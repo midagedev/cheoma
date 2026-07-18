@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>html,body{margin:0;height:100%;background:#c9d3dc;overflow:hidden}#c{display:block}</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// 단청 고증 검증 하네스: env/main/post 없이 buildBuilding 만 중립 스튜디오 조명으로 렌더.
+// 병렬로 다른 에이전트가 조명 리그(env/post)를 바꿔도 재질 색(단청) 판정이 흔들리지 않게 한다.
+import * as THREE from 'three';
+import { buildBuilding } from '../src/builder/index.js';
+import { PRESETS, computeLayout } from '../src/params.js';
+
+const q = new URLSearchParams(location.search);
+const presetKey = q.get('preset') || 'korea';
+const angle = q.get('angle') || 'closeup';
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setSize(1600, 1000);
+renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xc9d3dc);
+
+// 정면광: 태양을 정면(+z) 위쪽에 둬 공포·연목 마구리 앞면이 밝게 칠 색을 드러냄.
+const hemi = new THREE.HemisphereLight(0xdfe7ee, 0xbfb49c, 1.0);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff4e2, 2.0);
+sun.position.set(-5, 9, 11);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+const d = 16;
+sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 70;
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+// 그림자면도 색이 읽히게 앰비언트 넉넉히(고증 색 판정용 — 실제 앱 룩 아님).
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+const P = { ...PRESETS[presetKey] };
+const building = buildBuilding(P);
+scene.add(building);
+
+const L = computeLayout(P);
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshStandardMaterial({ color: 0xb6a892, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const camera = new THREE.PerspectiveCamera(28, 1600 / 1000, 0.1, 500);
+const maxDim = Math.max(L.W + 4, L.D + 4, L.totalH);
+const target = new THREE.Vector3(0, L.totalH * 0.42, 0);
+const spots = {
+  'front':          { az: 0,   el: 7,  r: 2.9 },
+  'three-quarter':  { az: 38,  el: 13, r: 3.0 },
+  'side':           { az: 90,  el: 8,  r: 2.9 },
+  'roof':           { az: 42,  el: 36, r: 2.9 },
+  'closeup':        { az: 42,  el: -12, r: 0.76, ty: L.plateY + 0.8 },
+  // 공포 정면 근접: 다색화·연화 마구리를 정면에서
+  'brackets':       { az: 8,   el: -6, r: 0.62, ty: L.plateY + 0.7 },
+};
+const s = spots[angle] || spots['closeup'];
+if (s.ty !== undefined) target.y = s.ty;
+const az = (s.az * Math.PI) / 180, el = (s.el * Math.PI) / 180;
+const r = s.r * maxDim;
+camera.position.set(
+  target.x + r * Math.cos(el) * Math.sin(az),
+  target.y + r * Math.sin(el),
+  target.z + r * Math.cos(el) * Math.cos(az));
+camera.lookAt(target);
+
+renderer.render(scene, camera);
+requestAnimationFrame(() => { renderer.render(scene, camera); window.__SHOT_READY = true; });
+</script>
+</body>
+</html>

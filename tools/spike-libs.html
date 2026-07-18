@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>joseon · 지오메트리 라이브러리 채택 스파이크</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
+    "clipper2-js": "https://cdn.jsdelivr.net/npm/clipper2-js@1.2.4/fesm2015/clipper2-js.mjs",
+    "manifold-3d": "https://cdn.jsdelivr.net/npm/manifold-3d@3.5.1/manifold.js",
+    "three-mesh-bvh": "https://esm.sh/three-mesh-bvh@0.9.11?external=three",
+    "js-angusj-clipper": "https://esm.sh/js-angusj-clipper@1.3.1/web"
+  }
+}
+</script>
+</head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+const R = { clipper2: {}, manifold: {}, bvh: {}, demo: {} };
+const log = (...a) => { console.log(...a); };
+const fail = (slot, e) => { R[slot].loaded = R[slot].loaded ?? false; R[slot].error = String(e && e.stack || e); };
+
+// ── 1. clipper2-js: 사각형 오프셋(deflate) ──
+// 정수 좌표 → 10×10 사각형을 100배 스케일, delta -50(=-0.5) 오프셋 후 되돌림.
+try {
+  const C = await import('clipper2-js');
+  R.clipper2.loaded = true;
+  R.clipper2.exports = Object.keys(C).slice(0, 40);
+  const { Clipper, Paths64, JoinType, EndType, FillRule } = C;
+  const S = 10000; // 정수 정밀 여유
+  const readPaths = (out) => {
+    const arr = [];
+    for (const p of out) arr.push([...p].map((pt) => [pt.x / S, pt.y / S]));
+    return arr;
+  };
+  const mk = (flat) => { const ps = new Paths64(); ps.push(Clipper.makePath(flat)); return ps; };
+  const area = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a) / 2; };
+  const sqCCW = [0, 0, 10 * S, 0, 10 * S, 10 * S, 0, 10 * S];
+  const sqCW = [0, 0, 0, 10 * S, 10 * S, 10 * S, 10 * S, 0];
+  R.clipper2.offset = {};
+  for (const [tag, flat, delta] of [
+    ['ccw_neg', sqCCW, -0.5 * S], ['cw_neg', sqCW, -0.5 * S], ['cw_pos', sqCW, 0.5 * S],
+  ]) {
+    const out = Clipper.InflatePaths(mk(flat), delta, JoinType.Miter, EndType.Polygon);
+    const paths = readPaths(out);
+    R.clipper2.offset[tag] = { nPaths: out.length, area: paths[0] ? +area(paths[0]).toFixed(3) : 0, paths };
+  }
+  // 코어 boolean 검증: 10×10 두 사각형을 5 겹치게 union → 면적 175 기대
+  const a2 = mk([0, 0, 10 * S, 0, 10 * S, 10 * S, 0, 10 * S]);
+  const b2 = mk([5 * S, 5 * S, 15 * S, 5 * S, 15 * S, 15 * S, 5 * S, 15 * S]);
+  const uni = Clipper.Union(a2, b2, FillRule.NonZero);
+  const uarea = [...uni].reduce((s, p) => s + area([...p].map((pt) => [pt.x / S, pt.y / S])), 0);
+  R.clipper2.boolean = { op: 'Union(10×10, 10×10 offset 5)', area: +uarea.toFixed(2), expected: 175 };
+  R.clipper2.op = 'offset(square, ±0.5) + Union';
+  R.clipper2.result = R.clipper2.offset.ccw_neg.paths;
+  R.clipper2.expected = 'inset 면적 81 (=9²); union 면적 175';
+  log('[clipper2]', JSON.stringify({ offset: R.clipper2.offset, boolean: R.clipper2.boolean }));
+} catch (e) { fail('clipper2', e); log('[clipper2] ERROR', e); }
+
+// ── 2. manifold-3d (WASM): 큐브 ∩ 큐브 volume ──
+// cube 2×2×2 (원점 중심, -1..1) ∩ 같은 큐브를 +x 1 이동(0..2) → 교집합 x∈0..1 → volume 1*2*2 = 4.
+try {
+  const Module = (await import('manifold-3d')).default;
+  const wasm = await Module();
+  wasm.setup();
+  R.manifold.loaded = true;
+  const { Manifold } = wasm;
+  const a = Manifold.cube([2, 2, 2], true);
+  const b = Manifold.cube([2, 2, 2], true).translate([1, 0, 0]);
+  const inter = a.intersect(b);
+  R.manifold.op = 'cube(2³) ∩ cube(2³)+translate(1,0,0)';
+  R.manifold.result = { volume: inter.volume(), surfaceArea: inter.surfaceArea() };
+  R.manifold.expected = 'volume ≈ 4';
+  // glTF 익스포트 후보 검증: MeshGL 추출 가능 여부
+  const mesh = inter.getMesh();
+  R.manifold.meshGL = { numVert: mesh.numVert, numTri: mesh.numTri, hasVertProps: !!mesh.vertProperties };
+  a.delete(); b.delete(); inter.delete();
+  log('[manifold] volume', R.manifold.result.volume);
+} catch (e) { fail('manifold', e); log('[manifold] ERROR', e); }
+
+// ── 3. three-mesh-bvh: BVH 빌드 + 레이캐스트 히트 ──
+try {
+  const THREE = await import('three');
+  const { MeshBVH, computeBoundsTree, disposeBoundsTree, acceleratedRaycast } =
+    await import('three-mesh-bvh');
+  R.bvh.loaded = true;
+  THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+  THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+  THREE.Mesh.prototype.raycast = acceleratedRaycast;
+  const geom = new THREE.BoxGeometry(2, 2, 2);
+  geom.computeBoundsTree();
+  R.bvh.hasBoundsTree = !!geom.boundsTree;
+  R.bvh.isMeshBVH = geom.boundsTree instanceof MeshBVH;
+  const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial());
+  const rc = new THREE.Raycaster();
+  rc.set(new THREE.Vector3(0, 0, 5), new THREE.Vector3(0, 0, -1));
+  const hits = rc.intersectObject(mesh);
+  R.bvh.op = 'BoxGeometry(2³) BVH + ray z=5→-z';
+  R.bvh.result = { hitCount: hits.length, firstDistance: hits[0] ? hits[0].distance : null };
+  R.bvh.expected = 'hit at distance 4 (z=5 → 앞면 z=1)';
+  log('[bvh] hits', hits.length, 'dist', hits[0] && hits[0].distance);
+} catch (e) { fail('bvh', e); log('[bvh] ERROR', e); }
+
+// ── 4. 실사용 시연: 필지 담장 폴리라인 clipper2 오프셋 ──
+// 34×28 대지 사각형을 안쪽으로 0.23(담 두께 절반) 오프셋 → 담 중심선. 현 수동 방식과 비교용.
+try {
+  const C = await import('clipper2-js');
+  const { Clipper, Paths64, JoinType, EndType } = C;
+  const S = 1000, hw = 17, hd = 14;
+  const rect = Clipper.makePath([
+    -hw * S, hd * S, hw * S, hd * S, hw * S, -hd * S, -hw * S, -hd * S,
+  ]);
+  const paths = new Paths64(); paths.push(rect);
+  const inset = Clipper.InflatePaths(paths, -0.23 * S, JoinType.Miter, EndType.Polygon);
+  const coords = [];
+  for (const p of inset) for (const pt of p) coords.push([+(pt.x / S).toFixed(3), +(pt.y / S).toFixed(3)]);
+  R.demo.op = 'parcel 34×28 사각형 담 중심선(-0.23 인셋)';
+  R.demo.result = coords;
+  R.demo.note = '수동 마이터 오프셋(hanok.offsetPoly)과 부호·좌표 일치 확인용';
+} catch (e) { fail('demo', e); }
+
+// ── 5. js-angusj-clipper (WASM, 오프셋 대안) — clipper2-js 오프셋 버그 우회 후보 ──
+R.angusj = {};
+try {
+  const cl = await import('js-angusj-clipper');
+  const clipper = await cl.loadNativeClipperLibInstanceAsync(
+    cl.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback);
+  R.angusj.loaded = true;
+  const S = 10000;
+  const square = [{ x: 0, y: 0 }, { x: 10 * S, y: 0 }, { x: 10 * S, y: 10 * S }, { x: 0, y: 10 * S }];
+  const out = clipper.offsetToPaths({
+    delta: -0.5 * S,
+    offsetInputs: [{ data: square, joinType: cl.JoinType.Miter, endType: cl.EndType.ClosedPolygon }],
+  });
+  const area = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a) / 2; };
+  R.angusj.op = 'offsetToPaths(square 10×10, delta -0.5)';
+  R.angusj.result = out.map((p) => p.map((pt) => [pt.x / S, pt.y / S]));
+  R.angusj.area = out[0] ? +(area(out[0]) / (S * S)).toFixed(3) : 0;
+  R.angusj.expected = 'inset 정사각형, 면적 81 (=9²)';
+} catch (e) { R.angusj.loaded = R.angusj.loaded ?? false; R.angusj.error = String(e && e.stack || e); }
+
+window.__SPIKE_RESULTS = R;
+window.__SPIKE_DONE = true;
+document.getElementById('out').textContent = JSON.stringify(R, null, 2);
+</script>
+</body>
+</html>

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>joseon · sound layer test</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1c20;
+    font: 13px/1.45 -apple-system, 'Apple SD Gothic Neo', sans-serif; color: #eee; }
+  #app { position: fixed; inset: 0; }
+  #panel {
+    position: fixed; left: 12px; top: 12px; z-index: 10; width: 240px;
+    background: rgba(20,22,26,.82); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px; padding: 12px 12px 14px; backdrop-filter: blur(6px);
+  }
+  #panel h1 { font-size: 13px; margin: 0 0 8px; font-weight: 600; letter-spacing: .02em; }
+  #panel .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  #panel .lbl { width: 100%; opacity: .6; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+  button {
+    background: #2a2e36; color: #eee; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #363b45; }
+  button.on { background: #4a6d8c; border-color: #6d97bd; }
+  button#start { width: 100%; padding: 8px; font-weight: 600; background: #4a6d8c; }
+  input[type=range] { width: 100%; }
+  #hint { position: fixed; right: 12px; bottom: 10px; opacity: .5; font-size: 11px; pointer-events: none; }
+  #status { font-size: 11px; opacity: .7; margin-top: 6px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div id="panel">
+  <h1>joseon · sound</h1>
+  <button id="start">▶ Start audio (resume context)</button>
+  <div class="lbl">Time of day</div>
+  <div class="row" id="times">
+    <button data-time="dawn">dawn</button>
+    <button data-time="day" class="on">day</button>
+    <button data-time="sunset">sunset</button>
+    <button data-time="night">night</button>
+  </div>
+  <div class="lbl">Weather</div>
+  <div class="row" id="weathers">
+    <button data-weather="clear" class="on">clear</button>
+    <button data-weather="rain">rain</button>
+    <button data-weather="snow">snow</button>
+  </div>
+  <div class="lbl">Wind chime (풍경)</div>
+  <div class="row">
+    <button id="strike">Strike now</button>
+    <button id="strike4">Strike all 4</button>
+  </div>
+  <div class="lbl">Stream (개울 물소리)</div>
+  <div class="row"><button id="streamToggle" class="on">Stream: ON</button></div>
+  <div class="lbl">Dog (마당 개)</div>
+  <div class="row">
+    <button id="dogBark">Dog bark now</button>
+    <button id="dogSit">Simulate sit</button>
+  </div>
+  <div class="lbl">BGM track</div>
+  <div class="row" id="tracks"></div>
+  <div class="lbl">BGM volume</div>
+  <div class="row"><input id="bgmVol" type="range" min="0" max="1.5" step="0.01" value="1"></div>
+  <div class="lbl">Ambience volume</div>
+  <div class="row"><input id="ambVol" type="range" min="0" max="2" step="0.01" value="1"></div>
+  <div class="row"><button id="toggle" class="on">Sound: ON</button></div>
+  <div id="status">context: not started</div>
+</div>
+<div id="hint">drag to orbit · move around to hear the 4 corner chimes pan</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PRESETS, computeLayout } from './src/params.js';
+import { buildBuilding } from './src/builder/index.js';
+import { setupAudio } from './src/audio/index.js';
+import { synthBell } from './src/audio/synth.js';
+import { buildStreamBed } from './src/audio/stream.js';
+
+// ---------- scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcfd8e0);
+scene.fog = new THREE.Fog(0xcfd8e0, 60, 220);
+
+const sun = new THREE.DirectionalLight(0xfff0dd, 2.4);
+sun.position.set(30, 42, 26); sun.castShadow = true;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xbdd0e4, 0x8a7a63, 0.9));
+
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(160, 48),
+  new THREE.MeshStandardMaterial({ color: 0xb5a893, roughness: 1 })
+);
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
+
+const P = { ...PRESETS.korea };
+const layout = computeLayout(P);
+scene.add(buildBuilding(P));
+
+// ---------- camera ----------
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 500);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+{
+  const maxDim = Math.max(layout.W + 4, layout.D + 4, layout.totalH);
+  const target = new THREE.Vector3(0, layout.totalH * 0.42, 0);
+  const az = 38 * Math.PI / 180, el = 13 * Math.PI / 180, r = 2.4 * maxDim;
+  camera.position.set(
+    target.x + r * Math.cos(el) * Math.sin(az),
+    target.y + r * Math.sin(el),
+    target.z + r * Math.cos(el) * Math.cos(az));
+  controls.target.copy(target); controls.update();
+}
+
+// ---------- audio ----------
+// 테스트 씬에는 env/water/critters 가 없으므로 개울·개 앵커를 임의 배치(청취용).
+const streamAnchor = new THREE.Vector3(layout.W * 0.5 + 5, 0.3, layout.D * 0.5 + 4);
+// 개는 앞마당(+z)을 천천히 왕복하도록 라이브 앵커를 매 프레임 갱신한다.
+const dogAnchor = new THREE.Vector3(-layout.W * 0.4, 0.3, layout.D * 0.5 + 6);
+let dogState = 'walking';
+const audio = setupAudio(camera, {
+  layout, streamAnchor,
+  getDogAnchor: () => dogAnchor,
+  getDogState: () => dogState,
+});
+audio.setEnvActive(true); // 테스트 페이지는 env 항상 ON 취급 → 개울·개 활성
+window.__audio = audio;
+window.__audioState = () => audio.listener.context.state;
+
+// 앵커 시각 표식: 파란 점=개울, 갈색 점=개
+{
+  const mk = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x4aa3d0 }));
+  mk.position.copy(streamAnchor);
+  scene.add(mk);
+}
+const dogMarker = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0xb5793a }));
+scene.add(dogMarker);
+
+// OfflineAudioContext 로 풍경 합성 1회를 렌더해 RMS 반환(무음 아님 검증용)
+function rmsOf(buf) {
+  const d = buf.getChannelData(0);
+  let sum = 0;
+  for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+  return Math.sqrt(sum / d.length);
+}
+window.__renderBellRMS = async () => {
+  const sr = 44100;
+  const off = new OfflineAudioContext(1, sr * 4, sr);
+  synthBell(off, off.destination, 0, { base: 1500, gain: 1 });
+  return rmsOf(await off.startRendering());
+};
+// 개울 물바닥 루프 2초를 오프라인 렌더해 RMS 반환(무음 아님 검증용)
+window.__renderStreamRMS = async () => {
+  const sr = 44100;
+  const off = new OfflineAudioContext(1, sr * 2, sr);
+  buildStreamBed(off, off.destination, {}).start();
+  return rmsOf(await off.startRendering());
+};
+
+// ---------- UI ----------
+const statusEl = document.getElementById('status');
+function setStatus() { statusEl.textContent = 'context: ' + audio.listener.context.state; }
+
+document.getElementById('start').onclick = async () => { await audio.start(); setStatus(); };
+
+function selectGroup(id, attr, fn) {
+  const box = document.getElementById(id);
+  box.querySelectorAll('button').forEach((b) => {
+    b.onclick = () => {
+      box.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      fn(b.getAttribute(attr));
+    };
+  });
+}
+selectGroup('times', 'data-time', (v) => audio.setTime(v));
+selectGroup('weathers', 'data-weather', (v) => audio.setWeather(v));
+
+document.getElementById('strike').onclick = () => audio.strike();
+document.getElementById('strike4').onclick = () => { for (let i = 0; i < 4; i++) audio.strike(i); };
+
+let streamOn = true;
+document.getElementById('streamToggle').onclick = (e) => {
+  streamOn = !streamOn; audio.setEnvActive(streamOn); // env 위치성 사운드(개울+개) 토글
+  e.target.textContent = 'Stream: ' + (streamOn ? 'ON' : 'OFF');
+  e.target.classList.toggle('on', streamOn);
+};
+
+document.getElementById('dogBark').onclick = () => audio.barkDog();
+// 앉는 순간(walking→sitting)의 확률적 촉발을 시뮬레이션(60% 확률로 곧 짖음)
+document.getElementById('dogSit').onclick = () => {
+  dogState = 'sitting';
+  setTimeout(() => { dogState = 'walking'; }, 2500);
+};
+
+// BGM 트랙 버튼(시간대 + 옵션 트랙)
+const tr = audio.getTracks();
+const tbox = document.getElementById('tracks');
+const allTracks = [...new Set([...Object.values(tr.byTime), ...tr.options])];
+for (const name of allTracks) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => audio.playTrack(name);
+  tbox.appendChild(b);
+}
+
+document.getElementById('bgmVol').oninput = (e) => audio.setBgmVolume(parseFloat(e.target.value));
+document.getElementById('ambVol').oninput = (e) => audio.setAmbienceVolume(parseFloat(e.target.value));
+
+let on = true;
+document.getElementById('toggle').onclick = (e) => {
+  on = !on; audio.setEnabled(on);
+  e.target.textContent = 'Sound: ' + (on ? 'ON' : 'OFF');
+  e.target.classList.toggle('on', on);
+};
+
+// ---------- loop ----------
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+let prev = performance.now();
+let frames = 0;
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min((now - prev) / 1000, 0.05);
+  prev = now;
+  controls.update();
+  // 개 앵커를 앞마당에서 천천히 왕복(위치성·패닝 확인용) + 표식 동기
+  dogAnchor.x = -layout.W * 0.4 + Math.sin(now / 3200) * layout.W * 0.5;
+  dogMarker.position.copy(dogAnchor);
+  audio.update(dt);
+  renderer.render(scene, camera);
+  if (++frames === 3) window.__SHOT_READY = true;
+});
+setStatus();
+</script>
+</body>
+</html>

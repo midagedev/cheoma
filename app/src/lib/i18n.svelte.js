@@ -1,0 +1,154 @@
+// 경량 i18n — 브라우저 로케일 기반 en/ko 자동 전환. 무거운 라이브러리 없이 딕셔너리 +
+// Svelte 5 $state. 판정 우선순위: ?lang= > localStorage > navigator.language(ko* → ko, 그 외 en).
+// 브랜드 요소(cheoma 로고타입, 한글 '처마' 낙관)는 로케일 불변 → 딕셔너리에 없음.
+//
+// 건축 용어는 영어에서 로마자(이탤릭) + 짧은 영문 병기(반가→giwa "tiled" 등).
+
+const DICT = {
+  ko: {
+    hero_enter: '눌러 들어가기',
+    act_rebuild: '다시 짓기', act_rebuild_tip: '다시 짓기 (새 씨앗)',
+    act_replay: '다시 보기', act_replay_tip: '종가 다시 짓는 장면 보기',
+    act_postcard: '엽서', act_postcard_tip: '엽서로 저장·공유',
+    act_sound_on_tip: '소리 끄기', act_sound_off_tip: '소리 켜기',
+    panel_title: '집 짓기',
+    sec_type: '유형', sec_expand: '칸 들이기', sec_finish: '매무새',
+    type_korea_l: '궁', type_korea_s: '전각',
+    type_temple_l: '절', type_temple_s: '불전',
+    type_giwa_l: '기와집', type_giwa_s: '반가',
+    type_choga_l: '초가', type_choga_s: '민가',
+    step_single: '홑채', step_l: 'ㄱ자', step_u: 'ㄷ자',
+    merge: '이웃과 합치기',
+    giwa_note: '기와집(반가)은 ㄱ자 기본형입니다.',
+    s_roofPitch: '지붕 물매', s_riseScale: '지붕 물매', s_eaveOverhang: '처마 깊이',
+    s_cornerLift: '추녀 들림', s_profileCurve: '지붕 곡률', s_roofCurve: '지붕 곡률',
+    // #48 편집 축 확장
+    s_columnHeight: '기둥 높이', s_podiumTierH: '기단 높이', s_ridgeH: '용마루 높이',
+    s_footprintScale: '집 크기', s_wallType: '담장', s_roofTone: '지붕 색조', s_thatchAge: '이엉 상태',
+    s_doorPattern: '창살', s_winBack: '뒷창 수', s_aux: '부속채',
+    s_mainHalfW: '본채 폭', s_mainHalfD: '본채 깊이', s_wingLen: '날개 길이', s_wingW: '날개 폭',
+    s_centerBayW: '어칸 폭', s_endBayW: '퇴칸 폭',
+    s_bracketTiers: '공포 단수', s_bracketScale: '공포 크기', s_interBrackets: '주간포 수',
+    s_podiumTiers: '기단 켜', s_podiumRailing: '월대 난간', s_wallH: '벽 높이',
+    sec_plan: '평면', sec_roof: '지붕', sec_skin: '외피', sec_proportion: '비례',
+    sec_bracket: '공포', sec_podium: '기단', sec_yard: '마당', sec_structure: '구조',
+    wall_tile: '기와담', wall_stone: '돌담', wall_mud: '토담', wall_brush: '싸리울', wall_hedge: '생울', wall_open: '열림',
+    door_ttisal: '띠살', door_jeongja: '정자살',
+    edit_advanced: '고급',
+    vil_palace_edit_note: '관아 — 고을의 중심. 공포·월대·지붕 격식을 손봅니다.',
+    vil_hero_edit_note: '종가 — 마을의 중심. 지붕·처마 매무새를 손봅니다.',
+    vil_palace_compound_note: '궁궐 — 다일곽 궁역. 전각의 공포·지붕·처마 격식을 일괄 손봅니다.',
+    dial_time: '시간', dial_season: '계절', dial_weather: '날씨',
+    env_reroll: '하늘 굴리기', env_reroll_tip: '하늘 굴리기 — 시간·계절·날씨',
+    env_flow: '시간 흐르기',
+    env_flow_tip: '시간 흐르기 — 때·계절이 저절로 흐른다',
+    env_flow_on_tip: '시간 흐름 멈추기',
+    time_dawn: '아침', time_day: '낮', time_sunset: '석양', time_night: '밤',
+    season_spring: '봄', season_summer: '여름', season_autumn: '가을',
+    weather_clear: '맑음', weather_rain: '비', weather_snow: '눈',
+    // ── 마을 모드 ──
+    mode_house: '가까이', mode_village: '멀리',
+    mode_to_village: '마을 전체 보기', mode_to_house: '한 채 가까이 보기',
+    vil_title: '마을', vil_sub: 'village',
+    vil_scale: '규모', vil_character: '성격',
+    scale_hamlet: '초락', scale_village: '마을', scale_town: '읍치', scale_capital: '도성', scale_hanyang: '한양',
+    char_minchon: '민촌', char_yeoyeom: '여염', char_banchon: '반촌',
+    vil_palace: '궁', vil_temple: '절',
+    vil_palace_hint: '도성에서만',
+    vil_reroll: '마을 다시 짓기', vil_reroll_tip: '마을을 통째로 다시 짓기 (해체→재생성→조립)',
+    crumb_hanok: '종가', crumb_palace: '관아', crumb_palace_compound: '궁궐',
+    vil_houses: '호',
+    vil_edit_title: '집 고치기', vil_edit_sub: 'edit house',
+    vil_bays: '칸수', s_frontBays: '정면 칸', s_sideBays: '측면 칸',
+    vil_hero_note: '종가·궁·절은 마을의 얼굴 — 고쳐 지을 수 없습니다.',
+    hint_bays: '칸',
+  },
+  en: {
+    hero_enter: 'Click to enter',
+    act_rebuild: 'Rebuild', act_rebuild_tip: 'Rebuild (new seed)',
+    act_replay: 'Replay', act_replay_tip: 'Watch the head house rise again',
+    act_postcard: 'Postcard', act_postcard_tip: 'Save & share a postcard',
+    act_sound_on_tip: 'Mute', act_sound_off_tip: 'Sound on',
+    panel_title: 'Build',
+    sec_type: 'Type', sec_expand: 'Add a bay', sec_finish: 'Details',
+    type_korea_l: 'Palace', type_korea_s: 'jeongak',
+    type_temple_l: 'Temple', type_temple_s: 'buljeon',
+    type_giwa_l: 'Giwa', type_giwa_s: 'tiled',
+    type_choga_l: 'Choga', type_choga_s: 'thatched',
+    step_single: 'single', step_l: 'L-plan', step_u: 'U-plan',
+    merge: 'Merge with neighbor',
+    giwa_note: 'The giwa (tiled yangban house) is inherently L-shaped.',
+    s_roofPitch: 'Roof pitch', s_riseScale: 'Roof pitch', s_eaveOverhang: 'Eave depth',
+    s_cornerLift: 'Corner lift', s_profileCurve: 'Roof curve', s_roofCurve: 'Roof curve',
+    // #48 edit axes
+    s_columnHeight: 'Column height', s_podiumTierH: 'Podium height', s_ridgeH: 'Ridge height',
+    s_footprintScale: 'House size', s_wallType: 'Wall', s_roofTone: 'Roof tone', s_thatchAge: 'Thatch age',
+    s_doorPattern: 'Lattice', s_winBack: 'Rear windows', s_aux: 'Outbuilding',
+    s_mainHalfW: 'Main width', s_mainHalfD: 'Main depth', s_wingLen: 'Wing length', s_wingW: 'Wing width',
+    s_centerBayW: 'Center bay', s_endBayW: 'End bay',
+    s_bracketTiers: 'Bracket tiers', s_bracketScale: 'Bracket size', s_interBrackets: 'Inter-brackets',
+    s_podiumTiers: 'Podium tiers', s_podiumRailing: 'Woldae railing', s_wallH: 'Wall height',
+    sec_plan: 'Plan', sec_roof: 'Roof', sec_skin: 'Skin', sec_proportion: 'Proportion',
+    sec_bracket: 'Brackets', sec_podium: 'Podium', sec_yard: 'Yard', sec_structure: 'Structure',
+    wall_tile: 'Tiled', wall_stone: 'Stone', wall_mud: 'Mud', wall_brush: 'Brush', wall_hedge: 'Hedge', wall_open: 'Open',
+    door_ttisal: 'Ttisal', door_jeongja: 'Jeongja',
+    edit_advanced: 'Advanced',
+    vil_palace_edit_note: 'The magistracy — heart of the town. Tune its brackets, terrace and roof.',
+    vil_hero_edit_note: 'The head house — heart of the village. Tune its roof and eaves.',
+    vil_palace_compound_note: 'The palace — a walled compound of courts. Tune the halls’ brackets, roof and eaves together.',
+    dial_time: 'Time', dial_season: 'Season', dial_weather: 'Weather',
+    env_reroll: 'Reroll sky', env_reroll_tip: 'Reroll the sky — time · season · weather',
+    env_flow: 'Let time flow',
+    env_flow_tip: 'Let time flow — hours and seasons drift on',
+    env_flow_on_tip: 'Stop the flow of time',
+    time_dawn: 'Dawn', time_day: 'Day', time_sunset: 'Sunset', time_night: 'Night',
+    season_spring: 'Spring', season_summer: 'Summer', season_autumn: 'Autumn',
+    weather_clear: 'Clear', weather_rain: 'Rain', weather_snow: 'Snow',
+    // ── Village mode ──
+    mode_house: 'House', mode_village: 'Village',
+    mode_to_village: 'See the village', mode_to_house: 'See one house',
+    vil_title: 'Village', vil_sub: 'settlement',
+    vil_scale: 'Scale', vil_character: 'Character',
+    scale_hamlet: 'Hamlet', scale_village: 'Village', scale_town: 'Town', scale_capital: 'Capital', scale_hanyang: 'Hanyang',
+    char_minchon: 'Thatched hamlet', char_yeoyeom: 'Village', char_banchon: 'Gentry village',
+    vil_palace: 'Palace', vil_temple: 'Temple',
+    vil_palace_hint: 'capital only',
+    vil_reroll: 'Rebuild village',
+    crumb_hanok: 'Head house', crumb_palace: 'Magistracy', crumb_palace_compound: 'Palace',
+    vil_houses: 'houses',
+    vil_edit_title: 'Edit house', vil_edit_sub: 'plan & profile',
+    vil_bays: 'Bays', s_frontBays: 'Front bays', s_sideBays: 'Side bays',
+    vil_hero_note: 'The head house, palace and temple are the face of the village — not editable.',
+    hint_bays: 'bays',
+  },
+};
+
+function detect() {
+  try {
+    const url = new URLSearchParams(location.search).get('lang');
+    if (url === 'ko' || url === 'en') return url;
+    const ls = localStorage.getItem('cheoma-lang');
+    if (ls === 'ko' || ls === 'en') return ls;
+  } catch {}
+  const nav = (navigator.language || 'en').toLowerCase();
+  return nav.startsWith('ko') ? 'ko' : 'en'; // 글로벌 기본 = 영어
+}
+
+export const i18n = $state({ lang: detect() });
+
+export function setLang(l) {
+  if (l !== 'ko' && l !== 'en') return;
+  i18n.lang = l;
+  try {
+    localStorage.setItem('cheoma-lang', l);
+    const u = new URL(location.href);
+    u.searchParams.set('lang', l);
+    history.replaceState(null, '', u);
+  } catch {}
+}
+
+// t(key): 현재 로케일 문자열. i18n.lang 을 읽으므로 템플릿에서 호출하면 전환 시 자동 갱신.
+export function t(key) {
+  const l = i18n.lang;
+  return (DICT[l] && DICT[l][key]) ?? DICT.en[key] ?? key;
+}

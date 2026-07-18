@@ -1,0 +1,77 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#cfd8e0}#app{width:100%;height:100%}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"}}</script>
+</head><body><div id="app"></div>
+<script type="module">
+// 격리 하네스: 내 모듈(terrain·clouds·mountains)만 직접 import. index.js/sky.js/seasons/weather
+// (타 에이전트 WIP)를 우회. 태양·fog 는 TIME_PRESETS 값을 인라인 복제. season·snow 는 실제
+// 패치 체인 순서(terrain→seasons→weather)를 재현하되 dynamic import + try/catch 로 관대하게.
+import * as THREE from 'three';
+import { PRESETS, computeLayout } from '/src/params.js';
+import { buildBuilding } from '/src/builder/index.js';
+import { buildTerrain } from '/src/env/terrain.js';
+import { setupClouds, createCloudUniforms } from '/src/env/clouds.js';
+import { buildMountains } from '/src/env/mountains.js';
+
+// 하네스 결정론: mountains.js makeMistTexture 등 Math.random 사용부를 시드 고정(앱 shot 하네스 규약).
+// 내 모듈(terrain·clouds·worldedge)은 애초에 시드 PRNG/순수함수만 쓰므로 이 오버라이드와 무관하게 결정론.
+{ let _rs = 0x1234abcd >>> 0; Math.random = () => { _rs = (_rs * 1664525 + 1013904223) >>> 0; return _rs / 4294967296; }; }
+
+const TP = {
+  day:    { dir:[30,42,26],  col:0xfff3e0, int:2.6, fog:0xcfdde8, near:95, far:500, hs:0xbcd4ec, hg:0x8a7a63, hi:0.9, exp:1.05, rn:0x445f6d, rf:0xbdd0dc, mist:0xeef4f8, mo:0.6 },
+  sunset: { dir:[-16,8,-45], col:0xffa85c, int:2.3, fog:0xc4a48e, near:70, far:470, hs:0x8593bd, hg:0x9c7856, hi:0.72, exp:1.11, rn:0x574863, rf:0xc2a284, mist:0xd8c0ad, mo:0.6 },
+  night:  { dir:[-7,5,-32],  col:0x9fb4d9, int:0.9, fog:0x1a2740, near:60, far:400, hs:0x33405e, hg:0x161c28, hi:0.3, exp:1.16, rn:0x222d48, rf:0x445270, mist:0x53628a, mo:0.46 },
+};
+const q = new URLSearchParams(location.search);
+const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
+const timeName = TP[q.get('time')] ? q.get('time') : 'day';
+const P0 = TP[timeName];
+const snow = q.get('snow')==='1';
+const num=(k,d)=>{const v=parseFloat(q.get(k));return Number.isFinite(v)?v:d;};
+const steps=Math.max(1,Math.round(num('steps',30)));
+const dt=num('dt',0.033);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=P0.exp;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(P0.fog);
+scene.fog=new THREE.Fog(P0.fog,P0.near,P0.far);
+const sun=new THREE.DirectionalLight(P0.col,P0.int);
+sun.position.set(...P0.dir).normalize().multiplyScalar(64);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-120;sun.shadow.camera.right=120;sun.shadow.camera.top=120;sun.shadow.camera.bottom=-120;
+sun.shadow.camera.far=400;sun.shadow.bias=-0.0001;sun.shadow.normalBias=0.05;scene.add(sun);
+const hemi=new THREE.HemisphereLight(P0.hs,P0.hg,P0.hi);scene.add(hemi);
+
+const P={...PRESETS.korea};const building=buildBuilding(P);building.name='building';scene.add(building);
+const layout=computeLayout(P);
+const group=new THREE.Group();scene.add(group);
+
+const edgeStyle=['ink','mist','diorama'].includes(q.get('edge'))?q.get('edge'):'mist';
+const cloudUniforms=createCloudUniforms();
+const mountains=buildMountains({});group.add(mountains.group);
+mountains.setPalette(P0.rn,P0.rf,P0.mist,P0.mo);
+const terrain=buildTerrain({clearance:18,cloudUniforms,edgeStyle,getHaze:()=>scene.fog?scene.fog.color:null});
+group.add(terrain.group);
+const clouds=setupClouds(group,{sun,edge:terrain.edge,terrainMax:terrain.R,uniforms:cloudUniforms});
+terrain.setSeason(season,{immediate:true});
+
+// 계절 패치(잎·지면 곱연산) — 실제 순서 재현(terrain 뒤 체이닝). WIP 깨지면 관대히 스킵.
+let seasons=null;
+try{const m=await import('/src/env/seasons.js');seasons=m.setupSeasons(group,{layout,paddies:null});seasons.setSeason(season,{immediate:true});}catch(e){console.log('[seasons skip]',e.message);}
+// 적설 패치(지면) — season 뒤 체이닝. snow=1 일 때만.
+let weather=null;
+if(snow){try{const m=await import('/src/env/weather.js');weather=m.setupWeather(scene,{layout,getBuilding:()=>building,getGround:()=>terrain.group.getObjectByName('terrain')});weather.setWeather('snow',{immediate:true,accum:1});}catch(e){console.log('[weather skip]',e.message);}}
+
+const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,0.1,900);
+camera.position.set(num('cx',120),num('cy',88),num('cz',175));
+camera.lookAt(new THREE.Vector3(num('tx',0),num('ty',2),num('tz',-16)));
+
+for(let i=0;i<steps;i++){terrain.update(dt);clouds.update(dt);if(seasons)seasons.update(dt);if(weather)weather.update(dt);}
+renderer.render(scene,camera);
+window.__DRAW=renderer.info.render.calls;
+requestAnimationFrame(()=>{renderer.render(scene,camera);window.__DRAW=renderer.info.render.calls;window.__SHOT_READY=true;});
+</script></body></html>

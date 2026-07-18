@@ -1,0 +1,106 @@
+import * as THREE from 'three';
+import { makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
+
+// 개울 물소리 — 위치성(PositionalAudio). 징검다리 교차점(anchor)에 앉힌다.
+//   createStream(listener, { anchor, rand }) →
+//     { object, setEnabled(v), setVolume(v), setWeather(name), update(dt), start() }
+//
+// 합성: 밴드패스 노이즈 물바닥(600~2500Hz, 흐름 요동 LFO) + 드문 물방울 플럭(짧은 사인 핑).
+// refDistance 짧게(4) + 높은 rolloff → 개울 근처에서만 뚜렷, 멀어지면 빠르게 잦아든다.
+
+// 물바닥(bed) 합성 그래프를 dest 에 연결. 실시간/오프라인(OfflineAudioContext) 공용.
+// 반환 start() 로 노이즈·LFO 소스를 기동한다.
+export function buildStreamBed(ctx, dest, { rand = Math.random } = {}) {
+  const noise = makeWhiteNoise(ctx, 2.5, 1);
+  const src = playBuffer(ctx, noise, null, { loop: true });
+
+  // 대역 한정: 저역 웅웅거림·고역 쉬익 제거 → 600~2500Hz 개울 대역만
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 600;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 2500;
+  // 흐르는 물의 중심 대역을 넓게 통과(낮은 Q)
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 0.7;
+  const bedGain = ctx.createGain();
+  bedGain.gain.value = 0.55;
+
+  src.connect(hp); hp.connect(lp); lp.connect(bp); bp.connect(bedGain); bedGain.connect(dest);
+
+  // 흐름 요동: 밴드패스 중심 주파수를 느리게 흔들어 물결의 살아있는 웅성임
+  const fLfo = ctx.createOscillator();
+  fLfo.frequency.value = 0.13 + rand() * 0.05;
+  const fDepth = ctx.createGain();
+  fDepth.gain.value = 320;
+  fLfo.connect(fDepth); fDepth.connect(bp.frequency);
+
+  // 게인 요동(잔물결 세기)
+  const gLfo = ctx.createOscillator();
+  gLfo.frequency.value = 0.21 + rand() * 0.06;
+  const gDepth = ctx.createGain();
+  gDepth.gain.value = 0.12;
+  gLfo.connect(gDepth); gDepth.connect(bedGain.gain);
+
+  return { start() { src.start(); fLfo.start(); gLfo.start(); } };
+}
+
+export function createStream(listener, { anchor, rand = Math.random } = {}) {
+  const ctx = listener.context;
+
+  const pa = new THREE.PositionalAudio(listener);
+  pa.setDistanceModel('inverse');
+  pa.setRefDistance(4);      // 개울 바로 곁에서 가장 크게
+  pa.setRolloffFactor(1.4);  // 멀어지면 빠르게 감쇠(국소음)
+  pa.setMaxDistance(60);
+
+  // out = setNodeSource 대상(상시 연결). 물바닥·물방울이 모두 여기로 모인다.
+  const out = ctx.createGain();
+  out.gain.value = 0;
+  pa.setNodeSource(out);
+  if (anchor) { pa.position.copy(anchor); pa.updateMatrixWorld(true); }
+
+  const bed = buildStreamBed(ctx, out, { rand });
+
+  let started = false;
+  let enabled = false;   // 전체 사운드 ON && env ON 일 때만 true
+  let volume = 1;        // ambience 볼륨 종속
+  let weatherMul = 1;    // 눈(결빙) 시 0.25
+  const BASE = 0.5;      // 개울 기본 레벨
+
+  function target() { return enabled ? BASE * volume * weatherMul : 0; }
+  function push() { out.gain.setTargetAtTime(target(), ctx.currentTime, 0.3); }
+
+  // 물방울 플럭 — 짧은 사인 핑, 드문드문
+  let nextPlink = 0.6 + rand() * 1.2;
+  function plink() {
+    const t = ctx.currentTime + 0.01;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1500 + rand() * 1400, t);
+    const g = ctx.createGain();
+    const amp = 0.06 * volume * weatherMul * (0.6 + rand() * 0.4);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(amp, t + 0.004);
+    g.gain.setTargetAtTime(0.0001, t + 0.006, 0.035);
+    osc.connect(g); g.connect(out);
+    osc.start(t); osc.stop(t + 0.25);
+  }
+
+  function update(dt) {
+    if (!started) return;
+    pa.updateMatrixWorld();
+    if (enabled && weatherMul > 0.01) {
+      nextPlink -= dt;
+      if (nextPlink <= 0) { plink(); nextPlink = poissonInterval(1.1, 0.35, 3.0, rand); }
+    }
+  }
+
+  return {
+    object: pa,
+    setEnabled(v) { enabled = !!v; push(); },
+    setVolume(v) { volume = Math.max(0, v); push(); },
+    setWeather(name) { weatherMul = name === 'snow' ? 0.25 : 1; push(); },
+    update,
+    start() { if (started) return; started = true; bed.start(); push(); },
+  };
+}

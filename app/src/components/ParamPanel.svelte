@@ -1,0 +1,179 @@
+<script>
+  import { TYPES } from '../lib/seed.js';
+  import { t } from '../lib/i18n.svelte.js';
+  import BottomSheet from './BottomSheet.svelte';
+
+  // 우측 한지 파라미터 패널 — 집 선택 시 슬라이드 인. 라벨은 로케일화(t).
+  let {
+    open = false, preset = 'korea', expansion = 1, maxExpansion = 3, canMerge = false,
+    params = {}, onType, onExpansion, onMerge, onParam, onClose,
+  } = $props();
+
+  // 코어가 즉시 지원하는 슬라이더만 노출(params 에 존재하는 수치 키에 한함). 라벨키 s_<key>.
+  const SLIDER_DEFS = [
+    { key: 'roofPitch', min: 0.4, max: 0.95, step: 0.01 },
+    { key: 'riseScale', min: 0.6, max: 1.3, step: 0.01 },
+    { key: 'eaveOverhang', min: 1.0, max: 3.0, step: 0.05 },
+    { key: 'cornerLift', min: 0, max: 1.6, step: 0.01 },
+    { key: 'profileCurve', min: 0, max: 1, step: 0.01 },
+  ];
+  const sliders = $derived(SLIDER_DEFS.filter((d) => typeof params[d.key] === 'number'));
+
+  // 큰 글리프 一/ㄱ/ㄷ 는 평면 상형 → 로케일 불변, 캡션만 로케일화.
+  const STEPS = [ { n: 1, g: '一', k: 'step_single' }, { n: 2, g: 'ㄱ', k: 'step_l' }, { n: 3, g: 'ㄷ', k: 'step_u' } ];
+  const steps = $derived(STEPS.filter((s) => s.n <= maxExpansion));
+
+  // 슬라이더 디바운스 재생성.
+  let timers = {};
+  function slide(key, value) {
+    params[key] = value; // 라벨 즉시 반영
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(() => onParam?.(key, value), 110);
+  }
+</script>
+
+<BottomSheet {open} {onClose} variant="right" ariaLabel="build panel">
+  <div class="head">
+    <span class="ko">{t('panel_title')}</span>
+    <span class="en">plan &amp; profile</span>
+  </div>
+
+  <!-- 유형 탭 -->
+  <section>
+    <h4>{t('sec_type')}</h4>
+    <div class="tabs">
+      {#each TYPES as ty}
+        <button class="tab" class:on={preset === ty.key} onclick={() => onType?.(ty.key)}>
+          <span class="tl">{t('type_' + ty.key + '_l')}</span>
+          <span class="ts">{t('type_' + ty.key + '_s')}</span>
+        </button>
+      {/each}
+    </div>
+  </section>
+
+  <!-- 칸 들이기(확장) -->
+  <section>
+    <h4>{t('sec_expand')}</h4>
+    {#if maxExpansion > 1}
+      <div class="stepper">
+        {#each steps as s}
+          <button class="step" class:on={expansion === s.n} onclick={() => onExpansion?.(s.n)}>
+            <span class="glyph">{s.g}</span>
+            <span class="st">{s.n}R · {t(s.k)}</span>
+          </button>
+        {/each}
+      </div>
+      {#if canMerge}
+        <button class="merge" onclick={onMerge}>
+          <span class="mseal" aria-hidden="true">合</span>
+          {t('merge')}
+        </button>
+      {/if}
+    {:else}
+      <p class="note">{t('giwa_note')}</p>
+    {/if}
+  </section>
+
+  <!-- 파라미터 슬라이더 -->
+  <section>
+    <h4>{t('sec_finish')}</h4>
+    {#each sliders as d}
+      <label class="row">
+        <span class="rl">{t('s_' + d.key)}</span>
+        <input
+          type="range" min={d.min} max={d.max} step={d.step}
+          value={params[d.key]}
+          oninput={(e) => slide(d.key, parseFloat(e.currentTarget.value))}
+        />
+        <span class="rv">{Number(params[d.key]).toFixed(2)}</span>
+      </label>
+    {/each}
+  </section>
+</BottomSheet>
+
+<style>
+  .head { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--ink-line); padding-bottom: 10px; }
+  .head .ko { font-family: var(--brush); font-size: 30px; color: var(--ink); }
+  .head .en { font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-faint); }
+
+  section { display: flex; flex-direction: column; gap: 9px; }
+  h4 {
+    margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.22em;
+    color: var(--ink-faint); text-transform: uppercase;
+  }
+
+  .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 8px 2px; border-radius: 4px;
+    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink-soft);
+    transition: all 0.16s ease;
+  }
+  .tab .tl { font-size: 14px; font-weight: 700; }
+  .tab .ts { font-size: 9px; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .tab:hover { background: rgba(44, 38, 32, 0.05); }
+  .tab.on { background: var(--seal); border-color: var(--seal-deep); color: var(--paper); }
+  .tab.on .ts { color: rgba(244, 239, 228, 0.8); }
+
+  .stepper { display: flex; gap: 8px; }
+  .step {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 10px 2px; border-radius: 5px;
+    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink-soft);
+    transition: all 0.16s ease;
+  }
+  .step .glyph { font-family: var(--serif); font-size: 22px; font-weight: 700; line-height: 1; }
+  .step .st { font-size: 9.5px; letter-spacing: 0.06em; color: var(--ink-faint); }
+  .step:hover { background: rgba(44, 38, 32, 0.05); }
+  .step.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .step.on .st { color: rgba(244, 239, 228, 0.78); }
+
+  .row { display: grid; grid-template-columns: 74px 1fr 38px; align-items: center; gap: 8px; }
+  .rl { font-size: 12.5px; color: var(--ink); }
+  .rv { font-size: 11px; color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+
+  input[type='range'] {
+    -webkit-appearance: none; appearance: none;
+    height: 3px; border-radius: 2px; background: var(--ink-line); outline: none;
+  }
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--seal); border: 1.5px solid var(--paper);
+    box-shadow: 0 1px 3px rgba(60, 30, 20, 0.4); cursor: pointer;
+  }
+  input[type='range']::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--seal); border: 1.5px solid var(--paper); cursor: pointer;
+  }
+  .note { margin: 0; font-size: 12px; color: var(--ink-faint); font-style: italic; }
+
+  .merge {
+    margin-top: 4px;
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 12px; border-radius: 5px;
+    background: transparent; border: 1px dashed var(--seal); color: var(--seal-deep);
+    font-size: 13px; font-weight: 700; letter-spacing: 0.03em;
+    transition: all 0.16s ease;
+  }
+  .merge .mseal {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 3px;
+    background: var(--seal); color: var(--paper); font-size: 13px; font-weight: 700;
+  }
+  .merge:hover { background: rgba(177, 54, 43, 0.08); border-style: solid; }
+  .merge:active { transform: scale(0.98); }
+
+  /* 터치: 타깃 확대 — 탭·스테퍼·병합·슬라이더 thumb 를 손가락에 맞게. */
+  @media (pointer: coarse) {
+    .tab { padding: 12px 2px; }
+    .tab .tl { font-size: 15px; }
+    .step { padding: 13px 2px; }
+    .merge { padding: 13px 12px; font-size: 14px; }
+    .row { grid-template-columns: 84px 1fr 40px; }
+    input[type='range'] { height: 5px; }
+    input[type='range']::-webkit-slider-thumb { width: 24px; height: 24px; }
+    input[type='range']::-moz-range-thumb { width: 24px; height: 24px; }
+    /* 슬라이더 행 세로 여백을 늘려 손가락 조작 여유. */
+    .row { min-height: 40px; }
+  }
+</style>

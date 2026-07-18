@@ -1,0 +1,8 @@
+{
+  "name": "asiahouse-tools",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.54.0"
+  }
+}

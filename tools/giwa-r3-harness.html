@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>html,body{margin:0;height:100%;background:#c9d3dc;overflow:hidden}#c{display:block}</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// 격리 검증 하네스: env/weather/main 없이 buildBuilding 만 렌더.
+// 다른 에이전트가 공유 파일(env/main/weather)을 수정 중이어도 giwa 지붕 검증은 흔들리지 않는다.
+import * as THREE from 'three';
+import { buildBuilding } from '../src/builder/index.js';
+import { PRESETS, computeLayout } from '../src/params.js';
+
+const q = new URLSearchParams(location.search);
+const presetKey = q.get('preset') || 'giwa';
+const angle = q.get('angle') || 'three-quarter';
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setSize(1280, 800);
+renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+// 배경: 상단 하늘색 → 하단 사토색 그라디언트(critic 컷과 유사)
+scene.background = new THREE.Color(0xc9d3dc);
+
+const hemi = new THREE.HemisphereLight(0xdfe7ee, 0xb9ad97, 1.05);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff3e0, 2.1);
+// ?sun=back → 정면(+z) 뒤쪽에서 비춰 정면 기둥을 역광으로(역광 백골 톤 검증용)
+sun.position.copy(q.get('sun') === 'back' ? new THREE.Vector3(4, 9, -10) : new THREE.Vector3(-6, 10, 8));
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+const d = 14;
+sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 60;
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+const P = { ...PRESETS[presetKey] };
+const building = buildBuilding(P);
+scene.add(building);
+
+// 지면(옅은 사토색) — critic 컷 톤 재현
+const L = computeLayout(P);
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshStandardMaterial({ color: 0xb6a892, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const camera = new THREE.PerspectiveCamera(28, 1280 / 800, 0.1, 500);
+const maxDim = Math.max(L.W + 4, L.D + 4, L.totalH);
+const target = new THREE.Vector3(0, L.totalH * 0.42, 0);
+const spots = {
+  'front':          { az: 0,   el: 7,  r: 2.9 },
+  'three-quarter':  { az: 38,  el: 13, r: 3.0 },
+  'side':           { az: 90,  el: 8,  r: 2.9 },
+  'roof':           { az: 42,  el: 36, r: 2.9 },
+  'closeup':        { az: 42,  el: -12, r: 0.76, ty: L.plateY + 0.8 },
+  // 접합부 전용: ㄱ자 회첨/용마루 교차를 정면 근접
+  'junction':       { az: 20,  el: 22, r: 1.15, ty: L.totalH * 0.7 },
+  // 원래 삼각 공극이 보이던 각(안마당 쪽에서 접합부를 올려다봄)
+  'gapcheck':       { az: 42,  el: -4, r: 0.95, ty: L.totalH * 0.82 },
+};
+const s = spots[angle] || spots['three-quarter'];
+if (s.ty !== undefined) target.y = s.ty;
+const az = (s.az * Math.PI) / 180, el = (s.el * Math.PI) / 180;
+const r = s.r * maxDim;
+camera.position.set(
+  target.x + r * Math.cos(el) * Math.sin(az),
+  target.y + r * Math.sin(el),
+  target.z + r * Math.cos(el) * Math.cos(az));
+camera.lookAt(target);
+
+renderer.render(scene, camera);
+requestAnimationFrame(() => { renderer.render(scene, camera); window.__SHOT_READY = true; });
+</script>
+</body>
+</html>

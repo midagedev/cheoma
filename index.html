@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>cheoma — procedural Joseon village</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1c20; }
+  #app { width: 100%; height: 100%; }
+  #badge {
+    position: fixed; left: 12px; bottom: 10px; z-index: 10;
+    font: 12px/1.4 -apple-system, 'Apple SD Gothic Neo', sans-serif;
+    color: rgba(255,255,255,.55); pointer-events: none; user-select: none;
+  }
+  .shot #badge, .shot .lil-gui { display: none !important; }
+
+  /* 히어로 오프닝 오버레이 — 한지 톤 바탕, 세리프 타이틀, 낙관 빨강 포인트 */
+  #hero {
+    position: fixed; inset: 0; z-index: 9999; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1.05rem; text-align: center; padding: 6vh 8vw;
+    background: radial-gradient(120% 100% at 50% 38%, #f7f2e8 0%, #efe8da 58%, #e6dccb 100%);
+    color: #2c2620; -webkit-font-smoothing: antialiased;
+    font-family: Georgia, 'Times New Roman', 'Nanum Myeongjo', serif;
+    transition: opacity .8s ease;
+  }
+  #hero.leaving { opacity: 0; pointer-events: none; }
+  #hero .title {
+    display: inline-flex; align-items: center; gap: .42em;
+    font-size: clamp(34px, 7vw, 74px); font-weight: 400; letter-spacing: .05em;
+  }
+  #hero .title .seal {
+    width: .4em; height: .4em; background: #b1362b; border-radius: 2px;
+    transform: translateY(-.06em); box-shadow: 0 0 0 1px rgba(120,40,30,.22);
+  }
+  #hero .title .ko {
+    font-family: 'AppleMyungjo', 'Nanum Myeongjo', serif;
+    font-size: .3em; color: #9a8f80; letter-spacing: .1em;
+    align-self: center; transform: translateY(.06em);
+  }
+  #hero .sub {
+    font-size: clamp(13px, 1.8vw, 18px); font-style: italic;
+    color: #6b6157; letter-spacing: .015em; max-width: 30ch;
+  }
+  #hero .enter {
+    margin-top: .5rem;
+    font-family: -apple-system, 'Apple SD Gothic Neo', sans-serif;
+    font-size: 11px; letter-spacing: .34em; text-transform: uppercase; color: #9a8f80;
+    animation: heroPulse 2.6s ease-in-out infinite;
+  }
+  @keyframes heroPulse { 0%, 100% { opacity: .42; } 50% { opacity: .95; } }
+  .shot #hero { display: none !important; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
+    "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.21.0/+esm"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div id="hero">
+  <div class="title">cheoma<span class="ko">처마</span><span class="seal"></span></div>
+  <div class="sub">Dusk lingers along the eaves.</div>
+  <div class="enter">Click to enter</div>
+</div>
+<div id="badge">cheoma · stylized parametric model, not an archaeological reconstruction</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>joseon · 배치 어휘 (layout: skeleton·담장·문·필지)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd8e0; }
+  #app { width: 100%; height: 100%; }
+  #badge {
+    position: fixed; left: 12px; bottom: 10px; z-index: 10;
+    font: 12px/1.4 -apple-system, 'Apple SD Gothic Neo', sans-serif;
+    color: rgba(31,27,24,.55); pointer-events: none; user-select: none;
+  }
+  .shot #badge { display: none !important; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div id="badge">joseon · 배치 어휘 — ?case=skeleton-{rect,L,U}|roof-{L,U}|corridor|corridor-court|fence|gate-{soseul,iljak}|parcel-{palace,temple,choga,hanok}</div>
+<script type="module" src="./src/layout/viewer.js"></script>
+</body>
+</html>
