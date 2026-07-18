@@ -14,7 +14,8 @@
 //  - bloom·rim 은 톤매핑 전 선형 HDR 버퍼(EffectComposer 기본 HalfFloat)에서 동작.
 //    OutputPass 가 마지막에 ACES 톤매핑+sRGB 를 한 번만 적용 → 이중 과노출 없음
 //    (ACES 하이라이트 롤오프가 bloom·rim 가산분을 자연 흡수).
-//  - 림(태스크 #76): 기본은 재질 프레넬(rim.js) — 씬 건물 재질(userData.role) 셰이딩에
+//  - 림(태스크 #76 도입·#101 전 오브젝트 확장): 기본은 재질 프레넬(rim.js) — 씬의 lit 재질 전반
+//    (건물·나무·풀·소품·담장·동물; 하늘·물·지형·발광·입자·먹 제외) 셰이딩에
 //    뷰벡터-노멀 프레넬 × 태양 역광 × 근경 거리 게이트로 태양색 가산. 자기 표면에만 발광하므로
 //    가려진 뒷건물 윤곽이 앞 표면에 새는 X-ray 누출이 구조적으로 불가능하고, 매 프레임 씬 재렌더
 //    (지오 2배 제출)가 없어 마을·hanyang 부감에서도 상시 ON 가능. 구 RimPass(노멀 하프해상도
@@ -701,12 +702,14 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     camera.updateMatrixWorld();
     _v.copy(cur.dir).transformDirection(camera.matrixWorldInverse); // 뷰공간 태양 방향(단위)
     // 역광 게이트(엄격): -_v.z = dot(뷰전방, 태양) — 태양이 카메라 전방·피사체 뒤에 있을수록 1.
-    const backlit = THREE.MathUtils.smoothstep(-_v.z, 0.06, 0.5);
+    // 순광/측광 뷰에서도 최소 18% 림 강도가 잔존하도록 게이트 완화
+    const rawBacklit = THREE.MathUtils.smoothstep(-_v.z, 0.06, 0.5);
+    const backlit = THREE.MathUtils.lerp(0.18, 1.0, rawBacklit);
     if (useFresnel) {
       // 재질 프레넬: 뷰공간 태양 방향 + 최종 강도(rimBase×backlit×enabled)를 공유 uniform 에.
       //   FRES_STR_MUL: 지수 상향(에지 집중)에 따른 총 에너지 감소를 보정하는 배율(처마 킥 인상 유지).
       fresnelRim.setSunViewDir(_v);
-      fresnelRim.setStrength(enabled ? rimBase * backlit * 1.1 : 0);
+      fresnelRim.setStrength(enabled ? rimBase * backlit * 1.6 : 0);
       // 새 재질(마을 리롤·focus-in 오버레이·단일건물 rebuild) self-heal 패치. 대략 0.4s 주기.
       if ((++scanTick % 24) === 0) fresnelRim.apply(scene);
     } else {
@@ -798,10 +801,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
       get front() { return flarePass.uniforms.sunFront.value; },
       setEnabled: setFlareEnabled,
     };
-    // #76 검증 훅: 림 모드·강도·패치수·마스터 스케일 판독 + 재스캔 강제.
+    // #76/#101 검증 훅: 림 모드·강도·패치수·재질군 커버리지·마스터 스케일 판독 + 재스캔 강제.
     window.__rim = {
       mode: RIM_MODE,
       get patched() { return fresnelRim ? fresnelRim.patchedCount : 0; },
+      get coverage() { return fresnelRim ? fresnelRim.coverage : null; },  // {total,building,misc,organic}
       get strength() { return useFresnel ? fresnelRim.uniforms.uRimStrength.value : (rimPass ? rimPass.uniforms.rimStrength.value : 0); },
       get scale() { return useFresnel ? fresnelRim.uniforms.uRimScale.value : (rimPass && rimPass.enabled ? 1 : 0); },
       setEnabled: setRimEnabled,

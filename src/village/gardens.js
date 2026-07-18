@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
 import { parcelMatrix } from './instancing.js';
 import { YARD_SPECIES } from './variants.js';
+import { buildParcelLanternGeo, getLanternMaterials, lanternStyleFor } from '../layout/props.js';
 import * as G from './geom.js';
 
 // 마당 과실수 · 반가 정원 · 마을 보호수(당산나무) — 태스크 #41 (docs Q4·Q5, R-G1/R-G2/R-T1).
@@ -291,8 +292,18 @@ export function buildVillageFlora(plan, site, seed) {
   const fruitProto = {}; for (const sp of YARD_SPECIES) fruitProto[sp] = makeFruitProto(sp, (seed ^ hash(sp)) >>> 0);
   const guardProto = { zelkova: makeGuardianProto('zelkova', (seed ^ 0x9e11) >>> 0), ginkgo: makeGuardianProto('ginkgo', (seed ^ 0x9e12) >>> 0) };
 
-  const L = { wood: [], leaf: [], blossom: [], fruit: [], stone: [] };
+  const L = { wood: [], leaf: [], blossom: [], fruit: [], stone: [], lantern: [] };
   const yardTreeAnchors = [], guardianAnchors = [], gardenAnchors = [];
+
+  // 필지 등롱(#83): 발광 몸체→lantern 레이어(hanjiGlow glow 재질, 야간 adapter 램프), 프레임→wood 병합.
+  //   parcel.lantern({gate,yard}, variants.js) 기반, 위치는 layout/props.js lanternLayout(rng 미소비 결정론).
+  const bakeLanterns = (p, pm) => {
+    const cfg = p.lantern;
+    if (!cfg || (!cfg.gate && !cfg.yard)) return;
+    const { glow, frame } = buildParcelLanternGeo(lanternStyleFor(p), p.seed, p.plotW, p.plotD, cfg);
+    for (const g of glow) bake(L.lantern, g, pm.clone());
+    for (const f of frame) bake(L.wood, tint(f, WOOD_DK), pm.clone());
+  };
 
   const placeFruit = (sp, wm) => {
     const P = fruitProto[sp]; if (!P) return;
@@ -305,6 +316,7 @@ export function buildVillageFlora(plan, site, seed) {
     const pm = parcelMatrix(p);
     const trng = makeRng((p.seed ^ 0x7ee5) >>> 0);
     const ct = p.courtyardTree;
+    bakeLanterns(p, pm);   // 전 필지(히어로 포함) 등롱 — trng 미소비(#89 앵커 불침해)
     if (p.hero) {
       // 종가 뒤안: 화계(중앙) + 괴석·석지(측) + 과실수 2(코너) — 뒷담 안쪽에 몰아 컴파운드 관통 회피.
       const hw = p.plotW / 2, hd = p.plotD / 2;
@@ -377,6 +389,8 @@ export function buildVillageFlora(plan, site, seed) {
   mk(L.stone, stoneMat, 'flora-stone');
   mk(L.blossom, blossomMat, 'flora-blossom');
   mk(L.fruit, fruitMat, 'flora-fruit');
+  // 등롱 발광 몸체 — 공유 glow 재질(hanjiGlow, 야간 adapter 램프). 계절 토글 대상 아님(상시 가시).
+  mk(L.lantern, getLanternMaterials().glow, 'flora-lantern');
 
   function setSeason(name) {
     const t = LEAF_TINT[name] || LEAF_TINT.summer;

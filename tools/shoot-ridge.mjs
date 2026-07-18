@@ -85,6 +85,20 @@ if (mode === 'palace') {
   if (boxes['gwolnaegaksa-cell1'] && boxes['gwolnaegaksa-cell3']) checks['cell1_x_cell3'] = overlap(boxes['gwolnaegaksa-cell1'], boxes['gwolnaegaksa-cell3']);
   if (boxes['gwolnaegaksa-cell2'] && boxes['gwolnaegaksa-cell3']) checks['cell2_x_cell3'] = overlap(boxes['gwolnaegaksa-cell2'], boxes['gwolnaegaksa-cell3']);
   window.__P.checks = checks;
+  // 금천교 치수(#97 축소 검증) — 노면 최고점 y·크로싱·통행 폭.
+  let bridge = null;
+  palace.traverse((o) => { if (o.name === 'bridge-slab' || o.name === 'bridge-arch') bridge = o; });
+  if (bridge) {
+    const bb = new THREE.Box3().setFromObject(bridge);
+    window.__P.bridge = {
+      type: bridge.name, topY: +bb.max.y.toFixed(2),
+      dz: +(bb.max.z - bb.min.z).toFixed(2), dx: +(bb.max.x - bb.min.x).toFixed(2),
+    };
+  }
+  // 진입 시퀀스 게이트 존재 확인(광화문→흥례문→정전문).
+  const gateNames = ['gate-gwanghwamun', 'gate-heungryemun'];
+  let gates = 0; palace.traverse((o) => { if (gateNames.includes(o.name)) gates++; });
+  window.__P.gates = gates;
   // 궐내각사(-x) 일곽 중심으로 프레이밍
   const h = palace.userData.palaceHandle;
   const gaksa = h && h.areas.find((a) => a.role === 'gwolnaegaksa');
@@ -161,6 +175,8 @@ const shots = [
   ['hanyang-tq', 'mode=palace&view=tq&focus=whole'],
   ['regress-temple', 'mode=single&view=tq&preset=temple'],
   ['regress-choga', 'mode=single&view=tq&preset=choga'],
+  ['measure-hanyang', 'mode=palace&view=tq&focus=whole'],
+  ['measure-capital', 'mode=palace&view=tq&focus=whole&tier=capital'],
 ].filter(([n]) => !filter || n.includes(filter));
 
 let browser;
@@ -177,6 +193,7 @@ for (const [name, qs] of shots) {
   await page.waitForTimeout(120);
   const info = await page.evaluate(() => window.__P);
   console.log(name, JSON.stringify(info));
+  if (name.includes('measure')) continue;   // 측정 전용: 스크린샷 생략(시각검증 중단)
   const file = join(OUT, `${PFX}${name}.png`);
   await page.screenshot({ path: file });
   console.log('saved', file);

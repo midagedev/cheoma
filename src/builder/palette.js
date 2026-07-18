@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
+  CLOUD_SHADOW_VERT_DECL, CLOUD_SHADOW_VERT_BODY,
+} from '../env/clouds.js';
 
 // 캔버스 텍스처의 무작위 얼룩·짚결·막돌은 기본 Math.random 을 쓴다. 다만 마을 재현 렌더
 // (같은 seed → 픽셀 동일)를 위해 외부에서 시드 가능한 난수원으로 교체할 수 있다.
@@ -755,4 +759,76 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
   });
   mat.userData.role = 'roof';   // 지붕면 신규 재질도 부위 태그(마을 기와 톤 변주, 태스크 #55)
   return mat;
+}
+
+// 수키와 롤 전용: 튜브 길이 방향(V)으로 기와 겹침 반복수를 계산한 재질 생성.
+export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
+  const tex = mats.tileTex.clone();
+  tex.needsUpdate = true;
+  tex.anisotropy = 8;
+  // U 방향(둘레)은 1회 반복, V 방향(길이)은 기와 한 장 크기(0.34m) 당 1회 반복
+  tex.repeat.set(1, Math.max(1, Math.round(lengthMeters / 0.34)));
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x6a6d73, map: tex, roughness: 0.9, metalness: 0.0,
+    bumpMap: tex, bumpScale,
+  });
+  mat.userData.role = 'roof';
+  return mat;
+}
+
+// ── 흐르는 구름 그림자 주입(#110) ─────────────────────────────────────────────
+// 밀집 부감(한양급)은 화면 대부분이 지붕이라, 지형 재질에만 얹힌 구름 그늘(populate buildSiteTerrain·
+//   env terrain.js)이 지붕에 가려 안 보인다. 지형과 "같은" GLSL(clouds.js export, 같은 uCloudBlobs
+//   uniform 공유)을 지붕 재질에 재질별 onBeforeCompile 로 얹어 그늘이 지붕에도 흐르게 한다.
+//   cloudUniforms(populate 가 만들어 clouds.js update 가 매 프레임 갱신)가 있을 때만 활성 →
+//   env 단일건물(uniforms 미배선)은 미주입(무회귀). uniform 은 공유 참조로 넘겨 갱신이 끊기지 않게 한다.
+// 함정 대응:
+//   - 인스턴싱: 집 지붕은 InstancedMesh → CLOUD_SHADOW_VERT_BODY 가 USE_INSTANCING 시 instanceMatrix
+//     를 합성(clouds.js). 지형·병합 지오는 modelMatrix 경로 그대로.
+//   - 체인 순서: 기존 onBeforeCompile(있으면)을 먼저 호출(prev)해 보존. shade 는 곱연산이라 색 패치
+//     순서와 무관(교환 가능)하고, color_fragment 앵커는 소비되지 않아(뒤에 append) 재치환 안전.
+//   - 캐시키: three 는 onBeforeCompile 변형을 기본 프로그램 캐시키에 반영하지 않는다 → 미주입 동일
+//     파라미터 재질과 프로그램을 공유하지 않도록 키를 분리(#52 실증). 기존 커스텀 키가 있으면 접미.
+//   - 멱등: 공유 재질을 traverse 로 여러 번 만나도 1회만 패치(__cloudShadowPatched).
+// 반환: 실제로 패치했으면 true(검증 카운트용).
+export function injectCloudShadow(mat, cloudUniforms) {
+  if (!mat || !mat.isMaterial || !cloudUniforms) return false;
+  if (mat.userData.__cloudShadowPatched) return false;
+  mat.userData.__cloudShadowPatched = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    if (prev) prev(shader, renderer);
+    shader.uniforms.uCloudTime = cloudUniforms.uCloudTime;
+    shader.uniforms.uCloudStr = cloudUniforms.uCloudStr;
+    shader.uniforms.uCloudBlobs = cloudUniforms.uCloudBlobs;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${CLOUD_SHADOW_VERT_DECL}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${CLOUD_SHADOW_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${CLOUD_SHADOW_FRAG_DECL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${CLOUD_SHADOW_FRAG_BODY}`);
+  };
+  const baseKey = (mat.customProgramCacheKey && mat.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey)
+    ? mat.customProgramCacheKey() : '';
+  mat.customProgramCacheKey = () => 'cloudshadow|' + baseKey;
+  mat.needsUpdate = true;
+  return true;
+}
+
+// 마을 root(populateVillage 산출)를 traverse 해 지붕(role='roof') 재질에 구름 그림자를 주입한다.
+//   부감에서 실제로 보이는 표면은 지붕+지형이며 지형은 이미 그늘을 받으므로, 지붕만 얹어도 "구름이
+//   마을 위를 흐르는" 그늘이 완결된다(벽·목부재까지 넓히면 프로그램 수만 늘어 이득 없음). 공유 재질이라
+//   실 패치 수는 소수(giwa·choga·궁·절·히어로·시전 지붕 팔레트). 반환: 패치한 고유 재질 수.
+export function injectVillageCloudShadow(root, cloudUniforms) {
+  if (!root || !cloudUniforms) return 0;
+  let n = 0;
+  root.traverse((o) => {
+    const m = o.material;
+    if (!m) return;
+    const list = Array.isArray(m) ? m : [m];
+    for (const mm of list) {
+      if (mm && mm.userData && mm.userData.role === 'roof' && injectCloudShadow(mm, cloudUniforms)) n++;
+    }
+  });
+  return n;
 }

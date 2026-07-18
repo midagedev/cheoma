@@ -7,6 +7,7 @@ import { buildFence } from './fence.js';
 import { buildGate } from './gate.js';
 import { buildHanok } from './hanok.js';
 import { buildCorridor } from './corridor.js';
+import { attachOverlayLanterns } from './props.js';
 
 // 담장으로 둘린 대지 + 남측 대문 + 마당 + 북측 중앙 몸채 + 행각/행랑.
 // 좌표계: 남쪽 = +z(대문·진입), 북쪽 = -z(몸채·배산). 몸채는 +z(남)을 향해 앉는다.
@@ -22,7 +23,9 @@ const STYLE_MAP = {
   hanok: { preset: 'hanok', gate: 'soseuldaemun', gateW: 5.2, plot: [24, 22], fenceH: 2.0, wings: true, wall: 'toseok' },
 };
 
-export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, roofOpts, wallH = 2.7, presetOverrides } = {}) {
+//   lanterns: 필지 등롱(대문·마당 걸이등롱, #83)을 루트 직속에 심을지. 기본 true(focus 오버레이·뷰어).
+//     mergeStatic 병합 경로(populate 히어로·절·궁 코어)는 false 로 넘겨 PointLight 유실·bulb 오염을 막는다.
+export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, roofOpts, wallH = 2.7, presetOverrides, lanterns = true } = {}) {
   const cfg = STYLE_MAP[style] || STYLE_MAP.palace;
   const rng = makeRng(seed);
   const W = plotW || cfg.plot[0];
@@ -137,6 +140,11 @@ export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, r
       }
     }
   }
+
+  // ── 필지 등롱 (대문·마당 걸이등롱, #83) ──
+  //   루트 직속에 bulb + PointLight → focus 링(env/motes.js setupLanternSway)이 직속 자식을 훑어
+  //   흔들림 구동(dormant 였던 레이어 활성). 병합 경로는 lanterns:false 로 skip.
+  if (lanterns) attachOverlayLanterns(root, { style, W, D, seed });
 
   root.userData = { style, W, D, mats };
   return root;

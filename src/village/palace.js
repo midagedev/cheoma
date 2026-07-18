@@ -30,6 +30,18 @@ import { mergeStatic } from './instancing.js';
 //   중심 향(우법선)으로 뒤집으려면 -1. (시각 검증 완료.)
 const INNER = -1;
 
+// 부속·소전각 배치용 처마 외연 반치수(로컬 AABB). buildBuilding 결과는 월대·처마·마루장식까지
+// 포함하므로, 이 실측 외연을 이격 산정 기준으로 써야 지붕이 본채·이웃·행각과 겹치지 않는다(#97).
+function footprintHalf(obj) {
+  obj.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(obj);
+  return {
+    x: Math.max(Math.abs(b.min.x), Math.abs(b.max.x)),
+    z: Math.max(Math.abs(b.min.z), Math.abs(b.max.z)),
+    minZ: b.min.z, maxZ: b.max.z,
+  };
+}
+
 // 전각 프리셋 변주 — PRESETS.korea 를 격식별로 축소(신규 프리셋 아님, 스프레드 파생).
 function hallPreset(role, seed) {
   const k = PRESETS.korea;
@@ -217,8 +229,10 @@ function layGeumcheon(root, cx, cz, seed) {
   water.rotation.x = -Math.PI / 2;
   water.position.set(cx, -0.06, cz);
   root.add(water);
-  // 홍예교: span=크로싱(로컬 X). 축선(z) 위로 건너게 90° 회전.
-  const bridge = buildBridge({ type: 'arch', span: streamD + 2.5, width: 6.5, seed });
+  // 금천교: 낮은 판석 돌다리(#97). 종전 홍예교(type:'arch', span 9·폭 6.5)는 정점≈4.57m로 진입부를
+  // 압도하고 마른 지면 위 붕 뜬 인상이었다 → 고증(경복궁 영제교·창덕궁 금천교는 낮고 편평)을 좇아
+  // 낮은 판석교로 축소. span=크로싱(로컬 X, 금천 폭 6.5 + 양안 받침), width=통행 폭(어도급). 축선(z) 90° 회전.
+  const bridge = buildBridge({ type: 'slab', span: streamD + 2.0, width: 4.6, deckY: 0.5, piers: 2, seed });
   bridge.position.set(cx, 0.06, cz);
   bridge.rotation.y = Math.PI / 2;
   root.add(bridge);

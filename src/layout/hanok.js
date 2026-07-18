@@ -81,6 +81,9 @@ export function buildHanok({ footprint, seed = 1, mats, wallH = 2.7, podiumH = 0
   beam.position.y = wallH - 0.16;
   g.add(beam);
 
+  // ── 창호·문 (마당 향한 면 최소 개구 보장) ──
+  const openings = addHanokOpenings(g, poly, M, seed, wallH, podiumH);
+
   // ── 지붕 ──
   const eaveOverhang = roofOpts.eaveOverhang ?? 1.15;
   const roof = buildSkeletonRoof(poly, {
@@ -157,6 +160,151 @@ function addHanokChimney(g, poly, M, rng, eaveOverhang) {
   chimney.add(cap3);
 
   g.add(chimney);
+}
+
+// ── 반가 안채 창호·문 (마당·안뜰 향한 면에 최소 개구 보장) ──
+// 진단(#99): buildHanok 은 회벽·기둥·창방·지붕만 만들고 창호가 전무해 히어로 종가가 늘 무개구 회벽으로
+//   생성됐다("최초 진입 집에 문·창 없음"). 여기서 마당(+z 남)·안뜰(ㄱ/ㄷ자 오목 꼭짓점 인접 면)을 향한
+//   벽면에 대청 분합문 + 방 살창을 얹어 개구를 보장한다. 문 ≥1·창 ≥1 최소 보장, 칸 수·짝수는 평면 파생.
+// 재질: 팔레트의 M.door(빗꽃살+한지) 단일 클론을 문·창 공용으로 쓰고(청판 노출·짝수는 per-panel UV),
+//   userData.hanjiGlow(0.18) 가 클론에 전파돼 #66 야간 발광이 자동 발현된다. 머름/문틀은 기존 M.woodDark.
+//   창호는 재질별 병합 1콜·머름 1콜(기존 woodDark 그룹에 접힘) → 종가 mergeStatic 드로우콜 억제.
+function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
+  const n = poly.length;
+  if (n < 3 || !M.door || !M.door.map) return;
+  // 개구 전용 rng(굴뚝 rng 불침해) — 방 창 폭 등 시드 파생 변주.
+  const rng = makeRng((seed || 1) * 131 + 7);
+
+  // 개구 수직 구간: 기단 위 ~ 창방(wallH-0.16) 밑.
+  const oy0 = podiumH + 0.10;
+  const oy1 = (wallH - 0.16) - 0.03;
+  const T = 0.10, faceOff = 0.075;   // 벽면 바깥으로 살짝 돌출한 응용 창호
+  const colClear = 0.30;             // 칸 폭에서 기둥 회피 여유
+  const VSILL = 96 / 512;            // 문 텍스처 하부 청판 경계(flipY 기본: 청판=v∈[0,0.1875])
+  const sillTop = oy0 + 0.82;        // 방 창 하부 머름 상단
+
+  // 문·창 공용 창호 재질(단일 클론 → 병합 1콜, hanjiGlow 전파).
+  const doorMat = M.door.clone();
+  doorMat.map = M.door.map.clone();
+  doorMat.map.wrapS = doorMat.map.wrapT = THREE.RepeatWrapping;
+  doorMat.map.needsUpdate = true;
+
+  const panels = [];   // 창호 패널(빗꽃살) 병합 대상
+  const sills = [];    // 방 창 하부 머름대(woodDark) 병합 대상
+  let doorN = 0, winN = 0;
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const winW = (w) => w * (0.80 + rng() * 0.14);   // 방 창 폭 변주(칸 폭의 0.80~0.94)
+  // 한 개구 패널을 병합 목록에 추가. kind: 'door'(전 높이·청판 포함) | 'win'(머름 위·청판 제외).
+  const addPanel = (theta, cx, cz, w, kind) => {
+    const yb = kind === 'door' ? oy0 + 0.02 : sillTop + 0.04;
+    const yt = oy1;
+    const h = yt - yb;
+    if (w < 0.55 || h < 0.4) return false;
+    const leaves = kind === 'door'
+      ? clamp(Math.round(w / 0.6), 2, 4)   // 분합문: 좁은 살문 여러 짝
+      : (w > 1.7 ? 2 : 1);                 // 방 창: 1~2짝
+    const geo = new THREE.BoxGeometry(w, h, T);
+    const uv = geo.attributes.uv;
+    const vmin = kind === 'win' ? VSILL : 0;    // 창은 청판 잘라내고 살+한지만
+    for (let i = 0; i < uv.count; i++) {
+      uv.setX(i, uv.getX(i) * leaves);          // 가로로 leaves 만큼 반복(짝 사이 문틀선)
+      uv.setY(i, vmin + uv.getY(i) * (1 - vmin));
+    }
+    uv.needsUpdate = true;
+    geo.rotateY(theta);
+    geo.translate(cx, (yb + yt) / 2, cz);
+    panels.push(geo);
+    if (kind === 'door') doorN++; else winN++;
+    if (kind === 'win') {                        // 머름대(창 하인방)
+      const s = new THREE.BoxGeometry(w + 0.06, 0.12, T + 0.05);
+      s.rotateY(theta); s.translate(cx, sillTop, cz);
+      sills.push(s);
+    }
+    return true;
+  };
+
+  // 엣지 형상: 방향 e·바깥 법선 N(=(e.z,-e.x), offsetPoly 규약)·회전각·길이·칸수.
+  const edgeInfo = (i) => {
+    const a = poly[i], b = poly[(i + 1) % n];
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.hypot(dx, dz) || 1e-3;
+    const e = { x: dx / len, z: dz / len };
+    const N = { x: e.z, z: -e.x };
+    const theta = Math.atan2(N.x, N.z);           // 로컬 +z → 월드 N
+    const k = Math.max(1, Math.round(len / 2.5));
+    return { a, e, N, theta, len, k };
+  };
+  // 칸 j 중심(벽면 바깥 오프셋) + 유효 폭.
+  const bay = (inf, j) => {
+    const tc = (j + 0.5) / inf.k;
+    const bx = inf.a.x + inf.e.x * inf.len * tc;
+    const bz = inf.a.z + inf.e.z * inf.len * tc;
+    return { cx: bx + inf.N.x * faceOff, cz: bz + inf.N.z * faceOff, w: inf.len / inf.k - colClear };
+  };
+
+  // 오목(reflex) 꼭짓점 판정 — ㄱ/ㄷ자 안뜰 면 식별(CCW: cross<0).
+  const reflex = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    const p = poly[(i - 1 + n) % n], c = poly[i], q = poly[(i + 1) % n];
+    const cr = (c.x - p.x) * (q.z - c.z) - (c.z - p.z) * (q.x - c.x);
+    if (cr < 0) reflex[i] = true;
+  }
+
+  // 엣지 분류: front(마당 남향 N.z>0.35) / inner(오목 꼭짓점 인접·안뜰 향, 뒷면 아님).
+  const fronts = [], inners = [];
+  for (let i = 0; i < n; i++) {
+    const inf = edgeInfo(i);
+    if (inf.N.z > 0.35) fronts.push(inf);
+    else if ((reflex[i] || reflex[(i + 1) % n]) && inf.N.z > -0.15) inners.push(inf);
+  }
+  // 마당면이 없으면(비-남향 평면 방어) N.z 최대 엣지를 앞면으로.
+  if (fronts.length === 0) {
+    let best = edgeInfo(0);
+    for (let i = 1; i < n; i++) { const inf = edgeInfo(i); if (inf.N.z > best.N.z) best = inf; }
+    fronts.push(best);
+  }
+  // 주 정면 = 가장 긴 남향 면(대청). 나머지 남향 면은 부 정면.
+  fronts.sort((p, q) => q.len - p.len);
+  const primary = fronts[0];
+  const secondary = fronts.slice(1);
+
+  // 주 정면: 중앙 칸 = 대청 분합문, 좌우 칸 = 방 창.
+  {
+    const mid = Math.floor(primary.k / 2);
+    for (let j = 0; j < primary.k; j++) {
+      const bj = bay(primary, j);
+      addPanel(primary.theta, bj.cx, bj.cz, j === mid ? bj.w : winW(bj.w), j === mid ? 'door' : 'win');
+    }
+  }
+  // 부 정면·안뜰 면: 방 창. 넉넉한 면(칸 폭>1.6) 중 최장 면 중앙엔 방문 하나 더.
+  const rest = [...secondary, ...inners];
+  let doorEdge = null, doorEdgeLen = 1.6;
+  for (const inf of rest) { const w0 = inf.len / inf.k - colClear; if (w0 > 1.6 && inf.len > doorEdgeLen) { doorEdge = inf; doorEdgeLen = inf.len; } }
+  for (const inf of rest) {
+    const mid = Math.floor(inf.k / 2);
+    for (let j = 0; j < inf.k; j++) {
+      const bj = bay(inf, j);
+      const isDoor = inf === doorEdge && j === mid;
+      addPanel(inf.theta, bj.cx, bj.cz, isDoor ? bj.w : winW(bj.w), isDoor ? 'door' : 'win');
+    }
+  }
+
+  // 최소 보장: 문 0 이면 주 정면 중앙에 강제, 창 0 이면 주 정면 첫 칸에 강제.
+  if (doorN === 0) { const bj = bay(primary, Math.floor(primary.k / 2)); addPanel(primary.theta, bj.cx, bj.cz, Math.max(0.9, bj.w), 'door'); }
+  if (winN === 0) { const bj = bay(primary, 0); addPanel(primary.theta, bj.cx, bj.cz, Math.max(0.7, bj.w * 0.86), 'win'); }
+
+  if (panels.length) {
+    const m = new THREE.Mesh(mergeGeometries(panels, false), doorMat);
+    m.name = 'changho';
+    m.castShadow = true; m.receiveShadow = true;
+    g.add(m);
+  }
+  if (sills.length) {
+    const s = new THREE.Mesh(mergeGeometries(sills, false), M.woodDark);
+    s.castShadow = true;
+    g.add(s);
+  }
 }
 
 // 다각형을 바깥으로 d 만큼 마이터 오프셋 (볼록/반사 모두)

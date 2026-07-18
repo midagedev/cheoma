@@ -150,6 +150,10 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     animals.setSeason(name);
     terrain.setSeason(name, opts);  // 들판 금빛(가을) 자체 보간
     sky.setSeason(name, { immediate: !!opts.immediate || !enabled });  // 능선 가을 훅(크로스페이드)
+    // 카메라 추종 계절 입자 필드(#111): weather.js 소유(scene 루트·setWeatherCenter 추종)라 season 을
+    //   window.__wx 브릿지로 전달한다(engine 은 weather 에 season 미전달 — env↔weather 유일 연결).
+    //   __wx 부재(env 단독 검증 하네스·weather 미생성)면 no-op.
+    if (typeof window !== 'undefined' && window.__wx && window.__wx.setSeason) window.__wx.setSeason(name);
   }
   // 매 프레임 계절 애니메이션(색 보간·낙엽 파티클·논 계절)+개울 흐름+생물. 환경 ON 일 때만.
   function update(dt) {

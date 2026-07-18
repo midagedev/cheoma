@@ -117,68 +117,86 @@ function buildTuftGeometry(rng) {
   return { geo, trisPerTuft };
 }
 
-// ── 배치: 담장 안쪽 둘레 밴드 + 마당 가장자리 + 필지 외곽 성긴 프린지 ──────────────
-// 비움: 마당 중앙 동선(대문→몸채 디딤돌 길)·건물 발자국·대문 개구부·마당(닭) 중심.
+// ── 배치(#106): 길가·고샅 가장자리 중심 ──────────────────────────────────────────
+// 조선 마을 풀은 손질된 마당 안이 아니라 담장 바깥 길 어깨·고샅(골목) 가장자리에 무성하다. 그래서
+// 배치 무게를 필지 앞(=frontDir=+z=대문/길)의 길 어깨와 그 양옆 고샅으로 옮기고, 마당 안은 담장 밑
+// 성긴 밴드만 남긴다(#90 은 마당 안 중심이었다). 반환 pt.lane 으로 분포 검증(verify-ambfield).
+// 비움: 대문 진입 동선·건물 발자국·마당 중앙 동선·마당(닭) 중심. 담장 밑동 밀착(제곱 편향)으로 성토
+//   패드 밖 낮은 노면 위로 뜨는 것을 억제한다(패드 축대 부유 방지).
 function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
   const rng = makeRng(seed);
   const hw = W / 2, hd = D / 2;
-  const band = Math.min(2.4, Math.min(W, D) * 0.22);   // 담장 밑 밴드 폭
-  const inMargin = 0.32;                                // 담장에서 살짝 안쪽부터
 
-  // 건물 발자국 회피 박스(북쪽). buildParcel: 몸채는 −z(북) 중앙. 정확 footprint 대신 견고한
-  // 휴리스틱 박스(스타일 무관 안전). 북벽 코너·측벽엔 풀 허용, 몸채 발자국만 비움.
+  // 건물 발자국(북쪽 몸채) 회피 — 마당 안 배치에만 적용.
   const bHalfW = W * 0.30;
-  const bZtop = -hd;                 // 북벽
   const bZbot = -hd + D * (style === 'choga' ? 0.42 : 0.55);
-  const inBuilding = (x, z) => Math.abs(x) < bHalfW && z > bZtop && z < bZbot;
-
-  // 중앙 동선(대문→몸채 디딤돌 길): x≈0 회랑. 마당(몸채 남쪽)에서만.
-  const pathHalf = 1.35;
-  const onPath = (x, z) => Math.abs(x) < pathHalf && z > bZbot - 0.5;
-
-  // 대문 개구부(남벽 +z): 진입 폭 비움.
+  const inBuilding = (x, z) => Math.abs(x) < bHalfW && z > -hd && z < bZbot;
+  const onPath = (x, z) => Math.abs(x) < 1.35 && z > bZbot - 0.5;   // 대문→몸채 디딤돌 길
   const gHalf = (gateW || 2.0) * 0.5 + 0.7;
-  const inGateGap = (x, z) => z > hd - 1.2 && Math.abs(x) < gHalf;
-
-  // 마당(닭) 중심: 동선 유지 위해 성기게 비움.
+  const inGateGap = (x, z) => z > hd - 1.2 && Math.abs(x) < gHalf;   // 마당 안 대문 진입 동선
   const inYard = yard && Number.isFinite(yard.x)
     ? (x, z) => ((x - yard.x) ** 2 + (z - yard.z) ** 2) < (yard.r * 1.05) ** 2
     : () => false;
+  const gateGapX = gHalf + 0.2;      // 길 어깨에서도 대문 정면은 성기게(진입 인상)
 
   const pts = [];
-  const excluded = (x, z) => inBuilding(x, z) || onPath(x, z) || inGateGap(x, z) || inYard(x, z);
+  let nRoad = 0, nAlley = 0, nRest = 0, nYard = 0;
+  const tRoad = Math.round(count * 0.42);    // 앞(+z) 길 어깨 — 가장 무성
+  const tAlley = Math.round(count * 0.24);   // 앞쪽 좌우 고샅 어깨
+  const tRest = Math.round(count * 0.12);    // 뒤/옆 성긴 잡초
+  // 나머지(≈22%)는 마당 안 담장 밑 성긴 밴드.
 
-  // 1) 내부: 담장 근접 강한 편향(둘레 밴드·코너 밀집), 열린 중앙엔 성긴 몇 포기만.
-  const maxAtt = count * 40;
-  let att = 0;
-  while (pts.length < count && att < maxAtt) {
-    att++;
+  // 1) 앞 길 어깨(+z 바깥): 담장 밑동에서 길 쪽으로 밴드. 대문 정면만 성기게(양옆으로 갈라짐).
+  let a = 0;
+  while (nRoad < tRoad && a++ < tRoad * 40) {
+    const x = (rng() * 2 - 1) * (hw + 0.6);
+    const z = hd + 0.12 + 0.1 + rng() * rng() * 1.7;   // 제곱 편향 → 담장 밑 무성, 길 쪽 성기게(성토 패드 밖 부유 억제)
+    if (Math.abs(x) < gateGapX && rng() > 0.15) continue;
+    pts.push({ x, z, ext: true, lane: 'road', yaw: rng() * TAU, s: 0.6 + rng() * 0.5, hVar: 0.8 + rng() * 0.45 });
+    nRoad++;
+  }
+
+  // 2) 앞쪽 좌우 고샅 어깨(±x 바깥, 앞 절반 z>0 편향): 골목을 따라 자란 풀.
+  a = 0;
+  while (nAlley < tAlley && a++ < tAlley * 40) {
+    const side = rng() < 0.5 ? 1 : -1;
+    const x = side * (hw + 0.12 + 0.1 + rng() * rng() * 1.5);
+    const z = (rng() * 1.35 - 0.35) * hd;               // 앞(z>0) 편향, 뒤쪽도 약간
+    pts.push({ x, z, ext: true, lane: 'alley', yaw: rng() * TAU, s: 0.55 + rng() * 0.45, hVar: 0.75 + rng() * 0.4 });
+    nAlley++;
+  }
+
+  // 3) 뒤/옆 성긴 잡초(담장 바깥 밑동, 전방위 소량).
+  a = 0;
+  while (nRest < tRest && a++ < tRest * 40) {
+    const pick = rng.int(0, 3);
+    const out = 0.1 + rng() * 0.5;
+    let x, z;
+    if (pick === 1) { x = (rng() * 2 - 1) * (hw - 0.4); z = -hd - out; }
+    else if (pick === 2) { x = hw + out; z = (rng() * 2 - 1) * (hd - 0.4); }
+    else if (pick === 3) { x = -hw - out; z = (rng() * 2 - 1) * (hd - 0.4); }
+    else { x = (rng() * 2 - 1) * (hw - 0.4); z = hd + out; if (Math.abs(x) < gateGapX) continue; }
+    pts.push({ x, z, ext: true, lane: 'rest', yaw: rng() * TAU, s: 0.5 + rng() * 0.35, hVar: 0.7 + rng() * 0.3 });
+    nRest++;
+  }
+
+  // 4) 마당 안: 담장 밑 성긴 밴드만(소량). 중앙·건물·마당 중심·대문 진입은 비움.
+  const band = Math.min(2.2, Math.min(W, D) * 0.2);
+  const inMargin = 0.32;
+  const tYard = Math.max(0, count - pts.length);
+  a = 0;
+  while (nYard < tYard && a++ < tYard * 50) {
     const x = (rng() * 2 - 1) * (hw - inMargin);
     const z = (rng() * 2 - 1) * (hd - inMargin);
-    if (excluded(x, z)) continue;
+    if (inBuilding(x, z) || onPath(x, z) || inGateGap(x, z) || inYard(x, z)) continue;
     const ed = Math.min(hw - Math.abs(x), hd - Math.abs(z));   // 최근접 벽까지
-    // 벽에 붙을수록 밀. 밴드 안에서 부드럽게 감쇠, 밴드 밖 열린 중앙엔 성긴 몇 포기만.
-    const w = ed <= band ? (1.0 - 0.45 * (ed / band)) : 0.06;
+    const w = ed <= band ? (0.9 - 0.55 * (ed / band)) : 0.03;  // 담장 밑만, 중앙 거의 없음
     if (rng() > w) continue;
-    pts.push({ x, z, ext: false, yaw: rng() * TAU, s: 0.72 + rng() * 0.55, hVar: 0.82 + rng() * 0.4 });
+    pts.push({ x, z, ext: false, lane: 'yard', yaw: rng() * TAU, s: 0.7 + rng() * 0.5, hVar: 0.82 + rng() * 0.4 });
+    nYard++;
   }
 
-  // 2) 외곽 프린지("필지 주변"): 담장 바깥 밑동에 성긴 잡초. 대문 앞은 비움. 짧게·밀착.
-  const extN = Math.round(count * 0.10);
-  let extA = 0;
-  const extMax = extN * 30;
-  while (pts.filter((p) => p.ext).length < extN && extA < extMax) {
-    extA++;
-    const side = rng.int(0, 3);           // 0:S(+z) 1:N(-z) 2:E(+x) 3:W(-x)
-    const out = 0.15 + rng() * 0.32;      // 담장 밑동 밀착
-    let x, z;
-    if (side === 0) { x = (rng() * 2 - 1) * (hw - 0.4); z = hd + out; if (Math.abs(x) < gHalf) continue; }
-    else if (side === 1) { x = (rng() * 2 - 1) * (hw - 0.4); z = -hd - out; }
-    else if (side === 2) { x = hw + out; z = (rng() * 2 - 1) * (hd - 0.4); }
-    else { x = -hw - out; z = (rng() * 2 - 1) * (hd - 0.4); }
-    pts.push({ x, z, ext: true, yaw: rng() * TAU, s: 0.5 + rng() * 0.35, hVar: 0.7 + rng() * 0.3 });
-  }
-
+  pts.lanes = { road: nRoad, alley: nAlley, rest: nRest, yard: nYard };
   return pts;
 }
 
@@ -187,7 +205,10 @@ export function setupGrass(parent, {
   sun = null, seed = 4343, count, season = 'summer',
 } = {}) {
   const W = bounds.W || 20, D = bounds.D || 18;
-  const N = count || Math.max(160, Math.min(700, Math.round(2 * (W + D) * 7)));
+  // 밀도 상향(#106): #90 기저 공식 대비 ~1.75× (길가·고샅 어깨로 재배치하며 무성함 강화). 상한 1200
+  //   (기저 캡 700 에서도 밀도 ≥1.5 유지). 단일 InstancedMesh 라 인스턴스만 늘 뿐 드로우콜 불변(+1).
+  const baseN = Math.max(160, Math.min(700, Math.round(2 * (W + D) * 7)));
+  const N = count || Math.min(1200, Math.round(baseN * 1.75));
 
   const geoRng = makeRng((seed ^ 0x9e3d) >>> 0);
   const { geo, trisPerTuft } = buildTuftGeometry(geoRng);
@@ -352,6 +373,7 @@ export function setupGrass(parent, {
 
   return {
     mesh, setFade, setSeason, setTime, update, dispose,
-    drawInfo: { instances: pts.length, triangles: pts.length * trisPerTuft },
+    // drawInfo.lanes: 배치 분포(#106 검증). ext(road+alley+rest) = 길가/외곽, yard = 마당 안.
+    drawInfo: { instances: pts.length, triangles: pts.length * trisPerTuft, baseN, lanes: pts.lanes || null },
   };
 }

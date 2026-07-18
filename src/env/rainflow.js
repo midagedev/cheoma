@@ -13,7 +13,7 @@ import { makeRng } from '../rng.js';
 //
 // 성능: 리벌릿 1병합 메시(1 드로우콜) + 웅덩이 1병합(1). rain·wet 레벨로 알파 게이트.
 
-const RIV_SKY = new THREE.Color(0x9db2c6);       // 젖은 지붕 시트 반사 톤(차가운 회청)
+const RIV_SKY = new THREE.Color(0x343c44);       // 젖은 지붕 반사 톤 (차분한 다크 흑청색으로 톤다운)
 const RIV_GLINT = new THREE.Color(0.55, 0.66, 0.78);
 const PUD_SKY = new THREE.Color(0x8fa6bd);
 const PUD_GLINT = new THREE.Color(0.62, 0.72, 0.86);
@@ -155,10 +155,11 @@ function makeRivuletMaterial(uTime, uRain) {
         float g1 = sin(dot(vWP.xz, vec2(2.1, -1.4)) + uTime * 2.2);
         float g2 = sin(dot(vWP.xz, vec2(-1.2, 2.5)) - uTime * 1.3);
         float sp = pow(clamp(g1 * g2, 0.0, 1.0), 8.0);
-        float a = (sheen * 0.5 + riv * 0.85) * uRain;
-        vec3 c = mix(uSky, vec3(0.96, 0.98, 1.0), clamp(riv, 0.0, 1.0)) + uGlint * sp * (0.4 + 0.6 * fres);
+        // 빗물 띠가 허옇게 튀거나 과하게 두꺼워 보이지 않도록 불투명도 및 믹싱 강도 진정
+        float a = (sheen * 0.35 + riv * 0.46) * uRain;
+        vec3 c = mix(uSky, uSky * 1.15, clamp(riv, 0.0, 1.0)) + uGlint * sp * (0.4 + 0.6 * fres);
         if (a < 0.015) discard;
-        gl_FragColor = vec4(c, clamp(a, 0.0, 0.8));
+        gl_FragColor = vec4(c, clamp(a, 0.0, 0.45));
       }`,
   });
 }

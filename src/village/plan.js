@@ -33,7 +33,9 @@ function rectParcel(center, frontDir, plotW, plotD) {
 //   0.5 이상이라 궁+민촌 클램프가 자연 소멸(회귀 안전).
 const CHAR01_ANCHORS = [[74, 0.18], [128, 0.34], [176, 0.48], [250, 0.60], [500, 0.66]];
 // 필지 목표수 앵커(연속) — SCALE_TARGET 이산값을 제어점으로. town(70)=단일청크 상한, capital(104)+는 다청크.
-const HOUSE_ANCHORS = [[74, 10], [128, 32], [176, 70], [250, 104], [500, 340]];
+//   값은 "프론티지(추가 필지)" 목표수 — 종가·관아 예약 코어는 별도 +1. [30,0] = 외딴집 하한(#114):
+//   R30 에서 프론티지 0 + 예약 종가 = 딱 한 채. 30~74 는 0~10 연속(두세 채 촌락도 성립).
+const HOUSE_ANCHORS = [[30, 0], [74, 10], [128, 32], [176, 70], [250, 104], [500, 340]];
 
 function pieceLerp(R, anchors) {
   if (R <= anchors[0][0]) return anchors[0][1];
@@ -111,7 +113,11 @@ export function planVillage(opts = {}) {
   const charOverride = typeof opts.char01 === 'number' && isFinite(opts.char01);
   const char01 = charOverride ? Math.min(1, Math.max(0, opts.char01)) : char01ForR(siteR, seed);
   const character = charLabel(char01);
-  const houseTarget = Math.round(pieceLerp(siteR, HOUSE_ANCHORS));   // 필지 목표수(연속) → tier 경계 카운트 스냅 제거
+  // 필지 목표수(연속) → tier 경계 카운트 스냅 제거. opts.houses(#114)는 직접 오버라이드 — 0 허용
+  //   ("절 하나만" 구성: houses:0 + includeTemple:true → 집 없는 산사 플랜, 엔진은 부감 랜딩 폴백).
+  const houseTarget = (typeof opts.houses === 'number' && isFinite(opts.houses))
+    ? Math.max(0, Math.min(400, Math.round(opts.houses)))
+    : Math.round(pieceLerp(siteR, HOUSE_ANCHORS));
 
   const norm = { scale, siteR, scale01: rToScale01(siteR), includePalace, includeTemple, seed, character, char01, charOverride, target: houseTarget, tuning };
   const rng = makeRng(seed);
@@ -126,29 +132,34 @@ export function planVillage(opts = {}) {
   const blockers = [];
   const features = { pavilion: null, bridges: [], props: [], temple: null, palace: null };
 
+  const rimFrontDir = G.norm({ x: -16, z: -45 }); // 석양 sunDir [-16, 8, -45] 의 수평 투영 방향
+
   if (isCapitalTier && includePalace) {
     // 궁역(#88): 행각 공유 다일곽 궁궐. 한양=경복궁급 4일곽(96×150), capital=3일곽 축소판(60×90).
     //   축선 깊이가 커져 궁역이 배산(-z)쪽으로 확장 — 중심을 북으로 당겨 진입부(+z)가 도성 안에 앉게 한다.
     const tier = scale === 'hanyang' ? 'hanyang' : 'capital';
     const pw = tier === 'hanyang' ? 96 : 60, pd = tier === 'hanyang' ? 150 : 90;
     const pc = { x: 0, z: C.z - pd * 0.16 };   // 깊어진 축선을 북으로 상재(진입부 여유)
-    const poly = rectParcel(pc, toEntrance, pw, pd);
-    features.palace = { x: pc.x, z: pc.z, frontDir: toEntrance, seed: (seed ^ 0x9a11) >>> 0, plotW: pw, plotD: pd, tier };
+    const poly = rectParcel(pc, rimFrontDir, pw, pd);
+    features.palace = { x: pc.x, z: pc.z, frontDir: rimFrontDir, seed: (seed ^ 0x9a11) >>> 0, plotW: pw, plotD: pd, tier };
     blockers.push({ poly });
+  } else if (houseTarget <= 0 && typeof opts.houses === 'number') {
+    // 집 없는 구성(#114): houses:0 명시 시 예약 코어(종가·관아)도 생략 — "절 하나만"(includeTemple)
+    //   또는 빈 산세 구성. 엔진은 hero 부재 시 부감 랜딩 폴백(기존 경로).
   } else if (isCapitalTier) {
     // 궁 없는 도성풍: 중심에 대형 관아(객사) 코어
-    const poly = rectParcel(C, toEntrance, 42, 34);
-    features.govCore = { x: C.x, z: C.z, frontDir: toEntrance };
-    blockers.push({ poly, hero: true, heroStyle: 'palace', center: C, frontDir: toEntrance, plotW: 42, plotD: 34, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
+    const poly = rectParcel(C, rimFrontDir, 42, 34);
+    features.govCore = { x: C.x, z: C.z, frontDir: rimFrontDir };
+    blockers.push({ poly, hero: true, heroStyle: 'palace', center: C, frontDir: rimFrontDir, plotW: 42, plotD: 34, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
   } else if (scale === 'town') {
     // 관아 코어(객사 남향) — 배산 아래 중앙
-    const poly = rectParcel(C, toEntrance, 40, 32);
-    blockers.push({ poly, hero: true, heroStyle: 'palace', center: C, frontDir: toEntrance, plotW: 40, plotD: 32, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
+    const poly = rectParcel(C, rimFrontDir, 40, 32);
+    blockers.push({ poly, hero: true, heroStyle: 'palace', center: C, frontDir: rimFrontDir, plotW: 40, plotD: 32, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
   } else {
-    // 씨족촌 종가 — 명당(중심), 남향(동구쪽)
+    // 씨족촌 종가 — 명당(중심), 남향(동구쪽) -> 림 라이트 최적 방향
     const plotW = scale === 'village' ? 28 : 26, plotD = scale === 'village' ? 26 : 24;
-    const poly = rectParcel(C, toEntrance, plotW, plotD);
-    blockers.push({ poly, hero: true, heroStyle: 'hanok', center: C, frontDir: toEntrance, plotW, plotD, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
+    const poly = rectParcel(C, rimFrontDir, plotW, plotD);
+    blockers.push({ poly, hero: true, heroStyle: 'hanok', center: C, frontDir: rimFrontDir, plotW, plotD, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
   }
 
   // ── 2.5) 성곽·사대문 (한양 전용) ── 도로 생성 전에 게이트를 확정해 간선을 성문과 정렬한다.

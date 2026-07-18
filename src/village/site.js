@@ -57,14 +57,19 @@ export const SCALE_ANCHORS = [
   // 한양 도성급(#47): capital 대비 선형 2배 = 면적 4배. 내사산이 도성을 감싸는 큰 분지.
   { name: 'hanyang', siteR: 500, ridgeH: 150, benchDrop: 8.0, undAmp: 1.02 },
 ];
-const R_MIN = SCALE_ANCHORS[0].siteR * 0.86;              // 앵커 하한 살짝 아래까지 허용(파탄 없이)
+// 외딴집 하한(#114): 슬라이더 매핑(scale01)·명명 tier 는 hamlet(74) 그대로 두고, 절대 siteR 로만
+//   그 아래(집 한 채·절 하나 스케일)까지 내려간다. tier 는 'hamlet' 유지 → populate 문법 무수정 감쇠.
+const SOLO_FIELD = { siteR: 30, ridgeH: 30, benchDrop: 1.6, undAmp: 0.42 };
+const R_MIN = SOLO_FIELD.siteR;                           // 외딴집(집 한 채) 분지 하한
 const R_MAX = SCALE_ANCHORS[SCALE_ANCHORS.length - 1].siteR * 1.04;
 const clampR = (R) => clampN(R, R_MIN, R_MAX);
 
 // 앵커 필드(ridgeH·benchDrop·undAmp)의 R-구간 선형보간. 밖은 끝 앵커로 클램프.
+//   hamlet 아래(#114)는 가상 solo 앵커로 보간 — 지형·능선이 집 한 채 스케일로 아늑하게 줄어든다.
 function anchorField(R, key) {
   const A = SCALE_ANCHORS;
-  if (R <= A[0].siteR) return A[0][key];
+  if (R <= SOLO_FIELD.siteR) return SOLO_FIELD[key];
+  if (R < A[0].siteR) return lerpN(SOLO_FIELD[key], A[0][key], (R - SOLO_FIELD.siteR) / (A[0].siteR - SOLO_FIELD.siteR));
   for (let i = 1; i < A.length; i++) {
     if (R <= A[i].siteR) return lerpN(A[i - 1][key], A[i][key], (R - A[i - 1].siteR) / (A[i].siteR - A[i - 1].siteR));
   }
@@ -100,6 +105,7 @@ export function siteConfigFor(R) {
 //   숫자 문자열(URL 파라미터·폼 입력, 예 '370')도 숫자로 해석한다.
 export function resolveSiteR(scale) {
   if (typeof scale === 'string') {
+    if (scale === 'solo') return SOLO_FIELD.siteR;   // 외딴집(#114) — 슬라이더 최소 앵커(집 한 채)
     const a = SCALE_ANCHORS.find((x) => x.name === scale);
     if (a) return a.siteR;
     const n = parseFloat(scale);

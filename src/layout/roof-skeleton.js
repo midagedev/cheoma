@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { tileSurfaceMaterial } from '../builder/palette.js';
+import { tileSurfaceMaterial, sugiwaMaterial } from '../builder/palette.js';
 import { computeSkeleton } from './skeleton.js';
 
 // 다각형 풋프린트 + straight skeleton → 곡면 기와지붕.
@@ -54,6 +54,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   const fprofile = (v) => Math.pow(v, 1 + profileCurve);      // 높이 분율(오목)
   const smooth = (t) => t * t * (3 - 2 * t);
 
+  let maxSlopeLen = 3.5;
   // 기와집 격상 어휘 누적기(옵션 켜졌을 때만 채워진다).
   const rollGeoms = [];                 // 수키와 볼록 롤(면별 튜브 → 병합)
   const rafterRound = [], rafterSquare = []; // 연목(원)·부연(각) InstancedMesh 대상
@@ -89,6 +90,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
       const eY = eaveY + eaveLifts[iu];
       const uY = yOf(u.h);
       slopeLen = Math.max(slopeLen, Math.hypot(dist(e, u), uY - eY));
+      maxSlopeLen = Math.max(maxSlopeLen, slopeLen);
       for (let iv = 0; iv <= NV; iv++) {
         const v = iv / NV;
         // 평면 위치: 처마→마루 선형, 단 앙곡/안허리곡은 낮은 v 에서만 살아있게 감쇠
@@ -109,6 +111,9 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     geo.setIndex(idx);
     geo.computeVertexNormals();
     const mat = tileSurfaceMaterial(M, Math.max(2, width), Math.max(1.5, slopeLen), tileBump);
+    // 이 지붕면 UV는 이미 기와 반복수를 구워 넣음(u=width/0.34, v=slopeLen/0.9) — 재질 repeat까지
+    // 곱하면 밀도 제곱으로 무늬가 서브픽셀로 뭉개져 민무늬로 보임(히어로 종가 기와 무늬 실종의 원인).
+    mat.map.repeat.set(1, 1);
     mat.side = THREE.DoubleSide;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = mesh.receiveShadow = true;
@@ -207,7 +212,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   if (rollGeoms.length) {
     const merged = mergeGeometries(rollGeoms, false);
     rollGeoms.forEach((geo) => geo.dispose());
-    const rollMat = M.tileConvex.clone();
+    // 단색 재질 대신 튜브 경사 길이에 비례해 기와 무늬가 흘러내리는 전용 텍스처 재질 적용
+    const rollMat = sugiwaMaterial(M, maxSlopeLen, 0.45);
     const rolls = new THREE.Mesh(merged, rollMat);
     rolls.castShadow = true; rolls.receiveShadow = false;
     rolls.name = 'sugiwa-rolls';

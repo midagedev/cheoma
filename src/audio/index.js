@@ -28,8 +28,36 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
   const ctx = listener.context;
   const input = listener.getInput();
 
+  // Web Audio API non-finite 파라미터 에러 방지용 가드
+  if (typeof window !== 'undefined' && window.AudioParam && !window.AudioParam.__safeguarded) {
+    window.AudioParam.__safeguarded = true;
+    const origLinear = AudioParam.prototype.linearRampToValueAtTime;
+    AudioParam.prototype.linearRampToValueAtTime = function(value, endTime) {
+      if (!isFinite(value) || !isFinite(endTime)) {
+        console.warn('AudioParam.linearRampToValueAtTime was bypassed due to non-finite arguments:', value, endTime);
+        return this;
+      }
+      return origLinear.call(this, value, endTime);
+    };
+    const origExp = AudioParam.prototype.exponentialRampToValueAtTime;
+    AudioParam.prototype.exponentialRampToValueAtTime = function(value, endTime) {
+      if (!isFinite(value) || !isFinite(endTime) || value <= 0) {
+        console.warn('AudioParam.exponentialRampToValueAtTime was bypassed due to non-finite or non-positive arguments:', value, endTime);
+        return this;
+      }
+      return origExp.call(this, value, endTime);
+    };
+    const origSetValue = AudioParam.prototype.setValueAtTime;
+    AudioParam.prototype.setValueAtTime = function(value, startTime) {
+      if (!isFinite(value) || !isFinite(startTime)) {
+        console.warn('AudioParam.setValueAtTime was bypassed due to non-finite arguments:', value, startTime);
+        return this;
+      }
+      return origSetValue.call(this, value, startTime);
+    };
+  }
+
   // 마스터 소프트 리미터. 풍경 4연타·환경음·BGM 동시 피크를 부드럽게 잡아 클리핑 방지.
-  // listener.gain(모든 소스가 모이는 지점) → compressor → destination 으로 재배선.
   const limiter = ctx.createDynamicsCompressor();
   limiter.threshold.value = -8;
   limiter.knee.value = 6;

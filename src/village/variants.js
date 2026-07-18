@@ -158,6 +158,18 @@ const pickWeighted = (list, rng) => {
   return list[0][0];
 };
 
+// ── 필지 등롱(대문·마당 걸이등롱, #83) ────────────────────────────────────────
+//   대문 걸이등롱은 반가(giwa)에 흔하고 민가(choga)엔 드물다(부유 상관). 마당 기둥걸이 등롱은
+//   대문 있는 부유한 반가에서 가끔. 배치 개수만 결정(위치는 layout/props.js lanternLayout).
+//   전용 rng(호출자 시퀀스 불침해) — 결정론·#89 앵커 회귀 방지.
+export function pickLanterns(kind, wealth, rng) {
+  const gateProb = kind === 'giwa' ? 0.4 + wealth * 0.45 : 0.05 + wealth * 0.22;
+  const gate = rng() < gateProb ? 1 : 0;
+  const yardProb = (gate && kind === 'giwa') ? 0.2 + wealth * 0.32 : (gate ? 0.04 : 0);
+  const yard = rng() < yardProb ? 1 : 0;
+  return { gate, yard };
+}
+
 // gardenLevel: 0 없음(텃밭·장독대) · 1 과실수 1~2 · 2 여염+화목 · 3 반가 화계·괴석·석지.
 export function gardenLevelFor(parcel, char01 = 0.5) {
   if (parcel.hero) return 3;
@@ -206,6 +218,7 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
     // 반가 종가: 뒤안 화계 + 사랑마당 괴석·석지 + 매화·감 과실수(gardenLevel 3).
     parcel.gardenLevel = 3;
     parcel.courtyardTree = { count: 2, species: ['plum', 'persimmon'] };
+    parcel.lantern = { gate: 2, yard: 1 };   // 종가·관아: 대문 한 쌍 + 마당 걸이등롱(#83)
     return parcel;
   }
   const rng = makeRng((parcel.seed ^ 0x5a17c0de) >>> 0);
@@ -240,6 +253,8 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   // 마당 과실수·정원 — 뒤에 뽑아 rng 시퀀스 안정.
   parcel.gardenLevel = gardenLevelFor(parcel, char01);
   parcel.courtyardTree = pickYardTrees(parcel, char01, rng);
+  // 필지 등롱(#83) — 전용 rng(위 rng 시퀀스·기존 필드·#89 앵커 불침해).
+  parcel.lantern = pickLanterns(kind, wealth, makeRng((parcel.seed ^ 0x1a27ee) >>> 0));
   return parcel;
 }
 

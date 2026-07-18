@@ -71,21 +71,21 @@ await page.waitForTimeout(3200); await shot('04-landing-done'); await maxGap('la
 
 // 모드 토글: 집(클로즈업) → 마을(부감) 왕복. ModeToggle 세그 클릭(실제 UX 경로).
 await page.evaluate(() => { window.__frameGaps = []; });
-await page.click('.mode .seg:has(.glyph:text-is("村"))');   // 마을(부감)
+await page.click('.mode .seg:has(.glyph:text-is("遠"))');   // 마을(부감 - 멀 遠)
 await page.waitForTimeout(1800); await shot('05-aerial'); await maxGap('to-aerial');
-await page.click('.mode .seg:has(.glyph:text-is("家"))');   // 집(종가 클로즈업)
+await page.click('.mode .seg:has(.glyph:text-is("近"))');   // 집(종가 클로즈업 - 가까울 近)
 await page.waitForTimeout(2600); await shot('06-closeup'); await maxGap('to-closeup');
 
-// 히어로 리플레이(액션바 再 도장)
+// 히어로 리플레이(패널 내 再 다시 보기 버튼)
 await page.evaluate(() => { window.__frameGaps = []; });
-await page.click('.actions .seal.replay');
+await page.click('.house-actions .hbtn.ghost');
 await page.waitForTimeout(1800); await shot('07-replay-mid');
 await page.waitForTimeout(3600); await shot('08-replay-done'); await maxGap('replay-total');
 
 // 연타 안정: 리플레이 3연타
-await page.click('.actions .seal.replay'); await page.waitForTimeout(120);
-await page.click('.actions .seal.replay'); await page.waitForTimeout(120);
-await page.click('.actions .seal.replay'); await page.waitForTimeout(2500);
+await page.click('.house-actions .hbtn.ghost'); await page.waitForTimeout(120);
+await page.click('.house-actions .hbtn.ghost'); await page.waitForTimeout(120);
+await page.click('.house-actions .hbtn.ghost'); await page.waitForTimeout(2500);
 await shot('09-replay-spam'); await maxGap('replay-spam');
 
 console.log(`\npageErrors=${pageErrs} consoleErrors=${consoleErrs}`);

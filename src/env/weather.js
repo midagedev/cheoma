@@ -5,6 +5,7 @@ import { captureRoofSurfaces } from './roofcapture.js';
 import { createSnowVolume } from './snowvol.js';
 import { createRainFlow } from './rainflow.js';
 import { makePresenceGate } from './present-gate.js';
+import { createPetalField } from './petals.js';
 
 // 날씨 시뮬레이터 (눈·비).
 //   setupWeather(scene, { layout, getBuilding, getGround })
@@ -48,6 +49,7 @@ const WET_GROUND = new THREE.Color(0x6b6154);  // 젖은 마당(암부 톤다운
 export function setupWeather(scene, { layout, getBuilding, getGround, env = null, lowPerf = false }) {
   let L = layout;
   let name = 'clear';
+  let roofColliders = []; // 지붕 충돌 박스 목록 (AABB Box3 배열)
 
   // 공유 적설 uniform — 모든 패치 재질이 같은 객체를 참조 → 한 번 갱신으로 전체 반영.
   const snowUniform = { value: 0 };
@@ -70,15 +72,35 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
 
   let t = 0; // 누적 시간(파티클 흔들림/재순환·바람 위상용)
 
+  // 하늘 입자 필드 중심(#98). 눈·비 낙하 박스는 원점 기준 ±boxHalf 로 좁게(밀도 유지) 두되, 이 중심을
+  //   매 프레임 카메라 타깃으로 옮겨(setWeatherCenter) "보는 곳에 눈/비가 온다"를 보장한다. 단일건물은
+  //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 파티클(snow.points·
+  //   rain.lines)만 이설 — 처마 낙수·스플래시는 건물 앵커(월드 베이크)+bldFx 게이트라 불변.
+  let fieldCX = 0, fieldCZ = 0;
+
+  // 계절 입자 필드(#111): 봄 벚꽃·가을 낙엽의 카메라 추종 볼륨. 눈·비와 동일하게 scene 루트에 붙여
+  //   env.group 은닉(마을 모드)을 우회하고, setWeatherCenter 로 카메라 타깃을 따라온다. season 은
+  //   weather 로 직접 흐르지 않으므로(engine 은 env.setSeason 만 호출) env.setSeason → window.__wx.setSeason
+  //   브릿지로 받는다. present(조기노출)·camDist(고도)는 아래 update/센터에서 판정해 넘긴다.
+  let season = 'summer';
+  let petalCamDist = NaN, petalCamY = null;
+  // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
+  //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
+  //   마을에선 앱 building.visible=false 라 bldFx 로는 못 켜므로 centerAway 를 OR 로 함께 본다.
+  const petalGate = makePresenceGate({ delay: 0.6, up: 1.2, down: 0.5 });
+  let petalPresent = 1;
+
   // ---------- 파티클 시스템 ----------
   const snow = makeSnow();
   const rain = makeRain();
   const drips = makeDrips();
   const splash = makeSplashes();
+  const petals = createPetalField({ getWind, lowPerf });
   scene.add(snow.points);
   scene.add(rain.lines);
   scene.add(drips.lines);
   scene.add(splash.points);
+  scene.add(petals.points);
 
   // ── 볼륨 시뮬(태스크 #52) ──────────────────────────────────────────────
   // 셰이더 틴트(#21) 위에 "실제 두께의 눈 쉘 + 빗물 흐름"을 얹는다. 두께/성장은 이미 존재하는
@@ -184,6 +206,10 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
           snowCov = cov;
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.96, 0.98), cov);
         }`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.96, snowCov);`)
+        .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        metalnessFactor = mix(metalnessFactor, 0.0, snowCov);`)
         // 그늘진 눈면 미드톤 리프트: 노멀 교정 대상(뒤집혀 어둡게 셰이딩되는 눈 덮인 지붕면 —
         // 동측 하합각 등)만 곱연산으로 살짝 밝혀 전면 눈과의 밝기 이질감(약 40%→15~20%)을 줄인다.
         // 기하 게이트(snowFix)라 색공간·라이팅 무관하게 그 면만 정확히 잡고, 밝은 전면·벽은 무변화,
@@ -198,6 +224,12 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
 
   function applyWetness() {
     for (const rec of patched.values()) {
+      // 적설 볼륨 재질(customProgramCacheKey 가 'snowvol_' 로 시작)은 젖음 감쇠(roughness 깎기)에서 제외합니다.
+      const hasCustom = typeof rec.mat.customProgramCacheKey === 'function';
+      const key = hasCustom ? rec.mat.customProgramCacheKey() : '';
+      if (key && key.startsWith('snowvol_')) {
+        continue;
+      }
       rec.mat.roughness = rec.roughness * (1.0 - WET_FACTOR * rainLevel);
     }
   }
@@ -328,6 +360,14 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     if (rainVis) { rain.update(dt, t, rainLevel); splash.update(dt, t, rainLevel, bldFx); }
     if (dripVis) drips.update(dt, t, rainLevel * bldFx);
 
+    // 계절 입자(봄 꽃잎·가을 낙엽): 조기노출 게이트(원점 빈 터 억제) + 카메라 추종 볼륨. 눈·비처럼
+    //   하늘/대기 소속이라 accumLevel·rainLevel 과 무관하게 season 이 spring/autumn 이면 발현한다.
+    //   present = 건물 존재(단일건물) OR 필드가 원점을 벗어남(마을·focus·히어로) — bldGate 와 별개
+    //   페이드(petalGate)로 원점 빈 터 조립 전엔 0, 씬 정착 후 오른다. 고도 게이트는 petals 내부(camDist).
+    const petalPresentRaw = present || Math.abs(fieldCX) > 8 || Math.abs(fieldCZ) > 8;
+    petalPresent = petalGate.update(dt, { present: petalPresentRaw, reset: bldReset && !petalPresentRaw });
+    petals.update(dt, { t, camDist: petalCamDist, camY: petalCamY, present: petalPresent, wind: getWind(t) });
+
     // 볼륨 시뮬: 눈 쉘은 accumLevel(쌓임 진행)로, 빗물은 rainLevel/wetLevel 로 구동.
     // 건물 종속분(지붕 눈 쉘·기단 두둑·기왓골 리벌릿)은 bldFx 로 게이트 → 조립 전 빈 터/골조엔 안 뜬다(#61).
     // 눈 쉘 두께는 accum*bldFx 로 전달해 "지붕이 정착하면 눈이 서서히 쌓이는" 인과로 자란다.
@@ -359,6 +399,10 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       // 이징된 강수 레벨(0..1) — 외부 소비자(post 렌즈 플레어 등)가 엔진 배선 없이 읽는 읽기 전용 신호.
       get rain() { return rainLevel; },
       get snow() { return snowLevel; },
+      // 계절 입자 필드(#111): env.setSeason 이 이 브릿지로 season 을 전달(engine 은 weather 에 season 미전달).
+      //   'spring'|'autumn' 만 꽃잎/낙엽 발현. 읽기 전용 petalLevel 로 검증/외부 소비.
+      setSeason: (name) => { season = name; petals.setSeason(name); },
+      get petalLevel() { return petals.level; },
     };
   }
 
@@ -372,6 +416,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       (sys.points || sys.lines).geometry.dispose();
       (sys.points || sys.lines).material.dispose();
     }
+    scene.remove(petals.points); petals.dispose();   // 계절 입자 필드(#111)
     if (VOL) { snowVol.dispose(); rainFlow.dispose(); }
     if (typeof window !== 'undefined' && window.__wx) delete window.__wx;
   }
@@ -457,9 +502,33 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       const fall = 0.85 + 0.15 * (1 - Math.min(1, w.speed)); // 강풍일수록 수직 낙하 완화(옆으로 감)
       const arr = posAttr.array;
       for (let i = 0; i < N; i++) {
-        let y = arr[i * 3 + 1] - spd[i] * fall * dt;
-        if (y < yb) y += H;
-        arr[i * 3 + 1] = y;
+        let px = arr[i * 3];
+        let py = arr[i * 3 + 1] - spd[i] * fall * dt;
+        let pz = arr[i * 3 + 2];
+
+        // 지붕 충돌 검사(월드 좌표 — 필드가 카메라 타깃으로 이설돼 있으면 fieldC 를 더해 월드로 환산).
+        let hit = false;
+        if (!lowPerf) {
+          const wx2 = px + fieldCX, wz2 = pz + fieldCZ;
+          for (let j = 0; j < roofColliders.length; j++) {
+            const b = roofColliders[j];
+            if (wx2 >= b.min.x && wx2 <= b.max.x &&
+                wz2 >= b.min.z && wz2 <= b.max.z &&
+                py >= b.min.y && py <= b.max.y) {
+              hit = true;
+              break;
+            }
+          }
+        }
+
+        if (hit) {
+          py = yTop() - Math.random() * 4.0;
+          bx[i] = (Math.random() * 2 - 1) * half;
+          bz[i] = (Math.random() * 2 - 1) * half;
+        } else if (py < yb) {
+          py += H;
+        }
+        arr[i * 3 + 1] = py;
         // 기저 위치를 바람 방향으로 실어 나른다(박스 안에서 랩). 순환 유지하며 "부는 눈".
         bx[i] += wx * WIND_CARRY * dt;
         bz[i] += wz * WIND_CARRY * dt;
@@ -518,7 +587,29 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       for (let i = 0; i < N; i++) {
         y[i] -= spd[i] * dt;
         x[i] += driftX * dt; z[i] += driftZ * dt;
-        if (y[i] < yb) y[i] += H;
+
+        // 지붕 충돌 검사(월드 좌표 — 필드 이설분 fieldC 를 더해 환산).
+        let hit = false;
+        if (!lowPerf) {
+          const wx2 = x[i] + fieldCX, wz2 = z[i] + fieldCZ;
+          for (let j = 0; j < roofColliders.length; j++) {
+            const b = roofColliders[j];
+            if (wx2 >= b.min.x && wx2 <= b.max.x &&
+                wz2 >= b.min.z && wz2 <= b.max.z &&
+                y[i] >= b.min.y && y[i] <= b.max.y) {
+              hit = true;
+              break;
+            }
+          }
+        }
+
+        if (hit) {
+          y[i] = yTop() - Math.random() * 4.0;
+          x[i] = (Math.random() * 2 - 1) * half2;
+          z[i] = (Math.random() * 2 - 1) * half2;
+        } else if (y[i] < yb) {
+          y[i] += H;
+        }
         if (x[i] > half2) x[i] -= 2 * half2; else if (x[i] < -half2) x[i] += 2 * half2;
         if (z[i] > half2) z[i] -= 2 * half2; else if (z[i] < -half2) z[i] += 2 * half2;
         writeDrop(i);
@@ -757,5 +848,44 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     return { points, update, rebuild: build };
   }
 
-  return { setWeather, update, applyAtmosphere, applyAtmosphereScaled, onBuildingChanged, setAccum, dispose, get weather() { return name; } };
+  return {
+    setWeather,
+    update,
+    applyAtmosphere,
+    applyAtmosphereScaled,
+    onBuildingChanged,
+    setAccum,
+    setRoofColliders(boxes) {
+      roofColliders = boxes || [];
+    },
+    // 하늘 입자 낙하 필드 중심 이설(#98). 마을 부감·종가 클로즈업처럼 시선이 원점을 벗어난 뷰에서
+    //   눈·비가 화면 밖(원점)에만 쌓여 안 보이던 문제를 해소한다. 낙하 파티클 오브젝트만 이동(처마
+    //   낙수·스플래시는 건물 앵커라 불변). 값 변화가 없으면 no-op.
+    setWeatherCenter(x, z, camDist, camY) {
+      if (Number.isFinite(x) && Number.isFinite(z) && (x !== fieldCX || z !== fieldCZ)) {
+        fieldCX = x; fieldCZ = z;
+        snow.points.position.set(x, 0, z);
+        rain.lines.position.set(x, 0, z);
+        petals.points.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
+      }
+      // 고도(카메라↔타깃 거리) 비례 눈송이 크기(#98 원경 정책) — 부감에서 카메라가 멀어 점이 벼룩처럼
+      //   작아지는 걸 상쇄(uScale 은 gl_PointSize 를 -mv.z 로 나눔). 근경 1× → 부감 최대 5×. 낙하 입자
+      //   볼륨은 전 고도 유지(하늘 소속) — 매트릭스: 부감에서도 snow/rain count>0.
+      if (Number.isFinite(camDist)) {
+        snow.points.material.uniforms.uScale.value = 340 * Math.min(5, Math.max(1, camDist / 42));
+      }
+      // 계절 입자 고도 게이트 신호(#111): camDist 는 항상, camY(선택 4번째 인자)는 넘어오면 정밀 게이트.
+      //   눈·비와 달리 꽃잎·낙엽은 부감(고도 높음)에서 소거된다(petals 내부 altGate). engine 이 camY 를
+      //   아직 안 넘기면 camDist 프록시 사용(setWeatherCenter 4-arg 는 하위호환).
+      petalCamDist = camDist;
+      petalCamY = Number.isFinite(camY) ? camY : null;
+    },
+    // 계절 입자 필드 season 설정(#111). engine 은 weather 에 season 을 직접 안 넘기므로(env.setSeason 만
+    //   호출) env.setSeason → window.__wx.setSeason 브릿지로 도달한다. 'spring'|'autumn' 만 발현, 그 외 OFF.
+    setSeason(name) { season = name; petals.setSeason(name); },
+    // 검증 전용(tools/verify-petals.mjs): 계절 입자 필드 핸들 노출.
+    _petals: petals,
+    dispose,
+    get weather() { return name; }
+  };
 }

@@ -235,9 +235,26 @@ export function computeLayout(P) {
   // 맞배는 용마루가 전 폭 + 박공 내밀기까지 뻗는다(합각 안쏠림 없음).
   // 팔작은 합각이 끝에서 hipInset 만큼 들어온 곳에서 용마루가 끝난다.
   const matbae = P.roofType === 'matbae';
-  const ridgeHalf = matbae
-    ? W / 2 + (P.gableOverhang || 0)
-    : Math.max(W * 0.12, W / 2 - P.hipInsetBays * P.endBayW);
+  let ridgeHalf;
+  if (matbae) {
+    ridgeHalf = W / 2 + (P.gableOverhang || 0);
+  } else {
+    // 팔작 용마루 반길이. 기본식은 정면폭에서 합각 후퇴(hipInset)를 뺀 값이지만, 이 식은
+    // 측면깊이(D)를 반영하지 않아 정면폭≈측면깊이인 소전각에선 용마루가 합각 밑변 깊이보다
+    // 짧아진다 → 용마루 소실·내림마루 X자 교차 파탄(#97). 고증상 팔작 용마루는 측면 합각보다
+    // 길다. 그래서 합각 반깊이 zGable(roof.js 와 동일한 낙차곡선으로 역산)을 구해, 용마루가
+    // 합각폭(2·zGable)의 RIDGE_MIN_GABLE_K 배 이상이 되도록 하한을 건다. 넓은 전각(정전 등)은
+    // 기본식이 이 하한보다 크므로 불변.
+    const dropN = (v) =>
+      (s1 * v + ((s0 - s1) * (1 - Math.pow(1 - v, q + 1))) / (q + 1)) / totalDrop;
+    let vStar = 0.3, lo = 0.01, hi = 0.95;
+    for (let i = 0; i < 40; i++) { vStar = (lo + hi) / 2; if (dropN(vStar) < P.hipBreak) lo = vStar; else hi = vStar; }
+    const zGable = zEave * vStar;
+    const base = W / 2 - P.hipInsetBays * P.endBayW;
+    const ridgeMin = Math.max(W * 0.12, RIDGE_MIN_GABLE_K * zGable);
+    // 안전 상한: 합각이 벽선 밖으로 밀려 측면 회첨이 뒤집히지 않도록 정면폭의 0.46 이내.
+    ridgeHalf = Math.min(Math.max(base, ridgeMin), W * 0.46);
+  }
 
   return {
     xPos: fx.positions, zPos: fz.positions,

@@ -8,6 +8,7 @@ import { createSnowVolume } from './snowvol.js';
 import { createRainFlow } from './rainflow.js';
 import { getWind } from './wind.js';
 import { setupGrass } from './grass.js';
+import { attachOverlayLanterns, getLanternMaterials } from '../layout/props.js';
 
 // 필지 스타일별 대문 개구부 폭(buildParcel STYLE_MAP 대응) — 풀이 대문 앞을 막지 않게 비운다.
 const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
@@ -289,5 +290,291 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
     // 검증 전용: 현재 활성 링 강도(0..1)·페이드아웃 대기 수.
     get strength() { return active ? active.strength : 0; },
     get retiringCount() { return retiring.length; },
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 카메라 앵커 앰비언스 필드(#105)
+// ══════════════════════════════════════════════════════════════════════════════
+// 선택 종속(focus 링 1개)이던 앰비언스를 카메라 지면점 기준 3계층 LOD 필드로 확장한다. 어댑터가
+// updateLod(camera) 경로에서 구동하며, 비선택(인스턴스) 이웃 필지에 계층별 앰비언스를 점등한다.
+//   (선택 필지 자체는 engine focusRing 이 풀 오버레이 링으로 담당 — 필드는 excluded 로 제외해 중복 방지.)
+//
+//   const field = createAmbientField(scene, { heightAt, sun, renderer, lowPerf });
+//   field.setParcels(descriptors);         // 어댑터가 필지 서술자 배열 주입(월드좌표·치수·굴뚝·seed)
+//   field.setExcluded(fn);                 // (id)=>bool — 오버레이(선택) 필지 제외
+//   field.setTime(name, immediate); field.setSeason(name);
+//   field.update(dt, camera);              // 매 프레임(어댑터 update 에서 same-frame dt·camera). 없으면 no-op.
+//   field.dispose();
+//   window.__ambLookahead(x, z)            // 시네마틱 프리워밍 훅 — 드론 경로 앞 지점 선행 점등(TTL)
+//
+// 3계층:
+//   근접(NEAR): 먼지 모트 + 등롱 sway + 공유 굴뚝 연기. 캡 NEAR_CAP.
+//               (풀·소동물·지붕 날씨 오버레이는 오버레이 지오가 필요 → 선택 필지 engine 링 전용.
+//                필드 이웃은 지오가 없어 생략 — 드로우콜 예산 준수. 풀은 #106 그대로 engine 링 +1.)
+//   중간(MID) : 등롱 sway(프레임 제거 bulb+light) + 공유 굴뚝 연기. 캡 MID_CAP, 거리랭크 LRU 교체.
+//   원경      : 어댑터 기존 일괄(vnight·정적 등롱 발광) — 필드 무개입.
+//
+// 원칙:
+//  - 히스테리시스: 진입 반경 < 이탈 반경(1인칭 워커가 경계에서 왕복해도 명멸 없게).
+//  - 속도 게이트: 카메라 이동 속도(위치 히스토리 추정)가 높으면 신규 점등 억제, 감속 시 재개.
+//  - 프레임 분산: 한 프레임에 신규 셀 1개까지(히치 방지).
+//  - 크로스페이드: 셀 present-gate(팟 금지). 공유 연기는 앵커 집합 변경에도 게이트 미리셋(smoke gateOnChange=false).
+//  - 공유 연기: 굴뚝 앵커를 합성 name='chimney' 미니 메시(비렌더)로 등록 → setupSmoke 재사용(smoke.js 무개입).
+//  - 드로우콜 절약: 등롱은 프레임(갓·끈·기둥) 제거 후 bulb+light 만(공유 재질). 셀 dispose 시 공유 재질 미해제.
+
+const NEAR_ENTER = 26, NEAR_EXIT = 34;     // 근접 진입/이탈 반경(m) — 히스테리시스 8m
+const MID_ENTER = 62, MID_EXIT = 74;       // 중간 진입/이탈 반경(m) — 히스테리시스 12m
+const NEAR_CAP = 2, MID_CAP = 6;           // 계층별 동시 셀 상한
+const SPEED_GATE = 18, SPEED_RESUME = 11;  // 신규 점등 억제 속도(m/s) — 히스테리시스
+const SMOKE_ANCHORS = 4, SMOKE_PARTICLES = 6;   // 공유 연기 캡(≤24 스프라이트 = 드로우콜 상한)
+const LOOKAHEAD_TTL = 3.0;                  // 프리워밍 지점 유효시간(초) — 갱신 없으면 소멸
+
+const nowSec = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+
+export function createAmbientField(scene, { heightAt = () => 0, sun = null, renderer = null, lowPerf = false } = {}) {
+  const _sun = sun || findSun(scene);
+  const shared = getLanternMaterials();
+  const sharedMats = new Set([shared.glow, shared.frame]);   // 셀 dispose 시 미해제(공유 재질 보호)
+
+  let parcels = [];
+  const descById = new Map();
+  let excluded = () => false;
+  let curTime = 'day', curSeason = 'summer';
+  let enabled = true;
+
+  // 공유 굴뚝 연기 — 다중 앵커(합성 chimney 메시)를 하나의 스프라이트 풀로. 앵커 집합 변경에도 미명멸.
+  const anchorGroup = new THREE.Group(); anchorGroup.name = 'ambFieldChimneys';
+  scene.add(anchorGroup);
+  const chimneyGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+  const chimneyMat = new THREE.MeshBasicMaterial({ visible: false });   // 비렌더(드로우콜 0), bbox 만 제공
+  const smoke = setupSmoke({ scene, getBuilding: () => anchorGroup, particles: SMOKE_PARTICLES, maxAnchors: SMOKE_ANCHORS, gateOnChange: false });
+  scene.add(smoke.group);
+  smoke.setTime(curTime, { immediate: true });
+  smoke.setEnabled(true);
+  let smokeKey = '';
+  let smokeFade = 0;
+
+  const cells = new Map();   // id -> cell(active)
+  const retiring = [];
+  let frameNo = 0;
+
+  // 카메라 히스토리(속도) + 앵커(지면점) + 룩어헤드(프리워밍).
+  const _camPrev = new THREE.Vector3(); let _camHas = false; let speed = 0; let speedHot = false;
+  const _dir = new THREE.Vector3();
+  let anchorX = 0, anchorZ = 0;
+  let lookahead = null;      // { x, z, t }
+  const lookaheadFn = (x, z) => { if (Number.isFinite(x) && Number.isFinite(z)) lookahead = { x, z, t: nowSec() }; };
+  if (typeof window !== 'undefined') window.__ambLookahead = lookaheadFn;
+
+  // ── 셀 공용 helpers ──
+  function stripLanternFrames(scope) {
+    for (let i = scope.children.length - 1; i >= 0; i--) {
+      const c = scope.children[i];
+      if (c.name === 'lantern-frame') { c.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); scope.remove(c); }  // 지오만(재질 공유)
+    }
+  }
+  function attachSway(container, desc) {
+    const scope = new THREE.Group();
+    scope.position.set(desc.cx, desc.baseY, desc.cz); scope.rotation.y = desc.rotY;
+    container.add(scope);
+    attachOverlayLanterns(scope, { style: desc.style, W: desc.W, D: desc.D, seed: desc.seed });
+    stripLanternFrames(scope);
+    const bulbs = [], lights = [];
+    for (const c of scope.children) {
+      if (c.name === 'lantern-bulb') bulbs.push({ mesh: c, base: c.scale.clone() });
+      else if (c.isPointLight) lights.push({ light: c, base: c.intensity });
+    }
+    const sway = setupLanternSway({ scene, scope }); sway.setEnabled(true);
+    return { sway, bulbs, lights };
+  }
+  function applyLanternFade(bulbs, lights, s) {
+    for (const b of bulbs) b.mesh.scale.set(b.base.x * s, b.base.y * s, b.base.z * s);
+    for (const l of lights) l.light.intensity = l.base * s;
+  }
+  // 셀 dispose: 지오·전용 재질만 해제(공유 등롱 재질 보호). motes ShaderMaterial·bulb SphereGeometry 등.
+  function disposeCell(container) {
+    const geos = new Set(), mats = new Set(), texs = new Set();
+    container.traverse((o) => {
+      if (o.geometry && !o.isSprite) geos.add(o.geometry);
+      const m = o.material;
+      if (m) (Array.isArray(m) ? m : [m]).forEach((mm) => { if (mm && !sharedMats.has(mm)) mats.add(mm); });
+    });
+    for (const m of mats) for (const k in m) { const v = m[k]; if (v && v.isTexture) texs.add(v); }
+    for (const t of texs) t.dispose();
+    for (const m of mats) m.dispose();
+    for (const g of geos) g.dispose();
+  }
+
+  function makeCell(tier, container, desc, subs) {
+    const gate = makePresenceGate({ delay: 0.12, up: 0.7, down: 0.6 });
+    let firstFrame = true, phase = 'in', strength = 0;
+    return {
+      tier, container, desc, _dist: 0, touch: frameNo,
+      setTime(name, imm) { if (subs.motes) subs.motes.setTime(name, { immediate: !!imm }); },
+      update(dt) {
+        const present = phase === 'out' ? false : firstFrame ? false : true;   // 첫 프레임 prime→0(팟 방지)
+        firstFrame = false;
+        strength = gate.update(dt, { present });
+        if (subs.motes) { subs.motes.setFade(strength); subs.motes.update(dt); }
+        if (subs.sway) subs.sway.update(dt);
+        applyLanternFade(subs.bulbs, subs.lights, strength);
+      },
+      beginOut() { phase = 'out'; },
+      dead() { return phase === 'out' && strength < 0.02; },
+      dispose() {
+        if (subs.sway) subs.sway.setEnabled(false);
+        if (subs.motes) subs.motes.setEnabled(false);
+        scene.remove(container);
+        disposeCell(container);
+      },
+      get strength() { return strength; },
+    };
+  }
+  function buildNearCell(desc) {
+    const container = new THREE.Group(); container.name = 'ambNear'; scene.add(container);
+    const moteR = Math.max(5.5, Math.max(desc.W, desc.D) * 0.5);
+    const motes = setupMotes({ scene, sun: _sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 70 });
+    motes.group.position.set(desc.cx, desc.baseY, desc.cz);
+    container.add(motes.group); motes.setEnabled(true); motes.setTime(curTime, { immediate: true });
+    const sway = attachSway(container, desc);
+    return makeCell('near', container, desc, { motes, ...sway });
+  }
+  function buildMidCell(desc) {
+    const container = new THREE.Group(); container.name = 'ambMid'; scene.add(container);
+    const sway = attachSway(container, desc);
+    return makeCell('mid', container, desc, { ...sway });
+  }
+
+  // ── 티어 판정(히스테리시스) ──
+  function tierFor(cur, dist) {
+    if (cur === 'near') return dist <= NEAR_EXIT ? 'near' : dist <= MID_EXIT ? 'mid' : null;
+    if (cur === 'mid') return dist <= NEAR_ENTER ? 'near' : dist <= MID_EXIT ? 'mid' : null;
+    return dist <= NEAR_ENTER ? 'near' : dist <= MID_ENTER ? 'mid' : null;
+  }
+
+  function computeAnchor(camera) {
+    camera.getWorldDirection(_dir);
+    if (_dir.y < -1e-3) {
+      const t = -camera.position.y / _dir.y;   // y=0 평면(지면) 교점 = 카메라가 보는 지면점
+      if (t > 0 && t < 1400) { anchorX = camera.position.x + _dir.x * t; anchorZ = camera.position.z + _dir.z * t; return; }
+    }
+    anchorX = camera.position.x; anchorZ = camera.position.z;   // 위/수평 시선 폴백
+  }
+  function updateSpeed(camera, dt) {
+    if (_camHas && dt > 1e-4) {
+      const inst = camera.position.distanceTo(_camPrev) / dt;
+      speed += (inst - speed) * Math.min(1, dt * 6);   // 평활(순간 지터 억제)
+    }
+    _camPrev.copy(camera.position); _camHas = true;
+    if (speed > SPEED_GATE) speedHot = true; else if (speed < SPEED_RESUME) speedHot = false;
+  }
+
+  function syncSmokeAnchors() {
+    const list = [];
+    for (const [id, cell] of cells) { const d = descById.get(id); if (d && d.chimney) list.push({ id, ch: d.chimney, dist: cell._dist }); }
+    list.sort((a, b) => a.dist - b.dist);
+    const chosen = list.slice(0, SMOKE_ANCHORS);
+    const key = chosen.map((c) => c.id).sort().join(',');
+    if (key !== smokeKey) {
+      smokeKey = key;
+      for (let i = anchorGroup.children.length - 1; i >= 0; i--) anchorGroup.remove(anchorGroup.children[i]);
+      for (const c of chosen) { const m = new THREE.Mesh(chimneyGeo, chimneyMat); m.name = 'chimney'; m.position.set(c.ch.x, c.ch.y, c.ch.z); anchorGroup.add(m); }
+      smoke.onBuildingChanged();
+    }
+  }
+
+  function update(dt, camera) {
+    if (!enabled || !camera) { smoke.update(dt); return; }
+    frameNo++;
+    computeAnchor(camera);
+    updateSpeed(camera, dt);
+    if (lookahead && (nowSec() - lookahead.t) > LOOKAHEAD_TTL) lookahead = null;
+
+    // 희망 티어 산출(유효거리 = min(앵커, 룩어헤드)).
+    const desired = new Map();
+    if (parcels.length) {
+      for (const d of parcels) {
+        if (excluded(d.id)) continue;
+        let dist = Math.hypot(d.cx - anchorX, d.cz - anchorZ);
+        if (lookahead) dist = Math.min(dist, Math.hypot(d.cx - lookahead.x, d.cz - lookahead.z));
+        const cur = cells.get(d.id);
+        const tier = tierFor(cur ? cur.tier : null, dist);
+        if (tier) desired.set(d.id, { tier, dist });
+      }
+      // 캡(거리 랭크). near 초과분은 mid 강등(범위 내) 아니면 드롭. mid 초과분(원거리)은 드롭 = LRU.
+      const near = [...desired].filter(([, v]) => v.tier === 'near').sort((a, b) => a[1].dist - b[1].dist);
+      for (let i = NEAR_CAP; i < near.length; i++) { const [id, v] = near[i]; if (v.dist <= MID_EXIT) v.tier = 'mid'; else desired.delete(id); }
+      const mid = [...desired].filter(([, v]) => v.tier === 'mid').sort((a, b) => a[1].dist - b[1].dist);
+      for (let i = MID_CAP; i < mid.length; i++) desired.delete(mid[i][0]);
+    }
+
+    // 리컨사일: 드롭/티어변경 → 리타이어, 유지 → 거리·touch 갱신.
+    for (const [id, cell] of [...cells]) {
+      const d = desired.get(id);
+      if (!d || d.tier !== cell.tier) { cell.beginOut(); retiring.push(cell); cells.delete(id); }
+      else { cell._dist = d.dist; cell.touch = frameNo; }
+    }
+    // 프레임 분산 스핀업(속도 게이트 시 신규 억제). 희망인데 미생성인 가장 가까운 1개만.
+    if (!speedHot) {
+      let bestId = null, bestDist = Infinity, bestTier = null;
+      for (const [id, v] of desired) { if (cells.has(id)) continue; if (v.dist < bestDist) { bestDist = v.dist; bestId = id; bestTier = v.tier; } }
+      if (bestId != null) {
+        const desc = descById.get(bestId);
+        const cell = bestTier === 'near' ? buildNearCell(desc) : buildMidCell(desc);
+        cell._dist = bestDist; cell.setTime(curTime, true);
+        cells.set(bestId, cell);
+      }
+    }
+
+    for (const c of cells.values()) c.update(dt);
+    for (let i = retiring.length - 1; i >= 0; i--) { const r = retiring[i]; r.update(dt); if (r.dead()) { r.dispose(); retiring.splice(i, 1); } }
+
+    syncSmokeAnchors();
+    const sTarget = anchorGroup.children.length > 0 ? 1 : 0;
+    smokeFade += (sTarget - smokeFade) * Math.min(1, dt * 1.4);
+    smoke.setFade(smokeFade);
+    smoke.update(dt);
+  }
+
+  function setParcels(list) {
+    parcels = Array.isArray(list) ? list : [];
+    descById.clear();
+    for (const d of parcels) descById.set(d.id, d);
+  }
+  function setExcluded(fn) { excluded = typeof fn === 'function' ? fn : () => false; }
+  function setTime(name, immediate) {
+    if (!name) return; curTime = name;
+    smoke.setTime(name, { immediate: !!immediate });
+    for (const c of cells.values()) c.setTime(name, immediate);
+    for (const r of retiring) r.setTime(name, immediate);
+  }
+  function setSeason(name) { if (name) curSeason = name; }   // 필드엔 풀 없음(모트·연기·등롱 계절 무관)
+  function setEnabled(v) { enabled = !!v; }
+
+  function dispose() {
+    if (typeof window !== 'undefined' && window.__ambLookahead === lookaheadFn) delete window.__ambLookahead;
+    for (const c of cells.values()) c.dispose(); cells.clear();
+    for (const r of retiring) r.dispose(); retiring.length = 0;
+    smoke.setEnabled(false); scene.remove(smoke.group); disposeSubtree(smoke.group);
+    scene.remove(anchorGroup);
+    chimneyGeo.dispose(); chimneyMat.dispose();
+  }
+
+  return {
+    setParcels, setExcluded, setTime, setSeason, setEnabled, update, dispose,
+    // 검증 전용: 연기 서브시스템 가시성 토글(드로우콜 표에서 구조/연기 분해 실측용).
+    _setSmokeVisible(v) { smoke.group.visible = !!v; },
+    // 검증 전용.
+    _debug() {
+      const near = [], mid = [];
+      for (const [id, c] of cells) (c.tier === 'near' ? near : mid).push(id);
+      return {
+        nearIds: near, midIds: mid, near: near.length, mid: mid.length,
+        retiring: retiring.length, speed: +speed.toFixed(2), speedHot,
+        smokeAnchors: anchorGroup.children.length, lookahead: !!lookahead,
+        anchorX: +anchorX.toFixed(1), anchorZ: +anchorZ.toFixed(1),
+      };
+    },
   };
 }

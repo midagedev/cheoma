@@ -24,6 +24,13 @@ const CHOGA_SECTIONS = [
     { key: 'wallType', ctrl: 'segment', route: 'top',
       options: ['stone', 'mud', 'brush', 'hedge', 'open'] },
   ] },
+  // 창호·개구(#96 ②): 문/창 개수·창살. 코어 buildBuilding 지원(builder/walls.js winBack·winSide + applyDoorPattern).
+  //   초가 정면은 어칸 문 1 + 나머지 칸 살창(frontBays 파생) — 정면 창수는 '평면' frontBays 로 조절.
+  { id: 'openings', titleKey: 'sec_openings', fields: [
+    { key: 'winBack', ctrl: 'stepper', min: 0, max: 2, route: 'building' },   // 후면 살창 개수
+    { key: 'winSide', ctrl: 'toggle', route: 'building' },                    // 측면 봉창 유무
+    { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] }, // 창살 패턴
+  ] },
   { id: 'plan', titleKey: 'sec_plan', adv: true, fields: [
     { key: 'frontBays', ctrl: 'stepper', min: 3, max: 5, route: 'building' },
     { key: 'sideBays', ctrl: 'stepper', min: 2, max: 3, route: 'building' },
@@ -36,8 +43,16 @@ const CHOGA_SECTIONS = [
     { key: 'ridgeH', ctrl: 'range', min: 0.24, max: 0.4, step: 0.01, route: 'building' },
     { key: 'footprintScale', ctrl: 'range', min: 0.7, max: 1.4, step: 0.02, route: 'top' },
   ] },
+  // 마당 소품(#96): 장독대·텃밭·낟가리·빨래줄 넣을지/규모. 코어 parcel.jangdok/vegBed/yardStack/clothesline
+  //   (variants.assignVariation) → walls.buildVillageWall(makeYardProps). route 'top' 로 rebuildParcel
+  //   newParams 최상위에 실려 필지 원본값을 오버라이드한다(미조정 축은 원본 유지 — undefined 스킵).
+  { id: 'props', titleKey: 'sec_props', fields: [
+    { key: 'jangdok', ctrl: 'stepper', min: 0, max: 3, route: 'top' },
+    { key: 'vegBed', ctrl: 'toggle', route: 'top' },
+    { key: 'yardStack', ctrl: 'toggle', route: 'top' },
+    { key: 'clothesline', ctrl: 'toggle', route: 'top' },
+  ] },
   { id: 'yard', titleKey: 'sec_yard', adv: true, fields: [
-    { key: 'winBack', ctrl: 'stepper', min: 0, max: 2, route: 'building' },
     { key: 'roofTone', ctrl: 'stepper', min: 0, max: 4, route: 'top' },
     { key: 'aux', ctrl: 'toggle', route: 'top' },
   ] },
@@ -65,6 +80,11 @@ const GIWA_SECTIONS = [
     { key: 'podiumTierH', ctrl: 'range', min: 0.3, max: 0.9, step: 0.02, route: 'building' },
     { key: 'ridgeH', ctrl: 'range', min: 0.3, max: 0.6, step: 0.01, route: 'building' },
     { key: 'footprintScale', ctrl: 'range', min: 0.7, max: 1.4, step: 0.02, route: 'top' },
+  ] },
+  // 마당 소품(#96): 반가(기와)는 장독대·빨래줄만(텃밭·낟가리는 민가 어휘라 제외, 정원은 마을병합 flora).
+  { id: 'props', titleKey: 'sec_props', fields: [
+    { key: 'jangdok', ctrl: 'stepper', min: 0, max: 3, route: 'top' },
+    { key: 'clothesline', ctrl: 'toggle', route: 'top' },
   ] },
   { id: 'yard', titleKey: 'sec_yard', adv: true, fields: [
     { key: 'cornerLift', ctrl: 'range', min: 0, max: 0.9, step: 0.02, route: 'building' },
@@ -136,6 +156,46 @@ const PALACE_COMPOUND_SECTIONS = [
     { key: 'interBrackets', ctrl: 'stepper', min: 0, max: 3, route: 'preset' },
   ] },
 ];
+
+// ── 마을 패널 파라미터(#91) ── 부감 컨텍스트 패널의 "마을 상세" 축. 코어(plan.normTuning + site.makeSite +
+//   populate + variants)가 이미 소비하는 옵션을 지형/구성/어휘 그룹으로 표면화한다. 값은 App villageOpts 로
+//   모여 engine.village.setOpts → 재생성(시드 유지). 무옵션(전부 기본 K=1·stream=true·auto·char01=auto)은
+//   현행 정확 재현이 코어 계약 — 그래서 각 field.def 는 코어 기본과 동치(범위·클램프도 plan.js 실측 일치).
+//   ctrl:
+//     'range'  — 배율/비율 슬라이더. def=기본(코어 no-op 값), 커밋 시 그 숫자 그대로 setOpts.
+//     'toggle' — 불. plain(stream: def true) | tri(cityWall·sijeon: 'auto'|true|false, 패널이 강제 ON/OFF).
+//   tierGate: 그 tier 미만에서 비활성(sijeon 은 대로 파사드가 있는 capital+ 에서만 실효 — plan.js 주석 참조).
+const VILLAGE_SECTIONS = [
+  { id: 'terrain', titleKey: 'vsec_terrain', fields: [
+    { key: 'undAmpK', ctrl: 'range', min: 0, max: 2.2, step: 0.05, def: 1 },        // 기복(언듈레이션) 진폭
+    { key: 'ridgeHK', ctrl: 'range', min: 0.5, max: 1.6, step: 0.02, def: 1 },      // 배산 능선·봉우리 높이
+    { key: 'streamMeanderK', ctrl: 'range', min: 0, max: 2.5, step: 0.05, def: 1 }, // 개울 사행(굽이)
+    { key: 'stream', ctrl: 'toggle', def: true },                                    // 개울 유무(off=마른 마을)
+  ] },
+  { id: 'composition', titleKey: 'vsec_composition', fields: [
+    { key: 'paddyDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },    // 논 비율
+    { key: 'treeDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },     // 나무 밀도
+    { key: 'cityWall', ctrl: 'toggle', tri: true, def: 'auto' },                     // 성곽(auto=hanyang)
+    { key: 'sijeon', ctrl: 'toggle', tri: true, def: 'auto', tierGate: 'capital' },  // 시전(대로 필요→capital+)
+  ] },
+  { id: 'vocab', titleKey: 'vsec_vocab', fields: [
+    { key: 'char01', ctrl: 'range', min: 0, max: 1, step: 0.02, def: 0.5, auto: true }, // 초가↔기와 비율(미조정=규모파생)
+    { key: 'diversityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },       // 집 변주 강도
+  ] },
+];
+
+// 마을 스키마(부감 패널이 렌더). spec 무관 — 마을 컨텍스트 전용.
+export function villageSchema() { return VILLAGE_SECTIONS; }
+
+// App villageOpts 초기값(#91). 전부 코어 no-op 기본 → 무변경 시 현행 픽셀 불변(결정론). char01 은
+//   null(=규모 파생 auto), tri-state 는 'auto'. setOpts 에 이 값들이 그대로 실려도 코어가 기본으로 해석.
+export function villageDefaults() {
+  return {
+    undAmpK: 1, ridgeHK: 1, streamMeanderK: 1, stream: true,
+    paddyDensityK: 1, treeDensityK: 1, cityWall: 'auto', sijeon: 'auto',
+    char01: null, diversityK: 1,
+  };
+}
 
 // spec → { family, tabs, sections }. family 로 라이브 전략(정규=드래그 라이브, 특수=놓을 때 정착)이 갈린다.
 export function schemaFor(spec) {

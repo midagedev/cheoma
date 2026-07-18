@@ -19,8 +19,8 @@ import { makePresenceGate } from './present-gate.js';
 //    시간대로 변조(밤·밥짓는 시간 발광, 낮 소등). night-glow와 독립(창호는 night-glow 담당).
 //  - 결정론: Math.random 미사용. 위상/해시/시간 t 순수 함수 → shot 재현성.
 
-const PARTICLES = 30;   // 굴뚝당 파티클 수(연속 컬럼용 조밀 오버랩)
-const MAX_ANCHORS = 3;  // 동시 굴뚝 상한(giwa 1 · choga 1 + 여유)
+const PARTICLES = 30;   // 굴뚝당 파티클 수 기본(연속 컬럼용 조밀 오버랩)
+const MAX_ANCHORS = 3;  // 동시 굴뚝 상한 기본(giwa 1 · choga 1 + 여유)
 
 // 시간대별 프로파일: amp=피어오름 세기, col=연기색, op=개별 파티클 불투명도(오버랩 누적),
 //   rise=상승 높이(m), ember=아궁이 불씨 emissive 강도, fire=아궁이 PointLight 강도.
@@ -51,7 +51,13 @@ function makeSmokeTexture() {
   return new THREE.CanvasTexture(cv);
 }
 
-export function setupSmoke({ scene, getBuilding }) {
+// opts.particles / opts.maxAnchors(캡): 다중 굴뚝 공유 인스턴스(#105 앰비언스 필드)가 앵커 수를 늘리고
+//   굴뚝당 파티클(=스프라이트 드로우콜)을 줄여 드로우콜 예산 안에 든다. 미지정 시 기존 상수(무회귀).
+// opts.gateOnChange(기본 true): 건물/앵커 교체 시 조기노출 게이트를 0으로 리셋할지. 공유 연기(#105
+//   필드)는 앵커 집합이 카메라 이동으로 자주 바뀌므로 false 로 두어 전체 명멸(팟)을 막는다(게이트부).
+export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnChange = true } = {}) {
+  const NP = Math.max(1, particles || PARTICLES);        // 굴뚝당 파티클(캡)
+  const NA = Math.max(1, maxAnchors || MAX_ANCHORS);     // 동시 굴뚝 상한(캡)
   let time = 'day';
   let enabled = false;
   let t = 0;   // 연기·불씨 누적 시계(결정론)
@@ -80,7 +86,7 @@ export function setupSmoke({ scene, getBuilding }) {
 
   // 스프라이트 풀(재사용). 각자 own material 로 개별 opacity/rotation/color.
   const pool = [];
-  for (let i = 0; i < MAX_ANCHORS * PARTICLES; i++) {
+  for (let i = 0; i < NA * NP; i++) {
     const mat = new THREE.SpriteMaterial({
       map: tex, transparent: true, depthWrite: false, opacity: 0, color: 0xffffff,
     });
@@ -130,8 +136,8 @@ export function setupSmoke({ scene, getBuilding }) {
       if (o.name === 'agungiEmber' && o.material) embers.push(o.material);
       else if (o.name === 'agungiFire' && o.isLight) fires.push(o);
     });
-    anchors.slice(0, MAX_ANCHORS).forEach((a, ai) => {
-      const sprites = pool.slice(ai * PARTICLES, (ai + 1) * PARTICLES);
+    anchors.slice(0, NA).forEach((a, ai) => {
+      const sprites = pool.slice(ai * NP, (ai + 1) * NP);
       for (const sp of sprites) sp.visible = true;
       emitters.push({ anchor: a, sprites });
     });
@@ -162,7 +168,7 @@ export function setupSmoke({ scene, getBuilding }) {
     const b = ensureBuilding();
     // 게이트: 건물이 보이고 조립 정착 후에만 오른다(매 프레임 갱신 — enabled 무관하게 상태 추종).
     const present = enabled && !!b && b.visible;
-    const g = gate.update(dt, { present, reset: bldChanged });
+    const g = gate.update(dt, { present, reset: gateOnChange && bldChanged });
     bldChanged = false;
     if (!enabled) return;
     t += dt;
@@ -179,7 +185,7 @@ export function setupSmoke({ scene, getBuilding }) {
     for (const e of emitters) {
       const a = e.anchor;
       e.sprites.forEach((sp, i) => {
-        const ph = i / PARTICLES;                       // 위상 오프셋(연속 스트림)
+        const ph = i / NP;                              // 위상 오프셋(연속 스트림)
         const jit = hash1(i * 2.17 + a.x * 0.13 + 1.7); // 결정론 지터
         const life = 6.0 + 1.2 * hash1(i * 1.7 + 3.1);  // 파티클 수명 6.0~7.2s(위상 균일 유지)
         const f = fract(t / life + ph);                 // 0→1 생애

@@ -5,7 +5,7 @@
   //   흘려받아(engine onProgress) 카메라·DoF·링과 한 클록으로 그린다(원칙 3). 패널은 마을 씬에서 상주
   //   (히어로 랜딩 중엔 App 이 open=false 로 숨김).
   import { t } from '../lib/i18n.svelte.js';
-  import { schemaFor } from '../lib/edit-schema.js';
+  import { schemaFor, villageSchema } from '../lib/edit-schema.js';
   import BottomSheet from './BottomSheet.svelte';
 
   let {
@@ -13,8 +13,12 @@
     // 마을 섹션(부감)
     scale = 'village', includePalace = false, includeTemple = false, houses = 0,
     onScale, onPalace, onTemple, onReroll, waving = false,
+    // 마을 상세 파라미터(#91) — 지형·구성·어휘. villageParams 는 App villageOpts 서브셋, onVillageOpt(key,value) 커밋.
+    villageParams = {}, onVillageOpt = null,
     // 집 섹션(근접)
-    spec = null, params = {}, onType, onLive, onCommit,
+    spec = null, params = {}, onType, onLive, onCommit, onReplay, onRerollHouse, houseBusy = false,
+    // glb 내보내기(#112) — onExportVillage(부감 전체)·onExportHouse(focus 건물)·exporting(스피너·중복 방지)
+    onExportVillage = null, onExportHouse = null, exporting = false,
     // 공통
     onBack,
   } = $props();
@@ -36,7 +40,8 @@
   });
 
   // ── 마을 규모 슬라이더(기존 VillagePanel 계약 그대로) ──
-  const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
+  //   'solo'(#114) = 외딴집(집 한 채, siteR30). 절 토글과 조합하면 "산사 하나만" 구성.
+  const SCALES = ['solo', 'hamlet', 'village', 'town', 'capital', 'hanyang'];
   const idx = $derived(Math.max(0, SCALES.indexOf(scale)));
   let dragVal = $state(null);
   const shownVal = $derived(dragVal != null ? dragVal : idx);
@@ -45,12 +50,27 @@
   function slideInput(v) { dragVal = v; }
   function slideCommit(v) { dragVal = null; const a = SCALES[Math.round(v)]; if (a !== scale) onScale?.(a); }
 
+  // ── 마을 상세 파라미터(#91) — 지형·구성·어휘 스키마 렌더 + 커밋(라이브 없음 = 재생성 파라미터) ──
+  const vSections = villageSchema();
+  let showVDetail = $state(true);   // 기본 펼침(사용자 지시 2026-07-19: 고급설정 숨기지 말 것)
+  const scaleIdx = $derived(Math.max(0, SCALES.indexOf(scale)));
+  // range 표시값: 코어 no-op 기본(def) 을 fallback. char01(auto) 은 값이 null 이면 def 로 표시하되 미전송.
+  const vShow = (f) => (typeof villageParams[f.key] === 'number' ? villageParams[f.key] : (f.def ?? f.min));
+  const vIsAuto = (f) => f.auto === true && typeof villageParams[f.key] !== 'number';
+  // tri-state(cityWall·sijeon) 켜짐 판정 — true 강제 or ('auto' 이고 hanyang tier). 표시·클릭 방향에 사용.
+  const vTriOn = (f) => { const v = villageParams[f.key]; return v === true || ((v == null || v === 'auto') && scale === 'hanyang'); };
+  const vPlainOn = (f) => villageParams[f.key] !== false;   // stream: 기본 true
+  const vDisabled = (f) => f.tierGate === 'capital' && scaleIdx < SCALES.indexOf('capital');
+  function vRange(f, value) { onVillageOpt?.(f.key, value); }
+  function vToggleTri(f) { onVillageOpt?.(f.key, vTriOn(f) ? false : true); }   // 강제 ON/OFF(‘auto’ 이탈)
+  function vTogglePlain(f) { onVillageOpt?.(f.key, !vPlainOn(f)); }
+
   // ── 집 편집 스키마(기존 VillageEditPanel 계약 그대로) ──
   const editable = $derived(!!spec && spec.editable === true);
   const schema = $derived(schemaFor(spec));
   const basic = $derived(schema.sections.filter((s) => !s.adv));
   const adv = $derived(schema.sections.filter((s) => s.adv));
-  let showAdv = $state(false);
+  let showAdv = $state(true);   // 기본 펼침(사용자 지시 2026-07-19)
   const TYPES = [
     { key: 'giwa', l: 'type_giwa_l', s: 'type_giwa_s' },
     { key: 'choga', l: 'type_choga_l', s: 'type_choga_s' },
@@ -102,7 +122,7 @@
           onchange={(e) => slideCommit(parseFloat(e.currentTarget.value))}
           aria-label={t('vil_scale')}
         />
-        <div class="ends"><span>{t('scale_hamlet')}</span><span>{t('scale_hanyang')}</span></div>
+        <div class="ends"><span>{t('scale_solo')}</span><span>{t('scale_hanyang')}</span></div>
       </section>
 
       <section>
@@ -114,13 +134,35 @@
           <button class="toggle" class:on={includeTemple} onclick={() => onTemple?.()}>
             <span class="dot" aria-hidden="true"></span>{t('vil_temple')}
           </button>
+          <!-- 외딴집(#114)에서만: 집 없이 = 빈 산세/절 하나만(절 토글과 조합) -->
+          {#if shownAnchor === 'solo' && onVillageOpt}
+            <button class="toggle" class:on={villageParams.houses === 0}
+              onclick={() => onVillageOpt('houses', villageParams.houses === 0 ? null : 0)}>
+              <span class="dot" aria-hidden="true"></span>{t('vil_nohouse')}
+            </button>
+          {/if}
         </div>
       </section>
+
+      <!-- 마을 상세(#91): 지형·구성·어휘 파라미터. 과밀 제어로 접기(기본 닫힘). 변경 시 재생성(시드 유지). -->
+      {#if onVillageOpt}
+        <button class="advtoggle" class:open={showVDetail} onclick={() => (showVDetail = !showVDetail)} aria-expanded={showVDetail}>
+          <span class="chev" aria-hidden="true">{showVDetail ? '−' : '+'}</span>{t('vil_detail')}
+        </button>
+        {#if showVDetail}
+          {#each vSections as vsec (vsec.id)}{@render villageSection(vsec)}{/each}
+        {/if}
+      {/if}
 
       <section>
         <button class="rebuild" onclick={() => onReroll?.()} disabled={waving} title={t('vil_reroll_tip')}>
           <span class="rk" aria-hidden="true">再</span>{t('vil_reroll')}
         </button>
+        {#if onExportVillage}
+          <button class="glb" onclick={() => onExportVillage?.()} disabled={waving || exporting} title={t('glb_village_tip')}>
+            <span class="gk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('glb_village')}
+          </button>
+        {/if}
       </section>
     </div>
 
@@ -164,9 +206,60 @@
           <p>{t('vil_hero_note')}</p>
         </div>
       {/if}
+
+      <!-- 집 액션(#100): 다시 보기(같은 집 재조립·시각 불변) vs 이 집 다시 짓기(새 씨앗·이 집만).
+           마을 다시 짓기(웨이브)는 마을 섹션 전용 — 집 컨텍스트에서 마을 리롤 진입 경로 없음. -->
+      {#if spec}
+        <section class="house-actions">
+          <button class="hbtn ghost" onclick={() => onReplay?.()} disabled={houseBusy} title={t('vil_replay_tip')}>
+            <span class="hk" aria-hidden="true">再</span>{t('vil_replay')}
+          </button>
+          <button class="hbtn reroll" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
+            <span class="hk" aria-hidden="true">⚄</span>{t('vil_reroll_house')}
+          </button>
+        </section>
+        {#if onExportHouse}
+          <button class="hbtn glb wide" onclick={() => onExportHouse?.()} disabled={houseBusy || exporting} title={t('glb_house_tip')}>
+            <span class="hk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('act_glb')}
+          </button>
+        {/if}
+      {/if}
     </div>
   </div>
 </BottomSheet>
+
+{#snippet villageSection(vsec)}
+  <section class="vdetail">
+    <h4>{t(vsec.titleKey)}</h4>
+    {#each vsec.fields as f (f.key)}
+      {#if f.ctrl === 'range'}
+        <label class="row">
+          <span class="rl">{t('s_' + f.key)}</span>
+          <input type="range" data-vkey={f.key} min={f.min} max={f.max} step={f.step}
+            value={vShow(f)}
+            onchange={(e) => vRange(f, parseFloat(e.currentTarget.value))} />
+          <span class="rv">{vIsAuto(f) ? t('vil_char_auto') : Number(vShow(f)).toFixed(2)}</span>
+        </label>
+      {:else if f.ctrl === 'toggle'}
+        <div class="row">
+          <span class="rl">{t('s_' + f.key)}{#if vDisabled(f)}<span class="tierhint"> · {t('vil_sijeon_hint')}</span>{/if}</span>
+          {#if f.tri}
+            <button class="tgl" data-vkey={f.key} class:on={vTriOn(f)} disabled={vDisabled(f)}
+              onclick={() => vToggleTri(f)} role="switch" aria-checked={vTriOn(f)}>
+              <span class="knob" aria-hidden="true"></span>
+            </button>
+          {:else}
+            <button class="tgl" data-vkey={f.key} class:on={vPlainOn(f)}
+              onclick={() => vTogglePlain(f)} role="switch" aria-checked={vPlainOn(f)}>
+              <span class="knob" aria-hidden="true"></span>
+            </button>
+          {/if}
+          <span class="rv"></span>
+        </div>
+      {/if}
+    {/each}
+  </section>
+{/snippet}
 
 {#snippet editSection(sec)}
   <section>
@@ -268,6 +361,17 @@
   .rebuild .rk { font-size: 15px; }
   .rebuild:hover:not(:disabled) { transform: translateY(-1px); }
   .rebuild:disabled { filter: saturate(0.6) opacity(0.6); cursor: default; }
+  /* glb 내보내기 — 먹빛 보조 액션(주묵 다시 짓기와 위계 구분). */
+  .glb {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 9px; border-radius: 5px; font-size: 12.5px; font-weight: 700;
+    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink);
+    transition: transform 0.12s ease, background 0.15s ease, filter 0.2s ease;
+  }
+  .glb .gk { font-size: 14px; color: var(--ink-soft); }
+  .glb:hover:not(:disabled) { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
+  .glb:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
+  .hbtn.glb.wide { flex: none; width: 100%; margin-top: 8px; }
 
   /* ── 집 섹션(VillageEditPanel 룩 계승) ── */
   .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -298,6 +402,9 @@
   .advtoggle:hover { color: var(--ink); }
   .advtoggle .chev { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 3px; border: 1px solid var(--ink-hair); font-size: 13px; line-height: 1; }
   .note { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); font-style: italic; }
+  /* 마을 상세(#91) — 편집 섹션과 동일 룩 계승. tierhint = 하위 tier 비활성 사유(예: 시전=도성부터). */
+  .vdetail { gap: 7px; }
+  .tierhint { font-size: 9.5px; color: var(--ink-faint); font-weight: 600; letter-spacing: 0.02em; }
   .hero-note { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 6px; background: rgba(177, 54, 43, 0.06); border: 1px dashed var(--seal); }
   .hero-note .mark { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 3px; background: var(--seal); color: var(--paper); font-size: 15px; font-weight: 700; }
   .hero-note p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
@@ -305,12 +412,32 @@
   input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--seal); border: 1.5px solid var(--paper); box-shadow: 0 1px 3px rgba(60, 30, 20, 0.4); cursor: pointer; }
   input[type='range']::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: var(--seal); border: 1.5px solid var(--paper); cursor: pointer; }
 
+  /* 집 액션(#100): 다시 보기(먹빛 고스트) + 이 집 다시 짓기(주묵 전각) — 재/리롤 구분 명확. */
+  .house-actions { flex-direction: row; gap: 8px; margin-top: 3px; padding-top: 11px; border-top: 1px solid var(--ink-line); }
+  .hbtn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 10px; border-radius: 5px; font-size: 12.5px; font-weight: 700;
+    transition: transform 0.12s ease, filter 0.2s ease, background 0.15s ease;
+  }
+  .hbtn .hk { font-size: 15px; }
+  .hbtn.ghost { background: transparent; border: 1px solid var(--ink-hair); color: var(--ink); }
+  .hbtn.ghost .hk { color: var(--ink-soft); }
+  .hbtn.ghost:hover:not(:disabled) { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
+  .hbtn.reroll {
+    background: var(--seal); border: 1px solid var(--seal-deep); color: var(--paper);
+    background-image: var(--hanji), linear-gradient(160deg, #bb3e31 0%, #a5322a 60%, #8f2a23 100%);
+    box-shadow: 0 2px 8px rgba(120, 40, 30, 0.28);
+  }
+  .hbtn.reroll:hover:not(:disabled) { transform: translateY(-1px); }
+  .hbtn:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
+
   /* 터치: 타깃 확대. */
   @media (pointer: coarse) {
     .crumb.root, .crumb.leaf { font-size: 28px; }
     .scaleval { font-size: 16px; }
     .toggle { padding: 13px 6px; font-size: 14px; }
     .rebuild { padding: 14px; font-size: 15px; }
+    .hbtn { padding: 14px 8px; font-size: 14px; }
     input[type='range'].scale { height: 5px; }
     input[type='range'].scale::-webkit-slider-thumb { width: 26px; height: 26px; }
     input[type='range'].scale::-moz-range-thumb { width: 26px; height: 26px; }

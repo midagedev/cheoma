@@ -1,19 +1,28 @@
 <script>
-  // 우하: 주요 액션(도장 모양 버튼) — 다시 짓기 / (히어로 리플레이) / 엽서 / 사운드.
+  // 우하: 주요 액션(도장 모양 버튼) — (다시 짓기) / 엽서 / 사운드.
   import { t } from '../lib/i18n.svelte.js';
   // raised: 마을 부감에서 하단 peek 옵션 시트 위로 액션바를 올려 겹침 방지(모바일).
-  // onReplay: 마을 씬에서만 전달(종가 리플레이 #59) — 없으면 버튼 미표시.
-  // shifted: 우측 편집 패널이 열리면(데스크톱) 패널 왼쪽으로 밀어 가려지지 않게 한다(다이얼과 동형).
-  let { onReroll, onPostcard, onToggleAudio, onReplay = null, audioOn = false, busy = false, raised = false, shifted = false } = $props();
+  // onReroll: 단일건물 씬(레거시)에서만 전달 — 마을 씬은 리롤/리플레이를 컨텍스트 패널이 소유(#100)하므로
+  //   null 이면 도장 미노출. shifted: 우측 편집 패널이 열리면(데스크톱) 패널 왼쪽으로 밀어 가려지지 않게.
+  // onDrone/onWalk: 마을 부감에서만 전달(시네마틱 데모 진입). null 이면 미노출.
+  let { onReroll = null, onPostcard, onToggleAudio, audioOn = false, busy = false, raised = false, shifted = false,
+    onDrone = null, onWalk = null } = $props();
 </script>
 
 <div class="actions" class:raised class:shifted>
-  <button class="seal primary" onclick={onReroll} disabled={busy} title={t('act_rebuild_tip')}>
-    <span class="face">{t('act_rebuild')}</span>
-  </button>
-  {#if onReplay}
-    <button class="seal replay" onclick={onReplay} title={t('act_replay_tip')} aria-label={t('act_replay')}>
-      <span class="face glyph" aria-hidden="true">再</span>
+  {#if onReroll}
+    <button class="seal primary" onclick={onReroll} disabled={busy} title={t('act_rebuild_tip')}>
+      <span class="face">{t('act_rebuild')}</span>
+    </button>
+  {/if}
+  {#if onDrone}
+    <button class="seal round" onclick={onDrone} disabled={busy} title={t('act_drone_tip')} aria-label={t('act_drone_tip')}>
+      <span class="face glyph">▷</span>
+    </button>
+  {/if}
+  {#if onWalk}
+    <button class="seal round" onclick={onWalk} disabled={busy} title={t('act_walk_tip')} aria-label={t('act_walk_tip')}>
+      <span class="face glyph">步</span>
     </button>
   {/if}
   <button class="seal" onclick={onPostcard} title={t('act_postcard_tip')}>
@@ -86,6 +95,8 @@
   }
   .seal.round { border-radius: 50%; width: 52px; min-width: 52px; height: 52px; padding: 0; }
   .seal .note { font-size: 20px; color: var(--ink-faint); }
+  /* 시네마틱 진입(드론 ▷ / 거닐기 步) — 먹빛 전각 글리프. */
+  .seal .glyph { font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1; }
   /* 히어로 리플레이(再) — 다시 짓기 옆 도장. 먹빛 전각 글리프. */
   .seal.replay { min-width: 52px; width: 52px; padding: 0; }
   .seal.replay .glyph { font-size: 21px; font-weight: 700; color: var(--ink); }

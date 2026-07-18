@@ -22,6 +22,19 @@ import { makeRng } from '../rng.js';
 
 const MAX_THICK = 0.52;                          // accum=1 일 때 최대 눈 두께(월드 m) — 두툼한 눈담요
 const SNOW_COL = new THREE.Color(0xeef2f7);
+
+// ── 볏짚 돔(choga) 적설 감쇠(#85) ────────────────────────────────────────────
+// 초가의 둥근 볏짚 지붕은 볼록면이라, 기와면과 같은 균일 노멀 오프셋을 주면 곡면 전체가
+// 통째로 부풀어 흰 돔("눈사람 머리")처럼 보인다(기와 팔작·맞배면은 평탄해 정상). 실제 볏짚은
+// 눈이 얹혀도 "두께"가 아니라 "윤곽"을 따르므로, 둥근 표면만 골라 (a) 두께 상한을 낮추고
+// (b) 정수리(상향 노멀 ny 큰 곳)를 추가로 깎아 눈이 둥근 능선을 얇게 덮게 한다. 처마쪽(ny 낮음)은
+// 감쇠에서 제외돼 눈처마(눈띠) 립·볼륨 단면 인상을 유지한다.
+//   판별: 수평 노멀의 방위 코히런스 = |Σ(nx,nz)| / Σ|(nx,nz)|. 기와·궁·절 지붕은 면(面)마다
+//   별도 메시라 한 면의 노멀이 한 방위로 모여 코히런스 ≈1, 둥근 볏짚 돔은 노멀이 방사로 퍼져
+//   상쇄돼 ≈0. planarity(면 곡률)는 돔 얕기에 따라 기와면과 겹쳐 부적합 → 방위 코히런스로 분리.
+const THATCH_COHERENCE = 0.5;                    // 이 미만 = 방사 노멀(둥근 돔) → 감쇠 적용
+const THATCH_SCALE = 0.62;                       // 돔 눈 두께를 기와 대비 낮춤(윤곽 따르기)
+const THATCH_APEX_ATTEN = 0.35;                  // 정수리(ny 큰 곳)를 추가로 깎아 통팽창 차단
 const SLIP_DUR = 1.7;                            // 낙설 1회 애니 길이(초)
 const SLIP_PERIOD = 15.0;                        // 자동 낙설 주기(초, 드물게)
 
@@ -182,11 +195,33 @@ function makeShellMaterial(uThick, uWind, uWindBias, { emissive = 0x0c1018, ao =
   return m;
 }
 
+// 수평 노멀 방위 코히런스 = |Σ(nx,nz)| / Σ|(nx,nz)|. 경사 평면(한 방위)≈1, 둥근 돔(방사)≈0.
+// 거의 수평(무물매)면 수평성분이 미미 → 1 반환(돔 아님, 팽창 문제 없음).
+export function domeCoherence(s) {
+  let sx = 0, sz = 0, sm = 0;
+  const n = s.count;
+  for (let i = 0; i < n; i++) {
+    const nx = s.nor[i * 3], nz = s.nor[i * 3 + 2];
+    sx += nx; sz += nz; sm += Math.hypot(nx, nz);
+  }
+  if (sm < 1e-4) return 1;
+  return Math.hypot(sx, sz) / sm;
+}
+
+// 정점 눈 두께 계수(grow). 기와 평면(round=false)은 물매 게이트만 — 기존 거동 불변.
+// 둥근 볏짚 돔(round=true)은 THATCH_SCALE 로 얇히고, 정수리(ny 큰 곳)를 추가 감쇠(#85).
+export function growFor(ny, round) {
+  const g = smooth01(ny, 0.10, 0.42);            // 물매 게이트(공통): 완경사=1, 급경사·수직→0
+  if (!round) return g;
+  return g * THATCH_SCALE * (1 - THATCH_APEX_ATTEN * smooth01(ny, 0.5, 0.92));
+}
+
 // ── 지붕 눈 쉘 지오메트리(표면 복제 + 경계 림 벽) ────────────────────────────
-function buildShellGeometry(surfaces) {
+export function buildShellGeometry(surfaces) {
   const parts = [];
   for (const s of surfaces) {
     const n = s.count;
+    const round = domeCoherence(s) < THATCH_COHERENCE;      // 둥근 볏짚 돔 판별(#85)
     // 표면 복제(기와면 위 0.02m 띄움)
     const pos = new Float32Array(n * 3);
     const lift = new Float32Array(n * 3);
@@ -199,7 +234,7 @@ function buildShellGeometry(surfaces) {
       pos[i * 3 + 1] = s.pos[i * 3 + 1] + ny * 0.02;
       pos[i * 3 + 2] = s.pos[i * 3 + 2] + nz * 0.02;
       lift[i * 3] = nx; lift[i * 3 + 1] = ny; lift[i * 3 + 2] = nz;
-      grow[i] = smooth01(ny, 0.10, 0.42);        // 물매 게이트: 완경사=1, 급경사·수직→0
+      grow[i] = growFor(ny, round);              // #85: 둥근 돔이면 얇게+정수리 감쇠
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -213,7 +248,7 @@ function buildShellGeometry(surfaces) {
 
     // 경계 림 벽: 처마·박공 가장자리에 눈 두께 단면을 세운다(처마 눈처마 립).
     const edges = boundaryEdges(s.index);
-    if (edges.length) parts.push(buildRim(s, edges));
+    if (edges.length) parts.push(buildRim(s, edges, round));
   }
   if (!parts.length) return null;
   const merged = mergeGeometries(parts, false);
@@ -222,7 +257,8 @@ function buildShellGeometry(surfaces) {
 }
 
 // 경계 에지마다 사각 벽(림): 아래=기와면(안 자람), 위=들린 눈 가장자리(밖으로 살짝 내밈=립).
-function buildRim(s, edges) {
+// round=true(볏짚 돔): 표면과 동일한 growFor 감쇠를 립에도 적용해 이음매 없이 얇아진다.
+function buildRim(s, edges, round = false) {
   const nQuad = edges.length;
   const pos = new Float32Array(nQuad * 4 * 3);
   const lift = new Float32Array(nQuad * 4 * 3);
@@ -236,7 +272,7 @@ function buildRim(s, edges) {
     for (const vi of [a, b]) {
       const nx = s.nor[vi * 3], ny = s.nor[vi * 3 + 1], nz = s.nor[vi * 3 + 2];
       const px = s.pos[vi * 3] + nx * 0.02, py = s.pos[vi * 3 + 1] + ny * 0.02, pz = s.pos[vi * 3 + 2] + nz * 0.02;
-      const gw = smooth01(ny, 0.10, 0.42);
+      const gw = growFor(ny, round);
       outward.set(nx, 0, nz);
       const hl = outward.length();
       if (hl > 1e-4) outward.multiplyScalar(1 / hl); else outward.set(0, 0, 0);

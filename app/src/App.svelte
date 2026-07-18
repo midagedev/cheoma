@@ -4,7 +4,7 @@
   import { createEngine } from './engine/engine.js';
   import { configFromSeed, paramsFor, newSeed, FLAGSHIP_TIME } from './lib/seed.js';
   import { readUrl, writeUrl } from './lib/url.js';
-  import { buildRebuildPayload } from './lib/edit-schema.js';
+  import { buildRebuildPayload, villageDefaults } from './lib/edit-schema.js';
   import { device, initDevice } from './lib/device.svelte.js';
   import Hero from './components/Hero.svelte';
   import SealLabel from './components/SealLabel.svelte';
@@ -15,6 +15,9 @@
   import ContextPanel from './components/ContextPanel.svelte';
   import HoverLabel from './components/HoverLabel.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
+  import CinematicOverlay from './components/CinematicOverlay.svelte';
+  import { exportGLB, analyzeExport, filenameFor, triggerDownload } from '../../src/export/gltf.js';
+  import { t } from './lib/i18n.svelte.js';
 
   let container;
   let engine = null;
@@ -56,7 +59,9 @@
   //   mode(파생): 마을 홈은 클로즈업=집/부감=마을, 그 외는 씬 기준.
   let sceneVillage = $state(false);
   let villageHome = $state(false);
-  let villageOpts = $state({ scale: 'village', character: 'yeoyeom', includePalace: false, includeTemple: false });
+  // 마을 옵션: 규모·궁·절 + 상세 파라미터(#91 지형·구성·어휘). villageDefaults() 는 전부 코어 no-op 기본
+  //   (K=1·stream=true·cityWall/sijeon='auto'·char01=null) → 무변경 시 현행 픽셀 불변(결정론).
+  let villageOpts = $state({ scale: 'village', character: 'yeoyeom', includePalace: false, includeTemple: false, ...villageDefaults() });
   let villageSeed = $state(0);
   let villageHouses = $state(0);               // 현재 마을 호수(패널 표시)
   // focus 연속체(#92): villageEditing = 현재 focus 필지 { parcelId, spec }(focus-in START 에 설정,
@@ -70,6 +75,16 @@
   let editParams = $state({});                 // { kind, frontBays, sideBays, roofPitch, eaveOverhang }
   let hoverInfo = $state(null);                // 호버 미니라벨 { spec, x, y }
   let veil = $state(false);                    // 먹 안개 트랜지션 오버레이(#46) — 마을 생성 프리징 마스킹
+
+  // ---------- 시네마틱 데모 모드(#112) ----------
+  let cine = $state({ active: false, mode: null, pass: null });   // engine 'cinematic' 이벤트로 갱신
+  let exporting = $state(false);               // glb 익스포트 진행(스피너·중복 클릭 방지)
+  let toast = $state(null);                    // 안내 토스트 문구(overBudget 등) — null 이면 숨김
+  let toastTimer;
+  const showToast = (msg, ms = 3600) => { toast = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast = null; }, ms); };
+  // 데스크톱 1인칭 조작: WASD/화살표 이동 + 마우스 시선. autoStroll 기본, 수동 입력 시 해제(다시 안 켬).
+  const walkKeys = new Set();
+  let walkYaw = 0, walkPitch = 0, walkManual = false, walkRaf = null;
 
   function syncUrl() {
     // villageHome(기본 인터랙티브 부팅)은 village 파라미터를 URL 에 쓰지 않는다 — 써 두면 새로고침이
@@ -115,6 +130,8 @@
   );
   // 마을 부감: 하단 peek 옵션 시트 위로 액션바를 올림.
   let villageAerial = $derived(sceneVillage && !villageEditing && !villageZooming);
+  // 시네마틱 진입 버튼(드론/거닐기)은 마을 부감에서만 — focus·전환·웨이브·먹안개·데모 중엔 미노출.
+  let cineButtons = $derived(villageAerial && !waving && !veil && !cine.active && !heroLanding);
   // 편집 중엔 액션바 숨김(모든 터치 디바이스 — 세로 시트/가로·태블릿 사이드 패널과 겹침 방지).
   // 데스크톱(perf=false)은 종전대로 유지. 낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
   let hideActions = $derived(device.perf && editing);
@@ -169,9 +186,39 @@
     engine.on('villageWave', (w) => { waving = w.phase === 'start'; if (w.phase === 'done') { pullVillage(); syncUrl(); chromaFaded = false; } });
     engine.on('villageSeed', (s) => { villageSeed = s; pullVillage(); syncUrl(); });
 
+    // 시네마틱 데모(#112): 진입/패스 전환/종료 상태를 크롬 최소화·오버레이 라벨에 반영.
+    engine.on('cinematic', (c) => {
+      cine = { active: !!c.active, mode: c.mode ?? cine.mode, pass: c.pass ?? null };
+      if (c.active) { chromaFaded = false; hoverInfo = null; startWalkFeed(); }
+      else { stopWalkFeed(); }
+    });
+
+    // glb 익스포트 검증 훅(#112) — 실제 코어(exportGLB/analyzeExport)를 앱 대상(마을·focus)에 태워
+    //   직렬화 가능한 결과만 반환(스크린샷 없는 수치 단언). __hero/__engine 계열과 동일한 비침습 훅.
+    if (typeof window !== 'undefined') {
+      window.__glb = {
+        hasFocus: () => !!engine.village.focusRoot(),
+        analyzeVillage: () => { const r = engine.village.exportRoot(); return r ? analyzeExport(r) : null; },
+        exportHouse: async () => {
+          const r = engine.village.focusRoot(); if (!r) return { ok: false, reason: 'no-focus' };
+          const b = await exportGLB(r);
+          return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) } : { ok: false, over: !!b.overBudget };
+        },
+        exportVillage: async (opts) => {
+          const r = engine.village.exportRoot(); if (!r) return { ok: false, reason: 'no-village' };
+          const b = await exportGLB(r, opts);
+          return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) }
+            : { ok: false, over: !!b.overBudget, triangles: b.triangles, limit: b.limit };
+        },
+      };
+    }
+
     // 초기 설정: seed 기반 + URL 명시 오버라이드.
     const cfg = configFromSeed(url.seed);
-    if (!url.hasSeed && !url.time) cfg.time = FLAGSHIP_TIME;
+    // 히어로 기본 = 석양 역광(#98 사용자 지시). shot 만 결정론 유지(configFromSeed 기본, 보통 day),
+    //   그 외엔 시드 유무와 무관하게 사용자가 ?time 을 명시하지 않으면 늘 석양으로 랜딩(구 !hasSeed
+    //   게이트가 시드 URL에서 석양 기본을 실효시켜 역광 림이 안 나오던 회귀 수정).
+    if (!url.shot && !url.time) cfg.time = FLAGSHIP_TIME;
     if (url.preset && PRESETS[url.preset]) { cfg.preset = url.preset; cfg.params = paramsFor(url.preset); overrides.preset = true; }
     if (url.time) { cfg.time = url.time; overrides.time = true; }
     if (url.season) { cfg.season = url.season; overrides.season = true; }
@@ -231,12 +278,15 @@
       for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) removeEventListener(ev, wake);
       removeEventListener('keydown', onKey);
       cancelAnimationFrame(flowRaf);
+      stopWalkFeed();
+      clearTimeout(toastTimer);
       engine?.dispose();
     };
   });
 
   function onKey(e) {
     if (e.key !== 'Escape') return;
+    if (cine.active) { engine.cine.stop(); return; }  // 시네마틱 데모 중이면 먼저 종료
     if (sceneVillage) { engine.village.escape(); }   // 클로즈업이면 부감 복귀(escape 가 selected 판정)
     else if (ui.selected) { engine.clearSelection(); }
   }
@@ -253,14 +303,16 @@
     else engine.hero.enter({ onDone });
     setTimeout(() => { heroVisible = false; }, 900);
   }
-  // 리플레이(#59·#92 일반화): 현재 focus 중인 필지를 다시 조립. 액션바 再 도장에서 호출(focus 중일 때만 노출).
-  function replayFocus() { if (sceneVillage && villageEditing) { engine.village.replay(); chromaFaded = false; scheduleFlowTick(); } }
+  // 리플레이(#59·#92 일반화): 현재 focus 중인 필지를 같은 시드로 다시 조립(시각 불변). 집 패널 '다시 보기'.
+  function replayFocus() { if (sceneVillage && villageEditing && !villageZooming && !waving) { engine.village.replay(); chromaFaded = false; scheduleFlowTick(); } }
+  // 이 집만 다시 짓기(#100): 현재 focus 중인 필지만 새 시드로 재생성(마을·이웃 불변). 집 패널 '이 집 다시 짓기'.
+  //   마을 리롤(웨이브)과 완전 분리 — 집 컨텍스트에서 마을 리롤 진입 경로 없음(#100 ②).
+  function rerollHouse() { if (sceneVillage && villageEditing && !villageZooming && !waving) { engine.village.rerollParcel(); chromaFaded = false; scheduleFlowTick(); } }
+  // 단일건물 씬(?hero=0·?village=1 레거시) 액션바 도장 = 새 씨앗 재생성. 마을 씬에선 도장 미노출(리롤은 패널 소유).
   function reroll() {
-    if (rerollCooldown || waving) return;
+    if (rerollCooldown || waving || sceneVillage) return;
     rerollCooldown = true;
     setTimeout(() => (rerollCooldown = false), 500);
-    // 마을: 리롤 웨이브(#56) — 부감 유지·연출 재구성. focus 중이면 웨이브가 focus-out 후 진행하도록 먼저 복귀.
-    if (sceneVillage) { rerollVillage(); return; }
     overrides = { preset: false, time: false, season: false, weather: false };
     engine.reroll();
     pullState();
@@ -282,6 +334,84 @@
   }
   function postcard() { engine.postcard({ download: true }); }
   function toggleAudio() { audioOn = !audioOn; engine.toggleAudio(audioOn); }
+
+  // ---------- 시네마틱 데모 모드(#112) ----------
+  function startDrone() { if (!waving) engine.cine.start('drone'); }        // 오토플레이 체인(순환)
+  function startWalk() { if (!waving) engine.cine.start('walk'); }
+  function stopCine() { engine.cine.stop(); }
+
+  // 데스크톱 1인칭 입력 — cine walk 활성 동안만 rAF 로 키/마우스 델타를 walker 에 피드(모바일은 autoStroll).
+  function startWalkFeed() {
+    if (cine.mode !== 'walk' || device.perf) return;   // 터치/저사양은 autoStroll 전용
+    walkKeys.clear(); walkYaw = 0; walkPitch = 0; walkManual = false;
+    addEventListener('keydown', onWalkKey);
+    addEventListener('keyup', onWalkKeyUp);
+    addEventListener('pointermove', onWalkMouse, { passive: true });
+    const feed = () => {
+      if (!cine.active || cine.mode !== 'walk') { walkRaf = null; return; }
+      walkRaf = requestAnimationFrame(feed);
+      const fwd = (walkKeys.has('w') || walkKeys.has('ArrowUp') ? 1 : 0) - (walkKeys.has('s') || walkKeys.has('ArrowDown') ? 1 : 0);
+      const strafe = (walkKeys.has('d') || walkKeys.has('ArrowRight') ? 1 : 0) - (walkKeys.has('a') || walkKeys.has('ArrowLeft') ? 1 : 0);
+      const run = walkKeys.has('shift');
+      if (fwd || strafe || walkYaw || walkPitch) {
+        if (!walkManual) { walkManual = true; engine.cine.setAutoStroll(false); }   // 첫 조작에 자동산책 해제
+        engine.cine.input({ fwd, strafe, run, yaw: walkYaw, pitch: walkPitch });
+        walkYaw = 0; walkPitch = 0;
+      }
+    };
+    walkRaf = requestAnimationFrame(feed);
+  }
+  function stopWalkFeed() {
+    if (walkRaf != null) { cancelAnimationFrame(walkRaf); walkRaf = null; }
+    removeEventListener('keydown', onWalkKey);
+    removeEventListener('keyup', onWalkKeyUp);
+    removeEventListener('pointermove', onWalkMouse);
+    walkKeys.clear();
+  }
+  function onWalkKey(e) {
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) { walkKeys.add(k); e.preventDefault(); }
+    if (e.shiftKey) walkKeys.add('shift');
+  }
+  function onWalkKeyUp(e) {
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    walkKeys.delete(k);
+    if (!e.shiftKey) walkKeys.delete('shift');
+  }
+  function onWalkMouse(e) {
+    // 버튼 눌린 드래그일 때만 시선 회전(자유 커서 이동과 구분). movementX/Y 는 상대 델타.
+    if (e.buttons & 1) { walkYaw -= (e.movementX || 0) * 0.0026; walkPitch -= (e.movementY || 0) * 0.0022; }
+  }
+
+  // ---------- glb 내보내기(#104·#112) ----------
+  // 대형 마을은 sanitize+parse 가 수 초 블록 가능 → 스피너 페인트 후(rAF 2회 양보) 실행 + 중복 클릭 방지.
+  async function runExport(getTarget) {
+    if (exporting) return;
+    const target = getTarget();
+    if (!target) { showToast(t('glb_error')); return; }
+    exporting = true;
+    chromaFaded = false;
+    await tick();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const result = await exportGLB(target);
+      if (result && result.overBudget) {
+        showToast(t('glb_toobig'));
+      } else if (result instanceof ArrayBuffer) {
+        triggerDownload(result, filenameFor(target));
+        showToast(t('glb_done'), 2200);
+      } else {
+        showToast(t('glb_error'));
+      }
+    } catch (err) {
+      console.error('glb export failed', err);
+      showToast(t('glb_error'));
+    } finally {
+      exporting = false;
+    }
+  }
+  function exportVillage() { runExport(() => engine.village.exportRoot()); }
+  function exportHouse() { runExport(() => engine.village.focusRoot()); }
 
   // 환경 적용 원자 연산(엔진 호출 + 오버라이드 표시). 수동 setter·오토로테이션이 공유.
   function applyTime(v) { engine.setTime(v); overrides.time = true; }
@@ -383,6 +513,8 @@
     // 궁은 도성 규모(capital·hanyang)만. hanyang 은 궁 기본 ON(도성=궁성), 그 외 도성 미만은 OFF.
     if (s === 'hanyang') villageOpts.includePalace = true;
     else if (s !== 'capital') villageOpts.includePalace = false;
+    // 집 없음(#114)은 외딴집 전용 구성 — 규모를 키우면 해제(보이지 않는 houses:0 잔존 방지).
+    if (s !== 'solo' && villageOpts.houses != null) villageOpts.houses = null;
     withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); });
   }
   // character(민촌/여염/반촌) 셀렉터는 폐지(사용자 지시) — UI 미노출, villageOpts.character 는 내부 기본값(yeoyeom) 유지.
@@ -392,6 +524,13 @@
     withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); });
   }
   function toggleTemple() { villageOpts.includeTemple = !villageOpts.includeTemple; withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); }); }
+  // 마을 상세 파라미터(#91): 지형·구성·어휘 옵션 커밋 → setOpts 재생성(시드 유지, 부감 재프레이밍). 규모·궁·절과
+  //   동일 경로(withVeil 먹 안개 마스킹). 라이브 rAF 미요구(재생성 파라미터) — 슬라이더 onchange/토글 클릭에서만 호출.
+  function setVillageOpt(key, value) {
+    if (waving || villageZooming) return;
+    villageOpts[key] = value;
+    withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); });
+  }
 
   // 집 편집(#48·#69): 편집값을 스키마(edit-schema)로 어댑터 rebuildParcel 계약에 라우팅. 라이브 전략은
   //   family 로 갈린다 — 정규 필지(가벼운 단일 집)는 드래그 중 rAF 병합 라이브(#69 즉각 변형),
@@ -401,7 +540,9 @@
   //   spec.params(기본값)로 덮여 "지오는 편집 상태인데 패널 숫자는 기본값 고정"(critic-focusv2 desync)이 난다.
   //   필지가 바뀔 때만(또는 최초) 기본값으로 시드. 특수 컴파운드(종가·관아·궁) 커밋 경로도 이 진실원을 공유.
   function seedEdit(p) {
-    const changed = !villageEditing || villageEditing.parcelId !== p.parcelId;
+    // 필지가 바뀔 때만 기본값으로 재시드(같은 필지 재-emit 에선 편집 보존). 단 리롤(#100)은 같은
+    //   parcelId 라도 시드가 굴러 새 기본값이므로 p.reseed 로 강제 재시드(desync 방지).
+    const changed = p.reseed || !villageEditing || villageEditing.parcelId !== p.parcelId;
     villageEditing = { parcelId: p.parcelId, spec: p.spec };
     if (changed) editParams = { kind: p.spec.kind, ...(p.spec.params || {}) };
   }
@@ -449,9 +590,10 @@
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
 <div class="veil" class:on={veil} aria-hidden="true"></div>
 
-<ModeToggle {mode} onToggle={toggleMode} />
+{#if !cine.active}<ModeToggle {mode} onToggle={toggleMode} />{/if}
 
-<div class="chroma" class:faded={chromaFaded && !heroVisible}>
+<!-- 시네마틱 데모 중엔 크롬을 페이드(감상 우선) — .chroma 3초 감상 페이드와 별개 게이트. -->
+<div class="chroma" class:faded={(chromaFaded || cine.active) && !heroVisible}>
   {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={() => { refOpen = true; chromaFaded = false; }} />{/if}
   <EnvironmentDial
     time={ui.time} season={ui.season} weather={ui.weather}
@@ -462,20 +604,21 @@
   />
   {#if !hideActions}
     <ActionBar
-      onReroll={reroll} onPostcard={postcard} onToggleAudio={toggleAudio}
-      onReplay={sceneVillage && villageEditing ? replayFocus : null}
+      onReroll={sceneVillage ? null : reroll} onPostcard={postcard} onToggleAudio={toggleAudio}
       audioOn={audioOn} busy={rerollCooldown || waving}
       raised={sheetLayout && villageAerial}
       shifted={ui.selected && !sheetLayout}
+      onDrone={cineButtons ? startDrone : null}
+      onWalk={cineButtons && !device.perf ? startWalk : null}
     />
   {/if}
 </div>
 
 {#if sceneVillage}
   <!-- 단일 컨텍스트 패널(#92): 마을(부감)·집(근접) 섹션이 한 패널 안에서 focusMorph 로 crossfade.
-       히어로 랜딩 중엔 숨김(연출). 브레드크럼 '마을' 클릭 = focus-out. -->
+       히어로 랜딩·시네마틱 중엔 숨김(연출). 브레드크럼 '마을' 클릭 = focus-out. -->
   <ContextPanel
-    open={!heroLanding}
+    open={!heroLanding && !cine.active}
     morph={focusMorph}
     detent={focusMorph >= 0.5 ? 'half' : 'peek'}
     scale={villageOpts.scale}
@@ -486,13 +629,21 @@
     onPalace={togglePalace}
     onTemple={toggleTemple}
     onReroll={rerollVillage}
+    villageParams={villageOpts}
+    onVillageOpt={setVillageOpt}
     waving={waving}
+    houseBusy={villageZooming || waving}
     spec={villageEditing?.spec}
     params={editParams}
     onType={villageSetType}
     onLive={villageLive}
     onCommit={villageCommit}
+    onReplay={replayFocus}
+    onRerollHouse={rerollHouse}
     onBack={closeVillageEdit}
+    onExportVillage={villageAerial ? exportVillage : null}
+    onExportHouse={villageEditing && !villageZooming ? exportHouse : null}
+    exporting={exporting}
   />
   <HoverLabel info={hoverInfo} />
 {:else}
@@ -513,6 +664,14 @@
 
 <ReferenceModal open={refOpen} onClose={() => { refOpen = false; }} />
 
+<!-- 시네마틱 데모 오버레이(#112): 종료 창구 + 현재 장면 라벨. -->
+<CinematicOverlay active={cine.active} mode={cine.mode} pass={cine.pass} onExit={stopCine} />
+
+<!-- 안내 토스트(#112): glb overBudget·완료·실패 문구. -->
+{#if toast}
+  <div class="toast" role="status" aria-live="polite">{toast}</div>
+{/if}
+
 <style>
   .stage { position: fixed; inset: 0; z-index: 0; }
   .chroma { transition: opacity 0.9s ease; }
@@ -527,4 +686,17 @@
       radial-gradient(130% 110% at 50% 42%, #f4efe4 0%, #ece4d4 55%, #e0d5c2 100%);
   }
   .veil.on { opacity: 1; pointer-events: auto; }
+
+  /* 안내 토스트(#112) — 하단 중앙 먹빛 캡슐(엽서·glb 안내). */
+  .toast {
+    position: fixed; left: 50%; bottom: max(84px, calc(env(safe-area-inset-bottom) + 80px));
+    transform: translateX(-50%); z-index: 300; max-width: min(88vw, 420px);
+    padding: 11px 18px; border-radius: 8px; text-align: center;
+    background: rgba(24, 20, 16, 0.86); color: rgba(244, 239, 228, 0.96);
+    font-family: var(--serif); font-size: 13.5px; line-height: 1.4; font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    animation: toastin 0.3s ease both;
+  }
+  @keyframes toastin { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 </style>

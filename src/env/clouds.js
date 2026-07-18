@@ -77,7 +77,19 @@ export const CLOUD_SHADOW_FRAG_BODY = `
 }
 `;
 export const CLOUD_SHADOW_VERT_DECL = `varying vec3 vCloudWorld;`;
-export const CLOUD_SHADOW_VERT_BODY = `vCloudWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`;
+// 그림자 블롭은 월드 XZ 로 판정하므로 정점의 월드 좌표가 필요하다. 인스턴싱(#110 지붕·부재:
+//   집은 InstancedMesh)에서는 각 인스턴스가 자기 instanceMatrix 를 가지므로 modelMatrix 만으로는
+//   모든 인스턴스가 같은 자리로 접혀 그림자가 부정확했다 → USE_INSTANCING 시 instanceMatrix 를
+//   합성한다. 지형·병합(merged) 지오는 인스턴싱이 아니라 #else(=기존 modelMatrix 경로) 그대로라
+//   완전 하위호환(#include <begin_vertex> 삽입점에서 transformed=오브젝트 로컬, instanceMatrix 는
+//   three 가 USE_INSTANCING 시 선언).
+export const CLOUD_SHADOW_VERT_BODY = `
+#ifdef USE_INSTANCING
+  vCloudWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+#else
+  vCloudWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+#endif
+`;
 
 // 소프트 원형 구름 텍스처(캔버스) — 중심 불투명 → 가장자리 투명, 결정론(고정 시드 배치).
 function makeCloudTexture(seed = 1) {
@@ -284,7 +296,7 @@ export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, 
 
 // mistBillboards(기본 true): 산허리 물안개 빌보드 2장 생성 여부 — 마을은 전용 운해 링·능선 물안개가
 //   대신하므로 false. highCloudCount(기본 4, 최대 MAX_CLOUD_BLOBS=5): 상공 뭉게구름 장수(=대응 그림자 블롭 수).
-export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mistBillboards = true, highCloudCount = 4 } = {}) {
+export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mistBillboards = true, highCloudCount = 4, siteCenter = null, coverR = null } = {}) {
   const u = uniforms || createCloudUniforms();
   const root = new THREE.Group();
   root.name = 'clouds';
@@ -309,7 +321,24 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   // 마을(부감) 인스턴스 판별: 어댑터는 mistBillboards=false 로 호출하고(능선 물안개는 populate 운해 링이
   //   대신) env 단일건물은 기본 true. 따라서 !mistBillboards = 마을 부감 인스턴스 → env 는 절대 미접촉.
   const overheadFade = !mistBillboards;
-  const OF_LO = -30, OF_HI = 6, OF_DEPTH = 0.85;   // dyEye(=카메라y−구름y) 밴드 & 최대 감쇠율
+  // OF_DEPTH: 부감(구름을 내려다봄)에서 빌보드 최대 감쇠율. #108 에서 마을 블롭이 프레임 중앙을
+  //   가로지르게 되며(그림자 커버리지) 잔여 빌보드가 프레임 중앙에 어른거릴 수 있어 0.85→0.92 로
+  //   높여 부감 프레임을 더 비운다(#81 의도 강화). overheadFade(=마을) 게이트 안이라 env 무영향.
+  const OF_LO = -30, OF_HI = 6, OF_DEPTH = 0.92;   // dyEye(=카메라y−구름y) 밴드 & 최대 감쇠율
+
+  // ── 마을 부감 커버리지(#108) ─────────────────────────────────────────────────
+  // 진단(tools/verify-cloudshadow.mjs): env 식 배치(rad = terrainMax·r + 40 + 표류 ±120)에선 블롭이
+  //   원점 기준 반경 233~331 까지 표류하는데 부감 프레임(마을 외곽 원)은 반경 83~223 뿐 — 블롭이 표류
+  //   주기의 대부분을 "프레임 밖"에서 보내 그림자가 좀처럼 화면에 안 들어왔다(사용자: "한 번도 못 봤다").
+  // 마을(overheadFade) 인스턴스는 블롭을 프레임 중앙(원점 근처) 디스크에 가둬 배치하고, 표류를 그 디스크
+  //   폭을 "가로지르는" 유한 왕복으로 바꾼다 → 블롭 몇 개가 유유히 프레임을 통과한다. env 단일건물은
+  //   기존 배치·표류 그대로(무회귀). coverR 은 어댑터가 실제 프레임 반경(villageOuterR)을 주면 그 값,
+  //   없으면 terrainMax 파생(마을 규모의 프레임 반경 ≈ 0.42·terrainMax — 프레임 밖으로 나가느니 안쪽).
+  const village = overheadFade;
+  const cCx = siteCenter ? siteCenter.x : 0;
+  const cCz = siteCenter ? siteCenter.z : 0;
+  const COVER = village ? (coverR || terrainMax * 0.42) : 0;
+  const nHigh = Math.max(0, Math.min(MAX_CLOUD_BLOBS, highCloudCount));
 
   // ── 상공 뭉게구름 빌보드 (카메라 보는 적운, 최대 5장) ──
   // 반경을 마을·씬 중앙 위(r 0.14~0.55)로 낮춰 지면 투영 그림자가 마을 안·언저리에 떨어지게 한다
@@ -323,7 +352,7 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     { r: 0.30, ang: 4.1, y: 90, w: 160, h: 112, op: 0.62, sp: 0.68 },
     { r: 0.55, ang: 1.0, y: 108, w: 192, h: 132, op: 0.58, sp: 0.5 },
     { r: 0.14, ang: 0.2, y: 76, w: 136, h: 100, op: 0.68, sp: 0.62 },
-  ].slice(0, Math.max(0, Math.min(MAX_CLOUD_BLOBS, highCloudCount)));
+  ].slice(0, nHigh);
   highSpecs.forEach((s, i) => {
     const mat = new THREE.MeshBasicMaterial({
       map: cloudTex[i], transparent: true, opacity: s.op, depthWrite: false,
@@ -331,11 +360,24 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), mat);
     mesh.renderOrder = 3;
-    const rad = R * s.r + 40;
-    mesh.userData = {
-      baseX: Math.cos(s.ang) * rad, z: Math.sin(s.ang) * rad, y: s.y,
-      w: s.w, op: s.op, sp: s.sp, phase: i * 2.1, blob: i,   // blob: 대응 그림자 uniform 슬롯
-    };
+    if (village) {
+      // 프레임 중앙 디스크 배치: 각 블롭을 표류 수직(perp)의 서로 다른 레인에 놓고, 표류(drift) 축으로
+      //   디스크 폭(span)을 사인 왕복하며 가로지른다(place 가 매 프레임 계산). 레인·위상을 분산해
+      //   한 번에 1~2 개만 프레임 중앙을 지나가게 한다(마을 전체가 어두워지는 명멸 금지).
+      const laneT = nHigh > 1 ? (i / (nHigh - 1) - 0.5) : 0;   // -0.5..0.5
+      const lane = laneT * 2 * COVER * 0.55;                   // perp 레인 오프셋(프레임 폭 내)
+      mesh.userData = {
+        laneX: cCx + perp.x * lane, laneZ: cCz + perp.y * lane, y: s.y,
+        span: COVER * 0.85,                                    // 가로지름 진폭(프레임 안팎을 유유히 오감)
+        w: s.w, op: s.op, sp: s.sp, phase: i * (6.2832 / nHigh), blob: i,
+      };
+    } else {
+      const rad = R * s.r + 40;
+      mesh.userData = {
+        baseX: Math.cos(s.ang) * rad, z: Math.sin(s.ang) * rad, y: s.y,
+        w: s.w, op: s.op, sp: s.sp, phase: i * 2.1, blob: i,   // blob: 대응 그림자 uniform 슬롯
+      };
+    }
     // 카메라를 향해 빌보드 — 렌더 직전 실제 카메라를 받아 재조준(update 에 카메라 불필요).
     const _up = new THREE.Vector3(0, 1, 0);
     mesh.onBeforeRender = (r, sc, cam) => {
@@ -391,8 +433,19 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   //   왕복만 쓴다(순 이동 누적 없음) → 오래 켜둬도 안정. #68 에서 진폭·주기를 키워 "지나간다"는
   //   인상을 준다(주기 ~90s, 진폭 ±120). SHOT 은 t=0 고정(결정론).
   function place(mesh) {
-    if (SHOT) { const d0 = mesh.userData; mesh.position.set(d0.baseX, d0.y, d0.z); return; }
     const d = mesh.userData;
+    if (village && d.span != null) {
+      // 마을: 레인(perp) 시작점 + 표류(drift) 축 가로지름(sweep) + perp 축 느린 흔들림(wob)의 2D
+      //   유한 왕복. 위상 분산이라 한 번에 1~2 개만 프레임을 통과(유유히). wob 는 sweep 과 다른 주기라
+      //   블롭이 사분면을 두루 훑어 석양 레이킹(+z 편향)에도 프레임 한쪽이 굶지 않는다. SHOT=t0 결정론.
+      const sweep = Math.sin(t * 0.085 * d.sp + d.phase) * d.span;
+      const wob = Math.cos(t * 0.055 * d.sp + d.phase * 1.3) * d.span * 0.30;
+      mesh.position.set(
+        d.laneX + drift.x * sweep + perp.x * wob, d.y,
+        d.laneZ + drift.y * sweep + perp.y * wob);
+      return;
+    }
+    if (SHOT) { mesh.position.set(d.baseX, d.y, d.z); return; }
     const sway = Math.sin(t * 0.06 * d.sp + d.phase) * 32;
     const dx = drift.x * Math.sin(t * 0.07 * d.sp + d.phase) * 120;
     const dz = drift.y * Math.sin(t * 0.07 * d.sp + d.phase) * 120;
@@ -403,14 +456,21 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   //   바로 아래, 저고도(석양)면 태양 반대쪽으로 레이킹(장그림자). k 는 상한을 둬 그림자가 지형 밖으로
   //   날아가지 않게 한다. 반경은 구름 폭에 비례(지면 발자국), 세기는 구름 불투명도에 비례.
   const SHADOW_R = 0.50, RAKE = 0.9, RAKE_MAX = 78;
+  // 마을: 그림자 발자국을 프레임(COVER)에 비례시켜 몇 개가 유유히 지난다(반경 ≈ COVER·0.5 → 프레임에
+  //   2~3 개가 겹치지 않고 든다). 레이킹(석양 장그림자)도 COVER 로 상한을 조여 그림자가 프레임 밖으로
+  //   날아가지 않게 한다(진단: 기존 RAKE_MAX=78 이 저고도에서 그늘을 남쪽 가장자리로 밀어냈다).
+  const villRadius = Math.max(22, COVER * 0.36);   // 이산 그늘(프레임에 2~3 개 든다 — 상시 반그늘 방지)
+  const villRakeMax = COVER * 0.28;   // 저고도 장그림자 상한(프레임 한쪽 굶주림 방지 — 진단 #108)
   function writeBlob(m) {
     const b = u.uCloudBlobs.value[m.userData.blob];
     if (!b) return;
     const p = m.position;
     const hy = Math.max(0.001, Math.hypot(_sunDir.x, _sunDir.z));
     const nx = _sunDir.x / hy, nz = _sunDir.z / hy;         // 태양 수평방향(정규화)
-    const rake = Math.min(RAKE_MAX, (1 - Math.min(1, _sunDir.y)) * p.y * RAKE);
-    b.set(p.x - nx * rake, p.z - nz * rake, m.userData.w * SHADOW_R, Math.min(1, m.userData.op / 0.5));
+    const rakeMax = village ? villRakeMax : RAKE_MAX;
+    const rake = Math.min(rakeMax, (1 - Math.min(1, _sunDir.y)) * p.y * RAKE);
+    const rad = village ? villRadius : m.userData.w * SHADOW_R;
+    b.set(p.x - nx * rake, p.z - nz * rake, rad, Math.min(1, m.userData.op / 0.5));
   }
 
   function update(dt) {
@@ -421,8 +481,22 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     _sunDir.copy(sun.position).normalize();
     const alt = Math.max(0, _sunDir.y);               // 태양 고도(0..1)
     const inten = sun.intensity;                       // day2.6 sunset2.3 dawn1.7 night0.9
-    // 그림자 전역 세기: 밝은 낮 강, 석양 중강, 새벽 약, 야간 ~0 (live intensity 단조 매핑). #68 상향.
-    u.uCloudStr.value = 0.52 * smoothstep(1.2, 2.45, inten);
+    // 그림자 전역 세기: 밝은 낮 강, 석양 중강, 새벽 약. #68 상향.
+    const daylight = 0.52 * smoothstep(1.2, 2.45, inten);
+    if (village) {
+      // ── 달빛 구름 그림자(#108) ──────────────────────────────────────────────
+      // 야간(night) 조명은 sky.js 에서 sun(방향광)이 달빛으로 전용된다: 저강도(inten≈0.9)·청색
+      //   (sunColor 0x9fb4d9 → b>r). 낮/석양/새벽은 웜(r≥b). 그래서 sun.color 의 청색도로 "달밤"을
+      //   판별한다(sky 상태 미접촉 — 색·강도만 판독, 크로스페이드#50 중 lerp 되어 팟 없이 발현/소멸).
+      //   강도는 낮 대비 저감(#17 달빛 그림자와 정합) — 야간 dim 바닥과 균형(칠흑 금지: 1-0.20=0.80).
+      const cool = smoothstep(0.0, 0.16, sun.color.b - sun.color.r);   // 청색도(달빛=1, 웜=0)
+      const lowlit = 1 - smoothstep(1.15, 1.9, inten);                  // 저광량(야간=1, 낮=0)
+      const moonUp = _sunDir.y > 0.02 ? 1 : 0;                          // 달 지평선 위
+      const moonlight = 0.20 * cool * lowlit * moonUp;
+      u.uCloudStr.value = Math.max(daylight, moonlight);
+    } else {
+      u.uCloudStr.value = daylight;                    // env 단일건물: 기존식 그대로(무회귀)
+    }
 
     // 구름 색: 흰 바탕 → 태양색으로 살짝 물들이되 밑면은 따뜻하게(석양). 야간엔 어둡게.
     _warm.copy(sun.color);

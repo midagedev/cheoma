@@ -171,7 +171,8 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const C = site.center;
   // 필지 목표수: 연속 스케일(#89)은 plan 이 siteR 파생 연속값(opts.target)을 주입 → tier 경계에서
   //   호수(戶數)가 튀지 않는다. 미주입(구 호출)이면 이산 SCALE_TARGET 폴백(회귀 안전).
-  const target = (typeof opts.target === 'number' && opts.target > 0) ? Math.round(opts.target) : (SCALE_TARGET[scale] || 30);
+  //   target 0 도 유효(#114 외딴집·"절 하나만": 프론티지 0 — 종가 예약 코어는 plan 쪽 소관) — 미주입만 폴백.
+  const target = (typeof opts.target === 'number' && opts.target >= 0) ? Math.round(opts.target) : (SCALE_TARGET[scale] || 30);
   const parcels = [];
   const placed = makePlacedGrid();                              // 충돌 폴리곤 공간해시(예약분 포함)
   for (const b of blockers) if (b.poly) placed.add(b.poly);
