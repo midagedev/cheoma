@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tileSurfaceMaterial } from './palette.js';
+import { createThatchRoofProfile, THATCH_ROOF_SEGMENTS } from './thatch-profile.js';
 
 // 팔작지붕.
 // 좌표계: x = 정면 방향(폭), z = 깊이(+z가 정면), y = 높이.
@@ -607,18 +608,11 @@ function buildMatbaeGables(P, L, M, g, frontPoint, xr, yEaveTile) {
 //       엮은 용마름 롤.
 function buildThatchRoof(P, L, M) {
   const g = new THREE.Group();
-  const ovh = P.eaveOverhang;
-  const xEave = L.W / 2 + ovh, zEave = L.D / 2 + ovh;
-  const eaveY = L.eaveEdgeY;
-  const rise = L.ridgeY - eaveY;
-  const ridgeY = L.ridgeY;
-  const ridgeHalfX = Math.max(0.3, L.W / 2 - L.D / 2); // 용마루 반길이(우진각)
-  const thick = P.thatchThick ?? 0.38;
-  const ne = 4.2;                                      // 평면 초승형 지수(모서리 둥글림)
-  const kHip = 2.6;                                    // 힙 모서리 둥글림(어깨 넓은 둥근사각)
-  const profExp = 1.32;                                // 물매 곡률(↓ 원뿔감·↑ 부픈 돔) — 각지지 않게
-  const ridgeSag = 0.17;                               // 용마루 중앙 오목 처짐
-  const rx = ridgeHalfX / xEave;                       // 정규화 용마루 반길이
+  const profile = createThatchRoofProfile(P, L);
+  const {
+    xEave, zEave, eaveY, rise, ridgeY, ridgeHalfX, thick,
+    planExponent: ne, ridgeSag, planXZ, descend, heightAB,
+  } = profile;
 
   const straw = () => {
     const m = M.thatch.clone();
@@ -627,28 +621,10 @@ function buildThatchRoof(P, L, M) {
     return m;
   };
 
-  // 정규화 사각(a,b)∈[-1,1] → 둥근사각(초승형) 평면 좌표. 경계 m=max(|a|,|b|)=1이 초승형에 밀착.
-  const planXZ = (a, b) => {
-    const m = Math.max(Math.abs(a), Math.abs(b));
-    if (m < 1e-6) return [0, 0];
-    const ux = Math.abs(a / m), uz = Math.abs(b / m);
-    const r = 1 / Math.pow(Math.pow(ux, ne) + Math.pow(uz, ne), 1 / ne); // 초승형 반경(방향 의존)
-    return [a * r * xEave, b * r * zEave];
-  };
-  // 하강 dd(0=용마루, 1=처마): 용마루 평탄부(|a|<rx, b=0) → 경계로 갈수록 1.
-  const descend = (a, b) => {
-    const sa = Math.max(0, (Math.abs(a) - rx) / (1 - rx));
-    return Math.min(1, Math.pow(Math.pow(Math.abs(b), kHip) + Math.pow(sa, kHip), 1 / kHip));
-  };
-  const heightAB = (a, b) => {
-    const dd = descend(a, b);
-    const along = Math.max(0, 1 - Math.pow(Math.abs(a) / Math.max(1e-3, rx), 2));
-    return eaveY + rise * (1 - Math.pow(dd, profExp)) - ridgeSag * along * (1 - dd);
-  };
   const slopeLen = Math.hypot(zEave, rise);
 
   // ── 지붕면 그리드 (둥근사각) ── UV: v=하강 → 짚결이 경사 따라 아래로 흐름
-  const NA = 56, NB = 44;
+  const NA = THATCH_ROOF_SEGMENTS.a, NB = THATCH_ROOF_SEGMENTS.b;
   const pos = [], uv = [], idx = [];
   for (let ib = 0; ib <= NB; ib++) {
     for (let ia = 0; ia <= NA; ia++) {

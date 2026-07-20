@@ -49,7 +49,11 @@ const sun=new THREE.DirectionalLight(0xfff0dd,2.6);sun.position.set(30,42,26);su
 sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-22;sun.shadow.camera.right=22;sun.shadow.camera.top=22;sun.shadow.camera.bottom=-22;
 sun.shadow.camera.far=260;sun.shadow.bias=-0.0001;sun.shadow.normalBias=0.05;scene.add(sun);
 const hemi=new THREE.HemisphereLight(0xbdd0e4,0x8a7a63,0.9);scene.add(hemi);
-const P={...PRESETS[preset]};const building=buildBuilding(P);building.name='building';scene.add(building);
+const P={...PRESETS[preset]};
+for(const key of ['frontBays','sideBays','eaveOverhang','centerBayW','endBayW']){
+  if(q.has(key))P[key]=num(key,P[key]);
+}
+const building=buildBuilding(P);building.name='building';scene.add(building);
 const layout=computeLayout(P);
 const env=setupEnvironment(scene,{sun,hemi,renderer,layout});
 env.setSeason(season,{immediate:true});env.setTime(timeOfDay);env.setEnabled(true);
@@ -142,7 +146,14 @@ await open(`${base}/__th?preset=choga&frame=eave&time=sunset`);
 await aim([L.W*0.12, L.eaveEdgeY-0.8, L.zEave+3.4, L.W*0.30, L.eaveEdgeY+0.2, L.zEave]);
 await save('macro-silhouette-sunset');
 
-// 3) 눈(적설 쉘 정합)
+// 3) 편집 UI의 가장 넓고 처마가 짧은 유효 조합 — 둥근 처마가 벽 모서리까지 덮는지 확인
+const wide = 'frontBays=5&sideBays=3&eaveOverhang=0.8&centerBayW=3.8&endBayW=3.0';
+await open(`${base}/__th?preset=choga&frame=roofclose&time=day&${wide}`);
+await save('wide-roofclose-day');
+await open(`${base}/__th?preset=choga&frame=eave&time=day&${wide}`);
+await save('wide-eave-day');
+
+// 4) 눈(적설 쉘 정합)
 await open(`${base}/__th?preset=choga&frame=roofclose&time=day&weather=snow`);
 await page.evaluate(() => window.__advance(6));
 await save('snow-roofclose');

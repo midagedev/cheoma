@@ -1,4 +1,10 @@
 import * as THREE from 'three';
+import {
+  createThatchRoofProfile,
+  THATCH_WALL_END_OVERLAP,
+  thatchWallBreakpoints,
+  thatchWallTopAt,
+} from './thatch-profile.js';
 
 // 벽체·창호. 궁(palace): 전면 칸마다 세살문, 측·후면 회벽+광창.
 // 절(temple): 전면 어칸 띠살문 + 협칸(황토벽 하부 + 살창 상부), 측·후면 황토벽+작은 살창.
@@ -90,22 +96,10 @@ export function buildWalls(P, L, M) {
 // 지붕과 벽 사이 틈(모자 뜸)을 없앤다. 어칸 좁은 띠살문 + 작은 살창, 측면 진흙 굴뚝.
 function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   const y0 = L.podTopY + 0.05;
-  const ovh = P.eaveOverhang;
-  const xEave = L.W / 2 + ovh, zEave = L.D / 2 + ovh;
-  const eaveY = L.eaveEdgeY, rise = L.ridgeY - eaveY;
-  const ridgeHalfX = Math.max(0.3, L.W / 2 - L.D / 2);
-  const denomX = Math.max(0.01, xEave - ridgeHalfX);
-  const kHip = 2.4, ridgeSag = 0.16;
-  // 지붕 밑면 높이(우진각) — buildThatchRoof와 동일 공식(어깨 넓힘+용마루 오목 동기화)
-  const roofUnder = (x, z) => {
-    const dz = Math.abs(z) / zEave, dx = Math.max(0, Math.abs(x) - ridgeHalfX) / denomX;
-    const d = Math.min(1, Math.pow(Math.pow(dz, kHip) + Math.pow(dx, kHip), 1 / kHip));
-    const along = Math.max(0, 1 - Math.pow(Math.abs(x) / ridgeHalfX, 2));
-    return eaveY + rise * (1 - Math.pow(d, 1.55)) - ridgeSag * along * (1 - d);
-  };
+  const roofProfile = createThatchRoofProfile(P, L);
   const zF = L.zPos[lastZ], zB = L.zPos[0], xL = L.xPos[0], xR = L.xPos[lastX];
   const centerBay = Math.floor(lastX / 2);
-  const cr = P.columnRadius + 0.03;
+  const cr = P.columnRadius + THATCH_WALL_END_OVERLAP;
   // #55 변주 필드(집집이 창호 개수·배치·하방 판벽·툇마루가 다름). 미지정 시 기존 룩 기본값.
   const winBack = P.winBack != null ? P.winBack : 1;       // 후면 살창 개수(0~2)
   const winSide = !!P.winSide;                             // 측면(부엌 반대편) 봉창 유무
@@ -114,14 +108,17 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
 
   // 상단이 지붕선을 따르는 심벽 벽면(리본). axis 'x'=z고정, 'z'=x고정.
   const wallStrip = (axis, fixed, a, b) => {
-    const N = 28, pos = [], idx = [], uv = [];
-    for (let i = 0; i <= N; i++) {
-      const t = a + (b - a) * (i / N);
-      const x = axis === 'x' ? t : fixed;
-      const z = axis === 'x' ? fixed : t;
-      const top = roofUnder(x, z) + 0.05;   // 지붕 밑에 살짝 물려 틈 제거
+    const points = thatchWallBreakpoints(roofProfile, axis, fixed, a, b);
+    const N = points.length - 1, pos = [], idx = [], uv = [];
+    for (let i = 0; i < points.length; i++) {
+      const along = points[i];
+      const x = axis === 'x' ? along : Math.fround(fixed);
+      const z = axis === 'x' ? Math.fround(fixed) : along;
+      // 렌더 표면과 동일한 프로파일에서 3cm만 안으로 물려, 틈 없이 이엉 아래에 숨긴다.
+      const top = thatchWallTopAt(roofProfile, x, z);
       pos.push(x, y0, z, x, top, z);
-      uv.push(i * 0.5, 0, i * 0.5, 1.5);
+      const u = ((along - a) / (b - a)) * 14; // 기존 28분할의 0..14 반복 범위를 보존한다.
+      uv.push(u, 0, u, 1.5);
     }
     for (let i = 0; i < N; i++) {
       const A = i * 2, B = A + 1, C = A + 2, D = A + 3;
@@ -233,7 +230,7 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   // ── 부엌 끝 뭉툭한 진흙 굴뚝 스택(둥근 유기 형태·금 간 표면, 매끈 관 아님) ──
   // 후면 처마선 밖(-zEave 바깥)에 세워 연기가 지붕에 갇히지 않고 곧게 오르게 한다.
   // 라스 프로파일 회전체 = 단일 M.mud 메시 → smoke.js 연기 anchor 1개 유지(둘로 쪼개면 anchor 중복).
-  const zEaveW = L.D / 2 + ovh;
+  const zEaveW = roofProfile.zEave;
   const ccx = xR - 0.45, ccz = -zEaveW - 0.28;        // +x 부엌 코너·후면 처마 밖
   const prof = [
     [0.31, 0.00], [0.32, 0.25], [0.29, 0.60], [0.27, 1.05],
