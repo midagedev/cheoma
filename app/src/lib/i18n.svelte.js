@@ -90,6 +90,8 @@ const DICT = {
     vil_bays: '칸수', s_frontBays: '정면 칸', s_sideBays: '측면 칸',
     vil_hero_note: '종가·궁·절은 마을의 얼굴 — 고쳐 지을 수 없습니다.',
     hint_bays: '칸',
+    // 모바일 바텀시트 접기/펼치기(#154)
+    sheet_expand: '편집 열기', sheet_collapse: '접기',
   },
   en: {
     hero_enter: 'Click to enter',
@@ -176,6 +178,8 @@ const DICT = {
     vil_bays: 'Bays', s_frontBays: 'Front bays', s_sideBays: 'Side bays',
     vil_hero_note: 'The head house, palace and temple are the face of the village — not editable.',
     hint_bays: 'bays',
+    // Mobile bottom-sheet collapse/expand (#154)
+    sheet_expand: 'Edit', sheet_collapse: 'Collapse',
   },
 };
 

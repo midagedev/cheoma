@@ -9,6 +9,7 @@
   //                        은 detent [full, half, peek] 상주 시트(스크림 없음 — 부감에서 줌·필지 조작 유지).
   //                        detent prop 으로 컨텍스트 전환 시 외부에서 detent 요청(부감=peek, 근접=half).
   import { device } from '../lib/device.svelte.js';
+  import { t } from '../lib/i18n.svelte.js';
 
   let {
     open = false, onClose, variant = 'right', ariaLabel = 'panel',
@@ -85,9 +86,12 @@
     snap = best;
   }
   // 핸들 탭 = detent 토글(드래그 후 클릭은 무시).
+  //   context(#154): 기본 접힘(peek)이라 손잡이는 접힘↔펼침 2-state 토글 — '편집 열기' 버튼 은유.
+  //   그 외 카드(leftCard)는 3-state 순환, right 는 full↔half.
   function tapGrip() {
     if (suppressClick) { suppressClick = false; return; }
-    if (isCard) snap = snap === 'peek' ? 'half' : snap === 'half' ? 'full' : 'peek';
+    if (variant === 'context') snap = snap === 'peek' ? 'half' : 'peek';
+    else if (isCard) snap = snap === 'peek' ? 'half' : snap === 'half' ? 'full' : 'peek';
     else snap = snap === 'full' ? 'half' : 'full';
   }
 </script>
@@ -105,14 +109,24 @@
     aria-label={ariaLabel}
   >
     <div
-      class="grip" role="button" tabindex="0" aria-label="drag handle"
+      class="grip" class:context={variant === 'context'} role="button" tabindex="0"
+      aria-label={variant === 'context' ? (snap === 'peek' ? t('sheet_expand') : t('sheet_collapse')) : 'drag handle'}
+      aria-expanded={variant === 'context' ? snap !== 'peek' : undefined}
       onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}
       onclick={tapGrip}
       onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tapGrip(); } }}
     >
-      <span class="bar"></span>
-      {#if closable}
-        <button class="x" onclick={(e) => { e.stopPropagation(); onClose?.(); }} aria-label="close">×</button>
+      {#if variant === 'context'}
+        <!-- #154 접힘 기본 → 손잡이를 명시적 '편집 열기'/'접기' 버튼처럼(셰브런+라벨). 3D 뷰를 비워 둔다. -->
+        <span class="peekbtn">
+          <span class="chev" class:open={snap !== 'peek'} aria-hidden="true"></span>
+          <span class="lbl">{snap === 'peek' ? t('sheet_expand') : t('sheet_collapse')}</span>
+        </span>
+      {:else}
+        <span class="bar"></span>
+        {#if closable}
+          <button class="x" onclick={(e) => { e.stopPropagation(); onClose?.(); }} aria-label="close">×</button>
+        {/if}
       {/if}
     </div>
     <!-- #118 U1: context 헤더/푸터는 grip 아래 고정 도킹 — half detent(하단 46% 감춤)에서도 상단
@@ -254,6 +268,22 @@
     font-size: 22px; line-height: 1; color: var(--ink-soft);
     display: grid; place-items: center;
   }
+  /* #154 context 접힘/펼침 손잡이 — 명시적 '편집 열기'/'접기' 버튼(셰브런+라벨). 접힘 기본이라 이 버튼이
+     유일한 펼침 창구다(3D 뷰는 비워 둠). 데스크톱은 이 시트 자체가 없어 무영향. */
+  .grip.context { height: 46px; cursor: pointer; }
+  .peekbtn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 18px; border-radius: 999px;
+    background: rgba(44, 38, 32, 0.06); border: 1px solid var(--ink-hair);
+    font-family: var(--serif); font-size: 14px; font-weight: 700; color: var(--ink);
+  }
+  .peekbtn .chev {
+    width: 9px; height: 9px; margin-top: 2px;
+    border-right: 2px solid var(--ink-soft); border-bottom: 2px solid var(--ink-soft);
+    transform: rotate(-135deg);                       /* 접힘=위(펼치기) */
+    transition: transform 0.22s ease, margin 0.22s ease;
+  }
+  .peekbtn .chev.open { transform: rotate(45deg); margin-top: -2px; }   /* 펼침=아래(접기) */
   .scroll {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;

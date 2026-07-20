@@ -71,6 +71,37 @@
   let villageZooming = $state(false);          // focus 전환(돌리) 진행 중 — 크롬 숨김 판단
   let focusMorph = $state(0);                  // 0=마을(부감)·1=집(근접) 패널 컨텍스트 모프
   let heroLanding = $state(false);             // 부팅 종가 랜딩 중(패널 숨김 — 히어로 연출)
+  // 전환 완료 감시(#155): focusMorph 는 카메라 focus 트윈이 흘려주는 값이고, 부감 복귀(0)·근접 안착(1)의
+  //   확정은 그 트윈의 onDone(=villageReturnDone / villageSelect) 이벤트에만 달려 있다. 트윈이 다른 트윈으로
+  //   교체(supersede)되거나 유실되면 그 이벤트가 안 와 focusMorph 가 부감에서 1 에 갇히고, 그러면 ContextPanel
+  //   의 villageOpacity(1-smoothstep(morph))=0 이 되어 마을(부감) 편집 섹션이 통째로 사라진다("원경에서 항목이
+  //   하나도 안 보임"). 전환 개시 시 절대 상한(FOCUS_SETTLE_CAP_MS)을 무장해, 정상 전환(≈1.7s)은 완료 이벤트가
+  //   먼저 타이머를 해제하지만(무영향) 상한을 넘도록 완료 이벤트가 안 오면 엔진 권위 상태(getState().selected)로
+  //   컨텍스트를 확정해 패널이 영구히 갇히지 않게 한다(늦게 발동해도 목적지 끝값으로 스냅 → 안전).
+  let focusWatchdog = null;
+  let focusMorphLatched = false;               // 재조정 후 스테일 트윈이 흘리는 늦은 morph 이벤트 무시(교체된
+                                               //   트윈이 계속 이벤트를 흘리는 저사양·잔류 케이스 방어). 다음 전환
+                                               //   개시(Start/Return)에서 해제 — 새 트윈의 morph 는 정상 반영.
+  const FOCUS_SETTLE_CAP_MS = 3500;            // 최장 정상 전환(<2s) + 셰이더 컴파일 히치 여유
+  function clearFocusWatchdog() { if (focusWatchdog) { clearTimeout(focusWatchdog); focusWatchdog = null; } }
+  function armFocusWatchdog() {
+    clearFocusWatchdog();
+    focusMorphLatched = false;                 // 새 전환 개시 → morph 이벤트 다시 수용
+    if (heroLanding) return;                   // 히어로 랜딩(조립 수 초)은 감시 제외 — villageSelect 가 정리
+    focusWatchdog = setTimeout(reconcileFocusState, FOCUS_SETTLE_CAP_MS);
+  }
+  function reconcileFocusState() {
+    focusWatchdog = null;
+    if (!engine || !sceneVillage) return;
+    const st = engine.village.getState();
+    focusMorphLatched = true;                   // 이후 스테일 morph 이벤트가 확정값을 되돌리지 못하게 래치
+    if (!st.selected) {                         // 엔진은 부감(비-focus) → 마을 섹션으로 확정(갇힌 morph 해소)
+      villageEditing = null; villageZooming = false; focusMorph = 0;
+    } else {                                    // 엔진은 특정 필지 focus → 집 섹션으로 확정
+      villageZooming = false; focusMorph = 1;
+      if (!villageEditing && st.spec) seedEdit({ parcelId: st.selected, spec: st.spec });
+    }
+  }
   let waving = $state(false);                  // 리롤 웨이브 진행 중(#56 — 입력·버튼 잠금)
   let editParams = $state({});                 // { kind, frontBays, sideBays, roofPitch, eaveOverhang }
   let hoverInfo = $state(null);                // 호버 미니라벨 { spec, x, y }
@@ -165,7 +196,7 @@
     engine.on('villageMode', (on) => {
       sceneVillage = on;
       // 마을 씬 이탈 = 랜딩 종료(정상 완주든 폴백/리버트든) → heroLanding 해제로 #118 U4 크롬 스턱 방지.
-      if (!on) { villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0; villageZooming = false; waving = false; heroLanding = false; pendingCommit = null; }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
+      if (!on) { villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0; villageZooming = false; waving = false; heroLanding = false; pendingCommit = null; clearFocusWatchdog(); focusMorphLatched = false; }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
       else pullVillage();
       syncUrl();
     });
@@ -176,19 +207,22 @@
       hoverInfo = null; villageZooming = true;
       if (p && p.spec) { seedEdit(p); }
       chromaFaded = false;
+      armFocusWatchdog();                       // #155 전환 개시 → 스톨 감시 무장
     });
-    // 카메라 focus 트윈 진행 → 패널 컨텍스트 모프(같은 클록, 원칙 3).
-    engine.on('villageFocusMorph', (k) => { focusMorph = k; });
+    // 카메라 focus 트윈 진행 → 패널 컨텍스트 모프(같은 클록, 원칙 3). 감시 타이머는 전환 개시(Start/Return)에서
+    //   한 번 무장하고 여기선 재무장하지 않는다 — 완료 이벤트가 정상 전환에서 먼저 해제하고, 안 오면 상한 발동(#155).
+    engine.on('villageFocusMorph', (k) => { if (!focusMorphLatched) focusMorph = k; });
     engine.on('villageSelect', (p) => {
       villageZooming = false; heroLanding = false; focusMorph = 1;
       seedEdit(p);
       chromaFaded = false;
+      clearFocusWatchdog(); focusMorphLatched = false;   // #155 근접 안착 → 감시 해제
     });
     // focus-out START — 패널은 집 컨텍스트를 유지한 채 모프가 역행(villageFocusMorph 가 1→0).
-    engine.on('villageReturn', () => { villageZooming = true; hoverInfo = null; });
+    engine.on('villageReturn', () => { villageZooming = true; hoverInfo = null; armFocusWatchdog(); });   // #155
     // focus-out 완료(부감 도착) — 집 컨텍스트 해제, 마을 섹션만. 랜딩이 부감으로 귀착한 경우도 여기 —
     //   heroLanding 해제로 크롬 복원(#118 U4).
-    engine.on('villageReturnDone', () => { villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false; });
+    engine.on('villageReturnDone', () => { villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false; clearFocusWatchdog(); focusMorphLatched = false; });
     // 리롤 웨이브(#56): 진행 중 입력·버튼 잠금, 완료 시 호수·URL 갱신.
     engine.on('villageWave', (w) => {
       waving = w.phase === 'start';
@@ -298,6 +332,7 @@
       cancelAnimationFrame(flowRaf);
       stopWalkFeed();
       clearTimeout(toastTimer);
+      clearFocusWatchdog();
       engine?.dispose();
     };
   });
@@ -663,7 +698,7 @@
   <ContextPanel
     open={!heroLanding && !cine.active}
     morph={focusMorph}
-    detent={focusMorph >= 0.5 ? 'half' : 'peek'}
+    detent={null}
     scale={villageOpts.scale}
     includePalace={villageOpts.includePalace}
     includeTemple={villageOpts.includeTemple}
