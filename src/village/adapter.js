@@ -6,6 +6,7 @@ import { buildParcel } from '../layout/parcel.js';
 import { makeMaterials, setTextureRandom, applyThatchAge } from '../builder/palette.js';
 import { setGateRandom } from '../layout/gate.js';
 import { candleFlicker } from '../env/night-glow.js';
+import { setupVillageCritters } from '../env/critters.js';
 import { planVillage } from './plan.js';
 import { populateVillage, populateVillageSteps } from './populate.js';
 import { buildPalaceCompound } from './palace.js';
@@ -785,6 +786,54 @@ function finishVillage(opts, seed, plan, group) {
   };
   group.userData.getSnowInfo = () => ({ target: snowTarget, accum: +snowAccum.toFixed(3), value: +snowU.value.toFixed(3), pinned: snowPinned });
 
+  // ── 마을 소동물: 개·고양이·까치·새 떼(critters.js setupVillageCritters) ─────────────
+  //   env.group(마을 모드에서 은닉)에 붙는 setupCritters 와 달리 마을 루트(group)에 직접 붙어 부감·근접
+  //   양쪽에서 보인다. 닭·소(populate buildVillageAnimals)와 별개 레이어. 인스턴싱으로 규모 무관 ≤4 드로우콜.
+  //   결정론: 자체 시드 rng만 소비(post-gen, 전역 Math.random 불침해) → 마을 생성(plan+populate) 해시 불변.
+  //   group 자식이므로 add/remove/dispose(disposeTree traverse)가 마을과 함께 자동 처리된다.
+  const villageCritters = (() => {
+    const cParcels = [];
+    for (const p of plan.parcels) {
+      if (p.hero || !p.poly) continue;   // 히어로 종가는 engine focusRing·근접 링이 담당(닭·소와 동일 정책)
+      cParcels.push({
+        x: p.center.x, z: p.center.z,
+        baseY: p.baseY != null ? p.baseY : site.heightAt(p.center.x, p.center.z),
+        W: p.plotW || 20, D: p.plotD || 18,
+        rotY: parcelRotY(p), kind: p.kind === 'giwa' ? 'giwa' : 'choga',
+      });
+    }
+    // 까치 페르치: 당산나무 수관 꼭대기(y+h·0.82) + 마당 과실수 수관(y+0.5). populate 가 노출한 앵커 재사용.
+    const treePerches = [];
+    for (const g of (group.userData.guardianAnchors || [])) treePerches.push({ x: g.x, y: g.y + (g.h || 12) * 0.82, z: g.z });
+    for (const y of (group.userData.yardTreeAnchors || [])) treePerches.push({ x: y.x, y: y.y + 0.5, z: y.z });
+    const b = plan.bounds || {};
+    const radius = Math.max(b.w || 0, b.d || 0) * 0.5 || 40;
+    const c = site.center || { x: 0, z: 0 };
+    const rig = setupVillageCritters(group, {
+      heightAt: (x, z) => (site && typeof site.heightAt === 'function' ? site.heightAt(x, z) : 0),
+      center: { x: c.x, z: c.z }, radius, scale: plan.scale,
+      parcels: cParcels, treePerches, seed: (seed ^ 0x00c1c7) >>> 0,
+    });
+    rig.setTime(time); rig.setSeason(season);
+    return rig;
+  })();
+
+  // 논 소(animals.js, populate 배선) 원경 부스트 — 부감(기본 뷰)에서 소가 서브픽셀로 뭉개지지 않게 cow 그룹
+  //   스케일을 카메라 고도로 램프(근경=1, 개·고양이는 원경 생략이나 소는 시대 대표동물이라 부감 가시). animals
+  //   cow.update 는 g.scale 을 건드리지 않아(발끝 y=0 기준 상향 성장) 여기서 소유해도 충돌 없음. cow 는 재롤에
+  //   재생성되지 않으므로 1회 수집. updateLod(매 프레임 camera)에서 구동.
+  const COW_BOOST = 2.5;
+  let _cowGroups = null;
+  function applyCowAerial(camera) {
+    if (_cowGroups === null) { _cowGroups = []; group.traverse((o) => { if (o.name === 'cow') _cowGroups.push(o); }); }
+    if (!_cowGroups.length) return;
+    const y = (camera && camera.position) ? camera.position.y : 0;
+    const x = Math.max(0, Math.min(1, (y - 46) / 80));
+    const hi = x * x * (3 - 2 * x);                 // smoothstep (villageCritters 와 동일 램프)
+    const s = 1 + hi * (COW_BOOST - 1);
+    for (const g of _cowGroups) g.scale.setScalar(s);
+  }
+
   const api = {
     group,
     plan,
@@ -1011,9 +1060,10 @@ function finishVillage(opts, seed, plan, group) {
       vlights.apply(name);                    // 마을 전용 헤미 리프트 + 안티솔라 웜 필
       group.userData.setWaterTime?.(name);   // 개울 물 글린트·하늘반사 시간대 하향(야간 흰 띠 방지)
       group.userData.setAnimalsTime?.(name); // 마당 닭 야간 홰 자세(소동물 #41)
+      villageCritters.setTime(name);         // 개·고양이·까치·새 떼(밤엔 새 떼 숨김·활동 저하)
       ambField?.setTime(name);               // 카메라 앵커 필드 앰비언스 시간대(연기·모트, #105)
     },
-    setSeason(name, _opts) { season = name; group.userData.setSeason?.(name); ambField?.setSeason(name); },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
+    setSeason(name, _opts) { season = name; group.userData.setSeason?.(name); villageCritters.setSeason(name); ambField?.setSeason(name); },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
     setWeather(name) {
       weather = name;
       snowTarget = name === 'snow' ? 1 : 0;
@@ -1028,6 +1078,7 @@ function finishVillage(opts, seed, plan, group) {
       _lastDt = dt;                                // updateLod(카메라 필요)가 same-frame dt 로 앰비언스 필드 구동(#105)
       vlights.step(dt);                            // 마을 조명 리그 시간대 크로스페이드(태스크 #50)
       group.userData.update?.(dt);                 // 개울 물결 uTime
+      villageCritters.update(dt);                  // 개·고양이·까치·새 떼 앰비언트(마을 루트 자식)
       cloudsHandle?.update(dt);                    // 산 구름·물안개 표류 + 흐르는 구름 그림자(태양 판독, #57)
       stepNightGlow(dt);                           // 창호 발광 크로스페이드 + 촛불 일렁임(밤)
       // 지붕 눈 흰틴트 강도(#131): 선형 램프로 서서히(쌓임 ~46s, 녹음 ~16s) — 즉시 점프 아님(무드).
@@ -1041,6 +1092,8 @@ function finishVillage(opts, seed, plan, group) {
     //   engine.js 가 camera 를 넘겨 호출. far 청크 없으면(R<340) no-op.
     updateLod(camera) {
       const swaps = group.userData.updateChunkLod?.(camera) || 0;   // #140-E 스왑 수 반환(engine 이 그림자 1프레임 갱신)
+      villageCritters.updateLod(camera);           // 새 떼·까치 원경(부감) 스케일 부스트 램프
+      applyCowAerial(camera);                       // 논 소 원경(부감) 스케일 부스트 램프
       ambField?.update(_lastDt, camera);           // 카메라 앵커 앰비언스 필드(#105) — same-frame dt·camera
       // 흩날리는 낙엽 고도 게이트(#98 원경 정책) — 낙엽 입자는 나무·지면 근처에서만 의미. 부감(카메라
       //   고도 높음)에선 끈다(가을 무드는 능선 틴트·마당 단풍이 담당). env.update 가 매 프레임 autumn 이면

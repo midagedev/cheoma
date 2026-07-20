@@ -111,6 +111,110 @@ function buildBirdGeo() {
   return g;
 }
 
+// 새 떼(boids) 공용 팩토리 — 단일 건물 스코프(setupCritters)와 마을 스코프(setupVillageCritters)가
+// 홈 앵커·고도밴드·원정 반경만 달리해 재사용한다. rng 소비 순서는 두 호출자가 동일(N→homeAngle→개체×N→tExc).
+//   반환 update(dt, t, active): active=false(밤)면 정지. inst.visible 은 호출자가 토글.
+//   cx/cz/alt/ax/az: 홈 선회 타원(중심·고도·반축). exCx/exCz: 원정 목표 중심(기본 원점 — 단일 건물 파리티).
+//   bandLo/bandHi: 고도 밴드(수관 위·프레임 상단 사이로 무리를 가둠). color/size: 원경 먹점 실루엣.
+function makeBoidFlock(group, rng, {
+  cx = 2, cz = 12, alt = 17, ax = 4, az = 3,
+  bandLo = 14, bandHi = 21, awayR = 122, exCx = 0, exCz = 0,
+  sizeLo = 0.5, sizeHi = 0.8, color = 0x2b2e28,
+} = {}) {
+  const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3();
+  const M = new THREE.Matrix4();
+  let scaleBoost = 1;   // 원경(부감) 가시성용 배율 — 호출자가 카메라 고도로 램프(마을 스코프). 근경=1.
+  const N = rng.int(12, 16);
+  const geo = buildBirdGeo();
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, fog: false });
+  const inst = new THREE.InstancedMesh(geo, mat, N);
+  inst.name = 'birds';
+  inst.frustumCulled = false;   // 원정 시 경계구가 커져 팝 방지
+  inst.castShadow = false;
+  group.add(inst);
+
+  const pos = [], vel = [], phase = [], size = [];
+  let homeAngle = rng.range(0, TAU);
+  const homePt = (ang, ta) => _v.set(cx + Math.cos(ang) * ax, alt + 2.5 * Math.sin(ta * 0.11), cz + Math.sin(ang) * az);
+  const anchor = homePt(homeAngle, 0).clone();
+  const target = anchor.clone();
+  for (let i = 0; i < N; i++) {
+    const a = rng.range(0, TAU), r = rng.range(3, 9);
+    const py = anchor.y + rng.range(-3, 3);
+    pos.push(new THREE.Vector3(anchor.x + Math.cos(a) * r, py, anchor.z + Math.sin(a) * r));
+    const sp = rng.range(6, 8);
+    vel.push(new THREE.Vector3(Math.cos(a) * sp, 0, Math.sin(a) * sp));
+    phase.push(rng.range(0, TAU));
+    size.push(rng.range(sizeLo, sizeHi));   // 원경 먹점: 작게
+  }
+
+  let mode = 'home';
+  let tExc = poisson(rng, 55, 40, 90);   // 다음 원정 시각
+  let holdMax = 0, hold = 0;
+
+  function update(dt, t, active) {
+    if (!active) return;
+    homeAngle += 0.085 * dt;
+    if (mode === 'home') {
+      target.copy(homePt(homeAngle, t));
+      if (t >= tExc) {
+        mode = 'away';
+        const aa = homeAngle + Math.PI + rng.range(-0.6, 0.6); // 반대편으로 → 화면 가로지름
+        target.set(exCx + Math.cos(aa) * awayR, 30 + rng.range(-3, 7), exCz + Math.sin(aa) * awayR);
+        holdMax = rng.range(5, 9); hold = 0;
+      }
+    } else {
+      if (anchor.distanceTo(target) < 12) {
+        hold += dt;
+        if (hold > holdMax) { mode = 'home'; tExc = t + poisson(rng, 55, 40, 90); }
+      }
+    }
+    anchor.lerp(target, 1 - Math.exp(-dt / 2.4));
+
+    // boids: 분리·정렬·응집 + 앵커 유인 + 고도 유지.
+    const rSep = 3.5, rNb = 12;
+    for (let i = 0; i < N; i++) {
+      const pi = pos[i], vi = vel[i];
+      let sx = 0, sy = 0, sz = 0, ax2 = 0, ay = 0, az2 = 0, cx2 = 0, cy = 0, cz2 = 0, ns = 0, nn = 0;
+      for (let j = 0; j < N; j++) {
+        if (j === i) continue;
+        const pj = pos[j];
+        const dx = pi.x - pj.x, dy = pi.y - pj.y, dz = pi.z - pj.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < rSep * rSep && d2 > 1e-4) { const inv = 1 / d2; sx += dx * inv; sy += dy * inv; sz += dz * inv; ns++; }
+        if (d2 < rNb * rNb) { ax2 += vel[j].x; ay += vel[j].y; az2 += vel[j].z; cx2 += pj.x; cy += pj.y; cz2 += pj.z; nn++; }
+      }
+      let fx = 0, fy = 0, fz = 0;
+      if (ns) { fx += sx * 1.6; fy += sy * 1.6; fz += sz * 1.6; }
+      if (nn) {
+        fx += (ax2 / nn - vi.x) * 0.7; fy += (ay / nn - vi.y) * 0.7; fz += (az2 / nn - vi.z) * 0.7;    // 정렬
+        fx += (cx2 / nn - pi.x) * 0.06; fy += (cy / nn - pi.y) * 0.06; fz += (cz2 / nn - pi.z) * 0.06; // 응집
+      }
+      fx += (anchor.x - pi.x) * 0.11; fy += (anchor.y - pi.y) * 0.13; fz += (anchor.z - pi.z) * 0.11; // 앵커
+      if (pi.y < bandLo) fy += (bandLo - pi.y) * 0.8;        // 나무 위로(지면·수관 회피)
+      else if (pi.y > bandHi) fy -= (pi.y - bandHi) * 0.9;   // 천장(프레임 상단 이탈 방지)
+      vi.x += fx * dt; vi.y += fy * dt; vi.z += fz * dt;
+      const sp = Math.hypot(vi.x, vi.y, vi.z) || 1e-3;
+      const cl = Math.min(9, Math.max(6, sp)) / sp;
+      vi.x *= cl; vi.y = Math.max(-3, Math.min(3, vi.y * cl)); vi.z *= cl;
+      pi.x += vi.x * dt; pi.y += vi.y * dt; pi.z += vi.z * dt;
+    }
+    for (let i = 0; i < N; i++) {
+      const pi = pos[i], vi = vel[i];
+      const yaw = -Math.atan2(vi.z, vi.x);
+      const flap = 0.35 + 0.95 * (0.5 + 0.5 * Math.sin(t * 11 + phase[i]));
+      const k = size[i] * scaleBoost;
+      _e.set(0, yaw, 0);
+      _q.setFromEuler(_e);
+      _s.set(k, k * flap, k);
+      M.compose(pi, _q, _s);
+      inst.setMatrixAt(i, M);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+  }
+  return { inst, update, setScaleBoost(v) { scaleBoost = v; } };
+}
+
 export function setupCritters(parent, { heightAt = () => 0, layout = {} } = {}) {
   const group = new THREE.Group();
   group.name = 'critters';
@@ -144,107 +248,13 @@ export function setupCritters(parent, { heightAt = () => 0, layout = {} } = {}) 
 
   // ==================================================================
   // 1) 새 떼 (boids) — 마을 상공 앵커 주위 선회 + 간헐 원정(능선 너머)
+  //   홈 선회: 앞마당 상공(+z, 카메라 방향)에 중심을 둔 완만한 타원 → 기본 프레이밍에 늘 든다.
+  //   원정 목표는 원점 중심(exCx/exCz 기본 0). makeBoidFlock 공용 구현.
   // ==================================================================
-  const flock = (() => {
-    const N = rng.int(12, 16);
-    const geo = buildBirdGeo();
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0x2b2e28, side: THREE.DoubleSide, fog: false,
-    });
-    const inst = new THREE.InstancedMesh(geo, mat, N);
-    inst.name = 'birds';
-    inst.frustumCulled = false;   // 원정 시 경계구가 커져 팝 방지
-    inst.castShadow = false;
-    group.add(inst);
-
-    const pos = [], vel = [], phase = [], size = [];
-    let homeAngle = rng.range(0, TAU);
-    // 홈 선회: 앞마당 상공(+z, 카메라 방향)에 중심을 둔 완만한 타원 → 기본 프레이밍에 늘 든다.
-    const homeCx = 2, homeCz = 12, homeAx = 4, homeAz = 3, homeAlt0 = 17;
-    const homePt = (ang, ta) => _v.set(homeCx + Math.cos(ang) * homeAx, homeAlt0 + 2.5 * Math.sin(ta * 0.11), homeCz + Math.sin(ang) * homeAz);
-    const anchor = homePt(homeAngle, 0).clone();
-    const target = anchor.clone();
-    for (let i = 0; i < N; i++) {
-      const a = rng.range(0, TAU), r = rng.range(3, 9);
-      pos.push(new THREE.Vector3(anchor.x + Math.cos(a) * r, anchor.y + rng.range(-3, 3), anchor.z + Math.sin(a) * r));
-      const sp = rng.range(6, 8);
-      vel.push(new THREE.Vector3(Math.cos(a) * sp, 0, Math.sin(a) * sp));
-      phase.push(rng.range(0, TAU));
-      size.push(rng.range(0.5, 0.8));   // 원경 먹점: 작게
-    }
-
-    let mode = 'home';
-    let tExc = poisson(rng, 55, 40, 90);   // 다음 원정 시각
-    const awayR = 122;
-    let holdMax = 0, hold = 0;
-
-    function update(dt) {
-      if (!flockActive) return;
-      // 앵커 선회 + 원정 상태기계
-      homeAngle += 0.085 * dt;
-      if (mode === 'home') {
-        target.copy(homePt(homeAngle, t));
-        if (t >= tExc) {
-          mode = 'away';
-          const aa = homeAngle + Math.PI + rng.range(-0.6, 0.6); // 반대편으로 → 화면 가로지름
-          target.set(Math.cos(aa) * awayR, 30 + rng.range(-3, 7), Math.sin(aa) * awayR);
-          holdMax = rng.range(5, 9); hold = 0;
-        }
-      } else {
-        if (anchor.distanceTo(target) < 12) {
-          hold += dt;
-          if (hold > holdMax) { mode = 'home'; tExc = t + poisson(rng, 55, 40, 90); }
-        }
-      }
-      anchor.lerp(target, 1 - Math.exp(-dt / 2.4));
-
-      // boids: 분리·정렬·응집 + 앵커 유인 + 고도 유지.
-      // 무리가 한 덩어리로 뭉쳐 프레임에 머물되, 개체 간 간격은 유지 → 흩뿌린 먹점 무리.
-      const rSep = 3.5, rNb = 12;
-      for (let i = 0; i < N; i++) {
-        const pi = pos[i], vi = vel[i];
-        let sx = 0, sy = 0, sz = 0, ax = 0, ay = 0, az = 0, cx = 0, cy = 0, cz = 0, ns = 0, nn = 0;
-        for (let j = 0; j < N; j++) {
-          if (j === i) continue;
-          const pj = pos[j];
-          const dx = pi.x - pj.x, dy = pi.y - pj.y, dz = pi.z - pj.z;
-          const d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 < rSep * rSep && d2 > 1e-4) { const inv = 1 / d2; sx += dx * inv; sy += dy * inv; sz += dz * inv; ns++; }
-          if (d2 < rNb * rNb) { ax += vel[j].x; ay += vel[j].y; az += vel[j].z; cx += pj.x; cy += pj.y; cz += pj.z; nn++; }
-        }
-        // 가속도 누적
-        let fx = 0, fy = 0, fz = 0;
-        if (ns) { fx += sx * 1.6; fy += sy * 1.6; fz += sz * 1.6; }
-        if (nn) {
-          fx += (ax / nn - vi.x) * 0.7; fy += (ay / nn - vi.y) * 0.7; fz += (az / nn - vi.z) * 0.7;    // 정렬
-          fx += (cx / nn - pi.x) * 0.06; fy += (cy / nn - pi.y) * 0.06; fz += (cz / nn - pi.z) * 0.06; // 응집
-        }
-        fx += (anchor.x - pi.x) * 0.11; fy += (anchor.y - pi.y) * 0.13; fz += (anchor.z - pi.z) * 0.11; // 앵커
-        if (pi.y < 14) fy += (14 - pi.y) * 0.8;        // 나무 위로(지면·수관 회피)
-        else if (pi.y > 21) fy -= (pi.y - 21) * 0.9;   // 천장(프레임 상단 이탈 방지)
-        vi.x += fx * dt; vi.y += fy * dt; vi.z += fz * dt;
-        // 속도 클램프(순항 6~9)
-        const sp = Math.hypot(vi.x, vi.y, vi.z) || 1e-3;
-        const cl = Math.min(9, Math.max(6, sp)) / sp;
-        vi.x *= cl; vi.y = Math.max(-3, Math.min(3, vi.y * cl)); vi.z *= cl;
-        pi.x += vi.x * dt; pi.y += vi.y * dt; pi.z += vi.z * dt;
-      }
-      // 매트릭스: yaw=진행방향, Y 스케일 요동=날갯짓
-      for (let i = 0; i < N; i++) {
-        const pi = pos[i], vi = vel[i];
-        const yaw = -Math.atan2(vi.z, vi.x);
-        const flap = 0.35 + 0.95 * (0.5 + 0.5 * Math.sin(t * 11 + phase[i]));
-        _e.set(0, yaw, 0);
-        _q.setFromEuler(_e);
-        _s.set(size[i], size[i] * flap, size[i]);
-        M.compose(pi, _q, _s);
-        inst.setMatrixAt(i, M);
-      }
-      inst.instanceMatrix.needsUpdate = true;
-    }
-    const M = new THREE.Matrix4();
-    return { inst, update };
-  })();
+  const flock = makeBoidFlock(group, rng, {
+    cx: 2, cz: 12, alt: 17, ax: 4, az: 3,
+    bandLo: 14, bandHi: 21, awayR: 122,
+  });
 
   // 나무 페르치 수집: 건물 가까운 활엽수 상단 수관 지점 몇 곳(까치가 지붕↔나무를 오감).
   // 나무 인스턴스 행렬을 복호화해 위치·스케일을 얻는다(seasons.buildLeaves 와 동일 방식).
@@ -502,7 +512,7 @@ export function setupCritters(parent, { heightAt = () => 0, layout = {} } = {}) 
   // ---------- 공개 API ----------
   function update(dt) {
     t += dt;
-    flock.update(dt);
+    flock.update(dt, t, flockActive);
     magpies.update(dt);
     dog.update(dt);
     cat.update(dt);
@@ -523,5 +533,276 @@ export function setupCritters(parent, { heightAt = () => 0, layout = {} } = {}) 
     get dogState() { return dog.state; },
     // 검증 전용: 까치를 나무 페르치로 스냅(스크린샷 조준용). 페르치 없으면 null.
     debugMagpieTree() { return magpies.debugToTree(); },
+  };
+}
+
+// ============================================================================
+// 마을 스코프 소동물 — 개·고양이·까치·새 떼. setupCritters(단일 건물 하나에 종속)와 달리 마을 전역을
+//   상대한다. env.group(마을 모드에서 은닉됨)이 아니라 어댑터가 넘긴 마을 루트(parent)에 직접 붙어
+//   부감·근접 양쪽에서 보인다. 닭·소(populate buildVillageAnimals)와는 별개 레이어.
+//
+//   setupVillageCritters(parent, { heightAt, center, radius, scale, parcels, treePerches, seed }) →
+//     { update(dt), setTime, setSeason, setEnabled, setFade, group }   // setupAnimals 와 동형 계약
+//
+//   parcels:     [{ x, z, baseY, W, D, rotY, kind }]  비-히어로 주거 필지(월드좌표·회전).
+//   treePerches: [{ x, y, z }]                        당산나무·마당나무 수관 지점(까치 페르치).
+//
+// 성능: 개·고양이·까치·새 각각 단일 InstancedMesh(부위 애니는 개체별 매트릭스 합성) → 규모 무관 ≤4 드로우콜.
+//   개체 상한은 규모별(CAP). 지오·헬퍼(buildDog/buildCat*/buildMagpie*/buildBirdGeo, tint/place/poisson,
+//   makeBoidFlock)는 setupCritters 와 전면 공유.
+// 결정론: 전용 makeRng(seed)만 소비 — 전역 Math.random 을 건드리지 않아 마을 생성(plan+populate) 해시와
+//   독립적이다. 어댑터가 생성 완료(finishVillage) 후 post-gen 레이어로 붙이므로 재현성 불변.
+// 스타일: setupCritters 와 동일 로우폴리·flatShading. 좌표 규약 로컬 +X 정면. 밤엔 새 떼 숨김·활동 저하.
+export function setupVillageCritters(parent, {
+  heightAt = () => 0,
+  center = { x: 0, z: 0 },
+  radius = 40,
+  scale = 'village',
+  parcels = [],
+  treePerches = [],
+  seed = 4242,
+} = {}) {
+  const group = new THREE.Group();
+  group.name = 'village-critters';
+  parent.add(group);
+
+  const rng = makeRng(seed >>> 0);
+  const solidMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.9, metalness: 0, flatShading: true,
+  });
+
+  let flockActive = true;   // 밤엔 false → 새 떼 숨김·까치/고양이 이동 자제
+  let live = 1;             // 밤엔 낮은 활동성(이동 느림·휴식 김)
+  let t = 0;
+  // 원경(부감) 가시성 배율 — updateLod(camera)가 카메라 고도로 램프(근경=1). 부감에서 서브픽셀 소실 방지.
+  //   새 떼·까치만 부스트(개·고양이는 원경 생략 정책). 소는 어댑터가 논 위 cow 를 별도 스케일.
+  const BIRD_BOOST = 3.2, MAG_BOOST = 2.2;
+  let magAerial = 1;
+
+  const _q = new THREE.Quaternion(), _e = new THREE.Euler();
+  const _p = new THREE.Vector3(), _sc = new THREE.Vector3();
+  const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
+
+  // 규모별 개체 상한(과밀·산만 방지). 전부 인스턴싱이라 드로우콜은 개체수와 무관.
+  const CAP = ({
+    hamlet:  { dog: 1, cat: 1, magpie: 2 },
+    village: { dog: 2, cat: 2, magpie: 3 },
+    town:    { dog: 4, cat: 3, magpie: 4 },
+    capital: { dog: 5, cat: 4, magpie: 5 },
+    hanyang: { dog: 6, cat: 5, magpie: 6 },
+  })[scale] || { dog: 2, cat: 2, magpie: 3 };
+
+  // 필지를 자체 rng 로 결정론적 셔플 → 개·고양이·까치 홈으로 분배(겹쳐도 무방, 오프셋이 다름).
+  const shuffled = parcels.map((p) => ({ p, k: rng() })).sort((a, b) => a.k - b.k).map((o) => o.p);
+  const take = (n) => shuffled.slice(0, Math.max(0, Math.min(n, shuffled.length)));
+  // 필지 로컬(fx=우, fz=앞/+z) → 월드. parcelMatrix(T·Ry) 규약과 동일(populate 소동물 배치와 일치).
+  const toWorld = (p, fx, fz) => {
+    const cos = Math.cos(p.rotY), sin = Math.sin(p.rotY);
+    return { x: p.x + fx * cos + fz * sin, z: p.z - fx * sin + fz * cos };
+  };
+
+  // ==================================================================
+  // 1) 새 떼 — 마을 중심 상공 선회 + 간헐 원정(마을 밖으로). 고도·반경은 규모 비례.
+  // ==================================================================
+  const alt = Math.min(60, Math.max(22, 20 + radius * 0.28));
+  const flock = makeBoidFlock(group, rng, {
+    cx: center.x, cz: center.z, alt, ax: Math.max(6, radius * 0.34), az: Math.max(5, radius * 0.28),
+    bandLo: alt - 7, bandHi: alt + 7, awayR: radius * 1.7 + 70, exCx: center.x, exCz: center.z,
+    sizeLo: 0.6, sizeHi: 1.05,
+  });
+
+  // ==================================================================
+  // 2) 개 — 필지 앞마당(대문·길가) 근처를 홈으로 삼아 그 둘레를 랜덤워크. 이따금 앉아 쉼.
+  // ==================================================================
+  const dogs = (() => {
+    const homes = take(CAP.dog).map((p) => {
+      const w = toWorld(p, p.W * 0.1, p.D * 0.62);   // 앞마당(+z) 가장자리
+      return { x: w.x, z: w.z, baseY: p.baseY };
+    });
+    const count = homes.length;
+    if (!count) return { update() {}, count: 0 };
+    const inst = new THREE.InstancedMesh(buildDog(), solidMat, count);
+    inst.name = 'v-dogs'; inst.castShadow = true; inst.frustumCulled = false;
+    group.add(inst);
+    const RAD = 6.5;   // 홈 주변 배회 반경
+    const S = homes.map((h) => ({
+      hx: h.x, hz: h.z, baseY: h.baseY, px: h.x, pz: h.z, wpx: h.x, wpz: h.z,
+      heading: rng.range(0, TAU), mode: 'walk', rest: 0, sit: 0, gaitPh: rng.range(0, TAU),
+    }));
+    const pickWp = (s) => { const a = rng.range(0, TAU), r = rng.range(2, RAD); s.wpx = s.hx + Math.cos(a) * r; s.wpz = s.hz + Math.sin(a) * r; };
+    for (const s of S) pickWp(s);
+    function update(dt) {
+      for (let i = 0; i < count; i++) {
+        const s = S[i];
+        if (s.mode === 'walk') {
+          const dx = s.wpx - s.px, dz = s.wpz - s.pz, d = Math.hypot(dx, dz);
+          if (d < 0.4) { if (rng() < 0.5) { s.mode = 'rest'; s.rest = rng.range(4, 12) / live; } else pickWp(s); }
+          else {
+            const want = Math.atan2(dz, dx);
+            let da = ((want - s.heading + Math.PI) % TAU + TAU) % TAU - Math.PI;
+            s.heading += Math.max(-1.6 * dt, Math.min(1.6 * dt, da));
+            const sp = (0.8 + 0.6 * rng()) * live;
+            s.px += Math.cos(s.heading) * sp * dt; s.pz += Math.sin(s.heading) * sp * dt;
+            s.gaitPh += dt * 9 * live;
+          }
+        } else { s.rest -= dt; if (s.rest <= 0) { s.mode = 'walk'; pickWp(s); } }
+        s.sit += ((s.mode === 'rest' ? 1 : 0) - s.sit) * Math.min(1, dt * 3);
+        const bounce = s.mode === 'walk' ? Math.abs(Math.sin(s.gaitPh)) * 0.05 : 0;
+        const rz = (s.mode === 'walk' ? Math.sin(s.gaitPh) * 0.03 : 0) + s.sit * 0.16;
+        _m.makeTranslation(s.px, s.baseY - s.sit * 0.12 + bounce, s.pz);
+        _m.multiply(_m2.makeRotationY(-s.heading));
+        if (rz) _m.multiply(_m2.makeRotationZ(rz));
+        inst.setMatrixAt(i, _m);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+    }
+    return { update, count };
+  })();
+
+  // ==================================================================
+  // 3) 고양이 — 필지 담·기단 모서리에 웅크려 앉음(대부분). 이따금 근처로 사뿐 이동. 꼬리는 정지각으로 구움.
+  // ==================================================================
+  const cats = (() => {
+    const catGeo = mergeGeometries([buildCatBody(), place(buildCatTail(), -0.24, 0.20, 0, { rz: 0.35 })], false);
+    const homes = take(CAP.cat).map((p) => {
+      const w = toWorld(p, p.W * 0.34, p.D * 0.4);   // 앞마당 한쪽 모서리
+      return { x: w.x, z: w.z, baseY: p.baseY, yaw: -p.rotY - Math.PI / 2 };
+    });
+    const count = homes.length;
+    if (!count) { catGeo.dispose(); return { update() {}, count: 0 }; }
+    const inst = new THREE.InstancedMesh(catGeo, solidMat, count);
+    inst.name = 'v-cats'; inst.castShadow = true; inst.frustumCulled = false;
+    group.add(inst);
+    const S = homes.map((h) => {
+      const a = rng.range(0, TAU), r = rng.range(1.2, 3);
+      return {
+        baseY: h.baseY, yaw: h.yaw, ph: rng.range(0, TAU),
+        ax: h.x, az: h.z, bx: h.x + Math.cos(a) * r, bz: h.z + Math.sin(a) * r,   // 두 페르치 사이 왕래
+        from: 'a', mode: 'sit', u: 0, dur: 1, tNext: t + poisson(rng, 26, 14, 44),
+      };
+    });
+    function update(dt) {
+      for (let i = 0; i < count; i++) {
+        const s = S[i];
+        let px, pz, hop = 0;
+        const frx = s.from === 'a' ? s.ax : s.bx, frz = s.from === 'a' ? s.az : s.bz;
+        const tox = s.from === 'a' ? s.bx : s.ax, toz = s.from === 'a' ? s.bz : s.az;
+        if (s.mode === 'sit') {
+          px = frx; pz = frz;
+          if (t >= s.tNext && flockActive) { s.mode = 'move'; s.u = 0; s.dur = 0.8 + Math.hypot(tox - frx, toz - frz) * 0.09; }
+        } else {
+          s.u += dt / s.dur; const u = Math.min(1, s.u);
+          px = frx + (tox - frx) * u; pz = frz + (toz - frz) * u;
+          hop = Math.sin(Math.PI * u) * 0.3;   // 낮고 사뿐한 호
+          if (u >= 1) { s.mode = 'sit'; s.from = s.from === 'a' ? 'b' : 'a'; s.tNext = t + poisson(rng, 26, 14, 44) / live; }
+        }
+        const yaw = s.yaw + 0.05 * Math.sin(t * 0.9 + s.ph);   // 미세 자세
+        _p.set(px, s.baseY + hop, pz);
+        _e.set(0, yaw, 0); _q.setFromEuler(_e); _sc.set(1, 1, 1);
+        _m.compose(_p, _q, _sc);
+        inst.setMatrixAt(i, _m);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+    }
+    return { update, count };
+  })();
+
+  // ==================================================================
+  // 4) 까치 — 당산나무·마당나무 수관, 그리고 지붕 용마루에 앉아 있다가 근처로 짧은 호 비행. 매우 한국적(까치+당산나무).
+  // ==================================================================
+  const magpies = (() => {
+    // 페르치 후보: 나무 수관 우선(iconic) + 지붕(용마루 추정 높이). 지붕은 나무가 모자랄 때 채운다.
+    const perches = [];
+    for (const tp of treePerches) perches.push({ x: tp.x, y: tp.y, z: tp.z });
+    for (const p of shuffled) perches.push({ x: p.x, y: p.baseY + (p.kind === 'giwa' ? 5.2 : 4.0), z: p.z });
+    const count = Math.min(CAP.magpie, perches.length);
+    if (!count) return { update() {}, count: 0 };
+    const magGeo = mergeGeometries([buildMagpieBody(), place(buildMagpieTail(), -0.14, 0.14, 0, { rz: 0.5 })], false);
+    const inst = new THREE.InstancedMesh(magGeo, solidMat, count);
+    inst.name = 'v-magpies'; inst.castShadow = true; inst.frustumCulled = false;
+    group.add(inst);
+    const SCALE = 1.8;         // 원경에서도 읽히게(까치 ~0.45m)
+    const MAXHOP = 26;         // 마을을 가로지르는 장거리 비행 방지(근처 페르치만)
+    const S = [];
+    for (let i = 0; i < count; i++) S.push({ cur: i, mode: 'perch', yaw: rng.range(0, TAU), ph: rng.range(0, TAU), tNext: t + poisson(rng, 12, 5, 22), fly: null });
+    function nearPerch(ci) {
+      const a = perches[ci];
+      const cand = [];
+      for (let i = 0; i < perches.length; i++) { if (i === ci) continue; const b = perches[i]; if (Math.hypot(b.x - a.x, b.z - a.z) < MAXHOP) cand.push(i); }
+      return cand.length ? cand[rng.int(0, cand.length - 1)] : -1;
+    }
+    function update(dt) {
+      for (let i = 0; i < count; i++) {
+        const s = S[i];
+        if (s.mode === 'perch') {
+          const p = perches[s.cur];
+          const yaw = s.yaw + 0.05 * Math.sin(t * 1.3 + s.ph);
+          const bob = 0.02 * Math.sin(t * 2.2 + s.ph);
+          _p.set(p.x, p.y + bob, p.z);
+          if (t >= s.tNext && flockActive) {
+            const np = nearPerch(s.cur);
+            if (np < 0) { s.tNext = t + poisson(rng, 12, 5, 22); }
+            else {
+              const a = perches[s.cur], b = perches[np];
+              s.fly = { ax: a.x, ay: a.y, az: a.z, bx: b.x, by: b.y, bz: b.z, u: 0, dur: 0.9 + Math.hypot(b.x - a.x, b.z - a.z) * 0.05, dir: Math.atan2(b.z - a.z, b.x - a.x) };
+              s.cur = np; s.mode = 'fly';
+            }
+          }
+          _e.set(0, yaw, 0);
+        } else {
+          const f = s.fly; f.u += dt / f.dur; const u = Math.min(1, f.u);
+          const px = f.ax + (f.bx - f.ax) * u, pz = f.az + (f.bz - f.az) * u;
+          let py = f.ay + (f.by - f.ay) * u + Math.sin(Math.PI * u) * (1.2 + Math.hypot(f.bx - f.ax, f.bz - f.az) * 0.06);
+          py += 0.05 * Math.sin(t * 26);   // 날갯짓 진동
+          _p.set(px, py, pz);
+          _e.set(0, -f.dir, 0);
+          if (u >= 1) { s.mode = 'perch'; s.yaw = -f.dir; s.tNext = t + poisson(rng, 12, 5, 22) / live; }
+        }
+        const sc = SCALE * magAerial;   // 원경 부스트(부감에서 지붕·나무 위 까치가 서브픽셀로 사라지지 않게)
+        _q.setFromEuler(_e); _sc.set(sc, sc, sc);
+        _m.compose(_p, _q, _sc);
+        inst.setMatrixAt(i, _m);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+    }
+    return { update, count };
+  })();
+
+  // ---------- 공개 API ----------
+  function update(dt) {
+    t += dt;
+    flock.update(dt, t, flockActive);
+    magpies.update(dt);
+    dogs.update(dt);
+    cats.update(dt);
+  }
+  function setTime(name) {
+    flockActive = name !== 'night';
+    live = name === 'night' ? 0.45 : 1;
+    flock.inst.visible = flockActive;
+  }
+  // 카메라 고도 구동 원경 부스트(어댑터 updateLod 가 매 프레임 camera 로 호출). 근경(<46)=1, 부감으로 램프.
+  //   개·고양이는 그대로(원경 생략 정책) — 새 떼·까치만 서브픽셀 소실 방지로 키운다.
+  function updateLod(camera) {
+    const y = (camera && camera.position) ? camera.position.y : 0;
+    const x = Math.max(0, Math.min(1, (y - 46) / 80));   // 46~126m 램프
+    const hi = x * x * (3 - 2 * x);                       // smoothstep
+    flock.setScaleBoost(1 + hi * (BIRD_BOOST - 1));
+    magAerial = 1 + hi * (MAG_BOOST - 1);
+  }
+  function setSeason(_name) { /* 계절 연동 여지(현재 무영향) */ }
+  function setEnabled(v) { group.visible = !!v; }
+  // 근접 링 크로스페이드(0..1) 파리티(setupAnimals.setFade 와 동형). 공유 재질 하나라 개체 전체 균일 페이드.
+  function setFade(v) {
+    const a = Math.max(0, Math.min(1, v));
+    solidMat.transparent = a < 0.999;
+    solidMat.opacity = a;
+    solidMat.depthWrite = a >= 0.999;
+  }
+
+  return {
+    update, updateLod, setTime, setSeason, setEnabled, setFade, group,
+    // 검증용: 개체수(스크린샷 조준·게이트).
+    counts: { dogs: dogs.count, cats: cats.count, magpies: magpies.count },
   };
 }
