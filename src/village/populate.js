@@ -872,7 +872,9 @@ export function* populateVillageSteps(plan, opts = {}) {
 
   // 1) 지형 · 2) 개울 (단일 메시 — 병합 대상 아님)
   //   지형 최외곽은 site.edge 로 신축(비정형 테두리). warpInner 안쪽(마을·논·개울·필지·랜드마크)은 불변.
-  const warpInner = Math.max(computeFixedRadius(plan, site) + 6, site.R * 0.9);
+  // #143 R*0.9 바닥을 terrainR 안으로 캡 — 한양(R*0.9=450 > terrainR=380)서 신축밴드 소멸→사각 테두리 해소.
+  //   ★ forest-crunch.js crunchForest 의 warpInner 와 동일식 유지(워커=동기 byte-identical 필수).
+  const warpInner = Math.max(computeFixedRadius(plan, site) + 6, Math.min(site.R * 0.9, (site.terrainR || site.R) - 6));
   // 구조물 거리 필드(#115) — 지형 황토색·숲 침투 식재가 공유(개활지=집 윤곽, 비원형).
   const clearDist = makeClearance(plan, site);
   yield 'setup+clearance';

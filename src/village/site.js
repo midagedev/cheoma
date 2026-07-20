@@ -247,7 +247,10 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   const streamZat = (x) => streamMeander(x);
   const streamHalf = 0.018 * R + 0.9;         // 개울 반폭
   const streamPts = [];
-  const sx0 = -R * 1.02, sx1 = R * 1.02, SN = 72;
+  // #143 절단 지형 밖 워터리본 삐침 방지 — 개울 끝(±1.02R)을 terrainR 안으로 클램프.
+  //   heightAt·streamCarve 는 연속 streamMeander(x) 라 불침해, 워터리본 지오메트리(site.stream.pts)만 짧아진다.
+  const sEx = Math.min(R * 1.02, terrainR - 4);
+  const sx0 = -sEx, sx1 = sEx, SN = 72;
   for (let i = 0; i <= SN; i++) { const x = sx0 + (sx1 - sx0) * (i / SN); streamPts.push({ x, z: streamZat(x) }); }
   const streamCross = { x: 0, z: streamZat(0) };  // 진입 스파인이 개울을 건너는 지점(다리)
 

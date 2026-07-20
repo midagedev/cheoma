@@ -84,7 +84,7 @@ const DICT = {
     vil_reroll: '마을 다시 짓기', vil_reroll_tip: '마을을 통째로 다시 짓기 (해체→재생성→조립)',
     vil_replay: '다시 보기', vil_replay_tip: '이 집 다시 짓는 장면 보기 (같은 집)',
     vil_reroll_house: '이 집 다시 짓기', vil_reroll_house_tip: '이 집만 새 씨앗으로 (마을·이웃은 그대로)',
-    crumb_hanok: '종가', crumb_palace: '관아', crumb_palace_compound: '궁궐',
+    crumb_hanok: '종가', crumb_palace: '관아', crumb_palace_compound: '궁궐', crumb_temple: '산사',
     vil_houses: '호',
     vil_edit_title: '집 고치기', vil_edit_sub: 'edit house',
     vil_bays: '칸수', s_frontBays: '정면 칸', s_sideBays: '측면 칸',
@@ -170,7 +170,7 @@ const DICT = {
     vil_reroll: 'Rebuild village',
     vil_replay: 'Replay', vil_replay_tip: 'Watch this house rise again (same house)',
     vil_reroll_house: 'Reroll this house', vil_reroll_house_tip: 'Reseed this house only (village & neighbours unchanged)',
-    crumb_hanok: 'Head house', crumb_palace: 'Magistracy', crumb_palace_compound: 'Palace',
+    crumb_hanok: 'Head house', crumb_palace: 'Magistracy', crumb_palace_compound: 'Palace', crumb_temple: 'Temple',
     vil_houses: ' houses',   // 선행 공백 — 카운트 조합 시 "28 houses" (ko '호'는 붙여 "28호")
     vil_edit_title: 'Edit house', vil_edit_sub: 'plan & profile',
     vil_bays: 'Bays', s_frontBays: 'Front bays', s_sideBays: 'Side bays',

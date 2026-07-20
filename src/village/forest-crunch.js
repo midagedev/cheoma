@@ -550,7 +550,9 @@ function forestTuning(plan) {
 export function crunchForest(plan, site, opts = {}) {
   const seed = ((plan.seed || 0) ^ 0x0f03e5) >>> 0;
   const { forestK, rockK } = forestTuning(plan);
-  const warp = opts.warp || makeEdgeWarp(site, Math.max(computeFixedRadius(plan, site) + 6, site.R * 0.9));
+  // #143 warpInner: R*0.9 바닥을 terrainR 안으로 캡 — 대규모(한양)서 R*0.9(450)>terrainR(380) 이면 신축밴드가
+  //   지형 밖이라 테두리가 사각화됨. ★ populate.js buildVillage 의 warpInner 와 반드시 동일식(워커=동기 결정론).
+  const warp = opts.warp || makeEdgeWarp(site, Math.max(computeFixedRadius(plan, site) + 6, Math.min(site.R * 0.9, (site.terrainR || site.R) - 6)));
   const mask = opts.mask || makeTreeMask(plan, site);
   const clearDist = opts.clearDist || makeClearance(plan, site);
   const sampler = makeTerrainSampler(site, warp);

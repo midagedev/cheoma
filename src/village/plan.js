@@ -407,7 +407,8 @@ function placeTemple(site, seed) {
     const angFrac = 0.34 + (0.52 - 0.34) * (ai / 5);
     const ang = angFrac * Math.PI;                   // 0=정북(주산 배후), 0.5=정측(청룡·백호 어깨)
     const dir = { x: side * Math.sin(ang), z: -Math.cos(ang) };
-    for (let r = 0.55 * R; r <= 1.00 * R; r += 0.02 * R) {
+    const rCap = Math.min(1.00 * R, (site.terrainR || R) * 0.94);   // #143 절 스캔 상한을 terrainR 안으로(절단 지형 밖 off-mesh 배치 방지)
+    for (let r = 0.55 * R; r <= rCap; r += 0.02 * R) {
       const x = C.x + dir.x * r, z = C.z + dir.z * r;
       const gy = site.heightAt(x, z);
       const er = gy / Hmax;
@@ -419,7 +420,7 @@ function placeTemple(site, seed) {
     }
   }
   if (!best) {   // 밴드 미발견(극소 분지) 안전 폴백 — 측면 산기슭
-    const x = side * R * 0.62, z = C.z - R * 0.18;
+    const x = side * Math.min(R * 0.62, (site.terrainR || R) * 0.9), z = C.z - R * 0.18;   // #143 폴백도 terrainR 안
     best = { x, z };
   }
   // 일주문·대웅전은 마을(하향)을 향한다 — 절→마을 중심 방향으로 정면(남향 성분 유지).

@@ -34,6 +34,7 @@
   const houseLabel = $derived.by(() => {
     if (!spec) return '';
     if (spec.family === 'palace-compound') return t('crumb_palace_compound');   // 궁궐(#93)
+    if (spec.family === 'temple') return t('crumb_temple');   // 산사(#147) — 줌 전용 랜드마크
     if (spec.hero) return t(spec.heroStyle === 'hanok' ? 'crumb_hanok' : 'crumb_palace');
     const k = params.kind || spec.kind;
     return t(k === 'giwa' ? 'type_giwa_l' : 'type_choga_l');
@@ -235,7 +236,7 @@
       style:pointer-events={houseActive ? 'auto' : 'none'}
       aria-hidden={!houseActive}
     >
-      {#if spec}
+      {#if spec && spec.family !== 'temple'}
         <div class="house-actions">
           <button class="hbtn ghost" onclick={() => onReplay?.()} disabled={houseBusy} title={t('vil_replay_tip')}>
             <span class="hk" aria-hidden="true">再</span>{t('vil_replay')}

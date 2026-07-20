@@ -219,6 +219,7 @@ export function villageDefaults() {
 export function schemaFor(spec) {
   if (!spec) return { family: 'regular', tabs: false, sections: [] };
   if (spec.family === 'palace-compound') return { family: 'palace-compound', tabs: false, sections: PALACE_COMPOUND_SECTIONS };
+  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: [] };   // #147 절: 편집 섹션 없음(줌만)
   if (spec.hero) {
     const hs = spec.heroStyle === 'hanok' ? 'hanok' : 'palace';
     return { family: 'hero', heroStyle: hs, tabs: false, sections: hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS };

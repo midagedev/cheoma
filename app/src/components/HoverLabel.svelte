@@ -8,6 +8,7 @@
     if (!info) return '';
     const spec = info.spec;
     if (spec.family === 'palace-compound') return t('crumb_palace_compound');
+    if (spec.family === 'temple') return t('crumb_temple');   // #147 산사
     if (spec.hero) return t(spec.heroStyle === 'hanok' ? 'crumb_hanok' : 'crumb_palace');
     return t('type_' + (spec.kind === 'giwa' ? 'giwa' : 'choga') + '_l');
   });
