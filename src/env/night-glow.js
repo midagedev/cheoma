@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // 야간 창호 실내광 — 밤에 한지 창이 호롱불 온기로 은은히 밝아 "생활감"을 준다.
-//   setupNightGlow({ getBuilding }) → { setTime(name), onBuildingChanged(), setEnabled(v) }
+//   setupNightGlow({ getBuilding }) → { setTime(name), onBuildingChanged(), setEnabled(v), dispose() }
 //
 // 구현 방침 (builder 파일 무수정 — weather.js 처럼 traverse/userData 접근만):
 //  - night 일 때 건물 공유 재질(building.userData.materials)의 한지 창호(door·hanji)에
@@ -30,6 +30,7 @@ export function candleFlicker(t, phase) {
 }
 
 export function setupNightGlow({ getBuilding }) {
+  let disposed = false;
   let time = 'day';
   let enabled = false;
   let t = 0;   // 플리커 누적 시계(결정론)
@@ -155,6 +156,7 @@ export function setupNightGlow({ getBuilding }) {
 
   // 촛불 일렁임 + 밤 진입/이탈 크로스페이드. 매 프레임 호출(내부에서 게이트).
   function update(dt) {
+    if (disposed) return;
     started = true;
     if (Math.abs(nightness - nightGoal) > 1e-4) {
       nightness += (nightGoal - nightness) * Math.min(1, dt * NIGHT_RATE);
@@ -167,9 +169,17 @@ export function setupNightGlow({ getBuilding }) {
     setGlowLevel(true);
   }
 
-  function setTime(name) { time = name; reconcile(); }
-  function setEnabled(v) { enabled = !!v; reconcile(); }
-  function onBuildingChanged() { if (patched.length) restore(); reconcile(); }   // 새 건물 재질·조명 재적용
+  function setTime(name) { if (disposed) return; time = name; reconcile(); }
+  function setEnabled(v) { if (disposed) return; enabled = !!v; reconcile(); }
+  function onBuildingChanged() { if (disposed) return; if (patched.length) restore(); reconcile(); }   // 새 건물 재질·조명 재적용
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    enabled = false;
+    nightGoal = 0;
+    nightness = 0;
+    restore();
+  }
 
-  return { setTime, onBuildingChanged, setEnabled, update };
+  return { setTime, onBuildingChanged, setEnabled, update, dispose };
 }

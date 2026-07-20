@@ -24,15 +24,54 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
   outline.selectedObjects = [];
   post.composer.insertPass(outline, post.composer.passes.length - 1);
 
+  // constructor.name 은 three 배포 빌드에서 선행 '_'가 붙거나 minify될 수 있다. 소유한 패스
+  // 참조로 이름을 고정해 브라우저/빌드 종류와 무관한 검증 계약을 제공한다.
+  const debugNames = new Map([
+    [post.renderPass, 'RenderPass'],
+    [post.gradePass, 'GradePass'],
+    [post.rimPass, 'RimPass'],
+    [post.bloomPass, 'UnrealBloomPass'],
+    [post.bokehPass, 'BokehPass'],
+    [post.flarePass, 'FlarePass'],
+    [outline, 'OutlinePass'],
+    [post.outputPass, 'OutputPass'],
+  ].filter(([pass]) => !!pass));
+
+  let disposed = false;
   return {
     post,
     outline,
     dofOn: !perf,
+    debugPassOrder() {
+      return post.composer.passes.map((pass) => debugNames.get(pass) || pass?.name || 'Pass');
+    },
+    debugResolution() {
+      return {
+        pixelRatio: renderer.getPixelRatio(),
+        composer: {
+          width: post.composer.renderTarget1.width,
+          height: post.composer.renderTarget1.height,
+        },
+        outline: {
+          width: outline.renderTargetMaskBuffer.width,
+          height: outline.renderTargetMaskBuffer.height,
+        },
+      };
+    },
     resize(w, h) {
+      if (disposed) return;
       post.setSize(w, h);
       // composer.setSize restores bloom to full resolution, so compact mode reapplies its cap.
       applyBloomResolution(w, h);
-      outline.setSize(w, h);
+      // OutlinePass 크기는 composer가 현재 DPR을 반영한 device px로 이미 전파한다.
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      outline.selectedObjects = [];
+      post.composer.removePass(outline);
+      outline.dispose();
+      post.dispose();
     },
   };
 }

@@ -63,7 +63,8 @@ const SKIP_NAMES = new Set(['terrain', 'stream', 'paddyField']);
 export function createFresnelRim(scene) {
   // 모든 패치 재질이 참조 공유하는 uniform(seasons 패턴). 한 번 갱신하면 패치된 전 재질에 반영.
   const u = {
-    uRimColor: { value: new THREE.Color(0xffc070).convertSRGBToLinear() },
+    // r185 Color(hex)는 sRGB 입력을 working-linear로 자동 변환한다. 추가 변환하면 이중 디코드된다.
+    uRimColor: { value: new THREE.Color(0xffc070) },
     uSunViewDir: { value: new THREE.Vector3(0, 0, 1) }, // 뷰공간 태양 방향(post 가 매 프레임 세팅)
     uRimStrength: { value: 0.0 },   // cur.rim × altGate(저고도) × backlit(역광) — post 가 세팅
     uRimPower: { value: 1.92 },     // 프레넬 지수(담백하고 예리한 에지 실선 복원)
@@ -71,6 +72,15 @@ export function createFresnelRim(scene) {
     uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
     uRimNear: { value: 24.0 },      // 근경 거리 게이트 시작(뷰공간 깊이) — 근경 focus 림 불변
     uRimFar: { value: 175.0 },      // 원경 능선·far 건물 제외(#119: 부감/전환 원경 림 과다 하향, 210→175)
+  };
+
+  // 그룹 계수는 셰이더 리터럴이 아니라 재질별 uniform으로 전달한다. onBeforeCompile 클로저의
+  // toString()은 캡처값을 구분하지 않으므로 리터럴을 구우면 서로 다른 셰이더가 같은 프로그램
+  // 캐시키를 갖는다. 소스는 하나로 유지하고 uniform만 나누면 프로그램 변형 없이 의도가 보존된다.
+  const groupUniforms = {
+    building: { value: RIM_GROUP_MUL.building },
+    misc: { value: RIM_GROUP_MUL.misc },
+    organic: { value: RIM_GROUP_MUL.organic },
   };
 
   // 커버리지 카운트(검증 로그): 재질군별 패치 수 — 나무·풀·소품 포함 증명·제외 준수 확인.
@@ -118,8 +128,7 @@ export function createFresnelRim(scene) {
     if (!includable(mat)) return;
     mat.userData.__rimPatched = true;
     counts.total++; counts[group]++;
-    // 강도 계수를 셰이더에 리터럴 상수로 굽는다(재질별 onBeforeCompile 클로저 — 유일 uniform 추가 없음).
-    const mul = (RIM_GROUP_MUL[group] ?? 1.0).toFixed(4);
+    const groupUniform = groupUniforms[group] || groupUniforms.misc;
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
@@ -131,6 +140,7 @@ export function createFresnelRim(scene) {
       shader.uniforms.uRimScale = u.uRimScale;
       shader.uniforms.uRimNear = u.uRimNear;
       shader.uniforms.uRimFar = u.uRimFar;
+      shader.uniforms.uRimGroupMul = groupUniform;
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
           uniform vec3 uRimColor;
@@ -140,7 +150,8 @@ export function createFresnelRim(scene) {
           uniform float uRimWrap;
           uniform float uRimScale;
           uniform float uRimNear;
-          uniform float uRimFar;`)
+          uniform float uRimFar;
+          uniform float uRimGroupMul;`)
         .replace('#include <opaque_fragment>', `
           {
             // 프레넬(그레이징): 자기 실루엣 에지에서 최대. 이웃/타표면 샘플 전무 → X-ray 불가.
@@ -156,8 +167,8 @@ export function createFresnelRim(scene) {
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
             float _rim = _fres * mix(uRimWrap, 1.0, _side) * _df * uRimStrength * uRimScale;
             // 톤매핑 전(선형 HDR)에 outgoingLight 로 가산 → bloom 이 밝은 처마 킥을 흡수,
-            // OutputPass ACES 가 한 번만 롤오프. 재질군 강도 계수(${mul})로 유기물/소품 절제.
-            outgoingLight += uRimColor * max(_rim, 0.0) * ${mul};
+            // OutputPass ACES 가 한 번만 롤오프. 재질군 uniform으로 유기물/소품 강도를 절제.
+            outgoingLight += uRimColor * max(_rim, 0.0) * uRimGroupMul;
           }
           #include <opaque_fragment>`);
     };
@@ -192,6 +203,13 @@ export function createFresnelRim(scene) {
     setSunViewDir(v) { u.uSunViewDir.value.copy(v); },
     get patchedCount() { return counts.total; },
     get coverage() { return { ...counts }; },
+    get groupMultipliers() {
+      return {
+        building: groupUniforms.building.value,
+        misc: groupUniforms.misc.value,
+        organic: groupUniforms.organic.value,
+      };
+    },
     // 패치 자체는 되돌리지 않되(셰이더는 무해히 잔존), 강도·마스터를 0 으로 눌러 잔여 림 소거.
     dispose() { u.uRimStrength.value = 0; u.uRimScale.value = 0; },
   };

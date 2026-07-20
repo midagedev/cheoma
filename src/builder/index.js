@@ -7,6 +7,9 @@ import { buildBrackets } from './brackets.js';
 import { buildWalls } from './walls.js';
 import { buildRoof } from './roof.js';
 import { buildGiwa } from './giwa.js';
+import { disposeBuilding, registerBuildingResources } from './lifecycle.js';
+
+export { disposeBuilding };
 
 // 파라미터 → 건물 그룹. 파트별 그룹 이름을 달아 조립 애니메이션에 대비한다.
 //   P.mats(옵트인, #149): 호출측이 공유 재질셋을 주면 makeMaterials 를 건너뛰고 그걸 쓴다.
@@ -24,7 +27,7 @@ export function buildBuilding(P) {
     const root = buildGiwa(P, M);
     root.userData.layout = computeLayout(P);
     root.userData.materials = M;
-    return root;
+    return registerBuildingResources(root, M, !P.mats);
   }
   const L = computeLayout(P);
   const root = new THREE.Group();
@@ -44,5 +47,5 @@ export function buildBuilding(P) {
 
   root.userData.layout = L;
   root.userData.materials = M;
-  return root;
+  return registerBuildingResources(root, M, !P.mats);
 }

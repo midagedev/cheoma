@@ -42,6 +42,7 @@ const LITTER_DOWN = 12;    // 낙엽 사라짐 시간(초)
 const TAU = Math.PI * 2;
 
 export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
+  let disposed = false;
   // ---------- 대상 재질 수집 ----------
   const treesGroup = envGroup.getObjectByName('trees');
   const terrainGroup = envGroup.getObjectByName('terrain');
@@ -103,6 +104,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
   }
 
   function setSeason(name, opts = {}) {
+    if (disposed) return;
     if (!['spring', 'summer', 'autumn'].includes(name)) name = 'summer';
     pending = name;
     partGoal = name === 'summer' ? 0 : 1;
@@ -138,6 +140,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
   }
 
   function update(dt) {
+    if (disposed) return;
     t += dt;
     const k = Math.min(1, dt * RATE);
 
@@ -191,11 +194,15 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
   }
 
   // shot 하네스 훅: 낙엽 누적 단계 고정(은은한 증가 비교 컷). v=null 이면 자유 진행.
+  let seasonDebug = null;
   if (typeof window !== 'undefined') {
-    window.__season = { setLitter(v) { pinnedLitter = v; if (v != null && litter) { litterLevel = v; litter.setLevel(v); } } };
+    seasonDebug = { setLitter(v) { pinnedLitter = v; if (v != null && litter) { litterLevel = v; litter.setLevel(v); } } };
+    window.__season = seasonDebug;
   }
 
   function dispose() {
+    if (disposed) return;
+    disposed = true;
     if (leaves) {
       envGroup.remove(leaves.mesh);
       leaves.mesh.geometry.dispose();
@@ -210,7 +217,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
     }
     uTargetAmt.value = 0;
     uGroundAmt.value = 0;
-    if (typeof window !== 'undefined' && window.__season) delete window.__season;
+    if (typeof window !== 'undefined' && window.__season === seasonDebug) delete window.__season;
   }
 
   return { setSeason, update, dispose, get season() { return season; } };

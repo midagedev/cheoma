@@ -248,9 +248,20 @@ export function setupCinematic(camera, controls, { layout, getLayout, domElement
     domElement.addEventListener('wheel', interrupt, { passive: true });
   }
 
+  let disposed = false;
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    stop();
+    if (domElement) {
+      domElement.removeEventListener('pointerdown', interrupt);
+      domElement.removeEventListener('wheel', interrupt);
+    }
+  }
+
   return {
     names,
-    play, stop, update, setProgress, record,
+    play, stop, update, setProgress, record, dispose,
     isPlaying: () => state === 'playing',
     isActive: () => state !== 'idle',
   };

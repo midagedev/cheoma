@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { disposeObjectTree } from '../core/three-resources.js';
 import { buildTerrain } from './terrain.js';
 import { buildTrees } from './trees.js';
 import { buildMountains } from './mountains.js';
@@ -14,19 +15,45 @@ import { setupClouds, createCloudUniforms } from './clouds.js';
 export { createFocusRing } from './focus.js';   // 앰비언스 근접 링(#79) — focus-in 필지 풀 앰비언스
 export { setupGrass } from './grass.js';         // focus 링 바람 풀(#90) — 줌인 한정 인스턴스드 풀
 
+// 환경 ON/OFF 경계에서 호출자 소유 scene/light 상태를 identity와 정밀도 손실 없이 보존한다.
+// 별도 함수라 Texture/CubeTexture 배경과 FogExp2 계약을 전체 환경 생성 없이 빠르게 검증할 수 있다.
+export function captureEnvironmentFallback(scene, { sun, hemi, renderer }) {
+  return {
+    background: scene.background,
+    backgroundColor: scene.background?.isColor ? scene.background.clone() : null,
+    fog: scene.fog,
+    fogColor: scene.fog?.color?.clone?.() || null,
+    fogNear: scene.fog?.near,
+    fogFar: scene.fog?.far,
+    fogDensity: scene.fog?.density,
+    exposure: renderer.toneMappingExposure,
+    sunPos: sun.position.clone(), sunColor: sun.color.clone(), sunInt: sun.intensity,
+    hemiSky: hemi.color.clone(), hemiGround: hemi.groundColor.clone(), hemiInt: hemi.intensity,
+  };
+}
+
+export function restoreEnvironmentFallback(scene, { sun, hemi, renderer }, fallback) {
+  scene.background = fallback.background;
+  if (fallback.backgroundColor && scene.background?.isColor) scene.background.copy(fallback.backgroundColor);
+  scene.fog = fallback.fog;
+  if (scene.fog && fallback.fogColor) {
+    scene.fog.color.copy(fallback.fogColor);
+    if (scene.fog.isFogExp2) scene.fog.density = fallback.fogDensity;
+    else { scene.fog.near = fallback.fogNear; scene.fog.far = fallback.fogFar; }
+  }
+  renderer.toneMappingExposure = fallback.exposure;
+  sun.position.copy(fallback.sunPos); sun.color.copy(fallback.sunColor); sun.intensity = fallback.sunInt;
+  hemi.color.copy(fallback.hemiSky); hemi.groundColor.copy(fallback.hemiGround); hemi.intensity = fallback.hemiInt;
+}
+
 // 산수화 환경 레이어를 조립한다.
 //   setupEnvironment(scene, { sun, hemi, renderer, layout })
-//     → { group, setTime(name), setSeason(name, opts), update(dt), setEnabled(bool) }
+//     → { group, setTime(name), setSeason(name, opts), update(dt), setEnabled(bool), dispose() }
 // 환경 OFF 시 셋업 시점의 배경·안개·조명 상태로 복원한다(기존 단순 배경 폴백).
 export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
-  // 폴백(현 상태) 캡처
-  const fb = {
-    bg: scene.background && scene.background.clone ? scene.background.clone() : null,
-    fog: scene.fog ? { c: scene.fog.color.getHex(), near: scene.fog.near, far: scene.fog.far } : null,
-    exposure: renderer.toneMappingExposure,
-    sunPos: sun.position.clone(), sunColor: sun.color.getHex(), sunInt: sun.intensity,
-    hemiSky: hemi.color.getHex(), hemiGround: hemi.groundColor.getHex(), hemiInt: hemi.intensity,
-  };
+  // 폴백(현 상태) 캡처. Texture/CubeTexture 배경과 FogExp2까지 호출자 객체 identity를
+  // 그대로 돌려준다. 환경이 켜진 동안 Color/Fog 값이 in-place로 바뀔 수 있어 값도 함께 보존한다.
+  const fb = captureEnvironmentFallback(scene, { sun, hemi, renderer });
 
   const group = new THREE.Group();
   group.name = 'environment';
@@ -100,6 +127,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   const lanternSway = setupLanternSway({ scene, getBuilding: () => scene.getObjectByName('building') });
 
   let enabled = false;
+  let disposed = false;
   let currentTime = 'day';
   let currentSeason = 'summer';
   let everApplied = false;   // 첫 적용은 항상 즉시(로드 시 트윈-인 방지). 이후 다이얼만 크로스페이드.
@@ -119,21 +147,18 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     for (const fn of fogMods) { try { fn(scene); } catch (e) { /* 모디파이어 오류가 루프를 깨지 않게 */ } }
   }
   function composeFogNow() { if (enabled && !immediateMode) applyFogBaseAndMods(); }
-  function addFogModifier(fn) { if (fn && !fogMods.includes(fn)) { fogMods.push(fn); composeFogNow(); } }
-  function removeFogModifier(fn) { const i = fogMods.indexOf(fn); if (i >= 0) { fogMods.splice(i, 1); composeFogNow(); } }
+  function addFogModifier(fn) { if (!disposed && fn && !fogMods.includes(fn)) { fogMods.push(fn); composeFogNow(); } }
+  function removeFogModifier(fn) { if (disposed) return; const i = fogMods.indexOf(fn); if (i >= 0) { fogMods.splice(i, 1); composeFogNow(); } }
   // ink 모드 등에서 트윈·fog 합성을 끈다(즉시 스냅으로 종이색 fog 를 침해하지 않게).
-  function setImmediate(v) { immediateMode = !!v; }
+  function setImmediate(v) { if (!disposed) immediateMode = !!v; }
 
   function restoreFallback() {
-    scene.background = fb.bg ? fb.bg.clone() : null;
-    scene.fog = fb.fog ? new THREE.Fog(fb.fog.c, fb.fog.near, fb.fog.far) : null;
-    renderer.toneMappingExposure = fb.exposure;
-    sun.position.copy(fb.sunPos); sun.color.setHex(fb.sunColor); sun.intensity = fb.sunInt;
-    hemi.color.setHex(fb.hemiSky); hemi.groundColor.setHex(fb.hemiGround); hemi.intensity = fb.hemiInt;
+    restoreEnvironmentFallback(scene, { sun, hemi, renderer }, fb);
   }
 
   // 시그니처 유지(opts 신설): opts.immediate=true(shot·초기 로드) 면 즉시 스냅, 그 외엔 크로스페이드.
   function setTime(name, opts = {}) {
+    if (disposed) return;
     const immediate = !!opts.immediate || immediateMode || !enabled || !everApplied;
     currentTime = name;
     critters.setTime(name);   // 밤엔 새 떼 숨김·이동 자제(이산 — 트윈 불필요)
@@ -144,6 +169,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     if (enabled) { sky.apply(name, { immediate }); everApplied = true; }
   }
   function setSeason(name, opts = {}) {
+    if (disposed) return;
     currentSeason = name;
     seasons.setSeason(name, opts);
     critters.setSeason(name);
@@ -157,6 +183,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   }
   // 매 프레임 계절 애니메이션(색 보간·낙엽 파티클·논 계절)+개울 흐름+생물. 환경 ON 일 때만.
   function update(dt) {
+    if (disposed) return;
     seasons.update(dt);   // 논 계절 보간도 seasons 가 전파
     terrain.update(dt);   // 들판 금빛 보간
     water.update(dt);     // 개울 물결 시간(uTime) — 논 물면과 공유
@@ -172,6 +199,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     if (enabled && !immediateMode && (sky.isTweening() || fogMods.length)) applyFogBaseAndMods();
   }
   function setEnabled(v) {
+    if (disposed) return;
     enabled = !!v;
     group.visible = enabled;
     smoke.setEnabled(enabled); // 건물의 아궁이 불씨(그룹 밖)도 함께 소등/점등
@@ -187,21 +215,34 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     }
   }
 
+  function dispose() {
+    if (disposed) return;
+    // 건물에 걸친 등롱·아궁이 상태와 scene-level fog/light를 먼저 원복한 뒤,
+    // 환경이 소유한 Object3D 리소스만 identity-dedupe해 해제한다.
+    setEnabled(false);
+    disposed = true;
+    fogMods.length = 0;
+    seasons.dispose();
+    scene.remove(group);
+    disposeObjectTree(group);
+    group.clear();
+  }
+
   return {
-    group, setTime, setSeason, update, setEnabled,
+    group, setTime, setSeason, update, setEnabled, dispose,
     addFogModifier, removeFogModifier, setImmediate,
     get time() { return currentTime; },
     get season() { return currentSeason; },
     // 개울 징검다리 교차점 월드 좌표(위치성 물소리 앵커). water 없으면 null.
-    get streamAnchor() { return water ? water.anchor : null; },
+    get streamAnchor() { return !disposed && water ? water.anchor : null; },
     // 개의 라이브 월드 위치·상태(오디오 개 짖음 positional 앵커·촉발 타이밍).
-    get dogAnchor() { return critters.dogAnchor; },
-    get dogState() { return critters.dogState; },
+    get dogAnchor() { return disposed ? null : critters.dogAnchor; },
+    get dogState() { return disposed ? null : critters.dogState; },
     // 검증 전용: 까치를 나무 페르치로 스냅(스크린샷 조준용).
-    debugMagpieTree() { return critters.debugMagpieTree(); },
+    debugMagpieTree() { return disposed ? null : critters.debugMagpieTree(); },
     // 논 소 라이브 월드 위치(검증 조준·오디오 여지). 없으면 null.
-    get cowAnchor() { return animals.cowAnchor; },
+    get cowAnchor() { return disposed ? null : animals.cowAnchor; },
     // 검증 전용: 마당 닭 무리 중심 월드 좌표.
-    debugFlockCenter() { return animals.debugFlockCenter(); },
+    debugFlockCenter() { return disposed ? null : animals.debugFlockCenter(); },
   };
 }

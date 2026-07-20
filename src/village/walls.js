@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markSharedResource } from '../core/three-resources.js';
 import { makeRng } from '../rng.js';
 export { pickWallType } from './variants.js';   // 담 유형 선택은 순수 로직(variants.js)에 둔다
 
@@ -24,10 +25,12 @@ const DEG = Math.PI / 180;
 const STYLE_H = { tile: 2.2, stone: 1.8, mud: 1.7, brush: 1.25, hedge: 1.1 };
 
 // 생울(관목) 공유 재질·지오 — 모든 필지 공유 1벌이라 병합 후 1 드로우콜.
-const HEDGE_MAT = new THREE.MeshStandardMaterial({ color: 0x4d6a33, roughness: 0.96, metalness: 0, flatShading: true });
-const HEDGE_GEO = new THREE.IcosahedronGeometry(1, 0);
+const HEDGE_MAT = markSharedResource(new THREE.MeshStandardMaterial({
+  color: 0x4d6a33, roughness: 0.96, metalness: 0, flatShading: true,
+}));
+const HEDGE_GEO = markSharedResource(new THREE.IcosahedronGeometry(1, 0));
 // 옹기(장독) 공유 지오 — 둥근 항아리 근사(스케일로 개체차). 병합 대상이라 재질은 wallMats 재사용.
-const JAR_GEO = new THREE.SphereGeometry(0.3, 10, 8);
+const JAR_GEO = markSharedResource(new THREE.SphereGeometry(0.3, 10, 8));
 
 // shape 폴백(부정형 미지정 시 정사각): parcels.rectShape 와 동일 규약.
 function rectShape(plotW, plotD) {

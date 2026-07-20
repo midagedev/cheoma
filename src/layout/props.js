@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markSharedResource } from '../core/three-resources.js';
 
 // 필지 등롱(마당·대문 걸이등롱) — 태스크 #83.
 //   조선 감성: 대문(솟을대문·사립문) 처마 밑 걸이등롱 + 반가 마당 기둥걸이 등롱(장명등 계열).
@@ -26,7 +27,7 @@ export function getLanternMaterials() {
   // 창호(hanji 0.26)보다 살짝 높은 계수 — #70 석등 화창과 동일(은은히 도드라지되 blowout 금지).
   glow.userData.hanjiGlow = 0.30;
   const frame = new THREE.MeshStandardMaterial({ color: 0x241f19, roughness: 0.82, metalness: 0.1 });
-  _mats = { glow, frame };
+  _mats = { glow: markSharedResource(glow), frame: markSharedResource(frame) };
   return _mats;
 }
 

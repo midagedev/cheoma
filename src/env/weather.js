@@ -71,6 +71,8 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 파티클(snow.points·
   //   rain.lines)·계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
   let fieldCX = 0, fieldCZ = 0;
+  let disposed = false;
+  let fogModifierRegistered = false;
 
   // 계절 입자 필드(#111): 봄 벚꽃·가을 낙엽의 카메라 추종 볼륨. 눈·비와 동일하게 scene 루트에 붙여
   //   env.group 은닉(마을 모드)을 우회하고, setWeatherCenter 로 카메라 타깃을 따라온다. season 은
@@ -332,8 +334,9 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     pinnedAccum = v;
     if (v != null) { accumLevel = v; snowUniform.value = accumLevel * SNOW_MAX; applyGround(); }
   }
+  let weatherDebug = null;
   if (typeof window !== 'undefined') {
-    window.__wx = {
+    weatherDebug = {
       // accum(0..1)=지붕 눈 흰틴트 진행도(#131: 볼륨 아님, patchSnow 강도). setAccum 으로 shot 고정.
       setAccum, get accum() { return accumLevel; }, get wind() { return getWind(t); },
       // 이징된 강수 레벨(0..1) — 외부 소비자(post 렌즈 플레어 등)가 엔진 배선 없이 읽는 읽기 전용 신호.
@@ -344,10 +347,18 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       setSeason: (name) => { season = name; petals.setSeason(name); },
       get petalLevel() { return petals.level; },
     };
+    window.__wx = weatherDebug;
   }
 
   function dispose() {
+    if (disposed) return;
+    disposed = true;
+    if (fogModifierRegistered && env && typeof env.removeFogModifier === 'function') {
+      env.removeFogModifier(applyAtmosphereScaled);
+    }
+    fogModifierRegistered = false;
     for (const rec of patched.values()) rec.mat.roughness = rec.roughness;
+    patched.clear();
     const g = getGround && getGround();
     if (g && groundOrig) g.material.color.copy(groundOrig);
     snowUniform.value = 0;
@@ -357,15 +368,18 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       (sys.points || sys.lines).material.dispose();
     }
     scene.remove(petals.points); petals.dispose();   // 계절 입자 필드(#111)
-    if (typeof window !== 'undefined' && window.__wx) delete window.__wx;
+    if (typeof window !== 'undefined' && window.__wx === weatherDebug) delete window.__wx;
   }
 
   // 초기 재질 수집(눈 흰틴트 patchSnow 를 씬 전체 재질에 주입)
   collectMaterials();
 
   // env fog 모디파이어 자동 등록(태스크 #50): 넘겨받았으면 대기 틴트를 매 틱 base fog 위에 레벨
-  // 스케일로 합성. weather 는 앱 수명 내내 살아있으므로 해제 불필요.
-  if (env && typeof env.addFogModifier === 'function') env.addFogModifier(applyAtmosphereScaled);
+  // 스케일로 합성한다. dispose 에서 같은 함수 참조를 제거해 재마운트 시 모디파이어가 누적되지 않게 한다.
+  if (env && typeof env.addFogModifier === 'function') {
+    env.addFogModifier(applyAtmosphereScaled);
+    fogModifierRegistered = true;
+  }
 
   // ---------- 파티클 팩토리 ----------
   function boxHalf() { return 46; }

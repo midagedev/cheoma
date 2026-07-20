@@ -5,13 +5,15 @@
   "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
   "scripts": {
     "check": "node tools/check-fast.mjs",
-    "check:all": "npm run check && npm run check:app && npm run check:worker",
+    "check:all": "npm run check && npm run check:app && npm run check:worker && npm run check:audio",
     "check:app": "node tools/check-app-smoke.mjs",
+    "check:audio": "node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:worker": "node tools/check-worker-contract.mjs"
   },
   "devDependencies": {
-    "playwright": "1.61.1"
+    "playwright": "1.61.1",
+    "pngjs": "7.0.0"
   }
 }

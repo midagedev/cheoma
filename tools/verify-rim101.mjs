@@ -1,5 +1,5 @@
 // #101 재질 프레넬 림 전 오브젝트 확장 — 코드/로그 전용 검증(시각 캡처 없음, 사용자 토큰 절약).
-//   env/post.js·rim.js 를 코어 직접 import 하는 하네스(포트 4215)에서:
+//   env/post.js·rim.js 를 코어 직접 import 하는 임시 포트 하네스에서:
 //     ① 씬 유형별(단일건물+env / 소품+풀 확장) 패치 재질 재질군 커버리지 카운트
 //        — 나무·풀·소품 포함 증명 + 제외 목록(지형·물·개구부·발광·먹) 준수 확인
 //     ② 셰이더 컴파일 에러·pageerror 0 (sunset·night·autumn 각 로드; renderer.compile 로 전 재질 강제 컴파일)
@@ -97,6 +97,7 @@ if (ink) {
   post = setupPost({ renderer, scene, camera }); post.setSize(innerWidth, innerHeight); post.setTime(time); post.setEnabled(true);
 }
 window.__post = post;
+window.__renderer = renderer;
 
 // 전 재질 강제 컴파일(오프스크린 프리워밍) → 패치된 셰이더의 GLSL 에러를 즉시 표면화.
 renderer.compile(scene, camera);
@@ -110,6 +111,20 @@ window.__rimAudit = () => {
     const arr = Array.isArray(m) ? m : [m];
     for (const mm of arr) {
       if (!mm || !mm.isMaterial) continue;
+      let rimMul = null;
+      if (mm.userData && mm.userData.__rimPatched) {
+        try {
+          // 실제 onBeforeCompile 경로를 호출해 재질별 uniform 바인딩을 감사한다. 상수 getter만
+          // 확인하면 프로그램 캐시는 안정적이어도 모든 재질이 같은 계수를 받는 회귀를 놓친다.
+          const shader = {
+            uniforms: {},
+            vertexShader: THREE.ShaderLib.standard.vertexShader,
+            fragmentShader: THREE.ShaderLib.standard.fragmentShader,
+          };
+          mm.onBeforeCompile(shader, renderer);
+          rimMul = shader.uniforms.uRimGroupMul ? shader.uniforms.uRimGroupMul.value : null;
+        } catch (e) { console.error('rim binding audit: ' + e.message); }
+      }
       rows.push({
         name: o.name || '', parent: (o.parent && o.parent.name) || '',
         type: mm.type, isPoints: !!o.isPoints, isSprite: !!o.isSprite,
@@ -118,6 +133,7 @@ window.__rimAudit = () => {
         hanji: !!(mm.userData && mm.userData.hanjiGlow),
         emiss: +lum(mm.emissive, mm.emissiveIntensity).toFixed(4),
         patched: !!(mm.userData && mm.userData.__rimPatched),
+        rimMul,
         // rim.js 와 동일 판정: 프로토타입 기본 메서드는 제외(기본 onBeforeCompile.toString() 오탐 회피).
         cck: (() => { try {
           if (!mm.customProgramCacheKey || mm.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) return false;
@@ -155,8 +171,8 @@ const server = createServer(async (req, res) => {
     res.end(data);
   } catch { res.writeHead(404); res.end('not found'); }
 });
-await new Promise((ok) => server.listen(4215, '127.0.0.1', ok));
-const base = 'http://127.0.0.1:4215';
+await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+const base = `http://127.0.0.1:${server.address().port}`;
 
 let browser;
 try { browser = await chromium.launch({ channel: 'chrome' }); }
@@ -176,7 +192,14 @@ async function open(qs) {
   await page.waitForTimeout(150);
 }
 const audit = () => page.evaluate(() => window.__rimAudit());
-const rimInfo = () => page.evaluate(() => window.__rim ? ({ mode: window.__rim.mode, patched: window.__rim.patched, coverage: window.__rim.coverage, strength: +window.__rim.strength.toFixed(3), scale: window.__rim.scale }) : null);
+const rimInfo = () => page.evaluate(() => window.__rim ? ({
+  mode: window.__rim.mode,
+  patched: window.__rim.patched,
+  coverage: window.__rim.coverage,
+  groupMultipliers: window.__rim.groupMultipliers,
+  strength: +window.__rim.strength.toFixed(3),
+  scale: window.__rim.scale,
+}) : null);
 const programs = () => page.evaluate(() => window.__programs());
 
 let FAIL = 0;
@@ -194,16 +217,27 @@ await open('rim=fresnel&time=sunset&season=summer');
   ok(cov.building >= 4, `건물 재질 패치 ${cov.building} (>=4)`);
   ok(cov.organic >= 2, `유기물(나무+풀) 재질 패치 ${cov.organic} (>=2: 나무·풀 공유재질)`);
   ok(cov.misc >= 5, `소품·동물·담장 재질 패치 ${cov.misc} (>=5)`);
+  ok(
+    ri.groupMultipliers?.building === 1.5
+      && ri.groupMultipliers?.misc === 1
+      && ri.groupMultipliers?.organic === 0.7,
+    `재질군 림 uniform 계수 ${JSON.stringify(ri.groupMultipliers)} (프로그램 변형 없이 1.5/1/0.7)`,
+  );
   // 나무 재질 실제 패치
   const treeRows = rows.filter((r) => r.parent === 'trees');
   ok(treeRows.length > 0 && treeRows.every((r) => r.patched), `나무(trees) 재질 전부 패치 (${treeRows.length}개 인스턴스)`);
   ok(treeRows.some((r) => r.flat), `나무 flatShading 재질 패치 성공(vNormal 미선언 함정 회피)`);
+  ok(treeRows.every((r) => r.rimMul === 0.7), `나무 실제 shader uniform 계수 0.7`);
   // 풀 재질 패치
   const grassRows = rows.filter((r) => r.name === 'focusGrass');
   ok(grassRows.length > 0 && grassRows.every((r) => r.patched), `풀(focusGrass) 재질 패치`);
+  ok(grassRows.every((r) => r.rimMul === 0.7), `풀 실제 shader uniform 계수 0.7`);
   // 소품 재질 패치(props-test 하위, flat granite 포함)
   const propRows = rows.filter((r) => { let p = r; return r.parent && r.name !== '' ; });
   const patchedProps = rows.filter((r) => r.patched && r.type === 'MeshStandardMaterial' && !r.role && !r.hanji && r.parent !== 'trees' && r.name !== 'focusGrass');
+  const buildingRows = rows.filter((r) => r.patched && ['roof', 'wall', 'wood', 'stone'].includes(r.role));
+  ok(buildingRows.length > 0 && buildingRows.every((r) => r.rimMul === 1.5), `건물 실제 shader uniform 계수 1.5 (${buildingRows.length}개)`);
+  ok(patchedProps.length > 0 && patchedProps.every((r) => r.rimMul === 1), `소품 실제 shader uniform 계수 1.0 (${patchedProps.length}개)`);
   ok(patchedProps.length > 0, `소품/동물/담장(role 없는 misc) 재질 패치 ${patchedProps.length}개`);
 
   console.log('\\n  --- 제외 목록 준수 ---');
@@ -233,12 +267,49 @@ await open('rim=fresnel&time=sunset&season=summer');
   if (errors.length) console.log('    errors:', errors.slice(0, 6));
 }
 
-console.log('\\n=== GATE 2: 시간대/계절 로드 클린 (night · autumn) ===');
-for (const qs of ['rim=fresnel&time=night&season=summer', 'rim=fresnel&time=sunset&season=autumn', 'rim=fresnel&time=day&season=spring']) {
+console.log('\\n=== GATE 2: 시간대/계절 로드 클린 (night · dawn · autumn) ===');
+for (const qs of [
+  'rim=fresnel&time=night&season=summer',
+  'rim=fresnel&time=dawn&season=summer',
+  'rim=fresnel&time=sunset&season=autumn',
+  'rim=fresnel&time=day&season=spring',
+]) {
   await open(qs);
-  const ce = compileErrs();
   ok(errors.length === 0, `${qs}: 콘솔에러 0`);
+  const gradeEnabled = await page.evaluate(() => !!window.__post?.gradePass?.enabled);
+  const expectedGrade = qs.includes('time=sunset') || qs.includes('time=dawn');
+  ok(gradeEnabled === expectedGrade, `${qs}: 채도 항등 패스 ${expectedGrade ? '활성' : '생략'}`);
   if (errors.length) console.log('    errors:', errors.slice(0, 6));
+}
+
+console.log('\\n=== GATE 2A: 채도 패스 전환 중 활성 · 항등 복귀 ===');
+await open('rim=fresnel&time=day&season=summer');
+{
+  const gradeTransition = await page.evaluate(() => {
+    window.__post.setTime('sunset');
+    window.__post.update(0.05);
+    const during = window.__post.gradePass.enabled;
+    for (let i = 0; i < 40; i++) window.__post.update(0.05);
+    window.__post.setTime('day');
+    for (let i = 0; i < 40; i++) window.__post.update(0.05);
+    return { during, after: window.__post.gradePass.enabled };
+  });
+  ok(gradeTransition.during, 'day→sunset 전환 중 GradePass 활성');
+  ok(!gradeTransition.after, 'sunset→day 완료 후 항등 GradePass 생략');
+}
+
+console.log('\\n=== GATE 2B: renderer/composer DPR 동기화 ===');
+await open('rim=fresnel&time=day&season=summer');
+{
+  const dpr = await page.evaluate(() => {
+    window.__renderer.setPixelRatio(1.5);
+    window.__post.setSize(innerWidth, innerHeight);
+    return {
+      width: window.__post.composer.renderTarget1.width,
+      expected: Math.round(innerWidth * 1.5),
+    };
+  });
+  ok(dpr.width === dpr.expected, `composer target ${dpr.width}px = renderer DPR 반영값 ${dpr.expected}px`);
 }
 
 console.log('\\n=== GATE 3: rim 재컴파일 폭주 없음 (rescan 멱등 · 계절 토글 plateau) ===');

@@ -34,8 +34,7 @@ function roleTone(kind, parcel, role) {
 // 지오메트리를 병합 가능한 균일 레이아웃으로 정규화: non-indexed + position/normal/uv(+color).
 // keepColor 는 vertexColors 재질일 때만(그 외 color 는 렌더에 안 쓰이므로 제거해 병합 충돌 방지).
 function normalizeGeo(src, worldMatrix, keepColor) {
-  let g = src.index ? src.toNonIndexed() : src.clone();
-  if (src.index) g = g.clone();            // toNonIndexed 는 새 지오지만 방어적으로 clone
+  const g = src.index ? src.toNonIndexed() : src.clone();
   g.applyMatrix4(worldMatrix);
   if (!g.attributes.normal) g.computeVertexNormals();
   const n = g.attributes.position.count;

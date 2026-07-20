@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import {
+  addMaterialResource,
+  addMaterialTextures,
+  collectObjectResources,
+  disposeObjectResources,
+  disposeObjectTree,
+} from '../../core/three-resources.js';
 import { PRESETS } from '../../params.js';
 import { buildBuilding } from '../../builder/index.js';
 import { buildParcel } from '../../layout/parcel.js';
@@ -38,7 +45,7 @@ import { createVillageFaunaController } from './fauna.js';
 // VillageHandle (UI 소비 API):
 //   .group            THREE.Group — scene 에 add 할 마을 루트(지형·집·랜드마크·수목 포함)
 //   .plan             planVillage 원본 데이터(집 목록·통계·경계)
-//   .getPickProxies() → [{ parcelId, mesh, bbox, buildingSpec, worldCenter, cameraFraming }]
+//   .getPickProxy(id) / .getPickProxies() → [{ parcelId, mesh, bbox, buildingSpec, worldCenter, cameraFraming }]
 //   .raycast(raycaster) → 위 프록시 디스크립터 | null (히트한 필지)
 //   .rebuildParcel(parcelId, newParams) → 해당 필지만 풀디테일로 재생성(집 편집 반영)
 //   .highlightParcel(parcelId, on)      → 먹선 아웃라인 하이라이트 토글(호버 표시)
@@ -53,6 +60,7 @@ import { createVillageFaunaController } from './fauna.js';
 
 // plan+group 이후 핸들(VillageHandle) 조립 — 동기/비동기 경로가 공유(THREE 오브젝트 확정 후, 시드창 무관).
 export function createVillageHandle(opts, seed, plan, group) {
+  let disposed = false;
   const char01 = typeof plan.opts.char01 === 'number' ? plan.opts.char01 : 0.5;
   const site = plan.site;
 
@@ -111,6 +119,19 @@ export function createVillageHandle(opts, seed, plan, group) {
   for (const p of proxies) proxyGroup.add(p.mesh);
   proxyGroup.updateMatrixWorld(true);
   const proxyById = new Map(proxies.map((p) => [p.parcelId, p]));
+
+  // 소유 경계 밖으로는 가변 Vector/Box를 복제해 내보낸다. 전체·단건 API가 같은
+  // 디스크립터 계약을 공유해 hero 카메라용 치수 필드가 누락되지 않게 한다.
+  function describePickProxy(p) {
+    if (!p) return null;
+    return {
+      parcelId: p.parcelId, mesh: p.mesh, bbox: p.bbox.clone(),
+      buildingSpec: p.buildingSpec, worldCenter: p.worldCenter.clone(),
+      cameraFraming: cloneCameraFraming(p.cameraFraming),
+      dims: p.dims.clone(), rotY: p.rotY,
+      H: p.dims.y, maxDim: Math.max(p.dims.x, p.dims.y, p.dims.z),
+    };
+  }
 
   // ── env 상태 ──
   let time = 'day', season = 'summer', weather = 'clear';
@@ -363,16 +384,14 @@ export function createVillageHandle(opts, seed, plan, group) {
       return { x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2) };
     },
 
+    // 종가 랜딩(enterVillageHero)이 나선 줌인 구도를 직접 산출할 때 dims/rotY/H/maxDim까지
+    // 필요하다. 미노출 시 카메라 값이 NaN이 되므로 단건·전체 모두 같은 헬퍼를 쓴다.
+    getPickProxy(parcelId) {
+      return describePickProxy(proxyById.get(parcelId));
+    },
+
     getPickProxies() {
-      return proxies.map((p) => ({
-        parcelId: p.parcelId, mesh: p.mesh, bbox: p.bbox.clone(),
-        buildingSpec: p.buildingSpec, worldCenter: p.worldCenter.clone(),
-        cameraFraming: cloneCameraFraming(p.cameraFraming),
-        // 종가 랜딩(enterVillageHero)이 나선 줌인 구도를 직접 산출할 때 쓰는 치수·회전.
-        //   dims=Vector3(W,H,D). 미노출 시 pr.H/pr.maxDim/pr.rotY 가 undefined → 카메라 NaN(정지) 회귀.
-        dims: p.dims.clone(), rotY: p.rotY,
-        H: p.dims.y, maxDim: Math.max(p.dims.x, p.dims.y, p.dims.z),
-      }));
+      return proxies.map(describePickProxy);
     },
 
     // 레이캐스터(마우스→광선) 로 히트한 필지 디스크립터 반환(없으면 null).
@@ -669,16 +688,37 @@ export function createVillageHandle(opts, seed, plan, group) {
     },
 
     dispose() {
+      if (disposed) return;
+      disposed = true;
       detachClouds();
       ambientField.exit();
-      disposeTree(group);
+      disposeTree(group, keptMats);
       // #129 프로그램 앵커 최종 해제 — 오버레이 dispose 는 __kept 를 건너뛰므로 마을 파기 시 여기서 정리.
-      for (const m of keptMats) { m.map?.dispose?.(); m.dispose?.(); }
+      disposeMaterials(keptMats);
       keptMats.length = 0;
       vlights.dispose();
-      for (const p of proxies) p.mesh.geometry.dispose();
+      disposeObjectTree(proxyGroup);
+      proxyGroup.clear();
     },
   };
+
+  // dispose 이후의 handle은 완전히 불활성이다. 공개 메서드를 한 번 감싸면 새 API가 추가돼도
+  // enter/debug/detail 경로가 자원을 다시 만들거나 씬에 재부착하는 종료 후 누수를 자동으로 막는다.
+  const nullAfterDispose = new Set([
+    'heroParcelId', 'heroDetailGroup', 'overlayBox', 'getPickProxy', 'raycast',
+    'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel',
+  ]);
+  for (const key of Object.keys(api)) {
+    const method = api[key];
+    if (key === 'dispose' || typeof method !== 'function') continue;
+    api[key] = (...args) => {
+      if (!disposed) return method.apply(api, args);
+      if (key === 'getPickProxies') return [];
+      if (key === 'isHero' || key === 'heroEditable') return false;
+      if (key === 'updateLod') return 0;
+      return nullAfterDispose.has(key) ? null : undefined;
+    };
+  }
 
   return api;
 }
@@ -697,13 +737,23 @@ function findSun(scene) {
   return found;
 }
 
-function disposeTree(root) {
-  root.traverse((o) => {
-    if (o.geometry) o.geometry.dispose?.();
-    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-    for (const m of mats) {
-      if (m.userData && m.userData.__kept) continue;   // #129 프로그램 앵커 — dispose 하면 캐시 프로그램 삭제→재컴파일
-      m.map?.dispose?.(); m.dispose?.();
-    }
-  });
+function disposeTree(root, retainedMaterials = []) {
+  const resources = collectObjectResources(root);
+  // #129 프로그램 앵커는 overlay 수명보다 길다. 앵커가 공유하는 모든 texture slot/uniform도
+  // 함께 보호하고, 최종 VillageHandle.dispose에서 identity-dedupe해 정확히 한 번 해제한다.
+  const retained = new Set(retainedMaterials);
+  for (const material of resources.materials) if (material.userData?.__kept) retained.add(material);
+  for (const material of retained) {
+    resources.materials.delete(material);
+    const keptTextures = new Set();
+    addMaterialTextures(material, keptTextures);
+    for (const texture of keptTextures) resources.textures.delete(texture);
+  }
+  disposeObjectResources(resources);
+}
+
+function disposeMaterials(materials) {
+  const resources = { geometries: new Set(), materials: new Set(), textures: new Set() };
+  for (const material of materials) addMaterialResource(material, resources.materials, resources.textures);
+  disposeObjectResources(resources);
 }

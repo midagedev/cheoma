@@ -194,7 +194,7 @@ class RimPass extends Pass {
       texSize: { value: new THREE.Vector2(1, 1) },
       cameraNear: { value: camera.near },
       cameraFar: { value: camera.far },
-      rimColor: { value: new THREE.Color(0xff9d52).convertSRGBToLinear() },
+      rimColor: { value: new THREE.Color(0xff9d52) },
       sunScreenDir: { value: new THREE.Vector2(0, 1) },
       rimStrength: { value: 1.0 },
       rimPower: { value: 2.2 },
@@ -301,6 +301,11 @@ class GradePass extends Pass {
       depthTest: false, depthWrite: false,
     });
     this.fsQuad = new FullScreenQuad(this.material);
+    this.enabled = false;   // sat=1 기본 상태는 완전한 항등 패스 — 불필요한 fullscreen read/write 생략.
+  }
+  setSaturation(value) {
+    this.uniforms.sat.value = value;
+    this.enabled = Math.abs(value - 1) > 1e-4;
   }
   render(renderer, writeBuffer, readBuffer) {
     this.uniforms.tDiffuse.value = readBuffer.texture;
@@ -461,7 +466,7 @@ class FlarePass extends Pass {
       tDepth: { value: null },
       sunUV: { value: new THREE.Vector2(0.5, 0.7) },
       aspect: { value: 1.0 },
-      flareColor: { value: new THREE.Color(0xffc078).convertSRGBToLinear() },
+      flareColor: { value: new THREE.Color(0xffc078) },
       flareAmt: { value: 0.0 },
       sunFront: { value: 0.0 },
       eyeDamp: { value: 0.0 },
@@ -546,7 +551,9 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
 
   // ---- 컴포저 ----
   const composer = new EffectComposer(renderer);   // 기본 HalfFloat → HDR bloom
-  composer.addPass(new RenderPass(scene, camera));
+  let composerPixelRatio = renderer.getPixelRatio();
+  const renderPass = new RenderPass(scene, camera);
+  composer.addPass(renderPass);
 
   // fresnel: 재질 프레넬 림(rim.js, 패스 없음) + 채도 그레이드 패스. pass: 구 RimPass(림+채도 통합).
   const fresnelRim = useFresnel ? createFresnelRim(scene) : null;
@@ -573,9 +580,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   flarePass.enabled = !lowPerf;
   composer.addPass(flarePass);
 
-  composer.addPass(new OutputPass());
+  const outputPass = new OutputPass();
+  composer.addPass(outputPass);
   composer.setSize(size.x, size.y);
 
+  let disposed = false;
   let enabled = true;
   let rimOn = true;                 // setRimEnabled 마스터(부감 OFF·focus ON). fresnel=uRimScale, pass=rimPass.enabled
   let rimBase = 0;                  // cur.rim × altGate(저고도) — update 가 backlit 을 곱해 최종 강도
@@ -605,10 +614,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     const T = POST_TUNING[name] || POST_TUNING.day;
     out.bloomStrength = T.bloomStrength; out.bloomRadius = T.bloomRadius; out.bloomThreshold = T.bloomThreshold;
     out.rim = T.rim; out.rimPower = T.rimPower; out.rimWrap = T.rimWrap;
-    out.rimColor.set(T.rimColor).convertSRGBToLinear();   // 기존 경로와 동일(정착값 불변)
+    // r185의 숫자형 색 입력은 이미 sRGB→working-linear 변환된다. 명시적 색공간만 남겨 이중 디코드 방지.
+    out.rimColor.setHex(T.rimColor, THREE.SRGBColorSpace);
     out.sat = T.sat ?? 1.0;
     out.sunGlow = T.sunGlow; out.sunGlowSize = T.sunGlowSize; out.sunGlowColor.set(T.sunGlowColor);
-    out.flare = T.flare ?? 0; out.flareColor.set(T.flareColor ?? 0xffffff).convertSRGBToLinear();
+    out.flare = T.flare ?? 0; out.flareColor.setHex(T.flareColor ?? 0xffffff, THREE.SRGBColorSpace);
     const d = (TIME_PRESETS[name] || TIME_PRESETS.day).sunDir;
     out.dir.set(d[0], d[1], d[2]).normalize();
     return out;
@@ -655,7 +665,7 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
       //   전반을 잡으므로, 기단 윗면 같은 태양 수직 평면이 광역으로 물드는 것을 억제(태양 대면
       //   실루엣 킥은 side≈1 이라 불변). 구 RimPass 는 깊이-엣지 게이트로 평면을 뺐지만 프레넬엔 없음.
       fresnelRim.setWrap(cur.rimWrap * 0.4);
-      gradePass.uniforms.sat.value = cur.sat;   // 전역 채도 그레이드(구 RimShader 말미 이관)
+      gradePass.setSaturation(cur.sat);   // sat≈1이면 항등 fullscreen 패스를 자동 생략.
     } else {
       rimPass.uniforms.rimStrength.value = rimBase;
       rimPass.uniforms.rimPower.value = cur.rimPower;
@@ -764,6 +774,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   }
 
   function setSize(w, h) {
+    const pixelRatio = renderer.getPixelRatio();
+    if (pixelRatio !== composerPixelRatio) {
+      composerPixelRatio = pixelRatio;
+      composer.setPixelRatio(pixelRatio);
+    }
     composer.setSize(w, h);   // 각 패스(bloom·bokeh·rim)에 device px 전파
     flarePass.uniforms.aspect.value = (h > 0 ? w / h : 1.0);  // 고스트·헤일로 화면상 원형 유지
   }
@@ -803,42 +818,55 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   if (useFresnel) fresnelRim.apply(scene);
 
   // 검증 하네스 훅(window.__wx 패턴과 동일). 결정론 캡처에서 날씨·강도를 직접 구동·판독.
+  let flareDebug = null;
+  let rimDebug = null;
   if (typeof window !== 'undefined') {
-    window.__flare = {
+    flareDebug = {
       setWeather,
       get sunUV() { const u = flarePass.uniforms.sunUV.value; return [u.x, u.y]; },
       get amt() { return flarePass.uniforms.flareAmt.value; },
       get front() { return flarePass.uniforms.sunFront.value; },
       setEnabled: setFlareEnabled,
     };
+    window.__flare = flareDebug;
     // #76/#101 검증 훅: 림 모드·강도·패치수·재질군 커버리지·마스터 스케일 판독 + 재스캔 강제.
-    window.__rim = {
+    rimDebug = {
       mode: RIM_MODE,
       get patched() { return fresnelRim ? fresnelRim.patchedCount : 0; },
       get coverage() { return fresnelRim ? fresnelRim.coverage : null; },  // {total,building,misc,organic}
+      get groupMultipliers() { return fresnelRim ? fresnelRim.groupMultipliers : null; },
       get strength() { return useFresnel ? fresnelRim.uniforms.uRimStrength.value : (rimPass ? rimPass.uniforms.rimStrength.value : 0); },
       get scale() { return useFresnel ? fresnelRim.uniforms.uRimScale.value : (rimPass && rimPass.enabled ? 1 : 0); },
       setEnabled: setRimEnabled,
       rescan() { if (fresnelRim) fresnelRim.apply(scene); },
       drawCalls() { return renderer.info.render.calls; },
     };
+    window.__rim = rimDebug;
   }
 
   return {
     composer, setTime, setSize, update, setDof, setFocus, setEnabled, setWeather, setFlareEnabled, setRimEnabled,
-    bloomPass, rimPass, flarePass, sunGlow, fresnelRim,
+    renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass, sunGlow, fresnelRim,
     // 마을 리롤·focus-in 오버레이 직후 명시 재패치용(선택 — update() throttle 스캔이 이미 self-heal).
     rimRescan() { if (fresnelRim) fresnelRim.apply(scene); },
     dispose() {
+      if (disposed) return;
+      disposed = true;
+      scene.remove(sunGlow);
       if (rimPass) rimPass.dispose();
       if (gradePass) gradePass.dispose();
       if (fresnelRim) fresnelRim.dispose();
       flarePass.dispose();
       bloomPass.dispose();
+      bokehPass.dispose();
+      outputPass.dispose();
       glowTex.dispose();
       sunGlow.material.dispose();
       composer.dispose();
-      if (typeof window !== 'undefined') { delete window.__flare; delete window.__rim; }
+      if (typeof window !== 'undefined') {
+        if (window.__flare === flareDebug) delete window.__flare;
+        if (window.__rim === rimDebug) delete window.__rim;
+      }
     },
   };
 }

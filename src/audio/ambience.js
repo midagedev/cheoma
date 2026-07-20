@@ -1,19 +1,20 @@
-import { makePinkNoise, makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
+import { createAudioScope, makePinkNoise, makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
 
 // 환경음 — 전부 합성. 시간대·날씨·바람 세기에 따라 각 레이어의 목표 레벨이 바뀌고
 // update(dt)에서 부드럽게 이징한다. 지속음(바람·비·귀뚜라미)은 native LFO 로 흔들고,
 // 간헐음(새·소쩍새·낙숫물·개)은 update()의 포아송 스케줄러로 촉발한다.
 //
 //   createAmbience(listener, { layout, rand, destination }) →
-//     { setTime(name), setWeather(name), setWindiness(w), update(dt), start() }
+//     { setTime(name), setWeather(name), setWindiness(w), update(dt), start(), dispose() }
 //   destination: 이 레이어 전체가 연결될 노드(환경음 마스터 게인).
 
 export function createAmbience(listener, { layout, rand = Math.random, destination } = {}) {
   const ctx = listener.context;
   const out = destination || ctx.destination;
-  const L = layout || {};
+  const scope = createAudioScope();
 
   let started = false;
+  let disposed = false;
   let windiness = 0.15;
   let time = 'day';
   let weather = 'clear';
@@ -40,11 +41,7 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
     const cutDepth = ctx.createGain();
     cutDepth.gain.value = 180;
     cutLfo.connect(cutDepth); cutDepth.connect(lp.frequency);
-
-    // 게인 LFO(돌풍) — 별도 게인 노드에 곱해지는 형태
-    const gust = ctx.createGain();
-    gust.gain.value = 1;
-    g.connect(gust); // (사용 안 함: 게인 요동은 update 에서 windiness 로 처리)
+    scope.trackVoice([src, cutLfo], [lp, g, cutDepth]);
 
     return {
       start() { src.start(); cutLfo.start(); },
@@ -79,6 +76,7 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
       p.pan.value = pan;
       osc.connect(g); g.connect(p); p.connect(out);
       osc.start(t); osc.stop(t + 0.2);
+      scope.trackVoice([osc], [g, p]);
     }
     function phrase() {
       const pan = (rand() * 2 - 1) * 0.8;
@@ -109,6 +107,8 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
     const master = ctx.createGain();
     master.gain.value = 0;
     master.connect(out);
+    scope.track(master);
+    const sources = [];
     // 두 개체 살짝 디튠
     for (const f of [4180, 4270]) {
       const osc = ctx.createOscillator();
@@ -126,10 +126,12 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
       trillOff.offset.value = 0.5;
       trill.connect(trillDepth); trillDepth.connect(vca.gain); trillOff.connect(vca.gain);
       osc.connect(vca); vca.connect(master);
-      osc.start(); trill.start(); trillOff.start();
+      sources.push(osc, trill, trillOff);
+      scope.trackVoice([osc, trill, trillOff], [vca, trillDepth]);
     }
     let level = 0, tgt = 0;
     return {
+      start() { for (const source of sources) source.start(); },
       set tgt(v) { tgt = v; }, get tgt() { return tgt; },
       cur: 0,
       update(dt) { level = ease(level, tgt, dt, 2.0); this.cur = level; master.gain.setTargetAtTime(level * 0.06, ctx.currentTime, 0.2); },
@@ -150,6 +152,7 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
       g.gain.setTargetAtTime(0.0001, when + 0.12, 0.12);
       osc.connect(g); g.connect(out);
       osc.start(when); osc.stop(when + 0.7);
+      scope.trackVoice([osc], [g]);
     }
     return {
       set tgt(v) { tgt = v; }, get tgt() { return tgt; },
@@ -179,6 +182,7 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
     hp.type = 'highpass'; hp.frequency.value = 400;
     const g = ctx.createGain(); g.gain.value = 0;
     src.connect(hp); hp.connect(lp); lp.connect(hs); hs.connect(g); g.connect(out);
+    scope.trackVoice([src], [hp, lp, hs, g]);
     let level = 0, tgt = 0;
     return {
       start() { src.start(); },
@@ -207,6 +211,7 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
       p.pan.value = (rand() * 2 - 1) * 0.7;
       src.connect(bp); bp.connect(g); g.connect(p); p.connect(out);
       src.start(when); src.stop(when + 0.08);
+      scope.trackVoice([src], [bp, g, p]);
     }
     return {
       set tgt(v) { tgt = v; }, get tgt() { return tgt; },
@@ -246,15 +251,21 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
   }
 
   return {
-    setTime(name) { time = name; applyTargets(); },
-    setWeather(name) { weather = name; applyTargets(); },
-    setWindiness(w) { windiness = Math.max(0, Math.min(1, w)); },
-    update(dt) { if (!started) return; for (const l of layers) l.update(dt); },
+    setTime(name) { if (disposed) return; time = name; applyTargets(); },
+    setWeather(name) { if (disposed) return; weather = name; applyTargets(); },
+    setWindiness(w) { if (disposed) return; windiness = Math.max(0, Math.min(1, w)); },
+    update(dt) { if (!started || disposed) return; for (const l of layers) l.update(dt); },
     start() {
-      if (started) return;
+      if (started || disposed) return;
       started = true;
-      wind.start(); rain.start();
+      wind.start(); crickets.start(); rain.start();
       applyTargets();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      started = false;
+      scope.dispose();
     },
   };
 }

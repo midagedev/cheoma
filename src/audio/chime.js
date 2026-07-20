@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { synthBell, poissonInterval } from './synth.js';
+import { createAudioScope, synthBell, poissonInterval } from './synth.js';
 
 // 처마 끝 풍경(風磬) — 4개 모서리에 THREE.PositionalAudio 로 배치.
 // 각 풍경은 자기 기음(base)과 독립 포아송 타이머를 가진다(바람이 각 모서리를 따로 때린다).
@@ -7,12 +7,13 @@ import { synthBell, poissonInterval } from './synth.js';
 //   평온(0): 평균 ~34s, 최소 18s   /   강풍(1): 평균 ~5s, 최소 2.5s
 //
 //   createChimes(listener, { layout, rand }) →
-//     { objects[], setWindiness(w), setVolume(v), strike(i?), update(dt), start() }
+//     { objects[], setWindiness(w), setVolume(v), strike(i?), update(dt), start(), dispose() }
 //   objects 는 씬에 추가하지 않아도 된다 — 정적 위치라 update()에서 updateMatrixWorld 로
 //   panner 위치만 갱신한다(listener 는 camera 를 따라 움직인다).
 
 export function createChimes(listener, { layout, rand = Math.random } = {}) {
   const ctx = listener.context;
+  const scope = createAudioScope();
 
   function cornersOf(L) {
     const xE = (L && L.xEave) ?? 9;
@@ -32,6 +33,7 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
     const bus = ctx.createGain();
     bus.gain.value = 1;
     pa.setNodeSource(bus);
+    scope.track(bus, pa.panner, pa.gain);
     pa.position.set(x, y, z);
     pa.updateMatrixWorld(true);
     // 풍경마다 다른 기음(1.35~1.75kHz 개체차)
@@ -39,15 +41,17 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
     return { pa, bus, base, next: 2 + rand() * 6 };
   });
 
-  // 건물 재생성으로 크기가 바뀌면 처마 모서리 좌표 갱신.
-  function setLayout(L) {
-    const c = cornersOf(L);
-    chimes.forEach((ch, i) => { ch.pa.position.set(c[i][0], c[i][1], c[i][2]); ch.pa.updateMatrixWorld(true); });
-  }
-
   let windiness = 0.15;
   let volume = 1;
   let started = false;
+  let disposed = false;
+
+  // 건물 재생성으로 크기가 바뀌면 처마 모서리 좌표 갱신.
+  function setLayout(L) {
+    if (disposed) return;
+    const c = cornersOf(L);
+    chimes.forEach((ch, i) => { ch.pa.position.set(c[i][0], c[i][1], c[i][2]); ch.pa.updateMatrixWorld(true); });
+  }
 
   function rate() {
     // windiness → 평균 타종 간격(초)과 하한
@@ -58,15 +62,16 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
   }
 
   function strike(i) {
+    if (disposed) return;
     const c = (i == null) ? chimes[Math.floor(rand() * chimes.length)] : chimes[i % chimes.length];
     if (!c) return;
     // 강풍일수록 강하게, 약할 때는 여린 종소리
     const g = (0.5 + windiness * 0.5) * (0.75 + rand() * 0.25) * volume;
-    synthBell(ctx, c.bus, ctx.currentTime + 0.01, { base: c.base, gain: g, rand });
+    synthBell(ctx, c.bus, ctx.currentTime + 0.01, { base: c.base, gain: g, rand, scope });
   }
 
   function update(dt) {
-    if (!started) return;
+    if (!started || disposed) return;
     for (const c of chimes) {
       c.pa.updateMatrixWorld(); // 정적이지만 저렴 — panner 위치 확정
       c.next -= dt;
@@ -74,9 +79,9 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
         const { mean, min, max } = rate();
         // 강풍일 땐 한 번 흔들릴 때 2~3연타가 나기도 한다
         const g = (0.5 + windiness * 0.5) * (0.75 + rand() * 0.25) * volume;
-        synthBell(ctx, c.bus, ctx.currentTime + 0.01, { base: c.base, gain: g, rand });
+        synthBell(ctx, c.bus, ctx.currentTime + 0.01, { base: c.base, gain: g, rand, scope });
         if (windiness > 0.55 && rand() < windiness * 0.5) {
-          synthBell(ctx, c.bus, ctx.currentTime + 0.14 + rand() * 0.18, { base: c.base, gain: g * 0.7, rand });
+          synthBell(ctx, c.bus, ctx.currentTime + 0.14 + rand() * 0.18, { base: c.base, gain: g * 0.7, rand, scope });
         }
         c.next = poissonInterval(mean, min, max, rand);
       }
@@ -85,11 +90,22 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
 
   return {
     objects: chimes.map((c) => c.pa),
-    setWindiness(w) { windiness = Math.max(0, Math.min(1, w)); },
-    setVolume(v) { volume = Math.max(0, v); },
+    setWindiness(w) { if (!disposed) windiness = Math.max(0, Math.min(1, w)); },
+    setVolume(v) { if (!disposed) volume = Math.max(0, v); },
     setLayout,
     strike,
     update,
-    start() { started = true; },
+    start() { if (!disposed) started = true; },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      started = false;
+      for (const chime of chimes) {
+        try { chime.bus.gain.setValueAtTime(0, ctx.currentTime); } catch {}
+        try { chime.pa.disconnect(); } catch {}
+        chime.pa.removeFromParent();
+      }
+      scope.dispose();
+    },
   };
 }

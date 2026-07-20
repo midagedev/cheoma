@@ -5,7 +5,7 @@
 //  개별 애니메이션 불가 → 튼ㄱ자·튼ㄷ자 배치로 표현. 보고서의 코어 훅 참조.)
 
 import * as THREE from 'three';
-import { buildBuilding, computeLayout } from '../../../src/api/building.js';
+import { buildBuilding, computeLayout, disposeBuilding } from '../../../src/api/building.js';
 
 // 확장 가능한(격자) 프리셋의 최대 날개 수. giwa 는 이미 ㄱ자 단일 동이라 확장 대상 아님.
 const WING_MAX = { korea: 2, temple: 2, choga: 2, giwa: 0 };
@@ -43,13 +43,16 @@ export function wingSpec(P, index) {
   return { rotY, pos, side, params: wp, size: { W: Ww, D: Dw, H: Lw.totalH } };
 }
 
-function makeWing(P, index) {
-  const s = wingSpec(P, index);
+function makeWingFromSpec(s) {
   const g = buildBuilding(s.params);
   g.name = 'wing';
   g.rotation.y = s.rotY;
   g.position.copy(s.pos);
   return { group: g, spec: s };
+}
+
+function makeWing(P, index) {
+  return makeWingFromSpec(wingSpec(P, index));
 }
 
 // P(본채), expansion(1..3) → 이번 단계에서 존재해야 하는 날개 그룹 배열.
@@ -61,23 +64,38 @@ export function buildWings(P, expansion) {
   return out;
 }
 
-// 다음(추가될) 날개 1동. 머지 애니메이션용 시작/최종 위치 포함.
-//   targetExpansion 로 커질 때 새로 붙는 날개(index = targetExpansion-2).
-export function buildNextWing(P, targetExpansion) {
+// 날개 wrapper 또는 raw group을 받아 코어의 건물 소유권 규약으로 해제한다.
+export function disposeWing(wing) {
+  return disposeBuilding(wing?.group || wing);
+}
+
+// 다음 날개의 배치만 계산한다. ghost와 실제 머지가 같은 공식을 공유하고,
+// 지오메트리·재질 생성은 buildNextWing에서만 일어난다.
+export function nextWingPlacement(P, targetExpansion) {
   const max = wingCount(keyOf(P));
   const index = targetExpansion - 2;
   if (index < 0 || index >= max) return null;
-  const { group, spec } = makeWing(P, index);
+  const spec = wingSpec(P, index);
   const pFinal = spec.pos.clone();
   // 시작 위치: 마당 바깥으로 밀려난 "부속채" 자리(머지 시 끌려 들어온다).
-  const pStart = pFinal.clone().add(new THREE.Vector3(spec.side * spec.size.D * 1.3, 0, spec.size.W * 0.45));
-  return { group, pFinal, pStart, size: spec.size, index };
+  const pStart = pFinal.clone();
+  pStart.x += spec.side * spec.size.D * 1.3;
+  pStart.z += spec.size.W * 0.45;
+  return { spec, pFinal, pStart, size: spec.size, index };
+}
+
+// 다음(추가될) 날개 1동. 머지 애니메이션용 시작/최종 위치 포함.
+//   targetExpansion 로 커질 때 새로 붙는 날개(index = targetExpansion-2).
+export function buildNextWing(P, targetExpansion) {
+  const placement = nextWingPlacement(P, targetExpansion);
+  if (!placement) return null;
+  const { group } = makeWingFromSpec(placement.spec);
+  const { pFinal, pStart, size, index } = placement;
+  return { group, pFinal, pStart, size, index };
 }
 
 // 머지 후보 점선 윤곽용 박스 치수·위치(부속채가 놓인 바깥 자리).
 export function ghostSpec(P, targetExpansion) {
-  const nw = buildNextWing(P, targetExpansion);
-  if (!nw) return null;
-  nw.group.traverse((o) => o.geometry?.dispose?.()); // 치수만 사용, 그룹은 폐기
-  return { pStart: nw.pStart, size: nw.size };
+  const placement = nextWingPlacement(P, targetExpansion);
+  return placement ? { pStart: placement.pStart, size: placement.size } : null;
 }

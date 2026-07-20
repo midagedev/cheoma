@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import * as G from '../../core/math/geom2.js';
+import { markSharedResource } from '../../core/three-resources.js';
 
 const PAD_LIFT = 0.06;
 const PAD_MARGIN = 0.6;
@@ -7,8 +8,12 @@ const PAD_STEP_MIN = 0.1;
 const PAD_SINK = 0.06;
 
 // 필지·랜드마크 패드는 같은 두 재질을 공유해 draw call과 material 수를 고정한다.
-const padTopMaterial = new THREE.MeshStandardMaterial({ color: 0x8a7f66, roughness: 1, metalness: 0 });
-const padStoneMaterial = new THREE.MeshStandardMaterial({ color: 0x8d857a, roughness: 1, metalness: 0 });
+const padTopMaterial = markSharedResource(
+  new THREE.MeshStandardMaterial({ color: 0x8a7f66, roughness: 1, metalness: 0 }),
+);
+const padStoneMaterial = markSharedResource(
+  new THREE.MeshStandardMaterial({ color: 0x8d857a, roughness: 1, metalness: 0 }),
+);
 
 // footprint 전체가 지형에 파묻히지 않도록 코너·변중점·내부 grid의 최고점을 사용한다.
 export function computePadY(parcel, site) {

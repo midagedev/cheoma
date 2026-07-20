@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
+import { createAudioScope, makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
 
 // 개울 물소리 — 위치성(PositionalAudio). 징검다리 교차점(anchor)에 앉힌다.
 //   createStream(listener, { anchor, rand }) →
-//     { object, setEnabled(v), setVolume(v), setWeather(name), update(dt), start() }
+//     { object, setEnabled(v), setVolume(v), setWeather(name), update(dt), start(), dispose() }
 //
 // 합성: 밴드패스 노이즈 물바닥(600~2500Hz, 흐름 요동 LFO) + 드문 물방울 플럭(짧은 사인 핑).
 // refDistance 짧게(4) + 높은 rolloff → 개울 근처에서만 뚜렷, 멀어지면 빠르게 잦아든다.
@@ -11,6 +11,7 @@ import { makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
 // 물바닥(bed) 합성 그래프를 dest 에 연결. 실시간/오프라인(OfflineAudioContext) 공용.
 // 반환 start() 로 노이즈·LFO 소스를 기동한다.
 export function buildStreamBed(ctx, dest, { rand = Math.random } = {}) {
+  const scope = createAudioScope();
   const noise = makeWhiteNoise(ctx, 2.5, 1);
   const src = playBuffer(ctx, noise, null, { loop: true });
 
@@ -40,12 +41,27 @@ export function buildStreamBed(ctx, dest, { rand = Math.random } = {}) {
   const gDepth = ctx.createGain();
   gDepth.gain.value = 0.12;
   gLfo.connect(gDepth); gDepth.connect(bedGain.gain);
+  scope.trackVoice([src, fLfo, gLfo], [hp, lp, bp, bedGain, fDepth, gDepth]);
 
-  return { start() { src.start(); fLfo.start(); gLfo.start(); } };
+  let started = false;
+  let disposed = false;
+  return {
+    start() {
+      if (started || disposed) return;
+      started = true;
+      src.start(); fLfo.start(); gLfo.start();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      scope.dispose();
+    },
+  };
 }
 
 export function createStream(listener, { anchor, rand = Math.random } = {}) {
   const ctx = listener.context;
+  const scope = createAudioScope();
 
   const pa = new THREE.PositionalAudio(listener);
   pa.setDistanceModel('inverse');
@@ -57,18 +73,20 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
   const out = ctx.createGain();
   out.gain.value = 0;
   pa.setNodeSource(out);
+  scope.track(out, pa.panner, pa.gain);
   if (anchor) { pa.position.copy(anchor); pa.updateMatrixWorld(true); }
 
   const bed = buildStreamBed(ctx, out, { rand });
 
   let started = false;
+  let disposed = false;
   let enabled = false;   // 전체 사운드 ON && env ON 일 때만 true
   let volume = 1;        // ambience 볼륨 종속
   let weatherMul = 1;    // 눈(결빙) 시 0.25
   const BASE = 0.5;      // 개울 기본 레벨
 
   function target() { return enabled ? BASE * volume * weatherMul : 0; }
-  function push() { out.gain.setTargetAtTime(target(), ctx.currentTime, 0.3); }
+  function push() { if (!disposed) out.gain.setTargetAtTime(target(), ctx.currentTime, 0.3); }
 
   // 물방울 플럭 — 짧은 사인 핑, 드문드문
   let nextPlink = 0.6 + rand() * 1.2;
@@ -84,10 +102,11 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
     g.gain.setTargetAtTime(0.0001, t + 0.006, 0.035);
     osc.connect(g); g.connect(out);
     osc.start(t); osc.stop(t + 0.25);
+    scope.trackVoice([osc], [g]);
   }
 
   function update(dt) {
-    if (!started) return;
+    if (!started || disposed) return;
     pa.updateMatrixWorld();
     if (enabled && weatherMul > 0.01) {
       nextPlink -= dt;
@@ -97,10 +116,20 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
 
   return {
     object: pa,
-    setEnabled(v) { enabled = !!v; push(); },
-    setVolume(v) { volume = Math.max(0, v); push(); },
-    setWeather(name) { weatherMul = name === 'snow' ? 0.25 : 1; push(); },
+    setEnabled(v) { if (disposed) return; enabled = !!v; push(); },
+    setVolume(v) { if (disposed) return; volume = Math.max(0, v); push(); },
+    setWeather(name) { if (disposed) return; weatherMul = name === 'snow' ? 0.25 : 1; push(); },
     update,
-    start() { if (started) return; started = true; bed.start(); push(); },
+    start() { if (started || disposed) return; started = true; bed.start(); push(); },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      started = false;
+      try { out.gain.setValueAtTime(0, ctx.currentTime); } catch {}
+      bed.dispose();
+      try { pa.disconnect(); } catch {}
+      pa.removeFromParent();
+      scope.dispose();
+    },
   };
 }

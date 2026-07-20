@@ -1,26 +1,27 @@
 // 태양 렌즈 플레어(#67) 검증. src/env/post.js 의 FlarePass 를 index.html(main.js 경로)로 구동.
 // 사용: node tools/shoot-flare.mjs
-// 산출: scratchpad/flare/ 에 전 컷(중간 증거), shots/flare-*.png 에 게이트 증거만.
+// 산출: 실행 중 OS 임시 디렉터리에 전 컷(종료 시 삭제), shots/flare-*.png 에 게이트 증거만.
 //   각 컷에서 window.__flare(amt·sunUV·front) 를 읽고, 같은 프레임의 flareON/flareOFF 를
 //   토글 재캡처해 '플레어 기여분'(ON-OFF)을 분리 측정 → 절제(에너지 국소성)·연속성·소멸 판정.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { mkdirSync, copyFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createRequire } from 'node:module';
 const { PNG } = createRequire(import.meta.url)('pngjs');
 
 const ROOT = resolve(import.meta.dirname, '..');
-const SCRATCH = '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/flare';
+const SCRATCH = mkdtempSync(join(tmpdir(), 'cheoma-flare-'));
 const SHOTS = join(ROOT, 'shots');
-mkdirSync(SCRATCH, { recursive: true });
 mkdirSync(SHOTS, { recursive: true });
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
   try {
     const path = req.url.split('?')[0];
+    if (path === '/favicon.ico') { res.writeHead(204); res.end(); return; }
     const file = join(ROOT, path === '/' ? 'index.html' : path);
     const data = await readFile(file);
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
@@ -67,6 +68,11 @@ try { browser = await chromium.launch({ channel: 'chrome' }); }
 catch { browser = await chromium.launch(); }
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errors = [];
+let failures = 0;
+const check = (condition, message) => {
+  console.log(`  ${condition ? 'PASS' : 'FAIL'} — ${message}`);
+  if (!condition) failures++;
+};
 page.on('console', (m) => { if (m.type() === 'error') { console.error('[page]', m.text()); errors.push(m.text()); } });
 page.on('pageerror', (e) => { console.error('[pageerror]', e.message); errors.push('PAGEERROR: ' + e.message); });
 
@@ -105,6 +111,13 @@ function gate(name) { copyFileSync(join(SCRATCH, name + '.png'), join(SHOTS, 'fl
 // hero-eave: 태양이 우측 처마 뒤에서 드러나는 시그니처(az=30,el=-6, sunUV≈[0.73,0.63]).
 // hero-tq: 앱 기본 뷰(three-quarter, 태양 프레임 위 → 은은한 상단 번짐+미세 고스트, 절제).
 console.log('\n=== GATE 1: 골든아워 역광 (처마 킥 시그니처 + 기본 뷰) ===');
+// 픽셀 골든은 브라우저/GPU에 너무 민감하다. 대신 승인한 룩의 넓은 에너지 봉투로
+// 이중 색공간 변환·전면 번짐·플레어 소실 같은 의미 있는 회귀만 실패시킨다.
+const heroEnvelopes = {
+  'hero-eave': { add: [0.002, 0.008], max: [0.4, 0.9], lit: [5, 20], sun: [40, 85] },
+  'hero-tq': { add: [0.0002, 0.0045], max: [0.2, 0.9], lit: [0.2, 5] },
+  'hero-front': { add: [0.0004, 0.007], max: [0.2, 0.9], lit: [1, 12] },
+};
 for (const [nm, qs] of [
   ['hero-eave', 'env=1&preset=korea&time=sunset&az=30&el=-6'],
   ['hero-tq', 'env=1&preset=korea&angle=three-quarter&time=sunset'],
@@ -118,6 +131,13 @@ for (const [nm, qs] of [
   gate(nm + '-on'); gate(nm + '-off');
   console.log(`${nm}: amt=${st ? st.amt.toFixed(3) : 'n/a'} eff=${st ? st.eff.toFixed(3) : '?'} sunUV=[${st ? st.sunUV.map(v => v.toFixed(2)) : '?'}] front=${st ? st.front : '?'}${errd ? ` ERR:${errd}` : ''}`);
   console.log(`  diff addPerPx=${d.addPerPx} sunFrac=${d.sunFrac}% maxAdd=${d.maxAdd} warm=${d.warm} litPx=${d.litPx}%`);
+  const e = heroEnvelopes[nm];
+  const add = Number(d.addPerPx), peak = Number(d.maxAdd), lit = Number(d.litPx), sun = Number(d.sunFrac);
+  check(errd === 0 && !!st, `${nm}: 런타임 에러 없이 플레어 상태 제공`);
+  check(add >= e.add[0] && add <= e.add[1], `${nm}: 가산 에너지 ${add} ∈ [${e.add.join(', ')}]`);
+  check(peak >= e.max[0] && peak <= e.max[1], `${nm}: 피크 ${peak} ∈ [${e.max.join(', ')}]`);
+  check(lit >= e.lit[0] && lit <= e.lit[1], `${nm}: 영향 면적 ${lit}% ∈ [${e.lit.join(', ')}]`);
+  if (e.sun) check(sun >= e.sun[0] && sun <= e.sun[1], `${nm}: 태양 주변 국소성 ${sun}% ∈ [${e.sun.join(', ')}]`);
 }
 
 // ── 게이트 2: 카메라 궤도 스윕 (태양 화면밖→안→건물가림) 연속성·팟 없음 ───────────
@@ -134,7 +154,8 @@ for (const az of [-18, -13, -9, -4, 3, 12, 21, 30, 39, 45, 50, 55, 61, 68, 82]) 
 // 인접 az 간 실효강도(eff) 점프 검사: 셰이더 렌더 강도의 연속성 = 육안 팟 부재. 큰 급점프 없어야.
 let maxJump = 0;
 for (let i = 1; i < sweep.length; i++) maxJump = Math.max(maxJump, Math.abs(sweep[i].eff - sweep[i - 1].eff));
-console.log(`  최대 인접 eff 점프 = ${maxJump.toFixed(3)} (연속이면 작음; 스텝당 ~0.3 이하 기대)`);
+console.log(`  최대 인접 eff 점프 = ${maxJump.toFixed(3)} (샘플 간 국소 점등을 포함해 0.45 이하)`);
+check(maxJump <= 0.45, `궤도 스윕 최대 인접 점프 ${maxJump.toFixed(3)} ≤ 0.45`);
 for (const az of [3, 30, 55]) gate(`sweep-az${az}`);
 
 // ── 게이트 3: 시간대·날씨·모드 스윕 (정오미세/석양최대/밤소멸, 비·눈 소멸, ink·post0 무영향) ─
@@ -162,6 +183,11 @@ await shot('post0'); gate('post0');
 console.log(`  post0: (post 컴포저 미사용)${errdP0 ? ` ERR:${errdP0}` : ''}`);
 gate('time-sunset'); gate('time-day'); gate('time-night'); gate('wx-rain');
 console.log(`  판정: day<sunset? ${aDay < aSun} | night≈0? ${aNight < 0.02} | rain소멸? ${aRain < aSun * 0.25} | snow소멸? ${aSnow < aSun * 0.25}`);
+check([aDay, aSun, aNight, aRain, aSnow].every(Number.isFinite), '시간대·날씨별 플레어 강도 모두 유한');
+check(aDay < aSun, `정오(${aDay}) < 석양(${aSun})`);
+check(aNight < 0.02, `밤 플레어 소멸(${aNight})`);
+check(aRain < aSun * 0.25 && aSnow < aSun * 0.25, `비·눈 플레어가 석양의 25% 미만(${aRain}, ${aSnow})`);
+check(errdInk === 0 && errdP0 === 0, 'ink·post=0 경로 런타임 에러 0');
 
 // ── 게이트 4: shot 결정론 (같은 URL 2회 픽셀 동일) ────────────────────────────────
 // 플레어는 시간항이 없어 카메라·시간 고정 시 결정론이다. 잔차가 있다면 베이스 씬(모트·새 등
@@ -181,6 +207,9 @@ const detNoPost = await detDiff('env=1&preset=korea&time=sunset&az=30&el=-6&post
 console.log(`  처마킥(플레어 강): 다른 픽셀 ${detFlare.n}/${detFlare.total} (${(100 * detFlare.n / detFlare.total).toFixed(2)}%)`);
 console.log(`  post=0(플레어 무): 다른 픽셀 ${detNoPost.n}/${detNoPost.total} (${(100 * detNoPost.n / detNoPost.total).toFixed(2)}%)`);
 console.log(`  → 두 잔차가 비슷하면 비결정성은 베이스 씬 몫(플레어 추가분 없음).`);
+const flareResidual = 100 * detFlare.n / detFlare.total;
+const baseResidual = 100 * detNoPost.n / detNoPost.total;
+check(Math.abs(flareResidual - baseResidual) <= 2, `플레어/베이스 결정론 잔차 차이 ${Math.abs(flareResidual - baseResidual).toFixed(2)}%p ≤ 2%p`);
 
 // ── 게이트 5: 마을 진입 정상(부감 저각 플레어 성립) ───────────────────────────────
 console.log('\n=== GATE 5: 4프리셋 pageerror 0 ===');
@@ -191,5 +220,8 @@ for (const p of ['korea', 'temple', 'choga', 'giwa']) {
 }
 
 await browser.close();
-server.close();
-console.log(errors.length ? `\nTOTAL ERRORS: ${errors.length}` : '\nNO ERRORS');
+await new Promise((resolveClose) => server.close(resolveClose));
+rmSync(SCRATCH, { recursive: true, force: true });
+check(errors.length === 0, `전체 브라우저 런타임 에러 0 (실제 ${errors.length})`);
+console.log(`\n${failures === 0 ? 'VISUAL GATES: PASS' : `VISUAL GATES: FAIL (${failures})`}`);
+process.exit(failures === 0 ? 0 : 1);

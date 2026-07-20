@@ -2,6 +2,81 @@
 // 이 프로젝트는 파라메트릭이 컨셉이므로 사운드도 파일 샘플이 아닌 합성으로 만든다.
 // 모든 함수는 BaseAudioContext(실시간 AudioContext / OfflineAudioContext 공용)에서 동작한다.
 
+function stopNode(node) {
+  try { node?.stop?.(); } catch {}
+}
+
+function disconnectNode(node) {
+  try { node?.disconnect?.(); } catch {}
+}
+
+// Web Audio 노드는 GC만으로 수명이 끝나지 않는다. 특히 loop source와 oscillator는 명시적으로
+// stop 해야 하며, 연결된 그래프도 끊어야 한다. 각 오디오 서브시스템이 자신이 만든 노드만
+// 소유하도록 작은 scope를 두면 정상 종료와 중간 dispose를 같은 경로로 처리할 수 있다.
+export function createAudioScope() {
+  const nodes = new Set();
+  const voices = new Set();
+  let disposed = false;
+
+  function track(...ownedNodes) {
+    for (const node of ownedNodes) {
+      if (!node) continue;
+      if (disposed) disconnectNode(node);
+      else nodes.add(node);
+    }
+  }
+
+  function trackVoice(sources, ownedNodes = []) {
+    const sourceSet = new Set((sources || []).filter(Boolean));
+    const nodeSet = new Set([...sourceSet, ...(ownedNodes || []).filter(Boolean)]);
+    const ended = new Set();
+    let released = false;
+
+    function onEnded(event) {
+      ended.add(event.currentTarget || event.target);
+      if (ended.size >= sourceSet.size) release(false);
+    }
+
+    function release(stop = true) {
+      if (released) return;
+      released = true;
+      for (const source of sourceSet) {
+        source.removeEventListener?.('ended', onEnded);
+        if (stop) stopNode(source);
+      }
+      for (const node of nodeSet) disconnectNode(node);
+      voices.delete(voice);
+    }
+
+    const voice = { dispose: () => release(true) };
+    if (disposed) {
+      release(true);
+      return voice;
+    }
+
+    voices.add(voice);
+    for (const source of sourceSet) source.addEventListener?.('ended', onEnded);
+    // 소스가 없는 임시 그래프도 즉시 정리할 수 있게 한다.
+    if (!sourceSet.size) release(false);
+    return voice;
+  }
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (const voice of [...voices]) voice.dispose();
+    for (const node of nodes) disconnectNode(node);
+    voices.clear();
+    nodes.clear();
+  }
+
+  return {
+    track,
+    trackVoice,
+    dispose,
+  };
+}
+
 // ---------- 노이즈 버퍼 ----------
 // 흰 노이즈: 바람/비의 원재료. loop=true 로 재생.
 export function makeWhiteNoise(ctx, seconds = 2, channels = 1) {
@@ -68,7 +143,9 @@ const BELL_PARTIALS = [
   { ratio: 11.34, amp: 0.16, tau: 0.34 }, // 반짝임
 ];
 
-export function synthBell(ctx, destination, when = ctx.currentTime, { base = 1500, gain = 1, rand = Math.random } = {}) {
+export function synthBell(ctx, destination, when = ctx.currentTime, {
+  base = 1500, gain = 1, rand = Math.random, scope = null,
+} = {}) {
   const t0 = Math.max(when, ctx.currentTime);
   // 종 전체 미세 디튠(타종마다 다른 개체감)
   const detune = 1 + (rand() * 2 - 1) * 0.02;
@@ -76,6 +153,8 @@ export function synthBell(ctx, destination, when = ctx.currentTime, { base = 150
   master.gain.value = 0.16 * gain;
   master.connect(destination);
 
+  const sources = [];
+  const nodes = [master];
   let ringEnd = t0;
   for (const p of BELL_PARTIALS) {
     const osc = ctx.createOscillator();
@@ -92,6 +171,8 @@ export function synthBell(ctx, destination, when = ctx.currentTime, { base = 150
     const stop = t0 + p.tau * 2.6 + 0.15;
     osc.start(t0);
     osc.stop(stop);
+    sources.push(osc);
+    nodes.push(g);
     ringEnd = Math.max(ringEnd, stop);
   }
 
@@ -112,6 +193,12 @@ export function synthBell(ctx, destination, when = ctx.currentTime, { base = 150
   cg.connect(destination);
   click.start(t0);
   click.stop(t0 + 0.09);
+  sources.push(click);
+  nodes.push(bp, cg);
+
+  // 호출자가 scope를 주면 상위 dispose가 잔향까지 즉시 끊는다. 독립 호출(오프라인
+  // 검증 포함)은 마지막 source의 ended 이벤트에서 로컬 그래프를 자연 정리한다.
+  (scope || createAudioScope()).trackVoice(sources, nodes);
 
   return ringEnd;
 }

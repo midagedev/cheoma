@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { addMaterialTextures, markSharedResource } from '../core/three-resources.js';
 
 // 볏짚/짚 결 텍스처(낟가리·멍석·솟대 지푸라기). palette.js의 지붕 볏짚과 톤 조화.
 function makeStrawTexture() {
@@ -118,5 +119,14 @@ export function getPropMaterials() {
   _cache.lantern.userData.hanjiGlow = 0.30;
   // 장승 명문 텍스처 생성 헬퍼도 노출(좌/우 글자 다름)
   _cache._jangseungText = makeJangseungText;
+  // 모듈 캐시는 모든 건물·마을이 빌린다. 개별 root teardown이 끊지 않게 원본 identity만
+  // process-lifetime 공유로 표시한다(Material.clone 파생본에는 WeakSet 표식이 전파되지 않는다).
+  for (const value of Object.values(_cache)) {
+    if (!value?.isMaterial) continue;
+    markSharedResource(value);
+    const textures = new Set();
+    addMaterialTextures(value, textures);
+    for (const texture of textures) markSharedResource(texture);
+  }
   return _cache;
 }

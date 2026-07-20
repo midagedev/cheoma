@@ -4,12 +4,12 @@
 //
 //   createEngine({ container }) → controller
 //
-// 렌더 경로는 플래그십 룩(env/post.js): RenderPass → Rim → Bloom → (Outline) → Bokeh → Output.
+// 렌더 경로는 플래그십 룩(env/post.js): Render → Grade/Rim → Bloom → Bokeh → Flare → Outline → Output.
 // 히어로/조립/포스트카드/셔플/환경 훅은 코어 모듈을 직접 재사용한다.
 
 import * as THREE from 'three';
 import {
-  PRESETS, buildBuilding, computeLayout, playAssembly, tofuBob, tofuScale,
+  PRESETS, buildBuilding, computeLayout, disposeBuilding, playAssembly, tofuBob, tofuScale,
 } from '../../../src/api/building.js';
 import {
   setupEnvironment, createFocusRing, setupNightGlow, setupWeather,
@@ -21,7 +21,7 @@ import {
   createRerollWave, createVillage, createVillageAsync,
 } from '../../../src/api/village.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
-import { buildWings, wingCount, buildNextWing, ghostSpec } from './expansion.js';
+import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './expansion.js';
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
 import { createCinematicRuntime } from './cinematic-runtime.js';
 import { createPostRuntime } from './post-runtime.js';
@@ -78,6 +78,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     seed: 0, preset: 'korea', time: 'day', season: 'summer', weather: 'clear',
     expansion: 1, selected: false, canMerge: false,
   };
+  let disposed = false;
   let P = {}; // 현재 파라미터
 
   // ---------- 렌더러 / 씬 / 카메라 ----------
@@ -185,16 +186,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   });
   const demo = demoRuntime.state;
 
-  function disposeGroup(g) {
-    g.traverse((o) => { o.geometry?.dispose?.(); });
-  }
-
   function regenerate() {
     bumpShadow(1500);   // #140-A 단일건물 재생성: 원점 근처 지오 교체 → 그림자 갱신
     if (assembly) { assembly.skip(); assembly = null; }
-    for (const w of wings) { w.assembly?.skip?.(); scene.remove(w.group); disposeGroup(w.group); }
+    for (const w of wings) { w.assembly?.skip?.(); scene.remove(w.group); disposeWing(w); }
     wings = [];
-    if (building) { scene.remove(building); disposeGroup(building); }
+    if (building) { scene.remove(building); disposeBuilding(building); }
 
     building = buildBuilding(P);
     scene.add(building);
@@ -241,7 +238,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 환경 (산수화 레이어) ----------
-  const env = setupEnvironment(scene, { sun, hemi, renderer, layout: computeLayout(PRESETS.korea) });
+  let env = setupEnvironment(scene, { sun, hemi, renderer, layout: computeLayout(PRESETS.korea) });
   // 앰비언스 근접 링(#79·mode-integration §3) — focus-in 필지에 마당 닭·굴뚝 연기·먼지 모트·등롱 흔들림을
   // 점등한다. 동시 1개, 크로스페이드. 부감(focus-out)에선 clear. heightAt 은 현재 마을 지형 조회(폴백 0).
   const focusRing = createFocusRing(scene, {
@@ -276,6 +273,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         }
       }
     } else if (building && building.visible) {
+      const layout = building.userData.layout || computeLayout(P);
       const xE = layout.xEave ?? 9, zE = layout.zEave ?? 6;
       const topY = layout.eaveEdgeY ?? 6.5;
       const box = new THREE.Box3(
@@ -566,7 +564,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         //   않는다(부팅 임계 경로엔 mp3 0 — 프리페치는 여기 정착 이후 발생). 1회만.
         if (!bootAudioWarmed) {
           bootAudioWarmed = true;
-          const warm = () => { try { ensureAudio()?.prefetchCurrentTrack?.(); } catch {} };
+          const warm = () => { if (disposed) return; try { ensureAudio()?.prefetchCurrentTrack?.(); } catch {} };
           if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 3000 });
           else setTimeout(warm, 500);
         }
@@ -629,7 +627,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const hit = raycaster.intersectObjects(targets, true);
     return hit.length ? hit[0] : null;
   }
-  renderer.domElement.addEventListener('pointermove', (e) => {
+  function onCanvasPointerMove(e) {
     if (demo.active) return;                                   // 시네마틱 데모 중 호버 무시(#112)
     if (village.wave) return;                                  // 웨이브 중 입력 무시(#56)
     if (village.active) { villageHover(e.clientX, e.clientY); return; }
@@ -642,9 +640,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       renderer.domElement.style.cursor = now ? 'pointer' : '';
       emit('hover', now);
     }
-  });
+  }
   let downPos = null;
-  renderer.domElement.addEventListener('pointerdown', (e) => {
+  function onCanvasPointerDown(e) {
     // 시네마틱 데모 중 캔버스 입력(#112): 드론(수동관람)은 탭/클릭 = 종료. 1인칭은 드래그가 시선 조작이라
     //   종료하지 않음(ESC·오버레이 종료 버튼으로만 나간다).
     if (demo.active) { if (demo.mode !== 'walk') stopDemo(); return; }
@@ -654,8 +652,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (e.pointerType === 'touch' && village.active && !village.transitioning && !village.wave) {
       lastHoverT = 0; villageHover(e.clientX, e.clientY);
     }
-  });
-  renderer.domElement.addEventListener('pointerup', (e) => {
+  }
+  function onCanvasPointerUp(e) {
     ensureAudio()?.start();
     if (!downPos) return;
     const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
@@ -679,7 +677,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     const h = pick(e.clientX, e.clientY);
     if (h && !state.selected) { selectBuilding(); }
-  });
+  }
+  renderer.domElement.addEventListener('pointermove', onCanvasPointerMove);
+  renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
+  renderer.domElement.addEventListener('pointerup', onCanvasPointerUp);
   // 줌 연속체(#92): 부감↔근접 전환은 렌더 루프의 updateZoomContinuum 이 카메라↔필지 거리(휠·핀치가
   //   OrbitControls 로 구동)를 감시해 자동 트리거한다. 휠 자체는 OrbitControls 가 소비 — 여기선 봉인 없음.
 
@@ -722,7 +723,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     state.selected = false;
     state.canMerge = false;
     clearGhost();
-    const { pos, target } = spotFor('three-quarter', computeLayout(P));
+    const { pos, target } = buildingSpot('three-quarter', computeLayout(P));
     tweenTo(pos, target);
     emit('select', false);
     emit('state', { ...state });
@@ -895,6 +896,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (bootShaderCheckRetired) return;
     bootShaderCheckRetired = true;
     const off = () => {
+      if (disposed) return;
       try { renderer.debug.checkShaderErrors = false; } catch {}
       // #140-A 그림자 정적 캐시 개시 — 예열 완료(공유 셰이더 검증·초기 부감 정착) 후 autoUpdate 를
       //   끄고, 이후엔 shadowHot/움직임/ focus 조건에서만 needsUpdate 로 재렌더한다. 개시 직후 잠깐은
@@ -909,7 +911,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   보장(초과분 잔여 링크는 checkShaderErrors=false 로 논블록).
   function afterWarm(promise, capMs, fn) {
     let done = false;
-    const go = () => { if (done) return; done = true; fn(); };
+    const go = () => { if (done || disposed) return; done = true; fn(); };
     Promise.resolve(promise).then(go, go);
     setTimeout(go, capMs);
   }
@@ -959,6 +961,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       startVillageReveal();
       bumpShadow(3000);   // #140-A 새 마을 지오 등장 + reveal·예열 정착 동안 그림자 갱신(캐시 개시는 retire 소유)
       requestAnimationFrame(() => {
+        if (disposed) return;
         const warm = (village.active && village.handle) ? warmShaders(village.handle.group) : Promise.resolve();
         retireShaderErrorCheck(warm);   // #128: 첫 마을 예열 완료 후 셰이더 에러 체크 은퇴. 1회 게이트.
       });
@@ -1029,7 +1032,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     reapplyEnvBase();                    // 단일건물 fog 복원(env.setTime)
     weatherRef.setWeather(state.weather); refreshAtmosphere();
     updateWeatherColliders();
-    const { pos, target } = spotFor('three-quarter', computeLayout(P));
+    const { pos, target } = buildingSpot('three-quarter', computeLayout(P));
     tweenTo(pos, target, 1.2, { fov: camera.__houseFov ?? 28 });
     emit('villageMode', false);
   }
@@ -1081,7 +1084,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   한 타임라인으로 구동(onProgress 가 카메라 이즈드 k 를 App 패널 모프로 흘림). 줌은 전환 중 봉인.
   function villageSelect(parcelId) {
     if (!village.handle) return;
-    const pr = village.handle.getPickProxies().find((p) => p.parcelId === parcelId);
+    const pr = village.handle.getPickProxy(parcelId);
     if (!pr) return;
     if (hoverParcel && hoverParcel !== parcelId) village.handle.highlightParcel(hoverParcel, false);
     hoverParcel = null; village.zoomCand = null;
@@ -1126,7 +1129,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!village.active || !village.handle || village.transitioning || village.wave) return;
     const fromId = village.selected;
     if (!fromId || toId === fromId) return;                       // 부감(미focus)이거나 같은 필지면 무효(재클릭 no-op)
-    const pr = village.handle.getPickProxies().find((p) => p.parcelId === toId);
+    const pr = village.handle.getPickProxy(toId);
     if (!pr) return;
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     village.zoomCand = null;
@@ -1198,7 +1201,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   function villageSpec(parcelId) {
     if (!village.handle || !parcelId) return null;
-    return village.handle.getPickProxies().find((p) => p.parcelId === parcelId)?.buildingSpec || null;
+    return village.handle.getPickProxy(parcelId)?.buildingSpec || null;
   }
 
   // ---------- 종가 랜딩·포커스·리플레이 (마을 우선 진입 #62 · 모드 일원화·리플레이 #59) ----------
@@ -1294,7 +1297,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const g = village.handle.showHeroDetail(heroId);   // 풀디테일 오버레이(원본 종가 가림)
     if (g) warmShaders(g);   // 종가 컴파운드 오버레이 서브트리만 프리컴파일(#117) — 랜딩 조립 첫 렌더 컴파일 스톨 흡수(타이틀 마스킹 구간)
     // 종가 클로즈업 프레이밍으로 스냅(타이틀이 화면을 덮는 동안 세팅 → 페이드 아웃되면 조립이 보임)
-    const pr = village.handle.getPickProxies().find((p) => p.parcelId === heroId);
+    const pr = village.handle.getPickProxy(heroId);
     // 종가 치수·회전. getPickProxies 가 미노출하던 시절 pr.rotY/maxDim/H 가 undefined → 카메라
     //   좌표 NaN → 랜딩 카메라가 정지(선회·줌인 소실)했다(#98 근본 원인). 어댑터에서 노출 복원 +
     //   여기 방어 폴백(bbox·cameraFraming 파생)으로 재발을 원천 차단한다.
@@ -1349,7 +1352,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //   0 에 갇혀 효과음만 들리던 회귀 수정). setBgmVolume 은 볼륨 배수라 audio 미start 여도 안전.
     ensureAudio();
     { const t0 = performance.now(), durMs = 2500;
-      const stepFade = () => { const k = Math.min(1, (performance.now() - t0) / durMs); audio?.setBgmVolume(k); if (k < 1) requestAnimationFrame(stepFade); };
+      const stepFade = () => { if (disposed) return; const k = Math.min(1, (performance.now() - t0) / durMs); audio?.setBgmVolume(k); if (k < 1) requestAnimationFrame(stepFade); };
       requestAnimationFrame(stepFade); }
     const closeupDist = finalPosition.distanceTo(finalTarget);
     // 조립 즉시 시작하되 착공 지연(delay)만큼 빈 터 유지 → 타이틀 페이드·먹안개가 착공 순간을 덮는다.
@@ -1415,7 +1418,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!village.active || !village.handle || village.transitioning) return;
     const id = village.selected;
     if (!id) return;
-    const pr = village.handle.getPickProxies().find((p) => p.parcelId === id);
+    const pr = village.handle.getPickProxy(id);
     if (!pr) return;
     let detail = village.handle.focusAssembly(id);           // 현 오버레이(편집 보존)
     if (!detail) { const d = village.handle.showParcelDetail(id); if (!d) return; detail = d; }
@@ -1451,7 +1454,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const detail = village.handle.rerollParcel(id);
     if (!detail) return;
     if (detail.group) warmShaders(detail.group);   // 리롤 신규 오버레이 서브트리만 프리컴파일(#117) — 재조립 첫 렌더 컴파일 스톨 흡수
-    const pr = village.handle.getPickProxies().find((p) => p.parcelId === id);
+    const pr = village.handle.getPickProxy(id);
     const spec = detail.spec || pr?.buildingSpec;
     const dur = detail.compound ? HERO_ASSEMBLE_DUR : 3.0;
     village.transitioning = true;
@@ -1588,7 +1591,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       regenerate();
       audio?.setLayout(computeLayout(P));
       // 선택 상태면 포커스 유지(+후보 갱신), 아니면 3/4
-      const { pos, target } = state.selected ? focusFraming() : spotFor('three-quarter', computeLayout(P));
+      const { pos, target } = state.selected ? focusFraming() : buildingSpot('three-quarter', computeLayout(P));
       tweenTo(pos, target, 0.7);
       startAssembly(2.4);
       if (state.selected) refreshGhost();
@@ -1815,7 +1818,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       //   info.render.calls 를 1(풀스크린 쿼드)로 덮으므로, 후처리 없는 씬 1회 렌더로 실측한다.
       debugDrawCalls: () => { renderer.render(scene, camera); return renderer.info.render.calls; },
       debugScreenOf(parcelId) {
-        const pr = village.handle?.getPickProxies().find((p) => p.parcelId === parcelId);
+        const pr = village.handle?.getPickProxy(parcelId);
         if (!pr) return null;
         const c = pr.bbox.getCenter(new THREE.Vector3());
         const v = c.project(camera);
@@ -1843,7 +1846,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       //   이 임계 판정으로 자동 focus-in/out 을 트리거(실사용 게이트 경로). 반환: 설정된 카메라↔타깃 거리.
       debugDolly(frac, parcelId = null) {
         if (!village.active || village.transitioning || village.wave) return null;
-        if (parcelId) { const pr = village.handle.getPickProxies().find((p) => p.parcelId === parcelId); if (pr) controls.target.copy(pr.worldCenter); }
+        if (parcelId) { const pr = village.handle.getPickProxy(parcelId); if (pr) controls.target.copy(pr.worldCenter); }
         const d = (village.aerialDist || 150) * frac;
         const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
         if (dir.lengthSq() < 1e-6) dir.set(0.2, 1, 1.9);
@@ -1911,6 +1914,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         const t0 = performance.now(), durMs = 2500;
         if (typeof window !== 'undefined') { window.__heroEnterT = t0; window.__heroAssembleT = null; }
         const stepFade = () => {
+          if (disposed) return;
           const k = Math.min(1, (performance.now() - t0) / durMs);
           audio?.setBgmVolume(k);
           if (k < 1) requestAnimationFrame(stepFade);
@@ -1920,6 +1924,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         // 착공(조립 시작)을 크게 앞당김 — 타이틀 페이드 직후 기단이 올라오기 시작(중단 시 취소).
         let assembleTimer = setTimeout(() => {
           assembleTimer = null;
+          if (disposed) return;
           building.visible = true;
           for (const w of wings) w.group.visible = true;
           if (typeof window !== 'undefined') window.__heroAssembleT = performance.now() - t0;
@@ -1928,6 +1933,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         // reveal 자연 종료·사용자 중단(cinematic 내장 interrupt) 감시 → 컨트롤 인계.
         let handed = false;
         const iv = setInterval(() => {
+          if (disposed) {
+            handed = true;
+            clearInterval(iv);
+            if (assembleTimer) { clearTimeout(assembleTimer); assembleTimer = null; }
+            return;
+          }
           if (handed) { clearInterval(iv); return; }
           if (!cinematic.isActive()) {
             handed = true;
@@ -1991,15 +2002,66 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setViewShiftEnabled: (enabled) => viewShiftRuntime.setEnabled(enabled),
     renderer, scene, camera,
     __controls: controls,   // 검증용: 프레임 단위 controls.target 샘플링
+    debugPostPassOrder: () => postRuntime.debugPassOrder(),
+    debugPostResolution: () => postRuntime.debugResolution(),
     dispose() {
-      demoRuntime.dispose();
+      if (disposed) return;
+      disposed = true;
       renderer.setAnimationLoop(null);
+      village.pregen = null;
+      village.build = null;
+      village.waveBuild = null;
+      village.active = false;
+      village.selected = null;
+      village.transitioning = false;
+      village.zoomCand = null;
+      village.reveal = null;
+      village.heroAsm = null;
+      heroActive = false;
+      hoverParcel = null;
+      tween = null;
+      groupAnims = [];
+      if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
+      if (village.heroTimer) { clearTimeout(village.heroTimer); village.heroTimer = null; }
+      demoRuntime.dispose();
+      cinematic.dispose?.();
       removeEventListener('resize', resizeAll);
       for (const ev of activityEvents) removeEventListener(ev, markActivity);
-      focusRing.clear();
+      renderer.domElement.removeEventListener('pointermove', onCanvasPointerMove);
+      renderer.domElement.removeEventListener('pointerdown', onCanvasPointerDown);
+      renderer.domElement.removeEventListener('pointerup', onCanvasPointerUp);
+      focusRing.dispose();
+      nightGlowRef?.dispose?.();
+      audio?.dispose?.();
+      if (village.wave) {
+        const wave = village.wave;
+        village.wave = null;
+        wave.anim.dispose();
+        scene.remove(wave.newHandle.group);
+        if (wave.newHandle !== village.handle) wave.newHandle.dispose();
+      }
       if (village.handle) { village.handle.exitVillageMode({ scene, building, ground, env }); village.handle.dispose(); village.handle = null; }
       if (village.cache.handle) { village.cache.handle.dispose(); village.cache = { key: null, handle: null }; }
+      weatherRef?.dispose?.();
+      postRuntime.dispose();
+      env?.dispose?.();
+      env = null;
+      clearGhost();
+      if (assembly) { assembly.skip(); assembly = null; }
+      for (const wing of wings) {
+        wing.assembly?.skip?.();
+        scene.remove(wing.group);
+        disposeWing(wing);
+      }
+      wings = [];
+      if (building) { scene.remove(building); disposeBuilding(building); building = null; }
+      scene.remove(ground);
+      ground.geometry.dispose();
+      ground.material.dispose();
+      controls.dispose();
       renderer.dispose();
+      renderer.domElement.remove();
+      for (const eventName of Object.keys(listeners)) listeners[eventName] = [];
       if (typeof window !== 'undefined' && window.__engine === controller) {
         delete window.__engine;
         delete window.__viewshift;

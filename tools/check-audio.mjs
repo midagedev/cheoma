@@ -35,6 +35,49 @@ try { browser = await chromium.launch({ channel: 'chrome', args: ARGS }); }
 catch { browser = await chromium.launch({ args: ARGS }); }
 
 const page = await browser.newPage({ viewport: { width: 1000, height: 720 } });
+// 실제 Web Audio native 메서드를 계측한다. 모듈 내부 카운터가 아니라 브라우저가 본
+// start/stop/connect/disconnect 쌍을 비교해 종료 계약의 빈틈을 잡는다.
+await page.addInitScript(() => {
+  const connected = new Set();
+  const disconnected = new Set();
+  const started = new Set();
+  const stopped = new Set();
+
+  const nodeProto = globalThis.AudioNode?.prototype;
+  if (nodeProto) {
+    const connect = nodeProto.connect;
+    const disconnect = nodeProto.disconnect;
+    nodeProto.connect = function(...args) {
+      connected.add(this);
+      return connect.apply(this, args);
+    };
+    nodeProto.disconnect = function(...args) {
+      disconnected.add(this);
+      return disconnect.apply(this, args);
+    };
+  }
+
+  const sourceProto = globalThis.AudioScheduledSourceNode?.prototype;
+  if (sourceProto) {
+    const start = sourceProto.start;
+    const stop = sourceProto.stop;
+    sourceProto.start = function(...args) {
+      started.add(this);
+      return start.apply(this, args);
+    };
+    sourceProto.stop = function(...args) {
+      stopped.add(this);
+      return stop.apply(this, args);
+    };
+  }
+
+  globalThis.__audioLifecycleProbe = () => ({
+    connected: connected.size,
+    disconnected: [...connected].filter((node) => disconnected.has(node)).length,
+    started: started.size,
+    stopped: [...started].filter((source) => stopped.has(source)).length,
+  });
+});
 const errors = [];
 const warnings = [];
 page.on('console', (msg) => {
@@ -101,6 +144,36 @@ try {
   await page.click('#toggle');
   ok('enable toggle', true);
 
+  // 종료 계약: 두 번 호출해도 안전하고, 모든 시작 소스·연결 그래프를 정리하며,
+  // dispose 뒤 public API 호출은 새 source/node를 만들지 않는다.
+  const detached = await page.evaluate(() => {
+    window.__audio.dispose();
+    window.__audio.dispose();
+    return window.__audio.listener.parent === null;
+  });
+  await page.waitForTimeout(250);
+  const disposedProbe = await page.evaluate(() => window.__audioLifecycleProbe());
+  ok('dispose is idempotent + listener detached', detached);
+  ok('all started sources stopped on dispose', disposedProbe.started === disposedProbe.stopped,
+    `started=${disposedProbe.started} stopped=${disposedProbe.stopped}`);
+  ok('all connected nodes disconnected on dispose', disposedProbe.connected === disposedProbe.disconnected,
+    `connected=${disposedProbe.connected} disconnected=${disposedProbe.disconnected}`);
+
+  await page.evaluate(async () => {
+    await window.__audio.start();
+    window.__audio.strike();
+    window.__audio.barkDog();
+    window.__audio.playTrack('night');
+    window.__audio.setTime('night');
+    window.__audio.setWeather('rain');
+    window.__audio.update(1 / 60);
+  });
+  await page.waitForTimeout(100);
+  const afterDisposedCalls = await page.evaluate(() => window.__audioLifecycleProbe());
+  ok('public API is inert after dispose',
+    afterDisposedCalls.started === disposedProbe.started && afterDisposedCalls.connected === disposedProbe.connected,
+    `before=${JSON.stringify(disposedProbe)} after=${JSON.stringify(afterDisposedCalls)}`);
+
   // 오프라인 풍경 합성 RMS
   const rms = await page.evaluate(() => window.__renderBellRMS());
   ok('offline bell RMS > 0 (not silent)', rms > 1e-4, `rms=${rms.toExponential(3)}`);
@@ -115,7 +188,7 @@ try {
   ok('run', false, e.message);
 } finally {
   await browser.close();
-  server.close();
+  await new Promise((resolveClose) => server.close(resolveClose));
 }
 
 // ---------- 리포트 ----------

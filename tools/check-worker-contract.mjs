@@ -90,10 +90,78 @@ try {
         }
       };
 
-      const [{ createVillage, createVillageAsync }, { hashThreeGroup, hashVillagePickProxies }] = await Promise.all([
+      const [{ createVillage, createVillageAsync }, { hashThreeGroup, hashVillagePickProxies }, { isSharedResource }] = await Promise.all([
         import('/src/village/adapter.js'),
         import('/tools/lib/hash-three-group.mjs'),
+        import('/src/core/three-resources.js'),
       ]);
+      const probeLifecycle = (handle) => {
+        const owned = new Set();
+        const shared = new Set();
+        const add = (resource) => {
+          if (!resource?.dispose) return;
+          (isSharedResource(resource) ? shared : owned).add(resource);
+        };
+        const addMaterial = (material) => {
+          if (!material) return;
+          add(material);
+          for (const value of Object.values(material)) if (value?.isTexture) add(value);
+          for (const uniform of Object.values(material.uniforms || {})) {
+            const value = uniform?.value;
+            if (value?.isTexture) add(value);
+            else if (Array.isArray(value)) for (const item of value) if (item?.isTexture) add(item);
+          }
+        };
+        const addObject = (object) => {
+          add(object.geometry);
+          const materials = Array.isArray(object.material)
+            ? object.material
+            : (object.material ? [object.material] : []);
+          for (const material of materials) addMaterial(material);
+        };
+        handle.group.traverse(addObject);
+        for (const proxy of handle.getPickProxies()) addObject(proxy.mesh);
+        const counts = new Map();
+        let sharedDisposals = 0;
+        const onOwned = (event) => counts.set(event.target, (counts.get(event.target) || 0) + 1);
+        const onShared = () => { sharedDisposals++; };
+        for (const resource of owned) resource.addEventListener('dispose', onOwned);
+        for (const resource of shared) resource.addEventListener('dispose', onShared);
+        return {
+          finish() {
+            for (const resource of owned) resource.removeEventListener('dispose', onOwned);
+            for (const resource of shared) resource.removeEventListener('dispose', onShared);
+            return {
+              owned: owned.size,
+              disposed: counts.size,
+              duplicates: [...counts.values()].filter((count) => count !== 1).length,
+              duplicateDetails: [...counts.entries()]
+                .filter(([, count]) => count !== 1)
+                .slice(0, 8)
+                .map(([resource, count]) => ({ type: resource.type || resource.constructor?.name, name: resource.name || '', count })),
+              shared: shared.size,
+              sharedDisposals,
+            };
+          },
+        };
+      };
+      const postDisposeInactive = (handle) => {
+        const scene = new handle.group.constructor();
+        let beforeObjects = 0;
+        handle.group.traverse(() => { beforeObjects++; });
+        const parcelId = handle.plan.parcels[0]?.id;
+        handle.enterVillageMode({ scene });
+        handle.debugShowProxies(true);
+        const detail = handle.showParcelDetail(parcelId);
+        let afterObjects = 0;
+        handle.group.traverse(() => { afterObjects++; });
+        return scene.children.length === 0
+          && beforeObjects === afterObjects
+          && detail === null
+          && handle.getPickProxy(parcelId) === null
+          && handle.getPickProxies().length === 0
+          && handle.updateLod(null) === 0;
+      };
       const scales = ['village', 'town', 'capital', 'hanyang'];
       const cases = [];
       for (const scale of scales) {
@@ -109,6 +177,21 @@ try {
         const asyncHash = hashThreeGroup(asyncHandle.group);
         const syncProxyHash = hashVillagePickProxies(sync);
         const asyncProxyHash = hashVillagePickProxies(asyncHandle);
+        const syncProbe = probeLifecycle(sync);
+        const asyncProbe = probeLifecycle(asyncHandle);
+        sync.dispose();
+        sync.dispose();
+        asyncHandle.dispose();
+        asyncHandle.dispose();
+        const inactive = postDisposeInactive(sync) && postDisposeInactive(asyncHandle);
+        const syncLifecycle = syncProbe.finish();
+        const asyncLifecycle = asyncProbe.finish();
+        const lifecyclePass = [syncLifecycle, asyncLifecycle].every((result) => (
+          result.owned > 0
+          && result.disposed === result.owned
+          && result.duplicates === 0
+          && result.sharedDisposals === 0
+        )) && inactive;
         cases.push({
           scale,
           equal: syncHash.hash === asyncHash.hash && syncProxyHash.hash === asyncProxyHash.hash,
@@ -117,9 +200,11 @@ try {
           syncProxyHash,
           asyncProxyHash,
           steps,
+          lifecyclePass,
+          syncLifecycle,
+          asyncLifecycle,
+          inactive,
         });
-        sync.dispose();
-        asyncHandle.dispose();
       }
       return { cases, workerStats };
     });
@@ -134,7 +219,8 @@ try {
       const stepsEqual = JSON.stringify(item.steps) === JSON.stringify(expectedSteps);
       const baselineEqual = item.syncHash.hash === expectedSceneHashes[item.scale]
         && item.syncProxyHash.hash === expectedProxyHashes[item.scale];
-      const pass = item.equal && stepsEqual && baselineEqual;
+      const proxyApiPass = item.syncProxyHash.singleContract && item.asyncProxyHash.singleContract;
+      const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && item.lifecyclePass;
       failed ||= !pass;
       console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`);
       if (!item.equal) console.log(`          async ${item.asyncHash.hash}  proxy=${item.asyncProxyHash.hash}`);
@@ -142,6 +228,10 @@ try {
         console.log(`          expected ${expectedSceneHashes[item.scale]}  proxy=${expectedProxyHashes[item.scale]}`);
       }
       if (!stepsEqual) console.log(`          steps ${JSON.stringify(item.steps)}`);
+      if (!proxyApiPass) console.log('          getPickProxy descriptor parity/isolation contract failed');
+      if (!item.lifecyclePass) {
+        console.log(`          lifecycle sync=${JSON.stringify(item.syncLifecycle)} async=${JSON.stringify(item.asyncLifecycle)} inactive=${item.inactive}`);
+      }
     }
     const workerPass = mode === 'worker'
       ? result.workerStats.started === 1

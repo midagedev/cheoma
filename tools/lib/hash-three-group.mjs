@@ -97,7 +97,7 @@ function stableValue(value) {
 
 /** Hash the non-rendered VillageHandle picking and framing contract. */
 export function hashVillagePickProxies(handle) {
-  const values = handle.getPickProxies().map((proxy) => ({
+  const describe = (proxy) => ({
     parcelId: proxy.parcelId,
     bbox: [proxy.bbox.min.toArray(), proxy.bbox.max.toArray()],
     worldCenter: proxy.worldCenter.toArray(),
@@ -109,9 +109,20 @@ export function hashVillagePickProxies(handle) {
       target: proxy.cameraFraming.target.toArray(),
       fov: proxy.cameraFraming.fov,
     },
-  }));
+  });
+  const proxies = handle.getPickProxies();
+  const values = proxies.map(describe);
+  let singleContract = typeof handle.getPickProxy === 'function'
+    && proxies.every((proxy, index) => stableValue(describe(handle.getPickProxy(proxy.parcelId))) === stableValue(values[index]))
+    && handle.getPickProxy('__missing_proxy__') === null;
+  if (singleContract && proxies.length) {
+    const first = handle.getPickProxy(proxies[0].parcelId);
+    first.worldCenter.set(1e9, 1e9, 1e9);
+    first.bbox.makeEmpty();
+    singleContract = stableValue(describe(handle.getPickProxy(proxies[0].parcelId))) === stableValue(values[0]);
+  }
   const text = stableValue(values);
   let hash = 2166136261 >>> 0;
   for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
-  return { hash: hash.toString(16).padStart(8, '0'), count: values.length };
+  return { hash: hash.toString(16).padStart(8, '0'), count: values.length, singleContract };
 }

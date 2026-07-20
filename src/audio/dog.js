@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { makeWhiteNoise, poissonInterval } from './synth.js';
+import { createAudioScope, makeWhiteNoise, poissonInterval } from './synth.js';
 
 // 마당 개 짖는 소리 — 위치성(PositionalAudio). 개의 라이브 위치(getAnchor)를 따라다닌다.
 //   createDog(listener, { getAnchor, getState, rand }) →
-//     { object, setEnabled(v), setVolume(v), bark(), update(dt), start() }
+//     { object, setEnabled(v), setVolume(v), bark(), update(dt), start(), dispose() }
 //
 // 근거리용으로 톤 정리: 딜레이 리버브를 옅게(짧은 테일)만 남기고, 성대 톤(2 디튠 톱니)에
 // 포먼트(peaking 700Hz)로 "몸통"을 주어 시골 마당 개의 "월! 월!" 2~3연.
@@ -11,6 +11,7 @@ import { makeWhiteNoise, poissonInterval } from './synth.js';
 
 export function createDog(listener, { getAnchor, getState, rand = Math.random } = {}) {
   const ctx = listener.context;
+  const scope = createAudioScope();
 
   const pa = new THREE.PositionalAudio(listener);
   pa.setDistanceModel('inverse');
@@ -38,8 +39,11 @@ export function createDog(listener, { getAnchor, getState, rand = Math.random } 
   const voicePk = ctx.createBiquadFilter();
   voicePk.type = 'peaking'; voicePk.frequency.value = 700; voicePk.Q.value = 1; voicePk.gain.value = 6;
   voiceLP.connect(voicePk); voicePk.connect(barkBus);
+  scope.track(out, pa.panner, pa.gain, barkBus, delay, fb, wet, voiceLP, voicePk);
 
   function woof(when, amp, pitch) {
+    const sources = [];
+    const nodes = [];
     // 성대: 2 디튠 톱니, 피치 컨투어(빠른 상승 후 하강) — "워우"
     for (const det of [1, 1.006]) {
       const osc = ctx.createOscillator();
@@ -53,6 +57,8 @@ export function createDog(listener, { getAnchor, getState, rand = Math.random } 
       g.gain.setTargetAtTime(0.0001, when + 0.06, 0.05);
       osc.connect(g); g.connect(voiceLP);
       osc.start(when); osc.stop(when + 0.4);
+      sources.push(osc);
+      nodes.push(g);
     }
     // 어택 노이즈("워"의 자음) — 포먼트 우회, 짧고 또렷
     const nb = ctx.createBufferSource();
@@ -65,6 +71,9 @@ export function createDog(listener, { getAnchor, getState, rand = Math.random } 
     ng.gain.setTargetAtTime(0.0001, when + 0.01, 0.02);
     nb.connect(nbp); nbp.connect(ng); ng.connect(barkBus);
     nb.start(when); nb.stop(when + 0.06);
+    sources.push(nb);
+    nodes.push(nbp, ng);
+    scope.trackVoice(sources, nodes);
   }
 
   function barkPhrase() {
@@ -79,16 +88,17 @@ export function createDog(listener, { getAnchor, getState, rand = Math.random } 
   }
 
   let started = false;
+  let disposed = false;
   let enabled = false;
   let volume = 1;
   let prevState = null;
   let nextBg = 30 + rand() * 40; // 배경 포아송 카운트다운(초)
   const pending = [];            // 짖을 절대 시각(ctx time) 큐
 
-  function push() { out.gain.setTargetAtTime(enabled ? volume : 0, ctx.currentTime, 0.2); }
+  function push() { if (!disposed) out.gain.setTargetAtTime(enabled ? volume : 0, ctx.currentTime, 0.2); }
 
   function update(dt) {
-    if (!started) return;
+    if (!started || disposed) return;
     // 개가 걸어다니므로 매 프레임 panner 위치 갱신(라이브 앵커)
     const a = getAnchor && getAnchor();
     if (a) { pa.position.copy(a); pa.updateMatrixWorld(); }
@@ -110,10 +120,21 @@ export function createDog(listener, { getAnchor, getState, rand = Math.random } 
 
   return {
     object: pa,
-    setEnabled(v) { enabled = !!v; push(); },
-    setVolume(v) { volume = Math.max(0, v); push(); },
-    bark() { barkPhrase(); }, // 테스트용 즉시 짖음
+    setEnabled(v) { if (disposed) return; enabled = !!v; push(); },
+    setVolume(v) { if (disposed) return; volume = Math.max(0, v); push(); },
+    bark() { if (!disposed) barkPhrase(); }, // 테스트용 즉시 짖음
     update,
-    start() { if (started) return; started = true; push(); },
+    start() { if (started || disposed) return; started = true; push(); },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      started = false;
+      enabled = false;
+      pending.length = 0;
+      try { out.gain.setValueAtTime(0, ctx.currentTime); } catch {}
+      try { pa.disconnect(); } catch {}
+      pa.removeFromParent();
+      scope.dispose();
+    },
   };
 }

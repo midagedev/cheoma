@@ -65,10 +65,26 @@ export function createVillageCameraRuntime({
     }
   }
 
+  let distanceHandle = null;
+  let distanceParcelId = null;
+  let distanceWorldCenter = null;
   function parcelDistance(parcelId) {
-    if (!parcelId || !village.handle) return Infinity;
-    const proxy = village.handle.getPickProxies().find((item) => item.parcelId === parcelId);
-    return proxy ? camera.position.distanceTo(proxy.worldCenter) : Infinity;
+    const handle = village.handle;
+    if (!parcelId || !handle) {
+      distanceHandle = null;
+      distanceParcelId = null;
+      distanceWorldCenter = null;
+      return Infinity;
+    }
+    // zoom candidate는 여러 프레임 유지된다. 같은 handle/id에서는 첫 단건 조회의
+    // 복제본을 재사용해, steady-state 거리 계산을 무할당으로 유지한다.
+    if (handle !== distanceHandle || parcelId !== distanceParcelId) {
+      const proxy = handle.getPickProxy(parcelId);
+      distanceHandle = handle;
+      distanceParcelId = parcelId;
+      distanceWorldCenter = proxy?.worldCenter || null;
+    }
+    return distanceWorldCenter ? camera.position.distanceTo(distanceWorldCenter) : Infinity;
   }
 
   function updateContinuum() {

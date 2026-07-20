@@ -2,6 +2,18 @@
 
 기준일: 2026-07-16. 버전·게시일은 npm 레지스트리, 유지보수 상태는 GitHub `pushed_at`으로 교차 검증됨.
 
+## 2026-07-20: `cloudai-x/threejs-skills` 선별 적용 판단
+
+[`cloudai-x/threejs-skills`](https://github.com/cloudai-x/threejs-skills)는 일반적인 three.js 제작 체크리스트로는 가치가 있지만, 이 레포의 결정론·worker·instancing·`onBeforeCompile` 규칙과 겹치는 자체 계약을 대체할 수는 없다. 따라서 스킬 전체를 설치하거나 코드를 복사하지 않고 다음 원칙만 현재 구조에 맞게 적용했다.
+
+- hot loop에서 전체 객체 열거·복제를 피하고 이미 존재하는 인덱스를 단건 API로 노출한다.
+- renderer, composer, pass와 DOM 이벤트의 소유자에게 idempotent teardown을 둔다.
+- 색공간과 DPR은 three 0.185.1의 실제 동작을 기준으로 한 번만 변환·동기화한다.
+- 셰이더 프로그램 변형은 리터럴 분기보다 uniform을 우선하고 program plateau로 검증한다.
+- 시각 변경은 고정 시드 캡처와 효과 ON/OFF 기여량을 함께 본다.
+
+적용 결과는 `architecture-refactor.md`와 `verification.md`의 현재 계약에 반영했다. 나머지 예제·보일러플레이트·일반 튜토리얼은 레포에 중복 문서와 두 번째 작업 규칙을 만들기 때문에 가져오지 않는다.
+
 ## 1. CSG / 불리언 연산
 
 ### manifold-3d (Manifold) — 1순위

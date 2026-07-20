@@ -1,4 +1,5 @@
 import { smoothstep } from '../core/math/scalar.js';
+import { disposeObjectTree } from '../core/three-resources.js';
 import * as THREE from 'three';
 
 // 산 구름·물안개 + 흐르는 구름 그림자 (태스크 #51 축② → #68 재설계로 형태·대응 강화).
@@ -242,10 +243,16 @@ export function buildEdgeMistRing(edge, {
   mesh.renderOrder = 2;
   const _c = new THREE.Color();
   const _white = new THREE.Color(0xffffff);
+  let disposed = false;
   function update(fogColor) {
+    if (disposed) return;
     if (fogColor) { _c.copy(fogColor).lerp(_white, 0.11); mat.color.copy(_c); }
   }
-  function dispose() { geo.dispose(); tex.dispose(); mat.dispose(); }
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    disposeObjectTree(mesh);
+  }
   return { mesh, update, dispose };
 }
 
@@ -286,8 +293,16 @@ export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, 
     mats.push(mat);
   }
   const _c = new THREE.Color(), _white = new THREE.Color(0xffffff);
-  function update(fogColor) { if (fogColor) { _c.copy(fogColor).lerp(_white, 0.14); for (const m of mats) m.color.copy(_c); } }
-  function dispose() { tex.dispose(); root.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
+  let disposed = false;
+  function update(fogColor) {
+    if (!disposed && fogColor) { _c.copy(fogColor).lerp(_white, 0.14); for (const m of mats) m.color.copy(_c); }
+  }
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    disposeObjectTree(root);
+    root.clear();
+  }
   return { group: root, update, dispose };
 }
 
@@ -341,7 +356,6 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   // 반경을 마을·씬 중앙 위(r 0.14~0.55)로 낮춰 지면 투영 그림자가 마을 안·언저리에 떨어지게 한다
   //   (이전 r 0.62~0.86 은 그림자가 외곽 숲 링에 떨어져 "마을에 드리우는" 인상이 없었다). 크기·높이는
   //   부감·아이레벨 양쪽에서 덩어리로 읽히게 큼직하게.
-  const cloudTex = [makeCumulusTexture(11), makeCumulusTexture(29), makeCumulusTexture(47), makeCumulusTexture(63), makeCumulusTexture(81)];
   const highClouds = [];
   const highSpecs = [
     { r: 0.20, ang: 2.4, y: 82, w: 150, h: 108, op: 0.72, sp: 0.55 },
@@ -350,6 +364,10 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     { r: 0.55, ang: 1.0, y: 108, w: 192, h: 132, op: 0.58, sp: 0.5 },
     { r: 0.14, ang: 0.2, y: 76, w: 136, h: 100, op: 0.68, sp: 0.62 },
   ].slice(0, nHigh);
+  // 실제 billboard 수만큼만 생성한다. 기본 nHigh=4에서 고정 5장을 만들면 마지막
+  // CanvasTexture는 어떤 material에도 연결되지 않아 상위 Object3D teardown이 회수할 수 없다.
+  const cloudSeeds = [11, 29, 47, 63, 81];
+  const cloudTex = highSpecs.map((_, i) => makeCumulusTexture(cloudSeeds[i]));
   highSpecs.forEach((s, i) => {
     const mat = new THREE.MeshBasicMaterial({
       map: cloudTex[i], transparent: true, opacity: s.op, depthWrite: false,
@@ -425,6 +443,7 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   const _base = new THREE.Color(0xffffff);
   const _warm = new THREE.Color();
   let t = 0;
+  let disposed = false;
 
   // 표류: drift 방향으로 눈에 띄게 미끄러지고 perp 로 왕복한다. 경계 밖으로 벗어나지 않게 사인
   //   왕복만 쓴다(순 이동 누적 없음) → 오래 켜둬도 안정. #68 에서 진폭·주기를 키워 "지나간다"는
@@ -471,6 +490,7 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   }
 
   function update(dt) {
+    if (disposed) return;
     if (!SHOT) t += dt;
     u.uCloudTime.value = t;
 
@@ -520,15 +540,13 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     });
   }
 
-  function setEnabled(v) { root.visible = !!v; }
+  function setEnabled(v) { if (!disposed) root.visible = !!v; }
 
   function dispose() {
-    root.traverse((o) => {
-      if (o.geometry) o.geometry.dispose?.();
-      const m = o.material;
-      if (m) { m.map?.dispose?.(); m.dispose?.(); }
-    });
-    cloudTex.forEach((t) => t.dispose());
+    if (disposed) return;
+    disposed = true;
+    disposeObjectTree(root);
+    root.clear();
   }
 
   return { group: root, uniforms: u, update, setEnabled, dispose };

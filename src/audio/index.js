@@ -9,7 +9,7 @@ import { createDog } from './dog.js';
 //   setupAudio(listenerCarrier, { layout, streamAnchor, getDogAnchor, getDogState }) →
 //     { start(), setEnabled(v), setEnvActive(v), setTime(name), setWeather(name),
 //       update(dt), setBgmVolume(v), setAmbienceVolume(v), setLayout(l),
-//       strike(i?), barkDog(), getTracks(), playTrack(n), listener }
+//       strike(i?), barkDog(), getTracks(), playTrack(n), listener, dispose() }
 //   streamAnchor: 개울 물소리를 앉힐 월드 좌표(THREE.Vector3) 또는 null.
 //   getDogAnchor/getDogState: 마당 개의 라이브 월드 위치·상태('walking'|'sitting') getter(없으면 개 없음).
 //
@@ -86,6 +86,8 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
 
   let enabled = true;
   let started = false;
+  let disposed = false;
+  let startPromise = null;
   let envActive = true;  // env 레이어 ON 여부 — 개울 물소리는 env 가 꺼지면 정지
   let time = 'day';
   let weather = 'clear';
@@ -99,16 +101,19 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
     return w;
   }
   function pushWind() {
+    if (disposed) return;
     const w = windiness();
     chimes.setWindiness(w);
     ambience.setWindiness(w);
   }
 
   function applyMaster() {
+    if (disposed) return;
     listener.setMasterVolume(enabled ? 1 : 0);
   }
   // 개울 물소리·개 짖음(위치성 env 사운드)은 전체 사운드 ON && env 레이어 ON 일 때만.
   function pushEnvAudio() {
+    if (disposed) return;
     const on = enabled && envActive;
     stream?.setEnabled(on);
     dog?.setEnabled(on);
@@ -116,22 +121,29 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
 
   const api = {
     listener,
-    async start() {
-      if (started) return;
-      if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
-      started = true;
-      chimes.start();
-      ambience.start();
-      stream?.start();
-      dog?.start();
-      await bgm.start();
-      applyMaster();
-      pushEnvAudio();
+    start() {
+      if (disposed || started) return startPromise || Promise.resolve();
+      if (startPromise) return startPromise;
+      startPromise = (async () => {
+        if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
+        if (disposed) return;
+        started = true;
+        chimes.start();
+        ambience.start();
+        stream?.start();
+        dog?.start();
+        await bgm.start();
+        if (disposed) return;
+        applyMaster();
+        pushEnvAudio();
+      })().finally(() => { startPromise = null; });
+      return startPromise;
     },
-    setEnabled(v) { enabled = !!v; applyMaster(); pushEnvAudio(); },
+    setEnabled(v) { if (disposed) return; enabled = !!v; applyMaster(); pushEnvAudio(); },
     // env 레이어(산수화 배경·지형·개울·개) ON/OFF — 위치성 env 사운드를 따라 정지/재개
-    setEnvActive(v) { envActive = !!v; pushEnvAudio(); },
+    setEnvActive(v) { if (disposed) return; envActive = !!v; pushEnvAudio(); },
     setTime(name) {
+      if (disposed) return;
       time = name;
       ambience.setTime(name);
       pushWind();
@@ -140,15 +152,17 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       if (track) bgm.play(track);
     },
     setWeather(name) {
+      if (disposed) return;
       weather = name;
       ambience.setWeather(name);
       stream?.setWeather(name); // 눈(결빙) 시 물소리 0.25배
       pushWind();
     },
     // 건물 재생성(크기 변경) 시 풍경 위치 갱신
-    setLayout(layout) { chimes.setLayout(layout); },
-    setBgmVolume(v) { bgm.setVolume(v); },
+    setLayout(layout) { if (!disposed) chimes.setLayout(layout); },
+    setBgmVolume(v) { if (!disposed) bgm.setVolume(v); },
     setAmbienceVolume(v) {
+      if (disposed) return;
       ambienceVol = Math.max(0, v);
       ambienceGain.gain.setTargetAtTime(ambienceVol, ctx.currentTime, 0.1);
       chimes.setVolume(ambienceVol); // 풍경도 환경음 볼륨에 종속
@@ -156,22 +170,43 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       dog?.setVolume(ambienceVol);    // 개 짖음도 환경음 볼륨에 종속
     },
     // #140-D 현재 시간대 트랙 프리페치(제스처 전 유휴 호출용) — 첫 사운드 활성 즉시 재생.
-    prefetchCurrentTrack() { return bgm.prefetch(TIME_TRACK[time]); },
+    prefetchCurrentTrack() { return disposed ? Promise.resolve(null) : bgm.prefetch(TIME_TRACK[time]); },
     // BGM 트랙 선택지(옵션 트랙 village/genesis 포함) 노출
     getTracks() { return bgm.getTracks(); },
     // 특정 트랙 강제 재생(옵션 트랙 테스트/노출용)
-    playTrack(name) { bgm.play(name); },
+    playTrack(name) { if (!disposed) bgm.play(name); },
     // 테스트용 즉시 타종
-    strike(i) { chimes.strike(i); },
+    strike(i) { if (!disposed) chimes.strike(i); },
     // 테스트용 즉시 개 짖음
-    barkDog() { dog?.bark(); },
+    barkDog() { if (!disposed) dog?.bark(); },
     update(dt) {
-      if (!started || !enabled) return;
+      if (!started || !enabled || disposed) return;
       chimes.update(dt);
       ambience.update(dt);
       stream?.update(dt);
       dog?.update(dt);
       bgm.update(dt);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      enabled = false;
+      envActive = false;
+      started = false;
+      try {
+        input.gain.cancelScheduledValues(ctx.currentTime);
+        input.gain.setValueAtTime(0, ctx.currentTime);
+      } catch {}
+      chimes.dispose();
+      ambience.dispose();
+      bgm.dispose();
+      stream?.dispose();
+      dog?.dispose();
+      try { ambienceGain.disconnect(); } catch {}
+      try { bgmGain.disconnect(); } catch {}
+      try { input.disconnect(); } catch {}
+      try { limiter.disconnect(); } catch {}
+      listener.removeFromParent();
     },
   };
 

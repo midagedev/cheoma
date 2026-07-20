@@ -42,12 +42,17 @@ app/src/                       Svelte UI
 
 | 영역 | 이전 | 현재 |
 | --- | --- | --- |
-| 마을 어댑터 | `src/village/adapter.js` 1,523줄에 worker·handle·pick·edit·환경 결합 | 2줄 호환 façade + `src/runtime/village/`의 역할별 모듈, 최대 파일 `handle.js` 709줄 |
+| 마을 어댑터 | `src/village/adapter.js` 1,523줄에 worker·handle·pick·edit·환경 결합 | 2줄 호환 façade + `src/runtime/village/`의 역할별 모듈, 최대 파일 `handle.js` 약 760줄 |
 | 마을 populate | `src/village/populate.js` 1,389줄에 모든 조립 구현 | 398줄 순서 orchestration + `src/generators/village/` 6개 생성기, 최대 302줄 |
-| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | 약 2,065줄 integration façade + scene/post/view-shift/cinematic/village-camera runtime |
+| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | 약 2,128줄 integration façade + scene/post/view-shift/cinematic/village-camera runtime |
 | 공용 수학 | geometry, world edge, value noise, smoothstep가 여러 도메인에 복제 | `src/core/math/{geom2,world-edge,value-noise2,scalar}.js`가 단일 구현 소유 |
 | 필지 변환 | layout이 village instancing 내부에 의존 | `src/generators/shared/parcel-transform.js`가 소유, 기존 경로는 re-export |
 | 공개 경계 | 앱과 외부 소비자가 코어 내부 파일을 직접 import | 앱의 코어 import는 `src/api/*`로 한정, 정적 게이트로 고정 |
+| 건물 자원 수명 | 재생성 때 geometry만 해제해 CanvasTexture가 매회 누적 | 공개 `disposeBuilding()`이 geometry·material·texture를 identity-dedupe하며, 주입된 `P.mats`와 모듈 수명 공유 소품 재질은 보존 |
+| 확장 미리보기 | ghost 치수 확인만으로 완성 건물·재질·텍스처를 생성 후 폐기 | 순수 `nextWingPlacement`를 ghost와 실제 merge가 공유하고, 실제 건물은 merge 때 한 번만 생성 |
+| 필지 단건 조회 | 내부 `Map`이 있어도 전체 proxy와 가변 객체를 매번 복제 | `getPickProxy(id)`가 한 건만 방어 복제하고, 카메라 hot loop는 동일 handle/id의 중심점을 재사용 |
+| 후처리 계약 | 그룹별 shader cache 의미, 색공간, DPR, dispose가 암묵적 | 그룹 계수 uniform, r185 선형 색, renderer/composer DPR 동기화, Output-last·owned-resource teardown을 실행 가능한 계약으로 고정 |
+| 앱 종료 | canvas 이벤트, post, 환경 GPU 자원, WebAudio graph가 재마운트 뒤 남음 | 이름 있는 이벤트와 idempotent `dispose()`로 listener·pass·target·environment·audio·hook·canvas를 정리 |
 
 기존 깊은 import를 당장 깨지 않도록 아래 경로는 호환 shim으로 남겼다.
 
@@ -76,7 +81,9 @@ app/src/                       Svelte UI
 
 ## 보존되는 런타임 계약
 
-- 공개 함수 시그니처와 `VillageHandle` 메서드.
+- 기존 공개 함수 시그니처와 `VillageHandle` 메서드. 단건 `getPickProxy(id)`는 기존 전체 조회를 보존하는 추가 계약이다.
+- `buildBuilding()`의 기존 반환 구조. 새 `disposeBuilding(root)`는 해당 root의 소유 자원만 정리하고 외부 `P.mats`와 모듈 수명 공유 소품 재질은 건드리지 않는다.
+- `VillageHandle.dispose()`는 내부 공유 identity를 정확히 한 번 해제하며, 종료 뒤 public method는 씬이나 자원을 다시 만들지 않는다.
 - 같은 seed의 RNG 소비 순서와 sync/worker/fallback 결과.
 - `populateVillageSteps`의 label과 순서.
 - object `name`, `userData`, material role·identity, pick proxy framing.
@@ -107,9 +114,9 @@ app/src/                       Svelte UI
 
 | 파일 | 현재 줄 수(근사) | 다음 안전 조건 |
 | --- | ---: | --- |
-| `app/src/engine/engine.js` | 2,065 | village/focus lifecycle의 명확한 상태기계 계약과 전용 앱 하네스가 있을 때 추가 추출 |
+| `app/src/engine/engine.js` | 2,128 | village/focus lifecycle의 명확한 상태기계 계약과 전용 앱 하네스가 있을 때 추가 추출 |
 | `src/builder/palette.js` | 899 | canvas/texture provider 주입과 material/shader identity 검사 마련 후 분리 |
-| `src/env/post.js` | 845 | pass 순서·program count·대표 픽셀 게이트 마련 후 분리 |
+| `src/env/post.js` | 873 | pass 순서·program plateau·대표 픽셀 게이트는 마련됨. 실제 재사용 소비자가 pass 단위 소유권을 요구할 때만 추가 분리 |
 | `src/builder/roof.js` | 826 | 지붕 유형별 geometry hash와 근접 시각 게이트 마련 후 분리 |
 | `src/env/critters.js` | 817 | proto/배치/애니메이션별 수치·시각 계약 마련 후 분리 |
 | `app/src/App.svelte` | 785 | UI 상태 소유권을 먼저 명시한 뒤 화면 orchestration 분리 |
