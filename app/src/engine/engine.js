@@ -1609,6 +1609,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.position.copy(f.pos); controls.target.copy(f.target); camera.fov = f.fov;
       camera.updateProjectionMatrix(); camera.lookAt(controls.target);
       village.transitioning = false; heroActive = false;
+      ensureAudio(); audio?.setBgmVolume(1);   // arm() 이 0 으로 뮤트한 BGM 복원(폴백 경로 — 랜딩 스킵)
       emit('villageMode', true); onDone?.(); return;
     }
     village.selected = heroId;
@@ -1666,6 +1667,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageMode', true);
     emit('villageSelectStart', { parcelId: heroId, spec: pr.buildingSpec });   // 패널 집 컨텍스트(스펙 선전달)
     emit('villageFocusMorph', 1);                                              // 랜딩=집 컨텍스트로 안착
+    // BGM 페이드인(#BGM): hero.arm() 이 타이틀 동안 BGM 볼륨을 0 으로 뮤트했으므로, 마을 우선 랜딩에서
+    //   다시 0→1 로 스웰시킨다(레거시 hero.enter 의 stepFade 대응 — 이게 없어 마을 우선 경로에서 BGM 이
+    //   0 에 갇혀 효과음만 들리던 회귀 수정). setBgmVolume 은 볼륨 배수라 audio 미start 여도 안전.
+    ensureAudio();
+    { const t0 = performance.now(), durMs = 2500;
+      const stepFade = () => { const k = Math.min(1, (performance.now() - t0) / durMs); audio?.setBgmVolume(k); if (k < 1) requestAnimationFrame(stepFade); };
+      requestAnimationFrame(stepFade); }
     const closeupDist = finalPosition.distanceTo(finalTarget);
     // 조립 즉시 시작하되 착공 지연(delay)만큼 빈 터 유지 → 타이틀 페이드·먹안개가 착공 순간을 덮는다.
     // 완료 시 클로즈업 편집 상태로 안착(패널 슬라이드 인).
