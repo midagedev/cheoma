@@ -2,3 +2,4 @@
 await import('./check-architecture.mjs');
 await import('./check-plan-contract.mjs');
 await import('./check-choga-roof.mjs');
+await import('./check-roof-seams.mjs');

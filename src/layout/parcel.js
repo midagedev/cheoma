@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hanokFootprint } from './hanok-footprint.js';
 import { PRESETS } from '../params.js';
 import { buildBuilding } from '../builder/index.js';
 import { makeMaterials } from '../builder/palette.js';
@@ -30,32 +31,6 @@ const STYLE_MAP = {
 //   뻗어 안뜰을 감싼다. bayW·wingLen·wingW 는 기본 ㄱ자(bays=3)가 기존 하드코딩 풋프린트와 정확히
 //   일치하도록 고른 값 — 미편집 종가의 픽셀 불변을 보장한다. 날개폭은 안뜰/본채 앞면이 붕괴하지 않게
 //   본채 폭에 종속 클램프(ㄷ자는 양 날개가 겹치지 않게, ㄱ자는 본채 앞면이 날개보다 넓게).
-function hanokFootprint(shape, bays) {
-  const nb = Math.max(2, Math.min(4, Math.round(bays || 3)));
-  const bayW = 10 / 3;               // 칸 폭 — bays=3 이면 본채 폭 10(기본형과 동일)
-  const hw = (nb * bayW) / 2;        // 본채 반폭(x)
-  const hd = 2.6;                    // 본채 반깊이(z, 고정)
-  const wingLen = 5.4;               // 날개 길이(+z)
-  if (shape === 'single') {
-    return [{ x: -hw, z: -hd }, { x: hw, z: -hd }, { x: hw, z: hd }, { x: -hw, z: hd }];
-  }
-  if (shape === 'u') {
-    const wingW = Math.min(3.6, hw - 1.2);   // 양 날개가 겹치지 않게(안뜰 확보)
-    return [
-      { x: -hw, z: -hd }, { x: hw, z: -hd },
-      { x: hw, z: hd + wingLen }, { x: hw - wingW, z: hd + wingLen },
-      { x: hw - wingW, z: hd }, { x: -hw + wingW, z: hd },
-      { x: -hw + wingW, z: hd + wingLen }, { x: -hw, z: hd + wingLen },
-    ];
-  }
-  // 'l' (ㄱ자, 기본) — bays=3 에서 기존 하드코딩 풋프린트와 완전 동일.
-  const wingW = Math.min(3.6, 2 * hw - 2);   // 본채 앞면이 날개보다 넓게 유지
-  return [
-    { x: -hw, z: -hd }, { x: hw, z: -hd }, { x: hw, z: hd },
-    { x: -hw + wingW, z: hd }, { x: -hw + wingW, z: hd + wingLen }, { x: -hw, z: hd + wingLen },
-  ];
-}
-
 export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, roofOpts, wallH = 2.7, presetOverrides, lanterns = true } = {}) {
   const cfg = STYLE_MAP[style] || STYLE_MAP.palace;
   const rng = makeRng(seed);

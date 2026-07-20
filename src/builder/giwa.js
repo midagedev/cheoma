@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { buildSkeletonRoof } from '../layout/roof-skeleton.js';
-import { giwaFootprint } from '../params.js';
+import { giwaFootprint, giwaFootprintPolygon } from '../params.js';
 
 // 기와집(ㄱ자 반가 안채): L 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
@@ -29,10 +29,7 @@ export function buildGiwa(P, M) {
   const { a, b, w, c } = giwaFootprint(P);   // 좁은 폭 정규화(computeLayout 과 공유)
   // ㄱ자 풋프린트(기둥/벽 중심선): 본채 + 우측 세로 날개.
   // buildSkeletonRoof는 CW 감김에서 바깥 법선(윗면)이 나오도록 검증됨.
-  const foot = [
-    { x: -a, z: b }, { x: a - w, z: b }, { x: a - w, z: b + c },
-    { x: a, z: b + c }, { x: a, z: -b }, { x: -a, z: -b },
-  ];
+  const foot = giwaFootprintPolygon(P);
   const n = foot.length;
   const cen = foot.reduce((s, p) => ({ x: s.x + p.x, z: s.z + p.z }), { x: 0, z: 0 });
   cen.x /= n; cen.z /= n;
