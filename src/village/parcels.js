@@ -1,6 +1,15 @@
 import { smoothstep } from '../core/math/scalar.js';
 import * as G from '../core/math/geom2.js';
 import { makeRng } from '../rng.js';
+import {
+  cityGateApproachFootprint,
+  cityWallClearance,
+  cityWallContainsPolygon,
+  cityWallOutsidePolygon,
+  cityWallRadiusAt,
+  worldEdgeClearance,
+  worldEdgeContainsPolygon,
+} from './citywall-contour.js';
 
 // 도로변 필지 분할 + 신분 위계 그라디언트 (joseon-city.md 규칙 7·8·9·10).
 //   - 필지는 도로 파사드를 따라 양편에 앉고, 집은 도로(로컬 +z)를 향한다(규칙 7).
@@ -210,6 +219,10 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     return true;
   };
   const validate = (center, poly, ownRoad) => {
+    // 필지 전체가 실제 지형 메시와 성곽 안쪽에 있어야 한다. 중심점만 검사하면 큰 필지 모서리가
+    // world-edge 밖으로 삐치거나 성벽을 관통한다.
+    if (!worldEdgeContainsPolygon(site.edge, poly, 6)) { dbg.edge = (dbg.edge || 0) + 1; return false; }
+    if (opts.cityWall && !cityWallContainsPolygon(opts.cityWall, poly, 6)) { dbg.wall = (dbg.wall || 0) + 1; return false; }
     // #120 비원형 분지: 외곽 한계를 방위별 분지 반경(bowlRAt)에 태워 신장 로브까지 필지가 뻗게 한다.
     const bowlLim = site.bowlRAt ? site.bowlRAt(center.x, center.z) : site.bowlR;
     if (G.dist(center, C) > bowlLim * 1.06) { dbg.bowl++; return false; }
@@ -377,16 +390,16 @@ function assignEdgeShare(parcels) {
 //   parcel 은 정규 필지와 동일 형태({poly,shape,center,frontDir,rank,kind,plotW,plotD,seed}) — plan 이
 //   parcels 에 편입하면 id·assignVariation·populate 조립·나무 clearance/mask·야경·소동물이 그대로 적용된다.
 //   전용 rng(공유 rng·필지 seed 공간 불침해, 결정론). existing = 겹침 회피용 기존 필지·예약 polygon.
-export function planSatellites(site, opts, seed, { minR = 0, existing = [] } = {}) {
+export function planSatellites(site, opts, seed, { existing = [], cityWall = null } = {}) {
   const scale = opts.scale;
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const nClusters = ({ hamlet: 0, village: 1, town: 1, capital: 2, hanyang: 3 })[scale] || 0;
   if (nClusters <= 0) return [];
   const rng = makeRng((seed ^ 0x5a7e11) >>> 0);
   const C = site.center, bowlR = site.bowlR, TR = site.terrainR || site.R;
-  const rLo = Math.max(minR, bowlR * 1.14);
-  const rHi = Math.min(TR * 0.9, bowlR * 1.66);
-  if (rHi <= rLo + 8) return [];
+  const baseRLo = bowlR * 1.14;
+  const baseRHi = Math.min(TR * 0.9, bowlR * 1.66);
+  if (!cityWall && baseRHi <= baseRLo + 8) return [];
 
   const foot = 13;                                   // 소형 필지 footprint 상당(완경사 판별)
   const footSlope = (x, z) => {
@@ -398,6 +411,7 @@ export function planSatellites(site, opts, seed, { minR = 0, existing = [] } = {
     return hi - lo;
   };
   const nearStream = (x, z, m) => site.stream && Math.abs(z - site.streamZat(x)) < site.streamHalf + m;
+  const gateApproaches = cityWall ? cityWall.gates.map((gate) => cityGateApproachFootprint(gate)) : [];
 
   // 앵커 후보 스캔: (phi, r) 격자에서 완사면·저능선·비정북·비하천 지점 수집·점수화.
   const cands = [];
@@ -406,14 +420,30 @@ export function planSatellites(site, opts, seed, { minR = 0, existing = [] } = {
     const phi = (p / NP) * Math.PI * 2;
     const dx = Math.cos(phi), dz = Math.sin(phi);
     if (dz < -0.72) continue;                        // 정북(-z) 콘 배제 → 주산 배후 보호
-    for (let r = rLo; r <= rHi; r += bowlR * 0.06) {
+    // 성곽이 있으면 고정 bowl 배수 띠가 아니라 실제 방위별 성벽 바깥에서 스캔을 시작한다. 부정형 벽이
+    // r≈340까지 나온 방향을 옛 rHi≈342가 거의 덮어 위성 부락이 0이 되던 문제를 없애고, world edge까지의
+    // 얇은 성저 공간을 방향마다 온전히 활용한다.
+    const wallAngle = Math.atan2(dx, dz);             // contour 규약(+z=0)
+    const scanLo = cityWall
+      ? Math.max(bowlR * 1.02, cityWallRadiusAt(cityWall, wallAngle) + foot / 2 + 5)
+      : baseRLo;
+    const scanHi = cityWall
+      ? scanLo + bowlR * 0.55
+      : baseRHi;
+    if (scanHi <= scanLo + 8) continue;
+    const scanStep = bowlR * (cityWall ? 0.04 : 0.06);
+    for (let r = scanLo; r <= scanHi; r += scanStep) {
       const x = C.x + dx * r, z = C.z + dz * r;
-      if (site.hillAt(x, z) > 0.44) continue;        // 능선·급사면 제외(성곽 밖 완사면 어깨 허용)
+      const anchor = { x, z };
+      if (gateApproaches.some((approach) => G.pointInPoly(anchor, approach))) continue;
+      if (worldEdgeClearance(site.edge, anchor) < foot / 2 + 6) continue;
+      if (cityWall && cityWallClearance(cityWall, anchor) > -(foot / 2 + 4)) continue;
+      if (site.hillAt(x, z) > (cityWall ? 0.54 : 0.44)) continue; // 성저 어깨만 완화; 기존 무성곽 규모 불변
       const slope = footSlope(x, z);
-      if (slope > 4.2) continue;                     // 완~중경사(도성 성곽 밖 어깨 축대 허용); 점수가 완경사 우선 → 소규모는 완경사만 채택
+      if (slope > (cityWall ? 4.6 : 4.2)) continue;   // 성저만 중경사 축대 허용; 기존 위성 부락 계약 보존
       if (nearStream(x, z, 4)) continue;
       const south = dz > 0.2 ? 1 : 0;                // 남측(계곡 입구) 외딴집 선호
-      const score = -site.hillAt(x, z) * 3 - slope * 1.4 - (r - rLo) / bowlR * 0.5 + south * 0.6 + rng() * 0.35;
+      const score = -site.hillAt(x, z) * 3 - slope * 1.4 - (r - scanLo) / bowlR * 0.5 + south * 0.6 + rng() * 0.35;
       cands.push({ x, z, phi, r, score });
     }
   }
@@ -461,6 +491,9 @@ export function planSatellites(site, opts, seed, { minR = 0, existing = [] } = {
       const shape = localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
       const center = { x: px, z: pz };
       const poly = worldPolyFromShape(center, frontDir, shape.pts);
+      if (!worldEdgeContainsPolygon(site.edge, poly, 6)) continue;
+      if (cityWall && !cityWallOutsidePolygon(cityWall, poly, 4)) continue;
+      if (gateApproaches.some((approach) => G.polysOverlap(poly, approach))) continue;
       if (placed.overlaps(poly)) continue;
       out.push({ poly, shape, center, frontDir, rank, kind: dims.kind, plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed, satellite: true });
       placed.add(poly);

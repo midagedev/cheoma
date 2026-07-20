@@ -1,12 +1,9 @@
 import * as THREE from 'three';
-import { facingY } from '../../core/math/geom2.js';
+import { parcelRotY } from './parcel-spatial.js';
+
+export { parcelRotY };
 
 const M4 = () => new THREE.Matrix4();
-
-// 필지와 집 생성기가 공유하는 유일한 월드 변환 계약.
-export function parcelRotY(parcel) {
-  return facingY(parcel.frontDir) + (parcel.yaw || 0);
-}
 
 export function houseMatrix(parcel) {
   const back = -parcel.plotD / 2 + (parcel.kind === 'giwa' ? 5.2 : 3.4);

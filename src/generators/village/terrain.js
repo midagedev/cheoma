@@ -4,6 +4,7 @@ import { createValueNoise2D } from '../../core/math/value-noise2.js';
 import {
   GRANITE, makeEcotoneField, makeEdgeWarp, makeRockExposure,
 } from '../../village/forest-crunch.js';
+import { terrainGridSize } from '../../village/terrain-grid.js';
 import { injectWaterLook } from '../../env/water.js';
 import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
@@ -22,7 +23,7 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const R = site.R;
   const TR = site.terrainR || R;               // 지형 메시 범위(마을보다 넓게)
   const edge = site.edge;
-  const N = Math.max(150, Math.min(260, Math.round(TR / 1.4)));
+  const N = terrainGridSize(site);
   const cCourt = linCol(0x8a7f66);   // 마을 바닥(밟힌 흙)
   const cGrass = linCol(0x676f45);   // 초지
   const cGrassDry = linCol(0x7a7c4c);   // 볕 좋은 마른 초지(#115 모틀링) — 균일 초록 원반(어두운 타원) 깨기

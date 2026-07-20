@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baselineCommit": "5ca668e",
+  "baselineCommit": "3c5e577",
   "seed": 20260716,
   "cases": {
     "hamlet:base": {
@@ -20,8 +20,8 @@
       "bytes": 113420
     },
     "hanyang:base": {
-      "hash": "bb3b368bb5171faf756e60f7ac961d76731db9c3bb6126b868d3b415f9c8daba",
-      "bytes": 695252
+      "hash": "68701ce71c3c6de6699f678f237d569a626bd29f2cd9461148e5a906ff5fa85e",
+      "bytes": 704764
     },
     "hamlet:temple": {
       "hash": "1e321bd82ff0ebafeaf1fbac4e39d87d4eb124c07e2f6f4ac6aa1a24992fdcf1",
@@ -40,8 +40,8 @@
       "bytes": 113538
     },
     "hanyang:temple": {
-      "hash": "c2a93a1d3046db650d3c1a32981ddf745aec8abb59065f0d701f86dea9bbcdb0",
-      "bytes": 695369
+      "hash": "86c3caf1d018ba349ab7c831b0f33c833893ac3874c3f69bb562ac226797c87c",
+      "bytes": 704881
     }
   }
 }

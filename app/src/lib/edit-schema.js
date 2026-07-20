@@ -182,7 +182,7 @@ const PALACE_COMPOUND_SECTIONS = [
 //   ctrl:
 //     'range'  — 배율/비율 슬라이더. def=기본(코어 no-op 값), 커밋 시 그 숫자 그대로 setOpts.
 //     'toggle' — 불. plain(stream: def true) | tri(cityWall·sijeon: 'auto'|true|false, 패널이 강제 ON/OFF).
-//   tierGate: 그 tier 미만에서 비활성(sijeon 은 대로 파사드가 있는 capital+ 에서만 실효 — plan.js 주석 참조).
+//   tierGate/tierHint: 해당 tier 미만에서 비활성 + 비활성 사유 i18n 키.
 const VILLAGE_SECTIONS = [
   { id: 'terrain', titleKey: 'vsec_terrain', fields: [
     { key: 'undAmpK', ctrl: 'range', min: 0, max: 2.2, step: 0.05, def: 1 },        // 기복(언듈레이션) 진폭
@@ -193,8 +193,8 @@ const VILLAGE_SECTIONS = [
   { id: 'composition', titleKey: 'vsec_composition', fields: [
     { key: 'paddyDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },    // 논 비율
     { key: 'treeDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },     // 나무 밀도
-    { key: 'cityWall', ctrl: 'toggle', tri: true, def: 'auto' },                     // 성곽(auto=hanyang)
-    { key: 'sijeon', ctrl: 'toggle', tri: true, def: 'auto', tierGate: 'capital' },  // 시전(대로 필요→capital+)
+    { key: 'cityWall', ctrl: 'toggle', tri: true, def: 'auto', tierGate: 'hamlet', tierHint: 'vil_citywall_hint' }, // 성곽(auto=hanyang, 초락부터 강제 가능)
+    { key: 'sijeon', ctrl: 'toggle', tri: true, def: 'auto', tierGate: 'capital', tierHint: 'vil_sijeon_hint' },    // 시전(대로 필요→capital+)
   ] },
   { id: 'vocab', titleKey: 'vsec_vocab', fields: [
     { key: 'char01', ctrl: 'range', min: 0, max: 1, step: 0.02, def: 0.5, auto: true }, // 초가↔기와 비율(미조정=규모파생)

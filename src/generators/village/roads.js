@@ -1,6 +1,6 @@
 import { smoothstep } from '../../core/math/scalar.js';
 import * as THREE from 'three';
-import * as G from '../../core/math/geom2.js';
+import { sampleRoadSurface } from '../../village/road-surface.js';
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 // ───────────────────────── 도로 ─────────────────────────
@@ -16,40 +16,47 @@ export function buildRoads(site, roads) {
   // color=white + vertexColors: 색은 정점에 실어 평지는 기존 베이지 그대로, 급사면만 지형에 뮤트.
   const roadMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1, metalness: 0 });
   const tmp = new THREE.Color(), terr = new THREE.Color();
-  const roadColAt = (x, z, out) => {
+  const roadColAt = (x, z, level, out) => {
     const hill = site.hillAt(x, z);
-    const mute = smoothstep(0.30, 0.60, hill) * 0.9;   // 완사면 0 → 급사면 0.9
+    // 도성 대로는 길찾기·구도 축이라 흙색을 유지하고, 산속의 작은 길일수록 지형에 더 녹인다.
+    // 같은 리본 안에서 초록 얼룩이 구멍처럼 읽히지 않도록 등급별 상한을 둔다.
+    const muteK = level === 'daero' ? 0 : level === 'jungno' ? 0.25 : 0.8;
+    const mute = smoothstep(0.30, 0.60, hill) * muteK;
     if (mute <= 0) return out.copy(R_BEIGE);
     terr.copy(R_GRASS).lerp(R_FOREST, smoothstep(0.06, 0.55, hill));
     return out.copy(R_BEIGE).lerp(terr, mute);
   };
+  const pos = [], col = [], idx = [];
+  // terrain-cell 경계에서 이웃 clip 조각이 공유하는 정점을 재사용한다. level을 key에 포함해
+  // 서로 다른 등급(색)의 겹친 길이 한 정점으로 섞이지 않게 한다.
+  const pointIndex = new Map();
+  const addPoint = (point, level) => {
+    const key = `${level}:${point.x.toFixed(6)}:${point.y.toFixed(6)}:${point.z.toFixed(6)}`;
+    const found = pointIndex.get(key);
+    if (found != null) return found;
+    const index = pos.length / 3;
+    pos.push(point.x, point.y, point.z);
+    roadColAt(point.x, point.z, level, tmp); col.push(tmp.r, tmp.g, tmp.b);
+    pointIndex.set(key, index);
+    return index;
+  };
   for (const road of roads) {
-    const pts = road.pts;
-    if (pts.length < 2) continue;
-    const hw = road.width / 2;
-    const pos = [], col = [], idx = [];
-    const N = pts.length - 1;
-    for (let i = 0; i <= N; i++) {
-      const p = pts[i];
-      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(N, i + 1)];
-      const tan = G.norm(G.sub(b, a));
-      const nx = -tan.z, nz = tan.x;
-      const xL = p.x + nx * hw, zL = p.z + nz * hw, xR = p.x - nx * hw, zR = p.z - nz * hw;
-      const yL = site.heightAt(xL, zL) + 0.06;
-      const yR = site.heightAt(xR, zR) + 0.06;
-      pos.push(xL, yL, zL); pos.push(xR, yR, zR);
-      roadColAt(xL, zL, tmp); col.push(tmp.r, tmp.g, tmp.b);
-      roadColAt(xR, zR, tmp); col.push(tmp.r, tmp.g, tmp.b);
-    }
-    for (let i = 0; i < N; i++) { const a = i * 2, b = a + 1, c = a + 2, d = a + 3; idx.push(a, c, b, b, c, d); }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    geo.setIndex(idx);
-    geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, roadMat);
-    mesh.receiveShadow = true;
-    group.add(mesh);
+    if (road.pts.length < 2) continue;
+    const { strips, joins } = sampleRoadSurface(site, road);
+    if (!strips.length) continue;
+    const addTriangle = (triangle) => idx.push(...triangle.map((point) => addPoint(point, road.level)));
+    for (const strip of strips) for (const triangle of strip.triangles) addTriangle(triangle);
+    for (const join of joins) for (const triangle of join.triangles) addTriangle(triangle);
   }
+  if (!idx.length) return group;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, roadMat);
+  mesh.name = 'village-roads-m0';
+  mesh.receiveShadow = true;
+  group.add(mesh);
   return group;
 }

@@ -585,6 +585,8 @@
     // 궁은 도성 규모(capital·hanyang)만. hanyang 은 궁 기본 ON(도성=궁성), 그 외 도성 미만은 OFF.
     if (s === 'hanyang') villageOpts.includePalace = true;
     else if (s !== 'capital') villageOpts.includePalace = false;
+    // 외딴집에는 성곽 문법이 없으므로 강제 ON을 auto로 정리한다. 초락 이상은 tier별 도로가 성문에 정렬된다.
+    if (s === 'solo' && villageOpts.cityWall === true) villageOpts.cityWall = 'auto';
     // 집 없음(#114)은 외딴집 전용 구성 — 규모를 키우면 해제(보이지 않는 houses:0 잔존 방지).
     if (s !== 'solo' && villageOpts.houses != null) villageOpts.houses = null;
     commitVillageOpts();

@@ -61,7 +61,10 @@
   // tri-state(cityWall·sijeon) 켜짐 판정 — true 강제 or ('auto' 이고 hanyang tier). 표시·클릭 방향에 사용.
   const vTriOn = (f) => { const v = villageParams[f.key]; return v === true || ((v == null || v === 'auto') && scale === 'hanyang'); };
   const vPlainOn = (f) => villageParams[f.key] !== false;   // stream: 기본 true
-  const vDisabled = (f) => f.tierGate === 'capital' && scaleIdx < SCALES.indexOf('capital');
+  const vDisabled = (f) => {
+    const gateIdx = SCALES.indexOf(f.tierGate);
+    return gateIdx >= 0 && scaleIdx < gateIdx;
+  };
   function vRange(f, value) { onVillageOpt?.(f.key, value); }
   function vToggleTri(f) { onVillageOpt?.(f.key, vTriOn(f) ? false : true); }   // 강제 ON/OFF(‘auto’ 이탈)
   function vTogglePlain(f) { onVillageOpt?.(f.key, !vPlainOn(f)); }
@@ -269,7 +272,7 @@
         </label>
       {:else if f.ctrl === 'toggle'}
         <div class="row">
-          <span class="rl">{t('s_' + f.key)}{#if vDisabled(f)}<span class="tierhint"> · {t('vil_sijeon_hint')}</span>{/if}</span>
+          <span class="rl">{t('s_' + f.key)}{#if vDisabled(f) && f.tierHint}<span class="tierhint"> · {t(f.tierHint)}</span>{/if}</span>
           {#if f.tri}
             <button class="tgl" data-vkey={f.key} class:on={vTriOn(f)} disabled={vDisabled(f)}
               onclick={() => vToggleTri(f)} role="switch" aria-checked={vTriOn(f)} aria-label={t('s_' + f.key)}>

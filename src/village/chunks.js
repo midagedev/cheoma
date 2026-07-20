@@ -17,6 +17,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // 링 폭(m). ringW=150 이면 capital(bowlR≈148)까지는 링 0 하나 → 단일 청크(회귀 안전),
 //   hanyang(bowlR≈296)만 링 0/1 로 갈린다.
 const RING_W = 150;
+const MAX_ARC_SECTORS = 24;
 
 // 링 내 섹터(각) 분할 수 — 필지 수 함수. ≤70 이면 1(단일: 소규모·중심 응집 보존),
 //   그 이상은 ~40호당 1섹터로 쪼개되 6 상한(과도한 드로우콜 방지).
@@ -29,10 +30,18 @@ function sectorsFor(count) {
 //   chunk: { key, ring, sector, parcels[], center:{x,z}, boundingRadius, dist, order, far }
 //   · center/boundingRadius: 컬링·정렬용(청크 바운딩 구).
 //   · dist: 앵커에서 청크 중심까지 거리 — order(웨이브 순서, 중심→밖) 산출.
-//   · far: 원경 청크 플래그(그림자 캐스터 다이어트 대상) — opts.farDist 초과 시 true.
+//   · opts.maxArcLength: 유한한 값이면 링의 최대 호 길이를 제한한다. 컬링 바운드와
+//     런타임 LOD 교체 단위가 마을 반대편까지 넓어지지 않게 한다.
+//     상한을 생략하면 기존 count 기반 분할을 그대로 보존한다.
+//   · far: 원경 청크 플래그(그림자 캐스터 다이어트 대상) — 청크의 가장 가까운
+//     필지 footprint가 opts.farDist 밖일 때 true. 중심점 거리는 반대편 필지끼리 상쇄될 수 있어
+//     LOD 경계로 쓰지 않고, 정렬·컬링 메타데이터로만 유지한다.
 export function partitionParcels(parcels, anchor, opts = {}) {
   const ringW = opts.ringW || RING_W;
   const farDist = opts.farDist != null ? opts.farDist : Infinity;
+  const maxArcLength = Number.isFinite(opts.maxArcLength) && opts.maxArcLength > 0
+    ? opts.maxArcLength
+    : Infinity;
   const withPolar = parcels.map((p) => {
     const dx = p.center.x - anchor.x, dz = p.center.z - anchor.z;
     const r = Math.hypot(dx, dz);
@@ -43,7 +52,14 @@ export function partitionParcels(parcels, anchor, opts = {}) {
 
   const chunks = new Map();
   for (const e of withPolar) {
-    const nsec = sectorsFor(ringCount.get(e.ring));
+    // count 기반 분할은 소규모의 기존 출력을 보존한다. 카메라 LOD를 쓰는 호출자만
+    // maxArcLength를 넘겨 청크 중심과 필지가 너무 멀어지지 않도록 방위 분할을 추가한다.
+    // 링은 [ring*ringW, (ring+1)*ringW)이므로 중간 반지름으로 필요 섹터 수를 계산한다.
+    let nsec = sectorsFor(ringCount.get(e.ring));
+    if (e.ring > 0 && Number.isFinite(maxArcLength)) {
+      const arcSectors = Math.ceil(TAU * (e.ring + 0.5) * ringW / maxArcLength);
+      nsec = clamp(Math.max(nsec, arcSectors), 1, MAX_ARC_SECTORS);
+    }
     const sector = nsec === 1 ? 0 : Math.floor(((e.th + Math.PI) / TAU) * nsec) % nsec;
     const key = e.ring * 100 + sector;
     let c = chunks.get(key);
@@ -57,20 +73,43 @@ export function partitionParcels(parcels, anchor, opts = {}) {
     for (const p of c.parcels) { sx += p.center.x; sz += p.center.z; }
     const n = c.parcels.length;
     const cx = sx / n, cz = sz / n;
-    let rad = 0;
+    let rad = 0, nearestFootprint = Infinity;
     for (const p of c.parcels) {
-      const d = Math.hypot(p.center.x - cx, p.center.z - cz) + Math.hypot(p.plotW || 10, p.plotD || 10) * 0.5;
+      const footprint = Math.hypot(p.plotW || 10, p.plotD || 10) * 0.5;
+      const d = Math.hypot(p.center.x - cx, p.center.z - cz) + footprint;
       if (d > rad) rad = d;
+      nearestFootprint = Math.min(nearestFootprint,
+        Math.hypot(p.center.x - anchor.x, p.center.z - anchor.z) - footprint);
     }
     c.center = { x: cx, z: cz };
     c.boundingRadius = rad;
     c.dist = Math.hypot(cx - anchor.x, cz - anchor.z);
-    c.far = c.dist > farDist;
+    c.far = nearestFootprint > farDist;
     out.push(c);
   }
   out.sort((a, b) => a.dist - b.dist);   // 중심→밖(웨이브 sweep 순서)
   out.forEach((c, i) => { c.order = i; });
   return out;
+}
+
+// 카메라와 청크가 실제로 소유한 필지 중심 사이의 최소 수평거리. centroid는 반대편 필지끼리
+// 상쇄될 수 있으므로 런타임 LOD 근접 판정에 쓰지 않는다. 매 프레임 호출되므로 임시 Vector나
+// 배열을 만들지 않는다. parcels가 없는 구형 호출은 center/{x,z} 거리로 폴백해 공개 API 호환을
+// 유지한다.
+export function chunkLodDistance(chunk, x, z) {
+  const parcels = chunk?.parcels;
+  if (parcels?.length) {
+    let minSq = Infinity;
+    for (const parcel of parcels) {
+      const dx = x - parcel.center.x;
+      const dz = z - parcel.center.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < minSq) minSq = dSq;
+    }
+    return Math.sqrt(minSq);
+  }
+  const center = chunk?.center || chunk;
+  return center ? Math.hypot(x - center.x, z - center.z) : Infinity;
 }
 
 // 여러 청크의 종류별 은닉 핸들을 하나의 API 로 합친다(픽킹·편집이 id 로 필지를 은닉).

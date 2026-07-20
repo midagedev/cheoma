@@ -11,3 +11,45 @@ export {
   makeSite,
 } from '../village/site.js';
 export { ROAD_WIDTH } from '../village/roads.js';
+export { planGuardianTrees } from '../village/guardian-plan.js';
+export { planParcelFocus } from '../generators/shared/parcel-spatial.js';
+export { IMPOSTOR_VARIANT_COUNTS, impostorHouseSpec } from '../village/impostor-spec.js';
+export {
+  computeFixedRadius,
+  terrainGridSize,
+  terrainMeshHeightAt,
+  terrainWarpInner,
+} from '../village/terrain-surface.js';
+export {
+  ROAD_SURFACE_MAX_SPAN,
+  ROAD_SURFACE_MAX_JOIN_SAGITTA,
+  ROAD_SURFACE_MIN_JOIN_GAP,
+  ROAD_SURFACE_LIFT,
+  sampleRoadSurface,
+} from '../village/road-surface.js';
+export {
+  CITY_WALL_DIMENSIONS,
+  CITY_WALL_MIN_SITE_R,
+  planCityWall,
+  cityWallRadiusAt,
+  pointOnCityWall,
+  normalOnCityWall,
+  cityWallClearance,
+  cityWallContainsPolygon,
+  cityWallOutsidePolygon,
+  worldEdgeClearance,
+  worldEdgeContainsPolygon,
+  clampPointInsideCityWall,
+  clampPointOutsideCityWall,
+  cityGateFootprint,
+  cityGateApproachFootprint,
+  cityGateLocalPoint,
+  cityGatePierTerrainProfile,
+  cityGateTerrainProfile,
+  cityGateStructureProfile,
+  cityGateStreamClearance,
+  cityWallVegetationBlocked,
+  sampleCityWallSegments,
+  cityWallSegmentCapProfile,
+  cityWallSegmentFootprint,
+} from '../village/citywall-contour.js';
