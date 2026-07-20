@@ -557,6 +557,7 @@ export function setupVillageCritters(parent, {
   heightAt = () => 0,
   center = { x: 0, z: 0 },
   radius = 40,
+  siteR = 0,          // 분지 반경(m) — 부감 카메라 고도(≈1.02·siteR)의 기준. LOD 램프 임계를 여기 비례.
   scale = 'village',
   parcels = [],
   treePerches = [],
@@ -784,12 +785,16 @@ export function setupVillageCritters(parent, {
     live = name === 'night' ? 0.45 : 1;
     flock.inst.visible = flockActive;
   }
-  // 카메라 고도 구동 원경 부스트(어댑터 updateLod 가 매 프레임 camera 로 호출). 근경(<46)=1, 부감으로 램프.
-  //   개·고양이는 그대로(원경 생략 정책) — 새 떼·까치만 서브픽셀 소실 방지로 키운다.
+  // ── LOD 램프 ── 어댑터 updateLod 가 매 프레임 camera 로 호출(engine.js:656). 카메라 고도(camera.y)를
+  //   부감 기준고도(≈1.02·siteR)에 비례한 임계로 판독 → 근경/포커스/워크(고도 낮음)=1x, 부감(고도 높음)=부스트.
+  //   임계를 siteR 비례로 잡아 규모 무관하게(작은 마을~한양) + 궁 포커스(카메라 ~50m로 높은 편)까지 확실히
+  //   1x 로 배제. smoothstep 이라 중간 줌(돌리)에서 매끄럽게 램프(팝 없음). refLo/refHi 는 adapter cow 와 동일.
+  const rampRef = siteR > 1 ? siteR : Math.max(60, radius * 1.4);   // siteR 없으면 radius 로 근사
+  const refLo = rampRef * 0.55, refHi = rampRef * 0.90;
   function updateLod(camera) {
     const y = (camera && camera.position) ? camera.position.y : 0;
-    const x = Math.max(0, Math.min(1, (y - 46) / 50));   // 46~96m 램프(작은 마을 부감도 빠르게 포화)
-    const hi = x * x * (3 - 2 * x);                       // smoothstep
+    const x = Math.max(0, Math.min(1, (y - refLo) / Math.max(1, refHi - refLo)));
+    const hi = x * x * (3 - 2 * x);                       // smoothstep — 근경 0(1x) ↔ 부감 1(full boost)
     flock.setScaleBoost(1 + hi * (BIRD_BOOST - 1));
     magAerial = 1 + hi * (MAG_BOOST - 1);
   }

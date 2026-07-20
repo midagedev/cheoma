@@ -105,6 +105,22 @@ window.__CRIT = {
   counts: { dogs: (meshByName['v-dogs']?.count) || 0, cats: (meshByName['v-cats']?.count) || 0, magpies: (meshByName['v-magpies']?.count) || 0, birds: (meshByName['birds']?.count) || 0, cows: cowGroups.length },
 };
 window.__advance = (secs) => { const n = Math.max(1, Math.round(secs / (1 / 60))); for (let i = 0; i < n; i++) { villageHandle.update(1 / 60); villageHandle.updateLod(camera); } };
+// LOD 램프 실측: camera.y 를 여러 값으로 놓고 updateLod→update 후 적용된 스케일 판독(소 그룹=정확 배율, 새=인스턴스 x스케일).
+window.__lodSweep = (ys) => {
+  const cow = (() => { let g = null; villageHandle.group.traverse((o) => { if (o.name === 'cow') g = o; }); return g; })();
+  const birds = meshByName['birds'];
+  const saveY = camera.position.y;
+  const m = new THREE.Matrix4(), s = new THREE.Vector3();
+  const out = [];
+  for (const y of ys) {
+    camera.position.y = y;
+    villageHandle.updateLod(camera); villageHandle.update(1 / 60); villageHandle.updateLod(camera);
+    let birdSx = null; if (birds) { birds.getMatrixAt(0, m); m.decompose(new THREE.Vector3(), new THREE.Quaternion(), s); birdSx = +s.x.toFixed(3); }
+    out.push({ camY: y, cowScale: cow ? +cow.scale.x.toFixed(3) : null, birdSx });
+  }
+  camera.position.y = saveY; villageHandle.updateLod(camera);
+  return out;
+};
 window.__posOf = (kind) => (kind === 'cow' ? cowPositions() : instPositions(nameFor[kind] || 'v-dogs'));
 window.__flockCenter = () => { const ps = instPositions('birds'); if (!ps.length) return null; let x = 0, y = 0, z = 0; for (const p of ps) { x += p.x; y += p.y; z += p.z; } return { x: x / ps.length, y: y / ps.length, z: z / ps.length }; };
 // 월드 → 캔버스 디바이스 픽셀(크롭 조준용).
@@ -118,12 +134,20 @@ if (view === 'near') {
   camera.lookAt(tgt.x, tgt.y + 0.3, tgt.z);
   window.__CRIT.aimAt = tgt;
 } else if (view === 'paddy') {
-  // 논 소를 부감 고도(부스트 발동, cam.y>46)에서 중거리로 조준 — 원경 소 가시성 확인.
+  // 논 소를 부감 고도(부스트 발동)에서 중거리로 조준 — 원경 소 가시성 확인.
   const ps = cowPositions();
   const tgt = ps[0] || { x: 0, y: villageHandle.plan.site.heightAt(0, 0), z: 0 };
   camera.fov = num('fov', 34);
   camera.position.set(tgt.x + num('cx', 6), tgt.y + num('cy', 52), tgt.z + num('cz', 62));
   camera.lookAt(tgt.x, tgt.y, tgt.z);
+  window.__CRIT.aimAt = tgt;
+} else if (view === 'cownear') {
+  // 논 소를 근접(낮은 카메라 → LOD 램프 하한 아래 → 부스트 1x)에서 조준 — 소가 실제 크기(정상 비례)인지.
+  const ps = cowPositions();
+  const tgt = ps[0] || { x: 0, y: villageHandle.plan.site.heightAt(0, 0), z: 0 };
+  camera.fov = num('fov', 30);
+  camera.position.set(tgt.x + num('cx', 5), tgt.y + num('cy', 4), tgt.z + num('cz', 9));
+  camera.lookAt(tgt.x, tgt.y + 0.8, tgt.z);
   window.__CRIT.aimAt = tgt;
 } else {
   // aerial: 기본 부감(마을 전체) — cam.y≈1.02R(>46)라 새·소 원경 부스트 발동.
@@ -158,24 +182,24 @@ await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const port = server.address().port;
 
 const filter = process.argv[2] || '';
-// ── 게이트: 앱 villageAerial 프레이밍 그대로 풀프레임 1280×900(crop 금지) — 새·소가 자연스럽게 읽히는지.
-//   논 있는 마을 day·sunset 필수. seed 12=개활 논(비가림), seed 42=나무 인접 논(현실 케이스).
+// ── LOD 게이트(한 세트): 부감=부스트 발동(새·소 읽힘) + 근접=부스트 1x(실제 크기). crop 금지, 앱 villageAerial 프레이밍 풀프레임.
+//   seed 12=개활 논(소 비가림). 부감 sunset·day + 근접 개/고양이/까치/소(모두 1x 정상 크기여야).
 const shots = [
-  ['gate-s12-aerial-sunset', '/__crit?scale=village&seed=12&view=aerial&time=sunset', 1280, 900],
-  ['gate-s12-aerial-day', '/__crit?scale=village&seed=12&view=aerial&time=day', 1280, 900],
-  ['gate-s42-aerial-sunset', '/__crit?scale=village&seed=42&view=aerial&time=sunset', 1280, 900],
-  ['gate-s42-aerial-day', '/__crit?scale=village&seed=42&view=aerial&time=day', 1280, 900],
-  // 근경 무회귀 확인(개·고양이·까치 원경 부스트가 근경엔 안 먹는지) + 기본 시드 부감 새.
-  ['village-near-dog', '/__crit?scale=village&view=near&target=dog&time=day', 1440, 900],
-  ['village-near-magpie', '/__crit?scale=village&view=near&target=magpie&time=day', 1440, 900],
-  ['village-aerial-sunset', '/__crit?scale=village&view=aerial&time=sunset', 1280, 900],
+  // 원경(부감) — 부스트 발동, 새·소 읽힘
+  ['aerial-s12-sunset', '/__crit?scale=village&seed=12&view=aerial&time=sunset', 1280, 900],
+  ['aerial-s12-day', '/__crit?scale=village&seed=12&view=aerial&time=day', 1280, 900],
+  // 근접 — 부스트 1x(실제 크기 정상). 개·고양이·까치는 원경부스트 대상도 아님(항상1x), 소는 부감에서 키운 게 근접서 되돌아오는지 핵심.
+  ['near-cow-s12', '/__crit?scale=village&seed=12&view=cownear&time=sunset', 1280, 900],
+  ['near-dog', '/__crit?scale=village&seed=12&view=near&target=dog&time=day', 1280, 900],
+  ['near-cat', '/__crit?scale=village&seed=12&view=near&target=cat&time=day', 1280, 900],
+  ['near-magpie', '/__crit?scale=village&seed=12&view=near&target=magpie&time=day', 1280, 900],
 ].filter(([name]) => !filter || name.includes(filter));
 
 let browser;
 try { browser = await chromium.launch({ channel: 'chrome' }); }
 catch { browser = await chromium.launch(); }
 
-let pageErrs = 0, consoleErrs = 0;
+let pageErrs = 0, consoleErrs = 0, sweptOnce = false;
 for (const [name, qs, vw, vh] of shots) {
   const page = await browser.newPage({ viewport: { width: vw, height: vh } });
   page.on('console', (msg) => { if (msg.type() === 'error') { const t = msg.text(); if (!/favicon|404/.test(t)) { consoleErrs++; console.error('[console]', name, t); } } });
@@ -195,6 +219,14 @@ for (const [name, qs, vw, vh] of shots) {
   const info = await page.evaluate(() => ({ plan: window.__PLAN, crit: window.__CRIT }));
   const file = join(OUT, `crit-${name}.png`);
   await page.screenshot({ path: file });   // 풀프레임만(crop 게이트 무효 — 앱 villageAerial 프레이밍 그대로)
+  // LOD 램프 실측(첫 shot에서 1회): camera.y 스윕 → 근경 1x·부감 full·중간 매끄러운지.
+  if (!sweptOnce) {
+    sweptOnce = true;
+    const R = info.plan?.R || 128;
+    const ys = [8, 20, R * 0.45, R * 0.55, R * 0.7, R * 0.85, R * 0.9, R * 1.02].map((v) => +v.toFixed(1));
+    const sweep = await page.evaluate((arr) => window.__lodSweep(arr), ys);
+    console.log('LOD sweep (camY→cowScale/birdSx):', JSON.stringify(sweep));
+  }
   const c = info.crit || {};
   console.log(`${name.padEnd(22)} R=${info.plan?.R} present=${c.present} drawMeshes=${c.drawMeshes} counts=${JSON.stringify(c.counts)} dogMotion=${JSON.stringify(motion)} calls=${info.plan?.perf?.calls}`);
   await page.close();

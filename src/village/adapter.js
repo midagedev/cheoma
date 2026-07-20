@@ -811,7 +811,7 @@ function finishVillage(opts, seed, plan, group) {
     const c = site.center || { x: 0, z: 0 };
     const rig = setupVillageCritters(group, {
       heightAt: (x, z) => (site && typeof site.heightAt === 'function' ? site.heightAt(x, z) : 0),
-      center: { x: c.x, z: c.z }, radius, scale: plan.scale,
+      center: { x: c.x, z: c.z }, radius, siteR: site.R || 0, scale: plan.scale,
       parcels: cParcels, treePerches, seed: (seed ^ 0x00c1c7) >>> 0,
     });
     rig.setTime(time); rig.setSeason(season);
@@ -823,13 +823,15 @@ function finishVillage(opts, seed, plan, group) {
   //   cow.update 는 g.scale 을 건드리지 않아(발끝 y=0 기준 상향 성장) 여기서 소유해도 충돌 없음. cow 는 재롤에
   //   재생성되지 않으므로 1회 수집. updateLod(매 프레임 camera)에서 구동.
   const COW_BOOST = 3.5;
+  const _cowRampRef = (site.R && site.R > 1) ? site.R : 120;   // 부감 카메라 고도 기준(≈1.02·siteR)
+  const _cowLo = _cowRampRef * 0.55, _cowHi = _cowRampRef * 0.90;   // villageCritters updateLod refLo/refHi 와 동일
   let _cowGroups = null;
   function applyCowAerial(camera) {
     if (_cowGroups === null) { _cowGroups = []; group.traverse((o) => { if (o.name === 'cow') _cowGroups.push(o); }); }
     if (!_cowGroups.length) return;
     const y = (camera && camera.position) ? camera.position.y : 0;
-    const x = Math.max(0, Math.min(1, (y - 46) / 50));
-    const hi = x * x * (3 - 2 * x);                 // smoothstep (villageCritters updateLod 와 동일 램프)
+    const x = Math.max(0, Math.min(1, (y - _cowLo) / Math.max(1, _cowHi - _cowLo)));
+    const hi = x * x * (3 - 2 * x);                 // smoothstep — 근경 1x ↔ 부감 full(LOD 램프, 새·까치와 동일 임계)
     const s = 1 + hi * (COW_BOOST - 1);
     for (const g of _cowGroups) g.scale.setScalar(s);
   }
