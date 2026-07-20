@@ -25,10 +25,10 @@ npm run build    # → app/dist   (build.target es2022, assetsInlineLimit 0)
 Repository contract gates run from the root:
 
 ```bash
-npm run check          # architecture + 10 deterministic plan goldens
+npm run check          # architecture + plan goldens + pure geometry invariants
 npm run check:app      # isolated full-app browser smoke
 npm run check:worker   # sync / real Worker / fallback scene + picking contracts
-npm run check:all      # all three
+npm run check:all      # all repository contract groups
 ```
 
 There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`), so run the tools with plain node:

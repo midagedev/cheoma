@@ -17,10 +17,11 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  village: '533a5367:8911e1f5:0ac7c5b4:af16cc1d',
-  town: '7fb03ffe:7a276f00:7c244fdb:ed313cb8',
-  capital: 'c38e38af:7093d979:d99406d9:d6977201',
-  hanyang: 'e9cd6e0c:4591809c:ae783181:a4af5014',
+  // #1: 초가 벽 상단을 실제 이엉 삼각면 아래로 맞춘 의도된 geometry 변경.
+  village: '5f96980b:8e2f6a0b:3409cea0:67c2b79b',
+  town: '0dc66cf0:291bc85c:dc0dd24f:07ac6c56',
+  capital: '2435db3d:1b3a191f:b41947dd:e6d0e705',
+  hanyang: 'c163f740:793bbefe:02fc9575:ff91023a',
 };
 const expectedProxyHashes = {
   village: '28774cfe',

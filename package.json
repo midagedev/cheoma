@@ -9,6 +9,7 @@
     "check:app": "node tools/check-app-smoke.mjs",
     "check:audio": "node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
+    "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:worker": "node tools/check-worker-contract.mjs"
   },
