@@ -17,17 +17,17 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #4: 기와 지붕 면이 용마루·추녀 접합점을 정확히 공유하도록 한 의도된 geometry 변경.
-  village: '842f5eea:c378b0e4:94742c01:4e8a3aea',
-  town: 'c1a49bde:e24cee4a:8429cc73:4cc5ad1e',
-  capital: 'b2aa1087:9e89bdcf:30ef3c56:6828dbd3',
-  hanyang: '083a8c5a:7907d666:475a9bf3:05f96bd2',
+  // #2 지형 밀착 indexed 도로(전 tier) + 한양 성곽·접근로·식생 footprint의 의도된 geometry 변경.
+  village: '587bc27c:e590aea8:092552fb:cd112f24',
+  town: '2d862954:41440794:037ab6d6:e92a4a90',
+  capital: '6bf3408d:32fc031d:6dd3f0e1:f0941a89',
+  hanyang: 'de2fe8ee:d17ea404:7a8f2eb9:7f587cb2',
 };
 const expectedProxyHashes = {
   village: '28774cfe',
   town: '9f4da67b',
   capital: '0032c3e8',
-  hanyang: '64a3ef9e',
+  hanyang: 'de9f7c23',
 };
 
 const server = await createServer({
@@ -91,10 +91,18 @@ try {
         }
       };
 
-      const [{ createVillage, createVillageAsync }, { hashThreeGroup, hashVillagePickProxies }, { isSharedResource }] = await Promise.all([
+      const [
+        { createVillage, createVillageAsync },
+        { hashThreeGroup, hashVillagePickProxies },
+        { isSharedResource },
+        { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked },
+        { FOREST_VISUAL_RADIUS },
+      ] = await Promise.all([
         import('/src/village/adapter.js'),
         import('/tools/lib/hash-three-group.mjs'),
         import('/src/core/three-resources.js'),
+        import('/src/village/citywall-contour.js'),
+        import('/src/village/forest-crunch.js'),
       ]);
       const probeLifecycle = (handle) => {
         const owned = new Set();
@@ -163,6 +171,47 @@ try {
           && handle.getPickProxies().length === 0
           && handle.updateLod(null) === 0;
       };
+      const wallVegetationContract = (handle) => {
+        const wall = handle.plan.features?.cityWall;
+        if (!wall) return { pass: true, checked: 0, failures: [] };
+        let checked = 0;
+        const failures = [];
+        handle.group.traverse((object) => {
+          if (!object.isInstancedMesh || !['forest-pine', 'forest-broad', 'forest-far', 'forest-rocks'].includes(object.name)) return;
+          const array = object.instanceMatrix.array;
+          for (let i = 0; i < object.count; i++) {
+            const o = i * 16;
+            const point = { x: array[o + 12], z: array[o + 14] };
+            const sx = Math.hypot(array[o], array[o + 1], array[o + 2]);
+            const sz = Math.hypot(array[o + 8], array[o + 9], array[o + 10]);
+            const factor = object.name === 'forest-pine' ? FOREST_VISUAL_RADIUS.pine
+              : object.name === 'forest-broad' ? FOREST_VISUAL_RADIUS.broad
+                : object.name === 'forest-far' ? FOREST_VISUAL_RADIUS.far
+                  : FOREST_VISUAL_RADIUS.rock;
+            const radius = Math.max(sx, sz) * factor;
+            const blocked = cityWallVegetationBlocked(wall, point, {
+              corridor: radius + CITY_WALL_DIMENSIONS.vegetationClearance,
+              gateMargin: radius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+              gateApproachMargin: radius,
+            });
+            checked++;
+            if (blocked && failures.length < 8) failures.push({ name: object.name, index: i, radius, x: point.x, z: point.z });
+          }
+        });
+        for (const [index, anchor] of (handle.group.userData.guardianAnchors || []).entries()) {
+          const radius = anchor.r || 0;
+          const blocked = cityWallVegetationBlocked(wall, anchor, {
+            corridor: radius + CITY_WALL_DIMENSIONS.vegetationClearance,
+            gateMargin: radius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+            gateApproachMargin: radius,
+          });
+          checked++;
+          if (blocked && failures.length < 8) failures.push({
+            name: 'flora-guardian', index, radius, x: anchor.x, z: anchor.z,
+          });
+        }
+        return { pass: failures.length === 0, checked, failures };
+      };
       const scales = ['village', 'town', 'capital', 'hanyang'];
       const cases = [];
       for (const scale of scales) {
@@ -178,6 +227,7 @@ try {
         const asyncHash = hashThreeGroup(asyncHandle.group);
         const syncProxyHash = hashVillagePickProxies(sync);
         const asyncProxyHash = hashVillagePickProxies(asyncHandle);
+        const vegetation = wallVegetationContract(sync);
         const syncProbe = probeLifecycle(sync);
         const asyncProbe = probeLifecycle(asyncHandle);
         sync.dispose();
@@ -205,6 +255,7 @@ try {
           syncLifecycle,
           asyncLifecycle,
           inactive,
+          vegetation,
         });
       }
       return { cases, workerStats };
@@ -221,7 +272,7 @@ try {
       const baselineEqual = item.syncHash.hash === expectedSceneHashes[item.scale]
         && item.syncProxyHash.hash === expectedProxyHashes[item.scale];
       const proxyApiPass = item.syncProxyHash.singleContract && item.asyncProxyHash.singleContract;
-      const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && item.lifecyclePass;
+      const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && item.lifecyclePass && item.vegetation.pass;
       failed ||= !pass;
       console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`);
       if (!item.equal) console.log(`          async ${item.asyncHash.hash}  proxy=${item.asyncProxyHash.hash}`);
@@ -233,6 +284,7 @@ try {
       if (!item.lifecyclePass) {
         console.log(`          lifecycle sync=${JSON.stringify(item.syncLifecycle)} async=${JSON.stringify(item.asyncLifecycle)} inactive=${item.inactive}`);
       }
+      if (!item.vegetation.pass) console.log(`          wall vegetation ${JSON.stringify(item.vegetation)}`);
     }
     const workerPass = mode === 'worker'
       ? result.workerStats.started === 1

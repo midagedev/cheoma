@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 import { toneOf } from './variants.js';
+import { impostorHouseSpec } from './impostor-spec.js';
 
 export { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 
@@ -212,24 +213,13 @@ export function buildHouseInstances(kind, parcels, decomps) {
 //   문제: 청크별 풀디테일 인스턴싱은 재질 수(giwa≈54·choga≈32)를 청크마다 곱해 드로우콜·삼각형이
 //   폭증한다(hanyang 실측 3400콜·20M삼각). 부감·원경에서 개별 집의 공포·창호·기와골은 픽셀 이하라
 //   무의미 — 지붕 덩어리와 벽 매스만 읽힌다. 그래서 원경 청크의 정규 주택을 한 채당 저폴리 프록시
-//   (몸통 박스 + 맞배 지붕 프리즘)로 대체하고 청크 전체를 vertexColor 단일 메시로 병합한다
-//   → 청크당 1 드로우콜, 채당 ~30 삼각. 색은 집 종류 기저색 × 필지 부위 톤(roofTone/wallTone)으로
-//   실제 집과 근사(부감에서 지붕색 다양성 유지). 그림자 비캐스트(원경).
-// 기저색은 선형(linear) 근사값 — 마을 지오와 톤 정합. 부감 지붕 매스가 실제 집과 비슷하게 읽히도록.
-const IMP = {
-  giwa:  { roof: [0.20, 0.23, 0.27], wall: [0.70, 0.67, 0.60], bodyH: 3.4, roofH: 2.5, wK: 0.60, dK: 0.54 },
-  choga: { roof: [0.40, 0.33, 0.21], wall: [0.40, 0.31, 0.20], bodyH: 2.5, roofH: 2.1, wK: 0.62, dK: 0.50 },
-};
+//   로 대체하고 청크 전체를 vertexColor 단일 메시로 병합한다. 순수 impostorHouseSpec이 실제 variant의
+//   초가 우진각·기와 ㄱ자 평면/날개·mirror·팔레트 선형색을 저폴리 명세로 줄인다. 따라서 청크당
+//   1 드로우콜은 유지하면서 LOD 경계에서 종류와 실루엣이 바뀌지 않는다. 그림자 비캐스트(원경).
 const _v = new THREE.Vector3();
 function pushImpostorHouse(P, N, C, parcel) {
-  const kind = parcel.kind === 'giwa' ? 'giwa' : 'choga';
-  const cfg = IMP[kind];
+  const spec = impostorHouseSpec(parcel);
   const m = houseMatrix(parcel);   // T(center,baseY)·Ry·T(0,0,back)·S — 풀디테일 집과 동일 배치
-  const W = (parcel.plotW || 10) * cfg.wK, D = (parcel.plotD || 9) * cfg.dK;
-  const bh = cfg.bodyH, rh = cfg.roofH, hw = W / 2, hd = D / 2;
-  const rt = parcel.roofTone || [1, 1, 1], wt = parcel.wallTone || [1, 1, 1];
-  const rc = [cfg.roof[0] * rt[0], cfg.roof[1] * rt[1], cfg.roof[2] * rt[2]];
-  const wc = [cfg.wall[0] * wt[0], cfg.wall[1] * wt[1], cfg.wall[2] * wt[2]];
   // 로컬 정점을 houseMatrix 로 월드화해 누적. 노멀은 computeVertexNormals 로 최종 산출(여기선 0 채움).
   const emit = (lx, ly, lz, col) => {
     _v.set(lx, ly, lz).applyMatrix4(m);
@@ -237,21 +227,54 @@ function pushImpostorHouse(P, N, C, parcel) {
   };
   const tri = (a, b, c, col) => { emit(a[0], a[1], a[2], col); emit(b[0], b[1], b[2], col); emit(c[0], c[1], c[2], col); };
   const quad = (a, b, c, d, col) => { tri(a, b, c, col); tri(a, c, d, col); };
-  // 몸통 박스(윗면 제외 — 지붕이 덮음). 4벽 + 바닥 생략.
-  const y0 = 0, y1 = bh;
-  const c0 = [-hw, y0, -hd], c1 = [hw, y0, -hd], c2 = [hw, y0, hd], c3 = [-hw, y0, hd];
-  const t0 = [-hw, y1, -hd], t1 = [hw, y1, -hd], t2 = [hw, y1, hd], t3 = [-hw, y1, hd];
-  quad(c3, c2, t2, t3, wc);  // +z
-  quad(c1, c0, t0, t1, wc);  // -z
-  quad(c0, c3, t3, t0, wc);  // -x
-  quad(c2, c1, t1, t2, wc);  // +x
-  // 맞배 지붕(용마루 로컬 x). 처마가 몸통 밖으로.
-  const rW = W + 1.6, rD = D + 1.8, rhw = rW / 2, rhd = rD / 2, ry = bh, ryt = bh + rh;
-  const b0 = [-rhw, ry, -rhd], b1 = [rhw, ry, -rhd], b2 = [rhw, ry, rhd], b3 = [-rhw, ry, rhd];
-  const g0 = [-rhw, ryt, 0], g1 = [rhw, ryt, 0];
-  tri(b3, b2, g1, rc); tri(b3, g1, g0, rc);   // +z 슬로프
-  tri(b1, b0, g0, rc); tri(b1, g0, g1, rc);   // -z 슬로프
-  tri(b0, b3, g0, rc); tri(b2, b1, g1, rc);   // 박공 삼각
+
+  // 몸통은 실제 초가 사각/기와 ㄱ자 polygon을 그대로 세운다. 상단의 얇은 목재 띠가 멀리서도
+  // 흙벽·회벽과 처마선을 분리하되, 같은 vertexColor mesh 안이므로 재질/드로우콜은 늘지 않는다.
+  const { polygon, y0, y1 } = spec.body;
+  const bandH = spec.kind === 'choga' ? 0.18 : 0.24;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+    const bandY = Math.max(y0, y1 - bandH);
+    quad([a.x, y0, a.z], [b.x, y0, b.z], [b.x, bandY, b.z], [a.x, bandY, a.z], spec.colors.wall);
+    quad([a.x, bandY, a.z], [b.x, bandY, b.z], [b.x, y1, b.z], [a.x, y1, a.z], spec.colors.wood);
+  }
+
+  const roofPoint = (roof, along, y, across) => roof.axis === 'x'
+    ? [along, y, across]
+    : [across, y, along];
+  const pushRoof = (roof) => {
+    const long0 = roof.axis === 'x' ? roof.x0 : roof.z0;
+    const long1 = roof.axis === 'x' ? roof.x1 : roof.z1;
+    const short0 = roof.axis === 'x' ? roof.z0 : roof.x0;
+    const short1 = roof.axis === 'x' ? roof.z1 : roof.x1;
+    const longMid = (long0 + long1) * 0.5, shortMid = (short0 + short1) * 0.5;
+    const c0 = roofPoint(roof, long0, roof.eaveY, short0);
+    const c1 = roofPoint(roof, long1, roof.eaveY, short0);
+    const c2 = roofPoint(roof, long1, roof.eaveY, short1);
+    const c3 = roofPoint(roof, long0, roof.eaveY, short1);
+    const r0 = roofPoint(roof, longMid - roof.ridgeHalf, roof.ridgeY, shortMid);
+    const r1 = roofPoint(roof, longMid + roof.ridgeHalf, roof.ridgeY, shortMid);
+    // 우진각 4면: 긴 양 사면 2×2삼각 + 양 끝 합각 1삼각. 초가와 기와 모두 실제
+    // 원경 실루엣의 짧은 용마루와 내려오는 추녀선을 보존한다.
+    tri(c3, c2, r1, spec.colors.roof); tri(c3, r1, r0, spec.colors.roof);
+    tri(c1, c0, r0, spec.colors.roof); tri(c1, r0, r1, spec.colors.roof);
+    tri(c0, c3, r0, spec.colors.roof); tri(c2, c1, r1, spec.colors.roof);
+
+    // 용마루 저폴리 각재. 초가는 굵은 용마름, 기와는 얇은 기와마루 비례다.
+    const ridgeW = spec.kind === 'choga' ? 0.36 : 0.2;
+    const ridgeH = spec.kind === 'choga' ? 0.26 : 0.16;
+    const rl0 = longMid - roof.ridgeHalf - ridgeW * 0.35;
+    const rl1 = longMid + roof.ridgeHalf + ridgeW * 0.35;
+    const rs0 = shortMid - ridgeW * 0.5, rs1 = shortMid + ridgeW * 0.5;
+    const ry0 = roof.ridgeY - ridgeH * 0.15, ry1 = roof.ridgeY + ridgeH * 0.85;
+    const p = (along, y, across) => roofPoint(roof, along, y, across);
+    const q0 = p(rl0, ry0, rs0), q1 = p(rl1, ry0, rs0), q2 = p(rl1, ry0, rs1), q3 = p(rl0, ry0, rs1);
+    const u0 = p(rl0, ry1, rs0), u1 = p(rl1, ry1, rs0), u2 = p(rl1, ry1, rs1), u3 = p(rl0, ry1, rs1);
+    quad(q0, q1, u1, u0, spec.colors.ridge); quad(q1, q2, u2, u1, spec.colors.ridge);
+    quad(q2, q3, u3, u2, spec.colors.ridge); quad(q3, q0, u0, u3, spec.colors.ridge);
+    quad(u0, u1, u2, u3, spec.colors.ridge);
+  };
+  for (const roof of spec.roofs) pushRoof(roof);
 }
 
 // buildChunkImpostor(parcels) → THREE.Group(단일 vertexColor 메시). 원경 청크 전용.

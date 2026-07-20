@@ -12,7 +12,8 @@ import { buildVillageFlora } from './gardens.js';
 import { buildSpringBloom } from '../layout/bloom.js';
 import { buildForest } from './forest.js';
 // #123: forest 입력 빌더(마스크·거리필드·외곽신축·고정반경)는 워커 공유 위해 forest-crunch 로 이설.
-import { makeEdgeWarp, computeFixedRadius, makeTreeMask, makeClearance } from './forest-crunch.js';
+import { makeEdgeWarp, makeTreeMask, makeClearance } from './forest-crunch.js';
+import { terrainWarpInner } from './terrain-surface.js';
 import { buildNightLights } from './nightlights.js';
 import { setupAnimals } from '../env/animals.js';
 import * as G from '../core/math/geom2.js';
@@ -55,8 +56,8 @@ export {
 //   자연(지형·개울·논·수목) → 도로 → 필지(집·담·문) → 공용(정자·다리·소품) → 절·궁 순으로 쌓는다.
 //   집은 프로토타입 1벌을 clone(지오메트리·재질 공유)해 대량 배치(메모리 고정, 스틸 렌더 충분).
 
-// 지형 최외곽 신축 매핑(makeEdgeWarp)·고정반경(computeFixedRadius)·나무마스크(makeTreeMask)·구조물
-//   거리필드(makeClearance)는 #123 에서 forest-crunch.js 로 이설(워커 공유). 위 import 참조.
+// 지형 최외곽 신축 매핑(makeEdgeWarp)·나무마스크(makeTreeMask)·구조물 거리필드(makeClearance)는
+// forest-crunch.js, 고정반경(terrainWarpInner)은 terrain-surface.js에서 워커와 공유한다.
 
 
 
@@ -98,9 +99,9 @@ export function* populateVillageSteps(plan, opts = {}) {
 
   // 1) 지형 · 2) 개울 (단일 메시 — 병합 대상 아님)
   //   지형 최외곽은 site.edge 로 신축(비정형 테두리). warpInner 안쪽(마을·논·개울·필지·랜드마크)은 불변.
-  // #143 R*0.9 바닥을 terrainR 안으로 캡 — 한양(R*0.9=450 > terrainR=380)서 신축밴드 소멸→사각 테두리 해소.
-  //   ★ forest-crunch.js crunchForest 의 warpInner 와 동일식 유지(워커=동기 byte-identical 필수).
-  const warpInner = Math.max(computeFixedRadius(plan, site) + 6, Math.min(site.R * 0.9, (site.terrainR || site.R) - 6));
+  // terrainWarpInner가 plan 콘텐츠와 R*0.9 바닥을 terrainR 안으로 캡한다. forest worker도 같은
+  // 순수 helper를 호출하므로 외곽 신축 좌표와 동기 경로가 byte-identical하다.
+  const warpInner = terrainWarpInner(plan, site);
   // 구조물 거리 필드(#115) — 지형 황토색·숲 침투 식재가 공유(개활지=집 윤곽, 비원형).
   const clearDist = makeClearance(plan, site);
   yield 'setup+clearance';
@@ -173,9 +174,15 @@ export function* populateVillageSteps(plan, opts = {}) {
       // 그림자 캐스터 다이어트 + 원경 임포스터: 원경 청크(중심에서 farDist 초과)는 castShadow off /
       //   저폴리 임포스터로 대체 — 부감 원경 집 디테일·그림자는 픽셀 이하라 무영향이고 지오 제출을 크게
       //   줄인다. 대규모(#89 연속: R≥340)에서 적용 — capital 앵커(R250)=Infinity·hanyang(R500)=diet 로
-      //   양 앵커 불변. 임계를 375→340 로 낮춰 R340~400 대형 도성(무성곽)의 삼각형 스파이크를 흡수한다.
-      const farDist = site.R >= 340 ? site.bowlR * 0.62 : Infinity;
-      const chunks = partitionParcels(regular, site.center, { farDist });
+      //   양 앵커 불변. 대규모는 링을 bowlR/2로 좁혀 중앙 핵(약 140m)은 원본을 유지하고, 그 밖은
+      //   부감에서 임포스터로 시작한다. 카메라가 접근하면 attachChunkLodSwap이 원본으로 되돌린다.
+      const largeSite = site.R >= 340;
+      const farDist = largeSite ? site.bowlR * 0.4 : Infinity;
+      const ringW = largeSite ? site.bowlR * 0.5 : undefined;
+      // 한양은 호 길이도 링 폭 이하로 제한해 컬링 바운드와 필지-근접 LOD 교체 단위가
+      // 마을 반대편까지 넓어지지 않게 한다.
+      const maxArcLength = largeSite ? ringW : undefined;
+      const chunks = partitionParcels(regular, site.center, { farDist, ringW, maxArcLength });
       const chunkMeta = [];
       const giwaGroups = [], chogaGroups = [], wallGroups = [];
       for (const chunk of chunks) {
@@ -202,7 +209,7 @@ export function* populateVillageSteps(plan, opts = {}) {
           buildFullDetail(full);
           full.visible = false;
           cg.add(full);
-          attachChunkLodSwap(cg, imp, full, chunk.center, site.bowlR);   // #140-E lodUpdate 를 cg 에 부착(모듈 스코프)
+          attachChunkLodSwap(cg, imp, full, chunk, site.bowlR);   // #140-E lodUpdate 를 cg 에 부착(모듈 스코프)
         } else {
           // 근경 청크: 풀디테일 변주 인스턴싱 + 병합 담.
           buildFullDetail(cg);
@@ -257,12 +264,13 @@ export function* populateVillageSteps(plan, opts = {}) {
   yield 'features+wall+sijeon';
 
   // 병합 반영(optimize) — 로드·논·랜드마크를 재질별로 접는다.
+  // 도로는 buildRoads가 처음부터 단일 indexed mesh로 조립한다. mergeStatic을 다시 거치면
+  // 불필요하게 non-indexed 복제되어 정점·메모리만 약 4배 늘어난다.
+  if (roadsGroup) root.add(roadsGroup);
   if (optimize) {
-    if (roadsGroup) root.add(mergeStatic([roadsGroup], 'village-roads'));
     if (paddyGroup) root.add(mergeStatic([paddyGroup], 'village-paddies'));
     if (landmarks.length) root.add(mergeStatic(landmarks, 'village-landmarks'));
   } else {
-    if (roadsGroup) root.add(roadsGroup);
     if (paddyGroup) root.add(paddyGroup);
     for (const o of landmarks) root.add(o);
   }

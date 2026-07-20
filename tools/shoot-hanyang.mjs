@@ -1,15 +1,17 @@
-// 한양 도성 시각 검증 + 컬링 실효 측정. 중간 컷은 scratchpad/capital/, 게이트 증거는 shots/capital-*.
-// 사용법: node tools/shoot-hanyang.mjs [out=scratch|shots]
+// 한양 도성 시각 검증 + 컬링 실효 측정. shots 모드는 shots/capital-*, 그 외는 지정 디렉터리에 저장.
+// 사용법: node tools/shoot-hanyang.mjs [scratch|shots|output-dir] [name-filter]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const dest = process.argv[2] === 'shots' ? 'shots' : 'scratch';
+const dest = process.argv[2] || 'scratch';
 const OUT = dest === 'shots' ? join(ROOT, 'shots')
-  : '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/capital';
+  : dest === 'scratch' ? join(tmpdir(), 'cheoma-hanyang')
+    : resolve(process.cwd(), dest);
 mkdirSync(OUT, { recursive: true });
 const PFX = dest === 'shots' ? 'capital-' : '';
 
@@ -17,7 +19,7 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
 
 const HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>html,body{margin:0;height:100%;overflow:hidden}#app{width:100%;height:100%}</style>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"/app/node_modules/three/build/three.module.js","three/addons/":"/app/node_modules/three/examples/jsm/"}}</script>
 </head><body><div id="app"></div>
 <script type="module">
 import * as THREE from 'three';
@@ -69,18 +71,50 @@ if (view === 'aerial') {
   target = new THREE.Vector3(0, 0, -0.05 * R);
 } else if (view === 'gate') {
   // 숭례문(남문) 근처 접근뷰 — 성벽·문루가 크게
-  fov = 50;
+  fov = 48;
   const gs = (plan.features.cityWall && plan.features.cityWall.gates.find((g) => g.name === 'south')) || { x: 0, z: cen.z + R * 0.65 };
+  let dx = Number.isFinite(gs.dirX) ? gs.dirX : 0;
+  let dz = Number.isFinite(gs.dirZ) ? gs.dirZ : 1;
+  const dLen = Math.hypot(dx, dz) || 1;
+  dx /= dLen; dz /= dLen;
+  const tx = -dz, tz = dx;
+  const camX = gs.x + dx * R * 0.18 + tx * R * 0.035;
+  const camZ = gs.z + dz * R * 0.18 + tz * R * 0.035;
   const gy = plan.site.heightAt(gs.x, gs.z);
-  campos = new THREE.Vector3(gs.x + R * 0.06, gy + R * 0.14, gs.z + R * 0.30);
-  target = new THREE.Vector3(0, gy + 6, cen.z + R * 0.1);
+  campos = new THREE.Vector3(camX, plan.site.heightAt(camX, camZ) + R * 0.06, camZ);
+  target = new THREE.Vector3(gs.x, gy + 7, gs.z);
+} else if (view === 'east' || view === 'west') {
+  // 동·서문 근경 — 성 안쪽 사선에서 문루와 성벽 접합을 함께 본다.
+  fov = 48;
+  const side = view === 'east' ? 1 : -1;
+  const gate = (plan.features.cityWall && plan.features.cityWall.gates.find((g) => g.name === view))
+    || { x: cen.x + side * R * 0.65, z: cen.z, dirX: side, dirZ: 0 };
+  let dx = Number.isFinite(gate.dirX) ? gate.dirX : side;
+  let dz = Number.isFinite(gate.dirZ) ? gate.dirZ : 0;
+  const dLen = Math.hypot(dx, dz) || 1;
+  dx /= dLen; dz /= dLen;
+  const tx = -dz, tz = dx;
+  const camX = gate.x - dx * R * 0.18 + tx * R * 0.035;
+  const camZ = gate.z - dz * R * 0.18 + tz * R * 0.035;
+  const camY = plan.site.heightAt(camX, camZ) + R * 0.06;
+  const gateY = plan.site.heightAt(gate.x, gate.z);
+  campos = new THREE.Vector3(camX, camY, camZ);
+  target = new THREE.Vector3(gate.x, gateY + 7, gate.z);
 } else if (view === 'north') {
   // 숙정문(북문) 산길 근경 — 도성 안에서 북악 급사면·성벽·문루를 올려다봄.
   fov = 48;
-  const gn = (plan.features.cityWall && plan.features.cityWall.gates.find((g) => g.name === 'north')) || { x: 0, z: cen.z - R * 0.65 };
+  const gn = (plan.features.cityWall && plan.features.cityWall.gates.find((g) => g.name === 'north'))
+    || { x: 0, z: cen.z - R * 0.65, dirX: 0, dirZ: -1 };
+  let dx = Number.isFinite(gn.dirX) ? gn.dirX : 0;
+  let dz = Number.isFinite(gn.dirZ) ? gn.dirZ : -1;
+  const dLen = Math.hypot(dx, dz) || 1;
+  dx /= dLen; dz /= dLen;
+  const tx = -dz, tz = dx;
+  const camX = gn.x - dx * R * 0.18 + tx * R * 0.04;
+  const camZ = gn.z - dz * R * 0.18 + tz * R * 0.04;
   const gy = plan.site.heightAt(gn.x, gn.z);
-  campos = new THREE.Vector3(gn.x + R * 0.14, gy - R * 0.06, gn.z + R * 0.52);
-  target = new THREE.Vector3(gn.x, gy + 6, gn.z - R * 0.02);
+  campos = new THREE.Vector3(camX, plan.site.heightAt(camX, camZ) + R * 0.06, camZ);
+  target = new THREE.Vector3(gn.x, gy + 7, gn.z);
 } else if (view === 'palace') {
   // 궁역 근접 3/4 부감(#88) — 도시 속 다일곽 궁궐 스카이라인.
   const Pl = plan.features.palace || { x: 0, z: cen.z };
@@ -95,10 +129,23 @@ if (view === 'aerial') {
   campos = new THREE.Vector3(0, gy + 8, cen.z + R * 0.02);
   target = new THREE.Vector3(0, gy + 4, cen.z - R * 0.5);
 } else { // eye — 남측 진입
-  const camZ = plan.site.streamZ + R * 0.30, cx0 = R * 0.03;
-  const gy = plan.site.heightAt(cx0, camZ);
-  fov = 52; campos = new THREE.Vector3(cx0, gy + 3, camZ);
-  target = new THREE.Vector3(0, plan.site.heightAt(0, cen.z) + 8, cen.z * 0.6);
+  const gate = (plan.features.cityWall && plan.features.cityWall.gates.find((g) => g.name === 'south'))
+    || { x: 0, z: cen.z + R * 0.65, dirX: 0, dirZ: 1 };
+  const approach = plan.roads.find((road) => road.wallApproach?.gate === 'south');
+  let dx = Number.isFinite(gate.dirX) ? gate.dirX : 0;
+  let dz = Number.isFinite(gate.dirZ) ? gate.dirZ : 1;
+  const dLen = Math.hypot(dx, dz) || 1;
+  dx /= dLen; dz /= dLen;
+  const approachEnd = approach
+    ? (approach.wallApproach.side === 'start' ? approach.pts[0] : approach.pts.at(-1))
+    : null;
+  const camX = approachEnd?.x ?? gate.x + dx * R * 0.13;
+  const camZ = approachEnd?.z ?? gate.z + dz * R * 0.13;
+  const innerX = gate.x - dx * R * 0.08;
+  const innerZ = gate.z - dz * R * 0.08;
+  fov = 52;
+  campos = new THREE.Vector3(camX, plan.site.heightAt(camX, camZ) + 4.2, camZ);
+  target = new THREE.Vector3(innerX, plan.site.heightAt(innerX, innerZ) + 4.2, innerZ);
 }
 const camera = new THREE.PerspectiveCamera(fov, innerWidth / innerHeight, 0.5, R * 9);
 camera.position.set(num('cx', campos.x), num('cy', campos.y), num('cz', campos.z));
@@ -111,7 +158,8 @@ renderer.setAnimationLoop(() => {
   if (frames === 14) {
     const ri = renderer.info;
     window.__PLAN = { scale, seed, view, R, stats: plan.stats, warnings: plan.warnings,
-      perf: { calls: ri.render.calls, triangles: ri.render.triangles, geometries: ri.memory.geometries, textures: ri.memory.textures } };
+      perf: { calls: ri.render.calls, triangles: ri.render.triangles, programs: ri.programs?.length || 0,
+        geometries: ri.memory.geometries, textures: ri.memory.textures } };
     window.__SHOT_READY = true;
   }
 });
@@ -119,6 +167,7 @@ renderer.setAnimationLoop(() => {
 
 const server = createServer(async (req, res) => {
   const path = req.url.split('?')[0];
+  if (path === '/favicon.ico') { res.writeHead(204); res.end(); return; }
   if (path === '/__hanyang') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
   try {
     const file = join(ROOT, path === '/' ? 'index.html' : path);
@@ -135,6 +184,8 @@ const shots = [
   ['hanyang-aerial', 'scale=hanyang&view=aerial&time=day'],
   ['hanyang-high', 'scale=hanyang&view=high&time=day'],
   ['hanyang-gate', 'scale=hanyang&view=gate&time=day'],
+  ['hanyang-east-gate', 'scale=hanyang&view=east&time=day'],
+  ['hanyang-west-gate', 'scale=hanyang&view=west&time=day'],
   ['hanyang-north', 'scale=hanyang&view=north&time=day'],
   ['hanyang-sunset', 'scale=hanyang&view=aerial&time=sunset'],
   ['hanyang-cull', 'scale=hanyang&view=cull&time=day'],
@@ -143,25 +194,57 @@ const shots = [
   ['capital-aerial', 'scale=capital&view=aerial&time=day'],
   ['capital-palace', 'scale=capital&view=palace&time=day'],
 ].filter(([n]) => !filter || n.includes(filter));
+if (!shots.length) {
+  throw new Error(`no screenshot job matches filter: ${JSON.stringify(filter)}`);
+}
 
 let browser;
-try { browser = await chromium.launch({ channel: 'chrome' }); } catch { browser = await chromium.launch(); }
-const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
-let pageErrs = 0;
-page.on('pageerror', (e) => { pageErrs++; console.error('[pageerror]', e.message); });
-page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) console.error('[console]', m.text()); });
+const errors = [];
+let currentJob = 'setup';
+const fail = (kind, detail) => {
+  const message = `[${currentJob}] ${kind}: ${detail}`;
+  errors.push(message);
+  console.error(message);
+};
 
-for (const [name, qs] of shots) {
-  await page.goto(`http://127.0.0.1:${port}/__hanyang?${qs}`, { waitUntil: 'load' });
-  try { await page.waitForFunction('window.__SHOT_READY === true', null, { timeout: 60000 }); }
-  catch { console.error('TIMEOUT', name); }
-  await page.waitForTimeout(200);
-  const info = await page.evaluate(() => window.__PLAN);
-  if (info) console.log(name, JSON.stringify(info.stats), 'perf=' + JSON.stringify(info.perf), info.warnings.length ? 'WARN:' + info.warnings.join(';') : '');
-  const file = join(OUT, `${PFX}${name}.png`);
-  await page.screenshot({ path: file });
-  console.log('saved', file);
+try {
+  try { browser = await chromium.launch({ channel: 'chrome' }); } catch { browser = await chromium.launch(); }
+  const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
+  page.on('pageerror', (error) => fail('pageerror', error.message));
+  page.on('console', (message) => { if (message.type() === 'error') fail('console', message.text()); });
+  page.on('requestfailed', (request) => fail('requestfailed', `${request.url()} — ${request.failure()?.errorText || 'unknown error'}`));
+
+  console.log('output=' + OUT);
+  for (const [name, qs] of shots) {
+    currentJob = name;
+    try {
+      await page.goto(`http://127.0.0.1:${port}/__hanyang?${qs}`, { waitUntil: 'load', timeout: 60000 });
+    } catch (error) {
+      fail('navigation', error.message);
+      continue;
+    }
+    try {
+      await page.waitForFunction('window.__SHOT_READY === true', null, { timeout: 60000 });
+    } catch (error) {
+      fail('timeout', error.message);
+      continue;
+    }
+    await page.waitForTimeout(200);
+    try {
+      const info = await page.evaluate(() => window.__PLAN);
+      if (!info) throw new Error('window.__PLAN was not populated');
+      console.log(name, JSON.stringify(info.stats), 'perf=' + JSON.stringify(info.perf), info.warnings.length ? 'WARN:' + info.warnings.join(';') : '');
+      const file = join(OUT, `${PFX}${name}.png`);
+      await page.screenshot({ path: file });
+      console.log('saved', file);
+    } catch (error) {
+      fail('capture', error.message);
+    }
+  }
+} finally {
+  await browser?.close();
+  await new Promise((done) => server.close(done));
 }
-console.log('pageerror=' + pageErrs);
-await browser.close();
-server.close();
+
+console.log(`errors=${errors.length}`);
+if (errors.length) process.exitCode = 1;

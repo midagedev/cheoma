@@ -1,54 +1,22 @@
 import * as THREE from 'three';
-import { parcelRotY } from '../../generators/shared/parcel-transform.js';
+import { planParcelFocus } from '../../generators/shared/parcel-spatial.js';
 import * as G from '../../core/math/geom2.js';
 import { buildParcelSpec } from './parcel-edit.js';
 
 const DEG = Math.PI / 180;
 
-function parcelBounds(parcel) {
-  const points = parcel.shape?.pts;
-  if (!points || points.length < 3) {
-    return { width: parcel.plotW, depth: parcel.plotD, centerX: 0, centerZ: 0 };
-  }
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const point of points) {
-    minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
-    minZ = Math.min(minZ, point.z); maxZ = Math.max(maxZ, point.z);
-  }
-  return {
-    width: maxX - minX,
-    depth: maxZ - minZ,
-    centerX: (minX + maxX) / 2,
-    centerZ: (minZ + maxZ) / 2,
-  };
-}
-
-function parcelCameraFraming(worldCenter, rotationY, maxDimension, height) {
-  const azimuth = 38 * DEG;
-  const elevation = 7 * DEG;
-  const radius = 2.25 * maxDimension;
-  const offset = new THREE.Vector3(
-    radius * Math.cos(elevation) * Math.sin(azimuth),
-    radius * Math.sin(elevation),
-    radius * Math.cos(elevation) * Math.cos(azimuth),
-  );
-  offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
-  const target = new THREE.Vector3(worldCenter.x, worldCenter.y + height * 0.42, worldCenter.z);
-  return { position: target.clone().add(offset), target, fov: 23 };
+function parcelCameraFraming(worldCenter, focus) {
+  const target = new THREE.Vector3(worldCenter.x, worldCenter.y + focus.height * 0.42, worldCenter.z);
+  const position = new THREE.Vector3(focus.cameraX, target.y + focus.cameraLift, focus.cameraZ);
+  return { position, target, fov: focus.fov };
 }
 
 export function buildParcelPickProxies(plan, site) {
   const proxies = [];
   for (const parcel of plan.parcels) {
     const baseY = parcel.baseY ?? site.heightAt(parcel.center.x, parcel.center.z);
-    const height = parcel.hero ? 14 : (parcel.kind === 'giwa' ? 9 : 6.5);
-    const bounds = parcelBounds(parcel);
-    const width = bounds.width * 1.08;
-    const depth = bounds.depth * 1.08;
-    const rotationY = parcelRotY(parcel);
-    const cos = Math.cos(rotationY), sin = Math.sin(rotationY);
-    const worldX = parcel.center.x + bounds.centerX * cos + bounds.centerZ * sin;
-    const worldZ = parcel.center.z - bounds.centerX * sin + bounds.centerZ * cos;
+    const focus = planParcelFocus(parcel);
+    const { width, depth, height, rotationY, worldX, worldZ } = focus;
     const worldCenter = new THREE.Vector3(worldX, baseY, worldZ);
 
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth));
@@ -64,7 +32,7 @@ export function buildParcelPickProxies(plan, site) {
       dims: new THREE.Vector3(width, height, depth),
       rotY: rotationY,
       buildingSpec: buildParcelSpec(parcel),
-      cameraFraming: parcelCameraFraming(worldCenter, rotationY, Math.max(width, depth, height), height),
+      cameraFraming: parcelCameraFraming(worldCenter, focus),
     });
   }
   return proxies;

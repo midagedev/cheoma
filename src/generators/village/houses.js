@@ -6,6 +6,7 @@ import { parcelMatrix, decomposeByMaterial, mirrorDecomp, shareMaterials } from 
 import { parcelRotY } from '../shared/parcel-transform.js';
 import { buildVillageWall } from '../../village/walls.js';
 import { CHOGA_VARIANTS, GIWA_VARIANTS } from '../../village/variants.js';
+import { chunkLodDistance } from '../../village/chunks.js';
 
 // ───────────────────────── 집 프로토타입 ─────────────────────────
 // buildBuilding(초가/기와) 로 프로토타입을 만들어 clone. 종가·궁·절은 풀디테일 별도.
@@ -76,21 +77,20 @@ export function placeParcel(parcel, protos, wallMats, char01 = 0.5) {
 
 // 원경 청크 런타임 LOD 스왑 — 카메라가 다가오면 저폴리 임포스터 → 풀디테일 전환.
 //   #92 자유 줌 이후 한양 스케일에서 줌인해도 원경 박스 매스가 그대로 보이던 문제 해소.
-//   카메라-청크중심 거리를 매 프레임 판정해 visible 토글. 히스테리시스(진입/복귀 분리)로
+//   카메라-청크 소유 필지의 최소 수평거리를 매 프레임 판정해 visible 토글.
+//   히스테리시스(진입/복귀 분리)로
 //   경계 왕복 플리커 방지. far 청크만 대상(near 청크는 항상 풀디테일).
-const _lodCenter = new THREE.Vector3();   // 매 프레임 재사용 (GC 방지)
-export function attachChunkLodSwap(chunkGroup, impostor, fullDetail, chunkCenter, bowlR) {
-  // 스왑 임계: farDist(bowlR*0.62) 안쪽 0.72배 지점에서 풀디테일 진입,
-  //   0.85배 지점에서 임포스터 복귀 — 히스테리시스 폭 ≈ bowlR*0.08.
-  const swapIn  = bowlR * 0.62 * 0.72;   // 풀디테일 전환 거리(가까움)
-  const swapOut = bowlR * 0.62 * 0.85;   // 임포스터 복귀 거리(멀어짐)
+export function attachChunkLodSwap(chunkGroup, impostor, fullDetail, chunk, bowlR) {
+  // 카메라가 청크의 어느 필지든 bowlR의 절반 안으로 들어오면 원본을 복원한다. 공간상
+  // far 분류와 카메라 LOD 임계는 별개이며, 히스테리시스로 경계 왕복 시 깜빡임을 막는다.
+  const swapIn = bowlR * 0.45;
+  const swapOut = bowlR * 0.53;
   let showFull = false;
 
   // 반환: 이 프레임에 스왑(임포스터↔풀디테일 토글)이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
   //   모드에서 캐스터 구성 변경(임포스터 castShadow=false ↔ 풀디테일 캐스팅)을 1프레임 반영하는 데 쓴다.
   chunkGroup.userData.lodUpdate = (camera) => {
-    _lodCenter.set(chunkCenter.x, camera.position.y, chunkCenter.z);   // Y 는 카메라 높이로 맞춰 수직 거리 무시(부감 줌)
-    const d = _lodCenter.distanceTo(camera.position);
+    const d = chunkLodDistance(chunk, camera.position.x, camera.position.z);
     if (!showFull && d < swapIn) {
       impostor.visible = false;
       fullDetail.visible = true;

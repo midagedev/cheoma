@@ -67,7 +67,7 @@ app/src/                       Svelte UI
 
 | 진입점 | 주요 계약 | 실행 환경 |
 | --- | --- | --- |
-| `src/api/village-plan.js` | `planVillage`, site/tier/road 순수 helper | Node, worker, browser |
+| `src/api/village-plan.js` | `planVillage`, site/tier/road, 성곽 contour·사대문, 보호수·필지 focus·LOD impostor 명세, terrain-grid 높이, 지형 clip 도로 surface 순수 helper | Node, worker, browser |
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
 | `src/api/environment.js` | environment, focus, post, weather, ink, time, world edge | WebGL browser runtime |

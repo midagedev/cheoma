@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { KOREA_COLORS } from './material-colors.js';
 import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
   CLOUD_SHADOW_VERT_DECL, CLOUD_SHADOW_VERT_BODY,
@@ -10,23 +11,8 @@ import {
 let _texRand = Math.random;
 export function setTextureRandom(fn) { _texRand = (typeof fn === 'function') ? fn : Math.random; }
 
-// 단청 계열 기본 색 (조선). 국가 스타일 모핑 시 이 팔레트를 교체/보간한다.
-export const KOREA_COLORS = {
-  seokganju: 0x8e4a35,   // 석간주 (기둥·창방·문틀)
-  noerok: 0x4c6559,      // 뇌록 (공포·서까래 바탕) — 실물 회청록(잎초록 탈피)
-  juhong: 0x9c4632,      // 주홍 (공포 소로·부재 교차 포인트)
-  samcheong: 0x3e5f9e,   // 삼청 (머리초 포인트)
-  hwang: 0xc8a34a,       // 황
-  baek: 0xe8e4d8,        // 백 (긋기·서까래 마구리)
-  meok: 0x2e2a28,        // 먹
-  tile: 0x4a4d53,        // 온기 도는 진회색 기와
-  tileDark: 0x4b4e55,    // 마루 (기와 적층 톤)
-  plaster: 0xd9d2c4,     // 회벽
-  stone: 0xb8b2a6,       // 화강암 기단
-  stoneDark: 0x99938a,   // 기단 그림자면
-  hanji: 0xefe6d2,       // 한지
-  ground: 0xb5a893,      // 마당
-};
+// 하위호환 공개 export. 실제 토큰은 THREE 비의존 모듈에 두어 원경 프록시와 공유한다.
+export { KOREA_COLORS };
 
 // 기와 지붕 텍스처: 기왓등·기왓골 세로 줄 + 가로 겹침 라인 (온기 있는 진회색)
 function makeTileTexture() {

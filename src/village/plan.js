@@ -2,6 +2,14 @@ import { makeRng, hashString } from '../rng.js';
 import { makeSite, resolveSiteR, tierForR, rToScale01 } from './site.js';
 import { planRoads } from './roads.js';
 import { planParcels, planSatellites } from './parcels.js';
+import {
+  CITY_WALL_DIMENSIONS,
+  CITY_WALL_MIN_SITE_R,
+  cityWallClearance,
+  cityWallContainsPolygon,
+  planCityWall,
+  worldEdgeContainsPolygon,
+} from './citywall-contour.js';
 import { assignVariation } from './variants.js';
 import * as G from '../core/math/geom2.js';
 
@@ -25,6 +33,32 @@ function rectParcel(center, frontDir, plotW, plotD) {
   const base = G.add(center, G.mul(fd, plotD / 2));   // 전면(도로/마당쪽) 모서리선
   const inward = G.mul(fd, -1);
   return G.frontageParcel(base, tan, inward, plotW / 2, plotD, 0);
+}
+
+function roadStreamCrossing(road, site, cityWall) {
+  if (!road || !site.stream) return null;
+  const candidates = [];
+  for (let i = 0; i < road.pts.length - 1; i++) {
+    const a = road.pts[i], b = road.pts[i + 1];
+    const signed = (point) => point.z - site.streamZat(point.x);
+    let fa = signed(a), fb = signed(b);
+    if (fa * fb > 0) continue;
+    let lo = 0, hi = 1;
+    for (let step = 0; step < 42; step++) {
+      const mid = (lo + hi) * 0.5;
+      const fm = signed(G.lerp(a, b, mid));
+      if (fa * fm <= 0) { hi = mid; fb = fm; }
+      else { lo = mid; fa = fm; }
+    }
+    const point = G.lerp(a, b, (lo + hi) * 0.5);
+    candidates.push({
+      point,
+      tangent: G.norm(G.sub(b, a)),
+      outside: !cityWall || cityWallClearance(cityWall, point) <= 0,
+    });
+  }
+  const outside = candidates.filter((candidate) => candidate.outside);
+  return (outside.length ? outside : candidates)[0] || null;
 }
 
 // ── char01 규모 파생(#89) ── 규모 연동 단조 앵커 + 시드 지터. 작은 씨족촌=민촌 성향(초가 우세,
@@ -173,15 +207,21 @@ export function planVillage(opts = {}) {
 
   // ── 2.5) 성곽·사대문 (한양 전용) ── 도로 생성 전에 게이트를 확정해 간선을 성문과 정렬한다.
   //   내사산 능선을 잇는 부정형 폐곡선(joseon-city 규칙 2) — 여기선 스펙(순수 데이터)만, 렌더는 citywall.js.
-  // 성곽 강제 오버라이드(#91): auto=hanyang 자동, true/false=강제. computeCityWall 은 site 파생(공유 rng
-  //   미소비)이고 blocker 도 안 만들어 — 비-hanyang 강제 ON 은 도로·필지 배치를 흔들지 않고 완전형 링만
-  //   추가된다(성곽 끊김 없음). hanyang 강제 OFF 는 도로 게이트 정렬이 사라져 하류가 달라짐(비기본, 결정론).
+  // 성곽 강제 오버라이드(#91): auto=hanyang 자동, true/false=강제. planCityWall 은 공유 rng를 소비하지
+  //   않는 순수 site 파생이다. 강제 ON에서도 필지는 성 안·위성 부락은 성 밖이라는 같은 배치 계약을 쓴다.
+  //   hanyang 강제 OFF는 도로의 성문 정렬이 사라져 하류가 달라진다(비기본이지만 seed 결정론은 유지).
   const wantWall = tuning.cityWall === true ? true : tuning.cityWall === false ? false : (scale === 'hanyang');
-  const cityWall = wantWall ? computeCityWall(site, seed) : null;
-  if (cityWall) { features.cityWall = cityWall; norm.cityWall = cityWall; }
+  const corePolys = blockers.map((b) => b.poly).filter(Boolean);
+  const wallSupported = siteR >= CITY_WALL_MIN_SITE_R;
+  if (wantWall && !wallSupported) {
+    warnings.push(`성곽은 초락(R≥${CITY_WALL_MIN_SITE_R})부터 유효 — R=${Math.round(siteR)}에서 생략됨`);
+  }
+  const cityWall = wantWall && wallSupported ? planCityWall(site, seed, corePolys) : null;
+  if (cityWall) features.cityWall = cityWall;
+  const layoutOpts = cityWall ? { ...norm, cityWall } : norm; // 생성 중에만 주입; 반환 plan에는 features가 단일 소스.
 
   // ── 3) 도로 (간선 결정론 + 이면 유기) ──
-  const roadsResult = planRoads(site, norm, rng);
+  const roadsResult = planRoads(site, layoutOpts, rng);
 
   // ── 3.5) 시전행랑 (한양) ── 간선(주작대로·종로) 파사드를 따라 연립 벽식 점포(선형 상업, 규칙 7).
   //   점포 footprint 를 blockers 에 넣어 일반 필지가 대로변 상가 열을 침범하지 않게 한다.
@@ -190,18 +230,19 @@ export function planVillage(opts = {}) {
   //   footprint 는 blocker 라 강제 ON 시 일반 필지 배치가 그만큼 달라진다(의도된 구성 변화, 결정론).
   const wantSijeon = tuning.sijeon === true ? true : tuning.sijeon === false ? false : (scale === 'hanyang');
   if (wantSijeon) {
-    features.sijeon = planSijeon(roadsResult, site, char01);
+    features.sijeon = planSijeon(roadsResult, site, char01).filter((shop) =>
+      worldEdgeContainsPolygon(site.edge, shop.poly, 6)
+      && (!cityWall || cityWallContainsPolygon(cityWall, shop.poly, 4)));
     for (const s of features.sijeon) blockers.push({ poly: s.poly });
   }
 
   // ── 4) 필지 (도로변 분할 + 위계 그라디언트) ──
-  const frontage = planParcels(site, roadsResult, norm, rng, blockers);
+  const frontage = planParcels(site, roadsResult, layoutOpts, rng, blockers);
   // ── 4.5) 위성 부락(#120) ── 본동에서 조금 떨어진 완사면 포켓에 작은 무리(몇 채). rng 소비 없는 전용
   //   시드 경로(공유 rng 불침해 → 상류 결정론 보존, 위성 OFF 회귀 안전). 겹침 회피에 기존 필지·예약 코어
-  //   polygon 을 넘긴다. cityWall 있으면 성곽 링 밖으로(minR).
-  const satMinR = features.cityWall ? features.cityWall.ringR * 1.06 : 0;
+  //   polygon 을 넘긴다. cityWall 이 있으면 실제 부정형 윤곽 바깥만 허용한다.
   const satExisting = [...blockers.map((b) => b.poly).filter(Boolean), ...frontage.map((p) => p.poly)];
-  const satellites = planSatellites(site, norm, seed, { minR: satMinR, existing: satExisting });
+  const satellites = planSatellites(site, norm, seed, { existing: satExisting, cityWall });
   // 예약 코어 중 실제 필지로 렌더할 것(궁 제외)만 parcels 에 포함
   const reserved = blockers.filter((b) => b.hero);
   const parcels = [...reserved, ...frontage, ...satellites];
@@ -226,16 +267,32 @@ export function planVillage(opts = {}) {
 
   // ── 6) 돌다리 (개울 위, 진입 스파인 교차점) ──
   if (site.stream) {
-    const cx = site.stream.cross;
+    const wallApproach = cityWall
+      ? roadsResult.roads.find((road) => road.wallApproach?.gate === 'south')
+      : null;
+    const crossing = roadStreamCrossing(wallApproach, site, cityWall);
+    const cx = crossing?.point || site.stream.cross;
     const tanS = G.norm(G.sub(site.stream.pts[Math.min(site.stream.pts.length - 1, 37)], site.stream.pts[35]));
-    const across = G.perpL(tanS);
+    const across = crossing?.tangent || G.perpL(tanS);
     const rot = Math.atan2(-across.z, across.x);   // 다리 로컬 X(span)를 개울 횡단 방향으로
+    let span = site.stream.width + 5;
+    let width = scale === 'hamlet' ? 1.8 : 2.4;
+    if (crossing) {
+      const d = 1;
+      const streamTangent = G.norm({
+        x: d * 2,
+        z: site.streamZat(cx.x + d) - site.streamZat(cx.x - d),
+      });
+      const streamNormal = G.perpL(streamTangent);
+      span = site.stream.width / Math.max(0.5, Math.abs(G.dot(crossing.tangent, streamNormal))) + 5;
+      width = wallApproach.width + 1;
+    }
     // 반촌=격식 홍예교, 민촌=소박 판석교, 여염=규모 따라.
     const bridgeType = char01 < 0.34 ? 'slab'
       : (char01 >= 0.66 || scale === 'town' || scale === 'capital') ? 'arch' : 'slab';
     features.bridges.push({
       x: cx.x, z: cx.z, rot, type: bridgeType,
-      span: site.stream.width + 5, width: scale === 'hamlet' ? 1.8 : 2.4,
+      span, width,
     });
   }
 
@@ -271,24 +328,6 @@ export function planVillage(opts = {}) {
       parcelDebug: planParcels.lastDebug,
     },
   };
-}
-
-// ── 성곽·사대문 스펙(순수 데이터, THREE 비의존) ── 렌더는 citywall.buildCityWall 이 소비.
-//   내사산 능선을 잇는 부정형 폐곡선 대신, 분지 중심(명당) 둘레의 링(ringR)에 유기적 파동을 실어
-//   근사한다(joseon-city 규칙 2). 4대문: 남(숭례문·정문)·동(흥인)·북(숙정)·서(돈의). angle 0 = +z(남).
-function computeCityWall(site, seed) {
-  const C = site.center;
-  const ringR = site.bowlR * 1.16;                 // 주거역(bowlR·1.06) 바깥 하부 사면에 성벽
-  const gates = [
-    { name: 'south', angle: 0,             width: 26 },   // 숭례문 — 정문(가장 큼), 주작대로 정렬
-    { name: 'east',  angle: Math.PI * 0.5, width: 18 },   // 흥인지문 — 종로 동단
-    { name: 'north', angle: Math.PI,       width: 15 },   // 숙정문 — 궁 뒤(주산), 작음
-    { name: 'west',  angle: Math.PI * 1.5, width: 18 },   // 돈의문 — 종로 서단
-  ].map((g) => {
-    const dx = Math.sin(g.angle), dz = Math.cos(g.angle);
-    return { name: g.name, angle: g.angle, width: g.width, x: C.x + dx * ringR, z: C.z + dz * ringR, dirX: dx, dirZ: dz };
-  });
-  return { cx: C.x, cz: C.z, ringR, gates, wobbleAmp: ringR * 0.055, seed: (seed ^ 0xc17a) >>> 0 };
 }
 
 // ── 시전행랑(선형 상업) ── 간선(daero=주작대로·종로) 양측 파사드를 따라 연속 배치된 연립 점포.
@@ -431,13 +470,45 @@ function placeTemple(site, seed) {
 
 // 소품: 동구(장승 한 쌍·솟대), 종가/중심(우물), 초가군(장독대). 은은하게 몇 점만.
 function planProps(features, site, scale, rng, char01 = 0.5) {
-  const E = site.entrance, C = site.center;
-  const toC = G.norm(G.sub(C, E));
+  const C = site.center;
+  const southGate = features.cityWall?.gates.find((gate) => gate.name === 'south') || null;
+  const E = southGate || site.entrance;
+  const toC = southGate
+    ? { x: -southGate.dirX, z: -southGate.dirZ }
+    : G.norm(G.sub(C, E));
   const perp = G.perpL(toC);
-  // 동구 장승 한 쌍 — 진입 초입, 안길 한쪽 옆으로 비켜(진입로 안 막게)
-  features.props.push({ name: 'jangseung-pair', x: E.x + perp.x * 5, z: E.z + perp.z * 5, rot: Math.atan2(toC.x, toC.z), scale: 1.0, seed: 21 });
+  let entrancePerp = perp;
+  let jangseungOffset = 5, sotdaeOffset = 8, forecourtInset = 0;
+  if (southGate) {
+    const structureHalf = (southGate.width
+      + CITY_WALL_DIMENSIONS.gateExtraWidth * (southGate.scale || 1)) * 0.5;
+    jangseungOffset = structureHalf + 4;
+    sotdaeOffset = structureHalf + 8;
+    forecourtInset = CITY_WALL_DIMENSIONS.gateDepth * (southGate.scale || 1) * 0.5 + 3;
+    // 두 문 옆 중 물가에서 더 먼 쪽을 택한다. 장승 한 쌍과 솟대 모두 육축·도로 폭 바깥,
+    // 성 안쪽 문전 공간에 두어 홍예 통행과 개울을 막지 않는다.
+    if (site.stream) {
+      const bankScore = (sign) => Math.min(...[jangseungOffset, sotdaeOffset].map((offset) => {
+        const point = G.add(E, G.add(G.mul(entrancePerp, offset * sign), G.mul(toC, forecourtInset)));
+        return Math.abs(point.z - site.streamZat(point.x)) - site.streamHalf;
+      }));
+      if (bankScore(-1) > bankScore(1)) entrancePerp = G.mul(entrancePerp, -1);
+    }
+  }
+  // 동구/남문 장승 한 쌍 — 성곽 ON이면 실제 남문 진입부를 쓰고 안길 한쪽으로 비킨다.
+  features.props.push({
+    name: 'jangseung-pair',
+    x: E.x + entrancePerp.x * jangseungOffset + toC.x * forecourtInset,
+    z: E.z + entrancePerp.z * jangseungOffset + toC.z * forecourtInset,
+    rot: Math.atan2(toC.x, toC.z), scale: 1.0, seed: 21,
+  });
   // 솟대 — 장승 옆
-  features.props.push({ name: 'sotdae', x: E.x + perp.x * 8, z: E.z + perp.z * 8, rot: 0, scale: 1.0, seed: 22 });
+  features.props.push({
+    name: 'sotdae',
+    x: E.x + entrancePerp.x * sotdaeOffset + toC.x * forecourtInset,
+    z: E.z + entrancePerp.z * sotdaeOffset + toC.z * forecourtInset,
+    rot: 0, scale: 1.0, seed: 22,
+  });
   // 우물 — 중심 근처
   features.props.push({ name: 'well', x: C.x + perp.x * 9, z: C.z + toC.z * 7, rot: 0, scale: 1.0, seed: 23 });
   if (scale !== 'hamlet') {

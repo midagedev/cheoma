@@ -5,6 +5,7 @@ import { parcelMatrix } from './instancing.js';
 import { YARD_SPECIES } from './variants.js';
 import { buildParcelLanternGeo, getLanternMaterials, lanternStyleFor } from '../layout/props.js';
 import * as G from '../core/math/geom2.js';
+import { planGuardianTrees } from './guardian-plan.js';
 
 // 마당 과실수 · 반가 정원 · 마을 보호수(당산나무) — 태스크 #41 (docs Q4·Q5, R-G1/R-G2/R-T1).
 //   buildVillageFlora(plan, site, seed) → { group, setSeason(name), guardianAnchors, yardTreeAnchors, drawCalls }
@@ -13,7 +14,7 @@ import * as G from '../core/math/geom2.js';
 //   · 마당 중앙은 비운다(困 자 금기 — 작업 공간). 과실수는 뒤안·담 모퉁이(집 벽에서 떨어져)에만.
 //   · 반가는 뒤안 화계(꽃계단)+사랑마당 괴석·석지, 여염은 과실수 1~2, 민촌은 텃밭(나무 0~1).
 //   · 마을엔 신격 노거수(당산나무=느티나무 우세)가 동구/중심에 1주 이상 — 일반 수목의 3~5배
-//     우산형 수관, 밑동 돌단·금줄·평상. 부감·아이레벨 양쪽에서 즉각 읽히는 랜드마크.
+//     우산형 수관, 밑동 돌단·금줄·평상. 단, 작은 강제 성곽에 수관까지 안전한 빈터가 없으면 생략한다.
 //
 // 성능: 전 필지 과실수·정원·보호수를 재질(레이어)별 정적 병합 → 드로우콜 ~5(수백 그루라도 상수).
 //   레이어: wood(줄기·가지·평상·금줄) / leaf(잎, 계절 틴트·겨울 나목) / blossom(봄 꽃) /
@@ -239,46 +240,9 @@ function yardSlots(p, rng) {
   return ok;
 }
 
-// ───────────────────────── 보호수 배치 ─────────────────────────
-// 동구(진입로 옆, 정자 반대편) 필수 1주 + 중심 명당(town/capital) + 개울가(capital).
-function guardianPlacements(plan, site, rng) {
-  const E = site.entrance, C = site.center, R = site.R, scale = plan.scale;
-  const toC = G.norm(G.sub(C, E));            // 동구→마을 안쪽(북)
-  const perp = G.perpL(toC);
-  const parcels = plan.parcels || [];
-  const clearOfParcels = (x, z) => {
-    for (const p of parcels) { const rad = Math.max(p.plotW, p.plotD) * 0.5 + 6; if ((x - p.center.x) ** 2 + (z - p.center.z) ** 2 < rad * rad) return false; }
-    return true;
-  };
-  const nudge = (x0, z0, dx, dz) => {
-    for (let k = 0; k < 8; k++) { const x = x0 + dx * k * 2.4, z = z0 + dz * k * 2.4; if (clearOfParcels(x, z)) return { x, z }; }
-    return { x: x0, z: z0 };
-  };
-  const out = [];
-  // 동구 보호수(정자 반대편 +perp, 마을쪽으로 살짝) — 규모 무관 필수.
-  {
-    const bx = E.x + perp.x * R * 0.11 + toC.x * R * 0.05;
-    const bz = E.z + perp.z * R * 0.11 + toC.z * R * 0.05;
-    const pos = nudge(bx, bz, perp.x, perp.z);
-    out.push({ ...pos, kind: rng() < 0.85 ? 'zelkova' : 'ginkgo', scale: rng.range(0.95, 1.15), spin: rng() * TAU, props: true });
-  }
-  // 중심 명당(종가/관아 옆) — town·capital.
-  if (scale === 'town' || scale === 'capital') {
-    const pos = nudge(C.x + perp.x * R * 0.15, C.z + perp.z * R * 0.03, perp.x, perp.z);
-    out.push({ ...pos, kind: 'zelkova', scale: rng.range(1.0, 1.2), spin: rng() * TAU, props: true });
-  }
-  // 개울가 — capital.
-  if (scale === 'capital') {
-    const pos = nudge(R * 0.3, site.streamZ - R * 0.02, 1, 0);
-    out.push({ ...pos, kind: rng() < 0.6 ? 'zelkova' : 'ginkgo', scale: rng.range(0.9, 1.1), spin: rng() * TAU, props: false });
-  }
-  return out;
-}
-
 // ───────────────────────── 최상위 ─────────────────────────
 export function buildVillageFlora(plan, site, seed) {
   const group = new THREE.Group(); group.name = 'village-flora';
-  const rng = makeRng((seed ^ 0x60a2d) >>> 0);
 
   // 재질(마을 1벌 — 계절 틴트가 다른 마을에 새지 않게 호출마다 신규). flatShading 로우폴리.
   const woodMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, flatShading: true });
@@ -363,7 +327,7 @@ export function buildVillageFlora(plan, site, seed) {
   }
 
   // ── 2) 마을 보호수(당산나무) ──
-  for (const gp of guardianPlacements(plan, site, rng)) {
+  for (const gp of planGuardianTrees(plan, site, seed)) {
     const y = site.heightAt(gp.x, gp.z);
     const wm = M4().makeTranslation(gp.x, y, gp.z).multiply(M4().makeRotationY(gp.spin)).multiply(M4().makeScale(gp.scale, gp.scale, gp.scale));
     const P = guardProto[gp.kind] || guardProto.zelkova;

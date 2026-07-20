@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { makeRng } from '../rng.js';
 import * as G from '../core/math/geom2.js';
 import { createValueNoise2D } from '../core/math/value-noise2.js';
+import { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked } from './citywall-contour.js';
+import { terrainGridSize } from './terrain-grid.js';
+import { terrainWarpInner } from './terrain-surface.js';
 
 // 산 숲 "수치 크런치"(#123) — forest.js 의 배치 루프(buildForestTrees·buildGraniteMassifs)에서
 //   THREE 오브젝트 조립을 뺀 순수 수학만 추출한 모듈. 워커(populate.worker.js)와 메인(forest.js)이
@@ -32,6 +35,15 @@ export const GRANITE = 0xa5a29a;
 const GRANITE_COL = linCol(GRANITE);
 // 나무 프로토 삼각수(triCount 회계용) — forest.js 프로토와 일치.
 const PINE_TRIS = 24, BROAD_TRIS = 20, FAR_TRIS = 40;
+// Instancing matrix의 x/z scale에 곱해야 실제 prototype 수평 bound가 된다. 배치 후 footprint 검증과
+// 브라우저 계약이 이 값을 공유해 "matrix scale=시각 반경"이라는 잘못된 가정을 막는다.
+export const FOREST_VISUAL_RADIUS = Object.freeze({
+  pine: 1.55,
+  broad: 1.97,
+  far: 1.4,
+  // 최대 scale(1.25)·형상 perturb(1.1)·중심 이동 hypot(0.4,0.4)을 합친 해석 상한 1.9407을 올림.
+  rock: 1.95,
+});
 
 // ───────────────────────── 결정론 value-noise ─────────────────────────
 export function makeNoise(seed) {
@@ -90,7 +102,7 @@ export function makeEcotoneField(site) {
 // ───────────────────────── 지형 메시면 샘플러(#86) ─────────────────────────
 export function makeTerrainSampler(site, warp) {
   const TR = site.terrainR || site.R;
-  const N = Math.max(150, Math.min(260, Math.round(TR / 1.4)));
+  const N = terrainGridSize(site);
   const cache = new Map();
   const vert = (i, j) => {
     const key = i * (N + 3) + j;
@@ -161,7 +173,7 @@ function broadColor(season, t, hillBias, mosaic, out) {
 const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 
 // ───────────────────────── 빽빽한 숲 나무 크런치(forest.js buildForestTrees 수학 그대로) ─────────────────────────
-export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, ecotone, clearDist) {
+export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, ecotone, clearDist, cityWall = null) {
   const TR = site.terrainR || site.R;
   const C = site.center, bowlR = site.bowlR;
   const { N, onMesh } = sampler;
@@ -269,6 +281,15 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       const t = rng();
       const mosaic = rng();
       const hillBias = smoothstep(0.3, 0.85, hill);
+      // 초기 mask는 점 anchor만 보므로 수관이 성벽·성문 시야 안으로 다시 들어올 수 있다.
+      // 크기·회전·색에 필요한 RNG를 모두 소비한 뒤 실제 prototype 반경으로 재검사해 worker와
+      // 동기 경로의 난수 순서는 같게 유지하면서 최종 footprint 계약을 닫는다.
+      const visualRadius = s * (isPine ? FOREST_VISUAL_RADIUS.pine : FOREST_VISUAL_RADIUS.broad);
+      if (cityWallVegetationBlocked(cityWall, p, {
+        corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
+        gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+        gateApproachMargin: visualRadius,
+      })) continue;
       { const k = gkey(p.x, p.z); let a = grid.get(k); if (!a) { a = []; grid.set(k, a); } a.push({ x: p.x, z: p.z }); }
       const far = allowFar && Math.hypot(p.x - C.x, p.z - C.z) > nearR;
       if (!far) {
@@ -301,13 +322,22 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
   const farM = [], farC = { spring: [], summer: [], autumn: [], winter: [] };
   let farTreeN = 0;
   for (const cl of clusters.values()) {
-    farTreeN += cl.n;
     const inv = 1 / cl.n;
     const cx = cl.sx * inv, cz = cl.sz * inv;
     const cy = site.heightAt(cx, cz) - TREE_SINK;         // 중심 재샘플(정확한 지면 안착)
     const avgS = cl.ss * inv;
     const spread = clusterCell * (0.46 + 0.05 * Math.min(5, cl.n));   // 클러스터 footprint 커버
     const blobH = 3.0 + avgS * 3.6;                        // 캐노피 매스 높이(능선 실루엣 유지)
+    // 개별 anchor는 mask를 통과해도 셀 centroid로 합친 큰 blob의 반경이 성벽을 다시 덮을 수 있다.
+    // 최종 footprint 반경까지 확장한 동일 판정으로 후단을 닫는다. 충돌 cluster는 생략해 성벽 주변 시야와
+    // 드로우 예산을 함께 확보하며, RNG 시퀀스는 이미 끝난 뒤라 worker/sync 결정론에 영향이 없다.
+    const visualRadius = spread * FOREST_VISUAL_RADIUS.far;
+    if (cityWallVegetationBlocked(cityWall, { x: cx, z: cz }, {
+      corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
+      gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+      gateApproachMargin: visualRadius,
+    })) continue;
+    farTreeN += cl.n;
     farM.push(M4().makeTranslation(cx, cy, cz).multiply(M4().makeScale(spread, blobH, spread)));
     for (const se of SEASONS) { const a = cl.col[se]; farC[se].push(a[0] * inv, a[1] * inv, a[2] * inv); }
   }
@@ -327,7 +357,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
 }
 
 // ───────────────────────── 화강암 암릉·암괴 크런치(buildGraniteMassifs 수학 그대로) ─────────────────────────
-export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK) {
+export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, cityWall = null) {
   const TR = site.terrainR || site.R;
   const C = site.center, bowlR = site.bowlR, Hmax = site.Hmax;
   const { N, onMesh } = sampler;
@@ -369,13 +399,24 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK) {
     if (tooClose(p.x, p.z)) continue;
     const w = rng.range(3.5, 6.5) * (0.85 + 0.4 * smoothstep(0.66, 0.95, hill));
     const h = w * rng.range(0.7, 1.05);
+    const rotation = rng() * Math.PI * 2;
+    const l = 0.6 + rng() * 0.2;
+    const redJitter = rng(), blueJitter = rng();
+    const visualRadius = w * FOREST_VISUAL_RADIUS.rock;
+    // reject 여부와 무관하게 이 암괴의 RNG 창을 모두 소비해, 성벽 근처 한 점 제거가 이후 산 전체
+    // 배치를 재시드하지 않게 한다(나무 placement와 같은 국소 변경 계약).
+    if (cityWallVegetationBlocked(cityWall, p, {
+      corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
+      gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+      gateApproachMargin: visualRadius,
+    })) continue;
     // #137 급사면 다운슬로프 float 방지 — 폭·경사 비례로 밑동을 지형에 깊이 박는다(넓은 강체가 경사에서
     //   내리막 가장자리가 뜨는 착시). w·slope 곱으로 내리막 낙차(~w·slope)를 흡수.
     const sink = w * 0.42 + slope * w * 0.6;
     const y = p.y - sink;
-    mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rng() * Math.PI * 2)).multiply(M4().makeScale(w, h, w)));
-    const l = 0.6 + rng() * 0.2;
-    const c = GRANITE_COL.clone().multiplyScalar(l); c.r *= 1 + (rng() - 0.5) * 0.04; c.b *= 1 + (rng() - 0.5) * 0.04;
+    mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rotation)).multiply(M4().makeScale(w, h, w)));
+    const c = GRANITE_COL.clone().multiplyScalar(l);
+    c.r *= 1 + (redJitter - 0.5) * 0.04; c.b *= 1 + (blueJitter - 0.5) * 0.04;
     colors.push(c);
     anchors.push({ x: p.x, y, z: p.z, h, sink, hill });
     if (hill > 0.72) ridgeCount++;
@@ -395,10 +436,17 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK) {
     if (mask && mask(p.x, p.z)) continue;
     const w = rng.range(7, 11);    // #137 크기 절제(9~14 → 7~11)
     const h = w * rng.range(0.85, 1.15);
+    const rotation = rng() * Math.PI * 2;
+    const l = 0.64 + rng() * 0.18;
+    const visualRadius = w * FOREST_VISUAL_RADIUS.rock;
+    if (cityWallVegetationBlocked(cityWall, p, {
+      corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
+      gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+      gateApproachMargin: visualRadius,
+    })) continue;
     const sink = w * 0.5 + lslope * w * 0.8;   // 완만해도 폭 비례 깊이 매립
     const y = p.y - sink;
-    mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rng() * Math.PI * 2)).multiply(M4().makeScale(w, h, w)));
-    const l = 0.64 + rng() * 0.18;
+    mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rotation)).multiply(M4().makeScale(w, h, w)));
     colors.push(GRANITE_COL.clone().multiplyScalar(l));
     anchors.push({ x: p.x, y, z: p.z, h, sink, hill });
     ridgeCount++; placedLand++;
@@ -431,28 +479,6 @@ export function makeEdgeWarp(site, warpInner) {
   };
 }
 
-// 지형 신축 밴드의 안쪽 경계 반경(마을·논·개울·필지·랜드마크는 신축 금지).
-export function computeFixedRadius(plan, site) {
-  let r = site.bowlR * 1.05;
-  const consider = (x, z, m = 0) => { const d = Math.hypot(x, z) + m; if (d > r) r = d; };
-  for (const p of plan.parcels || []) {
-    const half = Math.hypot(p.plotW || 0, p.plotD || 0) / 2;
-    consider(p.center.x, p.center.z, half);
-  }
-  for (const f of plan.paddies || []) for (const pt of f.poly) consider(pt.x, pt.z);
-  if (site.stream) for (const pt of site.stream.pts) consider(pt.x, pt.z);
-  const F = plan.features || {};
-  const cf = (o, m) => { if (o && typeof o.x === 'number') consider(o.x, o.z, m); };
-  cf(F.temple, 22); cf(F.palace, 26); cf(F.govCore, 24); cf(F.pavilion, 8);
-  for (const p of F.props || []) cf(p, 4);
-  // #143: 지형 절단으로 terrainR 이 작아지면 개울 끝(±1.02R)·논 등 콘텐츠가 terrainR 을 넘겨 warpInner 를
-  //   지형 밖으로 밀어(warpInner>terrainR) worldedge 유기적 신축 밴드가 사라진다(테두리 사각화). 고정반경을
-  //   terrainR 안으로 클램프해 항상 신축 밴드가 남게 한다 — 주거 콘텐츠(필지·위성)는 nearR≪terrainR 안이라
-  //   이 클램프에 걸리지 않는다(측정 확인). 개울 리본만 terrainR 밖으로 삐치지만 그건 안개 밴드에 묻힌다.
-  const TR = site.terrainR || site.R;
-  return Math.min(r, TR - Math.max(8, TR * 0.06));
-}
-
 // 나무 제외 마스크: 도로·필지·논·개울·절 경내.
 export function makeTreeMask(plan, site) {
   const parcels = plan.parcels || [];
@@ -464,7 +490,11 @@ export function makeTreeMask(plan, site) {
   const F = plan.features || {};
   const temple = (F.temple && typeof F.temple.x === 'number')
     ? { x: F.temple.x, z: F.temple.z, r2: 32 * 32 } : null;
+  const cityWall = F.cityWall || null;
   return (x, z) => {
+    // 성벽 석축·사대문 진입부를 나무와 화강암이 관통하지 않게 한다. 이 mask는 worker와 sync,
+    // 산림·근경 산포·바위가 모두 공유하므로 RNG 추가 소비 없이 한 판정으로 전 경로가 정렬된다.
+    if (cityWallVegetationBlocked(cityWall, { x, z })) return true;
     for (const p of parcels) {
       const rad = Math.max(p.plotW, p.plotD) * 0.7 + 3;
       if ((x - p.center.x) ** 2 + (z - p.center.z) ** 2 < rad * rad) return true;
@@ -538,16 +568,17 @@ function forestTuning(plan) {
 export function crunchForest(plan, site, opts = {}) {
   const seed = ((plan.seed || 0) ^ 0x0f03e5) >>> 0;
   const { forestK, rockK } = forestTuning(plan);
-  // #143 warpInner: R*0.9 바닥을 terrainR 안으로 캡 — 대규모(한양)서 R*0.9(450)>terrainR(380) 이면 신축밴드가
-  //   지형 밖이라 테두리가 사각화됨. ★ populate.js buildVillage 의 warpInner 와 반드시 동일식(워커=동기 결정론).
-  const warp = opts.warp || makeEdgeWarp(site, Math.max(computeFixedRadius(plan, site) + 6, Math.min(site.R * 0.9, (site.terrainR || site.R) - 6)));
+  // populate와 같은 순수 helper를 써 외곽 warp 좌표와 worker/sync 결정론을 한 계약으로 고정한다.
+  const warp = opts.warp || makeEdgeWarp(site, terrainWarpInner(plan, site));
   const mask = opts.mask || makeTreeMask(plan, site);
   const clearDist = opts.clearDist || makeClearance(plan, site);
   const sampler = makeTerrainSampler(site, warp);
   const slopeAt = makeSlopeAt(site);
   const ecotone = makeEcotoneField(site);
-  const trees = crunchForestTrees(site, sampler, slopeAt, mask, (seed ^ 0xa1) >>> 0, forestK, ecotone, clearDist);
-  const rocks = crunchGranite(site, sampler, slopeAt, mask, (seed ^ 0xb2) >>> 0, rockK);
+  const trees = crunchForestTrees(site, sampler, slopeAt, mask, (seed ^ 0xa1) >>> 0,
+    forestK, ecotone, clearDist, plan.features?.cityWall || null);
+  const rocks = crunchGranite(site, sampler, slopeAt, mask, (seed ^ 0xb2) >>> 0,
+    rockK, plan.features?.cityWall || null);
   return { trees, rocks };
 }
 
