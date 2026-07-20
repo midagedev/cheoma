@@ -158,17 +158,17 @@ await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const port = server.address().port;
 
 const filter = process.argv[2] || '';
+// ── 게이트: 앱 villageAerial 프레이밍 그대로 풀프레임 1280×900(crop 금지) — 새·소가 자연스럽게 읽히는지.
+//   논 있는 마을 day·sunset 필수. seed 12=개활 논(비가림), seed 42=나무 인접 논(현실 케이스).
 const shots = [
-  ['village-aerial-day', '/__crit?scale=village&view=aerial&time=day', 1440, 900],
-  ['village-aerial-sunset', '/__crit?scale=village&view=aerial&time=sunset', 1440, 900],
-  ['village-night-aerial', '/__crit?scale=village&view=aerial&time=night', 1440, 900],
+  ['gate-s12-aerial-sunset', '/__crit?scale=village&seed=12&view=aerial&time=sunset', 1280, 900],
+  ['gate-s12-aerial-day', '/__crit?scale=village&seed=12&view=aerial&time=day', 1280, 900],
+  ['gate-s42-aerial-sunset', '/__crit?scale=village&seed=42&view=aerial&time=sunset', 1280, 900],
+  ['gate-s42-aerial-day', '/__crit?scale=village&seed=42&view=aerial&time=day', 1280, 900],
+  // 근경 무회귀 확인(개·고양이·까치 원경 부스트가 근경엔 안 먹는지) + 기본 시드 부감 새.
   ['village-near-dog', '/__crit?scale=village&view=near&target=dog&time=day', 1440, 900],
-  ['village-near-cat', '/__crit?scale=village&view=near&target=cat&time=day', 1440, 900],
   ['village-near-magpie', '/__crit?scale=village&view=near&target=magpie&time=day', 1440, 900],
-  ['town-aerial-day', '/__crit?scale=town&view=aerial&time=day', 1440, 900],
-  // 논 소 검증 — 시드 42 마을은 논 3·소 1(기본 시드 20260716 은 논 0). 부감/논 근접 두 컷.
-  ['s42-aerial-day', '/__crit?scale=village&seed=42&view=aerial&time=day', 1440, 900],
-  ['s42-paddy-cow', '/__crit?scale=village&seed=42&view=paddy&time=day', 1440, 900],
+  ['village-aerial-sunset', '/__crit?scale=village&view=aerial&time=sunset', 1280, 900],
 ].filter(([name]) => !filter || name.includes(filter));
 
 let browser;
@@ -194,24 +194,7 @@ for (const [name, qs, vw, vh] of shots) {
   });
   const info = await page.evaluate(() => ({ plan: window.__PLAN, crit: window.__CRIT }));
   const file = join(OUT, `crit-${name}.png`);
-  await page.screenshot({ path: file });
-  // 부감 크롭: 새 떼 중심·소 주변을 확대 캡처(원경에서 실제로 읽히는지) — aerial 컷만.
-  if (name.includes('aerial')) {
-    const proj = await page.evaluate(() => {
-      const fc = window.__flockCenter && window.__flockCenter();
-      const cows = window.__posOf && window.__posOf('cow');
-      return { flock: fc ? window.__project(fc) : null, cow: (cows && cows.length) ? window.__project(cows[0]) : null };
-    });
-    const cropAt = async (tag, s, half) => {
-      if (!s) return;
-      const cx = s.x / s.dpr, cy = s.y / s.dpr, r = half;
-      const x = Math.max(0, cx - r), y = Math.max(0, cy - r);
-      const w = Math.min(vw - x, 2 * r), h = Math.min(vh - y, 2 * r);
-      if (w > 8 && h > 8) await page.screenshot({ path: join(OUT, `crit-${name}-${tag}.png`), clip: { x, y, width: w, height: h } });
-    };
-    await cropAt('flock', proj.flock, 200);
-    await cropAt('cow', proj.cow, 160);
-  }
+  await page.screenshot({ path: file });   // 풀프레임만(crop 게이트 무효 — 앱 villageAerial 프레이밍 그대로)
   const c = info.crit || {};
   console.log(`${name.padEnd(22)} R=${info.plan?.R} present=${c.present} drawMeshes=${c.drawMeshes} counts=${JSON.stringify(c.counts)} dogMotion=${JSON.stringify(motion)} calls=${info.plan?.perf?.calls}`);
   await page.close();

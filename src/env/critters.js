@@ -576,7 +576,9 @@ export function setupVillageCritters(parent, {
   let t = 0;
   // 원경(부감) 가시성 배율 — updateLod(camera)가 카메라 고도로 램프(근경=1). 부감에서 서브픽셀 소실 방지.
   //   새 떼·까치만 부스트(개·고양이는 원경 생략 정책). 소는 어댑터가 논 위 cow 를 별도 스케일.
-  const BIRD_BOOST = 3.2, MAG_BOOST = 2.2;
+  //   풀프레임 부감에서 자연스럽게 눈에 들어오는 최소선(만화 크기 금지). 가독성의 주 레버는 크기가 아니라
+  //   고도 상향(아래 alt) — 미스트/능선 배경에 떠 저대비 탈출. 근경(<46m)=1x.
+  const BIRD_BOOST = 4.2, MAG_BOOST = 2.6;
   let magAerial = 1;
 
   const _q = new THREE.Quaternion(), _e = new THREE.Euler();
@@ -603,8 +605,9 @@ export function setupVillageCritters(parent, {
 
   // ==================================================================
   // 1) 새 떼 — 마을 중심 상공 선회 + 간헐 원정(마을 밖으로). 고도·반경은 규모 비례.
+  //   고도를 넉넉히(부감 시선각에서 마을 지붕·숲 위 미스트/능선 배경으로 떠 대비가 살게).
   // ==================================================================
-  const alt = Math.min(60, Math.max(22, 20 + radius * 0.28));
+  const alt = Math.min(78, Math.max(30, 28 + radius * 0.34));
   const flock = makeBoidFlock(group, rng, {
     cx: center.x, cz: center.z, alt, ax: Math.max(6, radius * 0.34), az: Math.max(5, radius * 0.28),
     bandLo: alt - 7, bandHi: alt + 7, awayR: radius * 1.7 + 70, exCx: center.x, exCz: center.z,
@@ -785,7 +788,7 @@ export function setupVillageCritters(parent, {
   //   개·고양이는 그대로(원경 생략 정책) — 새 떼·까치만 서브픽셀 소실 방지로 키운다.
   function updateLod(camera) {
     const y = (camera && camera.position) ? camera.position.y : 0;
-    const x = Math.max(0, Math.min(1, (y - 46) / 80));   // 46~126m 램프
+    const x = Math.max(0, Math.min(1, (y - 46) / 50));   // 46~96m 램프(작은 마을 부감도 빠르게 포화)
     const hi = x * x * (3 - 2 * x);                       // smoothstep
     flock.setScaleBoost(1 + hi * (BIRD_BOOST - 1));
     magAerial = 1 + hi * (MAG_BOOST - 1);

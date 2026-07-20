@@ -822,14 +822,14 @@ function finishVillage(opts, seed, plan, group) {
   //   스케일을 카메라 고도로 램프(근경=1, 개·고양이는 원경 생략이나 소는 시대 대표동물이라 부감 가시). animals
   //   cow.update 는 g.scale 을 건드리지 않아(발끝 y=0 기준 상향 성장) 여기서 소유해도 충돌 없음. cow 는 재롤에
   //   재생성되지 않으므로 1회 수집. updateLod(매 프레임 camera)에서 구동.
-  const COW_BOOST = 2.5;
+  const COW_BOOST = 3.5;
   let _cowGroups = null;
   function applyCowAerial(camera) {
     if (_cowGroups === null) { _cowGroups = []; group.traverse((o) => { if (o.name === 'cow') _cowGroups.push(o); }); }
     if (!_cowGroups.length) return;
     const y = (camera && camera.position) ? camera.position.y : 0;
-    const x = Math.max(0, Math.min(1, (y - 46) / 80));
-    const hi = x * x * (3 - 2 * x);                 // smoothstep (villageCritters 와 동일 램프)
+    const x = Math.max(0, Math.min(1, (y - 46) / 50));
+    const hi = x * x * (3 - 2 * x);                 // smoothstep (villageCritters updateLod 와 동일 램프)
     const s = 1 + hi * (COW_BOOST - 1);
     for (const g of _cowGroups) g.scale.setScalar(s);
   }
