@@ -3,7 +3,7 @@ import { makeSite, resolveSiteR, tierForR, rToScale01 } from './site.js';
 import { planRoads } from './roads.js';
 import { planParcels, planSatellites } from './parcels.js';
 import { assignVariation } from './variants.js';
-import * as G from './geom.js';
+import * as G from '../core/math/geom2.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //

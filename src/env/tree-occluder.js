@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 
 // 전경 나무 오클루더 페이드 — 프레임워크 무관 ES 모듈.
@@ -23,7 +24,6 @@ const RECOMPUTE_DT = 0.09; // 오클루전 타깃 재계산 주기(초) — 매 
 const SCREEN_IN = 0.13;    // 화면중심 반경 이내 = 완전 페이드
 const SCREEN_OUT = 0.62;   // 이 반경 밖 = 페이드 없음(가장자리 나무는 시야를 안 막음)
 
-const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 export function setupTreeOccluder({ getSubject } = {}) {
   // entries: { mesh, attr, pos(Float32 n*3 캐노피 월드), n, cur, tgt }

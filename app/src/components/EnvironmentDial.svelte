@@ -233,8 +233,8 @@
     stroke-width: 2.4px;
     transition: fill 0.3s ease, font-weight 0.2s ease;
   }
-  .band:focus-visible { outline: none; }
-  .band:focus-visible + .band, .dial:focus-within .hub { stroke: var(--seal); }
+  .band:focus-visible { outline: none; stroke: var(--seal); }
+  .dial:focus-within .hub { stroke: var(--seal); }
   .lab.on {
     fill: #fff2e2;
     font-weight: 700;

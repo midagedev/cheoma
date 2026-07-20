@@ -213,10 +213,6 @@
   .it-lic { font-family: var(--serif); font-size: 11px; color: var(--ink-faint); line-height: 1.55; margin-top: 1px; }
   .it-lic strong { color: var(--ink-soft); font-weight: 700; }
 
-  .prod ul { gap: 9px; }
-  .prod-li { font-family: var(--serif); font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
-  .prod-li strong { color: var(--ink); font-weight: 700; }
-
   @media (prefers-reduced-motion: reduce) {
     .scrim, .modal { animation: none; }
   }

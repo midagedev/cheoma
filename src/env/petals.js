@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { makeRng } from '../rng.js';
 
@@ -55,10 +56,6 @@ function altGateFrom(camDist, camY) {
   return 1; // 신호 없음(env 단독 하네스·단일건물 초기) → 근경 취급(ON)
 }
 
-function smoothstep(a, b, x) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-}
 
 // 잎 실루엣 절차 생성(#116) — "낙엽을 낙엽답게": 원형 점이 아니라 은행잎(부채꼴)·단풍잎(손바닥)
 //   형태를 흰 알파로 그린다(색은 aColor 로 곱함). 셀 중심(32,32), 위=−y. kind 0=벚꽃 꽃잎·1=은행·2=단풍.

@@ -1,0 +1,28 @@
+// 마을 계획부터 THREE 조립·runtime handle까지의 공개 API.
+export * from './village-plan.js';
+export { populateVillage, populateVillageSteps } from '../village/populate.js';
+export { createVillage, createVillageAsync } from '../village/adapter.js';
+export { createRerollWave } from '../village/wave.js';
+export { buildFeaturePad, buildParcelPads, computePadY } from '../generators/village/pads.js';
+export {
+  buildFeatureObjects,
+  buildHeroParcel,
+  buildPaddyFields,
+  buildSijeon,
+  collectMaterialSets,
+} from '../generators/village/features.js';
+export {
+  buildSiteTerrain,
+  buildWaterRibbon,
+  computeRidgeMistAnchors,
+  setVillageWaterTime,
+} from '../generators/village/terrain.js';
+export { buildRoads } from '../generators/village/roads.js';
+export { scatterTrees } from '../generators/village/trees.js';
+export {
+  attachChunkLodSwap,
+  buildCourtyard,
+  buildKindDecomps,
+  makeHouseProtos,
+  placeParcel,
+} from '../generators/village/houses.js';

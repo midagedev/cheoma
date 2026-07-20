@@ -1,5 +1,7 @@
+import { smoothstep } from '../core/math/scalar.js';
 import { makeRng } from '../rng.js';
-import { makeWorldEdge } from '../env/worldedge.js';
+import { makeWorldEdge } from '../core/math/world-edge.js';
+import { createValueNoise2D } from '../core/math/value-noise2.js';
 
 // 마을 전용 사이트 지형 — 배산임수(背山臨水)의 토대. (joseon-city.md 규칙 1·2·16)
 //   기존 env/terrain.js 는 단일 건물용(평탄 24m + -x 고정 개울축)이라 마을 스케일과
@@ -14,36 +16,8 @@ import { makeWorldEdge } from '../env/worldedge.js';
 //
 // makeSite({ scale, seed }) → 순수 데이터 + heightAt/hillAt 클로저.
 
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 const clampN = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const lerpN = (a, b, t) => a + (b - a) * t;
-
-// 컴팩트 시드 value-noise(fBm). terrain.js 와 같은 방식이되 이 모듈 자립.
-function makeNoise(seed) {
-  const rng = makeRng(seed);
-  const perm = new Uint8Array(512), base = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) base[i] = i;
-  for (let i = 255; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = base[i]; base[i] = base[j]; base[j] = t; }
-  for (let i = 0; i < 512; i++) perm[i] = base[i & 255];
-  const lat = (ix, iz) => perm[(perm[ix & 255] + iz) & 255] / 255 * 2 - 1;
-  const sm = (t) => t * t * (3 - 2 * t);
-  const noise = (x, z) => {
-    const x0 = Math.floor(x), z0 = Math.floor(z), fx = x - x0, fz = z - z0;
-    const v00 = lat(x0, z0), v10 = lat(x0 + 1, z0), v01 = lat(x0, z0 + 1), v11 = lat(x0 + 1, z0 + 1);
-    const sx = sm(fx), sz = sm(fz);
-    const a = v00 + (v10 - v00) * sx, b = v01 + (v11 - v01) * sx;
-    return a + (b - a) * sz;
-  };
-  const fbm = (x, z, oct = 4) => {
-    let sum = 0, amp = 0.5, freq = 1, norm = 0;
-    for (let o = 0; o < oct; o++) { sum += amp * noise(x * freq, z * freq); norm += amp; amp *= 0.5; freq *= 2.03; }
-    return sum / norm;
-  };
-  return { noise, fbm };
-}
 
 // ── 규모 연속축(#89) ── siteR(분지 반경, m) 스칼라 하나에서 지형·기복·능선·지형범위를 파생.
 //   기존 5 이산 프리셋을 "연속 함수의 앵커(제어점)"로 재해석한다. 각 앵커에서 정확히 재현(회귀 안전),
@@ -182,7 +156,7 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   const meK = clampN(streamMeanderK, 0, 2.5); // 개울 사행(굽이) 정도 배율
   const dry = stream === false ? true : cfg.dry;   // 개울 유무(off=내륙 마른 마을: 개울·다리·논 소멸)
   const benchDrop = cfg.benchDrop, undAmp = cfg.undAmp * uAmpK;
-  const { fbm } = makeNoise(seed ^ 0x51a1);
+  const { fbm } = createValueNoise2D(seed ^ 0x51a1, { signed: true });
   // 언듈레이션 파장: 규모에 비례(분지에 2~3개 완만한 융기가 얹히도록).
   const undF = 1.4 / R, undF2 = 3.6 / R;
 

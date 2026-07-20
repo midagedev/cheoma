@@ -1,6 +1,8 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { makeRng } from '../rng.js';
-import * as G from './geom.js';
+import * as G from '../core/math/geom2.js';
+import { createValueNoise2D } from '../core/math/value-noise2.js';
 
 // 산 숲 "수치 크런치"(#123) — forest.js 의 배치 루프(buildForestTrees·buildGraniteMassifs)에서
 //   THREE 오브젝트 조립을 뺀 순수 수학만 추출한 모듈. 워커(populate.worker.js)와 메인(forest.js)이
@@ -16,7 +18,6 @@ import * as G from './geom.js';
 //   forest.js buildForest 는 이 버퍼로 InstancedMesh 조립만. 워커는 이 함수를 그대로 굴려 버퍼를 넘긴다.
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
-const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const M4 = () => new THREE.Matrix4();
 
@@ -34,20 +35,7 @@ const PINE_TRIS = 24, BROAD_TRIS = 20, FAR_TRIS = 40;
 
 // ───────────────────────── 결정론 value-noise ─────────────────────────
 export function makeNoise(seed) {
-  const rng = makeRng(seed);
-  const perm = new Uint8Array(512), base = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) base[i] = i;
-  for (let i = 255; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = base[i]; base[i] = base[j]; base[j] = t; }
-  for (let i = 0; i < 512; i++) perm[i] = base[i & 255];
-  const lat = (ix, iz) => perm[(perm[ix & 255] + (iz & 255)) & 255] / 255;
-  const sm = (t) => t * t * (3 - 2 * t);
-  return (x, z) => {
-    const x0 = Math.floor(x), z0 = Math.floor(z), fx = x - x0, fz = z - z0;
-    const v00 = lat(x0, z0), v10 = lat(x0 + 1, z0), v01 = lat(x0, z0 + 1), v11 = lat(x0 + 1, z0 + 1);
-    const sx = sm(fx), sz = sm(fz);
-    const a = v00 + (v10 - v00) * sx, b = v01 + (v11 - v01) * sx;
-    return a + (b - a) * sz;
-  };
+  return createValueNoise2D(seed).noise;
 }
 
 // ───────────────────────── 화강암 노출장(#137) ─────────────────────────

@@ -26,6 +26,23 @@ npm run build   # → app/dist
 
 Core generation modules live in `src/` (framework-agnostic ES modules); the Svelte 5 SPA in `app/` consumes them.
 
+Repository-wide contract checks run from the root:
+
+```bash
+npm run check       # architecture + deterministic plan goldens
+npm run check:app   # full app browser smoke
+npm run check:worker
+npm run check:all
+```
+
+## Documentation
+
+- Contributor and coding-agent rules: [`AGENTS.md`](AGENTS.md)
+- Document map and status: [`docs/README.md`](docs/README.md)
+- Project direction and active work: [`docs/project-status.md`](docs/project-status.md)
+- Architecture and reuse contract: [`docs/architecture-refactor.md`](docs/architecture-refactor.md)
+- Verification guide: [`docs/verification.md`](docs/verification.md)
+
 ## License
 
 MIT

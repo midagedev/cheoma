@@ -1,0 +1,129 @@
+# 에이전트 친화적 구조 계약
+
+> - **상태**: 1차 구조 개선 완료 / 후속 개선의 기준선
+> - **기준일**: 2026-07-20
+> - **목표**: 동작과 결정론을 보존하면서 변경 이유가 다른 코드를 분리하고, 생성 엔진을 앱 밖에서도 재사용 가능하게 유지
+
+## Beck 단순 설계 규칙
+
+구조 판단은 다음 순서를 고정한다. 뒤 규칙을 위해 앞 규칙을 훼손하지 않는다.
+
+1. **모든 검사를 통과한다.** 구조·plan·앱·worker 계약이 먼저 녹색이어야 한다.
+2. **의도를 드러낸다.** 이름과 공개 계약만으로 입력, 결과, 수명, dispose 소유권을 알 수 있어야 한다.
+3. **중복이 없다.** RNG 창, 좌표 변환, noise, 보간, worker 프로토콜처럼 하나의 규칙은 한 곳에만 둔다.
+4. **요소가 최소다.** 줄 수를 맞추는 파일 분할, 소비자 없는 façade, 전달만 하는 계층은 만들지 않는다.
+
+함수 이동과 동작 변경은 같은 작업에 섞지 않는다. 구조 이동 중 hash가 바뀌면 먼저 회귀로 취급한다.
+
+## 현재 레이어
+
+```text
+src/api/                       앱과 외부 프로젝트가 보는 안정된 진입점
+src/core/math/                 THREE·DOM 없는 공용 geometry/noise/scalar/world-edge 커널
+src/generators/shared/         생성기들이 공유하는 좌표 변환
+src/generators/village/        THREE 마을 조립: pads/features/terrain/roads/trees/houses
+src/runtime/village/           생성 수명: seed window/worker/create/handle/pick/edit/light/env bridge
+src/village/                   순수 plan과 아직 이동하지 않은 도메인 구현, 기존 경로 호환 shim
+app/src/engine/                제품 scene 조립과 앱 전용 runtime
+app/src/                       Svelte UI
+```
+
+의존 방향은 위에서 아래로 흐르지 않는다. 특히 다음 규칙은 `npm run check:architecture`가 강제한다.
+
+- `src/`는 Svelte나 `app/`을 import하지 않는다.
+- `app/src/`가 코어를 사용할 때는 `src/api/`만 import한다.
+- 코어 내부 구현은 `src/api/` façade를 역으로 import하지 않는다.
+- `src/generators/`는 `src/runtime/`을 import하지 않는다.
+- 기존 `src/village/`에서 runtime으로 가는 경로는 `adapter.js` 호환 shim 하나뿐이다.
+- `src/core/`는 상위 생성·runtime 계층을 알지 않는다.
+- `src/api/village-plan.js`의 전체 dependency closure에는 THREE와 브라우저 전역이 없다.
+
+## 완료된 구조 개선
+
+| 영역 | 이전 | 현재 |
+| --- | --- | --- |
+| 마을 어댑터 | `src/village/adapter.js` 1,523줄에 worker·handle·pick·edit·환경 결합 | 2줄 호환 façade + `src/runtime/village/`의 역할별 모듈, 최대 파일 `handle.js` 709줄 |
+| 마을 populate | `src/village/populate.js` 1,389줄에 모든 조립 구현 | 398줄 순서 orchestration + `src/generators/village/` 6개 생성기, 최대 302줄 |
+| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | 약 2,065줄 integration façade + scene/post/view-shift/cinematic/village-camera runtime |
+| 공용 수학 | geometry, world edge, value noise, smoothstep가 여러 도메인에 복제 | `src/core/math/{geom2,world-edge,value-noise2,scalar}.js`가 단일 구현 소유 |
+| 필지 변환 | layout이 village instancing 내부에 의존 | `src/generators/shared/parcel-transform.js`가 소유, 기존 경로는 re-export |
+| 공개 경계 | 앱과 외부 소비자가 코어 내부 파일을 직접 import | 앱의 코어 import는 `src/api/*`로 한정, 정적 게이트로 고정 |
+
+기존 깊은 import를 당장 깨지 않도록 아래 경로는 호환 shim으로 남겼다.
+
+- `src/village/adapter.js`
+- `src/village/geom.js`
+- `src/env/worldedge.js`
+- `src/village/instancing.js`의 `parcelMatrix`
+
+레포 내부 소비가 0이어도 외부 사용 여부를 확인하기 전에는 제거하지 않는다. 새 코드는 shim 대신 공개 API나 새 소유 모듈을 사용한다.
+
+## 공개 재사용 API
+
+| 진입점 | 주요 계약 | 실행 환경 |
+| --- | --- | --- |
+| `src/api/village-plan.js` | `planVillage`, site/tier/road 순수 helper | Node, worker, browser |
+| `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
+| `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
+| `src/api/environment.js` | environment, focus, post, weather, ink, time, world edge | WebGL browser runtime |
+| `src/api/cinematic.js` | 건물 카메라 drive, 마을 drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
+| `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
+| `src/api/props.js` | prop registry와 생성 | THREE와 canvas provider가 있는 runtime |
+| `src/api/export.js` | export 분석·GLB·download·postcard | 분석 제외 대부분 browser |
+| `src/api/index.js` | 전체 browser runtime façade | WebGL browser runtime |
+
+외부 프로젝트는 bare `three`를 하나만 사용해야 한다. 이 레포처럼 alias/dedupe를 적용하거나 향후 패키징 시 `three@0.185.1`을 peer dependency로 둔다.
+
+## 보존되는 런타임 계약
+
+- 공개 함수 시그니처와 `VillageHandle` 메서드.
+- 같은 seed의 RNG 소비 순서와 sync/worker/fallback 결과.
+- `populateVillageSteps`의 label과 순서.
+- object `name`, `userData`, material role·identity, pick proxy framing.
+- `onBeforeCompile` 등록 순서와 `customProgramCacheKey`.
+- `instanceColor`, geometry winding, `instanceMatrix` normal 합성.
+- 앱의 `window.__engine` API와 URL/runtime hook.
+- focus overlay와 scene resource의 dispose 소유권.
+
+`tools/check-worker-contract.mjs`는 네 규모의 scene graph와 pick proxy 골든 hash, 실제 Worker 메시지, async 단계 순서를 함께 고정한다. 구조 이동 뒤 이 값은 갱신 대상이 아니라 보존 대상이다.
+
+## 병렬 작업 소유권
+
+| 작업 레인 | 기본 소유 경계 | 통합 시 공유 계약 |
+| --- | --- | --- |
+| 순수 village plan | `src/village/{site,roads,parcels,plan,variants}`와 `src/core/math` | plan fixture, RNG |
+| 건물 생성 | `src/builder`, building 관련 `src/layout` | `params.js`, material role |
+| village 생성 | `src/generators/village` | populate step order, object metadata |
+| village runtime | `src/runtime/village` | `VillageHandle`, worker protocol |
+| 환경·post | `src/env` | shader/material hooks |
+| 앱 integration | `app/src/engine` runtime과 `App.svelte` | `window.__engine` |
+| 검증 | `tools/check-*`, 도메인 harness | golden fixture와 문서 |
+
+병렬 작업자는 같은 대형 파일의 서로 다른 구간을 동시에 고치지 않는다. façade나 fixture 변경은 구현 레인의 결과가 통과한 뒤 통합 단계에서 한 번에 수행한다.
+
+## 현재 남은 개선 후보
+
+다음 파일은 크지만 줄 수만으로 분할하지 않는다.
+
+| 파일 | 현재 줄 수(근사) | 다음 안전 조건 |
+| --- | ---: | --- |
+| `app/src/engine/engine.js` | 2,065 | village/focus lifecycle의 명확한 상태기계 계약과 전용 앱 하네스가 있을 때 추가 추출 |
+| `src/builder/palette.js` | 899 | canvas/texture provider 주입과 material/shader identity 검사 마련 후 분리 |
+| `src/env/post.js` | 845 | pass 순서·program count·대표 픽셀 게이트 마련 후 분리 |
+| `src/builder/roof.js` | 826 | 지붕 유형별 geometry hash와 근접 시각 게이트 마련 후 분리 |
+| `src/env/critters.js` | 817 | proto/배치/애니메이션별 수치·시각 계약 마련 후 분리 |
+| `app/src/App.svelte` | 785 | UI 상태 소유권을 먼저 명시한 뒤 화면 orchestration 분리 |
+
+가장 자연스러운 후속 순서는 palette의 browser 의존 주입, engine의 village/focus controller, façade를 사용하는 최소 외부 예제, 마지막으로 `@cheoma/core`·`@cheoma/three` 패키지 manifest다. 현재 검증보다 위험한 이동은 먼저 게이트를 추가한 뒤 수행한다.
+
+## 완료 판정
+
+이번 1차 구조 개선은 다음을 만족한다.
+
+- `adapter.js`와 `populate.js`의 다중 책임이 generator/runtime 경계로 이동했다.
+- 앱과 외부 소비자의 공개 진입점이 마련됐고 정적 경계 검사가 이를 강제한다.
+- 순수 plan, 전체 scene, pick proxy, 실제 Worker, 앱 부팅·카메라·focus에 영구 회귀 게이트가 있다.
+- 대표 계획과 전체 마을 골든 결과가 구조 이동 전과 같다.
+- 남은 대형 모듈은 검증 없이 억지로 쪼개지 않고 위험과 선행 조건을 문서화했다.
+
+새 기능 작업은 이 기준선 위에서 진행할 수 있다. 이후 구조 개선도 같은 Beck 순서와 검증 매트릭스를 반복한다.

@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { PRESETS } from '../../src/params.js';
+  import { PRESETS } from '../../src/api/building.js';
   import { createEngine } from './engine/engine.js';
   import { configFromSeed, paramsFor, newSeed, FLAGSHIP_TIME } from './lib/seed.js';
   import { readUrl, writeUrl } from './lib/url.js';
@@ -16,7 +16,7 @@
   import HoverLabel from './components/HoverLabel.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
   import CinematicOverlay from './components/CinematicOverlay.svelte';
-  import { exportGLB, analyzeExport, filenameFor, triggerDownload } from '../../src/export/gltf.js';
+  import { exportGLB, analyzeExport, filenameFor, triggerDownload } from '../../src/api/export.js';
   import { t } from './lib/i18n.svelte.js';
 
   let container;
@@ -32,7 +32,7 @@
   let chromaFaded = $state(false);
   let refOpen = $state(false);                 // 참고 자료 모달
   let audioOn = $state(false);
-  let rerollCooldown = false;
+  let rerollCooldown = $state(false);
 
   // ---------- 오토로테이션("시간 흐르기" #64) ----------
   // 활성 시 FLOW_INTERVAL 마다 시간대를 한 칸 전진(dawn→day→sunset→night→dawn…). 전환은 기존

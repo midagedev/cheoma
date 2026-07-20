@@ -9,7 +9,7 @@ cheoma (처마) — a procedural Joseon-era Korean architecture & village genera
 ## Two-layer boundary (read this first)
 
 - **`src/`** — the framework-agnostic ES-module core (pure three.js): all generation, rendering, environment, animation, export. Imports bare `three`. **Never import Svelte or anything from `app/` into `src/`.**
-- **`app/`** — a Svelte 5 + Vite SPA that consumes the core. `app/src/engine/engine.js` is the imperative wrapper: it wires the core into one three.js scene and exposes `window.__engine`. Svelte components drive that imperative API only — they hold no three.js state of their own.
+- **`app/`** — a Svelte 5 + Vite SPA that consumes the core through `src/api/` only. `app/src/engine/engine.js` is the imperative wrapper: it wires the core into one three.js scene and exposes `window.__engine`. Svelte components drive that imperative API only — they hold no three.js state of their own.
 
 three is pinned to **0.185.1**. `app/vite.config.js` aliases bare `three` → `app/node_modules` (with `dedupe`) and sets `server.fs.allow = repoRoot` so the app can import `../src`. A second three instance silently breaks `instanceof` checks and prototype patches (e.g. accelerated raycast).
 
@@ -20,6 +20,15 @@ cd app
 npm install
 npm run dev      # vite dev server (default :5173)
 npm run build    # → app/dist   (build.target es2022, assetsInlineLimit 0)
+```
+
+Repository contract gates run from the root:
+
+```bash
+npm run check          # architecture + 10 deterministic plan goldens
+npm run check:app      # isolated full-app browser smoke
+npm run check:worker   # sync / real Worker / fallback scene + picking contracts
+npm run check:all      # all three
 ```
 
 There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`), so run the tools with plain node:
@@ -40,8 +49,8 @@ The core runs standalone from the repo-root `index.html` (plus per-domain harnes
 
 **Building types & materials**: 궁(palace) / 절(temple) / 기와집(giwa) / 초가(choga). 단청 (dancheong) is type-dependent — palace & temple only. Roof builder dispatch: giwa → `roof-skeleton.js`; palace/temple/choga → `roof.js`. `src/builder/palette.js#makeMaterials` returns role-tagged materials; per-part color variety rides `instanceColor` at zero extra draw calls (adding material variants is expensive — mind draw-call budgets; town ceiling < 1000).
 
-**Village generation (`src/village/`)** — a deterministic pipeline:
-`plan.js` (`planVillage(opts)`: parcels, basin, roads — pure & seed-deterministic) → `populate.js` (`populateVillage`, and the `populateVillageSteps` generator) → `adapter.js` (`createVillage` / `createVillageAsync` → the village handle the engine drives). Convention: **`+z` = south.** Scale is a continuum (`siteR` scalar / tier): lone house → hamlet → village → town → capital → hanyang (성곽 도성 with 사대문·시전, `citywall.js`). Repeated buildings are instanced (`chunks.js`, `instancing.js`).
+**Village generation** — a deterministic pipeline:
+`src/village/plan.js` (pure plan) → `src/village/populate.js` (step orchestration over `src/generators/village/*`) → `src/runtime/village/create.js` and `handle.js`. `src/village/adapter.js` is only a compatibility re-export. Convention: **`+z` = south.** Scale is a continuum (`siteR` scalar / tier): lone house → hamlet → village → town → capital → hanyang (성곽 도성 with 사대문·시전, `citywall.js`). Repeated buildings are instanced (`chunks.js`, `instancing.js`).
 
 **Performance is architectural here, not incidental** (this is a large scene):
 - **Worker offload** (`populate.worker.js` + `forest-crunch.js`): forest placement (14k–40k trees, the bulk of generation cost) runs in a Web Worker that returns a transferable `Float32Array` of matrices + seasonal colors; the main thread only assembles `InstancedMesh`. `createVillageAsync` rAF-chunks that assembly. `?worker=0` is the synchronous fallback.
@@ -63,5 +72,14 @@ Many stock materials are patched via `onBeforeCompile`. Rules learned the hard w
 ## Verifying visual changes
 Headless ANGLE serializes shader linking, so absolute frame-ms from headless runs is unreliable — judge perf by **program-count deltas** and determinism hashes, not wall-clock. Keep gate screenshots minimal; put throwaway captures in a scratch dir, not `shots/`.
 
-## Design specs (`docs/`)
-Code comments reference these directly: `mode-integration.md` (mode/camera/focus integration — comments cite e.g. "mode-integration §5.5"), `palace-layout.md`, `joseon-city.md`, `tooling.md` (vetted library stack — manifold-3d, three-mesh-bvh, clipper2 offset caveat), `perf-webgpu.md`, `ui-design.md`, `references.md`.
+## Documentation & current work
+
+- Start at `docs/README.md` for the document map and status labels. Not every file in `docs/` is a current implementation contract; research and dated snapshots are marked there.
+- `docs/project-status.md` holds the current wrap-up direction and stable user decisions migrated from Claude Code memory.
+- `docs/architecture-refactor.md` records the completed first structure pass and the current reuse/boundary contract. Public consumer entrypoints live in `src/api/`; internal modules must not import that façade. Run `npm run check` before browser-heavy gates.
+- `docs/verification.md` is the canonical harness map. In particular, `tools/check-determinism.mjs` does not compare worker vs sync and does not hash temple data, while `tools/verify-forest.mjs` is obsolete.
+- `SANSA-HANDOFF.md` is the queued temple-relocation brief. Do not mix its behavior changes into mechanical structure moves. When implemented, its source changes must remain uncommitted for review unless the user changes that instruction.
+
+Code comments reference design documents directly: `mode-integration.md` (mode/camera/focus integration — comments cite e.g. "mode-integration §5.5"), `palace-layout.md`, `joseon-city.md`, `tooling.md` (vetted library stack — manifold-3d, three-mesh-bvh, clipper2 offset caveat), `perf-webgpu.md`, `ui-design.md`, and `references.md`. Do not rename these files or renumber referenced sections casually.
+
+Repository docs must be self-contained. Claude Code memory under `/Users/hckim/.claude/projects/-Users-hckim-repo-asiahouse/memory/` is useful historical input, but it includes superseded implementations, tool-specific routing, credentials, and ephemeral scratch paths. When a memory contains a stable rule that future work needs, migrate the rule into the relevant repository document instead of adding a hard dependency on that private path.

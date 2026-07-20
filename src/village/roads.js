@@ -1,4 +1,4 @@
-import * as G from './geom.js';
+import * as G from '../core/math/geom2.js';
 
 // 2단계 도로 생성 (joseon-city.md 규칙 3·4·11·12·13·14·17).
 //   1) 간선(대로·중로)은 결정론 골격 — 십자/T/남북대로. 곧게(등고 따라 완만 곡선 허용).

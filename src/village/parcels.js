@@ -1,4 +1,5 @@
-import * as G from './geom.js';
+import { smoothstep } from '../core/math/scalar.js';
+import * as G from '../core/math/geom2.js';
 import { makeRng } from '../rng.js';
 
 // 도로변 필지 분할 + 신분 위계 그라디언트 (joseon-city.md 규칙 7·8·9·10).
@@ -10,7 +11,6 @@ import { makeRng } from '../rng.js';
 // planParcels(site, roadsResult, opts, rng, blockers) → parcels[]
 //   parcel: { poly, center, frontDir, rank, kind, plotW, plotD, hero?, heroStyle?, seed }
 
-const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 const SCALE_TARGET = { hamlet: 10, village: 32, town: 70, capital: 104, hanyang: 340 };
 

@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { getWind } from './wind.js';
 
@@ -18,10 +19,6 @@ import { getWind } from './wind.js';
 //    weather 적설 traverse 대상 아님). 바람 사인 요동 + 회전 낙하 + 지면/수관 끝 페이드.
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 // 수종별 계절 목표 잎색 (index = SPECIES). pine(0)은 미사용(상록).
 const AUTUMN = [0x000000, 0xe8c33a, 0xc8452c, 0xa5762f, 0xcf6b4e]; // 은행 진노랑 / 단풍 주홍 / 잡목 갈금 / 벚 코랄

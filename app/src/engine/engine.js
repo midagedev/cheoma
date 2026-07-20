@@ -8,24 +8,26 @@
 // 히어로/조립/포스트카드/셔플/환경 훅은 코어 모듈을 직접 재사용한다.
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
-import { PRESETS, computeLayout } from '../../../src/params.js';
-import { buildBuilding } from '../../../src/builder/index.js';
-import { setupEnvironment, createFocusRing } from '../../../src/env/index.js';
-import { setupWeather } from '../../../src/env/weather.js';
-import { setupNightGlow } from '../../../src/env/night-glow.js';
-import { setupCinematic } from '../../../src/camera/cinematic.js';
-import { createDronePaths } from '../../../src/cinematic/dronepath.js';
-import { createWalker } from '../../../src/cinematic/walker.js';
-import { setupAudio } from '../../../src/audio/index.js';
-import { setupPost } from '../../../src/env/post.js';
-import { playAssembly, tofuScale, tofuBob } from '../../../src/anim/assembly.js';
-import { capturePostcard } from '../../../src/share/postcard.js';
-import { createVillage, createVillageAsync } from '../../../src/village/adapter.js';
-import { createRerollWave } from '../../../src/village/wave.js';
+import {
+  PRESETS, buildBuilding, computeLayout, playAssembly, tofuBob, tofuScale,
+} from '../../../src/api/building.js';
+import {
+  setupEnvironment, createFocusRing, setupNightGlow, setupWeather,
+} from '../../../src/api/environment.js';
+import { setupCinematic } from '../../../src/api/cinematic.js';
+import { setupAudio } from '../../../src/api/audio.js';
+import { capturePostcard } from '../../../src/api/export.js';
+import {
+  createRerollWave, createVillage, createVillageAsync,
+} from '../../../src/api/village.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
 import { buildWings, wingCount, buildNextWing, ghostSpec } from './expansion.js';
+import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
+import { createCinematicRuntime } from './cinematic-runtime.js';
+import { createPostRuntime } from './post-runtime.js';
+import { createSceneRuntime } from './scene-runtime.js';
+import { createViewShift } from './view-shift.js';
+import { createVillageCameraRuntime } from './village-camera-runtime.js';
 
 const DEG = Math.PI / 180;
 const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
@@ -58,17 +60,11 @@ const FOCUS_HOP_DUR = 1.5;             // 집(A)→집(B) 직접 전환(#95) —
 //   잔여 링크는 checkShaderErrors=false 로 논블록). 헤드리스(병렬컴파일 미지원)에선 compileAsync 가 즉시
 //   resolve 하므로 사실상 대기 없음(현행 타이밍 보존).
 const REVEAL_WARM_CAP_MS = 200;
-// 줌 연속체 임계(mode-integration §5.5 원칙 1) — 카메라↔필지(부감=화면중심 후보, 근접=focus 필지)
-// 거리를 부감 기준거리(aerialDist)에 대한 비율로 게이트. ENTER<EXIT 히스테리시스로 경계 왕복 떨림 방지.
-const ZOOM_ENTER_FRAC = 0.52;          // 줌인해 이 배율 이하로 가까워지면 자동 focus-in
-const ZOOM_EXIT_FRAC = 0.72;           // 줌아웃해 이 배율 이상 멀어지면 자동 focus-out
-
 export function createEngine({ container, perf = false, compact = false } = {}) {
   // 모바일 성능 프로파일. perf: 터치/좁은 뷰포트(폰·태블릿) → DoF off·그림자맵 하향.
   // compact: 폰급(최소변 ≤520) → pixelRatio 1.5·저해상 bloom(필레이트 절감). 데스크톱은 무변.
   const PR_CAP = compact ? 1.5 : 2;
   const SHADOW_SIZE = compact ? 1536 : perf ? 2048 : 4096;
-  const LOW_BLOOM = compact;   // bloom 내부 타깃 반해상도(저주파라 시각 손실 미미)
   // ---------- 이벤트 버스 (Svelte 로 상태 변화 통지) ----------
   const listeners = {};
   const emit = (ev, payload) => { (listeners[ev] || []).forEach((f) => f(payload)); };
@@ -84,55 +80,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   };
   let P = {}; // 현재 파라미터
 
-  // ---------- 렌더러 / 씬 ----------
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, PR_CAP));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;   // OutputPass 가 최종 1회 적용
-  renderer.toneMappingExposure = 1.05;
+  // ---------- 렌더러 / 씬 / 카메라 ----------
+  const { renderer, scene, sun, hemi, ground, camera, controls } = createSceneRuntime({
+    container,
+    pixelRatioCap: PR_CAP,
+    shadowSize: SHADOW_SIZE,
+  });
   // #128 전환 프리징 본체: three 는 신규 프로그램 첫 렌더(onFirstUse)마다 checkShaderErrors 가 켜져 있으면
   //   getProgramInfoLog + LINK_STATUS 를 조회해 GPU 링크 완료를 메인스레드에서 동기 대기한다(KHR_parallel_
   //   shader_compile 가 있어도 이 조회가 병렬성을 무력화). focus-out/in·hop 전환마다 대량 신규 프로그램이
   //   생겨 이 조회가 압도적 셀프타임(focus-out ~1.6s)이 된다. 부팅 초기 컴파일 동안은 true 로 두어 개발 중
   //   셰이더 에러 가시성을 보존하고(첫 마을 draw 로 공유 셰이더 코드가 전부 검증됨), 첫 마을 예열 완료 후
   //   retireShaderErrorCheck() 가 1회 false 로 플립해 이후 런타임 전환의 첫 렌더를 논블록으로 만든다.
-  renderer.debug.checkShaderErrors = true;
-  container.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xcfd8e0);
-  scene.fog = new THREE.Fog(0xcfd8e0, 60, 220);
-
-  const sun = new THREE.DirectionalLight(0xfff0dd, 2.6);
-  sun.position.set(30, 42, 26);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(SHADOW_SIZE, SHADOW_SIZE);
-  sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
-  sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
-  sun.shadow.bias = -0.0001;
-  sun.shadow.normalBias = 0.05;
-  scene.add(sun);
-  const hemi = new THREE.HemisphereLight(0xbdd0e4, 0x8a7a63, 0.9);
-  scene.add(hemi);
-
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(160, 48),
-    new THREE.MeshStandardMaterial({ color: 0xb5a893, roughness: 1 })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  // ---------- 카메라 / 컨트롤 ----------
-  const camera = new THREE.PerspectiveCamera(28, container.clientWidth / container.clientHeight, 0.1, 500);
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.maxPolarAngle = Math.PI / 2 - 0.02;
   // 감상 자동 회전(느린 궤도). 유휴일 때만 ease-in 으로 켜고, 조작·전환 중엔 정지.
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0;             // 매 프레임 램프로 제어(아래 루프)
+  // autoRotate 기본값은 scene-runtime 이 켜고, 속도는 매 프레임 아래 램프로 제어한다.
   const ORBIT_SPEED = 0.33;                 // ≈ 3분/바퀴 (autoRotateSpeed 2.0=30초 기준)
   const ORBIT_IDLE_MS = 9000;               // 유휴 후 재개까지(8~12초 범위)
   const ORBIT_RAMP_SEC = 2.6;               // ease-in 램프 시간
@@ -157,8 +118,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let shadowHot = 0;                      // performance.now() 이 값 미만이면 매 프레임 그림자 갱신
   const bumpShadow = (ms = 1800) => { shadowHot = Math.max(shadowHot, performance.now() + ms); };
 
+  const activityEvents = ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'];
   const markActivity = () => { lastActivity = performance.now(); };
-  for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) {
+  for (const ev of activityEvents) {
     addEventListener(ev, markActivity, { passive: true });
   }
 
@@ -196,27 +158,38 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let hoverParcel = null;     // 마을 호버 중 필지 id(하이라이트 토글 최소화)
   let lastHoverT = 0;         // 호버 레이캐스트 스로틀(~30Hz)
   let wheelAccum = 0;         // 편집 중 줌아웃 제스처 누적
+  let villageCamera;
 
-  // ---------- 시네마틱 데모 모드(#103·#112) ----------
-  //   마을 부감에서만 진입하는 자동 카메라 데모. 히어로 랜딩용 setupCinematic(위 cinematic)과 별개.
-  //   active 동안 OrbitControls 봉인 + 매 프레임 camera 를 직접 구동(위치·lookAt·fov). 종료 시
-  //   controls.target 을 마지막 lookAt 으로 인계 + 관성 리셋해 스냅 튐 없이 orbit 재개(#98 카메라 규약).
-  //     mode 'drone'  — dronepath.js 4패스. single=패스명이면 1회 완주 후 자동 종료, 아니면 체인 순환.
-  //     mode 'walk'   — walker.js 1인칭. autoStroll 기본 + 데스크톱 WASD/마우스 입력(input()).
-  const demo = {
-    active: false, mode: null,
-    paths: null, walker: null,
-    chain: [], chainIdx: 0, pass: null, t: 0, single: null,
-    lastLook: new THREE.Vector3(),
-    input: { fwd: 0, strafe: 0, yaw: 0, pitch: 0, run: false },
-    ambT: 0,                      // window.__ambLookahead 스로틀(초)
-  };
+  // 마을 드론·보행 데모는 독립 상태기계가 소유한다. 아래 콜백은 씬 전환 정책만 주입한다.
+  const demoRuntime = createCinematicRuntime({
+    camera,
+    cancelTween: () => { tween = null; },
+    controls,
+    village,
+    focusOutDuration: FOCUS_OUT_DUR,
+    clearHover: () => {
+      if (!hoverParcel) return;
+      village.handle?.highlightParcel(hoverParcel, false);
+      hoverParcel = null;
+    },
+    emit,
+    getAerial: () => villageAerial(),
+    markActivity,
+    reapplyVillageFog: () => reapplyVillageFog(),
+    returnFromFocus: () => villageReturn(),
+    setPostFocus,
+    setZoomRegime: (mode, distance) => setZoomRegime(mode, distance),
+    settleControls,
+    stopHeroDrive: () => cinematic.stop(),
+    tweenTo,
+  });
+  const demo = demoRuntime.state;
 
   function disposeGroup(g) {
     g.traverse((o) => { o.geometry?.dispose?.(); });
   }
 
-  function regenerate({ animateWings = false } = {}) {
+  function regenerate() {
     bumpShadow(1500);   // #140-A 단일건물 재생성: 원점 근처 지오 교체 → 그림자 갱신
     if (assembly) { assembly.skip(); assembly = null; }
     for (const w of wings) { w.assembly?.skip?.(); scene.remove(w.group); disposeGroup(w.group); }
@@ -230,7 +203,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (state.expansion > 1) {
       wings = buildWings(P, state.expansion).map((w) => {
         scene.add(w.group);
-        return { group: w.group, assembly: null, animate: animateWings };
+        return { group: w.group, assembly: null };
       });
     }
 
@@ -318,30 +291,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   nightGlowRef = setupNightGlow({ getBuilding: () => building });
 
   // ---------- 플래그십 후처리 (메인 룩) ----------
-  const post = setupPost({ renderer, scene, camera });
-  // 모바일(perf)은 DoF off — BokehPass 풀스크린 블러가 필레이트를 크게 먹는다. 돌리인 전환의
-  // dofPull 램프는 pass 비활성 시 무해(카메라 트윈만 유지). 데스크톱은 종전대로 ON.
-  post.setDof(!perf);
-  // 모바일(perf)은 렌즈 플레어 패스도 스킵 — 풀스크린 가산 패스 필레이트 절감(#67).
-  post.setFlareEnabled(!perf);
-  const dofOn = !perf;
-  // compact: bloom 내부 타깃 반해상도(저주파라 손실 미미, 필레이트 절감). setSize 뒤 재적용.
-  const applyBloomRes = (w, h) => { if (LOW_BLOOM) post.bloomPass.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1)); };
-  applyBloomRes(container.clientWidth, container.clientHeight);
-  // 호버 윤곽(먹선) — post 컴포저의 OutputPass 앞에 삽입.
-  const outline = new OutlinePass(
-    new THREE.Vector2(container.clientWidth, container.clientHeight), scene, camera
-  );
-  outline.edgeStrength = 2.2;                // 은은한 먹선 하이라이트
-  outline.edgeGlow = 0.0;
-  outline.edgeThickness = 1.0;
-  outline.pulsePeriod = 0;
-  outline.visibleEdgeColor.set('#2c2620');   // 먹색(보이는 실루엣만)
-  // 가려진(occluded) 실루엣은 그리지 않는다 — 검정=가산 0. (지형 뒤 기단 윤곽이
-  // 밝은 흰 선으로 누출되던 아티팩트 제거: OutlinePass 는 hidden 엣지를 항상 렌더하므로 색으로 소거.)
-  outline.hiddenEdgeColor.set('#000000');
-  outline.selectedObjects = [];
-  post.composer.insertPass(outline, post.composer.passes.length - 1);
+  // 모바일은 DoF/flare를 끄고, compact는 bloom 내부 타깃을 반해상도로 유지한다.
+  const postRuntime = createPostRuntime({
+    renderer,
+    scene,
+    camera,
+    width: container.clientWidth,
+    height: container.clientHeight,
+    perf,
+    compact,
+  });
+  const { post, outline, dofOn } = postRuntime;
 
   function reapplyEnvBase() {
     env.setTime(state.time); // sky.apply → fog/bg/exposure/조명
@@ -351,30 +311,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 카메라 프레이밍 ----------
-  function spotFor(name, L) {
-    const maxDim = Math.max(L.W + 4, L.D + 4, L.totalH);
-    const target = new THREE.Vector3(0, L.totalH * 0.42, 0);
-    const spots = {
-      'front': { az: 0, el: 7, r: 2.9 },
-      'three-quarter': { az: 38, el: 13, r: 3.0 },
-      'side': { az: 90, el: 8, r: 2.9 },
-      'roof': { az: 42, el: 36, r: 2.9 },
-      'closeup': { az: 42, el: -12, r: 0.76, ty: L.plateY + 0.8 },
-      'focus': { az: 34, el: 10, r: 2.35 },
-    };
-    const s = spots[name] || spots['three-quarter'];
-    if (s.ty !== undefined) target.y = s.ty;
-    const az = (s.az * Math.PI) / 180, el = (s.el * Math.PI) / 180;
-    const r = s.r * maxDim;
-    const pos = new THREE.Vector3(
-      target.x + r * Math.cos(el) * Math.sin(az),
-      target.y + r * Math.sin(el),
-      target.z + r * Math.cos(el) * Math.cos(az)
-    );
-    return { pos, target };
-  }
   function setAngle(name) {
-    const { pos, target } = spotFor(name, computeLayout(P));
+    const { pos, target } = buildingSpot(name, computeLayout(P));
     camera.position.copy(pos);
     controls.target.copy(target);
     controls.update();
@@ -382,18 +320,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // 선택/확장 포커스 프레이밍 — 마당(날개 포함) 전체가 들어오도록 확장 단계에 따라 넓힌다.
   function focusFraming() {
-    const L = computeLayout(P);
-    const exp = state.expansion;
-    const maxDim = Math.max(L.W + 4, L.D + 4, L.totalH) * (1 + 0.34 * (exp - 1));
-    const target = new THREE.Vector3(0, L.totalH * 0.42, exp > 1 ? L.D * 0.35 : 0);
-    const az = 34 * Math.PI / 180, el = (exp > 1 ? 17 : 11) * Math.PI / 180;
-    const r = (exp > 1 ? 2.55 : 2.35) * maxDim;
-    const pos = new THREE.Vector3(
-      target.x + r * Math.cos(el) * Math.sin(az),
-      target.y + r * Math.sin(el),
-      target.z + r * Math.cos(el) * Math.cos(az)
-    );
-    return { pos, target };
+    return expandedBuildingSpot(computeLayout(P), state.expansion);
   }
 
   // 카메라 트윈(선택 포커스·해제·마을 돌리인/아웃). 진행 중이면 매 프레임 lerp.
@@ -438,50 +365,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   레이캐스트(setFromCamera)·DoF 초점(거리)·FlarePass 태양 투영이 모두 같은 offset 행렬을 경유해
   //   자동 정합한다(별도 보정 불필요). cur/tgt 는 "피사체 화면 시프트 px": curX>0=오른쪽, curY>0=위.
   //   프러스텀 매핑은 offsetX=-curX(축 point NDC=+2·curX/W → 오른쪽), offsetY=+curY(NDC=+2·curY/H → 위).
-  const SHIFT_FRAC = 0.5;   // 가린 폭·높이의 절반 = 가시영역 정중앙(과하지 않게 상수로 조절)
-  const viewShift = { curX: 0, curY: 0, tgtX: 0, tgtY: 0, enabled: true, lastSample: 0, appliedX: NaN, appliedY: NaN };
-  // 오프셋 홀드 대상 — 시네마틱 리빌(데모·리롤 웨이브·히어로 조립/랜딩)은 패널이 없고 오프셋 0 을 유지해야
-  //   하므로 홀드한다. focus 전환 트윈(focus-in/out·hop)은 홀드하지 않는다(#135): 패널이 트윈 진행 k(onProgress
-  //   villageFocusMorph)로 함께 모프하므로 트윈 동안 오프셋을 라이브 목표까지 추종시켜 카메라·패널·투영 시프트가
-  //   한 모션으로 동시 안착한다(예전엔 트윈 내내 홀드→종료 후 tau≈0.18s 로 뒤늦게 미끄러지는 "띡" 발생). 순수 캡처
-  //   샷은 viewShift.enabled=false 라 별도 게이트로 0 홀드(픽셀 불변). 투영-only 라 lookAt/DoF/레이캐스트 자동정합(#124) 불침해.
-  function viewShiftBusy() { return !!(demo.active || village.wave || village.heroAsm || heroActive); }
-  // 실제 렌더된 패널 DOM 을 읽어 가린 영역(px)을 집계 → 시프트 목표 산출. 라이브 rect 라 열림/닫힘
-  //   CSS 트랜지션·시트 드래그·detent 전환·리사이즈/회전을 한 경로로 추종한다(패널별 상태 배선 불필요).
-  function sampleViewShiftTarget() {
-    if (typeof document === 'undefined') return;
-    const W = container.clientWidth || 1, H = container.clientHeight || 1;
-    let dx = 0, dy = 0;
-    for (const el of document.querySelectorAll('.ctxcard, .vcard, .panel, .sheet')) {
-      const r = el.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) continue;
-      if (el.classList.contains('sheet')) dy += Math.max(0, Math.min(H, H - r.top));       // 하단 시트 → 피사체 위로
-      else if (el.classList.contains('panel')) dx -= Math.max(0, Math.min(W, W - r.left)); // 우측 패널 → 피사체 왼쪽
-      else dx += Math.max(0, Math.min(W, r.right));                                        // 좌측 카드 → 피사체 오른쪽
-    }
-    const capX = W * 0.42, capY = H * 0.42;   // 극단 detent(수동 full)에서도 피사체가 화면 밖으로 밀리지 않게
-    viewShift.tgtX = Math.max(-capX, Math.min(capX, dx * SHIFT_FRAC));
-    viewShift.tgtY = Math.max(-capY, Math.min(capY, dy * SHIFT_FRAC));
-  }
-  function applyViewShift() {
-    const x = viewShift.curX, y = viewShift.curY;
-    if (Math.abs(x - viewShift.appliedX) < 0.2 && Math.abs(y - viewShift.appliedY) < 0.2) return;  // 무변화 재적용 스킵
-    viewShift.appliedX = x; viewShift.appliedY = y;
-    const W = container.clientWidth || 1, H = container.clientHeight || 1;
-    if (Math.abs(x) > 0.4 || Math.abs(y) > 0.4) camera.setViewOffset(W, H, -x, y, W, H);
-    else if (camera.view && camera.view.enabled) camera.clearViewOffset();
-  }
-  function updateViewShift(dt) {
-    if (!viewShift.enabled) { viewShift.curX = viewShift.curY = viewShift.tgtX = viewShift.tgtY = 0; applyViewShift(); return; }
-    if (!viewShiftBusy()) {
-      const now = performance.now();
-      if (now - viewShift.lastSample > 90) { viewShift.lastSample = now; sampleViewShiftTarget(); }   // ~11Hz 샘플(레이아웃 리드 비용 절감)
-      const a = 1 - Math.exp(-dt / 0.18);   // 프레임레이트 독립 지수 이징(팟 없음, tau≈0.18s)
-      viewShift.curX += (viewShift.tgtX - viewShift.curX) * a;
-      viewShift.curY += (viewShift.tgtY - viewShift.curY) * a;
-    }
-    applyViewShift();   // 연출 중에도 매 프레임 재적용(트윈 fov 변경이 부른 updateProjectionMatrix 뒤에 offset 유지)
-  }
+  // 데모·리롤·히어로 연출 중에는 홀드하고, focus 트윈 중에는 패널 모프와 함께 추종한다.
+  const viewShiftRuntime = createViewShift({
+    container,
+    camera,
+    isBusy: () => !!(demo.active || village.wave || village.heroAsm || heroActive),
+  });
+  const viewShift = viewShiftRuntime.state;
 
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
   function ensureAudio() {
@@ -545,10 +435,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-    post.setSize(w, h);
-    applyBloomRes(w, h);   // composer.setSize 가 bloom 을 풀해상도로 되돌리므로 재적용
-    outline.setSize(w, h);
-    viewShift.appliedX = NaN;   // #124: 새 뷰포트 dims 로 setViewOffset 재적용 강제(다음 updateViewShift)
+    postRuntime.resize(w, h);
+    viewShiftRuntime.invalidate();   // #124: 새 뷰포트 dims 로 setViewOffset 재적용 강제
   }
   addEventListener('resize', resizeAll);
 
@@ -688,12 +576,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #145 부감 z-fight: 카메라↔타깃 거리 종속 near 램프(부감=큰 near로 원거리 깊이정밀도 확보,
     //   근접=작은 near로 근경 클리핑 없음). 줌 연속체·트윈 중 매 프레임 부드럽게 추종(팝 없음).
     //   walk/drone(demo)은 자체 near(0.08) 관리라 제외. 변화 미미하면 updateProjectionMatrix 생략(정적 부감 무비용).
-    //   updateViewShift(applyViewShift) 직전에 둬 offset 재적용이 새 near 위에 얹힌다(#124 정합).
+    //   viewShiftRuntime.update 직전에 둬 offset 재적용이 새 near 위에 얹힌다(#124 정합).
     if (village.active && !demo.active) {
       const nn = villageNear();
       if (Math.abs(nn - camera.near) > 1e-3) { camera.near = nn; camera.updateProjectionMatrix(); }
     }
-    updateViewShift(dt);   // 뷰포트 중심 보정(#124) — 패널 점유 시 피사체를 가시영역 중심으로(투영만 시프트)
+    viewShiftRuntime.update(dt);   // 뷰포트 중심 보정(#124) — 투영만 시프트
     // #140-A 그림자 재렌더 게이트 — autoUpdate=false 캐시 모드에서만 관여(그 전엔 매 프레임 자동).
     if (shadowCacheOn) {
       // 무대/지오가 움직이는 프레임: 조립 낙하·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈.
@@ -714,6 +602,23 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // ---------- 호버/선택 (레이캐스트) ----------
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
+  villageCamera = createVillageCameraRuntime({
+    camera,
+    centerParcel: () => {
+      if (!village.handle) return null;
+      ndc.set(0, 0);
+      raycaster.setFromCamera(ndc, camera);
+      return village.handle.raycast(raycaster)?.parcelId || null;
+    },
+    container,
+    controls,
+    getHoverParcel: () => hoverParcel,
+    isBusy: () => !!(tween || village.transitioning || village.wave || village.heroAsm || demo.active),
+    onReturn: () => villageReturn(),
+    onSelect: (parcelId) => villageSelect(parcelId),
+    scene,
+    village,
+  });
   let hovering = false;
   function pick(clientX, clientY) {
     const rect = renderer.domElement.getBoundingClientRect();
@@ -850,133 +755,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 마을 모드 ----------
-  // 마을 외곽 실반경(#80) — 지형 반경(site.R)이 아니라 실제 집이 퍼진 반경으로 프레이밍해야 마을이
-  // 화면을 채운다. 필지 중심 최대거리 + 담/마당 여유(×1.12). 캐시(핸들당 1회).
-  // handle 인자: 웨이브 중 아직 승격 전인 새 핸들 기준 프레이밍(#144 규모 커밋 동반 재프레이밍)에 쓴다.
-  //   활성 핸들(village.handle)일 때만 __outerR 캐시를 읽고/쓴다 — 새 핸들은 캐시 비경유(스테일 방지).
-  function villageOuterR(handle = village.handle) {
-    if (handle === village.handle && village.__outerR != null) return village.__outerR;
-    const plan = handle.plan;
-    let r = (plan.site.bowlR || plan.site.R * 0.56);
-    for (const p of (plan.parcels || [])) {
-      const d = Math.hypot(p.center.x, p.center.z);
-      if (d > r) r = d;
-    }
-    const rr = r * 1.12;
-    if (handle === village.handle) village.__outerR = rr;
-    return rr;
-  }
-  // 마을 부감 프레이밍(#80) — 마을 외곽 원이 뷰포트 최소변의 ~72% 를 채우도록 거리 산출(규모 파생, 고정
-  // 상수 아님). 배산임수 실루엣(뒤 능선+하늘)은 타깃을 살짝 위·북으로 올려 상단에 남긴다. 자동 회전 중심.
-  const AERIAL_FILL = 0.72;    // 마을 외곽 지름이 최소변에서 차지할 비율
-  const AERIAL_FOV = 42;
-  const AERIAL_EL = 31 * DEG;  // 부감 앙각(능선 헤드룸 유지)
-  const AERIAL_AZ = 9 * DEG;
-  function villageAerial(handle = village.handle) {
-    const Rv = villageOuterR(handle);
-    const aspect = camera.aspect || (container.clientWidth / container.clientHeight) || 1.6;
-    // 실측 보정(shoot-entry-aerial): 부감 틸트(AERIAL_EL)·fov 에서 지면 중앙의 화면 수평 반폭 ≈ C·d·aspect.
-    // 두 종횡비(1.78·0.59)에서 C≈0.40 일치. 마을 지름(2Rv)이 최소변의 fill 을 채우도록 d 를 역산한다.
-    //   landscape(가로 넓음): 세로가 최소변이나 틸트로 세로가 압축돼 체감이 커지므로 수평 fill 목표는
-    //     조금 낮춰(0.60) 잡아 세로 체감 ~0.7 + 능선/하늘 상단 여백 확보. portrait: 가로가 최소변 → 0.70.
-    const C = 0.40;
-    const fill = aspect >= 1 ? 0.60 : 0.70;
-    let d = Rv / (C * fill * aspect);
-    village.aerialDist = d;   // 줌 연속체 임계 산출 기준(#92)
-    const target = new THREE.Vector3(0, Rv * 0.05, -Rv * 0.10);   // 살짝 위+북(능선/하늘 상단 여백)
-    const pos = new THREE.Vector3(
-      target.x + d * Math.cos(AERIAL_EL) * Math.sin(AERIAL_AZ),
-      target.y + d * Math.sin(AERIAL_EL),
-      target.z + d * Math.cos(AERIAL_EL) * Math.cos(AERIAL_AZ));
-    return { pos, target, fov: AERIAL_FOV };
-  }
-
-  // ── 줌 연속체(#92) — OrbitControls 줌을 상태별 거리 클램프로 제어 ──
-  //   'aerial': 부감. 줌아웃 상한은 부감거리 근처(더 못 뺌), 줌인 하한은 focus 진입 임계 살짝 아래
-  //             (임계에 도달하면 자동 focus-in 이 인계). 'focus': 근접. 줌인 하한은 근경 안쪽(집 살펴보기),
-  //             줌아웃 상한은 focus-out 임계 살짝 위(임계 도달 시 자동 focus-out 인계). 'lock': 전환/웨이브
-  //             중 줌 봉인.
-  function setZoomRegime(mode, closeupDist = 0) {
-    const a = village.aerialDist || 150;
-    if (mode === 'aerial') {
-      controls.enableZoom = true;
-      controls.minDistance = a * (ZOOM_ENTER_FRAC * 0.82);
-      controls.maxDistance = a * 1.06;
-    } else if (mode === 'focus') {
-      controls.enableZoom = true;
-      controls.minDistance = Math.max(1.2, closeupDist * 0.16);
-      controls.maxDistance = a * (ZOOM_EXIT_FRAC * 1.06);
-    } else {                       // lock
-      controls.enableZoom = false;
-    }
-  }
-  // 화면 중심(NDC 0,0) 필지 픽 — 부감 줌인 중 "지금 보고 있는 집" 후보를 뽑는다(스로틀).
-  function centerParcel() {
-    if (!village.handle) return null;
-    ndc.set(0, 0);
-    raycaster.setFromCamera(ndc, camera);
-    const hit = village.handle.raycast(raycaster);
-    return hit ? hit.parcelId : null;
-  }
-  // 부감 중심 후보 필지의 월드 중심까지 카메라 거리(줌 연속체 metric). 없으면 Infinity.
-  function parcelDist(parcelId) {
-    if (!parcelId || !village.handle) return Infinity;
-    const pr = village.handle.getPickProxies().find((p) => p.parcelId === parcelId);
-    return pr ? camera.position.distanceTo(pr.worldCenter) : Infinity;
-  }
-  // 매 프레임 줌 연속체 게이트(#92). 부감(미focus)에서 휠/핀치로 화면중심 후보 필지가 ENTER 임계 이내로
-  //   가까워지면 자동 focus-in(스냅 돌리 마무리). 근접(focus)에서 EXIT 임계 밖으로 멀어지면 자동 focus-out.
-  //   히스테리시스(ENTER<EXIT)로 경계 왕복 떨림 방지. 전환·웨이브·랜딩 중엔 게이트 정지(중복 트리거 차단).
-  function updateZoomContinuum() {
-    // 엔진 구동 카메라 트윈(진입·부감·focus·setOpts·reroll) 중엔 정지 — 그때는 dist 가 목표를 향해
-    // 흐르는 중이라(진입 초기엔 근접) 오작동 트리거가 난다. 사용자 줌(OrbitControls dolly)은 tween 을
-    // 만들지 않으므로 게이트 통과 → 실사용 연속체만 반응한다.
-    if (!village.active || tween || village.transitioning || village.wave || village.heroAsm || demo.active) return;
-    const a = village.aerialDist || 0;
-    if (a <= 0) return;
-    if (!village.selected) {
-      // 부감: 화면중심 후보 필지(스로틀) → ENTER 임계 이내면 자동 focus-in.
-      const now = performance.now();
-      if (now - village.lastCenterT > 90) {
-        village.lastCenterT = now;
-        const cand = centerParcel();
-        if (cand !== village.zoomCand) {
-          if (village.zoomCand && village.zoomCand !== hoverParcel) village.handle.highlightParcel(village.zoomCand, false);
-          village.zoomCand = cand;
-        }
-      }
-      const cand = village.zoomCand;
-      if (!cand) return;
-      const d = parcelDist(cand);
-      // 후보가 화면중심에 잡히고 부감보다 눈에 띄게 가까워졌을 때만 후보 하이라이트(줌인 피드백).
-      if (d < a * (ZOOM_ENTER_FRAC + 0.28) && cand !== hoverParcel) village.handle.highlightParcel(cand, true);
-      if (d < a * ZOOM_ENTER_FRAC) { village.zoomCand = null; villageSelect(cand); }
-    } else {
-      // 근접: focus 필지에서 EXIT 임계 밖으로 멀어지면 자동 focus-out.
-      const d = camera.position.distanceTo(controls.target);
-      if (d > a * ZOOM_EXIT_FRAC) villageReturn();
-    }
-  }
-  // #145 부감 z-fight: 원거리 깊이버퍼 분해능은 near/far 비가 지배(1/near 항 지배, far 축소는 무효).
-  //   마을 모드 near 를 카메라↔타깃 거리 종속으로 — 부감(먼 거리)일수록 near 를 키워 촘촘한 집 켜(기단
-  //   단·갑석)·성곽·능선 주름의 z-fighting 플리커를 없애고(capital −62%·hanyang −85% 실측), 근접(focus)
-  //   으로 좁혀 들어오면 near 를 작게 되돌려 근경 클리핑이 없다. 거리 종속이라 줌 연속체 전환 중 near 가
-  //   부드럽게 램프(팝 없음). walk/drone(demo)은 자체 near(0.08) 관리라 렌더 루프 게이트에서 제외한다.
-  const VNEAR_FRAC = 0.02, VNEAR_MIN = 0.08, VNEAR_MAX = 2.5;
-  function villageNear() {
-    const d = camera.position.distanceTo(controls.target);
-    return Math.min(VNEAR_MAX, Math.max(VNEAR_MIN, d * VNEAR_FRAC));
-  }
-
-  // 마을은 규모가 커 단일건물용 fog(near55~ far500)·camera.far(500)로는 원경이 잘리거나 안개에 먹힌다.
-  // env.setTime 이 fog 를 되돌리므로 시간·날씨 전환 뒤 항상 이걸로 R 비례 값을 덮어쓴다.
-  function reapplyVillageFog() {
-    if (!village.active || !village.handle) return;
-    const R = village.handle.plan.site.R;
-    if (scene.fog) { scene.fog.near = R * 2.2; scene.fog.far = R * 7.0; }
-    camera.far = R * 8; camera.near = villageNear();   // #145 거리 종속(부감 z-fight)
-    camera.updateProjectionMatrix();
-  }
+  const villageOuterR = (handle = village.handle) => villageCamera.outerRadius(handle);
+  const villageAerial = (handle = village.handle) => villageCamera.aerial(handle);
+  const setZoomRegime = (mode, closeupDist = 0) => villageCamera.setRegime(mode, closeupDist);
+  const updateZoomContinuum = () => villageCamera.updateContinuum();
+  const villageNear = () => villageCamera.near();
+  const reapplyVillageFog = () => villageCamera.reapplyFog();
 
   // 배율별 후처리(mode-integration §5): 마을 부감은 RimPass(매 프레임 씬 노멀 재렌더)가 도성 규모에서
   // 60fps 위험이라 OFF. focus-in(집 근접)·단일건물 씬은 ON. rim OFF 시 FlarePass 가림 판정이 스테일
@@ -990,118 +774,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     post.setDof?.(focused && !perf);
   }
 
-  // ---------- 시네마틱 데모 모드 — 진입/구동/종료 ----------
-  // 진입 가능(마을 활성 + 전환·웨이브·랜딩 조립 없음). App 이 버튼 노출 판단에 조회.
-  function cineAvailable() {
-    return !!(village.active && village.handle && !village.wave && !village.heroAsm && !village.transitioning);
-  }
-  // 드론 패스 4종을 현 마을 plan·site 로 생성. focus 오버레이가 없는 부감 기준(장애물=필지 지붕 추정).
-  function makeDronePaths() {
-    const plan = village.handle.plan, site = plan.site;
-    return createDronePaths({ site, plan, heightAt: (x, z) => site.heightAt(x, z), seed: village.seed });
-  }
-  // 오토플레이 체인 순서(트윗 클립): 진입 크레인 → 랜드마크 선회 → 골목 비행 → 당김 엔딩. 패스 간 컷.
-  const DRONE_CHAIN = ['crane-in', 'landmark-orbit', 'street-flythrough', 'pullback-reveal'];
-
-  function startDemo(mode = 'drone', opts = {}) {
-    if (!cineAvailable()) return false;
-    // focus 중 진입은 부감 복귀 후 시작(부감 기준 패스). transitioning 중이면 cineAvailable 이 이미 차단.
-    if (village.selected) {
-      villageReturn();
-      setTimeout(() => { if (cineAvailable() && !village.selected) startDemo(mode, opts); }, FOCUS_OUT_DUR * 1000 + 140);
-      return true;
-    }
-    tween = null;                       // 진행 중 엔진 트윈 정리(있다면)
-    cinematic.stop();                   // 히어로 reveal 카메라(혹시 활성) 정지
-    if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
-    village.zoomCand = null;
-    demo.mode = mode; demo.active = true; demo.ambT = 0;
-    demo.input.fwd = demo.input.strafe = demo.input.yaw = demo.input.pitch = 0; demo.input.run = false;
-    controls.enabled = false;           // OrbitControls 봉인(휠·드래그 무시)
-    setPostFocus(false);                // 부감 룩(rim/flare/dof off) — 드론은 전경·원경을 오가므로 부감 후처리
-    reapplyVillageFog();                // 마을 규모 fog·far 보장(focus 잔여 클램프 해제)
-    const plan = village.handle.plan, site = plan.site;
-    if (mode === 'walk') {
-      demo.walker = createWalker({ site, plan, heightAt: (x, z) => site.heightAt(x, z) });
-      demo.walker.startAutoStroll();
-      camera.near = 0.08; camera.updateProjectionMatrix();   // 1인칭 근접 클리핑
-      demo.pass = null; demo.chain = []; demo.single = null;
-    } else {
-      demo.paths = makeDronePaths();
-      const byName = Object.fromEntries(demo.paths.map((p) => [p.name, p]));
-      if (opts.pass && byName[opts.pass]) { demo.chain = [byName[opts.pass]]; demo.single = opts.pass; }
-      else { demo.chain = DRONE_CHAIN.map((n) => byName[n]).filter(Boolean); demo.single = null; }
-      demo.chainIdx = 0; demo.pass = demo.chain[0]; demo.t = 0;
-    }
-    markActivity();                     // orbit 유휴 타이머 리셋(종료 직후 즉시 자동회전 재개 방지)
-    emit('cinematic', { active: true, mode, pass: demo.pass ? demo.pass.name : null, index: 0 });
-    return true;
-  }
-
-  // 매 프레임 구동(렌더 루프). 카메라 위치·시선·fov 를 데모 소스로 덮고 lastLook 을 인계용으로 보존한다.
-  function updateDemo(dt) {
-    let lookAt;
-    if (demo.mode === 'walk') {
-      const { pos, dir } = demo.walker.update(dt, demo.input);
-      camera.position.copy(pos);
-      lookAt = pos.clone().add(dir);
-    } else {
-      const p = demo.pass;
-      if (!p) return;
-      demo.t += dt / p.duration;
-      if (demo.t >= 1) {
-        if (demo.single) { stopDemo(); return; }             // 단일 패스: 완주 후 orbit 인계
-        demo.t = 0;                                           // 체인: 다음 패스로 컷
-        demo.chainIdx = (demo.chainIdx + 1) % demo.chain.length;
-        demo.pass = demo.chain[demo.chainIdx];
-        emit('cinematic', { active: true, mode: 'drone', pass: demo.pass.name, index: demo.chainIdx });
-      }
-      const s = demo.pass.sample(clamp01(demo.t));
-      camera.position.copy(s.pos);
-      if (s.fov != null && Math.abs(camera.fov - s.fov) > 1e-3) { camera.fov = s.fov; camera.updateProjectionMatrix(); }
-      lookAt = s.lookAt;
-    }
-    // 매 프레임 lookAt 필수(안 하면 방향 동결 → 종료 스냅). controls.target 도 동기화해 weather/DoF 앵커·인계 정합.
-    camera.lookAt(lookAt);
-    demo.lastLook.copy(lookAt);
-    controls.target.copy(lookAt);
-    // 앰비언스 프리워밍 훅(다른 에이전트 병렬 구현) — 경로 ~2.5s 앞 지점을 매초 1회. 없으면 조용히 무시.
-    demo.ambT += dt;
-    if (demo.ambT >= 1) {
-      demo.ambT = 0;
-      const hook = typeof window !== 'undefined' && window.__ambLookahead;
-      if (typeof hook === 'function') {
-        let ax, az;
-        if (demo.mode === 'walk') { ax = camera.position.x + (lookAt.x - camera.position.x); az = camera.position.z + (lookAt.z - camera.position.z); }
-        else { const a = demo.pass.sample(clamp01(demo.t + 2.5 / demo.pass.duration)); ax = a.pos.x; az = a.pos.z; }
-        try { hook(ax, az); } catch {}
-      }
-    }
-  }
-
-  function stopDemo() {
-    if (!demo.active) return;
-    demo.active = false;
-    const wasWalk = demo.mode === 'walk';
-    demo.mode = null; demo.pass = null; demo.walker = null; demo.chain = []; demo.single = null;
-    controls.enabled = true;
-    reapplyVillageFog();                 // near 등 1인칭 클리핑 복원(camera.near=0.12)
-    // 종료 인계: 현 시선(demo.lastLook)에서 부감 개관으로 부드럽게 복귀(트윈). 트윈 시작점 t0=lastLook 라
-    //   방향이 연속(스냅 튐 없음)하고, 도착 시 카메라가 부감 거리라 줌 연속체가 오작동 focus-in 하지 않는다
-    //   (드론이 지붕 위 저고도로 끝나도 안전). 트윈 종료 시 loop 가 settleControls 로 관성 리셋 → orbit 재개.
-    if (village.active && village.handle) {
-      controls.target.copy(demo.lastLook);
-      const f = villageAerial();
-      setPostFocus(false);
-      tweenTo(f.pos, f.target, wasWalk ? 1.3 : 1.0, { fov: f.fov, onDone: () => setZoomRegime('aerial') });
-    } else {
-      controls.target.copy(demo.lastLook);
-      camera.lookAt(controls.target);
-      settleControls();
-    }
-    markActivity();
-    emit('cinematic', { active: false });
-  }
+  // ---------- 시네마틱 데모 모드 — 독립 runtime으로 위임 ----------
+  const cineAvailable = () => demoRuntime.available();
+  const startDemo = (mode = 'drone', opts = {}) => demoRuntime.start(mode, opts);
+  const updateDemo = (dt) => demoRuntime.update(dt);
+  const stopDemo = () => demoRuntime.stop();
 
   // 시드·옵션 → 캐시 키(코어 내부 구조 불결합, 직렬화만).
   function villageKey(opts, seed) {
@@ -1930,14 +1607,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (step === state.expansion) return;
       const growing = step > state.expansion;
       state.expansion = step;
-      // 본채·기존 날개는 유지, 재생성 후 새 날개만 애니메이션.
-      const prevWingGroups = wings.map((w) => w.group);
-      const prevBuilding = building;
-      // 부분 재구성: 본채/기존 날개를 없애지 않고 새 날개만 추가하려면 buildWings 를
-      // 전체로 다시 만들되, 이미 존재하던 그룹은 즉시 완성 상태로 둔다.
+      // 전체를 새 구성으로 교체하되, 확장할 때는 새 마지막 날개만 조립 애니메이션을 준다.
       regenerate();
       building.visible = true;
-      building.traverse(() => {});
       if (growing) {
         // 마지막(새) 날개만 조립 애니메이션(두부), 앞 날개는 즉시 완성.
         wings.forEach((w, i) => {
@@ -1951,7 +1623,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       audio?.setLayout(computeLayout(P));
       if (state.selected) { const f = focusFraming(); tweenTo(f.pos, f.target, 0.9); refreshGhost(); }
       emit('state', { ...state });
-      void prevWingGroups; void prevBuilding;
     },
     merge,
     maxExpansion: () => wingCount(state.preset) + 1,
@@ -2181,14 +1852,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         camera.lookAt(controls.target); controls.update();
         return +camera.position.distanceTo(controls.target).toFixed(1);
       },
-      debugContinuum: () => ({
-        active: village.active, selected: village.selected, transitioning: village.transitioning,
-        wave: !!village.wave, zoomCand: village.zoomCand,
-        aerialDist: +(village.aerialDist || 0).toFixed(1),
-        dist: +camera.position.distanceTo(controls.target).toFixed(1),
-        enterDist: +((village.aerialDist || 0) * ZOOM_ENTER_FRAC).toFixed(1),
-        exitDist: +((village.aerialDist || 0) * ZOOM_EXIT_FRAC).toFixed(1),
-      }),
+      debugContinuum: () => villageCamera.debugContinuum(),
       // 검증용(#95·#145): 카메라 고도·타깃·거리·near — A→B 전환 중 고도 튐 계측 + 거리종속 near 램프 확인.
       debugCamera: () => ({
         y: +camera.position.y.toFixed(1), targetY: +controls.target.y.toFixed(1),
@@ -2217,8 +1881,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const filename = `cheoma-${state.preset}-${state.seed}.png`;
       const url = capturePostcard(renderer, renderFrame, { title: 'cheoma', filename, download });
       if (bump) { renderer.setPixelRatio(prev); resizeAll(); }
-      if (restoreView) viewShift.appliedX = NaN;   // 오프셋 복원 강제(appliedX 리셋 → applyViewShift 재적용)
-      applyViewShift();
+      if (restoreView) viewShiftRuntime.invalidate();
+      viewShiftRuntime.apply();
       renderFrame();
       return url;
     },
@@ -2301,24 +1965,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       isActive: () => demo.active,
       available: () => cineAvailable(),
       // 1인칭 데스크톱 입력 피드(WASD/마우스). walk 모드일 때만 반영. { fwd, strafe, yaw, pitch, run }.
-      input: (partial = {}) => { if (demo.active && demo.mode === 'walk') Object.assign(demo.input, partial); },
+      input: (partial = {}) => demoRuntime.input(partial),
       // autoStroll 토글(walk) — 수동 조작 시 자동산책 중지. 다시 켜면 경로 복귀.
-      setAutoStroll: (on) => { if (demo.walker) { on ? demo.walker.startAutoStroll() : demo.walker.stopAutoStroll(); } },
-      getState: () => ({
-        active: demo.active, mode: demo.mode,
-        pass: demo.pass ? demo.pass.name : null, index: demo.chainIdx,
-        chain: demo.chain.map((p) => p.name), single: demo.single, t: +demo.t.toFixed(3),
-      }),
+      setAutoStroll: (on) => demoRuntime.setAutoStroll(on),
+      getState: () => demoRuntime.getState(),
       // 검증용: 드론 패스 목록·duration.
-      passList: () => (village.handle ? makeDronePaths().map((p) => ({ name: p.name, kind: p.kind, duration: p.duration })) : []),
+      passList: () => demoRuntime.passList(),
       // 검증용: 현재 드론 패스를 강제 완주(다음 프레임 전환/종료) — 긴 duration 대기 없이 체인 전이 관찰.
-      debugAdvance: () => { if (demo.active && demo.mode === 'drone') demo.t = 1; },
+      debugAdvance: () => demoRuntime.debugAdvance(),
       // 검증용: walker 접지·경계·충돌(1인칭 히트박스 단언).
-      debugWalker: () => (demo.walker ? {
-        clearance: +demo.walker.groundClearance().toFixed(3), eyeHeight: demo.walker.eyeHeight,
-        colliding: demo.walker.isColliding(), outside: demo.walker.outsideBoundary(),
-        pos: { x: +demo.walker.pos.x.toFixed(2), y: +demo.walker.pos.y.toFixed(2), z: +demo.walker.pos.z.toFixed(2) },
-      } : null),
+      debugWalker: () => demoRuntime.debugWalker(),
       // 검증용: 현재 카메라 pos/quat 유한성·시선(종료 인계 각도 연속성 계측).
       debugCam: () => ({
         pos: { x: +camera.position.x.toFixed(2), y: +camera.position.y.toFixed(2), z: +camera.position.z.toFixed(2) },
@@ -2332,17 +1988,24 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     resize: resizeAll,
     // 뷰포트 중심 보정 마스터 토글(#124) — App 이 !shot 로 설정. shot·검증 하네스는 오프셋 0(픽셀 불변).
-    setViewShiftEnabled(b) { viewShift.enabled = !!b; if (!b) { viewShift.curX = viewShift.curY = viewShift.tgtX = viewShift.tgtY = 0; applyViewShift(); } },
+    setViewShiftEnabled: (enabled) => viewShiftRuntime.setEnabled(enabled),
     renderer, scene, camera,
     __controls: controls,   // 검증용: 프레임 단위 controls.target 샘플링
     dispose() {
-      demo.active = false;
+      demoRuntime.dispose();
       renderer.setAnimationLoop(null);
       removeEventListener('resize', resizeAll);
+      for (const ev of activityEvents) removeEventListener(ev, markActivity);
       focusRing.clear();
       if (village.handle) { village.handle.exitVillageMode({ scene, building, ground, env }); village.handle.dispose(); village.handle = null; }
       if (village.cache.handle) { village.cache.handle.dispose(); village.cache = { key: null, handle: null }; }
       renderer.dispose();
+      if (typeof window !== 'undefined' && window.__engine === controller) {
+        delete window.__engine;
+        delete window.__viewshift;
+        delete window.__hero;
+        delete window.__asm;
+      }
     },
   };
 

@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import * as G from './geom.js';
+import { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 import { toneOf } from './variants.js';
+
+export { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
+
+const M4 = () => new THREE.Matrix4();
 
 // 부위(role)별 톤 선택(#55): parcel 의 부위별 곱틴트(roofTone/wallTone/woodTone/stoneTone)에서 고른다.
 //   미지정(레거시 parcel·부위 톤 없음)이면 단일 톤(toneOf(toneIdx))로 하위호환. role 없음(개구부 등)=중립.
@@ -26,26 +30,6 @@ function roleTone(kind, parcel, role) {
 //   두 경로 모두 드로우콜을 "재질 수" 규모로 눌러 CPU 병목을 제거한다(레스터 삼각형 수는 동일).
 //
 // 픽킹·편집은 인스턴스 매트릭스 은닉(hide)로 개별성 유지 — 프록시 레이캐스트는 adapter.js.
-
-const M4 = () => new THREE.Matrix4();
-// 배치 회전 = 정면(frontDir) + yaw 지터(±수도). 집·담·프록시가 모두 같은 각으로 앉게 공유.
-export function parcelRotY(parcel) { return G.facingY(parcel.frontDir) + (parcel.yaw || 0); }
-// 집 본체 배치 변환: T(중심,지면) · Ry(정면+yaw) · T(0,0,back) · S(변주 스케일). placeParcel 과 픽셀 동일.
-//   S 는 마지막(로컬 지오 스케일) — back 오프셋은 스케일 영향 없음.
-export function houseMatrix(parcel) {
-  const back = -parcel.plotD / 2 + (parcel.kind === 'giwa' ? 5.2 : 3.4);
-  const t1 = M4().makeTranslation(parcel.center.x, parcel.baseY || 0, parcel.center.z);
-  const r = M4().makeRotationY(parcelRotY(parcel));
-  const t2 = M4().makeTranslation(0, 0, back);
-  const s = M4().makeScale(parcel.sx || 1, parcel.sy || 1, parcel.sz || 1);
-  return t1.multiply(r).multiply(t2).multiply(s);
-}
-// 필지 그룹(담·마당) 배치 변환: T(중심,지면) · Ry(정면+yaw). 담은 필지 치수에 맞으므로 스케일 제외.
-export function parcelMatrix(parcel) {
-  const t1 = M4().makeTranslation(parcel.center.x, parcel.baseY || 0, parcel.center.z);
-  const r = M4().makeRotationY(parcelRotY(parcel));
-  return t1.multiply(r);
-}
 
 // 지오메트리를 병합 가능한 균일 레이아웃으로 정규화: non-indexed + position/normal/uv(+color).
 // keepColor 는 vertexColors 재질일 때만(그 외 color 는 렌더에 안 쓰이므로 제거해 병합 충돌 방지).

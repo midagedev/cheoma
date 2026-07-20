@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 // 결정론적 바람 필드 — 비·눈·낙엽 파티클과 나무 흔들림이 "같은 바람"에 함께 반응하게 하는
 // 단일 소스. Math.random 을 쓰지 않고 시간 t 의 사인/밸류노이즈 합성만 사용하므로 shot 재현성이
 // 보장된다(같은 t → 같은 바람).
@@ -48,9 +49,5 @@ export function getWind(t) {
   return { dirX: Math.cos(angle), dirZ: Math.sin(angle), speed, gust: gust * scale, angle };
 }
 
-function smoothstep(a, b, x) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-}
 
 export { TAU };

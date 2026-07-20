@@ -4,7 +4,7 @@ import { makeRng } from '../rng.js';
 import { parcelMatrix } from './instancing.js';
 import { YARD_SPECIES } from './variants.js';
 import { buildParcelLanternGeo, getLanternMaterials, lanternStyleFor } from '../layout/props.js';
-import * as G from './geom.js';
+import * as G from '../core/math/geom2.js';
 
 // 마당 과실수 · 반가 정원 · 마을 보호수(당산나무) — 태스크 #41 (docs Q4·Q5, R-G1/R-G2/R-T1).
 //   buildVillageFlora(plan, site, seed) → { group, setSeason(name), guardianAnchors, yardTreeAnchors, drawCalls }

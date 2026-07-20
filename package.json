@@ -1,7 +1,16 @@
 {
   "name": "cheoma-tools",
   "private": true,
+  "type": "module",
   "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
+  "scripts": {
+    "check": "node tools/check-fast.mjs",
+    "check:all": "npm run check && npm run check:app && npm run check:worker",
+    "check:app": "node tools/check-app-smoke.mjs",
+    "check:architecture": "node tools/check-architecture.mjs",
+    "check:plan": "node tools/check-plan-contract.mjs",
+    "check:worker": "node tools/check-worker-contract.mjs"
+  },
   "devDependencies": {
     "playwright": "1.61.1"
   }

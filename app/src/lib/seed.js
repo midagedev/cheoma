@@ -1,7 +1,7 @@
 // 씨앗(seed) → 결정적 마을 설정. 같은 seed 는 항상 같은 건물·환경을 재현한다
 // (?seed= 공유 시 동일 결과). main.js 의 surpriseMe 큐레이션을 계승하되 Date.now 대신
 // seed 로 완전히 결정적으로 만든다.
-import { PRESETS } from '../../../src/params.js';
+import { PRESETS } from '../../../src/api/building.js';
 
 // 유형 탭 ↔ 프리셋 키 매핑. (궁=korea, 절=temple, 기와집=giwa, 초가=choga)
 export const TYPES = [

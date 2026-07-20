@@ -1,52 +1,12 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
-import { makeRng } from '../rng.js';
 import { makeWorldEdge } from './worldedge.js';
+import { createValueNoise2D } from '../core/math/value-noise2.js';
 import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
   CLOUD_SHADOW_VERT_DECL, CLOUD_SHADOW_VERT_BODY,
 } from './clouds.js';
 
-// 시드 value-noise (2D). 격자점 해시 → 스무스 보간. fBm은 옥타브 합.
-function makeNoise2D(seed) {
-  const rng = makeRng(seed);
-  const perm = new Uint8Array(512);
-  const base = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) base[i] = i;
-  for (let i = 255; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const t = base[i]; base[i] = base[j]; base[j] = t;
-  }
-  for (let i = 0; i < 512; i++) perm[i] = base[i & 255];
-  const lattice = (ix, iz) => {
-    const h = perm[(perm[ix & 255] + iz) & 255];
-    return h / 255 * 2 - 1;           // -1..1
-  };
-  const smooth = (t) => t * t * (3 - 2 * t);
-  const noise = (x, z) => {
-    const x0 = Math.floor(x), z0 = Math.floor(z);
-    const fx = x - x0, fz = z - z0;
-    const v00 = lattice(x0, z0), v10 = lattice(x0 + 1, z0);
-    const v01 = lattice(x0, z0 + 1), v11 = lattice(x0 + 1, z0 + 1);
-    const sx = smooth(fx), sz = smooth(fz);
-    const a = v00 + (v10 - v00) * sx;
-    const b = v01 + (v11 - v01) * sx;
-    return a + (b - a) * sz;
-  };
-  const fbm = (x, z, oct = 4) => {
-    let sum = 0, amp = 0.5, freq = 1, norm = 0;
-    for (let o = 0; o < oct; o++) {
-      sum += amp * noise(x * freq, z * freq);
-      norm += amp; amp *= 0.5; freq *= 2.03;
-    }
-    return sum / norm;               // -1..1
-  };
-  return { noise, fbm };
-}
-
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 // sRGB hex → 선형 THREE.Color (vertexColors 속성은 선형값을 기대)
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
@@ -67,7 +27,7 @@ export function buildTerrain({
   seed = 424242, clearance = 18,
   cloudUniforms = null, edgeStyle = 'mist', getHaze = null,
 } = {}) {
-  const { fbm } = makeNoise2D(seed);
+  const { fbm } = createValueNoise2D(seed, { signed: true });
   const R = 152;                     // 마당+언덕 반경(평균) — 유기적 외곽선의 기준 반경
   const flatEnd = clearance + 6;     // 여기까지 완전 평탄
   const maxRise = 13;                // 완만한 언덕 (능선이 뒤로 보이도록 낮게)

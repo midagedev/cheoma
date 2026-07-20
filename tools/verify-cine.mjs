@@ -13,11 +13,12 @@ import { createServer } from 'node:http';
 import { resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
 
-const require = createRequire(import.meta.url);
-const esbuild = require('esbuild');
-const { chromium } = require('playwright');
-
 const ROOT = resolve(import.meta.dirname, '..');
+const requireApp = createRequire(join(ROOT, 'app', 'package.json'));
+const requireRoot = createRequire(join(ROOT, 'package.json'));
+const esbuild = requireApp('esbuild');
+const { chromium } = requireRoot('playwright');
+
 const PORT = 4219;
 const threeMain = join(ROOT, 'app/node_modules/three/build/three.module.js');
 const threeAddons = join(ROOT, 'app/node_modules/three/examples/jsm/');
@@ -32,9 +33,8 @@ const threeAlias = {
 };
 
 const ENTRY = `
-import { createVillage } from './src/village/adapter.js';
-import { createDronePaths, buildObstacles, roofTopAt } from './src/cinematic/dronepath.js';
-import { createWalker } from './src/cinematic/walker.js';
+import { createVillage } from './src/api/village.js';
+import { createDronePaths, buildObstacles, createWalker, roofTopAt } from './src/api/cinematic.js';
 
 const RAD2DEG = 180 / Math.PI;
 function dirOf(p, l){ const dx=l.x-p.x, dy=l.y-p.y, dz=l.z-p.z; const m=Math.hypot(dx,dy,dz)||1; return [dx/m,dy/m,dz/m]; }

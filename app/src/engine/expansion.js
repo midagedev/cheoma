@@ -5,8 +5,7 @@
 //  개별 애니메이션 불가 → 튼ㄱ자·튼ㄷ자 배치로 표현. 보고서의 코어 훅 참조.)
 
 import * as THREE from 'three';
-import { computeLayout } from '../../../src/params.js';
-import { buildBuilding } from '../../../src/builder/index.js';
+import { buildBuilding, computeLayout } from '../../../src/api/building.js';
 
 // 확장 가능한(격자) 프리셋의 최대 날개 수. giwa 는 이미 ㄱ자 단일 동이라 확장 대상 아님.
 const WING_MAX = { korea: 2, temple: 2, choga: 2, giwa: 0 };

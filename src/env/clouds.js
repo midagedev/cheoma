@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 
 // 산 구름·물안개 + 흐르는 구름 그림자 (태스크 #51 축② → #68 재설계로 형태·대응 강화).
@@ -19,10 +20,6 @@ const q = typeof location !== 'undefined' ? new URLSearchParams(location.search)
 const SHOT = q.get('shot') === '1';
 const CLOUDS_ON = q.get('clouds') !== '0';
 
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 // 지형/지면 재질이 공유하는 구름 그림자 uniform. index.js 가 만들어 buildTerrain 과 setupClouds
 // 양쪽에 넘긴다(물 uniform 공유 패턴과 동일). 값은 setupClouds.update 가 매 프레임 갱신.

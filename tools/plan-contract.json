@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "baselineCommit": "5ca668e",
+  "seed": 20260716,
+  "cases": {
+    "hamlet:base": {
+      "hash": "458375ff0c57721b8b47184337106eb6eab147650b78deabb8f77fa37cf990ec",
+      "bytes": 26537
+    },
+    "village:base": {
+      "hash": "c9f05ccded26fba051b435f30bc74071636593b4b3e719f0816157ded9f3ad88",
+      "bytes": 66850
+    },
+    "town:base": {
+      "hash": "650704d0c2c92b5e37fddb623a906cb154a0b21b10f363da821f807d095c0d62",
+      "bytes": 110675
+    },
+    "capital:base": {
+      "hash": "7b43c8d6ec545730fb2613ee9f4ef72f8860ec2223db806a71ee22b2e75063cb",
+      "bytes": 113420
+    },
+    "hanyang:base": {
+      "hash": "bb3b368bb5171faf756e60f7ac961d76731db9c3bb6126b868d3b415f9c8daba",
+      "bytes": 695252
+    },
+    "hamlet:temple": {
+      "hash": "1e321bd82ff0ebafeaf1fbac4e39d87d4eb124c07e2f6f4ac6aa1a24992fdcf1",
+      "bytes": 26655
+    },
+    "village:temple": {
+      "hash": "bbe175a6d9995b60e6744b2fc9c1e43886a8fc7b0665aa4693d5a56268026ccd",
+      "bytes": 66969
+    },
+    "town:temple": {
+      "hash": "27574576d628f762be1748f955fb2a54c8d176d01cf51ba237dafc03f60921e4",
+      "bytes": 110793
+    },
+    "capital:temple": {
+      "hash": "96d724d3457c5abbc3ced848674e94b18d49b4c9b0ee0d5a2be19b875cc1f301",
+      "bytes": 113538
+    },
+    "hanyang:temple": {
+      "hash": "c2a93a1d3046db650d3c1a32981ddf745aec8abb59065f0d701f86dea9bbcdb0",
+      "bytes": 695369
+    }
+  }
+}

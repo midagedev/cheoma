@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
@@ -163,10 +164,6 @@ function makeCherry(seed) {
   });
 }
 
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 // 절차 수목 배치. heightAt으로 표면에 앉히고, rejection sampling으로 최소거리 유지.
 // 건물 반경(clearance) 밖, 전면 진입로는 비우고 뒤편 언덕을 밀도 높게.

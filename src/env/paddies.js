@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { injectWaterLook, createWaterUniforms } from './water.js';
 
@@ -13,10 +14,6 @@ import { injectWaterLook, createWaterUniforms } from './water.js';
 //   겨울(weather=snow): weather.js 적설 traverse 가 논면(상향)을 덮음(별도 처리 불요)
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 // 계절별 목표: 논면색·논둑색·이랑강도·물강도·붉은기
 const TARGET = {

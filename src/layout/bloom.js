@@ -1,8 +1,9 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
-import { parcelMatrix } from '../village/instancing.js';
-import * as G from '../village/geom.js';
+import { parcelMatrix } from '../generators/shared/parcel-transform.js';
+import * as G from '../core/math/geom2.js';
 
 // 봄 개화 관목(#107) — 진달래(산비탈 군집)·개나리(담장가·길가 띠). 봄을 가을 단풍만큼의 백미로.
 //   buildSpringBloom(plan, site, warp, mask) → { group, setSeason, drawCalls, azalea, forsythia }
@@ -20,7 +21,6 @@ const TAU = Math.PI * 2;
 const M4 = () => new THREE.Matrix4();
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 const ico = (r) => new THREE.IcosahedronGeometry(r, 0);
-const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // 진달래 연분홍~자주 / 개나리 노랑 팔레트(instanceColor 곱, SRGB→linear). 스타일라이즈드 산수화 무드.
 const AZALEA_COLORS = [0xe77fb3, 0xd9679e, 0xee95c4, 0xcf5b93, 0xe070a8].map((h) => linCol(h));

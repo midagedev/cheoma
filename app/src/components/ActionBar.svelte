@@ -97,9 +97,6 @@
   .seal .note { font-size: 20px; color: var(--ink-faint); }
   /* 시네마틱 진입(드론 ▷ / 거닐기 步) — 먹빛 전각 글리프. */
   .seal .glyph { font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1; }
-  /* 히어로 리플레이(再) — 다시 짓기 옆 도장. 먹빛 전각 글리프. */
-  .seal.replay { min-width: 52px; width: 52px; padding: 0; }
-  .seal.replay .glyph { font-size: 21px; font-weight: 700; color: var(--ink); }
   .seal.round.active { background: var(--seal); border-color: var(--seal-deep); }
   .seal.round.active .note { color: var(--paper); }
 

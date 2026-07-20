@@ -272,12 +272,12 @@
           <span class="rl">{t('s_' + f.key)}{#if vDisabled(f)}<span class="tierhint"> · {t('vil_sijeon_hint')}</span>{/if}</span>
           {#if f.tri}
             <button class="tgl" data-vkey={f.key} class:on={vTriOn(f)} disabled={vDisabled(f)}
-              onclick={() => vToggleTri(f)} role="switch" aria-checked={vTriOn(f)}>
+              onclick={() => vToggleTri(f)} role="switch" aria-checked={vTriOn(f)} aria-label={t('s_' + f.key)}>
               <span class="knob" aria-hidden="true"></span>
             </button>
           {:else}
             <button class="tgl" data-vkey={f.key} class:on={vPlainOn(f)}
-              onclick={() => vTogglePlain(f)} role="switch" aria-checked={vPlainOn(f)}>
+              onclick={() => vTogglePlain(f)} role="switch" aria-checked={vPlainOn(f)} aria-label={t('s_' + f.key)}>
               <span class="knob" aria-hidden="true"></span>
             </button>
           {/if}
@@ -323,7 +323,7 @@
       {:else if f.ctrl === 'toggle'}
         <div class="row">
           <span class="rl">{t('s_' + f.key)}</span>
-          <button class="tgl" data-key={f.key} class:on={!!params[f.key]} onclick={() => toggleField(f)} role="switch" aria-checked={!!params[f.key]}>
+          <button class="tgl" data-key={f.key} class:on={!!params[f.key]} onclick={() => toggleField(f)} role="switch" aria-checked={!!params[f.key]} aria-label={t('s_' + f.key)}>
             <span class="knob" aria-hidden="true"></span>
           </button>
           <span class="rv"></span>

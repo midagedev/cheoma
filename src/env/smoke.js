@@ -1,3 +1,4 @@
+import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
@@ -33,22 +34,25 @@ const TIME = {
 
 const fract = (x) => x - Math.floor(x);
 function hash1(n) { const x = Math.sin(n * 127.13 + 11.7) * 43758.5453; return x - Math.floor(x); }
-function smoothstep(a, b, x) { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 // 불씨 일렁임(결정론). 저주파 숨쉬기 + 고주파 지터, 난수 없음.
 function flicker(t) { return 0.80 + 0.13 * Math.sin(t * 7.3) + 0.07 * Math.sin(t * 17.9 + 1.3); }
 
 // 부드러운 radial 알파 텍스처(흰 중심 → 투명 가장자리). 색은 material.color가 물들인다.
 function makeSmokeTexture() {
-  const s = 64;
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = s;
-  const ctx = cv.getContext('2d');
-  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  g.addColorStop(0.0, 'rgba(255,255,255,0.70)');
-  g.addColorStop(0.45, 'rgba(255,255,255,0.30)');
-  g.addColorStop(1.0, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
-  return new THREE.CanvasTexture(cv);
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext('2d');
+  const gradient = context.createRadialGradient(
+    size / 2, size / 2, 0,
+    size / 2, size / 2, size / 2,
+  );
+  gradient.addColorStop(0.0, 'rgba(255,255,255,0.70)');
+  gradient.addColorStop(0.45, 'rgba(255,255,255,0.30)');
+  gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
 }
 
 // opts.particles / opts.maxAnchors(캡): 다중 굴뚝 공유 인스턴스(#105 앰비언스 필드)가 앵커 수를 늘리고
