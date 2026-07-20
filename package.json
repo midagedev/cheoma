@@ -11,6 +11,7 @@
     "check:architecture": "node tools/check-architecture.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
+    "check:roof-seams": "node tools/check-roof-seams.mjs",
     "check:worker": "node tools/check-worker-contract.mjs"
   },
   "devDependencies": {

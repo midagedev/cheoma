@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { tileSurfaceMaterial, sugiwaMaterial } from '../builder/palette.js';
+import { resampleChainPreservingKnots } from './chain-sampling.js';
 import { computeSkeleton } from './skeleton.js';
 
 // 다각형 풋프린트 + straight skeleton → 곡면 기와지붕.
@@ -85,7 +86,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     // 처마선 리샘플(직선 Ae→Be), 상단 체인 리샘플(호길이)
     const eavePts = resampleLine(Ae, Be, NU);
     const eaveLifts = resampleScalarEnds(liftA, liftB, NU);
-    const upPts = resampleChain(chain, NU);
+    const upPts = resampleChainPreservingKnots(chain, NU);
 
     const pos = [], uv = [], idx = [];
     const width = dist(Ae, Be);
@@ -480,23 +481,6 @@ function resampleScalarEnds(a, b, N) {
     const ends = Math.pow(Math.abs(2 * t - 1), 4.5); // 0(중앙)→1(끝), 끝에 급집중
     const side = t < 0.5 ? a : b;
     out.push(side * ends);
-  }
-  return out;
-}
-function resampleChain(chain, N) {
-  // 폴리라인 호길이 균등 리샘플
-  const segLen = [];
-  let total = 0;
-  for (let i = 0; i + 1 < chain.length; i++) { const l = dist(chain[i], chain[i + 1]); segLen.push(l); total += l; }
-  if (total < 1e-6) { const out = []; for (let i = 0; i <= N; i++) out.push({ ...chain[0] }); return out; }
-  const out = [];
-  for (let i = 0; i <= N; i++) {
-    let d = (i / N) * total, k = 0;
-    while (k < segLen.length && d > segLen[k]) { d -= segLen[k]; k++; }
-    if (k >= segLen.length) { out.push({ ...chain[chain.length - 1] }); continue; }
-    const t = segLen[k] > 1e-9 ? d / segLen[k] : 0;
-    const a = chain[k], b = chain[k + 1];
-    out.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, h: a.h + (b.h - a.h) * t });
   }
   return out;
 }

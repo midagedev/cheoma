@@ -161,6 +161,15 @@ export function giwaFootprint(P) {
   return { a, b, w, c };
 }
 
+// 기둥·벽·지붕과 geometry gate가 공유하는 정규화된 ㄱ자 평면(CW).
+export function giwaFootprintPolygon(P) {
+  const { a, b, w, c } = giwaFootprint(P);
+  return [
+    { x: -a, z: b }, { x: a - w, z: b }, { x: a - w, z: b + c },
+    { x: a, z: b + c }, { x: a, z: -b }, { x: -a, z: -b },
+  ];
+}
+
 // 팔작 용마루 최소 길이 = 합각폭의 이 배수(#97). ≥1 이면 용마루가 항상 측면 합각보다
 // 길어 소전각에서도 뚜렷한 가로 마루로 선다(X자 교차 방지). 넓은 전각은 기본식이 지배.
 const RIDGE_MIN_GABLE_K = 1.25;

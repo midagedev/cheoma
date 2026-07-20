@@ -17,11 +17,11 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #1: 초가 벽 상단을 실제 이엉 삼각면 아래로 맞춘 의도된 geometry 변경.
-  village: '5f96980b:8e2f6a0b:3409cea0:67c2b79b',
-  town: '0dc66cf0:291bc85c:dc0dd24f:07ac6c56',
-  capital: '2435db3d:1b3a191f:b41947dd:e6d0e705',
-  hanyang: 'c163f740:793bbefe:02fc9575:ff91023a',
+  // #4: 기와 지붕 면이 용마루·추녀 접합점을 정확히 공유하도록 한 의도된 geometry 변경.
+  village: '842f5eea:c378b0e4:94742c01:4e8a3aea',
+  town: 'c1a49bde:e24cee4a:8429cc73:4cc5ad1e',
+  capital: 'b2aa1087:9e89bdcf:30ef3c56:6828dbd3',
+  hanyang: '083a8c5a:7907d666:475a9bf3:05f96bd2',
 };
 const expectedProxyHashes = {
   village: '28774cfe',

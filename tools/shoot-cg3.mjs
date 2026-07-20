@@ -1,5 +1,5 @@
-// critic-giwa-r3 전용 원오프 캡처 → shots/cg3-*.png
-// 실행: node tools/shoot-cg3.mjs
+// critic-giwa-r3 전용 원오프 캡처 → [outdir]/cg3-*.png
+// 실행: node tools/shoot-cg3.mjs [outdir] (기본 shots, 회귀 확인은 OS 임시 디렉터리 권장)
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const OUT = join(ROOT, 'shots');
+const OUT = process.argv[2] ? resolve(process.argv[2]) : join(ROOT, 'shots');
 mkdirSync(OUT, { recursive: true });
 
 const MIME = {
@@ -18,6 +18,10 @@ const MIME = {
 const server = createServer(async (req, res) => {
   try {
     const path = req.url.split('?')[0];
+    if (path === '/favicon.ico') {
+      res.writeHead(204); res.end();
+      return;
+    }
     const file = join(ROOT, path === '/' ? 'index.html' : path);
     const data = await readFile(file);
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
@@ -62,8 +66,17 @@ try { browser = await chromium.launch({ channel: 'chrome' }); }
 catch { browser = await chromium.launch(); }
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 let errors = 0;
-page.on('console', (msg) => { if (msg.type() === 'error') { errors++; console.error('[page]', msg.text()); } });
+page.on('console', (msg) => {
+  if (msg.type() === 'error') {
+    errors++;
+    console.error('[page]', msg.text());
+  }
+});
 page.on('pageerror', (err) => { errors++; console.error('[pageerror]', err.message); });
+page.on('requestfailed', (request) => {
+  errors++;
+  console.error('[requestfailed]', request.url(), request.failure()?.errorText || 'unknown error');
+});
 
 for (const [kind, suffix, name] of jobs) {
   const base = kind === 'app' ? 'index.html?shot=1&' : 'tools/cg3-harness.html?';
@@ -76,6 +89,7 @@ for (const [kind, suffix, name] of jobs) {
     await page.screenshot({ path: file });
     console.log('saved', file);
   } catch (e) {
+    errors++;
     console.error('FAILED', name, e.message);
   }
 }
@@ -83,3 +97,4 @@ for (const [kind, suffix, name] of jobs) {
 await browser.close();
 server.close();
 console.log(errors ? `ERRORS: ${errors}` : 'errors: 0');
+if (errors) process.exitCode = 1;
