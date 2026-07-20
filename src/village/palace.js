@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PRESETS } from '../params.js';
 import { buildBuilding } from '../builder/index.js';
-import { makeMaterials } from '../builder/palette.js';
+import { makeMaterials, canonicalizeSharedMaterials } from '../builder/palette.js';
 import { buildCorridor } from '../layout/corridor.js';
 import { buildGate } from '../layout/gate.js';
 import { buildFence } from '../layout/fence.js';
@@ -160,6 +160,7 @@ function placeGate(root, type, x, z, { width, seed, faceSouth = true }) {
 // 전각 배치 — 마당 북측(안쪽), 남향(+z). buildBuilding 자체 월대 포함.
 //   반환 { group, frontZ } (frontZ=전각 남단 처마, 어도·품계석 배치 기준).
 function placeHall(root, preset, cx, czNorthFace, depth, name) {
+  // 공유 재질셋(#149): preset.mats(호출측이 shareMats 시 세팅)가 있으면 전각이 그걸 공유 → 병합 붕괴.
   const hall = buildBuilding(preset);
   const L = hall.userData.layout;
   const backMargin = (preset.podiumMarginS || 1.4) + 1.2;
@@ -238,8 +239,12 @@ function layGeumcheon(root, cx, cz, seed) {
   root.add(bridge);
 }
 
-export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial', seed = 5, mats, merge = true, presetOverrides = null } = {}) {
+export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial', seed = 5, mats, merge = true, presetOverrides = null, shareMats = true } = {}) {
   const M = mats || makeMaterials('palace');
+  // #149 재질 공유 게이트: shareMats(기본 ON) 면 전 전각이 M 한 벌을 공유 + 시각 동일 재질 통일 →
+  //   부감 병합(palaceMerged)이 전각 경계까지 무너진다(한양 궁 병합 392→61콜). false 면 구 동작
+  //   (전각마다 makeMaterials·통일 없음) — A/B 측정·회귀 진단용.
+  const hallMats = shareMats ? M : undefined;
   const spec = tierSpec(tier);
   // 편집 오버라이드(#93): 전 전각 buildBuilding 프리셋에 일괄 적용 — 궁 전체 일관 반영.
   //   칸수/월대단수 등 일곽-구조 종속 키는 호출측(edit-schema)이 보내지 않는 규약.
@@ -255,9 +260,15 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
 
   const areaHandles = [];   // 편집 승격용 개별 일곽 핸들
 
+  // 공유 재질 정규화 캐시(#149): 일곽을 가로질러 누적된다. 빌더가 부재별로 clone 한 "시각 동일"
+  //   재질(창방 색동·문짝 분합·기와면 골·합각·처마 띠·적새)을 canon 인스턴스로 통일해, 부감 병합
+  //   (palaceMerged)이 전각·일곽 경계까지 무너지게 한다. 픽셀 동일 보장(서명이 렌더 필드를 모두 담음).
+  const matCanon = new Map();
+
   // 정적 히어로라 일곽 단위로 재질별 병합(드로우콜 억제). 병합 그룹이 픽킹 단위(heroHandle 유사).
   //   merge=false 면 미병합(before 측정용). 병합 후에도 그룹 name·userData 로 편집 노출 유지.
   const finalize = (grp) => {
+    if (shareMats) canonicalizeSharedMaterials(grp, matCanon);   // #149 시각 동일 재질 통일(일곽 누적)
     if (!merge) { root.add(grp); return grp; }
     const merged = mergeStatic([grp], grp.name);
     merged.userData = grp.userData;
@@ -325,6 +336,7 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
 
     // 전각 + 월대.
     const preset = applyOv(hallPreset(A.role, (seed ^ (0x1000 * (i + 1))) >>> 0));
+    preset.mats = hallMats;   // #149 공유 재질셋(shareMats 시 M, 아니면 undefined=구 동작)
     const { group: hall, frontZ } = placeHall(grp, preset, 0, northFace, A.corridorDepth, `hall-${A.role}`);
 
     // 조정(정전 전용): 박석·어도·품계석.
@@ -335,7 +347,7 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
     // 대부분 차지하므로, 본채 실측 외연과 행각 사이 여유폭에서 겹치지 않는 최대 scale 을 역산해
     // 앉힌다(#97 — 종전엔 scale 0.72·cz+1.0 고정이라 본채 지붕에 관통). 붙여 쌓지 않는 게 원칙.
     if (A.satellites) {
-      const satPreset = applyOv({ ...hallPreset('chimjeon', seed + 900), frontBays: 3, sideBays: 2, columnHeight: 3.0, podiumTiers: 1, podiumTierH: 0.6 });
+      const satPreset = applyOv({ ...hallPreset('chimjeon', seed + 900), frontBays: 3, sideBays: 2, columnHeight: 3.0, podiumTiers: 1, podiumTierH: 0.6, mats: hallMats });
       const proto = buildBuilding(satPreset);
       const pf = footprintHalf(proto);
       const hf = footprintHalf(hall);            // 본채 실측 외연(월대 포함)
@@ -382,7 +394,7 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
       // 궐내각사: 작은 채 격자(2×2) — 저격식 소전. 1채만 짓고 clone(재질·지오 공유).
       // 격자 간격을 실측 처마 외연 + 이격으로 산정 — 종전 gx·0.7 고정은 좁은 x축에서 좌우 채가
       // 서로 관통했다(#97). 좁은 x축이 제약이라 두 열이 이격되는 최대 scale 을 역산해 앉힌다.
-      const cellPreset = applyOv({ ...hallPreset('junggung', seed + 700), frontBays: 3, sideBays: 2, columnHeight: 2.9, bracketTiers: 1, podiumTiers: 1, podiumTierH: 0.5 });
+      const cellPreset = applyOv({ ...hallPreset('junggung', seed + 700), frontBays: 3, sideBays: 2, columnHeight: 2.9, bracketTiers: 1, podiumTiers: 1, podiumTierH: 0.5, mats: hallMats });
       const proto = buildBuilding(cellPreset);
       const pf = footprintHalf(proto);
       const gap = 1.4;
@@ -405,6 +417,7 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
     } else {
       // 동궁: 소전 1채.
       const preset = applyOv({ ...hallPreset('chimjeon', seed + 500), frontBays: 3, sideBays: 3 });
+      preset.mats = hallMats;   // #149 공유 재질셋
       placeHall(grp, preset, fx, fz - F.D / 2, depth, `hall-${F.role}`);
     }
     const finalGrp = finalize(grp);

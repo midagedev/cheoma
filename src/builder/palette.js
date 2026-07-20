@@ -749,6 +749,67 @@ function tagRoles(M) {
   }
 }
 
+// ── 공유 재질 정규화(#149) ────────────────────────────────────────────────
+//   궁궐은 전 전각이 한 벌의 재질셋(P.mats)을 공유하지만, 빌더들이 부재별로 재질을 clone 해
+//   텍스처 반복(map.repeat)이나 side 만 바꾸는 경우가 많다(창방 색동·문짝 분합·기와면 골·합각·
+//   처마 띠·적새). 이 clone 들은 "시각적으로는 같지만 객체는 다른" 재질이라, mergeStatic 이 재질
+//   identity 로 병합하는 부감 경로에서 전각마다 별개 메시로 남아 병합 바닥을 끌어올린다.
+//   → 서명(시각 관련 필드 전부)이 완전히 같은 재질을 canon 인스턴스 하나로 통일해 병합을 더 무너뜨린다.
+//   보수적 원칙: 서명은 렌더에 영향 주는 모든 필드를 담고, onBeforeCompile/customProgramCacheKey 같은
+//   숨은 상태가 있으면 통일 대상에서 제외(null 반환) → 통일된 재질은 픽셀 동일이 보장된다.
+//
+// 텍스처 이미지(Source) 동일성 판정용 안정 id. clone 은 source 를 공유참조하므로 같은 이미지 = 같은 id.
+let _srcSeq = 0;
+const _srcId = new WeakMap();
+function texSig(t) {
+  if (!t) return '-';
+  const src = t.source || t.image;
+  let id;
+  if (src && typeof src === 'object') { id = _srcId.get(src); if (id === undefined) { id = ++_srcSeq; _srcId.set(src, id); } }
+  else id = String(src);
+  return `${id}|${t.repeat.x.toFixed(4)},${t.repeat.y.toFixed(4)}|${t.offset.x.toFixed(4)},${t.offset.y.toFixed(4)}|${t.wrapS},${t.wrapT}|${t.rotation}|${t.colorSpace}|${t.flipY ? 1 : 0}`;
+}
+function materialSignature(m) {
+  if (!m || !m.isMaterial) return null;
+  // 커스텀 셰이더/캐시키(구름그림자 등 숨은 상태)가 붙은 재질은 통일 제외 — 궁 빌드 시점엔 없음(방어).
+  //   주의: onBeforeCompile·customProgramCacheKey 는 프로토타입에 기본(빈 함수)이 있어 항상 truthy 다.
+  //   "직접 대입(own 프로퍼티)된 경우"만 커스텀으로 보고 제외한다(injectCloudShadow 등이 own 대입).
+  const has = (k) => Object.prototype.hasOwnProperty.call(m, k);
+  if (has('onBeforeCompile') || has('customProgramCacheKey')) return null;
+  const ud = m.userData || {};
+  return [
+    m.type, m.side, m.transparent ? 1 : 0, +(m.opacity ?? 1).toFixed(4), m.vertexColors ? 1 : 0,
+    m.flatShading ? 1 : 0, +(m.alphaTest ?? 0).toFixed(4), m.depthWrite ? 1 : 0, m.depthTest ? 1 : 0,
+    m.blending, m.wireframe ? 1 : 0, m.name || '',
+    m.color ? m.color.getHexString() : '-',
+    m.emissive ? m.emissive.getHexString() : '-', +(m.emissiveIntensity ?? 1).toFixed(4),
+    +(m.roughness ?? 1).toFixed(4), +(m.metalness ?? 0).toFixed(4),
+    +(m.bumpScale ?? 1).toFixed(4), +(m.aoMapIntensity ?? 1).toFixed(4),
+    +(m.displacementScale ?? 1).toFixed(4), m.normalScale ? `${m.normalScale.x},${m.normalScale.y}` : '-',
+    texSig(m.map), texSig(m.bumpMap), texSig(m.normalMap), texSig(m.emissiveMap),
+    texSig(m.roughnessMap), texSig(m.metalnessMap), texSig(m.aoMap), texSig(m.alphaMap),
+    // 부위 태그·야간 발광 계수: 서로 다른 역할/발광의 재질을 섞지 않게 서명에 포함.
+    ud.role || '-', ud.hanjiGlow ?? '-',
+  ].join('~');
+}
+
+// root 서브트리의 메시 재질을 서명이 같은 것끼리 canon 인스턴스로 통일한다. canon(Map)을 여러 번
+//   넘기면 서브트리를 가로질러(예: 궁 일곽마다 finalize 직전 호출) 누적 통일된다. 반환: 교체 횟수.
+export function canonicalizeSharedMaterials(root, canon = new Map()) {
+  let replaced = 0;
+  root.traverse((o) => {
+    if (!o.isMesh && !o.isInstancedMesh) return;
+    const m = o.material;
+    if (!m || Array.isArray(m) || !m.isMaterial) return;   // 멀티머티리얼(궁엔 없음)은 스킵
+    const sig = materialSignature(m);
+    if (sig == null) return;
+    const c = canon.get(sig);
+    if (c === undefined) { canon.set(sig, m); return; }
+    if (c !== m) { o.material = c; replaced++; }
+  });
+  return replaced;
+}
+
 // 지붕면 전용: 표면 크기에 맞춰 기와 골 반복수를 계산한 재질 생성.
 // bumpScale은 호출부에서 지정(궁=0.6 유지, 절 맞배=0.9 강조).
 export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 0.6) {
