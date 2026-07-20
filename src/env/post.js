@@ -341,6 +341,8 @@ const FlareShader = {
     uniform vec3 flareColor;   // 선형 HDR 웜 틴트
     uniform float flareAmt;    // 최종 강도(시간대×고도×날씨). 0 이면 무연산 조기 반환.
     uniform float sunFront;    // 태양이 카메라 전방이면 1
+    uniform float eyeDamp;     // 아이레벨(1인칭 walk) 감쇠(#119): 지상 수평 시선서 태양향 헤일로가
+                               //   거대 적색 블롭이 되는 것을 억제. 부감·히어로(내려봄)=0 → 처마킥 불변.
 
     // 해당 uv 가 하늘이면 1, 불투명 표면이면 0. 화면 밖은 가림 없음(1)으로 취급.
     float sky(vec2 uv) {
@@ -402,8 +404,10 @@ const FlareShader = {
       {
         vec2 d = (uv - sunUV); d.x *= aspect;
         float rr = dot(d, d);
-        flare += flareColor * exp(-rr / (2.0 * 0.045 * 0.045)) * 0.55;
-        flare += flareColor * exp(-rr / (2.0 * 0.125 * 0.125)) * 0.12;
+        // 아이레벨(walk)에서 넓은 헤일로가 화면을 뒤덮는 적색 블롭이 되는 것을 강하게 억제(#119).
+        //   타이트 코어는 절제된 감쇠(태양 핫스팟 자체는 남김). 부감·히어로(eyeDamp=0)는 불변.
+        flare += flareColor * exp(-rr / (2.0 * 0.045 * 0.045)) * 0.55 * (1.0 - eyeDamp * 0.45);
+        flare += flareColor * exp(-rr / (2.0 * 0.125 * 0.125)) * 0.12 * (1.0 - eyeDamp * 0.82);
       }
 
       // (2) 아나모픽 스트릭: 수평으로 짧고 옅게(화면 가로지르지 않게 x 시그마 제한).
@@ -411,7 +415,7 @@ const FlareShader = {
         vec2 d = (uv - sunUV);
         float sx = exp(-(d.x * d.x) / (2.0 * 0.15 * 0.15));
         float sy = exp(-(d.y * d.y) / (2.0 * 0.006 * 0.006));
-        flare += flareColor * sx * sy * 0.20;
+        flare += flareColor * sx * sy * 0.20 * (1.0 - eyeDamp * 0.5);
       }
 
       // (3) 고스트: 중심 대칭축을 따라 저채도·저불투명. 태양-중심 사이 1개 + 반대편 3개.
@@ -460,6 +464,7 @@ class FlarePass extends Pass {
       flareColor: { value: new THREE.Color(0xffc078).convertSRGBToLinear() },
       flareAmt: { value: 0.0 },
       sunFront: { value: 0.0 },
+      eyeDamp: { value: 0.0 },
     };
     this.material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
@@ -751,6 +756,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     }
     flarePass.uniforms.flareAmt.value = amt;
     flarePass.uniforms.sunFront.value = front > 0.02 ? 1 : 0;
+    // 아이레벨 게이트(#119): 카메라 전방 벡터의 y(피치)로 1인칭 walk(지상 수평 시선, fy≈0)를 판별.
+    //   부감(fy≈-0.36)·focus(-0.66)·히어로 랜딩(-0.10~-0.12)은 모두 아래를 향하므로 eyeDamp=0 →
+    //   처마킥·역광 헤일로 불변. 수평(walk)에서만 1 로 올라가 태양향 거대 적색 블롭을 억제한다.
+    const fy = -camera.matrixWorld.elements[9];   // world forward.y (getWorldDirection 과 동일)
+    flarePass.uniforms.eyeDamp.value = THREE.MathUtils.smoothstep(fy, -0.09, -0.02);
   }
 
   function setSize(w, h) {

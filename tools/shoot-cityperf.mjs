@@ -1,5 +1,5 @@
 // 헤드리스 성능 실측: 규모별 생성 ms · 드로우콜 · 삼각형 · 프레임타임 + 그룹 구조 분해.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-cityperf.mjs [scale...]
+// 사용법: node tools/shoot-cityperf.mjs [scale...]
 //   인자 없으면 전 규모(hamlet..hanyang) 측정. 컬링 실효 드로우콜(aerial vs eye)도 함께.
 //   PNG는 안 찍고 표만 출력(설계·리포트용). shots/ 오염 없음.
 import { createServer } from 'node:http';

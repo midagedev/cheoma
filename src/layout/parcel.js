@@ -25,6 +25,37 @@ const STYLE_MAP = {
 
 //   lanterns: 필지 등롱(대문·마당 걸이등롱, #83)을 루트 직속에 심을지. 기본 true(focus 오버레이·뷰어).
 //     mergeStatic 병합 경로(populate 히어로·절·궁 코어)는 false 로 넘겨 PointLight 유실·bulb 오염을 막는다.
+// 반가 안채(hanok) 풋프린트 생성 — 평면형(single=ㅡ자 / l=ㄱ자 / u=ㄷ자) × 칸수(bays, 본채 정면 칸).
+//   좌표계는 buildParcel 과 동일(원점 기준, +z=남). 본채는 -hd..hd 깊이의 가로 채, 날개는 +z(남)로
+//   뻗어 안뜰을 감싼다. bayW·wingLen·wingW 는 기본 ㄱ자(bays=3)가 기존 하드코딩 풋프린트와 정확히
+//   일치하도록 고른 값 — 미편집 종가의 픽셀 불변을 보장한다. 날개폭은 안뜰/본채 앞면이 붕괴하지 않게
+//   본채 폭에 종속 클램프(ㄷ자는 양 날개가 겹치지 않게, ㄱ자는 본채 앞면이 날개보다 넓게).
+function hanokFootprint(shape, bays) {
+  const nb = Math.max(2, Math.min(4, Math.round(bays || 3)));
+  const bayW = 10 / 3;               // 칸 폭 — bays=3 이면 본채 폭 10(기본형과 동일)
+  const hw = (nb * bayW) / 2;        // 본채 반폭(x)
+  const hd = 2.6;                    // 본채 반깊이(z, 고정)
+  const wingLen = 5.4;               // 날개 길이(+z)
+  if (shape === 'single') {
+    return [{ x: -hw, z: -hd }, { x: hw, z: -hd }, { x: hw, z: hd }, { x: -hw, z: hd }];
+  }
+  if (shape === 'u') {
+    const wingW = Math.min(3.6, hw - 1.2);   // 양 날개가 겹치지 않게(안뜰 확보)
+    return [
+      { x: -hw, z: -hd }, { x: hw, z: -hd },
+      { x: hw, z: hd + wingLen }, { x: hw - wingW, z: hd + wingLen },
+      { x: hw - wingW, z: hd }, { x: -hw + wingW, z: hd },
+      { x: -hw + wingW, z: hd + wingLen }, { x: -hw, z: hd + wingLen },
+    ];
+  }
+  // 'l' (ㄱ자, 기본) — bays=3 에서 기존 하드코딩 풋프린트와 완전 동일.
+  const wingW = Math.min(3.6, 2 * hw - 2);   // 본채 앞면이 날개보다 넓게 유지
+  return [
+    { x: -hw, z: -hd }, { x: hw, z: -hd }, { x: hw, z: hd },
+    { x: -hw + wingW, z: hd }, { x: -hw + wingW, z: hd + wingLen }, { x: -hw, z: hd + wingLen },
+  ];
+}
+
 export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, roofOpts, wallH = 2.7, presetOverrides, lanterns = true } = {}) {
   const cfg = STYLE_MAP[style] || STYLE_MAP.palace;
   const rng = makeRng(seed);
@@ -66,14 +97,16 @@ export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, r
   // ── 몸채 (북측 중앙, 남향) ──
   let building, frontZ, buildingZ;
   if (cfg.preset === 'hanok') {
-    // ㄱ자 반가 안채: 앞채(동서 긴 채) + 좌측 날개(남북). 남향 개방.
-    const fp = [
-      { x: -5, z: -2.6 }, { x: 5, z: -2.6 }, { x: 5, z: 2.6 },
-      { x: -1.4, z: 2.6 }, { x: -1.4, z: 8 }, { x: -5, z: 8 },
-    ];
+    // 반가 안채 평면형·칸수 편집(#146): planShape(ㅡ/ㄱ/ㄷ)·bays 는 roofOpts 채널로 흘러온다
+    //   (adapter heroEditOpts 가 np.roofOpts 를 통째로 포워딩 → 여기 roofOpts 에 실림). buildHanok 은
+    //   footprint 다각형·straight-skeleton 지붕·reflex 안뜰 개구를 모두 임의 폴리곤에서 지원하므로,
+    //   여기서 풋프린트만 형태·칸수에 맞춰 생성하면 지붕/창호/굴뚝이 전부 자동 정합한다. 미지정
+    //   (랜딩·리플레이)이면 기본 ㄱ자·3칸 → 기존 하드코딩 풋프린트와 완전 동일(픽셀 불변).
+    const { planShape, bays, ...roofRest } = roofOpts || {};
+    const fp = hanokFootprint(planShape || 'l', bays);
     const cz = fp.reduce((s, p) => s + p.z, 0) / fp.length;
     const centered = fp.map((p) => ({ x: p.x, z: p.z - cz }));
-    building = buildHanok({ footprint: centered, seed, mats, wallH, roofOpts });
+    building = buildHanok({ footprint: centered, seed, mats, wallH, roofOpts: roofRest });
     const zExtent = Math.max(...centered.map((p) => p.z)) + 1.15; // 처마 포함 남단
     buildingZ = -hd + (Math.max(...centered.map((p) => p.z)) - Math.min(...centered.map((p) => p.z))) / 2 + 3.5;
     building.position.set(0, 0, buildingZ);
@@ -142,9 +175,11 @@ export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, r
   }
 
   // ── 필지 등롱 (대문·마당 걸이등롱, #83) ──
-  //   루트 직속에 bulb + PointLight → focus 링(env/motes.js setupLanternSway)이 직속 자식을 훑어
-  //   흔들림 구동(dormant 였던 레이어 활성). 병합 경로는 lanterns:false 로 skip.
-  if (lanterns) attachOverlayLanterns(root, { style, W, D, seed });
+  //   루트 직속에 발광 bulb → focus 링(env/motes.js setupLanternSway)이 직속 자식을 훑어 흔들림 구동.
+  //   PointLight 는 심지 않는다(#141 emitLight:false) — focus-in/out·hop 로 오버레이가 add/remove 될 때
+  //   numPointLights 가 요동해 셰이더 폭풍을 일으키므로, 국소 조명은 env/focus.js 링 고정 풀이 담당.
+  //   병합 경로는 lanterns:false 로 skip.
+  if (lanterns) attachOverlayLanterns(root, { style, W, D, seed, emitLight: false });
 
   root.userData = { style, W, D, mats };
   return root;

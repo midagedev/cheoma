@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 날씨 결함 2건 수정 검증 → shots/wxfix-*.png (전용 출력)
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-wxfix.mjs
+// 사용법: node tools/shoot-wxfix.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

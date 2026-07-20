@@ -6,7 +6,7 @@
 //   ② tagRoles 부활(#55) — mode=village 는 실제 adapter(createVillage) 경로로 마을 부감을 렌더하고
 //      village group 을 훑어 material.userData.role 태그 수·드로우콜을 리포트(before/after 판정).
 //
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-nightprops.mjs [필터]
+// 사용: node tools/shoot-nightprops.mjs [필터]
 //   기본 출력 scratchpad/nightprops/ (반복). NIGHTPROPS_OUT=shots 로 최종 게이트(shots/nightprops-*.png).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

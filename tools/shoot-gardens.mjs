@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 마당 과실수·반가 정원·마을 보호수·동물(#41) 검증 → shots/gardens-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-gardens.mjs [필터]
+// 사용법: node tools/shoot-gardens.mjs [필터]
 //   /__flora 하네스: village group.userData 의 앵커(보호수·과실수·정원·닭·소)로 프레이밍,
 //   setSeason/setAnimalsTime/update 를 직접 구동(앱 경로 불침해). 고정 dt 로 결정론.
 import { createServer } from 'node:http';

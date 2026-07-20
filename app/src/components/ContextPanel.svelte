@@ -75,32 +75,23 @@
     { key: 'giwa', l: 'type_giwa_l', s: 'type_giwa_s' },
     { key: 'choga', l: 'type_choga_l', s: 'type_choga_s' },
   ];
-  const showVal = (f) => (typeof params[f.key] === 'number' ? params[f.key] : f.min);
+  // 표시값 — 편집 전엔 필드 기본(def) 을 fallback(#146: 종가 평면형/칸수는 spec.params 에 없어 def 로
+  //   초기 표시하되, 미편집이면 페이로드엔 안 실려 렌더 불변). def 없으면 min.
+  const showVal = (f) => (typeof params[f.key] === 'number' ? params[f.key] : (f.def ?? f.min));
   function range(f, value) { params[f.key] = value; onLive?.(f.key, value); }
   function rangeCommit(f, value) { params[f.key] = value; onCommit?.(f.key, value); }
   function stepField(f, dir) {
-    const cur = typeof params[f.key] === 'number' ? params[f.key] : f.min;
+    const cur = typeof params[f.key] === 'number' ? params[f.key] : (f.def ?? f.min);
     const v = Math.max(f.min, Math.min(f.max, (cur | 0) + dir));
     params[f.key] = v; onCommit?.(f.key, v);
   }
   function pick(f, value) { params[f.key] = value; onCommit?.(f.key, value); }
   function toggleField(f) { const v = !params[f.key]; params[f.key] = v; onCommit?.(f.key, v); }
-  const optLabel = (key, o) => t((key === 'wallType' ? 'wall_' : key === 'doorPattern' ? 'door_' : '') + o);
+  // segment 옵션 라벨: wallType→wall_*, doorPattern→door_*, planShape→step_*(#146 구 패널 어휘 재사용).
+  const optLabel = (key, o) => t((key === 'wallType' ? 'wall_' : key === 'doorPattern' ? 'door_' : key === 'planShape' ? 'step_' : '') + o);
 </script>
 
-<BottomSheet {open} variant="context" closable={false} gap={13} {detent} ariaLabel="context panel">
-  <!-- 브레드크럼: 마을 → 필지. 집 컨텍스트에서 '마을'을 누르면 focus-out. -->
-  <div class="crumbs">
-    <button
-      class="crumb root" class:link={houseActive}
-      onclick={() => { if (houseActive) onBack?.(); }}
-      aria-label={t('vil_title')}
-    >{t('vil_title')}</button>
-    <span class="sep" style="opacity:{houseOpacity}" aria-hidden="true">›</span>
-    <span class="crumb leaf" style="opacity:{houseOpacity}">{houseLabel}</span>
-    {#if !houseActive && houses > 0}<span class="count">{houses}{t('vil_houses')}</span>{/if}
-  </div>
-
+<BottomSheet {open} variant="context" closable={false} gap={13} {detent} ariaLabel="context panel" {header} {footer}>
   <!-- 모프 스택: 마을·집 섹션이 같은 그리드 셀에 겹쳐 crossfade. -->
   <div class="stack">
     <!-- 마을 섹션(부감) -->
@@ -153,17 +144,7 @@
           {#each vSections as vsec (vsec.id)}{@render villageSection(vsec)}{/each}
         {/if}
       {/if}
-
-      <section>
-        <button class="rebuild" onclick={() => onReroll?.()} disabled={waving} title={t('vil_reroll_tip')}>
-          <span class="rk" aria-hidden="true">再</span>{t('vil_reroll')}
-        </button>
-        {#if onExportVillage}
-          <button class="glb" onclick={() => onExportVillage?.()} disabled={waving || exporting} title={t('glb_village_tip')}>
-            <span class="gk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('glb_village')}
-          </button>
-        {/if}
-      </section>
+      <!-- 마을 액션(다시 짓기·내보내기)은 sticky 푸터로 이설(#118 U1) — footer 스니펫 참조. -->
     </div>
 
     <!-- 집 섹션(근접) -->
@@ -206,18 +187,63 @@
           <p>{t('vil_hero_note')}</p>
         </div>
       {/if}
+      <!-- 집 액션(다시 보기·다시 짓기·GLB)은 sticky 푸터로 이설(#118 U1) — footer 스니펫 참조. -->
+    </div>
+  </div>
+</BottomSheet>
 
-      <!-- 집 액션(#100): 다시 보기(같은 집 재조립·시각 불변) vs 이 집 다시 짓기(새 씨앗·이 집만).
-           마을 다시 짓기(웨이브)는 마을 섹션 전용 — 집 컨텍스트에서 마을 리롤 진입 경로 없음. -->
+<!-- ── 고정 헤더: 브레드크럼(마을 → 필지). 집 컨텍스트에서 '마을'을 누르면 focus-out. ── -->
+{#snippet header()}
+  <div class="crumbs">
+    <button
+      class="crumb root" class:link={houseActive}
+      onclick={() => { if (houseActive) onBack?.(); }}
+      aria-label={t('vil_title')}
+    >{t('vil_title')}</button>
+    <span class="sep" style="opacity:{houseOpacity}" aria-hidden="true">›</span>
+    <span class="crumb leaf" style="opacity:{houseOpacity}">{houseLabel}</span>
+    {#if !houseActive && houses > 0}<span class="count">{houses}{t('vil_houses')}</span>{/if}
+  </div>
+{/snippet}
+
+<!-- ── 고정 푸터(#118 U1): 부감=마을 액션 / 근접=집 액션이 morph 로 crossfade(섹션 스택과 한 클록).
+     기본 펼침 상세가 길어도 주요 액션이 폴드 아래로 매몰되지 않게 스크롤 밖에 상주한다. ── -->
+{#snippet footer()}
+  <div class="footstack">
+    <!-- 마을 액션(부감): 다시 짓기(웨이브) + 내보내기 -->
+    <div
+      class="foot village"
+      style="opacity:{villageOpacity}"
+      style:pointer-events={houseActive ? 'none' : 'auto'}
+      aria-hidden={houseActive}
+    >
+      <button class="rebuild" onclick={() => onReroll?.()} disabled={waving} title={t('vil_reroll_tip')}>
+        <span class="rk" aria-hidden="true">再</span>{t('vil_reroll')}
+      </button>
+      {#if onExportVillage}
+        <button class="glb" onclick={() => onExportVillage?.()} disabled={waving || exporting} title={t('glb_village_tip')}>
+          <span class="gk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('glb_village')}
+        </button>
+      {/if}
+    </div>
+
+    <!-- 집 액션(근접, #100): 다시 보기(같은 집·시각 불변) / 이 집 다시 짓기(새 씨앗·이 집만) / GLB.
+         마을 다시 짓기는 마을 액션 전용 — 집 컨텍스트에 마을 리롤 진입 경로 없음. -->
+    <div
+      class="foot house"
+      style="opacity:{houseOpacity}"
+      style:pointer-events={houseActive ? 'auto' : 'none'}
+      aria-hidden={!houseActive}
+    >
       {#if spec}
-        <section class="house-actions">
+        <div class="house-actions">
           <button class="hbtn ghost" onclick={() => onReplay?.()} disabled={houseBusy} title={t('vil_replay_tip')}>
             <span class="hk" aria-hidden="true">再</span>{t('vil_replay')}
           </button>
           <button class="hbtn reroll" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
             <span class="hk" aria-hidden="true">⚄</span>{t('vil_reroll_house')}
           </button>
-        </section>
+        </div>
         {#if onExportHouse}
           <button class="hbtn glb wide" onclick={() => onExportHouse?.()} disabled={houseBusy || exporting} title={t('glb_house_tip')}>
             <span class="hk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('act_glb')}
@@ -226,7 +252,7 @@
       {/if}
     </div>
   </div>
-</BottomSheet>
+{/snippet}
 
 {#snippet villageSection(vsec)}
   <section class="vdetail">
@@ -264,6 +290,7 @@
 {#snippet editSection(sec)}
   <section>
     <h4>{t(sec.titleKey)}</h4>
+    {#if sec.noteKey}<p class="editnote">{t(sec.noteKey)}</p>{/if}
     {#each sec.fields as f (f.key)}
       {#if f.ctrl === 'range'}
         <label class="row">
@@ -288,7 +315,7 @@
           <span class="rl">{t('s_' + f.key)}</span>
           <div class="segs">
             {#each f.options as o}
-              <button class="segbtn" class:on={params[f.key] === o} onclick={() => pick(f, o)}>{optLabel(f.key, o)}</button>
+              <button class="segbtn" class:on={(params[f.key] ?? f.def) === o} onclick={() => pick(f, o)}>{optLabel(f.key, o)}</button>
             {/each}
           </div>
         </div>
@@ -374,6 +401,7 @@
   .hbtn.glb.wide { flex: none; width: 100%; margin-top: 8px; }
 
   /* ── 집 섹션(VillageEditPanel 룩 계승) ── */
+  .editnote { margin: -2px 0 2px; font-size: 11.5px; line-height: 1.45; color: var(--ink-faint); font-style: italic; }
   .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .tab { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 2px; border-radius: 4px; background: transparent; border: 1px solid var(--ink-hair); color: var(--ink-soft); transition: all 0.16s ease; }
   .tab .tl { font-size: 14px; font-weight: 700; }
@@ -412,8 +440,12 @@
   input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--seal); border: 1.5px solid var(--paper); box-shadow: 0 1px 3px rgba(60, 30, 20, 0.4); cursor: pointer; }
   input[type='range']::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: var(--seal); border: 1.5px solid var(--paper); cursor: pointer; }
 
+  /* ── sticky 푸터(#118 U1) — 부감/근접 액션을 같은 셀에 겹쳐 morph crossfade(섹션 스택과 동일 클록). ── */
+  .footstack { display: grid; }
+  .footstack > .foot { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 8px; transition: opacity 0.12s linear; }
+
   /* 집 액션(#100): 다시 보기(먹빛 고스트) + 이 집 다시 짓기(주묵 전각) — 재/리롤 구분 명확. */
-  .house-actions { flex-direction: row; gap: 8px; margin-top: 3px; padding-top: 11px; border-top: 1px solid var(--ink-line); }
+  .house-actions { display: flex; flex-direction: row; gap: 8px; }
   .hbtn {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px;
     padding: 10px; border-radius: 5px; font-size: 12.5px; font-weight: 700;

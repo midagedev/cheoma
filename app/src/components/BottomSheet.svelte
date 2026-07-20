@@ -13,6 +13,10 @@
   let {
     open = false, onClose, variant = 'right', ariaLabel = 'panel',
     closable = true, gap = 18, peekPx = 80, detent = null, children,
+    // #118 U1: context 패널 sticky 헤더/푸터 — 상세만 내부 스크롤, 액션은 항상 가시.
+    //   header(브레드크럼)·footer(액션)를 스크롤 밖 고정 영역으로 렌더한다. 데스크톱은 카드 하단 푸터,
+    //   모바일 시트는 상단 도킹(half detent 에서 아래 밀려나 감춰지지 않도록 grip 아래로). context 만 사용.
+    header = null, footer = null,
   } = $props();
   // 상주·소형카드 계열(스크림 없이 씬 조작 유지, peek detent 허용).
   const isCard = $derived(variant === 'leftCard' || variant === 'context');
@@ -111,6 +115,10 @@
         <button class="x" onclick={(e) => { e.stopPropagation(); onClose?.(); }} aria-label="close">×</button>
       {/if}
     </div>
+    <!-- #118 U1: context 헤더/푸터는 grip 아래 고정 도킹 — half detent(하단 46% 감춤)에서도 상단
+         가시 영역에 남아 브레드크럼·주요 액션이 항상 보인다(바텀시트는 하단이 뷰포트 밖으로 밀리므로). -->
+    {#if header}<div class="sheethead">{@render header()}</div>{/if}
+    {#if footer}<div class="sheetfoot">{@render footer()}</div>{/if}
     <div class="scroll" style="gap:{gap}px">{@render children?.()}</div>
   </aside>
 {:else if variant === 'right'}
@@ -119,9 +127,12 @@
     {@render children?.()}
   </aside>
 {:else if variant === 'context'}
-  <!-- 단일 컨텍스트 패널(#92) 데스크톱 — 우상단 자동높이 카드(내용만큼, 편집 시 늘어나 스크롤). -->
-  <aside class="ctxcard hanji-surface" class:open aria-hidden={!open} style="gap:{gap}px">
-    {@render children?.()}
+  <!-- 단일 컨텍스트 패널(#92) 데스크톱 — 좌상단 자동높이 카드. #118 U1: 헤더(브레드크럼)·푸터(액션)를
+       스크롤 밖 고정, 상세만 내부 스크롤 → 기본 펼침이어도 주요 액션이 폴드 아래 매몰되지 않는다. -->
+  <aside class="ctxcard hanji-surface" class:open aria-hidden={!open}>
+    {#if header}<div class="ctxhead">{@render header()}</div>{/if}
+    <div class="ctxscroll" style="gap:{gap}px">{@render children?.()}</div>
+    {#if footer}<div class="ctxfoot">{@render footer()}</div>{/if}
   </aside>
 {:else}
   <aside class="vcard hanji-surface" class:open aria-hidden={!open} style="gap:{gap}px">
@@ -179,16 +190,25 @@
     z-index: 32;
     width: min(300px, 84vw);
     max-height: calc(100vh - clamp(10px, 1.6vh, 22px) - 200px);
-    padding: 15px 16px 17px;
+    padding: 0;
     border-radius: 9px;
     display: flex; flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;                          /* #118 U1: 카드 자체는 스크롤 안 함 — 상세 영역만 스크롤 */
     transform: translateX(-118%);
     opacity: 0;
     transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
     pointer-events: none;
   }
   .ctxcard.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
+  /* #118 U1: 고정 헤더(브레드크럼) / 스크롤 상세 / 고정 푸터(액션) 3분할. */
+  .ctxhead { flex: none; padding: 15px 16px 0; }
+  .ctxscroll {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column;
+    padding: 12px 16px 14px;
+    overscroll-behavior: contain;
+  }
+  .ctxfoot { flex: none; padding: 13px 16px 16px; border-top: 1px solid var(--ink-line); }
 
   /* ---------- 모바일 바텀 시트 ---------- */
   .scrim {
@@ -241,5 +261,12 @@
     touch-action: pan-y;
     display: flex; flex-direction: column;
     padding: 0 clamp(16px, 5vw, 22px) calc(20px + env(safe-area-inset-bottom));
+  }
+  /* #118 U1 모바일: 헤더·푸터를 grip 아래 고정 도킹 — half detent 상단 가시대에 남아 액션이 감춰지지
+     않는다(바텀시트 하단은 뷰포트 밖으로 밀림). 푸터 아래 border 로 스크롤 상세와 구분. */
+  .sheethead { flex: none; padding: 2px clamp(16px, 5vw, 22px) 0; }
+  .sheetfoot {
+    flex: none; padding: 12px clamp(16px, 5vw, 22px) 13px;
+    border-bottom: 1px solid var(--ink-line);
   }
 </style>

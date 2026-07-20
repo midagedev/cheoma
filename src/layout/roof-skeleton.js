@@ -23,6 +23,10 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     // sugiwaRolls: 수키와 볼록 롤 3D 지오메트리, rafters: 처마 밑 연목·부연,
     // junctionCaps: ㄱ/ㄷ자 마루 접합부 solid 회첨 캡.
     sugiwaRolls = false, rafters = false, junctionCaps = false,
+    // heroDetail(#139): 히어로 종가 전용 근접 격상 — 처마 끝 막새(와구토) 열 +
+    //   적새 겹쌓은 용마루/숫마루장 + 망와 마루끝. 신규 메시(마을 인스턴스 드로우콜 침해)라
+    //   반드시 opt-in: buildHanok(히어로) 만 켠다. giwa.js(마을) 는 미설정 → 콜·재질 불변.
+    heroDetail = false,
   } = opts;
   const M = mats;
   const g = new THREE.Group();
@@ -58,7 +62,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   // 기와집 격상 어휘 누적기(옵션 켜졌을 때만 채워진다).
   const rollGeoms = [];                 // 수키와 볼록 롤(면별 튜브 → 병합)
   const rafterRound = [], rafterSquare = []; // 연목(원)·부연(각) InstancedMesh 대상
-  const capTips = [];                   // 연목 끝 원형 마구리 위치
+  const capTips = [];                   // 수키와 롤 끝(수막새) 위치
+  const dripTips = [];                  // 기왓골(암키와) 끝(암막새) 위치 — heroDetail 처마 끝 리듬
 
   // ── face 별 곡면 ──
   for (const face of sk.faces) {
@@ -184,6 +189,16 @@ export function buildSkeletonRoof(footprint, opts = {}) {
           rollGeoms.push(tube);
           capTips.push({ p: tip, dir: tipDir, n: n0 });
         }
+        // heroDetail: 롤 사이 기왓골(암키와) 끝에 암막새 자리 — 수막새와 교대로 처마 끝 리듬 완성.
+        if (heroDetail) {
+          for (let j = 1; j < nRolls; j++) {
+            const sv = j / nRolls;
+            const p0 = pointAt(sv, 0.02), p1 = pointAt(sv, 0.09);
+            const dv = p0.clone().sub(p1).normalize();
+            const t = p0.clone().addScaledVector(dv, 0.09); t.y -= 0.035;   // 골이라 살짝 낮게
+            dripTips.push({ p: t, dir: dv });
+          }
+        }
       }
 
       if (rafters) {
@@ -228,6 +243,39 @@ export function buildSkeletonRoof(footprint, opts = {}) {
       caps.castShadow = true; caps.name = 'sugiwa-caps';
       g.add(caps);
     }
+    // ── heroDetail: 처마 끝 막새(와구토) 열 — 수키와 롤 끝(capTips)마다 흰 회물림 반원. ──
+    //   실사 한식기와의 상징 디테일(부석사·근정전 처마 끝 구슬 열). 어두운 지붕에 밝은 회(灰)
+    //   원판이 리듬 있게 박혀 근접에서 "찍어낸 톤"을 깬다. 원판 축 = 처마 밖 방향(tipDir).
+    if (heroDetail && capTips.length) {
+      const wGeo = new THREE.CylinderGeometry(0.078, 0.078, 0.06, 12);
+      const wag = new THREE.InstancedMesh(wGeo, M.waguto, capTips.length);
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0), d = new THREE.Vector3(), pos = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+      capTips.forEach((c, i) => {
+        d.copy(c.dir).normalize(); q.setFromUnitVectors(up, d);
+        pos.copy(c.p).addScaledVector(d, 0.02);
+        m4.compose(pos, q, one); wag.setMatrixAt(i, m4);
+      });
+      wag.instanceMatrix.needsUpdate = true;
+      wag.castShadow = true; wag.name = 'wadang-row'; wag.userData.asmGroup = 'body';
+      g.add(wag);
+    }
+    // ── heroDetail: 암막새 열 — 수막새(밝은 회) 사이 기왓골 끝에 어두운 드림판. ──
+    //   밝은 수막새·어두운 암막새가 교대로 박혀 처마 끝이 톱니처럼 촘촘히 읽힌다(실사 리듬).
+    if (heroDetail && dripTips.length) {
+      const dGeo = new THREE.CylinderGeometry(0.055, 0.05, 0.05, 10);
+      const drp = new THREE.InstancedMesh(dGeo, M.tileRidge, dripTips.length);
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0), d = new THREE.Vector3(), pos = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+      dripTips.forEach((c, i) => {
+        d.copy(c.dir).normalize(); q.setFromUnitVectors(up, d);
+        pos.copy(c.p).addScaledVector(d, 0.015);
+        m4.compose(pos, q, one); drp.setMatrixAt(i, m4);
+      });
+      drp.instanceMatrix.needsUpdate = true;
+      drp.castShadow = true; drp.name = 'ammaksae-row'; drp.userData.asmGroup = 'body';
+      g.add(drp);
+    }
   }
   const placeRafters = (list, geo, mat) => {
     if (!list.length) return;
@@ -269,16 +317,53 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   const p3 = (p, dy = 0) => ({ x: p.x, y: yOf(p.h) + dy, z: p.z });
 
   // 용마루: 각형 큰 마루
+  const ZAX = new THREE.Vector3(0, 0, 1), YAX = new THREE.Vector3(0, 1, 0);
   for (const s of sk.ridges) {
     const a = p3(s.a, ridgeH * 0.5), b = p3(s.b, ridgeH * 0.5);
-    // 각진 용마루(BoxGeometry 로 단면 두껍게)
     const va = new THREE.Vector3(a.x, a.y, a.z), vb = new THREE.Vector3(b.x, b.y, b.z);
     const len = va.distanceTo(vb);
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.34, ridgeH, len), M.tileRidge);
-    box.position.copy(va).lerp(vb, 0.5);
-    box.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), vb.clone().sub(va).normalize());
-    box.castShadow = true;
-    g.add(box);
+    const axis = vb.clone().sub(va).normalize();
+    const mid = va.clone().lerp(vb, 0.5);
+    const surfMid = mid.y - ridgeH * 0.5;   // 지붕면 마루선 y(p3 가 +ridgeH*0.5 올린 값 복원)
+    if (heroDetail) {
+      // ── 적새(겹쌓은 암키와) 몸통 + 숫마루장(둥근 상단) + 망와(마루끝 와당) ──
+      const bodyH = ridgeH * 1.55;
+      // 적새 켜(가로 줄)가 길이·높이에 맞춰 촘촘히 읽히도록 jeoksae 클론에 repeat 지정(공유재질 불침해).
+      const jmat = M.jeoksae.clone();
+      jmat.map = M.jeoksae.map.clone();
+      jmat.map.wrapS = jmat.map.wrapT = THREE.RepeatWrapping;
+      jmat.map.repeat.set(Math.max(1, Math.round(len / 0.9)), Math.max(3, Math.round(bodyH / 0.11)));
+      jmat.map.needsUpdate = true;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.44, bodyH, len), jmat);
+      body.position.copy(mid); body.position.y = surfMid + bodyH * 0.5;
+      body.quaternion.setFromUnitVectors(ZAX, axis);
+      body.castShadow = body.receiveShadow = true; body.userData.asmGroup = 'finial';
+      g.add(body);
+      // 숫마루장: 마루 위 둥근 수키와 마루(반원통 상단 캡)
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, len, 12), M.tileRidge);
+      cap.position.copy(mid); cap.position.y = surfMid + bodyH;
+      cap.quaternion.setFromUnitVectors(YAX, axis);
+      cap.castShadow = true; cap.userData.asmGroup = 'finial';
+      g.add(cap);
+      // 망와: 용마루 양 끝 상향 와당(반가 — 취두/치미 아님)
+      for (const end of [va, vb]) {
+        const outw = (end === va ? va : vb).clone().sub(mid).normalize();
+        const mw = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.14, 0.07, 14), M.wadang);
+        mw.position.copy(end).addScaledVector(outw, 0.03);
+        mw.position.y = surfMid + bodyH * 0.7;
+        mw.quaternion.setFromUnitVectors(YAX, outw);
+        mw.rotateX(-0.35);   // 끝을 살짝 위로 세운 바래기(망와) 느낌
+        mw.castShadow = true; mw.userData.asmGroup = 'finial';
+        g.add(mw);
+      }
+    } else {
+      // 각진 용마루(BoxGeometry 로 단면 두껍게) — 마을 giwa 기존 경로(콜 불변)
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.34, ridgeH, len), M.tileRidge);
+      box.position.copy(mid);
+      box.quaternion.setFromUnitVectors(ZAX, axis);
+      box.castShadow = true;
+      g.add(box);
+    }
   }
   // 오목 곡면을 따라 마루선을 휘게 하는 곡선 튜브
   const curvedTube = (top, botPlan, botY, r, dy) => {
@@ -303,7 +388,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     const ci = poly.findIndex((v) => Math.abs(v.x - lo.x) < 1e-3 && Math.abs(v.z - lo.z) < 1e-3);
     const botPlan = ci >= 0 ? eaveV[ci] : lo;
     const botY = eaveY + (ci >= 0 ? eaveLift[ci] : 0);
-    g.add(curvedTube(hi, botPlan, botY, 0.1, 0.07));
+    // heroDetail: 내림·추녀마루를 굵게(적새 톤) — 근접에서 마루선이 실하게 보이게
+    g.add(curvedTube(hi, botPlan, botY, heroDetail ? 0.13 : 0.1, heroDetail ? 0.085 : 0.07));
   }
   // 회첨(valley): 반사 코너 → 절점, 곡면보다 살짝 낮게(골)
   for (const s of sk.valleys) {

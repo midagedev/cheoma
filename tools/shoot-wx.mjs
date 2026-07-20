@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 날씨 물리(바람·쌓임·스플래시) 검증 → shots/wx-*.png (이 태스크 전용 출력)
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-wx.mjs
+// 사용법: node tools/shoot-wx.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

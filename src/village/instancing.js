@@ -104,16 +104,26 @@ export function shareMaterials(canon, variant, keepOwn = null) {
 
 // root(프로토 또는 이미 월드배치된 객체)를 재질별 병합 지오메트리로 분해.
 //   preMatrix: root 로컬을 어떤 기준으로 구울지(프로토는 항등 → 프로토로컬 유지).
-// 반환: [{ material, geometry, castShadow, receiveShadow }]
-export function decomposeByMaterial(root, preMatrix = null) {
+//   opts.trackSrc(#148): true 면 재질별 병합 지오 안에서 소스별(o/조상 userData.__mergeSrc) 정점
+//     레인지를 함께 반환(srcRanges: Map<srcId,{start,count}> — 정점 단위). 병합 담의 필지별 은닉용.
+//     traverse 는 깊이우선(root→o0 서브트리→o1…)이라 재질 리스트 내 같은 src 기여가 연속 → 단일 레인지.
+// 반환: [{ material, geometry, castShadow, receiveShadow, srcRanges? }]
+export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
+  const trackSrc = !!opts.trackSrc;
   root.updateMatrixWorld(true);
-  const groups = new Map();   // material -> { list:[geo], cast, recv }
-  const push = (mat, geo, cast, recv) => {
+  const groups = new Map();   // material -> { list:[geo], cast, recv, runs:[{src,count}] }
+  const push = (mat, geo, cast, recv, src) => {
     let e = groups.get(mat);
-    if (!e) { e = { list: [], cast: false, recv: false }; groups.set(mat, e); }
+    if (!e) { e = { list: [], cast: false, recv: false, runs: [] }; groups.set(mat, e); }
     e.list.push(geo); e.cast = e.cast || cast; e.recv = e.recv || recv;
+    if (trackSrc) e.runs.push({ src, count: geo.attributes.position.count });
   };
   const baseInv = preMatrix ? preMatrix.clone().invert() : null;
+  const srcOf = (o) => {   // o 또는 조상에서 최근접 __mergeSrc 태그
+    let a = o;
+    while (a && a !== root) { if (a.userData && a.userData.__mergeSrc !== undefined) return a.userData.__mergeSrc; a = a.parent; }
+    return undefined;
+  };
 
   root.traverse((o) => {
     if (!o.isMesh && !o.isInstancedMesh) return;
@@ -123,6 +133,7 @@ export function decomposeByMaterial(root, preMatrix = null) {
     const mat = mats[0];
     if (!mat) return;
     const keepColor = !!mat.vertexColors;
+    const src = trackSrc ? srcOf(o) : undefined;
     // 월드행렬을 preMatrix 기준으로 환산(프로토면 baseInv=null → 프로토로컬 그대로)
     const wm = baseInv ? baseInv.clone().multiply(o.matrixWorld) : o.matrixWorld;
     if (o.isInstancedMesh) {
@@ -130,17 +141,32 @@ export function decomposeByMaterial(root, preMatrix = null) {
       for (let i = 0; i < o.count; i++) {
         o.getMatrixAt(i, im);
         const full = wm.clone().multiply(im);
-        push(mat, normalizeGeo(o.geometry, full, keepColor), o.castShadow, o.receiveShadow);
+        push(mat, normalizeGeo(o.geometry, full, keepColor), o.castShadow, o.receiveShadow, src);
       }
     } else {
-      push(mat, normalizeGeo(o.geometry, wm, keepColor), o.castShadow, o.receiveShadow);
+      push(mat, normalizeGeo(o.geometry, wm, keepColor), o.castShadow, o.receiveShadow, src);
     }
   });
 
   const out = [];
   for (const [material, e] of groups) {
     const geometry = e.list.length === 1 ? e.list[0] : mergeGeometries(e.list, false);
-    if (geometry) out.push({ material, geometry, castShadow: e.cast, receiveShadow: e.recv });
+    if (!geometry) continue;
+    const rec = { material, geometry, castShadow: e.cast, receiveShadow: e.recv };
+    if (trackSrc) {
+      const ranges = new Map();   // srcId -> {start,count}(정점). 연속 run 이라 누적=단일 레인지.
+      let cursor = 0;
+      for (const r of e.runs) {
+        if (r.src !== undefined) {
+          let rr = ranges.get(r.src);
+          if (!rr) { rr = { start: cursor, count: 0 }; ranges.set(r.src, rr); }
+          rr.count += r.count;
+        }
+        cursor += r.count;
+      }
+      rec.srcRanges = ranges;
+    }
+    out.push(rec);
   }
   return out;
 }
@@ -266,22 +292,61 @@ export function buildChunkImpostor(parcels, name = 'chunk-impostor') {
 }
 
 // 유일 지오(랜드마크·담·도로·논)를 재질별로 정적 병합. objects 는 이미 월드에 배치된 상태.
+//   opts.ids(#148): objects 와 평행한 소스 id 배열. 주면 병합 메시 안에 소스별 정점 레인지를 기록해
+//     group.userData.setHidden(id, on)/isHidden(id)/srcIds 를 노출한다 → focus 필지의 병합 담을 접어
+//     오버레이 담과의 동일평면 이중 렌더(플리커)를 없앤다. 드로우콜 불변(레인지 접기, 메시 분할 아님).
 // 반환: 병합 메시들을 담은 Group(자기 변환은 항등, 지오가 월드좌표를 품음).
-export function mergeStatic(objects, name = 'merged-static') {
+export function mergeStatic(objects, name = 'merged-static', opts = {}) {
+  const ids = opts.ids || null;
   const combined = new THREE.Group(); combined.name = 'tmp';
   // decomposeByMaterial 는 단일 root 를 받으므로 임시 부모로 묶는다(원본 부모 보존).
   const parents = objects.map((o) => ({ o, parent: o.parent }));
+  if (ids) objects.forEach((o, i) => { if (ids[i] !== undefined) o.userData.__mergeSrc = ids[i]; });
   for (const { o } of parents) combined.add(o);
-  const decomp = decomposeByMaterial(combined);
+  const decomp = decomposeByMaterial(combined, null, { trackSrc: !!ids });
   // 원복(원본 트리 훼손 금지 — 병합은 사본 지오만 사용)
   for (const { o, parent } of parents) { if (parent) parent.add(o); else combined.remove(o); }
+  if (ids) objects.forEach((o) => { delete o.userData.__mergeSrc; });
 
   const group = new THREE.Group(); group.name = name;
-  decomp.forEach(({ material, geometry, castShadow, receiveShadow }, i) => {
+  const meshRanges = [];   // [{ mesh, ranges:Map<id,{start,count}> }]
+  decomp.forEach(({ material, geometry, castShadow, receiveShadow, srcRanges }, i) => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `${name}-m${i}`;
     mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
     group.add(mesh);
+    if (srcRanges && srcRanges.size) meshRanges.push({ mesh, ranges: srcRanges });
   });
+  if (ids && meshRanges.length) attachSourceHideHandle(group, meshRanges);
   return group;
+}
+
+// 병합 메시의 소스별 정점 레인지를 접었다/펴는(픽셀 일치 복원) 핸들을 group.userData 에 부착.
+//   접기 = 레인지 정점 위치를 레인지 첫 정점으로 붕괴(퇴화 삼각 → 프래그먼트 0). 원본은 최초 접을 때
+//   1회 slice 로 보관 → 펼 때 그대로 복사(byte 일치). 색·재질·드로우콜 불변(지오 position 부분 갱신만).
+function attachSourceHideHandle(group, meshRanges) {
+  const hidden = new Set();
+  const srcIds = new Set();
+  for (const mr of meshRanges) { for (const id of mr.ranges.keys()) srcIds.add(id); mr.saved = new Map(); }
+  function setHidden(id, on) {
+    if (on ? hidden.has(id) : !hidden.has(id)) return;   // 이미 목표 상태
+    for (const mr of meshRanges) {
+      const r = mr.ranges.get(id);
+      if (!r || !r.count) continue;
+      const pos = mr.mesh.geometry.attributes.position, arr = pos.array;
+      const s = r.start * 3, cnt = r.count * 3;
+      if (on) {
+        if (!mr.saved.has(id)) mr.saved.set(id, arr.slice(s, s + cnt));   // 원본 1회 보관
+        const ax = arr[s], ay = arr[s + 1], az = arr[s + 2];
+        for (let k = 0; k < cnt; k += 3) { arr[s + k] = ax; arr[s + k + 1] = ay; arr[s + k + 2] = az; }
+      } else {
+        const sv = mr.saved.get(id); if (sv) arr.set(sv, s);
+      }
+      pos.needsUpdate = true;
+    }
+    if (on) hidden.add(id); else hidden.delete(id);
+  }
+  group.userData.setHidden = setHidden;
+  group.userData.isHidden = (id) => hidden.has(id);
+  group.userData.srcIds = srcIds;
 }

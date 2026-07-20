@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createChimes } from './chime.js';
 import { createAmbience } from './ambience.js';
-import { createBgm } from './bgm.js';
+import { createBgm, TIME_TRACK } from './bgm.js';
 import { createStream } from './stream.js';
 import { createDog } from './dog.js';
 
@@ -155,6 +155,8 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       stream?.setVolume(ambienceVol); // 개울도 환경음 볼륨에 종속
       dog?.setVolume(ambienceVol);    // 개 짖음도 환경음 볼륨에 종속
     },
+    // #140-D 현재 시간대 트랙 프리페치(제스처 전 유휴 호출용) — 첫 사운드 활성 즉시 재생.
+    prefetchCurrentTrack() { return bgm.prefetch(TIME_TRACK[time]); },
     // BGM 트랙 선택지(옵션 트랙 village/genesis 포함) 노출
     getTracks() { return bgm.getTracks(); },
     // 특정 트랙 강제 재생(옵션 트랙 테스트/노출용)

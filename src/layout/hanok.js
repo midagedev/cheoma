@@ -37,14 +37,36 @@ export function buildHanok({ footprint, seed = 1, mats, wallH = 2.7, podiumH = 0
     return geo;
   };
 
-  // ── 기단 (낮은 장대석, 풋프린트보다 살짝 넓게) ──
-  const podPts = offsetPoly(poly, 0.7);
-  const pod = new THREE.Mesh(extrudeY(shapeFrom(podPts), podiumH), M.stone);
+  // ── 기단 (장대석 두벌대: 지대석 + 기단 몸통 + 갑석 + 앞 댓돌) ──
+  // 반가 기단은 다듬은 장대석을 두어 켜 쌓고 위에 넓은 갑석(甲石)을 얹는다. 근접에서 집이
+  //   땅에 붙지 않고 단정히 앉아 보이게 한다(#139). 지대석은 살짝 넓게(단 그림자), 갑석은
+  //   기단 몸통보다 조금 내밀어 처마 그늘에서도 밝은 돌 선이 읽히게 한다.
+  // 지대석: 바닥에 살짝 넓게 깔리는 어두운 밑돌 켜(단 그림자)
+  const zidae = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.92)), 0.14), M.stoneDark);
+  zidae.receiveShadow = zidae.castShadow = true; g.add(zidae);
+  // 기단 몸통(장대석): 상면이 podiumH — 회벽·기둥이 그대로 앉는다
+  const pod = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH), M.stone);
   pod.receiveShadow = true; pod.castShadow = true;
   g.add(pod);
-  // 기단 상부 어두운 면
-  const cap = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.55)), 0.06), M.stoneDark);
+  // 갑석: 기단 상단을 덮는 넓은 마감석(몸통보다 내밀어 처마 그늘에도 밝은 돌 선)
+  const gapseok = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.84)), 0.11), M.stone);
+  gapseok.position.y = podiumH - 0.11;
+  gapseok.receiveShadow = gapseok.castShadow = true; g.add(gapseok);
+  // 기단 상면(회벽 앉는 자리) 어두운 면 — 벽 밑동 그늘
+  const cap = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.5)), 0.05), M.stoneDark);
   cap.position.y = podiumH; g.add(cap);
+  // 앞(남, +z) 댓돌: 대청 앞 계단돌 2벌(지면 위)
+  {
+    let maxZ = -Infinity, sx = 0, cnt = 0;
+    for (const p of poly) if (p.z > maxZ) maxZ = p.z;
+    for (const p of poly) if (p.z > maxZ - 0.5) { sx += p.x; cnt++; }
+    const fcx = cnt ? sx / cnt : 0;
+    for (let i = 0; i < 2; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(1.9 - i * 0.3, 0.16, 0.55), M.stone);
+      step.position.set(fcx, 0.08 + i * 0.16, maxZ + 1.35 - i * 0.5);
+      step.castShadow = step.receiveShadow = true; g.add(step);
+    }
+  }
 
   // ── 회벽 (풋프린트 압출) ──
   const wallGeo = extrudeY(shapeFrom(poly), wallH - podiumH);
@@ -85,10 +107,16 @@ export function buildHanok({ footprint, seed = 1, mats, wallH = 2.7, podiumH = 0
   const openings = addHanokOpenings(g, poly, M, seed, wallH, podiumH);
 
   // ── 지붕 ──
+  // 히어로 종가 전용 근접 격상(#139): 수키와 볼록 롤·겹처마 서까래·접합 캡 + heroDetail(막새 열·
+  //   적새 용마루·망와). buildHanok 은 마을 인스턴스가 아닌 히어로/focus 경로 전용이라(마을 giwa 는
+  //   builder/giwa.js) 이 플래그들을 켜도 마을 드로우콜은 불변. 편집 파라미터(riseScale 등)는 ...roofOpts
+  //   가 뒤에 펼쳐져 그대로 오버라이드된다.
   const eaveOverhang = roofOpts.eaveOverhang ?? 1.15;
   const roof = buildSkeletonRoof(poly, {
-    eaveY: wallH, eaveOverhang, riseScale: 1.3, profileCurve: 0.45,
-    cornerLift: 0.45, planCurve: 0.25, ridgeH: 0.42, mats: M, ...roofOpts,
+    eaveY: wallH, eaveOverhang, riseScale: 1.18, profileCurve: 0.5,
+    cornerLift: 0.42, planCurve: 0.26, ridgeH: 0.44, mats: M,
+    sugiwaRolls: true, rafters: true, junctionCaps: true, heroDetail: true,
+    ...roofOpts,
   });
   g.add(roof);
 

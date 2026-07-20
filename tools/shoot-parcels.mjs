@@ -3,7 +3,7 @@
 //
 // 앱 dist 빌드가 sibling(env/animals.js) 편집중 깨짐 → 이 하네스만 animals.js 를 no-op 스텁으로
 // 가로채 서빙(실제 파일 불침해). 마을 지오/필지/담/패드는 그대로 — 소동물만 렌더 생략.
-//   사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-parcels.mjs [필터]
+//   사용법: node tools/shoot-parcels.mjs [필터]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

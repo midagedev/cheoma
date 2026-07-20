@@ -1,5 +1,5 @@
 // giwa 3R 전용 캡처 → shots/giwa-r3-*.png (+ 회귀 컷 giwa-r3-reg-*.png)
-// 실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-giwa-r3.mjs [preset|only=angle]
+// 실행: node tools/shoot-giwa-r3.mjs [preset|only=angle]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

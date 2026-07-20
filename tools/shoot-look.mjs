@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 플래그십 룩(bloom 헤이즈 + 골든아워 림 + 태양 글로우) 검증 → shots/look-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-look.mjs
+// 사용법: node tools/shoot-look.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

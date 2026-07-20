@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 적설 볼륨 시뮬(#52) — 눈 쉘 두께 성장·낙설·처마 립·드리프트 + 빗물 흐름.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-snowsim.mjs
+// 사용법: node tools/shoot-snowsim.mjs
 // 중간 검증 컷은 세션 스크래치패드로(shots/ 오염 방지). 게이트 증거만 shots/ 에 snowsim- 접두사로 수동 복사.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

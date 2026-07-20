@@ -1,5 +1,5 @@
 // 헤드리스 검증: 마을 모드 환경 전환 크로스페이드(태스크 #50 마을 경로).
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-village-tween.mjs
+// 사용법: node tools/shoot-village-tween.mjs
 //
 // engine 의 마을 배선을 모사: setupEnvironment + setupWeather(env) + createVillage + enterVillageMode,
 // 시간대 변경 시 env.setTime + village.handle.setTime(+ reapplyVillageFog 상당 near/far). env.update·

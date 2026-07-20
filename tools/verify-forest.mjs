@@ -1,5 +1,10 @@
+// ⚠️ [폐기 #122/#137/#142] 이 검증기는 폐기된 "캐노피 쉘"(#113) 전제다 — 항목 ①②(쉘 커버리지·
+//   쉘-지형 간격)는 #122 에서 쉘→빽빽한 인스턴스 나무(forest-crunch.js: pine/broad/forest-far/rocks)로
+//   피벗하며 무효가 됐다. 현행 산 숲 검증은 tools/shoot-forest.mjs(부감·배산 스크린샷) + forest-crunch.js
+//   의 결정론 게이트를 쓴다. #142 근경 활엽 접지(populate.js scatterTrees)는 shoot-forest.mjs 배산 뷰로
+//   시각 검증. 이 파일은 이력 참고용으로만 남긴다(실행 시 쉘 단언 실패 예상).
 // 산 숲·화강암 노두 검증(#113) — 코드·수치 단언만(스크린샷·PNG Read 없음). 전용 포트 4229, src/ 직접 서빙.
-//   사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-forest.mjs
+//   사용: node tools/verify-forest.mjs
 // 검증 항목:
 //   ① 쉘 커버리지: hill 밴드 표본 쉘 존재 비율 > 0.85, 마을 bowl 안 0
 //   ② 부유·관통: 쉘-지형 간격 ∈ [1, 수관높이], 바위 sink(매립) 정상

@@ -6,7 +6,7 @@
 //   'building'  → newParams.building[key]         (정규 기와/초가: buildBuilding 프리셋 오버라이드)
 //   'top'       → newParams[key]                  (footprintScale·wallType·roofTone·thatchAge·aux)
 //   'preset'    → newParams.presetOverrides[key]  (특수 관아/객사: buildBuilding 프리셋 오버라이드)
-//   'roofOpts'  → newParams.roofOpts[key]         (종가 hanok: buildHanok roofOpts)
+//   'roofOpts'  → newParams.roofOpts[key]         (종가 hanok: buildHanok roofOpts + 평면형/칸수 #146)
 //   'wallH'     → newParams.wallH                 (종가 hanok: 벽 높이)
 //
 // ctrl: 'range'(슬라이더·라이브) | 'stepper'(정수 ±) | 'segment'(택1) | 'toggle'(불).
@@ -14,6 +14,12 @@
 
 // ── 정규 필지: 초가(민가) ─────────────────────────────────────────────────
 const CHOGA_SECTIONS = [
+  // 칸수(#146 복원) — 초가는 一자 격자라 정면·측면 칸수가 곧 규모("몇 칸짜리"). 구 단일건물 패널의 헤드라인
+  //   축이었으므로 맨 위·기본 노출(구 스키마는 고급 접기에 묻혀 있었다). 코어 buildBuilding bayPositions 지원.
+  { id: 'plan', titleKey: 'sec_plan', fields: [
+    { key: 'frontBays', ctrl: 'stepper', min: 3, max: 5, route: 'building' },
+    { key: 'sideBays', ctrl: 'stepper', min: 2, max: 3, route: 'building' },
+  ] },
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'roofPitch', ctrl: 'range', min: 0.5, max: 0.78, step: 0.01, route: 'building' },
     { key: 'eaveOverhang', ctrl: 'range', min: 0.8, max: 1.8, step: 0.05, route: 'building' },
@@ -31,9 +37,7 @@ const CHOGA_SECTIONS = [
     { key: 'winSide', ctrl: 'toggle', route: 'building' },                    // 측면 봉창 유무
     { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] }, // 창살 패턴
   ] },
-  { id: 'plan', titleKey: 'sec_plan', adv: true, fields: [
-    { key: 'frontBays', ctrl: 'stepper', min: 3, max: 5, route: 'building' },
-    { key: 'sideBays', ctrl: 'stepper', min: 2, max: 3, route: 'building' },
+  { id: 'plandims', titleKey: 'sec_plandims', adv: true, fields: [
     { key: 'centerBayW', ctrl: 'range', min: 2.2, max: 3.8, step: 0.05, route: 'building' },
     { key: 'endBayW', ctrl: 'range', min: 2.0, max: 3.0, step: 0.05, route: 'building' },
   ] },
@@ -60,6 +64,13 @@ const CHOGA_SECTIONS = [
 
 // ── 정규 필지: 기와집(반가, ㄱ자) ─────────────────────────────────────────
 const GIWA_SECTIONS = [
+  // 규모/칸(#146) — 기와집(반가)은 ㄱ자 고정형(코어 buildGiwa 는 L 전용, 평면형 선택 없음). 칸수는
+  //   연속 치수로 조절: 본채 폭이 곧 정면 칸수(buildGiwa 가 폭/주칸으로 칸을 산출), 날개 길이가 측면.
+  //   noteKey 로 "ㄱ자 기본형" 안내를 얹어 평면형 선택이 왜 없는지 설명하고, 맨 위에 둬 규모 축을 헤드라인화.
+  { id: 'plan', titleKey: 'sec_plan', noteKey: 'giwa_note', fields: [
+    { key: 'mainHalfW', ctrl: 'range', min: 2.8, max: 5.2, step: 0.1, route: 'building' },
+    { key: 'wingLen', ctrl: 'range', min: 2.8, max: 4.6, step: 0.1, route: 'building' },
+  ] },
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'riseScale', ctrl: 'range', min: 0.6, max: 1.2, step: 0.02, route: 'building' },
     { key: 'eaveOverhang', ctrl: 'range', min: 1.0, max: 2.0, step: 0.05, route: 'building' },
@@ -69,10 +80,8 @@ const GIWA_SECTIONS = [
     { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] },
     { key: 'wallType', ctrl: 'segment', route: 'top', options: ['tile', 'stone', 'mud', 'brush'] },
   ] },
-  { id: 'plan', titleKey: 'sec_plan', adv: true, fields: [
-    { key: 'mainHalfW', ctrl: 'range', min: 2.8, max: 5.2, step: 0.1, route: 'building' },
+  { id: 'plandims', titleKey: 'sec_plandims', adv: true, fields: [
     { key: 'mainHalfD', ctrl: 'range', min: 1.8, max: 2.8, step: 0.1, route: 'building' },
-    { key: 'wingLen', ctrl: 'range', min: 2.8, max: 4.6, step: 0.1, route: 'building' },
     { key: 'wingW', ctrl: 'range', min: 1.8, max: 3.0, step: 0.1, route: 'building' },
   ] },
   { id: 'proportion', titleKey: 'sec_proportion', adv: true, fields: [
@@ -93,8 +102,17 @@ const GIWA_SECTIONS = [
   ] },
 ];
 
-// ── 특수: 종가(hanok 컴파운드) — buildHanok roofOpts + 벽 높이 ────────────
+// ── 특수: 종가(hanok 컴파운드) — 평면형·칸수 + buildHanok roofOpts + 벽 높이 ────────────
+//   평면형(#146 복원): 종가 안채는 buildHanok(임의 폴리곤 풋프린트 + straight-skeleton 지붕 + reflex
+//   안뜰 개구)이라 ㅡ/ㄱ/ㄷ 평면을 코어가 온전히 지원한다. planShape·bays 를 route 'roofOpts' 로 보내면
+//   adapter heroEditOpts 가 np.roofOpts 를 통째로 포워딩 → buildParcel 이 풋프린트를 그 형태·칸수로
+//   생성한다(adapter/engine 무수정). def 로 기본 ㄱ자·3칸을 표시하되, 미편집 페이로드엔 실리지 않아
+//   랜딩 종가 픽셀 불변. 평면형 옵션 라벨은 구 패널 어휘(홑채/ㄱ자/ㄷ자, step_*) 재사용.
 const HANOK_SECTIONS = [
+  { id: 'plan', titleKey: 'sec_plan', fields: [
+    { key: 'planShape', ctrl: 'segment', route: 'roofOpts', def: 'l', options: ['single', 'l', 'u'] },
+    { key: 'bays', ctrl: 'stepper', min: 2, max: 4, route: 'roofOpts', def: 3 },
+  ] },
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'riseScale', ctrl: 'range', min: 0.9, max: 1.8, step: 0.02, route: 'roofOpts' },
     { key: 'eaveOverhang', ctrl: 'range', min: 0.8, max: 1.8, step: 0.05, route: 'roofOpts' },

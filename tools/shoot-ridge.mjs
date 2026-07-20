@@ -1,6 +1,6 @@
 // #97 팔작지붕 용마루 소실 + 부속채 지붕 관통 검증. buildBuilding·buildPalaceCompound 직접 import.
 //   전용 포트 4212 / 중간 컷 scratchpad/ridge/, 게이트 증거 shots/ridge-*.
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-ridge.mjs [out=scratch|shots] [filter]
+// 사용: node tools/shoot-ridge.mjs [out=scratch|shots] [filter]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

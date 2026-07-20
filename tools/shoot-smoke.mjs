@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 굴뚝 연기 + 아궁이 불씨 검증 → shots/smoke-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-smoke.mjs [group]
+// 사용법: node tools/shoot-smoke.mjs [group]
 //   group = giwa | wind | night | choga | regress | all(기본)
 //
 // env 직접 import 하네스(/__smoke): index.html 앱 경로(다른 에이전트가 자주 깨뜨림) 회피.

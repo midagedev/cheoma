@@ -1,5 +1,5 @@
 // 한양 도성 시각 검증 + 컬링 실효 측정. 중간 컷은 scratchpad/capital/, 게이트 증거는 shots/capital-*.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-hanyang.mjs [out=scratch|shots]
+// 사용법: node tools/shoot-hanyang.mjs [out=scratch|shots]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

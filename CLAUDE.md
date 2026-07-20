@@ -1,0 +1,67 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+cheoma (처마) — a procedural Joseon-era Korean architecture & village generator in three.js. Parametric hanok (칸 system, 공포, 팔작지붕 curvature), auto-composed villages (배산임수 terrain, 필지·담장·고샅, 다랑이 논·개울, 산사), a scale continuum from a lone house to a walled capital (한양) with multi-곽 palaces, plus time/season/weather, a focus zoom continuum, and an ink (수묵화) NPR mode. Live at cheoma.midagedev.com.
+
+## Two-layer boundary (read this first)
+
+- **`src/`** — the framework-agnostic ES-module core (pure three.js): all generation, rendering, environment, animation, export. Imports bare `three`. **Never import Svelte or anything from `app/` into `src/`.**
+- **`app/`** — a Svelte 5 + Vite SPA that consumes the core. `app/src/engine/engine.js` is the imperative wrapper: it wires the core into one three.js scene and exposes `window.__engine`. Svelte components drive that imperative API only — they hold no three.js state of their own.
+
+three is pinned to **0.185.1**. `app/vite.config.js` aliases bare `three` → `app/node_modules` (with `dedupe`) and sets `server.fs.allow = repoRoot` so the app can import `../src`. A second three instance silently breaks `instanceof` checks and prototype patches (e.g. accelerated raycast).
+
+## Commands
+
+```bash
+cd app
+npm install
+npm run dev      # vite dev server (default :5173)
+npm run build    # → app/dist   (build.target es2022, assetsInlineLimit 0)
+```
+
+There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`), so run the tools with plain node:
+
+```bash
+npm install                        # at repo root, one-time (chromium reuses the shared Playwright cache)
+node tools/shoot-<feature>.mjs
+```
+
+For a deterministic build snapshot use a clean build (`rm -rf dist && vite build`) — repeated incremental builds to a dedicated outDir can corrupt output (boot-time null uniforms). When spinning up an *extra* dev server for isolated verification, bind `host: '127.0.0.1'` (vite defaults to IPv6 `::1`, which Playwright's `127.0.0.1` refuses) with its own `cacheDir`; leave the user's own dev server alone.
+
+### Harnesses & runtime flags
+The core runs standalone from the repo-root `index.html` (plus per-domain harnesses `ink.html`, `layout.html`, `props.html`, `seasons.html`, `audio.html`). Subsystems expose URL params / `window.__*` hooks for isolated testing — e.g. `?post=0` (disable the post composer), `?worker=0` or `window.__villageSync` (synchronous village gen), `?rim=pass`, `window.__wx`, `window.__viewshift`. Prefer a direct-import harness over the full app path when verifying an `env/` change (the app path breaks often mid-refactor).
+
+## Architecture
+
+**Rendering — the flagship look (`src/env/post.js`)**: a unified EffectComposer, on by default (`?post=0` disables). Pass order is RenderPass → Rim → Bloom → OutlinePass → Bokeh(DoF) → Output → FlarePass. The signature look is golden-hour backlit rim + bloom haze. The rim is a **Fresnel material patch** (`src/env/rim.js`) applied to role-tagged materials, not a screen-space normal pass.
+
+**Building types & materials**: 궁(palace) / 절(temple) / 기와집(giwa) / 초가(choga). 단청 (dancheong) is type-dependent — palace & temple only. Roof builder dispatch: giwa → `roof-skeleton.js`; palace/temple/choga → `roof.js`. `src/builder/palette.js#makeMaterials` returns role-tagged materials; per-part color variety rides `instanceColor` at zero extra draw calls (adding material variants is expensive — mind draw-call budgets; town ceiling < 1000).
+
+**Village generation (`src/village/`)** — a deterministic pipeline:
+`plan.js` (`planVillage(opts)`: parcels, basin, roads — pure & seed-deterministic) → `populate.js` (`populateVillage`, and the `populateVillageSteps` generator) → `adapter.js` (`createVillage` / `createVillageAsync` → the village handle the engine drives). Convention: **`+z` = south.** Scale is a continuum (`siteR` scalar / tier): lone house → hamlet → village → town → capital → hanyang (성곽 도성 with 사대문·시전, `citywall.js`). Repeated buildings are instanced (`chunks.js`, `instancing.js`).
+
+**Performance is architectural here, not incidental** (this is a large scene):
+- **Worker offload** (`populate.worker.js` + `forest-crunch.js`): forest placement (14k–40k trees, the bulk of generation cost) runs in a Web Worker that returns a transferable `Float32Array` of matrices + seasonal colors; the main thread only assembles `InstancedMesh`. `createVillageAsync` rAF-chunks that assembly. `?worker=0` is the synchronous fallback.
+- **Shader precompile**: transition freezes are shader **link** stalls, not CPU. `engine.js` calls `warmShaders` (`renderer.compileAsync` scoped to the *new* subtree only — passing the whole scene makes it worse) and flips `renderer.debug.checkShaderErrors = false` after the first village warm.
+- Terrain radius is clamped to basin + a fixed buffer; the world edge is finished with `worldedge.js` mist rather than sprawling terrain.
+
+**Determinism (critical)**: village generation swaps global `Math.random` for a seeded rng across the plan+populate window, then restores it; the worker uses a worker-local rng. Any multi-frame async path must save/reinstall the seed window per rAF slice, or the render loop's `Math.random` calls pollute the seed stream and break byte-identical reproduction. Gate village changes with a worker-vs-sync full-village hash.
+
+**Environment (`src/env/`)**: time/season/weather changes crossfade via internal tweens — API signatures stay stable, no hard cut. Snow = a roof white-tint shader (not an accumulation volume); rain = falling-curtain particles. `focus.js` drives the close-up ambience ring (chickens, chimney smoke, wind grass, lanterns) on the focused parcel. Camera tweens must call `camera.lookAt` every frame — freezing direction snaps the frame on tween end.
+
+**Other core dirs**: `src/layout/` (hanok/compound assembly, `offsetPoly`), `src/anim/assembly.js` (the "tofu" drop-in assembly, shared by assembly/expansion/merge), `src/camera/`, `src/cinematic/` (drone + first-person walk), `src/export/` (glTF/GLB, `EXT_mesh_gpu_instancing`), `src/render/` (ink NPR), `src/props/`, `src/share/`.
+
+## onBeforeCompile gotchas
+Many stock materials are patched via `onBeforeCompile`. Rules learned the hard way:
+- No dynamically-indexed custom uniform arrays. `Vector3.copy(Color)` yields NaN → black render.
+- Patch **chain order inverts**: an earlier-registered patch's `color` code runs *after* a later patch's (string-replacement ordering) — exploited deliberately for seasonal multiply overrides.
+- World-normal effects on an `InstancedMesh` must compose `mat3(instanceMatrix)` (instance orientation lives in `instanceMatrix`, not `modelMatrix`), or up-facing gates read zero.
+
+## Verifying visual changes
+Headless ANGLE serializes shader linking, so absolute frame-ms from headless runs is unreliable — judge perf by **program-count deltas** and determinism hashes, not wall-clock. Keep gate screenshots minimal; put throwaway captures in a scratch dir, not `shots/`.
+
+## Design specs (`docs/`)
+Code comments reference these directly: `mode-integration.md` (mode/camera/focus integration — comments cite e.g. "mode-integration §5.5"), `palace-layout.md`, `joseon-city.md`, `tooling.md` (vetted library stack — manifold-3d, three-mesh-bvh, clipper2 offset caveat), `perf-webgpu.md`, `ui-design.md`, `references.md`.

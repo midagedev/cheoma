@@ -5,7 +5,7 @@
 //     ② 셰이더 컴파일 에러·pageerror 0 (sunset·night·autumn 각 로드; renderer.compile 로 전 재질 강제 컴파일)
 //     ③ seasons 활성 + 반복 rescan 에서 프로그램 재컴파일 폭주 없음(programs 카운트 안정)
 //     ④ ink / ?post=0 / ?rim=pass 각 로드 클린(강도·마스터 0 / 미패치 / 폴백)
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-rim101.mjs
+// 사용: node tools/verify-rim101.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';

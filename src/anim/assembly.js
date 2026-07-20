@@ -48,27 +48,54 @@ const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 // 착지 시점(자식 로컬 진행도 u 기준). u<IMPACT 는 공중 낙하, 이후는 두부 출렁 복원.
 const IMPACT = 0.5;
 
+// 상승 속도 → 스케일 연속 결합(#126 사용자 피드백 2차). 최초의 "띠용"은 착지 후 **별도 반동 단계**
+//   (구: cos 1.6사이클 감쇠 진동 / 1차 수정: 단일 팔로스루)에서 왔다. 사용자 지시: 반동 단계 자체를
+//   없애고, 부재가 떠오르는 **속도를 그대로 스케일에 연속으로 실어** 이징한다 — 빠를수록 진행방향으로
+//   늘어나고, 감속해 멈추는 순간 정확히 원상(1)으로 수렴한다. 오버슈트·2차 재도약 0(단조).
+//   상승은 easeOutCubic 이라 IMPACT 에서 속도 0 으로 안착하므로(assembly·wave·engine compound 3경로
+//   공유), 그 속도의 정규화 형상 v=(1-u/IMPACT)² 이 스트레치를 구동한다(u≥IMPACT → v=0 → 스케일=1,
+//   position 도 동시 정지 → C1 연속). TOFU_STRETCH: 속도→스케일 결합 게인(1=또렷한 스쿼시&스트레치,
+//   0=변형 없이 순수 상승). window.__tofuStretch(런타임 튜닝)·window.__tofuLegacy(구 반동 A/B) 오버라이드.
+//   하위호환: setTofuBounce/getTofuBounce 는 이 게인의 별칭으로 유지(외부 API 시그니처 불변).
+let TOFU_STRETCH = 0.7;
+export function setTofuBounce(k) { TOFU_STRETCH = Math.max(0, Math.min(1, k)); }
+export function getTofuBounce() { return TOFU_STRETCH; }
+function stretchK() {
+  if (typeof window !== 'undefined' && typeof window.__tofuStretch === 'number') return window.__tofuStretch;
+  if (typeof window !== 'undefined' && typeof window.__tofuBounce === 'number') return window.__tofuBounce; // 구 훅 호환
+  return TOFU_STRETCH;
+}
+function tofuLegacy() { return typeof window !== 'undefined' && !!window.__tofuLegacy; }
+
 // 두부 스쿼시&스트레치 배율. u(자식 진행 0..1), amp(진폭) → { sy, sxz }.
-//  - 낙하 중(u<IMPACT): 진행 방향으로 살짝 늘어남(anticipation stretch).
-//  - 착지 후: 강한 눌림(sy<1, xz 퍼짐)에서 시작해 감쇠 진동으로 1 로 복원(띠용 1~2회).
+//   신 모델(속도 결합): 상승 중(u<IMPACT)만 상승 속도 v=(1-u/IMPACT)² 에 비례해 진행방향(수직)으로
+//   늘어나고(sy>1, 부피보존 sxz<1), IMPACT 에서 v→0 이라 스케일이 1 로 연속 수렴. u≥IMPACT 는 정확히 1
+//   (정착 완료 — 반동/재도약 없음). 구 모델(legacy): 착지 후 cos 1.6사이클 감쇠 진동(A/B 비교용).
 export function tofuScale(u, amp = 0.2) {
   if (u <= 0 || u >= 1) return { sy: 1, sxz: 1 };
-  if (u < IMPACT) {
-    const k = u / IMPACT;                 // 0..1
-    const s = amp * 0.30 * Math.sin(k * Math.PI * 0.5); // 착지 직전 최대 stretch
-    return { sy: 1 + s, sxz: 1 - s * 0.5 };
+  if (tofuLegacy()) {
+    if (u < IMPACT) {
+      const k = u / IMPACT;
+      const s = amp * 0.30 * Math.sin(k * Math.PI * 0.5);
+      return { sy: 1 + s, sxz: 1 - s * 0.5 };
+    }
+    const w = (u - IMPACT) / (1 - IMPACT);
+    const decay = Math.exp(-w * 4.2);
+    const osc = Math.cos(w * Math.PI * 2 * 1.6);
+    return { sy: 1 - amp * decay * osc, sxz: 1 + amp * 0.55 * decay * osc };
   }
-  const w = (u - IMPACT) / (1 - IMPACT);  // 0..1
-  const decay = Math.exp(-w * 4.2);
-  const osc = Math.cos(w * Math.PI * 2 * 1.6); // cos(0)=1 → 착지 순간 최대 눌림
-  return { sy: 1 - amp * decay * osc, sxz: 1 + amp * 0.55 * decay * osc };
+  if (u >= IMPACT) return { sy: 1, sxz: 1 };     // 상승 종료·안착 — 스케일 정확히 원상(무반동)
+  const v = (1 - u / IMPACT) ** 2;               // 상승 속도 정규화(1→0): easeOutCubic 위치의 도함수 형상
+  const s = amp * stretchK() * v;                // 속도 결합 스트레치(빠를수록↑, 멈추며 0 으로 연속 수렴)
+  return { sy: 1 + s, sxz: 1 - s * 0.5 };
 }
 
-// 착지 후 미세 위치 바운스(두부가 통째로 까딱). u, amp → y 오프셋 계수(진폭 amp).
+// 위치 보정 계수(caller 가 position.y 에 가산). 신 모델은 상승 자체가 연속 이징이라 별도 수직 반동을
+//   두지 않는다 → 0(무까딱, 재도약 없음). legacy 만 구 다중 sin 까딱 유지(A/B 비교용).
 export function tofuBob(u, amp = 0.2) {
   if (u < IMPACT || u >= 1) return 0;
-  const w = (u - IMPACT) / (1 - IMPACT);
-  return amp * Math.exp(-w * 4.5) * Math.sin(w * Math.PI * 2 * 1.6); // 착지 순간 0 에서 시작
+  if (tofuLegacy()) { const w = (u - IMPACT) / (1 - IMPACT); return amp * Math.exp(-w * 4.5) * Math.sin(w * Math.PI * 2 * 1.6); }
+  return 0;
 }
 
 // 낙하 오프셋 계수(1→0): 착지(IMPACT)까지 감속하며 내려앉고, 이후 0.

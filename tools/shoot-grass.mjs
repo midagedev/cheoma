@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: focus 링 바람 풀(#90) 검증 → shots/grass-*.png + scratchpad
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-grass.mjs
+// 사용법: node tools/shoot-grass.mjs
 //
 // shoot-focus(/__focus) 구조 재활용, 전용 포트 4204(사용자 dev 5174·다른 하네스 4197 미접촉).
 //   window.__advance(secs)      : ring.update 를 0.05s 씩 전진(페이드/흔들림)

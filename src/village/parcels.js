@@ -91,6 +91,17 @@ function rotDir(d, ang) {
 // reg → 필지 방향 지터 최대각(rad). 정연 마을(격자 지향) 규칙을 완화해 손배치 인상.
 const facingJitter = (reg, sr) => (sr() * 2 - 1) * lerpN(0.34, 0.09, reg);   // ±19.5°(민촌)~±5°(반가)
 
+// ── 남향 지향(#120) ── 도로 지향 frontDir 을 남(+z)쪽으로 제한된 각(pull)만큼 당긴다. 조선 가옥의
+//   남향 선호 반영이되, 도로에 등을 돌리지 않도록 최대 pull 로 클램프 — 이미 pull 안이면 정남 스냅,
+//   그밖은 pull 만큼만 남으로 회전(정북 지향 집은 거의 불변). worldPolyFromShape·parcelRotY 가 같은
+//   frontDir 을 공유하므로 poly·담·패드·프록시 정합 유지. facingY(=atan2(x,z)) 기준: 남(+z)=0.
+const SOUTH_PULL = 0.42;   // ≈24° — 도로 관계 보존하며 남향 리드
+function southPull(dir, pull = SOUTH_PULL) {
+  const cur = Math.atan2(dir.x, dir.z);                 // 현 facingY (남=0)
+  const ang = Math.max(-pull, Math.min(pull, cur));     // rotDir(+ang) 은 facingY 를 ang 만큼 감소
+  return rotDir(dir, ang);
+}
+
 // 로컬 부정형 필지 폴리곤(docs R-P1). 좌표: X=좌우(도로 접선), Z=앞(+hd 도로변)~뒤(-hd).
 //   집은 뒤(z=-hd 근처)에 앉고 앞(+hd)은 마당·대문쪽. 앞변(파사드)은 직선·전폭 고정 —
 //   담 렌더(walls.buildFrontEdge)가 z=+hd 전폭 직선을 전제하고, 고증상 도로변은 곧은 파사드 +
@@ -199,7 +210,9 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     return true;
   };
   const validate = (center, poly, ownRoad) => {
-    if (G.dist(center, C) > site.bowlR * 1.06) { dbg.bowl++; return false; }
+    // #120 비원형 분지: 외곽 한계를 방위별 분지 반경(bowlRAt)에 태워 신장 로브까지 필지가 뻗게 한다.
+    const bowlLim = site.bowlRAt ? site.bowlRAt(center.x, center.z) : site.bowlR;
+    if (G.dist(center, C) > bowlLim * 1.06) { dbg.bowl++; return false; }
     if (site.stream && Math.abs(center.z - site.streamZat(center.x)) < site.streamHalf + 4.5) { dbg.stream++; return false; }
     if (site.paddyRegion) {
       const pr = site.paddyRegion;
@@ -261,7 +274,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
         const center = G.add(base, G.mul(inward, dims.plotD / 2));
         const inwardDir = G.norm(G.mul(inward, -1));            // 도로를 향한 기본 방향
         const frontDir = hero ? inwardDir
-          : rotDir(inwardDir, facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0)));  // 방향 지터(격자 완화)
+          : southPull(rotDir(inwardDir, facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0))));  // 지터 + 남향 지향(#120)
         const shape = hero ? rectShape(dims.plotW, dims.plotD)
           : localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
         const poly = worldPolyFromShape(center, frontDir, shape.pts);
@@ -292,7 +305,9 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   while (parcels.length < target && guard < target * 90) {
     guard++;
     const ang = rng.range(0, Math.PI * 2);
-    const rad = site.bowlR * Math.pow(rng(), radExp);      // 중심 편향(밀도↑)
+    // #120 비원형: 방위별 분지 반경으로 샘플 → 신장 로브가 있으면 그쪽으로 필지 군집이 더 뻗는다.
+    const bowlRad = site.bowlRadiusAt ? site.bowlRadiusAt(ang) : site.bowlR;
+    const rad = bowlRad * Math.pow(rng(), radExp);         // 중심 편향(밀도↑)
     const p0 = { x: C.x + Math.cos(ang) * rad, z: C.z + Math.sin(ang) * rad };
     let best = { d: Infinity, pt: null };
     for (const r of roads) { const q = G.distToPolyline(p0, r.pts); if (q.d < best.d) best = q; }
@@ -302,7 +317,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     const reg = regOf(rank, char01, false);
     const dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
     if (best.d < dims.plotD * 0.5 + 1.5) continue;         // 도로 위/침범 방지
-    const frontDir = rotDir(G.norm(G.sub(best.pt, p0)), facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0)));  // 도로 지향 + 지터
+    const frontDir = southPull(rotDir(G.norm(G.sub(best.pt, p0)), facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0))));  // 도로 지향 + 지터 + 남향(#120)
     const shape = localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
     const poly = worldPolyFromShape(p0, frontDir, shape.pts);
     dbg.candidates++;
@@ -354,4 +369,105 @@ function assignEdgeShare(parcels) {
     }
     P.shape.edges = edges;
   }
+}
+
+// ── 위성 부락(#120) ── 본동에서 조금 떨어진 완사면 포켓에 흩어진 작은 무리(몇 채). 조선 마을이 본동 +
+//   외딴 몇 집으로 퍼지는 자연스러움. 분지 밖(minR 바깥)의 낮은 어깨를 스캔해 완경사·비능선·비정북(주산
+//   실루엣 보호)·on-mesh 앵커를 고르고, 그 둘레에 남향 초가 위주 2~5채를 한 줄(+뒷줄)로 앉힌다. 반환
+//   parcel 은 정규 필지와 동일 형태({poly,shape,center,frontDir,rank,kind,plotW,plotD,seed}) — plan 이
+//   parcels 에 편입하면 id·assignVariation·populate 조립·나무 clearance/mask·야경·소동물이 그대로 적용된다.
+//   전용 rng(공유 rng·필지 seed 공간 불침해, 결정론). existing = 겹침 회피용 기존 필지·예약 polygon.
+export function planSatellites(site, opts, seed, { minR = 0, existing = [] } = {}) {
+  const scale = opts.scale;
+  const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
+  const nClusters = ({ hamlet: 0, village: 1, town: 1, capital: 2, hanyang: 3 })[scale] || 0;
+  if (nClusters <= 0) return [];
+  const rng = makeRng((seed ^ 0x5a7e11) >>> 0);
+  const C = site.center, bowlR = site.bowlR, TR = site.terrainR || site.R;
+  const rLo = Math.max(minR, bowlR * 1.14);
+  const rHi = Math.min(TR * 0.9, bowlR * 1.66);
+  if (rHi <= rLo + 8) return [];
+
+  const foot = 13;                                   // 소형 필지 footprint 상당(완경사 판별)
+  const footSlope = (x, z) => {
+    let lo = 1e9, hi = -1e9;
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      const h = site.heightAt(x + i * foot / 2, z + j * foot / 2);
+      if (h < lo) lo = h; if (h > hi) hi = h;
+    }
+    return hi - lo;
+  };
+  const nearStream = (x, z, m) => site.stream && Math.abs(z - site.streamZat(x)) < site.streamHalf + m;
+
+  // 앵커 후보 스캔: (phi, r) 격자에서 완사면·저능선·비정북·비하천 지점 수집·점수화.
+  const cands = [];
+  const NP = 48;
+  for (let p = 0; p < NP; p++) {
+    const phi = (p / NP) * Math.PI * 2;
+    const dx = Math.cos(phi), dz = Math.sin(phi);
+    if (dz < -0.72) continue;                        // 정북(-z) 콘 배제 → 주산 배후 보호
+    for (let r = rLo; r <= rHi; r += bowlR * 0.06) {
+      const x = C.x + dx * r, z = C.z + dz * r;
+      if (site.hillAt(x, z) > 0.44) continue;        // 능선·급사면 제외(성곽 밖 완사면 어깨 허용)
+      const slope = footSlope(x, z);
+      if (slope > 4.2) continue;                     // 완~중경사(도성 성곽 밖 어깨 축대 허용); 점수가 완경사 우선 → 소규모는 완경사만 채택
+      if (nearStream(x, z, 4)) continue;
+      const south = dz > 0.2 ? 1 : 0;                // 남측(계곡 입구) 외딴집 선호
+      const score = -site.hillAt(x, z) * 3 - slope * 1.4 - (r - rLo) / bowlR * 0.5 + south * 0.6 + rng() * 0.35;
+      cands.push({ x, z, phi, r, score });
+    }
+  }
+  if (!cands.length) return [];
+  cands.sort((a, b) => b.score - a.score);
+  // 각 분리(≈60°) 확보하며 nClusters 앵커 선정.
+  const chosen = [];
+  for (const c of cands) {
+    if (chosen.length >= nClusters) break;
+    let ok = true;
+    for (const q of chosen) { let d = Math.abs(c.phi - q.phi); if (d > Math.PI) d = Math.PI * 2 - d; if (d < 1.05) { ok = false; break; } }
+    if (ok) chosen.push(c);
+  }
+
+  const placed = makePlacedGrid();
+  for (const poly of existing) if (poly) placed.add(poly);
+  const south = { x: 0, z: 1 };
+  const out = [];
+  let sidx = 0;
+  for (const anchor of chosen) {
+    const cseed = (seed ^ (0x5afe1 * (sidx + 1))) >>> 0;
+    const crng = makeRng(cseed);
+    const big = scale === 'capital' || scale === 'hanyang';
+    const kTarget = 2 + Math.floor(crng() * (big ? 4 : 3));   // 2~4(마을) / 2~5(도성)
+    const cellW = 10.5 * (0.86 + char01 * 0.3);
+    // 등반경 접선 열(같은 표고대 유지) + 안쪽(저지) 뒷줄 — 방사(고지) 확산을 피해 얇은 완사면대에 앉힌다.
+    const rad = G.norm({ x: anchor.x - C.x, z: anchor.z - C.z });   // 바깥 방사
+    const tan = { x: -rad.z, z: rad.x };                            // 접선(등반경)
+    const perRow = Math.min(3, Math.max(2, kTarget));
+    let col = 0, row = 0, made = 0, attempts = 0;
+    while (made < kTarget && attempts < kTarget * 7) {
+      attempts++;
+      const tOff = (col - (perRow - 1) / 2) * cellW + crng.range(-1.0, 1.0);   // 접선 방향(등반경)
+      const rOff = -row * cellW * 1.05 + crng.range(-1.0, 1.0);                // 안쪽(-rad, 저지)으로 뒷줄
+      col++; if (col >= perRow) { col = 0; row++; }
+      const px = anchor.x + tan.x * tOff + rad.x * rOff, pz = anchor.z + tan.z * tOff + rad.z * rOff;
+      if (site.hillAt(px, pz) > 0.54) continue;
+      if (footSlope(px, pz) > 4.6) continue;                        // 성토 계단(computePadY 축대); 어깨 부락 허용
+      if (nearStream(px, pz, 3)) continue;
+      const rank = Math.max(0, 0.16 + (char01 - 0.5) * 0.30 + crng.range(-0.06, 0.06)); // 외딴집=하급(초가 우세)
+      const pseed = (cseed ^ (made * 2654435761)) >>> 0;
+      const reg = regOf(rank, char01, false);
+      const dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
+      const frontDir = southPull(rotDir(south, facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0)) * 0.7));  // 남향 + 약한 지터
+      const shape = localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
+      const center = { x: px, z: pz };
+      const poly = worldPolyFromShape(center, frontDir, shape.pts);
+      if (placed.overlaps(poly)) continue;
+      out.push({ poly, shape, center, frontDir, rank, kind: dims.kind, plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed, satellite: true });
+      placed.add(poly);
+      made++;
+    }
+    sidx++;
+  }
+  if (out.length) assignEdgeShare(out);   // 위성 군집 내 담 공유·높이 차등
+  return out;
 }

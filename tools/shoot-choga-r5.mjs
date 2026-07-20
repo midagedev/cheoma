@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 초가 R5 폴리시 + 아궁이 검증 → shots/choga-r5-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-choga-r5.mjs [group]
+// 사용법: node tools/shoot-choga-r5.mjs [group]
 //   group = choga | agungi | chimney | regress | all(기본)
 //
 // env 직접 import 하네스(/__cr5): index.html 앱 경로 회피(다른 에이전트가 자주 깨뜨림).

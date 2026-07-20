@@ -1,6 +1,6 @@
 // 진입 대개편(#62 마을 우선 진입 · #59 모드 일원화·리플레이 · #72 브랜딩) 게이트 검증.
 // 빌트 앱(app/dist-entry)을 실제로 구동해 부팅 시퀀스·모드 토글·리플레이를 촬영한다.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-entry.mjs
+// 사용법: node tools/shoot-entry.mjs
 //   포트 4188 고정(사용자 dev 5174 불침해). 결과: shots/entry-*.png + 콘솔에 pageerror·프레임갭 로그.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

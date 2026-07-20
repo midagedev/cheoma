@@ -1,5 +1,5 @@
 // 일회성 측정: 집 프로토타입(giwa/choga) 메시·재질·지오메트리 구성 + capital 마을 draw calls.
-// NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/measure-proto.mjs
+// node tools/measure-proto.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';

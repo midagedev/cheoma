@@ -1,5 +1,5 @@
 // 외곽 나무 검증(#86): 부유(높이 오배치) + 밀도. populateVillage 직접 경로(결정론·나무 수 집계).
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-trees.mjs [out=scratch|shots] [필터]
+// 사용법: node tools/shoot-trees.mjs [out=scratch|shots] [필터]
 //   전용 포트 4202, src/ 직접 서빙(빌드 불필요 → 사용자 dev 5174 무접촉).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

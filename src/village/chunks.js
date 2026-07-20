@@ -89,3 +89,20 @@ export function combineHouseHandles(kind, groups) {
     isHidden(id) { const uh = owner.get(id); return uh ? uh.isHidden(id) : false; },
   };
 }
+
+// 여러 청크의 병합 담(mergeStatic ids 로 소스레인지 부착) 은닉 핸들을 하나로 합친다(#148).
+//   각 병합 담 그룹 userData(setHidden/isHidden/srcIds)를 id→그룹 맵으로. focus 필지의 병합 담을
+//   접어 오버레이 담과의 동일평면 이중 렌더(플리커)를 제거하는 배선(adapter rebuildParcel/hideParcelDetail).
+export function combineWallHandles(groups) {
+  const owner = new Map();   // parcelId -> 병합 담 그룹 userData
+  for (const gp of groups) {
+    const uh = gp && gp.userData;
+    if (!uh || !uh.srcIds) continue;
+    for (const id of uh.srcIds) owner.set(id, uh);
+  }
+  return {
+    locate: owner,
+    setHidden(id, on) { const uh = owner.get(id); if (uh) uh.setHidden(id, on); },
+    isHidden(id) { const uh = owner.get(id); return uh ? uh.isHidden(id) : false; },
+  };
+}

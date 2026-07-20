@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: hanok(종가) 굴뚝 #82 검증 → shots/chimney-*.png + scratchpad
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-chimney.mjs
+// 사용법: node tools/shoot-chimney.mjs
 //
 // shoot-focus.mjs(#79 /__focus) 구조 재활용. 전용 포트 4199, 사용자 dev 미접촉.
 //   buildParcel(hanok) + createFocusRing 만 직접 import(앱/adapter 우회).

@@ -190,6 +190,51 @@ export function buildExportScene(target, opts = {}) {
   return root;
 }
 
+// ── 프레임 양보(#117): 마을 전체(수백 노드)를 한 번에 정화하면 메인스레드가 통째로 멈춘다(부감
+//    마을 익스포트 ~0.6s 블록). sanitize 를 노드 예산 단위로 끊어 requestAnimationFrame 사이사이
+//    양보하면 rAF·입력·베일 애니가 살아있는 채로 트리가 재구성된다. 출력 트리·순서·재질 dedup 은
+//    동기 sanitize 와 완전 동일(같은 재귀 순서, 같은 matCache) — GLB 바이트 동일성 보존.
+function nextFrame() {
+  if (typeof requestAnimationFrame === 'function') return new Promise((r) => requestAnimationFrame(() => r()));
+  return new Promise((r) => setTimeout(r, 0));
+}
+async function sanitizeChunked(node, opts, matCache, budget) {
+  const verdict = classify(node, opts);
+  if (verdict === 'skip') return null;
+
+  let out;
+  if (node.isInstancedMesh) {
+    if (opts.instancing === 'bake') {
+      out = bakeInstanced(node, matCache);
+    } else {
+      const im = new THREE.InstancedMesh(node.geometry, cleanMaterial(node.material, matCache), node.count);
+      im.instanceMatrix = node.instanceMatrix;
+      if (node.instanceColor) im.instanceColor = node.instanceColor;
+      out = im;
+    }
+  } else if (node.isMesh) {
+    out = new THREE.Mesh(node.geometry, cleanMaterial(node.material, matCache));
+  } else {
+    out = new THREE.Group();
+  }
+
+  out.name = node.name || '';
+  out.position.copy(node.position);
+  out.quaternion.copy(node.quaternion);
+  out.scale.copy(node.scale);
+
+  // 노드 예산 소진 시 다음 프레임으로 양보(자식 순회 전에 검사해 깊은 서브트리도 균등 분할).
+  if (--budget.left <= 0) { budget.left = budget.size; await nextFrame(); }
+
+  for (const child of node.children) {
+    const c = await sanitizeChunked(child, opts, matCache, budget);
+    if (c) out.add(c);
+  }
+
+  if (!node.isMesh && !node.isInstancedMesh && out.children.length === 0) return null;
+  return out;
+}
+
 // ── 메인 익스포트. 성공 시 ArrayBuffer(binary) / glTF JSON(binary:false),
 //    예산 초과 시 안내 객체(overBudget).
 export async function exportGLB(target, opts = {}) {
@@ -217,7 +262,13 @@ export async function exportGLB(target, opts = {}) {
     };
   }
 
-  const root = buildExportScene(target, o);
+  // 정화 트리 구성 — 프레임 양보 청킹(#117)으로 큰 마을(수백 노드)의 sanitize(~0.65s)를 여러 프레임에
+  //   나눠 rAF·베일 애니를 살린다. 소규모(단일 집)는 예산 안에 끝나 사실상 동기(양보 0회). 출력 트리·
+  //   순서·재질 dedup 은 동기 sanitize 와 동일 → GLB 바이트 불변. (익스포트 총시간의 대부분은
+  //   GLTFExporter.parseAsync 의 동기 이미지 임베딩·버퍼 패킹으로, 그건 애드온 내부라 여기서 청킹 불가.)
+  const matCache = new Map();
+  const root = await sanitizeChunked(target, o, matCache, { left: o.chunkNodes || 500, size: o.chunkNodes || 500 });
+  if (!root) throw new Error('exportGLB: 익스포트할 지오가 없습니다(전부 필터됨)');
 
   const exporter = new GLTFExporter();
   const result = await exporter.parseAsync(root, {

@@ -62,9 +62,25 @@ export function createBgm(listener, { destination, baseUrl = './assets/audio/' }
     if (!started) return; // start() 후 실제 재생
     const buf = await load(name);
     if (!buf) return;
+    // #140-D stale 가드: await(fetch+decode) 중 새 play(다른 트랙)가 들어왔으면 이 요청은 버린다.
+    //   느린 옛 로드가 새 요청을 덮어써 엉뚱한 트랙이 이기던 레이스(시간대 연타 시 트랙 어긋남) 방지.
+    if (currentName !== name) return;
     // 기존 보이스는 페이드 아웃, 새 보이스 페이드 인
     for (const v of voices) { v.from = v.gain.gain.value; v.to = 0; v.p = 0; }
     voices.push(startVoice(buf, 1));
+  }
+
+  // #140-D 프리페치: 재생 없이 fetch+decode 만 해 buffers 에 담아둔다(load 가 memoized).
+  //   · prefetch(name): 단일 트랙(첫 사운드 활성 즉시 재생용, 제스처 전 유휴에 호출 — decode 는 suspended ctx 에서도 동작).
+  //   · prefetchTimeTracks(): TIME_TRACK 4곡을 동시 1개·순차로(대역폭 폭주 방지). start() 후 호출 → 이후 시간대 전환 즉시 크로스페이드.
+  function prefetch(name) { return name ? load(name) : Promise.resolve(null); }
+  let prefetchedTimeTracks = false;
+  async function prefetchTimeTracks() {
+    if (prefetchedTimeTracks) return;
+    prefetchedTimeTracks = true;
+    for (const name of Object.values(TIME_TRACK)) {
+      if (!buffers.has(name)) { try { await load(name); } catch {} }
+    }
   }
 
   return {
@@ -72,8 +88,9 @@ export function createBgm(listener, { destination, baseUrl = './assets/audio/' }
       if (started) return;
       started = true;
       if (currentName) await play(currentName);
+      prefetchTimeTracks();   // #140-D 나머지 시간대 트랙 백그라운드 프리페치(await 안 함 — start 는 즉시 반환)
     },
-    play,
+    play, prefetch, prefetchTimeTracks,
     setVolume(v) { volMul = Math.max(0, v); master.gain.setTargetAtTime(volMul * BASE_GAIN, ctx.currentTime, 0.1); },
     getTracks() { return { byTime: { ...TIME_TRACK }, options: [...OPTION_TRACKS] }; },
     update(dt) {

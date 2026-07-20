@@ -1,5 +1,5 @@
 // 리브랜딩(#39) + 레퍼런스 모달(#42) 검증 캡처. 출력: shots/brand-*.png
-//   실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-brand.mjs
+//   실행: node tools/shoot-brand.mjs
 // 정적 서버(ROOT) 4179 에서 빌드본 app/dist-brand 를 서빙(다른 에이전트 dist 와 격리).
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';

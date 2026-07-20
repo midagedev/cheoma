@@ -1,5 +1,5 @@
 // 플래그십 룩 R3 검증(사용자 정정 2건): 바닥 바운스·HDR 충만 + 평행(비-부채꼴) 그림자.
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-look3.mjs
+// 사용: node tools/shoot-look3.mjs
 // 산출: shots/look3-*.png. weather clear 이지만 적설 오염 방지 위해 __wx.setAccum(0) 훅 호출.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

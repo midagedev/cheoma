@@ -1,5 +1,5 @@
 // 실제 앱 dist 빌드(dist-parcels)를 정적 서빙 → ?village=1 부감 캡처. #54 판정 컷.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-parcels-app.mjs
+//   node tools/shoot-parcels-app.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

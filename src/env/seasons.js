@@ -309,21 +309,57 @@ function patchTerrain(mat, uGroundMul, uGroundAmt) {
 
 // ---------- 낙엽/벚꽃 파티클 ----------
 
-function makeLeafTexture() {
+// 잎 실루엣 절차 생성(#116) — "낙엽이 낙엽답게": 원형 점이 아니라 은행잎(부채꼴)·단풍잎(손바닥)
+// 형태를 흰 알파로 그린다(색은 instanceColor 로 곱함). 셀 중심 (32,32), 위=−y.
+//   kind 0=벚꽃 꽃잎(둥근 타원+끝 파임), 1=은행(부채꼴+중앙 결각+잎자루), 2=단풍(5갈래+잎자루).
+function drawLeafShape(g, kind) {
+  g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineJoin = 'round';
+  if (kind === 0) {                       // 벚꽃 꽃잎
+    g.beginPath();
+    g.moveTo(0, 21);
+    g.bezierCurveTo(15, 13, 14, -13, 3, -19);
+    g.quadraticCurveTo(0, -15, -3, -19);  // 끝 살짝 파임
+    g.bezierCurveTo(-14, -13, -15, 13, 0, 21);
+    g.fill();
+  } else if (kind === 1) {                 // 은행잎(부채꼴)
+    g.beginPath();
+    g.moveTo(0, 20);                        // 잎자루 위쪽 기점
+    g.quadraticCurveTo(-17, 12, -22, -9);   // 왼쪽 옆선 위로
+    g.quadraticCurveTo(-13, -19, -4, -11);  // 왼쪽 상단 봉우리
+    g.quadraticCurveTo(0, -8, 4, -11);      // 중앙 결각(V 패임)
+    g.quadraticCurveTo(13, -19, 22, -9);    // 오른쪽 상단 봉우리
+    g.quadraticCurveTo(17, 12, 0, 20);      // 오른쪽 옆선 아래로
+    g.fill();
+    g.lineWidth = 2.6; g.beginPath(); g.moveTo(0, 18); g.lineTo(0, 29); g.stroke(); // 잎자루
+  } else {                                 // 단풍잎(5갈래 손바닥)
+    const tips = [0, 65, 135, 225, 295];   // 위·우상·우하·좌하·좌상 (deg, 위=0)
+    const R = 23;
+    g.beginPath();
+    for (let i = 0; i < tips.length; i++) {
+      const a = tips[i] * Math.PI / 180;
+      const x = Math.sin(a) * R, y = -Math.cos(a) * R;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      const n = tips[(i + 1) % tips.length];
+      let mid = (tips[i] + (n > tips[i] ? n : n + 360)) / 2;
+      const bottom = Math.abs(((mid % 360) + 360) % 360 - 180) < 20; // 바닥(180°)=잎자루 골
+      const rv = bottom ? 5 : 10;
+      const av = mid * Math.PI / 180;
+      g.lineTo(Math.sin(av) * rv, -Math.cos(av) * rv);
+    }
+    g.closePath(); g.fill();
+    g.lineWidth = 2.6; g.beginPath(); g.moveTo(0, 6); g.lineTo(0, 30); g.stroke(); // 잎자루
+  }
+}
+
+// 3프레임 아틀라스(192×64: [벚꽃|은행|단풍]). InstancedMesh 는 per-instance aFrame UV 오프셋으로 프레임 선택.
+function makeLeafAtlas() {
   const c = document.createElement('canvas');
-  c.width = 64; c.height = 64;
+  c.width = 192; c.height = 64;
   const g = c.getContext('2d');
-  g.clearRect(0, 0, 64, 64);
-  // 부드러운 잎(타원) 실루엣 — 가장자리 soft.
-  const grad = g.createRadialGradient(32, 32, 4, 32, 32, 30);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.6, 'rgba(255,255,255,0.95)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad;
-  g.save();
-  g.translate(32, 32); g.scale(0.62, 1.0);
-  g.beginPath(); g.arc(0, 0, 28, 0, Math.PI * 2); g.fill();
-  g.restore();
+  g.clearRect(0, 0, 192, 64);
+  for (let f = 0; f < 3; f++) {
+    g.save(); g.translate(f * 64 + 32, 32); drawLeafShape(g, f); g.restore();
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -355,13 +391,23 @@ function buildLeaves(treeInsts) {
     return emitters[emitters.length - 1];
   };
 
-  const N = Math.min(640, emitters.length * 13);
-  const tex = makeLeafTexture();
+  // #125 개수 대폭 감축(사용자: "색종이 축제 아니라 바람에 이따금 지는 잎"). 640→~150. 나무 방출
+  //   낙엽은 마을 중심 근경에서만 보이는 보조분(원점 밖 focus 근경은 petals 담당) → 성기게 충분.
+  //   per-frame 갱신 루프도 감축분만큼 저비용(성능 우선).
+  const N = Math.min(160, emitters.length * 4);
+  const tex = makeLeafAtlas();
   const mat = new THREE.MeshBasicMaterial({
     map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
     alphaTest: 0.03, fog: true,
   });
+  // per-instance aFrame(0/1/2)으로 아틀라스 3프레임 중 하나를 UV 오프셋 선택(단일 드로우콜 유지).
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aFrame;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = vec2((vMapUv.x + aFrame) / 3.0, vMapUv.y);\n#endif');
+  };
   const geo = new THREE.PlaneGeometry(1, 1);
+  geo.setAttribute('aFrame', new THREE.InstancedBufferAttribute(new Float32Array(N), 1));
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   mesh.name = 'seasonLeaves';
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
@@ -386,7 +432,7 @@ function buildLeaves(treeInsts) {
       fall: 1.1 + rnd() * 1.3,
       spin: rnd() * Math.PI * 2,
       spinSpd: (rnd() * 2 - 1) * 1.8,
-      size: 1.5 + rnd() * 0.9,
+      size: 0.36 + rnd() * 0.20,          // #125 월드 0.36~0.56m — 사람 스케일 대비 자연스러운 낙엽(구 1.0~1.7m=사람만)
       tilt: rnd(),                        // 회전축 성향
     });
   }
@@ -401,17 +447,28 @@ function buildLeaves(treeInsts) {
     const spring = name === 'spring';
     fallScale = spring ? 0.6 : 1.0;
     sizeScale = spring ? 0.82 : 1.0;
-    // 개체 색: 가을=수관 수종색 혼합(노랑/주홍/갈/코랄), 봄=연분홍 계열.
-    const AU = [0xe8c33a, 0xd98a2b, 0xc8452c, 0xb8873a];
-    const SP = [0xf3c4d6, 0xf0b0c8, 0xe79bbf, 0xfad9e6];
+    // 개체 형태·색: 가을은 이미터 수종을 따라간다 — 은행나무는 은행잎(황금), 단풍나무는 단풍잎(주홍~주황),
+    //   벚·잡목은 단순 잎(웜 오렌지-브라운). 봄은 전부 벚꽃 꽃잎(연분홍). #116 "낙엽을 낙엽답게".
+    const GINKGO = [0xf2c53d, 0xf0b429, 0xe8b21f, 0xf5ce4a];       // 순수 황금(은행)
+    const MAPLE  = [0xc0392b, 0xd35400, 0xe0491f, 0xb83a1e, 0xd9622b]; // 진홍~주황(단풍)
+    const WARM   = [0xd9772b, 0xc86a2a, 0xcf9a3a, 0xbe7d34];       // 벚·잡목 낙엽(오렌지-브라운)
+    const SP     = [0xf3c4d6, 0xf0b0c8, 0xe79bbf, 0xfad9e6];       // 봄 벚꽃
+    const frames = geo.attributes.aFrame.array;
     const col = new THREE.Color();
     for (let i = 0; i < N; i++) {
-      const pick = spring ? SP[(i * 7) % SP.length] : AU[(i * 5) % AU.length];
-      col.copy(linCol(pick));
-      // 약간의 개체 편차
-      const j = 0.85 + ((i * 2654435761) % 1000) / 1000 * 0.3;
+      const sp = st[i].e.sp;
+      let frame, pal;
+      if (spring) { frame = 0; pal = SP; }
+      else if (sp === 'ginkgo') { frame = 1; pal = GINKGO; }
+      else if (sp === 'maple') { frame = 2; pal = MAPLE; }
+      else if (sp === 'misc') { frame = (i & 1) ? 1 : 2; pal = (i & 1) ? GINKGO : MAPLE; } // 잡목=은행·단풍 혼합
+      else { frame = 0; pal = WARM; }        // cherry 등 = 단순 잎 오렌지-브라운
+      frames[i] = frame;
+      col.copy(linCol(pal[(i * 5) % pal.length]));
+      const j = 0.85 + ((i * 2654435761) % 1000) / 1000 * 0.3;  // 개체 밝기 편차
       mesh.setColorAt(i, col.multiplyScalar(j));
     }
+    geo.attributes.aFrame.needsUpdate = true;
     mesh.instanceColor.needsUpdate = true;
   }
 
@@ -488,7 +545,7 @@ function buildLitter(treeInsts, layout = {}) {
   // 낙엽 데칼 위치 수집: 나무 밑 원반 + 마당 네 구석.
   const spots = [];
   for (const b of nearBases) {
-    const k = 6 + Math.floor(rnd() * 5);
+    const k = 3 + Math.floor(rnd() * 3);   // #125 지면 낙엽 대폭 감축(낙하 낙엽과 같은 비율) — 성기게
     for (let i = 0; i < k; i++) {
       const rr = Math.sqrt(rnd()) * b.r * 1.5;
       const th = rnd() * Math.PI * 2;
@@ -499,19 +556,26 @@ function buildLitter(treeInsts, layout = {}) {
   const xE = (layout.xEave ?? 9) + 3, zE = (layout.zEave ?? 6) + 3;
   const corners = [[-xE, -zE], [xE, -zE], [-xE, zE], [xE, zE], [0, zE + 2], [-xE * 0.6, zE + 1]];
   for (const [cx, cz] of corners) {
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 9; i++) {   // #125 구석 무더기도 감축(14→9) — 지면이 낙엽으로 뒤덮이지 않고 드문드문
       spots.push({ x: cx + (rnd() * 2 - 1) * 3.6, y: 0.05, z: cz + (rnd() * 2 - 1) * 3.6 });
     }
   }
   const N = spots.length;
   if (!N) return null;
 
-  const tex = makeLeafTexture();
+  const tex = makeLeafAtlas();
   const mat = new THREE.MeshBasicMaterial({
     map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
     alphaTest: 0.06, fog: true,
   });
+  // per-instance aFrame UV 오프셋으로 은행·단풍·단순잎 실루엣 선택(지면 낙엽도 낙엽답게, #116).
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aFrame;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = vec2((vMapUv.x + aFrame) / 3.0, vMapUv.y);\n#endif');
+  };
   const geo = new THREE.PlaneGeometry(1, 1);
+  geo.setAttribute('aFrame', new THREE.InstancedBufferAttribute(new Float32Array(N), 1));
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   mesh.name = 'seasonLitter';
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
@@ -519,7 +583,11 @@ function buildLitter(treeInsts, layout = {}) {
   mesh.renderOrder = 6; // 지면 위, 낙하 낙엽/눈보다 아래
   mesh.visible = false;
 
-  const AU = [0xc98a3a, 0xb5502a, 0xd8a83a, 0x9a6b2e, 0xc0632f];
+  // 지면 낙엽 종별 색·형태: 은행(황금)·단풍(주홍~주황)·단순잎(오렌지-브라운) 혼합.
+  const GINKGO = [0xf2c53d, 0xf0b429, 0xe8b21f];
+  const MAPLE = [0xc0392b, 0xd35400, 0xb83a1e, 0xd9622b];
+  const WARM = [0xc98a3a, 0x9a6b2e, 0xc0632f, 0xb5502a];
+  const frames = geo.attributes.aFrame.array;
   const col = new THREE.Color();
   const st = [];
   for (let i = 0; i < N; i++) {
@@ -527,13 +595,18 @@ function buildLitter(treeInsts, layout = {}) {
       sp: spots[i],
       rev: rnd(),                       // 드러나는 임계값(누적 진행도가 이걸 넘으면 보임)
       rot: rnd() * Math.PI * 2,         // 바닥면 내 회전
-      size: 2.1 + rnd() * 1.9,
+      size: 0.6 + rnd() * 0.55,        // #125 지면 낙엽 클럼프 스케일(구 2.1~4.0m=거대) — 잎 무더기로 읽히되 사람 스케일 이하
       tiltX: (rnd() * 2 - 1) * 0.12,    // 살짝 들뜬 각도
       tiltZ: (rnd() * 2 - 1) * 0.12,
     });
-    col.copy(linCol(AU[(i * 5) % AU.length])).multiplyScalar(0.8 + rnd() * 0.35);
+    const r3 = i % 3;
+    const frame = r3 === 0 ? 1 : r3 === 1 ? 2 : 0;   // 은행·단풍·단순잎 순환
+    const pal = frame === 1 ? GINKGO : frame === 2 ? MAPLE : WARM;
+    frames[i] = frame;
+    col.copy(linCol(pal[(i * 5) % pal.length])).multiplyScalar(0.8 + rnd() * 0.35);
     mesh.setColorAt(i, col);
   }
+  geo.attributes.aFrame.needsUpdate = true;
   mesh.instanceColor.needsUpdate = true;
 
   const dummy = new THREE.Object3D();

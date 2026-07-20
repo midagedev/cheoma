@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 마을 다양성·담장 격상(태스크 #37) 검증 → shots/var-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-var.mjs [필터]
+// 사용법: node tools/shoot-var.mjs [필터]
 //   어댑터(createVillage) 경로로 렌더. 변주(집 톤·크기·방향·평면)·담장 어휘(tile/stone/brush)·
 //   드로우콜(perf.calls)·rebuildParcel 신규 파라미터·재현성·야간 창호광을 함께 확인한다.
 import { createServer } from 'node:http';

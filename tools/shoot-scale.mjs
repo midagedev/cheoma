@@ -1,7 +1,7 @@
 // #89 스케일 연속화 검증 — 부감 컷(shots/scale-*.png) + 게이트 메타(호수·성곽·시전·궁 tier·char01·성능).
 //   어댑터(createVillage) 경로로 렌더 → baseY·char01 자동화·성곽/시전/궁 임계까지 실제 앱 경로로 확인.
 //   scale 은 프리셋명 또는 숫자 siteR(m). 전용 포트 4207(사용자 dev 5174 미접촉), 소스 직접 서빙+importmap.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-scale.mjs [필터] [--tmp]
+// 사용법: node tools/shoot-scale.mjs [필터] [--tmp]
 //   --tmp: 중간 검증컷을 scratchpad/scale 로(shots 오염 방지). 기본은 shots/scale-*.png(게이트 증거).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

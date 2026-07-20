@@ -14,7 +14,7 @@
 //   ③ 단일건물 env 경로(mistBillboards=true) 무회귀: 강도 곡선이 기존식과 동일(0.52·smoothstep).
 //   ④ pageerror 0.
 //
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-cloudshadow.mjs
+// 사용: node tools/verify-cloudshadow.mjs
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';

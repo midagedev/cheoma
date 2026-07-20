@@ -1,5 +1,5 @@
 // 헤드리스 검증: focus 중 필지→필지 직접 전환(#95) + 리롤 분리(#100) → shots/hop-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-hop.mjs
+// 사용법: node tools/shoot-hop.mjs
 //
 // 빌드된 dist-hop 을 정적 서빙(포트 4213, 사용자 dev 5174 미접촉). window.__engine 훅으로 구동:
 //   village.debugParcels()            : [{parcelId, kind, hero, heroStyle, family, editable}]

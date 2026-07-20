@@ -7,7 +7,7 @@ import { makeMaterials, setTextureRandom, applyThatchAge } from '../builder/pale
 import { setGateRandom } from '../layout/gate.js';
 import { candleFlicker } from '../env/night-glow.js';
 import { planVillage } from './plan.js';
-import { populateVillage } from './populate.js';
+import { populateVillage, populateVillageSteps } from './populate.js';
 import { buildPalaceCompound } from './palace.js';
 import { houseMatrix, parcelMatrix, parcelRotY } from './instancing.js';
 import { buildVillageWall } from './walls.js';
@@ -67,8 +67,12 @@ const VILLAGE_LIGHT_BY_TIME = {
   },
   sunset: {
     // 위는 쿨(황혼 하늘색 앰비언트)·아래는 웜(바운스) — 골든아워 색분리 골격을 리프트로 유지.
-    hemiSky: 0x9fb0d6, hemiGround: 0x6d5236, hemiInt: 0.66,
-    fillColor: 0xf2b28c, fillInt: 1.15, fillElev: 0.34, glowBoost: 1.0,
+    // hemiGround(하향면 웜 바운스)는 분지를 둘러싼 배산 안쪽 사면(아래-안쪽 향)까지 데워 저채도
+    //   부감에서 능선을 주황 화염으로 blowout 시키는 주범(#119). 채도·밝기를 크게 낮춰 화염을 끄되
+    //   처마밑·기단 그늘의 웜 바운스는 남긴다. fill(웜 directional)도 능선 grazing 화염에 가세하므로
+    //   절반 이하로. hemiSky(쿨)는 능선을 초록으로 유지하므로 그대로.
+    hemiSky: 0x9fb0d6, hemiGround: 0x2a241e, hemiInt: 0.54,
+    fillColor: 0xecc09c, fillInt: 0.62, fillElev: 0.42, glowBoost: 1.0,
   },
   night: {
     // 야간은 어둠(무드) 유지하되 순흑 뭉갬만 완화 — 달빛 쿨 리프트로 지붕·담 형태가 읽히게.
@@ -78,29 +82,128 @@ const VILLAGE_LIGHT_BY_TIME = {
   },
 };
 
-export function createVillage(opts = {}) {
-  const seed = (typeof opts.seed === 'number' ? opts.seed
+// 시드 해석(number|string|기본). 동기·워커·청킹 경로 공유.
+function resolveVillageSeed(opts) {
+  return (typeof opts.seed === 'number' ? opts.seed
     : typeof opts.seed === 'string' ? hashStr(opts.seed) : 20260716) >>> 0;
+}
 
-  // ── 재현성(같은 seed → 픽셀 동일): plan+populate 는 동기 실행이므로 그 구간 동안만
-  //    난수원을 시드로 고정하고 즉시 원복한다(앱 나머지 Math.random 불침해).
-  //    · palette.js 캔버스텍스처·gate.js 싸리문은 전용 시더로(명시 계약).
-  //    · props/materials.js 등 그 밖의 Math.random 소비자는 전역 Math.random 을 임시 교체해 덮는다.
-  //    마을 배치 자체(makeRng)는 이미 완전 결정론.
-  const origRandom = Math.random;
-  setTextureRandom(makeRng((seed ^ 0x7e17) >>> 0));
-  setGateRandom(makeRng((seed ^ 0x6a1e) >>> 0));
-  Math.random = makeRng((seed ^ 0x9e3779b9) >>> 0);
+// ── 재현성(같은 seed → 픽셀 동일) 시드 창 ──────────────────────────────────────
+//   plan+populate 는 시드 고정 난수원 안에서 실행하고 즉시 원복한다(앱 나머지 Math.random 불침해).
+//   · palette 캔버스텍스처·gate 싸리문은 전용 시더로(명시 계약).
+//   · props/materials 등 그 밖의 전역 Math.random 소비자는 임시 교체로 덮는다.
+//   ★ #123 결정론 핵심: createVillageAsync 는 이 창을 "슬라이스마다" 설치/원복하되 rng 클로저는 1벌을
+//     재사용한다 → 슬라이스 사이(rAF)엔 실 Math.random 이 렌더 루프를 구동하고, 슬라이스 안에선 시드
+//     스트림이 이어져 소비 순서가 동기 경로(1회 창)와 byte-identical. runInWindow 를 스텝마다 감싸면 됨.
+function makeSeedWindow(seed) {
+  const texRng = makeRng((seed ^ 0x7e17) >>> 0);
+  const gateRng = makeRng((seed ^ 0x6a1e) >>> 0);
+  const mainRng = makeRng((seed ^ 0x9e3779b9) >>> 0);
+  return function runInWindow(fn) {
+    const origRandom = Math.random;
+    setTextureRandom(texRng); setGateRandom(gateRng); Math.random = mainRng;
+    try { return fn(); } finally { Math.random = origRandom; setTextureRandom(null); setGateRandom(null); }
+  };
+}
+
+// 동기 코어: 시드 창 안에서 plan + populate 를 일괄 실행. createVillage 가 소비.
+function buildVillageCore(opts) {
+  const seed = resolveVillageSeed(opts);
+  const run = makeSeedWindow(seed);
   let plan, group;
-  try {
+  run(() => {
     plan = planVillage({ ...opts, seed });
     group = populateVillage(plan);      // optimize 기본 ON
-  } finally {
-    Math.random = origRandom;
-    setTextureRandom(null);
-    setGateRandom(null);
-  }
+  });
+  return { seed, plan, group };
+}
 
+export function createVillage(opts = {}) {
+  const { seed, plan, group } = buildVillageCore(opts);
+  return finishVillage(opts, seed, plan, group);
+}
+
+// ── forest 크런치 워커(#123) ── 프리즈의 64~90%인 forest 배치 루프를 메인 밖으로. 단일 워커를 지연
+//   생성·재사용(작업마다 재-spawn 하면 THREE 파싱 비용 반복). id 로 작업 구분. ?worker=0·미지원 폴백.
+let _forestWorker = null;               // null=미시도, false=사용불가, Worker=활성
+let _workerJobSeq = 0;
+const _workerJobs = new Map();
+function workerAllowed() {
+  if (typeof Worker === 'undefined') return false;
+  if (typeof location !== 'undefined') { try { if (new URLSearchParams(location.search).get('worker') === '0') return false; } catch {} }
+  return true;
+}
+function getForestWorker() {
+  if (_forestWorker !== null) return _forestWorker || null;
+  if (!workerAllowed()) { _forestWorker = false; return null; }
+  try {
+    const w = new Worker(new URL('./populate.worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = (e) => { const d = e.data || {}; const job = _workerJobs.get(d.id); if (job) { _workerJobs.delete(d.id); job(d); } };
+    w.onerror = () => { _forestWorker = false; for (const job of _workerJobs.values()) job({ ok: false, error: 'worker error' }); _workerJobs.clear(); };
+    _forestWorker = w;
+    return w;
+  } catch { _forestWorker = false; return null; }
+}
+// opts+seed → 워커에서 crunchForest 실행 → Promise<{trees,rocks}>. 워커 불가 시 reject(메인 폴백).
+function crunchForestInWorker(opts, seed) {
+  return new Promise((resolve, reject) => {
+    const w = getForestWorker();
+    if (!w) { reject(new Error('no-worker')); return; }
+    const id = ++_workerJobSeq;
+    _workerJobs.set(id, (d) => { if (d && d.ok) resolve(d.crunch); else reject(new Error((d && d.error) || 'worker-fail')); });
+    try { w.postMessage({ opts, seed, id }); } catch (e) { _workerJobs.delete(id); reject(e); }
+  });
+}
+
+// ── 비동기 코어(#123) ── plan + populateVillageSteps 를 rAF 프레임에 분산 구동해 롱프레임 스파이크를
+//   없앤다. 각 스텝 .next() 를 시드 창(makeSeedWindow, rng 1벌 재사용)으로 감싸 결정론을 동기 경로와
+//   byte-identical 로 유지한다. 프레임당 budgetMs 를 넘기 전까지 여러 값싼 스텝을 이어 실행.
+//   ★ forest(비용 64~90%)는 워커가 병렬 크런치 → 그루/암괴 버퍼가 도착하면 forest 스텝이 "조립만"(값싼)
+//     한다. 워커 결과 미도착이면 forest 스텝 직전에서 프레임 양보하며 대기(메인은 그동안 다른 스텝 진행).
+//     워커 불가/실패(?worker=0 포함)면 forest 스텝이 메인에서 크런치(동기 경로와 동일 — 결정론 불변, 단
+//     롱프레임 잔존 = 폴백). onStep(label,i) 진행 콜백. nextFrame 주입 가능(테스트/헤드리스).
+export function createVillageAsync(opts = {}, { onStep, budgetMs = 8, nextFrame } = {}) {
+  const seed = resolveVillageSeed(opts);
+  const run = makeSeedWindow(seed);
+  const raf = nextFrame || ((typeof requestAnimationFrame === 'function')
+    ? (cb) => requestAnimationFrame(() => cb())
+    : (cb) => setTimeout(cb, 0));
+  // forest 워커 조기 착수(plan+다른 스텝과 병렬). 결과/실패를 ref 로 forest 스텝에 전달.
+  const forestRef = { value: null };
+  let workerErr = false, useWorker = workerAllowed();
+  if (useWorker) crunchForestInWorker(opts, seed).then((cr) => { forestRef.value = cr; }, () => { workerErr = true; });
+  return new Promise((resolve, reject) => {
+    let plan = null, it = null, stepI = 0, lastLabel = null;
+    const genOpts = { forestCrunchRef: forestRef };   // populateVillageSteps 가 forest 스텝에서 판독
+    const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const slice = () => {
+      try {
+        const t0 = nowMs();
+        if (!plan) {                                   // 스텝 0: plan(시드 창)
+          run(() => { plan = planVillage({ ...opts, seed }); });
+          it = populateVillageSteps(plan, genOpts);
+          onStep && onStep('plan', stepI++);
+          if (nowMs() - t0 < budgetMs) return slice();
+          return raf(slice);
+        }
+        let r = { done: false };
+        do {
+          // forest 스텝 게이트: 직전 라벨이 'trees'면 다음 .next() 가 forest. 워커 사용 중인데 결과가
+          //   아직 없고 에러도 아니면 이번 프레임은 여기서 양보(워커 병렬 진행 → 다음 프레임 재확인).
+          if (lastLabel === 'trees' && useWorker && !forestRef.value && !workerErr) return raf(slice);
+          r = run(() => it.next());
+          if (!r.done) { lastLabel = r.value; onStep && onStep(r.value, stepI++); }
+        } while (!r.done && (nowMs() - t0) < budgetMs);
+        if (r.done) { resolve(finishVillage(opts, seed, plan, r.value)); return; }
+        return raf(slice);
+      } catch (e) { reject(e); }
+    };
+    raf(slice);
+  });
+}
+
+// plan+group 이후 핸들(VillageHandle) 조립 — 동기/비동기 경로가 공유(THREE 오브젝트 확정 후, 시드창 무관).
+function finishVillage(opts, seed, plan, group) {
   const char01 = typeof plan.opts.char01 === 'number' ? plan.opts.char01 : 0.5;
   const site = plan.site;
 
@@ -120,6 +223,38 @@ export function createVillage(opts = {}) {
   group.add(overrides);
   const overrideById = new Map();                 // parcelId -> THREE.Group
   const editWallMats = makeMaterials('giwa');      // 편집 담장 공유 재질(base 씬 wallMats 와 동일 팔레트)
+
+  // ── #129 오버레이 셰이더 프로그램 앵커(반복 focus-in/hop 재컴파일 방지) ────────────
+  //   focus-in/hop/리롤마다 오버레이(비인스턴스 풀디테일)가 makeMaterials/buildParcel 로 새 재질을
+  //   만들고 focus-out 에서 disposeTree 로 dispose 한다. three 는 재질 dispose 시 그 프로그램의
+  //   usedTimes 를 0 으로 떨궈 GL 프로그램을 캐시에서 삭제 → 다음 오버레이가 동일 cacheKey 재질을 다시
+  //   컴파일한다(전환 히치 잔여, #128 후속). 인스턴스드 마을 재질은 USE_INSTANCING define 으로 cacheKey 가
+  //   달라 비인스턴스 오버레이 프로그램을 공유하지 못한다 → 오버레이 프로그램은 오버레이 전용으로,
+  //   매번 삭제·재컴파일된다.
+  //   대책: 오버레이 "종류(kind×눈상태)"의 첫 빌드 재질 1벌을 __kept 로 표시해 영구 미dispose 앵커로
+  //   삼는다. 앵커 재질은 그 오버레이가 최소 1프레임 렌더될 때 프로그램을 획득하고, 이후 오버레이가
+  //   dispose 돼도(disposeTree 가 __kept 건너뜀) 살아 usedTimes≥1 을 유지 → 프로그램이 캐시에 남는다.
+  //   그 뒤 빌드의 새 재질은 동일 cacheKey 로 컴파일 없이 재사용(색은 uniform 이라 cacheKey 불변 —
+  //   부위별 곱틴트 #55·편집 라이브 반영 #48 무영향). #131 눈틴트: injectSnow 후 retain 하고 anchorKey 에
+  //   |snow 를 붙여 snowtint cacheKey 변형까지 앵커에 포함(맑음/눈 각각 1벌). 앵커는 dispose() 에서만 해제.
+  const _anchoredKinds = new Set();
+  const keptMats = [];   // 프로그램 앵커(영구 보존) — 전 마을 수명 동안 미dispose
+  function retainOverlayPrograms(root, anchorKey) {
+    if (!root || _anchoredKinds.has(anchorKey)) return;
+    _anchoredKinds.add(anchorKey);
+    root.traverse((o) => {
+      const list = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+      for (const m of list) {
+        if (m && m.userData && !m.userData.__kept) { m.userData.__kept = true; keptMats.push(m); }
+      }
+    });
+  }
+  // 편집 담장 공유 재질은 전 오버레이가 재사용하는 영구 1벌 → 앵커로 고정(오버레이 dispose 가 이를
+  //   해제하던 잠재 결함도 차단: 공유 재질이 dispose 되면 다음 오버레이가 그 재질을 재컴파일했다).
+  for (const k in editWallMats) {
+    const m = editWallMats[k];
+    if (m && m.isMaterial && m.userData && !m.userData.__kept) { m.userData.__kept = true; keptMats.push(m); }
+  }
 
   // ── 하이라이트(먹선 아웃라인 + 은은한 발광 박스) — 재사용 1벌을 이동/스케일. ──
   const hi = makeHighlight();
@@ -148,6 +283,7 @@ export function createVillage(opts = {}) {
   //    (시간대 크로스페이드)로 두고 near/far 만 오버라이드 — engine.reapplyVillageFog 와 동일 값
   //    (R*2.2/R*7.0)이라 멱등. enterVillageMode 에서 env.addFogModifier 로 등록. ──
   const villageFogR = (site && typeof site.R === 'number' && site.R > 0) ? site.R : 150;
+  vlights.setSiteR(villageFogR);   // 규모 인지 골든아워 감쇠(#119) — 큰 규모 능선 화염 억제
   const villageFog = (scn) => {
     if (scn.fog) {
       scn.fog.near = villageFogR * 2.2; scn.fog.far = villageFogR * 7.0;
@@ -287,6 +423,7 @@ export function createVillage(opts = {}) {
   function buildHeroCompound(parcel, editOpts = {}) {
     const g = new THREE.Group();
     g.name = `hero-override-${parcel.id}`;
+    g.userData.snowRoofKind = 'giwa';   // 종가(한옥)=기와 지붕 — 눈 흰틴트 게이트(#131)
     const opts = { seed: parcel.seed || 7, style: parcel.heroStyle || 'hanok', plotW: parcel.plotW, plotD: parcel.plotD };
     if (editOpts.roofOpts) opts.roofOpts = editOpts.roofOpts;
     if (editOpts.presetOverrides) opts.presetOverrides = editOpts.presetOverrides;
@@ -304,6 +441,7 @@ export function createVillage(opts = {}) {
     hideHeroDetail();
     const g = buildHeroCompound(parcel, editOpts || {});
     overrides.add(g);
+    if (snowActive()) injectSnow(g);   // 눈 중 생성된 오버레이 지붕도 즉시 흰틴트(#131, 신규 재질)
     heroOverride = { id: parcelId, group: g };
     // 오버레이 창호·문 발광(#98) — collectGlowMats 는 생성 시 마을 병합본만 훑어, 나중에 얹는 focus/히어로
     //   오버레이의 창은 미포착이었다(석양·야간에 정작 focus 한 집만 불이 안 켜짐). 오버레이 hanjiGlow 재질을
@@ -312,6 +450,7 @@ export function createVillage(opts = {}) {
     if (hg.length) { glow.push(...hg); heroOverride.glow = hg; ensureGlowPatched(vnight > 0.001); applyGlowLevel(false); }
     if (heroHandle && heroHandle.get(parcelId)) heroHandle.get(parcelId).visible = false;
     else { const lm = landmarksGroup(); if (lm) { lm.visible = false; landmarksHidden = true; } }
+    retainOverlayPrograms(g, 'hero-' + (parcel.heroStyle || 'hanok') + (snowActive() ? '|snow' : ''));   // #129 프로그램 앵커
     return g;
   }
   function hideHeroDetail() {
@@ -331,8 +470,14 @@ export function createVillage(opts = {}) {
   //   focus-in: palaceCore 를 가리고 buildPalaceCompound 오버레이(편집 가능)를 같은 자리에 얹는다.
   //   편집: 오버레이를 presetOverrides 로 재생성(일곽 단위 병합 유지 — 드로우콜 회귀 없음).
   //   focus-out: 오버레이 폐기 + palaceCore 복원.
-  const palaceCore = group.userData.palaceCore || null;                        // 미병합 palace-core 그룹 | null
-  const palaceCompound = palaceCore ? (palaceCore.userData.palaceCompound || null) : null;  // buildPalaceCompound 루트
+  const palaceCore = group.userData.palaceCore || null;                        // 미병합 palace-core 그룹(편집 메타 소스) | null
+  // #140-B 부감 병합본. optimize 시 populate 가 palaceCore 를 재질별로 접어(palace-merged) 씬에 얹고
+  //   palaceCore 지오는 dispose(메타·재질만 보존) → 부감 −~350 콜·힙. focus-in 은 이 병합본을 가리고
+  //   미병합 오버레이(buildPalaceCompound)로 교체(히어로 heroHandle #62 동형). 비최적화·구빌드면 null 이라
+  //   palaceCore(씬에 상주) 를 대신 토글(폴백). 아래 palaceVisNode 가 "부감에 보이는 궁 노드"를 가리킨다.
+  const palaceMerged = group.userData.palaceMerged || null;                    // 부감 병합본(씬 상주) | null
+  const palaceVisNode = palaceMerged || palaceCore;                            // focus 시 가릴 대상(병합본 우선, 없으면 미병합)
+  const palaceCompound = palaceCore ? (palaceCore.userData.palaceCompound || null) : null;  // buildPalaceCompound 루트(편집 메타)
   const palaceInner = palaceCompound ? palaceCompound.parent : null;           // 배치 변환(위치·회전) 보유 그룹
   const palaceHandle = palaceCompound ? (palaceCompound.userData.palaceHandle || null) : null;
   let palaceOverride = null;     // { group, comp } 표시 중 오버레이
@@ -344,6 +489,7 @@ export function createVillage(opts = {}) {
     const ph = palaceHandle;
     const g = new THREE.Group();
     g.name = 'palace-override';
+    g.userData.snowRoofKind = 'giwa';   // 궁 전각=기와 지붕 — 눈 흰틴트 게이트(#131)
     const comp = buildPalaceCompound({
       w: ph.regionW, d: ph.regionD, tier: ph.tier, variant: ph.variant,
       seed: ph.seed != null ? ph.seed : 5,
@@ -361,7 +507,7 @@ export function createVillage(opts = {}) {
     const g = buildPalaceOverlay(presetOverrides);
     overrides.add(g);
     palaceOverride = { group: g, comp: g.children[0] };
-    palaceCore.visible = false; palaceHidden = true;
+    if (palaceVisNode) palaceVisNode.visible = false; palaceHidden = true;   // #140-B 부감 병합본(또는 미병합 폴백) 은닉
     return g;
   }
   function hidePalaceDetail() {
@@ -371,7 +517,7 @@ export function createVillage(opts = {}) {
       palaceOverride.group.traverse((o) => { if (o.geometry) o.geometry.dispose?.(); });
       overrides.remove(palaceOverride.group); palaceOverride = null;
     }
-    if (palaceHidden && palaceCore) { palaceCore.visible = true; palaceHidden = false; }
+    if (palaceHidden && palaceVisNode) { palaceVisNode.visible = true; palaceHidden = false; }   // #140-B 병합본 복원
   }
   // 궁 편집 패널 명세(#93). family 'palace-compound' 로 edit-schema 가 궁 전용 스키마를 연다.
   //   editable 은 palaceCore(미병합 핸들) 유무 — 없으면 focus·프레이밍만 되고 편집은 비활성.
@@ -411,6 +557,37 @@ export function createVillage(opts = {}) {
     proxies.push(proxy);
     proxyGroup.add(pmesh); proxyGroup.updateMatrixWorld(true);
     proxyById.set('palace', proxy);
+  }
+
+  // ── 절(산사) 픽킹 프록시(#147) — features.temple 이 있으면 추가. 궁·종가와 달리 절은 village-landmarks
+  //   로 정적 병합된 랜드마크라 편집·오버레이가 없다(populate 가 palace-core 만 병합에서 뺀다). 프록시는
+  //   "픽 → focus 돌리 + DoF" 만 지원한다: showParcelDetail('temple') 은 temple 이 plan.parcels 에 없어
+  //   자연히 null 을 반환 → villageSelect 가 오버레이 없이 카메라만 절로 돌리·초점한다(병합본 그대로). detail
+  //   이 null 이라 attachFocusRing 도 걸리지 않아 농가 앰비언스 링(마당 닭·연기)이 대웅전 마당에 안 깔린다
+  //   (궁과 동일한 생략 규약). replay/reroll 은 focusAssembly/rerollParcel 이 temple 에 null 을 돌려 self-guard
+  //   (엔진 무수정). buildingSpec.editable:false → 편집 섹션 없음. 박스는 경내(30×30+pad)를 덮어 어디를 눌러도
+  //   절이 잡힌다. temple 자리엔 민가 필지가 없어(plan) 픽킹 하이재킹 없음.
+  if (plan.features && plan.features.temple) {
+    const tf = plan.features.temple;
+    const rotY = G.facingY(tf.frontDir || { x: 0, z: 1 });
+    const groundY = (site && typeof site.heightAt === 'function') ? site.heightAt(tf.x, tf.z) : 0;
+    const W = 36, D = 36, H = 30;                    // 경내 + 석축 대지 + 대웅전 지붕을 여유롭게 덮는 픽 박스
+    const worldCenter = new THREE.Vector3(tf.x, groundY + 9, tf.z);   // 대지(석축 pad) 상면 근사(병합본이라 정확 padY 미조회)
+    const pmesh = new THREE.Mesh(new THREE.BoxGeometry(W, H, D));
+    pmesh.position.set(tf.x, groundY + H / 2, tf.z);
+    pmesh.rotation.y = rotY;
+    pmesh.userData.parcelId = 'temple';
+    pmesh.updateMatrixWorld(true);
+    const proxy = {
+      parcelId: 'temple', mesh: pmesh, bbox: new THREE.Box3().setFromObject(pmesh), worldCenter,
+      dims: new THREE.Vector3(W, H, D), rotY,
+      // family 'temple' — edit-schema/패널이 편집 섹션을 열지 않는다(editable:false). landmark:true = 병합 랜드마크.
+      buildingSpec: { parcelId: 'temple', family: 'temple', style: 'temple', editable: false, landmark: true },
+      cameraFraming: templeFraming(worldCenter, rotY, W, D),
+    };
+    proxies.push(proxy);
+    proxyGroup.add(pmesh); proxyGroup.updateMatrixWorld(true);
+    proxyById.set('temple', proxy);
   }
 
   // ── 카메라 앵커 앰비언스 필드(#105) ─────────────────────────────────────────────
@@ -463,6 +640,150 @@ export function createVillage(opts = {}) {
   function disposeAmbField() {
     if (ambField) { ambField.dispose(); ambField = null; }
   }
+
+  // ── 눈 = 지붕 흰틴트, 마을 실경로 배선(#131) ─────────────────────────────────
+  //   env(weather.js)의 patchSnow 는 setupWeather 시점(마을 생성 전)에 씬을 한 번 훑고 그 뒤엔 단일건물
+  //   rebuild 때만 재수집한다 → 마을 진입 후 얹힌 인스턴스드 건물 청크(inst-giwa-v2-m*)·focus 오버레이
+  //   지붕엔 닿지 않아, 눈 날씨에도 지붕이 안 희어졌다(낙하 입자만 보임). 여기서 어댑터가 "마을 소관"
+  //   지붕 재질(role='roof')에 weather.js 와 동일한 흰틴트 셰이더를 공유 uniform(snowU)으로 주입하고,
+  //   accum(0..1)을 시간 램프로 구동한다. env 경로 불침해: env 는 env 오브젝트를, 어댑터는 마을
+  //   오브젝트를 각각 소유(공유 재질 없음). 가드 __snowPatched 는 env 와 공유 → 혹 겹쳐 훑어도 이중
+  //   패치(varying 재정의 컴파일 실패) 방지.
+  const SNOW_MAX = 0.82, ACCUM_UP = 46, ACCUM_DOWN = 16;   // weather.js 와 동일 상수(램프 톤 정합)
+  const snowU = { value: 0 };            // 공유 적설 uniform — 마을 지붕 재질 전부가 이 참조를 공유
+  let snowTarget = 0, snowAccum = 0, snowPinned = null;      // 램프 목표·진행도 + shot 고정(null=자유)
+
+  // 지붕 재질(MeshStandardMaterial)에 눈 흰틴트 주입 — weather.js patchSnow 와 동일 GLSL(월드 노멀 상향
+  //   기반, 양면 셸 뒤집힘 보정 포함). prev onBeforeCompile 체인(#110 구름그림자 등 보존) + cacheKey 접미
+  //   (미패치 동일재질과 프로그램 공유 방지, #52). 반환: 신규 패치 여부.
+  function patchRoofSnow(m, isThatch) {
+    if (!m || !m.isMeshStandardMaterial) return false;
+    if (m.userData && m.userData.__snowPatched) return false;
+    m.userData = m.userData || {};
+    m.userData.__snowPatched = true;
+    // 초가(볏짚) 지붕은 기와보다 눈을 성글게·덜 하얗게 인다(#131): 부감에서 둥근 이엉 지붕이 눈+bloom 으로
+    //   순백 발광 덩어리가 되던 아티팩트 해소. 볏짚만 흰 목표색·최대 커버리지·고적설 채움·뒤집힌 셸면 부스트를
+    //   낮춰 bloom 임계 아래로 — 기와·양성바름(궁·절)은 현행 유지(정상 흰틴트). 사실적으로도 볏짚은 눈을 덜 얹음.
+    // #136 기와 blowout 톤다운: 소형 급경사 기와(정자 사모/육모)·담 코핑 기와가 최대 적설+bloom 에서
+    //   순백 포화되던 문제 — 흰 목표색·고적설 채움·뒤집힌 셸 부스트를 낮춰 peak 휘도를 bloom 임계 아래로.
+    //   큰 몸채 지붕(완경사 대면적)은 여전히 눈답게 하얗되(0.93), 소형·급경사만 STEEPMIN 으로 추가 감쇠.
+    const WHITE = isThatch ? 'vec3(0.80, 0.80, 0.78)' : 'vec3(0.92, 0.93, 0.95)';
+    const CEIL = isThatch ? '0.50' : '1.0';        // 최대 커버리지 계수(볏짚=절반, 성글게 덮인 느낌)
+    const THICKFILL = isThatch ? '0.28' : '0.62';  // 고적설 시 사면 채움(볏짚·기와 모두 억제, 둥근 돔 blowout 방지)
+    const FIXB = isThatch ? '0.30' : '0.78';       // 뒤집힌 셸면 밝기 부스트(과밝음 완화)
+    const STEEPMIN = isThatch ? '1.0' : '0.55';    // 급경사 면 눈 감쇠 하한(기와만; 물매로 미끄러지는 사면 순백 방지)
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (shader, r) => {
+      if (prev) prev(shader, r);
+      shader.uniforms.uSnowAmount = snowU;   // 공유 참조(어댑터 램프가 갱신)
+      const twoSided = m.side === THREE.DoubleSide ? '1.0' : '0.0';
+      // 월드 노멀·좌표: 마을 건물은 InstancedMesh 청크(inst-giwa-v2-m*)라 각 인스턴스의 배치·방향이
+      //   instanceMatrix 에 있다 → modelMatrix 만으로는 프로토타입 로컬 노멀이 세워지지 않아 위 향함
+      //   판정(up 게이트)이 실패해 눈이 안 걸린다(구름그림자 #110 과 동일 함정). USE_INSTANCING 시
+      //   instanceMatrix 를 합성. 지형·병합/오버레이 지오는 #else(기존 modelMatrix)로 하위호환.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vSnowWN;\nvarying vec3 vSnowWP;')
+        .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        #ifdef USE_INSTANCING
+          vSnowWN = mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal;
+        #else
+          vSnowWN = mat3(modelMatrix) * objectNormal;
+        #endif`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vSnowWP = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+        #else
+          vSnowWP = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        #endif`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vSnowWN;\nvarying vec3 vSnowWP;\nuniform float uSnowAmount;\nfloat snowCov = 0.0;\nfloat snowFix = 0.0;')
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec3 swn = normalize(vSnowWN);
+          float fixup = ${twoSided} * step(swn.y, -0.05)
+                      * smoothstep(0.30, 0.55, abs(swn.y))
+                      * smoothstep(0.0, 0.20, uSnowAmount);
+          vec3 vUp = normalize((viewMatrix * vec4(-swn, 0.0)).xyz);
+          normal = normalize(mix(normal, vUp, fixup));
+          snowFix = fixup;
+        }`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec3 wn = normalize(vSnowWN);
+          float ny = mix(wn.y, abs(wn.y), ${twoSided});
+          float thresh = mix(0.72, 0.20, uSnowAmount);
+          float up = smoothstep(thresh - 0.10, thresh + 0.18, ny);
+          float ridge = 0.5 + 0.5 * sin(vSnowWP.x * 3.0 + vSnowWP.z * 0.6);
+          float blotch = 0.55 + 0.45 * sin(vSnowWP.x * 1.3) * sin(vSnowWP.z * 1.7);
+          float flatFace = smoothstep(0.80, 0.97, wn.y);
+          float slopeCov = (0.72 + 0.28 * blotch) * (0.86 + 0.14 * ridge);
+          float floorCov = 0.90 + 0.10 * blotch;
+          float thick = smoothstep(0.35, 0.85, uSnowAmount);
+          slopeCov = mix(slopeCov, 0.98, thick * ${THICKFILL});
+          float cov = up * mix(slopeCov, floorCov, flatFace);
+          cov *= smoothstep(0.0, 0.14, uSnowAmount);
+          // #136 급경사 감쇠: 물매 급한 면(낮은 ny)일수록 눈 덜 얹힘 — 소형 급경사 기와·코핑 순백 포화 완화.
+          cov *= mix(${STEEPMIN}, 1.0, smoothstep(0.34, 0.66, ny));
+          cov = clamp(cov * ${CEIL}, 0.0, 1.0);
+          snowCov = cov;
+          diffuseColor.rgb = mix(diffuseColor.rgb, ${WHITE}, cov);
+        }`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.96, snowCov);`)
+        .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        metalnessFactor = mix(metalnessFactor, 0.0, snowCov);`)
+        .replace('#include <dithering_fragment>', `{
+          gl_FragColor.rgb *= 1.0 + snowFix * snowCov * ${FIXB};
+        }
+        #include <dithering_fragment>`);
+    };
+    const baseKey = (m.customProgramCacheKey && m.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey)
+      ? m.customProgramCacheKey() : '';
+    // 초가/기와는 baked 상수가 달라 프로그램 분리(캐시 접미) — 미패치 동일재질과의 공유도 계속 방지.
+    m.customProgramCacheKey = () => 'snowtint' + (isThatch ? '-th' : '') + '|' + baseKey;
+    m.needsUpdate = true;
+    return true;
+  }
+
+  // 이 메시가 초가(볏짚) 지붕인지 판정(#131 톤다운 게이트). 인스턴스드 마을은 giwa/choga 가 완전히 분리된
+  //   그룹(houses-{kind})·청크(inst-{kind}-…)라 이름 토큰으로, 풀디테일 오버레이는 종류를 이름에 담지 않으므로
+  //   생성 시 심은 userData.snowRoofKind 마커로 식별. 마커가 우선(오버레이 내부 'sugiwa-…' 등 부분문자열 오탐
+  //   방지) — 마커 없으면 '-choga'/'-giwa' 토큰, 둘 다 없으면 기와(궁·절 병합본·임포스터 기본).
+  function roofIsThatch(o) {
+    for (let n = o; n; n = n.parent) {
+      if (n.userData && n.userData.snowRoofKind) return n.userData.snowRoofKind === 'choga';
+    }
+    for (let n = o; n; n = n.parent) {
+      const nm = n.name || '';
+      if (nm.indexOf('-choga') >= 0) return true;
+      if (nm.indexOf('-giwa') >= 0) return false;
+    }
+    return false;
+  }
+
+  // root 를 traverse 해 지붕(role='roof') 재질만 눈틴트 주입(멱등). 인스턴스드 청크·병합 랜드마크·
+  //   풀디테일 오버레이 모두 동일 role 태그를 지니므로 한 순회로 커버(overrides 는 group 자식 → group
+  //   한 번이면 현 오버레이도 포함). 초가/기와는 roofIsThatch 로 갈라 흰 세기를 달리 굽는다(#131). 반환: 신규 패치 수.
+  function injectSnow(root) {
+    if (!root) return 0;
+    let n = 0;
+    root.traverse((o) => {
+      const m = o.material; if (!m) return;
+      const list = Array.isArray(m) ? m : [m];
+      const th = roofIsThatch(o);
+      for (const mm of list) if (mm && mm.userData && mm.userData.role === 'roof' && patchRoofSnow(mm, th)) n++;
+    });
+    return n;
+  }
+
+  // 눈 활성 여부 — 오버레이 생성 시(hero/palace/parcel) 신규 지붕 재질을 즉시 패치할지 게이트.
+  const snowActive = () => snowTarget > 0;
+  // 검증/shot 훅: accum 을 특정 단계로 고정(v=null 이면 자유 램프 복귀). window.__wx.setAccum 과 대칭.
+  group.userData.setSnowAccum = (v) => {
+    snowPinned = v;
+    if (v != null) { snowAccum = v; snowU.value = v * SNOW_MAX; }
+  };
+  group.userData.getSnowInfo = () => ({ target: snowTarget, accum: +snowAccum.toFixed(3), value: +snowU.value.toFixed(3), pinned: snowPinned });
 
   const api = {
     group,
@@ -547,6 +868,7 @@ export function createVillage(opts = {}) {
       const gk = kind === 'giwa' ? 'giwa' : 'choga';
       const g = new THREE.Group();
       g.name = `override-${parcelId}`;
+      g.userData.snowRoofKind = gk;   // 이 집 종류(giwa/choga) — 눈 흰틴트 게이트(#131, 초가 톤다운)
       // 편집 오버라이드 정규화: 패널 키 roofCurve → 코어 buildBuilding 키 profileCurve.
       const bld = { ...(newParams.building || {}) };
       if (bld.roofCurve != null && bld.profileCurve == null) { bld.profileCurve = bld.roofCurve; delete bld.roofCurve; }
@@ -586,10 +908,15 @@ export function createVillage(opts = {}) {
       g.applyMatrix4(parcelMatrix(parcel));
       overrides.add(g);
       overrideById.set(parcelId, g);
+      if (snowActive()) injectSnow(g);   // 눈 중 생성된 오버레이 지붕도 즉시 흰틴트(#131, 신규 재질)
+      retainOverlayPrograms(g, gk + (snowActive() ? '|snow' : ''));   // #129 프로그램 앵커(kind×눈상태)
 
       // 인스턴스 은닉(원래 종류 기준)
       const h = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga'];
       h?.userData.setHidden(parcelId, true);
+      // #148: 병합 담(village-walls-*)도 이 필지분만 접는다 — 오버레이가 자기 담을 새로 지으므로
+      //   접지 않으면 동일평면 이중 렌더로 회전 중 플리커. 드로우콜 불변(레인지 접기).
+      handle.walls?.setHidden(parcelId, true);
       return g;
     },
 
@@ -623,7 +950,10 @@ export function createVillage(opts = {}) {
       if (parcel && parcel.hero) { hideHeroDetail(); return; }
       const g = overrideById.get(parcelId);
       if (g) { disposeTree(g); overrides.remove(g); overrideById.delete(parcelId); }
-      if (parcel) { const h = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga']; h?.userData.setHidden(parcelId, false); }
+      if (parcel) {
+        const h = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga']; h?.userData.setHidden(parcelId, false);
+        handle.walls?.setHidden(parcelId, false);   // #148 병합 담 원상복원(픽셀 일치)
+      }
     },
     // 현재 표시 중 focus 오버레이(정규/특수) — 리플레이(#92 再 일반화)가 조회. 재생성 없이 현 오버레이
     //   (편집 상태 보존)를 반환: group=링 앵커, assembly=조립 대상 노드, compound=playCompoundAssembly 여부.
@@ -684,7 +1014,14 @@ export function createVillage(opts = {}) {
       ambField?.setTime(name);               // 카메라 앵커 필드 앰비언스 시간대(연기·모트, #105)
     },
     setSeason(name, _opts) { season = name; group.userData.setSeason?.(name); ambField?.setSeason(name); },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
-    setWeather(name) { weather = name; /* 적설은 앱 weather 배선 필요(보고 참조) */ },
+    setWeather(name) {
+      weather = name;
+      snowTarget = name === 'snow' ? 1 : 0;
+      // 눈으로 전환될 때만 지붕 재질을 훑어 흰틴트를 주입한다(멱등 — 재패치 없음). group 한 순회로 인스턴스드
+      //   건물 청크 + 현 focus 오버레이(overrides=group 자식)까지 커버. accum 은 update(dt) 램프가 구동하고,
+      //   clear 로 바뀌면 램프가 0 으로 녹아 원본 외형 회복(재질은 패치된 채로 두되 uniform 0 → 무영향).
+      if (snowTarget > 0) injectSnow(group);
+    },
     get time() { return time; }, get season() { return season; }, get weather() { return weather; },
 
     update(dt) {
@@ -693,11 +1030,17 @@ export function createVillage(opts = {}) {
       group.userData.update?.(dt);                 // 개울 물결 uTime
       cloudsHandle?.update(dt);                    // 산 구름·물안개 표류 + 흐르는 구름 그림자(태양 판독, #57)
       stepNightGlow(dt);                           // 창호 발광 크로스페이드 + 촛불 일렁임(밤)
+      // 지붕 눈 흰틴트 강도(#131): 선형 램프로 서서히(쌓임 ~46s, 녹음 ~16s) — 즉시 점프 아님(무드).
+      //   shot 하네스가 setSnowAccum 으로 고정하면 그 값 유지. weather.js env 램프와 동일 상수라 정합.
+      if (snowPinned != null) snowAccum = snowPinned;
+      else if (snowTarget > 0) snowAccum = Math.min(1, snowAccum + dt / ACCUM_UP);
+      else snowAccum = Math.max(0, snowAccum - dt / ACCUM_DOWN);
+      snowU.value = snowAccum * SNOW_MAX;
     },
     // 원경 청크 LOD 스왑(매 프레임, 카메라 필요) — 임포스터↔풀디테일 거리 전환.
     //   engine.js 가 camera 를 넘겨 호출. far 청크 없으면(R<340) no-op.
     updateLod(camera) {
-      group.userData.updateChunkLod?.(camera);
+      const swaps = group.userData.updateChunkLod?.(camera) || 0;   // #140-E 스왑 수 반환(engine 이 그림자 1프레임 갱신)
       ambField?.update(_lastDt, camera);           // 카메라 앵커 앰비언스 필드(#105) — same-frame dt·camera
       // 흩날리는 낙엽 고도 게이트(#98 원경 정책) — 낙엽 입자는 나무·지면 근처에서만 의미. 부감(카메라
       //   고도 높음)에선 끈다(가을 무드는 능선 틴트·마당 단풍이 담당). env.update 가 매 프레임 autumn 이면
@@ -708,6 +1051,7 @@ export function createVillage(opts = {}) {
           if (rec.obj.name === 'seasonLeaves' && high && rec.obj.visible) rec.obj.visible = false;
         }
       }
+      return swaps;   // #140-E LOD 스왑 수 — engine 렌더 루프가 그림자 캐시 무효화에 사용
     },
 
     // 앱 단일건물 씬 → 마을 씬 스왑. app: { scene, building?, ground?, env? }.
@@ -780,6 +1124,9 @@ export function createVillage(opts = {}) {
       detachClouds();
       disposeAmbField();
       disposeTree(group);
+      // #129 프로그램 앵커 최종 해제 — 오버레이 dispose 는 __kept 를 건너뛰므로 마을 파기 시 여기서 정리.
+      for (const m of keptMats) { m.map?.dispose?.(); m.dispose?.(); }
+      keptMats.length = 0;
       vlights.dispose();
       for (const p of proxies) p.mesh.geometry.dispose();
     },
@@ -974,6 +1321,21 @@ function palaceFraming(worldCenter, rotY, W, D) {
   return { position: target.clone().add(off), target, fov };
 }
 
+// 절(산사) focus 프레이밍(#147) — 절 정면(frontDir=마을 하향)에서 3/4 로 올려다보며 배산 능선을 배경에.
+//   rotY=facingY(frontDir) 이라 로컬 +z 가 마을 방향(하향) → +z 성분 오프셋이 카메라를 절 앞(마을 쪽 아래)에
+//   두어 대웅전 정면·일주문을 보고 뒤로 산이 솟는 산사 특유의 구도가 잡힌다. ext 는 경내(~36m) 기준.
+function templeFraming(worldCenter, rotY, W, D) {
+  const ext = Math.max(W, D);
+  const fov = 34;
+  const az = 24 * DEG, el = 17 * DEG;
+  const r = (ext * 0.5) / Math.tan(fov * 0.5 * DEG) * 1.16 + ext * 0.14;
+  const off = new THREE.Vector3(
+    r * Math.cos(el) * Math.sin(az), r * Math.sin(el), r * Math.cos(el) * Math.cos(az));
+  off.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+  const target = new THREE.Vector3(worldCenter.x, worldCenter.y + 4, worldCenter.z);
+  return { position: target.clone().add(off), target, fov };
+}
+
 // 야간 창호광 대상(#66): 마을 루트를 훑어 userData.hanjiGlow 태그가 붙은 창·문 재질을 모은다.
 //   구 코드는 공유 matSets(M.door/hanji/salchang)를 패치했으나, 집 프로토는 문짝·살창을 per-mesh
 //   clone 으로 써 공유 원본은 실제 렌더에 안 쓰여 발광이 나지 않았다(사용자 지적 "문으로도 빛").
@@ -1021,10 +1383,25 @@ function makeVillageLights() {
   const tDir = new THREE.Vector3(1, 0.4, 1).normalize();
   const _p = new THREE.Vector3();
 
+  // 규모 인지 골든아워 감쇠(#119). 석양·dawn 부감에서 배산 능선이 주황 화염으로 blowout 되는
+  //   임계(bloom cliff)는 규모가 클수록 낮다: siteR 이 크면 원경 석양 fog(env)가 능선을 이미 웜하게
+  //   데워 리그가 조금만 얹혀도 임계를 넘는다. 반대로 큰 규모는 그 fog 가 분지도 밝혀 리그 리프트가
+  //   덜 필요하다. → siteR 로 리그 웜 강도를 스케일(작은 마을=full 리프트, 도성·한양=하향)해 규모별
+  //   편차(마을 어두움 / 도성·한양 화염)를 함께 해소. day/night 는 무관(화염 없음)이라 불건드림.
+  let warmMul = 1;                     // setSiteR 가 갱신(석양·dawn 에만 적용)
+  function setSiteR(R) {
+    const r = (typeof R === 'number' && R > 0) ? R : 150;
+    // R170 이하 full(마을), R300 에서 0.4(도성), 그 위 0.3 바닥(한양·fog 지배).
+    const t = Math.min(1, Math.max(0, (r - 170) / (300 - 170)));
+    warmMul = Math.max(0.3, 1 - t * 0.6);
+  }
+
   function setTarget(name) {
     const V = VILLAGE_LIGHT_BY_TIME[name] || VILLAGE_LIGHT_BY_TIME.day;
     tHemiSky.setHex(V.hemiSky); tHemiGround.setHex(V.hemiGround); tHemiInt = V.hemiInt;
     tFillColor.setHex(V.fillColor); tFillInt = V.fillInt;
+    // 골든아워(석양·dawn)만 규모 감쇠 — 큰 규모에서 능선 화염 blowout 억제(day/night 불변).
+    if (name === 'sunset' || name === 'dawn') { tHemiInt *= warmMul; tFillInt *= warmMul; }
     // 태양 수평 반대편 + 저각(fillElev). 태양(TIME_PRESETS.sunDir)이 배산 뒤로 낮게 있으므로
     // 그 반대편(카메라 쪽)에서 그늘 수직면·근사면을 데운다.
     const s = (TIME_PRESETS[name] || TIME_PRESETS.day).sunDir;
@@ -1053,7 +1430,7 @@ function makeVillageLights() {
   }
 
   return {
-    rig, apply, step,
+    rig, apply, step, setSiteR,
     dispose() { hemi.dispose(); fill.dispose(); },
   };
 }
@@ -1083,6 +1460,9 @@ function disposeTree(root) {
   root.traverse((o) => {
     if (o.geometry) o.geometry.dispose?.();
     const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-    for (const m of mats) { m.map?.dispose?.(); m.dispose?.(); }
+    for (const m of mats) {
+      if (m.userData && m.userData.__kept) continue;   // #129 프로그램 앵커 — dispose 하면 캐시 프로그램 삭제→재컴파일
+      m.map?.dispose?.(); m.dispose?.();
+    }
   });
 }

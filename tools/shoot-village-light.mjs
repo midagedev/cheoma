@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷 + 휘도 통계: 마을 조명(태스크 #44) 검증 → shots/vlight-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-village-light.mjs [필터]
+// 사용법: node tools/shoot-village-light.mjs [필터]
 //
 // shoot-village.mjs 와 달리 이 하네스는 "앱 경로"를 충실히 재현한다:
 //   engine.js 처럼 scene sun/hemi → setupEnvironment(sky.apply) → setupPost →

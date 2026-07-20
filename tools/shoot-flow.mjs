@@ -1,5 +1,5 @@
 // SPA 인터랙션 폴리시 검증 (task #38 ①②). 출력: shots/flow-*.png.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-flow.mjs
+//   node tools/shoot-flow.mjs
 // dist-flow 를 전용 포트(4180)로 정적 서빙(HMR 없음 → 다른 에이전트 src 편집 무영향).
 // ① 카메라 전환 왕복에서 프레임 단위 camera.position/controls.target/forward-dir 샘플링 →
 //    before(구버그 window.__flowNoFix)/after(수정본) 스파이크 수치 비교.

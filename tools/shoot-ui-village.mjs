@@ -1,5 +1,5 @@
 // 마을 모드 UX 검증 (task #4, UI 측). 출력: shots/uiv-*.png 전용.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-ui-village.mjs [필터]
+//   node tools/shoot-ui-village.mjs [필터]
 // 빌드된 app/dist 를 정적 서버로(HMR 없음 → 다른 에이전트 src 편집 무영향). 실제 클릭/드래그 + 상태 단언.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

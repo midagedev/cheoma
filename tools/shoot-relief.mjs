@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 마을 내부 지형 기복(완경사·언듈레이션·필지 단차·축대) 검증 → shots/relief-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-relief.mjs [필터]
+// 사용법: node tools/shoot-relief.mjs [필터]
 //   어댑터(createVillage) 경로로 렌더 → baseY(성토 패드)·픽킹 프록시·야간 창호광까지 함께 확인.
 //   자체 프레이밍(부감/아이레벨/클로즈업)을 쓴다. 파탄 검사(부양·관통·축대)는 window.__PLAN.relief 에.
 import { createServer } from 'node:http';

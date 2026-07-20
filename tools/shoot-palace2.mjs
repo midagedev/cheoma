@@ -1,6 +1,6 @@
 // 궁궐 다일곽 컴파운드(#88) 근접 검증. 컴파운드를 직접 import 해 평지 위에 렌더(앱 경로 우회).
 //   전용 포트 4206 / 중간 컷은 scratchpad/palace2/, 게이트 증거는 shots/palace2-*.
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-palace2.mjs [out=scratch|shots] [filter]
+// 사용: node tools/shoot-palace2.mjs [out=scratch|shots] [filter]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

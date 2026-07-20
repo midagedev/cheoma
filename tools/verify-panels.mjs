@@ -1,5 +1,5 @@
 // 헤드리스 코드·수치 검증(#91 마을 패널 파라미터 대확장 + #96 집 마당 소품 축). 스크린샷·PNG 없음.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-panels.mjs
+// 사용법: node tools/verify-panels.mjs
 //
 // 두 컨텍스트:
 //   A) /__vplan (ROOT 서버, importmap + planVillage 직접) — 코어 옵션 반영을 plan 데이터로 단언:

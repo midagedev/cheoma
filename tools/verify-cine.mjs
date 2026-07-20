@@ -1,5 +1,5 @@
 // 시네마틱 데모 코어(#103) 수치 검증 — 렌더 캡처 없음, 수치 단언만.
-//   실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-cine.mjs
+//   실행: node tools/verify-cine.mjs
 //   방식: esbuild 로 createVillage + createDronePaths + createWalker 를 브라우저 번들로 묶어
 //         포트 4219 로 서빙 → headless chromium 에서 window.__RESULT 산출(순수 수치) → 표·게이트.
 //

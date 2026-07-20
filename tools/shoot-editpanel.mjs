@@ -1,5 +1,5 @@
 // 헤드리스 검증: focus-in 상세 편집 패널(#48) + 라이브 반영(#69) → shots/editpanel-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-editpanel.mjs
+// 사용법: node tools/shoot-editpanel.mjs
 //
 // 빌드된 dist-editpanel 을 정적 서빙(포트 4203, 사용자 dev 5174 미접촉). window.__engine 훅으로 구동:
 //   village.debugParcels()  : [{parcelId, kind, hero, heroStyle, family, editable}]

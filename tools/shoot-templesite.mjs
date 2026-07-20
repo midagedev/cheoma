@@ -2,7 +2,7 @@
 //   코어 직접 import(planVillage + populateVillage) 하네스. 전용 포트 4209(사용자 dev 5174 미접촉).
 //   mode=current: 디스크 plan.js 의 절 배치 그대로. mode=fix: 하네스 내 후보 배치 함수(placeTempleFix)로
 //   plan.features.temple 를 교체해 populate — 수렴 후 plan.js 로 이식. 진단값은 window.__T.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-templesite.mjs [필터] [--tmp]
+// 사용법: node tools/shoot-templesite.mjs [필터] [--tmp]
 //   --tmp: 중간 컷을 scratchpad/temple 로(shots 오염 방지). 기본은 shots/templesite-*.png(게이트 증거).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

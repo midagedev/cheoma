@@ -1,6 +1,6 @@
 // 산 숲·암봉 시각 비교 하네스(#113, 사용자 지시로 이 태스크 한정 시각검증 허용). 전용 포트 4229.
 //   금강산·설악산 레퍼런스(refs/mountains) 대비용 마을 배산 중경·부감 스크린샷.
-//   사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-forest.mjs [out=scratch|shots] [view] [season] [scale]
+//   사용: node tools/shoot-forest.mjs [out=scratch|shots] [view] [season] [scale]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

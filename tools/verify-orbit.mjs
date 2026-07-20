@@ -1,5 +1,5 @@
 // 기본 카메라 자동 궤도 회전 검증(사용자 스펙).
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-orbit.mjs
+// 사용: node tools/verify-orbit.mjs
 // 판정:
 //  A 회전(일반 ?hero=0): 5초 간격 2컷 diff 高 (카메라가 돌고 있음)
 //  B 정지(?shot=1)     : 5초 간격 2컷 diff ≈0 (자동 회전 완전 비활성 → 캡처 재현성)

@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 import { makeRng } from '../rng.js';
 import { getWind } from './wind.js';
-import { captureRoofSurfaces } from './roofcapture.js';
-import { createSnowVolume } from './snowvol.js';
-import { createRainFlow } from './rainflow.js';
 import { makePresenceGate } from './present-gate.js';
 import { createPetalField } from './petals.js';
 
@@ -12,15 +9,16 @@ import { createPetalField } from './petals.js';
 //     → { setWeather(name, opts), update(dt), applyAtmosphere({mode}), onBuildingChanged(), dispose(), get weather() }
 //   name: 'clear' | 'rain' | 'snow'
 //
-// 구현 방침:
-//  - 강설/강우는 scene 에 직접 붙는 파티클(건물 재생성과 무관하게 유지).
-//  - 지붕 적설은 건물 재질을 traverse 해 onBeforeCompile 로 "월드 노멀 상향" 기반
-//    흰색 블렌딩을 주입 — 위를 향한 면(지붕·기단 윗면·난간 위)에만 눈이 쌓인다.
-//    강도는 공유 uniform uSnowAmount(0~1) 로 제어, setWeather('snow') 시 수 초에 걸쳐
-//    0→0.8 로 애니메이션. clear 전환 시 0 으로 복귀(원본 외형 회복).
-//  - 젖은 재질은 roughness 를 원본*0.55 로 낮춘다(원복 관리).
-//  - 처마 낙숫물은 layout 의 처마선(전/후 z=±zEave, 좌/우 x=±xEave, 높이 eaveEdgeY)을
-//    직선 근사해 일정 간격으로 떨어지는 물방울 라인.
+// 구현 방침 (#131 물리 제거·사용자 결정): 눈·비는 "값싼 낙하 입자 + 재질/대기 틴트"로만 표현한다.
+//  적설 볼륨 쉘·빗물 지붕 리벌릿·처마 낙수·착지 스플래시 같은 지붕/지면 물리 상호작용은 전부 제거했다
+//  ("비는 지붕 별도 처리 불필요, 눈은 지붕 희게 칠하는 것으로 충분").
+//  - 강설/강우 낙하 커튼은 scene 에 직접 붙는 파티클(건물 재생성과 무관하게 유지).
+//  - 눈 룩 = 지붕 흰틴트: 건물 재질을 traverse 해 onBeforeCompile 로 "월드 노멀 상향" 기반 흰색
+//    블렌딩을 주입 — 위를 향한 면(지붕·기단 윗면·난간 위)에만 눈이 걸린다(볼륨 지오 없음, 값싼 셰이더).
+//    강도는 공유 uniform uSnowAmount(0~1) 로 제어, setWeather('snow') 시 수십 초에 걸쳐 서서히 희어진다
+//    (accumLevel 램프). clear 전환 시 0 으로 복귀(원본 외형 회복).
+//  - 젖은 재질은 roughness 를 원본*(1-0.45) 로 낮춘다(비 젖은 광택 룩, 물리 아님 — 원복 관리).
+//  - 지면은 눈이면 흰색, 비면 암부 톤다운으로 색만 lerp(값싼, 볼륨 아님).
 
 const TAU = Math.PI * 2;
 const WEATHER_SEED = 0x5e450; // 결정론 시드 (snow/rain 배치 재현)
@@ -57,14 +55,10 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // 이징 레벨(0..1). snowLevel → 눈발 파티클 가시성, rainLevel → 젖음/비 파티클.
   let snowLevel = 0, rainLevel = 0;
   let snowTarget = 0, rainTarget = 0;
-  // bldGate(0..1): 건물 종속 FX(처마 낙수·기단/처마선 스플래시·적설 쉘·기왓골 리벌릿)가 "집이 실제로
-  // 서고 조립이 정착한 뒤"에만 오르는 게이트(#61 로 #36 의 bldFx 를 지연 게이트로 일반화). 히어로 빈 터·
-  // 리롤 조립 중엔 0 → 빈 터/골조 위에 이펙트가 먼저 뜨는 조기 노출을 막는다. 조립 완료 ~1.4s 뒤부터
-  // 스멀스멀 오름("보상 신호"). 지면 스플래시·비 스트릭·낙하 눈발 파티클은 게이트 무관(하늘/지면 소속).
-  // 기본 present 로 프라임 → shot·히어로 없는 로드는 첫 프레임부터 1(재현성 유지).
-  const bldGate = makePresenceGate({ delay: 1.4, up: 1.6, down: 0.35 });
-  let bldFx = 1;               // bldGate.value 캐시(매 틱 갱신)
-  let lastBld = null;          // 건물 교체(리롤/유형변경) 감지 → 게이트 reset
+  // #131 물리 제거로 건물 종속 FX(처마 낙수·스플래시·적설 쉘·리벌릿)가 모두 사라져 bldGate 도 폐기.
+  //   눈 지붕 흰틴트는 공유 uniform(uSnowAmount) 이라 조기노출 게이트가 불필요(빈 터엔 눈 걸릴 위 향한
+  //   면 자체가 없음). lastBld 는 계절 입자(꽃잎/낙엽) petalGate 의 건물 교체 reset 판정에만 남긴다.
+  let lastBld = null;          // 건물 교체(리롤/유형변경) 감지 → petalGate reset
   // accumLevel(0..1): 지붕·기단·지면에 눈이 "쌓인" 진행도. 눈발(snowLevel)과 분리돼 천천히 오른다.
   let accumLevel = 0;
   // pinnedAccum: shot 하네스(window.__wx.setAccum)로 특정 쌓임 단계를 고정할 때의 값(null=자유 진행).
@@ -75,7 +69,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // 하늘 입자 필드 중심(#98). 눈·비 낙하 박스는 원점 기준 ±boxHalf 로 좁게(밀도 유지) 두되, 이 중심을
   //   매 프레임 카메라 타깃으로 옮겨(setWeatherCenter) "보는 곳에 눈/비가 온다"를 보장한다. 단일건물은
   //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 파티클(snow.points·
-  //   rain.lines)만 이설 — 처마 낙수·스플래시는 건물 앵커(월드 베이크)+bldFx 게이트라 불변.
+  //   rain.lines)·계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
   let fieldCX = 0, fieldCZ = 0;
 
   // 계절 입자 필드(#111): 봄 벚꽃·가을 낙엽의 카메라 추종 볼륨. 눈·비와 동일하게 scene 루트에 붙여
@@ -86,39 +80,19 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   let petalCamDist = NaN, petalCamY = null;
   // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
   //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
-  //   마을에선 앱 building.visible=false 라 bldFx 로는 못 켜므로 centerAway 를 OR 로 함께 본다.
+  //   마을에선 앱 building.visible=false 라 present 로는 못 켜므로 centerAway(fieldC)를 OR 로 함께 본다.
   const petalGate = makePresenceGate({ delay: 0.6, up: 1.2, down: 0.5 });
   let petalPresent = 1;
 
   // ---------- 파티클 시스템 ----------
+  // #131: 낙하 눈·비 커튼만 유지(값싼 입자). 처마 낙수(drips)·착지 스플래시·지붕 볼륨(snowvol/rainflow)은
+  //   제거 — 비는 지붕/지면 별도 처리 없이 그냥 내리고, 눈은 아래 patchSnow 흰틴트로 지붕이 희어진다.
   const snow = makeSnow();
   const rain = makeRain();
-  const drips = makeDrips();
-  const splash = makeSplashes();
   const petals = createPetalField({ getWind, lowPerf });
   scene.add(snow.points);
   scene.add(rain.lines);
-  scene.add(drips.lines);
-  scene.add(splash.points);
   scene.add(petals.points);
-
-  // ── 볼륨 시뮬(태스크 #52) ──────────────────────────────────────────────
-  // 셰이더 틴트(#21) 위에 "실제 두께의 눈 쉘 + 빗물 흐름"을 얹는다. 두께/성장은 이미 존재하는
-  // accumLevel(눈)·rainLevel/wetLevel(비) 램프를 시뮬 입력으로 그대로 재사용(#50 트윈 정합).
-  // 모바일 perf 프로파일·?snowvol=0 은 틴트만 남기는 폴백(볼륨 미생성). shot·데스크톱은 ON.
-  const q52 = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-  const VOL = !lowPerf && q52.get('snowvol') !== '0';
-  const snowVol = VOL ? createSnowVolume(scene, { getBuilding, getGround, layout: L }) : null;
-  const rainFlow = VOL ? createRainFlow(scene, { layout: L }) : null;
-
-  // 지붕 표면을 캡처해 눈 쉘·리벌릿 오버레이를 (재)구성한다. 초기 1회 + 건물 재생성마다.
-  function rebuildVolume() {
-    if (!VOL) return;
-    const b2 = getBuilding && getBuilding();
-    const surfaces = captureRoofSurfaces(b2);
-    snowVol.setLayout(L); snowVol.rebuild(surfaces);
-    rainFlow.setLayout(L); rainFlow.rebuild(surfaces);
-  }
 
   // ---------- 재질 패치(적설/젖음) ----------
   // material.uuid → { mat, roughness } (원본 roughness 보관)
@@ -224,12 +198,6 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
 
   function applyWetness() {
     for (const rec of patched.values()) {
-      // 적설 볼륨 재질(customProgramCacheKey 가 'snowvol_' 로 시작)은 젖음 감쇠(roughness 깎기)에서 제외합니다.
-      const hasCustom = typeof rec.mat.customProgramCacheKey === 'function';
-      const key = hasCustom ? rec.mat.customProgramCacheKey() : '';
-      if (key && key.startsWith('snowvol_')) {
-        continue;
-      }
       rec.mat.roughness = rec.roughness * (1.0 - WET_FACTOR * rainLevel);
     }
   }
@@ -305,11 +273,8 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
 
   function onBuildingChanged() {
     collectMaterials();
-    snowUniform.value = accumLevel * SNOW_MAX; // 새 재질에 현재 적설 즉시 반영
+    snowUniform.value = accumLevel * SNOW_MAX; // 새 재질에 현재 적설 흰틴트 즉시 반영
     applyWetness();
-    rebuildDrips();
-    splash.rebuild();
-    rebuildVolume();                            // 새 지붕 지오로 눈 쉘·리벌릿 재구성(#52)
   }
 
   function update(dt) {
@@ -322,14 +287,12 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     snowLevel += (effSnowTarget - snowLevel) * Math.min(1, dt / SNOW_TAU);
     rainLevel += (effRainTarget - rainLevel) * Math.min(1, dt / RAIN_TAU);
 
-    // 건물 종속 FX 지연 게이트(#61): 집이 보이고(building.visible) 조립이 정착한 뒤에만 오른다.
-    // 건물 교체(리롤/유형변경)는 reset 으로 0 스냅 후 지연 재상승 → 조립 중 빈 골조 위 조기 노출 차단.
+    // 건물 교체(리롤/유형변경) 감지 — 계절 입자 petalGate reset 판정용(#131 로 건물 종속 FX 게이트 폐기).
     const bObj = getBuilding && getBuilding();
     const bldReset = bObj !== lastBld; lastBld = bObj;
     const present = !!(bObj && bObj.visible);
-    bldFx = bldGate.update(dt, { present, reset: bldReset });
 
-    // 적설 쌓임은 선형 램프로 천천히(올라갈 땐 ~46s, 녹을 땐 ~16s). shot 하네스가 고정하면 그 값 유지.
+    // 적설 흰틴트 강도는 선형 램프로 천천히(올라갈 땐 ~46s, 녹을 땐 ~16s). shot 하네스가 고정하면 그 값 유지.
     if (pinnedAccum != null) {
       accumLevel = pinnedAccum;
     } else if (snowTarget > 0) {
@@ -346,40 +309,21 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     applyWetness();
     applyGround();
 
-    // 파티클 가시성/갱신
+    // 파티클 가시성/갱신 — 낙하 눈·비 커튼만(값싼 입자, 하늘 소속). 처마 낙수·스플래시·볼륨은 #131 로 제거.
     const snowVis = snowLevel > 0.003;
     const rainVis = rainLevel > 0.003;
-    // 처마 낙수는 전량 건물 종속 → bldFx 로 게이트(빈 터에선 0). 스플래시는 지면분(상시)과
-    // 건물분(기단·처마선)이 한 지오메트리에 섞여 있어 uBldFade 유니폼으로 건물분만 페이드한다.
-    const dripVis = rainVis && bldFx > 0.02;
     snow.points.visible = snowVis;
     rain.lines.visible = rainVis;
-    drips.lines.visible = dripVis;
-    splash.points.visible = rainVis;
     if (snowVis) snow.update(dt, t, snowLevel);
-    if (rainVis) { rain.update(dt, t, rainLevel); splash.update(dt, t, rainLevel, bldFx); }
-    if (dripVis) drips.update(dt, t, rainLevel * bldFx);
+    if (rainVis) rain.update(dt, t, rainLevel);
 
     // 계절 입자(봄 꽃잎·가을 낙엽): 조기노출 게이트(원점 빈 터 억제) + 카메라 추종 볼륨. 눈·비처럼
     //   하늘/대기 소속이라 accumLevel·rainLevel 과 무관하게 season 이 spring/autumn 이면 발현한다.
-    //   present = 건물 존재(단일건물) OR 필드가 원점을 벗어남(마을·focus·히어로) — bldGate 와 별개
-    //   페이드(petalGate)로 원점 빈 터 조립 전엔 0, 씬 정착 후 오른다. 고도 게이트는 petals 내부(camDist).
+    //   present = 건물 존재(단일건물) OR 필드가 원점을 벗어남(마을·focus·히어로) — petalGate 로 원점 빈 터
+    //   조립 전엔 0, 씬 정착 후 오른다. 고도 게이트는 petals 내부(camDist).
     const petalPresentRaw = present || Math.abs(fieldCX) > 8 || Math.abs(fieldCZ) > 8;
     petalPresent = petalGate.update(dt, { present: petalPresentRaw, reset: bldReset && !petalPresentRaw });
     petals.update(dt, { t, camDist: petalCamDist, camY: petalCamY, present: petalPresent, wind: getWind(t) });
-
-    // 볼륨 시뮬: 눈 쉘은 accumLevel(쌓임 진행)로, 빗물은 rainLevel/wetLevel 로 구동.
-    // 건물 종속분(지붕 눈 쉘·기단 두둑·기왓골 리벌릿)은 bldFx 로 게이트 → 조립 전 빈 터/골조엔 안 뜬다(#61).
-    // 눈 쉘 두께는 accum*bldFx 로 전달해 "지붕이 정착하면 눈이 서서히 쌓이는" 인과로 자란다.
-    // 지면 웅덩이(wet)·낙하 눈발/빗줄기 파티클은 하늘/지면 소속이라 게이트 없이 유지.
-    if (VOL) {
-      const snowActive = accumLevel > 0.004 || snowLevel > 0.004;
-      snowVol.setVisible(snowActive);
-      if (snowActive) snowVol.update(dt, { accum: accumLevel * bldFx, t, wind: getWind(t) });
-      const rainActive = rainLevel > 0.004 || wetLevel > 0.004;
-      rainFlow.setVisible(rainActive);
-      if (rainActive) rainFlow.update(dt, { rain: rainLevel * bldFx, wet: wetLevel, t });
-    }
   }
 
   // shot 하네스 훅: 특정 쌓임 단계로 고정(시간 경과 비교 컷). v=null 이면 자유 진행 복귀.
@@ -390,12 +334,8 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   }
   if (typeof window !== 'undefined') {
     window.__wx = {
+      // accum(0..1)=지붕 눈 흰틴트 진행도(#131: 볼륨 아님, patchSnow 강도). setAccum 으로 shot 고정.
       setAccum, get accum() { return accumLevel; }, get wind() { return getWind(t); },
-      // 낙설 이벤트 훅(#52): triggerSlip()=지금 1회 발생, setSlip(p)=진행도 p(0..1)로 고정(shot 중간 컷),
-      //   setSlip(null)=고정 해제. vol=볼륨 시뮬 활성 여부.
-      triggerSlip: () => { if (VOL) snowVol.fireSlip(t); },
-      setSlip: (p) => { if (VOL) snowVol.setSlip(p); },
-      get vol() { return VOL; },
       // 이징된 강수 레벨(0..1) — 외부 소비자(post 렌즈 플레어 등)가 엔진 배선 없이 읽는 읽기 전용 신호.
       get rain() { return rainLevel; },
       get snow() { return snowLevel; },
@@ -411,21 +351,17 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     const g = getGround && getGround();
     if (g && groundOrig) g.material.color.copy(groundOrig);
     snowUniform.value = 0;
-    for (const sys of [snow, rain, drips, splash]) {
+    for (const sys of [snow, rain]) {
       scene.remove(sys.points || sys.lines);
       (sys.points || sys.lines).geometry.dispose();
       (sys.points || sys.lines).material.dispose();
     }
     scene.remove(petals.points); petals.dispose();   // 계절 입자 필드(#111)
-    if (VOL) { snowVol.dispose(); rainFlow.dispose(); }
     if (typeof window !== 'undefined' && window.__wx) delete window.__wx;
   }
 
-  // 초기 재질 수집
+  // 초기 재질 수집(눈 흰틴트 patchSnow 를 씬 전체 재질에 주입)
   collectMaterials();
-  // 초기 볼륨 구성(첫 건물 — onBuildingChanged 이전 최초 로드 경로). L 은 collectMaterials 가 실제
-  // 건물 layout 으로 갱신한 값을 쓴다.
-  rebuildVolume();
 
   // env fog 모디파이어 자동 등록(태스크 #50): 넘겨받았으면 대기 틴트를 매 틱 base fog 위에 레벨
   // 스케일로 합성. weather 는 앱 수명 내내 살아있으므로 해제 불필요.
@@ -462,26 +398,38 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     geo.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1));
     geo.setAttribute('aOpacity', new THREE.BufferAttribute(aOpacity, 1));
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uFade: { value: 0 }, uScale: { value: 340 } },
+      // uNearA/B: 카메라 근접 페이드 창(월드 m). 히어로가 눈 볼륨(±46) 안에 앉으면 코앞 눈송이가
+      //   화면을 덮는 거대 원반이 되므로, 카메라 앞 uNearA 안은 소거하고 uNearB 까지 서서히 켠다.
+      // uMaxPx: 스프라이트 상한(px). 부감 uScale 증폭·근접 입자가 초대형 보케가 되는 걸 캡으로 차단.
+      uniforms: { uFade: { value: 0 }, uScale: { value: 340 }, uNearA: { value: 5.0 }, uNearB: { value: 15.0 }, uMaxPx: { value: 22.0 } },
       transparent: true, depthWrite: false,
       vertexShader: `
         attribute float aSize;
         attribute float aOpacity;
         uniform float uScale;
+        uniform float uNearA;
+        uniform float uNearB;
+        uniform float uMaxPx;
         varying float vOp;
+        varying float vNear;
         void main() {
           vOp = aOpacity;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = aSize * (uScale / max(-mv.z, 1.0));
+          float dcam = -mv.z;
+          // 근접 페이드: 코앞(<uNearA) 눈송이는 알파 0 → 거대 원반 소거. 원경 강수 커튼은 무영향.
+          vNear = smoothstep(uNearA, uNearB, dcam);
+          // 원근 크기 + 상한 캡(초대형 스프라이트 차단).
+          gl_PointSize = min(aSize * (uScale / max(dcam, 1.0)), uMaxPx);
         }`,
       fragmentShader: `
         uniform float uFade;
         varying float vOp;
+        varying float vNear;
         void main() {
           vec2 uv = gl_PointCoord - 0.5;
           float d = length(uv);
-          float a = smoothstep(0.5, 0.12, d) * vOp * uFade;
+          float a = smoothstep(0.5, 0.12, d) * vOp * uFade * vNear;
           if (a < 0.01) discard;
           gl_FragColor = vec4(1.0, 1.0, 1.0, a);
         }`,
@@ -619,235 +567,6 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     return { lines, update };
   }
 
-  function makeDrips() {
-    const mat = new THREE.LineBasicMaterial({
-      color: 0xaccbe0, transparent: true, opacity: 0.5, depthWrite: false,
-    });
-    const lines = new THREE.LineSegments(new THREE.BufferGeometry(), mat);
-    lines.name = 'weatherDrips';
-    lines.frustumCulled = false;
-    lines.renderOrder = 22;
-    lines.visible = false;
-    let ax = new Float32Array(0), az = new Float32Array(0), y = new Float32Array(0);
-    let spd = new Float32Array(0), len = new Float32Array(0);
-    let gper = new Float32Array(0), gph = new Float32Array(0); // 간헐 낙수 주기·위상
-    let pos = new Float32Array(0);
-    let N = 0;
-    let topY = 6, botY = 0;
-    let leanX = 0; // 바람에 의한 낙수 줄기 살짝 기울기
-
-    function build() {
-      const rng = makeRng(WEATHER_SEED ^ 0x3333);
-      const xE = L.xEave ?? 9, zE = L.zEave ?? 6;
-      topY = L.eaveEdgeY ?? 6.5;
-      botY = 0;
-      const spacing = 1.15;
-      const anchors = [];
-      // 전/후 처마선 (x 스캔)
-      for (let s = -1; s <= 1; s += 2) {
-        for (let px = -xE; px <= xE; px += spacing) anchors.push([px, s * zE]);
-      }
-      // 좌/우 처마선 (z 스캔)
-      for (let s = -1; s <= 1; s += 2) {
-        for (let pz = -zE + spacing; pz <= zE - spacing; pz += spacing) anchors.push([s * xE, pz]);
-      }
-      N = anchors.length;
-      ax = new Float32Array(N); az = new Float32Array(N); y = new Float32Array(N);
-      spd = new Float32Array(N); len = new Float32Array(N);
-      gper = new Float32Array(N); gph = new Float32Array(N);
-      pos = new Float32Array(N * 6);
-      for (let i = 0; i < N; i++) {
-        ax[i] = anchors[i][0] + rng.range(-0.15, 0.15);
-        az[i] = anchors[i][1] + rng.range(-0.15, 0.15);
-        y[i] = botY + rng() * (topY - botY);   // 위상 분산
-        spd[i] = rng.range(9, 16);
-        len[i] = rng.range(0.35, 0.7);
-        gper[i] = rng.range(1.6, 3.4);          // 낙수 방울이 맺혔다 떨어지는 주기(초)
-        gph[i] = rng();                          // 앵커별 위상 — 처마 전체가 동시에 안 떨어지게
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      lines.geometry.dispose();
-      lines.geometry = geo;
-      for (let i = 0; i < N; i++) writeDrip(i, 0);
-      geo.attributes.position.needsUpdate = true;
-    }
-    function writeDrip(i, tt) {
-      const o = i * 6;
-      // 간헐: 주기 안에서 앞쪽 55% 구간만 낙수 활성. 나머지는 방울이 맺히는 중(비가시).
-      const cyc = ((tt / gper[i] + gph[i]) % 1 + 1) % 1;
-      if (cyc > 0.55) { pos[o] = pos[o + 3] = ax[i]; pos[o + 1] = pos[o + 4] = topY; pos[o + 2] = pos[o + 5] = az[i]; return; }
-      pos[o] = ax[i];              pos[o + 1] = y[i];          pos[o + 2] = az[i];
-      pos[o + 3] = ax[i] - leanX * len[i]; pos[o + 4] = y[i] - len[i]; pos[o + 5] = az[i];
-    }
-    function update(dt, tt, level) {
-      mat.opacity = 0.5 * level;
-      const w = getWind(tt);
-      leanX = w.dirX * w.speed * 0.25;
-      for (let i = 0; i < N; i++) {
-        y[i] -= spd[i] * dt;
-        if (y[i] < botY) y[i] = topY;
-        writeDrip(i, tt);
-      }
-      lines.geometry.attributes.position.needsUpdate = true;
-    }
-    build();
-    return { lines, update, rebuild: build };
-  }
-  function rebuildDrips() { drips.rebuild(); }
-
-  // 빗방울/낙수가 "착지"할 때 튀는 스플래시. 착지점마다 작은 물방울 도트가 위로+밖으로
-  // 튀어 포물선으로 떨어지는 크라운 + 그 아래 은은한 파문 링으로 구성(파티클/도트 감성).
-  // 착지 표면(마당 지면 · 기단 상면 · 처마 낙수 착지선)에만 앵커를 흩뿌리고, 앵커 하나가
-  // 결정론 위상으로 순환한다. 물이 "떠나는" 처마 끝·지붕면 공중에는 스폰하지 않는다.
-  function makeSplashes() {
-    const DROPS = 4; // 앵커당 물방울 도트 수(크라운)
-    const geo = new THREE.BufferGeometry();
-    const mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uFade: { value: 0 }, uPix: { value: 260 }, uBldFade: { value: 1 } },
-      transparent: true, depthWrite: false,
-      vertexShader: `
-        attribute float aPhase;
-        attribute float aPeriod;
-        attribute float aScale;
-        attribute vec3 aDrop;   // xy=수평 비행(밖으로), z=솟는 높이. 파문은 0.
-        attribute float aKind;  // 0=파문 링, 1=물방울 도트
-        attribute float aBuilding; // 1=건물 종속(기단·처마선), 0=지면(상시)
-        uniform float uTime;
-        uniform float uPix;
-        varying float vLife;
-        varying float vKind;
-        varying float vBuilding;
-        void main() {
-          float lt = fract(uTime / aPeriod + aPhase);
-          vLife = lt; vKind = aKind; vBuilding = aBuilding;
-          vec3 p = position;
-          if (aKind > 0.5) {
-            // 물방울: 밖으로 퍼지며 포물선(솟았다 낙하)
-            p.x += aDrop.x * lt;
-            p.z += aDrop.y * lt;
-            p.y += aDrop.z * lt * (1.0 - lt) * 4.0;
-          }
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          gl_Position = projectionMatrix * mv;
-          float grow = (aKind > 0.5) ? (1.1 - 0.5 * lt) : sqrt(lt); // 도트=살짝 축소, 파문=팽창
-          gl_PointSize = aScale * grow * (uPix / max(-mv.z, 1.0));
-        }`,
-      fragmentShader: `
-        uniform float uFade;
-        uniform float uBldFade;
-        varying float vLife;
-        varying float vKind;
-        varying float vBuilding;
-        void main() {
-          vec2 uv = gl_PointCoord - 0.5;
-          float d = length(uv);
-          float a;
-          if (vKind > 0.5) {
-            // 물방울: 작고 반짝 튀는 도트(액센트) — 낮은 알파, 작은 코어
-            a = smoothstep(0.5, 0.18, d) * (1.0 - smoothstep(0.55, 1.0, vLife)) * 0.5;
-          } else {
-            // 파문: 팽창하는 링(주) — 물이 표면에 닿는 읽기. 살짝 넓은 밴드로 원거리서도 보이게.
-            float ring = smoothstep(0.5, 0.40, d) - smoothstep(0.36, 0.20, d);
-            a = ring * (1.0 - vLife) * 0.72;
-          }
-          a *= uFade;
-          a *= mix(1.0, uBldFade, vBuilding); // 건물 종속(기단·처마선) 스플래시는 집이 없을 때 소거
-          if (a < 0.02) discard;
-          gl_FragColor = vec4(0.88, 0.93, 0.99, a);
-        }`,
-    });
-    const points = new THREE.Points(geo, mat);
-    points.name = 'weatherSplash';
-    points.frustumCulled = false;
-    points.renderOrder = 23;
-    points.visible = false;
-
-    function build() {
-      const rng = makeRng(WEATHER_SEED ^ 0x4444);
-      const xE = L.xEave ?? 9, zE = L.zEave ?? 6;
-      const wallHX = (L.W ?? 12) / 2, wallHZ = (L.D ?? 8) / 2;
-      const podY = L.podTopY ?? 1.0;   // 기단 상면 높이(평방 윗면 plateY 아님!)
-      // 착지 표면만: ① 마당 지면(원반) ② 기단 상면 둘레 링 ③ 처마 낙수 착지선(지면).
-      // 크라운 밀도는 드문드문 — 팝콘 밭이 아니라 톡톡 튀는 물방울.
-      const nGround = 165, nPodium = 52, nEave = 83;
-      const nAnchor = nGround + nPodium + nEave;
-      const N = nAnchor * (1 + DROPS); // 앵커당 파문 1 + 물방울 DROPS
-      const pos = new Float32Array(N * 3);
-      const aPhase = new Float32Array(N);
-      const aPeriod = new Float32Array(N);
-      const aScale = new Float32Array(N);
-      const aDrop = new Float32Array(N * 3);
-      const aKind = new Float32Array(N);
-      const aBuilding = new Float32Array(N); // 0=지면(상시) / 1=건물 종속(기단·처마선)
-      let k = 0;
-      let bflag = 0; // 현재 앵커 그룹의 건물 종속 여부(put 루프 사이에 토글)
-      // 한 착지점 = 파문 링 1 + 물방울 도트 DROPS (같은 위상·주기로 함께 튄다)
-      const put = (x, y, z, ripLo, ripHi, spread, rise, perLo, perHi) => {
-        const ph = rng();
-        const per = rng.range(perLo ?? 0.55, perHi ?? 1.1); // 짧은 수명(빠른 튐)
-        const emit = (kind, sc, dx, dy, dz) => {
-          pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
-          aPhase[k] = ph; aPeriod[k] = per; aScale[k] = sc;
-          aDrop[k * 3] = dx; aDrop[k * 3 + 1] = dy; aDrop[k * 3 + 2] = dz;
-          aKind[k] = kind; aBuilding[k] = bflag; k++;
-        };
-        emit(0, rng.range(ripLo, ripHi), 0, 0, 0); // 파문
-        for (let j = 0; j < DROPS; j++) {
-          const th = (j + rng() * 0.7) / DROPS * TAU;
-          const rad = rng.range(0.5, 1.0) * spread;
-          const h = rng.range(0.5, 1.0) * rise;
-          emit(1, rng.range(1.2, 2.0), Math.cos(th) * rad, Math.sin(th) * rad, h);
-        }
-      };
-      // ① 마당 지면: 기단 밖에서 시작하는 원반(가까울수록 조밀). 지면 높이에서 튄다.
-      //    지면분은 집 유무와 무관(빈 터에서도 비는 땅에 튄다) → bflag=0 유지.
-      bflag = 0;
-      for (let i = 0; i < nGround; i++) {
-        const rr = (xE + 1.0) + Math.pow(rng(), 0.7) * 20;
-        const th = rng.range(0, TAU);
-        put(Math.cos(th) * rr, 0.05, Math.sin(th) * rr, 4.5, 9, 0.9, 0.6);
-      }
-      // ② 기단 상면(툇마루/월대 돌바닥): 건물 벽선 바로 밖 둘레 링, podTopY 높이.
-      //    ②③ 은 건물 표면에 물이 튀는 FX → 집이 없으면 소거되게 bflag=1.
-      bflag = 1;
-      for (let i = 0; i < nPodium; i++) {
-        const side = Math.floor(rng() * 4);
-        const out = rng.range(0.1, 0.9);   // 벽선에서 기단 상면 쪽으로 살짝 밖(기단 위 유지)
-        let x, z;
-        if (side === 0) { z = wallHZ + out; x = rng.range(-wallHX, wallHX); }
-        else if (side === 1) { z = -(wallHZ + out); x = rng.range(-wallHX, wallHX); }
-        else if (side === 2) { x = wallHX + out; z = rng.range(-wallHZ, wallHZ); }
-        else { x = -(wallHX + out); z = rng.range(-wallHZ, wallHZ); }
-        put(x, podY + 0.06, z, 3, 5.5, 0.6, 0.45);
-      }
-      // ③ 처마 낙수 착지선: 처마 footprint(x=±xE, z=±zE) 바로 아래 지면. 낙수 줄기(drips)와
-      //    같은 라인이라 "처마 끝→지면"의 인과가 읽힌다. 지면 높이에서 튄다.
-      const eaveAnchors = [];
-      const spc = 1.1;
-      for (const s of [-1, 1]) for (let px = -xE; px <= xE; px += spc) eaveAnchors.push([px, s * zE]);
-      for (const s of [-1, 1]) for (let pz = -zE + spc; pz <= zE - spc; pz += spc) eaveAnchors.push([s * xE, pz]);
-      for (let i = 0; i < nEave; i++) {
-        const a = eaveAnchors[i % eaveAnchors.length];
-        put(a[0] + rng.range(-0.12, 0.12), 0.06, a[1] + rng.range(-0.12, 0.12), 3.5, 6, 0.8, 0.7, 0.45, 0.9);
-      }
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('aPhase', new THREE.BufferAttribute(aPhase, 1));
-      geo.setAttribute('aPeriod', new THREE.BufferAttribute(aPeriod, 1));
-      geo.setAttribute('aScale', new THREE.BufferAttribute(aScale, 1));
-      geo.setAttribute('aDrop', new THREE.BufferAttribute(aDrop, 3));
-      geo.setAttribute('aKind', new THREE.BufferAttribute(aKind, 1));
-      geo.setAttribute('aBuilding', new THREE.BufferAttribute(aBuilding, 1));
-    }
-    function update(dt, tt, level, bldFade = 1) {
-      mat.uniforms.uTime.value = tt;
-      mat.uniforms.uFade.value = level;
-      mat.uniforms.uBldFade.value = bldFade;
-    }
-    build();
-    return { points, update, rebuild: build };
-  }
-
   return {
     setWeather,
     update,
@@ -868,11 +587,18 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
         rain.lines.position.set(x, 0, z);
         petals.points.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
       }
-      // 고도(카메라↔타깃 거리) 비례 눈송이 크기(#98 원경 정책) — 부감에서 카메라가 멀어 점이 벼룩처럼
-      //   작아지는 걸 상쇄(uScale 은 gl_PointSize 를 -mv.z 로 나눔). 근경 1× → 부감 최대 5×. 낙하 입자
-      //   볼륨은 전 고도 유지(하늘 소속) — 매트릭스: 부감에서도 snow/rain count>0.
+      // 고도(카메라↔타깃 거리) 대응(#98·#116 원경 정책). 두 축으로 나눠 부감 강수를 "커튼"으로 만든다:
+      //   ① uScale: 부감에서 눈송이가 벼룩처럼 작아지는 걸 상쇄하되 완만하게(최대 2.2×). 셰이더 사이즈
+      //      캡(uMaxPx)이 초대형 스프라이트를 막으므로 예전(5×)처럼 과증폭할 필요가 없다 — 과증폭이
+      //      바로 부감 "흰 솜뭉치 블롭"의 원인이었다.
+      //   ② 낙하 볼륨 xz 분산: 카메라가 멀수록(부감) ±boxHalf 박스를 넓게 편다(최대 3×). 3600 입자가
+      //      마을 중심 ±46 에 뭉쳐 블롭이 되던 걸, 넓은 면적에 흩어 "원경에 깔리는 강수 커튼"으로 만든다.
+      //      근경(hero·focus, camDist 작음)은 1× 라 기존 밀도·룩 무변(히어로는 셰이더 근접페이드가 담당).
       if (Number.isFinite(camDist)) {
-        snow.points.material.uniforms.uScale.value = 340 * Math.min(5, Math.max(1, camDist / 42));
+        snow.points.material.uniforms.uScale.value = 340 * Math.min(2.2, Math.max(1, camDist / 75));
+        const spread = Math.min(3.0, Math.max(1, camDist / 60));
+        snow.points.scale.set(spread, 1, spread);
+        rain.lines.scale.set(spread, 1, spread);
       }
       // 계절 입자 고도 게이트 신호(#111): camDist 는 항상, camY(선택 4번째 인자)는 넘어오면 정밀 게이트.
       //   눈·비와 달리 꽃잎·낙엽은 부감(고도 높음)에서 소거된다(petals 내부 altGate). engine 이 camY 를

@@ -3,10 +3,6 @@ import { setupAnimals } from './animals.js';
 import { setupSmoke } from './smoke.js';
 import { setupMotes, setupLanternSway } from './motes.js';
 import { makePresenceGate } from './present-gate.js';
-import { captureRoofSurfaces } from './roofcapture.js';
-import { createSnowVolume } from './snowvol.js';
-import { createRainFlow } from './rainflow.js';
-import { getWind } from './wind.js';
 import { setupGrass } from './grass.js';
 import { attachOverlayLanterns, getLanternMaterials } from '../layout/props.js';
 
@@ -23,21 +19,17 @@ const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
 //   ring.update(dt, timeName);                        // 매 프레임. timeName: dawn|day|sunset|night
 //
 // 원칙:
-//  - 기존 env 시스템 재사용(신규 발명 금지): animals.js·smoke.js·motes.js(모트+등롱흔들림)·
-//    snowvol.js/rainflow.js(지붕 적설 쉘·빗물 리벌릿, roofOnly).
+//  - 기존 env 시스템 재사용(신규 발명 금지): animals.js·smoke.js·motes.js(모트+등롱흔들림)·grass.js.
+//    (#131: 지붕 적설 쉘·빗물 리벌릿 물리는 제거 — 눈은 weather.js 지붕 흰틴트(uSnowAmount)가 대체.)
 //  - 활성/해제 모두 크로스페이드(팟 금지) — present-gate(조립 정착 후 상승)를 강도(strength)로 쓴다.
 //  - 동시 1개 링만. set 재호출 시 기존 링을 페이드아웃(retiring) 후 교체, ~0 도달 시 dispose.
 //  - dispose 철저: 지오/재질/텍스처 누수 금지(Sprite 공유 지오는 제외 — 전역 손상 방지).
 //
-// 날씨(#84): 계약 시그니처는 불변. 적설/빗물은 window.__wx(weather.js) 를 직접 판독한다
-//   (FlarePass #67 이 확립한 선례 — 명시 배선 없이 env 코드가 __wx.accum/rain/snow 자동 판독).
-//   신호 부재/0 이면 dormant(현행 동일) = forward-compatible. ring.set({getWeather}) 로 명시
-//   오버라이드 가능(미래 명시성). ?snowvol=0·lowPerf 는 볼륨 미생성(틴트만) 폴백 존중.
+// 날씨(#131): 지붕 눈/비 물리는 제거됨. 눈은 weather.js 지붕 흰틴트(uSnowAmount 공유 uniform)가 전역
+//   담당(focus-in 지붕도 자동 흰색화), 비는 낙하 커튼만. readWeather 는 잔존하나 현재 미사용(dormant).
 //
 // 좌표: buildParcel 컴파운드는 이미 필지 월드 위치에 놓여 있다(group.matrixWorld). 링 컨테이너는
 //   씬 루트(identity)에 두고 모든 배치를 월드 좌표로 계산한다(populate 소동물 배치 패턴과 동일).
-//   적설 쉘·빗물 리벌릿은 captureRoofSurfaces 월드좌표를 지오에 베이크하므로 volume group=origin
-//   유지 시 오프셋 필지 지붕에 정확히 얹힌다(roofOnly 로 origin 상대 지면 드리프트·웅덩이 배제).
 
 // window.__wx(weather.js 노출) 자동 판독. getWeather 오버라이드 우선. 신호 없으면 전부 0(dormant).
 function readWeather(getWeather) {
@@ -136,10 +128,15 @@ function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed,
   container.add(motes.group);
   motes.setEnabled(true);
 
-  // 4) 등롱 바람 흔들림 — focus 오버레이 스코프(env 전역 lanternSway 와 대상 분리). 현재 필지엔
-  //    매달린 등롱이 없어 dormant(no-op) 이나, 오버레이가 등롱을 갖게 되면 자동 흔들린다.
+  // 4) 등롱 바람 흔들림 — focus 오버레이 스코프(env 전역 lanternSway 와 대상 분리). 오버레이(parcel-*)는
+  //    emitLight:false 로 발광 bulb 만 갖는다(#141) → light 없이 bulb 만 흔들린다.
   const lantern = setupLanternSway({ scene, getBuilding, scope: group });
   lantern.setEnabled(true);
+  // 오버레이 등롱 국소 조명(#141): 오버레이는 PointLight 를 안 갖는다(개수 요동 방지). bulb 를 모아
+  //   createFocusRing 고정 풀(ringPool)이 링 강도로 점등 → focus-in/out·hop 로 오버레이가 add/remove
+  //   돼도 씬 조명 개수 불변. group 직속 자식 bulb 만 수집(frame·건물 배제).
+  const ringLanterns = [];
+  for (const c of group.children) if (c.name === 'lantern-bulb') ringLanterns.push({ bulb: c, baseI: 0.65 });
 
   // 4.5) 바람 풀(#90) — 담장 밑·마당 가장자리·필지 외곽에 인스턴스드 풀 포기. 마당 중앙 동선·
   //    건물 발자국·대문 앞은 비운다. 버텍스 셰이더 흔들림(wind.js 판독, 연기·낙엽과 동방향).
@@ -152,19 +149,9 @@ function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed,
     sun, seed: (seed ^ 0x3aa9) >>> 0, season,
   });
 
-  // 5) 지붕 적설 쉘·빗물 리벌릿(#84, roofOnly) — window.__wx 날씨 판독으로 구동. 볼륨 group 은
-  //    origin 유지(쉘·리벌릿이 captureRoofSurfaces 월드좌표 베이크라 오프셋 필지 지붕에 정확). 지붕
-  //    표면 캡처는 조립 정착 후 1회(부재가 솟는 중 캡처하면 쉘이 어긋남) — strength 상승 시점에 지연 캡처.
-  const snowVol = vol ? createSnowVolume(scene, { getBuilding, getGround: () => null, layout: {}, roofOnly: true }) : null;
-  const rainFlow = vol ? createRainFlow(scene, { layout: {}, roofOnly: true }) : null;
-  let roofCaptured = false;
-  function captureRoofOnce() {
-    if (roofCaptured || !vol) return;
-    const b = getBuilding();
-    if (!b) return;
-    const surfaces = captureRoofSurfaces(b);
-    if (surfaces && surfaces.length) { snowVol.rebuild(surfaces); rainFlow.rebuild(surfaces); roofCaptured = true; }
-  }
+  // 5) 지붕 적설/빗물(#131): 눈 쌓임 볼륨 쉘·빗물 리벌릿 물리는 사용자 지시로 제거(roofcapture +
+  //    2×mergeGeometries 성능 부담). 눈은 weather.js 지붕 흰틴트(uSnowAmount 공유 uniform)가 대체하고
+  //    focus-in 지붕도 그 전역 셰이더 틴트로 자동 흰색화(별도 배선 불필요), 비는 낙하 커튼만 남긴다.
 
   // present-gate 를 강도(strength)로 재사용: 조립 정착(delay) 후 상승(up), 해제 시 하강(down).
   //   첫 프레임 present=false 강제(prime→0) → 오버레이가 이미 보여도 팟 없이 페이드인.
@@ -201,20 +188,7 @@ function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed,
     lantern.update(dt);
     grass.update(dt);
 
-    // 지붕 적설/빗물(#84): 날씨 신호(__wx 또는 getWeather)를 판독해 구동. 강도(strength)로 크로스페이드
-    //   — accum·rain·wet 에 strength 를 곱해 활성 시 서서히 쌓이고 해제 시 서서히 녹는다(팟 없음).
-    //   조립 정착(strength 상승) 후에만 지붕 캡처 → 부재가 솟는 중 어긋난 쉘 방지.
-    if (vol) {
-      if (!roofCaptured && strength > 0.02) captureRoofOnce();
-      const wx = readWeather(getWeather);
-      const wind = wx.wind || getWind(_wt += dt);
-      const snowOn = (wx.accum > 0.004 || wx.snow > 0.004) && strength > 0.004;
-      snowVol.setVisible(snowOn);
-      if (snowOn) snowVol.update(dt, { accum: wx.accum * strength, t: _wt, wind });
-      const rainOn = (wx.rain > 0.004 || wx.wet > 0.004) && strength > 0.004;
-      rainFlow.setVisible(rainOn);
-      if (rainOn) rainFlow.update(dt, { rain: wx.rain * strength, wet: wx.wet * strength, t: _wt });
-    }
+    // 지붕 적설/빗물(#131): 물리 제거됨 — 눈은 weather.js 지붕 흰틴트가, 비는 낙하 커튼이 담당(위 5 참조).
   }
 
   function beginOut() { phase = 'out'; }
@@ -222,13 +196,11 @@ function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed,
   function dispose() {
     smoke.setEnabled(false);    // 건물의 아궁이 불씨(그룹 밖 라이트)까지 소등 후 해제
     lantern.setEnabled(false);
-    if (snowVol) snowVol.dispose();   // 씬 직속 group(container 밖) — 명시 해제
-    if (rainFlow) rainFlow.dispose();
     scene.remove(container);
     disposeSubtree(container);
   }
 
-  return { setTime, setSeason, update, beginOut, dead, dispose, get strength() { return strength; }, get phase() { return phase; } };
+  return { setTime, setSeason, update, beginOut, dead, dispose, lanterns: ringLanterns, get strength() { return strength; }, get phase() { return phase; } };
 }
 
 export function createFocusRing(scene, { heightAt = () => 0, sun = null, renderer = null, lowPerf = false } = {}) {
@@ -240,6 +212,39 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
   const retiring = [];
   let curTime = 'day';
   let curSeason = 'summer';
+
+  // 오버레이 등롱 국소 조명 고정 풀(#141) — createFocusRing 수명 동안 씬에 상주하는 RING_POOL_N 개
+  //   PointLight. 항상 visible(개수 불변) → focus-in/out·hop 로 오버레이가 add/remove 돼도 씬 조명
+  //   개수 불변. 미사용은 intensity 0 파킹. 활성 링(≤3 등롱) 우선 배정, 남으면 페이드아웃 링(hop
+  //   크로스페이드)에 배분. 카메라 불요(단일 필지라 링 강도로만 점등).
+  const RING_POOL_N = 4;
+  const ringPool = (() => {
+    const lights = [];
+    for (let i = 0; i < RING_POOL_N; i++) {
+      const l = new THREE.PointLight(0xffb266, 0, 5.5, 2);   // attachOverlayLanterns 등롱과 동일 파라미터
+      l.name = 'ringPoolLight'; l.castShadow = false; l.visible = true;
+      scene.add(l); lights.push(l);
+    }
+    const _wp = new THREE.Vector3();
+    function assign() {
+      let slot = 0;
+      const use = (ring) => {
+        if (!ring || slot >= RING_POOL_N) return;
+        const ls = ring.lanterns, s = ring.strength;
+        if (!ls || !ls.length || s < 0.02) return;
+        for (const L of ls) {
+          if (slot >= RING_POOL_N) break;
+          L.bulb.getWorldPosition(_wp);
+          lights[slot].position.copy(_wp); lights[slot].intensity = L.baseI * s; slot++;
+        }
+      };
+      use(active);
+      for (const r of retiring) use(r);
+      for (; slot < RING_POOL_N; slot++) lights[slot].intensity = 0;
+    }
+    function dispose() { for (const l of lights) scene.remove(l); }
+    return { assign, dispose };
+  })();
 
   // 활성 링 점등. 기존 링은 페이드아웃 대기열로. getWeather: __wx 대신 쓸 명시 날씨 게터(선택).
   //   season: 풀 색 계절(spring|summer|autumn|winter). 기본 현행 유지(마지막 setSeason 값).
@@ -276,6 +281,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
       r.update(dt);
       if (r.dead()) { r.dispose(); retiring.splice(i, 1); }
     }
+    ringPool.assign();   // #141 오버레이 등롱 국소광을 고정 풀에 배정(개수 불변)
   }
 
   // 전체 해제(즉시 dispose — 씬 파괴 시).
@@ -283,6 +289,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
     if (active) { active.dispose(); active = null; }
     for (const r of retiring) r.dispose();
     retiring.length = 0;
+    ringPool.dispose();
   }
 
   return {
@@ -359,6 +366,47 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
   const retiring = [];
   let frameNo = 0;
 
+  // PointLight 고정 풀(#141) — 필드 수명 동안 씬에 상주하는 POOL_N 개 PointLight. 항상 visible 이라
+  //   씬의 numPointLights 가 상수(=재컴파일 폭풍 소멸). 미사용 슬롯은 intensity 0 으로 파킹(visible=false 는
+  //   개수에서 빠져 다시 요동하므로 금지). 매 프레임 active/retiring 셀 등롱을 카메라 근접 순으로 배정,
+  //   초과분은 자연 탈락(기존에도 원경 등롱은 국소광이 약했음). N=10 은 근접 우선 점등 + 프래그먼트 상한.
+  const POOL_N = 10;
+  function makeLightPool() {
+    const lights = [];
+    for (let i = 0; i < POOL_N; i++) {
+      const l = new THREE.PointLight(0xffb266, 0, 5.5, 2);   // attachOverlayLanterns 등롱과 동일 파라미터
+      l.name = 'ambPoolLight'; l.castShadow = false; l.visible = true;
+      scene.add(l); lights.push(l);
+    }
+    const _wp = new THREE.Vector3();
+    const _cand = [];   // 재사용 후보 배열(프레임당 clear)
+    function assign(camera) {
+      _cand.length = 0;
+      const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+      const gather = (cell) => {
+        const ls = cell.lanterns; if (!ls) return;
+        const s = cell.strength; if (s < 0.02) return;
+        for (const L of ls) {
+          L.bulb.getWorldPosition(_wp);
+          const dx = _wp.x - cx, dy = _wp.y - cy, dz = _wp.z - cz;
+          _cand.push({ x: _wp.x, y: _wp.y, z: _wp.z, i: L.baseI * s, d: dx * dx + dy * dy + dz * dz });
+        }
+      };
+      for (const c of cells.values()) gather(c);
+      for (const r of retiring) gather(r);
+      _cand.sort((a, b) => a.d - b.d);
+      for (let i = 0; i < POOL_N; i++) {
+        const c = _cand[i];
+        if (c) { lights[i].position.set(c.x, c.y, c.z); lights[i].intensity = c.i; }
+        else lights[i].intensity = 0;
+      }
+    }
+    function clear() { for (const l of lights) l.intensity = 0; }
+    function dispose() { for (const l of lights) scene.remove(l); }
+    return { assign, clear, dispose, get size() { return POOL_N; } };
+  }
+  const lightPool = makeLightPool();
+
   // 카메라 히스토리(속도) + 앵커(지면점) + 룩어헤드(프리워밍).
   const _camPrev = new THREE.Vector3(); let _camHas = false; let speed = 0; let speedHot = false;
   const _dir = new THREE.Vector3();
@@ -378,19 +426,21 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     const scope = new THREE.Group();
     scope.position.set(desc.cx, desc.baseY, desc.cz); scope.rotation.y = desc.rotY;
     container.add(scope);
-    attachOverlayLanterns(scope, { style: desc.style, W: desc.W, D: desc.D, seed: desc.seed });
+    // PointLight 풀링(#141): 셀은 발광 bulb(공유 glow 재질 emissive — 야간 어댑터가 hanjiGlow 로 점등)만
+    //   두고 PointLight 는 심지 않는다(emitLight:false). 셀 스핀업/은퇴마다 조명 개수가 요동해 씬 전체
+    //   조명 재질이 개수별로 재컴파일되는 전환 셰이더 폭풍을 막는다. 국소 조명(warm cast)은 필드 고정
+    //   풀(makeLightPool)이 카메라 근접 순으로 배정한다.
+    attachOverlayLanterns(scope, { style: desc.style, W: desc.W, D: desc.D, seed: desc.seed, emitLight: false });
     stripLanternFrames(scope);
-    const bulbs = [], lights = [];
+    const bulbs = [], lanterns = [];
     for (const c of scope.children) {
-      if (c.name === 'lantern-bulb') bulbs.push({ mesh: c, base: c.scale.clone() });
-      else if (c.isPointLight) lights.push({ light: c, base: c.intensity });
+      if (c.name === 'lantern-bulb') { bulbs.push({ mesh: c, base: c.scale.clone() }); lanterns.push({ bulb: c, baseI: 0.65 }); }
     }
-    const sway = setupLanternSway({ scene, scope }); sway.setEnabled(true);
-    return { sway, bulbs, lights };
+    const sway = setupLanternSway({ scene, scope }); sway.setEnabled(true);   // light 없이 bulb 만 흔들림(#141)
+    return { sway, bulbs, lanterns };
   }
-  function applyLanternFade(bulbs, lights, s) {
+  function applyLanternFade(bulbs, s) {
     for (const b of bulbs) b.mesh.scale.set(b.base.x * s, b.base.y * s, b.base.z * s);
-    for (const l of lights) l.light.intensity = l.base * s;
   }
   // 셀 dispose: 지오·전용 재질만 해제(공유 등롱 재질 보호). motes ShaderMaterial·bulb SphereGeometry 등.
   function disposeCell(container) {
@@ -411,6 +461,7 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     let firstFrame = true, phase = 'in', strength = 0;
     return {
       tier, container, desc, _dist: 0, touch: frameNo,
+      lanterns: subs.lanterns || null,   // #141 풀 배정용(bulb 월드좌표·baseI). strength 곱해 국소 조명.
       setTime(name, imm) { if (subs.motes) subs.motes.setTime(name, { immediate: !!imm }); },
       update(dt) {
         const present = phase === 'out' ? false : firstFrame ? false : true;   // 첫 프레임 prime→0(팟 방지)
@@ -418,7 +469,7 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
         strength = gate.update(dt, { present });
         if (subs.motes) { subs.motes.setFade(strength); subs.motes.update(dt); }
         if (subs.sway) subs.sway.update(dt);
-        applyLanternFade(subs.bulbs, subs.lights, strength);
+        applyLanternFade(subs.bulbs, strength);
       },
       beginOut() { phase = 'out'; },
       dead() { return phase === 'out' && strength < 0.02; },
@@ -485,7 +536,7 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
   }
 
   function update(dt, camera) {
-    if (!enabled || !camera) { smoke.update(dt); return; }
+    if (!enabled || !camera) { lightPool.clear(); smoke.update(dt); return; }
     frameNo++;
     computeAnchor(camera);
     updateSpeed(camera, dt);
@@ -530,6 +581,8 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     for (const c of cells.values()) c.update(dt);
     for (let i = retiring.length - 1; i >= 0; i--) { const r = retiring[i]; r.update(dt); if (r.dead()) { r.dispose(); retiring.splice(i, 1); } }
 
+    lightPool.assign(camera);   // #141 셀 등롱 국소광을 고정 풀에 근접 순 배정(개수 불변)
+
     syncSmokeAnchors();
     const sTarget = anchorGroup.children.length > 0 ? 1 : 0;
     smokeFade += (sTarget - smokeFade) * Math.min(1, dt * 1.4);
@@ -556,6 +609,7 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     if (typeof window !== 'undefined' && window.__ambLookahead === lookaheadFn) delete window.__ambLookahead;
     for (const c of cells.values()) c.dispose(); cells.clear();
     for (const r of retiring) r.dispose(); retiring.length = 0;
+    lightPool.dispose();
     smoke.setEnabled(false); scene.remove(smoke.group); disposeSubtree(smoke.group);
     scene.remove(anchorGroup);
     chimneyGeo.dispose(); chimneyMat.dispose();

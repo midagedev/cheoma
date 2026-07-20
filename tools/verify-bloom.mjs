@@ -3,7 +3,7 @@
 //   ① 규모 3종 진달래·개나리 인스턴스 카운트  ② 부유 검사(각 인스턴스 y vs site.heightAt < 0.5m)
 //   ③ 드로우콜 격리(bloom 그룹 on/off delta ≤ 2, 메인패스 총계 참고)  ④ 계절 토글(spring=visible·autumn=hidden)
 //   ⑤ 결정론(같은 seed 2회 빌드 → 개화 위치 동일)  ⑥ pageerror 0.
-// 실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-bloom.mjs
+// 실행: node tools/verify-bloom.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';

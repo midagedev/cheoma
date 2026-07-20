@@ -1,5 +1,5 @@
 // 플래그십 룩 R4 검증(골든아워 색온도·색분리). 사용자 정정: "전부 노랗게만 보이지 않게".
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-look4.mjs
+// 사용: node tools/shoot-look4.mjs
 // 산출: shots/look4-*.png. 각 컷 저장 직후 hue/휘도 통계를 stdout 에 찍는다(주황 단일 피크 감지).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

@@ -1,5 +1,5 @@
 // critic-giwa-r3 전용 원오프 캡처 → shots/cg3-*.png
-// 실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-cg3.mjs
+// 실행: node tools/shoot-cg3.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

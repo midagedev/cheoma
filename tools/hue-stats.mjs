@@ -1,5 +1,5 @@
 // 색분리 정량 측정: PNG 의 hue 히스토그램·녹/청 성분·근흑 비율을 찍는다.
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/hue-stats.mjs shots/look4-default.png [...]
+// 사용: node tools/hue-stats.mjs shots/look4-default.png [...]
 // 판정: 주황 단일 피크(orange 밴드 비율↑, green/cool≈0)면 뭉갬. green·cool 성분이 살아있고
 //       orange 비율이 내려가면 색분리 성공. sky(상단 25%)는 별도로 2색 이상인지 확인.
 import { readFile } from 'node:fs/promises';

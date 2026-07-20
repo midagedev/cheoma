@@ -1,5 +1,5 @@
 // focus 연속체 v2(#92) 게이트 검증 — 빌트 앱(app/dist-focusv2)을 실제 구동해 촬영.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-focusv2.mjs
+// 사용법: node tools/shoot-focusv2.mjs
 //   포트 4205 고정(사용자 dev 5174 불침해). 게이트 컷은 shots/focusv2-*, 중간 컷은 스크래치패드.
 // 게이트: ① 줌 연속체 4컷 ② 패널 모프 before/mid/after ③ 리플레이 비종가 ④ 리롤 웨이브 3컷
 //   ⑤ 모바일 2컷 ⑥ 회귀(부팅·shot·hero0·village1·4프리셋 0에러) ⑦ 크리틱 3건(월대난간·물매 라이브·기와 접힘)

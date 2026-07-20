@@ -69,8 +69,8 @@ export function createFresnelRim(scene) {
     uRimPower: { value: 1.92 },     // 프레넬 지수(담백하고 예리한 에지 실선 복원)
     uRimWrap: { value: 0.18 },      // 태양 반대편 실루엣 잔여 림(과도한 그늘 림 억제)
     uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
-    uRimNear: { value: 24.0 },      // 근경 거리 게이트 시작(뷰공간 깊이)
-    uRimFar: { value: 210.0 },      // 원경 능선·far 건물 제외(부감 골든 아웃라인 과다 완화)
+    uRimNear: { value: 24.0 },      // 근경 거리 게이트 시작(뷰공간 깊이) — 근경 focus 림 불변
+    uRimFar: { value: 175.0 },      // 원경 능선·far 건물 제외(#119: 부감/전환 원경 림 과다 하향, 210→175)
   };
 
   // 커버리지 카운트(검증 로그): 재질군별 패치 수 — 나무·풀·소품 포함 증명·제외 준수 확인.

@@ -1,5 +1,5 @@
 // 감상 뷰 자동 회전 검증 (task #8 마지막 항목). 출력: shots/ui-orbit-*.png 전용.
-//   실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-orbit.mjs
+//   실행: node tools/shoot-orbit.mjs
 // 빌드된 app/dist 를 정적 서버로 띄워 검증(HMR 함정 회피). 검증 신호는 렌더 픽셀이 아니라
 // 카메라 위치/방위각 델타 — 앰비언트 파티클(모트·연기·물결)이 매 프레임 움직이므로
 // "픽셀 동일"은 성립하지 않고, "카메라가 도느냐/멈췄느냐"가 자동 회전의 실제 지표다.

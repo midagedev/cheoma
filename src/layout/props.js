@@ -64,7 +64,12 @@ export function lanternLayout(style, seed, W, D, config = null) {
 
 // ── 오버레이(풀디테일) 등롱: 필지 루트 직속에 bulb + PointLight 를 심는다(setupLanternSway 탐지 계약). ──
 //   frame(갓·걸이·기둥)은 하위 Group 에 담아 직속 소형 Sphere 오인 방지. 반환: 심은 등롱 수.
-export function attachOverlayLanterns(root, { style = 'hanok', W = 24, D = 22, seed = 7 } = {}) {
+// emitLight(#141, 기본 true): PointLight 를 심을지. focus 오버레이(parcel.js)·앰비언스 필드 셀은
+//   false 로 호출 — 셀/오버레이가 자기 PointLight 를 씬에 두면 focus-in/out·hop·필드 셀 스핀업마다
+//   numPointLights 가 요동해 씬 전체 조명 재질이 개수별로 재컴파일된다(전환 셰이더 폭풍). 발광 bulb
+//   (공유 glow 재질 emissive — 야간 어댑터가 hanjiGlow 로 점등)만 남기고, 국소 조명(warm cast)은
+//   env/focus.js 의 고정 PointLight 풀이 카메라/링 근접 순으로 배정한다(개수 불변).
+export function attachOverlayLanterns(root, { style = 'hanok', W = 24, D = 22, seed = 7, emitLight = true } = {}) {
   const { glow, frame } = getLanternMaterials();
   const places = lanternLayout(style, seed, W, D, null);
   let count = 0;
@@ -77,11 +82,13 @@ export function attachOverlayLanterns(root, { style = 'hanok', W = 24, D = 22, s
     bulb.castShadow = false; bulb.receiveShadow = false;
     root.add(bulb);
     // 등롱 빛 — WARM PointLight(직속 자식 → 탐지·흔들림). 저강도(낮엔 태양에 묻히고 밤엔 호롱빛).
-    const light = new THREE.PointLight(0xffb266, 0.65, 5.5, 2);
-    light.name = 'lantern-light';
-    light.position.set(pl.x, pl.lampY, pl.z);
-    light.castShadow = false;
-    root.add(light);
+    if (emitLight) {
+      const light = new THREE.PointLight(0xffb266, 0.65, 5.5, 2);
+      light.name = 'lantern-light';
+      light.position.set(pl.x, pl.lampY, pl.z);
+      light.castShadow = false;
+      root.add(light);
+    }
     // 프레임(갓·걸이 끈·기둥·팔) — 하위 Group(탐지 제외). 정적(흔들리는 램프를 붙드는 지지물).
     const fg = new THREE.Group();
     fg.name = 'lantern-frame';

@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 소동물(마당 닭 + 논 소) 검증 → shots/animals-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-animals.mjs [group]
+// 사용법: node tools/shoot-animals.mjs [group]
 //   group = chicken | cow | night | all(기본)
 //
 // /__anim 인라인 하네스(env 직접 import — 병렬 중 앱 경로가 깨져도 무관):

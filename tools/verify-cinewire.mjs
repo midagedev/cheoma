@@ -1,6 +1,6 @@
 // 헤드리스 검증(#112): 시네마틱 데모 모드(#103 코어 배선) + glb 다운로드(#104 코어 배선).
 //   스크린샷·PNG 없음 — window.__engine / window.__glb 훅으로 상태·수치만 단언한다.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-cinewire.mjs
+// 사용법: node tools/verify-cinewire.mjs
 //
 // 정적 서빙: app/dist-cine (사용자 dev 5174 미접촉), 포트 4226. 클린 빌드 선행(rm -rf → vite build --outDir dist-cine).
 //

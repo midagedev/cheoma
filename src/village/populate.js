@@ -17,14 +17,16 @@ import {
   CLOUD_SHADOW_VERT_DECL, CLOUD_SHADOW_VERT_BODY,
 } from '../env/clouds.js';
 import { buildHouseInstances, buildChunkImpostor, mergeStatic, parcelMatrix, parcelRotY, decomposeByMaterial, mirrorDecomp, shareMaterials } from './instancing.js';
-import { partitionParcels, combineHouseHandles } from './chunks.js';
+import { partitionParcels, combineHouseHandles, combineWallHandles } from './chunks.js';
 import { buildCityWall } from './citywall.js';
 import { buildVillageWall } from './walls.js';
 import { CHOGA_VARIANTS, GIWA_VARIANTS } from './variants.js';
 import { setupTreeOccluder } from '../env/tree-occluder.js';
 import { buildVillageFlora } from './gardens.js';
 import { buildSpringBloom } from '../layout/bloom.js';
-import { buildForest, GRANITE } from './forest.js';
+import { buildForest, GRANITE, makeEcotoneField } from './forest.js';
+// #123: forest 입력 빌더(마스크·거리필드·외곽신축·고정반경)는 워커 공유 위해 forest-crunch 로 이설.
+import { makeEdgeWarp, computeFixedRadius, makeTreeMask, makeClearance, makeRockExposure } from './forest-crunch.js';
 import { buildNightLights } from './nightlights.js';
 import { setupAnimals } from '../env/animals.js';
 import * as G from './geom.js';
@@ -39,44 +41,37 @@ const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b
 // 마을 지형 엣지 헤이즈(mist) 강도 — env/terrain.js EDGE_HAZE_AMT.mist 와 동일 계수(마을도 mist 채택).
 const V_EDGE_HAZE_AMT = 0.62;
 
-// 지형 최외곽 신축 매핑(비정형 테두리). buildSiteTerrain(메시)·scatterTrees(수목)가 공유한다 —
-//   나무를 메시와 "동일한" 신축면에 앉혀 부유(디스크 밖·신축밴드 불일치)를 원천 차단(#86).
-//   warpInner 안쪽은 항등(마을·논·개울·필지 불변), 바깥 밴드만 유기적 경계 Redge(theta)로 재매핑.
-function makeEdgeWarp(site, warpInner) {
-  const edge = site.edge;
-  const TR = site.terrainR || site.R;
-  return (x, z) => {
-    if (!edge) return [x, z];
-    const r = Math.hypot(x, z);
-    if (r <= warpInner) return [x, z];
-    const th = Math.atan2(z, x);
-    const ax = Math.abs(Math.cos(th)), az = Math.abs(Math.sin(th));
-    const rMax = TR / Math.max(ax, az, 1e-6);          // 이 방향 정사각 경계까지의 반경
-    const Redge = Math.max(edge.edgeRadiusAt(th), warpInner + 1);
-    const t = (r - warpInner) / Math.max(rMax - warpInner, 1e-3);
-    const nr = warpInner + t * (Redge - warpInner);
-    const k = nr / r;
-    return [x * k, z * k];
-  };
-}
+// 지형 최외곽 신축 매핑(makeEdgeWarp)·고정반경(computeFixedRadius)·나무마스크(makeTreeMask)·구조물
+//   거리필드(makeClearance)는 #123 에서 forest-crunch.js 로 이설(워커 공유). 위 import 참조.
 
 // ───────────────────────── 지형 메시 ─────────────────────────
 // site.heightAt 를 격자로 샘플 → vertexColors(마당·풀·숲·물가·원경 대기). terrain.js 톤 계열.
 //   + 비정형 외곽선(site.edge): warpInner 밖 최외곽 정점만 edgeRadiusAt(theta) 로 신축(내부 불변).
 //   + 엣지 소실 헤이즈(aEdge) + 흐르는 구름 그림자(cloudU) 셰이더 패치(단일 씬 terrain.js 와 동형).
 // 반환 { mesh, setHaze(color) } — setHaze 는 엣지 헤이즈색을 대기(fog)색과 동기화(어댑터 fog 훅이 호출).
-function buildSiteTerrain(site, cloudU, warpInner) {
+function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const R = site.R;
   const TR = site.terrainR || R;               // 지형 메시 범위(마을보다 넓게)
   const edge = site.edge;
   const N = Math.max(150, Math.min(260, Math.round(TR / 1.4)));
   const cCourt = linCol(0x8a7f66);   // 마을 바닥(밟힌 흙)
   const cGrass = linCol(0x676f45);   // 초지
+  const cGrassDry = linCol(0x7a7c4c);   // 볕 좋은 마른 초지(#115 모틀링) — 균일 초록 원반(어두운 타원) 깨기
   const cForest = linCol(0x435a2a);  // 숲(능선) — 산 덩어리가 읽히되 사면이 검게 안 죽게
+  const cScrub = linCol(0x566a38);   // 초지↔숲 사이 관목 올리브(#115 재작업) — 접합부 3단 페더로 경계 완화
   const cFar = linCol(0x6a7c70);     // 원경 대기 감쇠
   const cBank = linCol(0x6d6249);    // 물가 축축한 흙
   const cGranite = linCol(GRANITE);  // 화강암 밝은 회백(급경사·상부 노출, #113) — forest.js 와 공유 톤
+  // #137 이끼 낀 회록 화강암 — 순수 화강암 100%가 아니라 숲색 쪽으로 살짝 섞어(레퍼런스: 바위에 낀 이끼)
+  //   회색 노출이 너무 죽지 않게. 실제 페인트는 이 색을 기준으로 rock 강도만큼 섞는다.
+  const cGraniteMoss = linCol(GRANITE).lerp(cForest, 0.26);
+  const cWinterDry = linCol(0x8a8168); // 겨울 마른 갈회(#115 F) — 초지·완사면을 갈회로 이동(겨울감)
   const tmp = new THREE.Color();
+  const tmpW = new THREE.Color();
+  // #115 에코톤 공유 필드(캐노피 쉘과 동일) — 숲 톤 onset 을 쉘 시작선과 일치시킨다(색·기하 경계 일치).
+  const ecotone = makeEcotoneField(site);
+  // 마을 흙터(court) 가장자리 노이즈 페더 — 밟힌 흙 원반이 깔끔한 원으로 읽히지 않게(전용 시드, 공유 rng 불침해).
+  const courtN = makeClump(((site.seed || 0) ^ 0xc0f7) >>> 0);
   // 해석 경사 |∇높이| — 화강암 노출 게이트(상부 급경사만). forest.js makeSlopeAt 과 동형.
   const slopeAt = (x, z) => {
     const d = 2.0;
@@ -84,6 +79,9 @@ function buildSiteTerrain(site, cloudU, warpInner) {
     const hz = (site.heightAt(x, z + d) - site.heightAt(x, z - d)) / (2 * d);
     return Math.hypot(hx, hz);
   };
+  // #137 화강암 노출장 — forest-crunch 와 "같은" 함수(동일 site.seed 파생). 지형 회색 페인트가 여기서
+  //   칠하는 곳 = 나무 rockAvoid 가 걷는 곳으로 정확히 일치한다(나무 걷힌 자리에 회색이 드러남).
+  const rockExp = makeRockExposure(site);
 
   // 비정형 외곽선 신축(공유 헬퍼 makeEdgeWarp): warpInner 안쪽 고정, 바깥 밴드만 유기적 재매핑.
   //   scatterTrees 도 같은 warp 로 나무를 앉혀 메시-수목 신축면이 정확히 일치한다(#86 부유 차단).
@@ -97,29 +95,60 @@ function buildSiteTerrain(site, cloudU, warpInner) {
     const cz = site.streamZat(x);
     return smoothstep(site.streamHalf + 6, site.streamHalf * 0.4, Math.abs(z - cz));
   };
-  const colorAt = (x, z) => {
+  // outBase 에 기본(봄·여름·가을) 색을, outWinter(있으면)에 겨울 갈회 버퍼 색을 쓴다.
+  const colorAt = (x, z, outBase, outWinter) => {
     const hill = site.hillAt(x, z);
     const rC = Math.hypot(x - site.center.x, z - site.center.z);
-    // 분지 중심(마을터)만 밟힌 흙 기운, 바깥 분지는 초지→숲(황량한 맨흙 링 방지)
-    const court = smoothstep(site.bowlR * 0.42, site.bowlR * 0.08, rC) * (1 - hill);
-    tmp.copy(cGrass).lerp(cCourt, court * 0.55);
-    tmp.lerp(cForest, smoothstep(0.06, 0.55, hill));   // 완만한 산자락도 숲 톤으로
-    // 화강암 노출(#113): 상부 급경사면 지형색을 밝은 화강암 회백으로. 캐노피 쉘이 사면을 연속으로 덮어
-    //   대부분 가려지므로(민둥 패치 없음) 실제로는 쉘 프린지가 얇아지는 능선 crest 사이 노두로 비친다 —
-    //   숲을 뚫는 forest.js 수직 암봉과 함께 능선의 바위 인상을 완성. 완사면·평지 무변(타 규모 룩 회귀 0).
-    if (hill > 0.40) {
-      const rock = smoothstep(0.58, 1.25, slopeAt(x, z)) * smoothstep(0.44, 0.74, hill);
-      if (rock > 0) tmp.lerp(cGranite, rock * 0.82);
+    // #115: 밟힌 흙(court)을 반경 원반 → "구조물로부터의 거리"(clearDist) 기반으로 전환. 황토가 집·길
+    //   윤곽을 따라 앉아(비원형) 원형 마을터 인상을 해소한다. 노이즈 페더로 경계선을 흔든다.
+    //   clearDist 없을 때(하위호환)만 구 반경식 폴백.
+    const cw = (courtN(x / 24, z / 24) - 0.5) * 9;   // 페더(m)
+    let court;
+    if (clearDist) {
+      const cd = clearDist(x, z);
+      court = smoothstep(22 + cw, 2 + cw, cd) * (1 - hill);   // cd 작음(구조물 인접)=황토, 멀면 초지
+    } else {
+      const cwR = (courtN(x / 24, z / 24) - 0.5) * site.bowlR * 0.14;
+      court = smoothstep(site.bowlR * 0.42 + cwR, site.bowlR * 0.08, rC) * (1 - hill);
+    }
+    outBase.copy(cGrass).lerp(cCourt, court * 0.55);
+    // #115 초지 모틀링: 개활 초지에 저주파 마른-초지 얼룩을 섞어 균일 초록 원반(어두운 타원)을 깬다.
+    //   황토(court) 위·깊은 숲 아래에서만 약하게(hill/court 로 게이트) — 지형 색 비정형화.
+    const mott = smoothstep(0.36, 0.72, courtN(x / 68 + 40, z / 68 - 25));
+    outBase.lerp(cGrassDry, mott * (1 - court) * (1 - smoothstep(0.28, 0.6, hill)) * 0.5);
+    // #115 에코톤: 숲 톤 전이를 순수 hill 게이트에서 쉘과 동일한 에코톤 필드(반경+노이즈)로 교체 —
+    //   색 경계가 캐노피 쉘 시작선과 일치(두드러진 원형 경계 해소). 평지 녹패치 방지 hillGate 로 게이트하고,
+    //   깊은 능선(고지)은 반경 무관 완전 숲 톤 보장(max).
+    const eco = ecotone(x, z);
+    const hillGate = smoothstep(0.04, 0.20, hill);
+    const forestT = Math.max(eco * hillGate, smoothstep(0.45, 0.72, hill));
+    // #115 재작업: 초지→관목(scrub)→숲 3단 페더 — 접합부가 좁은 선으로 읽히지 않게 전이 폭 확대.
+    //   두 겹침 램프(0~0.55, 0.30~1.0)로 넓고 완만한 그라데이션. 깊은 숲(forestT→1)은 최종 cForest.
+    outBase.lerp(cScrub, smoothstep(0.0, 0.55, forestT));
+    outBase.lerp(cForest, smoothstep(0.30, 1.0, forestT));
+    // 화강암 노출(#137 재균형): 구 연속 회색 띠(smoothstep(0.58,1.25,slope)·(0.44,0.74,hill))가 상부
+    //   사면을 넓게 회색으로 칠해 "민짜 암벽"으로 읽혔다 → rockExp 로 노이즈 게이트된 불규칙 줄무늬 패치
+    //   (상부 지릉·골, 표면 ~10–20%)로 교체하고 이끼 낀 회록으로 섞는다. 나무 rockAvoid 와 동일 필드라
+    //   나무가 걷힌 자리에만 회색이 드러난다(정합). 하부 사면·완사면·평지 무변(순수 숲).
+    if (hill > 0.55) {
+      const rock = rockExp(x, z, slopeAt(x, z), hill);
+      if (rock > 0) outBase.lerp(cGraniteMoss, Math.min(1, rock) * 0.86);
     }
     // 물가
     const bank = streamDistK(x, z);
-    if (bank > 0) tmp.lerp(cBank, bank * 0.7);
+    if (bank > 0) outBase.lerp(cBank, bank * 0.7);
     // 원경 대기(먼 능선일수록 옅게)
     const far = smoothstep(TR * 0.6, TR, Math.hypot(x, z)) * 0.45;
-    tmp.lerp(cFar, far);
-    return tmp;
+    outBase.lerp(cFar, far);
+    // 겨울 버퍼(#115 F): 기저색을 마른 갈회로 이동. 분지 초지·완사면 강, 깊은 숲(상록 잔존) 약, 물가 유지.
+    //   지형 정점색은 정적이므로 forest.js 계절 버퍼 방식과 동형으로 겨울 전용 버퍼를 만들어 setSeason 스왑.
+    if (outWinter) {
+      const wAmt = 0.55 * (1 - 0.5 * forestT) * (1 - 0.7 * bank) * (1 - far);
+      outWinter.copy(outBase).lerp(cWinterDry, wAmt);
+    }
   };
 
+  const colW = [];   // 겨울 전용 정점색 버퍼(#115 F)
   const grid = [];
   for (let i = 0; i <= N; i++) {
     grid[i] = [];
@@ -129,8 +158,9 @@ function buildSiteTerrain(site, cloudU, warpInner) {
       const [x, z] = warp(gx, gz);               // 외곽만 유기적으로 신축(내부는 그대로)
       const y = site.heightAt(x, z);
       pos.push(x, y, z);
-      const c = colorAt(x, z);
-      col.push(c.r, c.g, c.b);
+      colorAt(x, z, tmp, tmpW);
+      col.push(tmp.r, tmp.g, tmp.b);
+      colW.push(tmpW.r, tmpW.g, tmpW.b);
       edgeK.push(edge ? edge.edgeK(x, z) : 0);   // 외곽 밴드 0(안)→1(경계선) — 엣지 소실 마스크
       grid[i][j] = i * (N + 1) + j;
     }
@@ -141,7 +171,8 @@ function buildSiteTerrain(site, cloudU, warpInner) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const colBaseArr = new Float32Array(col), colWinterArr = new Float32Array(colW);
+  geo.setAttribute('color', new THREE.BufferAttribute(colBaseArr.slice(), 3));   // 라이브 버퍼(계절 스왑)
   geo.setAttribute('aEdge', new THREE.Float32BufferAttribute(edgeK, 1));
   geo.setIndex(idx);
   geo.computeVertexNormals();
@@ -181,27 +212,19 @@ function buildSiteTerrain(site, cloudU, warpInner) {
   mesh.receiveShadow = true;
   // Vector3.copy(Color)=NaN 함정 회피 → 채널 직접 대입.
   const setHaze = (c) => { if (c) uEdgeHaze.value.set(c.r, c.g, c.b); };
-  return { mesh, setHaze };
+  // 계절 정점색 스왑(#115 F): 겨울만 마른 갈회 버퍼, 그 외(봄·여름·가을)는 기저 버퍼(현행 색 불변).
+  const colAttr = geo.getAttribute('color');
+  let shownWinter = false;
+  const setSeason = (name) => {
+    const w = name === 'winter';
+    if (w === shownWinter) return;
+    colAttr.array.set(w ? colWinterArr : colBaseArr);
+    colAttr.needsUpdate = true;
+    shownWinter = w;
+  };
+  return { mesh, setHaze, setSeason };
 }
 
-// 지형 신축 밴드의 안쪽 경계 반경 — 이 안쪽(마을·논·개울·필지·랜드마크)은 절대 신축 금지.
-//   고정 피처(필지 풋프린트·논·개울·정자·절·궁·소품)의 원점 기준 최대 반경 + 여유로 산출.
-//   같은 시드는 같은 plan → 결정론. edge 최소 반경(terrainR·(1-amp))보다 작아 신축 밴드가 보장된다.
-function computeFixedRadius(plan, site) {
-  let r = site.bowlR * 1.05;
-  const consider = (x, z, m = 0) => { const d = Math.hypot(x, z) + m; if (d > r) r = d; };
-  for (const p of plan.parcels || []) {
-    const half = Math.hypot(p.plotW || 0, p.plotD || 0) / 2;
-    consider(p.center.x, p.center.z, half);
-  }
-  for (const f of plan.paddies || []) for (const pt of f.poly) consider(pt.x, pt.z);
-  if (site.stream) for (const pt of site.stream.pts) consider(pt.x, pt.z);
-  const F = plan.features || {};
-  const cf = (o, m) => { if (o && typeof o.x === 'number') consider(o.x, o.z, m); };
-  cf(F.temple, 22); cf(F.palace, 26); cf(F.govCore, 24); cf(F.pavilion, 8);
-  for (const p of F.props || []) cf(p, 4);
-  return r;
-}
 
 // 배산 능선 물안개 앵커 — 뒤(북) 반원 각 방위에서 site.center(분지 중심) 기준으로 밖으로 표고를
 //   스캔해 목표 중턱높이의 "안쪽(분지를 바라보는) 사면" 첫 교차점을 찾는다(원점 아닌 center 기준 —
@@ -414,6 +437,21 @@ function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
     const crest = smoothstep(0.62, 0.9, hill);                         // 능선 상부만 보존
     return outBand * slope * grove * crest;
   };
+  // #115 에코톤 점묘: 마을 가장자리 ~ 캐노피 쉘 시작선 사이 전이 밴드에 성긴 낱개 나무(숲 치마).
+  //   #113 R4 가 사면 낱개 나무를 crest 로 물려 전이대가 텅 비었다("벽처럼 시작하는 숲") → 쉘 앞에
+  //   소나무 위주 + 소량 활엽을 흩뿌려 숲이 마을로 자연스레 번지게. 쉘과 동일 필드로 시작선 정합.
+  const ecoField = makeEcotoneField(site);
+  const CF2 = 1 / 38;                                                  // 점묘 군집 파장(숲 치마 뭉치)
+  const bandDensity = (x, z, hill) => {
+    if (hill < 0.05) return 0;
+    const f = ecoField(x, z);                                          // 0(마을)~1(숲 내부)
+    // 쉘 시작 직전(f 낮~중)에 점묘, 숲 내부(f 높음)는 쉘이 덮으니 감쇠 — 전이 밴드에 집중.
+    //   #115 재작업: 밴드 창 확대 + grove 하한↑ + 배율↑ 로 "성긴 숲" 인상 강화(전이대 채움).
+    const band = smoothstep(0.02, 0.30, f) * (1 - smoothstep(0.54, 0.94, f));
+    if (band <= 0) return 0;
+    const grove = 0.42 + 0.58 * smoothstep(0.30, 0.68, clump(x * CF2 + 11, z * CF2 - 7));
+    return band * grove * 1.15;                                        // 전이대 점묘 밀도 상향(0.7→1.15)
+  };
   // 능선 너머(far downslope): 중심→점 사이에 더 높은 능선이 있으면 부감·아이레벨 모두 안 보임 → 0.
   //   실루엣에 기여하는 크레스트·근사면(사이에 더 높은 능선 없음)은 남긴다. 고지(hill↑)만 검사(비용).
   const hidden = (x, z, yHere) => {
@@ -428,7 +466,9 @@ function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
   //   #91 나무 밀도 배율(treeDensityK, 기본 1=현행): 목표수만 배율하고 Math.min 캡은 유지 → 상한 고정
   //   (성능 파탄 방지). 나무는 자체 rng(seed^0x77ee)라 공유 시퀀스 미소비 → 밀도 변경이 배치·필지 불간섭.
   const tK = Math.min(2, Math.max(0, treeDensityK));
-  const target = Math.min(TR > 480 ? 1600 : 2800, Math.round((TR / 138) ** 2 * 200 * tK));
+  //   #115(재작업): 전이 밴드 점묘 몫으로 목표수 상향(200→260, 캡↑). 밴드는 마을 인접 숲 치마라
+  //   외곽 밀도 대폭 감소(#86, 먼 산) 기조와 무관 — crest 실루엣 나무는 그대로, 앞에 점묘만 더한다.
+  const target = Math.min(TR > 480 ? 2050 : 3500, Math.round((TR / 138) ** 2 * 260 * tK));
   let attempts = 0;
   const pts = [];
   const minD = 4.8;
@@ -450,25 +490,41 @@ function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
     const p = onMesh(gu, gv);
     const x = p.x, z = p.z;
     const hill = site.hillAt(x, z);
-    if (rng() > density(x, z, hill)) continue;       // 거리감쇠·군집 밀도장 기각
+    const crestD = density(x, z, hill);
+    const bandD = bandDensity(x, z, hill);            // #115 전이 밴드 점묘
+    const dens = Math.min(1, crestD + bandD);
+    if (rng() > dens) continue;                       // 거리감쇠·군집·에코톤 밴드 밀도장 기각
     if (mask && mask(x, z)) continue;
     if (tooClose(x, z)) continue;
     if (hill > 0.45 && hidden(x, z, p.y)) continue;   // 능선 너머(안 보임) → 심지 않음
+    const isBand = bandD > crestD;                    // 이 점이 전이 밴드 점묘인지(밴드 우세)
     pts.push({ x, z });
     { const k = tkey(x, z); let arr = tgrid.get(k); if (!arr) { arr = []; tgrid.set(k, arr); } arr.push({ x, z }); }
     const s = rng.range(0.8, 1.5);
-    rng();                              // (구 broadTree 추첨 자리 — rng 시퀀스 보존)
-    const broadTree = false;            // #113 R4: 능선 나무는 상록 소나무만(사철 짙은 침엽 실루엣, 계절 불일치 제거)
+    // #115: crest 나무는 상록 소나무만(#113 R4, 사철 짙은 침엽 실루엣). 전이 밴드 점묘는 소나무 위주에
+    //   소량(≈28%) 활엽 혼합 — 숲 치마의 혼효림 인상. 밴드 나무는 쉘 앞(맨 지면) 위라 가을 계절 불일치
+    //   착시 없음(쉘 위에 뜬 게 아님). rng() 1회 소비는 기존 자리와 동일 → 시퀀스 정합 유지.
+    const broadTree = (rng() < 0.34) && isBand;   // rng() 무조건 1회 소비 / 밴드 혼효림 활엽 비율 소폭↑
     // 급사면 시각 하드닝(#86 재라운드): 나무 밑동을 국소 경사에 비례해 지면에 박는다. 배치 y 는
     //   메시면 위(레이캐스트 검증 편차<0.1m)이나, 저각(grazing) 매끈한 사면에서는 다운슬로프 그림자
     //   오프셋과 겹쳐 '둥치가 떠 보이는' 착시가 난다 → 밑동을 묻어 둥치가 지면을 뚫고 나오게 한다.
-    //   완사면=무변(sink→0). 둥근 활엽(캐노피가 높이 떠 공처럼 보임)은 더 깊이 박아 캐노피를 지면에 붙인다.
     const e = 0.7;
     const su = onMesh(Math.min(N, gu + e), gv), sd = onMesh(Math.max(0, gu - e), gv);
     const sr = onMesh(gu, Math.min(N, gv + e)), sl = onMesh(gu, Math.max(0, gv - e));
     const runU = Math.hypot(su.x - sd.x, su.z - sd.z) || 1, runV = Math.hypot(sr.x - sl.x, sr.z - sl.z) || 1;
     const slopeR = Math.hypot((su.y - sd.y) / runU, (sr.y - sl.y) / runV);   // |∇높이| (rise/run)
-    const sink = Math.min(broadTree ? 1.6 : 1.1, (broadTree ? 1.5 : 1.0) * slopeR);
+    // #142 활엽 접지: 롤리팝 활엽은 캐노피 하단이 밑동보다 ~2.1·s 높다. 가는 줄기(원경 비가시) 위
+    //   넓은 캐노피라 급사면에서 내리막 가장자리가 공중에 뜬다("공 부유", #137 잔여). 경사에 비례해
+    //   나무 전체를 내려 앉혀 캐노피 하단을 사면에 밀착시킨다(완사면=롤리팝 유지, 급사면=지면 밀착 —
+    //   크런치 활엽과 동조). 소나무는 종전대로 밑동 매립 하드닝만.
+    let sink;
+    if (broadTree) {
+      const canopyBottom = 2.09 * s;                                   // 프로토 blob 하단(스케일 반영)
+      // 완경사부터 캐노피 하단을 지면에 밀착(smoothstep 조기 포화) + 급사면 내리막 가장자리 매립 마진.
+      sink = smoothstep(0.04, 0.22, slopeR) * canopyBottom + 1.4 * s * slopeR;
+    } else {
+      sink = Math.min(1.1, 1.0 * slopeR);
+    }
     const m = M4().makeTranslation(x, p.y - sink, z);
     m.multiply(M4().makeRotationY(rng.range(0, 6.28)));
     m.multiply(M4().makeScale(s, s * rng.range(0.9, 1.2), s));
@@ -766,6 +822,8 @@ function attachChunkLodSwap(chunkGroup, impostor, fullDetail, chunkCenter, bowlR
   const swapOut = bowlR * 0.62 * 0.85;   // 임포스터 복귀 거리(멀어짐)
   let showFull = false;
 
+  // 반환: 이 프레임에 스왑(임포스터↔풀디테일 토글)이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
+  //   모드에서 캐스터 구성 변경(임포스터 castShadow=false ↔ 풀디테일 캐스팅)을 1프레임 반영하는 데 쓴다.
   chunkGroup.userData.lodUpdate = (camera) => {
     _lodCenter.set(chunkCenter.x, camera.position.y, chunkCenter.z);   // Y 는 카메라 높이로 맞춰 수직 거리 무시(부감 줌)
     const d = _lodCenter.distanceTo(camera.position);
@@ -773,15 +831,32 @@ function attachChunkLodSwap(chunkGroup, impostor, fullDetail, chunkCenter, bowlR
       impostor.visible = false;
       fullDetail.visible = true;
       showFull = true;
+      return true;
     } else if (showFull && d > swapOut) {
       impostor.visible = true;
       fullDetail.visible = false;
       showFull = false;
+      return true;
     }
+    return false;
   };
 }
 
+// 동기 진입점(기존 계약 불변) — 아래 제너레이터를 완전 소진해 root 를 반환한다.
+//   shoot/verify 도구·adapter sync 경로가 이 시그니처를 그대로 쓴다(결정론·픽셀 동일).
 export function populateVillage(plan, opts = {}) {
+  const it = populateVillageSteps(plan, opts);
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+
+// 조립 제너레이터(#123) — 마을 조립을 "의미 단위 스텝"으로 쪼개, 각 스텝 뒤 yield 로 제어를 넘긴다.
+//   · 동기 소진(populateVillage) == 기존 body 를 일직선 실행 → 픽셀·결정론 완전 동일(리팩터 등가).
+//   · createVillageAsync(adapter) 는 이 스텝들을 rAF 프레임에 분산 구동(롱프레임 스파이크 해소).
+//   yield 값(라벨)은 진행 리포트·프레임 예산 판정용. 전역 Math.random 소비 스텝(parcels/features 등)은
+//   adapter 가 매 .next() 슬라이스를 시드창으로 감싸 소비 순서를 동기 경로와 byte-identical 하게 유지한다.
+export function* populateVillageSteps(plan, opts = {}) {
   const optimize = opts.optimize !== false;
   const site = plan.site;
   const root = new THREE.Group();
@@ -798,8 +873,12 @@ export function populateVillage(plan, opts = {}) {
   // 1) 지형 · 2) 개울 (단일 메시 — 병합 대상 아님)
   //   지형 최외곽은 site.edge 로 신축(비정형 테두리). warpInner 안쪽(마을·논·개울·필지·랜드마크)은 불변.
   const warpInner = Math.max(computeFixedRadius(plan, site) + 6, site.R * 0.9);
-  const terrain = buildSiteTerrain(site, cloudU, warpInner);
+  // 구조물 거리 필드(#115) — 지형 황토색·숲 침투 식재가 공유(개활지=집 윤곽, 비원형).
+  const clearDist = makeClearance(plan, site);
+  yield 'setup+clearance';
+  const terrain = buildSiteTerrain(site, cloudU, warpInner, clearDist);
   root.add(terrain.mesh);
+  yield 'terrain';
   // 저층 운해 링 — 비정형 외곽선을 따라 지형 등고에 밀착(groundY)해 배산 능선 사면을 감고 분지
   //   가장자리에 얕게 고인다. rIn 을 안으로 넓혀(≈0.58) 능선 중턱까지 걸치므로 부감에선 "감는 운해",
   //   아이레벨에선 "사면 원경 물안개"로 함께 읽힌다. lift 는 지형 위 소량(등고 위로 살짝 뜸).
@@ -823,6 +902,7 @@ export function populateVillage(plan, opts = {}) {
   if (ridgeMist) root.add(ridgeMist.group);
   const water = buildWaterRibbon(site, waterU);
   if (water) root.add(water);
+  yield 'mist+water';
 
   const landmarks = [];    // 유일 지오(정자·다리·소품·궁·절) → 재질별 정적 병합
   const matSets = [];      // 야간 창호광 등 env 패치 대상 공유 재질셋
@@ -834,6 +914,7 @@ export function populateVillage(plan, opts = {}) {
   // 3) 도로 · 4) 논 (병합 후 추가)
   const roadsGroup = (plan.roads && plan.roads.length) ? buildRoads(site, plan.roads) : null;
   const paddyGroup = plan.paddies ? buildPaddyFields(site, plan.paddies) : null;
+  yield 'roads+paddy';
 
   // 5) 필지(집·담·문)
   if (plan.parcels && plan.parcels.length) {
@@ -843,27 +924,10 @@ export function populateVillage(plan, opts = {}) {
     for (const p of plan.parcels) p.baseY = computePadY(p, site);
     root.add(buildParcelPads(plan.parcels, site));   // 기단 상면 + 축대(옹벽) — 2 드로우콜
 
-    // 원경 청크 런타임 LOD 스왑(사용자 지적 2026-07-18): 임포스터는 부감 전용인데 #92 자유 줌으로
-    //   다가가도 박스 매스가 그대로 남았다. 렌더 루프 훅 없이 onBeforeRender(보일 때만 호출)로
-    //   카메라-청크 거리를 자가 판정해 임포스터↔풀디테일을 교체. 히스테리시스로 경계 왕복 방지.
-    //   풀디테일은 생성 시 미리 지어 hidden 보관(선행 생성 원칙 + 은닉 핸들 결합 유지) — 부감
-    //   드로우콜은 visible=false 라 불변, 스왑 시에도 원경 청크는 프러스텀 컬링이 상쇄.
-    const attachChunkLodSwap = (imp, full, center, bowlR) => {
-      const nearD = Math.max(150, bowlR * 0.55);
-      const farD = nearD * 1.3;
-      const c = new THREE.Vector3(center.x, 0, center.z);
-      const camP = new THREE.Vector3();
-      const dist = (camera) => camP.setFromMatrixPosition(camera.matrixWorld).distanceTo(c);
-      imp.onBeforeRender = (_r, _s, camera) => {
-        if (dist(camera) < nearD) { imp.visible = false; full.visible = true; }
-      };
-      let sentinel = null;
-      full.traverse((o) => { if (!sentinel && o.isMesh) sentinel = o; });
-      if (sentinel) sentinel.onBeforeRender = (_r, _s, camera) => {
-        if (dist(camera) > farD) { imp.visible = true; full.visible = false; }
-      };
-    };
-
+    // 원경 청크 런타임 LOD 스왑(#92 자유 줌: 임포스터는 부감 전용인데 다가가도 박스 매스가 남던 문제).
+    //   구현은 모듈 스코프 attachChunkLodSwap(L818) — chunkGroup.userData.lodUpdate 에 부착하고 렌더 루프
+    //   (engine → adapter.updateLod → root.updateChunkLod)가 매 프레임 카메라로 구동한다. (구 onBeforeRender
+    //   방식은 imp 가 Group 이라 three 렌더러가 콜백을 안 불러 무동작 → #140-E 에서 제거·이관 완결.)
     const heroes = plan.parcels.filter((p) => p.hero);
     const regular = plan.parcels.filter((p) => !p.hero);
     const regGiwa = regular.filter((p) => p.kind === 'giwa');
@@ -885,7 +949,7 @@ export function populateVillage(plan, opts = {}) {
       const farDist = site.R >= 340 ? site.bowlR * 0.62 : Infinity;
       const chunks = partitionParcels(regular, site.center, { farDist });
       const chunkMeta = [];
-      const giwaGroups = [], chogaGroups = [];
+      const giwaGroups = [], chogaGroups = [], wallGroups = [];
       for (const chunk of chunks) {
         const cg = new THREE.Group();
         cg.name = `village-chunk-${chunk.ring}-${chunk.sector}`;
@@ -896,7 +960,9 @@ export function populateVillage(plan, opts = {}) {
           if (cGiwa.length && giwaPool) { const hg = buildHouseInstances('giwa', cGiwa, giwaPool.decomps); into.add(hg); giwaGroups.push(hg); }
           if (cChoga.length && chogaPool) { const hg = buildHouseInstances('choga', cChoga, chogaPool.decomps); into.add(hg); chogaGroups.push(hg); }
           const walls = chunk.parcels.map((p) => buildCourtyard(p, wallMats, char01));
-          into.add(mergeStatic(walls, `village-walls-${chunk.ring}-${chunk.sector}`));
+          // #148: ids 로 필지별 정점 레인지 기록 → focus 오버레이가 그 필지 병합 담만 접어 이중 렌더 제거.
+          const wg = mergeStatic(walls, `village-walls-${chunk.ring}-${chunk.sector}`, { ids: chunk.parcels.map((p) => p.id) });
+          into.add(wg); wallGroups.push(wg);
         };
         if (chunk.far) {
           // 원경 청크: 저폴리 임포스터 + 숨겨둔 풀디테일 — 카메라가 다가오면 스왑(런타임 LOD).
@@ -908,7 +974,7 @@ export function populateVillage(plan, opts = {}) {
           buildFullDetail(full);
           full.visible = false;
           cg.add(full);
-          attachChunkLodSwap(imp, full, chunk.center, site.bowlR);
+          attachChunkLodSwap(cg, imp, full, chunk.center, site.bowlR);   // #140-E lodUpdate 를 cg 에 부착(모듈 스코프)
         } else {
           // 근경 청크: 풀디테일 변주 인스턴싱 + 병합 담.
           buildFullDetail(cg);
@@ -921,6 +987,8 @@ export function populateVillage(plan, opts = {}) {
       houseHandle.giwa = giwaGroups.length ? { userData: combineHouseHandles('giwa', giwaGroups) } : null;
       houseHandle.choga = chogaGroups.length ? { userData: combineHouseHandles('choga', chogaGroups) } : null;
       houseHandle.chunks = chunkMeta;
+      // #148: 병합 담 필지별 은닉 핸들 — focus 오버레이가 자기 필지 병합 담을 접어 이중 렌더 제거.
+      houseHandle.walls = wallGroups.length ? combineWallHandles(wallGroups) : null;
     } else {
       const protos = makeHouseProtos();
       matSets.push(protos.giwa.userData.materials, protos.choga.userData.materials);
@@ -938,6 +1006,7 @@ export function populateVillage(plan, opts = {}) {
       heroHandle.set(p.id, g);
     }
   }
+  yield 'parcels/houses';
 
   // 6) 공용: 정자·다리·소품·절·궁 (유일 지오 → 랜드마크 병합군)
   //   단, 궁(palace-core)은 히어로(종가)처럼 랜드마크 병합에서 제외한다 — mergeStatic 이 일곽 그룹·
@@ -957,6 +1026,7 @@ export function populateVillage(plan, opts = {}) {
   //   넣지 않고 자체 그룹으로 추가한다(성곽은 소수 재질, 시전은 자체 병합).
   if (plan.features && plan.features.cityWall) root.add(buildCityWall(plan.features.cityWall, site));
   if (plan.features && plan.features.sijeon && plan.features.sijeon.length) root.add(buildSijeon(plan.features.sijeon, site));
+  yield 'features+wall+sijeon';
 
   // 병합 반영(optimize) — 로드·논·랜드마크를 재질별로 접는다.
   if (optimize) {
@@ -969,25 +1039,47 @@ export function populateVillage(plan, opts = {}) {
     for (const o of landmarks) root.add(o);
   }
 
-  // 궁 코어(미병합) — 편집 핸들·일곽 그룹 구조 보존(#93). optimize 여부와 무관하게 root 직속.
-  //   핸들 노출(root.userData.palaceCore)은 아래 root.userData 리터럴 안에서(그 대입이 전체를 덮으므로).
-  if (palaceCore) root.add(palaceCore);
+  // 궁 코어 — 부감=전곽 재질별 병합본(드로우콜 −350), focus/편집=미병합 오버레이(#140-B, 히어로 #62 동형).
+  //   #88 이 palace.js 에서 일곽 단위로만 병합해 palace-core 는 여전히 ~428 메시(편집 핸들 보존 #93)로
+  //   부감에도 상시 미병합이었다. 여기서 optimize 시 전곽을 한 번 더 재질별로 접어(mergeStatic) 부감엔
+  //   병합본만 렌더하고, 미병합 palace-core 는 편집 오버레이의 메타데이터(핸들·변환·재질) 소스로만 보존한다
+  //   (씬 미추가). 병합은 지오를 clone 하므로 원본 지오는 dispose 해 힙 중복을 없앤다(재질은 공유 — 오버레이·
+  //   병합본이 같은 재질 refs 를 재사용하므로 야간 창호광·#129 앵커·픽셀 정합 불변). 어댑터가
+  //   palaceMerged.visible 을 부감↔focus 로 토글하고, palaceCore.userData(palaceCompound 핸들)로 오버레이를 짓는다.
+  let palaceMerged = null;
+  if (palaceCore) {
+    if (optimize) {
+      palaceMerged = mergeStatic([palaceCore], 'palace-merged');
+      palaceCore.traverse((o) => { if (o.isMesh || o.isInstancedMesh) o.geometry?.dispose?.(); });
+      root.add(palaceMerged);
+    } else {
+      root.add(palaceCore);   // 디버그(비최적화) 경로: 미병합 그대로 노출
+    }
+  }
+  yield 'merges';
 
   // 7) 수목(맨 마지막: 건물 마스크 확정 후) — 이미 InstancedMesh(vertexColors)라 병합 제외
   //    warpInner 를 넘겨 나무를 지형 메시와 동일한 신축면에 앉힌다(#86 부유 차단).
   const mask = makeTreeMask(plan, site);
   const treeDensityK = (plan.opts.tuning && plan.opts.tuning.treeDensityK != null) ? plan.opts.tuning.treeDensityK : 1;
   root.add(scatterTrees(site, mask, plan.seed, warpInner, treeDensityK));
+  yield 'trees';
 
   // 7.5) 산 숲(#113) — 캐노피 쉘(빽빽한 활엽 사면) + 화강암 암괴 노두. 배산 사면을 "듬성한 나무 꽂힌
   //     언덕"이 아니라 "숲으로 덮인 한국 산"으로. 나무와 동일 신축면(warp)·마스크(도로·필지·논 제외).
   //     쉘 1 + 바위 1 = 신규 +2 드로우콜, 쉘은 구름 그림자·엣지 헤이즈를 지형과 동형으로 수신.
-  const forest = buildForest(plan, site, makeEdgeWarp(site, warpInner), mask, cloudU);
+  // #123 워커 오프로드: createVillageAsync 가 워커에서 미리 계산한 forest 크런치 버퍼를 opts.forestCrunchRef
+  //   로 주입하면 그 버퍼로 조립만(메인 스레드 배치 루프 생략 → 롱프레임 제거). 없으면 메인에서 크런치
+  //   (동기 createVillage·?worker=0·shoot 도구 — 결정론 동일, warp/mask/clearDist 재사용).
+  const preForest = opts.forestCrunchRef ? opts.forestCrunchRef.value : (opts.forestCrunch || null);
+  const forest = buildForest(plan, site, makeEdgeWarp(site, warpInner), mask, cloudU, clearDist, preForest);
   root.add(forest.group);
+  yield 'forest';
 
   // 8) 마당 과실수·반가 정원·마을 보호수(당산나무) — 레이어별 정적 병합(드로우콜 ~5), 계절 토글.
   const flora = buildVillageFlora(plan, site, plan.seed);
   root.add(flora.group);
+  yield 'flora';
 
   // 9) 소동물(마당 닭·논 소) — 필지 마당·논 앵커 재사용, 필지별 시드 결정론·과밀 금지.
   const animals = buildVillageAnimals(root, plan, site);
@@ -1007,16 +1099,18 @@ export function populateVillage(plan, opts = {}) {
   //     지붕 위를 흐르게 한다. 어댑터 진입 시 setupClouds 가 이 cloudU 를 갱신하므로 지형·지붕·빌보드가
   //     한 uniform 으로 정합. 순수 셰이더 패치라 드로우콜·재질 수 불변, 첫 렌더 전(반환 전) 수행.
   injectVillageCloudShadow(root, cloudU);
+  yield 'animals+night+bloom+cloudshadow';
 
   root.userData = {
     plan, waterU, matSets, houseHandle, heroHandle, optimize, flora, animals, nightLights, bloom, forest,
     palaceCore,   // 궁 편집 핸들(#93) — 미병합 palace-core 그룹(궁 없으면 null), userData.palaceCompound 로 일곽 접근
+    palaceMerged, // #140-B 부감 병합본(궁 없거나 비최적화면 null) — 어댑터가 focus-in 시 가리고 오버레이로 교체(히어로 #62 동형)
 
     // 흐르는 구름 그림자 공유 uniform(어댑터가 진입 시 setupClouds 에 넘겨 빌보드가 갱신) + 외곽선.
     cloudUniforms: cloudU, edge: site.edge, terrainMax: site.terrainR,
     setWaterTime: (name) => setVillageWaterTime(waterU, name),   // 개울 물 시간대 톤(어댑터 setTime 이 호출)
     setAnimalsTime: (name) => { for (const a of animals.handles) a.setTime(name); },
-    setSeason: (name) => { flora.setSeason(name); bloom.setSeason(name); forest.setSeason(name); for (const a of animals.handles) a.setSeason(name); },
+    setSeason: (name) => { terrain.setSeason(name); flora.setSeason(name); bloom.setSeason(name); forest.setSeason(name); for (const a of animals.handles) a.setSeason(name); },
     // 엣지 헤이즈·운해 링·능선 물안개 색을 대기(fog)색과 동기화 — 어댑터 fog 모디파이어가 매 틱 호출(#50 정합).
     setEnvHaze: (fogColor) => { terrain.setHaze(fogColor); forest.setHaze(fogColor); mist?.update(fogColor); ridgeMist?.update(fogColor); },
     // 검증 앵커(하네스 프레이밍용)
@@ -1031,9 +1125,11 @@ export function populateVillage(plan, opts = {}) {
     // 런타임 LOD 스왑 — 원경 청크 임포스터↔풀디테일(매 프레임, 카메라 필요).
     //   engine.js 렌더 루프에서 camera 넘겨 호출. far 청크가 없으면(R<340) 빈 배열라 no-op.
     updateChunkLod: (camera) => {
+      let swaps = 0;   // #140-E 이 프레임에 임포스터↔풀디테일 스왑이 일어난 청크 수(그림자 1프레임 갱신 트리거)
       for (const child of root.children) {
-        child.userData.lodUpdate?.(camera);
+        if (child.userData.lodUpdate?.(camera)) swaps++;
       }
+      return swaps;
     },
   };
   return root;
@@ -1128,29 +1224,7 @@ function collectMatSets(obj, into) {
   });
 }
 
-// 나무 제외 마스크: 도로·필지·논·개울·정자 주변.
-function makeTreeMask(plan, site) {
-  const parcels = plan.parcels || [];
-  const roads = plan.roads || [];
-  const region = site.paddyRegion;
-  return (x, z) => {
-    // 필지 근처
-    for (const p of parcels) {
-      const rad = Math.max(p.plotW, p.plotD) * 0.7 + 3;
-      if ((x - p.center.x) ** 2 + (z - p.center.z) ** 2 < rad * rad) return true;
-    }
-    // 도로 근처
-    for (const r of roads) {
-      const d = G.distToPolyline({ x, z }, r.pts).d;
-      if (d < r.width / 2 + 3) return true;
-    }
-    // 논 영역
-    if (plan.paddies) for (const f of plan.paddies) {
-      if (G.pointInPoly({ x, z }, f.poly)) return true;
-    }
-    return false;
-  };
-}
+// (makeTreeMask·makeClearance 는 #123 에서 forest-crunch.js 로 이설 — 워커 공유. 상단 import 참조.)
 
 // 다랑이 논(간이): 필드 폴리곤을 평평한 계단면으로. 계절색은 여름 초록 기본.
 function buildPaddyFields(site, paddies) {
@@ -1278,7 +1352,10 @@ function buildTempleCluster(T, site) {
   const w = 30, d = 30, rotY = G.facingY(T.frontDir || { x: 0, z: 1 });
   // 산사 석축 대지: 배산 사면 완사 벤치라도 30m footprint 엔 낙차가 있어(규모 비례) 넉넉한 석축으로
   //   앉힌다. Hmax 비례(자기유사 지형이라 절대 낙차가 규모 따라 커짐)에 상한 클램프(거대 옹벽 방지).
-  const templeCap = Math.min(12, Math.max(4, (site.Hmax || 68) * 0.13));
+  //   #147: 캡을 12→18 로 상향 — buildPadRect 의 padY 는 min(maxCorner, lo+cap) 이라 캡이 footprint 낙차보다
+  //   작으면 오르막(뒤쪽) 지형이 대지 위로 솟아 대웅전 뒷면이 산에 파묻힌다(사용자 보고). 미세 기복 여유까지
+  //   덮도록 캡을 키워 padY=maxCorner(전면 석축 테라스)를 보장 → 뒷면 파묻힘 제거, 앞면은 석축이 접지.
+  const templeCap = Math.min(18, Math.max(5, (site.Hmax || 68) * 0.16));
   const { group: pad, padY } = buildPadRect(site, T.x, T.z, w + 3, d + 3, rotY, templeCap);
   g.add(pad);
   const inner = new THREE.Group();

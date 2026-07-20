@@ -116,11 +116,12 @@ function scatterAzalea(site, warp, mask, seed) {
   const density = (x, z, hill) => {
     if (hill < 0.05) return 0;
     const rC = Math.hypot(x - C.x, z - C.z);
-    const band = smoothstep(bowlR * 0.76, bowlR * 1.00, rC) * (1 - smoothstep(bowlR * 1.40, bowlR * 1.78, rC));
+    // #115: 산자락 전이대(마을~숲 치마)에 진달래가 확 피게 밴드 안쪽을 조금 당기고(0.76→0.72) 바깥을 넓힘.
+    const band = smoothstep(bowlR * 0.72, bowlR * 1.00, rC) * (1 - smoothstep(bowlR * 1.48, bowlR * 1.86, rC));
     if (band <= 0) return 0;
     const slope = smoothstep(0.05, 0.16, hill) * (1 - smoothstep(0.42, 0.66, hill));   // 하~중 사면(급벽 배제)
-    const patch = smoothstep(0.40, 0.70, clump(x * CF, z * CF));
-    return band * slope * (0.22 + 0.78 * patch);   // 군락 밖에도 성긴 진달래 — 부감 점묘 "백미"
+    const patch = smoothstep(0.36, 0.70, clump(x * CF, z * CF));
+    return band * slope * (0.34 + 0.66 * patch);   // #115 밀도↑: 성긴 자리도 진하게(봄 백미) — 군락 대비 유지
   };
   // 능선 너머(가림): 중심→점 사이 더 높은 능선이 있으면 부감·아이레벨 안 보임 → 심지 않음.
   const hidden = (x, z, yHere) => {
@@ -130,8 +131,8 @@ function scatterAzalea(site, warp, mask, seed) {
     return mx > yHere + 1.5;
   };
 
-  const target = Math.min(TR > 480 ? 1500 : 2400, Math.round((TR / 145) ** 2 * 240));
-  const minD = 1.9;
+  const target = Math.min(TR > 480 ? 2100 : 3200, Math.round((TR / 145) ** 2 * 330));  // #115 봄 백미: 밀도 상향
+  const minD = 1.7;
   const grid = new Map();
   const key = (x, z) => Math.floor(x / minD) * 92821 ^ Math.floor(z / minD);
   const tooClose = (x, z) => {
@@ -207,9 +208,9 @@ function scatterForsythia(plan, site, seed) {
       const nx = -tan.z, nz = tan.x;
       // 아크길이 따라 노이즈 게이트 — 뭉치(군락)와 빈틈이 교대. 촘촘도는 규모 무관(도로 길이 비례).
       const along = noise(i * 0.5, road.width);
-      if (along < 0.42) continue;
+      if (along < 0.34) continue;                   // #115: 길가 개나리 띠 더 자주(0.42→0.34)
       for (const side of [-1, 1]) {
-        if (rng() > 0.72) continue;                 // 양쪽 중 성기게
+        if (rng() > 0.82) continue;                 // #115: 양쪽 keep 82%(0.72→) — 노랑 띠 밀도↑
         const off = hw + rng.range(0.5, 1.15);
         const jx = (rng() * 2 - 1) * 0.5, jz = (rng() * 2 - 1) * 0.5;
         const x = p.x + nx * side * off + jx, z = p.z + nz * side * off + jz;
@@ -223,7 +224,7 @@ function scatterForsythia(plan, site, seed) {
   for (const p of (plan.parcels || [])) {
     if (p.hero || !p.plotW) continue;
     const prng = makeRng((p.seed ^ 0x51f0) >>> 0);
-    if (prng() > 0.82) continue;                    // 집집이 다 두르지 않게(약 80%)
+    if (prng() > 0.90) continue;                    // #115: 담장 밖 개나리 군락 집 비율↑(80%→90%)
     const pm = parcelMatrix(p);
     const out = p.plotD / 2 + 1.3;                   // 담(+z) + 성토 패드 턱(PAD_MARGIN) 밖 자연지면
     const sides = prng() < 0.55 ? [-1, 1] : [prng() < 0.5 ? -1 : 1];

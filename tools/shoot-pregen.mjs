@@ -1,5 +1,5 @@
 // 진입 시퀀스·성능 검증 (task #46). 출력: shots/pregen-*.png + 콘솔 수치표.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-pregen.mjs
+//   node tools/shoot-pregen.mjs
 // dist-pregen 을 전용 포트(4181)로 정적 서빙(HMR 없음 → 사용자 dev 5174·타 에이전트 src 무영향).
 //
 // ① 히어로 착공 시각: enter 후 window.__heroAssembleT(ms) — before(window.__heroLegacy=구버전 6.6s)

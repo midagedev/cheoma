@@ -1,5 +1,5 @@
 // 태양 렌즈 플레어(#67) 검증. src/env/post.js 의 FlarePass 를 index.html(main.js 경로)로 구동.
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-flare.mjs
+// 사용: node tools/shoot-flare.mjs
 // 산출: scratchpad/flare/ 에 전 컷(중간 증거), shots/flare-*.png 에 게이트 증거만.
 //   각 컷에서 window.__flare(amt·sunUV·front) 를 읽고, 같은 프레임의 flareON/flareOFF 를
 //   토글 재캡처해 '플레어 기여분'(ON-OFF)을 분리 측정 → 절제(에너지 국소성)·연속성·소멸 판정.

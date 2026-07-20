@@ -75,6 +75,7 @@
   let editParams = $state({});                 // { kind, frontBays, sideBays, roofPitch, eaveOverhang }
   let hoverInfo = $state(null);                // 호버 미니라벨 { spec, x, y }
   let veil = $state(false);                    // 먹 안개 트랜지션 오버레이(#46) — 마을 생성 프리징 마스킹
+  let veilPending = 0;                          // withVeil 재진입 카운터(#133) — 파라미터 연타(#69 라이브 반영) 시 마지막 호출만 베일 해제
 
   // ---------- 시네마틱 데모 모드(#112) ----------
   let cine = $state({ active: false, mode: null, pass: null });   // engine 'cinematic' 이벤트로 갱신
@@ -122,12 +123,16 @@
   // sheetLayout: 바텀 시트 레이아웃(세로 좁은 화면). editing: 우측 편집 시트가 열림.
   let sheetLayout = $derived(device.sheet);
   let editing = $derived(ui.selected || !!villageEditing || villageZooming);
-  // 모드(파생): 마을 홈은 클로즈업(편집/줌 중)=집·부감=마을, 그 외 세션은 씬 기준(단일건물=집·마을=마을).
+  // 모드(파생): focus(편집·줌) 중이면 항상 '집'(近), 아니면 마을 씬=마을(遠)·단일건물=집. villageHome/비-home
+  //   구분 없이 통일 — ?village=1(비-home) 세션도 집 focus 중 遠 활성되던 회귀 수정(#118 U3). focus 중
+  //   遠 을 누르면 toggleMode('village')=focus-out(부감 복귀) 경로가 그대로 동작(집 씬 이탈 아님).
   let mode = $derived(
-    villageHome
-      ? ((villageEditing || villageZooming) ? 'house' : 'village')
-      : (sceneVillage ? 'village' : 'house')
+    (villageEditing || villageZooming) ? 'house' : (sceneVillage ? 'village' : 'house')
   );
+  // 히어로 랜딩 크롬 은닉(#118 U4): 타이틀 표시(heroVisible)~종가 랜딩(heroLanding) 동안 ModeToggle·
+  //   EnvironmentDial·ActionBar·낙관을 숨긴다(ContextPanel 과 동일 연출). 랜딩 종료 시 chroma 페이드로
+  //   복원(전환은 opacity 트랜지션 1회 — chroma 감상 페이드와 이중 적용 없이 부드럽게).
+  let heroChrome = $derived(heroVisible || heroLanding);
   // 마을 부감: 하단 peek 옵션 시트 위로 액션바를 올림.
   let villageAerial = $derived(sceneVillage && !villageEditing && !villageZooming);
   // 시네마틱 진입 버튼(드론/거닐기)은 마을 부감에서만 — focus·전환·웨이브·먹안개·데모 중엔 미노출.
@@ -159,7 +164,8 @@
     // 마을 모드 이벤트 — 씬 스왑(단일건물↔마을). villageHome 세션은 여기서 벗어나지 않는다(부감/클로즈업만).
     engine.on('villageMode', (on) => {
       sceneVillage = on;
-      if (!on) { villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0; villageZooming = false; waving = false; }
+      // 마을 씬 이탈 = 랜딩 종료(정상 완주든 폴백/리버트든) → heroLanding 해제로 #118 U4 크롬 스턱 방지.
+      if (!on) { villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0; villageZooming = false; waving = false; heroLanding = false; pendingCommit = null; }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
       else pullVillage();
       syncUrl();
     });
@@ -180,10 +186,19 @@
     });
     // focus-out START — 패널은 집 컨텍스트를 유지한 채 모프가 역행(villageFocusMorph 가 1→0).
     engine.on('villageReturn', () => { villageZooming = true; hoverInfo = null; });
-    // focus-out 완료(부감 도착) — 집 컨텍스트 해제, 마을 섹션만.
-    engine.on('villageReturnDone', () => { villageEditing = null; villageZooming = false; focusMorph = 0; });
+    // focus-out 완료(부감 도착) — 집 컨텍스트 해제, 마을 섹션만. 랜딩이 부감으로 귀착한 경우도 여기 —
+    //   heroLanding 해제로 크롬 복원(#118 U4).
+    engine.on('villageReturnDone', () => { villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false; });
     // 리롤 웨이브(#56): 진행 중 입력·버튼 잠금, 완료 시 호수·URL 갱신.
-    engine.on('villageWave', (w) => { waving = w.phase === 'start'; if (w.phase === 'done') { pullVillage(); syncUrl(); chromaFaded = false; } });
+    engine.on('villageWave', (w) => {
+      waving = w.phase === 'start';
+      if (w.phase === 'done') {
+        // #151 웨이브 중 유실된 최신 커밋이 큐에 있으면 완료 즉시 자동 재커밋 → 마지막 값으로 수렴. 큐를 먼저
+        //   비우고 villageOpts(소스오브트루스, 웨이브 중 세터가 갱신) 를 그대로 다시 웨이브 커밋(연쇄 1회로 종료).
+        if (pendingCommit) { pendingCommit = null; engine.village.setOpts({ ...villageOpts }, { wave: true }); return; }
+        pullVillage(); syncUrl(); chromaFaded = false;
+      }
+    });
     engine.on('villageSeed', (s) => { villageSeed = s; pullVillage(); syncUrl(); });
 
     // 시네마틱 데모(#112): 진입/패스 전환/종료 상태를 크롬 최소화·오버레이 라벨에 반영.
@@ -227,6 +242,9 @@
 
     // 오토로테이션 복원: shot 에서는 항상 비활성(결정론). flowsec 은 검증용 간격 오버라이드.
     shot = url.shot;
+    // 뷰포트 중심 보정(#124): 패널 점유 시 피사체 시프트. shot·검증 하네스는 패널이 없거나 결정론
+    //   기준이므로 오프셋 0(기존 스크린샷 픽셀 불변). 그 외 실사용에서만 활성.
+    engine.setViewShiftEnabled(!url.shot);
     if (url.flow && !url.shot) flowing = true;
     if (url.flowsec != null) flowIntervalMs = Math.round(url.flowsec * 1000);
 
@@ -298,7 +316,10 @@
     audioOn = true;
     // 마을 우선 진입(#62): 마을 씬 안에서 종가 클로즈업 랜딩 + 조립. 기본 인터랙티브 부팅.
     // (구 단일건물 히어로 reveal 은 villageHome 이 아닌 세션에만 — 현재 진입 계약상 도달 안 하나 계승.)
-    const onDone = () => { scheduleFlowTick(); };
+    // onDone 은 랜딩 시퀀스 완료(정상=villageSelect 후 · 예외=종가 없음 폴백 즉시) 양 경로에서 호출된다.
+    //   여기서 heroLanding 을 확실히 해제해 #118 U4 크롬이 폴백/조기클릭 엣지에서도 스턱되지 않게 한다
+    //   (정상 경로는 villageSelect 가 이미 해제 → 무해한 중복).
+    const onDone = () => { heroLanding = false; scheduleFlowTick(); };
     if (villageHome) { heroLanding = true; engine.village.enterHero({ ...villageOpts }, villageSeed, { onDone }); }
     else engine.hero.enter({ onDone });
     setTimeout(() => { heroVisible = false; }, 900);
@@ -482,6 +503,7 @@
   // 먹 안개 마스킹(#46): 오버레이가 화면을 완전히 덮은 뒤 동기 생성 fn 을 실행 → 생성 프리징 은닉,
   // 완료 후 페이드 아웃(마을이 안개에서 드러남 + 돌리인). 조작 직후 오버레이 페이드 인은 즉시 반응.
   async function withVeil(fn) {
+    veilPending++;                              // #133 재진입 가드: 파라미터 연타로 withVeil 이 겹치면
     veil = true;
     await tick();
     // 오버레이 opacity 1 도달까지 대기(CSS 트랜지션) — 이후에 생성해야 프리징이 안 보인다.
@@ -489,7 +511,7 @@
     await new Promise((r) => setTimeout(r, 260));
     try { fn(); } finally {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      veil = false;
+      if (--veilPending === 0) veil = false;    // 마지막 호출 완료 시에만 베일 해제(앞 호출 finally 가 뒤 호출 재생성 프레임을 조기 노출하지 않게)
     }
   }
   function toggleMode(target) {
@@ -508,28 +530,45 @@
       else withVeil(() => engine.village.enter({ ...villageOpts }, villageSeed));
     } else if (sceneVillage) engine.village.exit();
   }
+  // #144 규모 커밋 = 즉시 웨이브(구 마을 유지 → 중앙에서 방사형 조립). withVeil(헛번쩍) 폐기 — setOpts 가
+  //   비동기(#123)라 베일이 아무것도 안 덮었다. pullVillage·syncUrl 은 완료 시 villageWave 'done'·villageMode 가 수행.
+  // #151 웨이브 중 커밋 큐잉: 웨이브 애니(3.6s) 진행 중엔 setOpts 가 엔진에서 드롭된다(startVillageWave 가
+  //   village.wave 잠금으로 null 반환) → 연타 커밋이 전부 유실돼 슬라이더 UI 와 마을이 desync 됐다(T5 8/8 드롭).
+  //   이제 세터는 항상 villageOpts(소스오브트루스) 를 먼저 갱신해 UI 를 즉시 반영하고, waving 이면 커밋을 큐 1칸
+  //   (pendingCommit) 에 표시만 해 뒀다가 웨이브 완료('villageWave' done) 에 자동 재커밋 → 마지막 값으로 수렴한다.
+  //   큐 1칸이라 연타해도 연쇄 웨이브 1회로 끝난다(최신 승리·무한 연쇄 없음). villageZooming(집 focus 전환) 중엔
+  //   마을 opts 커밋 자체가 무의미하므로 드롭 유지(패널 컨텍스트가 집 편집으로 모프된 상태).
+  let pendingCommit = null;
+  function commitVillageOpts() {
+    if (villageZooming) return;
+    if (waving) { pendingCommit = { ...villageOpts }; return; }   // 웨이브 중 → 최신 의도만 큐잉(덮어쓰기)
+    engine.village.setOpts({ ...villageOpts }, { wave: true });
+  }
   function setScale(s) {
+    if (villageZooming) return;
     villageOpts.scale = s;
     // 궁은 도성 규모(capital·hanyang)만. hanyang 은 궁 기본 ON(도성=궁성), 그 외 도성 미만은 OFF.
     if (s === 'hanyang') villageOpts.includePalace = true;
     else if (s !== 'capital') villageOpts.includePalace = false;
     // 집 없음(#114)은 외딴집 전용 구성 — 규모를 키우면 해제(보이지 않는 houses:0 잔존 방지).
     if (s !== 'solo' && villageOpts.houses != null) villageOpts.houses = null;
-    withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); });
+    commitVillageOpts();
   }
   // character(민촌/여염/반촌) 셀렉터는 폐지(사용자 지시) — UI 미노출, villageOpts.character 는 내부 기본값(yeoyeom) 유지.
   function togglePalace() {
+    if (villageZooming) return;
     if (villageOpts.scale !== 'capital' && villageOpts.scale !== 'hanyang') return;
     villageOpts.includePalace = !villageOpts.includePalace;
-    withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); });
+    commitVillageOpts();
   }
-  function toggleTemple() { villageOpts.includeTemple = !villageOpts.includeTemple; withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); }); }
-  // 마을 상세 파라미터(#91): 지형·구성·어휘 옵션 커밋 → setOpts 재생성(시드 유지, 부감 재프레이밍). 규모·궁·절과
-  //   동일 경로(withVeil 먹 안개 마스킹). 라이브 rAF 미요구(재생성 파라미터) — 슬라이더 onchange/토글 클릭에서만 호출.
+  function toggleTemple() { if (villageZooming) return; villageOpts.includeTemple = !villageOpts.includeTemple; commitVillageOpts(); }
+  // 마을 상세 파라미터(#91): 지형·구성·어휘 옵션 커밋 → 재생성(시드 유지). 규모·궁·절과 동일하게 웨이브 경로
+  //   (#144) — 이 옵션들은 plan/populate 를 통째로 재유도(seed 동일이라도 layout 이 바뀜)라 전-마을 웨이브가
+  //   의미상 맞다. 라이브 rAF 미요구(재생성 파라미터) — 슬라이더 onchange/토글 클릭에서만 호출.
   function setVillageOpt(key, value) {
-    if (waving || villageZooming) return;
+    if (villageZooming) return;
     villageOpts[key] = value;
-    withVeil(() => { engine.village.setOpts({ ...villageOpts }); pullVillage(); syncUrl(); });
+    commitVillageOpts();
   }
 
   // 집 편집(#48·#69): 편집값을 스키마(edit-schema)로 어댑터 rebuildParcel 계약에 라우팅. 라이브 전략은
@@ -590,10 +629,14 @@
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
 <div class="veil" class:on={veil} aria-hidden="true"></div>
 
-{#if !cine.active}<ModeToggle {mode} onToggle={toggleMode} />{/if}
+{#if !cine.active}
+  <!-- 히어로 랜딩 중 은닉(#118 U4) — chroma 와 동일 0.9s 페이드로 복원(하드 마운트 팝 방지). -->
+  <div class="modewrap" class:hero={heroChrome}><ModeToggle {mode} onToggle={toggleMode} /></div>
+{/if}
 
-<!-- 시네마틱 데모 중엔 크롬을 페이드(감상 우선) — .chroma 3초 감상 페이드와 별개 게이트. -->
-<div class="chroma" class:faded={(chromaFaded || cine.active) && !heroVisible}>
+<!-- 시네마틱 데모 중엔 크롬을 페이드(감상 우선) — .chroma 3초 감상 페이드와 별개 게이트.
+     히어로 랜딩(heroChrome) 동안에도 은닉(#118 U4), 랜딩 종료 시 자연 복원. -->
+<div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
   {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={() => { refOpen = true; chromaFaded = false; }} />{/if}
   <EnvironmentDial
     time={ui.time} season={ui.season} weather={ui.weather}
@@ -676,6 +719,10 @@
   .stage { position: fixed; inset: 0; z-index: 0; }
   .chroma { transition: opacity 0.9s ease; }
   .chroma.faded { opacity: 0; pointer-events: none; }
+  /* ModeToggle 은 chroma 감상 페이드에서 제외(상시 노출)하되, 히어로 랜딩(#118 U4) 동안만 은닉 —
+     chroma 와 동일 0.9s 트랜지션으로 랜딩 종료 시 함께 복원(팝/깜빡임 방지). */
+  .modewrap { transition: opacity 0.9s ease; }
+  .modewrap.hero { opacity: 0; pointer-events: none; }
 
   /* 먹 안개 트랜지션(#46) — 한지 바탕 수묵 크로스페이드. 생성 프리징을 덮어 튐/프리즈를 은닉. */
   .veil {

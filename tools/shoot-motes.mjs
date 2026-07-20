@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 먼지 모트 + 등롱 흔들림 검증 → shots/motes-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-motes.mjs [group]
+// 사용법: node tools/shoot-motes.mjs [group]
 //   group = backlight | drift | timecurve | ink | lantern | regress | all(기본)
 //
 // env 직접 import 하네스(/__motes): index.html 앱 경로(다른 에이전트가 자주 깨뜨림) 회피.

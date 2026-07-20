@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 마을 리롤 웨이브(#56) 검증.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-wave.mjs [필터]
+// 사용법: node tools/shoot-wave.mjs [필터]
 //   앱 경로 독립 — createVillage(구/신 시드) 2벌을 씬에 얹고 createRerollWave 로 구동, progress 를
 //   seek(t01) 로 고정해 각 시점을 캡처(/__valley·/__focus 하네스 문법 계승, 전용 포트 4200).
 //   모든 컷은 스크래치패드(SCRATCH)에, 게이트 증거 컷만 shots/wave-*.png 로도 저장.

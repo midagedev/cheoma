@@ -1,6 +1,6 @@
 // 재질 프레넬 림(#76) 검증. env/post.js 를 index.html(main.js) 대신 env 직접 import 하네스(/__fres)로
 //   구동 — 병렬 작업 중 앱 경로 breakage 에 흔들리지 않음(ambient-verify-harness 원칙).
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-fresnel.mjs
+// 사용: node tools/shoot-fresnel.mjs
 // 산출: scratchpad/fresnel/ 에 전 컷(중간), shots/fresnel-*.png 에 게이트 증거만.
 //
 // 림 모드는 post.js 가 location.search 의 ?rim= 로 선택하므로 하네스 URL 에 rim=pass|fresnel 을 실어

@@ -1,10 +1,4 @@
-// SPA 엔트리. 웹폰트는 로컬 번들(@fontsource, 외부 CDN 무의존).
-import '@fontsource/nanum-myeongjo/latin-400.css';
-import '@fontsource/nanum-myeongjo/latin-700.css';
-import '@fontsource/nanum-myeongjo/korean-400.css';
-import '@fontsource/nanum-myeongjo/korean-700.css';
-import '@fontsource/nanum-brush-script/latin-400.css';
-import '@fontsource/nanum-brush-script/korean-400.css';
+// SPA 엔트리. 웹폰트 미사용(#132) — 시스템 기본 폰트만 사용해 로딩 부담 제거.
 import './styles/global.css';
 
 import { mount } from 'svelte';

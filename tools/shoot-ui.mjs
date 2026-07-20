@@ -1,6 +1,6 @@
 // Svelte SPA UI 검증 캡처 (task #8). 출력: shots/ui-*.png 전용.
 // 전제: app dev 서버가 http://localhost:4318 에서 구동 중(npm run dev -- --port 4318).
-//   실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-ui.mjs
+//   실행: node tools/shoot-ui.mjs
 // 두부 이징 + 데모셸 회귀는 정적 ROOT 서버로 기존 index.html ?assemble=1&t= 를 캡처.
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';

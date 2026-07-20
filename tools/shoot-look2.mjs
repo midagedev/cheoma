@@ -1,5 +1,5 @@
 // 플래그십 룩 R2 검증: 광학 림(역광 게이트) + 역광 기본뷰 + 지면 톤다운 → shots/look2-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-look2.mjs
+// 사용법: node tools/shoot-look2.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

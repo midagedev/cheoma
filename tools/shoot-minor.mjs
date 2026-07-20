@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 조연 건물(정자·돌다리) 검증 → shots/minor-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-minor.mjs
+// 사용법: node tools/shoot-minor.mjs
 //   - 정자: 사모/육모 × day/sunset/night (night 창호광 오작동 없음 확인)
 //   - 돌다리: 판석교·홍예교 개울 위 배치
 //   - 회귀: index.html?shot=1 korea day (pageerror 0 확인)

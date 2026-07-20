@@ -1,5 +1,5 @@
 // 계절 입자 필드(#111) 수치 검증 — 스크린샷·PNG 없이 코드·수치 단언만.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-petals.mjs
+//   node tools/verify-petals.mjs
 //
 // 방식: esbuild(app/node_modules)로 src/env/weather.js(+petals.js) 를 브라우저 번들로 묶어 전용 포트
 //   4225 에 자체 하네스 HTML 로 서빙 → playwright(chrome)가 weather 를 결정론적으로 구동하며

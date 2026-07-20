@@ -1,5 +1,5 @@
 // 헤드리스: 초가 처마 프린지 고증 검증(태스크 #71) → shots/thatch-*.png (기본은 스크래치패드)
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-thatch.mjs [tag] [outdir]
+// 사용법: node tools/shoot-thatch.mjs [tag] [outdir]
 //   tag    = before | after | (임의 접두)   기본 'x'
 //   outdir = 저장 디렉터리                  기본 스크래치패드/thatch
 //

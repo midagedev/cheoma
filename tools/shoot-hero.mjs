@@ -4,7 +4,7 @@
 //   ② 조립 중 선회: 방위각 변화율>0(매 샘플 구간).
 //   ③ 앰비언트 입자 매트릭스: 부감/focus/히어로 3상태 × {snow, rain, 낙엽, motes} 발현(visible·eff).
 //   ④ 무대 연출: 조립 동안 fog near/far 좁힘 → 완료 후 열림.
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-hero.mjs
+// 사용법: node tools/shoot-hero.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';

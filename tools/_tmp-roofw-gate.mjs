@@ -1,5 +1,5 @@
 // 게이트: 4프리셋 index.html?assemble=1 로드 pageerror 0 + giwa 조립 태그(asmChunked/asmGroup) 보존.
-// NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/_tmp-roofw-gate.mjs
+// node tools/_tmp-roofw-gate.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

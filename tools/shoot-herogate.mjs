@@ -1,7 +1,7 @@
 // 히어로 타임라인 검증(#61): 조기 노출 게이트 — 빈 터(building.visible=false) 동안 건물 종속
 // 이펙트(굴뚝 연기·적설 쉘)가 뜨지 않고, 건물이 서고 정착한 뒤 스멀스멀 등장하는지 프레임 시퀀스로 확인.
 // 비-shot 모드(히어로 활성). 출력=세션 스크래치패드.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-herogate.mjs
+//   node tools/shoot-herogate.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

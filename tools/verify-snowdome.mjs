@@ -6,7 +6,7 @@
 //
 // 실행(esbuild 번들 → node; three/addons 해석 때문에 번들 필요):
 //   SP=/private/tmp/.../scratchpad
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules \
+//   \
 //     npx --prefix app esbuild tools/verify-snowdome.mjs --bundle --format=esm \
 //       --platform=node --outfile="$SP/_snowdome.mjs" && node "$SP/_snowdome.mjs"
 import * as THREE from 'three';

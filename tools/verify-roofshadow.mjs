@@ -17,7 +17,7 @@
 //   ⑥ 결정론: 같은 시드 마을 2회 생성 → 패치 재질 수·통계 동일.
 //   ⑦ env 단일건물 경로 무회귀: buildBuilding 재질은 미주입(populateVillage 밖이라 uniforms 부재).
 //
-// 사용: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-roofshadow.mjs
+// 사용: node tools/verify-roofshadow.mjs
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';

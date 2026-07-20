@@ -23,10 +23,13 @@ function hash1(n) { const x = Math.sin(n * 127.13 + 11.7) * 43758.5453; return x
 //  sunset/dawn 최대(골든아워 공기 중 먼지), day 미약, night 극미(달빛 반짝).
 // int 는 앱 렌더(bloom 有)에서 다소 증폭되므로 raw 하네스에서 "살짝" 읽히는 값으로 잡되,
 // 시간대 비율(sunset≈dawn ≫ day ≫ night)을 유지한다.
+// int: 마스터 알파 배율. sunset/dawn 이 최대(골든아워 역광 먼지)이나, 히어로·부감처럼 카메라가 볼륨에서
+//   멀면 원거리 모트가 DoF 로 번져 보케가 과해진다 → #116 에서 sunset/dawn 을 소폭 낮춰 "은은한 반짝"으로
+//   절제(역광 헤이즈는 유지, 전멸 금지).
 const MOTE_TIME = {
-  dawn:   { int: 2.2, color: 0xffe7c6 },  // 새벽 온기
+  dawn:   { int: 1.9, color: 0xffe7c6 },  // 새벽 온기
   day:    { int: 0.7, color: 0xf2f4f6 },  // 낮은 미약·중성
-  sunset: { int: 2.6, color: 0xffdca8 },  // 해질녘 최대·금빛
+  sunset: { int: 2.1, color: 0xffdca8 },  // 해질녘 최대·금빛
   night:  { int: 0.5, color: 0xcdd8f0 },  // 밤 극미·달빛 쿨
 };
 
@@ -48,6 +51,8 @@ uniform float uWindSway;    // 바람 쓸림 진폭(m)
 uniform float uGust;        // 0..1 거스트
 uniform float uIntensity;   // 마스터 알파 배율(시간대)
 uniform float uForwardPow;  // 역광 로브 폭
+uniform float uNearA;       // 근접 페이드 시작(월드 m)
+uniform float uNearB;       // 근접 페이드 완료(월드 m)
 
 attribute vec4 aRand;       // x=위상, y=주파수배율, z=기준알파, w=크기배율
 
@@ -81,11 +86,13 @@ void main() {
   // 먼지가 구르며 빛을 받는 미세 반짝임(twinkle).
   float tw = 0.72 + 0.28 * sin(t * (1.7 + fm) + ph * 3.1);
 
-  vAlpha = aRand.z * uIntensity * shimmer * tw;
+  // 근접 페이드: 카메라가 모트 볼륨 안에 들어와도 코앞 모트가 거대 보케가 되지 않게 소거(#116 안전장치).
+  float nearFade = smoothstep(uNearA, uNearB, -mv.z);
+  vAlpha = aRand.z * uIntensity * shimmer * tw * nearFade;
 
   // 원근 감쇠(먼 모트는 작게), physical px. 최소/최대 클램프로 1~2px 감성.
   float sz = uSize * aRand.w * uPixelRatio;
-  gl_PointSize = clamp(sz * (50.0 / -mv.z), 1.0 * uPixelRatio, 5.0 * uPixelRatio);
+  gl_PointSize = clamp(sz * (50.0 / -mv.z), 1.0 * uPixelRatio, 4.0 * uPixelRatio);
 }`;
 
 const MOTE_FRAG = /* glsl */`
@@ -144,7 +151,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uSize: { value: 2.6 },
+      uSize: { value: 2.2 },
       uPixelRatio: { value: renderer ? renderer.getPixelRatio() : 2 },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uDrift: { value: 0.75 },
@@ -153,6 +160,8 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
       uGust: { value: 0.0 },
       uIntensity: { value: prof.int },
       uForwardPow: { value: FORWARD_POW },
+      uNearA: { value: 3.0 },
+      uNearB: { value: 9.0 },
       uColor: { value: new THREE.Color(prof.color) },
     },
     vertexShader: MOTE_VERT,
@@ -260,7 +269,7 @@ export function setupLanternSway({ scene, getBuilding = null, scope = null }) {
         bulbs.push(o);
       }
     }
-    if (!lights.length || !bulbs.length) return false;
+    if (!bulbs.length) return false;   // 등롱 몸체(bulb)만 있어도 흔들림 구동(light 는 선택 — #141 풀링 셀)
     // bulb↔light 위치로 짝짓기(정확 동일 위치). 위상은 인덱스로 갈라 동기화 방지.
     lanterns = [];
     bulbs.forEach((bulb, i) => {

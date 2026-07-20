@@ -1,5 +1,5 @@
 // giwa 좁은 폭 지붕 파탄 재현/검증 — mainHalfW 파라미터 스윕 + sx/sz 비균등 스케일 스윕.
-// NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/_tmp-roofw-sweep.mjs [outTag]
+// node tools/_tmp-roofw-sweep.mjs [outTag]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

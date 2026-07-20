@@ -2,7 +2,7 @@
 //   어댑터(createVillage) 경로로 렌더 → 옵션이 실제 앱 경로(planVillage→populateVillage)로 흐르는지 확인.
 //   opts 는 JSON 으로 ?o= 에 실어 브라우저가 createVillage 로 그대로 spread. 전용 포트 4211(사용자 dev 5174
 //   미접촉), 소스 직접 서빙 + importmap(shoot-scale/templesite 패턴).
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-vopts.mjs [필터] [--tmp]
+// 사용법: node tools/shoot-vopts.mjs [필터] [--tmp]
 //   --tmp: 중간 검증컷을 scratchpad/vopts 로(shots 오염 방지). 기본은 shots/vopts-*.png(게이트 증거).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

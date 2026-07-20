@@ -42,13 +42,14 @@ const DICT = {
     s_doorPattern: '창살', s_winBack: '뒷창 수', s_aux: '부속채',
     s_mainHalfW: '본채 폭', s_mainHalfD: '본채 깊이', s_wingLen: '날개 길이', s_wingW: '날개 폭',
     s_centerBayW: '어칸 폭', s_endBayW: '퇴칸 폭',
+    s_planShape: '형태', s_bays: '칸수',   // #146 종가 평면형·칸수
     s_bracketTiers: '공포 단수', s_bracketScale: '공포 크기', s_interBrackets: '주간포 수',
     s_podiumTiers: '기단 켜', s_podiumRailing: '월대 난간', s_wallH: '벽 높이',
     // #96 마당 소품 + 창호/개구
     s_jangdok: '장독대', s_vegBed: '텃밭', s_yardStack: '낟가리', s_clothesline: '빨래줄',
     s_winSide: '측면 창',
     sec_props: '마당 소품', sec_openings: '창호',
-    sec_plan: '평면', sec_roof: '지붕', sec_skin: '외피', sec_proportion: '비례',
+    sec_plan: '평면', sec_plandims: '칸 치수', sec_roof: '지붕', sec_skin: '외피', sec_proportion: '비례',
     sec_bracket: '공포', sec_podium: '기단', sec_yard: '마당', sec_structure: '구조',
     wall_tile: '기와담', wall_stone: '돌담', wall_mud: '토담', wall_brush: '싸리울', wall_hedge: '생울', wall_open: '열림',
     door_ttisal: '띠살', door_jeongja: '정자살',
@@ -127,13 +128,14 @@ const DICT = {
     s_doorPattern: 'Lattice', s_winBack: 'Rear windows', s_aux: 'Outbuilding',
     s_mainHalfW: 'Main width', s_mainHalfD: 'Main depth', s_wingLen: 'Wing length', s_wingW: 'Wing width',
     s_centerBayW: 'Center bay', s_endBayW: 'End bay',
+    s_planShape: 'Shape', s_bays: 'Bays',   // #146 hanok plan shape & bays
     s_bracketTiers: 'Bracket tiers', s_bracketScale: 'Bracket size', s_interBrackets: 'Inter-brackets',
     s_podiumTiers: 'Podium tiers', s_podiumRailing: 'Woldae railing', s_wallH: 'Wall height',
     // #96 yard props + openings
     s_jangdok: 'Jar terrace', s_vegBed: 'Kitchen garden', s_yardStack: 'Straw stack', s_clothesline: 'Clothesline',
     s_winSide: 'Side window',
     sec_props: 'Yard props', sec_openings: 'Openings',
-    sec_plan: 'Plan', sec_roof: 'Roof', sec_skin: 'Skin', sec_proportion: 'Proportion',
+    sec_plan: 'Plan', sec_plandims: 'Bay sizes', sec_roof: 'Roof', sec_skin: 'Skin', sec_proportion: 'Proportion',
     sec_bracket: 'Brackets', sec_podium: 'Podium', sec_yard: 'Yard', sec_structure: 'Structure',
     wall_tile: 'Tiled', wall_stone: 'Stone', wall_mud: 'Mud', wall_brush: 'Brush', wall_hedge: 'Hedge', wall_open: 'Open',
     door_ttisal: 'Ttisal', door_jeongja: 'Jeongja',
@@ -169,7 +171,7 @@ const DICT = {
     vil_replay: 'Replay', vil_replay_tip: 'Watch this house rise again (same house)',
     vil_reroll_house: 'Reroll this house', vil_reroll_house_tip: 'Reseed this house only (village & neighbours unchanged)',
     crumb_hanok: 'Head house', crumb_palace: 'Magistracy', crumb_palace_compound: 'Palace',
-    vil_houses: 'houses',
+    vil_houses: ' houses',   // 선행 공백 — 카운트 조합 시 "28 houses" (ko '호'는 붙여 "28호")
     vil_edit_title: 'Edit house', vil_edit_sub: 'plan & profile',
     vil_bays: 'Bays', s_frontBays: 'Front bays', s_sideBays: 'Side bays',
     vil_hero_note: 'The head house, palace and temple are the face of the village — not editable.',

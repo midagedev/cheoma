@@ -1,5 +1,5 @@
 // v4 마을 어댑터 검증 → shots/v4-*.png
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-v4.mjs [필터]
+//   node tools/shoot-v4.mjs [필터]
 // 커버: ①인스턴싱 전/후 draw calls·fps(capital) ②픽킹 프록시 시각화 ③rebuildParcel 전/후
 //       ④야간 마을 창호광 ⑤같은 seed 재현성. adapter.js 가 텍스처/게이트 난수를 자체 시드.
 import { createServer } from 'node:http';

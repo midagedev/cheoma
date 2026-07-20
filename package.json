@@ -1,0 +1,8 @@
+{
+  "name": "cheoma-tools",
+  "private": true,
+  "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

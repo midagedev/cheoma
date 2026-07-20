@@ -1,7 +1,7 @@
 import { makeRng, hashString } from '../rng.js';
 import { makeSite, resolveSiteR, tierForR, rToScale01 } from './site.js';
 import { planRoads } from './roads.js';
-import { planParcels } from './parcels.js';
+import { planParcels, planSatellites } from './parcels.js';
 import { assignVariation } from './variants.js';
 import * as G from './geom.js';
 
@@ -115,15 +115,24 @@ export function planVillage(opts = {}) {
   const character = charLabel(char01);
   // 필지 목표수(연속) → tier 경계 카운트 스냅 제거. opts.houses(#114)는 직접 오버라이드 — 0 허용
   //   ("절 하나만" 구성: houses:0 + includeTemple:true → 집 없는 산사 플랜, 엔진은 부감 랜딩 폴백).
-  const houseTarget = (typeof opts.houses === 'number' && isFinite(opts.houses))
-    ? Math.max(0, Math.min(400, Math.round(opts.houses)))
-    : Math.round(pieceLerp(siteR, HOUSE_ANCHORS));
+  const housesOverridden = typeof opts.houses === 'number' && isFinite(opts.houses);
+  const defaultTarget = Math.round(pieceLerp(siteR, HOUSE_ANCHORS));   // siteR 이 함의하는 명목 호수
+  const houseTarget = housesOverridden ? Math.max(0, Math.min(400, Math.round(opts.houses))) : defaultTarget;
 
-  const norm = { scale, siteR, scale01: rToScale01(siteR), includePalace, includeTemple, seed, character, char01, charOverride, target: houseTarget, tuning };
+  // ── 분지 크기 = 건축 footprint 종속(#120) ── siteR(규모)만 움직이면 houseTarget≈defaultTarget 이라
+  //   계수 1(현행 반경 정확 재현 — 무옵션 게이트 보존). houses 를 직접 낮추면(집 적음) 분지가 아담해지고
+  //   높이면 넓어진다("사각 그릇 고정 반경" 인상 해소). 면적 ∝ 호수 → 반경 ∝ √호수(+3 완충으로 극단 방지).
+  //   대규모 궁·성곽 붕괴 방지로 [0.72,1.25] 클램프(site.js 도 [0.68,1.28] 재클램프).
+  const bowlK = housesOverridden
+    ? Math.min(1.25, Math.max(0.72, Math.pow((houseTarget + 3) / (defaultTarget + 3), 0.5)))
+    : 1;
+
+  const norm = { scale, siteR, scale01: rToScale01(siteR), includePalace, includeTemple, seed, character, char01, charOverride, target: houseTarget, tuning, bowlK };
   const rng = makeRng(seed);
 
   // ── 1) 사이트(배산임수) ── 지형 옵션(#91) 주입: 기복·능선고·개울 사행/유무(무옵션=현행 정확 재현).
-  const site = makeSite({ siteR, seed,
+  //   bowlK(#120): 분지 반경을 footprint(houseTarget)에 종속. 무옵션(houses 미지정) 시 bowlK=1 → 불변.
+  const site = makeSite({ siteR, seed, bowlK,
     undAmpK: tuning.undAmpK, ridgeHK: tuning.ridgeHK, streamMeanderK: tuning.streamMeanderK, stream: tuning.stream });
   const C = site.center, E = site.entrance;
   const toEntrance = G.norm(G.sub(E, C));   // 종가가 바라보는 방향(남, 동구쪽)
@@ -187,9 +196,15 @@ export function planVillage(opts = {}) {
 
   // ── 4) 필지 (도로변 분할 + 위계 그라디언트) ──
   const frontage = planParcels(site, roadsResult, norm, rng, blockers);
+  // ── 4.5) 위성 부락(#120) ── 본동에서 조금 떨어진 완사면 포켓에 작은 무리(몇 채). rng 소비 없는 전용
+  //   시드 경로(공유 rng 불침해 → 상류 결정론 보존, 위성 OFF 회귀 안전). 겹침 회피에 기존 필지·예약 코어
+  //   polygon 을 넘긴다. cityWall 있으면 성곽 링 밖으로(minR).
+  const satMinR = features.cityWall ? features.cityWall.ringR * 1.06 : 0;
+  const satExisting = [...blockers.map((b) => b.poly).filter(Boolean), ...frontage.map((p) => p.poly)];
+  const satellites = planSatellites(site, norm, seed, { minR: satMinR, existing: satExisting });
   // 예약 코어 중 실제 필지로 렌더할 것(궁 제외)만 parcels 에 포함
   const reserved = blockers.filter((b) => b.hero);
-  const parcels = [...reserved, ...frontage];
+  const parcels = [...reserved, ...frontage, ...satellites];
   // 안정적 필지 ID(시드 고정 → 같은 seed 는 같은 id 순서) — 인스턴싱·픽킹·편집의 키.
   parcels.forEach((p, i) => { p.id = `p${i}`; });
   // 집 변주 필드(평면 프로토·톤·yaw·스케일·담 유형·부속채) — parcel.seed 결정론(variants.js).
@@ -249,6 +264,8 @@ export function planVillage(opts = {}) {
       houses: parcels.length,
       giwa: parcels.filter((p) => p.kind === 'giwa').length,
       choga: parcels.filter((p) => p.kind === 'choga').length,
+      satellites: satellites.length,            // 위성 부락 필지 수(#120)
+      bowlK,                                     // footprint 종속 분지 계수(#120)
       roads: roadsResult.roads.length,
       paddies: paddies ? paddies.length : 0,
       parcelDebug: planParcels.lastDebug,

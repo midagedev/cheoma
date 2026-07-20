@@ -1,5 +1,5 @@
 // verify-solo.mjs — #114 외딴집(집 한 채)·절-단독 스케일 하한 검증 (plan 레벨, node 전용·무캡처)
-//   실행: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/verify-solo.mjs
+//   실행: node tools/verify-solo.mjs
 //   ① R=30 시드 스윕: 필지 정확히 1개 + 그 필지가 hero(hanok 종가)
 //   ② R 스윕 30→74: 필지 수 1→10 단조(±1 허용), 전 구간 무예외
 //   ③ 절 단독: houses:0 + includeTemple → 필지 0 + temple feature 존재

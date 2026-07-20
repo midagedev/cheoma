@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 마을 자동 구성(village) 검증 → shots/village-*.png
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-village.mjs [필터]
+// 사용법: node tools/shoot-village.mjs [필터]
 //   [필터] 인자가 있으면 파일명에 그 문자열이 포함된 컷만 촬영(반복 개발용).
 //   메인 카메라 리그(건물 고정)와 무관하게 자체 프레이밍(부감/아이레벨)을 쓴다.
 import { createServer } from 'node:http';

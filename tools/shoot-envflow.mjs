@@ -1,5 +1,5 @@
 // env 오토로테이션 "시간 흐르기" 토글 검증 (task #64). 출력: shots/envflow-*.png.
-//   NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-envflow.mjs
+//   node tools/shoot-envflow.mjs
 // dist-envflow 를 전용 포트(4185)로 정적 서빙(HMR 없음 → 다른 에이전트 src 편집 무영향, dev 5174 미접촉).
 // 게이트:
 //   ① 간격 오버라이드(flowsec)로 스텝마다 자동 전진 + 다이얼 활성 라벨/URL 추종 + 크로스페이드(스냅 아님)

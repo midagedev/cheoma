@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 앰비언스 근접 링(#79) 검증 → shots/focus-*.png + scratchpad
-// 사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-focus.mjs
+// 사용법: node tools/shoot-focus.mjs
 //
 // env 독립 하네스(/__focus): buildParcel + createFocusRing 만 직접 import(앱/adapter 경로 우회).
 //   전용 포트 4197. 사용자 dev(5174) 절대 미접촉.

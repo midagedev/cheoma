@@ -636,7 +636,10 @@ export function makeMaterials(style = 'palace') {
   const C = KOREA_COLORS;
   const temple = style === 'temple';
   const choga = style === 'choga';
-  const giwa = style === 'giwa';
+  // 'hanok'(히어로 종가·반가 안채, parcel.js 전용 스타일)도 giwa 백골 팔레트를 쓴다.
+  //   (#139) 종전엔 'hanok' 이 어느 분기도 안 걸려 궁 기본값(석간주 붉은 기둥·회색 회벽)으로
+  //   폴백 → 반가가 궁 목재 톤으로 렌더됐다. 마을 인스턴스는 makeMaterials('giwa') 별경로라 불침해.
+  const giwa = style === 'giwa' || style === 'hanok';
   const std = (color, rough = 0.85, extra = {}) =>
     new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.0, ...extra });
 

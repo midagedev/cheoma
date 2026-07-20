@@ -1,5 +1,5 @@
 // #99 히어로 종가 문/창 개구 검증. 코어(buildHanok) 직접 import 하네스 — 앱 dev 서버 불침해, 전용 포트 4214.
-//   사용법: NODE_PATH=/Users/hckim/repo/threesur/node_modules node tools/shoot-hanokface.mjs [필터]
+//   사용법: node tools/shoot-hanokface.mjs [필터]
 //   컷: front(히어로 근접 정면) · grid(시드 스윕 8) · night(hanjiGlow 발광) · L(ㄱ자) · U(ㄷ자) · rect
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
