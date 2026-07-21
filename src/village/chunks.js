@@ -33,9 +33,9 @@ function sectorsFor(count) {
 //   · opts.maxArcLength: 유한한 값이면 링의 최대 호 길이를 제한한다. 컬링 바운드와
 //     런타임 LOD 교체 단위가 마을 반대편까지 넓어지지 않게 한다.
 //     상한을 생략하면 기존 count 기반 분할을 그대로 보존한다.
-//   · far: 원경 청크 플래그(그림자 캐스터 다이어트 대상) — 청크의 가장 가까운
-//     필지 footprint가 opts.farDist 밖일 때 true. 중심점 거리는 반대편 필지끼리 상쇄될 수 있어
-//     LOD 경계로 쓰지 않고, 정렬·컬링 메타데이터로만 유지한다.
+//   · far: 가장 가까운 필지 footprint가 opts.farDist 밖인지 나타내는 공간 메타데이터.
+//     한양의 런타임 LOD는 중앙·외곽 모두에 적용되며, 이 값은 분할 계약/분석/하위호환용이다.
+//     중심점 거리는 반대편 필지끼리 상쇄될 수 있어 카메라 LOD 경계로 쓰지 않는다.
 export function partitionParcels(parcels, anchor, opts = {}) {
   const ringW = opts.ringW || RING_W;
   const farDist = opts.farDist != null ? opts.farDist : Infinity;
@@ -92,18 +92,20 @@ export function partitionParcels(parcels, anchor, opts = {}) {
   return out;
 }
 
-// 카메라와 청크가 실제로 소유한 필지 중심 사이의 최소 수평거리. centroid는 반대편 필지끼리
-// 상쇄될 수 있으므로 런타임 LOD 근접 판정에 쓰지 않는다. 매 프레임 호출되므로 임시 Vector나
-// 배열을 만들지 않는다. parcels가 없는 구형 호출은 center/{x,z} 거리로 폴백해 공개 API 호환을
-// 유지한다.
-export function chunkLodDistance(chunk, x, z) {
+// 카메라와 청크가 실제로 소유한 필지 중심 사이의 최소 거리. centroid는 반대편 필지끼리
+// 상쇄될 수 있으므로 런타임 LOD 근접 판정에 쓰지 않는다. y를 주면 필지 대지(baseY)까지의
+// 3D 거리를 써 부감 카메라가 수평상 가까운 외곽 청크를 불필요하게 풀디테일로 바꾸지 않는다.
+// y 생략은 기존 순수 XZ 계약을 보존한다. 매 프레임 호출되므로 임시 Vector나 배열을 만들지 않는다.
+export function chunkLodDistance(chunk, x, z, y) {
   const parcels = chunk?.parcels;
   if (parcels?.length) {
+    const useY = Number.isFinite(y);
     let minSq = Infinity;
     for (const parcel of parcels) {
       const dx = x - parcel.center.x;
       const dz = z - parcel.center.z;
-      const dSq = dx * dx + dz * dz;
+      const dy = useY ? y - (parcel.baseY || 0) : 0;
+      const dSq = dx * dx + dy * dy + dz * dz;
       if (dSq < minSq) minSq = dSq;
     }
     return Math.sqrt(minSq);
@@ -115,25 +117,34 @@ export function chunkLodDistance(chunk, x, z) {
 // 여러 청크의 종류별 은닉 핸들을 하나의 API 로 합친다(픽킹·편집이 id 로 필지를 은닉).
 //   각 청크 buildHouseInstances 그룹의 userData(setHidden/isHidden/locate)를 id→청크핸들 맵으로.
 export function combineHouseHandles(kind, groups) {
-  const owner = new Map();   // parcelId -> 청크 그룹 userData
+  const owner = new Map();   // parcelId -> 같은 필지를 표현하는 tier별 그룹 userData[]
   for (const gp of groups) {
     const uh = gp.userData;
     if (!uh || !uh.locate) continue;
-    for (const id of uh.locate.keys()) owner.set(id, uh);
+    for (const id of uh.locate.keys()) {
+      let list = owner.get(id);
+      if (!list) { list = []; owner.set(id, list); }
+      list.push(uh);
+    }
   }
   return {
     kind,
     locate: owner,
-    setHidden(id, on) { const uh = owner.get(id); if (uh) uh.setHidden(id, on); },
-    isHidden(id) { const uh = owner.get(id); return uh ? uh.isHidden(id) : false; },
+    setHidden(id, on) {
+      const list = owner.get(id);
+      if (list) for (const uh of list) uh.setHidden(id, on);
+    },
+    isHidden(id) {
+      const list = owner.get(id);
+      return list?.length ? list.every((uh) => uh.isHidden(id)) : false;
+    },
   };
 }
 
-// 여러 청크의 병합 담(mergeStatic ids 로 소스레인지 부착) 은닉 핸들을 하나로 합친다(#148).
-//   각 병합 담 그룹 userData(setHidden/isHidden/srcIds)를 id→그룹 맵으로. focus 필지의 병합 담을
-//   접어 오버레이 담과의 동일평면 이중 렌더(플리커)를 제거하는 배선(adapter rebuildParcel/hideParcelDetail).
-export function combineWallHandles(groups) {
-  const owner = new Map();   // parcelId -> 병합 담 그룹 userData
+// 여러 청크의 병합 소스(mergeStatic ids 또는 임포스터 필지 레인지) 은닉 핸들을 하나로 합친다.
+// 각 그룹 userData(setHidden/isHidden/srcIds)를 id→소유 그룹으로 디스패치한다.
+export function combineSourceHideHandles(groups) {
+  const owner = new Map();   // parcelId -> 소스 그룹 userData
   for (const gp of groups) {
     const uh = gp && gp.userData;
     if (!uh || !uh.srcIds) continue;
@@ -144,4 +155,8 @@ export function combineWallHandles(groups) {
     setHidden(id, on) { const uh = owner.get(id); if (uh) uh.setHidden(id, on); },
     isHidden(id) { const uh = owner.get(id); return uh ? uh.isHidden(id) : false; },
   };
+}
+
+export function combineWallHandles(groups) {
+  return combineSourceHideHandles(groups);
 }

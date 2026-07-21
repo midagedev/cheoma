@@ -37,6 +37,11 @@ import { createVillageNightGlow } from './night-glow.js';
 import { createVillageSnowController } from './snow.js';
 import { createVillageAmbientFieldController } from './ambient-field.js';
 import { createVillageFaunaController } from './fauna.js';
+import {
+  parcelRepresentationState,
+  setParcelBaseHidden,
+} from './parcel-representation.js';
+import { createVillageDetailLodState } from './detail-lod.js';
 
 // v4 마을 어댑터 — 앱 실시간 파이프라인과 마을 생성기 사이의 단일 계약면.
 //   createVillage(opts) → VillageHandle
@@ -51,6 +56,7 @@ import { createVillageFaunaController } from './fauna.js';
 //   .highlightParcel(parcelId, on)      → 먹선 아웃라인 하이라이트 토글(호버 표시)
 //   .setTime(name) / .setSeason(name, opts) / .setWeather(name)  → env 상태 전파
 //   .update(dt)       매 프레임(개울 물결·야간 촛불 일렁임)
+//   .prepareWavePresentation(app)                   → 새 마을 scene-direct 앰비언스만 사전 연결
 //   .enterVillageMode(app) / .exitVillageMode(app)  → 앱 단일건물 씬 ↔ 마을 씬 스왑
 //   .dispose()        지오·텍스처 해제
 //
@@ -74,6 +80,11 @@ export function createVillageHandle(opts, seed, plan, group) {
   group.add(overrides);
   const overrideById = new Map();                 // parcelId -> THREE.Group
   const editWallMats = makeMaterials('giwa');      // 편집 담장 공유 재질(base 씬 wallMats 와 동일 팔레트)
+  let representationDirty = false;                 // base/overlay caster 소유권 변경 → 그림자 캐시 1회 갱신
+
+  function setResidentialBaseHidden(parcel, hidden) {
+    if (setParcelBaseHidden(handle, parcel, hidden)) representationDirty = true;
+  }
 
   // ── #129 오버레이 셰이더 프로그램 앵커(반복 focus-in/hop 재컴파일 방지) ────────────
   //   focus-in/hop/리롤마다 오버레이(비인스턴스 풀디테일)가 makeMaterials/buildParcel 로 새 재질을
@@ -203,7 +214,8 @@ export function createVillageHandle(opts, seed, plan, group) {
   for (const p of proxies) {
     if (p.buildingSpec && p.buildingSpec.hero) { p.buildingSpec.editable = !!heroHandle; p.buildingSpec.compound = true; }
   }
-  let heroOverride = null;       // { id, group } 표시 중 오버레이
+  const heroOverrides = new Map();   // hero parcelId -> { id, group, glow }; hop 동안 A/B 동시 소유
+  let activeHeroId = null;           // 기존 무인자 heroDetailGroup()이 돌려줄 마지막 hero
   let landmarksHidden = false;   // 폴백: merged 랜드마크 통째 은닉 여부
 
   // building 편집 파라미터 → buildHanok roofOpts(eaveOverhang·profileCurve·riseScale=물매).
@@ -240,6 +252,10 @@ export function createVillageHandle(opts, seed, plan, group) {
     const g = new THREE.Group();
     g.name = `hero-override-${parcel.id}`;
     g.userData.snowRoofKind = 'giwa';   // 종가(한옥)=기와 지붕 — 눈 흰틴트 게이트(#131)
+    g.userData.W = parcel.plotW || 20;
+    g.userData.D = parcel.plotD || 18;
+    g.userData.style = parcel.heroStyle || 'hanok';
+    g.userData.parcel = parcel;
     const opts = { seed: parcel.seed || 7, style: parcel.heroStyle || 'hanok', plotW: parcel.plotW, plotD: parcel.plotD };
     if (editOpts.roofOpts) opts.roofOpts = editOpts.roofOpts;
     if (editOpts.presetOverrides) opts.presetOverrides = editOpts.presetOverrides;
@@ -254,26 +270,45 @@ export function createVillageHandle(opts, seed, plan, group) {
   function showHeroDetail(parcelId, editOpts) {
     const parcel = heroParcels.find((p) => p.id === parcelId);
     if (!parcel) return null;
-    hideHeroDetail();
+    // 같은 hero의 편집/리롤만 교체한다. 다른 hero A는 hop 도착까지 유지하고 엔진이 A id로 해제한다.
+    hideHeroDetail(parcelId);
     const g = buildHeroCompound(parcel, editOpts || {});
     overrides.add(g);
     if (snow.isActive()) snow.inject(g);
-    heroOverride = { id: parcelId, group: g };
+    const rec = { id: parcelId, group: g };
+    heroOverrides.set(parcelId, rec);
+    activeHeroId = parcelId;
     // 생성 뒤 얹는 focus overlay의 한지 재질도 현재 시간대의 창호 발광 수명에 합류시킨다.
     const hg = nightGlow.add(g);
-    if (hg.length) heroOverride.glow = hg;
+    if (hg.length) rec.glow = hg;
     if (heroHandle && heroHandle.get(parcelId)) heroHandle.get(parcelId).visible = false;
     else { const lm = landmarksGroup(); if (lm) { lm.visible = false; landmarksHidden = true; } }
+    representationDirty = true;
     retainOverlayPrograms(g, 'hero-' + (parcel.heroStyle || 'hanok') + (snow.isActive() ? '|snow' : ''));
     return g;
   }
-  function hideHeroDetail() {
-    if (heroOverride) {
-      nightGlow.remove(heroOverride.glow);
-      disposeTree(heroOverride.group); overrides.remove(heroOverride.group); heroOverride = null;
+  function hideHeroDetail(parcelId = null) {
+    const ids = parcelId == null ? [...heroOverrides.keys()] : [parcelId];
+    let changed = false;
+    for (const id of ids) {
+      const rec = heroOverrides.get(id);
+      if (!rec) continue;
+      nightGlow.remove(rec.glow);
+      disposeTree(rec.group); overrides.remove(rec.group); heroOverrides.delete(id);
+      if (heroHandle?.get(id)) heroHandle.get(id).visible = true;
+      changed = true;
     }
-    if (heroHandle) for (const g of heroHandle.values()) g.visible = true;
-    if (landmarksHidden) { const lm = landmarksGroup(); if (lm) lm.visible = true; landmarksHidden = false; }
+    if (!heroOverrides.size && landmarksHidden) {
+      const lm = landmarksGroup();
+      if (lm) lm.visible = true;
+      landmarksHidden = false;
+      changed = true;
+    }
+    if (activeHeroId && !heroOverrides.has(activeHeroId)) {
+      const remaining = [...heroOverrides.keys()];
+      activeHeroId = remaining.length ? remaining[remaining.length - 1] : null;
+    }
+    if (changed) representationDirty = true;
   }
 
   // ── 궁궐 다일곽 컴파운드 focus·편집(#93) ─────────────────────────────────────
@@ -322,9 +357,11 @@ export function createVillageHandle(opts, seed, plan, group) {
     overrides.add(g);
     palaceOverride = { group: g, comp: g.children[0] };
     if (palaceVisNode) palaceVisNode.visible = false; palaceHidden = true;   // #140-B 부감 병합본(또는 미병합 폴백) 은닉
+    representationDirty = true;
     return g;
   }
   function hidePalaceDetail() {
+    const changed = !!palaceOverride || palaceHidden;
     // 오버레이는 원본 palaceCore 와 재질(mats)을 공유하므로 지오메트리만 dispose — 재질을 dispose 하면
     //   focus-out 후 되살린 palaceCore 가 깨진 재질로 렌더된다. (지오는 buildPalaceCompound 마다 신규.)
     if (palaceOverride) {
@@ -332,6 +369,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       overrides.remove(palaceOverride.group); palaceOverride = null;
     }
     if (palaceHidden && palaceVisNode) { palaceVisNode.visible = true; palaceHidden = false; }   // #140-B 병합본 복원
+    if (changed) representationDirty = true;
   }
   // 궁 편집 패널 명세(#93). family 'palace-compound' 로 edit-schema 가 궁 전용 스키마를 연다.
   //   editable 은 palaceCore(미병합 핸들) 유무 — 없으면 focus·프레이밍만 되고 편집은 비활성.
@@ -357,8 +395,48 @@ export function createVillageHandle(opts, seed, plan, group) {
   const ambientField = createVillageAmbientFieldController({
     plan, site, proxyById, overrideById, findSun,
   });
+  // 필드는 scene 직속 셀/연기/조명을 소유해 village root만 순회하는 wave가 그대로는 찾지 못한다.
+  // 빈 bridge를 root 데코로 등록해 wave multiplier만 전달하고, 실제 가시성·CPU sleep은 필드가 합성한다.
+  const ambientWaveOwner = new THREE.Group();
+  ambientWaveOwner.name = 'village-ambient-wave-owner';
+  ambientWaveOwner.userData.waveFade = { setWeight: (value) => ambientField.setWaveFade(value) };
+  ambientWaveOwner.userData.debugAmbient = () => ambientField.debug();
+  group.add(ambientWaveOwner);
   const snow = createVillageSnowController(group);
   const fauna = createVillageFaunaController({ group, plan, site, seed, time, season });
+  let detailLod = null;
+
+  function residentialLodState(parcelId) {
+    const parcel = plan.parcels.find((candidate) => candidate.id === parcelId && !candidate.hero);
+    if (!parcel) return null;
+    return parcelRepresentationState(handle, parcel, overrideById.has(parcelId));
+  }
+
+  // focus 생활 디테일이 집 내부 자식이 아니라 필지의 실제 월드 변환·치수·마당 데이터를 쓰게 한다.
+  // show/reroll/hop 경로가 모두 이 서술자를 공유해 닭·풀·낙엽 링이 엉뚱한 원점에 생기지 않는다.
+  function focusAmbientDescriptor(parcelId, overlayGroup = null) {
+    if (!parcelId || parcelId === 'palace') return null;
+    const parcel = plan.parcels.find((candidate) => candidate.id === parcelId);
+    if (!parcel) return null;
+    const root = overlayGroup
+      || (parcel.hero ? heroOverrides.get(parcelId)?.group : overrideById.get(parcelId));
+    if (!root) return null;
+    root.userData.W = root.userData.W || parcel.plotW || 20;
+    root.userData.D = root.userData.D || parcel.plotD || 18;
+    root.userData.style = root.userData.style
+      || (parcel.hero ? parcel.heroStyle || 'hanok' : parcel.kind === 'giwa' ? 'giwa' : 'choga');
+    root.userData.parcel = parcel;
+    return {
+      group: root,
+      parcel,
+      radius: Math.max(12, Math.min(22, Math.max(parcel.plotW || 20, parcel.plotD || 18) * 0.72)),
+      seed: ((parcel.seed ?? seed) ^ 0xf0c5) >>> 0,
+      season,
+      // populate가 이미 둔 닭은 마을 공통 거리 LOD가 계속 소유한다. 같은 필지 focus ring은
+      // 두 번째 flock을 만들지 않고, base가 없는 필지에서만 근접 닭을 생성한다.
+      chickens: !fauna.hasResidentialFlock(parcelId),
+    };
+  }
 
   const api = {
     group,
@@ -370,18 +448,41 @@ export function createVillageHandle(opts, seed, plan, group) {
     isHero: (id) => heroParcels.some((p) => p.id === id),
     heroEditable: () => !!heroHandle,     // 편집 반영 가능(populate 언머지 필요). 아니면 오버레이 폴백은 근접 소품 은닉
     showHeroDetail, hideHeroDetail,
-    heroDetailGroup: () => (heroOverride ? heroOverride.group : null),
+    heroDetailGroup: (parcelId = activeHeroId) => heroOverrides.get(parcelId)?.group || null,
 
     // 검증용(#48): 현재 편집 오버레이(정규 override 또는 특수 hero override)의 월드 바운딩 크기.
     //   편집 전후로 비교해 지오가 실제로 바뀌었는지 정량 확인(스크린샷 육안 검수와 병행).
     overlayBox(parcelId) {
       const g = parcelId === 'palace' ? (palaceOverride && palaceOverride.group)
-        : (heroOverride && heroOverride.id === parcelId) ? heroOverride.group : overrideById.get(parcelId);
+        : heroOverrides.get(parcelId)?.group || overrideById.get(parcelId);
       if (!g) return null;
       g.updateWorldMatrix(true, true);
       const b = new THREE.Box3().setFromObject(g);
       const s = b.getSize(new THREE.Vector3());
       return { x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2) };
+    },
+
+    // 검증용 LOD 소유권 스냅샷. 각 정규 필지는 어느 순간에도 far/mid/full/overlay 중
+    // 정확히 하나만 논리적으로 보여야 한다. id 생략 시 전체 요약과 실패 필지를 함께 반환한다.
+    lodState(parcelId = null) {
+      if (parcelId) return residentialLodState(parcelId);
+      const parcels = plan.parcels.filter((parcel) => !parcel.hero)
+        .map((parcel) => residentialLodState(parcel.id));
+      const counts = { fullDetail: 0, midDetail: 0, farMass: 0, impostor: 0, overlay: 0, far: 0 };
+      for (const state of parcels) {
+        if (state.fullDetail) counts.fullDetail++;
+        if (state.midDetail) counts.midDetail++;
+        if (state.farMass) counts.farMass++;
+        if (state.impostor) counts.impostor++;
+        if (state.overlay) counts.overlay++;
+        if (state.far) counts.far++;
+      }
+      return {
+        valid: parcels.every((state) => state.valid),
+        counts,
+        failures: parcels.filter((state) => !state.valid).map((state) => state.parcelId),
+        parcels,
+      };
     },
 
     // 종가 랜딩(enterVillageHero)이 나선 줌인 구도를 직접 산출할 때 dims/rotY/H/maxDim까지
@@ -442,6 +543,10 @@ export function createVillageHandle(opts, seed, plan, group) {
       const g = new THREE.Group();
       g.name = `override-${parcelId}`;
       g.userData.snowRoofKind = gk;   // 이 집 종류(giwa/choga) — 눈 흰틴트 게이트(#131, 초가 톤다운)
+      g.userData.W = parcel.plotW || 20;
+      g.userData.D = parcel.plotD || 18;
+      g.userData.style = gk;
+      g.userData.parcel = parcel;
       // 편집 오버라이드 정규화: 패널 키 roofCurve → 코어 buildBuilding 키 profileCurve.
       const bld = { ...(newParams.building || {}) };
       if (bld.roofCurve != null && bld.profileCurve == null) { bld.profileCurve = bld.roofCurve; delete bld.roofCurve; }
@@ -483,13 +588,11 @@ export function createVillageHandle(opts, seed, plan, group) {
       overrideById.set(parcelId, g);
       if (snow.isActive()) snow.inject(g);
       retainOverlayPrograms(g, gk + (snow.isActive() ? '|snow' : ''));
+      representationDirty = true;     // 새 오버레이 지오/캐스터(편집 교체 포함)
 
-      // 인스턴스 은닉(원래 종류 기준)
-      const h = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga'];
-      h?.userData.setHidden(parcelId, true);
-      // #148: 병합 담(village-walls-*)도 이 필지분만 접는다 — 오버레이가 자기 담을 새로 지으므로
-      //   접지 않으면 동일평면 이중 렌더로 회전 중 플리커. 드로우콜 불변(레인지 접기).
-      handle.walls?.setHidden(parcelId, true);
+      // 부감 표현의 소유권을 오버레이로 넘긴다. 풀디테일 인스턴스·담뿐 아니라 현재 청크의
+      // 필지별 임포스터까지 함께 접어 줌/홉/복귀 전환 중에도 단 하나의 집만 보이게 한다.
+      setResidentialBaseHidden(parcel, true);
       return g;
     },
 
@@ -504,28 +607,32 @@ export function createVillageHandle(opts, seed, plan, group) {
     showParcelDetail(parcelId) {
       if (parcelId === 'palace') {
         const g = showPalaceDetail();   // 편집 없는 기본 오버레이(원본 palaceCore 가림) — 조립·편집 앵커
-        return g ? { group: g, compound: true, assembly: g } : null;
+        return g ? { group: g, compound: true, assembly: g, ambient: null } : null;
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
       if (parcel.hero) {
         const g = showHeroDetail(parcelId);
-        return g ? { group: g, compound: true, assembly: g } : null;
+        if (!g) return null;
+        return { group: g, compound: true, assembly: g, ambient: focusAmbientDescriptor(parcelId, g) };
       }
       const g = this.rebuildParcel(parcelId, {});   // 기본(변주) 오버레이 + 인스턴스 은닉
       if (!g) return null;
-      return { group: g, compound: false, assembly: g.children[0] || g };
+      return { group: g, compound: false, assembly: g.children[0] || g, ambient: focusAmbientDescriptor(parcelId, g) };
     },
+    focusAmbientDescriptor,
     // focus-out: 오버레이 해제 + 원본 복원. 정규=인스턴스 재노출, 특수(종가)=병합본 복원.
     hideParcelDetail(parcelId) {
       if (parcelId === 'palace') { hidePalaceDetail(); return; }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
-      if (parcel && parcel.hero) { hideHeroDetail(); return; }
+      if (parcel && parcel.hero) {
+        hideHeroDetail(parcelId);
+        return;
+      }
       const g = overrideById.get(parcelId);
       if (g) { disposeTree(g); overrides.remove(g); overrideById.delete(parcelId); }
       if (parcel) {
-        const h = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga']; h?.userData.setHidden(parcelId, false);
-        handle.walls?.setHidden(parcelId, false);   // #148 병합 담 원상복원(픽셀 일치)
+        setResidentialBaseHidden(parcel, false);   // 부감 인스턴스·담·임포스터 원상복원(픽셀 일치)
       }
     },
     // 현재 표시 중 focus 오버레이(정규/특수) — 리플레이(#92 再 일반화)가 조회. 재생성 없이 현 오버레이
@@ -534,7 +641,10 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (parcelId === 'palace') return palaceOverride ? { group: palaceOverride.group, assembly: palaceOverride.group, compound: true } : null;
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
-      if (parcel.hero) return heroOverride && heroOverride.id === parcelId ? { group: heroOverride.group, assembly: heroOverride.group, compound: true } : null;
+      if (parcel.hero) {
+        const rec = heroOverrides.get(parcelId);
+        return rec ? { group: rec.group, assembly: rec.group, compound: true } : null;
+      }
       const g = overrideById.get(parcelId);
       return g ? { group: g, assembly: g.children[0] || g, compound: false } : null;
     },
@@ -595,7 +705,6 @@ export function createVillageHandle(opts, seed, plan, group) {
     get time() { return time; }, get season() { return season; }, get weather() { return weather; },
 
     update(dt) {
-      ambientField.rememberDt(dt);                 // updateLod가 same-frame dt로 앰비언스 필드를 구동
       vlights.update(dt);                          // 마을 조명 리그 시간대 크로스페이드(태스크 #50)
       group.userData.update?.(dt);                 // 개울 물결 uTime
       fauna.update(dt);                            // 개·고양이·까치·새 떼 앰비언트(마을 루트 자식)
@@ -603,22 +712,32 @@ export function createVillageHandle(opts, seed, plan, group) {
       nightGlow.update(dt);                        // 창호 발광 크로스페이드 + 촛불 일렁임(밤)
       snow.update(dt);
     },
-    // 원경 청크 LOD 스왑(매 프레임, 카메라 필요) — 임포스터↔풀디테일 거리 전환.
-    //   engine.js 가 camera 를 넘겨 호출. far 청크 없으면(R<340) no-op.
-    updateLod(camera) {
+    // 대규모 주택 청크 LOD(매 프레임, 카메라 필요) — FAR↔MID↔FULL 거리 전환.
+    //   engine.js 가 camera 를 넘겨 호출. LOD 정책이 꺼진 규모(R<340)는 no-op.
+    updateLod(camera, target = null, dt = 1 / 60) {
       const swaps = group.userData.updateChunkLod?.(camera) || 0;   // #140-E 스왑 수 반환(engine 이 그림자 1프레임 갱신)
-      fauna.updateLod(camera);                     // 새 떼·까치·논 소 원경 스케일 부스트
-      ambientField.update(camera);                 // 카메라 앵커 앰비언스 필드(#105)
-      // 흩날리는 낙엽 고도 게이트(#98 원경 정책) — 낙엽 입자는 나무·지면 근처에서만 의미. 부감(카메라
-      //   고도 높음)에선 끈다(가을 무드는 능선 틴트·마당 단풍이 담당). env.update 가 매 프레임 autumn 이면
-      //   leaves.visible=true 로 켜므로, 그 뒤 실행되는 여기서 고도 초과 시 되끈다. 먼지 모트는 유지.
-      if (this._ambientLift && camera) {
-        const high = camera.position.y > 46;   // focus/근경 <46, 부감 ≫46 — 명확 분리
-        for (const rec of this._ambientLift) {
-          if (rec.obj.name === 'seasonLeaves' && high && rec.obj.visible) rec.obj.visible = false;
-        }
-      }
-      return swaps;   // #140-E LOD 스왑 수 — engine 렌더 루프가 그림자 캐시 무효화에 사용
+      detailLod = createVillageDetailLodState(camera, target, site, detailLod);
+      const faunaChanged = fauna.updateLod(camera, detailLod);  // 새 떼 + 카메라 셀 근접 소동물
+      ambientField.update(dt, camera, detailLod);   // 카메라 앵커 앰비언스 필드(#105)
+      // 오버레이가 base house/wall/impostor caster 소유권을 바꾼 프레임도 LOD swap과 같은 그림자
+      // 캐시 무효화 신호로 합친다. focus-out 마지막 프레임의 잔상 그림자를 남기지 않는다.
+      const ownershipChanged = representationDirty;
+      representationDirty = false;
+      return swaps + Number(ownershipChanged) + Number(faunaChanged);
+    },
+
+    // focus ring·검증 도구가 같은 프레임의 생활 디테일 강도를 공유한다(복제 임계값 금지).
+    detailLodState() {
+      const state = detailLod || createVillageDetailLodState(null, null, site);
+      return { ...state, anchor: { ...state.anchor } };
+    },
+
+    // 웨이브 중 새 마을은 아직 fog·조명·구름·단일집 가시성을 소유하면 안 되지만, scene 직속
+    // 비선택 필지 앰비언스는 건물과 함께 0→1로 들어와야 한다. 이 한 레이어만 미리 붙이고
+    // PointLight 풀·전역 lookahead는 옛 필드와 겹치지 않게 승격까지 미룬다. enterVillageMode의
+    // 같은 호출은 기존 필드를 승격만 해 완료 프레임에도 총 조명 개수와 리소스 수명을 일정하게 둔다.
+    prepareWavePresentation(app = {}) {
+      if (app.scene) ambientField.enter(app.scene, { deferSceneServices: true });
     },
 
     // 앱 단일건물 씬 → 마을 씬 스왑. app: { scene, building?, ground?, env? }.
@@ -641,28 +760,14 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (app.building) app.building.visible = false;
       if (app.ground) app.ground.visible = false;
       if (app.env?.group) app.env.group.visible = false;
-      // 대기 앰비언트(먼지 모트·흩날리는 낙엽) 복원(#98). env.group 을 통째로 숨기면 지면 레이어(지형·
-      //   나무)뿐 아니라 대기 입자까지 사라져 마을에서 "먼지·낙엽이 전멸"했다. 이 둘은 원점(≈마을 중심)
-      //   상공의 대기 오버레이라 마을과 무관하게 유효 — 씬 루트로 이설해 env.group 은닉을 우회한다.
-      //   env.update 가 참조로 계속 구동하고(위치/가시성), 계절(autumn) 이면 낙엽이 partAmt 로 드러난다.
-      //   exit 시 원부모로 환원. (지면 낙엽 seasonLitter 는 마을 지형과 겹쳐 제외.)
-      this._ambientLift = [];
-      const eg = app.env?.group;
-      if (eg) {
-        for (const nm of ['motes', 'seasonLeaves']) {
-          const o = eg.getObjectByName(nm);
-          if (o && o.parent) { this._ambientLift.push({ obj: o, parent: o.parent }); app.scene.add(o); }
-        }
-      }
+      // 단일집 env의 원점 고정 motes/seasonLeaves는 env.group과 함께 숨긴다. 마을의 대기 디테일은
+      // 카메라 추종 petals(weather)·비선택 ambientField·선택 focusRing이 각각 한 번만 소유한다.
     },
     exitVillageMode(app = {}) {
       if (!app.scene) return;
       app.env?.removeFogModifier?.(villageFog); // 마을 fog 거리 오버라이드 해제(태스크 #50)
       detachClouds();                            // 구름 빌보드 정리(재진입마다 새로 붙임, #57)
       ambientField.exit();                       // 카메라 앵커 앰비언스 필드 해제(#105)
-      // 대기 앰비언트 이설 환원(#98) — 원부모(env.group)로 복귀. env.group.visible 복원 전에 되돌린다.
-      for (const rec of (this._ambientLift || [])) rec.parent.add(rec.obj);
-      this._ambientLift = [];
       app.scene.remove(group);
       app.scene.remove(vlights.rig);         // 리그 제거 → 씬 조명은 단일 씬 상태로 완전 복귀
       const pv = this._prev || {};

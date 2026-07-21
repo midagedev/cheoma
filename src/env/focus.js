@@ -16,7 +16,7 @@ const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
 //   const ring = createFocusRing(scene, { heightAt, sun?, renderer?, lowPerf? });
 //   ring.set({ group, parcel, radius = 18, seed, getWeather? });  // group=풀디테일 buildParcel 컴파운드
 //   ring.clear();                                     // focus-out — 페이드아웃 후 dispose
-//   ring.update(dt, timeName);                        // 매 프레임. timeName: dawn|day|sunset|night
+//   ring.update(dt, timeName, detailLod);             // 매 프레임. 지상/입자 LOD와 같은 연속 강도
 //
 // 원칙:
 //  - 기존 env 시스템 재사용(신규 발명 금지): animals.js·smoke.js·motes.js(모트+등롱흔들림)·grass.js.
@@ -72,9 +72,15 @@ function disposeSubtree(obj) {
 }
 
 // 단일 링 인스턴스(활성 또는 페이드아웃 중). 자기 컨테이너·서브시스템·게이트를 소유한다.
-function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed, getWeather, vol, season }) {
+function makeRing({
+  scene, heightAt, sun, renderer, group, parcel, radius, seed, getWeather, vol, season,
+  chickens,
+}) {
   const container = new THREE.Group();
   container.name = 'focusRing';
+  // Hop 중 active/retiring 링이 공존하므로 검증·조명 풀은 각 링의 필지 소유권을
+  // 전역 개수 대신 이 안정적인 id로 구분한다.
+  container.userData.parcelId = parcel?.id || group.userData?.parcel?.id || null;
   scene.add(container);
 
   // focus 오버레이의 월드 변환(위치·회전) — 이미 배치 완료 상태.
@@ -102,16 +108,22 @@ function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed,
 
   // 소동물: 격식 건물(궁·절) 마당엔 닭 부적절 → 주거형만 기본 점등(parcel.chickens 로 강제 가능).
   const residential = style === 'choga' || style === 'hanok' || style === 'giwa';
-  const wantChickens = parcel && parcel.chickens != null ? !!parcel.chickens : residential;
+  const wantChickens = chickens != null
+    ? !!chickens
+    : parcel && parcel.chickens != null ? !!parcel.chickens : residential;
+  const cowSite = parcel && parcel.cowSite ? parcel.cowSite : null;
 
-  // 1) 소동물 — 마당 닭(+옵션 소). 지면 Y 는 필지 패드 상면(groundY) 상수(평평한 마당).
-  const animals = setupAnimals(container, {
+  // 1) 소동물 — 이미 populate base flock이 있는 필지는 그 LOD-managed flock을 그대로 쓴다.
+  // focus ring이 같은 마당에 두 번째 flock을 만들지 않으면 lease/즉시 hide/교체 pop이 모두 사라지고,
+  // 원거리→근거리 발현은 공통 village detail weight 하나가 계속 소유한다.
+  const animals = (wantChickens || cowSite) ? setupAnimals(container, {
     heightAt: () => groundY,
     yard: { x: yardX, z: yardZ, r: yardR },
-    cowSite: parcel && parcel.cowSite ? parcel.cowSite : null,
+    cowSite,
     seed: (seed ^ 0x6b17) >>> 0,
     chickens: wantChickens,
-  });
+  }) : null;
+  container.userData.hasAnimals = !!animals;
 
   // 2) 굴뚝 연기·아궁이 — 오버레이 내부 몸채 조회(교체 self-heal). choga=M.mud 재질, giwa/hanok=name='chimney'.
   const getBuilding = () => group.getObjectByName('building') || group.getObjectByName('hanok') || null;
@@ -158,42 +170,57 @@ function makeRing({ scene, heightAt, sun, renderer, group, parcel, radius, seed,
   const gate = makePresenceGate({ delay: 0.9, up: 0.7, down: 0.6 });
   let firstFrame = true;
   let phase = 'in';   // 'in' 활성 | 'out' 페이드아웃(retiring)
-  let strength = 0;
+  let strength = 0, particleStrength = 0, baseStrength = 0;
   let _wt = 0;        // 날씨 시뮬 시계(__wx.wind 부재 시 getWind 폴백용)
+  let disposed = false;
 
   function setTime(name, immediate) {
-    animals.setTime(name);
+    animals?.setTime(name);
     smoke.setTime(name, { immediate: !!immediate });
     motes.setTime(name, { immediate: !!immediate });
     grass.setTime(name, { immediate: !!immediate });
   }
   function setSeason(name) { grass.setSeason(name); }
 
-  function update(dt) {
+  function update(dt, detailLod = 1) {
     let present;
     if (phase === 'out') present = false;
     else if (firstFrame) present = false;               // prime → 0(팟 방지)
     else { const b = getBuilding(); present = !!(b && b.visible); }
     firstFrame = false;
-    strength = gate.update(dt, { present });
+    baseStrength = gate.update(dt, { present });
+    const groundWeight = typeof detailLod === 'number'
+      ? detailLod : (detailLod?.groundWeight ?? 1);
+    const particleWeight = typeof detailLod === 'number'
+      ? detailLod : (detailLod?.particleWeight ?? groundWeight);
+    strength = baseStrength * Math.max(0, Math.min(1, groundWeight));
+    particleStrength = baseStrength * Math.max(0, Math.min(1, particleWeight));
 
-    animals.setFade(strength);
-    smoke.setFade(strength);
-    motes.setFade(strength);
+    animals?.setFade(strength);
+    smoke.setFade(particleStrength);
+    motes.setFade(particleStrength);
     grass.setFade(strength);
 
-    animals.update(dt);
-    smoke.update(dt);
-    motes.update(dt);
-    lantern.update(dt);
-    grass.update(dt);
+    // 0에 가까운 링은 렌더뿐 아니라 시뮬레이션도 쉰다. gate 자체는 계속 흘러 다음 근접
+    // 프레임에 자연스럽게 이어지고, 보이는 단계에서만 소동물·입자 행렬을 갱신한다.
+    if (strength > 0.002) {
+      animals?.update(dt);
+      lantern.update(dt);
+      grass.update(dt);
+    }
+    if (particleStrength > 0.002) {
+      smoke.update(dt);
+      motes.update(dt);
+    }
 
     // 지붕 적설/빗물(#131): 물리 제거됨 — 눈은 weather.js 지붕 흰틴트가, 비는 낙하 커튼이 담당(위 5 참조).
   }
 
   function beginOut() { phase = 'out'; }
-  function dead() { return phase === 'out' && strength < 0.01; }
+  function dead() { return phase === 'out' && baseStrength < 0.01; }
   function dispose() {
+    if (disposed) return;
+    disposed = true;
     smoke.setEnabled(false);    // 건물의 아궁이 불씨(그룹 밖 라이트)까지 소등 후 해제
     lantern.setEnabled(false);
     scene.remove(container);
@@ -248,12 +275,24 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
 
   // 활성 링 점등. 기존 링은 페이드아웃 대기열로. getWeather: __wx 대신 쓸 명시 날씨 게터(선택).
   //   season: 풀 색 계절(spring|summer|autumn|winter). 기본 현행 유지(마지막 setSeason 값).
-  function set({ group, parcel = null, radius = 18, seed = 4343, getWeather = null, season } = {}) {
+  function set({
+    group, parcel = null, radius = 18, seed = 4343, getWeather = null, season,
+    chickens = null,
+  } = {}) {
     if (!group) return;
     if (season) curSeason = season;
     if (active) { active.beginOut(); retiring.push(active); active = null; }
-    active = makeRing({ scene, heightAt, sun: _sun, renderer, group, parcel, radius, seed: seed >>> 0, getWeather, vol: VOL, season: curSeason });
-    active.setTime(curTime, true);   // 시간대 프로파일 즉시 정합(발현 세기는 strength 로 페이드)
+    const next = makeRing({
+      scene, heightAt, sun: _sun, renderer, group, parcel, radius,
+      seed: seed >>> 0, getWeather, vol: VOL, season: curSeason, chickens,
+    });
+    try {
+      next.setTime(curTime, true);   // 시간대 프로파일 즉시 정합(발현 세기는 strength 로 페이드)
+      active = next;
+    } catch (error) {
+      next.dispose();
+      throw error;
+    }
   }
 
   // 계절 변경(풀 색 크로스페이드). 앱 engine 이 env.setSeason 과 나란히 호출(main 배선 명세).
@@ -269,16 +308,16 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
     if (active) { active.beginOut(); retiring.push(active); active = null; }
   }
 
-  function update(dt, timeName) {
+  function update(dt, timeName, detailLod = 1) {
     if (timeName && timeName !== curTime) {
       curTime = timeName;
       if (active) active.setTime(timeName, false);
       for (const r of retiring) r.setTime(timeName, false);
     }
-    if (active) active.update(dt);
+    if (active) active.update(dt, detailLod);
     for (let i = retiring.length - 1; i >= 0; i--) {
       const r = retiring[i];
-      r.update(dt);
+      r.update(dt, detailLod);
       if (r.dead()) { r.dispose(); retiring.splice(i, 1); }
     }
     ringPool.assign();   // #141 오버레이 등롱 국소광을 고정 풀에 배정(개수 불변)
@@ -307,7 +346,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
 // updateLod(camera) 경로에서 구동하며, 비선택(인스턴스) 이웃 필지에 계층별 앰비언스를 점등한다.
 //   (선택 필지 자체는 engine focusRing 이 풀 오버레이 링으로 담당 — 필드는 excluded 로 제외해 중복 방지.)
 //
-//   const field = createAmbientField(scene, { heightAt, sun, renderer, lowPerf });
+//   const field = createAmbientField(scene, { heightAt, sun, renderer, lowPerf, deferSceneServices });
 //   field.setParcels(descriptors);         // 어댑터가 필지 서술자 배열 주입(월드좌표·치수·굴뚝·seed)
 //   field.setExcluded(fn);                 // (id)=>bool — 오버레이(선택) 필지 제외
 //   field.setTime(name, immediate); field.setSeason(name);
@@ -339,7 +378,15 @@ const LOOKAHEAD_TTL = 3.0;                  // 프리워밍 지점 유효시간(
 
 const nowSec = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 
-export function createAmbientField(scene, { heightAt = () => 0, sun = null, renderer = null, lowPerf = false } = {}) {
+export function createAmbientField(scene, {
+  heightAt = () => 0,
+  sun = null,
+  renderer = null,
+  lowPerf = false,
+  // 웨이브의 새 필드는 smoke/motes/bulb만 미리 붙인다. PointLight 10개와 전역 lookahead는
+  // 옛 필드가 해제되는 승격 프레임에 넘겨받아 light-count shader variant를 늘리지 않는다.
+  deferSceneServices = false,
+} = {}) {
   const _sun = sun || findSun(scene);
   const shared = getLanternMaterials();
   const sharedMats = new Set([shared.glow, shared.frame]);   // 셀 dispose 시 미해제(공유 재질 보호)
@@ -349,6 +396,7 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
   let excluded = () => false;
   let curTime = 'day', curSeason = 'summer';
   let enabled = true;
+  let lastOwnerWeight = 1;
 
   // 공유 굴뚝 연기 — 다중 앵커(합성 chimney 메시)를 하나의 스프라이트 풀로. 앵커 집합 변경에도 미명멸.
   const anchorGroup = new THREE.Group(); anchorGroup.name = 'ambFieldChimneys';
@@ -405,7 +453,7 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     function dispose() { for (const l of lights) scene.remove(l); }
     return { assign, clear, dispose, get size() { return POOL_N; } };
   }
-  const lightPool = makeLightPool();
+  let lightPool = null;
 
   // 카메라 히스토리(속도) + 앵커(지면점) + 룩어헤드(프리워밍).
   const _camPrev = new THREE.Vector3(); let _camHas = false; let speed = 0; let speedHot = false;
@@ -413,7 +461,11 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
   let anchorX = 0, anchorZ = 0;
   let lookahead = null;      // { x, z, t }
   const lookaheadFn = (x, z) => { if (Number.isFinite(x) && Number.isFinite(z)) lookahead = { x, z, t: nowSec() }; };
-  if (typeof window !== 'undefined') window.__ambLookahead = lookaheadFn;
+  function activateSceneServices() {
+    if (!lightPool) lightPool = makeLightPool();
+    if (typeof window !== 'undefined') window.__ambLookahead = lookaheadFn;
+  }
+  if (!deferSceneServices) activateSceneServices();
 
   // ── 셀 공용 helpers ──
   function stripLanternFrames(scope) {
@@ -440,7 +492,10 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     return { sway, bulbs, lanterns };
   }
   function applyLanternFade(bulbs, s) {
-    for (const b of bulbs) b.mesh.scale.set(b.base.x * s, b.base.y * s, b.base.z * s);
+    for (const b of bulbs) {
+      b.mesh.visible = s > 0.002;
+      b.mesh.scale.set(b.base.x * s, b.base.y * s, b.base.z * s);
+    }
   }
   // 셀 dispose: 지오·전용 재질만 해제(공유 등롱 재질 보호). motes ShaderMaterial·bulb SphereGeometry 등.
   function disposeCell(container) {
@@ -458,21 +513,30 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
 
   function makeCell(tier, container, desc, subs) {
     const gate = makePresenceGate({ delay: 0.12, up: 0.7, down: 0.6 });
-    let firstFrame = true, phase = 'in', strength = 0;
+    let firstFrame = true, phase = 'in', strength = 0, baseStrength = 0;
     return {
       tier, container, desc, _dist: 0, touch: frameNo,
       lanterns: subs.lanterns || null,   // #141 풀 배정용(bulb 월드좌표·baseI). strength 곱해 국소 조명.
       setTime(name, imm) { if (subs.motes) subs.motes.setTime(name, { immediate: !!imm }); },
-      update(dt) {
+      update(dt, detailLod = 1) {
         const present = phase === 'out' ? false : firstFrame ? false : true;   // 첫 프레임 prime→0(팟 방지)
         firstFrame = false;
-        strength = gate.update(dt, { present });
-        if (subs.motes) { subs.motes.setFade(strength); subs.motes.update(dt); }
-        if (subs.sway) subs.sway.update(dt);
+        baseStrength = gate.update(dt, { present });
+        const groundWeight = typeof detailLod === 'number'
+          ? detailLod : (detailLod?.groundWeight ?? 1);
+        const particleWeight = typeof detailLod === 'number'
+          ? detailLod : (detailLod?.particleWeight ?? groundWeight);
+        strength = baseStrength * groundWeight;
+        const particleStrength = baseStrength * particleWeight;
+        if (subs.motes) {
+          subs.motes.setFade(particleStrength);
+          if (particleStrength > 0.002) subs.motes.update(dt);
+        }
+        if (subs.sway && strength > 0.002) subs.sway.update(dt);
         applyLanternFade(subs.bulbs, strength);
       },
       beginOut() { phase = 'out'; },
-      dead() { return phase === 'out' && strength < 0.02; },
+      dead() { return phase === 'out' && baseStrength < 0.02; },
       dispose() {
         if (subs.sway) subs.sway.setEnabled(false);
         if (subs.motes) subs.motes.setEnabled(false);
@@ -535,22 +599,37 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     }
   }
 
-  function update(dt, camera) {
-    if (!enabled || !camera) { lightPool.clear(); smoke.update(dt); return; }
+  function update(dt, camera, lod = null, ownerWeight = 1) {
+    if (!enabled || !camera) { lightPool?.clear(); smoke.update(dt); return; }
     frameNo++;
-    computeAnchor(camera);
+    if (lod?.anchor && Number.isFinite(lod.anchor.x) && Number.isFinite(lod.anchor.z)) {
+      anchorX = lod.anchor.x; anchorZ = lod.anchor.z;
+    } else {
+      computeAnchor(camera);
+    }
     updateSpeed(camera, dt);
     if (lookahead && (nowSec() - lookahead.t) > LOOKAHEAD_TTL) lookahead = null;
+    lastOwnerWeight = Math.max(0, Math.min(1, Number.isFinite(ownerWeight) ? ownerWeight : 0));
+    const groundWeight = (lod ? Math.max(0, Math.min(1, lod.groundWeight || 0)) : 1)
+      * lastOwnerWeight;
+    const particleWeight = (lod ? Math.max(0, Math.min(1, lod.particleWeight || 0)) : 1)
+      * lastOwnerWeight;
+    const detailWeights = { groundWeight, particleWeight };
+    const groundActive = lod ? lod.groundActive === true : true;
+    const nearAllowed = !lod || lod.tier === 'near';
 
     // 희망 티어 산출(유효거리 = min(앵커, 룩어헤드)).
     const desired = new Map();
-    if (parcels.length) {
+    // wave가 아직 소유권을 주지 않은 새 필드는 셀 지오/모트/등롱을 미리 만들지 않는다.
+    // owner가 실제로 오르기 시작한 프레임부터 한 셀씩 스핀업해, 숨은 새 마을 준비 비용도 0에 가깝게 둔다.
+    if (groundActive && lastOwnerWeight > 0.002 && parcels.length) {
       for (const d of parcels) {
         if (excluded(d.id)) continue;
         let dist = Math.hypot(d.cx - anchorX, d.cz - anchorZ);
         if (lookahead) dist = Math.min(dist, Math.hypot(d.cx - lookahead.x, d.cz - lookahead.z));
         const cur = cells.get(d.id);
-        const tier = tierFor(cur ? cur.tier : null, dist);
+        let tier = tierFor(cur ? cur.tier : null, dist);
+        if (!nearAllowed && tier === 'near') tier = 'mid';
         if (tier) desired.set(d.id, { tier, dist });
       }
       // 캡(거리 랭크). near 초과분은 mid 강등(범위 내) 아니면 드롭. mid 초과분(원거리)은 드롭 = LRU.
@@ -578,13 +657,17 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
       }
     }
 
-    for (const c of cells.values()) c.update(dt);
-    for (let i = retiring.length - 1; i >= 0; i--) { const r = retiring[i]; r.update(dt); if (r.dead()) { r.dispose(); retiring.splice(i, 1); } }
+    for (const c of cells.values()) c.update(dt, detailWeights);
+    for (let i = retiring.length - 1; i >= 0; i--) {
+      const r = retiring[i];
+      r.update(dt, detailWeights);
+      if (r.dead()) { r.dispose(); retiring.splice(i, 1); }
+    }
 
-    lightPool.assign(camera);   // #141 셀 등롱 국소광을 고정 풀에 근접 순 배정(개수 불변)
+    lightPool?.assign(camera);   // #141 활성 필드만 고정 풀을 소유(웨이브 중 총 개수 불변)
 
     syncSmokeAnchors();
-    const sTarget = anchorGroup.children.length > 0 ? 1 : 0;
+    const sTarget = anchorGroup.children.length > 0 ? particleWeight : 0;
     smokeFade += (sTarget - smokeFade) * Math.min(1, dt * 1.4);
     smoke.setFade(smokeFade);
     smoke.update(dt);
@@ -609,14 +692,16 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
     if (typeof window !== 'undefined' && window.__ambLookahead === lookaheadFn) delete window.__ambLookahead;
     for (const c of cells.values()) c.dispose(); cells.clear();
     for (const r of retiring) r.dispose(); retiring.length = 0;
-    lightPool.dispose();
+    lightPool?.dispose();
+    lightPool = null;
     smoke.setEnabled(false); scene.remove(smoke.group); disposeSubtree(smoke.group);
     scene.remove(anchorGroup);
     chimneyGeo.dispose(); chimneyMat.dispose();
   }
 
   return {
-    setParcels, setExcluded, setTime, setSeason, setEnabled, update, dispose,
+    setParcels, setExcluded, setTime, setSeason, setEnabled,
+    activateSceneServices, update, dispose,
     // 검증 전용: 연기 서브시스템 가시성 토글(드로우콜 표에서 구조/연기 분해 실측용).
     _setSmokeVisible(v) { smoke.group.visible = !!v; },
     // 검증 전용.
@@ -628,6 +713,10 @@ export function createAmbientField(scene, { heightAt = () => 0, sun = null, rend
         retiring: retiring.length, speed: +speed.toFixed(2), speedHot,
         smokeAnchors: anchorGroup.children.length, lookahead: !!lookahead,
         anchorX: +anchorX.toFixed(1), anchorZ: +anchorZ.toFixed(1),
+        ownerWeight: lastOwnerWeight,
+        maxStrength: Math.max(0, ...[...cells.values(), ...retiring].map((cell) => cell.strength)),
+        smokeFade,
+        lightPoolSize: lightPool?.size || 0,
       };
     },
   };

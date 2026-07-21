@@ -4,9 +4,6 @@ import * as G from '../src/core/math/geom2.js';
 import { makeSite } from '../src/village/site.js';
 import { planVillage } from '../src/village/plan.js';
 import { planGuardianTrees } from '../src/village/guardian-plan.js';
-import { IMPOSTOR_VARIANT_COUNTS, impostorHouseSpec } from '../src/village/impostor-spec.js';
-import { chunkLodDistance, partitionParcels } from '../src/village/chunks.js';
-import { planParcelFocus } from '../src/generators/shared/parcel-spatial.js';
 import { terrainMeshHeightAt, terrainWarpInner } from '../src/village/terrain-surface.js';
 import {
   ROAD_SURFACE_MIN_JOIN_GAP,
@@ -64,118 +61,12 @@ function assertGuardianClearance(plan, label, expectedCount) {
   return guardians.length;
 }
 
-function assertChunkLodContract(plan, label) {
-  const site = plan.site;
-  const farDist = site.bowlR * 0.4;
-  const ringW = site.bowlR * 0.5;
-  const swapIn = site.bowlR * 0.45;
-  const safeChunkRadius = swapIn * 0.9;
-  const regular = plan.parcels.filter((parcel) => !parcel.hero);
-  const chunks = partitionParcels(regular, site.center, { farDist, ringW, maxArcLength: ringW });
-  const nearestFootprint = (chunk) => Math.min(...chunk.parcels.map((parcel) =>
-    Math.hypot(parcel.center.x - site.center.x, parcel.center.z - site.center.z)
-      - Math.hypot(parcel.plotW || 10, parcel.plotD || 10) * 0.5));
-  for (const chunk of chunks) {
-    const nearest = nearestFootprint(chunk);
-    invariant(chunk.far === (nearest > farDist),
-      `${label}: chunk ${chunk.ring}/${chunk.sector} used centroid instead of nearest footprint`);
-    if (chunk.far) {
-      const furthestFromCenter = Math.max(...chunk.parcels.map((parcel) =>
-        Math.hypot(parcel.center.x - chunk.center.x, parcel.center.z - chunk.center.z)));
-      invariant(furthestFromCenter < safeChunkRadius,
-        `${label}: chunk ${chunk.ring}/${chunk.sector} lacks swapIn margin (${furthestFromCenter.toFixed(2)} >= ${safeChunkRadius.toFixed(2)})`);
-      for (const parcel of chunk.parcels) {
-        const focus = planParcelFocus(parcel);
-        const distance = chunkLodDistance(chunk, focus.cameraX, focus.cameraZ);
-        invariant(distance < swapIn,
-          `${label}/${parcel.id}: focus camera cannot swap chunk ${chunk.ring}/${chunk.sector} (${distance.toFixed(2)} >= ${swapIn.toFixed(2)})`);
-      }
-    }
-  }
-  const full = chunks.filter((chunk) => !chunk.far)
-    .reduce((count, chunk) => count + chunk.parcels.length, 0);
-  const inner = chunks.filter((chunk) => chunk.ring === 0)
-    .reduce((count, chunk) => count + chunk.parcels.length, 0);
-  invariant(full === inner, `${label}: initial full-detail count escaped inner ring (${full} != ${inner})`);
-}
-
-// 소규모와 maxArcLength를 생략한 호출은 기존 count 기반 분할을 보존한다.
-// 호 길이를 명시한 LOD 호출만 외곽 링을 공간적으로 쪼개며, footprint가 farDist
-// 경계에 걸치면 필지 중심이 밖이어도 근경으로 분류한다.
-{
-  const anchor = { x: 0, z: 0 };
-  const parcel = (id, x, z, plotW = 10, plotD = 10) =>
-    ({ id, center: { x, z }, plotW, plotD });
-  const sparseOuter = [
-    parcel('e', 300, 0), parcel('w', -300, 0), parcel('s', 0, 300), parcel('n', 0, -300),
-  ];
-  const legacy = partitionParcels(sparseOuter, anchor);
-  invariant(legacy.length === 1 && legacy[0].ring === 2 && !legacy[0].far,
-    'chunks: farDist=Infinity changed sparse outer-ring partition');
-  const classified = partitionParcels(sparseOuter, anchor, { ringW: 140, farDist: 100 });
-  invariant(classified.length === 1 && classified[0].far,
-    'chunks: far classification unexpectedly changed the public partition');
-  const lod = partitionParcels(sparseOuter, anchor, {
-    ringW: 140, farDist: 100, maxArcLength: 140,
-  });
-  invariant(lod.length === 4 && lod.every((chunk) => chunk.far),
-    'chunks: maxArcLength did not spatialize sparse outer ring');
-  invariant(chunkLodDistance(lod.find((chunk) => chunk.parcels[0].id === 'e'), 300, 0) === 0,
-    'chunks: LOD distance ignored an owned parcel');
-  invariant(!partitionParcels([parcel('edge', 110, 0, 40, 40)], anchor, { farDist: 100 })[0].far,
-    'chunks: footprint crossing farDist was classified by centroid');
-  invariant(partitionParcels([parcel('far', 140, 0)], anchor, { farDist: 100 })[0].far,
-    'chunks: wholly distant footprint was not classified far');
-}
-
 const near = (a, b, eps = EPS) => Math.abs(a - b) <= eps;
 const pointNear = (a, b, eps = EPS) => G.dist(a, b) <= eps;
 const angleDistance = (a, b) => {
   let d = Math.abs(a - b) % TAU;
   return d > Math.PI ? TAU - d : d;
 };
-
-// 원경 LOD도 실제 variant 어휘를 보존한다: 초가=우진각 1동, 기와=mirror 가능한 ㄱ자
-// 몸통+본채/날개 2지붕. 팔레트는 실제 sRGB 토큰을 선형화한 값이라 회색 박스로 퇴색하지 않는다.
-{
-  const specs = { choga: [], giwa: [] };
-  for (const kind of ['choga', 'giwa']) {
-    for (let variant = 0; variant < IMPOSTOR_VARIANT_COUNTS[kind]; variant++) {
-      const spec = impostorHouseSpec({ kind, variant });
-      specs[kind].push(spec);
-      invariant(spec.body.polygon.length === (kind === 'giwa' ? 6 : 4),
-        `impostor ${kind}/${variant}: wrong body plan`);
-      invariant(spec.roofs.length === (kind === 'giwa' ? 2 : 1),
-        `impostor ${kind}/${variant}: wrong roof vocabulary`);
-      invariant(spec.roofs.every((roof) => roof.x1 > roof.x0 && roof.z1 > roof.z0
-        && roof.ridgeY > roof.eaveY && roof.ridgeHalf > 0),
-      `impostor ${kind}/${variant}: invalid hip roof`);
-      invariant(Object.values(spec.colors).flat().every((channel) =>
-        Number.isFinite(channel) && channel >= 0 && channel <= 1.2),
-      `impostor ${kind}/${variant}: invalid linear palette`);
-    }
-  }
-  invariant(specs.choga[2].roofs[0].x1 - specs.choga[2].roofs[0].x0
-    > specs.choga[0].roofs[0].x1 - specs.choga[0].roofs[0].x0,
-  'impostor choga: five-bay rich variant lost its wider silhouette');
-  for (const [base, flipped] of [[0, 1], [2, 3]]) {
-    const expected = specs.giwa[base].body.polygon
-      .map((point) => `${(-point.x).toFixed(6)},${point.z.toFixed(6)}`)
-      .sort();
-    const actual = specs.giwa[flipped].body.polygon
-      .map((point) => `${point.x.toFixed(6)},${point.z.toFixed(6)}`)
-      .sort();
-    invariant(JSON.stringify(actual) === JSON.stringify(expected),
-      `impostor giwa ${base}/${flipped}: L-plan mirror drift`);
-  }
-  invariant(Math.max(...specs.giwa[0].colors.roof) < 0.15
-    && Math.min(...specs.giwa[0].colors.wall) > 0.5,
-  'impostor giwa: tile/plaster palette drifted from full-detail materials');
-  const fresh = impostorHouseSpec({ kind: 'choga', variant: 2, thatchAge: 0 }).colors.roof;
-  const old = impostorHouseSpec({ kind: 'choga', variant: 0, thatchAge: 1 }).colors.roof;
-  invariant(fresh.reduce((sum, value) => sum + value, 0) > old.reduce((sum, value) => sum + value, 0),
-    'impostor choga: thatch ageing lost fresh-to-old value contrast');
-}
 
 function assertSimpleContour(spec, label) {
   const points = spec.radii.map((_, i) => pointOnCityWall(spec, i / spec.radii.length * TAU));
@@ -676,7 +567,6 @@ assertPlan({ scale: 'hanyang', seed: 1, cityWall: false }, { expectedWall: false
 
 const defaultPlan = assertPlan({ scale: 'hanyang', seed: 20260716 }, { repeat: true });
 assertGuardianClearance(defaultPlan, 'default hanyang', 1);
-assertChunkLodContract(defaultPlan, 'default hanyang');
 const defaultRoadTriangles = defaultPlan.roads.reduce(
   (sum, road, index) => sum
     + assertRoadSurfaceDraped(road, defaultPlan.site, `default hanyang/road-${index}`), 0,
@@ -688,15 +578,8 @@ invariant(cityGateStreamClearance(
   defaultPlan.features.cityWall.gates.find((gate) => gate.name === 'south'), defaultPlan.site,
 ) >= CITY_WALL_DIMENSIONS.gateStreamClearance - EPS, 'default hanyang: south gate flooded');
 assertPlan({ scale: 'hanyang', seed: 20260716, includePalace: false });
-for (const siteR of [340, 400]) {
-  for (const seed of [1, 42]) {
-    const plan = planVillage({ siteR, seed });
-    assertChunkLodContract(plan, `LOD R${siteR}/${seed}`);
-  }
-}
 for (const seed of [25, 108, 112, 142]) {
-  const plan = assertPlan({ scale: 'hanyang', seed });
-  assertChunkLodContract(plan, `LOD hanyang/${seed}`);
+  assertPlan({ scale: 'hanyang', seed });
 }
 assertPlan({ scale: 'hanyang', seed: 7, houses: 0, includePalace: false });
 

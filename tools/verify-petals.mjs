@@ -9,7 +9,7 @@
 //   ① 발현 매트릭스: {spring,summer,autumn,winter} × {근경(camDist 30), 부감(camDist 210)}
 //   ② 팔랑거림: 무풍에서 입자 x 변위 비단조(플러터) + 낙하 y 단조 감소
 //   ③ 카메라 추종: 중심 ±80m 이동 후 입자 AABB 가 카메라 주변을 감쌈
-//   ④ 눈·비 회귀: snow count(3600)·uScale(#98 근경 340→부감 1700), rain count(2600)
+//   ④ 눈·비 회귀: snow count(3600)·uScale(#116 근경 340→부감 748), rain count(2600)
 //   ⑤ 조기노출: 원점 빈 터(building 숨김·중심 원점)에서 count 0, 건물 복귀 후 상승(게이트 미고착)
 //   ⑥ pageerror 0
 
@@ -155,7 +155,7 @@ const wx = await page.evaluate((dt) => {
 }, DT);
 check('④snow count', wx.snowNear.n === 3600 && wx.snowNear.vis, `n=${wx.snowNear.n} vis=${wx.snowNear.vis}`);
 check('④snow uScale 근경', approx(wx.snowNear.us, 340, 1), `us=${wx.snowNear.us.toFixed(1)}`);
-check('④snow uScale 부감', approx(wx.snowAerial.us, 1700, 1), `us=${wx.snowAerial.us.toFixed(1)}`);
+check('④snow uScale 부감', approx(wx.snowAerial.us, 340 * 2.2, 1), `us=${wx.snowAerial.us.toFixed(1)}`);
 check('④rain count', wx.rain.n === 2600 && wx.rain.vis, `n=${wx.rain.n} vis=${wx.rain.vis}`);
 
 // ── ⑤ 조기노출 게이트(원점 빈 터 count 0, 건물 복귀 후 상승) ──

@@ -180,6 +180,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   const group = new THREE.Group();
   group.name = 'motes';
   group.add(points);
+  group.visible = false;
 
   const _sunDir = new THREE.Vector3();
   const isInk = () => !!(renderer && renderer.toneMapping === THREE.NoToneMapping);
@@ -200,7 +201,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   setTimeTarget(time);
 
   function update(dt) {
-    if (!enabled) return;
+    if (!enabled || fade <= 0.002) return;
     // ink 모드에선 비표시(반투명 글린트가 먹 뷰티 패스에 이물감).
     points.visible = !isInk();
     if (!points.visible) return;
@@ -225,9 +226,14 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
     setTimeTarget(name);
     if (opts.immediate) { curInt = tgtInt; mat.uniforms.uIntensity.value = curInt * fade; mat.uniforms.uColor.value.copy(tgtColor); }
   }
-  function setEnabled(v) { enabled = !!v; group.visible = enabled; }
+  function applyPresentation() { group.visible = enabled && fade > 0.002; }
+  function setEnabled(v) { enabled = !!v; applyPresentation(); }
   // 근접 링 활성/해제 크로스페이드(0..1). 시간대 애니와 독립적으로 최종 알파를 배율한다.
-  function setFade(v) { fade = v; mat.uniforms.uIntensity.value = curInt * fade; }
+  function setFade(v) {
+    fade = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    mat.uniforms.uIntensity.value = curInt * fade;
+    applyPresentation();
+  }
 
   return { group, setTime, setEnabled, update, setFade };
 }

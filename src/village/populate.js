@@ -5,8 +5,20 @@ import { createWaterUniforms } from '../env/water.js';
 import {
   createCloudUniforms, buildEdgeMistRing, buildRidgeMist,
 } from '../env/clouds.js';
-import { buildHouseInstances, buildChunkImpostor, mergeStatic } from './instancing.js';
-import { partitionParcels, combineHouseHandles, combineWallHandles } from './chunks.js';
+import {
+  buildHouseInstances,
+  buildHouseEnvelopeInstances,
+  buildChunkImpostor,
+  createImpostorMaterials,
+  mergeStatic,
+} from './instancing.js';
+import {
+  partitionParcels,
+  combineHouseHandles,
+  combineSourceHideHandles,
+  combineWallHandles,
+} from './chunks.js';
+import { villageChunkLodPolicy } from './lod-policy.js';
 import { buildCityWall } from './citywall.js';
 import { buildVillageFlora } from './gardens.js';
 import { buildSpringBloom } from '../layout/bloom.js';
@@ -153,7 +165,7 @@ export function* populateVillageSteps(plan, opts = {}) {
     for (const p of plan.parcels) p.baseY = computePadY(p, site);
     root.add(buildParcelPads(plan.parcels, site));   // 기단 상면 + 축대(옹벽) — 2 드로우콜
 
-    // 원경 청크 런타임 LOD 스왑(#92 자유 줌: 임포스터는 부감 전용인데 다가가도 박스 매스가 남던 문제).
+    // 대규모 주택 청크 런타임 LOD(#92 자유 줌: 부감 mass가 다가가도 남던 문제).
     //   구현은 모듈 스코프 attachChunkLodSwap(L818) — chunkGroup.userData.lodUpdate 에 부착하고 렌더 루프
     //   (engine → adapter.updateLod → root.updateChunkLod)가 매 프레임 카메라로 구동한다. (구 onBeforeRender
     //   방식은 imp 가 Group 이라 three 렌더러가 콜백을 안 불러 무동작 → #140-E 에서 제거·이관 완결.)
@@ -171,57 +183,72 @@ export function* populateVillageSteps(plan, opts = {}) {
       const chogaPool = regChoga.length ? buildKindDecomps('choga') : null;
       if (giwaPool) matSets.push(giwaPool.matset);
       if (chogaPool) matSets.push(chogaPool.matset);
-      // 그림자 캐스터 다이어트 + 원경 임포스터: 원경 청크(중심에서 farDist 초과)는 castShadow off /
-      //   저폴리 임포스터로 대체 — 부감 원경 집 디테일·그림자는 픽셀 이하라 무영향이고 지오 제출을 크게
-      //   줄인다. 대규모(#89 연속: R≥340)에서 적용 — capital 앵커(R250)=Infinity·hanyang(R500)=diet 로
-      //   양 앵커 불변. 대규모는 링을 bowlR/2로 좁혀 중앙 핵(약 140m)은 원본을 유지하고, 그 밖은
-      //   부감에서 임포스터로 시작한다. 카메라가 접근하면 attachChunkLodSwap이 원본으로 되돌린다.
-      const largeSite = site.R >= 340;
-      const farDist = largeSite ? site.bowlR * 0.4 : Infinity;
-      const ringW = largeSite ? site.bowlR * 0.5 : undefined;
-      // 한양은 호 길이도 링 폭 이하로 제한해 컬링 바운드와 필지-근접 LOD 교체 단위가
-      // 마을 반대편까지 넓어지지 않게 한다.
-      const maxArcLength = largeSite ? ringW : undefined;
-      const chunks = partitionParcels(regular, site.center, { farDist, ringW, maxArcLength });
+      // 대규모 주택 3단계 LOD: 한양의 모든 정규 청크를 FAR mass / 실제 외피 MID / FULL로 만든다.
+      //   중앙 청크를 항상 FULL로 남기면 부감에서도 수백 draw와 수백만 tri를 제출해, 외곽만 줄인
+      //   성능 이득을 대부분 잃는다. 카메라-소유 필지 3D 거리가 현재 단계를 정하므로 중앙/외곽이
+      //   같은 줌 문법을 쓰고, 접근한 청크만 자연스럽게 실제 외피와 전체 디테일로 승격한다.
+      //   정책은 대규모(#89 연속: R≥340)에서만 켜져 capital 이하 출력은 그대로 보존한다.
+      const lodPolicy = villageChunkLodPolicy(site);
+      const chunks = partitionParcels(regular, site.center, lodPolicy);
+      const impostorMaterials = lodPolicy.enabled ? createImpostorMaterials() : null;
       const chunkMeta = [];
-      const giwaGroups = [], chogaGroups = [], wallGroups = [];
+      const giwaGroups = [], chogaGroups = [], wallGroups = [], impostorGroups = [];
       for (const chunk of chunks) {
         const cg = new THREE.Group();
         cg.name = `village-chunk-${chunk.ring}-${chunk.sector}`;
-        cg.userData.chunk = { ring: chunk.ring, sector: chunk.sector, order: chunk.order, dist: chunk.dist, center: chunk.center, far: chunk.far };
-        const buildFullDetail = (into) => {
+        cg.userData.chunk = {
+          ring: chunk.ring, sector: chunk.sector, order: chunk.order,
+          dist: chunk.dist, center: chunk.center, far: chunk.far,
+          lod: lodPolicy.enabled,
+        };
+        const buildHouses = (into, tier = 'full') => {
           const cGiwa = chunk.parcels.filter((p) => p.kind === 'giwa');
           const cChoga = chunk.parcels.filter((p) => p.kind !== 'giwa');
-          if (cGiwa.length && giwaPool) { const hg = buildHouseInstances('giwa', cGiwa, giwaPool.decomps); into.add(hg); giwaGroups.push(hg); }
-          if (cChoga.length && chogaPool) { const hg = buildHouseInstances('choga', cChoga, chogaPool.decomps); into.add(hg); chogaGroups.push(hg); }
+          const build = tier === 'mid' ? buildHouseEnvelopeInstances : buildHouseInstances;
+          if (cGiwa.length && giwaPool) { const hg = build('giwa', cGiwa, giwaPool.decomps); into.add(hg); giwaGroups.push(hg); }
+          if (cChoga.length && chogaPool) { const hg = build('choga', cChoga, chogaPool.decomps); into.add(hg); chogaGroups.push(hg); }
+        };
+        const buildFullDetail = (into) => {
+          buildHouses(into, 'full');
           const walls = chunk.parcels.map((p) => buildCourtyard(p, wallMats, char01));
           // #148: ids 로 필지별 정점 레인지 기록 → focus 오버레이가 그 필지 병합 담만 접어 이중 렌더 제거.
           const wg = mergeStatic(walls, `village-walls-${chunk.ring}-${chunk.sector}`, { ids: chunk.parcels.map((p) => p.id) });
           into.add(wg); wallGroups.push(wg);
         };
-        if (chunk.far) {
-          // 원경 청크: 저폴리 임포스터 + 숨겨둔 풀디테일 — 카메라가 다가오면 스왑(런타임 LOD).
-          //   임포스터만 두면 줌인해도 박스 매스가 그대로 보인다(#92 자유 줌 이후 사용자 지적).
-          const imp = buildChunkImpostor(chunk.parcels, `impostor-${chunk.ring}-${chunk.sector}`);
+        if (lodPolicy.enabled) {
+          // 모든 한양 청크: 저폴리 mass + 실제 빌더 외피 + 풀디테일. 중거리 외피는 같은 재질·지붕선을
+          // 써 집이 갑자기 다른 모형/색으로 바뀌지 않으며, 미세 반복부재와 담은 근거리까지 미룬다.
+          const imp = buildChunkImpostor(
+            chunk.parcels, `impostor-${chunk.ring}-${chunk.sector}`, impostorMaterials,
+          );
+          impostorGroups.push(imp);
           cg.add(imp);
+          const mid = new THREE.Group();
+          mid.name = `chunk-mid-${chunk.ring}-${chunk.sector}`;
+          buildHouses(mid, 'mid');
+          mid.visible = false;
+          cg.add(mid);
           const full = new THREE.Group();
           full.name = `chunk-full-${chunk.ring}-${chunk.sector}`;
           buildFullDetail(full);
           full.visible = false;
           cg.add(full);
-          attachChunkLodSwap(cg, imp, full, chunk, site.bowlR);   // #140-E lodUpdate 를 cg 에 부착(모듈 스코프)
+          attachChunkLodSwap(cg, imp, mid, full, chunk, lodPolicy);   // #140-E lodUpdate 를 cg 에 부착(모듈 스코프)
         } else {
-          // 근경 청크: 풀디테일 변주 인스턴싱 + 병합 담.
+          // LOD 비활성 규모: 기존 풀디테일 변주 인스턴싱 + 병합 담.
           buildFullDetail(cg);
         }
         root.add(cg);
         chunkMeta.push(cg.userData.chunk);
       }
       // 결합 은닉 핸들(픽킹·편집이 id 로 필지 은닉 — 청크 가로질러 dispatch). scene 추가 안 함(청크가 담음).
-      //   far 청크 풀디테일도 giwaGroups/chogaGroups 에 포함되므로 스왑 후 은닉 dispatch 정상.
+      //   LOD 청크의 MID/FULL도 giwaGroups/chogaGroups 에 포함되므로 단계 전환 뒤 은닉 dispatch 정상.
       houseHandle.giwa = giwaGroups.length ? { userData: combineHouseHandles('giwa', giwaGroups) } : null;
       houseHandle.choga = chogaGroups.length ? { userData: combineHouseHandles('choga', chogaGroups) } : null;
       houseHandle.chunks = chunkMeta;
+      // 원경 임포스터도 필지별 은닉 핸들을 합친다. 포커스 오버레이가 청크 전환 전부터 해당
+      // 필지의 저폴리 표현을 접어, 줌/홉/복귀 어느 프레임에도 두 표현이 겹치지 않는다.
+      houseHandle.impostors = impostorGroups.length ? combineSourceHideHandles(impostorGroups) : null;
       // #148: 병합 담 필지별 은닉 핸들 — focus 오버레이가 자기 필지 병합 담을 접어 이중 렌더 제거.
       houseHandle.walls = wallGroups.length ? combineWallHandles(wallGroups) : null;
     } else {
@@ -358,10 +385,10 @@ export function* populateVillageSteps(plan, opts = {}) {
     // 창불 발광 포인트 점등 레벨 갱신(어댑터 stepNightGlow 가 vnight 를 넘겨줌, #60/#50 정합).
     updateNightLights: (dt, level) => nightLights.update(dt, level),
     update: (dt) => { waterU.uTime.value += dt; for (const a of animals.handles) a.update(dt); },
-    // 런타임 LOD 스왑 — 원경 청크 임포스터↔풀디테일(매 프레임, 카메라 필요).
-    //   engine.js 렌더 루프에서 camera 넘겨 호출. far 청크가 없으면(R<340) 빈 배열라 no-op.
+    // 런타임 LOD — 대규모 주택 청크 FAR↔MID↔FULL(매 프레임, 카메라 필요).
+    //   engine.js 렌더 루프에서 camera 넘겨 호출. 정책이 꺼진 규모(R<340)는 빈 배열이라 no-op.
     updateChunkLod: (camera) => {
-      let swaps = 0;   // #140-E 이 프레임에 임포스터↔풀디테일 스왑이 일어난 청크 수(그림자 1프레임 갱신 트리거)
+      let swaps = 0;   // #140-E 이 프레임에 FAR/MID/FULL 전환이 일어난 청크 수(그림자 1프레임 갱신 트리거)
       for (const child of root.children) {
         if (child.userData.lodUpdate?.(camera)) swaps++;
       }
@@ -377,6 +404,14 @@ function buildVillageAnimals(root, plan, site) {
   const scale = plan.opts.scale;
   const rng = makeRng((plan.seed ^ 0x0a2117) >>> 0);
   const handles = [], flockCenters = [], cowAnchors = [];
+  // 닭은 필지 focus 링과 같은 마당을 점유하므로 안정적인 소유 필지 id를 갖는다.
+  // 논의 소는 필지 오버레이 소유가 아니어서 null — 집 focus가 소까지 숨기지 않는다.
+  const register = (animal, ownerParcelId = null) => {
+    animal.ownerParcelId = ownerParcelId;
+    animal.group.userData.ownerParcelId = ownerParcelId;
+    handles.push(animal);
+    return animal;
+  };
   // 닭: 초가 필지 ~1/4, 규모별 상한(초가 있으면 최소 1 보장·결정론적 분산 선택).
   const chickenCap = { hamlet: 1, village: 2, town: 3, capital: 4 }[scale] || 2;
   const choga = (plan.parcels || []).filter((p) => !p.hero && p.kind !== 'giwa' && p.poly);
@@ -389,7 +424,11 @@ function buildVillageAnimals(root, plan, site) {
       .multiply(new THREE.Matrix4().makeRotationY(parcelRotY(p)));
     const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(pm);
     const baseY = p.baseY != null ? p.baseY : site.heightAt(p.center.x, p.center.z);
-    handles.push(setupAnimals(root, { heightAt: () => baseY, yard: { x: v.x, z: v.z, r: 1.6 }, seed: (p.seed ^ 0x6b17) >>> 0 }));
+    register(setupAnimals(root, {
+      heightAt: () => baseY,
+      yard: { x: v.x, z: v.z, r: 1.6 },
+      seed: (p.seed ^ 0x6b17) >>> 0,
+    }), p.id);
     flockCenters.push({ x: v.x, y: baseY + 0.4, z: v.z });
   }
   // 소: 논 필지 1~2(규모별) — 큰 논 우선, 분산 선택.
@@ -399,7 +438,12 @@ function buildVillageAnimals(root, plan, site) {
   for (let i = 0; i < nCow; i++) {
     const f = paddies[Math.floor(i * paddies.length / nCow)];
     const c = G.polyCentroid(f.poly);
-    handles.push(setupAnimals(root, { heightAt: () => f.y, cowSite: { x: c.x, z: c.z, yaw: rng.range(0, Math.PI * 2) }, seed: (plan.seed ^ (0x50 + i)) >>> 0, chickens: false }));
+    register(setupAnimals(root, {
+      heightAt: () => f.y,
+      cowSite: { x: c.x, z: c.z, yaw: rng.range(0, Math.PI * 2) },
+      seed: (plan.seed ^ (0x50 + i)) >>> 0,
+      chickens: false,
+    }));
     cowAnchors.push({ x: c.x, y: f.y + 1.0, z: c.z });
   }
   return { handles, flockCenters, cowAnchors };

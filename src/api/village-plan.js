@@ -15,6 +15,18 @@ export { planGuardianTrees } from '../village/guardian-plan.js';
 export { planParcelFocus } from '../generators/shared/parcel-spatial.js';
 export { IMPOSTOR_VARIANT_COUNTS, impostorHouseSpec } from '../village/impostor-spec.js';
 export {
+  CHUNK_LOD_LEVEL,
+  VILLAGE_CHUNK_LOD,
+  VILLAGE_DETAIL_LOD,
+  villageChunkLodPolicy,
+  nextChunkLodLevel,
+} from '../village/lod-policy.js';
+export {
+  VILLAGE_DETAIL_TIER,
+  createVillageDetailLodState,
+  villageDetailWeightAt,
+} from '../runtime/village/detail-lod.js';
+export {
   computeFixedRadius,
   terrainGridSize,
   terrainMeshHeightAt,

@@ -64,6 +64,18 @@ if (view === 'eye') {
 }
 const camera = new THREE.PerspectiveCamera(fov, innerWidth / innerHeight, 0.5, R * 8);
 camera.position.copy(campos); camera.lookAt(target);
+// 제품 렌더 루프와 같이 현재 카메라를 먼저 반영한다. Hanyang은 boot FAR가 기본이므로 이 호출이
+// 없으면 eye/aerial 두 행이 실제 줌 LOD가 아니라 같은 초기 표현만 재는 잘못된 성능 표가 된다.
+group.userData.updateChunkLod?.(camera);
+
+function lodCounts(root) {
+  const counts = { far: 0, mid: 0, full: 0 };
+  for (const child of root.children) {
+    const level = child.userData?.lod?.level;
+    if (level && counts[level] != null) counts[level]++;
+  }
+  return counts;
+}
 
 // 그룹 구조 분해: 이름 프리픽스별 메시/인스턴스드메시 수 + 인스턴스 수.
 function structure(root) {
@@ -105,6 +117,7 @@ window.__PERF = {
   calls: ri.render.calls, triangles: ri.render.triangles,
   geometries: ri.memory.geometries, textures: ri.memory.textures,
   frameMedian: +ft.median.toFixed(2), frameMax: +ft.max.toFixed(2),
+  lod: lodCounts(group),
   structure: st,
   warnings: plan.warnings,
 };
@@ -151,7 +164,7 @@ for (const scale of scales) {
       if (p.warnings.length) console.log('  WARN:', p.warnings.join(';'));
       console.log('  structure:', JSON.stringify(p.structure));
     }
-    console.log(`  [${view}] calls=${p.calls} tris=${(p.triangles / 1e6).toFixed(2)}M geo=${p.geometries} tex=${p.textures} frame(med/max)=${p.frameMedian}/${p.frameMax}ms`);
+    console.log(`  [${view}] calls=${p.calls} tris=${(p.triangles / 1e6).toFixed(2)}M geo=${p.geometries} tex=${p.textures} frame(med/max)=${p.frameMedian}/${p.frameMax}ms lod=${JSON.stringify(p.lod)}`);
   }
 }
 console.log('\n=== SUMMARY (지형 비율) ===');

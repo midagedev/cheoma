@@ -39,6 +39,7 @@ export function impostorHouseSpec(parcel) {
   const roofTone = toneOrNeutral(parcel.roofTone);
   const wallTone = toneOrNeutral(parcel.wallTone);
   const woodTone = toneOrNeutral(parcel.woodTone);
+  const stoneTone = toneOrNeutral(parcel.stoneTone);
 
   if (kind === 'choga') {
     const age = parcel.thatchAge ?? variantThatchAge(parcel);
@@ -51,9 +52,10 @@ export function impostorHouseSpec(parcel) {
           { x: -halfW, z: -halfD }, { x: halfW, z: -halfD },
           { x: halfW, z: halfD }, { x: -halfW, z: halfD },
         ],
-        y0: 0,
+        y0: layout.podTopY,
         y1: layout.eaveEdgeY,
       },
+      foundation: { y0: 0, y1: layout.podTopY },
       roofs: [roofRect(
         -layout.xEave, layout.xEave, -layout.zEave, layout.zEave,
         'x', layout.eaveEdgeY, layout.ridgeY, layout.ridgeHalf,
@@ -63,6 +65,7 @@ export function impostorHouseSpec(parcel) {
         ridge: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.chogaRidge), roofTone),
         wall: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.chogaWall), wallTone),
         wood: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.chogaWood), woodTone),
+        stone: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.chogaStone), stoneTone),
       },
     };
   }
@@ -79,7 +82,8 @@ export function impostorHouseSpec(parcel) {
   return {
     kind,
     mirrored,
-    body: { polygon, y0: 0, y1: layout.eaveEdgeY },
+    body: { polygon, y0: layout.podTopY, y1: layout.eaveEdgeY },
+    foundation: { y0: 0, y1: layout.podTopY },
     roofs: [
       roofRect(
         -a - eave, a + eave, -b - eave, b + eave,
@@ -95,6 +99,7 @@ export function impostorHouseSpec(parcel) {
       ridge: multiply3(srgbHexToLinear3(KOREA_COLORS.tileDark), roofTone),
       wall: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.giwaWall), wallTone),
       wood: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.giwaWood), woodTone),
+      stone: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.giwaStone), stoneTone),
     },
   };
 }

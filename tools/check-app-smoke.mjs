@@ -123,6 +123,127 @@ try {
   });
   pass(fallbackContract, 'environment fallback preserves Texture and FogExp2 identity, type, and exact light values');
 
+  // old/new village roots can legitimately share module-lifetime pad/lantern materials.
+  // Their wave phases overlap with different alpha values, so each side must fade an owned
+  // clone and then restore the exact source identity on both cancel and completion.
+  const waveMaterialContract = await page.evaluate(async ({ waveModuleUrl, threeModuleUrl, resourceModuleUrl }) => {
+    const [{ createRerollWave }, THREE, { markSharedResource }] = await Promise.all([
+      import(waveModuleUrl),
+      import(threeModuleUrl),
+      import(resourceModuleUrl),
+    ]);
+    function fixture() {
+      const shared = new THREE.MeshStandardMaterial({
+        opacity: 1, transparent: false, depthWrite: true,
+        emissive: 0x111111, emissiveIntensity: 0,
+      });
+      const shaderHook = () => {};
+      const cacheKey = () => 'wave-shared-fixture';
+      shared.onBeforeCompile = shaderHook;
+      shared.customProgramCacheKey = cacheKey;
+      const geometry = new THREE.BoxGeometry(1, 1, 1);
+      const oldRoot = new THREE.Group();
+      const newRoot = new THREE.Group();
+      const oldPads = new THREE.Group(); oldPads.name = 'village-pads';
+      const newPads = new THREE.Group(); newPads.name = 'village-pads';
+      const oldMesh = new THREE.Mesh(geometry, shared);
+      const newMesh = new THREE.Mesh(geometry, shared);
+      oldPads.add(oldMesh); newPads.add(newMesh);
+      oldRoot.add(oldPads); newRoot.add(newPads);
+      const wave = createRerollWave({ oldRoot, newRoot, duration: 1 });
+      const oldClone = oldMesh.material;
+      const newClone = newMesh.material;
+      let oldCloneDisposals = 0, newCloneDisposals = 0;
+      oldClone.addEventListener('dispose', () => { oldCloneDisposals++; });
+      newClone.addEventListener('dispose', () => { newCloneDisposals++; });
+      return {
+        shared, shaderHook, cacheKey, oldPads, newPads, oldMesh, newMesh,
+        oldClone, newClone, wave, geometry,
+        disposalCounts: () => [oldCloneDisposals, newCloneDisposals],
+      };
+    }
+
+    const cancel = fixture();
+    const isolated = cancel.oldClone !== cancel.shared
+      && cancel.newClone !== cancel.shared
+      && cancel.oldClone !== cancel.newClone
+      && cancel.oldClone.onBeforeCompile === cancel.shaderHook
+      && cancel.newClone.onBeforeCompile === cancel.shaderHook
+      && cancel.oldClone.customProgramCacheKey === cancel.cacheKey
+      && cancel.newClone.customProgramCacheKey === cancel.cacheKey;
+    cancel.shared.emissiveIntensity = 0.77; // night-glow updates the shared source during a live wave.
+    cancel.wave.seek(0.405);
+    const alpha = {
+      old: cancel.oldMesh.material.opacity,
+      new: cancel.newMesh.material.opacity,
+      source: cancel.shared.opacity,
+      oldEmission: cancel.oldMesh.material.emissiveIntensity,
+      newEmission: cancel.newMesh.material.emissiveIntensity,
+    };
+    cancel.wave.cancel();
+    cancel.wave.cancel();
+    const cancelRestored = cancel.oldMesh.material === cancel.shared
+      && cancel.newMesh.material === cancel.shared
+      && cancel.oldPads.visible && !cancel.newPads.visible
+      && cancel.shared.opacity === 1 && !cancel.shared.transparent && cancel.shared.depthWrite
+      && cancel.disposalCounts().every((count) => count === 1)
+      && cancel.wave.isDone() && cancel.wave.update(0.5) === 1;
+    cancel.geometry.dispose(); cancel.shared.dispose();
+
+    const finish = fixture();
+    finish.wave.seek(0.405);
+    finish.wave.dispose();
+    finish.wave.dispose();
+    const finishRestored = finish.oldMesh.material === finish.shared
+      && finish.newMesh.material === finish.shared
+      && !finish.oldPads.visible && finish.newPads.visible
+      && finish.shared.opacity === 1 && !finish.shared.transparent && finish.shared.depthWrite
+      && finish.disposalCounts().every((count) => count === 1)
+      && finish.wave.isDone() && finish.wave.update(0.5) === 1;
+    finish.geometry.dispose(); finish.shared.dispose();
+
+    // A module-lifetime material may occur in only one wave phase while an LOD/groupUnit
+    // outside the fader still consumes it. Its explicit shared marker must isolate that one
+    // fader too, or the external consumer inherits the phase opacity.
+    const marked = markSharedResource(new THREE.MeshStandardMaterial({ opacity: 1 }));
+    const incoming = new THREE.MeshStandardMaterial({ opacity: 1 });
+    const markedGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const markedOldRoot = new THREE.Group(), markedNewRoot = new THREE.Group();
+    const markedOldPads = new THREE.Group(), markedNewPads = new THREE.Group();
+    markedOldPads.name = markedNewPads.name = 'village-pads';
+    const markedOldMesh = new THREE.Mesh(markedGeometry, marked);
+    const markedNewMesh = new THREE.Mesh(markedGeometry, incoming);
+    const externalMesh = new THREE.Mesh(markedGeometry, marked);
+    markedOldPads.add(markedOldMesh); markedNewPads.add(markedNewMesh);
+    markedOldRoot.add(markedOldPads); markedNewRoot.add(markedNewPads);
+    const markedWave = createRerollWave({ oldRoot: markedOldRoot, newRoot: markedNewRoot, duration: 1 });
+    markedWave.seek(0.405);
+    const markedIsolation = markedOldMesh.material !== marked
+      && markedOldMesh.material.opacity < 1
+      && externalMesh.material === marked && externalMesh.material.opacity === 1;
+    markedWave.cancel();
+    const markedRestored = markedOldMesh.material === marked && marked.opacity === 1;
+    markedGeometry.dispose(); incoming.dispose(); marked.dispose();
+    return { isolated, alpha, cancelRestored, finishRestored, markedIsolation, markedRestored };
+  }, {
+    waveModuleUrl: `/@fs${join(ROOT, 'src/village/wave.js')}`,
+    threeModuleUrl: `/@fs${join(APP_ROOT, 'node_modules/three/build/three.module.js')}`,
+    resourceModuleUrl: `/@fs${join(ROOT, 'src/core/three-resources.js')}`,
+  });
+  pass(
+    waveMaterialContract.isolated
+      && Math.abs(waveMaterialContract.alpha.old - 0.625) < 1e-9
+      && Math.abs(waveMaterialContract.alpha.new - (0.005 / 0.26)) < 1e-9
+      && waveMaterialContract.alpha.source === 1
+      && waveMaterialContract.alpha.oldEmission === 0.77
+      && waveMaterialContract.alpha.newEmission === 0.77
+      && waveMaterialContract.cancelRestored
+      && waveMaterialContract.finishRestored
+      && waveMaterialContract.markedIsolation
+      && waveMaterialContract.markedRestored,
+    `wave isolates shared old/new material fades and restores ownership (${JSON.stringify(waveMaterialContract)})`,
+  );
+
   const cinematic = await page.evaluate(() => {
     const { cine } = window.__engine;
     const available = cine.available();
@@ -192,15 +313,33 @@ try {
     engine.setTime('night');
     engine.setSeason('autumn');
     engine.setWeather('clear');
+    const environment = engine.scene.getObjectByName('environment');
+    const motes = environment?.getObjectByName('dustMotes')?.material?.uniforms;
+    const sun = engine.scene.children.find((object) => object.isDirectionalLight && object.castShadow);
     const parcelId = engine.village.heroId();
     engine.village.focus(parcelId);
     const state = engine.village.getState();
-    return { selected: state.selected, spec: state.spec, overlay: engine.village.debugOverlayBox(state.selected) };
+    return {
+      selected: state.selected,
+      spec: state.spec,
+      overlay: engine.village.debugOverlayBox(state.selected),
+      // Visible-time changes remain animated: synchronously after the dial event, neither the
+      // scene-level sky nor the hidden single-house motes have snapped to the night target yet.
+      timeTransitionStart: {
+        sunIntensity: sun?.intensity,
+        moteIntensity: motes?.uIntensity?.value,
+      },
+    };
   });
   // Headless ANGLE may produce fewer than one frame per second while linking shaders, so this
   // fast smoke asserts synchronous focus setup rather than wall-clock tween completion.
   pass(focused.selected === heroId && !!focused.spec, 'focus setup targets the requested parcel');
   pass(!!focused.overlay, 'focused parcel exposes a measurable detail overlay');
+  pass(
+    Math.abs(focused.timeTransitionStart.sunIntensity - 0.9) > 1e-3
+      && Math.abs(focused.timeTransitionStart.moteIntensity - 0.5) > 1e-6,
+    `visible time changes preserve the sky and ambience crossfade contract (${JSON.stringify(focused.timeTransitionStart)})`,
+  );
 
   const typeChange = await page.evaluate(() => {
     window.__engine.setType('choga');
@@ -346,6 +485,23 @@ try {
   const texturePlateau = await page.evaluate(() => {
     const engine = window.__engine;
     engine.village.exit();
+    const environment = engine.scene.getObjectByName('environment');
+    const motes = environment?.getObjectByName('dustMotes')?.material?.uniforms;
+    const smokeSprite = environment?.getObjectByName('smoke')?.children.find((object) => object.isSprite && object.visible);
+    const sun = engine.scene.children.find((object) => object.isDirectionalLight && object.castShadow);
+    const resumedEnvironment = {
+      visible: environment?.visible === true,
+      sunIntensity: sun?.intensity,
+      sunColor: sun?.color?.getHex(),
+      fogNear: engine.scene.fog?.near,
+      fogFar: engine.scene.fog?.far,
+      fogColor: engine.scene.fog?.color?.getHex(),
+      moteIntensity: motes?.uIntensity?.value,
+      moteColor: motes?.uColor?.value?.getHex(),
+      // No assigned emitter is also settled: the first visible update detects the rebuilt house
+      // after the immediate profile snap, so a stale smoke sprite cannot be rendered meanwhile.
+      smokeColor: smokeSprite?.material?.color?.getHex() ?? null,
+    };
     engine.setType('choga');
     // setType의 조립 초반에는 아직 숨은 재질이 있어 첫 렌더가 전체 텍스처를 업로드하지 않는다.
     // 완성 상태 1회를 워밍한 뒤, 같은 완성 상태의 교체들만 steady-state로 비교한다.
@@ -357,8 +513,19 @@ try {
       engine.renderer.render(engine.scene, engine.camera);
       samples.push(engine.renderer.info.memory.textures);
     }
-    return { samples, stable: samples.every((count) => count === samples[0]) };
+    return { samples, stable: samples.every((count) => count === samples[0]), resumedEnvironment };
   });
+  const resumed = texturePlateau.resumedEnvironment;
+  pass(
+    resumed.visible
+      && Math.abs(resumed.sunIntensity - 0.9) < 1e-6
+      && resumed.sunColor === 0x9fb4d9
+      && resumed.fogNear === 60 && resumed.fogFar === 400 && resumed.fogColor === 0x1a2740
+      && Math.abs(resumed.moteIntensity - 0.5) < 1e-6
+      && resumed.moteColor === 0xcdd8f0
+      && (resumed.smokeColor == null || resumed.smokeColor === 0x969eae),
+    `single-house environment resumes directly at the hidden night profiles (${JSON.stringify(resumed)})`,
+  );
   pass(
     texturePlateau.stable && texturePlateau.samples[0] > 0,
     `repeated visible building rebuilds keep GPU textures flat (${texturePlateau.samples.join(' → ')})`,

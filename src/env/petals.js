@@ -1,5 +1,5 @@
-import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
+import { DEFAULT_DETAIL_BANDS, fadeBeyond } from '../core/lod.js';
 import { makeRng } from '../rng.js';
 
 // 계절 입자 필드(태스크 #111) — 봄 벚꽃 꽃잎 · 가을 낙엽의 "카메라 추종 볼륨".
@@ -13,7 +13,7 @@ import { makeRng } from '../rng.js';
 // 소유·구동: 이 필드는 weather.js 가 소유해 scene 루트에 붙이고(눈·비처럼 env.group 은닉을 우회 →
 //   마을에서도 보임), 매 프레임 setWeatherCenter 로 카메라 타깃에 이설한다. season 은 weather 가
 //   setSeason 으로 전달(env.setSeason → window.__wx.setSeason 브릿지). present(조기노출 게이트)·
-//   camDist(고도 게이트)도 weather 가 판정해 넘긴다.
+//   viewHeight(시선 타깃 대비 카메라 높이)도 weather 가 넘긴다.
 //
 // 눈과의 차이(팔랑거림): 눈은 거의 수직 낙하 + 미세 흔들림. 꽃잎/낙엽은 (1) 훨씬 느린 부유 낙하,
 //   (2) 개별 위상·진폭의 큰 좌우 플러터(사인 합성 → 변위 시계열 비단조), (3) 스프라이트 개별 회전
@@ -46,14 +46,28 @@ const SEASON_CFG = {
   },
 };
 
-// 고도 게이트: 꽃잎·낙엽은 근경·focus 에서만 의미(부감에선 능선 틴트·마당 단풍이 무드 담당, #98 규약).
-//   정밀 신호는 카메라 높이(camY>46 OFF, adapter seasonLeaves 게이트와 정합). weather 가 camY 를
-//   넘겨주지 못하는 경로(현행 engine 은 camDist 만 전달)에선 camDist 프록시로 대체한다.
-//   camY=46 은 부감 앙각(31°)에서 camDist≈77 에 대응 → 프록시 66→88 로 근사(focus<60 전량, 부감>88 소거).
-function altGateFrom(camDist, camY) {
-  if (camY != null && Number.isFinite(camY)) return 1 - smoothstep(40, 52, camY);
-  if (Number.isFinite(camDist)) return 1 - smoothstep(66, 88, camDist);
-  return 1; // 신호 없음(env 단독 하네스·단일건물 초기) → 근경 취급(ON)
+// 수직 디테일 게이트: 절대 world Y가 아니라 카메라와 현재 시선 타깃/지면 사이의 높이에
+// 적용한다. 산지와 평지가 동일한 줌 단계에서 40m→52m로 자연스럽게 소거된다.
+export function petalDetailWeight(viewHeight, camDist = NaN, sharedWeight = null) {
+  let weight = 1;
+  let measured = false;
+  if (Number.isFinite(viewHeight)) {
+    const { full, hidden } = DEFAULT_DETAIL_BANDS.particles;
+    weight = Math.min(weight, fadeBeyond(viewHeight, full, hidden));
+    measured = true;
+  }
+  // 낮은 앙각으로 멀리 보는 구도도 입자 시뮬레이션을 쉬게 한다. 3인자 구 API 역시
+  // 이 거리 밴드만으로 자연스럽게 동작하고, 마을은 같은 값이 sharedWeight로 한 번 더 고정된다.
+  if (Number.isFinite(camDist)) {
+    const { full, hidden } = DEFAULT_DETAIL_BANDS.particleView;
+    weight = Math.min(weight, fadeBeyond(camDist, full, hidden));
+    measured = true;
+  }
+  if (Number.isFinite(sharedWeight)) {
+    weight = Math.min(weight, Math.max(0, Math.min(1, sharedWeight)));
+    measured = true;
+  }
+  return measured ? weight : 1; // 신호 없음(env 단독 하네스 초기) → 근경 취급
 }
 
 
@@ -114,7 +128,7 @@ const GINKGO_COLS = [0xf2c53d, 0xf0b429, 0xe8b21f, 0xf5ce4a];
 const MAPLE_COLS = [0xc0392b, 0xd35400, 0xe0491f, 0xb83a1e, 0xd9622b];
 
 // createPetalField({ getWind, lowPerf }) →
-//   { points, setSeason(name), update(dt, {t, camDist, camY, present, wind}), get level, get count, get season, aabb(), dispose() }
+//   { points, setSeason(name), update(dt, {t, camDist, viewHeight, present, wind}), get level, get count, get season, aabb(), dispose() }
 export function createPetalField({ getWind, lowPerf = false } = {}) {
   // #125 대폭 감축(사용자: "색종이 축제 아니라 바람에 이따금 지는 잎"). 기존 1200 → 460. 실제 동시
   //   가시 수는 아래 돌풍 게이트(uActive)가 더 조인다 — 잔잔할 땐 한 자릿수~십수 장, 돌풍에 잠깐 늘었다
@@ -279,12 +293,15 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
 
   const posAttr = geo.attributes.position;
 
-  // update(dt, { t, camDist, camY, present, wind })
+  // update(dt, { t, camDist, viewHeight, present, wind })
   //   t: 누적 시간(회전·팔랑 위상), present: 조기노출 게이트(0..1, weather 판정),
-  //   camDist/camY: 고도 게이트 신호, wind: getWind(t) 결과(공유 바람).
-  function update(dt, { t = 0, camDist = NaN, camY = null, present = 1, wind = null } = {}) {
+  //   viewHeight: 시선 타깃/지면 대비 카메라 높이, camDist: 구 API 하위호환 근사치,
+  //   wind: getWind(t) 결과(공유 바람).
+  function update(dt, {
+    t = 0, camDist = NaN, viewHeight = null, detailWeight = null, present = 1, wind = null,
+  } = {}) {
     const active = season === 'spring' || season === 'autumn';
-    const alt = altGateFrom(camDist, camY);
+    const alt = petalDetailWeight(viewHeight, camDist, detailWeight);
     level = active ? Math.max(0, Math.min(1, present)) * alt : 0;
     mat.uniforms.uFade.value = level;
     mat.uniforms.uTime.value = t;

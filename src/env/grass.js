@@ -348,7 +348,10 @@ export function setupGrass(parent, {
   setSeason(season, { immediate: true });
 
   // 크로스페이드 배율(focus 링 규약). 0=지면에 잠김, 1=완전. GPU 셰이더 배율(CPU 비용 0).
-  function setFade(v) { uGrassFade.value = Math.max(0, Math.min(1, v)); }
+  function setFade(v) {
+    uGrassFade.value = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    mesh.visible = uGrassFade.value > 0.002;
+  }
 
   function update(dt) {
     t += dt;

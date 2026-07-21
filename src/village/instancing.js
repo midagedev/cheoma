@@ -7,6 +7,12 @@ import { impostorHouseSpec } from './impostor-spec.js';
 export { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 
 const M4 = () => new THREE.Matrix4();
+// Focus/edit presentation mutates the live render buffers (zero instance matrices and
+// degenerate merged-geometry ranges). Export needs the authored village, not that transient
+// presentation state. Symbol metadata stays outside userData, so Object3D cloning/extras JSON
+// never serializes these potentially large snapshots.
+const EXPORT_INSTANCE_MATRIX = Symbol.for('cheoma.export.pristineInstanceMatrix');
+const EXPORT_POSITION_SNAPSHOT = Symbol.for('cheoma.export.pristinePositionSnapshot');
 
 // 부위(role)별 톤 선택(#55): parcel 의 부위별 곱틴트(roofTone/wallTone/woodTone/stoneTone)에서 고른다.
 //   미지정(레거시 parcel·부위 톤 없음)이면 단일 톤(toneOf(toneIdx))로 하위호환. role 없음(개구부 등)=중립.
@@ -160,9 +166,12 @@ export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
 //   집집이 서로 다른 표정. 드로우콜 = Σ(변주별 재질 수) — 호수 무관 상수(capital 도 수십 규모).
 //   반환 핸들의 setHidden 은 변주 그룹을 가로질러 id→(메시들, 인덱스) 로 은닉/복원(편집 반영).
 //   decomps: 변주 인덱스별 decompose 결과 배열([{material,geometry,cast,recv}], 미러 포함).
-export function buildHouseInstances(kind, parcels, decomps) {
+export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
   const group = new THREE.Group();
-  group.name = `houses-${kind}`;
+  const tier = opts.tier || 'full';
+  const include = typeof opts.filterMaterial === 'function' ? opts.filterMaterial : null;
+  // 기존 FULL 이름은 scene/hash/외부 탐색 계약이므로 그대로 둔다. 새 suffix는 MID에만 붙인다.
+  group.name = tier === 'full' ? `houses-${kind}` : `houses-${kind}-${tier}`;
   const ZERO = M4().makeScale(0, 0, 0);               // 은닉용(축소 소거)
   const clampV = (v) => (decomps[v] ? v : 0);
   const byVariant = new Map();
@@ -173,15 +182,20 @@ export function buildHouseInstances(kind, parcels, decomps) {
   const locate = new Map();   // id -> { meshes:[InstancedMesh], index, mat:Matrix4 }
   const col = new THREE.Color();
   for (const [v, plist] of byVariant) {
-    const decomp = decomps[v] || decomps[0];
+    const source = decomps[v] || decomps[0];
+    const decomp = include ? source.filter((entry) => include(entry.material, entry)) : source;
     const n = plist.length;
     const mats = plist.map(houseMatrix);
     const meshes = [];
+    let exportMatrices = null;   // 같은 변주·필지 순서를 쓰는 role mesh들이 공유하는 불변 원본
     for (let g = 0; g < decomp.length; g++) {
       const { material, geometry, castShadow, receiveShadow } = decomp[g];
       const inst = new THREE.InstancedMesh(geometry, material, n);
-      inst.name = `inst-${kind}-v${v}-m${g}`;
-      inst.castShadow = castShadow; inst.receiveShadow = receiveShadow;
+      inst.name = tier === 'full'
+        ? `inst-${kind}-v${v}-m${g}`
+        : `inst-${kind}-${tier}-v${v}-m${g}`;
+      inst.castShadow = opts.castShadow === false ? false : castShadow;
+      inst.receiveShadow = receiveShadow;
       // #55: 부위별 독립 곱틴트 — 이 메시 재질의 역할(roof/wall/wood/stone)에 맞는 parcel 톤을
       //   instanceColor 로. 재질 복제 없이(각 역할=이미 별도 InstancedMesh) 드로우콜 불변. 개구부·
       //   기타(role 없음)는 중립(1,1,1) — 야간 창호광(emissive)·아궁이 불빛과 충돌 방지.
@@ -193,6 +207,11 @@ export function buildHouseInstances(kind, parcels, decomps) {
       }
       inst.instanceMatrix.needsUpdate = true;
       if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      // setHidden mutates instanceMatrix in place. Keep one immutable authored snapshot for
+      // GLB export; cloning here (before any focus can hide a parcel) also prevents the export
+      // tree from sharing a buffer that a later focus transition may change.
+      exportMatrices ||= inst.instanceMatrix.clone();
+      inst[EXPORT_INSTANCE_MATRIX] = exportMatrices;
       meshes.push(inst); group.add(inst);
     }
     plist.forEach((p, i) => locate.set(p.id, { meshes, index: i, mat: mats[i] }));
@@ -205,28 +224,50 @@ export function buildHouseInstances(kind, parcels, decomps) {
     const m = on ? ZERO : rec.mat;
     for (const inst of rec.meshes) { inst.setMatrixAt(rec.index, m); inst.instanceMatrix.needsUpdate = true; }
   }
-  group.userData = { kind, setHidden, isHidden: (id) => hidden.has(id), locate };
+  group.userData = { kind, tier, setHidden, isHidden: (id) => hidden.has(id), locate };
   return group;
 }
 
-// ── 원경 청크 임포스터(LOD, #47) ──────────────────────────────────────────────
+// 실제 house prototype에서 화면을 이루는 외피만 남긴 중거리 단계. 별도 근사 모델이 아니라
+// 같은 지오메트리·텍스처·재질을 쓰므로 FAR→MID에서 집 종류와 색이 바뀌지 않고, 공포·기와 낱장·
+// 소품처럼 작은 반복 부재만 제출하지 않는다.
+export function buildHouseEnvelopeInstances(kind, parcels, decomps) {
+  return buildHouseInstances(kind, parcels, decomps, {
+    tier: 'mid',
+    castShadow: false,
+    filterMaterial: (material) => material?.userData?.lodEnvelope === true,
+  });
+}
+
+// ── 부감 FAR 주택 mass(LOD, #47) ──────────────────────────────────────────────
 //   문제: 청크별 풀디테일 인스턴싱은 재질 수(giwa≈54·choga≈32)를 청크마다 곱해 드로우콜·삼각형이
 //   폭증한다(hanyang 실측 3400콜·20M삼각). 부감·원경에서 개별 집의 공포·창호·기와골은 픽셀 이하라
-//   무의미 — 지붕 덩어리와 벽 매스만 읽힌다. 그래서 원경 청크의 정규 주택을 한 채당 저폴리 프록시
-//   로 대체하고 청크 전체를 vertexColor 단일 메시로 병합한다. 순수 impostorHouseSpec이 실제 variant의
+//   무의미 — 지붕 덩어리와 벽 매스만 읽힌다. 그래서 부감 상태의 정규 주택을 한 채당 저폴리 프록시
+//   로 대체하고 청크 전체를 역할별 소수 vertexColor 메시로 병합한다. 순수 impostorHouseSpec이 실제 variant의
 //   초가 우진각·기와 ㄱ자 평면/날개·mirror·팔레트 선형색을 저폴리 명세로 줄인다. 따라서 청크당
-//   1 드로우콜은 유지하면서 LOD 경계에서 종류와 실루엣이 바뀌지 않는다. 그림자 비캐스트(원경).
+//   작은 상수 드로우콜을 유지하면서 LOD 경계에서 종류와 실루엣이 바뀌지 않는다. 그림자 비캐스트(원경).
+const IMPOSTOR_PARTS = ['roof-giwa', 'roof-choga', 'wall', 'wood', 'stone'];
 const _v = new THREE.Vector3();
-function pushImpostorHouse(P, N, C, parcel) {
+const newImpostorPart = () => ({ P: [], N: [], C: [] });
+
+function pushImpostorHouse(parts, parcel) {
   const spec = impostorHouseSpec(parcel);
+  const roofPart = `roof-${spec.kind}`;
   const m = houseMatrix(parcel);   // T(center,baseY)·Ry·T(0,0,back)·S — 풀디테일 집과 동일 배치
   // 로컬 정점을 houseMatrix 로 월드화해 누적. 노멀은 computeVertexNormals 로 최종 산출(여기선 0 채움).
-  const emit = (lx, ly, lz, col) => {
+  const emit = (role, lx, ly, lz, col) => {
+    const { P, N, C } = parts[role];
     _v.set(lx, ly, lz).applyMatrix4(m);
     P.push(_v.x, _v.y, _v.z); N.push(0, 0, 0); C.push(col[0], col[1], col[2]);
   };
-  const tri = (a, b, c, col) => { emit(a[0], a[1], a[2], col); emit(b[0], b[1], b[2], col); emit(c[0], c[1], c[2], col); };
-  const quad = (a, b, c, d, col) => { tri(a, b, c, col); tri(a, c, d, col); };
+  const tri = (role, a, b, c, col) => {
+    emit(role, a[0], a[1], a[2], col);
+    emit(role, b[0], b[1], b[2], col);
+    emit(role, c[0], c[1], c[2], col);
+  };
+  const quad = (role, a, b, c, d, col) => {
+    tri(role, a, b, c, col); tri(role, a, c, d, col);
+  };
 
   // 몸통은 실제 초가 사각/기와 ㄱ자 polygon을 그대로 세운다. 상단의 얇은 목재 띠가 멀리서도
   // 흙벽·회벽과 처마선을 분리하되, 같은 vertexColor mesh 안이므로 재질/드로우콜은 늘지 않는다.
@@ -235,8 +276,12 @@ function pushImpostorHouse(P, N, C, parcel) {
   for (let i = 0; i < polygon.length; i++) {
     const a = polygon[i], b = polygon[(i + 1) % polygon.length];
     const bandY = Math.max(y0, y1 - bandH);
-    quad([a.x, y0, a.z], [b.x, y0, b.z], [b.x, bandY, b.z], [a.x, bandY, a.z], spec.colors.wall);
-    quad([a.x, bandY, a.z], [b.x, bandY, b.z], [b.x, y1, b.z], [a.x, y1, a.z], spec.colors.wood);
+    quad('wall', [a.x, y0, a.z], [b.x, y0, b.z], [b.x, bandY, b.z], [a.x, bandY, a.z], spec.colors.wall);
+    quad('wood', [a.x, bandY, a.z], [b.x, bandY, b.z], [b.x, y1, b.z], [a.x, y1, a.z], spec.colors.wood);
+    quad('stone',
+      [a.x, spec.foundation.y0, a.z], [b.x, spec.foundation.y0, b.z],
+      [b.x, spec.foundation.y1, b.z], [a.x, spec.foundation.y1, a.z],
+      spec.colors.stone);
   }
 
   const roofPoint = (roof, along, y, across) => roof.axis === 'x'
@@ -248,17 +293,43 @@ function pushImpostorHouse(P, N, C, parcel) {
     const short0 = roof.axis === 'x' ? roof.z0 : roof.x0;
     const short1 = roof.axis === 'x' ? roof.z1 : roof.x1;
     const longMid = (long0 + long1) * 0.5, shortMid = (short0 + short1) * 0.5;
+    // 6삼각 평면 덩어리 대신 작은 곡면 격자를 쓴다. across의 완만한 사인 곡률과 양 끝 hip
+    // 감쇠가 실제 roof builder의 처마선·추녀선에 가까운 실루엣을 만들되, 집당 수십 tri에 그친다.
+    const ridge0 = longMid - roof.ridgeHalf;
+    const ridge1 = longMid + roof.ridgeHalf;
+    const along = [long0, (long0 + ridge0) * 0.5, ridge0, ridge1, (ridge1 + long1) * 0.5, long1];
+    const across = [short0, short0 * 0.5 + shortMid * 0.5, shortMid,
+      short1 * 0.5 + shortMid * 0.5, short1];
+    const halfShort = Math.max(1e-4, (short1 - short0) * 0.5);
+    const rise = roof.ridgeY - roof.eaveY;
+    const point = (a, s) => {
+      const side = Math.max(0, 1 - Math.abs(s - shortMid) / halfShort);
+      const sideCurve = Math.sin(side * Math.PI * 0.5) ** 0.88;
+      const end = a < ridge0
+        ? (a - long0) / Math.max(1e-4, ridge0 - long0)
+        : a > ridge1
+          ? (long1 - a) / Math.max(1e-4, long1 - ridge1)
+          : 1;
+      return roofPoint(roof, a, roof.eaveY + rise * Math.max(0, end) * sideCurve, s);
+    };
+    for (let ai = 0; ai < along.length - 1; ai++) {
+      for (let si = 0; si < across.length - 1; si++) {
+        quad(roofPart,
+          point(along[ai], across[si]), point(along[ai + 1], across[si]),
+          point(along[ai + 1], across[si + 1]), point(along[ai], across[si + 1]),
+          spec.colors.roof);
+      }
+    }
+
+    // 얇은 처마 단면을 목재 역할로 분리해 원경에서도 지붕과 벽이 한 덩어리로 붙지 않는다.
+    const eaveDrop = spec.kind === 'choga' ? 0.16 : 0.12;
     const c0 = roofPoint(roof, long0, roof.eaveY, short0);
     const c1 = roofPoint(roof, long1, roof.eaveY, short0);
     const c2 = roofPoint(roof, long1, roof.eaveY, short1);
     const c3 = roofPoint(roof, long0, roof.eaveY, short1);
-    const r0 = roofPoint(roof, longMid - roof.ridgeHalf, roof.ridgeY, shortMid);
-    const r1 = roofPoint(roof, longMid + roof.ridgeHalf, roof.ridgeY, shortMid);
-    // 우진각 4면: 긴 양 사면 2×2삼각 + 양 끝 합각 1삼각. 초가와 기와 모두 실제
-    // 원경 실루엣의 짧은 용마루와 내려오는 추녀선을 보존한다.
-    tri(c3, c2, r1, spec.colors.roof); tri(c3, r1, r0, spec.colors.roof);
-    tri(c1, c0, r0, spec.colors.roof); tri(c1, r0, r1, spec.colors.roof);
-    tri(c0, c3, r0, spec.colors.roof); tri(c2, c1, r1, spec.colors.roof);
+    for (const [a, b] of [[c0, c1], [c1, c2], [c2, c3], [c3, c0]]) {
+      quad('wood', a, b, [b[0], b[1] - eaveDrop, b[2]], [a[0], a[1] - eaveDrop, a[2]], spec.colors.wood);
+    }
 
     // 용마루 저폴리 각재. 초가는 굵은 용마름, 기와는 얇은 기와마루 비례다.
     const ridgeW = spec.kind === 'choga' ? 0.36 : 0.2;
@@ -270,30 +341,66 @@ function pushImpostorHouse(P, N, C, parcel) {
     const p = (along, y, across) => roofPoint(roof, along, y, across);
     const q0 = p(rl0, ry0, rs0), q1 = p(rl1, ry0, rs0), q2 = p(rl1, ry0, rs1), q3 = p(rl0, ry0, rs1);
     const u0 = p(rl0, ry1, rs0), u1 = p(rl1, ry1, rs0), u2 = p(rl1, ry1, rs1), u3 = p(rl0, ry1, rs1);
-    quad(q0, q1, u1, u0, spec.colors.ridge); quad(q1, q2, u2, u1, spec.colors.ridge);
-    quad(q2, q3, u3, u2, spec.colors.ridge); quad(q3, q0, u0, u3, spec.colors.ridge);
-    quad(u0, u1, u2, u3, spec.colors.ridge);
+    quad(roofPart, q0, q1, u1, u0, spec.colors.ridge); quad(roofPart, q1, q2, u2, u1, spec.colors.ridge);
+    quad(roofPart, q2, q3, u3, u2, spec.colors.ridge); quad(roofPart, q3, q0, u0, u3, spec.colors.ridge);
+    quad(roofPart, u0, u1, u2, u3, spec.colors.ridge);
   };
   for (const roof of spec.roofs) pushRoof(roof);
 }
 
-// buildChunkImpostor(parcels) → THREE.Group(단일 vertexColor 메시). 원경 청크 전용.
-export function buildChunkImpostor(parcels, name = 'chunk-impostor') {
-  const P = [], N = [], C = [];
-  for (const p of parcels) pushImpostorHouse(P, N, C, p);
+function createImpostorMaterial(part) {
+  const role = part.startsWith('roof-') ? 'roof' : part;
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: role === 'wood' ? 0.88 : 0.96,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
+  mat.name = `impostor-${part}`;
+  mat.userData.role = role;
+  return mat;
+}
+
+export function createImpostorMaterials(parts = IMPOSTOR_PARTS) {
+  const materials = {};
+  for (const part of parts) materials[part] = createImpostorMaterial(part);
+  return materials;
+}
+
+// buildChunkImpostor(parcels) → 역할별 최대 5개 vertexColor mesh. roof/wall/wood/stone 역할을
+// 보존하고 초가/기와 지붕은 분리해 서로 다른 적설 규칙을 타면서도 청크 드로우콜은 작은 상수다.
+export function buildChunkImpostor(parcels, name = 'chunk-impostor', sharedMaterials = null) {
+  const parts = Object.fromEntries(IMPOSTOR_PARTS.map((part) => [part, newImpostorPart()]));
+  const ranges = Object.fromEntries(IMPOSTOR_PARTS.map((part) => [part, new Map()]));
+  for (const p of parcels) {
+    const starts = Object.fromEntries(IMPOSTOR_PARTS.map((part) => [part, parts[part].P.length / 3]));
+    pushImpostorHouse(parts, p);
+    for (const part of IMPOSTOR_PARTS) {
+      ranges[part].set(p.id, { start: starts[part], count: parts[part].P.length / 3 - starts[part] });
+    }
+  }
   const group = new THREE.Group(); group.name = name;
-  if (!P.length) return group;
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.name = `${name}-m`;
-  mesh.castShadow = false; mesh.receiveShadow = true;
-  group.add(mesh);
+  const materials = sharedMaterials || createImpostorMaterials();
+  const meshRanges = [];
+  for (const part of IMPOSTOR_PARTS) {
+    const { P, N, C } = parts[part];
+    if (!P.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, materials[part]);
+    mesh.name = `${name}-${part}`;
+    if (part.startsWith('roof-')) mesh.userData.snowRoofKind = part.slice(5);
+    mesh.castShadow = false; mesh.receiveShadow = true;
+    group.add(mesh);
+    meshRanges.push({ mesh, ranges: ranges[part] });
+  }
   group.userData.impostor = true;
+  // 포커스 오버레이가 나타나는 동안 해당 필지의 원경 표현만 접는다. 청크 전체를 숨기지 않아
+  // 이웃 집의 LOD는 그대로 유지되며, 복귀 시 원본 Float32 정점을 바이트 그대로 되살린다.
+  if (meshRanges.length) attachSourceHideHandle(group, meshRanges);
   return group;
 }
 
@@ -333,7 +440,27 @@ export function mergeStatic(objects, name = 'merged-static', opts = {}) {
 function attachSourceHideHandle(group, meshRanges) {
   const hidden = new Set();
   const srcIds = new Set();
-  for (const mr of meshRanges) { for (const id of mr.ranges.keys()) srcIds.add(id); mr.saved = new Map(); }
+  for (const mr of meshRanges) {
+    for (const id of mr.ranges.keys()) srcIds.add(id);
+    mr.saved = new Map();
+    // Reconstruct an independent pristine position buffer lazily. Persisting a second complete
+    // copy for every wall/FAR mesh would waste memory; only hidden source ranges need saved data.
+    mr.mesh[EXPORT_POSITION_SNAPSHOT] = () => {
+      let needsSnapshot = false;
+      for (const id of hidden) {
+        if (mr.ranges.has(id) && mr.saved.has(id)) { needsSnapshot = true; break; }
+      }
+      if (!needsSnapshot) return null;
+      const current = mr.mesh.geometry.attributes.position.array;
+      const snapshot = current.slice();
+      for (const id of hidden) {
+        const range = mr.ranges.get(id);
+        const saved = mr.saved.get(id);
+        if (range && saved) snapshot.set(saved, range.start * 3);
+      }
+      return snapshot;
+    };
+  }
   function setHidden(id, on) {
     if (on ? hidden.has(id) : !hidden.has(id)) return;   // 이미 목표 상태
     for (const mr of meshRanges) {

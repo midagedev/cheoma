@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { presentationWeight } from '../core/lod.js';
 import { makeRng } from '../rng.js';
 
 // 생물 앰비언트: 마을에 생명감. 새 떼(boids)·까치·개·고양이.
@@ -212,7 +213,17 @@ function makeBoidFlock(group, rng, {
     }
     inst.instanceMatrix.needsUpdate = true;
   }
-  return { inst, update, setScaleBoost(v) { scaleBoost = v; } };
+  return {
+    inst,
+    update,
+    setScaleBoost(v) { scaleBoost = v; },
+    setFade(v) {
+      const alpha = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+      mat.transparent = alpha < 0.999;
+      mat.opacity = alpha;
+      mat.depthWrite = alpha >= 0.999;
+    },
+  };
 }
 
 export function setupCritters(parent, { heightAt = () => 0, layout = {} } = {}) {
@@ -542,7 +553,7 @@ export function setupCritters(parent, { heightAt = () => 0, layout = {} } = {}) 
 //   부감·근접 양쪽에서 보인다. 닭·소(populate buildVillageAnimals)와는 별개 레이어.
 //
 //   setupVillageCritters(parent, { heightAt, center, radius, scale, parcels, treePerches, seed }) →
-//     { update(dt), setTime, setSeason, setEnabled, setFade, group }   // setupAnimals 와 동형 계약
+//     { update(dt), updateLod(camera, detail, weightAt), setTime, setSeason, setEnabled, setFade, group }
 //
 //   parcels:     [{ x, z, baseY, W, D, rotY, kind }]  비-히어로 주거 필지(월드좌표·회전).
 //   treePerches: [{ x, y, z }]                        당산나무·마당나무 수관 지점(까치 페르치).
@@ -557,7 +568,6 @@ export function setupVillageCritters(parent, {
   heightAt = () => 0,
   center = { x: 0, z: 0 },
   radius = 40,
-  siteR = 0,          // 분지 반경(m) — 부감 카메라 고도(≈1.02·siteR)의 기준. LOD 램프 임계를 여기 비례.
   scale = 'village',
   parcels = [],
   treePerches = [],
@@ -567,7 +577,13 @@ export function setupVillageCritters(parent, {
   group.name = 'village-critters';
   parent.add(group);
 
-  const rng = makeRng(seed >>> 0);
+  // 각 레이어가 자기 난수열을 소유한다. 지상 LOD sleep 여부가 하늘 새 떼의 다음 원정 방향이나
+  // 다른 종의 행동 순서를 바꾸지 않아 같은 seed의 배경 연출이 카메라 경로와 분리된다.
+  const placementRng = makeRng((seed ^ 0x504c4143) >>> 0);
+  const flockRng = makeRng((seed ^ 0x464c4f43) >>> 0);
+  const dogRng = makeRng((seed ^ 0x444f4753) >>> 0);
+  const catRng = makeRng((seed ^ 0x43415453) >>> 0);
+  const magpieRng = makeRng((seed ^ 0x4d414750) >>> 0);
   const solidMat = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.9, metalness: 0, flatShading: true,
   });
@@ -575,16 +591,63 @@ export function setupVillageCritters(parent, {
   let flockActive = true;   // 밤엔 false → 새 떼 숨김·까치/고양이 이동 자제
   let live = 1;             // 밤엔 낮은 활동성(이동 느림·휴식 김)
   let t = 0;
-  // 원경(부감) 가시성 배율 — updateLod(camera)가 카메라 고도로 램프(근경=1). 부감에서 서브픽셀 소실 방지.
-  //   새 떼·까치만 부스트(개·고양이는 원경 생략 정책). 소는 어댑터가 논 위 cow 를 별도 스케일.
-  //   풀프레임 부감에서 자연스럽게 눈에 들어오는 최소선(만화 크기 금지). 가독성의 주 레버는 크기가 아니라
-  //   고도 상향(아래 alt) — 미스트/능선 배경에 떠 저대비 탈출. 근경(<46m)=1x.
-  const BIRD_BOOST = 4.2, MAG_BOOST = 2.6;
-  let magAerial = 1;
+  let enabled = true;
+  let fadeWeight = 1;
+  let waveWeight = 1;
+  const LOD_EPSILON = 0.002;
+  // 새 떼는 부감에서도 마을 실루엣의 일부로 유지한다. 지상 개체인 까치는
+  // 개·고양이·닭·소와 같은 시선-셀 LOD를 따르며 크기 부스트하지 않는다.
+  const BIRD_BOOST = 4.2;
+  const lod = {
+    birdScale: 1,
+    waveWeight: 1,
+    ground: { dogs: 1, cats: 1, magpies: 1 },
+    active: { dogs: true, cats: true, magpies: true },
+    updates: { flock: 0, dogs: 0, cats: 0, magpies: 0 },
+    skipped: { groundFrames: 0 },
+  };
 
   const _q = new THREE.Quaternion(), _e = new THREE.Euler();
   const _p = new THREE.Vector3(), _sc = new THREE.Vector3();
   const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
+  const presentationFade = () => presentationWeight(fadeWeight, waveWeight);
+
+  const EMPTY_GROUND_RIG = Object.freeze({
+    update() { return 0; }, setDetail() { return 0; }, applyVisibility() {},
+    consumeVisibilityChange() { return false; }, count: 0,
+  });
+  function makeGroundDetailController(inst, states) {
+    let maxWeight = 1;
+    let visibilityChanged = false;
+    function applyVisibility() {
+      const next = enabled && presentationFade() > LOD_EPSILON && maxWeight > LOD_EPSILON;
+      if (inst.visible !== next) visibilityChanged = true;
+      inst.visible = next;
+    }
+    function setDetail(weightAt, fallback = 1) {
+      maxWeight = 0;
+      for (const state of states) {
+        const value = weightAt ? weightAt(state) : fallback;
+        state.detail = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+        maxWeight = Math.max(maxWeight, state.detail);
+      }
+      applyVisibility();
+      return maxWeight;
+    }
+    function consumeVisibilityChange() {
+      const changed = visibilityChanged;
+      visibilityChanged = false;
+      return changed;
+    }
+    return { setDetail, applyVisibility, consumeVisibilityChange };
+  }
+  function collapseHiddenInstance(inst, state, index) {
+    if (state.detail > LOD_EPSILON || state.renderedDetail <= LOD_EPSILON) return false;
+    _m.makeScale(0, 0, 0);
+    inst.setMatrixAt(index, _m);
+    state.renderedDetail = 0;
+    return true;
+  }
 
   // 규모별 개체 상한(과밀·산만 방지). 전부 인스턴싱이라 드로우콜은 개체수와 무관.
   const CAP = ({
@@ -596,7 +659,8 @@ export function setupVillageCritters(parent, {
   })[scale] || { dog: 2, cat: 2, magpie: 3 };
 
   // 필지를 자체 rng 로 결정론적 셔플 → 개·고양이·까치 홈으로 분배(겹쳐도 무방, 오프셋이 다름).
-  const shuffled = parcels.map((p) => ({ p, k: rng() })).sort((a, b) => a.k - b.k).map((o) => o.p);
+  const shuffled = parcels.map((p) => ({ p, k: placementRng() }))
+    .sort((a, b) => a.k - b.k).map((o) => o.p);
   const take = (n) => shuffled.slice(0, Math.max(0, Math.min(n, shuffled.length)));
   // 필지 로컬(fx=우, fz=앞/+z) → 월드. parcelMatrix(T·Ry) 규약과 동일(populate 소동물 배치와 일치).
   const toWorld = (p, fx, fz) => {
@@ -609,7 +673,7 @@ export function setupVillageCritters(parent, {
   //   고도를 넉넉히(부감 시선각에서 마을 지붕·숲 위 미스트/능선 배경으로 떠 대비가 살게).
   // ==================================================================
   const alt = Math.min(78, Math.max(30, 28 + radius * 0.34));
-  const flock = makeBoidFlock(group, rng, {
+  const flock = makeBoidFlock(group, flockRng, {
     cx: center.x, cz: center.z, alt, ax: Math.max(6, radius * 0.34), az: Math.max(5, radius * 0.28),
     bandLo: alt - 7, bandHi: alt + 7, awayR: radius * 1.7 + 70, exCx: center.x, exCz: center.z,
     sizeLo: 0.6, sizeHi: 1.05,
@@ -624,28 +688,38 @@ export function setupVillageCritters(parent, {
       return { x: w.x, z: w.z, baseY: p.baseY };
     });
     const count = homes.length;
-    if (!count) return { update() {}, count: 0 };
+    if (!count) return EMPTY_GROUND_RIG;
     const inst = new THREE.InstancedMesh(buildDog(), solidMat, count);
     inst.name = 'v-dogs'; inst.castShadow = true; inst.frustumCulled = false;
     group.add(inst);
     const RAD = 6.5;   // 홈 주변 배회 반경
     const S = homes.map((h) => ({
       hx: h.x, hz: h.z, baseY: h.baseY, px: h.x, pz: h.z, wpx: h.x, wpz: h.z,
-      heading: rng.range(0, TAU), mode: 'walk', rest: 0, sit: 0, gaitPh: rng.range(0, TAU),
+      x: h.x, z: h.z,
+      heading: dogRng.range(0, TAU), mode: 'walk', rest: 0, sit: 0, gaitPh: dogRng.range(0, TAU),
+      detail: 1, renderedDetail: 1,
     }));
-    const pickWp = (s) => { const a = rng.range(0, TAU), r = rng.range(2, RAD); s.wpx = s.hx + Math.cos(a) * r; s.wpz = s.hz + Math.sin(a) * r; };
+    const detail = makeGroundDetailController(inst, S);
+    const pickWp = (s) => { const a = dogRng.range(0, TAU), r = dogRng.range(2, RAD); s.wpx = s.hx + Math.cos(a) * r; s.wpz = s.hz + Math.sin(a) * r; };
     for (const s of S) pickWp(s);
     function update(dt) {
+      if (!inst.visible) return 0;
+      let active = 0, dirty = false;
       for (let i = 0; i < count; i++) {
         const s = S[i];
+        if (s.detail <= LOD_EPSILON) {
+          dirty = collapseHiddenInstance(inst, s, i) || dirty;
+          continue;
+        }
+        active++;
         if (s.mode === 'walk') {
           const dx = s.wpx - s.px, dz = s.wpz - s.pz, d = Math.hypot(dx, dz);
-          if (d < 0.4) { if (rng() < 0.5) { s.mode = 'rest'; s.rest = rng.range(4, 12) / live; } else pickWp(s); }
+          if (d < 0.4) { if (dogRng() < 0.5) { s.mode = 'rest'; s.rest = dogRng.range(4, 12) / live; } else pickWp(s); }
           else {
             const want = Math.atan2(dz, dx);
             let da = ((want - s.heading + Math.PI) % TAU + TAU) % TAU - Math.PI;
             s.heading += Math.max(-1.6 * dt, Math.min(1.6 * dt, da));
-            const sp = (0.8 + 0.6 * rng()) * live;
+            const sp = (0.8 + 0.6 * dogRng()) * live;
             s.px += Math.cos(s.heading) * sp * dt; s.pz += Math.sin(s.heading) * sp * dt;
             s.gaitPh += dt * 9 * live;
           }
@@ -653,14 +727,19 @@ export function setupVillageCritters(parent, {
         s.sit += ((s.mode === 'rest' ? 1 : 0) - s.sit) * Math.min(1, dt * 3);
         const bounce = s.mode === 'walk' ? Math.abs(Math.sin(s.gaitPh)) * 0.05 : 0;
         const rz = (s.mode === 'walk' ? Math.sin(s.gaitPh) * 0.03 : 0) + s.sit * 0.16;
+        s.x = s.px; s.z = s.pz;
         _m.makeTranslation(s.px, s.baseY - s.sit * 0.12 + bounce, s.pz);
         _m.multiply(_m2.makeRotationY(-s.heading));
         if (rz) _m.multiply(_m2.makeRotationZ(rz));
+        _m.scale(_sc.setScalar(s.detail));
         inst.setMatrixAt(i, _m);
+        s.renderedDetail = s.detail;
+        dirty = true;
       }
-      inst.instanceMatrix.needsUpdate = true;
+      if (dirty) inst.instanceMatrix.needsUpdate = true;
+      return active;
     }
-    return { update, count };
+    return { update, ...detail, count };
   })();
 
   // ==================================================================
@@ -673,42 +752,59 @@ export function setupVillageCritters(parent, {
       return { x: w.x, z: w.z, baseY: p.baseY, yaw: -p.rotY - Math.PI / 2 };
     });
     const count = homes.length;
-    if (!count) { catGeo.dispose(); return { update() {}, count: 0 }; }
+    if (!count) {
+      catGeo.dispose();
+      return EMPTY_GROUND_RIG;
+    }
     const inst = new THREE.InstancedMesh(catGeo, solidMat, count);
     inst.name = 'v-cats'; inst.castShadow = true; inst.frustumCulled = false;
     group.add(inst);
     const S = homes.map((h) => {
-      const a = rng.range(0, TAU), r = rng.range(1.2, 3);
+      const a = catRng.range(0, TAU), r = catRng.range(1.2, 3);
       return {
-        baseY: h.baseY, yaw: h.yaw, ph: rng.range(0, TAU),
+        baseY: h.baseY, yaw: h.yaw, ph: catRng.range(0, TAU), clock: 0,
         ax: h.x, az: h.z, bx: h.x + Math.cos(a) * r, bz: h.z + Math.sin(a) * r,   // 두 페르치 사이 왕래
-        from: 'a', mode: 'sit', u: 0, dur: 1, tNext: t + poisson(rng, 26, 14, 44),
+        from: 'a', mode: 'sit', u: 0, dur: 1, tNext: poisson(catRng, 26, 14, 44),
+        px: h.x, pz: h.z, x: h.x, z: h.z, detail: 1, renderedDetail: 1,
       };
     });
+    const detail = makeGroundDetailController(inst, S);
     function update(dt) {
+      if (!inst.visible) return 0;
+      let active = 0, dirty = false;
       for (let i = 0; i < count; i++) {
         const s = S[i];
+        if (s.detail <= LOD_EPSILON) {
+          dirty = collapseHiddenInstance(inst, s, i) || dirty;
+          continue;
+        }
+        active++;
+        s.clock += dt;
         let px, pz, hop = 0;
         const frx = s.from === 'a' ? s.ax : s.bx, frz = s.from === 'a' ? s.az : s.bz;
         const tox = s.from === 'a' ? s.bx : s.ax, toz = s.from === 'a' ? s.bz : s.az;
         if (s.mode === 'sit') {
           px = frx; pz = frz;
-          if (t >= s.tNext && flockActive) { s.mode = 'move'; s.u = 0; s.dur = 0.8 + Math.hypot(tox - frx, toz - frz) * 0.09; }
+          if (s.clock >= s.tNext && flockActive) { s.mode = 'move'; s.u = 0; s.dur = 0.8 + Math.hypot(tox - frx, toz - frz) * 0.09; }
         } else {
           s.u += dt / s.dur; const u = Math.min(1, s.u);
           px = frx + (tox - frx) * u; pz = frz + (toz - frz) * u;
           hop = Math.sin(Math.PI * u) * 0.3;   // 낮고 사뿐한 호
-          if (u >= 1) { s.mode = 'sit'; s.from = s.from === 'a' ? 'b' : 'a'; s.tNext = t + poisson(rng, 26, 14, 44) / live; }
+          if (u >= 1) { s.mode = 'sit'; s.from = s.from === 'a' ? 'b' : 'a'; s.tNext = s.clock + poisson(catRng, 26, 14, 44) / live; }
         }
-        const yaw = s.yaw + 0.05 * Math.sin(t * 0.9 + s.ph);   // 미세 자세
+        s.px = px; s.pz = pz; s.x = px; s.z = pz;
+        const yaw = s.yaw + 0.05 * Math.sin(s.clock * 0.9 + s.ph);   // 미세 자세
         _p.set(px, s.baseY + hop, pz);
-        _e.set(0, yaw, 0); _q.setFromEuler(_e); _sc.set(1, 1, 1);
+        _e.set(0, yaw, 0); _q.setFromEuler(_e); _sc.setScalar(s.detail);
         _m.compose(_p, _q, _sc);
         inst.setMatrixAt(i, _m);
+        s.renderedDetail = s.detail;
+        dirty = true;
       }
-      inst.instanceMatrix.needsUpdate = true;
+      if (dirty) inst.instanceMatrix.needsUpdate = true;
+      return active;
     }
-    return { update, count };
+    return { update, ...detail, count };
   })();
 
   // ==================================================================
@@ -720,7 +816,7 @@ export function setupVillageCritters(parent, {
     for (const tp of treePerches) perches.push({ x: tp.x, y: tp.y, z: tp.z });
     for (const p of shuffled) perches.push({ x: p.x, y: p.baseY + (p.kind === 'giwa' ? 5.2 : 4.0), z: p.z });
     const count = Math.min(CAP.magpie, perches.length);
-    if (!count) return { update() {}, count: 0 };
+    if (!count) return EMPTY_GROUND_RIG;
     const magGeo = mergeGeometries([buildMagpieBody(), place(buildMagpieTail(), -0.14, 0.14, 0, { rz: 0.5 })], false);
     const inst = new THREE.InstancedMesh(magGeo, solidMat, count);
     inst.name = 'v-magpies'; inst.castShadow = true; inst.frustumCulled = false;
@@ -728,24 +824,37 @@ export function setupVillageCritters(parent, {
     const SCALE = 1.8;         // 원경에서도 읽히게(까치 ~0.45m)
     const MAXHOP = 26;         // 마을을 가로지르는 장거리 비행 방지(근처 페르치만)
     const S = [];
-    for (let i = 0; i < count; i++) S.push({ cur: i, mode: 'perch', yaw: rng.range(0, TAU), ph: rng.range(0, TAU), tNext: t + poisson(rng, 12, 5, 22), fly: null });
+    for (let i = 0; i < count; i++) S.push({
+      cur: i, mode: 'perch', yaw: magpieRng.range(0, TAU), ph: magpieRng.range(0, TAU), clock: 0,
+      tNext: poisson(magpieRng, 12, 5, 22), fly: null,
+      x: perches[i].x, z: perches[i].z, detail: 1, renderedDetail: 1,
+    });
+    const detail = makeGroundDetailController(inst, S);
     function nearPerch(ci) {
       const a = perches[ci];
       const cand = [];
       for (let i = 0; i < perches.length; i++) { if (i === ci) continue; const b = perches[i]; if (Math.hypot(b.x - a.x, b.z - a.z) < MAXHOP) cand.push(i); }
-      return cand.length ? cand[rng.int(0, cand.length - 1)] : -1;
+      return cand.length ? cand[magpieRng.int(0, cand.length - 1)] : -1;
     }
     function update(dt) {
+      if (!inst.visible) return 0;
+      let active = 0, dirty = false;
       for (let i = 0; i < count; i++) {
         const s = S[i];
+        if (s.detail <= LOD_EPSILON) {
+          dirty = collapseHiddenInstance(inst, s, i) || dirty;
+          continue;
+        }
+        active++;
+        s.clock += dt;
         if (s.mode === 'perch') {
           const p = perches[s.cur];
-          const yaw = s.yaw + 0.05 * Math.sin(t * 1.3 + s.ph);
-          const bob = 0.02 * Math.sin(t * 2.2 + s.ph);
+          const yaw = s.yaw + 0.05 * Math.sin(s.clock * 1.3 + s.ph);
+          const bob = 0.02 * Math.sin(s.clock * 2.2 + s.ph);
           _p.set(p.x, p.y + bob, p.z);
-          if (t >= s.tNext && flockActive) {
+          if (s.clock >= s.tNext && flockActive) {
             const np = nearPerch(s.cur);
-            if (np < 0) { s.tNext = t + poisson(rng, 12, 5, 22); }
+            if (np < 0) { s.tNext = s.clock + poisson(magpieRng, 12, 5, 22); }
             else {
               const a = perches[s.cur], b = perches[np];
               s.fly = { ax: a.x, ay: a.y, az: a.z, bx: b.x, by: b.y, bz: b.z, u: 0, dur: 0.9 + Math.hypot(b.x - a.x, b.z - a.z) * 0.05, dir: Math.atan2(b.z - a.z, b.x - a.x) };
@@ -757,60 +866,105 @@ export function setupVillageCritters(parent, {
           const f = s.fly; f.u += dt / f.dur; const u = Math.min(1, f.u);
           const px = f.ax + (f.bx - f.ax) * u, pz = f.az + (f.bz - f.az) * u;
           let py = f.ay + (f.by - f.ay) * u + Math.sin(Math.PI * u) * (1.2 + Math.hypot(f.bx - f.ax, f.bz - f.az) * 0.06);
-          py += 0.05 * Math.sin(t * 26);   // 날갯짓 진동
+          py += 0.05 * Math.sin(s.clock * 26);   // 날갯짓 진동
           _p.set(px, py, pz);
           _e.set(0, -f.dir, 0);
-          if (u >= 1) { s.mode = 'perch'; s.yaw = -f.dir; s.tNext = t + poisson(rng, 12, 5, 22) / live; }
+          if (u >= 1) { s.mode = 'perch'; s.yaw = -f.dir; s.tNext = s.clock + poisson(magpieRng, 12, 5, 22) / live; }
         }
-        const sc = SCALE * magAerial;   // 원경 부스트(부감에서 지붕·나무 위 까치가 서브픽셀로 사라지지 않게)
+        s.x = _p.x; s.z = _p.z;
+        const sc = SCALE * s.detail;
         _q.setFromEuler(_e); _sc.set(sc, sc, sc);
         _m.compose(_p, _q, _sc);
         inst.setMatrixAt(i, _m);
+        s.renderedDetail = s.detail;
+        dirty = true;
       }
-      inst.instanceMatrix.needsUpdate = true;
+      if (dirty) inst.instanceMatrix.needsUpdate = true;
+      return active;
     }
-    return { update, count };
+    return { update, ...detail, count };
   })();
 
   // ---------- 공개 API ----------
   function update(dt) {
+    if (!group.visible) return;
     t += dt;
     flock.update(dt, t, flockActive);
-    magpies.update(dt);
-    dogs.update(dt);
-    cats.update(dt);
+    if (flockActive) lod.updates.flock++;
+    const magpieActive = magpies.update(dt);
+    const dogActive = dogs.update(dt);
+    const catActive = cats.update(dt);
+    lod.updates.magpies += magpieActive;
+    lod.updates.dogs += dogActive;
+    lod.updates.cats += catActive;
+    if (magpieActive + dogActive + catActive === 0) lod.skipped.groundFrames++;
   }
   function setTime(name) {
     flockActive = name !== 'night';
     live = name === 'night' ? 0.45 : 1;
     flock.inst.visible = flockActive;
   }
-  // ── LOD 램프 ── 어댑터 updateLod 가 매 프레임 camera 로 호출(engine.js:656). 카메라 고도(camera.y)를
-  //   부감 기준고도(≈1.02·siteR)에 비례한 임계로 판독 → 근경/포커스/워크(고도 낮음)=1x, 부감(고도 높음)=부스트.
-  //   임계를 siteR 비례로 잡아 규모 무관하게(작은 마을~한양) + 궁 포커스(카메라 ~50m로 높은 편)까지 확실히
-  //   1x 로 배제. smoothstep 이라 중간 줌(돌리)에서 매끄럽게 램프(팝 없음). refLo/refHi 는 adapter cow 와 동일.
-  const rampRef = siteR > 1 ? siteR : Math.max(60, radius * 1.4);   // siteR 없으면 radius 로 근사
-  const refLo = rampRef * 0.55, refHi = rampRef * 0.90;
-  function updateLod(camera) {
-    const y = (camera && camera.position) ? camera.position.y : 0;
-    const x = Math.max(0, Math.min(1, (y - refLo) / Math.max(1, refHi - refLo)));
-    const hi = x * x * (3 - 2 * x);                       // smoothstep — 근경 0(1x) ↔ 부감 1(full boost)
-    flock.setScaleBoost(1 + hi * (BIRD_BOOST - 1));
-    magAerial = 1 + hi * (MAG_BOOST - 1);
+  // ── 공통 LOD 소비자 ── 절대 camera.y를 다시 판독하지 않고, 런타임이
+  // 시선 지면에 대해 한 번 계산한 detail 상태와 공간 가중치를 주입받는다.
+  function updateLod(_camera, detail = null, weightAt = null) {
+    const aerial = Math.max(0, Math.min(1, detail?.aerialWeight ?? 0));
+    lod.birdScale = 1 + aerial * (BIRD_BOOST - 1);
+    flock.setScaleBoost(lod.birdScale);
+
+    const groundAllowed = detail?.groundActive !== false;
+    const fallback = groundAllowed ? (detail?.groundWeight ?? 1) : 0;
+    const resolver = groundAllowed ? weightAt : null;
+    lod.ground.dogs = dogs.setDetail(resolver, fallback);
+    lod.ground.cats = cats.setDetail(resolver, fallback);
+    lod.ground.magpies = magpies.setDetail(resolver, fallback);
+    syncLodActive();
+    // 각 컨트롤러의 dirty 플래그를 같은 프레임에 모두 비운다. 논리 OR를 직접 이어 쓰면
+    // 앞 컨트롤러가 true인 프레임에 뒤 플래그가 남아 다음 프레임까지 그림자 캐시를 깨운다.
+    const dogsChanged = dogs.consumeVisibilityChange();
+    const catsChanged = cats.consumeVisibilityChange();
+    const magpiesChanged = magpies.consumeVisibilityChange();
+    return dogsChanged || catsChanged || magpiesChanged;
   }
   function setSeason(_name) { /* 계절 연동 여지(현재 무영향) */ }
-  function setEnabled(v) { group.visible = !!v; }
+  function syncLodActive() {
+    const shown = enabled && presentationFade() > LOD_EPSILON;
+    lod.active.dogs = shown && lod.ground.dogs > LOD_EPSILON;
+    lod.active.cats = shown && lod.ground.cats > LOD_EPSILON;
+    lod.active.magpies = shown && lod.ground.magpies > LOD_EPSILON;
+  }
+  function applyPresentation() {
+    const alpha = presentationFade();
+    lod.waveWeight = waveWeight;
+    group.visible = enabled && alpha > LOD_EPSILON;
+    flock.setFade(alpha);
+    solidMat.transparent = alpha < 0.999;
+    solidMat.opacity = alpha;
+    solidMat.depthWrite = alpha >= 0.999;
+    dogs.applyVisibility(); cats.applyVisibility(); magpies.applyVisibility();
+    syncLodActive();
+  }
+  function setEnabled(v) {
+    enabled = !!v;
+    applyPresentation();
+  }
   // 근접 링 크로스페이드(0..1) 파리티(setupAnimals.setFade 와 동형). 공유 재질 하나라 개체 전체 균일 페이드.
   function setFade(v) {
-    const a = Math.max(0, Math.min(1, v));
-    solidMat.transparent = a < 0.999;
-    solidMat.opacity = a;
-    solidMat.depthWrite = a >= 0.999;
+    fadeWeight = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    applyPresentation();
+  }
+  function setWaveFade(v) {
+    waveWeight = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    applyPresentation();
   }
 
+  // Reroll/scale wave는 multiplier만 주입한다. ground child visibility와 flock/day 상태는
+  // 이 controller가 계속 소유해 reframe 중 일반 decor fader의 vis0 덮어쓰기를 피한다.
+  group.userData.waveFade = { setWeight: setWaveFade };
+
   return {
-    update, updateLod, setTime, setSeason, setEnabled, setFade, group,
+    update, updateLod, setTime, setSeason, setEnabled, setFade, setWaveFade, group,
     // 검증용: 개체수(스크린샷 조준·게이트).
     counts: { dogs: dogs.count, cats: cats.count, magpies: magpies.count },
+    lod,
   };
 }

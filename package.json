@@ -5,12 +5,15 @@
   "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
   "scripts": {
     "check": "node tools/check-fast.mjs",
-    "check:all": "npm run check && npm run check:app && npm run check:worker && npm run check:audio",
+    "check:all": "npm run check && npm run check:app && npm run check:petals && npm run check:worker && npm run check:audio",
     "check:app": "node tools/check-app-smoke.mjs",
     "check:audio": "node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:citywall": "node tools/check-citywall.mjs",
+    "check:lod": "node tools/check-lod.mjs",
+    "check:lod:app": "node tools/check-lod-app.mjs",
+    "check:petals": "node tools/verify-petals.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:roof-seams": "node tools/check-roof-seams.mjs",
     "check:worker": "node tools/check-worker-contract.mjs"

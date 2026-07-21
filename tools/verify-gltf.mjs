@@ -3,24 +3,28 @@
 //   라운드트립해 수치만 단언한다. 앱 dev 서버 불침해, 전용 포트 4218.
 //
 //   실행: node tools/verify-gltf.mjs          (playwright 는 tools/node_modules 에서 해석)
-//         산출 .glb 는 scratchpad/gltf/ 에 저장(리포 커밋 금지).
+//         산출 .glb 는 OS 임시 디렉터리에 저장(CHEOMA_GLTF_OUT으로 재지정 가능, 리포 커밋 금지).
 //
 //   검증 항목
 //     ① 단일 건물 5종(buildBuilding palace/giwa · buildParcel hanok/palace/temple/choga)
 //        export → 라운드트립: 메시 수·삼각형 수·재질 수 일치 + 텍스처 임베드(image 존재).
 //     ② 마을(village 규모) export → 라운드트립 + 파일<80MB + 임포스터·입자 0.
-//     ③ hanyang: analyzeExport 삼각형 > maxTriangles → exportGLB 안내 반환(overBudget).
-//        + 정화 씬(buildExportScene)에 임포스터·입자 0(임포스터 존재 규모에서 제외 필터 실증).
+//     ③ hanyang: 실제 FULL은 예산 가드, fullDetail:false는 모든 경량 FAR 주택을 보존.
+//        두 경로 모두 현재 카메라 LOD/focus와 무관하며 FULL/FAR가 중복되지 않는다.
+//        focus 중에도 staging override는 빠지고 원본 행렬·정점이 비focus export와 같다.
 //     ④ pageerror/예외 0.
 
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const SCRATCH = '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/gltf';
+const SCRATCH = process.env.CHEOMA_GLTF_OUT
+  ? resolve(process.env.CHEOMA_GLTF_OUT)
+  : mkdtempSync(join(tmpdir(), 'cheoma-gltf-'));
 mkdirSync(SCRATCH, { recursive: true });
 
 const reqApp = createRequire(join(ROOT, 'app', 'package.json'));
@@ -41,6 +45,7 @@ import { buildParcel } from '${ROOT}/src/layout/parcel.js';
 import { PRESETS } from '${ROOT}/src/params.js';
 import { planVillage } from '${ROOT}/src/village/plan.js';
 import { populateVillage } from '${ROOT}/src/village/populate.js';
+import { createVillage } from '${ROOT}/src/village/adapter.js';
 import { exportGLB, analyzeExport, buildExportScene, filenameFor } from '${ROOT}/src/export/gltf.js';
 
 function abToB64(ab) {
@@ -50,12 +55,16 @@ function abToB64(ab) {
   return btoa(bin);
 }
 const TEX_KEYS = ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap'];
+const SCENERY_RE = /^(?:trees|forest-|village-(?:trees|forest|flora|bloom|critters)|animals|cow|birds|critters|v-(?:dogs|cats|magpies))/;
 function countScene(obj) {
-  let meshes = 0, tris = 0, points = 0, impostors = 0, tex = 0, texWithImage = 0, instanced = 0;
+  let meshes = 0, tris = 0, points = 0, impostors = 0, overrides = 0;
+  let scenery = 0, tex = 0, texWithImage = 0, instanced = 0;
   const mats = new Set();
   obj.traverse((n) => {
     if (n.isPoints || n.isSprite) points++;
     if (/^impostor-/.test(n.name || '')) impostors++;
+    if (/^(?:village-overrides|override-|hero-override|palace-override)/.test(n.name || '')) overrides++;
+    if (SCENERY_RE.test(n.name || '')) scenery++;
     if (n.isMesh || n.isInstancedMesh) {
       const g = n.geometry; if (!g) return;
       const idx = g.getIndex(); const p = g.getAttribute('position');
@@ -68,7 +77,41 @@ function countScene(obj) {
         for (const k of TEX_KEYS) { const t = m[k]; if (t) { tex++; if (t.image) texWithImage++; } } }
     }
   });
-  return { meshes, tris, materials: mats.size, points, impostors, tex, texWithImage, instanced };
+  return { meshes, tris, materials: mats.size, points, impostors, overrides, scenery, tex, texWithImage, instanced };
+}
+function mixString(hash, value) {
+  for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619) >>> 0;
+  return hash;
+}
+function mixFloatArray(hash, array) {
+  const words = new Uint32Array(array.buffer, array.byteOffset, array.byteLength / 4);
+  for (let i = 0; i < words.length; i++) hash = Math.imul(hash ^ words[i], 16777619) >>> 0;
+  return hash;
+}
+// Position + instance-matrix fingerprint catches the bug that triangle counts alone cannot:
+// focused source geometry still has the same count even when every selected range is degenerate.
+function shapeFingerprint(obj) {
+  let hash = 2166136261, values = 0;
+  obj.traverse((n) => {
+    if (!n.isMesh && !n.isInstancedMesh) return;
+    hash = mixString(hash, n.name || '');
+    const position = n.geometry?.getAttribute('position')?.array;
+    if (position) { hash = mixFloatArray(hash, position); values += position.length; }
+    if (n.isInstancedMesh) {
+      hash = mixFloatArray(hash, n.instanceMatrix.array);
+      values += n.instanceMatrix.array.length;
+    }
+  });
+  return values + ':' + hash.toString(16).padStart(8, '0');
+}
+function exportSummary(root, opts) {
+  const scene = buildExportScene(root, opts);
+  return { ...countScene(scene), fingerprint: shapeFingerprint(scene) };
+}
+function sameExportShape(a, b) {
+  return a.meshes === b.meshes && a.tris === b.tris && a.instanced === b.instanced
+    && a.impostors === b.impostors && a.overrides === b.overrides
+    && a.fingerprint === b.fingerprint;
 }
 function roundtrip(buffer) {
   return new Promise((res, rej) => new GLTFLoader().parse(buffer, '', (g) => res(g.scene), rej));
@@ -129,29 +172,63 @@ async function runAll() {
     out.opts.bake = { ok: buf instanceof ArrayBuffer, gpuTris: gpu.triangles, gpuMeshes: gpu.meshes, rtTris: rt.tris, rtMeshes: rt.meshes };
   } catch (e) { out.opts.bake = { ok: false, reason: String(e && e.stack || e) }; }
   try {
-    const plan = planVillage({ scale: 'village', seed: 20260716 });
-    const root = populateVillage(plan);
+    // createVillage를 써 populate 뒤 VillageHandle이 붙이는 개·고양이·까치까지 실제 계약을 검증한다.
+    const handle = createVillage({ scale: 'village', seed: 20260716 });
+    const root = handle.group;
+    const fullScene = buildExportScene(root, {});
+    const leanScene = buildExportScene(root, { pretty: false, includeTerrain: false });
     const full = analyzeExport(root, {});
     const lean = analyzeExport(root, { pretty: false, includeTerrain: false });
-    out.opts.lean = { fullTris: full.triangles, leanTris: lean.triangles };
+    out.opts.lean = {
+      fullTris: full.triangles, leanTris: lean.triangles,
+      sourceScenery: countScene(root).scenery,
+      fullScenery: countScene(fullScene).scenery,
+      leanScenery: countScene(leanScene).scenery,
+    };
+    handle.dispose();
   } catch (e) { out.opts.lean = { reason: String(e && e.stack || e) }; }
 
   // ③ hanyang 예산 가드 + 임포스터 존재 규모의 제외 필터 실증
   try {
-    const plan = planVillage({ scale: 'hanyang', seed: 20260716 });
-    const root = populateVillage(plan);
+    const handle = createVillage({ scale: 'hanyang', seed: 20260716 });
+    const root = handle.group;
     const an = analyzeExport(root, {});
     const res = await exportGLB(root, {});
     const overBudget = !(res instanceof ArrayBuffer) && res && res.overBudget === true;
-    // 정화 씬(제외 필터 적용)에서 임포스터·입자 0 — 예산 초과라 GLB 는 안 만들지만 필터는 실증.
-    const sanitized = buildExportScene(root, {});
-    const sc = countScene(sanitized);
+    // 실제 FULL 경로는 FAR·입자를 제외한다. 경량 경로는 반대로 FAR를 전체 승격한다.
+    const sc = exportSummary(root, {});
+    const lw = exportSummary(root, { fullDetail: false });
     // 원본에 임포스터가 실제로 존재하는지(테스트 전제) 확인.
     let srcImpostors = 0; root.traverse((n) => { if (/^impostor-/.test(n.name || '')) srcImpostors++; });
+
+    // 실제 FAR 소스까지 가진 정규 필지를 focus해 FULL instance matrix, FAR mass position,
+    // merged wall position을 동시에 접는다. Export 결과는 그 presentation mutation과 무관해야 한다.
+    const focusParcel = handle.plan.parcels.find((parcel) => !parcel.hero && handle.lodState(parcel.id)?.far);
+    const detail = focusParcel ? handle.showParcelDetail(focusParcel.id) : null;
+    const focusedState = focusParcel ? handle.lodState(focusParcel.id) : null;
+    const focusFull = exportSummary(root, {});
+    const focusLean = exportSummary(root, { fullDetail: false });
+    const focusInvariant = {
+      parcelId: focusParcel?.id || null,
+      detailCreated: !!detail,
+      stateValid: focusedState?.valid === true,
+      baseHidden: focusedState?.baseHidden === true,
+      wallHidden: focusedState?.wallHidden === true,
+      impostorHidden: focusedState?.impostorHidden === true,
+      fullSame: sameExportShape(sc, focusFull),
+      leanSame: sameExportShape(lw, focusLean),
+      baseFull: sc,
+      focusFull,
+      baseLean: lw,
+      focusLean,
+    };
+    if (focusParcel) handle.hideParcelDetail(focusParcel.id);
+    handle.dispose();
     out.hanyang = {
       ok: true, analyzeTris: an.triangles, limit: an.limit, overBudget,
       sanitizedImpostors: sc.impostors, sanitizedPoints: sc.points,
-      srcImpostors, suggestions: overBudget ? res.suggestions : null,
+      lightweightImpostors: lw.impostors, lightweightTris: lw.tris,
+      srcImpostors, focusInvariant, suggestions: overBudget ? res.suggestions : null,
     };
   } catch (e) { out.hanyang = { ok: false, reason: String(e && e.stack || e) }; }
 
@@ -252,12 +329,26 @@ if (results) {
   if (!h || !h.ok) { fails.push('hanyang: ' + (h && h.reason)); console.log('hanyang FAIL', h && h.reason); }
   else {
     const overOk = h.analyzeTris > h.limit && h.overBudget === true;
-    const filterOk = h.sanitizedImpostors === 0 && h.sanitizedPoints === 0;
+    const filterOk = h.sanitizedImpostors === 0 && h.sanitizedPoints === 0
+      && h.lightweightImpostors > 0 && h.lightweightTris > 0
+      && h.lightweightTris < h.analyzeTris;
     const preOk = h.srcImpostors > 0; // 테스트 전제: 원본에 임포스터 존재
+    const fi = h.focusInvariant || {};
+    const focusOk = !!fi.parcelId && fi.detailCreated && fi.stateValid
+      && fi.baseHidden && fi.wallHidden && fi.impostorHidden
+      && fi.fullSame && fi.leanSame
+      && fi.focusFull?.overrides === 0 && fi.focusLean?.overrides === 0;
     if (!overOk) fails.push(`hanyang: guard not tripped (tris ${B(h.analyzeTris)} vs limit ${B(h.limit)}, overBudget=${h.overBudget})`);
-    if (!filterOk) fails.push(`hanyang: sanitized impostors ${h.sanitizedImpostors} points ${h.sanitizedPoints} ≠ 0`);
+    if (!filterOk) fails.push(`hanyang: FULL/FAR export selection drift `
+      + `(full impostors=${h.sanitizedImpostors}, points=${h.sanitizedPoints}, `
+      + `light impostors=${h.lightweightImpostors}, tris=${B(h.lightweightTris)})`);
     if (!preOk) fails.push(`hanyang: src had no impostors (test premise broken)`);
-    console.log(`analyzeTris ${B(h.analyzeTris)} > limit ${B(h.limit)} → overBudget=${h.overBudget}${overOk ? '' : '✗'} · srcImpostors ${h.srcImpostors}${preOk ? '' : '✗'} → sanitized impostors ${h.sanitizedImpostors}/points ${h.sanitizedPoints}${filterOk ? '' : '✗'}`);
+    if (!focusOk) fails.push(`hanyang: focus changed export `
+      + `(parcel=${fi.parcelId}, detail=${fi.detailCreated}, state=${fi.stateValid}, `
+      + `hidden=${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden}, `
+      + `same=${fi.fullSame}/${fi.leanSame}, overrides=${fi.focusFull?.overrides}/${fi.focusLean?.overrides})`);
+    console.log(`analyzeTris ${B(h.analyzeTris)} > limit ${B(h.limit)} → overBudget=${h.overBudget}${overOk ? '' : '✗'} · srcImpostors ${h.srcImpostors}${preOk ? '' : '✗'} → FULL impostors ${h.sanitizedImpostors}/points ${h.sanitizedPoints} · FAR impostors ${h.lightweightImpostors}/tris ${B(h.lightweightTris)}${filterOk ? '' : '✗'}`);
+    console.log(`focus ${fi.parcelId || 'none'} hidden(base/wall/FAR) ${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden} · FULL ${fi.baseFull?.fingerprint}→${fi.focusFull?.fingerprint} · FAR ${fi.baseLean?.fingerprint}→${fi.focusLean?.fingerprint} · overrides ${fi.focusFull?.overrides}/${fi.focusLean?.overrides}${focusOk ? '' : '✗'}`);
     if (h.suggestions) console.log('  안내:', h.suggestions.join(' | '));
   }
 }
@@ -273,9 +364,10 @@ if (results && results.opts) {
   } else { fails.push('bake: ' + (bk && bk.reason)); console.log('bake FAIL', bk && bk.reason); }
   const ln = results.opts.lean;
   if (ln && ln.fullTris != null) {
-    const leanOk = ln.leanTris < ln.fullTris;
+    const leanOk = ln.leanTris < ln.fullTris
+      && ln.sourceScenery > 0 && ln.fullScenery > 0 && ln.leanScenery === 0;
     if (!leanOk) fails.push(`lean: pretty:false 가 삼각형을 줄이지 않음(${ln.leanTris}≥${ln.fullTris})`);
-    console.log(`pretty:false+includeTerrain:false: tris ${B(ln.fullTris)}→${B(ln.leanTris)}${leanOk ? '' : '✗'}`);
+    console.log(`pretty:false+includeTerrain:false: tris ${B(ln.fullTris)}→${B(ln.leanTris)} · scenery source/full/lean ${ln.sourceScenery}/${ln.fullScenery}/${ln.leanScenery}${leanOk ? '' : '✗'}`);
   } else { fails.push('lean: ' + (ln && ln.reason)); }
 }
 
