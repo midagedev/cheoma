@@ -107,6 +107,9 @@ app/src/                       Svelte UI
   `src/village/parcel-rebuild.js`가 원래 예약 필지에서 새 계획을 만들고, runtime은 pick proxy·카메라 framing·
   실제 편집 처마 footprint·병합 flora를 한 커밋으로 갱신한다. 저장된 편집 소유권과 현재 focus 앰비언스
   제외 상태를 같은 Map으로 표현하지 않는다.
+- Svelte의 연속 range 입력은 `app/src/lib/live-edit-scheduler.js`가 소유한다. 앱 컴포넌트는 최신 편집값만
+  보유하고 scheduler가 적응형 preview와 단일 commit, focus epoch 취소를 담당한다. 코어는 UI 이벤트나
+  rAF를 알지 못하며, slider commit만 기존 `rebuildParcel()` 트랜잭션으로 들어간다.
 - 소동물·필지 앰비언스·꽃잎/낙엽은 절대 `camera.position.y` 대신 `controls.target`의 지형 높이에 대한
   상대 고도와 시선 거리를 공유한다. 지상 개체는 현재 시선 셀 주변만 갱신하고 원경에서는 mesh와 CPU
   시뮬레이션을 함께 쉰다. 하늘의 새 떼와 시간대·fog 전이는 부감에서도 유지한다.

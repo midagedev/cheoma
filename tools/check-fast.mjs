@@ -12,6 +12,7 @@ const checks = [
   './check-wave-contract.mjs',
   './check-yard-layout-contract.mjs',
   './check-parcel-rebuild-contract.mjs',
+  './check-live-edit-scheduler.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
   './check-choga-roof.mjs',

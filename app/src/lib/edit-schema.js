@@ -1,4 +1,4 @@
-// focus-in 편집 스키마 (#48) — 코어가 지원하는 편집 축을 유형별로 선언한다. 패널(VillageEditPanel)이
+// focus-in 편집 스키마 (#48) — 코어가 지원하는 편집 축을 유형별로 선언한다. 통합 ContextPanel이
 // 이 배열을 그대로 렌더하고, App 이 buildRebuildPayload 로 편집값을 어댑터 rebuildParcel 계약에 맞춰
 // 라우팅한다. params.js 는 읽기 전용(코어 소유)이라, UI 메타데이터(범위·스텝·라우팅)는 여기 앱 층에 둔다.
 //

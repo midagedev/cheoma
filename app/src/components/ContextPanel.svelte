@@ -69,7 +69,7 @@
   function vToggleTri(f) { onVillageOpt?.(f.key, vTriOn(f) ? false : true); }   // 강제 ON/OFF(‘auto’ 이탈)
   function vTogglePlain(f) { onVillageOpt?.(f.key, !vPlainOn(f)); }
 
-  // ── 집 편집 스키마(기존 VillageEditPanel 계약 그대로) ──
+  // ── 집 편집 스키마(통합 패널의 단일 구현) ──
   const editable = $derived(!!spec && spec.editable === true);
   const schema = $derived(schemaFor(spec));
   const basic = $derived(schema.sections.filter((s) => !s.adv));
@@ -408,7 +408,7 @@
   .glb:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
   .hbtn.glb.wide { flex: none; width: 100%; margin-top: 8px; }
 
-  /* ── 집 섹션(VillageEditPanel 룩 계승) ── */
+  /* ── 집 섹션 ── */
   .editnote { margin: -2px 0 2px; font-size: 11.5px; line-height: 1.45; color: var(--ink-faint); font-style: italic; }
   .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .tab { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 2px; border-radius: 4px; background: transparent; border: 1px solid var(--ink-hair); color: var(--ink-soft); transition: all 0.16s ease; }

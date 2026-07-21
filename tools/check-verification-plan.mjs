@@ -24,6 +24,9 @@ assert.deepEqual(ids(['src/runtime/village/handle.js']), [
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
 assert.deepEqual(ids(['app/src/App.svelte']), ['core', 'app', 'parcel-rebuild-browser', 'build']);
+assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
+  'core', 'app', 'parcel-rebuild-browser', 'build',
+]);
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-focus', 'lod-wave', 'build',
 ]);
