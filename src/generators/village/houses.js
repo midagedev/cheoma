@@ -78,7 +78,7 @@ export function placeParcel(parcel, protos, wallMats, char01 = 0.5) {
 
 // 대규모 주택 청크 런타임 LOD — 저폴리 mass → 실제 재료 외피 → 풀디테일의 3단계 전환.
 //   #92 자유 줌 이후 한양 스케일에서 줌인해도 원경 박스 매스가 그대로 보이던 문제 해소.
-//   카메라-청크 소유 필지의 최소 3D 거리를 매 프레임 판정해 visible 토글.
+//   카메라-청크 소유 필지의 최소 3D 거리를 렌즈 보상 전 화면등가 거리로 환산해 visible 토글.
 //   히스테리시스(진입/복귀 분리)로
 //   경계 왕복 플리커 방지. 한양에서는 중앙·외곽 청크가 모두 이 계약을 쓴다.
 export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, chunk, policy) {
@@ -106,6 +106,7 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
     chunkId: chunkGroup.name,
     level: CHUNK_LOD_LEVEL.FAR,
     distance: Infinity,
+    physicalDistance: Infinity,
     midIn: policy.midIn,
     midOut: policy.midOut,
     fullIn: policy.fullIn,
@@ -134,11 +135,14 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
 
   // 반환: 이 프레임에 FAR/MID/FULL 표현 전환이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
   //   모드에서 캐스터 구성 변경(FAR castShadow=false ↔ 실제 외피 캐스팅)을 1프레임 반영하는 데 쓴다.
-  chunkGroup.userData.lodUpdate = (camera) => {
+  chunkGroup.userData.lodUpdate = (camera, lensScale = 1) => {
     if (!camera?.position) return false;
-    const d = chunkLodDistance(
+    const physicalDistance = chunkLodDistance(
       chunk, camera.position.x, camera.position.z, camera.position.y,
     );
+    const scale = Number.isFinite(lensScale) && lensScale > 1e-6 ? lensScale : 1;
+    const d = physicalDistance / scale;
+    state.physicalDistance = physicalDistance;
     state.distance = d;
     const next = legacy
       ? state.level === CHUNK_LOD_LEVEL.FULL

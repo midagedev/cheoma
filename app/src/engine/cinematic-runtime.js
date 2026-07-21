@@ -88,6 +88,9 @@ export function createCinematicRuntime({
       state.pass = null;
       state.chain = [];
       state.single = null;
+      // Walk framing was authored at its physical FOV, without compensated dolly.
+      // Clear a preceding house/landmark profile so local-detail LOD stays literal.
+      camera.userData.villageReferenceFov = camera.fov;
     } else {
       state.paths = paths();
       const byName = Object.fromEntries(state.paths.map((path) => [path.name, path]));
@@ -142,6 +145,7 @@ export function createCinematicRuntime({
         camera.fov = sample.fov;
         camera.updateProjectionMatrix();
       }
+      if (sample.fov != null) camera.userData.villageReferenceFov = sample.referenceFov ?? sample.fov;
       lookAt = sample.lookAt;
     }
 
@@ -184,6 +188,7 @@ export function createCinematicRuntime({
       setPostFocus(false);
       tweenTo(framing.pos, framing.target, wasWalk ? 1.3 : 1.0, {
         fov: framing.fov,
+        referenceFov: framing.referenceFov,
         onDone: () => setZoomRegime('aerial'),
       });
     } else {

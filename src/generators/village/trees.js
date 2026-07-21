@@ -202,12 +202,11 @@ export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
   }
   group.userData.count = pts.length;
   // 전경 나무 오클루더 페이드: 궤도 회전 중 카메라와 마을 중심 사이 근경 나무를 dithered 반투명화.
-  // app 렌더 루프가 카메라를 넘겨주지 않으므로 mesh.onBeforeRender 로 자가 구동(카메라 제공). 마을은
-  // 원점 기준으로 authored 라 캐노피 월드좌표는 그룹 추가 전에도 인스턴스 행렬 그대로.
-  const occSubject = new THREE.Vector3(0, 4, 0);
-  const occ = setupTreeOccluder({ getSubject: () => occSubject });
+  // VillageHandle.updateLod(camera, target, dt)가 애니메이션 프레임당 정확히 한 번 구동한다. 후처리의
+  // 추가 scene render마다 onBeforeRender가 재실행되면 비용·이징이 패스 수에 결합되므로 self-drive 금지.
+  // 마을은 원점 기준 authored라 캐노피 월드좌표는 그룹 추가 전에도 인스턴스 행렬 그대로다.
+  const occ = setupTreeOccluder();
   occ.register(group, { canopyY: 4.0 });
-  occ.enableSelfDrive();
   group.userData.occluder = occ;
   return group;
 }

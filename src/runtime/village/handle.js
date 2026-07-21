@@ -54,7 +54,7 @@ import { createVillageDetailLodState } from './detail-lod.js';
 //   .raycast(raycaster) → 위 프록시 디스크립터 | null (히트한 필지)
 //   .rebuildParcel(parcelId, newParams) → 해당 필지만 풀디테일로 재생성(집 편집 반영)
 //   .highlightParcel(parcelId, on)      → 먹선 아웃라인 하이라이트 토글(호버 표시)
-//   .setTime(name) / .setSeason(name, opts) / .setWeather(name)  → env 상태 전파
+//   .setTime(name, opts) / .setSeason(name, opts) / .setWeather(name)  → env 상태 전파
 //   .update(dt)       매 프레임(개울 물결·야간 촛불 일렁임)
 //   .prepareWavePresentation(app)                   → 새 마을 scene-direct 앰비언스만 사전 연결
 //   .enterVillageMode(app) / .exitVillageMode(app)  → 앱 단일건물 씬 ↔ 마을 씬 스왑
@@ -74,6 +74,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   //   텍스처·싸리문·소품). 새 필지 시드로 감싸 buildBuilding/buildParcel/buildPalaceCompound 를 굴린 뒤 원복.
   const withSeededBuild = withVillageRandomSeed;
   const handle = group.userData.houseHandle;   // { giwa, choga } InstancedMesh 그룹(또는 null)
+  const treeOccluder = group.getObjectByName('village-trees')?.userData?.occluder || null;
 
   // ── 편집 오버레이 계층: rebuildParcel 이 만든 개별(풀디테일) 필지를 담는다. ──
   const overrides = new THREE.Group(); overrides.name = 'village-overrides';
@@ -146,9 +147,10 @@ export function createVillageHandle(opts, seed, plan, group) {
 
   // ── env 상태 ──
   let time = 'day', season = 'summer', weather = 'clear';
+  let detailLod = null;
   const nightGlow = createVillageNightGlow(
     group,
-    (dt, level) => group.userData.updateNightLights?.(dt, level),
+    (dt, level) => group.userData.updateNightLights?.(dt, level, detailLod?.lensScale ?? 1),
   );
 
   // ── 마을 전용 조명 리그(태스크 #44). scene 에 add/remove 로 마을 활성 동안만 유효. ──
@@ -404,8 +406,6 @@ export function createVillageHandle(opts, seed, plan, group) {
   group.add(ambientWaveOwner);
   const snow = createVillageSnowController(group);
   const fauna = createVillageFaunaController({ group, plan, site, seed, time, season });
-  let detailLod = null;
-
   function residentialLodState(parcelId) {
     const parcel = plan.parcels.find((candidate) => candidate.id === parcelId && !candidate.hero);
     if (!parcel) return null;
@@ -686,18 +686,23 @@ export function createVillageHandle(opts, seed, plan, group) {
       highlighted = parcelId;
     },
 
-    setTime(name) {
+    setTime(name, { immediate = false } = {}) {
       time = name;
       const V = VILLAGE_LIGHT_BY_TIME[name] || VILLAGE_LIGHT_BY_TIME.day;
       nightGlow.setBoost(V.glowBoost ?? 1.0);
-      nightGlow.setTime(name);
-      vlights.apply(name);                    // 마을 전용 헤미 리프트 + 안티솔라 웜 필
+      nightGlow.setTime(name, { immediate });
+      vlights.apply(name, { immediate });      // 마을 전용 헤미 리프트 + 안티솔라 웜 필
       group.userData.setWaterTime?.(name);   // 개울 물 글린트·하늘반사 시간대 하향(야간 흰 띠 방지)
       group.userData.setAnimalsTime?.(name); // 마당 닭 야간 홰 자세(소동물 #41)
       fauna.setTime(name);                   // 개·고양이·까치·새 떼(밤엔 새 떼 숨김·활동 저하)
-      ambientField.setTime(name);            // 카메라 앵커 필드 앰비언스 시간대(연기·모트, #105)
+      ambientField.setTime(name, immediate);  // 카메라 앵커 필드 앰비언스 시간대(연기·모트, #105)
     },
-    setSeason(name, _opts) { season = name; group.userData.setSeason?.(name); fauna.setSeason(name); ambientField.setSeason(name); },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
+    setSeason(name, { immediate = false } = {}) {
+      season = name;
+      group.userData.setSeason?.(name);
+      fauna.setSeason(name);
+      ambientField.setSeason(name, immediate);
+    },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
     setWeather(name) {
       weather = name;
       snow.setWeather(name);
@@ -715,8 +720,10 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 대규모 주택 청크 LOD(매 프레임, 카메라 필요) — FAR↔MID↔FULL 거리 전환.
     //   engine.js 가 camera 를 넘겨 호출. LOD 정책이 꺼진 규모(R<340)는 no-op.
     updateLod(camera, target = null, dt = 1 / 60) {
-      const swaps = group.userData.updateChunkLod?.(camera) || 0;   // #140-E 스왑 수 반환(engine 이 그림자 1프레임 갱신)
       detailLod = createVillageDetailLodState(camera, target, site, detailLod);
+      const swaps = group.userData.updateChunkLod?.(camera, detailLod.lensScale) || 0;
+      treeOccluder?.setSubject(target);              // 부감 중심이 아니라 현재 선택/시선 필지를 가리는 나무를 판정
+      treeOccluder?.update(camera, dt);              // 색 렌더 횟수와 무관하게 애니메이션 프레임당 1회
       const faunaChanged = fauna.updateLod(camera, detailLod);  // 새 떼 + 카메라 셀 근접 소동물
       ambientField.update(dt, camera, detailLod);   // 카메라 앵커 앰비언스 필드(#105)
       // 오버레이가 base house/wall/impostor caster 소유권을 바꾼 프레임도 LOD swap과 같은 그림자
@@ -797,6 +804,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       disposed = true;
       detachClouds();
       ambientField.exit();
+      treeOccluder?.dispose();
       disposeTree(group, keptMats);
       // #129 프로그램 앵커 최종 해제 — 오버레이 dispose 는 __kept 를 건너뛰므로 마을 파기 시 여기서 정리.
       disposeMaterials(keptMats);

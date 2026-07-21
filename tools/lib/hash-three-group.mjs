@@ -108,6 +108,10 @@ export function hashVillagePickProxies(handle) {
       position: proxy.cameraFraming.position.toArray(),
       target: proxy.cameraFraming.target.toArray(),
       fov: proxy.cameraFraming.fov,
+      // Landmark FOVs overlap the ordinary village continuum, so the authored
+      // reference lens is part of the public framing contract rather than a
+      // value consumers can reconstruct from `fov` alone.
+      referenceFov: proxy.cameraFraming.referenceFov,
     },
   });
   const proxies = handle.getPickProxies();

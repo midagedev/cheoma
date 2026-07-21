@@ -31,18 +31,14 @@ const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
 // 좌표: buildParcel 컴파운드는 이미 필지 월드 위치에 놓여 있다(group.matrixWorld). 링 컨테이너는
 //   씬 루트(identity)에 두고 모든 배치를 월드 좌표로 계산한다(populate 소동물 배치 패턴과 동일).
 
-// window.__wx(weather.js 노출) 자동 판독. getWeather 오버라이드 우선. 신호 없으면 전부 0(dormant).
+const CLEAR_WEATHER = Object.freeze({ accum: 0, rain: 0, snow: 0, wet: 0, wind: null });
+
+// window.__wx(weather.js 노출) 자동 판독. getWeather 오버라이드 우선. 핫 루프에서 기존 객체를
+// 그대로 읽어 반딧불 날씨 게이트 때문에 매 프레임 임시 객체가 생기지 않게 한다.
 function readWeather(getWeather) {
   if (getWeather) { const w = getWeather(); if (w) return w; }
-  if (typeof window !== 'undefined' && window.__wx) {
-    const wx = window.__wx;
-    return {
-      accum: wx.accum || 0, rain: wx.rain || 0, snow: wx.snow || 0,
-      wet: wx.wet != null ? wx.wet : (wx.rain || 0),   // __wx 는 wet 미노출 → rain 근사
-      wind: wx.wind || null,
-    };
-  }
-  return { accum: 0, rain: 0, snow: 0, wet: 0, wind: null };
+  if (typeof window !== 'undefined' && window.__wx) return window.__wx;
+  return CLEAR_WEATHER;
 }
 
 const _pos = new THREE.Vector3();
@@ -135,10 +131,14 @@ function makeRing({
   //    수직 스팬을 납작하게(ySpan) + centerY 낮춰 "대기 헤이즈"가 아닌 "마당 먼지"로 조인다(#79 크리틱).
   //    최대 높이 ≈ centerY + moteR*ySpan ≈ 지붕 처마선(≈2.8+moteR·0.22) — 마루 위로 뜨지 않게.
   const moteR = Math.min(radius, Math.max(5.5, Math.max(W, D) * 0.5));
-  const motes = setupMotes({ scene, sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 90 });
+  const motes = setupMotes({
+    scene, sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 90,
+    fireflies: true, // 기존 Points 중 ~8% 재사용 — 여름·맑은 밤에만 희박한 보케 씨앗
+  });
   motes.group.position.set(worldX, groundY, worldZ);
   container.add(motes.group);
   motes.setEnabled(true);
+  motes.setSeason(season, { immediate: true });
 
   // 4) 등롱 바람 흔들림 — focus 오버레이 스코프(env 전역 lanternSway 와 대상 분리). 오버레이(parcel-*)는
   //    emitLight:false 로 발광 bulb 만 갖는다(#141) → light 없이 bulb 만 흔들린다.
@@ -180,7 +180,10 @@ function makeRing({
     motes.setTime(name, { immediate: !!immediate });
     grass.setTime(name, { immediate: !!immediate });
   }
-  function setSeason(name) { grass.setSeason(name); }
+  function setSeason(name, opts = {}) {
+    grass.setSeason(name, opts);
+    motes.setSeason(name, opts);
+  }
 
   function update(dt, detailLod = 1) {
     let present;
@@ -199,6 +202,8 @@ function makeRing({
     animals?.setFade(strength);
     smoke.setFade(particleStrength);
     motes.setFade(particleStrength);
+    motes.setLensScale(detailLod?.lensScale ?? 1);
+    motes.setWeather(readWeather(getWeather));
     grass.setFade(strength);
 
     // 0에 가까운 링은 렌더뿐 아니라 시뮬레이션도 쉰다. gate 자체는 계속 흘러 다음 근접
@@ -295,12 +300,19 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
     }
   }
 
+  function setTime(name, immediate = false) {
+    if (!name) return;
+    curTime = name;
+    if (active) active.setTime(name, immediate);
+    for (const r of retiring) r.setTime(name, immediate);
+  }
+
   // 계절 변경(풀 색 크로스페이드). 앱 engine 이 env.setSeason 과 나란히 호출(main 배선 명세).
-  function setSeason(name) {
+  function setSeason(name, opts = {}) {
     if (!name) return;
     curSeason = name;
-    if (active) active.setSeason(curSeason);
-    for (const r of retiring) r.setSeason(curSeason);
+    if (active) active.setSeason(curSeason, opts);
+    for (const r of retiring) r.setSeason(curSeason, opts);
   }
 
   // focus-out: 활성 링 페이드아웃 후 dispose.
@@ -309,11 +321,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
   }
 
   function update(dt, timeName, detailLod = 1) {
-    if (timeName && timeName !== curTime) {
-      curTime = timeName;
-      if (active) active.setTime(timeName, false);
-      for (const r of retiring) r.setTime(timeName, false);
-    }
+    if (timeName && timeName !== curTime) setTime(timeName, false);
     if (active) active.update(dt, detailLod);
     for (let i = retiring.length - 1; i >= 0; i--) {
       const r = retiring[i];
@@ -332,7 +340,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
   }
 
   return {
-    set, clear, setSeason, update, dispose,
+    set, clear, setTime, setSeason, update, dispose,
     // 검증 전용: 현재 활성 링 강도(0..1)·페이드아웃 대기 수.
     get strength() { return active ? active.strength : 0; },
     get retiringCount() { return retiring.length; },
@@ -355,7 +363,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
 //   window.__ambLookahead(x, z)            // 시네마틱 프리워밍 훅 — 드론 경로 앞 지점 선행 점등(TTL)
 //
 // 3계층:
-//   근접(NEAR): 먼지 모트 + 등롱 sway + 공유 굴뚝 연기. 캡 NEAR_CAP.
+//   근접(NEAR): 먼지 모트(여름 맑은 밤 일부는 반딧불) + 등롱 sway + 공유 굴뚝 연기. 캡 NEAR_CAP.
 //               (풀·소동물·지붕 날씨 오버레이는 오버레이 지오가 필요 → 선택 필지 engine 링 전용.
 //                필드 이웃은 지오가 없어 생략 — 드로우콜 예산 준수. 풀은 #106 그대로 engine 링 +1.)
 //   중간(MID) : 등롱 sway(프레임 제거 bulb+light) + 공유 굴뚝 연기. 캡 MID_CAP, 거리랭크 LRU 교체.
@@ -518,6 +526,7 @@ export function createAmbientField(scene, {
       tier, container, desc, _dist: 0, touch: frameNo,
       lanterns: subs.lanterns || null,   // #141 풀 배정용(bulb 월드좌표·baseI). strength 곱해 국소 조명.
       setTime(name, imm) { if (subs.motes) subs.motes.setTime(name, { immediate: !!imm }); },
+      setSeason(name, imm) { if (subs.motes) subs.motes.setSeason(name, { immediate: !!imm }); },
       update(dt, detailLod = 1) {
         const present = phase === 'out' ? false : firstFrame ? false : true;   // 첫 프레임 prime→0(팟 방지)
         firstFrame = false;
@@ -530,6 +539,8 @@ export function createAmbientField(scene, {
         const particleStrength = baseStrength * particleWeight;
         if (subs.motes) {
           subs.motes.setFade(particleStrength);
+          subs.motes.setLensScale(detailLod?.lensScale ?? 1);
+          subs.motes.setWeather(readWeather());
           if (particleStrength > 0.002) subs.motes.update(dt);
         }
         if (subs.sway && strength > 0.002) subs.sway.update(dt);
@@ -549,9 +560,14 @@ export function createAmbientField(scene, {
   function buildNearCell(desc) {
     const container = new THREE.Group(); container.name = 'ambNear'; scene.add(container);
     const moteR = Math.max(5.5, Math.max(desc.W, desc.D) * 0.5);
-    const motes = setupMotes({ scene, sun: _sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 70 });
+    const motes = setupMotes({
+      scene, sun: _sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 70,
+      fireflies: true,
+    });
     motes.group.position.set(desc.cx, desc.baseY, desc.cz);
-    container.add(motes.group); motes.setEnabled(true); motes.setTime(curTime, { immediate: true });
+    container.add(motes.group); motes.setEnabled(true);
+    motes.setTime(curTime, { immediate: true });
+    motes.setSeason(curSeason, { immediate: true });
     const sway = attachSway(container, desc);
     return makeCell('near', container, desc, { motes, ...sway });
   }
@@ -614,7 +630,7 @@ export function createAmbientField(scene, {
       * lastOwnerWeight;
     const particleWeight = (lod ? Math.max(0, Math.min(1, lod.particleWeight || 0)) : 1)
       * lastOwnerWeight;
-    const detailWeights = { groundWeight, particleWeight };
+    const detailWeights = { groundWeight, particleWeight, lensScale: lod?.lensScale ?? 1 };
     const groundActive = lod ? lod.groundActive === true : true;
     const nearAllowed = !lod || lod.tier === 'near';
 
@@ -685,7 +701,12 @@ export function createAmbientField(scene, {
     for (const c of cells.values()) c.setTime(name, immediate);
     for (const r of retiring) r.setTime(name, immediate);
   }
-  function setSeason(name) { if (name) curSeason = name; }   // 필드엔 풀 없음(모트·연기·등롱 계절 무관)
+  function setSeason(name, immediate = false) {
+    if (!name) return;
+    curSeason = name;
+    for (const c of cells.values()) c.setSeason(name, immediate);
+    for (const r of retiring) r.setSeason(name, immediate);
+  }
   function setEnabled(v) { enabled = !!v; }
 
   function dispose() {

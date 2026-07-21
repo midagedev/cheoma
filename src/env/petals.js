@@ -185,6 +185,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     uniforms: {
       uFade: { value: 0 },
       uScale: { value: 180 },   // #125 근경 과대 재조정(260→180) — 사람 스케일 대비 자연스러운 꽃잎·낙엽
+      uLensScale: { value: 1 },
       uTime: { value: 0 },
       uMaxPx: { value: 15.0 }, // #125 스프라이트 상한(px) 26→15 — 근경/1인칭 "손바닥만한" 잎 방지(사용자 피드백)
       uActive: { value: 0 },    // #125 돌풍 게이트(0..1) — 개체별 aThresh 를 넘긴 잎만 보임(간헐 리듬)
@@ -202,6 +203,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
       attribute float aSpecies;
       attribute float aThresh;
       uniform float uScale;
+      uniform float uLensScale;
       uniform float uTime;
       uniform float uMaxPx;
       uniform float uActive;
@@ -220,7 +222,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
         vRot = aRot + uTime * aRotSpd;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = min(aSize * (uScale / max(-mv.z, 1.0)), uMaxPx);
+        gl_PointSize = min(aSize * (uScale * uLensScale / max(-mv.z, 1.0)), uMaxPx);
       }`,
     fragmentShader: `
       uniform float uFade;
@@ -298,13 +300,16 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   //   viewHeight: 시선 타깃/지면 대비 카메라 높이, camDist: 구 API 하위호환 근사치,
   //   wind: getWind(t) 결과(공유 바람).
   function update(dt, {
-    t = 0, camDist = NaN, viewHeight = null, detailWeight = null, present = 1, wind = null,
+    t = 0, camDist = NaN, viewHeight = null, detailWeight = null,
+    lensScale = 1, present = 1, wind = null,
   } = {}) {
     const active = season === 'spring' || season === 'autumn';
     const alt = petalDetailWeight(viewHeight, camDist, detailWeight);
     level = active ? Math.max(0, Math.min(1, present)) * alt : 0;
     mat.uniforms.uFade.value = level;
     mat.uniforms.uTime.value = t;
+    mat.uniforms.uLensScale.value = Number.isFinite(lensScale)
+      ? Math.max(0.5, Math.min(2, lensScale)) : 1;
     points.visible = level > 0.002;
     if (!points.visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
 

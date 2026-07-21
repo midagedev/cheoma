@@ -14,7 +14,15 @@ import {
 import {
   setupEnvironment, createFocusRing, setupNightGlow, setupWeather,
 } from '../../../src/api/environment.js';
-import { setupCinematic } from '../../../src/api/cinematic.js';
+import {
+  VILLAGE_LENS,
+  dollyDistanceForFov,
+  lensScaleForCamera,
+  referenceFovForCamera,
+  referenceVillageFov,
+  setupCinematic,
+  villageScreenDistanceForCamera,
+} from '../../../src/api/cinematic.js';
 import { setupAudio } from '../../../src/api/audio.js';
 import { capturePostcard } from '../../../src/api/export.js';
 import {
@@ -48,10 +56,10 @@ const HERO_REVEAL_HOLD = 0.5;          // 먹 안개 무대 유지 배율(이 �
 const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주변 먹안개 far 시작 깊이 배율(1=기본), 히어로 근접은 불변
 const HERO_SPIN_RAD = 2.35;            // 랜딩 나선 선회량(라디안 ≈135°) — "멋있게 회전"(구 1.258→2.35)
 
-// focus 전환 타임라인 통일(#92, mode-integration §5.5 원칙 3) — focus-in 은 카메라 돌리 + DoF 램프 +
+// focus 전환 타임라인 통일(#92, mode-integration §5.5 원칙 3) — focus-in 은 카메라 돌리 + DoF 페이드 +
 // 링 크로스페이드 + 패널 컨텍스트 모프를 "한 타임라인"으로 구동한다. 카메라 트윈이 그 클록의 권위 —
-// tweenTo(onProgress)가 매 프레임 이즈드 k 를 흘려 App 이 패널 모프를 같은 커브로 그린다. DoF 는
-// dofPull 로 트윈에 결선, 링은 경계(START/도착)에서 focusRing.set/clear(내부 페이드는 env 소유).
+// tweenTo(onProgress)가 매 프레임 이즈드 k 를 흘려 App 패널과 DoF 강도를 같은 커브로 그린다. 초점은
+// 의미 있는 필지 앵커의 카메라축 깊이에 고정하고, 링은 경계에서 set/clear(내부 페이드는 env 소유).
 const FOCUS_IN_DUR = 1.9;              // 부감→근접 돌리인(줌 연속체 스냅 마무리 + 패널 모프)
 const FOCUS_OUT_DUR = 1.7;             // 근접→부감 돌리아웃(역재생)
 const FOCUS_HOP_DUR = 1.5;             // 집(A)→집(B) 직접 전환(#95) — 부감 미경유 측면 돌리(약간 더 짧게)
@@ -150,7 +158,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     heroAsm: null,  // 종가 랜딩/리플레이 조립 애니(#62·#59) — 렌더 루프가 매 프레임 update
     heroTimer: null, // 랜딩 착공 지연 타이머(중단 시 취소)
     // ── 줌 연속체(#92) ──
-    aerialDist: 0,  // 현재 부감 기준 카메라↔중심 거리(줌 임계 산출 기준, villageAerial 이 갱신)
+    aerialDist: 0,          // 46° 부감의 실제 카메라↔중심 거리(villageAerial 갱신)
+    aerialReferenceDist: 0, // 종전 42° 화면 등가 거리 — 렌즈가 다른 enter/exit 임계의 공통 기준
     zoomCand: null, // 부감 줌인 중 화면중심 후보 필지 id(임계 넘으면 자동 focus)
     lastCenterT: 0, // 화면중심 픽 레이캐스트 스로틀
     // ── 리롤 웨이브(#56 배선) ──
@@ -335,30 +344,38 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // 카메라 트윈(선택 포커스·해제·마을 돌리인/아웃). 진행 중이면 매 프레임 lerp.
-  //   opts.fov 지정 시 화각도 함께 보간(마을 부감 42 ↔ 필지 28), opts.dofPull 로 전환 중 조리개 램프,
+  //   opts.fov 지정 시 화각도 함께 보간(광각 부감 46 ↔ 망원 필지 20). opts.dofAnchor 는 전환 중 의미 있는
+  //   월드 초점점을 고정한다. 생략하면 보간 중인 controls.target(항상 화면 앞)을 따라가며, opts.dofAmount 는
+  //   현재 강도에서 목표값까지 단조 보간한다.
   //   opts.onDone 은 도착 콜백(마을 도착 시 편집 패널 슬라이드 인 등).
   let tween = null;
-  function tweenTo(pos, target, dur = 0.95, { fov, onDone, onProgress, dofPull = false, lockFocus = false } = {}) {
+  function tweenTo(pos, target, dur = 0.95, {
+    fov, referenceFov, onDone, onProgress, dofAnchor = null, dofAmount = null,
+  } = {}) {
     cinematic.stop();
+    const currentReferenceFov = referenceFovForCamera(camera);
+    const changesLens = Number.isFinite(fov) || Number.isFinite(referenceFov);
     tween = {
       p0: camera.position.clone(), p1: pos.clone(),
       t0: controls.target.clone(), t1: target.clone(),
       f0: camera.fov, f1: fov ?? camera.fov,
-      dur, e: 0, onDone, onProgress, dofPull, lockFocus,
+      r0: currentReferenceFov,
+      r1: Number.isFinite(referenceFov)
+        ? referenceFov
+        : (Number.isFinite(fov) ? referenceVillageFov(fov) : currentReferenceFov),
+      changesLens,
+      dur, e: 0, onDone, onProgress,
+      dofAnchor: dofAnchor?.clone?.() || null,
+      dof0: post.dof.amount,
+      dof1: Number.isFinite(dofAmount) ? clamp01(dofAmount) : null,
       // 검증 토글(before/after 계측용). window.__flowNoFix=true 면 이번 트윈은 방향 연속화·핸드오프
       // 리셋을 끈다(구버전 버그 재현). 미설정=수정본. 트윈 시작 시 1회만 읽어 핫 루프 오염 방지.
       noFix: typeof window !== 'undefined' && !!window.__flowNoFix,
     };
   }
 
-  // 플래그십 후처리 컴포저에서 BokehPass(DoF)를 찾아 전환 중 조리개를 램프한다(있을 때만).
-  const bokehPass = post.composer.passes.find((p) => p.uniforms && p.uniforms.aperture);
-  const bokehBase = bokehPass ? bokehPass.uniforms.aperture.value : 0;
-  // 전환 진행 k(0→1)에 sin 종 모양으로 조리개를 부풀렸다 복원 — 중간에 주변이 뭉개져 집으로 시선이 모임.
-  function dofPullRamp(k) {
-    if (!bokehPass) return;
-    bokehPass.uniforms.aperture.value = bokehBase * (1 + 6 * Math.sin(Math.PI * clamp01(k)));
-  }
+  const bokehPass = post.bokehPass;
+  let dofTargetDepth = post.dof.focus;
 
   // 트윈 핸드오프용 — OrbitControls 관성(회전 _sphericalDelta·팬 _panOffset·줌 _scale)을 0 으로.
   // three 0.185 인스턴스 필드 직접 리셋(공개 stop() 이 없어 이게 표준 패턴): 전환 중 사용자
@@ -429,18 +446,137 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 렌더 루프 ----------
-  function renderFrame() {
-    if (dofOn) {
-      // 초점 평면 = 카메라→"보고 있는/선택한 대상" 실거리(#102). 전환 중(focus-in·집→집)은 lerp 되는
-      //   controls.target 이 아니라 목적 프레이밍 타깃(tween.t1)을 추적해 이동 내내 선택 대상이 초점 앵커로
-      //   남는다(중간 프레임의 초점이 두 필지 사이에 떠 둘 다 흐려지는 현상 제거). focus-out·부감은 lerp
-      //   타깃 추적(멀어지며 부드럽게 아웃포커스). 히어로 랜딩은 controls.target 이 상수라 동일 결과.
-      const ft = (tween && tween.lockFocus) ? tween.t1 : controls.target;
-      post.setFocus(camera.position.distanceTo(ft));
+  const activeDofAnchor = () => tween?.dofAnchor || controls.target;
+
+  function debugDofState() {
+    const anchorDepth = post.dof.depthAt(activeDofAnchor());
+    return {
+      enabled: post.dof.enabled,
+      amount: post.dof.amount,
+      focus: post.dof.focus,
+      aperture: bokehPass.uniforms.aperture.value,
+      baseAperture: post.dof.aperture,
+      maxBlur: bokehPass.uniforms.maxblur.value,
+      bokehSamples: bokehPass.bokehSampleCount,
+      highlightThreshold: bokehPass.uniforms.highlightThreshold.value,
+      highlightGain: bokehPass.uniforms.highlightGain.value,
+      bokehRadiusScale: bokehPass.uniforms.bokehRadiusScale.value,
+      fov: camera.fov,
+      anchorDepth,
+      error: anchorDepth == null ? null : Math.abs(post.dof.focus - anchorDepth),
+      depthExcluded: bokehPass.depthExcludedCount,
+      depthDithered: bokehPass.depthDitheredCount,
+      tweenProgress: tween ? clamp01(tween.e / tween.dur) : null,
+      anchored: !!tween?.dofAnchor,
+    };
+  }
+
+  function renderFrame(postDt) {
+    if (dofOn && post.dof.amount > 0) {
+      // Bokeh focus는 유클리드 거리가 아니라 카메라 시선축(view-space -Z) 깊이다. 전환 앵커가
+      // 화면 중심 밖에 있어도 post가 그 축 깊이를 계산해 선택 집의 초점면을 정확히 유지한다.
+      dofTargetDepth = post.setFocusPoint(activeDofAnchor());
     }
-    post.update();
+    post.update(postDt);
     post.composer.render();
   }
+
+  // Camera-dependent environment policy has one owner so the live frame and focused
+  // regression harness cannot drift. `frameDetailLod` is available inside village mode;
+  // mode handoffs deliberately fall back to the camera's named lens metadata.
+  function syncCameraDependentEnvironment(frameDetailLod = null) {
+    const physicalDistance = camera.position.distanceTo(controls.target);
+    const physicalAltitude = Math.max(0, camera.position.y - controls.target.y);
+    const visualDistance = frameDetailLod?.visualDistance
+      ?? villageScreenDistanceForCamera(physicalDistance, camera);
+    const visualAltitude = frameDetailLod?.visualAltitude
+      ?? villageScreenDistanceForCamera(physicalAltitude, camera);
+    const lensScale = frameDetailLod?.lensScale ?? lensScaleForCamera(camera);
+    weatherRef.setWeatherCenter?.(
+      controls.target.x,
+      controls.target.z,
+      physicalDistance,
+      visualAltitude,
+      frameDetailLod?.particleWeight,
+      visualDistance,
+      lensScale,
+    );
+    env.setLensScale?.(lensScale);
+    return { physicalDistance, physicalAltitude, visualDistance, visualAltitude, lensScale };
+  }
+
+  // 카메라·시선·화각·DoF·패널 모프는 하나의 순수한 진행도 적용 경로를 공유한다. 런타임은
+  // advanceCameraTween 이 시간을 진행시키고, 검증은 debugSeekDofTween 이 같은 경로를 정지 샘플링한다.
+  // 두 구현이 갈라지면 테스트가 실제 전환을 검증하지 않게 되므로 별도 "테스트용 보간"을 만들지 않는다.
+  function applyCameraTween(active, progress) {
+    const k = easeInOutCubic(clamp01(progress));
+    if (active.arc) {
+      // 종가 랜딩 나선 궤도(#98②) — 타깃 수직축 둘레 극좌표 보간. 각속도 일정(이즈드), 반경은
+      // 단조 감소(줌인)라 궤도가 집 쪽으로 파고들지 않는다(중간 휩 팬 없음). 높이도 함께 하강.
+      const A = active.arc;
+      const a = A.a0 + (A.a1 - A.a0) * k;
+      const r = A.r0 + (A.r1 - A.r0) * k;
+      const y = A.y0 + (A.y1 - A.y0) * k;
+      camera.position.set(A.cx + Math.sin(a) * r, y, A.cz + Math.cos(a) * r);
+    } else {
+      camera.position.lerpVectors(active.p0, active.p1, k);
+    }
+    controls.target.lerpVectors(active.t0, active.t1, k);
+    // 위치·타깃과 함께 시선 방향도 매 프레임 연속 갱신한다. OrbitControls.update() 는 트윈 중
+    // 게이트로 스킵되므로 여기서 직접 바라보게 해 종료 프레임의 방향 스냅을 막는다.
+    if (!active.noFix) camera.lookAt(controls.target);
+    if (active.f1 !== active.f0) {
+      camera.fov = active.f0 + (active.f1 - active.f0) * k;
+      camera.updateProjectionMatrix();
+    }
+    // FOV alone cannot identify landmark profiles (for example palace 24° keeps
+    // the former 32° composition). Interpolate the explicit reference lens with
+    // the camera so LOD and zoom thresholds see the same projected scale.
+    // Manual cinematic tweens may carry r0/r1 directly; an explicit false is the
+    // position-only contract. This default keeps authored arc lenses safe if a caller
+    // omits the convenience flag while still preventing plain house tweens from leaking
+    // village metadata.
+    if (active.changesLens !== false && Number.isFinite(active.r0) && Number.isFinite(active.r1)) {
+      camera.userData.villageReferenceFov = active.r0 + (active.r1 - active.r0) * k;
+    }
+    if (active.dof1 != null) post.setDofAmount(active.dof0 + (active.dof1 - active.dof0) * k);
+    active.onProgress?.(k);   // 패널 컨텍스트 모프 등 — 카메라와 동일 클록(#92 타임라인 통일)
+    return k;
+  }
+
+  function finishCameraTween(active) {
+    if (tween !== active) return;
+    // 핸드오프: OrbitControls 관성(회전/팬/줌 잔류)을 0 으로 리셋해 다음 update() 가 스냅·lurch
+    // 없이 현재 지오메트리에서 재개하도록(자동 회전도 0속도 시작 보장).
+    if (!active.noFix) settleControls();
+    const cb = active.onDone;
+    tween = null;
+    cb?.();
+  }
+
+  function advanceCameraTween(dt) {
+    const active = tween;
+    if (!active) return;
+    active.e = Math.min(active.dur, active.e + dt);
+    applyCameraTween(active, active.e / active.dur);
+    if (active.e >= active.dur) finishCameraTween(active);
+  }
+
+  // 회귀 하네스용 결정적 seek. 컴포저를 수백 프레임 돌리지 않고 실제 제품 트윈을 같은 진행도에서
+  // 샘플링한다. finish=true·progress=1 이면 실제 onDone까지 실행해 다음 전환을 이어갈 수 있다.
+  function debugSeekDofTween(progress, { finish = false } = {}) {
+    const active = tween;
+    if (!active) return null;
+    const p = clamp01(progress);
+    active.e = active.dur * p;
+    const easedProgress = applyCameraTween(active, p);
+    camera.updateMatrixWorld(true);
+    if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
+    const sampled = debugDofState();
+    if (finish && p >= 1) finishCameraTween(active);
+    return { ...sampled, easedProgress, finished: tween !== active };
+  }
+
   function resizeAll() {
     const w = container.clientWidth, h = container.clientHeight;
     camera.aspect = w / h;
@@ -453,39 +589,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   let frames = 0;
   const clock = new THREE.Clock();
+  let debugPaused = false;
   renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
-    // 카메라 트윈
-    if (tween) {
-      tween.e = Math.min(tween.dur, tween.e + dt);
-      const k = easeInOutCubic(clamp01(tween.e / tween.dur));
-      if (tween.arc) {
-        // 종가 랜딩 나선 궤도(#98②) — 타깃 수직축 둘레 극좌표 보간. 각속도 일정(이즈드), 반경은
-        //   단조 감소(줌인)라 궤도가 집 쪽으로 파고들지 않는다(중간 휩 팬 없음). 높이도 함께 하강.
-        const A = tween.arc;
-        const a = A.a0 + (A.a1 - A.a0) * k;
-        const r = A.r0 + (A.r1 - A.r0) * k;
-        const y = A.y0 + (A.y1 - A.y0) * k;
-        camera.position.set(A.cx + Math.sin(a) * r, y, A.cz + Math.cos(a) * r);
-      } else {
-        camera.position.lerpVectors(tween.p0, tween.p1, k);
-      }
-      controls.target.lerpVectors(tween.t0, tween.t1, k);
-      // 위치·타깃과 함께 시선 방향도 매 프레임 연속 갱신한다. OrbitControls.update() 는 트윈 중
-      // 게이트(아래 line ~392)로 스킵되므로 그 안의 object.lookAt(target) 이 걸리지 않는다 —
-      // 이걸 빼면 전환 내내 방향이 동결됐다가 종료 프레임에 update() 가 재개되며 스냅한다(= 화면
-      // 중심이 튀는 현상). 여기서 직접 바라보게 해 방향 불연속을 제거.
-      if (!tween.noFix) camera.lookAt(controls.target);
-      if (tween.f1 !== tween.f0) { camera.fov = tween.f0 + (tween.f1 - tween.f0) * k; camera.updateProjectionMatrix(); }
-      if (tween.dofPull) dofPullRamp(k);
-      tween.onProgress?.(k);   // 패널 컨텍스트 모프 등 — 카메라와 동일 클록(#92 타임라인 통일)
-      if (tween.e >= tween.dur) {
-        // 핸드오프: OrbitControls 관성(회전/팬/줌 잔류)을 0 으로 리셋해 다음 update() 가 스냅·lurch
-        // 없이 현재 지오메트리에서 재개하도록(자동 회전도 0속도 시작 보장).
-        if (!tween.noFix) settleControls();
-        const cb = tween.onDone; tween = null; cb?.();
-      }
-    }
+    const elapsed = clock.getDelta();
+    if (debugPaused) return;
+    const dt = Math.min(elapsed, 0.05);
+    advanceCameraTween(dt);
     cinematic.update(dt);
     if (demo.active) updateDemo(dt);                                           // 시네마틱 데모 카메라 구동(#112)
     if (assembly && assembly.update(dt)) assembly = null;
@@ -549,13 +658,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     // 하늘 입자(눈·비) 낙하 필드를 시선(카메라 타깃)으로 이설 — 마을 부감·종가 클로즈업·랜딩 등
     //   원점을 벗어난 뷰에서도 "보는 곳에 눈/비"가 오게(#98). 단일건물은 타깃≈원점이라 사실상 무변.
-    weatherRef.setWeatherCenter?.(
-      controls.target.x,
-      controls.target.z,
-      camera.position.distanceTo(controls.target),
-      frameDetailLod?.altitude ?? Math.max(0, camera.position.y - controls.target.y),
-      frameDetailLod?.particleWeight,
-    );
+    // Fade/spread use former-FOV equivalent distance; point size separately uses
+    // the physical/visual ratio so a compensated lens dolly remains pixel-stable.
+    syncCameraDependentEnvironment(frameDetailLod);
     weatherRef.update(dt);
     env.update(dt);
     // 히어로 역광 방위 고정(#98) — env sky 가 매 프레임 sun.position 을 시간대 방향으로 세팅한 직후,
@@ -802,13 +907,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // 배율별 후처리(mode-integration §5): 마을 부감은 RimPass(매 프레임 씬 노멀 재렌더)가 도성 규모에서
   // 60fps 위험이라 OFF. focus-in(집 근접)·단일건물 씬은 ON. rim OFF 시 FlarePass 가림 판정이 스테일
   // depth 로 오작동하므로 flare 도 동반 토글(모바일 perf 분기와 합성 — 한 곳에서 관리). 부감엔 flare 불필요.
-  function setPostFocus(focused) {
+  function setPostFocus(focused, dofAmount = focused ? 1 : 0) {
     post.setRimEnabled?.(focused);
     post.setFlareEnabled?.(focused && !perf);
     // 부감(focus=null)은 DoF off — 마을 전체가 얕은 심도로 뭉개지지 않게(#80 완성도, hanyang·모바일 특히).
-    // focus-in(집 근접)·단일건물은 on(플래그십 근경 심도). 돌리인 dofPull 램프는 focus-in 시작 시 DoF 가
-    // 켜진 상태에서만 유효하므로 focus-in START(setPostFocus(true))에 함께 켜진다. 모바일 perf 는 항상 off.
-    post.setDof?.(focused && !perf);
+    // amount 하나가 pass enable과 기본 조리개 배율을 함께 소유한다. focus-in은 0→1, focus-out은
+    // 현재값→0 단조 전환이라 중단·교체 뒤 부풀린 조리개가 남지 않는다. 모바일 perf는 항상 0.
+    post.setDofAmount?.(focused && !perf ? dofAmount : 0);
   }
 
   // ---------- 시네마틱 데모 모드 — 독립 runtime으로 위임 ----------
@@ -867,7 +972,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!h || !h.group) return;
     const culled = [];
     const lodVisibility = [];
-    const cam = { pos: camera.position.clone(), tgt: controls.target.clone(), fov: camera.fov, far: camera.far, near: camera.near };
+    const cam = {
+      pos: camera.position.clone(), tgt: controls.target.clone(), fov: camera.fov,
+      referenceFov: camera.userData.villageReferenceFov,
+      far: camera.far, near: camera.near,
+    };
     const fog = scene.fog ? { near: scene.fog.near, far: scene.fog.far } : null;
     try {
       scene.add(h.group);
@@ -886,11 +995,23 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 실제 진입 뷰(부감 카메라 + 마을 fog·far)로 예열 — 첫 진입 프레임의 셰이더 변종·업로드·
       // 스테이트를 그대로 warming(단일건물 카메라/far 로는 원경 지오·부감 셰이더가 덜 예열됨).
       const R = h.plan.site.R;
-      camera.position.set(0.20 * R, 1.02 * R, 1.98 * R);
       controls.target.set(0, 0.06 * R, -0.10 * R);
-      camera.fov = 42; camera.far = R * 8; camera.near = 0.5; camera.updateProjectionMatrix();
+      const prewarmScale = dollyDistanceForFov(
+        1,
+        VILLAGE_LENS.aerial.referenceFov,
+        VILLAGE_LENS.aerial.fov,
+      );
+      camera.position.set(
+        controls.target.x + 0.20 * R * prewarmScale,
+        controls.target.y + 0.96 * R * prewarmScale,
+        controls.target.z + 2.08 * R * prewarmScale,
+      );
+      camera.fov = VILLAGE_LENS.aerial.fov;
+      camera.userData.villageReferenceFov = VILLAGE_LENS.aerial.referenceFov;
+      camera.far = R * 8; camera.near = 0.5; camera.updateProjectionMatrix();
       camera.lookAt(controls.target);
       if (scene.fog) { scene.fog.near = R * 2.2; scene.fog.far = R * 7.0; }
+      post.rimRescan?.(h.group);          // patch first, then compile that final shader variant
       renderer.compile(scene, camera);   // 셰이더 컴파일(그림자 depth 포함)
       renderFrame();                     // 버퍼·instanceMatrix 업로드(draw 강제)
     } catch (e) {
@@ -901,6 +1022,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       scene.remove(h.group);
       camera.position.copy(cam.pos); controls.target.copy(cam.tgt);
       camera.fov = cam.fov; camera.far = cam.far; camera.near = cam.near; camera.updateProjectionMatrix();
+      if (Number.isFinite(cam.referenceFov)) camera.userData.villageReferenceFov = cam.referenceFov;
+      else delete camera.userData.villageReferenceFov;
       camera.lookAt(controls.target);
       if (fog && scene.fog) { scene.fog.near = fog.near; scene.fog.far = fog.far; }
       renderFrame();                     // 캔버스를 단일건물 상태로 원복(플래시 없음)
@@ -921,6 +1044,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //     이미 컴파일된 마을 수백 재질까지 매번 재처리해 도리어 큰 정지가 생긴다(hop·focus 악화 확인).
   //     targetScene=scene 을 넘겨 조명·fog 는 메인 씬 것을 쓰되, 컴파일 대상은 root 서브트리로 한정.
   function warmShaders(root, cam = camera) {
+    // Material patches must precede both real rendering and compileAsync. Keeping
+    // this ahead of the no-warm A/B gate also makes the visual contract independent
+    // of the optional performance experiment and prevents a first-frame rim pop.
+    post.rimRescan?.(root);
     if (typeof renderer.compileAsync !== 'function' || !root) return Promise.resolve();
     if (typeof window !== 'undefined' && window.__noWarm) return Promise.resolve();   // A/B 계측 게이트(#117 검증용)
     try { return renderer.compileAsync(root, cam, root === scene ? null : scene).catch(() => {}); }
@@ -1050,7 +1177,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
     // 재진입(활성): 비동기 빌드일 수 있어 프레이밍 트윈을 onReady 로(새 핸들 site.R 기준). 구 마을 유지 중 부감.
-    if (village.active) { setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, onDone: () => setZoomRegime('aerial') }); }); emit('villageMode', true); return; }
+    if (village.active) { setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('aerial') }); }); emit('villageMode', true); return; }
     // 단일건물 선택·호버 상태 정리
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
@@ -1058,9 +1185,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     weatherRef.setWeather('clear');
     village.active = true; village.selected = null; village.transitioning = false; village.zoomCand = null;
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
+    camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
+      ? camera.userData.villageReferenceFov : camera.fov;
     setPostFocus(false);                 // 부감 진입 → RimPass·flare OFF(성능)
     // 첫 진입은 동기(handle 無) → onReady 즉시 실행. 프레이밍 트윈을 onReady 로 두어 async 폴백에도 정합.
-    buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.4, { fov: f.fov, onDone: () => setZoomRegime('aerial') }); });
+    buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.4, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('aerial') }); });
     updateWeatherColliders();
     emit('villageMode', true);
   }
@@ -1093,7 +1222,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     weatherRef.setWeather(state.weather); refreshAtmosphere();
     updateWeatherColliders();
     const { pos, target } = buildingSpot('three-quarter', computeLayout(P));
-    tweenTo(pos, target, 1.2, { fov: camera.__houseFov ?? 28 });
+    tweenTo(pos, target, 1.2, {
+      fov: camera.__houseFov ?? 28,
+      referenceFov: camera.__houseReferenceFov ?? camera.__houseFov ?? 28,
+      onDone: () => { delete camera.userData.villageReferenceFov; },
+    });
     emit('villageMode', false);
   }
 
@@ -1153,7 +1286,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     hoverParcel = null; village.zoomCand = null;
     village.handle.highlightParcel(parcelId, true);   // 돌리인 동안 추적 하이라이트
     village.selected = parcelId; village.transitioning = true;
-    setPostFocus(true);                                 // focus-in → rim/flare ON(#76 이전 임시)
+    setPostFocus(true, 0);                              // focus-in 시작은 선명, 카메라와 함께 DoF를 단조 점등
     setZoomRegime('lock');                              // 전환 중 줌 봉인
     // 풀디테일 오버레이 승격(모든 필지) — 편집·리플레이·근접 링 앵커.
     const detail = village.handle.showParcelDetail(parcelId);
@@ -1171,7 +1304,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== parcelId) return;
       tweenTo(f.position, f.target, FOCUS_IN_DUR, {
-        fov: f.fov, dofPull: true, lockFocus: true,              // 선택 필지에 초점 고정(#102)
+        fov: f.fov, referenceFov: f.referenceFov,
+        dofAnchor: f.target, dofAmount: 1,                         // 선택 필지 축깊이 고정 + 0→1 페이드
         onProgress: (k) => emit('villageFocusMorph', k),         // 부감→집 패널 모프(0→1)
         onDone: () => {
           village.transitioning = false;
@@ -1186,7 +1320,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // focus 중 필지→필지 직접 전환(#95) — A(현재 focus)에서 B 로 부감 미경유 이동. #92 타임라인 통일 규약:
   //   카메라 측면 돌리(A framing→B framing, tweenTo 가 매 프레임 lookAt + 종료 관성 리셋) + 패널 유형 모프
-  //   (브레드크럼·편집 스키마가 B 로) + DoF(renderFrame 이 타깃 거리 추적) 한 타임라인. focusMorph 는 1 유지
+  //   (브레드크럼·편집 스키마가 B 로) + DoF(renderFrame 이 A→B 시선점을 추적) 한 타임라인. focusMorph 는 1 유지
   //   (집→집, 부감 골짜기 없음). 오버레이 스왑 순서: B 선표시(도착 시 근경 완성) → 도착(onDone)에 A 해제
   //   (근경 팝을 부감/원거리로 밀어냄). 앰비언스 링은 attachFocusRing(B) 이 focusRing.set → A 링 retiring
   //   크로스페이드. 전환 내내 transitioning=true → 줌 감시자·재클릭 봉인.
@@ -1217,7 +1351,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== toId) return;
       tweenTo(f.position, f.target, FOCUS_HOP_DUR, {
-        fov: f.fov, lockFocus: true,                               // 이동 대상(B)에 초점 고정(#102)
+        // 목적지 B가 출발 카메라 뒤에 있을 수 있다. 보이지 않는 B를 고정 추적하면 시야평면을 통과할 때
+        // near→원거리 초점 점프가 생기므로, 생략된 dofAnchor가 보간 controls.target(A→B)을 따라가게 한다.
+        fov: f.fov, referenceFov: f.referenceFov,
         onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
         onDone: () => {
           village.transitioning = false;
@@ -1240,12 +1376,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     stopHeroAsm();                                   // 진행 중 조립 정리
     focusRing.clear();                               // focus-out → 근접 앰비언스 페이드아웃(#79)
     const parcelId = village.selected;
+    const departingFocus = parcelId
+      ? village.handle?.getPickProxy(parcelId)?.cameraFraming?.target || controls.target
+      : controls.target;
     village.selected = null; village.transitioning = true; village.zoomCand = null;
     setZoomRegime('lock');                            // 전환 중 줌 봉인
     if (parcelId) village.handle.highlightParcel(parcelId, true);  // "내 집이 저기" 앵커
     const f = villageAerial();
     tweenTo(f.pos, f.target, FOCUS_OUT_DUR, {
-      fov: f.fov,
+      fov: f.fov, referenceFov: f.referenceFov,
+      dofAnchor: departingFocus, dofAmount: 0,
       onProgress: (k) => emit('villageFocusMorph', 1 - k),   // 집→부감 패널 모프(1→0)
       onDone: () => {
         village.transitioning = false;
@@ -1345,6 +1485,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     post.setTime('sunset');
     village.active = true; village.selected = null; village.transitioning = true;
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
+    camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
+      ? camera.userData.villageReferenceFov : camera.fov;
     heroActive = true;                          // 랜딩 중 자동 회전 억제
     lastActivity = performance.now() - ORBIT_IDLE_MS - 1000; // 조립 시작 즉시 카메라 선회
     buildVillage(null, true);                    // 히어로 랜딩은 동기(직후 village.handle 사용) — 사전 생성분 소비(무프리징) + 먹 안개 reveal
@@ -1352,6 +1494,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!heroId) {                               // 종가 없음(예외) → 부감 랜딩 폴백
       const f = villageAerial();
       camera.position.copy(f.pos); controls.target.copy(f.target); camera.fov = f.fov;
+      camera.userData.villageReferenceFov = f.referenceFov;
       camera.updateProjectionMatrix(); camera.lookAt(controls.target);
       village.transitioning = false; heroActive = false;
       ensureAudio(); audio?.setBgmVolume(1);   // arm() 이 0 으로 뮤트한 BGM 복원(폴백 경로 — 랜딩 스킵)
@@ -1376,7 +1519,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
     const az = 34 * DEG;  // 정면 기준 three-quarter(정측면) — frontDir±35° 안에서 역광 구도
     const el = 7 * DEG;   // 7도 로우 앵글
-    const r = 1.85 * maxDim; // 기와에 밀착하도록 줌인 강화 (2.25 -> 1.85)
+    // 더 먼 자리에서 좁은 화각으로 같은 화면 점유율을 유지해 처마·산세가 망원으로 압축된다.
+    const heroDistance = dollyDistanceForFov(
+      1.85,
+      VILLAGE_LENS.hero.referenceFov,
+      VILLAGE_LENS.hero.fov,
+    );
+    const r = heroDistance * maxDim;
     const off = new THREE.Vector3(
       r * Math.cos(el) * Math.sin(az),
       r * Math.sin(el),
@@ -1385,7 +1534,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     off.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY); // 가옥 정면 기준 회전각 반영
     const finalTarget = new THREE.Vector3(pr.worldCenter.x, pr.worldCenter.y + HH * 0.42, pr.worldCenter.z);
     const finalPosition = finalTarget.clone().add(off);
-    const finalFov = 21; // 화각 조여서 줌인 강화 (23 -> 21)
+    const finalFov = VILLAGE_LENS.hero.fov;
 
     // 나선 줌인 궤도 극좌표(#98②) — 최종 구도(finalPosition)를 기준각/반경/높이로 분해하고, 시작은
     //   HERO_SPIN_RAD 만큼 앞선 각 + 1.9배 먼 반경 + 4.2m 높은 상공. 조립 내내 각속도 일정(이즈드)으로
@@ -1401,6 +1550,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const startPos = new THREE.Vector3(arc.cx + Math.sin(arc.a0) * arc.r0, arc.y0, arc.cz + Math.cos(arc.a0) * arc.r0);
 
     camera.position.copy(startPos); controls.target.copy(finalTarget); camera.fov = 34; // 먼 fov로 시작
+    camera.userData.villageReferenceFov = 34;
     camera.updateProjectionMatrix(); camera.lookAt(controls.target);
     reapplyVillageFog();
     // 랜딩 먹 안개: 조립 완주까지 걸쳐 두되(hold 로 전반부 짙은 무대 유지) 조립 후반에 마을을 연다(#98④).
@@ -1433,6 +1583,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       t1: finalTarget.clone(),
       f0: 34,
       f1: finalFov,
+      r0: 34,
+      r1: VILLAGE_LENS.hero.referenceFov,
+      changesLens: true,
       onDone: () => {
         settleControls();
         controls.update(); // 1프레임 회전 튕김 차단
@@ -1594,7 +1747,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       //   맞게 자란다(완료 후 스냅 대신). 웨이브(3.6s)보다 살짝 짧게 끝내 finish 의 setZoomRegime 과 안 겹침.
       if (reframe) {
         const f = villageAerial(newHandle);
-        tweenTo(f.pos, f.target, 3.0, { fov: f.fov });
+        tweenTo(f.pos, f.target, 3.0, { fov: f.fov, referenceFov: f.referenceFov });
         village.wave.reframeTween = tween;
       }
       emit('villageWave', { phase: 'start' });
@@ -1734,27 +1887,27 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     merge,
     maxExpansion: () => wingCount(state.preset) + 1,
 
-    setTime(name) {
+    setTime(name, opts = {}) {
       state.time = name;
       bumpShadow(2200);   // #140-A 시간대 크로스페이드: 태양 방향(고도·방위) 이동 동안 그림자 갱신
-      env.setTime(name);
+      env.setTime(name, opts);
       nightGlowRef.setTime(name);
-      post.setTime(name);
+      post.setTime(name, opts);
       refreshAtmosphere();
       audio?.setTime(name);
       // 웨이브 중 old/new가 함께 보이므로 두 핸들에 같은 프레임의 환경 상태를 전달한다.
       // 전역 sky/fog/post는 위에서 한 번만 갱신하고, 핸들별 물·조명·동물만 각각 동기화한다.
-      if (forEachPresentedVillageHandle((handle) => handle.setTime(name))) reapplyVillageFog();
-      focusRing.setTime?.(name);          // 근접 링 앰비언스 시간대(연기·모트·닭)
+      if (forEachPresentedVillageHandle((handle) => handle.setTime(name, opts))) reapplyVillageFog();
+      focusRing.setTime?.(name, opts.immediate); // 근접 링 앰비언스 시간대(연기·모트·닭)
       emit('state', { ...state });
     },
-    setSeason(name) {
+    setSeason(name, opts = {}) {
       state.season = name;
       bumpShadow(1800);   // #140-A 계절 전환 크로스페이드 동안 그림자 갱신(잎·개화 캐스터 정합)
-      env.setSeason(name, {});
+      env.setSeason(name, opts);
       refreshAtmosphere();
-      if (forEachPresentedVillageHandle((handle) => handle.setSeason(name, {}))) reapplyVillageFog();
-      focusRing.setSeason?.(name);        // 근접 링 바람 풀 계절색 연동(#90) — 마을 계절과 일치(미배선 시 여름 초록 고정)
+      if (forEachPresentedVillageHandle((handle) => handle.setSeason(name, opts))) reapplyVillageFog();
+      focusRing.setSeason?.(name, opts);  // 근접 링 풀·반딧불 계절 연동(결정론 캡처는 immediate까지 전달)
       emit('state', { ...state });
     },
     setWeather(name) {
@@ -1839,7 +1992,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           village.selected = null; village.transitioning = false; village.zoomCand = null;
           setPostFocus(false);
           // #123: 규모커밋은 비동기 빌드(forest 워커) — 구 마을 유지 중 부감 프레이밍은 새 핸들 준비 시(onReady).
-          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, onDone: () => setZoomRegime('aerial') }); });
+          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('aerial') }); });
           emit('villageMode', true);
         }
       },
@@ -1849,7 +2002,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         if (village.active) {
           village.selected = null; village.transitioning = false; village.zoomCand = null;
           setPostFocus(false);
-          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, onDone: () => setZoomRegime('aerial') }); });
+          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('aerial') }); });
         }
         emit('villageSeed', village.seed);
         return village.seed;
@@ -1964,13 +2117,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         }
         return { outerR: +villageOuterR().toFixed(0), frameMaxR: +maxR.toFixed(0), corners: out, aspect: +(camera.aspect || 0).toFixed(2) };
       },
-      // 검증용(#92): 줌 연속체 시뮬 — 카메라 거리를 aerialDist 의 frac 배로 설정(휠/핀치 등가). parcelId 지정
+      // 검증용(#92): 줌 연속체 시뮬 — 카메라 거리를 부감 화면 등가 거리의 frac 배로 설정하고
+      // 현재 렌즈의 실제 dolly로 변환한다(휠/핀치 등가). parcelId 지정
       //   시 controls.target 을 그 필지로 조준해 화면중심 후보가 그것이 되게 한다. 다음 프레임 updateZoomContinuum
       //   이 임계 판정으로 자동 focus-in/out 을 트리거(실사용 게이트 경로). 반환: 설정된 카메라↔타깃 거리.
       debugDolly(frac, parcelId = null) {
         if (!village.active || village.transitioning || villageWaveBusy()) return null;
         if (parcelId) { const pr = village.handle.getPickProxy(parcelId); if (pr) controls.target.copy(pr.worldCenter); }
-        const d = (village.aerialDist || 150) * frac;
+        const d = villageCamera.distanceAtFraction(frac);
         const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
         if (dir.lengthSq() < 1e-6) dir.set(0.2, 1, 1.9);
         dir.normalize();
@@ -2127,6 +2281,43 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     __controls: controls,   // 검증용: 프레임 단위 controls.target 샘플링
     debugPostPassOrder: () => postRuntime.debugPassOrder(),
     debugPostResolution: () => postRuntime.debugResolution(),
+    debugDof: debugDofState,
+    debugDofSeek: debugSeekDofTween,
+    debugRenderDofFrame: () => { renderFrame(0); return debugDofState(); },
+    // Deterministic camera-transition gate: applies the exact live-frame particle/LOD
+    // lens policy without drawing the large scene.
+    debugSyncCameraEnvironment: () => syncCameraDependentEnvironment(
+      village.active ? village.handle?.detailLodState?.() : null,
+    ),
+    debugSetPaused(paused = true) {
+      debugPaused = !!paused;
+      clock.getDelta();
+      return debugPaused;
+    },
+    debugAdvancePost(seconds = 2) {
+      const step = 0.05;
+      const count = Math.max(1, Math.ceil(Math.max(0, seconds) / step));
+      for (let i = 0; i < count; i++) post.update(step);
+      return bokehPass.uniforms.highlightThreshold.value;
+    },
+    debugTuneDof({ amount, aperture, maxBlur } = {}) {
+      if (Number.isFinite(aperture)) post.setDofAperture(aperture);
+      if (Number.isFinite(maxBlur)) bokehPass.uniforms.maxblur.value = Math.max(0, maxBlur);
+      if (Number.isFinite(amount)) post.setDofAmount(amount);
+      return debugDofState();
+    },
+    debugAdvanceFocusRing(seconds = 3) {
+      const step = 0.05;
+      const count = Math.max(1, Math.ceil(Math.max(0, seconds) / step));
+      for (let i = 0; i < count; i++) {
+        if (village.active && village.handle) village.handle.updateLod(camera, controls.target, step);
+        const lod = village.active
+          ? (village.handle?.detailLodState?.() || { groundWeight: 0, particleWeight: 0 })
+          : 1;
+        focusRing.update(step, state.time, lod);
+      }
+      return focusRing.strength;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -2220,10 +2411,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     get fogNear() { return scene.fog ? scene.fog.near : null; },
     get fogFar() { return scene.fog ? scene.fog.far : null; },
     get siteR() { return village.handle?.plan?.site?.R ?? null; },
-    // #102 DoF: bokeh 초점 uniform vs 카메라→타깃(또는 트윈 목적) 실거리 오차 계측.
+    // #24 DoF: Bokeh uniform과 활성 의미 앵커의 카메라축 깊이 계측.
     get dofOn() { return !!(bokehPass && bokehPass.enabled); },
     get dofFocus() { return bokehPass ? bokehPass.uniforms.focus.value : null; },
-    get dofTargetDist() { const ft = (tween && tween.lockFocus) ? tween.t1 : controls.target; return camera.position.distanceTo(ft); },
+    get dofTargetDepth() { return post.dof.depthAt(activeDofAnchor()) ?? dofTargetDepth; },
+    // 하위 호환 이름. 이제 잘못된 유클리드 거리가 아니라 실제 Bokeh 축깊이를 반환한다.
+    get dofTargetDist() { return post.dof.depthAt(activeDofAnchor()) ?? dofTargetDepth; },
+    get dofAmount() { return post.dof.amount; },
+    get dofAperture() { return bokehPass ? bokehPass.uniforms.aperture.value : null; },
     // #98 역광: 태양 방위(sun.position 실측)·히어로 종가 frontDir(rotY)·카메라 방위 — 역광 구도 단언.
     get sunAz() { return Math.atan2(sun.position.x, sun.position.z); },
     get heroRotY() { return village.heroRotY != null ? village.heroRotY : null; },

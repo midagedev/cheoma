@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { planParcelFocus } from '../../generators/shared/parcel-spatial.js';
+import { VILLAGE_LENS, dollyDistanceForFov } from '../../camera/optics.js';
 import * as G from '../../core/math/geom2.js';
 import { buildParcelSpec } from './parcel-edit.js';
 
@@ -8,7 +9,7 @@ const DEG = Math.PI / 180;
 function parcelCameraFraming(worldCenter, focus) {
   const target = new THREE.Vector3(worldCenter.x, worldCenter.y + focus.height * 0.42, worldCenter.z);
   const position = new THREE.Vector3(focus.cameraX, target.y + focus.cameraLift, focus.cameraZ);
-  return { position, target, fov: focus.fov };
+  return { position, target, fov: focus.fov, referenceFov: focus.referenceFov };
 }
 
 export function buildParcelPickProxies(plan, site) {
@@ -39,12 +40,28 @@ export function buildParcelPickProxies(plan, site) {
 }
 
 export function cloneCameraFraming(framing) {
-  return { position: framing.position.clone(), target: framing.target.clone(), fov: framing.fov };
+  return {
+    position: framing.position.clone(),
+    target: framing.target.clone(),
+    fov: framing.fov,
+    referenceFov: framing.referenceFov,
+  };
 }
 
-function landmarkCameraFraming(worldCenter, rotationY, width, depth, { fov, azimuth, elevation, targetY, fit, padding }) {
+function landmarkCameraFraming(
+  worldCenter,
+  rotationY,
+  width,
+  depth,
+  { lens, azimuth, elevation, targetY, fit, padding },
+) {
   const extent = Math.max(width, depth);
-  const radius = (extent * 0.5) / Math.tan(fov * 0.5 * DEG) * fit + extent * padding;
+  // First reproduce the established composition at its reference lens, including
+  // padding, then dolly the whole radius. Scaling only the fit term subtly enlarges
+  // monumental compounds when switching to the telephoto profile.
+  const referenceRadius = (extent * 0.5) / Math.tan(lens.referenceFov * 0.5 * DEG) * fit
+    + extent * padding;
+  const radius = dollyDistanceForFov(referenceRadius, lens.referenceFov, lens.fov);
   const offset = new THREE.Vector3(
     radius * Math.cos(elevation * DEG) * Math.sin(azimuth * DEG),
     radius * Math.sin(elevation * DEG),
@@ -52,18 +69,23 @@ function landmarkCameraFraming(worldCenter, rotationY, width, depth, { fov, azim
   );
   offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
   const target = new THREE.Vector3(worldCenter.x, worldCenter.y + targetY, worldCenter.z);
-  return { position: target.clone().add(offset), target, fov };
+  return {
+    position: target.clone().add(offset),
+    target,
+    fov: lens.fov,
+    referenceFov: lens.referenceFov,
+  };
 }
 
 export function palaceCameraFraming(worldCenter, rotationY, width, depth) {
   return landmarkCameraFraming(worldCenter, rotationY, width, depth, {
-    fov: 32, azimuth: 40, elevation: 20, targetY: 6, fit: 1.12, padding: 0.12,
+    lens: VILLAGE_LENS.palace, azimuth: 40, elevation: 20, targetY: 6, fit: 1.12, padding: 0.12,
   });
 }
 
 export function templeCameraFraming(worldCenter, rotationY, width, depth) {
   return landmarkCameraFraming(worldCenter, rotationY, width, depth, {
-    fov: 34, azimuth: 24, elevation: 17, targetY: 4, fit: 1.16, padding: 0.14,
+    lens: VILLAGE_LENS.temple, azimuth: 24, elevation: 17, targetY: 4, fit: 1.16, padding: 0.14,
   });
 }
 

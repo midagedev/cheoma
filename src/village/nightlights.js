@@ -139,6 +139,7 @@ uniform float uMinPx;
 uniform float uMaxPx;
 uniform float uFadeNear;
 uniform float uFadeNearEnd;
+uniform float uLensScale;
 attribute float aPhase;
 attribute float aLit;
 attribute float aThreshold;
@@ -157,17 +158,18 @@ float flick(float t, float ph) {
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float dist = max(-mv.z, 0.001);
+  float visualDist = dist / max(uLensScale, 0.0001);
   // 집집이 다른 문턱을 uNight 이 넘을 때 서서히 점등(0.16 밴드 → 크로스페이드 부드럽게).
   float on = smoothstep(aThreshold, aThreshold + 0.16, uNight);
   float fl = flick(uTime, aPhase);
   float base = aLit * on * fl;
   // 근접 페이드: 아주 가까우면 0(재질 창호광이 바통 터치), 멀어질수록 1.
-  float nearFade = smoothstep(uFadeNear, uFadeNearEnd, dist);
+  float nearFade = smoothstep(uFadeNear, uFadeNearEnd, visualDist);
   vIntensity = base * nearFade;
   vWarm = aWarm;
   if (vIntensity <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
   // 거리 감쇠 + 하/상한 클램프(원거리에서도 읽히는 최소 픽셀).
-  float px = uSizeBase * aScale * uPixelRatio / dist;
+  float px = uSizeBase * aScale * uPixelRatio * uLensScale / dist;
   px = clamp(px, uMinPx * uPixelRatio, uMaxPx * uPixelRatio);
   gl_PointSize = px * (0.55 + 0.45 * smoothstep(0.0, 0.6, base));
   gl_Position = projectionMatrix * mv;
@@ -237,11 +239,14 @@ export function buildNightLights(plan, site) {
     uMaxPx: { value: 17 },        // 근·중거리 오브가 부풀지 않게 상한 하향(26→17)
     uFadeNear: { value: 15 },
     uFadeNearEnd: { value: 62 },
+    uLensScale: { value: 1 },
     uColorCandle: { value: COLOR_CANDLE.clone() },
     uColorLamp: { value: COLOR_LAMP.clone() },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms, vertexShader: VERT, fragmentShader: FRAG,
+    // 필지 단위의 근사 창 좌표는 건물 내부에 놓이므로 일반 깊이 테스트 시 벽에 완전히 묻힌다.
+    // 실제 전면 벽 바깥 좌표를 갖기 전까지 기존 발광 레이어 계약을 유지한다.
     transparent: true, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -259,8 +264,10 @@ export function buildNightLights(plan, site) {
     group,
     setLevel(v) { level = clamp01(v || 0); uniforms.uNight.value = level; points.visible = level > 0.001; },
     setPixelRatio(v) { uniforms.uPixelRatio.value = clamp(v || 1, 0.5, 3); },
-    update(dt, v) {
+    update(dt, v, lensScale = 1) {
       if (v != null) { level = clamp01(v); uniforms.uNight.value = level; }
+      uniforms.uLensScale.value = Number.isFinite(lensScale)
+        ? clamp(lensScale, 0.5, 2) : 1;
       points.visible = level > 0.001;
       if (points.visible) uniforms.uTime.value += dt || 0;
     },

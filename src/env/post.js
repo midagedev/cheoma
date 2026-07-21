@@ -2,7 +2,7 @@
 //
 //   setupPost({ renderer, scene, camera })
 //     → { composer, setTime(name), setSize(w,h), update(dt), setDof(bool),
-//         setFocus(dist), setEnabled(bool), bloomPass, rimPass }
+//         setFocusPoint(worldPoint), setDofAmount(0..1), setEnabled(bool), bloomPass, rimPass }
 //
 // 이 앱의 메인 룩을 한 컴포저로 통합한다(기존 main.js DoF BokehPass 흡수):
 //   fresnel(기본): RenderPass → GradePass(채도) → UnrealBloomPass → BokehPass(opt-in)
@@ -28,11 +28,12 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { TIME_PRESETS } from './sky.js';
 import { createFresnelRim } from './rim.js';
+import { createDofController, DEFAULT_DOF_APERTURE } from './dof.js';
+import { StableBokehPass } from './stable-bokeh-pass.js';
 
 // 태양 글로우 스프라이트를 놓을 반경(카메라 far=500·최원경 능선 r≈470 안쪽).
 const SUN_GLOW_DIST = 430;
@@ -567,10 +568,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   composer.addPass(bloomPass);
 
   // DoF(피사계 심도) — 기존 main.js BokehPass 흡수. 기본 off, setDof 로 토글.
-  const bokehPass = new BokehPass(scene, camera, {
-    focus: 40, aperture: 0.00012, maxblur: 0.01,
+  const bokehPass = new StableBokehPass(scene, camera, {
+    focus: 40, aperture: DEFAULT_DOF_APERTURE, maxblur: 0.01,
   });
   bokehPass.enabled = false;
+  const dof = createDofController({ camera, pass: bokehPass, aperture: DEFAULT_DOF_APERTURE });
   composer.addPass(bokehPass);
 
   // 태양 렌즈 플레어(#67): bloom·DoF 뒤·OutputPass(ACES) 앞에 가산. bloom 이후라 고스트가
@@ -651,6 +653,10 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     bloomPass.strength = cur.bloomStrength;
     bloomPass.radius = cur.bloomRadius;
     bloomPass.threshold = cur.bloomThreshold;
+    // Bloom and circular DoF consume the same linear-HDR image. Deriving the bokeh
+    // threshold from the time profile keeps dim night lanterns eligible without
+    // mistaking sunlit plaster for an emitter during day/dawn transitions.
+    bokehPass.uniforms.highlightThreshold.value = Math.max(0.48, cur.bloomThreshold * 0.9);
     // 저고도 게이트: 림은 태양이 낮을 때(골든아워)만 성립하고 정오로 갈수록 소거된다.
     const altGate = 1.0 - THREE.MathUtils.smoothstep(cur.dir.y, 0.20, 0.52);
     rimBase = cur.rim * altGate;   // update() 가 backlit 을 곱해 최종 강도(두 모드 공통 저장)
@@ -783,8 +789,11 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     flarePass.uniforms.aspect.value = (h > 0 ? w / h : 1.0);  // 고스트·헤일로 화면상 원형 유지
   }
 
-  function setDof(on) { bokehPass.enabled = !!on; }
-  function setFocus(dist) { bokehPass.uniforms.focus.value = dist; }
+  function setDof(on) { return dof.setEnabled(on); }
+  function setDofAmount(weight) { return dof.setAmount(weight); }
+  function setDofAperture(value) { return dof.setAperture(value); }
+  function setFocus(dist) { return dof.setFocus(dist); }
+  function setFocusPoint(point) { return dof.focusAt(point); }
 
   function setEnabled(v) {
     enabled = !!v;
@@ -845,10 +854,13 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   }
 
   return {
-    composer, setTime, setSize, update, setDof, setFocus, setEnabled, setWeather, setFlareEnabled, setRimEnabled,
+    composer, setTime, setSize, update,
+    setDof, setDofAmount, setDofAperture, setFocus, setFocusPoint,
+    setEnabled, setWeather, setFlareEnabled, setRimEnabled,
     renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass, sunGlow, fresnelRim,
+    dof,
     // 마을 리롤·focus-in 오버레이 직후 명시 재패치용(선택 — update() throttle 스캔이 이미 self-heal).
-    rimRescan() { if (fresnelRim) fresnelRim.apply(scene); },
+    rimRescan(root = scene) { if (fresnelRim) fresnelRim.apply(root); },
     dispose() {
       if (disposed) return;
       disposed = true;

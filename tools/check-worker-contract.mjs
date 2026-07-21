@@ -25,10 +25,12 @@ const expectedSceneHashes = {
   hanyang: 'a7289eb2:19a19830:3a9535c2:0b896f00',
 };
 const expectedProxyHashes = {
-  village: '28774cfe',
-  town: '9f4da67b',
-  capital: '0032c3e8',
-  hanyang: 'de9f7c23',
+  // #24: 프록시의 집/회전/경계는 그대로다. framing만 일반 필지 20°와 궁/사찰
+  // 24°/26° 망원으로 바뀌고, named referenceFov + 보상 dolly가 descriptor에 추가됐다.
+  village: 'c5caff50',
+  town: 'b3afd832',
+  capital: 'ae8da7ff',
+  hanyang: '6f2570b9',
 };
 
 const server = await createServer({
@@ -98,12 +100,14 @@ try {
         { isSharedResource },
         { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked },
         { FOREST_VISUAL_RADIUS },
+        { VILLAGE_LENS, dollyScaleForFov },
       ] = await Promise.all([
         import('/src/village/adapter.js'),
         import('/tools/lib/hash-three-group.mjs'),
         import('/src/core/three-resources.js'),
         import('/src/village/citywall-contour.js'),
         import('/src/village/forest-crunch.js'),
+        import('/src/camera/optics.js'),
       ]);
       const probeLifecycle = (handle) => {
         const owned = new Set();
@@ -213,6 +217,44 @@ try {
         }
         return { pass: failures.length === 0, checked, failures };
       };
+      const landmarkLensContract = (handle, { requirePalace = false, requireTemple = true } = {}) => {
+        const DEG = Math.PI / 180;
+        const failures = [];
+        let checked = 0;
+        const specs = [
+          { id: 'palace', profile: VILLAGE_LENS.palace, fit: 1.12, padding: 0.12, required: requirePalace },
+          { id: 'temple', profile: VILLAGE_LENS.temple, fit: 1.16, padding: 0.14, required: requireTemple },
+        ];
+        for (const spec of specs) {
+          const proxy = handle.getPickProxy(spec.id);
+          if (!proxy) {
+            if (spec.required) failures.push({ id: spec.id, reason: 'missing' });
+            continue;
+          }
+          checked++;
+          const framing = proxy.cameraFraming;
+          const extent = Math.max(proxy.dims.x, proxy.dims.z);
+          const expectedReferenceDistance = (extent * 0.5)
+            / Math.tan(spec.profile.referenceFov * 0.5 * DEG) * spec.fit
+            + extent * spec.padding;
+          const physicalDistance = framing.position.distanceTo(framing.target);
+          const scale = dollyScaleForFov(spec.profile.referenceFov, spec.profile.fov);
+          const screenEquivalentDistance = physicalDistance / scale;
+          const referencePreserved = framing.referenceFov === spec.profile.referenceFov;
+          const fovPreserved = framing.fov === spec.profile.fov;
+          const compositionPreserved = Math.abs(screenEquivalentDistance - expectedReferenceDistance) <= 1e-8;
+          if (!referencePreserved || !fovPreserved || !compositionPreserved) {
+            failures.push({
+              id: spec.id,
+              fov: framing.fov,
+              referenceFov: framing.referenceFov,
+              screenEquivalentDistance,
+              expectedReferenceDistance,
+            });
+          }
+        }
+        return { pass: failures.length === 0, checked, failures };
+      };
       const scales = ['village', 'town', 'capital', 'hanyang'];
       const cases = [];
       for (const scale of scales) {
@@ -229,6 +271,9 @@ try {
         const syncProxyHash = hashVillagePickProxies(sync);
         const asyncProxyHash = hashVillagePickProxies(asyncHandle);
         const vegetation = wallVegetationContract(sync);
+        const lensRequirements = { requirePalace: scale === 'hanyang', requireTemple: true };
+        const syncLandmarkLenses = landmarkLensContract(sync, lensRequirements);
+        const asyncLandmarkLenses = landmarkLensContract(asyncHandle, lensRequirements);
         const syncProbe = probeLifecycle(sync);
         const asyncProbe = probeLifecycle(asyncHandle);
         sync.dispose();
@@ -257,6 +302,8 @@ try {
           asyncLifecycle,
           inactive,
           vegetation,
+          syncLandmarkLenses,
+          asyncLandmarkLenses,
         });
       }
       return { cases, workerStats };
@@ -273,7 +320,9 @@ try {
       const baselineEqual = item.syncHash.hash === expectedSceneHashes[item.scale]
         && item.syncProxyHash.hash === expectedProxyHashes[item.scale];
       const proxyApiPass = item.syncProxyHash.singleContract && item.asyncProxyHash.singleContract;
-      const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && item.lifecyclePass && item.vegetation.pass;
+      const landmarkLensPass = item.syncLandmarkLenses.pass && item.asyncLandmarkLenses.pass;
+      const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && landmarkLensPass
+        && item.lifecyclePass && item.vegetation.pass;
       failed ||= !pass;
       console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`);
       if (!item.equal) console.log(`          async ${item.asyncHash.hash}  proxy=${item.asyncProxyHash.hash}`);
@@ -282,6 +331,9 @@ try {
       }
       if (!stepsEqual) console.log(`          steps ${JSON.stringify(item.steps)}`);
       if (!proxyApiPass) console.log('          getPickProxy descriptor parity/isolation contract failed');
+      if (!landmarkLensPass) {
+        console.log(`          landmark lenses sync=${JSON.stringify(item.syncLandmarkLenses)} async=${JSON.stringify(item.asyncLandmarkLenses)}`);
+      }
       if (!item.lifecyclePass) {
         console.log(`          lifecycle sync=${JSON.stringify(item.syncLifecycle)} async=${JSON.stringify(item.asyncLifecycle)} inactive=${item.inactive}`);
       }

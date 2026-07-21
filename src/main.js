@@ -11,11 +11,12 @@ import { setupCinematic } from './camera/cinematic.js';
 import { setupAudio } from './audio/index.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { playAssembly } from './anim/assembly.js';
 import { capturePostcard } from './share/postcard.js';
 import { setupPost } from './env/post.js';
+import { createDofController, DEFAULT_DOF_APERTURE } from './env/dof.js';
+import { StableBokehPass } from './env/stable-bokeh-pass.js';
 import { setupTreeOccluder } from './env/tree-occluder.js';
 
 const q = new URLSearchParams(location.search);
@@ -50,7 +51,7 @@ const PAPER = new THREE.Color(INK_PALETTE.paper);
 const dofParam = q.get('dof');
 const dofState = {
   enabled: dofParam === null ? !SHOT : dofParam === '1',
-  aperture: 0.00012, // 절제된 시작값: 건물 몸체는 선명, 원경 산·최전경만 살짝 풀림
+  aperture: DEFAULT_DOF_APERTURE, // 실측 균형값: 건물 몸체는 선명, 원경 산·최전경은 읽히게 풀림
 };
 
 // 플래그십 룩(bloom 헤이즈 + 골든아워 림 + 태양 글로우): 기본 ON(shot 포함).
@@ -288,19 +289,23 @@ function ensureInk() {
 // ---------- 피사계 심도(DoF) 컴포저 (pbr 전용, 지연 생성) ----------
 // RenderPass → BokehPass → OutputPass. RenderPass/BokehPass 는 오프스크린(선형)에서
 // 처리되고 마지막 OutputPass 가 캔버스에 렌더될 때만 ACES 톤매핑+sRGB 를 한 번 적용한다
-// (renderer.render 직접 경로와 색 일치). focus 는 매 프레임 카메라→controls.target 거리로 갱신.
+// (renderer.render 직접 경로와 색 일치). focus 는 매 프레임 controls.target의 카메라축 깊이로 갱신.
 let dof = null;
 function ensureDof() {
   if (!dof) {
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bokeh = new BokehPass(scene, camera, {
+    const bokeh = new StableBokehPass(scene, camera, {
       focus: 40, aperture: dofState.aperture, maxblur: 0.01,
     });
     composer.addPass(bokeh);
     composer.addPass(new OutputPass());
     composer.setSize(innerWidth, innerHeight); // EffectComposer 가 DPR 내부 반영
-    dof = { composer, bokeh };
+    dof = {
+      composer,
+      bokeh,
+      controller: createDofController({ camera, pass: bokeh, aperture: dofState.aperture }),
+    };
   }
   return dof;
 }
@@ -475,7 +480,10 @@ if (!SHOT) {
     .onChange((v) => applyMode(v));
   fRender.add(dofState, 'enabled').name('depth of field');
   fRender.add(dofState, 'aperture', 0, 0.0004, 0.00001).name('aperture')
-    .onChange((v) => { if (dof) dof.bokeh.uniforms.aperture.value = v; });
+    .onChange((v) => {
+      dof?.controller.setAperture(v);
+      post?.setDofAperture(v);
+    });
   fRender.add({ postcard: () => makePostcard({ download: true }) }, 'postcard');
   const fEnv = gui.addFolder('Environment');
   fEnv.add(envState, 'enabled').name('enabled').onChange((v) => {
@@ -513,8 +521,8 @@ function renderFrame() {
   // 플래그십 룩(기본): bloom·rim·태양 글로우. DoF 는 이 컴포저의 bokeh 로 흡수.
   if (postEnabled) {
     const p = ensurePost();
-    p.setDof(dofState.enabled);
-    if (dofState.enabled) p.setFocus(camera.position.distanceTo(controls.target));
+    p.setDofAmount(dofState.enabled ? 1 : 0);
+    if (dofState.enabled) p.setFocusPoint(controls.target);
     p.update();  // 화면상 태양 방향·역광 계수 갱신(카메라 이동 반영)
     p.composer.render();
     return;
@@ -522,7 +530,7 @@ function renderFrame() {
   // ?post=0 폴백: 기존 경로(선명 렌더 또는 DoF 전용 컴포저).
   if (dofState.enabled) {
     const d = ensureDof();
-    d.bokeh.uniforms.focus.value = camera.position.distanceTo(controls.target);
+    d.controller.focusAt(controls.target);
     d.composer.render();
     return;
   }

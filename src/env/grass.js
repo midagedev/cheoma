@@ -303,6 +303,9 @@ export function setupGrass(parent, {
   mesh.castShadow = false;          // 그림자 패스 0(드로우콜 +1 유지) + 얇은 블레이드 자기그림자 노이즈 회피
   mesh.receiveShadow = true;        // 담장·몸채 그림자를 받아 지면에 안착(추가 드로우콜 없음)
   mesh.frustumCulled = false;
+  // 색 패스는 uGrassFade grow-in + 바람 변형을 쓰지만 전역 MeshDepthMaterial은 둘 다 모른다.
+  // 얇은 장식 풀이 완전 높이의 정적 깊이로 먼저 팝하지 않도록 지면/건물 깊이를 그대로 사용한다.
+  mesh.userData.dofDepth = false;
 
   // 인스턴스 행렬: 로컬 TRS(yaw+scale+pos) → 필지 월드행렬 곱(회전 반영). y=0=지면.
   const parcelM = matrix ? matrix.clone() : new THREE.Matrix4();

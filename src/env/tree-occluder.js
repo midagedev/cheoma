@@ -1,9 +1,10 @@
 import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
+import { patchInstFadeShader } from './inst-fade-shader.js';
 
 // 전경 나무 오클루더 페이드 — 프레임워크 무관 ES 모듈.
 //   setupTreeOccluder({ getSubject }) →
-//     { register(group, opts), update(camera, dt), enableSelfDrive(), dispose() }
+//     { register(group, opts), setSubject(point), update(camera, dt), dispose() }
 //
 // 자동 궤도 회전 중 카메라와 피사체(건물·마을 중심) 사이를 가로막는 근경 나무가 화면을 통째로
 // 덮으며 지나가 시야가 막히는 걸 막는다. 시선을 가리는 나무만 부드럽게 dithered 페이드(스크린도어
@@ -15,8 +16,8 @@ import * as THREE from 'three';
 //    프레임 간 깜빡임 없고, fade 가 이즈되며 픽셀이 서서히 생겼다 사라져 부드러운 반투명으로 읽힌다.
 //  - 성능: 오클루전 타깃 재계산은 스로틀(RECOMPUTE_DT)+반경 프리필터(피사체보다 먼 나무 조기 제외),
 //    instFade 이징만 매 프레임. 나무 캐노피 월드좌표는 정적이라 register 시 1회 캐시.
-//  - 마을(app 렌더 루프가 카메라를 안 넘김)은 enableSelfDrive() 로 mesh.onBeforeRender(카메라 제공)
-//    에서 자가 구동. 단일 씬은 main.js 루프가 update(camera, dt) 로 직접 구동.
+//  - 앱 마을은 VillageHandle.updateLod가 선택 필지 target을 setSubject로 전달하고 프레임당 한 번
+//    update한다. 독립 호출자는 getSubject를 주고 자신의 프레임 루프에서 update한다.
 
 const MIN_FADE = 0.18;     // 완전 오클루전 시 잔여 불투명(≈18% 픽셀 유지 → 반투명하게 비침)
 const EASE_TAU = 0.14;     // 페이드 이징 시상수(초) — 약 0.4s 수렴(팝 방지)
@@ -37,18 +38,12 @@ export function setupTreeOccluder({ getSubject } = {}) {
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float instFade;\nvarying float vInstFade;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvInstFade = instFade;');
-      // 안전 앵커: <clipping_planes_fragment> 는 seasons·snow 가 건드리지 않고 main() 앞머리에 항상 있음.
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vInstFade;')
-        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-        if (vInstFade < 0.999) {
-          float _ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-          if (vInstFade < _ign) discard;
-        }`);
+      // 안전 앵커: clipping chunk는 seasons·snow가 건드리지 않고 main() 앞머리에 항상 있다.
+      patchInstFadeShader(shader);
     };
+    // Material의 기본 cache key는 onBeforeCompile.toString()을 사용한다. 별도 own key를
+    // 심으면 rim.js가 섬세한 기존 shader 변형으로 간주해 이 수목을 림 대상에서 제외한다.
+    // wrapper 자체가 fade 변형을 구분하므로 기본 key를 유지한다.
     mat.needsUpdate = true;
   }
 
@@ -80,11 +75,21 @@ export function setupTreeOccluder({ getSubject } = {}) {
 
   const _cam = new THREE.Vector3();
   const _subj = new THREE.Vector3();
+  const _manualSubject = new THREE.Vector3();
+  let hasManualSubject = false;
   const _dir = new THREE.Vector3();
   const _p = new THREE.Vector3();
+  function setSubject(subject) {
+    if (subject && [subject.x, subject.y, subject.z].every(Number.isFinite)) {
+      _manualSubject.copy(subject);
+      hasManualSubject = true;
+    } else {
+      hasManualSubject = false;
+    }
+  }
   function recompute(camera) {
     _cam.setFromMatrixPosition(camera.matrixWorld);
-    const s = getSubject && getSubject();
+    const s = (getSubject && getSubject()) || (hasManualSubject ? _manualSubject : null);
     _subj.copy(s || _subj.set(0, 0, 0));
     _dir.set(0, 0, -1).applyQuaternion(camera.quaternion); // 카메라 전방(월드)
     const camDotDir = _cam.dot(_dir); // 뒤편 판정용(할당 없이 (P-cam)·dir = P·dir - cam·dir)
@@ -131,25 +136,9 @@ export function setupTreeOccluder({ getSubject } = {}) {
     e.attr.needsUpdate = true;
   }
 
-  // 마을 자가 구동: mesh.onBeforeRender(renderer, scene, camera)에서 카메라를 얻어 프레임당 1회 구동.
-  let lastFrame = -1, lastT = 0;
-  function selfTick(renderer, camera) {
-    const frame = renderer.info.render.frame;
-    if (frame === lastFrame) return;      // 프레임당 한 번(여러 mesh 콜백 중 최초만)
-    lastFrame = frame;
-    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-    const dt = lastT ? Math.min(0.05, now - lastT) : 0.016;
-    lastT = now;
-    update(camera, dt);
-  }
-  function enableSelfDrive() {
-    for (const e of entries) e.mesh.onBeforeRender = (renderer, scene, camera) => selfTick(renderer, camera);
-  }
-
   function dispose() {
-    for (const e of entries) { e.mesh.onBeforeRender = () => {}; }
     entries.length = 0;
   }
 
-  return { register, update, enableSelfDrive, dispose };
+  return { register, setSubject, update, dispose };
 }
