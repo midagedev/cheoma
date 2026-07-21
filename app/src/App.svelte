@@ -5,6 +5,7 @@
   import { configFromSeed, paramsFor, newSeed, FLAGSHIP_TIME } from './lib/seed.js';
   import { readUrl, writeUrl } from './lib/url.js';
   import { buildRebuildPayload, villageDefaults } from './lib/edit-schema.js';
+  import { createLiveEditScheduler } from './lib/live-edit-scheduler.js';
   import { device, initDevice } from './lib/device.svelte.js';
   import Hero from './components/Hero.svelte';
   import SealLabel from './components/SealLabel.svelte';
@@ -96,6 +97,7 @@
     const st = engine.village.getState();
     focusMorphLatched = true;                   // 이후 스테일 morph 이벤트가 확정값을 되돌리지 못하게 래치
     if (!st.selected) {                         // 엔진은 부감(비-focus) → 마을 섹션으로 확정(갇힌 morph 해소)
+      liveEdit.cancel();
       villageEditing = null; villageZooming = false; focusMorph = 0;
     } else {                                    // 엔진은 특정 필지 focus → 집 섹션으로 확정
       villageZooming = false; focusMorph = 1;
@@ -196,7 +198,12 @@
     engine.on('villageMode', (on) => {
       sceneVillage = on;
       // 마을 씬 이탈 = 랜딩 종료(정상 완주든 폴백/리버트든) → heroLanding 해제로 #118 U4 크롬 스턱 방지.
-      if (!on) { villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0; villageZooming = false; waving = false; heroLanding = false; pendingCommit = null; clearFocusWatchdog(); focusMorphLatched = false; }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
+      if (!on) {
+        liveEdit.cancel();
+        villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0;
+        villageZooming = false; waving = false; heroLanding = false; pendingCommit = null;
+        clearFocusWatchdog(); focusMorphLatched = false;
+      }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
       else pullVillage();
       syncUrl();
     });
@@ -219,10 +226,17 @@
       clearFocusWatchdog(); focusMorphLatched = false;   // #155 근접 안착 → 감시 해제
     });
     // focus-out START — 패널은 집 컨텍스트를 유지한 채 모프가 역행(villageFocusMorph 가 1→0).
-    engine.on('villageReturn', () => { villageZooming = true; hoverInfo = null; armFocusWatchdog(); });   // #155
+    engine.on('villageReturn', () => {
+      liveEdit.cancel();
+      villageZooming = true; hoverInfo = null; armFocusWatchdog();
+    });   // #155
     // focus-out 완료(부감 도착) — 집 컨텍스트 해제, 마을 섹션만. 랜딩이 부감으로 귀착한 경우도 여기 —
     //   heroLanding 해제로 크롬 복원(#118 U4).
-    engine.on('villageReturnDone', () => { villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false; clearFocusWatchdog(); focusMorphLatched = false; });
+    engine.on('villageReturnDone', () => {
+      liveEdit.cancel();
+      villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false;
+      clearFocusWatchdog(); focusMorphLatched = false;
+    });
     // 리롤 웨이브(#56): 진행 중 입력·버튼 잠금, 완료 시 호수·URL 갱신.
     engine.on('villageWave', (w) => {
       waving = w.phase === 'start';
@@ -333,6 +347,7 @@
       stopWalkFeed();
       clearTimeout(toastTimer);
       clearFocusWatchdog();
+      liveEdit.dispose();
       engine?.dispose();
     };
   });
@@ -617,6 +632,7 @@
     // 필지가 바뀔 때만 기본값으로 재시드(같은 필지 재-emit 에선 편집 보존). 단 리롤(#100)은 같은
     //   parcelId 라도 시드가 굴러 새 기본값이므로 p.reseed 로 강제 재시드(desync 방지).
     const changed = p.reseed || !villageEditing || villageEditing.parcelId !== p.parcelId;
+    if (changed) liveEdit.cancel();
     villageEditing = { parcelId: p.parcelId, spec: p.spec };
     if (changed) editParams = { kind: p.spec.kind, ...(p.spec.params || {}) };
   }
@@ -624,11 +640,6 @@
   //   드래그 라이브 재생성 금지 — 값 라벨만 라이브, 놓을 때(commit) 재생성.
   const isSpecialCompound = (spec) => !!spec
     && (spec.hero || spec.family === 'palace-compound' || spec.family === 'temple');
-  let liveRaf = null, liveLast = 0;
-  // 라이브 재생성 최소 간격 — 재생성(~12ms)을 매 프레임 태우면 focus 뷰 후처리(rim/bloom/DoF/flare)
-  //   렌더와 합쳐 프레임이 눌린다. 재생성 케이던스를 렌더에서 분리(~22Hz)해 사이 프레임은 렌더만 —
-  //   변형은 여전히 라이브로 읽히되 파이프라인이 숨을 쉰다(#69 부드러움). 값 라벨은 항상 즉시.
-  const LIVE_MIN_MS = 45;
   function pushRebuild({ refreshFlora = true } = {}) {
     if (!villageEditing) return;
     const rebuilt = engine.village.rebuild(
@@ -644,19 +655,18 @@
       villageEditing = { ...villageEditing, spec: nextSpec };
     }
   }
-  function scheduleLive() {
-    if (liveRaf != null) return;                   // rAF 1회 병합(드래그 이벤트 폭주 흡수)
-    liveRaf = requestAnimationFrame(() => {
-      liveRaf = null;
-      if (performance.now() - liveLast < LIVE_MIN_MS) { scheduleLive(); return; }  // 아직 이르면 다음 프레임(값은 최신 editParams)
-      liveLast = performance.now();
-      pushRebuild({ refreshFlora: false });
-    });
-  }
+  // Geometry-backed range controls receive many more input events than useful
+  // rendered frames. The reusable scheduler keeps the label immediate, merges
+  // preview work latest-wins, adapts its cadence to measured rebuild cost, and
+  // makes pointer release the only flora/pick-boundary commit (#3, #19).
+  const liveEdit = createLiveEditScheduler({
+    preview: () => pushRebuild({ refreshFlora: false }),
+    commit: () => pushRebuild(),
+  });
   function villageLive(k, v) {
     editParams[k] = v;
     if (isSpecialCompound(villageEditing?.spec)) return;   // 특수 컴파운드(종가·관아·궁): 값 라벨만 라이브, 놓을 때 재생성
-    scheduleLive();
+    liveEdit.request();
   }
   function villageCommit(k, v) {
     // Switching a temple grammar is a semantic layout change, not a cosmetic
@@ -668,11 +678,10 @@
       : null;
     if (templeDefaults) editParams = { ...editParams, ...templeDefaults, variant: v };
     else editParams[k] = v;
-    if (liveRaf != null) { cancelAnimationFrame(liveRaf); liveRaf = null; }
-    pushRebuild();
+    liveEdit.commit();
   }
   function villageSetType(kind) { villageCommit('kind', kind); }
-  function closeVillageEdit() { engine.village.return(); }
+  function closeVillageEdit() { liveEdit.cancel(); engine.village.return(); }
 </script>
 
 <div class="stage" bind:this={container}></div>

@@ -39,7 +39,7 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
-    if (/^app\/src\/(?:App\.svelte|components\/ContextPanel\.svelte|engine\/engine\.js)$/.test(path)) {
+    if (/^app\/src\/(?:App\.svelte|components\/ContextPanel\.svelte|engine\/engine\.js|lib\/live-edit-scheduler\.js)$/.test(path)) {
       select('focused rebuild surface changed', 'parcel-rebuild-browser');
     }
     if (path === 'app/src/engine/engine.js') {
