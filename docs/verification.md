@@ -67,6 +67,7 @@ npm run check:yard          # 마당나무·부속채·장독대 등 hard object
 npm run check:wave          # 마을 재생성 scenery 배타 소유·재질 불변·취소 계약
 npm run check:choga-roof    # 초가 지붕/벽 접합만 빠르게 검사
 npm run check:roof-seams    # straight-skeleton 기와지붕 face 이음새 검사
+npm run check:cinematic     # 막다른 길·±π·드론 시선의 각속도/각가속도 순수 계약
 npm run check:app           # 실제 Vite 앱 Playwright smoke
 npm run check:build         # OS 임시 outDir의 격리 production build
 npm run check:worker        # sync/Worker/fallback 전체 마을 계약
@@ -297,8 +298,9 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | --- | --- | --- |
 | `tools/check-determinism.mjs` | 일부 plan 반복성 보조 검사 | worker·forest·temple 전체 계약이 아니다. |
 | `tools/verify-solo-app.mjs` | 외딴집·절 단독 populate와 browser error | 전체 앱·worker 검사가 아니다. |
-| `tools/verify-cine.mjs` | drone path와 walker 수학 | 앱 배선은 확인하지 않는다. |
-| `tools/verify-cinewire.mjs` | 앱 시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |
+| `tools/check-cinematic-turns.mjs` | 브라우저 없이 ±π 최단각, 각속도·각가속도, 주도로 시작점, 합성 막다른 길 반복 왕복 | 실제 마을 지형과 앱 카메라 배선은 확인하지 않는다. |
+| `tools/verify-cine.mjs` | 세 규모 drone path와 walker 100초 수학·결정론 | 앱 배선은 확인하지 않는다. |
+| `tools/verify-cinewire.mjs` | 앱 패스 경계 시선 상한·시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |
 | `tools/check-audio.mjs` | 합성음 RMS, 시간·날씨·BGM 배선, source/node teardown | 공유 `AudioContext` 자체는 닫지 않으며 시작/정지·연결/해제 identity를 비교한다. |
 | `tools/check-dof.mjs` | 축방향 초점, 단일 DoF controller, 깊이 기여 분류, 고정 41-tap 원형 kernel의 순수 계약 | 실제 depth prepass와 전환 배선은 앱 게이트가 맡는다. |
 | `tools/check-dof-app.mjs` | 실제 광각↔망원 focus/hop/reversal과 StableBokeh 깊이 제외·상태 복원 | Bokeh 실제 렌더는 한 프레임만 수행하며 미감 판정을 대신하지 않는다. |

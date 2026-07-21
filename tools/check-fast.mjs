@@ -3,6 +3,7 @@ import { runVerificationChecks } from './lib/verification-runner.mjs';
 
 const checks = [
   './check-architecture.mjs',
+  './check-cinematic-turns.mjs',
   './check-dof.mjs',
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',

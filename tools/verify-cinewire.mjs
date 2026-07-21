@@ -110,9 +110,14 @@ ok(chainSt.active && chainSt.index === 0 && !chainSt.single, `② 체인 재생 
 // debugAdvance 로 각 패스를 강제 완주시켜 전이 관찰(긴 duration 대기 없이).
 const seen = [chainSt.pass];
 let camFiniteThroughCut = true;
+let maxChainTurnRate = 0;
 for (let i = 0; i < 5; i++) {
   await ev(page, () => window.__engine.cine.debugAdvance());
-  await wait(page, 130);
+  for (let sample = 0; sample < 6; sample++) {
+    await wait(page, 24);
+    const state = await cine(page);
+    maxChainTurnRate = Math.max(maxChainTurnRate, state.turnRateDeg || 0);
+  }
   const c = await cam(page); if (!c.finite) camFiniteThroughCut = false;
   const s = await cine(page);
   if (s.pass !== seen[seen.length - 1]) seen.push(s.pass);
@@ -122,6 +127,7 @@ ok(seen.length >= 3, `② 패스 전이 발생(관측 ${seen.length}종: ${seen.
 // 5회 강제 완주 → crane 이 두 번(index 0·4) 나타남 = 체인 끝에서 처음으로 순환.
 ok(seen.filter((s) => s === 'crane-in').length >= 2 || seen.length >= 5, `② 체인 순환(재-crane 관측: ${seen.join('→')})`);
 ok(camFiniteThroughCut, `② 패스 컷 전환 중 camera finite`);
+ok(maxChainTurnRate <= 72.2, `② 패스 컷 시선 각속도 ≤ 72.2°/s (max=${maxChainTurnRate.toFixed(1)}°/s)`);
 const stillActive = (await cine(page)).active;
 ok(stillActive, `② 체인은 순환 재생(자동 종료 안 함)=${stillActive}`);
 

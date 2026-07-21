@@ -15,6 +15,7 @@
     "check:audio": "node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
+    "check:cinematic": "node tools/check-cinematic-turns.mjs",
     "check:citywall": "node tools/check-citywall.mjs",
     "check:dof": "node tools/check-dof.mjs",
     "check:dof:app": "node tools/check-dof-app.mjs",

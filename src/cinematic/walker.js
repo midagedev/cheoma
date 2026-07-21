@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createHeadingController, shortestAngleDelta } from '../camera/heading.js';
 import { buildObstacles, mainRoad } from './dronepath.js';
 
 // 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103).
@@ -13,25 +14,25 @@ import { buildObstacles, mainRoad } from './dronepath.js';
 // 접지: 시선고 = heightAt + 1.6m, 계단·성토 패드 단차를 지수 스무딩(단차에서 튀지 않게). 하한 클램프로
 //   지면 침하(발이 땅 아래) 0 보장. 충돌: 필지 풋프린트(담 포함)를 solid OBB 로 보고 축분리 슬라이드
 //   (뚫고 들어가기 금지). 대문 개구 통과는 미구현(간이) — 필지 전체를 solid 로 취급, 담을 따라 미끄러짐.
-//   경계: 마을 분지(bowlR) 밖으로 소프트 클램프(bowlR·1.12 하드 캡).
+//   경계: 마을 분지(bowlR)·1.12 밖으로 나가지 않는 하드 캡.
+//   자동산책 종점: 먼저 멈춰 바라본 뒤 52°/s·120°/s² 제한으로 회전하고 다시 걷는다. 정확히 반대인
+//   ±π 목표도 회전면을 고정해 한 프레임 급회전이나 좌우 부호 진동을 만들지 않는다.
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const EYE = 1.6;
 const WALK = 1.4, RUN = 2.8;
 const BODY = 0.45;              // 몸 반경(담과의 이격)
-
-// 최단각 보간(±π 래핑).
-function lerpAngle(a, b, t) {
-  let d = ((b - a + Math.PI) % (2 * Math.PI)) - Math.PI;
-  if (d < -Math.PI) d += 2 * Math.PI;
-  return a + d * t;
-}
+const DEG = Math.PI / 180;
+const AUTO_LOOK_AHEAD = 3.0;
+const AUTO_TURN_SPEED = 52 * DEG;
+const AUTO_TURN_ACCELERATION = 120 * DEG;
+const AUTO_MOVE_CONE = 62 * DEG;
+const AUTO_TURN_PAUSE = 0.35;
 
 export function createWalker({ site, plan, heightAt } = {}) {
   const H = typeof heightAt === 'function' ? heightAt : (site && site.heightAt) || (() => 0);
   const C = site.center, bowlR = site.bowlR, R = site.R;
   const MAXR = bowlR * 1.12;                 // 경계 하드 캡
-  const SOFTR = bowlR * 1.0;                 // 여기서부터 바깥 성분 감쇠(소프트)
   const obstacles = buildObstacles(plan, H); // 지붕 top 은 미사용, 풋프린트 OBB 만 사용
 
   // (x,z) 가 어떤 담(풋프린트+몸 반경) 안이면 true.
@@ -52,25 +53,21 @@ export function createWalker({ site, plan, heightAt } = {}) {
     return { x: px, z: pz };
   };
 
-  // ── 상태 ──
-  const spawn = nudgeOut(
-    site.entrance ? site.entrance.x : C.x,
-    site.entrance ? site.entrance.z : (C.z + bowlR * 0.3),
-  );
-  let x = spawn.x, z = spawn.z;
-  let yaw = Math.atan2(C.x - x, C.z - z);    // 초기 시선: 마을 중심
-  let pitch = 0;
-  let eyeY = H(x, z) + EYE;
-
-  const pos = new THREE.Vector3(x, eyeY, z);
-  const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-
   // ── 자동 산책 경로(도로 폴리라인) ──
-  let auto = false, routeS = 0, routeDir = 1;
+  const entrance = site.entrance || { x: C.x, z: C.z + bowlR * 0.3 };
   const road = mainRoad(plan);
-  const routePts = road ? road.pts.slice() : [{ x: C.x, z: C.z + bowlR * 0.4 }, { x: C.x, z: C.z - bowlR * 0.4 }];
+  const routePts = road
+    ? road.pts.slice()
+    : [{ x: C.x, z: C.z + bowlR * 0.4 }, { x: C.x, z: C.z - bowlR * 0.4 }];
+  const endpointDistance = (point) => Math.hypot(point.x - entrance.x, point.z - entrance.z);
+  if (endpointDistance(routePts[routePts.length - 1]) < endpointDistance(routePts[0])) routePts.reverse();
   const routeCum = [0];
-  for (let i = 1; i < routePts.length; i++) routeCum.push(routeCum[i - 1] + Math.hypot(routePts[i].x - routePts[i - 1].x, routePts[i].z - routePts[i - 1].z));
+  for (let i = 1; i < routePts.length; i++) {
+    routeCum.push(routeCum[i - 1] + Math.hypot(
+      routePts[i].x - routePts[i - 1].x,
+      routePts[i].z - routePts[i - 1].z,
+    ));
+  }
   const routeLen = routeCum[routeCum.length - 1] || 1;
   const sampleRoute = (s) => {
     s = clamp(s, 0, routeLen);
@@ -81,10 +78,30 @@ export function createWalker({ site, plan, heightAt } = {}) {
     return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
   };
 
+  // ── 상태 ── 시작 위치와 routeS=0은 같은 도로 끝점을 가리킨다.
+  const spawn = nudgeOut(routePts[0].x, routePts[0].z);
+  let x = spawn.x, z = spawn.z;
+  const initialLook = sampleRoute(AUTO_LOOK_AHEAD);
+  let yaw = Math.atan2(initialLook.x - x, initialLook.z - z);
+  let pitch = 0;
+  let eyeY = H(x, z) + EYE;
+  const heading = createHeadingController({
+    angle: yaw,
+    maxSpeed: AUTO_TURN_SPEED,
+    maxAcceleration: AUTO_TURN_ACCELERATION,
+  });
+
+  const pos = new THREE.Vector3(x, eyeY, z);
+  const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+
+  let auto = false, routeS = 0, routeDir = 1, turnPause = 0, turnarounds = 0;
+
   // 축분리 이동+슬라이드: 각 축을 독립 시도, 충돌하면 그 축만 취소(담을 따라 미끄러짐).
   function tryStep(dx, dz) {
+    const ox = x, oz = z;
     if (!collides(x + dx, z)) x += dx;
     if (!collides(x, z + dz)) z += dz;
+    return Math.hypot(x - ox, z - oz);
   }
 
   function freeStep(dt) {
@@ -97,14 +114,32 @@ export function createWalker({ site, plan, heightAt } = {}) {
   }
 
   function strollStep(dt) {
-    routeS += WALK * dt * routeDir;
-    if (routeS >= routeLen) { routeS = routeLen; routeDir = -1; }
-    else if (routeS <= 0) { routeS = 0; routeDir = 1; }
-    const look = sampleRoute(routeS + routeDir * 3.0);
+    const look = sampleRoute(routeS + routeDir * AUTO_LOOK_AHEAD);
     const ty = Math.atan2(look.x - x, look.z - z);
-    yaw = lerpAngle(yaw, ty, 1 - Math.exp(-dt * 4));
+    yaw = heading.step(ty, dt, -routeDir);
+    const turnError = Math.abs(shortestAngleDelta(yaw, ty, -routeDir));
+    turnPause = Math.max(0, turnPause - dt);
+
+    // A walker looks through the turn before moving again. This removes the
+    // endpoint skid while preserving gradual motion through ordinary corners.
+    const alignment = turnPause > 0
+      ? 0
+      : clamp((Math.cos(turnError) - Math.cos(AUTO_MOVE_CONE)) / (1 - Math.cos(AUTO_MOVE_CONE)), 0, 1);
     const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
-    tryStep(fdx * WALK * dt, fdz * WALK * dt);
+    const moved = tryStep(fdx * WALK * dt * alignment, fdz * WALK * dt * alignment);
+    routeS += moved * routeDir;
+
+    if (routeDir > 0 && routeS >= routeLen) {
+      routeS = routeLen;
+      routeDir = -1;
+      turnPause = AUTO_TURN_PAUSE;
+      turnarounds++;
+    } else if (routeDir < 0 && routeS <= 0) {
+      routeS = 0;
+      routeDir = 1;
+      turnPause = AUTO_TURN_PAUSE;
+      turnarounds++;
+    }
   }
 
   const cur = { fwd: 0, strafe: 0, run: false };
@@ -114,13 +149,13 @@ export function createWalker({ site, plan, heightAt } = {}) {
     if (auto) {
       strollStep(dt);
     } else {
-      if (input.yaw) yaw += input.yaw;
+      if (input.yaw) { yaw += input.yaw; heading.reset(yaw); }
       if (input.pitch) pitch = clamp(pitch + input.pitch, -1.2, 1.2);
       cur.fwd = input.fwd || 0; cur.strafe = input.strafe || 0; cur.run = !!input.run;
       freeStep(dt);
     }
 
-    // 경계: SOFTR..MAXR 사이는 바깥 성분 감쇠, MAXR 초과는 하드 캡.
+    // 경계: MAXR 초과는 원형 분지 안으로 하드 캡.
     const rr = Math.hypot(x - C.x, z - C.z);
     if (rr > MAXR) { const k = MAXR / rr; x = C.x + (x - C.x) * k; z = C.z + (z - C.z) * k; }
 
@@ -137,11 +172,11 @@ export function createWalker({ site, plan, heightAt } = {}) {
 
   return {
     update, pos, dir,
-    get yaw() { return yaw; }, set yaw(v) { yaw = v; },
+    get yaw() { return yaw; }, set yaw(v) { yaw = v; heading.reset(v); },
     get pitch() { return pitch; }, set pitch(v) { pitch = clamp(v, -1.2, 1.2); },
     get autoStroll() { return auto; },
-    startAutoStroll() { auto = true; },
-    stopAutoStroll() { auto = false; cur.fwd = cur.strafe = 0; cur.run = false; },
+    startAutoStroll() { auto = true; heading.reset(yaw); },
+    stopAutoStroll() { auto = false; heading.reset(yaw); cur.fwd = cur.strafe = 0; cur.run = false; },
     setPos(nx, nz) { const p = nudgeOut(nx, nz); x = p.x; z = p.z; eyeY = H(x, z) + EYE; pos.set(x, eyeY, z); },
     lookAt() { return pos.clone().add(dir); },
     // 검증·엔진 배선용 디버그/조회 훅.
@@ -149,5 +184,7 @@ export function createWalker({ site, plan, heightAt } = {}) {
     groundClearance() { return eyeY - H(x, z); },
     isColliding() { return collides(x, z); },
     outsideBoundary() { return Math.hypot(x - C.x, z - C.z) > MAXR + 1e-3; },
+    turnRate() { return heading.velocity; },
+    turnaroundCount() { return turnarounds; },
   };
 }
