@@ -54,6 +54,7 @@ The core runs standalone from the repo-root `index.html` (plus per-domain harnes
 
 **Performance is architectural here, not incidental** (this is a large scene):
 - **Worker offload** (`populate.worker.js` + `forest-crunch.js`): forest placement (14k–40k trees, the bulk of generation cost) runs in a Web Worker that returns a transferable `Float32Array` of matrices + seasonal colors; the main thread only assembles `InstancedMesh`. `createVillageAsync` rAF-chunks that assembly. `?worker=0` is the synchronous fallback.
+- **Yard hard-object contract** (`yard-layout.js`): walls and flora share renderer-independent positions and semantic footprints for sheds, jangdok platforms, stacks, clotheslines, garden beds, and stone ornaments. Tall objects clear the whole canopy; low objects clear the trunk while allowing natural crown overhang. Add or move a yard object here first, then consume it from both renderers and `check:yard`.
 - **Shader precompile**: transition freezes are shader **link** stalls, not CPU. `engine.js` calls `warmShaders` (`renderer.compileAsync` scoped to the *new* subtree only — passing the whole scene makes it worse) and flips `renderer.debug.checkShaderErrors = false` after the first village warm.
 - Terrain radius is clamped to basin + a fixed buffer; the world edge is finished with `worldedge.js` mist rather than sprawling terrain.
 

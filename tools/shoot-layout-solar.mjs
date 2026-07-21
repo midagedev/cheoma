@@ -9,15 +9,18 @@
 //   CHEOMA_LAYOUT_OVERLAY=off CHEOMA_LAYOUT_SCENE=giwa node tools/shoot-layout-solar.mjs
 //   CHEOMA_LAYOUT_LAYERS=front,solar node tools/shoot-layout-solar.mjs
 //   CHEOMA_LAYOUT_SCALE=hamlet CHEOMA_LAYOUT_SEED=7 CHEOMA_LAYOUT_SCENE=top node tools/shoot-layout-solar.mjs
+//   CHEOMA_LAYOUT_SCALE=hanyang CHEOMA_LAYOUT_SEED=7 CHEOMA_LAYOUT_SCENE=parcel \
+//     CHEOMA_LAYOUT_PARCEL=p254 node tools/shoot-layout-solar.mjs
 //
 // CHEOMA_LAYOUT_OVERLAY: both (default), on, off
-// CHEOMA_LAYOUT_SCENE:   all (default), top, aerial, focus, giwa, choga
+// CHEOMA_LAYOUT_SCENE:   all (default), top, aerial, focus, giwa, choga, parcel
 // CHEOMA_LAYOUT_LAYERS:  comma-separated front,solar,guardian (default: all)
 // CHEOMA_LAYOUT_SCALE:   hamlet, village, town, capital, hanyang (default: village)
 // CHEOMA_LAYOUT_SEED:    unsigned integer VillagePlan seed (default: 20260716)
 // CHEOMA_LAYOUT_TIME:    dawn, day, sunset, night (default: day)
 // CHEOMA_LAYOUT_SEASON:  spring, summer, autumn, winter (default: summer)
 // CHEOMA_LAYOUT_WEATHER: clear, rain, snow (default: clear)
+// CHEOMA_LAYOUT_PARCEL:  exact parcel ID; pair with CHEOMA_LAYOUT_SCENE=parcel
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -33,6 +36,7 @@ const layoutSeed = Number.parseInt(process.env.CHEOMA_LAYOUT_SEED || '20260716',
 const layoutTime = process.env.CHEOMA_LAYOUT_TIME || 'day';
 const layoutSeason = process.env.CHEOMA_LAYOUT_SEASON || 'summer';
 const layoutWeather = process.env.CHEOMA_LAYOUT_WEATHER || 'clear';
+const layoutParcel = process.env.CHEOMA_LAYOUT_PARCEL || null;
 const reproduceQuery = '?hero=0&village=1&worker=0&shot=1'
   + `&seed=42&vseed=${layoutSeed}&vscale=${layoutScale}`
   + `&time=${layoutTime}&season=${layoutSeason}&weather=${layoutWeather}`;
@@ -47,8 +51,11 @@ const layers = (process.env.CHEOMA_LAYOUT_LAYERS || 'front,solar,guardian')
 if (!['both', 'on', 'off'].includes(overlayMode)) {
   throw new Error(`CHEOMA_LAYOUT_OVERLAY must be both, on, or off (received ${overlayMode})`);
 }
-if (!['all', 'top', 'aerial', 'focus', 'giwa', 'choga'].includes(sceneFilter)) {
+if (!['all', 'top', 'aerial', 'focus', 'giwa', 'choga', 'parcel'].includes(sceneFilter)) {
   throw new Error(`CHEOMA_LAYOUT_SCENE has an unknown value: ${sceneFilter}`);
+}
+if (sceneFilter === 'parcel' && !layoutParcel) {
+  throw new Error('CHEOMA_LAYOUT_SCENE=parcel requires CHEOMA_LAYOUT_PARCEL');
 }
 if (!validScales.has(layoutScale)) throw new Error(`CHEOMA_LAYOUT_SCALE is invalid: ${layoutScale}`);
 if (!validTimes.has(layoutTime)) throw new Error(`CHEOMA_LAYOUT_TIME is invalid: ${layoutTime}`);
@@ -283,7 +290,7 @@ try {
   });
   console.log(`overlay: ${JSON.stringify(overlayStats)}`);
 
-  const candidates = await page.evaluate(() => {
+  const candidates = await page.evaluate((requestedParcelId) => {
     const root = window.__engine.village.exportRoot();
     const plan = root.userData.plan;
     const editable = new Set(window.__engine.village.debugParcels()
@@ -292,13 +299,28 @@ try {
     const regular = (plan.parcels || []).filter((parcel) => editable.has(parcel.id));
     const choose = (kind) => regular.find((parcel) => parcel.kind === kind && treeOwners.has(parcel.id))
       || regular.find((parcel) => parcel.kind === kind);
-    return { giwa: choose('giwa')?.id || null, choga: choose('choga')?.id || null };
-  });
+    const requested = requestedParcelId
+      ? (plan.parcels || []).find((parcel) => parcel.id === requestedParcelId)
+      : null;
+    return {
+      giwa: choose('giwa')?.id || null,
+      choga: choose('choga')?.id || null,
+      parcel: requested ? {
+        id: requested.id,
+        kind: requested.kind,
+        hero: !!requested.hero,
+        hasTree: treeOwners.has(requested.id),
+      } : null,
+    };
+  }, layoutParcel);
   const wants = (name) => sceneFilter === 'all'
     || sceneFilter === name
     || (sceneFilter === 'focus' && (name === 'giwa' || name === 'choga'));
   if ((wants('giwa') && !candidates.giwa) || (wants('choga') && !candidates.choga)) {
     throw new Error(`missing representative layout candidates: ${JSON.stringify(candidates)}`);
+  }
+  if (sceneFilter === 'parcel' && !candidates.parcel) {
+    throw new Error(`missing requested layout parcel: ${layoutParcel}`);
   }
   console.log(`focus candidates: ${JSON.stringify(candidates)}`);
   const overlayStates = overlayMode === 'both'
@@ -538,6 +560,14 @@ try {
     occlusionReports.push({ kind, ...report });
     console.log(`${kind} occlusion: ${JSON.stringify(report)}`);
     for (const state of overlayStates) await renderAndCapture(`${kind}-focus`, state);
+  }
+  if (sceneFilter === 'parcel') {
+    const target = candidates.parcel;
+    await beginAndSeek('focus', target.id);
+    const report = await inspectOcclusion(target.id);
+    occlusionReports.push({ kind: target.kind, requested: true, ...report });
+    console.log(`parcel occlusion: ${JSON.stringify(report)}`);
+    for (const state of overlayStates) await renderAndCapture(`${target.id}-focus`, state);
   }
 
   const diagnosticsPath = join(outputDir, 'occlusion.json');

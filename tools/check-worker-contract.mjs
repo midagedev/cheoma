@@ -17,13 +17,13 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #7: 남향 필지·실제 처마 fit·도로측 대문·개울/논/수관 clearance를 하나의
-  // 결정론 plan과 worker-safe spatial mask로 묶은 후 시각 승인한 전체 scene 기준선. capital은
-  // 궁 없는 관아 구성이므로 주작대로가 실제 남문에서 시작하는 변경까지 포함한다.
-  village: 'f55a936e:47dc0048:04a9764c:2834ca80',
-  town: '75bde81e:cd0afc1e:cae2a769:212ce5b4',
-  capital: '60432580:e6dd55b2:a96c4507:195b07ae',
-  hanyang: '48f7703d:55bde5a7:5031fd86:7d5d6e23',
+  // #17: 담 렌더러와 flora가 공유하는 순수 마당 점유 계약으로 부속채·장독대 등
+  // hard object를 관통하던 과실수를 안전한 후보로 옮긴 뒤 시각 승인한 전체 scene 기준선.
+  // 나머지 배치·worker 결정론 계약은 #7 기준선을 그대로 잇는다.
+  village: 'bda616fe:7c912464:36b3c36b:402c4e8c',
+  town: '42e23dd8:099e39a6:0290a08d:2a64c946',
+  capital: 'df88bd3b:56769115:4ede5302:5d5d6e11',
+  hanyang: '39634ed9:a6b1f9e5:93e7d5db:ad4c7fc3',
 };
 const expectedProxyHashes = {
   // #7: 프록시도 실제 variant·fit·단일 parcel transform을 소유하므로 scene과 함께 갱신한다.
@@ -103,6 +103,7 @@ try {
         { VILLAGE_LENS, dollyScaleForFov },
         { makeVegetationMask, yardCanopyBlocked },
         { parcelLocalPoint },
+        { yardHardObstacles, yardTreeIntersectsHardObstacle },
         { SCATTER_TREE_VISUAL_RADIUS },
       ] = await Promise.all([
         import('/src/village/adapter.js'),
@@ -113,6 +114,7 @@ try {
         import('/src/camera/optics.js'),
         import('/src/village/vegetation-spatial.js'),
         import('/src/village/parcel-contract.js'),
+        import('/src/village/yard-layout.js'),
         import('/src/generators/village/trees.js'),
       ]);
       const probeLifecycle = (handle) => {
@@ -234,9 +236,17 @@ try {
         for (const [index, anchor] of (handle.group.userData.yardTreeAnchors || []).entries()) {
           const parcel = parcelById.get(anchor.parcelId);
           const local = parcel && parcelLocalPoint(parcel, anchor);
+          const gardenOptions = Number.isFinite(anchor.hwagyeX)
+            ? { exact: true, side: anchor.gardenSide, hwagyeX: anchor.hwagyeX }
+            : undefined;
           const blocked = !parcel || !(anchor.radius > 0)
+            || !(anchor.trunkRadius > 0)
             || yardCanopyBlocked(parcel, local, anchor.radius)
-            || mask.spatial.blocksYardCanopy(anchor.x, anchor.z, anchor.radius);
+            || mask.spatial.blocksYardCanopy(anchor.x, anchor.z, anchor.radius)
+            || yardTreeIntersectsHardObstacle(local, {
+              canopyRadius: anchor.radius,
+              trunkRadius: anchor.trunkRadius,
+            }, yardHardObstacles(parcel, gardenOptions));
           checked++;
           if (blocked && failures.length < 8) failures.push({
             name: 'flora-yard', index, parcelId: anchor.parcelId,
