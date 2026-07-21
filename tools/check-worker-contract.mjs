@@ -20,12 +20,13 @@ const expectedSceneHashes = {
   // #12: the variable rectangular precinct is reserved before parcels and
   // vegetation, then rendered as the compact/courtyard/extended TemplePlan.
   // #49 extends the solar/focus-frame contract to pavilion eaves and feature
-  // props. Sync, real module Worker, and ?worker=0 fallback must remain
-  // byte-identical after those deterministic placement changes.
-  village: 'dd601916:7ec2904a:47f5fb2e:95ffb0e4',
-  town: '05eef928:4e792578:caf6fb90:8c9ff1e8',
-  capital: '024dd0f2:7fe32a78:86023e82:2bbcabb8',
-  hanyang: 'ca8a2925:21871ed1:e447296e:41453cef',
+  // props. #13 replaces overlapping rectangular giwa podiums with one concave
+  // solid and sinks every building foundation. Sync, real module Worker, and
+  // ?worker=0 fallback must remain byte-identical after both deterministic changes.
+  village: 'e9a600da:6456e228:5bc64496:54738d16',
+  town: 'b53893ae:fbb36442:bd83f418:de967d98',
+  capital: 'f2734ff0:387a5b36:fbb9c376:c883081c',
+  hanyang: '22225a93:6456eaaf:bc86f132:de164773',
 };
 const expectedProxyHashes = {
   // Door-height residential targets plus the variable temple bounds and its

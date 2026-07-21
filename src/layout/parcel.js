@@ -9,13 +9,15 @@ import { buildGate } from './gate.js';
 import { buildHanok } from './hanok.js';
 import { buildCorridor } from './corridor.js';
 import { attachOverlayLanterns } from './props.js';
+import { COURTYARD_SURFACE_LIFT } from '../core/surface-clearance.js';
 
 // 담장으로 둘린 대지 + 남측 대문 + 마당 + 북측 중앙 몸채 + 행각/행랑.
 // 좌표계: 남쪽 = +z(대문·진입), 북쪽 = -z(몸채·배산). 몸채는 +z(남)을 향해 앉는다.
 //
-// buildParcel({ seed, style, plotW, plotD, roofOpts, wallH, presetOverrides }) → THREE.Group
+// buildParcel({ seed, style, plotW, plotD, roofOpts, wallH, presetOverrides, materials }) → THREE.Group
 //   roofOpts·wallH 는 hanok 분기의 buildHanok 으로 전달 (히어로 필지 편집 반영용)
 //   presetOverrides 는 비-hanok 분기(palace/temple/choga)의 PRESETS 병합 — 특수 건물 편집 반영용
+//   materials 는 테스트·외부 조립기가 소유한 공유 재질셋을 주입하는 선택 계약(미지정이면 자체 생성)
 //   style: 'palace' | 'temple' | 'choga' | 'hanok'(ㄱ자 반가 안채)
 const STYLE_MAP = {
   palace: { preset: 'korea', gate: 'soseuldaemun', gateW: 6.6, plot: [34, 28], fenceH: 2.2, wings: true, wall: 'jeondol' },
@@ -31,13 +33,23 @@ const STYLE_MAP = {
 //   뻗어 안뜰을 감싼다. bayW·wingLen·wingW 는 기본 ㄱ자(bays=3)가 기존 하드코딩 풋프린트와 정확히
 //   일치하도록 고른 값 — 미편집 종가의 픽셀 불변을 보장한다. 날개폭은 안뜰/본채 앞면이 붕괴하지 않게
 //   본채 폭에 종속 클램프(ㄷ자는 양 날개가 겹치지 않게, ㄱ자는 본채 앞면이 날개보다 넓게).
-export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, roofOpts, wallH = 2.7, presetOverrides, lanterns = true } = {}) {
+export function buildParcel({
+  seed = 20260716,
+  style = 'palace',
+  plotW,
+  plotD,
+  roofOpts,
+  wallH = 2.7,
+  presetOverrides,
+  lanterns = true,
+  materials = null,
+} = {}) {
   const cfg = STYLE_MAP[style] || STYLE_MAP.palace;
   const rng = makeRng(seed);
   const W = plotW || cfg.plot[0];
   const D = plotD || cfg.plot[1];
   const hw = W / 2, hd = D / 2;
-  const mats = makeMaterials(cfg.preset === 'korea' ? 'palace' : cfg.preset);
+  const mats = materials || makeMaterials(cfg.preset === 'korea' ? 'palace' : cfg.preset);
 
   const root = new THREE.Group();
   root.name = `parcel-${style}`;
@@ -46,8 +58,9 @@ export function buildParcel({ seed = 20260716, style = 'palace', plotW, plotD, r
   const yard = new THREE.Mesh(
     new THREE.PlaneGeometry(W, D),
     new THREE.MeshStandardMaterial({ color: 0xcabfa2, roughness: 1.0 }));
+  yard.name = 'courtyard-ground';
   yard.rotation.x = -Math.PI / 2;
-  yard.position.y = 0.01;
+  yard.position.y = COURTYARD_SURFACE_LIFT;
   yard.receiveShadow = true;
   root.add(yard);
 

@@ -1,6 +1,13 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildSkeletonRoof } from '../layout/roof-skeleton.js';
 import { giwaFootprint, giwaFootprintPolygon } from '../params.js';
+import * as G from '../core/math/geom2.js';
+import {
+  OPENING_FACE_CLEARANCE,
+  overlayCenterOffset,
+  sunkPrism,
+} from '../core/surface-clearance.js';
 
 // 기와집(ㄱ자 반가 안채): L 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
@@ -23,6 +30,61 @@ function colGeom(r, h, entasis) {
 //              e3 우측면(회벽+살창), e4 후면(세로널 판벽), e5 좌측면(회벽+살창)
 const EDGE_ROLE = ['door', 'door', 'wall', 'wall', 'plank', 'wall'];
 
+function extrudeFootprint(points, bottom, top) {
+  const shape = new THREE.Shape();
+  points.forEach((point, index) => {
+    if (index === 0) shape.moveTo(point.x, -point.z);
+    else shape.lineTo(point.x, -point.z);
+  });
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: top - bottom,
+    bevelEnabled: false,
+  });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, bottom, 0);
+  return geometry;
+}
+
+function addPodiumLayer(group, footprint, bottom, top, material, name, castShadow = true) {
+  const mesh = new THREE.Mesh(extrudeFootprint(footprint, bottom, top), material);
+  mesh.name = name;
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return mesh;
+}
+
+function addVerticalPodiumJoints(group, footprint, height, material) {
+  const geometries = [];
+  const spacing = 1.6;
+  for (let i = 0; i < footprint.length; i++) {
+    const a = footprint[i], b = footprint[(i + 1) % footprint.length];
+    const edge = G.sub(b, a);
+    const length = G.len(edge);
+    const direction = G.norm(edge);
+    const outward = G.perpL(direction); // footprint is CCW
+    const rotation = -Math.atan2(direction.z, direction.x);
+    for (let along = spacing; along < length - 0.2; along += spacing) {
+      const geometry = new THREE.BoxGeometry(0.04, height * 0.9, 0.06);
+      geometry.rotateY(rotation);
+      geometry.translate(
+        a.x + direction.x * along + outward.x * 0.005,
+        height * 0.5,
+        a.z + direction.z * along + outward.z * 0.005,
+      );
+      geometries.push(geometry);
+    }
+  }
+  if (!geometries.length) return;
+  const merged = mergeGeometries(geometries, false);
+  for (const geometry of geometries) geometry.dispose();
+  const joints = new THREE.Mesh(merged, material);
+  joints.name = 'podium-vertical-joints';
+  joints.receiveShadow = true;
+  group.add(joints);
+}
+
 export function buildGiwa(P, M) {
   const root = new THREE.Group();
   root.name = 'building';
@@ -38,44 +100,29 @@ export function buildGiwa(P, M) {
   const colH = P.columnHeight, colR = P.columnRadius;
   const podTopY = podH, colTopY = podTopY + colH, eaveY = colTopY + 0.35;
 
-  // ── 기단 (본채 + 날개 박스, 낮은 장대석 + 줄눈) ──
+  // ── 기단 (단일 ㄱ자 솔리드, 낮은 장대석 + 줄눈) ──
   const podium = new THREE.Group(); podium.name = 'podium';
   const jointMat = new THREE.MeshStandardMaterial({ color: 0x6e675a, roughness: 1.0 });
-  const mkPod = (x0, x1, z0, z1) => {
-    const mg = 0.7;
-    const bw2 = (x1 - x0) + 2 * mg, bd2 = (z1 - z0) + 2 * mg, ccx = (x0 + x1) / 2, ccz = (z0 + z1) / 2;
-    // 장대석 2켜쌓기: 아래켜(폭 넓음) + 위켜(살짝 물림) → 켜 사이 그늘선(베벨)이 정면에서 읽힌다.
-    const h0 = podH * 0.54, h1 = podH - h0 - 0.02;
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(bw2, h0, bd2), M.stone);
-    lower.position.set(ccx, h0 / 2, ccz);
-    lower.castShadow = lower.receiveShadow = true; podium.add(lower);
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(bw2 - 0.10, h1, bd2 - 0.10), M.stone);
-    upper.position.set(ccx, h0 + 0.02 + h1 / 2, ccz);
-    upper.castShadow = upper.receiveShadow = true; podium.add(upper);
-    // 켜 사이 수평 줄눈(어두운 홈)
-    const line = new THREE.Mesh(new THREE.BoxGeometry(bw2 + 0.02, 0.05, bd2 + 0.02), jointMat);
-    line.position.set(ccx, h0, ccz);
-    line.receiveShadow = true; podium.add(line);
-    // 장대석 세로 줄눈(개별 켓돌 이음): 정면(+z)·측면 긴 변에 짧은 홈 반복
-    const vseg = 1.6;
-    for (let x = x0 - mg + vseg; x < x1 + mg - 0.2; x += vseg) {
-      for (const [zz, zs] of [[z1 + mg, 1], [z0 - mg, -1]]) {
-        const vj = new THREE.Mesh(new THREE.BoxGeometry(0.04, h0 * 0.9, 0.06), jointMat);
-        vj.position.set(x, h0 * 0.5, zz + zs * 0.005); podium.add(vj);
-      }
-    }
-    for (let z = z0 - mg + vseg; z < z1 + mg - 0.2; z += vseg) {
-      for (const [xx, xs] of [[x1 + mg, 1], [x0 - mg, -1]]) {
-        const vj = new THREE.Mesh(new THREE.BoxGeometry(0.06, h0 * 0.9, 0.04), jointMat);
-        vj.position.set(xx + xs * 0.005, h0 * 0.5, z); podium.add(vj);
-      }
-    }
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(bw2 + 0.06, 0.1, bd2 + 0.06), M.stoneDark);
-    cap.position.set(ccx, podH - 0.05, ccz);
-    cap.receiveShadow = true; podium.add(cap);
-  };
-  mkPod(-a, a, -b, b);        // 본채
-  mkPod(a - w, a, b, b + c);  // 날개
+  // 두 직사각형을 겹치면 교차부의 상면·줄눈·갑석이 정확히 중복된다. 같은 외곽을 한 번만
+  // 압출해 깊이 소유자를 하나로 만들고, 최하단은 성토면 아래로 묻어 접지선도 안정시킨다.
+  const podiumFoot = G.ensureCCW(foot);
+  const lowerFoot = G.offsetPoly(podiumFoot, 0.70);
+  const h0 = podH * 0.54, h1 = podH - h0 - 0.02;
+  const foundation = sunkPrism(h0);
+  addPodiumLayer(podium, lowerFoot, foundation.bottom, foundation.top, M.stone, 'podium-lower');
+  addPodiumLayer(
+    podium, G.offsetPoly(podiumFoot, 0.65), h0 + 0.02, h0 + 0.02 + h1,
+    M.stone, 'podium-upper',
+  );
+  addPodiumLayer(
+    podium, G.offsetPoly(podiumFoot, 0.70 + OPENING_FACE_CLEARANCE), h0 - 0.025, h0 + 0.025,
+    jointMat, 'podium-course-joint', false,
+  );
+  addPodiumLayer(
+    podium, G.offsetPoly(podiumFoot, 0.73), podH - 0.1, podH,
+    M.stoneDark, 'podium-cap', false,
+  );
+  addVerticalPodiumJoints(podium, lowerFoot, h0, jointMat);
   root.add(podium);
 
   // ── 기둥 · 심벽 벽체 · 인방/창방 ──
@@ -184,8 +231,25 @@ export function buildGiwa(P, M) {
         slab(cx, cz, bw, meoreumTop, yLintel, doorMat(bw), alongX, 0.10); // 띠살 분합문
         slab(cx, cz, bw, yLintel + 0.10, yTopWall, M.plaster, alongX);  // 상인방 위 회벽
       } else if (role === 'plank') {
-        slab(cx, cz, bw, y0, yTopWall, plankMat(bw), alongX);           // 세로널 판벽
-        if (k === 1) slab(cx, cz, Math.min(bw * 0.4, 0.7), winTop, winTop + 0.5, salMat, alongX, 0.10); // 봉창 하나
+        const plank = slab(cx, cz, bw, y0, yTopWall, plankMat(bw), alongX); // 세로널 판벽
+        if (k === 1) {
+          plank.name = 'plank-wall-window-bay';
+          const openingT = 0.10;
+          const edgeDirection = G.norm(G.sub(B, A));
+          const exterior = G.perpR(edgeDirection); // foot is CW
+          const faceOffset = overlayCenterOffset(T, openingT);
+          const opening = slab(
+            cx + exterior.x * faceOffset,
+            cz + exterior.z * faceOffset,
+            Math.min(bw * 0.4, 0.7),
+            winTop,
+            winTop + 0.5,
+            salMat,
+            alongX,
+            openingT,
+          );
+          opening.name = 'plank-opening';
+        }
       } else { // wall
         if (k === cbay) wallWithWindow(cx, cz, bw, alongX);             // 회벽 + 살창
         else slab(cx, cz, bw, y0, yTopWall, M.plaster, alongX);         // 회벽만

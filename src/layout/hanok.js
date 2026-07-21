@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
 import { computeSkeleton } from './skeleton.js';
 import { buildSkeletonRoof } from './roof-skeleton.js';
+import { sunkPrism } from '../core/surface-clearance.js';
 
 // 다각형 풋프린트(rect/ㄱ자/ㄷ자) 기와집 몸채: 기단 + 기둥 + 회벽 + straight-skeleton 곡면 지붕.
 // 백골(무단청) 반가 톤. buildBuilding(궁·절·초가)과 별개로, 꺾인 평면 살림집을 만든다.
@@ -42,7 +43,13 @@ export function buildHanok({ footprint, seed = 1, mats, wallH = 2.7, podiumH = 0
   //   땅에 붙지 않고 단정히 앉아 보이게 한다(#139). 지대석은 살짝 넓게(단 그림자), 갑석은
   //   기단 몸통보다 조금 내밀어 처마 그늘에서도 밝은 돌 선이 읽히게 한다.
   // 지대석: 바닥에 살짝 넓게 깔리는 어두운 밑돌 켜(단 그림자)
-  const zidae = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.92)), 0.14), M.stoneDark);
+  const zidaeBounds = sunkPrism(0.14);
+  const zidae = new THREE.Mesh(
+    extrudeY(shapeFrom(offsetPoly(poly, 0.92)), zidaeBounds.height),
+    M.stoneDark,
+  );
+  zidae.name = 'foundation-base';
+  zidae.position.y = zidaeBounds.bottom;
   zidae.receiveShadow = zidae.castShadow = true; g.add(zidae);
   // 기단 몸통(장대석): 상면이 podiumH — 회벽·기둥이 그대로 앉는다
   const pod = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH), M.stone);

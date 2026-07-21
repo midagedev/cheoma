@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { sunkPrism } from '../core/surface-clearance.js';
 
 // 기단(월대): 장대석 단 + 전면 계단 + 주춧돌
 export function buildPodium(P, L, M) {
@@ -11,11 +12,13 @@ export function buildPodium(P, L, M) {
     const halfDF = L.D / 2 + P.podiumMarginF + (P.podiumTiers - 1 - t) * 1.35; // 전면
     const halfDB = L.D / 2 + P.podiumMarginS + (P.podiumTiers - 1 - t) * 1.35; // 후면
     const h = P.podiumTierH;
+    const tier = t === 0 ? sunkPrism(h) : { height: h, center: t * h + h / 2 };
     const box = new THREE.Mesh(
-      new THREE.BoxGeometry(halfW * 2, h, halfDF + halfDB),
+      new THREE.BoxGeometry(halfW * 2, tier.height, halfDF + halfDB),
       M.stone
     );
-    box.position.set(0, t * h + h / 2, (halfDF - halfDB) / 2);
+    box.name = `podium-tier-${t}`;
+    box.position.set(0, tier.center, (halfDF - halfDB) / 2);
     box.castShadow = box.receiveShadow = true;
     g.add(box);
 
