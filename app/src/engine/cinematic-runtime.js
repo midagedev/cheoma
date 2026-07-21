@@ -1,9 +1,15 @@
-import { createDronePaths, createWalker } from '../../../src/api/cinematic.js';
+import {
+  createDirectionController,
+  createDronePaths,
+  createWalker,
+} from '../../../src/api/cinematic.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const DRONE_CHAIN = ['crane-in', 'landmark-orbit', 'street-flythrough', 'pullback-reveal'];
+const DEG = Math.PI / 180;
 
 // 마을 시네마틱의 상태기계. 씬 전환 정책은 콜백으로 받고 카메라 경로 구동만 소유한다.
+// 명명된 드론 패스 사이의 위치 컷은 유지하되 시선은 가속도 제한 컨트롤러로 연속 인계한다.
 export function createCinematicRuntime({
   camera,
   cancelTween,
@@ -22,6 +28,17 @@ export function createCinematicRuntime({
   stopHeroDrive,
   tweenTo,
 } = {}) {
+  const viewDirection = camera.position.clone();
+  camera.getWorldDirection(viewDirection);
+  const droneLook = createDirectionController({
+    direction: viewDirection,
+    // Axis limits combine to a <=72.2°/s spherical turn, including diagonal
+    // yaw+pitch changes at a pass boundary.
+    maxYawSpeed: 60 * DEG,
+    maxYawAcceleration: 150 * DEG,
+    maxPitchSpeed: 40 * DEG,
+    maxPitchAcceleration: 100 * DEG,
+  });
   const state = {
     active: false,
     mode: null,
@@ -35,6 +52,9 @@ export function createCinematicRuntime({
     lastLook: camera.position.clone(),
     input: { fwd: 0, strafe: 0, yaw: 0, pitch: 0, run: false },
     ambT: 0,
+    viewReady: false,
+    desiredLook: camera.position.clone(),
+    smoothedLook: camera.position.clone(),
   };
 
   const available = () => !!(
@@ -44,6 +64,14 @@ export function createCinematicRuntime({
     && !village.heroAsm
     && !village.transitioning
   );
+
+  function turnRateDegrees() {
+    if (!state.active) return 0;
+    const rate = state.mode === 'walk' && state.walker
+      ? Math.abs(state.walker.turnRate())
+      : droneLook.angularSpeed;
+    return +(rate / DEG).toFixed(2);
+  }
 
   function paths() {
     const plan = village.handle.plan;
@@ -73,6 +101,7 @@ export function createCinematicRuntime({
     state.mode = mode;
     state.active = true;
     state.ambT = 0;
+    state.viewReady = false;
     Object.assign(state.input, { fwd: 0, strafe: 0, yaw: 0, pitch: 0, run: false });
     controls.enabled = false;
     setPostFocus(false);
@@ -120,7 +149,7 @@ export function createCinematicRuntime({
     if (state.mode === 'walk') {
       const { pos, dir } = state.walker.update(dt, state.input);
       camera.position.copy(pos);
-      lookAt = pos.clone().add(dir);
+      lookAt = state.smoothedLook.copy(pos).add(dir);
     } else {
       if (!state.pass) return;
       state.t += dt / state.pass.duration;
@@ -146,7 +175,15 @@ export function createCinematicRuntime({
         camera.updateProjectionMatrix();
       }
       if (sample.fov != null) camera.userData.villageReferenceFov = sample.referenceFov ?? sample.fov;
-      lookAt = sample.lookAt;
+      state.desiredLook.copy(sample.lookAt).sub(sample.pos);
+      if (!state.viewReady) {
+        droneLook.reset(state.desiredLook);
+        state.viewReady = true;
+      }
+      const direction = droneLook.step(state.desiredLook, dt);
+      viewDirection.set(direction.x, direction.y, direction.z);
+      const lookDistance = Math.max(1, sample.pos.distanceTo(sample.lookAt));
+      lookAt = state.smoothedLook.copy(sample.pos).addScaledVector(viewDirection, lookDistance);
     }
 
     // 종료 시 OrbitControls로 방향을 연속 인계할 수 있도록 매 프레임 같은 시선을 공유한다.
@@ -180,6 +217,7 @@ export function createCinematicRuntime({
     state.walker = null;
     state.chain = [];
     state.single = null;
+    state.viewReady = false;
     controls.enabled = true;
     reapplyVillageFog();
     controls.target.copy(state.lastLook);
@@ -219,6 +257,7 @@ export function createCinematicRuntime({
       chain: state.chain.map((path) => path.name),
       single: state.single,
       t: +state.t.toFixed(3),
+      turnRateDeg: turnRateDegrees(),
     }),
     passList: () => (village.handle
       ? paths().map(({ name, kind, duration }) => ({ name, kind, duration }))
@@ -236,12 +275,15 @@ export function createCinematicRuntime({
         y: +state.walker.pos.y.toFixed(2),
         z: +state.walker.pos.z.toFixed(2),
       },
+      turnRateDeg: +(state.walker.turnRate() / DEG).toFixed(2),
+      turnarounds: state.walker.turnaroundCount(),
     } : null),
     dispose() {
       state.active = false;
       state.walker = null;
       state.chain = [];
       state.pass = null;
+      state.viewReady = false;
     },
   };
 }

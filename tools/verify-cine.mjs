@@ -6,7 +6,7 @@
 // 게이트:
 //   드론 4패스 × 3규모: (a) 지형 클리어런스 min > 1.5m  (b) 건물 관통 0  (c) flythrough 지붕 위 <2m 0
 //                       (d) lookAt 각속도 max < 60 deg/s
-//   walker 100초 자동산책 × 3규모: 지면 침하 0(발 클리어런스>0)·담 관통 0·경계 이탈 0·결정론(재현 delta≈0)
+//   walker 100초 자동산책 × 3규모: 접지·충돌·경계·결정론 + 각속도≤52°/s·각가속도≤120°/s²
 //   드론 결정론(파이프라인): 같은 시드 → 같은 경로(샘플 delta≈0). pageerror 0.
 
 import { createServer } from 'node:http';
@@ -76,20 +76,28 @@ function walkerCheck(plan, site, H){
   const dt = 1/60, steps = Math.round(100 / dt);
   const w = createWalker({ site, plan, heightAt: H });
   w.startAutoStroll();
-  let minFoot = Infinity, collide = 0, outb = 0;
+  let minFoot = Infinity, collide = 0, outb = 0, maxTurn = 0, maxAccel = 0, previousRate = 0;
   for (let i = 0; i < steps; i++){
     w.update(dt, {});
     const fc = w.groundClearance();
     if (fc < minFoot) minFoot = fc;
     if (w.isColliding()) collide++;
     if (w.outsideBoundary()) outb++;
+    const rate = w.turnRate();
+    maxTurn = Math.max(maxTurn, Math.abs(rate));
+    maxAccel = Math.max(maxAccel, Math.abs(rate - previousRate) / dt);
+    previousRate = rate;
   }
   // 결정론: 같은 plan 재시뮬 → 종점 일치
   const w2 = createWalker({ site, plan, heightAt: H });
   w2.startAutoStroll();
   for (let i = 0; i < steps; i++) w2.update(dt, {});
   const det = Math.hypot(w.pos.x - w2.pos.x, w.pos.y - w2.pos.y, w.pos.z - w2.pos.z);
-  return { minFoot:+minFoot.toFixed(3), collide, outb, det:+det.toFixed(6) };
+  return {
+    minFoot:+minFoot.toFixed(3), collide, outb, det:+det.toFixed(6),
+    maxTurn:+(maxTurn * RAD2DEG).toFixed(1), maxAccel:+(maxAccel * RAD2DEG).toFixed(1),
+    turns:w.turnaroundCount(),
+  };
 }
 
 export function run(){
@@ -179,11 +187,13 @@ for (const s of R.scales) {
 }
 
 console.log('\n=== walker 100초 자동 산책 ===');
-console.log(pad('scale', 9) + padL('minFootClear', 14) + padL('담관통', 10) + padL('경계이탈', 10) + padL('det delta', 12));
+console.log(pad('scale', 9) + padL('minFootClear', 14) + padL('담관통', 10) + padL('경계이탈', 10) + padL('max°/s', 9) + padL('max°/s²', 10) + padL('turns', 7) + padL('det delta', 12));
 for (const w of R.walker) {
-  const ok = w.minFoot > 0 && w.collide === 0 && w.outb === 0 && w.det < 1e-4;
+  const ok = w.minFoot > 0 && w.collide === 0 && w.outb === 0
+    && w.maxTurn <= 52.1 && w.maxAccel <= 120.1 && w.det < 1e-4;
   if (!ok) fail++;
-  console.log(pad(w.scale, 9) + padL(w.minFoot, 14) + padL(w.collide, 10) + padL(w.outb, 10) + padL(w.det, 12) + (ok ? '' : '  <-- FAIL'));
+  console.log(pad(w.scale, 9) + padL(w.minFoot, 14) + padL(w.collide, 10) + padL(w.outb, 10)
+    + padL(w.maxTurn, 9) + padL(w.maxAccel, 10) + padL(w.turns, 7) + padL(w.det, 12) + (ok ? '' : '  <-- FAIL'));
 }
 
 console.log('\n=== 결정론(파이프라인) ===');

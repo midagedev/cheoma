@@ -12,6 +12,11 @@ export {
   villageScreenDistanceForCamera,
 } from '../camera/optics.js';
 export {
+  createDirectionController,
+  createHeadingController,
+  shortestAngleDelta,
+} from '../camera/heading.js';
+export {
   buildObstacles,
   createDronePaths,
   mainRoad,
