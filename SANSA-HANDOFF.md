@@ -4,7 +4,7 @@
 > - **기준일**: 2026-07-21
 > - **작업 브랜치**: `codex/issue-5-sansa-placement`
 > - **커밋 정책**: 2026-07-21 사용자가 검토 후 커밋·PR·머지를 승인했다.
-> - **후속 작업**: GitHub #12의 복합 가람 생성기는 [`docs/temple-generator.md`](docs/temple-generator.md)에서 별도로 다룬다.
+> - **후속 작업**: GitHub #12 복합 가람 생성기는 2026-07-22 구현됐다. 현재 계약은 [`docs/temple-generator.md`](docs/temple-generator.md)가 소유한다.
 
 이 문서는 Claude Code 메모리의 사찰 배치·지형 패드·숲 worker 관련 이력과 현재 코드를 대조해 만든 자립형 브리프다. 구현이나 검증에 개인 메모리 경로, 특정 포트, 임시 스크린샷 경로가 필요하지 않다.
 
@@ -41,9 +41,9 @@
 
 ### 순수 계획
 
-`src/village/temple-plan.js`가 다음을 단독 소유한다.
+이 절은 #5 완료 시점의 배치 계약 기록이다. #12 이후 경내 크기·형태의 현재 사실은 `compound.width/depth`와 [`docs/temple-generator.md`](docs/temple-generator.md)를 우선한다. `src/village/temple-plan.js`가 다음을 단독 소유한다.
 
-- 규모 연속체에 따른 현재 경내 footprint `22..33m`. 작은 hamlet은 큰 불전이 터를 압도하거나 높은 축대를 만들지 않도록 compact footprint를 쓴다.
+- 규모 연속체에 따른 실제 직사각 경내 footprint `22..72m`. 작은 hamlet은 compact, village/town은 courtyard, capital/hanyang은 extended를 예약한다.
 - 회전 footprint의 5×5 지형 낙차와 최고점.
 - world/terrain/road/stream/core parcel/city wall 충돌 검사.
 - 평탄성, 접근 거리, 가장자리, 전면 장벽, 지형 위요감의 결정론 점수.
@@ -59,7 +59,7 @@
 - 접근로는 지형에 밀착한 폭 2.5m ribbon 하나와 필요한 계단 buffer 하나를 사용한다.
 - forest/vegetation/terrain/picking은 모두 같은 footprint·path 데이터를 소비한다.
 - 식생은 회전 경내와 경로만 비우며 장식용 원형 clearing이나 강제 grove를 만들지 않는다.
-- 기존 `{x,z,frontDir,seed}`는 유지하고 `compoundSize`, `baseY`, `path`, `placement`만 추가한다.
+- 기존 `{x,z,frontDir,seed}`는 유지하고 `compoundWidth`, `compoundDepth`, 순수 `compound`, `baseY`, `path`, `placement`를 추가한다. `compoundSize`는 레거시 최대변 호환값이다.
 
 ## 4. 구현 결과
 
@@ -123,6 +123,6 @@ npm run check:full
 - [x] 식생과 picking이 같은 footprint를 쓴다.
 - [x] 부감·근접 이미지를 에이전트가 직접 열어 확인했다.
 - [x] 사람 리뷰 후 커밋·PR·머지 승인.
-- [ ] #12에서 복합 가람 생성기와 편집 옵션 구현.
+- [x] #12에서 복합 가람 생성기와 편집 옵션 구현.
 
 이 터 계약은 #5의 승인된 배치 기반이다. #12는 이를 렌더 단계에서 몰래 키우지 말고, 필요한 footprint를 순수 계획 단계에 먼저 요청해야 한다.

@@ -276,10 +276,12 @@ export function* populateVillageSteps(plan, opts = {}) {
   //   이미 일곽 단위 내부 병합(궁역 ~778콜)이라 미병합 노출해도 net 드로우콜 동등. 재질셋(야간 창호광)은
   //   병합 여부와 무관하게 병합 전 원본에서 그대로 수집(parity). 절 등 나머지 랜드마크는 그대로 병합.
   let palaceCore = null;
+  let templeCore = null;
   if (plan.features) {
     for (const o of buildFeatureObjects(plan, site)) {
       collectMaterialSets(o, matSets);
       if (o.name === 'palace-core') palaceCore = o;
+      else if (o.name === 'temple-cluster') templeCore = o;
       else landmarks.push(o);
     }
   }
@@ -317,6 +319,29 @@ export function* populateVillageSteps(plan, opts = {}) {
       root.add(palaceMerged);
     } else {
       root.add(palaceCore);   // 디버그(비최적화) 경로: 미병합 그대로 노출
+    }
+  }
+
+  // Temple site and architecture have separate focus ownership. The pad and
+  // approach remain visible while the aerial compound merge is replaced by an
+  // editable full-detail overlay; this avoids a terrain/path pop during dolly-in.
+  let templeMerged = null;
+  let templeSiteMerged = null;
+  if (templeCore) {
+    if (optimize) {
+      const inner = templeCore.userData.templeInner;
+      const siteObjects = templeCore.userData.templeSiteObjects || [];
+      if (siteObjects.length) {
+        templeSiteMerged = mergeStatic(siteObjects, 'temple-site-merged');
+        root.add(templeSiteMerged);
+      }
+      if (inner) {
+        templeMerged = mergeStatic([inner], 'temple-compound-merged');
+        root.add(templeMerged);
+      }
+      templeCore.traverse((o) => { if (o.isMesh || o.isInstancedMesh) o.geometry?.dispose?.(); });
+    } else {
+      root.add(templeCore);
     }
   }
   yield 'merges';
@@ -368,6 +393,7 @@ export function* populateVillageSteps(plan, opts = {}) {
     plan, waterU, matSets, houseHandle, heroHandle, optimize, flora, animals, nightLights, bloom, forest,
     palaceCore,   // 궁 편집 핸들(#93) — 미병합 palace-core 그룹(궁 없으면 null), userData.palaceCompound 로 일곽 접근
     palaceMerged, // #140-B 부감 병합본(궁 없거나 비최적화면 null) — 어댑터가 focus-in 시 가리고 오버레이로 교체(히어로 #62 동형)
+    templeCore, templeMerged, templeSiteMerged,
 
     // 흐르는 구름 그림자 공유 uniform(어댑터가 진입 시 setupClouds 에 넘겨 빌보드가 갱신) + 외곽선.
     cloudUniforms: cloudU, edge: site.edge, terrainMax: site.terrainR,

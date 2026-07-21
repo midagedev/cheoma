@@ -175,7 +175,13 @@ export function planVillage(opts = {}) {
   //   ("절 하나만" 구성: houses:0 + includeTemple:true → 집 없는 사찰 플랜, 엔진은 부감 랜딩 폴백).
   const housesOverridden = typeof opts.houses === 'number' && isFinite(opts.houses);
   const defaultTarget = Math.round(pieceLerp(siteR, HOUSE_ANCHORS));   // siteR 이 함의하는 명목 호수
-  const houseTarget = housesOverridden ? Math.max(0, Math.min(400, Math.round(opts.houses))) : defaultTarget;
+  const requestedHouseTarget = housesOverridden ? Math.max(0, Math.min(400, Math.round(opts.houses))) : defaultTarget;
+  // The solo field can safely hold either one household or the minimum 22m
+  // hermitage precinct, not both plus a road network. Selecting a temple at
+  // this scale therefore means the documented "temple alone" composition.
+  const templeSolo = includeTemple && siteR < 50;
+  const houseTarget = templeSolo ? 0 : requestedHouseTarget;
+  if (templeSolo && requestedHouseTarget > 0) warnings.push('외딴 절 구성에서는 주거 필지를 생략함');
   const wantWall = tuning.cityWall === true ? true : tuning.cityWall === false ? false : (scale === 'hanyang');
   const wallSupported = siteR >= CITY_WALL_MIN_SITE_R;
 
@@ -200,8 +206,15 @@ export function planVillage(opts = {}) {
 
   // ── 1) 사이트(배산임수) ── 지형 옵션(#91) 주입: 기복·능선고·개울 사행/유무(무옵션=현행 정확 재현).
   //   bowlK(#120): 분지 반경을 footprint(houseTarget)에 종속. 무옵션(houses 미지정) 시 bowlK=1 → 불변.
+  // A 22m compact precinct cannot share the 30m solo field with the stream bank
+  // without either climbing the ridge or violating the exact bank clearance.
+  // Keep that smallest temple landscape dry; the next scale restores the user's
+  // stream setting. This is a planning constraint, not a renderer-side overlap.
+  const templeSoloDry = templeSolo;
   const site = makeSite({ siteR, seed, bowlK,
-    undAmpK: tuning.undAmpK, ridgeHK: tuning.ridgeHK, streamMeanderK: tuning.streamMeanderK, stream: tuning.stream });
+    undAmpK: tuning.undAmpK, ridgeHK: tuning.ridgeHK, streamMeanderK: tuning.streamMeanderK,
+    stream: templeSoloDry ? false : tuning.stream });
+  if (templeSoloDry && tuning.stream) warnings.push('외딴 절 터는 경내 이격을 위해 마른 분지로 구성됨');
   const C = site.center, E = site.entrance;
   const toEntrance = G.norm(G.sub(E, C));   // 종가가 바라보는 방향(남, 동구쪽)
 
@@ -226,7 +239,7 @@ export function planVillage(opts = {}) {
     // 남기면 보호수와 숲 worker가 궁궐을 빈 땅으로 오인한다.
     features.palace = { ...palaceParcel, x: pc.x, z: pc.z, tier };
     blockers.push(palaceParcel);
-  } else if (houseTarget <= 0 && typeof opts.houses === 'number') {
+  } else if (houseTarget <= 0 && (typeof opts.houses === 'number' || templeSolo)) {
     // 집 없는 구성(#114): houses:0 명시 시 예약 코어(종가·관아)도 생략 — "절 하나만"(includeTemple)
     //   또는 빈 산세 구성. 엔진은 hero 부재 시 부감 랜딩 폴백(기존 경로).
   } else if (isCapitalTier) {
@@ -274,7 +287,9 @@ export function planVillage(opts = {}) {
     : norm; // 생성 중에만 주입; 반환 plan에는 features가 단일 소스.
 
   // ── 3) 도로 (간선 결정론 + 이면 유기) ──
-  const roadsResult = planRoads(site, layoutOpts, rng);
+  const roadsResult = templeSolo
+    ? { roads: [], nodes: { junctions: [] } }
+    : planRoads(site, layoutOpts, rng);
 
   // ── 3.25) 사찰 대지·진입로 예약 ── 사찰은 남은 급사면에 사후 삽입되는 장식물이 아니라,
   //   완만한 대지와 물·길의 관계를 먼저 읽고 자리를 잡는다. 산의 위요감은 좋은 선택지 중 하나일

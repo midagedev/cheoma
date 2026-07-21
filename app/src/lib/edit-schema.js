@@ -175,6 +175,42 @@ const PALACE_COMPOUND_SECTIONS = [
   ] },
 ];
 
+// ── 사찰 복합 가람(#12) ────────────────────────────────────────────────────
+// Geometry is never mutated from Svelte. These fields become TemplePlan options
+// and the runtime swaps one full compound overlay inside the reserved site.
+function templeSections(spec) {
+  const variant = spec?.params?.variant || 'compact';
+  const propFields = [
+    ...(variant === 'compact' ? [] : [
+      { key: 'pagoda', ctrl: 'segment', route: 'temple', options: ['auto', 'none', 'single', 'pair'] },
+    ]),
+    { key: 'stoneLanterns', ctrl: 'stepper', min: 0, max: 2, route: 'temple' },
+    ...(variant === 'compact' ? [] : [
+      { key: 'includeBellPavilion', ctrl: 'toggle', route: 'temple' },
+      { key: 'includeDanggan', ctrl: 'toggle', route: 'temple' },
+    ]),
+    ...(variant === 'extended'
+      ? [{ key: 'includeBudo', ctrl: 'toggle', route: 'temple' }]
+      : []),
+  ];
+  return [
+    { id: 'temple-plan', titleKey: 'sec_temple_plan', fields: [
+      { key: 'variant', ctrl: 'segment', route: 'temple',
+        options: spec?.variantOptions?.length ? spec.variantOptions : ['compact'] },
+      { key: 'hallCount', ctrl: 'stepper', min: spec?.hallRange?.min || 1,
+        max: spec?.hallRange?.max || 2, route: 'temple' },
+      { key: 'courtScale', ctrl: 'range', min: 0.82, max: 1.18, step: 0.02, route: 'temple' },
+      { key: 'axisBend', ctrl: 'range', min: -1, max: 1, step: 0.05, route: 'temple' },
+    ] },
+    { id: 'temple-props', titleKey: 'sec_temple_props', fields: propFields },
+  ];
+}
+
+const TEMPLE_OPTION_KEYS = [
+  'variant', 'hallCount', 'courtScale', 'axisBend', 'pagoda', 'stoneLanterns',
+  'includeBellPavilion', 'includeDanggan', 'includeBudo',
+];
+
 // ── 마을 패널 파라미터(#91) ── 부감 컨텍스트 패널의 "마을 상세" 축. 코어(plan.normTuning + site.makeSite +
 //   populate + variants)가 이미 소비하는 옵션을 지형/구성/어휘 그룹으로 표면화한다. 값은 App villageOpts 로
 //   모여 engine.village.setOpts → 재생성(시드 유지). 무옵션(전부 기본 K=1·stream=true·auto·char01=auto)은
@@ -219,7 +255,7 @@ export function villageDefaults() {
 export function schemaFor(spec) {
   if (!spec) return { family: 'regular', tabs: false, sections: [] };
   if (spec.family === 'palace-compound') return { family: 'palace-compound', tabs: false, sections: PALACE_COMPOUND_SECTIONS };
-  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: [] };   // #147 절: 편집 섹션 없음(줌만)
+  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: templeSections(spec) };
   if (spec.hero) {
     const hs = spec.heroStyle === 'hanok' ? 'hanok' : 'palace';
     return { family: 'hero', heroStyle: hs, tabs: false, sections: hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS };
@@ -241,6 +277,15 @@ const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 //   (유형 전환 등으로 비어 있는 축은 코어 프리셋 기본값을 쓰게). 정규만 kind 포함.
 export function buildRebuildPayload(spec, params) {
   const schema = schemaFor(spec);
+  if (schema.family === 'temple') {
+    return {
+      templeOptions: Object.fromEntries(
+        TEMPLE_OPTION_KEYS
+          .filter((key) => params[key] !== undefined)
+          .map((key) => [key, params[key]]),
+      ),
+    };
+  }
   const payload = {};
   const building = {}, top = {}, preset = {}, roofOpts = {};
   let wallH;

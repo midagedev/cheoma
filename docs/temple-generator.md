@@ -1,15 +1,16 @@
 # 재사용 가능한 한국 사찰 생성기 설계
 
-> - **상태**: 대기 설계
+> - **상태**: 현재 계약·구현 완료
 > - **관련 이슈**: GitHub #12 — 절 크기·구성·편집 다양화
-> - **선행 조건**: 사찰 터 재배치 #5 리뷰·머지
+> - **기준일**: 2026-07-22
+> - **선행 조건**: 사찰 터 재배치 #5, 남측 일조·focus 구도 #15
 > - **목표 경계**: `src/`의 framework-agnostic Three.js 모듈, `app/` 의존 금지
 
 ## 1. 목표와 현재 공백
 
 사용자가 원하는 것은 특정 산사 한 채가 아니라, 규모와 지형에 따라 아름답고 서로 다른 한국 사찰이 나타나는 생성기다. 산속·계류변·마을 가장자리·도성 안을 모두 지원해야 하며, 한 동짜리 구성도 작은 암자형의 한 변형일 뿐 유일한 결과가 아니다.
 
-현재 `buildTempleCluster()`는 `buildParcel({style:'temple'})` 한 번만 호출한다. 경내에는 빈 좌대 네 개가 놓이지만 기존 `src/props/temple.js`의 삼층석탑·석등·당간지주·부도는 사용하지 않는다. 즉 자산 부족이 아니라 **순수 가람 계획과 의미 기반 배치가 없는 것**이 핵심 공백이다.
+이 공백은 #12에서 닫혔다. 기존 `buildParcel({style:'temple'})` 한 번과 빈 좌대 네 개 대신 순수 `TemplePlan`이 전각·담장·문·마당·길·삼층석탑·석등·당간지주·부도를 의미로 배치하고, 독립 renderer와 village adapter가 같은 계획을 소비한다.
 
 ## 2. 실증에서 가져올 공간 언어
 
@@ -31,13 +32,13 @@
 
 ## 3. 모듈 경계
 
-생성기는 세 층으로 나눈다.
+생성기는 다음 세 층으로 구현한다.
 
-1. `planTempleCompound(options)` — Three.js 없이 local-space 순수 데이터만 만든다.
-2. `buildTempleCompound(plan, resources?)` — 계획을 Three.js group으로 조립한다.
-3. village adapter — site의 `baseY`, world transform, terrain apron, approach를 결합한다.
+1. `src/temple/plan.js#planTempleCompound(options)` — Three.js 없이 local-space 순수 데이터만 만든다.
+2. `src/temple/compound.js#buildTempleCompound(plan, resources?)` — 계획을 Three.js group으로 조립하고 `disposeTempleCompound()`로 소유 자원을 해제한다.
+3. `src/village/temple-plan.js`와 `src/generators/village/features.js` — site의 `baseY`, 회전 transform, terrain apron, approach, 식생 예약을 결합한다.
 
-공개 소비자는 `src/api/`를 통하고, 내부 계획기는 village나 Svelte를 import하지 않는다. 다른 프로젝트는 terrain/village 없이도 local-space 가람만 만들 수 있어야 한다. 렌더러는 건물·프롭 위치를 새로 추론하지 않고 plan을 그대로 소비한다.
+외부 소비자는 Three 없는 `src/api/temple-plan.js` 또는 renderer까지 포함한 `src/api/temple.js`를 쓴다. 내부 계획기는 village나 Svelte를 import하지 않는다. 다른 프로젝트는 terrain/village 없이도 local-space 가람만 만들 수 있고, 렌더러는 건물·프롭 위치를 새로 추론하지 않고 plan을 그대로 소비한다.
 
 권장 계획 데이터:
 
@@ -48,7 +49,8 @@
   width, depth,
   axis,
   courtyards: [{ id, polygon, level }],
-  buildings: [{ id, role, style, position, yaw, bays, depthBays, level }],
+  buildings: [{ id, role, style, position, yaw, frontBays, sideBays, footprint }],
+  enclosures: [{ id, role, polygon, gateId }],
   gates: [{ id, role, position, yaw }],
   props: [{ id, role, kind, position, yaw, scale }],
   paths: [{ id, role, points, width }]
@@ -76,35 +78,34 @@
 
 ## 5. 편집 계약
 
-편집 패널은 렌더 오브젝트를 직접 조작하지 않고 계획 옵션을 갱신한다.
+편집 패널은 렌더 오브젝트를 직접 조작하지 않고 `templeOptions`를 통해 계획 옵션을 갱신한다.
 
-- seed, variant, 전체 폭/깊이.
-- 전각 수와 주불전/부불전 bays.
-- 축 굴절 정도, 중정 여백, 단차 수.
-- 문루·종루·요사 포함 여부.
-- 석탑 유형/개수, 석등/당간지주/부도 포함 여부.
-- 단청 강도나 palette는 geometry 계획과 분리한다.
+- `variant`, 전각 수, 축 굴절 정도, 중정 여백.
+- 석탑 없음/한 기/쌍탑/자동, 석등 수, 종루·당간지주·부도 포함 여부.
+- 마을이 예약한 최대 크기에 들어가는 변형만 패널에 노출한다.
+- 변형을 바꾸면 그 문법의 전각·기념물 기본값을 함께 다시 시드해 UI 숫자와 planner clamp가 어긋나지 않게 한다.
+- 폭·깊이는 마을 재생성 전에 터 계획이 소유한다. focus 편집이 예약 경계를 몰래 키우지 않는다.
 
 옵션 변경은 같은 seed에서 건물/프롭 ID를 가능한 한 보존해 선택 상태와 애니메이션이 불필요하게 깨지지 않게 한다.
 
 ## 6. 품질과 검증 기준
 
-- 순수 계획: 규모×변형×다중 seed에서 polygon 겹침, 보행축 폐쇄, footprint 이탈, 비결정성을 검사한다.
+- 순수 계획: `npm run check:temple`이 18개 변형·크기·seed와 6개 마을 adapter에서 겹침, footprint 이탈, 결정론, 남측 일조축, 접근로를 검사한다.
 - 역사성: 역할별 배치 규칙을 자동 검사하되, 모든 사찰을 완전 대칭 한 템플릿으로 만들지 않는다.
-- 시각: compact/courtyard/extended 각각 부감·진입·중정·주불전 근접 PNG를 직접 본다.
-- 성능: 건물 재질을 공유하고 반복 프롭은 가능한 경우 merge/instance한다. 변형별 draw call과 program delta를 기록한다.
-- 수명주기: 독립 생성 결과에 명시적 dispose 계약을 제공하고 호출자 소유 재질은 보존한다.
+- 시각: `temple.html`에서 compact/courtyard/extended의 부감·남측 26° 망원 구도를 직접 보고, `npm run shoot:focus-level`로 실제 앱의 사찰 focus와 편집 전환을 확인한다.
+- 성능: `npm run check:temple:browser`가 raw/부감 merge 삼각형 동등성과 draw call을 기록한다. 기준 장면에서 compact `805→85`, courtyard `1521→95`, extended `2681→111`이며 병합본은 140콜 이하를 유지한다.
+- 수명주기: 독립 생성 결과의 dispose 성공·멱등성과 호출자 palette 보존, 자체 palette 해제를 실제 WebGL 브라우저에서 검사한다.
 - 재사용: public API bundle이 Svelte·village runtime 없이 성공해야 한다.
 
 완료 최소선은 세 변형이 실질적으로 다른 실루엣과 동선을 만들고, 그중 둘 이상이 여러 전각을 가지며, 준비된 사찰 프롭이 의미 있는 위치에 등장하는 것이다. 현재 한 동짜리 경내를 단순히 랜덤 프롭으로 채우는 것은 완료로 보지 않는다.
 
-## 7. 작업 분할
+## 7. 구현 결과와 유지 규칙
 
-1. 순수 plan schema와 겹침/결정론 게이트.
-2. compact/courtyard/extended local-space 계획기.
-3. 기존 building·prop을 소비하는 renderer와 dispose.
-4. village 터 계획의 가변 footprint 연동.
-5. `src/api/` 공개 façade와 standalone 하네스.
-6. Svelte 편집 패널 연결.
+1. compact는 22–30m 암자형, courtyard는 36–48m 중정형, extended는 52–72m 두 일곽으로 계획한다.
+2. courtyard와 extended는 반드시 여러 전각을 가지며, extended는 내부 담장과 산문을 실제 같은 선에 둔다.
+3. 주불전 앞 `solarAccess`에는 다른 전각이나 높은 석탑·당간을 두지 않는다. 순수 게이트가 정자를 고의로 통로에 넣은 반례도 거부해야 한다.
+4. 마을 adapter는 실제 직사각 폭·깊이를 필지·도로·개울·숲보다 먼저 예약한다. 30m solo는 주거·도로·개울을 억지로 겹치지 않고 절만 있는 마른 분지와 중앙 진입을 쓴다.
+5. 부감에서는 재질별 정적 병합본만 보이고 focus에서는 편집 가능한 원본 계획을 재생성한다. 호출자 palette와 모듈 공유 프롭 자원의 소유권을 바꾸지 않는다.
+6. 사찰 카메라는 `frontDir`을 따라 남측 진입 공간에서 26° 망원으로 지면 위 3m를 조준한다. 일조축과 카메라축은 서로 다른 렌더 보정을 만들지 않는다.
 
-각 단계는 독립 파일과 독립 게이트를 가져 병렬 작업 시 같은 조립 파일을 동시에 수정하지 않게 한다.
+계획·renderer·village adapter·앱 schema·브라우저 게이트가 독립 파일을 가져 후속 병렬 작업이 같은 조립 파일을 불필요하게 공유하지 않게 한다.

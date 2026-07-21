@@ -35,7 +35,7 @@ import { planVillage } from '/src/village/plan.js';
 import { populateVillage } from '/src/village/populate.js';
 import * as G from '/src/village/geom.js';
 import { parcelWorldPoint } from '/src/village/parcel-contract.js';
-import { templeCompoundSize } from '/src/village/temple-plan.js';
+import { templeCompoundDepth, templeCompoundWidth } from '/src/village/temple-plan.js';
 const q = new URLSearchParams(location.search);
 const scaleRaw = q.get('scale') || 'village';
 const scale = isNaN(+scaleRaw) ? scaleRaw : +scaleRaw;
@@ -89,13 +89,13 @@ scene.add(villageGroup);
 const T = plan.features.temple;
 let tdiag = null;
 if (T) {
-  const foot = templeCompoundSize(T);
+  const footW = templeCompoundWidth(T), footD = templeCompoundDepth(T);
   let fmin = 1e9, fmax = -1e9;
   const NG = 6;
   for (let i = 0; i <= NG; i++) for (let j = 0; j <= NG; j++) {
     const point = parcelWorldPoint({ center: T, frontDir: T.frontDir }, {
-      x: -foot / 2 + foot * i / NG,
-      z: -foot / 2 + foot * j / NG,
+      x: -footW / 2 + footW * i / NG,
+      z: -footD / 2 + footD * j / NG,
     });
     const h = site.heightAt(point.x, point.z);
     if (h < fmin) fmin = h; if (h > fmax) fmax = h;

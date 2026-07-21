@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "baselineCommit": "93f5a4e",
-  "templeRevision": "issue-5-review-2026-07-21",
+  "templeRevision": "issue-12-compound-2026-07-22",
   "pavilionRevision": "issue-15-solar-focus-2026-07-21",
   "buildingSolarRevision": "issue-15-winter-sun-2026-07-21",
   "seed": 20260716,
@@ -27,24 +27,24 @@
       "bytes": 895424
     },
     "hamlet:temple": {
-      "hash": "e20f4231b3a80caf6805c9c360136be7bbcd199408b49e119d8b358cef41a048",
-      "bytes": 25540
+      "hash": "be8386f856f312552c76c7307bc80f875bf5ddb8c47b8620885268a6d89ce88a",
+      "bytes": 27061
     },
     "village:temple": {
-      "hash": "b8d6052e4284fa14bcd60e98d0d115582a97223d62fa63161ecaf0b3f494baef",
-      "bytes": 85887
+      "hash": "8b85aa8b0f0e5c44c0d55dd1d99c6f61a7804d50a03ece4e99be7edbd256aecb",
+      "bytes": 85936
     },
     "town:temple": {
-      "hash": "6dc5f611e73dda9ebf3f706f2d0a839d6763b6f5cd80c14ba87232c1f2f397ae",
-      "bytes": 177921
+      "hash": "c66bfac87d011c5e645e2eff2e09b6f4e56cc89485145b2ab9b5b7a36e287807",
+      "bytes": 188668
     },
     "capital:temple": {
-      "hash": "72d927d148f5c34f557a50f0eb6c08430f094c9cdf55451b87647f463d4ab307",
-      "bytes": 160437
+      "hash": "637fa0f8f7166458943e915e534ae256f5d8cd98726de1adc2bfa08782a80db1",
+      "bytes": 168128
     },
     "hanyang:temple": {
-      "hash": "3bc3f3a47e05cc86f0c93d174d1c9a3bc082942d9a77a31966766630b8f73419",
-      "bytes": 853574
+      "hash": "8b214cade993e1b45b0eae830390fffc064d9efd7d3a57d8a1abdbfe1170a210",
+      "bytes": 869835
     }
   }
 }

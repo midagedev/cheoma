@@ -4,11 +4,17 @@ import { buildPavilion } from '../../builder/pavilion.js';
 import { buildBridge } from '../../builder/bridge.js';
 import { buildParcel } from '../../layout/parcel.js';
 import { buildProp } from '../../props/index.js';
+import { buildTempleCompound } from '../../temple/compound.js';
+import { planTempleCompound } from '../../temple/plan.js';
 import { buildPalaceCompound } from '../../village/palace.js';
 import { mergeStatic } from '../../village/instancing.js';
 import * as G from '../../core/math/geom2.js';
 import { terrainMeshHeightAt } from '../../village/terrain-grid.js';
-import { TEMPLE_PATH_WIDTH, templeCompoundSize } from '../../village/temple-plan.js';
+import {
+  TEMPLE_PATH_WIDTH,
+  templeCompoundDepth,
+  templeCompoundWidth,
+} from '../../village/temple-plan.js';
 import {
   buildFeaturePad,
   buildTempleFeaturePad,
@@ -244,26 +250,33 @@ function buildTempleApproach(temple, site, surfaces) {
   return group;
 }
 
-function buildTempleCluster(temple, site) {
+export function buildTempleCluster(temple, site) {
   const group = new THREE.Group();
   group.name = 'temple-cluster';
-  const size = templeCompoundSize(temple);
-  const width = size - 3, depth = size - 3;
+  const width = templeCompoundWidth(temple);
+  const depth = templeCompoundDepth(temple);
   const rotationY = G.facingY(temple.frontDir || { x: 0, z: 1 });
   const { group: pad, padY, surfaces } = buildTempleFeaturePad(site, temple);
+  const approach = buildTempleApproach(temple, site, surfaces);
   group.add(pad);
-  group.add(buildTempleApproach(temple, site, surfaces));
+  group.add(approach);
   const inner = new THREE.Group();
-  inner.add(buildParcel({
+  inner.name = 'temple-inner';
+  const fallbackVariant = Math.max(width, depth) >= 52 ? 'extended'
+    : Math.max(width, depth) >= 36 ? 'courtyard' : 'compact';
+  const compound = buildTempleCompound(temple.compound || planTempleCompound({
     seed: temple.seed || 11,
-    style: 'temple',
-    plotW: width,
-    plotD: depth,
-    lanterns: false,
+    variant: fallbackVariant,
+    width,
+    depth,
   }));
+  inner.add(compound);
   inner.rotation.y = rotationY;
   inner.position.set(temple.x, padY, temple.z);
   group.add(inner);
+  group.userData.templeCompound = compound;
+  group.userData.templeInner = inner;
+  group.userData.templeSiteObjects = [pad, approach];
   return group;
 }
 

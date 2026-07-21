@@ -6,4 +6,5 @@ export * from './environment.js';
 export * from './cinematic.js';
 export * from './audio.js';
 export * from './props.js';
+export * from './temple.js';
 export * from './export.js';

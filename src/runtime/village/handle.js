@@ -11,6 +11,12 @@ import { buildBuilding } from '../../builder/index.js';
 import { buildParcel } from '../../layout/parcel.js';
 import { makeMaterials, applyThatchAge } from '../../builder/palette.js';
 import { buildPalaceCompound } from '../../village/palace.js';
+import { buildTempleCompound, disposeTempleCompound } from '../../temple/compound.js';
+import {
+  TEMPLE_VARIANT_SPECS,
+  planTempleCompound,
+  templeVariantsForSize,
+} from '../../temple/plan.js';
 import { houseMatrix, parcelMatrix } from '../../village/instancing.js';
 import { buildVillageWall } from '../../village/walls.js';
 import { toneOf, variantOv, variantThatchAge } from '../../village/variants.js';
@@ -387,8 +393,122 @@ export function createVillageHandle(opts, seed, plan, group) {
     };
   }
 
+  // ── 재사용 사찰 컴파운드 focus·편집 (#12) ────────────────────────────────
+  // The optimized aerial compound and the site apron/path are separate. Focus
+  // swaps only the architecture, so the approach never disappears under the
+  // camera. All edits regenerate a pure TemplePlan inside the footprint that
+  // site planning already reserved.
+  const templeCore = group.userData.templeCore || null;
+  const templeMerged = group.userData.templeMerged || null;
+  const templeVisNode = templeMerged || templeCore;
+  const templeCompound = templeCore?.userData?.templeCompound || null;
+  const templeInner = templeCore?.userData?.templeInner || templeCompound?.parent || null;
+  const templeHandle = templeCompound?.userData?.templeHandle || null;
+  const templeFeature = plan.features?.temple || null;
+  const templeLimit = Math.max(
+    templeFeature?.compoundWidth || templeHandle?.width || 0,
+    templeFeature?.compoundDepth || templeHandle?.depth || 0,
+  );
+  const templeVariantOptions = templeVariantsForSize(templeLimit);
+  let templeSeed = templeHandle?.seed ?? templeFeature?.seed ?? 11;
+  let templeCurrentPlan = templeHandle?.plan || templeFeature?.compound || null;
+  let templeOverride = null; // { group, compound }
+  let templeHidden = false;
+  const templeEditable = () => !!(templeCompound && templeInner && templeCurrentPlan);
+
+  function templePlanFromOptions(options = {}) {
+    const base = templeHandle?.plan || templeFeature?.compound || templeCurrentPlan;
+    const resolved = { ...(templeCurrentPlan?.settings || base.settings || {}), ...options };
+    const requested = templeVariantOptions.includes(resolved.variant) ? resolved.variant : (templeCurrentPlan?.variant || base.variant);
+    const preserveReservedVariantSize = requested === base.variant;
+    return planTempleCompound({
+      seed: templeSeed,
+      variant: requested,
+      ...(preserveReservedVariantSize ? { width: base.width, depth: base.depth } : {}),
+      hallCount: resolved.hallCount,
+      axisBend: resolved.axisBend,
+      courtScale: resolved.courtScale,
+      includeBellPavilion: resolved.includeBellPavilion,
+      pagoda: resolved.pagoda,
+      stoneLanterns: resolved.stoneLanterns,
+      includeDanggan: resolved.includeDanggan,
+      includeBudo: resolved.includeBudo,
+    });
+  }
+
+  function buildTempleOverlay(options) {
+    templeCurrentPlan = templePlanFromOptions(options);
+    const wrapper = new THREE.Group();
+    wrapper.name = 'temple-override';
+    wrapper.userData.snowRoofKind = 'giwa';
+    const compound = buildTempleCompound(templeCurrentPlan, { mats: templeCompound.userData.mats });
+    wrapper.add(compound);
+    wrapper.rotation.y = templeInner.rotation.y;
+    wrapper.position.copy(templeInner.position);
+    wrapper.userData.W = templeCurrentPlan.width;
+    wrapper.userData.D = templeCurrentPlan.depth;
+    wrapper.userData.style = 'temple';
+    return { wrapper, compound };
+  }
+
+  function showTempleDetail(options = {}) {
+    if (!templeEditable()) return null;
+    hideTempleDetail();
+    const built = buildTempleOverlay(options);
+    overrides.add(built.wrapper);
+    templeOverride = { group: built.wrapper, compound: built.compound };
+    if (templeVisNode) templeVisNode.visible = false;
+    templeHidden = true;
+    if (snow.isActive()) snow.inject(built.wrapper);
+    retainOverlayPrograms(built.wrapper, `temple${snow.isActive() ? '|snow' : ''}`);
+    representationDirty = true;
+    return built.wrapper;
+  }
+
+  function hideTempleDetail() {
+    const changed = !!templeOverride || templeHidden;
+    if (templeOverride) {
+      disposeTempleCompound(templeOverride.compound);
+      overrides.remove(templeOverride.group);
+      templeOverride = null;
+    }
+    if (templeHidden && templeVisNode) templeVisNode.visible = true;
+    templeHidden = false;
+    if (changed) representationDirty = true;
+  }
+
+  function templeSpec() {
+    const current = templeCurrentPlan || templeFeature?.compound;
+    const base = templeHandle?.plan || templeFeature?.compound || current;
+    const variantDefaults = Object.fromEntries(templeVariantOptions.map((variant) => {
+      const useReservedSize = variant === base?.variant;
+      const planned = planTempleCompound({
+        seed: templeSeed,
+        variant,
+        ...(useReservedSize ? { width: base.width, depth: base.depth } : {}),
+      });
+      return [variant, { ...planned.settings }];
+    }));
+    return {
+      parcelId: 'temple', family: 'temple', style: 'temple', temple: true,
+      landmark: true, editable: templeEditable(),
+      variantOptions: templeVariantOptions.slice(),
+      variantDefaults,
+      hallRange: current ? {
+        min: TEMPLE_VARIANT_SPECS[current.variant].minHalls,
+        max: current.variant === 'compact' && Math.min(current.width, current.depth) < 25
+          ? 1
+          : TEMPLE_VARIANT_SPECS[current.variant].maxHalls,
+      } : { min: 1, max: 2 },
+      params: current ? { variant: current.variant, ...current.settings } : {},
+    };
+  }
+
   // Palace and temple proxies join the same address space as residential parcels.
-  for (const proxy of buildLandmarkPickProxies(plan, site, { palaceHandle, palaceInner, palaceSpec })) {
+  for (const proxy of buildLandmarkPickProxies(plan, site, {
+    palaceHandle, palaceInner, palaceSpec,
+    templeHandle, templeInner, templeSpec,
+  })) {
     proxies.push(proxy);
     proxyGroup.add(proxy.mesh);
     proxyById.set(proxy.parcelId, proxy);
@@ -417,7 +537,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   // focus 생활 디테일이 집 내부 자식이 아니라 필지의 실제 월드 변환·치수·마당 데이터를 쓰게 한다.
   // show/reroll/hop 경로가 모두 이 서술자를 공유해 닭·풀·낙엽 링이 엉뚱한 원점에 생기지 않는다.
   function focusAmbientDescriptor(parcelId, overlayGroup = null) {
-    if (!parcelId || parcelId === 'palace') return null;
+    if (!parcelId || parcelId === 'palace' || parcelId === 'temple') return null;
     const parcel = plan.parcels.find((candidate) => candidate.id === parcelId);
     if (!parcel) return null;
     const root = overlayGroup
@@ -456,6 +576,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     //   편집 전후로 비교해 지오가 실제로 바뀌었는지 정량 확인(스크린샷 육안 검수와 병행).
     overlayBox(parcelId) {
       const g = parcelId === 'palace' ? (palaceOverride && palaceOverride.group)
+        : parcelId === 'temple' ? (templeOverride && templeOverride.group)
         : heroOverrides.get(parcelId)?.group || overrideById.get(parcelId);
       if (!g) return null;
       g.updateWorldMatrix(true, true);
@@ -527,6 +648,13 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (parcelId === 'palace') {
         if (!palaceEditable()) return null;
         return showPalaceDetail(newParams.presetOverrides || null);
+      }
+      if (parcelId === 'temple') {
+        if (!templeEditable()) return null;
+        const group = showTempleDetail(newParams.templeOptions || newParams);
+        const proxy = proxyById.get('temple');
+        if (proxy) proxy.buildingSpec = templeSpec();
+        return group;
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
@@ -612,6 +740,10 @@ export function createVillageHandle(opts, seed, plan, group) {
         const g = showPalaceDetail();   // 편집 없는 기본 오버레이(원본 palaceCore 가림) — 조립·편집 앵커
         return g ? { group: g, compound: true, assembly: g, ambient: null } : null;
       }
+      if (parcelId === 'temple') {
+        const g = showTempleDetail();
+        return g ? { group: g, compound: true, assembly: g, ambient: null } : null;
+      }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
       if (parcel.hero) {
@@ -627,6 +759,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // focus-out: 오버레이 해제 + 원본 복원. 정규=인스턴스 재노출, 특수(종가)=병합본 복원.
     hideParcelDetail(parcelId) {
       if (parcelId === 'palace') { hidePalaceDetail(); return; }
+      if (parcelId === 'temple') { hideTempleDetail(); return; }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (parcel && parcel.hero) {
         hideHeroDetail(parcelId);
@@ -642,6 +775,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     //   (편집 상태 보존)를 반환: group=링 앵커, assembly=조립 대상 노드, compound=playCompoundAssembly 여부.
     focusAssembly(parcelId) {
       if (parcelId === 'palace') return palaceOverride ? { group: palaceOverride.group, assembly: palaceOverride.group, compound: true } : null;
+      if (parcelId === 'temple') return templeOverride ? { group: templeOverride.group, assembly: templeOverride.group, compound: true } : null;
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
       if (parcel.hero) {
@@ -663,6 +797,14 @@ export function createVillageHandle(opts, seed, plan, group) {
         const g = withSeededBuild(palaceHandle.seed, () => showPalaceDetail(null));
         const px = proxyById.get('palace'); if (px) px.buildingSpec = palaceSpec();
         return g ? { group: g, compound: true, assembly: g, spec: px ? px.buildingSpec : palaceSpec() } : null;
+      }
+      if (parcelId === 'temple') {
+        if (!templeEditable()) return null;
+        templeSeed = (Math.random() * 0x100000000) >>> 0;
+        const g = withSeededBuild(templeSeed, () => showTempleDetail());
+        const px = proxyById.get('temple');
+        if (px) px.buildingSpec = templeSpec();
+        return g ? { group: g, compound: true, assembly: g, spec: px ? px.buildingSpec : templeSpec() } : null;
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
@@ -814,6 +956,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      hideTempleDetail();
       detachClouds();
       ambientField.exit();
       treeOccluder?.dispose();

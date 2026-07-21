@@ -17,11 +17,13 @@ import { createRoadSpatialIndex } from '../src/village/road-spatial.js';
 import { streamIntersectsPolygon } from '../src/village/stream-spatial.js';
 import {
   TEMPLE_PAD_LIFT,
-  TEMPLE_COMPOUND_SIZE,
+  TEMPLE_MAX_COMPOUND_SIZE,
   TEMPLE_MAX_RELIEF,
   TEMPLE_MIN_COMPOUND_SIZE,
   TEMPLE_PATH_WIDTH,
+  templeCompoundDepth,
   templeCompoundSize,
+  templeCompoundWidth,
   templeFootprint,
   templeReservationPolygons,
 } from '../src/village/temple-plan.js';
@@ -78,18 +80,23 @@ const errors = [];
 function assertTempleContract(plan, label) {
   const temple = plan.features.temple;
   const size = templeCompoundSize(temple);
+  const width = templeCompoundWidth(temple);
+  const depth = templeCompoundDepth(temple);
   const footprint = templeFootprint(temple);
   const placement = temple.placement || {};
   const fail = (message) => errors.push(`${label}: ${message}`);
 
-  if (size < TEMPLE_MIN_COMPOUND_SIZE || size > TEMPLE_COMPOUND_SIZE) {
-    fail(`compound size ${size} outside ${TEMPLE_MIN_COMPOUND_SIZE}..${TEMPLE_COMPOUND_SIZE}m`);
+  if (size < TEMPLE_MIN_COMPOUND_SIZE || size > TEMPLE_MAX_COMPOUND_SIZE) {
+    fail(`compound size ${size} outside ${TEMPLE_MIN_COMPOUND_SIZE}..${TEMPLE_MAX_COMPOUND_SIZE}m`);
   }
   if (placement.footprintDrop > TEMPLE_MAX_RELIEF) {
     fail(`footprint drop ${placement.footprintDrop}m exceeds ${TEMPLE_MAX_RELIEF}m`);
   }
-  if (!['road', 'gate'].includes(placement.pathSource)) {
-    fail(`approach source ${placement.pathSource || 'missing'} is not a road or city gate`);
+  if (!['road', 'gate', 'center'].includes(placement.pathSource)) {
+    fail(`approach source ${placement.pathSource || 'missing'} is not a road, city gate, or empty-site center`);
+  }
+  if (placement.pathSource === 'center' && plan.roads.length) {
+    fail('center approach is only valid in a road-free solo temple composition');
   }
   if (!worldEdgeContainsPolygon(plan.site.edge, footprint, 4)) fail('footprint crosses the world edge');
   const terrainR = plan.site.terrainR || plan.site.R;
@@ -105,8 +112,8 @@ function assertTempleContract(plan, label) {
   const frame = { center: temple, frontDir: temple.frontDir };
   for (let row = 0; row <= 4; row++) for (let column = 0; column <= 4; column++) {
     const point = parcelWorldPoint(frame, {
-      x: -size * 0.5 + size * column / 4,
-      z: -size * 0.5 + size * row / 4,
+      x: -width * 0.5 + width * column / 4,
+      z: -depth * 0.5 + depth * row / 4,
     });
     sampledMax = Math.max(sampledMax, plan.site.heightAt(point.x, point.z));
   }
@@ -117,7 +124,7 @@ function assertTempleContract(plan, label) {
   const path = temple.path || [];
   if (path.length < 2) fail('approach path has fewer than two points');
   else {
-    const expectedStart = parcelWorldPoint(frame, { x: 0, z: size * 0.5 });
+    const expectedStart = parcelWorldPoint(frame, { x: 0, z: depth * 0.5 });
     if (G.dist(path[0], expectedStart) > 1e-8) fail('approach does not start at the south gate');
     const edgeMargin = TEMPLE_PATH_WIDTH * 0.5 + 0.4;
     for (let index = 0; index < path.length; index++) {
@@ -141,6 +148,8 @@ function assertTempleContract(plan, label) {
     } else if (placement.pathSource === 'gate') {
       const gate = plan.features.cityWall?.gates?.find((candidate) => candidate.name === placement.pathGate);
       if (!gate || G.dist(endpoint, gate) > 1e-7) fail('approach endpoint misses its city gate');
+    } else if (placement.pathSource === 'center') {
+      if (G.dist(endpoint, plan.site.center) > 1e-7) fail('solo approach endpoint misses the site center');
     }
   }
 

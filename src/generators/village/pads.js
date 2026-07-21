@@ -4,7 +4,8 @@ import { markSharedResource } from '../../core/three-resources.js';
 import { parcelWorldPoint } from '../../village/parcel-contract.js';
 import {
   TEMPLE_PAD_LIFT,
-  templeCompoundSize,
+  templeCompoundDepth,
+  templeCompoundWidth,
   templeFootprint,
 } from '../../village/temple-plan.js';
 
@@ -144,13 +145,14 @@ function localRectPolygon(frame, minX, maxX, minZ, maxZ) {
   ].map((point) => parcelWorldPoint(frame, point));
 }
 
-function samplePolygonRange(site, frame, size, divisions = 4) {
-  const half = size * 0.5;
+function samplePolygonRange(site, frame, width, depth, divisions = 4) {
+  const halfWidth = width * 0.5;
+  const halfDepth = depth * 0.5;
   let min = Infinity, max = -Infinity;
   for (let row = 0; row <= divisions; row++) for (let column = 0; column <= divisions; column++) {
     const point = parcelWorldPoint(frame, {
-      x: -half + size * column / divisions,
-      z: -half + size * row / divisions,
+      x: -halfWidth + width * column / divisions,
+      z: -halfDepth + depth * row / divisions,
     });
     const height = site.heightAt(point.x, point.z);
     min = Math.min(min, height);
@@ -176,9 +178,10 @@ export function buildTempleFeaturePad(site, temple) {
     center: { x: temple.x, z: temple.z },
     frontDir: temple.frontDir || { x: 0, z: 1 },
   };
-  const size = templeCompoundSize(temple);
+  const width = templeCompoundWidth(temple);
+  const depth = templeCompoundDepth(temple);
   const upper = templeFootprint(temple);
-  const relief = samplePolygonRange(site, frame, size);
+  const relief = samplePolygonRange(site, frame, width, depth);
   const reliefCap = temple.placement?.reliefCap
     || Math.min(8, Math.max(4, (site.Hmax || 68) * 0.08));
   // Above roughly one human storey, split the downhill face so even a compact
@@ -188,14 +191,15 @@ export function buildTempleFeaturePad(site, temple) {
   const padY = Number.isFinite(temple.baseY) ? temple.baseY : relief.max + TEMPLE_PAD_LIFT;
   const surfaces = [{ polygon: upper, y: padY, role: 'court' }];
 
-  const half = size * 0.5;
+  const halfWidth = width * 0.5;
+  const halfDepth = depth * 0.5;
   const apronDepth = 5.2;
   const overlap = 0.9;
   for (let tier = 1; tier < tierCount; tier++) {
-    const back = half - overlap + (tier - 1) * (apronDepth - overlap);
+    const back = halfDepth - overlap + (tier - 1) * (apronDepth - overlap);
     const front = back + apronDepth;
-    const halfWidth = half + 0.7 - tier * 0.35;
-    const polygon = localRectPolygon(frame, -halfWidth, halfWidth, back, front);
+    const apronHalfWidth = halfWidth + 0.7 - tier * 0.35;
+    const polygon = localRectPolygon(frame, -apronHalfWidth, apronHalfWidth, back, front);
     const desired = padY - relief.drop * tier / tierCount;
     const y = Math.max(desired, polygonMaxHeight(site, polygon) + PAD_LIFT);
     surfaces.push({ polygon, y, role: 'apron' });
