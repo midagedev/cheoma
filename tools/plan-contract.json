@@ -1,48 +1,50 @@
 {
   "schema": 1,
-  "baselineCommit": "af361ca",
+  "baselineCommit": "93f5a4e",
   "templeRevision": "issue-5-review-2026-07-21",
+  "pavilionRevision": "issue-15-solar-focus-2026-07-21",
+  "buildingSolarRevision": "issue-15-winter-sun-2026-07-21",
   "seed": 20260716,
   "cases": {
     "hamlet:base": {
-      "hash": "0f133c73f8ed55c99d1537155cea5ff8b5032a865dc457c4fc7c9fbbd4292938",
-      "bytes": 34266
+      "hash": "5fd492f74d93f96acc7fceae5ffa4de5b2996892a8759a73fa90699f151d02f7",
+      "bytes": 34337
     },
     "village:base": {
-      "hash": "4cb857a717d010fc5e128579c2182521724343255f9a8a97f5eef76f0f9b26a8",
-      "bytes": 89450
+      "hash": "33e94ae71e25a51f255b5abc7be761b1729d6d14e9439fea45cfebdf79a3dd4c",
+      "bytes": 89518
     },
     "town:base": {
-      "hash": "dfe3a0b5e9b2bab525a7bae69a4cba6d5ecce5e3708d1efdce6a0b3a48426966",
-      "bytes": 186146
+      "hash": "37371a3a7f608c163f7fe678bd3deda37082ea110fd51eca384ddb023632c18e",
+      "bytes": 186217
     },
     "capital:base": {
-      "hash": "4da8372bcd6acfa6954f26a71aa02e70bfd1f0b84afcf276e53bd1fbcfa12676",
-      "bytes": 166882
+      "hash": "9f05bf09d481961fa433e4418965c1eaaa4021b97fb8de306b7b52bff7db909b",
+      "bytes": 166971
     },
     "hanyang:base": {
-      "hash": "a80e4a25f1fe3238101a2e5e3fd1789a3ba6d1a40c69e403c8a787865710f15b",
-      "bytes": 899521
+      "hash": "f45999a9532fb8bc3f72a034ea1591af02b4113ed62a6c1fd1009df66ce7fd52",
+      "bytes": 895424
     },
     "hamlet:temple": {
-      "hash": "bf0b5aec79a189cf248c3d61811104bf816470e46497d19c67c0e0aa921ebbab",
-      "bytes": 27900
+      "hash": "e20f4231b3a80caf6805c9c360136be7bbcd199408b49e119d8b358cef41a048",
+      "bytes": 25540
     },
     "village:temple": {
-      "hash": "a70d6690681cf72199878bda567042695bb71a465170f53a8fe759bd5d12ce52",
-      "bytes": 85819
+      "hash": "b8d6052e4284fa14bcd60e98d0d115582a97223d62fa63161ecaf0b3f494baef",
+      "bytes": 85887
     },
     "town:temple": {
-      "hash": "44510c5347b2d6c4d043d17df0c813d97fa2a28969d96a291ca16e262f9ef6a9",
-      "bytes": 177850
+      "hash": "6dc5f611e73dda9ebf3f706f2d0a839d6763b6f5cd80c14ba87232c1f2f397ae",
+      "bytes": 177921
     },
     "capital:temple": {
-      "hash": "1ea814c979fe96ae8f819ac118601bf0c81fbcdd7c92560c38a82d8acdecd08d",
-      "bytes": 160348
+      "hash": "72d927d148f5c34f557a50f0eb6c08430f094c9cdf55451b87647f463d4ab307",
+      "bytes": 160437
     },
     "hanyang:temple": {
-      "hash": "b6ca675c372914bfa89731b74e8b6ac7d1955110cf11623bb03cdb88f9ee2108",
-      "bytes": 875497
+      "hash": "3bc3f3a47e05cc86f0c93d174d1c9a3bc082942d9a77a31966766630b8f73419",
+      "bytes": 853574
     }
   }
 }

@@ -31,6 +31,7 @@ import {
   villageChunkLodPolicy,
 } from '../src/village/lod-policy.js';
 import { planVillage } from '../src/village/plan.js';
+import { parcelLocalPoint } from '../src/village/parcel-contract.js';
 
 const EPS = 1e-9;
 
@@ -479,7 +480,18 @@ function assertPlanChunkContract(plan, label) {
       `${label}: chunk ${chunk.ring}/${chunk.sector} used centroid instead of nearest footprint`);
     for (const parcel of chunk.parcels) {
       const focus = planParcelFocus(parcel);
-      const cameraY = (parcel.baseY || 0) + focus.height * 0.42 + focus.cameraLift;
+      invariant(focus.targetLift >= 1.65 && focus.targetLift <= 2.5,
+        `${label}/${parcel.id}: focus target escaped door-height band (${focus.targetLift})`);
+      invariant(focus.targetLift < focus.height * 0.34,
+        `${label}/${parcel.id}: focus target drifted back toward the roof (${focus.targetLift}/${focus.height})`);
+      const localTarget = parcelLocalPoint(parcel, { x: focus.worldX, z: focus.worldZ });
+      const localCamera = parcelLocalPoint(parcel, { x: focus.cameraX, z: focus.cameraZ });
+      const solar = parcel.solarAccess;
+      const solarT = (solar.localEnd - localTarget.z) / (localCamera.z - localTarget.z);
+      const solarX = localTarget.x + (localCamera.x - localTarget.x) * solarT;
+      invariant(solarT > 0 && solarT < 1 && Math.abs(solarX) <= solar.halfWidth - 0.2,
+        `${label}/${parcel.id}: focus camera left its south-light opening (${solarX}/${solar.halfWidth})`);
+      const cameraY = (parcel.baseY || 0) + focus.targetLift + focus.cameraLift;
       const distance = chunkLodDistance(chunk, focus.cameraX, focus.cameraZ, cameraY);
       invariant(distance < policy.fullIn,
         `${label}/${parcel.id}: focus camera cannot reach FULL for chunk ${chunk.ring}/${chunk.sector} `

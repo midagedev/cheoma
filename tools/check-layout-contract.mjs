@@ -4,6 +4,7 @@ import * as G from '../src/core/math/geom2.js';
 import { planVillage } from '../src/api/village-plan.js';
 import {
   CITY_WALL_DIMENSIONS,
+  cityWallContainsPolygon,
   cityWallVegetationBlocked,
   worldEdgeClearance,
 } from '../src/village/citywall-contour.js';
@@ -11,6 +12,7 @@ import {
   canopyBlocksSolarAccess,
   circleIntersectsPolygon,
   parcelHouseTranslation,
+  parcelSolarAccessPolygon,
   parcelWorldPoint,
   parcelWorldPolygon,
   preferredParcelHouseTranslation,
@@ -22,7 +24,20 @@ import {
 } from '../src/village/house-footprint.js';
 import { GUARDIAN_BASE_CLEARANCE } from '../src/village/guardian-plan.js';
 import { createRoadSpatialIndex } from '../src/village/road-spatial.js';
+import {
+  PAVILION_PARCEL_CLEARANCE,
+  PAVILION_GUARDIAN_CLEARANCE,
+  PAVILION_MAX_RELIEF,
+  PAVILION_ROAD_CLEARANCE,
+  PAVILION_ROOF_RADIUS,
+  PAVILION_STREAM_CLEARANCE,
+  pavilionBlocksParcelFocus,
+  pavilionFootprint,
+  pavilionTerrainRelief,
+} from '../src/village/pavilion-plan.js';
 import { makeVegetationMask } from '../src/village/vegetation-spatial.js';
+import { buildingBlocksSolarAccess } from '../src/village/solar-access.js';
+import { templeFootprint } from '../src/village/temple-plan.js';
 import {
   STREAM_GUARDIAN_BASE_CLEARANCE,
   STREAM_PADDY_BANK_CLEARANCE,
@@ -90,6 +105,7 @@ function assertGuardianContract(plan, label, scale, {
     ...(plan.features.palace?.poly ? [plan.features.palace] : []),
   ];
   const cityWall = plan.features.cityWall || null;
+  const pavilionPoly = pavilionFootprint(plan.features.pavilion, PAVILION_GUARDIAN_CLEARANCE);
   for (let i = 0; i < planned.length; i++) {
     const guardian = planned[i];
     invariant(mask(guardian.x, guardian.z, 0.1), `${label} guardian ${guardian.role} is not masked`);
@@ -116,6 +132,8 @@ function assertGuardianContract(plan, label, scale, {
       invariant(!circleIntersectsPolygon(guardian, guardian.radius, field.poly),
         `${label} guardian ${guardian.role} overlaps paddy ${fieldIndex}`);
     }
+    invariant(!circleIntersectsPolygon(guardian, guardian.radius, pavilionPoly),
+      `${label} guardian ${guardian.role} overlaps the pavilion`);
     for (let j = 0; j < i; j++) {
       const other = planned[j];
       invariant(G.dist(guardian, other) >= guardian.radius + other.radius + 2,
@@ -125,7 +143,7 @@ function assertGuardianContract(plan, label, scale, {
   return planned.length;
 }
 
-let parcels = 0, accesses = 0, guardians = 0, south45 = 0;
+let parcels = 0, accesses = 0, guardians = 0, pavilions = 0, solarBuildings = 0, solarProbes = 0, south45 = 0;
 let roofPolygons = 0, maxFacing = 0, maxAccess = 0, indexedCells = 0;
 let minHouseFit = 1, minHouseScale = 1, minRoofClearance = Infinity;
 let rerollChecks = 0;
@@ -141,6 +159,8 @@ for (const scale of SCALES) {
     const repeat = buildWithoutGlobalRandom(options);
     invariant(JSON.stringify(plan.roads) === JSON.stringify(repeat.roads), `${label} roads drift`);
     invariant(JSON.stringify(plan.parcels) === JSON.stringify(repeat.parcels), `${label} parcels drift`);
+    invariant(JSON.stringify(plan.features.pavilion) === JSON.stringify(repeat.features.pavilion),
+      `${label} pavilion plan drift`);
     invariant(JSON.stringify(plan.features.guardianTrees) === JSON.stringify(repeat.features.guardianTrees),
       `${label} guardian plan drift`);
     invariant(plan.parcels.length >= DENSITY_FLOOR[scale],
@@ -164,6 +184,72 @@ for (const scale of SCALES) {
       ...plan.parcels,
       ...(plan.features.palace?.poly ? [plan.features.palace] : []),
     ];
+    const solarProbeTarget = spatialParcels.find((parcel) => parcel.kind === 'giwa' || parcel.kind === 'choga');
+    if (solarProbeTarget) {
+      const makeProbe = (z) => ({
+        ...solarProbeTarget,
+        center: parcelWorldPoint(solarProbeTarget, { x: 0, z }),
+      });
+      const southBlocker = makeProbe(solarProbeTarget.solarAccess.localStart + 4);
+      const northNonBlocker = makeProbe(solarProbeTarget.solarAccess.localStart - 40);
+      invariant(buildingBlocksSolarAccess(solarProbeTarget, southBlocker, plan.site),
+        `${label} winter-sun probe missed a south-side roof`);
+      invariant(!buildingBlocksSolarAccess(solarProbeTarget, northNonBlocker, plan.site),
+        `${label} winter-sun probe rejected a north-side roof`);
+      solarProbes += 2;
+    }
+    const pavilion = plan.features.pavilion;
+    const pavilionPoly = pavilionFootprint(pavilion);
+    invariant(pavilion && pavilionPoly.length >= 8, `${label} missing planned pavilion footprint`);
+    invariant(!roadSpatial.intersectsRoadCorridor(pavilionPoly, PAVILION_ROAD_CLEARANCE),
+      `${label} pavilion overlaps a road corridor`);
+    invariant(pavilionTerrainRelief(plan.site, pavilion) <= PAVILION_MAX_RELIEF,
+      `${label} pavilion exceeds terrain relief limit`);
+    invariant(streamClearanceAt(plan.site, pavilion)
+      >= PAVILION_ROOF_RADIUS + PAVILION_STREAM_CLEARANCE,
+    `${label} pavilion overlaps the stream bank`);
+    if (plan.site.edge) {
+      invariant(worldEdgeClearance(plan.site.edge, pavilion) >= PAVILION_ROOF_RADIUS + 4,
+        `${label} pavilion left the world edge`);
+    }
+    if (plan.features.cityWall) {
+      invariant(cityWallContainsPolygon(plan.features.cityWall, pavilionPoly, 3),
+        `${label} pavilion left the city wall`);
+    }
+    for (const parcel of spatialParcels) {
+      invariant(!circleIntersectsPolygon(
+        pavilion,
+        PAVILION_ROOF_RADIUS + PAVILION_PARCEL_CLEARANCE,
+        parcel.poly,
+      ), `${label} pavilion overlaps ${parcel.id || 'palace'}`);
+      invariant(!canopyBlocksSolarAccess(parcel, pavilion, PAVILION_ROOF_RADIUS),
+        `${label} pavilion blocks ${parcel.id || 'palace'} solar access`);
+      invariant(!pavilionBlocksParcelFocus(parcel, pavilion),
+        `${label} pavilion blocks ${parcel.id || 'palace'} focus sightline`);
+    }
+    for (const [fieldIndex, field] of (plan.paddies || []).entries()) {
+      invariant(!G.polysOverlap(pavilionPoly, field.poly),
+        `${label} pavilion overlaps paddy ${fieldIndex}`);
+    }
+    pavilions++;
+    const tallPublicObstacles = [
+      ...(plan.features.temple ? [templeFootprint(plan.features.temple, 2)] : []),
+      ...(plan.features.sijeon || []).map((shop) => shop.poly),
+    ];
+    for (let targetIndex = 0; targetIndex < plan.parcels.length; targetIndex++) {
+      const target = plan.parcels[targetIndex];
+      for (const obstacle of tallPublicObstacles) {
+        invariant(!G.polysOverlap(parcelSolarAccessPolygon(target), obstacle),
+          `${label} a tall public structure blocks ${target.id || 'palace'} solar access`);
+      }
+      for (let blockerIndex = 0; blockerIndex < spatialParcels.length; blockerIndex++) {
+        const blocker = spatialParcels[blockerIndex];
+        if (target === blocker) continue;
+        invariant(!buildingBlocksSolarAccess(target, blocker, plan.site),
+          `${label} ${blocker.id || 'palace'} blocks ${target.id || 'palace'} winter solar access`);
+      }
+      solarBuildings++;
+    }
     let seedSouth60 = 0;
 
     for (let parcelIndex = 0; parcelIndex < plan.parcels.length; parcelIndex++) {
@@ -377,6 +463,8 @@ for (const [scale, seeds] of Object.entries(ADVERSARIAL_GUARDIAN_SEEDS)) {
 console.log(
   `LAYOUT CONTRACT: PASS (${parcels} parcels, ${roofPolygons} roof polygons, ${rerollChecks} rerolls, `
   + `${accesses} road links, `
+  + `${solarBuildings} solar-safe buildings + ${solarProbes} direction probes, `
+  + `${pavilions} solar/view-safe pavilions, `
   + `${guardians} guardians + ${adversarialGuardians} in ${adversarialGuardianPlans} adversarial plans, `
   + `${(south45 / parcels * 100).toFixed(1)}% within south±45°, max facing `
   + `${(maxFacing * 180 / Math.PI).toFixed(1)}°, max access ${maxAccess.toFixed(1)}m, `

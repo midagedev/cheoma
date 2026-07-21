@@ -117,6 +117,16 @@ export function parcelSolarAccess(parcel) {
   };
 }
 
+export function parcelSolarAccessPolygon(parcel) {
+  const corridor = parcel.solarAccess || parcelSolarAccess(parcel);
+  return [
+    parcelWorldPoint(parcel, { x: -corridor.halfWidth, z: corridor.localStart }),
+    parcelWorldPoint(parcel, { x: corridor.halfWidth, z: corridor.localStart }),
+    parcelWorldPoint(parcel, { x: corridor.halfWidth, z: corridor.localEnd }),
+    parcelWorldPoint(parcel, { x: -corridor.halfWidth, z: corridor.localEnd }),
+  ];
+}
+
 export function localCanopyBlocksSolarAccess(parcel, point, radius = 0) {
   const corridor = parcel.solarAccess || parcelSolarAccess(parcel);
   const dx = Math.max(0, Math.abs(point.x) - corridor.halfWidth);

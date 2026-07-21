@@ -13,6 +13,7 @@ import {
 import {
   SOUTH,
   attachParcelSpatialContract,
+  parcelSolarAccessPolygon,
   rectangularParcelShape,
   terrainAlignedFacing,
 } from './parcel-contract.js';
@@ -22,6 +23,10 @@ import {
   assignFittedVariationSequence,
   fitHouseWithinParcel,
 } from './house-footprint.js';
+import {
+  buildingBlocksSolarAccess,
+  parcelObstructionPolygons,
+} from './solar-access.js';
 import {
   STREAM_PARCEL_BANK_CLEARANCE,
   STREAM_SATELLITE_BANK_CLEARANCE,
@@ -55,10 +60,11 @@ function makePlacedGrid(cell = 28) {
     return { cx0: Math.floor(minX / cell), cx1: Math.floor(maxX / cell), cz0: Math.floor(minZ / cell), cz1: Math.floor(maxZ / cell) };
   };
   return {
-    add(poly) {
+    add(poly, item = poly) {
+      const entry = { poly, item };
       const b = bboxCells(poly);
       for (let cx = b.cx0; cx <= b.cx1; cx++) for (let cz = b.cz0; cz <= b.cz1; cz++) {
-        const k = key(cx, cz); let arr = grid.get(k); if (!arr) { arr = []; grid.set(k, arr); } arr.push(poly);
+        const k = key(cx, cz); let arr = grid.get(k); if (!arr) { arr = []; grid.set(k, arr); } arr.push(entry);
       }
     },
     overlaps(poly) {
@@ -66,11 +72,52 @@ function makePlacedGrid(cell = 28) {
       const seen = new Set();
       for (let cx = b.cx0; cx <= b.cx1; cx++) for (let cz = b.cz0; cz <= b.cz1; cz++) {
         const arr = grid.get(key(cx, cz)); if (!arr) continue;
-        for (const q of arr) { if (seen.has(q)) continue; seen.add(q); if (G.polysOverlap(poly, q)) return true; }
+        for (const entry of arr) {
+          if (seen.has(entry)) continue;
+          seen.add(entry);
+          if (G.polysOverlap(poly, entry.poly)) return true;
+        }
       }
       return false;
     },
+    query(poly) {
+      const b = bboxCells(poly);
+      const seen = new Set(), items = new Set();
+      for (let cx = b.cx0; cx <= b.cx1; cx++) for (let cz = b.cz0; cz <= b.cz1; cz++) {
+        const arr = grid.get(key(cx, cz)); if (!arr) continue;
+        for (const entry of arr) {
+          if (seen.has(entry)) continue;
+          seen.add(entry);
+          items.add(entry.item);
+        }
+      }
+      return items;
+    },
   };
+}
+
+function reserveParcelSun(parcel, roofGrid, accessGrid) {
+  for (const roof of parcelObstructionPolygons(parcel)) roofGrid.add(roof, parcel);
+  // Palace solarAccess is a precinct-scale vegetation corridor, not a single
+  // 1.5m residential window. Its whole enclosure still obstructs nearby homes.
+  if (parcel.solarAccess && parcel.kind !== 'palace') {
+    accessGrid.add(parcelSolarAccessPolygon(parcel), parcel);
+  }
+}
+
+function parcelSunBlocked(parcel, site, roofGrid, accessGrid) {
+  const fullAccess = parcelSolarAccessPolygon(parcel);
+  for (const blocker of roofGrid.query(fullAccess)) {
+    if (blocker.blockingPolygon) {
+      if (G.polysOverlap(fullAccess, blocker.blockingPolygon)) return true;
+    } else if (buildingBlocksSolarAccess(parcel, blocker, site)) return true;
+  }
+  for (const roof of parcelObstructionPolygons(parcel)) {
+    for (const target of accessGrid.query(roof)) {
+      if (buildingBlocksSolarAccess(target, parcel, site)) return true;
+    }
+  }
+  return false;
 }
 // 간선 우선 배정 순서(대로변 프라임 파사드부터).
 const LEVEL_ORDER = { daero: 0, jungno: 1, soro: 2, golmok: 3 };
@@ -202,12 +249,20 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const target = (typeof opts.target === 'number' && opts.target >= 0) ? Math.round(opts.target) : (SCALE_TARGET[scale] || 30);
   const parcels = [];
   const placed = makePlacedGrid();                              // 충돌 폴리곤 공간해시(예약분 포함)
+  const placedRoofs = makePlacedGrid();
+  const placedSolarAccess = makePlacedGrid();
   for (const blocker of blockers) {
     if (blocker.kind && blocker.seed != null) {
       if (blocker.sx == null) assignFittedVariation(blocker, char01, opts.tuning);
       else fitHouseWithinParcel(blocker);
     }
-    if (blocker.poly) placed.add(blocker.poly);
+    if (blocker.poly) {
+      placed.add(blocker.poly);
+      if (blocker.kind) reserveParcelSun(blocker, placedRoofs, placedSolarAccess);
+      else if (blocker.solarObstruction !== false) {
+        placedRoofs.add(blocker.poly, { blockingPolygon: blocker.poly });
+      }
+    }
   }
 
   const northRef = C.z - site.bowlR * 0.35;    // 최북 거주선(주산 기슭)
@@ -225,7 +280,8 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   // 자기 길은 실제 poly↔ribbon 계약으로, 다른 길은 후보 중심 회랑으로 빠르게 검사한다.
   const clearOfRoads = (center, ownRoad) =>
     !roadSpatial.withinRoadClearance(center, ownRoad, 2.5);
-  const validate = (center, poly, ownRoad) => {
+  const validate = (parcel, ownRoad) => {
+    const { center, poly } = parcel;
     // 필지 전체가 실제 지형 메시와 성곽 안쪽에 있어야 한다. 중심점만 검사하면 큰 필지 모서리가
     // world-edge 밖으로 삐치거나 성벽을 관통한다.
     if (!worldEdgeContainsPolygon(site.edge, poly, 6)) { dbg.edge = (dbg.edge || 0) + 1; return false; }
@@ -253,6 +309,10 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     }
     if (!clearOfRoads(center, ownRoad)) { dbg.road++; return false; }
     if (placed.overlaps(poly)) { dbg.overlap++; return false; }
+    if (parcelSunBlocked(parcel, site, placedRoofs, placedSolarAccess)) {
+      dbg.solar = (dbg.solar || 0) + 1;
+      return false;
+    }
     if (roadSpatial.intersectsRoadCorridor(poly, 0.2)) {
       dbg.road++;
       return false;
@@ -329,10 +389,11 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
           continue;
         }
         dbg.candidates++;
-        if (validate(center, poly, road)) {
+        if (validate(parcel, road)) {
           dbg.placed++;
           parcels.push(parcel);
           placed.add(poly);
+          reserveParcelSun(parcel, placedRoofs, placedSolarAccess);
           if (hero) heroCount++;
           const gap = gapWidth(rank, char01, rng);              // R-P2 고샅 폭 변주
           i += Math.max(1, Math.round((dims.plotW + gap) / FS)); // 필지폭 + 고샅만큼 전진
@@ -382,10 +443,11 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
       return false;
     }
     dbg.candidates++;
-    if (!validate(p0, poly, best.road)) return false;
+    if (!validate(parcel, best.road)) return false;
     dbg.placed++;
     parcels.push(parcel);
     placed.add(poly);
+    reserveParcelSun(parcel, placedRoofs, placedSolarAccess);
     return true;
   };
 
@@ -453,7 +515,13 @@ function assignEdgeShare(parcels) {
 //   parcel 은 정규 필지와 동일 형태({poly,shape,center,frontDir,rank,kind,plotW,plotD,seed}) — plan 이
 //   parcels 에 편입하면 id·assignVariation·populate 조립·나무 clearance/mask·야경·소동물이 그대로 적용된다.
 //   전용 rng(공유 rng·필지 seed 공간 불침해, 결정론). existing = 겹침 회피용 기존 필지·예약 polygon.
-export function planSatellites(site, opts, seed, { existing = [], cityWall = null, roads = [] } = {}) {
+export function planSatellites(site, opts, seed, {
+  existing = [],
+  residential = [],
+  solarObstacles = [],
+  cityWall = null,
+  roads = [],
+} = {}) {
   const scale = opts.scale;
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const nClusters = ({ hamlet: 0, village: 1, town: 1, capital: 2, hanyang: 3 })[scale] || 0;
@@ -522,9 +590,15 @@ export function planSatellites(site, opts, seed, { existing = [], cityWall = nul
   }
 
   const placed = makePlacedGrid();
+  const placedRoofs = makePlacedGrid();
+  const placedSolarAccess = makePlacedGrid();
   const roadSpatial = createRoadSpatialIndex(roads);
   const streamSpatial = createStreamSpatialIndex(site);
   for (const poly of existing) if (poly) placed.add(poly);
+  for (const poly of solarObstacles) if (poly) {
+    placedRoofs.add(poly, { blockingPolygon: poly });
+  }
+  for (const parcel of residential) reserveParcelSun(parcel, placedRoofs, placedSolarAccess);
   const out = [];
   let sidx = 0;
   for (const anchor of chosen) {
@@ -571,8 +645,10 @@ export function planSatellites(site, opts, seed, { existing = [], cityWall = nul
       if (streamSpatial.intersectsPolygon(poly, STREAM_SATELLITE_BANK_CLEARANCE)) continue;
       if (roadSpatial.intersectsRoadCorridor(poly, 0.2)) continue;
       if (placed.overlaps(poly)) continue;
+      if (parcelSunBlocked(parcel, site, placedRoofs, placedSolarAccess)) continue;
       out.push(parcel);
       placed.add(poly);
+      reserveParcelSun(parcel, placedRoofs, placedSolarAccess);
       made++;
     }
     sidx++;

@@ -23,6 +23,7 @@ import {
   streamIntersectsPolygon,
 } from './stream-spatial.js';
 import { planTempleSite, templeReservationPolygons } from './temple-plan.js';
+import { planPavilion } from './pavilion-plan.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -224,7 +225,7 @@ export function planVillage(opts = {}) {
     // 궁역도 일반 필지와 같은 poly·남측 일조 회랑을 보존한다. 렌더용 축약 feature만
     // 남기면 보호수와 숲 worker가 궁궐을 빈 땅으로 오인한다.
     features.palace = { ...palaceParcel, x: pc.x, z: pc.z, tier };
-    blockers.push({ poly: palaceParcel.poly });
+    blockers.push(palaceParcel);
   } else if (houseTarget <= 0 && typeof opts.houses === 'number') {
     // 집 없는 구성(#114): houses:0 명시 시 예약 코어(종가·관아)도 생략 — "절 하나만"(includeTemple)
     //   또는 빈 산세 구성. 엔진은 hero 부재 시 부감 랜딩 폴백(기존 경로).
@@ -290,7 +291,13 @@ export function planVillage(opts = {}) {
       cityWall,
     });
     templeReservations = templeReservationPolygons(features.temple);
-    for (const poly of templeReservations) blockers.push({ poly, templeReserve: true });
+    templeReservations.forEach((poly, index) => blockers.push({
+      poly,
+      templeReserve: true,
+      // The precinct can cast a shadow; the remaining reservation polygons are
+      // only a walkable approach and must not be treated as tall structures.
+      solarObstruction: index === 0,
+    }));
   }
 
   // ── 3.5) 시전행랑 (한양) ── 간선(주작대로·종로) 파사드를 따라 연립 벽식 점포(선형 상업, 규칙 7).
@@ -309,6 +316,8 @@ export function planVillage(opts = {}) {
 
   // ── 4) 필지 (도로변 분할 + 위계 그라디언트) ──
   const frontage = planParcels(site, roadsResult, layoutOpts, rng, blockers);
+  // 예약 코어 중 실제 필지로 렌더할 것(궁 제외)만 parcels 에 포함
+  const reserved = blockers.filter((blocker) => blocker.hero);
   // ── 4.5) 위성 부락(#120) ── 본동에서 조금 떨어진 완사면 포켓에 작은 무리(몇 채). rng 소비 없는 전용
   //   시드 경로(공유 rng 불침해 → 상류 결정론 보존, 위성 OFF 회귀 안전). 겹침 회피에 기존 필지·예약 코어
   //   polygon 을 넘긴다. cityWall 이 있으면 실제 부정형 윤곽 바깥만 허용한다.
@@ -318,11 +327,13 @@ export function planVillage(opts = {}) {
   ];
   const satellites = planSatellites(site, norm, seed, {
     existing: satExisting,
+    residential: [...reserved, ...frontage],
+    solarObstacles: blockers
+      .filter((blocker) => !blocker.kind && blocker.solarObstruction !== false)
+      .map((blocker) => blocker.poly),
     cityWall,
     roads: roadsResult.roads,
   });
-  // 예약 코어 중 실제 필지로 렌더할 것(궁 제외)만 parcels 에 포함
-  const reserved = blockers.filter((b) => b.hero);
   const parcels = [...reserved, ...frontage, ...satellites];
   // 안정적 필지 ID(시드 고정 → 같은 seed 는 같은 id 순서) — 인스턴싱·픽킹·편집의 키.
   parcels.forEach((p, i) => { p.id = `p${i}`; });
@@ -335,17 +346,24 @@ export function planVillage(opts = {}) {
   });
 
   // ── 5) 정자 ──
-  // 씨족촌: 동구 정자(진입 초입). 도성/읍치: 중심 정자(공용 결절).
-  if (scale === 'hamlet' || scale === 'village') {
-    const side = 1;
-    const off = G.mul(G.perpL(toEntrance), site.R * 0.10 * side);
-    const px = E.x + off.x + toEntrance.x * site.R * 0.05;
-    const pz = E.z + off.z + toEntrance.z * site.R * 0.05;
-    features.pavilion = { x: px, z: pz, sides: 6, rot: rng.range(0, 6.28) };
-  } else {
-    const pv = G.lerp(C, E, 0.30);
-    features.pavilion = { x: pv.x + site.R * 0.06, z: pv.z, sides: 6, rot: 0 };
-  }
+  // 씨족촌의 동구 정자 / 읍치·도성의 중심 정자라는 의미는 유지하되, 고정 좌표를 찍어
+  // 민가 위에 겹치거나 남측 일조·focus 회랑을 가리던 오류를 순수 배치 계약으로 막는다.
+  // 작은 마을이 예전부터 소비하던 RNG 1회는 ±6.9° 도로향 jitter로 보존해 하류 seed를 흔들지 않는다.
+  const pavilionRotationJitter = (scale === 'hamlet' || scale === 'village')
+    ? (rng.range(0, 6.28) / 6.28 - 0.5) * 0.24
+    : 0;
+  const pavilionParcels = [
+    ...parcels,
+    ...(features.palace?.poly ? [features.palace] : []),
+  ];
+  const pavilionPlanInput = {
+    site,
+    scale,
+    roads: roadsResult.roads,
+    parcels: pavilionParcels,
+    cityWall,
+    rotationJitter: pavilionRotationJitter,
+  };
 
   // ── 6) 돌다리 (개울 위, 진입 스파인 교차점) ──
   if (site.stream) {
@@ -400,11 +418,8 @@ export function planVillage(opts = {}) {
     }
   }
 
-  // ── 8) 소품 (동구 장승·솟대, 종가 앞 우물·장독대, 성격별 액센트) ──
-  planProps(features, site, scale, rng, char01);
-
-  // ── 9) 보호수 예약 ── 실제 flora를 만들기 전에 순수 위치·수관을 plan에 고정한다. 숲 worker와
-  // 마당 renderer가 같은 목록을 소비하므로 보호수 자리에 배경 숲이 먼저 박히지 않는다.
+  // 보호수는 scale별 필수 landmark이므로 먼저 실제 수관을 예약한다. 정자를 먼저 고정해
+  // 동구 당산나무를 밀어내거나, 유일한 초락 배미를 지우지 않는다.
   features.guardianTrees = planGuardianTrees({
     scale,
     features,
@@ -412,6 +427,22 @@ export function planVillage(opts = {}) {
     paddies,
     roads: roadsResult.roads,
   }, site, seed);
+
+  // 논과 보호수의 stable 예약을 모두 보존한 채 정자가 남향 주거 회랑 사이의 빈터를 찾는다.
+  features.pavilion = planPavilion({
+    ...pavilionPlanInput,
+    occupied: [
+      ...parcels.map((parcel) => parcel.poly),
+      ...(features.palace?.poly ? [features.palace.poly] : []),
+      ...(features.sijeon || []).map((shop) => shop.poly),
+      ...templeReservations,
+      ...(paddies || []).map((field) => field.poly),
+    ],
+    reservedCircles: features.guardianTrees,
+  });
+
+  // ── 8) 소품 (동구 장승·솟대, 종가 앞 우물·장독대, 성격별 액센트) ──
+  planProps(features, site, scale, rng, char01);
 
   const allPts = [...roadsResult.roads.flatMap((r) => r.pts), ...parcels.map((p) => p.center)];
   const bounds = G.boundsOfPts(allPts.length ? allPts : [site.center]);

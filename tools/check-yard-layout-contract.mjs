@@ -142,17 +142,23 @@ const hamletAnchors = snapshotParcel(hamlet, 'p0');
 invariant(hamletAnchors.length === 2, `hamlet:7:p0 retained ${hamletAnchors.length}/2 trees`);
 
 const hanyang = fixtures.get('hanyang:7');
-const hanyangParcel = hanyang.plan.parcels.find((parcel) => parcel.id === 'p254');
-invariant(yardTreeIntersectsHardObstacle(
-  { x: 7.67, z: -7.41 }, { trunkRadius: 0.1, canopyRadius: 0.1 }, yardHardObstacles(hanyangParcel),
-), 'hanyang:7:p254 old aux collision is no longer reserved');
-const hanyangAnchors = snapshotParcel(hanyang, 'p254');
-invariant(hanyangAnchors.length >= 1, 'hanyang:7:p254 lost its fruit tree instead of relocating it');
+const hanyangAnchorOwners = new Set(hanyang.flora.yardTreeAnchors.map((anchor) => anchor.parcelId));
+const hanyangParcel = hanyang.plan.parcels.find((parcel) => hanyangAnchorOwners.has(parcel.id)
+  && yardTreeIntersectsHardObstacle(
+    { x: 7.67, z: -7.41 },
+    { trunkRadius: 0.1, canopyRadius: 0.1 },
+    yardHardObstacles(parcel),
+  ));
+invariant(hanyangParcel, 'hanyang:7 lost the aux-building collision fixture');
+const hanyangParcelId = hanyangParcel.id;
+const hanyangAnchors = snapshotParcel(hanyang, hanyangParcelId);
+invariant(hanyangAnchors.length >= 1,
+  `hanyang:7:${hanyangParcelId} lost its fruit tree instead of relocating it`);
 
 // Rebuild the two targeted fixtures to pin the new slot choice and RNG contract.
 for (const [scale, seed, parcelId, expected] of [
   ['hamlet', 7, 'p0', hamletAnchors],
-  ['hanyang', 7, 'p254', hanyangAnchors],
+  ['hanyang', 7, hanyangParcelId, hanyangAnchors],
 ]) {
   const repeat = buildFixture(scale, seed);
   invariant(JSON.stringify(snapshotParcel(repeat, parcelId)) === JSON.stringify(expected),
@@ -164,5 +170,5 @@ for (const fixture of fixtures.values()) disposeFlora(fixture.flora);
 
 console.log(
   `YARD LAYOUT CONTRACT: PASS (${plans} plans, ${renderedTrees}/${plannedTrees} rendered, `
-  + `${(retention * 100).toFixed(1)}% of PR #36 tree baseline, p0/p254 relocated)`,
+  + `${(retention * 100).toFixed(1)}% of PR #36 tree baseline, p0/${hanyangParcelId} relocated)`,
 );

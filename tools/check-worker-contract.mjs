@@ -17,20 +17,20 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #5: 사찰 경내와 접근로를 필지보다 먼저 예약하고 forest/terrain/picking이 같은
-  // 회전 footprint를 소비한 뒤 시각 승인한 temple-ON scene 기준선. sync, 실제 module
+  // #15: 집 사이의 실제 저각 일조를 보존하고, 4.5m 정자 지붕을 필지 일조·focus·
+  // 보호수 회랑 밖에 예약하며 forest/terrain도 그 footprint를 소비한 scene 기준선. sync, 실제 module
   // Worker, ?worker=0 fallback은 이 값뿐 아니라 서로 byte-identical해야 한다.
-  village: 'fc5fa092:65f023a6:74f070e0:e0a311aa',
-  town: 'e11717e2:0f726104:9aaec996:482a5872',
-  capital: 'dc95e8ce:b69b7600:4a2d1bd4:33ec0d34',
-  hanyang: 'bdc75dc0:1785c5ce:0ad1e25f:c4ce1554',
+  village: '70198480:4cf70b52:af45764a:5b419da2',
+  town: 'f08ba8f4:ac01de7a:090a8324:2d5fd3d8',
+  capital: '785efef2:76f13918:b5ab0e86:73f3421e',
+  hanyang: '624ceb03:52d96285:7eacc062:ac0af03f',
 };
 const expectedProxyHashes = {
-  // 사찰 proxy가 가변 경내 폭과 계획된 baseY를 사용하므로 scene과 함께 갱신한다.
-  village: '13d7982c',
-  town: '79a79d96',
-  capital: 'ef7ece38',
-  hanyang: 'a5aaf2dc',
+  // 문 높이 target과 solarAccess 안의 XZ 시선을 쓰는 pick proxy 기준선.
+  village: 'bbb78e8b',
+  town: 'e9e10d24',
+  capital: '04633d8f',
+  hanyang: '259a3403',
 };
 
 const server = await createServer({
@@ -273,8 +273,8 @@ try {
         const failures = [];
         let checked = 0;
         const specs = [
-          { id: 'palace', profile: VILLAGE_LENS.palace, fit: 1.12, padding: 0.12, required: requirePalace },
-          { id: 'temple', profile: VILLAGE_LENS.temple, fit: 1.16, padding: 0.14, required: requireTemple },
+          { id: 'palace', profile: VILLAGE_LENS.palace, fit: 1.12, padding: 0.12, targetLift: 3.2, required: requirePalace },
+          { id: 'temple', profile: VILLAGE_LENS.temple, fit: 1.16, padding: 0.14, targetLift: 3, required: requireTemple },
         ];
         for (const spec of specs) {
           const proxy = handle.getPickProxy(spec.id);
@@ -294,13 +294,17 @@ try {
           const referencePreserved = framing.referenceFov === spec.profile.referenceFov;
           const fovPreserved = framing.fov === spec.profile.fov;
           const compositionPreserved = Math.abs(screenEquivalentDistance - expectedReferenceDistance) <= 1e-8;
-          if (!referencePreserved || !fovPreserved || !compositionPreserved) {
+          const targetLift = framing.target.y - proxy.worldCenter.y;
+          const doorTargetPreserved = Math.abs(targetLift - spec.targetLift) <= 1e-8;
+          if (!referencePreserved || !fovPreserved || !compositionPreserved || !doorTargetPreserved) {
             failures.push({
               id: spec.id,
               fov: framing.fov,
               referenceFov: framing.referenceFov,
               screenEquivalentDistance,
               expectedReferenceDistance,
+              targetLift,
+              expectedTargetLift: spec.targetLift,
             });
           }
         }

@@ -8,6 +8,7 @@ import { terrainGridSize } from './terrain-grid.js';
 import { terrainWarpInner } from './terrain-surface.js';
 import { makeVegetationMask } from './vegetation-spatial.js';
 import { templeFootprint } from './temple-plan.js';
+import { pavilionFootprint } from './pavilion-plan.js';
 
 // 산 숲 "수치 크런치"(#123) — forest.js 의 배치 루프(buildForestTrees·buildGraniteMassifs)에서
 //   THREE 오브젝트 조립을 뺀 순수 수학만 추출한 모듈. 워커(populate.worker.js)와 메인(forest.js)이
@@ -506,7 +507,8 @@ export function makeClearance(plan, site) {
   for (const f of (plan.paddies || [])) for (const c of f.poly) pts.push(c.x, c.z);
   if (site.stream) for (const q of site.stream.pts) pts.push(q.x, q.z);
   const F = plan.features || {};
-  for (const k of ['temple', 'palace', 'govCore', 'pavilion']) { const o = F[k]; if (o && typeof o.x === 'number') pts.push(o.x, o.z); }
+  for (const k of ['temple', 'palace', 'govCore']) { const o = F[k]; if (o && typeof o.x === 'number') pts.push(o.x, o.z); }
+  for (const point of pavilionFootprint(F.pavilion)) pts.push(point.x, point.z);
   // #147 절 footprint 모서리도 등재 — 절이 완경사(infill 발현 가능)에 앉는 경우 경내 거리장 정확화.
   if (F.temple && typeof F.temple.x === 'number') {
     for (const point of templeFootprint(F.temple)) pts.push(point.x, point.z);

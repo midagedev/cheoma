@@ -7,7 +7,7 @@ import { buildParcelSpec } from './parcel-edit.js';
 const DEG = Math.PI / 180;
 
 function parcelCameraFraming(worldCenter, focus) {
-  const target = new THREE.Vector3(worldCenter.x, worldCenter.y + focus.height * 0.42, worldCenter.z);
+  const target = new THREE.Vector3(worldCenter.x, worldCenter.y + focus.targetLift, worldCenter.z);
   const position = new THREE.Vector3(focus.cameraX, target.y + focus.cameraLift, focus.cameraZ);
   return { position, target, fov: focus.fov, referenceFov: focus.referenceFov };
 }
@@ -79,13 +79,13 @@ function landmarkCameraFraming(
 
 export function palaceCameraFraming(worldCenter, rotationY, width, depth) {
   return landmarkCameraFraming(worldCenter, rotationY, width, depth, {
-    lens: VILLAGE_LENS.palace, azimuth: 40, elevation: 20, targetY: 6, fit: 1.12, padding: 0.12,
+    lens: VILLAGE_LENS.palace, azimuth: 40, elevation: 20, targetY: 3.2, fit: 1.12, padding: 0.12,
   });
 }
 
 export function templeCameraFraming(worldCenter, rotationY, width, depth) {
   return landmarkCameraFraming(worldCenter, rotationY, width, depth, {
-    lens: VILLAGE_LENS.temple, azimuth: 24, elevation: 17, targetY: 4, fit: 1.16, padding: 0.14,
+    lens: VILLAGE_LENS.temple, azimuth: 24, elevation: 17, targetY: 3, fit: 1.16, padding: 0.14,
   });
 }
 
@@ -124,7 +124,7 @@ export function buildLandmarkPickProxies(plan, site, { palaceHandle, palaceInner
     const width = (feature.compoundSize || 33) + 3;
     const depth = width;
     const height = 30;
-    const worldCenter = new THREE.Vector3(feature.x, groundY + 9, feature.z);
+    const worldCenter = new THREE.Vector3(feature.x, groundY, feature.z);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth));
     mesh.position.set(feature.x, groundY + height / 2, feature.z);
     mesh.rotation.y = rotY;
