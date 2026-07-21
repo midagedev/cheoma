@@ -136,7 +136,7 @@ function routePath(path) {
       select('village plan API changed', 'app', 'worker');
       return { gates, reasons };
     }
-    if (/^src\/api\/(?:building|cinematic|export|props)\.js$/.test(path)) {
+    if (/^src\/api\/(?:building|cinematic|export|props|rendering)\.js$/.test(path)) {
       select('public feature API changed', 'app');
       return { gates, reasons };
     }

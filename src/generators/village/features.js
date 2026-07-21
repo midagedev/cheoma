@@ -9,7 +9,10 @@ import { planTempleCompound } from '../../temple/plan.js';
 import { buildPalaceCompound } from '../../village/palace.js';
 import { mergeStatic } from '../../village/instancing.js';
 import * as G from '../../core/math/geom2.js';
-import { terrainMeshHeightAt } from '../../village/terrain-grid.js';
+import {
+  streamSurfaceHeightAt,
+  terrainMeshHeightAt,
+} from '../../village/terrain-grid.js';
 import {
   TEMPLE_PATH_WIDTH,
   templeCompoundDepth,
@@ -331,9 +334,10 @@ export function buildFeatureObjects(plan, site) {
       site.heightAt(bridgeSpec.x, streamZ - (site.streamHalf + 3)),
       site.heightAt(bridgeSpec.x, streamZ + (site.streamHalf + 3)),
     );
+    const waterY = streamSurfaceHeightAt(site, bridgeSpec.x, streamZ);
     const y = bridgeSpec.type === 'arch'
-      ? site.streamY(bridgeSpec.x)
-      : Math.max(site.streamY(bridgeSpec.x), bankHeight - 0.35);
+      ? waterY
+      : Math.max(waterY, bankHeight - 0.35);
     bridge.position.set(bridgeSpec.x, y, bridgeSpec.z);
     bridge.rotation.y = bridgeSpec.rot || 0;
     objects.push(bridge);

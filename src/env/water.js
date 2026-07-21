@@ -54,13 +54,19 @@ const WATER_SKY_TIME = {
 
 // MeshStandard 셰이더에 물 표면감을 주입한다. wet 이 문자열이면 그 이름의 varying/uniform
 // (0..1)으로 강도를 게이트한다(논: 봄에만 물). 없으면 항상 물(개울).
-export function injectWaterLook(shader, u, { wet = null } = {}) {
+export function injectWaterLook(shader, u, {
+  wet = null,
+  reflection = 1,
+  ripple = 1,
+} = {}) {
   shader.uniforms.uTime = u.uTime;
   shader.uniforms.uSky = u.uSky;
   shader.uniforms.uRipple = u.uRipple;
   shader.uniforms.uFlow = u.uFlow;
   shader.uniforms.uGlint = u.uGlint;
   shader.uniforms.uRough = u.uRough;
+  shader.uniforms.uWaterReflection = { value: reflection };
+  shader.uniforms.uWaterRippleScale = { value: ripple };
 
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vWaterWP;')
@@ -75,6 +81,8 @@ export function injectWaterLook(shader, u, { wet = null } = {}) {
       uniform vec2 uFlow;
       uniform vec3 uGlint;
       uniform float uRough;
+      uniform float uWaterReflection;
+      uniform float uWaterRippleScale;
       varying vec3 vWaterWP;`)
     // 시간대 거칠기 가산: 저각 광원 스펙큘러의 뾰족한 peak 를 낮춰 bloom 임계 아래로.
     // wetK 로 게이트(논: 봄에만 물). uRough=0 이면 완전 무연산(기본 룩 불변).
@@ -91,7 +99,8 @@ export function injectWaterLook(shader, u, { wet = null } = {}) {
         float a = sin(dot(pw, fd) * 1.7 - uTime * 1.4);
         float b = sin(dot(pw, vec2(-fd.y, fd.x)) * 2.6 + uTime * 0.85);
         float c = sin(dot(pw, fd) * 4.3 - uTime * 2.3) * 0.4;
-        vec3 dn = vec3(a * 0.09 + c, 0.0, b * 0.09 - c * 0.6) * uRipple * wetK;
+        vec3 dn = vec3(a * 0.09 + c, 0.0, b * 0.09 - c * 0.6)
+          * uRipple * uWaterRippleScale * wetK;
         normal = normalize(normal + dn);
       }`)
     // 가짜 하늘 반사: fresnel 로 하늘색을 더한다(envMap 대체) + 태양/달빛 글린트 스파클.
@@ -100,14 +109,15 @@ export function injectWaterLook(shader, u, { wet = null } = {}) {
         float wetK = clamp(${wetExpr}, 0.0, 1.0);
         vec3 V = normalize(vViewPosition);
         float fres = pow(clamp(1.0 - abs(dot(normalize(normal), V)), 0.0, 1.0), 2.4);
-        totalEmissiveRadiance += uSky * (0.10 + 0.85 * fres) * wetK;
+        totalEmissiveRadiance += uSky * (0.10 + 0.85 * fres) * uWaterReflection * wetK;
         // 글린트: 흐름 따라 흐르는 교차 고주파 → 성기고 뾰족한 하이라이트만(수묵 감성).
         // grazing(fres)으로 게이트해 은은하게 얹는다.
         vec2 gp = vWaterWP.xz;
         float g1 = sin(dot(gp, vec2(1.9, -1.3)) + uTime * 1.7);
         float g2 = sin(dot(gp, vec2(-1.1, 2.3)) - uTime * 1.05);
         float spark = pow(clamp(g1 * g2, 0.0, 1.0), 8.0);
-        totalEmissiveRadiance += uGlint * spark * (0.35 + 0.65 * fres) * wetK;
+        totalEmissiveRadiance += uGlint * spark * (0.35 + 0.65 * fres)
+          * uWaterReflection * wetK;
       }`);
 }
 

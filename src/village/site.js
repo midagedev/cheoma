@@ -220,7 +220,18 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   // ── 명당수 중심선(사행) ── 동서로 가로지르며 완만히 굽는다.
   const streamMeander = (x) => streamZ + R * 0.05 * meK * Math.sin(x / R * 3.0 + 1.1) + R * 0.03 * meK * Math.sin(x / R * 6.7);
   const streamZat = (x) => streamMeander(x);
-  const streamHalf = 0.018 * R + 0.9;         // 개울 반폭
+  const streamHalf = 0.018 * R + 0.9;         // 제방을 포함한 하도 반폭
+  // A creek grows enough to read at town scale but caps before becoming a river;
+  // the larger river grammar belongs to its own scale option.
+  const streamWaterHalf = Math.min(4, Math.max(1.4, streamHalf * 0.5));
+  // A stream cannot climb the enclosing ridge. Reserve a broad, scale-relative
+  // valley whose center bed descends monotonically toward -x (the shader flow).
+  // The broad shoulder avoids replacing the old buried ribbon with a slot canyon.
+  const streamValleyHalf = streamHalf + Math.max(8, R * 0.10);
+  // Keep the wet channel and one coarse terrain-cell margin level. Otherwise the
+  // triangulated terrain can interpolate a high shoulder across a ribbon edge even
+  // though the analytic centerline itself is clear.
+  const streamValleyFlatHalf = streamWaterHalf + 3;
   const streamPts = [];
   // #143 절단 지형 밖 워터리본 삐침 방지 — 개울 끝(±1.02R)을 terrainR 안으로 클램프.
   //   heightAt·streamCarve 는 연속 streamMeander(x) 라 불침해, 워터리본 지오메트리(site.stream.pts)만 짧아진다.
@@ -228,6 +239,9 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   const sx0 = -sEx, sx1 = sEx, SN = 72;
   for (let i = 0; i <= SN; i++) { const x = sx0 + (sx1 - sx0) * (i / SN); streamPts.push({ x, z: streamZat(x) }); }
   const streamCross = { x: 0, z: streamZat(0) };  // 진입 스파인이 개울을 건너는 지점(다리)
+  const streamGradeDrop = Math.max(0.6, R * 0.006);
+  const streamBedY = (x) => -benchDrop * 0.38
+    + (Math.max(-sEx, Math.min(sEx, x)) / sEx) * streamGradeDrop * 0.5;
 
   // 능선 융기: 분지 밖으로 갈수록 상승, 뒤(북)가 가장 높고 앞(남, +z)은 열려(물·진입) 낮다.
   // 분지 가장자리에서 가파르게 솟아(가시적 사면) 바깥에서 완만해지도록 rise 곡선을 앞당긴다.
@@ -292,13 +306,13 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
                    + 0.28 * fbm(x * undF2 - 5, z * undF2 + 9, 2));
   }
 
-  // 개울 채널 파임(명당수). 중심선 근처를 수면 아래로 끌어내린다.
-  function streamCarve(x, z) {
-    if (dry) return { depth: 0 };
+  // 개울 골짜기(명당수). 기존의 고정 2.2m 감산은 양끝 산 매스를 따라 수면도 다시
+  // 10~46m 솟게 했다. 렌더·계획이 공유하는 단조 하상으로 넓게 보간해 물이 산에 묻히지 않는다.
+  function streamValleyWeight(x, z) {
+    if (dry) return 0;
     const cz = streamZat(x);
     const d = Math.abs(z - cz);
-    const k = smoothstep(streamHalf + 3.0, streamHalf * 0.3, d);
-    return { depth: 2.2 * k, k };
+    return smoothstep(streamValleyHalf, streamValleyFlatHalf, d);
   }
 
   // 분지 게이트: 분지 안 0 → 밖 1. 산 덩어리(봉우리 포함)가 분지 바닥으로 새어 들지 않게.
@@ -329,14 +343,14 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
       const n = fbm(x * 0.016, z * 0.016, 4) * (0.09 * Hmax) + fbm(x * 0.05 + 4, z * 0.05 - 3, 3) * (0.03 * Hmax);
       h += n * smoothstep(1.5, 10, hilly);
     }
-    const car = streamCarve(x, z);
-    if (car.depth > 0) h -= car.depth;
+    const valley = streamValleyWeight(x, z);
+    if (valley > 0) h = h + (streamBedY(x) - h) * valley;
     return h;
   }
 
   // hillAt: 이 점이 "산·능선"인 정도(0..1) — 나무 밀도·숲 마스크·필지 급경사 제외용.
   function hillAt(x, z) {
-    return Math.min(1, hillMass(x, z) / (0.28 * Hmax));
+    return Math.min(1, hillMass(x, z) / (0.28 * Hmax)) * (1 - streamValleyWeight(x, z));
   }
 
   // 개울 수면 y — 실제 파인 바닥 바로 위(파묻힘 방지).
@@ -350,8 +364,17 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     // 비원형 분지 반경(#120) — 필지 외곽·충전 반경이 유기적 윤곽을 따르게(forest 는 bowlR 스칼라 사용, 불침해).
     bowlRAt, bowlRadiusAt,
     heightAt, hillAt,
-    streamZat, streamY, streamHalf,
-    stream: dry ? null : { pts: streamPts, width: streamHalf * 2, cross: streamCross, half: streamHalf },
+    streamZat, streamY, streamHalf, streamWaterHalf, streamValleyHalf, streamValleyFlatHalf,
+    stream: dry ? null : {
+      pts: streamPts,
+      width: streamHalf * 2,
+      cross: streamCross,
+      half: streamHalf,
+      waterHalf: streamWaterHalf,
+      valleyHalf: streamValleyHalf,
+      valleyFlatHalf: streamValleyFlatHalf,
+      flow: { x: -1, z: 0.12 },
+    },
     // 다랑이 논 후보역: 개울 남쪽 ~ 안산 기슭 사이 저지.
     paddyRegion: dry ? null : {
       xMin: -0.7 * R, xMax: 0.7 * R,

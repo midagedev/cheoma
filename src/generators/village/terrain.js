@@ -4,7 +4,10 @@ import { createValueNoise2D } from '../../core/math/value-noise2.js';
 import {
   GRANITE, makeEcotoneField, makeEdgeWarp, makeRockExposure,
 } from '../../village/forest-crunch.js';
-import { terrainGridSize } from '../../village/terrain-grid.js';
+import {
+  streamSurfaceHeightAt,
+  terrainGridSize,
+} from '../../village/terrain-grid.js';
 import { injectWaterLook } from '../../env/water.js';
 import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
@@ -235,28 +238,49 @@ export function computeRidgeMistAnchors(site) {
 export function buildWaterRibbon(site, uniforms) {
   if (!site.stream) return null;
   const pts = site.stream.pts;
-  const pos = [], uv = [], idx = [];
+  const pos = [], uv = [], col = [], idx = [];
   const N = pts.length - 1;
+  const lanes = [-1, -0.52, 0, 0.52, 1];
   const tmpT = new THREE.Vector3();
+  const deep = linCol(0x376f82);
+  const bank = linCol(0x78928a);
+  const tone = new THREE.Color();
   for (let i = 0; i <= N; i++) {
     const p = pts[i];
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(N, i + 1)];
     tmpT.set(b.x - a.x, 0, b.z - a.z).normalize();
     const nx = -tmpT.z, nz = tmpT.x;
-    const hw = site.streamHalf;
-    const y = site.streamY(p.x);
-    pos.push(p.x + nx * hw, y, p.z + nz * hw);
-    pos.push(p.x - nx * hw, y, p.z - nz * hw);
-    uv.push(0, i / N * 10, 1, i / N * 10);
+    const hw = site.streamWaterHalf;
+    const y = streamSurfaceHeightAt(site, p.x, p.z);
+    for (const lane of lanes) {
+      pos.push(p.x + nx * hw * lane, y, p.z + nz * hw * lane);
+      uv.push((lane + 1) * 0.5, i / N * 10);
+      tone.copy(deep).lerp(bank, smoothstep(0.28, 1, Math.abs(lane)) * 0.58);
+      col.push(tone.r, tone.g, tone.b);
+    }
   }
-  for (let i = 0; i < N; i++) { const a = i * 2, b = a + 1, c = a + 2, d = a + 3; idx.push(a, c, b, b, c, d); }
+  const stride = lanes.length;
+  for (let i = 0; i < N; i++) for (let lane = 0; lane < stride - 1; lane++) {
+    const a = i * stride + lane, b = a + 1;
+    const c = (i + 1) * stride + lane, d = c + 1;
+    idx.push(a, b, c, b, d, c);
+  }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x35566a, metalness: 0.35, roughness: 0.17 });
-  mat.onBeforeCompile = (shader) => injectWaterLook(shader, uniforms);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    metalness: 0,
+    roughness: 0.38,
+  });
+  mat.onBeforeCompile = (shader) => injectWaterLook(shader, uniforms, {
+    reflection: 0.58,
+    ripple: 0.48,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'village-stream';
   mesh.renderOrder = 1;

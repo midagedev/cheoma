@@ -25,6 +25,7 @@
     "check:lod:focus": "node tools/check-lod-app.mjs --scenario=focus",
     "check:layout": "node tools/check-layout-contract.mjs",
     "check:live-edit": "node tools/check-live-edit-scheduler.mjs",
+    "check:shader-warm": "node tools/check-shader-warm.mjs",
     "check:live-edit:browser": "node tools/check-parcel-rebuild-browser.mjs",
     "check:petals": "node tools/verify-petals.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",

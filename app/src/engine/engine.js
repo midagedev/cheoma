@@ -25,6 +25,7 @@ import {
 } from '../../../src/api/cinematic.js';
 import { setupAudio } from '../../../src/api/audio.js';
 import { capturePostcard } from '../../../src/api/export.js';
+import { compileSubtreeAsync } from '../../../src/api/rendering.js';
 import {
   createRerollWave, createVillage, createVillageAsync,
 } from '../../../src/api/village.js';
@@ -63,10 +64,10 @@ const HERO_SPIN_RAD = 2.35;            // 랜딩 나선 선회량(라디안 ≈1
 const FOCUS_IN_DUR = 1.9;              // 둘러보기→집 돌리인(명시적 선택 + 패널 모프)
 const FOCUS_OUT_DUR = 1.7;             // 근접→부감 돌리아웃(역재생)
 const FOCUS_HOP_DUR = 1.5;             // 집(A)→집(B) 직접 전환(#95) — 부감 미경유 측면 돌리(약간 더 짧게)
-// #128 reveal 게이트 상한(ms): focus-in/hop 돌리 시작을 오버레이 셰이더 프리컴파일(compileAsync) 완료에
+// #128 reveal 게이트 상한(ms): focus-in/hop 돌리 시작을 안전한 오버레이 셰이더 프리컴파일 완료에
 //   묶되, 느린 GPU 에서 클릭→카메라 지연이 체감되지 않도록 이 상한까지만 기다린다(초과 시 그대로 시작 —
-//   잔여 링크는 checkShaderErrors=false 로 논블록). 헤드리스(병렬컴파일 미지원)에선 compileAsync 가 즉시
-//   resolve 하므로 사실상 대기 없음(현행 타이밍 보존).
+//   잔여 링크는 checkShaderErrors=false 로 논블록). 병렬 컴파일 미지원 환경에서는 program readiness가
+//   즉시 완료되므로 사실상 대기 없음(현행 타이밍 보존).
 const REVEAL_WARM_CAP_MS = 200;
 export function createEngine({ container, perf = false, compact = false } = {}) {
   // 모바일 성능 프로파일. perf: 터치/좁은 뷰포트(폰·태블릿) → DoF off·그림자맵 하향.
@@ -1029,14 +1030,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // 셰이더 프리컴파일(#117): 새 마을·오버레이 지오가 씬에 붙으면 첫 렌더 프레임에 그 재질의 셰이더가
   //   지연 컴파일되며 메인스레드가 정지한다 — walk 진입(원경 풀디테일 청크 LOD 스왑 ~146 프로그램)·
-  //   hop·focus-in·리롤 리빌 스톨의 실체가 바로 이 첫 렌더 컴파일이다. renderer.compileAsync 는
+  //   hop·focus-in·리롤 리빌 스톨의 실체가 바로 이 첫 렌더 컴파일이다. compileSubtreeAsync 는
   //   프로그램을 미리 초기화하고 KHR_parallel_shader_compile 로 링크를 드라이버 백그라운드에 위임
   //   (동기 비용↓)한 뒤 Promise 로 완료를 알린다. 다만 compile의 프로그램 준비와 실제 vertex/index/
   //   instance buffer 업로드는 별개다. preload의 prewarmVillage만 숨은 LOD root를 임시로 열어 render하고,
   //   일반 focus/wave warmShaders는 가시성에 손대지 않는다.
   //   이미 컴파일된 재질은 건너뛰므로 재호출은 신규분만 예열(정상상태 재질엔 저렴). 베일·카메라 트윈·
   //   카메라 트윈 구간에 얹어 프리즈를 흡수한다. 미지원(구 three)이면 조용히 no-op(폴백=지연 컴파일).
-  //   ★ root 를 반드시 신규 서브트리(오버레이·새 핸들 그룹)로 좁혀야 한다: compileAsync 는 인자 씬을
+  //   ★ root 를 반드시 신규 서브트리(오버레이·새 핸들 그룹)로 좁혀야 한다: precompile은 인자 root를
   //     scene.traverse 로 전수 순회하며 재질마다 prepareMaterial 을 돌리므로, scene 전체를 넘기면
   //     이미 컴파일된 마을 수백 재질까지 매번 재처리해 도리어 큰 정지가 생긴다(hop·focus 악화 확인).
   //     targetScene=scene 을 넘겨 조명·fog 는 메인 씬 것을 쓰되, 컴파일 대상은 root 서브트리로 한정.
@@ -1045,9 +1046,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // this ahead of the no-warm A/B gate also makes the visual contract independent
     // of the optional performance experiment and prevents a first-frame rim pop.
     post.rimRescan?.(root);
-    if (typeof renderer.compileAsync !== 'function' || !root) return Promise.resolve();
+    if (typeof renderer.compile !== 'function' || !root) return Promise.resolve();
     if (typeof window !== 'undefined' && window.__noWarm) return Promise.resolve();   // A/B 계측 게이트(#117 검증용)
-    try { return renderer.compileAsync(root, cam, root === scene ? null : scene).catch(() => {}); }
+    try { return compileSubtreeAsync(renderer, root, cam, root === scene ? null : scene).catch(() => {}); }
     catch { return Promise.resolve(); }
   }
 
