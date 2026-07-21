@@ -12,6 +12,10 @@ export {
   makeSite,
 } from '../village/site.js';
 export { ROAD_WIDTH } from '../village/roads.js';
+export { planRiverPort } from '../village/river-port-plan.js';
+export { createSettlementRelief } from '../village/settlement-relief.js';
+export { terrainRangeOnPolygon } from '../village/placement-search.js';
+export { attachRoadJunctions } from '../village/road-topology.js';
 export { planGuardianTrees } from '../village/guardian-plan.js';
 export { planParcelFocus } from '../generators/shared/parcel-spatial.js';
 export { IMPOSTOR_VARIANT_COUNTS, impostorHouseSpec } from '../village/impostor-spec.js';

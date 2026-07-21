@@ -22,20 +22,22 @@ const expectedSceneHashes = {
   // #49 extends the solar/focus-frame contract to pavilion eaves and feature
   // props. #13 replaces overlapping rectangular giwa podiums with one concave
   // solid and sinks every building foundation. #21 reserves a monotonically
-  // graded stream valley and adds the visible five-lane water ribbon. Sync, real
-  // module Worker, and ?worker=0 fallback stay byte-identical after every change.
-  village: 'f114c6ec:d9b1745c:8eb17c99:5b72fb28',
-  town: 'f4f49ed7:3ce500b9:0f0bf585:6cd5bafb',
-  capital: '055ea529:85c1243b:c5aa2fff:195885f5',
-  hanyang: '12a4ebcf:ac71ede9:301336ab:c789d3d9',
+  // graded stream valley and adds the visible five-lane water ribbon. #40 adds
+  // metre-scale settlement relief to every tier; explicit river mode remains a
+  // separate non-golden scenario. Sync, real module Worker, and ?worker=0
+  // fallback stay byte-identical after every change.
+  village: '9cd05326:e012b95a:c0b94200:e834531e',
+  town: '296f8c9c:b1fe0ef2:6b84da75:237bd8e4',
+  capital: '651f0d5e:ba3d0a72:0bb68ec8:493d466a',
+  hanyang: '9021def6:b212e60a:0563a64e:9437a8de',
 };
 const expectedProxyHashes = {
   // Door-height residential targets plus the variable temple bounds and its
   // south-facing 26° telephoto framing.
-  village: 'dec61d37',
-  town: 'd8d8bb18',
-  capital: 'd0e96ce5',
-  hanyang: '18e4d284',
+  village: 'f8a6c235',
+  town: '494ea067',
+  capital: '7f8f2bdc',
+  hanyang: 'a6ab7fe9',
 };
 
 const server = await createServer({

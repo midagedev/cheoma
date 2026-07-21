@@ -225,6 +225,7 @@ const VILLAGE_SECTIONS = [
     { key: 'ridgeHK', ctrl: 'range', min: 0.5, max: 1.6, step: 0.02, def: 1 },      // 배산 능선·봉우리 높이
     { key: 'streamMeanderK', ctrl: 'range', min: 0, max: 2.5, step: 0.05, def: 1 }, // 개울 사행(굽이)
     { key: 'stream', ctrl: 'toggle', def: true },                                    // 개울 유무(off=마른 마을)
+    { key: 'river', ctrl: 'toggle', def: false, tierGate: 'capital', tierHint: 'vil_river_hint' }, // 큰 물길
   ] },
   { id: 'composition', titleKey: 'vsec_composition', fields: [
     { key: 'paddyDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },    // 논 비율
@@ -245,7 +246,7 @@ export function villageSchema() { return VILLAGE_SECTIONS; }
 //   null(=규모 파생 auto), tri-state 는 'auto'. setOpts 에 이 값들이 그대로 실려도 코어가 기본으로 해석.
 export function villageDefaults() {
   return {
-    undAmpK: 1, ridgeHK: 1, streamMeanderK: 1, stream: true,
+    undAmpK: 1, ridgeHK: 1, streamMeanderK: 1, stream: true, river: false,
     paddyDensityK: 1, treeDensityK: 1, cityWall: 'auto', sijeon: 'auto',
     char01: null, diversityK: 1,
   };

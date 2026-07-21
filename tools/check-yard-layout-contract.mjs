@@ -28,7 +28,10 @@ const PR36_TREE_BASELINES = {
 const PR36_TREE_BASELINE = Object.values(PR36_TREE_BASELINES)
   .reduce((sum, count) => sum + count, 0);
 const MIN_TREE_RETENTION = 0.94;
-const MIN_CASE_TREE_RETENTION = 0.85;
+// #40 changes the ground under otherwise identical yard grammar, so one seed may
+// move enough valid parcels to retain 80% of the old PR #36 tree count. The 94%
+// aggregate floor and every exact hard-object intersection assertion stay strict.
+const MIN_CASE_TREE_RETENTION = 0.80;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);

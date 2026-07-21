@@ -150,6 +150,21 @@ export function buildRoadJunctions(roads, {
   });
 }
 
+// Keep forward junction records and road back-references as one transaction.
+// Planning passes that append an exterior district road can safely rebuild the
+// topology without duplicating the bookkeeping previously embedded in roads.js.
+export function attachRoadJunctions(roads, options) {
+  for (const road of roads) road.junctionIds = [];
+  const junctions = buildRoadJunctions(roads, options);
+  const roadById = new Map(roads.map((road) => [road.id, road]));
+  for (const junction of junctions) {
+    for (const connection of junction.connections) {
+      roadById.get(connection.roadId)?.junctionIds.push(junction.id);
+    }
+  }
+  return junctions;
+}
+
 export function polylineSelfIntersections(pts, epsilon = DEFAULT_EPSILON) {
   const intersections = [];
   for (let a = 0; a < pts.length - 1; a++) {

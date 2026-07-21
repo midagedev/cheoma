@@ -97,7 +97,7 @@ app/src/                       Svelte UI
   three.js 기본 `compileAsync`처럼 해제된 material의 사라진 `currentProgram`을 계속 poll하지 않으므로,
   빠른 focus-out·리롤과 GPU 링크 수명이 겹쳐도 전역 예외를 만들지 않는다.
 
-## 개울의 계획·렌더 표면 계약
+## 개울·대하천의 계획·렌더 표면 계약
 
 `src/village/site.js`는 제방을 포함한 계획 회랑 `streamHalf`와, ordinary creek의 실제 수면 폭
 `streamWaterHalf`를 구분한다. 하곡 중심은 `-x` 흐름 방향으로 단조롭게 낮아지고, 평시 물폭은 최대 8m에서
@@ -107,6 +107,8 @@ app/src/                       Svelte UI
 `src/village/terrain-grid.js#streamSurfaceHeightAt`가 두 표면의 상한과 clearance를 한 번만 계산하고,
 수면 ribbon과 다리가 이를 함께 소비한다. 계획 변경은 `check:layout`의 전 단면 lane/단조 경사 검사와
 plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
+
+`river=true`는 capital/hanyang에서만 실효를 갖는 별도 대하천 문법이다. `site.js`가 수면·제방·충적 완사면·world-edge 소실을 소유하고, `river-port-plan.js`가 Three 없이 양안 나루 접근로와 남안 취락 시드를 만든다. 외곽 길을 더한 뒤 `attachRoadJunctions()`로 양방향 접합 메타데이터를 재계산하며, 포구 필지도 일반 필지의 집 fit·남향 일조·도로측 대문·식생 clearance를 그대로 쓴다. 가벼운 외부 사용은 `src/api/village-plan.js` 에서 `createSettlementRelief`, `planRiverPort`, `terrainRangeOnPolygon`, `attachRoadJunctions`를 소비한다.
 
 ## 보기별 줌과 디테일 LOD 계약
 

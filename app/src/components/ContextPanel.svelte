@@ -60,7 +60,7 @@
   const vIsAuto = (f) => f.auto === true && typeof villageParams[f.key] !== 'number';
   // tri-state(cityWall·sijeon) 켜짐 판정 — true 강제 or ('auto' 이고 hanyang tier). 표시·클릭 방향에 사용.
   const vTriOn = (f) => { const v = villageParams[f.key]; return v === true || ((v == null || v === 'auto') && scale === 'hanyang'); };
-  const vPlainOn = (f) => villageParams[f.key] !== false;   // stream: 기본 true
+  const vPlainOn = (f) => villageParams[f.key] == null ? f.def !== false : villageParams[f.key] === true;
   const vDisabled = (f) => {
     const gateIdx = SCALES.indexOf(f.tierGate);
     return gateIdx >= 0 && scaleIdx < gateIdx;
@@ -283,7 +283,7 @@
               <span class="knob" aria-hidden="true"></span>
             </button>
           {:else}
-            <button class="tgl" data-vkey={f.key} class:on={vPlainOn(f)}
+            <button class="tgl" data-vkey={f.key} class:on={vPlainOn(f)} disabled={vDisabled(f)}
               onclick={() => vTogglePlain(f)} role="switch" aria-checked={vPlainOn(f)} aria-label={t('s_' + f.key)}>
               <span class="knob" aria-hidden="true"></span>
             </button>

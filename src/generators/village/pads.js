@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import * as G from '../../core/math/geom2.js';
 import { markSharedResource } from '../../core/three-resources.js';
 import { parcelWorldPoint } from '../../village/parcel-contract.js';
+import { terrainRangeOnPolygon } from '../../village/placement-search.js';
 import {
   TEMPLE_PAD_LIFT,
   templeCompoundDepth,
@@ -28,23 +29,7 @@ export function featurePadMaterials() {
 
 // footprint 전체가 지형에 파묻히지 않도록 코너·변중점·내부 grid의 최고점을 사용한다.
 export function computePadY(parcel, site) {
-  const polygon = parcel.poly;
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  let maxHeight = site.heightAt(parcel.center.x, parcel.center.z);
-  for (let i = 0; i < polygon.length; i++) {
-    const a = polygon[i], b = polygon[(i + 1) % polygon.length];
-    minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x);
-    minZ = Math.min(minZ, a.z); maxZ = Math.max(maxZ, a.z);
-    maxHeight = Math.max(maxHeight, site.heightAt(a.x, a.z));
-    maxHeight = Math.max(maxHeight, site.heightAt((a.x + b.x) / 2, (a.z + b.z) / 2));
-  }
-  const divisions = 5;
-  for (let i = 0; i <= divisions; i++) for (let j = 0; j <= divisions; j++) {
-    const x = minX + (maxX - minX) * i / divisions;
-    const z = minZ + (maxZ - minZ) * j / divisions;
-    if (G.pointInPoly({ x, z }, polygon)) maxHeight = Math.max(maxHeight, site.heightAt(x, z));
-  }
-  return maxHeight + PAD_LIFT;
+  return terrainRangeOnPolygon(site, parcel.poly, 5).max + PAD_LIFT;
 }
 
 function makeBufferMesh(positions, indices, material, name) {
