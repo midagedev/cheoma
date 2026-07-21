@@ -2,6 +2,7 @@
 // 해석 site.heightAt만 다시 부르면 실제 화면의 선형 terrain 면과 어긋날 수 있다.
 
 const GRID_CACHE = new WeakMap();
+export const STREAM_SURFACE_CLEARANCE = 0.035;
 
 export function terrainGridSize(site) {
   const terrainR = site.terrainR || site.R;
@@ -39,4 +40,14 @@ export function terrainMeshHeightAt(site, x, z) {
   return fu + fv <= 1
     ? a * (1 - fu - fv) + b * fv + c * fu
     : b * (1 - fu) + c * (1 - fv) + d * (fu + fv - 1);
+}
+
+// The analytic channel can dip below the renderer's triangulated heightfield
+// between grid samples. Water and bridges share this rendered-surface contract so
+// a valid pure stream never disappears underneath a coarse terrain triangle.
+export function streamSurfaceHeightAt(site, x, z = site.streamZat(x)) {
+  return Math.max(
+    site.streamY(x),
+    terrainMeshHeightAt(site, x, z) + STREAM_SURFACE_CLEARANCE,
+  );
 }

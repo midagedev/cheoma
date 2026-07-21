@@ -93,6 +93,20 @@ app/src/                       Svelte UI
 - `instanceColor`, geometry winding, `instanceMatrix` normal 합성.
 - 앱의 `window.__engine` API와 URL/runtime hook.
 - focus overlay와 scene resource의 dispose 소유권.
+- 짧게 사는 focus/wave 서브트리의 shader warm은 `src/api/rendering.js#compileSubtreeAsync`를 통한다.
+  three.js 기본 `compileAsync`처럼 해제된 material의 사라진 `currentProgram`을 계속 poll하지 않으므로,
+  빠른 focus-out·리롤과 GPU 링크 수명이 겹쳐도 전역 예외를 만들지 않는다.
+
+## 개울의 계획·렌더 표면 계약
+
+`src/village/site.js`는 제방을 포함한 계획 회랑 `streamHalf`와, ordinary creek의 실제 수면 폭
+`streamWaterHalf`를 구분한다. 하곡 중심은 `-x` 흐름 방향으로 단조롭게 낮아지고, 평시 물폭은 최대 8m에서
+멈춘다. 규모만 키워 개울을 암묵적으로 강으로 만들지 않는다.
+
+해석적 `site.heightAt/streamY`와 실제 화면의 정규 격자 삼각면은 보간 때문에 미세하게 다를 수 있다.
+`src/village/terrain-grid.js#streamSurfaceHeightAt`가 두 표면의 상한과 clearance를 한 번만 계산하고,
+수면 ribbon과 다리가 이를 함께 소비한다. 계획 변경은 `check:layout`의 전 단면 lane/단조 경사 검사와
+plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
 
 ## 보기별 줌과 디테일 LOD 계약
 

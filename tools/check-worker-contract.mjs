@@ -21,20 +21,21 @@ const expectedSceneHashes = {
   // vegetation, then rendered as the compact/courtyard/extended TemplePlan.
   // #49 extends the solar/focus-frame contract to pavilion eaves and feature
   // props. #13 replaces overlapping rectangular giwa podiums with one concave
-  // solid and sinks every building foundation. Sync, real module Worker, and
-  // ?worker=0 fallback must remain byte-identical after both deterministic changes.
-  village: 'e9a600da:6456e228:5bc64496:54738d16',
-  town: 'b53893ae:fbb36442:bd83f418:de967d98',
-  capital: 'f2734ff0:387a5b36:fbb9c376:c883081c',
-  hanyang: '22225a93:6456eaaf:bc86f132:de164773',
+  // solid and sinks every building foundation. #21 reserves a monotonically
+  // graded stream valley and adds the visible five-lane water ribbon. Sync, real
+  // module Worker, and ?worker=0 fallback stay byte-identical after every change.
+  village: 'f114c6ec:d9b1745c:8eb17c99:5b72fb28',
+  town: 'f4f49ed7:3ce500b9:0f0bf585:6cd5bafb',
+  capital: '055ea529:85c1243b:c5aa2fff:195885f5',
+  hanyang: '12a4ebcf:ac71ede9:301336ab:c789d3d9',
 };
 const expectedProxyHashes = {
   // Door-height residential targets plus the variable temple bounds and its
   // south-facing 26° telephoto framing.
-  village: 'd7f11ec1',
-  town: '3338fa54',
-  capital: '9b7e42a0',
-  hanyang: '9229716f',
+  village: 'dec61d37',
+  town: 'd8d8bb18',
+  capital: 'd0e96ce5',
+  hanyang: '18e4d284',
 };
 
 const server = await createServer({

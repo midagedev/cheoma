@@ -44,6 +44,11 @@ import {
 } from '../src/village/solar-access.js';
 import { templeFootprint } from '../src/village/temple-plan.js';
 import {
+  STREAM_SURFACE_CLEARANCE,
+  streamSurfaceHeightAt,
+  terrainMeshHeightAt,
+} from '../src/village/terrain-grid.js';
+import {
   STREAM_GUARDIAN_BASE_CLEARANCE,
   STREAM_PADDY_BANK_CLEARANCE,
   STREAM_PARCEL_BANK_CLEARANCE,
@@ -58,9 +63,10 @@ import {
 const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const SEEDS = [7, 42, 20260716];
 const MAX_FACING = 65 * Math.PI / 180;
-// 개별 seed는 수변·성곽 형상에 따라 흔들리되 aggregate는 이전 전체 밀도(990)를 지킨다.
+// 개별 seed는 수변·성곽 형상에 따라 흔들린다. Hanyang은 산을 타던 개울을 실제 하곡으로
+// 예약하면서 세 seed 합계에서 두 필지만 줄지만, 개별 최소와 전체 밀도는 사실상 보존한다.
 const DENSITY_FLOOR = { hamlet: 10, village: 28, town: 60, capital: 42, hanyang: 305 };
-const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 140, hanyang: 990 };
+const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 140, hanyang: 988 };
 const PADDY_TOTAL_FLOOR = { hamlet: 5, village: 3, town: 2, capital: 5, hanyang: 6 };
 const EXPECTED_GUARDIAN_ROLES = {
   hamlet: ['entrance'],
@@ -158,6 +164,7 @@ let minHouseFit = 1, minHouseScale = 1, minRoofClearance = Infinity;
 let rerollChecks = 0;
 let paddyFields = 0;
 let publicProps = 0;
+let streamSections = 0;
 
 for (const scale of SCALES) {
   let scaleHouseCount = 0;
@@ -173,6 +180,32 @@ for (const scale of SCALES) {
       `${label} pavilion plan drift`);
     invariant(JSON.stringify(plan.features.props) === JSON.stringify(repeat.features.props),
       `${label} public prop plan drift`);
+    let previousStreamSurface = -Infinity;
+    const streamPoints = plan.site.stream?.pts || [];
+    for (let pointIndex = 0; pointIndex < streamPoints.length; pointIndex++) {
+      const point = streamPoints[pointIndex];
+      const surface = streamSurfaceHeightAt(plan.site, point.x, point.z);
+      const previous = streamPoints[Math.max(0, pointIndex - 1)];
+      const next = streamPoints[Math.min(streamPoints.length - 1, pointIndex + 1)];
+      const tangentLength = Math.hypot(next.x - previous.x, next.z - previous.z);
+      const normalX = -(next.z - previous.z) / tangentLength;
+      const normalZ = (next.x - previous.x) / tangentLength;
+      for (const lane of [-1, -0.5, 0, 0.5, 1]) {
+        const terrain = terrainMeshHeightAt(
+          plan.site,
+          point.x + normalX * plan.site.streamWaterHalf * lane,
+          point.z + normalZ * plan.site.streamWaterHalf * lane,
+        );
+        invariant(surface >= terrain + STREAM_SURFACE_CLEARANCE - 1e-9,
+          `${label} stream lane ${lane} is buried by rendered terrain`);
+      }
+      invariant(surface - plan.site.streamY(point.x) <= 0.4,
+        `${label} stream surface floats above its analytic channel`);
+      invariant(surface >= previousStreamSurface - 1e-9,
+        `${label} stream runs uphill against its -x flow`);
+      previousStreamSurface = surface;
+      streamSections++;
+    }
     invariant(JSON.stringify(plan.features.guardianTrees) === JSON.stringify(repeat.features.guardianTrees),
       `${label} guardian plan drift`);
     invariant(plan.parcels.length >= DENSITY_FLOOR[scale],
@@ -533,5 +566,5 @@ console.log(
   + `${(maxFacing * 180 / Math.PI).toFixed(1)}°, max access ${maxAccess.toFixed(1)}m, `
   + `min house fit ${minHouseFit.toFixed(2)}, min scale ${minHouseScale.toFixed(2)}, `
   + `min roof clearance ${minRoofClearance.toFixed(2)}m, `
-  + `${paddyFields} paddies, ${indexedCells} indexed cells)`,
+  + `${paddyFields} paddies, ${streamSections} visible stream sections, ${indexedCells} indexed cells)`,
 );

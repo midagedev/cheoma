@@ -121,7 +121,7 @@ async function focusAndOpen(page, id, ms = 12000) {
 console.log('\n── A) 코어 plan(옵션 반영·결정론·no-op) ──');
 {
   const p = await browser.newPage();
-  p.on('pageerror', (e) => { errors.push(`[vplan] ${e.message}`); });
+  p.on('pageerror', (e) => { pageErrors.push(`[vplan] ${e.message}`); });
   await p.goto(`http://127.0.0.1:${rootPort}/__vplan`, { waitUntil: 'load' });
   await p.waitForFunction('window.__READY === true', null, { timeout: 30000 });
   const R = await ev(p, () => window.__VP);
@@ -162,7 +162,10 @@ console.log('plan0:', JSON.stringify({ seed: plan0.seed, houses: plan0.houses, p
 
 // ② end-to-end: stream 토글 클릭(App setVillageOpt→setOpts) → 개울 소멸 + 시드 유지
 await ev(desk, () => { const t = document.querySelector('.ctx.village [data-vkey="stream"]'); if (t) t.click(); });
-await wait(desk, 2600);   // withVeil(260) + 재생성 + 부감 트윈(1.0s)
+// 옵션 커밋은 3.6초 exclusive scenery wave가 소유한다. 고정 2.6초 판정은 아직
+// old plan이 보이는 정상 중간 프레임을 실패로 오인하므로 실제 커밋 상태를 기다린다.
+await desk.waitForFunction(() => window.__engine?.village?.debugPlan?.()?.stream === false,
+  null, { timeout: 12000 }).catch(() => {});
 const planStream = await ev(desk, () => window.__engine.village.debugPlan());
 ok('#91 end-to-end stream 토글 → 개울 소멸', plan0.stream === true && planStream.stream === false, `before=${plan0.stream} after=${planStream.stream}`);
 ok('#91 end-to-end 옵션 변경 후 시드 유지', planStream.seed === plan0.seed, `seed ${plan0.seed}→${planStream.seed}`);
@@ -172,6 +175,13 @@ await wait(desk, 1600);
 const planWall = await ev(desk, () => window.__engine.village.debugPlan());
 ok('#91 setOpts cityWall=true → 성곽 생성', plan0.cityWall === false && planWall.cityWall === true);
 ok('#91 cityWall 변경 후 시드 유지', planWall.seed === plan0.seed);
+await ev(desk, () => document.querySelector('.foot.village .rebuild')?.click());
+await desk.waitForFunction((seed) => window.__engine?.village?.debugPlan?.()?.seed !== seed,
+  planWall.seed, { timeout: 12000 }).catch(() => {});
+const planWallReroll = await ev(desk, () => window.__engine.village.debugPlan());
+ok('#21 마을 리롤 뒤 강제 성곽 옵션 유지', planWallReroll.seed !== planWall.seed
+  && planWallReroll.cityWall === true
+  && planWallReroll.opts.cityWall === true, `seed ${planWall.seed}→${planWallReroll.seed}`);
 await ev(desk, () => window.__engine.village.setOpts({ cityWall: 'auto', stream: true, paddyDensityK: 0.2 }));
 await wait(desk, 1600);
 const planPLo = await ev(desk, () => window.__engine.village.debugPlan());
@@ -246,18 +256,31 @@ const hp = await browser.newPage({ viewport: { width: 1280, height: 800, deviceS
 watch(hp, 'hero');
 await hp.goto(`${appBase}/index.html?seed=20260718&vseed=7`, { waitUntil: 'load' });
 await hp.waitForFunction('window.__SHOT_READY === true', null, { timeout: 40000 });
-await ev(hp, () => { const h = document.querySelector('.hero'); if (h) h.click(); });
+await ev(hp, () => document.querySelector('button.hero')?.click());
 await wait(hp, 9000);   // 랜딩(종가 클로즈업)+조립
 // 부감 복귀 후 마을 옵션 변경(히어로 홈 세션에서도 setOpts 동작)
-await ev(hp, () => window.__engine.village.return());
-await wait(hp, 2600);
+await ev(hp, () => {
+  window.__engine.village.return();
+  window.__engine.debugDofSeek(1, { finish: true });
+});
+await hp.waitForFunction(() => window.__engine?.village?.getState?.().selected == null,
+  null, { timeout: 12000 }).catch(() => {});
 await ev(hp, () => window.__engine.village.setOpts({ treeDensityK: 0.3 }));
-await wait(hp, 1600);
+await hp.waitForFunction(() => {
+  const plan = window.__engine?.village?.debugPlan?.();
+  return plan?.opts?.treeDensityK === 0.3 && plan.trees < 200;
+},
+  null, { timeout: 12000 }).catch(() => {});
 const heroPlan = await ev(hp, () => window.__engine.village.debugPlan());
 ok('④ 히어로 세션 마을 옵션 반영(treeDensityK)', heroPlan && heroPlan.trees >= 0, `trees=${heroPlan?.trees}`);
 // 리롤 웨이브(패널 다시 짓기)
-await ev(hp, () => { const r = document.querySelector('.ctx.village .rebuild'); if (r) r.click(); });
-await wait(hp, 5000);
+await ev(hp, () => document.querySelector('.foot.village .rebuild')?.click());
+await hp.waitForFunction((seed) => window.__engine?.village?.debugPlan?.()?.seed !== seed,
+  heroPlan.seed, { timeout: 12000 }).catch(() => {});
+const heroRerolled = await ev(hp, () => window.__engine.village.debugPlan());
+ok('④ 히어로 세션 리롤 뒤 상세 옵션 유지', heroRerolled?.seed !== heroPlan.seed
+  && heroRerolled?.opts?.treeDensityK === 0.3,
+  `seed ${heroPlan.seed}→${heroRerolled?.seed}, treeDensityK=${heroRerolled?.opts?.treeDensityK}`);
 await hp.close();
 
 ok('④ 히어로/focus/리롤 플로우 pageerror 0', pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 6).join(' || ') : '');

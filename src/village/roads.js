@@ -296,7 +296,11 @@ function smoothApproachTail(start, destination, outward) {
   const chord = G.norm(G.sub(destination, start));
   const c1 = G.add(start, G.mul(outward, distance * 0.45));
   const c2 = G.sub(destination, G.mul(chord, distance * 0.25));
-  const steps = Math.max(2, Math.ceil(distance / 2.5));
+  // Short exterior tails used only two cubic samples, so the first sample could
+  // fold more than 35° when a carved stream valley moved the south destination.
+  // Denser arc-length sampling preserves the same curve while keeping the road
+  // ribbon's actual polyline turn gentle at the gate transition.
+  const steps = Math.max(6, Math.ceil(distance / 0.9));
   const points = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps, u = 1 - t;

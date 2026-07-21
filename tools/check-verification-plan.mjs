@@ -34,6 +34,7 @@ assert.deepEqual(ids(['src/api/village.js']), [
   'core', 'app', 'worker', 'lod-focus', 'lod-wave',
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
   'core', 'app', 'petals', 'worker', 'lod-wave',
 ]);
