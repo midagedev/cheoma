@@ -127,7 +127,12 @@ function makeBoidFlock(group, rng, {
   let scaleBoost = 1;   // 원경(부감) 가시성용 배율 — 호출자가 카메라 고도로 램프(마을 스코프). 근경=1.
   const N = rng.int(12, 16);
   const geo = buildBirdGeo();
-  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, fog: false });
+  const mat = new THREE.MeshBasicMaterial({
+    color, side: THREE.DoubleSide, fog: false,
+    // The flock crosses focus, LOD, and reroll ownership boundaries often. Compile
+    // the hashed-opacity path once instead of toggling transparent shader variants.
+    alphaHash: true,
+  });
   const inst = new THREE.InstancedMesh(geo, mat, N);
   inst.name = 'birds';
   inst.frustumCulled = false;   // 원정 시 경계구가 커져 팝 방지
@@ -219,9 +224,7 @@ function makeBoidFlock(group, rng, {
     setScaleBoost(v) { scaleBoost = v; },
     setFade(v) {
       const alpha = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
-      mat.transparent = alpha < 0.999;
       mat.opacity = alpha;
-      mat.depthWrite = alpha >= 0.999;
     },
   };
 }
@@ -586,6 +589,9 @@ export function setupVillageCritters(parent, {
   const magpieRng = makeRng((seed ^ 0x4d414750) >>> 0);
   const solidMat = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.9, metalness: 0, flatShading: true,
+    // Ground animals share this material, so a fixed hashed-opacity program keeps
+    // their distance/reroll fades deterministic without transparent sorting churn.
+    alphaHash: true,
   });
 
   let flockActive = true;   // 밤엔 false → 새 떼 숨김·까치/고양이 이동 자제
@@ -937,9 +943,7 @@ export function setupVillageCritters(parent, {
     lod.waveWeight = waveWeight;
     group.visible = enabled && alpha > LOD_EPSILON;
     flock.setFade(alpha);
-    solidMat.transparent = alpha < 0.999;
     solidMat.opacity = alpha;
-    solidMat.depthWrite = alpha >= 0.999;
     dogs.applyVisibility(); cats.applyVisibility(); magpies.applyVisibility();
     syncLodActive();
   }
@@ -947,7 +951,8 @@ export function setupVillageCritters(parent, {
     enabled = !!v;
     applyPresentation();
   }
-  // 근접 링 크로스페이드(0..1) 파리티(setupAnimals.setFade 와 동형). 공유 재질 하나라 개체 전체 균일 페이드.
+  // 근접 링 크로스페이드(0..1) 파리티(setupAnimals.setFade 와 동형).
+  // alphaHash 프로그램은 고정하고 공유 opacity 균일값만 바꾸어 프로그램 churn을 피한다.
   function setFade(v) {
     fadeWeight = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
     applyPresentation();

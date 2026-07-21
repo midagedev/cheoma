@@ -217,6 +217,10 @@ export function setupAnimals(parent, {
   const rng = makeRng(seed);
   const solidMat = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.92, metalness: 0, flatShading: true,
+    // Keep one opaque/depth-writing shader while focus, distance LOD, and village
+    // rerolls crossfade. alphaHash turns opacity into a stable stipple without
+    // transparent sorting or a new program at every ownership transition.
+    alphaHash: true,
   });
 
   let time = 'day';
@@ -539,14 +543,12 @@ export function setupAnimals(parent, {
     lod.waveWeight = waveWeight;
     lod.active = enabled && alpha > LOD_EPSILON;
     group.visible = lod.active;
-    solidMat.transparent = alpha < 0.999;
     solidMat.opacity = alpha;
-    solidMat.depthWrite = alpha >= 0.999;
     return wasVisible !== group.visible;
   }
   function setEnabled(v) { enabled = !!v; return applyPresentation(); }
-  // 근접 링 활성/해제 크로스페이드(0..1). 공유 재질 하나라 개체 전체가 균일 페이드.
-  //   v>=1 이면 불투명 복귀(투명 정렬 비용 제거) — 기존 호출자는 호출 안 하므로 무회귀.
+  // 근접 링 활성/해제 크로스페이드(0..1). 고정 alphaHash 재질이므로
+  // 매 프레임 opacity 균일값만 바꾸고 투명 프로그램과 정렬 경로는 생성하지 않는다.
   function setFade(v) {
     fadeWeight = Math.max(0, Math.min(1, v));
     return applyPresentation();

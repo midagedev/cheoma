@@ -89,6 +89,12 @@ invariant(!contributesDofDepth({ visible: true, isMesh: true, material: material
   'non-depth-writing mesh became an opaque DoF occluder');
 invariant(contributesDofDepth({ visible: true, isMesh: true, material: material({ transparent: true }) }),
   'transparent mesh with explicit depth writing lost its depth contract');
+invariant(!contributesDofDepth({
+  visible: true, isMesh: true, material: material({ alphaHash: true, opacity: 0.5 }),
+}), 'intermediate alphaHash fade became an opaque DoF occluder');
+invariant(contributesDofDepth({
+  visible: true, isMesh: true, material: material({ alphaHash: true, opacity: 1 }),
+}), 'full-weight alphaHash mesh lost its DoF depth contract');
 invariant(!contributesDofDepth({ visible: true, isPoints: true }),
   'Points became an opaque DoF occluder');
 invariant(!contributesDofDepth({ visible: true, isSprite: true }),

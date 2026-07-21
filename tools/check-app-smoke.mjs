@@ -124,8 +124,9 @@ try {
   pass(fallbackContract, 'environment fallback preserves Texture and FogExp2 identity, type, and exact light values');
 
   // old/new village roots can legitimately share module-lifetime pad/lantern materials.
-  // Their wave phases overlap with different alpha values, so each side must fade an owned
-  // clone and then restore the exact source identity on both cancel and completion.
+  // Scenery handoff must preserve that exact opaque material instead of creating transparent
+  // clones/program variants. The fast pure contract covers the full timeline; this browser
+  // probe verifies the same ownership rule through Vite's real module graph.
   const waveMaterialContract = await page.evaluate(async ({ waveModuleUrl, threeModuleUrl, resourceModuleUrl }) => {
     const [{ createRerollWave }, THREE, { markSharedResource }] = await Promise.all([
       import(waveModuleUrl),
@@ -164,13 +165,10 @@ try {
     }
 
     const cancel = fixture();
-    const isolated = cancel.oldClone !== cancel.shared
-      && cancel.newClone !== cancel.shared
-      && cancel.oldClone !== cancel.newClone
+    const opaqueShared = cancel.oldClone === cancel.shared
+      && cancel.newClone === cancel.shared
       && cancel.oldClone.onBeforeCompile === cancel.shaderHook
-      && cancel.newClone.onBeforeCompile === cancel.shaderHook
-      && cancel.oldClone.customProgramCacheKey === cancel.cacheKey
-      && cancel.newClone.customProgramCacheKey === cancel.cacheKey;
+      && cancel.oldClone.customProgramCacheKey === cancel.cacheKey;
     cancel.shared.emissiveIntensity = 0.77; // night-glow updates the shared source during a live wave.
     cancel.wave.seek(0.405);
     const alpha = {
@@ -186,7 +184,7 @@ try {
       && cancel.newMesh.material === cancel.shared
       && cancel.oldPads.visible && !cancel.newPads.visible
       && cancel.shared.opacity === 1 && !cancel.shared.transparent && cancel.shared.depthWrite
-      && cancel.disposalCounts().every((count) => count === 1)
+      && cancel.disposalCounts().every((count) => count === 0)
       && cancel.wave.isDone() && cancel.wave.update(0.5) === 1;
     cancel.geometry.dispose(); cancel.shared.dispose();
 
@@ -198,13 +196,12 @@ try {
       && finish.newMesh.material === finish.shared
       && !finish.oldPads.visible && finish.newPads.visible
       && finish.shared.opacity === 1 && !finish.shared.transparent && finish.shared.depthWrite
-      && finish.disposalCounts().every((count) => count === 1)
+      && finish.disposalCounts().every((count) => count === 0)
       && finish.wave.isDone() && finish.wave.update(0.5) === 1;
     finish.geometry.dispose(); finish.shared.dispose();
 
-    // A module-lifetime material may occur in only one wave phase while an LOD/groupUnit
-    // outside the fader still consumes it. Its explicit shared marker must isolate that one
-    // fader too, or the external consumer inherits the phase opacity.
+    // A module-lifetime material may also have a consumer outside the wave. All three users
+    // must retain the same opaque identity throughout the scenery ownership handoff.
     const marked = markSharedResource(new THREE.MeshStandardMaterial({ opacity: 1 }));
     const incoming = new THREE.MeshStandardMaterial({ opacity: 1 });
     const markedGeometry = new THREE.BoxGeometry(1, 1, 1);
@@ -218,30 +215,30 @@ try {
     markedOldRoot.add(markedOldPads); markedNewRoot.add(markedNewPads);
     const markedWave = createRerollWave({ oldRoot: markedOldRoot, newRoot: markedNewRoot, duration: 1 });
     markedWave.seek(0.405);
-    const markedIsolation = markedOldMesh.material !== marked
-      && markedOldMesh.material.opacity < 1
+    const markedIdentity = markedOldMesh.material === marked
+      && markedOldMesh.material.opacity === 1
       && externalMesh.material === marked && externalMesh.material.opacity === 1;
     markedWave.cancel();
     const markedRestored = markedOldMesh.material === marked && marked.opacity === 1;
     markedGeometry.dispose(); incoming.dispose(); marked.dispose();
-    return { isolated, alpha, cancelRestored, finishRestored, markedIsolation, markedRestored };
+    return { opaqueShared, alpha, cancelRestored, finishRestored, markedIdentity, markedRestored };
   }, {
     waveModuleUrl: `/@fs${join(ROOT, 'src/village/wave.js')}`,
     threeModuleUrl: `/@fs${join(APP_ROOT, 'node_modules/three/build/three.module.js')}`,
     resourceModuleUrl: `/@fs${join(ROOT, 'src/core/three-resources.js')}`,
   });
   pass(
-    waveMaterialContract.isolated
-      && Math.abs(waveMaterialContract.alpha.old - 0.625) < 1e-9
-      && Math.abs(waveMaterialContract.alpha.new - (0.005 / 0.26)) < 1e-9
+    waveMaterialContract.opaqueShared
+      && waveMaterialContract.alpha.old === 1
+      && waveMaterialContract.alpha.new === 1
       && waveMaterialContract.alpha.source === 1
       && waveMaterialContract.alpha.oldEmission === 0.77
       && waveMaterialContract.alpha.newEmission === 0.77
       && waveMaterialContract.cancelRestored
       && waveMaterialContract.finishRestored
-      && waveMaterialContract.markedIsolation
+      && waveMaterialContract.markedIdentity
       && waveMaterialContract.markedRestored,
-    `wave isolates shared old/new material fades and restores ownership (${JSON.stringify(waveMaterialContract)})`,
+    `wave preserves opaque shared materials across exclusive scenery ownership (${JSON.stringify(waveMaterialContract)})`,
   );
 
   const cinematic = await page.evaluate(() => {

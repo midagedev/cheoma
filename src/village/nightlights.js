@@ -140,6 +140,7 @@ uniform float uMaxPx;
 uniform float uFadeNear;
 uniform float uFadeNearEnd;
 uniform float uLensScale;
+uniform float uWave;
 attribute float aPhase;
 attribute float aLit;
 attribute float aThreshold;
@@ -165,7 +166,7 @@ void main() {
   float base = aLit * on * fl;
   // 근접 페이드: 아주 가까우면 0(재질 창호광이 바통 터치), 멀어질수록 1.
   float nearFade = smoothstep(uFadeNear, uFadeNearEnd, visualDist);
-  vIntensity = base * nearFade;
+  vIntensity = base * nearFade * uWave;
   vWarm = aWarm;
   if (vIntensity <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
   // 거리 감쇠 + 하/상한 클램프(원거리에서도 읽히는 최소 픽셀).
@@ -240,6 +241,7 @@ export function buildNightLights(plan, site) {
     uFadeNear: { value: 15 },
     uFadeNearEnd: { value: 62 },
     uLensScale: { value: 1 },
+    uWave: { value: 1 },
     uColorCandle: { value: COLOR_CANDLE.clone() },
     uColorLamp: { value: COLOR_LAMP.clone() },
   };
@@ -259,16 +261,24 @@ export function buildNightLights(plan, site) {
   points.visible = false;
   group.add(points);
 
-  let level = 0;
+  let level = 0, waveWeight = 1;
+  const syncVisibility = () => { points.visible = level > 0.001 && waveWeight > 0.001; };
+  group.userData.waveFade = {
+    setWeight(value) {
+      waveWeight = clamp01(Number.isFinite(value) ? value : 0);
+      uniforms.uWave.value = waveWeight;
+      syncVisibility();
+    },
+  };
   return {
     group,
-    setLevel(v) { level = clamp01(v || 0); uniforms.uNight.value = level; points.visible = level > 0.001; },
+    setLevel(v) { level = clamp01(v || 0); uniforms.uNight.value = level; syncVisibility(); },
     setPixelRatio(v) { uniforms.uPixelRatio.value = clamp(v || 1, 0.5, 3); },
     update(dt, v, lensScale = 1) {
       if (v != null) { level = clamp01(v); uniforms.uNight.value = level; }
       uniforms.uLensScale.value = Number.isFinite(lensScale)
         ? clamp(lensScale, 0.5, 2) : 1;
-      points.visible = level > 0.001;
+      syncVisibility();
       if (points.visible) uniforms.uTime.value += dt || 0;
     },
     dispose() { geo.dispose(); mat.dispose(); },

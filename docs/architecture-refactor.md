@@ -117,11 +117,17 @@ app/src/                       Svelte UI
   옛 필드가 따로 남거나 새 연기·모트·등롱이 완료 프레임에 한꺼번에 나타나는 별도 수명 주기를 만들지 않는다.
   새 필드의 PointLight 풀과 전역 lookahead 소유권은 옛 필드가 해제되는 승격 프레임까지 지연해, 웨이브 중
   scene light 개수와 shader variant가 늘어나지 않는다.
+- 정적 scenery(지형·개울·논·도로·필지·수목)는 재질 페이드를 하지 않고 먹안개가 100%인 한 프레임에
+  old→incoming 가시성을 배타적으로 넘긴다. 그림자도 같은 veil의 보수로 1→0→1을 따라 이중 필지·도로·그림자가
+  한 프레임에 공존하지 않는다. 건물·궁·사찰·성곽만 두부 transform wave를 탄다.
+- 소동물·새·입자·야간 광원은 `userData.waveFade` controller에서 거리/focus/wave 가중치를 곱해 소유권을
+  합성한다. 중간 값은 고정 uniform 또는 미리 컴파일한 `alphaHash`로 표현하고, 런타임에 `transparent`/
+  `depthWrite`를 토글해 새 program·투명 정렬 경로를 만들지 않는다.
 - 임계값을 소비자 파일에 복제하지 않는다. 새 근접 디테일은 `createVillageDetailLodState` 또는
   `villageDetailWeightAt`을 소비하며, 새 주택 표현은 `setParcelBaseHidden`의 단일 소유권 전환에 합류한다.
 - 규모 wave의 비동기 build부터 애니메이션 완료까지는 하나의 busy 수명이다. 이 동안 focus·zoom·hover를
   잠그고, old/incoming 핸들에 시간·계절·날씨를 같은 프레임에 적용한다. 취소·이탈은 pending
-  토큰, reframe tween, 임시 재질, incoming root를 함께 회수해 늦게 완성된 핸들이 재승격되지 않게 한다.
+  토큰, reframe tween, fog/그림자 presentation, incoming root를 함께 회수해 늦게 완성된 핸들이 재승격되지 않게 한다.
 - GLB export는 현재 카메라 LOD와 focus 은닉 상태를 읽지 않는다. 인스턴스 행렬·병합 정점의
   pristine snapshot에서 `FULL` 또는 `FAR`를 선택하고 `village-overrides`를 제외해, 같은 옵션의 export가
   사용자의 현재 화면에 따라 달라지지 않는다.
@@ -138,7 +144,7 @@ app/src/                       Svelte UI
 
 - `src/camera/optics.js`가 부감 46° 광각, 일반 필지 20°·hero 18°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈는 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를, point sprite 크기는 별도 lens scale을 사용한다.
 - `src/env/dof.js`가 월드 초점점을 카메라 전방축 깊이로 변환하고 DoF enable·amount·aperture를 한 controller에서 소유한다. focus-in/out은 선택 필지 축깊이를 붙들고, 필지 hop은 보간되는 시선을 따라간다.
-- `StableBokehPass`의 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
+- `StableBokehPass`의 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. stock override depth가 opacity dither를 재현하지 못하므로 중간 opacity의 `alphaHash` 재질은 완전 불투명 occluder로 쓰지 않고, 가중치 1에서만 일반 depth에 합류한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
 - 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보하고, 탭별 판정 대신 평균 뒤 한 번만 HDR 광원 격리를 판정한다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다. out-of-focus 픽셀의 ALU는 stock보다 많지만 새 post pass나 draw call은 없고, 저성능 경로에서는 DoF 자체를 건너뛴다. 중앙 depth 기반 gather라 초점면 불투명 표면과 정확히 겹친 전경 광원은 원판으로 산란하지 못하며, 이를 고정 fixture로 기록한다.
 
 화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환과 한 번의 depth prepass는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·정지 동일성·저속 패닝은 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.

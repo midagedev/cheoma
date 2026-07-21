@@ -679,8 +679,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       village.handle.update(dt);   // 개울 물결·야간 촛불·LOD로 활성화된 동물
       village.wave?.newHandle?.update(dt);   // 조립 중 새 마을의 물·하늘 새 떼도 정지하지 않는다.
     }
-    // 리롤 웨이브(#56) — 옛 마을 방사 해체 → 지형 크로스페이드 → 새 마을 방사 조립. 완료 시 승격.
-    if (village.wave) { if (village.wave.anim.update(dt) >= 1) finishRerollWave(); }
+    // 리롤 웨이브(#56) — 옛 건물 방사 해체 → 먹안개 peak scenery handoff → 새 건물 방사 조립.
+    // 코어는 재질을 건드리지 않고 veil/shadow weight만 내보내며, 앱이 fog·태양 그림자를 표현한다.
+    if (village.wave) {
+      const activeWave = village.wave;
+      const finished = !activeWave.debugPaused && activeWave.anim.update(dt) >= 1;
+      applyVillageWavePresentation(activeWave);
+      if (finished) finishRerollWave();
+    }
     focusRing.update(
       dt,
       state.time,
@@ -1695,13 +1701,36 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ── 마을 웨이브 재구성(#56 배선·mode-integration §5.5 원칙·#144 일반화) — 부감 유지, 옛 마을 방사 해체
-  //    → 지형 크로스페이드 → 새 마을 중앙에서 방사형 조립. 리롤(새 시드)·규모/궁/절/상세 옵션 커밋 공용.
+  //    → 먹안개 속 scenery 단일 handoff → 새 마을 중앙에서 방사형 조립. 리롤(새 시드)·규모/궁/절/상세
+  //      옵션 커밋 공용. 도로·필지·지형은 동시에 한 root만 보이며 material transparency를 쓰지 않는다.
   //    · buildOpts 지정 → 그 옵션으로 빌드하고 완료 시 village.opts 에 확정(규모·상세 커밋), 미지정 → 현
   //      village.opts 유지(리롤). · seed 지정 → 그 시드로(리롤=newSeed), 미지정 → 현 시드 유지(옵션 커밋).
   //    · reframe → 새 site 반경 기준 부감 재프레이밍을 웨이브와 동반 트윈(규모 변경 시 새 마을이 프레임에
   //      맞게 자람). 리롤(동일 규모)은 생략. 웨이브 시작 전 focus-out(링·오버레이 정리)은 방어적으로 처리.
   //    레이스: 애니 진행 중(village.wave)·전환 중엔 진입 거부(App 이 waving 잠금). 빌드 진행 중(waveBuild)
   //      재호출은 새 토큰이 이전 빌드를 무효화(최신 커밋 승리) — 연타 커밋 스테일 스왑 방지.
+  function applyVillageWavePresentation(wave) {
+    const veil = clamp01(wave.anim.veil);
+    const ownerRadius = wave.anim.sceneryOwner === 'old' ? wave.oldRadius : wave.newRadius;
+    if (scene.fog) {
+      // 평상시 각 장면의 규모별 fog에서 시작/종료하고, peak만 더 큰 장면까지 감싸는 먹안개로 모인다.
+      // handoff 순간에는 ownerRadius 항이 0이라 규모가 달라도 fog 거리가 튀지 않는다.
+      scene.fog.near = ownerRadius * 2.2 * (1 - veil);
+      scene.fog.far = ownerRadius * 7.0 * (1 - veil) + wave.coverRadius * 0.14 * veil;
+    }
+    if (sun.shadow) sun.shadow.intensity = wave.shadowIntensity * wave.anim.shadowWeight;
+    const requiredFar = wave.coverRadius * 8;
+    if (camera.far < requiredFar) {
+      camera.far = requiredFar;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  function restoreVillageWavePresentation(wave) {
+    if (sun.shadow) sun.shadow.intensity = wave.shadowIntensity;
+    reapplyVillageFog();
+  }
+
   function startVillageWave({ seed, buildOpts, reframe = false } = {}) {
     if (!village.active || !village.handle || village.wave || village.transitioning) return null;
     // 반대 방향 경합도 latest request가 이긴다. 진행 중 regular async 결과는 토큰 불일치로
@@ -1713,6 +1742,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (village.selected) { focusRing.clear(); village.handle.hideParcelDetail(village.selected); village.selected = null; }
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     village.zoomCand = null;
+    village.reveal = null;    // 진입 reveal과 웨이브 fog가 같은 scene.fog를 동시에 소유하지 않게 한다.
     setPostFocus(false);   // 부감 연출 — focus 잔재가 있어도 rim/flare OFF(성능·룩)
     setZoomRegime('lock');
     const oldHandle = village.handle;
@@ -1739,10 +1769,21 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const anim = createRerollWave({
         oldRoot: oldHandle.group, newRoot: newHandle.group,
         center: site.center || { x: 0, z: 0 },
-        heightAt: (x, z) => site.heightAt(x, z),
         seed: useSeed, duration: 3.6,
       });
-      village.wave = { anim, oldHandle, newHandle, seed: useSeed, opts: buildOpts ? { ...buildOpts } : null };
+      // Patch every incoming material before its first visible frame, then let the scoped
+      // async compile overlap the opening veil. Without this explicit handoff the post
+      // composer's throttled self-heal can change material programs midway through the wave.
+      warmShaders(newHandle.group);
+      const oldRadius = oldHandle.plan.site.R;
+      const newRadius = newHandle.plan.site.R;
+      village.wave = {
+        anim, oldHandle, newHandle, seed: useSeed,
+        opts: buildOpts ? { ...buildOpts } : null,
+        oldRadius, newRadius, coverRadius: Math.max(oldRadius, newRadius),
+        shadowIntensity: Number.isFinite(sun.shadow?.intensity) ? sun.shadow.intensity : 1,
+      };
+      applyVillageWavePresentation(village.wave);
       // 규모 커밋 동반 재프레이밍(#144): 새 핸들 site 기준 부감으로 웨이브와 함께 밀어 새 마을이 프레임에
       //   맞게 자란다(완료 후 스냅 대신). 웨이브(3.6s)보다 살짝 짧게 끝내 finish 의 setZoomRegime 과 안 겹침.
       if (reframe) {
@@ -1780,10 +1821,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       tween = null;
       settleControls();
     }
-    w.anim.cancel();                        // old 루트 복원·new 루트 미착공 + 임시 재질 회수
+    w.anim.cancel();                        // old 루트 복원·new 루트 미착공 + scenery 소유권 복원
     scene.remove(w.newHandle.group);        // dispose 뒤 scene에 죽은 Object3D를 남기지 않는다.
     w.newHandle.dispose();
     village.handle = w.oldHandle;           // 방어: 웨이브 도중에는 원래 같지만 공개 API 레이스에도 명시
+    restoreVillageWavePresentation(w);
     bumpShadow(1200);                       // partial-wave caster 행렬 복원을 즉시 shadow cache에 반영
     emit('villageWave', { phase: 'cancel' });
     return true;
@@ -1792,7 +1834,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function finishRerollWave() {
     const w = village.wave; if (!w) return;
     village.wave = null;
-    w.anim.dispose();                                        // 새 마을 트랜스폼·재질 완전 정상화
+    w.anim.dispose();                                        // 새 마을 트랜스폼·scenery 소유권 정상화
+    if (sun.shadow) sun.shadow.intensity = w.shadowIntensity;
     // 옛 마을 이탈(조명 리그·구름·fog 모디파이어 해제 + 그룹 제거) 후 폐기.
     w.oldHandle.exitVillageMode({ scene, building, ground, env });
     w.oldHandle.dispose();
@@ -2022,8 +2065,45 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           active: !!active,
           old: snapshot(active?.oldHandle || (village.waveBuild ? village.handle : null)),
           incoming: snapshot(active?.newHandle || null),
+          presentation: active ? {
+            progress: active.anim.progress,
+            veil: active.anim.veil,
+            shadowWeight: active.anim.shadowWeight,
+            sceneryOwner: active.anim.sceneryOwner,
+            fogNear: scene.fog?.near ?? null,
+            fogFar: scene.fog?.far ?? null,
+            shadowIntensity: sun.shadow?.intensity ?? null,
+            paused: !!active.debugPaused,
+          } : null,
         };
       },
+      // 결정론 시각 하네스: 실제 앱의 post/env/scene 수명을 유지한 채 지정 seed 웨이브를 시작하고
+      // 한 progress에 정지한다. 일반 UI는 이 API를 쓰지 않으며, cancel까지 같은 공개 수명 경로를 탄다.
+      debugStartWave: ({ seed, opts, reframe = false } = {}) => startVillageWave({
+        seed: seed != null ? seed >>> 0 : newSeed(),
+        buildOpts: opts ? { ...village.opts, ...opts } : undefined,
+        reframe,
+      }),
+      debugSeekWave: (progress) => {
+        const active = village.wave;
+        if (!active) return null;
+        active.debugPaused = true;
+        active.anim.seek(clamp01(progress));
+        applyVillageWavePresentation(active);
+        if (shadowCacheOn) renderer.shadowMap.needsUpdate = true;
+        return {
+          progress: active.anim.progress,
+          veil: active.anim.veil,
+          shadowWeight: active.anim.shadowWeight,
+          sceneryOwner: active.anim.sceneryOwner,
+        };
+      },
+      debugResumeWave: () => {
+        if (!village.wave) return false;
+        village.wave.debugPaused = false;
+        return true;
+      },
+      debugCancelWave: () => cancelVillageWave(),
       // glb 익스포트 대상(#104·#112). exportRoot=마을 전체(populate root, 부감에서 노출), focusRoot=현재
       //   focus 중 필지의 풀디테일 오버레이(재생성 없이 현 오버레이 반환). 둘 다 gltf.exportGLB 에 그대로.
       exportRoot: () => village.handle?.group ?? null,
@@ -2350,6 +2430,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (village.wave) {
         const wave = village.wave;
         village.wave = null;
+        if (sun.shadow) sun.shadow.intensity = wave.shadowIntensity;
         wave.anim.dispose();
         scene.remove(wave.newHandle.group);
         if (wave.newHandle !== village.handle) wave.newHandle.dispose();
