@@ -49,6 +49,7 @@ app/src/                       Svelte UI
 | 필지 변환 | layout이 village instancing 내부에 의존 | `src/generators/shared/parcel-transform.js`가 소유, 기존 경로는 re-export |
 | 공개 경계 | 앱과 외부 소비자가 코어 내부 파일을 직접 import | 앱의 코어 import는 `src/api/*`로 한정, 정적 게이트로 고정 |
 | 건물 자원 수명 | 재생성 때 geometry만 해제해 CanvasTexture가 매회 누적 | 공개 `disposeBuilding()`이 geometry·material·texture를 identity-dedupe하며, 주입된 `P.mats`와 모듈 수명 공유 소품 재질은 보존 |
+| 건물 표면 깊이 | ㄱ자 기단을 직사각형 두 벌로 겹치고 장식면의 순서를 개별 오프셋에 의존 | 순수 `core/surface-clearance.js`의 기초 매입·표면 간격과 단일 오목 기단 솔리드가 보이는 면의 depth owner를 하나로 고정 |
 | 확장 미리보기 | ghost 치수 확인만으로 완성 건물·재질·텍스처를 생성 후 폐기 | 순수 `nextWingPlacement`를 ghost와 실제 merge가 공유하고, 실제 건물은 merge 때 한 번만 생성 |
 | 필지 단건 조회 | 내부 `Map`이 있어도 전체 proxy와 가변 객체를 매번 복제 | `getPickProxy(id)`가 한 건만 방어 복제하고, 카메라 hot loop는 동일 handle/id의 중심점을 재사용 |
 | 후처리 계약 | 그룹별 shader cache 의미, 색공간, DPR, dispose가 암묵적 | 그룹 계수 uniform, r185 선형 색, renderer/composer DPR 동기화, Output-last·owned-resource teardown을 실행 가능한 계약으로 고정 |
@@ -83,6 +84,7 @@ app/src/                       Svelte UI
 
 - 기존 공개 함수 시그니처와 `VillageHandle` 메서드. 단건 `getPickProxy(id)`는 기존 전체 조회를 보존하는 추가 계약이다.
 - `buildBuilding()`의 기존 반환 구조. 새 `disposeBuilding(root)`는 해당 root의 소유 자원만 정리하고 외부 `P.mats`와 모듈 수명 공유 소품 재질은 건드리지 않는다.
+- 기단·대지·창호처럼 맞닿는 보이는 면은 `polygonOffset`으로 덮지 않는다. `src/core/surface-clearance.js`의 월드 단위 간격을 공유하고, 가장 낮은 기초만 상단 높이 불변으로 대지 아래에 묻힌다.
 - `VillageHandle.dispose()`는 내부 공유 identity를 정확히 한 번 해제하며, 종료 뒤 public method는 씬이나 자원을 다시 만들지 않는다.
 - 같은 seed의 RNG 소비 순서와 sync/worker/fallback 결과.
 - `populateVillageSteps`의 label과 순서.

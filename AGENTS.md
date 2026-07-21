@@ -55,6 +55,8 @@ The core runs standalone from the repo-root `index.html` (plus per-domain harnes
 
 **Building types & materials**: 궁(palace) / 절(temple) / 기와집(giwa) / 초가(choga). 단청 (dancheong) is type-dependent — palace & temple only. Roof builder dispatch: giwa → `roof-skeleton.js`; palace/temple/choga → `roof.js`. `src/builder/palette.js#makeMaterials` returns role-tagged materials; per-part color variety rides `instanceColor` at zero extra draw calls (adding material variants is expensive — mind draw-call budgets; town ceiling < 1000). A standalone `buildBuilding()` result must be released with `disposeBuilding()` from `src/api/building.js`; it disposes owned geometry/material/texture resources while preserving caller-owned shared `P.mats` and module-lifetime prop materials.
 
+`src/core/surface-clearance.js` owns the small world-space separations for building contact surfaces. Sink only the lowest foundation while preserving its visible top, keep courtyard/terrain faces physically separated, and place visible opening faces beyond their host geometry. Do not hide coplanar defects with camera-dependent `polygonOffset`. The giwa podium is one concave solid per stone course; never rebuild its ㄱ footprint from overlapping boxes.
+
 **Village generation** — a deterministic pipeline:
 `src/village/plan.js` (pure plan) → `src/village/populate.js` (step orchestration over `src/generators/village/*`) → `src/runtime/village/create.js` and `handle.js`. `src/village/adapter.js` is only a compatibility re-export. Convention: **`+z` = south.** Scale is a continuum (`siteR` scalar / tier): lone house → hamlet → village → town → capital → hanyang (성곽 도성 with 사대문·시전, `citywall.js`). Repeated buildings are instanced (`chunks.js`, `instancing.js`).
 

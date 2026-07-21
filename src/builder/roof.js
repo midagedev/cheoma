@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { tileSurfaceMaterial } from './palette.js';
 import { createThatchRoofProfile, THATCH_ROOF_SEGMENTS } from './thatch-profile.js';
+import { ROOF_WALL_TUCK } from '../core/surface-clearance.js';
 
 // 팔작지붕.
 // 좌표계: x = 정면 방향(폭), z = 깊이(+z가 정면), y = 높이.
@@ -507,7 +508,7 @@ function buildMatbaeGables(P, L, M, g, frontPoint, xr, yEaveTile) {
     const shape = new THREE.Shape();
     const N = 12;
     // 윗변은 기와 상면(prof.y)보다 확실히 아래로 내려 지붕을 뚫지 않게 한다(기와 두께 여유).
-    const yTuck = 0.16;
+    const yTuck = ROOF_WALL_TUCK;
     for (let i = 0; i <= N; i++) {
       const v = vMax * (1 - i / N);      // 뒷경사: z=-zHalf → 0
       const q = prof(v, -1);
@@ -527,6 +528,7 @@ function buildMatbaeGables(P, L, M, g, frontPoint, xr, yEaveTile) {
     wallGeo.rotateY(-Math.PI / 2);
     wallGeo.translate(xWall, 0, 0);
     const wall = new THREE.Mesh(wallGeo, M.plaster.clone()); // 황토 바탕
+    wall.name = 'matbae-gable-wall';
     wall.material.side = THREE.DoubleSide;
     wall.castShadow = wall.receiveShadow = true;
     g.add(wall);
