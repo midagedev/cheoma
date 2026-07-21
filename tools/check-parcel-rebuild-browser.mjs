@@ -237,7 +237,7 @@ try {
   invariant(livePreview.floraSame, 'live preview rebuilt the merged flora batch');
   invariant(livePreview.houseOpacity > 0.99 && livePreview.footerOpacity > 0.99,
     `live input faded the editing context (${livePreview.houseOpacity}/${livePreview.footerOpacity})`);
-  invariant(/멀리.*가까이/.test(livePreview.modeText || '') && /내보내기/.test(livePreview.exportText || ''),
+  invariant(/둘러보기.*집 보기/.test(livePreview.modeText || '') && /내보내기/.test(livePreview.exportText || ''),
     `live input removed UI actions (${livePreview.modeText}/${livePreview.exportText})`);
   invariant(Math.abs(livePreview.box.x - liveFixture.startBox.x) > 0.1
     || Math.abs(livePreview.box.z - liveFixture.startBox.z) > 0.1,

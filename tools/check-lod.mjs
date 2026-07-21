@@ -7,11 +7,16 @@ import {
 } from '../src/core/lod.js';
 import {
   VILLAGE_LENS,
+  VILLAGE_ZOOM,
   dollyDistanceForFov,
   lensScaleForCamera,
   referenceFovForCamera,
   referenceVillageFov,
   villageScreenDistance,
+  VILLAGE_FOCUS_CONTEXT_ELEVATION,
+  villageFocusContextElevation,
+  villageFocusEffectWeight,
+  villageZoomReferenceBounds,
 } from '../src/camera/optics.js';
 import { planParcelFocus } from '../src/generators/shared/parcel-spatial.js';
 import {
@@ -86,21 +91,44 @@ function assertLevel(actual, expected, message) {
   near(referenceFovForCamera(landmark), VILLAGE_LENS.palace.referenceFov,
     'optics: named landmark reference lens was ignored');
 
-  // 줌 연속체의 enter/exit는 서로 다른 렌즈의 실제 미터를 직접 비교하지 않는다. 같은
-  // 42°/23° 기준 화면 거리를 각 모드의 46°/20° 실제 dolly로 변환해야 히스테리시스가 보존된다.
-  const exitReference = 100 * 0.72;
-  const aerialExitActual = dollyDistanceForFov(
-    exitReference, VILLAGE_LENS.aerial.referenceFov, VILLAGE_LENS.aerial.fov,
-  );
-  const focusExitActual = dollyDistanceForFov(
-    exitReference, VILLAGE_LENS.parcel.referenceFov, VILLAGE_LENS.parcel.fov,
-  );
-  near(villageScreenDistance(
-    focusExitActual, VILLAGE_LENS.parcel.fov, VILLAGE_LENS.parcel.referenceFov,
-  ), exitReference,
-    'optics: telephoto focus-exit lost its screen-equivalent threshold');
-  invariant(focusExitActual > aerialExitActual * 1.2,
-    'optics: focus-exit accidentally reused the wide-aerial physical distance');
+  // #14: 줌은 보기 상태를 전환하지 않고 각 보기의 카메라 범위만 소유한다. 규모가 커져도
+  // 둘러보기 최소 거리는 24m에서 멈춰 한양 안으로 내려갈 수 있고, focus 최대 범위는 부감 전체
+  // 컨텍스트까지 열어 두되 선택은 유지한다.
+  const exploreSmall = villageZoomReferenceBounds('explore', 20);
+  const exploreLarge = villageZoomReferenceBounds('explore', 1000);
+  const focusLarge = villageZoomReferenceBounds('focus', 1000, 18);
+  near(exploreSmall.min, VILLAGE_ZOOM.explore.minReferenceFloor,
+    'optics: small-site explore minimum escaped its floor');
+  near(exploreLarge.min, VILLAGE_ZOOM.explore.minReferenceCap,
+    'optics: large-site explore minimum kept scaling with city radius');
+  near(exploreLarge.max, 1000 * VILLAGE_ZOOM.explore.maxReferenceFraction,
+    'optics: explore context maximum drift');
+  near(focusLarge.max, exploreLarge.max,
+    'optics: focused zoom-out cannot reach the full village context');
+  near(focusLarge.min, 18 * VILLAGE_ZOOM.focus.minCloseupFraction,
+    'optics: focus close-up minimum no longer protects the building shell');
+  near(villageFocusEffectWeight(18, 1000, 18), 1,
+    'optics: close house lost its full bokeh weight');
+  near(villageFocusEffectWeight(focusLarge.max, 1000, 18), 0,
+    'optics: wide focused context kept the close-up bokeh pass alive');
+  const focusWeights = [18, 100, 300, 600, focusLarge.max]
+    .map((distance) => villageFocusEffectWeight(distance, 1000, 18));
+  invariant(focusWeights.every((weight, index) => index === 0 || weight <= focusWeights[index - 1]),
+    'optics: focused bokeh weight is not monotonic across zoom-out');
+  const baseElevation = 9 * Math.PI / 180;
+  near(villageFocusContextElevation(18, 1000, 18, baseElevation), baseElevation,
+    'optics: close house camera lost its authored elevation');
+  near(villageFocusContextElevation(focusLarge.max, 1000, 18, baseElevation),
+    VILLAGE_FOCUS_CONTEXT_ELEVATION,
+    'optics: wide house context did not crane above foreground architecture');
+  const contextElevations = [18, 100, 300, 600, focusLarge.max]
+    .map((distance) => villageFocusContextElevation(distance, 1000, 18, baseElevation));
+  invariant(contextElevations.every((elevation, index) => (
+    index === 0 || elevation >= contextElevations[index - 1]
+  )), 'optics: focus context crane is not monotonic across zoom-out');
+  let invalidModeRejected = false;
+  try { villageZoomReferenceBounds('automatic', 100); } catch { invalidModeRejected = true; }
+  invariant(invalidModeRejected, 'optics: unknown zoom mode silently acquired camera bounds');
 }
 
 // 공통 fade는 경계에서 튀지 않고, 잘못된 밴드에도 결정적인 계단 fallback을 쓴다.

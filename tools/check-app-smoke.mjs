@@ -39,11 +39,18 @@ try {
     }
   });
 
-  const url = `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&seed=42&vseed=20260716&time=day`;
+  const url = `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&seed=42&vseed=20260716&time=day&lang=ko`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
   await page.waitForFunction(() => !!window.__engine.village.debugPlan(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
+
+  // __SHOT_READY는 렌더 준비 신호이지 1.4초 진입 돌리의 완료 신호가 아니다. 실제 제품 tween의
+  // onDone을 결정적으로 실행해 explore 줌 범위가 설치된 상태에서 보기 계약을 검사한다.
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
 
   const boot = await page.evaluate(() => {
     const engine = window.__engine;
@@ -66,10 +73,73 @@ try {
   pass(boot.canvas.width > 0 && boot.canvas.height > 0, 'renderer owns a sized canvas');
   pass(
     boot.continuum.aerialDist > 0
-      && boot.continuum.enterDist < boot.continuum.exitDist
+      && boot.continuum.mode === 'explore'
+      && boot.continuum.exploreMinReferenceDist < boot.continuum.aerialReferenceDist
+      && boot.continuum.exploreMaxReferenceDist >= boot.continuum.aerialReferenceDist
       && Number.isFinite(boot.camera.near),
     'village camera exposes valid aerial, zoom, and near-plane contracts',
   );
+
+  const zoomModes = await page.evaluate(async () => {
+    const engine = window.__engine;
+    window.__noWarm = true;
+    const parcelId = engine.village.debugParcels()[0]?.parcelId;
+    if (!parcelId) throw new Error('zoom mode fixture has no parcel');
+    const frames = (count = 8) => new Promise((resolve) => {
+      const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
+      requestAnimationFrame(step);
+    });
+    const drainTransition = async () => {
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      const sample = engine.debugDofSeek(1, { finish: true });
+      if (!sample) throw new Error('explicit view transition did not start');
+    };
+
+    const exploreStart = engine.village.debugContinuum();
+    const exploreDistance = engine.village.debugDolly(0.20, parcelId);
+    await frames();
+    const exploreNear = {
+      state: engine.village.getState(),
+      continuum: engine.village.debugContinuum(),
+      minDistance: engine.__controls.minDistance,
+    };
+
+    const expectedFocus = engine.village.heroId();
+    document.querySelector('.mode .seg:last-child')?.click();
+    await drainTransition();
+    const focusStart = engine.village.debugContinuum();
+    const focusDistance = engine.village.debugDolly(0.99);
+    await frames();
+    const focusWide = {
+      state: engine.village.getState(),
+      continuum: engine.village.debugContinuum(),
+      maxDistance: engine.__controls.maxDistance,
+      labels: [...document.querySelectorAll('.mode .seg')]
+        .map((button) => button.textContent.replace(/\s+/g, ' ').trim()),
+    };
+
+    engine.village.return();
+    await drainTransition();
+    const returned = engine.village.getState();
+    return { parcelId, expectedFocus, exploreStart, exploreDistance, exploreNear, focusStart, focusDistance, focusWide, returned };
+  });
+  pass(zoomModes.exploreNear.state.selected == null
+      && zoomModes.exploreNear.continuum.mode === 'explore'
+      && zoomModes.exploreNear.minDistance <= zoomModes.exploreDistance + 0.2,
+  'deep wheel-equivalent zoom keeps free village exploration instead of selecting the center house');
+  const focusWideOk = zoomModes.focusWide.state.active
+      && zoomModes.focusWide.state.selected === zoomModes.expectedFocus
+      && zoomModes.focusWide.state.transitioning === false
+      && zoomModes.focusWide.continuum.mode === 'focus'
+      && zoomModes.focusWide.continuum.focusEffectWeight <= 0.05
+      && zoomModes.focusWide.continuum.elevation >= 29
+      && zoomModes.focusWide.maxDistance >= zoomModes.focusDistance - 0.2;
+  pass(focusWideOk,
+  `direct-village house view preserves selection while retiring close-up bokeh${focusWideOk ? '' : ` (${JSON.stringify(zoomModes.focusWide)})`}`);
+  pass(zoomModes.focusWide.labels.some((label) => label.includes('둘러보기'))
+      && zoomModes.focusWide.labels.some((label) => label.includes('집 보기'))
+      && zoomModes.returned.selected == null,
+  'view controls name the two intents and only an explicit return leaves house view');
 
   const fallbackContract = await page.evaluate(async ({ environmentModuleUrl, threeModuleUrl }) => {
     const [{ captureEnvironmentFallback, restoreEnvironmentFallback }, THREE] = await Promise.all([

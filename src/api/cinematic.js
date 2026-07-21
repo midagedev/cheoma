@@ -2,6 +2,8 @@
 export { setupCinematic } from '../camera/cinematic.js';
 export {
   VILLAGE_LENS,
+  VILLAGE_FOCUS_CONTEXT_ELEVATION,
+  VILLAGE_ZOOM,
   dollyDistanceForFov,
   dollyScaleForFov,
   equivalentDistanceAtFov,
@@ -10,6 +12,9 @@ export {
   referenceVillageFov,
   villageScreenDistance,
   villageScreenDistanceForCamera,
+  villageFocusContextElevation,
+  villageFocusEffectWeight,
+  villageZoomReferenceBounds,
 } from '../camera/optics.js';
 export {
   createDirectionController,

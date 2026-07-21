@@ -1,4 +1,4 @@
-// Shared lens policy for the village zoom continuum.
+// Shared lens and view-relative zoom policy for the village camera.
 //
 // A focal-length change only becomes visible as perspective when the camera also
 // dollies: wide aerial views move closer, telephoto house views move farther away.
@@ -6,6 +6,7 @@
 // compression, and let screen-space LOD ignore the compensating dolly distance.
 
 const DEG = Math.PI / 180;
+export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 
@@ -16,6 +17,79 @@ export const VILLAGE_LENS = Object.freeze({
   palace: lens(24, 32),
   temple: lens(26, 34),
 });
+
+// 휠/핀치는 현재 보기 안의 구도만 바꾸고 explore↔focus 상태를 전환하지 않는다.
+// 화면 등가 거리(reference FOV 기준)로 한 번 정의해 광각 부감·망원 근경이 같은 범위를 소비한다.
+export const VILLAGE_ZOOM = Object.freeze({
+  explore: Object.freeze({
+    minReferenceFraction: 0.16,
+    minReferenceFloor: 6,
+    minReferenceCap: 24,
+    maxReferenceFraction: 1.06,
+  }),
+  focus: Object.freeze({
+    minCloseupFraction: 0.42,
+    minReferenceFloor: 1.2,
+    maxReferenceFraction: 1.06,
+  }),
+});
+
+export function villageZoomReferenceBounds(mode, aerialReference, closeupReference = 0) {
+  const aerial = Number.isFinite(aerialReference) && aerialReference > 0 ? aerialReference : 150;
+  if (mode === 'explore') {
+    const policy = VILLAGE_ZOOM.explore;
+    return {
+      min: Math.max(policy.minReferenceFloor, Math.min(
+        policy.minReferenceCap,
+        aerial * policy.minReferenceFraction,
+      )),
+      max: aerial * policy.maxReferenceFraction,
+    };
+  }
+  if (mode === 'focus') {
+    const policy = VILLAGE_ZOOM.focus;
+    const closeup = Number.isFinite(closeupReference) && closeupReference > 0
+      ? closeupReference : policy.minReferenceFloor;
+    return {
+      min: Math.max(policy.minReferenceFloor, closeup * policy.minCloseupFraction),
+      max: aerial * policy.maxReferenceFraction,
+    };
+  }
+  throw new Error(`Unknown village zoom mode: ${mode}`);
+}
+
+const smoothstep = (edge0, edge1, value) => {
+  if (edge1 <= edge0) return value < edge0 ? 0 : 1;
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+};
+
+// 선택은 유지하되 근경용 얕은 심도는 넓은 문맥에서 사라진다. 화면 등가 거리로 계산해
+// 렌즈 dolly만으로 보케 양이 달라지지 않으며, 0에 도달하면 Bokeh pass도 쉴 수 있다.
+export function villageFocusEffectWeight(referenceDistance, aerialReference, closeupReference) {
+  const bounds = villageZoomReferenceBounds('focus', aerialReference, closeupReference);
+  const closeup = Number.isFinite(closeupReference) && closeupReference > 0
+    ? closeupReference : bounds.min;
+  const fullUntil = Math.min(bounds.max, Math.max(bounds.min, closeup * 1.35));
+  const clearAt = Math.max(fullUntil + 1e-6, Math.min(
+    bounds.max,
+    Math.max(closeup * 3, bounds.max * 0.5),
+  ));
+  return 1 - smoothstep(fullUntil, clearAt, referenceDistance);
+}
+
+export function villageFocusContextElevation(
+  referenceDistance,
+  aerialReference,
+  closeupReference,
+  baseElevation,
+) {
+  const base = Number.isFinite(baseElevation) ? baseElevation : 0;
+  const context = 1 - villageFocusEffectWeight(
+    referenceDistance, aerialReference, closeupReference,
+  );
+  return base + (Math.max(base, VILLAGE_FOCUS_CONTEXT_ELEVATION) - base) * context;
+}
 
 function validFov(value) {
   return Number.isFinite(value) && value > 0 && value < 179;

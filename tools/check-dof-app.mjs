@@ -228,11 +228,11 @@ try {
       && monotonic(result.returnOuter.map((sample) => sample.fov), 1),
   'lens continuum moves monotonically from wide aerial to telephoto house framing');
   pass(result.focusEnd.continuum.aerialReferenceDist > 0
-      && result.focusEnd.continuum.exitActualDist
-        > result.focusEnd.continuum.aerialDist * 0.72 * 1.2
+      && result.focusEnd.continuum.focusMaxReferenceDist
+        >= result.focusEnd.continuum.aerialReferenceDist
       && Math.abs(result.focusEnd.zoomMax
-        - result.focusEnd.continuum.exitActualDist * 1.06) < 0.2,
-  'telephoto focus-out preserves the reference screen-distance hysteresis');
+        - result.focusEnd.continuum.focusMaxActualDist) < 0.2,
+  'telephoto house view can zoom out to village context without distance-owned focus-out');
   pass(Number.isFinite(result.focusedWeatherLensScale)
       && Math.abs(result.focusedWeatherLensScale - result.focusedOptics.lensScale) < 1e-9,
   'focused weather particles consume the shared village lens scale without target-height breathing');

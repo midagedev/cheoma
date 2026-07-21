@@ -91,6 +91,8 @@ Roads own stable IDs and bidirectional junction metadata through `roads.js`/`roa
 
 **Environment (`src/env/`)**: time/season/weather changes crossfade via internal tweens — API signatures stay stable, no hard cut. Snow = a roof white-tint shader (not an accumulation volume); rain = falling-curtain particles. `focus.js` drives the close-up ambience ring (chickens, chimney smoke, wind grass, lanterns) on the focused parcel. Camera tweens must call `camera.lookAt` every frame — freezing direction snaps the frame on tween end. `setupEnvironment()` and `setupAudio()` both own explicit `dispose()` contracts; audio teardown stops/disconnects owned nodes but never closes three's shared `AudioContext`.
 
+Village zoom never owns selection. Wheel/pinch changes framing inside the current `explore` or `focus` regime; only a house click/programmatic focus enters a parcel, and only the breadcrumb, Escape, or explicit view toggle returns to exploration. `src/camera/optics.js` owns both regimes' reference-distance bounds so wide aerial and telephoto focus lenses share one screen-equivalent contract. Gate this behavior in the existing full-app smoke rather than adding another browser startup.
+
 **Other core dirs**: `src/layout/` (hanok/compound assembly, `offsetPoly`), `src/anim/assembly.js` (the "tofu" drop-in assembly, shared by assembly/expansion/merge), `src/camera/`, `src/cinematic/` (drone + first-person walk), `src/export/` (glTF/GLB, `EXT_mesh_gpu_instancing`), `src/render/` (ink NPR), `src/props/`, `src/share/`.
 
 ## onBeforeCompile gotchas

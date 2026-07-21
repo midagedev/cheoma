@@ -73,8 +73,9 @@ const DICT = {
     season_spring: '봄', season_summer: '여름', season_autumn: '가을',
     weather_clear: '맑음', weather_rain: '비', weather_snow: '눈',
     // ── 마을 모드 ──
-    mode_house: '가까이', mode_village: '멀리',
-    mode_to_village: '마을 전체 보기', mode_to_house: '한 채 가까이 보기',
+    mode_house: '집 보기', mode_village: '둘러보기',
+    mode_to_village: '마을 둘러보기 — 확대·축소는 보기를 바꾸지 않습니다',
+    mode_to_house: '종가 보기 — 다른 집은 화면에서 선택하세요',
     vil_title: '마을', vil_sub: 'village',
     vil_scale: '규모', vil_character: '성격',
     scale_solo: '외딴집', scale_hamlet: '초락', scale_village: '마을', scale_town: '읍치', scale_capital: '도성', scale_hanyang: '한양',
@@ -167,8 +168,9 @@ const DICT = {
     season_spring: 'Spring', season_summer: 'Summer', season_autumn: 'Autumn',
     weather_clear: 'Clear', weather_rain: 'Rain', weather_snow: 'Snow',
     // ── Village mode ──
-    mode_house: 'House', mode_village: 'Village',
-    mode_to_village: 'See the village', mode_to_house: 'See one house',
+    mode_house: 'House', mode_village: 'Explore',
+    mode_to_village: 'Explore freely — zoom does not change views',
+    mode_to_house: 'View the head house — select any other house in the scene',
     vil_title: 'Village', vil_sub: 'settlement',
     vil_scale: 'Scale', vil_character: 'Character',
     scale_solo: 'Lone house', scale_hamlet: 'Hamlet', scale_village: 'Village', scale_town: 'Town', scale_capital: 'Capital', scale_hanyang: 'Hanyang',

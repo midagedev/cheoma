@@ -561,7 +561,7 @@ try {
     `focused autumn view wakes camera-local leaves (${nearLife.petalLevel})`);
 
   // 선택 overlay를 유지한 채 해당 청크가 fullOut 밖, midIn 안에 머물도록 카메라만 물린다.
-  // 자동 focus-in을 우회하는 별도 디버그 API 없이 실제 focus regime 안에서 안정된 MID root를 잰다.
+  // 실제 focus regime 안에서 선택 overlay를 유지한 채 안정된 MID root를 잰다.
   const midProbe = await page.evaluate(async (parcelId) => {
     const engine = window.__engine;
     const camera = engine.camera;

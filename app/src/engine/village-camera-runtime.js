@@ -1,34 +1,31 @@
 import * as THREE from 'three';
 import {
+  VILLAGE_FOCUS_CONTEXT_ELEVATION,
   VILLAGE_LENS,
   dollyDistanceForFov,
   referenceFovForCamera,
   villageScreenDistance,
   villageScreenDistanceForCamera,
+  villageFocusContextElevation,
+  villageFocusEffectWeight as focusEffectWeightForDistance,
+  villageZoomReferenceBounds,
 } from '../../../src/api/cinematic.js';
 
 const DEG = Math.PI / 180;
-const AERIAL_ELEVATION = 31 * DEG;
 const AERIAL_AZIMUTH = 9 * DEG;
-const ZOOM_ENTER_FRAC = 0.52;
-const ZOOM_EXIT_FRAC = 0.72;
 const NEAR_FRAC = 0.02;
 const NEAR_MIN = 0.08;
 const NEAR_MAX = 2.5;
 
-// 마을 배율의 카메라 프레이밍·줌 연속체·깊이 범위를 한곳에서 관리한다.
+// 마을 배율의 카메라 프레이밍·보기별 줌·깊이 범위를 한곳에서 관리한다.
 export function createVillageCameraRuntime({
   camera,
-  centerParcel,
   container,
   controls,
-  getHoverParcel,
-  isBusy,
-  onReturn,
-  onSelect,
   scene,
   village,
 } = {}) {
+  const focusDirection = new THREE.Vector3();
   function outerRadius(handle = village.handle) {
     if (handle === village.handle && village.__outerR != null) return village.__outerR;
     const plan = handle.plan;
@@ -55,9 +52,9 @@ export function createVillageCameraRuntime({
     village.aerialDist = distance;
     const target = new THREE.Vector3(0, radius * 0.05, -radius * 0.10);
     const pos = new THREE.Vector3(
-      target.x + distance * Math.cos(AERIAL_ELEVATION) * Math.sin(AERIAL_AZIMUTH),
-      target.y + distance * Math.sin(AERIAL_ELEVATION),
-      target.z + distance * Math.cos(AERIAL_ELEVATION) * Math.cos(AERIAL_AZIMUTH),
+      target.x + distance * Math.cos(VILLAGE_FOCUS_CONTEXT_ELEVATION) * Math.sin(AERIAL_AZIMUTH),
+      target.y + distance * Math.sin(VILLAGE_FOCUS_CONTEXT_ELEVATION),
+      target.z + distance * Math.cos(VILLAGE_FOCUS_CONTEXT_ELEVATION) * Math.cos(AERIAL_AZIMUTH),
     );
     return {
       pos,
@@ -83,75 +80,31 @@ export function createVillageCameraRuntime({
     return dollyDistanceForFov(referenceDistance, referenceFovForCamera(camera), camera.fov);
   }
 
+  let regime = 'lock';
+  let focusCloseupReference = 0;
+  let focusBaseElevation = 0;
+  let focusElevationOffset = 0;
+  let focusAppliedElevation = null;
   function setRegime(mode, closeupDistance = 0) {
-    const aerialReference = referenceAerialDistance();
-    if (mode === 'aerial') {
-      controls.enableZoom = true;
-      controls.minDistance = actualDistance(aerialReference * (ZOOM_ENTER_FRAC * 0.82));
-      controls.maxDistance = actualDistance(aerialReference * 1.06);
-    } else if (mode === 'focus') {
-      controls.enableZoom = true;
-      controls.minDistance = Math.max(1.2, closeupDistance * 0.16);
-      controls.maxDistance = actualDistance(aerialReference * (ZOOM_EXIT_FRAC * 1.06));
-    } else {
+    regime = mode;
+    if (mode === 'lock') {
       controls.enableZoom = false;
+      return;
     }
-  }
-
-  let distanceHandle = null;
-  let distanceParcelId = null;
-  let distanceWorldCenter = null;
-  function parcelDistance(parcelId) {
-    const handle = village.handle;
-    if (!parcelId || !handle) {
-      distanceHandle = null;
-      distanceParcelId = null;
-      distanceWorldCenter = null;
-      return Infinity;
-    }
-    // zoom candidate는 여러 프레임 유지된다. 같은 handle/id에서는 첫 단건 조회의
-    // 복제본을 재사용해, steady-state 거리 계산을 무할당으로 유지한다.
-    if (handle !== distanceHandle || parcelId !== distanceParcelId) {
-      const proxy = handle.getPickProxy(parcelId);
-      distanceHandle = handle;
-      distanceParcelId = parcelId;
-      distanceWorldCenter = proxy?.worldCenter || null;
-    }
-    return distanceWorldCenter ? camera.position.distanceTo(distanceWorldCenter) : Infinity;
-  }
-
-  function updateContinuum() {
-    if (!village.active || isBusy()) return;
     const aerialReference = referenceAerialDistance();
-    if (aerialReference <= 0) return;
-    if (!village.selected) {
-      const now = performance.now();
-      if (now - village.lastCenterT > 90) {
-        village.lastCenterT = now;
-        const candidate = centerParcel();
-        if (candidate !== village.zoomCand) {
-          if (village.zoomCand && village.zoomCand !== getHoverParcel()) {
-            village.handle.highlightParcel(village.zoomCand, false);
-          }
-          village.zoomCand = candidate;
-        }
-      }
-      const candidate = village.zoomCand;
-      if (!candidate) return;
-      const distance = villageScreenDistanceForCamera(parcelDistance(candidate), camera);
-      if (distance < aerialReference * (ZOOM_ENTER_FRAC + 0.28)
-        && candidate !== getHoverParcel()) {
-        village.handle.highlightParcel(candidate, true);
-      }
-      if (distance < aerialReference * ZOOM_ENTER_FRAC) {
-        village.zoomCand = null;
-        onSelect(candidate);
-      }
-    } else if (villageScreenDistanceForCamera(
-      camera.position.distanceTo(controls.target), camera,
-    ) > aerialReference * ZOOM_EXIT_FRAC) {
-      onReturn();
+    if (mode === 'focus' && closeupDistance > 0) {
+      focusCloseupReference = villageScreenDistanceForCamera(closeupDistance, camera);
+      const direction = focusDirection.subVectors(camera.position, controls.target);
+      const distance = direction.length();
+      focusBaseElevation = distance > 1e-6
+        ? Math.asin(Math.max(-1, Math.min(1, direction.y / distance))) : 0;
+      focusElevationOffset = 0;
+      focusAppliedElevation = focusBaseElevation;
     }
+    const bounds = villageZoomReferenceBounds(mode, aerialReference, focusCloseupReference);
+    controls.enableZoom = true;
+    controls.minDistance = actualDistance(bounds.min);
+    controls.maxDistance = actualDistance(bounds.max);
   }
 
   function near() {
@@ -175,20 +128,70 @@ export function createVillageCameraRuntime({
     return actualDistance(referenceAerialDistance() * fraction);
   }
 
+  function focusEffectWeight() {
+    return focusEffectWeightForDistance(
+      villageScreenDistanceForCamera(camera.position.distanceTo(controls.target), camera),
+      referenceAerialDistance(),
+      focusCloseupReference,
+    );
+  }
+
+  // 망원 근경을 남측 축으로 직선 후퇴시키면 근경 프레임 밖에 예약된 정자·높은 공공 오브젝트가
+  // 넓어진 시야에서 선택 집을 가릴 수 있다. 같은 일조 개방축 위에서 줌아웃 진행도만큼 크레인 업하되,
+  // 사용자가 OrbitControls로 더한 수직 오프셋은 다음 프레임에도 보존한다.
+  function updateFocusContext() {
+    if (regime !== 'focus' || !village.selected) return 0;
+    const direction = focusDirection.subVectors(camera.position, controls.target);
+    const distance = direction.length();
+    if (distance <= 1e-6) return 0;
+    const currentElevation = Math.asin(Math.max(-1, Math.min(1, direction.y / distance)));
+    if (focusAppliedElevation != null) {
+      focusElevationOffset += currentElevation - focusAppliedElevation;
+    }
+    const referenceDistance = villageScreenDistanceForCamera(distance, camera);
+    const effectWeight = focusEffectWeightForDistance(
+      referenceDistance, referenceAerialDistance(), focusCloseupReference,
+    );
+    const pathElevation = villageFocusContextElevation(
+      referenceDistance,
+      referenceAerialDistance(),
+      focusCloseupReference,
+      focusBaseElevation,
+    );
+    const desiredElevation = Math.max(0.02, Math.min(
+      Math.PI / 2 - 0.03,
+      pathElevation + focusElevationOffset,
+    ));
+    const horizontal = Math.hypot(direction.x, direction.z);
+    if (horizontal > 1e-6) {
+      const horizontalDistance = Math.cos(desiredElevation) * distance;
+      const scale = horizontalDistance / horizontal;
+      camera.position.set(
+        controls.target.x + direction.x * scale,
+        controls.target.y + Math.sin(desiredElevation) * distance,
+        controls.target.z + direction.z * scale,
+      );
+      camera.lookAt(controls.target);
+    }
+    focusAppliedElevation = desiredElevation;
+    return effectWeight;
+  }
+
   return {
     aerial,
     near,
     outerRadius,
     reapplyFog,
     setRegime,
-    updateContinuum,
     distanceAtFraction,
+    focusEffectWeight,
+    updateFocusContext,
     debugContinuum: () => ({
+      mode: regime,
       active: village.active,
       selected: village.selected,
       transitioning: village.transitioning,
       wave: !!village.wave,
-      zoomCand: village.zoomCand,
       aerialDist: +(village.aerialDist || 0).toFixed(1),
       aerialReferenceDist: +referenceAerialDistance().toFixed(1),
       dist: +camera.position.distanceTo(controls.target).toFixed(1),
@@ -196,10 +199,23 @@ export function createVillageCameraRuntime({
         camera.position.distanceTo(controls.target), camera,
       ).toFixed(1),
       referenceFov: +referenceFovForCamera(camera).toFixed(2),
-      enterDist: +(referenceAerialDistance() * ZOOM_ENTER_FRAC).toFixed(1),
-      exitDist: +(referenceAerialDistance() * ZOOM_EXIT_FRAC).toFixed(1),
-      enterActualDist: +actualDistance(referenceAerialDistance() * ZOOM_ENTER_FRAC).toFixed(1),
-      exitActualDist: +actualDistance(referenceAerialDistance() * ZOOM_EXIT_FRAC).toFixed(1),
+      exploreMinReferenceDist: +villageZoomReferenceBounds(
+        'explore', referenceAerialDistance(),
+      ).min.toFixed(1),
+      exploreMaxReferenceDist: +villageZoomReferenceBounds(
+        'explore', referenceAerialDistance(),
+      ).max.toFixed(1),
+      focusMaxReferenceDist: +villageZoomReferenceBounds(
+        'focus', referenceAerialDistance(), focusCloseupReference,
+      ).max.toFixed(1),
+      focusMaxActualDist: +actualDistance(villageZoomReferenceBounds(
+        'focus', referenceAerialDistance(), focusCloseupReference,
+      ).max).toFixed(1),
+      focusEffectWeight: +focusEffectWeight().toFixed(3),
+      elevation: +(Math.asin(Math.max(-1, Math.min(1,
+        focusDirection.subVectors(camera.position, controls.target).y
+          / Math.max(1e-6, camera.position.distanceTo(controls.target)),
+      ))) / DEG).toFixed(1),
     }),
   };
 }

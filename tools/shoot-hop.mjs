@@ -230,20 +230,21 @@ const parcels2 = await ev(desk, () => window.__engine.village.debugParcels());
 const reg2 = parcels2.find((p) => p.family === 'regular' && p.editable);
 if (reg2) { await ev(desk, (id) => window.__engine.village.debugFocus(id), reg2.parcelId); await settle(desk, 9000); await wait(desk, 300); await shot(desk, '100-7b-refocus-after-wave'); const s = await state(desk); ok(s.selected === reg2.parcelId, `#100⑦ 웨이브 후 focus 재개 정상 (${s.selected})`); }
 
-// ── 게이트 ⑨ : 회귀 — 정규 편집(라이브 슬라이더) + 줌 연속체 ──
+// ── 게이트 ⑨ : 회귀 — 정규 편집(라이브 슬라이더) + 명시적 보기/연속 구도 ──
 // 정규 편집: 슬라이더 드래그 시뮬(값 변경). (현 focus reg2)
 try {
   const range = await desk.$('.ctx.house input[type="range"]');
   if (range) { await range.focus(); for (let i = 0; i < 6; i++) { await desk.keyboard.press('ArrowRight'); await wait(desk, 60); } await wait(desk, 400); await shot(desk, '100-9-live-edit'); }
 } catch (e) { console.error('live-edit err', e.message); }
-// 줌 연속체: 부감 복귀 → 줌인 임계로 자동 focus-in.
+// 둘러보기에서 깊게 줌해도 상태 유지 → 명시적 focus-in.
 await ev(desk, () => window.__engine.village.return()); await settle(desk, 6000);
 await ev(desk, (id) => window.__engine.village.debugDolly(0.45, id), reg2 ? reg2.parcelId : A.parcelId);
+await ev(desk, (id) => window.__engine.village.focus(id), reg2 ? reg2.parcelId : A.parcelId);
 await wait(desk, 2600);
 const zc = await ev(desk, () => window.__engine.village.debugContinuum());
 console.log('ZOOM CONTINUUM', JSON.stringify(zc));
 await shot(desk, '100-9-zoom-continuum');
-ok(true, '#⑨ 줌 연속체 구동(무크래시)');
+ok(true, '#⑨ 명시적 보기/연속 구도 구동(무크래시)');
 
 // ───────────────────────── 모바일 게이트 ⑤ ─────────────────────────
 const mob = await browser.newPage({ viewport: { width: 390, height: 844, deviceScaleFactor: 3 }, isMobile: true, hasTouch: true });

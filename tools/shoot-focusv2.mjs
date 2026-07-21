@@ -1,7 +1,7 @@
 // focus 연속체 v2(#92) 게이트 검증 — 빌트 앱(app/dist-focusv2)을 실제 구동해 촬영.
 // 사용법: node tools/shoot-focusv2.mjs
 //   포트 4205 고정(사용자 dev 5174 불침해). 게이트 컷은 shots/focusv2-*, 중간 컷은 스크래치패드.
-// 게이트: ① 줌 연속체 4컷 ② 패널 모프 before/mid/after ③ 리플레이 비종가 ④ 리롤 웨이브 3컷
+// 게이트: ① 명시적 보기+연속 구도 4컷 ② 패널 모프 before/mid/after ③ 리플레이 비종가 ④ 리롤 웨이브 3컷
 //   ⑤ 모바일 2컷 ⑥ 회귀(부팅·shot·hero0·village1·4프리셋 0에러) ⑦ 크리틱 3건(월대난간·물매 라이브·기와 접힘)
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -71,7 +71,7 @@ await wait(page, 1800); await shot(page, 'landing-early');
 await waitFocused(page); await wait(page, 800);
 await shot(page, 'reg-02-landing', true);
 
-// 부감 복귀(近→遠 토글) — 이후 모든 연속체 테스트의 출발점.
+// 둘러보기 복귀(家→村 토글) — 이후 모든 보기별 줌 테스트의 출발점.
 await ev(page, () => window.__engine.village.return());
 await waitAerial(page); await wait(page, 600);
 console.log('aerial continuum:', JSON.stringify(await cont(page)));
@@ -83,14 +83,14 @@ const choga = parcels.find((p) => p.kind === 'choga' && !p.hero && p.editable);
 const anyRegular = giwa || choga;
 console.log('parcels giwa=', giwa?.parcelId, 'choga=', choga?.parcelId, 'total=', parcels.length);
 
-// ─────────────────── ① 줌 연속체 4컷 ───────────────────
+// ─────────────────── ① 명시적 보기 + 연속 구도 4컷 ───────────────────
 await shot(page, 'zoom-01-aerial', true);
-// 중간 줌(임계 위 — 후보 하이라이트, 자동 focus 미발동)
-await ev(page, (id) => window.__engine.village.debugDolly(0.62, id), anyRegular.parcelId);
+// 깊은 줌에서도 둘러보기 유지 — 화면 중앙 필지를 자동 선택하지 않는다(#14).
+await ev(page, (id) => window.__engine.village.debugDolly(0.20, id), anyRegular.parcelId);
 await wait(page, 350); await shot(page, 'zoom-02-mid', true);
 console.log('mid continuum:', JSON.stringify(await cont(page)));
-// 임계 이하 → 자동 focus-in(스냅 돌리). 전환 중 컷.
-await ev(page, (id) => window.__engine.village.debugDolly(0.46, id), anyRegular.parcelId);
+// 명시적 집 선택만 focus-in을 시작한다. 전환 중 컷.
+await ev(page, (id) => window.__engine.village.focus(id), anyRegular.parcelId);
 await wait(page, 700); await shot(page, 'zoom-03-dolly', true);
 const midC = await cont(page);
 console.log('dolly continuum:', JSON.stringify(midC));
@@ -165,7 +165,7 @@ console.log('after wave continuum:', JSON.stringify(await cont(page)));
     await ev(pp, (id) => window.__engine.village.focus(id), palace.parcelId);
     await pp.waitForFunction(() => { const c = window.__engine.village.debugContinuum(); return c.selected && !c.transitioning; }, null, { timeout: 9000 });
     await wait(pp, 700);
-    // 월대(기단) 난간이 프레임에 크게 잡히도록 근접 돌리(줌 연속체 등가) — off/on 대비 가독.
+    // 월대(기단) 난간이 프레임에 크게 잡히도록 현재 보기 안에서 근접 돌리 — off/on 대비 가독.
     await ev(pp, (id) => window.__engine.village.debugDolly(0.18, id), palace.parcelId);
     await wait(pp, 400);
     // 월대난간 OFF
