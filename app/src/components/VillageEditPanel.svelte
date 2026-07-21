@@ -43,7 +43,11 @@
   function toggleField(f) { const v = !params[f.key]; params[f.key] = v; onCommit?.(f.key, v); }
 
   // segment 옵션 라벨: wallType→wall_*, doorPattern→door_*.
-  const optLabel = (key, o) => t((key === 'wallType' ? 'wall_' : key === 'doorPattern' ? 'door_' : '') + o);
+  const optLabel = (key, o) => t((key === 'wallType' ? 'wall_'
+    : key === 'doorPattern' ? 'door_'
+    : key === 'variant' ? 'temple_variant_'
+    : key === 'pagoda' ? 'temple_pagoda_'
+    : '') + o);
 </script>
 
 <BottomSheet {open} {onClose} variant="right" ariaLabel="edit house panel">
@@ -53,7 +57,11 @@
   </div>
 
   {#if editable}
-    {#if schema.family === 'hero'}
+    {#if schema.family === 'temple'}
+      <p class="ctx">{t('vil_temple_compound_note')}</p>
+    {:else if schema.family === 'palace-compound'}
+      <p class="ctx">{t('vil_palace_compound_note')}</p>
+    {:else if schema.family === 'hero'}
       <p class="ctx">{t(schema.heroStyle === 'hanok' ? 'vil_hero_edit_note' : 'vil_palace_edit_note')}</p>
     {:else}
       <section>

@@ -5,6 +5,7 @@ const checks = [
   './check-architecture.mjs',
   './check-dof.mjs',
   './check-plan-contract.mjs',
+  './check-temple-contract.mjs',
   './check-road-contract.mjs',
   './check-layout-contract.mjs',
   './check-wall-gate-contract.mjs',

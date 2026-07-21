@@ -114,7 +114,35 @@ try {
   ].filter(([, parcel]) => parcel);
   check(picks.length === 4,
     `capital focus subjects are available (${picks.map(([name]) => name).join(', ')})`);
-  for (const [name, parcel] of picks) await focusAndCapture(name, parcel);
+  for (const [name, parcel] of picks) {
+    await focusAndCapture(name, parcel);
+    if (name !== 'temple') continue;
+    const edit = await page.evaluate(() => {
+      const engine = window.__engine;
+      const initial = engine.village.getState().spec;
+      const compactOptions = { ...initial.variantDefaults.compact, variant: 'compact' };
+      engine.village.rebuild('temple', { templeOptions: compactOptions });
+      const compact = {
+        spec: engine.village.getState().spec,
+        box: engine.village.debugOverlayBox('temple'),
+      };
+      const extendedOptions = { ...compact.spec.variantDefaults.extended, variant: 'extended' };
+      engine.village.rebuild('temple', { templeOptions: extendedOptions });
+      const extended = {
+        spec: engine.village.getState().spec,
+        box: engine.village.debugOverlayBox('temple'),
+      };
+      return { initial, compact, extended };
+    });
+    check(edit.compact.spec.params.variant === 'compact'
+      && edit.compact.spec.params.hallCount === edit.compact.spec.variantDefaults.compact.hallCount,
+    `temple editor keeps compact UI and plan values synchronized (${edit.compact.spec.params.hallCount} halls)`);
+    check(edit.extended.spec.params.variant === 'extended'
+      && edit.extended.spec.params.hallCount === edit.extended.spec.variantDefaults.extended.hallCount,
+    `temple editor restores extended semantic defaults (${edit.extended.spec.params.hallCount} halls)`);
+    check(edit.extended.box.x > edit.compact.box.x + 20 && edit.extended.box.z > edit.compact.box.z + 20,
+      `temple editor rebuilds the reserved compound geometry (${JSON.stringify({ compact: edit.compact.box, extended: edit.extended.box })})`);
+  }
 
   // Capital deliberately replaces the residential hero with the palace core.
   await loadVillage('vscale=village&vtemple=0&seed=20260718&vseed=7&time=day&weather=clear');

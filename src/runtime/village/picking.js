@@ -90,7 +90,10 @@ export function templeCameraFraming(worldCenter, rotationY, width, depth) {
 }
 
 /** Build non-residential focus proxies after palace metadata is available. */
-export function buildLandmarkPickProxies(plan, site, { palaceHandle, palaceInner, palaceSpec }) {
+export function buildLandmarkPickProxies(plan, site, {
+  palaceHandle, palaceInner, palaceSpec,
+  templeHandle, templeInner, templeSpec,
+}) {
   const proxies = [];
   if (plan.features?.palace) {
     const feature = plan.features.palace;
@@ -119,11 +122,11 @@ export function buildLandmarkPickProxies(plan, site, { palaceHandle, palaceInner
 
   if (plan.features?.temple) {
     const feature = plan.features.temple;
-    const rotY = G.facingY(feature.frontDir || { x: 0, z: 1 });
-    const groundY = feature.baseY ?? site?.heightAt?.(feature.x, feature.z) ?? 0;
-    const width = (feature.compoundSize || 33) + 3;
-    const depth = width;
-    const height = 30;
+    const rotY = templeInner?.rotation.y ?? G.facingY(feature.frontDir || { x: 0, z: 1 });
+    const groundY = templeInner?.position.y ?? feature.baseY ?? site?.heightAt?.(feature.x, feature.z) ?? 0;
+    const width = (templeHandle?.width || feature.compoundWidth || feature.compoundSize || 33) + 2;
+    const depth = (templeHandle?.depth || feature.compoundDepth || feature.compoundSize || 33) + 2;
+    const height = 18;
     const worldCenter = new THREE.Vector3(feature.x, groundY, feature.z);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth));
     mesh.position.set(feature.x, groundY + height / 2, feature.z);
@@ -137,7 +140,7 @@ export function buildLandmarkPickProxies(plan, site, { palaceHandle, palaceInner
       worldCenter,
       dims: new THREE.Vector3(width, height, depth),
       rotY,
-      buildingSpec: {
+      buildingSpec: templeSpec ? templeSpec() : {
         parcelId: 'temple', family: 'temple', style: 'temple', editable: false, landmark: true,
       },
       cameraFraming: templeCameraFraming(worldCenter, rotY, width, depth),

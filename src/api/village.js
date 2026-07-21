@@ -9,6 +9,7 @@ export {
   buildHeroParcel,
   buildPaddyFields,
   buildSijeon,
+  buildTempleCluster,
   collectMaterialSets,
 } from '../generators/village/features.js';
 export {

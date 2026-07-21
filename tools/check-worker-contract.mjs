@@ -17,20 +17,22 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #15: 집 사이의 실제 저각 일조를 보존하고, 4.5m 정자 지붕을 필지 일조·focus·
-  // 보호수 회랑 밖에 예약하며 forest/terrain도 그 footprint를 소비한 scene 기준선. sync, 실제 module
-  // Worker, ?worker=0 fallback은 이 값뿐 아니라 서로 byte-identical해야 한다.
-  village: '70198480:4cf70b52:af45764a:5b419da2',
-  town: 'f08ba8f4:ac01de7a:090a8324:2d5fd3d8',
-  capital: '785efef2:76f13918:b5ab0e86:73f3421e',
-  hanyang: '624ceb03:52d96285:7eacc062:ac0af03f',
+  // #12: the variable rectangular precinct is reserved before parcels and
+  // vegetation, then rendered as the compact/courtyard/extended TemplePlan.
+  // The #15 house/pavilion solar contract remains in the same baseline. Sync,
+  // real module Worker, and ?worker=0 fallback must be byte-identical.
+  village: 'da06159b:38341db1:7a482310:3c0ac8d3',
+  town: '55c0c8fb:7338ad73:d9104e7b:a9923e7f',
+  capital: '137a7eea:2eb1270c:495c9a8a:90d9bac4',
+  hanyang: '4eede084:0d14ab06:40589297:41dd0eaa',
 };
 const expectedProxyHashes = {
-  // 문 높이 target과 solarAccess 안의 XZ 시선을 쓰는 pick proxy 기준선.
-  village: 'bbb78e8b',
-  town: 'e9e10d24',
-  capital: '04633d8f',
-  hanyang: '259a3403',
+  // Door-height residential targets plus the variable temple bounds and its
+  // south-facing 26° telephoto framing.
+  village: 'd7f11ec1',
+  town: '3338fa54',
+  capital: '9b7e42a0',
+  hanyang: '9229716f',
 };
 
 const server = await createServer({

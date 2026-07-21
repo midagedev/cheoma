@@ -8,12 +8,17 @@ import {
 } from './citywall-contour.js';
 import { parcelWorldPoint } from './parcel-contract.js';
 import { createRoadSpatialIndex } from './road-spatial.js';
+import {
+  planTempleCompound,
+  templeCompoundDefaultsForSite,
+} from '../temple/plan.js';
 
 // Pure, worker-safe temple site contract. Planning owns the compound footprint and
 // approach centerline so the renderer, forest mask, and regression gates cannot
 // silently invent different clearances.
 export const TEMPLE_COMPOUND_SIZE = 33;
 export const TEMPLE_MIN_COMPOUND_SIZE = 22;
+export const TEMPLE_MAX_COMPOUND_SIZE = 72;
 export const TEMPLE_PATH_WIDTH = 2.5;
 export const TEMPLE_PATH_CLEARANCE = 4;
 export const TEMPLE_PAD_LIFT = 0.06;
@@ -38,31 +43,42 @@ function templeFrontDir(site, x, z) {
 }
 
 export function templeCompoundSize(temple) {
-  return temple?.compoundSize || TEMPLE_COMPOUND_SIZE;
+  return Math.max(templeCompoundWidth(temple), templeCompoundDepth(temple));
+}
+
+export function templeCompoundWidth(temple) {
+  return temple?.compoundWidth || temple?.compound?.width || temple?.compoundSize || TEMPLE_COMPOUND_SIZE;
+}
+
+export function templeCompoundDepth(temple) {
+  return temple?.compoundDepth || temple?.compound?.depth || temple?.compoundSize || TEMPLE_COMPOUND_SIZE;
 }
 
 export function templeFootprint(temple, margin = 0) {
-  const half = templeCompoundSize(temple) * 0.5 + Math.max(0, margin);
+  const halfWidth = templeCompoundWidth(temple) * 0.5 + Math.max(0, margin);
+  const halfDepth = templeCompoundDepth(temple) * 0.5 + Math.max(0, margin);
   const frame = {
     center: { x: temple.x, z: temple.z },
     frontDir: temple.frontDir || { x: 0, z: 1 },
   };
   return [
-    { x: half, z: half }, { x: -half, z: half },
-    { x: -half, z: -half }, { x: half, z: -half },
+    { x: halfWidth, z: halfDepth }, { x: -halfWidth, z: halfDepth },
+    { x: -halfWidth, z: -halfDepth }, { x: halfWidth, z: -halfDepth },
   ].map((point) => parcelWorldPoint(frame, point));
 }
 
 function footprintRelief(site, temple) {
   let min = Infinity, max = -Infinity;
-  const size = templeCompoundSize(temple);
-  const half = size * 0.5;
+  const width = templeCompoundWidth(temple);
+  const depth = templeCompoundDepth(temple);
+  const halfWidth = width * 0.5;
+  const halfDepth = depth * 0.5;
   const frame = { center: temple, frontDir: temple.frontDir };
   for (let row = 0; row <= FOOTPRINT_SAMPLES; row++) {
     for (let column = 0; column <= FOOTPRINT_SAMPLES; column++) {
       const point = parcelWorldPoint(frame, {
-        x: -half + size * column / FOOTPRINT_SAMPLES,
-        z: -half + size * row / FOOTPRINT_SAMPLES,
+        x: -halfWidth + width * column / FOOTPRINT_SAMPLES,
+        z: -halfDepth + depth * row / FOOTPRINT_SAMPLES,
       });
       const height = site.heightAt(point.x, point.z);
       min = Math.min(min, height);
@@ -274,7 +290,7 @@ function nearestParcelConnector(start, parcels) {
 function planApproach(temple, { network, parcels, occupied, paddies, site, cityWall, seed }) {
   const start = parcelWorldPoint({ center: temple, frontDir: temple.frontDir }, {
     x: 0,
-    z: templeCompoundSize(temple) * 0.5,
+    z: templeCompoundDepth(temple) * 0.5,
   });
   const context = { occupied, paddies, site, cityWall, wallSide: temple.wallSide };
   const primary = cityWall && temple.wallSide === 'outside'
@@ -327,18 +343,15 @@ function candidateMode(drop, radiusRatio, setting) {
   return 'gentle-slope';
 }
 
-function collectCandidates(site, seed, occupied, cityWall, network) {
+function collectCandidates(site, seed, occupied, cityWall, network, compound) {
   const preferredSide = ((seed ^ 0x7e11) & 1) ? 1 : -1;
   const sides = [preferredSide, -preferredSide];
   const reliefCap = Math.min(8, Math.max(4, (site.Hmax || 68) * 0.08));
   const candidates = [];
   const radialStep = Math.max(2.4, site.R * 0.012);
-  // A full precinct overwhelms the smallest hamlet basin. Scale only the lower
-  // continuum into a compact temple; village and larger retain the current size.
-  const compoundSize = Math.min(
-    TEMPLE_COMPOUND_SIZE,
-    Math.max(TEMPLE_MIN_COMPOUND_SIZE, site.R * 0.30),
-  );
+  const compoundWidth = compound.width;
+  const compoundDepth = compound.depth;
+  const compoundSize = Math.max(compoundWidth, compoundDepth);
   // Temples may occupy a valley floor, streamside bench, gentle footslope, or an
   // urban precinct. Scan broadly around the basin margin, treating terrain
   // enclosure as a bonus rather than requiring a mountain-monastery setting.
@@ -355,7 +368,7 @@ function collectCandidates(site, seed, occupied, cityWall, network) {
           z: site.center.z + direction.z * radius,
         };
         const frontDir = templeFrontDir(site, point.x, point.z);
-        const temple = { ...point, frontDir, compoundSize };
+        const temple = { ...point, frontDir, compoundSize, compoundWidth, compoundDepth, compound };
         const footprint = templeFootprint(temple, 2);
         if (site.edge && !worldEdgeContainsPolygon(site.edge, footprint, 4)) continue;
         const terrainR = site.terrainR || site.R;
@@ -382,7 +395,7 @@ function collectCandidates(site, seed, occupied, cityWall, network) {
         const mode = candidateMode(relief.drop, radiusRatio, setting);
         const approachStart = parcelWorldPoint({ center: temple, frontDir }, {
           x: 0,
-          z: compoundSize * 0.5,
+          z: compoundDepth * 0.5,
         });
         const roadDistance = accessDistance(approachStart, network, cityWall, wallSide);
         const edgePenalty = Math.max(0, radiusRatio - 0.72) * 34;
@@ -429,6 +442,7 @@ export function planTempleSite({
   occupied = parcels.map((parcel) => parcel.poly).filter(Boolean),
   paddies = [],
   cityWall = null,
+  compoundOptions = null,
 }) {
   const segments = buildRoadSegments(roads);
   const network = {
@@ -437,7 +451,12 @@ export function planTempleSite({
     spatial: createRoadSpatialIndex(roads),
     siteRadius: site.R,
   };
-  const candidates = collectCandidates(site, seed, occupied, cityWall, network);
+  const compound = planTempleCompound({
+    seed: (seed ^ 0x7e11) >>> 0,
+    ...templeCompoundDefaultsForSite(site.R, seed),
+    ...(compoundOptions || {}),
+  });
+  const candidates = collectCandidates(site, seed, occupied, cityWall, network, compound);
   let fallback = null;
   for (const candidate of candidates) {
     const approach = planApproach(candidate, {
@@ -468,6 +487,9 @@ export function planTempleSite({
     frontDir: candidate.frontDir,
     seed: (seed ^ 0x7e11) >>> 0,
     compoundSize: round(candidate.compoundSize),
+    compoundWidth: round(candidate.compoundWidth),
+    compoundDepth: round(candidate.compoundDepth),
+    compound: candidate.compound,
     baseY: candidate.relief.max + TEMPLE_PAD_LIFT,
     path: approach.path,
     pathWidth: TEMPLE_PATH_WIDTH,

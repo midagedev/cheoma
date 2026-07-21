@@ -92,7 +92,12 @@
   function pick(f, value) { params[f.key] = value; onCommit?.(f.key, value); }
   function toggleField(f) { const v = !params[f.key]; params[f.key] = v; onCommit?.(f.key, v); }
   // segment 옵션 라벨: wallType→wall_*, doorPattern→door_*, planShape→step_*(#146 구 패널 어휘 재사용).
-  const optLabel = (key, o) => t((key === 'wallType' ? 'wall_' : key === 'doorPattern' ? 'door_' : key === 'planShape' ? 'step_' : '') + o);
+  const optLabel = (key, o) => t((key === 'wallType' ? 'wall_'
+    : key === 'doorPattern' ? 'door_'
+    : key === 'planShape' ? 'step_'
+    : key === 'variant' ? 'temple_variant_'
+    : key === 'pagoda' ? 'temple_pagoda_'
+    : '') + o);
 </script>
 
 <BottomSheet {open} variant="context" closable={false} gap={13} {detent} ariaLabel="context panel" {header} {footer}>
@@ -161,6 +166,8 @@
       {#if editable}
         {#if schema.family === 'palace-compound'}
           <p class="note">{t('vil_palace_compound_note')}</p>
+        {:else if schema.family === 'temple'}
+          <p class="note">{t('vil_temple_compound_note')}</p>
         {:else if schema.family === 'hero'}
           <p class="note">{t(schema.heroStyle === 'hanok' ? 'vil_hero_edit_note' : 'vil_palace_edit_note')}</p>
         {:else}
@@ -239,7 +246,7 @@
       style:pointer-events={houseActive ? 'auto' : 'none'}
       aria-hidden={!houseActive}
     >
-      {#if spec && spec.family !== 'temple'}
+      {#if spec}
         <div class="house-actions">
           <button class="hbtn ghost" onclick={() => onReplay?.()} disabled={houseBusy} title={t('vil_replay_tip')}>
             <span class="hk" aria-hidden="true">再</span>{t('vil_replay')}

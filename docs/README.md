@@ -8,7 +8,7 @@
 2. 이 문서 — 어떤 문서가 현재 계약이고 어떤 문서가 참고 자료인지 확인.
 3. [`project-status.md`](project-status.md) — 현재 마무리 방향, 활성 작업, 유지·보류 결정.
 4. [`architecture-refactor.md`](architecture-refactor.md) — 현재 진행 중인 구조 개선의 목표 레이어와 마이그레이션 순서.
-5. 작업별 브리프 — 승인된 사찰 터 계약은 [`SANSA-HANDOFF.md`](../SANSA-HANDOFF.md), 후속 가람 생성기는 [`temple-generator.md`](temple-generator.md).
+5. 작업별 계약 — 사찰 터 이력은 [`SANSA-HANDOFF.md`](../SANSA-HANDOFF.md), 현재 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md).
 6. [`verification.md`](verification.md) — 실제로 쓸 수 있는 검증 도구와 알려진 공백.
 
 문서와 코드가 충돌하면 현재 코드와 실행 결과가 우선이다. 의도에 관한 충돌은 `AGENTS.md` → 활성 작업 브리프 → 현재 계약 문서 → 리서치/스냅샷 순으로 해석하고, 차이가 확인되면 같은 작업에서 문서도 갱신한다.
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
-| [`temple-generator.md`](temple-generator.md) | 대기 설계 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·검증 경계. |
+| [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
 | [`project-status.md`](project-status.md) | 계약 | 프로젝트 마무리 방향, 유지해야 할 사용자 결정, 현재 작업 상태. |
 | [`verification.md`](verification.md) | 계약 | 빌드·문법·Playwright·결정론 검증의 실제 사용 범위와 함정. |
 | [`mode-integration.md`](mode-integration.md) | 계약 | 모드/카메라/focus 통합. `ui-design.md`의 초기 모드 구상보다 우선한다. |

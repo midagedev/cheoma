@@ -624,7 +624,8 @@
   }
   // 특수 컴파운드(종가·관아 hero + 궁 palace-compound)는 buildParcel/buildPalaceCompound 통짜라 무거워
   //   드래그 라이브 재생성 금지 — 값 라벨만 라이브, 놓을 때(commit) 재생성.
-  const isSpecialCompound = (spec) => !!spec && (spec.hero || spec.family === 'palace-compound');
+  const isSpecialCompound = (spec) => !!spec
+    && (spec.hero || spec.family === 'palace-compound' || spec.family === 'temple');
   let liveRaf = null, liveLast = 0;
   // 라이브 재생성 최소 간격 — 재생성(~12ms)을 매 프레임 태우면 focus 뷰 후처리(rim/bloom/DoF/flare)
   //   렌더와 합쳐 프레임이 눌린다. 재생성 케이던스를 렌더에서 분리(~22Hz)해 사이 프레임은 렌더만 —
@@ -632,7 +633,17 @@
   const LIVE_MIN_MS = 45;
   function pushRebuild() {
     if (!villageEditing) return;
-    engine.village.rebuild(villageEditing.parcelId, buildRebuildPayload(villageEditing.spec, editParams));
+    const rebuilt = engine.village.rebuild(
+      villageEditing.parcelId,
+      buildRebuildPayload(villageEditing.spec, editParams),
+    );
+    // Compound planners may change the valid controls and clamp ranges when a
+    // variant changes. Refresh the declarative spec after the core accepts the
+    // rebuild; Svelte still owns no THREE state.
+    const nextSpec = rebuilt ? engine.village.getState().spec : null;
+    if (nextSpec?.parcelId === villageEditing.parcelId) {
+      villageEditing = { ...villageEditing, spec: nextSpec };
+    }
   }
   function scheduleLive() {
     if (liveRaf != null) return;                   // rAF 1회 병합(드래그 이벤트 폭주 흡수)
@@ -649,7 +660,15 @@
     scheduleLive();
   }
   function villageCommit(k, v) {
-    editParams[k] = v;
+    // Switching a temple grammar is a semantic layout change, not a cosmetic
+    // label swap. Seed the new variant's hall/monument defaults so the panel and
+    // the planner's clamped result cannot drift (for example 7 halls displayed
+    // while a compact precinct actually renders 2).
+    const templeDefaults = villageEditing?.spec?.family === 'temple' && k === 'variant'
+      ? villageEditing.spec.variantDefaults?.[v]
+      : null;
+    if (templeDefaults) editParams = { ...editParams, ...templeDefaults, variant: v };
+    else editParams[k] = v;
     if (liveRaf != null) { cancelAnimationFrame(liveRaf); liveRaf = null; }
     pushRebuild();
   }
