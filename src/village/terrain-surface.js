@@ -1,4 +1,5 @@
 import { cityGateFootprint } from './citywall-contour.js';
+import { TEMPLE_PATH_CLEARANCE, templeFootprint } from './temple-plan.js';
 export { terrainGridSize, terrainMeshHeightAt } from './terrain-grid.js';
 
 // 지형 신축 밴드의 안쪽 경계 반경. 도로 폭까지 포함해 이 반경 안의 terrain grid는 좌표가
@@ -32,7 +33,10 @@ export function computeFixedRadius(plan, site) {
   const considerFeature = (feature, margin) => {
     if (feature && typeof feature.x === 'number') consider(feature.x, feature.z, margin);
   };
-  considerFeature(features.temple, 22);
+  if (features.temple && typeof features.temple.x === 'number') {
+    for (const point of templeFootprint(features.temple, 1)) consider(point.x, point.z);
+    for (const point of features.temple.path || []) consider(point.x, point.z, TEMPLE_PATH_CLEARANCE);
+  }
   considerFeature(features.palace, 26);
   considerFeature(features.govCore, 24);
   considerFeature(features.pavilion, 8);

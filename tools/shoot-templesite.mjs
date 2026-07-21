@@ -1,23 +1,22 @@
-// #94 절 배치 검증 — 마을 절이 산 능선과 겹치는 문제 진단·수정 게이트.
-//   코어 직접 import(planVillage + populateVillage) 하네스. 전용 포트 4209(사용자 dev 5174 미접촉).
-//   mode=current: 디스크 plan.js 의 절 배치 그대로. mode=fix: 하네스 내 후보 배치 함수(placeTempleFix)로
-//   plan.features.temple 를 교체해 populate — 수렴 후 plan.js 로 이식. 진단값은 window.__T.
+// 사찰 터 검증 — 코어 plan/populate를 직접 실행해 규모별 대지 낙차, 진입로,
+// 접지, 월드/성곽 관계와 draw call을 함께 기록한다. mode=old는 과거 급사면
+// 배치의 시각 비교만 제공하고 mode=current가 유일한 현재 구현이다.
 // 사용법: node tools/shoot-templesite.mjs [필터] [--tmp]
 //   --tmp: 중간 컷을 scratchpad/temple 로(shots 오염 방지). 기본은 shots/templesite-*.png(게이트 증거).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
-import { chromium } from 'playwright';
+import { launchVerificationBrowser } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const PORT = 4209;
 const args = process.argv.slice(2);
 const useTmp = args.includes('--tmp');
 const filter = args.find((a) => !a.startsWith('--')) || '';
-const OUT = useTmp
-  ? '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/temple'
-  : join(ROOT, 'shots');
+const OUT = process.env.CHEOMA_TEMPLE_OUT
+  ? resolve(process.env.CHEOMA_TEMPLE_OUT)
+  : useTmp ? mkdtempSync(join(tmpdir(), 'cheoma-templesite-')) : join(ROOT, 'shots');
 mkdirSync(OUT, { recursive: true });
 const prefix = useTmp ? '' : 'templesite-';
 
@@ -35,6 +34,8 @@ import * as THREE from 'three';
 import { planVillage } from '/src/village/plan.js';
 import { populateVillage } from '/src/village/populate.js';
 import * as G from '/src/village/geom.js';
+import { parcelWorldPoint } from '/src/village/parcel-contract.js';
+import { templeCompoundSize } from '/src/village/temple-plan.js';
 const q = new URLSearchParams(location.search);
 const scaleRaw = q.get('scale') || 'village';
 const scale = isNaN(+scaleRaw) ? scaleRaw : +scaleRaw;
@@ -63,86 +64,15 @@ const L = {
 scene.background = new THREE.Color(L.bg);
 renderer.toneMappingExposure = L.exp;
 
-const plan = planVillage({ scale, seed, includePalace, includeTemple });
+const plan = planVillage({
+  scale,
+  seed,
+  includePalace,
+  includeTemple: includeTemple && mode !== 'old',
+});
 const site = plan.site;
 const R = site.R;
 const Hmax = site.Hmax;
-
-// ── 후보 배치 함수(수렴 후 plan.js 로 이식) ──────────────────────────────────
-//   산사(山寺): 능선 마루가 아니라 배산 사면 중턱의 완사면 벤치에 앉아 마을을 내려다보되
-//   하늘선을 깨지 않는다. 요건 (1) 목표 표고대 [eLo..eHi]*Hmax 중턱 (2) footprint 완경사
-//   (3) 절 뒤(북)로 능선이 배경으로 솟음(백드롭 마진). 측사면(좌청룡·우백호 어깨)에 앉혀
-//   부감 시선축(남→북)에서 절 지붕선과 능선 마루선이 분리되게 한다.
-function placeTempleFix(site, seed, P) {
-  const C = site.center, Hmax = site.Hmax, R = site.R;
-  const foot = 33;                          // pad 포함 footprint(30+3)
-  const eLo = P.eLo, eHi = P.eHi;           // 목표 표고대(Hmax 비율)
-  const eMid = (eLo + eHi) / 2;
-  const side = ((seed ^ 0x7e11) >>> 0) % 2 === 0 ? 1 : -1;   // 결정론 좌/우 사면
-  const footSlope = (x, z) => {
-    let lo = 1e9, hi = -1e9;
-    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
-      const h = site.heightAt(x + i * foot / 2, z + j * foot / 2);
-      if (h < lo) lo = h; if (h > hi) hi = h;
-    }
-    return { lo, hi, slope: hi - lo };
-  };
-  const backdropRise = (x, z, gy) => {
-    let hi = -1e9;
-    for (let dz = 0.06 * R; dz <= 0.7 * R; dz += 0.05 * R) {
-      for (const dx of [-0.12 * R, 0, 0.12 * R]) hi = Math.max(hi, site.heightAt(x + dx, z - dz));
-    }
-    return hi - gy;
-  };
-  // 후보: 배산 사면(북~정측) 방위 × 반경 스캔. 표고대 안에서 완경사(접지)·백드롭·중앙표고·비가장자리 최적.
-  const angs = [];
-  for (let i = 0; i < P.an; i++) angs.push(P.aLo + (P.aHi - P.aLo) * (P.an === 1 ? 0.5 : i / (P.an - 1)));
-  let best = null;
-  for (const angFrac of angs) {
-    const ang = angFrac * Math.PI;           // 0=정북(-z, 주산 배후), 0.5=정측(±x, 청룡·백호 어깨)
-    const dir = { x: side * Math.sin(ang), z: -Math.cos(ang) };
-    for (let r = 0.55 * R; r <= P.rMax * R; r += 0.02 * R) {
-      const x = C.x + dir.x * r, z = C.z + dir.z * r;
-      const gy = site.heightAt(x, z);
-      const er = gy / Hmax;
-      if (er < eLo || er > eHi) continue;
-      const fs = footSlope(x, z);
-      const bd = backdropRise(x, z, gy);
-      const edge = Math.max(0, r / R - P.rSoft) * P.wEdge;    // 가장자리(월드 밖) 페널티
-      const score = -fs.slope * P.wSlope + bd * P.wBack - Math.abs(er - eMid) * Hmax * P.wElev - edge;
-      if (!best || score > best.score) best = { x, z, gy, er, fs, bd, score, ang, r };
-    }
-  }
-  if (!best) {   // 표고대 못 찾으면 안전 폴백: 기존 방식 근사
-    const x = side * R * 0.62, z = C.z - R * 0.18;
-    best = { x, z, gy: site.heightAt(x, z), er: site.heightAt(x, z) / Hmax,
-      fs: footSlope(x, z), bd: backdropRise(x, z, site.heightAt(x, z)), fallback: true };
-  }
-  // 일주문·대웅전은 마을(하향)을 향한다 — 절→마을 중심 방향으로 정면(남향 성분 유지).
-  const toC = G.norm({ x: C.x - best.x, z: C.z - best.z });
-  const frontDir = G.norm({ x: toC.x * 0.5, z: Math.max(0.5, toC.z) });
-  return { temple: { x: best.x, z: best.z, frontDir, seed: (seed ^ 0x7e11) >>> 0 }, meta: best };
-}
-
-// 지형 완경사 존 프로브 — (ang, r) 격자에서 footprint slope·elev·backdrop 를 훑어 게으른 벤치를 찾는다.
-if (mode === 'probe') {
-  const C = site.center;
-  const foot = 33;
-  const fs = (x, z) => { let lo = 1e9, hi = -1e9; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const h = site.heightAt(x + i * foot / 2, z + j * foot / 2); if (h < lo) lo = h; if (h > hi) hi = h; } return hi - lo; };
-  const bd = (x, z, gy) => { let hi = -1e9; for (let dz = 0.06 * R; dz <= 0.7 * R; dz += 0.06 * R) for (const dx of [-0.12 * R, 0, 0.12 * R]) hi = Math.max(hi, site.heightAt(x + dx, z - dz)); return hi - gy; };
-  const rows = [];
-  for (let a = 0.10; a <= 0.66; a += 0.08) {
-    const cells = [];
-    for (let rf = 0.60; rf <= 1.10; rf += 0.06) {
-      const ang = a * Math.PI, dir = { x: Math.sin(ang), z: -Math.cos(ang) };
-      const x = C.x + dir.x * rf * R, z = C.z + dir.z * rf * R;
-      const gy = site.heightAt(x, z);
-      cells.push({ rf: +rf.toFixed(2), er: +(gy / Hmax).toFixed(2), sl: +fs(x, z).toFixed(0), bk: +bd(x, z, gy).toFixed(0), zf: +((z - C.z) / R).toFixed(2) });
-    }
-    rows.push({ a: +a.toFixed(2), cells });
-  }
-  window.__PROBE = rows;
-}
 
 // #94 이전(옛) 배치 재현 — before/after 대비 게이트용. (측면 급벽 x=±0.62R, z=중심-0.18R)
 if (includeTemple && mode === 'old') {
@@ -152,52 +82,31 @@ if (includeTemple && mode === 'old') {
   plan.features.temple = { x: tx, z: tz, frontDir: G.norm({ x: -east * 0.4, z: 1 }), seed: (plan.opts.seed ^ 0x7e11) >>> 0 };
 }
 
-let fixMeta = null;
-if (includeTemple && mode === 'fix') {
-  const P = {
-    eLo: num('elo', 0.50), eHi: num('ehi', 0.70),
-    aLo: num('alo', 0.34), aHi: num('ahi', 0.52), an: num('an', 6),
-    rMax: num('rmax', 1.00), rSoft: num('rsoft', 0.98),
-    wSlope: num('wslope', 3.0), wBack: num('wback', 0.35), wElev: num('welev', 0.30), wEdge: num('wedge', 60),
-  };
-  const pang = parseFloat(q.get('pang')), prf = parseFloat(q.get('prf'));
-  if (Number.isFinite(pang) && Number.isFinite(prf)) {
-    // 위치 강제(프로브 셀 시각검증) — 탐색 우회
-    const C = site.center, ang = pang * Math.PI;
-    const side = ((plan.opts.seed ^ 0x7e11) >>> 0) % 2 === 0 ? 1 : -1;
-    const x = C.x + side * Math.sin(ang) * prf * R, z = C.z + (-Math.cos(ang)) * prf * R;
-    const toC = G.norm({ x: C.x - x, z: C.z - z });
-    plan.features.temple = { x, z, frontDir: G.norm({ x: toC.x * 0.5, z: Math.max(0.5, toC.z) }), seed: (plan.opts.seed ^ 0x7e11) >>> 0 };
-    fixMeta = { ang, r: prf * R, forced: true };
-  } else {
-    const r = placeTempleFix(site, plan.opts.seed, P);
-    plan.features.temple = r.temple;
-    fixMeta = r.meta;
-  }
-}
-
-let villageGroup = null;
-if (mode !== 'probe') { villageGroup = populateVillage(plan); scene.add(villageGroup); }
+const villageGroup = populateVillage(plan);
+scene.add(villageGroup);
 
 // ── 절 진단 ──────────────────────────────────────────────────────────────
 const T = plan.features.temple;
 let tdiag = null;
 if (T) {
-  const foot = 33;
+  const foot = templeCompoundSize(T);
   let fmin = 1e9, fmax = -1e9;
   const NG = 6;
   for (let i = 0; i <= NG; i++) for (let j = 0; j <= NG; j++) {
-    const x = T.x - foot / 2 + foot * i / NG, z = T.z - foot / 2 + foot * j / NG;
-    const h = site.heightAt(x, z);
+    const point = parcelWorldPoint({ center: T, frontDir: T.frontDir }, {
+      x: -foot / 2 + foot * i / NG,
+      z: -foot / 2 + foot * j / NG,
+    });
+    const h = site.heightAt(point.x, point.z);
     if (h < fmin) fmin = h; if (h > fmax) fmax = h;
   }
   const gy = site.heightAt(T.x, T.z);
   // 절 뒤 능선 백드롭
-  let ridgeMax = -1e9, ridgeZ = 0;
+  let ridgeMax = -1e9;
   for (let dz = 0.04 * R; dz <= 0.8 * R; dz += 0.03 * R) {
     for (const dx of [-0.12 * R, 0, 0.12 * R]) {
       const h = site.heightAt(T.x + dx, T.z - dz);
-      if (h > ridgeMax) { ridgeMax = h; ridgeZ = T.z - dz; }
+      if (h > ridgeMax) ridgeMax = h;
     }
   }
   tdiag = {
@@ -206,8 +115,10 @@ if (T) {
     groundY: +gy.toFixed(1), elevRatio: +(gy / Hmax).toFixed(3), hillAt: +site.hillAt(T.x, T.z).toFixed(2),
     footMin: +fmin.toFixed(1), footMax: +fmax.toFixed(1), footSlope: +(fmax - fmin).toFixed(1),
     ridgeMax: +ridgeMax.toFixed(1), backdropRise: +(ridgeMax - gy).toFixed(1),
+    baseY: Number.isFinite(T.baseY) ? +T.baseY.toFixed(1) : null,
+    placement: T.placement || null,
+    pathPoints: T.path?.length || 0,
   };
-  if (fixMeta) tdiag.pickAng = +(fixMeta.ang / Math.PI).toFixed(2), tdiag.pickR = +(fixMeta.r || 0).toFixed(0), tdiag.fallback = !!fixMeta.fallback;
 }
 const pc = villageGroup ? villageGroup.userData.palaceCore : undefined;
 window.__T = { scaleIn: scaleRaw, R: +R.toFixed(0), Hmax: +Hmax.toFixed(0), tier: plan.opts.scale, seed: plan.opts.seed, temple: tdiag, warnings: plan.warnings,
@@ -274,7 +185,8 @@ const server = createServer(async (req, res) => {
     res.end(data);
   } catch { res.writeHead(404); res.end('not found'); }
 });
-await new Promise((ok, no) => server.listen(PORT, '127.0.0.1', ok).on('error', no));
+await new Promise((ok, no) => server.listen(0, '127.0.0.1', ok).on('error', no));
+const activePort = server.address().port;
 
 // 기본 게이트 목록 — 필터로 서브셋. name 이 곧 파일 접미사.
 // #94 게이트 세트 — before(옛 급벽) / after(어깨 벤치) 대비 + 다시드·다규모 분리 일관성 + 근접 + 앵커.
@@ -292,33 +204,28 @@ const shots = (process.env.SHOTS ? JSON.parse(process.env.SHOTS) : [
   ['anchor-notemple-village', 'scale=village&seed=20260716&mode=current&view=aerial&temple=0'],
 ]).filter(([name]) => !filter || name.includes(filter));
 
-let browser;
-try { browser = await chromium.launch({ channel: 'chrome' }); }
-catch { browser = await chromium.launch(); }
+const browser = await launchVerificationBrowser();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 let pageErrs = 0, consoleErrs = 0;
 page.on('console', (m) => { if (m.type() !== 'error') return; const t = m.text(); if (/favicon|404/.test(t)) return; consoleErrs++; console.error('[console]', t); });
 page.on('pageerror', (e) => { pageErrs++; console.error('[pageerror]', e.message); });
 
+let timeouts = 0;
 for (const [name, qs] of shots) {
-  await page.goto(`http://127.0.0.1:${PORT}/__temple?${qs}`, { waitUntil: 'load' });
+  await page.goto(`http://127.0.0.1:${activePort}/__temple?${qs}`, { waitUntil: 'load' });
   try { await page.waitForFunction('window.__SHOT_READY === true', null, { timeout: 45000 }); }
-  catch { console.error('TIMEOUT', name); continue; }
+  catch { timeouts++; console.error('TIMEOUT', name); continue; }
   await page.waitForTimeout(180);
-  const probe = await page.evaluate(() => window.__PROBE || null);
-  if (probe) {
-    console.log(`PROBE ${name}: (a=ang/π; cells rf|er|slope|backdrop|zf)`);
-    for (const row of probe) console.log(` a=${row.a} ` + row.cells.map((c) => `${c.rf}:e${c.er}s${c.sl}b${c.bk}z${c.zf}`).join('  '));
-    continue;
-  }
   const p = await page.evaluate(() => window.__T);
   const file = join(OUT, `${prefix}${name}.png`);
   await page.screenshot({ path: file });
   const t = p.temple;
   console.log(`${name}  R=${p.R} H=${p.Hmax} ${p.tier}` + (t
-    ? `  T(xf=${t.xFrac},zf=${t.zFracFromC}) elev=${t.elevRatio}(gy${t.groundY}) slope=${t.footSlope} backdrop=${t.backdropRise} hill=${t.hillAt}` + (t.pickAng != null ? ` ang=${t.pickAng} r=${t.pickR}${t.fallback ? ' FALLBACK' : ''}` : '')
+    ? `  T(xf=${t.xFrac},zf=${t.zFracFromC}) elev=${t.elevRatio}(gy${t.groundY}) slope=${t.footSlope} backdrop=${t.backdropRise} hill=${t.hillAt}`
+      + (t.placement ? ` place=${t.placement.mode} path=${t.placement.pathSource}:${t.pathPoints}` : '')
     : '  (no temple)') + `  calls=${p.perf ? p.perf.calls : '?'}  palaceCore=${p.palaceCore}` + (p.warnings && p.warnings.length ? '  WARN:' + p.warnings.join(';') : ''));
 }
 console.log(`\nsaved to ${OUT}/${prefix}*.png   pageerror=${pageErrs} console-error=${consoleErrs}`);
 await browser.close();
 server.close();
+if (pageErrs || consoleErrs || timeouts) process.exitCode = 1;

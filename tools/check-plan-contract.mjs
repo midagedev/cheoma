@@ -4,6 +4,27 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planVillage } from '../src/api/village-plan.js';
+import * as G from '../src/core/math/geom2.js';
+import {
+  cityWallClearance,
+  cityWallContainsPolygon,
+  cityWallOutsidePolygon,
+  worldEdgeClearance,
+  worldEdgeContainsPolygon,
+} from '../src/village/citywall-contour.js';
+import { parcelWorldPoint } from '../src/village/parcel-contract.js';
+import { createRoadSpatialIndex } from '../src/village/road-spatial.js';
+import { streamIntersectsPolygon } from '../src/village/stream-spatial.js';
+import {
+  TEMPLE_PAD_LIFT,
+  TEMPLE_COMPOUND_SIZE,
+  TEMPLE_MAX_RELIEF,
+  TEMPLE_MIN_COMPOUND_SIZE,
+  TEMPLE_PATH_WIDTH,
+  templeCompoundSize,
+  templeFootprint,
+  templeReservationPolygons,
+} from '../src/village/temple-plan.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(readFileSync(join(HERE, 'plan-contract.json'), 'utf8'));
@@ -53,6 +74,98 @@ function snapshot(options) {
 }
 
 const errors = [];
+
+function assertTempleContract(plan, label) {
+  const temple = plan.features.temple;
+  const size = templeCompoundSize(temple);
+  const footprint = templeFootprint(temple);
+  const placement = temple.placement || {};
+  const fail = (message) => errors.push(`${label}: ${message}`);
+
+  if (size < TEMPLE_MIN_COMPOUND_SIZE || size > TEMPLE_COMPOUND_SIZE) {
+    fail(`compound size ${size} outside ${TEMPLE_MIN_COMPOUND_SIZE}..${TEMPLE_COMPOUND_SIZE}m`);
+  }
+  if (placement.footprintDrop > TEMPLE_MAX_RELIEF) {
+    fail(`footprint drop ${placement.footprintDrop}m exceeds ${TEMPLE_MAX_RELIEF}m`);
+  }
+  if (!['road', 'gate'].includes(placement.pathSource)) {
+    fail(`approach source ${placement.pathSource || 'missing'} is not a road or city gate`);
+  }
+  if (!worldEdgeContainsPolygon(plan.site.edge, footprint, 4)) fail('footprint crosses the world edge');
+  const terrainR = plan.site.terrainR || plan.site.R;
+  if (footprint.some((point) => Math.hypot(point.x, point.z) > terrainR - 6)) {
+    fail('footprint crosses the rendered terrain');
+  }
+  if (createRoadSpatialIndex(plan.roads).intersectsRoadCorridor(footprint, 2)) {
+    fail('footprint overlaps a road corridor');
+  }
+  if (streamIntersectsPolygon(plan.site, footprint, 4)) fail('footprint overlaps the stream bank');
+
+  let sampledMax = -Infinity;
+  const frame = { center: temple, frontDir: temple.frontDir };
+  for (let row = 0; row <= 4; row++) for (let column = 0; column <= 4; column++) {
+    const point = parcelWorldPoint(frame, {
+      x: -size * 0.5 + size * column / 4,
+      z: -size * 0.5 + size * row / 4,
+    });
+    sampledMax = Math.max(sampledMax, plan.site.heightAt(point.x, point.z));
+  }
+  if (Math.abs(temple.baseY - sampledMax - TEMPLE_PAD_LIFT) > 1e-8) {
+    fail(`baseY ${temple.baseY} does not cover the sampled precinct maximum ${sampledMax}`);
+  }
+
+  const path = temple.path || [];
+  if (path.length < 2) fail('approach path has fewer than two points');
+  else {
+    const expectedStart = parcelWorldPoint(frame, { x: 0, z: size * 0.5 });
+    if (G.dist(path[0], expectedStart) > 1e-8) fail('approach does not start at the south gate');
+    const edgeMargin = TEMPLE_PATH_WIDTH * 0.5 + 0.4;
+    for (let index = 0; index < path.length; index++) {
+      if (worldEdgeClearance(plan.site.edge, path[index]) < edgeMargin) {
+        fail(`approach point ${index} crosses the world edge`);
+        break;
+      }
+      if (Math.hypot(path[index].x, path[index].z) > terrainR - edgeMargin - 4) {
+        fail(`approach point ${index} crosses the rendered terrain`);
+        break;
+      }
+      if (index && G.dist(path[index - 1], path[index]) > 4) {
+        fail(`approach sample gap ${G.dist(path[index - 1], path[index]).toFixed(3)}m exceeds 4m`);
+        break;
+      }
+    }
+    const endpoint = path[path.length - 1];
+    if (placement.pathSource === 'road') {
+      const road = plan.roads.find((candidate) => candidate.id === placement.pathRoadId);
+      if (!road || G.distToPolyline(endpoint, road.pts).d > 1e-7) fail('approach endpoint misses its road');
+    } else if (placement.pathSource === 'gate') {
+      const gate = plan.features.cityWall?.gates?.find((candidate) => candidate.name === placement.pathGate);
+      if (!gate || G.dist(endpoint, gate) > 1e-7) fail('approach endpoint misses its city gate');
+    }
+  }
+
+  const cityWall = plan.features.cityWall;
+  if (cityWall && placement.wallSide === 'inside') {
+    if (!cityWallContainsPolygon(cityWall, footprint, 4)) fail('inside temple footprint crosses the city wall');
+    if (path.some((point) => cityWallClearance(cityWall, point) < TEMPLE_PATH_WIDTH * 0.5 + 0.4)) {
+      fail('inside temple approach crosses the city wall');
+    }
+  } else if (cityWall && placement.wallSide === 'outside') {
+    if (!cityWallOutsidePolygon(cityWall, footprint, 4)) fail('outside temple footprint touches the city wall');
+  }
+
+  const reservations = templeReservationPolygons(temple);
+  const overlapsReservation = (polygon) => polygon?.length
+    && reservations.some((reservation) => G.polysOverlap(polygon, reservation));
+  if (plan.parcels.some((parcel) => overlapsReservation(parcel.poly))) fail('a parcel overlaps the temple reservation');
+  if ((plan.features.sijeon || []).some((shop) => overlapsReservation(shop.poly))) {
+    fail('a market shop overlaps the temple reservation');
+  }
+  if ((plan.paddies || []).some((field) => overlapsReservation(field.poly))) {
+    fail('a paddy overlaps the temple reservation');
+  }
+}
+
 for (const includeTemple of [false, true]) {
   for (const scale of scales) {
     const label = `${scale}:${includeTemple ? 'temple' : 'base'}`;
@@ -69,6 +182,7 @@ for (const includeTemple of [false, true]) {
     if (a.hash !== b.hash) errors.push(`${label}: repeated builds differ (${a.hash} != ${b.hash})`);
     if (!includeTemple && a.plan.features?.temple) errors.push(`${label}: temple exists while includeTemple=false`);
     if (includeTemple && !a.plan.features?.temple) errors.push(`${label}: temple missing while includeTemple=true`);
+    if (includeTemple && a.plan.features?.temple) assertTempleContract(a.plan, label);
     if (!expected) errors.push(`${label}: fixture missing`);
     else {
       if (a.hash !== expected.hash) errors.push(`${label}: hash ${a.hash} != ${expected.hash}`);

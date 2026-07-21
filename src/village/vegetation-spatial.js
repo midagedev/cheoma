@@ -14,6 +14,11 @@ import {
   cityWallVegetationBlocked,
 } from './citywall-contour.js';
 import { STREAM_VEGETATION_BANK_CLEARANCE } from './stream-spatial.js';
+import {
+  TEMPLE_FOREST_MARGIN,
+  TEMPLE_PATH_CLEARANCE,
+  templeFootprint,
+} from './temple-plan.js';
 
 // Forest, near scatter, and future yard/guardian planners share this worker-safe
 // footprint index. Obstacles are inserted into every grid cell touched by their
@@ -23,7 +28,6 @@ import { STREAM_VEGETATION_BANK_CLEARANCE } from './stream-spatial.js';
 const DEFAULT_CELL_SIZE = 24;
 const PARCEL_CLEARANCE = 3;
 const ROAD_CLEARANCE = 3;
-const TEMPLE_CLEARANCE = 32;
 
 function distToSegmentSquared(x, z, a, b) {
   const abx = b.x - a.x, abz = b.z - a.z;
@@ -216,10 +220,19 @@ export function createVegetationSpatial(plan, site, { cellSize = DEFAULT_CELL_SI
 
   const temple = plan.features?.temple;
   if (temple && Number.isFinite(temple.x) && Number.isFinite(temple.z)) {
-    insert(circleBounds(temple.x, temple.z, TEMPLE_CLEARANCE), (x, z, radius) => {
-      const combined = TEMPLE_CLEARANCE + radius;
-      return (x - temple.x) ** 2 + (z - temple.z) ** 2 < combined * combined;
-    });
+    const footprint = templeFootprint(temple, TEMPLE_FOREST_MARGIN);
+    insert(boundsOfPoints(footprint), (x, z, radius, point) =>
+      circleIntersectsPolygon(point, radius, footprint));
+    for (let index = 0; index < (temple.path?.length || 0) - 1; index++) {
+      const a = temple.path[index], b = temple.path[index + 1];
+      insert(
+        expandedBounds(boundsOfPoints([a, b]), TEMPLE_PATH_CLEARANCE),
+        (x, z, radius) => {
+          const combined = TEMPLE_PATH_CLEARANCE + radius;
+          return distToSegmentSquared(x, z, a, b) < combined * combined;
+        },
+      );
+    }
   }
 
   // 보호수는 plan 단계에서 이미 위치와 실제 수관 반경이 정해진다. 배경 숲과 근경 산포가
