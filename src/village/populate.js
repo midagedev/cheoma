@@ -383,14 +383,14 @@ export function* populateVillageSteps(plan, opts = {}) {
     debugFlockCenter: () => animals.flockCenters[0] || null,
     debugCowAnchor: () => animals.cowAnchors[0] || null,
     // 창불 발광 포인트 점등 레벨 갱신(어댑터 stepNightGlow 가 vnight 를 넘겨줌, #60/#50 정합).
-    updateNightLights: (dt, level) => nightLights.update(dt, level),
+    updateNightLights: (dt, level, lensScale) => nightLights.update(dt, level, lensScale),
     update: (dt) => { waterU.uTime.value += dt; for (const a of animals.handles) a.update(dt); },
     // 런타임 LOD — 대규모 주택 청크 FAR↔MID↔FULL(매 프레임, 카메라 필요).
     //   engine.js 렌더 루프에서 camera 넘겨 호출. 정책이 꺼진 규모(R<340)는 빈 배열이라 no-op.
-    updateChunkLod: (camera) => {
+    updateChunkLod: (camera, lensScale = 1) => {
       let swaps = 0;   // #140-E 이 프레임에 FAR/MID/FULL 전환이 일어난 청크 수(그림자 1프레임 갱신 트리거)
       for (const child of root.children) {
-        if (child.userData.lodUpdate?.(camera)) swaps++;
+        if (child.userData.lodUpdate?.(camera, lensScale)) swaps++;
       }
       return swaps;
     },

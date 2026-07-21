@@ -80,7 +80,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   //   브릿지로 받는다. present(조기노출)와 viewHeight(시선 타깃 대비 높이)는 아래
   //   update/센터에서 판정해 넘긴다.
   let season = 'summer';
-  let petalCamDist = NaN, petalViewHeight = null, petalDetail = null;
+  let petalCamDist = NaN, petalViewHeight = null, petalDetail = null, petalLensScale = 1;
   // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
   //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
   //   마을에선 앱 building.visible=false 라 present 로는 못 켜므로 centerAway(fieldC)를 OR 로 함께 본다.
@@ -335,6 +335,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       camDist: petalCamDist,
       viewHeight: petalViewHeight,
       detailWeight: petalDetail,
+      lensScale: petalLensScale,
       present: petalPresent,
       wind: getWind(t),
     });
@@ -427,12 +428,16 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       // uNearA/B: 카메라 근접 페이드 창(월드 m). 히어로가 눈 볼륨(±46) 안에 앉으면 코앞 눈송이가
       //   화면을 덮는 거대 원반이 되므로, 카메라 앞 uNearA 안은 소거하고 uNearB 까지 서서히 켠다.
       // uMaxPx: 스프라이트 상한(px). 부감 uScale 증폭·근접 입자가 초대형 보케가 되는 걸 캡으로 차단.
-      uniforms: { uFade: { value: 0 }, uScale: { value: 340 }, uNearA: { value: 5.0 }, uNearB: { value: 15.0 }, uMaxPx: { value: 22.0 } },
+      uniforms: {
+        uFade: { value: 0 }, uScale: { value: 340 }, uLensScale: { value: 1 },
+        uNearA: { value: 5.0 }, uNearB: { value: 15.0 }, uMaxPx: { value: 22.0 },
+      },
       transparent: true, depthWrite: false,
       vertexShader: `
         attribute float aSize;
         attribute float aOpacity;
         uniform float uScale;
+        uniform float uLensScale;
         uniform float uNearA;
         uniform float uNearB;
         uniform float uMaxPx;
@@ -443,10 +448,11 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mv;
           float dcam = -mv.z;
+          float visualDepth = dcam / max(uLensScale, 0.0001);
           // 근접 페이드: 코앞(<uNearA) 눈송이는 알파 0 → 거대 원반 소거. 원경 강수 커튼은 무영향.
-          vNear = smoothstep(uNearA, uNearB, dcam);
+          vNear = smoothstep(uNearA, uNearB, visualDepth);
           // 원근 크기 + 상한 캡(초대형 스프라이트 차단).
-          gl_PointSize = min(aSize * (uScale / max(dcam, 1.0)), uMaxPx);
+          gl_PointSize = min(aSize * (uScale * uLensScale / max(dcam, 1.0)), uMaxPx);
         }`,
       fragmentShader: `
         uniform float uFade;
@@ -606,31 +612,53 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     // 하늘 입자 낙하 필드 중심 이설(#98). 마을 부감·종가 클로즈업처럼 시선이 원점을 벗어난 뷰에서
     //   눈·비가 화면 밖(원점)에만 쌓여 안 보이던 문제를 해소한다. 낙하 파티클 오브젝트만 이동(처마
     //   낙수·스플래시는 건물 앵커라 불변). 값 변화가 없으면 no-op.
-    setWeatherCenter(x, z, camDist, viewHeight, detailWeight) {
+    setWeatherCenter(
+      x,
+      z,
+      camDist,
+      viewHeight,
+      detailWeight,
+      visualDistance = camDist,
+      explicitLensScale = null,
+    ) {
       if (Number.isFinite(x) && Number.isFinite(z) && (x !== fieldCX || z !== fieldCZ)) {
         fieldCX = x; fieldCZ = z;
         snow.points.position.set(x, 0, z);
         rain.lines.position.set(x, 0, z);
         petals.points.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
       }
-      // 고도(카메라↔타깃 거리) 대응(#98·#116 원경 정책). 두 축으로 나눠 부감 강수를 "커튼"으로 만든다:
+      const visualDist = Number.isFinite(visualDistance) ? visualDistance : camDist;
+      // The village runtime already owns the compensated-lens scale. Its physical and visual
+      // distances are measured from terrain height, while this field follows controls.target
+      // (usually the roof line). Prefer the explicit scale so target height cannot make point
+      // sprites breathe; retain ratio inference for standalone/legacy callers.
+      const inferredLensScale = Number.isFinite(camDist)
+        && Number.isFinite(visualDist) && visualDist > 1e-6
+        ? camDist / visualDist : 1;
+      const lensScale = Math.max(0.5, Math.min(2,
+        Number.isFinite(explicitLensScale) ? explicitLensScale : inferredLensScale,
+      ));
+      // 화면 등가 거리 대응(#98·#116 원경 정책). 두 축으로 나눠 부감 강수를 "커튼"으로 만든다:
       //   ① uScale: 부감에서 눈송이가 벼룩처럼 작아지는 걸 상쇄하되 완만하게(최대 2.2×). 셰이더 사이즈
       //      캡(uMaxPx)이 초대형 스프라이트를 막으므로 예전(5×)처럼 과증폭할 필요가 없다 — 과증폭이
       //      바로 부감 "흰 솜뭉치 블롭"의 원인이었다.
       //   ② 낙하 볼륨 xz 분산: 카메라가 멀수록(부감) ±boxHalf 박스를 넓게 편다(최대 3×). 3600 입자가
       //      마을 중심 ±46 에 뭉쳐 블롭이 되던 걸, 넓은 면적에 흩어 "원경에 깔리는 강수 커튼"으로 만든다.
       //      근경(hero·focus, camDist 작음)은 1× 라 기존 밀도·룩 무변(히어로는 셰이더 근접페이드가 담당).
-      if (Number.isFinite(camDist)) {
-        snow.points.material.uniforms.uScale.value = 340 * Math.min(2.2, Math.max(1, camDist / 75));
-        const spread = Math.min(3.0, Math.max(1, camDist / 60));
+      if (Number.isFinite(visualDist)) {
+        // uLensScale이 보상 dolly만 상쇄하고, uScale의 미적 고도 곡선은 화면 등가 거리가 소유한다.
+        snow.points.material.uniforms.uLensScale.value = lensScale;
+        snow.points.material.uniforms.uScale.value = 340 * Math.min(2.2, Math.max(1, visualDist / 75));
+        const spread = Math.min(3.0, Math.max(1, visualDist / 60));
         snow.points.scale.set(spread, 1, spread);
         rain.lines.scale.set(spread, 1, spread);
       }
       // 계절 입자는 눈·비와 달리 근경 디테일이다. 4번째 인자는 절대 world Y가 아니라
       // 카메라와 현재 시선 타깃/지면 사이의 수직 높이다. petals가 공통 디테일 밴드로 소거한다.
       // 기존 3-인자 호출은 camDist 근사치를 사용하도록 보존한다.
-      petalCamDist = camDist;
+      petalCamDist = visualDist;
       petalViewHeight = Number.isFinite(viewHeight) ? Math.max(0, viewHeight) : null;
+      petalLensScale = lensScale;
       petalDetail = Number.isFinite(detailWeight)
         ? Math.max(0, Math.min(1, detailWeight)) : null;
     },

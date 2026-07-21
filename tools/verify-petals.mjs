@@ -11,7 +11,8 @@
 //   ③ 카메라 추종: 중심 ±80m 이동 후 입자 AABB 가 카메라 주변을 감쌈
 //   ④ 눈·비 회귀: snow count(3600)·uScale(#116 근경 340→부감 748), rain count(2600)
 //   ⑤ 조기노출: 원점 빈 터(building 숨김·중심 원점)에서 count 0, 건물 복귀 후 상승(게이트 미고착)
-//   ⑥ pageerror 0
+//   ⑥ 보상 dolly: 눈·꽃잎 point-size와 거리 gate가 동일한 화면 크기를 유지
+//   ⑦ pageerror 0
 
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -38,7 +39,7 @@ window.__mk = (o={}) => {
   return true;
 };
 window.__drive = (frames, dt, c) => {
-  for (let i=0;i<frames;i++){ if (c) window.__W.setWeatherCenter(c.x, c.z, c.d, c.y); window.__W.update(dt); }
+  for (let i=0;i<frames;i++){ if (c) window.__W.setWeatherCenter(c.x, c.z, c.d, c.y, c.w, c.v); window.__W.update(dt); }
 };
 window.__record = (frames, dt, c, idx) => {
   const out=[];
@@ -56,7 +57,8 @@ window.__season = (n) => window.__W.setSeason(n);
 window.__weather = (n,o) => window.__W.setWeather(n,o);
 window.__ppos = () => { const p = window.__W._petals.points.position; return [p.x,p.y,p.z]; };
 window.__aabb = () => { const b = window.__W._petals.aabb(); return { min:[b.min.x,b.min.y,b.min.z], max:[b.max.x,b.max.y,b.max.z] }; };
-window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnow'); return { us: s.material.uniforms.uScale.value, vis: s.visible, n: s.geometry.attributes.position.count }; };
+window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnow'); return { us: s.material.uniforms.uScale.value, ls: s.material.uniforms.uLensScale.value, spread: s.scale.x, vis: s.visible, n: s.geometry.attributes.position.count }; };
+window.__petalOptics = () => { const p = window.__W._petals.points; return { ls: p.material.uniforms.uLensScale.value, level: window.__W._petals.level }; };
 window.__rain = () => { const r = window.__scene.getObjectByName('weatherRain'); return { vis: r.visible, n: r.geometry.attributes.position.count/2 }; };
 window.__setWind = (v) => { window.__windScale = v; };
 window.__ready = true;
@@ -171,8 +173,22 @@ const gate = await page.evaluate((dt) => {
 check('⑤빈 터 조기노출 차단', gate.empty < 0.02, `level=${gate.empty.toFixed(3)}`);
 check('⑤정착 후 발현(미고착)', gate.recovered > 0.5, `level=${gate.recovered.toFixed(3)}`);
 
-// ── ⑥ pageerror ──
-check('⑥pageerror 0', errors.length === 0, errors.join(' | ') || 'none');
+// ── ⑥ 렌즈 보상 dolly: physical 56.7m가 reference 42m와 같은 화면 크기 ──
+const optical = await page.evaluate((dt) => {
+  window.__mk({ bv: true }); window.__season('spring'); window.__weather('snow', { immediate: true });
+  window.__drive(30, dt, { x: 0, z: 0, d: 56.7, v: 42, y: 28, w: 1 });
+  return { snow: window.__snow(), petal: window.__petalOptics() };
+}, DT);
+const expectedLens = 56.7 / 42;
+check('⑥snow 화면등가 크기', approx(optical.snow.us, 340, 1)
+    && approx(optical.snow.ls, expectedLens, 0.01) && approx(optical.snow.spread, 1, 0.01),
+`uScale=${optical.snow.us.toFixed(1)} lens=${optical.snow.ls.toFixed(3)} spread=${optical.snow.spread.toFixed(2)}`);
+check('⑥petal 화면등가 크기·발현', approx(optical.petal.ls, expectedLens, 0.01)
+    && optical.petal.level > 0.3,
+`lens=${optical.petal.ls.toFixed(3)} level=${optical.petal.level.toFixed(3)}`);
+
+// ── ⑦ pageerror ──
+check('⑦pageerror 0', errors.length === 0, errors.join(' | ') || 'none');
 
 await browser.close(); server.close();
 

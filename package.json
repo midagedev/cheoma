@@ -11,12 +11,16 @@
     "check:architecture": "node tools/check-architecture.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:citywall": "node tools/check-citywall.mjs",
+    "check:dof": "node tools/check-dof.mjs",
+    "check:dof:app": "node tools/check-dof-app.mjs",
     "check:lod": "node tools/check-lod.mjs",
     "check:lod:app": "node tools/check-lod-app.mjs",
     "check:petals": "node tools/verify-petals.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:roof-seams": "node tools/check-roof-seams.mjs",
-    "check:worker": "node tools/check-worker-contract.mjs"
+    "check:worker": "node tools/check-worker-contract.mjs",
+    "shoot:bokeh": "node tools/shoot-bokeh-fixture.mjs",
+    "shoot:dof": "node tools/shoot-dof.mjs"
   },
   "devDependencies": {
     "playwright": "1.61.1",

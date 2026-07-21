@@ -74,8 +74,8 @@ export function createVillageAmbientFieldController({ plan, site, proxyById, ove
     setWaveFade(value) {
       waveWeight = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
     },
-    setTime(name) { time = name; field?.setTime(name); },
-    setSeason(name) { season = name; field?.setSeason(name); },
+    setTime(name, immediate = false) { time = name; field?.setTime(name, immediate); },
+    setSeason(name, immediate = false) { season = name; field?.setSeason(name, immediate); },
     // field가 아직 생성되지 않았거나 exit로 해제된 뒤에도 wave 소유권 자체는 읽을 수 있다.
     // 준비→웨이브→취소 수명 검증이 scene 리소스의 존재 여부와 controller 상태를 혼동하지 않게 한다.
     debug() {

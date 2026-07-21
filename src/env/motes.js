@@ -53,10 +53,13 @@ uniform float uIntensity;   // 마스터 알파 배율(시간대)
 uniform float uForwardPow;  // 역광 로브 폭
 uniform float uNearA;       // 근접 페이드 시작(월드 m)
 uniform float uNearB;       // 근접 페이드 완료(월드 m)
+uniform float uLensScale;   // 보상 dolly 배율(포인트 크기/근접 밴드 화면등가 보정)
+uniform float uFirefly;     // 여름·맑은 밤 focus 링에서만 0..1
 
-attribute vec4 aRand;       // x=위상, y=주파수배율, z=기준알파, w=크기배율
+attribute vec4 aRand;       // x=위상, y=주파수배율, |z|=기준알파(z<0=반딧불), w=크기배율
 
 varying float vAlpha;
+varying float vFirefly;
 
 void main() {
   vec3 p = position;
@@ -87,31 +90,48 @@ void main() {
   float tw = 0.72 + 0.28 * sin(t * (1.7 + fm) + ph * 3.1);
 
   // 근접 페이드: 카메라가 모트 볼륨 안에 들어와도 코앞 모트가 거대 보케가 되지 않게 소거(#116 안전장치).
-  float nearFade = smoothstep(uNearA, uNearB, -mv.z);
-  vAlpha = aRand.z * uIntensity * shimmer * tw * nearFade;
+  float visualDepth = -mv.z / max(uLensScale, 0.0001);
+  float nearFade = smoothstep(uNearA, uNearB, visualDepth);
+  float dustAlpha = abs(aRand.z) * uIntensity * shimmer * tw * nearFade;
+
+  // 기존 점의 약 8%를 재사용하는 반딧불. CPU가 기준알파의 부호에 membership을 새겨
+  // 주파수·위상·크기와 독립이고 GPU hash 경계 오차도 없다. 비활성 draw는 pulse/pow를 건너뛴다.
+  float ffPick = step(aRand.z, -0.0001);
+  vFirefly = 0.0;
+  float ffAlpha = 0.0;
+  if (uFirefly > 0.0001) {
+    float ffPulse = pow(0.5 + 0.5 * sin(t * (0.72 + fm * 0.31) + ph * 2.7), 8.0);
+    vFirefly = ffPick * uFirefly;
+    ffAlpha = (0.18 + 0.82 * ffPulse) * 0.72 * nearFade * uFirefly;
+  }
+  vAlpha = mix(dustAlpha, ffAlpha, vFirefly);
 
   // 원근 감쇠(먼 모트는 작게), physical px. 최소/최대 클램프로 1~2px 감성.
   float sz = uSize * aRand.w * uPixelRatio;
-  gl_PointSize = clamp(sz * (50.0 / -mv.z), 1.0 * uPixelRatio, 4.0 * uPixelRatio);
+  gl_PointSize = clamp(sz * mix(1.0, 1.35, vFirefly) * (50.0 * uLensScale / -mv.z),
+    1.0 * uPixelRatio, 4.0 * uPixelRatio);
 }`;
 
 const MOTE_FRAG = /* glsl */`
 precision mediump float;
 uniform vec3 uColor;
+uniform vec3 uFireflyColor;
 varying float vAlpha;
+varying float vFirefly;
 void main() {
   vec2 uv = gl_PointCoord - 0.5;
   float d = length(uv);
   if (d > 0.5) discard;
   float soft = smoothstep(0.5, 0.0, d);   // 부드러운 원형 글린트
-  gl_FragColor = vec4(uColor, vAlpha * soft);
+  gl_FragColor = vec4(mix(uColor, uFireflyColor, vFirefly), vAlpha * soft);
 }`;
 
 // opts(선택): radius/centerY/count/ySpan 로 볼륨을 좁혀 근접 링(마당 볼륨 한정)에 재사용한다.
 //   기본값 = 기존 상수(집 단독 모드 호출자 무회귀). fade(setFade)=활성/해제 크로스페이드 배율.
 //   ySpan: 수직 눌림 계수(작을수록 납작한 공기층). 근접 링은 낮춰 "대기 헤이즈"가 아닌 "마당 먼지"로.
-export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan } = {}) {
+export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan, fireflies = false } = {}) {
   let time = 'sunset';
+  let season = 'summer';
   let enabled = false;
   let t = 0;   // 결정론 시계
   let fade = 1;             // 외부 크로스페이드 배율(근접 링 활성/해제). 1=무영향.
@@ -137,7 +157,9 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
 
     rands[i * 4] = hash1(i * 7.7 + 0.3) * Math.PI * 2;      // 위상
     rands[i * 4 + 1] = 0.6 + hash1(i * 9.1 + 2.2) * 0.9;    // 주파수배율 0.6~1.5
-    rands[i * 4 + 2] = 0.15 + hash1(i * 11.3 + 5.1) * 0.20; // 기준알파 0.15~0.35
+    const alpha = 0.15 + hash1(i * 11.3 + 5.1) * 0.20;       // 기준알파 0.15~0.35
+    const isFirefly = fireflies && hash1(i * 17.3 + 9.7) >= 0.92; // 선택 링만 독립 membership(~8%)
+    rands[i * 4 + 2] = isFirefly ? -alpha : alpha;           // 부호 bit 재사용(추가 attribute 없음)
     rands[i * 4 + 3] = 0.6 + hash1(i * 13.9 + 8.4) * 0.8;   // 크기배율 0.6~1.4
   }
 
@@ -162,7 +184,10 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
       uForwardPow: { value: FORWARD_POW },
       uNearA: { value: 3.0 },
       uNearB: { value: 9.0 },
+      uLensScale: { value: 1.0 },
       uColor: { value: new THREE.Color(prof.color) },
+      uFirefly: { value: 0 },
+      uFireflyColor: { value: new THREE.Color(0xe8f58a) },
     },
     vertexShader: MOTE_VERT,
     fragmentShader: MOTE_FRAG,
@@ -189,6 +214,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   // curInt 는 시간대 애니 상태(순수), 셰이더 uIntensity = curInt*fade(외부 크로스페이드 분리).
   let curInt = mat.uniforms.uIntensity.value;
   let tgtInt = curInt;
+  let curFirefly = 0, tgtFirefly = 0, wetSuppression = 0, lastCalm = 1;
   const tgtColor = new THREE.Color(mat.uniforms.uColor.value);
   const TIME_RATE = 2.4;   // ≈1.6s(sky 크로스페이드와 결이 맞게)
   function setTimeTarget(name) {
@@ -197,6 +223,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
     tgtColor.setHex(p.color);
     // 낮은 바람이 화면 전체를 흔들면 과하니 바람 쓸림도 시간대로 살짝 조절.
     mat.uniforms.uWindSway.value = 0.6;   // 기준(거스트가 추가로 키움)
+    tgtFirefly = fireflies && name === 'night' && season === 'summer' ? 1 : 0;
   }
   setTimeTarget(time);
 
@@ -212,11 +239,14 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
     const k = Math.min(1, dt * TIME_RATE);
     curInt += (tgtInt - curInt) * k;
     u.uIntensity.value = curInt * fade;
+    curFirefly += (tgtFirefly - curFirefly) * k;
     u.uColor.value.lerp(tgtColor, k);
     if (renderer) u.uPixelRatio.value = renderer.getPixelRatio();
     // 태양(달) 방향: sky.apply 가 sun.position 을 방향*64 로 세팅 → 정규화해 사용.
     if (sun) { _sunDir.copy(sun.position).normalize(); u.uSunDir.value.copy(_sunDir); }
     const w = getWind(t);
+    lastCalm = 1 - 0.72 * Math.max(0, Math.min(1, w.gust));
+    u.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
     u.uWindDir.value.set(w.dirX, 0, w.dirZ);
     u.uGust.value = w.gust;
   }
@@ -224,7 +254,27 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   function setTime(name, opts = {}) {
     time = name;
     setTimeTarget(name);
-    if (opts.immediate) { curInt = tgtInt; mat.uniforms.uIntensity.value = curInt * fade; mat.uniforms.uColor.value.copy(tgtColor); }
+    if (opts.immediate) {
+      curInt = tgtInt; curFirefly = tgtFirefly;
+      mat.uniforms.uIntensity.value = curInt * fade;
+      mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
+      mat.uniforms.uColor.value.copy(tgtColor);
+    }
+  }
+  function setSeason(name, opts = {}) {
+    season = name || 'summer';
+    tgtFirefly = fireflies && time === 'night' && season === 'summer' ? 1 : 0;
+    if (opts.immediate) {
+      curFirefly = tgtFirefly;
+      mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
+    }
+  }
+  function setWeather(weather) {
+    const wet = typeof weather === 'string'
+      ? (weather === 'rain' || weather === 'snow' ? 1 : 0)
+      : Math.max(weather?.rain || 0, weather?.snow || 0, weather?.accum || 0);
+    wetSuppression = Math.max(0, Math.min(1, wet));
+    mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
   }
   function applyPresentation() { group.visible = enabled && fade > 0.002; }
   function setEnabled(v) { enabled = !!v; applyPresentation(); }
@@ -232,10 +282,16 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   function setFade(v) {
     fade = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
     mat.uniforms.uIntensity.value = curInt * fade;
+    mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
     applyPresentation();
   }
 
-  return { group, setTime, setEnabled, update, setFade };
+  function setLensScale(value) {
+    mat.uniforms.uLensScale.value = Number.isFinite(value)
+      ? Math.max(0.5, Math.min(2, value)) : 1;
+  }
+
+  return { group, setTime, setSeason, setWeather, setEnabled, update, setFade, setLensScale };
 }
 
 // ── 처마 등롱 진자 미세 요동 ────────────────────────────────────────────────

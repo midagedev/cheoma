@@ -57,6 +57,18 @@ try {
   await page.evaluate(() => new Promise((resolveFrame) => {
     requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
   }));
+  // Plan readiness precedes the 1.4s house→aerial camera tween. Sample boot LOD only
+  // after that real transition has settled; three rAFs alone is machine-speed dependent
+  // and can catch a legitimate MID/ground-fauna handoff in progress.
+  await page.waitForFunction(() => {
+    const engine = window.__engine;
+    const root = engine?.village?.exportRoot?.();
+    const fauna = root?.userData?.faunaLod;
+    return engine?.debugDof?.().tweenProgress == null
+      && Math.abs((engine?.camera?.fov ?? 0) - 46) < 0.01
+      && fauna?.tier === 'far'
+      && fauna?.groundWeight <= 0.002;
+  }, null, { timeout });
 
   const boot = await page.evaluate(() => {
     const engine = window.__engine;
@@ -65,6 +77,29 @@ try {
       .filter((parcel) => !parcel.hero && parcel.parcelId !== 'palace');
     const far = lod.parcels.filter((state) => state.far && state.level === 'far');
     const root = engine.village.exportRoot();
+    const chunkStates = root.children
+      .filter((child) => typeof child.userData?.lodUpdate === 'function')
+      .map((child) => child.userData.lod);
+    const chunkLensState = chunkStates
+      .filter((state) => Number.isFinite(state?.physicalDistance))
+      .sort((a, b) => b.physicalDistance - a.physicalDistance)[0] || null;
+    let chunkLens = null;
+    if (chunkLensState) {
+      root.userData.updateChunkLod(engine.camera, 1);
+      const reference = {
+        level: chunkLensState.level,
+        physicalDistance: chunkLensState.physicalDistance,
+        distance: chunkLensState.distance,
+      };
+      const lensScale = 1.2;
+      root.userData.updateChunkLod(engine.camera, lensScale);
+      const compensated = {
+        level: chunkLensState.level,
+        physicalDistance: chunkLensState.physicalDistance,
+        distance: chunkLensState.distance,
+      };
+      chunkLens = { lensScale, reference, compensated };
+    }
     const fauna = root?.userData?.faunaLod;
     const ownerParcelIds = [...new Set(
       (fauna?.baseAnimals?.ownerParcelIds || []).filter((id) => typeof id === 'string'),
@@ -123,6 +158,7 @@ try {
       birds: { exists: !!birds, visible: birds?.visible === true },
       crittersVisible: critters?.visible === true,
       groundMeshes,
+      chunkLens,
     };
   });
 
@@ -152,6 +188,15 @@ try {
     `daytime aerial flock remains visible (scale=${boot.fauna?.birdScale})`);
   pass(boot.groundMeshes.filter((mesh) => mesh.exists).every((mesh) => !mesh.visible),
     'aerial dog, cat, and magpie meshes are actually hidden');
+  pass(boot.chunkLens
+      && boot.chunkLens.reference.level === boot.chunkLens.compensated.level
+      && Math.abs(boot.chunkLens.reference.distance
+        - boot.chunkLens.reference.physicalDistance) < 1e-6
+      && Math.abs(boot.chunkLens.compensated.physicalDistance
+        - boot.chunkLens.reference.physicalDistance) < 1e-6
+      && Math.abs(boot.chunkLens.compensated.distance * boot.chunkLens.lensScale
+        - boot.chunkLens.compensated.physicalDistance) < 1e-6,
+  'attached Hanyang chunk LOD consumes screen-equivalent lens distance without changing its stable tier');
 
   async function sceneMetrics(label) {
     const metrics = await page.evaluate(() => {
@@ -511,13 +556,18 @@ try {
     };
     const before = engine.village.debugLod(parcelId);
     // 같은 청크의 이웃 필지가 선택 필지보다 카메라 쪽에 있을 수 있으므로 fullOut보다 충분히
-    // 물리되, midOut(= fullOut * 0.90/0.53) 안에는 남는 거리로 잡는다.
-    const desired = Math.max(1, (before?.swapOut || 140) * 1.58);
+    // 물리되, midOut(= fullOut * 0.90/0.53) 안에는 남는 화면등가 거리로 잡는다. Focus는
+    // compensated telephoto라 실제 dolly 미터에는 reference/actual lensScale을 다시 곱해야 한다.
+    const desiredVisual = Math.max(1, (before?.swapOut || 140) * 1.58);
+    const DEG = Math.PI / 180;
+    const referenceFov = camera.userData.villageReferenceFov ?? camera.fov;
+    const lensScale = Math.tan(referenceFov * DEG * 0.5) / Math.tan(camera.fov * DEG * 0.5);
+    const desiredPhysical = desiredVisual * lensScale;
     const direction = camera.position.clone().sub(controls.target);
     if (direction.lengthSq() < 1e-6) direction.set(0.2, 0.55, 1);
     direction.normalize();
-    controls.maxDistance = Math.max(saved.maxDistance, desired * 1.2);
-    camera.position.copy(controls.target).addScaledVector(direction, desired);
+    controls.maxDistance = Math.max(saved.maxDistance, desiredPhysical * 1.2);
+    camera.position.copy(controls.target).addScaledVector(direction, desiredPhysical);
     camera.lookAt(controls.target);
     controls.update();
 
@@ -559,7 +609,10 @@ try {
       restored = engine.village.debugLod(parcelId);
       if (restored?.level === 'full') break;
     }
-    return { desired, levels, stableMidFrames, mid, restored, failures, metrics };
+    return {
+      desiredVisual, desiredPhysical, lensScale,
+      levels, stableMidFrames, mid, restored, failures, metrics,
+    };
   }, first);
   pass(midProbe.stableMidFrames >= 3 && midProbe.mid?.level === 'mid'
       && midProbe.mid?.valid && midProbe.failures.length === 0,

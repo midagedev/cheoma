@@ -1,9 +1,14 @@
 import { facingY } from '../../core/math/geom2.js';
+import { VILLAGE_LENS, dollyDistanceForFov } from '../../camera/optics.js';
 
 const DEG = Math.PI / 180;
 const FOCUS_AZIMUTH = 38 * DEG;
 const FOCUS_ELEVATION = 7 * DEG;
-const FOCUS_DISTANCE = 2.25;
+const FOCUS_DISTANCE = dollyDistanceForFov(
+  2.25,
+  VILLAGE_LENS.parcel.referenceFov,
+  VILLAGE_LENS.parcel.fov,
+);
 
 // THREE.Vector3.applyAxisAngle(Y, angle)의 연산 순서를 그대로 옮긴 순수 helper. 단순 cos/sin
 // 전개는 수학적으로 같아도 마지막 비트가 달라 기존 pick-proxy 결정론 해시가 바뀐다.
@@ -75,6 +80,7 @@ export function planParcelFocus(parcel) {
     cameraX: worldX + offset.x,
     cameraZ: worldZ + offset.z,
     cameraLift: offset.y,
-    fov: 23,
+    fov: VILLAGE_LENS.parcel.fov,
+    referenceFov: VILLAGE_LENS.parcel.referenceFov,
   };
 }

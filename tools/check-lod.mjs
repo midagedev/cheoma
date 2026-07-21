@@ -5,6 +5,14 @@ import {
   presentationWeight,
   waveFadeController,
 } from '../src/core/lod.js';
+import {
+  VILLAGE_LENS,
+  dollyDistanceForFov,
+  lensScaleForCamera,
+  referenceFovForCamera,
+  referenceVillageFov,
+  villageScreenDistance,
+} from '../src/camera/optics.js';
 import { planParcelFocus } from '../src/generators/shared/parcel-spatial.js';
 import {
   createVillageDetailLodState,
@@ -37,6 +45,61 @@ function near(actual, expected, message, epsilon = EPS) {
 
 function assertLevel(actual, expected, message) {
   invariant(actual === expected, `${message} (${actual} != ${expected})`);
+}
+
+// 광각/망원 변화는 화면 점유율을 유지하는 실제 dolly이고, 그 물리 거리는 LOD에서
+// 이전 렌즈의 등가 거리로 환산돼 소동물·낙엽이 조기 소거되지 않아야 한다.
+{
+  for (const profile of Object.values(VILLAGE_LENS)) {
+    const referenceDistance = 100;
+    const opticalDistance = dollyDistanceForFov(
+      referenceDistance, profile.referenceFov, profile.fov,
+    );
+    near(villageScreenDistance(
+      opticalDistance, profile.fov, profile.referenceFov,
+    ), referenceDistance,
+      `optics: ${profile.fov}° dolly changed screen-equivalent distance`);
+  }
+  invariant(VILLAGE_LENS.aerial.fov > VILLAGE_LENS.aerial.referenceFov
+      && VILLAGE_LENS.parcel.fov < VILLAGE_LENS.parcel.referenceFov
+      && VILLAGE_LENS.hero.fov < VILLAGE_LENS.parcel.fov
+      && VILLAGE_LENS.palace.fov < VILLAGE_LENS.palace.referenceFov
+      && VILLAGE_LENS.temple.fov < VILLAGE_LENS.temple.referenceFov,
+  'optics: wide-aerial/telephoto-close continuum inverted');
+  near(referenceVillageFov(VILLAGE_LENS.aerial.fov), VILLAGE_LENS.aerial.referenceFov,
+    'optics: aerial reference mapping drift');
+  near(referenceVillageFov(VILLAGE_LENS.parcel.fov), VILLAGE_LENS.parcel.referenceFov,
+    'optics: parcel reference mapping drift');
+  near(referenceVillageFov(VILLAGE_LENS.hero.fov), VILLAGE_LENS.hero.referenceFov,
+    'optics: hero reference mapping drift');
+
+  const standalone = { fov: 28, userData: {} };
+  near(referenceFovForCamera(standalone), 28,
+    'optics: an unprofiled house camera was inferred as a village lens');
+  near(lensScaleForCamera(standalone), 1,
+    'optics: an unprofiled house camera changed point-sprite scale');
+  const landmark = {
+    fov: VILLAGE_LENS.palace.fov,
+    userData: { villageReferenceFov: VILLAGE_LENS.palace.referenceFov },
+  };
+  near(referenceFovForCamera(landmark), VILLAGE_LENS.palace.referenceFov,
+    'optics: named landmark reference lens was ignored');
+
+  // 줌 연속체의 enter/exit는 서로 다른 렌즈의 실제 미터를 직접 비교하지 않는다. 같은
+  // 42°/23° 기준 화면 거리를 각 모드의 46°/20° 실제 dolly로 변환해야 히스테리시스가 보존된다.
+  const exitReference = 100 * 0.72;
+  const aerialExitActual = dollyDistanceForFov(
+    exitReference, VILLAGE_LENS.aerial.referenceFov, VILLAGE_LENS.aerial.fov,
+  );
+  const focusExitActual = dollyDistanceForFov(
+    exitReference, VILLAGE_LENS.parcel.referenceFov, VILLAGE_LENS.parcel.fov,
+  );
+  near(villageScreenDistance(
+    focusExitActual, VILLAGE_LENS.parcel.fov, VILLAGE_LENS.parcel.referenceFov,
+  ), exitReference,
+    'optics: telephoto focus-exit lost its screen-equivalent threshold');
+  invariant(focusExitActual > aerialExitActual * 1.2,
+    'optics: focus-exit accidentally reused the wide-aerial physical distance');
 }
 
 // 공통 fade는 경계에서 튀지 않고, 잘못된 밴드에도 결정적인 계단 fallback을 쓴다.
@@ -233,6 +296,51 @@ function assertLevel(actual, expected, message) {
     'detail LOD: aerial altitude left local fauna visible');
   near(villageDetailWeightAt(local, { x: NaN, z: 0 }), 0,
     'detail LOD: invalid spatial anchor failed open');
+
+  const referenceCamera = {
+    position: { x: 0, y: 28, z: 42 },
+  };
+  const focusScale = dollyDistanceForFov(
+    1, VILLAGE_LENS.parcel.referenceFov, VILLAGE_LENS.parcel.fov,
+  );
+  const telephotoCamera = {
+    fov: VILLAGE_LENS.parcel.fov,
+    userData: { villageReferenceFov: VILLAGE_LENS.parcel.referenceFov },
+    position: {
+      x: 0,
+      y: referenceCamera.position.y * focusScale,
+      z: referenceCamera.position.z * focusScale,
+    },
+  };
+  const referenceLod = createVillageDetailLodState(referenceCamera, { x: 0, z: 0 }, flat);
+  const telephotoLod = createVillageDetailLodState(telephotoCamera, { x: 0, z: 0 }, flat);
+  near(telephotoLod.visualAltitude, referenceLod.altitude,
+    'detail LOD: telephoto dolly changed apparent altitude');
+  near(telephotoLod.visualDistance, referenceLod.viewDistance,
+    'detail LOD: telephoto dolly changed apparent distance');
+  near(telephotoLod.groundWeight, referenceLod.groundWeight,
+    'detail LOD: telephoto dolly changed ground detail weight');
+  near(telephotoLod.particleWeight, referenceLod.particleWeight,
+    'detail LOD: telephoto dolly changed particle detail weight');
+  near(telephotoLod.lensScale, focusScale,
+    'detail LOD: telephoto point-size compensation drifted from its dolly');
+
+  // Palace/temple FOVs overlap the ordinary continuum numerically, so their
+  // authored reference lens must travel with the camera instead of being guessed.
+  for (const name of ['palace', 'temple']) {
+    const profile = VILLAGE_LENS[name];
+    const scale = dollyDistanceForFov(1, profile.referenceFov, profile.fov);
+    const landmarkCamera = {
+      fov: profile.fov,
+      userData: { villageReferenceFov: profile.referenceFov },
+      position: { x: 0, y: referenceCamera.position.y * scale, z: referenceCamera.position.z * scale },
+    };
+    const landmarkLod = createVillageDetailLodState(landmarkCamera, { x: 0, z: 0 }, flat);
+    near(landmarkLod.visualDistance, referenceLod.viewDistance,
+      `detail LOD: ${name} named lens changed apparent distance`);
+    near(landmarkLod.lensScale, scale,
+      `detail LOD: ${name} point-size scale drifted from its compensated dolly`);
+  }
 }
 
 function makeHideSource(ids) {

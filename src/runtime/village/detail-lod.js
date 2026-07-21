@@ -1,4 +1,8 @@
 import { distance2D, fadeBeyond } from '../../core/lod.js';
+import {
+  lensScaleForCamera,
+  villageScreenDistanceForCamera,
+} from '../../camera/optics.js';
 import { VILLAGE_DETAIL_LOD } from '../../village/lod-policy.js';
 
 export const VILLAGE_DETAIL_TIER = Object.freeze({
@@ -40,7 +44,8 @@ export function createVillageDetailLodState(camera, target, site, previous = nul
   if (!position) {
     return {
       anchor: { x: 0, y: 0, z: 0 }, altitude: Infinity,
-      viewDistance: Infinity, detailDistance: Infinity,
+      viewDistance: Infinity, visualAltitude: Infinity, visualDistance: Infinity,
+      detailDistance: Infinity, lensScale: 1,
       tier: VILLAGE_DETAIL_TIER.FAR,
       groundWeight: 0, particleWeight: 0, groundActive: false,
       aerialWeight: 1,
@@ -54,26 +59,30 @@ export function createVillageDetailLodState(camera, target, site, previous = nul
   const altitude = Math.max(0, position.y - y);
   const dx = position.x - x, dy = position.y - y, dz = position.z - z;
   const viewDistance = Math.hypot(dx, dy, dz);
+  const visualAltitude = villageScreenDistanceForCamera(altitude, camera);
+  const visualDistance = villageScreenDistanceForCamera(viewDistance, camera);
+  const lensScale = lensScaleForCamera(camera);
   // altitude는 부감 여부, viewDistance는 줌 수준을 나타낸다. 낮은 고도로 멀리 바라보는
   // 구도에서도 서브픽셀 동물/입자를 계속 돌리지 않도록 둘 중 더 보수적인 강도를 쓴다.
   const altitudeWeight = fadeBeyond(
-    altitude, VILLAGE_DETAIL_LOD.altitude.full, VILLAGE_DETAIL_LOD.altitude.hidden,
+    visualAltitude, VILLAGE_DETAIL_LOD.altitude.full, VILLAGE_DETAIL_LOD.altitude.hidden,
   );
   const viewWeight = fadeBeyond(
-    viewDistance, VILLAGE_DETAIL_LOD.view.full, VILLAGE_DETAIL_LOD.view.hidden,
+    visualDistance, VILLAGE_DETAIL_LOD.view.full, VILLAGE_DETAIL_LOD.view.hidden,
   );
   const particleAltitudeWeight = fadeBeyond(
-    altitude, VILLAGE_DETAIL_LOD.particles.full, VILLAGE_DETAIL_LOD.particles.hidden,
+    visualAltitude, VILLAGE_DETAIL_LOD.particles.full, VILLAGE_DETAIL_LOD.particles.hidden,
   );
   const particleViewWeight = fadeBeyond(
-    viewDistance, VILLAGE_DETAIL_LOD.particleView.full, VILLAGE_DETAIL_LOD.particleView.hidden,
+    visualDistance, VILLAGE_DETAIL_LOD.particleView.full, VILLAGE_DETAIL_LOD.particleView.hidden,
   );
   const groundWeight = Math.min(altitudeWeight, viewWeight);
   const particleWeight = Math.min(particleAltitudeWeight, particleViewWeight);
-  const detailDistance = Math.max(altitude, viewDistance * 0.72);
+  const detailDistance = Math.max(visualAltitude, visualDistance * 0.72);
   const tier = nextDetailTier(previous?.tier, detailDistance);
   return {
-    anchor: { x, y, z }, altitude, viewDistance, detailDistance, tier,
+    anchor: { x, y, z }, altitude, viewDistance, visualAltitude, visualDistance,
+    detailDistance, lensScale, tier,
     groundWeight, particleWeight,
     // tier는 셀 밀도/히스테리시스의 이산 상태이고, 가시성은 연속 weight가 끝까지 소유한다.
     // 낮은 고도로 멀리 보는 구도에서 tier가 먼저 FAR가 되더라도 남은 10~20%를 갑자기

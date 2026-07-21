@@ -1,7 +1,13 @@
 import * as THREE from 'three';
+import {
+  VILLAGE_LENS,
+  dollyDistanceForFov,
+  referenceFovForCamera,
+  villageScreenDistance,
+  villageScreenDistanceForCamera,
+} from '../../../src/api/cinematic.js';
 
 const DEG = Math.PI / 180;
-const AERIAL_FOV = 42;
 const AERIAL_ELEVATION = 31 * DEG;
 const AERIAL_AZIMUTH = 9 * DEG;
 const ZOOM_ENTER_FRAC = 0.52;
@@ -39,7 +45,13 @@ export function createVillageCameraRuntime({
     const radius = outerRadius(handle);
     const aspect = camera.aspect || (container.clientWidth / container.clientHeight) || 1.6;
     const fill = aspect >= 1 ? 0.60 : 0.70;
-    const distance = radius / (0.40 * fill * aspect);
+    const referenceDistance = radius / (0.40 * fill * aspect);
+    const distance = dollyDistanceForFov(
+      referenceDistance,
+      VILLAGE_LENS.aerial.referenceFov,
+      VILLAGE_LENS.aerial.fov,
+    );
+    village.aerialReferenceDist = referenceDistance;
     village.aerialDist = distance;
     const target = new THREE.Vector3(0, radius * 0.05, -radius * 0.10);
     const pos = new THREE.Vector3(
@@ -47,19 +59,40 @@ export function createVillageCameraRuntime({
       target.y + distance * Math.sin(AERIAL_ELEVATION),
       target.z + distance * Math.cos(AERIAL_ELEVATION) * Math.cos(AERIAL_AZIMUTH),
     );
-    return { pos, target, fov: AERIAL_FOV };
+    return {
+      pos,
+      target,
+      fov: VILLAGE_LENS.aerial.fov,
+      referenceFov: VILLAGE_LENS.aerial.referenceFov,
+    };
+  }
+
+  function referenceAerialDistance() {
+    if (village.aerialReferenceDist > 0) return village.aerialReferenceDist;
+    if (village.aerialDist > 0) {
+      return villageScreenDistance(
+        village.aerialDist,
+        VILLAGE_LENS.aerial.fov,
+        VILLAGE_LENS.aerial.referenceFov,
+      );
+    }
+    return 150;
+  }
+
+  function actualDistance(referenceDistance) {
+    return dollyDistanceForFov(referenceDistance, referenceFovForCamera(camera), camera.fov);
   }
 
   function setRegime(mode, closeupDistance = 0) {
-    const aerialDistance = village.aerialDist || 150;
+    const aerialReference = referenceAerialDistance();
     if (mode === 'aerial') {
       controls.enableZoom = true;
-      controls.minDistance = aerialDistance * (ZOOM_ENTER_FRAC * 0.82);
-      controls.maxDistance = aerialDistance * 1.06;
+      controls.minDistance = actualDistance(aerialReference * (ZOOM_ENTER_FRAC * 0.82));
+      controls.maxDistance = actualDistance(aerialReference * 1.06);
     } else if (mode === 'focus') {
       controls.enableZoom = true;
       controls.minDistance = Math.max(1.2, closeupDistance * 0.16);
-      controls.maxDistance = aerialDistance * (ZOOM_EXIT_FRAC * 1.06);
+      controls.maxDistance = actualDistance(aerialReference * (ZOOM_EXIT_FRAC * 1.06));
     } else {
       controls.enableZoom = false;
     }
@@ -89,8 +122,8 @@ export function createVillageCameraRuntime({
 
   function updateContinuum() {
     if (!village.active || isBusy()) return;
-    const aerialDistance = village.aerialDist || 0;
-    if (aerialDistance <= 0) return;
+    const aerialReference = referenceAerialDistance();
+    if (aerialReference <= 0) return;
     if (!village.selected) {
       const now = performance.now();
       if (now - village.lastCenterT > 90) {
@@ -105,16 +138,18 @@ export function createVillageCameraRuntime({
       }
       const candidate = village.zoomCand;
       if (!candidate) return;
-      const distance = parcelDistance(candidate);
-      if (distance < aerialDistance * (ZOOM_ENTER_FRAC + 0.28)
+      const distance = villageScreenDistanceForCamera(parcelDistance(candidate), camera);
+      if (distance < aerialReference * (ZOOM_ENTER_FRAC + 0.28)
         && candidate !== getHoverParcel()) {
         village.handle.highlightParcel(candidate, true);
       }
-      if (distance < aerialDistance * ZOOM_ENTER_FRAC) {
+      if (distance < aerialReference * ZOOM_ENTER_FRAC) {
         village.zoomCand = null;
         onSelect(candidate);
       }
-    } else if (camera.position.distanceTo(controls.target) > aerialDistance * ZOOM_EXIT_FRAC) {
+    } else if (villageScreenDistanceForCamera(
+      camera.position.distanceTo(controls.target), camera,
+    ) > aerialReference * ZOOM_EXIT_FRAC) {
       onReturn();
     }
   }
@@ -136,6 +171,10 @@ export function createVillageCameraRuntime({
     camera.updateProjectionMatrix();
   }
 
+  function distanceAtFraction(fraction) {
+    return actualDistance(referenceAerialDistance() * fraction);
+  }
+
   return {
     aerial,
     near,
@@ -143,6 +182,7 @@ export function createVillageCameraRuntime({
     reapplyFog,
     setRegime,
     updateContinuum,
+    distanceAtFraction,
     debugContinuum: () => ({
       active: village.active,
       selected: village.selected,
@@ -150,9 +190,16 @@ export function createVillageCameraRuntime({
       wave: !!village.wave,
       zoomCand: village.zoomCand,
       aerialDist: +(village.aerialDist || 0).toFixed(1),
+      aerialReferenceDist: +referenceAerialDistance().toFixed(1),
       dist: +camera.position.distanceTo(controls.target).toFixed(1),
-      enterDist: +((village.aerialDist || 0) * ZOOM_ENTER_FRAC).toFixed(1),
-      exitDist: +((village.aerialDist || 0) * ZOOM_EXIT_FRAC).toFixed(1),
+      visualDist: +villageScreenDistanceForCamera(
+        camera.position.distanceTo(controls.target), camera,
+      ).toFixed(1),
+      referenceFov: +referenceFovForCamera(camera).toFixed(2),
+      enterDist: +(referenceAerialDistance() * ZOOM_ENTER_FRAC).toFixed(1),
+      exitDist: +(referenceAerialDistance() * ZOOM_EXIT_FRAC).toFixed(1),
+      enterActualDist: +actualDistance(referenceAerialDistance() * ZOOM_ENTER_FRAC).toFixed(1),
+      exitActualDist: +actualDistance(referenceAerialDistance() * ZOOM_EXIT_FRAC).toFixed(1),
     }),
   };
 }

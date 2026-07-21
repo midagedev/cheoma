@@ -1,7 +1,7 @@
 # 에이전트 친화적 구조 계약
 
 > - **상태**: 1차 구조 개선 완료 / 후속 개선의 기준선
-> - **기준일**: 2026-07-20
+> - **기준일**: 2026-07-21
 > - **목표**: 동작과 결정론을 보존하면서 변경 이유가 다른 코드를 분리하고, 생성 엔진을 앱 밖에서도 재사용 가능하게 유지
 
 ## Beck 단순 설계 규칙
@@ -70,8 +70,8 @@ app/src/                       Svelte UI
 | `src/api/village-plan.js` | `planVillage`, site/tier/road, 성곽 contour·사대문, 보호수·필지 focus·LOD impostor 명세, terrain-grid 높이, 지형 clip 도로 surface 순수 helper | Node, worker, browser |
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
-| `src/api/environment.js` | environment, focus, post, weather, ink, time, world edge | WebGL browser runtime |
-| `src/api/cinematic.js` | 건물 카메라 drive, 마을 drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
+| `src/api/environment.js` | environment, focus, post, 축방향 DoF controller, weather, ink, time, world edge | WebGL browser runtime |
+| `src/api/cinematic.js` | 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
 | `src/api/props.js` | prop registry와 생성 | THREE와 canvas provider가 있는 runtime |
 | `src/api/export.js` | export 분석·GLB·download·postcard | 분석 제외 대부분 browser |
@@ -106,6 +106,9 @@ app/src/                       Svelte UI
 - 소동물·필지 앰비언스·꽃잎/낙엽은 절대 `camera.position.y` 대신 `controls.target`의 지형 높이에 대한
   상대 고도와 시선 거리를 공유한다. 지상 개체는 현재 시선 셀 주변만 갱신하고 원경에서는 mesh와 CPU
   시뮬레이션을 함께 쉰다. 하늘의 새 떼와 시간대·fog 전이는 부감에서도 유지한다.
+- 광각↔망원 전환의 보상 dolly가 실제 카메라 거리를 바꾸더라도 생활·입자 LOD는
+  `src/camera/optics.js`의 화면 등가 거리로 판단한다. 같은 화면 크기의 소동물·모트·낙엽이 망원 전환만으로
+  일찍 꺼지지 않으며, 실제 거리와 등가 거리는 debug 상태에서 구분한다.
 - populate가 이미 배치한 마당 닭은 focus에서 숨겼다가 다른 무리로 바꾸지 않고, 같은 객체를
   거리 LOD로 깨워 계속 쓴다. base flock이 없는 필지만 focus ring이 닭을 만들어 같은 마당에
   두 무리가 겹치지 않는다. 별도 exclusion/lease 상태는 존재하지 않는다.
@@ -128,6 +131,17 @@ app/src/                       Svelte UI
 정책값이 아니라 실제 root 가시성과 필지별 은닉 핸들을 읽어 실패 필지를 반환한다.
 
 `tools/check-worker-contract.mjs`는 네 규모의 scene graph와 pick proxy 골든 hash, 실제 Worker 메시지, async 단계 순서를 함께 고정한다. 구조 이동 뒤 이 값은 갱신 대상이 아니라 보존 대상이다.
+
+## 광학과 DoF 계약
+
+마을 줌 연속체의 시각 언어와 초점 계산은 생성기나 앱 전환마다 복제하지 않는다.
+
+- `src/camera/optics.js`가 부감 46° 광각, 일반 필지 20°·hero 18°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈는 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를, point sprite 크기는 별도 lens scale을 사용한다.
+- `src/env/dof.js`가 월드 초점점을 카메라 전방축 깊이로 변환하고 DoF enable·amount·aperture를 한 controller에서 소유한다. focus-in/out은 선택 필지 축깊이를 붙들고, 필지 hop은 보간되는 시선을 따라간다.
+- `StableBokehPass`의 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
+- 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보하고, 탭별 판정 대신 평균 뒤 한 번만 HDR 광원 격리를 판정한다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다. out-of-focus 픽셀의 ALU는 stock보다 많지만 새 post pass나 draw call은 없고, 저성능 경로에서는 DoF 자체를 건너뛴다. 중앙 depth 기반 gather라 초점면 불투명 표면과 정확히 겹친 전경 광원은 원판으로 산란하지 못하며, 이를 고정 fixture로 기록한다.
+
+화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환과 한 번의 depth prepass는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·정지 동일성·저속 패닝은 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
 
 ## 병렬 작업 소유권
 

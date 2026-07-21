@@ -70,8 +70,11 @@ await page.addInitScript(() => {
       leaves: leaves ? { vis: effVisible(leaves), count: leaves.count ?? 0 } : null,
       focusRingPresent: !!fr, focusRingChildren: fr ? fr.children.length : 0,
       // #102 DoF + #98 역광/창빛
-      dofOn: hero.dofOn, dofFocus: hero.dofFocus != null ? +hero.dofFocus.toFixed(2) : null,
-      dofTargetDist: +hero.dofTargetDist.toFixed(2), dofErr: (hero.dofFocus != null) ? +Math.abs(hero.dofFocus - hero.dofTargetDist).toFixed(2) : null,
+      dofOn: hero.dofOn, dofAmount: hero.dofAmount,
+      dofAperture: hero.dofAperture,
+      dofFocus: hero.dofFocus != null ? +hero.dofFocus.toFixed(2) : null,
+      dofTargetDepth: +hero.dofTargetDepth.toFixed(2),
+      dofErr: (hero.dofFocus != null) ? +Math.abs(hero.dofFocus - hero.dofTargetDepth).toFixed(3) : null,
       sunAz: +hero.sunAz.toFixed(4), heroRotY: hero.heroRotY != null ? +hero.heroRotY.toFixed(4) : null,
       timeState: hero.timeState,
       // 창호 발광 재질 수(emissiveIntensity>0) — 석양 hanjiGlow 점등 계측.
@@ -159,7 +162,7 @@ console.log(`  sun vs frontDir+180=${sunVsBack.toFixed(0)}° (ASSERT ≤30: ${su
 console.log('\n[창호 발광 (석양 hanjiGlow)]');
 console.log(`  glowMats(emissive>0)=${hp.glowMats}  ASSERT >0: ${hp.glowMats > 0 ? 'PASS' : 'FAIL'}`);
 console.log('\n[② DoF 도착 오차 (focus 정착)]');
-console.log(`  dofOn=${hp.dofOn} focus=${hp.dofFocus} targetDist=${hp.dofTargetDist} err=${hp.dofErr}m  ASSERT <1m: ${hp.dofErr != null && hp.dofErr < 1 ? 'PASS' : 'FAIL'}`);
+console.log(`  dofOn=${hp.dofOn} amount=${hp.dofAmount} aperture=${hp.dofAperture} focus=${hp.dofFocus} targetDepth=${hp.dofTargetDepth} err=${hp.dofErr}m  ASSERT <0.01m: ${hp.dofErr != null && hp.dofErr < 0.01 ? 'PASS' : 'FAIL'}`);
 
 // ── ③ 앰비언트 매트릭스: 3상태 × {snow, rain, 낙엽, motes} ──
 // FOCUS 상태(랜딩 정착). 날씨=눈 → 눈 입자, 계절=가을 → 낙엽.
@@ -201,7 +204,7 @@ await page.click('.mode .seg:has(.glyph:text-is("近"))');
 await wait(2800);
 const backClose = await probe();
 console.log('\n[#102 부감→집 focus-in DoF 도착]');
-console.log(`  dofOn=${backClose.dofOn} err=${backClose.dofErr}m  ASSERT <1m: ${backClose.dofErr != null && backClose.dofErr < 1 ? 'PASS' : 'FAIL'}`);
+console.log(`  dofOn=${backClose.dofOn} amount=${backClose.dofAmount} err=${backClose.dofErr}m  ASSERT <0.01m: ${backClose.dofErr != null && backClose.dofErr < 0.01 ? 'PASS' : 'FAIL'}`);
 
 // 리플레이(집 복귀 후 재조립) — 히어로 상태 동형 경로에서 조립 중 입자.
 await page.click('.house-actions .hbtn.ghost').catch(() => {});
