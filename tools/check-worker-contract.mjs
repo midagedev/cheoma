@@ -19,12 +19,13 @@ const expectedSteps = [
 const expectedSceneHashes = {
   // #12: the variable rectangular precinct is reserved before parcels and
   // vegetation, then rendered as the compact/courtyard/extended TemplePlan.
-  // The #15 house/pavilion solar contract remains in the same baseline. Sync,
-  // real module Worker, and ?worker=0 fallback must be byte-identical.
-  village: 'da06159b:38341db1:7a482310:3c0ac8d3',
-  town: '55c0c8fb:7338ad73:d9104e7b:a9923e7f',
-  capital: '137a7eea:2eb1270c:495c9a8a:90d9bac4',
-  hanyang: '4eede084:0d14ab06:40589297:41dd0eaa',
+  // #49 extends the solar/focus-frame contract to pavilion eaves and feature
+  // props. Sync, real module Worker, and ?worker=0 fallback must remain
+  // byte-identical after those deterministic placement changes.
+  village: 'dd601916:7ec2904a:47f5fb2e:95ffb0e4',
+  town: '05eef928:4e792578:caf6fb90:8c9ff1e8',
+  capital: '024dd0f2:7fe32a78:86023e82:2bbcabb8',
+  hanyang: 'ca8a2925:21871ed1:e447296e:41453cef',
 };
 const expectedProxyHashes = {
   // Door-height residential targets plus the variable temple bounds and its

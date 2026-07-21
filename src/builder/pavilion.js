@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeMaterials, tileSurfaceMaterial } from './palette.js';
+import { PAVILION_DEFAULTS } from './pavilion-spec.js';
 
 // 정자(亭子) — 사모(정사각)·육모(육각) 모임지붕 개방 정자.
 //   참조: 경복궁 향원정(육모), 창덕궁 부용정(사모 계열).
@@ -87,13 +88,13 @@ export function buildPavilion(opts = {}) {
   const {
     sides = 6,               // 4=사모지붕, 6=육모지붕
     style = 'palace',        // 정자는 대개 단청(궁) 계열
-    radius = 2.5,            // 기둥 링 외접원 반경
-    postH = 3.0,             // 기둥 높이(개방·벽 없음)
-    eaveOverhang = 1.55,     // 처마 내밈(반경 방향)
-    roofRise = 2.55,         // 처마→꼭대기 높이(모임지붕 물매)
-    cornerLift = 0.55,       // 앙곡(추녀 들림)
-    planCurve = 0.42,        // 안허리곡(추녀 밖으로)
-    profileCurve = 0.6,      // 물매(처마로 갈수록 완만)
+    radius = PAVILION_DEFAULTS.radius,             // 기둥 링 외접원 반경
+    postH = PAVILION_DEFAULTS.postH,               // 기둥 높이(개방·벽 없음)
+    eaveOverhang = PAVILION_DEFAULTS.eaveOverhang, // 처마 내밈(반경 방향)
+    roofRise = PAVILION_DEFAULTS.roofRise,         // 처마→꼭대기 높이(모임지붕 물매)
+    cornerLift = PAVILION_DEFAULTS.cornerLift,     // 앙곡(추녀 들림)
+    planCurve = PAVILION_DEFAULTS.planCurve,       // 안허리곡(추녀 밖으로)
+    profileCurve = PAVILION_DEFAULTS.profileCurve, // 물매(처마로 갈수록 완만)
     entrance = true,         // 한 변 난간 비움(오르는 쪽)
   } = opts;
   const M = opts.materials || makeMaterials(style);
@@ -283,7 +284,7 @@ export function buildPavilion(opts = {}) {
 
   root.userData = {
     kind: 'pavilion', sides: n, radius, materials: M,
-    height: apexY + 1.5, eaveY, floorTopY,
+    height: apexY + PAVILION_DEFAULTS.finialAllowance, eaveY, floorTopY,
   };
   return root;
 }

@@ -3,7 +3,6 @@ import { makeSite, resolveSiteR, tierForR, rToScale01 } from './site.js';
 import { planRoads } from './roads.js';
 import { planParcels, planSatellites } from './parcels.js';
 import {
-  CITY_WALL_DIMENSIONS,
   CITY_WALL_MIN_SITE_R,
   cityWallClearance,
   cityWallContainsPolygon,
@@ -24,6 +23,7 @@ import {
 } from './stream-spatial.js';
 import { planTempleSite, templeReservationPolygons } from './temple-plan.js';
 import { planPavilion } from './pavilion-plan.js';
+import { planPublicProps } from './public-props-plan.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -457,7 +457,24 @@ export function planVillage(opts = {}) {
   });
 
   // ── 8) 소품 (동구 장승·솟대, 종가 앞 우물·장독대, 성격별 액센트) ──
-  planProps(features, site, scale, rng, char01);
+  features.props = planPublicProps({
+    features,
+    site,
+    scale,
+    rng,
+    char01,
+    parcels: pavilionParcels,
+    roads: roadsResult.roads,
+    pavilion: features.pavilion,
+    reservedCircles: features.guardianTrees,
+    occupied: [
+      ...parcels.map((parcel) => parcel.poly),
+      ...(features.palace?.poly ? [features.palace.poly] : []),
+      ...(features.sijeon || []).map((shop) => shop.poly),
+      ...templeReservations,
+      ...(paddies || []).map((field) => field.poly),
+    ],
+  });
 
   const allPts = [...roadsResult.roads.flatMap((r) => r.pts), ...parcels.map((p) => p.center)];
   const bounds = G.boundsOfPts(allPts.length ? allPts : [site.center]);
@@ -595,61 +612,4 @@ function trimPaddyToStreamBank(site, poly, margin) {
     if (southEdge - Math.max(out[0].z, out[1].z) < 3.5) return null;
   }
   return streamIntersectsPolygon(site, out, margin) ? null : out;
-}
-
-// 소품: 동구(장승 한 쌍·솟대), 종가/중심(우물), 초가군(장독대). 은은하게 몇 점만.
-function planProps(features, site, scale, rng, char01 = 0.5) {
-  const C = site.center;
-  const southGate = features.cityWall?.gates.find((gate) => gate.name === 'south') || null;
-  const E = southGate || site.entrance;
-  const toC = southGate
-    ? { x: -southGate.dirX, z: -southGate.dirZ }
-    : G.norm(G.sub(C, E));
-  const perp = G.perpL(toC);
-  let entrancePerp = perp;
-  let jangseungOffset = 5, sotdaeOffset = 8, forecourtInset = 0;
-  if (southGate) {
-    const structureHalf = (southGate.width
-      + CITY_WALL_DIMENSIONS.gateExtraWidth * (southGate.scale || 1)) * 0.5;
-    jangseungOffset = structureHalf + 4;
-    sotdaeOffset = structureHalf + 8;
-    forecourtInset = CITY_WALL_DIMENSIONS.gateDepth * (southGate.scale || 1) * 0.5 + 3;
-    // 두 문 옆 중 물가에서 더 먼 쪽을 택한다. 장승 한 쌍과 솟대 모두 육축·도로 폭 바깥,
-    // 성 안쪽 문전 공간에 두어 홍예 통행과 개울을 막지 않는다.
-    if (site.stream) {
-      const bankScore = (sign) => Math.min(...[jangseungOffset, sotdaeOffset].map((offset) => {
-        const point = G.add(E, G.add(G.mul(entrancePerp, offset * sign), G.mul(toC, forecourtInset)));
-        return Math.abs(point.z - site.streamZat(point.x)) - site.streamHalf;
-      }));
-      if (bankScore(-1) > bankScore(1)) entrancePerp = G.mul(entrancePerp, -1);
-    }
-  }
-  // 동구/남문 장승 한 쌍 — 성곽 ON이면 실제 남문 진입부를 쓰고 안길 한쪽으로 비킨다.
-  features.props.push({
-    name: 'jangseung-pair',
-    x: E.x + entrancePerp.x * jangseungOffset + toC.x * forecourtInset,
-    z: E.z + entrancePerp.z * jangseungOffset + toC.z * forecourtInset,
-    rot: Math.atan2(toC.x, toC.z), scale: 1.0, seed: 21,
-  });
-  // 솟대 — 장승 옆
-  features.props.push({
-    name: 'sotdae',
-    x: E.x + entrancePerp.x * sotdaeOffset + toC.x * forecourtInset,
-    z: E.z + entrancePerp.z * sotdaeOffset + toC.z * forecourtInset,
-    rot: 0, scale: 1.0, seed: 22,
-  });
-  // 우물 — 중심 근처
-  features.props.push({ name: 'well', x: C.x + perp.x * 9, z: C.z + toC.z * 7, rot: 0, scale: 1.0, seed: 23 });
-  if (scale !== 'hamlet') {
-    // 장독대 — 중심 살짝 뒤(북)
-    features.props.push({ name: 'jangdokdae', x: C.x - perp.x * 10, z: C.z - site.R * 0.05, rot: rng.range(0, 6.28), scale: 1.0, seed: 24 });
-  }
-  // 성격 액센트: 민촌은 시골 살림(낟가리·절구), 반촌은 격식(추가 장독대·우물)로 빈부가 읽히게.
-  if (char01 < 0.34) {
-    features.props.push({ name: 'haystack', x: C.x + perp.x * 14, z: C.z + toC.z * 12, rot: rng.range(0, 6.28), scale: 1.1, seed: 25 });
-    features.props.push({ name: 'mortar-pestle', x: C.x + perp.x * 11, z: C.z + toC.z * 15, rot: rng.range(0, 6.28), scale: 1.0, seed: 26 });
-  } else if (char01 >= 0.66) {
-    features.props.push({ name: 'jangdokdae', x: C.x + perp.x * 12, z: C.z - site.R * 0.02, rot: rng.range(0, 6.28), scale: 1.0, seed: 27 });
-    features.props.push({ name: 'well', x: C.x - perp.x * 12, z: C.z + toC.z * 5, rot: 0, scale: 1.0, seed: 28 });
-  }
 }
