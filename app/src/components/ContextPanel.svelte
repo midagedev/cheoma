@@ -16,7 +16,7 @@
     // 마을 상세 파라미터(#91) — 지형·구성·어휘. villageParams 는 App villageOpts 서브셋, onVillageOpt(key,value) 커밋.
     villageParams = {}, onVillageOpt = null,
     // 집 섹션(근접)
-    spec = null, params = {}, onType, onLive, onCommit, onReplay, onRerollHouse, houseBusy = false,
+    spec = null, params = {}, onType, onLive, onCommit, onRerollHouse, houseBusy = false,
     // glb 내보내기(#112) — onExportVillage(부감 전체)·onExportHouse(focus 건물)·exporting(스피너·중복 방지)
     onExportVillage = null, onExportHouse = null, exporting = false,
     // 공통
@@ -198,7 +198,7 @@
           <p>{t('vil_hero_note')}</p>
         </div>
       {/if}
-      <!-- 집 액션(다시 보기·다시 짓기·GLB)은 sticky 푸터로 이설(#118 U1) — footer 스니펫 참조. -->
+      <!-- 집 액션(다시 짓기·내보내기)은 sticky 푸터로 이설(#118 U1) — footer 스니펫 참조. -->
     </div>
   </div>
 </BottomSheet>
@@ -238,7 +238,7 @@
       {/if}
     </div>
 
-    <!-- 집 액션(근접, #100): 다시 보기(같은 집·시각 불변) / 이 집 다시 짓기(새 씨앗·이 집만) / GLB.
+    <!-- 집 액션(근접, #19): 필지·집·마당·수목을 한 번에 다시 짓기 / 3D 모델 내보내기.
          마을 다시 짓기는 마을 액션 전용 — 집 컨텍스트에 마을 리롤 진입 경로 없음. -->
     <div
       class="foot house"
@@ -248,10 +248,7 @@
     >
       {#if spec}
         <div class="house-actions">
-          <button class="hbtn ghost" onclick={() => onReplay?.()} disabled={houseBusy} title={t('vil_replay_tip')}>
-            <span class="hk" aria-hidden="true">再</span>{t('vil_replay')}
-          </button>
-          <button class="hbtn reroll" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
+          <button class="hbtn reroll wide" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
             <span class="hk" aria-hidden="true">⚄</span>{t('vil_reroll_house')}
           </button>
         </div>
@@ -455,7 +452,7 @@
   .footstack { display: grid; }
   .footstack > .foot { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 8px; transition: opacity 0.12s linear; }
 
-  /* 집 액션(#100): 다시 보기(먹빛 고스트) + 이 집 다시 짓기(주묵 전각) — 재/리롤 구분 명확. */
+  /* 집 액션(#19): 필지 transaction을 시작하는 주묵 전각. */
   .house-actions { display: flex; flex-direction: row; gap: 8px; }
   .hbtn {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px;
@@ -463,9 +460,6 @@
     transition: transform 0.12s ease, filter 0.2s ease, background 0.15s ease;
   }
   .hbtn .hk { font-size: 15px; }
-  .hbtn.ghost { background: transparent; border: 1px solid var(--ink-hair); color: var(--ink); }
-  .hbtn.ghost .hk { color: var(--ink-soft); }
-  .hbtn.ghost:hover:not(:disabled) { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
   .hbtn.reroll {
     background: var(--seal); border: 1px solid var(--seal-deep); color: var(--paper);
     background-image: var(--hanji), linear-gradient(160deg, #bb3e31 0%, #a5322a 60%, #8f2a23 100%);

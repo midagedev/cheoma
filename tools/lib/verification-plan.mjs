@@ -1,5 +1,6 @@
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'petals', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave', 'build',
+  'core', 'app', 'petals', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
+  'parcel-rebuild-browser', 'build',
 ]);
 
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$)|\.gitignore$)/;
@@ -38,6 +39,9 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
+    if (/^app\/src\/(?:App\.svelte|components\/ContextPanel\.svelte|engine\/engine\.js)$/.test(path)) {
+      select('focused rebuild surface changed', 'parcel-rebuild-browser');
+    }
     if (path === 'app/src/engine/engine.js') {
       select('engine integration changed', 'dof-app', 'lod-focus', 'lod-wave');
     }
@@ -84,6 +88,9 @@ function routePath(path) {
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
     select('village generation changed', 'app', 'worker');
+    if (/^src\/village\/(?:parcel-rebuild|vegetation-spatial|gardens|populate)\.js$/.test(path)) {
+      select('parcel rebuild planning or flora changed', 'parcel-rebuild-browser');
+    }
     if (/^src\/village\/(?:chunks|instancing|impostor-spec|lod-policy)\.js$/.test(path)
       || path === 'src/generators/village/houses.js') {
       select('parcel representation changed', 'lod-focus', 'lod-wave');
@@ -95,6 +102,9 @@ function routePath(path) {
 
   if (path.startsWith('src/runtime/village/')) {
     select('village runtime changed', 'app', 'worker');
+    if (/^src\/runtime\/village\/(?:handle|parcel-edit|picking|fauna|ambient-field)\.js$/.test(path)) {
+      select('parcel rebuild runtime changed', 'parcel-rebuild-browser');
+    }
     if (/^src\/runtime\/village\/(?:detail-lod|fauna|parcel-representation|ambient-field)\.js$/.test(path)) {
       select('runtime detail and wave ownership changed', 'lod-focus', 'lod-wave');
     }
@@ -200,6 +210,13 @@ export function verificationCommands(plan) {
   }
   if (has('lod-wave')) {
     commands.push({ id: 'lod-wave', command: 'npm', args: ['run', 'check:wave:app'] });
+  }
+  if (has('parcel-rebuild-browser')) {
+    commands.push({
+      id: 'parcel-rebuild-browser',
+      command: 'npm',
+      args: ['run', 'check:parcel-rebuild:browser'],
+    });
   }
   if (has('build')) commands.push({ id: 'build', command: 'npm', args: ['run', 'check:build'] });
   return commands;

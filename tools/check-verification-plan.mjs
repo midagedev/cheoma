@@ -10,17 +10,20 @@ assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
 assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'lod-wave']);
 assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/village/parcel-rebuild.js']), [
+  'core', 'app', 'worker', 'parcel-rebuild-browser',
+]);
 assert.deepEqual(ids(['src/village/wave.js']), ['core', 'app', 'lod-wave']);
 assert.deepEqual(ids(['src/env/focus.js']), ['core', 'app', 'lod-focus', 'lod-wave']);
 assert.deepEqual(ids(['src/env/animals.js']), ['core', 'app', 'lod-focus', 'lod-wave']);
 assert.deepEqual(ids(['src/runtime/village/ambient-field.js']), [
-  'core', 'app', 'worker', 'lod-focus', 'lod-wave',
+  'core', 'app', 'worker', 'lod-focus', 'lod-wave', 'parcel-rebuild-browser',
 ]);
 assert.deepEqual(ids(['src/runtime/village/handle.js']), [
-  'core', 'app', 'worker', 'lod-focus', 'lod-wave',
+  'core', 'app', 'worker', 'lod-focus', 'lod-wave', 'parcel-rebuild-browser',
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
-assert.deepEqual(ids(['app/src/App.svelte']), ['core', 'app', 'build']);
+assert.deepEqual(ids(['app/src/App.svelte']), ['core', 'app', 'parcel-rebuild-browser', 'build']);
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-focus', 'lod-wave', 'build',
 ]);

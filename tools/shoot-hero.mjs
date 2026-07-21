@@ -207,7 +207,7 @@ console.log('\n[#102 부감→집 focus-in DoF 도착]');
 console.log(`  dofOn=${backClose.dofOn} amount=${backClose.dofAmount} err=${backClose.dofErr}m  ASSERT <0.01m: ${backClose.dofErr != null && backClose.dofErr < 0.01 ? 'PASS' : 'FAIL'}`);
 
 // 리플레이(집 복귀 후 재조립) — 히어로 상태 동형 경로에서 조립 중 입자.
-await page.click('.house-actions .hbtn.ghost').catch(() => {});
+await page.evaluate(() => window.__engine.village.replay()).catch(() => {});
 await wait(1400);
 const replayAsm = await measureAmbient('HERO/REPLAY (mid-assembly) · snow+autumn');
 console.log(`    replay heroAsm=${replayAsm?.heroAsm} transitioning=${replayAsm?.transitioning} time=${replayAsm?.timeState} glowMats=${replayAsm?.glowMats}`);

@@ -175,31 +175,45 @@ const stRe = await state(desk); const camRe = await cam(desk);
 await shot(desk, '95-7-reclick-noop');
 ok(stRe.selected === stCur.selected && !camRe.transitioning, `#95④ 재클릭 no-op (focus 불변=${stRe.selected}, transitioning=${camRe.transitioning})`);
 
-// ── 게이트 ⑧ : 집 패널 버튼 라벨 구분 (다시 보기 / 이 집 다시 짓기) ──
-const houseBtns = await ev(desk, () => Array.from(document.querySelectorAll('.house-actions .hbtn')).map((b) => b.textContent.trim()));
+// ── 게이트 ⑧ : #19 집 패널 액션 정리 (다시 보기 제거 / 다시 짓기 / 명확한 내보내기) ──
+const houseBtns = await ev(desk, () => Array.from(document.querySelectorAll('.foot.house .hbtn')).map((b) => b.textContent.trim()));
 console.log('HOUSE BTN LABELS', JSON.stringify(houseBtns));
 await shot(desk, '100-8-house-labels');
-ok(houseBtns.length === 2 && houseBtns.some((s) => s.includes('다시 보기')) && houseBtns.some((s) => s.includes('이 집 다시 짓기')),
-  `#100⑧ 집 패널 라벨 구분 (${JSON.stringify(houseBtns)})`);
+ok(houseBtns.length === 2 && !houseBtns.some((s) => s.includes('다시 보기'))
+  && houseBtns.some((s) => s.includes('이 집 다시 짓기'))
+  && houseBtns.some((s) => s.includes('내보내기')),
+  `#19⑧ 집 패널 액션 정리 (${JSON.stringify(houseBtns)})`);
 
 // ── 게이트 ⑥ : 집 리롤 before/after (그 집만 변경, 마을 시드 불변) ──
 // A 로 다시 focus(재클릭 no-op 뒤 현 focus 가 A 라고 보장 못하므로 명시 전환).
 if (stRe.selected !== A.parcelId) { await ev(desk, (id) => window.__engine.village.switchTo(id), A.parcelId); await settle(desk, 9000); await wait(desk, 300); }
 const beforeReroll = await state(desk);
 const villSeedBefore = beforeReroll.seed;
+const rebuildBefore = await ev(desk, (id) => window.__engine.village.debugParcelRebuild(id), A.parcelId);
 await shot(desk, '100-6-reroll-before');
-await ev(desk, () => window.__engine.village.rerollParcel());
+await desk.click('.house-actions .hbtn.reroll');
 await settle(desk, 9000); await wait(desk, 500);
 const afterReroll = await state(desk);
+const rebuildAfter = await ev(desk, (id) => window.__engine.village.debugParcelRebuild(id), A.parcelId);
 await shot(desk, '100-6-reroll-after');
 console.log('REROLL seed', beforeReroll.spec?.seed, '→', afterReroll.spec?.seed, 'villageSeed', villSeedBefore, '→', afterReroll.seed);
 ok(beforeReroll.spec?.seed !== afterReroll.spec?.seed, `#100⑥ 집 시드 변경 (${beforeReroll.spec?.seed}→${afterReroll.spec?.seed})`);
 ok(villSeedBefore === afterReroll.seed, `#100⑥ 마을 시드 불변 (${villSeedBefore}=${afterReroll.seed}) → 이웃·마을 그대로`);
 ok(afterReroll.selected === A.parcelId, `#100⑥ 리롤 후 같은 필지 focus 유지 (${afterReroll.selected})`);
+ok(rebuildAfter?.persistent === true && rebuildAfter?.rebuildSeed != null,
+  `#19⑥ 필지 transaction 영속 소유권 (${JSON.stringify(rebuildAfter)})`);
+ok(rebuildBefore && rebuildAfter
+  && (rebuildBefore.plotW !== rebuildAfter.plotW || rebuildBefore.plotD !== rebuildAfter.plotD),
+  `#19⑥ 필지 경계부터 재구성 (${rebuildBefore?.plotW}×${rebuildBefore?.plotD}→${rebuildAfter?.plotW}×${rebuildAfter?.plotD})`);
+ok(rebuildAfter?.conflicts === 0,
+  `#19⑥ 재생성 수목-처마-일조-마당소품 충돌 0 (${rebuildAfter?.conflicts})`);
 
 // ── 게이트 ⑦ : 마을 웨이브(부감 복귀 후) ──
 await ev(desk, () => window.__engine.village.return());
 await settle(desk, 6000); await wait(desk, 400);
+const rebuildAerial = await ev(desk, (id) => window.__engine.village.debugParcelRebuild(id), A.parcelId);
+ok(rebuildAerial?.persistent === true && rebuildAerial?.lod?.valid === true && rebuildAerial?.lod?.overlay === true,
+  `#19⑦ focus-out 뒤에도 새 집 유지·단일 LOD 표현 (${JSON.stringify(rebuildAerial?.lod)})`);
 await shot(desk, '100-7-aerial-before-wave');
 const beforeWave = await state(desk);
 await ev(desk, () => window.__engine.village.rerollWave());

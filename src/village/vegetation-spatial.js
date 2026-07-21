@@ -93,6 +93,10 @@ export function yardTreeCandidates(parcel, rng) {
 }
 
 function houseRoofBounds(parcel) {
+  const explicit = parcel.editRoofBounds;
+  if (explicit && [explicit.minX, explicit.maxX, explicit.minZ, explicit.maxZ].every(Number.isFinite)) {
+    return explicit;
+  }
   return parcelLocalRoofBounds(parcel);
 }
 

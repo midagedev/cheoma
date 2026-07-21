@@ -11,6 +11,7 @@ const checks = [
   './check-wall-gate-contract.mjs',
   './check-wave-contract.mjs',
   './check-yard-layout-contract.mjs',
+  './check-parcel-rebuild-contract.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
   './check-choga-roof.mjs',

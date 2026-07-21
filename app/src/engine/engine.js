@@ -1687,6 +1687,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageSelectStart', { parcelId: id, spec, reseed: true });   // 패널 접힘 + 새 기본값 강제 재시드
     emit('villageHover', null);
     startVillageReveal(dur + 0.4);                               // 재형성 무드 + 폴백 소품 은닉 마스킹
+    if (pr) {
+      const framing = pr.cameraFraming;
+      tweenTo(framing.position, framing.target, Math.min(1.2, dur * 0.42), {
+        fov: framing.fov,
+        referenceFov: framing.referenceFov,
+        dofAnchor: framing.target,
+        onProgress: () => emit('villageFocusMorph', 1),
+      });
+    }
     playFocusAssembly(detail, dur, { onDone: () => {
       village.transitioning = false;
       attachFocusRing(detail.group);
@@ -2112,8 +2121,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 필지 편집 반영(#48, 라이브 스로틀은 App). 정규 필지는 오버레이 단일 집 교체, 특수(종가·관아)는
       //   컴파운드 오버레이 재생성. 편집 시 오버레이가 새로 만들어져 근접 앰비언스 링 앵커가 스테일해지므로
       //   focus 중인 그 필지면 새 오버레이에 링을 재부착(정규·특수 모두 — #92 정규도 오버레이+링).
-      rebuild: (id, params) => {
-        const g = village.handle?.rebuildParcel(id, params);
+      rebuild: (id, params, opts = {}) => {
+        const g = village.handle?.rebuildParcel(id, params, {
+          persist: true,
+          refreshFlora: opts.refreshFlora !== false,
+        });
         if (g && village.selected === id) attachFocusRing(g);
         return g;
       },
@@ -2146,14 +2158,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       },
       // 검증용(#96): 필지 params 로 오버레이 재생성 후 메시·정점 수 — 마당 소품(장독대·텃밭·낟가리·빨래줄)은
       //   makeYardProps 가 개별 메시로 추가(병합 없음)라, jangdok/vegBed 등 켜기/끄기가 메시·정점 수 변화로 잡힌다.
-      debugParcelStats: (id, params) => {
-        const g = village.handle?.rebuildParcel(id, params);
-        if (g && village.selected === id) attachFocusRing(g);
-        if (!g) return null;
-        let meshes = 0, verts = 0;
-        g.traverse((o) => { if (o.isMesh && o.geometry?.attributes?.position) { meshes++; verts += o.geometry.attributes.position.count; } });
-        return { meshes, verts };
-      },
+      debugParcelStats: (id, params) => village.handle?.parcelBuildStats?.(id, params) ?? null,
+      // 검증용(#19): persistent rebuild 소유권, 필지 치수, 편집 스펙, 마당나무 충돌을
+      // renderer traversal 없이 한 스냅샷으로 확인한다.
+      debugParcelRebuild: (id) => village.handle?.parcelRebuildState(id) ?? null,
       // 검증용: 필지 목록·화면 투영(플레이라이트 결정적 호버/클릭 좌표).
       debugParcels: () => (village.handle?.getPickProxies() || []).map((p) => ({
         parcelId: p.parcelId, hero: p.buildingSpec.hero, kind: p.buildingSpec.kind,
