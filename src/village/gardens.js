@@ -12,6 +12,13 @@ import {
   yardCanopyBlocked,
   yardTreeCandidates,
 } from './vegetation-spatial.js';
+import {
+  yardGwaeseokPosition,
+  yardHardObstacles,
+  yardHwagyePosition,
+  yardSeokjiPosition,
+  yardTreeIntersectsHardObstacle,
+} from './yard-layout.js';
 
 // 마당 과실수 · 반가 정원 · 마을 보호수(당산나무) — 태스크 #41 (docs Q4·Q5, R-G1/R-G2/R-T1).
 //   buildVillageFlora(plan, site, seed) → { group, setSeason(name), guardianAnchors, yardTreeAnchors, drawCalls }
@@ -20,7 +27,7 @@ import {
 //   · 마당 중앙은 비운다(困 자 금기 — 작업 공간). 과실수는 뒤안·담 모퉁이(집 벽에서 떨어져)에만.
 //   · 반가는 뒤안 화계(꽃계단)+사랑마당 괴석·석지, 여염은 과실수 1~2, 민촌은 텃밭(나무 0~1).
 //   · 마을엔 신격 노거수(당산나무=느티나무 우세)가 동구/중심에 1주 이상 — 일반 수목의 3~5배
-//     우산형 수관, 밑동 돌단·금줄·평상. 단, 작은 강제 성곽에 수관까지 안전한 빈터가 없으면 생략한다.
+//     우산형 수관, 밑동 돌단·금줄·평상. 필수 역할과 충돌 없는 위치는 guardian-plan이 먼저 확정한다.
 //
 // 성능: 전 필지 과실수·정원·보호수를 재질(레이어)별 정적 병합 → 드로우콜 ~5(수백 그루라도 상수).
 //   레이어: wood(줄기·가지·평상·금줄) / leaf(잎, 계절 틴트·겨울 나목) / blossom(봄 꽃) /
@@ -251,11 +258,13 @@ function yardTreeCanopyRadius(prototype, scale = 1) {
   return Math.max(0, prototype?.footprint?.radius || 0) * Math.max(0, scale);
 }
 
-function safeYardTreeSlot(parcel, point, radius, spatial, occupied) {
-  if (yardCanopyBlocked(parcel, point, radius)) return false;
+function safeYardTreeSlot(parcel, point, footprint, spatial, hardObstacles, occupied) {
+  if (yardTreeIntersectsHardObstacle(point, footprint, hardObstacles)) return false;
+  if (yardCanopyBlocked(parcel, point, footprint.canopyRadius)) return false;
   const world = parcelWorldPoint(parcel, point);
-  if (spatial.blocksYardCanopy(world.x, world.z, radius)) return false;
-  return occupied.every((tree) => G.dist(world, tree) > radius + tree.radius * 0.72);
+  if (spatial.blocksYardCanopy(world.x, world.z, footprint.canopyRadius)) return false;
+  return occupied.every((tree) =>
+    G.dist(world, tree) > footprint.canopyRadius + tree.radius * 0.72);
 }
 
 // ───────────────────────── 최상위 ─────────────────────────
@@ -303,11 +312,16 @@ export function buildVillageFlora(plan, site, seed) {
     bakeLanterns(p, pm);   // 전 필지(히어로 포함) 등롱 — trng 미소비(#89 앵커 불침해)
     if (p.hero) {
       // 종가 뒤안: 화계(중앙) + 괴석·석지(측) + 과실수 2(코너) — 뒷담 안쪽에 몰아 컴파운드 관통 회피.
-      const hw = p.plotW / 2, hd = p.plotD / 2;
-      bakeHwagye(L, pm.clone().multiply(M4().makeTranslation(trng.range(-1, 1), 0, -hd * 0.9)), trng);
+      const hd = p.plotD / 2;
+      const hwagyeX = trng.range(-1, 1);
+      const hwagye = yardHwagyePosition(p, hwagyeX, true);
+      bakeHwagye(L, pm.clone().multiply(M4().makeTranslation(hwagye.x, 0, hwagye.z)), trng);
       const side = trng() < 0.5 ? -1 : 1;
-      bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(side * hw * 0.5, 0, -hd * 0.86)), trng);
-      bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(side * hw * 0.5 - side * 1.2, 0, -hd * 0.82)));
+      const rock = yardGwaeseokPosition(p, side, true);
+      const pond = yardSeokjiPosition(p, side, true);
+      bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(rock.x, 0, rock.z)), trng);
+      bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(pond.x, 0, pond.z)));
+      const hardObstacles = yardHardObstacles(p, { exact: true, side, hwagyeX });
       const sps = (ct && ct.species) || ['plum', 'persimmon'];
       const slots = yardTreeCandidates(p, trng);
       for (let i = 0; i < sps.length; i++) {
@@ -315,8 +329,12 @@ export function buildVillageFlora(plan, site, seed) {
         const scaleX = trng.range(YARD_CROWN_SCALE.heroMin, YARD_CROWN_SCALE.heroMax);
         const scaleZ = trng.range(YARD_CROWN_SCALE.heroMin, YARD_CROWN_SCALE.heroMax);
         const radius = yardTreeCanopyRadius(fruitProto[sps[i]], Math.max(scaleX, scaleZ));
+        const footprint = {
+          canopyRadius: radius,
+          trunkRadius: FRUIT_INFO[sps[i]].r0 * Math.max(scaleX, scaleZ),
+        };
         const slotIndex = slots.findIndex((point) =>
-          safeYardTreeSlot(p, point, radius, yardSpatial, occupiedYard));
+          safeYardTreeSlot(p, point, footprint, yardSpatial, hardObstacles, occupiedYard));
         if (slotIndex < 0) continue;
         const [point] = slots.splice(slotIndex, 1);
         const wm = pm.clone().multiply(M4().makeTranslation(point.x, 0, point.z))
@@ -326,7 +344,8 @@ export function buildVillageFlora(plan, site, seed) {
         occupiedYard.push({ x: v.x, z: v.z, radius });
         yardTreeAnchors.push({
           x: v.x, y: v.y + 2.6, z: v.z,
-          species: sps[i], radius, parcelId: p.id,
+          species: sps[i], radius, trunkRadius: footprint.trunkRadius, parcelId: p.id,
+          gardenSide: side, hwagyeX,
         });
       }
       const gv = new THREE.Vector3(0, 0, -hd * 0.86).applyMatrix4(pm);
@@ -335,13 +354,15 @@ export function buildVillageFlora(plan, site, seed) {
       continue;
     }
     // 정규 필지: 과실수 슬롯
+    const hardObstacles = yardHardObstacles(p);
     if (ct && ct.species && ct.species.length) {
       const slots = yardTreeCandidates(p, trng);
       for (const species of ct.species) {
         const spin = trng() * TAU, sc = trng.range(YARD_CROWN_SCALE.min, YARD_CROWN_SCALE.max);
         const radius = yardTreeCanopyRadius(fruitProto[species], sc);
+        const footprint = { canopyRadius: radius, trunkRadius: FRUIT_INFO[species].r0 * sc };
         const slotIndex = slots.findIndex((slot) =>
-          safeYardTreeSlot(p, slot, radius, yardSpatial, occupiedYard));
+          safeYardTreeSlot(p, slot, footprint, yardSpatial, hardObstacles, occupiedYard));
         if (slotIndex < 0) continue;
         const [s] = slots.splice(slotIndex, 1);
         const wm = pm.clone().multiply(M4().makeTranslation(s.x, 0, s.z)).multiply(M4().makeRotationY(spin)).multiply(M4().makeScale(sc, trng.range(0.9, 1.12), sc));
@@ -350,7 +371,7 @@ export function buildVillageFlora(plan, site, seed) {
         occupiedYard.push({ x: v.x, z: v.z, radius });
         yardTreeAnchors.push({
           x: v.x, y: v.y + 2.4, z: v.z, species,
-          radius,
+          radius, trunkRadius: footprint.trunkRadius,
           parcelId: p.id,
           accent: FRUIT_INFO[species].accent,
         });
@@ -360,12 +381,15 @@ export function buildVillageFlora(plan, site, seed) {
     const gl = p.gardenLevel || 0;
     if (gl >= 2) {
       const hw = p.plotW / 2, hd = p.plotD / 2, side = trng() < 0.5 ? -1 : 1;
-      bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(side * hw * 0.58, 0, -hd * 0.5)), trng);
+      const rock = yardGwaeseokPosition(p, side, false);
+      bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(rock.x, 0, rock.z)), trng);
       if (gl >= 3) {
-        bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(side * hw * 0.58 - side * 1.1, 0, -hd * 0.5 + 1.0)));
-        bakeHwagye(L, pm.clone().multiply(M4().makeTranslation(trng.range(-1, 1), 0, -hd * 0.85)), trng);
+        const pond = yardSeokjiPosition(p, side, false);
+        const hwagye = yardHwagyePosition(p, trng.range(-1, 1), false);
+        bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(pond.x, 0, pond.z)));
+        bakeHwagye(L, pm.clone().multiply(M4().makeTranslation(hwagye.x, 0, hwagye.z)), trng);
       }
-      const gv = new THREE.Vector3(side * hw * 0.58, 0, -hd * 0.5).applyMatrix4(pm);
+      const gv = new THREE.Vector3(rock.x, 0, rock.z).applyMatrix4(pm);
       const gc = new THREE.Vector3(side * (hw + 7), 3.2, -hd * 0.5 + 1.5).applyMatrix4(pm);   // 담 밖 측면 눈높이
       gardenAnchors.push({ x: gv.x, y: gv.y + 1.0, z: gv.z, cx: gc.x, cy: gc.y, cz: gc.z, hero: false });
     }
