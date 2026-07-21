@@ -32,11 +32,16 @@ import {
   PAVILION_ROOF_RADIUS,
   PAVILION_STREAM_CLEARANCE,
   pavilionBlocksParcelFocus,
+  pavilionBlocksParcelSolarAccess,
   pavilionFootprint,
   pavilionTerrainRelief,
 } from '../src/village/pavilion-plan.js';
+import { publicPropObstruction } from '../src/village/public-props-plan.js';
 import { makeVegetationMask } from '../src/village/vegetation-spatial.js';
-import { buildingBlocksSolarAccess } from '../src/village/solar-access.js';
+import {
+  buildingBlocksSolarAccess,
+  circleBlocksSolarAccess,
+} from '../src/village/solar-access.js';
 import { templeFootprint } from '../src/village/temple-plan.js';
 import {
   STREAM_GUARDIAN_BASE_CLEARANCE,
@@ -45,6 +50,10 @@ import {
   createStreamSpatialIndex,
   streamClearanceAt,
 } from '../src/village/stream-spatial.js';
+import {
+  circleBlocksParcelFocusFrame,
+  parcelFocusViewEnvelope,
+} from '../src/village/view-clearance.js';
 
 const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const SEEDS = [7, 42, 20260716];
@@ -148,6 +157,7 @@ let roofPolygons = 0, maxFacing = 0, maxAccess = 0, indexedCells = 0;
 let minHouseFit = 1, minHouseScale = 1, minRoofClearance = Infinity;
 let rerollChecks = 0;
 let paddyFields = 0;
+let publicProps = 0;
 
 for (const scale of SCALES) {
   let scaleHouseCount = 0;
@@ -161,6 +171,8 @@ for (const scale of SCALES) {
     invariant(JSON.stringify(plan.parcels) === JSON.stringify(repeat.parcels), `${label} parcels drift`);
     invariant(JSON.stringify(plan.features.pavilion) === JSON.stringify(repeat.features.pavilion),
       `${label} pavilion plan drift`);
+    invariant(JSON.stringify(plan.features.props) === JSON.stringify(repeat.features.props),
+      `${label} public prop plan drift`);
     invariant(JSON.stringify(plan.features.guardianTrees) === JSON.stringify(repeat.features.guardianTrees),
       `${label} guardian plan drift`);
     invariant(plan.parcels.length >= DENSITY_FLOOR[scale],
@@ -222,16 +234,47 @@ for (const scale of SCALES) {
         PAVILION_ROOF_RADIUS + PAVILION_PARCEL_CLEARANCE,
         parcel.poly,
       ), `${label} pavilion overlaps ${parcel.id || 'palace'}`);
-      invariant(!canopyBlocksSolarAccess(parcel, pavilion, PAVILION_ROOF_RADIUS),
+      invariant(!pavilionBlocksParcelSolarAccess(parcel, pavilion, plan.site),
         `${label} pavilion blocks ${parcel.id || 'palace'} solar access`);
       invariant(!pavilionBlocksParcelFocus(parcel, pavilion),
-        `${label} pavilion blocks ${parcel.id || 'palace'} focus sightline`);
+        `${label} pavilion blocks ${parcel.id || 'palace'} focus frame`);
     }
     for (const [fieldIndex, field] of (plan.paddies || []).entries()) {
       invariant(!G.polysOverlap(pavilionPoly, field.poly),
         `${label} pavilion overlaps paddy ${fieldIndex}`);
     }
     pavilions++;
+    for (let propIndex = 0; propIndex < (plan.features.props || []).length; propIndex++) {
+      const prop = plan.features.props[propIndex];
+      const obstruction = publicPropObstruction(prop);
+      invariant(obstruction, `${label} public prop ${prop.name} has no obstruction contract`);
+      invariant(!roadSpatial.withinRoadClearance(prop, null, obstruction.radius + 0.35),
+        `${label} public prop ${prop.name} overlaps a road`);
+      invariant(streamClearanceAt(plan.site, prop) >= obstruction.radius + 0.8,
+        `${label} public prop ${prop.name} overlaps the stream bank`);
+      if (plan.site.edge) {
+        invariant(worldEdgeClearance(plan.site.edge, prop) >= obstruction.radius + 2,
+          `${label} public prop ${prop.name} left the world edge`);
+      }
+      for (const parcel of spatialParcels) {
+        invariant(!circleIntersectsPolygon(prop, obstruction.radius + 0.35, parcel.poly),
+          `${label} public prop ${prop.name} overlaps ${parcel.id || 'palace'}`);
+        invariant(!circleBlocksSolarAccess(parcel, obstruction, plan.site),
+          `${label} public prop ${prop.name} blocks ${parcel.id || 'palace'} solar access`);
+        if (obstruction.viewRadius > 0) {
+          invariant(!circleBlocksParcelFocusFrame(parcel, prop, obstruction.viewRadius, 0.3),
+            `${label} public prop ${prop.name} blocks ${parcel.id || 'palace'} focus frame`);
+        }
+      }
+      for (let otherIndex = 0; otherIndex < propIndex; otherIndex++) {
+        const other = plan.features.props[otherIndex];
+        const otherObstruction = publicPropObstruction(other);
+        invariant(G.dist(prop, other)
+          >= obstruction.radius + otherObstruction.radius + 0.5,
+        `${label} public props ${prop.name}/${other.name} overlap`);
+      }
+      publicProps++;
+    }
     const tallPublicObstacles = [
       ...(plan.features.temple ? [templeFootprint(plan.features.temple, 2)] : []),
       ...(plan.features.sijeon || []).map((shop) => shop.poly),
@@ -446,6 +489,25 @@ for (const scale of SCALES) {
     `${scale} aggregate paddies ${scalePaddyCount} < ${PADDY_TOTAL_FLOOR[scale]}`);
 }
 
+// A broad pavilion roof can miss the old camera center ray while still covering
+// one side of the house. Keep a synthetic off-axis case so the frame-width part
+// of the contract cannot silently collapse back to a line test.
+{
+  const plan = buildWithoutGlobalRandom({ scale: 'town', seed: 2 });
+  const parcel = plan.parcels[8];
+  const envelope = parcelFocusViewEnvelope(parcel);
+  const t = 0.55;
+  const lateral = PAVILION_ROOF_RADIUS + 1.6;
+  const offAxis = {
+    x: envelope.target.x + envelope.forward.x * envelope.distance * t + envelope.right.x * lateral,
+    z: envelope.target.z + envelope.forward.z * envelope.distance * t + envelope.right.z * lateral,
+  };
+  invariant(lateral > PAVILION_ROOF_RADIUS,
+    'focus-frame probe still intersects the obsolete center-ray cylinder');
+  invariant(circleBlocksParcelFocusFrame(parcel, offAxis, PAVILION_ROOF_RADIUS),
+    'focus-frame probe missed an off-axis pavilion roof');
+}
+
 let adversarialGuardianPlans = 0, adversarialGuardians = 0;
 for (const [scale, seeds] of Object.entries(ADVERSARIAL_GUARDIAN_SEEDS)) {
   for (const seed of seeds) {
@@ -465,6 +527,7 @@ console.log(
   + `${accesses} road links, `
   + `${solarBuildings} solar-safe buildings + ${solarProbes} direction probes, `
   + `${pavilions} solar/view-safe pavilions, `
+  + `${publicProps} solar/view-safe public props, `
   + `${guardians} guardians + ${adversarialGuardians} in ${adversarialGuardianPlans} adversarial plans, `
   + `${(south45 / parcels * 100).toFixed(1)}% within south±45°, max facing `
   + `${(maxFacing * 180 / Math.PI).toFixed(1)}°, max access ${maxAccess.toFixed(1)}m, `

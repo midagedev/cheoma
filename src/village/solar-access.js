@@ -1,6 +1,7 @@
 import * as G from '../core/math/geom2.js';
 import { impostorHouseSpec } from './impostor-spec.js';
 import {
+  circleIntersectsPolygon,
   parcelSolarAccessPolygon,
   parcelWorldPoint,
 } from './parcel-contract.js';
@@ -12,10 +13,34 @@ import { parcelRoofPolygons } from './house-footprint.js';
 export const BUILDING_SOLAR_ALTITUDE = 30 * Math.PI / 180;
 export const BUILDING_SOLAR_TARGET_LIFT = 1.5;
 
-function parcelGroundY(parcel, site) {
+export function parcelGroundY(parcel, site) {
   if (Number.isFinite(parcel.baseY)) return parcel.baseY;
   if (Number.isFinite(parcel.padY)) return parcel.padY;
   return site.heightAt(parcel.center.x, parcel.center.z);
+}
+
+export function circleBlocksSolarAccess(target, obstruction, site) {
+  if (!target?.solarAccess || !site
+    || !Number.isFinite(obstruction?.x) || !Number.isFinite(obstruction?.z)
+    || !Number.isFinite(obstruction?.height)) return false;
+  const targetY = parcelGroundY(target, site) + BUILDING_SOLAR_TARGET_LIFT;
+  const baseY = Number.isFinite(obstruction.baseY)
+    ? obstruction.baseY
+    : site.heightAt(obstruction.x, obstruction.z);
+  const shadowLength = Math.max(
+    0,
+    (baseY + obstruction.height - targetY) / Math.tan(BUILDING_SOLAR_ALTITUDE),
+  );
+  if (shadowLength <= 1e-8) return false;
+  const corridor = target.solarAccess;
+  const localEnd = Math.min(corridor.localEnd, corridor.localStart + shadowLength);
+  const shadow = [
+    parcelWorldPoint(target, { x: -corridor.halfWidth, z: corridor.localStart }),
+    parcelWorldPoint(target, { x: corridor.halfWidth, z: corridor.localStart }),
+    parcelWorldPoint(target, { x: corridor.halfWidth, z: localEnd }),
+    parcelWorldPoint(target, { x: -corridor.halfWidth, z: localEnd }),
+  ];
+  return circleIntersectsPolygon(obstruction, Math.max(0, obstruction.radius || 0), shadow);
 }
 
 export function parcelObstructionPolygons(parcel) {

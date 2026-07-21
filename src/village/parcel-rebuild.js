@@ -113,8 +113,8 @@ export function planParcelRebuild(
         attempts,
       })) continue;
       // Runtime rebuilds may adjust the wall envelope and therefore the pure focus
-      // framing. The village pavilion is a full-height building with a 4.5 m roof,
-      // not a point prop: keep both the daylight opening and the camera ray clear
+      // framing. The village pavilion is a full-height building with broad eaves,
+      // not a point prop: keep both the daylight opening and the camera frame clear
       // under the same contract used by initial village planning.
       if (pavilion && (
         canopyBlocksSolarAccess(candidate, pavilion, pavilion.radius || PAVILION_ROOF_RADIUS)
