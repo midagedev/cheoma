@@ -10,8 +10,18 @@ import {
   planCityWall,
   worldEdgeContainsPolygon,
 } from './citywall-contour.js';
-import { assignVariation } from './variants.js';
 import * as G from '../core/math/geom2.js';
+import {
+  attachParcelSpatialContract,
+  parcelWorldPoint,
+  rectangularParcelShape,
+} from './parcel-contract.js';
+import { planGuardianTrees } from './guardian-plan.js';
+import { assignFittedVariation } from './house-footprint.js';
+import {
+  STREAM_PADDY_BANK_CLEARANCE,
+  streamIntersectsPolygon,
+} from './stream-spatial.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -26,13 +36,24 @@ import * as G from '../core/math/geom2.js';
 //   includeTemple        : 19~21 — 마을과 떨어진 산기슭 별도 클러스터(어느 scale에도 조합)
 //   includePalace        : capital 외 scale 에선 무시(경고)
 
-// 로컬 +z(정면)를 frontDir 로 향하는 자립 사각 필지 폴리곤(도로 비접) — 종가·궁 등 예약분.
-function rectParcel(center, frontDir, plotW, plotD) {
-  const fd = G.norm(frontDir);
-  const tan = G.perpL(fd);
-  const base = G.add(center, G.mul(fd, plotD / 2));   // 전면(도로/마당쪽) 모서리선
-  const inward = G.mul(fd, -1);
-  return G.frontageParcel(base, tan, inward, plotW / 2, plotD, 0);
+// 종가·관아처럼 도로 프론티지보다 먼저 자리를 잡는 사각 필지도 일반 필지와 같은
+// shape→poly→일조 계약을 쓴다. 별도 사각형 수학을 두지 않아 pad·담·집 방향이 어긋나지 않는다.
+function reservedParcel(center, frontDir, plotW, plotD, fields = {}) {
+  return attachParcelSpatialContract({
+    placement: 'core',
+    ...fields,
+    center: { x: center.x, z: center.z },
+    frontDir: G.norm(frontDir),
+    plotW,
+    plotD,
+    shape: rectangularParcelShape(plotW, plotD),
+  });
+}
+
+// site.center는 종가·관아의 몸체 중심보다 공동 앞마당/대문 결절로 쓰인다. 집을 남향으로
+// 돌린 뒤에도 기존 안길이 본채를 관통하지 않도록 필지 중심을 대문에서 북쪽으로 물린다.
+function coreCenterBehindGate(gate, frontDir, plotD) {
+  return G.sub(gate, G.mul(G.norm(frontDir), plotD * 0.5));
 }
 
 function roadStreamCrossing(road, site, cityWall) {
@@ -70,6 +91,7 @@ const CHAR01_ANCHORS = [[74, 0.18], [128, 0.34], [176, 0.48], [250, 0.60], [500,
 //   값은 "프론티지(추가 필지)" 목표수 — 종가·관아 예약 코어는 별도 +1. [30,0] = 외딴집 하한(#114):
 //   R30 에서 프론티지 0 + 예약 종가 = 딱 한 채. 30~74 는 0~10 연속(두세 채 촌락도 성립).
 const HOUSE_ANCHORS = [[30, 0], [74, 10], [128, 32], [176, 70], [250, 104], [500, 340]];
+const WALLED_BOWL_K_MIN = 0.8;
 
 function pieceLerp(R, anchors) {
   if (R <= anchors[0][0]) return anchors[0][1];
@@ -152,14 +174,24 @@ export function planVillage(opts = {}) {
   const housesOverridden = typeof opts.houses === 'number' && isFinite(opts.houses);
   const defaultTarget = Math.round(pieceLerp(siteR, HOUSE_ANCHORS));   // siteR 이 함의하는 명목 호수
   const houseTarget = housesOverridden ? Math.max(0, Math.min(400, Math.round(opts.houses))) : defaultTarget;
+  const wantWall = tuning.cityWall === true ? true : tuning.cityWall === false ? false : (scale === 'hanyang');
+  const wallSupported = siteR >= CITY_WALL_MIN_SITE_R;
 
   // ── 분지 크기 = 건축 footprint 종속(#120) ── siteR(규모)만 움직이면 houseTarget≈defaultTarget 이라
   //   계수 1(현행 반경 정확 재현 — 무옵션 게이트 보존). houses 를 직접 낮추면(집 적음) 분지가 아담해지고
   //   높이면 넓어진다("사각 그릇 고정 반경" 인상 해소). 면적 ∝ 호수 → 반경 ∝ √호수(+3 완충으로 극단 방지).
   //   대규모 궁·성곽 붕괴 방지로 [0.72,1.25] 클램프(site.js 도 [0.68,1.28] 재클램프).
-  const bowlK = housesOverridden
+  const footprintBowlK = housesOverridden
     ? Math.min(1.25, Math.max(0.72, Math.pow((houseTarget + 3) / (defaultTarget + 3), 0.5)))
     : 1;
+  // 성곽은 호수와 무관한 고정 폭 성문·육축·edge inset을 가진다. 원래 규모의 지형 span을
+  // 80% 아래로 줄이면 최소 초락에서는 성벽보다 terrain grid가 먼저 잘리고, 큰 tier에서도
+  // 성문 연결도로 ribbon이 잘린 지형 band에 닿는다.
+  // 요청된 성곽에만 인프라 최소 span을 적용하므로 기본/무성곽의 footprint 축소와 RNG는 그대로다.
+  const wallBowlFloor = WALLED_BOWL_K_MIN;
+  const bowlK = wantWall && wallSupported
+    ? Math.max(footprintBowlK, wallBowlFloor)
+    : footprintBowlK;
 
   const norm = { scale, siteR, scale01: rToScale01(siteR), includePalace, includeTemple, seed, character, char01, charOverride, target: houseTarget, tuning, bowlK };
   const rng = makeRng(seed);
@@ -175,7 +207,9 @@ export function planVillage(opts = {}) {
   const blockers = [];
   const features = { pavilion: null, bridges: [], props: [], temple: null, palace: null };
 
-  const rimFrontDir = G.norm({ x: -16, z: -45 }); // 석양 sunDir [-16, 8, -45] 의 수평 투영 방향
+  // 핵심 건물의 좌향은 카메라/석양 룩이 아니라 배산임수의 주산→동구 축이 결정한다.
+  // 이전 rimFrontDir(-z)은 남향 주석과 달리 종가·관아·궁을 북북서로 돌리고 있었다.
+  const coreFrontDir = toEntrance;
 
   if (isCapitalTier && includePalace) {
     // 궁역(#88): 행각 공유 다일곽 궁궐. 한양=경복궁급 4일곽(96×150), capital=3일곽 축소판(60×90).
@@ -183,26 +217,35 @@ export function planVillage(opts = {}) {
     const tier = scale === 'hanyang' ? 'hanyang' : 'capital';
     const pw = tier === 'hanyang' ? 96 : 60, pd = tier === 'hanyang' ? 150 : 90;
     const pc = { x: 0, z: C.z - pd * 0.16 };   // 깊어진 축선을 북으로 상재(진입부 여유)
-    const poly = rectParcel(pc, rimFrontDir, pw, pd);
-    features.palace = { x: pc.x, z: pc.z, frontDir: rimFrontDir, seed: (seed ^ 0x9a11) >>> 0, plotW: pw, plotD: pd, tier };
-    blockers.push({ poly });
+    const palaceParcel = reservedParcel(pc, coreFrontDir, pw, pd, {
+      placement: 'landmark', kind: 'palace', seed: (seed ^ 0x9a11) >>> 0,
+    });
+    // 궁역도 일반 필지와 같은 poly·남측 일조 회랑을 보존한다. 렌더용 축약 feature만
+    // 남기면 보호수와 숲 worker가 궁궐을 빈 땅으로 오인한다.
+    features.palace = { ...palaceParcel, x: pc.x, z: pc.z, tier };
+    blockers.push({ poly: palaceParcel.poly });
   } else if (houseTarget <= 0 && typeof opts.houses === 'number') {
     // 집 없는 구성(#114): houses:0 명시 시 예약 코어(종가·관아)도 생략 — "절 하나만"(includeTemple)
     //   또는 빈 산세 구성. 엔진은 hero 부재 시 부감 랜딩 폴백(기존 경로).
   } else if (isCapitalTier) {
     // 궁 없는 도성풍: 중심에 대형 관아(객사) 코어
-    const poly = rectParcel(C, rimFrontDir, 42, 34);
-    features.govCore = { x: C.x, z: C.z, frontDir: rimFrontDir };
-    blockers.push({ poly, hero: true, heroStyle: 'palace', center: C, frontDir: rimFrontDir, plotW: 42, plotD: 34, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
+    const coreCenter = coreCenterBehindGate(C, coreFrontDir, 34);
+    const core = reservedParcel(coreCenter, coreFrontDir, 42, 34, {
+      hero: true, heroStyle: 'palace', kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
+    });
+    features.govCore = { x: coreCenter.x, z: coreCenter.z, frontDir: coreFrontDir };
+    blockers.push(core);
   } else if (scale === 'town') {
     // 관아 코어(객사 남향) — 배산 아래 중앙
-    const poly = rectParcel(C, rimFrontDir, 40, 32);
-    blockers.push({ poly, hero: true, heroStyle: 'palace', center: C, frontDir: rimFrontDir, plotW: 40, plotD: 32, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
+    blockers.push(reservedParcel(coreCenterBehindGate(C, coreFrontDir, 32), coreFrontDir, 40, 32, {
+      hero: true, heroStyle: 'palace', kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
+    }));
   } else {
     // 씨족촌 종가 — 명당(중심), 남향(동구쪽) -> 림 라이트 최적 방향
     const plotW = scale === 'village' ? 28 : 26, plotD = scale === 'village' ? 26 : 24;
-    const poly = rectParcel(C, rimFrontDir, plotW, plotD);
-    blockers.push({ poly, hero: true, heroStyle: 'hanok', center: C, frontDir: rimFrontDir, plotW, plotD, kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0 });
+    blockers.push(reservedParcel(coreCenterBehindGate(C, coreFrontDir, plotD), coreFrontDir, plotW, plotD, {
+      hero: true, heroStyle: 'hanok', kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
+    }));
   }
 
   // ── 2.5) 성곽·사대문 (한양 전용) ── 도로 생성 전에 게이트를 확정해 간선을 성문과 정렬한다.
@@ -210,15 +253,23 @@ export function planVillage(opts = {}) {
   // 성곽 강제 오버라이드(#91): auto=hanyang 자동, true/false=강제. planCityWall 은 공유 rng를 소비하지
   //   않는 순수 site 파생이다. 강제 ON에서도 필지는 성 안·위성 부락은 성 밖이라는 같은 배치 계약을 쓴다.
   //   hanyang 강제 OFF는 도로의 성문 정렬이 사라져 하류가 달라진다(비기본이지만 seed 결정론은 유지).
-  const wantWall = tuning.cityWall === true ? true : tuning.cityWall === false ? false : (scale === 'hanyang');
   const corePolys = blockers.map((b) => b.poly).filter(Boolean);
-  const wallSupported = siteR >= CITY_WALL_MIN_SITE_R;
   if (wantWall && !wallSupported) {
     warnings.push(`성곽은 초락(R≥${CITY_WALL_MIN_SITE_R})부터 유효 — R=${Math.round(siteR)}에서 생략됨`);
   }
   const cityWall = wantWall && wallSupported ? planCityWall(site, seed, corePolys) : null;
   if (cityWall) features.cityWall = cityWall;
-  const layoutOpts = cityWall ? { ...norm, cityWall } : norm; // 생성 중에만 주입; 반환 plan에는 features가 단일 소스.
+  const coreParcel = blockers.find((blocker) => blocker.hero);
+  const coreRoadAnchor = coreParcel
+    ? parcelWorldPoint(coreParcel, { x: 0, z: coreParcel.plotD * 0.5 })
+    : null;
+  const layoutOpts = (cityWall || coreRoadAnchor)
+    ? {
+      ...norm,
+      ...(cityWall ? { cityWall } : {}),
+      ...(coreRoadAnchor ? { coreRoadAnchor } : {}),
+    }
+    : norm; // 생성 중에만 주입; 반환 plan에는 features가 단일 소스.
 
   // ── 3) 도로 (간선 결정론 + 이면 유기) ──
   const roadsResult = planRoads(site, layoutOpts, rng);
@@ -241,8 +292,15 @@ export function planVillage(opts = {}) {
   // ── 4.5) 위성 부락(#120) ── 본동에서 조금 떨어진 완사면 포켓에 작은 무리(몇 채). rng 소비 없는 전용
   //   시드 경로(공유 rng 불침해 → 상류 결정론 보존, 위성 OFF 회귀 안전). 겹침 회피에 기존 필지·예약 코어
   //   polygon 을 넘긴다. cityWall 이 있으면 실제 부정형 윤곽 바깥만 허용한다.
-  const satExisting = [...blockers.map((b) => b.poly).filter(Boolean), ...frontage.map((p) => p.poly)];
-  const satellites = planSatellites(site, norm, seed, { existing: satExisting, cityWall });
+  const satExisting = [
+    ...blockers.map((blocker) => blocker.poly).filter(Boolean),
+    ...frontage.map((parcel) => parcel.poly),
+  ];
+  const satellites = planSatellites(site, norm, seed, {
+    existing: satExisting,
+    cityWall,
+    roads: roadsResult.roads,
+  });
   // 예약 코어 중 실제 필지로 렌더할 것(궁 제외)만 parcels 에 포함
   const reserved = blockers.filter((b) => b.hero);
   const parcels = [...reserved, ...frontage, ...satellites];
@@ -250,7 +308,11 @@ export function planVillage(opts = {}) {
   parcels.forEach((p, i) => { p.id = `p${i}`; });
   // 집 변주 필드(평면 프로토·톤·yaw·스케일·담 유형·부속채) — parcel.seed 결정론(variants.js).
   //   #91 어휘 옵션(다양성 강도·담장 분포)을 tuning 으로 전달(무옵션 시 현행 정확 재현, parcel-seed rng 격리).
-  parcels.forEach((p) => assignVariation(p, char01, tuning));
+  parcels.forEach((p) => {
+    if (p.sx == null) {
+      assignFittedVariation(p, char01, tuning);
+    }
+  });
 
   // ── 5) 정자 ──
   // 씨족촌: 동구 정자(진입 초입). 도성/읍치: 중심 정자(공용 결절).
@@ -297,13 +359,41 @@ export function planVillage(opts = {}) {
   }
 
   // ── 7) 다랑이 논 (개울 남쪽 저지) — 민촌일수록 농경 비중↑(논 촘촘), 반촌은 성글게 ──
-  const paddies = site.paddyRegion ? planPaddies(site, rng, char01, tuning.paddyDensityK) : null;
+  const paddyObstacles = [
+    ...parcels.map((parcel) => parcel.poly),
+    ...(features.palace?.poly ? [features.palace.poly] : []),
+  ];
+  // 논 후보 RNG는 전부 소비한 뒤 실제 필지와 겹치는 배미만 걷어 낸다. 필터 때문에 뒤쪽
+  // 소품/절 seed 흐름이 달라지지 않으면서 담·처마 아래 논 표면이 비치는 오류를 막는다.
+  let paddies = null;
+  if (site.paddyRegion) {
+    const candidates = planPaddies(site, rng, char01, tuning.paddyDensityK);
+    paddies = [];
+    // 후보·tone RNG를 전부 소비한 뒤 stable first-wins로 공간 계약만 적용한다. 인접 셀 지터가
+    // 논둑을 포개도 뒤 소품 seed는 불변이고, 화면에는 한 겹의 온전한 배미만 남는다.
+    for (const field of candidates) {
+      if (streamIntersectsPolygon(site, field.poly, STREAM_PADDY_BANK_CLEARANCE)) continue;
+      if (paddyObstacles.some((poly) => G.polysOverlap(field.poly, poly))) continue;
+      if (paddies.some((accepted) => G.polysOverlap(field.poly, accepted.poly))) continue;
+      paddies.push(field);
+    }
+  }
 
   // ── 8) 소품 (동구 장승·솟대, 종가 앞 우물·장독대, 성격별 액센트) ──
   planProps(features, site, scale, rng, char01);
 
   // ── 9) 절 클러스터 (배산 사면 중턱, 마을과 이격) ──
   if (includeTemple) features.temple = placeTemple(site, seed);
+
+  // ── 10) 보호수 예약 ── 실제 flora를 만들기 전에 순수 위치·수관을 plan에 고정한다. 숲 worker와
+  // 마당 renderer가 같은 목록을 소비하므로 보호수 자리에 배경 숲이 먼저 박히지 않는다.
+  features.guardianTrees = planGuardianTrees({
+    scale,
+    features,
+    parcels,
+    paddies,
+    roads: roadsResult.roads,
+  }, site, seed);
 
   const allPts = [...roadsResult.roads.flatMap((r) => r.pts), ...parcels.map((p) => p.center)];
   const bounds = G.boundsOfPts(allPts.length ? allPts : [site.center]);
@@ -406,10 +496,41 @@ function planPaddies(site, rng, char01 = 0.5, paddyK = 1) {
       ];
       // 논배미마다 옅은 색편차(패치워크). 차분한 여름 초록·마른 논둑 톤.
       const tone = rng.pick([0x6a7b3f, 0x71803f, 0x62723a, 0x79794a, 0x6d7c42]);
-      fields.push({ poly, y: site.heightAt(cx, cz) + 0.06, tone });
+      // 첫 단이 사행 수로에 닿으면 배미 전체를 버리지 않고 북변만 실제 남쪽 둑선까지 물린다.
+      // 다음 단과의 간격은 그대로라 겹침이 생기지 않고, 수변에 맞춘 얕은 사다리꼴이 남는다.
+      // tone까지 먼저 뽑아 기존 RNG 창을 끝낸 뒤 trim하므로 탈락 여부가 뒤 소품 seed를 흔들지 않는다.
+      const safePoly = trimPaddyToStreamBank(site, poly, STREAM_PADDY_BANK_CLEARANCE);
+      if (!safePoly) continue;
+      const safeCenter = G.polyCentroid(safePoly);
+      fields.push({ poly: safePoly, y: site.heightAt(safeCenter.x, safeCenter.z) + 0.06, tone });
     }
   }
   return fields;
+}
+
+function trimPaddyToStreamBank(site, poly, margin) {
+  if (!site.stream || !streamIntersectsPolygon(site, poly, margin)) return poly;
+  const out = poly.map((point) => ({ ...point }));
+  const minX = Math.min(...out.map((point) => point.x));
+  const maxX = Math.max(...out.map((point) => point.x));
+  let bankZ = -Infinity;
+  // 한 배미 폭 안의 사행 최고점을 직선 북변으로 감싸 convex 계약을 보존한다.
+  for (let i = 0; i <= 12; i++) {
+    const x = minX + (maxX - minX) * i / 12;
+    bankZ = Math.max(bankZ, site.streamZat(x) + site.streamHalf + margin + 0.08);
+  }
+  const southEdge = Math.min(out[2].z, out[3].z);
+  if (southEdge - bankZ < 3.5) return null;
+  out[0].z = Math.max(out[0].z, bankZ);
+  out[1].z = Math.max(out[1].z, bankZ);
+  // 선형 water ribbon의 접선 폭까지 포함한 최종 exact 판정. 드문 급굽이는 20cm씩 더
+  // 물리되, 농사 가능한 최소 깊이 아래로 줄어들면 그 배미만 생략한다.
+  for (let step = 0; step < 12 && streamIntersectsPolygon(site, out, margin); step++) {
+    out[0].z += 0.2;
+    out[1].z += 0.2;
+    if (southEdge - Math.max(out[0].z, out[1].z) < 3.5) return null;
+  }
+  return streamIntersectsPolygon(site, out, margin) ? null : out;
 }
 
 // ── 절(산사) 배치 (#94) ── 산사(山寺)는 능선 마루가 아니라 배산 사면의 완사 벤치(좌청룡·우백호 어깨)에

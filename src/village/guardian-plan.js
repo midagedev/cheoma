@@ -5,6 +5,12 @@ import {
   cityWallVegetationBlocked,
   worldEdgeClearance,
 } from './citywall-contour.js';
+import { canopyBlocksSolarAccess, circleIntersectsPolygon } from './parcel-contract.js';
+import { createRoadSpatialIndex } from './road-spatial.js';
+import {
+  STREAM_GUARDIAN_BASE_CLEARANCE,
+  streamClearanceAt,
+} from './stream-spatial.js';
 
 // 보호수(당산나무) 위치만 다루는 순수 계획 단계. THREE 지오메트리와 분리해 작은 성곽을
 // 강제한 경우에도 수관 전체가 성벽·문루·접근로를 침범하지 않는지 빠르게 계약 검사할 수 있다.
@@ -12,7 +18,19 @@ import {
 const TAU = Math.PI * 2;
 const SEARCH_STEP = 2.4;
 const LINEAR_ATTEMPTS = 12;
-const RADIAL_RINGS = 8;
+const RADIAL_RINGS = 18;
+// 보호수는 장식 후보가 아니라 scale별 필수 landmark다. 조밀한 도성에서는 기존 18-ring
+// 근방이 필지·일조 회랑으로 가득 찰 수 있으므로, 기존 후보 순서는 유지한 채 실패할 때만
+// 마을 반경에 비례해 탐색을 이어 간다. 0.4R이면 중앙 기준점(0.15R offset)의 의미를
+// 유지하면서도 한양의 실제 빈터까지 닿고, 이미 성공하던 seed의 위치/hash는 바뀌지 않는다.
+const REQUIRED_ROLE_SEARCH_RADIUS_RATIO = 0.4;
+export const GUARDIAN_CANOPY_RADIUS_BY_KIND = Object.freeze({ zelkova: 14, ginkgo: 8.4 });
+export const GUARDIAN_CANOPY_RADIUS = GUARDIAN_CANOPY_RADIUS_BY_KIND.zelkova;
+export const GUARDIAN_BASE_CLEARANCE = 5;
+
+export function guardianCanopyRadius(kind, scale = 1) {
+  return (GUARDIAN_CANOPY_RADIUS_BY_KIND[kind] || GUARDIAN_CANOPY_RADIUS) * scale;
+}
 
 export function planGuardianTrees(plan, site, seed) {
   const rng = makeRng((seed ^ 0x60a2d) >>> 0);
@@ -24,35 +42,44 @@ export function planGuardianTrees(plan, site, seed) {
     ? { x: -southGate.dirX, z: -southGate.dirZ }
     : G.norm(G.sub(C, E));
   const perp = G.perpL(toC);
-  const parcels = plan.parcels || [];
-  const clearOfParcels = (x, z) => {
+  const palace = plan.features?.palace;
+  const parcels = [...(plan.parcels || []), ...(palace?.center ? [palace] : [])];
+  const paddies = plan.paddies || [];
+  const roadSpatial = createRoadSpatialIndex(plan.roads || []);
+  const reservations = [];
+  const requiredRoleSearchRings = Math.max(
+    RADIAL_RINGS + 1,
+    Math.ceil(R * REQUIRED_ROLE_SEARCH_RADIUS_RATIO / (SEARCH_STEP * 2)),
+  );
+  const clearOfParcels = (x, z, visualRadius) => {
     for (const p of parcels) {
-      const radius = Math.max(p.plotW, p.plotD) * 0.5 + 6;
-      if ((x - p.center.x) ** 2 + (z - p.center.z) ** 2 < radius * radius) return false;
+      if (circleIntersectsPolygon({ x, z }, visualRadius + 1.5, p.poly)) return false;
+      if (canopyBlocksSolarAccess(p, { x, z }, visualRadius)) return false;
     }
     return true;
   };
-  const clearAt = (x, z, visualRadius = 0) => clearOfParcels(x, z)
-    // 무성곽 마을의 기존 보호수 배치는 그대로 둔다. 성곽 회피로 재탐색할 때만 수관이
-    // 지형 끝을 벗어나지 않도록 같은 footprint 계약을 추가한다.
-    && (!cityWall || !site.edge || worldEdgeClearance(site.edge, { x, z }) >= visualRadius)
+  const clearAt = (x, z, visualRadius = 0) => clearOfParcels(x, z, visualRadius)
+    && paddies.every((field) => !circleIntersectsPolygon({ x, z }, visualRadius, field.poly))
+    && reservations.every((tree) => G.dist(tree, { x, z }) >= tree.radius + visualRadius + 2)
+    // 수관이 마을길을 그늘지게 하는 것은 허용하되, 밑동 돌단·평상까지 도로 ribbon 위에
+    // 생기지는 않게 실제 소품 footprint만큼 중심을 물린다.
+    && !roadSpatial.withinRoadClearance({ x, z }, null, GUARDIAN_BASE_CLEARANCE)
+    && streamClearanceAt(site, { x, z }) >= STREAM_GUARDIAN_BASE_CLEARANCE
+    && (!site.edge || worldEdgeClearance(site.edge, { x, z }) >= visualRadius)
     && !cityWallVegetationBlocked(cityWall, { x, z }, {
       corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
       gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
       gateApproachMargin: visualRadius,
     });
-  const nudge = (x0, z0, dx, dz, visualRadius = 0) => {
+  const nudge = (x0, z0, dx, dz, visualRadius = 0, radialRings = RADIAL_RINGS) => {
     for (let k = 0; k < LINEAR_ATTEMPTS; k++) {
       const x = x0 + dx * k * SEARCH_STEP, z = z0 + dz * k * SEARCH_STEP;
       if (clearAt(x, z, visualRadius)) return { x, z };
     }
-    // 성곽이 없는 기존 마을은 12회 실패 시 원래 후보를 쓰던 장면 계약을 보존한다.
-    // 아래의 충돌 회피 확장은 성곽을 강제한 새 경로에만 적용한다.
-    if (!cityWall) return { x: x0, z: z0 };
-    // 작은 성곽은 입구 축·필지·성벽 여유가 겹칠 수 있다. 한 방향만 계속 밀지 말고 주변 빈터를
-    // 가까운 순서로 훑는다. 끝까지 없으면 null을 반환해 충돌한 나무를 억지로 만들지 않는다.
+    // 한 방향만 계속 밀지 말고 후보 의미(동구/중심/물가)를 보존하는 가장 가까운 빈터를 찾는다.
+    // 무성곽에서도 막힌 원점을 되돌려 수관을 집 위에 얹던 예전 예외는 허용하지 않는다.
     const baseAngle = Math.atan2(dz, dx);
-    for (let ring = 1; ring <= RADIAL_RINGS; ring++) {
+    for (let ring = 1; ring <= radialRings; ring++) {
       const radius = ring * SEARCH_STEP * 2;
       const steps = 8 + ring * 2;
       const phase = baseAngle + ring * Math.PI * (3 - Math.sqrt(5));
@@ -66,11 +93,18 @@ export function planGuardianTrees(plan, site, seed) {
   };
 
   const out = [];
+  const keepRequired = (pos, radius, fields) => {
+    if (!pos) {
+      throw new Error(`guardian-plan could not place required ${fields.role} tree for ${scale}:${seed}`);
+    }
+    reservations.push({ x: pos.x, z: pos.z, radius });
+    out.push({ ...pos, radius, ...fields });
+  };
   // 동구/남문 보호수: 종류·크기·회전 RNG 순서는 기존 출력과 동일하다.
   {
     const kind = rng() < 0.85 ? 'zelkova' : 'ginkgo';
     const treeScale = rng.range(0.95, 1.15), spin = rng() * TAU;
-    const visualRadius = 12 * treeScale;
+    const visualRadius = guardianCanopyRadius(kind, treeScale);
     const lateral = southGate
       ? Math.max(R * 0.11, southGate.width * 0.5 + CITY_WALL_DIMENSIONS.gateVegetationMargin + visualRadius + 4)
       : R * 0.11;
@@ -79,27 +113,38 @@ export function planGuardianTrees(plan, site, seed) {
       : R * 0.05;
     const bx = E.x + perp.x * lateral + toC.x * inward;
     const bz = E.z + perp.z * lateral + toC.z * inward;
-    const pos = nudge(bx, bz, perp.x, perp.z, visualRadius);
-    if (pos) out.push({ ...pos, kind, scale: treeScale, spin, props: true });
+    const pos = nudge(bx, bz, perp.x, perp.z, visualRadius, requiredRoleSearchRings);
+    keepRequired(pos, visualRadius, {
+      role: 'entrance', kind, scale: treeScale, spin, props: true,
+    });
   }
   // 중심 명당(종가/관아 옆) — 실제 수관 반경으로 검사한다.
-  if (scale === 'town' || scale === 'capital') {
+  if (scale === 'town' || scale === 'capital' || scale === 'hanyang') {
     const treeScale = rng.range(1.0, 1.2), spin = rng() * TAU;
+    const radius = guardianCanopyRadius('zelkova', treeScale);
     const pos = nudge(
       C.x + perp.x * R * 0.15,
       C.z + perp.z * R * 0.03,
       perp.x,
       perp.z,
-      12 * treeScale,
+      radius,
+      requiredRoleSearchRings,
     );
-    if (pos) out.push({ ...pos, kind: 'zelkova', scale: treeScale, spin, props: true });
+    keepRequired(pos, radius, {
+      role: 'central', kind: 'zelkova', scale: treeScale, spin, props: true,
+    });
   }
   // 개울가 — 실제 수관 반경으로 검사한다.
-  if (scale === 'capital') {
+  if (scale === 'capital' || scale === 'hanyang') {
     const kind = rng() < 0.6 ? 'zelkova' : 'ginkgo';
     const treeScale = rng.range(0.9, 1.1), spin = rng() * TAU;
-    const pos = nudge(R * 0.3, site.streamZ - R * 0.02, 1, 0, 12 * treeScale);
-    if (pos) out.push({ ...pos, kind, scale: treeScale, spin, props: false });
+    const radius = guardianCanopyRadius(kind, treeScale);
+    const x = R * 0.3;
+    const z = site.streamZat(x) - site.streamHalf - STREAM_GUARDIAN_BASE_CLEARANCE;
+    const pos = nudge(x, z, 1, 0, radius, requiredRoleSearchRings);
+    keepRequired(pos, radius, {
+      role: 'stream', kind, scale: treeScale, spin, props: false,
+    });
   }
   return out;
 }

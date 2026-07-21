@@ -10,9 +10,26 @@ import {
   worldEdgeClearance,
   worldEdgeContainsPolygon,
 } from './citywall-contour.js';
+import {
+  SOUTH,
+  attachParcelSpatialContract,
+  rectangularParcelShape,
+  terrainAlignedFacing,
+} from './parcel-contract.js';
+import { createRoadSpatialIndex } from './road-spatial.js';
+import {
+  assignFittedVariation,
+  assignFittedVariationSequence,
+  fitHouseWithinParcel,
+} from './house-footprint.js';
+import {
+  STREAM_PARCEL_BANK_CLEARANCE,
+  STREAM_SATELLITE_BANK_CLEARANCE,
+  createStreamSpatialIndex,
+} from './stream-spatial.js';
 
 // 도로변 필지 분할 + 신분 위계 그라디언트 (joseon-city.md 규칙 7·8·9·10).
-//   - 필지는 도로 파사드를 따라 양편에 앉고, 집은 도로(로컬 +z)를 향한다(규칙 7).
+//   - 필지는 도로 파사드를 따라 양편에 앉되, 집의 로컬 +z는 남향 지세축을 우선한다(규칙 7).
 //   - 신분(rank 0..1) → 필지 면적·칸수·유형(기와/초가) 매핑. 1품↔서인 면적차(가대제한).
 //   - 중심(종가/관아/궁)·주산(북)·간선에 가까울수록 rank↑(크고 기와), 멀·남·외곽일수록 rank↓
 //     (작고 초가). 그라디언트는 단조. 격자는 결코 완성되지 않는다.
@@ -22,6 +39,8 @@ import {
 
 
 const SCALE_TARGET = { hamlet: 10, village: 32, town: 70, capital: 104, hanyang: 340 };
+const ROAD_CURVE_SETBACK = 1.2; // 도로 ribbon 밖의 담·배수 여유(실제 poly↔capsule 검사와 동일 단위)
+const LOT_SCALE = { hamlet: 1, village: 0.96, town: 0.92, capital: 0.9, hanyang: 0.88 };
 
 // 공간 해시 그리드 — 필지 겹침 판정을 O(배치수)에서 O(근접셀)로. 도성(수백 필지)에서 필수:
 //   기존 전수검사(모든 placed 폴리곤 대비 SAT)는 후보수×배치수 = O(n²)라 hanyang 에서 수초 소요.
@@ -56,7 +75,6 @@ function makePlacedGrid(cell = 28) {
 // 간선 우선 배정 순서(대로변 프라임 파사드부터).
 const LEVEL_ORDER = { daero: 0, jungno: 1, soro: 2, golmok: 3 };
 // 도로 등급별 파사드 간격(전면 폭 + 여유).
-const FRONT_STEP = { daero: 17, jungno: 15, soro: 13, golmok: 11.5 };
 const ARTERIAL_BONUS = { daero: 0.26, jungno: 0.18, soro: 0.06, golmok: 0.0 };
 
 // rank + character(char01) → 필지 치수·유형.
@@ -91,25 +109,8 @@ function sizeVary(dims, reg, sr) {
 const regOf = (rank, char01, hero) =>
   hero ? 0.90 : Math.max(0, Math.min(1, 0.06 + rank * 0.46 + (char01 - 0.5) * 0.34));
 
-// 방향 벡터(frontDir) 를 xz 평면에서 ang(rad) 회전 — 필지 방향 지터. frontDir 에 얹으면
-//   worldPolyFromShape(=facingY)·parcelRotY 가 모두 이 각을 공유 → poly·담·패드·프록시 정합 유지.
-function rotDir(d, ang) {
-  const c = Math.cos(ang), s = Math.sin(ang);
-  return { x: d.x * c - d.z * s, z: d.x * s + d.z * c };
-}
 // reg → 필지 방향 지터 최대각(rad). 정연 마을(격자 지향) 규칙을 완화해 손배치 인상.
 const facingJitter = (reg, sr) => (sr() * 2 - 1) * lerpN(0.34, 0.09, reg);   // ±19.5°(민촌)~±5°(반가)
-
-// ── 남향 지향(#120) ── 도로 지향 frontDir 을 남(+z)쪽으로 제한된 각(pull)만큼 당긴다. 조선 가옥의
-//   남향 선호 반영이되, 도로에 등을 돌리지 않도록 최대 pull 로 클램프 — 이미 pull 안이면 정남 스냅,
-//   그밖은 pull 만큼만 남으로 회전(정북 지향 집은 거의 불변). worldPolyFromShape·parcelRotY 가 같은
-//   frontDir 을 공유하므로 poly·담·패드·프록시 정합 유지. facingY(=atan2(x,z)) 기준: 남(+z)=0.
-const SOUTH_PULL = 0.42;   // ≈24° — 도로 관계 보존하며 남향 리드
-function southPull(dir, pull = SOUTH_PULL) {
-  const cur = Math.atan2(dir.x, dir.z);                 // 현 facingY (남=0)
-  const ang = Math.max(-pull, Math.min(pull, cur));     // rotDir(+ang) 은 facingY 를 ang 만큼 감소
-  return rotDir(dir, ang);
-}
 
 // 로컬 부정형 필지 폴리곤(docs R-P1). 좌표: X=좌우(도로 접선), Z=앞(+hd 도로변)~뒤(-hd).
 //   집은 뒤(z=-hd 근처)에 앉고 앞(+hd)은 마당·대문쪽. 앞변(파사드)은 직선·전폭 고정 —
@@ -150,21 +151,19 @@ function localParcelShape(plotW, plotD, reg, sr) {
   return { pts, roles };
 }
 
-// 정연한 사각 필지(히어로·폴백). roles 는 부정형과 동일 4역.
-function rectShape(plotW, plotD) {
-  const hw = plotW / 2, hd = plotD / 2;
-  return {
-    pts: [{ x: hw, z: hd }, { x: -hw, z: hd }, { x: -hw, z: -hd }, { x: hw, z: -hd }],
-    roles: ['front', 'left', 'back', 'right'],
-  };
-}
-
-// 로컬 shape 점을 월드로 — parcelMatrix(instancing.js)와 동일한 T(center)·Ry(facingY(frontDir)).
-//   yaw 는 배치 변환에서만 얹히므로(현 poly 규약과 동일) 여기선 제외 — 담·패드·프록시가 이 poly 로 정렬.
-function worldPolyFromShape(center, frontDir, pts) {
-  const th = Math.atan2(frontDir.x, frontDir.z);
-  const cos = Math.cos(th), sin = Math.sin(th);
-  return pts.map((p) => ({ x: center.x + p.x * cos + p.z * sin, z: center.z - p.x * sin + p.z * cos }));
+// 남향 좌향은 길의 법선과 다를 수 있으므로 plotD/2 고정 이격으로는 회전한 필지가
+// 자기 길을 다시 덮는다. 실제 shape를 길 반대 방향에 투영해 도로측 끝이 shoulder 밖에
+// 놓이는 최소 중심 이격을 구한다.
+function roadSetbackForShape(shape, frontDir, awayFromRoad, shoulder) {
+  const front = G.norm(frontDir);
+  const right = { x: front.z, z: -front.x };
+  let nearest = Infinity;
+  for (const point of shape.pts) {
+    const x = right.x * point.x + front.x * point.z;
+    const z = right.z * point.x + front.z * point.z;
+    nearest = Math.min(nearest, x * awayFromRoad.x + z * awayFromRoad.z);
+  }
+  return shoulder - nearest;
 }
 
 // ── R-P2 고샅(골목) 폭 ──────────────────────────────────────────────
@@ -186,8 +185,16 @@ function polyDist(p, poly) {
 
 export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const scale = opts.scale;
+  const lotScale = LOT_SCALE[scale] || 1;
+  const compactLot = (dims) => ({
+    ...dims,
+    plotW: dims.plotW * lotScale,
+    plotD: dims.plotD * lotScale,
+  });
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const roads = roadsResult.roads;
+  const roadSpatial = createRoadSpatialIndex(roads);
+  const streamSpatial = createStreamSpatialIndex(site);
   const C = site.center;
   // 필지 목표수: 연속 스케일(#89)은 plan 이 siteR 파생 연속값(opts.target)을 주입 → tier 경계에서
   //   호수(戶數)가 튀지 않는다. 미주입(구 호출)이면 이산 SCALE_TARGET 폴백(회귀 안전).
@@ -195,7 +202,13 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const target = (typeof opts.target === 'number' && opts.target >= 0) ? Math.round(opts.target) : (SCALE_TARGET[scale] || 30);
   const parcels = [];
   const placed = makePlacedGrid();                              // 충돌 폴리곤 공간해시(예약분 포함)
-  for (const b of blockers) if (b.poly) placed.add(b.poly);
+  for (const blocker of blockers) {
+    if (blocker.kind && blocker.seed != null) {
+      if (blocker.sx == null) assignFittedVariation(blocker, char01, opts.tuning);
+      else fitHouseWithinParcel(blocker);
+    }
+    if (blocker.poly) placed.add(blocker.poly);
+  }
 
   const northRef = C.z - site.bowlR * 0.35;    // 최북 거주선(주산 기슭)
 
@@ -209,15 +222,9 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   };
 
   // 필지 유효성: 분지 안 · 개울/논 회피 · 남한선 · 급경사 회피 · 타도로/타필지 비겹침.
-  // 필지 중심이 다른 도로 위(또는 바짝)에 앉지 않도록만 막는다. 뒷모서리는 이웃 도로에
-  // 근접해도 허용(블록이 좁아도 채워지게) — 완전 겹침은 아래 overlap 검사가 담당.
-  const clearOfRoads = (center, ownRoad) => {
-    for (const r of roads) {
-      if (r === ownRoad) continue;
-      if (G.distToPolyline(center, r.pts).d < r.width / 2 + 2.5) return false;
-    }
-    return true;
-  };
+  // 자기 길은 실제 poly↔ribbon 계약으로, 다른 길은 후보 중심 회랑으로 빠르게 검사한다.
+  const clearOfRoads = (center, ownRoad) =>
+    !roadSpatial.withinRoadClearance(center, ownRoad, 2.5);
   const validate = (center, poly, ownRoad) => {
     // 필지 전체가 실제 지형 메시와 성곽 안쪽에 있어야 한다. 중심점만 검사하면 큰 필지 모서리가
     // world-edge 밖으로 삐치거나 성벽을 관통한다.
@@ -226,7 +233,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     // #120 비원형 분지: 외곽 한계를 방위별 분지 반경(bowlRAt)에 태워 신장 로브까지 필지가 뻗게 한다.
     const bowlLim = site.bowlRAt ? site.bowlRAt(center.x, center.z) : site.bowlR;
     if (G.dist(center, C) > bowlLim * 1.06) { dbg.bowl++; return false; }
-    if (site.stream && Math.abs(center.z - site.streamZat(center.x)) < site.streamHalf + 4.5) { dbg.stream++; return false; }
+    if (streamSpatial.intersectsPolygon(poly, STREAM_PARCEL_BANK_CLEARANCE)) { dbg.stream++; return false; }
     if (site.paddyRegion) {
       const pr = site.paddyRegion;
       if (center.x > pr.xMin - 2 && center.x < pr.xMax + 2 && center.z > pr.zNear - 2 && center.z < pr.zFar + 2) { dbg.paddy++; return false; }
@@ -246,6 +253,10 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     }
     if (!clearOfRoads(center, ownRoad)) { dbg.road++; return false; }
     if (placed.overlaps(poly)) { dbg.overlap++; return false; }
+    if (roadSpatial.intersectsRoadCorridor(poly, 0.2)) {
+      dbg.road++;
+      return false;
+    }
     return true;
   };
 
@@ -256,7 +267,10 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const heroCap = char01 < 0.34 ? 0 : Math.max(1, Math.round(baseCap * (0.3 + char01)));
   const heroRankMin = 0.86 - char01 * 0.16;    // 반촌일수록 반가 승격 문턱 낮음
   const heroDistK = 0.45 + char01 * 0.28;      // 반촌일수록 반가가 중심에서 더 넓게
-  const dbg = { candidates: 0, bowl: 0, stream: 0, paddy: 0, south: 0, hill: 0, steep: 0, road: 0, overlap: 0, placed: 0 };
+  const dbg = {
+    candidates: 0, bowl: 0, stream: 0, paddy: 0, south: 0, hill: 0,
+    steep: 0, road: 0, overlap: 0, houseFit: 0, placed: 0,
+  };
   planParcels.lastDebug = dbg;
 
   const FS = 2.0;              // 커서 정밀도(m)
@@ -265,7 +279,14 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     const fine = G.resample(road.pts, FS);
     if (fine.length < 4) continue;
     const endPad = Math.round((road.width * 0.6 + 4) / FS);   // 교차·끝부 회피
-    for (const side of [1, -1]) {
+    // 같은 길의 양편 중 길이 남쪽에 놓이는 필지(대문이 남향하기 쉬운 쪽)를 먼저 채운다.
+    // 반대편은 목표 호수를 채울 때만 자연스럽게 사용되어 북향 예외가 무작위로 앞서지 않는다.
+    const sides = [1, -1].sort((a, b) => {
+      const roadDirA = G.mul(G.perpL(fine[1].tan), -a);
+      const roadDirB = G.mul(G.perpL(fine[1].tan), -b);
+      return roadDirB.z - roadDirA.z;
+    });
+    for (const side of sides) {
       // 도로를 따라 커서 전진: 배치 성공 시 필지폭+골 만큼, 실패 시 FS 씩.
       let i = endPad;
       while (i < fine.length - endPad) {
@@ -274,7 +295,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
         const inward = G.mul(G.perpL(smp.tan), side);
         const provisional = G.add(smp.pt, G.mul(inward, road.width / 2 + 8));
         let rank = rankAt(provisional, road.level);
-        let dims = dimsFor(rank, char01);
+        let dims = compactLot(dimsFor(rank, char01));
         let hero = false, heroStyle;
         if (rank >= heroRankMin && heroCount < heroCap && G.dist(provisional, C) < site.bowlR * heroDistK) {
           hero = true; heroStyle = 'hanok';
@@ -283,21 +304,34 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
         const pseed = (opts.seed ^ (parcels.length * 2654435761)) >>> 0;
         const reg = regOf(rank, char01, hero);
         if (!hero) dims = sizeVary(dims, reg, makeRng((pseed ^ 0x51fa) >>> 0));  // 같은 rank 내 대소 변주
-        const base = G.add(smp.pt, G.mul(inward, road.width / 2 + 1.2));
-        const center = G.add(base, G.mul(inward, dims.plotD / 2));
         const inwardDir = G.norm(G.mul(inward, -1));            // 도로를 향한 기본 방향
-        const frontDir = hero ? inwardDir
-          : southPull(rotDir(inwardDir, facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0))));  // 지터 + 남향 지향(#120)
-        const shape = hero ? rectShape(dims.plotW, dims.plotD)
+        const jitter = hero ? 0 : facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0));
+        const frontDir = terrainAlignedFacing(inwardDir, SOUTH, jitter);
+        const shape = hero ? rectangularParcelShape(dims.plotW, dims.plotD)
           : localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
-        const poly = worldPolyFromShape(center, frontDir, shape.pts);
+        const setback = roadSetbackForShape(
+          shape,
+          frontDir,
+          inward,
+          road.width / 2 + ROAD_CURVE_SETBACK,
+        );
+        const center = G.add(smp.pt, G.mul(inward, setback));
+        const parcel = attachParcelSpatialContract({
+          shape, center, frontDir, rank, kind: dims.kind,
+          plotW: dims.plotW, plotD: dims.plotD, hero, heroStyle, seed: pseed,
+          structureScale: hero ? 1 : lotScale,
+          placement: 'frontage',
+        }, road.id, smp.pt);
+        const poly = parcel.poly;
+        if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: 4 })) {
+          dbg.houseFit++;
+          i += 1;
+          continue;
+        }
         dbg.candidates++;
         if (validate(center, poly, road)) {
           dbg.placed++;
-          parcels.push({
-            poly, shape, center, frontDir, rank, kind: dims.kind,
-            plotW: dims.plotW, plotD: dims.plotD, hero, heroStyle, seed: pseed,
-          });
+          parcels.push(parcel);
           placed.add(poly);
           if (hero) heroCount++;
           const gap = gapWidth(rank, char01, rng);              // R-P2 고샅 폭 변주
@@ -311,36 +345,59 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
 
   // ── 내부 충전(Poisson) ── 도로 회랑(≤maxRoadDist) 안에 남은 자리를 채운다. 각 집은
   // 가장 가까운 도로를 바라봐 방향 정합 유지 → 안길을 따라 두툼한 유기 군집이 된다.
-  const maxRoadDist = site.R * 0.16 + 6;
-  // 중심 편향: 작은 마을은 중심 응집, 큰 도성/읍치는 분지 전역으로 고르게 확산.
-  const radExp = scale === 'capital' ? 0.62 : scale === 'town' ? 0.66 : 0.72;
-  let guard = 0;
-  while (parcels.length < target && guard < target * 90) {
-    guard++;
-    const ang = rng.range(0, Math.PI * 2);
-    // #120 비원형: 방위별 분지 반경으로 샘플 → 신장 로브가 있으면 그쪽으로 필지 군집이 더 뻗는다.
-    const bowlRad = site.bowlRadiusAt ? site.bowlRadiusAt(ang) : site.bowlR;
-    const rad = bowlRad * Math.pow(rng(), radExp);         // 중심 편향(밀도↑)
-    const p0 = { x: C.x + Math.cos(ang) * rad, z: C.z + Math.sin(ang) * rad };
-    let best = { d: Infinity, pt: null };
-    for (const r of roads) { const q = G.distToPolyline(p0, r.pts); if (q.d < best.d) best = q; }
-    if (!best.pt || best.d > maxRoadDist) continue;
+  // 골목망이 성긴 대도성도 보행 연결 가능한 두세 필지 깊이까지만 충전한다. 예전의
+  // 무제한 R 비례식은 한양에서 대문이 길로부터 80m 가까이 떨어진 집을 만들었다.
+  const maxRoadDist = Math.min(site.R * 0.16 + 6, scale === 'hanyang' ? 64 : 40);
+  const tryInfill = (p0) => {
+    const best = roadSpatial.nearest(p0, maxRoadDist);
+    if (!best.pt || best.d > maxRoadDist) return false;
     const rank = rankAt(p0, 'golmok');
     const pseed = (opts.seed ^ (parcels.length * 2654435761)) >>> 0;
     const reg = regOf(rank, char01, false);
-    const dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
-    if (best.d < dims.plotD * 0.5 + 1.5) continue;         // 도로 위/침범 방지
-    const frontDir = southPull(rotDir(G.norm(G.sub(best.pt, p0)), facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0))));  // 도로 지향 + 지터 + 남향(#120)
+    const dims = sizeVary(compactLot(dimsFor(rank, char01)), reg,
+      makeRng((pseed ^ 0x51fa) >>> 0));
+    const frontDir = terrainAlignedFacing(
+      G.norm(G.sub(best.pt, p0)),
+      SOUTH,
+      facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0)),
+    );
     const shape = localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
-    const poly = worldPolyFromShape(p0, frontDir, shape.pts);
-    dbg.candidates++;
-    if (!validate(p0, poly, null)) continue;
-    dbg.placed++;
-    parcels.push({
-      poly, shape, center: p0, frontDir, rank, kind: dims.kind,
+    const awayFromRoad = G.norm(G.sub(p0, best.pt));
+    const roadSetback = roadSetbackForShape(
+      shape,
+      frontDir,
+      awayFromRoad,
+      (best.road?.width || 0) / 2 + ROAD_CURVE_SETBACK,
+    );
+    if (best.d < roadSetback) return false;                // 회전된 실제 필지의 도로 침범 방지
+    const parcel = attachParcelSpatialContract({
+      shape, center: p0, frontDir, rank, kind: dims.kind,
       plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed,
-    });
+      structureScale: lotScale,
+      placement: 'infill',
+    }, best.road?.id, best.pt);
+    const poly = parcel.poly;
+    if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: 4 })) {
+      dbg.houseFit++;
+      return false;
+    }
+    dbg.candidates++;
+    if (!validate(p0, poly, best.road)) return false;
+    dbg.placed++;
+    parcels.push(parcel);
     placed.add(poly);
+    return true;
+  };
+
+  // 도로변 배정 뒤 남은 블록의 작은 틈을 결정론적 난수 표본으로 보완한다.
+  const radExp = scale === 'capital' ? 0.62 : scale === 'town' ? 0.66 : 0.72;
+  let guard = 0;
+  while (parcels.length < target && guard < target * 180) {
+    guard++;
+    const ang = rng.range(0, Math.PI * 2);
+    const bowlRad = site.bowlRadiusAt ? site.bowlRadiusAt(ang) : site.bowlR;
+    const rad = bowlRad * Math.pow(rng(), radExp);
+    tryInfill({ x: C.x + Math.cos(ang) * rad, z: C.z + Math.sin(ang) * rad });
   }
 
   // ── R-P2 담 변별·공유(고샅 모델) ── 각 변의 이웃 근접도로 담 높이 차등 + 밀착 경계 담 1줄.
@@ -360,11 +417,17 @@ function assignEdgeShare(parcels) {
   const nonHero = parcels.filter((p) => !p.hero && p.shape && p.poly);
   for (const P of nonHero) {
     const poly = P.poly, roles = P.shape.roles, n = poly.length;
+    const gateEdge = Number.isInteger(P.access?.gateEdge)
+      ? P.access.gateEdge
+      : roles.indexOf('front');
     const sr = makeRng((P.seed ^ 0x1122b) >>> 0);
     const edges = new Array(n);
     for (let k = 0; k < n; k++) {
       const role = roles[k];
-      if (role === 'front') { edges[k] = { role, heightK: 1.0, share: false }; continue; }
+      if (k === gateEdge || role === 'front') {
+        edges[k] = { role, heightK: 1.0, share: false, gate: k === gateEdge };
+        continue;
+      }
       const a = poly[k], b = poly[(k + 1) % n];
       const m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
       let nearest = Infinity, nearIdx = -1;
@@ -390,7 +453,7 @@ function assignEdgeShare(parcels) {
 //   parcel 은 정규 필지와 동일 형태({poly,shape,center,frontDir,rank,kind,plotW,plotD,seed}) — plan 이
 //   parcels 에 편입하면 id·assignVariation·populate 조립·나무 clearance/mask·야경·소동물이 그대로 적용된다.
 //   전용 rng(공유 rng·필지 seed 공간 불침해, 결정론). existing = 겹침 회피용 기존 필지·예약 polygon.
-export function planSatellites(site, opts, seed, { existing = [], cityWall = null } = {}) {
+export function planSatellites(site, opts, seed, { existing = [], cityWall = null, roads = [] } = {}) {
   const scale = opts.scale;
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const nClusters = ({ hamlet: 0, village: 1, town: 1, capital: 2, hanyang: 3 })[scale] || 0;
@@ -459,8 +522,9 @@ export function planSatellites(site, opts, seed, { existing = [], cityWall = nul
   }
 
   const placed = makePlacedGrid();
+  const roadSpatial = createRoadSpatialIndex(roads);
+  const streamSpatial = createStreamSpatialIndex(site);
   for (const poly of existing) if (poly) placed.add(poly);
-  const south = { x: 0, z: 1 };
   const out = [];
   let sidx = 0;
   for (const anchor of chosen) {
@@ -487,15 +551,27 @@ export function planSatellites(site, opts, seed, { existing = [], cityWall = nul
       const pseed = (cseed ^ (made * 2654435761)) >>> 0;
       const reg = regOf(rank, char01, false);
       const dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
-      const frontDir = southPull(rotDir(south, facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0)) * 0.7));  // 남향 + 약한 지터
+      const frontDir = terrainAlignedFacing(
+        SOUTH,
+        SOUTH,
+        facingJitter(reg, makeRng((pseed ^ 0x77d1) >>> 0)) * 0.7,
+      );
       const shape = localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
       const center = { x: px, z: pz };
-      const poly = worldPolyFromShape(center, frontDir, shape.pts);
+      const parcel = attachParcelSpatialContract({
+        shape, center, frontDir, rank, kind: dims.kind,
+        plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed,
+        satellite: true, placement: 'satellite',
+      });
+      const poly = parcel.poly;
+      if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: 4 })) continue;
       if (!worldEdgeContainsPolygon(site.edge, poly, 6)) continue;
       if (cityWall && !cityWallOutsidePolygon(cityWall, poly, 4)) continue;
       if (gateApproaches.some((approach) => G.polysOverlap(poly, approach))) continue;
+      if (streamSpatial.intersectsPolygon(poly, STREAM_SATELLITE_BANK_CLEARANCE)) continue;
+      if (roadSpatial.intersectsRoadCorridor(poly, 0.2)) continue;
       if (placed.overlaps(poly)) continue;
-      out.push({ poly, shape, center, frontDir, rank, kind: dims.kind, plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed, satellite: true });
+      out.push(parcel);
       placed.add(poly);
       made++;
     }

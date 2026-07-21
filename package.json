@@ -15,9 +15,12 @@
     "check:dof:app": "node tools/check-dof-app.mjs",
     "check:lod": "node tools/check-lod.mjs",
     "check:lod:app": "node tools/check-lod-app.mjs",
+    "check:layout": "node tools/check-layout-contract.mjs",
     "check:petals": "node tools/verify-petals.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:roof-seams": "node tools/check-roof-seams.mjs",
+    "check:roads": "node tools/check-road-contract.mjs",
+    "check:wall-gate": "node tools/check-wall-gate-contract.mjs",
     "check:worker": "node tools/check-worker-contract.mjs",
     "shoot:bokeh": "node tools/shoot-bokeh-fixture.mjs",
     "shoot:dof": "node tools/shoot-dof.mjs"

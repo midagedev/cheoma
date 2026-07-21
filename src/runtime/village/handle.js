@@ -13,7 +13,9 @@ import { makeMaterials, applyThatchAge } from '../../builder/palette.js';
 import { buildPalaceCompound } from '../../village/palace.js';
 import { houseMatrix, parcelMatrix } from '../../village/instancing.js';
 import { buildVillageWall } from '../../village/walls.js';
-import { toneOf, variantOv, variantThatchAge, assignVariation } from '../../village/variants.js';
+import { toneOf, variantOv, variantThatchAge } from '../../village/variants.js';
+import { parcelHouseTranslation } from '../../village/parcel-contract.js';
+import { assignFittedVariationSequence } from '../../village/house-footprint.js';
 import { setupClouds } from '../../env/clouds.js';
 import * as G from '../../core/math/geom2.js';
 import { withVillageRandomSeed } from './random-window.js';
@@ -565,8 +567,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       const roofTint = newParams.roofTone != null ? toneOf(kind, newParams.roofTone)
         : (parcel.roofTone || toneOf(kind, parcel.toneIdx || 0));
       applyMaterialRoleTints(house, { roof: roofTint, wall: parcel.wallTone, wood: parcel.woodTone, stone: parcel.stoneTone });
-      const back = -parcel.plotD / 2 + (kind === 'giwa' ? 5.2 : 3.4);
-      house.position.set(0, 0, back);
+      const local = parcelHouseTranslation(parcel);
+      house.position.set(local.x, 0, local.z);
       // 변주 스케일 × 풋프린트 스케일 편집.
       const fs = Math.max(0.6, Math.min(1.6, newParams.footprintScale != null ? newParams.footprintScale : 1));
       house.scale.set((parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
@@ -580,6 +582,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       const vegBed = newParams.vegBed != null ? newParams.vegBed : parcel.vegBed;
       g.add(buildVillageWall(parcel.shape, editWallMats, {
         style: wallType, kind, seed: parcel.seed, char01, aux, plotW: parcel.plotW, plotD: parcel.plotD,
+        gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
         wallHeightK: parcel.wallHeightK, jangdok,
         yardStack, clothesline, vegBed,
       }));
@@ -663,11 +666,20 @@ export function createVillageHandle(opts, seed, plan, group) {
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
-      parcel.seed = (Math.random() * 0x100000000) >>> 0;
+      const previous = { ...parcel };
       // 변주 재유도: 같은 char01·tuning 으로 마을 다양성 규율 유지, rank(빈부 계층) 보존 = 집 유형 고정
-      //   (giwa↔choga 인스턴스 은닉/복원 짝이 어긋나지 않게). hero 는 assignVariation 이 고정 필드라
-      //   parcel.seed 만 바뀌어 buildParcel 내부 배치가 새로 굴러간다.
-      assignVariation(parcel, char01, plan.opts.tuning || {});
+      //   (giwa↔choga 인스턴스 은닉/복원 짝이 어긋나지 않게). 실제 처마 fit까지 plan과 같은
+      //   순수 계약으로 묶고, 드문 부적합 scale은 새 seed를 제한적으로 다시 뽑는다.
+      const rerollSeed = (Math.random() * 0x100000000) >>> 0;
+      const fitted = assignFittedVariationSequence(parcel, char01, plan.opts.tuning || {}, {
+        baseSeed: rerollSeed,
+        attempts: 16,
+      });
+      if (!fitted) {
+        for (const key of Object.keys(parcel)) if (!(key in previous)) delete parcel[key];
+        Object.assign(parcel, previous);
+        return null;
+      }
       const px = proxyById.get(parcelId);
       if (px) px.buildingSpec = buildParcelSpec(parcel);
       // 새 변주로 오버레이 재생성(showParcelDetail → rebuildParcel(id,{}) 이 기존 오버라이드 폐기).

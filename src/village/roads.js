@@ -6,13 +6,14 @@ import {
   clampPointOutsideCityWall,
   worldEdgeClearance,
 } from './citywall-contour.js';
+import { buildRoadJunctions } from './road-topology.js';
 
 // 2단계 도로 생성 (joseon-city.md 규칙 3·4·11·12·13·14·17).
 //   1) 간선(대로·중로)은 결정론 골격 — 십자/T/남북대로. 곧게(등고 따라 완만 곡선 허용).
 //   2) 이면(소로·골목)은 유기 — 간선/스파인에서 가지형으로 분기하며 등고에 순응해 휜다.
 //   공통 원칙: 전역 격자는 결코 완성되지 않는다.
 //
-// planRoads(site, opts, rng) → { roads:[{level,width,pts}], nodes, spine }
+// planRoads(site, opts, rng) → { roads:[{id,level,width,pts,junctionIds}], nodes, spine }
 //   level: 'daero'(17.5) | 'jungno'(5.0) | 'soro'(3.4) | 'golmok'(2.4)  — 경국대전 폭 등급
 
 export const ROAD_WIDTH = { daero: 17.5, jungno: 5.0, soro: 3.4, golmok: 2.4 };
@@ -27,15 +28,23 @@ function organicPath(a, b, rng, { amp = 6, comps = 2 } = {}) {
   const perp = G.perpL(d);
   const waves = [];
   for (let k = 0; k < comps; k++) {
-    waves.push({ w: (1.2 + 1.6 * k) * Math.PI / L * rng.range(0.7, 1.3), ph: rng.range(0, 6.28), a: amp * rng.range(0.5, 1) / (k + 1) });
+    // 난수 소비량(성분당 3회)은 기존과 동일하게 유지한다. 파장은 저주파에 묶고
+    // 고조파 진폭은 제곱 감쇠해 짧은 골목의 톱니형 꺾임을 없앤다.
+    waves.push({
+      cycles: (0.38 + 0.52 * k) * rng.range(0.85, 1.15),
+      ph: rng.range(0, Math.PI * 2),
+      a: amp * rng.range(0.5, 1) / ((k + 1) ** 2),
+    });
   }
   const pts = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const base = G.lerp(a, b, t);
     let off = 0;
-    for (const wv of waves) off += wv.a * Math.sin(wv.w * (t * L) + wv.ph);
-    off *= Math.sin(Math.PI * t);          // 끝 수렴
+    for (const wv of waves) off += wv.a * Math.sin(Math.PI * 2 * wv.cycles * t + wv.ph);
+    // sin² envelope는 위치뿐 아니라 끝점 미분도 0으로 만들어 분기·T 접합의
+    // 접선을 원래 간선 방향에 맞춘다.
+    off *= Math.sin(Math.PI * t) ** 2;
     pts.push(G.add(base, G.mul(perp, off)));
   }
   return pts;
@@ -57,6 +66,117 @@ function branchPath(from, dir, len, rng, site) {
     if (site.stream && Math.abs(pts[i].z - site.streamZat(pts[i].x)) < site.streamHalf + 2) break; // 개울 침범 방지
   }
   return out.length >= 2 ? out : null;
+}
+
+// 새 샛길은 기존 길을 가로질러 계속 뻗지 않고 첫 접속점에서 끝난다. 시작점은 부모 길과
+// 의도적으로 맞닿으므로 짧은 초기 구간의 교차만 무시한다. 이 한 규칙으로 골목망은
+// 교차 낙서가 아니라 간선→안길→막다른 길의 얕은 프랙탈이 된다.
+const MIN_USABLE_BRANCH_LENGTH = 12;
+const ROAD_HIERARCHY = { daero: 0, jungno: 1, soro: 2, golmok: 3 };
+
+function trimBranchAtRoads(points, roads, minimumAdvance = 2.5) {
+  if (!points || points.length < 2 || roads.length === 0) return points;
+  let traversed = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    const segmentLength = G.dist(a, b);
+    let nearest = null;
+    for (const road of roads) {
+      for (let j = 0; j < road.pts.length - 1; j++) {
+        const hit = G.segIntersect(a, b, road.pts[j], road.pts[j + 1]);
+        if (!hit) continue;
+        const advance = traversed + segmentLength * hit.t;
+        if (advance <= minimumAdvance) continue;
+        if (!nearest || hit.t < nearest.t) nearest = hit;
+      }
+    }
+    if (nearest) {
+      if (traversed + segmentLength * nearest.t < MIN_USABLE_BRANCH_LENGTH) return null;
+      return [...points.slice(0, i + 1), { x: nearest.x, z: nearest.z }];
+    }
+    traversed += segmentLength;
+  }
+  return points;
+}
+
+function roadPairIntersections(a, b) {
+  const hits = [];
+  let distanceA = 0;
+  for (let ai = 0; ai < a.pts.length - 1; ai++) {
+    const lengthA = G.dist(a.pts[ai], a.pts[ai + 1]);
+    let distanceB = 0;
+    for (let bi = 0; bi < b.pts.length - 1; bi++) {
+      const lengthB = G.dist(b.pts[bi], b.pts[bi + 1]);
+      const hit = G.segIntersect(a.pts[ai], a.pts[ai + 1], b.pts[bi], b.pts[bi + 1]);
+      if (hit) {
+        const point = { x: hit.x, z: hit.z };
+        if (!hits.some((previous) => G.dist2(previous.point, point) < 1e-10)) hits.push({
+          point,
+          a: { segment: ai, distance: distanceA + lengthA * hit.t },
+          b: { segment: bi, distance: distanceB + lengthB * hit.u },
+        });
+      }
+      distanceB += lengthB;
+    }
+    distanceA += lengthA;
+  }
+  return hits;
+}
+
+function roadSliceToHit(road, hit, keepStart) {
+  if (keepStart) {
+    const points = [...road.pts.slice(0, hit.segment + 1), hit.point];
+    if (G.dist2(points.at(-2), points.at(-1)) < 1e-12) points.pop();
+    return points;
+  }
+  const points = [hit.point, ...road.pts.slice(hit.segment + 1)];
+  if (G.dist2(points[0], points[1]) < 1e-12) points.shift();
+  return points;
+}
+
+// 두 ribbon이 서로 떨어지기도 전에 재교차하면 화면에는 바늘구멍 같은 렌즈가 남는다.
+// 낮은 위계의 길을 한 접점에서 끝내 실제 geometry를 T자로 만들고, metadata만 합쳐 숨기지 않는다.
+function collapseNarrowRoadLenses(roads) {
+  let changed = true, guard = 0;
+  while (changed && guard++ < 64) {
+    changed = false;
+    outer: for (let ai = 0; ai < roads.length; ai++) {
+      for (let bi = ai + 1; bi < roads.length; bi++) {
+        const a = roads[ai], b = roads[bi];
+        const hits = roadPairIntersections(a, b);
+        const threshold = Math.min(a.width, b.width) * 0.5;
+        let lens = null;
+        for (let i = 0; i < hits.length; i++) for (let j = i + 1; j < hits.length; j++) {
+          if (G.dist(hits[i].point, hits[j].point) <= threshold) {
+            lens = [hits[i], hits[j]];
+            break;
+          }
+        }
+        if (!lens) continue;
+        const victimIsA = (ROAD_HIERARCHY[a.level] || 0) > (ROAD_HIERARCHY[b.level] || 0)
+          || (a.level === b.level && ai > bi);
+        const victimIndex = victimIsA ? ai : bi;
+        const victim = roads[victimIndex];
+        const key = victimIsA ? 'a' : 'b';
+        const ordered = lens.slice().sort((x, y) => x[key].distance - y[key].distance);
+        const total = G.polylineLength(victim.pts);
+        const before = ordered[0][key].distance;
+        const after = total - ordered[1][key].distance;
+        if (Math.max(before, after) < MIN_USABLE_BRANCH_LENGTH) {
+          roads.splice(victimIndex, 1);
+        } else {
+          const keepStart = before >= after;
+          const chosen = keepStart ? ordered[0] : ordered[1];
+          victim.pts = roadSliceToHit(victim, {
+            ...chosen[key],
+            point: chosen.point,
+          }, keepStart);
+        }
+        changed = true;
+        break outer;
+      }
+    }
+  }
 }
 
 function clipRoadsToWall(roads, cityWall, except = new Set()) {
@@ -237,11 +357,20 @@ export function planRoads(site, opts, rng) {
   const gS = gate('south'), gE = gate('east'), gW = gate('west');
   const E = gS || site.entrance;           // 성곽 ON이면 동구 대신 남문이 모든 tier의 진입점.
   const C = site.center;                   // 명당(북, 종가/관아/궁)
+  const coreRoadAnchor = opts.coreRoadAnchor || C; // 예약 코어의 실제 남측 대문
   const wallGateRoads = new Set();
   let southApproach = null;
+  const roadOrdinals = { daero: 0, jungno: 0, soro: 0, golmok: 0 };
   const push = (level, pts) => {
     if (!pts || pts.length < 2) return null;
-    const road = { level, width: ROAD_WIDTH[level], pts };
+    const ordinal = roadOrdinals[level]++;
+    const road = {
+      id: `${level}-${String(ordinal).padStart(3, '0')}`,
+      level,
+      width: ROAD_WIDTH[level],
+      pts,
+      junctionIds: [],
+    };
     roads.push(road);
     return road;
   };
@@ -250,7 +379,7 @@ export function planRoads(site, opts, rng) {
 
   if (scale === 'hamlet' || scale === 'village') {
     // ── 씨족 촌락: 안길(스파인) + 준방사 골목 (규칙 17·18) ──
-    const rawSpine = organicPath(E, C, rng, { amp: site.R * 0.06, comps: 2 });
+    const rawSpine = organicPath(E, coreRoadAnchor, rng, { amp: site.R * 0.06, comps: 2 });
     const spine = W ? confineGateRoad(rawSpine, W, ROAD_WIDTH.soro, { startGate: gS }) : rawSpine;
     const spineRoad = push('soro', spine);
     if (W) { wallGateRoads.add(spineRoad); southApproach = { road: spineRoad, atStart: true }; }
@@ -267,13 +396,15 @@ export function planRoads(site, opts, rng) {
       // 위로 갈수록(중심 근처) 골목 짧게, 초입은 길게
       const len = site.R * (0.16 + 0.14 * rng());
       const dir = G.norm(G.add(perp, G.mul(smp.tan, rng.range(-0.25, 0.25))));
-      push('golmok', branchPath(smp.pt, dir, len, rng, site));
+      push('golmok', trimBranchAtRoads(branchPath(smp.pt, dir, len, rng, site), roads));
       bi++;
     }
     // 중심(종가 앞)에서 좌우로 짧은 안길 — 마을이 중심 안길로 북/남촌 갈림(규칙 17)
     for (const side of [1, -1]) {
-      const dir = G.mul(G.perpL(G.norm(G.sub(C, E))), side);
-      push('golmok', branchPath(C, dir, site.R * 0.20, rng, site));
+      const dir = G.mul(G.perpL(G.norm(G.sub(coreRoadAnchor, E))), side);
+      push('golmok', trimBranchAtRoads(
+        branchPath(coreRoadAnchor, dir, site.R * 0.20, rng, site), roads,
+      ));
     }
     if (scale === 'village') {
       // 마을급: 개울과 평행한 하단 가로(동서) 하나 추가 — 논·물가 접근로
@@ -284,14 +415,14 @@ export function planRoads(site, opts, rng) {
   } else if (scale === 'town') {
     // ── 읍치: 십자 또는 T 간선(규칙 14) + 유기 충전 ──
     const cross = rng() < 0.5 ? 'cross' : 'T';
-    // 남북 간선: 동구 → 관아 코어(C)
-    const rawNs = trunkPath(E, C, rng);
+    // 남북 간선: 동구 → 관아 코어의 남측 대문
+    const rawNs = trunkPath(E, coreRoadAnchor, rng);
     const ns = W ? confineGateRoad(rawNs, W, ROAD_WIDTH.jungno, { startGate: gS }) : rawNs;
     const nsRoad = push('jungno', ns);
     if (W) { wallGateRoads.add(nsRoad); southApproach = { road: nsRoad, atStart: true }; }
     nodes.spine = ns;
-    // 동서 간선: 관아 앞(C 남쪽 조금)에서 좌우로
-    const xz = G.lerp(E, C, 0.66);
+    // 동서 간선: 관아 앞에서 좌우로
+    const xz = { ...coreRoadAnchor };
     nodes.crossing = xz;
     let ew;
     if (W && gE && gW) {
@@ -310,11 +441,13 @@ export function planRoads(site, opts, rng) {
     }
     // 유기 골목 충전: 두 간선에서 가지 분기 — 골목 밀도↑(읍치 이면부 채움 → 도로변 프론티지 확대,
     //   #45 부정형 여파로 성겼던 town 밀도 보강). town 전용이라 타 규모 회귀 무관.
-    fillGolmok(roads, [ns, ew], site, rng, 22, push);
+    fillGolmok([ns, ew], site, rng, 22, roads, push);
   } else if (scale === 'capital') {
     // ── 도성풍: 남북대로 + 동서 간선 T + 피맛길 + 골목 (규칙 3·4·12·13) ──
     // 궁/관아 코어 = C(주산 남쪽 기슭). 남북대로는 궁 앞에서 남으로.
-    const palaceFront = { x: 0, z: C.z + site.R * 0.13 };  // 궁 정문 앞
+    // 궁이 없으면 plan이 예약 관아의 실제 남문을 넘긴다. 궁이 있는 기존 구성은 anchor가
+    // 없으므로 역사적인 식과 RNG 순서를 그대로 보존한다.
+    const palaceFront = opts.coreRoadAnchor || { x: 0, z: C.z + site.R * 0.13 };
     const tJoin = G.lerp(palaceFront, E, 0.62);            // 동서 간선과 만나는 T 지점
     nodes.crossing = tJoin;
     nodes.palaceFront = palaceFront;
@@ -348,14 +481,14 @@ export function planRoads(site, opts, rng) {
       for (const t of [0.35, 0.7]) {
         const smp = G.lerp(palaceFront, tJoin, t);
         const dir = G.mul(G.perpL(G.norm(G.sub(tJoin, palaceFront))), side);
-        push('soro', branchPath(smp, dir, site.R * 0.18, rng, site));
+        push('soro', trimBranchAtRoads(branchPath(smp, dir, site.R * 0.18, rng, site), roads));
       }
     }
     // 유기 골목: 동서 간선·피맛길·남북대로에서 대량 분기(북촌/남촌 채움)
-    fillGolmok(roads, [ew, pima, daero], site, rng, 26, push);
+    fillGolmok([ew, pima, daero], site, rng, 26, roads, push);
   } else if (scale === 'hanyang') {
     // ── 한양 도성: 궁 앵커 + 주작대로(육조거리) + 종로 T + 사대문 연결 + 피맛길 + 북촌/남촌 중로 ──
-    const palaceFront = { x: 0, z: C.z + site.R * 0.11 };   // 궁 정문 앞(주작대로 북단)
+    const palaceFront = opts.coreRoadAnchor || { x: 0, z: C.z + site.R * 0.11 };
     const tJoin = { x: 0, z: W?.axes?.jongnoZ ?? C.z + site.R * 0.42 }; // 종로와 만나는 T 지점
     nodes.palaceFront = palaceFront; nodes.crossing = tJoin;
     // 주작대로(육조거리형, 최대폭): 궁 정문 → T
@@ -394,7 +527,7 @@ export function planRoads(site, opts, rng) {
     for (const side of [1, -1]) for (const t of [0.3, 0.6, 0.85]) {
       const smp = G.lerp(palaceFront, tJoin, t);
       const dir = G.mul(G.perpL(G.norm(G.sub(tJoin, palaceFront))), side);
-      push('soro', branchPath(smp, dir, site.R * 0.17, rng, site));
+      push('soro', trimBranchAtRoads(branchPath(smp, dir, site.R * 0.17, rng, site), roads));
     }
     // 북촌 중로(궁 동서, 고지대 반가역) + 남촌 중로(종로 남, 초가 우세역)
     push('jungno', organicPath({ x: -site.bowlR * 0.74, z: C.z }, { x: site.bowlR * 0.74, z: C.z }, rng, { amp: site.R * 0.028, comps: 2 }));
@@ -414,7 +547,7 @@ export function planRoads(site, opts, rng) {
       ));
     }
     // 유기 골목 대량 분기(도성 전역 이면부 충전)
-    fillGolmok(roads, roads.map((r) => r.pts), site, rng, 64, push);
+    fillGolmok(roads.map((r) => r.pts), site, rng, 64, roads, push);
   }
 
   if (W) {
@@ -424,15 +557,30 @@ export function planRoads(site, opts, rng) {
     clipRoadsToWall(roads, W, wallGateRoads);
   }
 
+  collapseNarrowRoadLenses(roads);
+
+  const junctions = buildRoadJunctions(roads);
+  const roadById = new Map(roads.map((road) => [road.id, road]));
+  for (const junction of junctions) {
+    for (const connection of junction.connections) {
+      roadById.get(connection.roadId)?.junctionIds.push(junction.id);
+    }
+  }
+  nodes.junctions = junctions;
+
   return { roads, nodes };
 }
 
 // 간선들에서 골목을 가지형으로 분기해 블록 내부를 유기 충전. 등고 순응·개울/분지 밖 자름.
-function fillGolmok(roads, trunks, site, rng, count, push) {
+function fillGolmok(trunks, site, rng, count, roads, push) {
+  // 승인된 가지의 절반을 다음 세대 frontier로 편입한다. 간선에서만 빗살처럼 뻗던 예전
+  // 한 세대 산포와 달리, 안길→샛길→막다른 골목의 얕은 계층망이 된다. RNG 호출 수를
+  // 늘리지 않고 made 순번으로 제한해 결정론과 생성 비용을 안정시킨다.
+  const frontier = trunks.slice();
   let made = 0, guard = 0;
   while (made < count && guard < count * 6) {
     guard++;
-    const trunk = trunks[Math.floor(rng() * trunks.length)];
+    const trunk = frontier[Math.floor(rng() * frontier.length)];
     const smps = G.resample(trunk, 8);
     if (smps.length < 3) continue;
     const smp = smps[1 + Math.floor(rng() * (smps.length - 2))];
@@ -440,7 +588,11 @@ function fillGolmok(roads, trunks, site, rng, count, push) {
     const perp = G.mul(G.perpL(smp.tan), side);
     const dir = G.norm(G.add(perp, G.mul(smp.tan, rng.range(-0.35, 0.35))));
     const len = site.R * (0.10 + 0.12 * rng());
-    const p = branchPath(smp.pt, dir, len, rng, site);
-    if (p) { push('golmok', p); made++; }
+    const p = trimBranchAtRoads(branchPath(smp.pt, dir, len, rng, site), roads);
+    if (p) {
+      push('golmok', p);
+      made++;
+      if (made % 2 === 0) frontier.push(p);
+    }
   }
 }

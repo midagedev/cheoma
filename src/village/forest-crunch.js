@@ -6,6 +6,7 @@ import { createValueNoise2D } from '../core/math/value-noise2.js';
 import { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked } from './citywall-contour.js';
 import { terrainGridSize } from './terrain-grid.js';
 import { terrainWarpInner } from './terrain-surface.js';
+import { makeVegetationMask } from './vegetation-spatial.js';
 
 // 산 숲 "수치 크런치"(#123) — forest.js 의 배치 루프(buildForestTrees·buildGraniteMassifs)에서
 //   THREE 오브젝트 조립을 뺀 순수 수학만 추출한 모듈. 워커(populate.worker.js)와 메인(forest.js)이
@@ -40,7 +41,8 @@ const PINE_TRIS = 24, BROAD_TRIS = 20, FAR_TRIS = 40;
 export const FOREST_VISUAL_RADIUS = Object.freeze({
   pine: 1.55,
   broad: 1.97,
-  far: 1.4,
+  // makeCanopyBlobProto의 두 번째 offset blob까지 포함한 실제 XZ bound 1.451529m.
+  far: 1.46,
   // 최대 scale(1.25)·형상 perturb(1.1)·중심 이동 hypot(0.4,0.4)을 합친 해석 상한 1.9407을 올림.
   rock: 1.95,
 });
@@ -285,6 +287,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       // 크기·회전·색에 필요한 RNG를 모두 소비한 뒤 실제 prototype 반경으로 재검사해 worker와
       // 동기 경로의 난수 순서는 같게 유지하면서 최종 footprint 계약을 닫는다.
       const visualRadius = s * (isPine ? FOREST_VISUAL_RADIUS.pine : FOREST_VISUAL_RADIUS.broad);
+      if (mask && mask(p.x, p.z, visualRadius)) continue;
       if (cityWallVegetationBlocked(cityWall, p, {
         corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
         gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
@@ -332,6 +335,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
     // 최종 footprint 반경까지 확장한 동일 판정으로 후단을 닫는다. 충돌 cluster는 생략해 성벽 주변 시야와
     // 드로우 예산을 함께 확보하며, RNG 시퀀스는 이미 끝난 뒤라 worker/sync 결정론에 영향이 없다.
     const visualRadius = spread * FOREST_VISUAL_RADIUS.far;
+    if (mask && mask(cx, cz, visualRadius)) continue;
     if (cityWallVegetationBlocked(cityWall, { x: cx, z: cz }, {
       corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
       gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
@@ -405,6 +409,7 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
     const visualRadius = w * FOREST_VISUAL_RADIUS.rock;
     // reject 여부와 무관하게 이 암괴의 RNG 창을 모두 소비해, 성벽 근처 한 점 제거가 이후 산 전체
     // 배치를 재시드하지 않게 한다(나무 placement와 같은 국소 변경 계약).
+    if (mask && mask(p.x, p.z, visualRadius)) continue;
     if (cityWallVegetationBlocked(cityWall, p, {
       corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
       gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
@@ -439,6 +444,7 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
     const rotation = rng() * Math.PI * 2;
     const l = 0.64 + rng() * 0.18;
     const visualRadius = w * FOREST_VISUAL_RADIUS.rock;
+    if (mask && mask(p.x, p.z, visualRadius)) continue;
     if (cityWallVegetationBlocked(cityWall, p, {
       corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
       gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
@@ -481,34 +487,10 @@ export function makeEdgeWarp(site, warpInner) {
 
 // 나무 제외 마스크: 도로·필지·논·개울·절 경내.
 export function makeTreeMask(plan, site) {
-  const parcels = plan.parcels || [];
-  const roads = plan.roads || [];
-  // #147 절 경내 나무·바위 배제 — 절은 산 사면(hill>0.5)에 앉아 mtnChance 산나무로 식재되고, 산나무는
-  //   clearDist 를 안 거쳐 이 mask 로만 걷힌다. #122 밀집 캐노피의 큰 수관이 경내를 덮어 절이 "산에 파묻힌"
-  //   것처럼 보이던 게 실제 주범 → 32m 반경 원형 공터로 넓혀 확실히 걷는다(impl-flicker2 32m 검증). 회전
-  //   불필요(원형). crunchGranite 가 같은 mask 를 공유하므로 이 한 곳만 넓히면 나무+바위가 함께 걷힌다.
-  const F = plan.features || {};
-  const temple = (F.temple && typeof F.temple.x === 'number')
-    ? { x: F.temple.x, z: F.temple.z, r2: 32 * 32 } : null;
-  const cityWall = F.cityWall || null;
-  return (x, z) => {
-    // 성벽 석축·사대문 진입부를 나무와 화강암이 관통하지 않게 한다. 이 mask는 worker와 sync,
-    // 산림·근경 산포·바위가 모두 공유하므로 RNG 추가 소비 없이 한 판정으로 전 경로가 정렬된다.
-    if (cityWallVegetationBlocked(cityWall, { x, z })) return true;
-    for (const p of parcels) {
-      const rad = Math.max(p.plotW, p.plotD) * 0.7 + 3;
-      if ((x - p.center.x) ** 2 + (z - p.center.z) ** 2 < rad * rad) return true;
-    }
-    for (const r of roads) {
-      const d = G.distToPolyline({ x, z }, r.pts).d;
-      if (d < r.width / 2 + 3) return true;
-    }
-    if (plan.paddies) for (const f of plan.paddies) {
-      if (G.pointInPoly({ x, z }, f.poly)) return true;
-    }
-    if (temple && (x - temple.x) ** 2 + (z - temple.z) ** 2 < temple.r2) return true;   // 32m 반경 원형 공터(나무+바위)
-    return false;
-  };
+  // Two-argument calls preserve the established anchor mask. Passing the actual
+  // visual radius performs the commit-phase query, including canopy-safe parcel,
+  // road, paddy, temple, solar-access, guardian, and city-wall clearances.
+  return makeVegetationMask(plan, site);
 }
 
 // 구조물 거리 필드(#115) — 코스 그리드 최근접 구조물 거리 → 바이리니어 샘플.

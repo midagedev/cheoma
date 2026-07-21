@@ -85,6 +85,44 @@ export function distToPolyline(p, pts) {
   return best;
 }
 
+// 선분과 폴리곤 경계/내부 사이의 실제 최단거리. 도로·개울처럼 폭을 가진 선형 지물을
+// 점 하나로 근사하지 않고, 회전된 필지·지붕 전체와 비교할 때 쓰는 공통 커널이다.
+export function segmentPolygonDistance(a, b, poly) {
+  if (!poly?.length) return Infinity;
+  if (pointInPoly(a, poly) || pointInPoly(b, poly)) return 0;
+  let distance = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const c = poly[i], d = poly[(i + 1) % poly.length];
+    if (segIntersect(a, b, c, d)) return 0;
+    distance = Math.min(
+      distance,
+      distToSeg(a, c, d).d,
+      distToSeg(b, c, d).d,
+      distToSeg(c, a, b).d,
+      distToSeg(d, a, b).d,
+    );
+  }
+  return distance;
+}
+
+export function polylinePolygonDistance(pts, poly) {
+  if (!pts?.length || !poly?.length) return Infinity;
+  if (pts.length === 1) {
+    if (pointInPoly(pts[0], poly)) return 0;
+    let distance = Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      distance = Math.min(distance, distToSeg(pts[0], poly[i], poly[(i + 1) % poly.length]).d);
+    }
+    return distance;
+  }
+  let distance = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    distance = Math.min(distance, segmentPolygonDistance(pts[i], pts[i + 1], poly));
+    if (distance === 0) break;
+  }
+  return distance;
+}
+
 export function polylineLength(pts) {
   let L = 0;
   for (let i = 0; i < pts.length - 1; i++) L += dist(pts[i], pts[i + 1]);
