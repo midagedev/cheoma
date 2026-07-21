@@ -916,16 +916,19 @@ try {
           }
           // The flock stays logically available in aerial view, but a reroll/scale wave must
           // fade its unlit material with the same multiplier instead of popping at the parent
-          // visibility boundary.
+          // visibility boundary. alphaHash keeps the same opaque/depth-writing program for
+          // every intermediate weight, avoiding transparent sorting and shader churn.
           const alpha = Math.max(0, Math.min(1, critterLod?.waveWeight ?? 0));
           const materials = Array.isArray(birds.material) ? birds.material : [birds.material];
           for (const material of materials) {
             if (!material || Math.abs(material.opacity - alpha) > 0.001
-              || material.transparent !== (alpha < 0.999)
-              || material.depthWrite !== (alpha >= 0.999)) {
+              || material.alphaHash !== true
+              || material.transparent !== false
+              || material.depthWrite !== true) {
               record({
                 phase, root: root.name, critters: 'flock-material-fade', alpha,
-                opacity: material?.opacity, transparent: material?.transparent,
+                opacity: material?.opacity, alphaHash: material?.alphaHash,
+                transparent: material?.transparent,
                 depthWrite: material?.depthWrite,
               });
             }

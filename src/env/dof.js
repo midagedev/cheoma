@@ -15,6 +15,14 @@ function focusBounds(camera) {
   return { near, far };
 }
 
+// Keep this module-scoped: StableBokeh calls it for every visible mesh in its depth prepass.
+function materialContributesDofDepth(material) {
+  return !!material
+    && material.visible !== false
+    && material.depthWrite !== false
+    && !(material.alphaHash === true && material.opacity < 0.999);
+}
+
 /** Return a world point's positive depth along the camera forward axis. */
 export function focusDepthForPoint(camera, point) {
   if (!camera || !point || ![point.x, point.y, point.z].every(Number.isFinite)) return null;
@@ -41,14 +49,17 @@ export function contributesDofDepth(object) {
   if (object.isPoints || object.isLine || object.isSprite) return false;
   if (!object.isMesh) return false;
   if (object.userData?.dofDepth === true) return true;
+  // Built-in BokehPass replaces the source material with one opaque depth material, so it
+  // cannot reproduce an alphaHash opacity fade. Exclude intermediate hashed fades just as the
+  // former transparent/depthWrite=false path did; full-weight hashed meshes still contribute.
   const material = object.material;
   if (!Array.isArray(material)) {
-    return !!material && material.visible !== false && material.depthWrite !== false;
+    return materialContributesDofDepth(material);
   }
   // Hot depth-pass path: avoid filter()/some() and temporary arrays across thousands of meshes.
   for (let i = 0; i < material.length; i++) {
     const part = material[i];
-    if (part && part.visible !== false && part.depthWrite !== false) return true;
+    if (materialContributesDofDepth(part)) return true;
   }
   return false;
 }

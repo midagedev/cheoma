@@ -1,12 +1,13 @@
 // 마을 리롤 웨이브 연출(#56) — 프레임워크 무관 ES 모듈(코어).
 //
-//   createRerollWave({ oldRoot, newRoot, center, heightAt, seed, duration }) →
-//     { update(dt) → progress, seek(t01), isDone(), cancel(), dispose(), duration, progress }
+//   createRerollWave({ oldRoot, newRoot, center, seed, duration }) →
+//     { update(dt) → progress, seek(t01), isDone(), cancel(), dispose(),
+//       duration, progress, veil, shadowWeight, sceneryOwner }
 //
 // 리롤(새 시드) 순간을 3막으로 연출한다:
 //   ① 해체  기존 마을이 중심에서 바깥으로 좌르르륵 사라진다(집=인스턴스 단위 방사 스태거).
 //           두부 물리 역재생 — 제자리에서 눌렸다 접히며 지면으로 오므라들어 사라진다(산산이 아님).
-//   ② 지형  옛 지형·개울·논·도로·기단·담이 페이드아웃, 새 지형이 페이드인(크로스페이드/재생성).
+//   ② 지형  먹안개가 가장 짙을 때 옛 지형·개울·논·도로·기단·담을 새 장면으로 한 번만 넘긴다.
 //   ③ 조립  새 마을이 중심에서 방사형으로 주루루룩 솟는다(밖으로 퍼지는 웨이브, 두부 스쿼시 안착).
 //
 // 웨이브 단위(방사 스태거 딜레이 = 중심에서의 반경 거리):
@@ -15,21 +16,21 @@
 //     한 채씩 물결친다. 인스턴스 행렬(instanceMatrix)만 트랜스폼(지오 재생성·드로우콜 증가 없음).
 //   · 원경 임포스터(far) 청크·랜드마크(궁·절·정자)·히어로(종가) 그룹·성곽·시전 = **그룹 단위**(제 바운딩
 //     중심 반경으로 스태거). 병합/월드좌표 그룹이라 그룹 트랜스폼(pivot=바운딩 하단)만으로 솟게 한다.
-//   · 담장·기단·도로·논·지형·개울·물안개 = 지면 확립 레이어(크로스페이드, 트랜스폼 아님). 수목·정원·야경
-//     발광은 건물 웨이브에 맞춰 페이드(집과 함께 사라지고 집과 함께 돋는다).
+//   · 담장·기단·도로·논·지형·개울·물안개·수목·정원·야경 = scenery 레이어. 구/신 재질을 투명
+//     크로스페이드하지 않고 먹안개 peak에서 정확히 한 쪽만 보이게 handoff한다. 이는 투명 셰이더
+//     변형·depth-write 해제·겹친 그림자를 만들지 않으며 공유 재질 identity를 그대로 보존한다.
 //
 // 이징 언어는 조립 애니(src/anim/assembly.js)의 두부 물리(tofuScale/tofuBob)를 그대로 재사용한다
 // — 수묵 정적 위에 통통 튀는 두부 대비가 이 앱의 시그니처(assembly-semantic-chunks). 낙하/착지
 // 문법(fallOffset·IMPACT)은 동일 상수로 로컬 재현(assembly.js 는 미export).
 //
 // 결정론: 인스턴스·그룹별 미세 스태거 지터는 seed 기반 makeRng(Math.random 미사용).
-// 원상복구: dispose()·완료 시 newRoot 를 완전 정상 상태(트랜스폼 항등·재질 플래그 원복)로 되돌려
+// 원상복구: dispose()·완료 시 newRoot 를 완전 정상 상태(트랜스폼 항등·scenery 단독 소유)로 되돌려
 // 픽킹·편집·env 전파가 곧바로 정상 동작한다.
 
 import * as THREE from 'three';
 import { tofuScale, tofuBob } from '../anim/assembly.js';
 import { waveFadeController } from '../core/lod.js';
-import { isSharedResource } from '../core/three-resources.js';
 import { makeRng } from '../rng.js';
 
 // ── 이징(assembly.js 와 동일 상수) ──
@@ -41,15 +42,14 @@ const smoothstep = (t) => { t = clamp01(t); return t * t * (3 - 2 * t); };
 const fallOffset = (u) => (u >= IMPACT ? 0 : 1 - easeOutCubic(u / IMPACT));
 
 // ── 타임라인 윈도(전체 progress 0..1 대비 구간) ──
-//   해체 → (지형 크로스페이드) → 조립. 구간이 살짝 겹쳐 흐름이 끊기지 않는다.
+//   해체 → 먹안개 handoff → 조립. 구조물이 모두 접힌 짧은 틈에 scenery 소유권을 넘긴다.
 const PH = {
   disasm:    [0.00, 0.42],   // 옛 집·랜드마크 방사 해체(중심→밖)
-  decorOut:  [0.02, 0.40],   // 옛 수목·정원·야경 페이드아웃(집과 함께)
-  groundOut: [0.30, 0.58],   // 옛 지형·개울·논·도로·기단·담 페이드아웃
-  groundIn:  [0.40, 0.66],   // 새 지형·개울·논·도로·기단·담 페이드인
   asm:       [0.55, 1.00],   // 새 집·랜드마크 방사 조립(중심→밖)
-  decorIn:   [0.62, 0.98],   // 새 수목·정원·야경 페이드인(집 뒤따라)
 };
+const SCENERY_HANDOFF = 0.50;
+const VEIL_IN = 0.20;
+const VEIL_OUT = 0.80;
 
 // 방사 스태거: 반경 정규화값(0=최내곽,1=최외곽)에 이 비율만큼 시작 시각을 벌린다. 나머지(1-SPREAD)는
 //   개별 유닛 애니 길이 → 중심 유닛이 끝나갈 즈음 외곽 유닛이 시작하며 웨이브가 밖으로 흐른다.
@@ -65,24 +65,26 @@ const GROUP_DROP = 3.2, GROUP_TOFU = 0.30;
 const GS_MIN = 0.02;
 
 const phaseLocal = (t, [a, b]) => clamp01((t - a) / (b - a));
+const veilAt = (t) => {
+  if (t <= VEIL_IN || t >= VEIL_OUT) return 0;
+  if (t < SCENERY_HANDOFF) return smoothstep((t - VEIL_IN) / (SCENERY_HANDOFF - VEIL_IN));
+  return 1 - smoothstep((t - SCENERY_HANDOFF) / (VEIL_OUT - SCENERY_HANDOFF));
+};
 
 // ── 루트 자식 분류(이름 규약 기반) ──
 const isChunk = (n) => n.startsWith('village-chunk-');
 const isWalls = (n) => n.startsWith('village-walls-');
-const GROUND_NAMES = new Set([
-  'village-terrain', 'village-stream', 'edge-mist-ring', 'ridge-mist',
-  'village-pads', 'village-roads', 'village-paddies',
+const GROUP_NAMES = new Set([
+  'village-landmarks', 'village-sijeon', 'city-wall', 'city-wall-work',
+  'palace-core', 'palace-merged',
 ]);
-const DECOR_NAMES = new Set(['village-trees', 'village-flora', 'village-nightlights']);
-const GROUP_NAMES = new Set(['village-landmarks', 'village-sijeon', 'city-wall', 'city-wall-work']);
 // 어댑터가 populate 뒤 붙이는 헬퍼(편집 오버레이·하이라이트) — 웨이브 대상 아님.
 const SKIP_NAMES = new Set(['village-overrides', 'village-highlight']);
 
-// 재질 페이드 컨트롤러 — 대상 하위 트리 재질의 opacity 를 램프한다(트랜스폼 아님).
-//   pads·등롱처럼 모듈 수명 재질을 구/신 마을이 함께 쓰는 경우가 있다. 원본 opacity 를 직접 쓰면
-//   뒤에 적용한 new fade가 old 쪽까지 덮어쓰므로, 서로 다른 fade phase에서 실제로 겹치는 재질만
-//   루트별 임시 clone으로 격리한다. 나머지는 원본을 유지해 핸들의 계절·시간대 업데이트 경로를 보존한다.
-function splitFadeObjects(objs) {
+// scenery는 재질을 건드리지 않고 top-level visibility만 한 번 넘긴다. 소동물·scene-direct
+// 앰비언스처럼 자체 LOD를 가진 계층은 waveFade controller에 owner 측 `1 - veil`
+// multiplier(비owner=0)를 전달해 handoff peak에서만 부드럽게 소거한다.
+function splitSceneryObjects(objs) {
   const owned = [];
   const staticObjs = [];
   for (const o of objs) {
@@ -93,144 +95,28 @@ function splitFadeObjects(objs) {
   return { owned, staticObjs };
 }
 
-function sharedFadeMaterials(collections) {
-  const phases = new Map();
-  for (let phase = 0; phase < collections.length; phase++) {
-    const { staticObjs } = splitFadeObjects(collections[phase]);
-    for (const o of staticObjs) {
-      o.traverse((node) => {
-        const materials = Array.isArray(node.material)
-          ? node.material : (node.material ? [node.material] : []);
-        for (const material of materials) {
-          let owners = phases.get(material);
-          if (!owners) { owners = new Set(); phases.set(material, owners); }
-          owners.add(phase);
-        }
-      });
-    }
-  }
-  // markSharedResource는 LOD groupUnit·scene-direct helper처럼 fader 바깥 소비자도 있다는 뜻이다.
-  // 현재 네 collection에서 한 번만 보여도 원본 opacity를 쓰면 그 외 소비자에 새므로 격리한다.
-  return new Set([...phases]
-    .filter(([material, owners]) => owners.size > 1 || isSharedResource(material))
-    .map(([material]) => material));
-}
-
-function syncSharedMaterial(source, target) {
-  for (const key of ['color', 'emissive', 'specular', 'sheenColor', 'attenuationColor', 'normalScale']) {
-    if (source[key]?.copy && target[key]?.copy) target[key].copy(source[key]);
-  }
-  for (const key of [
-    'emissiveIntensity', 'roughness', 'metalness', 'envMapIntensity', 'lightMapIntensity',
-    'aoMapIntensity', 'bumpScale', 'displacementScale', 'displacementBias', 'alphaTest',
-  ]) {
-    if (key in source && key in target) target[key] = source[key];
-  }
-  if (source.uniforms && target.uniforms) {
-    for (const [key, uniform] of Object.entries(source.uniforms)) {
-      const dst = target.uniforms[key];
-      if (!dst) continue;
-      if (uniform?.value?.copy && dst.value?.copy) dst.value.copy(uniform.value);
-      else dst.value = uniform?.value;
-    }
-  }
-}
-
-function makeFader(objs, isolatedMaterials) {
-  const { owned, staticObjs } = splitFadeObjects(objs);
+function makeSceneryStage(objs) {
+  const { owned, staticObjs } = splitSceneryObjects(objs);
   const tops = staticObjs.map((o) => ({ o, vis0: o.visible }));
-  const assignments = [];
-  const clones = new Map();
-  const cloneSources = new Map();
-  const seenNodes = new Set();
-  const cloneMaterial = (source) => {
-    if (!source?.isMaterial || !isolatedMaterials.has(source)) return source;
-    let clone = clones.get(source);
-    if (clone) return clone;
-    clone = source.clone();
-    // Material.copy intentionally omits shader hooks. Village materials use chained
-    // onBeforeCompile patches for rim/season/snow, so preserve the exact program contract.
-    clone.onBeforeCompile = source.onBeforeCompile;
-    clone.customProgramCacheKey = source.customProgramCacheKey;
-    clones.set(source, clone);
-    cloneSources.set(clone, source);
-    return clone;
-  };
-  for (const o of staticObjs) {
-    o.traverse((node) => {
-      if (!node.material || seenNodes.has(node)) return;
-      seenNodes.add(node);
-      const original = node.material;
-      const replacement = Array.isArray(original)
-        ? original.map(cloneMaterial)
-        : cloneMaterial(original);
-      if (replacement !== original
-        && (!Array.isArray(original) || replacement.some((material, i) => material !== original[i]))) {
-        node.material = replacement;
-        assignments.push({ node, original });
-      }
-    });
-  }
-  const recs = new Map();
-  for (const o of staticObjs) {
-    o.traverse((n) => {
-      const m = n.material;
-      if (!m) return;
-      const arr = Array.isArray(m) ? m : [m];
-      for (const mm of arr) {
-        if (!recs.has(mm.uuid)) recs.set(mm.uuid, {
-          mat: mm,
-          source: cloneSources.get(mm) || null,
-          opacity: mm.opacity,
-          transparent: mm.transparent,
-          depthWrite: mm.depthWrite,
-        });
-      }
-    });
-  }
-  const baseState = (record) => record.source || record;
-  const restoreMats = () => {
-    for (const r of recs.values()) {
-      if (r.source) syncSharedMaterial(r.source, r.mat);
-      const base = baseState(r);
-      r.mat.opacity = base.opacity;
-      r.mat.transparent = base.transparent;
-      r.mat.depthWrite = base.depthWrite;
-    }
-  };
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    restoreMats();
-    for (const { node, original } of assignments) node.material = original;
-    for (const clone of clones.values()) clone.dispose();
-  };
+  let visible = null, weight = null;
   return {
-    set(v) {
-      // LOD-owned layers compose the wave multiplier internally. Their visibility and base
-      // opacity remain camera-detail state, so a scale reframe cannot be overwritten by vis0.
-      for (const controller of owned) controller.setWeight(v);
-      if (v <= 0.001) { for (const t of tops) t.o.visible = false; return; }
-      for (const t of tops) t.o.visible = t.vis0;
-      if (v >= 0.999) { restoreMats(); return; }
-      for (const r of recs.values()) {
-        if (r.source) syncSharedMaterial(r.source, r.mat);
-        const base = baseState(r);
-        r.mat.transparent = true;
-        r.mat.opacity = base.opacity * v;
-        r.mat.depthWrite = false;
-      }
+    setVisible(nextVisible) {
+      if (visible === nextVisible) return;
+      visible = nextVisible;
+      for (const t of tops) t.o.visible = nextVisible ? t.vis0 : false;
     },
-    release,
+    setWeight(nextWeight) {
+      if (weight === nextWeight) return;
+      weight = nextWeight;
+      for (const controller of owned) controller.setWeight(nextWeight);
+    },
   };
 }
 
 function classifyRoot(root, center, rng) {
   const instMeshes = [];   // { mesh, count, rest:Float32Array, rad:Float32Array, jit:Float32Array, rmin, rmax, _st }
   const groupUnits = [];   // { obj, pivot, radius, vis0, jit, _st }
-  const groundObjs = [];
-  const decorObjs = [];
+  const sceneryObjs = [];
 
   const addInstMesh = (mesh) => {
     const count = mesh.count | 0;
@@ -272,15 +158,13 @@ function classifyRoot(root, center, rng) {
         addGroupUnit(child);
       } else {
         child.traverse((o) => { if (o.isInstancedMesh) addInstMesh(o); });   // 집 = 인스턴스 단위
-        for (const cc of child.children) if (isWalls(cc.name || '')) groundObjs.push(cc);  // 담 = 지면 확립 페이드
+        for (const cc of child.children) if (isWalls(cc.name || '')) sceneryObjs.push(cc);  // 담 = scenery handoff
       }
       continue;
     }
     if (n.startsWith('hero-') || n.startsWith('parcel-')) { addGroupUnit(child); continue; }
     if (GROUP_NAMES.has(n)) { addGroupUnit(child); continue; }
-    if (GROUND_NAMES.has(n)) { groundObjs.push(child); continue; }
-    if (DECOR_NAMES.has(n)) { decorObjs.push(child); continue; }
-    decorObjs.push(child);                    // 미분류(소동물 등) → 데코 페이드(팝 방지 안전 기본)
+    sceneryObjs.push(child);                  // 새 지면·환경 계층도 기본으로 배타 handoff에 합류한다.
   }
 
   // 루트 전체 [rmin,rmax] — 정규화 기준(집·랜드마크·히어로 통합). 링 배치라도 스태거를 전폭에 편다.
@@ -290,7 +174,7 @@ function classifyRoot(root, center, rng) {
   if (!isFinite(rmin)) rmin = 0;
   const span = rmax - rmin || 1;
 
-  return { instMeshes, groupUnits, rmin, span, groundObjs, decorObjs };
+  return { instMeshes, groupUnits, rmin, span, sceneryObjs };
 }
 
 // ── 인스턴스 행렬 쓰기(원 rest 기준 상대) ──
@@ -381,18 +265,15 @@ function settleWave(rootC, built) {
   for (const u of rootC.groupUnits) applyGroupUnit(u, built ? 1 : 0);
 }
 
-export function createRerollWave({ oldRoot, newRoot, center, heightAt, seed = 1, duration = 3.4 } = {}) {
+export function createRerollWave({ oldRoot, newRoot, center, seed = 1, duration = 3.4 } = {}) {
   const c = center || { x: 0, z: 0 };
   const rng = makeRng((seed ^ 0x5eed56) >>> 0);
   const oldC = classifyRoot(oldRoot, c, rng);
   const newC = classifyRoot(newRoot, c, rng);
-  const isolatedMaterials = sharedFadeMaterials([
-    oldC.groundObjs, oldC.decorObjs, newC.groundObjs, newC.decorObjs,
-  ]);
-  oldC.ground = makeFader(oldC.groundObjs, isolatedMaterials);
-  oldC.decor = makeFader(oldC.decorObjs, isolatedMaterials);
-  newC.ground = makeFader(newC.groundObjs, isolatedMaterials);
-  newC.decor = makeFader(newC.decorObjs, isolatedMaterials);
+  oldC.scenery = makeSceneryStage(oldC.sceneryObjs);
+  newC.scenery = makeSceneryStage(newC.sceneryObjs);
+  let veil = 0;
+  let sceneryOwner = 'old';
 
   function applyAt(t) {
     // ① 옛 마을 해체(중심→밖). 위상 전=온전·위상 후=소거 스냅, 그 사이만 방사 애니.
@@ -403,11 +284,16 @@ export function createRerollWave({ oldRoot, newRoot, center, heightAt, seed = 1,
     if (t <= PH.asm[0]) settleWave(newC, false);
     else if (t >= PH.asm[1]) settleWave(newC, true);
     else { const tp = phaseLocal(t, PH.asm); applyInstances(newC, tp, false); applyGroups(newC, tp, false); }
-    // ② 지면(지형·개울·논·도로·기단·담) 크로스페이드 + 수목·정원·야경 페이드(건물과 동반).
-    oldC.ground.set(1 - phaseLocal(t, PH.groundOut));
-    newC.ground.set(phaseLocal(t, PH.groundIn));
-    oldC.decor.set(1 - phaseLocal(t, PH.decorOut));
-    newC.decor.set(phaseLocal(t, PH.decorIn));
+    // ② 지면·환경은 먹안개 peak에서 단 한 번 소유권을 넘긴다. 두 쪽이 함께 렌더되는 프레임이 없고
+    // 재질 플래그도 바꾸지 않으므로 도로/기단 z-fight, 반투명 그림자, 새 shader variant가 생기지 않는다.
+    sceneryOwner = t < SCENERY_HANDOFF ? 'old' : 'new';
+    veil = veilAt(t);
+    oldC.scenery.setVisible(sceneryOwner === 'old');
+    newC.scenery.setVisible(sceneryOwner === 'new');
+    // 자체 LOD/alpha 합성기를 가진 새·소동물·연기·등불은 peak에서 양쪽 모두 0이 되었다가 새 owner만
+    // 되살아난다. 정적 scenery처럼 material flag를 바꾸지 않으며, 실루엣이 handoff에서 튀지 않는다.
+    oldC.scenery.setWeight(sceneryOwner === 'old' ? 1 - veil : 0);
+    newC.scenery.setWeight(sceneryOwner === 'new' ? 1 - veil : 0);
   }
 
   let elapsed = 0, prog = 0, done = false;
@@ -416,6 +302,9 @@ export function createRerollWave({ oldRoot, newRoot, center, heightAt, seed = 1,
   return {
     duration,
     get progress() { return prog; },
+    get veil() { return veil; },
+    get shadowWeight() { return 1 - veil; },
+    get sceneryOwner() { return sceneryOwner; },
     isDone() { return done; },
     update(dt) {
       if (done) return 1;
@@ -427,20 +316,17 @@ export function createRerollWave({ oldRoot, newRoot, center, heightAt, seed = 1,
     },
     seek(t01) { prog = clamp01(t01); elapsed = prog * duration; applyAt(prog); },
     // 중도 취소는 완료 dispose와 반대다. 옛 마을은 원래 행렬·가시성으로, 새 마을은 미착공
-    // 상태로 돌리고 양쪽 임시 투명 재질 플래그를 회수한다. 엔진 이탈/API 취소가 사용한다.
+    // 상태로 돌리고 scenery 소유권도 옛 마을에 되돌린다. 엔진 이탈/API 취소가 사용한다.
     cancel() {
       settleWave(oldC, true);
       settleWave(newC, false);
-      oldC.ground.set(1); oldC.decor.set(1);
-      newC.ground.set(0); newC.decor.set(0);
-      oldC.ground.release(); oldC.decor.release();
-      newC.ground.release(); newC.decor.release();
+      oldC.scenery.setVisible(true); oldC.scenery.setWeight(1);
+      newC.scenery.setVisible(false); newC.scenery.setWeight(0);
+      veil = 0; sceneryOwner = 'old';
       elapsed = 0; prog = 0; done = true;
     },
     dispose() {
-      applyAt(1);                 // 새 마을 완전 정상화(트랜스폼 항등·재질 원복)
-      oldC.ground.release(); oldC.decor.release();   // 원 material identity + 임시 clone 수명 회수
-      newC.ground.release(); newC.decor.release();
+      applyAt(1);                 // 새 마을 완전 정상화(트랜스폼 항등·scenery 단독 소유)
       elapsed = duration; prog = 1; done = true;
     },
   };
