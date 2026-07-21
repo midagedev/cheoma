@@ -22,6 +22,7 @@ import {
   STREAM_PADDY_BANK_CLEARANCE,
   streamIntersectsPolygon,
 } from './stream-spatial.js';
+import { planTempleSite, templeReservationPolygons } from './temple-plan.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -170,7 +171,7 @@ export function planVillage(opts = {}) {
   const char01 = charOverride ? Math.min(1, Math.max(0, opts.char01)) : char01ForR(siteR, seed);
   const character = charLabel(char01);
   // 필지 목표수(연속) → tier 경계 카운트 스냅 제거. opts.houses(#114)는 직접 오버라이드 — 0 허용
-  //   ("절 하나만" 구성: houses:0 + includeTemple:true → 집 없는 산사 플랜, 엔진은 부감 랜딩 폴백).
+  //   ("절 하나만" 구성: houses:0 + includeTemple:true → 집 없는 사찰 플랜, 엔진은 부감 랜딩 폴백).
   const housesOverridden = typeof opts.houses === 'number' && isFinite(opts.houses);
   const defaultTarget = Math.round(pieceLerp(siteR, HOUSE_ANCHORS));   // siteR 이 함의하는 명목 호수
   const houseTarget = housesOverridden ? Math.max(0, Math.min(400, Math.round(opts.houses))) : defaultTarget;
@@ -274,6 +275,24 @@ export function planVillage(opts = {}) {
   // ── 3) 도로 (간선 결정론 + 이면 유기) ──
   const roadsResult = planRoads(site, layoutOpts, rng);
 
+  // ── 3.25) 사찰 대지·진입로 예약 ── 사찰은 남은 급사면에 사후 삽입되는 장식물이 아니라,
+  //   완만한 대지와 물·길의 관계를 먼저 읽고 자리를 잡는다. 산의 위요감은 좋은 선택지 중 하나일
+  //   뿐 필수 조건이 아니다. 도로가 확정된 직후
+  //   footprint와 접근로를 예약해 필지·시전·위성 부락·논이 그 공간을 선점하지 않게 한다.
+  //   seed 파생 전용 경로라 공유 rng를 소비하지 않으며 temple OFF의 하류 plan은 그대로다.
+  let templeReservations = [];
+  if (includeTemple) {
+    features.temple = planTempleSite({
+      site,
+      seed,
+      roads: roadsResult.roads,
+      occupied: corePolys,
+      cityWall,
+    });
+    templeReservations = templeReservationPolygons(features.temple);
+    for (const poly of templeReservations) blockers.push({ poly, templeReserve: true });
+  }
+
   // ── 3.5) 시전행랑 (한양) ── 간선(주작대로·종로) 파사드를 따라 연립 벽식 점포(선형 상업, 규칙 7).
   //   점포 footprint 를 blockers 에 넣어 일반 필지가 대로변 상가 열을 침범하지 않게 한다.
   // 시전 강제 오버라이드(#91): auto=hanyang, true/false=강제. planSijeon 은 간선(daero) 파사드가 있어야
@@ -283,7 +302,8 @@ export function planVillage(opts = {}) {
   if (wantSijeon) {
     features.sijeon = planSijeon(roadsResult, site, char01).filter((shop) =>
       worldEdgeContainsPolygon(site.edge, shop.poly, 6)
-      && (!cityWall || cityWallContainsPolygon(cityWall, shop.poly, 4)));
+      && (!cityWall || cityWallContainsPolygon(cityWall, shop.poly, 4))
+      && !templeReservations.some((poly) => G.polysOverlap(shop.poly, poly)));
     for (const s of features.sijeon) blockers.push({ poly: s.poly });
   }
 
@@ -362,6 +382,7 @@ export function planVillage(opts = {}) {
   const paddyObstacles = [
     ...parcels.map((parcel) => parcel.poly),
     ...(features.palace?.poly ? [features.palace.poly] : []),
+    ...templeReservations,
   ];
   // 논 후보 RNG는 전부 소비한 뒤 실제 필지와 겹치는 배미만 걷어 낸다. 필터 때문에 뒤쪽
   // 소품/절 seed 흐름이 달라지지 않으면서 담·처마 아래 논 표면이 비치는 오류를 막는다.
@@ -382,10 +403,7 @@ export function planVillage(opts = {}) {
   // ── 8) 소품 (동구 장승·솟대, 종가 앞 우물·장독대, 성격별 액센트) ──
   planProps(features, site, scale, rng, char01);
 
-  // ── 9) 절 클러스터 (배산 사면 중턱, 마을과 이격) ──
-  if (includeTemple) features.temple = placeTemple(site, seed);
-
-  // ── 10) 보호수 예약 ── 실제 flora를 만들기 전에 순수 위치·수관을 plan에 고정한다. 숲 worker와
+  // ── 9) 보호수 예약 ── 실제 flora를 만들기 전에 순수 위치·수관을 plan에 고정한다. 숲 worker와
   // 마당 renderer가 같은 목록을 소비하므로 보호수 자리에 배경 숲이 먼저 박히지 않는다.
   features.guardianTrees = planGuardianTrees({
     scale,
@@ -531,62 +549,6 @@ function trimPaddyToStreamBank(site, poly, margin) {
     if (southEdge - Math.max(out[0].z, out[1].z) < 3.5) return null;
   }
   return streamIntersectsPolygon(site, out, margin) ? null : out;
-}
-
-// ── 절(산사) 배치 (#94) ── 산사(山寺)는 능선 마루가 아니라 배산 사면의 완사 벤치(좌청룡·우백호 어깨)에
-//   앉아 마을을 내려다보되 하늘선을 깨지 않는다. 옛 배치(측면 급벽 x=±0.62R, z=중심-0.18R)는 33m footprint
-//   안에서 표고차 40~59m 인 거의 절벽에 얹혀 (a)부감 실루엣이 능선과 겹치고 (b)성토 패드가 접지 못해
-//   컴파운드가 붕 떴다. 대신 배산 측면 사면을 스캔해 완경사·능선 백드롭·비가장자리를 만족하는 어깨 벤치를
-//   고른다. 지형은 자기유사(site.js)라 표고비(er)·완경사 존이 규모 불변 → 비율 기반 밴드로 전 규모 대응.
-//   temple 은 rng 소비 마지막 단계라 seed 파생 배치로 바꿔도 상류 결정론 불변(절 OFF 앵커 회귀 안전).
-function placeTemple(site, seed) {
-  const C = site.center, Hmax = site.Hmax, R = site.R;
-  const foot = 33;                                   // pad 포함 footprint(30+3)
-  const side = ((seed ^ 0x7e11) >>> 0) % 2 === 0 ? 1 : -1;   // 결정론 좌/우 사면
-  // footprint 표고 낙차(완경사=접지 가능 판별)
-  const footSlope = (x, z) => {
-    let lo = 1e9, hi = -1e9;
-    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
-      const h = site.heightAt(x + i * foot / 2, z + j * foot / 2);
-      if (h < lo) lo = h; if (h > hi) hi = h;
-    }
-    return hi - lo;
-  };
-  // 절 뒤(북) 능선 백드롭: 벤치에서 북으로 스캔한 최대 표고 − 절 지반(양수면 능선이 배경으로 솟음)
-  const backdropRise = (x, z, gy) => {
-    let hi = -1e9;
-    for (let dz = 0.06 * R; dz <= 0.7 * R; dz += 0.05 * R)
-      for (const dx of [-0.12 * R, 0, 0.12 * R]) hi = Math.max(hi, site.heightAt(x + dx, z - dz));
-    return hi - gy;
-  };
-  // 배산 측면 사면(북~정측) 방위 × 반경 스캔 → 어깨 벤치. 표고 밴드 안에서 완경사(접지)·백드롭·중앙표고·
-  //   비가장자리 최적점. 밴드는 표고비(Hmax 비율) — 어깨 벤치가 er≈0.5~0.7 에 형성됨(규모 불변).
-  const eLo = 0.50, eHi = 0.70, eMid = 0.60;
-  let best = null;
-  for (let ai = 0; ai < 6; ai++) {
-    const angFrac = 0.34 + (0.52 - 0.34) * (ai / 5);
-    const ang = angFrac * Math.PI;                   // 0=정북(주산 배후), 0.5=정측(청룡·백호 어깨)
-    const dir = { x: side * Math.sin(ang), z: -Math.cos(ang) };
-    const rCap = Math.min(1.00 * R, (site.terrainR || R) * 0.94);   // #143 절 스캔 상한을 terrainR 안으로(절단 지형 밖 off-mesh 배치 방지)
-    for (let r = 0.55 * R; r <= rCap; r += 0.02 * R) {
-      const x = C.x + dir.x * r, z = C.z + dir.z * r;
-      const gy = site.heightAt(x, z);
-      const er = gy / Hmax;
-      if (er < eLo || er > eHi) continue;
-      const slope = footSlope(x, z), bd = backdropRise(x, z, gy);
-      const edge = Math.max(0, r / R - 0.98) * 60;
-      const score = -slope * 3.0 + bd * 0.35 - Math.abs(er - eMid) * Hmax * 0.30 - edge;
-      if (!best || score > best.score) best = { x, z, score };
-    }
-  }
-  if (!best) {   // 밴드 미발견(극소 분지) 안전 폴백 — 측면 산기슭
-    const x = side * Math.min(R * 0.62, (site.terrainR || R) * 0.9), z = C.z - R * 0.18;   // #143 폴백도 terrainR 안
-    best = { x, z };
-  }
-  // 일주문·대웅전은 마을(하향)을 향한다 — 절→마을 중심 방향으로 정면(남향 성분 유지).
-  const toC = G.norm({ x: C.x - best.x, z: C.z - best.z });
-  const frontDir = G.norm({ x: toC.x * 0.5, z: Math.max(0.5, toC.z) });
-  return { x: best.x, z: best.z, frontDir, seed: (seed ^ 0x7e11) >>> 0 };
 }
 
 // 소품: 동구(장승 한 쌍·솟대), 종가/중심(우물), 초가군(장독대). 은은하게 몇 점만.

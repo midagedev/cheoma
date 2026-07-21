@@ -47,7 +47,8 @@ const clampR = (R) => clampN(R, R_MIN, R_MAX);
 //   먹안개(mist)가 마감. (2) 능선 크레스트(ridgeR)를 near 밴드 안으로 당겨 배산 매스가 통째로 "진짜 숲"
 //   (far 블롭 아님)이 되게 한다 — 레퍼런스(한국 산): 마을 바로 뒤 가파른 숲 매스. proportional(terrainMul·R)
 //   은 무해한 상한 안전장치로 남긴다. 주거 콘텐츠(필지·위성)는 전 규모에서 nearR 안(측정 확인)이라 절단해도
-//   안 잘린다. 절(산사)은 heightAt 표고밴드 스캔 배치(plan.placeTemple)라 능선을 당기면 함께 따라 들어온다.
+//   안 잘린다. 사찰 터는 실제 terrain/world 경계를 검사하고 terrain-surface가 경내·진입로를 fixed radius에
+//   포함하므로 능선 반경 튜닝과 독립적으로 렌더 지형 안에 남는다.
 //   대규모(한양)일수록 nearR/R 가 작아(≈0.80R) 절대 절단폭이 크다 — 사용자 "한양급 더 크게" 부합.
 const TERR_EDGE_BUF = 12;     // 지형 가장자리 = nearR + 이 소버퍼(얇은 far 마감 밴드 + worldedge 안개 여유)
 const RIDGE_NEAR_INSET = 14;  // 능선 크레스트를 near 밴드 안쪽으로(배산=진짜 숲, 항상 ridgeR<terrainR)

@@ -17,20 +17,20 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #17: 담 렌더러와 flora가 공유하는 순수 마당 점유 계약으로 부속채·장독대 등
-  // hard object를 관통하던 과실수를 안전한 후보로 옮긴 뒤 시각 승인한 전체 scene 기준선.
-  // 나머지 배치·worker 결정론 계약은 #7 기준선을 그대로 잇는다.
-  village: 'bda616fe:7c912464:36b3c36b:402c4e8c',
-  town: '42e23dd8:099e39a6:0290a08d:2a64c946',
-  capital: 'df88bd3b:56769115:4ede5302:5d5d6e11',
-  hanyang: '39634ed9:a6b1f9e5:93e7d5db:ad4c7fc3',
+  // #5: 사찰 경내와 접근로를 필지보다 먼저 예약하고 forest/terrain/picking이 같은
+  // 회전 footprint를 소비한 뒤 시각 승인한 temple-ON scene 기준선. sync, 실제 module
+  // Worker, ?worker=0 fallback은 이 값뿐 아니라 서로 byte-identical해야 한다.
+  village: 'fc5fa092:65f023a6:74f070e0:e0a311aa',
+  town: 'e11717e2:0f726104:9aaec996:482a5872',
+  capital: 'dc95e8ce:b69b7600:4a2d1bd4:33ec0d34',
+  hanyang: 'bdc75dc0:1785c5ce:0ad1e25f:c4ce1554',
 };
 const expectedProxyHashes = {
-  // #7: 프록시도 실제 variant·fit·단일 parcel transform을 소유하므로 scene과 함께 갱신한다.
-  village: '1395db7a',
-  town: 'd796d5a3',
-  capital: 'd036043d',
-  hanyang: 'aaa887ab',
+  // 사찰 proxy가 가변 경내 폭과 계획된 baseY를 사용하므로 scene과 함께 갱신한다.
+  village: '13d7982c',
+  town: '79a79d96',
+  capital: 'ef7ece38',
+  hanyang: 'a5aaf2dc',
 };
 
 const server = await createServer({

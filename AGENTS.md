@@ -94,7 +94,7 @@ Headless ANGLE serializes shader linking, so absolute frame-ms from headless run
 - `docs/project-status.md` holds the current wrap-up direction and stable user decisions migrated from Claude Code memory.
 - `docs/architecture-refactor.md` records the completed first structure pass and the current reuse/boundary contract. Public consumer entrypoints live in `src/api/`; internal modules must not import that façade. Run `npm run check` before browser-heavy gates.
 - `docs/verification.md` is the canonical harness map. In particular, `tools/check-determinism.mjs` does not compare worker vs sync and does not hash temple data, while `tools/verify-forest.mjs` is obsolete.
-- `SANSA-HANDOFF.md` is the queued temple-relocation brief. Do not mix its behavior changes into mechanical structure moves. When implemented, its source changes must remain uncommitted for review unless the user changes that instruction.
+- `SANSA-HANDOFF.md` records the reviewed #5 temple-site contract. Its placement changes were approved for an independent PR; do not mix later compound behavior into that boundary. `docs/temple-generator.md` is the separate queued #12 design for reusable multi-building temple compounds and existing stone props.
 
 Code comments reference design documents directly: `mode-integration.md` (mode/camera/focus integration — comments cite e.g. "mode-integration §5.5"), `palace-layout.md`, `joseon-city.md`, `tooling.md` (vetted library stack — manifold-3d, three-mesh-bvh, clipper2 offset caveat), `perf-webgpu.md`, `ui-design.md`, and `references.md`. Do not rename these files or renumber referenced sections casually.
 

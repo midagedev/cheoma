@@ -120,9 +120,9 @@ export function buildLandmarkPickProxies(plan, site, { palaceHandle, palaceInner
   if (plan.features?.temple) {
     const feature = plan.features.temple;
     const rotY = G.facingY(feature.frontDir || { x: 0, z: 1 });
-    const groundY = site?.heightAt?.(feature.x, feature.z) ?? 0;
-    const width = 36;
-    const depth = 36;
+    const groundY = feature.baseY ?? site?.heightAt?.(feature.x, feature.z) ?? 0;
+    const width = (feature.compoundSize || 33) + 3;
+    const depth = width;
     const height = 30;
     const worldCenter = new THREE.Vector3(feature.x, groundY + 9, feature.z);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth));

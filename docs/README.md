@@ -8,7 +8,7 @@
 2. 이 문서 — 어떤 문서가 현재 계약이고 어떤 문서가 참고 자료인지 확인.
 3. [`project-status.md`](project-status.md) — 현재 마무리 방향, 활성 작업, 유지·보류 결정.
 4. [`architecture-refactor.md`](architecture-refactor.md) — 현재 진행 중인 구조 개선의 목표 레이어와 마이그레이션 순서.
-5. 작업별 브리프 — 대기 중인 도메인 작업은 [`SANSA-HANDOFF.md`](../SANSA-HANDOFF.md).
+5. 작업별 브리프 — 승인된 사찰 터 계약은 [`SANSA-HANDOFF.md`](../SANSA-HANDOFF.md), 후속 가람 생성기는 [`temple-generator.md`](temple-generator.md).
 6. [`verification.md`](verification.md) — 실제로 쓸 수 있는 검증 도구와 알려진 공백.
 
 문서와 코드가 충돌하면 현재 코드와 실행 결과가 우선이다. 의도에 관한 충돌은 `AGENTS.md` → 활성 작업 브리프 → 현재 계약 문서 → 리서치/스냅샷 순으로 해석하고, 차이가 확인되면 같은 작업에서 문서도 갱신한다.
@@ -26,12 +26,13 @@
 | 문서 | 상태 | 용도와 주의점 |
 | --- | --- | --- |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
-| [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 대기 작업 | 산사 배치·대지·진입로·숲 프레이밍 폴리시. 구조 개선 중에는 동작 변경과 섞지 않는다. |
+| [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
+| [`temple-generator.md`](temple-generator.md) | 대기 설계 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·검증 경계. |
 | [`project-status.md`](project-status.md) | 계약 | 프로젝트 마무리 방향, 유지해야 할 사용자 결정, 현재 작업 상태. |
 | [`verification.md`](verification.md) | 계약 | 빌드·문법·Playwright·결정론 검증의 실제 사용 범위와 함정. |
 | [`mode-integration.md`](mode-integration.md) | 계약 | 모드/카메라/focus 통합. `ui-design.md`의 초기 모드 구상보다 우선한다. |
 | [`ui-design.md`](ui-design.md) | 리서치 | 초기 UI 설계와 상호작용 언어. 현재 focus 연속체는 `mode-integration.md`를 따른다. |
-| [`joseon-city.md`](joseon-city.md) | 리서치 | 도성·읍성·촌락·산사 배치 원리와 생성 규칙. 산사 작업은 특히 §5·§7G 참조. |
+| [`joseon-city.md`](joseon-city.md) | 리서치 | 도성·읍성·촌락·사찰 입지와 가람 원리. 사찰 작업은 특히 §5·§7G 참조. |
 | [`palace-layout.md`](palace-layout.md) | 리서치 | 궁궐 다일곽·축선·행각 공유 규칙과 구현 파라미터. |
 | [`village-walls-parcels.md`](village-walls-parcels.md) | 리서치 | 담장·필지·정원·보호수의 실증 근거와 알고리즘 번역. |
 | [`tooling.md`](tooling.md) | 스냅샷 | 후보 라이브러리 평가와 채택 판단. 현재 설치 목록으로 오해하지 않는다. |

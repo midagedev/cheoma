@@ -7,7 +7,14 @@ import { buildProp } from '../../props/index.js';
 import { buildPalaceCompound } from '../../village/palace.js';
 import { mergeStatic } from '../../village/instancing.js';
 import * as G from '../../core/math/geom2.js';
-import { buildFeaturePad, computePadY } from './pads.js';
+import { terrainMeshHeightAt } from '../../village/terrain-grid.js';
+import { TEMPLE_PATH_WIDTH, templeCompoundSize } from '../../village/temple-plan.js';
+import {
+  buildFeaturePad,
+  buildTempleFeaturePad,
+  computePadY,
+  featurePadMaterials,
+} from './pads.js';
 
 function gableRoof(width, depth, height, material) {
   const halfWidth = width / 2, halfDepth = depth / 2;
@@ -149,17 +156,103 @@ export function buildHeroParcel(parcel, site) {
   return group;
 }
 
+function buildTempleApproach(temple, site, surfaces) {
+  const group = new THREE.Group();
+  group.name = 'temple-approach';
+  const path = temple.path || [];
+  if (path.length < 2) return group;
+  const width = temple.pathWidth || TEMPLE_PATH_WIDTH;
+  const materials = featurePadMaterials();
+  const heightAt = (point) => {
+    let height = terrainMeshHeightAt(site, point.x, point.z) + 0.075;
+    for (const surface of surfaces) {
+      if (G.pointInPoly(point, surface.polygon)) height = Math.max(height, surface.y + 0.015);
+    }
+    return height;
+  };
+  const tangentAt = (index) => G.norm(G.sub(
+    path[Math.min(path.length - 1, index + 1)],
+    path[Math.max(0, index - 1)],
+  ));
+
+  const positions = [], indices = [], heights = [];
+  for (let index = 0; index < path.length; index++) {
+    const point = path[index], tangent = tangentAt(index), normal = G.perpR(tangent);
+    const left = G.add(point, G.mul(normal, width * 0.5));
+    const right = G.add(point, G.mul(normal, -width * 0.5));
+    const leftY = heightAt(left), rightY = heightAt(right);
+    positions.push(left.x, leftY, left.z, right.x, rightY, right.z);
+    heights.push((leftY + rightY) * 0.5);
+    if (!index) continue;
+    const previous = (index - 1) * 2, current = index * 2;
+    indices.push(previous, current, previous + 1, previous + 1, current, current + 1);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const ribbon = new THREE.Mesh(geometry, materials.top);
+  ribbon.name = 'temple-approach-ribbon';
+  ribbon.receiveShadow = true;
+  group.add(ribbon);
+
+  const stepPositions = [], stepIndices = [];
+  const emitStep = (point, tangent, y) => {
+    const right = G.perpR(tangent);
+    const halfWidth = width * 0.56, halfDepth = 0.24, halfHeight = 0.08;
+    const base = stepPositions.length / 3;
+    for (const [sx, sy, sz] of [
+      [-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1],
+      [-1, 1, -1], [1, 1, -1], [1, 1, 1], [-1, 1, 1],
+    ]) {
+      stepPositions.push(
+        point.x + right.x * sx * halfWidth + tangent.x * sz * halfDepth,
+        y + sy * halfHeight,
+        point.z + right.z * sx * halfWidth + tangent.z * sz * halfDepth,
+      );
+    }
+    for (const triangle of [
+      [0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7],
+      [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5],
+      [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7],
+    ]) stepIndices.push(...triangle.map((index) => base + index));
+  };
+  for (let index = 0; index < path.length - 1; index++) {
+    const distance = G.dist(path[index], path[index + 1]);
+    if (distance < 1e-6) continue;
+    const rise = Math.abs(heights[index + 1] - heights[index]);
+    if (rise / distance < 0.16 && rise < 0.55) continue;
+    emitStep(
+      G.lerp(path[index], path[index + 1], 0.5),
+      G.norm(G.sub(path[index + 1], path[index])),
+      (heights[index] + heights[index + 1]) * 0.5 + 0.08,
+    );
+  }
+  if (stepIndices.length) {
+    const stepGeometry = new THREE.BufferGeometry();
+    stepGeometry.setAttribute('position', new THREE.Float32BufferAttribute(stepPositions, 3));
+    stepGeometry.setIndex(stepIndices);
+    stepGeometry.computeVertexNormals();
+    const steps = new THREE.Mesh(stepGeometry, materials.stone);
+    steps.name = 'temple-approach-steps';
+    steps.castShadow = true;
+    steps.receiveShadow = true;
+    group.add(steps);
+    group.userData.stepCount = stepIndices.length / 36;
+  } else group.userData.stepCount = 0;
+  group.userData.drawCalls = group.children.length;
+  return group;
+}
+
 function buildTempleCluster(temple, site) {
   const group = new THREE.Group();
   group.name = 'temple-cluster';
-  const width = 30, depth = 30;
+  const size = templeCompoundSize(temple);
+  const width = size - 3, depth = size - 3;
   const rotationY = G.facingY(temple.frontDir || { x: 0, z: 1 });
-  // footprint의 오르막 끝까지 덮어 대웅전 뒷면 관통을 막되, 거대 옹벽이 되지 않게 규모 비례 cap을 둔다.
-  const heightCap = Math.min(18, Math.max(5, (site.Hmax || 68) * 0.16));
-  const { group: pad, padY } = buildFeaturePad(
-    site, temple.x, temple.z, width + 3, depth + 3, rotationY, heightCap,
-  );
+  const { group: pad, padY, surfaces } = buildTempleFeaturePad(site, temple);
   group.add(pad);
+  group.add(buildTempleApproach(temple, site, surfaces));
   const inner = new THREE.Group();
   inner.add(buildParcel({
     seed: temple.seed || 11,
