@@ -55,9 +55,9 @@
   // ---------- 마을 모드 상태 ----------
   // "하나의 공간, 두 배율"(#59·#62): 기본 인터랙티브 부팅은 마을 씬 안에서 종가 클로즈업으로 시작한다.
   //   sceneVillage: 엔진이 마을 씬에 있는가(단일건물 씬 ↔ 마을 씬). villageMode 이벤트로 갱신.
-  //   villageHome: 이 세션이 "마을 우선(#62)"으로 부팅됐는가 — 그러면 모드 토글 '집'='종가 클로즈업 돌리',
-  //     '마을'='부감 복귀'로 카메라 배율만 오간다(별도 씬 아님). false(?hero=0·?village=1·?shot)면 구 씬 스왑 유지.
-  //   mode(파생): 마을 홈은 클로즈업=집/부감=마을, 그 외는 씬 기준.
+  //   villageHome: 이 세션이 "마을 우선(#62)"으로 부팅됐는가 — 히어로 랜딩과 URL 기록 정책만 소유한다.
+  //     마을 안 보기 버튼은 이 값과 무관하게 집 보기=종가 focus, 둘러보기=focus-out이다(#14).
+  //   mode(파생): 마을 홈은 선택 집=집 보기/미선택=둘러보기, 그 외는 씬 기준.
   let sceneVillage = $state(false);
   let villageHome = $state(false);
   // 마을 옵션: 규모·궁·절 + 상세 파라미터(#91 지형·구성·어휘). villageDefaults() 는 전부 코어 no-op 기본
@@ -156,9 +156,8 @@
   // sheetLayout: 바텀 시트 레이아웃(세로 좁은 화면). editing: 우측 편집 시트가 열림.
   let sheetLayout = $derived(device.sheet);
   let editing = $derived(ui.selected || !!villageEditing || villageZooming);
-  // 모드(파생): focus(편집·줌) 중이면 항상 '집'(近), 아니면 마을 씬=마을(遠)·단일건물=집. villageHome/비-home
-  //   구분 없이 통일 — ?village=1(비-home) 세션도 집 focus 중 遠 활성되던 회귀 수정(#118 U3). focus 중
-  //   遠 을 누르면 toggleMode('village')=focus-out(부감 복귀) 경로가 그대로 동작(집 씬 이탈 아님).
+  // 보기(파생): focus(편집·전환) 중이면 항상 집 보기, 아니면 마을 씬=둘러보기·단일건물=집 보기.
+  //   ?village=1 세션도 선택 중 둘러보기가 켜지지 않으며, 둘러보기를 누르면 명시적으로 focus-out한다.
   let mode = $derived(
     (villageEditing || villageZooming) ? 'house' : (sceneVillage ? 'village' : 'house')
   );
@@ -208,7 +207,7 @@
       syncUrl();
     });
     engine.on('villageHover', (h) => { hoverInfo = h; });
-    // focus-in START(클릭·줌 연속체·토글·리플레이·랜딩) — 스펙 선전달(#92)로 패널이 돌리 중 집 컨텍스트로
+    // focus-in START(집 클릭·집 보기·프로그램 진입·랜딩) — 스펙 선전달(#92)로 패널이 돌리 중 집 컨텍스트로
     //   모프하기 시작한다(도착 대기 없음). editParams 를 즉시 시드해 슬라이더가 렌더값에서 출발.
     engine.on('villageSelectStart', (p) => {
       hoverInfo = null; villageZooming = true;
@@ -309,8 +308,8 @@
     syncUrl();
 
     // 기본 인터랙티브 부팅(#62): 마을 우선 진입 — 타이틀 동안 마을 사전 생성, 클릭 시 종가 클로즈업
-    // 랜딩. villageHome 세션은 모드 토글이 종가 클로즈업↔부감 배율만 오간다. ?shot·?hero=0·?village=1
-    // 은 기존 계약(단일건물 부팅·직행 부감) 그대로 — villageHome 아님.
+    // 랜딩. ?shot·?hero=0·?village=1은 기존 부팅 계약(단일건물·직행 부감)대로 villageHome이 아니지만,
+    // 마을에 들어온 뒤의 보기 버튼 의미는 동일하다(#14).
     if (url.hero && !url.shot && !url.village) {
       heroVisible = true;
       villageHome = true;
@@ -564,19 +563,19 @@
   }
   function toggleMode(target) {
     if (waving) return;                       // 리롤 웨이브 중 배율 전환 잠금(#56)
-    if (villageHome) {
-      // 마을 홈(#59): 별도 씬이 아니라 카메라 배율만 오간다. '집'=종가 클로즈업 돌리, '마을'=부감 복귀.
+    if (sceneVillage) {
+      // #14: 마을에 들어온 뒤 보기 버튼의 뜻은 진입 경로와 무관하다. 집 보기=종가 focus,
+      // 둘러보기=focus-out. ?village=1에서 집 보기가 레거시 단일건물 씬으로 이탈하던 이중 의미를 제거한다.
       if (target === 'house') engine.village.focusHero();
       else engine.village.return();
       return;
     }
-    // 구 세션(?hero=0 단일건물 홈·?village=1): 마을 진입/이탈 씬 스왑. 마을 안 클로즈업 중 '마을'=부감 복귀.
+    // 단일건물로 시작한 구 세션(?hero=0)은 둘러보기를 눌렀을 때만 마을로 진입한다.
     if (target === 'village') {
-      if (sceneVillage) { engine.village.return(); return; }
       // 사전 생성분이 준비됐으면 즉시 진입(프리징 없음), 아니면 먹 안개로 생성을 마스킹.
       if (engine.village.isReady({ ...villageOpts }, villageSeed)) engine.village.enter({ ...villageOpts }, villageSeed);
       else withVeil(() => engine.village.enter({ ...villageOpts }, villageSeed));
-    } else if (sceneVillage) engine.village.exit();
+    }
   }
   // #144 규모 커밋 = 즉시 웨이브(구 마을 유지 → 중앙에서 방사형 조립). withVeil(헛번쩍) 폐기 — setOpts 가
   //   비동기(#123)라 베일이 아무것도 안 덮었다. pullVillage·syncUrl 은 완료 시 villageWave 'done'·villageMode 가 수행.

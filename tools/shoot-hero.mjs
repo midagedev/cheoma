@@ -187,8 +187,8 @@ await page.evaluate(() => window.__engine.setWeather('rain'));
 await wait(3200);
 const focusRain = await measureAmbient('FOCUS · rain+autumn');
 
-// 부감(遠) 토글 — 집→부감 focus-out(DoF 완화).
-await page.click('.mode .seg:has(.glyph:text-is("遠"))');
+// 둘러보기(村) 토글 — 집→부감 focus-out(DoF 완화).
+await page.click('.mode .seg:has(.glyph:text-is("村"))');
 await wait(2600);
 const aerialRain = await measureAmbient('AERIAL · rain+autumn');
 await page.evaluate(() => window.__engine.setWeather('snow'));
@@ -199,8 +199,8 @@ console.log(`  부감 DoF off(흐릿한 마을 금지): dofOn=${aerialSnow.dofOn
 console.log(`  부감 카메라볼륨 입자>0: snow.vis=${aerialSnow.snow.vis} rain.vis=${aerialRain.rain.vis}  ASSERT: ${aerialSnow.snow.vis ? 'PASS' : 'FAIL'}`);
 console.log(`  부감 낙엽 OFF(고도 게이트): leaves.vis=${aerialSnow.leaves.vis}  ASSERT false: ${aerialSnow.leaves.vis === false ? 'PASS' : 'FAIL'}`);
 
-// 부감→집(近) focus-in — DoF 도착 오차 <1m(#102 경로2: 부감→집).
-await page.click('.mode .seg:has(.glyph:text-is("近"))');
+// 부감→집(家) focus-in — DoF 도착 오차 <1m(#102 경로2: 부감→집).
+await page.click('.mode .seg:has(.glyph:text-is("家"))');
 await wait(2800);
 const backClose = await probe();
 console.log('\n[#102 부감→집 focus-in DoF 도착]');

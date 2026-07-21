@@ -71,9 +71,9 @@ await page.waitForTimeout(3200); await shot('04-landing-done'); await maxGap('la
 
 // 모드 토글: 집(클로즈업) → 마을(부감) 왕복. ModeToggle 세그 클릭(실제 UX 경로).
 await page.evaluate(() => { window.__frameGaps = []; });
-await page.click('.mode .seg:has(.glyph:text-is("遠"))');   // 마을(부감 - 멀 遠)
+await page.click('.mode .seg:has(.glyph:text-is("村"))');   // 마을 둘러보기
 await page.waitForTimeout(1800); await shot('05-aerial'); await maxGap('to-aerial');
-await page.click('.mode .seg:has(.glyph:text-is("近"))');   // 집(종가 클로즈업 - 가까울 近)
+await page.click('.mode .seg:has(.glyph:text-is("家"))');   // 종가 집 보기
 await page.waitForTimeout(2600); await shot('06-closeup'); await maxGap('to-closeup');
 
 // 히어로 리플레이 엔진 계약(UI 버튼은 #19에서 제거, 내부 조립 회귀는 유지)

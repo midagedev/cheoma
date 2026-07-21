@@ -97,7 +97,6 @@ export function createCinematicRuntime({
     cancelTween();
     stopHeroDrive();
     clearHover();
-    village.zoomCand = null;
     state.mode = mode;
     state.active = true;
     state.ambT = 0;
@@ -227,7 +226,7 @@ export function createCinematicRuntime({
       tweenTo(framing.pos, framing.target, wasWalk ? 1.3 : 1.0, {
         fov: framing.fov,
         referenceFov: framing.referenceFov,
-        onDone: () => setZoomRegime('aerial'),
+        onDone: () => setZoomRegime('explore'),
       });
     } else {
       camera.lookAt(controls.target);

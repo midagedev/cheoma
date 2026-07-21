@@ -1,6 +1,6 @@
 <script>
-  // 좌상 배율 전환(#48 focus 어휘) — "모드"가 아니라 하나의 마을을 멀리(부감)/가까이(종가 근접)
-  //   보는 배율 스위치. 遠·近 상형으로 거리감을 담백하게 표현(村/家 두 범주 인상 제거).
+  // 좌상 보기 전환(#14) — 줌 거리가 아니라 상호작용 의도를 표시한다. 둘러보기에서는 휠/핀치로
+  //   자유롭게 이동하고, 집 보기는 명시적으로 선택한 한 채의 컨텍스트를 유지한다.
   import { t } from '../lib/i18n.svelte.js';
   let { mode = 'house', onToggle } = $props();
 </script>
@@ -11,7 +11,7 @@
     onclick={() => mode !== 'village' && onToggle?.('village')}
     aria-pressed={mode === 'village'} title={t('mode_to_village')}
   >
-    <span class="glyph" aria-hidden="true">遠</span>
+    <span class="glyph" aria-hidden="true">村</span>
     <span class="lab">{t('mode_village')}</span>
   </button>
   <button
@@ -19,7 +19,7 @@
     onclick={() => mode !== 'house' && onToggle?.('house')}
     aria-pressed={mode === 'house'} title={t('mode_to_house')}
   >
-    <span class="glyph" aria-hidden="true">近</span>
+    <span class="glyph" aria-hidden="true">家</span>
     <span class="lab">{t('mode_house')}</span>
   </button>
 </div>

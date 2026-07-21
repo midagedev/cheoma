@@ -94,12 +94,18 @@ app/src/                       Svelte UI
 - 앱의 `window.__engine` API와 URL/runtime hook.
 - focus overlay와 scene resource의 dispose 소유권.
 
-## 줌 연속체와 디테일 LOD 계약
+## 보기별 줌과 디테일 LOD 계약
 
 한양처럼 큰 장면의 주택과 생활 디테일은 서로 다른 임계값을 임의로 판독하지 않는다. 순수 정책은
 `src/village/lod-policy.js`, 카메라·시선 셀 상태 계산은 `src/runtime/village/detail-lod.js`, 실제 필지
 표현 소유권은 `src/runtime/village/parcel-representation.js`가 각각 한 번만 소유한다.
 
+- 줌 거리와 선택 상태는 직교한다. 휠/핀치는 `explore`/`focus` 내부의 거리만 바꾸고 모드 전환을 일으키지
+  않는다. `src/camera/optics.js#villageZoomReferenceBounds`가 규모별 둘러보기 최소 거리와 두 보기의 최대
+  거리를 화면 등가 단위로 소유하며, 앱 runtime은 현재 렌즈의 실제 dolly로 한 번만 변환한다. 선택을 유지한
+  넓은 집 보기에서는 `villageFocusEffectWeight`가 근경 DoF만 단조롭게 0으로 내려 Bokeh pass를 쉬고,
+  `villageFocusContextElevation`이 정자·높은 공공 오브젝트와 공유하는 남측 일조축을 유지한 채 31° 부감으로
+  크레인 업해 넓어진 시야의 전경 차폐를 넘는다.
 - 한양의 모든 정규 주택은 `FAR mass → MID envelope → FULL` 세 단계다. FAR는 실제 variant의
   치수·평면·지붕 종류와 역할별 팔레트에서 파생하고, MID는 별도 근사 모델이 아니라 실제 빌더의
   외피 geometry·material만 재사용한다. 중앙을 포함해 청크마다 세 root 중 하나만 보인다.
@@ -149,7 +155,7 @@ app/src/                       Svelte UI
 
 ## 광학과 DoF 계약
 
-마을 줌 연속체의 시각 언어와 초점 계산은 생성기나 앱 전환마다 복제하지 않는다.
+마을의 연속 구도와 focus 전환의 시각 언어·초점 계산은 생성기나 앱 전환마다 복제하지 않는다.
 
 - `src/camera/optics.js`가 부감 46° 광각, 일반 필지 20°·hero 18°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈는 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를, point sprite 크기는 별도 lens scale을 사용한다.
 - `src/env/dof.js`가 월드 초점점을 카메라 전방축 깊이로 변환하고 DoF enable·amount·aperture를 한 controller에서 소유한다. focus-in/out은 선택 필지 축깊이를 붙들고, 필지 hop은 보간되는 시선을 따라간다.
