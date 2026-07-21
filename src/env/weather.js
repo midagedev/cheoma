@@ -77,9 +77,10 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // 계절 입자 필드(#111): 봄 벚꽃·가을 낙엽의 카메라 추종 볼륨. 눈·비와 동일하게 scene 루트에 붙여
   //   env.group 은닉(마을 모드)을 우회하고, setWeatherCenter 로 카메라 타깃을 따라온다. season 은
   //   weather 로 직접 흐르지 않으므로(engine 은 env.setSeason 만 호출) env.setSeason → window.__wx.setSeason
-  //   브릿지로 받는다. present(조기노출)·camDist(고도)는 아래 update/센터에서 판정해 넘긴다.
+  //   브릿지로 받는다. present(조기노출)와 viewHeight(시선 타깃 대비 높이)는 아래
+  //   update/센터에서 판정해 넘긴다.
   let season = 'summer';
-  let petalCamDist = NaN, petalCamY = null;
+  let petalCamDist = NaN, petalViewHeight = null, petalDetail = null;
   // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
   //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
   //   마을에선 앱 building.visible=false 라 present 로는 못 켜므로 centerAway(fieldC)를 OR 로 함께 본다.
@@ -322,10 +323,21 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     // 계절 입자(봄 꽃잎·가을 낙엽): 조기노출 게이트(원점 빈 터 억제) + 카메라 추종 볼륨. 눈·비처럼
     //   하늘/대기 소속이라 accumLevel·rainLevel 과 무관하게 season 이 spring/autumn 이면 발현한다.
     //   present = 건물 존재(단일건물) OR 필드가 원점을 벗어남(마을·focus·히어로) — petalGate 로 원점 빈 터
-    //   조립 전엔 0, 씬 정착 후 오른다. 고도 게이트는 petals 내부(camDist).
-    const petalPresentRaw = present || Math.abs(fieldCX) > 8 || Math.abs(fieldCZ) > 8;
+    //   조립 전엔 0, 씬 정착 후 오른다. 디테일 게이트는 petals 내부(viewHeight).
+    // 유한 detailWeight는 engine이 마을 공통 LOD를 주입했다는 명시적 신호다. 도성 중심 8m
+    // 안을 보더라도 앱의 단일집 building은 숨겨져 있으므로 좌표 이격만으로 마을 존재를 판정하면
+    // 중심 필지의 꽃잎/낙엽이 영구 OFF가 된다. 원경은 detailWeight=0이 최종 level을 그대로 재운다.
+    const petalPresentRaw = present || petalDetail !== null
+      || Math.abs(fieldCX) > 8 || Math.abs(fieldCZ) > 8;
     petalPresent = petalGate.update(dt, { present: petalPresentRaw, reset: bldReset && !petalPresentRaw });
-    petals.update(dt, { t, camDist: petalCamDist, camY: petalCamY, present: petalPresent, wind: getWind(t) });
+    petals.update(dt, {
+      t,
+      camDist: petalCamDist,
+      viewHeight: petalViewHeight,
+      detailWeight: petalDetail,
+      present: petalPresent,
+      wind: getWind(t),
+    });
   }
 
   // shot 하네스 훅: 특정 쌓임 단계로 고정(시간 경과 비교 컷). v=null 이면 자유 진행 복귀.
@@ -594,7 +606,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     // 하늘 입자 낙하 필드 중심 이설(#98). 마을 부감·종가 클로즈업처럼 시선이 원점을 벗어난 뷰에서
     //   눈·비가 화면 밖(원점)에만 쌓여 안 보이던 문제를 해소한다. 낙하 파티클 오브젝트만 이동(처마
     //   낙수·스플래시는 건물 앵커라 불변). 값 변화가 없으면 no-op.
-    setWeatherCenter(x, z, camDist, camY) {
+    setWeatherCenter(x, z, camDist, viewHeight, detailWeight) {
       if (Number.isFinite(x) && Number.isFinite(z) && (x !== fieldCX || z !== fieldCZ)) {
         fieldCX = x; fieldCZ = z;
         snow.points.position.set(x, 0, z);
@@ -614,11 +626,13 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
         snow.points.scale.set(spread, 1, spread);
         rain.lines.scale.set(spread, 1, spread);
       }
-      // 계절 입자 고도 게이트 신호(#111): camDist 는 항상, camY(선택 4번째 인자)는 넘어오면 정밀 게이트.
-      //   눈·비와 달리 꽃잎·낙엽은 부감(고도 높음)에서 소거된다(petals 내부 altGate). engine 이 camY 를
-      //   아직 안 넘기면 camDist 프록시 사용(setWeatherCenter 4-arg 는 하위호환).
+      // 계절 입자는 눈·비와 달리 근경 디테일이다. 4번째 인자는 절대 world Y가 아니라
+      // 카메라와 현재 시선 타깃/지면 사이의 수직 높이다. petals가 공통 디테일 밴드로 소거한다.
+      // 기존 3-인자 호출은 camDist 근사치를 사용하도록 보존한다.
       petalCamDist = camDist;
-      petalCamY = Number.isFinite(camY) ? camY : null;
+      petalViewHeight = Number.isFinite(viewHeight) ? Math.max(0, viewHeight) : null;
+      petalDetail = Number.isFinite(detailWeight)
+        ? Math.max(0, Math.min(1, detailWeight)) : null;
     },
     // 계절 입자 필드 season 설정(#111). engine 은 weather 에 season 을 직접 안 넘기므로(env.setSeason 만
     //   호출) env.setSeason → window.__wx.setSeason 브릿지로 도달한다. 'spring'|'autumn' 만 발현, 그 외 OFF.

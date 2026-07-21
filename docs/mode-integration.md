@@ -51,9 +51,11 @@ const ring = createFocusRing(scene, { heightAt });
 ring.set({ group, parcel, radius = 18, seed });  // group=풀디테일 오버레이(트래버스로 굴뚝·마당·지붕 앵커 탐지)
                                                   // parcel={ yard, cowSite?, bounds } (populate 필지 데이터)
 ring.clear();                                     // focus-out — 페이드 아웃 후 dispose
-ring.update(dt, timeName);                        // 매 프레임
+ring.update(dt, timeName, detailLod);             // 매 프레임 — 공통 지상/입자 LOD 강도
 ```
-- 활성화·해제 모두 크로스페이드, present-gate 게이트. 링은 **동시 1개만** (드로우콜 규율).
+- 활성화·해제 모두 크로스페이드, present-gate 게이트. 정착 상태의 활성 링은 1개이며,
+  필지 hop 동안에만 이전 retiring 링과 새 active 링이 잠시 공존한다. 조명은 이 과도 상태와 무관하게
+  고정 풀을 재사용한다.
 - env 검증은 /__amb 하네스 문법(앱 경로 독립)으로.
 
 ## 4. 편집 — 특수 건물 포함 전 필지
@@ -69,13 +71,14 @@ ring.update(dt, timeName);                        // 매 프레임
   다양성 강도 등 plan/populate 옵션 노출). 패널은 하드코딩이 아니라 **파라미터 스키마 주도(schema-driven)** 로
   구성해 코어 축 추가가 자동 반영되게 한다.
 - #69 라이브 반영(드래그 중 실시간)은 focus-in 패널에서 완성한다 — 절차 생성 데모의 심장.
-- 임포스터(far 청크) 필지는 focus-in 시 풀디테일 오버레이로 승격되므로 편집 문제 없음 (#47 한계 해소 경로).
+- FAR/MID 주택 필지는 focus-in 시 풀디테일 오버레이로 승격되므로 편집 문제 없음 (#47 한계 해소 경로).
 
 ## 5. 성능 규율
 
-- 오버레이·근접 링 동시 1개. 미병합 컴파운드 다중 add 금지 (드로우콜 폭발 실측 2010→5613).
+- 정착 상태 오버레이·근접 링은 각 1개. hop 크로스페이드 동안만 이전/새 표현이 최대 2개이며,
+  완료된 retiring 표현은 즉시 dispose한다. 미병합 컴파운드 상시 다중 add 금지 (드로우콜 폭발 실측 2010→5613).
 - RimPass: 부감 off / focus-in on (#76 Fresnel 실험 성공 시 무토글로 대체).
-- hanyang 부감은 LOD 임포스터+컬링(#47), 지형은 타이트 버짓(#77, terrain-extent-budget 원칙).
+- hanyang 부감은 FAR mass→MID 외피→FULL 주택 LOD+컬링(#47), 지형은 타이트 버짓(#77, terrain-extent-budget 원칙).
 
 ## 5.5 v2 — "하나의 패널, 하나의 줌 연속체" (사용자 재피드백 2026-07-18)
 

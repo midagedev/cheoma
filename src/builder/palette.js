@@ -733,6 +733,20 @@ function tagRoles(M) {
       if (m && m.isMaterial) m.userData.role = role;
     }
   }
+  // 중거리 LOD는 별도 모형을 새로 그리지 않고 실제 빌더 결과에서 외피 재질만 추출한다.
+  // 지붕면·마루·벽·기둥·기단·창호는 남기고, 기와 한 장·공포·서까래·장식처럼 픽셀보다
+  // 작은 반복 부재는 full 단계까지 미룬다. 태그는 clone에도 전파돼 변주별 재료/텍스처가 보존된다.
+  const envelope = [
+    'tileFlat', 'tileRidge', 'eaveBand', 'thatch', 'yongmaru',
+    'plaster', 'gable', 'pungpan', 'planwall',
+    'wood', 'woodDark', 'woodBoard',
+    'stone', 'stoneDark', 'fieldstone',
+    'door', 'hanji', 'salchang',
+  ];
+  for (const key of envelope) {
+    const m = M[key];
+    if (m && m.isMaterial) m.userData.lodEnvelope = true;
+  }
 }
 
 // ── 공유 재질 정규화(#149) ────────────────────────────────────────────────
@@ -808,6 +822,7 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
     bumpMap: tex, bumpScale,
   });
   mat.userData.role = 'roof';   // 지붕면 신규 재질도 부위 태그(마을 기와 톤 변주, 태스크 #55)
+  mat.userData.lodEnvelope = true;
   return mat;
 }
 

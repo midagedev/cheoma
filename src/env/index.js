@@ -48,7 +48,9 @@ export function restoreEnvironmentFallback(scene, { sun, hemi, renderer }, fallb
 
 // 산수화 환경 레이어를 조립한다.
 //   setupEnvironment(scene, { sun, hemi, renderer, layout })
-//     → { group, setTime(name), setSeason(name, opts), update(dt), setEnabled(bool), dispose() }
+//     → { group, setTime(name, opts), setSeason(name, opts), update(dt), setEnabled(bool), dispose() }
+// opts.immediate=true 는 숨김→재노출 같은 씬 수명주기 경계에서 하늘·물·연기·모트를 한 번에
+// 정착시키는 계약이다. 보이는 상태의 일반 변경은 opts 없이 호출해 크로스페이드를 유지한다.
 // 환경 OFF 시 셋업 시점의 배경·안개·조명 상태로 복원한다(기존 단순 배경 폴백).
 export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   // 폴백(현 상태) 캡처. Texture/CubeTexture 배경과 FogExp2까지 호출자 객체 identity를
@@ -181,20 +183,24 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     //   __wx 부재(env 단독 검증 하네스·weather 미생성)면 no-op.
     if (typeof window !== 'undefined' && window.__wx && window.__wx.setSeason) window.__wx.setSeason(name);
   }
-  // 매 프레임 계절 애니메이션(색 보간·낙엽 파티클·논 계절)+개울 흐름+생물. 환경 ON 일 때만.
+  // 마을은 자체 지형·생활 디테일을 소유하므로 env.group을 숨긴 동안 단일집 전용
+  // CPU 작업은 쉬게 한다. scene 레벨 시간대·조명·fog를 소유한 sky는 계속 갱신한다.
   function update(dt) {
     if (disposed) return;
-    seasons.update(dt);   // 논 계절 보간도 seasons 가 전파
-    terrain.update(dt);   // 들판 금빛 보간
-    water.update(dt);     // 개울 물결 시간(uTime) — 논 물면과 공유
-    critters.update(dt);  // 새 떼 boids·개·고양이·까치
-    animals.update(dt);   // 마당 닭 무리(쪼기·종종·홰치기)·논 소(풀 뜯기·꼬리·귀)
-    sky.update(dt);        // 시간대 크로스페이드(태양·하늘·포그·헤미·능선) + 가을 능선 틴트 보간
-    sky.updateFlicker(dt); // 처마 등롱 촛불 일렁임(등불 켜졌을 때)
-    smoke.update(dt);      // 굴뚝 연기 상승·소산·바람 드리프트 + 아궁이 불씨 일렁임
-    motes.update(dt);      // 먼지 모트 드리프트·바람 쓸림·역광 반짝(ink 모드 자동 비표시)
-    lanternSway.update(dt);// 처마 등롱 진자 미세 요동(바람 거스트 연동, 위치만)
-    clouds.update(dt);     // 산 구름·물안개 표류 + 흐르는 구름 그림자 세기(태양 상태 판독)
+    sky.update(dt);       // 시간대·하늘·fog·조명은 마을에서도 계속 이어진다.
+
+    if (group.visible) {
+      seasons.update(dt);   // 논 계절 보간도 seasons 가 전파
+      terrain.update(dt);   // 들판 금빛 보간
+      water.update(dt);     // 개울 물결 시간(uTime) — 논 물면과 공유
+      critters.update(dt);  // 새 떼 boids·개·고양이·까치
+      animals.update(dt);   // 마당 닭 무리(쪼기·종종·홰치기)·논 소(풀 뜯기·꼬리·귀)
+      sky.updateFlicker(dt); // 처마 등롱 촛불 일렁임(등불 켜졌을 때)
+      smoke.update(dt);      // 굴뚝 연기 상승·소산·바람 드리프트 + 아궁이 불씨 일렁임
+      motes.update(dt);      // 먼지 모트 드리프트·바람 쓸림·역광 반짝(ink 모드 자동 비표시)
+      lanternSway.update(dt);// 처마 등롱 진자 미세 요동(바람 거스트 연동, 위치만)
+      clouds.update(dt);   // 산 구름·물안개 표류 + 흐르는 구름 그림자 세기(태양 상태 판독)
+    }
     // fog 재합성: 시간대 트윈 중이거나 모디파이어(마을 거리·날씨 대기)가 등록돼 있으면 base+모디파이어로.
     if (enabled && !immediateMode && (sky.isTweening() || fogMods.length)) applyFogBaseAndMods();
   }

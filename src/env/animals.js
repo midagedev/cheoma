@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { presentationWeight } from '../core/lod.js';
 import { makeRng } from '../rng.js';
 
 // 소동물 확장(태스크 #43): 마당 닭 무리(암탉·병아리·수탉) + 논의 소(한우).
 //   setupAnimals(parent, { heightAt, layout, yard, cowSite, seed }) →
-//     { update(dt), setTime(name), setSeason(name), setEnabled(bool), cowAnchor, debugAim }
+//     { update(dt), setTime(name), setSeason(name), setEnabled(bool), setFade(v), setDetail(v), cowAnchor }
 //   parent: 환경 group(critters 와 동일). 여기에 animals 서브그룹을 붙여 env ON/OFF 가시성에 묶인다.
 //
 // 배치 앵커는 인자로 받는다(마을에서도 필지 마당·논 앵커를 주입해 재사용).
@@ -222,6 +223,12 @@ export function setupAnimals(parent, {
   let live = 1;             // 활동성(밤엔 낮춤)
   let roostGoal = 0;        // 닭 홰 자세 목표(밤=1)
   let t = 0;
+  let enabled = true;
+  let fadeWeight = 1;       // focus-ring ownership crossfade
+  let detailWeight = 1;     // shared camera / view-cell LOD
+  let waveWeight = 1;       // reroll/scale wave multiplier (visible/detail ownership stays here)
+  const LOD_EPSILON = 0.002;
+  const lod = { weight: 1, waveWeight: 1, active: true, updates: 0, skipped: 0 };
 
   const _ray = new THREE.Raycaster();
   const _down = new THREE.Vector3(0, -1, 0);
@@ -512,6 +519,9 @@ export function setupAnimals(parent, {
 
   // ---------- 공개 API ----------
   function update(dt) {
+    // Pause both animation and event scheduling when the layer cannot be seen.
+    if (!lod.active) { lod.skipped++; return; }
+    lod.updates++;
     t += dt;
     if (flock) flock.update(dt);
     if (cow) cow.update(dt);
@@ -522,18 +532,49 @@ export function setupAnimals(parent, {
     roostGoal = name === 'night' ? 1 : 0;              // 밤: 닭 홰 자세
   }
   function setSeason(_name) { /* 계절 연동 여지(현재 무영향) */ }
-  function setEnabled(v) { group.visible = !!v; }
+  function applyPresentation() {
+    const wasVisible = group.visible;
+    const alpha = presentationWeight(fadeWeight, detailWeight, waveWeight);
+    lod.weight = detailWeight;
+    lod.waveWeight = waveWeight;
+    lod.active = enabled && alpha > LOD_EPSILON;
+    group.visible = lod.active;
+    solidMat.transparent = alpha < 0.999;
+    solidMat.opacity = alpha;
+    solidMat.depthWrite = alpha >= 0.999;
+    return wasVisible !== group.visible;
+  }
+  function setEnabled(v) { enabled = !!v; return applyPresentation(); }
   // 근접 링 활성/해제 크로스페이드(0..1). 공유 재질 하나라 개체 전체가 균일 페이드.
   //   v>=1 이면 불투명 복귀(투명 정렬 비용 제거) — 기존 호출자는 호출 안 하므로 무회귀.
   function setFade(v) {
-    const t = Math.max(0, Math.min(1, v));
-    solidMat.transparent = t < 0.999;
-    solidMat.opacity = t;
-    solidMat.depthWrite = t >= 0.999;
+    fadeWeight = Math.max(0, Math.min(1, v));
+    return applyPresentation();
+  }
+  // Village detail is independent from the focus-ring presence fade. Multiplying the
+  // weights keeps either owner from overwriting the other's visibility decision.
+  function setDetail(v) {
+    detailWeight = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    return applyPresentation();
+  }
+  // Village reroll/scale wave owns only this multiplier. It must not write group.visible or
+  // material opacity itself because camera LOD can change concurrently during a reframe.
+  function setWaveFade(v) {
+    waveWeight = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    return applyPresentation();
   }
 
+  group.userData.waveFade = { setWeight: setWaveFade };
+
+  // Stable world anchors let the village runtime evaluate the shared view-cell policy
+  // without walking the object tree or allocating vectors every frame.
+  const detailAnchors = [];
+  if (flock) detailAnchors.push(flock.center());
+  if (cow) detailAnchors.push(cow.anchor());
+
   return {
-    update, setTime, setSeason, setEnabled, setFade,
+    update, setTime, setSeason, setEnabled, setFade, setDetail, setWaveFade,
+    group, detailAnchors, lod,
     // 소 라이브 월드 위치(오디오·마을 배치·검증 조준). 없으면 null.
     get cowAnchor() { return cow ? cow.anchor() : null; },
     // 검증 전용: 닭 무리 중심 월드 좌표.

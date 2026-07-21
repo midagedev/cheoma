@@ -26,22 +26,30 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
 // 연출(staging) 오브젝트 — 항상 제외. 대부분은 어댑터/엔진이 씬에 붙이므로 populate root 엔 없지만
 //   방어적으로 이름 필터. 입자/스프라이트/라인은 타입으로도 잡는다.
-const STAGING_NAME_RE = /^(skyDome|moon|clouds|edge-mist-ring|ridge-mist|focusRing|worldedge|village-nightlights|nightlight-points|flare|lensflare|dust|motes|lanternGlow)/;
+const STAGING_NAME_RE = /^(skyDome|moon|clouds|edge-mist-ring|ridge-mist|focusRing|worldedge|village-overrides|village-nightlights|nightlight-points|flare|lensflare|dust|motes|lanternGlow)/;
 // 지형·물·논 — opts.includeTerrain 게이트(기본 true).
 const TERRAIN_NAME_RE = /^(village-terrain|village-stream|village-paddies)$/;
-// 수목·정원·소동물 — opts.includeScenery(=pretty) 게이트(기본 true).
-const SCENERY_NAME_RE = /^(trees|village-flora|animals|cow)$/;
-// 원경 청크 임포스터(저폴리 박스 매스) — 항상 제외.
+// 수목·정원·소동물 — opts.includeScenery(=pretty) 게이트(기본 true). populate 단계의
+// animals/forest뿐 아니라 VillageHandle이 뒤에서 붙이는 critter rig도 같은 계약에 포함한다.
+const SCENERY_NAME_RE = /^(?:trees|forest-|village-(?:trees|forest|flora|bloom|critters)|animals|cow|birds|critters|v-(?:dogs|cats|magpies))/;
+// 대규모 청크 표현. 익스포트는 현재 카메라 LOD와 무관하게 둘 중 하나만 고른다:
+//   fullDetail=true → 실제 FULL, false → 개선된 경량 FAR mass. MID는 전환 전용이라 항상 제외.
 const IMPOSTOR_NAME_RE = /^impostor-/;
-// 숨겨둔 풀디테일 청크(visible=false) — opts.fullDetail 이면 승격(실지오 확보).
+const CHUNK_MID_RE = /^chunk-mid-/;
 const CHUNK_FULL_RE = /^chunk-full-/;
+// Hero/palace base nodes are unique architecture rather than switchable residential LOD.
+// Focus temporarily hides them in favour of an override, but village export must always retain
+// the authored base after the whole village-overrides staging subtree has been removed.
+const LANDMARK_BASE_RE = /^(?:hero-|palace-(?:merged|core)(?:-|$))/;
+const EXPORT_INSTANCE_MATRIX = Symbol.for('cheoma.export.pristineInstanceMatrix');
+const EXPORT_POSITION_SNAPSHOT = Symbol.for('cheoma.export.pristinePositionSnapshot');
 
 const DEFAULTS = {
   binary: true,           // true → .glb(ArrayBuffer), false → glTF JSON 객체
   includeTerrain: true,   // 지형 메시 + 개울 + 논
   includeScenery: true,   // 수목·정원·보호수·소동물 (pretty 의 실질)
   pretty: true,           // includeScenery 의 별칭(true 면 수목/정원/동물 포함). false 면 건축+지형만.
-  fullDetail: true,       // 원경 청크 숨은 풀디테일을 승격(임포스터 대신 실지오). 완전한 마을.
+  fullDetail: true,       // true=전체 실제 주택, false=전체 경량 FAR 주택(카메라 상태와 무관).
   instancing: 'gpu',      // 'gpu'(EXT_mesh_gpu_instancing, 작은 파일·instanceColor 보존)
                           //   | 'bake'(인스턴스를 개별 노드로 전개, 범용 호환·instanceColor 소실)
   maxTriangles: 3_000_000, // 유효(전개) 삼각형 상한. 초과 시 GLB 를 만들지 않고 안내 반환.
@@ -62,11 +70,13 @@ function meshTriangles(mesh) {
 function classify(node, opts) {
   const name = node.name || '';
   if (node.isPoints || node.isSprite || node.isLine || node.isLineSegments) return 'skip';
-  if (IMPOSTOR_NAME_RE.test(name)) return 'skip';
+  if (IMPOSTOR_NAME_RE.test(name)) return opts.fullDetail ? 'skip' : 'keep-hidden';
+  if (CHUNK_MID_RE.test(name)) return 'skip';
+  if (CHUNK_FULL_RE.test(name)) return opts.fullDetail ? 'keep-hidden' : 'skip';
   if (STAGING_NAME_RE.test(name)) return 'skip';
+  if (LANDMARK_BASE_RE.test(name)) return 'keep-hidden';
   if (node.visible === false) {
-    // 숨은 노드는 기본 제외. 단 원경 청크 풀디테일은 fullDetail 이면 승격(실지오).
-    if (opts.fullDetail && CHUNK_FULL_RE.test(name)) return 'keep-hidden';
+    // 표현 root는 위에서 카메라 가시성과 무관하게 선택했다. 나머지 숨은 연출 노드는 제외한다.
     return 'skip';
   }
   if (TERRAIN_NAME_RE.test(name)) return opts.includeTerrain ? 'keep' : 'skip';
@@ -90,17 +100,66 @@ function cleanMaterial(material, cache) {
 
 // ── 인스턴스 베이크: InstancedMesh → 지오/재질 공유 개별 Mesh N개(instanceColor 소실).
 //    지오·재질을 공유하므로 GLB 는 지오를 1회만 저장(노드 N개). 예산 가드 이후에만 호출.
+function pristineGeometry(node) {
+  const snapshot = node[EXPORT_POSITION_SNAPSHOT];
+  if (typeof snapshot !== 'function') return node.geometry;
+  const positions = snapshot();
+  if (!positions) return node.geometry;
+  const geometry = node.geometry.clone();
+  const position = geometry.getAttribute('position');
+  if (!position || position.array.length !== positions.length) {
+    throw new Error(`GLB export position snapshot mismatch: ${node.name || '(unnamed)'}`);
+  }
+  position.array.set(positions);
+  position.needsUpdate = true;
+  return geometry;
+}
+
+function pristineInstanceMatrix(node) {
+  return node[EXPORT_INSTANCE_MATRIX] || node.instanceMatrix;
+}
+
 function bakeInstanced(node, matCache) {
   const g = new THREE.Group();
   const mat = cleanMaterial(node.material, matCache);
   const m = new THREE.Matrix4();
+  const matrices = pristineInstanceMatrix(node);
+  const geometry = pristineGeometry(node);
   for (let i = 0; i < node.count; i++) {
-    node.getMatrixAt(i, m);
-    const mesh = new THREE.Mesh(node.geometry, mat);
+    m.fromArray(matrices.array, i * 16);
+    const mesh = new THREE.Mesh(geometry, mat);
     mesh.applyMatrix4(m);              // 인스턴스 로컬 변환을 노드 변환으로.
     g.add(mesh);
   }
   return g;
+}
+
+// 동기/청크 정화가 같은 스냅샷 규칙을 공유한다. 특히 instance attributes는 항상 clone해,
+// 비동기 GLTFExporter가 도는 동안 focus 전환이 원본 버퍼를 바꿔도 출력이 흔들리지 않게 한다.
+function sanitizeNode(node, opts, matCache) {
+  let out;
+  if (node.isInstancedMesh) {
+    if (opts.instancing === 'bake') {
+      out = bakeInstanced(node, matCache);
+    } else {
+      const im = new THREE.InstancedMesh(
+        pristineGeometry(node), cleanMaterial(node.material, matCache), node.count,
+      );
+      im.instanceMatrix = pristineInstanceMatrix(node).clone();
+      if (node.instanceColor) im.instanceColor = node.instanceColor.clone();
+      out = im;
+    }
+  } else if (node.isMesh) {
+    out = new THREE.Mesh(pristineGeometry(node), cleanMaterial(node.material, matCache));
+  } else {
+    out = new THREE.Group();
+  }
+
+  out.name = node.name || '';
+  out.position.copy(node.position);
+  out.quaternion.copy(node.quaternion);
+  out.scale.copy(node.scale);
+  return out;
 }
 
 // ── 순회 재구성: 필터를 통과한 노드만 새 경량 트리로 복제(지오는 참조 공유).
@@ -110,28 +169,7 @@ function sanitize(node, opts, matCache) {
   const verdict = classify(node, opts);
   if (verdict === 'skip') return null;
 
-  let out;
-  if (node.isInstancedMesh) {
-    if (opts.instancing === 'bake') {
-      out = bakeInstanced(node, matCache);
-    } else {
-      const im = new THREE.InstancedMesh(node.geometry, cleanMaterial(node.material, matCache), node.count);
-      im.instanceMatrix = node.instanceMatrix;             // 읽기 전용 공유.
-      if (node.instanceColor) im.instanceColor = node.instanceColor;
-      out = im;
-    }
-  } else if (node.isMesh) {
-    out = new THREE.Mesh(node.geometry, cleanMaterial(node.material, matCache));
-  } else {
-    out = new THREE.Group();
-  }
-
-  out.name = node.name || '';
-  // 로컬 변환 보존(계층 유지 → world 는 부모 체인으로 재구성). trs=false 익스포트는 matrix 를
-  //   쓰고 matrixAutoUpdate=true 면 pos/quat/scale 로 재계산하므로 이 셋만 복사하면 충분.
-  out.position.copy(node.position);
-  out.quaternion.copy(node.quaternion);
-  out.scale.copy(node.scale);
+  const out = sanitizeNode(node, opts, matCache);
   // userData 는 의도적으로 비운 채 유지(extras 누출 방지).
 
   for (const child of node.children) {
@@ -202,26 +240,7 @@ async function sanitizeChunked(node, opts, matCache, budget) {
   const verdict = classify(node, opts);
   if (verdict === 'skip') return null;
 
-  let out;
-  if (node.isInstancedMesh) {
-    if (opts.instancing === 'bake') {
-      out = bakeInstanced(node, matCache);
-    } else {
-      const im = new THREE.InstancedMesh(node.geometry, cleanMaterial(node.material, matCache), node.count);
-      im.instanceMatrix = node.instanceMatrix;
-      if (node.instanceColor) im.instanceColor = node.instanceColor;
-      out = im;
-    }
-  } else if (node.isMesh) {
-    out = new THREE.Mesh(node.geometry, cleanMaterial(node.material, matCache));
-  } else {
-    out = new THREE.Group();
-  }
-
-  out.name = node.name || '';
-  out.position.copy(node.position);
-  out.quaternion.copy(node.quaternion);
-  out.scale.copy(node.scale);
+  const out = sanitizeNode(node, opts, matCache);
 
   // 노드 예산 소진 시 다음 프레임으로 양보(자식 순회 전에 검사해 깊은 서브트리도 균등 분할).
   if (--budget.left <= 0) { budget.left = budget.size; await nextFrame(); }
@@ -255,7 +274,7 @@ export async function exportGLB(target, opts = {}) {
       suggestions: [
         `maxTriangles 를 ${stats.triangles} 이상으로 올려 강제 익스포트`,
         'pretty:false (수목·정원·소동물 제외)로 삼각형 축소',
-        'fullDetail:false (원경 청크 제외)로 근경만 익스포트',
+        'fullDetail:false 로 전체 주택을 경량 FAR 지오메트리로 익스포트',
         'includeTerrain:false (지형·물 제외)',
         "instancing:'gpu' 유지 — bake 전개는 노드 폭발",
       ],

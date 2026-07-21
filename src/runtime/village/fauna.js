@@ -1,9 +1,8 @@
 import { setupVillageCritters } from '../../env/critters.js';
 import { parcelRotY } from '../../generators/shared/parcel-transform.js';
+import { villageDetailWeightAt } from './detail-lod.js';
 
-const COW_AERIAL_SCALE = 3.5;
-
-/** Own the post-generation village critters and camera-dependent cow LOD. */
+/** Coordinate aerial flock and view-cell LOD for every village-scale ground animal. */
 export function createVillageFaunaController({ group, plan, site, seed, time = 'day', season = 'summer' }) {
   const parcels = [];
   for (const parcel of plan.parcels) {
@@ -34,7 +33,6 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
     heightAt: (x, z) => site?.heightAt?.(x, z) ?? 0,
     center: { x: center.x, z: center.z },
     radius,
-    siteR: site.R || 0,
     scale: plan.scale,
     parcels,
     treePerches,
@@ -43,28 +41,67 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
   rig.setTime(time);
   rig.setSeason(season);
 
-  const rampRef = (site.R && site.R > 1) ? site.R : 120;
-  const rampLow = rampRef * 0.55;
-  const rampHigh = rampRef * 0.90;
-  let cowGroups = null;
+  // populate owns chickens/cows as setupAnimals handles; this controller only assigns
+  // their shared camera-cell detail weight. Their normal animation remains in group.userData.update.
+  const animalHandles = group.userData.animals?.handles || [];
+  const residentialFlocks = new Set(animalHandles
+    .map((animal) => animal.ownerParcelId)
+    .filter((parcelId) => typeof parcelId === 'string' && parcelId));
+  let detailState = null;
+  const debugLod = {
+    tier: 'near', groundWeight: 1,
+    baseAnimals: {
+      total: animalHandles.length,
+      active: animalHandles.length,
+      weights: animalHandles.map(() => 1),
+      ownerParcelIds: animalHandles.map((animal) => animal.ownerParcelId ?? null),
+      effectiveActive: animalHandles.map((animal) => animal.lod?.active === true),
+      visible: animalHandles.map((animal) => animal.group?.visible === true),
+    },
+    critters: rig.lod,
+  };
+  // Keep one mutable snapshot on the village root so browser harnesses can assert sleep/wake
+  // behavior without traversing meshes or adding a frame-time-dependent probe.
+  group.userData.faunaLod = debugLod;
+  const resolveWeight = (point) => (detailState ? villageDetailWeightAt(detailState, point) : 1);
 
-  function updateCowLod(camera) {
-    if (cowGroups === null) {
-      cowGroups = [];
-      group.traverse((object) => { if (object.name === 'cow') cowGroups.push(object); });
+  function syncBaseDebug() {
+    let active = 0;
+    for (let i = 0; i < animalHandles.length; i++) {
+      const animal = animalHandles[i];
+      const isActive = animal.lod?.active === true;
+      debugLod.baseAnimals.effectiveActive[i] = isActive;
+      debugLod.baseAnimals.visible[i] = animal.group?.visible === true;
+      if (isActive) active++;
     }
-    if (!cowGroups.length) return;
-    const cameraY = camera?.position?.y ?? 0;
-    const t = Math.max(0, Math.min(1, (cameraY - rampLow) / Math.max(1, rampHigh - rampLow)));
-    const eased = t * t * (3 - 2 * t);
-    const scale = 1 + eased * (COW_AERIAL_SCALE - 1);
-    for (const cow of cowGroups) cow.scale.setScalar(scale);
+    debugLod.baseAnimals.active = active;
+  }
+
+  function updateLod(camera, detail) {
+    detailState = detail;
+    let visibilityChanged = rig.updateLod(camera, detail, resolveWeight);
+
+    for (let i = 0; i < animalHandles.length; i++) {
+      const animal = animalHandles[i];
+      let weight = 0;
+      for (const anchor of (animal.detailAnchors || [])) {
+        weight = Math.max(weight, resolveWeight(anchor));
+      }
+      if (animal.setDetail?.(weight)) visibilityChanged = true;
+      debugLod.baseAnimals.weights[i] = weight;
+    }
+    debugLod.tier = detail?.tier || 'near';
+    debugLod.groundWeight = detail?.groundWeight ?? 1;
+    syncBaseDebug();
+    return visibilityChanged;
   }
 
   return {
     setTime(name) { rig.setTime(name); },
     setSeason(name) { rig.setSeason(name); },
     update(dt) { rig.update(dt); },
-    updateLod(camera) { rig.updateLod(camera); updateCowLod(camera); },
+    updateLod,
+    hasResidentialFlock(parcelId) { return residentialFlocks.has(parcelId); },
+    debugLod,
   };
 }

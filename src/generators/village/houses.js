@@ -7,6 +7,7 @@ import { parcelRotY } from '../shared/parcel-transform.js';
 import { buildVillageWall } from '../../village/walls.js';
 import { CHOGA_VARIANTS, GIWA_VARIANTS } from '../../village/variants.js';
 import { chunkLodDistance } from '../../village/chunks.js';
+import { CHUNK_LOD_LEVEL, nextChunkLodLevel } from '../../village/lod-policy.js';
 
 // ───────────────────────── 집 프로토타입 ─────────────────────────
 // buildBuilding(초가/기와) 로 프로토타입을 만들어 clone. 종가·궁·절은 풀디테일 별도.
@@ -75,34 +76,79 @@ export function placeParcel(parcel, protos, wallMats, char01 = 0.5) {
   return g;
 }
 
-// 원경 청크 런타임 LOD 스왑 — 카메라가 다가오면 저폴리 임포스터 → 풀디테일 전환.
+// 대규모 주택 청크 런타임 LOD — 저폴리 mass → 실제 재료 외피 → 풀디테일의 3단계 전환.
 //   #92 자유 줌 이후 한양 스케일에서 줌인해도 원경 박스 매스가 그대로 보이던 문제 해소.
-//   카메라-청크 소유 필지의 최소 수평거리를 매 프레임 판정해 visible 토글.
+//   카메라-청크 소유 필지의 최소 3D 거리를 매 프레임 판정해 visible 토글.
 //   히스테리시스(진입/복귀 분리)로
-//   경계 왕복 플리커 방지. far 청크만 대상(near 청크는 항상 풀디테일).
-export function attachChunkLodSwap(chunkGroup, impostor, fullDetail, chunk, bowlR) {
-  // 카메라가 청크의 어느 필지든 bowlR의 절반 안으로 들어오면 원본을 복원한다. 공간상
-  // far 분류와 카메라 LOD 임계는 별개이며, 히스테리시스로 경계 왕복 시 깜빡임을 막는다.
-  const swapIn = bowlR * 0.45;
-  const swapOut = bowlR * 0.53;
-  let showFull = false;
+//   경계 왕복 플리커 방지. 한양에서는 중앙·외곽 청크가 모두 이 계약을 쓴다.
+export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, chunk, policy) {
+  // 공개 API의 기존 5인자 계약도 보존한다:
+  //   (chunkGroup, impostor, fullDetail, chunk, bowlR)
+  // 구 소비자는 원래의 FAR↔FULL 두 단계로 동작하고, 새 6인자 호출만 MID envelope를 사용한다.
+  const legacy = policy == null && Number.isFinite(chunk);
+  if (legacy) {
+    const oldFullDetail = midDetail;
+    const oldChunk = fullDetail;
+    const bowlR = chunk;
+    midDetail = null;
+    fullDetail = oldFullDetail;
+    chunk = oldChunk;
+    policy = {
+      fullIn: bowlR * 0.45,
+      fullOut: bowlR * 0.53,
+      midIn: bowlR * 0.45,
+      midOut: bowlR * 0.53,
+    };
+  }
+  // far 분류와 카메라 LOD 임계는 별개이며, 순수 정책의 히스테리시스로 경계 왕복 시
+  // 깜빡임을 막는다. 같은 state를 청크와 두 표현에 달아 검증 도구가 내부 탐색 없이 읽는다.
+  const state = {
+    chunkId: chunkGroup.name,
+    level: CHUNK_LOD_LEVEL.FAR,
+    distance: Infinity,
+    midIn: policy.midIn,
+    midOut: policy.midOut,
+    fullIn: policy.fullIn,
+    fullOut: policy.fullOut,
+    swapIn: policy.fullIn,
+    swapOut: policy.fullOut,
+    parcelIds: new Set(chunk.parcels.map((parcel) => parcel.id)),
+    farRoot: farMass,
+    impostorRoot: farMass,   // 하위호환 디버그 이름
+    midRoot: midDetail,
+    fullRoot: fullDetail,
+  };
+  chunkGroup.userData.lod = state;
+  farMass.userData.lod = state;
+  if (midDetail) midDetail.userData.lod = state;
+  fullDetail.userData.lod = state;
 
-  // 반환: 이 프레임에 스왑(임포스터↔풀디테일 토글)이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
-  //   모드에서 캐스터 구성 변경(임포스터 castShadow=false ↔ 풀디테일 캐스팅)을 1프레임 반영하는 데 쓴다.
+  function showOnly(level) {
+    farMass.visible = level === CHUNK_LOD_LEVEL.FAR;
+    if (midDetail) midDetail.visible = level === CHUNK_LOD_LEVEL.MID;
+    fullDetail.visible = legacy
+      ? level !== CHUNK_LOD_LEVEL.FAR
+      : level === CHUNK_LOD_LEVEL.FULL;
+  }
+  showOnly(state.level);
+
+  // 반환: 이 프레임에 FAR/MID/FULL 표현 전환이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
+  //   모드에서 캐스터 구성 변경(FAR castShadow=false ↔ 실제 외피 캐스팅)을 1프레임 반영하는 데 쓴다.
   chunkGroup.userData.lodUpdate = (camera) => {
-    const d = chunkLodDistance(chunk, camera.position.x, camera.position.z);
-    if (!showFull && d < swapIn) {
-      impostor.visible = false;
-      fullDetail.visible = true;
-      showFull = true;
-      return true;
-    } else if (showFull && d > swapOut) {
-      impostor.visible = true;
-      fullDetail.visible = false;
-      showFull = false;
-      return true;
-    }
-    return false;
+    if (!camera?.position) return false;
+    const d = chunkLodDistance(
+      chunk, camera.position.x, camera.position.z, camera.position.y,
+    );
+    state.distance = d;
+    const next = legacy
+      ? state.level === CHUNK_LOD_LEVEL.FULL
+        ? (d > policy.fullOut ? CHUNK_LOD_LEVEL.FAR : state.level)
+        : (d < policy.fullIn ? CHUNK_LOD_LEVEL.FULL : state.level)
+      : nextChunkLodLevel(state.level, d, policy);
+    if (next === state.level) return false;
+    state.level = next;
+    showOnly(next);
+    return true;
   };
 }
 

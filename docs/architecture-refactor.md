@@ -92,6 +92,41 @@ app/src/                       Svelte UI
 - 앱의 `window.__engine` API와 URL/runtime hook.
 - focus overlay와 scene resource의 dispose 소유권.
 
+## 줌 연속체와 디테일 LOD 계약
+
+한양처럼 큰 장면의 주택과 생활 디테일은 서로 다른 임계값을 임의로 판독하지 않는다. 순수 정책은
+`src/village/lod-policy.js`, 카메라·시선 셀 상태 계산은 `src/runtime/village/detail-lod.js`, 실제 필지
+표현 소유권은 `src/runtime/village/parcel-representation.js`가 각각 한 번만 소유한다.
+
+- 한양의 모든 정규 주택은 `FAR mass → MID envelope → FULL` 세 단계다. FAR는 실제 variant의
+  치수·평면·지붕 종류와 역할별 팔레트에서 파생하고, MID는 별도 근사 모델이 아니라 실제 빌더의
+  외피 geometry·material만 재사용한다. 중앙을 포함해 청크마다 세 root 중 하나만 보인다.
+- focus overlay가 나타나는 순간 해당 필지의 FAR, MID, FULL, 병합 담을 함께 접는다. 카메라 전환이 끝나기
+  전이나 focus hop 중에도 `base/overlay` 두 집이 겹치지 않으며, focus-out 때 현재 청크 단계 하나만 복원한다.
+- 소동물·필지 앰비언스·꽃잎/낙엽은 절대 `camera.position.y` 대신 `controls.target`의 지형 높이에 대한
+  상대 고도와 시선 거리를 공유한다. 지상 개체는 현재 시선 셀 주변만 갱신하고 원경에서는 mesh와 CPU
+  시뮬레이션을 함께 쉰다. 하늘의 새 떼와 시간대·fog 전이는 부감에서도 유지한다.
+- populate가 이미 배치한 마당 닭은 focus에서 숨겼다가 다른 무리로 바꾸지 않고, 같은 객체를
+  거리 LOD로 깨워 계속 쓴다. base flock이 없는 필지만 focus ring이 닭을 만들어 같은 마당에
+  두 무리가 겹치지 않는다. 별도 exclusion/lease 상태는 존재하지 않는다.
+- scene 직속인 비선택 필지 앰비언스도 `village-ambient-wave-owner` bridge로 마을 root의 wave multiplier를
+  받는다. 새 핸들은 전체 마을 모드를 넘겨받기 전에 이 앰비언스만 사전 연결해, 집·지형이 교체되는 동안
+  옛 필드가 따로 남거나 새 연기·모트·등롱이 완료 프레임에 한꺼번에 나타나는 별도 수명 주기를 만들지 않는다.
+  새 필드의 PointLight 풀과 전역 lookahead 소유권은 옛 필드가 해제되는 승격 프레임까지 지연해, 웨이브 중
+  scene light 개수와 shader variant가 늘어나지 않는다.
+- 임계값을 소비자 파일에 복제하지 않는다. 새 근접 디테일은 `createVillageDetailLodState` 또는
+  `villageDetailWeightAt`을 소비하며, 새 주택 표현은 `setParcelBaseHidden`의 단일 소유권 전환에 합류한다.
+- 규모 wave의 비동기 build부터 애니메이션 완료까지는 하나의 busy 수명이다. 이 동안 focus·zoom·hover를
+  잠그고, old/incoming 핸들에 시간·계절·날씨를 같은 프레임에 적용한다. 취소·이탈은 pending
+  토큰, reframe tween, 임시 재질, incoming root를 함께 회수해 늦게 완성된 핸들이 재승격되지 않게 한다.
+- GLB export는 현재 카메라 LOD와 focus 은닉 상태를 읽지 않는다. 인스턴스 행렬·병합 정점의
+  pristine snapshot에서 `FULL` 또는 `FAR`를 선택하고 `village-overrides`를 제외해, 같은 옵션의 export가
+  사용자의 현재 화면에 따라 달라지지 않는다.
+
+순수 경계·히스테리시스·variant 계약은 `npm run check:lod`, 실제 앱의 한양 focus-in/hop/out 프레임별
+배타성과 동물 sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window.__engine.village.debugLod()`는
+정책값이 아니라 실제 root 가시성과 필지별 은닉 핸들을 읽어 실패 필지를 반환한다.
+
 `tools/check-worker-contract.mjs`는 네 규모의 scene graph와 pick proxy 골든 hash, 실제 Worker 메시지, async 단계 순서를 함께 고정한다. 구조 이동 뒤 이 값은 갱신 대상이 아니라 보존 대상이다.
 
 ## 병렬 작업 소유권

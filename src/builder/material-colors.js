@@ -24,6 +24,8 @@ export const VILLAGE_MATERIAL_COLORS = {
   chogaWall: 0xc9ad84,
   chogaWood: 0x4e3b28,
   chogaRidge: 0x766748,
+  chogaStone: 0xaa9878,
+  giwaStone: 0xa79f8f,
 };
 
 export function srgbChannelToLinear(channel) {

@@ -17,11 +17,12 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #2 지형 밀착 indexed 도로(전 tier) + 한양 성곽·접근로·식생 footprint의 의도된 geometry 변경.
-  village: '587bc27c:e590aea8:092552fb:cd112f24',
-  town: '2d862954:41440794:037ab6d6:e92a4a90',
-  capital: '6bf3408d:32fc031d:6dd3f0e1:f0941a89',
-  hanyang: 'de2fe8ee:d17ea404:7a8f2eb9:7f587cb2',
+  // #29: 지상 동물과 상공 새 떼의 난수 스트림을 분리해 카메라 LOD sleep 여부가 다음 행동을
+  // 오염하지 않게 했고, 한양의 중앙·외곽 모든 주택 청크가 FAR/MID/FULL 표현을 함께 소유한다.
+  village: 'ff4d4469:1ebe218d:dd94185b:28437c3d',
+  town: 'c61eb653:4a6807bb:cd54073e:502b178b',
+  capital: '87fa464c:d886f5a2:d4394c51:0a0e0322',
+  hanyang: 'a7289eb2:19a19830:3a9535c2:0b896f00',
 };
 const expectedProxyHashes = {
   village: '28774cfe',

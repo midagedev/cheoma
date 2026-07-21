@@ -155,7 +155,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     lastCenterT: 0, // 화면중심 픽 레이캐스트 스로틀
     // ── 리롤 웨이브(#56 배선) ──
     wave: null,     // { anim, oldHandle, newHandle, seed } — 진행 중 재구성 웨이브(입력 잠금)
+    waveBuild: null, // 비동기 incoming handle 준비 토큰 — active wave 전에도 입력은 잠그되 최신 토큰 교체는 허용
   };
+  // 워커가 새 핸들을 만드는 구간도 화면상 하나의 웨이브 수명이다. 애니메이션 여부(village.wave)와
+  // 상호작용 busy 여부를 분리해, latest-wins 토큰 교체는 보존하면서 focus/줌 레이스만 닫는다.
+  const villageWaveBusy = () => !!(village.wave || village.waveBuild);
+  function forEachPresentedVillageHandle(fn) {
+    if (!village.active) return 0;
+    const current = village.handle;
+    const incoming = village.wave?.newHandle;
+    let count = 0;
+    if (current) { fn(current); count++; }
+    if (incoming && incoming !== current) { fn(incoming); count++; }
+    return count;
+  }
   let hoverParcel = null;     // 마을 호버 중 필지 id(하이라이트 토글 최소화)
   let lastHoverT = 0;         // 호버 레이캐스트 스로틀(~30Hz)
   let wheelAccum = 0;         // 편집 중 줌아웃 제스처 누적
@@ -301,8 +314,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   });
   const { post, outline, dofOn } = postRuntime;
 
-  function reapplyEnvBase() {
-    env.setTime(state.time); // sky.apply → fog/bg/exposure/조명
+  function reapplyEnvBase(opts) {
+    env.setTime(state.time, opts); // sky.apply → fog/bg/exposure/조명
   }
   function refreshAtmosphere() {
     weatherRef?.applyAtmosphere({ mode: 'pbr' });
@@ -367,7 +380,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const viewShiftRuntime = createViewShift({
     container,
     camera,
-    isBusy: () => !!(demo.active || village.wave || village.heroAsm || heroActive),
+    isBusy: () => !!(demo.active || villageWaveBusy() || village.heroAsm || heroActive),
   });
   const viewShift = viewShiftRuntime.state;
 
@@ -501,7 +514,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 단, 마을 모드에서 조립 중(village.heroAsm)일 때는 자동 선회 연출을 허용합니다.
     const orbitBusy = (heroActive && !village.heroAsm) || assembly || groupAnims.length > 0 ||
       wings.some((w) => w.assembly) || cinematic.isActive() || tween || state.selected || demo.active ||
-      (village.active && village.selected && !village.heroAsm) || village.wave;
+      (village.active && village.selected && !village.heroAsm) || villageWaveBusy();
 
     let curRotateSpeed = ORBIT_SPEED;
     if (village.active && village.heroAsm) {
@@ -521,9 +534,28 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
     if (!cinematic.isActive() && !tween && !demo.active) controls.update(dt);   // 데모 중 카메라는 updateDemo 소유
+    // 카메라/시선 셀 LOD는 이 프레임에 한 번만 계산한다. weather·focus·동물·필지 필드가
+    // 같은 ground/particle weight를 소비해 서로 다른 거리에서 팝하지 않게 한다.
+    let frameDetailLod = null;
+    let lodSwaps = 0;
+    if (village.active && village.handle) {
+      lodSwaps = village.handle.updateLod(camera, controls.target, dt);
+      frameDetailLod = village.handle.detailLodState?.() || null;
+      // 웨이브 중 새 마을도 현재 카메라로 계속 샘플한다. 규모 reframe 동안 FAR/MID/FULL과
+      // 지상 동물이 옛 카메라 상태에 고정됐다가 승격 직후 팝하지 않게 한다.
+      if (village.wave?.newHandle) {
+        lodSwaps += village.wave.newHandle.updateLod(camera, controls.target, dt);
+      }
+    }
     // 하늘 입자(눈·비) 낙하 필드를 시선(카메라 타깃)으로 이설 — 마을 부감·종가 클로즈업·랜딩 등
     //   원점을 벗어난 뷰에서도 "보는 곳에 눈/비"가 오게(#98). 단일건물은 타깃≈원점이라 사실상 무변.
-    weatherRef.setWeatherCenter?.(controls.target.x, controls.target.z, camera.position.distanceTo(controls.target), camera.position.y);
+    weatherRef.setWeatherCenter?.(
+      controls.target.x,
+      controls.target.z,
+      camera.position.distanceTo(controls.target),
+      frameDetailLod?.altitude ?? Math.max(0, camera.position.y - controls.target.y),
+      frameDetailLod?.particleWeight,
+    );
     weatherRef.update(dt);
     env.update(dt);
     // 히어로 역광 방위 고정(#98) — env sky 가 매 프레임 sun.position 을 시간대 방향으로 세팅한 직후,
@@ -535,16 +567,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (hmag > 1e-4) { sp.x = Math.sin(heroSunAz) * hmag; sp.z = Math.cos(heroSunAz) * hmag; }
     }
     nightGlowRef.update(dt);
-    if (village.active && village.handle) village.handle.update(dt);   // 개울 물결·야간 촛불 일렁임
-    // 원경 청크 LOD 스왑(임포스터↔풀디테일). #140-E: 스왑 프레임엔 캐스터 구성이 바뀌므로(임포스터
-    //   castShadow=false ↔ 풀디테일 캐스팅) 그림자 캐시 모드에서 그 프레임만 그림자를 1회 갱신한다.
+    // LOD가 활성화한 애니메이션만 갱신한다. 청크/overlay caster 소유권 변화도 같은 프레임에
+    // 그림자 캐시를 무효화한다.
     if (village.active && village.handle) {
-      const lodSwaps = village.handle.updateLod(camera);
       if (lodSwaps && shadowCacheOn) renderer.shadowMap.needsUpdate = true;
+      village.handle.update(dt);   // 개울 물결·야간 촛불·LOD로 활성화된 동물
+      village.wave?.newHandle?.update(dt);   // 조립 중 새 마을의 물·하늘 새 떼도 정지하지 않는다.
     }
     // 리롤 웨이브(#56) — 옛 마을 방사 해체 → 지형 크로스페이드 → 새 마을 방사 조립. 완료 시 승격.
     if (village.wave) { if (village.wave.anim.update(dt) >= 1) finishRerollWave(); }
-    focusRing.update(dt, state.time);                                  // 앰비언스 근접 링(#79) — 미설정 시 no-op
+    focusRing.update(
+      dt,
+      state.time,
+      village.active ? (frameDetailLod || { groundWeight: 0, particleWeight: 0 }) : 1,
+    );                                                                 // 앰비언스 근접 링(#79)
     updateZoomContinuum();                                             // 줌 연속체 자동 focus-in/out(#92)
     // 진입 먹 안개 reveal: fog 를 짙게(near/far 좁게) 시작해 base(R비례)로 풀어 마을이 드러남.
     //   hold 구간 동안은 짙은 먹안개를 유지(히어로 단독 무대감) → 이후 easeOut 으로 마을을 연다.
@@ -611,7 +647,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     container,
     controls,
     getHoverParcel: () => hoverParcel,
-    isBusy: () => !!(tween || village.transitioning || village.wave || village.heroAsm || demo.active),
+    isBusy: () => !!(tween || village.transitioning || villageWaveBusy() || village.heroAsm || demo.active),
     onReturn: () => villageReturn(),
     onSelect: (parcelId) => villageSelect(parcelId),
     scene,
@@ -629,7 +665,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
   function onCanvasPointerMove(e) {
     if (demo.active) return;                                   // 시네마틱 데모 중 호버 무시(#112)
-    if (village.wave) return;                                  // 웨이브 중 입력 무시(#56)
+    if (villageWaveBusy()) return;                              // 웨이브 빌드·애니 중 입력 무시(#56)
     if (village.active) { villageHover(e.clientX, e.clientY); return; }
     if (state.selected) { outline.selectedObjects = []; return; }
     const h = pick(e.clientX, e.clientY);
@@ -649,7 +685,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     downPos = { x: e.clientX, y: e.clientY };
     // 터치엔 호버가 없으므로 탭 시작 순간 미니 라벨을 잠깐 띄운다(선택 시 villageSelectStart 가 지움).
     //   focus 중에도 허용(#95) — 다른 필지 탭 예고(villageHover 가 현 focus 필지 자신은 제외).
-    if (e.pointerType === 'touch' && village.active && !village.transitioning && !village.wave) {
+    if (e.pointerType === 'touch' && village.active && !village.transitioning && !villageWaveBusy()) {
       lastHoverT = 0; villageHover(e.clientX, e.clientY);
     }
   }
@@ -660,7 +696,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     downPos = null;
     if (moved > 6) return;             // 드래그(궤도 회전)는 선택으로 치지 않음
     if (village.active) {
-      if (village.wave || village.transitioning) return;         // 웨이브·전환 중 클릭 무시
+      if (villageWaveBusy() || village.transitioning) return;     // 웨이브 빌드·애니·전환 중 클릭 무시
       const rect = renderer.domElement.getBoundingClientRect();
       ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -830,11 +866,23 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function prewarmVillage(h) {
     if (!h || !h.group) return;
     const culled = [];
+    const lodVisibility = [];
     const cam = { pos: camera.position.clone(), tgt: controls.target.clone(), fov: camera.fov, far: camera.far, near: camera.near };
     const fog = scene.fog ? { near: scene.fog.near, far: scene.fog.far } : null;
     try {
       scene.add(h.group);
-      h.group.traverse((o) => { if (o.isMesh || o.isInstancedMesh || o.isLine || o.isPoints) { culled.push([o, o.frustumCulled]); o.frustumCulled = false; } });
+      h.group.traverse((o) => {
+        // compile은 숨은 재질 프로그램을 찾을 수 있어도 실제 render는 visible=false 서브트리의
+        // geometry/instance buffer를 업로드하지 않는다. FAR/MID/FULL root를 한 프레임만 모두 열어
+        // 첫 거리 전환까지 GPU 업로드가 미뤄지는 히치를 제거하고, 아래 finally에서 정확히 복원한다.
+        const name = o.name || '';
+        const lodTierRoot = o.userData?.impostor === true
+          || name.startsWith('chunk-mid-') || name.startsWith('chunk-full-');
+        if (lodTierRoot) { lodVisibility.push([o, o.visible]); o.visible = true; }
+        if (o.isMesh || o.isInstancedMesh || o.isLine || o.isPoints) {
+          culled.push([o, o.frustumCulled]); o.frustumCulled = false;
+        }
+      });
       // 실제 진입 뷰(부감 카메라 + 마을 fog·far)로 예열 — 첫 진입 프레임의 셰이더 변종·업로드·
       // 스테이트를 그대로 warming(단일건물 카메라/far 로는 원경 지오·부감 셰이더가 덜 예열됨).
       const R = h.plan.site.R;
@@ -848,6 +896,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     } catch (e) {
       /* 프리워밍 실패는 비치명적 — 진입 시 정상 생성 경로로 폴백 */
     } finally {
+      for (const [o, v] of lodVisibility) o.visible = v;
       for (const [o, v] of culled) o.frustumCulled = v;
       scene.remove(h.group);
       camera.position.copy(cam.pos); controls.target.copy(cam.tgt);
@@ -862,8 +911,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   지연 컴파일되며 메인스레드가 정지한다 — walk 진입(원경 풀디테일 청크 LOD 스왑 ~146 프로그램)·
   //   hop·focus-in·리롤 리빌 스톨의 실체가 바로 이 첫 렌더 컴파일이다. renderer.compileAsync 는
   //   프로그램을 미리 초기화하고 KHR_parallel_shader_compile 로 링크를 드라이버 백그라운드에 위임
-  //   (동기 비용↓)한 뒤 Promise 로 완료를 알린다. three 의 compile 이 scene.traverse(가시 무관)로
-  //   재질을 모으므로 visible=false 인 숨은 풀디테일 청크까지 함께 예열된다(가시 토글 불필요 → 팝 없음).
+  //   (동기 비용↓)한 뒤 Promise 로 완료를 알린다. 다만 compile의 프로그램 준비와 실제 vertex/index/
+  //   instance buffer 업로드는 별개다. preload의 prewarmVillage만 숨은 LOD root를 임시로 열어 render하고,
+  //   일반 focus/wave warmShaders는 가시성에 손대지 않는다.
   //   이미 컴파일된 재질은 건너뛰므로 재호출은 신규분만 예열(정상상태 재질엔 저렴). 베일·카메라 트윈·
   //   카메라 트윈 구간에 얹어 프리즈를 흡수한다. 미지원(구 three)이면 조용히 no-op(폴백=지연 컴파일).
   //   ★ root 를 반드시 신규 서브트리(오버레이·새 핸들 그룹)로 좁혀야 한다: compileAsync 는 인자 씬을
@@ -940,6 +990,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //     연속 커밋 중 스테일 결과 취소. ?worker=0·window.__villageSync 는 내부 폴백(동기/메인 크런치).
   //   · 첫 진입(handle 無) → 동기(부팅은 preload 워밍 + 히어로 랜딩 마스킹이 담당). 회귀 안전.
   function buildVillage(onReady, forceSync) {
+    // regular swap과 wave swap은 같은 village.handle/scene root를 소유한다. 어느 경로가
+    // 나중에 시작됐든 먼저 진행 중이던 wave(build 포함)를 회수해 late promotion을 막는다.
+    cancelVillageWave();
     if (demo.active) stopDemo();   // 마을 재생성(리롤·규모·재진입) 시 데모 정지(스테일 패스 방지)
     if (village.heroTimer) { clearTimeout(village.heroTimer); village.heroTimer = null; }
     village.heroAsm = null;
@@ -1015,6 +1068,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function exitVillage() {
     if (!village.active) return;
     if (demo.active) stopDemo();                      // 시네마틱 데모 종료(#112)
+    // 공개 API로 웨이브 도중 이탈할 수도 있다. 새 루트를 scene에 둔 채 active만 끄면 애니가
+    // 뒤늦게 승격되어 단일집을 다시 숨기므로, 현재 핸들을 건드리기 전에 웨이브 소유물을 회수한다.
+    cancelVillageWave();
     stopHeroAsm();                                   // 진행 중 종가 조립·타이머 정리
     focusRing.clear();
     if (village.selected) village.handle.hideParcelDetail(village.selected);   // 오버레이(정규/특수) 해제
@@ -1026,10 +1082,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     controls.enableZoom = true; controls.minDistance = 0; controls.maxDistance = Infinity; wheelAccum = 0;
     renderer.domElement.style.cursor = '';
     setPostFocus(true);                  // 단일건물 씬 복귀 → rim/flare 기본 복원
+    // 마을에서 바뀐 계절·시간의 단일집 전환은 env.group이 숨은 동안 CPU를 쉬었다. 재노출 전에
+    // 목표 상태를 즉시 정착시켜 예전 들판/수목뿐 아니라 물·연기·모트 프로파일이 한 프레임
+    // 나타났다 다시 변하는 회귀를 막는다. 보이는 상태의 일반 다이얼 변경은 여전히 크로스페이드한다.
+    env.setSeason(state.season, { immediate: true });
+    reapplyEnvBase({ immediate: true });
     village.handle.exitVillageMode({ scene, building, ground, env });
     camera.far = camera.__houseFar ?? 500; camera.near = camera.__houseNear ?? 0.1;
     camera.updateProjectionMatrix();
-    reapplyEnvBase();                    // 단일건물 fog 복원(env.setTime)
     weatherRef.setWeather(state.weather); refreshAtmosphere();
     updateWeatherColliders();
     const { pos, target } = buildingSpot('three-quarter', computeLayout(P));
@@ -1041,7 +1101,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function villageHover(clientX, clientY) {
     // 전환·웨이브 중엔 호버 봉인. focus 중(selected)에도 다른 필지 호버는 허용(#95 직접 전환 예고) —
     //   현 focus 필지 자신만 제외(재클릭 no-op 대상이라 하이라이트·라벨 불필요).
-    if (village.transitioning || village.wave) {
+    if (village.transitioning || villageWaveBusy()) {
       if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; renderer.domElement.style.cursor = ''; emit('villageHover', null); }
       return;
     }
@@ -1067,13 +1127,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // 앰비언스 근접 링(#79) — focus 오버레이 컴파운드에 붙인다(마당 닭·연기·모트·등롱). 미설정 시 no-op.
-  function attachFocusRing(overlayGroup) {
+  function attachFocusRing(detailOrGroup) {
+    const overlayGroup = detailOrGroup?.group || detailOrGroup;
     if (!overlayGroup) return;
     // 궁궐(#93): 다일곽 궁역은 기념비적 건축 — 농가 앰비언스(마당 닭·풀·굴뚝 연기)가 조정(박석) 위에
     //   깔리면 고증 붕괴. focus.js 는 그룹 바운드로 풀/모트를 깔아 궁역 60~96m 를 채우므로 도메스틱 링은 생략.
     if (village.selected === 'palace') { focusRing.clear(); return; }
-    const compound = overlayGroup.children.find((c) => c.name && c.name.startsWith('parcel-')) || overlayGroup.children[0] || overlayGroup;
-    focusRing.set({ group: compound, parcel: null, radius: 18, seed: (village.seed ^ 0xf0c5) >>> 0, season: state.season });
+    const ambient = detailOrGroup?.ambient
+      || village.handle?.focusAmbientDescriptor?.(village.selected, overlayGroup);
+    if (!ambient) { focusRing.clear(); return; }
+    focusRing.set({ ...ambient, season: state.season });
     focusRing.setTime?.(state.time, true);
     warmFocusRingShaders();   // #128: 방금 생성된 링 컨테이너(scene 직속) 프리컴파일 — 링 첫 렌더 링크 스톨 흡수
   }
@@ -1083,7 +1146,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   근접 링 앵커 확보(§4). 카메라 돌리 + DoF 램프 + 링 크로스페이드 + 패널 컨텍스트 모프를 FOCUS_IN_DUR
   //   한 타임라인으로 구동(onProgress 가 카메라 이즈드 k 를 App 패널 모프로 흘림). 줌은 전환 중 봉인.
   function villageSelect(parcelId) {
-    if (!village.handle) return;
+    if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const pr = village.handle.getPickProxy(parcelId);
     if (!pr) return;
     if (hoverParcel && hoverParcel !== parcelId) village.handle.highlightParcel(hoverParcel, false);
@@ -1094,6 +1157,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setZoomRegime('lock');                              // 전환 중 줌 봉인
     // 풀디테일 오버레이 승격(모든 필지) — 편집·리플레이·근접 링 앵커.
     const detail = village.handle.showParcelDetail(parcelId);
+    // 링은 전환 시작 프레임부터 소유권을 넘겨받되 공통 생활 LOD weight로 0→1이 된다.
+    // 도착 후 갑자기 생기는 닭/낙엽 팝과, 전환 중 ambient-field 공백을 동시에 없앤다.
+    if (detail?.group) attachFocusRing(detail);
     const warmP = detail?.group ? warmShaders(detail.group) : Promise.resolve();   // 오버레이 서브트리 프리컴파일(#117)
     renderer.domElement.style.cursor = '';
     const f = pr.cameraFraming;
@@ -1110,7 +1176,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         onDone: () => {
           village.transitioning = false;
           village.handle.highlightParcel(parcelId, false);        // 도착: 근경엔 박스 숨김
-          if (detail && detail.group) attachFocusRing(detail.group);  // 근접 앰비언스 점등(모든 필지)
           setZoomRegime('focus', closeupDist);                    // 근접 줌 클램프(줌아웃 → focus-out 인계)
           emit('villageFocusMorph', 1);
           emit('villageSelect', { parcelId, spec: pr.buildingSpec });
@@ -1126,7 +1191,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   (근경 팝을 부감/원거리로 밀어냄). 앰비언스 링은 attachFocusRing(B) 이 focusRing.set → A 링 retiring
   //   크로스페이드. 전환 내내 transitioning=true → 줌 감시자·재클릭 봉인.
   function villageSwitch(toId) {
-    if (!village.active || !village.handle || village.transitioning || village.wave) return;
+    if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const fromId = village.selected;
     if (!fromId || toId === fromId) return;                       // 부감(미focus)이거나 같은 필지면 무효(재클릭 no-op)
     const pr = village.handle.getPickProxy(toId);
@@ -1142,7 +1207,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setPostFocus(true);                                           // 두 상태 모두 focus(멱등) — rim/flare 유지
     setZoomRegime('lock');                                        // 전환 중 줌 봉인
     village.handle.highlightParcel(toId, true);                   // 돌리 동안 B 추적 하이라이트
-    if (detail.group) attachFocusRing(detail.group);             // 앰비언스 링 A→B 크로스페이드(set 이 A 링 retiring)
+    if (detail.group) attachFocusRing(detail);                   // 앰비언스 링 A→B 크로스페이드(set 이 A 링 retiring)
     renderer.domElement.style.cursor = '';
     const f = pr.cameraFraming;
     const closeupDist = f.position.distanceTo(f.target);
@@ -1392,7 +1457,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // 종가 클로즈업으로 돌리(모드 토글 '집' — 부감에서 호출). villageSelect 재사용(돌리인+DoF 조임+패널).
   function focusHero() {
-    if (!village.active || !village.handle || village.transitioning) return;
+    if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const heroId = village.handle.heroParcelId();
     if (!heroId || village.selected === heroId) return;
     villageSelect(heroId);
@@ -1415,7 +1480,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   focus 중인 오버레이(편집 상태 보존, 재생성 안 함)를 그대로 조립 재생 → 부팅 히어로 랜딩과 동형 경로.
   //   리플레이 내내 transitioning=true(연타 무효) + 패널 접힘(villageSelectStart), 정착 시 재슬라이드인.
   function replayFocus() {
-    if (!village.active || !village.handle || village.transitioning) return;
+    if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const id = village.selected;
     if (!id) return;
     const pr = village.handle.getPickProxy(id);
@@ -1448,7 +1513,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   교체 → 새 buildingSpec 반환. 편집값은 새 기본값으로 리셋하되 패널과 동기(emit reseed:true). 그 뒤는
   //   replayFocus 와 동형(조립 재생 + 링 재부착 + 패널 재시드).
   function rerollFocusParcel() {
-    if (!village.active || !village.handle || village.transitioning || village.wave) return;
+    if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const id = village.selected;
     if (!id) return;
     const detail = village.handle.rerollParcel(id);
@@ -1486,6 +1551,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //      재호출은 새 토큰이 이전 빌드를 무효화(최신 커밋 승리) — 연타 커밋 스테일 스왑 방지.
   function startVillageWave({ seed, buildOpts, reframe = false } = {}) {
     if (!village.active || !village.handle || village.wave || village.transitioning) return null;
+    // 반대 방향 경합도 latest request가 이긴다. 진행 중 regular async 결과는 토큰 불일치로
+    // 완성 즉시 dispose되고 현재 oldHandle을 건드리지 않는다.
+    village.build = null;
     if (demo.active) stopDemo();
     // 진행 중 focus/조립 흔적 정리(부감 상태에서 호출되지만 방어)
     stopHeroAsm();
@@ -1500,11 +1568,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #123: 새 마을 핸들은 forest 워커 오프로드로 비블로킹 생성(구 마을 유지 중 부감). 준비되면 웨이브 시작
     //   → 웨이브 시작 프레임의 동기 createVillage 프리즈 제거. 스테일 토큰 취소(연속 커밋·이탈 방어).
     const startWave = (newHandle) => {
-      // 그 사이 상태가 바뀌었으면(이탈·다른 빌드·이미 웨이브 중) 새 핸들 폐기.
-      if (village.wave || !village.active || village.handle !== oldHandle) { newHandle.dispose(); return; }
+      // 현재 토큰은 startWave 호출 직전에 비워진다. 이후에도 busy/선택/전환이 남았다면 빌드 중
+      // 다른 화면 흐름이 소유권을 얻은 것이므로 incoming 핸들을 폐기한다.
+      if (villageWaveBusy() || village.selected || village.transitioning
+        || !village.active || village.handle !== oldHandle) { newHandle.dispose(); return; }
       newHandle.setTime(state.time);              // env 상태 선적용(웨이브 중 옛 마을과 톤 일치)
       newHandle.setSeason(state.season, {});
       newHandle.setWeather(state.weather);
+      // createRerollWave가 vis0를 캡처하기 전에 현재 부감 LOD를 적용한다. 그렇지 않으면 새 마을의
+      // 닭·소·개·고양이·까치가 기본 visible=true로 데코 웨이브에 섞였다가 승격 때 갑자기 사라진다.
+      newHandle.updateLod(camera, controls.target, 0);
+      // 새 마을의 scene-direct 연기·모트·등롱 필드는 완료 뒤 갑자기 만들지 않고 미리 연결한다.
+      // 아직 셀이 없고 아래 wave가 ownerWeight=0으로 prime하므로 이 동기 구간에 보이는 팝은 없다.
+      newHandle.prepareWavePresentation({ scene });
       scene.add(newHandle.group);                 // old 와 공존(웨이브 대상)
       const site = oldHandle.plan.site;
       const anim = createRerollWave({
@@ -1516,7 +1592,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       village.wave = { anim, oldHandle, newHandle, seed: useSeed, opts: buildOpts ? { ...buildOpts } : null };
       // 규모 커밋 동반 재프레이밍(#144): 새 핸들 site 기준 부감으로 웨이브와 함께 밀어 새 마을이 프레임에
       //   맞게 자란다(완료 후 스냅 대신). 웨이브(3.6s)보다 살짝 짧게 끝내 finish 의 setZoomRegime 과 안 겹침.
-      if (reframe) { const f = villageAerial(newHandle); tweenTo(f.pos, f.target, 3.0, { fov: f.fov }); }
+      if (reframe) {
+        const f = villageAerial(newHandle);
+        tweenTo(f.pos, f.target, 3.0, { fov: f.fov });
+        village.wave.reframeTween = tween;
+      }
       emit('villageWave', { phase: 'start' });
     };
     if (villageAsyncBuild()) {
@@ -1532,6 +1612,29 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
   // 리롤 웨이브(#56): 새 시드로 마을 전체 재구성. 옵션은 유지, 규모 불변이라 재프레이밍 없음.
   function startRerollWave() { return startVillageWave({ seed: newSeed() }); }
+  function cancelVillageWave() {
+    // 비동기 build 토큰을 먼저 무효화한다. 이미 resolve 중인 Promise는 토큰 불일치를 보고
+    // 완성된 핸들을 dispose하며, 공개 exit/isWaving은 같은 틱에 idle로 돌아간다.
+    const cancelledBuild = !!village.waveBuild;
+    village.waveBuild = null;
+    const w = village.wave;
+    if (!w) {
+      if (cancelledBuild) emit('villageWave', { phase: 'cancel' });
+      return cancelledBuild;
+    }
+    village.wave = null;
+    if (tween && tween === w.reframeTween) {
+      tween = null;
+      settleControls();
+    }
+    w.anim.cancel();                        // old 루트 복원·new 루트 미착공 + 임시 재질 회수
+    scene.remove(w.newHandle.group);        // dispose 뒤 scene에 죽은 Object3D를 남기지 않는다.
+    w.newHandle.dispose();
+    village.handle = w.oldHandle;           // 방어: 웨이브 도중에는 원래 같지만 공개 API 레이스에도 명시
+    bumpShadow(1200);                       // partial-wave caster 행렬 복원을 즉시 shadow cache에 반영
+    emit('villageWave', { phase: 'cancel' });
+    return true;
+  }
   // 웨이브 완료 → 옛 마을 폐기 + 새 마을 활성 승격(enterVillageMode 상당: 조명 리그·구름·fog·야경·픽킹 재연결).
   function finishRerollWave() {
     const w = village.wave; if (!w) return;
@@ -1550,6 +1653,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.handle.setSeason(state.season, {});
     village.handle.setWeather(state.weather);
     reapplyVillageFog();
+    updateWeatherColliders();   // 새 seed/규모의 지붕·마당 AABB로 눈·비 충돌 대상을 즉시 교체
     bumpShadow(2000);   // #140-A 웨이브 완료 후 새 마을 정착 프레임 그림자 갱신
     setZoomRegime('aerial');
     emit('villageSeed', village.seed);
@@ -1638,7 +1742,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       post.setTime(name);
       refreshAtmosphere();
       audio?.setTime(name);
-      if (village.active && village.handle) { village.handle.setTime(name); reapplyVillageFog(); }
+      // 웨이브 중 old/new가 함께 보이므로 두 핸들에 같은 프레임의 환경 상태를 전달한다.
+      // 전역 sky/fog/post는 위에서 한 번만 갱신하고, 핸들별 물·조명·동물만 각각 동기화한다.
+      if (forEachPresentedVillageHandle((handle) => handle.setTime(name))) reapplyVillageFog();
       focusRing.setTime?.(name);          // 근접 링 앰비언스 시간대(연기·모트·닭)
       emit('state', { ...state });
     },
@@ -1647,7 +1753,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       bumpShadow(1800);   // #140-A 계절 전환 크로스페이드 동안 그림자 갱신(잎·개화 캐스터 정합)
       env.setSeason(name, {});
       refreshAtmosphere();
-      if (village.active && village.handle) { village.handle.setSeason(name, {}); reapplyVillageFog(); }
+      if (forEachPresentedVillageHandle((handle) => handle.setSeason(name, {}))) reapplyVillageFog();
       focusRing.setSeason?.(name);        // 근접 링 바람 풀 계절색 연동(#90) — 마을 계절과 일치(미배선 시 여름 초록 고정)
       emit('state', { ...state });
     },
@@ -1656,8 +1762,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       bumpShadow(1800);   // #140-A 날씨 전환 크로스페이드 동안 그림자 갱신
       // 마을 모드: 건물 종속 FX(처마 낙수 등)는 building.visible=false 로 자동 억제되므로
       // 안전하게 weatherRef 를 동시 업데이트하여 하늘 입자를 구동합니다.
-      if (village.active && village.handle) {
-        village.handle.setWeather(name);
+      if (forEachPresentedVillageHandle((handle) => handle.setWeather(name))) {
         reapplyEnvBase();
         reapplyVillageFog();
       } else {
@@ -1701,9 +1806,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 이 집만 다시 굴리기(#100): 현재 focus 중인 필지만 새 시드로 재생성(마을·이웃 불변).
       rerollParcel: rerollFocusParcel,
       // 임의 필지 focus(모드 토글 '집'은 종가 focusHero, 클릭·줌은 이 경로) — 검증·프로그램 진입.
-      focus: (id) => { if (village.active && !village.transitioning && !village.wave && !village.selected) villageSelect(id); },
+      focus: (id) => { if (village.active && !village.transitioning && !villageWaveBusy() && !village.selected) villageSelect(id); },
       // focus 중 필지→필지 직접 전환(#95): 현재 focus 상태에서 B 로 부감 미경유 이동. 검증·프로그램 진입.
-      switchTo: (id) => { if (village.active && !village.transitioning && !village.wave && village.selected) villageSwitch(id); },
+      switchTo: (id) => { if (village.active && !village.transitioning && !villageWaveBusy() && village.selected) villageSwitch(id); },
       heroId: () => village.handle?.heroParcelId?.() ?? null,
       // focus 중 여부(App 이 再 버튼 노출·모드 판단) — selected 이면서 전환 완료 상태.
       focused: () => !!(village.active && village.selected),
@@ -1749,9 +1854,23 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         emit('villageSeed', village.seed);
         return village.seed;
       },
-      // 리롤 웨이브(#56): 부감 유지·연출 재구성. 웨이브 진행 중 여부는 isWaving.
+      // 리롤 웨이브(#56): 부감 유지·연출 재구성. isWaving은 워커 빌드부터 애니 완료까지 true다.
       rerollWave: () => startRerollWave(),
-      isWaving: () => !!village.wave,
+      isWaving: villageWaveBusy,
+      // 검증용: 비동기 준비와 활성 웨이브를 구분하고, 동시에 제시되는 두 핸들의 환경 상태만
+      // 읽는다. Object3D/handle 자체를 노출하지 않아 테스트가 수명 소유권을 우회하지 못하게 한다.
+      debugWave: () => {
+        const snapshot = (handle) => handle ? {
+          time: handle.time, season: handle.season, weather: handle.weather,
+        } : null;
+        const active = village.wave;
+        return {
+          building: !!village.waveBuild,
+          active: !!active,
+          old: snapshot(active?.oldHandle || (village.waveBuild ? village.handle : null)),
+          incoming: snapshot(active?.newHandle || null),
+        };
+      },
       // glb 익스포트 대상(#104·#112). exportRoot=마을 전체(populate root, 부감에서 노출), focusRoot=현재
       //   focus 중 필지의 풀디테일 오버레이(재생성 없이 현 오버레이 반환). 둘 다 gltf.exportGLB 에 그대로.
       exportRoot: () => village.handle?.group ?? null,
@@ -1810,8 +1929,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         parcelId: p.parcelId, hero: p.buildingSpec.hero, kind: p.buildingSpec.kind,
         heroStyle: p.buildingSpec.heroStyle || null, family: p.buildingSpec.family || null,
         editable: p.buildingSpec.editable === true })),
+      // 검증용(#29): FAR/MID/FULL/focus overlay 중 필지당 정확히 하나만 보이는지 상태 스냅샷.
+      debugLod: (id = null) => village.handle?.lodState?.(id) ?? null,
       // 검증용(#48): 좌표 클릭 대신 필지 id 로 직접 focus-in(돌리인+패널). 실사용 경로 villageSelect 재사용.
-      debugFocus: (id) => { if (village.active && !village.transitioning && !village.selected) villageSelect(id); },
+      debugFocus: (id) => {
+        if (village.active && !village.transitioning && !villageWaveBusy() && !village.selected) villageSelect(id);
+      },
       // 검증용(#48): 편집 오버레이 바운딩 크기 — 편집 전후 비교로 지오 변화 정량 확인.
       debugOverlayBox: (id) => village.handle?.overlayBox?.(id) ?? null,
       // 검증용(#93): 씬 기하 드로우콜 수(궁 편집 전/후·재생성 회귀 계측). 컴포저 최종 패스가
@@ -1845,7 +1968,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       //   시 controls.target 을 그 필지로 조준해 화면중심 후보가 그것이 되게 한다. 다음 프레임 updateZoomContinuum
       //   이 임계 판정으로 자동 focus-in/out 을 트리거(실사용 게이트 경로). 반환: 설정된 카메라↔타깃 거리.
       debugDolly(frac, parcelId = null) {
-        if (!village.active || village.transitioning || village.wave) return null;
+        if (!village.active || village.transitioning || villageWaveBusy()) return null;
         if (parcelId) { const pr = village.handle.getPickProxy(parcelId); if (pr) controls.target.copy(pr.worldCenter); }
         const d = (village.aerialDist || 150) * frac;
         const dir = new THREE.Vector3().subVectors(camera.position, controls.target);

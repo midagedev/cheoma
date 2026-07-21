@@ -5,9 +5,9 @@ export function createVillageAmbientFieldController({ plan, site, proxyById, ove
   const enabled = typeof location === 'undefined'
     || new URLSearchParams(location.search).get('ambfield') !== '0';
   let field = null;
-  let lastDt = 0.016;
   let time = 'day';
   let season = 'summer';
+  let waveWeight = 1;
 
   function buildDescriptors() {
     const descriptors = [];
@@ -45,11 +45,16 @@ export function createVillageAmbientFieldController({ plan, site, proxyById, ove
     return descriptors;
   }
 
-  function enter(scene) {
-    if (!enabled || field || !scene) return;
+  function enter(scene, { deferSceneServices = false } = {}) {
+    if (!enabled || !scene) return;
+    if (field) {
+      if (!deferSceneServices) field.activateSceneServices();
+      return;
+    }
     field = createAmbientField(scene, {
       heightAt: (x, z) => site?.heightAt?.(x, z) ?? 0,
       sun: findSun(scene),
+      deferSceneServices,
     });
     field.setParcels(buildDescriptors());
     field.setExcluded((id) => overrideById.has(id));
@@ -65,9 +70,21 @@ export function createVillageAmbientFieldController({ plan, site, proxyById, ove
   return {
     enter,
     exit,
-    rememberDt(dt) { lastDt = dt; },
-    update(camera) { field?.update(lastDt, camera); },
+    update(dt, camera, lod) { field?.update(dt, camera, lod, waveWeight); },
+    setWaveFade(value) {
+      waveWeight = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+    },
     setTime(name) { time = name; field?.setTime(name); },
     setSeason(name) { season = name; field?.setSeason(name); },
+    // field가 아직 생성되지 않았거나 exit로 해제된 뒤에도 wave 소유권 자체는 읽을 수 있다.
+    // 준비→웨이브→취소 수명 검증이 scene 리소스의 존재 여부와 controller 상태를 혼동하지 않게 한다.
+    debug() {
+      return {
+        waveWeight,
+        ownerWeight: waveWeight,
+        entered: !!field,
+        ...(field?._debug?.() || {}),
+      };
+    },
   };
 }

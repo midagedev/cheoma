@@ -154,10 +154,23 @@ camera.lookAt(num('tx', target.x), num('ty', target.y), num('tz', target.z));
 let frames = 0;
 renderer.setAnimationLoop(() => {
   if (group.userData.update) group.userData.update(1 / 60);
+  // 실제 앱과 같은 production LOD 경로를 반드시 구동한다. 이 호출이 없으면 모든 컷이 부팅 시
+  // 임포스터 상태에 고정돼 근경/게이트 스크린샷이 LOD 회귀를 전혀 잡지 못한다(#29).
+  if (group.userData.updateChunkLod) group.userData.updateChunkLod(camera);
   renderer.render(scene, camera); frames++;
   if (frames === 14) {
     const ri = renderer.info;
+    const lod = { full: 0, mid: 0, far: 0, invalid: 0 };
+    for (const child of group.children) {
+      const state = child.userData?.lod;
+      if (!state) continue;
+      if (state.level === 'full') lod.full++;
+      else if (state.level === 'mid') lod.mid++;
+      else if (state.level === 'far' || state.level === 'impostor') lod.far++;
+      else lod.invalid++;
+    }
     window.__PLAN = { scale, seed, view, R, stats: plan.stats, warnings: plan.warnings,
+      lod,
       perf: { calls: ri.render.calls, triangles: ri.render.triangles, programs: ri.programs?.length || 0,
         geometries: ri.memory.geometries, textures: ri.memory.textures } };
     window.__SHOT_READY = true;
@@ -233,7 +246,7 @@ try {
     try {
       const info = await page.evaluate(() => window.__PLAN);
       if (!info) throw new Error('window.__PLAN was not populated');
-      console.log(name, JSON.stringify(info.stats), 'perf=' + JSON.stringify(info.perf), info.warnings.length ? 'WARN:' + info.warnings.join(';') : '');
+      console.log(name, JSON.stringify(info.stats), 'lod=' + JSON.stringify(info.lod), 'perf=' + JSON.stringify(info.perf), info.warnings.length ? 'WARN:' + info.warnings.join(';') : '');
       const file = join(OUT, `${PFX}${name}.png`);
       await page.screenshot({ path: file });
       console.log('saved', file);

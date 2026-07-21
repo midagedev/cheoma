@@ -1,7 +1,7 @@
 // 마을 리롤 웨이브 연출(#56) — 프레임워크 무관 ES 모듈(코어).
 //
 //   createRerollWave({ oldRoot, newRoot, center, heightAt, seed, duration }) →
-//     { update(dt) → progress, seek(t01), isDone(), dispose(), duration, progress }
+//     { update(dt) → progress, seek(t01), isDone(), cancel(), dispose(), duration, progress }
 //
 // 리롤(새 시드) 순간을 3막으로 연출한다:
 //   ① 해체  기존 마을이 중심에서 바깥으로 좌르르륵 사라진다(집=인스턴스 단위 방사 스태거).
@@ -28,6 +28,8 @@
 
 import * as THREE from 'three';
 import { tofuScale, tofuBob } from '../anim/assembly.js';
+import { waveFadeController } from '../core/lod.js';
+import { isSharedResource } from '../core/three-resources.js';
 import { makeRng } from '../rng.js';
 
 // ── 이징(assembly.js 와 동일 상수) ──
@@ -77,32 +79,150 @@ const GROUP_NAMES = new Set(['village-landmarks', 'village-sijeon', 'city-wall',
 const SKIP_NAMES = new Set(['village-overrides', 'village-highlight']);
 
 // 재질 페이드 컨트롤러 — 대상 하위 트리 재질의 opacity 를 램프한다(트랜스폼 아님).
-//   같은 루트 안 공유 재질은 uuid 로 1회만 등록(예: 담장 wallMats 는 전 청크 공유 → 함께 페이드).
-//   서로 다른 루트(old/new)는 재질 인스턴스가 독립이므로 상호 간섭 없음.
-function makeFader(objs) {
-  const tops = objs.map((o) => ({ o, vis0: o.visible }));
-  const recs = new Map();
+//   pads·등롱처럼 모듈 수명 재질을 구/신 마을이 함께 쓰는 경우가 있다. 원본 opacity 를 직접 쓰면
+//   뒤에 적용한 new fade가 old 쪽까지 덮어쓰므로, 서로 다른 fade phase에서 실제로 겹치는 재질만
+//   루트별 임시 clone으로 격리한다. 나머지는 원본을 유지해 핸들의 계절·시간대 업데이트 경로를 보존한다.
+function splitFadeObjects(objs) {
+  const owned = [];
+  const staticObjs = [];
   for (const o of objs) {
+    const controller = waveFadeController(o);
+    if (controller) owned.push(controller);
+    else staticObjs.push(o);
+  }
+  return { owned, staticObjs };
+}
+
+function sharedFadeMaterials(collections) {
+  const phases = new Map();
+  for (let phase = 0; phase < collections.length; phase++) {
+    const { staticObjs } = splitFadeObjects(collections[phase]);
+    for (const o of staticObjs) {
+      o.traverse((node) => {
+        const materials = Array.isArray(node.material)
+          ? node.material : (node.material ? [node.material] : []);
+        for (const material of materials) {
+          let owners = phases.get(material);
+          if (!owners) { owners = new Set(); phases.set(material, owners); }
+          owners.add(phase);
+        }
+      });
+    }
+  }
+  // markSharedResource는 LOD groupUnit·scene-direct helper처럼 fader 바깥 소비자도 있다는 뜻이다.
+  // 현재 네 collection에서 한 번만 보여도 원본 opacity를 쓰면 그 외 소비자에 새므로 격리한다.
+  return new Set([...phases]
+    .filter(([material, owners]) => owners.size > 1 || isSharedResource(material))
+    .map(([material]) => material));
+}
+
+function syncSharedMaterial(source, target) {
+  for (const key of ['color', 'emissive', 'specular', 'sheenColor', 'attenuationColor', 'normalScale']) {
+    if (source[key]?.copy && target[key]?.copy) target[key].copy(source[key]);
+  }
+  for (const key of [
+    'emissiveIntensity', 'roughness', 'metalness', 'envMapIntensity', 'lightMapIntensity',
+    'aoMapIntensity', 'bumpScale', 'displacementScale', 'displacementBias', 'alphaTest',
+  ]) {
+    if (key in source && key in target) target[key] = source[key];
+  }
+  if (source.uniforms && target.uniforms) {
+    for (const [key, uniform] of Object.entries(source.uniforms)) {
+      const dst = target.uniforms[key];
+      if (!dst) continue;
+      if (uniform?.value?.copy && dst.value?.copy) dst.value.copy(uniform.value);
+      else dst.value = uniform?.value;
+    }
+  }
+}
+
+function makeFader(objs, isolatedMaterials) {
+  const { owned, staticObjs } = splitFadeObjects(objs);
+  const tops = staticObjs.map((o) => ({ o, vis0: o.visible }));
+  const assignments = [];
+  const clones = new Map();
+  const cloneSources = new Map();
+  const seenNodes = new Set();
+  const cloneMaterial = (source) => {
+    if (!source?.isMaterial || !isolatedMaterials.has(source)) return source;
+    let clone = clones.get(source);
+    if (clone) return clone;
+    clone = source.clone();
+    // Material.copy intentionally omits shader hooks. Village materials use chained
+    // onBeforeCompile patches for rim/season/snow, so preserve the exact program contract.
+    clone.onBeforeCompile = source.onBeforeCompile;
+    clone.customProgramCacheKey = source.customProgramCacheKey;
+    clones.set(source, clone);
+    cloneSources.set(clone, source);
+    return clone;
+  };
+  for (const o of staticObjs) {
+    o.traverse((node) => {
+      if (!node.material || seenNodes.has(node)) return;
+      seenNodes.add(node);
+      const original = node.material;
+      const replacement = Array.isArray(original)
+        ? original.map(cloneMaterial)
+        : cloneMaterial(original);
+      if (replacement !== original
+        && (!Array.isArray(original) || replacement.some((material, i) => material !== original[i]))) {
+        node.material = replacement;
+        assignments.push({ node, original });
+      }
+    });
+  }
+  const recs = new Map();
+  for (const o of staticObjs) {
     o.traverse((n) => {
       const m = n.material;
       if (!m) return;
       const arr = Array.isArray(m) ? m : [m];
       for (const mm of arr) {
-        if (!recs.has(mm.uuid)) recs.set(mm.uuid, { mat: mm, opacity: mm.opacity, transparent: mm.transparent, depthWrite: mm.depthWrite });
+        if (!recs.has(mm.uuid)) recs.set(mm.uuid, {
+          mat: mm,
+          source: cloneSources.get(mm) || null,
+          opacity: mm.opacity,
+          transparent: mm.transparent,
+          depthWrite: mm.depthWrite,
+        });
       }
     });
   }
+  const baseState = (record) => record.source || record;
   const restoreMats = () => {
-    for (const r of recs.values()) { r.mat.opacity = r.opacity; r.mat.transparent = r.transparent; r.mat.depthWrite = r.depthWrite; }
+    for (const r of recs.values()) {
+      if (r.source) syncSharedMaterial(r.source, r.mat);
+      const base = baseState(r);
+      r.mat.opacity = base.opacity;
+      r.mat.transparent = base.transparent;
+      r.mat.depthWrite = base.depthWrite;
+    }
+  };
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    restoreMats();
+    for (const { node, original } of assignments) node.material = original;
+    for (const clone of clones.values()) clone.dispose();
   };
   return {
     set(v) {
+      // LOD-owned layers compose the wave multiplier internally. Their visibility and base
+      // opacity remain camera-detail state, so a scale reframe cannot be overwritten by vis0.
+      for (const controller of owned) controller.setWeight(v);
       if (v <= 0.001) { for (const t of tops) t.o.visible = false; return; }
       for (const t of tops) t.o.visible = t.vis0;
       if (v >= 0.999) { restoreMats(); return; }
-      for (const r of recs.values()) { r.mat.transparent = true; r.mat.opacity = r.opacity * v; r.mat.depthWrite = false; }
+      for (const r of recs.values()) {
+        if (r.source) syncSharedMaterial(r.source, r.mat);
+        const base = baseState(r);
+        r.mat.transparent = true;
+        r.mat.opacity = base.opacity * v;
+        r.mat.depthWrite = false;
+      }
     },
-    restoreMats,
+    release,
   };
 }
 
@@ -146,8 +266,10 @@ function classifyRoot(root, center, rng) {
     const n = child.name || '';
     if (n === '' || SKIP_NAMES.has(n)) continue;
     if (isChunk(n)) {
-      if (child.userData && child.userData.chunk && child.userData.chunk.far) {
-        addGroupUnit(child);                 // 원경 임포스터 청크 = 그룹 1유닛(단순 하강+스케일)
+      if (child.userData?.chunk?.lod || child.userData?.chunk?.far) {
+        // 다단계 청크는 숨은 MID/FULL까지 개별 인스턴스로 만지지 않는다. 현재 LOD root 하나를
+        // 품은 청크 전체가 한 유닛으로 움직여 웨이브와 거리 LOD의 표현 소유권을 분리한다.
+        addGroupUnit(child);
       } else {
         child.traverse((o) => { if (o.isInstancedMesh) addInstMesh(o); });   // 집 = 인스턴스 단위
         for (const cc of child.children) if (isWalls(cc.name || '')) groundObjs.push(cc);  // 담 = 지면 확립 페이드
@@ -168,7 +290,7 @@ function classifyRoot(root, center, rng) {
   if (!isFinite(rmin)) rmin = 0;
   const span = rmax - rmin || 1;
 
-  return { instMeshes, groupUnits, rmin, span, ground: makeFader(groundObjs), decor: makeFader(decorObjs) };
+  return { instMeshes, groupUnits, rmin, span, groundObjs, decorObjs };
 }
 
 // ── 인스턴스 행렬 쓰기(원 rest 기준 상대) ──
@@ -264,6 +386,13 @@ export function createRerollWave({ oldRoot, newRoot, center, heightAt, seed = 1,
   const rng = makeRng((seed ^ 0x5eed56) >>> 0);
   const oldC = classifyRoot(oldRoot, c, rng);
   const newC = classifyRoot(newRoot, c, rng);
+  const isolatedMaterials = sharedFadeMaterials([
+    oldC.groundObjs, oldC.decorObjs, newC.groundObjs, newC.decorObjs,
+  ]);
+  oldC.ground = makeFader(oldC.groundObjs, isolatedMaterials);
+  oldC.decor = makeFader(oldC.decorObjs, isolatedMaterials);
+  newC.ground = makeFader(newC.groundObjs, isolatedMaterials);
+  newC.decor = makeFader(newC.decorObjs, isolatedMaterials);
 
   function applyAt(t) {
     // ① 옛 마을 해체(중심→밖). 위상 전=온전·위상 후=소거 스냅, 그 사이만 방사 애니.
@@ -297,10 +426,22 @@ export function createRerollWave({ oldRoot, newRoot, center, heightAt, seed = 1,
       return prog;
     },
     seek(t01) { prog = clamp01(t01); elapsed = prog * duration; applyAt(prog); },
+    // 중도 취소는 완료 dispose와 반대다. 옛 마을은 원래 행렬·가시성으로, 새 마을은 미착공
+    // 상태로 돌리고 양쪽 임시 투명 재질 플래그를 회수한다. 엔진 이탈/API 취소가 사용한다.
+    cancel() {
+      settleWave(oldC, true);
+      settleWave(newC, false);
+      oldC.ground.set(1); oldC.decor.set(1);
+      newC.ground.set(0); newC.decor.set(0);
+      oldC.ground.release(); oldC.decor.release();
+      newC.ground.release(); newC.decor.release();
+      elapsed = 0; prog = 0; done = true;
+    },
     dispose() {
       applyAt(1);                 // 새 마을 완전 정상화(트랜스폼 항등·재질 원복)
-      oldC.ground.restoreMats(); oldC.decor.restoreMats();   // 옛 재질 플래그도 원복(방어)
-      newC.ground.restoreMats(); newC.decor.restoreMats();
+      oldC.ground.release(); oldC.decor.release();   // 원 material identity + 임시 clone 수명 회수
+      newC.ground.release(); newC.decor.release();
+      elapsed = duration; prog = 1; done = true;
     },
   };
 }

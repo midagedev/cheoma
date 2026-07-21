@@ -22,6 +22,7 @@ import { makePresenceGate } from './present-gate.js';
 
 const PARTICLES = 30;   // 굴뚝당 파티클 수 기본(연속 컬럼용 조밀 오버랩)
 const MAX_ANCHORS = 3;  // 동시 굴뚝 상한 기본(giwa 1 · choga 1 + 여유)
+const PRESENT_EPSILON = 0.002;
 
 // 시간대별 프로파일: amp=피어오름 세기, col=연기색, op=개별 파티클 불투명도(오버랩 누적),
 //   rise=상승 높이(m), ember=아궁이 불씨 emissive 강도, fire=아궁이 PointLight 강도.
@@ -86,6 +87,7 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
 
   const group = new THREE.Group();
   group.name = 'smoke';
+  group.visible = false;
   const tex = makeSmokeTexture();
 
   // 스프라이트 풀(재사용). 각자 own material 로 개별 opacity/rotation/color.
@@ -174,7 +176,8 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
     const present = enabled && !!b && b.visible;
     const g = gate.update(dt, { present, reset: gateOnChange && bldChanged });
     bldChanged = false;
-    if (!enabled) return;
+    // 완전히 소거된 거리에서는 gate/건물 교체까지만 추적하고 스프라이트 궤적·프로파일 CPU는 쉰다.
+    if (!enabled || fadeMul <= PRESENT_EPSILON) { applyEmber(t); return; }
     t += dt;
     // 시간대 프로파일 크로스페이드(세기·색·불씨). 색은 매 프레임 스프라이트에 반영.
     const kp = Math.min(1, dt * PROF_RATE);
@@ -231,13 +234,18 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
   }
   function setEnabled(v) {
     enabled = !!v;
-    group.visible = enabled;
-    if (!enabled) for (const sp of pool) sp.material.opacity = 0;
+    group.visible = enabled && fadeMul > PRESENT_EPSILON;
+    if (!group.visible) for (const sp of pool) sp.material.opacity = 0;
     applyEmber(t);
   }
   function onBuildingChanged() { lastBuilding = null; ensureBuilding(); applyEmber(t); }
   // 근접 링 활성/해제 크로스페이드(0..1). 연기·불씨 최종 세기를 배율(팟 방지).
-  function setFade(v) { fadeMul = v; applyEmber(t); }
+  function setFade(v) {
+    fadeMul = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    group.visible = enabled && fadeMul > PRESENT_EPSILON;
+    if (!group.visible) for (const sp of pool) sp.material.opacity = 0;
+    applyEmber(t);
+  }
 
   return { group, setTime, setEnabled, update, onBuildingChanged, setFade };
 }
