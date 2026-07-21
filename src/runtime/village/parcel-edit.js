@@ -96,6 +96,26 @@ export function buildParcelSpec(parcel) {
   };
 }
 
+const PARCEL_TOP_EDIT_KEYS = Object.freeze([
+  'footprintScale', 'wallType', 'roofTone', 'thatchAge', 'aux', 'jangdok',
+  'yardStack', 'clothesline', 'vegBed',
+]);
+
+// A persistent runtime overlay becomes the authoritative representation for its
+// parcel. Keep the declarative editor spec in lockstep so leaving and re-entering
+// focus cannot reset the panel to the original instanced-house values.
+export function buildEditedParcelSpec(parcel, newParams = {}) {
+  const spec = buildParcelSpec(parcel);
+  const kind = newParams.kind === 'giwa' ? 'giwa'
+    : newParams.kind === 'choga' ? 'choga' : spec.kind;
+  spec.kind = kind;
+  spec.params = { ...spec.params, ...(newParams.building || {}) };
+  for (const key of PARCEL_TOP_EDIT_KEYS) {
+    if (newParams[key] !== undefined) spec.params[key] = newParams[key];
+  }
+  return spec;
+}
+
 // 가사제한 어휘를 보존해 서민 주택 편집값이 궁궐 비례로 넘어가지 않게 한다.
 export function clampBuildingDimensions(params, kind) {
   const clamp = (key, min, max) => {

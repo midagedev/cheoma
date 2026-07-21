@@ -18,13 +18,20 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
     });
   }
 
-  const treePerches = [];
-  for (const tree of (group.userData.guardianAnchors || [])) {
-    treePerches.push({ x: tree.x, y: tree.y + (tree.h || 12) * 0.82, z: tree.z });
-  }
-  for (const tree of (group.userData.yardTreeAnchors || [])) {
-    treePerches.push({ x: tree.x, y: tree.y + 0.5, z: tree.z });
-  }
+  const treePerchesFor = (guardianAnchors, yardTreeAnchors) => {
+    const perches = [];
+    for (const tree of (guardianAnchors || [])) {
+      perches.push({ x: tree.x, y: tree.y + (tree.h || 12) * 0.82, z: tree.z });
+    }
+    for (const tree of (yardTreeAnchors || [])) {
+      perches.push({ x: tree.x, y: tree.y + 0.5, z: tree.z });
+    }
+    return perches;
+  };
+  const treePerches = treePerchesFor(
+    group.userData.guardianAnchors,
+    group.userData.yardTreeAnchors,
+  );
 
   const bounds = plan.bounds || {};
   const radius = Math.max(bounds.w || 0, bounds.d || 0) * 0.5 || 40;
@@ -99,6 +106,9 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
   return {
     setTime(name) { rig.setTime(name); },
     setSeason(name) { rig.setSeason(name); },
+    setTreePerches(guardianAnchors, yardTreeAnchors) {
+      rig.setTreePerches(treePerchesFor(guardianAnchors, yardTreeAnchors));
+    },
     update(dt) { rig.update(dt); },
     updateLod,
     hasResidentialFlock(parcelId) { return residentialFlocks.has(parcelId); },

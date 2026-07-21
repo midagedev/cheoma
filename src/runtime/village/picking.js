@@ -39,6 +39,28 @@ export function buildParcelPickProxies(plan, site) {
   return proxies;
 }
 
+export function refreshParcelPickProxy(proxy, parcel, site, buildingSpec = null) {
+  if (!proxy || !parcel) return null;
+  const focusParcel = buildingSpec?.kind && buildingSpec.kind !== parcel.kind
+    ? { ...parcel, kind: buildingSpec.kind }
+    : parcel;
+  const baseY = parcel.baseY ?? site.heightAt(parcel.center.x, parcel.center.z);
+  const focus = planParcelFocus(focusParcel);
+  const { width, depth, height, rotationY, worldX, worldZ } = focus;
+  proxy.mesh.geometry?.dispose?.();
+  proxy.mesh.geometry = new THREE.BoxGeometry(width, height, depth);
+  proxy.mesh.position.set(worldX, baseY + height / 2, worldZ);
+  proxy.mesh.rotation.y = rotationY;
+  proxy.mesh.updateMatrixWorld(true);
+  proxy.bbox.setFromObject(proxy.mesh);
+  proxy.worldCenter.set(worldX, baseY, worldZ);
+  proxy.dims.set(width, height, depth);
+  proxy.rotY = rotationY;
+  proxy.cameraFraming = parcelCameraFraming(proxy.worldCenter, focus);
+  if (buildingSpec) proxy.buildingSpec = buildingSpec;
+  return proxy;
+}
+
 export function cloneCameraFraming(framing) {
   return {
     position: framing.position.clone(),

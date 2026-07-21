@@ -4,6 +4,7 @@ import { makeRng } from '../rng.js';
 import { parcelMatrix } from './instancing.js';
 import { YARD_SPECIES } from './variants.js';
 import { buildParcelLanternGeo, getLanternMaterials, lanternStyleFor } from '../layout/props.js';
+import { disposeObjectTree } from '../core/three-resources.js';
 import * as G from '../core/math/geom2.js';
 import { guardianCanopyRadius, planGuardianTrees } from './guardian-plan.js';
 import { parcelWorldPoint } from './parcel-contract.js';
@@ -442,5 +443,6 @@ export function buildVillageFlora(plan, site, seed) {
   return {
     group, setSeason, guardianAnchors, yardTreeAnchors, gardenAnchors,
     drawCalls: Object.keys(meshes).length,
+    dispose() { disposeObjectTree(group); group.clear(); },
   };
 }

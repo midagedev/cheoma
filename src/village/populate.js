@@ -365,9 +365,30 @@ export function* populateVillageSteps(plan, opts = {}) {
   yield 'forest';
 
   // 8) 마당 과실수·반가 정원·마을 보호수(당산나무) — 레이어별 정적 병합(드로우콜 ~5), 계절 토글.
-  const flora = buildVillageFlora(plan, site, plan.seed);
+  let flora = buildVillageFlora(plan, site, plan.seed);
   root.add(flora.group);
   yield 'flora';
+
+  // Runtime parcel edits keep the village flora batched at a constant layer
+  // count. Rebuilding the whole deterministic flora batch is cheaper than
+  // promoting every yard to several permanent draw calls, and lets the shared
+  // yard-layout contract move or omit a tree when a shed, jar terrace, stack, or
+  // edited roof now occupies its former slot.
+  const replaceFlora = (season = 'summer') => {
+    const next = buildVillageFlora(plan, site, plan.seed);
+    next.setSeason(season);
+    root.remove(flora.group);
+    flora.dispose?.();
+    flora = next;
+    root.add(flora.group);
+    if (root.userData) {
+      root.userData.flora = flora;
+      root.userData.guardianAnchors = flora.guardianAnchors;
+      root.userData.yardTreeAnchors = flora.yardTreeAnchors;
+      root.userData.gardenAnchors = flora.gardenAnchors;
+    }
+    return flora;
+  };
 
   // 9) 소동물(마당 닭·논 소) — 필지 마당·논 앵커 재사용, 필지별 시드 결정론·과밀 금지.
   const animals = buildVillageAnimals(root, plan, site);
@@ -400,6 +421,7 @@ export function* populateVillageSteps(plan, opts = {}) {
     setWaterTime: (name) => setVillageWaterTime(waterU, name),   // 개울 물 시간대 톤(어댑터 setTime 이 호출)
     setAnimalsTime: (name) => { for (const a of animals.handles) a.setTime(name); },
     setSeason: (name) => { terrain.setSeason(name); flora.setSeason(name); bloom.setSeason(name); forest.setSeason(name); for (const a of animals.handles) a.setSeason(name); },
+    replaceFlora,
     // 엣지 헤이즈·운해 링·능선 물안개 색을 대기(fog)색과 동기화 — 어댑터 fog 모디파이어가 매 틱 호출(#50 정합).
     setEnvHaze: (fogColor) => { terrain.setHaze(fogColor); forest.setHaze(fogColor); mist?.update(fogColor); ridgeMist?.update(fogColor); },
     // 검증 앵커(하네스 프레이밍용)

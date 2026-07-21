@@ -620,7 +620,7 @@ export function setupVillageCritters(parent, {
 
   const EMPTY_GROUND_RIG = Object.freeze({
     update() { return 0; }, setDetail() { return 0; }, applyVisibility() {},
-    consumeVisibilityChange() { return false; }, count: 0,
+    consumeVisibilityChange() { return false; }, setTreePerches() {}, count: 0,
   });
   function makeGroundDetailController(inst, states) {
     let maxWeight = 1;
@@ -820,7 +820,10 @@ export function setupVillageCritters(parent, {
     // 페르치 후보: 나무 수관 우선(iconic) + 지붕(용마루 추정 높이). 지붕은 나무가 모자랄 때 채운다.
     const perches = [];
     for (const tp of treePerches) perches.push({ x: tp.x, y: tp.y, z: tp.z });
-    for (const p of shuffled) perches.push({ x: p.x, y: p.baseY + (p.kind === 'giwa' ? 5.2 : 4.0), z: p.z });
+    const roofPerches = shuffled.map((p) => ({
+      x: p.x, y: p.baseY + (p.kind === 'giwa' ? 5.2 : 4.0), z: p.z,
+    }));
+    perches.push(...roofPerches);
     const count = Math.min(CAP.magpie, perches.length);
     if (!count) return EMPTY_GROUND_RIG;
     const magGeo = mergeGeometries([buildMagpieBody(), place(buildMagpieTail(), -0.14, 0.14, 0, { rz: 0.5 })], false);
@@ -888,7 +891,20 @@ export function setupVillageCritters(parent, {
       if (dirty) inst.instanceMatrix.needsUpdate = true;
       return active;
     }
-    return { update, ...detail, count };
+    function setTreePerches(next) {
+      const trees = (next || [])
+        .filter((point) => [point?.x, point?.y, point?.z].every(Number.isFinite))
+        .map((point) => ({ x: point.x, y: point.y, z: point.z }));
+      perches.splice(0, perches.length, ...trees, ...roofPerches);
+      if (!perches.length) return;
+      for (const state of S) {
+        state.cur = ((state.cur | 0) % perches.length + perches.length) % perches.length;
+        // A destination from the previous perch topology is no longer valid.
+        // Land on the corresponding new perch instead of flying through empty air.
+        if (state.mode === 'fly') { state.mode = 'perch'; state.fly = null; }
+      }
+    }
+    return { update, ...detail, setTreePerches, count };
   })();
 
   // ---------- 공개 API ----------
@@ -967,7 +983,8 @@ export function setupVillageCritters(parent, {
   group.userData.waveFade = { setWeight: setWaveFade };
 
   return {
-    update, updateLod, setTime, setSeason, setEnabled, setFade, setWaveFade, group,
+    update, updateLod, setTime, setSeason, setEnabled, setFade, setWaveFade,
+    setTreePerches: (next) => magpies.setTreePerches(next), group,
     // 검증용: 개체수(스크린샷 조준·게이트).
     counts: { dogs: dogs.count, cats: cats.count, magpies: magpies.count },
     lod,

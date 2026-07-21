@@ -20,8 +20,11 @@ import {
 import { houseMatrix, parcelMatrix } from '../../village/instancing.js';
 import { buildVillageWall } from '../../village/walls.js';
 import { toneOf, variantOv, variantThatchAge } from '../../village/variants.js';
-import { parcelHouseTranslation } from '../../village/parcel-contract.js';
-import { assignFittedVariationSequence } from '../../village/house-footprint.js';
+import { parcelHouseTranslation, parcelLocalPoint } from '../../village/parcel-contract.js';
+import {
+  captureParcelRebuildEnvelope,
+  planParcelRebuild,
+} from '../../village/parcel-rebuild.js';
 import { setupClouds } from '../../env/clouds.js';
 import * as G from '../../core/math/geom2.js';
 import { withVillageRandomSeed } from './random-window.js';
@@ -31,6 +34,7 @@ import {
 } from './lighting.js';
 import {
   applyMaterialRoleTints,
+  buildEditedParcelSpec,
   buildParcelSpec,
   clampBuildingDimensions,
   palaceCompoundDefaults,
@@ -40,6 +44,7 @@ import {
   buildLandmarkPickProxies,
   cloneCameraFraming,
   createParcelHighlight,
+  refreshParcelPickProxy,
 } from './picking.js';
 import { createVillageNightGlow } from './night-glow.js';
 import { createVillageSnowController } from './snow.js';
@@ -50,6 +55,12 @@ import {
   setParcelBaseHidden,
 } from './parcel-representation.js';
 import { createVillageDetailLodState } from './detail-lod.js';
+import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
+import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
+
+const PERSISTENT_YARD_FIELDS = Object.freeze([
+  'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed',
+]);
 
 // v4 마을 어댑터 — 앱 실시간 파이프라인과 마을 생성기 사이의 단일 계약면.
 //   createVillage(opts) → VillageHandle
@@ -88,6 +99,16 @@ export function createVillageHandle(opts, seed, plan, group) {
   const overrides = new THREE.Group(); overrides.name = 'village-overrides';
   group.add(overrides);
   const overrideById = new Map();                 // parcelId -> THREE.Group
+  // A committed edit remains authoritative in the aerial scene, but only the
+  // parcel currently in focus must be excluded from the camera-proximity
+  // ambience field. Keeping persistence and focus ownership separate prevents
+  // a rebuilt house from permanently losing chimney smoke after focus-out.
+  const focusedResidentialIds = new Set();
+  const persistentOverrideIds = new Set();        // edited/rebuilt parcels remain authoritative in aerial view
+  const rebuildEnvelopeById = new Map(plan.parcels.map((parcel) => [
+    parcel.id,
+    captureParcelRebuildEnvelope(parcel),
+  ]));
   const editWallMats = makeMaterials('giwa');      // 편집 담장 공유 재질(base 씬 wallMats 와 동일 팔레트)
   let representationDirty = false;                 // base/overlay caster 소유권 변경 → 그림자 캐시 1회 갱신
 
@@ -517,7 +538,7 @@ export function createVillageHandle(opts, seed, plan, group) {
 
   // Camera-proximity ambience and post-generation fauna own their update state.
   const ambientField = createVillageAmbientFieldController({
-    plan, site, proxyById, overrideById, findSun,
+    plan, site, proxyById, excludedParcelIds: focusedResidentialIds, findSun,
   });
   // 필드는 scene 직속 셀/연기/조명을 소유해 village root만 순회하는 wave가 그대로는 찾지 못한다.
   // 빈 bridge를 root 데코로 등록해 wave multiplier만 전달하고, 실제 가시성·CPU sleep은 필드가 합성한다.
@@ -528,6 +549,13 @@ export function createVillageHandle(opts, seed, plan, group) {
   group.add(ambientWaveOwner);
   const snow = createVillageSnowController(group);
   const fauna = createVillageFaunaController({ group, plan, site, seed, time, season });
+  function refreshVillageFlora() {
+    const flora = group.userData.replaceFlora?.(season);
+    if (!flora) return null;
+    fauna.setTreePerches(flora.guardianAnchors, flora.yardTreeAnchors);
+    representationDirty = true;
+    return flora;
+  }
   function residentialLodState(parcelId) {
     const parcel = plan.parcels.find((candidate) => candidate.id === parcelId && !candidate.hero);
     if (!parcel) return null;
@@ -643,7 +671,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     //   }
     //   편집 기준은 필지의 실제 변주(variantOv) — 슬라이더 미조정 축은 렌더된 집 그대로 유지.
     //   격식 가드(clampDims): 서민 초가가 궁 비례가 되지 않게 kind별 치수 클램프(가사제한 정신).
-    rebuildParcel(parcelId, newParams = {}) {
+    rebuildParcel(parcelId, newParams = {}, { persist = false, refreshFlora = persist } = {}) {
       // 궁궐 컴파운드(#93): presetOverrides 로 오버레이 재생성(일곽 병합 유지). 특수 커밋 경로(pointerup).
       if (parcelId === 'palace') {
         if (!palaceEditable()) return null;
@@ -661,6 +689,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       // 기존 오버라이드 제거
       const prev = overrideById.get(parcelId);
       if (prev) { disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId); }
+      persistentOverrideIds.delete(parcelId);
 
       if (parcel.hero) {
         // 특수 필지(종가·관아)는 풀디테일 오버레이로 편집 반영(#48·#62·#59). populate 언머지(heroHandle)
@@ -701,6 +730,15 @@ export function createVillageHandle(opts, seed, plan, group) {
       const fs = Math.max(0.6, Math.min(1.6, newParams.footprintScale != null ? newParams.footprintScale : 1));
       house.scale.set((parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
       g.add(house);
+      // Before the parcel transform is applied, this is the exact edited eave
+      // envelope in parcel-local coordinates. Runtime flora consumes it instead
+      // of guessing from the original instanced variant.
+      house.updateWorldMatrix(true, true);
+      const roofBox = new THREE.Box3().setFromObject(house);
+      const editRoofBounds = {
+        minX: roofBox.min.x, maxX: roofBox.max.x,
+        minZ: roofBox.min.z, maxZ: roofBox.max.z,
+      };
       // 담·마당(개별) — 유형·부속채 어휘 + 마당 소품 편집(#96). newParams 오버라이드 우선, 없으면 필지 원본값.
       const wallType = newParams.wallType || parcel.wallType || 'stone';
       const aux = newParams.aux != null ? newParams.aux : parcel.aux;
@@ -717,6 +755,17 @@ export function createVillageHandle(opts, seed, plan, group) {
       g.applyMatrix4(parcelMatrix(parcel));
       overrides.add(g);
       overrideById.set(parcelId, g);
+      if (persist) {
+        persistentOverrideIds.add(parcelId);
+        for (const key of PERSISTENT_YARD_FIELDS) {
+          if (newParams[key] !== undefined) parcel[key] = newParams[key];
+        }
+        parcel.editRoofBounds = editRoofBounds;
+        const spec = buildEditedParcelSpec(parcel, newParams);
+        const proxy = proxyById.get(parcelId);
+        if (proxy) refreshParcelPickProxy(proxy, parcel, site, spec);
+        if (refreshFlora) refreshVillageFlora();
+      }
       if (snow.isActive()) snow.inject(g);
       retainOverlayPrograms(g, gk + (snow.isActive() ? '|snow' : ''));
       representationDirty = true;     // 새 오버레이 지오/캐스터(편집 교체 포함)
@@ -751,8 +800,20 @@ export function createVillageHandle(opts, seed, plan, group) {
         if (!g) return null;
         return { group: g, compound: true, assembly: g, ambient: focusAmbientDescriptor(parcelId, g) };
       }
+      const persistent = overrideById.get(parcelId);
+      if (persistent && persistentOverrideIds.has(parcelId)) {
+        focusedResidentialIds.add(parcelId);
+        setResidentialBaseHidden(parcel, true);
+        return {
+          group: persistent,
+          compound: false,
+          assembly: persistent.children[0] || persistent,
+          ambient: focusAmbientDescriptor(parcelId, persistent),
+        };
+      }
       const g = this.rebuildParcel(parcelId, {});   // 기본(변주) 오버레이 + 인스턴스 은닉
       if (!g) return null;
+      focusedResidentialIds.add(parcelId);
       return { group: g, compound: false, assembly: g.children[0] || g, ambient: focusAmbientDescriptor(parcelId, g) };
     },
     focusAmbientDescriptor,
@@ -765,7 +826,12 @@ export function createVillageHandle(opts, seed, plan, group) {
         hideHeroDetail(parcelId);
         return;
       }
+      focusedResidentialIds.delete(parcelId);
       const g = overrideById.get(parcelId);
+      if (g && persistentOverrideIds.has(parcelId)) {
+        setResidentialBaseHidden(parcel, true);
+        return;
+      }
       if (g) { disposeTree(g); overrides.remove(g); overrideById.delete(parcelId); }
       if (parcel) {
         setResidentialBaseHidden(parcel, false);   // 부감 인스턴스·담·임포스터 원상복원(픽셀 일치)
@@ -808,26 +874,121 @@ export function createVillageHandle(opts, seed, plan, group) {
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
-      const previous = { ...parcel };
-      // 변주 재유도: 같은 char01·tuning 으로 마을 다양성 규율 유지, rank(빈부 계층) 보존 = 집 유형 고정
-      //   (giwa↔choga 인스턴스 은닉/복원 짝이 어긋나지 않게). 실제 처마 fit까지 plan과 같은
-      //   순수 계약으로 묶고, 드문 부적합 scale은 새 seed를 제한적으로 다시 뽑는다.
       const rerollSeed = (Math.random() * 0x100000000) >>> 0;
-      const fitted = assignFittedVariationSequence(parcel, char01, plan.opts.tuning || {}, {
-        baseSeed: rerollSeed,
-        attempts: 16,
+      const envelope = rebuildEnvelopeById.get(parcelId);
+      const candidate = planParcelRebuild(envelope, rerollSeed, {
+        char01,
+        tuning: plan.opts.tuning || {},
+        pavilion: plan.features?.pavilion || null,
+        site,
+        solarPeers: [
+          ...plan.parcels,
+          ...(plan.features?.palace?.center ? [plan.features.palace] : []),
+        ],
       });
-      if (!fitted) {
-        for (const key of Object.keys(parcel)) if (!(key in previous)) delete parcel[key];
-        Object.assign(parcel, previous);
-        return null;
-      }
+      if (!candidate) return null;
+      // Keep the object identity consumed by plan, focus ambience, and LOD maps,
+      // but atomically replace its data only after the pure planner succeeds.
+      for (const key of Object.keys(parcel)) delete parcel[key];
+      Object.assign(parcel, candidate);
       const px = proxyById.get(parcelId);
-      if (px) px.buildingSpec = buildParcelSpec(parcel);
-      // 새 변주로 오버레이 재생성(showParcelDetail → rebuildParcel(id,{}) 이 기존 오버라이드 폐기).
-      const detail = withSeededBuild(parcel.seed, () => this.showParcelDetail(parcelId));
+      if (parcel.hero) {
+        if (px) px.buildingSpec = buildParcelSpec(parcel);
+        const detail = withSeededBuild(parcel.seed, () => this.showParcelDetail(parcelId));
+        if (detail) detail.spec = px ? px.buildingSpec : buildParcelSpec(parcel);
+        return detail;
+      }
+      // Residential rebuilds become persistent authoritative overlays. Their
+      // exact roof and randomized yard vocabulary are committed before the flora
+      // batch is deterministically regenerated, so focus-out cannot restore the
+      // stale instanced house or leave a tree through a new hard object.
+      const detail = withSeededBuild(parcel.seed, () => {
+        const g = this.rebuildParcel(parcelId, {}, { persist: true });
+        return g ? {
+          group: g,
+          compound: false,
+          assembly: g.children[0] || g,
+          ambient: focusAmbientDescriptor(parcelId, g),
+        } : null;
+      });
       if (detail) detail.spec = px ? px.buildingSpec : buildParcelSpec(parcel);
       return detail;
+    },
+
+    parcelRebuildState(parcelId) {
+      const parcel = plan.parcels.find((candidate) => candidate.id === parcelId);
+      if (!parcel) return null;
+      const trees = (group.userData.yardTreeAnchors || [])
+        .filter((tree) => tree.parcelId === parcelId)
+        .map((tree) => {
+          const local = parcelLocalPoint(parcel, tree);
+          const footprint = {
+            canopyRadius: tree.radius || 0,
+            trunkRadius: tree.trunkRadius || 0,
+          };
+          return {
+            x: +local.x.toFixed(3), z: +local.z.toFixed(3),
+            radius: +footprint.canopyRadius.toFixed(3),
+            hardConflict: yardTreeIntersectsHardObstacle(
+              local,
+              footprint,
+              yardHardObstacles(parcel),
+            ),
+            roofOrSolarConflict: yardCanopyBlocked(parcel, local, footprint.canopyRadius),
+          };
+        });
+      const proxy = proxyById.get(parcelId);
+      return {
+        persistent: persistentOverrideIds.has(parcelId),
+        seed: parcel.seed >>> 0,
+        rebuildSeed: parcel.rebuildSeed == null ? null : parcel.rebuildSeed >>> 0,
+        plotW: +parcel.plotW.toFixed(3),
+        plotD: +parcel.plotD.toFixed(3),
+        kind: proxy?.buildingSpec?.kind || parcel.kind,
+        params: { ...(proxy?.buildingSpec?.params || {}) },
+        trees,
+        conflicts: trees.filter((tree) => tree.hardConflict || tree.roofOrSolarConflict).length,
+        lod: residentialLodState(parcelId),
+      };
+    },
+
+    // Verification-only geometry probe. Measuring an alternate yard vocabulary
+    // must not destroy a committed edit or leave the base instancing hidden.
+    // Temporarily detach the current overlay, build and dispose the probe, then
+    // restore the exact same group and persistence ownership without touching
+    // flora, proxy specs, or the parcel seed.
+    parcelBuildStats(parcelId, newParams = {}) {
+      const parcel = plan.parcels.find((candidate) => candidate.id === parcelId && !candidate.hero);
+      if (!parcel) return null;
+      const existing = overrideById.get(parcelId) || null;
+      const wasPersistent = persistentOverrideIds.has(parcelId);
+      if (existing) {
+        overrideById.delete(parcelId);
+        persistentOverrideIds.delete(parcelId);
+        overrides.remove(existing);
+      }
+      const probe = this.rebuildParcel(parcelId, newParams);
+      let meshes = 0, verts = 0;
+      probe?.traverse((object) => {
+        if (!object.isMesh || !object.geometry?.attributes?.position) return;
+        meshes++;
+        verts += object.geometry.attributes.position.count;
+      });
+      if (probe) {
+        disposeTree(probe);
+        overrides.remove(probe);
+        overrideById.delete(parcelId);
+      }
+      if (existing) {
+        overrides.add(existing);
+        overrideById.set(parcelId, existing);
+        if (wasPersistent) persistentOverrideIds.add(parcelId);
+        setResidentialBaseHidden(parcel, true);
+      } else {
+        setResidentialBaseHidden(parcel, false);
+      }
+      representationDirty = true;
+      return probe ? { meshes, verts } : null;
     },
 
     // 먹선 아웃라인 하이라이트 토글. on=true 면 해당 필지에 아웃라인+은은한 발광.
@@ -974,7 +1135,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   // enter/debug/detail 경로가 자원을 다시 만들거나 씬에 재부착하는 종료 후 누수를 자동으로 막는다.
   const nullAfterDispose = new Set([
     'heroParcelId', 'heroDetailGroup', 'overlayBox', 'getPickProxy', 'raycast',
-    'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel',
+    'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
   ]);
   for (const key of Object.keys(api)) {
     const method = api[key];

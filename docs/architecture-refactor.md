@@ -103,6 +103,10 @@ app/src/                       Svelte UI
   외피 geometry·material만 재사용한다. 중앙을 포함해 청크마다 세 root 중 하나만 보인다.
 - focus overlay가 나타나는 순간 해당 필지의 FAR, MID, FULL, 병합 담을 함께 접는다. 카메라 전환이 끝나기
   전이나 focus hop 중에도 `base/overlay` 두 집이 겹치지 않으며, focus-out 때 현재 청크 단계 하나만 복원한다.
+- 사용자가 다시 지은 정규 필지는 예외적으로 focus-out 뒤에도 overlay가 부감 표현의 권위 있는 소유자다.
+  `src/village/parcel-rebuild.js`가 원래 예약 필지에서 새 계획을 만들고, runtime은 pick proxy·카메라 framing·
+  실제 편집 처마 footprint·병합 flora를 한 커밋으로 갱신한다. 저장된 편집 소유권과 현재 focus 앰비언스
+  제외 상태를 같은 Map으로 표현하지 않는다.
 - 소동물·필지 앰비언스·꽃잎/낙엽은 절대 `camera.position.y` 대신 `controls.target`의 지형 높이에 대한
   상대 고도와 시선 거리를 공유한다. 지상 개체는 현재 시선 셀 주변만 갱신하고 원경에서는 mesh와 CPU
   시뮬레이션을 함께 쉰다. 하늘의 새 떼와 시간대·fog 전이는 부감에서도 유지한다.

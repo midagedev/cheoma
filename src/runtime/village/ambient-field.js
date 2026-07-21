@@ -1,7 +1,13 @@
 import { createAmbientField } from '../../env/focus.js';
 
 /** Camera-proximity ambience for non-focused residential parcels. */
-export function createVillageAmbientFieldController({ plan, site, proxyById, overrideById, findSun }) {
+export function createVillageAmbientFieldController({
+  plan,
+  site,
+  proxyById,
+  excludedParcelIds,
+  findSun,
+}) {
   const enabled = typeof location === 'undefined'
     || new URLSearchParams(location.search).get('ambfield') !== '0';
   let field = null;
@@ -57,7 +63,7 @@ export function createVillageAmbientFieldController({ plan, site, proxyById, ove
       deferSceneServices,
     });
     field.setParcels(buildDescriptors());
-    field.setExcluded((id) => overrideById.has(id));
+    field.setExcluded((id) => excludedParcelIds.has(id));
     field.setTime(time, true);
     field.setSeason(season);
   }

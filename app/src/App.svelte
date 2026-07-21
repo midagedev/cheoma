@@ -359,10 +359,8 @@
     else engine.hero.enter({ onDone });
     setTimeout(() => { heroVisible = false; }, 900);
   }
-  // 리플레이(#59·#92 일반화): 현재 focus 중인 필지를 같은 시드로 다시 조립(시각 불변). 집 패널 '다시 보기'.
-  function replayFocus() { if (sceneVillage && villageEditing && !villageZooming && !waving) { engine.village.replay(); chromaFaded = false; scheduleFlowTick(); } }
-  // 이 집만 다시 짓기(#100): 현재 focus 중인 필지만 새 시드로 재생성(마을·이웃 불변). 집 패널 '이 집 다시 짓기'.
-  //   마을 리롤(웨이브)과 완전 분리 — 집 컨텍스트에서 마을 리롤 진입 경로 없음(#100 ②).
+  // 이 집 다시 짓기(#19): 예약된 이웃·도로는 보존하되 필지 내부 경계부터 집 변주, 마당 소품,
+  //   과실수까지 하나의 결정론적 transaction으로 재생성한다. 마을 전체 리롤과는 분리한다.
   function rerollHouse() { if (sceneVillage && villageEditing && !villageZooming && !waving) { engine.village.rerollParcel(); chromaFaded = false; scheduleFlowTick(); } }
   // 단일건물 씬(?hero=0·?village=1 레거시) 액션바 도장 = 새 씨앗 재생성. 마을 씬에선 도장 미노출(리롤은 패널 소유).
   function reroll() {
@@ -631,11 +629,12 @@
   //   렌더와 합쳐 프레임이 눌린다. 재생성 케이던스를 렌더에서 분리(~22Hz)해 사이 프레임은 렌더만 —
   //   변형은 여전히 라이브로 읽히되 파이프라인이 숨을 쉰다(#69 부드러움). 값 라벨은 항상 즉시.
   const LIVE_MIN_MS = 45;
-  function pushRebuild() {
+  function pushRebuild({ refreshFlora = true } = {}) {
     if (!villageEditing) return;
     const rebuilt = engine.village.rebuild(
       villageEditing.parcelId,
       buildRebuildPayload(villageEditing.spec, editParams),
+      { refreshFlora },
     );
     // Compound planners may change the valid controls and clamp ranges when a
     // variant changes. Refresh the declarative spec after the core accepts the
@@ -651,7 +650,7 @@
       liveRaf = null;
       if (performance.now() - liveLast < LIVE_MIN_MS) { scheduleLive(); return; }  // 아직 이르면 다음 프레임(값은 최신 editParams)
       liveLast = performance.now();
-      pushRebuild();
+      pushRebuild({ refreshFlora: false });
     });
   }
   function villageLive(k, v) {
@@ -737,7 +736,6 @@
     onType={villageSetType}
     onLive={villageLive}
     onCommit={villageCommit}
-    onReplay={replayFocus}
     onRerollHouse={rerollHouse}
     onBack={closeVillageEdit}
     onExportVillage={villageAerial ? exportVillage : null}
