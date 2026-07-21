@@ -24,8 +24,8 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium } from 'playwright';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -81,7 +81,7 @@ const errors = [];
 try {
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch();
+  browser = await launchVerificationBrowser();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(180_000);
   await page.addInitScript(() => {
@@ -99,6 +99,7 @@ try {
   console.log(`repro: ${reproduceUrl}`);
   await page.goto(reproduceUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine);
+  await reportWebGLRenderer(page, 'layout-solar');
   await page.waitForFunction(({ seed, scale }) => {
     const plan = window.__engine?.village?.debugPlan?.();
     return plan?.seed === seed && plan?.scale === scale;

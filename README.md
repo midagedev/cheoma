@@ -30,10 +30,14 @@ Repository-wide contract checks run from the root:
 
 ```bash
 npm run check       # architecture + deterministic plan goldens
+npm run check:pr    # affected contracts for the current branch/worktree
 npm run check:app   # full app browser smoke
 npm run check:worker
 npm run check:all
+npm run check:full  # merge gate, including optical/LOD app flows and app build
 ```
+
+`check:pr` is the normal iteration entrypoint; use `npm run check:pr -- --dry-run` to inspect its fail-closed plan. Browser gates prefer a locally installed Chrome, report the actual WebGL renderer, and fall back to bundled Chromium. Set `CHEOMA_BROWSER=chromium` when the pinned Playwright backend is required.
 
 ## Documentation
 

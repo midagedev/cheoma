@@ -9,9 +9,9 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -151,7 +151,7 @@ const errors = [];
 try {
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch();
+  browser = await launchVerificationBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
   page.setDefaultTimeout(timeout);
   await page.addInitScript(() => { window.__noWarm = true; });
@@ -166,6 +166,7 @@ try {
     + '&seed=42&vseed=20260716&time=night&season=summer&weather=clear';
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
+  await reportWebGLRenderer(page, 'bokeh-fixture');
 
   // A locator screenshot includes overlapping HTML controls. Hide every canvas
   // sibling while keeping its ancestor chain laid out at the product dimensions.

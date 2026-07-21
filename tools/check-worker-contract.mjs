@@ -65,7 +65,11 @@ try {
   await server.listen();
   const address = server.httpServer.address();
   const base = `http://127.0.0.1:${address.port}`;
+  // Scene/proxy goldens are cross-path determinism bytes, not a render benchmark. Keep the
+  // Playwright-pinned JS/browser runtime here; system Chrome versions can legitimately round
+  // generated Float32 data differently even when worker and sync still agree with each other.
   browser = await chromium.launch();
+  console.log('[verification-browser] browser=chromium mode=pinned-worker-goldens');
 
   async function compare(mode) {
     const page = await browser.newPage();

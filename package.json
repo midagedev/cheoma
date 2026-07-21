@@ -6,7 +6,12 @@
   "scripts": {
     "check": "node tools/check-fast.mjs",
     "check:all": "npm run check && npm run check:app && npm run check:petals && npm run check:worker && npm run check:audio",
+    "check:full": "npm run check:all && npm run check:dof:app && npm run check:lod:app && npm run check:build",
+    "check:pr": "node tools/check-pr.mjs",
+    "check:verification-plan": "node tools/check-verification-plan.mjs",
+    "check:verification-browser": "node tools/check-verification-browser.mjs",
     "check:app": "node tools/check-app-smoke.mjs",
+    "check:build": "node tools/check-app-build.mjs",
     "check:audio": "node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
@@ -15,6 +20,7 @@
     "check:dof:app": "node tools/check-dof-app.mjs",
     "check:lod": "node tools/check-lod.mjs",
     "check:lod:app": "node tools/check-lod-app.mjs",
+    "check:lod:focus": "node tools/check-lod-app.mjs --scenario=focus",
     "check:layout": "node tools/check-layout-contract.mjs",
     "check:petals": "node tools/verify-petals.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
@@ -22,11 +28,13 @@
     "check:roads": "node tools/check-road-contract.mjs",
     "check:wall-gate": "node tools/check-wall-gate-contract.mjs",
     "check:wave": "node tools/check-wave-contract.mjs",
+    "check:wave:app": "node tools/check-lod-app.mjs --scenario=wave",
     "check:yard": "node tools/check-yard-layout-contract.mjs",
     "check:worker": "node tools/check-worker-contract.mjs",
     "shoot:bokeh": "node tools/shoot-bokeh-fixture.mjs",
     "shoot:dof": "node tools/shoot-dof.mjs",
-    "shoot:wave": "node tools/shoot-wave.mjs"
+    "shoot:wave": "node tools/shoot-wave.mjs village",
+    "shoot:wave:full": "node tools/shoot-wave.mjs hamlet,village,capital,hanyang"
   },
   "devDependencies": {
     "playwright": "1.61.1",

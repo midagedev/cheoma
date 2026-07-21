@@ -26,9 +26,11 @@ Repository contract gates run from the root:
 
 ```bash
 npm run check          # architecture + plan goldens + pure geometry invariants
+npm run check:pr       # changed-file router: fast core + affected browser/worker gates
 npm run check:app      # isolated full-app browser smoke
 npm run check:worker   # sync / real Worker / fallback scene + picking contracts
 npm run check:all      # all repository contract groups
+npm run check:full     # merge gate: all + DoF/LOD app flows + production build
 ```
 
 There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`), so run the tools with plain node:
@@ -37,6 +39,10 @@ There is **no unit-test framework, linter, typechecker, or formatter** (no eslin
 npm install                        # at repo root, one-time (chromium reuses the shared Playwright cache)
 node tools/shoot-<feature>.mjs
 ```
+
+For normal iteration, start with `npm run check:pr -- --dry-run`, then run `npm run check:pr`. The router always runs the fast core contracts, unions only the browser/worker gates affected by the changed paths, and fails closed to `check:full` for unknown paths, verification tooling, dependency manifests, or an unresolved merge base. `npm run check` runs its isolated contracts with bounded parallelism (`CHEOMA_CHECK_JOBS`, default up to 4). Run `check:full` once before merging; it preserves the full Hanyang/continuous-frame coverage and adds a production build.
+
+Canonical browser harnesses use `CHEOMA_BROWSER=auto`: they prefer an installed Chrome, which may use the host GPU, and fall back to Playwright's bundled Chromium. Use `CHEOMA_BROWSER=chrome` or `CHEOMA_BROWSER=chromium` to require one backend. Harnesses using this launcher log the selected browser and, when applicable, the WebGL renderer; never compare wall time across different backends. `check:worker` deliberately stays on Playwright-pinned Chromium because its byte goldens include browser-runtime floating-point behavior and it does not render WebGL.
 
 For a deterministic build snapshot use a clean build (`rm -rf dist && vite build`) — repeated incremental builds to a dedicated outDir can corrupt output (boot-time null uniforms). When spinning up an *extra* dev server for isolated verification, bind `host: '127.0.0.1'` (vite defaults to IPv6 `::1`, which Playwright's `127.0.0.1` refuses) with its own `cacheDir`; leave the user's own dev server alone.
 
@@ -52,7 +58,7 @@ The core runs standalone from the repo-root `index.html` (plus per-domain harnes
 **Village generation** — a deterministic pipeline:
 `src/village/plan.js` (pure plan) → `src/village/populate.js` (step orchestration over `src/generators/village/*`) → `src/runtime/village/create.js` and `handle.js`. `src/village/adapter.js` is only a compatibility re-export. Convention: **`+z` = south.** Scale is a continuum (`siteR` scalar / tier): lone house → hamlet → village → town → capital → hanyang (성곽 도성 with 사대문·시전, `citywall.js`). Repeated buildings are instanced (`chunks.js`, `instancing.js`).
 
-Village rerolls use an exclusive scenery handoff: `src/village/wave.js` keeps exactly one static terrain/road/parcel/forest generation visible, swaps ownership only under the peak ink-fog veil, and drives shadows to zero for that frame. Buildings alone use the tofu transform wave. Never crossfade static scenery by mutating `transparent`, `opacity`, or `depthWrite`; dynamic animals, particles, and lights must expose `userData.waveFade` and compose the weight through a stable uniform or precompiled `alphaHash` material. The engine rim-patches and prewarms only the incoming subtree before it becomes visible. Gate this contract with `npm run check:wave` and inspect `npm run shoot:wave` output.
+Village rerolls use an exclusive scenery handoff: `src/village/wave.js` keeps exactly one static terrain/road/parcel/forest generation visible, swaps ownership only under the peak ink-fog veil, and drives shadows to zero for that frame. Buildings alone use the tofu transform wave. Never crossfade static scenery by mutating `transparent`, `opacity`, or `depthWrite`; dynamic animals, particles, and lights must expose `userData.waveFade` and compose the weight through a stable uniform or precompiled `alphaHash` material. The engine rim-patches and prewarms only the incoming subtree before it becomes visible. Gate this contract with `npm run check:wave` and `npm run check:wave:app`; inspect the representative `npm run shoot:wave` output during iteration and `npm run shoot:wave:full` for the full scale matrix.
 
 **Performance is architectural here, not incidental** (this is a large scene):
 - **Worker offload** (`populate.worker.js` + `forest-crunch.js`): forest placement (14k–40k trees, the bulk of generation cost) runs in a Web Worker that returns a transferable `Float32Array` of matrices + seasonal colors; the main thread only assembles `InstancedMesh`. `createVillageAsync` rAF-chunks that assembly. `?worker=0` is the synchronous fallback.
