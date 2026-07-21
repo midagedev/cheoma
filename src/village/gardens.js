@@ -5,7 +5,13 @@ import { parcelMatrix } from './instancing.js';
 import { YARD_SPECIES } from './variants.js';
 import { buildParcelLanternGeo, getLanternMaterials, lanternStyleFor } from '../layout/props.js';
 import * as G from '../core/math/geom2.js';
-import { planGuardianTrees } from './guardian-plan.js';
+import { guardianCanopyRadius, planGuardianTrees } from './guardian-plan.js';
+import { parcelWorldPoint } from './parcel-contract.js';
+import {
+  createVegetationSpatial,
+  yardCanopyBlocked,
+  yardTreeCandidates,
+} from './vegetation-spatial.js';
 
 // 마당 과실수 · 반가 정원 · 마을 보호수(당산나무) — 태스크 #41 (docs Q4·Q5, R-G1/R-G2/R-T1).
 //   buildVillageFlora(plan, site, seed) → { group, setSeason(name), guardianAnchors, yardTreeAnchors, drawCalls }
@@ -24,6 +30,9 @@ const TAU = Math.PI * 2;
 const M4 = () => new THREE.Matrix4();
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
+// 담장이 있는 작은 필지의 과실수는 수고는 유지하고 수관만 전정된 비율로 심는다.
+// x/z만 줄여 꽃·열매가 읽히는 높이와 바닥 접지는 보존한다.
+const YARD_CROWN_SCALE = Object.freeze({ min: 0.45, max: 0.75, heroMin: 0.55, heroMax: 0.8 });
 
 const WOOD = 0x6b5333, WOOD_DK = 0x533f28, STRAW = 0xccb473, HANJI = 0xeee6d6;
 const STONE = 0x8f877b, STONE_WARM = 0x9c917f, STONE_DK = 0x6e675b, WATER_DK = 0x35454e, PLANK = 0x8a6b45;
@@ -51,6 +60,21 @@ function tint(geo, hex) {
 function bake(arr, geo, wm) { geo.applyMatrix4(wm); arr.push(geo); }
 // 프로토 지오(재사용)를 clone → 월드변환 → 적재.
 function stamp(arr, proto, wm) { if (!proto) return; const g = proto.clone(); g.applyMatrix4(wm); arr.push(g); }
+
+function horizontalFootprint(geometries) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, radius2 = 0;
+  for (const geometry of geometries) {
+    const positions = geometry?.getAttribute('position');
+    if (!positions) continue;
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i), z = positions.getZ(i);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      radius2 = Math.max(radius2, x * x + z * z);
+    }
+  }
+  return { minX, maxX, minZ, maxZ, radius: Math.sqrt(radius2) };
+}
 
 // ───────────────────────── 과실수 프로토 ─────────────────────────
 // 종별 시그니처: 감=주황 열매(가을), 대추=붉은 열매, 살구=연분홍 꽃(봄), 매화=성근 가지에 흰꽃(봄),
@@ -103,10 +127,14 @@ function makeFruitProto(species, seed) {
     d.translate(Math.cos(a) * rad, py, Math.sin(a) * rad);
     accent.push(tint(d, I.accentCol));
   }
+  const mergedWood = mergeGeometries(wood, false);
+  const mergedLeaf = mergeGeometries(leaf, false);
+  const mergedAccent = accent.length ? mergeGeometries(accent, false) : null;
   return {
-    wood: mergeGeometries(wood, false),
-    leaf: mergeGeometries(leaf, false),
-    accent: accent.length ? mergeGeometries(accent, false) : null,
+    wood: mergedWood,
+    leaf: mergedLeaf,
+    accent: mergedAccent,
+    footprint: horizontalFootprint([mergedWood, mergedLeaf, mergedAccent]),
     season: I.season,
   };
 }
@@ -219,25 +247,15 @@ function bakePyeongsang(L, wm) {
 }
 
 // ───────────────────────── 배치: 마당 과실수 슬롯 ─────────────────────────
-// 뒤안·담 모퉁이·측면(집 옆) 후보 로컬점을 담 안쪽 + 집 footprint 밖으로 걸러 반환(결정론 셔플).
-function yardSlots(p, rng) {
-  const hw = p.plotW / 2, hd = p.plotD / 2, giwa = p.kind === 'giwa';
-  const back = -hd + (giwa ? 5.2 : 3.4);
-  // 집 본체 로컬 bbox(보수적이되 좁게 — 담 근처 코너는 집 밖). 마당(민가)이 작아 여유는 짧게.
-  const hxHalf = p.plotW * (giwa ? 0.30 : 0.28);
-  const hzB = back - p.plotD * (giwa ? 0.28 : 0.24), hzF = back + p.plotD * (giwa ? 0.24 : 0.22);
-  const inHouse = (x, z) => Math.abs(x) < hxHalf + 0.7 && z > hzB - 1.0 && z < hzF + 1.0;
-  const poly = (p.shape && p.shape.pts) ? G.offsetPoly(G.ensureCCW(p.shape.pts), -0.9) : null;
-  const inPoly = (x, z) => !poly || G.pointInPoly({ x, z }, poly);
-  // 우선순위: 뒤안 코너 → 측면(집 옆) → 앞 담 모퉁이(대문 옆 off-axis, 중앙 비움). 처마·중앙 회피.
-  const cand = [
-    { x: -hw * 0.74, z: -hd * 0.62 }, { x: hw * 0.74, z: -hd * 0.62 },   // 뒤안 좌·우 코너
-    { x: -hw * 0.82, z: -hd * 0.08 }, { x: hw * 0.82, z: -hd * 0.08 },   // 측면(집 옆)
-    { x: -hw * 0.76, z: hd * 0.58 }, { x: hw * 0.76, z: hd * 0.58 },     // 앞 담 모퉁이(대문 옆)
-  ];
-  const ok = cand.filter((s) => inPoly(s.x, s.z) && !inHouse(s.x, s.z));
-  for (let i = ok.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [ok[i], ok[j]] = [ok[j], ok[i]]; }
-  return ok;
+function yardTreeCanopyRadius(prototype, scale = 1) {
+  return Math.max(0, prototype?.footprint?.radius || 0) * Math.max(0, scale);
+}
+
+function safeYardTreeSlot(parcel, point, radius, spatial, occupied) {
+  if (yardCanopyBlocked(parcel, point, radius)) return false;
+  const world = parcelWorldPoint(parcel, point);
+  if (spatial.blocksYardCanopy(world.x, world.z, radius)) return false;
+  return occupied.every((tree) => G.dist(world, tree) > radius + tree.radius * 0.72);
 }
 
 // ───────────────────────── 최상위 ─────────────────────────
@@ -255,9 +273,11 @@ export function buildVillageFlora(plan, site, seed) {
   const hash = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
   const fruitProto = {}; for (const sp of YARD_SPECIES) fruitProto[sp] = makeFruitProto(sp, (seed ^ hash(sp)) >>> 0);
   const guardProto = { zelkova: makeGuardianProto('zelkova', (seed ^ 0x9e11) >>> 0), ginkgo: makeGuardianProto('ginkgo', (seed ^ 0x9e12) >>> 0) };
+  const yardSpatial = createVegetationSpatial(plan, site);
 
   const L = { wood: [], leaf: [], blossom: [], fruit: [], stone: [], lantern: [] };
   const yardTreeAnchors = [], guardianAnchors = [], gardenAnchors = [];
+  const occupiedYard = [];
 
   // 필지 등롱(#83): 발광 몸체→lantern 레이어(hanjiGlow glow 재질, 야간 adapter 램프), 프레임→wood 병합.
   //   parcel.lantern({gate,yard}, variants.js) 기반, 위치는 layout/props.js lanternLayout(rng 미소비 결정론).
@@ -289,11 +309,25 @@ export function buildVillageFlora(plan, site, seed) {
       bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(side * hw * 0.5, 0, -hd * 0.86)), trng);
       bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(side * hw * 0.5 - side * 1.2, 0, -hd * 0.82)));
       const sps = (ct && ct.species) || ['plum', 'persimmon'];
+      const slots = yardTreeCandidates(p, trng);
       for (let i = 0; i < sps.length; i++) {
-        const sx = (i % 2 ? 1 : -1) * hw * 0.74, sz = -hd * 0.82;
-        const wm = pm.clone().multiply(M4().makeTranslation(sx, 0, sz)).multiply(M4().makeRotationY(trng() * TAU)).multiply(M4().makeScale(trng.range(0.9, 1.1), 1, trng.range(0.9, 1.1)));
+        const spin = trng() * TAU;
+        const scaleX = trng.range(YARD_CROWN_SCALE.heroMin, YARD_CROWN_SCALE.heroMax);
+        const scaleZ = trng.range(YARD_CROWN_SCALE.heroMin, YARD_CROWN_SCALE.heroMax);
+        const radius = yardTreeCanopyRadius(fruitProto[sps[i]], Math.max(scaleX, scaleZ));
+        const slotIndex = slots.findIndex((point) =>
+          safeYardTreeSlot(p, point, radius, yardSpatial, occupiedYard));
+        if (slotIndex < 0) continue;
+        const [point] = slots.splice(slotIndex, 1);
+        const wm = pm.clone().multiply(M4().makeTranslation(point.x, 0, point.z))
+          .multiply(M4().makeRotationY(spin)).multiply(M4().makeScale(scaleX, 1, scaleZ));
         placeFruit(sps[i], wm);
-        const v = new THREE.Vector3(sx, 0, sz).applyMatrix4(pm); yardTreeAnchors.push({ x: v.x, y: v.y + 2.6, z: v.z });
+        const v = new THREE.Vector3(point.x, 0, point.z).applyMatrix4(pm);
+        occupiedYard.push({ x: v.x, z: v.z, radius });
+        yardTreeAnchors.push({
+          x: v.x, y: v.y + 2.6, z: v.z,
+          species: sps[i], radius, parcelId: p.id,
+        });
       }
       const gv = new THREE.Vector3(0, 0, -hd * 0.86).applyMatrix4(pm);
       const gc = new THREE.Vector3(0, 8.5, -hd - 4).applyMatrix4(pm);   // 뒷담 밖 높은 곳에서 뒤안을 내려다봄
@@ -302,13 +336,24 @@ export function buildVillageFlora(plan, site, seed) {
     }
     // 정규 필지: 과실수 슬롯
     if (ct && ct.species && ct.species.length) {
-      const slots = yardSlots(p, trng);
-      for (let i = 0; i < ct.species.length && i < slots.length; i++) {
-        const s = slots[i], spin = trng() * TAU, sc = trng.range(0.85, 1.15);
+      const slots = yardTreeCandidates(p, trng);
+      for (const species of ct.species) {
+        const spin = trng() * TAU, sc = trng.range(YARD_CROWN_SCALE.min, YARD_CROWN_SCALE.max);
+        const radius = yardTreeCanopyRadius(fruitProto[species], sc);
+        const slotIndex = slots.findIndex((slot) =>
+          safeYardTreeSlot(p, slot, radius, yardSpatial, occupiedYard));
+        if (slotIndex < 0) continue;
+        const [s] = slots.splice(slotIndex, 1);
         const wm = pm.clone().multiply(M4().makeTranslation(s.x, 0, s.z)).multiply(M4().makeRotationY(spin)).multiply(M4().makeScale(sc, trng.range(0.9, 1.12), sc));
-        placeFruit(ct.species[i], wm);
+        placeFruit(species, wm);
         const v = new THREE.Vector3(s.x, 0, s.z).applyMatrix4(pm);
-        yardTreeAnchors.push({ x: v.x, y: v.y + 2.4, z: v.z, species: ct.species[i], accent: FRUIT_INFO[ct.species[i]].accent });
+        occupiedYard.push({ x: v.x, z: v.z, radius });
+        yardTreeAnchors.push({
+          x: v.x, y: v.y + 2.4, z: v.z, species,
+          radius,
+          parcelId: p.id,
+          accent: FRUIT_INFO[species].accent,
+        });
       }
     }
     // 반가 정원 점경물(gardenLevel≥2): 괴석 + (≥3) 석지·화계. 뒤안 코너.
@@ -327,7 +372,8 @@ export function buildVillageFlora(plan, site, seed) {
   }
 
   // ── 2) 마을 보호수(당산나무) ──
-  for (const gp of planGuardianTrees(plan, site, seed)) {
+  const guardianTrees = plan.features?.guardianTrees || planGuardianTrees(plan, site, seed);
+  for (const gp of guardianTrees) {
     const y = site.heightAt(gp.x, gp.z);
     const wm = M4().makeTranslation(gp.x, y, gp.z).multiply(M4().makeRotationY(gp.spin)).multiply(M4().makeScale(gp.scale, gp.scale, gp.scale));
     const P = guardProto[gp.kind] || guardProto.zelkova;
@@ -337,7 +383,11 @@ export function buildVillageFlora(plan, site, seed) {
     const propWm = M4().makeTranslation(gp.x, y, gp.z).multiply(M4().makeRotationY(gp.spin));
     bakeDolran(L, propWm, 2.6 + gp.scale * 0.4, prng);
     if (gp.props) bakePyeongsang(L, propWm.clone().multiply(M4().makeTranslation(3.4, 0, 0.6)));
-    guardianAnchors.push({ x: gp.x, y, z: gp.z, r: 12 * gp.scale, h: 14 * gp.scale });
+    guardianAnchors.push({
+      x: gp.x, y, z: gp.z,
+      r: gp.radius || guardianCanopyRadius(gp.kind, gp.scale),
+      h: 14 * gp.scale,
+    });
   }
 
   // ── 병합 → 레이어 메시 ──

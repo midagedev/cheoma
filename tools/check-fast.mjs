@@ -2,6 +2,9 @@
 await import('./check-architecture.mjs');
 await import('./check-dof.mjs');
 await import('./check-plan-contract.mjs');
+await import('./check-road-contract.mjs');
+await import('./check-layout-contract.mjs');
+await import('./check-wall-gate-contract.mjs');
 await import('./check-lod.mjs');
 await import('./check-citywall.mjs');
 await import('./check-choga-roof.mjs');

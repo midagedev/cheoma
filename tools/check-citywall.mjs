@@ -49,7 +49,7 @@ function assertGuardianClearance(plan, label, expectedCount) {
   invariant(guardians.length === expectedCount,
     `${label}: expected ${expectedCount} collision-free guardian trees, got ${guardians.length}`);
   for (const [index, guardian] of guardians.entries()) {
-    const radius = 12 * guardian.scale;
+    const radius = guardian.radius;
     invariant(!cityWallVegetationBlocked(wall, guardian, {
       corridor: radius + CITY_WALL_DIMENSIONS.vegetationClearance,
       gateMargin: radius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
@@ -557,16 +557,36 @@ for (const [seed, siteR] of REGRESSION_SITES) {
 const solo = assertPlan({ scale: 'solo', seed: 1, cityWall: true }, { expectedWall: false, repeat: true });
 invariant(solo.warnings.some((warning) => warning.includes(`R≥${CITY_WALL_MIN_SITE_R}`)), 'solo: missing graceful wall warning');
 for (const [scale, seed, guardians] of [
-  ['hamlet', 20, 0], ['hamlet', 1, 1], ['village', 88, 1], ['village', 42, 1],
+  ['hamlet', 20, 1], ['hamlet', 1, 1], ['village', 88, 1], ['village', 42, 1],
   ['town', 42, 2], ['capital', 42, 3],
 ]) {
   const plan = assertPlan({ scale, seed, cityWall: true });
   assertGuardianClearance(plan, `forced ${scale}/${seed}`, guardians);
 }
+
+// 호수 기반 bowl 축소가 고정 폭 성문·육축보다 지형을 작게 만들면 강제 성곽이 예외로
+// 앱 생성을 중단했다. 최소 호수와 건천/개울 양쪽을 전 tier에서 훑고, 실제 회귀 seed의
+// hamlet은 반복 계획까지 비교해 wall을 조용히 버리지도 결정론을 흔들지도 않게 잠근다.
+for (const scale of ['hamlet', 'village', 'town', 'capital', 'hanyang']) {
+  for (const stream of [true, false]) {
+    const options = {
+      scale,
+      seed: 13,
+      cityWall: true,
+      houses: 1,
+      stream,
+      includePalace: false,
+    };
+    const plan = assertPlan(options, { repeat: scale === 'hamlet' });
+    invariant(near(plan.opts.bowlK, 0.8),
+      `${JSON.stringify(options)}: wall did not reserve its minimum terrain span`);
+  }
+}
+assertPlan({ scale: 'hanyang', seed: 13, houses: 1 }, { repeat: true });
 assertPlan({ scale: 'hanyang', seed: 1, cityWall: false }, { expectedWall: false, repeat: true });
 
 const defaultPlan = assertPlan({ scale: 'hanyang', seed: 20260716 }, { repeat: true });
-assertGuardianClearance(defaultPlan, 'default hanyang', 1);
+assertGuardianClearance(defaultPlan, 'default hanyang', 3);
 const defaultRoadTriangles = defaultPlan.roads.reduce(
   (sum, road, index) => sum
     + assertRoadSurfaceDraped(road, defaultPlan.site, `default hanyang/road-${index}`), 0,

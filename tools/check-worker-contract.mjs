@@ -17,20 +17,20 @@ const expectedSteps = [
   'animals+night+bloom+cloudshadow',
 ];
 const expectedSceneHashes = {
-  // #29: 지상 동물과 상공 새 떼의 난수 스트림을 분리해 카메라 LOD sleep 여부가 다음 행동을
-  // 오염하지 않게 했고, 한양의 중앙·외곽 모든 주택 청크가 FAR/MID/FULL 표현을 함께 소유한다.
-  village: 'ff4d4469:1ebe218d:dd94185b:28437c3d',
-  town: 'c61eb653:4a6807bb:cd54073e:502b178b',
-  capital: '87fa464c:d886f5a2:d4394c51:0a0e0322',
-  hanyang: 'a7289eb2:19a19830:3a9535c2:0b896f00',
+  // #7: 남향 필지·실제 처마 fit·도로측 대문·개울/논/수관 clearance를 하나의
+  // 결정론 plan과 worker-safe spatial mask로 묶은 후 시각 승인한 전체 scene 기준선. capital은
+  // 궁 없는 관아 구성이므로 주작대로가 실제 남문에서 시작하는 변경까지 포함한다.
+  village: 'f55a936e:47dc0048:04a9764c:2834ca80',
+  town: '75bde81e:cd0afc1e:cae2a769:212ce5b4',
+  capital: '60432580:e6dd55b2:a96c4507:195b07ae',
+  hanyang: '48f7703d:55bde5a7:5031fd86:7d5d6e23',
 };
 const expectedProxyHashes = {
-  // #24: 프록시의 집/회전/경계는 그대로다. framing만 일반 필지 20°와 궁/사찰
-  // 24°/26° 망원으로 바뀌고, named referenceFov + 보상 dolly가 descriptor에 추가됐다.
-  village: 'c5caff50',
-  town: 'b3afd832',
-  capital: 'ae8da7ff',
-  hanyang: '6f2570b9',
+  // #7: 프록시도 실제 variant·fit·단일 parcel transform을 소유하므로 scene과 함께 갱신한다.
+  village: '1395db7a',
+  town: 'd796d5a3',
+  capital: 'd036043d',
+  hanyang: 'aaa887ab',
 };
 
 const server = await createServer({
@@ -101,6 +101,9 @@ try {
         { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked },
         { FOREST_VISUAL_RADIUS },
         { VILLAGE_LENS, dollyScaleForFov },
+        { makeVegetationMask, yardCanopyBlocked },
+        { parcelLocalPoint },
+        { SCATTER_TREE_VISUAL_RADIUS },
       ] = await Promise.all([
         import('/src/village/adapter.js'),
         import('/tools/lib/hash-three-group.mjs'),
@@ -108,6 +111,9 @@ try {
         import('/src/village/citywall-contour.js'),
         import('/src/village/forest-crunch.js'),
         import('/src/camera/optics.js'),
+        import('/src/village/vegetation-spatial.js'),
+        import('/src/village/parcel-contract.js'),
+        import('/src/generators/village/trees.js'),
       ]);
       const probeLifecycle = (handle) => {
         const owned = new Set();
@@ -176,13 +182,16 @@ try {
           && handle.getPickProxies().length === 0
           && handle.updateLod(null) === 0;
       };
-      const wallVegetationContract = (handle) => {
+      const vegetationContract = (handle) => {
         const wall = handle.plan.features?.cityWall;
-        if (!wall) return { pass: true, checked: 0, failures: [] };
+        const mask = makeVegetationMask(handle.plan, handle.plan.site);
         let checked = 0;
         const failures = [];
         handle.group.traverse((object) => {
-          if (!object.isInstancedMesh || !['forest-pine', 'forest-broad', 'forest-far', 'forest-rocks'].includes(object.name)) return;
+          if (!object.isInstancedMesh || ![
+            'forest-pine', 'forest-broad', 'forest-far', 'forest-rocks',
+            'scatter-pine', 'scatter-broad',
+          ].includes(object.name)) return;
           const array = object.instanceMatrix.array;
           for (let i = 0; i < object.count; i++) {
             const o = i * 16;
@@ -192,20 +201,26 @@ try {
             const factor = object.name === 'forest-pine' ? FOREST_VISUAL_RADIUS.pine
               : object.name === 'forest-broad' ? FOREST_VISUAL_RADIUS.broad
                 : object.name === 'forest-far' ? FOREST_VISUAL_RADIUS.far
-                  : FOREST_VISUAL_RADIUS.rock;
+                  : object.name === 'forest-rocks' ? FOREST_VISUAL_RADIUS.rock
+                    : object.name === 'scatter-pine' ? SCATTER_TREE_VISUAL_RADIUS.pine
+                      : SCATTER_TREE_VISUAL_RADIUS.broad;
             const radius = Math.max(sx, sz) * factor;
-            const blocked = cityWallVegetationBlocked(wall, point, {
+            const blockedByLayout = mask(point.x, point.z, radius);
+            const blockedByWall = wall && cityWallVegetationBlocked(wall, point, {
               corridor: radius + CITY_WALL_DIMENSIONS.vegetationClearance,
               gateMargin: radius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
               gateApproachMargin: radius,
             });
             checked++;
-            if (blocked && failures.length < 8) failures.push({ name: object.name, index: i, radius, x: point.x, z: point.z });
+            if ((blockedByLayout || blockedByWall) && failures.length < 8) failures.push({
+              name: object.name, index: i, radius, x: point.x, z: point.z,
+              blockedByLayout, blockedByWall: !!blockedByWall,
+            });
           }
         });
         for (const [index, anchor] of (handle.group.userData.guardianAnchors || []).entries()) {
           const radius = anchor.r || 0;
-          const blocked = cityWallVegetationBlocked(wall, anchor, {
+          const blocked = wall && cityWallVegetationBlocked(wall, anchor, {
             corridor: radius + CITY_WALL_DIMENSIONS.vegetationClearance,
             gateMargin: radius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
             gateApproachMargin: radius,
@@ -213,6 +228,28 @@ try {
           checked++;
           if (blocked && failures.length < 8) failures.push({
             name: 'flora-guardian', index, radius, x: anchor.x, z: anchor.z,
+          });
+        }
+        const parcelById = new Map(handle.plan.parcels.map((parcel) => [parcel.id, parcel]));
+        for (const [index, anchor] of (handle.group.userData.yardTreeAnchors || []).entries()) {
+          const parcel = parcelById.get(anchor.parcelId);
+          const local = parcel && parcelLocalPoint(parcel, anchor);
+          const blocked = !parcel || !(anchor.radius > 0)
+            || yardCanopyBlocked(parcel, local, anchor.radius)
+            || mask.spatial.blocksYardCanopy(anchor.x, anchor.z, anchor.radius);
+          checked++;
+          if (blocked && failures.length < 8) failures.push({
+            name: 'flora-yard', index, parcelId: anchor.parcelId,
+            radius: anchor.radius, x: anchor.x, z: anchor.z,
+          });
+        }
+        const plannedGuardians = handle.plan.features?.guardianTrees || [];
+        const renderedGuardians = handle.group.userData.guardianAnchors || [];
+        if (plannedGuardians.length !== renderedGuardians.length && failures.length < 8) {
+          failures.push({
+            name: 'flora-guardian-count',
+            planned: plannedGuardians.length,
+            rendered: renderedGuardians.length,
           });
         }
         return { pass: failures.length === 0, checked, failures };
@@ -270,7 +307,7 @@ try {
         const asyncHash = hashThreeGroup(asyncHandle.group);
         const syncProxyHash = hashVillagePickProxies(sync);
         const asyncProxyHash = hashVillagePickProxies(asyncHandle);
-        const vegetation = wallVegetationContract(sync);
+        const vegetation = vegetationContract(sync);
         const lensRequirements = { requirePalace: scale === 'hanyang', requireTemple: true };
         const syncLandmarkLenses = landmarkLensContract(sync, lensRequirements);
         const asyncLandmarkLenses = landmarkLensContract(asyncHandle, lensRequirements);
@@ -337,7 +374,7 @@ try {
       if (!item.lifecyclePass) {
         console.log(`          lifecycle sync=${JSON.stringify(item.syncLifecycle)} async=${JSON.stringify(item.asyncLifecycle)} inactive=${item.inactive}`);
       }
-      if (!item.vegetation.pass) console.log(`          wall vegetation ${JSON.stringify(item.vegetation)}`);
+      if (!item.vegetation.pass) console.log(`          vegetation ${JSON.stringify(item.vegetation)}`);
     }
     const workerPass = mode === 'worker'
       ? result.workerStats.started === 1

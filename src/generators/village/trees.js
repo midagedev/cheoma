@@ -8,6 +8,10 @@ import { makeEcotoneField } from '../../village/forest.js';
 import { makeEdgeWarp } from '../../village/forest-crunch.js';
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
+export const SCATTER_TREE_VISUAL_RADIUS = Object.freeze({
+  pine: 2.1,
+  broad: 2.64, // Icosahedron radius 2.4 × authored horizontal scale 1.1
+});
 
 // ───────────────────────── 수목(숲·능선) ─────────────────────────
 // hillAt 로 능선·산에만 밀집. mask(x,z)=true 인 자리(마을·도로·논)는 제외.
@@ -160,8 +164,6 @@ export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
     if (tooClose(x, z)) continue;
     if (hill > 0.45 && hidden(x, z, p.y)) continue;   // 능선 너머(안 보임) → 심지 않음
     const isBand = bandD > crestD;                    // 이 점이 전이 밴드 점묘인지(밴드 우세)
-    pts.push({ x, z });
-    { const k = tkey(x, z); let arr = tgrid.get(k); if (!arr) { arr = []; tgrid.set(k, arr); } arr.push({ x, z }); }
     const s = rng.range(0.8, 1.5);
     // #115: crest 나무는 상록 소나무만(#113 R4, 사철 짙은 침엽 실루엣). 전이 밴드 점묘는 소나무 위주에
     //   소량(≈28%) 활엽 혼합 — 숲 치마의 혼효림 인상. 밴드 나무는 쉘 앞(맨 지면) 위라 가을 계절 불일치
@@ -190,11 +192,24 @@ export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
     const m = M4().makeTranslation(x, p.y - sink, z);
     m.multiply(M4().makeRotationY(rng.range(0, 6.28)));
     m.multiply(M4().makeScale(s, s * rng.range(0.9, 1.2), s));
+    // Anchor rejection stays before the RNG window for backward compatibility.
+    // The footprint query runs only after scale/species/rotation have all consumed
+    // their draws, so a newly blocked canopy cannot shift every later candidate.
+    const visualRadius = s * (broadTree
+      ? SCATTER_TREE_VISUAL_RADIUS.broad
+      : SCATTER_TREE_VISUAL_RADIUS.pine);
+    if (mask && mask(x, z, visualRadius)) continue;
+    pts.push({ x, z });
+    { const k = tkey(x, z); let arr = tgrid.get(k); if (!arr) { arr = []; tgrid.set(k, arr); } arr.push({ x, z }); }
     (broadTree ? broad : pine).push(m);
   }
-  for (const [proto, mats, tint] of [[protos.pine, pine, null], [protos.broad, broad, null]]) {
+  for (const [proto, mats, name] of [
+    [protos.pine, pine, 'scatter-pine'],
+    [protos.broad, broad, 'scatter-broad'],
+  ]) {
     if (!mats.length) continue;
     const inst = new THREE.InstancedMesh(proto, mat, mats.length);
+    inst.name = name;
     mats.forEach((m, i) => inst.setMatrixAt(i, m));
     inst.instanceMatrix.needsUpdate = true;
     inst.castShadow = true; inst.receiveShadow = false;

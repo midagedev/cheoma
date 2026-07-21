@@ -229,11 +229,18 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   // 잠재변수: 신분(주) + 마을 성격(부) + 개체 노이즈. [0,1] 클램프.
   const wealth = clamp01(rank * 0.72 + (char01 - 0.5) * 0.34 + (rng() * 2 - 1) * 0.12);
   parcel.wealth = wealth;
-  parcel.yaw = (rng() * 2 - 1) * 6 * dK * Math.PI / 180;   // ±6° 도로 지향 미세 회전(dK 배율)
+  // 좌향은 plan의 frontDir 하나가 필지 poly·패드·집·담·픽킹을 모두 결정한다. 예전의 별도
+  // yaw는 검증 뒤 실제 렌더만 최대 ±6° 돌려 필지 경계와 집을 어긋나게 했다. RNG 한 칸은
+  // 이후 색·살림 변주의 seed 계약을 보존하려고 소비하되 두 번째 공간 회전은 만들지 않는다.
+  rng();
+  parcel.yaw = 0;
   // 규모: 부유할수록 넓고 높게(스카이라인 처마선 리플 확대) + 개체 노이즈. 폭 0.82~1.19.
-  parcel.sx = 0.9 + wealth * 0.16 + (rng() * 2 - 1) * 0.06 * dK;
-  parcel.sz = 0.9 + wealth * 0.16 + (rng() * 2 - 1) * 0.06 * dK;
-  parcel.sy = 0.86 + wealth * 0.22 + (rng() * 2 - 1) * 0.07 * dK;
+  // 도로가 먼저 정한 도시 가구의 structureScale은 필지와 실제 집을 함께 줄인다. plot만
+  // 압축해 처마가 담과 이웃집을 뚫는 보정은 허용하지 않는다.
+  const structureScale = parcel.structureScale || 1;
+  parcel.sx = (0.9 + wealth * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
+  parcel.sz = (0.9 + wealth * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
+  parcel.sy = (0.86 + wealth * 0.22 + (rng() * 2 - 1) * 0.07 * dK) * structureScale;
   // 부위별 독립 톤(#55 핵심) + 레거시 단일 톤(하위호환).
   assignRoleTones(parcel, kind, wealth, rng, dK);
   parcel.toneIdx = Math.floor(rng() * TONE[kind].length);

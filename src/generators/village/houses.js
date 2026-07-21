@@ -8,6 +8,7 @@ import { buildVillageWall } from '../../village/walls.js';
 import { CHOGA_VARIANTS, GIWA_VARIANTS } from '../../village/variants.js';
 import { chunkLodDistance } from '../../village/chunks.js';
 import { CHUNK_LOD_LEVEL, nextChunkLodLevel } from '../../village/lod-policy.js';
+import { parcelHouseTranslation } from '../../village/parcel-contract.js';
 
 // ───────────────────────── 집 프로토타입 ─────────────────────────
 // buildBuilding(초가/기와) 로 프로토타입을 만들어 clone. 종가·궁·절은 풀디테일 별도.
@@ -59,14 +60,15 @@ export function placeParcel(parcel, protos, wallMats, char01 = 0.5) {
   const kind = parcel.kind;
   // 집 본체(디버그 경로는 기본 프로토만 — 변주 스케일은 반영, 평면 변주는 최적화 경로 전용)
   const house = (kind === 'giwa' ? protos.giwa : protos.choga).clone(true);
-  const back = -parcel.plotD / 2 + (kind === 'giwa' ? 5.2 : 3.4);
-  house.position.set(0, 0, back);
+  const local = parcelHouseTranslation(parcel);
+  house.position.set(local.x, 0, local.z);
   house.scale.set(parcel.sx || 1, parcel.sy || 1, parcel.sz || 1);
   g.add(house);
   // 마당 담 — 유형(tile/stone/brush)·부속채 어휘. 필지 부정형 shape 를 따라 변별 담.
   g.add(buildVillageWall(parcel.shape, wallMats, {
     style: parcel.wallType || 'stone', kind: parcel.kind, seed: parcel.seed, char01,
     aux: parcel.aux, plotW: parcel.plotW, plotD: parcel.plotD,
+    gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
     wallHeightK: parcel.wallHeightK, jangdok: parcel.jangdok,
     yardStack: parcel.yardStack, clothesline: parcel.clothesline, vegBed: parcel.vegBed,
   }));
@@ -161,6 +163,7 @@ export function buildCourtyard(parcel, wallMats, char01) {
   const g = buildVillageWall(parcel.shape, wallMats, {
     style: parcel.wallType || 'stone', kind: parcel.kind, seed: parcel.seed, char01,
     aux: parcel.aux, plotW: parcel.plotW, plotD: parcel.plotD,
+    gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
     // #55: 담 높이 연속 변주 + 마당 부속 소품(신분 상관). 전부 공유 재질 → 병합 후 드로우콜 불변.
     wallHeightK: parcel.wallHeightK, jangdok: parcel.jangdok,
     yardStack: parcel.yardStack, clothesline: parcel.clothesline, vegBed: parcel.vegBed,
