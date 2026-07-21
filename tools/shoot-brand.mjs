@@ -35,6 +35,10 @@ try { browser = await chromium.launch({ channel: 'chrome' }); }
 catch { browser = await chromium.launch(); }
 
 let errors = 0;
+const check = (name, pass, detail = '') => {
+  if (pass) console.log(`  PASS ${name}${detail ? ` (${detail})` : ''}`);
+  else { errors++; console.error(`  FAIL ${name}${detail ? ` (${detail})` : ''}`); }
+};
 const trackErrors = (pg) => {
   pg.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) { errors++; console.error('[page]', m.text()); } });
   pg.on('pageerror', (e) => { errors++; console.error('[pageerror]', e.message); });
@@ -105,12 +109,67 @@ async function refMobile() {
   await ctx.close();
 }
 
-// ---------- 엽서 낙관 (처마 전각) ----------
+// ---------- 사진 찍기 명칭 + 캡처 낙관(처마 전각) ----------
 async function postcard() {
-  await page.goto(`${SPA}/?hero=0&seed=20260716&time=sunset`, { waitUntil: 'load' });
-  await ready(); await settle(1500);
-  const dataUrl = await page.evaluate(() => window.__engine.postcard({ download: false }));
-  const buf = Buffer.from(dataUrl.split(',')[1], 'base64');
+  for (const { lang, label, tip } of [
+    { lang: 'ko', label: '사진 찍기', tip: '낙관을 더해 사진으로 저장·공유' },
+    { lang: 'en', label: 'Take photo', tip: 'Save & share a photo with the cheoma seal' },
+  ]) {
+    await page.goto(`${SPA}/?hero=0&lang=${lang}&seed=20260716&time=sunset`, { waitUntil: 'load' });
+    await ready(); await settle(700);
+    await page.mouse.move(680, 425); await settle(150);
+    const button = page.locator('.actions button').filter({ hasText: label });
+    check(`${lang} photo action unique`, await button.count() === 1);
+    check(`${lang} photo action label`, (await button.locator('.face').textContent())?.trim() === label);
+    check(`${lang} photo action tooltip`, await button.getAttribute('title') === tip);
+    if (lang === 'ko') await button.screenshot({ path: join(OUT, 'brand-photo-action-ko.png') });
+  }
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('.actions button').filter({ hasText: 'Take photo' }).click();
+  const download = await downloadPromise;
+  check('photo action downloads PNG', /^cheoma-.+\.png$/.test(download.suggestedFilename()), download.suggestedFilename());
+
+  const capture = await page.evaluate(async () => {
+    const dataUrl = window.__engine.postcard({ download: false });
+    const image = await new Promise((resolveImage, rejectImage) => {
+      const element = new Image();
+      element.onload = () => resolveImage(element);
+      element.onerror = rejectImage;
+      element.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    const sealH = Math.round(image.height * 0.062);
+    const sealW = Math.round(sealH * 0.76);
+    const margin = Math.round(image.height * 0.035);
+    const x = image.width - margin - sealW, y = image.height - margin - sealH;
+    const pixels = context.getImageData(x, y, sealW, sealH).data;
+    let sealRedPixels = 0, sealPaperPixels = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index], green = pixels[index + 1], blue = pixels[index + 2];
+      if (Math.abs(red - 177) < 40 && Math.abs(green - 54) < 34 && Math.abs(blue - 43) < 34) sealRedPixels++;
+      if (red > 220 && green > 210 && blue > 190) sealPaperPixels++;
+    }
+    return {
+      dataUrl,
+      width: image.width,
+      height: image.height,
+      sealRedPixels,
+      sealPaperPixels,
+      sealArea: sealW * sealH,
+    };
+  });
+  check('photo capture has output size', capture.width > 0 && capture.height > 0, `${capture.width}×${capture.height}`);
+  check(
+    'photo capture contains lower-right seal ink',
+    capture.sealRedPixels / capture.sealArea > 0.35,
+    `${capture.sealRedPixels}/${capture.sealArea} pixels`,
+  );
+  check('photo capture contains seal lettering', capture.sealPaperPixels > 30, `${capture.sealPaperPixels} paper pixels`);
+  const buf = Buffer.from(capture.dataUrl.split(',')[1], 'base64');
   await writeFile(join(OUT, 'brand-postcard.png'), buf);
   console.log('saved', 'brand-postcard.png');
 }

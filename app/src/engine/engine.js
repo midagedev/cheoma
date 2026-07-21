@@ -2230,12 +2230,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       return onWanted;
     },
 
-    // 엽서: 현재 뷰 → 낙관 합성 PNG. pixelRatio 2 로 승격 후 복구.
+    // 사진 찍기: 현재 뷰 → 낙관 합성 PNG. 기존 postcard API 이름은 호환을 위해 유지한다.
     postcard({ download = true } = {}) {
       const prev = renderer.getPixelRatio();
       const bump = prev < 2;
       if (bump) { renderer.setPixelRatio(2); resizeAll(); }
-      // 엽서 이미지엔 패널이 없으므로 뷰 오프셋(#124)을 빼고 피사체 중앙 프레이밍으로 캡처(캡처 후 복원).
+      // 캡처 이미지엔 패널이 없으므로 뷰 오프셋(#124)을 빼고 피사체 중앙 프레이밍으로 캡처(캡처 후 복원).
       const restoreView = !!(camera.view && camera.view.enabled);
       if (restoreView) camera.clearViewOffset();
       const filename = `cheoma-${state.preset}-${state.seed}.png`;

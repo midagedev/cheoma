@@ -771,7 +771,7 @@
   }
   .veil.on { opacity: 1; pointer-events: auto; }
 
-  /* 안내 토스트(#112) — 하단 중앙 먹빛 캡슐(엽서·glb 안내). */
+  /* 안내 토스트(#112) — 하단 중앙 먹빛 캡슐(사진 캡처·glb 안내). */
   .toast {
     position: fixed; left: 50%; bottom: max(84px, calc(env(safe-area-inset-bottom) + 80px));
     transform: translateX(-50%); z-index: 300; max-width: min(88vw, 420px);
