@@ -1,13 +1,22 @@
 // 에이전트가 코드 변경 직후 돌리는 네트워크·브라우저 없는 빠른 게이트.
-await import('./check-architecture.mjs');
-await import('./check-dof.mjs');
-await import('./check-plan-contract.mjs');
-await import('./check-road-contract.mjs');
-await import('./check-layout-contract.mjs');
-await import('./check-wall-gate-contract.mjs');
-await import('./check-wave-contract.mjs');
-await import('./check-yard-layout-contract.mjs');
-await import('./check-lod.mjs');
-await import('./check-citywall.mjs');
-await import('./check-choga-roof.mjs');
-await import('./check-roof-seams.mjs');
+import { runVerificationChecks } from './lib/verification-runner.mjs';
+
+const checks = [
+  './check-architecture.mjs',
+  './check-dof.mjs',
+  './check-plan-contract.mjs',
+  './check-road-contract.mjs',
+  './check-layout-contract.mjs',
+  './check-wall-gate-contract.mjs',
+  './check-wave-contract.mjs',
+  './check-yard-layout-contract.mjs',
+  './check-lod.mjs',
+  './check-citywall.mjs',
+  './check-choga-roof.mjs',
+  './check-roof-seams.mjs',
+  './check-verification-plan.mjs',
+  './check-verification-browser.mjs',
+];
+
+const result = await runVerificationChecks(checks, { baseUrl: import.meta.url });
+if (!result.ok) process.exitCode = 1;

@@ -1,16 +1,24 @@
-// 실제 앱의 한양 장면에서 필지 표현 소유권과 생활 디테일 LOD를 프레임 단위로 검증한다.
-// 느린 Playwright 게이트이므로 check-fast/check:all에는 넣지 않고 필요할 때 독립 실행한다.
+// 실제 앱에서 필지 표현 소유권과 생활 디테일 LOD를 프레임 단위로 검증한다.
+// full/focus는 Hanyang, 빠른 wave는 town→village를 사용하며 check:full이 전체 흐름을 보존한다.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium } from 'playwright';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
+const scenarioArg = process.argv.find((arg) => arg.startsWith('--scenario='));
+const scenario = scenarioArg ? scenarioArg.slice('--scenario='.length) : 'full';
+if (!['full', 'focus', 'wave'].includes(scenario)) {
+  throw new Error(`LOD APP: unknown scenario "${scenario}" (expected full, focus, or wave)`);
+}
+const runFocusScenario = scenario !== 'wave';
+const runWaveScenario = scenario !== 'focus';
+const bootScale = runFocusScenario ? 'hanyang' : 'town';
+const waveScale = scenario === 'wave' ? 'village' : 'town';
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-lod-app-'));
-// Headless SwiftShader serializes the large Hanyang shader workload. A 3.6s engine wave can
-// therefore need several wall-clock minutes even though its frame/dt progression is healthy.
+// Bundled Chromium의 SwiftShader fallback에서는 3.6s engine wave가 wall-clock 수분이 될 수 있다.
 const timeout = Number(process.env.CHEOMA_LOD_APP_TIMEOUT_MS) || 420_000;
 const failures = [];
 
@@ -32,7 +40,7 @@ const runtimeErrors = [];
 try {
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch();
+  browser = await launchVerificationBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 640 } });
   page.setDefaultTimeout(timeout);
   // Shader compilation is covered by the focused smoke gate. This contract exercises scene
@@ -47,13 +55,14 @@ try {
   });
 
   const url = `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&post=0`
-    + '&seed=42&vseed=20260716&vscale=hanyang&time=day';
+    + `&seed=42&vseed=20260716&vscale=${bootScale}&time=day`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
-  await page.waitForFunction(() => {
+  await page.waitForFunction(({ scale, seed }) => {
     const plan = window.__engine?.village?.debugPlan?.();
-    return plan?.scale === 'hanyang' && plan?.seed === 20260716;
-  }, null, { timeout });
+    return plan?.scale === scale && plan?.seed === seed;
+  }, { scale: bootScale, seed: 20260716 }, { timeout });
+  await reportWebGLRenderer(page, 'lod-app');
   await page.evaluate(() => new Promise((resolveFrame) => {
     requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
   }));
@@ -70,7 +79,7 @@ try {
       && fauna?.groundWeight <= 0.002;
   }, null, { timeout });
 
-  const boot = await page.evaluate(() => {
+  const boot = await page.evaluate((runLensContract) => {
     const engine = window.__engine;
     const lod = engine.village.debugLod();
     const regular = engine.village.debugParcels()
@@ -84,7 +93,7 @@ try {
       .filter((state) => Number.isFinite(state?.physicalDistance))
       .sort((a, b) => b.physicalDistance - a.physicalDistance)[0] || null;
     let chunkLens = null;
-    if (chunkLensState) {
+    if (chunkLensState && runLensContract) {
       root.userData.updateChunkLod(engine.camera, 1);
       const reference = {
         level: chunkLensState.level,
@@ -160,23 +169,25 @@ try {
       groundMeshes,
       chunkLens,
     };
-  });
+  }, runFocusScenario);
 
-  pass(boot.plan.scale === 'hanyang' && boot.plan.seed === 20260716,
-    'isolated worker=0 app boots deterministic Hanyang');
+  pass(boot.plan.scale === bootScale && boot.plan.seed === 20260716,
+    `isolated worker=0 app boots deterministic ${bootScale}`);
   pass(boot.regularCount > 0 && boot.lodCount === boot.regularCount,
     `LOD snapshot covers every regular parcel (${boot.lodCount}/${boot.regularCount})`);
   pass(boot.lodValid && boot.lodFailures.length === 0,
     `aerial parcel representations are exclusive (${boot.lodFailures.join(', ') || 'no failures'})`);
-  pass(!!boot.candidates.first && !!boot.candidates.second,
-    'two regular parcels in different chunks are available for focus/hop');
-  pass(boot.candidates.ownerParcelIds.includes(boot.candidates.first)
-      && boot.candidates.ownerParcelIds.includes(boot.candidates.second),
-  `focus/hop fixtures own base yard flocks (${boot.candidates.first}, ${boot.candidates.second})`);
-  pass([boot.candidates.first, boot.candidates.second].every((id) => {
+  const requiredCandidates = runFocusScenario
+    ? [boot.candidates.first, boot.candidates.second]
+    : [boot.candidates.first];
+  pass(requiredCandidates.every(Boolean),
+    `${scenario} scenario has the required regular parcel fixtures`);
+  pass(requiredCandidates.every((id) => boot.candidates.ownerParcelIds.includes(id)),
+    `${scenario} fixtures own base yard flocks (${requiredCandidates.join(', ')})`);
+  pass(requiredCandidates.every((id) => {
     const owner = boot.candidates.ownerAnimals[id];
     return owner?.count === 1 && owner.uuids.length === 1 && !!owner.uuids[0];
-  }), 'focus/hop fixtures start with one stable base-flock object each');
+  }), `${scenario} fixtures start with one stable base-flock object each`);
 
   const groundCrittersOff = boot.fauna
     && Object.values(boot.fauna.critterActive).every((active) => active === false)
@@ -188,15 +199,17 @@ try {
     `daytime aerial flock remains visible (scale=${boot.fauna?.birdScale})`);
   pass(boot.groundMeshes.filter((mesh) => mesh.exists).every((mesh) => !mesh.visible),
     'aerial dog, cat, and magpie meshes are actually hidden');
-  pass(boot.chunkLens
-      && boot.chunkLens.reference.level === boot.chunkLens.compensated.level
-      && Math.abs(boot.chunkLens.reference.distance
-        - boot.chunkLens.reference.physicalDistance) < 1e-6
-      && Math.abs(boot.chunkLens.compensated.physicalDistance
-        - boot.chunkLens.reference.physicalDistance) < 1e-6
-      && Math.abs(boot.chunkLens.compensated.distance * boot.chunkLens.lensScale
-        - boot.chunkLens.compensated.physicalDistance) < 1e-6,
-  'attached Hanyang chunk LOD consumes screen-equivalent lens distance without changing its stable tier');
+  if (runFocusScenario) {
+    pass(boot.chunkLens
+        && boot.chunkLens.reference.level === boot.chunkLens.compensated.level
+        && Math.abs(boot.chunkLens.reference.distance
+          - boot.chunkLens.reference.physicalDistance) < 1e-6
+        && Math.abs(boot.chunkLens.compensated.physicalDistance
+          - boot.chunkLens.reference.physicalDistance) < 1e-6
+        && Math.abs(boot.chunkLens.compensated.distance * boot.chunkLens.lensScale
+          - boot.chunkLens.compensated.physicalDistance) < 1e-6,
+    `attached ${bootScale} chunk LOD consumes screen-equivalent lens distance without changing its stable tier`);
+  }
 
   async function sceneMetrics(label) {
     const metrics = await page.evaluate(() => {
@@ -440,6 +453,13 @@ try {
     }, { action, parcelId, expected, timeoutMs: timeout - 10_000 });
   }
 
+  const first = boot.candidates.first;
+  const second = boot.candidates.second;
+  if (!first || (runFocusScenario && !second)) {
+    throw new Error(`LOD APP: no ${scenario} parcel candidates`);
+  }
+
+  if (runFocusScenario) {
   if (boot.heroes.length >= 2) {
     const [heroA, heroB] = boot.heroes;
     const heroIn = await traceTransition('focus', heroA, {
@@ -471,9 +491,6 @@ try {
     console.log(`SKIP  hero→hero hop needs two hero parcels (found ${boot.heroes.length})`);
   }
 
-  const first = boot.candidates.first;
-  const second = boot.candidates.second;
-  if (!first || !second) throw new Error('LOD APP: no focus/hop parcel candidates');
   const ownerUuid = (id) => boot.candidates.ownerAnimals[id]?.uuids?.[0] || null;
   const stableOwner = (fauna, id) => {
     const owner = fauna?.ownerAnimals?.[id];
@@ -745,7 +762,9 @@ try {
   const allSeen = new Set([...focus.seenLevels, ...hop.seenLevels, ...focusOut.seenLevels]);
   pass(['far', 'mid', 'full'].every((level) => allSeen.has(level)),
     `browser transition exercised FAR/MID/FULL actual roots (${[...allSeen].join(', ')})`);
+  }
 
+  if (runWaveScenario) {
   // 규모 변경 웨이브는 근접 카메라에서 부감으로 재프레이밍한다. 따라서 미리 예열된
   // 필지로 다시 들어간 뒤 공개 setOpts 경로를 탄다. 이 시작점이 있어야 소동물이
   // 근접에서 깨어났다가 시야가 높아지며 자는 실제 전환을 한 흐름에서 검증할 수 있다.
@@ -755,7 +774,7 @@ try {
   pass(waveFocus.finished && waveFocus.failures.length === 0,
     'scale-wave fixture starts from a valid focused parcel');
 
-  const wave = await page.evaluate(async (timeoutMs) => {
+  const wave = await page.evaluate(async ({ timeoutMs, targetScale }) => {
     const engine = window.__engine;
     const rootNames = new Set([
       'village-solo', 'village-hamlet', 'village-village',
@@ -768,7 +787,7 @@ try {
       season: engine.getState().season,
       weather: engine.getState().weather,
     };
-    engine.village.setOpts({ scale: 'town' }, { wave: true });
+    engine.village.setOpts({ scale: targetScale }, { wave: true });
     const failures = [];
     let failureCount = 0;
     let frames = 0;
@@ -940,7 +959,7 @@ try {
       const ambientMarker = ambientOwner?.userData?.waveFade;
       const debugAmbient = ambientOwner?.userData?.debugAmbient;
       const role = root.name === `village-${oldScale}` ? 'old'
-        : root.name === 'village-town' ? 'new' : null;
+        : root.name === `village-${targetScale}` ? 'new' : null;
       if (!ambientOwner || typeof ambientMarker?.setWeight !== 'function'
         || typeof debugAmbient !== 'function') {
         record({ phase, root: root.name, ambient: 'owner-marker-missing' });
@@ -1032,8 +1051,8 @@ try {
         critterActive: { ...(fauna.critters?.active || {}) },
       } : null,
     };
-  }, timeout - 10_000);
-  pass(wave.oldScale === 'hanyang' && wave.finalScale === 'town'
+  }, { timeoutMs: timeout - 10_000, targetScale: waveScale });
+  pass(wave.oldScale === bootScale && wave.finalScale === waveScale
       && wave.oldSeed === wave.finalSeed
       && wave.finished && wave.frames >= 3 && wave.twoRootFrames > 0
       && wave.rootCount === 1 && wave.finalValid
@@ -1207,7 +1226,7 @@ try {
     && Object.values(state.ambientResidue).every((count) => count === 0)
     && state.lookaheadIsNull
     && state.environmentProfile.matched;
-  pass(waveExit.before.scale === 'town' && waveExit.before.roots.length === 1
+  pass(waveExit.before.scale === waveScale && waveExit.before.roots.length === 1
       && waveExit.locked.waving
       && waveExit.locked.wave?.building && !waveExit.locked.wave?.active
       && waveExit.locked.rootCount === 1
@@ -1220,11 +1239,14 @@ try {
       && cleanExit(waveExit.sync) && cleanExit(waveExit.settled),
   `wave-build input lock and public exit prevent stale solo promotion `
     + `while restoring the house environment without a smoke pop (${JSON.stringify(waveExit)})`);
+  }
 
-  console.log(`PERF  aerial   calls=${performance.aerial.calls} triangles=${performance.aerial.triangles}`);
-  console.log(`PERF  mid      calls=${performance.mid.calls} triangles=${performance.mid.triangles}`);
-  console.log(`PERF  focus    calls=${performance.focus.calls} triangles=${performance.focus.triangles}`);
-  console.log(`PERF  focusOut calls=${performance.focusOut.calls} triangles=${performance.focusOut.triangles}`);
+  if (runFocusScenario) {
+    console.log(`PERF  aerial   calls=${performance.aerial.calls} triangles=${performance.aerial.triangles}`);
+    console.log(`PERF  mid      calls=${performance.mid.calls} triangles=${performance.mid.triangles}`);
+    console.log(`PERF  focus    calls=${performance.focus.calls} triangles=${performance.focus.triangles}`);
+    console.log(`PERF  focusOut calls=${performance.focusOut.calls} triangles=${performance.focusOut.triangles}`);
+  }
 
   pass(runtimeErrors.length === 0,
     `LOD browser flow has no runtime errors${runtimeErrors.length ? `: ${runtimeErrors.join(' | ')}` : ''}`);

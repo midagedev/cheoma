@@ -17,7 +17,7 @@
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -76,14 +76,16 @@ const HTML = `<!doctype html><meta charset=utf8><body><script>${BUNDLE}</script>
 const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML);
 });
-await new Promise((ok) => server.listen(4225, '127.0.0.1', ok));
+await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+const port = server.address().port;
 
-const browser = await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch());
+const browser = await launchVerificationBrowser();
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto('http://127.0.0.1:4225/', { waitUntil: 'load' });
+await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
 await page.waitForFunction('window.__ready === true', { timeout: 15000 });
+await reportWebGLRenderer(page, 'petals');
 
 const results = [];
 const approx = (a, b, tol) => Math.abs(a - b) <= tol;

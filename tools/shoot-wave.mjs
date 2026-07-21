@@ -3,13 +3,14 @@
 //
 //   node tools/shoot-wave.mjs
 //   CHEOMA_WAVE_SCALES=village,capital node tools/shoot-wave.mjs
+//   node tools/shoot-wave.mjs hamlet,village,capital,hanyang  # full visual matrix
 //   CHEOMA_WAVE_PHASES=0.35,0.499,0.5,0.501,0.65 node tools/shoot-wave.mjs
 //   CHEOMA_WAVE_TIME=night CHEOMA_WAVE_SEASON=winter node tools/shoot-wave.mjs
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium } from 'playwright';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -21,7 +22,7 @@ const seedB = Number.parseInt(process.env.CHEOMA_WAVE_SEED_B || '777', 10) >>> 0
 const time = process.env.CHEOMA_WAVE_TIME || 'sunset';
 const season = process.env.CHEOMA_WAVE_SEASON || 'autumn';
 const weather = process.env.CHEOMA_WAVE_WEATHER || 'clear';
-const scales = (process.env.CHEOMA_WAVE_SCALES || process.argv[2] || 'hamlet,village,capital,hanyang')
+const scales = (process.env.CHEOMA_WAVE_SCALES || process.argv[2] || 'village')
   .split(',').map((value) => value.trim()).filter(Boolean);
 const phases = (process.env.CHEOMA_WAVE_PHASES || '0,0.35,0.499,0.5,0.501,0.65,1')
   .split(',').map(Number);
@@ -48,7 +49,7 @@ const reports = [];
 try {
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch();
+  browser = await launchVerificationBrowser();
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on('pageerror', (error) => runtimeErrors.push(`page: ${error.message}`));
   page.on('console', (message) => {
@@ -69,6 +70,7 @@ try {
         && engine?.village?.debugPlan?.()?.scale === expectedScale
         && !engine.village.isWaving();
     }, scale, { timeout });
+    if (reports.length === 0) await reportWebGLRenderer(page, 'wave');
 
     const baseShadowIntensity = await page.evaluate(() => {
       const sun = window.__engine.scene.children.find((object) => object.isDirectionalLight && object.castShadow);
@@ -126,9 +128,14 @@ try {
     // 양쪽 root의 정상 opaque 프로그램과 환경 패치를 먼저 한 번씩 렌더한다. 이후 delta는 wave가
     // 만든 변형만 뜻하며, 새 장면의 합법적인 첫-use 프로그램을 오탐하지 않는다.
     for (const progress of [0, 1, 0]) {
-      await page.evaluate((value) => window.__engine.village.debugSeekWave(value), progress);
-      await page.evaluate(() => new Promise((resolveFrame) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
+      await page.evaluate(async (value) => {
+        const engine = window.__engine;
+        engine.village.debugSeekWave(value);
+        await new Promise((resolveFrame) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
+        await engine.renderer.compileAsync(engine.scene, engine.camera);
+        await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame));
+      }, progress);
     }
     const programBaseline = await page.evaluate(() => {
       const engine = window.__engine;
@@ -267,7 +274,8 @@ try {
       }
       const unexpectedProgramKeys = report.programKeys.filter((key) => !baselineProgramKeys.has(key));
       if (unexpectedProgramKeys.length) {
-        throw new Error(`${scale}:${phase} added ${unexpectedProgramKeys.length} shader program key(s)`);
+        throw new Error(`${scale}:${phase} added ${unexpectedProgramKeys.length} shader program key(s): `
+          + unexpectedProgramKeys.slice(0, 3).join(' | '));
       }
       maxPrograms = Math.max(maxPrograms, report.programs);
       minShadowWeight = Math.min(minShadowWeight, report.wave.shadowWeight);

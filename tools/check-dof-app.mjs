@@ -3,8 +3,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chromium } from 'playwright';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -29,7 +29,7 @@ const runtimeErrors = [];
 try {
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch();
+  browser = await launchVerificationBrowser();
   // Keep desktop DoF enabled (>900px) while making the single real depth frame inexpensive.
   const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
   page.setDefaultTimeout(timeout);
@@ -46,6 +46,7 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
   await page.waitForFunction(() => window.__engine?.village?.debugPlan?.()?.seed === 20260716, null, { timeout });
+  await reportWebGLRenderer(page, 'dof-app');
 
   const result = await page.evaluate(async () => {
     const engine = window.__engine;

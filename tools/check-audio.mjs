@@ -5,7 +5,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import { chromium } from 'playwright';
+import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const MIME = {
@@ -31,8 +31,7 @@ const port = server.address().port;
 
 const ARGS = ['--autoplay-policy=no-user-gesture-required'];
 let browser;
-try { browser = await chromium.launch({ channel: 'chrome', args: ARGS }); }
-catch { browser = await chromium.launch({ args: ARGS }); }
+browser = await launchVerificationBrowser({ args: ARGS });
 
 const page = await browser.newPage({ viewport: { width: 1000, height: 720 } });
 // 실제 Web Audio native 메서드를 계측한다. 모듈 내부 카운터가 아니라 브라우저가 본
@@ -92,6 +91,7 @@ const ok = (name, pass, extra = '') => { results.push({ name, pass, extra }); };
 try {
   await page.goto(`http://127.0.0.1:${port}/audio.html`, { waitUntil: 'load' });
   await page.waitForFunction('window.__SHOT_READY === true', null, { timeout: 30000 });
+  await reportWebGLRenderer(page, 'audio');
   ok('page loads + render loop', true);
 
   // start (user gesture → resume)
