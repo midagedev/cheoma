@@ -1512,19 +1512,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (g) warmShaders(g);   // 종가 컴파운드 오버레이 서브트리만 프리컴파일(#117) — 랜딩 조립 첫 렌더 컴파일 스톨 흡수(타이틀 마스킹 구간)
     // 종가 클로즈업 프레이밍으로 스냅(타이틀이 화면을 덮는 동안 세팅 → 페이드 아웃되면 조립이 보임)
     const pr = village.handle.getPickProxy(heroId);
-    // 종가 치수·회전. getPickProxies 가 미노출하던 시절 pr.rotY/maxDim/H 가 undefined → 카메라
+    // 종가 치수·회전. getPickProxies 가 미노출하던 시절 pr.rotY/maxDim 이 undefined → 카메라
     //   좌표 NaN → 랜딩 카메라가 정지(선회·줌인 소실)했다(#98 근본 원인). 어댑터에서 노출 복원 +
     //   여기 방어 폴백(bbox·cameraFraming 파생)으로 재발을 원천 차단한다.
     const bbSpan = pr.bbox ? { x: pr.bbox.max.x - pr.bbox.min.x, y: pr.bbox.max.y - pr.bbox.min.y, z: pr.bbox.max.z - pr.bbox.min.z } : null;
     const rotY = Number.isFinite(pr.rotY) ? pr.rotY : 0;
     const maxDim = Number.isFinite(pr.maxDim) ? pr.maxDim : (bbSpan ? Math.max(bbSpan.x, bbSpan.y, bbSpan.z) : 14);
-    const HH = Number.isFinite(pr.H) ? pr.H : (bbSpan ? bbSpan.y : 12);
-    // 역광 무대(#98): 태양을 종가 배면(frontDir≈rotY, +180°+30° 사선)에 고정 → 정측면 카메라가 역광으로
-    //   본다. 카메라는 정면 기준 34° three-quarter(정측면, frontDir±35° 규약 안). 둘이 맞물려 처마 골든 림.
+    // 역광 무대(#98): 태양을 종가 배면(frontDir≈rotY, +180°+25° 사선)에 고정한다.
+    // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
     heroSunAz = rotY + Math.PI + 25 * DEG;   // 배면 +25° 사선 역광(정배면보다 처마·측면 실루엣 림이 예쁨)
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
-    const az = 34 * DEG;  // 정면 기준 three-quarter(정측면) — frontDir±35° 안에서 역광 구도
-    const el = 7 * DEG;   // 7도 로우 앵글
+    // 시선점은 문 높이로 내리되 카메라까지 낮춰 앞집 처마에 가리지 않는다. 9°의 완만한
+    // 하향 시선은 기존 카메라 절대 높이를 거의 보존하면서 단청↔마당 탐색 여백을 만든다.
+    const el = 9 * DEG;
     // 더 먼 자리에서 좁은 화각으로 같은 화면 점유율을 유지해 처마·산세가 망원으로 압축된다.
     const heroDistance = dollyDistanceForFov(
       1.85,
@@ -1532,13 +1532,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       VILLAGE_LENS.hero.fov,
     );
     const r = heroDistance * maxDim;
-    const off = new THREE.Vector3(
-      r * Math.cos(el) * Math.sin(az),
-      r * Math.sin(el),
-      r * Math.cos(el) * Math.cos(az)
-    );
-    off.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY); // 가옥 정면 기준 회전각 반영
-    const finalTarget = new THREE.Vector3(pr.worldCenter.x, pr.worldCenter.y + HH * 0.42, pr.worldCenter.z);
+    const finalTarget = pr.cameraFraming.target.clone();
+    const plannedXZ = pr.cameraFraming.position.clone().sub(finalTarget).setY(0).normalize();
+    const off = plannedXZ.multiplyScalar(r * Math.cos(el));
+    off.y = r * Math.sin(el);
     const finalPosition = finalTarget.clone().add(off);
     const finalFov = VILLAGE_LENS.hero.fov;
 
@@ -2161,7 +2158,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       debugParcels: () => (village.handle?.getPickProxies() || []).map((p) => ({
         parcelId: p.parcelId, hero: p.buildingSpec.hero, kind: p.buildingSpec.kind,
         heroStyle: p.buildingSpec.heroStyle || null, family: p.buildingSpec.family || null,
-        editable: p.buildingSpec.editable === true })),
+        editable: p.buildingSpec.editable === true,
+        focusBaseY: +p.worldCenter.y.toFixed(2),
+        focusTargetY: +p.cameraFraming.target.y.toFixed(2),
+        focusTargetLift: +(p.cameraFraming.target.y - p.worldCenter.y).toFixed(2),
+        focusCameraY: +p.cameraFraming.position.y.toFixed(2),
+      })),
       // 검증용(#29): FAR/MID/FULL/focus overlay 중 필지당 정확히 하나만 보이는지 상태 스냅샷.
       debugLod: (id = null) => village.handle?.lodState?.(id) ?? null,
       // 검증용(#48): 좌표 클릭 대신 필지 id 로 직접 focus-in(돌리인+패널). 실사용 경로 villageSelect 재사용.

@@ -4,7 +4,7 @@ import {
   circleIntersectsPolygon,
   localCanopyBlocksSolarAccess,
   parcelLocalPoint,
-  parcelSolarAccess,
+  parcelSolarAccessPolygon,
   parcelWorldPoint,
 } from './parcel-contract.js';
 import { parcelLocalRoofBounds } from './house-footprint.js';
@@ -19,6 +19,7 @@ import {
   TEMPLE_PATH_CLEARANCE,
   templeFootprint,
 } from './temple-plan.js';
+import { pavilionFootprint } from './pavilion-plan.js';
 
 // Forest, near scatter, and future yard/guardian planners share this worker-safe
 // footprint index. Obstacles are inserted into every grid cell touched by their
@@ -61,13 +62,7 @@ function circleBounds(x, z, radius) {
 }
 
 function solarBounds(parcel) {
-  const corridor = parcel.solarAccess || parcelSolarAccess(parcel);
-  return boundsOfPoints([
-    parcelWorldPoint(parcel, { x: -corridor.halfWidth, z: corridor.localStart }),
-    parcelWorldPoint(parcel, { x: corridor.halfWidth, z: corridor.localStart }),
-    parcelWorldPoint(parcel, { x: corridor.halfWidth, z: corridor.localEnd }),
-    parcelWorldPoint(parcel, { x: -corridor.halfWidth, z: corridor.localEnd }),
-  ]);
+  return boundsOfPoints(parcelSolarAccessPolygon(parcel));
 }
 
 function shuffled(items, rng) {
@@ -233,6 +228,13 @@ export function createVegetationSpatial(plan, site, { cellSize = DEFAULT_CELL_SI
         },
       );
     }
+  }
+
+  const pavilion = plan.features?.pavilion;
+  if (pavilion && Number.isFinite(pavilion.x) && Number.isFinite(pavilion.z)) {
+    const footprint = pavilionFootprint(pavilion, 1);
+    insert(boundsOfPoints(footprint), (x, z, radius, point) =>
+      circleIntersectsPolygon(point, radius, footprint));
   }
 
   // 보호수는 plan 단계에서 이미 위치와 실제 수관 반경이 정해진다. 배경 숲과 근경 산포가

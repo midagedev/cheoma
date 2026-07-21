@@ -33,6 +33,7 @@
     "check:worker": "node tools/check-worker-contract.mjs",
     "shoot:bokeh": "node tools/shoot-bokeh-fixture.mjs",
     "shoot:dof": "node tools/shoot-dof.mjs",
+    "shoot:focus-level": "node tools/shoot-focus-level.mjs",
     "shoot:wave": "node tools/shoot-wave.mjs village",
     "shoot:wave:full": "node tools/shoot-wave.mjs hamlet,village,capital,hanyang"
   },
