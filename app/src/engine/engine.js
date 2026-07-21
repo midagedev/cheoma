@@ -926,7 +926,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //   #91 상세 파라미터(지형·구성·어휘)도 마을 지오를 바꾸므로 직렬화에 편입(기본값이면 현행 키와 동치 문자열).
     const n = (v, d) => (v == null ? d : v);
     const base = `${seed >>> 0}|${opts.scale}|${opts.character}|${!!opts.includePalace}|${!!opts.includeTemple}`;
-    const tune = `${n(opts.undAmpK, 1)},${n(opts.ridgeHK, 1)},${n(opts.streamMeanderK, 1)},${opts.stream === false ? 0 : 1}`
+    const tune = `${n(opts.undAmpK, 1)},${n(opts.ridgeHK, 1)},${n(opts.streamMeanderK, 1)},${opts.stream === false ? 0 : 1},${opts.river === true ? 1 : 0}`
       + `|${n(opts.paddyDensityK, 1)},${n(opts.treeDensityK, 1)},${n(opts.cityWall, 'a')},${n(opts.sijeon, 'a')}`
       + `|${opts.char01 == null ? 'a' : opts.char01},${n(opts.diversityK, 1)}`
       + `|h${opts.houses == null ? 'a' : opts.houses}`;   // #114 집 수 오버라이드(0="절 하나만" 등)
@@ -2139,6 +2139,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           seed: village.seed >>> 0, scale: p.scale, siteR: p.siteR,
           houses: p.stats?.houses ?? 0, paddies: p.stats?.paddies ?? 0, trees,
           stream: !!(p.site && p.site.stream),
+          watercourse: p.site?.stream?.kind || 'dry',
+          waterWidth: p.site?.stream ? +(p.site.stream.waterHalf * 2).toFixed(2) : 0,
           cityWall: !!feat.cityWall, sijeon: Array.isArray(feat.sijeon) ? feat.sijeon.length : 0,
           temple: !!feat.temple,
           char01: (typeof p.opts?.char01 === 'number') ? +p.opts.char01.toFixed(3) : null,

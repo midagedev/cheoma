@@ -1,3 +1,5 @@
+import * as G from '../core/math/geom2.js';
+
 const TAU = Math.PI * 2;
 
 export const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -42,4 +44,35 @@ export function terrainRelief(site, point, sampleRadius, perimeterSamples) {
     );
   }
   return max - min;
+}
+
+// Pads, parcel planning, and lightweight visual gates must agree on the whole
+// footprint rather than sampling only corners. Irregular terrain can peak along
+// an edge or inside a concave-looking bounding box even when every corner is
+// acceptable; this shared dense sampler prevents renderer-only floating fixes.
+export function terrainRangeOnPolygon(site, polygon, divisions = 5) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  let min = Infinity, max = -Infinity;
+  const sample = (point) => {
+    const height = site.heightAt(point.x, point.z);
+    min = Math.min(min, height);
+    max = Math.max(max, height);
+  };
+  for (let index = 0; index < polygon.length; index++) {
+    const a = polygon[index], b = polygon[(index + 1) % polygon.length];
+    minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x);
+    minZ = Math.min(minZ, a.z); maxZ = Math.max(maxZ, a.z);
+    sample(a);
+    sample({ x: (a.x + b.x) * 0.5, z: (a.z + b.z) * 0.5 });
+  }
+  for (let xIndex = 0; xIndex <= divisions; xIndex++) {
+    for (let zIndex = 0; zIndex <= divisions; zIndex++) {
+      const point = {
+        x: minX + (maxX - minX) * xIndex / divisions,
+        z: minZ + (maxZ - minZ) * zIndex / divisions,
+      };
+      if (G.pointInPoly(point, polygon)) sample(point);
+    }
+  }
+  return { min, max, range: max - min };
 }

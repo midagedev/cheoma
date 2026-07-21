@@ -2,6 +2,7 @@ import { smoothstep } from '../core/math/scalar.js';
 import { makeRng } from '../rng.js';
 import { makeWorldEdge } from '../core/math/world-edge.js';
 import { createValueNoise2D } from '../core/math/value-noise2.js';
+import { createSettlementRelief } from './settlement-relief.js';
 
 // 마을 전용 사이트 지형 — 배산임수(背山臨水)의 토대. (joseon-city.md 규칙 1·2·16)
 //   기존 env/terrain.js 는 단일 건물용(평탄 24m + -x 고정 개울축)이라 마을 스케일과
@@ -143,7 +144,7 @@ export function tierForR(R) {
 }
 
 export function makeSite({ scale = 'village', siteR, seed = 20260716,
-  undAmpK = 1, ridgeHK = 1, streamMeanderK = 1, stream = true, bowlK = 1 } = {}) {
+  undAmpK = 1, ridgeHK = 1, streamMeanderK = 1, stream = true, river = false, bowlK = 1 } = {}) {
   const R = clampR(typeof siteR === 'number' && isFinite(siteR) ? siteR : resolveSiteR(scale));
   const cfg = siteConfigFor(R);
   // ── 분지 크기 = 건축 footprint 종속(#120) ── bowlK 는 plan.js 가 houseTarget/nominal 비로 넘기는
@@ -156,14 +157,16 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   const rHK = clampN(ridgeHK, 0.5, 1.6);      // 배산 능선·봉우리 높이 배율(Hmax)
   const meK = clampN(streamMeanderK, 0, 2.5); // 개울 사행(굽이) 정도 배율
   const dry = stream === false ? true : cfg.dry;   // 개울 유무(off=내륙 마른 마을: 개울·다리·논 소멸)
+  const riverMode = !dry && river === true && R >= 213;
   const benchDrop = cfg.benchDrop, undAmp = cfg.undAmp * uAmpK;
   const { fbm } = createValueNoise2D(seed ^ 0x51a1, { signed: true });
-  // 언듈레이션 파장: 규모에 비례(분지에 2~3개 완만한 융기가 얹히도록).
-  const undF = 1.4 / R, undF2 = 3.6 / R;
 
   // ── 주요 앵커 (z: 음수=북/뒤, 양수=남/앞) ──
   const center = { x: 0, z: -0.24 * R };      // 명당(종가·마을 중심) — 주산 남쪽 기슭
-  const streamZ = 0.30 * R;                   // 명당수(앞 개울)
+  // A generic capital can straddle a river inside its basin. Hanyang keeps the
+  // historical city north of a Han-scale river, while the whole generated
+  // settlement extends to both banks outside the wall.
+  const streamZ = (riverMode ? (R >= 400 ? 0.47 : 0.18) : 0.30) * R;
   const bowlR = 0.56 * R * bK;                // 분지(마을) 평균 반경 — footprint 계수(bK) 반영(#120)
   const Hmax = cfg.ridgeH * rHK;
 
@@ -199,7 +202,14 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   //   (terrainMul·R)은 무해한 상한 안전장치. bloom·adapter·populate·worldedge·forest 샘플러가 terrainR 을
   //   자동 추종하므로 여기 한 곳 절단이 전 소비처로 전파된다.
   const nearR = bowlR * 1.15 + Math.min(Math.max(34, bowlR * 0.28), NEAR_FAR_CAP);   // ★ = forest-crunch.js crunchForestTrees nearR(폴백 동일공식)
-  const terrainR = Math.min((cfg.terrainMul || 1.55) * R, nearR + TERR_EDGE_BUF); // 지형 메시·수목 외곽
+  // 한강급 물길은 성저에서 끝나는 장식 리본이 아니라 남안에도 나루·취락이
+  // 살아야 한다. 여기서만 near LOD 외곽에 최대 60m의 충적 평야를 더한다. 기본 개울·
+  // 기본 한양은 0m라 #143의 잘라낸 지형/숲 예산을 그대로 보존한다.
+  const riverPlainExtension = riverMode ? Math.max(0, Math.min(60, (R - 250) * 0.24)) : 0;
+  const terrainR = Math.min(
+    (cfg.terrainMul || 1.55) * R,
+    nearR + TERR_EDGE_BUF + riverPlainExtension,
+  ); // 지형 메시·수목 외곽
   // 능선 크레스트: near 밴드 안쪽에서 Hmax 도달 → 배산 매스 전체가 진짜 숲(far 블롭 아님)이고 terrainR 안.
   let ridgeR = Math.min((cfg.ridgeMul || 1.45) * R, nearR - RIDGE_NEAR_INSET);
   ridgeR = Math.min(ridgeR, terrainR - 8);                   // 안전: 크레스트는 항상 지형 안
@@ -220,28 +230,88 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   // ── 명당수 중심선(사행) ── 동서로 가로지르며 완만히 굽는다.
   const streamMeander = (x) => streamZ + R * 0.05 * meK * Math.sin(x / R * 3.0 + 1.1) + R * 0.03 * meK * Math.sin(x / R * 6.7);
   const streamZat = (x) => streamMeander(x);
-  const streamHalf = 0.018 * R + 0.9;         // 제방을 포함한 하도 반폭
-  // A creek grows enough to read at town scale but caps before becoming a river;
-  // the larger river grammar belongs to its own scale option.
-  const streamWaterHalf = Math.min(4, Math.max(1.4, streamHalf * 0.5));
+  const creekHalf = 0.018 * R + 0.9;
+  // A creek caps before becoming a river. Large settlements can opt into a
+  // separate alluvial watercourse whose wet channel and planning banks scale
+  // together; small settlements never silently turn into river towns.
+  const streamWaterHalf = riverMode
+    ? Math.min(68, Math.max(30, R * 0.12))
+    : Math.min(4, Math.max(1.4, creekHalf * 0.5));
+  const streamHalf = riverMode
+    ? streamWaterHalf + Math.min(12, Math.max(8, R * 0.024))
+    : creekHalf;                                      // 제방을 포함한 하도 반폭
   // A stream cannot climb the enclosing ridge. Reserve a broad, scale-relative
   // valley whose center bed descends monotonically toward -x (the shader flow).
   // The broad shoulder avoids replacing the old buried ribbon with a slot canyon.
-  const streamValleyHalf = streamHalf + Math.max(8, R * 0.10);
+  const streamValleyHalf = streamHalf + Math.max(
+    riverMode && R >= 400 ? 50 : 8,
+    R * (riverMode && R >= 400 ? 0.22 : 0.10),
+  );
   // Keep the wet channel and one coarse terrain-cell margin level. Otherwise the
   // triangulated terrain can interpolate a high shoulder across a ribbon edge even
   // though the analytic centerline itself is clear.
   const streamValleyFlatHalf = streamWaterHalf + 3;
   const streamPts = [];
-  // #143 절단 지형 밖 워터리본 삐침 방지 — 개울 끝(±1.02R)을 terrainR 안으로 클램프.
-  //   heightAt·streamCarve 는 연속 streamMeander(x) 라 불침해, 워터리본 지오메트리(site.stream.pts)만 짧아진다.
-  const sEx = Math.min(R * 1.02, terrainR - 4);
-  const sx0 = -sEx, sx1 = sEx, SN = 72;
-  for (let i = 0; i <= SN; i++) { const x = sx0 + (sx1 - sx0) * (i / SN); streamPts.push({ x, z: streamZat(x) }); }
+  // 물길 중심선이 비정형 world edge에 닿는 지점을 양쪽에서 따로 찾는다. 과거의
+  // ±(terrainR-4) 사각 클램프는 한강급 폭에서 수면이 지형 밖으로 큰 직사각형으로 삐져
+  // 나왔다. 끝 9%는 습지·안개 밴드 안에서 점진적으로 좁혀 화면 경계에 자연스럽게 녹인다.
+  const edgeClearanceAt = (x, z) => {
+    const dx = x - edge.cx, dz = z - edge.cz;
+    return edge.edgeRadiusAt(Math.atan2(dz, dx)) - Math.hypot(dx, dz);
+  };
+  const findStreamEnd = (side) => {
+    const limit = Math.min(R * 1.02, terrainR - 4);
+    let inside = 0, outside = limit;
+    for (let d = 2; d <= limit; d += 2) {
+      if (edgeClearanceAt(side * d, streamZat(side * d)) >= 7) inside = d;
+      else { outside = d; break; }
+    }
+    for (let step = 0; step < 28; step++) {
+      const mid = (inside + outside) * 0.5;
+      if (edgeClearanceAt(side * mid, streamZat(side * mid)) >= 7) inside = mid;
+      else outside = mid;
+    }
+    return side * inside;
+  };
+  const legacyStreamExtent = Math.min(R * 1.02, terrainR - 4);
+  const sx0 = riverMode ? findStreamEnd(-1) : -legacyStreamExtent;
+  const sx1 = riverMode ? findStreamEnd(1) : legacyStreamExtent;
+  const SN = 72;
+  for (let i = 0; i <= SN; i++) {
+    const t = i / SN;
+    const x = sx0 + (sx1 - sx0) * t;
+    streamPts.push({ x, z: streamZat(x), half: streamWaterHalf });
+  }
+  for (let i = 0; i <= SN; i++) {
+    const p = streamPts[i];
+    const a = streamPts[Math.max(0, i - 1)], b = streamPts[Math.min(SN, i + 1)];
+    const tl = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const nx = -(b.z - a.z) / tl, nz = (b.x - a.x) / tl;
+    const envelope = riverMode
+      ? smoothstep(0, 0.09, i / SN) * smoothstep(1, 0.91, i / SN)
+      : 1;
+    let lo = 0, hi = streamWaterHalf * envelope;
+    for (let step = 0; step < 24; step++) {
+      const half = (lo + hi) * 0.5;
+      const safe = edgeClearanceAt(p.x + nx * half, p.z + nz * half) >= 6
+        && edgeClearanceAt(p.x - nx * half, p.z - nz * half) >= 6;
+      if (safe) lo = half; else hi = half;
+    }
+    p.half = lo;
+  }
   const streamCross = { x: 0, z: streamZat(0) };  // 진입 스파인이 개울을 건너는 지점(다리)
+  const riverNorthLanding = riverMode
+    ? { x: 0, z: streamCross.z - streamHalf - 6 }
+    : null;
+  const riverSouthLanding = riverMode
+    ? { x: 0, z: streamCross.z + streamHalf + 6 }
+    : null;
   const streamGradeDrop = Math.max(0.6, R * 0.006);
-  const streamBedY = (x) => -benchDrop * 0.38
-    + (Math.max(-sEx, Math.min(sEx, x)) / sEx) * streamGradeDrop * 0.5;
+  const streamBedY = (x) => {
+    const clamped = Math.max(sx0, Math.min(sx1, x));
+    const progress = (clamped - sx0) / Math.max(1e-6, sx1 - sx0) - 0.5;
+    return -benchDrop * 0.38 + progress * streamGradeDrop;
+  };
 
   // 능선 융기: 분지 밖으로 갈수록 상승, 뒤(북)가 가장 높고 앞(남, +z)은 열려(물·진입) 낮다.
   // 분지 가장자리에서 가파르게 솟아(가시적 사면) 바깥에서 완만해지도록 rise 곡선을 앞당긴다.
@@ -293,18 +363,16 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     return Hmax * 0.42 * rise * openMid;
   }
 
-  // 분지 벤치: 약간 북고남저(배산 느낌) — 완만해서 집이 앉기 좋다.
-  function bench(x, z) {
-    const t = smoothstep(streamZ, mountainZ + 0.12 * R, z);   // 남(0)→북(1)
-    return benchDrop * t;                                     // 주산측 → 개울측 완경사(총 낙차 benchDrop)
-  }
-
-  // 언듈레이션: 완경사 위에 얹히는 저진폭·장파장 기복(잔물결이 아니라 땅의 숨결).
-  //   완전 평면의 어색함을 없애되, 필지 성토 패드가 흡수할 만큼 완만하게(±undAmp).
-  function undulation(x, z) {
-    return undAmp * (0.72 * fbm(x * undF + 11, z * undF - 7, 3)
-                   + 0.28 * fbm(x * undF2 - 5, z * undF2 + 9, 2));
-  }
+  const settlementRelief = createSettlementRelief({
+    R,
+    seed,
+    streamZ,
+    mountainZ,
+    benchDrop,
+    undAmp,
+    undAmpK: uAmpK,
+    macroNoise: fbm,
+  });
 
   // 개울 골짜기(명당수). 기존의 고정 2.2m 감산은 양끝 산 매스를 따라 수면도 다시
   // 10~46m 솟게 했다. 렌더·계획이 공유하는 단조 하상으로 넓게 보간해 물이 산에 묻히지 않는다.
@@ -312,7 +380,11 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     if (dry) return 0;
     const cz = streamZat(x);
     const d = Math.abs(z - cz);
-    return smoothstep(streamValleyHalf, streamValleyFlatHalf, d);
+    const weight = smoothstep(streamValleyHalf, streamValleyFlatHalf, d);
+    // A large river forms a broad alluvial floor instead of a creek-like notch
+    // cut into the front hill. The eased shoulder leaves dry bank elevation yet
+    // removes the abrupt ansan slope where ferry wards and fields must settle.
+    return riverMode && R >= 400 ? Math.pow(weight, 0.65) : weight;
   }
 
   // 분지 게이트: 분지 안 0 → 밖 1. 산 덩어리(봉우리 포함)가 분지 바닥으로 새어 들지 않게.
@@ -333,11 +405,13 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   }
 
   function heightAt(x, z) {
-    let h = Math.max(bench(x, z), hillMass(x, z));
     const hilly = hillMass(x, z);
-    // 분지·평지 바닥의 미세 기복(땅의 숨결). 산으로 갈수록 자체 굴곡 노이즈가 대신하도록 억제.
-    const undMask = 1 - Math.min(1, hilly / (0.12 * Hmax));
-    if (undMask > 0.001) h += undMask * undulation(x, z);
+    // The settlement floor owns local relief and broad benches. Fade it toward
+    // mountain mass so the ridge keeps its own rock/forest noise grammar.
+    const floor = settlementRelief.heightAt(x, z);
+    const floorMask = 1 - Math.min(1, hilly / (0.12 * Hmax));
+    let h = Math.max(settlementRelief.benchAt(x, z), hilly);
+    if (floorMask > 0.001) h += floorMask * (floor - settlementRelief.benchAt(x, z));
     // 능선·산에만 굴곡 노이즈(분지 벤치는 완만 유지 → 집 앉히기 안정)
     if (hilly > 1.5) {
       const n = fbm(x * 0.016, z * 0.016, 4) * (0.09 * Hmax) + fbm(x * 0.05 + 4, z * 0.05 - 3, 3) * (0.03 * Hmax);
@@ -359,26 +433,35 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   return {
     scale: tierForR(R), siteR: R, seed, R, terrainR, Hmax,
     edge,                                       // 비정형 외곽선(worldedge) — 지형 신축·운해 링·구름 공유
-    center, entrance: { x: 0, z: streamCross.z + 0.06 * R }, // 동구: 개울 바로 북(마을측 초입)
+    center,
+    // Creek villages enter across the water. Han-scale river roads terminate at
+    // the north ferry landing; no renderer may draw a road ribbon through water.
+    entrance: riverMode ? riverNorthLanding : { x: 0, z: streamCross.z + 0.06 * R },
     mountainZ, streamZ, ansanZ, bowlR, ridgeR, nearR,   // nearR: 숲 원경 LOD 경계 단일 진실원(#143, forest-crunch 소비)
     // 비원형 분지 반경(#120) — 필지 외곽·충전 반경이 유기적 윤곽을 따르게(forest 는 bowlR 스칼라 사용, 불침해).
     bowlRAt, bowlRadiusAt,
     heightAt, hillAt,
     streamZat, streamY, streamHalf, streamWaterHalf, streamValleyHalf, streamValleyFlatHalf,
+    relief: settlementRelief.config,
     stream: dry ? null : {
       pts: streamPts,
+      kind: riverMode ? 'river' : 'creek',
       width: streamHalf * 2,
       cross: streamCross,
       half: streamHalf,
       waterHalf: streamWaterHalf,
       valleyHalf: streamValleyHalf,
       valleyFlatHalf: streamValleyFlatHalf,
+      floodplainHalf: riverMode ? streamValleyHalf : streamHalf,
+      northLanding: riverNorthLanding,
+      southLanding: riverSouthLanding,
       flow: { x: -1, z: 0.12 },
     },
     // 다랑이 논 후보역: 개울 남쪽 ~ 안산 기슭 사이 저지.
     paddyRegion: dry ? null : {
       xMin: -0.7 * R, xMax: 0.7 * R,
-      zNear: streamZ + 0.05 * R, zFar: ansanZ - 0.05 * R,
+      zNear: riverMode ? streamZ + streamHalf + 8 : streamZ + 0.05 * R,
+      zFar: riverMode ? Math.min(ansanZ - 0.05 * R, terrainR - 20) : ansanZ - 0.05 * R,
     },
     bounds: { minX: -R, maxX: R, minZ: -R, maxZ: R },
   };

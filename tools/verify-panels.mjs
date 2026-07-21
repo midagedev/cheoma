@@ -7,7 +7,7 @@
 //      · 결정론: 같은 seed+opts 2회 ==
 //      · stream off → site.stream 소멸 / cityWall true → 성곽 생성 / paddyDensityK 극단 → 논 카운트 변화
 //   B) app/dist-panels (전용 포트 4228, window.__engine 훅) — 앱·엔진 경로:
-//      · 마을 상세 스키마 DOM 등재(10 필드) + 토글 end-to-end → debugPlan 효과 + 시드 유지
+//      · 마을 상세 스키마 DOM 등재(11 필드) + 토글 end-to-end → debugPlan 효과 + 시드 유지
 //      · #96 집 패널 마당 소품 필드 렌더 + buildRebuildPayload route 'top' 라우팅
 //      · 기존 파라미터 회귀(footprintScale 라이브) · 히어로/focus/리롤 플로우 pageerror 0
 import { createServer } from 'node:http';
@@ -46,6 +46,8 @@ function info(scale, opts) {
     hash: parts.join('|'), terr,
     houses: p.stats.houses, paddies: p.stats.paddies,
     stream: !!(p.site && p.site.stream),
+    watercourse: p.site?.stream?.kind || 'dry',
+    waterWidth: p.site?.stream ? p.site.stream.waterHalf * 2 : 0,
     cityWall: !!F.cityWall, sijeon: Array.isArray(F.sijeon) ? F.sijeon.length : 0,
     char01: +Number(p.opts.char01).toFixed(3), charOverride: !!p.opts.charOverride,
   };
@@ -56,6 +58,7 @@ R.base = info('village', {});
 R.def = info('village', { ...villageDefaults() });        // App 실제 기본값 주입
 R.base2 = info('village', {});                             // 결정론(재현)
 R.streamOff = info('village', { stream: false });
+R.river = info('capital', { river: true, includePalace: true });
 R.wallOn = info('village', { cityWall: true });
 R.paddyHi = info('village', { paddyDensityK: 2 });
 R.paddyLo = info('village', { paddyDensityK: 0.2 });
@@ -131,6 +134,7 @@ console.log('\n── A) 코어 plan(옵션 반영·결정론·no-op) ──');
   ok('#91 결정론 (같은 seed+opts 2회 동일)', R.base.hash === R.base2.hash);
   ok('#91 stream=false → 개울 소멸', R.base.stream === true && R.streamOff.stream === false);
   ok('#91 stream=false → 필지 배치도 변화(마른 마을)', R.base.hash !== R.streamOff.hash);
+  ok('#40 river=true → 도성 수로가 한강급 강 문법 사용', R.river.watercourse === 'river' && R.river.waterWidth >= 60);
   ok('#91 cityWall=true → 성곽 생성 (village 기본 없음)', R.base.cityWall === false && R.wallOn.cityWall === true);
   ok('#91 paddyDensityK 극단 → 논 카운트 변화', R.paddyHi.paddies !== R.paddyLo.paddies, `hi=${R.paddyHi.paddies} lo=${R.paddyLo.paddies} base=${R.base.paddies}`);
   ok('#91 undAmpK 변경 → 지형 기복 변화 (heightAt 샘플)', R.undLo.terr !== R.undHi.terr && R.base.terr !== R.undLo.terr, `terrLo≠terrHi`);
@@ -143,10 +147,10 @@ console.log('\n── A) 코어 plan(옵션 반영·결정론·no-op) ──');
 
 // ═════════════ B) 앱·엔진 경로 ═════════════
 console.log('\n── B) 앱 패널·엔진 경로 ──');
-const VKEYS = ['undAmpK', 'ridgeHK', 'streamMeanderK', 'stream', 'paddyDensityK', 'treeDensityK', 'cityWall', 'sijeon', 'char01', 'diversityK'];
+const VKEYS = ['undAmpK', 'ridgeHK', 'streamMeanderK', 'stream', 'river', 'paddyDensityK', 'treeDensityK', 'cityWall', 'sijeon', 'char01', 'diversityK'];
 const desk = await browser.newPage({ viewport: { width: 1280, height: 800, deviceScaleFactor: 2 } });
 watch(desk, 'app');
-await desk.goto(`${appBase}/index.html?village=1&vseed=7&seed=20260718&time=day`, { waitUntil: 'load' });
+await desk.goto(`${appBase}/index.html?village=1&vscale=capital&vseed=7&seed=20260718&time=day`, { waitUntil: 'load' });
 await desk.waitForFunction('window.__SHOT_READY === true', null, { timeout: 40000 });
 await wait(desk, 1600);   // 부감 진입 트윈 정착
 
@@ -155,7 +159,7 @@ await ev(desk, () => { const b = document.querySelector('.ctx.village .advtoggle
 await wait(desk, 300);
 const domKeys = await ev(desk, () => [...document.querySelectorAll('.ctx.village [data-vkey]')].map((n) => n.getAttribute('data-vkey')));
 const missing = VKEYS.filter((k) => !domKeys.includes(k));
-ok('#91 마을 상세 스키마 10필드 DOM 등재', missing.length === 0, missing.length ? 'missing=' + missing.join(',') : `keys=${domKeys.length}`);
+ok('#40 마을 상세 스키마 11필드 DOM 등재', missing.length === 0, missing.length ? 'missing=' + missing.join(',') : `keys=${domKeys.length}`);
 
 const plan0 = await ev(desk, () => window.__engine.village.debugPlan());
 console.log('plan0:', JSON.stringify({ seed: plan0.seed, houses: plan0.houses, paddies: plan0.paddies, stream: plan0.stream, cityWall: plan0.cityWall, trees: plan0.trees }));
@@ -169,6 +173,23 @@ await desk.waitForFunction(() => window.__engine?.village?.debugPlan?.()?.stream
 const planStream = await ev(desk, () => window.__engine.village.debugPlan());
 ok('#91 end-to-end stream 토글 → 개울 소멸', plan0.stream === true && planStream.stream === false, `before=${plan0.stream} after=${planStream.stream}`);
 ok('#91 end-to-end 옵션 변경 후 시드 유지', planStream.seed === plan0.seed, `seed ${plan0.seed}→${planStream.seed}`);
+// 큰 물길은 도성부터 UI에서 활성화된다. 개울을 복원한 뒤 실제 버튼을 눌러
+// Svelte → engine.setOpts → pure site → renderer 경로를 한 번에 검증한다.
+await ev(desk, () => document.querySelector('.ctx.village [data-vkey="stream"]')?.click());
+await desk.waitForFunction(() => window.__engine?.village?.debugPlan?.()?.watercourse === 'creek',
+  null, { timeout: 12000 }).catch(() => {});
+const riverUi = await ev(desk, () => {
+  const button = document.querySelector('.ctx.village [data-vkey="river"]');
+  return { found: !!button, disabled: !!button?.disabled };
+});
+await ev(desk, () => document.querySelector('.ctx.village [data-vkey="river"]')?.click());
+await desk.waitForFunction(() => window.__engine?.village?.debugPlan?.()?.watercourse === 'river',
+  null, { timeout: 12000 }).catch(() => {});
+const planRiver = await ev(desk, () => window.__engine.village.debugPlan());
+ok('#40 도성 강 토글 활성·end-to-end 반영', riverUi.found && !riverUi.disabled
+  && planRiver.watercourse === 'river' && planRiver.waterWidth >= 60,
+`ui=${JSON.stringify(riverUi)} kind=${planRiver.watercourse} width=${planRiver.waterWidth}`);
+ok('#40 강 전환 뒤 시드 유지', planRiver.seed === plan0.seed, `seed ${plan0.seed}→${planRiver.seed}`);
 // 직접 setOpts 로 cityWall / paddy 극단(빠른 경로, 동일 setOpts)
 await ev(desk, () => window.__engine.village.setOpts({ cityWall: true }));
 await wait(desk, 1600);

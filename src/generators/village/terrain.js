@@ -34,6 +34,7 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const cScrub = linCol(0x566a38);   // 초지↔숲 사이 관목 올리브(#115 재작업) — 접합부 3단 페더로 경계 완화
   const cFar = linCol(0x6a7c70);     // 원경 대기 감쇠
   const cBank = linCol(0x6d6249);    // 물가 축축한 흙
+  const cFloodplain = linCol(0x788164); // 큰 물길의 충적 완사면(초지보다 옅고 습함)
   const cGranite = linCol(GRANITE);  // 화강암 밝은 회백(급경사·상부 노출, #113) — forest.js 와 공유 톤
   // #137 이끼 낀 회록 화강암 — 순수 화강암 100%가 아니라 숲색 쪽으로 살짝 섞어(레퍼런스: 바위에 낀 이끼)
   //   회색 노출이 너무 죽지 않게. 실제 페인트는 이 색을 기준으로 rock 강도만큼 섞는다.
@@ -109,6 +110,11 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
     }
     // 물가
     const bank = streamDistK(x, z);
+    if (stream?.kind === 'river') {
+      const distance = Math.abs(z - site.streamZat(x));
+      const floodplain = smoothstep(stream.floodplainHalf, stream.half * 0.8, distance);
+      outBase.lerp(cFloodplain, floodplain * (1 - bank) * 0.34);
+    }
     if (bank > 0) outBase.lerp(cBank, bank * 0.7);
     // 원경 대기(먼 능선일수록 옅게)
     const far = smoothstep(TR * 0.6, TR, Math.hypot(x, z)) * 0.45;
@@ -240,7 +246,9 @@ export function buildWaterRibbon(site, uniforms) {
   const pts = site.stream.pts;
   const pos = [], uv = [], col = [], idx = [];
   const N = pts.length - 1;
-  const lanes = [-1, -0.52, 0, 0.52, 1];
+  const lanes = site.stream.kind === 'river'
+    ? [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1]
+    : [-1, -0.52, 0, 0.52, 1];
   const tmpT = new THREE.Vector3();
   const deep = linCol(0x376f82);
   const bank = linCol(0x78928a);
@@ -250,7 +258,7 @@ export function buildWaterRibbon(site, uniforms) {
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(N, i + 1)];
     tmpT.set(b.x - a.x, 0, b.z - a.z).normalize();
     const nx = -tmpT.z, nz = tmpT.x;
-    const hw = site.streamWaterHalf;
+    const hw = Number.isFinite(p.half) ? p.half : site.streamWaterHalf;
     const y = streamSurfaceHeightAt(site, p.x, p.z);
     for (const lane of lanes) {
       pos.push(p.x + nx * hw * lane, y, p.z + nz * hw * lane);
@@ -275,11 +283,11 @@ export function buildWaterRibbon(site, uniforms) {
     color: 0xffffff,
     vertexColors: true,
     metalness: 0,
-    roughness: 0.38,
+    roughness: site.stream.kind === 'river' ? 0.5 : 0.38,
   });
   mat.onBeforeCompile = (shader) => injectWaterLook(shader, uniforms, {
-    reflection: 0.58,
-    ripple: 0.48,
+    reflection: site.stream.kind === 'river' ? 0.42 : 0.58,
+    ripple: site.stream.kind === 'river' ? 0.30 : 0.48,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'village-stream';

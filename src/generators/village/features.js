@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { makeMaterials } from '../../builder/palette.js';
 import { buildPavilion } from '../../builder/pavilion.js';
 import { buildBridge } from '../../builder/bridge.js';
+import { buildFerryCrossing } from '../../builder/ferry.js';
 import { buildParcel } from '../../layout/parcel.js';
 import { buildProp } from '../../props/index.js';
 import { buildTempleCompound } from '../../temple/compound.js';
@@ -341,6 +342,23 @@ export function buildFeatureObjects(plan, site) {
     bridge.position.set(bridgeSpec.x, y, bridgeSpec.z);
     bridge.rotation.y = bridgeSpec.rot || 0;
     objects.push(bridge);
+  }
+  if (features.ferry) {
+    const spec = features.ferry;
+    const waterY = streamSurfaceHeightAt(site, spec.x, spec.z);
+    const northRise = site.heightAt(spec.north.x, spec.north.z) - waterY;
+    const southRise = site.heightAt(spec.south.x, spec.south.z) - waterY;
+    const ferry = buildFerryCrossing({
+      span: spec.span,
+      waterWidth: spec.waterWidth,
+      width: site.scale === 'hanyang' ? 5.2 : 4.2,
+      northRise,
+      southRise,
+      boatCount: spec.boatCount,
+    });
+    ferry.position.set(spec.x, waterY, spec.z);
+    ferry.rotation.y = spec.rot || 0;
+    objects.push(ferry);
   }
   for (const propSpec of features.props || []) {
     const prop = buildProp(propSpec.name, { seed: propSpec.seed || 3, scale: propSpec.scale });

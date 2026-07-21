@@ -6,7 +6,7 @@ import {
   clampPointOutsideCityWall,
   worldEdgeClearance,
 } from './citywall-contour.js';
-import { buildRoadJunctions } from './road-topology.js';
+import { attachRoadJunctions } from './road-topology.js';
 
 // 2단계 도로 생성 (joseon-city.md 규칙 3·4·11·12·13·14·17).
 //   1) 간선(대로·중로)은 결정론 골격 — 십자/T/남북대로. 곧게(등고 따라 완만 곡선 허용).
@@ -563,13 +563,7 @@ export function planRoads(site, opts, rng) {
 
   collapseNarrowRoadLenses(roads);
 
-  const junctions = buildRoadJunctions(roads);
-  const roadById = new Map(roads.map((road) => [road.id, road]));
-  for (const junction of junctions) {
-    for (const connection of junction.connections) {
-      roadById.get(connection.roadId)?.junctionIds.push(junction.id);
-    }
-  }
+  const junctions = attachRoadJunctions(roads);
   nodes.junctions = junctions;
 
   return { roads, nodes };

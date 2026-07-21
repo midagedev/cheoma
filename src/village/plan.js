@@ -24,6 +24,8 @@ import {
 import { planTempleSite, templeReservationPolygons } from './temple-plan.js';
 import { planPavilion } from './pavilion-plan.js';
 import { planPublicProps } from './public-props-plan.js';
+import { planRiverPort } from './river-port-plan.js';
+import { attachRoadJunctions } from './road-topology.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -131,6 +133,7 @@ function normTuning(opts) {
     ridgeHK: clampNum(opts.ridgeHK, 0.5, 1.6, 1),        // 배산 능선·봉우리 높이
     streamMeanderK: clampNum(opts.streamMeanderK, 0, 2.5, 1),  // 개울 사행 정도
     stream: opts.stream === false ? false : true,        // 개울 유무(off=내륙 마른 마을)
+    river: opts.river === true,                           // 큰 마을의 넓은 물길(명시 선택)
     // 구성
     treeDensityK: clampNum(opts.treeDensityK, 0, 2, 1),  // 나무 밀도(populate scatterTrees)
     paddyDensityK: clampNum(opts.paddyDensityK, 0, 2, 1),// 논 밀도(planPaddies)
@@ -155,6 +158,7 @@ export function planVillage(opts = {}) {
     : (opts.scale != null ? opts.scale : 'village'));
   const scale = tierForR(siteR);                      // 이산 tier(토폴로지·성곽·궁 임계 분기)
   const isCapitalTier = scale === 'capital' || scale === 'hanyang';
+  if (tuning.river && !isCapitalTier) warnings.push('강은 도성·한양 규모에서만 유효 — 이 규모에서는 개울로 구성됨');
   // 한양 도성은 궁 앵커가 도시 구성의 척추 — 명시적으로 끄지 않는 한 궁 기본 활성.
   let includePalace = scale === 'hanyang' ? (opts.includePalace !== false) : !!opts.includePalace;
   if (includePalace && !isCapitalTier) {
@@ -213,14 +217,17 @@ export function planVillage(opts = {}) {
   const templeSoloDry = templeSolo;
   const site = makeSite({ siteR, seed, bowlK,
     undAmpK: tuning.undAmpK, ridgeHK: tuning.ridgeHK, streamMeanderK: tuning.streamMeanderK,
-    stream: templeSoloDry ? false : tuning.stream });
+    stream: templeSoloDry ? false : tuning.stream, river: tuning.river && isCapitalTier });
   if (templeSoloDry && tuning.stream) warnings.push('외딴 절 터는 경내 이격을 위해 마른 분지로 구성됨');
   const C = site.center, E = site.entrance;
   const toEntrance = G.norm(G.sub(E, C));   // 종가가 바라보는 방향(남, 동구쪽)
 
   // ── 2) 예약 코어(종가/관아/궁) — 프론티지 배정 전에 블록으로 확보 ──
   const blockers = [];
-  const features = { pavilion: null, bridges: [], props: [], temple: null, palace: null };
+  const features = {
+    pavilion: null, bridges: [], ferry: null, riverPort: null,
+    props: [], temple: null, palace: null,
+  };
 
   // 핵심 건물의 좌향은 카메라/석양 룩이 아니라 배산임수의 주산→동구 축이 결정한다.
   // 이전 rimFrontDir(-z)은 남향 주석과 달리 종가·관아·궁을 북북서로 돌리고 있었다.
@@ -291,6 +298,16 @@ export function planVillage(opts = {}) {
     ? { roads: [], nodes: { junctions: [] } }
     : planRoads(site, layoutOpts, rng);
 
+  // 한강급 수계는 도성 남문에서 끝나지 않고 나루 반대편의 성저 취락으로
+  // 이어진다. 성벽 클립 이후에 외곽 길을 추가하고 정규 접합 메타데이터를 한 번만
+  // 재계산해, 렌더러 전용 리본이 아닌 픽킹·필지·검증이 공유하는 실제 길로 남긴다.
+  const riverPort = planRiverPort(site, seed);
+  if (riverPort) {
+    roadsResult.roads.push(...riverPort.roads);
+    roadsResult.nodes.junctions = attachRoadJunctions(roadsResult.roads);
+    features.riverPort = riverPort;
+  }
+
   // ── 3.25) 사찰 대지·진입로 예약 ── 사찰은 남은 급사면에 사후 삽입되는 장식물이 아니라,
   //   완만한 대지와 물·길의 관계를 먼저 읽고 자리를 잡는다. 산의 위요감은 좋은 선택지 중 하나일
   //   뿐 필수 조건이 아니다. 도로가 확정된 직후
@@ -348,6 +365,7 @@ export function planVillage(opts = {}) {
       .map((blocker) => blocker.poly),
     cityWall,
     roads: roadsResult.roads,
+    riverPort,
   });
   const parcels = [...reserved, ...frontage, ...satellites];
   // 안정적 필지 ID(시드 고정 → 같은 seed 는 같은 id 순서) — 인스턴싱·픽킹·편집의 키.
@@ -382,33 +400,53 @@ export function planVillage(opts = {}) {
 
   // ── 6) 돌다리 (개울 위, 진입 스파인 교차점) ──
   if (site.stream) {
-    const wallApproach = cityWall
-      ? roadsResult.roads.find((road) => road.wallApproach?.gate === 'south')
-      : null;
-    const crossing = roadStreamCrossing(wallApproach, site, cityWall);
-    const cx = crossing?.point || site.stream.cross;
-    const tanS = G.norm(G.sub(site.stream.pts[Math.min(site.stream.pts.length - 1, 37)], site.stream.pts[35]));
-    const across = crossing?.tangent || G.perpL(tanS);
-    const rot = Math.atan2(-across.z, across.x);   // 다리 로컬 X(span)를 개울 횡단 방향으로
-    let span = site.stream.width + 5;
-    let width = scale === 'hamlet' ? 1.8 : 2.4;
-    if (crossing) {
+    if (site.stream.kind === 'river') {
       const d = 1;
-      const streamTangent = G.norm({
+      const tangent = G.norm({
         x: d * 2,
-        z: site.streamZat(cx.x + d) - site.streamZat(cx.x - d),
+        z: site.streamZat(d) - site.streamZat(-d),
       });
-      const streamNormal = G.perpL(streamTangent);
-      span = site.stream.width / Math.max(0.5, Math.abs(G.dot(crossing.tangent, streamNormal))) + 5;
-      width = wallApproach.width + 1;
+      let across = G.perpL(tangent);
+      if (across.z > 0) across = G.mul(across, -1); // local +X = north bank
+      features.ferry = {
+        x: site.stream.cross.x,
+        z: site.stream.cross.z,
+        rot: Math.atan2(-across.z, across.x),
+        span: site.stream.width + 12,
+        waterWidth: site.stream.waterHalf * 2,
+        north: site.stream.northLanding,
+        south: site.stream.southLanding,
+        boatCount: scale === 'hanyang' ? 3 : 2,
+      };
+    } else {
+      const wallApproach = cityWall
+        ? roadsResult.roads.find((road) => road.wallApproach?.gate === 'south')
+        : null;
+      const crossing = roadStreamCrossing(wallApproach, site, cityWall);
+      const cx = crossing?.point || site.stream.cross;
+      const tanS = G.norm(G.sub(site.stream.pts[Math.min(site.stream.pts.length - 1, 37)], site.stream.pts[35]));
+      const across = crossing?.tangent || G.perpL(tanS);
+      const rot = Math.atan2(-across.z, across.x);   // 다리 로컬 X(span)를 개울 횡단 방향으로
+      let span = site.stream.width + 5;
+      let width = scale === 'hamlet' ? 1.8 : 2.4;
+      if (crossing) {
+        const d = 1;
+        const streamTangent = G.norm({
+          x: d * 2,
+          z: site.streamZat(cx.x + d) - site.streamZat(cx.x - d),
+        });
+        const streamNormal = G.perpL(streamTangent);
+        span = site.stream.width / Math.max(0.5, Math.abs(G.dot(crossing.tangent, streamNormal))) + 5;
+        width = wallApproach.width + 1;
+      }
+      // 반촌=격식 홍예교, 민촌=소박 판석교, 여염=규모 따라.
+      const bridgeType = char01 < 0.34 ? 'slab'
+        : (char01 >= 0.66 || scale === 'town' || scale === 'capital') ? 'arch' : 'slab';
+      features.bridges.push({
+        x: cx.x, z: cx.z, rot, type: bridgeType,
+        span, width,
+      });
     }
-    // 반촌=격식 홍예교, 민촌=소박 판석교, 여염=규모 따라.
-    const bridgeType = char01 < 0.34 ? 'slab'
-      : (char01 >= 0.66 || scale === 'town' || scale === 'capital') ? 'arch' : 'slab';
-    features.bridges.push({
-      x: cx.x, z: cx.z, rot, type: bridgeType,
-      span, width,
-    });
   }
 
   // ── 7) 다랑이 논 (개울 남쪽 저지) — 민촌일수록 농경 비중↑(논 촘촘), 반촌은 성글게 ──

@@ -35,6 +35,7 @@ const character = q.get('char') || 'yeoyeom';
 const view = q.get('view') || 'aerial';
 const time = q.get('time') || 'day';
 const usePost = q.get('post') === '1';   // 플래그십 bloom 파이프라인(개울 흰 띠 회귀 검증)
+const river = q.get('river') === '1';
 const num = (k, d) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : d; };
 
 // 결정론 렌더: 공유 팔레트·사립문이 Math.random 을 쓰므로 재현 컷 픽셀 동일하도록 시드 고정.
@@ -55,13 +56,19 @@ const L = {
 scene.background = new THREE.Color(L.bg);
 renderer.toneMappingExposure = L.exp;
 
-const handle = createVillage({ scale, seed, includePalace, includeTemple, character });
+const handle = createVillage({ scale, seed, includePalace, includeTemple, character, river });
 handle.setTime(time);
 scene.add(handle.group);
 const plan = handle.plan;
 const site = plan.site;
 const R = site.R;
-window.__PLAN = { scale, seed, character: plan.opts.character, stats: plan.stats, warnings: plan.warnings, R };
+window.__PLAN = {
+  scale, seed, character: plan.opts.character, stats: plan.stats, warnings: plan.warnings, R,
+  watercourse: site.stream?.kind || 'dry',
+  waterWidth: site.stream ? +(site.stream.waterHalf * 2).toFixed(2) : 0,
+  bankWidth: site.stream ? +site.stream.width.toFixed(2) : 0,
+  reliefConfig: site.relief,
+};
 
 scene.fog = new THREE.Fog(L.bg, R * 2.4, R * 7.0);
 
@@ -170,12 +177,19 @@ if (view === 'aerial') {
   target = new THREE.Vector3(-3, hAt(-3, cen.z) + 1.2, cen.z * 0.4);
 } else if (view === 'bridge-close') {
   // 돌다리·개울 정합 — 개울 축(동→서)을 따라 저각으로: 물 리본이 다리 아래로 흐르는지.
-  const bx = site.stream ? site.stream.cross.x : 0;
-  const bz = site.stream ? site.stream.cross.z : site.streamZ;
+  const crossing = plan.features.bridges?.[0] || site.stream?.cross || { x: 0, z: site.streamZ };
+  const bx = crossing.x, bz = crossing.z;
   const wy = site.streamY ? site.streamY(bx) : hAt(bx, bz);
   fov = 44;
   campos = new THREE.Vector3(bx + 22, wy + 4.0, bz + 3);
   target = new THREE.Vector3(bx - 12, wy + 0.2, bz - 1);
+} else if (view === 'bridge-oblique') {
+  const crossing = plan.features.bridges?.[0] || site.stream?.cross || { x: 0, z: site.streamZ };
+  const bx = crossing.x, bz = crossing.z;
+  const wy = site.streamY ? site.streamY(bx) : hAt(bx, bz);
+  fov = 46;
+  campos = new THREE.Vector3(bx + 25, wy + 13, bz + 23);
+  target = new THREE.Vector3(bx, wy + 2.2, bz);
 } else { // aerial-high
   fov = 40;
   campos = new THREE.Vector3(0.02 * R, 2.1 * R, 1.5 * R);
@@ -275,7 +289,12 @@ const shots = [
   ['village-relief-eye', '/__relief?scale=village&view=relief-eye&time=day'],
   // ② hamlet·capital 항공
   ['hamlet-aerial', '/__relief?scale=hamlet&view=aerial&time=day'],
+  ['hamlet-relief-eye', '/__relief?scale=hamlet&view=relief-eye&time=day'],
   ['capital-aerial', '/__relief?scale=capital&view=aerial&time=day'],
+  ['capital-relief-eye', '/__relief?scale=capital&view=relief-eye&time=day&palace=1'],
+  ['capital-river-aerial', '/__relief?scale=capital&view=aerial&time=day&river=1&palace=1'],
+  ['hanyang-river-aerial', '/__relief?scale=hanyang&view=aerial&time=day&river=1&palace=1'],
+  ['hanyang-river-ferry', '/__relief?scale=hanyang&view=bridge-oblique&time=day&river=1&palace=1'],
   // ③ 도로 지형 밀착 클로즈업
   ['road-close', '/__relief?scale=village&view=road-close&time=day'],
   // ④ 다리·개울 정합

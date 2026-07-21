@@ -66,7 +66,11 @@ const MAX_FACING = 65 * Math.PI / 180;
 // 개별 seed는 수변·성곽 형상에 따라 흔들린다. Hanyang은 산을 타던 개울을 실제 하곡으로
 // 예약하면서 세 seed 합계에서 두 필지만 줄지만, 개별 최소와 전체 밀도는 사실상 보존한다.
 const DENSITY_FLOOR = { hamlet: 10, village: 28, town: 60, capital: 42, hanyang: 305 };
-const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 140, hanyang: 988 };
+// #40 changes the former smooth bowl into real landform benches. The Hanyang
+// samples retain >99% of the previous 988 aggregate while rejecting frontage
+// lots that straddle a riser; keep a tight floor instead of pretending output is
+// pixel-stable across a deliberate terrain contract change.
+const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 140, hanyang: 980 };
 const PADDY_TOTAL_FLOOR = { hamlet: 5, village: 3, town: 2, capital: 5, hanyang: 6 };
 const EXPECTED_GUARDIAN_ROLES = {
   hamlet: ['entrance'],
@@ -174,6 +178,17 @@ for (const scale of SCALES) {
     const options = { scale, seed, includePalace: scale === 'capital' || scale === 'hanyang' };
     const plan = buildWithoutGlobalRandom(options);
     const repeat = buildWithoutGlobalRandom(options);
+    invariant(plan.site.stream?.kind === 'creek', `${label} default watercourse is not a creek`);
+    if (scale === 'hamlet') {
+      invariant(plan.site.relief.localWavelength <= 33,
+        `${label} rural relief lost its metre-based wavelength`);
+    }
+    if (scale === 'capital' || scale === 'hanyang') {
+      invariant(plan.site.relief.terraceStrength >= 0.8,
+        `${label} large-settlement landform benches are too weak`);
+      invariant(plan.site.relief.terraceStep >= (scale === 'hanyang' ? 1.75 : 1.2),
+        `${label} large-settlement landform step is too small`);
+    }
     invariant(JSON.stringify(plan.roads) === JSON.stringify(repeat.roads), `${label} roads drift`);
     invariant(JSON.stringify(plan.parcels) === JSON.stringify(repeat.parcels), `${label} parcels drift`);
     invariant(JSON.stringify(plan.features.pavilion) === JSON.stringify(repeat.features.pavilion),
@@ -522,6 +537,92 @@ for (const scale of SCALES) {
     `${scale} aggregate paddies ${scalePaddyCount} < ${PADDY_TOTAL_FLOOR[scale]}`);
 }
 
+// Large rivers are an explicit settlement archetype, not the creek width scaled
+// without bound. Exercise the wet channel, alluvial reserve, ferry-port ward,
+// tapered world-edge handoff, and the default solar/vegetation contracts.
+let riverSections = 0;
+for (const scale of ['capital', 'hanyang']) {
+  const label = `${scale}:river`;
+  const plan = buildWithoutGlobalRandom({
+    scale,
+    seed: 20260716,
+    includePalace: true,
+    river: true,
+  });
+  const site = plan.site;
+  invariant(site.stream?.kind === 'river', `${label} did not select river grammar`);
+  invariant(site.stream.waterHalf * 2 >= 60 && site.stream.waterHalf * 2 <= 136,
+    `${label} wet width left the river contract`);
+  invariant(site.stream.floodplainHalf > site.stream.half,
+    `${label} has no alluvial shoulder outside its bank`);
+  const ferry = plan.features.ferry;
+  invariant(ferry?.boatCount >= 2 && plan.features.bridges.length === 0,
+    `${label} is not served by a bridge-free ferry crossing`);
+  invariant(ferry.span > site.stream.width
+    && ferry.north.z < site.stream.cross.z
+    && ferry.south.z > site.stream.cross.z,
+  `${label} ferry landings do not reach both banks`);
+  const riverPort = plan.features.riverPort;
+  const portParcels = plan.parcels.filter((parcel) => parcel.riverbank);
+  invariant(riverPort?.roads.length === 2
+    && riverPort.roads.every((road) => road.junctionIds.length >= 1),
+  `${label} south-bank road is not connected to its ferry approach`);
+  invariant(portParcels.length >= (scale === 'hanyang' ? 8 : 5),
+    `${label} has no meaningful south-bank ferry ward`);
+  for (const parcel of portParcels) {
+    invariant(parcel.center.z > site.streamZat(parcel.center.x) + site.stream.half,
+      `${label}:${parcel.id} is not on the south bank`);
+    invariant(parcel.access?.roadId?.startsWith('port-'),
+      `${label}:${parcel.id} has no explicit port-road gate`);
+  }
+  let previousSurface = -Infinity;
+  for (let index = 0; index < site.stream.pts.length; index++) {
+    const point = site.stream.pts[index];
+    const previous = site.stream.pts[Math.max(0, index - 1)];
+    const next = site.stream.pts[Math.min(site.stream.pts.length - 1, index + 1)];
+    const tangentLength = Math.hypot(next.x - previous.x, next.z - previous.z);
+    const normalX = -(next.z - previous.z) / tangentLength;
+    const normalZ = (next.x - previous.x) / tangentLength;
+    const surface = streamSurfaceHeightAt(site, point.x, point.z);
+    const waterHalf = Number.isFinite(point.half) ? point.half : site.streamWaterHalf;
+    for (const lane of [-1, -0.5, 0, 0.5, 1]) {
+      const lanePoint = {
+        x: point.x + normalX * waterHalf * lane,
+        z: point.z + normalZ * waterHalf * lane,
+      };
+      const terrain = terrainMeshHeightAt(
+        site,
+        lanePoint.x,
+        lanePoint.z,
+      );
+      invariant(surface >= terrain + STREAM_SURFACE_CLEARANCE - 1e-9,
+        `${label} water lane ${lane} is buried`);
+      invariant(worldEdgeClearance(site.edge, lanePoint) >= 5.9,
+        `${label} water lane ${lane} leaves the world edge`);
+    }
+    invariant(surface >= previousSurface - 1e-9, `${label} runs uphill against flow`);
+    previousSurface = surface;
+    riverSections++;
+  }
+  const pavilion = plan.features.pavilion;
+  invariant(streamClearanceAt(site, pavilion)
+    >= PAVILION_ROOF_RADIUS + PAVILION_STREAM_CLEARANCE,
+  `${label} pavilion overlaps the river bank`);
+  for (const parcel of plan.parcels) {
+    invariant(!pavilionBlocksParcelSolarAccess(parcel, pavilion, site),
+      `${label} pavilion blocks ${parcel.id} solar access`);
+    invariant(!pavilionBlocksParcelFocus(parcel, pavilion),
+      `${label} pavilion blocks ${parcel.id} focus frame`);
+  }
+  guardians += assertGuardianContract(plan, label, scale);
+}
+{
+  const small = buildWithoutGlobalRandom({ scale: 'village', seed: 7, river: true });
+  invariant(small.site.stream?.kind === 'creek', 'small river request did not fall back to creek');
+  invariant(small.warnings.some((warning) => warning.includes('도성·한양')),
+    'small river fallback is not explained to the caller');
+}
+
 // A broad pavilion roof can miss the old camera center ray while still covering
 // one side of the house. Keep a synthetic off-axis case so the frame-width part
 // of the contract cannot silently collapse back to a line test.
@@ -566,5 +667,5 @@ console.log(
   + `${(maxFacing * 180 / Math.PI).toFixed(1)}°, max access ${maxAccess.toFixed(1)}m, `
   + `min house fit ${minHouseFit.toFixed(2)}, min scale ${minHouseScale.toFixed(2)}, `
   + `min roof clearance ${minRoofClearance.toFixed(2)}m, `
-  + `${paddyFields} paddies, ${streamSections} visible stream sections, ${indexedCells} indexed cells)`,
+  + `${paddyFields} paddies, ${streamSections} creek + ${riverSections} river sections, ${indexedCells} indexed cells)`,
 );

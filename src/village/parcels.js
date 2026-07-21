@@ -32,6 +32,7 @@ import {
   STREAM_SATELLITE_BANK_CLEARANCE,
   createStreamSpatialIndex,
 } from './stream-spatial.js';
+import { terrainRangeOnPolygon } from './placement-search.js';
 
 // 도로변 필지 분할 + 신분 위계 그라디언트 (joseon-city.md 규칙 7·8·9·10).
 //   - 필지는 도로 파사드를 따라 양편에 앉되, 집의 로컬 +z는 남향 지세축을 우선한다(규칙 7).
@@ -521,16 +522,17 @@ export function planSatellites(site, opts, seed, {
   solarObstacles = [],
   cityWall = null,
   roads = [],
+  riverPort = null,
 } = {}) {
   const scale = opts.scale;
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const nClusters = ({ hamlet: 0, village: 1, town: 1, capital: 2, hanyang: 3 })[scale] || 0;
-  if (nClusters <= 0) return [];
+  if (nClusters <= 0 && !riverPort) return [];
   const rng = makeRng((seed ^ 0x5a7e11) >>> 0);
   const C = site.center, bowlR = site.bowlR, TR = site.terrainR || site.R;
   const baseRLo = bowlR * 1.14;
   const baseRHi = Math.min(TR * 0.9, bowlR * 1.66);
-  if (!cityWall && baseRHi <= baseRLo + 8) return [];
+  if (!cityWall && baseRHi <= baseRLo + 8 && !riverPort) return [];
 
   const foot = 13;                                   // 소형 필지 footprint 상당(완경사 판별)
   const footSlope = (x, z) => {
@@ -578,7 +580,6 @@ export function planSatellites(site, opts, seed, {
       cands.push({ x, z, phi, r, score });
     }
   }
-  if (!cands.length) return [];
   cands.sort((a, b) => b.score - a.score);
   // 각 분리(≈60°) 확보하며 nClusters 앵커 선정.
   const chosen = [];
@@ -588,6 +589,16 @@ export function planSatellites(site, opts, seed, {
     for (const q of chosen) { let d = Math.abs(c.phi - q.phi); if (d > Math.PI) d = Math.PI * 2 - d; if (d < 1.05) { ok = false; break; } }
     if (ok) chosen.push(c);
   }
+  const clusterPlans = [
+    ...chosen,
+    ...(riverPort?.wards || []).map((ward) => ({
+      ...ward,
+      riverbank: true,
+      tangent: { x: 1, z: 0 },
+      rowDir: { x: 0, z: 1 },
+    })),
+  ];
+  if (!clusterPlans.length) return [];
 
   const placed = makePlacedGrid();
   const placedRoofs = makePlacedGrid();
@@ -601,30 +612,43 @@ export function planSatellites(site, opts, seed, {
   for (const parcel of residential) reserveParcelSun(parcel, placedRoofs, placedSolarAccess);
   const out = [];
   let sidx = 0;
-  for (const anchor of chosen) {
-    const cseed = (seed ^ (0x5afe1 * (sidx + 1))) >>> 0;
+  for (const anchor of clusterPlans) {
+    const cseed = anchor.seed ?? ((seed ^ (0x5afe1 * (sidx + 1))) >>> 0);
     const crng = makeRng(cseed);
     const big = scale === 'capital' || scale === 'hanyang';
-    const kTarget = 2 + Math.floor(crng() * (big ? 4 : 3));   // 2~4(마을) / 2~5(도성)
+    const kTarget = anchor.target ?? (2 + Math.floor(crng() * (big ? 4 : 3)));   // 2~4(마을) / 2~5(도성)
     const cellW = 10.5 * (0.86 + char01 * 0.3);
     // 등반경 접선 열(같은 표고대 유지) + 안쪽(저지) 뒷줄 — 방사(고지) 확산을 피해 얇은 완사면대에 앉힌다.
     const rad = G.norm({ x: anchor.x - C.x, z: anchor.z - C.z });   // 바깥 방사
-    const tan = { x: -rad.z, z: rad.x };                            // 접선(등반경)
-    const perRow = Math.min(3, Math.max(2, kTarget));
+    const tan = anchor.tangent || { x: -rad.z, z: rad.x };          // 접선(등반경)
+    const rowDir = anchor.rowDir || rad;                            // 포구만 명시 남안 방향
+    // A ferry ward is a single long street frontage. Keeping its households on
+    // one south-facing row preserves every solar corridor and reads as a port
+    // settlement; generic satellites retain compact 2–3-house rows.
+    const perRow = anchor.riverbank
+      ? Math.max(2, kTarget)
+      : Math.min(3, Math.max(2, kTarget));
     let col = 0, row = 0, made = 0, attempts = 0;
     while (made < kTarget && attempts < kTarget * 7) {
       attempts++;
       const tOff = (col - (perRow - 1) / 2) * cellW + crng.range(-1.0, 1.0);   // 접선 방향(등반경)
-      const rOff = -row * cellW * 1.05 + crng.range(-1.0, 1.0);                // 안쪽(-rad, 저지)으로 뒷줄
+      const rowSign = anchor.rowDir ? 1 : -1;                                 // 기본=내측(-rad), 포구=남안
+      const rOff = rowSign * row * cellW * 1.05 + crng.range(-1.0, 1.0);
       col++; if (col >= perRow) { col = 0; row++; }
-      const px = anchor.x + tan.x * tOff + rad.x * rOff, pz = anchor.z + tan.z * tOff + rad.z * rOff;
+      const px = anchor.x + tan.x * tOff + rowDir.x * rOff;
+      const pz = anchor.z + tan.z * tOff + rowDir.z * rOff;
       if (site.hillAt(px, pz) > 0.54) continue;
       if (footSlope(px, pz) > 4.6) continue;                        // 성토 계단(computePadY 축대); 어깨 부락 허용
       if (nearStream(px, pz, 3)) continue;
       const rank = Math.max(0, 0.16 + (char01 - 0.5) * 0.30 + crng.range(-0.06, 0.06)); // 외딴집=하급(초가 우세)
       const pseed = (cseed ^ (made * 2654435761)) >>> 0;
       const reg = regOf(rank, char01, false);
-      const dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
+      let dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
+      if (anchor.riverbank) dims = {
+        ...dims,
+        plotW: dims.plotW * 0.86,
+        plotD: dims.plotD * 0.86,
+      };
       const frontDir = terrainAlignedFacing(
         SOUTH,
         SOUTH,
@@ -632,15 +656,20 @@ export function planSatellites(site, opts, seed, {
       );
       const shape = localParcelShape(dims.plotW, dims.plotD, reg, makeRng((pseed ^ 0xa53f) >>> 0));
       const center = { x: px, z: pz };
+      const accessRoad = roadSpatial.nearest(center, anchor.riverbank ? 64 : 32);
       const parcel = attachParcelSpatialContract({
         shape, center, frontDir, rank, kind: dims.kind,
         plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed,
-        satellite: true, placement: 'satellite',
-      });
+        satellite: true,
+        riverbank: anchor.riverbank === true,
+        placement: anchor.riverbank ? 'river-port' : 'satellite',
+      }, accessRoad.road?.id, accessRoad.pt);
       const poly = parcel.poly;
       if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: 4 })) continue;
       if (!worldEdgeContainsPolygon(site.edge, poly, 6)) continue;
       if (cityWall && !cityWallOutsidePolygon(cityWall, poly, 4)) continue;
+      if (site.stream?.kind === 'river'
+        && terrainRangeOnPolygon(site, poly, 5).range > 2.8) continue;
       if (gateApproaches.some((approach) => G.polysOverlap(poly, approach))) continue;
       if (streamSpatial.intersectsPolygon(poly, STREAM_SATELLITE_BANK_CLEARANCE)) continue;
       if (roadSpatial.intersectsRoadCorridor(poly, 0.2)) continue;

@@ -106,6 +106,12 @@
 
 근거: [KCI 「입향성격 및 시기에 따른 전통마을 입지특성 연구」](https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001245814), [KCI 「전통마을의 길 구조에 관한 연구」](https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001274653), [국가한옥센터 Village and Alleys](https://www.hanokdb.kr/theology_eng/sub_03_01), [AURI 「한옥마을 우수경관 사례 연구」](https://www.auri.re.kr/publication/view.es?mid=a10312000000&publication_id=150&publication_type=research)
 
+### 한강급 대하천과 나루 취락
+
+큰 강은 마을 앞의 개울을 단순히 넓힌 것이 아니라 생활권을 양안으로 나누는 지형 골격이다. 조선시대 한강은 상설 거대 석교보다 나루배로 건너는 수계였고, 광나루~양화진 사이에만 11개의 나루·포구가 길·시장·물류를 조직했다. 왕의 행차처럼 특별한 경우에는 배를 엮은 배다리가 임시로 쓰였다. 따라서 기본 대하천 문법은 `도성/본취락 — 북안 접근로 — 나루 — 남안 접근로 — 성저 포구 취락`이며, 다리는 별도 시대·사건 문법일 때만 선택한다.
+
+근거: [서울시 한강 나루터](https://hangang.seoul.go.kr/www/contents/767.do?mid=568), [서울역사박물관 「한강과 나루·포구」](https://museum.seoul.go.kr/www/board/NR_boardView.do?bbsCd=1004&q_exhSttus=next&seq=20181224182834238&sso=ok), [서울시 한강 남쪽 나루](https://hangang.seoul.go.kr/www/contents/950.do?mid=919)
+
 ---
 
 ## 5. 전통 사찰의 입지와 가람
@@ -183,6 +189,7 @@
 2. **내사산 프레임**: 주산(북) + 좌청룡(동 능선) + 우백호(서 능선) + 안산(남)의 4개 능선을 생성하고, **성곽은 이 능선을 잇는 부정형 폐곡선**으로 그림 (원/사각 금지). 명당수(하천)를 사이트 중앙을 동서로 관류시킴.
 3. **주축 대로**: 궁 정문에서 남쪽으로 **남북 대로(육조거리형, 폭 최대 = 대로 17.5m)** 를 뻗음. 양편에 관청 블록을 좌우 대칭으로 열 지어 배치.
 4. **동서 간선 T결합**: 남북 대로 끝에서 **동서 간선(종로형)** 과 T자로 교차. 동서 간선은 동·서 성문을 잇도록 지형 따라 완만히 곡선 허용.
+   - **한강급 수계 옵션**: 최소 60m, 한양 120m의 실제 수면이 도성과 외곽 취락을 분리한다. 충적 저지, 양안 접근로, 나루배, 남안 소규모 포구 취락을 하나의 계획 계약으로 두고 상설 거대교는 만들지 않는다.
 
 ### B. 좌묘우사·전조후시 (예법 배치)
 
