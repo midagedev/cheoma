@@ -9,7 +9,7 @@ const DICT = {
     hero_enter: '눌러 들어가기',
     act_rebuild: '다시 짓기', act_rebuild_tip: '다시 짓기 (새 씨앗)',
     act_replay: '다시 보기', act_replay_tip: '종가 다시 짓는 장면 보기',
-    act_postcard: '엽서', act_postcard_tip: '엽서로 저장·공유',
+    act_postcard: '사진 찍기', act_postcard_tip: '낙관을 더해 사진으로 저장·공유',
     act_sound_on_tip: '소리 끄기', act_sound_off_tip: '소리 켜기',
     // 시네마틱 데모 모드(#112)
     act_drone: '드론', act_drone_tip: '드론 시네마틱 — 자동 항공 투어',
@@ -97,7 +97,7 @@ const DICT = {
     hero_enter: 'Click to enter',
     act_rebuild: 'Rebuild', act_rebuild_tip: 'Rebuild (new seed)',
     act_replay: 'Replay', act_replay_tip: 'Watch the head house rise again',
-    act_postcard: 'Postcard', act_postcard_tip: 'Save & share a postcard',
+    act_postcard: 'Take photo', act_postcard_tip: 'Save & share a photo with the cheoma seal',
     act_sound_on_tip: 'Mute', act_sound_off_tip: 'Sound on',
     // Cinematic demo mode (#112)
     act_drone: 'Drone', act_drone_tip: 'Drone cinematic — automatic aerial tour',
