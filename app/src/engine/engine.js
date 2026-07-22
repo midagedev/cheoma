@@ -1793,7 +1793,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       visibilityScale,
     );
 
-    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 18°의
+    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 20°의
     // 마당·문높이 망원 프레임으로 내려앉는다. seed는 선회 방향만 정하고 생성 RNG를 소비하지 않는다.
     // 모바일은 호를 줄이며 reduced-motion은 즉시 endpoint를 적용한다.
     revealCamera.reveal('arrival', {
