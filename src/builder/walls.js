@@ -265,18 +265,26 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
     Math.abs(opening.tangent.x) >= Math.abs(opening.tangent.z) ? 0 : Math.PI / 2
   );
   const smallWin = (opening) => {
-    const win = new THREE.Mesh(new THREE.BoxGeometry(opening.width, 0.5, 0.06), winMat);
-    win.position.set(opening.center.x, y0 + 1.35, opening.center.z);
-    win.rotation.y = panelRotation(opening);
-    g.add(win);
-    residentialDetails.add(opening, win);
+    residentialDetails.add(opening, (detail, placement) => {
+      const win = new THREE.Mesh(
+        new THREE.BoxGeometry(opening.width, detail.height, 0.06),
+        winMat,
+      );
+      win.position.set(
+        opening.center.x,
+        placement.bottomY + detail.height / 2,
+        opening.center.z,
+      );
+      win.rotation.y = panelRotation(opening);
+      g.add(win);
+      return win;
+    });
   };
   const door = (opening) => {
     const add = opening.primary
       ? residentialDetails.addPrimaryDoor
       : residentialDetails.add;
     add(opening, (detail, placement) => {
-      const dh = 1.55;
       const mat = M.door.clone();
       mat.map = M.door.map.clone();
       mat.map.repeat.set(detail.leafCount, 1);
@@ -288,13 +296,17 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
           plan: detail,
           placement,
           material: mat,
-          panelHeight: dh,
+          panelHeight: detail.height,
           depth: 0.06,
           castShadow: false,
         }).active;
       }
-      const d = new THREE.Mesh(new THREE.BoxGeometry(opening.width, dh, 0.06), mat);
-      d.position.set(opening.center.x, y0 + dh / 2, opening.center.z);
+      const d = new THREE.Mesh(new THREE.BoxGeometry(opening.width, detail.height, 0.06), mat);
+      d.position.set(
+        opening.center.x,
+        placement.bottomY + detail.height / 2,
+        opening.center.z,
+      );
       d.rotation.y = panelRotation(opening);
       d.receiveShadow = true;
       g.add(d);

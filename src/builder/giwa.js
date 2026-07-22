@@ -147,10 +147,11 @@ export function buildGiwa(P, M) {
   const walls = new THREE.Group(); walls.name = 'walls';
   const T = 0.13, y0 = podTopY + 0.02;
   const yTopWall = colTopY - 0.06;        // 창방 밑 = 벽 상단
-  const yLintel = y0 + 2.05;              // 상인방(분합문 상단)
   const yMid = y0 + 1.12;                 // 중인방
   const lowerPanelTop = y0 + 0.42;         // 문짝 하부 청판 상단
-  const winBot = y0 + 1.30, winTop = y0 + 1.92;  // 살창
+  const doorBaseHeight = 2.05;            // residential heightK의 기와 기준 band
+  const windowBaseBottom = y0 + 1.30;
+  const windowBaseHeight = 0.62;           // 살창 기준 band
 
   // 목재 톤: 창방·기둥은 밝은 백골(M.wood), 인방 트림은 살짝 짙게 정의감 부여
   const woodTrim = M.wood.clone(); woodTrim.color = M.wood.color.clone().multiplyScalar(0.78);
@@ -209,7 +210,7 @@ export function buildGiwa(P, M) {
   }, {
     door: {
       bottomY: y0,
-      height: yLintel - y0,
+      height: doorBaseHeight,
       wallThickness: T,
       lowerPanelHeight: lowerPanelTop - y0,
       leafOutward: overlayCenterOffset(T, 0.10),
@@ -222,11 +223,17 @@ export function buildGiwa(P, M) {
       },
     },
     window: {
-      bottomY: winBot,
-      height: winTop - winBot,
+      bottomY: windowBaseBottom,
+      height: windowBaseHeight,
       wallThickness: T,
     },
   });
+  const firstDoor = openingDetails.plan.openings.find((opening) => opening.kind === 'door');
+  const firstWindow = openingDetails.plan.openings.find((opening) => opening.kind === 'window');
+  const doorBand = openingDetails.verticalProfile(firstDoor);
+  const windowBand = openingDetails.verticalProfile(firstWindow);
+  const yLintel = doorBand.topY;
+  const winBot = windowBand.bottomY, winTop = windowBand.topY;
 
   const sidePanels = (opening, bayWidth, yb, yt, material, alongX) => {
     const side = Math.max(0, (bayWidth - opening.width) * 0.5);

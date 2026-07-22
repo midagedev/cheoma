@@ -17,6 +17,10 @@ import {
 
 const ROOT = resolve(import.meta.dirname, '..');
 const EPS = 1e-5;
+const RESIDENTIAL_BASE_HEIGHT = Object.freeze({
+  choga: Object.freeze({ door: 1.55, window: 0.5 }),
+  giwa: Object.freeze({ door: 2.05, window: 0.62 }),
+});
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -265,6 +269,7 @@ for (const [condition, adapter] of Object.entries(production.thresholdAdapters))
 
 for (const fixture of production.residentialFixtures) {
   const plan = fixture.plan;
+  const style = fixture.name.startsWith('choga') ? 'choga' : 'giwa';
   invariant(fixture.planCount === 1, `${fixture.name} exposes ${fixture.planCount} residential plans`);
   invariant(plan && fixture.panels.length === plan.openings.length,
     `${fixture.name} rendered ${fixture.panels.length}/${plan?.openings.length || 0} planned openings`);
@@ -273,8 +278,18 @@ for (const fixture of production.residentialFixtures) {
   invariant(fixture.panels.filter((panel) => panel.primary).length === 1,
     `${fixture.name} lost its single primary panel`);
   for (const panel of fixture.panels) {
+    const expectedHeight = RESIDENTIAL_BASE_HEIGHT[style][panel.kind] * panel.plannedHeightK;
     invariant(Math.abs(panel.renderedWidth - panel.plannedWidth) < EPS,
       `${fixture.name}/${panel.id} width drifted ${panel.renderedWidth} != ${panel.plannedWidth}`);
+    invariant(Math.abs(panel.detailHeight - expectedHeight) < EPS,
+      `${fixture.name}/${panel.id} detail height drifted ${panel.detailHeight} != ${expectedHeight}`);
+    // Every giwa door owner is the upper hanji leaf; its 0.42m lower cheongpan
+    // remains a separate material owner. Choga doors and all windows are whole.
+    const expectedOwnerHeight = style === 'giwa' && panel.kind === 'door' && !panel.primary
+      ? expectedHeight - 0.42
+      : expectedHeight;
+    invariant(Math.abs(panel.renderedHeight - expectedOwnerHeight) < EPS,
+      `${fixture.name}/${panel.id} rendered height drifted ${panel.renderedHeight} != ${expectedOwnerHeight}`);
     if (panel.primary) {
       invariant(Math.abs(
         panel.activeWidth - panel.plannedWidth / panel.detailLeafCount,
@@ -341,17 +356,23 @@ const residentialByName = Object.fromEntries(
   production.residentialFixtures.map((fixture) => [fixture.name, fixture]),
 );
 invariant(residentialByName['choga-min'].plan.params.doorCount === 1
-    && residentialByName['choga-min'].plan.params.windowCount === 1,
+    && residentialByName['choga-min'].plan.params.windowCount === 1
+    && residentialByName['choga-min'].plan.params.doorHeightK === 0.9
+    && residentialByName['choga-min'].plan.params.windowHeightK === 0.8,
   'choga minimum controls did not reach production');
 invariant(residentialByName['choga-max'].plan.params.doorCount
     === residentialByName['choga-max'].plan.capabilities.doorCount.max
     && residentialByName['choga-max'].plan.params.windowCount
-    === residentialByName['choga-max'].plan.capabilities.windowCount.max,
+    === residentialByName['choga-max'].plan.capabilities.windowCount.max
+    && residentialByName['choga-max'].plan.params.doorHeightK === 1.08
+    && residentialByName['choga-max'].plan.params.windowHeightK === 1.2,
   'choga maximum controls were not shape-clamped in production');
 invariant(residentialByName['giwa-u-max'].plan.params.doorCount
     === residentialByName['giwa-u-max'].plan.capabilities.doorCount.max
     && residentialByName['giwa-u-max'].plan.params.windowCount
-    === residentialByName['giwa-u-max'].plan.capabilities.windowCount.max,
+    === residentialByName['giwa-u-max'].plan.capabilities.windowCount.max
+    && residentialByName['giwa-u-max'].plan.params.doorHeightK === 1.05
+    && residentialByName['giwa-u-max'].plan.params.windowHeightK === 1.25,
   'giwa U maximum controls were not shape-clamped in production');
 
 const chogaLeafBoundary = residentialByName['choga-default'].panels.find((panel) => panel.primary);

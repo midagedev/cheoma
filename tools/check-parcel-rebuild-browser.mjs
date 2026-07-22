@@ -144,15 +144,18 @@ try {
   invariant(actions.some((label) => label.includes('내보내기')), `missing export label: ${actions.join(' | ')}`);
   invariant(!actions.some((label) => /다시 보기|GLB/i.test(label)), `legacy action remains: ${actions.join(' | ')}`);
 
-  // #10: the real Korean editor exposes the planner's four axes with visible
-  // units/ranges. Exercise one width through the native keyboard path and one
-  // count through the stepper, then inspect the actual FULL overlay plan.
+  // #10: the real Korean editor exposes the planner's six axes with visible
+  // units/ranges. Exercise width and height through the native keyboard path
+  // plus one count through the stepper, then inspect the actual FULL overlay plan.
   const openingBefore = await page.evaluate((parcelId) => {
     const engine = window.__engine;
     engine.village.debugDrawCalls();
     const state = engine.village.debugParcelRebuild(parcelId);
     const controls = {};
-    for (const key of ['doorCount', 'windowCount', 'doorWidthK', 'windowWidthK']) {
+    for (const key of [
+      'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+      'doorHeightK', 'windowHeightK',
+    ]) {
       const input = document.querySelector(`.ctx.house:not([aria-hidden="true"]) input[data-key="${key}"]`);
       const row = input?.closest('.row')
         || document.querySelector(`.ctx.house:not([aria-hidden="true"]) .row[data-key="${key}"]`);
@@ -175,16 +178,22 @@ try {
   invariant(openingBefore.controls.doorCount.label === '문 수'
       && openingBefore.controls.windowCount.label === '창 수'
       && openingBefore.controls.doorWidthK.label === '문 너비'
-      && openingBefore.controls.windowWidthK.label === '창 너비',
+      && openingBefore.controls.windowWidthK.label === '창 너비'
+      && openingBefore.controls.doorHeightK.label === '문 높이'
+      && openingBefore.controls.windowHeightK.label === '창 높이',
     `opening editor lost Korean labels: ${JSON.stringify(openingBefore.controls)}`);
   invariant(openingBefore.controls.doorCount.value.endsWith('개')
       && openingBefore.controls.windowCount.value.endsWith('개'),
     `opening counts lost their unit: ${JSON.stringify(openingBefore.controls)}`);
   invariant(openingBefore.controls.doorWidthK.value.endsWith('%')
       && openingBefore.controls.windowWidthK.value.endsWith('%')
+      && openingBefore.controls.doorHeightK.value.endsWith('%')
+      && openingBefore.controls.windowHeightK.value.endsWith('%')
       && openingBefore.controls.doorWidthK.bounds.includes('–')
-      && openingBefore.controls.windowWidthK.bounds.includes('–'),
-    `opening widths lost percent/range affordances: ${JSON.stringify(openingBefore.controls)}`);
+      && openingBefore.controls.windowWidthK.bounds.includes('–')
+      && openingBefore.controls.doorHeightK.bounds.includes('–')
+      && openingBefore.controls.windowHeightK.bounds.includes('–'),
+    `opening dimensions lost percent/range affordances: ${JSON.stringify(openingBefore.controls)}`);
 
   const doorWidth = page.locator('.ctx.house:not([aria-hidden="true"]) input[data-key="doorWidthK"]');
   await doorWidth.focus();
@@ -192,6 +201,12 @@ try {
   await page.waitForFunction(({ parcelId, beforeValue }) => (
     window.__engine.village.debugParcelRebuild(parcelId)?.params?.doorWidthK !== beforeValue
   ), { parcelId: fixture.parcelId, beforeValue: openingBefore.params.doorWidthK }, { timeout });
+  const windowHeight = page.locator('.ctx.house:not([aria-hidden="true"]) input[data-key="windowHeightK"]');
+  await windowHeight.focus();
+  await windowHeight.press('ArrowLeft');
+  await page.waitForFunction(({ parcelId, beforeValue }) => (
+    window.__engine.village.debugParcelRebuild(parcelId)?.params?.windowHeightK !== beforeValue
+  ), { parcelId: fixture.parcelId, beforeValue: openingBefore.params.windowHeightK }, { timeout });
   const countButtons = page.locator('.ctx.house:not([aria-hidden="true"]) .row[data-key="doorCount"] button');
   const increaseEnabled = await countButtons.nth(1).isEnabled();
   await countButtons.nth(increaseEnabled ? 1 : 0).click();
@@ -232,7 +247,9 @@ try {
   invariant(openingAfter.plan && openingAfter.panels.length === openingAfter.plan.openings.length,
     `FULL overlay rendered ${openingAfter.panels.length}/${openingAfter.plan?.openings.length || 0} openings`);
   invariant(openingAfter.plan.params.doorCount === openingAfter.state.params.doorCount
-      && openingAfter.plan.params.doorWidthK === openingAfter.state.params.doorWidthK,
+      && openingAfter.plan.params.doorWidthK === openingAfter.state.params.doorWidthK
+      && openingAfter.plan.params.doorHeightK === openingAfter.state.params.doorHeightK
+      && openingAfter.plan.params.windowHeightK === openingAfter.state.params.windowHeightK,
     'editor state and rendered residential plan diverged');
   invariant(openingAfter.panels.filter((opening) => opening.primary).length === 1
       && openingAfter.frameBatches === 1 && openingAfter.hardwareBatches === 1,
@@ -663,7 +680,10 @@ try {
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'full', null, { timeout });
   const mobileControls = await page.evaluate(() => {
     const house = document.querySelector('.ctx.house:not([aria-hidden="true"])');
-    const keys = ['doorCount', 'windowCount', 'doorWidthK', 'windowWidthK'];
+    const keys = [
+      'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+      'doorHeightK', 'windowHeightK',
+    ];
     const controls = keys.map((key) => (
       house?.querySelector(`input[data-key="${key}"]`)
       || house?.querySelector(`.row[data-key="${key}"]`)
@@ -677,7 +697,7 @@ try {
       card: card ? { left: card.getBoundingClientRect().left, right: card.getBoundingClientRect().right } : null,
     };
   });
-  invariant(mobileControls.allPresent, 'mobile editor lost one of the four opening controls');
+  invariant(mobileControls.allPresent, 'mobile editor lost one of the six opening controls');
   invariant(mobileControls.buttonSizes.every((size) => size.width >= 40 && size.height >= 40),
     `mobile opening steppers are too small: ${JSON.stringify(mobileControls.buttonSizes)}`);
   invariant(mobileControls.card && mobileControls.card.left >= -1 && mobileControls.card.right <= 391,

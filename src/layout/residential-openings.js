@@ -2,8 +2,8 @@
 // the village and footprint contracts. This module plans habitable doors and
 // windows only: the kitchen hearth remains a separate service opening.
 //
-// Width multipliers and count limits are product-safe bay constraints, not
-// claims about historical frequency or a universal Joseon house distribution.
+// Width/height multipliers and count limits are product-safe bay constraints,
+// not claims about historical frequency or a universal Joseon house distribution.
 
 import {
   giwaFootprintMetrics,
@@ -20,6 +20,8 @@ export const RESIDENTIAL_OPENING_PARAM_KEYS = Object.freeze([
   'windowCount',
   'doorWidthK',
   'windowWidthK',
+  'doorHeightK',
+  'windowHeightK',
 ]);
 
 export const RESIDENTIAL_OPENING_DEFAULTS = deepFreeze({
@@ -28,12 +30,16 @@ export const RESIDENTIAL_OPENING_DEFAULTS = deepFreeze({
     windowCount: 3,
     doorWidthK: 0.4,
     windowWidthK: 0.24,
+    doorHeightK: 1,
+    windowHeightK: 1,
   },
   giwa: {
     doorCount: 2,
     windowCount: 3,
     doorWidthK: 0.9,
     windowWidthK: 0.5,
+    doorHeightK: 1,
+    windowHeightK: 1,
   },
 });
 
@@ -45,6 +51,20 @@ const WIDTH_CAPABILITIES = deepFreeze({
   giwa: {
     doorWidthK: { min: 0.6, max: 0.94, step: 0.01 },
     windowWidthK: { min: 0.3, max: 0.78, step: 0.01 },
+  },
+});
+
+// Heights are multipliers over each production builder's established vertical
+// band. Keeping those base bands renderer-owned preserves the choga roof profile
+// and giwa lintel/meoreum grammar while this pure contract owns the safe range.
+const HEIGHT_CAPABILITIES = deepFreeze({
+  choga: {
+    doorHeightK: { min: 0.9, max: 1.08, step: 0.01 },
+    windowHeightK: { min: 0.8, max: 1.2, step: 0.01 },
+  },
+  giwa: {
+    doorHeightK: { min: 0.9, max: 1.05, step: 0.01 },
+    windowHeightK: { min: 0.75, max: 1.25, step: 0.01 },
   },
 });
 
@@ -401,6 +421,8 @@ function capabilitiesFor(style, slots) {
     windowCount: countCapability(slots.windows.length, defaults.windowCount),
     doorWidthK: { ...WIDTH_CAPABILITIES[style].doorWidthK, default: defaults.doorWidthK },
     windowWidthK: { ...WIDTH_CAPABILITIES[style].windowWidthK, default: defaults.windowWidthK },
+    doorHeightK: { ...HEIGHT_CAPABILITIES[style].doorHeightK, default: defaults.doorHeightK },
+    windowHeightK: { ...HEIGHT_CAPABILITIES[style].windowHeightK, default: defaults.windowHeightK },
   });
 }
 
@@ -422,6 +444,8 @@ function normalizeWithCapabilities(source, capabilities) {
     windowCount: normalizedField(source.windowCount, capabilities.windowCount, true),
     doorWidthK: normalizedField(source.doorWidthK, capabilities.doorWidthK),
     windowWidthK: normalizedField(source.windowWidthK, capabilities.windowWidthK),
+    doorHeightK: normalizedField(source.doorHeightK, capabilities.doorHeightK),
+    windowHeightK: normalizedField(source.windowHeightK, capabilities.windowHeightK),
   });
 }
 
@@ -431,7 +455,7 @@ export function normalizeResidentialOpenings(kind, building = {}) {
   return normalizeWithCapabilities(source, capabilitiesFor(style, frozenSlots(style, source)));
 }
 
-function plannedOpening(slot, style, widthK, primary) {
+function plannedOpening(slot, style, widthK, heightK, primary) {
   return {
     id: slot.id,
     kind: slot.openingKind,
@@ -447,6 +471,7 @@ function plannedOpening(slot, style, widthK, primary) {
     availableWidth: slot.availableWidth,
     widthK,
     width: slot.availableWidth * widthK,
+    heightK,
     verticalBand: slot.openingKind === 'door' ? 'floor-to-lintel' : 'sill-to-lintel',
     primary,
     landing: primary && (slot.landingClearSide === -1 || slot.landingClearSide === 1)
@@ -465,8 +490,12 @@ export function planResidentialOpenings(kind, building = {}, seed = building?.se
   const doorSlots = orderedDoorSlots(slots.doors, stableSeed).slice(0, params.doorCount);
   const windowSlots = orderedWindowSlots(style, slots.windows, stableSeed).slice(0, params.windowCount);
   const openings = [
-    ...doorSlots.map((slot, index) => plannedOpening(slot, style, params.doorWidthK, index === 0)),
-    ...windowSlots.map((slot) => plannedOpening(slot, style, params.windowWidthK, false)),
+    ...doorSlots.map((slot, index) => plannedOpening(
+      slot, style, params.doorWidthK, params.doorHeightK, index === 0,
+    )),
+    ...windowSlots.map((slot) => plannedOpening(
+      slot, style, params.windowWidthK, params.windowHeightK, false,
+    )),
   ];
   return deepFreeze({
     kind: style,

@@ -229,7 +229,7 @@ if (choga) {
   const box1 = await ev(desk, (id) => window.__engine.village.debugOverlayBox(id), choga.parcelId);
   ok('③ 기존 파라미터 회귀: footprintScale 라이브 반영(bbox 증가)', hasFs && box0 && box1 && (box1.x > box0.x || box1.y > box0.y), `box0=${JSON.stringify(box0)} box1=${JSON.stringify(box1)}`);
 
-  // #10 집 마당 소품 + 창호 필드 렌더(초가: 문/창 개수·폭 + 창살)
+  // #10 집 마당 소품 + 창호 필드 렌더(초가: 문/창 개수·폭·높이 + 창살)
   await ev(desk, () => { const b = document.querySelector('.ctx.house .advtoggle'); if (b && b.getAttribute('aria-expanded') !== 'true') b.click(); });
   await wait(desk, 250);
   const chogaProps = await ev(desk, () => {
@@ -239,12 +239,14 @@ if (choga) {
       jangdok: has(/장독대|Jar/i), vegBed: has(/텃밭|Kitchen/i), yardStack: has(/낟가리|Straw/i), clothesline: has(/빨래|Clothes/i),
       doorCount: has(/문 수|Doors/i), windowCount: has(/창 수|Windows/i),
       doorWidth: has(/문 너비|Door width/i), windowWidth: has(/창 너비|Window width/i),
+      doorHeight: has(/문 높이|Door height/i), windowHeight: has(/창 높이|Window height/i),
       doorPattern: has(/창살|Lattice/i),
     };
   });
   ok('#96 초가 마당 소품 4종 필드 렌더', chogaProps.jangdok && chogaProps.vegBed && chogaProps.yardStack && chogaProps.clothesline, JSON.stringify(chogaProps));
-  ok('#10 초가 창호/개구 4축+창살 렌더', chogaProps.doorCount && chogaProps.windowCount
-    && chogaProps.doorWidth && chogaProps.windowWidth && chogaProps.doorPattern, JSON.stringify(chogaProps));
+  ok('#10 초가 창호/개구 6축+창살 렌더', chogaProps.doorCount && chogaProps.windowCount
+    && chogaProps.doorWidth && chogaProps.windowWidth
+    && chogaProps.doorHeight && chogaProps.windowHeight && chogaProps.doorPattern, JSON.stringify(chogaProps));
 
   // #96 실제 반영(adapter override): 마당 소품 전부 ON vs OFF → 오버레이 메시·정점 수 증가
   const yStats = await ev(desk, (id) => {
@@ -269,12 +271,12 @@ if (giwa) {
   const giwaProps = await ev(desk, () => ({
     jangdok: [...document.querySelectorAll('.ctx.house .rl')].some((n) => /장독대|Jar/i.test(n.textContent)),
     clothesline: [...document.querySelectorAll('.ctx.house .rl')].some((n) => /빨래|Clothes/i.test(n.textContent)),
-    openings: ['문 수', '창 수', '문 너비', '창 너비'].every((label) => (
+    openings: ['문 수', '창 수', '문 너비', '창 너비', '문 높이', '창 높이'].every((label) => (
       [...document.querySelectorAll('.ctx.house .rl')].some((n) => n.textContent.includes(label))
     )),
   }));
   ok('#96 기와 마당 소품 필드 렌더(장독대·빨래줄)', giwaProps.jangdok && giwaProps.clothesline, JSON.stringify(giwaProps));
-  ok('#10 기와 창호/개구 4축 렌더', giwaProps.openings, JSON.stringify(giwaProps));
+  ok('#10 기와 창호/개구 6축 렌더', giwaProps.openings, JSON.stringify(giwaProps));
   await ev(desk, () => window.__engine.village.return());
   await wait(desk, 2400);
 }

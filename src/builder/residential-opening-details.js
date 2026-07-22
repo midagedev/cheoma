@@ -29,12 +29,29 @@ export function createResidentialOpeningDetails(kind, building, target, material
     return byBay.get(`${edgeIndex}:${bayIndex}`) || null;
   }
 
+  // Builders own the established physical vertical bands; the pure residential
+  // plan owns only a safe multiplier. Resolve that composition exactly once so
+  // host-wall cuts, panels and the shared detail grammar cannot disagree.
+  function verticalProfile(opening) {
+    if (!opening || !plan.openings.includes(opening)) {
+      throw new Error('Residential opening does not belong to this building plan');
+    }
+    const base = profileFor(profiles, opening);
+    const height = base.height * opening.heightK;
+    return {
+      ...base,
+      baseHeight: base.height,
+      height,
+      topY: base.bottomY + height,
+    };
+  }
+
   function prepare(opening) {
     if (!opening || !plan.openings.includes(opening)) {
       throw new Error('Residential opening does not belong to this building plan');
     }
     if (added.has(opening.id)) throw new Error(`Residential opening assembled twice: ${opening.id}`);
-    const profile = profileFor(profiles, opening);
+    const profile = verticalProfile(opening);
     const detail = planOpeningDetail({
       kind: opening.kind,
       style: opening.style,
@@ -54,6 +71,9 @@ export function createResidentialOpeningDetails(kind, building, target, material
     });
     if (Math.abs(detail.width - opening.width) > EPSILON) {
       throw new Error(`Opening detail width drifted for ${opening.id}: ${detail.width} != ${opening.width}`);
+    }
+    if (Math.abs(detail.height - profile.height) > EPSILON) {
+      throw new Error(`Opening detail height drifted for ${opening.id}: ${detail.height} != ${profile.height}`);
     }
     const placement = {
       center: opening.center,
@@ -99,5 +119,5 @@ export function createResidentialOpeningDetails(kind, building, target, material
     assembler.finish();
   }
 
-  return { plan, openingAt, add, addPrimaryDoor, finish };
+  return { plan, openingAt, verticalProfile, add, addPrimaryDoor, finish };
 }
