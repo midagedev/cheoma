@@ -4,7 +4,7 @@
   "templeRevision": "issue-12-compound-2026-07-22",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
-  "focusCameraRevision": "issue-15-focus-elevation-20deg-2026-07-23",
+  "focusCameraRevision": "issue-15-focus-elevation-22deg-2026-07-23",
   "buildingSolarRevision": "issue-15-winter-sun-2026-07-21",
   "streamValleyRevision": "issue-21-visible-graded-water-2026-07-22",
   "settlementReliefRevision": "issue-40-local-relief-river-port-2026-07-22",
@@ -12,8 +12,8 @@
   "seed": 20260716,
   "cases": {
     "hamlet:base": {
-      "hash": "6f1cb40b7058b4370a8a45e807fa35a06423565de4f4b46e93f7d30ef3c42d44",
-      "bytes": 36916
+      "hash": "cfa5e92f3914ed47371f985bcf1298b0880b23bec799e604cc3ae922e4206ad5",
+      "bytes": 36900
     },
     "village:base": {
       "hash": "4ee9b5da1c54e8fb277e3d15841764dbe7caf89d9011d15dc53d44a6e0d31de4",

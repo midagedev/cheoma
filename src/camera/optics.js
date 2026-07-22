@@ -7,11 +7,11 @@
 
 const DEG = Math.PI / 180;
 export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
-// Shared close-parcel pose. Twenty degrees keeps the courtyard readable while retaining
+// Shared close-parcel pose. Twenty-two degrees keeps the courtyard readable while retaining
 // an architectural, rather than aerial, view across the tested residential variants.
 // Keep the projection centered: a sky-biased lens shift crops the foreground yard and
 // hides the animals and household details this elevation is meant to reveal.
-export const VILLAGE_FOCUS_ELEVATION = 20 * DEG;
+export const VILLAGE_FOCUS_ELEVATION = 22 * DEG;
 export const VILLAGE_FOCUS_SKY_FRACTION = 0;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
