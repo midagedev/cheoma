@@ -9,6 +9,7 @@ import {
   overlayCenterOffset,
   sunkPrism,
 } from '../core/surface-clearance.js';
+import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
 
 // 기와집(ㅡ/ㄱ/ㄷ 반가 안채): 공유 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
@@ -503,51 +504,17 @@ export function buildGiwa(P, M) {
   }
   root.add(chimney);
 
-  // ── 아궁이(부엌 화구) — 굴뚝과 같은 우측면(아궁이→구들→굴뚝) 기단부 ──
-  // 팔레트 무수정: 그을음/화구/가마솥/불씨 재질을 여기서 자체 생성.
-  const agX = a + 0.68;   // 기단 우측 바깥면(≈ a + podiumMargin)에 붙임
-  const agZ = 0.7;        // 굴뚝(후면)과 분리된 전면부
-  const agungi = new THREE.Group(); agungi.name = 'agungi';
-  const clayMat = new THREE.MeshStandardMaterial({ color: 0x8a6b45, roughness: 1.0 });   // 황토 부뚜막
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0806, roughness: 1.0 });   // 화구 내부(암부)
-  const scorchMat = new THREE.MeshStandardMaterial({ color: 0x1c1712, roughness: 1.0, transparent: true, opacity: 0.85 }); // 화구 위 그을음
-  const potMat = new THREE.MeshStandardMaterial({ color: 0x15120f, roughness: 0.55, metalness: 0.35 }); // 가마솥(무쇠)
-  const bodyD = 0.5, bodyH = 1.05, bodyW = 1.5;
-  const bodyCx = agX + bodyD / 2;
-  // 부뚜막/아궁이 몸체 (우측 기단에 붙는 조적 매스, 황토)
-  const body = new THREE.Mesh(new THREE.BoxGeometry(bodyD, bodyH, bodyW), clayMat);
-  body.position.set(bodyCx, bodyH / 2, agZ);
-  body.castShadow = body.receiveShadow = true; agungi.add(body);
-  // 화구(어두운 사각 개구) — 몸체 전면(+x)에 파인 캐비티
-  const mouthW = 0.9, mouthH = 0.5, mouthY = 0.36;
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.28, mouthH, mouthW), darkMat);
-  mouth.position.set(agX + bodyD - 0.10, mouthY, agZ); agungi.add(mouth);
-  // 화구 위 그을음 얼룩(불티·연기 그을림) — 전면(+x)에 얇게
-  const scorch = new THREE.Mesh(new THREE.PlaneGeometry(mouthW + 0.18, bodyH * 0.6), scorchMat);
-  scorch.position.set(agX + bodyD + 0.006, mouthY + 0.16, agZ); scorch.rotation.y = Math.PI / 2;
-  agungi.add(scorch);
-  // 화구 상부 돌 인방
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(bodyD + 0.06, 0.12, mouthW + 0.14), M.stoneDark);
-  lintel.position.set(bodyCx, mouthY + mouthH / 2 + 0.06, agZ); lintel.castShadow = true; agungi.add(lintel);
-  // 가마솥(검은 반구) — 부뚜막 상판에 앉음
-  const pot = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), potMat);
-  pot.rotation.x = Math.PI;          // 볼록면이 위로
-  pot.scale.set(1, 0.7, 1);
-  pot.position.set(bodyCx, bodyH + 0.02, agZ); pot.castShadow = true; agungi.add(pot);
-  // 불씨 발광면(밤·밥짓는 시간) — smoke.js가 emissiveIntensity를 시간대로 변조
-  const ember = new THREE.Mesh(
-    new THREE.PlaneGeometry(mouthW * 0.8, mouthH * 0.72),
-    new THREE.MeshStandardMaterial({ color: 0x1a0d04, emissive: 0xff5a1e, emissiveIntensity: 0, roughness: 1.0, side: THREE.DoubleSide }),
-  );
-  ember.name = 'agungiEmber';
-  ember.position.set(agX + bodyD - 0.06, mouthY - 0.02, agZ);
-  ember.rotation.y = Math.PI / 2;    // +x(바깥)를 향해 발광
-  agungi.add(ember);
-  // 화광 PointLight(밤 주변 돌·지면에 온기) — smoke.js가 강도/가시성 제어
-  const fire = new THREE.PointLight(0xff6a24, 0, 4.5, 2);
-  fire.castShadow = false; fire.visible = false; fire.name = 'agungiFire';
-  fire.position.set(agX + bodyD + 0.2, mouthY + 0.05, agZ); agungi.add(fire);
-  root.add(agungi);
+  // 부엌 화구는 굴뚝과 이어지는 살림채 끝방의 마당 높이 개구 안으로 물린다. 외부 기단에
+  // 별도 부뚜막을 덧붙이던 중복 구현을 초가와 공유하는 생활 장면 조립기로 대체한다.
+  root.add(buildRecessedKitchenHearth({
+    mats: M,
+    wallX: a,
+    centerZ: 0.7,
+    floorY: 0,
+    openingWidth: 1.38,
+    openingHeight: 1.58,
+    lightRange: 3.6,
+  }));
 
   return root;
 }

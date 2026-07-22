@@ -108,6 +108,24 @@ for (const tuck of production.matbaeGableTucks) {
   );
 }
 
+for (const [style, hearth] of Object.entries(production.hearths)) {
+  for (const [name, count] of Object.entries(hearth.counts)) {
+    invariant(count === 1, `${style} kitchen hearth has ${count} ${name} objects`);
+  }
+  invariant(
+    hearth.bounds.max.x <= hearth.wallX + 0.45 + EPS,
+    `${style} kitchen projects ${(hearth.bounds.max.x - hearth.wallX).toFixed(3)}m beyond its wall`,
+  );
+  invariant(
+    hearth.openingBounds.max.x <= hearth.wallX + 0.18 + EPS,
+    `${style} kitchen opening became a projecting solid`,
+  );
+  invariant(
+    hearth.thresholdBounds.min.y >= -EPS && hearth.thresholdBounds.max.y <= 0.13 + EPS,
+    `${style} kitchen threshold left the yard-level floor`,
+  );
+}
+
 console.log(
   `giwa podium=${production.giwa.podiumChildren} drawables, opening clearance=`
   + `${production.giwa.openingFaceClearance.toFixed(3)}m`,
@@ -115,5 +133,9 @@ console.log(
 console.log(
   `foundation sink=${FOUNDATION_SINK.toFixed(2)}m, courtyard lift=`
   + `${production.courtyardY.toFixed(2)}m, roof tuck=${ROOF_WALL_TUCK.toFixed(2)}m`,
+);
+console.log(
+  `recessed kitchens: giwa +${(production.hearths.giwa.bounds.max.x - production.hearths.giwa.wallX).toFixed(2)}m, `
+  + `choga +${(production.hearths.choga.bounds.max.x - production.hearths.choga.wallX).toFixed(2)}m`,
 );
 console.log('BUILDING CLEARANCE: PASS');

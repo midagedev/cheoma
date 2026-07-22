@@ -57,6 +57,8 @@ The core runs standalone from the repo-root `index.html` (plus per-domain harnes
 
 `src/builder/dancheong.js` owns the reusable, renderer-free dancheong axes and rank policy. Palace defaults to moro; a temple compound reserves geum for its main worship hall and steps subsidiary/domestic buildings down. Cached Canvas sources are immutable and bucket-keyed; Texture/Material objects stay palette-owned so concurrent compounds and disposal cannot mutate one another. Never expose dancheong controls or allocate its textures for giwa/choga. See `docs/dancheong.md`.
 
+Residential authenticity boundaries live in `docs/architectural-authenticity.md`. Civilian `jeongja`/`sesal` name lattice layouts, not palace coloration; keep them bare-timber/hanji. `src/builder/kitchen-hearth.js` is the shared lightweight kitchen opening for giwa/choga and must preserve the `agungiEmber`/`agungiFire` ambience names without returning to an exterior freestanding stove mass. In the current type system `palace-japsang` and `palace-chwidu` are palace-only even when another style selects a paljak roof.
+
 `src/core/surface-clearance.js` owns the small world-space separations for building contact surfaces. Sink only the lowest foundation while preserving its visible top, keep courtyard/terrain faces physically separated, and place visible opening faces beyond their host geometry. Do not hide coplanar defects with camera-dependent `polygonOffset`. The giwa podium is one concave solid per stone course; never rebuild its ㄱ footprint from overlapping boxes.
 
 **Village generation** — a deterministic pipeline:

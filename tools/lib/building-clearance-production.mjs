@@ -68,6 +68,30 @@ function inspectGiwaPodium(building, params) {
   };
 }
 
+const HEARTH_NAMES = [
+  'kitchen-opening',
+  'kitchen-threshold',
+  'kitchen-door',
+  'hearth-pot',
+  'agungiEmber',
+  'agungiFire',
+];
+
+function inspectHearth(building, wallX) {
+  const hearth = building.getObjectByName('agungi');
+  const counts = Object.fromEntries(HEARTH_NAMES.map((name) => [name, 0]));
+  hearth?.traverse((object) => {
+    if (object.name in counts) counts[object.name]++;
+  });
+  return {
+    wallX,
+    counts,
+    bounds: bounds(hearth),
+    openingBounds: bounds(hearth.getObjectByName('kitchen-opening')),
+    thresholdBounds: bounds(hearth.getObjectByName('kitchen-threshold')),
+  };
+}
+
 export function inspectBuildingClearance() {
   const giwaParams = { ...PRESETS.giwa, mats: testMaterials() };
   const giwa = buildBuilding(giwaParams);
@@ -79,6 +103,9 @@ export function inspectBuildingClearance() {
   const openingBounds = bounds(opening);
 
   const foundations = {};
+  const hearths = {
+    giwa: inspectHearth(giwa, giwaFootprint(giwaParams).a),
+  };
   let matbaeGableTucks = [];
   for (const style of ['korea', 'temple', 'choga']) {
     const building = buildBuilding({ ...PRESETS[style], mats: testMaterials() });
@@ -93,6 +120,9 @@ export function inspectBuildingClearance() {
         if (object.name === 'matbae-gable-wall') gables.push(bounds(object));
       });
       matbaeGableTucks = gables.map((gable) => ridgeY - gable.max.y);
+    }
+    if (style === 'choga') {
+      hearths.choga = inspectHearth(building, computeLayout(PRESETS.choga).xPos.at(-1));
     }
     disposeBuilding(building);
   }
@@ -120,6 +150,7 @@ export function inspectBuildingClearance() {
     hanokFoundation: bounds(parcel.getObjectByName('foundation-base')),
     courtyardY: parcel.getObjectByName('courtyard-ground').position.y,
     matbaeGableTucks,
+    hearths,
   };
   disposeBuilding(giwa);
   return result;
