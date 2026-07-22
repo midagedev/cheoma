@@ -13,7 +13,9 @@ import { createOpeningDetailAssembler } from '../builder/opening-details.js';
 //
 // buildHanok({ footprint, seed, mats, wallH, podiumH, roofOpts }) → THREE.Group
 //   footprint: 기둥열 2D 다각형 [{x,z}], 원점 기준. (원점 정렬은 호출측 책임)
-export function buildHanok({ footprint, seed = 1, mats, wallH = 2.7, podiumH = 0.5, roofOpts = {} } = {}) {
+export function buildHanok({
+  footprint, seed = 1, mats, wallH = 2.7, podiumH = 0.5, roofOpts = {},
+} = {}) {
   const rng = makeRng(seed);
   const M = mats;
   const g = new THREE.Group();
@@ -278,7 +280,7 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
         ? { lowerPanelHeight: h * VSILL }
         : { meoreumHeight: sillTop - oy0 }),
       footwear: primary ? {
-        y: podiumH - yb,
+        y: podiumH + 0.05 - yb,
         outward: 0.92,
         surface: 'podium-step',
       } : null,

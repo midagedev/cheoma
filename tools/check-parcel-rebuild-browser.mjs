@@ -684,10 +684,91 @@ try {
     `mobile editor overflows the viewport: ${JSON.stringify(mobileControls.card)}`);
   const mobilePath = join(outputDir, 'mobile-openings.png');
   await page.screenshot({ path: mobilePath, animations: 'disabled' });
+
+  // A giwa bay-count boundary keeps the same opening seed while changing the
+  // primary door width. That preview must regenerate footwear; a following
+  // roof-only edit with the same placement signature should retain and rigidly
+  // rebase the existing metric batch.
+  const thresholdPreview = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const inspect = () => {
+      const root = engine.village.focusRoot();
+      const mesh = root?.getObjectByName('threshold-life-detail');
+      const anchor = root?.getObjectByName('primary-opening-anchor');
+      root?.updateWorldMatrix(true, true);
+      mesh?.geometry?.computeBoundingBox();
+      const box = mesh?.geometry?.boundingBox || null;
+      return {
+        root, mesh, anchor,
+        size: box ? [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z] : null,
+      };
+    };
+    const timedRebuild = (params) => {
+      const started = performance.now();
+      engine.village.rebuild(parcelId, params, { refreshFlora: false });
+      return +(performance.now() - started).toFixed(2);
+    };
+
+    const initialMs = timedRebuild({
+      kind: 'giwa', building: { planShape: 'single', bays: 3, mainHalfW: 3.9 },
+    });
+    const wide = inspect();
+    let wideDisposed = 0;
+    wide.mesh?.geometry?.addEventListener('dispose', () => { wideDisposed++; });
+    const topologyMs = timedRebuild({
+      kind: 'giwa', building: { planShape: 'single', bays: 3, mainHalfW: 3.8 },
+    });
+    const narrow = inspect();
+    let narrowDisposed = 0;
+    narrow.mesh?.geometry?.addEventListener('dispose', () => { narrowDisposed++; });
+    const retainedMs = timedRebuild({
+      kind: 'giwa', building: {
+        planShape: 'single', bays: 3, mainHalfW: 3.8, eaveOverhang: 1.42,
+      },
+    });
+    const roofOnly = inspect();
+    return {
+      widths: [
+        wide.anchor?.userData?.openingDetailPlan?.width || null,
+        narrow.anchor?.userData?.openingDetailPlan?.width || null,
+        roofOnly.anchor?.userData?.openingDetailPlan?.width || null,
+      ],
+      signatures: [
+        wide.mesh?.userData?.thresholdLifePlan?.placement?.signature || null,
+        narrow.mesh?.userData?.thresholdLifePlan?.placement?.signature || null,
+        roofOnly.mesh?.userData?.thresholdLifePlan?.placement?.signature || null,
+      ],
+      regenerated: wide.mesh?.geometry !== narrow.mesh?.geometry,
+      retained: narrow.mesh?.geometry === roofOnly.mesh?.geometry,
+      wideDisposed,
+      narrowDisposed,
+      clearance: roofOnly.mesh?.userData?.thresholdLifePlan?.clearance || null,
+      sourceScale: roofOnly.mesh?.userData?.thresholdLifeSourceScale || null,
+      size: roofOnly.size,
+      milliseconds: { initial: initialMs, topology: topologyMs, retained: retainedMs },
+    };
+  }, fixture.parcelId);
+  invariant(thresholdPreview.widths[0] < thresholdPreview.widths[1]
+      && Math.abs(thresholdPreview.widths[1] - thresholdPreview.widths[2]) < 1e-9,
+  `giwa topology fixture did not change only the expected door width `
+    + `(${thresholdPreview.widths.join(' -> ')})`);
+  invariant(thresholdPreview.signatures[0] !== thresholdPreview.signatures[1]
+      && thresholdPreview.signatures[1] === thresholdPreview.signatures[2],
+  'threshold placement signature did not isolate topology from roof-only edits');
+  invariant(thresholdPreview.regenerated && thresholdPreview.wideDisposed === 1,
+    'topology-changing preview retained or leaked stale footwear geometry');
+  invariant(thresholdPreview.retained && thresholdPreview.narrowDisposed === 0,
+    'roof-only preview failed to retain the compatible footwear batch');
+  invariant(thresholdPreview.clearance?.jamb > 0.04
+      && thresholdPreview.clearance?.approach > 0.04,
+  `topology preview crossed its new jamb (${JSON.stringify(thresholdPreview.clearance)})`);
+  invariant(thresholdPreview.size?.[0] >= 0.18 && thresholdPreview.size?.[0] <= 0.31
+      && thresholdPreview.size?.[2] >= 0.22 && thresholdPreview.size?.[2] <= 0.31,
+  `runtime footwear escaped world-metric bounds (${thresholdPreview.size?.join('×')})`);
   invariant(runtimeErrors.length === 0, `browser errors: ${runtimeErrors.join(' | ')}`);
 
   console.log(`screenshots: ${beforePath}, ${openingControlsPath}, ${livePreviewPath}, ${liveCommitPath}, ${afterPath}, ${aerialPath}, ${mobilePath}`);
-  console.log(`PARCEL REBUILD BROWSER: PASS (${fixture.parcelId}, tree=${fixture.hasTree}, openings ${openingAfter.plan.openings.length}/${openingAfter.materials} materials, live 48→${livePreview.calls.length}, drag ${continuous.inputs}→${continuousPreview.calls.length}, exact commits, programs ${signed(after.programs - before.programs)}, calls ${signed(after.drawCalls - before.drawCalls)})`);
+  console.log(`PARCEL REBUILD BROWSER: PASS (${fixture.parcelId}, tree=${fixture.hasTree}, openings ${openingAfter.plan.openings.length}/${openingAfter.materials} materials, live 48→${livePreview.calls.length}, drag ${continuous.inputs}→${continuousPreview.calls.length}, threshold topology ${thresholdPreview.milliseconds.topology}ms / retained ${thresholdPreview.milliseconds.retained}ms, exact commits, programs ${signed(after.programs - before.programs)}, calls ${signed(after.drawCalls - before.drawCalls)})`);
 } finally {
   await browser?.close();
   await server.close();

@@ -3,6 +3,11 @@ import { buildBuilding, disposeBuilding } from '../../src/builder/index.js';
 import { PRESETS, computeLayout, giwaFootprint } from '../../src/params.js';
 import { buildParcel } from '../../src/layout/parcel.js';
 import { mergeOwnedGeometries } from '../../src/core/merge-owned-geometries.js';
+import { planThresholdLife } from '../../src/props/threshold-life-plan.js';
+import {
+  createThresholdLifeMaterial,
+  createThresholdLifeMesh,
+} from '../../src/props/threshold-life.js';
 
 const bounds = (object) => {
   const box = new THREE.Box3().setFromObject(object);
@@ -164,6 +169,7 @@ function inspectOpenings(building) {
   const counts = {
     frame: 0,
     hardware: 0,
+    thresholdLife: 0,
     primaryAnchor: 0,
     primaryPanel: 0,
   };
@@ -180,6 +186,7 @@ function inspectOpenings(building) {
   building.traverse((object) => {
     if (object.name === 'opening-frame-details') { counts.frame++; frame = object; }
     if (object.name === 'opening-hardware-details') { counts.hardware++; hardware = object; }
+    if (object.name === 'threshold-life-detail') counts.thresholdLife++;
     if (object.name === 'primary-opening-anchor') { counts.primaryAnchor++; anchor = object; }
     if (object.name === 'primary-opening-panel') {
       counts.primaryPanel++;
@@ -246,6 +253,47 @@ function inspectResidentialOpenings(building) {
     kitchenCount: HEARTH_NAMES.every((name) => building.getObjectByName(name)) ? 1 : 0,
     kitchenFrameSpanZ: { min: kitchenFrameBounds.min.z, max: kitchenFrameBounds.max.z },
   };
+}
+
+function inspectThresholdAdapter(opening, condition) {
+  const plan = planThresholdLife({ opening: opening.plan, condition, seed: 17 });
+  const material = createThresholdLifeMaterial();
+  const mesh = createThresholdLifeMesh(plan, new THREE.Matrix4(), material);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const metricSize = box.getSize(new THREE.Vector3());
+  const anisotropicMaterial = createThresholdLifeMaterial();
+  const anisotropicMesh = createThresholdLifeMesh(
+    plan,
+    new THREE.Matrix4().makeScale(-1.4, 0.7, 1.25),
+    anisotropicMaterial,
+  );
+  const anisotropicBox = new THREE.Box3().setFromObject(anisotropicMesh);
+  const anisotropicSize = anisotropicBox.getSize(new THREE.Vector3());
+  let geometryDisposed = 0;
+  let materialDisposed = 0;
+  mesh.geometry.addEventListener('dispose', () => { geometryDisposed++; });
+  material.addEventListener('dispose', () => { materialDisposed++; });
+  const result = {
+    kind: plan.kind,
+    tier: mesh.userData.openingDetailTier,
+    triangles: mesh.geometry.attributes.position.count / 3,
+    contactY: box.min.y,
+    expectedY: plan.items[0].y,
+    metricSize: metricSize.toArray(),
+    anisotropicSize: anisotropicSize.toArray(),
+    anisotropicContactY: anisotropicBox.min.y,
+    anisotropicExpectedY: plan.items[0].y * 0.7,
+    anisotropicSourceScale: anisotropicMesh.userData.thresholdLifeSourceScale,
+    vertexColors: material.vertexColors === true && !!mesh.geometry.attributes.color,
+    transparent: material.transparent === true,
+    envelope: material.userData.lodEnvelope === true,
+  };
+  mesh.geometry.dispose();
+  material.dispose();
+  anisotropicMesh.geometry.dispose();
+  anisotropicMaterial.dispose();
+  result.disposed = [geometryDisposed, materialDisposed];
+  return result;
 }
 
 export function inspectBuildingClearance() {
@@ -373,6 +421,10 @@ export function inspectBuildingClearance() {
     openings,
     residentialFixtures,
     chogaNonfinite: chogaNonfiniteProbe,
+    thresholdAdapters: {
+      dry: inspectThresholdAdapter(openings.choga, 'dry'),
+      wet: inspectThresholdAdapter(openings.giwa, 'wet'),
+    },
   };
   disposeBuilding(giwa);
   return result;

@@ -59,6 +59,12 @@ import {
 import { createVillageDetailLodState } from './detail-lod.js';
 import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
 import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
+import { planThresholdLife } from '../../props/threshold-life-plan.js';
+import {
+  createThresholdLifeMaterial,
+  createThresholdLifeMesh,
+  thresholdLifePlacementFrame,
+} from '../../props/threshold-life.js';
 
 const PERSISTENT_YARD_FIELDS = Object.freeze([
   'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed',
@@ -181,6 +187,73 @@ export function createVillageHandle(opts, seed, plan, group) {
 
   // ── env 상태 ──
   let time = 'day', season = 'summer', weather = 'clear';
+
+  function removeThresholdLife(root) {
+    const details = [];
+    root?.traverse((object) => {
+      if (object.name === 'threshold-life-detail') details.push(object);
+    });
+    for (const detail of details) {
+      detail.parent?.remove(detail);
+      disposeTree(detail);
+    }
+    return details.length;
+  }
+
+  function thresholdLifePlacement(root) {
+    const anchor = root?.getObjectByName('primary-opening-anchor');
+    const opening = anchor?.userData?.openingDetailPlan;
+    if (!anchor || !opening) return null;
+    const lifePlan = planThresholdLife({
+      opening,
+      seed: `${opening.seed}:focus-threshold`,
+      condition: weather === 'rain' ? 'wet' : 'dry',
+    });
+    if (!lifePlan) return null;
+    root.updateWorldMatrix(true, true);
+    const basis = root.matrixWorld.clone().invert().multiply(anchor.matrixWorld);
+    return { lifePlan, basis };
+  }
+
+  function attachThresholdLife(root) {
+    removeThresholdLife(root);
+    const placement = thresholdLifePlacement(root);
+    if (!placement) return null;
+    const mesh = createThresholdLifeMesh(
+      placement.lifePlan,
+      placement.basis,
+      createThresholdLifeMaterial(),
+    );
+    // The focused overlay root owns the batch so a scaled house child cannot
+    // distort museum-scale footwear dimensions.
+    root.add(mesh);
+    return mesh;
+  }
+
+  function reattachThresholdLife(root, mesh) {
+    const placement = thresholdLifePlacement(root);
+    const previous = mesh?.userData?.thresholdLifeBasis;
+    const previousPlan = mesh?.userData?.thresholdLifePlan;
+    if (!placement || !Array.isArray(previous) || previous.length !== 16) return false;
+    if (previousPlan?.placement?.signature !== placement.lifePlan.placement.signature) return false;
+    const next = thresholdLifePlacementFrame(placement.lifePlan, placement.basis);
+    const prior = new THREE.Matrix4().fromArray(previous);
+    if (Math.sign(prior.determinant()) !== Math.sign(next.frame.determinant())) return false;
+    mesh.geometry.applyMatrix4(prior.invert());
+    mesh.geometry.applyMatrix4(next.frame);
+    mesh.userData.thresholdLifePlan = placement.lifePlan;
+    mesh.userData.thresholdLifeBasis = next.frame.toArray();
+    mesh.userData.thresholdLifeSourceScale = next.scale;
+    root.add(mesh);
+    return true;
+  }
+
+  function refreshFocusedThresholdLife() {
+    for (const parcelId of focusedResidentialIds) {
+      attachThresholdLife(overrideById.get(parcelId));
+    }
+    for (const record of heroOverrides.values()) attachThresholdLife(record.group);
+  }
   let detailLod = null;
   const nightGlow = createVillageNightGlow(
     group,
@@ -310,6 +383,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 같은 hero의 편집/리롤만 교체한다. 다른 hero A는 hop 도착까지 유지하고 엔진이 A id로 해제한다.
     hideHeroDetail(parcelId);
     const g = buildHeroCompound(parcel, editOpts || {});
+    attachThresholdLife(g);
     overrides.add(g);
     if (snow.isActive()) snow.inject(g);
     const rec = { id: parcelId, group: g };
@@ -648,7 +722,9 @@ export function createVillageHandle(opts, seed, plan, group) {
         : parcelId === 'temple' ? (templeOverride && templeOverride.group)
         : heroOverrides.get(parcelId)?.group || overrideById.get(parcelId);
       if (!root) return null;
-      const counts = { anchor: 0, panel: 0, frameBatch: 0, hardwareBatch: 0 };
+      const counts = {
+        anchor: 0, panel: 0, frameBatch: 0, hardwareBatch: 0, thresholdLifeBatch: 0,
+      };
       let plan = null;
       root.traverse((object) => {
         if (object.name === 'primary-opening-anchor') {
@@ -658,6 +734,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         if (object.name === 'primary-opening-panel') counts.panel++;
         if (object.name === 'opening-frame-details') counts.frameBatch++;
         if (object.name === 'opening-hardware-details') counts.hardwareBatch++;
+        if (object.name === 'threshold-life-detail') counts.thresholdLifeBatch++;
       });
       return {
         ...counts,
@@ -752,6 +829,14 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (!parcel) return null;
       // 기존 오버라이드 제거
       const prev = overrideById.get(parcelId);
+      // Geometry-slider previews can rebuild the house many times per second.
+      // Carry the small batch only while its complete opening placement
+      // signature remains unchanged; topology/width/landing changes regenerate
+      // the pure plan and mesh below.
+      const retainedLife = persist && !refreshFlora && focusedResidentialIds.has(parcelId)
+        ? prev?.getObjectByName('threshold-life-detail') || null
+        : null;
+      retainedLife?.parent?.remove(retainedLife);
       if (prev) { disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId); }
       persistentOverrideIds.delete(parcelId);
 
@@ -848,6 +933,12 @@ export function createVillageHandle(opts, seed, plan, group) {
       }
       if (snow.isActive()) snow.inject(g);
       retainOverlayPrograms(g, gk + (snow.isActive() ? '|snow' : ''));
+      if (focusedResidentialIds.has(parcelId)) {
+        if (!retainedLife || !reattachThresholdLife(g, retainedLife)) {
+          if (retainedLife) disposeTree(retainedLife);
+          attachThresholdLife(g);
+        }
+      }
       representationDirty = true;     // 새 오버레이 지오/캐스터(편집 교체 포함)
 
       // 부감 표현의 소유권을 오버레이로 넘긴다. 풀디테일 인스턴스·담뿐 아니라 현재 청크의
@@ -884,6 +975,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (persistent && persistentOverrideIds.has(parcelId)) {
         focusedResidentialIds.add(parcelId);
         setResidentialBaseHidden(parcel, true);
+        attachThresholdLife(persistent);
         return {
           group: persistent,
           compound: false,
@@ -894,6 +986,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       const g = this.rebuildParcel(parcelId, {});   // 기본(변주) 오버레이 + 인스턴스 은닉
       if (!g) return null;
       focusedResidentialIds.add(parcelId);
+      attachThresholdLife(g);
       return { group: g, compound: false, assembly: g.children[0] || g, ambient: focusAmbientDescriptor(parcelId, g) };
     },
     focusAmbientDescriptor,
@@ -909,6 +1002,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       focusedResidentialIds.delete(parcelId);
       const g = overrideById.get(parcelId);
       if (g && persistentOverrideIds.has(parcelId)) {
+        removeThresholdLife(g);
         setResidentialBaseHidden(parcel, true);
         return;
       }
@@ -1102,6 +1196,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     setWeather(name) {
       weather = name;
       snow.setWeather(name);
+      refreshFocusedThresholdLife();
     },
     get time() { return time; }, get season() { return season; }, get weather() { return weather; },
 

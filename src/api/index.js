@@ -10,3 +10,4 @@ export * from './temple.js';
 export * from './export.js';
 export * from './rendering.js';
 export * from './surface-materials.js';
+export * from './threshold-life.js';

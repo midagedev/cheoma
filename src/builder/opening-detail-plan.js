@@ -1,4 +1,6 @@
 import { OPENING_FACE_CLEARANCE } from '../core/surface-clearance.js';
+import { deepFreeze, normalizeStableSeed } from '../core/stable-seed.js';
+import { hashString } from '../rng.js';
 
 // Renderer-free changho detail grammar. Coordinates are local to one opening:
 // +u runs along the facade, +y is up from the opening sill, and +outward points
@@ -10,49 +12,6 @@ export const OPENING_DETAIL_STYLES = Object.freeze(['palace', 'temple', 'giwa', 
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 const finite = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
-
-function seedHash(value) {
-  const text = String(value ?? 0);
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index++) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function stableSeedText(value, stack = new Set()) {
-  if (value === null) return 'null';
-  const type = typeof value;
-  if (type === 'string') return `string:${value}`;
-  if (type === 'number') return `number:${Number.isFinite(value) ? value : String(value)}`;
-  if (type === 'bigint') return `bigint:${value.toString()}`;
-  if (type === 'boolean') return `boolean:${value}`;
-  if (type === 'undefined') return 'undefined';
-  if (type !== 'object') return `${type}:${String(value)}`;
-  if (stack.has(value)) return '[circular]';
-  stack.add(value);
-  const text = Array.isArray(value)
-    ? `[${value.map((child) => stableSeedText(child, stack)).join(',')}]`
-    : `{${Object.keys(value).sort().map((key) => (
-      `${stableSeedText(key, stack)}:${stableSeedText(value[key], stack)}`
-    )).join(',')}}`;
-  stack.delete(value);
-  return text;
-}
-
-function normalizeSeed(value) {
-  if (value == null) return 0;
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  return `seed-${seedHash(stableSeedText(value)).toString(16)}`;
-}
-
-function deepFreeze(value) {
-  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
-}
 
 function defaultLeafCount(kind, width) {
   if (kind === 'window') return width >= 0.95 ? 2 : 1;
@@ -88,7 +47,7 @@ export function planOpeningDetail(input = {}) {
     kind === 'door' ? 4 : 2,
   );
   const primary = kind === 'door' && input.primary === true;
-  const seed = normalizeSeed(input.seed);
+  const seed = normalizeStableSeed(input.seed);
   if (kind === 'door' && input.meoreumHeight != null) {
     throw new Error('meoreumHeight belongs to a window; use lowerPanelHeight for a door leaf');
   }
@@ -163,7 +122,7 @@ export function planOpeningDetail(input = {}) {
   ) : null;
 
   const hardware = [];
-  const hash = seedHash(`${seed}|${style}|${kind}|${width.toFixed(3)}|${height.toFixed(3)}`);
+  const hash = hashString(`${seed}|${style}|${kind}|${width.toFixed(3)}|${height.toFixed(3)}`);
   const hingeSide = (hash & 1) === 0 ? -1 : 1;
   let pivot = null;
   let footwearAnchor = null;
@@ -233,7 +192,7 @@ export function planOpeningDetail(input = {}) {
 
   return deepFreeze({
     version: 2,
-    id: `opening-${seedHash(`${seed}|${kind}|${style}`).toString(16)}`,
+    id: `opening-${hashString(`${seed}|${kind}|${style}`).toString(16)}`,
     seed,
     kind,
     style,

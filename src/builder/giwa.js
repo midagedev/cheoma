@@ -212,7 +212,9 @@ export function buildGiwa(P, M) {
       wallThickness: T,
       lowerPanelHeight: lowerPanelTop - y0,
       footwear: {
-        y: podTopY + 0.42 - y0,
+        // The toenmaru slab is 12cm high and centered at podTopY + 0.42.
+        // Anchor footwear on its upper face rather than through its center.
+        y: podTopY + 0.42 + 0.06 - y0,
         outward: 0.78,
         surface: 'toenmaru',
       },

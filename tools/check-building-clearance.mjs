@@ -189,6 +189,33 @@ for (const [style, opening] of Object.entries(production.openings)) {
     `hanok frame/panel clearance drifted to ${opening.primaryFace.clearance.toFixed(3)}m `
       + `(expected ${opening.primaryFace.expectedClearance.toFixed(3)}m)`);
   }
+  invariant(opening.counts.thresholdLife === 0,
+    `${style} static builder owns ${opening.counts.thresholdLife} focus-only footwear batches`);
+}
+for (const [condition, adapter] of Object.entries(production.thresholdAdapters)) {
+  invariant(adapter.tier === 'focus', `${condition} footwear escaped focus-only ownership`);
+  invariant(adapter.triangles <= 256,
+    `${condition} footwear exceeded the focused-pair triangle budget (${adapter.triangles})`);
+  invariant(Math.abs(adapter.contactY - adapter.expectedY) < EPS,
+    `${condition} footwear no longer contacts its authored landing`);
+  invariant(adapter.metricSize.every((size, axis) => (
+    Math.abs(size - adapter.anisotropicSize[axis]) < EPS
+  )), `${condition} footwear inherited anisotropic house scale `
+    + `(${adapter.metricSize.join('×')} -> ${adapter.anisotropicSize.join('×')})`);
+  invariant(adapter.metricSize[0] >= 0.18 && adapter.metricSize[0] <= 0.28
+      && adapter.metricSize[2] >= 0.22 && adapter.metricSize[2] <= 0.31,
+  `${condition} footwear pair escaped world-metric length/width bounds `
+    + `(${adapter.metricSize[0]}×${adapter.metricSize[2]})`);
+  invariant(Math.abs(adapter.anisotropicContactY - adapter.anisotropicExpectedY) < EPS,
+    `${condition} footwear lost contact with its anisotropically scaled landing`);
+  invariant(Math.abs(adapter.anisotropicSourceScale.u - 1.4) < EPS
+      && Math.abs(adapter.anisotropicSourceScale.y - 0.7) < EPS
+      && Math.abs(adapter.anisotropicSourceScale.outward - 1.25) < EPS,
+  `${condition} footwear adapter lost its host scale decomposition`);
+  invariant(adapter.vertexColors && !adapter.transparent && !adapter.envelope,
+    `${condition} footwear lost its opaque single-material contract`);
+  invariant(adapter.disposed.every((count) => count === 1),
+    `${condition} footwear resources were not released exactly once`);
 }
 
 for (const fixture of production.residentialFixtures) {

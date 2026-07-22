@@ -19,6 +19,7 @@
     "check:environment": "node tools/check-environment-state.mjs",
     "check:house-diversity": "node tools/check-house-diversity.mjs",
     "check:opening-detail": "node tools/check-opening-detail-contract.mjs",
+    "check:threshold-life": "node tools/check-threshold-life-contract.mjs",
     "check:winter:app": "node tools/check-winter-app.mjs",
     "check:ink:app": "node tools/check-ink-app.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",
@@ -59,6 +60,7 @@
     "shoot:ink": "node tools/check-ink-app.mjs",
     "shoot:dof": "node tools/shoot-dof.mjs",
     "shoot:focus-level": "node tools/shoot-focus-level.mjs",
+    "shoot:threshold-life": "node tools/shoot-threshold-life.mjs",
     "shoot:wave": "node tools/shoot-wave.mjs village",
     "shoot:wave:full": "node tools/shoot-wave.mjs hamlet,village,capital,hanyang"
   },

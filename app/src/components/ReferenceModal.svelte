@@ -87,7 +87,7 @@
                   </div>
                 {/if}
                 {#if it.refs.length}<div class="it-refs">{it.refs.join(' · ')}</div>{/if}
-                {#if it.license}<div class="it-lic"><span class="k">{lab.license}</span>{#each segs(it.license) as s}{#if s.b}<strong>{s.t}</strong>{:else}{s.t}{/if}{/each}</div>{/if}
+                {#if it.license}<div class="it-lic it-license"><span class="k">{lab.license}</span>{#each segs(it.license) as s}{#if s.b}<strong>{s.t}</strong>{:else}{s.t}{/if}{/each}</div>{/if}
               </li>
             {/each}
           </ul>
