@@ -9,6 +9,10 @@ import {
   paintDancheongSource,
   resolveDancheong,
 } from './dancheong.js';
+import {
+  MATERIAL_PROGRAM_PATCH,
+  addMaterialProgramKey,
+} from '../render/material-program-key.js';
 
 // 캔버스 텍스처의 무작위 얼룩·짚결·막돌은 기본 Math.random 을 쓴다. 다만 마을 재현 렌더
 // (같은 seed → 픽셀 동일)를 위해 외부에서 시드 가능한 난수원으로 교체할 수 있다.
@@ -859,7 +863,7 @@ export function injectCloudShadow(mat, cloudUniforms) {
   // Explicit composition contract for later material patches (notably env/rim.js).  The patch
   // only multiplies diffuseColor at color_fragment and preserves previous callbacks, so it is
   // safe to chain when each participant also composes customProgramCacheKey.
-  mat.userData.__cloudShadowPatchVersion = 'cloudshadow-v1';
+  mat.userData.__cloudShadowPatchVersion = MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     if (prev) prev(shader, renderer);
@@ -873,9 +877,7 @@ export function injectCloudShadow(mat, cloudUniforms) {
       .replace('#include <common>', `#include <common>\n${CLOUD_SHADOW_FRAG_DECL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${CLOUD_SHADOW_FRAG_BODY}`);
   };
-  const baseKey = (mat.customProgramCacheKey && mat.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey)
-    ? mat.customProgramCacheKey() : '';
-  mat.customProgramCacheKey = () => 'cloudshadow|' + baseKey;
+  addMaterialProgramKey(mat, MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW);
   mat.needsUpdate = true;
   return true;
 }

@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  hasOnlyMaterialProgramKeys,
+  MATERIAL_PROGRAM_PATCH,
+  addMaterialProgramKey,
+} from '../render/material-program-key.js';
 
 // 재질 프레넬 골든아워 림 (태스크 #76 도입 · #101 전 오브젝트 확장) — RimPass(스크린스페이스) 대체.
 //
@@ -155,19 +160,17 @@ export function createFresnelRim(scene) {
     return lum > 0.2;
   }
 
-  // Known cloud-shadow is a color-multiply patch with an explicit chain contract.  Other own
-  // program keys (snow shells, bespoke shaders) remain excluded: silently composing an unknown
-  // key can alias shader programs even when onBeforeCompile itself happens to chain.
+  // These stock-material patches own explicit order-independent key tokens and disjoint shader
+  // anchors. Bespoke keys remain excluded: silently composing an unknown callback can still alias
+  // programs or consume the same anchor.
+  const composableProgramKeys = new Set([
+    MATERIAL_PROGRAM_PATCH.LOD_SCREEN_DOOR,
+    MATERIAL_PROGRAM_PATCH.INST_FADE,
+    MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW,
+    MATERIAL_PROGRAM_PATCH.SNOW,
+  ]);
   function hasIncompatibleCustomCacheKey(mat) {
-    try {
-      if (!mat.customProgramCacheKey) return false;
-      if (mat.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) return false;
-      const k = mat.customProgramCacheKey();
-      if (typeof k !== 'string' || k.length === 0) return false;
-      const cloudComposable = mat.userData.__cloudShadowPatchVersion === 'cloudshadow-v1'
-        && k.startsWith('cloudshadow|');
-      return !cloudComposable;
-    } catch { return true; }
+    return !hasOnlyMaterialProgramKeys(mat, composableProgramKeys);
   }
 
   function includable(mat) {
@@ -193,7 +196,7 @@ export function createFresnelRim(scene) {
     if (!includable(mat)) return;
     mat.userData.__rimPatched = true;
     counts.total++; counts[group]++;
-    if (mat.userData.__cloudShadowPatchVersion === 'cloudshadow-v1') {
+    if (mat.userData.__cloudShadowPatchVersion === MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW) {
       counts.cloudShadow++;
       if (mat.userData.role === 'roof') counts.cloudRoof++;
     }
@@ -208,9 +211,6 @@ export function createFresnelRim(scene) {
     const directStart = RIM_SOLAR_GATE.directStart.toFixed(3);
     const directFull = RIM_SOLAR_GATE.directFull.toFixed(2);
     const prev = mat.onBeforeCompile;
-    const prevProgramKey = (mat.customProgramCacheKey
-      && mat.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey)
-      ? mat.customProgramCacheKey : null;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
       shader.uniforms.uRimColor = u.uRimColor;
@@ -276,10 +276,9 @@ export function createFresnelRim(scene) {
           }
           #include <opaque_fragment>`);
     };
-    // Stock Material derives its key from onBeforeCompile.toString(), but a previous explicit
-    // key (cloud-shadow) overrides that.  Give rim a stable version and retain the full prior
-    // key so cloud→rim and rim→cloud both remain distinct, cache-safe chains.
-    mat.customProgramCacheKey = () => `cheoma-rim-physical-v1|${prevProgramKey ? prevProgramKey.call(mat) : ''}`;
+    // Preserve every known prior patch token. The same helper is used by cloud/snow/LOD, making
+    // clear→snow rerolls and post warm order cache-safe in both directions.
+    addMaterialProgramKey(mat, MATERIAL_PROGRAM_PATCH.PHYSICAL_RIM);
     mat.needsUpdate = true;
   }
 

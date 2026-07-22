@@ -34,7 +34,7 @@ export function setParcelBaseExportHidden(handle, parcel, hidden) {
 }
 
 // 검증·디버그가 정책값만 보며 자기검증하지 않도록 실제 은닉 핸들과 청크 루트 가시성을 읽는다.
-// 필지에는 어느 순간에도 far mass/mid envelope/full/overlay 중 정확히 한 표현만 활성이어야 한다.
+// 안정 상태는 한 표현, 짧은 screen-door 이행은 인접 두 표현, overlay는 다시 단독 소유다.
 export function parcelRepresentationState(handle, parcel, overlayVisible = false) {
   if (!handle || !parcel) return null;
   const houses = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga']?.userData;
@@ -55,6 +55,33 @@ export function parcelRepresentationState(handle, parcel, overlayVisible = false
   const impostor = farMass;   // 하위호환 디버그 이름
   const overlay = !!overlayVisible;
   const representations = Number(fullDetail) + Number(midDetail) + Number(farMass) + Number(overlay);
+  const tierOwners = [];
+  if (farMass) tierOwners.push(CHUNK_LOD_LEVEL.FAR);
+  if (midDetail) tierOwners.push(CHUNK_LOD_LEVEL.MID);
+  if (fullDetail) tierOwners.push(CHUNK_LOD_LEVEL.FULL);
+  const transition = lod?.transition || null;
+  const transitionActive = transition?.active === true;
+  const weights = lod?.weights || {
+    far: level === CHUNK_LOD_LEVEL.FAR ? 1 : 0,
+    mid: level === CHUNK_LOD_LEVEL.MID ? 1 : 0,
+    full: level === CHUNK_LOD_LEVEL.FULL ? 1 : 0,
+  };
+  const adjacent = (transition?.from === CHUNK_LOD_LEVEL.FAR && transition?.to === CHUNK_LOD_LEVEL.MID)
+    || (transition?.from === CHUNK_LOD_LEVEL.MID && transition?.to === CHUNK_LOD_LEVEL.FAR)
+    || (transition?.from === CHUNK_LOD_LEVEL.MID && transition?.to === CHUNK_LOD_LEVEL.FULL)
+    || (transition?.from === CHUNK_LOD_LEVEL.FULL && transition?.to === CHUNK_LOD_LEVEL.MID);
+  const transitionWeight = transitionActive
+    ? weights[transition.from] + weights[transition.to] : 0;
+  const stableValid = !transitionActive && tierOwners.length === 1
+    && tierOwners[0] === level && weights[level] === 1;
+  const transitionValid = transitionActive && adjacent && tierOwners.length === 2
+    && tierOwners.includes(transition.from) && tierOwners.includes(transition.to)
+    && weights[transition.from] > 0 && weights[transition.to] > 0
+    && Math.abs(transitionWeight - 1) < 1e-6;
+  const overlayValid = overlay && representations === 1
+    && baseHidden && wallHidden && (!impostorOwner || impostorHidden);
+  const valid = overlay ? overlayValid : representations === tierOwners.length
+    && (transitionActive ? transitionValid : stableValid);
 
   return {
     parcelId: parcel.id,
@@ -71,11 +98,19 @@ export function parcelRepresentationState(handle, parcel, overlayVisible = false
     farMass,
     impostor,
     overlay,
+    owners: overlay ? ['overlay'] : tierOwners,
+    weights: { far: weights.far, mid: weights.mid, full: weights.full },
+    transition: transitionActive ? {
+      active: true,
+      from: transition.from,
+      to: transition.to,
+      progress: transition.progress,
+      direction: transition.direction,
+    } : { active: false, from: null, to: null, progress: 0, direction: 0 },
     baseHidden,
     wallHidden,
     impostorHidden,
     representations,
-    valid: representations === 1
-      && (!overlay || (baseHidden && wallHidden && (!impostorOwner || impostorHidden))),
+    valid,
   };
 }

@@ -268,6 +268,166 @@ try {
       && legacyOverload.thresholds.swapOut === 53,
   'legacy 5-argument attachChunkLodSwap preserves direct FAR↔FULL behavior');
 
+  const screenDoorContract = await page.evaluate(() => {
+    const engine = window.__engine;
+    const root = engine.village.exportRoot();
+    const chunk = root.children.find((child) => typeof child.userData?.lodUpdate === 'function'
+      && child.userData.lod?.parcelIds?.size > 0);
+    const state = chunk?.userData?.lod;
+    const parcels = engine.village.debugParcels()
+      .filter((parcel) => state?.parcelIds?.has(parcel.parcelId));
+    const anchor = parcels.sort((a, b) => b.worldCenter[1] - a.worldCenter[1])[0];
+    if (!chunk || !state || !anchor) return { available: false };
+
+    const roots = { far: state.farRoot, mid: state.midRoot, full: state.fullRoot };
+    const snapshotResources = () => {
+      const geometries = new Set();
+      const materials = new Set();
+      for (const rootObject of Object.values(roots)) rootObject.traverse((object) => {
+        if (object.geometry) geometries.add(object.geometry.uuid);
+        const list = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of list) if (material?.uuid) materials.add(material.uuid);
+        if (object.customDepthMaterial?.uuid) materials.add(object.customDepthMaterial.uuid);
+        if (object.customDistanceMaterial?.uuid) materials.add(object.customDistanceMaterial.uuid);
+      });
+      return {
+        geometries: [...geometries].sort(),
+        materials: [...materials].sort(),
+      };
+    };
+    const rendererMemory = () => ({
+      geometries: engine.renderer.info.memory.geometries,
+      textures: engine.renderer.info.memory.textures,
+    });
+    const inspectRoot = (rootObject) => {
+      const values = new Set();
+      let meshes = 0;
+      let materialCount = 0;
+      let lodPatched = 0;
+      let transparent = 0;
+      let depthWriteOff = 0;
+      let missingShadowFade = 0;
+      let missingDistanceFade = 0;
+      let lodAttributes = 0;
+      let unrestoredMatrices = 0;
+      const channelSymbol = Symbol.for('cheoma.lodScreenDoorChannel');
+      rootObject.traverse((object) => {
+        if (!object.isMesh) return;
+        meshes++;
+        if (object.geometry?.getAttribute?.('instFade')) lodAttributes++;
+        if (object[channelSymbol]) values.add(object[channelSymbol].value);
+        if (object.matrixWorld.elements[15] !== 1) unrestoredMatrices++;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if (!material) continue;
+          materialCount++;
+          const programKey = material.customProgramCacheKey?.() || '';
+          if (material.userData?.__lodScreenDoorPatchVersion === 'cheoma-lod-screen-door-v1'
+            && programKey.split('|').includes('cheoma-lod-screen-door-v1')) lodPatched++;
+          if (material?.transparent) transparent++;
+          if (material?.depthWrite === false) depthWriteOff++;
+        }
+        if (object.castShadow
+          && !object.customDepthMaterial?.customProgramCacheKey?.().includes('lod-screen-door-v1')) {
+          missingShadowFade++;
+        }
+        if (object.castShadow
+          && !object.customDistanceMaterial?.customProgramCacheKey?.().includes('lod-screen-door-v1')) {
+          missingDistanceFade++;
+        }
+      });
+      return {
+        meshes, materialCount, lodPatched, transparent, depthWriteOff,
+        missingShadowFade, missingDistanceFade,
+        lodAttributes, unrestoredMatrices, values: [...values],
+      };
+    };
+    const cameraAt = (distance) => ({
+      position: {
+        x: anchor.worldCenter[0],
+        y: anchor.worldCenter[1] + distance,
+        z: anchor.worldCenter[2],
+      },
+    });
+    const update = (distance) => chunk.userData.lodUpdate(cameraAt(distance), 1);
+    const capture = () => ({
+      level: state.level,
+      transition: { ...state.transition },
+      weights: { ...state.weights },
+      channels: { ...state.channels },
+      roots: Object.fromEntries(Object.entries(roots).map(([key, value]) => [key, value.visible])),
+      renderables: Object.fromEntries(Object.entries(roots).map(([key, value]) => [key, inspectRoot(value)])),
+    });
+
+    update(state.midOut + state.transitionWidth + 2);
+    const resourcesBefore = snapshotResources();
+    const rendererMemoryBefore = rendererMemory();
+    const farMidDistance = state.midIn - state.transitionWidth * 0.5;
+    const changed = update(farMidDistance);
+    engine.renderer.shadowMap.needsUpdate = true;
+    engine.renderer.render(engine.scene, engine.camera);
+    const farMid = capture();
+    const resourcesAfterFarMid = snapshotResources();
+    const repeated = update(farMidDistance);
+    update(state.midIn - state.transitionWidth - 1);
+    const settledMid = capture();
+    const midFullDistance = state.fullIn - state.transitionWidth * 0.5;
+    update(midFullDistance);
+    engine.renderer.shadowMap.needsUpdate = true;
+    engine.renderer.render(engine.scene, engine.camera);
+    const midFull = capture();
+    const resourcesAfterMidFull = snapshotResources();
+    update(state.fullIn - state.transitionWidth - 1);
+    const settledFull = capture();
+    const resourcesAfter = snapshotResources();
+    const rendererMemoryAfter = rendererMemory();
+    // 다음 rAF 전에 원래 aerial FAR 상태로 복구한다. 큰 점프도 인접 MID를 한 번 거친다.
+    update(state.midOut + state.transitionWidth + 2);
+    update(state.midOut + state.transitionWidth + 2);
+    return {
+      available: true, changed, repeated, farMid, settledMid, midFull, settledFull,
+      resourcesStable: [resourcesAfterFarMid, resourcesAfterMidFull, resourcesAfter]
+        .every((snapshot) => JSON.stringify(resourcesBefore) === JSON.stringify(snapshot)),
+      rendererMemory: { before: rendererMemoryBefore, after: rendererMemoryAfter },
+    };
+  });
+  const validTransition = (snapshot, from, to) => snapshot?.transition?.active
+    && snapshot.transition.from === from && snapshot.transition.to === to
+    && Object.values(snapshot.roots).filter(Boolean).length === 2
+    && snapshot.roots[from] && snapshot.roots[to]
+    && Math.abs(snapshot.weights[from] + snapshot.weights[to] - 1) < 1e-6
+    && snapshot.channels[from] > 0 && snapshot.channels[to] < 0;
+  const validChannels = (snapshot, from, to) => Object.entries(snapshot?.renderables || {})
+    .every(([level, audit]) => audit.meshes > 0 && audit.materialCount > 0
+      && audit.lodPatched === audit.materialCount
+      && audit.transparent === 0 && audit.depthWriteOff === 0
+      && audit.missingShadowFade === 0 && audit.missingDistanceFade === 0
+      && audit.lodAttributes === 0 && audit.unrestoredMatrices === 0
+      && audit.values.length === 1
+      && (level === from ? audit.values[0] > 0
+        : level === to ? audit.values[0] < 0 : audit.values[0] === 1));
+  const screenDoorChannelsValid = screenDoorContract.available
+      && screenDoorContract.changed && !screenDoorContract.repeated
+      && validTransition(screenDoorContract.farMid, 'far', 'mid')
+      && validTransition(screenDoorContract.midFull, 'mid', 'full')
+      && validChannels(screenDoorContract.farMid, 'far', 'mid')
+      && validChannels(screenDoorContract.midFull, 'mid', 'full');
+  pass(!runFocusScenario || screenDoorChannelsValid,
+    runFocusScenario
+      ? `LOD screen-door uses complementary draw-local channels with idempotent distance updates `
+        + `(${JSON.stringify(screenDoorContract)})`
+      : 'town wave scenario correctly omits the Hanyang-only LOD screen-door contract');
+  const screenDoorResourcesValid = screenDoorContract.resourcesStable
+      && screenDoorContract.settledMid?.level === 'mid'
+      && !screenDoorContract.settledMid?.transition?.active
+      && screenDoorContract.settledFull?.level === 'full'
+      && !screenDoorContract.settledFull?.transition?.active;
+  pass(!runFocusScenario || screenDoorResourcesValid,
+    runFocusScenario
+      ? `LOD screen-door settles to one root without geometry/material allocation `
+        + `(${JSON.stringify(screenDoorContract)})`
+      : 'town wave scenario correctly omits Hanyang LOD transition resources');
+
   const particleAerial = await page.evaluate(async (petalsModuleUrl) => {
     const { petalDetailWeight } = await import(petalsModuleUrl);
     const engine = window.__engine;
@@ -386,7 +546,13 @@ try {
           const levelRoot = parcel.level === 'far' ? parcel.farRootVisible
             : parcel.level === 'mid' ? parcel.midRootVisible
               : parcel.level === 'full' ? parcel.fullRootVisible : false;
-          if (!parcel.valid || parcel.representations !== 1 || rootCount !== 1 || !levelRoot) {
+          const transitionRoots = parcel.transition?.active
+            && parcel[`${parcel.transition.from}RootVisible`] === true
+            && parcel[`${parcel.transition.to}RootVisible`] === true;
+          const rootOwnershipValid = parcel.transition?.active
+            ? rootCount === 2 && transitionRoots
+            : rootCount === 1 && levelRoot;
+          if (!parcel.valid || !rootOwnershipValid) {
             bad.push({
               id: parcel.parcelId,
               level: parcel.level,
@@ -395,6 +561,8 @@ try {
               roots: [parcel.farRootVisible, parcel.midRootVisible, parcel.fullRootVisible],
               hidden: [parcel.baseHidden, parcel.wallHidden, parcel.impostorHidden],
               overlay: parcel.overlay,
+              transition: parcel.transition,
+              weights: parcel.weights,
             });
           }
         }
@@ -619,7 +787,14 @@ try {
       const bad = all.parcels.filter((parcel) => {
         const roots = Number(parcel.farRootVisible)
           + Number(parcel.midRootVisible) + Number(parcel.fullRootVisible);
-        return !parcel.valid || parcel.representations !== 1 || roots !== 1;
+        const levelRoot = parcel.level === 'far' ? parcel.farRootVisible
+          : parcel.level === 'mid' ? parcel.midRootVisible : parcel.fullRootVisible;
+        const transitionRoots = parcel.transition?.active
+          && parcel[`${parcel.transition.from}RootVisible`] === true
+          && parcel[`${parcel.transition.to}RootVisible`] === true;
+        return !parcel.valid || (parcel.transition?.active
+          ? roots !== 2 || !transitionRoots
+          : roots !== 1 || !levelRoot);
       });
       if (bad.length) failures.push({ frame, ids: bad.slice(0, 8).map((parcel) => parcel.parcelId) });
       stableMidFrames = state?.level === 'mid' ? stableMidFrames + 1 : 0;
@@ -882,10 +1057,19 @@ try {
           + Number(state.midRoot?.visible) + Number(state.fullRoot?.visible);
         const matching = state.level === 'far' ? state.farRoot?.visible
           : state.level === 'mid' ? state.midRoot?.visible : state.fullRoot?.visible;
-        // 웨이브가 아직 조립하지 않은 청크는 0개가 정상이다. 둘 이상이거나 보이는 루트가
-        // 현재 정책 level과 다르면 새 핸들 승격 때 한 프레임 중복/팝이 생긴다.
-        if (visible > 1 || (visible === 1 && !matching)) {
-          record({ phase, chunkId: state.chunkId, level: state.level, visible });
+        const transitionMatching = state.transition?.active
+          && state[`${state.transition.from}Root`]?.visible === true
+          && state[`${state.transition.to}Root`]?.visible === true;
+        // 웨이브가 아직 조립하지 않은 청크는 0개가 정상이다. 조립 뒤에는 안정 1개 또는
+        // 인접 screen-door 이행 2개만 허용한다(FAR+FULL/3중 owner 금지).
+        if ((state.transition?.active && visible !== 0
+              && (visible !== 2 || !transitionMatching))
+          || (!state.transition?.active && visible > 1)
+          || (!state.transition?.active && visible === 1 && !matching)) {
+          record({
+            phase, chunkId: state.chunkId, level: state.level, visible,
+            transition: state.transition,
+          });
         }
       }
 

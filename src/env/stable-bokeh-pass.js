@@ -3,6 +3,11 @@ import { MeshDepthMaterial, NoBlending, RGBADepthPacking } from 'three';
 import { contributesDofDepth } from './dof.js';
 import { CIRCULAR_BOKEH_SAMPLE_COUNT, installCircularBokeh } from './circular-bokeh-shader.js';
 import { INST_FADE_PROGRAM_VERSION, patchInstFadeShader } from './inst-fade-shader.js';
+import {
+  hasLodScreenDoor,
+  LOD_SCREEN_DOOR_PROGRAM_VERSION,
+  patchLodScreenDoorMaterial,
+} from '../render/lod-screen-door.js';
 
 function createInstFadeDepthMaterial() {
   const material = new MeshDepthMaterial();
@@ -18,6 +23,17 @@ function createInstFadeDepthMaterial() {
   return material;
 }
 
+function createLodScreenDoorDepthMaterial() {
+  const material = new MeshDepthMaterial();
+  material.depthPacking = RGBADepthPacking;
+  material.blending = NoBlending;
+  material.allowOverride = false;
+  patchLodScreenDoorMaterial(material);
+  material.customProgramCacheKey = () =>
+    `cheoma-dof-depth|${LOD_SCREEN_DOOR_PROGRAM_VERSION}`;
+  return material;
+}
+
 /**
  * BokehPass whose depth prepass contains only opaque depth contributors.
  * The stock pass uses one opaque override material for the entire scene, which
@@ -30,9 +46,12 @@ export class StableBokehPass extends BokehPass {
     this.bokehSampleCount = CIRCULAR_BOKEH_SAMPLE_COUNT;
     this.depthExcludedCount = 0;
     this.depthDitheredCount = 0;
+    this.instFadeDepthCount = 0;
+    this.lodScreenDoorDepthCount = 0;
     this._hiddenForDepth = [];
     this._materialsForDepth = [];
     this._instFadeDepthMaterial = createInstFadeDepthMaterial();
+    this._lodScreenDoorDepthMaterial = createLodScreenDoorDepthMaterial();
   }
 
   render(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
@@ -42,6 +61,8 @@ export class StableBokehPass extends BokehPass {
     const previousBackground = this.scene.background;
     hidden.length = 0;
     materials.length = 0;
+    let instFadeDepthCount = 0;
+    let lodScreenDoorDepthCount = 0;
     // Match WebGLRenderer's effective visibility. A visible child beneath a hidden
     // group cannot reach either pass, so walking that subtree only burns CPU and
     // can inflate the diagnostic counts in large village scenes.
@@ -50,13 +71,19 @@ export class StableBokehPass extends BokehPass {
       const contributes = renderable && contributesDofDepth(object);
       if (renderable && !contributes) hidden.push(object);
       if (contributes && object.isMesh && object.geometry?.getAttribute?.('instFade')) {
-        materials.push(object, object.material);
+        materials.push(object, object.material, this._instFadeDepthMaterial);
+        instFadeDepthCount++;
+      } else if (contributes && object.isMesh && hasLodScreenDoor(object)) {
+        materials.push(object, object.material, this._lodScreenDoorDepthMaterial);
+        lodScreenDoorDepthCount++;
       }
     });
     for (const object of hidden) object.visible = false;
-    for (let i = 0; i < materials.length; i += 2) materials[i].material = this._instFadeDepthMaterial;
+    for (let i = 0; i < materials.length; i += 3) materials[i].material = materials[i + 2];
     this.depthExcludedCount = hidden.length;
-    this.depthDitheredCount = materials.length / 2;
+    this.depthDitheredCount = materials.length / 3;
+    this.instFadeDepthCount = instFadeDepthCount;
+    this.lodScreenDoorDepthCount = lodScreenDoorDepthCount;
     // BokehPass clears its packed-depth target to white (far). A Scene Color background would
     // immediately clear over that with arbitrary RGB, which unpackRGBAToDepth interprets as a
     // time/weather-dependent fake distance. Keep sky pixels at the deliberate far-depth clear.
@@ -66,7 +93,7 @@ export class StableBokehPass extends BokehPass {
     } finally {
       this.scene.overrideMaterial = previousOverride;
       this.scene.background = previousBackground;
-      for (let i = 0; i < materials.length; i += 2) materials[i].material = materials[i + 1];
+      for (let i = 0; i < materials.length; i += 3) materials[i].material = materials[i + 1];
       for (const object of hidden) object.visible = true;
       hidden.length = 0;
       materials.length = 0;
@@ -82,6 +109,7 @@ export class StableBokehPass extends BokehPass {
     this._hiddenForDepth.length = 0;
     this._materialsForDepth.length = 0;
     this._instFadeDepthMaterial.dispose();
+    this._lodScreenDoorDepthMaterial.dispose();
     super.dispose();
   }
 }

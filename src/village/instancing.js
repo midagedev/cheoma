@@ -3,6 +3,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 import { toneOf } from './variants.js';
 import { impostorHouseSpec } from './impostor-spec.js';
+import {
+  attachLodScreenDoorRoot,
+  LOD_SCREEN_DOOR_PROGRAM_VERSION,
+  patchLodScreenDoorMaterial,
+} from '../render/lod-screen-door.js';
 
 export { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 
@@ -13,6 +18,22 @@ const M4 = () => new THREE.Matrix4();
 // never serializes these potentially large snapshots.
 const EXPORT_INSTANCE_MATRIX = Symbol.for('cheoma.export.pristineInstanceMatrix');
 const EXPORT_POSITION_SNAPSHOT = Symbol.for('cheoma.export.pristinePositionSnapshot');
+let screenDoorDepthMaterial = null;
+let screenDoorDistanceMaterial = null;
+
+function screenDoorShadowMaterials() {
+  if (!screenDoorDepthMaterial) {
+    screenDoorDepthMaterial = new THREE.MeshDepthMaterial();
+    patchLodScreenDoorMaterial(screenDoorDepthMaterial);
+    screenDoorDepthMaterial.customProgramCacheKey = () =>
+      `cheoma-lod-shadow-depth|${LOD_SCREEN_DOOR_PROGRAM_VERSION}`;
+    screenDoorDistanceMaterial = new THREE.MeshDistanceMaterial();
+    patchLodScreenDoorMaterial(screenDoorDistanceMaterial);
+    screenDoorDistanceMaterial.customProgramCacheKey = () =>
+      `cheoma-lod-shadow-distance|${LOD_SCREEN_DOOR_PROGRAM_VERSION}`;
+  }
+  return { depth: screenDoorDepthMaterial, distance: screenDoorDistanceMaterial };
+}
 
 // 부위(role)별 톤 선택(#55): parcel 의 부위별 곱틴트(roofTone/wallTone/woodTone/stoneTone)에서 고른다.
 //   미지정(레거시 parcel·부위 톤 없음)이면 단일 톤(toneOf(toneIdx))로 하위호환. role 없음(개구부 등)=중립.
@@ -305,14 +326,18 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     kind, tier, setHidden, isHidden: (id) => hidden.has(id),
     setExportHidden, isExportHidden: (id) => exportHidden.has(id), locate,
   };
+  if (opts.screenDoor) {
+    group.userData.screenDoor = attachLodScreenDoorRoot(group, screenDoorShadowMaterials());
+  }
   return group;
 }
 
 // 실제 house prototype에서 화면을 이루는 외피만 남긴 중거리 단계. 별도 근사 모델이 아니라
 // 같은 지오메트리·텍스처·재질을 쓰므로 FAR→MID에서 집 종류와 색이 바뀌지 않고, 공포·기와 낱장·
 // 소품처럼 작은 반복 부재만 제출하지 않는다.
-export function buildHouseEnvelopeInstances(kind, parcels, decomps) {
+export function buildHouseEnvelopeInstances(kind, parcels, decomps, opts = {}) {
   return buildHouseInstances(kind, parcels, decomps, {
+    ...opts,
     tier: 'mid',
     castShadow: false,
     filterMaterial: (material) => material?.userData?.lodEnvelope === true,
@@ -450,7 +475,7 @@ export function createImpostorMaterials(parts = IMPOSTOR_PARTS) {
 
 // buildChunkImpostor(parcels) → 역할별 최대 5개 vertexColor mesh. roof/wall/wood/stone 역할을
 // 보존하고 초가/기와 지붕은 분리해 서로 다른 적설 규칙을 타면서도 청크 드로우콜은 작은 상수다.
-export function buildChunkImpostor(parcels, name = 'chunk-impostor', sharedMaterials = null) {
+export function buildChunkImpostor(parcels, name = 'chunk-impostor', sharedMaterials = null, opts = {}) {
   const parts = Object.fromEntries(IMPOSTOR_PARTS.map((part) => [part, newImpostorPart()]));
   const ranges = Object.fromEntries(IMPOSTOR_PARTS.map((part) => [part, new Map()]));
   for (const p of parcels) {
@@ -482,6 +507,9 @@ export function buildChunkImpostor(parcels, name = 'chunk-impostor', sharedMater
   // 포커스 오버레이가 나타나는 동안 해당 필지의 원경 표현만 접는다. 청크 전체를 숨기지 않아
   // 이웃 집의 LOD는 그대로 유지되며, 복귀 시 원본 Float32 정점을 바이트 그대로 되살린다.
   if (meshRanges.length) attachSourceHideHandle(group, meshRanges);
+  if (opts.screenDoor) {
+    group.userData.screenDoor = attachLodScreenDoorRoot(group, screenDoorShadowMaterials());
+  }
   return group;
 }
 
@@ -512,6 +540,9 @@ export function mergeStatic(objects, name = 'merged-static', opts = {}) {
     if (srcRanges && srcRanges.size) meshRanges.push({ mesh, ranges: srcRanges });
   });
   if (ids && meshRanges.length) attachSourceHideHandle(group, meshRanges);
+  if (opts.screenDoor) {
+    group.userData.screenDoor = attachLodScreenDoorRoot(group, screenDoorShadowMaterials());
+  }
   return group;
 }
 

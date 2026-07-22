@@ -217,18 +217,20 @@ export function* populateVillageSteps(plan, opts = {}) {
           dist: chunk.dist, center: chunk.center, far: chunk.far,
           lod: lodPolicy.enabled,
         };
-        const buildHouses = (into, tier = 'full') => {
+        const buildHouses = (into, tier = 'full', screenDoor = false) => {
           const cGiwa = chunk.parcels.filter((p) => p.kind === 'giwa');
           const cChoga = chunk.parcels.filter((p) => p.kind !== 'giwa');
           const build = tier === 'mid' ? buildHouseEnvelopeInstances : buildHouseInstances;
-          if (cGiwa.length && giwaPool) { const hg = build('giwa', cGiwa, giwaPool.decomps); into.add(hg); giwaGroups.push(hg); }
-          if (cChoga.length && chogaPool) { const hg = build('choga', cChoga, chogaPool.decomps); into.add(hg); chogaGroups.push(hg); }
+          if (cGiwa.length && giwaPool) { const hg = build('giwa', cGiwa, giwaPool.decomps, { screenDoor }); into.add(hg); giwaGroups.push(hg); }
+          if (cChoga.length && chogaPool) { const hg = build('choga', cChoga, chogaPool.decomps, { screenDoor }); into.add(hg); chogaGroups.push(hg); }
         };
-        const buildFullDetail = (into) => {
-          buildHouses(into, 'full');
+        const buildFullDetail = (into, screenDoor = false) => {
+          buildHouses(into, 'full', screenDoor);
           const walls = chunk.parcels.map((p) => buildCourtyard(p, wallMats, char01));
           // #148: ids 로 필지별 정점 레인지 기록 → focus 오버레이가 그 필지 병합 담만 접어 이중 렌더 제거.
-          const wg = mergeStatic(walls, `village-walls-${chunk.ring}-${chunk.sector}`, { ids: chunk.parcels.map((p) => p.id) });
+          const wg = mergeStatic(walls, `village-walls-${chunk.ring}-${chunk.sector}`, {
+            ids: chunk.parcels.map((p) => p.id), screenDoor,
+          });
           into.add(wg); wallGroups.push(wg);
         };
         if (lodPolicy.enabled) {
@@ -236,17 +238,18 @@ export function* populateVillageSteps(plan, opts = {}) {
           // 써 집이 갑자기 다른 모형/색으로 바뀌지 않으며, 미세 반복부재와 담은 근거리까지 미룬다.
           const imp = buildChunkImpostor(
             chunk.parcels, `impostor-${chunk.ring}-${chunk.sector}`, impostorMaterials,
+            { screenDoor: true },
           );
           impostorGroups.push(imp);
           cg.add(imp);
           const mid = new THREE.Group();
           mid.name = `chunk-mid-${chunk.ring}-${chunk.sector}`;
-          buildHouses(mid, 'mid');
+          buildHouses(mid, 'mid', true);
           mid.visible = false;
           cg.add(mid);
           const full = new THREE.Group();
           full.name = `chunk-full-${chunk.ring}-${chunk.sector}`;
-          buildFullDetail(full);
+          buildFullDetail(full, true);
           full.visible = false;
           cg.add(full);
           attachChunkLodSwap(cg, imp, mid, full, chunk, lodPolicy);   // #140-E lodUpdate 를 cg 에 부착(모듈 스코프)

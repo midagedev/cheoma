@@ -139,6 +139,8 @@ export function createInkModeRuntime({
         normalScale: ink?.pass.resolutionScale ?? null,
         normalExcluded: ink?.pass.normalExcludedCount ?? 0,
         normalDithered: ink?.pass.normalDitheredCount ?? 0,
+        instFadeNormal: ink?.pass.instFadeNormalCount ?? 0,
+        lodScreenDoorNormal: ink?.pass.lodScreenDoorNormalCount ?? 0,
         normalDrawCalls: ink?.pass.normalDrawCalls ?? 0,
         pbrPasses: {
           grade: !!post.gradePass?.enabled,

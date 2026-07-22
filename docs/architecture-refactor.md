@@ -141,7 +141,21 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
   크레인 업해 넓어진 시야의 전경 차폐를 넘는다.
 - 한양의 모든 정규 주택은 `FAR mass → MID envelope → FULL` 세 단계다. FAR는 실제 variant의
   치수·평면·지붕 종류와 역할별 팔레트에서 파생하고, MID는 별도 근사 모델이 아니라 실제 빌더의
-  외피 geometry·material만 재사용한다. 중앙을 포함해 청크마다 세 root 중 하나만 보인다.
+  외피 geometry·material만 재사용한다. 안정 상태에는 세 root 중 하나만 보이고, 임계값을 지나는 짧은
+  거리 밴드에서만 `FAR+MID` 또는 `MID+FULL` 인접 root가 함께 보인다. 두 root는 같은 화면 IGN의 보색
+  screen-door subset을 소유해 반투명 정렬·픽셀 공백·중복 depth 없이 이행한다. 진행도는 시간이나 frame
+  수가 아니라 화면 등가 거리에서만 나오며 127단계로 양자화한다. 큰 wheel/teleport가 두 경계를 한
+  프레임에 넘으면 완료된 인접 hop을 같은 평가 안에서 소진해, 느린 dolly와 최종 상태가 같다.
+- screen-door는 `transparent`, `opacity`, `depthWrite`를 바꾸거나 공유 material에 청크별 uniform을 쓰지
+  않는다. setup 때 각 root의 renderable이 scalar channel 하나를 공유하고, material draw callback이 Three가
+  model-view를 계산한 뒤 affine `modelMatrix[3][3]`에 그 값을 실어 같은 draw 직후 복원한다. 따라서
+  MID/FULL의 geometry/material/instance buffer는 청크 간 계속 공유되고 진행도 갱신은 GPU upload를
+  만들지 않는다. stock `worldPosition`이 그림자 좌표를 계산하기 전에는 동차좌표 `w=1`을 복원한다.
+  색, 태양/point shadow custom depth/distance, StableBokeh depth, 수묵 normal은
+  `src/render/screen-door.js`의 같은 IGN discard 문법을 쓴다. `material-program-key.js`가 LOD·구름·눈·물리
+  림의 명시 token을 설치 순서와 무관하게 보존해 LOD/일반 재질이 같은 WebGLProgram으로 합쳐지지 않게
+  한다. 실제 렌더 뒤 matrix 복원과 실제 LOD/일반 cloud+snow+rim 프로그램 분리를 브라우저 계약으로
+  고정한다.
 - focus overlay가 나타나는 순간 해당 필지의 FAR, MID, FULL, 병합 담을 함께 접는다. 카메라 전환이 끝나기
   전이나 focus hop 중에도 `base/overlay` 두 집이 겹치지 않으며, focus-out 때 현재 청크 단계 하나만 복원한다.
 - 사용자가 다시 지은 정규 필지는 예외적으로 focus-out 뒤에도 overlay가 부감 표현의 권위 있는 소유자다.
@@ -180,9 +194,10 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
   pristine snapshot에서 `FULL` 또는 `FAR`를 선택하고 `village-overrides`를 제외해, 같은 옵션의 export가
   사용자의 현재 화면에 따라 달라지지 않는다.
 
-순수 경계·히스테리시스·variant 계약은 `npm run check:lod`, 실제 앱의 한양 focus-in/hop/out 프레임별
-배타성과 동물 sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window.__engine.village.debugLod()`는
-정책값이 아니라 실제 root 가시성과 필지별 은닉 핸들을 읽어 실패 필지를 반환한다.
+순수 경계·히스테리시스·거리 기반 screen-door·variant 계약은 `npm run check:lod`, 실제 앱의 한양
+focus-in/hop/out 프레임별 안정 1-owner/이행 인접 2-owner, 보색 draw-local channel, 자원 불변과 동물
+sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window.__engine.village.debugLod()`는 정책값이
+아니라 실제 root 가시성과 필지별 은닉 핸들을 읽고 `owners/weights/transition`과 실패 필지를 반환한다.
 
 `tools/check-worker-contract.mjs`는 네 규모의 scene graph와 pick proxy 골든 hash, 실제 Worker 메시지, async 단계 순서를 함께 고정한다. 구조 이동 뒤 이 값은 갱신 대상이 아니라 보존 대상이다.
 

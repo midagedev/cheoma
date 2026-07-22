@@ -71,6 +71,7 @@
     "shoot:dof": "node tools/shoot-dof.mjs",
     "shoot:focus-level": "node tools/shoot-focus-level.mjs",
     "shoot:focus-shadow": "node tools/shoot-focus-shadow.mjs",
+    "shoot:lod-transition": "node tools/shoot-lod-transition.mjs",
     "shoot:threshold-life": "node tools/shoot-threshold-life.mjs",
     "shoot:wave": "node tools/shoot-wave.mjs village",
     "shoot:wave:full": "node tools/shoot-wave.mjs hamlet,village,capital,hanyang"
