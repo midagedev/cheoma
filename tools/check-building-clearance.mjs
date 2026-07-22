@@ -244,6 +244,37 @@ for (const fixture of production.residentialFixtures) {
     `${fixture.name} exceeded FULL budget (${fixture.meshes} meshes/${fixture.materials} materials)`);
 }
 
+invariant(production.thresholdLandingFixtures.length === 18,
+  `threshold landing matrix has ${production.thresholdLandingFixtures.length}/18 fixtures`);
+invariant(new Set(production.thresholdLandingFixtures.map((fixture) => fixture.shape)).size === 3,
+  'threshold landing matrix lost a giwa plan shape');
+invariant(new Set(production.thresholdLandingFixtures.map((fixture) => fixture.profile)).size === 3,
+  'threshold landing matrix lost a min/default/max door profile');
+invariant(new Set(production.thresholdLandingFixtures.map((fixture) => fixture.side)).size === 2,
+  'threshold landing matrix lost one seed-selected daecheong side');
+invariant(new Set(production.thresholdLandingFixtures.map((fixture) => fixture.mirrorX)).size === 2,
+  'threshold landing matrix no longer exercises mirrored focused geometry');
+for (const fixture of production.thresholdLandingFixtures) {
+  invariant(fixture.anchorCount === 1,
+    `${fixture.name} exposes ${fixture.anchorCount} primary anchors`);
+  invariant(fixture.primarySide === fixture.side
+      && fixture.openingSide === fixture.side
+      && fixture.placementSide === fixture.side,
+  `${fixture.name} changed landing side across residential/opening/footwear contracts`);
+  invariant(fixture.thresholdClearance > 0.005
+      && fixture.approachClearance > 0.04
+      && fixture.jambClearance > 0.04,
+  `${fixture.name} footwear lost threshold/opening/jamb clearance`);
+  invariant(fixture.deckContains,
+    `${fixture.name} footwear left the actual toenmaru: ${JSON.stringify(fixture)}`);
+  invariant(fixture.returnRailingOverlaps === 0,
+    `${fixture.name} footwear intersects ${fixture.returnRailingOverlaps} toenmaru return railings`);
+  invariant(!fixture.daecheongOverlap,
+    `${fixture.name} footwear overlaps the actual daecheong floor`);
+  invariant(fixture.signatureStable,
+    `${fixture.name} threshold placement plan/signature is not byte-identical`);
+}
+
 const residentialByName = Object.fromEntries(
   production.residentialFixtures.map((fixture) => [fixture.name, fixture]),
 );

@@ -46,7 +46,10 @@ export function createResidentialOpeningDetails(kind, building, target, material
       meoreumHeight: opening.kind === 'window' ? profile.meoreumHeight : undefined,
       lowerPanelHeight: opening.kind === 'door' ? profile.lowerPanelHeight : undefined,
       primary: opening.primary,
-      footwear: opening.primary ? profile.footwear : null,
+      footwear: opening.primary ? {
+        ...profile.footwear,
+        clearSide: opening.landing?.clearSide,
+      } : null,
     });
     if (Math.abs(detail.width - opening.width) > EPSILON) {
       throw new Error(`Opening detail width drifted for ${opening.id}: ${detail.width} != ${opening.width}`);

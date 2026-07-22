@@ -750,6 +750,7 @@ try {
       count,
       dryDisposed,
       sameGeometry: dry?.geometry === wet?.geometry,
+      sameMaterial: dry?.material === wet?.material,
     };
     engine.setWeather('clear');
     return result;
@@ -760,8 +761,9 @@ try {
       && thresholdWeather.wetCondition === 'wet'
       && thresholdWeather.count === 1
       && thresholdWeather.dryDisposed === 1
-      && !thresholdWeather.sameGeometry,
-    `real clear→rain path swaps one focused pair and releases the dry batch (${JSON.stringify(thresholdWeather)})`,
+      && !thresholdWeather.sameGeometry
+      && thresholdWeather.sameMaterial,
+    `real clear→rain path swaps one focused pair, releases its geometry, and reuses the runtime material (${JSON.stringify(thresholdWeather)})`,
   );
 
   const typeChange = await page.evaluate(() => {

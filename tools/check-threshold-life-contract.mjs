@@ -14,6 +14,7 @@ const opening = (style, overrides = {}) => planOpeningDetail({
     y: 0.4,
     outward: style === 'choga' ? 0.3 : 0.78,
     surface: style === 'choga' ? 'jjokmaru' : 'toenmaru',
+    clearSide: style === 'giwa' ? 1 : null,
   },
   ...overrides,
 });
@@ -29,6 +30,8 @@ assert.equal(wet.items.length, 2);
 assert.equal(dry.visibility.tier, 'focus');
 assert.equal(dry.visibility.owner, 'focus-overlay');
 assert.equal(dry.surface, 'jjokmaru');
+assert.equal(wet.clearance.placementSide, 1,
+  'giwa threshold life ignored its authored railing-free landing side');
 
 for (const plan of [dry, wet]) {
   assert.ok(Object.isFrozen(plan) && Object.isFrozen(plan.items)
@@ -73,6 +76,19 @@ assert.notEqual(signatureBase.placement.signature, signatureWidth.placement.sign
   'door width/topology change retained stale footwear placement');
 assert.notEqual(signatureBase.placement.signature, signatureSurface.placement.signature,
   'landing surface change retained stale footwear placement');
+const oppositeLanding = planThresholdLife({
+  opening: opening('giwa', {
+    width: 1.662,
+    footwear: { y: 0.4, outward: 0.78, surface: 'toenmaru', clearSide: -1 },
+  }),
+  seed: 91,
+});
+assert.equal(oppositeLanding.clearance.placementSide, -1,
+  'negative local landing guidance was replaced by a style-wide side');
+assert(oppositeLanding.items.every((item) => item.bounds.uMax < oppositeLanding.clearance.jambU),
+  'negative local landing guidance left footwear across its selected jamb');
+assert.notEqual(signatureBase.placement.signature, oppositeLanding.placement.signature,
+  'landing-side change retained stale footwear placement');
 
 const seedA = { household: 3, nested: { wet: true }, bigint: 9n };
 const seedB = { bigint: 9n, nested: { wet: true }, household: 3 };

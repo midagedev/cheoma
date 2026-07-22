@@ -187,11 +187,17 @@ export function planOpeningDetail(input = {}) {
       surface: typeof footwear.surface === 'string' && footwear.surface
         ? footwear.surface
         : 'threshold',
+      // Optional renderer-free landing guidance. It stays in the opening's
+      // local +u basis, so rotations and mirrored house transforms preserve
+      // the intended physical side without a world-axis special case.
+      clearSide: footwear.clearSide === -1 || footwear.clearSide === 1
+        ? footwear.clearSide
+        : null,
     };
   }
 
   return deepFreeze({
-    version: 2,
+    version: 3,
     id: `opening-${hashString(`${seed}|${kind}|${style}`).toString(16)}`,
     seed,
     kind,

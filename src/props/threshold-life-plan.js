@@ -51,11 +51,11 @@ export function planThresholdLife(input = {}) {
   const gap = kind === 'namaksin' ? 0.026 : 0.022;
   const pairWidth = width * 2 + gap;
   const hingeSide = opening.anchors.pivot?.hingeSide === 1 ? 1 : -1;
-  // The giwa representative door is immediately west of the open daecheong.
-  // Its shoes use that railing-free east access side without changing the
-  // static door hardware/pivot. Other residential openings keep their stable
-  // seed-side variation.
-  const placementSide = opening.style === 'giwa' ? 1 : hingeSide;
+  // Residential planning may name a railing-free landing side (the daecheong
+  // side for giwa). Keep the hardware hinge independent; openings without
+  // authored landing guidance retain their stable hinge-side variation.
+  const clearSide = opening.anchors.footwear.clearSide;
+  const placementSide = clearSide === -1 || clearSide === 1 ? clearSide : hingeSide;
   const jambU = placementSide * opening.width * 0.5;
   const pairCenterU = jambU + placementSide * (pairWidth * 0.5 + 0.065);
   const thresholdEnd = opening.threshold
@@ -98,7 +98,7 @@ export function planThresholdLife(input = {}) {
   // placement vocabulary remains identical. In particular, an opening seed can
   // survive a bay-topology change while its width and selected jamb do not.
   const placementSignature = [
-    'threshold-life-placement-v2',
+    'threshold-life-placement-v3',
     opening.id,
     opening.style,
     condition,
@@ -109,6 +109,7 @@ export function planThresholdLife(input = {}) {
     stableMetric(y),
     stableMetric(authoredOutward),
     opening.anchors.footwear.surface,
+    clearSide,
     placementSide,
     stableMetric(jambU),
     stableMetric(thresholdEnd),
@@ -116,7 +117,7 @@ export function planThresholdLife(input = {}) {
   ].join('|');
 
   return deepFreeze({
-    version: 1,
+    version: 2,
     id: `threshold-life-${hashString(`${seed}|${opening.id}|${condition}`).toString(16)}`,
     seed,
     style: opening.style,

@@ -57,14 +57,9 @@ import {
   setParcelBaseHidden,
 } from './parcel-representation.js';
 import { createVillageDetailLodState } from './detail-lod.js';
+import { createThresholdLifeRuntime } from './threshold-life.js';
 import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
 import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
-import { planThresholdLife } from '../../props/threshold-life-plan.js';
-import {
-  createThresholdLifeMaterial,
-  createThresholdLifeMesh,
-  thresholdLifePlacementFrame,
-} from '../../props/threshold-life.js';
 
 const PERSISTENT_YARD_FIELDS = Object.freeze([
   'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed',
@@ -187,72 +182,16 @@ export function createVillageHandle(opts, seed, plan, group) {
 
   // ── env 상태 ──
   let time = 'day', season = 'summer', weather = 'clear';
-
-  function removeThresholdLife(root) {
-    const details = [];
-    root?.traverse((object) => {
-      if (object.name === 'threshold-life-detail') details.push(object);
-    });
-    for (const detail of details) {
-      detail.parent?.remove(detail);
-      disposeTree(detail);
-    }
-    return details.length;
-  }
-
-  function thresholdLifePlacement(root) {
-    const anchor = root?.getObjectByName('primary-opening-anchor');
-    const opening = anchor?.userData?.openingDetailPlan;
-    if (!anchor || !opening) return null;
-    const lifePlan = planThresholdLife({
-      opening,
-      seed: `${opening.seed}:focus-threshold`,
-      condition: weather === 'rain' ? 'wet' : 'dry',
-    });
-    if (!lifePlan) return null;
-    root.updateWorldMatrix(true, true);
-    const basis = root.matrixWorld.clone().invert().multiply(anchor.matrixWorld);
-    return { lifePlan, basis };
-  }
-
-  function attachThresholdLife(root) {
-    removeThresholdLife(root);
-    const placement = thresholdLifePlacement(root);
-    if (!placement) return null;
-    const mesh = createThresholdLifeMesh(
-      placement.lifePlan,
-      placement.basis,
-      createThresholdLifeMaterial(),
-    );
-    // The focused overlay root owns the batch so a scaled house child cannot
-    // distort museum-scale footwear dimensions.
-    root.add(mesh);
-    return mesh;
-  }
-
-  function reattachThresholdLife(root, mesh) {
-    const placement = thresholdLifePlacement(root);
-    const previous = mesh?.userData?.thresholdLifeBasis;
-    const previousPlan = mesh?.userData?.thresholdLifePlan;
-    if (!placement || !Array.isArray(previous) || previous.length !== 16) return false;
-    if (previousPlan?.placement?.signature !== placement.lifePlan.placement.signature) return false;
-    const next = thresholdLifePlacementFrame(placement.lifePlan, placement.basis);
-    const prior = new THREE.Matrix4().fromArray(previous);
-    if (Math.sign(prior.determinant()) !== Math.sign(next.frame.determinant())) return false;
-    mesh.geometry.applyMatrix4(prior.invert());
-    mesh.geometry.applyMatrix4(next.frame);
-    mesh.userData.thresholdLifePlan = placement.lifePlan;
-    mesh.userData.thresholdLifeBasis = next.frame.toArray();
-    mesh.userData.thresholdLifeSourceScale = next.scale;
-    root.add(mesh);
-    return true;
-  }
+  const thresholdLife = createThresholdLifeRuntime();
+  const thresholdLifeCondition = () => weather === 'rain' ? 'wet' : 'dry';
 
   function refreshFocusedThresholdLife() {
     for (const parcelId of focusedResidentialIds) {
-      attachThresholdLife(overrideById.get(parcelId));
+      thresholdLife.attach(overrideById.get(parcelId), thresholdLifeCondition());
     }
-    for (const record of heroOverrides.values()) attachThresholdLife(record.group);
+    for (const record of heroOverrides.values()) {
+      thresholdLife.attach(record.group, thresholdLifeCondition());
+    }
   }
   let detailLod = null;
   const nightGlow = createVillageNightGlow(
@@ -383,7 +322,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 같은 hero의 편집/리롤만 교체한다. 다른 hero A는 hop 도착까지 유지하고 엔진이 A id로 해제한다.
     hideHeroDetail(parcelId);
     const g = buildHeroCompound(parcel, editOpts || {});
-    attachThresholdLife(g);
+    thresholdLife.attach(g, thresholdLifeCondition());
     overrides.add(g);
     if (snow.isActive()) snow.inject(g);
     const rec = { id: parcelId, group: g };
@@ -934,10 +873,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (snow.isActive()) snow.inject(g);
       retainOverlayPrograms(g, gk + (snow.isActive() ? '|snow' : ''));
       if (focusedResidentialIds.has(parcelId)) {
-        if (!retainedLife || !reattachThresholdLife(g, retainedLife)) {
-          if (retainedLife) disposeTree(retainedLife);
-          attachThresholdLife(g);
-        }
+        if (retainedLife) thresholdLife.reattach(g, retainedLife, thresholdLifeCondition());
+        else thresholdLife.attach(g, thresholdLifeCondition());
       }
       representationDirty = true;     // 새 오버레이 지오/캐스터(편집 교체 포함)
 
@@ -975,7 +912,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (persistent && persistentOverrideIds.has(parcelId)) {
         focusedResidentialIds.add(parcelId);
         setResidentialBaseHidden(parcel, true);
-        attachThresholdLife(persistent);
+        thresholdLife.attach(persistent, thresholdLifeCondition());
         return {
           group: persistent,
           compound: false,
@@ -986,7 +923,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       const g = this.rebuildParcel(parcelId, {});   // 기본(변주) 오버레이 + 인스턴스 은닉
       if (!g) return null;
       focusedResidentialIds.add(parcelId);
-      attachThresholdLife(g);
+      thresholdLife.attach(g, thresholdLifeCondition());
       return { group: g, compound: false, assembly: g.children[0] || g, ambient: focusAmbientDescriptor(parcelId, g) };
     },
     focusAmbientDescriptor,
@@ -1002,7 +939,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       focusedResidentialIds.delete(parcelId);
       const g = overrideById.get(parcelId);
       if (g && persistentOverrideIds.has(parcelId)) {
-        removeThresholdLife(g);
+        thresholdLife.detach(g);
         setResidentialBaseHidden(parcel, true);
         return;
       }
@@ -1298,6 +1235,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       ambientField.exit();
       treeOccluder?.dispose();
       disposeTree(group, keptMats);
+      thresholdLife.dispose();
       // #129 프로그램 앵커 최종 해제 — 오버레이 dispose 는 __kept 를 건너뛰므로 마을 파기 시 여기서 정리.
       disposeMaterials(keptMats);
       keptMats.length = 0;

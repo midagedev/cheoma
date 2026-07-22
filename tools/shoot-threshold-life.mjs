@@ -27,6 +27,8 @@ const scaleX = Number(query.get('sx') || 1);
 const scaleY = Number(query.get('sy') || 1);
 const scaleZ = Number(query.get('sz') || 1);
 const mainHalfW = Number(query.get('mainHalfW'));
+const buildingSeed = Number(query.get('seed') || (style === 'choga' ? 31 : 20260716));
+const planShape = query.get('planShape');
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -41,8 +43,9 @@ const palette = season === 'winter'
 scene.background = new THREE.Color(palette.bg);
 scene.fog = new THREE.Fog(palette.bg, 16, 42);
 const building = buildBuilding({
-  ...PRESETS[style], seed: style === 'choga' ? 31 : 17,
-  ...(Number.isFinite(mainHalfW) ? { planShape:'single', bays:3, mainHalfW } : {}),
+  ...PRESETS[style], seed: buildingSeed,
+  ...(planShape ? { planShape } : {}),
+  ...(Number.isFinite(mainHalfW) ? { bays:3, mainHalfW } : {}),
 });
 building.scale.set(scaleX, scaleY, scaleZ);
 scene.add(building);
@@ -58,7 +61,7 @@ const anchor = building.getObjectByName('primary-opening-anchor');
 if (!anchor) throw new Error('threshold life fixture missing production opening anchor');
 building.updateWorldMatrix(true, true);
 const lifePlan = planThresholdLife({
-  opening:anchor.userData.openingDetailPlan, condition, seed:style === 'choga' ? 31 : 17,
+  opening:anchor.userData.openingDetailPlan, condition, seed:buildingSeed,
 });
 const life = createThresholdLifeMesh(lifePlan, anchor.matrixWorld, createThresholdLifeMaterial());
 // Scene ownership keeps the batch outside the scaled building subtree, matching
@@ -79,7 +82,7 @@ const withoutLife={calls:renderer.info.render.calls,triangles:renderer.info.rend
 life.visible=true; renderer.info.reset(); renderer.render(scene,camera);
 const withLife={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,programs:renderer.info.programs?.length||0};
 window.__THRESHOLD_LIFE={
-  ready:true, style, condition, season, plan:life.userData.thresholdLifePlan,
+  ready:true, style, condition, season, buildingSeed, planShape, plan:life.userData.thresholdLifePlan,
   openingWidth:anchor.userData.openingDetailPlan.width,
   hostScale:[scaleX,scaleY,scaleZ],
   bounds:{min:box.min.toArray(),max:box.max.toArray(),size:box.getSize(new THREE.Vector3()).toArray()}, withoutLife,withLife,
@@ -127,15 +130,18 @@ try {
     }
   });
   const cases = [
-    ['choga-dry-scale070-autumn', 'choga', 'dry', 'autumn', 0.7, 0.7, 0.7, null],
-    ['choga-dry-scale140-winter', 'choga', 'dry', 'winter', 1.4, 1.4, 1.4, null],
-    ['giwa-dry-mainhalf390-scale070', 'giwa', 'dry', 'summer', 0.7, 0.7, 0.7, 3.9],
-    ['giwa-dry-mainhalf380-scale140', 'giwa', 'dry', 'summer', 1.4, 1.4, 1.4, 3.8],
-    ['giwa-wet-mainhalf380-anisotropic', 'giwa', 'wet', 'summer', 1.4, 0.75, 1.2, 3.8],
+    ['choga-dry-scale070-autumn', 'choga', 'dry', 'autumn', 0.7, 0.7, 0.7, null, 31, null],
+    ['choga-dry-scale140-winter', 'choga', 'dry', 'winter', 1.4, 1.4, 1.4, null, 31, null],
+    ['giwa-dry-l-right-default', 'giwa', 'dry', 'summer', 1, 1, 1, null, 20260716, 'l'],
+    ['giwa-wet-l-right-default', 'giwa', 'wet', 'summer', 1, 1, 1, null, 20260716, 'l'],
+    ['giwa-dry-mainhalf390-scale070', 'giwa', 'dry', 'summer', 0.7, 0.7, 0.7, 3.9, 17, 'single'],
+    ['giwa-dry-mainhalf380-scale140', 'giwa', 'dry', 'summer', 1.4, 1.4, 1.4, 3.8, 17, 'single'],
+    ['giwa-wet-mainhalf380-anisotropic', 'giwa', 'wet', 'summer', 1.4, 0.75, 1.2, 3.8, 17, 'single'],
   ];
-  for (const [name, style, condition, season, sx, sy, sz, mainHalfW] of cases) {
-    const params = new URLSearchParams({ style, condition, season, sx, sy, sz });
+  for (const [name, style, condition, season, sx, sy, sz, mainHalfW, seed, planShape] of cases) {
+    const params = new URLSearchParams({ style, condition, season, sx, sy, sz, seed });
     if (mainHalfW != null) params.set('mainHalfW', mainHalfW);
+    if (planShape) params.set('planShape', planShape);
     await page.goto(`http://127.0.0.1:${port}/__threshold-life?${params}`,
       { waitUntil:'domcontentloaded', timeout:60_000 });
     await page.waitForFunction(() => window.__THRESHOLD_LIFE?.ready === true, null, { timeout:60_000 });

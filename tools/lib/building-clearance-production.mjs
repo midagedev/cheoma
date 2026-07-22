@@ -8,6 +8,10 @@ import {
   createThresholdLifeMaterial,
   createThresholdLifeMesh,
 } from '../../src/props/threshold-life.js';
+import {
+  planResidentialOpenings,
+  residentialOpeningCapabilities,
+} from '../../src/layout/residential-openings.js';
 
 const bounds = (object) => {
   const box = new THREE.Box3().setFromObject(object);
@@ -255,6 +259,65 @@ function inspectResidentialOpenings(building) {
   };
 }
 
+function primarySideSeeds(params) {
+  const bySide = new Map();
+  for (let seed = 0; seed < 256 && bySide.size < 2; seed++) {
+    const primary = planResidentialOpenings('giwa', params, seed)
+      .openings.find((opening) => opening.primary);
+    const side = primary?.landing?.clearSide;
+    if ((side === -1 || side === 1) && !bySide.has(side)) bySide.set(side, seed);
+  }
+  if (bySide.size !== 2) throw new Error('Giwa fixture cannot select both daecheong landing sides');
+  return bySide;
+}
+
+function inspectThresholdLanding(building) {
+  building.updateWorldMatrix(true, true);
+  const anchors = [];
+  const returnRailings = [];
+  building.traverse((object) => {
+    if (object.name === 'primary-opening-anchor') anchors.push(object);
+    if (object.name === 'toenmaru-return-railing') returnRailings.push(object);
+  });
+  const anchor = anchors[0];
+  const opening = anchor?.userData?.openingDetailPlan;
+  const plan = planThresholdLife({ opening, condition: 'dry', seed: 17 });
+  const repeat = planThresholdLife({ opening, condition: 'dry', seed: 17 });
+  const material = createThresholdLifeMaterial();
+  const mesh = createThresholdLifeMesh(plan, anchor.matrixWorld, material);
+  const shoeBox = new THREE.Box3().setFromObject(mesh);
+  const deckBox = new THREE.Box3().setFromObject(building.getObjectByName('toenmaru'));
+  const daecheongBox = new THREE.Box3().setFromObject(building.getObjectByName('daecheong-floor'));
+  const railBoxes = returnRailings.map((railing) => new THREE.Box3().setFromObject(railing));
+  const result = {
+    anchorCount: anchors.length,
+    openingSide: opening?.anchors?.footwear?.clearSide ?? null,
+    placementSide: plan?.clearance?.placementSide ?? null,
+    thresholdClearance: plan?.clearance?.threshold ?? null,
+    approachClearance: plan?.clearance?.approach ?? null,
+    jambClearance: plan?.clearance?.jamb ?? null,
+    signatureStable: plan?.placement?.signature === repeat?.placement?.signature
+      && JSON.stringify(plan) === JSON.stringify(repeat),
+    deckContains: shoeBox.min.x >= deckBox.min.x - 1e-6
+      && shoeBox.max.x <= deckBox.max.x + 1e-6
+      && shoeBox.min.z >= deckBox.min.z - 1e-6
+      && shoeBox.max.z <= deckBox.max.z + 1e-6,
+    returnRailingOverlaps: railBoxes.filter((box) => box.intersectsBox(shoeBox)).length,
+    daecheongOverlap: daecheongBox.intersectsBox(shoeBox),
+    shoeBounds: {
+      min: shoeBox.min.toArray(),
+      max: shoeBox.max.toArray(),
+    },
+    deckBounds: {
+      min: deckBox.min.toArray(),
+      max: deckBox.max.toArray(),
+    },
+  };
+  mesh.geometry.dispose();
+  material.dispose();
+  return result;
+}
+
 function inspectThresholdAdapter(opening, condition) {
   const plan = planThresholdLife({ opening: opening.plan, condition, seed: 17 });
   const material = createThresholdLifeMaterial();
@@ -405,6 +468,46 @@ export function inspectBuildingClearance() {
     disposeBuilding(building);
     return { name, ...report };
   });
+  const thresholdLandingShapes = [
+    ['single', { ...PRESETS.giwa, planShape: 'single', mainHalfW: 3.3 }],
+    ['l', { ...PRESETS.giwa }],
+    ['u', {
+      ...PRESETS.giwa,
+      planShape: 'u', bays: 4, mainHalfW: 5, wingW: 2.15, wingLen: 3.4,
+    }],
+  ];
+  const thresholdLandingFixtures = thresholdLandingShapes.flatMap(([shape, shapeParams]) => {
+    const capabilities = residentialOpeningCapabilities('giwa', shapeParams);
+    const profiles = [
+      ['min', capabilities.doorWidthK.min, capabilities.doorCount.min],
+      ['default', capabilities.doorWidthK.default, capabilities.doorCount.default],
+      ['max', capabilities.doorWidthK.max, capabilities.doorCount.max],
+    ];
+    return [...primarySideSeeds(shapeParams)].flatMap(([side, seed]) => (
+      profiles.map(([profile, doorWidthK, doorCount]) => {
+        const params = { ...shapeParams, seed, doorWidthK, doorCount };
+        const primary = planResidentialOpenings('giwa', params, seed).openings
+          .find((opening) => opening.primary);
+        const building = buildBuilding({ ...params, mats: testMaterials() });
+        // Exercise the same reflection used by the focused ㄱ variant while
+        // retaining both local landing directions across the full matrix.
+        const mirrorX = side < 0 ? -1 : 1;
+        building.scale.x = mirrorX;
+        const landing = inspectThresholdLanding(building);
+        disposeBuilding(building);
+        return {
+          name: `${shape}-${side > 0 ? 'left' : 'right'}-${profile}`,
+          shape,
+          profile,
+          seed,
+          side,
+          mirrorX,
+          primarySide: primary.landing?.clearSide ?? null,
+          ...landing,
+        };
+      })
+    ));
+  });
   const result = {
     ownedMergeFailure: inspectOwnedMergeFailure(),
     giwa: {
@@ -420,6 +523,7 @@ export function inspectBuildingClearance() {
     hearths,
     openings,
     residentialFixtures,
+    thresholdLandingFixtures,
     chogaNonfinite: chogaNonfiniteProbe,
     thresholdAdapters: {
       dry: inspectThresholdAdapter(openings.choga, 'dry'),

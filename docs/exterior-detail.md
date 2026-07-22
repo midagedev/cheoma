@@ -63,8 +63,9 @@
   조건은 널리 쓰인 짚신, 명시적인 젖은 조건은 비 용례가 확인된 나막신이다. 조선 나막신을 계절 일반 장식이나
   신분 표지로 확대 해석하지 않으며 현대 고무신은 만들지 않는다. 각 신발의 실제 소장품 치수 범위를 저폴리
   화면 가독성에 맞게 약 24~26cm 길이로 제한한다.
-- 신발은 문 중앙이 아니라 문설주 바깥에 한 켤레를 붙인다. 기와집의 대표 문은 바로 동쪽 대청의 난간 없는
-  접근 gap 쪽을 선택하되 정적 철물과 미래 pivot 방향은 바꾸지 않는다. 순수 plan이 threshold 끝, 열린 출입 폭,
+- 신발은 문 중앙이 아니라 문설주 바깥에 한 켤레를 붙인다. 기와집의 대표 문은 seed에 따라 대청 왼쪽 또는
+  오른쪽 문이 될 수 있으므로 residential plan이 개구부 로컬 `+u` 기준의 난간 없는 대청 쪽(`clearSide`)을
+  명시한다. 신발은 그 방향을 소비하되 정적 철물과 미래 pivot 방향은 바꾸지 않는다. 순수 plan이 threshold 끝, 열린 출입 폭,
   선택한 문설주와의 양의 clearance 및 placement signature를 기록한다. `src/props/threshold-life.js`는 최종 opening
   basis에서 위치·회전과 landing reference만 소비하고 집의 `footprintScale`·필지 비등방 scale은 제거한다. 따라서
   처마·문간 위치는 편집된 집을 따르되 신발 자체는 세계 단위 24~26cm 범위를 유지한다. 문을 여는 상태는 여전히
@@ -100,6 +101,8 @@
   frame/hardware가 각각 한 batch이고, primary entrance가 하나이며 철물이 MID에 섞이지 않는지 검사한다. 초가
   기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ은 planner와 실제 패널의 개수·폭, 부엌 분리, 메시·재질 상한도 함께 검사하고,
   `-1.4×0.7×1.25` mirror·비등방 host basis에서도 신발 pair의 세계 length/width가 바뀌지 않는지 확인한다.
+  기와 ㅡ·ㄱ·ㄷ × 대청 좌우 primary seed × 최소·기본·최대 문 폭/개수 18개 production fixture는 실제 툇마루
+  bounds 안에 신발이 남고 리턴 난간·대청 바닥·출입구와 겹치지 않는지도 검사한다.
 - `npm run check:app`: 네 기와집 topology가 `hardware` 재질 하나를 공유하고 FULL decomp마다 한 그룹만 가지며,
   일반 기와↔초가와 대표 종가 rebuild가 anchor/panel/frame/hardware를 정확히 하나씩 교체·해제하는지 검사한다.
   정적 마을에는 신발이 없고 focus에서만 한 batch가 생기는지, 실제 clear→rain 전환이 짚신→나막신으로 바뀌며
