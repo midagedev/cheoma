@@ -257,6 +257,26 @@ export function createVillageHandle(opts, seed, plan, group) {
     group,
     (dt, level) => group.userData.updateNightLights?.(dt, level, detailLod?.lensScale ?? 1),
   );
+  // FULL overlays own fresh hanji materials and renderer-authored opening
+  // anchors. Keep material emissive ownership and the single Points owner slot
+  // in lockstep, but only at overlay lifecycle events (never per frame).
+  const residentialGlowById = new Map();
+  const refreshNightLightOwner = (ownerId, overlayRoot = null) => {
+    group.userData.refreshNightLights?.(ownerId, overlayRoot);
+  };
+  function registerResidentialGlow(parcelId, root) {
+    const previous = residentialGlowById.get(parcelId);
+    if (previous) nightGlow.remove(previous);
+    const owner = nightGlow.add(root);
+    residentialGlowById.set(parcelId, owner);
+    refreshNightLightOwner(parcelId, root);
+  }
+  function releaseResidentialGlow(parcelId, restoreBase = true) {
+    const owner = residentialGlowById.get(parcelId);
+    if (owner) nightGlow.remove(owner);
+    residentialGlowById.delete(parcelId);
+    if (restoreBase) refreshNightLightOwner(parcelId, null);
+  }
 
   // ── 마을 전용 조명 리그(태스크 #44). scene 에 add/remove 로 마을 활성 동안만 유효. ──
   const vlights = createVillageLightRig();
@@ -390,6 +410,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 생성 뒤 얹는 focus overlay의 한지 재질도 현재 시간대의 창호 발광 수명에 합류시킨다.
     const hg = nightGlow.add(g);
     if (hg.length) rec.glow = hg;
+    refreshNightLightOwner(parcelId, g);
     if (heroHandle && heroHandle.get(parcelId)) heroHandle.get(parcelId).visible = false;
     else { const lm = landmarksGroup(); if (lm) { lm.visible = false; landmarksHidden = true; } }
     representationDirty = true;
@@ -405,6 +426,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (!rec) continue;
       releasePrimaryDoor(id);
       nightGlow.remove(rec.glow);
+      refreshNightLightOwner(id, null);
       disposeTree(rec.group); overrides.remove(rec.group); heroOverrides.delete(id);
       if (heroHandle?.get(id)) heroHandle.get(id).visible = true;
       changed = true;
@@ -440,7 +462,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   const palaceCompound = palaceCore ? (palaceCore.userData.palaceCompound || null) : null;  // buildPalaceCompound 루트(편집 메타)
   const palaceInner = palaceCompound ? palaceCompound.parent : null;           // 배치 변환(위치·회전) 보유 그룹
   const palaceHandle = palaceCompound ? (palaceCompound.userData.palaceHandle || null) : null;
-  let palaceOverride = null;     // { group, comp } 표시 중 오버레이
+  let palaceOverride = null;     // { group, comp, glow } 표시 중 오버레이
   let palaceHidden = false;      // palaceCore 은닉 여부
   let palaceCurrentOverrides = {};
   let palaceDancheong = resolveDancheong('palace', palaceHandle?.dancheong || PRESETS.korea);
@@ -476,7 +498,8 @@ export function createVillageHandle(opts, seed, plan, group) {
     const activeOverrides = Object.keys(palaceCurrentOverrides).length ? palaceCurrentOverrides : null;
     const g = buildPalaceOverlay(activeOverrides);
     overrides.add(g);
-    palaceOverride = { group: g, comp: g.children[0] };
+    palaceOverride = { group: g, comp: g.children[0], glow: nightGlow.add(g) };
+    refreshNightLightOwner('palace', g);
     if (palaceVisNode) palaceVisNode.visible = false; palaceHidden = true;   // #140-B 부감 병합본(또는 미병합 폴백) 은닉
     representationDirty = true;
     return g;
@@ -486,6 +509,8 @@ export function createVillageHandle(opts, seed, plan, group) {
     if (palaceOverride) {
       // 오버레이는 독립 팔레트를 소유한다. 원본과 texture source 픽셀은 캐시해도 Texture/Material
       // 객체는 공유하지 않으므로 다른 궁의 단청 상태와 dispose 수명이 서로 오염되지 않는다.
+      nightGlow.remove(palaceOverride.glow);
+      refreshNightLightOwner('palace', null);
       disposePalaceCompound(palaceOverride.comp);
       overrides.remove(palaceOverride.group); palaceOverride = null;
     }
@@ -529,7 +554,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   let templeSeed = templeHandle?.seed ?? templeFeature?.seed ?? 11;
   let templeCurrentPlan = templeHandle?.plan || templeFeature?.compound || null;
   let templeDancheong = resolveDancheong('temple', templeHandle?.dancheong || PRESETS.temple);
-  let templeOverride = null; // { group, compound }
+  let templeOverride = null; // { group, compound, glow }
   let templeHidden = false;
   const templeEditable = () => !!(templeCompound && templeInner && templeCurrentPlan);
 
@@ -579,6 +604,8 @@ export function createVillageHandle(opts, seed, plan, group) {
     templeHidden = true;
     if (snow.isActive()) snow.inject(built.wrapper);
     retainOverlayPrograms(built.wrapper, `temple${snow.isActive() ? '|snow' : ''}`);
+    templeOverride.glow = nightGlow.add(built.wrapper);
+    refreshNightLightOwner('temple', built.wrapper);
     representationDirty = true;
     return built.wrapper;
   }
@@ -586,6 +613,8 @@ export function createVillageHandle(opts, seed, plan, group) {
   function hideTempleDetail() {
     const changed = !!templeOverride || templeHidden;
     if (templeOverride) {
+      nightGlow.remove(templeOverride.glow);
+      refreshNightLightOwner('temple', null);
       disposeTempleCompound(templeOverride.compound);
       overrides.remove(templeOverride.group);
       templeOverride = null;
@@ -930,6 +959,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       retainedLife?.parent?.remove(retainedLife);
       if (prev) {
         releasePrimaryDoor(parcelId);
+        releaseResidentialGlow(parcelId);
         disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId);
       }
       persistentOverrideIds.delete(parcelId);
@@ -1044,6 +1074,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       }
       if (snow.isActive()) snow.inject(g);
       retainOverlayPrograms(g, gk + (snow.isActive() ? '|snow' : ''));
+      registerResidentialGlow(parcelId, g);
       if (focusedResidentialIds.has(parcelId)) {
         if (retainedLife) thresholdLife.reattach(g, retainedLife, thresholdLifeCondition());
         else thresholdLife.attach(g, thresholdLifeCondition());
@@ -1086,6 +1117,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         focusedResidentialIds.add(parcelId);
         setResidentialBaseHidden(parcel, true);
         thresholdLife.attach(persistent, thresholdLifeCondition());
+        refreshNightLightOwner(parcelId, persistent);
         return {
           group: persistent,
           compound: false,
@@ -1117,7 +1149,10 @@ export function createVillageHandle(opts, seed, plan, group) {
         setResidentialBaseHidden(parcel, true);
         return;
       }
-      if (g) { disposeTree(g); overrides.remove(g); overrideById.delete(parcelId); }
+      if (g) {
+        releaseResidentialGlow(parcelId);
+        disposeTree(g); overrides.remove(g); overrideById.delete(parcelId);
+      }
       if (parcel) {
         setResidentialBaseHidden(parcel, false);   // 부감 인스턴스·담·임포스터 원상복원(픽셀 일치)
       }
@@ -1125,15 +1160,26 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 현재 표시 중 focus 오버레이(정규/특수) — 리플레이(#92 再 일반화)가 조회. 재생성 없이 현 오버레이
     //   (편집 상태 보존)를 반환: group=링 앵커, assembly=조립 대상 노드, compound=playCompoundAssembly 여부.
     focusAssembly(parcelId) {
-      if (parcelId === 'palace') return palaceOverride ? { group: palaceOverride.group, assembly: palaceOverride.group, compound: true } : null;
-      if (parcelId === 'temple') return templeOverride ? { group: templeOverride.group, assembly: templeOverride.group, compound: true } : null;
+      if (parcelId === 'palace') {
+        if (!palaceOverride) return null;
+        refreshNightLightOwner(parcelId, palaceOverride.group);
+        return { group: palaceOverride.group, assembly: palaceOverride.group, compound: true };
+      }
+      if (parcelId === 'temple') {
+        if (!templeOverride) return null;
+        refreshNightLightOwner(parcelId, templeOverride.group);
+        return { group: templeOverride.group, assembly: templeOverride.group, compound: true };
+      }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
       if (parcel.hero) {
         const rec = heroOverrides.get(parcelId);
-        return rec ? { group: rec.group, assembly: rec.group, compound: true } : null;
+        if (!rec) return null;
+        refreshNightLightOwner(parcelId, rec.group);
+        return { group: rec.group, assembly: rec.group, compound: true };
       }
       const g = overrideById.get(parcelId);
+      if (g) refreshNightLightOwner(parcelId, g);
       return g ? { group: g, assembly: g.children[0] || g, compound: false } : null;
     },
 
@@ -1278,6 +1324,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       const wasPersistent = persistentOverrideIds.has(parcelId);
       if (existing) {
         releasePrimaryDoor(parcelId);
+        releaseResidentialGlow(parcelId);
         overrideById.delete(parcelId);
         persistentOverrideIds.delete(parcelId);
         overrides.remove(existing);
@@ -1292,6 +1339,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       });
       if (probe) {
         releasePrimaryDoor(parcelId);
+        releaseResidentialGlow(parcelId);
         disposeTree(probe);
         overrides.remove(probe);
         overrideById.delete(parcelId);
@@ -1300,6 +1348,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         overrides.add(existing);
         overrideById.set(parcelId, existing);
         activatePrimaryDoor(parcelId, existing);
+        registerResidentialGlow(parcelId, existing);
         if (wasPersistent) persistentOverrideIds.add(parcelId);
         setResidentialBaseHidden(parcel, true);
       } else {
@@ -1443,7 +1492,13 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (disposed) return;
       disposed = true;
       for (const parcelId of [...primaryDoorById.keys()]) releasePrimaryDoor(parcelId);
+      for (const parcelId of [...residentialGlowById.keys()]) {
+        releaseResidentialGlow(parcelId, false);
+      }
+      for (const record of heroOverrides.values()) nightGlow.remove(record.glow);
+      if (palaceOverride) nightGlow.remove(palaceOverride.glow);
       hideTempleDetail();
+      nightGlow.dispose();
       detachClouds();
       ambientField.exit();
       treeOccluder?.dispose();
