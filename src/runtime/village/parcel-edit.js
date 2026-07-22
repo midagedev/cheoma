@@ -1,5 +1,16 @@
 import { PRESETS } from '../../params.js';
-import { variantOv } from '../../village/variants.js';
+import { normalizeGiwaPlan } from '../../layout/giwa-footprint.js';
+import { variantOv, variantThatchAge } from '../../village/variants.js';
+
+const WALL_TYPES = Object.freeze({
+  giwa: new Set(['tile', 'stone', 'mud', 'brush']),
+  choga: new Set(['stone', 'mud', 'brush', 'hedge', 'open']),
+});
+
+export function parcelWallType(kind, value) {
+  const generatorKind = kind === 'giwa' ? 'giwa' : 'choga';
+  return WALL_TYPES[generatorKind].has(value) ? value : 'stone';
+}
 
 function palaceBuildingDefaults() {
   const preset = PRESETS.korea;
@@ -40,7 +51,19 @@ export function palaceCompoundDefaults() {
 }
 
 // UI 편집 스키마가 생성기 키를 번역 없이 사용할 수 있게 현재 렌더 기본값을 명세한다.
-export function buildParcelSpec(parcel) {
+export function buildParcelSpec(sourceParcel, kindOverride = null) {
+  const requestedKind = kindOverride === 'giwa' ? 'giwa'
+    : kindOverride === 'choga' ? 'choga' : sourceParcel.kind;
+  const changedKind = !sourceParcel.hero && requestedKind !== sourceParcel.kind;
+  const parcel = changedKind ? {
+    ...sourceParcel,
+    kind: requestedKind,
+    variant: 0,
+    wallType: parcelWallType(requestedKind, sourceParcel.wallType),
+    thatchAge: requestedKind === 'choga'
+      ? variantThatchAge({ kind: 'choga', variant: 0 })
+      : undefined,
+  } : sourceParcel;
   const kind = parcel.kind;
   if (parcel.hero) {
     const heroStyle = parcel.heroStyle === 'hanok' ? 'hanok' : 'palace';
@@ -77,6 +100,9 @@ export function buildParcelSpec(parcel) {
     variant: parcel.variant,
     editable: true,
     params: {
+      planShape: generatorKind === 'giwa' ? value('planShape') : undefined,
+      bays: generatorKind === 'giwa' ? value('bays') : undefined,
+      bay: generatorKind === 'giwa' ? value('bay') : undefined,
       frontBays: value('frontBays'), sideBays: value('sideBays'),
       roofPitch: value('roofPitch'), riseScale: value('riseScale'),
       eaveOverhang: value('eaveOverhang'), profileCurve: value('profileCurve'), cornerLift: value('cornerLift'),
@@ -88,7 +114,7 @@ export function buildParcelSpec(parcel) {
       winSide: generatorKind === 'choga' ? !!variation.winSide : undefined,
       doorPattern: variation.doorPattern || 'ttisal',
       footprintScale: 1,
-      wallType: parcel.wallType || 'stone',
+      wallType: parcelWallType(generatorKind, parcel.wallType),
       roofTone: parcel.toneIdx || 0,
       thatchAge: generatorKind === 'giwa' ? undefined : (parcel.thatchAge ?? 0.5),
       aux: !!parcel.aux,
@@ -108,14 +134,17 @@ const PARCEL_TOP_EDIT_KEYS = Object.freeze([
 // A persistent runtime overlay becomes the authoritative representation for its
 // parcel. Keep the declarative editor spec in lockstep so leaving and re-entering
 // focus cannot reset the panel to the original instanced-house values.
-export function buildEditedParcelSpec(parcel, newParams = {}) {
-  const spec = buildParcelSpec(parcel);
+export function buildEditedParcelSpec(parcel, newParams = {}, acceptedBuilding = null) {
+  const original = buildParcelSpec(parcel);
   const kind = newParams.kind === 'giwa' ? 'giwa'
-    : newParams.kind === 'choga' ? 'choga' : spec.kind;
-  spec.kind = kind;
-  spec.params = { ...spec.params, ...(newParams.building || {}) };
+    : newParams.kind === 'choga' ? 'choga' : original.kind;
+  const spec = buildParcelSpec(parcel, kind);
+  spec.params = { ...spec.params, ...(acceptedBuilding || newParams.building || {}) };
   for (const key of PARCEL_TOP_EDIT_KEYS) {
-    if (newParams[key] !== undefined) spec.params[key] = newParams[key];
+    if (newParams[key] === undefined) continue;
+    spec.params[key] = key === 'wallType'
+      ? parcelWallType(kind, newParams[key])
+      : newParams[key];
   }
   return spec;
 }
@@ -126,6 +155,9 @@ export function clampBuildingDimensions(params, kind) {
     if (params[key] != null) params[key] = Math.max(min, Math.min(max, params[key]));
   };
   if (kind === 'giwa') {
+    const plan = normalizeGiwaPlan(params.planShape, params.bays);
+    params.planShape = plan.planShape;
+    params.bays = plan.bays;
     clamp('columnHeight', 2.4, 3.8);
     clamp('ridgeH', 0.30, 0.60);
     clamp('podiumTierH', 0.30, 0.95);

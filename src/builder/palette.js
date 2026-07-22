@@ -683,6 +683,12 @@ const MATERIAL_ROLES = {
   opening: ['door', 'hanji', 'salchang'],   // 창호: 중립 틴트(야간 광 충돌 방지) + 변주별 살 패턴 유지 태그
 };
 function tagRoles(M) {
+  // Separately built house variants still describe the same authored palette families.
+  // Clones retain userData, letting the village instancer share semantically identical
+  // materials across different ㅡ/ㄱ/ㄷ topology without confusing unrelated textures.
+  for (const [key, material] of Object.entries(M)) {
+    if (material?.isMaterial) material.userData.paletteKey = key;
+  }
   for (const role in MATERIAL_ROLES) {
     for (const key of MATERIAL_ROLES[role]) {
       const m = M[key];
@@ -783,6 +789,7 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
     bumpMap: tex, bumpScale,
   });
   mat.userData.role = 'roof';   // 지붕면 신규 재질도 부위 태그(마을 기와 톤 변주, 태스크 #55)
+  mat.userData.paletteKey = 'tileSurface';
   mat.userData.lodEnvelope = true;
   mat.userData.snowSurface = true;
   return mat;
@@ -800,6 +807,7 @@ export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
     bumpMap: tex, bumpScale,
   });
   mat.userData.role = 'roof';
+  mat.userData.paletteKey = 'sugiwa';
   mat.userData.snowSurface = true;
   return mat;
 }

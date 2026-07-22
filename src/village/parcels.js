@@ -525,6 +525,9 @@ export function planSatellites(site, opts, seed, {
   riverPort = null,
 } = {}) {
   const scale = opts.scale;
+  const householdContext = {
+    settlementScale01: Number.isFinite(opts.scale01) ? opts.scale01 : undefined,
+  };
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const nClusters = ({ hamlet: 0, village: 1, town: 1, capital: 2, hanyang: 3 })[scale] || 0;
   if (nClusters <= 0 && !riverPort) return [];
@@ -660,6 +663,7 @@ export function planSatellites(site, opts, seed, {
       const parcel = attachParcelSpatialContract({
         shape, center, frontDir, rank, kind: dims.kind,
         plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed,
+        ...householdContext,
         satellite: true,
         riverbank: anchor.riverbank === true,
         placement: anchor.riverbank ? 'river-port' : 'satellite',

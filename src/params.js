@@ -1,3 +1,8 @@
+import {
+  giwaFootprintMetrics,
+  giwaFootprintPoints,
+} from './layout/giwa-footprint.js';
+
 // 파라미터 정의와 프리셋.
 // 길이 단위: 미터. 칸 폭은 어칸(중앙) > 협칸 > 퇴칸(끝) 순으로 좁아진다.
 
@@ -127,7 +132,9 @@ export const PRESETS = {
     style: 'giwa',
     roofType: 'skeleton',
 
-    // ㄱ자 평면(기둥/벽 중심선): 가로 본채 + 우측 세로 날개
+    // 정규 반가 평면. 마을 변주는 같은 계약에서 ㅡ/ㄱ/ㄷ을 선택한다.
+    planShape: 'l',
+    bays: 3,
     mainHalfW: 4.2,   // 본채 반폭(x)
     mainHalfD: 2.2,   // 본채 반깊이(z)
     wingW: 2.6,       // 날개 폭(x)
@@ -146,32 +153,15 @@ export const PRESETS = {
   },
 };
 
-// 기와집(ㄱ자) 풋프린트 정규화 — 좁은 폭 지붕 파탄 방지 단일 지점.
-//   L 평면은 본채(반폭 a)에서 우측 세로 날개(폭 w)가 +z 로 뻗는 형태다. 날개폭 w 가 본채폭
-//   2a 에 비해 크면(리롤/편집으로 mainHalfW 가 작아질 때) 본채 앞면 마루(폭 2a−w)가 소실되고
-//   합각·회첨이 한 점으로 뭉쳐 스켈레톤 지붕이 뒤틀린다(파탄). 그래서:
-//     · 날개폭 w 를 본채 반폭 a 에 비례 종속(w ≤ WING_MAX_K·a) → mainHalfW 가 줄면 날개도 함께
-//       줄어 본채 앞면이 날개보다 항상 넓게 유지(=성립하는 ㄱ자 비례). 표준·g-wide 는 불구속.
-//     · 각 치수에 하한(장난감 크기 방지). 표준(4.2/2.2/4.0/2.6)·g-wide(5.0/2.2/3.4/2.8) 미구속.
-//   computeLayout(카메라·조립 치수)과 buildGiwa(몸체·지붕·굴뚝) 가 이 단일 함수를 공유해
-//   리롤·UI·마을 모든 경로가 같은 정규화를 받는다.
-const GIWA_MIN = { a: 2.4, b: 1.6, c: 2.6, w: 1.6 };
-const GIWA_WING_MAX_K = 0.72;   // wingW ≤ K·mainHalfW (본채 앞면이 날개보다 넓게 유지)
+// 기와집 풋프린트 정규화의 공개 호환면. 실제 ㅡ/ㄱ/ㄷ 문법과 ㄷ 최소 4칸 규칙은
+// layout/giwa-footprint.js 한 곳에 있고 builder/FULL·impostor/FAR·fit이 모두 이를 소비한다.
 export function giwaFootprint(P) {
-  const a = Math.max(GIWA_MIN.a, P.mainHalfW);
-  const b = Math.max(GIWA_MIN.b, P.mainHalfD);
-  const c = Math.max(GIWA_MIN.c, P.wingLen);
-  const w = Math.min(Math.max(GIWA_MIN.w, P.wingW), GIWA_WING_MAX_K * a);
-  return { a, b, w, c };
+  return giwaFootprintMetrics(P);
 }
 
-// 기둥·벽·지붕과 geometry gate가 공유하는 정규화된 ㄱ자 평면(CW).
+// 기둥·벽·지붕과 geometry gate가 공유하는 정규화된 평면(CW).
 export function giwaFootprintPolygon(P) {
-  const { a, b, w, c } = giwaFootprint(P);
-  return [
-    { x: -a, z: b }, { x: a - w, z: b }, { x: a - w, z: b + c },
-    { x: a, z: b + c }, { x: a, z: -b }, { x: -a, z: -b },
-  ];
+  return giwaFootprintPoints(P);
 }
 
 // 팔작 용마루 최소 길이 = 합각폭의 이 배수(#97). ≥1 이면 용마루가 항상 측면 합각보다
@@ -195,11 +185,11 @@ export function bayPositions(n, centerW, middleW, endW) {
 
 // 파라미터 → 전체 배치 치수 계산
 export function computeLayout(P) {
-  // 기와집(ㄱ자): 그리드 대신 L 풋프린트. 카메라·조립용 최소 치수만 산출.
+  // 기와집: 그리드 대신 정규 ㅡ/ㄱ/ㄷ 풋프린트. 카메라·조립용 최소 치수만 산출.
   if (P.style === 'giwa') {
-    const { a, b, c } = giwaFootprint(P);             // 좁은 폭 정규화(buildGiwa 와 공유)
+    const { planShape, a, b, c } = giwaFootprint(P);  // 평면 정규화(buildGiwa 와 공유)
     const W = 2 * a;
-    const D = 2 * b + c;                              // L 바운딩 깊이(본채+날개)
+    const D = 2 * b + (planShape === 'single' ? 0 : c);
     const podTopY = P.podiumTierH;
     const colTopY = podTopY + P.columnHeight;
     const eaveY = colTopY + 0.35;                     // 창방+도리 위 처마 높이
@@ -210,7 +200,9 @@ export function computeLayout(P) {
       eaveInnerY: eaveY, eaveEdgeY: eaveY, xEave: W / 2 + P.eaveOverhang,
       zEave: D / 2 + P.eaveOverhang, ridgeY, ridgeHalf: 0,
       profile: { s0: 1, s1: 0.3, q: 2, totalDrop: 1, tileLift: 0.22 },
-      center: { x: 0, y: (podTopY + ridgeY) / 2, z: 0 },
+      // Preserve the established ㄱ standalone framing; the new symmetric ㄷ
+      // needs its bounding-depth center because both forward wings are visible.
+      center: { x: 0, y: (podTopY + ridgeY) / 2, z: planShape === 'u' ? c * 0.5 : 0 },
       totalH: ridgeY + P.ridgeH,
     };
   }

@@ -72,28 +72,33 @@ export function impostorHouseSpec(parcel) {
 
   const variant = GIWA_VARIANTS[clampIndex(GIWA_VARIANTS, parcel.variant)] || GIWA_VARIANTS[0];
   const mirrored = variant.mirrorOf != null;
-  const { a, b, w, c } = giwaFootprint(params);
+  const { planShape, bays, a, b, w, c } = giwaFootprint(params);
   let polygon = giwaFootprintPolygon(params);
   if (mirrored) polygon = polygon.map((point) => ({ x: -point.x, z: point.z })).reverse();
   const eave = params.eaveOverhang;
-  const wingX0 = mirrored ? -a - eave : a - w - eave;
-  const wingX1 = mirrored ? -a + w + eave : a + eave;
   const wingRidgeY = layout.eaveEdgeY + w * 0.5 * params.riseScale;
+  const roofs = [roofRect(
+    -a - eave, a + eave, -b - eave, b + eave,
+    'x', layout.eaveEdgeY, layout.ridgeY, Math.max(0.45, a - b),
+  )];
+  const addWing = (side) => {
+    const x0 = side < 0 ? -a - eave : a - w - eave;
+    const x1 = side < 0 ? -a + w + eave : a + eave;
+    roofs.push(roofRect(
+      x0, x1, b - eave, b + c + eave,
+      'z', layout.eaveEdgeY, wingRidgeY, Math.max(0.35, (c - w) * 0.5),
+    ));
+  };
+  if (planShape === 'l') addWing(mirrored ? -1 : 1);
+  else if (planShape === 'u') { addWing(-1); addWing(1); }
   return {
     kind,
     mirrored,
+    planShape,
+    bays,
     body: { polygon, y0: layout.podTopY, y1: layout.eaveEdgeY },
     foundation: { y0: 0, y1: layout.podTopY },
-    roofs: [
-      roofRect(
-        -a - eave, a + eave, -b - eave, b + eave,
-        'x', layout.eaveEdgeY, layout.ridgeY, Math.max(0.45, a - b),
-      ),
-      roofRect(
-        wingX0, wingX1, b - eave, b + c + eave,
-        'z', layout.eaveEdgeY, wingRidgeY, Math.max(0.35, (c - w) * 0.5),
-      ),
-    ],
+    roofs,
     colors: {
       roof: multiply3(srgbHexToLinear3(VILLAGE_MATERIAL_COLORS.giwaRoofAverage), roofTone),
       ridge: multiply3(srgbHexToLinear3(KOREA_COLORS.tileDark), roofTone),

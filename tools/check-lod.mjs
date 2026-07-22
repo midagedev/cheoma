@@ -459,9 +459,11 @@ function makeRepresentationHandle(parcel, level) {
     for (let variant = 0; variant < IMPOSTOR_VARIANT_COUNTS[kind]; variant++) {
       const spec = impostorHouseSpec({ kind, variant });
       specs[kind].push(spec);
-      invariant(spec.body.polygon.length === (kind === 'giwa' ? 6 : 4),
+      const giwaBodyPoints = { single: 4, l: 6, u: 8 };
+      const giwaRoofCount = { single: 1, l: 2, u: 3 };
+      invariant(spec.body.polygon.length === (kind === 'giwa' ? giwaBodyPoints[spec.planShape] : 4),
         `far mass ${kind}/${variant}: wrong body plan`);
-      invariant(spec.roofs.length === (kind === 'giwa' ? 2 : 1),
+      invariant(spec.roofs.length === (kind === 'giwa' ? giwaRoofCount[spec.planShape] : 1),
         `far mass ${kind}/${variant}: wrong roof vocabulary`);
       invariant(spec.roofs.every((roof) => roof.x1 > roof.x0 && roof.z1 > roof.z0
         && roof.ridgeY > roof.eaveY && roof.ridgeHalf > 0),
@@ -474,7 +476,7 @@ function makeRepresentationHandle(parcel, level) {
   invariant(specs.choga[2].roofs[0].x1 - specs.choga[2].roofs[0].x0
     > specs.choga[0].roofs[0].x1 - specs.choga[0].roofs[0].x0,
   'far mass choga: five-bay rich variant lost wider silhouette');
-  for (const [base, flipped] of [[0, 1], [2, 3]]) {
+  for (const [base, flipped] of [[0, 1]]) {
     const expected = specs.giwa[base].body.polygon
       .map((point) => `${(-point.x).toFixed(6)},${point.z.toFixed(6)}`)
       .sort();
@@ -484,6 +486,12 @@ function makeRepresentationHandle(parcel, level) {
     invariant(JSON.stringify(actual) === JSON.stringify(expected),
       `far mass giwa ${base}/${flipped}: L-plan mirror drift`);
   }
+  invariant(JSON.stringify([...new Set(specs.giwa.map((spec) => spec.planShape))].sort())
+    === JSON.stringify(['l', 'single', 'u']),
+  'far mass giwa: ㅡ/ㄱ/ㄷ repertoire drifted');
+  invariant(specs.giwa.filter((spec) => spec.planShape === 'u')
+    .every((spec) => spec.bays >= 4),
+  'far mass giwa: U-plan dropped below four bays');
   invariant(Math.max(...specs.giwa[0].colors.roof) < 0.15
     && Math.min(...specs.giwa[0].colors.wall) > 0.5,
   'far mass giwa: tile/plaster palette drifted from full-detail materials');

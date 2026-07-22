@@ -199,6 +199,18 @@ for (const mainHalfW of giwaRanges.mainHalfW) {
   }
 }
 
+// Regular-house repertoire added by #8: exact ㅡ and minimum-four-bay ㄷ plans.
+for (const P of [
+  { ...PRESETS.giwa, planShape: 'single', bays: 3, mainHalfW: 3.7, mainHalfD: 2.0 },
+  { ...PRESETS.giwa, planShape: 'u', bays: 4, mainHalfW: 5.0, mainHalfD: 2.2, wingLen: 3.4, wingW: 2.15 },
+]) {
+  for (const riseScale of giwaRanges.riseScale) {
+    for (const [face, chain] of upperChains(giwaFootprintPolygon(P)).entries()) {
+      checkPureChain(chain, riseScale, `regular-${P.planShape}-${P.bays}-${face}`);
+    }
+  }
+}
+
 // 같은 production 지붕 엔진을 쓰는 종가 ㅡ/ㄱ/ㄷ 평면도 함께 보호한다.
 for (const shape of ['single', 'l', 'u']) {
   for (const bays of [2, 3, 4]) {
@@ -265,8 +277,8 @@ async function inspectProductionGeometry() {
 }
 
 const production = await inspectProductionGeometry();
-invariant(production.cases.length === 243, `production matrix changed (${production.cases.length})`);
-invariant(production.faces.length === 1458, `production face matrix changed (${production.faces.length})`);
+invariant(production.cases.length === 245, `production matrix changed (${production.cases.length})`);
+invariant(production.faces.length === 1470, `production face matrix changed (${production.faces.length})`);
 invariant(production.uVertices === 15, `production U vertex budget changed (${production.uVertices})`);
 invariant(production.faceVertexCount === 135, `production face vertex budget changed (${production.faceVertexCount})`);
 invariant(production.faceIndexCount === 672, `production face index budget changed (${production.faceIndexCount})`);

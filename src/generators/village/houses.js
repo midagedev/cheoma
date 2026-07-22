@@ -19,8 +19,9 @@ export function makeHouseProtos() {
   };
 }
 
-// 평면 변주 풀 → 변주 인덱스별 decompose 결과 배열(미러 포함). 재질셋은 kind당 1벌로 통일(shareMaterials)
-//   → 텍스처·재질 수 고정, 드로우콜은 변주×재질 규모. matset(=canon 프로토 재질)은 야간 창호광용.
+// 평면 변주 풀 → 변주 인덱스별 decompose 결과 배열(미러 포함). 서로 다른 토폴로지라도 같은
+//   팔레트 의미·시각 상태의 재질은 공유하고, 파생 UV 반복과 창호 패턴은 고유하게 보존한다.
+//   드로우콜은 변주×재질 규모. matset(=canon 프로토 재질)은 야간 창호광용.
 export function buildKindDecomps(kind) {
   const VAR = kind === 'giwa' ? GIWA_VARIANTS : CHOGA_VARIANTS;
   const base = PRESETS[kind];

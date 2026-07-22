@@ -5,6 +5,7 @@ import {
   preferredParcelHouseTranslation,
 } from './parcel-contract.js';
 import { assignVariation, variantThatchAge } from './variants.js';
+import { giwaVariantFallbacks, minimumGiwaFit } from './house-diversity.js';
 
 const EPS = 1e-9;
 const FEASIBLE_EPS = 1e-7;
@@ -215,8 +216,12 @@ export function fitHouseWithinParcel(parcel, clearance = HOUSE_ROOF_CLEARANCE) {
 }
 
 function houseFitAcceptable(parcel) {
-  return parcel.hero || (parcel.houseFitFactor >= MIN_HOUSE_FIT
-    && Math.min(parcel.sx, parcel.sy, parcel.sz) >= MIN_EFFECTIVE_HOUSE_SCALE);
+  if (parcel.hero) return true;
+  const limit = parcel.kind === 'giwa'
+    ? minimumGiwaFit(parcel.variant | 0)
+    : { factor: MIN_HOUSE_FIT, effectiveScale: MIN_EFFECTIVE_HOUSE_SCALE };
+  return parcel.houseFitFactor >= limit.factor
+    && Math.min(parcel.sx, parcel.sy, parcel.sz) >= limit.effectiveScale;
 }
 
 // plan 배치와 runtime 단건 reroll이 공유하는 완결된 변주 계약. 큰 평면이 작은 필지에서
@@ -233,7 +238,7 @@ export function assignFittedVariation(parcel, char01 = 0.5, tuning = {}) {
     : 0;
   const fallbacks = parcel.kind === 'choga'
     ? Array.from({ length: originalVariant }, (_, index) => originalVariant - index - 1)
-    : originalVariant >= 2 ? [originalVariant % 2] : [];
+    : giwaVariantFallbacks(originalVariant, parcel.seed);
   for (const variant of fallbacks) {
     parcel.variant = variant;
     parcel.sx = sourceScale.x;

@@ -9,7 +9,7 @@ import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const OUT = join(ROOT, 'shots');
+const OUT = process.env.CHEOMA_CAPTURE_DIR || join(ROOT, 'shots');
 mkdirSync(OUT, { recursive: true });
 
 const MIME = {
@@ -99,8 +99,12 @@ window.__PLAN = { scale, seed, character: plan.opts.character, houses: plan.stat
 // 담 클로즈업/리빌드 타깃 필지 선택(결정론: 첫 매칭 non-hero)
 function pickParcel(pred) { return plan.parcels.find((p) => !p.hero && pred(p)); }
 const kindF = q.get('kind');
+const variantF = q.get('variant');
 let target = null;
-if (wallType) {
+if (view === 'house' && variantF != null) {
+  target = pickParcel((p) => p.kind === (kindF || 'giwa') && p.variant === +variantF)
+        || pickParcel((p) => p.kind === (kindF || 'giwa'));
+} else if (wallType) {
   target = pickParcel((p) => p.wallType === wallType && (!kindF || p.kind === kindF))
         || pickParcel((p) => p.wallType === wallType)
         || pickParcel(() => true);
@@ -145,7 +149,7 @@ if (view === 'thatch3') {
   fov = 32;
   campos = new THREE.Vector3(cx0, hAt(cx0, cz0) + 7.5, cz0);
   target3 = new THREE.Vector3(-0.1 * R, hAt(0, cen.z) + 5.0, cen.z * 0.05);
-} else if (view === 'wall' || view === 'rebuild') {
+} else if (view === 'wall' || view === 'rebuild' || view === 'house') {
   // 필지 담 클로즈업: 도로쪽(frontDir) 전방·측면 저각 오블리크.
   const p = target || plan.parcels[0];
   const baseY = p.baseY != null ? p.baseY : hAt(p.center.x, p.center.z);
@@ -206,6 +210,8 @@ const shots = [
   ['aerial-village-minchon', '/__var?scale=village&char=minchon&view=aerial&time=day'],
   ['aerial-capital', '/__var?scale=capital&char=yeoyeom&view=aerial&time=day&palace=1'],
   ['aerial-low-banchon', '/__var?scale=village&char=banchon&view=aerial-low&time=day'],
+  ['house-u-town', '/__var?scale=town&char=yeoyeom&view=house&kind=giwa&variant=3&time=day'],
+  ['house-single-town', '/__var?scale=town&char=yeoyeom&view=house&kind=giwa&variant=2&time=day'],
   // ② 담장 어휘 클로즈업(6종) — 기와담·돌담·토담(이엉 coping)·싸리울·생울·개방 마당
   ['wall-tile-banchon', '/__var?scale=village&char=banchon&view=wall&wallType=tile&time=day'],
   ['wall-stone-choga', '/__var?scale=village&char=yeoyeom&view=wall&wallType=stone&kind=choga&time=day'],

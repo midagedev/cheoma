@@ -7,6 +7,7 @@
 //   전부 parcel.seed 결정론 → 같은 seed 는 픽셀 동일. 편집(override)이 이 기본값을 덮는다.
 
 import { makeRng } from '../rng.js';
+import { householdDiversityProfile, pickGiwaHouseVariant } from './house-diversity.js';
 
 // ── 프로토 풀(평면·치수·상태 사다리). st=스테이처(0=웅크린 민가 … 1=당당한 대가), 신분(rank)과 상관 ──
 //   치수(기둥높이·기단높이·용마루높이)를 변주에 baking → 스카이라인 처마선이 들쭉날쭉(드로우콜 불변).
@@ -29,15 +30,19 @@ export const CHOGA_VARIANTS = [
     ov: { frontBays: 5, centerBayW: 3.5, middleBayW: 2.9, endBayW: 2.7, columnHeight: 2.55, podiumTierH: 0.46, ridgeH: 0.37, roofPitch: 0.57, thatchThick: 0.42,
           winBack: 2, winSide: true, plankBase: true, maruStyle: 'full' } },
 ];
-// giwa: ㄱ자 반가(모두 상급) — 규모·칸 너비·기둥/기단/용마루 높이 + 창호 살 패턴(띠살/정자살) + ㄱ 방향
-//   플립. 짝수=빌드(고유 지오·창호), 홀수=앞 인덱스 미러(재질·창호 공유). doorPattern 은 buildBuilding 이
-//   makeMaterials 직후 applyDoorPattern 으로 창호 텍스처를 갈아끼운다(#55).
-//   st 는 원본(0.45/0.88) 유지 — 변주 선택 분포(=활성 그룹 수=드로우콜)를 규모별로 보존(capital 예산).
+// giwa: 활성 그룹 수 4를 그대로 유지하면서 ㅡ 1 + ㄱ 좌우 2 + ㄷ 1로 평면 어휘를 넓힌다.
+//   ㄷ은 최소 4칸이며 큰 필지/상위 살림에서만 후보가 되고 실제 roof fit을 통과해야 한다.
+//   mirrorOf는 ㄱ 방향만 뒤집어 재질·창호를 공유한다. ㅡ/ㄷ도 토폴로지가 달라도 같은 팔레트
+//   의미·시각 상태를 공유해 draw-call/texture 예산을 평면 다양성과 교환하지 않는다.
+//   doorPattern은 buildBuilding이 기존 재료에 적용하고 변주별 소유를 유지한다(#55).
 export const GIWA_VARIANTS = [
-  { name: 'g-base', st: 0.45, ov: { columnHeight: 2.85, podiumTierH: 0.46, ridgeH: 0.4, doorPattern: 'ttisal' } },
-  { name: 'g-base-flip', st: 0.45, mirrorOf: 0 },
-  { name: 'g-wide', st: 0.88, ov: { mainHalfW: 5.0, wingLen: 3.4, wingW: 2.8, columnHeight: 3.35, podiumTierH: 0.7, ridgeH: 0.49, doorPattern: 'jeongja' } },
-  { name: 'g-wide-flip', st: 0.88, mirrorOf: 2 },
+  { name: 'giwa-l', st: 0.52,
+    ov: { planShape: 'l', bays: 3, columnHeight: 2.9, podiumTierH: 0.46, ridgeH: 0.4, doorPattern: 'ttisal' } },
+  { name: 'giwa-l-flip', st: 0.52, mirrorOf: 0 },
+  { name: 'giwa-single', st: 0.2,
+    ov: { planShape: 'single', bays: 3, mainHalfW: 3.7, mainHalfD: 2.0, columnHeight: 2.65, podiumTierH: 0.38, ridgeH: 0.36, doorPattern: 'ttisal' } },
+  { name: 'giwa-u', st: 0.88,
+    ov: { planShape: 'u', bays: 4, mainHalfW: 5.0, mainHalfD: 2.2, wingLen: 3.4, wingW: 2.15, columnHeight: 3.35, podiumTierH: 0.7, ridgeH: 0.49, doorPattern: 'jeongja' } },
 ];
 
 // 지붕/집 톤 곱틴트(instanceColor) — 레거시 단일 톤(rebuildParcel·야간 fallback 용). 재채색이 아니라
@@ -82,14 +87,13 @@ function assignRoleTones(parcel, kind, wealth, rng, dK = 1) {
 function variantsFor(kind) { return kind === 'giwa' ? GIWA_VARIANTS : CHOGA_VARIANTS; }
 const clampIdx = (list, i) => Math.min(list.length - 1, Math.max(0, i | 0));
 
-// 신분(rank)↔스테이처(st) 상관 가중 선택 — 낮은 신분은 낮은 채(민가), 높은 신분은 큰 채(부농/대가).
-//   weight=삼각 근접(rank≈st) + 바닥값(0.04)으로 다양성 유지. 같은 st(플립 쌍)는 균등 → ㄱ 방향 50/50.
-//   격식 가드: choga·giwa 프리셋 자체가 신분별 스케일 → 서민이 궁 비례가 될 수 없음(가사제한 정신).
-function pickVariant(kind, rank, rng) {
-  const list = variantsFor(kind);
+// 초가 신분(rank)↔스테이처(st) 상관 가중 선택. 기와집은 필지·살림·마을 규모까지 읽는
+// house-diversity 정책을 쓴다. 바닥값(0.04)은 초가 사다리의 낮은 확률 다양성을 유지한다.
+function pickChogaVariant(rank, roll) {
+  const list = CHOGA_VARIANTS;
   const w = list.map((v) => Math.max(0.04, 1 - Math.abs(rank - (v.st != null ? v.st : 0.5)) * 1.6));
   const sum = w.reduce((a, b) => a + b, 0);
-  let r = rng() * sum;
+  let r = roll * sum;
   for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return i; }
   return list.length - 1;
 }
@@ -100,6 +104,15 @@ export function variantOv(parcel) {
   const v = list[clampIdx(list, parcel.variant)] || list[0];
   if (v.mirrorOf != null) return list[v.mirrorOf].ov || {};
   return v.ov || {};
+}
+
+// FULL/MID/FAR와 focus/edit 오버레이가 같은 좌우 평면을 읽는 단일 계약.
+// geometry를 미리 반전하는 인스턴스 경로와 달리 개별 buildBuilding 경로는 이 값을
+// Object3D scale.x에 적용한다. 현재 미러 어휘는 giwa ㄱ자에만 존재한다.
+export function variantMirrorX(parcel) {
+  if (parcel.kind !== 'giwa') return 1;
+  const variant = GIWA_VARIANTS[clampIdx(GIWA_VARIANTS, parcel.variant)] || GIWA_VARIANTS[0];
+  return variant.mirrorOf != null ? -1 : 1;
 }
 
 // parcel.variant 의 이엉 상태(choga). 미러 없음. 기본 0.5.
@@ -223,12 +236,20 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   }
   const rng = makeRng((parcel.seed ^ 0x5a17c0de) >>> 0);
   const rank = parcel.rank != null ? parcel.rank : 0.5;
-  // pickVariant 를 첫 rng 소비로 유지 — 변주(=활성 InstancedMesh 그룹) 선택 분포를 기존과 동일하게
-  //   보존해 capital 드로우콜 예산을 지킨다(이후 축들은 그룹 수 불변 → 순수 시각 다양성).
-  parcel.variant = pickVariant(kind, rank, rng);
+  // 첫 RNG 값은 프로토 선택에만 쓴다. 뒤의 wealth/색/살림 RNG 시퀀스는 평면 정책과 독립이라
+  // 새 평면을 넣어도 같은 seed의 연속 변주 축이 불필요하게 전부 바뀌지 않는다.
+  const variantRoll = rng();
   // 잠재변수: 신분(주) + 마을 성격(부) + 개체 노이즈. [0,1] 클램프.
   const wealth = clamp01(rank * 0.72 + (char01 - 0.5) * 0.34 + (rng() * 2 - 1) * 0.12);
   parcel.wealth = wealth;
+  const household = householdDiversityProfile(parcel, char01, wealth);
+  // One correlated stature signal reaches continuous width/height and color;
+  // plan/bays use the same profile below.  This makes actual lot and settlement
+  // tier matter without turning legal ceilings into literal dimensions.
+  const stature = clamp01(wealth * 0.72 + household.household01 * 0.28);
+  parcel.variant = kind === 'giwa'
+    ? pickGiwaHouseVariant(parcel, char01, wealth, variantRoll, household)
+    : pickChogaVariant(rank, variantRoll);
   // 좌향은 plan의 frontDir 하나가 필지 poly·패드·집·담·픽킹을 모두 결정한다. 예전의 별도
   // yaw는 검증 뒤 실제 렌더만 최대 ±6° 돌려 필지 경계와 집을 어긋나게 했다. RNG 한 칸은
   // 이후 색·살림 변주의 seed 계약을 보존하려고 소비하되 두 번째 공간 회전은 만들지 않는다.
@@ -238,11 +259,11 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   // 도로가 먼저 정한 도시 가구의 structureScale은 필지와 실제 집을 함께 줄인다. plot만
   // 압축해 처마가 담과 이웃집을 뚫는 보정은 허용하지 않는다.
   const structureScale = parcel.structureScale || 1;
-  parcel.sx = (0.9 + wealth * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
-  parcel.sz = (0.9 + wealth * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
-  parcel.sy = (0.86 + wealth * 0.22 + (rng() * 2 - 1) * 0.07 * dK) * structureScale;
+  parcel.sx = (0.9 + stature * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
+  parcel.sz = (0.9 + stature * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
+  parcel.sy = (0.86 + stature * 0.22 + (rng() * 2 - 1) * 0.07 * dK) * structureScale;
   // 부위별 독립 톤(#55 핵심) + 레거시 단일 톤(하위호환).
-  assignRoleTones(parcel, kind, wealth, rng, dK);
+  assignRoleTones(parcel, kind, clamp01(wealth * 0.8 + household.household01 * 0.2), rng, dK);
   parcel.toneIdx = Math.floor(rng() * TONE[kind].length);
   parcel.wallType = pickWallType(parcel, char01, rng, wallWeights);
   // 담 높이 연속 변주(유무 확률은 pickWallType): 부유할수록 높게 + 개체차. walls.js baseH 에 곱.

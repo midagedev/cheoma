@@ -24,23 +24,24 @@ const expectedSceneHashes = {
   // solid and sinks every building foundation. #21 reserves a monotonically
   // graded stream valley and adds the visible five-lane water ribbon. #40 adds
   // metre-scale settlement relief to every tier; explicit river mode remains a
-  // separate non-golden scenario. #56 gives temple roles distinct, bounded
-  // dancheong palettes, which intentionally changes merged material grouping.
-  // Sync, real module Worker, and ?worker=0 fallback stay byte-identical.
-  village: 'c2a7d46c:0f6d9070:38a637e7:a0d1d56a',
-  town: 'c1a9e698:e0614e9a:605c5d32:5bb48640',
-  capital: '15836798:fb6e8d1e:c100bbd4:cc001e4e',
-  hanyang: '363f908e:35b5a258:5d9e8c8f:e1300546',
+  // separate non-golden scenario. #56 gives temple roles distinct dancheong
+  // palettes; #8 retains four giwa groups but changes their exact geometry to
+  // ㅡ + mirrored ㄱ + fitted four-bay ㄷ. Sync, real module Worker, and
+  // ?worker=0 fallback stay byte-identical after both changes.
+  village: '820a1338:95d7b6f6:36ceed54:15357fa2',
+  town: '993c3ab1:746f1801:97d2b468:c9cebe39',
+  capital: '87ec65e8:b24242a4:a11e9d66:f919de6a',
+  hanyang: 'd40f114e:99a94ab4:2a596b17:d3163dc2',
 };
 const expectedProxyHashes = {
-  // Residential focus endpoints choose among three deterministic candidates
-  // inside the solar opening using fitted roof OBBs plus planned feature blockers.
-  // Scene bytes stay unchanged; only public camera framing hashes intentionally
-  // move. #56's palace/temple dancheong edit axes remain in the proxy contract.
-  village: 'ede9fc45',
-  town: 'ec997638',
-  capital: '18dba27e',
-  hanyang: 'dad837f5',
+  // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
+  // #56's palace/temple dancheong edit axes remain in the proxy contract. #8 also
+  // exposes the authored giwa bay width so the shape-aware editor can start at
+  // the first effective mainHalfW rather than presenting a dead slider range.
+  village: '0ad40baa',
+  town: 'ac44cf8c',
+  capital: '5ec8ed67',
+  hanyang: '7db20a4b',
 };
 
 const server = await createServer({

@@ -42,7 +42,7 @@ const CHOGA_SECTIONS = [
     { key: 'endBayW', ctrl: 'range', min: 2.0, max: 3.0, step: 0.05, route: 'building' },
   ] },
   { id: 'proportion', titleKey: 'sec_proportion', adv: true, fields: [
-    { key: 'columnHeight', ctrl: 'range', min: 1.8, max: 2.7, step: 0.02, route: 'building' },
+    { key: 'columnHeight', ctrl: 'range', min: 1.8, max: 2.7, step: 0.01, route: 'building' },
     { key: 'podiumTierH', ctrl: 'range', min: 0.16, max: 0.5, step: 0.02, route: 'building' },
     { key: 'ridgeH', ctrl: 'range', min: 0.24, max: 0.4, step: 0.01, route: 'building' },
     { key: 'footprintScale', ctrl: 'range', min: 0.7, max: 1.4, step: 0.02, route: 'top' },
@@ -62,11 +62,10 @@ const CHOGA_SECTIONS = [
   ] },
 ];
 
-// ── 정규 필지: 기와집(반가, ㄱ자) ─────────────────────────────────────────
+// ── 정규 필지: 기와집(반가, 생성 시 ㅡ/ㄱ/ㄷ) ──────────────────────────────
 const GIWA_SECTIONS = [
-  // 규모/칸(#146) — 기와집(반가)은 ㄱ자 고정형(코어 buildGiwa 는 L 전용, 평면형 선택 없음). 칸수는
-  //   연속 치수로 조절: 본채 폭이 곧 정면 칸수(buildGiwa 가 폭/주칸으로 칸을 산출), 날개 길이가 측면.
-  //   noteKey 로 "ㄱ자 기본형" 안내를 얹어 평면형 선택이 왜 없는지 설명하고, 맨 위에 둬 규모 축을 헤드라인화.
+  // 규모/칸(#146) — 생성된 planShape/bays는 코어 명세에 남지만 이 이슈에서는 새 선택 UI를 열지 않는다.
+  // 본채 폭·날개 길이의 기존 편집 경로만 유지하고, noteKey는 현재 마을 생성 어휘를 정확히 설명한다.
   { id: 'plan', titleKey: 'sec_plan', noteKey: 'giwa_note', fields: [
     { key: 'mainHalfW', ctrl: 'range', min: 2.8, max: 5.2, step: 0.1, route: 'building' },
     { key: 'wingLen', ctrl: 'range', min: 2.8, max: 4.6, step: 0.1, route: 'building' },
@@ -85,7 +84,7 @@ const GIWA_SECTIONS = [
     { key: 'wingW', ctrl: 'range', min: 1.8, max: 3.0, step: 0.1, route: 'building' },
   ] },
   { id: 'proportion', titleKey: 'sec_proportion', adv: true, fields: [
-    { key: 'columnHeight', ctrl: 'range', min: 2.4, max: 3.6, step: 0.02, route: 'building' },
+    { key: 'columnHeight', ctrl: 'range', min: 2.4, max: 3.6, step: 0.01, route: 'building' },
     { key: 'podiumTierH', ctrl: 'range', min: 0.3, max: 0.9, step: 0.02, route: 'building' },
     { key: 'ridgeH', ctrl: 'range', min: 0.3, max: 0.6, step: 0.01, route: 'building' },
     { key: 'footprintScale', ctrl: 'range', min: 0.7, max: 1.4, step: 0.02, route: 'top' },
@@ -101,6 +100,24 @@ const GIWA_SECTIONS = [
     { key: 'aux', ctrl: 'toggle', route: 'top' },
   ] },
 ];
+
+// 생성된 평면에 실제로 영향을 주는 축만 보여 준다. giwa-footprint의 칸 폭 하한과 같은
+// minHalfW를 쓰므로 3칸/4칸 집에서 슬라이더 초반이 움직이지 않는 dead range가 없다.
+function giwaSections(spec) {
+  const shape = spec?.params?.planShape || 'l';
+  const requestedBays = Number.isFinite(spec?.params?.bays) ? Math.round(spec.params.bays) : 3;
+  const bays = Math.max(shape === 'u' ? 4 : 3, Math.min(5, requestedBays));
+  const bay = Math.max(1.8, Number.isFinite(spec?.params?.bay) ? spec.params.bay : 2.2);
+  const minHalfW = Math.max(2.8, bays * bay * 0.5);
+  return GIWA_SECTIONS.map((section) => ({
+    ...section,
+    fields: section.fields
+      .filter((field) => shape !== 'single' || (field.key !== 'wingLen' && field.key !== 'wingW'))
+      .map((field) => field.key === 'mainHalfW'
+        ? { ...field, min: minHalfW, max: Math.max(field.max, minHalfW) }
+        : { ...field }),
+  }));
+}
 
 // ── 특수: 종가(hanok 컴파운드) — 평면형·칸수 + buildHanok roofOpts + 벽 높이 ────────────
 //   평면형(#146 복원): 종가 안채는 buildHanok(임의 폴리곤 풋프린트 + straight-skeleton 지붕 + reflex
@@ -276,7 +293,7 @@ export function schemaFor(spec) {
     return { family: 'hero', heroStyle: hs, tabs: false, sections: hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS };
   }
   const kind = spec.kind === 'giwa' ? 'giwa' : 'choga';
-  return { family: 'regular', kind, tabs: true, sections: kind === 'giwa' ? GIWA_SECTIONS : CHOGA_SECTIONS };
+  return { family: 'regular', kind, tabs: true, sections: kind === 'giwa' ? giwaSections(spec) : CHOGA_SECTIONS };
 }
 
 // 모든 필드를 평탄화(스키마 순회 없이 라우팅에 필요). 유효값만(정의됨) 담아 undefined 오염을 막는다.
