@@ -56,14 +56,14 @@ const expectedProxyHashes = {
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the six normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
-  // 18° courtyard elevation. Safe candidates scale XZ and Y together so their
+  // 20° courtyard elevation. Safe candidates scale XZ and Y together so their
   // proxy framing cannot silently steepen the camera. Raising that shared angle
   // changes every residential camera position and therefore all four proxy
   // hashes without changing their counts or isolation contract.
-  village: 'ac62d5b1',
-  town: 'a22c9d89',
-  capital: '1aab6629',
-  hanyang: '30ae4e31',
+  village: '4b4caf78',
+  town: 'f993be75',
+  capital: '45e0d173',
+  hanyang: '399551d9',
 };
 
 const server = await createServer({
