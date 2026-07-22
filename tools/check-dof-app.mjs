@@ -114,7 +114,6 @@ try {
     morph = 0;
     await begin(() => engine.village.focus('p32'));
     const focusOuter = seek();
-    const focusEnd = snapshot();
     const focusOuterDoor = doorFocusSnapshot('p32');
 
     // Refresh the product LOD at the settled telephoto camera, then assert that weather
@@ -124,7 +123,9 @@ try {
     const focusedSnow = engine.scene.getObjectByName('weatherSnow');
     const focusedWeatherLensScale = focusedSnow?.material?.uniforms?.uLensScale?.value ?? null;
 
-    // Exactly one real settled Bokeh render validates the depth filter and state restoration.
+    // Warm the stable program once, then render the exact same final camera pose
+    // through moving 13-tap and restored 41-tap quality. Uniform changes must not
+    // create or resize any post/depth resource or disturb the depth filter.
     const visibleSentinels = [];
     const materialSentinels = [];
     engine.scene.traverse((object) => {
@@ -139,6 +140,8 @@ try {
     });
     const overrideBefore = engine.scene.overrideMaterial;
     const backgroundBefore = engine.scene.background;
+    const initialRecovery = [];
+    for (let i = 0; i < 30; i++) initialRecovery.push(engine.debugAdvancePostQuality(1 / 60));
     const beforeDepthFrame = {
       dof: snapshot(), visibleCount: visibleSentinels.length,
       materialCount: materialSentinels.length,
@@ -148,13 +151,86 @@ try {
       )),
     };
     engine.debugRenderDofFrame();
+    const stableWarm = snapshot();
+    const resourcesBefore = engine.debugPostResources();
+    const resolutionBefore = engine.debugPostResolution();
+    const passOrderBefore = engine.debugPostPassOrder();
+    const programCountBefore = engine.renderer.info.programs?.length ?? null;
+    const programKeysBefore = (engine.renderer.info.programs || [])
+      .map((program) => program.cacheKey).sort();
+    const memoryBefore = { ...engine.renderer.info.memory };
+    const materialVersionBefore = resourcesBefore.bokehMaterial.version;
+
+    const finalFov = engine.camera.fov;
+    engine.camera.fov = finalFov + 0.5;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.camera.fov = finalFov;
+    engine.camera.updateProjectionMatrix();
+    const movingQuality = engine.debugAdvancePostQuality(1 / 60);
+    engine.debugRenderDofFrame();
+    const movingDepth = snapshot();
+
+    const settleQuality = [];
+    for (let i = 0; i < 30; i++) settleQuality.push(engine.debugAdvancePostQuality(1 / 60));
+    engine.debugRenderDofFrame();
+    const resourcesAfter = engine.debugPostResources();
+    const resolutionAfter = engine.debugPostResolution();
+    const passOrderAfter = engine.debugPostPassOrder();
+    const stableQuality = snapshot();
+    const resourceKeys = [
+      'depthTarget',
+      'depthTexture',
+      'bokehMaterial',
+      'instFadeDepthMaterial',
+      'lodScreenDoorDepthMaterial',
+      'composerTarget1',
+      'composerTarget2',
+    ];
     const afterDepthFrame = {
-      dof: snapshot(),
+      dof: stableQuality,
       visibilityRestored: visibleSentinels.every((object) => object.visible),
       materialsRestored: materialSentinels.every(([object, material]) => object.material === material),
       overrideRestored: engine.scene.overrideMaterial === overrideBefore,
       backgroundRestored: engine.scene.background === backgroundBefore,
     };
+    const postQuality = {
+      initialRecovery: initialRecovery.map((sample) => sample.postQuality),
+      moving: movingQuality,
+      movingDepth,
+      settle: settleQuality.map((sample) => sample.postQuality),
+      stableWarm,
+      stable: stableQuality,
+      policyStable: {
+        amount: stableWarm.amount,
+        focus: stableWarm.focus,
+        aperture: stableWarm.aperture,
+      },
+      policyMoving: {
+        amount: movingDepth.amount,
+        focus: movingDepth.focus,
+        aperture: movingDepth.aperture,
+      },
+      resourcesStable: resourceKeys.every((key) => resourcesBefore[key] === resourcesAfter[key])
+        && resourcesBefore.passCount === resourcesAfter.passCount
+        && resourcesAfter.bokehMaterial.version === materialVersionBefore,
+      resolutionStable: JSON.stringify(resolutionBefore) === JSON.stringify(resolutionAfter),
+      passOrderStable: JSON.stringify(passOrderBefore) === JSON.stringify(passOrderAfter),
+      programCountBefore,
+      programCountAfter: engine.renderer.info.programs?.length ?? null,
+      programKeysStable: JSON.stringify(programKeysBefore) === JSON.stringify(
+        (engine.renderer.info.programs || []).map((program) => program.cacheKey).sort(),
+      ),
+      depthSizeStable: resourcesBefore.depthTarget.width === resourcesAfter.depthTarget.width
+        && resourcesBefore.depthTarget.height === resourcesAfter.depthTarget.height,
+      memoryBefore,
+      memoryAfter: { ...engine.renderer.info.memory },
+      depthParity: movingDepth.depthExcluded === stableQuality.depthExcluded
+        && movingDepth.depthDithered === stableQuality.depthDithered
+        && movingDepth.instFadeDepth === stableQuality.instFadeDepth
+        && movingDepth.lodScreenDoorDepth === stableQuality.lodScreenDoorDepth,
+    };
+    const focusEnd = stableQuality;
 
     // A committed focused rebuild replaces the entire overlay. The semantic DoF
     // cache must be refreshed in the same event turn rather than retaining the
@@ -258,6 +334,7 @@ try {
       focusOuterDoor,
       focusedOptics,
       focusedWeatherLensScale,
+      postQuality,
       depthFrame: { before: beforeDepthFrame, after: afterDepthFrame },
       rebuild: {
         rebuilt,
@@ -344,6 +421,33 @@ try {
       && result.focusEnd.highlightThreshold >= 0.48
       && result.focusEnd.highlightGain > 0,
   'one single-pass circular HDR kernel owns focused bokeh');
+  pass(result.postQuality.moving.postQuality === 0
+      && result.postQuality.moving.postQualityMode === 'moving'
+      && result.postQuality.moving.bokehSamples === 13
+      && result.postQuality.moving.activeBokehTaps === 13
+      && result.postQuality.stable.postQuality === 1
+      && result.postQuality.stable.postQualityMode === 'stable'
+      && result.postQuality.stable.bokehSamples === 41
+      && result.postQuality.stable.activeBokehTaps === 41,
+  'final camera motion uses 13 taps and restores the exact 41-tap stable kernel');
+  pass(monotonic(result.postQuality.settle, 1)
+      && result.postQuality.settle.every((quality) => quality >= 0 && quality <= 1),
+  'post quality hold and settling recovery are monotonic without overshoot');
+  pass(result.postQuality.policyMoving.amount === result.postQuality.policyStable.amount
+      && Math.abs(result.postQuality.policyMoving.focus - result.postQuality.policyStable.focus) < 1e-9
+      && Math.abs(result.postQuality.policyMoving.aperture - result.postQuality.policyStable.aperture) < 1e-12,
+  'adaptive quality leaves DoF amount, focus, and aperture unchanged');
+  pass(result.postQuality.resourcesStable
+      && result.postQuality.resolutionStable
+      && result.postQuality.passOrderStable
+      && result.postQuality.programKeysStable
+      && result.postQuality.depthSizeStable
+      && result.postQuality.programCountAfter === result.postQuality.programCountBefore
+      && result.postQuality.memoryAfter.textures === result.postQuality.memoryBefore.textures
+      && result.postQuality.memoryAfter.geometries === result.postQuality.memoryBefore.geometries,
+  '13/41 transitions preserve pass order, shader program, targets, materials, and GPU resource counts');
+  pass(result.postQuality.depthParity,
+    'moving and stable kernels share one unchanged opaque/deferred depth contract');
 
   pass(finite(result.focusOuter) && result.focusEnd.transitioning === false && result.focusEnd.selected === 'p32',
     'outer focus-in completes with finite DoF state');

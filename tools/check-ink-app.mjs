@@ -284,6 +284,24 @@ try {
   await captureScene(page, 'ink-focus.png');
   pass(focusState.sample && !!focusState.selected && focusState.ink.amount >= 0.999,
     'telephoto house focus preserves fully covered ink policy');
+  const coveredAdaptiveQuality = await page.evaluate(() => {
+    const engine = window.__engine;
+    const fov = engine.camera.fov;
+    engine.camera.fov = fov + 0.5;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.camera.fov = fov;
+    engine.camera.updateProjectionMatrix();
+    const moving = engine.debugAdvancePostQuality(1 / 60);
+    for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
+    return { moving, stable: engine.debugDof(), ink: engine.debugInk() };
+  });
+  pass(coveredAdaptiveQuality.moving.postQuality === 0
+      && coveredAdaptiveQuality.moving.activeBokehTaps === 0
+      && coveredAdaptiveQuality.stable.postQuality === 1
+      && coveredAdaptiveQuality.stable.activeBokehTaps === 0
+      && !coveredAdaptiveQuality.ink.pbrPasses.bokeh,
+  'adaptive camera quality leaves fully covered ink DoF asleep');
   const focusedInkContinuity = await measureFullInkContinuity(page);
   pass(focusedInkContinuity.signal > 20 && focusedInkContinuity.mean <= 0.05 && focusedInkContinuity.max <= 1,
     'focused full-ink output is pixel-stable when DoF and flare wake behind it',
@@ -341,7 +359,28 @@ try {
   });
   await mobile.goto(`${base}&mode=ink`, { waitUntil: 'domcontentloaded', timeout });
   await mobile.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
-  const mobileUi = await mobile.evaluate(() => {
+  const mobileUi = await mobile.evaluate(async () => {
+    const engine = window.__engine;
+    window.__noWarm = true;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+    engine.setRenderStyle('pbr', { immediate: true });
+    const parcelId = engine.village.debugParcels()
+      .find((parcel) => parcel.editable && !parcel.hero)?.parcelId;
+    if (!parcelId) throw new Error('mobile perf fixture has no regular editable parcel');
+    engine.village.focus(parcelId);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    engine.debugDofSeek(1, { finish: true });
+    const fov = engine.camera.fov;
+    engine.camera.fov = fov + 0.5;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.camera.fov = fov;
+    engine.camera.updateProjectionMatrix();
+    const movingDof = engine.debugAdvancePostQuality(1 / 60);
+    const pbrInk = engine.debugInk();
+    engine.setRenderStyle('ink', { immediate: true });
+    await Promise.resolve();
+    const restoredInk = engine.debugInk();
     const group = document.querySelector('.render-style');
     const buttons = [...group.querySelectorAll('button')];
     const rect = group.getBoundingClientRect();
@@ -352,6 +391,9 @@ try {
       normalScale: window.__engine.debugInk().normalScale,
       beautyScale: window.__engine.debugInk().beautyScale,
       paperSize: window.__engine.debugInk().paperSize,
+      movingDof,
+      pbrInk,
+      restoredInk,
     };
   });
   pass(mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
@@ -359,6 +401,15 @@ try {
   pass(mobileUi.pressed[1] === 'true', 'mobile shared URL exposes the restored ink state');
   pass(mobileUi.normalScale <= 0.5 && mobileUi.beautyScale <= 0.5 && mobileUi.paperSize <= 512,
     'compact ink uses half-resolution targets and a bounded paper source');
+  pass(mobileUi.movingDof.postQuality === 0
+      && mobileUi.movingDof.activeBokehTaps === 0
+      && mobileUi.movingDof.enabled === false
+      && mobileUi.movingDof.amount === 0
+      && mobileUi.movingDof.aperture === 0
+      && mobileUi.pbrInk.pbrAwake
+      && !mobileUi.pbrInk.pbrPasses.bokeh
+      && !mobileUi.restoredInk.pbrPasses.bokeh,
+  'compact/mobile PBR focus keeps DoF asleep while adaptive quality tracks motion');
   await mobile.close();
 
   pass(runtimeErrors.length === 0, 'ink rendering emits no runtime or shader errors', runtimeErrors.join(' | '));

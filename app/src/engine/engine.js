@@ -407,8 +407,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         current: pathFrom.clone(),
         source: dofSource || 'primary-opening-transition',
       } : null,
-      dof0: post.dof.amount,
-      dof1: Number.isFinite(dofAmount) ? clamp01(dofAmount) : null,
+      dof0: perf ? 0 : post.dof.amount,
+      // Mobile/perf owns a hard zero-cost DoF policy. Normalize the target once at
+      // the shared tween boundary so focus-in, hop, reroll, and future callers
+      // cannot wake Bokeh after setPostFocus() has put it to sleep.
+      dof1: perf ? 0 : (Number.isFinite(dofAmount) ? clamp01(dofAmount) : null),
       composition0: focusComposition,
       composition1: Number.isFinite(nextFocusComposition) ? clamp01(nextFocusComposition) : null,
       // 검증 토글(before/after 계측용). window.__flowNoFix=true 면 이번 트윈은 방향 연속화·핸드오프
@@ -585,7 +588,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       lodScreenDoorDepth: bokehPass.lodScreenDoorDepthCount,
       tweenProgress: tween ? clamp01(tween.e / tween.dur) : null,
       anchored: activeDofSource() !== 'controls-target',
+      ...postRuntime.debugQuality(),
     };
+  }
+
+  function updatePostQuality(dt) {
+    if (!(dt > 0)) return;
+    const dx = camera.position.x - controls.target.x;
+    const dy = camera.position.y - controls.target.y;
+    const dz = camera.position.z - controls.target.z;
+    postRuntime.updateQuality(dt, Math.hypot(dx, dy, dz));
   }
 
   function renderFrame(postDt) {
@@ -872,6 +884,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (Math.abs(nn - camera.near) > 1e-3) { camera.near = nn; camera.updateProjectionMatrix(); }
     }
     viewShiftRuntime.update(dt);   // 뷰포트 중심 보정(#124) — 투영만 시프트
+    // 모든 카메라 writer와 최종 view-offset이 반영된 제품 프레임만 품질 이력에 넣는다.
+    // prewarm/postcard/debug renderFrame 호출은 이 경계를 지나지 않아 임시 카메라가 오염시키지 않는다.
+    updatePostQuality(dt);
     // #140-A 그림자 재렌더 게이트 — autoUpdate=false 캐시 모드에서만 관여(그 전엔 매 프레임 자동).
     if (shadowCacheOn) {
       // 무대/지오가 움직이는 프레임: 조립 낙하·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈.
@@ -2799,6 +2814,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     __controls: controls,   // 검증용: 프레임 단위 controls.target 샘플링
     debugPostPassOrder: () => postRuntime.debugPassOrder(),
     debugPostResolution: () => postRuntime.debugResolution(),
+    debugPostResources: () => postRuntime.debugResources(),
     debugDirectionalShadow: () => directionalShadow.debugState(),
     debugSetDirectionalShadowAnchor: (value) => {
       const point = value == null ? null : Array.isArray(value)
@@ -2840,7 +2856,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
       return controller.debugArchitecturalReveal();
     },
-    debugRenderDofFrame: () => { renderFrame(0); return debugDofState(); },
+    debugRenderDofFrame: (dt = 0) => {
+      updatePostQuality(dt);
+      renderFrame(dt);
+      return debugDofState();
+    },
+    debugAdvancePostQuality: (dt = 1 / 60) => {
+      updatePostQuality(dt);
+      return debugDofState();
+    },
     // Deterministic camera-transition gate: applies the exact live-frame particle/LOD
     // lens policy without drawing the large scene.
     debugSyncCameraEnvironment: () => syncCameraDependentEnvironment(

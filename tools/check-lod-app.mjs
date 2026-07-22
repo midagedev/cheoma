@@ -363,7 +363,9 @@ try {
       && legacyOverload.thresholds.swapOut === 53,
   'legacy 5-argument attachChunkLodSwap preserves direct FAR↔FULL behavior');
 
-  const screenDoorContract = await page.evaluate(() => {
+  const screenDoorContract = await page.evaluate(async ({ dofModuleUrl, lodModuleUrl }) => {
+    const { contributesDofDepth } = await import(dofModuleUrl);
+    const { hasLodScreenDoor } = await import(lodModuleUrl);
     const engine = window.__engine;
     const root = engine.village.exportRoot();
     const chunk = root.children.find((child) => typeof child.userData?.lodUpdate === 'function'
@@ -453,6 +455,16 @@ try {
       roots: Object.fromEntries(Object.entries(roots).map(([key, value]) => [key, value.visible])),
       renderables: Object.fromEntries(Object.entries(roots).map(([key, value]) => [key, inspectRoot(value)])),
     });
+    const expectedLodScreenDoorDepth = () => {
+      let count = 0;
+      engine.scene.traverseVisible((object) => {
+        if (object.isMesh
+          && contributesDofDepth(object)
+          && !object.geometry?.getAttribute?.('instFade')
+          && hasLodScreenDoor(object)) count++;
+      });
+      return count;
+    };
 
     update(state.midOut + state.transitionWidth + 2);
     const resourcesBefore = snapshotResources();
@@ -476,15 +488,92 @@ try {
     const settledFull = capture();
     const resourcesAfter = snapshotResources();
     const rendererMemoryAfter = rendererMemory();
+    // Return to the stable MID owner before entering the MID→FULL midpoint again.
+    // Coming directly from settled FULL leaves hysteresis on FULL and only proves
+    // post quality in a single-owner frame, not parity across the screen-door pair.
+    update(state.midIn - state.transitionWidth - 1);
+    update(midFullDistance);
+    const savedCamera = {
+      position: engine.camera.position.clone(),
+      quaternion: engine.camera.quaternion.clone(),
+      target: engine.__controls.target.clone(),
+      fov: engine.camera.fov,
+      amount: engine.debugDof().amount,
+    };
+    const midpointCamera = cameraAt(midFullDistance).position;
+    engine.camera.position.set(midpointCamera.x, midpointCamera.y, midpointCamera.z);
+    engine.__controls.target.set(anchor.worldCenter[0], anchor.worldCenter[1], anchor.worldCenter[2]);
+    engine.camera.lookAt(engine.__controls.target);
+    engine.camera.updateProjectionMatrix();
+    engine.camera.updateMatrixWorld(true);
+    engine.debugTuneDof({ amount: 1 });
+    for (let index = 0; index < 30; index++) engine.debugAdvancePostQuality(1 / 60);
+    engine.debugRenderDofFrame();
+    const postResourcesBefore = engine.debugPostResources();
+    const postProgramsBefore = (engine.renderer.info.programs || [])
+      .map((program) => program.cacheKey).sort();
+    const stableQualityBefore = engine.debugDof();
+    const expectedDepthBefore = expectedLodScreenDoorDepth();
+    const qualityLodBefore = capture();
+    const midpointFov = engine.camera.fov;
+    engine.camera.fov = midpointFov + 0.5;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.camera.fov = midpointFov;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.debugRenderDofFrame();
+    const movingQuality = engine.debugDof();
+    const expectedDepthMoving = expectedLodScreenDoorDepth();
+    const qualityLodMoving = capture();
+    for (let index = 0; index < 30; index++) engine.debugAdvancePostQuality(1 / 60);
+    engine.debugRenderDofFrame();
+    const stableQualityAfter = engine.debugDof();
+    const expectedDepthAfter = expectedLodScreenDoorDepth();
+    const qualityLodAfter = capture();
+    const postResourcesAfter = engine.debugPostResources();
+    const postProgramsAfter = (engine.renderer.info.programs || [])
+      .map((program) => program.cacheKey).sort();
+    const postResourceKeys = [
+      'depthTarget', 'depthTexture', 'bokehMaterial', 'instFadeDepthMaterial',
+      'lodScreenDoorDepthMaterial', 'composerTarget1', 'composerTarget2',
+    ];
+    const adaptiveQuality = {
+      stableBefore: stableQualityBefore,
+      moving: movingQuality,
+      stableAfter: stableQualityAfter,
+      expectedDepthBefore,
+      expectedDepthMoving,
+      expectedDepthAfter,
+      lodBefore: qualityLodBefore,
+      lodMoving: qualityLodMoving,
+      lodAfter: qualityLodAfter,
+      resourcesStable: postResourceKeys.every(
+        (key) => postResourcesBefore[key] === postResourcesAfter[key],
+      ) && postResourcesBefore.depthTarget.width === postResourcesAfter.depthTarget.width
+        && postResourcesBefore.depthTarget.height === postResourcesAfter.depthTarget.height,
+      programsStable: JSON.stringify(postProgramsBefore) === JSON.stringify(postProgramsAfter),
+    };
+    engine.camera.position.copy(savedCamera.position);
+    engine.camera.quaternion.copy(savedCamera.quaternion);
+    engine.__controls.target.copy(savedCamera.target);
+    engine.camera.fov = savedCamera.fov;
+    engine.camera.updateProjectionMatrix();
+    engine.camera.updateMatrixWorld(true);
+    engine.debugTuneDof({ amount: savedCamera.amount });
     // 다음 rAF 전에 원래 aerial FAR 상태로 복구한다. 큰 점프도 인접 MID를 한 번 거친다.
     update(state.midOut + state.transitionWidth + 2);
     update(state.midOut + state.transitionWidth + 2);
     return {
       available: true, changed, repeated, farMid, settledMid, midFull, settledFull,
+      adaptiveQuality,
       resourcesStable: [resourcesAfterFarMid, resourcesAfterMidFull, resourcesAfter]
         .every((snapshot) => JSON.stringify(resourcesBefore) === JSON.stringify(snapshot)),
       rendererMemory: { before: rendererMemoryBefore, after: rendererMemoryAfter },
     };
+  }, {
+    dofModuleUrl: `/@fs${join(ROOT, 'src/env/dof.js')}`,
+    lodModuleUrl: `/@fs${join(ROOT, 'src/render/lod-screen-door.js')}`,
   });
   const validTransition = (snapshot, from, to) => snapshot?.transition?.active
     && snapshot.transition.from === from && snapshot.transition.to === to
@@ -522,6 +611,53 @@ try {
       ? `LOD screen-door settles to one root without geometry/material allocation `
         + `(${JSON.stringify(screenDoorContract)})`
       : 'town wave scenario correctly omits Hanyang LOD transition resources');
+  const adaptiveQuality = screenDoorContract.adaptiveQuality;
+  const adaptiveMidpoint = adaptiveQuality?.lodBefore;
+  const adaptiveMidpointDepthMeshes = adaptiveMidpoint
+    ? Object.entries(adaptiveMidpoint.roots || {}).reduce(
+      (count, [level, visible]) => count
+        + (visible ? adaptiveMidpoint.renderables?.[level]?.meshes || 0 : 0),
+      0,
+    )
+    : 0;
+  const adaptiveMidpointValid = adaptiveMidpoint?.level === 'mid'
+    && adaptiveMidpoint.transition?.active
+    && adaptiveMidpoint.transition.from === 'mid'
+    && adaptiveMidpoint.transition.to === 'full'
+    && Math.abs(adaptiveMidpoint.transition.progress - 0.5) <= 0.05
+    && adaptiveMidpoint.roots?.far === false
+    && adaptiveMidpoint.roots?.mid === true
+    && adaptiveMidpoint.roots?.full === true
+    && adaptiveMidpoint.weights?.mid >= 0.45
+    && adaptiveMidpoint.weights?.full >= 0.45;
+  const adaptiveLodSnapshot = (snapshot) => JSON.stringify({
+    level: snapshot?.level,
+    transition: snapshot?.transition,
+    weights: snapshot?.weights,
+    roots: snapshot?.roots,
+  });
+  const adaptiveQualityValid = adaptiveQuality
+    && adaptiveMidpointValid
+    && adaptiveQuality.moving.postQuality === 0
+    && adaptiveQuality.moving.activeBokehTaps === 13
+    && adaptiveQuality.stableBefore.postQuality === 1
+    && adaptiveQuality.stableAfter.postQuality === 1
+    && adaptiveQuality.stableAfter.activeBokehTaps === 41
+    && adaptiveMidpointDepthMeshes > 0
+    && adaptiveQuality.expectedDepthBefore >= adaptiveMidpointDepthMeshes
+    && adaptiveQuality.stableBefore.lodScreenDoorDepth === adaptiveQuality.expectedDepthBefore
+    && adaptiveQuality.moving.lodScreenDoorDepth === adaptiveQuality.expectedDepthMoving
+    && adaptiveQuality.stableAfter.lodScreenDoorDepth === adaptiveQuality.expectedDepthAfter
+    && adaptiveLodSnapshot(adaptiveQuality.lodBefore)
+      === adaptiveLodSnapshot(adaptiveQuality.lodMoving)
+    && adaptiveLodSnapshot(adaptiveQuality.lodMoving)
+      === adaptiveLodSnapshot(adaptiveQuality.lodAfter)
+    && adaptiveQuality.resourcesStable && adaptiveQuality.programsStable;
+  pass(!runFocusScenario || adaptiveQualityValid,
+    runFocusScenario
+      ? `adaptive DoF preserves the Hanyang MID/FULL midpoint, depth set, and post resources `
+        + `(${JSON.stringify(adaptiveQuality)})`
+      : 'town wave scenario omits adaptive Hanyang midpoint parity');
 
   const particleAerial = await page.evaluate(async (petalsModuleUrl) => {
     const { petalDetailWeight } = await import(petalsModuleUrl);

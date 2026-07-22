@@ -7,6 +7,12 @@ function ids(files, options) {
 
 assert.deepEqual(ids(['docs/verification.md']), ['core']);
 assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
+assert.deepEqual(ids(['src/env/post-quality-state.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
+]);
+assert.deepEqual(ids(['src/env/circular-bokeh-shader.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
+]);
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
 assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'winter-app', 'lod-wave']);
 assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
@@ -40,6 +46,12 @@ assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-focus', 'lod-wave', 'build',
 ]);
+assert.deepEqual(ids(['app/src/engine/post-quality-runtime.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'lod-focus', 'build',
+]);
+assert.deepEqual(ids(['app/src/engine/post-runtime.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'lod-focus', 'build',
+]);
 assert.deepEqual(ids(['app/src/engine/directional-shadow-runtime.js']), [
   'core', 'app', 'rim', 'lod-focus', 'build',
 ]);
@@ -51,6 +63,9 @@ assert.deepEqual(ids(['src/api/village.js']), [
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/api/shadow-framing.js']), ['core', 'app', 'rim', 'lod-focus']);
+assert.deepEqual(ids(['src/api/post-quality.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
+]);
 assert.deepEqual(ids(['src/render/ink.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['app/src/engine/ink-mode-runtime.js']), ['core', 'app', 'ink-app', 'build']);
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);

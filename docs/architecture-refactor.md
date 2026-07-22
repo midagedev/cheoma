@@ -73,6 +73,7 @@ app/src/                       Svelte UI
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
 | `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, 계절·날씨 상태, environment, focus, post, 축방향 DoF controller, 공유 적설 재질, weather, ink, time, world edge | 상태/profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
+| `src/api/post-quality.js` | 프레임레이트 독립 adaptive-post 품질 상태 | Node, worker, browser |
 | `src/api/cinematic.js` | Three 없는 건축 arrival/rebuild 경로·clock, 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | reveal path는 Node/worker/browser; 나머지는 THREE runtime, 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
 | `src/api/rendering.js` | 해제 경합을 견디는 shader precompile | browser WebGL runtime |
@@ -212,9 +213,9 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 - `src/camera/optics.js`가 부감 46° 광각, 일반 필지 20°·hero 18°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈는 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를, point sprite 크기는 별도 lens scale을 사용한다.
 - `src/env/dof.js`가 월드 초점점을 카메라 전방축 깊이로 변환하고 DoF enable·amount·aperture를 한 controller에서 소유한다. focus-in/out은 선택 필지 축깊이를 붙들고, 필지 hop은 보간되는 시선을 따라간다.
 - `StableBokehPass`의 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. stock override depth가 opacity dither를 재현하지 못하므로 중간 opacity의 `alphaHash` 재질은 완전 불투명 occluder로 쓰지 않고, 가중치 1에서만 일반 depth에 합류한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
-- 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보하고, 탭별 판정 대신 평균 뒤 한 번만 HDR 광원 격리를 판정한다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다. out-of-focus 픽셀의 ALU는 stock보다 많지만 새 post pass나 draw call은 없고, 저성능 경로에서는 DoF 자체를 건너뛴다. 중앙 depth 기반 gather라 초점면 불투명 표면과 정확히 겹친 전경 광원은 원판으로 산란하지 못하며, 이를 고정 fixture로 기록한다.
+- 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보하고, 탭별 판정 대신 평균 뒤 한 번만 HDR 광원 격리를 판정한다. 제품 앱은 모든 카메라 writer와 view-offset이 끝난 뒤 position/quaternion/FOV/view-offset의 화면 등가 속도를 할당 없이 측정한다. 이동 중 일반 픽셀은 세 반경과 대칭 중심을 유지한 13개 부분집합만 읽되, 그 부분집합이 HDR 광원을 만나면 최대 41개를 써 원형 보케를 보존한다. 정착 hold 뒤에는 같은 shader/program 안에서 모든 픽셀의 41개 결과를 시간 기반으로 복원한다. 정착 품질 1은 기존 41개 합산 순서와 결과를 그대로 사용한다. composer 크기·DPR·depth target·focus·aperture·pass enable은 바꾸지 않으며 수묵/compact에서 이미 잠든 DoF를 깨우지 않는다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다. 중앙 depth 기반 gather라 초점면 불투명 표면과 정확히 겹친 전경 광원은 원판으로 산란하지 못하며, 이를 고정 fixture로 기록한다.
 
-화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환과 한 번의 depth prepass는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·정지 동일성·저속 패닝은 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
+화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·13/41 품질 상태와 셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환·depth prepass·자원 identity는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·pan→settle·최종 픽셀 동일성과 Chrome GPU query는 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
 
 ## 계절·날씨와 적설 재사용 계약
 

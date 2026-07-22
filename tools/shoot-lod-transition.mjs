@@ -247,9 +247,46 @@ try {
     });
 
     engine.debugTuneDof({ amount: 1 });
+    for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
     engine.debugRenderDofFrame();
     const dof = engine.debugDof();
     const dofRestored = restored();
+    const lodStableBefore = engine.village.debugLod('p13');
+    const resourcesBefore = engine.debugPostResources();
+    const fov = engine.camera.fov;
+    engine.camera.fov = fov + 0.5;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.camera.fov = fov;
+    engine.camera.updateProjectionMatrix();
+    engine.debugAdvancePostQuality(1 / 60);
+    engine.debugRenderDofFrame();
+    const movingDof = engine.debugDof();
+    const lodMoving = engine.village.debugLod('p13');
+    for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
+    engine.debugRenderDofFrame();
+    const stableDof = engine.debugDof();
+    const lodStableAfter = engine.village.debugLod('p13');
+    const resourcesAfter = engine.debugPostResources();
+    const adaptiveResourceKeys = [
+      'depthTarget', 'depthTexture', 'bokehMaterial', 'instFadeDepthMaterial',
+      'lodScreenDoorDepthMaterial', 'composerTarget1', 'composerTarget2',
+    ];
+    const comparableLod = (state) => ({
+      level: state?.level,
+      transition: state?.transition ? { ...state.transition } : null,
+      weights: state?.weights ? { ...state.weights } : null,
+      owners: state?.owners ? [...state.owners] : [],
+    });
+    const adaptiveQuality = {
+      movingDof,
+      stableDof,
+      lodMoving: comparableLod(lodMoving),
+      lodStableBefore: comparableLod(lodStableBefore),
+      lodStableAfter: comparableLod(lodStableAfter),
+      resourcesStable: adaptiveResourceKeys.every((key) => resourcesBefore[key] === resourcesAfter[key])
+        && resourcesBefore.passCount === resourcesAfter.passCount,
+    };
 
     engine.setRenderStyle('ink', { immediate: true });
     engine.debugRenderDofFrame();
@@ -267,6 +304,7 @@ try {
       inkLodScreenDoor: ink.lodScreenDoorNormal,
       dofRestored,
       inkRestored,
+      adaptiveQuality,
     };
   });
   const report = {
@@ -298,6 +336,9 @@ try {
     return midpoint.calls <= stableCalls * 1.35 + 10
       && midpoint.triangles <= stableTriangles * 1.20;
   });
+  const adaptive = passParity.adaptiveQuality;
+  const adaptiveLodParity = JSON.stringify(adaptive.lodStableBefore) === JSON.stringify(adaptive.lodMoving)
+    && JSON.stringify(adaptive.lodMoving) === JSON.stringify(adaptive.lodStableAfter);
   if (errors.length || captures.some((capture) => (
     !capture.actual?.valid || capture.addedPrograms.length > 0
       || !capture.edgeMist?.identityStable
@@ -311,6 +352,10 @@ try {
     || Math.abs(edgeMistView.restored.viewWeight) > 1e-6
     || passParity.dofLodScreenDoor !== passParity.visibleLodMeshes
     || passParity.inkLodScreenDoor !== passParity.visibleLodMeshes
+    || adaptive.movingDof.postQuality !== 0 || adaptive.movingDof.activeBokehTaps !== 13
+    || adaptive.stableDof.postQuality !== 1 || adaptive.stableDof.activeBokehTaps !== 41
+    || adaptive.movingDof.lodScreenDoorDepth !== adaptive.stableDof.lodScreenDoorDepth
+    || !adaptive.resourcesStable || !adaptiveLodParity
     || !passParity.dofRestored || !passParity.inkRestored) process.exitCode = 1;
 } finally {
   await browser?.close();

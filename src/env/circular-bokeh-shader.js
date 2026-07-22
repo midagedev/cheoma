@@ -14,6 +14,7 @@
 // scatter pass; the controlled fixture keeps the limitation visible and measured.
 
 export const CIRCULAR_BOKEH_SAMPLE_COUNT = 41;
+export const MOVING_BOKEH_SAMPLE_COUNT = 13;
 export const CIRCULAR_BOKEH_DEFAULTS = Object.freeze({
   highlightThreshold: 0.78,
   highlightKnee: 0.52,
@@ -52,9 +53,36 @@ export const CIRCULAR_BOKEH_KERNEL = Object.freeze(
   makeDiscKernel().map((point) => Object.freeze(point)),
 );
 
-const SAMPLE_LINES = CIRCULAR_BOKEH_KERNEL.map(([x, y]) => (
-  `accumulateSample(vUv + vec2(${glslFloat(x)}, ${glslFloat(y)}) * discRadius, colorSum, brightnessSum, peakBrightness);`
+// Center plus two opposite pairs from every authored ring. Keeping all three
+// radii in the moving kernel prevents the aperture disc from changing size when
+// the camera settles. These are indexes into the unchanged 41-tap kernel.
+const MOVING_KERNEL_INDEXES = Object.freeze([0, 1, 2, 5, 6, 11, 12, 17, 18, 27, 28, 37, 38]);
+export const CIRCULAR_BOKEH_MOVING_KERNEL = Object.freeze(
+  MOVING_KERNEL_INDEXES.map((index) => CIRCULAR_BOKEH_KERNEL[index]),
+);
+
+function sampleUv([x, y]) {
+  return `vUv + vec2(${glslFloat(x)}, ${glslFloat(y)}) * discRadius`;
+}
+
+const MOVING_INDEX_TO_SAMPLE = new Map(
+  MOVING_KERNEL_INDEXES.map((kernelIndex, sampleIndex) => [kernelIndex, sampleIndex]),
+);
+const MOVING_SAMPLE_LINES = CIRCULAR_BOKEH_MOVING_KERNEL.map((point, index) => (
+  `vec3 movingSample${index} = texture2D(tColor, ${sampleUv(point)}).rgb;\n`
+  + `      accumulateColor(movingSample${index}, movingColorSum, movingBrightnessSum, movingPeakBrightness);`
 )).join('\n      ');
+
+// The 13 moving samples are fetched first. If the pixel sees an HDR emitter we
+// replay those stored values plus the 28 remaining gathers in the original
+// 41-sample order. This keeps luminous bokeh round during motion without paying
+// the full kernel across ordinary surfaces; stable quality is pixel-identical.
+const FULL_SAMPLE_LINES = CIRCULAR_BOKEH_KERNEL.map((point, kernelIndex) => {
+  const movingIndex = MOVING_INDEX_TO_SAMPLE.get(kernelIndex);
+  return movingIndex == null
+    ? `accumulateFullSample(${sampleUv(point)}, colorSum, brightnessSum, peakBrightness);`
+    : `accumulateColor(movingSample${movingIndex}, colorSum, brightnessSum, peakBrightness);`;
+}).join('\n        ');
 
 export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */`
   #include <common>
@@ -74,6 +102,7 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */`
   uniform float highlightGain;
   uniform float bokehRadiusScale;
   uniform float viewportWidth;
+  uniform float bokehQuality;
 
   #include <packing>
 
@@ -93,17 +122,48 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */`
     #endif
   }
 
-  void accumulateSample(
+  void accumulateColor(
+    vec3 sampleColor,
+    inout vec3 colorSum,
+    inout float brightnessSum,
+    inout float peakBrightness
+  ) {
+    float brightness = max(max(sampleColor.r, sampleColor.g), sampleColor.b);
+    colorSum += sampleColor;
+    brightnessSum += brightness;
+    peakBrightness = max(peakBrightness, brightness);
+  }
+
+  void accumulateFullSample(
     vec2 uv,
     inout vec3 colorSum,
     inout float brightnessSum,
     inout float peakBrightness
   ) {
     vec3 sampleColor = texture2D(tColor, uv).rgb;
-    float brightness = max(max(sampleColor.r, sampleColor.g), sampleColor.b);
-    colorSum += sampleColor;
-    brightnessSum += brightness;
-    peakBrightness = max(peakBrightness, brightness);
+    accumulateColor(sampleColor, colorSum, brightnessSum, peakBrightness);
+  }
+
+  vec3 finishBokeh(
+    vec3 colorSum,
+    float brightnessSum,
+    float peakBrightness,
+    float sampleCount,
+    float cocMix
+  ) {
+    vec3 color = colorSum / sampleCount;
+    float meanBrightness = brightnessSum / sampleCount;
+    float isolation = clamp(
+      (peakBrightness - meanBrightness) / max(peakBrightness, 0.0001),
+      0.0,
+      1.0
+    );
+    float highlight = smoothstep(
+      highlightThreshold,
+      highlightThreshold + max(highlightKnee, 0.0001),
+      peakBrightness
+    ) * cocMix * isolation;
+    return color * (1.0 + highlight * highlightGain);
   }
 
   void main() {
@@ -124,26 +184,38 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */`
     vec3 colorSum = vec3(0.0);
     float brightnessSum = 0.0;
     float peakBrightness = 0.0;
+    vec3 movingColorSum = vec3(0.0);
+    float movingBrightnessSum = 0.0;
+    float movingPeakBrightness = 0.0;
 
-      ${SAMPLE_LINES}
+      ${MOVING_SAMPLE_LINES}
 
-    float sampleCount = ${glslFloat(CIRCULAR_BOKEH_SAMPLE_COUNT)};
-    vec3 color = colorSum / sampleCount;
-    float meanBrightness = brightnessSum / sampleCount;
-    // One post-average highlight decision replaces one smoothstep per tap. Bloom
-    // has already softened real emitters. Peak-vs-mean isolation keeps their disc
-    // luminous without boosting uniformly bright plaster or sky.
-    float isolation = clamp(
-      (peakBrightness - meanBrightness) / max(peakBrightness, 0.0001),
-      0.0,
-      1.0
+    vec3 movingColor = finishBokeh(
+      movingColorSum,
+      movingBrightnessSum,
+      movingPeakBrightness,
+      ${glslFloat(MOVING_BOKEH_SAMPLE_COUNT)},
+      cocMix
     );
-    float highlight = smoothstep(
-      highlightThreshold,
-      highlightThreshold + max(highlightKnee, 0.0001),
-      peakBrightness
-    ) * cocMix * isolation;
-    color *= 1.0 + highlight * highlightGain;
+    vec3 color = movingColor;
+    // A sparse kernel is acceptable on moving surfaces but turns tiny HDR lamps
+    // into a visible star. Preserve the full aperture wherever the moving subset
+    // already sees highlight energy; this remains one program and at most 41 reads.
+    bool preserveHighlight = movingPeakBrightness >= highlightThreshold;
+    if (bokehQuality > 0.0 || preserveHighlight) {
+      ${FULL_SAMPLE_LINES}
+      vec3 fullColor = finishBokeh(
+        colorSum,
+        brightnessSum,
+        peakBrightness,
+        ${glslFloat(CIRCULAR_BOKEH_SAMPLE_COUNT)},
+        cocMix
+      );
+      float outputQuality = preserveHighlight ? 1.0 : bokehQuality;
+      color = outputQuality >= 1.0
+        ? fullColor
+        : mix(movingColor, fullColor, clamp(outputQuality, 0.0, 1.0));
+    }
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -157,6 +229,7 @@ export function installCircularBokeh(material, options = {}) {
   material.uniforms.highlightGain = { value: tuning.highlightGain };
   material.uniforms.bokehRadiusScale = { value: tuning.radiusScale };
   material.uniforms.viewportWidth = { value: 1 };
+  material.uniforms.bokehQuality = { value: 1 };
   material.fragmentShader = CIRCULAR_BOKEH_FRAGMENT_SHADER;
   material.needsUpdate = true;
   return material.uniforms;
