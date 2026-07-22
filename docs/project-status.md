@@ -162,7 +162,11 @@ GitHub #10은 초가·기와 ㅡ·ㄱ·ㄷ의 문·창 plan을 FULL renderer와 
 너비·문 높이·창 높이 여섯 축의 기본값과 shape별 안전 범위는 `residential-openings.js` 한 곳에서 정규화되고, Svelte는 이 capability로
 한국어 단위·범위를 표시한 뒤 직렬화 가능한 엔진 params만 보낸다. 공통 조립 경계가 모든 계획 개구를 정확히 한
 번 패널과 창호 detail batch로 만들며 남향 primary anchor, 대청, 기와 부엌 span과 초가 부엌 service opening을
-보존한다. URL/share/export 직렬화는 이 단계에 추가하지 않았다.
+보존한다. commit된 일반집은 마지막으로 승인된 전체 spec을 소유해 이후의 부분 patch가 다른 축을 지우지 않는다.
+종류 변경은 대상 종류 기본값에서 시작하고 집 재굴림은 현재 종류만 유지한 채 편집값을 초기화한다. compact
+`vedit` URL은 실제로 달라진 종류와 여섯 개구부 축만 최대 8필지까지 기록하며 잘못된 payload는 전부 거부한다.
+GLB는 transient focus 표현은 제외하되 commit된 일반집 overlay와 그 편집을 포함하고, 대체된 base LOD는 export
+동안만 숨긴다.
 
 GitHub #12 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md)의 계약대로 구현됐다. Three 없는 순수 local-space 계획과 Three.js 조립·dispose를 분리하고, 22–30m 암자형·36–48m 중정형·52–72m 다원형을 제공한다. 마을은 실제 직사각 footprint를 필지·도로·식생 전에 예약하며, 편집 패널은 전각 수·중정 여백·축 굴절·석탑·석등·종루·당간지주·부도를 계획 옵션으로 갱신한다. 남측 일조 통로와 26° focus 카메라는 같은 `frontDir` 계약을 쓴다.
 

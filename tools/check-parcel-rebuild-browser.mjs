@@ -705,6 +705,8 @@ try {
         windowCount: partialEdits.state.params.windowCount,
         doorWidthK: partialEdits.state.params.doorWidthK,
         windowWidthK: partialEdits.state.params.windowWidthK,
+        doorHeightK: partialEdits.state.params.doorHeightK,
+        windowHeightK: partialEdits.state.params.windowHeightK,
       }) && partialEdits.json.length > 2,
   `residential opening handoff drifted: ${partialEdits.json}`);
 

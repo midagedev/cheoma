@@ -137,7 +137,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   // Geometry is disposable; this renderer-free snapshot survives focus hops and
   // makes every optional rebuild payload a patch rather than an accidental reset.
   const committedResidentialSpecs = new Map();    // parcelId -> normalized buildParcelSpec-compatible value
-  // URL/share may serialize only kind + the four opening axes. Mark a parcel
+  // URL/share may serialize only kind + the six opening axes. Mark a parcel
   // only when one of those values actually diverges; roof/yard-only edits and a
   // full parcel reroll cannot be truthfully reconstructed by that compact form.
   const shareableResidentialIds = new Set();
