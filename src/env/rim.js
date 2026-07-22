@@ -56,9 +56,9 @@ export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.7 };
 // 유기물 그룹 판정용 조상 그룹 이름(나무 스캐터·마당 초목·focus 풀).
 const ORGANIC_NAMES = new Set(['trees', 'village-flora', 'focusGrass']);
 
-// 그레이징 오탐(넓은 완사면 광역 금빛)·수면은 프레넬로 실루엣 분리가 불가 → 이름으로 명시 제외.
+// 그레이징 오탐(넓은 완사면·도로 광역 금빛)·수면은 프레넬로 실루엣 분리가 불가 → 이름으로 명시 제외.
 //   (하늘·능선·구름·낙엽·원경 창불 등은 MeshBasic/Points/Sprite 라 타입 게이트로 이미 제외.)
-const SKIP_NAMES = new Set(['terrain', 'stream', 'paddyField']);
+const SKIP_NAMES = new Set(['terrain', 'stream', 'paddyField', 'village-roads-m0']);
 
 export function createFresnelRim(scene) {
   // 모든 패치 재질이 참조 공유하는 uniform(seasons 패턴). 한 번 갱신하면 패치된 전 재질에 반영.

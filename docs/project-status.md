@@ -129,6 +129,8 @@ GitHub #11의 건축 고증 감사는 [`architectural-authenticity.md`](architec
 잡상·취두는 지붕 형식만으로 생기지 않고 현 유형 체계의 `palace`에만 허용한다. 공식 자료를 제품 판단에 쓰면
 같은 도메인 문서와 `credits.md`를 갱신하고 실제 Reference UI의 적용 문구와 링크까지 검증한다.
 
+GitHub #30의 첫 표면 파일럿은 [`surface-materials.md`](surface-materials.md)의 순수 source/Three adapter 경계를 따른다. 다져진 흙길은 사진 타일이나 비동기 로더 대신 seed 결정론 RGBA8 albedo·height를 만들고, 회전된 16m 월드 UV로 교차로까지 연속된다. 기존 vertex color가 도로 등급과 경사면 mute를 계속 소유하며 draw call·삼각형·재질 수는 늘지 않는다. 사용자에게 보이는 출처는 `credits.md` 한 곳에서 실제 Reference UI로 전달하고, 고정 OFF/ON 화면을 직접 열어 반복 띠·중원경 shimmer를 확인한다.
+
 GitHub #12 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md)의 계약대로 구현됐다. Three 없는 순수 local-space 계획과 Three.js 조립·dispose를 분리하고, 22–30m 암자형·36–48m 중정형·52–72m 다원형을 제공한다. 마을은 실제 직사각 footprint를 필지·도로·식생 전에 예약하며, 편집 패널은 전각 수·중정 여백·축 굴절·석탑·석등·종루·당간지주·부도를 계획 옵션으로 갱신한다. 남측 일조 통로와 26° focus 카메라는 같은 `frontDir` 계약을 쓴다.
 
 사찰 원본 조립 트리는 편집·두부 조립용으로만 유지하고, 부감에서는 재질별 병합해 대표 다원형을 2,681콜에서 111콜로 낮춘다. 순수 계약과 독립 WebGL 수명주기/성능 게이트, 실제 앱 focus 캡처를 분리해 일상 검증은 가볍게 유지한다.

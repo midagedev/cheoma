@@ -28,13 +28,14 @@ const expectedSceneHashes = {
   // palettes; #8 retains four giwa groups but changes their exact geometry to
   // ㅡ + mirrored ㄱ + fitted four-bay ㄷ. #11 replaces duplicated exterior
   // stove masses with one recessed residential kitchen scene and neutralizes
-  // civilian lattice textures. The combined FULL scene bytes intentionally
-  // move while parcel plans and public proxy hashes retain their own contracts.
+  // civilian lattice textures. #30 adds deterministic world-space road UVs;
+  // the texture bytes stay outside this structural hash. The combined FULL scene bytes
+  // intentionally move while parcel plans and public proxy hashes retain their own contracts.
   // Sync, real module Worker, and ?worker=0 fallback stay byte-identical.
-  village: '3bef3527:f934cc59:a2cc2c1e:dad78b8f',
-  town: '13af893f:6caac01d:b5226fd9:ff107199',
-  capital: '91162f32:1cb04884:ab86cf43:cd6243ea',
-  hanyang: 'd21620ee:f4b101c0:8ced9de3:b5319092',
+  village: '190a8cdb:7ccf5a45:3db0761f:a5136921',
+  town: 'a56c54f4:884c88d4:4071509e:5897276c',
+  capital: '90921425:8c9c9825:c93e7f61:200b9bef',
+  hanyang: '23a64d20:0ab5540c:1acbc9d6:1a956b24',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
