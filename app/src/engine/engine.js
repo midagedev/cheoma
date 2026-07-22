@@ -501,6 +501,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dofTargetDepth = post.setFocusPoint(activeDofAnchor());
     }
     post.update(postDt);
+    inkModeRuntime.syncAfterPostUpdate();
     post.composer.render();
   }
 

@@ -36,7 +36,7 @@ function mulberry32(seed) {
   };
 }
 
-export function makePaperTexture(size = 2048, seed = 20260716) {
+export function makePaperTexture(size = 1024, seed = 20260716) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
   const ctx = cv.getContext('2d');

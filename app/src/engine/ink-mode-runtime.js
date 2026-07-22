@@ -38,6 +38,9 @@ export function createInkModeRuntime({
     ink = createInkPass(scene, camera, {
       // Edges tolerate a reduced normal/depth target; color and paper remain full resolution.
       resolutionScale: compact ? 0.5 : 0.75,
+      // The paper is broad, low-frequency grain. A bounded source avoids walking a 4M-pixel
+      // canvas on the first input event while preserving lazy GPU allocation in default PBR.
+      paperSize: compact ? 512 : 1024,
       uniforms: {
         mixAmount: amount,
         silhouetteWidth: compact ? 2.2 : 2.6,
@@ -55,7 +58,10 @@ export function createInkModeRuntime({
   function setPbrAwake(awake) {
     if (pbrAwake === awake) return;
     pbrAwake = awake;
-    if (post.gradePass) post.gradePass.enabled = awake;
+    if (post.gradePass) {
+      const saturation = post.gradePass.uniforms?.sat?.value ?? 1;
+      post.gradePass.enabled = awake && Math.abs(saturation - 1) > EPSILON;
+    }
     post.bloomPass.enabled = awake;
     // Fresnel rim/sun glow belong to the raw scene beauty and cost no duplicate scene pass.
     // Keep that source policy stable while only the covered fullscreen effects sleep.
@@ -102,10 +108,18 @@ export function createInkModeRuntime({
     return true;
   }
 
+  // post.update() owns time-profile interpolation and may call GradePass.setSaturation().
+  // Reassert the full-ink sleep gate afterwards without discarding that profile's desired
+  // saturation; setPbrAwake(true) restores the pass from its current uniform value.
+  function syncAfterPostUpdate() {
+    if (!pbrAwake && post.gradePass) post.gradePass.enabled = false;
+  }
+
   return {
     setMode,
     setFocusPolicy,
     update,
+    syncAfterPostUpdate,
     resize(width, height) {
       ink?.setSize(width, height, renderer.getPixelRatio());
     },
@@ -120,6 +134,7 @@ export function createInkModeRuntime({
         inkEnabled: !!ink?.pass.enabled,
         sourceEnabled: !!ink?.sourcePass.enabled,
         beautyScale: ink?.sourcePass.resolutionScale ?? null,
+        paperSize: ink?.paperTexture?.image?.width ?? null,
         beautyCaptures: ink?.sourcePass.captureCount ?? 0,
         normalScale: ink?.pass.resolutionScale ?? null,
         normalExcluded: ink?.pass.normalExcludedCount ?? 0,

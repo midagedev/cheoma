@@ -218,7 +218,8 @@ try {
   pass(inkState.outputLast === 'OutputPass' && inkState.passes.at(-2) === 'InkPass',
     'ink remains inside the unified composer immediately before the one OutputPass', inkState.passes.join(' → '));
   pass(inkState.passes.filter((name) => name === 'InkBeautyCapturePass').length === 1
-    && inkState.ink.sourceEnabled && inkState.ink.beautyScale <= 0.75,
+    && inkState.ink.sourceEnabled && inkState.ink.beautyScale <= 0.75
+    && inkState.ink.paperSize <= 1024,
   'one reduced raw-beauty copy stabilizes ink tone before PBR passes');
   pass(!Object.values(inkState.ink.pbrPasses).some(Boolean),
     'fully covered ink mode sleeps grade, bloom, DoF, and flare', JSON.stringify(inkState.ink.pbrPasses));
@@ -269,6 +270,16 @@ try {
     'focused full-ink output is pixel-stable when DoF and flare wake behind it',
     `signal=${focusedInkContinuity.signal.toFixed(1)} mean=${focusedInkContinuity.mean.toFixed(3)} max=${focusedInkContinuity.max} changed=${(focusedInkContinuity.changed * 100).toFixed(2)}%`);
 
+  // A time-profile change is allowed to update the remembered saturation beneath opaque ink,
+  // but it must not wake the covered grade pass. PBR return then restores that exact profile.
+  const coveredProfile = await page.evaluate(async () => {
+    window.__engine.setTime('sunset', { immediate: true });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return window.__engine.debugInk();
+  });
+  pass(!coveredProfile.pbrPasses.grade,
+    'time-profile changes keep grade asleep beneath fully covered ink');
+
   await page.evaluate(() => document.querySelector('.render-style button:first-child')?.focus());
   await page.keyboard.press('Space');
   await page.waitForFunction(() => window.__engine.debugInk().amount <= 0.001, null, { timeout });
@@ -280,6 +291,8 @@ try {
   }));
   pass(restored.state.renderStyle === 'pbr' && restored.ink.pbrAwake && !restored.url.includes('mode='),
     'Space-key return restores PBR policy and removes the default URL token');
+  pass(restored.ink.pbrPasses.grade,
+    'PBR return restores the current time profile grade instead of forcing an identity pass');
   pass(restored.output === 'OutputPass', 'PBR return keeps OutputPass last');
   const dormantBeauty = await page.evaluate(async () => {
     const before = window.__engine.debugInk();
@@ -319,13 +332,14 @@ try {
       pressed: buttons.map((button) => button.getAttribute('aria-pressed')),
       normalScale: window.__engine.debugInk().normalScale,
       beautyScale: window.__engine.debugInk().beautyScale,
+      paperSize: window.__engine.debugInk().paperSize,
     };
   });
   pass(mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
     'mobile control stays on-screen with 44px touch targets', JSON.stringify(mobileUi));
   pass(mobileUi.pressed[1] === 'true', 'mobile shared URL exposes the restored ink state');
-  pass(mobileUi.normalScale <= 0.5 && mobileUi.beautyScale <= 0.5,
-    'compact ink uses half-resolution normal and raw-beauty targets');
+  pass(mobileUi.normalScale <= 0.5 && mobileUi.beautyScale <= 0.5 && mobileUi.paperSize <= 512,
+    'compact ink uses half-resolution targets and a bounded paper source');
   await mobile.close();
 
   pass(runtimeErrors.length === 0, 'ink rendering emits no runtime or shader errors', runtimeErrors.join(' | '));
