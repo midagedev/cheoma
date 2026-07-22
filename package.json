@@ -39,6 +39,7 @@
     "check:lod": "node tools/check-lod.mjs",
     "check:lod:app": "node tools/check-lod-app.mjs",
     "check:lod:focus": "node tools/check-lod-app.mjs --scenario=focus",
+    "check:nightlights": "node tools/check-opening-glow-catalog.mjs && node tools/check-nightlights.mjs",
     "check:layout": "node tools/check-layout-contract.mjs",
     "check:live-edit": "node tools/check-live-edit-scheduler.mjs",
     "check:shader-warm": "node tools/check-shader-warm.mjs",
