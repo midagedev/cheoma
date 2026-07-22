@@ -57,8 +57,10 @@ try {
   }));
   pass(reference.text.includes('국가한옥센터(AURI) 한옥DB — 한옥의 종류·한옥이론')
       && reference.text.includes('ㅡ·ㄱ·ㄷ·ㅁ')
+      && reference.text.includes('앱의 칸·충돌 안전 범위')
+      && reference.text.includes('역사적 빈도나 보편 비례가 아닌')
       && reference.links.some((url) => url.includes('hanokdb.kr/theology/sub_02')),
-  'National Hanok Center plan evidence renders in Product References');
+  'National Hanok Center semantic-slot evidence and non-historical safety bounds render in Product References');
   pass(reference.text.includes('출입용 호와 채광·조망·환기용 창')
       && reference.text.includes('창 하부 머름 apron/rail')
       && reference.text.includes('lowerPanel')

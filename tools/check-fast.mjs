@@ -3,6 +3,7 @@ import { runVerificationChecks } from './lib/verification-runner.mjs';
 
 const checks = [
   './check-architecture.mjs',
+  './check-residential-openings.mjs',
   './check-atmosphere-contract.mjs',
   './check-environment-state.mjs',
   './check-house-diversity.mjs',

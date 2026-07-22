@@ -14,6 +14,7 @@
     "check:build": "node tools/check-app-build.mjs",
     "check:audio": "node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
+    "check:residential-openings": "node tools/check-residential-openings.mjs",
     "check:atmosphere": "node tools/check-atmosphere-contract.mjs",
     "check:environment": "node tools/check-environment-state.mjs",
     "check:house-diversity": "node tools/check-house-diversity.mjs",

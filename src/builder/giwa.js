@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildSkeletonRoof } from '../layout/roof-skeleton.js';
 import { giwaFootprint, giwaFootprintPolygon } from '../params.js';
 import { giwaFrontRange } from '../layout/giwa-footprint.js';
+import { planGiwaKitchenOpening } from '../layout/kitchen-opening-spatial.js';
 import * as G from '../core/math/geom2.js';
 import {
   OPENING_FACE_CLEARANCE,
@@ -112,7 +113,7 @@ export function buildGiwa(P, M) {
   cen.x /= n; cen.z /= n;
 
   const podH = P.podiumTierH;
-  const colH = P.columnHeight, colR = P.columnRadius;
+  const colH = P.columnHeight, colR = footprint.columnRadius;
   const podTopY = podH, colTopY = podTopY + colH, eaveY = colTopY + 0.35;
 
   // ── 기단 (단일 ㄱ자 솔리드, 낮은 장대석 + 줄눈) ──
@@ -225,7 +226,7 @@ export function buildGiwa(P, M) {
   };
 
   const centerBayOf = (nb) => Math.floor(nb / 2);
-  const bay = P.bay;
+  const bay = footprint.bay;
 
   for (let i = 0; i < n; i++) {
     const A = foot[i], B = foot[(i + 1) % n];
@@ -543,14 +544,16 @@ export function buildGiwa(P, M) {
 
   // 부엌 화구는 굴뚝과 이어지는 살림채 끝방의 마당 높이 개구 안으로 물린다. 외부 기단에
   // 별도 부뚜막을 덧붙이던 중복 구현을 초가와 공유하는 생활 장면 조립기로 대체한다.
+  const kitchenOpening = planGiwaKitchenOpening(a);
   root.add(buildRecessedKitchenHearth({
     mats: M,
-    wallX: a,
-    centerZ: 0.7,
+    wallX: kitchenOpening.wallX,
+    centerZ: kitchenOpening.centerZ,
     floorY: 0,
-    openingWidth: 1.38,
-    openingHeight: 1.58,
-    lightRange: 3.6,
+    openingWidth: kitchenOpening.openingWidth,
+    openingHeight: kitchenOpening.openingHeight,
+    frameThickness: kitchenOpening.frameThickness,
+    lightRange: kitchenOpening.lightRange,
   }));
 
   return root;

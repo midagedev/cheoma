@@ -2,6 +2,7 @@ import {
   giwaFootprintMetrics,
   giwaFootprintPoints,
 } from './layout/giwa-footprint.js';
+import { normalizeChogaShape } from './layout/choga-shape.js';
 
 // 파라미터 정의와 프리셋.
 // 길이 단위: 미터. 칸 폭은 어칸(중앙) > 협칸 > 퇴칸(끝) 순으로 좁아진다.
@@ -185,6 +186,11 @@ export function bayPositions(n, centerW, middleW, endW) {
 
 // 파라미터 → 전체 배치 치수 계산
 export function computeLayout(P) {
+  const params = P.style === 'choga' ? { ...P, ...normalizeChogaShape(P) } : P;
+  return computeNormalizedLayout(params);
+}
+
+function computeNormalizedLayout(P) {
   // 기와집: 그리드 대신 정규 ㅡ/ㄱ/ㄷ 풋프린트. 카메라·조립용 최소 치수만 산출.
   if (P.style === 'giwa') {
     const { planShape, a, b, c } = giwaFootprint(P);  // 평면 정규화(buildGiwa 와 공유)

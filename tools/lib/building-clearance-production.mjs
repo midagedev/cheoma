@@ -104,6 +104,7 @@ const HEARTH_NAMES = [
 
 function inspectHearth(building, wallX) {
   const hearth = building.getObjectByName('agungi');
+  const openingBounds = bounds(hearth.getObjectByName('kitchen-opening'));
   const counts = Object.fromEntries(HEARTH_NAMES.map((name) => [name, 0]));
   hearth?.traverse((object) => {
     if (object.name in counts) counts[object.name]++;
@@ -112,7 +113,8 @@ function inspectHearth(building, wallX) {
     wallX,
     counts,
     bounds: bounds(hearth),
-    openingBounds: bounds(hearth.getObjectByName('kitchen-opening')),
+    openingBounds,
+    openingSpanZ: { min: openingBounds.min.z, max: openingBounds.max.z },
     thresholdBounds: bounds(hearth.getObjectByName('kitchen-threshold')),
   };
 }
@@ -237,6 +239,32 @@ export function inspectBuildingClearance() {
     disposeBuilding(building);
   }
 
+  // This exact invalid shape used to let the pure planner fall back while the
+  // production bay loop received Infinity/NaN. Building it here is the hang and
+  // finite-geometry regression probe for the shared choga shape frame.
+  const chogaNonfiniteParams = {
+    ...PRESETS.choga,
+    frontBays: Infinity,
+    sideBays: -Infinity,
+    centerBayW: NaN,
+    middleBayW: Infinity,
+    endBayW: -Infinity,
+    centerBayD: Infinity,
+    endBayD: NaN,
+    columnRadius: Infinity,
+    mats: testMaterials(),
+  };
+  const chogaNonfinite = buildBuilding(chogaNonfiniteParams);
+  const chogaNonfiniteLayout = chogaNonfinite.userData.layout;
+  const chogaNonfiniteProbe = {
+    W: chogaNonfiniteLayout.W,
+    D: chogaNonfiniteLayout.D,
+    xCount: chogaNonfiniteLayout.xPos.length,
+    zCount: chogaNonfiniteLayout.zPos.length,
+    bounds: bounds(chogaNonfinite),
+  };
+  disposeBuilding(chogaNonfinite);
+
   const parcel = buildParcel({ style: 'hanok', lanterns: false, materials: testMaterials() });
   openings.hanok = inspectOpenings(parcel);
   const giwaBoundaryShapes = [
@@ -264,6 +292,7 @@ export function inspectBuildingClearance() {
     matbaeGableTucks,
     hearths,
     openings,
+    chogaNonfinite: chogaNonfiniteProbe,
   };
   disposeBuilding(giwa);
   return result;

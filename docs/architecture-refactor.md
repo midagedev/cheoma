@@ -69,6 +69,7 @@ app/src/                       Svelte UI
 | 진입점 | 주요 계약 | 실행 환경 |
 | --- | --- | --- |
 | `src/api/village-plan.js` | `planVillage`, site/tier/road, 성곽 contour·사대문, 보호수·필지 focus·LOD impostor 명세, terrain-grid 높이, 지형 clip 도로 surface 순수 helper | Node, worker, browser |
+| `src/api/residential-openings.js` | 초가·기와 ㅡ·ㄱ·ㄷ의 문·창 의미 슬롯, 형상별 capabilities, 네 개의 최소 파라미터 정규화와 seed-stable 중첩 계획. 기와 슬롯은 FULL·impostor·fit과 같은 bounded footprint를 쓰며, 초가도 계획·layout·FULL이 같은 shape frame을 소비하고 지원 밖의 유한값을 명시적으로 거절 | Node, worker, browser |
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
 | `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, 계절·날씨 상태, environment, focus, post, 축방향 DoF controller, 공유 적설 재질, weather, ink, time, world edge | 상태/profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
