@@ -191,14 +191,17 @@
 
 ## 6. 검증
 
-- #81 코드 작업에서 추가할 `check:nightlights`는 초가·기와 ㅡ·ㄱ·ㄷ의 모든 변주·mirror·fit·필지 변환에서
-  opening id/한지 면/외향 법선이 production panel과 일치하고 JSON-safe·seed 결정론적인지 검사한다. 실제 WebGL
-  fixture는 같은 불빛이 정면에서는 보이되 불투명 집·담 뒤에서는 사라지고 지붕·하늘 위로 새지 않는지 검사한다.
-  이 명령은 문서 PR 시점에는 아직 package script가 아니며, 아래 항목은 통과 결과가 아니라 구현 완료 조건이다.
-- 같은 코드 작업의 `shoot:nightlights`는 고정 seed·카메라에서 aerial/MID/focus 밤 프레임을 촬영한다. 한지 면에
-  붙은 절제된 따뜻한 원형 bloom/bokeh, 실제 깊이 가림, 어두운 방의 공존, 자유 부유점 부재를 직접 판정한다.
-  focus/rebuild/reroll/wave/LOD 수명과 기존 단일 Points의 0-delta GPU 예산은 `check:worker`, `check:app`,
-  `check:full`과 함께 확인한다.
+- `npm run check:nightlights`는 실제 초가·기와 ㅡ·ㄱ·ㄷ prototype에서 수집한 38개 opening anchor의 id/한지 면/
+  외향 법선, mirror, JSON-safe deep freeze와 반복 결정론을 검사한다. 이어 실제 `planVillage` 필지 변환과 합성
+  hero·궁 소유자, 저작 anchor가 없는 사찰·정자의 fail-closed, 고정 owner slot, focus overlay 교체·원복,
+  wave·dispose 수명과 단일 Points의 1 draw/0 triangle/1 material/1 program/0 texture/0 light 예산을 검사한다.
+- `npm run shoot:nightlights`는 실제 앱의 고정 seed에서 aerial/MID/focus 밤 프레임과 같은 카메라의 정면·후면
+  depth-on/depth-off 프레임을 촬영한다. 한지 면에 붙은 절제된 따뜻한 bloom/bokeh, 불투명 집·담 뒤의 실제
+  깊이 가림, 어두운 방의 공존과 자유 부유점 부재를 직접 판정한다. 같은 실행에서 focus와 재건축이 고정 owner
+  slot·geometry·material을 재사용하면서 실제 opening 위치를 따라가는지도 확인한다.
+- `check:worker`는 sync/Worker/fallback의 scene bytes·일반 dispose 수명을, `check:parcel-rebuild:browser`는
+  focus/edit/probe 실패 뒤 창불·문 owner 복원을 맡는다. `check:app`은 항목별 References UI와 전체 앱 부팅을
+  확인하고, 넓은 회귀 범위는 `check:full`로 마감한다.
 
 - `npm run check:opening-detail`: 순수 결정론, 불변 데이터, vocabulary, 창 머름과 문 lowerPanel의 배타성,
   frame·threshold·유형별 철물 범위,

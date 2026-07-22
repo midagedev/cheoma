@@ -193,13 +193,40 @@ try {
     }
   });
 
+  // Hanyang owns the actual FAR/MID/FULL chunk continuum. Smaller town scenes
+  // deliberately keep regular houses on FULL and cannot verify MID ownership.
   const url = `http://127.0.0.1:${port}/?shot=1&hero=0&village=1&worker=0`
-    + `&vscale=town&seed=42&vseed=${SEED}&time=night&season=autumn&weather=clear`;
+    + `&vscale=hanyang&seed=42&vseed=${SEED}&time=night&season=autumn&weather=clear`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true
     && window.__engine?.village?.debugPlan?.()?.seed === 20260716
-    && window.__engine?.village?.debugPlan?.()?.scale === 'town', null, { timeout });
+    && window.__engine?.village?.debugPlan?.()?.scale === 'hanyang', null, { timeout });
   await page.waitForFunction(() => !window.__engine.village.getState().transitioning, null, { timeout });
+  // SHOT_READY covers scene ownership, not a camera arrival that may still be
+  // applying lens metadata. Wait for one genuinely stable aerial frame before
+  // deriving screen-equivalent LOD distances from it.
+  await page.evaluate(async () => {
+    const engine = window.__engine;
+    let previous = null;
+    let stable = 0;
+    for (let frame = 0; frame < 360; frame++) {
+      await new Promise(requestAnimationFrame);
+      const current = [
+        ...engine.camera.position.toArray(),
+        ...engine.__controls.target.toArray(),
+        engine.camera.fov,
+        engine.camera.userData.villageReferenceFov ?? engine.camera.fov,
+      ];
+      const delta = previous
+        ? Math.max(...current.map((value, index) => Math.abs(value - previous[index])))
+        : Infinity;
+      const revealActive = engine.debugArchitecturalReveal?.().active === true;
+      stable = frame >= 12 && !revealActive && delta < 1e-5 ? stable + 1 : 0;
+      previous = current;
+      if (stable >= 6) return;
+    }
+    throw new Error('nightlight visual camera did not settle');
+  });
   await reportWebGLRenderer(page, 'nightlights');
 
   const fixture = await page.evaluate(() => {
@@ -240,7 +267,114 @@ try {
     };
   });
 
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.setTime('night', { immediate: true });
+    engine.setSeason('autumn', { immediate: true });
+    engine.setWeather('clear', { immediate: true });
+    engine.debugAdvancePost(2);
+    engine.debugRenderDofFrame();
+    // Keep every review frame about the rendered scene. A persistent rule also
+    // catches controls that Svelte recreates after the time/season updates.
+    const sceneOnly = document.createElement('style');
+    sceneOnly.dataset.nightlightCapture = 'scene-only';
+    sceneOnly.textContent = 'body * { visibility: hidden !important; } canvas { visibility: visible !important; }';
+    document.head.appendChild(sceneOnly);
+  });
+  // Let the compositor retire UI layers before taking the first element shot.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+  const aerialPath = join(outDir, 'aerial-night.png');
+  await page.locator('canvas').screenshot({ path: aerialPath });
+
   const baseOwner = fixture.owner;
+
+  // Capture the real base MID root before focus transfers this parcel to a
+  // selected FULL overlay. The parcel target keeps the authored house in frame
+  // while the shared chunk policy, not a test-owned visibility toggle, swaps
+  // FAR → MID.
+  const midProbe = await page.evaluate(async ({ parcelId, focusTarget }) => {
+    const engine = window.__engine;
+    const camera = engine.camera;
+    const controls = engine.__controls;
+    const saved = {
+      position: camera.position.toArray(),
+      target: controls.target.toArray(),
+      maxDistance: controls.maxDistance,
+      fov: camera.fov,
+      dofAmount: engine.debugDof().amount,
+    };
+    const before = engine.village.debugLod(parcelId);
+    // The source state is FAR, so cross midIn while remaining beyond fullOut.
+    // fullOut*1.2 is safely inside that hysteresis band for the shared policy.
+    const desiredVisual = Math.max(1, (before?.swapOut || 140) * 1.2);
+    const referenceFov = camera.userData.villageReferenceFov ?? camera.fov;
+    const lensScale = Math.tan(referenceFov * Math.PI / 360)
+      / Math.tan(camera.fov * Math.PI / 360);
+    const desiredPhysical = desiredVisual * lensScale;
+    controls.target.fromArray(focusTarget);
+    const direction = camera.position.clone().sub(controls.target);
+    if (direction.lengthSq() < 1e-6) direction.set(0.2, 0.55, 1);
+    direction.normalize();
+    controls.maxDistance = Math.max(saved.maxDistance, desiredPhysical * 1.2);
+    camera.position.copy(controls.target).addScaledVector(direction, desiredPhysical);
+    camera.lookAt(controls.target);
+    controls.update();
+    engine.debugTuneDof({ amount: 0 });
+
+    let stableMidFrames = 0;
+    const levels = [];
+    for (let frame = 0; frame < 18; frame++) {
+      await new Promise(requestAnimationFrame);
+      const state = engine.village.debugLod(parcelId);
+      levels.push(state?.level || null);
+      stableMidFrames = state?.level === 'mid' ? stableMidFrames + 1 : 0;
+      if (stableMidFrames >= 3) break;
+    }
+    let points = null;
+    engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
+    const api = points?.parent?.userData?.nightLights;
+    engine.debugAdvancePost(2);
+    engine.debugRenderDofFrame();
+    return {
+      saved,
+      before,
+      desiredVisual,
+      desiredPhysical,
+      levels,
+      stableMidFrames,
+      lod: engine.village.debugLod(parcelId),
+      selected: engine.village.getState().selected,
+      owner: api?.debugOwner(parcelId) || null,
+    };
+  }, { parcelId: fixture.parcel.parcelId, focusTarget: fixture.parcel.focusTarget });
+  const midPath = join(outDir, 'mid-night.png');
+  await page.locator('canvas').screenshot({ path: midPath });
+  const midRestored = await page.evaluate(async ({ parcelId, saved, originalLevel }) => {
+    const engine = window.__engine;
+    engine.camera.position.fromArray(saved.position);
+    engine.__controls.target.fromArray(saved.target);
+    engine.__controls.maxDistance = saved.maxDistance;
+    engine.camera.fov = saved.fov;
+    engine.camera.updateProjectionMatrix();
+    engine.camera.lookAt(engine.__controls.target);
+    engine.__controls.update();
+    engine.debugTuneDof({ amount: saved.dofAmount });
+    let state = null;
+    for (let frame = 0; frame < 12; frame++) {
+      await new Promise(requestAnimationFrame);
+      state = engine.village.debugLod(parcelId);
+      if (state?.level === originalLevel && state?.valid) break;
+    }
+    return {
+      lod: state,
+      selected: engine.village.getState().selected,
+    };
+  }, {
+    parcelId: fixture.parcel.parcelId,
+    saved: midProbe.saved,
+    originalLevel: midProbe.before?.level,
+  });
+
   await page.evaluate((parcelId) => window.__engine.village.debugFocus(parcelId), fixture.parcel.parcelId);
   await page.waitForFunction(() => window.__engine.village.getState().transitioning, null, { timeout: 10_000 });
   await page.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
@@ -255,6 +389,20 @@ try {
     engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
     return points.parent.userData.nightLights.debugOwner(parcelId);
   }, fixture.parcel.parcelId);
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.debugAdvancePost(2);
+    engine.debugRenderDofFrame();
+  });
+  const focusPath = join(outDir, 'focus-night.png');
+  await page.locator('canvas').screenshot({ path: focusPath });
+  const focusFrame = await page.evaluate(() => ({
+    position: window.__engine.camera.position.toArray(),
+    target: window.__engine.__controls.target.toArray(),
+    maxDistance: window.__engine.__controls.maxDistance,
+    fov: window.__engine.camera.fov,
+    dofAmount: window.__engine.debugDof().amount,
+  }));
 
   const rebuilt = await page.evaluate((parcelId) => Boolean(window.__engine.village.rebuild(
     parcelId,
@@ -289,23 +437,24 @@ try {
     return { owner: api.debugOwner(parcelId), resource: api.debugState() };
   }, fixture.parcel.parcelId);
 
-  const pair = bestOpposedPair(rebuiltOwner.owner.selected);
+  let pair = bestOpposedPair(rebuiltOwner.owner.selected);
   if (!pair) throw new Error(`${fixture.parcel.parcelId} lost its two-point nightlight fixture after rebuild`);
-  const outward = horizontalUnit(pair.front);
-  const target = {
-    x: (pair.front.x + pair.rear.x) * 0.5,
-    y: (pair.front.y + pair.rear.y) * 0.5,
-    z: (pair.front.z + pair.rear.z) * 0.5,
+  const facingScore = (anchor) => {
+    const toCamera = {
+      x: focusFrame.position[0] - anchor.x,
+      z: focusFrame.position[2] - anchor.z,
+    };
+    const length = Math.hypot(toCamera.x, toCamera.z) || 1;
+    const outward = horizontalUnit(anchor);
+    return outward.x * toCamera.x / length + outward.z * toCamera.z / length;
   };
-  const distance = 70;
+  if (facingScore(pair.rear) > facingScore(pair.front)) {
+    pair = { ...pair, front: pair.rear, rear: pair.front };
+  }
   const cameraFrame = {
-    position: [
-      target.x + outward.x * distance,
-      target.y + Math.tan(10 * Math.PI / 180) * distance,
-      target.z + outward.z * distance,
-    ],
-    target: [target.x, target.y, target.z],
-    fov: 28,
+    position: focusFrame.position,
+    target: focusFrame.target,
+    fov: focusFrame.fov,
   };
 
   const framing = await page.evaluate(({ frame, front, rear }) => {
@@ -394,8 +543,20 @@ try {
       baseToFocus: focusDelta,
       focusToRebuild: rebuildDelta,
     },
+    mid: {
+      before: midProbe.before,
+      levels: midProbe.levels,
+      stableFrames: midProbe.stableMidFrames,
+      lod: midProbe.lod,
+      selected: midProbe.selected,
+      owner: ownerSignature(midProbe.owner),
+      restored: midRestored,
+    },
     resource,
     captures: {
+      aerial: aerialPath,
+      mid: midPath,
+      focus: focusPath,
       frontFinal: frontFinal.path,
       rearDepthOn: rearOn.path,
       rearDepthOff: rearOff.path,
@@ -425,6 +586,14 @@ try {
   pass(focusDelta?.matched > 0 && rebuildDelta?.matched > 0 && rebuildDelta.max > 0.005,
     'focus/rebuild refresh the same authored owner slot',
     `focus matched=${focusDelta?.matched || 0}, rebuild Δ=${rebuildDelta?.max?.toFixed(4) || 'n/a'}m`);
+  pass(midProbe.stableMidFrames >= 3 && midProbe.lod?.level === 'mid' && midProbe.lod?.valid
+      && midProbe.lod?.midDetail === true && midProbe.lod?.overlay === false
+      && midProbe.lod?.baseHidden === false && midProbe.selected == null
+      && JSON.stringify(ownerSignature(midProbe.owner)) === JSON.stringify(ownerSignature(baseOwner))
+      && midRestored?.lod?.level === midProbe.before?.level && midRestored?.lod?.valid
+      && midRestored?.selected == null,
+  'actual product MID uses the base MID root and restores the aerial owner',
+  `levels=${midProbe.levels.join('→')} restored=${midRestored?.lod?.level || 'none'}`);
   pass(resource.drawCalls === 1 && resource.triangles === 0 && resource.lights === 0
       && resource.textures === 0 && resource.materials === 1 && resource.depthTest === true,
   'nightlight resource state remains one draw with zero lights/textures/triangles',
@@ -436,6 +605,9 @@ try {
   console.log(`OWNER  ${JSON.stringify(report.ownerRefresh)}`);
   console.log(`RESOURCE draw=${resource.drawCalls} light=${resource.lights} texture=${resource.textures} tri=${resource.triangles}`);
   console.log(`VISUAL  ${frontFinal.path}`);
+  console.log(`VISUAL  ${aerialPath}`);
+  console.log(`VISUAL  ${midPath}`);
+  console.log(`VISUAL  ${focusPath}`);
   console.log(`VISUAL  ${rearOn.path}`);
   console.log(`VISUAL  ${rearOff.path}`);
   console.log(`REPORT  ${join(outDir, 'nightlights-report.json')}`);

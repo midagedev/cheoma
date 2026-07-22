@@ -11,6 +11,9 @@ const built = await esbuild.build({
     contents: `
       export { buildKindDecomps } from './src/generators/village/houses.js';
       export { CHOGA_VARIANTS, GIWA_VARIANTS } from './src/village/variants.js';
+      export { buildNightLights } from './src/village/nightlights.js';
+      export { houseMatrix } from './src/generators/shared/parcel-transform.js';
+      export * as THREE from 'three';
     `,
     resolveDir: ROOT,
     sourcefile: 'opening-glow-catalog-contract-entry.js',
@@ -63,7 +66,10 @@ globalThis.document = {
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(built.outputFiles[0].contents).toString('base64')}`;
 const production = await import(moduleUrl);
-const { buildKindDecomps, CHOGA_VARIANTS, GIWA_VARIANTS } = production;
+const {
+  buildKindDecomps, buildNightLights, houseMatrix, THREE,
+  CHOGA_VARIANTS, GIWA_VARIANTS,
+} = production;
 const ANCHOR_KEYS = [
   'height', 'kind', 'openingId', 'outward', 'position', 'primary', 'style', 'width',
 ];
@@ -113,6 +119,10 @@ function assertMirrored(source, mirrored, label) {
   }
 }
 
+function assertClose(actual, expected, label) {
+  assert(Math.abs(actual - expected) < 1e-9, `${label}: ${actual} !== ${expected}`);
+}
+
 let checked = 0;
 for (const [kind, variants] of [
   ['choga', CHOGA_VARIANTS],
@@ -154,6 +164,54 @@ for (const [kind, variants] of [
         label,
       );
     }
+
+
+    // Join the production catalog to the runtime policy for every variant. A
+    // non-uniform fitted parcel catches regressions that always select variant
+    // zero or skip mirror/house transforms even when each layer passes alone.
+    const fixtureParcel = {
+      id: `${kind}-variant-${variantIndex}`,
+      kind,
+      seed: (0x810000 + variantIndex * 131 + (kind === 'giwa' ? 17 : 29)) >>> 0,
+      wealth: 0.82,
+      variant: variantIndex,
+      center: { x: 14.2 + variantIndex, z: -9.7 + variantIndex * 0.3 },
+      baseY: 1.35,
+      frontDir: { x: 0.36, z: Math.sqrt(1 - 0.36 ** 2) },
+      houseLocal: { x: 1.1, z: -1.7 },
+      sx: 1.14,
+      sy: 0.91,
+      sz: 1.07,
+    };
+    const lights = buildNightLights(
+      { parcels: [fixtureParcel], features: {} },
+      null,
+      { regular: { [kind]: { variants: first.glowAnchors, variantAware: true } } },
+    );
+    const owner = lights.debugOwner(fixtureParcel.id);
+    assert(owner?.selected.length > 0, `${label} runtime selected no authored opening`);
+    const authoredById = new Map(anchors.map((item) => [item.openingId, item]));
+    const matrix = houseMatrix(fixtureParcel);
+    for (const selected of owner.selected) {
+      const authored = authoredById.get(selected.openingId);
+      assert(authored, `${label} runtime selected another variant's ${selected.openingId}`);
+      const expected = new THREE.Vector3(
+        authored.position.x, authored.position.y, authored.position.z,
+      ).applyMatrix4(matrix);
+      const expectedOutward = new THREE.Vector3(
+        authored.outward.x, authored.outward.y, authored.outward.z,
+      ).transformDirection(matrix);
+      assertClose(selected.x, expected.x, `${label}:${selected.openingId} fitted x`);
+      assertClose(selected.y, expected.y, `${label}:${selected.openingId} fitted y`);
+      assertClose(selected.z, expected.z, `${label}:${selected.openingId} fitted z`);
+      assertClose(selected.outwardX, expectedOutward.x,
+        `${label}:${selected.openingId} fitted outward x`);
+      assertClose(selected.outwardY, expectedOutward.y,
+        `${label}:${selected.openingId} fitted outward y`);
+      assertClose(selected.outwardZ, expectedOutward.z,
+        `${label}:${selected.openingId} fitted outward z`);
+    }
+    lights.dispose();
     checked += anchors.length;
   }
 }

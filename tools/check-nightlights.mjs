@@ -289,6 +289,24 @@ assert.equal(JSON.stringify(first.debugOwner(regular.id)), baseOwner, 'null over
 assert.equal(bytes(positionAttribute), basePositionBytes, 'null overlay restore changed base position bytes');
 assert.equal(first.refreshOwner('missing-owner', overlay), false, 'unknown overlay owner was accepted');
 
+const crossKindOverlay = new THREE.Group();
+crossKindOverlay.userData.style = 'giwa';
+crossKindOverlay.userData.openingGlowAnchors = [
+  anchor('cross-kind-front', { x: 0.1, y: 1.4, z: 2 }, { x: 0, y: 0, z: 1 }),
+  anchor('cross-kind-rear', { x: -0.2, y: 1.5, z: -2 }, { x: 0, y: 0, z: -1 }),
+];
+assert.equal(first.debugOwner(choga.id).kind, 'choga', 'base choga profile lost its kind');
+assert.equal(first.debugOwner(choga.id).desired, 1, 'base low-wealth choga light policy changed');
+assert.equal(first.refreshOwner(choga.id, crossKindOverlay), true,
+  'cross-kind overlay refresh rejected a known owner');
+assert.equal(first.debugOwner(choga.id).kind, 'giwa',
+  'cross-kind overlay kept the original parcel light policy');
+assert.equal(first.debugOwner(choga.id).desired, 2,
+  'edited giwa overlay did not acquire the giwa room-light policy');
+assert.equal(first.refreshOwner(choga.id, null), true, 'cross-kind null restore failed');
+assert.equal(first.debugOwner(choga.id).kind, 'choga',
+  'cross-kind null restore did not recover the base parcel policy');
+
 assert.equal(points.visible, false, 'nightlights start visible during day');
 first.setLevel(1);
 assert.equal(points.visible, true, 'nightlights did not become visible at night');

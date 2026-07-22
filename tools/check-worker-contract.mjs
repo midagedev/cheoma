@@ -37,13 +37,17 @@ const expectedSceneHashes = {
   // a fixed dark recess while residential primary-door and footwear anchors
   // share the same renderer-free opening plan. The prior 16° focus envelope
   // relocated the capital fixture's pavilion from a blocked `soro-003`
-  // candidate to the clear `golmok-015` candidate. Raising only the camera
-  // pitch to 18° keeps these four scene hashes stable. Sync, real module Worker,
-  // and ?worker=0 fallback stay byte-identical.
-  village: 'a11c8fe3:07366219:ccfcdc20:382faa03',
-  town: '56e38b49:9ca91523:de8fc9bb:203922ad',
-  capital: '9cf72f8f:2044e2af:12cdc393:ead3a36b',
-  hanyang: '62c6c481:fe98a453:5f2b6a86:840ea499',
+  // candidate to the clear `golmok-015` candidate. #81 replaces inferred lot
+  // lights with fixed renderer-authored opening anchors, keeps one Points draw,
+  // and turns scene depth testing on. The authored position/owner attributes
+  // intentionally update every scale hash; depthTest itself is covered by the
+  // pure and browser nightlight gates rather than this structural hasher. Sync,
+  // real module Worker, and ?worker=0 fallback
+  // must still remain byte-identical.
+  village: '6fac48b4:07720f16:e0118413:d2b8b05c',
+  town: '2cbd0bda:3ae321ea:439c19c3:29ad84a4',
+  capital: '20a0a22e:4e81fc5a:73af28b7:a4e51d42',
+  hanyang: '6d74923b:bf1e144b:8d2f5899:b977b7e5',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

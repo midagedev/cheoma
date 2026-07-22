@@ -11,6 +11,7 @@ const built = await esbuild.build({
     contents: `
       export { candleFlicker } from './src/env/night-glow.js';
       export { createVillageNightGlow } from './src/runtime/village/night-glow.js';
+      export { hashString } from './src/rng.js';
     `,
     resolveDir: ROOT,
     sourcefile: 'village-night-glow-contract-entry.js',
@@ -24,7 +25,7 @@ const built = await esbuild.build({
   logLevel: 'silent',
 });
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(built.outputFiles[0].contents).toString('base64')}`;
-const { candleFlicker, createVillageNightGlow } = await import(moduleUrl);
+const { candleFlicker, createVillageNightGlow, hashString } = await import(moduleUrl);
 
 const WARM_LIGHT = 0xffb35c;
 
@@ -84,9 +85,10 @@ assert.equal(base.emissiveIntensity, 1, 'boost was not applied to the initial ni
 assert.deepEqual(callbacks, [[0, 1]], 'initial setTime callback behavior changed');
 
 glow.update(0.25);
+const basePhase = (hashString('village-base|0') / 0x100000000) * Math.PI * 2;
 assert.equal(
   base.emissiveIntensity,
-  0.8 * 1.25 * candleFlicker(0.25, 0),
+  0.8 * 1.25 * candleFlicker(0.25, basePhase),
   'deterministic base flicker changed',
 );
 
@@ -94,8 +96,8 @@ const overlayMap = { name: 'overlay-map' };
 const overlayEmissiveMap = { name: 'overlay-emissive-map' };
 const overlayOriginal = { hex: 0x223344, intensity: 0.19, emissiveMap: overlayEmissiveMap };
 const overlay = makeMaterial({ ...overlayOriginal, map: overlayMap, glow: 0.5 });
-const overlayOwner = glow.add(makeRoot(base, [overlay, overlay]));
-const sharedOwner = glow.add(makeRoot(base));
+const overlayOwner = glow.add(makeRoot(base, [overlay, overlay]), 'overlay:p7');
+const sharedOwner = glow.add(makeRoot(base), 'shared:base');
 
 assert.equal(overlayOwner.length, 2, 'owner token did not deduplicate its root by identity');
 assert.equal(sharedOwner.length, 1, 'shared owner token lost its material');
@@ -128,8 +130,8 @@ const disposeMap = { name: 'dispose-map' };
 const disposeEmissiveMap = { name: 'dispose-emissive-map' };
 const disposeOriginal = { hex: 0x334455, intensity: 0.23, emissiveMap: disposeEmissiveMap };
 const disposeOnly = makeMaterial({ ...disposeOriginal, map: disposeMap, glow: 0.4 });
-const duplicateAtDispose = glow.add(makeRoot(base));
-const uniqueAtDispose = glow.add(makeRoot(disposeOnly));
+const duplicateAtDispose = glow.add(makeRoot(base), 'dispose:base');
+const uniqueAtDispose = glow.add(makeRoot(disposeOnly), 'dispose:unique');
 const baseSetsBeforeDispose = base.stats.setHex;
 
 glow.dispose();
@@ -157,5 +159,34 @@ assert.equal(inertOwner.length, 0, 'disposed add() returned a live owner token')
 assert.equal(late.stats.getHex, 0, 'disposed API acquired a late material');
 assert.equal(callbacks.length, callbacksAtDispose, 'disposed API still invoked its callback');
 assertOriginal(base, baseOriginal, 'disposed API mutated a restored material');
+
+function targetIntensityAfterHistory(withPriorOwner) {
+  const rootMaterial = makeMaterial({
+    hex: 0x101010, intensity: 0.2, emissiveMap: null, map: null, glow: 0.4,
+  });
+  const target = makeMaterial({
+    hex: 0x202020, intensity: 0.3, emissiveMap: null, map: null, glow: 0.7,
+  });
+  const prior = makeMaterial({
+    hex: 0x303030, intensity: 0.4, emissiveMap: null, map: null, glow: 0.6,
+  });
+  const runtime = createVillageNightGlow(makeRoot(rootMaterial));
+  runtime.setTime('night', { immediate: true });
+  if (withPriorOwner) {
+    const priorOwner = runtime.add(makeRoot(prior), 'residential:p1');
+    runtime.remove(priorOwner);
+  }
+  runtime.add(makeRoot(target), 'residential:p42');
+  runtime.update(0.5);
+  const intensity = target.emissiveIntensity;
+  runtime.dispose();
+  return intensity;
+}
+
+assert.equal(
+  targetIntensityAfterHistory(false),
+  targetIntensityAfterHistory(true),
+  'overlay flicker depends on prior focus/acquisition history',
+);
 
 console.log('VILLAGE NIGHT GLOW CONTRACT: PASS');
