@@ -23,7 +23,9 @@ assert.deepEqual(ids(['src/runtime/village/handle.js']), [
   'core', 'app', 'worker', 'lod-focus', 'lod-wave', 'parcel-rebuild-browser',
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
-assert.deepEqual(ids(['app/src/App.svelte']), ['core', 'app', 'parcel-rebuild-browser', 'build']);
+assert.deepEqual(ids(['app/src/App.svelte']), [
+  'core', 'app', 'ink-app', 'parcel-rebuild-browser', 'build',
+]);
 assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
   'core', 'app', 'parcel-rebuild-browser', 'build',
 ]);
@@ -37,7 +39,11 @@ assert.deepEqual(ids(['src/api/village.js']), [
   'core', 'app', 'worker', 'lod-focus', 'lod-wave',
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/render/ink.js']), ['core', 'app', 'ink-app']);
+assert.deepEqual(ids(['app/src/engine/ink-mode-runtime.js']), ['core', 'app', 'ink-app', 'build']);
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
+assert.deepEqual(ids(['src/api/ink.js']), ['core', 'app', 'ink-app']);
+assert.deepEqual(ids(['src/api/render-style.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
   'core', 'app', 'petals', 'winter-app', 'worker', 'lod-wave',
 ]);

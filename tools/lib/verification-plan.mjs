@@ -1,5 +1,5 @@
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'petals', 'winter-app', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
+  'core', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
   'parcel-rebuild-browser', 'build',
 ]);
 
@@ -39,6 +39,9 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
+    if (/^app\/src\/(?:App\.svelte|components\/RenderStyleToggle\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
+      select('product ink mode integration changed', 'ink-app');
+    }
     if (/^app\/src\/(?:components\/EnvironmentDial\.svelte|engine\/engine\.js|lib\/seed\.js)$/.test(path)) {
       select('winter environment integration changed', 'winter-app');
     }
@@ -59,6 +62,7 @@ function routePath(path) {
 
   if (path.startsWith('src/env/') || path.startsWith('src/render/')) {
     select('environment/rendering changed', 'app');
+    if (/^src\/render\/(?:ink|ink-state)\.js$/.test(path)) select('ink rendering changed', 'ink-app');
     if (/^src\/env\/(?:index|mountains|paddies|seasons|sky|snow-material|terrain|trees|weather)\.js$/.test(path)) {
       select('winter surface or environment changed', 'winter-app');
     }
@@ -133,6 +137,10 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/ink.js' || path === 'src/api/render-style.js') {
+      select('public ink rendering API changed', 'app', 'ink-app');
+      return { gates, reasons };
+    }
     if (path === 'src/api/environment.js') {
       select('environment API changed', 'app', 'dof-app', 'petals', 'winter-app', 'lod-wave');
       return { gates, reasons };
@@ -210,6 +218,7 @@ export function verificationCommands(plan) {
   const commands = [{ id: 'core', command: 'npm', args: ['run', 'check'] }];
   const has = (gate) => plan.gates.includes(gate);
   if (has('app')) commands.push({ id: 'app', command: 'npm', args: ['run', 'check:app'] });
+  if (has('ink-app')) commands.push({ id: 'ink-app', command: 'npm', args: ['run', 'check:ink:app'] });
   if (has('dof-app')) commands.push({ id: 'dof-app', command: 'npm', args: ['run', 'check:dof:app'] });
   if (has('petals')) commands.push({ id: 'petals', command: 'npm', args: ['run', 'check:petals'] });
   if (has('winter-app')) commands.push({ id: 'winter-app', command: 'npm', args: ['run', 'check:winter:app'] });

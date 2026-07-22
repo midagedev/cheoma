@@ -7,6 +7,7 @@
 - [x] 중국 (조사 완료)
 
 도구·라이브러리 스택 조사는 `docs/tooling.md` 참고.
+조선 진경산수의 미학 원칙과 제품 수묵 렌더로의 번역은 [`ink-landscape.md`](ink-landscape.md)를 기준으로 한다.
 
 ---
 

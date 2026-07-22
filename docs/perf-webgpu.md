@@ -28,7 +28,7 @@
 ### 후처리 — `src/env/post.js` (핵심 GPU 비용)
 - `EffectComposer`(HalfFloat HDR) 파이프라인: `RenderPass → RimPass(커스텀) → UnrealBloomPass → BokehPass(opt-in DoF) → OutputPass(ACES+sRGB 1회)`.
 - **`RimPass`(post.js:158–253)가 최대 관전 포인트:** `render()`마다 씬 전체를 `overrideMaterial = MeshNormalMaterial`로 **반해상도 오프스크린에 통째로 재렌더**(투명 오브젝트 숨김 traverse 포함)해서 뷰공간 노멀·깊이를 얻은 뒤 프레넬 림 합성. 건물 1채면 무해하나 **도성 300호에선 지오메트리 제출이 사실상 2배 + 별도 fill 패스**가 된다.
-- ink 모드는 별도 컴포저(`src/render/ink.js`): `RenderPass → InkPass(커스텀 GLSL FullScreenQuad) → OutputPass`. 절차 한지 텍스처(2048 canvas).
+- 제품 ink 모드는 통합 컴포저 안에서 `RenderPass → 축소 raw-beauty capture → PBR passes → InkPass → OutputPass`를 사용한다. 종이·normal/beauty target은 최초 진입 때만 만들며, 절차 한지 소스는 데스크톱 1024·compact 512로 제한해 첫 입력에서의 canvas 픽셀 순회와 메모리를 줄인다. 완전 수묵에서는 가려진 PBR fullscreen pass를 쉬게 하고 PBR 복귀 뒤 beauty copy도 중단한다.
 
 ### `onBeforeCompile` GLSL 패치 체인 (TSL 이행의 최대 난관)
 - `src/env/seasons.js` — `patchTrees`(vertex: 수종별 잎색 이동 + instanceMatrix 기반 바람 sway), `patchTerrain`(vertex+fragment 지면 곱연산 틴트). `prev()` 체이닝.

@@ -7,6 +7,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
 const APP = join(ROOT, 'app', 'src');
 const API_PLAN = join(SRC, 'api', 'village-plan.js');
+const API_RENDER_STYLE = join(SRC, 'api', 'render-style.js');
 const SOURCE_EXT = new Set(['.js', '.mjs', '.svelte']);
 
 function walk(dir) {
@@ -153,6 +154,28 @@ for (const file of planClosure) {
   if (browserGlobal.test(code)) errors.push(`pure plan closure uses browser global: ${rel}`);
 }
 
+// URL/state consumers must not pull the WebGL ink renderer (and therefore THREE/DOM) at app boot.
+const renderStyleClosure = new Set();
+const renderStyleQueue = [API_RENDER_STYLE];
+while (renderStyleQueue.length) {
+  const file = renderStyleQueue.pop();
+  if (renderStyleClosure.has(file)) continue;
+  renderStyleClosure.add(file);
+  for (const dep of graph.get(file) || []) if (dep.startsWith(SRC + sep)) renderStyleQueue.push(dep);
+}
+for (const file of renderStyleClosure) {
+  const rel = relative(ROOT, file);
+  for (const specifier of externals.get(file) || []) {
+    if (specifier === 'three' || specifier.startsWith('three/')) {
+      errors.push(`render-style closure imports THREE: ${rel} -> ${specifier}`);
+    }
+  }
+  const code = sourceByFile.get(file)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+  if (browserGlobal.test(code)) errors.push(`render-style closure uses browser global: ${rel}`);
+}
+
 const hotspots = [...walk(SRC), ...walk(APP)]
   .map((file) => ({ file: relative(ROOT, file), lines: sourceByFile.get(file).split('\n').length }))
   .filter((item) => item.lines >= 750)
@@ -164,7 +187,7 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, 0 cycles)`);
+console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${renderStyleClosure.size} pure render-style modules, 0 cycles)`);
 if (hotspots.length) {
   console.log('Refactor hotspots (warning only):');
   for (const item of hotspots) console.log(`  ${String(item.lines).padStart(4)}  ${item.file}`);

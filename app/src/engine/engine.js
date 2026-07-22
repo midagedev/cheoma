@@ -35,6 +35,7 @@ import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
 import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './expansion.js';
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
 import { createCinematicRuntime } from './cinematic-runtime.js';
+import { createInkModeRuntime } from './ink-mode-runtime.js';
 import { createPostRuntime } from './post-runtime.js';
 import { createSceneRuntime } from './scene-runtime.js';
 import { createViewShift } from './view-shift.js';
@@ -87,6 +88,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // ---------- 상태 ----------
   const state = {
     seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
+    renderStyle: 'pbr',
     expansion: 1, selected: false, canMerge: false,
   };
   let disposed = false;
@@ -322,6 +324,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     compact,
   });
   const { post, outline, dofOn } = postRuntime;
+  const inkModeRuntime = createInkModeRuntime({
+    renderer,
+    scene,
+    camera,
+    postRuntime,
+    compact,
+    reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
+  });
 
   function reapplyEnvBase(opts) {
     env.setTime(state.time, opts); // sky.apply → fog/bg/exposure/조명
@@ -491,6 +501,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dofTargetDepth = post.setFocusPoint(activeDofAnchor());
     }
     post.update(postDt);
+    inkModeRuntime.syncAfterPostUpdate();
     post.composer.render();
   }
 
@@ -552,7 +563,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (active.changesLens !== false && Number.isFinite(active.r0) && Number.isFinite(active.r1)) {
       camera.userData.villageReferenceFov = active.r0 + (active.r1 - active.r0) * k;
     }
-    if (active.dof1 != null) post.setDofAmount(active.dof0 + (active.dof1 - active.dof0) * k);
+    if (active.dof1 != null) {
+      inkModeRuntime.setFocusPolicy({ dofAmount: active.dof0 + (active.dof1 - active.dof0) * k });
+    }
     if (active.composition1 != null) {
       setFocusComposition(active.composition0 + (active.composition1 - active.composition0) * k);
     }
@@ -599,6 +612,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
     postRuntime.resize(w, h);
+    inkModeRuntime.resize(w, h);
     viewShiftRuntime.invalidate();   // #124: 새 뷰포트 dims 로 setViewOffset 재적용 강제
   }
   addEventListener('resize', resizeAll);
@@ -664,7 +678,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #14: 집 선택은 줌아웃으로 풀리지 않지만 근경 보케까지 넓은 마을 문맥에 남아서는 안 된다.
     // 화면 등가 거리를 따라 1→0으로 줄여 가까운 집의 원형 보케는 보존하고, 넓은 집 보기에서는
     // Bokeh pass를 완전히 쉬게 한다. focus-in/out/hop 중에는 카메라 tween이 amount를 단독 소유한다.
-    if (settledFocusAmount != null && !perf) post.setDofAmount(settledFocusAmount);
+    if (settledFocusAmount != null && !perf) inkModeRuntime.setFocusPolicy({ dofAmount: settledFocusAmount });
     // 카메라/시선 셀 LOD는 이 프레임에 한 번만 계산한다. weather·focus·동물·필지 필드가
     // 같은 ground/particle weight를 소비해 서로 다른 거리에서 팝하지 않게 한다.
     let frameDetailLod = null;
@@ -760,7 +774,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         renderer.shadowMap.needsUpdate = true;
       }
     }
-    renderFrame();
+    inkModeRuntime.update(dt);
+    renderFrame(dt);
     frames++;
     if (frames === 3) window.__SHOT_READY = true;
   });
@@ -924,12 +939,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // 60fps 위험이라 OFF. focus-in(집 근접)·단일건물 씬은 ON. rim OFF 시 FlarePass 가림 판정이 스테일
   // depth 로 오작동하므로 flare 도 동반 토글(모바일 perf 분기와 합성 — 한 곳에서 관리). 부감엔 flare 불필요.
   function setPostFocus(focused, dofAmount = focused ? 1 : 0) {
-    post.setRimEnabled?.(focused);
-    post.setFlareEnabled?.(focused && !perf);
     // 부감(focus=null)은 DoF off — 마을 전체가 얕은 심도로 뭉개지지 않게(#80 완성도, hanyang·모바일 특히).
-    // amount 하나가 pass enable과 기본 조리개 배율을 함께 소유한다. focus-in은 0→1, focus-out은
-    // 현재값→0 단조 전환이라 중단·교체 뒤 부풀린 조리개가 남지 않는다. 모바일 perf는 항상 0.
-    post.setDofAmount?.(focused && !perf ? dofAmount : 0);
+    // 수묵 상태기계가 이 PBR 정책을 기억하므로, 먹 화면 아래에서는 비싼 패스가 잠들어도 PBR 복귀 시
+    // 현재 focus 문맥으로 정확히 깨어난다.
+    inkModeRuntime.setFocusPolicy({
+      focused,
+      flare: focused && !perf,
+      dofAmount: focused && !perf ? dofAmount : 0,
+    });
   }
 
   // ---------- 시네마틱 데모 모드 — 독립 runtime으로 위임 ----------
@@ -1912,6 +1929,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     start(cfg, seed = 0) { state.seed = seed >>> 0; applyConfig(cfg, { animate: false }); },
 
+    setRenderStyle(value, opts = {}) {
+      state.renderStyle = inkModeRuntime.setMode(value, opts);
+      emit('state', { ...state });
+      return state.renderStyle;
+    },
+
     // 리롤(다시 짓기): 새 seed → 결정적 설정 → 조립 연출. 새 seed 반환.
     reroll() {
       const seed = newSeed();
@@ -2415,6 +2438,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     __controls: controls,   // 검증용: 프레임 단위 controls.target 샘플링
     debugPostPassOrder: () => postRuntime.debugPassOrder(),
     debugPostResolution: () => postRuntime.debugResolution(),
+    debugInk: () => inkModeRuntime.debugState(),
+    debugInkPbrAwake: (awake) => inkModeRuntime.debugSetPbrAwake(awake),
     debugDof: debugDofState,
     debugDofSeek: debugSeekDofTween,
     debugRenderDofFrame: () => { renderFrame(0); return debugDofState(); },
@@ -2437,7 +2462,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugTuneDof({ amount, aperture, maxBlur } = {}) {
       if (Number.isFinite(aperture)) post.setDofAperture(aperture);
       if (Number.isFinite(maxBlur)) bokehPass.uniforms.maxblur.value = Math.max(0, maxBlur);
-      if (Number.isFinite(amount)) post.setDofAmount(amount);
+      if (Number.isFinite(amount)) inkModeRuntime.setFocusPolicy({ dofAmount: amount });
       return debugDofState();
     },
     debugAdvanceFocusRing(seconds = 3) {
@@ -2491,6 +2516,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (village.handle) { village.handle.exitVillageMode({ scene, building, ground, env }); village.handle.dispose(); village.handle = null; }
       if (village.cache.handle) { village.cache.handle.dispose(); village.cache = { key: null, handle: null }; }
       weatherRef?.dispose?.();
+      inkModeRuntime.dispose();
       postRuntime.dispose();
       env?.dispose?.();
       env = null;
