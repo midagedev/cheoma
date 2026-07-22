@@ -7,6 +7,10 @@
 
 const DEG = Math.PI / 180;
 export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
+// Architectural-camera rise for close parcel views. The camera keeps aiming at the
+// documented door-height target while an asymmetric projection places that target lower
+// in frame, preserving the south-light corridor and revealing a useful band of sky.
+export const VILLAGE_FOCUS_SKY_FRACTION = 0.13;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 

@@ -1,5 +1,15 @@
 import * as THREE from 'three';
 import { candleFlicker } from './night-glow.js';
+import { disposeObjectTree } from '../core/three-resources.js';
+import {
+  DEFAULT_SUNSET_LOOK,
+  TIME_PRESETS,
+  atmosphereProfileKey,
+  normalizeSunsetLook,
+  resolveAtmosphereProfile,
+} from './atmosphere-profiles.js';
+
+export { TIME_PRESETS } from './atmosphere-profiles.js';
 
 // 달무리(halo) 텍스처: 중심 흰빛 → 가장자리 투명 방사 그라디언트.
 function makeGlowTexture() {
@@ -18,63 +28,8 @@ function makeGlowTexture() {
   return tex;
 }
 
-// 시간대 프리셋. dir=태양(달) 방향, 색·강도, 반구광, 안개, 하늘 그라디언트,
-// 능선 대기원근 색, 노출, 등불.
-// 주의: 모든 프리셋의 sky 그라디언트는 정확히 4스톱(하단→상단)이라 시간대 간 스톱 위치·색을
-//   1:1 보간할 수 있다(트윈). 스톱 수를 바꾸면 트윈 로직(lerpStops)이 깨진다.
-export const TIME_PRESETS = {
-  dawn: {
-    sky: [[0.0, '#e7d0b8'], [0.35, '#d9c3bb'], [0.7, '#8f9bbf'], [1.0, '#5d6a97']],
-    sunDir: [26, 9, 34], sunColor: 0xffd7ac, sunInt: 1.7,
-    hemiSky: 0xc3bcd0, hemiGround: 0x6f6252, hemiInt: 0.75,
-    fog: 0xe4cfbd, fogNear: 55, fogFar: 430, exposure: 1.02,
-    ridgeNear: 0x4a5069, ridgeFar: 0xcfc1c4, mist: 0xf1e2d4, mistOp: 0.72,
-    lantern: 0.0,
-  },
-  day: {
-    sky: [[0.0, '#d3dfe8'], [0.4, '#a9c4de'], [0.75, '#7ba6d6'], [1.0, '#5f8fca']],
-    sunDir: [30, 42, 26], sunColor: 0xfff3e0, sunInt: 2.6,
-    hemiSky: 0xbcd4ec, hemiGround: 0x8a7a63, hemiInt: 0.9,
-    fog: 0xcfdde8, fogNear: 95, fogFar: 500, exposure: 1.05,
-    ridgeNear: 0x445f6d, ridgeFar: 0xbdd0dc, mist: 0xeef4f8, mistOp: 0.6,
-    lantern: 0.0,
-  },
-  sunset: {
-    // 태양 방위를 기본 카메라(three-quarter az≈38, front az=0) '뒤'로 배치해 역광 기본뷰를
-    // 만든다: 저고도 alt≈9.5° → 건물 실루엣+금빛 림.
-    // R4 색분리: 중간 밴드에 뚜렷한 마젠타/모브 존을 넣어 하늘 그라디언트를 주황-단색이 아니라
-    // 주황(하단)→분홍모브(중단)→쪽빛(상단) 3색으로 — hue 히스토그램에 청·자 피크가 생긴다.
-    sky: [[0.0, '#f3b877'], [0.26, '#e8a074'], [0.55, '#a87e97'], [1.0, '#45598c']],
-    // R3 정정2(그림자 평행): 태양은 무한원 → 물리 그림자는 원래 평행이고, 방사형은 태양이
-    // 안티-카메라축과 거의 일치할 때 안티솔라 포인트가 화면에 맺혀 생기는 원근 수렴(지각)이다.
-    // 방위를 tq/front 안티-카메라축(각각 az≈218/180)의 정중앙인 az≈200°에 두면 두 뷰 모두
-    // 약 19° 비껴 그림자가 부채꼴 없이 대각으로 흐르고, 둘 다 강한 역광(dot≈0.84)으로 유지된다.
-    // R4 색온도: 순주황(0xff9d52)은 직사면(지붕·수목 양지쪽)을 갈색으로 죽인다 → 적기를 살짝
-    // 빼 금빛(0xffa85c)으로. 태양색은 유일하게 웜을 유지하는 축(스플릿의 웜 쪽).
-    sunDir: [-16, 8, -45], sunColor: 0xffa85c, sunInt: 2.3,
-    // R4 스플릿 토닝(핵심): 뭉갬의 근인은 hemiSky(위에서 오는 앰비언트)까지 웜 브라운이라
-    // 그늘·수목 음지쪽·단청 뇌록이 전부 갈색으로 붙는 것. hemiSky 를 황혼 하늘색(쿨 페리윙클)로
-    // 바꾸면 그늘이 시원해져 웜 직사광과 보색 대비 → 음지쪽 녹색은 쿨 그린으로, 뇌록은 청록으로
-    // 살아남는다. hemiGround(아래 바운스)는 웜 유지하되 채도를 낮춰(0xa86a3c→0x9c7856) 처마밑
-    // 소핏을 과하게 주황으로 물들이지 않게 — "위는 쿨/아래는 웜" 이 골든아워 색분리의 골격.
-    // 그늘진 전면의 타깃 리프트는 main.js 안티솔라 웜 필이 맡는다(분담).
-    hemiSky: 0x8593bd, hemiGround: 0x9c7856, hemiInt: 0.72,
-    // R4 채도 억제: fog·mist 가 과채도 주황이면 원경~중경이 전부 주황 필터로 먹힌다. 명도는
-    // 유지하고 채도만 낮춘 더스티 로즈-토프로 — 중간톤이 살아나 수목·능선 색이 구분된다.
-    fog: 0xc4a48e, fogNear: 70, fogFar: 470, exposure: 1.11,
-    ridgeNear: 0x574863, ridgeFar: 0xc2a284, mist: 0xd8c0ad, mistOp: 0.6,
-    lantern: 0.15,
-  },
-  night: {
-    // 달밤 짙은 청람. 지면에 긴 푸른 그림자가 읽히도록 달빛(sun)을 저고도·강도 상향.
-    sky: [[0.0, '#2b3a58'], [0.4, '#1c2a48'], [0.75, '#141d33'], [1.0, '#0c1220']],
-    sunDir: [-7, 5, -32], sunColor: 0x9fb4d9, sunInt: 0.9,
-    hemiSky: 0x33405e, hemiGround: 0x161c28, hemiInt: 0.3,
-    fog: 0x1a2740, fogNear: 60, fogFar: 400, exposure: 1.16,
-    ridgeNear: 0x222d48, ridgeFar: 0x445270, mist: 0x53628a, mistOp: 0.46,
-    lantern: 1.0, moon: true,
-  },
-};
+// All profiles keep exactly four sky stops (bottom to top), so time/look transitions can
+// interpolate position and sRGB colour one-to-one without reallocating the canvas texture.
 
 // 가을 능선 훅: season=autumn 일 때 원경 능선·안개를 단풍든 산자락 색조로 살짝 물들인다.
 // 낮엔 분명히(따뜻한 산), 석양엔 이미 따뜻하니 약하게, 밤엔 거의 무채색으로 가라앉힌다.
@@ -100,6 +55,13 @@ function parseHexSRGB(hex) {
 
 // 하늘 돔 + 등불. mountains(setPalette) 를 함께 물려 대기원근을 동기화.
 export function createSky({ scene, sun, hemi, renderer, group, mountains, layout }) {
+  // Celestial presentation is scene-level. Village mode hides `group` to swap the
+  // single-house terrain, but the sky must remain continuous behind both scenes.
+  const skyRoot = new THREE.Group();
+  skyRoot.name = 'sky-atmosphere';
+  skyRoot.visible = false;
+  scene.add(skyRoot);
+
   // 하늘 돔: 큰 구, 안쪽면, fog 미적용(하늘 자체). 텍스처는 재사용(트윈 중 매 프레임 재그림).
   const domeGeo = new THREE.SphereGeometry(720, 32, 20);
   const domeCanvas = document.createElement('canvas');
@@ -111,7 +73,13 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   const dome = new THREE.Mesh(domeGeo, domeMat);
   dome.name = 'skyDome';
   dome.renderOrder = -100;
-  group.add(dome);
+  // A sky sphere is angular scenery, not world geometry. Follow the render camera so
+  // Hanyang aerials and telephoto parcel focus cannot leave the 720 m shell.
+  dome.onBeforeRender = (rend, sc, camera) => {
+    dome.position.copy(camera.position);
+    dome.updateMatrixWorld();
+  };
+  skyRoot.add(dome);
 
   // 스톱 배열({pos, r,g,b})로 돔 캔버스를 다시 그린다(텍스처 재사용).
   function buildDomeFromStops(stops) {
@@ -150,7 +118,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   let flickT = 0;              // 등롱 촛불 플리커 누적 시계(결정론)
   let lanternNight = false;   // 등롱 일렁임(등불이 켜져 있을 때)
 
-  // 달 + 달무리 (야간). env group 자식 → env ON/OFF 가시성에 함께 묶인다.
+  // 달 + 달무리 (야간). scene-level sky 자식이며 environment lifecycle이 함께 켜고 정리한다.
   const moonGroup = new THREE.Group();
   moonGroup.name = 'moon';
   moonGroup.renderOrder = -50;
@@ -171,7 +139,19 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   halo.renderOrder = -51;
   moonGroup.add(halo);
   moonGroup.visible = false;
-  group.add(moonGroup);
+  skyRoot.add(moonGroup);
+
+  const moonOffset = new THREE.Vector3();
+  const placeMoonForCamera = (camera) => {
+    moonGroup.position.copy(camera.position).add(moonOffset);
+    moonGroup.updateMatrixWorld(true);
+  };
+  moonDisk.onBeforeRender = (rend, sc, camera) => placeMoonForCamera(camera);
+  halo.onBeforeRender = (rend, sc, camera) => {
+    placeMoonForCamera(camera);
+    halo.lookAt(camera.position);
+    halo.updateMatrixWorld();
+  };
 
   // ── 상태(State) 표현 ──────────────────────────────────────────────────────
   // 보간 가능한 모든 시간대 필드를 한 객체로. 색은 setHex(sRGB→선형) 디코드된 THREE.Color 로
@@ -186,8 +166,9 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       stops: [0, 1, 2, 3].map(() => ({ pos: 0, r: 0, g: 0, b: 0 })),
     };
   }
+  let sunsetLook = DEFAULT_SUNSET_LOOK;
   function resolveInto(out, name) {
-    const P = TIME_PRESETS[name] || TIME_PRESETS.day;
+    const P = resolveAtmosphereProfile(name, sunsetLook);
     out.sunDir.set(P.sunDir[0], P.sunDir[1], P.sunDir[2]).normalize();
     out.sunColor.setHex(P.sunColor); out.sunInt = P.sunInt;
     out.hemiSky.setHex(P.hemiSky); out.hemiGround.setHex(P.hemiGround); out.hemiInt = P.hemiInt;
@@ -242,7 +223,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   const _rn = new THREE.Color(), _rf = new THREE.Color(), _rm = new THREE.Color();
 
   let curName = 'day';
-  let tw = null;                // { t, dur, name } (진행 중 시간대 트윈)
+  let curKey = atmosphereProfileKey('day', sunsetLook);
+  let tw = null;                // { t, dur, name, key } (진행 중 시간대/노을빛 트윈)
   let curSeason = 'summer';
   let autumn01 = 0;             // 가을 능선 세기 0..1 (계절 트윈)
   let autumnGoal = 0;
@@ -277,10 +259,9 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     if (m > 0.02) {
       moonDisk.material.opacity = m;
       halo.material.opacity = 0.55 * m;
-      const dir = tmp.sunDir.copy(cur.sunDir).multiplyScalar(460);
-      moonGroup.position.copy(dir);
-      moonGroup.updateMatrixWorld();
-      halo.lookAt(0, 0, 0);
+      moonOffset.copy(cur.sunDir).multiplyScalar(460);
+      moonGroup.position.copy(moonOffset); // deterministic fallback before first camera render
+      moonGroup.updateMatrixWorld(true);
     }
     buildDomeFromStops(cur.stops);
   }
@@ -303,24 +284,33 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   //   같은 상태로의 재적용(reapplyEnvBase 등)은 스냅(멱등 복구) — ink/날씨가 만진 fog 를 되돌린다.
   function apply(name, opts = {}) {
     if (!(name in TIME_PRESETS)) name = 'day';
+    const key = atmosphereProfileKey(name, sunsetLook);
     if (opts.immediate) {
-      resolveInto(cur, name); curName = name; tw = null;
+      resolveInto(cur, name); curName = name; curKey = key; tw = null;
       applyCur();
       return;
     }
     if (tw) {
-      if (name === tw.name) return;                 // 진행 중 트윈과 같은 목표 → 계속
+      if (key === tw.key) return;                   // 진행 중인 동일 프로필 목표 → 계속
       copyState(from, cur);                          // 현재 보간값을 새 from 으로(리타깃)
       resolveInto(to, name);
-      tw = { t: 0, dur: DUR_TIME, name };
+      tw = { t: 0, dur: DUR_TIME, name, key };
       return;
     }
     resolveInto(to, name);
-    if (name === curName) {                          // 정착 상태에서 같은 시간대 재적용 → 스냅 복구
+    if (key === curKey) {                            // 정착 상태에서 같은 프로필 재적용 → 스냅 복구
       copyState(cur, to); applyCur(); return;
     }
     copyState(from, cur);
-    tw = { t: 0, dur: DUR_TIME, name };
+    tw = { t: 0, dur: DUR_TIME, name, key };
+  }
+
+  function setSunsetLook(name, opts = {}) {
+    const next = normalizeSunsetLook(name);
+    if (next === sunsetLook && curName !== 'sunset' && tw?.name !== 'sunset') return next;
+    sunsetLook = next;
+    if (curName === 'sunset' || tw?.name === 'sunset') apply('sunset', opts);
+    return sunsetLook;
   }
 
   // 매 프레임: 시간대 트윈 + 가을 능선 트윈 진행. env.update 에서 호출.
@@ -332,7 +322,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       lerpStateInto(cur, from, to, k);
       applyCur();
       moved = true;
-      if (tw.t >= tw.dur) { copyState(cur, to); curName = tw.name; tw = null; }
+      if (tw.t >= tw.dur) { copyState(cur, to); curName = tw.name; curKey = tw.key; tw = null; }
     }
     // 가을 능선 세기(지수 접근). 시간대 트윈이 없을 때도 능선만 갱신.
     if (Math.abs(autumn01 - autumnGoal) > 1e-4) {
@@ -362,5 +352,17 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   function getBaseFog() { return { color: cur.fogColor, near: cur.fogNear, far: cur.fogFar }; }
   function isTweening() { return !!tw; }
 
-  return { apply, setSeason, update, updateFlicker, getBaseFog, isTweening, dome, lanterns };
+  function setEnabled(value) { skyRoot.visible = !!value; }
+
+  function dispose() {
+    scene.remove(skyRoot);
+    disposeObjectTree(skyRoot);
+    skyRoot.clear();
+  }
+
+  return {
+    apply, setSunsetLook, setSeason, update, updateFlicker, getBaseFog, isTweening,
+    setEnabled, dispose, root: skyRoot, dome, lanterns,
+    get sunsetLook() { return sunsetLook; },
+  };
 }

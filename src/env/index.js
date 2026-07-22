@@ -48,7 +48,7 @@ export function restoreEnvironmentFallback(scene, { sun, hemi, renderer }, fallb
 
 // 산수화 환경 레이어를 조립한다.
 //   setupEnvironment(scene, { sun, hemi, renderer, layout })
-//     → { group, setTime(name, opts), setSeason(name, opts), setLensScale(k),
+//     → { group, setTime(name, opts), setSunsetLook(name, opts), setSeason(name, opts), setLensScale(k),
 //         update(dt), setEnabled(bool), dispose() }
 // opts.immediate=true 는 숨김→재노출 같은 씬 수명주기 경계에서 하늘·물·연기·모트를 한 번에
 // 정착시키는 계약이다. 보이는 상태의 일반 변경은 opts 없이 호출해 크로스페이드를 유지한다.
@@ -93,6 +93,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   //   외곽선(terrain.edge)·반경(terrain.R) 공유. shot 모드는 표류 t=0 고정, ?clouds=0 옵트아웃.
   const clouds = setupClouds(group, {
     sun, edge: terrain.edge, terrainMax: terrain.R, uniforms: cloudUniforms,
+    getHaze: () => scene.fog?.color || null,
   });
 
   const sky = createSky({ scene, sun, hemi, renderer, group, mountains, layout });
@@ -132,6 +133,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   let enabled = false;
   let disposed = false;
   let currentTime = 'day';
+  let currentSunsetLook = sky.sunsetLook;
   let currentSeason = 'summer';
   let everApplied = false;   // 첫 적용은 항상 즉시(로드 시 트윈-인 방지). 이후 다이얼만 크로스페이드.
   let immediateMode = false; // ink 모드 등: 트윈·fog 합성을 끄고 즉시 스냅(setImmediate 로 토글).
@@ -170,6 +172,16 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     smoke.setTime(name, { immediate });  // 연기 세기·색·아궁이 불씨(새벽·해질녘 밥짓기 최대)
     motes.setTime(name, { immediate });  // 먼지 모트 강도·색(해질녘·새벽 최대, 낮 미약, 밤 극미)
     if (enabled) { sky.apply(name, { immediate }); everApplied = true; }
+  }
+  // Sunset colour is a presentation sub-profile, not a fifth time of day. This keeps
+  // animals/audio/water on the existing `sunset` simulation state while sky, lights and
+  // haze transition together. Calling it outside sunset only stores the next look.
+  function setSunsetLook(name, opts = {}) {
+    if (disposed) return currentSunsetLook;
+    currentSunsetLook = sky.setSunsetLook(name, {
+      immediate: !!opts.immediate || immediateMode || !enabled || !everApplied,
+    });
+    return currentSunsetLook;
   }
   function setSeason(name, opts = {}) {
     if (disposed) return;
@@ -215,6 +227,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     if (disposed) return;
     enabled = !!v;
     group.visible = enabled;
+    sky.setEnabled(enabled);
     smoke.setEnabled(enabled); // 건물의 아궁이 불씨(그룹 밖)도 함께 소등/점등
     motes.setEnabled(enabled);
     lanternSway.setEnabled(enabled); // OFF 시 등롱 위치 원복
@@ -236,15 +249,17 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     disposed = true;
     fogMods.length = 0;
     seasons.dispose();
+    sky.dispose();
     scene.remove(group);
     disposeObjectTree(group);
     group.clear();
   }
 
   return {
-    group, setTime, setSeason, setLensScale, update, setEnabled, dispose,
+    group, setTime, setSunsetLook, setSeason, setLensScale, update, setEnabled, dispose,
     addFogModifier, removeFogModifier, setImmediate,
     get time() { return currentTime; },
+    get sunsetLook() { return currentSunsetLook; },
     get season() { return currentSeason; },
     // 개울 징검다리 교차점 월드 좌표(위치성 물소리 앵커). water 없으면 null.
     get streamAnchor() { return !disposed && water ? water.anchor : null; },

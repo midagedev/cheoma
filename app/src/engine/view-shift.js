@@ -11,6 +11,7 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     curY: 0,
     tgtX: 0,
     tgtY: 0,
+    compositionYFrac: 0,
     enabled: true,
     lastSample: 0,
     appliedX: NaN,
@@ -42,13 +43,15 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     state.tgtY = Math.max(-capY, Math.min(capY, dy * SHIFT_FRAC));
   }
 
-  function apply() {
-    const { curX: x, curY: y } = state;
+  function apply({ panels = true } = {}) {
+    const height = container.clientHeight || 1;
+    const x = panels && state.enabled ? state.curX : 0;
+    const y = (panels && state.enabled ? state.curY : 0)
+      + state.compositionYFrac * height;
     if (Math.abs(x - state.appliedX) < 0.2 && Math.abs(y - state.appliedY) < 0.2) return;
     state.appliedX = x;
     state.appliedY = y;
     const width = container.clientWidth || 1;
-    const height = container.clientHeight || 1;
     if (Math.abs(x) > 0.4 || Math.abs(y) > 0.4) {
       camera.setViewOffset(width, height, -x, y, width, height);
     } else if (camera.view?.enabled) {
@@ -90,10 +93,20 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     }
   }
 
+  // A normalized artistic composition shift composes with transient panel offsets.
+  // Negative values place the subject lower and reveal more sky. Keeping it normalized
+  // makes resize invalidation sufficient; no camera pose or focus distance changes.
+  function setCompositionY(fraction = 0) {
+    state.compositionYFrac = Math.max(-0.3, Math.min(0.3, Number(fraction) || 0));
+    invalidate();
+  }
+
+  function applyCompositionOnly() { apply({ panels: false }); }
+
   function invalidate() {
     state.appliedX = NaN;
     state.appliedY = NaN;
   }
 
-  return { state, update, apply, setEnabled, invalidate };
+  return { state, update, apply, applyCompositionOnly, setCompositionY, setEnabled, invalidate };
 }

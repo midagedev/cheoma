@@ -1,8 +1,10 @@
-// URL 쿼리 ↔ 상태 양방향 동기화. seed 는 항상, 나머지(preset/time/season/weather/exp)는
+// URL 쿼리 ↔ 상태 양방향 동기화. seed 는 항상, 나머지(preset/time/sunset/season/weather/exp)는
 // 사용자가 명시적으로 바꿨을 때만 URL 에 실어 공유 시 정확히 재현되게 한다.
 import { newSeed } from './seed.js';
 
-const KEYS = ['seed', 'preset', 'time', 'season', 'weather', 'exp'];
+import { normalizeSunsetLook } from '../../../src/api/environment.js';
+
+const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 
 const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const CHARS = ['minchon', 'yeoyeom', 'banchon'];
@@ -18,6 +20,7 @@ export function readUrl() {
     hasSeed: out.seed != null,
     preset: out.preset || null,
     time: out.time || null,
+    sunsetLook: out.sunset != null ? normalizeSunsetLook(out.sunset) : null,
     season: out.season || null,
     weather: out.weather || null,
     exp: out.exp != null ? Math.max(1, parseInt(out.exp, 10) || 1) : null,
@@ -44,6 +47,7 @@ export function writeUrl(state, { overrides = {}, village = null, flow = false }
   const put = (k, v, cond) => { if (cond) q.set(k, String(v)); else q.delete(k); };
   put('preset', state.preset, overrides.preset);
   put('time', state.time, overrides.time);
+  put('sunset', state.sunsetLook, overrides.sunsetLook);
   put('season', state.season, overrides.season);
   put('weather', state.weather, overrides.weather);
   put('exp', state.expansion, state.expansion > 1);
@@ -64,6 +68,7 @@ export function shareUrl(state, overrides) {
   q.set('seed', String(state.seed >>> 0));
   if (overrides.preset) q.set('preset', state.preset);
   if (overrides.time) q.set('time', state.time);
+  if (overrides.sunsetLook) q.set('sunset', state.sunsetLook);
   if (overrides.season) q.set('season', state.season);
   if (overrides.weather) q.set('weather', state.weather);
   if (state.expansion > 1) q.set('exp', String(state.expansion));
