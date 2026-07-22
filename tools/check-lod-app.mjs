@@ -521,6 +521,26 @@ try {
     'focus-in settles with one valid selected overlay');
   pass(focus.seenLevels.includes('mid'),
     `focus-in observes the real MID envelope root (${focus.seenLevels.join(' → ')})`);
+  const focusShadow = await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.debugRenderDofFrame();
+    const state = engine.debugDirectionalShadow();
+    return {
+      ...state,
+      targetError: Math.hypot(
+        state.requested[0] - engine.__controls.target.x,
+        state.requested[1] - engine.__controls.target.y,
+        state.requested[2] - engine.__controls.target.z,
+      ),
+    };
+  });
+  pass(focusShadow?.installed
+      && focusShadow.targetError < 1e-6
+      && Math.abs(focusShadow.requestedNdc[0]) <= 2 / focusShadow.mapSize[0]
+      && Math.abs(focusShadow.requestedNdc[1]) <= 2 / focusShadow.mapSize[1]
+      && focusShadow.requestedNdc[2] >= -1 && focusShadow.requestedNdc[2] <= 1,
+  `focused Hanyang parcel owns a texel-centred physical sun shadow `
+    + `(${JSON.stringify(focusShadow?.requestedNdc)})`);
   performance.focus = await sceneMetrics('focus');
   const nearLife = await page.evaluate(async () => {
     await new Promise((resolveFrame) => {

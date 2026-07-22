@@ -27,6 +27,8 @@ const checks = [
   './check-parcel-rebuild-contract.mjs',
   './check-live-edit-scheduler.mjs',
   './check-shader-warm.mjs',
+  './check-shadow-framing.mjs',
+  './check-directional-shadow-runtime.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
   './check-choga-roof.mjs',

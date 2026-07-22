@@ -54,6 +54,9 @@ function routePath(path) {
     if (/^app\/src\/engine\/(?:post-runtime|scene-runtime)\.js$/.test(path)) {
       select('post/scene runtime changed', 'dof-app');
     }
+    if (path === 'app/src/engine/directional-shadow-runtime.js') {
+      select('focused directional shadow framing changed', 'rim', 'lod-focus');
+    }
     if (/^app\/src\/engine\/(?:view-shift|village-camera-runtime)\.js$/.test(path)) {
       select('camera runtime changed', 'dof-app', 'lod-focus', 'lod-wave');
     }
@@ -88,6 +91,9 @@ function routePath(path) {
     select('camera/cinematic behavior changed', 'app');
     if (path === 'src/camera/optics.js') {
       select('optical transition changed', 'dof-app', 'lod-focus', 'lod-wave');
+    }
+    if (path === 'src/camera/directional-shadow-anchor.js') {
+      select('focused directional shadow framing changed', 'rim', 'lod-focus');
     }
     return { gates, reasons };
   }
@@ -160,6 +166,10 @@ function routePath(path) {
     }
     if (path === 'src/api/village-plan.js') {
       select('village plan API changed', 'app', 'worker');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/shadow-framing.js') {
+      select('directional shadow framing API changed', 'app', 'rim', 'lod-focus');
       return { gates, reasons };
     }
     if (/^src\/api\/(?:building|cinematic|export|props|rendering)\.js$/.test(path)) {
