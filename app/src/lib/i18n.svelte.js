@@ -33,7 +33,7 @@ const DICT = {
     type_choga_l: '초가', type_choga_s: '민가',
     step_single: '홑채', step_l: 'ㄱ자', step_u: 'ㄷ자',
     merge: '이웃과 합치기',
-    giwa_note: '기와집(반가)은 ㄱ자 기본형입니다.',
+    giwa_note: '마을 살림과 필지에 맞춰 ㅡ·ㄱ·ㄷ 평면으로 생성됩니다.',
     s_roofPitch: '지붕 물매', s_riseScale: '지붕 물매', s_eaveOverhang: '처마 깊이',
     s_cornerLift: '추녀 들림', s_profileCurve: '지붕 곡률', s_roofCurve: '지붕 곡률',
     // #48 편집 축 확장
@@ -133,7 +133,7 @@ const DICT = {
     type_choga_l: 'Choga', type_choga_s: 'thatched',
     step_single: 'single', step_l: 'L-plan', step_u: 'U-plan',
     merge: 'Merge with neighbor',
-    giwa_note: 'The giwa (tiled yangban house) is inherently L-shaped.',
+    giwa_note: 'Tiled houses are generated as single-, L-, or U-shaped plans to suit household and lot.',
     s_roofPitch: 'Roof pitch', s_riseScale: 'Roof pitch', s_eaveOverhang: 'Eave depth',
     s_cornerLift: 'Corner lift', s_profileCurve: 'Roof curve', s_roofCurve: 'Roof curve',
     // #48 edit axes

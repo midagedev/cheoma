@@ -2297,6 +2297,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 검증용: 필지 목록·화면 투영(플레이라이트 결정적 호버/클릭 좌표).
       debugParcels: () => (village.handle?.getPickProxies() || []).map((p) => ({
         parcelId: p.parcelId, hero: p.buildingSpec.hero, kind: p.buildingSpec.kind,
+        variant: p.buildingSpec.variant ?? null,
         heroStyle: p.buildingSpec.heroStyle || null, family: p.buildingSpec.family || null,
         editable: p.buildingSpec.editable === true,
         focusBaseY: +p.worldCenter.y.toFixed(2),

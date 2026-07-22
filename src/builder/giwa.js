@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildSkeletonRoof } from '../layout/roof-skeleton.js';
 import { giwaFootprint, giwaFootprintPolygon } from '../params.js';
+import { giwaFrontRange } from '../layout/giwa-footprint.js';
 import * as G from '../core/math/geom2.js';
 import {
   OPENING_FACE_CLEARANCE,
@@ -9,7 +10,7 @@ import {
   sunkPrism,
 } from '../core/surface-clearance.js';
 
-// 기와집(ㄱ자 반가 안채): L 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
+// 기와집(ㅡ/ㄱ/ㄷ 반가 안채): 공유 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
 // 지붕은 buildSkeletonRoof(동결 API)로 만들고, 기와 밀도·적새·망와·와구토는 이 파일에서 후처리한다.
 
@@ -26,9 +27,19 @@ function colGeom(r, h, entasis) {
   return new THREE.LatheGeometry(pts, 12);
 }
 
-// 변별 벽 어휘: e0 정면(분합문·중앙 대청), e1 날개안쪽(분합문), e2 날개끝(회벽+살창),
-//              e3 우측면(회벽+살창), e4 후면(세로널 판벽), e5 좌측면(회벽+살창)
-const EDGE_ROLE = ['door', 'door', 'wall', 'wall', 'plank', 'wall'];
+// 평면별 변 인덱스가 달라도 의미는 좌표에서 파생한다: 안마당 면=분합문, 북측 후면=판벽,
+// 바깥 측면=회벽. 이 분류를 쓰면 ㅡ/ㄱ/ㄷ이 동일한 벽체 루프를 공유한다.
+function edgeRole(A, B, { planShape, a, b, w, c }) {
+  const near = (x, y) => Math.abs(x - y) < 1e-7;
+  const horizontal = near(A.z, B.z);
+  const vertical = near(A.x, B.x);
+  if (horizontal && near(A.z, -b)) return 'plank';
+  if (horizontal && near(A.z, b)) return 'door';
+  if (planShape !== 'single' && vertical
+    && Math.min(A.z, B.z) >= b - 1e-7 && Math.max(A.z, B.z) <= b + c + 1e-7
+    && (near(A.x, a - w) || near(A.x, -a + w))) return 'door';
+  return 'wall';
+}
 
 function extrudeFootprint(points, bottom, top) {
   const shape = new THREE.Shape();
@@ -88,8 +99,9 @@ function addVerticalPodiumJoints(group, footprint, height, material) {
 export function buildGiwa(P, M) {
   const root = new THREE.Group();
   root.name = 'building';
-  const { a, b, w, c } = giwaFootprint(P);   // 좁은 폭 정규화(computeLayout 과 공유)
-  // ㄱ자 풋프린트(기둥/벽 중심선): 본채 + 우측 세로 날개.
+  const footprint = giwaFootprint(P);
+  const { a, b, w, c } = footprint;
+  // 정규 풋프린트(기둥/벽 중심선): ㅡ/ㄱ/ㄷ 모두 같은 순수 생성기를 쓴다.
   // buildSkeletonRoof는 CW 감김에서 바깥 법선(윗면)이 나오도록 검증됨.
   const foot = giwaFootprintPolygon(P);
   const n = foot.length;
@@ -209,7 +221,7 @@ export function buildGiwa(P, M) {
     const len = Math.hypot(B.x - A.x, B.z - A.z);
     const nb = Math.max(1, Math.round(len / bay));
     const alongX = Math.abs(B.x - A.x) > Math.abs(B.z - A.z);
-    const role = EDGE_ROLE[i];
+    const role = edgeRole(A, B, footprint);
     const cxE = (A.x + B.x) / 2, czE = (A.z + B.z) / 2;
     const cbay = centerBayOf(nb);
 
@@ -223,8 +235,9 @@ export function buildGiwa(P, M) {
       const tm = (k + 0.5) / nb;
       const cx = A.x + (B.x - A.x) * tm, cz = A.z + (B.z - A.z) * tm;
       const bw = len / nb - colR * 1.8;
-      // 대청: 정면(e0) 중앙 칸은 개방 (아래 대청 블록에서 처리)
-      if (i === 0 && k === cbay && nb >= 3) continue;
+      // 대청: 안마당을 향한 본채 정면 중앙 칸은 개방 (아래 대청 블록에서 처리)
+      const mainFront = alongX && Math.abs(A.z - b) < 1e-7 && Math.abs(B.z - b) < 1e-7;
+      if (mainFront && k === cbay && nb >= 3) continue;
 
       if (role === 'door') {
         slab(cx, cz, bw, y0, meoreumTop, meoreumMat, alongX);           // 머름(하부 청판)
@@ -267,8 +280,9 @@ export function buildGiwa(P, M) {
   // ── 대청·툇마루 (밝은 우물마루 + 세로널 판벽 뒷벽 + 계자난간) ──
   const mfloorY = podTopY + 0.42;   // 걸터앉는 마루 높이
   const dep = 1.25;                 // 툇마루 내밀기
-  const mX0 = -a, mX1 = a - w;      // 본채 전면(안마당 쪽) x 범위
-  const mW = mX1 - mX0, mcx = (mX0 + mX1) / 2, frontZ = b;
+  const front = giwaFrontRange(P);
+  const mX0 = front.x0, mX1 = front.x1;
+  const mW = mX1 - mX0, mcx = (mX0 + mX1) / 2, frontZ = front.z;
   const maruMat = () => { const m = M.maru.clone(); m.map = M.maru.map.clone(); m.map.repeat.set(4, 2); m.map.needsUpdate = true; return m; };
 
   // 툇마루(전면 걸터앉는 마루)
@@ -283,7 +297,8 @@ export function buildGiwa(P, M) {
   }
 
   // 대청: 중앙 개방칸 안쪽 우물마루 + 밝은 세로널 판벽 뒷벽(emissive로 실내 어둠 완화)
-  const hallW = 2.2, hallCx = -1.3;   // 정면 중앙 칸(개방) 범위
+  const hallW = Math.min(2.2, Math.max(1.4, mW * 0.34));
+  const hallCx = mcx;                  // 평면마다 달라지는 안마당 정면의 중앙 개방칸
   const hallFloorMat = M.maru.clone();
   hallFloorMat.map = M.maru.map.clone(); hallFloorMat.map.repeat.set(2, 3); hallFloorMat.map.needsUpdate = true;
   hallFloorMat.emissive = new THREE.Color(0x1c140b);   // 안쪽이 검게 죽지 않게 미량 자발광
@@ -319,6 +334,7 @@ export function buildGiwa(P, M) {
   // 전면 난간(대청 앞 gap 제외) — 좌/우 두 구간
   const gapHalf = hallW / 2 + 0.2;
   const addFrontRail = (fx0, fx1) => {
+    if (fx1 - fx0 < 0.12) return;
     const top = new THREE.Mesh(new THREE.BoxGeometry(fx1 - fx0, 0.08, 0.1), railMat);
     top.position.set((fx0 + fx1) / 2, railTopY, rz); top.castShadow = true; root.add(top);
     const apron = new THREE.Mesh(new THREE.BoxGeometry(fx1 - fx0, 0.16, 0.05), apronMat);

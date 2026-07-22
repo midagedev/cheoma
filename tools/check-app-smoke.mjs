@@ -45,6 +45,26 @@ try {
   await page.waitForFunction(() => !!window.__engine.village.debugPlan(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
 
+  // docs/credits.md is the public product-reference source of truth.  Verify the
+  // newly applied house-plan and legal-limit evidence reaches the actual modal,
+  // including authoritative links and the non-literal-use qualification.
+  await page.locator('button.info[aria-label="참고 자료"]').click();
+  const referenceDialog = page.locator('[role="dialog"][aria-label="참고 자료"]');
+  await referenceDialog.waitFor({ state: 'visible', timeout });
+  const reference = await referenceDialog.evaluate((dialog) => ({
+    text: dialog.textContent.replace(/\s+/g, ' ').trim(),
+    links: [...dialog.querySelectorAll('a')].map((anchor) => anchor.href),
+  }));
+  pass(reference.text.includes('국가한옥센터(AURI) 한옥DB — 한옥의 종류·한옥이론')
+      && reference.text.includes('ㅡ·ㄱ·ㄷ·ㅁ')
+      && reference.links.some((url) => url.includes('hanokdb.kr/theology/sub_02')),
+  'National Hanok Center plan evidence renders in Product References');
+  pass(reference.text.includes('법적 상한·규범')
+      && reference.text.includes('17배 필지 비례')
+      && reference.links.some((url) => url.includes('contents.history.go.kr/front/km/view.do')),
+  'enhanced house/lot legal-limit evidence and non-literal use render in Product References');
+  await referenceDialog.locator('button[aria-label="닫기"]').click();
+
   // __SHOT_READY는 렌더 준비 신호이지 1.4초 진입 돌리의 완료 신호가 아니다. 실제 제품 tween의
   // onDone을 결정적으로 실행해 explore 줌 범위가 설치된 상태에서 보기 계약을 검사한다.
   await page.evaluate(() => {
@@ -79,6 +99,103 @@ try {
       && Number.isFinite(boot.camera.near),
     'village camera exposes valid aerial, zoom, and near-plane contracts',
   );
+
+  const diversityRuntime = await page.evaluate(async ({ housesModuleUrl }) => {
+    const parcels = window.__engine.village.debugParcels();
+    const mirrored = parcels.find((parcel) => parcel.kind === 'giwa' && parcel.variant === 1);
+    const mirrorStats = mirrored
+      ? window.__engine.village.debugParcelStats(mirrored.parcelId, {})
+      : null;
+
+    const { buildKindDecomps } = await import(housesModuleUrl);
+    const { decomps, matset } = buildKindDecomps('giwa');
+    const canonical = new Set(decomps[0].map((entry) => entry.material));
+    const allMaterials = new Set(decomps.flatMap((decomp) => decomp.map((entry) => entry.material)));
+    const allTextures = new Set();
+    for (const material of allMaterials) {
+      for (const value of Object.values(material)) if (value?.isTexture) allTextures.add(value);
+    }
+    for (const value of Object.values(matset || {})) {
+      if (value?.isTexture) allTextures.add(value);
+      if (value?.isMaterial) {
+        allMaterials.add(value);
+        for (const property of Object.values(value)) if (property?.isTexture) allTextures.add(property);
+      }
+    }
+    const result = {
+      mirroredId: mirrored?.parcelId || null,
+      mirrorX: mirrorStats?.mirrorX ?? null,
+      lengths: decomps.map((decomp) => decomp.length),
+      shared: decomps.map((decomp) => decomp.filter((entry) => canonical.has(entry.material)).length),
+      materials: allMaterials.size,
+      textures: allTextures.size,
+    };
+    for (const decomp of decomps) for (const entry of decomp) entry.geometry.dispose();
+    for (const texture of allTextures) texture.dispose();
+    for (const material of allMaterials) material.dispose();
+    return result;
+  }, { housesModuleUrl: `/@fs${join(ROOT, 'src/generators/village/houses.js')}` });
+  pass(diversityRuntime.mirroredId != null && diversityRuntime.mirrorX === -1,
+    'mirrored L-plan stays mirrored in the real focus/edit overlay');
+  const semanticSharing = diversityRuntime.shared[2] >= Math.floor(diversityRuntime.lengths[2] * 0.45)
+    && diversityRuntime.shared[3] >= Math.floor(diversityRuntime.lengths[3] * 0.45)
+    && diversityRuntime.materials <= 120
+    && diversityRuntime.textures <= 60;
+  pass(semanticSharing,
+    `single/U topology reuses semantic palette resources (${JSON.stringify(diversityRuntime)})`);
+
+  await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    engine.village.debugFocus(parcelId);
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  }, diversityRuntime.mirroredId);
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, diversityRuntime.mirroredId, { timeout });
+  const houseTabs = page.locator('.ctx.house:not([aria-hidden="true"]) .tabs .tab');
+  await houseTabs.filter({ hasText: '초가' }).click();
+  await page.waitForFunction(() => window.__engine.village.getState().spec?.kind === 'choga', null, { timeout });
+  const chogaSwitch = await page.evaluate(() => {
+    const state = window.__engine.village.getState();
+    const panel = document.querySelector('.ctx.house:not([aria-hidden="true"])');
+    const column = panel?.querySelector('input[data-key="columnHeight"]');
+    return {
+      spec: state.spec,
+      columnValue: Number(column?.value),
+      columnMax: Number(column?.max),
+      keys: [...(panel?.querySelectorAll('[data-key]') || [])].map((element) => element.dataset.key),
+      activeType: panel?.querySelector('.tabs .tab.on')?.textContent?.replace(/\s+/g, ' ').trim(),
+    };
+  });
+  pass(chogaSwitch.spec.params.columnHeight === 1.95
+      && chogaSwitch.spec.params.wallType === 'stone'
+      && chogaSwitch.columnValue === 1.95
+      && chogaSwitch.columnValue <= chogaSwitch.columnMax
+      && !chogaSwitch.keys.some((key) => ['mainHalfW', 'wingLen', 'wingW'].includes(key))
+      && chogaSwitch.activeType?.includes('초가'),
+  `giwa→choga switch reseeds target defaults and accepted UI values (${JSON.stringify(chogaSwitch)})`);
+  await houseTabs.filter({ hasText: '기와집' }).click();
+  await page.waitForFunction(() => window.__engine.village.getState().spec?.kind === 'giwa', null, { timeout });
+  const restoredType = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const spec = engine.village.getState().spec;
+    const panel = document.querySelector('.ctx.house:not([aria-hidden="true"])');
+    const result = {
+      kind: spec?.kind,
+      columnHeight: spec?.params?.columnHeight,
+      mainHalfWMin: Number(panel?.querySelector('input[data-key="mainHalfW"]')?.min),
+      mirrorX: engine.village.debugParcelStats(parcelId, { kind: 'giwa' })?.mirrorX,
+    };
+    engine.village.return();
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+    return result;
+  }, diversityRuntime.mirroredId);
+  pass(restoredType.kind === 'giwa'
+      && restoredType.columnHeight === 2.9
+      && Math.abs(restoredType.mainHalfWMin - 3.3) < 1e-9
+      && restoredType.mirrorX === -1,
+  `choga→giwa switch restores fitted variant defaults and mirror (${JSON.stringify(restoredType)})`);
 
   const zoomModes = await page.evaluate(async () => {
     const engine = window.__engine;

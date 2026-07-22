@@ -136,12 +136,12 @@
 
 ## ④ 기관 데이터베이스 · 해설 (Institutional databases & explanatory sources)
 
-### 17. 국가한옥센터(AURI) 한옥DB — 한옥이론
+### 17. 국가한옥센터(AURI) 한옥DB — 한옥의 종류·한옥이론
 - 건축공간연구원(AURI)
-- 공포(주심포/다포/익공)·지붕(추녀·서까래·기와잇기)·칸·창호·천장 부재를 도해와 함께 해설.
-- **활용 / Use:** 부재 명칭·결구 체계 정합 및 지붕 부재 배치(서까래·부연·추녀) 어휘 근거 / Correct member naming and rafter/eave layout vocabulary.
-- URL: https://www.hanokdb.kr/theology/sub_04
-- 라이선스: 무료·로그인 불필요.
+- ㅡ·ㄱ·ㄷ·ㅁ 평면의 구성과 지역 사례, 공포(주심포/다포/익공)·지붕(추녀·서까래·기와잇기)·칸·창호·천장 부재를 도해와 함께 해설.
+- **활용 / Use:** 일반 주택의 ㅡ·ㄱ·ㄷ 가중 레퍼토리(지역축 없는 생성기에서 지역 사례를 엄격한 분포로 일반화하지 않음)와 부재 명칭·지붕 배치 어휘 근거; ㅁ자는 참고만 하고 미구현 / Basis for the weighted single/L/U house repertoire and member/roof vocabulary; regional examples are not treated as a strict national distribution, and enclosed ㅁ plans remain reference-only.
+- URL: https://www.hanokdb.kr/theology/sub_02 · https://www.hanokdb.kr/theology/sub_04
+- 라이선스: 웹 열람 무료·로그인 불필요. 텍스트·도해의 재배포 권리는 별도 확인(앱에는 링크와 구현 요약만 표시).
 
 ### 18. 국가유산 디지털 서비스 — 3D 에셋 서비스
 - 국가유산청
@@ -176,11 +176,11 @@
 ## ⑤ 마을 · 읍성 문헌 (Village & walled-town sources)
 
 ### 22. 경국대전 도로폭 규정 · 가사(家舍)/가대(家垈)제한
-- 원전 / 민족문화대백과·우리역사넷 해설 경유
-- 대로 56척(≈17.5m)·중로 16척(≈5.0m)·소로 11척(≈3.4m) 도로 등급, 신분별 가옥 칸수·집터 면적 상한(서인 10칸·2부 ↔ 대군 60칸·1품 35부).
-- **활용 / Use:** 도로 등급별 폭·피맛길(≈3.4m)과 신분→필지 크기/가옥 칸수 그라디언트의 수치 근거 / Numeric basis for road-width tiers, the pimatgil back-alley, and the rank→lot-size/house-scale gradient (src/village/roads.js, parcels.js).
-- URL: https://encykorea.aks.ac.kr/Article/E0071922
-- 라이선스: 원전 퍼블릭 도메인, 해설은 매체별 (CC BY-SA 등).
+- 『경국대전』 원전 / 국사편찬위원회 우리역사넷·한국학중앙연구원 해설
+- 대로 56척(≈17.5m)·중로 16척(≈5.0m)·소로 11척(≈3.4m) 도로 등급과 신분별 가옥 칸수·집터 지급량/상한(서인 10칸·2부 ↔ 대군 60칸·1품 35부). 이 수치는 실제 주택 평균이나 선형 빈도 분포가 아닌 법적 상한·규범이다.
+- **활용 / Use:** 도로 폭·피맛길과 rank/wealth→필지·집 규모의 완만한 단조 방향만 적용. 17배 필지 비례나 법정 최대 칸수를 실제 가구에 그대로 복제하지 않음 / Basis for road tiers and a gentle monotone rank/wealth→lot/house gradient; the 17× lot range and legal bay ceilings are not reproduced literally (`src/village/roads.js`, `src/village/parcels.js`, `docs/house-diversity.md`, `src/village/house-diversity.js`).
+- URL: https://contents.history.go.kr/front/km/view.do?levelId=km_033_0050_0020_0010 · https://encykorea.aks.ac.kr/Article/E0071922
+- 라이선스: 원전은 퍼블릭 도메인. 우리역사넷·민족문화대백과 해설의 저작권은 각 기관에 있으며 링크·요약 참고만 사용.
 
 ### 23. 한국의 역사마을 하회와 양동
 - UNESCO / 민족문화대백과 · 우리역사넷 해설

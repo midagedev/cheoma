@@ -76,6 +76,33 @@ export function inspectProductionRoofSeams() {
   const faces = [];
   const eaveY = 0.37;
 
+  const inspectCase = (P, label) => {
+    const footprint = giwaFootprintPolygon(P);
+    const chains = upperChains(footprint);
+    const roof = buildSkeletonRoof(footprint, { eaveY, riseScale: P.riseScale, mats });
+    const surfaceMeshes = roof.children.filter((object) => (
+      object.isMesh
+      && object.geometry?.getAttribute('position')?.count === FACE_VERTEX_COUNT
+      && object.geometry?.index?.count === FACE_INDEX_COUNT
+    ));
+    cases.push({ label, expectedFaces: chains.length, actualFaces: surfaceMeshes.length });
+
+    for (let faceIndex = 0; faceIndex < Math.min(chains.length, surfaceMeshes.length); faceIndex++) {
+      const position = surfaceMeshes[faceIndex].geometry.getAttribute('position');
+      const samples = [];
+      for (let iu = 0; iu <= U_SEGMENTS; iu++) {
+        const vertex = iu * (V_SEGMENTS + 1) + V_SEGMENTS;
+        samples.push({
+          x: position.getX(vertex),
+          z: position.getZ(vertex),
+          h: (position.getY(vertex) - eaveY) / P.riseScale,
+        });
+      }
+      faces.push({ label, chain: chains[faceIndex], samples });
+    }
+    disposeRoof(roof, borrowed);
+  };
+
   try {
     for (const mainHalfW of dimensions.mainHalfW) {
       for (const mainHalfD of dimensions.mainHalfD) {
@@ -83,36 +110,24 @@ export function inspectProductionRoofSeams() {
           for (const wingW of dimensions.wingW) {
             for (const riseScale of dimensions.riseScale) {
               const P = { ...PRESETS.giwa, mainHalfW, mainHalfD, wingLen, wingW, riseScale };
-              const footprint = giwaFootprintPolygon(P);
-              const chains = upperChains(footprint);
-              const roof = buildSkeletonRoof(footprint, { eaveY, riseScale, mats });
-              const surfaceMeshes = roof.children.filter((object) => (
-                object.isMesh
-                && object.geometry?.getAttribute('position')?.count === FACE_VERTEX_COUNT
-                && object.geometry?.index?.count === FACE_INDEX_COUNT
-              ));
               const label = `${mainHalfW}/${mainHalfD}/${wingLen}/${wingW}/${riseScale}`;
-              cases.push({ label, expectedFaces: chains.length, actualFaces: surfaceMeshes.length });
-
-              for (let faceIndex = 0; faceIndex < Math.min(chains.length, surfaceMeshes.length); faceIndex++) {
-                const position = surfaceMeshes[faceIndex].geometry.getAttribute('position');
-                const samples = [];
-                for (let iu = 0; iu <= U_SEGMENTS; iu++) {
-                  const vertex = iu * (V_SEGMENTS + 1) + V_SEGMENTS;
-                  samples.push({
-                    x: position.getX(vertex),
-                    z: position.getZ(vertex),
-                    h: (position.getY(vertex) - eaveY) / riseScale,
-                  });
-                }
-                faces.push({ label, chain: chains[faceIndex], samples });
-              }
-              disposeRoof(roof, borrowed);
+              inspectCase(P, label);
             }
           }
         }
       }
     }
+    // The dense boundary sweep above keeps the editable ㄱ preset. Add the two
+    // new production shapes explicitly so ㅡ and four-bay ㄷ Float32 wiring are
+    // covered without tripling the full UI matrix.
+    inspectCase({
+      ...PRESETS.giwa, planShape: 'single', bays: 3,
+      mainHalfW: 3.7, mainHalfD: 2.0, riseScale: 0.9,
+    }, 'regular-single-3');
+    inspectCase({
+      ...PRESETS.giwa, planShape: 'u', bays: 4,
+      mainHalfW: 5.0, mainHalfD: 2.2, wingLen: 3.4, wingW: 2.15, riseScale: 0.9,
+    }, 'regular-u-4');
   } finally {
     mats.tileTex.dispose();
     for (const value of Object.values(mats)) if (value?.isMaterial) value.dispose();

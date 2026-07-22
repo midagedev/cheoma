@@ -20,7 +20,7 @@ import {
 } from '../../temple/plan.js';
 import { houseMatrix, parcelMatrix } from '../../village/instancing.js';
 import { buildVillageWall } from '../../village/walls.js';
-import { toneOf, variantOv, variantThatchAge } from '../../village/variants.js';
+import { toneOf, variantMirrorX, variantOv, variantThatchAge } from '../../village/variants.js';
 import { parcelHouseTranslation, parcelLocalPoint } from '../../village/parcel-contract.js';
 import {
   captureParcelRebuildEnvelope,
@@ -38,6 +38,7 @@ import {
   buildEditedParcelSpec,
   buildParcelSpec,
   clampBuildingDimensions,
+  parcelWallType,
   palaceCompoundDefaults,
 } from './parcel-edit.js';
 import {
@@ -737,25 +738,41 @@ export function createVillageHandle(opts, seed, plan, group) {
       const bld = { ...(newParams.building || {}) };
       if (bld.roofCurve != null && bld.profileCurve == null) { bld.profileCurve = bld.roofCurve; delete bld.roofCurve; }
       // 프리셋 ← 변주 ov(실제 렌더 기준) ← 편집 오버라이드. 격식 가드로 치수 클램프.
-      const preset = { ...PRESETS[gk], ...variantOv(parcel), ...bld };
+      // A cross-kind edit starts from that kind's base variant instead of interpreting a
+      // choga variant index as a giwa mirror (or vice versa).
+      const variantParcel = gk === parcel.kind ? parcel : { ...parcel, kind: gk, variant: 0 };
+      const preset = { ...PRESETS[gk], ...variantOv(variantParcel), ...bld };
       clampBuildingDimensions(preset, gk);
+      const acceptedBuilding = Object.fromEntries(
+        Object.keys(bld).map((key) => [key, preset[key]]),
+      );
       const house = buildBuilding(preset);
       // 초가 이엉 상태(thatchAge) — 텍스처 후처리(빌더 코어 불침해).
       if (gk === 'choga') {
         const age = newParams.thatchAge != null ? newParams.thatchAge
-          : (parcel.thatchAge != null ? parcel.thatchAge : variantThatchAge(parcel));
+          : (gk === parcel.kind && parcel.thatchAge != null
+            ? parcel.thatchAge : variantThatchAge(variantParcel));
         applyThatchAge(house.userData.materials, age);
       }
       // 부위별 곱틴트(#55): 인스턴스와 동일 팔레트를 풀디테일에 재질 색 곱연산(신규 재질이라 clone 불필요).
       //   roofTone 은 편집 오버라이드(인덱스) 우선, 없으면 필지의 부위별 지붕톤. 벽·목·석은 필지 톤 유지.
-      const roofTint = newParams.roofTone != null ? toneOf(kind, newParams.roofTone)
-        : (parcel.roofTone || toneOf(kind, parcel.toneIdx || 0));
-      applyMaterialRoleTints(house, { roof: roofTint, wall: parcel.wallTone, wood: parcel.woodTone, stone: parcel.stoneTone });
+      const changedKind = gk !== parcel.kind;
+      const roofTint = newParams.roofTone != null ? toneOf(gk, newParams.roofTone)
+        : (changedKind ? toneOf(gk, parcel.toneIdx || 0)
+          : (parcel.roofTone || toneOf(gk, parcel.toneIdx || 0)));
+      applyMaterialRoleTints(house, {
+        roof: roofTint,
+        wall: changedKind ? null : parcel.wallTone,
+        wood: changedKind ? null : parcel.woodTone,
+        stone: changedKind ? null : parcel.stoneTone,
+      });
       const local = parcelHouseTranslation(parcel);
       house.position.set(local.x, 0, local.z);
       // 변주 스케일 × 풋프린트 스케일 편집.
       const fs = Math.max(0.6, Math.min(1.6, newParams.footprintScale != null ? newParams.footprintScale : 1));
-      house.scale.set((parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
+      const mirrorX = variantMirrorX(variantParcel);
+      house.scale.set(mirrorX * (parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
+      house.userData.variantMirrorX = mirrorX;
       g.add(house);
       // Before the parcel transform is applied, this is the exact edited eave
       // envelope in parcel-local coordinates. Runtime flora consumes it instead
@@ -767,7 +784,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         minZ: roofBox.min.z, maxZ: roofBox.max.z,
       };
       // 담·마당(개별) — 유형·부속채 어휘 + 마당 소품 편집(#96). newParams 오버라이드 우선, 없으면 필지 원본값.
-      const wallType = newParams.wallType || parcel.wallType || 'stone';
+      const wallType = parcelWallType(gk, newParams.wallType ?? parcel.wallType);
       const aux = newParams.aux != null ? newParams.aux : parcel.aux;
       const jangdok = newParams.jangdok != null ? newParams.jangdok : parcel.jangdok;
       const yardStack = newParams.yardStack != null ? newParams.yardStack : parcel.yardStack;
@@ -788,7 +805,7 @@ export function createVillageHandle(opts, seed, plan, group) {
           if (newParams[key] !== undefined) parcel[key] = newParams[key];
         }
         parcel.editRoofBounds = editRoofBounds;
-        const spec = buildEditedParcelSpec(parcel, newParams);
+        const spec = buildEditedParcelSpec(parcel, newParams, acceptedBuilding);
         const proxy = proxyById.get(parcelId);
         if (proxy) refreshParcelPickProxy(proxy, parcel, site, spec, proxies, plan);
         if (refreshFlora) refreshVillageFlora();
@@ -995,8 +1012,9 @@ export function createVillageHandle(opts, seed, plan, group) {
         overrides.remove(existing);
       }
       const probe = this.rebuildParcel(parcelId, newParams);
-      let meshes = 0, verts = 0;
+      let meshes = 0, verts = 0, mirrorX = 1;
       probe?.traverse((object) => {
+        if (object.userData?.variantMirrorX != null) mirrorX = object.userData.variantMirrorX;
         if (!object.isMesh || !object.geometry?.attributes?.position) return;
         meshes++;
         verts += object.geometry.attributes.position.count;
@@ -1015,7 +1033,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         setResidentialBaseHidden(parcel, false);
       }
       representationDirty = true;
-      return probe ? { meshes, verts } : null;
+      return probe ? { meshes, verts, mirrorX } : null;
     },
 
     // 먹선 아웃라인 하이라이트 토글. on=true 면 해당 필지에 아웃라인+은은한 발광.

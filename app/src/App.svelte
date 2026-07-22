@@ -666,6 +666,18 @@
   //   드래그 라이브 재생성 금지 — 값 라벨만 라이브, 놓을 때(commit) 재생성.
   const isSpecialCompound = (spec) => !!spec
     && (spec.hero || spec.family === 'palace-compound' || spec.family === 'temple');
+  function acceptVillageSpec(rebuilt) {
+    if (!rebuilt || !villageEditing) return false;
+    const state = engine.village.getState();
+    const nextSpec = state.selected === villageEditing.parcelId ? state.spec : null;
+    if (!nextSpec) return false;
+    villageEditing = { ...villageEditing, spec: nextSpec };
+    // The core owns target-kind defaults and clamps. Reflect its accepted spec
+    // into the panel so hidden source-kind fields and out-of-range labels cannot
+    // survive a rebuild.
+    editParams = { kind: nextSpec.kind, ...(nextSpec.params || {}) };
+    return true;
+  }
   function pushRebuild({ refreshFlora = true } = {}) {
     if (!villageEditing) return;
     const rebuilt = engine.village.rebuild(
@@ -676,10 +688,7 @@
     // Compound planners may change the valid controls and clamp ranges when a
     // variant changes. Refresh the declarative spec after the core accepts the
     // rebuild; Svelte still owns no THREE state.
-    const nextSpec = rebuilt ? engine.village.getState().spec : null;
-    if (nextSpec?.parcelId === villageEditing.parcelId) {
-      villageEditing = { ...villageEditing, spec: nextSpec };
-    }
+    acceptVillageSpec(rebuilt);
   }
   // Geometry-backed range controls receive many more input events than useful
   // rendered frames. The reusable scheduler keeps the label immediate, merges
@@ -706,7 +715,16 @@
     else editParams[k] = v;
     liveEdit.commit();
   }
-  function villageSetType(kind) { villageCommit('kind', kind); }
+  function villageSetType(kind) {
+    if (!villageEditing || isSpecialCompound(villageEditing.spec)) return;
+    if (kind === villageEditing.spec.kind) return;
+    // A type switch changes the schema itself. Do not route old-kind sliders
+    // through the target builder: rebuild from only the requested kind, then
+    // seed every visible value from the core's accepted target-kind spec.
+    liveEdit.cancel();
+    const rebuilt = engine.village.rebuild(villageEditing.parcelId, { kind });
+    if (!acceptVillageSpec(rebuilt)) editParams = { kind };
+  }
   function closeVillageEdit() { liveEdit.cancel(); engine.village.return(); }
 </script>
 

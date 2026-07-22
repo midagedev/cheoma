@@ -84,12 +84,69 @@ export function mirrorDecomp(decomp) {
   });
 }
 
-// 변주 decomp 가 canon 과 재질 역할·순서가 같으면(빌더 결정론 → 동일 순서) 재질 refs 를 canon 으로 통일.
-//   → 같은 kind 의 여러 평면 변주가 재질셋 1벌만 써 텍스처·재질 수를 고정(드로우콜은 변주×재질).
-//   keepOwn(material): true 인 변주 재질은 통일에서 제외(변주별 고유 유지) — 예: 이엉 상태(thatchAge)별 thatch.
+const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+const fixed = (value, fallback = 0) => Number(value ?? fallback).toFixed(5);
+
+function textureShareKey(texture) {
+  if (!texture) return '-';
+  return [
+    fixed(texture.repeat?.x, 1), fixed(texture.repeat?.y, 1),
+    fixed(texture.offset?.x), fixed(texture.offset?.y),
+    fixed(texture.center?.x), fixed(texture.center?.y), fixed(texture.rotation),
+    texture.wrapS, texture.wrapT, texture.mapping, texture.channel,
+    texture.colorSpace, texture.flipY ? 1 : 0,
+    texture.magFilter, texture.minFilter, texture.anisotropy,
+  ].join(',');
+}
+
+// Different plan topology changes decompose order and material count. Sharing by index therefore
+// either retains whole duplicate palettes or can pair the wrong surfaces. This conservative key
+// describes the authored palette family plus render-affecting state; texture source identity is
+// deliberately omitted because separately built variants redraw the same family canvas. Repeat,
+// offset, wrapping, and filters remain in the key so roof tile density and fitted UVs stay exact.
+export function materialShareKey(material) {
+  if (!material?.isMaterial) return null;
+  if (own(material, 'onBeforeCompile') || own(material, 'customProgramCacheKey')) return null;
+  const data = material.userData || {};
+  const textured = material.map || material.bumpMap || material.normalMap || material.emissiveMap
+    || material.roughnessMap || material.metalnessMap || material.aoMap || material.alphaMap;
+  // A generated texture without a declared family may be visually unrelated even when its
+  // transform matches. Palette materials and derived roof skins declare paletteKey explicitly.
+  if (textured && !data.paletteKey) return null;
+  return [
+    data.paletteKey || '-', data.role || '-', data.hanjiGlow ?? '-',
+    material.type, material.name || '', material.side,
+    material.transparent ? 1 : 0, fixed(material.opacity, 1), fixed(material.alphaTest),
+    material.alphaHash ? 1 : 0, material.depthWrite ? 1 : 0, material.depthTest ? 1 : 0,
+    material.blending, material.vertexColors ? 1 : 0, material.flatShading ? 1 : 0,
+    material.color?.getHexString?.() || '-', material.emissive?.getHexString?.() || '-',
+    fixed(material.emissiveIntensity, 1), fixed(material.roughness, 1), fixed(material.metalness),
+    fixed(material.bumpScale, 1), fixed(material.aoMapIntensity, 1),
+    fixed(material.displacementScale, 1),
+    material.normalScale ? `${fixed(material.normalScale.x, 1)},${fixed(material.normalScale.y, 1)}` : '-',
+    textureShareKey(material.map), textureShareKey(material.bumpMap),
+    textureShareKey(material.normalMap), textureShareKey(material.emissiveMap),
+    textureShareKey(material.roughnessMap), textureShareKey(material.metalnessMap),
+    textureShareKey(material.aoMap), textureShareKey(material.alphaMap),
+  ].join('~');
+}
+
+// 토폴로지와 decompose 순서가 달라도 같은 시각 의미의 재질 refs를 canon으로 통일한다.
+// keepOwn(material): true 인 변주 재질은 제외 — 초가 이엉 상태와 기와 창호 패턴처럼 실제로
+// 변주별 픽셀이 달라야 하는 표면이다. 일치하지 않는 파생 UV/기와 반복 재질도 그대로 보존한다.
 export function shareMaterials(canon, variant, keepOwn = null) {
-  if (!canon || canon.length !== variant.length) return variant;   // 역할 불일치 → 변주 자체 재질 유지
-  return variant.map((e, i) => (keepOwn && keepOwn(e.material)) ? e : { ...e, material: canon[i].material });
+  if (!canon) return variant;
+  const byKey = new Map();
+  for (const entry of canon) {
+    const key = materialShareKey(entry.material);
+    if (key != null && !byKey.has(key)) byKey.set(key, entry.material);
+  }
+  return variant.map((entry) => {
+    if (keepOwn?.(entry.material)) return entry;
+    const key = materialShareKey(entry.material);
+    const shared = key == null ? null : byKey.get(key);
+    return shared && shared !== entry.material ? { ...entry, material: shared } : entry;
+  });
 }
 
 // root(프로토 또는 이미 월드배치된 객체)를 재질별 병합 지오메트리로 분해.
@@ -244,7 +301,7 @@ export function buildHouseEnvelopeInstances(kind, parcels, decomps) {
 //   폭증한다(hanyang 실측 3400콜·20M삼각). 부감·원경에서 개별 집의 공포·창호·기와골은 픽셀 이하라
 //   무의미 — 지붕 덩어리와 벽 매스만 읽힌다. 그래서 부감 상태의 정규 주택을 한 채당 저폴리 프록시
 //   로 대체하고 청크 전체를 역할별 소수 vertexColor 메시로 병합한다. 순수 impostorHouseSpec이 실제 variant의
-//   초가 우진각·기와 ㄱ자 평면/날개·mirror·팔레트 선형색을 저폴리 명세로 줄인다. 따라서 청크당
+//   초가 우진각·기와 ㅡ/ㄱ/ㄷ 평면·mirror·팔레트 선형색을 저폴리 명세로 줄인다. 따라서 청크당
 //   작은 상수 드로우콜을 유지하면서 LOD 경계에서 종류와 실루엣이 바뀌지 않는다. 그림자 비캐스트(원경).
 const IMPOSTOR_PARTS = ['roof-giwa', 'roof-choga', 'wall', 'wood', 'stone'];
 const _v = new THREE.Vector3();
@@ -269,7 +326,7 @@ function pushImpostorHouse(parts, parcel) {
     tri(role, a, b, c, col); tri(role, a, c, d, col);
   };
 
-  // 몸통은 실제 초가 사각/기와 ㄱ자 polygon을 그대로 세운다. 상단의 얇은 목재 띠가 멀리서도
+  // 몸통은 실제 초가 사각/기와 ㅡ·ㄱ·ㄷ polygon을 그대로 세운다. 상단의 얇은 목재 띠가 멀리서도
   // 흙벽·회벽과 처마선을 분리하되, 같은 vertexColor mesh 안이므로 재질/드로우콜은 늘지 않는다.
   const { polygon, y0, y1 } = spec.body;
   const bandH = spec.kind === 'choga' ? 0.18 : 0.24;

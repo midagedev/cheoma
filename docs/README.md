@@ -30,6 +30,7 @@
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
 | [`dancheong.md`](dancheong.md) | 계약 + 리서치 | 궁 기본 모로·사찰 중심 불전 금단청 위계, 선명도/격식 축, 불변 source 캐시·수명·성능 계약과 공식 근거. |
+| [`house-diversity.md`](house-diversity.md) | 계약 | 일반 주택의 필지·살림 위계, ㅡ·ㄱ·ㄷ 레퍼토리, ㄷ 최소 4칸과 실제 처마 fit·성능 예산. |
 | [`project-status.md`](project-status.md) | 계약 | 프로젝트 마무리 방향, 유지해야 할 사용자 결정, 현재 작업 상태. |
 | [`verification.md`](verification.md) | 계약 | 빌드·문법·Playwright·결정론 검증의 실제 사용 범위와 함정. |
 | [`mode-integration.md`](mode-integration.md) | 계약 | 모드/카메라/focus 통합. `ui-design.md`의 초기 모드 구상보다 우선한다. |

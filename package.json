@@ -16,6 +16,7 @@
     "check:architecture": "node tools/check-architecture.mjs",
     "check:atmosphere": "node tools/check-atmosphere-contract.mjs",
     "check:environment": "node tools/check-environment-state.mjs",
+    "check:house-diversity": "node tools/check-house-diversity.mjs",
     "check:winter:app": "node tools/check-winter-app.mjs",
     "check:ink:app": "node tools/check-ink-app.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",
