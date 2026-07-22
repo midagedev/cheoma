@@ -33,16 +33,38 @@ function partGeometry(part, basis) {
   );
 }
 
+function plainVector(vector) {
+  return Object.freeze({ x: vector.x, y: vector.y, z: vector.z });
+}
+
+function openingGlowMetadata(plan, basis) {
+  const anchor = plan.anchors.glow;
+  const position = new THREE.Vector3(anchor.u, anchor.y, anchor.outward).applyMatrix4(basis);
+  const outward = new THREE.Vector3(0, 0, 1).transformDirection(basis);
+  return Object.freeze({
+    openingId: plan.id,
+    kind: plan.kind,
+    style: plan.style,
+    primary: plan.primary,
+    width: plan.width,
+    height: plan.height,
+    position: plainVector(position),
+    outward: plainVector(outward),
+  });
+}
+
 export function createOpeningDetailAssembler(target, materials) {
   const frameGeometries = [];
   const primaryLeafGeometries = [];
   const hardwareGeometries = [];
   const primaryRecesses = [];
+  const openingGlowAnchors = [];
   let finished = false;
 
   function add(plan, placement, owner = null) {
     if (finished) throw new Error('Opening detail assembler is already finished');
     const basis = openingPlacementBasis(placement);
+    openingGlowAnchors.push(openingGlowMetadata(plan, basis));
     for (const part of plan.frame.parts) {
       const pivot = plan.primary && plan.kind === 'door' ? plan.anchors.pivot : null;
       if (pivot && part.kind === 'lower-panel-rail') {
@@ -92,6 +114,9 @@ export function createOpeningDetailAssembler(target, materials) {
   function finish() {
     if (finished) return;
     finished = true;
+    // Plain immutable target-local metadata only: no marker Object3D, geometry,
+    // material, texture, or draw call is allocated per opening.
+    target.userData.openingGlowAnchors = Object.freeze(openingGlowAnchors.slice());
     if (frameGeometries.length) {
       const mesh = new THREE.Mesh(
         mergeOwnedGeometries(frameGeometries, 'Opening frame geometries'),

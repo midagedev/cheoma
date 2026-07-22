@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { makeRng } from '../rng.js';
-import { parcelRotY } from './instancing.js';
+import { hashString, makeRng } from '../rng.js';
+import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
+import { houseMatrix } from '../generators/shared/parcel-transform.js';
 
-// 원경 창불 발광 포인트(태스크 #60) — 부감 야경의 마법.
-//   문제: 창호 실내광(adapter vnight, 재질 emissive)은 원거리 부감에서 발광면이 픽셀 이하로
-//   작아져 소실 → "원경에서 집 조명이 하나도 안 보임". 이 레이어는 집집이 창·처마 밑 등롱 자리에
-//   additive 발광 포인트를 얹어, 원거리에서 또렷한 점광으로 읽히고(post bloom 이 헤일로) 근접하면
-//   페이드 아웃(재질 창호 발광이 바통 터치)한다.
+// 원경 창불 발광 포인트(태스크 #60, #81) — 부감 야경의 마법.
+//   실제 renderer가 확정한 고정 한지 면 anchor만 소비한다. 필지 크기나 처마 치수를 이 레이어에서
+//   재추정하지 않으며, 깊이 테스트로 집·담·지형 뒤의 불빛을 정상적으로 가린다. 가까워지면 실제
+//   창호 emissive가 바통을 이어받는다.
 //
 //   설계:
 //   · 단일 THREE.Points(1 드로우콜) — 집당 1~2점, 종가·궁·절은 밝게 여러 점. 호수 무관.
@@ -28,106 +28,97 @@ const clamp01 = (v) => clamp(v, 0, 1);
 const COLOR_CANDLE = new THREE.Color(0xff9a45);
 const COLOR_LAMP = new THREE.Color(0xffcf88);
 
-// 집 종류별 창불 높이(성토 패드 baseY 위) · 점 크기 배율.
-function windowY(parcel) {
-  if (parcel.hero) return 3.4;
-  return parcel.kind === 'giwa' ? 2.5 : 1.9;
-}
-
-// 필지 로컬(lx,lz) → 월드 (parcelMatrix 규약 T·Ry: x'=lx·cos+lz·sin, z'=-lx·sin+lz·cos).
-function localToWorld(parcel, lx, lz, cos, sin) {
-  return {
-    x: parcel.center.x + lx * cos + lz * sin,
-    z: parcel.center.z - lx * sin + lz * cos,
-  };
-}
-
-// 한 필지의 창불 점 목록 → [{x,y,z, lit, threshold, phase, warm, scale}]. 결정론(parcel.seed).
-function parcelLights(parcel) {
+function regularProfile(parcel, kind = parcel.kind) {
   const rng = makeRng((parcel.seed ^ 0x9117e5) >>> 0);
   const wealth = clamp01(parcel.wealth != null ? parcel.wealth : 0.5);
-  const rotY = parcelRotY(parcel);
-  const cos = Math.cos(rotY), sin = Math.sin(rotY);
-  const baseY = parcel.baseY || 0;
-  const wy = windowY(parcel);
-  const plotW = parcel.plotW || 6, plotD = parcel.plotD || 6;
-  const out = [];
-
-  if (parcel.hero) {
-    // 종가·반가 대형: 여러 방(사랑채·안채) 창불이 환하게. 일찍 점등, 밝게.
-    const spots = [[0, plotD * 0.08], [-plotW * 0.2, -plotD * 0.05], [plotW * 0.22, plotD * 0.02]];
-    for (let i = 0; i < spots.length; i++) {
-      const w = localToWorld(parcel, spots[i][0], spots[i][1], cos, sin);
-      out.push({
-        x: w.x, y: baseY + wy + (i === 0 ? 0 : 0.3 * (rng() - 0.5)), z: w.z,
-        lit: 0.95 + rng() * 0.15, threshold: 0.10 + rng() * 0.06,
-        phase: rng() * TAU, warm: 0.2 + rng() * 0.3, scale: 1.5,
-      });
-    }
-    return out;
-  }
-
-  // 정규 주택: ~6% 는 불 꺼진 집(빈집·잠듦) → 균일 크리스마스트리 방지·현실감.
-  if (rng() < 0.06) return out;
-
-  // 점등 문턱: 부유할수록 일찍(낮은 문턱), 가난할수록 늦게. 개체 노이즈로 이웃 변별(팟 방지).
+  const dark = rng() < 0.06;
   const threshold = clamp(0.16 + (1 - wealth) * 0.4 + (rng() * 2 - 1) * 0.13, 0.06, 0.9);
-  // 밝기: 부유할수록 환하게(더 많은 방·기름불), 가난할수록 은은.
   const lit = clamp01(0.5 + wealth * 0.5 + (rng() * 2 - 1) * 0.16);
   const warm = rng();
-  const isGiwa = parcel.kind === 'giwa';
-
-  // 1점(민가·초가) 또는 2점(기와·부유) — 앞채 창불 + (여유 시) 곁방/부속.
-  const nPts = (isGiwa || wealth > 0.62) ? 2 : 1;
-  const front = { lx: (rng() * 2 - 1) * plotW * 0.1, lz: plotD * (0.05 + rng() * 0.06) };
-  const w0 = localToWorld(parcel, front.lx, front.lz, cos, sin);
-  out.push({
-    x: w0.x, y: baseY + wy, z: w0.z,
+  const isGiwa = kind === 'giwa';
+  const desired = dark ? 0 : ((isGiwa || wealth > 0.62) ? 2 : 1);
+  const slots = [{
     lit, threshold, phase: rng() * TAU, warm, scale: isGiwa ? 1.12 : 1.0,
-  });
-  if (nPts === 2) {
-    // 곁방: 살짝 옆·뒤 + 조금 낮게·어둡게·늦게(문턱↑). 같은 집 안의 밝기 편차.
-    const w1 = localToWorld(parcel, (rng() < 0.5 ? -1 : 1) * plotW * 0.24, -plotD * (0.02 + rng() * 0.1), cos, sin);
-    out.push({
-      x: w1.x, y: baseY + wy - 0.25, z: w1.z,
+  }, {
       lit: lit * (0.55 + rng() * 0.2), threshold: clamp(threshold + 0.06 + rng() * 0.08, 0.06, 0.95),
       phase: rng() * TAU, warm: clamp01(warm + (rng() * 2 - 1) * 0.2), scale: isGiwa ? 0.95 : 0.85,
-    });
-  }
-  return out;
+  }];
+  return { capacity: 2, desired, kind: isGiwa ? 'giwa' : 'choga', slots };
 }
 
-// 궁·절(features) 등롱·창불 — 랜드마크라 여러 점, 밝게, 일찍 점등.
-function featureLights(plan, site) {
-  const F = plan.features || {};
-  const out = [];
-  const add = (f, count, litBase, scale, seedSalt) => {
-    if (!f || typeof f.x !== 'number') return;
-    const rng = makeRng(((f.seed || 7) ^ seedSalt) >>> 0);
-    const gy = site.heightAt(f.x, f.z);
-    for (let i = 0; i < count; i++) {
-      const a = rng() * TAU, r = 6 + rng() * 12;
-      out.push({
-        x: f.x + Math.cos(a) * r, y: gy + 3.0 + rng() * 2.5, z: f.z + Math.sin(a) * r,
-        lit: litBase + rng() * 0.2, threshold: 0.08 + rng() * 0.05,
-        phase: rng() * TAU, warm: 0.15 + rng() * 0.25, scale,
-      });
-    }
+function heroProfile(parcel) {
+  const rng = makeRng((parcel.seed ^ 0x9117e5) >>> 0);
+  return {
+    capacity: 3,
+    desired: 3,
+    slots: Array.from({ length: 3 }, () => ({
+      lit: 0.95 + rng() * 0.15,
+      threshold: 0.10 + rng() * 0.06,
+      phase: rng() * TAU,
+      warm: 0.2 + rng() * 0.3,
+      scale: 1.5,
+    })),
   };
-  add(F.palace, 4, 1.05, 1.8, 0x9a11);   // 궁: 크고 환한 등롱군
-  add(F.temple, 3, 0.95, 1.6, 0x7e12);   // 절: 대웅전·석등 불빛
-  add(F.pavilion, 1, 0.7, 1.2, 0x5a13);  // 정자: 은은한 한 점
-  return out;
 }
 
-// plan 전체 → 창불 점 목록.
-function collectLights(plan, site) {
-  const pts = [];
-  for (const p of plan.parcels || []) {
-    for (const L of parcelLights(p)) pts.push(L);
+function featureProfile(feature, count, litBase, scale, seedSalt) {
+  const featureSeed = Number.isFinite(feature?.seed) ? feature.seed : 7;
+  const rng = makeRng((featureSeed ^ seedSalt) >>> 0);
+  return {
+    capacity: count,
+    desired: count,
+    slots: Array.from({ length: count }, () => ({
+      lit: litBase + rng() * 0.2,
+      threshold: 0.08 + rng() * 0.05,
+      phase: rng() * TAU,
+      warm: 0.15 + rng() * 0.25,
+      scale,
+    })),
+  };
+}
+
+function transformAnchors(anchors, matrix) {
+  return (anchors || []).map((anchor) => {
+    const position = new THREE.Vector3(
+      anchor.position.x, anchor.position.y, anchor.position.z,
+    ).applyMatrix4(matrix);
+    const outward = new THREE.Vector3(
+      anchor.outward.x, anchor.outward.y, anchor.outward.z,
+    ).transformDirection(matrix);
+    return { ...anchor, position, outward };
+  });
+}
+
+function regularBaseAnchors(parcel, sources) {
+  const kind = parcel.kind === 'giwa' ? 'giwa' : 'choga';
+  const source = sources.regular?.[kind];
+  const variants = source?.variants || [];
+  const requested = source?.variantAware === false ? 0 : (parcel.variant | 0);
+  const index = clamp(requested, 0, Math.max(0, variants.length - 1));
+  return transformAnchors(variants[index] || variants[0] || [], houseMatrix(parcel));
+}
+
+function stableAnchorScore(ownerSeed, anchor, index) {
+  return hashString(`${ownerSeed}|${anchor.openingId || 'opening'}|${index}`) >>> 0;
+}
+
+function selectAnchors(anchors, count, ownerSeed) {
+  if (!anchors?.length || count <= 0) return [];
+  const ranked = anchors.map((anchor, index) => ({
+    anchor,
+    index,
+    score: stableAnchorScore(ownerSeed, anchor, index),
+  })).sort((a, b) => a.score - b.score || a.index - b.index);
+  // The first lit room should read from the normal south/front presentation
+  // when one exists. Remaining rooms retain a deterministic facade spread.
+  const front = ranked.find((entry) => (entry.anchor.outward?.z || 0) > 0.35);
+  const selected = front ? [front.anchor] : [];
+  for (const entry of ranked) {
+    if (selected.length >= count) break;
+    if (front && entry === front) continue;
+    selected.push(entry.anchor);
   }
-  for (const L of featureLights(plan, site)) pts.push(L);
-  return pts;
+  return selected;
 }
 
 const VERT = `
@@ -197,30 +188,116 @@ void main() {
 }
 `;
 
-// buildNightLights(plan, site) → { group, setLevel, setPixelRatio, update, dispose }.
-//   update(dt, level): level(=adapter vnight 0..1)을 uNight 에 직접 반영(#50 크로스페이드 자동 정합),
-//     uTime 누적(일렁임). level<=0(낮)이면 Points 자체를 숨겨 완전 소등 + 픽셀 처리 0.
-export function buildNightLights(plan, site) {
+// `sources` contains renderer-authored variant catalogs and already-placed
+// compound anchors. It is deliberately assembled by populate rather than
+// reconstructed from plan dimensions here.
+export function buildNightLights(plan, _site, sources = {}) {
   const group = new THREE.Group();
   group.name = 'village-nightlights';
-  const lights = collectLights(plan, site);
-  if (!lights.length) {
-    return { group, setLevel() {}, setPixelRatio() {}, update() {}, dispose() {} };
+
+  const ownerAnchors = sources.owners instanceof Map ? sources.owners : new Map();
+  const records = [];
+  const recordById = new Map();
+  let pointCount = 0;
+  const addOwner = (id, seed, profile, baseAnchors, parcel = null) => {
+    if (!id || !profile?.capacity || recordById.has(id)) return;
+    const record = {
+      id,
+      seed: seed >>> 0,
+      start: pointCount,
+      profile,
+      parcel,
+      baseAnchors: baseAnchors || [],
+      selected: [],
+    };
+    pointCount += profile.capacity;
+    records.push(record);
+    recordById.set(id, record);
+  };
+
+  for (const parcel of plan.parcels || []) {
+    const anchors = parcel.hero
+      ? (ownerAnchors.get(parcel.id) || [])
+      : regularBaseAnchors(parcel, sources);
+    addOwner(
+      parcel.id,
+      Number.isFinite(parcel.seed) ? parcel.seed : hashString(parcel.id),
+      parcel.hero ? heroProfile(parcel) : regularProfile(parcel),
+      anchors,
+      parcel,
+    );
+  }
+  const features = plan.features || {};
+  const featureSpecs = [
+    ['palace', features.palace, 4, 1.05, 1.8, 0x9a11],
+    ['temple', features.temple, 3, 0.95, 1.6, 0x7e12],
+    // There is no authored pavilion window/lantern anchor today. It remains
+    // dark rather than falling back to an inferred polar landmark light.
+    ['pavilion', features.pavilion, 1, 0.7, 1.2, 0x5a13],
+  ];
+  for (const [id, feature, count, lit, scale, salt] of featureSpecs) {
+    const anchors = ownerAnchors.get(id) || [];
+    if (!feature || anchors.length === 0) continue;
+    addOwner(
+      id,
+      Number.isFinite(feature.seed) ? feature.seed : hashString(id),
+      featureProfile(feature, count, lit, scale, salt),
+      anchors,
+    );
   }
 
-  const n = lights.length;
-  const pos = new Float32Array(n * 3);
-  const aPhase = new Float32Array(n);
-  const aLit = new Float32Array(n);
-  const aThreshold = new Float32Array(n);
-  const aWarm = new Float32Array(n);
-  const aScale = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const L = lights[i];
-    pos[i * 3] = L.x; pos[i * 3 + 1] = L.y; pos[i * 3 + 2] = L.z;
-    aPhase[i] = L.phase; aLit[i] = L.lit; aThreshold[i] = L.threshold;
-    aWarm[i] = L.warm; aScale[i] = L.scale;
+  if (pointCount === 0) {
+    const empty = {
+      group,
+      refreshOwner() { return false; },
+      setLevel() {},
+      setPixelRatio() {},
+      update() {},
+      setDepthTestForTest() {},
+      debugOwner() { return null; },
+      debugState() {
+        return { pointCount: 0, ownerCount: 0, drawCalls: 0, triangles: 0, depthTest: true };
+      },
+      dispose() {},
+    };
+    group.userData.nightLights = empty;
+    return empty;
   }
+
+  const pos = new Float32Array(pointCount * 3);
+  const aPhase = new Float32Array(pointCount);
+  const aLit = new Float32Array(pointCount);
+  const aThreshold = new Float32Array(pointCount);
+  const aWarm = new Float32Array(pointCount);
+  const aScale = new Float32Array(pointCount);
+
+  function writeOwner(record, anchors) {
+    const selected = selectAnchors(anchors, record.profile.desired, record.seed);
+    record.selected = selected.map((anchor) => ({
+      openingId: anchor.openingId,
+      x: anchor.position.x,
+      y: anchor.position.y,
+      z: anchor.position.z,
+      outwardX: anchor.outward?.x || 0,
+      outwardY: anchor.outward?.y || 0,
+      outwardZ: anchor.outward?.z || 0,
+    }));
+    for (let slot = 0; slot < record.profile.capacity; slot++) {
+      const index = record.start + slot;
+      const anchor = selected[slot];
+      const values = record.profile.slots[slot];
+      pos[index * 3] = anchor ? anchor.position.x : 0;
+      pos[index * 3 + 1] = anchor ? anchor.position.y : 0;
+      pos[index * 3 + 2] = anchor ? anchor.position.z : 0;
+      aPhase[index] = values.phase;
+      aLit[index] = anchor ? values.lit : 0;
+      aThreshold[index] = values.threshold;
+      aWarm[index] = values.warm;
+      aScale[index] = values.scale;
+    }
+  }
+  for (const record of records) writeOwner(record, record.baseAnchors);
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aPhase', new THREE.BufferAttribute(aPhase, 1));
@@ -235,9 +312,9 @@ export function buildNightLights(plan, site) {
     uNight: { value: 0 },
     uTime: { value: 0 },
     uPixelRatio: { value: dpr },
-    uSizeBase: { value: 1900 },   // #66 톤다운: 오브 지름 축소(호롱불 점점이, 형광 구슬 아님)
+    uSizeBase: { value: 1900 },
     uMinPx: { value: 3.2 },
-    uMaxPx: { value: 17 },        // 근·중거리 오브가 부풀지 않게 상한 하향(26→17)
+    uMaxPx: { value: 17 },
     uFadeNear: { value: 15 },
     uFadeNearEnd: { value: 62 },
     uLensScale: { value: 1 },
@@ -247,40 +324,128 @@ export function buildNightLights(plan, site) {
   };
   const mat = new THREE.ShaderMaterial({
     uniforms, vertexShader: VERT, fragmentShader: FRAG,
-    // 필지 단위의 근사 창 좌표는 건물 내부에 놓이므로 일반 깊이 테스트 시 벽에 완전히 묻힌다.
-    // 실제 전면 벽 바깥 좌표를 갖기 전까지 기존 발광 레이어 계약을 유지한다.
-    transparent: true, depthTest: false, depthWrite: false,
+    transparent: true, depthTest: true, depthWrite: false,
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   });
 
   const points = new THREE.Points(geo, mat);
   points.name = 'nightlight-points';
-  points.frustumCulled = false;   // 부감에서 항상 처리(경계 소실 방지, 단일 드로우콜이라 저렴)
-  points.renderOrder = 4;         // 안개·운해 뒤(발광이 대기 위에)
+  points.frustumCulled = false;
+  // Transparent ordering stays stable while the normal depth buffer still
+  // occludes lights behind walls, terrain, roofs, and courtyard objects.
+  points.renderOrder = 4;
   points.visible = false;
   group.add(points);
 
-  let level = 0, waveWeight = 1;
-  const syncVisibility = () => { points.visible = level > 0.001 && waveWeight > 0.001; };
+  let level = 0;
+  let waveWeight = 1;
+  let disposed = false;
+  const syncVisibility = () => {
+    points.visible = !disposed && level > 0.001 && waveWeight > 0.001;
+  };
   group.userData.waveFade = {
     setWeight(value) {
+      if (disposed) return;
       waveWeight = clamp01(Number.isFinite(value) ? value : 0);
       uniforms.uWave.value = waveWeight;
       syncVisibility();
     },
   };
-  return {
+
+  function overlayAnchorsInVillageSpace(overlayRoot) {
+    const world = collectOpeningGlowAnchors(overlayRoot, { space: 'world' });
+    const parent = group.parent;
+    if (!parent?.isObject3D) return world;
+    parent.updateWorldMatrix(true, false);
+    return transformAnchors(world, new THREE.Matrix4().copy(parent.matrixWorld).invert());
+  }
+
+  const api = {
     group,
-    setLevel(v) { level = clamp01(v || 0); uniforms.uNight.value = level; syncVisibility(); },
-    setPixelRatio(v) { uniforms.uPixelRatio.value = clamp(v || 1, 0.5, 3); },
-    update(dt, v, lensScale = 1) {
-      if (v != null) { level = clamp01(v); uniforms.uNight.value = level; }
+    refreshOwner(ownerId, overlayRoot = null) {
+      if (disposed) return false;
+      const record = recordById.get(ownerId);
+      if (!record) return false;
+      if (record.parcel) {
+        record.seed = Number.isFinite(record.parcel.seed)
+          ? record.parcel.seed >>> 0
+          : hashString(record.id);
+        const overlayKind = overlayRoot?.userData?.style;
+        const regularKind = overlayKind === 'giwa' || overlayKind === 'choga'
+          ? overlayKind : record.parcel.kind;
+        record.profile = record.parcel.hero
+          ? heroProfile(record.parcel)
+          : regularProfile(record.parcel, regularKind);
+      }
+      writeOwner(record, overlayRoot
+        ? overlayAnchorsInVillageSpace(overlayRoot)
+        : record.baseAnchors);
+      for (const name of ['position', 'aPhase', 'aLit', 'aThreshold', 'aWarm', 'aScale']) {
+        geo.attributes[name].needsUpdate = true;
+      }
+      return true;
+    },
+    setLevel(value) {
+      if (disposed) return;
+      level = clamp01(value || 0);
+      uniforms.uNight.value = level;
+      syncVisibility();
+    },
+    setPixelRatio(value) {
+      if (!disposed) uniforms.uPixelRatio.value = clamp(value || 1, 0.5, 3);
+    },
+    update(dt, value, lensScale = 1) {
+      if (disposed) return;
+      if (value != null) {
+        level = clamp01(value);
+        uniforms.uNight.value = level;
+      }
       uniforms.uLensScale.value = Number.isFinite(lensScale)
         ? clamp(lensScale, 0.5, 2) : 1;
       syncVisibility();
       if (points.visible) uniforms.uTime.value += dt || 0;
     },
-    dispose() { geo.dispose(); mat.dispose(); },
+    setDepthTestForTest(value) {
+      if (!disposed) mat.depthTest = value !== false;
+    },
+    debugOwner(ownerId) {
+      const record = recordById.get(ownerId);
+      if (!record) return null;
+      return {
+        id: record.id,
+        start: record.start,
+        capacity: record.profile.capacity,
+        desired: record.profile.desired,
+        kind: record.profile.kind || null,
+        selected: record.selected.map((anchor) => ({ ...anchor })),
+      };
+    },
+    debugState() {
+      return {
+        pointCount,
+        ownerCount: records.length,
+        drawCalls: 1,
+        triangles: 0,
+        materials: 1,
+        programs: 1,
+        textures: 0,
+        lights: 0,
+        depthTest: mat.depthTest,
+      };
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      points.visible = false;
+      // The village handle disposes the remaining scene tree generically. Take
+      // this owned drawable out first so geometry/material receive exactly one
+      // dispose event while the API becomes inert immediately.
+      group.remove(points);
+      geo.dispose();
+      mat.dispose();
+    },
   };
+  group.userData.nightLights = api;
+  return api;
 }

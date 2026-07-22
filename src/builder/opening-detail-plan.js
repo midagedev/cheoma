@@ -130,6 +130,14 @@ export function planOpeningDetail(input = {}) {
   let pivot = null;
   let footwearAnchor = null;
   let focusAnchor = null;
+  // Night-light consumers need the renderer-authored changho surface for every
+  // opening, including secondary doors and windows. Keep this fixed on the
+  // exterior panel plane; it must never inherit the active leaf's offset.
+  const glowAnchor = {
+    u: 0,
+    y: height * 0.5,
+    outward: face,
+  };
   if (primary) {
     const leafWidth = width / leafCount;
     // The moving leaf ends exactly on its hinge axis. Keeping the pivot on the
@@ -214,7 +222,7 @@ export function planOpeningDetail(input = {}) {
   }
 
   return deepFreeze({
-    version: 4,
+    version: 5,
     id: `opening-${hashString(`${seed}|${kind}|${style}`).toString(16)}`,
     seed,
     kind,
@@ -238,6 +246,6 @@ export function planOpeningDetail(input = {}) {
     frame: { width: frameWidth, depth: frameDepth, parts: frameParts },
     threshold,
     hardware,
-    anchors: { pivot, footwear: footwearAnchor, focus: focusAnchor },
+    anchors: { pivot, footwear: footwearAnchor, focus: focusAnchor, glow: glowAnchor },
   });
 }

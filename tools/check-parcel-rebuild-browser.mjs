@@ -661,6 +661,68 @@ try {
   invariant(JSON.stringify(refocused.params) === JSON.stringify(after.state.params),
     'refocus discarded the rebuilt edit specification');
 
+  // A verification-only stats probe must be transactional even when geometry
+  // inspection throws after the transient overlay has claimed the runtime slot.
+  // Inject that exact failure once and verify the user's authoritative overlay,
+  // persistence flag, and anchored nightlight owner are restored byte-for-byte.
+  const probeRecovery = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const villageRoot = engine.village.exportRoot();
+    const existing = engine.village.focusRoot();
+    const beforeDoor = engine.village.debugSeekDoor(0.64, parcelId);
+    let nightLights = null;
+    villageRoot.traverse((object) => {
+      if (object.name === 'nightlight-points') nightLights = object.parent?.userData?.nightLights || null;
+    });
+    const beforeOwner = JSON.stringify(nightLights?.debugOwner(parcelId) || null);
+    const prototype = Object.getPrototypeOf(existing);
+    const hadOwnTraverse = Object.hasOwn(prototype, 'traverse');
+    const originalTraverse = prototype.traverse;
+    let injected = false;
+    let caught = null;
+    try {
+      prototype.traverse = function traverseWithProbeFailure(callback) {
+        if (!injected && this !== existing && this.name === `override-${parcelId}`) {
+          injected = true;
+          throw new Error('forced parcel stats probe failure');
+        }
+        return originalTraverse.call(this, callback);
+      };
+      engine.village.debugParcelStats(parcelId, { roofTone: 2 });
+    } catch (error) {
+      caught = error.message;
+    } finally {
+      if (hadOwnTraverse) prototype.traverse = originalTraverse;
+      else delete prototype.traverse;
+    }
+    const current = engine.village.focusRoot();
+    let overlayCount = 0;
+    villageRoot.traverse((object) => {
+      if (object.name === `override-${parcelId}`) overlayCount++;
+    });
+    return {
+      caught,
+      injected,
+      sameRoot: current === existing,
+      attached: existing?.parent != null,
+      overlayCount,
+      state: engine.village.debugParcelRebuild(parcelId),
+      beforeOwner,
+      afterOwner: JSON.stringify(nightLights?.debugOwner(parcelId) || null),
+      beforeDoor,
+      afterDoor: engine.village.debugDoorInteraction(parcelId),
+    };
+  }, fixture.parcelId);
+  invariant(probeRecovery.injected && probeRecovery.caught === 'forced parcel stats probe failure',
+    `stats probe failure was not exercised: ${JSON.stringify(probeRecovery)}`);
+  invariant(probeRecovery.sameRoot && probeRecovery.attached && probeRecovery.overlayCount === 1,
+    `stats probe did not restore the exact overlay: ${JSON.stringify(probeRecovery)}`);
+  invariant(probeRecovery.state?.persistent && probeRecovery.beforeOwner === probeRecovery.afterOwner,
+    `stats probe lost persistent/nightlight ownership: ${JSON.stringify(probeRecovery)}`);
+  invariant(probeRecovery.beforeDoor?.progress === 0.64
+      && JSON.stringify(probeRecovery.beforeDoor) === JSON.stringify(probeRecovery.afterDoor),
+    `stats probe changed the open-door runtime: ${JSON.stringify(probeRecovery)}`);
+
   // #10 committed editor state: engine rebuild payloads are optional patches.
   // A later width-only patch must retain the accepted count/top edit, the FULL
   // plan and proxy must read the same normalized values, and the compact handoff

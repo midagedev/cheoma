@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeRng } from '../rng.js';
 import { makeMaterials, injectVillageCloudShadow } from '../builder/palette.js';
+import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
 import { createWaterUniforms } from '../env/water.js';
 import {
   createCloudUniforms, buildEdgeMistRing, buildRidgeMist,
@@ -151,6 +152,13 @@ export function* populateVillageSteps(plan, opts = {}) {
   // 히어로 필지(종가·반가 대형)만 병합 제외·개별 그룹 — 어댑터가 visible 토글 + buildParcel 오버레이로
   //   교체(랜딩 조립·클로즈업·편집, #62). 키=parcel.id(=`p${i}`, 픽킹·rebuildParcel 과 동일 키공간).
   const heroHandle = new Map();
+  // Renderer-authored opening coordinates only. Regular prototype variants stay
+  // local until the parcel transform is known; unique compounds are captured in
+  // village/world coordinates before their source hierarchy is merged away.
+  const nightLightSources = {
+    regular: { giwa: null, choga: null },
+    owners: new Map(),
+  };
 
   // 3) 도로 · 4) 논 (병합 후 추가)
   const roadsGroup = (plan.roads && plan.roads.length) ? buildRoads(site, plan.roads) : null;
@@ -181,6 +189,14 @@ export function* populateVillageSteps(plan, opts = {}) {
       //   청크 수만큼 분할된다. 소규모(≤70호)는 단일 청크라 기존 룩·드로우콜 회귀 없음(chunks.sectorsFor).
       const giwaPool = regGiwa.length ? buildKindDecomps('giwa') : null;
       const chogaPool = regChoga.length ? buildKindDecomps('choga') : null;
+      if (giwaPool) nightLightSources.regular.giwa = {
+        variants: giwaPool.glowAnchors,
+        variantAware: true,
+      };
+      if (chogaPool) nightLightSources.regular.choga = {
+        variants: chogaPool.glowAnchors,
+        variantAware: true,
+      };
       if (giwaPool) matSets.push(giwaPool.matset);
       if (chogaPool) matSets.push(chogaPool.matset);
       // 대규모 주택 3단계 LOD: 한양의 모든 정규 청크를 FAR mass / 실제 외피 MID / FULL로 만든다.
@@ -254,6 +270,14 @@ export function* populateVillageSteps(plan, opts = {}) {
     } else {
       const protos = makeHouseProtos();
       matSets.push(protos.giwa.userData.materials, protos.choga.userData.materials);
+      nightLightSources.regular.giwa = {
+        variants: [collectOpeningGlowAnchors(protos.giwa, { space: 'local' })],
+        variantAware: false,
+      };
+      nightLightSources.regular.choga = {
+        variants: [collectOpeningGlowAnchors(protos.choga, { space: 'local' })],
+        variantAware: false,
+      };
       for (const p of regular) root.add(placeParcel(p, protos, wallMats, char01));
     }
     // 히어로(종가·반가 대형) — landmarks 전체 병합에선 빼되 "히어로별 개별 병합" 그룹으로 root 직속.
@@ -263,6 +287,10 @@ export function* populateVillageSteps(plan, opts = {}) {
     for (const p of heroes) {
       const raw = buildHeroParcel(p, site);
       collectMaterialSets(raw, matSets);
+      nightLightSources.owners.set(
+        p.id,
+        collectOpeningGlowAnchors(raw, { space: 'world' }),
+      );
       const g = mergeStatic([raw], `hero-${p.id}`);
       root.add(g);
       heroHandle.set(p.id, g);
@@ -280,9 +308,25 @@ export function* populateVillageSteps(plan, opts = {}) {
   if (plan.features) {
     for (const o of buildFeatureObjects(plan, site)) {
       collectMaterialSets(o, matSets);
-      if (o.name === 'palace-core') palaceCore = o;
-      else if (o.name === 'temple-cluster') templeCore = o;
-      else landmarks.push(o);
+      if (o.name === 'palace-core') {
+        palaceCore = o;
+        nightLightSources.owners.set(
+          'palace',
+          collectOpeningGlowAnchors(o, { space: 'world' }),
+        );
+      } else if (o.name === 'temple-cluster') {
+        templeCore = o;
+        nightLightSources.owners.set(
+          'temple',
+          collectOpeningGlowAnchors(o, { space: 'world' }),
+        );
+      } else {
+        if (o.name === 'pavilion') {
+          const anchors = collectOpeningGlowAnchors(o, { space: 'world' });
+          if (anchors.length) nightLightSources.owners.set('pavilion', anchors);
+        }
+        landmarks.push(o);
+      }
     }
   }
 
@@ -393,9 +437,9 @@ export function* populateVillageSteps(plan, opts = {}) {
   // 9) 소동물(마당 닭·논 소) — 필지 마당·논 앵커 재사용, 필지별 시드 결정론·과밀 금지.
   const animals = buildVillageAnimals(root, plan, site);
 
-  // 10) 원경 창불 발광 포인트(#60) — 부감 야경 점점이 창불. 단일 Points 1 드로우콜,
-  //     점등 곡선은 adapter vnight(0..1)를 매 틱 받아 반영(크로스페이드 자동 정합).
-  const nightLights = buildNightLights(plan, site);
+  // 10) 실제 고정 한지 면 기반 원경 창불(#60/#81). 위치는 위 prototype/compound renderer가
+  //     확정했고 이 레이어는 단일 Points로만 표현한다. 깊이 가림과 근경 emissive handoff를 유지한다.
+  const nightLights = buildNightLights(plan, site, nightLightSources);
   root.add(nightLights.group);
 
   // 11) 봄 개화 관목(진달래·개나리, #107) — 봄을 가을만큼의 백미로. 진달래는 나무와 동일 신축면(warp)
@@ -432,6 +476,9 @@ export function* populateVillageSteps(plan, opts = {}) {
     debugCowAnchor: () => animals.cowAnchors[0] || null,
     // 창불 발광 포인트 점등 레벨 갱신(어댑터 stepNightGlow 가 vnight 를 넘겨줌, #60/#50 정합).
     updateNightLights: (dt, level, lensScale) => nightLights.update(dt, level, lensScale),
+    refreshNightLights: (ownerId, overlayRoot = null) => nightLights.refreshOwner(ownerId, overlayRoot),
+    debugNightLights: () => nightLights.debugState(),
+    debugNightLightOwner: (ownerId) => nightLights.debugOwner(ownerId),
     update: (dt) => { waterU.uTime.value += dt; for (const a of animals.handles) a.update(dt); },
     // 런타임 LOD — 대규모 주택 청크 FAR↔MID↔FULL(매 프레임, 카메라 필요).
     //   engine.js 렌더 루프에서 camera 넘겨 호출. 정책이 꺼진 규모(R<340)는 빈 배열이라 no-op.

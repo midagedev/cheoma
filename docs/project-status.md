@@ -109,6 +109,18 @@ GitHub #15 근경 구도는 지붕 중심이 아니라 1.65–2.5m 문 높이를
 
 GitHub #78은 이 구도를 바꾸지 않고 근경 DoF의 초점만 주출입문 의미 anchor로 분리한다. 고정 개구면 중심을 overlay 수명주기 이벤트에서 한 번 찾아 캐시하므로 정착 프레임에는 traversal·raycast·heap allocation이 없고, 새 GPU 자원·pass·재질·draw call도 없다. 전환의 두 끝점을 명시해 focus-in, 필지 hop, focus-out 중에도 문짝·창살·철물이 선명한 평면을 연속적으로 따라가며, 유일한 주출입문을 정할 수 없는 궁·사찰 같은 복합체는 기존 카메라 조준점으로 fallback한다.
 
+GitHub #81은 실제 창호 anchor를 따르는 야간 원경 불빛으로 구현됐다. AURI가 설명한 실내측 한지 면과 외부에서
+읽히는 살의 관계, 국립민속박물관이 소개한 양초·호롱·석유등의 작은 연소 점광원 어휘를 근거로 삼되, 모든 방이
+빛났다는 주장이나 정확한 색·밝기·flicker·점등 비율로 확대하지 않는다. 제품은 일부 거주 방을 seed-stable하게
+어둡게 남기면서 기존 따뜻한 불빛을 실제 고정 한지 opening anchor, 외향 법선, 변주·mirror·house fit·필지 변환에
+붙인다. `plotW`/`plotD` 추정점과 궁·사찰·정자의 근거 없는 극좌표 점은 제거하고, 저작 anchor가 없으면 어둡게
+fail closed한다. 기존 단일 `THREE.Points`의 `depthTest`를 켜 집·담·지형 뒤에서 가리되 `depthWrite=false`와
+bloom/보케 룩은 유지하며 draw·triangle·material·program·texture·render target 증가는 0이다. 조사 근거와 제품
+번역의 한계는 [`exterior-detail.md`](exterior-detail.md)·[`architectural-authenticity.md`](architectural-authenticity.md)·
+[`credits.md`](credits.md)에 함께 남겨 References UI가 같은 설명과 원문 링크를 보여 준다. 순수 anchor·자원 계약,
+Worker/fallback 수명, 실제 앱의 같은 카메라 depth A/B와 aerial/focus/rebuild 프레임은
+[`verification.md`](verification.md)의 영구 게이트로 고정했다.
+
 후속 GitHub #49는 가림의 실제 주체였던 정자를 중심선 점검에서 화면 폭 계약으로 보강한다. 정자의 공유 physical spec과 주택 지붕 실루엣을 사용해 카메라 쪽으로 좁아지는 focus envelope를 예약하며, 장승·솟대·우물·낟가리 같은 마을 소품도 높이 기반 겨울 일조와 같은 구도 판정을 소비한다. 낮은 소품과 이웃 지붕은 전경 깊이감으로 남기고, 넓은 정자 처마가 선택 집의 문·마당을 덮는 경우만 결정론적으로 다른 빈터를 고른다.
 
 GitHub #21은 개울을 지형 위에 얹은 장식 리본이 아니라 계획과 렌더가 공유하는 하곡으로 만든다. 넓은 어깨는

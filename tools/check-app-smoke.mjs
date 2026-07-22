@@ -60,6 +60,12 @@ try {
   const reference = await referenceDialog.evaluate((dialog) => ({
     text: dialog.textContent.replace(/\s+/g, ' ').trim(),
     links: [...dialog.querySelectorAll('a')].map((anchor) => anchor.href),
+    items: [...dialog.querySelectorAll('li')].map((item) => ({
+      title: item.querySelector('.it-title')?.textContent?.trim() || '',
+      text: item.textContent.replace(/\s+/g, ' ').trim(),
+      links: [...item.querySelectorAll('a')].map((anchor) => anchor.href),
+      license: item.querySelector('.it-license')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    })),
   }));
   pass(reference.text.includes('국가한옥센터(AURI) 한옥DB — 한옥의 종류·한옥이론')
       && reference.text.includes('ㅡ·ㄱ·ㄷ·ㅁ')
@@ -72,6 +78,21 @@ try {
       && reference.text.includes('lowerPanel')
       && reference.links.some((url) => url.includes('hanokdb.kr/theology/sub_04')),
   'National Hanok Center opening facts and applied lightweight grammar render in Product References');
+  const auriNight = reference.items.find((item) => item.title.includes('국가한옥센터(AURI) 한옥DB'));
+  const folkNight = reference.items.find((item) => item.title.includes('빛으로 밝히고 조명으로 통하다'));
+  pass(auriNight?.text.includes('창호지를 실내 쪽에 붙이고')
+      && auriNight.text.includes('실제 고정 한지 면')
+      && auriNight.text.includes('주간 채광 설명을 밤의 정확한 외부 밝기·색·점등 빈도로 확대하지 않는다')
+      && auriNight.links.some((url) => url.includes('hanokdb.kr/theology/sub_03'))
+      && auriNight.license.includes('All rights reserved'),
+  'AURI hanji-plane evidence, limit, canonical link, and license stay in one Reference item');
+  pass(folkNight?.text.includes('작은 연소 광원')
+      && folkNight.text.includes('일부 거주 창호만 seed-stable하게 켜고 어두운 방')
+      && folkNight.text.includes('정확한 색·밝기·flicker·점등 비율은 사료값이 아니라')
+      && folkNight.text.includes('깊이 가림')
+      && folkNight.links.some((url) => url.includes('webzine.nfm.go.kr/2018/09/06/'))
+      && folkNight.license.includes('원문·전시 사진은 재배포하지 않는다'),
+  'folk-light vocabulary, product limits, canonical link, and license stay in one Reference item');
   pass(reference.text.includes('법적 상한·규범')
       && reference.text.includes('17배 필지 비례')
       && reference.links.some((url) => url.includes('contents.history.go.kr/front/km/view.do')),

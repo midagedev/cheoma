@@ -35,13 +35,16 @@ invariant(randomCalls === 0, 'opening plan touched global Math.random');
 invariant(JSON.stringify(input) === inputSnapshot, 'opening plan mutated caller input');
 invariant(JSON.stringify(first) === JSON.stringify(second), 'same opening seed is not byte-stable');
 invariant(Object.isFrozen(first) && Object.isFrozen(first.frame.parts), 'opening plan is mutable');
-invariant(Object.isFrozen(first.anchors) && Object.isFrozen(first.anchors.focus),
-  'primary focus anchor is mutable');
+invariant(Object.isFrozen(first.anchors) && Object.isFrozen(first.anchors.focus)
+    && Object.isFrozen(first.anchors.glow),
+  'primary fixed anchors are mutable');
 const differentSeed = planOpeningDetail({ ...input, seed: 'contract:18' });
 invariant(first.id !== differentSeed.id,
   'opening seed does not reach stable identity');
 invariant(JSON.stringify(first.anchors.focus) === JSON.stringify(differentSeed.anchors.focus),
   'semantic focus anchor depends on the cosmetic opening seed');
+invariant(JSON.stringify(first.anchors.glow) === JSON.stringify(differentSeed.anchors.glow),
+  'semantic glow anchor depends on the cosmetic opening seed');
 
 const objectSeed = Object.freeze({
   z: 19n,
@@ -69,7 +72,7 @@ invariant(objectSeed.z === 19n && objectSeed.nested.tone === 'pine',
 invariant(nonJsonFootwear.surface === 17n, 'opening plan mutated caller-owned footwear data');
 
 invariant(first.primary && first.kind === 'door', 'primary entrance semantics were lost');
-invariant(first.version === 4, `opening schema version drifted to ${first.version}`);
+invariant(first.version === 5, `opening schema version drifted to ${first.version}`);
 invariant(first.hardware.length === 3, 'civilian primary door does not own the restrained 2 straps/ring set');
 invariant(first.hardware.filter((part) => part.kind === 'hinge-strap').length === 2,
   'primary door hinge straps drifted');
@@ -77,12 +80,21 @@ invariant(first.hardware.filter((part) => part.kind === 'pivot-cap').length === 
   'palace-only visible pivot caps leaked onto a civilian door');
 invariant(first.hardware.filter((part) => part.kind === 'ring-handle').length === 1,
   'primary door ring handle drifted');
-invariant(first.anchors.pivot && first.anchors.footwear && first.anchors.focus,
-  'primary entrance lost pivot, footwear, or focus anchor');
+invariant(first.anchors.pivot && first.anchors.footwear && first.anchors.focus
+    && first.anchors.glow,
+  'primary entrance lost pivot, footwear, focus, or glow anchor');
 invariant(first.anchors.focus.u === 0
     && Math.abs(first.anchors.focus.y - first.height * 0.5) < EPS
     && Math.abs(first.anchors.focus.outward - first.reveal.face) < EPS,
   'primary focus escaped the fixed opening center');
+invariant(first.anchors.glow.u === 0
+    && Math.abs(first.anchors.glow.y - first.height * 0.5) < EPS
+    && Math.abs(first.anchors.glow.outward - first.reveal.face) < EPS,
+  'primary glow escaped the cleared exterior opening center');
+invariant(Object.keys(first.anchors.glow).sort().join(',') === 'outward,u,y'
+    && Object.values(first.anchors.glow).every(Number.isFinite)
+    && first.anchors.glow.isObject3D == null,
+  'glow anchor is not finite plain JSON metadata');
 invariant(Math.abs(Math.abs(first.anchors.pivot.u) - first.width * 0.5) < EPS,
   'door pivot escaped the opening');
 invariant(Math.abs(first.anchors.pivot.leafWidth - first.width / first.leafCount) < EPS,
@@ -105,10 +117,24 @@ invariant(narrower.anchors.focus.u === 0 && wider.anchors.focus.u === 0
     && Math.abs(narrower.anchors.focus.y - first.anchors.focus.y) < EPS
     && Math.abs(wider.anchors.focus.y - first.anchors.focus.y) < EPS,
   'continuous width editing moved the fixed opening focus');
+invariant(narrower.anchors.glow.u === 0 && wider.anchors.glow.u === 0
+    && Math.abs(narrower.anchors.glow.y - first.anchors.glow.y) < EPS
+    && Math.abs(wider.anchors.glow.y - first.anchors.glow.y) < EPS
+    && Math.abs(narrower.anchors.glow.outward - narrower.reveal.face) < EPS
+    && Math.abs(wider.anchors.glow.outward - wider.reveal.face) < EPS,
+  'continuous width editing moved the fixed opening glow');
 invariant(Math.abs(taller.anchors.focus.y - taller.height * 0.5) < EPS
     && taller.anchors.focus.y > first.anchors.focus.y
     && Math.abs(taller.anchors.focus.outward - taller.reveal.face) < EPS,
   'height editing did not keep focus at the fixed opening center');
+invariant(Math.abs(taller.anchors.glow.y - taller.height * 0.5) < EPS
+    && taller.anchors.glow.y > first.anchors.glow.y
+    && Math.abs(taller.anchors.glow.outward - taller.reveal.face) < EPS,
+  'height editing did not keep glow at the fixed opening center');
+const movedLeaf = planOpeningDetail({ ...input, leafOutward: -0.17 });
+invariant(movedLeaf.anchors.pivot.outward !== first.anchors.pivot.outward
+    && JSON.stringify(movedLeaf.anchors.glow) === JSON.stringify(first.anchors.glow),
+  'fixed opening glow followed the moving primary leaf');
 invariant(first.meoreum.height === 0, 'door passage incorrectly acquired a window meoreum');
 invariant(Math.abs(first.lowerPanel.height - input.lowerPanelHeight) < EPS,
   'door lower-panel height drifted');
@@ -130,6 +156,10 @@ invariant(!secondary.primary && secondary.hardware.length === 0,
 invariant(secondary.anchors.pivot === null && secondary.anchors.footwear === null
     && secondary.anchors.focus === null,
   'secondary door acquired interaction/life anchors');
+invariant(secondary.anchors.glow
+    && Math.abs(secondary.anchors.glow.y - secondary.height * 0.5) < EPS
+    && Math.abs(secondary.anchors.glow.outward - secondary.reveal.face) < EPS,
+  'secondary door lost its fixed glow anchor');
 
 for (const style of OPENING_DETAIL_STYLES) {
   const windowPlan = planOpeningDetail({
@@ -152,6 +182,11 @@ for (const style of OPENING_DETAIL_STYLES) {
   invariant(windowPlan.anchors.pivot === null && windowPlan.anchors.footwear === null
       && windowPlan.anchors.focus === null,
     `${style} window acquired entrance anchors`);
+  invariant(windowPlan.anchors.glow && Object.isFrozen(windowPlan.anchors.glow)
+      && Object.values(windowPlan.anchors.glow).every(Number.isFinite)
+      && Math.abs(windowPlan.anchors.glow.y - windowPlan.height * 0.5) < EPS
+      && Math.abs(windowPlan.anchors.glow.outward - windowPlan.reveal.face) < EPS,
+  `${style} window lost its immutable exterior glow anchor`);
 }
 
 const palaceDoor = planOpeningDetail({ ...input, style: 'palace' });
