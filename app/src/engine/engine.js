@@ -2273,6 +2273,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 검증용(#19): persistent rebuild 소유권, 필지 치수, 편집 스펙, 마당나무 충돌을
       // renderer traversal 없이 한 스냅샷으로 확인한다.
       debugParcelRebuild: (id) => village.handle?.parcelRebuildState(id) ?? null,
+      // 검증용(#16): selected/persistent overlay rebuild가 primary 창호 anchor·panel과
+      // building-wide frame/hardware batch를 정확히 하나씩 재생성하는지 확인한다.
+      debugOpeningDetail: (id) => village.handle?.openingDetailState(id) ?? null,
       // 검증용(#22): 배치 RNG를 바꾸지 않는 남측 안전 endpoint의 기본/선택 구도와
       // 3×3 집 바운딩 가시성 근거. 실제 제품 카메라는 safe framing만 소비한다.
       debugFocusVisibility: (id) => {

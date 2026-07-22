@@ -686,6 +686,9 @@ export function makeMaterials(style = 'palace', options = {}) {
     stoneDark: std(stoneDarkCol, 0.95),
     door: doorMat,
     hanji: hanjiMat,
+    // 창호 철물은 작은 FULL 디테일 한 그룹으로만 쓴다. paletteKey는 변주 간 재질 공유를
+    // 허용하지만 lodEnvelope를 주지 않아 MID 창호 텍스처와 드로우콜을 그대로 보존한다.
+    hardware: std(0x302a24, 0.72, { metalness: 0.42 }),
     ground: std(C.ground, 1.0),
   };
   tagRoles(M);

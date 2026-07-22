@@ -58,6 +58,9 @@ invariant(
 invariant(ROOF_WALL_TUCK >= 0.1, 'gable wall no longer tucks safely below the roof');
 
 const production = await inspectProductionGeometry();
+invariant(production.ownedMergeFailure.threw
+    && production.ownedMergeFailure.disposed.every((count) => count === 1),
+  `owned geometry merge failure leaked inputs (${JSON.stringify(production.ownedMergeFailure)})`);
 function checkGiwaPodium(label, shape) {
   for (const [name, count] of Object.entries(shape.layerCounts)) {
     invariant(count === 1, `${label} ${name} has ${count} depth owners`);
@@ -126,6 +129,40 @@ for (const [style, hearth] of Object.entries(production.hearths)) {
   );
 }
 
+for (const [style, opening] of Object.entries(production.openings)) {
+  invariant(opening.counts.frame === 1,
+    `${style} openings use ${opening.counts.frame} frame batches instead of one`);
+  invariant(opening.counts.hardware === 1,
+    `${style} openings use ${opening.counts.hardware} hardware batches instead of one`);
+  invariant(opening.counts.primaryAnchor === 1 && opening.counts.primaryPanel === 1,
+    `${style} does not expose exactly one primary entrance`);
+  invariant(opening.frameVertices > 0 && opening.hardwareVertices > 0,
+    `${style} opening detail batch is empty`);
+  invariant(opening.frameTriangles <= (style === 'hanok' ? 2400 : 1600)
+      && opening.hardwareTriangles <= 240,
+    `${style} opening detail budget grew to ${opening.frameTriangles}+${opening.hardwareTriangles} triangles`);
+  invariant(opening.frameEnvelope,
+    `${style} frame no longer shares the MID envelope wood material`);
+  invariant(!opening.hardwareEnvelope && opening.hardwarePaletteKey === 'hardware',
+    `${style} ironwork leaked into MID or lost its shared palette key`);
+  invariant(opening.plan?.primary && opening.plan?.anchors?.pivot && opening.plan?.anchors?.footwear,
+    `${style} primary entrance lost its pure pivot/footwear contract`);
+  const expectedHardware = style === 'korea' ? 5 : 3;
+  invariant(opening.plan.hardware.length === expectedHardware,
+    `${style} primary entrance ironwork drifted to ${opening.plan.hardware.length} pieces`);
+  invariant(opening.plan.meoreum.height === 0 && opening.plan.lowerPanel.height > 0,
+    `${style} primary door conflates its lower panel with a window meoreum`);
+  if (style === 'hanok') {
+    invariant(opening.primaryFace?.clearance > 0,
+      `hanok frame front fell ${Math.abs(opening.primaryFace?.clearance || 0).toFixed(3)}m behind its panel`);
+    invariant(Math.abs(
+      opening.primaryFace.clearance - opening.primaryFace.expectedClearance,
+    ) <= EPS,
+    `hanok frame/panel clearance drifted to ${opening.primaryFace.clearance.toFixed(3)}m `
+      + `(expected ${opening.primaryFace.expectedClearance.toFixed(3)}m)`);
+  }
+}
+
 console.log(
   `giwa podium=${production.giwa.podiumChildren} drawables, opening clearance=`
   + `${production.giwa.openingFaceClearance.toFixed(3)}m`,
@@ -137,5 +174,13 @@ console.log(
 console.log(
   `recessed kitchens: giwa +${(production.hearths.giwa.bounds.max.x - production.hearths.giwa.wallX).toFixed(2)}m, `
   + `choga +${(production.hearths.choga.bounds.max.x - production.hearths.choga.wallX).toFixed(2)}m`,
+);
+console.log(
+  `opening batches: ${Object.entries(production.openings).map(([style, opening]) => (
+    `${style} tris=${opening.frameTriangles}+${opening.hardwareTriangles}`
+  )).join(', ')}`,
+);
+console.log(
+  `hanok primary frame/panel clearance=${production.openings.hanok.primaryFace.clearance.toFixed(3)}m`,
 );
 console.log('BUILDING CLEARANCE: PASS');

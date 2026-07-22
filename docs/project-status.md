@@ -131,6 +131,13 @@ GitHub #11의 건축 고증 감사는 [`architectural-authenticity.md`](architec
 
 GitHub #30의 첫 표면 파일럿은 [`surface-materials.md`](surface-materials.md)의 순수 source/Three adapter 경계를 따른다. 다져진 흙길은 사진 타일이나 비동기 로더 대신 seed 결정론 RGBA8 albedo·height를 만들고, 회전된 16m 월드 UV로 교차로까지 연속된다. 기존 vertex color가 도로 등급과 경사면 mute를 계속 소유하며 draw call·삼각형·재질 수는 늘지 않는다. 사용자에게 보이는 출처는 `credits.md` 한 곳에서 실제 Reference UI로 전달하고, 고정 OFF/ON 화면을 직접 열어 반복 띠·중원경 shimmer를 확인한다.
 
+GitHub #16의 첫 단계는 [`exterior-detail.md`](exterior-detail.md)의 공통 창호 grammar다. Three 없는 불변 plan이
+문·창 크기, 창 하부 머름, 문짝 lowerPanel, reveal, frame, threshold, primary entrance와 후속 pivot/footwear
+anchor를 소유하고, `giwa.js`·`walls.js`·대표 종가 `buildHanok`은 한 assembler로 이를 렌더링한다. 문은 머름을
+갖지 않으며 기존 하부 청판 rail을 별도 의미로 보존한다. 프레임은 기존 envelope 목재에 병합하고 절제된 철물은
+texture 없는 palette material 하나로 FULL/selected overlay에만 남긴다. 문 상호작용과 신발 렌더링은 이 anchor를
+소비하는 독립 후속 단계이며, 아궁이 service opening과 거주 창호를 합치지 않는다.
+
 GitHub #12 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md)의 계약대로 구현됐다. Three 없는 순수 local-space 계획과 Three.js 조립·dispose를 분리하고, 22–30m 암자형·36–48m 중정형·52–72m 다원형을 제공한다. 마을은 실제 직사각 footprint를 필지·도로·식생 전에 예약하며, 편집 패널은 전각 수·중정 여백·축 굴절·석탑·석등·종루·당간지주·부도를 계획 옵션으로 갱신한다. 남측 일조 통로와 26° focus 카메라는 같은 `frontDir` 계약을 쓴다.
 
 사찰 원본 조립 트리는 편집·두부 조립용으로만 유지하고, 부감에서는 재질별 병합해 대표 다원형을 2,681콜에서 111콜로 낮춘다. 순수 계약과 독립 WebGL 수명주기/성능 게이트, 실제 앱 focus 캡처를 분리해 일상 검증은 가볍게 유지한다.

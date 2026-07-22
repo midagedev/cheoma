@@ -4,6 +4,9 @@ import { makeRng } from '../rng.js';
 import { computeSkeleton } from './skeleton.js';
 import { buildSkeletonRoof } from './roof-skeleton.js';
 import { sunkPrism } from '../core/surface-clearance.js';
+import { mergeOwnedGeometries } from '../core/merge-owned-geometries.js';
+import { planOpeningDetail } from '../builder/opening-detail-plan.js';
+import { createOpeningDetailAssembler } from '../builder/opening-details.js';
 
 // 다각형 풋프린트(rect/ㄱ자/ㄷ자) 기와집 몸채: 기단 + 기둥 + 회벽 + straight-skeleton 곡면 지붕.
 // 백골(무단청) 반가 톤. buildBuilding(궁·절·초가)과 별개로, 꺾인 평면 살림집을 만든다.
@@ -224,14 +227,20 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
   doorMat.map.wrapS = doorMat.map.wrapT = THREE.RepeatWrapping;
   doorMat.map.needsUpdate = true;
 
-  const panels = [];   // 창호 패널(빗꽃살) 병합 대상
-  const sills = [];    // 방 창 하부 머름대(woodDark) 병합 대상
-  let doorN = 0, winN = 0;
+  const panels = [];   // secondary 창호 패널(빗꽃살) 병합 대상
+  let primaryPanelGeometry = null;
+  const details = [];
+  const openingDetails = createOpeningDetailAssembler(g, {
+    frame: M.woodDark,
+    hardware: M.hardware,
+  });
+  let doorN = 0, winN = 0, primaryDoor = false;
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const winW = (w) => w * (0.80 + rng() * 0.14);   // 방 창 폭 변주(칸 폭의 0.80~0.94)
   // 한 개구 패널을 병합 목록에 추가. kind: 'door'(전 높이·청판 포함) | 'win'(머름 위·청판 제외).
-  const addPanel = (theta, cx, cz, w, kind) => {
+  // primary 문짝만 별도 mesh로 남겨 후속 interaction이 전체 창호 batch가 아닌 실제 문짝을 소유하게 한다.
+  const addPanel = (inf, opening, w, kind, primary = false) => {
     const yb = kind === 'door' ? oy0 + 0.02 : sillTop + 0.04;
     const yt = oy1;
     const h = yt - yb;
@@ -247,15 +256,43 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
       uv.setY(i, vmin + uv.getY(i) * (1 - vmin));
     }
     uv.needsUpdate = true;
-    geo.rotateY(theta);
-    geo.translate(cx, (yb + yt) / 2, cz);
-    panels.push(geo);
-    if (kind === 'door') doorN++; else winN++;
-    if (kind === 'win') {                        // 머름대(창 하인방)
-      const s = new THREE.BoxGeometry(w + 0.06, 0.12, T + 0.05);
-      s.rotateY(theta); s.translate(cx, sillTop, cz);
-      sills.push(s);
-    }
+    geo.rotateY(inf.theta);
+    geo.translate(opening.cx, (yb + yt) / 2, opening.cz);
+    if (primary) primaryPanelGeometry = geo;
+    else panels.push(geo);
+    if (kind === 'door') {
+      doorN++;
+      if (primary) primaryDoor = true;
+    } else winN++;
+
+    const plan = planOpeningDetail({
+      kind: kind === 'door' ? 'door' : 'window',
+      style: 'giwa',
+      seed: `hanok:${seed}:${details.length}:${kind}`,
+      width: w,
+      height: h,
+      wallThickness: T,
+      leafCount: leaves,
+      primary,
+      ...(kind === 'door'
+        ? { lowerPanelHeight: h * VSILL }
+        : { meoreumHeight: sillTop - oy0 }),
+      footwear: primary ? {
+        y: podiumH - yb,
+        outward: 0.92,
+        surface: 'podium-step',
+      } : null,
+    });
+    details.push({
+      plan,
+      primary,
+      placement: {
+        center: { x: opening.cx, z: opening.cz },
+        bottomY: yb,
+        tangent: inf.e,
+        outward: inf.N,
+      },
+    });
     return true;
   };
 
@@ -275,7 +312,13 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     const tc = (j + 0.5) / inf.k;
     const bx = inf.a.x + inf.e.x * inf.len * tc;
     const bz = inf.a.z + inf.e.z * inf.len * tc;
-    return { cx: bx + inf.N.x * faceOff, cz: bz + inf.N.z * faceOff, w: inf.len / inf.k - colClear };
+    return {
+      wallCx: bx,
+      wallCz: bz,
+      cx: bx + inf.N.x * faceOff,
+      cz: bz + inf.N.z * faceOff,
+      w: inf.len / inf.k - colClear,
+    };
   };
 
   // 오목(reflex) 꼭짓점 판정 — ㄱ/ㄷ자 안뜰 면 식별(CCW: cross<0).
@@ -309,7 +352,7 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     const mid = Math.floor(primary.k / 2);
     for (let j = 0; j < primary.k; j++) {
       const bj = bay(primary, j);
-      addPanel(primary.theta, bj.cx, bj.cz, j === mid ? bj.w : winW(bj.w), j === mid ? 'door' : 'win');
+      addPanel(primary, bj, j === mid ? bj.w : winW(bj.w), j === mid ? 'door' : 'win', j === mid);
     }
   }
   // 부 정면·안뜰 면: 방 창. 넉넉한 면(칸 폭>1.6) 중 최장 면 중앙엔 방문 하나 더.
@@ -321,25 +364,46 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     for (let j = 0; j < inf.k; j++) {
       const bj = bay(inf, j);
       const isDoor = inf === doorEdge && j === mid;
-      addPanel(inf.theta, bj.cx, bj.cz, isDoor ? bj.w : winW(bj.w), isDoor ? 'door' : 'win');
+      addPanel(inf, bj, isDoor ? bj.w : winW(bj.w), isDoor ? 'door' : 'win');
     }
   }
 
   // 최소 보장: 문 0 이면 주 정면 중앙에 강제, 창 0 이면 주 정면 첫 칸에 강제.
-  if (doorN === 0) { const bj = bay(primary, Math.floor(primary.k / 2)); addPanel(primary.theta, bj.cx, bj.cz, Math.max(0.9, bj.w), 'door'); }
-  if (winN === 0) { const bj = bay(primary, 0); addPanel(primary.theta, bj.cx, bj.cz, Math.max(0.7, bj.w * 0.86), 'win'); }
+  if (doorN === 0 || !primaryDoor) {
+    const bj = bay(primary, Math.floor(primary.k / 2));
+    addPanel(primary, bj, Math.max(0.9, bj.w), 'door', true);
+  }
+  if (winN === 0) {
+    const bj = bay(primary, 0);
+    addPanel(primary, bj, Math.max(0.7, bj.w * 0.86), 'win');
+  }
 
   if (panels.length) {
-    const m = new THREE.Mesh(mergeGeometries(panels, false), doorMat);
+    let geometry;
+    try {
+      geometry = mergeOwnedGeometries(panels, 'Hanok opening panels');
+    } catch (error) {
+      primaryPanelGeometry?.dispose();
+      doorMat.map?.dispose();
+      doorMat.dispose();
+      throw error;
+    }
+    const m = new THREE.Mesh(geometry, doorMat);
     m.name = 'changho';
     m.castShadow = true; m.receiveShadow = true;
     g.add(m);
   }
-  if (sills.length) {
-    const s = new THREE.Mesh(mergeGeometries(sills, false), M.woodDark);
-    s.castShadow = true;
-    g.add(s);
+  let primaryPanel = null;
+  if (primaryPanelGeometry) {
+    primaryPanel = new THREE.Mesh(primaryPanelGeometry, doorMat);
+    primaryPanel.castShadow = true;
+    primaryPanel.receiveShadow = true;
+    g.add(primaryPanel);
   }
+  for (const detail of details) {
+    openingDetails.add(detail.plan, detail.placement, detail.primary ? primaryPanel : null);
+  }
+  openingDetails.finish();
 }
 
 // 다각형을 바깥으로 d 만큼 마이터 오프셋 (볼록/반사 모두)
