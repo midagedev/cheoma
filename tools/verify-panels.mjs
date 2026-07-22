@@ -229,7 +229,7 @@ if (choga) {
   const box1 = await ev(desk, (id) => window.__engine.village.debugOverlayBox(id), choga.parcelId);
   ok('③ 기존 파라미터 회귀: footprintScale 라이브 반영(bbox 증가)', hasFs && box0 && box1 && (box1.x > box0.x || box1.y > box0.y), `box0=${JSON.stringify(box0)} box1=${JSON.stringify(box1)}`);
 
-  // #96 집 마당 소품 + 창호 필드 렌더(초가: jangdok/vegBed/yardStack/clothesline + winBack/winSide/doorPattern)
+  // #10 집 마당 소품 + 창호 필드 렌더(초가: 문/창 개수·폭 + 창살)
   await ev(desk, () => { const b = document.querySelector('.ctx.house .advtoggle'); if (b && b.getAttribute('aria-expanded') !== 'true') b.click(); });
   await wait(desk, 250);
   const chogaProps = await ev(desk, () => {
@@ -237,11 +237,14 @@ if (choga) {
     const has = (re) => rls.some((t) => re.test(t));
     return {
       jangdok: has(/장독대|Jar/i), vegBed: has(/텃밭|Kitchen/i), yardStack: has(/낟가리|Straw/i), clothesline: has(/빨래|Clothes/i),
-      winBack: has(/뒷창|Rear/i), winSide: has(/측면 창|Side window/i), doorPattern: has(/창살|Lattice/i),
+      doorCount: has(/문 수|Doors/i), windowCount: has(/창 수|Windows/i),
+      doorWidth: has(/문 너비|Door width/i), windowWidth: has(/창 너비|Window width/i),
+      doorPattern: has(/창살|Lattice/i),
     };
   });
   ok('#96 초가 마당 소품 4종 필드 렌더', chogaProps.jangdok && chogaProps.vegBed && chogaProps.yardStack && chogaProps.clothesline, JSON.stringify(chogaProps));
-  ok('#96 초가 창호/개구 축 렌더(뒷창·측면창·창살)', chogaProps.winBack && chogaProps.winSide && chogaProps.doorPattern, JSON.stringify(chogaProps));
+  ok('#10 초가 창호/개구 4축+창살 렌더', chogaProps.doorCount && chogaProps.windowCount
+    && chogaProps.doorWidth && chogaProps.windowWidth && chogaProps.doorPattern, JSON.stringify(chogaProps));
 
   // #96 실제 반영(adapter override): 마당 소품 전부 ON vs OFF → 오버레이 메시·정점 수 증가
   const yStats = await ev(desk, (id) => {
@@ -250,13 +253,13 @@ if (choga) {
     return { hi, lo };
   }, choga.parcelId);
   ok('#96 마당 소품 ON/OFF → 오버레이 소품 카운트 변화', yStats.hi && yStats.lo && yStats.hi.meshes > yStats.lo.meshes && yStats.hi.verts > yStats.lo.verts, `hi=${JSON.stringify(yStats.hi)} lo=${JSON.stringify(yStats.lo)}`);
-  // #96 개구: winSide ON/OFF → 정점 수 변화(측면 봉창 추가). winSide 는 route 'building' → building 하위로 라우팅.
+  // #10 개구: windowCount 1→최대 → 실제 FULL 개구 정점 수 변화. route 'building' 계약.
   const wStats = await ev(desk, (id) => {
-    const on = window.__engine.village.debugParcelStats(id, { kind: 'choga', building: { winSide: true } });
-    const off = window.__engine.village.debugParcelStats(id, { kind: 'choga', building: { winSide: false } });
-    return { on, off };
+    const hi = window.__engine.village.debugParcelStats(id, { kind: 'choga', building: { windowCount: 99 } });
+    const lo = window.__engine.village.debugParcelStats(id, { kind: 'choga', building: { windowCount: 1 } });
+    return { hi, lo };
   }, choga.parcelId);
-  ok('#96 winSide ON/OFF → 개구 카운트 변화', wStats.on && wStats.off && wStats.on.verts !== wStats.off.verts, `on=${JSON.stringify(wStats.on)} off=${JSON.stringify(wStats.off)}`);
+  ok('#10 windowCount min/max → 개구 카운트 변화', wStats.hi && wStats.lo && wStats.hi.verts > wStats.lo.verts, `hi=${JSON.stringify(wStats.hi)} lo=${JSON.stringify(wStats.lo)}`);
   await ev(desk, () => window.__engine.village.return());
   await wait(desk, 2400);
 }
@@ -266,8 +269,12 @@ if (giwa) {
   const giwaProps = await ev(desk, () => ({
     jangdok: [...document.querySelectorAll('.ctx.house .rl')].some((n) => /장독대|Jar/i.test(n.textContent)),
     clothesline: [...document.querySelectorAll('.ctx.house .rl')].some((n) => /빨래|Clothes/i.test(n.textContent)),
+    openings: ['문 수', '창 수', '문 너비', '창 너비'].every((label) => (
+      [...document.querySelectorAll('.ctx.house .rl')].some((n) => n.textContent.includes(label))
+    )),
   }));
   ok('#96 기와 마당 소품 필드 렌더(장독대·빨래줄)', giwaProps.jangdok && giwaProps.clothesline, JSON.stringify(giwaProps));
+  ok('#10 기와 창호/개구 4축 렌더', giwaProps.openings, JSON.stringify(giwaProps));
   await ev(desk, () => window.__engine.village.return());
   await wait(desk, 2400);
 }

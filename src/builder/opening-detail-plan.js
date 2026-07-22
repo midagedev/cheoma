@@ -76,7 +76,10 @@ export function planOpeningDetail(input = {}) {
   if (!OPENING_DETAIL_KINDS.includes(kind)) throw new Error(`Unknown opening kind: ${kind}`);
   if (!OPENING_DETAIL_STYLES.includes(style)) throw new Error(`Unknown opening style: ${style}`);
 
-  const width = clamp(finite(input.width, kind === 'door' ? 1.0 : 0.6), 0.36, 6.4);
+  // Residential bay multipliers can deliberately make a very small 봉창.
+  // Keep the detail grammar transparent to that upstream width contract rather
+  // than silently widening the frame beyond its rendered leaf.
+  const width = clamp(finite(input.width, kind === 'door' ? 1.0 : 0.6), 0.08, 6.4);
   const height = clamp(finite(input.height, kind === 'door' ? 1.8 : 0.6), 0.32, 4.8);
   const wallThickness = clamp(finite(input.wallThickness, 0.12), 0.04, 0.4);
   const leafCount = clamp(

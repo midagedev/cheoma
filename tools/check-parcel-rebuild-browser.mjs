@@ -144,6 +144,106 @@ try {
   invariant(actions.some((label) => label.includes('내보내기')), `missing export label: ${actions.join(' | ')}`);
   invariant(!actions.some((label) => /다시 보기|GLB/i.test(label)), `legacy action remains: ${actions.join(' | ')}`);
 
+  // #10: the real Korean editor exposes the planner's four axes with visible
+  // units/ranges. Exercise one width through the native keyboard path and one
+  // count through the stepper, then inspect the actual FULL overlay plan.
+  const openingBefore = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    engine.village.debugDrawCalls();
+    const state = engine.village.debugParcelRebuild(parcelId);
+    const controls = {};
+    for (const key of ['doorCount', 'windowCount', 'doorWidthK', 'windowWidthK']) {
+      const input = document.querySelector(`.ctx.house:not([aria-hidden="true"]) input[data-key="${key}"]`);
+      const row = input?.closest('.row')
+        || document.querySelector(`.ctx.house:not([aria-hidden="true"]) .row[data-key="${key}"]`);
+      controls[key] = {
+        label: row?.querySelector('.rl')?.childNodes?.[0]?.textContent?.trim() || '',
+        bounds: row?.querySelector('.bounds')?.textContent?.trim() || '',
+        value: row?.querySelector('.rv, .num')?.textContent?.trim() || '',
+        min: input?.min || null,
+        max: input?.max || null,
+        aria: input?.getAttribute('aria-valuetext') || '',
+      };
+    }
+    return {
+      controls,
+      params: state.params,
+      programs: engine.renderer.info.programs?.length || 0,
+      drawCalls: engine.renderer.info.render.calls,
+    };
+  }, fixture.parcelId);
+  invariant(openingBefore.controls.doorCount.label === '문 수'
+      && openingBefore.controls.windowCount.label === '창 수'
+      && openingBefore.controls.doorWidthK.label === '문 너비'
+      && openingBefore.controls.windowWidthK.label === '창 너비',
+    `opening editor lost Korean labels: ${JSON.stringify(openingBefore.controls)}`);
+  invariant(openingBefore.controls.doorCount.value.endsWith('개')
+      && openingBefore.controls.windowCount.value.endsWith('개'),
+    `opening counts lost their unit: ${JSON.stringify(openingBefore.controls)}`);
+  invariant(openingBefore.controls.doorWidthK.value.endsWith('%')
+      && openingBefore.controls.windowWidthK.value.endsWith('%')
+      && openingBefore.controls.doorWidthK.bounds.includes('–')
+      && openingBefore.controls.windowWidthK.bounds.includes('–'),
+    `opening widths lost percent/range affordances: ${JSON.stringify(openingBefore.controls)}`);
+
+  const doorWidth = page.locator('.ctx.house:not([aria-hidden="true"]) input[data-key="doorWidthK"]');
+  await doorWidth.focus();
+  await doorWidth.press('ArrowRight');
+  await page.waitForFunction(({ parcelId, beforeValue }) => (
+    window.__engine.village.debugParcelRebuild(parcelId)?.params?.doorWidthK !== beforeValue
+  ), { parcelId: fixture.parcelId, beforeValue: openingBefore.params.doorWidthK }, { timeout });
+  const countButtons = page.locator('.ctx.house:not([aria-hidden="true"]) .row[data-key="doorCount"] button');
+  const increaseEnabled = await countButtons.nth(1).isEnabled();
+  await countButtons.nth(increaseEnabled ? 1 : 0).click();
+  await page.waitForFunction(({ parcelId, beforeValue }) => (
+    window.__engine.village.debugParcelRebuild(parcelId)?.params?.doorCount !== beforeValue
+  ), { parcelId: fixture.parcelId, beforeValue: openingBefore.params.doorCount }, { timeout });
+  const openingControlsPath = join(outputDir, 'opening-controls.png');
+  await page.screenshot({ path: openingControlsPath, animations: 'disabled' });
+  const openingAfter = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const override = engine.village.exportRoot().getObjectByName(`override-${parcelId}`);
+    const plans = [];
+    const panels = [];
+    let frameBatches = 0;
+    let hardwareBatches = 0;
+    const materials = new Set();
+    override?.traverse((object) => {
+      if (object.userData.residentialOpeningPlan) plans.push(object.userData.residentialOpeningPlan);
+      if (object.userData.residentialOpening) panels.push(object.userData.residentialOpening);
+      if (object.name === 'opening-frame-details') frameBatches++;
+      if (object.name === 'opening-hardware-details') hardwareBatches++;
+      if (object.material) {
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
+      }
+    });
+    engine.village.debugDrawCalls();
+    return {
+      state: engine.village.debugParcelRebuild(parcelId),
+      plan: plans[0] || null,
+      panels,
+      frameBatches,
+      hardwareBatches,
+      materials: materials.size,
+      programs: engine.renderer.info.programs?.length || 0,
+      drawCalls: engine.renderer.info.render.calls,
+    };
+  }, fixture.parcelId);
+  invariant(openingAfter.plan && openingAfter.panels.length === openingAfter.plan.openings.length,
+    `FULL overlay rendered ${openingAfter.panels.length}/${openingAfter.plan?.openings.length || 0} openings`);
+  invariant(openingAfter.plan.params.doorCount === openingAfter.state.params.doorCount
+      && openingAfter.plan.params.doorWidthK === openingAfter.state.params.doorWidthK,
+    'editor state and rendered residential plan diverged');
+  invariant(openingAfter.panels.filter((opening) => opening.primary).length === 1
+      && openingAfter.frameBatches === 1 && openingAfter.hardwareBatches === 1,
+    `opening detail ownership/batching drifted: ${JSON.stringify(openingAfter)}`);
+  invariant(openingAfter.programs - openingBefore.programs <= 8,
+    `opening controls added ${openingAfter.programs - openingBefore.programs} shader programs`);
+  invariant(openingAfter.drawCalls - openingBefore.drawCalls <= 30,
+    `opening controls added ${openingAfter.drawCalls - openingBefore.drawCalls} draw calls`);
+  invariant(openingAfter.materials < 80,
+    `focused opening edit grew to ${openingAfter.materials} materials`);
+
   // #3: exercise the actual range-input path before the full parcel reroll.
   // A synchronous burst must become one latest-value preview, keep the merged
   // flora identity stable, then perform exactly one flora commit on change.
@@ -154,27 +254,43 @@ try {
     const root = engine.village.exportRoot();
     const floraGroups = [];
     root.traverse((object) => { if (object.name === 'village-flora') floraGroups.push(object); });
+    const min = Number(slider.min);
+    const max = Number(slider.max);
+    const startValue = Number(slider.value);
+    const finalValue = Math.abs(startValue - max) > (max - min) * 0.2 ? max : min;
     const original = engine.village.rebuild.bind(engine.village);
     const calls = [];
+    const liveState = {
+      calls,
+      flora: floraGroups[0],
+      finalValue,
+      startValue,
+      inputSerial: 0,
+      inputValue: startValue,
+      phase: 'burst',
+    };
     engine.village.rebuild = (...args) => {
       const started = performance.now();
       const result = original(...args);
       calls.push({
         parcelId: args[0],
         refreshFlora: args[2]?.refreshFlora !== false,
-        duration: +(performance.now() - started).toFixed(2),
+        inputSerial: liveState.inputSerial,
+        inputValue: liveState.inputValue,
+        payloadEave: args[1]?.building?.eaveOverhang,
+        phase: liveState.phase,
+        startedAt: started,
+        duration: performance.now() - started,
       });
       return result;
     };
-    const min = Number(slider.min);
-    const max = Number(slider.max);
-    const startValue = Number(slider.value);
-    const finalValue = Math.abs(startValue - max) > (max - min) * 0.2 ? max : min;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    window.__liveEditFixture = { calls, flora: floraGroups[0], finalValue, startValue };
+    window.__liveEditFixture = liveState;
     for (let i = 1; i <= 48; i++) {
       const value = startValue + (finalValue - startValue) * (i / 48);
       setValue.call(slider, String(value));
+      liveState.inputSerial++;
+      liveState.inputValue = Number(slider.value);
       slider.dispatchEvent(new Event('input', { bubbles: true }));
     }
     engine.village.debugDrawCalls();
@@ -245,6 +361,7 @@ try {
 
   await page.evaluate(() => {
     const slider = document.querySelector('.ctx.house:not([aria-hidden="true"]) input[data-key="eaveOverhang"]');
+    window.__liveEditFixture.phase = 'burst-commit';
     slider.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await page.waitForFunction(() => window.__liveEditFixture?.calls.length === 2, null, { timeout });
@@ -280,7 +397,9 @@ try {
     `live edit added ${liveCommit.drawCalls - liveFixture.drawCalls} draw calls`);
 
   // A real drag emits one input per displayed frame rather than one synchronous
-  // burst. Verify that previews remain continuous but do not rebuild every frame.
+  // burst. Verify the scheduler's wall-clock cadence directly: at low display
+  // rates, rebuilding each already-sparse frame is valid and smoother than an
+  // input-count ratio would allow.
   const continuous = await page.evaluate(() => new Promise((resolve) => {
     const engine = window.__engine;
     const slider = document.querySelector('.ctx.house:not([aria-hidden="true"]) input[data-key="eaveOverhang"]');
@@ -290,6 +409,7 @@ try {
       if (object.name === 'village-flora') floraGroups.push(object);
     });
     fixture.streamFlora = floraGroups[0];
+    fixture.phase = 'continuous';
     const from = Number(slider.value);
     const target = fixture.startValue;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -300,61 +420,102 @@ try {
     function frame(now) {
       const progress = Math.min(1, (now - startedAt) / duration);
       setValue.call(slider, String(from + (target - from) * progress));
+      fixture.inputSerial++;
+      fixture.inputValue = Number(slider.value);
       slider.dispatchEvent(new Event('input', { bubbles: true }));
       inputs++;
       if (progress < 1) requestAnimationFrame(frame);
-      else resolve({ target, inputs, callStart });
+      else resolve({ target, inputs, callStart, finalSerial: fixture.inputSerial });
     }
     requestAnimationFrame(frame);
   }));
-  await page.waitForFunction((target) => {
-    const fixture = window.__liveEditFixture;
-    const state = window.__engine.village.debugParcelRebuild(fixture.calls.at(-1)?.parcelId);
-    return Math.abs((state?.params?.eaveOverhang ?? Infinity) - target) < 1e-6;
-  }, continuous.target, { timeout });
-  const continuousPreview = await page.evaluate(({ callStart }) => {
+  await page.waitForFunction(({ finalSerial }) => window.__liveEditFixture?.calls.some((call) => (
+    call.phase === 'continuous' && call.inputSerial === finalSerial && !call.refreshFlora
+  )), { finalSerial: continuous.finalSerial }, { timeout });
+  const continuousPreview = await page.evaluate(({ callStart, finalSerial }) => {
     const fixture = window.__liveEditFixture;
     const floraGroups = [];
     window.__engine.village.exportRoot().traverse((object) => {
       if (object.name === 'village-flora') floraGroups.push(object);
     });
+    const calls = fixture.calls.slice(callStart).map((call) => ({ ...call }));
     return {
-      calls: fixture.calls.slice(callStart).map((call) => ({ ...call })),
+      calls,
+      finalPreview: calls.findLast((call) => (
+        call.phase === 'continuous' && call.inputSerial === finalSerial && !call.refreshFlora
+      )),
       totalCalls: fixture.calls.length,
       floraSame: floraGroups[0] === fixture.streamFlora,
     };
-  }, { callStart: continuous.callStart });
+  }, { callStart: continuous.callStart, finalSerial: continuous.finalSerial });
   invariant(continuousPreview.calls.length >= 3,
     `continuous drag produced only ${continuousPreview.calls.length} previews`);
-  invariant(continuousPreview.calls.length <= Math.ceil(continuous.inputs / 2),
-    `continuous drag rebuilt ${continuousPreview.calls.length}/${continuous.inputs} displayed frames`);
+  invariant(continuousPreview.finalPreview
+      && Math.abs(continuousPreview.finalPreview.inputValue - continuous.target) < 1e-6
+      && Math.abs(continuousPreview.finalPreview.payloadEave - continuous.target) < 1e-6,
+    `final input serial was not consumed exactly: ${JSON.stringify(continuousPreview.finalPreview)}`);
+  const cadenceToleranceMs = 1;
+  const cadenceSamples = continuousPreview.calls.slice(1).map((call, index) => {
+    const previous = continuousPreview.calls[index];
+    return {
+      gapMs: call.startedAt - previous.startedAt,
+      requiredMs: Math.min(96, Math.max(32, previous.duration * 2.2)),
+      previousDurationMs: previous.duration,
+    };
+  });
+  const cadenceViolations = cadenceSamples.filter(({ gapMs, requiredMs }) => (
+    gapMs + cadenceToleranceMs < requiredMs
+  ));
+  invariant(cadenceViolations.length === 0,
+    `continuous drag violated adaptive cadence: ${JSON.stringify(cadenceViolations)}`);
+  console.log(`[live-edit] drag ${continuous.inputs} inputs → ${continuousPreview.calls.length} previews; `
+    + `minimum gap ${Math.min(...cadenceSamples.map((sample) => sample.gapMs)).toFixed(1)}ms; `
+    + `maximum required ${Math.max(...cadenceSamples.map((sample) => sample.requiredMs)).toFixed(1)}ms`);
   invariant(continuousPreview.calls.every((call) => !call.refreshFlora) && continuousPreview.floraSame,
     'continuous preview rebuilt flora before pointer release');
 
-  await page.evaluate(() => {
-    const slider = document.querySelector('.ctx.house:not([aria-hidden="true"]) input[data-key="eaveOverhang"]');
-    slider.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await page.waitForFunction((count) => window.__liveEditFixture?.calls.length === count + 1,
-    continuousPreview.totalCalls, { timeout });
-  const continuousCommit = await page.evaluate((parcelId) => {
+  const continuousCommit = await page.evaluate(({ parcelId, baseline }) => {
     const fixture = window.__liveEditFixture;
+    const slider = document.querySelector('.ctx.house:not([aria-hidden="true"]) input[data-key="eaveOverhang"]');
+    const before = fixture.calls.length;
+    const callsBeforeCommit = fixture.calls.slice(baseline).map((call) => ({ ...call }));
+    fixture.phase = 'continuous-commit';
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
+    const after = fixture.calls.length;
+    const calls = fixture.calls.slice(before).map((call) => ({ ...call }));
     const floraGroups = [];
     window.__engine.village.exportRoot().traverse((object) => {
       if (object.name === 'village-flora') floraGroups.push(object);
     });
     fixture.committedValue = fixture.startValue;
     return {
-      callCount: fixture.calls.length,
-      lastCall: { ...fixture.calls.at(-1) },
+      before,
+      after,
+      callCount: after,
+      callsBeforeCommit,
+      calls,
+      lastCall: calls.at(-1),
       state: window.__engine.village.debugParcelRebuild(parcelId),
       floraChanged: floraGroups[0] !== fixture.streamFlora,
     };
-  }, fixture.parcelId);
+  }, { parcelId: fixture.parcelId, baseline: continuousPreview.totalCalls });
+  invariant(continuousCommit.before === continuousPreview.totalCalls,
+    `preview calls crossed the drained baseline: ${JSON.stringify(continuousCommit.callsBeforeCommit)}`);
+  invariant(continuousCommit.after - continuousCommit.before === 1 && continuousCommit.calls.length === 1,
+    `continuous pointer release produced ${continuousCommit.after - continuousCommit.before} calls: ${JSON.stringify(continuousCommit.calls)}`);
   invariant(continuousCommit.lastCall.refreshFlora && continuousCommit.floraChanged,
-    'continuous pointer release did not perform one final flora commit');
+    `continuous pointer release did not perform one final flora commit: ${JSON.stringify(continuousCommit.calls)}`);
   invariant(continuousCommit.state.conflicts === 0,
     `continuous commit left ${continuousCommit.state.conflicts} yard conflicts`);
+  await page.waitForTimeout(110);
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  const staleCommitCalls = await page.evaluate((callCount) => (
+    window.__liveEditFixture.calls.slice(callCount).map((call) => ({ ...call }))
+  ), continuousCommit.callCount);
+  invariant(staleCommitCalls.length === 0,
+    `stale preview ran after exact commit: ${JSON.stringify(staleCommitCalls)}`);
 
   // Start another preview and leave focus in the same task. The scheduled frame
   // must be invalidated, and re-entry must restore the last committed value.
@@ -482,10 +643,51 @@ try {
     'refocus discarded the rebuilt parcel seed');
   invariant(JSON.stringify(refocused.params) === JSON.stringify(after.state.params),
     'refocus discarded the rebuilt edit specification');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(180);
+  const mobileGrip = page.locator('.sheet.context .grip');
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
+  await mobileGrip.click();
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
+  // data-snap changes before the 420ms transform finishes. Hover waits for a
+  // stable, event-receiving grip, avoiding a stale pre-transition hit point.
+  await mobileGrip.hover();
+  const gripBox = await mobileGrip.boundingBox();
+  invariant(gripBox, 'mobile editor grip has no layout box');
+  await page.mouse.down();
+  invariant(await page.locator('.sheet.context').evaluate((sheet) => sheet.classList.contains('dragging')),
+    'mobile grip missed pointerdown');
+  await page.mouse.move(gripBox.x + gripBox.width / 2, 36, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'full', null, { timeout });
+  const mobileControls = await page.evaluate(() => {
+    const house = document.querySelector('.ctx.house:not([aria-hidden="true"])');
+    const keys = ['doorCount', 'windowCount', 'doorWidthK', 'windowWidthK'];
+    const controls = keys.map((key) => (
+      house?.querySelector(`input[data-key="${key}"]`)
+      || house?.querySelector(`.row[data-key="${key}"]`)
+    ));
+    const card = house?.closest('.ctxcard') || house?.parentElement;
+    return {
+      allPresent: controls.every(Boolean),
+      widths: controls.filter(Boolean).map((control) => control.getBoundingClientRect().width),
+      buttonSizes: [...house?.querySelectorAll('.row[data-key="doorCount"] button') || []]
+        .map((button) => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })),
+      card: card ? { left: card.getBoundingClientRect().left, right: card.getBoundingClientRect().right } : null,
+    };
+  });
+  invariant(mobileControls.allPresent, 'mobile editor lost one of the four opening controls');
+  invariant(mobileControls.buttonSizes.every((size) => size.width >= 40 && size.height >= 40),
+    `mobile opening steppers are too small: ${JSON.stringify(mobileControls.buttonSizes)}`);
+  invariant(mobileControls.card && mobileControls.card.left >= -1 && mobileControls.card.right <= 391,
+    `mobile editor overflows the viewport: ${JSON.stringify(mobileControls.card)}`);
+  const mobilePath = join(outputDir, 'mobile-openings.png');
+  await page.screenshot({ path: mobilePath, animations: 'disabled' });
   invariant(runtimeErrors.length === 0, `browser errors: ${runtimeErrors.join(' | ')}`);
 
-  console.log(`screenshots: ${beforePath}, ${livePreviewPath}, ${liveCommitPath}, ${afterPath}, ${aerialPath}`);
-  console.log(`PARCEL REBUILD BROWSER: PASS (${fixture.parcelId}, tree=${fixture.hasTree}, live 48→${livePreview.calls.length}, drag ${continuous.inputs}→${continuousPreview.calls.length}, exact commits, programs ${signed(after.programs - before.programs)}, calls ${signed(after.drawCalls - before.drawCalls)})`);
+  console.log(`screenshots: ${beforePath}, ${openingControlsPath}, ${livePreviewPath}, ${liveCommitPath}, ${afterPath}, ${aerialPath}, ${mobilePath}`);
+  console.log(`PARCEL REBUILD BROWSER: PASS (${fixture.parcelId}, tree=${fixture.hasTree}, openings ${openingAfter.plan.openings.length}/${openingAfter.materials} materials, live 48→${livePreview.calls.length}, drag ${continuous.inputs}→${continuousPreview.calls.length}, exact commits, programs ${signed(after.programs - before.programs)}, calls ${signed(after.drawCalls - before.drawCalls)})`);
 } finally {
   await browser?.close();
   await server.close();

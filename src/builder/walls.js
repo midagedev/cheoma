@@ -5,9 +5,11 @@ import {
   thatchWallBreakpoints,
   thatchWallTopAt,
 } from './thatch-profile.js';
+import { planChogaKitchenOpening } from '../layout/kitchen-opening-spatial.js';
 import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
 import { planOpeningDetail } from './opening-detail-plan.js';
 import { createOpeningDetailAssembler } from './opening-details.js';
+import { createResidentialOpeningDetails } from './residential-opening-details.js';
 
 // 벽체·창호. 궁(palace): 전면 칸마다 세살문, 측·후면 회벽+광창.
 // 절(temple): 전면 어칸 띠살문 + 협칸(황토벽 하부 + 살창 상부), 측·후면 황토벽+작은 살창.
@@ -18,17 +20,16 @@ export function buildWalls(P, L, M) {
   const choga = P.style === 'choga';
   const rustic = temple; // 절: 어칸 문 + 협칸 벽+창
   const lastX = L.xPos.length - 1, lastZ = L.zPos.length - 1;
+  // ── 초가: 밀폐 심벽 민가 (전 칸 벽/문/작은 살창, 개방 툇간 없음) ──
+  if (choga) {
+    buildChogaWalls(P, L, M, g, lastX, lastZ);
+    return g;
+  }
+
   const openingDetails = createOpeningDetailAssembler(g, {
     frame: M.woodDark,
     hardware: M.hardware,
   });
-
-  // ── 초가: 밀폐 심벽 민가 (전 칸 벽/문/작은 살창, 개방 툇간 없음) ──
-  if (choga) {
-    buildChogaWalls(P, L, M, g, lastX, lastZ, openingDetails);
-    openingDetails.finish();
-    return g;
-  }
 
   const y0 = L.podTopY + 0.18;
   const y1 = L.colTopY - 0.05;
@@ -129,15 +130,12 @@ export function buildWalls(P, L, M) {
 
 // 초가 심벽 민가: 전 칸을 벽으로 채워 밀폐. 벽 상단이 지붕 밑면 곡선을 따라 올라가
 // 지붕과 벽 사이 틈(모자 뜸)을 없앤다. 어칸 좁은 띠살문 + 작은 살창, 측면 진흙 굴뚝.
-function buildChogaWalls(P, L, M, g, lastX, lastZ, openingDetails) {
+function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   const y0 = L.podTopY + 0.05;
   const roofProfile = createThatchRoofProfile(P, L);
   const zF = L.zPos[lastZ], zB = L.zPos[0], xL = L.xPos[0], xR = L.xPos[lastX];
-  const centerBay = Math.floor(lastX / 2);
   const cr = P.columnRadius + THATCH_WALL_END_OVERLAP;
-  // #55 변주 필드(집집이 창호 개수·배치·하방 판벽·툇마루가 다름). 미지정 시 기존 룩 기본값.
-  const winBack = P.winBack != null ? P.winBack : 1;       // 후면 살창 개수(0~2)
-  const winSide = !!P.winSide;                             // 측면(부엌 반대편) 봉창 유무
+  // #55의 하방 판벽·툇마루 변주는 유지하되 문/창 개수와 폭은 공유 residential planner가 소유한다.
   const plankBase = !!P.plankBase;                         // 하방 판벽(전면 벽 하부 널)
   const maruStyle = P.maruStyle || 'full';                 // 툇마루: full | short | none
 
@@ -209,52 +207,60 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ, openingDetails) {
   // 작은 살창: 파란 유리처럼 어둡게 죽지 않게 미색 한지 살창으로.
   const winMat = M.door.clone();
   winMat.map = M.door.map.clone(); winMat.map.repeat.set(1, 1); winMat.map.needsUpdate = true;
-  const smallWin = (cx, cz, rotY, placement, seed) => {
-    const win = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.06), winMat);
-    win.position.set(cx, y0 + 1.35, cz); win.rotation.y = rotY; g.add(win);
-    openingDetails.add(planOpeningDetail({
-      kind: 'window', style: 'choga', seed,
-      width: 0.5, height: 0.5, wallThickness: 0.06,
-    }), { ...placement, center: { x: cx, z: cz }, bottomY: y0 + 1.10 }, win);
-  };
-  const door = (cx, cz, rotY, placement, seed) => {
-    const dh = 1.55;
-    const mat = M.door.clone();
-    mat.map = M.door.map.clone(); mat.map.repeat.set(1, 1); mat.map.needsUpdate = true;
-    const d = new THREE.Mesh(new THREE.BoxGeometry(0.9, dh, 0.06), mat);
-    d.position.set(cx, y0 + dh / 2, cz); d.rotation.y = rotY; d.receiveShadow = true; g.add(d);
-    const maruY = L.podTopY + 0.36;
-    const maruDepth = maruStyle === 'short' ? 0.78 : 0.95;
-    openingDetails.add(planOpeningDetail({
-      kind: 'door', style: 'choga', seed,
-      width: 0.9, height: dh, wallThickness: 0.06,
-      leafCount: 1, lowerPanelHeight: 0.12, primary: true,
+  const residentialDetails = createResidentialOpeningDetails('choga', P, g, {
+    frame: M.woodDark,
+    hardware: M.hardware,
+  }, {
+    door: {
+      bottomY: y0,
+      height: 1.55,
+      wallThickness: 0.06,
+      lowerPanelHeight: 0.12,
       footwear: maruStyle === 'none'
         ? { y: L.podTopY - y0, outward: 0.30, surface: 'threshold' }
-        : { y: maruY - y0, outward: maruDepth * 0.68, surface: 'jjokmaru' },
-    }), { ...placement, center: { x: cx, z: cz }, bottomY: y0 }, d);
+        : {
+          y: L.podTopY + 0.36 - y0,
+          outward: (maruStyle === 'short' ? 0.78 : 0.95) * 0.68,
+          surface: 'jjokmaru',
+        },
+    },
+    window: {
+      bottomY: y0 + 1.10,
+      height: 0.5,
+      wallThickness: 0.06,
+    },
+  });
+  const panelRotation = (opening) => (
+    Math.abs(opening.tangent.x) >= Math.abs(opening.tangent.z) ? 0 : Math.PI / 2
+  );
+  const smallWin = (opening) => {
+    const win = new THREE.Mesh(new THREE.BoxGeometry(opening.width, 0.5, 0.06), winMat);
+    win.position.set(opening.center.x, y0 + 1.35, opening.center.z);
+    win.rotation.y = panelRotation(opening);
+    g.add(win);
+    residentialDetails.add(opening, win);
   };
-  for (let i = 0; i < lastX; i++) {
-    const cx = (L.xPos[i] + L.xPos[i + 1]) / 2;
-    if (i === centerBay) door(cx, zF + 0.06, 0, {
-      tangent: { x: 1, z: 0 }, outward: { x: 0, z: 1 },
-    }, `choga:${P.seed ?? 0}:front:${i}`);
-    else smallWin(cx, zF + 0.06, 0, {
-      tangent: { x: 1, z: 0 }, outward: { x: 0, z: 1 },
-    }, `choga:${P.seed ?? 0}:front:${i}`);
+  const door = (opening) => {
+    residentialDetails.add(opening, (detail) => {
+      const dh = 1.55;
+      const mat = M.door.clone();
+      mat.map = M.door.map.clone();
+      mat.map.repeat.set(detail.leafCount, 1);
+      mat.map.wrapS = THREE.RepeatWrapping;
+      mat.map.needsUpdate = true;
+      const d = new THREE.Mesh(new THREE.BoxGeometry(opening.width, dh, 0.06), mat);
+      d.position.set(opening.center.x, y0 + dh / 2, opening.center.z);
+      d.rotation.y = panelRotation(opening);
+      d.receiveShadow = true;
+      g.add(d);
+      return d;
+    });
+  };
+  for (const opening of residentialDetails.plan.openings) {
+    if (opening.kind === 'door') door(opening);
+    else smallWin(opening);
   }
-  // 후면 살창 개수 변주: 어칸 우선, 이어 협칸으로 분산(0~2).
-  const backOrder = [centerBay, centerBay - 1, centerBay + 1, 0, lastX - 1].filter((i) => i >= 0 && i < lastX);
-  for (let k = 0; k < Math.min(winBack, backOrder.length); k++) {
-    const i = backOrder[k];
-    smallWin((L.xPos[i] + L.xPos[i + 1]) / 2, zB - 0.06, 0, {
-      tangent: { x: -1, z: 0 }, outward: { x: 0, z: -1 },
-    }, `choga:${P.seed ?? 0}:back:${i}`);
-  }
-  // 측면 봉창(부엌 반대편 -x): 부엌·굴뚝(+x)과 겹치지 않게 좌측벽에만.
-  if (winSide) smallWin(xL - 0.06, (zB + zF) / 2, Math.PI / 2, {
-    tangent: { x: 0, z: 1 }, outward: { x: -1, z: 0 },
-  }, `choga:${P.seed ?? 0}:left`);
+  residentialDetails.finish();
   // 하방 판벽: 전면 벽 하부를 어두운 세로널로 두른 띠(회벽 대신 널). 살림 격 변주.
   if (plankBase) {
     const pbH = 0.52;
@@ -308,14 +314,16 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ, openingDetails) {
 
   // 부엌 아궁이는 마당 높이의 끝방 개구 안으로 물린다. 독립 노천 화덕처럼 외벽 밖에
   // 부뚜막 매스를 붙이지 않으며, 불씨/화광 이름은 smoke.js 시간대 계약을 그대로 쓴다.
+  const kitchenOpening = planChogaKitchenOpening(xR);
   g.add(buildRecessedKitchenHearth({
     mats: M,
-    wallX: xR,
-    centerZ: -0.25,
+    wallX: kitchenOpening.wallX,
+    centerZ: kitchenOpening.centerZ,
     floorY: 0,
-    openingWidth: 1.12,
-    openingHeight: 1.42,
-    lightRange: 3.2,
+    openingWidth: kitchenOpening.openingWidth,
+    openingHeight: kitchenOpening.openingHeight,
+    frameThickness: kitchenOpening.frameThickness,
+    lightRange: kitchenOpening.lightRange,
   }));
 
   return g;

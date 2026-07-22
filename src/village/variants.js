@@ -13,22 +13,25 @@ import { householdDiversityProfile, pickGiwaHouseVariant } from './house-diversi
 //   치수(기둥높이·기단높이·용마루높이)를 변주에 baking → 스카이라인 처마선이 들쭉날쭉(드로우콜 불변).
 //   flip 항목은 mirrorOf 인덱스의 지오를 X-미러(ㄱ자 방향 반전, 재질 재사용).
 // choga: 一자 초가 — 칸수·칸 너비 비율(어칸>협칸)·물매·이엉 두께·기둥/기단/용마루 높이 + 이엉 상태
-//   (thatchAge) 사다리 + 창호 개수·배치·하방 판벽·툇마루 스타일을 변주별로 확연히 달리한다(#55).
+//   (thatchAge) 사다리 + 창호 개수·폭·하방 판벽·툇마루 스타일을 변주별로 확연히 달리한다(#55/#10).
 //   민가(작고 낮고 좁은 균등칸·낡은 회갈 이엉·창 적음) ↔ 여염 ↔ 부농(크고 높고 어칸 강조·금빛 이엉·창 많음).
-//   ov 필드 중 win*/plankBase/maruStyle 는 buildChogaWalls(builder/walls.js)가 소비 — 벽면별 창호 변주.
+//   opening 네 축은 residential-openings가 shape capacity로 다시 정규화한다.
 export const CHOGA_VARIANTS = [
   // 민가: 좁고 균등한 칸(어칸≈협칸), 낮은 벽, 얕은 툇마루, 창 최소(정면 살창만).
   { name: 'choga-min', st: 0.15, thatchAge: 0.85,
     ov: { frontBays: 3, centerBayW: 2.5, middleBayW: 2.35, endBayW: 2.3, sideBays: 2, columnHeight: 1.95, podiumTierH: 0.2, ridgeH: 0.28, roofPitch: 0.66, thatchThick: 0.34, cornerLift: 0.03,
-          winBack: 0, winSide: false, plankBase: false, maruStyle: 'short' } },
+          doorCount: 1, windowCount: 2, doorWidthK: 0.36, windowWidthK: 0.2,
+          plankBase: false, maruStyle: 'short' } },
   // 여염: 중간 규모, 어칸이 협칸보다 확연히 넓음, 후면 창 1, 하방 판벽, 온전한 툇마루.
   { name: 'choga-mid', st: 0.5, thatchAge: 0.45,
     ov: { frontBays: 3, centerBayW: 3.2, middleBayW: 2.6, endBayW: 2.5, columnHeight: 2.25, podiumTierH: 0.32, ridgeH: 0.31,
-          winBack: 1, winSide: false, plankBase: true, maruStyle: 'full' } },
+          doorCount: 1, windowCount: 3, doorWidthK: 0.4, windowWidthK: 0.24,
+          plankBase: true, maruStyle: 'full' } },
   // 부농: 정면 5칸 대형, 어칸 대폭 강조, 높은 벽·기단, 후면·측면 창 다수, 판벽, 넓은 툇마루.
   { name: 'choga-bunong', st: 0.9, thatchAge: 0.12,
     ov: { frontBays: 5, centerBayW: 3.5, middleBayW: 2.9, endBayW: 2.7, columnHeight: 2.55, podiumTierH: 0.46, ridgeH: 0.37, roofPitch: 0.57, thatchThick: 0.42,
-          winBack: 2, winSide: true, plankBase: true, maruStyle: 'full' } },
+          doorCount: 1, windowCount: 7, doorWidthK: 0.48, windowWidthK: 0.3,
+          plankBase: true, maruStyle: 'full' } },
 ];
 // giwa: 활성 그룹 수 4를 그대로 유지하면서 ㅡ 1 + ㄱ 좌우 2 + ㄷ 1로 평면 어휘를 넓힌다.
 //   ㄷ은 최소 4칸이며 큰 필지/상위 살림에서만 후보가 되고 실제 roof fit을 통과해야 한다.
@@ -37,12 +40,15 @@ export const CHOGA_VARIANTS = [
 //   doorPattern은 buildBuilding이 기존 재료에 적용하고 변주별 소유를 유지한다(#55).
 export const GIWA_VARIANTS = [
   { name: 'giwa-l', st: 0.52,
-    ov: { planShape: 'l', bays: 3, columnHeight: 2.9, podiumTierH: 0.46, ridgeH: 0.4, doorPattern: 'ttisal' } },
+    ov: { planShape: 'l', bays: 3, columnHeight: 2.9, podiumTierH: 0.46, ridgeH: 0.4, doorPattern: 'ttisal',
+      doorCount: 2, windowCount: 3, doorWidthK: 0.9, windowWidthK: 0.5 } },
   { name: 'giwa-l-flip', st: 0.52, mirrorOf: 0 },
   { name: 'giwa-single', st: 0.2,
-    ov: { planShape: 'single', bays: 3, mainHalfW: 3.7, mainHalfD: 2.0, columnHeight: 2.65, podiumTierH: 0.38, ridgeH: 0.36, doorPattern: 'ttisal' } },
+    ov: { planShape: 'single', bays: 3, mainHalfW: 3.7, mainHalfD: 2.0, columnHeight: 2.65, podiumTierH: 0.38, ridgeH: 0.36, doorPattern: 'ttisal',
+      doorCount: 1, windowCount: 2, doorWidthK: 0.82, windowWidthK: 0.42 } },
   { name: 'giwa-u', st: 0.88,
-    ov: { planShape: 'u', bays: 4, mainHalfW: 5.0, mainHalfD: 2.2, wingLen: 3.4, wingW: 2.15, columnHeight: 3.35, podiumTierH: 0.7, ridgeH: 0.49, doorPattern: 'jeongja' } },
+    ov: { planShape: 'u', bays: 4, mainHalfW: 5.0, mainHalfD: 2.2, wingLen: 3.4, wingW: 2.15, columnHeight: 3.35, podiumTierH: 0.7, ridgeH: 0.49, doorPattern: 'jeongja',
+      doorCount: 4, windowCount: 6, doorWidthK: 0.92, windowWidthK: 0.55 } },
 ];
 
 // 지붕/집 톤 곱틴트(instanceColor) — 레거시 단일 톤(rebuildParcel·야간 fallback 용). 재채색이 아니라

@@ -1,5 +1,6 @@
 import { PRESETS } from '../../params.js';
 import { normalizeGiwaPlan } from '../../layout/giwa-footprint.js';
+import { normalizeResidentialOpenings } from '../../layout/residential-openings.js';
 import { variantOv, variantThatchAge } from '../../village/variants.js';
 
 const WALL_TYPES = Object.freeze({
@@ -89,6 +90,33 @@ export function buildParcelSpec(sourceParcel, kindOverride = null) {
   const preset = PRESETS[generatorKind] || {};
   const variation = variantOv(parcel);
   const value = (key) => variation[key] ?? preset[key];
+  const params = {
+    planShape: generatorKind === 'giwa' ? value('planShape') : undefined,
+    bays: generatorKind === 'giwa' ? value('bays') : undefined,
+    bay: generatorKind === 'giwa' ? value('bay') : undefined,
+    frontBays: value('frontBays'), sideBays: value('sideBays'),
+    roofPitch: value('roofPitch'), riseScale: value('riseScale'),
+    eaveOverhang: value('eaveOverhang'), profileCurve: value('profileCurve'), cornerLift: value('cornerLift'),
+    columnHeight: value('columnHeight'), ridgeH: value('ridgeH'), podiumTierH: value('podiumTierH'),
+    centerBayW: value('centerBayW'), endBayW: value('endBayW'),
+    mainHalfW: value('mainHalfW'), mainHalfD: value('mainHalfD'),
+    wingLen: value('wingLen'), wingW: value('wingW'),
+    doorPattern: variation.doorPattern || 'ttisal',
+    footprintScale: 1,
+    wallType: parcelWallType(generatorKind, parcel.wallType),
+    roofTone: parcel.toneIdx || 0,
+    thatchAge: generatorKind === 'giwa' ? undefined : (parcel.thatchAge ?? 0.5),
+    aux: !!parcel.aux,
+    jangdok: parcel.jangdok ?? 0,
+    yardStack: !!parcel.yardStack,
+    clothesline: !!parcel.clothesline,
+    vegBed: !!parcel.vegBed,
+  };
+  Object.assign(params, normalizeResidentialOpenings(generatorKind, {
+    ...preset,
+    ...variation,
+    ...params,
+  }));
   return {
     kind,
     rank: parcel.rank,
@@ -99,30 +127,7 @@ export function buildParcelSpec(sourceParcel, kindOverride = null) {
     seed: parcel.seed,
     variant: parcel.variant,
     editable: true,
-    params: {
-      planShape: generatorKind === 'giwa' ? value('planShape') : undefined,
-      bays: generatorKind === 'giwa' ? value('bays') : undefined,
-      bay: generatorKind === 'giwa' ? value('bay') : undefined,
-      frontBays: value('frontBays'), sideBays: value('sideBays'),
-      roofPitch: value('roofPitch'), riseScale: value('riseScale'),
-      eaveOverhang: value('eaveOverhang'), profileCurve: value('profileCurve'), cornerLift: value('cornerLift'),
-      columnHeight: value('columnHeight'), ridgeH: value('ridgeH'), podiumTierH: value('podiumTierH'),
-      centerBayW: value('centerBayW'), endBayW: value('endBayW'),
-      mainHalfW: value('mainHalfW'), mainHalfD: value('mainHalfD'),
-      wingLen: value('wingLen'), wingW: value('wingW'),
-      winBack: generatorKind === 'choga' ? (variation.winBack ?? 0) : undefined,
-      winSide: generatorKind === 'choga' ? !!variation.winSide : undefined,
-      doorPattern: variation.doorPattern || 'ttisal',
-      footprintScale: 1,
-      wallType: parcelWallType(generatorKind, parcel.wallType),
-      roofTone: parcel.toneIdx || 0,
-      thatchAge: generatorKind === 'giwa' ? undefined : (parcel.thatchAge ?? 0.5),
-      aux: !!parcel.aux,
-      jangdok: parcel.jangdok ?? 0,
-      yardStack: !!parcel.yardStack,
-      clothesline: !!parcel.clothesline,
-      vegBed: !!parcel.vegBed,
-    },
+    params,
   };
 }
 
@@ -146,6 +151,7 @@ export function buildEditedParcelSpec(parcel, newParams = {}, acceptedBuilding =
       ? parcelWallType(kind, newParams[key])
       : newParams[key];
   }
+  Object.assign(spec.params, normalizeResidentialOpenings(kind, spec.params));
   return spec;
 }
 
@@ -166,6 +172,7 @@ export function clampBuildingDimensions(params, kind) {
     clamp('ridgeH', 0.24, 0.40);
     clamp('podiumTierH', 0.16, 0.50);
   }
+  Object.assign(params, normalizeResidentialOpenings(kind, params));
 }
 
 // 풀디테일 overlay에도 instanced village와 같은 role별 색 변주를 적용한다.

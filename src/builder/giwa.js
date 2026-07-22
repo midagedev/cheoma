@@ -11,8 +11,7 @@ import {
   sunkPrism,
 } from '../core/surface-clearance.js';
 import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
-import { planOpeningDetail } from './opening-detail-plan.js';
-import { createOpeningDetailAssembler } from './opening-details.js';
+import { createResidentialOpeningDetails } from './residential-opening-details.js';
 
 // 기와집(ㅡ/ㄱ/ㄷ 반가 안채): 공유 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
@@ -154,11 +153,6 @@ export function buildGiwa(P, M) {
 
   // 목재 톤: 창방·기둥은 밝은 백골(M.wood), 인방 트림은 살짝 짙게 정의감 부여
   const woodTrim = M.wood.clone(); woodTrim.color = M.wood.color.clone().multiplyScalar(0.78);
-  const openingDetails = createOpeningDetailAssembler(walls, {
-    frame: woodTrim,
-    hardware: M.hardware,
-  });
-
   const seen = new Set();
   const addCol = (x, z) => {
     const k = `${x.toFixed(2)},${z.toFixed(2)}`;
@@ -200,29 +194,74 @@ export function buildGiwa(P, M) {
   lowerPanelMat.color = new THREE.Color(0x6b4e30); lowerPanelMat.emissive = new THREE.Color(0x1a1207);
   // 살창(측벽 창): 실내가 완전 검게 죽지 않도록 미량 emissive
   const salMat = M.salchang.clone(); salMat.emissive = new THREE.Color(0x14100a);
-  // 띠살 분합문 재질: 폭에 맞춰 문짝 수(짝) 반복
-  const doorMat = (bw) => {
-    const leaves = bw > 3.0 ? 4 : bw > 1.9 ? 3 : 2;
+  // 띠살 분합문 재질: detail plan이 정한 문짝 수를 texture에도 그대로 반복한다.
+  const doorMat = (leafCount) => {
     const m = M.door.clone();
-    m.map = M.door.map.clone(); m.map.repeat.set(leaves, 1);
+    m.map = M.door.map.clone(); m.map.repeat.set(leafCount, 1);
     m.map.wrapS = THREE.RepeatWrapping; m.map.needsUpdate = true;
     return m;
   };
 
-  // 회벽 + 창을 뚫은 심벽 한 칸(살창 주위에 회벽 띠). alongX 축을 따라 좌우 회벽을 배치.
-  const wallWithWindow = (cx, cz, bw, alongX, placement, seed) => {
-    const ww = Math.min(bw * 0.5, 1.1), side = (bw - ww) / 2;
-    const ax = alongX ? 1 : 0, az = alongX ? 0 : 1;
-    slab(cx, cz, bw, y0, winBot, M.plaster, alongX);            // 창 아래 회벽
-    slab(cx, cz, bw, winTop, yTopWall, M.plaster, alongX);      // 창 위 회벽(상부 공백 채움)
-    const off = ww / 2 + side / 2;
-    slab(cx - ax * off, cz - az * off, side, winBot, winTop, M.plaster, alongX); // 좌 회벽
-    slab(cx + ax * off, cz + az * off, side, winBot, winTop, M.plaster, alongX); // 우 회벽
-    const panel = slab(cx, cz, ww, winBot, winTop, salMat, alongX, 0.10); // 살창
-    openingDetails.add(planOpeningDetail({
-      kind: 'window', style: 'giwa', seed,
-      width: ww, height: winTop - winBot, wallThickness: T,
-    }), { ...placement, center: { x: cx, z: cz }, bottomY: winBot }, panel);
+  const openingDetails = createResidentialOpeningDetails('giwa', P, walls, {
+    frame: woodTrim,
+    hardware: M.hardware,
+  }, {
+    door: {
+      bottomY: y0,
+      height: yLintel - y0,
+      wallThickness: T,
+      lowerPanelHeight: lowerPanelTop - y0,
+      footwear: {
+        y: podTopY + 0.42 - y0,
+        outward: 0.78,
+        surface: 'toenmaru',
+      },
+    },
+    window: {
+      bottomY: winBot,
+      height: winTop - winBot,
+      wallThickness: T,
+    },
+  });
+
+  const sidePanels = (opening, bayWidth, yb, yt, material, alongX) => {
+    const side = Math.max(0, (bayWidth - opening.width) * 0.5);
+    if (side <= 1e-7) return [];
+    const offset = opening.width * 0.5 + side * 0.5;
+    return [-1, 1].map((sign) => slab(
+      opening.center.x + opening.tangent.x * offset * sign,
+      opening.center.z + opening.tangent.z * offset * sign,
+      side,
+      yb,
+      yt,
+      material,
+      alongX,
+    ));
+  };
+  const visibleCenter = (opening, thickness) => {
+    const offset = overlayCenterOffset(T, thickness);
+    return {
+      x: opening.center.x + opening.outward.x * offset,
+      z: opening.center.z + opening.outward.z * offset,
+    };
+  };
+
+  // The planner owns the actual aperture width. Host panels are split around
+  // that width so an unselected bay remains a wall rather than a visual door.
+  const wallWithWindow = (opening, bayWidth, alongX, hostMaterial) => {
+    const { x, z } = opening.center;
+    const hosts = [
+      slab(x, z, bayWidth, y0, winBot, hostMaterial, alongX),
+      slab(x, z, bayWidth, winTop, yTopWall, hostMaterial, alongX),
+      ...sidePanels(opening, bayWidth, winBot, winTop, hostMaterial, alongX),
+    ];
+    const face = visibleCenter(opening, 0.10);
+    const panel = slab(face.x, face.z, opening.width, winBot, winTop, salMat, alongX, 0.10);
+    if (opening.surface === 'plank') {
+      hosts[0].name = 'plank-wall-window-bay';
+      panel.name = 'plank-opening';
+    }
+    openingDetails.add(opening, panel);
   };
 
   const centerBayOf = (nb) => Math.floor(nb / 2);
@@ -234,11 +273,8 @@ export function buildGiwa(P, M) {
     const nb = Math.max(1, Math.round(len / bay));
     const alongX = Math.abs(B.x - A.x) > Math.abs(B.z - A.z);
     const role = edgeRole(A, B, footprint);
-    const edgeDirection = G.norm(G.sub(B, A));
-    const exterior = G.perpR(edgeDirection); // foot is CW
     const cxE = (A.x + B.x) / 2, czE = (A.z + B.z) / 2;
     const cbay = centerBayOf(nb);
-    const primaryDoorBay = nb >= 3 ? Math.max(0, cbay - 1) : cbay;
 
     // 기둥
     for (let k = 0; k <= nb; k++) {
@@ -253,57 +289,32 @@ export function buildGiwa(P, M) {
       // 대청: 안마당을 향한 본채 정면 중앙 칸은 개방 (아래 대청 블록에서 처리)
       const mainFront = alongX && Math.abs(A.z - b) < 1e-7 && Math.abs(B.z - b) < 1e-7;
       if (mainFront && k === cbay && nb >= 3) continue;
+      const opening = openingDetails.openingAt(i, k);
 
-      if (role === 'door') {
-        slab(cx, cz, bw, y0, lowerPanelTop, lowerPanelMat, alongX);     // 문짝 하부 청판
-        const panel = slab(cx, cz, bw, lowerPanelTop, yLintel, doorMat(bw), alongX, 0.10); // 띠살 분합문
-        const primary = mainFront && k === primaryDoorBay;
-        openingDetails.add(planOpeningDetail({
-          kind: 'door', style: 'giwa', seed: `giwa:${P.seed ?? 0}:${i}:${k}`,
-          width: bw, height: yLintel - y0, wallThickness: T,
-          lowerPanelHeight: lowerPanelTop - y0, primary,
-          footwear: primary ? {
-            y: podTopY + 0.42 - y0,
-            outward: 0.78,
-            surface: 'toenmaru',
-          } : null,
-        }), {
-          center: { x: cx, z: cz }, bottomY: y0,
-          tangent: edgeDirection, outward: exterior,
-        }, panel);
-        slab(cx, cz, bw, yLintel + 0.10, yTopWall, M.plaster, alongX);  // 상인방 위 회벽
+      if (opening?.kind === 'door') {
+        const face = visibleCenter(opening, 0.10);
+        sidePanels(opening, bw, y0, yTopWall, M.plaster, alongX);
+        slab(face.x, face.z, opening.width,
+          y0, lowerPanelTop, lowerPanelMat, alongX, 0.10);
+        slab(opening.center.x, opening.center.z, opening.width,
+          yLintel + 0.10, yTopWall, M.plaster, alongX);
+        openingDetails.add(opening, (detail) => slab(
+          face.x,
+          face.z,
+          opening.width,
+          lowerPanelTop,
+          yLintel,
+          doorMat(detail.leafCount),
+          alongX,
+          0.10,
+        ));
+      } else if (opening?.kind === 'window') {
+        wallWithWindow(opening, bw, alongX,
+          role === 'plank' ? plankMat(bw) : M.plaster);
       } else if (role === 'plank') {
-        const plank = slab(cx, cz, bw, y0, yTopWall, plankMat(bw), alongX); // 세로널 판벽
-        if (k === 1) {
-          plank.name = 'plank-wall-window-bay';
-          const openingT = 0.10;
-          const faceOffset = overlayCenterOffset(T, openingT);
-          const openingCx = cx + exterior.x * faceOffset;
-          const openingCz = cz + exterior.z * faceOffset;
-          const opening = slab(
-            openingCx,
-            openingCz,
-            Math.min(bw * 0.4, 0.7),
-            winTop,
-            winTop + 0.5,
-            salMat,
-            alongX,
-            openingT,
-          );
-          opening.name = 'plank-opening';
-          openingDetails.add(planOpeningDetail({
-            kind: 'window', style: 'giwa', seed: `giwa:${P.seed ?? 0}:${i}:${k}:plank`,
-            width: Math.min(bw * 0.4, 0.7), height: 0.5, wallThickness: openingT,
-          }), {
-            center: { x: openingCx, z: openingCz }, bottomY: winTop,
-            tangent: edgeDirection, outward: exterior,
-          }, opening);
-        }
-      } else { // wall
-        if (k === cbay) wallWithWindow(cx, cz, bw, alongX, {
-          tangent: edgeDirection, outward: exterior,
-        }, `giwa:${P.seed ?? 0}:${i}:${k}:wall`);                        // 회벽 + 살창
-        else slab(cx, cz, bw, y0, yTopWall, M.plaster, alongX);         // 회벽만
+        slab(cx, cz, bw, y0, yTopWall, plankMat(bw), alongX);
+      } else {
+        slab(cx, cz, bw, y0, yTopWall, M.plaster, alongX);
       }
     }
 

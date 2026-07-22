@@ -37,6 +37,12 @@
 - `src/builder/opening-details.js`는 일반 기와집 벽체, 대표 종가 `buildHanok`, 궁·사찰·초가 공용 벽체가 같은
   plan을 소비하게 한다. 문양 텍스처는 미세 살 짜임을 계속 담당하고, 얕은 jamb·head·sill·문짝 이음·문지방만
   실루엣을 만든다.
+- 일반 초가·기와집은 `src/layout/residential-openings.js`의 칸별 문·창 plan을
+  `src/builder/residential-opening-details.js`에서 이 detail grammar와 결합한다. planner의 개수·폭·남향 primary를
+  패널과 frame에 그대로 쓰며, 한 개구를 생략하거나 두 번 조립하면 fail closed한다. 부엌 아궁이는 이 목록에
+  들어오지 않는 별도 service opening이다. 초가·기와집 모두 `kitchen-opening-spatial.js`의 실제 개구+frame span을
+  renderer와 공유하며, 합법 최대 폭에서도 그 span에 닿는 동측 창 슬롯을 미리 제외한다. 문짝 texture 반복 수도
+  별도 폭 임계값을 갖지 않고 같은 detail plan의 `leafCount`를 소비한다.
 - AURI의 머름 설명은 창 하부 시설에 한정해 적용한다. window plan은 개구 sill 아래 음의 local-y에 style 기본
   또는 명시 높이의 `meoreum-apron`과 `meoreum-rail`을 두며, door plan의 머름 높이는 0이다. 문 텍스처 하부의
   기존 청판 경계는 별도 `lowerPanel`/`lower-panel-rail`로 기록하므로 출입 통과부를 머름으로 오인하지 않는다.
@@ -67,7 +73,8 @@
   frame·threshold·유형별 철물 범위,
   primary pivot/footwear anchor와 전역 RNG 비의존을 검사한다.
 - `npm run check:building-clearance`: 실제 궁·사찰·일반 기와·초가·대표 종가 production geometry에서
-  frame/hardware가 각각 한 batch이고, primary entrance가 하나이며 철물이 MID에 섞이지 않는지 검사한다.
+  frame/hardware가 각각 한 batch이고, primary entrance가 하나이며 철물이 MID에 섞이지 않는지 검사한다. 초가
+  기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ은 planner와 실제 패널의 개수·폭, 부엌 분리, 메시·재질 상한도 함께 검사한다.
 - `npm run check:app`: 네 기와집 topology가 `hardware` 재질 하나를 공유하고 FULL decomp마다 한 그룹만 가지며,
   일반 기와↔초가와 대표 종가 rebuild가 anchor/panel/frame/hardware를 정확히 하나씩 교체·해제하는지, 재질·텍스처
   및 program 상한과 실제 Reference UI를 보존하는지 검사한다.
@@ -78,6 +85,9 @@
 - 머름 의미 수정과 대표 종가 통합 뒤 production opening 예산은 일반 기와 552+144, 궁 1224+208, 사찰
   1032+144, 초가 240+144, 종가 444+144 triangles(frame+hardware)다. 실제 대표 종가 rebuild는 이전 opening
   geometry 두 개를 각각 한 번 해제했고 rebase 후 shader program은 135→136으로 제한됐다. 절대 시간은 비교하지 않는다.
+- residential plan 통합 뒤 fixture 기준 FULL 예산은 초가 기본 4개 개구/75 meshes/31 materials, 초가 최대
+  13/92/32, 기와 ㅡ 5/137/43, ㄱ 5/158/51, ㄷ 최대 20/248/64다. 개수가 늘어도 frame/hardware는 건물당
+  각각 한 batch이며 개구 수에 비례한 texture나 detail draw batch를 만들지 않는다.
 
 ## 6. 원문과 이용조건
 

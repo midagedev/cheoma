@@ -10,13 +10,20 @@ import {
   overlayCenterOffset,
   sunkPrism,
 } from '../src/core/surface-clearance.js';
-import { planGiwaKitchenOpening } from '../src/api/residential-openings.js';
+import {
+  planChogaKitchenOpening,
+  planGiwaKitchenOpening,
+} from '../src/api/residential-openings.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const EPS = 1e-5;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function spansOverlap(a, b) {
+  return a.min < b.max && b.min < a.max;
 }
 
 async function inspectProductionGeometry() {
@@ -184,6 +191,74 @@ for (const [style, opening] of Object.entries(production.openings)) {
   }
 }
 
+for (const fixture of production.residentialFixtures) {
+  const plan = fixture.plan;
+  invariant(fixture.planCount === 1, `${fixture.name} exposes ${fixture.planCount} residential plans`);
+  invariant(plan && fixture.panels.length === plan.openings.length,
+    `${fixture.name} rendered ${fixture.panels.length}/${plan?.openings.length || 0} planned openings`);
+  invariant(new Set(fixture.panels.map((panel) => panel.id)).size === fixture.panels.length,
+    `${fixture.name} assembled a residential opening more than once`);
+  invariant(fixture.panels.filter((panel) => panel.primary).length === 1,
+    `${fixture.name} lost its single primary panel`);
+  for (const panel of fixture.panels) {
+    invariant(Math.abs(panel.renderedWidth - panel.plannedWidth) < EPS,
+      `${fixture.name}/${panel.id} width drifted ${panel.renderedWidth} != ${panel.plannedWidth}`);
+    if (panel.kind === 'door') {
+      invariant(panel.textureRepeatX === panel.detailLeafCount,
+        `${fixture.name}/${panel.id} texture has ${panel.textureRepeatX} leaves but detail has ${panel.detailLeafCount}`);
+    }
+  }
+  invariant(fixture.details.counts.frame === 1 && fixture.details.counts.hardware === 1,
+    `${fixture.name} broke building-wide detail batching`);
+  invariant(fixture.details.counts.primaryAnchor === 1 && fixture.details.counts.primaryPanel === 1,
+    `${fixture.name} lost the future interaction anchor`);
+  invariant(fixture.kitchenCount === 1, `${fixture.name} lost its separate kitchen service opening`);
+  invariant(fixture.meshes < 280 && fixture.materials < 80,
+    `${fixture.name} exceeded FULL budget (${fixture.meshes} meshes/${fixture.materials} materials)`);
+}
+
+const residentialByName = Object.fromEntries(
+  production.residentialFixtures.map((fixture) => [fixture.name, fixture]),
+);
+invariant(residentialByName['choga-min'].plan.params.doorCount === 1
+    && residentialByName['choga-min'].plan.params.windowCount === 1,
+  'choga minimum controls did not reach production');
+invariant(residentialByName['choga-max'].plan.params.doorCount
+    === residentialByName['choga-max'].plan.capabilities.doorCount.max
+    && residentialByName['choga-max'].plan.params.windowCount
+    === residentialByName['choga-max'].plan.capabilities.windowCount.max,
+  'choga maximum controls were not shape-clamped in production');
+invariant(residentialByName['giwa-u-max'].plan.params.doorCount
+    === residentialByName['giwa-u-max'].plan.capabilities.doorCount.max
+    && residentialByName['giwa-u-max'].plan.params.windowCount
+    === residentialByName['giwa-u-max'].plan.capabilities.windowCount.max,
+  'giwa U maximum controls were not shape-clamped in production');
+
+const chogaLeafBoundary = residentialByName['choga-default'].panels.find((panel) => panel.primary);
+invariant(Math.abs(chogaLeafBoundary.plannedWidth - 1.0944) < EPS
+    && chogaLeafBoundary.detailLeafCount === 2
+    && chogaLeafBoundary.textureRepeatX === 2,
+  `choga 1.05m leaf boundary drifted: ${JSON.stringify(chogaLeafBoundary)}`);
+const giwaLeafBoundary = residentialByName['giwa-leaf-one'].panels.find((panel) => panel.primary);
+invariant(Math.abs(giwaLeafBoundary.plannedWidth - 0.9872) < EPS
+    && giwaLeafBoundary.detailLeafCount === 1
+    && giwaLeafBoundary.textureRepeatX === 1,
+  `giwa 1.05m leaf boundary drifted: ${JSON.stringify(giwaLeafBoundary)}`);
+
+const tightKitchen = residentialByName['choga-tight-kitchen'];
+const plannedKitchen = planChogaKitchenOpening(4.1);
+invariant(Math.abs(tightKitchen.kitchenFrameSpanZ.min - plannedKitchen.spanZ.min) < EPS
+    && Math.abs(tightKitchen.kitchenFrameSpanZ.max - plannedKitchen.spanZ.max) < EPS,
+  `choga kitchen renderer/planner spans drifted: ${JSON.stringify(tightKitchen.kitchenFrameSpanZ)}`);
+const tightEastWindows = tightKitchen.panels.filter((panel) => (
+  panel.kind === 'window' && panel.facade === 'side-east'
+));
+invariant(tightEastWindows.length === 0,
+  `tight choga retained east windows beside its kitchen: ${JSON.stringify(tightEastWindows)}`);
+invariant(tightKitchen.panels.every((panel) => (
+  panel.facade !== 'side-east' || !spansOverlap(panel.spanZ, tightKitchen.kitchenFrameSpanZ)
+)), 'tight choga rendered an opening through the kitchen frame');
+
 console.log(
   `giwa podium=${production.giwa.podiumChildren} drawables, opening clearance=`
   + `${production.giwa.openingFaceClearance.toFixed(3)}m`,
@@ -199,6 +274,11 @@ console.log(
 console.log(
   `opening batches: ${Object.entries(production.openings).map(([style, opening]) => (
     `${style} tris=${opening.frameTriangles}+${opening.hardwareTriangles}`
+  )).join(', ')}`,
+);
+console.log(
+  `residential FULL: ${production.residentialFixtures.map((fixture) => (
+    `${fixture.name}=${fixture.panels.length} openings/${fixture.meshes} meshes/${fixture.materials} materials`
   )).join(', ')}`,
 );
 console.log(

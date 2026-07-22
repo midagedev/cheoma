@@ -583,8 +583,12 @@ try {
       const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
       requestAnimationFrame(step);
     });
-    await frames();
     const oldRoot = engine.village.focusRoot();
+    // Focus warming is deliberately asynchronous. Register the same subtree-scoped material
+    // set before taking a program baseline so unrelated pending links cannot be charged to
+    // the rebuild when this smoke follows the CPU-heavy full contract suite.
+    engine.renderer.compile(oldRoot, engine.camera, engine.scene);
+    await frames();
     const oldGeometries = [];
     oldRoot?.traverse((object) => {
       if (['opening-frame-details', 'opening-hardware-details'].includes(object.name)
@@ -594,6 +598,9 @@ try {
     const onDispose = (event) => disposed.set(event.target, (disposed.get(event.target) || 0) + 1);
     for (const geometry of oldGeometries) geometry.addEventListener('dispose', onDispose);
     const beforePrograms = engine.renderer.info.programs?.length || 0;
+    const beforeProgramKeys = new Set(
+      (engine.renderer.info.programs || []).map((program) => program.cacheKey),
+    );
     const rebuilt = engine.village.rebuild(parcelId, {
       building: { roofPitch: 1.08, eaveOverhang: 1.38, profileCurve: 0.56 },
     }, { refreshFlora: false });
@@ -652,6 +659,8 @@ try {
       oldOpeningGeometries: oldGeometries.length,
       disposed: [...disposed.values()],
       programs: [beforePrograms, engine.renderer.info.programs?.length || 0],
+      newProgramFamilies: (engine.renderer.info.programs || [])
+        .filter((program) => !beforeProgramKeys.has(program.cacheKey)).length,
       material,
       primaryFace: inspectPrimaryFace(),
     };
@@ -671,7 +680,7 @@ try {
         heroOpeningLifecycle.primaryFace.clearance
           - heroOpeningLifecycle.primaryFace.expectedClearance,
       ) <= 1e-5
-      && heroOpeningLifecycle.programs[1] - heroOpeningLifecycle.programs[0] <= 1,
+      && heroOpeningLifecycle.newProgramFamilies <= 1,
   `head-house rebuild preserves positive frame/panel clearance, replaces one opening overlay, `
     + `disposes it once, and reuses LOD/program families (${JSON.stringify(heroOpeningLifecycle)})`);
 

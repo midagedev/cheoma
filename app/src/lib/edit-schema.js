@@ -12,6 +12,27 @@
 // ctrl: 'range'(슬라이더·라이브) | 'stepper'(정수 ±) | 'segment'(택1) | 'toggle'(불).
 // adv 섹션은 "고급" 접기로 숨긴다(과밀 제어). 라벨키는 i18n s_<key>/sec_<id>.
 
+import { residentialOpeningCapabilities } from '../../../src/api/residential-openings.js';
+
+function openingSection(kind, spec) {
+  const capabilities = residentialOpeningCapabilities(kind, spec?.params || {});
+  return {
+    id: 'openings',
+    titleKey: 'sec_openings',
+    fields: [
+      { key: 'doorCount', ctrl: 'stepper', ...capabilities.doorCount, def: capabilities.doorCount.default,
+        route: 'building', unitKey: 'unit_count', showBounds: true },
+      { key: 'windowCount', ctrl: 'stepper', ...capabilities.windowCount, def: capabilities.windowCount.default,
+        route: 'building', unitKey: 'unit_count', showBounds: true },
+      { key: 'doorWidthK', ctrl: 'range', ...capabilities.doorWidthK, def: capabilities.doorWidthK.default,
+        route: 'building', format: 'percent', showBounds: true },
+      { key: 'windowWidthK', ctrl: 'range', ...capabilities.windowWidthK, def: capabilities.windowWidthK.default,
+        route: 'building', format: 'percent', showBounds: true },
+      { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] },
+    ],
+  };
+}
+
 // ── 정규 필지: 초가(민가) ─────────────────────────────────────────────────
 const CHOGA_SECTIONS = [
   // 칸수(#146 복원) — 초가는 一자 격자라 정면·측면 칸수가 곧 규모("몇 칸짜리"). 구 단일건물 패널의 헤드라인
@@ -20,6 +41,7 @@ const CHOGA_SECTIONS = [
     { key: 'frontBays', ctrl: 'stepper', min: 3, max: 5, route: 'building' },
     { key: 'sideBays', ctrl: 'stepper', min: 2, max: 3, route: 'building' },
   ] },
+  { id: 'openings', titleKey: 'sec_openings', fields: [] },
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'roofPitch', ctrl: 'range', min: 0.5, max: 0.78, step: 0.01, route: 'building' },
     { key: 'eaveOverhang', ctrl: 'range', min: 0.8, max: 1.8, step: 0.05, route: 'building' },
@@ -29,13 +51,6 @@ const CHOGA_SECTIONS = [
     { key: 'thatchAge', ctrl: 'range', min: 0, max: 1, step: 0.02, route: 'top' },
     { key: 'wallType', ctrl: 'segment', route: 'top',
       options: ['stone', 'mud', 'brush', 'hedge', 'open'] },
-  ] },
-  // 창호·개구(#96 ②): 문/창 개수·창살. 코어 buildBuilding 지원(builder/walls.js winBack·winSide + applyDoorPattern).
-  //   초가 정면은 어칸 문 1 + 나머지 칸 살창(frontBays 파생) — 정면 창수는 '평면' frontBays 로 조절.
-  { id: 'openings', titleKey: 'sec_openings', fields: [
-    { key: 'winBack', ctrl: 'stepper', min: 0, max: 2, route: 'building' },   // 후면 살창 개수
-    { key: 'winSide', ctrl: 'toggle', route: 'building' },                    // 측면 봉창 유무
-    { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] }, // 창살 패턴
   ] },
   { id: 'plandims', titleKey: 'sec_plandims', adv: true, fields: [
     { key: 'centerBayW', ctrl: 'range', min: 2.2, max: 3.8, step: 0.05, route: 'building' },
@@ -70,13 +85,13 @@ const GIWA_SECTIONS = [
     { key: 'mainHalfW', ctrl: 'range', min: 2.8, max: 5.2, step: 0.1, route: 'building' },
     { key: 'wingLen', ctrl: 'range', min: 2.8, max: 4.6, step: 0.1, route: 'building' },
   ] },
+  { id: 'openings', titleKey: 'sec_openings', fields: [] },
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'riseScale', ctrl: 'range', min: 0.6, max: 1.2, step: 0.02, route: 'building' },
     { key: 'eaveOverhang', ctrl: 'range', min: 1.0, max: 2.0, step: 0.05, route: 'building' },
     { key: 'profileCurve', ctrl: 'range', min: 0, max: 0.8, step: 0.01, route: 'building' },
   ] },
   { id: 'skin', titleKey: 'sec_skin', fields: [
-    { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] },
     { key: 'wallType', ctrl: 'segment', route: 'top', options: ['tile', 'stone', 'mud', 'brush'] },
   ] },
   { id: 'plandims', titleKey: 'sec_plandims', adv: true, fields: [
@@ -109,14 +124,23 @@ function giwaSections(spec) {
   const bays = Math.max(shape === 'u' ? 4 : 3, Math.min(5, requestedBays));
   const bay = Math.max(1.8, Number.isFinite(spec?.params?.bay) ? spec.params.bay : 2.2);
   const minHalfW = Math.max(2.8, bays * bay * 0.5);
-  return GIWA_SECTIONS.map((section) => ({
-    ...section,
-    fields: section.fields
-      .filter((field) => shape !== 'single' || (field.key !== 'wingLen' && field.key !== 'wingW'))
-      .map((field) => field.key === 'mainHalfW'
-        ? { ...field, min: minHalfW, max: Math.max(field.max, minHalfW) }
-        : { ...field }),
-  }));
+  return GIWA_SECTIONS.map((section) => {
+    const source = section.id === 'openings' ? openingSection('giwa', spec) : section;
+    return {
+      ...source,
+      fields: source.fields
+        .filter((field) => shape !== 'single' || (field.key !== 'wingLen' && field.key !== 'wingW'))
+        .map((field) => field.key === 'mainHalfW'
+          ? { ...field, min: minHalfW, max: Math.max(field.max, minHalfW) }
+          : { ...field }),
+    };
+  });
+}
+
+function chogaSections(spec) {
+  return CHOGA_SECTIONS.map((section) => (
+    section.id === 'openings' ? openingSection('choga', spec) : section
+  ));
 }
 
 // ── 특수: 종가(hanok 컴파운드) — 평면형·칸수 + buildHanok roofOpts + 벽 높이 ────────────
@@ -293,7 +317,7 @@ export function schemaFor(spec) {
     return { family: 'hero', heroStyle: hs, tabs: false, sections: hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS };
   }
   const kind = spec.kind === 'giwa' ? 'giwa' : 'choga';
-  return { family: 'regular', kind, tabs: true, sections: kind === 'giwa' ? giwaSections(spec) : CHOGA_SECTIONS };
+  return { family: 'regular', kind, tabs: true, sections: kind === 'giwa' ? giwaSections(spec) : chogaSections(spec) };
 }
 
 // 모든 필드를 평탄화(스키마 순회 없이 라우팅에 필요). 유효값만(정의됨) 담아 undefined 오염을 막는다.

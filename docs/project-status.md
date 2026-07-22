@@ -138,6 +138,12 @@ anchor를 소유하고, `giwa.js`·`walls.js`·대표 종가 `buildHanok`은 한
 texture 없는 palette material 하나로 FULL/selected overlay에만 남긴다. 문 상호작용과 신발 렌더링은 이 anchor를
 소비하는 독립 후속 단계이며, 아궁이 service opening과 거주 창호를 합치지 않는다.
 
+GitHub #10은 초가·기와 ㅡ·ㄱ·ㄷ의 문·창 plan을 FULL renderer와 집 편집기에 연결했다. 문 수·창 수·문 너비·창
+너비 네 축의 기본값과 shape별 상한은 `residential-openings.js` 한 곳에서 정규화되고, Svelte는 이 capability로
+한국어 단위·범위를 표시한 뒤 직렬화 가능한 엔진 params만 보낸다. 공통 조립 경계가 모든 계획 개구를 정확히 한
+번 패널과 창호 detail batch로 만들며 남향 primary anchor, 대청, 기와 부엌 span과 초가 부엌 service opening을
+보존한다. URL/share/export 직렬화는 이 단계에 추가하지 않았다.
+
 GitHub #12 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md)의 계약대로 구현됐다. Three 없는 순수 local-space 계획과 Three.js 조립·dispose를 분리하고, 22–30m 암자형·36–48m 중정형·52–72m 다원형을 제공한다. 마을은 실제 직사각 footprint를 필지·도로·식생 전에 예약하며, 편집 패널은 전각 수·중정 여백·축 굴절·석탑·석등·종루·당간지주·부도를 계획 옵션으로 갱신한다. 남측 일조 통로와 26° focus 카메라는 같은 `frontDir` 계약을 쓴다.
 
 사찰 원본 조립 트리는 편집·두부 조립용으로만 유지하고, 부감에서는 재질별 병합해 대표 다원형을 2,681콜에서 111콜로 낮춘다. 순수 계약과 독립 WebGL 수명주기/성능 게이트, 실제 앱 focus 캡처를 분리해 일상 검증은 가볍게 유지한다.

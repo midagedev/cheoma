@@ -7,7 +7,10 @@ export {
   residentialOpeningCapabilities,
   residentialOpeningSlots,
 } from '../layout/residential-openings.js';
-export { planGiwaKitchenOpening } from '../layout/kitchen-opening-spatial.js';
+export {
+  planChogaKitchenOpening,
+  planGiwaKitchenOpening,
+} from '../layout/kitchen-opening-spatial.js';
 export {
   CHOGA_SHAPE_BOUNDS,
   CHOGA_SHAPE_DEFAULTS,

@@ -1,11 +1,12 @@
-// Pure contract for issue #10. The renderer/UI will consume this policy in a
-// later PR; this gate keeps shape capacity, determinism, and nesting stable.
+// End-to-end renderer-free contract for issue #10: planning, serializable edit
+// state and the declarative Svelte schema share one shape-aware capability set.
 import assert from 'node:assert/strict';
 import {
   RESIDENTIAL_OPENING_DEFAULTS,
   RESIDENTIAL_OPENING_PARAM_KEYS,
   normalizeChogaShape,
   normalizeResidentialOpenings,
+  planChogaKitchenOpening,
   planGiwaKitchenOpening,
   planResidentialOpenings,
   residentialOpeningCapabilities,
@@ -16,6 +17,12 @@ import {
   giwaFootprintMetrics,
   giwaFootprintPoints,
 } from '../src/layout/giwa-footprint.js';
+import { buildRebuildPayload, schemaFor } from '../app/src/lib/edit-schema.js';
+import {
+  buildEditedParcelSpec,
+  buildParcelSpec,
+  clampBuildingDimensions,
+} from '../src/runtime/village/parcel-edit.js';
 
 const FIXTURES = Object.freeze({
   choga3: Object.freeze({
@@ -128,6 +135,30 @@ const tightU = {
 };
 assert.equal(planResidentialOpenings('giwa', tightU, 7).openings.find((opening) => opening.primary)?.facade,
   'front', 'narrow U courtyard lost its primary south/front door when no daecheong fits');
+const chogaFace = planResidentialOpenings('choga', FIXTURES.choga3.building, 20260716);
+assert.equal(chogaFace.openings.filter((opening) => opening.kind === 'window' && opening.facade === 'front').length, 2,
+  'default 초가 face no longer preserves the central door with flanking front windows');
+const tightChogaKitchen = {
+  frontBays: 3, sideBays: 2,
+  centerBayW: 3, middleBayW: 2.6, endBayW: 2.6,
+  centerBayD: 1.4, endBayD: 1.4, columnRadius: 0.12,
+  windowCount: 99, windowWidthK: 0.62,
+};
+const tightChogaPlan = planResidentialOpenings('choga', tightChogaKitchen, 20260716);
+const tightChogaService = planChogaKitchenOpening(4.1);
+assert(Math.abs(tightChogaService.spanZ.min + 0.92) < 1e-12
+    && Math.abs(tightChogaService.spanZ.max - 0.42) < 1e-12,
+  `choga planner/renderer kitchen frame span drifted: ${JSON.stringify(tightChogaService.spanZ)}`);
+for (const opening of tightChogaPlan.openings.filter((candidate) => (
+  candidate.kind === 'window' && candidate.facade === 'side-east'
+))) {
+  assert(!spansOverlap({
+    min: opening.center.z - opening.width / 2,
+    max: opening.center.z + opening.width / 2,
+  }, tightChogaService.spanZ), `${opening.id}: tight choga window overlaps its kitchen frame`);
+}
+assert.equal(tightChogaPlan.openings.filter((opening) => opening.facade === 'side-east').length, 0,
+  'tight choga fixture retained the east window that clips the kitchen frame');
 
 const originalRandom = Math.random;
 Math.random = () => { throw new Error('residential opening plan consumed global Math.random'); };
@@ -355,4 +386,75 @@ assertExtentsEqual(
   'giwa-shared-upper-bounds',
 );
 
-console.log('RESIDENTIAL OPENINGS: PASS (초가 3/5칸 + 기와 ㅡ/ㄱ/ㄷ, nested seed-stable pure plans)');
+const parcelFixture = {
+  id: 'edit-fixture', kind: 'giwa', variant: 0, rank: 0.6, seed: 73,
+  plotW: 16, plotD: 14, wallType: 'stone', toneIdx: 0,
+};
+for (const [kind, params] of [
+  ['choga', { ...PRESETS.choga }],
+  ['giwa', { ...PRESETS.giwa, planShape: 'u', bays: 4, mainHalfW: 5 }],
+]) {
+  const schema = schemaFor({ kind, family: 'regular', params });
+  const fields = schema.sections.flatMap((section) => section.fields);
+  const openingFields = Object.fromEntries(fields
+    .filter((field) => RESIDENTIAL_OPENING_PARAM_KEYS.includes(field.key))
+    .map((field) => [field.key, field]));
+  const capabilities = residentialOpeningCapabilities(kind, params);
+  assert.deepEqual(Object.keys(openingFields), RESIDENTIAL_OPENING_PARAM_KEYS,
+    `${kind}: editor did not expose exactly the four residential axes`);
+  for (const key of RESIDENTIAL_OPENING_PARAM_KEYS) {
+    assert.equal(openingFields[key].min, capabilities[key].min, `${kind}/${key}: editor minimum drifted`);
+    assert.equal(openingFields[key].max, capabilities[key].max, `${kind}/${key}: editor maximum drifted`);
+    assert.equal(openingFields[key].step, capabilities[key].step, `${kind}/${key}: editor step drifted`);
+    assert.equal(openingFields[key].route, 'building', `${kind}/${key}: editor bypasses engine building params`);
+  }
+  assert.equal(openingFields.doorCount.unitKey, 'unit_count', `${kind}: count unit is missing`);
+  assert.equal(openingFields.windowWidthK.format, 'percent', `${kind}: width unit is missing`);
+  const payload = buildRebuildPayload({ kind, family: 'regular', params }, {
+    kind,
+    ...params,
+    doorCount: capabilities.doorCount.max,
+    windowCount: capabilities.windowCount.min,
+    doorWidthK: capabilities.doorWidthK.min,
+    windowWidthK: capabilities.windowWidthK.max,
+  });
+  assert.deepEqual(
+    Object.keys(payload.building).filter((key) => RESIDENTIAL_OPENING_PARAM_KEYS.includes(key)),
+    RESIDENTIAL_OPENING_PARAM_KEYS,
+    `${kind}: rebuild payload lost an opening axis`,
+  );
+}
+
+const defaultSpec = buildParcelSpec(parcelFixture);
+assert.deepEqual(
+  Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, defaultSpec.params[key]])),
+  RESIDENTIAL_OPENING_DEFAULTS.giwa,
+  'parcel edit state did not serialize planner defaults',
+);
+const chogaSparse = buildParcelSpec({ ...parcelFixture, kind: 'choga', variant: 0 });
+const chogaRich = buildParcelSpec({ ...parcelFixture, kind: 'choga', variant: 2 });
+assert(chogaSparse.params.windowCount < chogaRich.params.windowCount
+    && chogaSparse.params.windowWidthK < chogaRich.params.windowWidthK,
+  'seed-selected household variants no longer vary openings inside planner capabilities');
+for (const spec of [chogaSparse, chogaRich]) {
+  assert.deepEqual(
+    normalizeResidentialOpenings(spec.kind, spec.params),
+    Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, spec.params[key]])),
+    `${spec.variant}: generated opening variation escaped its shape capability`,
+  );
+}
+const accepted = { ...defaultSpec.params, planShape: 'single', doorCount: 999, windowCount: 999 };
+clampBuildingDimensions(accepted, 'giwa');
+const singleCapabilities = residentialOpeningCapabilities('giwa', accepted);
+assert.equal(accepted.doorCount, singleCapabilities.doorCount.max,
+  'shape change did not clamp the serialized door count');
+assert.equal(accepted.windowCount, singleCapabilities.windowCount.max,
+  'shape change did not clamp the serialized window count');
+const editedSpec = buildEditedParcelSpec(parcelFixture, { building: accepted }, accepted);
+assert.deepEqual(
+  normalizeResidentialOpenings('giwa', editedSpec.params),
+  Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, editedSpec.params[key]])),
+  'accepted editor spec is not a canonical serializable opening boundary',
+);
+
+console.log('RESIDENTIAL OPENINGS: PASS (초가 3/5칸 + 기와 ㅡ/ㄱ/ㄷ, planner/editor state/schema)');
