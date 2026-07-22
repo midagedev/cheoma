@@ -469,6 +469,7 @@ export function* populateVillageSteps(plan, opts = {}) {
     setAnimalsTime: (name) => { for (const a of animals.handles) a.setTime(name); },
     setSeason: (name) => { terrain.setSeason(name); flora.setSeason(name); bloom.setSeason(name); forest.setSeason(name); for (const a of animals.handles) a.setSeason(name); },
     replaceFlora,
+    deactivateMist: () => { mist?.deactivate(); ridgeMist?.deactivate(); },
     // 엣지 헤이즈·운해 링·능선 물안개 색을 대기(fog)색과 동기화 — 어댑터 fog 모디파이어가 매 틱 호출(#50 정합).
     setEnvHaze: (fogColor) => { terrain.setHaze(fogColor); forest.setHaze(fogColor); mist?.update(fogColor); ridgeMist?.update(fogColor); },
     // 검증 앵커(하네스 프레이밍용)

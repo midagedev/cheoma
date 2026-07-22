@@ -1521,6 +1521,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       detachClouds();
       ambientField.exit();
       treeOccluder?.dispose();
+      group.userData.deactivateMist?.();
       disposeTree(group, keptMats);
       thresholdLife.dispose();
       // #129 프로그램 앵커 최종 해제 — 오버레이 dispose 는 __kept 를 건너뛰므로 마을 파기 시 여기서 정리.
