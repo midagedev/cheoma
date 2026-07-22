@@ -39,6 +39,9 @@ assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-focus', 'lod-wave', 'build',
 ]);
+assert.deepEqual(ids(['app/src/engine/directional-shadow-runtime.js']), [
+  'core', 'app', 'rim', 'lod-focus', 'build',
+]);
 assert.deepEqual(ids(['app/src/components/EnvironmentDial.svelte']), [
   'core', 'app', 'winter-app', 'build',
 ]);
@@ -46,6 +49,7 @@ assert.deepEqual(ids(['src/api/village.js']), [
   'core', 'app', 'worker', 'lod-focus', 'lod-wave',
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/api/shadow-framing.js']), ['core', 'app', 'rim', 'lod-focus']);
 assert.deepEqual(ids(['src/render/ink.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['app/src/engine/ink-mode-runtime.js']), ['core', 'app', 'ink-app', 'build']);
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);

@@ -38,6 +38,7 @@ import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './
 import { createArchitecturalRevealRuntime } from './architectural-reveal-runtime.js';
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
 import { createCinematicRuntime } from './cinematic-runtime.js';
+import { createDirectionalShadowRuntime } from './directional-shadow-runtime.js';
 import { createInkModeRuntime } from './ink-mode-runtime.js';
 import { createPostRuntime } from './post-runtime.js';
 import { createSceneRuntime } from './scene-runtime.js';
@@ -102,6 +103,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     pixelRatioCap: PR_CAP,
     shadowSize: SHADOW_SIZE,
   });
+  const directionalShadow = createDirectionalShadowRuntime(sun);
+  const shadowOrigin = new THREE.Vector3();
+  let debugDirectionalShadowAnchor = null;
   // #128 전환 프리징 본체: three 는 신규 프로그램 첫 렌더(onFirstUse)마다 checkShaderErrors 가 켜져 있으면
   //   getProgramInfoLog + LINK_STATUS 를 조회해 GPU 링크 완료를 메인스레드에서 동기 대기한다(KHR_parallel_
   //   shader_compile 가 있어도 이 조회가 병렬성을 무력화). focus-out/in·hop 전환마다 대량 신규 프로그램이
@@ -122,9 +126,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let heroSunAz = null;
 
   // ---------- 그림자 정적 캐시(#140-A) ----------
-  //   sun.shadow.camera 는 원점 고정 ±22 ortho(위 설정, 어디서도 카메라를 따라 이동·리사이즈하지
-  //   않음) → 카메라 궤도·줌·팬·트윈·walk 는 그림자 맵을 바꾸지 않는다. 정적 부감/정적 focus 에서
-  //   매 프레임 shadowMap 을 재렌더하면 중앙 박스 캐스터(≈240콜/프레임)를 헛제출한다. 그래서 부팅
+  //   sun.shadow.camera 는 ±22 ortho 크기를 유지하되, 선택/전환 중에는 controls.target 을 texel 단위로
+  //   따라가 외곽 필지의 실제 처마·마당 그림자를 담는다. 부감은 원점에 고정되고 정착한 focus anchor도
+  //   변하지 않으므로 카메라 궤도·줌·미세 팬만으로 그림자 맵을 다시 만들지 않는다. 정적 프레임마다
+  //   shadowMap 을 재렌더하면 focus 박스 캐스터(≈240콜/프레임)를 헛제출한다. 그래서 부팅
   //   예열 후 shadowMap.autoUpdate=false 로 두고, 아래 조건에서만 needsUpdate 를 1프레임 세운다:
   //     · shadowHot 창(setTime/재생성 등 태양방향·지오 변동 후 일정 시간)
   //     · 조립·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈 등 지오/무대가 움직이는 프레임
@@ -734,6 +739,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const sp = sun.position;
       const hmag = Math.hypot(sp.x, sp.z);
       if (hmag > 1e-4) { sp.x = Math.sin(heroSunAz) * hmag; sp.z = Math.cos(heroSunAz) * hmag; }
+    }
+    // Product sun.position remains a direction vector for clouds/motes/grass/rim/flare.
+    // Only the shadow camera follows the viewed architectural target. During focus
+    // transitions controls.target supplies the same continuous A→B or house→aerial
+    // path as the camera; settled aerial deliberately returns to the world origin.
+    const shadowAnchor = debugDirectionalShadowAnchor
+      || (village.active && (village.selected || village.transitioning)
+        ? controls.target
+        : shadowOrigin);
+    if (directionalShadow.setAnchor(shadowAnchor) && shadowCacheOn) {
+      renderer.shadowMap.needsUpdate = true;
     }
     nightGlowRef.update(dt);
     // LOD가 활성화한 애니메이션만 갱신한다. 청크/overlay caster 소유권 변화도 같은 프레임에
@@ -2448,6 +2464,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         variant: p.buildingSpec.variant ?? null,
         heroStyle: p.buildingSpec.heroStyle || null, family: p.buildingSpec.family || null,
         editable: p.buildingSpec.editable === true,
+        worldCenter: p.worldCenter.toArray(),
+        focusTarget: p.cameraFraming.target.toArray(),
         focusBaseY: +p.worldCenter.y.toFixed(2),
         focusTargetY: +p.cameraFraming.target.y.toFixed(2),
         focusTargetLift: +(p.cameraFraming.target.y - p.worldCenter.y).toFixed(2),
@@ -2679,6 +2697,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     __controls: controls,   // 검증용: 프레임 단위 controls.target 샘플링
     debugPostPassOrder: () => postRuntime.debugPassOrder(),
     debugPostResolution: () => postRuntime.debugResolution(),
+    debugDirectionalShadow: () => directionalShadow.debugState(),
+    debugSetDirectionalShadowAnchor: (value) => {
+      const point = value == null ? null : Array.isArray(value)
+        ? new THREE.Vector3(value[0], value[1], value[2])
+        : new THREE.Vector3(value.x, value.y, value.z);
+      debugDirectionalShadowAnchor = point;
+      directionalShadow.setAnchor(point);
+      if (sun.shadow) renderer.shadowMap.needsUpdate = true;
+      return directionalShadow.debugState();
+    },
     debugInk: () => inkModeRuntime.debugState(),
     debugInkPbrAwake: (awake) => inkModeRuntime.debugSetPbrAwake(awake),
     debugDof: debugDofState,
@@ -2784,6 +2812,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       weatherRef?.dispose?.();
       inkModeRuntime.dispose();
       postRuntime.dispose();
+      directionalShadow.dispose();
       env?.dispose?.();
       env = null;
       clearGhost();
