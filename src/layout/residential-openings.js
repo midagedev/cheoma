@@ -270,6 +270,13 @@ function giwaSlots(building) {
       ...slot,
       id: `giwa:${slot.openingKind}:${facade}:e${edgeIndex}:b${slot.bayIndex}`,
       facade,
+      // A main-front door leaves its footwear on the side leading toward the
+      // open daecheong.  Express that in the opening's own +u basis here;
+      // renderers and focused props must not reconstruct it from world x or a
+      // particular ㄱ/ㄷ footprint orientation.
+      landingClearSide: mainFront
+        ? (slot.edgeCenterOffset <= 0 ? 1 : -1)
+        : null,
     }));
     if (surface === 'courtyard') {
       // The main-front center is the open daecheong only when the range has the
@@ -344,11 +351,19 @@ function orderedDoorSlots(slots, seed) {
   const eligible = slots.filter((slot) => slot.primaryEligible);
   const pool = eligible.length ? eligible : slots;
   const primary = [...pool].sort((a, b) => (
-    Math.abs(a.edgeCenterOffset) - Math.abs(b.edgeCenterOffset)
+    compareCenterDistance(a, b)
     || seededRank(seed, a.id) - seededRank(seed, b.id)
     || compareIds(a, b)
   ))[0];
   return [primary, ...seededOrder(slots.filter((slot) => slot.id !== primary.id), seed)];
+}
+
+function compareCenterDistance(a, b) {
+  const delta = Math.abs(a.edgeCenterOffset) - Math.abs(b.edgeCenterOffset);
+  // Symmetric bay centers can differ by the last floating-point bit after a
+  // footprint division. Preserve the documented seed tie-break instead of
+  // accidentally pinning one side of the daecheong forever.
+  return Math.abs(delta) < 1e-9 ? 0 : delta;
 }
 
 function frozenSlots(style, source) {
@@ -434,6 +449,9 @@ function plannedOpening(slot, style, widthK, primary) {
     width: slot.availableWidth * widthK,
     verticalBand: slot.openingKind === 'door' ? 'floor-to-lintel' : 'sill-to-lintel',
     primary,
+    landing: primary && (slot.landingClearSide === -1 || slot.landingClearSide === 1)
+      ? { clearSide: slot.landingClearSide }
+      : null,
   };
 }
 

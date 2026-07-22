@@ -192,32 +192,38 @@
 - URL: https://www.heritage.go.kr/heri/cul/chartImgHeritage.do?file_seq=2839493&title3d=%EB%8F%84%EB%A9%B4_%EA%B5%AD%EB%B3%B4_%EA%B2%BD%EB%B3%B5%EA%B6%81+%EA%B7%BC%EC%A0%95%EC%A0%84_%EC%A0%95%EB%B0%80%EC%8B%A4%EC%B8%A1+%EB%AC%B8%EA%B3%A0%EB%A6%AC%EF%BC%8F%EA%B3%A0%EB%A6%AC%EA%B0%88%EC%87%A0%EF%BC%8F%EA%B3%A0%EC%A0%95%EC%87%A0%EF%BC%8F%EB%8F%8C%EC%A9%8C%EA%B7%80%EF%BC%8F%EC%9B%90%EC%82%B0%EF%BC%8F%EC%9E%90%EB%AC%BC%EC%87%A0%EF%BC%8F%EA%B2%BD%EC%B2%A9%EF%BC%8F%EC%83%88%EB%B0%9C%EC%9E%A5%EC%8B%9D+%EC%B2%A0%EB%AC%BC+%EC%83%81%EC%84%B8%EB%8F%84
 - 라이선스: 국가유산청 공개 상세 페이지(2026-07-22 열람). 페이지의 출처·저작권 표기를 따르며 링크와 사실 요약만 수록. 도면·이미지 재사용 전 해당 항목의 최신 공공누리 유형과 이용조건을 별도 확인.
 
+### 25. 국립익산박물관 · 국립중앙박물관 · Korea.net — 조선 신발과 문간 탈화 생활
+- 국립익산박물관 「짚신」(양수 197, 한국-조선, 볏짚, 길이 24cm·너비 11cm) · 「나막신」(익산 2975, 한국-조선, 나무, 현존 길이 19.2cm·너비 6.6cm, 운두형), 국립중앙박물관 「삿갓을 쓰고 나막신을 신은 소동파 <동파입극도(東坡笠屐圖)>」, 문화체육관광부·Korea.net 「Things Newcomers Need to Know to Live in Korea」.
+- **활용 / Use:** 민가 primary 문간의 접근 쪽 문설주 바깥에 출입 폭과 문지방을 막지 않는 한 켤레만 배치. 마른 조건은 실물 치수와 보편 용례가 확인된 짚신, 명시적인 젖은 조건은 비 용례와 목제·운두형 형상이 확인된 나막신으로 제한하고 현대 고무신·신분 장식은 배제 (`src/props/threshold-life-plan.js`, `src/props/threshold-life.js`, `docs/exterior-detail.md`) / One restrained pair outside the access-side jamb of a residential primary threshold, preserving egress and threshold clearance. Dry conditions use the documented widespread straw jipsin; explicitly wet conditions use the documented wooden, covered-instep namaksin associated with rain. Modern rubber shoes and unsupported status symbolism are excluded.
+- URL: https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400100019700000&mode=V · https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400000297500000&mode=V · https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?pageSize=10&relicRecommendCategory=&relicRecommendId=165924&sc=&schM=view&sv= · https://www.korea.net/koreanet/fileDownload?fileUrl=FILE%2FPDF%2Fgeneral%2F201209_liveinkorea_en.pdf
+- 라이선스: 국립익산박물관·Korea.net 원문은 저작권 보호 자료로 링크와 사실 요약만 사용. 국립중앙박물관 해설은 **공공누리 제3유형(출처표시+변경금지)**. 앱은 원문 이미지·문장을 재배포하지 않고 소장품 메타데이터를 근거로 독자 저폴리 geometry만 생성하며, 자산 재사용 전 최신 이용조건을 재확인.
+
 ---
 
 ## ⑤ 마을 · 읍성 문헌 (Village & walled-town sources)
 
-### 25. 경국대전 도로폭 규정 · 가사(家舍)/가대(家垈)제한
+### 26. 경국대전 도로폭 규정 · 가사(家舍)/가대(家垈)제한
 - 『경국대전』 원전 / 국사편찬위원회 우리역사넷·한국학중앙연구원 해설
 - 대로 56척(≈17.5m)·중로 16척(≈5.0m)·소로 11척(≈3.4m) 도로 등급과 신분별 가옥 칸수·집터 지급량/상한(서인 10칸·2부 ↔ 대군 60칸·1품 35부). 이 수치는 실제 주택 평균이나 선형 빈도 분포가 아닌 법적 상한·규범이다.
 - **활용 / Use:** 도로 폭·피맛길과 rank/wealth→필지·집 규모의 완만한 단조 방향만 적용. 17배 필지 비례나 법정 최대 칸수를 실제 가구에 그대로 복제하지 않음 / Basis for road tiers and a gentle monotone rank/wealth→lot/house gradient; the 17× lot range and legal bay ceilings are not reproduced literally (`src/village/roads.js`, `src/village/parcels.js`, `docs/house-diversity.md`, `src/village/house-diversity.js`).
 - URL: https://contents.history.go.kr/front/km/view.do?levelId=km_033_0050_0020_0010 · https://encykorea.aks.ac.kr/Article/E0071922
 - 라이선스: 원전은 퍼블릭 도메인. 우리역사넷·민족문화대백과 해설의 저작권은 각 기관에 있으며 링크·요약 참고만 사용.
 
-### 26. 한국의 역사마을 하회와 양동
+### 27. 한국의 역사마을 하회와 양동
 - UNESCO / 민족문화대백과 · 우리역사넷 해설
 - 배산임수·풍수 길지 입지(하회=물돌이 연화부수형, 양동=산기슭), 종가 명당 중심의 준방사형 안길·위계 배치.
 - **활용 / Use:** 씨족촌 모드의 배산임수 시드·종가 명당 앵커·중심→외곽 위계(기와→초가) 그라디언트 / Basis for the clan-village mode's baesan-imsu siting, head-house anchor, and center-to-edge hierarchy (src/village/site.js, plan.js).
 - URL: https://heritage.unesco.or.kr/한국의-역사마을-하회와-양동/
 - 라이선스: 해설 매체별 (위키 CC BY-SA 등).
 
-### 27. 담장 — 한국민속대백과사전 / 담 — 한국민족문화대백과사전
+### 28. 담장 — 한국민속대백과사전 / 담 — 한국민족문화대백과사전
 - 국립민속박물관(집필 장필구) · 한국학중앙연구원
 - 담 종류(맞담/홑담/외담·사고석담·토담)·계층별 재료 차등·"담 지붕은 몸채 지붕을 따름"·생울/바자울 등 담 아닌 경계.
 - **활용 / Use:** 담 유무·유형 확률 테이블(기와담/돌담/토담/싸리울/생울/개방)과 담 지붕을 몸채 지붕에 일치시키는 규칙 / Wall-type probability table and matching wall coping to the main-building roof (docs/village-walls-parcels.md R-P3/R-P4, src/village/variants.js, walls.js).
 - URL: https://folkency.nfm.go.kr/topic/담장 · https://encykorea.aks.ac.kr/Article/E0013772
 - 라이선스: 해설 매체별.
 
-### 28. 일제강점기 토지조사사업 지적원도(地籍原圖)
+### 29. 일제강점기 토지조사사업 지적원도(地籍原圖)
 - 조선총독부 토지조사(1910~18) / 국가기록원
 - 전국 필지 실측 원도 약 78만 장. 전통 취락 필지가 도로·수로·능선을 따라 휘는 부정형임을 확인.
 - **활용 / Use:** 필지를 직사각이 아닌 부정형 다각형(앞변 직선·측/뒷변 꺾임)으로 생성하는 근거 / Basis for generating irregular polygonal lots rather than rectangles (docs/village-walls-parcels.md R-P1, src/village/parcels.js).
@@ -230,52 +236,52 @@
 
 > 아래 사진은 형태·질감·배치의 **시각 비교 기준**으로만 사용했으며, 앱 지오메트리는 사진을 복제하지 않은 오리지널 프로시저럴 모델입니다. 개별 파일의 출처·저작자·라이선스는 `refs/**/INDEX.md`에 항목별로 기록되어 있습니다.
 
-### 29. Wikimedia Commons — 조선 건축물 사진 (궁 · 절 · 반가 · 초가)
+### 30. Wikimedia Commons — 조선 건축물 사진 (궁 · 절 · 반가 · 초가)
 - 경복궁 근정전(다포·중층 팔작), 부석사 무량수전(주심포), 수덕사 대웅전·봉정사 극락전(맞배·무단청/소박 단청), 하회 양진당·양동 관가정(백골 반가·ㅁ자 배치), 낙안·하회·외암 초가(볏짚·집줄·용마름·흙벽).
 - **활용 / Use:** 4종 프리셋(궁/절/기와집/초가)의 지붕 실루엣·단청 배색·백골 목질·볏짚 이엉·꺾인 안채 배치의 시각 검증 루프 기준 / Visual verification loop for roof silhouettes, dancheong palette, bare timber, thatch, and courtyard layout of the four presets (src/builder/palette.js, giwa.js, roof.js).
 - URL: `refs/INDEX.md`, `refs/types/INDEX.md`, `refs/choga/INDEX.md`
 - 라이선스: 항목별 CC0 / CC BY / CC BY-SA / 퍼블릭 도메인 혼재 — INDEX에 저작자·유형 명시(CC BY 계열은 표기 필수).
 
-### 30. Wikimedia Commons — 마을 · 산사 경관 사진 (부감 · 항공)
+### 31. Wikimedia Commons — 마을 · 산사 경관 사진 (부감 · 항공)
 - 하회 파노라마·항공(물돌이 입지), 양동 산비탈 위계 배치, 낙안읍성 초가 군집·돌담, 성읍(제주형), 부석사·화엄사·봉정사 산지 가람, 겹겹 능선·운해, 적송 수형.
 - **활용 / Use:** 마을 군집 밀도·경사지 필지 위계·석축 단·산수 배경 레이어·소나무 수형의 시각 기준 / Reference for cluster density, sloped-lot hierarchy, stone terraces, mountain backdrop layers, and pine form (src/village/*, src/env/mountains.js, trees.js).
 - URL: `refs/scenery/INDEX.md`, `refs/village/INDEX.md`
 - 라이선스: 항목별 CC0 / CC BY / CC BY-SA / 퍼블릭 도메인 — INDEX에 명시.
 
-### 31. 조선 산수화 · 고지도 (퍼블릭 도메인)
+### 32. 조선 산수화 · 고지도 (퍼블릭 도메인)
 - 정선 인왕제색도(1751)·금강전도(1734), 안견 몽유도원도(1447); 동궐도(궁궐 배치도)·김정호 수선전도(한양 지도).
 - **활용 / Use:** 산수화 배경의 능선 양식화·먹 농담·안개 처리 아트디렉션, 그리고 궁궐/도성 배치 문법(축·위계·행각) 참고 / Art direction for stylized ridgelines, ink gradation, and haze, plus palace/city layout grammar (src/env/mountains.js, sky.js, render/ink.js, src/village/*).
 - URL: `refs/scenery/INDEX.md` (§5 산수화, §6 고지도)
 - 라이선스: 전부 **퍼블릭 도메인** (저작권 만료).
 
-### 32. 타국 목조건축 — 형태 대조 (중국 · 일본)
+### 33. 타국 목조건축 — 형태 대조 (중국 · 일본)
 - 자금성 태화전(중층 무전 지붕·황색 유리기와), 法隆寺 金堂(운두공·아스카 목조), 사합원 등.
 - **활용 / Use:** 조선 팔작·회흑색 기와·무단청 반가가 중국(무전·유리기와)·일본(운두공·반곡)과 어떻게 다른지 경계를 정의하는 대조군 / Comparative set to define how Joseon forms differ from Chinese and Japanese timber architecture.
 - URL: `refs/INDEX.md` §3 (타국 목조건축)
 - 라이선스: CC BY / CC BY-SA. **자금성 모델 등 일부는 "NoAI" 표기(생성형 AI 학습·입력 금지)** — 시각 대조로만 참고하고 학습·입력에는 사용하지 않음.
 
-### 33. 국립중앙박물관 — 인왕제색도 · 조선시대 실경산수화 해설
+### 34. 국립중앙박물관 — 인왕제색도 · 조선시대 실경산수화 해설
 - 국립중앙박물관 / 인왕제색도 큐레이터 추천·수어영상, 《우리 강산을 그리다: 화가의 시선, 조선시대 실경산수화》 전시 해설.
 - 실제 지형의 특징을 선택적으로 강조한 화면 구성, 짙은 바위와 비·안개의 여백, 작은 집과 소나무 숲의 대비를 설명.
 - **활용 / Use:** 수묵 모드의 밝은 안개 여백·농묵 지형 덩어리·실경을 존중하는 선택적 단순화 기준 / Basis for bright mist negative space, concentrated dark terrain masses, and selective simplification that preserves the real landscape character in ink mode.
 - URL: https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?relicRecommendId=962060&schM=view · https://vcm.museum.go.kr/MUSEUM/contents/M0506000000.do?arcId=18702&catCustomType=post&catId=11804 · https://www.museum.go.kr/MUSEUM/contents/M0202030000.do?act=past&exhiSpThemId=3803&listType=list&menuId=past&schM=view
 - 라이선스: 웹 열람 자료. 해설문·영상의 권리는 국립중앙박물관에 있으며, 앱에는 원문·영상·소장품 이미지를 재배포하지 않고 링크와 사실 확인에 기반한 요약만 수록.
 
-### 34. The Metropolitan Museum of Art — Korean Landscape Painting · Diamond Mountains
+### 35. The Metropolitan Museum of Art — Korean Landscape Painting · Diamond Mountains
 - The Met / *Mountain and Water: Korean Landscape Painting, 1400–1800*, *Diamond Mountains: Travel and Nostalgia in Korean Art*.
 - 정선 산수화의 날카로운 수직선, 수목을 이루는 짧은 횡선과 점, 넓은 담묵 및 안개 속에서 솟는 산의 화면 구성을 해설.
 - **활용 / Use:** 바위·수목·건축을 구분하는 선 계층과 넓은 담묵, 화면 절단 및 대기 원근의 시각 기준 / Visual basis for the line hierarchy separating rock, foliage, and architecture, broad pale washes, assertive cropping, and atmospheric depth.
 - URL: https://www.metmuseum.org/ko/essays/mountain-and-water-korean-landscape-painting-1400-1800 · https://www.metmuseum.org/exhibitions/listings/2018/diamond-mountains/exhibition-gallery
 - 라이선스: Met 웹 해설의 이용조건 적용. 앱에는 원문·전시 이미지를 복제하지 않고 링크와 미술사적 해석을 요약해 수묵 합성 기준으로만 사용.
 
-### 35. 국가유산포털 — 정선 필 금강전도
+### 36. 국가유산포털 — 정선 필 금강전도
 - 국가유산청 국가유산포털 / 국보 「정선 필 금강전도」 공식 지정 정보.
 - 작품의 공식 명칭·제작자·시대·지정 정보를 확인하는 1차 기관 메타데이터.
 - **활용 / Use:** 진경산수 근거 작품의 식별·시대 고증과 농담·선 계층 아트디렉션의 출처 교차 확인 / Primary-source cross-check for the identity and period of the true-view landscape reference used to direct ink gradation and line hierarchy.
 - URL: https://www.heritage.go.kr/heri/cul/culSelectDetail.do?VdkVgwKey=11%2C02170000%2C11&pageNo=1_1_1_1
 - 라이선스: 국가유산포털 콘텐츠별 이용조건 적용. 앱에는 링크와 공개 지정 메타데이터를 인용한 요약만 수록하고 원문·이미지는 재배포하지 않음.
 
-### 36. Wikimedia Commons · Bernard Gagnon — 낙안읍성 흙길·마당
+### 37. Wikimedia Commons · Bernard Gagnon — 낙안읍성 흙길·마당
 - Bernard Gagnon, *Naganeupseong Village 06* 및 *Naganeupseong Village 08*, 낙안읍성, 순천, 2022-10-01, own work.
 - 흙 통행면과 마당의 따뜻하고 낮은 대비, 눌린 입도 변화는 보이지만 짧은 간격으로 반복되는 장식 무늬는 없다는 시각 비교 근거.
 - **활용 / Use:** 사진 픽셀이나 자국을 복제하지 않고, 흙길의 저대비 albedo·bump 범위와 반복 억제·중원경 mipmap 기준에만 번역 / Qualitative basis for low-contrast packed-earth albedo and bump, repetition control, and mipmapped mid/far quietness; no pixels or literal marks were copied.

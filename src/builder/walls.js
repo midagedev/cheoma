@@ -219,7 +219,9 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
       footwear: maruStyle === 'none'
         ? { y: L.podTopY - y0, outward: 0.30, surface: 'threshold' }
         : {
-          y: L.podTopY + 0.36 - y0,
+          // The jjokmaru slab is 10cm high and centered at podTopY + 0.36.
+          // Keep the landing anchor on the board surface for every plan width.
+          y: L.podTopY + 0.36 + 0.05 - y0,
           outward: (maruStyle === 'short' ? 0.78 : 0.95) * 0.68,
           surface: 'jjokmaru',
         },

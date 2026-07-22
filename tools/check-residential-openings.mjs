@@ -16,7 +16,10 @@ import { PRESETS, computeLayout } from '../src/params.js';
 import {
   giwaFootprintMetrics,
   giwaFootprintPoints,
+  giwaFrontRange,
 } from '../src/layout/giwa-footprint.js';
+import { planOpeningDetail } from '../src/api/opening-detail.js';
+import { planThresholdLife } from '../src/api/threshold-life.js';
 import { buildRebuildPayload, schemaFor } from '../app/src/lib/edit-schema.js';
 import {
   buildEditedParcelSpec,
@@ -120,6 +123,50 @@ function assertExtentsEqual(actual, expected, name) {
     assert(Math.abs(actual[key] - expected[key]) < 1e-9,
       `${name}: planner ${key} ${actual[key]} diverged from production ${expected[key]}`);
   }
+}
+
+function primarySideSeeds(building) {
+  const bySide = new Map();
+  for (let seed = 0; seed < 256 && bySide.size < 2; seed++) {
+    const primary = planResidentialOpenings('giwa', building, seed)
+      .openings.find((opening) => opening.primary);
+    if (primary?.landing?.clearSide === -1 || primary?.landing?.clearSide === 1) {
+      if (!bySide.has(primary.landing.clearSide)) bySide.set(primary.landing.clearSide, seed);
+    }
+  }
+  return bySide;
+}
+
+function thresholdPlanFor(primary, seed) {
+  const detail = planOpeningDetail({
+    kind: 'door',
+    style: 'giwa',
+    seed: `${seed}:${primary.id}`,
+    width: primary.width,
+    height: 1.8,
+    wallThickness: 0.13,
+    primary: true,
+    footwear: {
+      y: 0.48,
+      outward: 0.78,
+      surface: 'toenmaru',
+      clearSide: primary.landing?.clearSide,
+    },
+  });
+  return { detail, threshold: planThresholdLife({ opening: detail, seed: 17 }) };
+}
+
+function buildingBoundsFor(opening, localBounds) {
+  const points = [];
+  for (const u of [localBounds.uMin, localBounds.uMax]) {
+    for (const outward of [localBounds.outwardMin, localBounds.outwardMax]) {
+      points.push({
+        x: opening.center.x + opening.tangent.x * u + opening.outward.x * outward,
+        z: opening.center.z + opening.tangent.z * u + opening.outward.z * outward,
+      });
+    }
+  }
+  return pointExtents(points);
 }
 
 assert.deepEqual(RESIDENTIAL_OPENING_PARAM_KEYS, [
@@ -299,6 +346,69 @@ try {
     assert(seededSelections.size > 1, `${name}: seed has no effect on non-primary slot selection`);
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(maximal)),
       `${name}: plan is not JSON-safe`);
+  }
+
+  // Focus footwear consumes the selected primary's local landing direction;
+  // cover every production giwa footprint, both seed-selected daecheong sides,
+  // and the declared minimum/default/maximum door control profiles without
+  // reproducing the planner's slot ordering in this harness.
+  for (const [name, fixture] of Object.entries({
+    single: FIXTURES.giwaSingle,
+    l: FIXTURES.giwaL,
+    u: FIXTURES.giwaU,
+  })) {
+    const building = fixture.building;
+    const capabilities = residentialOpeningCapabilities('giwa', building);
+    const sideSeeds = primarySideSeeds(building);
+    assert.deepEqual([...sideSeeds.keys()].sort(), [-1, 1],
+      `${name}: seed selection no longer reaches both sides of the daecheong`);
+    const profiles = [
+      ['min', capabilities.doorWidthK.min, capabilities.doorCount.min],
+      ['default', capabilities.doorWidthK.default, capabilities.doorCount.default],
+      ['max', capabilities.doorWidthK.max, capabilities.doorCount.max],
+    ];
+    const front = giwaFrontRange(building);
+    const frontCenter = { x: (front.x0 + front.x1) / 2, z: front.z };
+    for (const [side, seed] of sideSeeds) {
+      for (const [profile, doorWidthK, doorCount] of profiles) {
+        const request = { ...building, doorWidthK, doorCount };
+        const plan = planResidentialOpenings('giwa', request, seed);
+        const primary = plan.openings.find((opening) => opening.primary);
+        const primaries = plan.openings.filter((opening) => opening.primary);
+        const label = `${name}/${side > 0 ? 'left' : 'right'}/${profile}`;
+        assert.equal(primaries.length, 1, `${label}: primary opening count drifted`);
+        assert.equal(primary.landing?.clearSide, side,
+          `${label}: primary lost its local daecheong-side landing`);
+        const centerU = (frontCenter.x - primary.center.x) * primary.tangent.x
+          + (frontCenter.z - primary.center.z) * primary.tangent.z;
+        assert.equal(Math.sign(centerU), side,
+          `${label}: landing side points away from the actual front-range center`);
+        const { detail, threshold } = thresholdPlanFor(primary, seed);
+        assert.equal(detail.anchors.footwear.clearSide, side,
+          `${label}: opening-detail handoff lost the landing direction`);
+        assert.equal(threshold.clearance.placementSide, side,
+          `${label}: threshold life reconstructed a different side`);
+        assert(threshold.clearance.threshold > 0.005
+            && threshold.clearance.approach > 0.04
+            && threshold.clearance.jamb > 0.04,
+        `${label}: footwear lost threshold/opening/jamb clearance`);
+        for (const item of threshold.items) {
+          const world = buildingBoundsFor(primary, item.bounds);
+          assert(world.minX >= front.x0 - 1e-9 && world.maxX <= front.x1 + 1e-9,
+            `${label}: footwear left the toenmaru side bounds`);
+          assert(world.minZ >= front.z - 1e-9 && world.maxZ <= front.z + 1.25 + 1e-9,
+            `${label}: footwear left the toenmaru depth bounds`);
+        }
+        const repeat = planResidentialOpenings('giwa', request, seed);
+        const repeatThreshold = thresholdPlanFor(
+          repeat.openings.find((opening) => opening.primary), seed,
+        ).threshold;
+        assert.equal(JSON.stringify(repeat), JSON.stringify(plan),
+          `${label}: residential plan is not byte-identical`);
+        assert.equal(repeatThreshold.placement.signature, threshold.placement.signature,
+          `${label}: threshold placement signature is not deterministic`);
+      }
+    }
   }
 } finally {
   Math.random = originalRandom;

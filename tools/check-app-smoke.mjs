@@ -10,6 +10,12 @@ const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-app-smoke-'));
 const timeout = Number(process.env.CHEOMA_APP_SMOKE_TIMEOUT_MS) || 90_000;
+const FOOTWEAR_REFERENCE_URLS = Object.freeze([
+  'https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400100019700000&mode=V',
+  'https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400000297500000&mode=V',
+  'https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?pageSize=10&relicRecommendCategory=&relicRecommendId=165924&sc=&schM=view&sv=',
+  'https://www.korea.net/koreanet/fileDownload?fileUrl=FILE%2FPDF%2Fgeneral%2F201209_liveinkorea_en.pdf',
+]);
 const failures = [];
 const pass = (condition, message) => {
   console.log(`${condition ? 'PASS' : 'FAIL'}  ${message}`);
@@ -185,6 +191,7 @@ try {
     window.__engine.village.debugOpeningDetail(parcelId)
   ), diversityRuntime.mirroredId);
   pass(initialOpening?.valid && initialOpening.plan?.primary
+      && initialOpening.thresholdLifeBatch === 1
       && initialOpening.plan.hardware === 3
       && initialOpening.plan.meoreum === 0
       && initialOpening.plan.lowerPanel > 0
@@ -213,7 +220,8 @@ try {
       && chogaSwitch.columnValue <= chogaSwitch.columnMax
       && !chogaSwitch.keys.some((key) => ['mainHalfW', 'wingLen', 'wingW'].includes(key))
       && chogaSwitch.activeType?.includes('초가')
-      && chogaSwitch.opening?.valid && chogaSwitch.opening.plan?.style === 'choga'
+      && chogaSwitch.opening?.valid && chogaSwitch.opening.thresholdLifeBatch === 1
+      && chogaSwitch.opening.plan?.style === 'choga'
       && chogaSwitch.opening.plan.hardware === 3,
   `giwa→choga switch reseeds target defaults and accepted UI values (${JSON.stringify(chogaSwitch)})`);
   await houseTabs.filter({ hasText: '기와집' }).click();
@@ -237,7 +245,8 @@ try {
       && restoredType.columnHeight === 2.9
       && Math.abs(restoredType.mainHalfWMin - 3.3) < 1e-9
       && restoredType.mirrorX === -1
-      && restoredType.opening?.valid && restoredType.opening.plan?.style === 'giwa'
+      && restoredType.opening?.valid && restoredType.opening.thresholdLifeBatch === 1
+      && restoredType.opening.plan?.style === 'giwa'
       && restoredType.opening.plan.hardware === 3,
   `choga→giwa switch restores fitted variant defaults and mirror (${JSON.stringify(restoredType)})`);
 
@@ -539,6 +548,10 @@ try {
   pass(typeof heroId === 'string' && heroId.length > 0, 'hero parcel is addressable through the app API');
   const focused = await page.evaluate(() => {
     const engine = window.__engine;
+    let baseThresholdLife = 0;
+    engine.village.exportRoot()?.traverse((object) => {
+      if (object.name === 'threshold-life-detail') baseThresholdLife++;
+    });
     engine.setTime('night');
     engine.setSeason('autumn');
     engine.setWeather('clear');
@@ -548,11 +561,22 @@ try {
     const parcelId = engine.village.heroId();
     engine.village.focus(parcelId);
     const state = engine.village.getState();
+    const life = engine.village.focusRoot()?.getObjectByName('threshold-life-detail');
     return {
+      baseThresholdLife,
       selected: state.selected,
       spec: state.spec,
       overlay: engine.village.debugOverlayBox(state.selected),
       opening: engine.village.debugOpeningDetail(state.selected),
+      thresholdLife: life ? {
+        count: 1,
+        kind: life.userData.thresholdLifePlan?.kind,
+        pairs: life.userData.thresholdLifePlan?.items?.length,
+        tier: life.userData.openingDetailTier,
+        paletteKey: life.material?.userData?.paletteKey,
+        envelope: life.material?.userData?.lodEnvelope === true,
+        transparent: life.material?.transparent === true,
+      } : null,
       // Visible-time changes remain animated: synchronously after the dial event, neither the
       // scene-level sky nor the hidden single-house motes have snapped to the night target yet.
       timeTransitionStart: {
@@ -564,6 +588,8 @@ try {
   // Headless ANGLE may produce fewer than one frame per second while linking shaders, so this
   // fast smoke asserts synchronous focus setup rather than wall-clock tween completion.
   pass(focused.selected === heroId && !!focused.spec, 'focus setup targets the requested parcel');
+  pass(focused.baseThresholdLife === 0,
+    'aerial/static village prototypes own no repeated threshold footwear');
   pass(!!focused.overlay, 'focused parcel exposes a measurable detail overlay');
   pass(focused.opening?.valid
       && focused.opening.plan?.style === 'giwa'
@@ -571,6 +597,14 @@ try {
       && focused.opening.plan.meoreum === 0
       && focused.opening.plan.lowerPanel > 0,
   `representative head house consumes one shared primary opening contract (${JSON.stringify(focused.opening)})`);
+  pass(focused.thresholdLife?.count === 1
+      && focused.thresholdLife.kind === 'jipsin'
+      && focused.thresholdLife.pairs === 2
+      && focused.thresholdLife.tier === 'focus'
+      && focused.thresholdLife.paletteKey === 'thresholdLife'
+      && !focused.thresholdLife.envelope
+      && !focused.thresholdLife.transparent,
+  `focused residence owns one opaque focus-only footwear batch (${JSON.stringify(focused.thresholdLife)})`);
   pass(
     Math.abs(focused.timeTransitionStart.sunIntensity - 0.9) > 1e-3
       && Math.abs(focused.timeTransitionStart.moteIntensity - 0.5) > 1e-6,
@@ -591,12 +625,13 @@ try {
     await frames();
     const oldGeometries = [];
     oldRoot?.traverse((object) => {
-      if (['opening-frame-details', 'opening-hardware-details'].includes(object.name)
+      if (['opening-frame-details', 'opening-hardware-details', 'threshold-life-detail'].includes(object.name)
           && object.geometry) oldGeometries.push(object.geometry);
     });
     const disposed = new Map(oldGeometries.map((geometry) => [geometry, 0]));
     const onDispose = (event) => disposed.set(event.target, (disposed.get(event.target) || 0) + 1);
     for (const geometry of oldGeometries) geometry.addEventListener('dispose', onDispose);
+    await engine.renderer.compileAsync(oldRoot, engine.camera);
     const beforePrograms = engine.renderer.info.programs?.length || 0;
     const beforeProgramKeys = new Set(
       (engine.renderer.info.programs || []).map((program) => program.cacheKey),
@@ -606,7 +641,11 @@ try {
     }, { refreshFlora: false });
     await frames();
     const root = engine.village.focusRoot();
-    const material = { frameEnvelope: null, hardwareEnvelope: null, hardwareKey: null };
+    await engine.renderer.compileAsync(root, engine.camera);
+    const material = {
+      frameEnvelope: null, hardwareEnvelope: null, hardwareKey: null,
+      thresholdLifeEnvelope: null, thresholdLifeKey: null, thresholdLifeTransparent: null,
+    };
     root?.traverse((object) => {
       if (object.name === 'opening-frame-details') {
         material.frameEnvelope = object.material?.userData?.lodEnvelope === true;
@@ -614,6 +653,11 @@ try {
       if (object.name === 'opening-hardware-details') {
         material.hardwareEnvelope = object.material?.userData?.lodEnvelope === true;
         material.hardwareKey = object.material?.userData?.paletteKey || null;
+      }
+      if (object.name === 'threshold-life-detail') {
+        material.thresholdLifeEnvelope = object.material?.userData?.lodEnvelope === true;
+        material.thresholdLifeKey = object.material?.userData?.paletteKey || null;
+        material.thresholdLifeTransparent = object.material?.transparent === true;
       }
     });
     const inspectPrimaryFace = () => {
@@ -670,11 +714,14 @@ try {
   pass(heroOpeningLifecycle.rebuilt
       && heroOpeningLifecycle.opening?.valid
       && heroOpeningLifecycle.opening.plan?.style === 'giwa'
-      && heroOpeningLifecycle.oldOpeningGeometries === 2
+      && heroOpeningLifecycle.oldOpeningGeometries === 3
       && heroOpeningLifecycle.disposed.every((count) => count === 1)
       && heroOpeningLifecycle.material.frameEnvelope
       && !heroOpeningLifecycle.material.hardwareEnvelope
       && heroOpeningLifecycle.material.hardwareKey === 'hardware'
+      && !heroOpeningLifecycle.material.thresholdLifeEnvelope
+      && heroOpeningLifecycle.material.thresholdLifeKey === 'thresholdLife'
+      && !heroOpeningLifecycle.material.thresholdLifeTransparent
       && heroOpeningLifecycle.primaryFace?.clearance > 0
       && Math.abs(
         heroOpeningLifecycle.primaryFace.clearance
@@ -683,6 +730,41 @@ try {
       && heroOpeningLifecycle.newProgramFamilies <= 1,
   `head-house rebuild preserves positive frame/panel clearance, replaces one opening overlay, `
     + `disposes it once, and reuses LOD/program families (${JSON.stringify(heroOpeningLifecycle)})`);
+
+  const thresholdWeather = await page.evaluate(() => {
+    const engine = window.__engine;
+    const root = engine.village.focusRoot();
+    const dry = root?.getObjectByName('threshold-life-detail');
+    let dryDisposed = 0;
+    dry?.geometry?.addEventListener('dispose', () => { dryDisposed++; });
+    engine.setWeather('rain');
+    const wet = engine.village.focusRoot()?.getObjectByName('threshold-life-detail');
+    let count = 0;
+    engine.village.focusRoot()?.traverse((object) => {
+      if (object.name === 'threshold-life-detail') count++;
+    });
+    const result = {
+      dryKind: dry?.userData?.thresholdLifePlan?.kind || null,
+      wetKind: wet?.userData?.thresholdLifePlan?.kind || null,
+      wetCondition: wet?.userData?.thresholdLifePlan?.condition || null,
+      count,
+      dryDisposed,
+      sameGeometry: dry?.geometry === wet?.geometry,
+      sameMaterial: dry?.material === wet?.material,
+    };
+    engine.setWeather('clear');
+    return result;
+  });
+  pass(
+    thresholdWeather.dryKind === 'jipsin'
+      && thresholdWeather.wetKind === 'namaksin'
+      && thresholdWeather.wetCondition === 'wet'
+      && thresholdWeather.count === 1
+      && thresholdWeather.dryDisposed === 1
+      && !thresholdWeather.sameGeometry
+      && thresholdWeather.sameMaterial,
+    `real clear→rain path swaps one focused pair, releases its geometry, and reuses the runtime material (${JSON.stringify(thresholdWeather)})`,
+  );
 
   const typeChange = await page.evaluate(() => {
     window.__engine.setType('choga');
@@ -892,17 +974,26 @@ try {
   const openingCredit = page.locator('.modal .cat li').filter({
     hasText: '국가유산청 국가유산포털 — 경복궁 근정전 창호 철물 정밀실측도',
   });
+  const footwearCredit = page.locator('.modal .cat li').filter({
+    hasText: '국립익산박물관 · 국립중앙박물관 · Korea.net — 조선 신발과 문간 탈화 생활',
+  });
   await kitchenCredit.waitFor({ state: 'visible', timeout });
   await ornamentCredit.waitFor({ state: 'visible', timeout });
   await openingCredit.waitFor({ state: 'visible', timeout });
+  await footwearCredit.waitFor({ state: 'visible', timeout });
   const referenceContract = {
     kitchenLinks: await kitchenCredit.locator('a').count(),
     ornamentLinks: await ornamentCredit.locator('a').count(),
     openingLinks: await openingCredit.locator('a').count(),
+    footwearLinks: await footwearCredit.locator('a').count(),
     kitchenUse: await kitchenCredit.locator('.it-use').textContent(),
     ornamentUse: await ornamentCredit.locator('.it-use').textContent(),
     openingUse: await openingCredit.locator('.it-use').textContent(),
     openingHref: await openingCredit.locator('a').getAttribute('href'),
+    footwearUse: await footwearCredit.locator('.it-use').textContent(),
+    footwearHrefs: await footwearCredit.locator('.it-links a')
+      .evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+    footwearLicense: await footwearCredit.locator('.it-license').textContent(),
     safeLinks: await page.locator('.modal .it-links a').evaluateAll((links) => links.every((link) => (
       link.target === '_blank'
         && link.rel.split(/\s+/).includes('noopener')
@@ -913,12 +1004,20 @@ try {
     referenceContract.kitchenLinks === 3
       && referenceContract.ornamentLinks === 2
       && referenceContract.openingLinks === 1
+      && referenceContract.footwearLinks === 4
       && referenceContract.kitchenUse?.includes('마당 높이 부엌 개구 안')
       && referenceContract.ornamentUse?.includes('palace 전용 경계')
       && referenceContract.openingUse?.includes('민가에 그대로 복제하지 않는다')
       && referenceContract.openingUse?.includes('경첩 띠 두 개와 고리 하나')
       && referenceContract.openingHref?.includes('file_seq=2839493')
       && referenceContract.openingHref?.includes('title3d=')
+      && referenceContract.footwearUse?.includes('접근 쪽 문설주 바깥')
+      && referenceContract.footwearUse?.includes('현대 고무신')
+      && FOOTWEAR_REFERENCE_URLS.every((url, index) => (
+        referenceContract.footwearHrefs[index] === url
+      ))
+      && referenceContract.footwearLicense?.includes('저작권 보호')
+      && referenceContract.footwearLicense?.includes('공공누리 제3유형')
       && referenceContract.safeLinks,
     `Reference UI exposes authenticity evidence and applied-use mapping (${JSON.stringify(referenceContract)})`,
   );
@@ -927,6 +1026,10 @@ try {
   const texturePlateau = await page.evaluate(() => {
     const engine = window.__engine;
     engine.village.exit();
+    let thresholdLifeCount = 0;
+    engine.village.exportRoot()?.traverse((object) => {
+      if (object.name === 'threshold-life-detail') thresholdLifeCount++;
+    });
     const environment = engine.scene.getObjectByName('environment');
     const motes = environment?.getObjectByName('dustMotes')?.material?.uniforms;
     const smokeSprite = environment?.getObjectByName('smoke')?.children.find((object) => object.isSprite && object.visible);
@@ -955,7 +1058,12 @@ try {
       engine.renderer.render(engine.scene, engine.camera);
       samples.push(engine.renderer.info.memory.textures);
     }
-    return { samples, stable: samples.every((count) => count === samples[0]), resumedEnvironment };
+    return {
+      samples,
+      stable: samples.every((count) => count === samples[0]),
+      resumedEnvironment,
+      thresholdLifeCount,
+    };
   });
   const resumed = texturePlateau.resumedEnvironment;
   pass(
@@ -972,6 +1080,8 @@ try {
     texturePlateau.stable && texturePlateau.samples[0] > 0,
     `repeated visible building rebuilds keep GPU textures flat (${texturePlateau.samples.join(' → ')})`,
   );
+  pass(texturePlateau.thresholdLifeCount === 0,
+    'village exit/focus-out releases threshold footwear from the retained village handle');
 
   const teardown = await page.evaluate(() => {
     const engine = window.__engine;

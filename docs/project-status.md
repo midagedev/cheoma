@@ -135,8 +135,10 @@ GitHub #16의 첫 단계는 [`exterior-detail.md`](exterior-detail.md)의 공통
 문·창 크기, 창 하부 머름, 문짝 lowerPanel, reveal, frame, threshold, primary entrance와 후속 pivot/footwear
 anchor를 소유하고, `giwa.js`·`walls.js`·대표 종가 `buildHanok`은 한 assembler로 이를 렌더링한다. 문은 머름을
 갖지 않으며 기존 하부 청판 rail을 별도 의미로 보존한다. 프레임은 기존 envelope 목재에 병합하고 절제된 철물은
-texture 없는 palette material 하나로 FULL/selected overlay에만 남긴다. 문 상호작용과 신발 렌더링은 이 anchor를
-소비하는 독립 후속 단계이며, 아궁이 service opening과 거주 창호를 합치지 않는다.
+texture 없는 palette material 하나로 FULL/selected overlay에만 남긴다. 신발은 이 anchor를 소비하는 순수 plan과
+얇은 Three adapter로 분리하고, 정적 prototype이 아니라 선택된 focus overlay에서만 한 켤레를 소유한다. 맑은 날의
+짚신과 `rain`의 나막신 전환은 실제 제품 경로에서 검증하며 focus-out 때 회수한다. 문 상호작용은 여전히 독립 후속
+단계이고, 아궁이 service opening과 거주 창호를 합치지 않는다.
 
 GitHub #10은 초가·기와 ㅡ·ㄱ·ㄷ의 문·창 plan을 FULL renderer와 집 편집기에 연결했다. 문 수·창 수·문 너비·창
 너비 네 축의 기본값과 shape별 상한은 `residential-openings.js` 한 곳에서 정규화되고, Svelte는 이 capability로

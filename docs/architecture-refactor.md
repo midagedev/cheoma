@@ -78,7 +78,8 @@ app/src/                       Svelte UI
 | `src/api/rendering.js` | 해제 경합을 견디는 shader precompile | browser WebGL runtime |
 | `src/api/render-style.js` | Three·DOM 없는 `pbr | ink` 표현 상태 | Node, worker, browser |
 | `src/api/ink.js` | 재사용 수묵 pass·raw beauty capture·종이 texture | WebGL browser runtime |
-| `src/api/props.js` | prop registry와 생성 | THREE와 canvas provider가 있는 runtime |
+| `src/api/threshold-life.js` | primary opening anchor 기반 짚신·나막신 순수 plan | Node, worker, browser |
+| `src/api/props.js` | prop registry와 생성, threshold-life 저폴리 Three adapter | THREE와 canvas provider가 있는 runtime |
 | `src/api/export.js` | export 분석·GLB·download·postcard | 분석 제외 대부분 browser |
 | `src/api/index.js` | 전체 browser runtime façade | WebGL browser runtime |
 

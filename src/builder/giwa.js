@@ -212,7 +212,9 @@ export function buildGiwa(P, M) {
       wallThickness: T,
       lowerPanelHeight: lowerPanelTop - y0,
       footwear: {
-        y: podTopY + 0.42 - y0,
+        // The toenmaru slab is 12cm high and centered at podTopY + 0.42.
+        // Anchor footwear on its upper face rather than through its center.
+        y: podTopY + 0.42 + 0.06 - y0,
         outward: 0.78,
         surface: 'toenmaru',
       },
@@ -337,6 +339,7 @@ export function buildGiwa(P, M) {
 
   // 툇마루(전면 걸터앉는 마루)
   const maru = new THREE.Mesh(new THREE.BoxGeometry(mW, 0.12, dep), maruMat());
+  maru.name = 'toenmaru';
   maru.position.set(mcx, mfloorY, frontZ + dep / 2);
   maru.castShadow = maru.receiveShadow = true; root.add(maru);
   const dh = mfloorY - podTopY;
@@ -353,6 +356,7 @@ export function buildGiwa(P, M) {
   hallFloorMat.map = M.maru.map.clone(); hallFloorMat.map.repeat.set(2, 3); hallFloorMat.map.needsUpdate = true;
   hallFloorMat.emissive = new THREE.Color(0x1c140b);   // 안쪽이 검게 죽지 않게 미량 자발광
   const hall = new THREE.Mesh(new THREE.BoxGeometry(hallW, 0.12, 2 * b - 0.3), hallFloorMat);
+  hall.name = 'daecheong-floor';
   hall.position.set(hallCx, mfloorY, 0);
   hall.castShadow = hall.receiveShadow = true; root.add(hall);
   // 대청 뒷벽(세로널 판벽) — 밝은 목재 + emissive
@@ -399,9 +403,11 @@ export function buildGiwa(P, M) {
   // 좌우 짧은 리턴 난간
   for (const [zx, zz] of [[mX0 + 0.1, 'L'], [mX1 - 0.1, 'R']]) {
     const top = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, dep - 0.1), railMat);
+    top.name = 'toenmaru-return-railing';
     top.position.set(zx, railTopY, frontZ + dep / 2); top.castShadow = true; root.add(top);
     for (let z = frontZ + 0.2; z <= frontZ + dep - 0.1; z += 0.5) {
       const p = new THREE.Mesh(postGeo, railMat);
+      p.name = 'toenmaru-return-railing';
       p.position.set(zx, mfloorY + 0.27, z); p.castShadow = true; root.add(p);
     }
   }

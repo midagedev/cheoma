@@ -2235,6 +2235,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           persist: true,
           refreshFlora: opts.refreshFlora !== false,
         });
+        if (g) warmShaders(g);   // Every replacement owns fresh materials: restore rim patches and prelink only this subtree.
         if (g && village.selected === id) attachFocusRing(g);
         return g;
       },
