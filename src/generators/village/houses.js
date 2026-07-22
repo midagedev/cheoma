@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { buildBuilding } from '../../builder/index.js';
+import {
+  collectOpeningGlowAnchors,
+  mirrorOpeningGlowAnchorsX,
+} from '../../builder/opening-glow-anchors.js';
 import { applyThatchAge } from '../../builder/palette.js';
 import { PRESETS } from '../../params.js';
 import { parcelMatrix, decomposeByMaterial, mirrorDecomp, shareMaterials } from '../../village/instancing.js';
@@ -27,11 +31,13 @@ export function buildKindDecomps(kind) {
   const base = PRESETS[kind];
   const isChoga = kind !== 'giwa';
   const decomps = new Array(VAR.length);
+  const glowAnchors = new Array(VAR.length);
   let canon = null, matset = null;
   for (let i = 0; i < VAR.length; i++) {
     if (VAR[i].mirrorOf != null) continue;                 // 미러 항목은 2패스에서
     const proto = buildBuilding({ ...base, ...(VAR[i].ov || {}) });
     const M = proto.userData.materials;
+    glowAnchors[i] = collectOpeningGlowAnchors(proto, { space: 'local' });
     // 재질 공유 제외(변주별 고유 유지): (1) choga 이엉 상태 채(thatch/yongmaru/jipjul, 민가=낡음↔부농=신선),
     //   (2) giwa 창호 살 패턴(#55, 변주별 doorPattern 텍스처 — 공유 시 g-base 띠살이 g-wide 를 덮어씀).
     //   choga 창호는 패턴 단일이라 공유 유지(텍스처 절약).
@@ -49,9 +55,12 @@ export function buildKindDecomps(kind) {
     decomps[i] = d;
   }
   for (let i = 0; i < VAR.length; i++) {
-    if (VAR[i].mirrorOf != null) decomps[i] = mirrorDecomp(decomps[VAR[i].mirrorOf]);
+    if (VAR[i].mirrorOf != null) {
+      decomps[i] = mirrorDecomp(decomps[VAR[i].mirrorOf]);
+      glowAnchors[i] = mirrorOpeningGlowAnchorsX(glowAnchors[VAR[i].mirrorOf]);
+    }
   }
-  return { decomps, matset };
+  return { decomps, matset, glowAnchors: Object.freeze(glowAnchors) };
 }
 
 // 필지 → 컴파운드(집 + 마당 담). rot 은 로컬 +z 를 도로쪽(frontDir+yaw)으로. 비최적화(디버그) 경로.
