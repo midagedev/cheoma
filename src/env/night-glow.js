@@ -1,5 +1,3 @@
-import * as THREE from 'three';
-
 // 야간 창호 실내광 — 밤에 한지 창이 호롱불 온기로 은은히 밝아 "생활감"을 준다.
 //   setupNightGlow({ getBuilding }) → { setTime(name), onBuildingChanged(), setEnabled(v), dispose() }
 //
@@ -7,8 +5,8 @@ import * as THREE from 'three';
 //  - night 일 때 건물 공유 재질(building.userData.materials)의 한지 창호(door·hanji)에
 //    따뜻한 emissive(호롱불색)를 부여. emissiveMap = 재질 map 으로 두어 한지 밝은 부분만
 //    발광하고 살·문틀은 어둡게(형광등 아닌 은은한 창빛). 절 살창(salchang)은 미약하게.
-//  - 재질이 공유라 창마다 균일 → 밝은 방 1~2곳에 소형 PointLight(창 안쪽, 짧은 감쇠,
-//    castShadow=false)를 더해 밝기 편차를 만든다(전 창 균일 방지). 추가 라이트 ≤2.
+//  - 방별 결정론 dim·phase로 일부 창을 어둡게 하고 밝기 편차를 만든다. 레이아웃을 추정한 별도 광원이나
+//    scene object를 추가하지 않으므로 벽 너머로 빛이 새거나 rebuild 때 조명 수가 바뀌지 않는다.
 //  - 멱등(setTime 반복 안전), regenerate 시 재적용(onBuildingChanged), night 아니면 완전 원복.
 
 const WARM = 0xffb35c;   // 호롱불 온기 (형광등 금지)
@@ -43,18 +41,6 @@ export function setupNightGlow({ getBuilding }) {
   let started = false;
   const NIGHT_RATE = 2.4;   // ≈1.6s (sky 크로스페이드와 결이 맞게)
 
-  // 밝은 방 실내 조명 (최대 2개). 생성은 1회, 건물에 재부모.
-  //   #66: 창호지 자체 발광(emissive)이 주광이 되도록 실내 등불은 "가까운 기둥·툇마루에 스미는"
-  //   미약한 온기로만 남긴다(구 16/10 → 형광 구슬·긴 광선 소멸). distance 짧게(호롱불 감쇠).
-  const lights = [];
-  for (let i = 0; i < 2; i++) {
-    const l = new THREE.PointLight(WARM, 0, 6.5, 2);
-    l.castShadow = false;
-    l.visible = false;
-    l.name = `nightGlowLamp${i}`;
-    lights.push(l);
-  }
-
   // 원복용 재질 상태: [{ mat, emHex, emInt, emMap }]
   let patched = [];
 
@@ -81,9 +67,6 @@ export function setupNightGlow({ getBuilding }) {
     });
     return out;
   }
-  const LIGHT_BASE = [3.6, 2.2];
-  const LIGHT_PHASE = [1.3, 3.7];
-
   function restore() {
     for (const rec of patched) {
       rec.mat.emissive.setHex(rec.emHex);
@@ -92,11 +75,6 @@ export function setupNightGlow({ getBuilding }) {
       rec.mat.needsUpdate = true;
     }
     patched = [];
-    for (const l of lights) {
-      l.intensity = 0;
-      l.visible = false;
-      if (l.parent) l.parent.remove(l);
-    }
   }
 
   function applyGlow() {
@@ -114,40 +92,21 @@ export function setupNightGlow({ getBuilding }) {
       mat.emissiveIntensity = base * dim;
       mat.needsUpdate = true;
     }
-
-    // 밝은 방 조명: layout 으로 창 안쪽에 배치(전면 1 + 후면 1, 밝기 편차).
-    const L = (b.userData && b.userData.layout) || {};
-    const xE = L.xEave ?? 8, zE = L.zEave ?? 6;
-    const midY = ((L.plateY ?? 1) + (L.eaveEdgeY ?? 5)) * 0.5;
-    const spots = [
-      [xE * -0.4, midY, zE * 0.55],   // 전면 좌측 방 (밝게)
-      [xE * 0.5, midY, zE * -0.5],    // 후면 우측 방 (은은)
-    ];
-    lights.forEach((l, i) => {
-      const [x, y, z] = spots[i];
-      l.position.set(x, y, z);
-      l.intensity = LIGHT_BASE[i];
-      l.visible = true;
-      b.add(l);
-    });
   }
 
-  // 창호 emissive·실내 등불 강도를 nightness × (선택)플리커로 설정.
+  // 창호 emissive 강도를 nightness × (선택)플리커로 설정.
   function setGlowLevel(flickerOn) {
     for (const rec of patched) {
       const fl = flickerOn ? candleFlicker(t, rec.phase) : 1;
       rec.mat.emissiveIntensity = rec.base * rec.dim * nightness * fl;
     }
-    lights.forEach((l, i) => {
-      if (l.visible) l.intensity = LIGHT_BASE[i] * nightness * (flickerOn ? candleFlicker(t, LIGHT_PHASE[i]) : 1);
-    });
   }
 
   function reconcile() {
     nightGoal = (enabled && time === 'night') ? 1 : 0;
     if (!started) nightness = nightGoal;   // 로드 시 스냅(페이드-인 없음)
     if (nightness > 0.001) {
-      if (!patched.length) applyGlow();     // 재질 패치·실내 등불 배치(1회)
+      if (!patched.length) applyGlow();     // 재질 패치(1회)
       setGlowLevel(false);                  // 즉시 레벨 반영(플리커는 update)
     } else if (patched.length) {
       restore();
@@ -171,7 +130,7 @@ export function setupNightGlow({ getBuilding }) {
 
   function setTime(name) { if (disposed) return; time = name; reconcile(); }
   function setEnabled(v) { if (disposed) return; enabled = !!v; reconcile(); }
-  function onBuildingChanged() { if (disposed) return; if (patched.length) restore(); reconcile(); }   // 새 건물 재질·조명 재적용
+  function onBuildingChanged() { if (disposed) return; if (patched.length) restore(); reconcile(); }   // 새 건물 재질에 재적용
   function dispose() {
     if (disposed) return;
     disposed = true;
