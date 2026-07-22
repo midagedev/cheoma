@@ -1148,6 +1148,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 대규모 주택 청크 LOD(매 프레임, 카메라 필요) — FAR↔MID↔FULL 거리 전환.
     //   engine.js 가 camera 를 넘겨 호출. LOD 정책이 꺼진 규모(R<340)는 no-op.
     updateLod(camera, target = null, dt = 1 / 60) {
+      cloudsHandle?.updateView?.(camera);              // 화면 밖 원경 뱅크·빛줄기는 렌더 제출 전에 sleep
       detailLod = createVillageDetailLodState(camera, target, site, detailLod);
       const swaps = group.userData.updateChunkLod?.(camera, detailLod.lensScale) || 0;
       treeOccluder?.setSubject(target);              // 부감 중심이 아니라 현재 선택/시선 필지를 가리는 나무를 판정

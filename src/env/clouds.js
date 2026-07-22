@@ -624,7 +624,9 @@ export function setupClouds(group, {
   const horizonMaterial = new THREE.MeshBasicMaterial({
     map: horizonTexture, transparent: true, opacity: HORIZON_CLOUD_OPACITY,
     depthWrite: false, depthTest: true, fog: false, blending: THREE.NormalBlending,
-    side: THREE.DoubleSide,
+    // Every instance turns its +Z plane normal toward the camera in placeHorizonBank;
+    // DoubleSide would submit transparent backfaces as a redundant second draw.
+    side: THREE.FrontSide,
   });
   patchCloudRim(horizonMaterial);
   const horizonBank = new THREE.InstancedMesh(
@@ -634,13 +636,21 @@ export function setupClouds(group, {
   );
   horizonBank.name = 'horizon-cloud-bank';
   horizonBank.renderOrder = 1;
+  // The instances form a camera-relative ring, so one aggregate bounding sphere always
+  // surrounds the camera and Three cannot cull the bank as a whole. updateView performs
+  // conservative per-instance sphere tests and sleeps this one draw plus its three rays
+  // before render when the authored view never reaches the cloud band.
   horizonBank.frustumCulled = false;
-  horizonBank.userData = { op: HORIZON_CLOUD_OPACITY, opNow: HORIZON_CLOUD_OPACITY };
+  horizonBank.userData = {
+    op: HORIZON_CLOUD_OPACITY, opNow: HORIZON_CLOUD_OPACITY, viewActive: true,
+  };
   const horizonSpecs = Array.from({ length: HORIZON_CLOUD_COUNT }, (_, i) => ({
     az: 0.17 + i * Math.PI * 2 / HORIZON_CLOUD_COUNT,
-    // All centres stay above the geometric horizon. The focus rise reveals that band;
-    // depth testing still lets ridges and roofs naturally occlude the cloud bottoms.
-    elev: [0.092, 0.126, 0.108, 0.142][i % 4],
+    // These 9–12° centres belong to an explicit sky-facing view. The default 10°
+    // downward courtyard focus deliberately misses the band and updateView sleeps it;
+    // when a user looks upward, regular depth testing still lets roofs and ridges
+    // occlude the cloud bottoms without a depth-free layer over the architecture.
+    elev: [0.160, 0.195, 0.178, 0.215][i % 4],
     sx: [0.82, 1.06, 1.18, 0.94][i % 4],
     sy: [0.84, 1.06, 0.92, 1.14][(i + 1) % 4],
   }));
@@ -648,17 +658,27 @@ export function setupClouds(group, {
   const horizonForward = new THREE.Vector3();
   const horizonAnchor = new THREE.Object3D();
   horizonAnchor.userData.w = HORIZON_CLOUD_W;
+  const horizonViewProjection = new THREE.Matrix4();
+  const horizonFrustum = new THREE.Frustum();
+  const horizonSphere = new THREE.Sphere();
+  let horizonViewManaged = false;
 
   function placeHorizonBank(cam) {
     // Stay inside the procedural world edge. A bank behind that opaque ridge can be
     // perfectly valid in projection yet contribute zero pixels. This camera-centred
     // low-cloud layer sits beyond buildings but before the enclosing mountains.
-    const distance = Math.max(110, Math.min(210, R * 0.72, cam.far * 0.42));
+    const distance = Math.max(84, Math.min(150, R * 0.56, cam.far * 0.34));
     horizonBank.userData.distance = distance;
+    cam.updateMatrixWorld();
+    horizonBank.updateWorldMatrix(true, false);
+    horizonViewProjection.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    horizonFrustum.setFromProjectionMatrix(horizonViewProjection);
     cam.getWorldDirection(horizonForward);
     const viewAz = Math.atan2(horizonForward.x, horizonForward.z);
     let nearest = horizonSpecs[0];
     let nearestDistance = Infinity;
+    let inView = false;
+    const bankWorldScale = horizonBank.matrixWorld.getMaxScaleOnAxis();
 
     horizonSpecs.forEach((spec, i) => {
       horizonDummy.position.set(
@@ -670,6 +690,13 @@ export function setupClouds(group, {
       horizonDummy.scale.set(spec.sx, spec.sy, 1);
       horizonDummy.updateMatrix();
       horizonBank.setMatrixAt(i, horizonDummy.matrix);
+
+      horizonSphere.center.copy(horizonDummy.position).applyMatrix4(horizonBank.matrixWorld);
+      horizonSphere.radius = 0.5 * Math.hypot(
+        HORIZON_CLOUD_W * spec.sx,
+        HORIZON_CLOUD_H * spec.sy,
+      ) * bankWorldScale;
+      inView ||= horizonFrustum.intersectsSphere(horizonSphere);
 
       const delta = Math.abs(Math.atan2(Math.sin(spec.az - viewAz), Math.cos(spec.az - viewAz)));
       if (delta < nearestDistance) { nearestDistance = delta; nearest = spec; }
@@ -695,8 +722,21 @@ export function setupClouds(group, {
       if (rim.direction.lengthSq() < 1e-5) rim.direction.set(0, 1);
       else rim.direction.normalize();
     }
+    return inView;
   }
-  horizonBank.onBeforeRender = (rend, sc, cam) => placeHorizonBank(cam);
+  function updateView(cam) {
+    if (disposed || !cam) return false;
+    horizonViewManaged = true;
+    const active = placeHorizonBank(cam);
+    horizonBank.userData.viewActive = active;
+    horizonBank.visible = active;
+    for (const ray of lightRays) ray.visible = active && rayStrength > 0.001;
+    return active;
+  }
+  root.userData.updateView = updateView;
+  horizonBank.onBeforeRender = (rend, sc, cam) => {
+    if (!horizonViewManaged) placeHorizonBank(cam);
+  };
   root.add(horizonBank);
 
   // Crepuscular shafts share the same cloud anchors and sun direction as the shadow
@@ -760,7 +800,7 @@ export function setupClouds(group, {
   for (const ray of lightRays) {
     ray.onBeforeRender = (rend, sc, cam) => {
       const cloud = ray.userData.cloud;
-      placeHorizonBank(cam);
+      if (!horizonViewManaged) placeHorizonBank(cam);
       _rayDirection.copy(_sunDir).multiplyScalar(-1).normalize();
       _rayView.subVectors(cam.position, cloud.position).normalize();
       _rayWidth.crossVectors(_rayDirection, _rayView);
@@ -903,7 +943,7 @@ export function setupClouds(group, {
     horizonBank.userData.opNow = horizonBank.userData.op * (0.28 + 0.72 * smoothstep(0.72, 2.5, inten));
     horizonMaterial.opacity = horizonBank.userData.opNow;
     for (const ray of lightRays) {
-      ray.visible = rayStrength > 0.001;
+      ray.visible = horizonBank.userData.viewActive !== false && rayStrength > 0.001;
       _rayColor.copy(_rimColor).lerp(_base, 0.26);
       ray.material.uniforms.uRayColor.value.copy(_rayColor);
     }
@@ -924,5 +964,5 @@ export function setupClouds(group, {
     root.clear();
   }
 
-  return { group: root, uniforms: u, update, setEnabled, dispose };
+  return { group: root, uniforms: u, update, updateView, setEnabled, dispose };
 }

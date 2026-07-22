@@ -134,12 +134,16 @@ window.__rimAudit = () => {
         emiss: +lum(mm.emissive, mm.emissiveIntensity).toFixed(4),
         patched: !!(mm.userData && mm.userData.__rimPatched),
         rimMul,
-        // rim.js 와 동일 판정: 프로토타입 기본 메서드는 제외(기본 onBeforeCompile.toString() 오탐 회피).
+        // rim.js 와 동일 판정: rim 자체의 stable key와 명시적으로 합성 가능한 cloud key는
+        // 허용하고, snowvol/unknown own key만 incompatible custom으로 분류한다.
         cck: (() => { try {
           if (!mm.customProgramCacheKey || mm.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) return false;
           const k = mm.customProgramCacheKey();
-          return typeof k === 'string' && k.length > 0 && (k.startsWith('snowvol_') || Object.prototype.hasOwnProperty.call(mm, 'customProgramCacheKey'));
-        } catch { return false; } })(),
+          if (typeof k !== 'string' || k.length === 0) return false;
+          if (k.startsWith('cheoma-rim-physical-v1|')) return false;
+          if (mm.userData?.__cloudShadowPatchVersion === 'cloudshadow-v1' && k.startsWith('cloudshadow|')) return false;
+          return Object.prototype.hasOwnProperty.call(mm, 'customProgramCacheKey');
+        } catch { return true; } })(),
       });
     }
   });
@@ -258,7 +262,7 @@ await open('rim=fresnel&time=sunset&season=summer');
   const transpPatched = rows.filter((r) => r.patched && r.transparent);
   ok(transpPatched.length === 0, `반투명 재질 미패치`);
   const cckPatched = rows.filter((r) => r.patched && r.cck);
-  ok(cckPatched.length === 0, `customProgramCacheKey 재정의 재질(snowvol류) 미패치`);
+  ok(cckPatched.length === 0, `unknown customProgramCacheKey 재질(snowvol류) 미패치`);
   const fakeSnow = rows.filter((r) => r.name === 'fake-snowvol');
   ok(fakeSnow.length > 0 && fakeSnow.every((r) => !r.patched && r.cck), `합성 snowvol_ 재질 제외 확인(cck 감지·미패치)`);
 

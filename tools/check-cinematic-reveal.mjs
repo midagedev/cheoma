@@ -113,7 +113,8 @@ near(timeline.sample().position, rebuilt.position);
 
 // A neighbouring roof can occupy the authored yard ray without invalidating the
 // village layout. The safe endpoint may use another angle inside the same solar
-// opening, but must retain eye height, distance, and lens without generation RNG.
+// opening, but must retain the authored elevation and projected size without
+// generation RNG.
 const subjectBounds = { min: { x: -4, y: 0, z: -2 }, max: { x: 4, y: 8, z: 2 } };
 const baseAzimuth = 14 * Math.PI / 180;
 const focusBase = frame({ x: Math.sin(baseAzimuth) * 30, y: 1.35, z: Math.cos(baseAzimuth) * 30 }, { x: 0, y: 4, z: 0 }, 20, 23, 1);
@@ -128,7 +129,15 @@ assert.equal(safeFocus.baseVisibleRatio, 0, 'fixture default endpoint must be oc
 assert.equal(safeFocus.visibleRatio, 1, 'safe endpoint must restore the complete sampled house bounds');
 assert.equal(safeFocus.azimuth, 0, 'selector must choose the unblocked centre of the solar opening');
 assert.equal(safeFocus.scale, 0.8, 'selector must choose the bounded owner-yard dolly');
-assert.equal(safeFocus.framing.position.y, focusBase.position.y, 'solar-opening candidate must preserve human eye height');
+const focusElevation = (framing) => Math.atan2(
+  framing.position.y - framing.target.y,
+  Math.hypot(
+    framing.position.x - framing.target.x,
+    framing.position.z - framing.target.z,
+  ),
+);
+assert.ok(Math.abs(focusElevation(safeFocus.framing) - focusElevation(focusBase)) < EPS,
+  'solar-opening candidate must preserve the authored camera elevation');
 assert.ok(safeFocus.framing.fov < 26, 'safe solar-opening candidate must preserve a telephoto lens');
 assert.ok(Math.abs(
   Math.tan(safeFocus.framing.fov * Math.PI / 360) * safeFocus.scale

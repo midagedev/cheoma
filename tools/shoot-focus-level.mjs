@@ -1,4 +1,4 @@
-// #15 focus eye-level composition gate.
+// #15 exact-elevation residential focus composition gate.
 //
 // Runs the real app from an isolated Vite server, finishes the product's actual
 // camera tween deterministically, and captures representative house/landmark views.
@@ -9,19 +9,21 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
+import { countChangedPixels } from './lib/png-metrics.mjs';
+import { VILLAGE_FOCUS_ELEVATION } from '../src/camera/optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-cache-'));
 const outputDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-shots-'));
 const timeout = Number(process.env.CHEOMA_FOCUS_LEVEL_TIMEOUT_MS) || 90_000;
+const FOCUS_ELEVATION_DEG = VILLAGE_FOCUS_ELEVATION * 180 / Math.PI;
 const results = [];
 const runtimeErrors = [];
 const check = (pass, message) => {
   results.push({ pass, message });
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${message}`);
 };
-
 const server = await createServer({
   root: APP_ROOT,
   configFile: join(APP_ROOT, 'vite.config.js'),
@@ -74,7 +76,111 @@ try {
   }
 
   let selected = null;
-  const expectedLift = { choga: 3.12, giwa: 4.32, hero: 5.6, palace: 3.2, temple: 3 };
+  const residentialEvidence = [];
+  const expectedLift = { palace: 3.2, temple: 3 };
+  async function measureFocusedFrame(parcelId) {
+    return page.evaluate(async (id) => {
+      const engine = window.__engine;
+      const camera = engine.camera;
+      const target = engine.__controls.target;
+      const threeUrl = performance.getEntriesByType('resource')
+        .map((entry) => entry.name)
+        .find((name) => /\/deps\/three\.js/.test(name));
+      const THREE = await import(threeUrl);
+      const visibility = engine.village.debugFocusVisibility(id);
+      const bounds = visibility.subjectBounds;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const x of [bounds.min[0], bounds.max[0]]) {
+        for (const y of [bounds.min[1], bounds.max[1]]) {
+          for (const z of [bounds.min[2], bounds.max[2]]) {
+            const projected = camera.position.clone().set(x, y, z).project(camera);
+            minX = Math.min(minX, projected.x); maxX = Math.max(maxX, projected.x);
+            minY = Math.min(minY, projected.y); maxY = Math.max(maxY, projected.y);
+          }
+        }
+      }
+      const forward = target.clone().sub(camera.position).normalize();
+      const detailRoot = engine.village.focusRoot();
+      detailRoot?.updateWorldMatrix(true, true);
+      const raycaster = new THREE.Raycaster();
+      const inFrame = (point) => {
+        const projected = point.clone().project(camera);
+        return Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1
+          && Math.abs(projected.z) <= 1;
+      };
+      const rayVisible = (object, point) => {
+        const direction = point.clone().sub(camera.position);
+        const distance = direction.length();
+        raycaster.set(camera.position, direction.normalize());
+        const first = raycaster.intersectObject(detailRoot, true)
+          .find((hit) => hit.distance <= distance + 0.2);
+        return first?.object === object;
+      };
+      const yardDetails = [];
+      detailRoot?.traverse((object) => {
+        if (!object.visible) return;
+        let parent = object.parent, semantic = null;
+        while (parent && parent !== detailRoot) {
+          if (['yard-props', 'aux', 'garden'].includes(parent.name)) {
+            semantic = parent.name;
+            break;
+          }
+          parent = parent.parent;
+        }
+        const named = ['lantern-bulb', 'courtyard-ground'].includes(object.name);
+        if (!named && !(semantic && object.isMesh)) return;
+        const point = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
+        const framed = inFrame(point);
+        yardDetails.push({
+          name: object.name || semantic,
+          inFrame: framed,
+          visible: framed && rayVisible(object, point),
+        });
+      });
+      const ring = engine.scene.children.find((child) => (
+        child.name === 'focusRing' && child.userData?.parcelId === id && child.visible
+      ));
+      return {
+        elevation: Math.asin(-forward.y) * 180 / Math.PI,
+        composition: window.__viewshift?.compositionYFrac ?? null,
+        left: (minX + 1) * 0.5,
+        right: (maxX + 1) * 0.5,
+        top: (1 - maxY) * 0.5,
+        bottom: (1 - minY) * 0.5,
+        height: (maxY - minY) * 0.5,
+        yardDetailsInFrame: yardDetails.filter((detail) => detail.inFrame).length,
+        yardDetailsVisible: yardDetails.filter((detail) => detail.visible).length,
+        hasChickens: ring?.userData?.hasChickens ?? false,
+      };
+    }, parcelId);
+  }
+
+  async function captureFocusedAnimalPixels(parcelId) {
+    const state = await page.evaluate(async (id) => {
+      const engine = window.__engine;
+      engine.debugSetPaused(true);
+      engine.debugAdvanceFocusRing(3.2);
+      await new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
+      const ring = engine.scene.children.find((child) => (
+        child.name === 'focusRing' && child.userData?.parcelId === id && child.visible
+      ));
+      const animals = ring?.getObjectByName('animals');
+      engine.debugRenderDofFrame();
+      const on = engine.renderer.domElement.toDataURL('image/png');
+      if (!animals) return { toggled: false, on, off: on };
+      animals.visible = false;
+      engine.debugRenderDofFrame();
+      const off = engine.renderer.domElement.toDataURL('image/png');
+      animals.visible = true;
+      engine.debugRenderDofFrame();
+      return { toggled: true, on, off };
+    }, parcelId);
+    await page.evaluate(() => window.__engine.debugSetPaused(false));
+    const on = Buffer.from(state.on.split(',')[1], 'base64');
+    const off = Buffer.from(state.off.split(',')[1], 'base64');
+    return { toggled: state.toggled, changed: countChangedPixels(on, off) };
+  }
+
   async function focusAndCapture(name, parcel) {
     if (selected) {
       await finishTransition('return');
@@ -89,21 +195,39 @@ try {
       .find((candidate) => candidate.parcelId === parcel.parcelId);
     const wanted = expectedLift[name];
     check(Number.isFinite(current?.focusTargetLift)
-      && Math.abs(current.focusTargetLift - wanted) < 0.011,
-    `${name} aims at its authored lintel/eave height (${current?.focusTargetLift}m above base)`);
+      && (wanted == null
+        ? current.focusTargetLift >= 1.65 && current.focusTargetLift <= 2.5
+        : Math.abs(current.focusTargetLift - wanted) < 0.011),
+    `${name} aims at door height (${current?.focusTargetLift}m above base)`);
     check(Math.abs(framing.targetY - current.focusTargetY) < 0.11,
       `${name} runtime target matches planned framing (${framing.targetY}/${current.focusTargetY})`);
-    if (name === 'giwa' || name === 'choga' || name === 'hero') {
-      const eyeHeight = current.focusCameraY - current.focusBaseY;
-      check(Math.abs(eyeHeight - 1.35) < 0.011,
-        `${name} keeps the camera at yard eye height (${eyeHeight.toFixed(2)}m)`);
-    }
 
     // Allow the settled frame, LOD ownership handoff, and Svelte panel CSS morph to
     // finish before capture. Camera motion itself was already sought deterministically.
     await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame())));
     await page.waitForTimeout(300);
+    const frame = await measureFocusedFrame(parcel.parcelId);
+    console.log(`FOCUS FRAME ${name}: ${JSON.stringify(frame)}`);
+    if (name === 'giwa' || name === 'choga' || name === 'hero') {
+      check(Math.abs(frame.elevation - FOCUS_ELEVATION_DEG) < 0.02,
+        `${name} runtime keeps the exact shared focus elevation (${frame.elevation.toFixed(2)}°)`);
+      check(Math.abs(frame.composition) < 1e-6,
+        `${name} keeps the centered projection instead of cropping the courtyard for sky`);
+      check(frame.top >= 0.02 && frame.bottom <= 0.98
+        && frame.left >= 0.02 && frame.right <= 0.98 && frame.height >= 0.12,
+      `${name} house volume remains uncropped and readable (${(frame.top * 100).toFixed(1)}–${(frame.bottom * 100).toFixed(1)}%, height ${(frame.height * 100).toFixed(1)}%)`);
+    }
+    if (name === 'giwa' || name === 'choga') {
+      const animalPixels = await captureFocusedAnimalPixels(parcel.parcelId);
+      residentialEvidence.push({ name, frame, animalPixels });
+      console.log(`FOCUS LIFE ${name}: ${JSON.stringify({
+        yardDetailsVisible: frame.yardDetailsVisible, animalPixels,
+      })}`);
+      check(frame.yardDetailsVisible >= 1,
+        `${name} retains a ray-visible household yard detail (${frame.yardDetailsVisible}/${frame.yardDetailsInFrame})`);
+    }
     await page.screenshot({ path: join(outputDir, `${name}.png`) });
+    return frame;
   }
 
   await loadVillage('vscale=capital&vpalace=1&vtemple=1&seed=20260718&vseed=7&time=day&weather=clear');
@@ -146,6 +270,10 @@ try {
     check(edit.extended.box.x > edit.compact.box.x + 20 && edit.extended.box.z > edit.compact.box.z + 20,
       `temple editor rebuilds the reserved compound geometry (${JSON.stringify({ compact: edit.compact.box, extended: edit.extended.box })})`);
   }
+  check(residentialEvidence.some((entry) => (
+    entry.animalPixels.toggled && entry.animalPixels.changed >= 20
+  )), `regular residential focus animals make a real canvas contribution (${residentialEvidence
+    .map((entry) => `${entry.name}:${entry.animalPixels.changed}`).join(', ')})`);
 
   // Capital deliberately replaces the residential hero with the palace core.
   await loadVillage('vscale=village&vtemple=0&seed=20260718&vseed=7&time=day&weather=clear');
@@ -154,6 +282,19 @@ try {
     .find((parcel) => parcel.hero);
   check(!!hero, 'village head house is available');
   if (hero) await focusAndCapture('hero', hero);
+
+  // Towns use a formal government/guest-hall hero. Its focus ring may share the
+  // same lifecycle, but it must not inherit the residential inner-yard flock.
+  await loadVillage('vscale=town&vpalace=0&vtemple=0&seed=20260718&vseed=7&time=day&weather=clear');
+  selected = null;
+  const formalHero = (await page.evaluate(() => window.__engine.village.debugParcels()))
+    .find((parcel) => parcel.hero && parcel.heroStyle === 'palace');
+  check(!!formalHero, 'town formal hero is available');
+  if (formalHero) {
+    const formalFrame = await focusAndCapture('formal-hero', formalHero);
+    check(!formalFrame.hasChickens,
+      'formal government hero does not inherit the residential inner-yard chickens');
+  }
 
   check(runtimeErrors.length === 0, `browser reports no runtime errors (${runtimeErrors.length})`);
 } finally {

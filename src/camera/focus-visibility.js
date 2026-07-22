@@ -31,11 +31,12 @@ const normalizeAngle = (value) => {
 
 function framingAtCandidate(framing, axisYaw, azimuth, scale) {
   const dx = framing.position.x - framing.target.x;
+  const dy = framing.position.y - framing.target.y;
   const dz = framing.position.z - framing.target.z;
   const horizontal = Math.hypot(dx, dz);
   const position = {
     x: framing.target.x + horizontal * scale * Math.sin(axisYaw + azimuth),
-    y: framing.position.y,
+    y: framing.target.y + dy * scale,
     z: framing.target.z + horizontal * scale * Math.cos(axisYaw + azimuth),
   };
   return {
