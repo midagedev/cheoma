@@ -2312,6 +2312,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         const d = village.handle.focusAssembly?.(village.selected);
         return d?.group ?? null;
       },
+      residentialOpeningEdits: () => village.handle?.residentialOpeningEdits?.() ?? [],
       // 필지 편집 반영(#48, 라이브 스로틀은 App). 정규 필지는 오버레이 단일 집 교체, 특수(종가·관아)는
       //   컴파운드 오버레이 재생성. 편집 시 오버레이가 새로 만들어져 근접 앰비언스 링 앵커가 스테일해지므로
       //   focus 중인 그 필지면 새 오버레이에 링을 재부착(정규·특수 모두 — #92 정규도 오버레이+링).

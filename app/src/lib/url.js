@@ -4,6 +4,11 @@ import { newSeed } from './seed.js';
 
 import { normalizeSunsetLook } from '../../../src/api/environment.js';
 import { normalizeRenderStyle } from '../../../src/api/render-style.js';
+import {
+  RESIDENTIAL_EDIT_QUERY_KEY,
+  decodeResidentialEditState,
+  encodeResidentialEditState,
+} from './residential-edit-url.js';
 
 const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 
@@ -16,6 +21,7 @@ export function readUrl() {
   for (const k of KEYS) { if (q.has(k)) out[k] = q.get(k); }
   const seed = out.seed != null ? (parseInt(out.seed, 10) >>> 0) : newSeed();
   const vseedRaw = q.get('vseed');
+  const residentialEdits = decodeResidentialEditState(q.get(RESIDENTIAL_EDIT_QUERY_KEY));
   return {
     seed,
     hasSeed: out.seed != null,
@@ -38,12 +44,16 @@ export function readUrl() {
     vchar: CHARS.includes(q.get('vchar')) ? q.get('vchar') : null,
     vpalace: q.get('vpalace') === '1',
     vtemple: q.get('vtemple') === '1',
+    residentialEdits: residentialEdits?.records || [],
+    focusedParcelId: residentialEdits?.focusedParcelId || null,
   };
 }
 
 // 현재 상태를 URL 에 반영(pushState 없이 replaceState — 히스토리 오염 방지).
 //   village: 마을 모드일 때 { seed, scale, character, includePalace, includeTemple } — 없으면 마을 파라미터 제거.
-export function writeUrl(state, { overrides = {}, village = null, flow = false } = {}) {
+export function writeUrl(state, {
+  overrides = {}, village = null, flow = false, residentialEdits = [], focusedParcelId = null,
+} = {}) {
   const q = new URLSearchParams(location.search);
   q.set('seed', String(state.seed >>> 0));
   const put = (k, v, cond) => { if (cond) q.set(k, String(v)); else q.delete(k); };
@@ -62,11 +72,15 @@ export function writeUrl(state, { overrides = {}, village = null, flow = false }
   put('vchar', village && village.character, !!village && village.character !== 'yeoyeom');
   put('vpalace', 1, !!village && village.includePalace);
   put('vtemple', 1, !!village && village.includeTemple);
+  const editPayload = encodeResidentialEditState({ records: residentialEdits, focusedParcelId });
+  put(RESIDENTIAL_EDIT_QUERY_KEY, editPayload, !!village && !!editPayload);
   const url = `${location.pathname}?${q.toString()}`;
   history.replaceState(null, '', url);
 }
 
-export function shareUrl(state, overrides) {
+export function shareUrl(state, overrides, {
+  village = null, residentialEdits = [], focusedParcelId = null,
+} = {}) {
   const q = new URLSearchParams();
   q.set('seed', String(state.seed >>> 0));
   if (overrides.preset) q.set('preset', state.preset);
@@ -76,5 +90,15 @@ export function shareUrl(state, overrides) {
   if (overrides.weather) q.set('weather', state.weather);
   if (state.renderStyle === 'ink') q.set('mode', 'ink');
   if (state.expansion > 1) q.set('exp', String(state.expansion));
+  if (village) {
+    q.set('village', '1');
+    q.set('vseed', String(village.seed >>> 0));
+    if (village.scale !== 'village') q.set('vscale', village.scale);
+    if (village.character !== 'yeoyeom') q.set('vchar', village.character);
+    if (village.includePalace) q.set('vpalace', '1');
+    if (village.includeTemple) q.set('vtemple', '1');
+    const editPayload = encodeResidentialEditState({ records: residentialEdits, focusedParcelId });
+    if (editPayload) q.set(RESIDENTIAL_EDIT_QUERY_KEY, editPayload);
+  }
   return `${location.origin}${location.pathname}?${q.toString()}`;
 }

@@ -11,7 +11,8 @@
 //     ② 마을(village 규모) export → 라운드트립 + 파일<80MB + 임포스터·입자 0.
 //     ③ hanyang: 실제 FULL은 예산 가드, fullDetail:false는 모든 경량 FAR 주택을 보존.
 //        두 경로 모두 현재 카메라 LOD/focus와 무관하며 FULL/FAR가 중복되지 않는다.
-//        focus 중에도 staging override는 빠지고 원본 행렬·정점이 비focus export와 같다.
+//        transient focus는 빠져 비focus export와 같고, committed edit은 override를
+//        포함하면서 superseded base instance/ranges를 export snapshot에서 접는다.
 //     ④ pageerror/예외 0.
 
 import { createServer } from 'node:http';
@@ -58,7 +59,8 @@ const TEX_KEYS = ['map','normalMap','roughnessMap','metalnessMap','emissiveMap',
 const SCENERY_RE = /^(?:trees|forest-|village-(?:trees|forest|flora|bloom|critters)|animals|cow|birds|critters|v-(?:dogs|cats|magpies))/;
 function countScene(obj) {
   let meshes = 0, tris = 0, points = 0, impostors = 0, overrides = 0;
-  let scenery = 0, tex = 0, texWithImage = 0, instanced = 0;
+  let scenery = 0, tex = 0, texWithImage = 0, instanced = 0, zeroInstances = 0;
+  const matrix = new THREE.Matrix4();
   const mats = new Set();
   obj.traverse((n) => {
     if (n.isPoints || n.isSprite) points++;
@@ -71,13 +73,22 @@ function countScene(obj) {
       const base = idx ? idx.count / 3 : (p ? p.count / 3 : 0);
       if (base <= 0) return;
       meshes++; tris += base * (n.isInstancedMesh ? n.count : 1);
-      if (n.isInstancedMesh) instanced++;
+      if (n.isInstancedMesh) {
+        instanced++;
+        for (let index = 0; index < n.count; index++) {
+          matrix.fromArray(n.instanceMatrix.array, index * 16);
+          if (Math.abs(matrix.determinant()) < 1e-12) zeroInstances++;
+        }
+      }
       const mm = Array.isArray(n.material) ? n.material : [n.material];
       for (const m of mm) { if (!m) continue; mats.add(m.uuid);
         for (const k of TEX_KEYS) { const t = m[k]; if (t) { tex++; if (t.image) texWithImage++; } } }
     }
   });
-  return { meshes, tris, materials: mats.size, points, impostors, overrides, scenery, tex, texWithImage, instanced };
+  return {
+    meshes, tris, materials: mats.size, points, impostors, overrides,
+    scenery, tex, texWithImage, instanced, zeroInstances,
+  };
 }
 function mixString(hash, value) {
   for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619) >>> 0;
@@ -223,12 +234,38 @@ async function runAll() {
       focusLean,
     };
     if (focusParcel) handle.hideParcelDetail(focusParcel.id);
+
+    // A committed editor transaction is not a camera staging overlay. Export it
+    // as the authoritative FULL house and keep the superseded FULL/FAR/wall base
+    // collapsed in the export-only snapshots. The edit uses a count extreme so
+    // its opening geometry fingerprint cannot accidentally match the prototype.
+    const editedGroup = focusParcel ? handle.rebuildParcel(focusParcel.id, {
+      building: { windowCount: 1, windowWidthK: 0.31 },
+    }, { persist: true, refreshFlora: false }) : null;
+    const editedState = focusParcel ? handle.parcelRebuildState(focusParcel.id) : null;
+    const editedFull = exportSummary(root, {});
+    const editedLean = exportSummary(root, { fullDetail: false });
+    const committedEdit = {
+      created: !!editedGroup,
+      marked: editedGroup?.userData?.exportPersistentParcel === true,
+      persistent: editedState?.persistent === true,
+      fullChanged: !sameExportShape(sc, editedFull),
+      leanChanged: !sameExportShape(lw, editedLean),
+      fullOverrides: editedFull.overrides,
+      leanOverrides: editedLean.overrides,
+      fullZeroDelta: editedFull.zeroInstances - sc.zeroInstances,
+      baseFull: sc,
+      editedFull,
+      baseLean: lw,
+      editedLean,
+    };
     handle.dispose();
     out.hanyang = {
       ok: true, analyzeTris: an.triangles, limit: an.limit, overBudget,
       sanitizedImpostors: sc.impostors, sanitizedPoints: sc.points,
       lightweightImpostors: lw.impostors, lightweightTris: lw.tris,
-      srcImpostors, focusInvariant, suggestions: overBudget ? res.suggestions : null,
+      srcImpostors, focusInvariant, committedEdit,
+      suggestions: overBudget ? res.suggestions : null,
     };
   } catch (e) { out.hanyang = { ok: false, reason: String(e && e.stack || e) }; }
 
@@ -338,6 +375,11 @@ if (results) {
       && fi.baseHidden && fi.wallHidden && fi.impostorHidden
       && fi.fullSame && fi.leanSame
       && fi.focusFull?.overrides === 0 && fi.focusLean?.overrides === 0;
+    const ce = h.committedEdit || {};
+    const committedOk = ce.created && ce.marked && ce.persistent
+      && ce.fullChanged && ce.leanChanged
+      && ce.fullOverrides >= 2 && ce.leanOverrides >= 2
+      && ce.fullZeroDelta > 0;
     if (!overOk) fails.push(`hanyang: guard not tripped (tris ${B(h.analyzeTris)} vs limit ${B(h.limit)}, overBudget=${h.overBudget})`);
     if (!filterOk) fails.push(`hanyang: FULL/FAR export selection drift `
       + `(full impostors=${h.sanitizedImpostors}, points=${h.sanitizedPoints}, `
@@ -347,8 +389,13 @@ if (results) {
       + `(parcel=${fi.parcelId}, detail=${fi.detailCreated}, state=${fi.stateValid}, `
       + `hidden=${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden}, `
       + `same=${fi.fullSame}/${fi.leanSame}, overrides=${fi.focusFull?.overrides}/${fi.focusLean?.overrides})`);
+    if (!committedOk) fails.push(`hanyang: committed edit missing from export `
+      + `(created=${ce.created}, marked=${ce.marked}, persistent=${ce.persistent}, `
+      + `changed=${ce.fullChanged}/${ce.leanChanged}, overrides=${ce.fullOverrides}/${ce.leanOverrides}, `
+      + `zeroDelta=${ce.fullZeroDelta})`);
     console.log(`analyzeTris ${B(h.analyzeTris)} > limit ${B(h.limit)} → overBudget=${h.overBudget}${overOk ? '' : '✗'} · srcImpostors ${h.srcImpostors}${preOk ? '' : '✗'} → FULL impostors ${h.sanitizedImpostors}/points ${h.sanitizedPoints} · FAR impostors ${h.lightweightImpostors}/tris ${B(h.lightweightTris)}${filterOk ? '' : '✗'}`);
     console.log(`focus ${fi.parcelId || 'none'} hidden(base/wall/FAR) ${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden} · FULL ${fi.baseFull?.fingerprint}→${fi.focusFull?.fingerprint} · FAR ${fi.baseLean?.fingerprint}→${fi.focusLean?.fingerprint} · overrides ${fi.focusFull?.overrides}/${fi.focusLean?.overrides}${focusOk ? '' : '✗'}`);
+    console.log(`committed edit persistent/marked ${ce.persistent}/${ce.marked} · FULL ${ce.baseFull?.fingerprint}→${ce.editedFull?.fingerprint} · FAR ${ce.baseLean?.fingerprint}→${ce.editedLean?.fingerprint} · overrides ${ce.fullOverrides}/${ce.leanOverrides} · zero base delta ${ce.fullZeroDelta}${committedOk ? '' : '✗'}`);
     if (h.suggestions) console.log('  안내:', h.suggestions.join(' | '));
   }
 }

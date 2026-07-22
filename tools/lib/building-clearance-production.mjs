@@ -492,6 +492,8 @@ function inspectResidentialOpenings(building) {
         facade: opening.facade,
         primary: opening.primary,
         plannedWidth: opening.width,
+        plannedHeightK: opening.heightK,
+        detailHeight: detail?.height ?? null,
         detailLeafCount: detail?.leafCount ?? null,
         textureRepeatX: object.material?.map?.repeat?.x ?? null,
         spanZ: { min: panelBounds.min.z, max: panelBounds.max.z },
@@ -514,6 +516,7 @@ function inspectResidentialOpenings(building) {
           : alongX
           ? object.geometry?.parameters?.width ?? null
           : object.geometry?.parameters?.depth ?? null,
+        renderedHeight: object.geometry?.parameters?.height ?? null,
       };
     }
     anchor.updateWorldMatrix(true, false);
@@ -522,28 +525,33 @@ function inspectResidentialOpenings(building) {
     const range = (candidate) => {
       candidate.updateWorldMatrix(true, false);
       const positions = candidate.geometry?.attributes?.position;
-      let min = Infinity, max = -Infinity;
+      let min = Infinity, max = -Infinity, minY = Infinity, maxY = -Infinity;
       for (let index = 0; positions && index < positions.count; index++) {
         point.fromBufferAttribute(positions, index)
           .applyMatrix4(candidate.matrixWorld)
           .applyMatrix4(inverse);
         min = Math.min(min, point.x);
         max = Math.max(max, point.x);
+        minY = Math.min(minY, point.y);
+        maxY = Math.max(maxY, point.y);
       }
-      return { min, max };
+      return { min, max, minY, maxY };
     };
     const active = range(object);
-    let min = active.min, max = active.max;
+    let min = active.min, max = active.max, minY = active.minY, maxY = active.maxY;
     building.traverse((candidate) => {
       if (!candidate.isMesh || candidate.userData?.openingDetailId !== detail.id) return;
       const candidateRange = range(candidate);
       min = Math.min(min, candidateRange.min);
       max = Math.max(max, candidateRange.max);
+      minY = Math.min(minY, candidateRange.minY);
+      maxY = Math.max(maxY, candidateRange.maxY);
     });
     return {
       ...panel,
       activeWidth: active.max - active.min,
       renderedWidth: max - min,
+      renderedHeight: maxY - minY,
     };
   });
   const kitchenFrame = building.getObjectByName('kitchen-opening-frame');
@@ -743,10 +751,12 @@ export function inspectBuildingClearance() {
     ['choga-min', {
       ...PRESETS.choga,
       doorCount: 1, windowCount: 1, doorWidthK: 0.32, windowWidthK: 0.18,
+      doorHeightK: 0.9, windowHeightK: 0.8,
     }],
     ['choga-max', {
       ...PRESETS.choga,
       frontBays: 5, doorCount: 99, windowCount: 99, doorWidthK: 0.72, windowWidthK: 0.62,
+      doorHeightK: 1.08, windowHeightK: 1.2,
     }],
     ['choga-tight-kitchen', {
       ...PRESETS.choga,
@@ -762,6 +772,7 @@ export function inspectBuildingClearance() {
       ...PRESETS.giwa,
       planShape: 'u', bays: 4, mainHalfW: 5,
       doorCount: 99, windowCount: 99, doorWidthK: 0.94, windowWidthK: 0.78,
+      doorHeightK: 1.05, windowHeightK: 1.25,
     }],
   ].map(([name, params]) => {
     const building = buildBuilding({ ...params, mats: testMaterials() });
@@ -780,13 +791,13 @@ export function inspectBuildingClearance() {
   const thresholdLandingFixtures = thresholdLandingShapes.flatMap(([shape, shapeParams]) => {
     const capabilities = residentialOpeningCapabilities('giwa', shapeParams);
     const profiles = [
-      ['min', capabilities.doorWidthK.min, capabilities.doorCount.min],
-      ['default', capabilities.doorWidthK.default, capabilities.doorCount.default],
-      ['max', capabilities.doorWidthK.max, capabilities.doorCount.max],
+      ['min', capabilities.doorWidthK.min, capabilities.doorHeightK.min, capabilities.doorCount.min],
+      ['default', capabilities.doorWidthK.default, capabilities.doorHeightK.default, capabilities.doorCount.default],
+      ['max', capabilities.doorWidthK.max, capabilities.doorHeightK.max, capabilities.doorCount.max],
     ];
     return [...primarySideSeeds(shapeParams)].flatMap(([side, seed]) => (
-      profiles.map(([profile, doorWidthK, doorCount]) => {
-        const params = { ...shapeParams, seed, doorWidthK, doorCount };
+      profiles.map(([profile, doorWidthK, doorHeightK, doorCount]) => {
+        const params = { ...shapeParams, seed, doorWidthK, doorHeightK, doorCount };
         const primary = planResidentialOpenings('giwa', params, seed).openings
           .find((opening) => opening.primary);
         const building = buildBuilding({ ...params, mats: testMaterials() });

@@ -144,15 +144,18 @@ try {
   invariant(actions.some((label) => label.includes('내보내기')), `missing export label: ${actions.join(' | ')}`);
   invariant(!actions.some((label) => /다시 보기|GLB/i.test(label)), `legacy action remains: ${actions.join(' | ')}`);
 
-  // #10: the real Korean editor exposes the planner's four axes with visible
-  // units/ranges. Exercise one width through the native keyboard path and one
-  // count through the stepper, then inspect the actual FULL overlay plan.
+  // #10: the real Korean editor exposes the planner's six axes with visible
+  // units/ranges. Exercise width and height through the native keyboard path
+  // plus one count through the stepper, then inspect the actual FULL overlay plan.
   const openingBefore = await page.evaluate((parcelId) => {
     const engine = window.__engine;
     engine.village.debugDrawCalls();
     const state = engine.village.debugParcelRebuild(parcelId);
     const controls = {};
-    for (const key of ['doorCount', 'windowCount', 'doorWidthK', 'windowWidthK']) {
+    for (const key of [
+      'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+      'doorHeightK', 'windowHeightK',
+    ]) {
       const input = document.querySelector(`.ctx.house:not([aria-hidden="true"]) input[data-key="${key}"]`);
       const row = input?.closest('.row')
         || document.querySelector(`.ctx.house:not([aria-hidden="true"]) .row[data-key="${key}"]`);
@@ -175,16 +178,22 @@ try {
   invariant(openingBefore.controls.doorCount.label === '문 수'
       && openingBefore.controls.windowCount.label === '창 수'
       && openingBefore.controls.doorWidthK.label === '문 너비'
-      && openingBefore.controls.windowWidthK.label === '창 너비',
+      && openingBefore.controls.windowWidthK.label === '창 너비'
+      && openingBefore.controls.doorHeightK.label === '문 높이'
+      && openingBefore.controls.windowHeightK.label === '창 높이',
     `opening editor lost Korean labels: ${JSON.stringify(openingBefore.controls)}`);
   invariant(openingBefore.controls.doorCount.value.endsWith('개')
       && openingBefore.controls.windowCount.value.endsWith('개'),
     `opening counts lost their unit: ${JSON.stringify(openingBefore.controls)}`);
   invariant(openingBefore.controls.doorWidthK.value.endsWith('%')
       && openingBefore.controls.windowWidthK.value.endsWith('%')
+      && openingBefore.controls.doorHeightK.value.endsWith('%')
+      && openingBefore.controls.windowHeightK.value.endsWith('%')
       && openingBefore.controls.doorWidthK.bounds.includes('–')
-      && openingBefore.controls.windowWidthK.bounds.includes('–'),
-    `opening widths lost percent/range affordances: ${JSON.stringify(openingBefore.controls)}`);
+      && openingBefore.controls.windowWidthK.bounds.includes('–')
+      && openingBefore.controls.doorHeightK.bounds.includes('–')
+      && openingBefore.controls.windowHeightK.bounds.includes('–'),
+    `opening dimensions lost percent/range affordances: ${JSON.stringify(openingBefore.controls)}`);
 
   const doorWidth = page.locator('.ctx.house:not([aria-hidden="true"]) input[data-key="doorWidthK"]');
   await doorWidth.focus();
@@ -192,6 +201,12 @@ try {
   await page.waitForFunction(({ parcelId, beforeValue }) => (
     window.__engine.village.debugParcelRebuild(parcelId)?.params?.doorWidthK !== beforeValue
   ), { parcelId: fixture.parcelId, beforeValue: openingBefore.params.doorWidthK }, { timeout });
+  const windowHeight = page.locator('.ctx.house:not([aria-hidden="true"]) input[data-key="windowHeightK"]');
+  await windowHeight.focus();
+  await windowHeight.press('ArrowLeft');
+  await page.waitForFunction(({ parcelId, beforeValue }) => (
+    window.__engine.village.debugParcelRebuild(parcelId)?.params?.windowHeightK !== beforeValue
+  ), { parcelId: fixture.parcelId, beforeValue: openingBefore.params.windowHeightK }, { timeout });
   const countButtons = page.locator('.ctx.house:not([aria-hidden="true"]) .row[data-key="doorCount"] button');
   const increaseEnabled = await countButtons.nth(1).isEnabled();
   await countButtons.nth(increaseEnabled ? 1 : 0).click();
@@ -232,7 +247,9 @@ try {
   invariant(openingAfter.plan && openingAfter.panels.length === openingAfter.plan.openings.length,
     `FULL overlay rendered ${openingAfter.panels.length}/${openingAfter.plan?.openings.length || 0} openings`);
   invariant(openingAfter.plan.params.doorCount === openingAfter.state.params.doorCount
-      && openingAfter.plan.params.doorWidthK === openingAfter.state.params.doorWidthK,
+      && openingAfter.plan.params.doorWidthK === openingAfter.state.params.doorWidthK
+      && openingAfter.plan.params.doorHeightK === openingAfter.state.params.doorHeightK
+      && openingAfter.plan.params.windowHeightK === openingAfter.state.params.windowHeightK,
     'editor state and rendered residential plan diverged');
   invariant(openingAfter.panels.filter((opening) => opening.primary).length === 1
       && openingAfter.frameBatches === 1 && openingAfter.hardwareBatches === 1,
@@ -644,6 +661,88 @@ try {
   invariant(JSON.stringify(refocused.params) === JSON.stringify(after.state.params),
     'refocus discarded the rebuilt edit specification');
 
+  // #10 committed editor state: engine rebuild payloads are optional patches.
+  // A later width-only patch must retain the accepted count/top edit, the FULL
+  // plan and proxy must read the same normalized values, and the compact handoff
+  // must remain JSON-safe for the URL layer.
+  const partialEdits = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const before = engine.village.debugParcelRebuild(parcelId);
+    const doorCount = before.params.doorCount === 1 ? 2 : 1;
+    engine.village.rebuild(parcelId, {
+      building: { doorCount },
+      footprintScale: 1.37,
+    }, { refreshFlora: false });
+    engine.village.rebuild(parcelId, {
+      building: { doorWidthK: 99 },
+    }, { refreshFlora: false });
+    const state = engine.village.debugParcelRebuild(parcelId);
+    let plan = null;
+    engine.village.focusRoot()?.traverse((object) => {
+      if (!plan && object.userData.residentialOpeningPlan) {
+        plan = object.userData.residentialOpeningPlan;
+      }
+    });
+    const snapshot = engine.village.residentialOpeningEdits();
+    return {
+      doorCount,
+      state,
+      plan: plan?.params || null,
+      snapshot,
+      json: JSON.stringify(snapshot),
+    };
+  }, fixture.parcelId);
+  invariant(partialEdits.state.params.doorCount === partialEdits.doorCount
+      && partialEdits.state.params.footprintScale === 1.37,
+    `partial patch reset a committed edit: ${JSON.stringify(partialEdits.state.params)}`);
+  invariant(partialEdits.plan?.doorCount === partialEdits.state.params.doorCount
+      && partialEdits.plan?.doorWidthK === partialEdits.state.params.doorWidthK,
+    `partial patch diverged proxy/render state: ${JSON.stringify(partialEdits)}`);
+  const serializedEdit = partialEdits.snapshot.find((edit) => edit.parcelId === fixture.parcelId);
+  invariant(serializedEdit?.kind === partialEdits.state.kind
+      && JSON.stringify(serializedEdit.params) === JSON.stringify({
+        doorCount: partialEdits.state.params.doorCount,
+        windowCount: partialEdits.state.params.windowCount,
+        doorWidthK: partialEdits.state.params.doorWidthK,
+        windowWidthK: partialEdits.state.params.windowWidthK,
+        doorHeightK: partialEdits.state.params.doorHeightK,
+        windowHeightK: partialEdits.state.params.windowHeightK,
+      }) && partialEdits.json.length > 2,
+  `residential opening handoff drifted: ${partialEdits.json}`);
+
+  // Type changes start from target defaults, but the selected type itself is a
+  // durable decision across "rebuild this house". Every other committed edit is
+  // reset to the newly sampled variant.
+  const targetKind = partialEdits.state.kind === 'giwa' ? 'choga' : 'giwa';
+  await page.locator('.ctx.house:not([aria-hidden="true"]) .tabs .tab')
+    .nth(targetKind === 'giwa' ? 0 : 1).click();
+  await page.waitForFunction(({ parcelId, targetKind }) => (
+    window.__engine.village.debugParcelRebuild(parcelId)?.kind === targetKind
+  ), { parcelId: fixture.parcelId, targetKind }, { timeout });
+  const switched = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    engine.village.rebuild(parcelId, { footprintScale: 1.41 }, { refreshFlora: false });
+    return engine.village.debugParcelRebuild(parcelId);
+  }, fixture.parcelId);
+  invariant(switched.kind === targetKind && switched.params.footprintScale === 1.41,
+    `type switch did not establish a target-kind edit frame: ${JSON.stringify(switched)}`);
+  await page.locator('.foot.house:not([aria-hidden="true"]) button.reroll').click();
+  await page.waitForFunction(({ parcelId, targetKind }) => {
+    const state = window.__engine.village.getState();
+    const rebuilt = window.__engine.village.debugParcelRebuild(parcelId);
+    return state.selected === parcelId && !state.transitioning
+      && rebuilt?.kind === targetKind && rebuilt?.params?.footprintScale === 1;
+  }, { parcelId: fixture.parcelId, targetKind }, { timeout });
+  const typeRerolled = await page.evaluate((parcelId) => ({
+    state: window.__engine.village.debugParcelRebuild(parcelId),
+    edits: window.__engine.village.residentialOpeningEdits(),
+  }), fixture.parcelId);
+  const rerolledEdit = typeRerolled.edits.find((edit) => edit.parcelId === fixture.parcelId);
+  invariant(typeRerolled.state.kind === targetKind
+      && typeRerolled.state.params.footprintScale === 1
+      && !rerolledEdit,
+    `house reroll lost current kind or retained stale edits: ${JSON.stringify(typeRerolled)}`);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(180);
   const mobileGrip = page.locator('.sheet.context .grip');
@@ -663,7 +762,10 @@ try {
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'full', null, { timeout });
   const mobileControls = await page.evaluate(() => {
     const house = document.querySelector('.ctx.house:not([aria-hidden="true"])');
-    const keys = ['doorCount', 'windowCount', 'doorWidthK', 'windowWidthK'];
+    const keys = [
+      'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+      'doorHeightK', 'windowHeightK',
+    ];
     const controls = keys.map((key) => (
       house?.querySelector(`input[data-key="${key}"]`)
       || house?.querySelector(`.row[data-key="${key}"]`)
@@ -677,7 +779,7 @@ try {
       card: card ? { left: card.getBoundingClientRect().left, right: card.getBoundingClientRect().right } : null,
     };
   });
-  invariant(mobileControls.allPresent, 'mobile editor lost one of the four opening controls');
+  invariant(mobileControls.allPresent, 'mobile editor lost one of the six opening controls');
   invariant(mobileControls.buttonSizes.every((size) => size.width >= 40 && size.height >= 40),
     `mobile opening steppers are too small: ${JSON.stringify(mobileControls.buttonSizes)}`);
   invariant(mobileControls.card && mobileControls.card.left >= -1 && mobileControls.card.right <= 391,
@@ -765,6 +867,25 @@ try {
   invariant(thresholdPreview.size?.[0] >= 0.18 && thresholdPreview.size?.[0] <= 0.31
       && thresholdPreview.size?.[2] >= 0.22 && thresholdPreview.size?.[2] <= 0.31,
   `runtime footwear escaped world-metric bounds (${thresholdPreview.size?.join('×')})`);
+  const roofOnlyHandoff = await page.evaluate((selectedId) => {
+    const engine = window.__engine;
+    const other = engine.village.debugParcels().find((parcel) => (
+      parcel.editable && !parcel.hero && parcel.parcelId !== selectedId
+        && parcel.parcelId !== 'palace' && parcel.parcelId !== 'temple'
+    ));
+    if (!other) return null;
+    const before = engine.village.debugParcelRebuild(other.parcelId);
+    engine.village.rebuild(other.parcelId, {
+      building: { eaveOverhang: before.params.eaveOverhang + 0.05 },
+    }, { refreshFlora: false });
+    return {
+      parcelId: other.parcelId,
+      edits: engine.village.residentialOpeningEdits(),
+    };
+  }, fixture.parcelId);
+  invariant(roofOnlyHandoff && !roofOnlyHandoff.edits.some((edit) => (
+    edit.parcelId === roofOnlyHandoff.parcelId
+  )), `roof-only edit leaked into compact opening handoff: ${JSON.stringify(roofOnlyHandoff)}`);
   invariant(runtimeErrors.length === 0, `browser errors: ${runtimeErrors.join(' | ')}`);
 
   console.log(`screenshots: ${beforePath}, ${openingControlsPath}, ${livePreviewPath}, ${liveCommitPath}, ${afterPath}, ${aerialPath}, ${mobilePath}`);

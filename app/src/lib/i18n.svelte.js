@@ -42,6 +42,7 @@ const DICT = {
     s_doorPattern: '창살', s_aux: '부속채',
     s_doorCount: '문 수', s_windowCount: '창 수',
     s_doorWidthK: '문 너비', s_windowWidthK: '창 너비',
+    s_doorHeightK: '문 높이', s_windowHeightK: '창 높이',
     s_mainHalfW: '본채 폭', s_mainHalfD: '본채 깊이', s_wingLen: '날개 길이', s_wingW: '날개 폭',
     s_centerBayW: '어칸 폭', s_endBayW: '퇴칸 폭',
     s_planShape: '형태', s_bays: '칸수',   // #146 종가 평면형·칸수
@@ -143,6 +144,7 @@ const DICT = {
     s_doorPattern: 'Lattice', s_aux: 'Outbuilding',
     s_doorCount: 'Doors', s_windowCount: 'Windows',
     s_doorWidthK: 'Door width', s_windowWidthK: 'Window width',
+    s_doorHeightK: 'Door height', s_windowHeightK: 'Window height',
     s_mainHalfW: 'Main width', s_mainHalfD: 'Main depth', s_wingLen: 'Wing length', s_wingW: 'Wing width',
     s_centerBayW: 'Center bay', s_endBayW: 'End bay',
     s_planShape: 'Shape', s_bays: 'Bays',   // #146 hanok plan shape & bays

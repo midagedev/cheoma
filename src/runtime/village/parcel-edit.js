@@ -131,10 +131,93 @@ export function buildParcelSpec(sourceParcel, kindOverride = null) {
   };
 }
 
-const PARCEL_TOP_EDIT_KEYS = Object.freeze([
+export const PARCEL_TOP_EDIT_KEYS = Object.freeze([
   'footprintScale', 'wallType', 'roofTone', 'thatchAge', 'aux', 'jangdok',
   'yardStack', 'clothesline', 'vegBed',
 ]);
+const PARCEL_TOP_EDIT_KEY_SET = new Set(PARCEL_TOP_EDIT_KEYS);
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeTopEditParams(kind, params) {
+  const normalized = { ...params };
+  normalized.footprintScale = clamp(
+    Number.isFinite(params.footprintScale) ? params.footprintScale : 1,
+    0.6,
+    1.6,
+  );
+  normalized.wallType = parcelWallType(kind, params.wallType);
+  const roofTone = Number.isFinite(params.roofTone) ? Math.trunc(params.roofTone) : 0;
+  normalized.roofTone = ((roofTone % 5) + 5) % 5;
+  normalized.thatchAge = kind === 'choga'
+    ? clamp(Number.isFinite(params.thatchAge) ? params.thatchAge : 0.5, 0, 1)
+    : undefined;
+  normalized.aux = !!params.aux;
+  normalized.jangdok = clamp(
+    Number.isFinite(params.jangdok) ? Math.round(params.jangdok) : 0,
+    0,
+    3,
+  );
+  normalized.yardStack = !!params.yardStack;
+  normalized.clothesline = !!params.clothesline;
+  normalized.vegBed = !!params.vegBed;
+  return normalized;
+}
+
+function buildingParams(params) {
+  return Object.fromEntries(Object.entries(params).filter(([key, value]) => (
+    !PARCEL_TOP_EDIT_KEY_SET.has(key) && value !== undefined
+  )));
+}
+
+// Resolve one residential editor transaction without Three.js state. `previousSpec`
+// is the last accepted, fully normalized result; `patch` is the public optional
+// rebuildParcel payload. A same-kind patch composes over that result. An explicit
+// type change deliberately starts from the target kind's generated defaults so a
+// choga-only bay frame or thatch option cannot leak into a giwa (and vice versa).
+export function resolveResidentialEdit(sourceParcel, previousSpec = null, patch = {}) {
+  const previousKind = previousSpec?.kind === 'giwa' || previousSpec?.kind === 'choga'
+    ? previousSpec.kind
+    : (sourceParcel.kind === 'giwa' ? 'giwa' : 'choga');
+  const requestedKind = patch.kind === 'giwa' || patch.kind === 'choga'
+    ? patch.kind
+    : previousKind;
+  const changedKind = requestedKind !== previousKind;
+  const baseSpec = changedKind || !previousSpec
+    ? buildParcelSpec(sourceParcel, requestedKind)
+    : previousSpec;
+  const buildingPatch = { ...(patch.building || {}) };
+  if (buildingPatch.roofCurve != null && buildingPatch.profileCurve == null) {
+    buildingPatch.profileCurve = buildingPatch.roofCurve;
+  }
+  delete buildingPatch.roofCurve;
+  const params = {
+    ...(baseSpec.params || {}),
+    ...buildingPatch,
+  };
+  for (const key of PARCEL_TOP_EDIT_KEYS) {
+    if (patch[key] !== undefined) params[key] = patch[key];
+  }
+  const targetParcel = requestedKind === sourceParcel.kind
+    ? sourceParcel
+    : { ...sourceParcel, kind: requestedKind, variant: 0 };
+  const acceptedBuildingFrame = {
+    ...PRESETS[requestedKind],
+    ...variantOv(targetParcel),
+    ...buildingParams(params),
+  };
+  clampBuildingDimensions(acceptedBuildingFrame, requestedKind);
+  const acceptedBuilding = Object.fromEntries(
+    Object.keys(buildingParams(params)).map((key) => [key, acceptedBuildingFrame[key]]),
+  );
+  const top = normalizeTopEditParams(requestedKind, params);
+  const acceptedPatch = { kind: requestedKind, building: acceptedBuilding };
+  for (const key of PARCEL_TOP_EDIT_KEYS) acceptedPatch[key] = top[key];
+  const spec = buildEditedParcelSpec(sourceParcel, acceptedPatch, acceptedBuilding);
+  return { kind: requestedKind, building: acceptedBuilding, top, spec };
+}
 
 // A persistent runtime overlay becomes the authoritative representation for its
 // parcel. Keep the declarative editor spec in lockstep so leaving and re-entering
@@ -145,11 +228,10 @@ export function buildEditedParcelSpec(parcel, newParams = {}, acceptedBuilding =
     : newParams.kind === 'choga' ? 'choga' : original.kind;
   const spec = buildParcelSpec(parcel, kind);
   spec.params = { ...spec.params, ...(acceptedBuilding || newParams.building || {}) };
+  const top = normalizeTopEditParams(kind, { ...spec.params, ...newParams });
   for (const key of PARCEL_TOP_EDIT_KEYS) {
     if (newParams[key] === undefined) continue;
-    spec.params[key] = key === 'wallType'
-      ? parcelWallType(kind, newParams[key])
-      : newParams[key];
+    spec.params[key] = top[key];
   }
   Object.assign(spec.params, normalizeResidentialOpenings(kind, spec.params));
   return spec;

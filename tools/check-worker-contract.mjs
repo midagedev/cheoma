@@ -32,7 +32,7 @@ const expectedSceneHashes = {
   // the texture bytes stay outside this structural hash. #16 adds shared static
   // opening frames, window meoreum aprons, restrained FULL-only hardware, and
   // splits the active primary leaf from the fixed remainder. #10 carries the
-  // four residential opening axes through the variant bytes and renders those
+  // six residential opening axes through the variant bytes and renders those
   // selected openings in every FULL giwa/choga prototype. Choga and hanok keep
   // a fixed dark recess while residential primary-door and footwear anchors
   // share the same renderer-free opening plan. The reviewed 16° focus envelope
@@ -40,26 +40,26 @@ const expectedSceneHashes = {
   // candidate to the clear `golmok-015` candidate; the other three scene hashes
   // retain their door-only deltas. Sync, real module Worker, and ?worker=0
   // fallback stay byte-identical.
-  village: '8b45bd47:8fef9c31:4e78d07c:2340fdef',
-  town: '65e8388f:b825f667:cdf9f50f:a94132af',
-  capital: '9e639255:46bf4c53:e0fca787:508266ed',
-  hanyang: '0d7b08b7:36688847:b7a0ecea:436605cb',
+  village: 'a11c8fe3:07366219:ccfcdc20:382faa03',
+  town: '56e38b49:9ca91523:de8fc9bb:203922ad',
+  capital: '9cf72f8f:2044e2af:12cdc393:ead3a36b',
+  hanyang: '62c6c481:fe98a453:5f2b6a86:840ea499',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
   // #56's palace/temple dancheong edit axes remain in the proxy contract. #8 also
   // exposes the authored giwa bay width so the shape-aware editor can start at
   // the first effective mainHalfW rather than presenting a dead slider range.
-  // #10 adds the four normalized residential opening axes to the public proxy.
+  // #10 adds the six normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
   // 16° courtyard elevation. Safe candidates scale XZ and Y together so their
   // proxy framing cannot silently steepen the camera. Raising that shared angle
   // changes every residential camera position and therefore all four proxy
   // hashes without changing their counts or isolation contract.
-  village: 'f307e3a9',
-  town: 'e2bc9618',
-  capital: 'b7e4361f',
-  hanyang: 'ac01325b',
+  village: '4c6a4535',
+  town: '3f842a67',
+  capital: 'd4658493',
+  hanyang: 'fd6c704f',
 };
 
 const server = await createServer({

@@ -28,6 +28,10 @@ function openingSection(kind, spec) {
         route: 'building', format: 'percent', showBounds: true },
       { key: 'windowWidthK', ctrl: 'range', ...capabilities.windowWidthK, def: capabilities.windowWidthK.default,
         route: 'building', format: 'percent', showBounds: true },
+      { key: 'doorHeightK', ctrl: 'range', ...capabilities.doorHeightK, def: capabilities.doorHeightK.default,
+        route: 'building', format: 'percent', showBounds: true },
+      { key: 'windowHeightK', ctrl: 'range', ...capabilities.windowHeightK, def: capabilities.windowHeightK.default,
+        route: 'building', format: 'percent', showBounds: true },
       { key: 'doorPattern', ctrl: 'segment', route: 'building', options: ['ttisal', 'jeongja'] },
     ],
   };

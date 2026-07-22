@@ -25,6 +25,7 @@ import {
   buildEditedParcelSpec,
   buildParcelSpec,
   clampBuildingDimensions,
+  resolveResidentialEdit,
 } from '../src/runtime/village/parcel-edit.js';
 
 const FIXTURES = Object.freeze({
@@ -171,6 +172,7 @@ function buildingBoundsFor(opening, localBounds) {
 
 assert.deepEqual(RESIDENTIAL_OPENING_PARAM_KEYS, [
   'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+  'doorHeightK', 'windowHeightK',
 ]);
 assert(Object.isFrozen(RESIDENTIAL_OPENING_PARAM_KEYS));
 assert(Object.isFrozen(RESIDENTIAL_OPENING_DEFAULTS.choga));
@@ -254,6 +256,8 @@ try {
       windowCount: 999,
       doorWidthK: -1,
       windowWidthK: Infinity,
+      doorHeightK: -1,
+      windowHeightK: Infinity,
     });
     assert.equal(invalid.doorCount, 1, `${name}: door minimum was not enforced`);
     assert.equal(invalid.windowCount, capacity.windows, `${name}: window maximum was not enforced`);
@@ -261,6 +265,10 @@ try {
       `${name}: door width minimum was not enforced`);
     assert.equal(invalid.windowWidthK, capabilities.windowWidthK.default,
       `${name}: invalid window width did not use its declared default`);
+    assert.equal(invalid.doorHeightK, capabilities.doorHeightK.min,
+      `${name}: door height minimum was not enforced`);
+    assert.equal(invalid.windowHeightK, capabilities.windowHeightK.default,
+      `${name}: invalid window height did not use its declared default`);
 
     let previousDoors = [];
     for (let count = capabilities.doorCount.min; count <= capabilities.doorCount.max; count++) {
@@ -298,6 +306,8 @@ try {
       windowCount: capacity.windows,
       doorWidthK: capabilities.doorWidthK.max,
       windowWidthK: capabilities.windowWidthK.max,
+      doorHeightK: capabilities.doorHeightK.max,
+      windowHeightK: capabilities.windowHeightK.max,
     });
     const maximalBefore = JSON.stringify(maximalRequest);
     const maximal = planResidentialOpenings(kind, maximalRequest, 0x10a0b0c0);
@@ -305,13 +315,18 @@ try {
       `${name}: full planning mutated its input`);
     assertDeepFrozen(maximal, name);
     assert.deepEqual(Object.keys(maximal.params), RESIDENTIAL_OPENING_PARAM_KEYS,
-      `${name}: normalized plan grew beyond the four intended axes`);
+      `${name}: normalized plan grew beyond the six intended axes`);
     assert.equal(maximal.openings.length, capacity.doors + capacity.windows,
       `${name}: normalized counts and emitted openings disagree`);
     for (const opening of maximal.openings) {
       assert.equal(opening.style, kind, `${name}/${opening.id}: #16 style handoff drifted`);
       assert.equal(opening.width, opening.availableWidth * opening.widthK,
         `${name}/${opening.id}: #16 width handoff is inconsistent`);
+      assert.equal(
+        opening.heightK,
+        opening.kind === 'door' ? maximal.params.doorHeightK : maximal.params.windowHeightK,
+        `${name}/${opening.id}: #10 height handoff is inconsistent`,
+      );
       assert(['floor-to-lintel', 'sill-to-lintel'].includes(opening.verticalBand),
         `${name}/${opening.id}: structural height band is missing`);
     }
@@ -420,18 +435,21 @@ const adversarialShapes = [
     centerBayW: NaN, middleBayW: Infinity, endBayW: -Infinity,
     centerBayD: Infinity, endBayD: NaN, columnRadius: Infinity,
     doorCount: 1e308, windowCount: 1e308, doorWidthK: 1e308, windowWidthK: 1e308,
+    doorHeightK: 1e308, windowHeightK: 1e308,
   }],
   ['giwa-huge', 'giwa', {
     planShape: 'u', bays: 1e308, bay: 1e308,
     mainHalfW: 1e308, mainHalfD: 1e308, wingLen: 1e308, wingW: 1e308,
     columnRadius: 1e308,
     doorCount: 1e308, windowCount: 1e308, doorWidthK: 1e308, windowWidthK: 1e308,
+    doorHeightK: 1e308, windowHeightK: 1e308,
   }],
   ['giwa-nonfinite', 'giwa', {
     planShape: 'single', bays: Infinity, bay: -Infinity,
     mainHalfW: Infinity, mainHalfD: NaN, wingLen: -Infinity, wingW: Infinity,
     columnRadius: NaN,
     doorCount: Infinity, windowCount: -Infinity, doorWidthK: NaN, windowWidthK: Infinity,
+    doorHeightK: NaN, windowHeightK: Infinity,
   }],
 ];
 for (const [name, kind, building] of adversarialShapes) {
@@ -511,7 +529,7 @@ for (const [kind, params] of [
     .map((field) => [field.key, field]));
   const capabilities = residentialOpeningCapabilities(kind, params);
   assert.deepEqual(Object.keys(openingFields), RESIDENTIAL_OPENING_PARAM_KEYS,
-    `${kind}: editor did not expose exactly the four residential axes`);
+    `${kind}: editor did not expose exactly the six residential axes`);
   for (const key of RESIDENTIAL_OPENING_PARAM_KEYS) {
     assert.equal(openingFields[key].min, capabilities[key].min, `${kind}/${key}: editor minimum drifted`);
     assert.equal(openingFields[key].max, capabilities[key].max, `${kind}/${key}: editor maximum drifted`);
@@ -520,6 +538,8 @@ for (const [kind, params] of [
   }
   assert.equal(openingFields.doorCount.unitKey, 'unit_count', `${kind}: count unit is missing`);
   assert.equal(openingFields.windowWidthK.format, 'percent', `${kind}: width unit is missing`);
+  assert.equal(openingFields.doorHeightK.format, 'percent', `${kind}: door height unit is missing`);
+  assert.equal(openingFields.windowHeightK.format, 'percent', `${kind}: window height unit is missing`);
   const payload = buildRebuildPayload({ kind, family: 'regular', params }, {
     kind,
     ...params,
@@ -527,6 +547,8 @@ for (const [kind, params] of [
     windowCount: capabilities.windowCount.min,
     doorWidthK: capabilities.doorWidthK.min,
     windowWidthK: capabilities.windowWidthK.max,
+    doorHeightK: capabilities.doorHeightK.min,
+    windowHeightK: capabilities.windowHeightK.max,
   });
   assert.deepEqual(
     Object.keys(payload.building).filter((key) => RESIDENTIAL_OPENING_PARAM_KEYS.includes(key)),
@@ -544,7 +566,9 @@ assert.deepEqual(
 const chogaSparse = buildParcelSpec({ ...parcelFixture, kind: 'choga', variant: 0 });
 const chogaRich = buildParcelSpec({ ...parcelFixture, kind: 'choga', variant: 2 });
 assert(chogaSparse.params.windowCount < chogaRich.params.windowCount
-    && chogaSparse.params.windowWidthK < chogaRich.params.windowWidthK,
+    && chogaSparse.params.windowWidthK < chogaRich.params.windowWidthK
+    && chogaSparse.params.doorHeightK < chogaRich.params.doorHeightK
+    && chogaSparse.params.windowHeightK < chogaRich.params.windowHeightK,
   'seed-selected household variants no longer vary openings inside planner capabilities');
 for (const spec of [chogaSparse, chogaRich]) {
   assert.deepEqual(
@@ -566,5 +590,37 @@ assert.deepEqual(
   Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, editedSpec.params[key]])),
   'accepted editor spec is not a canonical serializable opening boundary',
 );
+
+// Public rebuild payloads are optional patches. Successive calls must compose
+// over the last accepted values rather than silently restoring the seed variant.
+const firstEdit = resolveResidentialEdit(parcelFixture, null, {
+  building: { doorCount: 4, windowCount: 6 },
+  footprintScale: 1.33,
+  wallType: 'tile',
+});
+const secondEdit = resolveResidentialEdit(parcelFixture, firstEdit.spec, {
+  building: { doorWidthK: 99 },
+});
+assert.equal(secondEdit.spec.params.doorCount, 4, 'partial width patch reset committed door count');
+assert.equal(secondEdit.spec.params.windowCount, 6, 'partial width patch reset committed window count');
+assert.equal(secondEdit.spec.params.footprintScale, 1.33, 'partial width patch reset committed top edit');
+assert.equal(secondEdit.spec.params.doorWidthK, 0.94, 'accepted width did not match renderer clamp');
+
+// A type switch is a fresh target-kind frame. Source-only building/top values
+// disappear, after which ordinary partial patches compose in the new frame.
+const switchedEdit = resolveResidentialEdit(parcelFixture, secondEdit.spec, {
+  kind: 'choga',
+  building: { doorCount: 2 },
+});
+assert.equal(switchedEdit.kind, 'choga', 'explicit type switch was ignored');
+assert.equal(switchedEdit.spec.params.planShape, undefined, 'giwa plan leaked into choga defaults');
+assert.equal(switchedEdit.spec.params.footprintScale, 1, 'source-kind footprint edit survived type switch');
+assert.notEqual(switchedEdit.spec.params.wallType, 'tile', 'source-kind wall vocabulary survived type switch');
+const switchedPatch = resolveResidentialEdit(parcelFixture, switchedEdit.spec, {
+  building: { windowWidthK: 99 },
+});
+assert.equal(switchedPatch.spec.params.doorCount, 2, 'target-kind partial patch reset committed count');
+assert.equal(switchedPatch.spec.params.windowWidthK, 0.62, 'target-kind width missed shared clamp');
+assert.doesNotThrow(() => JSON.stringify(switchedPatch.spec), 'accepted residential state is not serializable');
 
 console.log('RESIDENTIAL OPENINGS: PASS (초가 3/5칸 + 기와 ㅡ/ㄱ/ㄷ, planner/editor state/schema)');
