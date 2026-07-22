@@ -30,7 +30,13 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import { TIME_PRESETS } from './sky.js';
+import {
+  DEFAULT_SUNSET_LOOK,
+  atmosphereProfileKey,
+  normalizeSunsetLook,
+  resolveAtmosphereProfile,
+  resolvePostProfile,
+} from './atmosphere-profiles.js';
 import { createFresnelRim } from './rim.js';
 import { createDofController, DEFAULT_DOF_APERTURE } from './dof.js';
 import { StableBokehPass } from './stable-bokeh-pass.js';
@@ -55,35 +61,7 @@ const SUN_GLOW_DIST = 430;
 //   sunset 최대(역광 기본 뷰), day 미세(정오 순광은 altMul 이 더 눌러줌), night 0. 절제 원칙상
 //   낮게 잡아 처마 끝 킥이 "어? 예쁘다" 수준에 머물게 한다(화면 가로지르는 과한 스트릭 금지).
 // flareColor: 고스트·헤일로 틴트(sRGB→선형, rimColor 와 동일 경로). sunset 웜골드, day 중성.
-const POST_TUNING = {
-  dawn: {
-    bloomStrength: 0.55, bloomRadius: 0.55, bloomThreshold: 0.82,
-    rim: 1.15, rimColor: 0xffd6bc, rimPower: 2.1, rimWrap: 0.14,
-    sunGlow: 0.70, sunGlowSize: 70, sunGlowColor: 0xffdcb4, sat: 1.12,
-    flare: 0.55, flareColor: 0xffd9b4,
-  },
-  day: {
-    bloomStrength: 0.42, bloomRadius: 0.5, bloomThreshold: 0.92,
-    rim: 0.45, rimColor: 0xfff6ea, rimPower: 2.6, rimWrap: 0.12,
-    sunGlow: 0.55, sunGlowSize: 46, sunGlowColor: 0xfff4e6, sat: 1.0,
-    flare: 0.24, flareColor: 0xfff2e2,
-  },
-  sunset: {
-    // 태양 글로우를 '작고 밝은' 핫스팟으로: 큰 스프라이트 + 넓은 bloomRadius 는 화면 전체를
-    // 주황 헤이즈로 덮어 지면을 띄운다(측정: 지면 휘도 0.03→0.72). 크기·반경을 조여 태양
-    // 주변에만 피어나게 하면 밝기가 하늘에 남고 지면은 어둡게 유지된다 → 건물이 주인공.
-    bloomStrength: 0.62, bloomRadius: 0.38, bloomThreshold: 0.80,
-    rim: 2.05, rimColor: 0xffc070, rimPower: 1.7, rimWrap: 0.13,
-    sunGlow: 0.92, sunGlowSize: 40, sunGlowColor: 0xffb570, sat: 1.18,
-    flare: 1.0, flareColor: 0xffc078,
-  },
-  night: {
-    bloomStrength: 0.70, bloomRadius: 0.62, bloomThreshold: 0.32,
-    rim: 0.32, rimColor: 0xaec2e6, rimPower: 3.0, rimWrap: 0.12,
-    sunGlow: 0.0, sunGlowSize: 0, sunGlowColor: 0x9fb4d9, sat: 1.0,
-    flare: 0.0, flareColor: 0x9fb4d9,
-  },
-};
+// Time/look values live in atmosphere-profiles.js beside the matching sky and light profile.
 
 // 태양 글로우 텍스처: 흰-온기 코어 → 투명 방사 그라디언트(색은 material.color 로 시간대 틴트).
 function makeSunGlowTexture() {
@@ -612,8 +590,9 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     sunGlow: 0, sunGlowSize: 0, sunGlowColor: new THREE.Color(), dir: new THREE.Vector3(0.6, 0.5, 0.5).normalize(),
     flare: 0, flareColor: new THREE.Color(),
   });
+  let sunsetLook = DEFAULT_SUNSET_LOOK;
   function resolvePS(out, name) {
-    const T = POST_TUNING[name] || POST_TUNING.day;
+    const T = resolvePostProfile(name, sunsetLook);
     out.bloomStrength = T.bloomStrength; out.bloomRadius = T.bloomRadius; out.bloomThreshold = T.bloomThreshold;
     out.rim = T.rim; out.rimPower = T.rimPower; out.rimWrap = T.rimWrap;
     // r185의 숫자형 색 입력은 이미 sRGB→working-linear 변환된다. 명시적 색공간만 남겨 이중 디코드 방지.
@@ -621,7 +600,7 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     out.sat = T.sat ?? 1.0;
     out.sunGlow = T.sunGlow; out.sunGlowSize = T.sunGlowSize; out.sunGlowColor.set(T.sunGlowColor);
     out.flare = T.flare ?? 0; out.flareColor.setHex(T.flareColor ?? 0xffffff, THREE.SRGBColorSpace);
-    const d = (TIME_PRESETS[name] || TIME_PRESETS.day).sunDir;
+    const d = resolveAtmosphereProfile(name, sunsetLook).sunDir;
     out.dir.set(d[0], d[1], d[2]).normalize();
     return out;
   }
@@ -644,7 +623,8 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   const cur = makePS(), from = makePS(), to = makePS();
   resolvePS(cur, 'day');
   let curName = 'day';
-  let tw = null;             // { t, dur, name }
+  let curKey = atmosphereProfileKey('day', sunsetLook);
+  let tw = null;             // { t, dur, name, key }
   let started = false;       // 첫 update 전 setTime 은 즉시 스냅
   let lastNow = (typeof performance !== 'undefined' ? performance.now() : 0);
 
@@ -683,22 +663,31 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     sunGlow.material.opacity = cur.sunGlow;
     sunGlow.material.color.copy(cur.sunGlowColor);
     sunGlow.scale.set(cur.sunGlowSize, cur.sunGlowSize, 1);
-    sunGlow.position.copy(cur.dir).multiplyScalar(SUN_GLOW_DIST);
+    sunGlow.position.copy(camera.position).addScaledVector(cur.dir, SUN_GLOW_DIST);
     sunGlow.visible = enabled && glowIntensity > 0.001;
     // 플레어 틴트는 시간대 트윈값(정적). 강도·스크린 위치는 update() 가 카메라·가림에 맞춰 매 프레임.
     flarePass.uniforms.flareColor.value.copy(cur.flareColor);
   }
 
   function setTime(name, opts = {}) {
+    const key = atmosphereProfileKey(name, sunsetLook);
     resolvePS(to, name);
-    if (opts.immediate || !started) { copyPS(cur, to); curName = name; tw = null; applyPS(); return; }
+    if (opts.immediate || !started) { copyPS(cur, to); curName = name; curKey = key; tw = null; applyPS(); return; }
     if (tw) {
-      if (name === tw.name) return;               // 진행 중 트윈과 같은 목표 → 계속
-      copyPS(from, cur); tw = { t: 0, dur: DUR_POST, name };   // 현재 보간값에서 리타깃
+      if (key === tw.key) return;                 // 진행 중 트윈과 같은 프로필 목표 → 계속
+      copyPS(from, cur); tw = { t: 0, dur: DUR_POST, name, key }; // 현재 보간값에서 리타깃
       return;
     }
-    if (name === curName) { copyPS(cur, to); applyPS(); return; }  // 같은 시간대 재적용 → 스냅(멱등)
-    copyPS(from, cur); tw = { t: 0, dur: DUR_POST, name };
+    if (key === curKey) { copyPS(cur, to); applyPS(); return; }    // 같은 프로필 재적용 → 스냅(멱등)
+    copyPS(from, cur); tw = { t: 0, dur: DUR_POST, name, key };
+  }
+
+  function setSunsetLook(name, opts = {}) {
+    const next = normalizeSunsetLook(name);
+    if (next === sunsetLook && curName !== 'sunset' && tw?.name !== 'sunset') return next;
+    sunsetLook = next;
+    if (curName === 'sunset' || tw?.name === 'sunset') setTime('sunset', opts);
+    return sunsetLook;
   }
 
   // 매 프레임(pbr): 시간대 트윈 진행 + 카메라 이동에 따른 화면상 태양 방향·역광 계수 갱신.
@@ -716,11 +705,14 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
       tw.t += dt;
       lerpPS(cur, from, to, easeInOut(tw.t / tw.dur));
       applyPS();
-      if (tw.t >= tw.dur) { copyPS(cur, to); curName = tw.name; tw = null; }
+      if (tw.t >= tw.dur) { copyPS(cur, to); curName = tw.name; curKey = tw.key; tw = null; }
     } else {
       lastNow = (typeof performance !== 'undefined' ? performance.now() : lastNow + 16);
     }
     camera.updateMatrixWorld();
+    // Celestial sprites are angular scenery. Following camera translation removes
+    // parallax and keeps the sun inside the sky shell at every village scale.
+    sunGlow.position.copy(camera.position).addScaledVector(cur.dir, SUN_GLOW_DIST);
     _v.copy(cur.dir).transformDirection(camera.matrixWorldInverse); // 뷰공간 태양 방향(단위)
     // 역광 게이트(엄격): -_v.z = dot(뷰전방, 태양) — 태양이 카메라 전방·피사체 뒤에 있을수록 1.
     // 순광/측광 뷰에서도 최소 18% 림 강도가 잔존하도록 게이트 완화
@@ -854,11 +846,12 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   }
 
   return {
-    composer, setTime, setSize, update,
+    composer, setTime, setSunsetLook, setSize, update,
     setDof, setDofAmount, setDofAperture, setFocus, setFocusPoint,
     setEnabled, setWeather, setFlareEnabled, setRimEnabled,
     renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass, sunGlow, fresnelRim,
     dof,
+    get sunsetLook() { return sunsetLook; },
     // 마을 리롤·focus-in 오버레이 직후 명시 재패치용(선택 — update() throttle 스캔이 이미 self-heal).
     rimRescan(root = scene) { if (fresnelRim) fresnelRim.apply(root); },
     dispose() {

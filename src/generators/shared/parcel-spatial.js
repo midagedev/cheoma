@@ -7,9 +7,10 @@ const DEG = Math.PI / 180;
 // reveals bay depth while reading primarily as the house's south-facing elevation.
 const FOCUS_AZIMUTH_MAX = 14 * DEG;
 // Aim at the doors while retaining enough physical camera height to see across a
-// dense village. Lowering both the target and this angle lets foreground roofs hide
-// the selected house; 9° keeps the former camera altitude with a human-scale aim.
-const FOCUS_ELEVATION = 9 * DEG;
+// dense village. The protected south-light opening now keeps the foreground corridor
+// clear enough for a lower architectural viewpoint: 3° reads from the yard toward the
+// eaves and sky, while still retaining enough lift to see across a wall or gate.
+const FOCUS_ELEVATION = 3 * DEG;
 const FOCUS_DISTANCE = dollyDistanceForFov(
   2.25,
   VILLAGE_LENS.parcel.referenceFov,

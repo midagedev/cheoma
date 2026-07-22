@@ -3,6 +3,7 @@ export { setupCinematic } from '../camera/cinematic.js';
 export {
   VILLAGE_LENS,
   VILLAGE_FOCUS_CONTEXT_ELEVATION,
+  VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_ZOOM,
   dollyDistanceForFov,
   dollyScaleForFov,

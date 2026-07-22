@@ -2,6 +2,7 @@
 // (?seed= 공유 시 동일 결과). main.js 의 surpriseMe 큐레이션을 계승하되 Date.now 대신
 // seed 로 완전히 결정적으로 만든다.
 import { PRESETS } from '../../../src/api/building.js';
+import { DEFAULT_SUNSET_LOOK, SUNSET_LOOK_IDS } from '../../../src/api/environment.js';
 
 // 유형 탭 ↔ 프리셋 키 매핑. (궁=korea, 절=temple, 기와집=giwa, 초가=choga)
 export const TYPES = [
@@ -37,7 +38,7 @@ export function newSeed() {
   return (Date.now() ^ (Math.random() * 1e9)) >>> 0;
 }
 
-// seed → { preset, time, season, weather, params }. params 는 프리셋 복사 + 미세 지터.
+// seed → { preset, time, sunsetLook, season, weather, params }. params 는 프리셋 복사 + 미세 지터.
 export function configFromSeed(seed) {
   const rng = mulberry32(seed >>> 0);
 
@@ -47,13 +48,21 @@ export function configFromSeed(seed) {
   const preset = weightedPick(rng, presetPairs);
 
   let time = weightedPick(rng, [['day', 4], ['sunset', 3], ['dawn', 2], ['night', 1.5]]);
+  // A forked stream preserves every pre-existing seed-derived building/environment value.
+  // The look remains latent outside sunset and becomes visible when the dial reaches it.
+  const sunsetRng = mulberry32((seed ^ 0x51a7e7) >>> 0);
+  const sunsetLook = weightedPick(sunsetRng, [
+    [DEFAULT_SUNSET_LOOK, 5],
+    [SUNSET_LOOK_IDS[1], 2.8],
+    [SUNSET_LOOK_IDS[2], 2.2],
+  ]);
   const season = weightedPick(rng, [['autumn', 3], ['spring', 2.2], ['summer', 2]]);
   let weather = weightedPick(rng, [['clear', 4], ['snow', 2.2], ['rain', 1.8]]);
   if (weather === 'rain' && time === 'dawn') time = 'day';
   if (weather === 'rain' && time === 'night') time = 'sunset';
 
   const params = paramsFor(preset, rng);
-  return { preset, time, season, weather, params };
+  return { preset, time, sunsetLook, season, weather, params };
 }
 
 // 프리셋 파라미터 복사 + 정체성을 지키는 ±6% 지터(giwa 는 L 전용이라 지터 생략).

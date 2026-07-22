@@ -16,6 +16,7 @@ import {
 } from '../../../src/api/environment.js';
 import {
   VILLAGE_LENS,
+  VILLAGE_FOCUS_SKY_FRACTION,
   dollyDistanceForFov,
   lensScaleForCamera,
   referenceFovForCamera,
@@ -84,7 +85,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // ---------- 상태 ----------
   const state = {
-    seed: 0, preset: 'korea', time: 'day', season: 'summer', weather: 'clear',
+    seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
     expansion: 1, selected: false, canMerge: false,
   };
   let disposed = false;
@@ -347,8 +348,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   현재 강도에서 목표값까지 단조 보간한다.
   //   opts.onDone 은 도착 콜백(마을 도착 시 편집 패널 슬라이드 인 등).
   let tween = null;
+  let focusComposition = 0;
+  function setFocusComposition(weight) {
+    focusComposition = clamp01(weight);
+    viewShiftRuntime.setCompositionY(-VILLAGE_FOCUS_SKY_FRACTION * focusComposition);
+  }
+
   function tweenTo(pos, target, dur = 0.95, {
     fov, referenceFov, onDone, onProgress, dofAnchor = null, dofAmount = null,
+    focusComposition: nextFocusComposition = null,
   } = {}) {
     cinematic.stop();
     const currentReferenceFov = referenceFovForCamera(camera);
@@ -366,6 +374,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dofAnchor: dofAnchor?.clone?.() || null,
       dof0: post.dof.amount,
       dof1: Number.isFinite(dofAmount) ? clamp01(dofAmount) : null,
+      composition0: focusComposition,
+      composition1: Number.isFinite(nextFocusComposition) ? clamp01(nextFocusComposition) : null,
       // 검증 토글(before/after 계측용). window.__flowNoFix=true 면 이번 트윈은 방향 연속화·핸드오프
       // 리셋을 끈다(구버전 버그 재현). 미설정=수정본. 트윈 시작 시 1회만 읽어 핫 루프 오염 방지.
       noFix: typeof window !== 'undefined' && !!window.__flowNoFix,
@@ -418,6 +428,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function applyConfig(cfg, { animate = false } = {}) {
     state.preset = cfg.preset;
     state.time = cfg.time;
+    state.sunsetLook = cfg.sunsetLook || 'gold';
     state.season = cfg.season;
     state.weather = cfg.weather;
     state.canMerge = false;
@@ -430,11 +441,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     env.setEnabled(true);
     ground.visible = false;
+    env.setSunsetLook(state.sunsetLook, { immediate: true });
     env.setTime(state.time);
     env.setSeason(state.season, {});
     weatherRef.setWeather(state.weather);
     nightGlowRef.setEnabled(true);
     nightGlowRef.setTime(state.time);
+    post.setSunsetLook(state.sunsetLook, { immediate: true });
     post.setTime(state.time);
     reapplyEnvBase();
     refreshAtmosphere();
@@ -538,6 +551,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.userData.villageReferenceFov = active.r0 + (active.r1 - active.r0) * k;
     }
     if (active.dof1 != null) post.setDofAmount(active.dof0 + (active.dof1 - active.dof0) * k);
+    if (active.composition1 != null) {
+      setFocusComposition(active.composition0 + (active.composition1 - active.composition0) * k);
+    }
     active.onProgress?.(k);   // 패널 컨텍스트 모프 등 — 카메라와 동일 클록(#92 타임라인 통일)
     return k;
   }
@@ -1175,13 +1191,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
     // 재진입(활성): 비동기 빌드일 수 있어 프레이밍 트윈을 onReady 로(새 핸들 site.R 기준). 구 마을 유지 중 부감.
-    if (village.active) { setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); }); emit('villageMode', true); return; }
+    if (village.active) { setFocusComposition(0); setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); }); emit('villageMode', true); return; }
     // 단일건물 선택·호버 상태 정리
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
     // 단일건물 날씨 파티클은 원점(숨은 본채)에 몰려 부감에 튀므로 억제(상태값은 유지).
     weatherRef.setWeather('clear');
     village.active = true; village.selected = null; village.transitioning = false;
+    setFocusComposition(0);
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
       ? camera.userData.villageReferenceFov : camera.fov;
@@ -1206,6 +1223,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (village.selected) village.handle.highlightParcel(village.selected, false);
     village.build = null; village.waveBuild = null;   // #123: 진행 중 비동기 빌드·웨이브빌드 취소(이탈 후 스테일 스왑 방지)
     village.active = false; village.selected = null; village.transitioning = false;
+    setFocusComposition(0);
     controls.enableZoom = true; controls.minDistance = 0; controls.maxDistance = Infinity;
     renderer.domElement.style.cursor = '';
     setPostFocus(true);                  // 단일건물 씬 복귀 → rim/flare 기본 복원
@@ -1303,6 +1321,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (!village.active || village.selected !== parcelId) return;
       tweenTo(f.position, f.target, FOCUS_IN_DUR, {
         fov: f.fov, referenceFov: f.referenceFov,
+        focusComposition: 1,
         dofAnchor: f.target, dofAmount: 1,                         // 선택 필지 축깊이 고정 + 0→1 페이드
         onProgress: (k) => emit('villageFocusMorph', k),         // 부감→집 패널 모프(0→1)
         onDone: () => {
@@ -1351,6 +1370,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         // 목적지 B가 출발 카메라 뒤에 있을 수 있다. 보이지 않는 B를 고정 추적하면 시야평면을 통과할 때
         // near→원거리 초점 점프가 생기므로, 생략된 dofAnchor가 보간 controls.target(A→B)을 따라가게 한다.
         fov: f.fov, referenceFov: f.referenceFov,
+        focusComposition: 1,
         onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
         onDone: () => {
           village.transitioning = false;
@@ -1382,6 +1402,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const f = villageAerial();
     tweenTo(f.pos, f.target, FOCUS_OUT_DUR, {
       fov: f.fov, referenceFov: f.referenceFov,
+      focusComposition: 0,
       dofAnchor: departingFocus, dofAmount: 0,
       onProgress: (k) => emit('villageFocusMorph', 1 - k),   // 집→부감 패널 모프(1→0)
       onDone: () => {
@@ -1481,6 +1502,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     env.setTime('sunset');                              // 조립 중 비주얼 석양 강제 (오디오 반응성 보호를 위해 state.time 은 보존)
     post.setTime('sunset');
     village.active = true; village.selected = null; village.transitioning = true;
+    setFocusComposition(0);
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
       ? camera.userData.villageReferenceFov : camera.fov;
@@ -1513,9 +1535,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
     heroSunAz = rotY + Math.PI + 25 * DEG;   // 배면 +25° 사선 역광(정배면보다 처마·측면 실루엣 림이 예쁨)
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
-    // 시선점은 문 높이로 내리되 카메라까지 낮춰 앞집 처마에 가리지 않는다. 9°의 완만한
-    // 하향 시선은 기존 카메라 절대 높이를 거의 보존하면서 단청↔마당 탐색 여백을 만든다.
-    const el = 9 * DEG;
+    // 시선점은 문 높이를 지키고 3°의 얕은 마당 시점에서 처마와 석양 하늘을 함께 담는다.
+    // 일반 필지 planParcelFocus와 같은 고도라 종가 랜딩→임의 집 전환에도 시점이 튀지 않는다.
+    const el = 3 * DEG;
     // 더 먼 자리에서 좁은 화각으로 같은 화면 점유율을 유지해 처마·산세가 망원으로 압축된다.
     const heroDistance = dollyDistanceForFov(
       1.85,
@@ -1580,6 +1602,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       r0: 34,
       r1: VILLAGE_LENS.hero.referenceFov,
       changesLens: true,
+      composition0: focusComposition,
+      composition1: 1,
       onDone: () => {
         settleControls();
         controls.update(); // 1프레임 회전 튕김 차단
@@ -1684,6 +1708,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         fov: framing.fov,
         referenceFov: framing.referenceFov,
         dofAnchor: framing.target,
+        focusComposition: 1,
         onProgress: () => emit('villageFocusMorph', 1),
       });
     }
@@ -1737,6 +1762,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 진행 중 focus/조립 흔적 정리(부감 상태에서 호출되지만 방어)
     stopHeroAsm();
     if (village.selected) { focusRing.clear(); village.handle.hideParcelDetail(village.selected); village.selected = null; }
+    setFocusComposition(0);
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     village.reveal = null;    // 진입 reveal과 웨이브 fog가 같은 scene.fog를 동시에 소유하지 않게 한다.
     setPostFocus(false);   // 부감 연출 — focus 잔재가 있어도 rim/flare OFF(성능·룩)
@@ -1940,6 +1966,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       focusRing.setTime?.(name, opts.immediate); // 근접 링 앰비언스 시간대(연기·모트·닭)
       emit('state', { ...state });
     },
+    setSunsetLook(name, opts = {}) {
+      state.sunsetLook = env.setSunsetLook(name, opts);
+      post.setSunsetLook(state.sunsetLook, opts);
+      bumpShadow(1800);
+      refreshAtmosphere();
+      emit('state', { ...state });
+      return state.sunsetLook;
+    },
     setSeason(name, opts = {}) {
       state.season = name;
       bumpShadow(1800);   // #140-A 계절 전환 크로스페이드 동안 그림자 갱신(잎·개화 캐스터 정합)
@@ -2029,6 +2063,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         Object.assign(village.opts, partial);
         if (village.active) {
           village.selected = null; village.transitioning = false;
+          setFocusComposition(0);
           setPostFocus(false);
           // #123: 규모커밋은 비동기 빌드(forest 워커) — 구 마을 유지 중 부감 프레이밍은 새 핸들 준비 시(onReady).
           buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); });
@@ -2040,6 +2075,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         village.seed = newSeed();
         if (village.active) {
           village.selected = null; village.transitioning = false;
+          setFocusComposition(0);
           setPostFocus(false);
           buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); });
         }
@@ -2237,7 +2273,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (bump) { renderer.setPixelRatio(2); resizeAll(); }
       // 캡처 이미지엔 패널이 없으므로 뷰 오프셋(#124)을 빼고 피사체 중앙 프레이밍으로 캡처(캡처 후 복원).
       const restoreView = !!(camera.view && camera.view.enabled);
-      if (restoreView) camera.clearViewOffset();
+      if (restoreView) {
+        camera.clearViewOffset();
+        // UI panels are absent from the postcard, but the authored architectural rise
+        // is part of the composition and must remain in the exported frame.
+        viewShiftRuntime.invalidate();
+        viewShiftRuntime.applyCompositionOnly();
+      }
       const filename = `cheoma-${state.preset}-${state.seed}.png`;
       const url = capturePostcard(renderer, renderFrame, { title: 'cheoma', filename, download });
       if (bump) { renderer.setPixelRatio(prev); resizeAll(); }
@@ -2472,6 +2514,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     get enabled() { return viewShift.enabled; },
     get x() { return viewShift.curX; }, get y() { return viewShift.curY; },
     get tx() { return viewShift.tgtX; }, get ty() { return viewShift.tgtY; },
+    get compositionYFrac() { return viewShift.compositionYFrac; },
     get viewEnabled() { return !!(camera.view && camera.view.enabled); },
     setEnabled: (b) => controller.setViewShiftEnabled(b),
   };

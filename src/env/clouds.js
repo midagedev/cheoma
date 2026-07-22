@@ -8,6 +8,8 @@ import * as THREE from 'three';
 // 구성:
 //   - 상공 뭉게구름 최대 5장: 카메라를 보는 알파 빌보드(적운 텍스처 — 평평한 바닥·봉긋한 상부·상단
 //     밝음/하단 그늘 베이크). 마을·씬 중앙 상공에 배치돼 표류하며 지면에 그림자를 드리운다.
+//   - 원경 구름 링 1 draw call: 월드 방위에 고정된 16개 인스턴스가 카메라 이동만 따라가므로
+//     줌 화각에서도 빈 하늘이 되지 않는다. 같은 태양 상태로 HDR 림과 틈새 빛줄기를 만든다.
 //   - 산허리 물안개 2장: 능선을 감는 넓고 낮은 소프트 플레인(수평), 함께 표류.
 //   - 구름 그림자: 각 빌보드의 실제 위치를 태양 방향으로 지면에 투영한 XZ 를 블롭 uniform(uCloudBlobs)에
 //     기록 → 지형 재질(onBeforeCompile)이 그 블롭들의 가우시안 합을 감산. 빌보드와 "정확히 대응"해
@@ -180,6 +182,175 @@ function makeCumulusTexture(seed = 1) {
   return tex;
 }
 
+// Distant cumulus needs a more intricate silhouette than the broad overhead shadow
+// caster. Many small semi-opaque lobes form scalloped crowns and wispy shoulders;
+// baked valley/underside shading survives telephoto DoF without reading as a cloud icon.
+function makeHorizonCumulusTexture(seed = 97) {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  let s = seed >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const baseY = S * 0.71;
+  g.clearRect(0, 0, S, S);
+
+  const lobe = (x, y, r, alpha) => {
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    grad.addColorStop(0.56, `rgba(255,255,255,${alpha * 0.94})`);
+    grad.addColorStop(0.82, `rgba(255,255,255,${alpha * 0.58})`);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  };
+
+  // Four overlapping rows guarantee one connected mass. Each higher row narrows and
+  // uses smaller puffs, yielding a broad base with a scalloped, asymmetric crown.
+  const rows = [
+    { count: 8, x0: 0.14, x1: 0.86, y: 0.64, r0: 0.105, r1: 0.14 },
+    { count: 7, x0: 0.21, x1: 0.79, y: 0.55, r0: 0.095, r1: 0.13 },
+    { count: 5, x0: 0.30, x1: 0.70, y: 0.46, r0: 0.082, r1: 0.115 },
+    { count: 3, x0: 0.40, x1: 0.60, y: 0.38, r0: 0.072, r1: 0.10 },
+  ];
+  rows.forEach((row, rowIndex) => {
+    for (let i = 0; i < row.count; i++) {
+      const t = row.count > 1 ? i / (row.count - 1) : 0.5;
+      const x = S * (row.x0 + (row.x1 - row.x0) * t) + (rnd() - 0.5) * S * 0.035;
+      const y = S * row.y + (rnd() - 0.5) * S * (0.035 + rowIndex * 0.005);
+      const r = S * (row.r0 + rnd() * (row.r1 - row.r0));
+      lobe(x, y, r, 0.7 + rnd() * 0.2);
+    }
+  });
+
+  // Flatten and feather the rain-free base.
+  g.globalCompositeOperation = 'destination-out';
+  const erase = g.createLinearGradient(0, baseY - S * 0.02, 0, baseY + S * 0.10);
+  erase.addColorStop(0, 'rgba(0,0,0,0)');
+  erase.addColorStop(0.42, 'rgba(0,0,0,0.14)');
+  erase.addColorStop(1, 'rgba(0,0,0,1)');
+  g.fillStyle = erase; g.fillRect(0, baseY - S * 0.02, S, S * 0.18);
+
+  // Cool underside and small soft valley pockets give volume before the dynamic rim.
+  g.globalCompositeOperation = 'source-atop';
+  const underside = g.createLinearGradient(0, S * 0.28, 0, baseY);
+  underside.addColorStop(0, 'rgba(174,184,202,0)');
+  underside.addColorStop(0.62, 'rgba(143,155,179,0.16)');
+  underside.addColorStop(1, 'rgba(94,111,145,0.66)');
+  g.fillStyle = underside; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 6; i++) {
+    const x = S * (0.25 + rnd() * 0.5), y = S * (0.43 + rnd() * 0.18), r = S * (0.025 + rnd() * 0.035);
+    const pocket = g.createRadialGradient(x, y, 0, x, y, r);
+    pocket.addColorStop(0, 'rgba(74,91,124,0.20)');
+    pocket.addColorStop(1, 'rgba(74,91,124,0)');
+    g.fillStyle = pocket; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const crown = g.createLinearGradient(0, S * 0.18, 0, S * 0.42);
+  crown.addColorStop(0, 'rgba(255,255,255,0.42)');
+  crown.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = crown; g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = 'source-over';
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// One-pass HDR silver/gold lining for the alpha edge of a cloud billboard. The shader
+// samples alpha only (colour remains the regular map path), weights the contour toward
+// the projected sun direction, and adds linear-HDR energy for the existing bloom pass.
+// This costs no extra draw call and keeps the cloud itself available to moon/sun occlusion.
+function patchCloudRim(material) {
+  const state = {
+    color: new THREE.Color(0xffc68c),
+    strength: { value: 0 },
+    direction: new THREE.Vector2(0.8, 0.4).normalize(),
+    texel: new THREE.Vector2(1.8 / 256, 1.8 / 256),
+  };
+  material.userData.cloudRim = state;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uCloudRimColor = { value: state.color };
+    shader.uniforms.uCloudRimStrength = state.strength;
+    shader.uniforms.uCloudRimDir = { value: state.direction };
+    shader.uniforms.uCloudTexel = { value: state.texel };
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+uniform vec3 uCloudRimColor;
+uniform float uCloudRimStrength;
+uniform vec2 uCloudRimDir;
+uniform vec2 uCloudTexel;`,
+    ).replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+#ifdef USE_MAP
+  float cloudCenterA = texture2D(map, vMapUv).a;
+  float cloudNearA = min(
+    min(texture2D(map, vMapUv + vec2(uCloudTexel.x, 0.0)).a,
+        texture2D(map, vMapUv - vec2(uCloudTexel.x, 0.0)).a),
+    min(texture2D(map, vMapUv + vec2(0.0, uCloudTexel.y)).a,
+        texture2D(map, vMapUv - vec2(0.0, uCloudTexel.y)).a)
+  );
+  float cloudEdge = smoothstep(0.07, 0.62, cloudCenterA)
+                  * (1.0 - smoothstep(0.24, 0.88, cloudNearA));
+  vec2 cloudRadial = normalize(vMapUv - vec2(0.5) + vec2(1e-4));
+  float cloudSunSide = smoothstep(-0.32, 0.62, dot(cloudRadial, normalize(uCloudRimDir)));
+  float cloudCrown = mix(0.68, 1.0, smoothstep(0.32, 0.82, vMapUv.y));
+  diffuseColor.rgb += uCloudRimColor * uCloudRimStrength * cloudEdge
+                    * mix(0.16, 1.0, cloudSunSide) * cloudCrown;
+#endif`,
+    );
+  };
+  material.customProgramCacheKey = () => 'cheoma-cloud-rim-v1';
+  return state;
+}
+
+function makeLightRayMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uRayColor: { value: new THREE.Color(0xffcda0) },
+      uRayOpacity: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      varying vec2 vUv;
+      uniform vec3 uRayColor;
+      uniform float uRayOpacity;
+      void main() {
+        float across = pow(max(0.0, 1.0 - abs(vUv.x * 2.0 - 1.0)), 1.35);
+        float along = smoothstep(0.0, 0.13, vUv.y) * (1.0 - smoothstep(0.68, 1.0, vUv.y));
+        float airVariation = 0.82 + 0.18 * sin(vUv.y * 23.0 + vUv.x * 4.0);
+        float alpha = across * along * airVariation * uRayOpacity;
+        if (alpha < 0.001) discard;
+        gl_FragColor = vec4(uRayColor * 1.08, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+}
+
+function makeLightRayGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute([
+    0, 0, 1, 0, 0, 1, 1, 1,
+  ], 2));
+  geometry.setIndex([0, 2, 1, 2, 3, 1]);
+  geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1000);
+  return geometry;
+}
+
 // ── 유기적 저층 운해(雲海) 링 ───────────────────────────────────────────────
 // worldedge 외곽선(edge.edgeRadiusAt)을 따라 도는 넓고 낮은 소프트 밴드 — 배산 능선 사면을
 // 등고선을 따라 감아(groundY 샘플로 지형에 밀착) 산수화 여백으로 소실시킨다. env/terrain.js
@@ -308,7 +479,10 @@ export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, 
 
 // mistBillboards(기본 true): 산허리 물안개 빌보드 2장 생성 여부 — 마을은 전용 운해 링·능선 물안개가
 //   대신하므로 false. highCloudCount(기본 4, 최대 MAX_CLOUD_BLOBS=5): 상공 뭉게구름 장수(=대응 그림자 블롭 수).
-export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mistBillboards = true, highCloudCount = 4, siteCenter = null, coverR = null } = {}) {
+export function setupClouds(group, {
+  sun, edge, terrainMax = 152, uniforms, mistBillboards = true, highCloudCount = 4,
+  siteCenter = null, coverR = null, getHaze = null,
+} = {}) {
   const u = uniforms || createCloudUniforms();
   const root = new THREE.Group();
   root.name = 'clouds';
@@ -373,7 +547,9 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
       map: cloudTex[i], transparent: true, opacity: s.op, depthWrite: false,
       fog: true, blending: THREE.NormalBlending, side: THREE.DoubleSide,
     });
+    patchCloudRim(mat);
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), mat);
+    mesh.name = `high-cloud-${i}`;
     mesh.renderOrder = 3;
     if (village) {
       // 프레임 중앙 디스크 배치: 각 블롭을 표류 수직(perp)의 서로 다른 레인에 놓고, 표류(drift) 축으로
@@ -398,13 +574,32 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     mesh.onBeforeRender = (r, sc, cam) => {
       mesh.lookAt(cam.position.x, mesh.position.y + (cam.position.y - mesh.position.y) * 0.35, cam.position.z);
       mesh.up.copy(_up);
+      const rim = mesh.material.userData.cloudRim;
+      if (rim) {
+        const me = cam.matrixWorld.elements;
+        rim.direction.set(
+          _sunDir.x * me[0] + _sunDir.y * me[1] + _sunDir.z * me[2],
+          _sunDir.x * me[4] + _sunDir.y * me[5] + _sunDir.z * me[6],
+        );
+        if (rim.direction.lengthSq() < 1e-5) rim.direction.set(0, 1);
+        else rim.direction.normalize();
+      }
       if (overheadFade) {
         // 시선각 감쇠: dyEye>0 = 구름이 카메라 눈높이 아래(지형에 겹쳐 시선 가림) → 페이드,
         //   dyEye<0 = 구름이 하늘에 뜸 → 유지. opNow(=update 가 매 프레임 계산한 시간대 불투명도)에
         //   곱해 누적 없이(매 프레임 opNow 재설정) 적용. 부감 정지·자동회전 중엔 camera.y 불변 → 안정.
         const g = smoothstep(OF_LO, OF_HI, cam.position.y - mesh.position.y);
         const base = mesh.userData.opNow != null ? mesh.userData.opNow : mesh.material.opacity;
-        mesh.material.opacity = base * (1 - g * OF_DEPTH);
+        // A focus camera may stand directly under a 150 m shadow blob. Rendering that
+        // finite billboard from only a few dozen metres away turns it into a featureless
+        // ceiling when the user rotates toward the sky. Keep the physical shadow source,
+        // but hand visible close-up sky detail to the camera-relative horizon bank.
+        const distance = cam.position.distanceTo(mesh.position);
+        // A 150 m plane still fills a 20° lens at more than one plane-width away.
+        // Fade by apparent size, reaching full opacity only once it subtends a
+        // modest sky feature instead of most of the telephoto frame.
+        const proximity = smoothstep(mesh.userData.w * 1.6, mesh.userData.w * 3.2, distance);
+        mesh.material.opacity = base * (1 - g * OF_DEPTH) * proximity;
       }
     };
     root.add(mesh);
@@ -412,6 +607,114 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   });
   // 남는 블롭 슬롯은 비활성(반경 0)으로 초기화 — 셰이더가 건너뜀.
   for (let i = highClouds.length; i < MAX_CLOUD_BLOBS; i++) u.uCloudBlobs.value[i].set(0, 0, 0, 0);
+
+  // The local layer above is the exact ground-shadow source. A telephoto house view looks
+  // underneath it, so visible sky detail lives in a separate angular ring: sixteen cloud
+  // instances cover 360° with a small overlap, yet remain one draw call. Their azimuths are
+  // fixed to the world (camera rotation still reveals different clouds); only translation
+  // follows the camera, like a sky dome, so travel never reaches or overtakes the bank.
+  // The bank is inside the sun/moon sprites and can therefore create real alpha occlusion.
+  const HORIZON_CLOUD_COUNT = 16;
+  // At the low-cloud distance this subtends roughly 14–20° after deterministic scale
+  // variation: one or two silhouettes in a 20° telephoto frame, never a white ceiling.
+  const HORIZON_CLOUD_W = 18;
+  const HORIZON_CLOUD_H = 10;
+  const HORIZON_CLOUD_OPACITY = 0.72;
+  const horizonTexture = makeHorizonCumulusTexture(97);
+  const horizonMaterial = new THREE.MeshBasicMaterial({
+    map: horizonTexture, transparent: true, opacity: HORIZON_CLOUD_OPACITY,
+    depthWrite: false, depthTest: true, fog: false, blending: THREE.NormalBlending,
+    side: THREE.DoubleSide,
+  });
+  patchCloudRim(horizonMaterial);
+  const horizonBank = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(HORIZON_CLOUD_W, HORIZON_CLOUD_H),
+    horizonMaterial,
+    HORIZON_CLOUD_COUNT,
+  );
+  horizonBank.name = 'horizon-cloud-bank';
+  horizonBank.renderOrder = 1;
+  horizonBank.frustumCulled = false;
+  horizonBank.userData = { op: HORIZON_CLOUD_OPACITY, opNow: HORIZON_CLOUD_OPACITY };
+  const horizonSpecs = Array.from({ length: HORIZON_CLOUD_COUNT }, (_, i) => ({
+    az: 0.17 + i * Math.PI * 2 / HORIZON_CLOUD_COUNT,
+    // All centres stay above the geometric horizon. The focus rise reveals that band;
+    // depth testing still lets ridges and roofs naturally occlude the cloud bottoms.
+    elev: [0.032, 0.066, 0.048, 0.082][i % 4],
+    sx: [0.82, 1.06, 1.18, 0.94][i % 4],
+    sy: [0.84, 1.06, 0.92, 1.14][(i + 1) % 4],
+  }));
+  const horizonDummy = new THREE.Object3D();
+  const horizonForward = new THREE.Vector3();
+  const horizonAnchor = new THREE.Object3D();
+  horizonAnchor.userData.w = HORIZON_CLOUD_W;
+
+  function placeHorizonBank(cam) {
+    // Stay inside the procedural world edge. A bank behind that opaque ridge can be
+    // perfectly valid in projection yet contribute zero pixels. This camera-centred
+    // low-cloud layer sits beyond buildings but before the enclosing mountains.
+    const distance = Math.max(110, Math.min(210, R * 0.72, cam.far * 0.42));
+    horizonBank.userData.distance = distance;
+    cam.getWorldDirection(horizonForward);
+    const viewAz = Math.atan2(horizonForward.x, horizonForward.z);
+    let nearest = horizonSpecs[0];
+    let nearestDistance = Infinity;
+
+    horizonSpecs.forEach((spec, i) => {
+      horizonDummy.position.set(
+        cam.position.x + Math.sin(spec.az) * distance,
+        cam.position.y + spec.elev * distance,
+        cam.position.z + Math.cos(spec.az) * distance,
+      );
+      horizonDummy.lookAt(cam.position);
+      horizonDummy.scale.set(spec.sx, spec.sy, 1);
+      horizonDummy.updateMatrix();
+      horizonBank.setMatrixAt(i, horizonDummy.matrix);
+
+      const delta = Math.abs(Math.atan2(Math.sin(spec.az - viewAz), Math.cos(spec.az - viewAz)));
+      if (delta < nearestDistance) { nearestDistance = delta; nearest = spec; }
+    });
+    horizonBank.instanceMatrix.needsUpdate = true;
+
+    // Three narrow shafts escape from different gaps of the nearest visible cloud. The
+    // anchor is data only, not another renderable cloud or draw call.
+    horizonAnchor.position.set(
+      cam.position.x + Math.sin(nearest.az) * distance,
+      cam.position.y + nearest.elev * distance,
+      cam.position.z + Math.cos(nearest.az) * distance,
+    );
+    horizonAnchor.userData.w = HORIZON_CLOUD_W * nearest.sx;
+
+    const rim = horizonMaterial.userData.cloudRim;
+    if (rim) {
+      const me = cam.matrixWorld.elements;
+      rim.direction.set(
+        _sunDir.x * me[0] + _sunDir.y * me[1] + _sunDir.z * me[2],
+        _sunDir.x * me[4] + _sunDir.y * me[5] + _sunDir.z * me[6],
+      );
+      if (rim.direction.lengthSq() < 1e-5) rim.direction.set(0, 1);
+      else rim.direction.normalize();
+    }
+  }
+  horizonBank.onBeforeRender = (rend, sc, cam) => placeHorizonBank(cam);
+  root.add(horizonBank);
+
+  // Crepuscular shafts share the same cloud anchors and sun direction as the shadow
+  // blobs. Three tapered quads are enough to read as light breaking around cloud gaps;
+  // aerial cameras suppress them in onBeforeRender to avoid laying translucent curtains
+  // over a whole settlement.
+  const lightRays = [];
+  for (let i = 0; i < 3; i++) {
+    const ray = new THREE.Mesh(makeLightRayGeometry(), makeLightRayMaterial());
+    ray.name = `cloud-light-ray-${i}`;
+    ray.renderOrder = 0;
+    ray.frustumCulled = false;
+    ray.userData.cloud = horizonAnchor;
+    ray.userData.lane = (i - 1) * 0.18;
+    ray.userData.opacityScale = [1.0, 0.58, 0.34][i];
+    root.add(ray);
+    lightRays.push(ray);
+  }
 
   // ── 산허리 물안개 2장 (능선을 감는 넓고 낮은 수평 소프트 플레인) ──
   //   물안개는 방향성 없는 소프트 덩어리라야 사면에 자연스럽게 눕는다 → 뭉게구름(cumulus)이 아닌
@@ -442,8 +745,50 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
   const _sunDir = new THREE.Vector3();
   const _base = new THREE.Color(0xffffff);
   const _warm = new THREE.Color();
+  const _haze = new THREE.Color();
+  const _rimColor = new THREE.Color(0xffc68c);
+  const _rayColor = new THREE.Color(0xffdfbd);
+  const _rayDirection = new THREE.Vector3();
+  const _rayView = new THREE.Vector3();
+  const _rayWidth = new THREE.Vector3();
+  const _rayStart = new THREE.Vector3();
+  const _rayEnd = new THREE.Vector3();
+  let rayStrength = 0;
   let t = 0;
   let disposed = false;
+
+  for (const ray of lightRays) {
+    ray.onBeforeRender = (rend, sc, cam) => {
+      const cloud = ray.userData.cloud;
+      placeHorizonBank(cam);
+      _rayDirection.copy(_sunDir).multiplyScalar(-1).normalize();
+      _rayView.subVectors(cam.position, cloud.position).normalize();
+      _rayWidth.crossVectors(_rayDirection, _rayView);
+      if (_rayWidth.lengthSq() < 1e-5) _rayWidth.set(1, 0, 0);
+      else _rayWidth.normalize();
+
+      const cloudW = cloud.userData.w || 150;
+      _rayStart.copy(cloud.position)
+        .addScaledVector(_rayWidth, cloudW * ray.userData.lane)
+        .addScaledVector(_rayDirection, 7);
+      const length = Math.max(105, Math.min(250, R * (village ? 0.72 : 1.0)));
+      _rayEnd.copy(_rayStart).addScaledVector(_rayDirection, length);
+      const w0 = cloudW * 0.035;
+      const w1 = cloudW * 0.16;
+      const positions = ray.geometry.attributes.position;
+      positions.setXYZ(0, _rayStart.x - _rayWidth.x * w0, _rayStart.y - _rayWidth.y * w0, _rayStart.z - _rayWidth.z * w0);
+      positions.setXYZ(1, _rayStart.x + _rayWidth.x * w0, _rayStart.y + _rayWidth.y * w0, _rayStart.z + _rayWidth.z * w0);
+      positions.setXYZ(2, _rayEnd.x - _rayWidth.x * w1, _rayEnd.y - _rayWidth.y * w1, _rayEnd.z - _rayWidth.z * w1);
+      positions.setXYZ(3, _rayEnd.x + _rayWidth.x * w1, _rayEnd.y + _rayWidth.y * w1, _rayEnd.z + _rayWidth.z * w1);
+      positions.needsUpdate = true;
+
+      // Suppress shafts as the camera pitches into a settlement-wide aerial view. The
+      // distant bank remains visible, but translucent quads must not veil the whole town.
+      cam.getWorldDirection(horizonForward);
+      const aerial = smoothstep(0.22, 0.48, Math.max(0, -horizonForward.y));
+      ray.material.uniforms.uRayOpacity.value = rayStrength * ray.userData.opacityScale * (1 - aerial * 0.96);
+    };
+  }
 
   // 표류: drift 방향으로 눈에 띄게 미끄러지고 perp 로 왕복한다. 경계 밖으로 벗어나지 않게 사인
   //   왕복만 쓴다(순 이동 누적 없음) → 오래 켜둬도 안정. #68 에서 진폭·주기를 키워 "지나간다"는
@@ -518,20 +863,50 @@ export function setupClouds(group, { sun, edge, terrainMax = 152, uniforms, mist
     // 구름 색: 흰 바탕 → 태양색으로 살짝 물들이되 밑면은 따뜻하게(석양). 야간엔 어둡게.
     _warm.copy(sun.color);
     const warmMix = (1 - alt) * 0.55;                  // 저고도(석양·새벽)에 밑면 웜틴트 강
+    const haze = getHaze?.();
+    if (haze?.isColor) _haze.copy(haze);
     // #73 야간 무드: 밝기·불투명 바닥을 낮춰 야간(inten≈0.9) 뭉게구름을 "중간톤 회색 덩어리"에서
     //   "달빛 아래 은은한 청회 실루엣"으로 물린다. smoothstep 상단(day 2.6·sunset 2.3)은 계수가 ≈1
     //   이라 바닥만 낮추면 야간·(약하게)새벽만 어두워지고 day/sunset 룩은 사실상 불변.
     const dim = 0.3 + 0.7 * smoothstep(0.7, 2.6, inten);
+    const lowSun = 1 - smoothstep(0.24, 0.52, alt);
+    const brightSky = smoothstep(1.15, 2.15, inten);
+    const rimStrength = lowSun * brightSky * 1.28;
+    rayStrength = lowSun * brightSky * 0.038;
+    _rimColor.copy(sun.color);
+    if (haze?.isColor) _rimColor.lerp(_haze, 0.14);
 
     highClouds.forEach((m) => {
       place(m);
       writeBlob(m);                                    // 빌보드 위치 → 대응 그림자 블롭 갱신
-      m.material.color.copy(_base).lerp(_warm, warmMix * 0.7).multiplyScalar(dim);
+      m.material.color.copy(_base).lerp(_warm, warmMix * 0.7);
+      // The haze colour is the resolved atmosphere profile, so crimson/violet sunsets
+      // tint cloud bodies without making the physically warm direct sun itself purple.
+      if (haze?.isColor) m.material.color.lerp(_haze, (1 - alt) * 0.16);
+      m.material.color.multiplyScalar(dim);
+      const rim = m.material.userData.cloudRim;
+      if (rim) { rim.color.copy(_rimColor); rim.strength.value = rimStrength; }
       // 야간엔 뭉게구름이 창불 야경을 방해하지 않게 물러난다(저광량 불투명도 바닥 ↓).
       const opNow = m.userData.op * (0.32 + 0.68 * smoothstep(0.8, 2.55, inten));
       m.userData.opNow = opNow;              // 부감 인스턴스는 onBeforeRender 가 시선각으로 추가 감쇠
       m.material.opacity = opNow;
     });
+    horizonMaterial.color.copy(_base).lerp(_warm, warmMix * 0.74);
+    if (haze?.isColor) horizonMaterial.color.lerp(_haze, (1 - alt) * 0.20);
+    // Distant clouds sit against the unlit sky dome, so an ordinary [0..1] BasicMaterial
+    // collapses into the haze after ACES. Retain modest HDR headroom in daylight/sunset:
+    // the body reads white and the existing rim shader can bloom, while night stays dim.
+    const horizonLuminance = 0.78 + 0.32 * brightSky;
+    horizonMaterial.color.multiplyScalar(dim * horizonLuminance);
+    const horizonRim = horizonMaterial.userData.cloudRim;
+    if (horizonRim) { horizonRim.color.copy(_rimColor); horizonRim.strength.value = rimStrength * 0.88; }
+    horizonBank.userData.opNow = horizonBank.userData.op * (0.28 + 0.72 * smoothstep(0.72, 2.5, inten));
+    horizonMaterial.opacity = horizonBank.userData.opNow;
+    for (const ray of lightRays) {
+      ray.visible = rayStrength > 0.001;
+      _rayColor.copy(_rimColor).lerp(_base, 0.26);
+      ray.material.uniforms.uRayColor.value.copy(_rayColor);
+    }
     mistClouds.forEach((m) => {
       place(m);
       // 물안개는 하늘/대기색을 더 강하게 받는다(밑에서 올라온 습기)

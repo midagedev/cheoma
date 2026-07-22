@@ -24,10 +24,10 @@
   let engine = null;
 
   let ui = $state({
-    seed: 0, preset: 'korea', time: 'day', season: 'summer', weather: 'clear',
+    seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
     expansion: 1, selected: false, canMerge: false, params: {}, maxExpansion: 3,
   });
-  let overrides = $state({ preset: false, time: false, season: false, weather: false });
+  let overrides = $state({ preset: false, time: false, sunsetLook: false, season: false, weather: false });
   let heroVisible = $state(false);
   let heroLeaving = $state(false);
   let chromaFaded = $state(false);
@@ -133,7 +133,7 @@
   }
   function pullState() {
     const s = engine.getState();
-    ui.preset = s.preset; ui.time = s.time; ui.season = s.season;
+    ui.preset = s.preset; ui.time = s.time; ui.sunsetLook = s.sunsetLook; ui.season = s.season;
     ui.weather = s.weather; ui.expansion = s.expansion; ui.selected = s.selected;
     ui.canMerge = s.canMerge;
     ui.params = engine.getParams();
@@ -283,6 +283,7 @@
     if (!url.shot && !url.time) cfg.time = FLAGSHIP_TIME;
     if (url.preset && PRESETS[url.preset]) { cfg.preset = url.preset; cfg.params = paramsFor(url.preset); overrides.preset = true; }
     if (url.time) { cfg.time = url.time; overrides.time = true; }
+    if (url.sunsetLook) { cfg.sunsetLook = url.sunsetLook; overrides.sunsetLook = true; }
     if (url.season) { cfg.season = url.season; overrides.season = true; }
     if (url.weather) { cfg.weather = url.weather; overrides.weather = true; }
     ui.seed = url.seed;
@@ -483,12 +484,14 @@
 
   // 환경 적용 원자 연산(엔진 호출 + 오버라이드 표시). 수동 setter·오토로테이션이 공유.
   function applyTime(v) { engine.setTime(v); overrides.time = true; }
+  function applySunsetLook(v) { engine.setSunsetLook(v); overrides.sunsetLook = true; }
   function applySeason(v) { engine.setSeason(v); overrides.season = true; }
   function applyWeather(v) { engine.setWeather(v); overrides.weather = true; }
 
   // 수동 조작(다이얼 드래그·리롤은 onTime/onSeason/onWeather 로 이 경로를 탄다) → 타이머만 리셋,
   // 모드는 유지(흐르는 중이면 다음 전진까지 다시 10초, 꺼져 있으면 무동작).
   function setTime(v) { applyTime(v); syncUrl(); scheduleFlowTick(); }
+  function setSunsetLook(v) { applySunsetLook(v); syncUrl(); scheduleFlowTick(); }
   function setSeason(v) { applySeason(v); syncUrl(); scheduleFlowTick(); }
   function setWeather(v) { applyWeather(v); syncUrl(); scheduleFlowTick(); }
 
@@ -702,10 +705,10 @@
 <div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
   {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={() => { refOpen = true; chromaFaded = false; }} />{/if}
   <EnvironmentDial
-    time={ui.time} season={ui.season} weather={ui.weather}
+    time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
     shifted={ui.selected && !sheetLayout}
     flowing={flowing}
-    onTime={setTime} onSeason={setSeason} onWeather={setWeather}
+    onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
     onFlowToggle={toggleFlow}
   />
   {#if !hideActions}

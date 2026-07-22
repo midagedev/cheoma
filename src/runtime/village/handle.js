@@ -218,6 +218,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       // 구름 그림자 커버리지 정밀화(#108 후속): 어댑터가 아는 마을 실반경(site.R)을 프레임 반경으로 넘겨
       //   블롭·그림자를 마을 중심 원(원점)에 가둔다(terrainMax*0.42 파생 대신 실측 — 프레임 밖 표류 감소).
       siteCenter: { x: 0, z: 0 }, coverR: villageFogR,
+      getHaze: () => scene.fog?.color || null,
     });
   }
   function detachClouds() {

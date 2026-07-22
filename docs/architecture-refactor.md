@@ -1,7 +1,7 @@
 # 에이전트 친화적 구조 계약
 
 > - **상태**: 1차 구조 개선 완료 / 후속 개선의 기준선
-> - **기준일**: 2026-07-21
+> - **기준일**: 2026-07-22
 > - **목표**: 동작과 결정론을 보존하면서 변경 이유가 다른 코드를 분리하고, 생성 엔진을 앱 밖에서도 재사용 가능하게 유지
 
 ## Beck 단순 설계 규칙
@@ -71,7 +71,7 @@ app/src/                       Svelte UI
 | `src/api/village-plan.js` | `planVillage`, site/tier/road, 성곽 contour·사대문, 보호수·필지 focus·LOD impostor 명세, terrain-grid 높이, 지형 clip 도로 surface 순수 helper | Node, worker, browser |
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
-| `src/api/environment.js` | environment, focus, post, 축방향 DoF controller, weather, ink, time, world edge | WebGL browser runtime |
+| `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, environment, focus, post, 축방향 DoF controller, weather, ink, time, world edge | profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
 | `src/api/cinematic.js` | 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
 | `src/api/props.js` | prop registry와 생성 | THREE와 canvas provider가 있는 runtime |
@@ -179,6 +179,18 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
 - 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보하고, 탭별 판정 대신 평균 뒤 한 번만 HDR 광원 격리를 판정한다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다. out-of-focus 픽셀의 ALU는 stock보다 많지만 새 post pass나 draw call은 없고, 저성능 경로에서는 DoF 자체를 건너뛴다. 중앙 depth 기반 gather라 초점면 불투명 표면과 정확히 겹친 전경 광원은 원판으로 산란하지 못하며, 이를 고정 fixture로 기록한다.
 
 화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환과 한 번의 depth prepass는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·정지 동일성·저속 패닝은 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
+
+## 하늘과 석양 재사용 계약
+
+시간대별 하늘·광원·안개·post 수치는 `src/env/atmosphere-profiles.js`가 Three와 DOM 없이 소유한다. `sky.js`와 `post.js`가 각자 색표를 복제하지 않고 같은 profile key를 resolve하며, 외부 소비자는 `src/api/environment.js`에서 프로필과 resolver를 사용할 수 있다. 석양 스타일의 seed 선택은 앱 seed의 독립 fork라 village/worker 생성 순서를 오염시키지 않는다.
+
+가시성과 그림자는 두 구름 레이어로 분리한다.
+
+- 네 장의 월드 상공 구름은 지형 셰이더의 `uCloudBlobs`와 정확히 같은 위치를 사용한다. 카메라가 너무 가까워 거대한 판으로 보일 때는 billboard만 감쇠하고 그림자 데이터는 유지한다.
+- 16개 원경 적운은 하나의 `InstancedMesh`다. translation은 sky dome처럼 카메라를 따르지만 azimuth는 월드에 고정돼 회전하면 다른 구름이 나타난다. 이 레이어가 근경 실루엣, HDR rim, 달의 alpha 가림, 구름 틈 빛줄기를 맡는다.
+- sky dome과 달은 `environment` 지형 그룹이 아니라 scene-level `sky-atmosphere`가 소유한다. 마을 모드가 단일건물 지형을 숨겨도 하늘은 끊기지 않으며, enable/dispose는 environment lifecycle이 명시적으로 정리한다.
+
+일반 필지 focus는 순수 계획의 3° 저각·문 높이 target을 유지한다. 앱의 `view-shift.js`는 UI 패널 offset과 별개인 -13% 수직 composition을 같은 비대칭 frustum에 합성해 하늘을 연다. focus hop/in/out, 리롤, 옵션 변경은 이 값을 같은 카메라 timeline에서 보간하거나 0으로 초기화한다. `check:atmosphere`가 프로필·태양방향을, `shoot:sky`가 실제 앱 픽셀·구름/달/광선·draw call을 검사한다.
 
 ## 병렬 작업 소유권
 
