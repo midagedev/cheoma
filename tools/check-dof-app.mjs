@@ -168,7 +168,27 @@ try {
     }, { refreshFlora: false });
     const rebuildAfter = doorFocusSnapshot('p32');
 
+    // The public reroll path synchronously replaces the selected overlay before
+    // its restrained camera arc begins. Lock that event boundary: the new fixed
+    // portal must own DoF immediately, without a render frame or stale Object3D.
+    const rerollBefore = doorFocusSnapshot('p32');
+    const rerollStateBefore = engine.village.debugParcelRebuild('p32');
+    const originalRandom = Math.random;
+    try {
+      Math.random = () => 0.3141592653589793;
+      engine.village.rerollParcel();
+    } finally {
+      Math.random = originalRandom;
+    }
+    const rerollStateAfter = engine.village.debugParcelRebuild('p32');
+    const rerollAfter = doorFocusSnapshot('p32');
+    const rerollReveal = engine.debugArchitecturalReveal();
+
     await begin(() => engine.village.return());
+    // return() first skips the assembly into its rest pose, then value-copies the
+    // same semantic point into the departure path. This lets us compare against
+    // the current portal without adding another Bokeh render.
+    const rerollRestored = doorFocusSnapshot('p32');
     const returnOuter = seek();
     const returnEnd = snapshot();
 
@@ -246,6 +266,14 @@ try {
         before: rebuildBefore,
         after: rebuildAfter,
       },
+      reroll: {
+        before: rerollBefore,
+        after: rerollAfter,
+        restored: rerollRestored,
+        seedBefore: rerollStateBefore?.rebuildSeed ?? null,
+        seedAfter: rerollStateAfter?.rebuildSeed ?? null,
+        revealKind: rerollReveal?.kind ?? null,
+      },
       returnOuter,
       returnEnd,
       focusHopStart,
@@ -281,9 +309,9 @@ try {
       ? Math.hypot(...a.map((value, index) => value - b[index]))
       : Infinity
   );
-  const primaryDoorAligned = (sample) => {
+  const primaryDoorAligned = (sample, sources = ['primary-opening']) => {
     const { dof, leafWidth } = sample;
-    return dof.anchorSource === 'primary-opening'
+    return sources.includes(dof.anchorSource)
       && finiteAnchor(dof)
       && Number.isFinite(sample.doorDepth)
       && Number.isFinite(sample.anchorDepthFromMatrix)
@@ -365,6 +393,19 @@ try {
       && primaryDoorAligned(result.rebuild.after),
   `focused rebuild atomically refreshes the semantic anchor (${rebuildAnchorMove.toFixed(4)}m, writes ${
     result.rebuild.before.dof.semanticWrites}->${result.rebuild.after.dof.semanticWrites})`);
+
+  pass(result.reroll.seedBefore !== result.reroll.seedAfter
+      && result.reroll.revealKind === 'rebuild'
+      && result.reroll.after.dof.semanticParcel === 'p32'
+      && result.reroll.after.dof.semanticWrites === result.reroll.before.dof.semanticWrites + 1
+      && result.reroll.after.dof.anchorSource === 'primary-opening'
+      && finiteAnchor(result.reroll.after.dof)
+      && primaryDoorAligned(result.reroll.restored, ['primary-opening-transition']),
+  `focused reroll atomically replaces the semantic anchor (seed ${
+    result.reroll.seedBefore}->${result.reroll.seedAfter}, writes ${
+    result.reroll.before.dof.semanticWrites}->${result.reroll.after.dof.semanticWrites}, source ${
+    result.reroll.after.dof.anchorSource}, reveal ${result.reroll.revealKind}, rest-plane ${
+    result.reroll.restored.portalPlaneOffset})`);
 
   pass(maxError(result.returnOuter) < 0.01
       && monotonic(result.returnOuter.map((sample) => sample.amount), -1)
