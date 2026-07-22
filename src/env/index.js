@@ -202,6 +202,12 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   function setLensScale(value) {
     if (!disposed) motes.setLensScale(value);
   }
+  // MeshBasic ridge silhouettes do not participate in the shared lit-surface snow
+  // shader. Weather forwards the same accumulation clock here so their high crests
+  // gain a restrained snow line without adding meshes or draw calls.
+  function setSnowAccumulation(value) {
+    if (!disposed) mountains.setSnow(value);
+  }
   // 마을은 자체 지형·생활 디테일을 소유하므로 env.group을 숨긴 동안 단일집 전용
   // CPU 작업은 쉬게 한다. scene 레벨 시간대·조명·fog를 소유한 sky는 계속 갱신한다.
   function update(dt) {
@@ -256,7 +262,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   }
 
   return {
-    group, setTime, setSunsetLook, setSeason, setLensScale, update, setEnabled, dispose,
+    group, setTime, setSunsetLook, setSeason, setLensScale, setSnowAccumulation, update, setEnabled, dispose,
     addFogModifier, removeFogModifier, setImmediate,
     get time() { return currentTime; },
     get sunsetLook() { return currentSunsetLook; },

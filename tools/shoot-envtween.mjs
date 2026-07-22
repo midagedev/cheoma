@@ -38,7 +38,7 @@ import { setupNightGlow } from '/src/env/night-glow.js';
 import { setupPost } from '/src/env/post.js';
 const q = new URLSearchParams(location.search);
 const timeOfDay = q.get('time') || 'sunset';
-const season = ['spring','summer','autumn'].includes(q.get('season'))?q.get('season'):'summer';
+const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
 const weatherName = ['clear','rain','snow'].includes(q.get('weather'))?q.get('weather'):'clear';
 
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });

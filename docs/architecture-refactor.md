@@ -71,7 +71,7 @@ app/src/                       Svelte UI
 | `src/api/village-plan.js` | `planVillage`, site/tier/road, 성곽 contour·사대문, 보호수·필지 focus·LOD impostor 명세, terrain-grid 높이, 지형 clip 도로 surface 순수 helper | Node, worker, browser |
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
-| `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, environment, focus, post, 축방향 DoF controller, weather, ink, time, world edge | profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
+| `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, 계절·날씨 상태, environment, focus, post, 축방향 DoF controller, 공유 적설 재질, weather, ink, time, world edge | 상태/profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
 | `src/api/cinematic.js` | 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
 | `src/api/props.js` | prop registry와 생성 | THREE와 canvas provider가 있는 runtime |
@@ -180,6 +180,14 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
 
 화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환과 한 번의 depth prepass는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·정지 동일성·저속 패닝은 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
 
+## 계절·날씨와 적설 재사용 계약
+
+`src/env/environment-state.js`가 계절·날씨 호환성과 가중 장면 목록을 Three·DOM 없이 소유한다. 앱 seed, 환경 다이얼, 엔진 setter는 이 모듈을 공유하며 서로 호환되지 않는 눈·비 조합을 각자 보정하지 않는다. `setupEnvironment()` 하나가 계절 지형·식생·논·능선을 소유하고 샘플 페이지도 별도 `setupSeasons()`를 중첩하지 않는다.
+
+`src/env/snow-material.js`는 단독 건물과 대규모 마을이 함께 쓰는 적설 shader patch다. `surface/tile/thatch/terrain/foliage` profile은 uniform만 달리해 재질 종류마다 shader source를 복제하지 않고, InstancedMesh의 월드 노멀과 위치에는 `instanceMatrix`를 합성한다. 눈발과 표면 축적은 분리하되 지붕·지형·식생·외부 소품·원경 능선이 하나의 축적 시계를 소비한다. 외부 소비자는 `src/api/environment.js`에서 순수 상태와 적설 patch를 사용할 수 있다.
+
+순수 상태는 `npm run check:environment`, 실제 적설 범위·휘도·program/draw 예산은 `npm run check:winter:app`으로 검증한다.
+
 ## 하늘과 석양 재사용 계약
 
 시간대별 하늘·광원·안개·post 수치는 `src/env/atmosphere-profiles.js`가 Three와 DOM 없이 소유한다. `sky.js`와 `post.js`가 각자 색표를 복제하지 않고 같은 profile key를 resolve하며, 외부 소비자는 `src/api/environment.js`에서 프로필과 resolver를 사용할 수 있다. 석양 스타일의 seed 선택은 앱 seed의 독립 fork라 village/worker 생성 순서를 오염시키지 않는다.
@@ -190,7 +198,7 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
 - 16개 원경 적운은 하나의 `InstancedMesh`다. translation은 sky dome처럼 카메라를 따르지만 azimuth는 월드에 고정돼 회전하면 다른 구름이 나타난다. 이 레이어가 근경 실루엣, HDR rim, 달의 alpha 가림, 구름 틈 빛줄기를 맡는다.
 - sky dome과 달은 `environment` 지형 그룹이 아니라 scene-level `sky-atmosphere`가 소유한다. 마을 모드가 단일건물 지형을 숨겨도 하늘은 끊기지 않으며, enable/dispose는 environment lifecycle이 명시적으로 정리한다.
 
-일반 필지 focus는 순수 계획의 3° 저각·문 높이 target을 유지한다. 앱의 `view-shift.js`는 UI 패널 offset과 별개인 -13% 수직 composition을 같은 비대칭 frustum에 합성해 하늘을 연다. focus hop/in/out, 리롤, 옵션 변경은 이 값을 같은 카메라 timeline에서 보간하거나 0으로 초기화한다. `check:atmosphere`가 프로필·태양방향을, `shoot:sky`가 실제 앱 픽셀·구름/달/광선·draw call을 검사한다.
+일반 필지 focus는 순수 계획의 남측 접근·건물 비례 3.0–5.6m 인방/처마 target·1.35m 마당 눈높이를 유지한다. 각도 기준이 아니라 월드 높이 기준이므로 큰 필지나 망원 dolly에서도 카메라가 부감으로 떠오르지 않고 처마와 하늘을 올려다본다. 앱의 `view-shift.js`는 UI 패널 offset과 별개인 -18% 수직 composition을 같은 비대칭 frustum에 합성해 능선 위 하늘을 연다. focus hop/in/out, 리롤, 옵션 변경은 이 값을 같은 카메라 timeline에서 보간하거나 0으로 초기화한다. `check:atmosphere`가 프로필·태양방향을, `shoot:sky`가 실제 앱 픽셀·구름/달/광선·draw call을 검사한다.
 
 ## 병렬 작업 소유권
 

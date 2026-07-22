@@ -40,6 +40,12 @@ const AUTUMN_RIDGE = {
   mist: new THREE.Color(0xead2ab),   // 능선 사이 안개도 살짝 온기
 };
 const AUTUMN_RIDGE_AMT = { dawn: 0.16, day: 0.36, sunset: 0.12, night: 0.04 };
+const WINTER_RIDGE = {
+  near: new THREE.Color(0x687078),
+  far: new THREE.Color(0xb8c2ca),
+  mist: new THREE.Color(0xd7dde2),
+};
+const WINTER_RIDGE_AMT = { dawn: 0.22, day: 0.42, sunset: 0.18, night: 0.10 };
 
 // 전환 길이·이징 ---------------------------------------------------------------
 const DUR_TIME = 1.8;      // 시간대 크로스페이드(초) — 짧은 타임랩스감(그림자가 스윽 돈다)
@@ -162,7 +168,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), hemiInt: 0,
       fogColor: new THREE.Color(), fogNear: 0, fogFar: 0, exposure: 1,
       ridgeNear: new THREE.Color(), ridgeFar: new THREE.Color(), mist: new THREE.Color(),
-      mistOp: 0, autumnAmt: 0, lantern: 0, moon: 0,
+      mistOp: 0, autumnAmt: 0, winterAmt: 0, lantern: 0, moon: 0,
       stops: [0, 1, 2, 3].map(() => ({ pos: 0, r: 0, g: 0, b: 0 })),
     };
   }
@@ -174,7 +180,9 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     out.hemiSky.setHex(P.hemiSky); out.hemiGround.setHex(P.hemiGround); out.hemiInt = P.hemiInt;
     out.fogColor.setHex(P.fog); out.fogNear = P.fogNear; out.fogFar = P.fogFar; out.exposure = P.exposure;
     out.ridgeNear.setHex(P.ridgeNear); out.ridgeFar.setHex(P.ridgeFar); out.mist.setHex(P.mist);
-    out.mistOp = P.mistOp; out.autumnAmt = AUTUMN_RIDGE_AMT[name] ?? 0.3;
+    out.mistOp = P.mistOp;
+    out.autumnAmt = AUTUMN_RIDGE_AMT[name] ?? 0.3;
+    out.winterAmt = WINTER_RIDGE_AMT[name] ?? 0.3;
     out.lantern = P.lantern || 0; out.moon = P.moon ? 1 : 0;
     for (let i = 0; i < 4; i++) {
       const c = parseHexSRGB(P.sky[i][1]);
@@ -187,7 +195,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     dst.hemiSky.copy(src.hemiSky); dst.hemiGround.copy(src.hemiGround); dst.hemiInt = src.hemiInt;
     dst.fogColor.copy(src.fogColor); dst.fogNear = src.fogNear; dst.fogFar = src.fogFar; dst.exposure = src.exposure;
     dst.ridgeNear.copy(src.ridgeNear); dst.ridgeFar.copy(src.ridgeFar); dst.mist.copy(src.mist);
-    dst.mistOp = src.mistOp; dst.autumnAmt = src.autumnAmt; dst.lantern = src.lantern; dst.moon = src.moon;
+    dst.mistOp = src.mistOp; dst.autumnAmt = src.autumnAmt; dst.winterAmt = src.winterAmt;
+    dst.lantern = src.lantern; dst.moon = src.moon;
     for (let i = 0; i < 4; i++) {
       dst.stops[i].pos = src.stops[i].pos; dst.stops[i].r = src.stops[i].r;
       dst.stops[i].g = src.stops[i].g; dst.stops[i].b = src.stops[i].b;
@@ -205,6 +214,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     out.ridgeNear.copy(a.ridgeNear).lerp(b.ridgeNear, k); out.ridgeFar.copy(a.ridgeFar).lerp(b.ridgeFar, k);
     out.mist.copy(a.mist).lerp(b.mist, k);
     out.mistOp = _l(a.mistOp, b.mistOp, k); out.autumnAmt = _l(a.autumnAmt, b.autumnAmt, k);
+    out.winterAmt = _l(a.winterAmt, b.winterAmt, k);
     out.lantern = _l(a.lantern, b.lantern, k); out.moon = _l(a.moon, b.moon, k);
     for (let i = 0; i < 4; i++) {
       out.stops[i].pos = _l(a.stops[i].pos, b.stops[i].pos, k);
@@ -228,6 +238,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   let curSeason = 'summer';
   let autumn01 = 0;             // 가을 능선 세기 0..1 (계절 트윈)
   let autumnGoal = 0;
+  let winter01 = 0;
+  let winterGoal = 0;
 
   // cur 상태를 씬에 적용한다(트윈 매 프레임·정착·스냅 공통).
   function applyCur() {
@@ -269,11 +281,22 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   // 능선 대기원근: cur(시간대 보간)의 능선색 × 가을 세기(autumn01) 합성. 매 프레임 저렴.
   function applyRidge() {
     const amt = cur.autumnAmt * autumn01;
+    const winterAmt = cur.winterAmt * winter01;
     if (amt > 0.001) {
       const farAmt = Math.min(1, amt * 1.3);
       _rn.copy(cur.ridgeNear).lerp(AUTUMN_RIDGE.near, amt);
       _rf.copy(cur.ridgeFar).lerp(AUTUMN_RIDGE.far, farAmt);
       _rm.copy(cur.mist).lerp(AUTUMN_RIDGE.mist, amt * 0.7);
+      if (winterAmt > 0.001) {
+        _rn.lerp(WINTER_RIDGE.near, winterAmt);
+        _rf.lerp(WINTER_RIDGE.far, Math.min(1, winterAmt * 1.18));
+        _rm.lerp(WINTER_RIDGE.mist, winterAmt * 0.8);
+      }
+      mountains.setPalette(_rn, _rf, _rm, cur.mistOp);
+    } else if (winterAmt > 0.001) {
+      _rn.copy(cur.ridgeNear).lerp(WINTER_RIDGE.near, winterAmt);
+      _rf.copy(cur.ridgeFar).lerp(WINTER_RIDGE.far, Math.min(1, winterAmt * 1.18));
+      _rm.copy(cur.mist).lerp(WINTER_RIDGE.mist, winterAmt * 0.8);
       mountains.setPalette(_rn, _rf, _rm, cur.mistOp);
     } else {
       mountains.setPalette(cur.ridgeNear, cur.ridgeFar, cur.mist, cur.mistOp);
@@ -330,6 +353,11 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       if (Math.abs(autumn01 - autumnGoal) <= 1e-4) autumn01 = autumnGoal;
       if (!moved) applyRidge();
     }
+    if (Math.abs(winter01 - winterGoal) > 1e-4) {
+      winter01 += (winterGoal - winter01) * Math.min(1, dt * SEASON_RATE);
+      if (Math.abs(winter01 - winterGoal) <= 1e-4) winter01 = winterGoal;
+      if (!moved) applyRidge();
+    }
   }
 
   // 처마 등롱 촛불 일렁임 — env.update 경유(매 프레임). 등불이 켜져 있을 때만 변조.
@@ -345,7 +373,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   function setSeason(name, opts = {}) {
     curSeason = name;
     autumnGoal = name === 'autumn' ? 1 : 0;
-    if (opts.immediate) { autumn01 = autumnGoal; applyRidge(); }
+    winterGoal = name === 'winter' ? 1 : 0;
+    if (opts.immediate) { autumn01 = autumnGoal; winter01 = winterGoal; applyRidge(); }
   }
 
   // env fog 합성용: 현재 시간대 base fog(트윈 보간값). 모디파이어 적용 전 원본.

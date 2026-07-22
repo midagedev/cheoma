@@ -35,7 +35,7 @@ import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment } from '/src/env/index.js';
 import { setupInk } from '/src/render/ink.js';
 const q = new URLSearchParams(location.search);
-const season = ['spring','summer','autumn'].includes(q.get('season'))?q.get('season'):'summer';
+const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
 const timeOfDay = q.get('time')||'day';
 const ink = q.get('mode')==='ink';
 const num=(k,d)=>{const v=parseFloat(q.get(k));return Number.isFinite(v)?v:d;};

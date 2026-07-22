@@ -1,5 +1,5 @@
 // 헤드리스 스크린샷: 계절 × 앵글 → shots/season-*.png
-// 사용법: node tools/shoot-seasons.mjs [season...]  (기본: spring summer autumn)
+// 사용법: node tools/shoot-seasons.mjs [season...]  (기본: spring summer autumn winter)
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
@@ -29,7 +29,7 @@ const server = createServer(async (req, res) => {
 await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const port = server.address().port;
 
-const seasons = process.argv.slice(2).length ? process.argv.slice(2) : ['spring', 'summer', 'autumn'];
+const seasons = process.argv.slice(2).length ? process.argv.slice(2) : ['spring', 'summer', 'autumn', 'winter'];
 const angles = ['three-quarter', 'front'];
 const time = process.env.TIME || 'day';
 

@@ -18,6 +18,13 @@ import { setupPost } from './env/post.js';
 import { createDofController, DEFAULT_DOF_APERTURE } from './env/dof.js';
 import { StableBokehPass } from './env/stable-bokeh-pass.js';
 import { setupTreeOccluder } from './env/tree-occluder.js';
+import {
+  SEASON_IDS,
+  WEATHER_IDS,
+  normalizeEnvironmentState,
+  pickEnvironmentScene,
+  resolveEnvironmentChange,
+} from './env/environment-state.js';
 
 const q = new URLSearchParams(location.search);
 const SHOT = q.get('shot') === '1';
@@ -36,11 +43,14 @@ const timeOfDay = q.get('time') || (SHOT ? 'day' : 'sunset');
 
 // 날씨: clear(기본) | rain | snow. ?weather= 또는 GUI에서 전환.
 const weatherParam = q.get('weather');
-const weatherName = ['clear', 'rain', 'snow'].includes(weatherParam) ? weatherParam : 'clear';
+const requestedWeather = WEATHER_IDS.includes(weatherParam) ? weatherParam : 'clear';
 
-// 계절: summer(기본) | spring | autumn. ?season= 또는 GUI에서 전환. (겨울은 weather=snow)
+// 계절과 날씨는 하나의 호환 상태다. snow는 겨울로, 모순 URL은 결정적으로 정규화한다.
 const seasonParam = q.get('season');
-const seasonName = ['spring', 'summer', 'autumn'].includes(seasonParam) ? seasonParam : 'summer';
+const requestedSeason = SEASON_IDS.includes(seasonParam) ? seasonParam : 'summer';
+const initialEnvironment = normalizeEnvironmentState({ season: requestedSeason, weather: requestedWeather });
+const seasonName = initialEnvironment.season;
+const weatherName = initialEnvironment.weather;
 
 // 렌더 모드: pbr(기본) | ink(수묵 NPR). ?mode=ink 또는 GUI에서 전환.
 const modeState = { mode: q.get('mode') === 'ink' ? 'ink' : 'pbr' };
@@ -495,14 +505,23 @@ if (!SHOT) {
   });
   fEnv.add(envState, 'time', ['dawn', 'day', 'sunset', 'night']).name('time of day')
     .onChange((v) => { env.setTime(v); nightGlowRef?.setTime(v); refreshAppearance(); audio?.setTime(v); });
-  fEnv.add(seasonState, 'name', ['spring', 'summer', 'autumn']).name('season')
-    .onChange((v) => { env.setSeason(v); refreshAppearance(); });
-  fEnv.add(weatherState, 'name', ['clear', 'rain', 'snow']).name('weather')
+  fEnv.add(seasonState, 'name', SEASON_IDS).name('season')
     .onChange((v) => {
-      weather.setWeather(v);
+      const next = resolveEnvironmentChange({ season: seasonState.name, weather: weatherState.name }, { season: v });
+      seasonState.name = next.season; weatherState.name = next.weather;
+      env.setSeason(next.season); weather.setWeather(next.weather);
+      reapplyEnvBase(); refreshAppearance(); audio?.setWeather(next.weather);
+      gui?.controllersRecursive().forEach((c) => c.updateDisplay());
+    });
+  fEnv.add(weatherState, 'name', WEATHER_IDS).name('weather')
+    .onChange((v) => {
+      const next = resolveEnvironmentChange({ season: seasonState.name, weather: weatherState.name }, { weather: v });
+      seasonState.name = next.season; weatherState.name = next.weather;
+      env.setSeason(next.season); weather.setWeather(next.weather);
       reapplyEnvBase();     // fog/bg 를 base 로 되돌린 뒤
       refreshAppearance();  // 모드 오버레이 + 날씨 대기 오버레이를 신선하게 재적용
-      audio?.setWeather(v); // 바람 세기·비 환경음 전환
+      audio?.setWeather(next.weather); // 바람 세기·비 환경음 전환
+      gui?.controllersRecursive().forEach((c) => c.updateDisplay());
     });
   const fSound = gui.addFolder('Sound');
   const soundState = { enabled: true, bgm: 1, ambience: 1 };
@@ -585,14 +604,15 @@ function surpriseMe() {
   if (PRESETS.choga) presetPairs.push(['choga', 1.6]);
   const preset = weightedPick(rng, presetPairs);
 
-  // 시간대(밤은 낮은 가중치), 계절, 날씨. (weather 인스턴스와 겹치지 않게 weatherPick 명명)
-  let time = weightedPick(rng, [['day', 4], ['sunset', 3], ['dawn', 2], ['night', 1.5]]);
-  const season = weightedPick(rng, [['autumn', 3], ['spring', 2.2], ['summer', 2]]);
-  let weatherPick = weightedPick(rng, [['clear', 4], ['snow', 2.2], ['rain', 1.8]]);
-
-  // 흉한 조합 회피 (가을+눈 킥 조합은 가중치상 자연 발생하도록 그대로 둔다).
-  if (weatherPick === 'rain' && time === 'dawn') time = 'day';    // rain+dawn 회피
-  if (weatherPick === 'rain' && time === 'night') time = 'sunset'; // 비오는 밤의 과함 완화
+  // Preserve the legacy parameter stream: environment now comes from an independent
+  // curated fork, but its former three draws are still consumed before geometry jitter.
+  weightedPick(rng, [['day', 4], ['sunset', 3], ['dawn', 2], ['night', 1.5]]);
+  weightedPick(rng, [['autumn', 3], ['spring', 2.2], ['summer', 2]]);
+  weightedPick(rng, [['clear', 4], ['snow', 2.2], ['rain', 1.8]]);
+  const environment = pickEnvironmentScene(mulberry32((seed ^ 0xe1710f) >>> 0));
+  const time = environment.ti;
+  const season = environment.se;
+  const weatherPick = environment.we;
 
   // 프리셋 적용 (P 내용 교체, 참조 유지).
   for (const k of Object.keys(P)) delete P[k];

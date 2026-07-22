@@ -2,9 +2,9 @@ import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { getWind } from './wind.js';
 
-// 계절 시스템 — 날씨 시뮬레이터의 "킥": 가을 단풍·봄 벚꽃·여름 신록.
+// 계절 시스템 — 가을 단풍·봄 벚꽃·여름 신록·겨울 휴면색.
 //   setupSeasons(envGroup, { layout }) → { setSeason(name, opts), update(dt), dispose() }
-//   name: 'spring' | 'summer' | 'autumn'   (겨울은 weather=snow 가 담당)
+//   name: 'spring' | 'summer' | 'autumn' | 'winter'
 //
 // 구현 방침:
 //  - 잎 색은 나무 재질(공유 MeshStandardMaterial)의 셰이더를 onBeforeCompile 로 패치해
@@ -23,7 +23,8 @@ const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 // 수종별 계절 목표 잎색 (index = SPECIES). pine(0)은 미사용(상록).
 const AUTUMN = [0x000000, 0xe8c33a, 0xc8452c, 0xa5762f, 0xcf6b4e]; // 은행 진노랑 / 단풍 주홍 / 잡목 갈금 / 벚 코랄
 const SPRING = [0x000000, 0x9cc24a, 0x8fbf52, 0x93c256, 0xf2bcd0]; // 신록 연둣빛 / 벚 연분홍
-const SEASON_AMT = { spring: 0.85, summer: 0, autumn: 0.92 };
+const WINTER = [0x000000, 0x776e4e, 0x6d5747, 0x665e4c, 0x745f57]; // 낙엽 진 뒤 남은 가지·마른 잎의 저채도
+const SEASON_AMT = { spring: 0.85, summer: 0, autumn: 0.92, winter: 0.96 };
 
 // 지면 곱연산 톤 (aGround 영역). 여름=중립. 가을은 마른 풀 금빛(#b99a55 계열)이
 // 분명히 읽히게, 봄은 여름과 구별되는 신록으로.
@@ -31,8 +32,9 @@ const GROUND_MUL = {
   spring: new THREE.Vector3(0.9, 1.1, 0.78),
   summer: new THREE.Vector3(1, 1, 1),
   autumn: new THREE.Vector3(1.24, 1.06, 0.46),
+  winter: new THREE.Vector3(1.04, 0.98, 0.86),
 };
-const GROUND_AMT = { spring: 0.7, summer: 0, autumn: 1.0 };
+const GROUND_AMT = { spring: 0.7, summer: 0, autumn: 1.0, winter: 0.82 };
 
 const RATE = 2.6;          // 색/지면 보간 속도 (1/s) — 대략 1.5s 안에 여름 경유 전환
 const PART_RATE = 2.4;     // 파티클 페이드 속도
@@ -92,7 +94,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
   let t = 0;
 
   function applyPalette(name) {
-    const src = name === 'autumn' ? AUTUMN : SPRING;
+    const src = name === 'autumn' ? AUTUMN : name === 'winter' ? WINTER : SPRING;
     // uCol[0..3] = 은행(1)·단풍(2)·잡목(3)·벚(4). Color→Vector3 은 채널을 직접 옮긴다
     // (Vector3.copy 는 .x/.y/.z 를 읽어 Color 를 그대로 넣으면 NaN 이 된다).
     for (let i = 0; i < 4; i++) {
@@ -105,9 +107,9 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
 
   function setSeason(name, opts = {}) {
     if (disposed) return;
-    if (!['spring', 'summer', 'autumn'].includes(name)) name = 'summer';
+    if (!['spring', 'summer', 'autumn', 'winter'].includes(name)) name = 'summer';
     pending = name;
-    partGoal = name === 'summer' ? 0 : 1;
+    partGoal = name === 'spring' || name === 'autumn' ? 1 : 0;
     litterGoal = name === 'autumn' ? 1 : 0;  // 낙엽 누적은 가을에만
     // 다랑이 논 계절 전파(자체 보간). shot 모드는 즉시 세팅.
     if (paddies) { if (opts.immediate) paddies.applyImmediate(name); else paddies.setSeason(name); }

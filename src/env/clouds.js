@@ -595,10 +595,10 @@ export function setupClouds(group, {
         // ceiling when the user rotates toward the sky. Keep the physical shadow source,
         // but hand visible close-up sky detail to the camera-relative horizon bank.
         const distance = cam.position.distanceTo(mesh.position);
-        // A 150 m plane still fills a 20° lens at more than one plane-width away.
-        // Fade by apparent size, reaching full opacity only once it subtends a
-        // modest sky feature instead of most of the telephoto frame.
-        const proximity = smoothstep(mesh.userData.w * 1.6, mesh.userData.w * 3.2, distance);
+        // A 150 m plane still fills a 20° lens from several plane-widths away.
+        // Keep it out until its apparent width is below roughly 20°, then restore
+        // it gradually below 12°. The horizon bank supplies the closer silhouettes.
+        const proximity = smoothstep(mesh.userData.w * 2.8, mesh.userData.w * 4.6, distance);
         mesh.material.opacity = base * (1 - g * OF_DEPTH) * proximity;
       }
     };
@@ -640,7 +640,7 @@ export function setupClouds(group, {
     az: 0.17 + i * Math.PI * 2 / HORIZON_CLOUD_COUNT,
     // All centres stay above the geometric horizon. The focus rise reveals that band;
     // depth testing still lets ridges and roofs naturally occlude the cloud bottoms.
-    elev: [0.032, 0.066, 0.048, 0.082][i % 4],
+    elev: [0.092, 0.126, 0.108, 0.142][i % 4],
     sx: [0.82, 1.06, 1.18, 0.94][i % 4],
     sy: [0.84, 1.06, 0.92, 1.14][(i + 1) % 4],
   }));
@@ -893,13 +893,13 @@ export function setupClouds(group, {
     });
     horizonMaterial.color.copy(_base).lerp(_warm, warmMix * 0.74);
     if (haze?.isColor) horizonMaterial.color.lerp(_haze, (1 - alt) * 0.20);
-    // Distant clouds sit against the unlit sky dome, so an ordinary [0..1] BasicMaterial
-    // collapses into the haze after ACES. Retain modest HDR headroom in daylight/sunset:
-    // the body reads white and the existing rim shader can bloom, while night stays dim.
-    const horizonLuminance = 0.78 + 0.32 * brightSky;
+    // Keep the low-sun body below white so the gold/silver HDR edge has tonal room
+    // to read as a lining instead of bleaching the whole cloud into one flat cutout.
+    // Midday remains bright; night still follows the shared dim multiplier.
+    const horizonLuminance = 0.72 + 0.22 * brightSky - 0.14 * lowSun;
     horizonMaterial.color.multiplyScalar(dim * horizonLuminance);
     const horizonRim = horizonMaterial.userData.cloudRim;
-    if (horizonRim) { horizonRim.color.copy(_rimColor); horizonRim.strength.value = rimStrength * 0.88; }
+    if (horizonRim) { horizonRim.color.copy(_rimColor); horizonRim.strength.value = rimStrength * 1.08; }
     horizonBank.userData.opNow = horizonBank.userData.op * (0.28 + 0.72 * smoothstep(0.72, 2.5, inten));
     horizonMaterial.opacity = horizonBank.userData.opNow;
     for (const ray of lightRays) {

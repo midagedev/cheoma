@@ -165,7 +165,7 @@ console.log('\n[② DoF 도착 오차 (focus 정착)]');
 console.log(`  dofOn=${hp.dofOn} amount=${hp.dofAmount} aperture=${hp.dofAperture} focus=${hp.dofFocus} targetDepth=${hp.dofTargetDepth} err=${hp.dofErr}m  ASSERT <0.01m: ${hp.dofErr != null && hp.dofErr < 0.01 ? 'PASS' : 'FAIL'}`);
 
 // ── ③ 앰비언트 매트릭스: 3상태 × {snow, rain, 낙엽, motes} ──
-// FOCUS 상태(랜딩 정착). 날씨=눈 → 눈 입자, 계절=가을 → 낙엽.
+// FOCUS 상태(랜딩 정착). 눈은 겨울, 비는 봄으로 이동하는 공개 환경 계약까지 함께 확인한다.
 await wait(500);
 async function measureAmbient(label) {
   const p = await probe();
@@ -177,23 +177,23 @@ async function measureAmbient(label) {
   return p;
 }
 console.log('\n[③ AMBIENT MATRIX]');
-// 눈 + 가을 세팅(EnvironmentDial 경유가 아니라 엔진 API 직접 — 결정론).
-await page.evaluate(() => { window.__engine.setSeason('autumn'); window.__engine.setWeather('snow'); });
-await wait(3200);   // 눈 레벨 램프 + 낙엽 partAmt
-const focusSnow = await measureAmbient('FOCUS · snow+autumn');
+// 눈은 겨울과 원자적으로 결합된다(EnvironmentDial 경유가 아니라 엔진 API 직접 — 결정론).
+await page.evaluate(() => window.__engine.setWeather('snow'));
+await wait(3200);   // 눈 레벨 램프
+const focusSnow = await measureAmbient('FOCUS · snow+winter');
 
 // 비로 전환.
 await page.evaluate(() => window.__engine.setWeather('rain'));
 await wait(3200);
-const focusRain = await measureAmbient('FOCUS · rain+autumn');
+const focusRain = await measureAmbient('FOCUS · rain+spring');
 
 // 둘러보기(村) 토글 — 집→부감 focus-out(DoF 완화).
 await page.click('.mode .seg:has(.glyph:text-is("村"))');
 await wait(2600);
-const aerialRain = await measureAmbient('AERIAL · rain+autumn');
+const aerialRain = await measureAmbient('AERIAL · rain+spring');
 await page.evaluate(() => window.__engine.setWeather('snow'));
 await wait(3000);
-const aerialSnow = await measureAmbient('AERIAL · snow+autumn');
+const aerialSnow = await measureAmbient('AERIAL · snow+winter');
 console.log('\n[③ 원경 정책 단언]');
 console.log(`  부감 DoF off(흐릿한 마을 금지): dofOn=${aerialSnow.dofOn}  ASSERT false: ${aerialSnow.dofOn === false ? 'PASS' : 'FAIL'}`);
 console.log(`  부감 카메라볼륨 입자>0: snow.vis=${aerialSnow.snow.vis} rain.vis=${aerialRain.rain.vis}  ASSERT: ${aerialSnow.snow.vis ? 'PASS' : 'FAIL'}`);
@@ -209,7 +209,7 @@ console.log(`  dofOn=${backClose.dofOn} amount=${backClose.dofAmount} err=${back
 // 리플레이(집 복귀 후 재조립) — 히어로 상태 동형 경로에서 조립 중 입자.
 await page.evaluate(() => window.__engine.village.replay()).catch(() => {});
 await wait(1400);
-const replayAsm = await measureAmbient('HERO/REPLAY (mid-assembly) · snow+autumn');
+const replayAsm = await measureAmbient('HERO/REPLAY (mid-assembly) · snow+winter');
 console.log(`    replay heroAsm=${replayAsm?.heroAsm} transitioning=${replayAsm?.transitioning} time=${replayAsm?.timeState} glowMats=${replayAsm?.glowMats}`);
 
 console.log(`\npageErrors=${pageErrs} consoleErrors=${consoleErrs}`);

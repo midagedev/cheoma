@@ -747,6 +747,11 @@ function tagRoles(M) {
     const m = M[key];
     if (m && m.isMaterial) m.userData.lodEnvelope = true;
   }
+  // Snow follows continuous skins. Small shared ridge/eave ornaments stay
+  // unpatched to bound shader variants; authored full-length tile rolls opt in below.
+  for (const key of ['tileFlat', 'thatch']) {
+    if (M[key]?.isMaterial) M[key].userData.snowSurface = true;
+  }
 }
 
 // ── 공유 재질 정규화(#149) ────────────────────────────────────────────────
@@ -823,6 +828,7 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
   });
   mat.userData.role = 'roof';   // 지붕면 신규 재질도 부위 태그(마을 기와 톤 변주, 태스크 #55)
   mat.userData.lodEnvelope = true;
+  mat.userData.snowSurface = true;
   return mat;
 }
 
@@ -838,6 +844,7 @@ export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
     bumpMap: tex, bumpScale,
   });
   mat.userData.role = 'roof';
+  mat.userData.snowSurface = true;
   return mat;
 }
 

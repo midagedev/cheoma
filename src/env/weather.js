@@ -3,6 +3,13 @@ import { makeRng } from '../rng.js';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
 import { createPetalField } from './petals.js';
+import {
+  patchSnowMaterial,
+  snowProfileForObject,
+  SNOW_ACCUMULATE_SECONDS,
+  SNOW_AMOUNT_MAX,
+  SNOW_MELT_SECONDS,
+} from './snow-material.js';
 
 // 날씨 시뮬레이터 (눈·비).
 //   setupWeather(scene, { layout, getBuilding, getGround })
@@ -23,7 +30,6 @@ import { createPetalField } from './petals.js';
 const TAU = Math.PI * 2;
 const WEATHER_SEED = 0x5e450; // 결정론 시드 (snow/rain 배치 재현)
 
-const SNOW_MAX = 0.82;   // 적설 최대 강도
 const SNOW_TAU = 1.4;    // 눈 파티클 등장/소멸 페이드 시상수(초) — 수 초에 걸쳐 나타남
 const RAIN_TAU = 0.9;    // 강우/젖음 페이드 시상수(초)
 const WET_FACTOR = 0.45; // 젖음 시 roughness 감쇠(원본*(1-0.45))
@@ -31,11 +37,8 @@ const WET_FACTOR = 0.45; // 젖음 시 roughness 감쇠(원본*(1-0.45))
 // 적설 "쌓임"은 파티클 등장과 분리한다. 눈발은 수 초 안에 흩날리지만, 지붕·기단·지면이
 // 희어지는 건 30~60초에 걸쳐 서서히 진행돼야 무드가 산다(team-lead 지시). accumLevel(0..1)이
 // 그 진행도이며, 선형 램프로 오른다(이징은 앞이 급해 "즉시 하얘짐"으로 읽힘).
-const ACCUM_UP = 46;     // 0→1 쌓이는 시간(초)
-const ACCUM_DOWN = 16;   // 1→0 녹는 시간(초, 좀 더 빠르게)
 const WET_DOWN = 3.0;    // 마당 젖음 회복 시간(초)
 
-const SNOW_TINT = new THREE.Color(0xf3f6fa);   // 적설 색
 const GROUND_SNOW = new THREE.Color(0xeaeef4); // 지면 적설 톤
 const RAIN_FOG = new THREE.Color(0x39424e);    // 비 대기 색
 const SNOW_FOG = new THREE.Color(0xccd2da);    // 눈 대기 색(밝은 흐림)
@@ -117,86 +120,10 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       for (const m of mats) {
         if (!m || !m.isMeshStandardMaterial) continue;
         if (patched.has(m.uuid)) continue;
-        patchSnow(m);
+        patchSnowMaterial(m, snowUniform, { profile: snowProfileForObject(o, m) });
         patched.set(m.uuid, { mat: m, roughness: m.roughness });
       }
     });
-  }
-
-  function patchSnow(m) {
-    if (m.userData && m.userData.__snowPatched) return;
-    m.userData = m.userData || {};
-    m.userData.__snowPatched = true;
-    const prev = m.onBeforeCompile;
-    m.onBeforeCompile = (shader, r) => {
-      if (prev) prev(shader, r);
-      shader.uniforms.uSnowAmount = snowUniform; // 공유 참조
-      // 양면(DoubleSide) 셸인지 컴파일 시 확정해 GLSL 상수로 주입. 지붕면은 전부 DoubleSide.
-      const twoSided = m.side === THREE.DoubleSide ? '1.0' : '0.0';
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vSnowWN;\nvarying vec3 vSnowWP;')
-        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvSnowWN = mat3(modelMatrix) * objectNormal;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSnowWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vSnowWN;\nvarying vec3 vSnowWP;\nuniform float uSnowAmount;\nfloat snowCov = 0.0;\nfloat snowFix = 0.0;')
-        // 라이팅 노멀 교정: 양면 지붕 셸 중 정점 노멀이 아래로 뒤집힌 면(궁·절 우측·후면 지붕면
-        // — computeVertexNormals 와인딩 탓)은 위 향한 면으로 라이팅되게 노멀을 세운다. 이렇게
-        // 해야 흰 적설 diffuse 에 어두운 빛이 곱해져 남색으로 남던 문제가 라이팅 단계에서 해소되고
-        // 주간=밝게/야간=달빛대로 자연히 셰이딩된다. 눈 올 때만·아래 향한 지붕면만 → 맑음/벽 무영향.
-        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        {
-          vec3 swn = normalize(vSnowWN);
-          float fixup = ${twoSided} * step(swn.y, -0.05)
-                      * smoothstep(0.30, 0.55, abs(swn.y))
-                      * smoothstep(0.0, 0.20, uSnowAmount);
-          vec3 vUp = normalize((viewMatrix * vec4(-swn, 0.0)).xyz);
-          normal = normalize(mix(normal, vUp, fixup));
-          snowFix = fixup; // 그늘 리프트에서 재사용(뒤집힌 눈 덮인 지붕면 기하 게이트)
-        }`)
-        .replace('#include <color_fragment>', `#include <color_fragment>
-        {
-          vec3 wn = normalize(vSnowWN);
-          // 양면 셸(지붕면)은 computeVertexNormals 와인딩에 따라 정점 노멀이 아래로 뒤집힐 수
-          // 있다(궁·절 우측·후면 지붕면 등). 그런 면은 |y|로 위 향함을 판정해 부호와 무관하게
-          // 적설이 걸리게 한다. 단면(FrontSide) 재질은 부호 그대로 써서 처마 밑면·서까래
-          // 아랫면 등 진짜 아래 향한 면에는 눈이 앉지 않게 한다.
-          float ny = mix(wn.y, abs(wn.y), ${twoSided});
-          // 쌓임이 진행될수록 눈이 걸리는 경계가 내려간다: 처음엔 평평한 윗면만, 나중엔
-          // 경사진 지붕면·기왓골까지 덮인다 → "서서히 쌓이는" 시간감이 노멀 기준으로 읽힌다.
-          float thresh = mix(0.72, 0.20, uSnowAmount);
-          float up = smoothstep(thresh - 0.10, thresh + 0.18, ny);
-          // 기왓골: 월드 좌표 저주파 줄무늬로 골과 마루의 적설 편차(스타일라이즈).
-          float ridge = 0.5 + 0.5 * sin(vSnowWP.x * 3.0 + vSnowWP.z * 0.6);
-          float blotch = 0.55 + 0.45 * sin(vSnowWP.x * 1.3) * sin(vSnowWP.z * 1.7);
-          // 두꺼운 "바닥눈"은 실제로 위 향한 수평면(부호 있는 wn.y)에만 — 뒤집힌/아래 향한
-          // 양면 셸이 바닥눈으로 오인돼 밑면이 하얘지는 것 방지. 경사 지붕면은 골 편차 유지.
-          float flatFace = smoothstep(0.80, 0.97, wn.y);
-          float slopeCov = (0.72 + 0.28 * blotch) * (0.86 + 0.14 * ridge); // 얇을 땐 골 편차 유지
-          float floorCov = 0.90 + 0.10 * blotch;                            // 수평면: 두껍게
-          // 눈이 두꺼워질수록(thick) 골/얼룩 편차를 죽여 균일하게 덮는다 → 두꺼운 눈이 기왓골
-          // corrugation 을 메워, 그늘진 면이 "얇은 눈+골 줄무늬"가 아니라 균일한 눈면으로 읽힘.
-          float thick = smoothstep(0.35, 0.85, uSnowAmount);
-          slopeCov = mix(slopeCov, 0.98, thick * 0.85);
-          float cov = up * mix(slopeCov, floorCov, flatFace);
-          cov *= smoothstep(0.0, 0.14, uSnowAmount); // 극초기엔 티끌도 없음
-          cov = clamp(cov, 0.0, 1.0);
-          snowCov = cov;
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.96, 0.98), cov);
-        }`)
-        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        roughnessFactor = mix(roughnessFactor, 0.96, snowCov);`)
-        .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-        metalnessFactor = mix(metalnessFactor, 0.0, snowCov);`)
-        // 그늘진 눈면 미드톤 리프트: 노멀 교정 대상(뒤집혀 어둡게 셰이딩되는 눈 덮인 지붕면 —
-        // 동측 하합각 등)만 곱연산으로 살짝 밝혀 전면 눈과의 밝기 이질감(약 40%→15~20%)을 줄인다.
-        // 기하 게이트(snowFix)라 색공간·라이팅 무관하게 그 면만 정확히 잡고, 밝은 전면·벽은 무변화,
-        // 곱연산+국소라 야간 무드 유지(화이트아웃 없음). post 톤매핑이 뒤에서 다시 압축.
-        .replace('#include <dithering_fragment>', `{
-          gl_FragColor.rgb *= 1.0 + snowFix * snowCov * 1.05;
-        }
-        #include <dithering_fragment>`);
-    };
-    m.needsUpdate = true;
   }
 
   function applyWetness() {
@@ -268,7 +195,8 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       // 그 진행도로 고정(시간 경과 비교 컷용).
       accumLevel = snowTarget > 0 ? (opts.accum != null ? opts.accum : 1) : 0;
       wetLevel = rainTarget;
-      snowUniform.value = accumLevel * SNOW_MAX;
+      snowUniform.value = accumLevel * SNOW_AMOUNT_MAX;
+      env?.setSnowAccumulation?.(accumLevel);
       applyWetness();
       applyGround();
     }
@@ -276,7 +204,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
 
   function onBuildingChanged() {
     collectMaterials();
-    snowUniform.value = accumLevel * SNOW_MAX; // 새 재질에 현재 적설 흰틴트 즉시 반영
+    snowUniform.value = accumLevel * SNOW_AMOUNT_MAX; // 새 재질에 현재 적설 흰틴트 즉시 반영
     applyWetness();
   }
 
@@ -299,11 +227,12 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     if (pinnedAccum != null) {
       accumLevel = pinnedAccum;
     } else if (snowTarget > 0) {
-      accumLevel = Math.min(1, accumLevel + dt / ACCUM_UP);
+      accumLevel = Math.min(1, accumLevel + dt / SNOW_ACCUMULATE_SECONDS);
     } else {
-      accumLevel = Math.max(0, accumLevel - dt / ACCUM_DOWN);
+      accumLevel = Math.max(0, accumLevel - dt / SNOW_MELT_SECONDS);
     }
-    snowUniform.value = accumLevel * SNOW_MAX;
+    snowUniform.value = accumLevel * SNOW_AMOUNT_MAX;
+    env?.setSnowAccumulation?.(accumLevel);
 
     // 마당 젖음: 비 오는 동안 서서히 젖고, 개면 서서히 마른다.
     const wetTarget = rainTarget;
@@ -345,7 +274,12 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // main.js 무수정으로 촬영 재현성을 얻기 위해 weather 모듈이 직접 window 에 노출한다.
   function setAccum(v) {
     pinnedAccum = v;
-    if (v != null) { accumLevel = v; snowUniform.value = accumLevel * SNOW_MAX; applyGround(); }
+    if (v != null) {
+      accumLevel = v;
+      snowUniform.value = accumLevel * SNOW_AMOUNT_MAX;
+      env?.setSnowAccumulation?.(accumLevel);
+      applyGround();
+    }
   }
   let weatherDebug = null;
   if (typeof window !== 'undefined') {
@@ -375,6 +309,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     const g = getGround && getGround();
     if (g && groundOrig) g.material.color.copy(groundOrig);
     snowUniform.value = 0;
+    env?.setSnowAccumulation?.(0);
     for (const sys of [snow, rain]) {
       scene.remove(sys.points || sys.lines);
       (sys.points || sys.lines).geometry.dispose();

@@ -72,7 +72,7 @@ const DICT = {
     env_flow_tip: '시간 흐르기 — 때·계절이 저절로 흐른다',
     env_flow_on_tip: '시간 흐름 멈추기',
     time_dawn: '아침', time_day: '낮', time_sunset: '석양', time_night: '밤',
-    season_spring: '봄', season_summer: '여름', season_autumn: '가을',
+    season_spring: '봄', season_summer: '여름', season_autumn: '가을', season_winter: '겨울',
     weather_clear: '맑음', weather_rain: '비', weather_snow: '눈',
     // ── 마을 모드 ──
     mode_house: '집 보기', mode_village: '둘러보기',
@@ -169,7 +169,7 @@ const DICT = {
     env_flow_tip: 'Let time flow — hours and seasons drift on',
     env_flow_on_tip: 'Stop the flow of time',
     time_dawn: 'Dawn', time_day: 'Day', time_sunset: 'Sunset', time_night: 'Night',
-    season_spring: 'Spring', season_summer: 'Summer', season_autumn: 'Autumn',
+    season_spring: 'Spring', season_summer: 'Summer', season_autumn: 'Autumn', season_winter: 'Winter',
     weather_clear: 'Clear', weather_rain: 'Rain', weather_snow: 'Snow',
     // ── Village mode ──
     mode_house: 'House', mode_village: 'Explore',

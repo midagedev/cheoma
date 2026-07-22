@@ -981,7 +981,9 @@ try {
       else if (!waveObserved) buildFrames++;
       const waveState = engine.village.debugWave?.();
       if (!environmentSync && waveState?.active && waveState.incoming) {
-        const probe = { time: 'night', season: 'winter', weather: 'rain' };
+        // Exercise a complete winter scene without asking the public API to preserve
+        // an incoherent winter-rain pair (the environment contract resolves that to spring rain).
+        const probe = { time: 'night', season: 'winter', weather: 'snow' };
         engine.setTime(probe.time);
         engine.setSeason(probe.season);
         engine.setWeather(probe.weather);

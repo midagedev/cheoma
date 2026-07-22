@@ -12,7 +12,8 @@ import {
   PRESETS, buildBuilding, computeLayout, disposeBuilding, playAssembly, tofuBob, tofuScale,
 } from '../../../src/api/building.js';
 import {
-  setupEnvironment, createFocusRing, setupNightGlow, setupWeather,
+  setupEnvironment, createFocusRing, normalizeEnvironmentState, resolveEnvironmentChange,
+  setupNightGlow, setupWeather,
 } from '../../../src/api/environment.js';
 import {
   VILLAGE_LENS,
@@ -426,11 +427,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // ---------- 초기 씬 적용 ----------
   function applyConfig(cfg, { animate = false } = {}) {
+    const coherentEnvironment = normalizeEnvironmentState(cfg);
     state.preset = cfg.preset;
     state.time = cfg.time;
     state.sunsetLook = cfg.sunsetLook || 'gold';
-    state.season = cfg.season;
-    state.weather = cfg.weather;
+    state.season = coherentEnvironment.season;
+    state.weather = coherentEnvironment.weather;
     state.canMerge = false;
     P = cfg.params;
 
@@ -1520,6 +1522,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       emit('villageMode', true); onDone?.(); return;
     }
     village.selected = heroId;
+    setZoomRegime('lock');                              // 눈높이→문 상향 구도를 OrbitControls 극각 상한에서 보존
     setPostFocus(true);                                 // 종가 클로즈업 랜딩 → rim/flare ON
     const g = village.handle.showHeroDetail(heroId);   // 풀디테일 오버레이(원본 종가 가림)
     if (g) warmShaders(g);   // 종가 컴파운드 오버레이 서브트리만 프리컴파일(#117) — 랜딩 조립 첫 렌더 컴파일 스톨 흡수(타이틀 마스킹 구간)
@@ -1535,9 +1538,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
     heroSunAz = rotY + Math.PI + 25 * DEG;   // 배면 +25° 사선 역광(정배면보다 처마·측면 실루엣 림이 예쁨)
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
-    // 시선점은 문 높이를 지키고 3°의 얕은 마당 시점에서 처마와 석양 하늘을 함께 담는다.
-    // 일반 필지 planParcelFocus와 같은 고도라 종가 랜딩→임의 집 전환에도 시점이 튀지 않는다.
-    const el = 3 * DEG;
+    // 시선점은 문 인방과 처마 사이를 지키되 카메라는 마당의 사람 눈높이에 둔다. 필지 크기와
+    // 망원 dolly가 커져도 부감으로 떠오르지 않아, 종가 랜딩→일반 집 전환이 같은 저각을 유지한다.
     // 더 먼 자리에서 좁은 화각으로 같은 화면 점유율을 유지해 처마·산세가 망원으로 압축된다.
     const heroDistance = dollyDistanceForFov(
       1.85,
@@ -1547,8 +1549,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const r = heroDistance * maxDim;
     const finalTarget = pr.cameraFraming.target.clone();
     const plannedXZ = pr.cameraFraming.position.clone().sub(finalTarget).setY(0).normalize();
-    const off = plannedXZ.multiplyScalar(r * Math.cos(el));
-    off.y = r * Math.sin(el);
+    const off = plannedXZ.multiplyScalar(r);
+    off.y = pr.cameraFraming.position.y - finalTarget.y;
     const finalPosition = finalTarget.clone().add(off);
     const finalFov = VILLAGE_LENS.hero.fov;
 
@@ -1878,6 +1880,29 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageWave', { phase: 'done' });
   }
 
+  function commitSeason(name, opts = {}) {
+    state.season = name;
+    bumpShadow(1800);
+    env.setSeason(name, opts);
+    refreshAtmosphere();
+    if (forEachPresentedVillageHandle((handle) => handle.setSeason(name, opts))) reapplyVillageFog();
+    focusRing.setSeason?.(name, opts);
+  }
+
+  function commitWeather(name) {
+    state.weather = name;
+    bumpShadow(1800);
+    if (forEachPresentedVillageHandle((handle) => handle.setWeather(name))) {
+      reapplyEnvBase();
+      reapplyVillageFog();
+    } else {
+      reapplyEnvBase();
+      refreshAtmosphere();
+    }
+    weatherRef?.setWeather(name);
+    audio?.setWeather(name);
+  }
+
   // ---------- 컨트롤러 API ----------
   const controller = {
     on, emit,
@@ -1975,28 +2000,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       return state.sunsetLook;
     },
     setSeason(name, opts = {}) {
-      state.season = name;
-      bumpShadow(1800);   // #140-A 계절 전환 크로스페이드 동안 그림자 갱신(잎·개화 캐스터 정합)
-      env.setSeason(name, opts);
-      refreshAtmosphere();
-      if (forEachPresentedVillageHandle((handle) => handle.setSeason(name, opts))) reapplyVillageFog();
-      focusRing.setSeason?.(name, opts);  // 근접 링 풀·반딧불 계절 연동(결정론 캡처는 immediate까지 전달)
+      const next = resolveEnvironmentChange(state, { season: name });
+      commitSeason(next.season, opts);
+      if (next.weather !== state.weather) commitWeather(next.weather);
       emit('state', { ...state });
     },
     setWeather(name) {
-      state.weather = name;
-      bumpShadow(1800);   // #140-A 날씨 전환 크로스페이드 동안 그림자 갱신
-      // 마을 모드: 건물 종속 FX(처마 낙수 등)는 building.visible=false 로 자동 억제되므로
-      // 안전하게 weatherRef 를 동시 업데이트하여 하늘 입자를 구동합니다.
-      if (forEachPresentedVillageHandle((handle) => handle.setWeather(name))) {
-        reapplyEnvBase();
-        reapplyVillageFog();
-      } else {
-        reapplyEnvBase();
-        refreshAtmosphere();
-      }
-      weatherRef?.setWeather(name);
-      audio?.setWeather(name);
+      const next = resolveEnvironmentChange(state, { weather: name });
+      if (next.season !== state.season) commitSeason(next.season);
+      commitWeather(next.weather);
       emit('state', { ...state });
     },
 

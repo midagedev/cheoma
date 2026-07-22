@@ -10,7 +10,7 @@
   import Hero from './components/Hero.svelte';
   import SealLabel from './components/SealLabel.svelte';
   import ActionBar from './components/ActionBar.svelte';
-  import EnvironmentDial, { weatherOkForSeason } from './components/EnvironmentDial.svelte';
+  import EnvironmentDial from './components/EnvironmentDial.svelte';
   import ParamPanel from './components/ParamPanel.svelte';
   import ModeToggle from './components/ModeToggle.svelte';
   import ContextPanel from './components/ContextPanel.svelte';
@@ -19,6 +19,10 @@
   import CinematicOverlay from './components/CinematicOverlay.svelte';
   import { exportGLB, analyzeExport, filenameFor, triggerDownload } from '../../src/api/export.js';
   import { t } from './lib/i18n.svelte.js';
+  import {
+    SEASON_IDS,
+    normalizeEnvironmentState,
+  } from '../../src/api/environment.js';
 
   let container;
   let engine = null;
@@ -38,11 +42,11 @@
   // ---------- 오토로테이션("시간 흐르기" #64) ----------
   // 활성 시 FLOW_INTERVAL 마다 시간대를 한 칸 전진(dawn→day→sunset→night→dawn…). 전환은 기존
   // engine.setTime 경로만 호출 → #50 환경 크로스페이드가 자동으로 미니 타임랩스처럼 이어준다.
-  // 하루가 한 바퀴(night→dawn) 돌 때 계절도 한 칸 전진(봄→여름→가을→봄, 겨울 없음),
-  // 그 계절 전진으로 눈이 비-가을에 걸리면 맑음으로 정리(weatherOkForSeason, 그 외 날씨는 유지).
+  // 하루가 한 바퀴(night→dawn) 돌 때 계절도 한 칸 전진. 새 계절과 맞지 않는 강수는
+  // 순수 환경 계약으로 맑음 처리되어 여름 눈·겨울비 같은 모순 상태를 만들지 않는다.
   const FLOW_INTERVAL_MS = 10000;                              // 상수 10초
   const FLOW_TIME_CYCLE = ['dawn', 'day', 'sunset', 'night'];
-  const FLOW_SEASON_CYCLE = ['spring', 'summer', 'autumn'];    // 겨울 없음(#58 계절 축과 동일)
+  const FLOW_SEASON_CYCLE = SEASON_IDS;
   const FLOW_STALL_S = 1.0;    // 프레임 간격이 이보다 길면 스톨(초기 셰이더 컴파일·탭 비활성)로 보고 흐름 시간에서 제외
   let flowing = $state(false);
   let flowRaf = null;                                         // 흐름 클록 rAF 핸들
@@ -286,6 +290,9 @@
     if (url.sunsetLook) { cfg.sunsetLook = url.sunsetLook; overrides.sunsetLook = true; }
     if (url.season) { cfg.season = url.season; overrides.season = true; }
     if (url.weather) { cfg.weather = url.weather; overrides.weather = true; }
+    const coherentEnvironment = normalizeEnvironmentState(cfg);
+    cfg.season = coherentEnvironment.season;
+    cfg.weather = coherentEnvironment.weather;
     ui.seed = url.seed;
 
     // 오토로테이션 복원: shot 에서는 항상 비활성(결정론). flowsec 은 검증용 간격 오버라이드.
@@ -485,15 +492,29 @@
   // 환경 적용 원자 연산(엔진 호출 + 오버라이드 표시). 수동 setter·오토로테이션이 공유.
   function applyTime(v) { engine.setTime(v); overrides.time = true; }
   function applySunsetLook(v) { engine.setSunsetLook(v); overrides.sunsetLook = true; }
-  function applySeason(v) { engine.setSeason(v); overrides.season = true; }
-  function applyWeather(v) { engine.setWeather(v); overrides.weather = true; }
+  function applySeason(v) {
+    const before = engine.getState();
+    engine.setSeason(v); overrides.season = true;
+    if (engine.getState().weather !== before.weather) overrides.weather = true;
+  }
+  function applyWeather(v) {
+    const before = engine.getState();
+    engine.setWeather(v); overrides.weather = true;
+    if (engine.getState().season !== before.season) overrides.season = true;
+  }
 
   // 수동 조작(다이얼 드래그·리롤은 onTime/onSeason/onWeather 로 이 경로를 탄다) → 타이머만 리셋,
   // 모드는 유지(흐르는 중이면 다음 전진까지 다시 10초, 꺼져 있으면 무동작).
   function setTime(v) { applyTime(v); syncUrl(); scheduleFlowTick(); }
   function setSunsetLook(v) { applySunsetLook(v); syncUrl(); scheduleFlowTick(); }
-  function setSeason(v) { applySeason(v); syncUrl(); scheduleFlowTick(); }
-  function setWeather(v) { applyWeather(v); syncUrl(); scheduleFlowTick(); }
+  function setSeason(v) {
+    applySeason(v);
+    syncUrl(); scheduleFlowTick();
+  }
+  function setWeather(v) {
+    applyWeather(v);
+    syncUrl(); scheduleFlowTick();
+  }
 
   // 흐름 클록(rAF 기반) — "실제 표시된" 프레임 간격만 적산해 interval 마다 정확히 한 칸 전진한다.
   // setTimeout 은 소프트웨어GL 초기 셰이더 컴파일이 메인스레드를 수 초 블록하는 동안에도 wall-clock
@@ -530,7 +551,6 @@
       if (ni === 0) { // 하루 한 바퀴 완주(night→dawn) → 계절 한 칸 전진
         const nextSeason = FLOW_SEASON_CYCLE[(FLOW_SEASON_CYCLE.indexOf(st.season) + 1) % FLOW_SEASON_CYCLE.length];
         applySeason(nextSeason);
-        if (!weatherOkForSeason(st.weather, nextSeason)) applyWeather('clear');
       }
       syncUrl();
     } finally {
