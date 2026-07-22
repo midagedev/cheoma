@@ -18,7 +18,8 @@ const pass = (condition, message, detail = '') => {
 
 function imageStats(buffer) {
   const png = PNG.sync.read(buffer);
-  let luma = 0, chroma = 0, dark = 0, light = 0, count = 0;
+  const values = [];
+  let luma = 0, chroma = 0, dark = 0, light = 0, upperLight = 0, upperCount = 0, count = 0;
   for (let y = 0; y < png.height; y += 3) for (let x = 0; x < png.width; x += 3) {
     const i = (y * png.width + x) * 4;
     const r = png.data[i], g = png.data[i + 1], b = png.data[i + 2];
@@ -27,9 +28,23 @@ function imageStats(buffer) {
     chroma += Math.max(r, g, b) - Math.min(r, g, b);
     dark += v < 82 ? 1 : 0;
     light += v > 175 ? 1 : 0;
+    if (y < png.height * 0.25) {
+      upperLight += v > 175 ? 1 : 0;
+      upperCount++;
+    }
+    values.push(v);
     count++;
   }
-  return { luma: luma / count, chroma: chroma / count, dark: dark / count, light: light / count };
+  values.sort((a, b) => a - b);
+  const percentile = (p) => values[Math.min(values.length - 1, Math.floor(values.length * p))];
+  return {
+    luma: luma / count,
+    chroma: chroma / count,
+    dark: dark / count,
+    light: light / count,
+    upperLight: upperLight / upperCount,
+    tonalSpan: percentile(0.95) - percentile(0.05),
+  };
 }
 
 function meanDifference(aBuffer, bBuffer) {
@@ -241,9 +256,13 @@ try {
   pass(difference > 28 && inkStats.chroma < pbrStats.chroma * 0.65,
     'ink frame is visually distinct and substantially desaturated',
     `diff=${difference.toFixed(1)} chroma ${pbrStats.chroma.toFixed(1)}→${inkStats.chroma.toFixed(1)}`);
-  pass(inkStats.dark > 0.025 && inkStats.light > 0.08 && inkStats.luma > 105 && inkStats.luma < 225,
+  // Paper-white negative space belongs in the distant upper field, while the full image
+  // must retain a broad ink-to-paper range. A translucent atmosphere wedge elsewhere
+  // must not be allowed to satisfy the negative-space budget by itself.
+  pass(inkStats.dark > 0.025 && inkStats.upperLight > 0.08 && inkStats.tonalSpan > 95
+    && inkStats.luma > 105 && inkStats.luma < 225,
     'ink frame preserves 농묵, readable midtones, and paper 여백 instead of flattening',
-    `luma=${inkStats.luma.toFixed(1)} dark=${(inkStats.dark * 100).toFixed(1)}% light=${(inkStats.light * 100).toFixed(1)}%`);
+    `luma=${inkStats.luma.toFixed(1)} dark=${(inkStats.dark * 100).toFixed(1)}% upper-light=${(inkStats.upperLight * 100).toFixed(1)}% span=${inkStats.tonalSpan.toFixed(1)} global-light=${(inkStats.light * 100).toFixed(1)}%`);
 
   // The same ink state must survive the product's telephoto house transition. This capture is
   // intentionally separate from the aerial statistics so both landscape and architecture can be reviewed.
@@ -346,6 +365,7 @@ try {
   if (failures.length) throw new Error(`ink app failed: ${failures.join('; ')}`);
   console.log(`INK APP: PASS (temporary visual evidence ${shotDir})`);
 } finally {
+  await Promise.allSettled((browser?.contexts() || []).map((context) => context.close()));
   await browser?.close();
   await server.close();
   await rm(cacheDir, { recursive: true, force: true });

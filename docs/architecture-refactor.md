@@ -168,6 +168,10 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
 - 소동물·필지 앰비언스·꽃잎/낙엽은 절대 `camera.position.y` 대신 `controls.target`의 지형 높이에 대한
   상대 고도와 시선 거리를 공유한다. 지상 개체는 현재 시선 셀 주변만 갱신하고 원경에서는 mesh와 CPU
   시뮬레이션을 함께 쉰다. 하늘의 새 떼와 시간대·fog 전이는 부감에서도 유지한다.
+- 수평 `edge-mist-ring`은 geometry·재질·텍스처 identity를 유지한 채 실제 렌더 카메라의 local -Z
+  하향 성분만으로 authored opacity를 매 draw 다시 합성한다. 10°까지 원래 운해를 보존하고 18°에서 0이
+  되며, 이전 프레임 opacity에 누적 곱하지 않는다. 별도 수직 `ridge-mist`, 지형 haze, 구름 그림자는 이
+  가중치를 공유하지 않는다.
 - 광각↔망원 전환의 보상 dolly가 실제 카메라 거리를 바꾸더라도 생활·입자 LOD는
   `src/camera/optics.js`의 화면 등가 거리로 판단한다. 같은 화면 크기의 소동물·모트·낙엽이 망원 전환만으로
   일찍 꺼지지 않으며, 실제 거리와 등가 거리는 debug 상태에서 구분한다.

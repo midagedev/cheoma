@@ -1,5 +1,6 @@
 import { smoothstep } from '../core/math/scalar.js';
 import { disposeObjectTree } from '../core/three-resources.js';
+import { edgeMistViewWeight } from './edge-mist-view.js';
 import * as THREE from 'three';
 
 // 산 구름·물안개 + 흐르는 구름 그림자 (태스크 #51 축② → #68 재설계로 형태·대응 강화).
@@ -22,7 +23,7 @@ import * as THREE from 'three';
 const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const SHOT = q.get('shot') === '1';
 const CLOUDS_ON = q.get('clouds') !== '0';
-
+const NOOP_BEFORE_RENDER = () => {};
 
 // 지형/지면 재질이 공유하는 구름 그림자 uniform. index.js 가 만들어 buildTerrain 과 setupClouds
 // 양쪽에 넘긴다(물 uniform 공유 패턴과 동일). 값은 setupClouds.update 가 매 프레임 갱신.
@@ -412,19 +413,37 @@ export function buildEdgeMistRing(edge, {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'edge-mist-ring';
   mesh.renderOrder = 2;
+  mesh.userData.viewWeight = 1;
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    // Camera looks down its local -Z axis. Reading matrixWorld directly avoids a
+    // temporary Vector3 in this draw callback.
+    const elements = camera?.matrixWorld?.elements;
+    const weight = edgeMistViewWeight(elements ? -elements[9] : NaN);
+    mesh.userData.viewWeight = weight;
+    mat.opacity = opacity * weight;
+  };
   const _c = new THREE.Color();
   const _white = new THREE.Color(0xffffff);
-  let disposed = false;
+  let active = true;
+  let resourcesDisposed = false;
   function update(fogColor) {
-    if (disposed) return;
+    if (!active) return;
     if (fogColor) { _c.copy(fogColor).lerp(_white, 0.11); mat.color.copy(_c); }
   }
+  function deactivate() {
+    if (!active) return;
+    active = false;
+    mesh.onBeforeRender = NOOP_BEFORE_RENDER;
+    mesh.userData.viewWeight = 0;
+    mat.opacity = 0;
+  }
   function dispose() {
-    if (disposed) return;
-    disposed = true;
+    if (resourcesDisposed) return;
+    resourcesDisposed = true;
+    deactivate();
     disposeObjectTree(mesh);
   }
-  return { mesh, update, dispose };
+  return { mesh, update, deactivate, dispose };
 }
 
 // mistBillboards(기본 true): 산허리 물안개 빌보드 2장 생성 여부. 마을은 비정형 외곽선을 따르는
@@ -441,12 +460,13 @@ export function buildEdgeMistRing(edge, {
 export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, seed = 7 } = {}) {
   const root = new THREE.Group();
   root.name = 'ridge-mist';
-  if (!anchors.length) return { group: root, update() {}, dispose() {} };
+  if (!anchors.length) return { group: root, update() {}, deactivate() {}, dispose() {} };
   let s = seed >>> 0;
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   const tex = makeCloudTexture(seed);
   const _up = new THREE.Vector3(0, 1, 0);
   const mats = [];
+  const meshes = [];
   for (const a of anchors) {
     const mat = new THREE.MeshBasicMaterial({
       map: tex, color: 0xd6dde4, transparent: true, opacity: (a.op != null ? a.op : opacity) * (0.85 + rnd() * 0.3),
@@ -462,19 +482,27 @@ export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, 
     };
     root.add(mesh);
     mats.push(mat);
+    meshes.push(mesh);
   }
   const _c = new THREE.Color(), _white = new THREE.Color(0xffffff);
-  let disposed = false;
+  let active = true;
+  let resourcesDisposed = false;
   function update(fogColor) {
-    if (!disposed && fogColor) { _c.copy(fogColor).lerp(_white, 0.14); for (const m of mats) m.color.copy(_c); }
+    if (active && fogColor) { _c.copy(fogColor).lerp(_white, 0.14); for (const m of mats) m.color.copy(_c); }
+  }
+  function deactivate() {
+    if (!active) return;
+    active = false;
+    for (const mesh of meshes) mesh.onBeforeRender = NOOP_BEFORE_RENDER;
   }
   function dispose() {
-    if (disposed) return;
-    disposed = true;
+    if (resourcesDisposed) return;
+    resourcesDisposed = true;
+    deactivate();
     disposeObjectTree(root);
     root.clear();
   }
-  return { group: root, update, dispose };
+  return { group: root, update, deactivate, dispose };
 }
 
 // mistBillboards(기본 true): 산허리 물안개 빌보드 2장 생성 여부 — 마을은 전용 운해 링·능선 물안개가

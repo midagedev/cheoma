@@ -79,6 +79,101 @@ try {
       && fauna?.groundWeight <= 0.002;
   }, null, { timeout });
 
+  const edgeMistContract = runFocusScenario ? await page.evaluate(async (moduleUrl) => {
+    const { edgeMistViewWeight } = await import(moduleUrl);
+    const engine = window.__engine;
+    const root = engine.village.exportRoot();
+    const ring = root.getObjectByName('edge-mist-ring');
+    const ridge = root.getObjectByName('ridge-mist');
+    if (!ring || !ridge?.children?.length) return { available: false };
+    window.__edgeMistTestRef = ring;
+    window.__ridgeMistTestRef = ridge.children[0];
+    const camera = engine.camera;
+    const savedQuaternion = camera.quaternion.toArray();
+    const savedCameraLayers = camera.layers.mask;
+    const savedRingLayers = ring.layers.mask;
+    const savedFrustumCulled = ring.frustumCulled;
+    camera.layers.set(31);
+    ring.layers.set(31);
+    ring.frustumCulled = false;
+    const identity = {
+      geometry: ring.geometry.uuid,
+      material: ring.material.uuid,
+      map: ring.material.map?.uuid,
+    };
+    const renderAt = (degrees, azimuth) => {
+      const horizontal = 100;
+      camera.lookAt(
+        camera.position.x + Math.cos(azimuth) * horizontal,
+        camera.position.y - Math.tan(degrees * Math.PI / 180) * horizontal,
+        camera.position.z + Math.sin(azimuth) * horizontal,
+      );
+      camera.updateMatrixWorld(true);
+      engine.renderer.render(engine.scene, camera);
+      const direction = camera.getWorldDirection(camera.position.clone());
+      return {
+        degrees,
+        azimuth,
+        opacity: ring.material.opacity,
+        viewWeight: ring.userData.viewWeight,
+        forwardY: direction.y,
+        matrixForwardY: -camera.matrixWorld.elements[9],
+        expectedWeight: edgeMistViewWeight(direction.y),
+        calls: engine.renderer.info.render.calls,
+      };
+    };
+    renderAt(0, 0);
+    const resourceBefore = {
+      programs: engine.renderer.info.programs?.length || 0,
+      textures: engine.renderer.info.memory.textures,
+    };
+    const horizon = renderAt(0, 0);
+    const partialX = renderAt(14, 0);
+    const partialZ = renderAt(14, Math.PI * 0.5);
+    const repeated = renderAt(14, Math.PI * 0.5);
+    const aerial = renderAt(20, 0);
+    const resourceAfter = {
+      programs: engine.renderer.info.programs?.length || 0,
+      textures: engine.renderer.info.memory.textures,
+    };
+    camera.quaternion.fromArray(savedQuaternion);
+    camera.layers.mask = savedCameraLayers;
+    ring.layers.mask = savedRingLayers;
+    ring.frustumCulled = savedFrustumCulled;
+    camera.updateMatrixWorld(true);
+    return {
+      available: true, identity, horizon, partialX, partialZ, repeated, aerial,
+      restoredWeight: ring.userData.viewWeight,
+      resourceBefore, resourceAfter,
+      identityStable: ring.geometry.uuid === identity.geometry
+        && ring.material.uuid === identity.material
+        && ring.material.map?.uuid === identity.map,
+    };
+  }, `/@fs${join(ROOT, 'src/env/edge-mist-view.js')}`) : { available: false };
+  const validMistSample = (sample) => Number.isFinite(sample?.opacity)
+    && Math.abs(sample.forwardY - sample.matrixForwardY) < 1e-7
+    && Math.abs(sample.viewWeight - sample.expectedWeight) < 1e-7
+    && Math.abs(sample.opacity - 0.5 * sample.expectedWeight) < 1e-7;
+  pass(!runFocusScenario || (edgeMistContract.available
+      && edgeMistContract.identityStable
+      && validMistSample(edgeMistContract.horizon)
+      && validMistSample(edgeMistContract.partialX)
+      && validMistSample(edgeMistContract.partialZ)
+      && validMistSample(edgeMistContract.repeated)
+      && validMistSample(edgeMistContract.aerial)
+      && edgeMistContract.horizon.viewWeight === 1
+      && edgeMistContract.partialX.viewWeight > 0
+      && edgeMistContract.partialX.viewWeight < 1
+      && Math.abs(edgeMistContract.partialX.viewWeight - edgeMistContract.partialZ.viewWeight) < 1e-7
+      && Math.abs(edgeMistContract.partialZ.viewWeight - edgeMistContract.repeated.viewWeight) < 1e-7
+      && edgeMistContract.partialZ.calls === edgeMistContract.repeated.calls
+      && edgeMistContract.aerial.viewWeight === 0
+      && JSON.stringify(edgeMistContract.resourceBefore) === JSON.stringify(edgeMistContract.resourceAfter)),
+  runFocusScenario
+    ? `edge mist uses the real camera -Z axis, continuous non-compounding opacity, and stable resources `
+      + `(${JSON.stringify(edgeMistContract)})`
+    : 'town wave scenario omits the Hanyang edge-mist camera fixture');
+
   const boot = await page.evaluate((runLensContract) => {
     const engine = window.__engine;
     const lod = engine.village.debugLod();
@@ -1453,6 +1548,47 @@ try {
     console.log(`PERF  focus    calls=${performance.focus.calls} triangles=${performance.focus.triangles}`);
     console.log(`PERF  focusOut calls=${performance.focusOut.calls} triangles=${performance.focusOut.triangles}`);
   }
+
+  const mistTeardown = runFocusScenario ? await page.evaluate(() => {
+    const engine = window.__engine;
+    const ring = window.__edgeMistTestRef;
+    const ridge = window.__ridgeMistTestRef;
+    engine.dispose();
+    const ringOpacity = ring?.material?.opacity;
+    const ridgeQuaternion = ridge?.quaternion?.toArray?.();
+    let callbacksCallable = true;
+    try {
+      engine.camera.position.x += 137;
+      engine.camera.position.z -= 83;
+      engine.camera.lookAt(
+        engine.camera.position.x + 100,
+        engine.camera.position.y,
+        engine.camera.position.z,
+      );
+      engine.camera.updateMatrixWorld(true);
+      ring?.onBeforeRender?.(engine.renderer, engine.scene, engine.camera);
+      ridge?.onBeforeRender?.(engine.renderer, engine.scene, engine.camera);
+    } catch {
+      callbacksCallable = false;
+    }
+    return {
+      callbacksCallable,
+      ringCallback: typeof ring?.onBeforeRender === 'function',
+      ridgeCallback: typeof ridge?.onBeforeRender === 'function',
+      ringOpacity,
+      ringViewWeight: ring?.userData?.viewWeight,
+      opacityStable: ring?.material?.opacity === ringOpacity,
+      ridgeStable: JSON.stringify(ridge?.quaternion?.toArray?.()) === JSON.stringify(ridgeQuaternion),
+    };
+  }) : { callbacksCallable: true };
+  pass(!runFocusScenario || (mistTeardown.callbacksCallable
+      && mistTeardown.ringCallback && mistTeardown.ridgeCallback
+      && mistTeardown.ringOpacity === 0 && mistTeardown.ringViewWeight === 0
+      && mistTeardown.opacityStable && mistTeardown.ridgeStable),
+  runFocusScenario
+    ? `village teardown deactivates retained mist callbacks without leaving a callable mutation `
+      + `(${JSON.stringify(mistTeardown)})`
+    : 'town wave scenario omits the retained Hanyang mist teardown fixture');
 
   pass(runtimeErrors.length === 0,
     `LOD browser flow has no runtime errors${runtimeErrors.length ? `: ${runtimeErrors.join(' | ')}` : ''}`);

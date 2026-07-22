@@ -84,10 +84,19 @@ try {
     engine.debugAdvancePost(2);
     engine.debugSetPaused(true);
     engine.debugRenderDofFrame();
+    const edgeMist = engine.village.exportRoot().getObjectByName('edge-mist-ring');
+    if (!edgeMist) throw new Error('edge mist ring is unavailable');
     window.__lodShotProgramKeys = new Set(
       (engine.renderer.info.programs || []).map((program) => program.cacheKey),
     );
-    return { parcelId, direction, target };
+    return {
+      parcelId, direction, target,
+      edgeMist: {
+        geometry: edgeMist.geometry.uuid,
+        material: edgeMist.material.uuid,
+        map: edgeMist.material.map?.uuid,
+      },
+    };
   });
 
   await page.addStyleTag({ content: `
@@ -151,12 +160,20 @@ try {
       root.userData.updateChunkLod(engine.camera, 1);
       engine.debugRenderDofFrame();
       const actual = engine.village.debugLod(prepared.parcelId);
+      const edgeMist = root.getObjectByName('edge-mist-ring');
       const programKeys = (engine.renderer.info.programs || []).map((program) => program.cacheKey);
       const addedPrograms = programKeys.filter((key) => !window.__lodShotProgramKeys.has(key));
       window.__lodShotProgramKeys = new Set(programKeys);
       return {
         boundary, phase, desired, actual,
         camera: { position: engine.camera.position.toArray(), target, fov: engine.camera.fov },
+        edgeMist: edgeMist ? {
+          opacity: edgeMist.material.opacity,
+          viewWeight: edgeMist.userData.viewWeight,
+          identityStable: edgeMist.geometry.uuid === prepared.edgeMist.geometry
+            && edgeMist.material.uuid === prepared.edgeMist.material
+            && edgeMist.material.map?.uuid === prepared.edgeMist.map,
+        } : null,
         calls: engine.village.debugDrawCalls(),
         triangles: engine.renderer.info.render.triangles,
         programs: programKeys.length,
@@ -183,6 +200,32 @@ try {
     captures.push(await capture(`${prefix}-after`, boundary, 'after'));
   }
   await capture('', 'mid-full', 'half', false);
+  const edgeMistView = await page.evaluate((prepared) => {
+    const engine = window.__engine;
+    const ring = engine.village.exportRoot().getObjectByName('edge-mist-ring');
+    const programsBefore = engine.renderer.info.programs?.length || 0;
+    const dx = engine.__controls.target.x - engine.camera.position.x;
+    const dz = engine.__controls.target.z - engine.camera.position.z;
+    engine.camera.lookAt(
+      engine.camera.position.x + dx,
+      engine.camera.position.y,
+      engine.camera.position.z + dz,
+    );
+    engine.camera.updateMatrixWorld(true);
+    engine.debugRenderDofFrame();
+    const horizon = { opacity: ring.material.opacity, viewWeight: ring.userData.viewWeight };
+    engine.camera.lookAt(engine.__controls.target);
+    engine.camera.updateMatrixWorld(true);
+    engine.debugRenderDofFrame();
+    return {
+      horizon,
+      restored: { opacity: ring.material.opacity, viewWeight: ring.userData.viewWeight },
+      identityStable: ring.geometry.uuid === prepared.edgeMist.geometry
+        && ring.material.uuid === prepared.edgeMist.material
+        && ring.material.map?.uuid === prepared.edgeMist.map,
+      programDelta: (engine.renderer.info.programs?.length || 0) - programsBefore,
+    };
+  }, prepared);
   const passParity = await page.evaluate(() => {
     const engine = window.__engine;
     const channelSymbol = Symbol.for('cheoma.lodScreenDoorChannel');
@@ -227,7 +270,8 @@ try {
     };
   });
   const report = {
-    fixture: prepared.parcelId, viewport: '1440x900', captures, passParity, errors, outputDir,
+    fixture: prepared.parcelId, viewport: '1440x900', captures, edgeMistView,
+    passParity, errors, outputDir,
   };
   await writeFile(join(outputDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`LOD TRANSITION SHOTS: ${JSON.stringify(report, null, 2)}`);
@@ -256,7 +300,15 @@ try {
   });
   if (errors.length || captures.some((capture) => (
     !capture.actual?.valid || capture.addedPrograms.length > 0
+      || !capture.edgeMist?.identityStable
+      || Math.abs(capture.edgeMist.opacity) > 1e-6
+      || Math.abs(capture.edgeMist.viewWeight) > 1e-6
   )) || !captureStateValid || !transitionBudgetsValid || passParity.visibleLodMeshes <= 0
+    || !edgeMistView.identityStable || edgeMistView.programDelta !== 0
+    || Math.abs(edgeMistView.horizon.opacity - 0.5) > 1e-6
+    || Math.abs(edgeMistView.horizon.viewWeight - 1) > 1e-6
+    || Math.abs(edgeMistView.restored.opacity) > 1e-6
+    || Math.abs(edgeMistView.restored.viewWeight) > 1e-6
     || passParity.dofLodScreenDoor !== passParity.visibleLodMeshes
     || passParity.inkLodScreenDoor !== passParity.visibleLodMeshes
     || !passParity.dofRestored || !passParity.inkRestored) process.exitCode = 1;

@@ -87,6 +87,9 @@ function routePath(path) {
     if (/^src\/env\/(?:focus|animals|critters|grass|motes|smoke|wind)\.js$/.test(path)) {
       select('near-detail and wave-owned LOD changed', 'lod-focus', 'lod-wave');
     }
+    if (/^src\/env\/(?:clouds|edge-mist-view)\.js$/.test(path)) {
+      select('village atmospheric view ownership changed', 'lod-focus', 'lod-wave');
+    }
     if (path === 'src/env/night-glow.js') select('wave-owned lighting changed', 'lod-wave');
     return { gates, reasons };
   }
