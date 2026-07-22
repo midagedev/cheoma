@@ -8,9 +8,11 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { VILLAGE_FOCUS_ELEVATION } from '../src/camera/optics.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
+const FOCUS_ELEVATION_DEG = VILLAGE_FOCUS_ELEVATION * 180 / Math.PI;
 const VIEWPORT = { width: 128, height: 96 };
 const MIME = {
   '.html': 'text/html',
@@ -616,8 +618,8 @@ if (failures === 0 && process.argv.includes('--app')) {
     console.log(`  screenshots: ${outputDir}`);
     check((subject.coverage?.cloudRoof ?? 0) > 0,
       `actual village roof keeps cloud-shadow + rim composition (${subject.coverage?.cloudRoof ?? 0} materials)`);
-    check(Math.abs(Math.abs(subject.pitchDeg) - 10) <= 1,
-      `A/B uses the final ~10° focus pitch (${subject.pitchDeg.toFixed(2)}°)`);
+    check(Math.abs(Math.abs(subject.pitchDeg) - FOCUS_ELEVATION_DEG) <= 1,
+      `A/B uses the final ~${FOCUS_ELEVATION_DEG.toFixed(0)}° focus pitch (${subject.pitchDeg.toFixed(2)}°)`);
     check(on.clippedFraction === 0 && on.brightFraction < 0.001,
       `final focus rim avoids white/clipped surfaces (${(on.brightFraction * 100).toFixed(3)}% bright)`);
     check(appErrors.length === 0, `actual village cloud+rim shader errors: ${appErrors.length}`);

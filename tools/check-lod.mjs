@@ -57,7 +57,7 @@ function assertLevel(actual, expected, message) {
 // 광각/망원 변화는 화면 점유율을 유지하는 실제 dolly이고, 그 물리 거리는 LOD에서
 // 이전 렌즈의 등가 거리로 환산돼 소동물·낙엽이 조기 소거되지 않아야 한다.
 {
-  near(VILLAGE_FOCUS_ELEVATION, 10 * Math.PI / 180,
+  near(VILLAGE_FOCUS_ELEVATION, 12 * Math.PI / 180,
     'optics: reviewed residential focus elevation drift');
   for (const profile of Object.values(VILLAGE_LENS)) {
     const referenceDistance = 100;

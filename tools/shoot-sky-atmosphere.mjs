@@ -207,7 +207,7 @@ try {
     'focus projection stays centered so the foreground courtyard is not cropped for extra sky',
     `shift=${live.compositionYFrac.toFixed(3)}`);
   pass(Math.abs(live.cameraForwardY + Math.sin(VILLAGE_FOCUS_ELEVATION)) < 0.002,
-    'focus camera holds the exact ten-degree courtyard-reading approach',
+    `focus camera holds the exact ${Math.round(VILLAGE_FOCUS_ELEVATION * 180 / Math.PI)}-degree courtyard-reading approach`,
     `forwardY=${live.cameraForwardY.toFixed(3)}`);
   pass(live.highClouds === 4 && live.minRim > 0.8,
     'four village clouds receive low-sun HDR rim lighting', `rim>=${live.minRim.toFixed(2)}`);
