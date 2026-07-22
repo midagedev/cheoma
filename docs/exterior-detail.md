@@ -1,9 +1,9 @@
 # 창호 외관 디테일 계약
 
 > - **상태**: 계약 + 리서치
-> - **기준일**: 2026-07-22
+> - **기준일**: 2026-07-23
 > - **범위**: 궁·사찰·기와집·초가의 문·창 프레임, 창 하부 머름, 문짝 하부 청판 rail, 문지방,
->   절제된 철물·근접 민가 신발, 선택 FULL **주거** 주출입문 상호작용
+>   절제된 철물·근접 민가 신발, 선택 FULL **주거** 주출입문 상호작용, 실제 창호에 붙는 야간 원경 불빛
 > - **비범위**: 실내 생성, 인물, 특정 문화유산의 정밀 복원
 
 ## 1. 목적
@@ -22,6 +22,14 @@
 - 판문은 세로 판재를 가로 부재로 엮고, 살문은 살을 짜 뒤에 창호지나 비단을 댄다.
 - 세살문은 대표적인 살문이며 궁궐·사찰에는 더 화려한 꽃살창도 쓰였다.
 
+같은 기관의 「한옥의 감상」은 창호지를 실내 쪽에 붙이고, 이를 통과한 빛이 실내를 밝은 분위기로 만들며 외부에서는 살 무늬가
+읽힌다고 설명한다. 따라서 화면에 보이는 빛의 기준면은 필지 중심이나 벽 바깥의 임의 점이 아니라 실제 살과
+한지 면이다. 이 설명은 창호의 구성과 주간 채광 효과에 관한 근거이지, 밤의 외부 휘도나 색을 정한 자료는 아니다.
+
+국립민속박물관 웹진 「빛으로 밝히고 조명으로 통하다」는 양초·호롱·석유등 같은 작은 연소 광원을 생활 조명의
+역사 안에서 소개한다. 이는 현대 전기식 면광원과 다른 **점광원 어휘**의 근거다. 모든 집·모든 방이 켜졌다는
+근거나 정확한 밝기·색온도·점멸 주기·점등 비율을 제공하지는 않는다.
+
 국가유산청 국가유산포털의 경복궁 근정전 정밀실측 철물 상세도는 문고리, 고리갈쇠, 고정쇠, 돌쩌귀, 원산,
 자물쇠, 경첩, 새발장식이라는 궁궐 창호 철물 어휘를 한 건물의 실측 사례로 확인하게 한다.
 
@@ -33,6 +41,10 @@
 포함한 집에 들어갈 때 신발을 벗는 생활 관습을 설명한다.
 
 ## 3. 제품 해석과 한계
+
+- #81의 제품 번역은 일부 거주 창호만 seed-stable하게 켜고 나머지 방은 어둡게 둔다. 작은 호롱불을 연상시키는
+  절제된 따뜻한 색·낮은 에너지·미세한 flicker는 아름다움과 화면 가독성을 위한 구현 선택이며 사료가 정한
+  측광 복원이 아니다. 집 전체 벽이나 처마를 발광시키지 않고 실제 한지 면만 빛의 화면 위치를 소유한다.
 
 - `src/builder/opening-detail-plan.js`는 문/창, 크기, 창 하부 머름, 문짝 하부 `lowerPanel`, reveal, 프레임,
   문지방, 철물, primary entrance,
@@ -135,6 +147,28 @@
   궁·사찰·관아 복합체나 잘못된 anchor는 `controls.target`으로 fail closed하며 임의의 문을 고르지 않는다. 이 경로는
   카메라 구도, DoF kernel, 조명, LOD, 문 상호작용을 바꾸거나 GPU resource·pass·material·draw call을 추가하지 않는다.
 
+### 4.2 야간 창호 불빛 계약 (#81)
+
+- 일반 초가·기와집의 고정 창호 plan은 opening id, 한지 면 중심, 개구면 로컬 축과 외향 법선을 Three 없이 한 번
+  확정한다. 원경 불빛은 FULL renderer와 똑같은 변주·mirror·실제 house fit·필지 `frontDir`·회전·중심·지면 높이·
+  비등방 scale 변환을 소비한다. `plotW`/`plotD` 중심, 임의 극좌표, 렌더 파일 치수 재추론은 금지한다.
+- anchor는 움직이는 primary 문짝과 분리된 **고정 한지 면**이다. 보이는 불빛 중심은 실제 panel 외측으로
+  `OPENING_FACE_CLEARANCE` 2cm만 분리하며, 같은 opening id의 실제 한지 emissive가 근경 LOD를 이어받는다.
+  좌표 변환을 두 번 적용하거나 벽·지붕·담 위에 자유 부유하는 보정점은 허용하지 않는다.
+- 기존 원경 `THREE.Points`는 `depthTest=true`, `depthWrite=false`를 사용한다. 집 몸체·지붕·담·지형·수목처럼
+  카메라에 가까운 불투명 표면이 빛을 정상적으로 가리고, additive·bloom·DoF 보케는 가림 뒤의 픽셀을 되살리지
+  않는다. 반대 벽을 뚫거나 지붕·하늘 위로 비치는 점은 실패다.
+- seed-stable 점등 분포는 일부 방을 어둡게 유지한다. 낮에는 제출하지 않고, 밤에는 현재의 단일
+  `THREE.Points` geometry/material/program을 재사용하므로 기존 구현 대비 draw call·triangle·material·program·
+  texture·render target 증가는 모두 0이다. `PointLight`, 집별 mesh/material, 프레임별 scene traversal·raycast·
+  heap allocation도 0이어야 한다.
+- FAR/MID/FULL은 하나의 불빛 의미를 중복 소유하지 않는다. 렌즈 등가 거리와 근경 fade는 기존 uniform에
+  합성하고, focus/rebuild/reroll/hop과 wave의 old/incoming exclusive ownership에서 팝·잔상·이중 불빛이 없어야
+  한다. commit된 편집 집은 마지막 승인 opening plan과 실제 fit을 즉시 권위값으로 삼는다.
+- 궁·사찰·정자는 임의의 원형 점 분포로 채우지 않는다. 조립 뒤까지 역할이 보존된 실제 창호·등롱·석등 anchor가
+  있을 때만 같은 계약에 참여하고, 그렇지 않으면 불빛을 생략한다. ‘어두움’이 ‘근거 없는 부유 불빛’보다 안전한
+  fail-closed 결과다.
+
 ## 5. LOD·재질·수명 계약
 
 - MID는 기존 `door`·`hanji`·`salchang` 텍스처와 envelope 목재를 유지한다. 프레임·문지방은 기존
@@ -156,6 +190,15 @@
   Svelte는 Three 상태를 소유하지 않고 canvas pointer 결과만 표시한다.
 
 ## 6. 검증
+
+- #81 코드 작업에서 추가할 `check:nightlights`는 초가·기와 ㅡ·ㄱ·ㄷ의 모든 변주·mirror·fit·필지 변환에서
+  opening id/한지 면/외향 법선이 production panel과 일치하고 JSON-safe·seed 결정론적인지 검사한다. 실제 WebGL
+  fixture는 같은 불빛이 정면에서는 보이되 불투명 집·담 뒤에서는 사라지고 지붕·하늘 위로 새지 않는지 검사한다.
+  이 명령은 문서 PR 시점에는 아직 package script가 아니며, 아래 항목은 통과 결과가 아니라 구현 완료 조건이다.
+- 같은 코드 작업의 `shoot:nightlights`는 고정 seed·카메라에서 aerial/MID/focus 밤 프레임을 촬영한다. 한지 면에
+  붙은 절제된 따뜻한 원형 bloom/bokeh, 실제 깊이 가림, 어두운 방의 공존, 자유 부유점 부재를 직접 판정한다.
+  focus/rebuild/reroll/wave/LOD 수명과 기존 단일 Points의 0-delta GPU 예산은 `check:worker`, `check:app`,
+  `check:full`과 함께 확인한다.
 
 - `npm run check:opening-detail`: 순수 결정론, 불변 데이터, vocabulary, 창 머름과 문 lowerPanel의 배타성,
   frame·threshold·유형별 철물 범위,
@@ -215,6 +258,10 @@
 
 - 건축공간연구원 국가한옥센터, 「한옥의 시공 — 창호와 천장」:
   https://www.hanokdb.kr/theology/sub_04
+- 건축공간연구원 국가한옥센터, 「한옥의 감상」:
+  https://www.hanokdb.kr/theology/sub_03
+- 국립민속박물관 웹진, 「빛으로 밝히고 조명으로 통하다」:
+  https://webzine.nfm.go.kr/2018/09/06/%EB%B9%9B%EC%9C%BC%EB%A1%9C-%EB%B0%9D%ED%9E%88%EA%B3%A0-%EC%A1%B0%EB%AA%85%EC%9C%BC%EB%A1%9C-%ED%86%B5%ED%95%98%EB%8B%A4/
 - 국가유산청 국가유산포털, 「경복궁 근정전 정밀실측 문고리·고리갈쇠·고정쇠·돌쩌귀·원산·자물쇠·경첩·새발장식 철물 상세도」:
   https://www.heritage.go.kr/heri/cul/chartImgHeritage.do?file_seq=2839493&title3d=%EB%8F%84%EB%A9%B4_%EA%B5%AD%EB%B3%B4_%EA%B2%BD%EB%B3%B5%EA%B6%81+%EA%B7%BC%EC%A0%95%EC%A0%84_%EC%A0%95%EB%B0%80%EC%8B%A4%EC%B8%A1+%EB%AC%B8%EA%B3%A0%EB%A6%AC%EF%BC%8F%EA%B3%A0%EB%A6%AC%EA%B0%88%EC%87%A0%EF%BC%8F%EA%B3%A0%EC%A0%95%EC%87%A0%EF%BC%8F%EB%8F%8C%EC%A9%8C%EA%B7%80%EF%BC%8F%EC%9B%90%EC%82%B0%EF%BC%8F%EC%9E%90%EB%AC%BC%EC%87%A0%EF%BC%8F%EA%B2%BD%EC%B2%A9%EF%BC%8F%EC%83%88%EB%B0%9C%EC%9E%A5%EC%8B%9D+%EC%B2%A0%EB%AC%BC+%EC%83%81%EC%84%B8%EB%8F%84
 - 국립익산박물관, 「짚신」(양수 197):
@@ -226,7 +273,7 @@
 - 문화체육관광부·Korea.net, 「Things Newcomers Need to Know to Live in Korea」:
   https://www.korea.net/koreanet/fileDownload?fileUrl=FILE%2FPDF%2Fgeneral%2F201209_liveinkorea_en.pdf
 
-AURI·국립익산박물관·Korea.net 페이지는 저작권 보호 자료이므로 이용조건을 자산 재사용 전에 다시 확인한다.
+AURI·국립민속박물관·국립익산박물관·Korea.net 페이지는 저작권 보호 자료이므로 이용조건을 자산 재사용 전에 다시 확인한다.
 국립중앙박물관 해설은 공공누리 제3유형(출처표시+변경금지)이다. 국가유산포털 자료도 상세 페이지의 저작권·
 공공누리 유형을 자산 재사용 전에 다시 확인해야 한다. 저장소와 앱에는 원문 도면·이미지를 복제하지 않고 링크,
 사실 요약, 독자적으로 만든 저해상도 절차 geometry만 포함한다.
