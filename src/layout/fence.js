@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeRng } from '../rng.js';
 import { buildTileGableRoof } from './tileroof.js';
+import { planFenceRuns } from './fence-plan.js';
 
 // 토석담(土石담): 하부 자연석 켜(어두운 흙+화강 막돌) + 상부 회벽(밝은 톤)
 // + 위에 작은 기와 지붕담. 폴리라인을 따라 세우고 모서리를 기둥으로 잇는다.
@@ -30,12 +31,6 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
   const earthMat = new THREE.MeshStandardMaterial({ color: lowStone ? 0x7d6a52 : 0x8f6f4e, roughness: 1.0 });
   const brickMat = new THREE.MeshStandardMaterial({ color: 0x8a6656, roughness: 0.95 }); // 전돌
   const graniteGeo = new THREE.DodecahedronGeometry(0.16, 0);
-
-  const seg = (a, b) => {
-    const d = { x: b.x - a.x, z: b.z - a.z };
-    const L = Math.hypot(d.x, d.z);
-    return { d, L, rotY: Math.atan2(-d.z, d.x), mid: { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 } };
-  };
 
   // 담 몸체 한 스팬 (로컬: X=길이, Z=두께, Y=높이). 중앙 정렬.
   function wallSpan(len) {
@@ -85,48 +80,20 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
     return g;
   }
 
-  function placeAlong(child, s, offset = 0) {
-    child.position.set(s.mid.x, 0, s.mid.z);
-    child.rotation.y = s.rotY;
-    group.add(child);
-  }
-
   // 스팬 생성 (개구부 제외)
-  const verts = points.map((p) => ({ x: p.x, z: p.z }));
-  const nSeg = closed ? verts.length : verts.length - 1;
-  const openOut = [];
-  for (let si = 0; si < nSeg; si++) {
-    const a = verts[si], b = verts[(si + 1) % verts.length];
-    const s = seg(a, b);
-    // 이 세그먼트의 개구부들 → [start,end] 거리 구간 (points[si] 기준)
-    const gaps = openings.filter((o) => o.seg === si)
-      .map((o) => {
-        const c = o.center * s.L;
-        return { s: c - o.width / 2, e: c + o.width / 2, o };
-      })
-      .sort((p, q) => p.s - q.s);
-    // 개구부 월드 변환 기록
-    for (const gp of gaps) {
-      const c = (gp.s + gp.e) / 2;
-      openOut.push({
-        position: new THREE.Vector3(a.x + s.d.x * (c / s.L), 0, a.z + s.d.z * (c / s.L)),
-        rotationY: s.rotY, width: gp.o.width, seg: si,
-      });
-    }
-    // 벽 스팬 = [0,L] 에서 gap 구간 제외
-    let cursor = 0;
-    const spans = [];
-    for (const gp of gaps) {
-      if (gp.s - cursor > 0.05) spans.push([cursor, gp.s]);
-      cursor = Math.max(cursor, gp.e);
-    }
-    if (s.L - cursor > 0.05) spans.push([cursor, s.L]);
-    for (const [d0, d1] of spans) {
-      const len = d1 - d0;
-      const cd = (d0 + d1) / 2;
+  const plan = planFenceRuns(points, { closed, openings });
+  const verts = plan.vertices;
+  for (const segment of plan.segments) {
+    for (const run of segment.runs) {
+      const len = run.end - run.start;
+      const cd = (run.start + run.end) * 0.5;
       const child = wallSpan(len);
-      child.position.set(a.x + s.d.x * (cd / s.L), 0, a.z + s.d.z * (cd / s.L));
-      child.rotation.y = s.rotY;
+      child.position.set(
+        segment.a.x + segment.dx * cd / segment.length,
+        0,
+        segment.a.z + segment.dz * cd / segment.length,
+      );
+      child.rotation.y = segment.rotationY;
       group.add(child);
     }
   }
@@ -148,5 +115,11 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
     group.add(post);
   });
 
-  return { group, openings: openOut };
+  return {
+    group,
+    openings: plan.openings.map((opening) => ({
+      ...opening,
+      position: new THREE.Vector3(opening.position.x, 0, opening.position.z),
+    })),
+  };
 }

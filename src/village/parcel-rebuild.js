@@ -108,6 +108,7 @@ export function planParcelRebuild(
       }
       candidate.rebuildSeed = seed;
       delete candidate.editRoofBounds;
+      delete candidate.editBuildingBounds;
       if (!assignFittedVariationSequence(candidate, char01, tuning, {
         baseSeed: variationSeed,
         attempts,

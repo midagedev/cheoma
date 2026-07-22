@@ -183,6 +183,22 @@ function resourceCounts(root) {
 
 const matrixError = (a, b) => Math.max(...a.elements.map((value, index) => Math.abs(value - b.elements[index])));
 
+function worldMetric(matrix) {
+  const x = new THREE.Vector3().setFromMatrixColumn(matrix, 0);
+  const y = new THREE.Vector3().setFromMatrixColumn(matrix, 1);
+  const z = new THREE.Vector3().setFromMatrixColumn(matrix, 2);
+  return [
+    x.dot(x), y.dot(y), z.dot(z),
+    x.dot(y), x.dot(z), y.dot(z),
+  ];
+}
+
+const metricError = (a, b) => Math.max(...a.map((value, index) => Math.abs(value - b[index])));
+
+function orthonormalError(matrix) {
+  return metricError(worldMetric(matrix), [1, 1, 1, 0, 0, 0]);
+}
+
 function firstRenderedHit(raycaster, root) {
   return raycaster.intersectObject(root, true).find((hit) => {
     let current = hit.object;
@@ -196,9 +212,46 @@ function firstRenderedHit(raycaster, root) {
 }
 
 function inspectDoorRuntime(building) {
+  // Exercise the production runtime below a reflected, non-uniform ancestor.
+  // A rotated opening below this transform is the case where a normal child
+  // pivot changes world hinge radius unless the runtime owns an orthonormal
+  // compensation frame. Restore the caller's hierarchy exactly before return.
+  const originalHost = {
+    parent: building.parent,
+    position: building.position.clone(),
+    quaternion: building.quaternion.clone(),
+    scale: building.scale.clone(),
+    matrix: building.matrix.clone(),
+    matrixAutoUpdate: building.matrixAutoUpdate,
+  };
+  const affineParent = new THREE.Group();
+  affineParent.position.set(17, 2.5, -11);
+  affineParent.rotation.y = 0.37;
+  // Keep the visible recess above the pre-existing 3cm product threshold while
+  // retaining enough X/Z anisotropy to expose the old shrinking-leaf defect.
+  affineParent.scale.set(-1.43, 1.16, 1.05);
+  affineParent.add(building);
+  const restoreHost = () => {
+    building.removeFromParent();
+    originalHost.parent?.add(building);
+    building.position.copy(originalHost.position);
+    building.quaternion.copy(originalHost.quaternion);
+    building.scale.copy(originalHost.scale);
+    building.matrixAutoUpdate = originalHost.matrixAutoUpdate;
+    if (originalHost.matrixAutoUpdate) building.updateMatrix();
+    else building.matrix.copy(originalHost.matrix);
+    building.updateWorldMatrix(true, true);
+  };
+
   const beforeResources = resourceCounts(building);
+  building.updateWorldMatrix(true, true);
+  const prePanel = building.getObjectByName('primary-opening-panel');
+  const prePanelWorld = prePanel?.matrixWorld.clone() || null;
   const runtime = createPrimaryDoorRuntime(building);
-  if (!runtime) return null;
+  if (!runtime) {
+    restoreHost();
+    return null;
+  }
   building.updateWorldMatrix(true, true);
   const closed = {
     frame: building.getObjectByName('opening-frame-details').matrixWorld.clone(),
@@ -209,9 +262,22 @@ function inspectDoorRuntime(building) {
   const relative = (object) => runtime.panel.matrixWorld.clone().invert().multiply(object.matrixWorld);
   const closedHardwareRelative = relative(runtime.hardware);
   const closedLeafRelative = relative(runtime.leafDetails);
+  const moving = [runtime.panel, runtime.hardware, runtime.leafDetails, runtime.lowerPanel].filter(Boolean);
+  const closedMetrics = moving.map((object) => worldMetric(object.matrixWorld));
+  const plan = runtime.anchor.userData.openingDetailPlan;
+  const pivotPlan = plan.anchors.pivot;
+  const hingeLocal = new THREE.Vector3(pivotPlan.u, pivotPlan.y, pivotPlan.outward);
+  const freeLocal = new THREE.Vector3(
+    pivotPlan.leafCenterU * 2 - pivotPlan.u,
+    plan.height * 0.5,
+    pivotPlan.outward,
+  );
+  const hingeClosed = runtime.anchor.localToWorld(hingeLocal.clone());
+  const freeClosed = runtime.anchor.localToWorld(freeLocal.clone());
+  const freePanelLocal = runtime.panel.worldToLocal(freeClosed.clone());
+  const closedRadius = hingeClosed.distanceTo(freeClosed);
   const center = runtime.worldCenter();
-  const quaternion = runtime.anchor.getWorldQuaternion(new THREE.Quaternion());
-  const outward = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion).normalize();
+  const outward = runtime.worldFrame().outward;
   const raycaster = new THREE.Raycaster(
     center.clone().addScaledVector(outward, 3),
     outward.clone().multiplyScalar(-1),
@@ -234,6 +300,15 @@ function inspectDoorRuntime(building) {
   runtime.seek(0.5);
   building.updateWorldMatrix(true, true);
   const mid = runtime.snapshot();
+  const hingeMid = runtime.anchor.localToWorld(hingeLocal.clone());
+  const freeMid = freePanelLocal.clone().applyMatrix4(runtime.panel.matrixWorld);
+  const midRadius = hingeMid.distanceTo(freeMid);
+  const midMetrics = moving.map((object) => worldMetric(object.matrixWorld));
+  const midScaleError = Math.max(...midMetrics.map((metric, index) => (
+    metricError(closedMetrics[index], metric)
+  )));
+  const midInward = freeMid.clone().sub(freeClosed).dot(outward);
+  const pivotBasisError = orthonormalError(runtime.pivot.matrixWorld);
   const apertureCenter = runtime.anchor.localToWorld(new THREE.Vector3(
     mid.panelCenterU,
     runtime.anchor.userData.openingDetailPlan.height * 0.5,
@@ -262,14 +337,15 @@ function inspectDoorRuntime(building) {
       Math.abs(runtime.anchor.userData.openingDetailPlan.anchors.pivot.u)
         - runtime.anchor.userData.openingDetailPlan.width * 0.5,
     ),
-    freeEdgeInward: -Math.sin(Math.abs(mid.angle)) * mid.leafWidth,
-    sweepRadiusError: Math.abs(
-      Math.hypot(
-        Math.cos(Math.abs(mid.angle)) * mid.leafWidth,
-        Math.sin(Math.abs(mid.angle)) * mid.leafWidth,
-      ) - mid.leafWidth,
-    ),
-    inward: mid.angle * runtime.anchor.userData.openingDetailPlan.anchors.pivot.hingeSide < 0,
+    freeEdgeInward: midInward,
+    worldHingeRadiusError: Math.abs(midRadius - closedRadius),
+    worldScaleError: midScaleError,
+    pivotBasisError,
+    closedPoseError: prePanelWorld ? matrixError(prePanelWorld, closed.panel) : Infinity,
+    mirroredParent: runtime.anchor.matrixWorld.determinant() < 0,
+    nonUniformParent: Math.abs(affineParent.scale.x) !== affineParent.scale.z,
+    inward: midInward < -1e-3
+      && mid.angle * runtime.anchor.userData.openingDetailPlan.anchors.pivot.hingeSide < 0,
     frameFixed: matrixError(closed.frame, building.getObjectByName('opening-frame-details').matrixWorld) < 1e-9,
     panelMoved: matrixError(closed.panel, runtime.panel.matrixWorld) > 1e-4,
     hardwareMoved: matrixError(closed.hardware, runtime.hardware.matrixWorld) > 1e-4,
@@ -289,6 +365,26 @@ function inspectDoorRuntime(building) {
   };
   runtime.seek(1);
   building.updateWorldMatrix(true, true);
+  const hingeOpen = runtime.anchor.localToWorld(hingeLocal.clone());
+  const freeOpen = freePanelLocal.clone().applyMatrix4(runtime.panel.matrixWorld);
+  const openRadius = hingeOpen.distanceTo(freeOpen);
+  const openMetrics = moving.map((object) => worldMetric(object.matrixWorld));
+  const openScaleError = Math.max(...openMetrics.map((metric, index) => (
+    metricError(closedMetrics[index], metric)
+  )));
+  result.worldHingeRadiusError = Math.max(
+    result.worldHingeRadiusError,
+    Math.abs(openRadius - closedRadius),
+  );
+  result.worldScaleError = Math.max(result.worldScaleError, openScaleError);
+  // Preserve the historical assertion key while making it an actual world-space
+  // rigidity contract rather than an identity derived from sin²+cos².
+  result.sweepRadiusError = Math.max(
+    result.worldHingeRadiusError,
+    result.worldScaleError,
+    result.pivotBasisError,
+    result.closedPoseError,
+  );
   const openAction = runtime.raycast(apertureRay);
   const openSurface = firstRenderedHit(apertureRay, building);
   result.pickedOpenAction = !!openAction;
@@ -299,11 +395,15 @@ function inspectDoorRuntime(building) {
   result.hasRecess = runtime.snapshot().hasRecess;
   runtime.dispose();
   building.updateWorldMatrix(true, true);
-  result.closedOnDispose = Math.abs(runtime.pivot.rotation.y) < 1e-9;
+  result.closedOnDispose = Math.abs(runtime.snapshot().angle) < 1e-9;
   result.pivotRemoved = runtime.pivot.parent == null;
   result.hostRestored = [runtime.panel, runtime.hardware, runtime.leafDetails, runtime.lowerPanel]
     .filter(Boolean).every((object) => object.parent !== runtime.pivot);
+  result.restoredWorldError = prePanelWorld
+    ? matrixError(prePanelWorld, runtime.panel.matrixWorld) : Infinity;
+  result.sweepRadiusError = Math.max(result.sweepRadiusError, result.restoredWorldError);
   result.resources.push(resourceCounts(building));
+  restoreHost();
   return result;
 }
 

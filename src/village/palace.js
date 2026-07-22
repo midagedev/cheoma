@@ -17,6 +17,7 @@ import { buildGate } from '../layout/gate.js';
 import { buildFence } from '../layout/fence.js';
 import { buildBridge } from '../builder/bridge.js';
 import { mergeStatic } from './instancing.js';
+import { palaceOuterPrecinctPlan } from './palace-precinct-plan.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // 궁궐 컴파운드 오케스트레이터 (#88). docs/palace-layout.md §8 알고리즘 구현.
@@ -319,20 +320,26 @@ export function buildPalaceCompound({
   };
 
   // ── 1) 궁성 담(궁장) — 외곽 폐곡선 + 남측 광화문 개구 ──
-  const wallH = 3.0, gwanghwaGap = 8.0;
-  const corners = [
-    { x: -hw, z: hd }, { x: hw, z: hd }, { x: hw, z: -hd }, { x: -hw, z: -hd },
-  ];
-  const { group: palaceWall, openings } = buildFence({
-    points: corners, closed: true, height: wallH, thickness: 0.7,
-    seed, mats: M, wallStyle: 'jeondol',
-    openings: [{ seg: 0, center: 0.5, width: gwanghwaGap }],
+  const outerPrecinct = palaceOuterPrecinctPlan(W, D);
+  const { group: palaceWall } = buildFence({
+    points: outerPrecinct.wall.points,
+    closed: true,
+    height: outerPrecinct.wall.height,
+    thickness: outerPrecinct.wall.thickness,
+    seed,
+    mats: M,
+    wallStyle: outerPrecinct.wall.wallStyle,
+    openings: [outerPrecinct.wall.opening],
   });
   palaceWall.name = 'palace-wall';
   // 광화문(궁성 남문) — 솟을대문 3칸급, 개구 자리. (궁장·광화문은 아래 entry 그룹에서 조립.)
-  const gw = openings[0];
-  const gwanghwa = buildGate('soseuldaemun', { mats: M, seed, width: 3.4 });
-  if (gw) { gwanghwa.position.copy(gw.position); gwanghwa.rotation.y = gw.rotationY; }
+  const gwanghwa = buildGate(outerPrecinct.gate.type, {
+    mats: M,
+    seed,
+    width: outerPrecinct.gate.width,
+  });
+  gwanghwa.position.set(outerPrecinct.gate.position.x, 0, outerPrecinct.gate.position.z);
+  gwanghwa.rotation.y = outerPrecinct.gate.rotationY;
   gwanghwa.name = 'gate-gwanghwamun';
 
   // ── 2) 진입부: 중문(흥례문) → 금천교 → (정전 정문). 고증 순서(§2): 광화문→흥례문→영제교→근정문. ──

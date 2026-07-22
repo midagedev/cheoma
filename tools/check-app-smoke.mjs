@@ -671,7 +671,8 @@ try {
       && closedDoor.state.hasRecess && closedDoor.state.recessDepth > 0.03
       && !closedDoor.screen?.behind
       && closedDoor.screen.x > 0 && closedDoor.screen.x < 1280
-      && closedDoor.screen.y > 0 && closedDoor.screen.y < 800,
+      && closedDoor.screen.y > 0 && closedDoor.screen.y < 800
+      && closedDoor.programs > 0 && closedDoor.calls > 0,
   `focused FULL primary door starts closed at a visible direct target (${JSON.stringify(closedDoor)})`);
 
   const visibilityGate = await page.evaluate((parcelId) => {
@@ -703,6 +704,99 @@ try {
   pass((await doorHover.textContent()).includes('문 열기'),
     'actual door hover renders the localized open action in Product UI');
 
+  // `isPrimary` is scoped to a pointer type. A primary touch arriving while a
+  // primary mouse gesture owns the door must not overwrite the first pointer's
+  // down hit; cancelling that unrelated touch must not cancel the mouse click.
+  await page.mouse.down();
+  await page.evaluate(({ x, y }) => {
+    const canvas = window.__engine.renderer.domElement;
+    canvas.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      clientX: x,
+      clientY: y,
+      pointerId: 17,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      buttons: 1,
+    }));
+    canvas.dispatchEvent(new PointerEvent('pointercancel', {
+      bubbles: true,
+      clientX: x,
+      clientY: y,
+      pointerId: 17,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      buttons: 0,
+    }));
+  }, closedDoor.screen);
+  await page.mouse.up();
+  const afterCrossTypePointer = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const toggled = engine.village.debugDoorInteraction(parcelId);
+    engine.village.debugSeekDoor(0, parcelId);
+    return toggled;
+  }, doorParcelId);
+  pass(afterCrossTypePointer?.targetOpen,
+    `a second primary pointer type cannot steal the active door click `
+      + `(${JSON.stringify(afterCrossTypePointer)})`);
+
+  // A browser-cancelled pointer sequence must never survive until a later up
+  // and toggle the leaf. Exercise the real mouse pointer so OrbitControls also
+  // owns/releases pointer capture exactly as it does in production.
+  await page.mouse.down();
+  await page.evaluate(({ x, y }) => {
+    const canvas = window.__engine.renderer.domElement;
+    canvas.dispatchEvent(new PointerEvent('pointercancel', {
+      bubbles: true,
+      clientX: x,
+      clientY: y,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+      button: 0,
+      buttons: 0,
+    }));
+  }, closedDoor.screen);
+  await page.mouse.up();
+  const afterPointerCancel = await page.evaluate((parcelId) => (
+    window.__engine.village.debugDoorInteraction(parcelId)
+  ), doorParcelId);
+  pass(afterPointerCancel?.progress === 0 && !afterPointerCancel.targetOpen,
+    `pointercancel clears the pending door click (${JSON.stringify(afterPointerCancel)})`);
+
+  await page.mouse.down();
+  const captureReleased = await page.evaluate(async () => {
+    const canvas = window.__engine.renderer.domElement;
+    const captured = canvas.hasPointerCapture(1);
+    if (captured) canvas.releasePointerCapture(1);
+    else canvas.dispatchEvent(new PointerEvent('lostpointercapture', {
+      bubbles: true,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    }));
+    await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame));
+    return captured;
+  });
+  await page.mouse.up();
+  const afterLostCapture = await page.evaluate((parcelId) => (
+    window.__engine.village.debugDoorInteraction(parcelId)
+  ), doorParcelId);
+  pass(afterLostCapture?.progress === 0 && !afterLostCapture.targetOpen,
+    `lostpointercapture clears the pending door click (native=${captureReleased}, `
+      + `${JSON.stringify(afterLostCapture)})`);
+
+  await page.mouse.down();
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.mouse.up();
+  const afterBlur = await page.evaluate((parcelId) => (
+    window.__engine.village.debugDoorInteraction(parcelId)
+  ), doorParcelId);
+  pass(afterBlur?.progress === 0 && !afterBlur.targetOpen,
+    `window blur clears the pending door click (${JSON.stringify(afterBlur)})`);
+
   // A pointer sequence that turns into an OrbitControls drag must never toggle the door.
   await page.mouse.down();
   await page.mouse.move(closedDoor.screen.x + 12, closedDoor.screen.y);
@@ -717,7 +811,13 @@ try {
   // Down/up must both resolve to the same unobscured moving leaf. Reverse it while
   // moving to prove the spring inherits the exact pose instead of snapping.
   await page.evaluate(() => window.__engine.debugSetPaused(true));
-  await page.mouse.click(afterDrag.screen.x, afterDrag.screen.y);
+  // OrbitControls damping can keep moving the camera for a few frames after the
+  // drag's pointerup. Freeze first, then resolve the click point from that exact
+  // frame instead of reusing the pre-freeze projection above.
+  const pausedDoorScreen = await page.evaluate((parcelId) => (
+    window.__engine.village.debugDoorScreen(parcelId)
+  ), doorParcelId);
+  await page.mouse.click(pausedDoorScreen.x, pausedDoorScreen.y);
   const openingDoor = await page.evaluate((parcelId) => {
     const engine = window.__engine;
     const targeted = engine.village.debugDoorInteraction(parcelId);
@@ -773,9 +873,26 @@ try {
   }, doorParcelId);
   pass(openDoor.state?.progress === 1 && openDoor.state.targetOpen && !openDoor.state.moving
       && Object.values(openDoor.hierarchy).every(Boolean)
-      && openDoor.programs[0] === openDoor.programs[1] && openDoor.calls[0] === openDoor.calls[1],
+      && openDoor.programs[0] === openDoor.programs[1]
+      && openDoor.calls[0] === openDoor.calls[1]
+      && openDoor.calls[0] > 0,
   `open leaf, ironwork, and seams share one hinge without program/draw drift (${JSON.stringify(openDoor)})`);
   await page.evaluate(() => window.__engine.debugSetPaused(false));
+
+  const regularDoorReleaseBeforeHop = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const root = engine.village.focusRoot();
+    const pivot = root?.getObjectByName('primary-door-pivot');
+    const panel = root?.getObjectByName('primary-opening-panel');
+    window.__regularDoorReleaseProbe = { root, pivot, panel };
+    return {
+      open: engine.village.debugDoorInteraction(parcelId)?.progress === 1,
+      pivotAttached: pivot?.parent != null,
+      panelOnPivot: panel?.parent === pivot,
+    };
+  }, doorParcelId);
+  pass(Object.values(regularDoorReleaseBeforeHop).every(Boolean),
+    `regular door release probe starts on one open attached runtime (${JSON.stringify(regularDoorReleaseBeforeHop)})`);
 
   await page.evaluate((parcelId) => window.__engine.village.switchTo(parcelId), heroId);
   await page.waitForFunction((parcelId) => {
@@ -791,6 +908,22 @@ try {
     const state = window.__engine.village.getState();
     return state.selected === parcelId && !state.transitioning;
   }, heroId, { timeout });
+
+  const regularDoorReleaseAfterHop = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const probe = window.__regularDoorReleaseProbe;
+    delete window.__regularDoorReleaseProbe;
+    return {
+      runtimeReleased: engine.village.debugDoorInteraction(parcelId) == null,
+      rootDetached: probe?.root?.parent == null,
+      pivotDetached: probe?.pivot?.parent == null,
+      pivotClosed: Math.abs(probe?.pivot?.rotation?.y || 0) < 1e-9,
+      panelRestored: probe?.panel?.parent !== probe?.pivot,
+    };
+  }, doorParcelId);
+  pass(Object.values(regularDoorReleaseAfterHop).every(Boolean),
+    `regular→hero hop releases the old runtime, closes its pivot, and restores host ownership `
+      + `(${JSON.stringify(regularDoorReleaseAfterHop)})`);
 
   const heroOpeningLifecycle = await page.evaluate(async ({ parcelId, resourcesModuleUrl }) => {
     const engine = window.__engine;

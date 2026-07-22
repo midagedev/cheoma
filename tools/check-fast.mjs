@@ -10,6 +10,7 @@ const checks = [
   './check-opening-detail-contract.mjs',
   './check-threshold-life-contract.mjs',
   './check-door-motion-contract.mjs',
+  './check-door-occlusion-contract.mjs',
   './check-building-clearance.mjs',
   './check-cinematic-turns.mjs',
   './check-cinematic-reveal.mjs',

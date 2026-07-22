@@ -10,7 +10,7 @@
 
 창호는 지붕 아래의 평면 텍스처가 아니라 출입·채광·환기 기능을 구분하는 건축 부재로 읽혀야 한다. 동시에
 일반 주택 수십 채가 반복되는 마을에서 집마다 별도 재질·텍스처·draw call을 만들 수는 없다. 이 계약은 확인된
-창호 어휘를 얕은 입체 실루엣으로 번역하고, MID/FAR와 결정론을 보존하면서 후속 문 상호작용과 생활 소품이 같은
+창호 어휘를 얕은 입체 실루엣으로 번역하고, MID/FAR와 결정론을 보존하면서 문 상호작용과 생활 소품이 같은
 출입구 데이터를 재사용하게 한다.
 
 ## 2. 확인된 사실
@@ -95,14 +95,29 @@
   반대 문설주로 점프하지 않는다. runtime은 실제 panel의 local
   폭과 중심이 순수 plan의 한 짝 범위와 0.1mm 안에서 일치할 때만 활성화한다. 문 운동은 geometry·material·
   texture·light를 새로 만들지 않고 기존 host 객체를 일시 reparent한다.
+- 필지 변주는 집을 반전하거나 X/Y/Z를 서로 다르게 늘릴 수 있다. runtime은 닫힌 panel의 affine world matrix를
+  분해하지 않고 그대로 보존하되, 경첩점에는 host scale을 상쇄한 orthonormal frame을 둔다. 따라서 문이 움직이는
+  동안 세계 공간 경첩 반경과 Gram metric이 일정하고, 닫힘·dispose 뒤에는 원래 parent/local matrix가 정확히 돌아온다.
 - 초가와 대표 종가의 암부 plane은 각각 panel 뒤 3.2cm, 5.2cm에 고정된다. 양면을 위한 네 삼각형을 기존 frame
   batch에 합쳐 닫힌 면은 바꾸지 않고 열린 깊이만 읽히게 하며, draw call·material·shader program을 늘리지 않는다.
 - 제품 입력은 선택된 FULL focus overlay 한 곳만 대상으로 한다. pointer down/up이 모두 실제로 보이는 active
   leaf 또는 열려 비워진 그 leaf의 문간에 있고 이동량이 6px 이하일 때만 toggle한다. 문간 hit는 순수 ray/plane
   교차라 보이지 않는 mesh를 만들지 않는다. Three의 recursive raycast가 숨은 조상을 자동 배제하지 않는 점을
   보완해 hit부터 선택 root까지 모든 조상의 `visible`과 raycaster layer를 검사한다. 숨은 LOD·조립 owner는 target도
-  occluder도 아니며, 보이는 담·남문·다른 채가 먼저 가리면 뒤 문을 관통해 열 수 없다. drag는 OrbitControls에
-  남으며 필지 선택으로 새지 않는다.
+  occluder도 아니다. 선택 root 밖은 전체 scene raycast 대신 먼저 얻은 문 hit까지의 유한 선분만
+  `src/runtime/village/door-occlusion.js`의 Three 없는 uniform-grid DDA로 조회한다. 고정 인덱스는 일반집의
+  계획 몸체·지붕 또는 commit된 실제 FULL bounds, 일반 필지 담 run·문설주·상인방, 종가 담·닫힌 대문·행각 지붕,
+  정자의 다각 기단·기둥 링·위로 좁아지는 지붕, 공용 소품, 사찰의 회전 전각·담 run·닫힌 대문, 궁장과 광화문,
+  도성 성벽과 열린 홍예의 육축·상인방, 시전 다각형을 작은 record로 기록한다. 전체 담 ring이나 궁궐 precinct를
+  하나의 거대 AABB로 막지 않으므로 실제 문·홍예·중정의 빈 공간은 통과한다. 실제 마당·보호수 anchor는 flora
+  생성·교체 때 별도 인덱스로 미리 만들고 겨울에는 낙엽 수관을 제외해 줄기만 차폐한다. forest/scatter는 focus
+  수목 fade가 별도로 소유하므로 중복 등록하지 않는다. 아직 성문 문루 상부, 궁궐 내부 일곽, 사찰 소품은 이
+  외부 semantic index의 범위가 아니다. 선택 root 내부는 실제 first-surface ray가 계속 담당한다. 따라서 한양의
+  수만 tree instance를 pointermove마다 순회하거나 첫 hover에서 인덱스를 만들지 않으면서 대표적인 이웃 건축·
+  담·대문·소품·근경 수목 뒤의 문을 관통 선택하지 않는다. drag는 OrbitControls에 남으며 필지 선택으로 새지 않는다.
+- 첫 accepted `pointerdown`이 pointerId 소유권을 얻는다. mouse와 touch가 각자 primary여도 뒤 포인터가 이를
+  덮어쓰지 못하고, 일치하는 `pointerup`만 click을 완성한다. `pointercancel`, `lostpointercapture`, window blur는
+  해당 소유권을 해제해 오래된 down hit가 다음 입력에서 문을 열지 못하게 한다.
 - focus-out, LOD 전환, reroll, rebuild와 dispose는 문을 닫고 원래 parent/local transform을 복원한 뒤 빈 pivot을
   제거한다. persistent overlay도 다시 focus될 때 닫힌 새 runtime을 얻는다. listener와 GPU resource의 수명은
   builder/handle 소유권 밖으로 새지 않는다.
@@ -136,21 +151,30 @@
   placement signature, JSON-safe deep freeze, 객체·BigInt seed 결정론, 전역 RNG 비의존을 검사한다.
 - `npm run check:door-motion`: 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠, 중간 반전 무스냅,
   정확한 정착과 idempotent dispose를 검사한다.
+- `npm run check:door-occlusion`: ㄱ·ㄷ 빈 마당 통과와 실제 wing 차폐, 일반 담/대문 개구, 정자 외접 상자의
+  빈 모서리·기둥·수렴 지붕, 공용 소품, 사찰 중정·회전 전각·담/문, 궁장/광화문, 도성 성벽/홍예, 시전 다각형,
+  선택 host만 제외하는 owner 규칙, 회전된 commit bounds, 여름 수관/겨울 줄기, 필지·flora 원자 refresh와 유한
+  선분 DDA 후보 상한을 Three·DOM 없이 검사한다.
 - `npm run check:building-clearance`: 실제 궁·사찰·일반 기와·초가·대표 종가 production geometry에서
   frame/hardware가 각각 한 batch이고, primary entrance가 하나이며 철물이 MID에 섞이지 않는지 검사한다. 초가
-  기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ은 planner와 실제 패널의 개수·폭, 부엌 분리, 메시·재질 상한도 함께 검사하고,
+  기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ은 planner와 실제 패널의 개수·폭, 부엌 분리, 메시·재질 상한뿐 아니라
+  각 fixture의 닫힘/중간/열림 picking·안쪽 swing·dispose까지 함께 검사하고,
   `-1.4×0.7×1.25` mirror·비등방 host basis에서도 신발 pair의 세계 length/width가 바뀌지 않는지 확인한다.
   기와 ㅡ·ㄱ·ㄷ × 대청 좌우 primary seed × 최소·기본·최대 문 폭/개수 18개 production fixture는 실제 툇마루
   bounds 안에 신발이 남고 리턴 난간·대청 바닥·출입구와 겹치지 않는지도 검사한다.
-  같은 production fixture의 moving owner가 정확히 한 짝 폭인지, 회전 반경과 안쪽 sweep, 닫힘/중간/열림 picking,
-  frame 고정, panel/청판/seam/hardware 강체 동행, 고정 암부의 ray 깊이, 숨은 조상·layer 배제와 host 복원도 검사한다.
+  같은 production fixture의 moving owner가 정확히 한 짝 폭인지, 반전·비등방 host에서도 세계 경첩 반경과
+  Gram metric이 일정한지, 안쪽 sweep, 닫힘/중간/열림 picking, frame 고정, panel/청판/seam/hardware 강체 동행,
+  고정 암부의 ray 깊이, 숨은 조상·layer 배제와 host 복원도 검사한다. 선택 root 밖의 가림은 위 순수 semantic
+  gate와 실제 앱 입력 경로가 맡는다.
 - `npm run check:app`: 네 기와집 topology가 `hardware` 재질 하나를 공유하고 FULL decomp마다 한 그룹만 가지며,
   일반 기와↔초가와 대표 종가 rebuild가 anchor/panel/frame/hardware를 정확히 하나씩 교체·해제하는지 검사한다.
   정적 마을에는 신발이 없고 focus에서만 한 batch가 생기는지, 실제 clear→rain 전환이 짚신→나막신으로 바뀌며
   이전 자원을 한 번만 해제하는지, focus-out이 이를 회수하는지도 재질·텍스처·program 상한 및 실제 Reference UI와
   함께 검사한다. 또한
-  실제 초가 focus에서 hover/click/drag/중간 반전과 열린 문간 close action이 동작하는지, 숨은 owner를 고르거나
-  compound 차폐를 관통하지 않는지, 대표 종가 rebuild가 세 opening geometry를 정확히 한 번 해제하는지 검사한다.
+  실제 초가 focus에서 hover/click/drag/중간 반전과 열린 문간 close action이 동작하는지, 교차 pointer type·
+  cancel·lost capture·blur가 click 소유권을 깨뜨리지 않는지, 숨은 owner를 고르거나
+  compound 차폐를 관통하지 않는지, 초가→대표 종가 hop이 이전 runtime·pivot·host graph를 회수하는지,
+  대표 종가 rebuild가 네 opening/threshold geometry를 정확히 한 번 해제하는지 검사한다.
   별도 실제 capital/town 앱은 궁·사찰과 `heroStyle: 'palace'` 관아 focus에 runtime·screen target·pivot이 생기지
   않는 의미 기반 범위 제한을 검사한다.
 - 시각 판정은 같은 seed·카메라·시간의 전후 PNG를 직접 비교한다. 프레임이 창호지를 과도하게 가리거나 검은

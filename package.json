@@ -21,6 +21,7 @@
     "check:opening-detail": "node tools/check-opening-detail-contract.mjs",
     "check:threshold-life": "node tools/check-threshold-life-contract.mjs",
     "check:door-motion": "node tools/check-door-motion-contract.mjs",
+    "check:door-occlusion": "node tools/check-door-occlusion-contract.mjs",
     "check:winter:app": "node tools/check-winter-app.mjs",
     "check:ink:app": "node tools/check-ink-app.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",

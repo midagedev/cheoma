@@ -854,7 +854,30 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
   }
   let downPos = null;
+  function clearCanvasPointerDown(e = null) {
+    // A secondary pointer or an unrelated lost-capture notification must not
+    // cancel the primary gesture that currently owns the click candidate.
+    if (e?.pointerId != null && downPos?.pointerId !== e.pointerId) {
+      // If its down was rejected in capture phase, reject its cancel there too;
+      // OrbitControls cannot reconcile a cancel for a pointer it never tracked.
+      if (e.type === 'pointercancel') e.stopImmediatePropagation();
+      return;
+    }
+    downPos = null;
+  }
   function onCanvasPointerDown(e) {
+    if (e.isPrimary === false || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    // Pointer Events defines `isPrimary` per pointer type, so a mouse and a
+    // touch contact can both be primary at once. The first accepted pointer
+    // owns this click candidate until up/cancel/lost-capture/blur; a second
+    // device must not replace its door hit and leave the original up orphaned.
+    if (downPos && downPos.pointerId !== e.pointerId) {
+      // Run this handler in capture phase so an unrelated primary device cannot
+      // enter OrbitControls' pointer set either. Its own cancel/up would otherwise
+      // be able to terminate or corrupt the mouse gesture that already owns us.
+      e.stopImmediatePropagation();
+      return;
+    }
     // 시네마틱 데모 중 캔버스 입력(#112): 드론(수동관람)은 탭/클릭 = 종료. 1인칭은 드래그가 시선 조작이라
     //   종료하지 않음(ESC·오버레이 종료 버튼으로만 나간다).
     if (demo.active) { if (demo.mode !== 'walk') stopDemo(); return; }
@@ -863,7 +886,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       setVillageRay(e.clientX, e.clientY);
       if (village.handle.raycastPrimaryDoor?.(raycaster, village.selected)) doorId = village.selected;
     }
-    downPos = { x: e.clientX, y: e.clientY, doorId };
+    downPos = { x: e.clientX, y: e.clientY, doorId, pointerId: e.pointerId };
     // 터치엔 호버가 없으므로 탭 시작 순간 미니 라벨을 잠깐 띄운다(선택 시 villageSelectStart 가 지움).
     //   focus 중에도 허용(#95) — 다른 필지 탭 예고(villageHover 가 현 focus 필지 자신은 제외).
     if (e.pointerType === 'touch' && village.active && !village.transitioning && !villageWaveBusy()) {
@@ -874,9 +897,18 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function onCanvasPointerUp(e) {
     ensureAudio()?.start();
     if (!downPos) return;
+    if (e.pointerId !== downPos.pointerId) return;
+    // Explicit capture release may report hasPointerCapture=false before the
+    // queued lostpointercapture event reaches this element. Treat that up as a
+    // cancelled gesture; a normal OrbitControls pointerup still owns capture
+    // until its document-level listener runs later in the bubbling path.
+    if (renderer.domElement.hasPointerCapture?.(e.pointerId) === false) {
+      clearCanvasPointerDown(e);
+      return;
+    }
     const pointerDown = downPos;
     const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
-    downPos = null;
+    clearCanvasPointerDown(e);
     if (moved > 6) return;             // 드래그(궤도 회전)는 선택으로 치지 않음
     if (village.active) {
       if (villageWaveBusy() || village.transitioning) return;     // 웨이브 빌드·애니·전환 중 클릭 무시
@@ -908,8 +940,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (h && !state.selected) { selectBuilding(); }
   }
   renderer.domElement.addEventListener('pointermove', onCanvasPointerMove);
-  renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
+  renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown, true);
   renderer.domElement.addEventListener('pointerup', onCanvasPointerUp);
+  renderer.domElement.addEventListener('pointercancel', clearCanvasPointerDown, true);
+  renderer.domElement.addEventListener('lostpointercapture', clearCanvasPointerDown);
+  addEventListener('blur', clearCanvasPointerDown);
   // #14: 휠·핀치는 현재 보기 안에서 OrbitControls 거리만 바꾼다. 집 선택은 클릭/명시 API,
   //   둘러보기 복귀는 브레드크럼·ESC·모드 버튼만 소유해 거리 임계가 상태를 몰래 바꾸지 않는다.
 
@@ -2727,8 +2762,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       removeEventListener('resize', resizeAll);
       for (const ev of activityEvents) removeEventListener(ev, markActivity);
       renderer.domElement.removeEventListener('pointermove', onCanvasPointerMove);
-      renderer.domElement.removeEventListener('pointerdown', onCanvasPointerDown);
+      renderer.domElement.removeEventListener('pointerdown', onCanvasPointerDown, true);
       renderer.domElement.removeEventListener('pointerup', onCanvasPointerUp);
+      renderer.domElement.removeEventListener('pointercancel', clearCanvasPointerDown, true);
+      renderer.domElement.removeEventListener('lostpointercapture', clearCanvasPointerDown);
+      removeEventListener('blur', clearCanvasPointerDown);
       focusRing.dispose();
       nightGlowRef?.dispose?.();
       audio?.dispose?.();

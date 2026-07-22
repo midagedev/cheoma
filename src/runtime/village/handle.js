@@ -61,6 +61,7 @@ import { createThresholdLifeRuntime } from './threshold-life.js';
 import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
 import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
 import { createPrimaryDoorRuntime } from '../../interaction/primary-door.js';
+import { createVillageDoorOcclusion } from './door-occlusion.js';
 
 const PERSISTENT_YARD_FIELDS = Object.freeze([
   'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed',
@@ -106,6 +107,19 @@ export function createVillageHandle(opts, seed, plan, group) {
   const withSeededBuild = withVillageRandomSeed;
   const handle = group.userData.houseHandle;   // { giwa, choga } InstancedMesh 그룹(또는 null)
   const treeOccluder = group.getObjectByName('village-trees')?.userData?.occluder || null;
+  // Pointer input must not raycast Hanyang's tens of thousands of visible
+  // instances. Build a renderer-free semantic grid once, then refresh only the
+  // parcel/flora records whose authoritative plan data actually changes.
+  const primaryDoorOcclusion = createVillageDoorOcclusion({
+    plan,
+    site,
+    yardTrees: group.userData.yardTreeAnchors,
+    guardianTrees: group.userData.guardianAnchors,
+  });
+  const primaryDoorOcclusionQuery = {
+    excludeParcelId: null,
+    season: 'summer',
+  };
 
   // ── 편집 오버레이 계층: rebuildParcel 이 만든 개별(풀디테일) 필지를 담는다. ──
   const overrides = new THREE.Group(); overrides.name = 'village-overrides';
@@ -627,6 +641,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     const flora = group.userData.replaceFlora?.(season);
     if (!flora) return null;
     fauna.setTreePerches(flora.guardianAnchors, flora.yardTreeAnchors);
+    primaryDoorOcclusion.refreshFlora(flora);
     representationDirty = true;
     return flora;
   }
@@ -739,6 +754,15 @@ export function createVillageHandle(opts, seed, plan, group) {
     },
     raycastPrimaryDoor(raycaster, parcelId) {
       const hit = primaryDoorById.get(parcelId)?.raycast(raycaster);
+      if (hit) {
+        primaryDoorOcclusionQuery.excludeParcelId = parcelId;
+        primaryDoorOcclusionQuery.season = season;
+        if (primaryDoorOcclusion.find(
+          raycaster.ray,
+          hit.distance,
+          primaryDoorOcclusionQuery,
+        )) return null;
+      }
       return hit ? {
         distance: hit.distance,
         point: hit.point.clone(),
@@ -912,10 +936,18 @@ export function createVillageHandle(opts, seed, plan, group) {
       // envelope in parcel-local coordinates. Runtime flora consumes it instead
       // of guessing from the original instanced variant.
       house.updateWorldMatrix(true, true);
-      const roofBox = new THREE.Box3().setFromObject(house);
+      const buildingBox = new THREE.Box3().setFromObject(house);
       const editRoofBounds = {
-        minX: roofBox.min.x, maxX: roofBox.max.x,
-        minZ: roofBox.min.z, maxZ: roofBox.max.z,
+        minX: buildingBox.min.x, maxX: buildingBox.max.x,
+        minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+      };
+      // Exact committed FULL obstruction in the parcel's unrotated local frame.
+      // Door picking consumes this alongside baseY instead of reconstructing an
+      // edited/cross-kind house from the original variant and stale sx/sy/sz.
+      const editBuildingBounds = {
+        minX: buildingBox.min.x, maxX: buildingBox.max.x,
+        minY: buildingBox.min.y, maxY: buildingBox.max.y,
+        minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
       };
       // 담·마당(개별) — 유형·부속채 어휘 + 마당 소품 편집(#96). newParams 오버라이드 우선, 없으면 필지 원본값.
       const wallType = parcelWallType(gk, newParams.wallType ?? parcel.wallType);
@@ -940,6 +972,8 @@ export function createVillageHandle(opts, seed, plan, group) {
           if (newParams[key] !== undefined) parcel[key] = newParams[key];
         }
         parcel.editRoofBounds = editRoofBounds;
+        parcel.editBuildingBounds = editBuildingBounds;
+        primaryDoorOcclusion.refreshParcel({ ...parcel, kind: gk });
         const spec = buildEditedParcelSpec(parcel, newParams, acceptedBuilding);
         const proxy = proxyById.get(parcelId);
         if (proxy) refreshParcelPickProxy(proxy, parcel, site, spec, proxies, plan);

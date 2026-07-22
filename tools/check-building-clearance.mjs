@@ -291,6 +291,16 @@ for (const fixture of production.residentialFixtures) {
     `${fixture.name} broke building-wide detail batching`);
   invariant(fixture.details.counts.primaryAnchor === 1 && fixture.details.counts.primaryPanel === 1,
     `${fixture.name} lost the future interaction anchor`);
+  const runtime = fixture.details.doorRuntime;
+  invariant(runtime?.pickedClosed && runtime.pickedMidAction && runtime.pickedOpenAction
+      && runtime.inward && runtime.frameFixed
+      && runtime.closedOnDispose && runtime.pivotRemoved && runtime.hostRestored,
+    `${fixture.name} variable residential door lost runtime motion, picking, or disposal `
+      + `(${JSON.stringify(runtime)})`);
+  invariant(runtime.hiddenPanelRejected && runtime.hiddenAncestorRejected
+      && runtime.ownerLayerRejected && runtime.hiddenRootRejected,
+    `${fixture.name} variable residential door ignored visible/layer ownership `
+      + `(${JSON.stringify(runtime)})`);
   invariant(fixture.kitchenCount === 1, `${fixture.name} lost its separate kitchen service opening`);
   invariant(fixture.meshes < 280 && fixture.materials < 80,
     `${fixture.name} exceeded FULL budget (${fixture.meshes} meshes/${fixture.materials} materials)`);
