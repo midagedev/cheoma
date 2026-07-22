@@ -10,7 +10,8 @@ import { PRESETS } from '../../params.js';
 import { buildBuilding } from '../../builder/index.js';
 import { buildParcel } from '../../layout/parcel.js';
 import { makeMaterials, applyThatchAge } from '../../builder/palette.js';
-import { buildPalaceCompound } from '../../village/palace.js';
+import { resolveDancheong } from '../../builder/dancheong.js';
+import { buildPalaceCompound, disposePalaceCompound } from '../../village/palace.js';
 import { buildTempleCompound, disposeTempleCompound } from '../../temple/compound.js';
 import {
   TEMPLE_VARIANT_SPECS,
@@ -363,6 +364,8 @@ export function createVillageHandle(opts, seed, plan, group) {
   const palaceHandle = palaceCompound ? (palaceCompound.userData.palaceHandle || null) : null;
   let palaceOverride = null;     // { group, comp } 표시 중 오버레이
   let palaceHidden = false;      // palaceCore 은닉 여부
+  let palaceCurrentOverrides = {};
+  let palaceDancheong = resolveDancheong('palace', palaceHandle?.dancheong || PRESETS.korea);
   const palaceEditable = () => !!(palaceCompound && palaceInner && palaceHandle);
 
   // 편집 오버레이 컴파운드 — 원본과 동일 배치·재질·seed 로 재생성, presetOverrides 만 얹는다.
@@ -374,8 +377,8 @@ export function createVillageHandle(opts, seed, plan, group) {
     const comp = buildPalaceCompound({
       w: ph.regionW, d: ph.regionD, tier: ph.tier, variant: ph.variant,
       seed: ph.seed != null ? ph.seed : 5,
-      mats: palaceCompound.userData.mats,           // 텍스처·재질 공유(픽셀 정합)
       presetOverrides: presetOverrides || null,      // 코어 B 미반영 빌드에선 palace.js 가 무시(안전)
+      dancheong: palaceDancheong,
     });
     g.add(comp);
     g.rotation.y = palaceInner.rotation.y;
@@ -384,8 +387,16 @@ export function createVillageHandle(opts, seed, plan, group) {
   }
   function showPalaceDetail(presetOverrides) {
     if (!palaceEditable()) return null;
+    if (presetOverrides) {
+      palaceCurrentOverrides = { ...palaceCurrentOverrides, ...presetOverrides };
+      palaceDancheong = resolveDancheong('palace', {
+        ...palaceDancheong,
+        ...palaceCurrentOverrides,
+      });
+    }
     hidePalaceDetail();
-    const g = buildPalaceOverlay(presetOverrides);
+    const activeOverrides = Object.keys(palaceCurrentOverrides).length ? palaceCurrentOverrides : null;
+    const g = buildPalaceOverlay(activeOverrides);
     overrides.add(g);
     palaceOverride = { group: g, comp: g.children[0] };
     if (palaceVisNode) palaceVisNode.visible = false; palaceHidden = true;   // #140-B 부감 병합본(또는 미병합 폴백) 은닉
@@ -394,10 +405,10 @@ export function createVillageHandle(opts, seed, plan, group) {
   }
   function hidePalaceDetail() {
     const changed = !!palaceOverride || palaceHidden;
-    // 오버레이는 원본 palaceCore 와 재질(mats)을 공유하므로 지오메트리만 dispose — 재질을 dispose 하면
-    //   focus-out 후 되살린 palaceCore 가 깨진 재질로 렌더된다. (지오는 buildPalaceCompound 마다 신규.)
     if (palaceOverride) {
-      palaceOverride.group.traverse((o) => { if (o.geometry) o.geometry.dispose?.(); });
+      // 오버레이는 독립 팔레트를 소유한다. 원본과 texture source 픽셀은 캐시해도 Texture/Material
+      // 객체는 공유하지 않으므로 다른 궁의 단청 상태와 dispose 수명이 서로 오염되지 않는다.
+      disposePalaceCompound(palaceOverride.comp);
       overrides.remove(palaceOverride.group); palaceOverride = null;
     }
     if (palaceHidden && palaceVisNode) { palaceVisNode.visible = true; palaceHidden = false; }   // #140-B 병합본 복원
@@ -411,7 +422,12 @@ export function createVillageHandle(opts, seed, plan, group) {
     return {
       parcelId: 'palace', family: 'palace-compound', style: 'palace', palace: true,
       tier, editable: palaceEditable(),
-      params: palaceCompoundDefaults(),
+      params: {
+        ...palaceCompoundDefaults(),
+        ...palaceCurrentOverrides,
+        dancheongClarity: palaceDancheong.dancheongClarity,
+        dancheongSplendor: palaceDancheong.dancheongSplendor,
+      },
     };
   }
 
@@ -434,6 +450,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   const templeVariantOptions = templeVariantsForSize(templeLimit);
   let templeSeed = templeHandle?.seed ?? templeFeature?.seed ?? 11;
   let templeCurrentPlan = templeHandle?.plan || templeFeature?.compound || null;
+  let templeDancheong = resolveDancheong('temple', templeHandle?.dancheong || PRESETS.temple);
   let templeOverride = null; // { group, compound }
   let templeHidden = false;
   const templeEditable = () => !!(templeCompound && templeInner && templeCurrentPlan);
@@ -459,11 +476,12 @@ export function createVillageHandle(opts, seed, plan, group) {
   }
 
   function buildTempleOverlay(options) {
+    templeDancheong = resolveDancheong('temple', { ...templeDancheong, ...options });
     templeCurrentPlan = templePlanFromOptions(options);
     const wrapper = new THREE.Group();
     wrapper.name = 'temple-override';
     wrapper.userData.snowRoofKind = 'giwa';
-    const compound = buildTempleCompound(templeCurrentPlan, { mats: templeCompound.userData.mats });
+    const compound = buildTempleCompound(templeCurrentPlan, { dancheong: templeDancheong });
     wrapper.add(compound);
     wrapper.rotation.y = templeInner.rotation.y;
     wrapper.position.copy(templeInner.position);
@@ -522,7 +540,12 @@ export function createVillageHandle(opts, seed, plan, group) {
           ? 1
           : TEMPLE_VARIANT_SPECS[current.variant].maxHalls,
       } : { min: 1, max: 2 },
-      params: current ? { variant: current.variant, ...current.settings } : {},
+      params: current ? {
+        variant: current.variant,
+        ...current.settings,
+        dancheongClarity: templeDancheong.dancheongClarity,
+        dancheongSplendor: templeDancheong.dancheongSplendor,
+      } : {},
     };
   }
 

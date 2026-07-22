@@ -17,7 +17,7 @@ export { disposeBuilding };
 //   전각 경계까지 무너지게 한다(드로우콜 −). 미지정(마을 giwa/choga·히어로)이면 전과 동일하게
 //   호출마다 새 재질셋 — 옵트인이라 기존 경로는 바이트 불변.
 export function buildBuilding(P) {
-  const M = P.mats || makeMaterials(P.style || 'palace');
+  const M = P.mats || makeMaterials(P.style || 'palace', P);
   // 창호 살 패턴 변주(#55) — 부재 조립 전에 창호 텍스처 교체(문짝 클론이 새 패턴 상속).
   //   공유 재질(P.mats)에는 적용하지 않는다: M.door.map 교체가 재질셋을 공유하는 다른 전각·행각까지
   //   전파되기 때문. 궁 경로는 doorPattern 을 쓰지 않으므로 실질 무영향(방어적 가드).

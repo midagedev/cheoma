@@ -1,6 +1,8 @@
 // 파라미터 정의와 프리셋.
 // 길이 단위: 미터. 칸 폭은 어칸(중앙) > 협칸 > 퇴칸(끝) 순으로 좁아진다.
 
+import { DANCHEONG_DEFAULTS } from './builder/dancheong.js';
+
 export const PRESETS = {
   korea: {
     label: 'Korea · Joseon Hall (dapo, hip-and-gable)',
@@ -49,6 +51,7 @@ export const PRESETS = {
 
     // 기단/스타일
     podiumRailing: true,   // 월대 돌난간 (궁 전용)
+    ...DANCHEONG_DEFAULTS.palace,
     style: 'palace',       // palace | temple — 재질/창호/단청 계열 선택
   },
 
@@ -82,6 +85,7 @@ export const PRESETS = {
     hipBreak: 0.50,
     ridgeH: 0.4, doubleEave: true,
 
+    ...DANCHEONG_DEFAULTS.temple,
     style: 'temple',
   },
 

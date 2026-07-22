@@ -8,9 +8,16 @@ export {
   srgbHexToLinear3,
 } from '../builder/material-colors.js';
 export { buildBuilding, disposeBuilding } from '../builder/index.js';
+export {
+  DANCHEONG_BUCKET_STEPS,
+  DANCHEONG_DEFAULTS,
+  dancheongGrade,
+  resolveDancheong,
+  resolveTempleRoleDancheong,
+} from '../builder/dancheong.js';
 export { buildParcel } from '../layout/parcel.js';
 export { buildHanok } from '../layout/hanok.js';
-export { buildPalaceCompound } from '../village/palace.js';
+export { buildPalaceCompound, disposePalaceCompound } from '../village/palace.js';
 export {
   getTofuBounce,
   playAssembly,

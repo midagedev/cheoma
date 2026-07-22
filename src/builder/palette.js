@@ -4,6 +4,11 @@ import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
   CLOUD_SHADOW_VERT_DECL, CLOUD_SHADOW_VERT_BODY,
 } from '../env/clouds.js';
+import {
+  dancheongSourceKey,
+  paintDancheongSource,
+  resolveDancheong,
+} from './dancheong.js';
 
 // 캔버스 텍스처의 무작위 얼룩·짚결·막돌은 기본 Math.random 을 쓴다. 다만 마을 재현 렌더
 // (같은 seed → 픽셀 동일)를 위해 외부에서 시드 가능한 난수원으로 교체할 수 있다.
@@ -72,124 +77,42 @@ function makeDoorTexture() {
   return tex;
 }
 
-// 창방·평방 머리초 띠: 뇌록 바탕 + 부재 끝 색동(백·적·청·황) 반복.
-// compact=true(절): 색동 폭을 줄이고 청록 위주로 더 소박하게.
-function makeDancheongBandTexture(compact = false) {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = compact ? '#4a6357' : '#4f6c60'; // 뇌록 바탕(실물 회청록)
-  g.fillRect(0, 0, 512, 64);
-  // 한 반복 = 한 칸: 양 끝에 머리초 색동
-  const bands = compact
-    ? ['#d8d2c2', '#4e6b52', '#3e5f9e', '#4e6b52', '#8e4a35'] // 청록 위주·소박
-    : ['#e8e4d8', '#8e4a35', '#3e5f9e', '#c8a34a', '#8e4a35', '#e8e4d8'];
-  const bw = compact ? 7 : 11;                   // 색동 폭
-  for (const x0 of [0, 512 - bands.length * bw]) {
-    bands.forEach((col, i) => {
-      g.fillStyle = col;
-      g.fillRect(x0 + i * bw, 0, bw, 64);
-    });
+// 단청 source는 불변 Canvas로 캐시하고 Texture/Material 소유권은 각 팔레트에 둔다. 따라서
+// 서로 다른 궁·사찰이 동시에 있어도 한쪽의 슬라이더가 다른 쪽 픽셀을 바꾸지 않으며, 개별 건물
+// dispose가 다른 팔레트의 texture를 끊지 않는다. 8구간(9레벨)×2축은 충분히 연속적으로 보이되 LRU가
+// 에이전트의 반복 편집 세션에서 source 참조를 무한히 쌓지 않게 한다.
+const DANCHEONG_SOURCE_CACHE_MAX = 96;
+const dancheongSourceCache = new Map();
+
+function dancheongSource(kind, config) {
+  const key = dancheongSourceKey(config, kind);
+  const hit = dancheongSourceCache.get(key);
+  if (hit) {
+    dancheongSourceCache.delete(key);
+    dancheongSourceCache.set(key, hit);
+    return hit;
   }
-  // 백색 긋기 라인 (상하)
-  g.fillStyle = 'rgba(232,228,216,0.9)';
-  g.fillRect(0, 4, 512, 3);
-  g.fillRect(0, 57, 512, 3);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  const canvas = document.createElement('canvas');
+  canvas.width = kind === 'band' ? 512 : 64;
+  canvas.height = 64;
+  paintDancheongSource(canvas, kind, config);
+  dancheongSourceCache.set(key, canvas);
+  while (dancheongSourceCache.size > DANCHEONG_SOURCE_CACHE_MAX) {
+    dancheongSourceCache.delete(dancheongSourceCache.keys().next().value);
+  }
+  return canvas;
+}
+
+function makeDancheongTexture(kind, config) {
+  const tex = new THREE.CanvasTexture(dancheongSource(kind, config));
+  if (kind === 'band') tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.userData.dancheongSourceKey = dancheongSourceKey(config, kind);
   return tex;
 }
 
-// 절 창방·평방: 세월에 바랜 퇴색 금단청. 고재 바탕 위에 뇌록 도막이 얼룩덜룩 남고,
-// 부재 끝 머리초 색동은 채도가 죽어 은은히 비친다("단청이 있(었)다"가 읽히되 궁보다 낮은 채도).
-function makeTempleDancheongBandTexture() {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = '#7c6a4b';                         // 바랜 고재 바탕
-  g.fillRect(0, 0, 512, 64);
-  g.fillStyle = 'rgba(74,99,88,0.70)';             // 퇴색 뇌록 도막(반투명 — 고재 비침)
-  g.fillRect(0, 0, 512, 64);
-  for (let i = 0; i < 64; i++) {                    // 도막 벗겨짐(고재 노출) 얼룩
-    const x = _texRand() * 512, y = _texRand() * 64, r = 3 + _texRand() * 11;
-    g.fillStyle = `rgba(126,106,74,${0.10 + _texRand() * 0.20})`;
-    g.beginPath(); g.ellipse(x, y, r, r * 0.6, 0, 0, Math.PI * 2); g.fill();
-  }
-  // 부재 끝 머리초 색동(퇴색): 낮은 채도 회록·벽돌빛·바랜 청·황토
-  const bands = ['#c4b99e', '#96604d', '#5f7986', '#ab9560', '#96604d'];
-  const bw = 8;
-  g.globalAlpha = 0.80;
-  for (const x0 of [0, 512 - bands.length * bw]) {
-    bands.forEach((col, i) => { g.fillStyle = col; g.fillRect(x0 + i * bw, 0, bw, 64); });
-  }
-  g.globalAlpha = 1;
-  g.fillStyle = 'rgba(198,188,162,0.45)';          // 바랜 백색 긋기
-  g.fillRect(0, 5, 512, 2); g.fillRect(0, 57, 512, 2);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// 공포 부재 마구리(살미·첨차 끝) 연화 문양: 뇌록/회록 바탕에 백 연판 8엽 + 적 씨방.
-// faded=true(절): 채도를 낮춰 퇴색.
-function makeYeonhwaTexture(faded = false) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const cx = 32, cy = 32;
-  const p = faded
-    ? { bg: '#586a5e', petal: '#c3b79c', edge: '#7f8f96', center: '#96604d', dot: '#9a844f' }
-    : { bg: '#3e5f4e', petal: '#ece7d6', edge: '#2f5f9e', center: '#b23a2a', dot: '#d9b24a' };
-  g.fillStyle = p.bg; g.fillRect(0, 0, 64, 64);
-  for (let i = 0; i < 8; i++) {                     // 연판 8엽
-    const a = (i / 8) * Math.PI * 2;
-    g.save(); g.translate(cx, cy); g.rotate(a);
-    g.fillStyle = p.petal;
-    g.beginPath(); g.ellipse(0, -16, 5, 11, 0, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = p.edge; g.lineWidth = 1.2; g.stroke();
-    g.restore();
-  }
-  g.fillStyle = p.center; g.beginPath(); g.arc(cx, cy, 8, 0, Math.PI * 2); g.fill();  // 씨방
-  g.fillStyle = p.dot; g.beginPath(); g.arc(cx, cy, 3.2, 0, Math.PI * 2); g.fill();
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// 연목초(椽木椒): 연목(둥근 서까래) 끝 목재용 컬러 마구리 문양. 청·황·적 동심원 + 백 중심.
-// 회색 수막새(와당)와 구분되는 목부재 단청. faded=true(절): 퇴색 톤.
-function makeYeonmokchoTexture(faded = false) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const cx = 32, cy = 32;
-  const p = faded
-    ? { rim: '#495047', blue: '#5f7986', yellow: '#ab9560', red: '#96604d', white: '#c4b99e', dot: '#463d31' }
-    : { rim: '#2b3830', blue: '#2f5f9e', yellow: '#d9b24a', red: '#b23a2a', white: '#ece7d6', dot: '#2b2724' };
-  const rings = [[30, p.rim], [26, p.blue], [19, p.yellow], [12, p.red], [6, p.white]];
-  for (const [r, col] of rings) { g.fillStyle = col; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill(); }
-  g.fillStyle = p.dot; g.beginPath(); g.arc(cx, cy, 2.4, 0, Math.PI * 2); g.fill();
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// 부연초: 부연(사각 서까래) 끝 사각 마구리 문양. 청 테두리 + 적 안쪽 + 백 중심(동심 사각).
-function makeBujeonchoTexture(faded = false) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const p = faded
-    ? { edge: '#495047', blue: '#5f7986', red: '#96604d', white: '#c4b99e', dot: '#463d31' }
-    : { edge: '#2b3830', blue: '#2f5f9e', red: '#b23a2a', white: '#ece7d6', dot: '#2b2724' };
-  const sq = (inset, col) => { g.fillStyle = col; g.fillRect(inset, inset, 64 - 2 * inset, 64 - 2 * inset); };
-  sq(0, p.edge); sq(8, p.blue); sq(18, p.red); sq(27, p.white);
-  g.fillStyle = p.dot; g.fillRect(29, 29, 6, 6);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+export function dancheongSourceCacheStats() {
+  return { size: dancheongSourceCache.size, max: DANCHEONG_SOURCE_CACHE_MAX };
 }
 
 // 합각/박공면. 'palace' = 붉은 세로 널, 'temple' = 노출 가구(가로 도리 + 황토 패널).
@@ -617,8 +540,39 @@ function makeMaruTexture() {
   return tex;
 }
 
+const standard = (color, roughness = 0.85, extra = {}) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.0, ...extra });
+
+function dancheongMaterials(style, input) {
+  const config = resolveDancheong(style, input);
+  if (!config) return null;
+  const temple = style === 'temple';
+  return {
+    dancheong: config,
+    beamDancheong: standard(0xffffff, 0.86, { map: makeDancheongTexture('band', config) }),
+    bracket: standard(temple ? 0x526f5e : KOREA_COLORS.noerok, 0.85),
+    bracketAlt: standard(temple ? 0x98533f : KOREA_COLORS.juhong, 0.85),
+    bracketFace: standard(0xffffff, 0.85, { map: makeDancheongTexture('face', config) }),
+    yeonmokcho: standard(0xffffff, 0.85, { map: makeDancheongTexture('round', config) }),
+    bujeoncho: standard(0xffffff, 0.85, { map: makeDancheongTexture('square', config) }),
+    rafter: standard(temple ? 0x526f5e : KOREA_COLORS.noerok, 0.85),
+    rafterEnd: standard(temple ? 0xd2c7ad : KOREA_COLORS.baek, 0.8),
+    accentBlue: standard(KOREA_COLORS.samcheong, 0.85),
+  };
+}
+
+// 한 컴파운드 안의 격식 위계용 얕은 팔레트. 비단청 리소스는 base를 그대로 빌리고,
+// 단청 9재질/4텍스처만 이 변형이 소유한다. 프로그램 종류는 MeshStandard 하나로 불변이다.
+export function makeDancheongVariant(base, input) {
+  const variation = dancheongMaterials(base?.style, input);
+  if (!variation) return base;
+  const palette = { ...base, ...variation };
+  tagRoles(palette);
+  return palette;
+}
+
 // style: 'palace'(궁·다포) | 'temple'(절·주심포) | 'choga'(민가·볏짚) | 'giwa'(반가·기와). 벽·창호·재료 계열을 바꾼다.
-export function makeMaterials(style = 'palace') {
+export function makeMaterials(style = 'palace', options = {}) {
   const C = KOREA_COLORS;
   const temple = style === 'temple';
   const choga = style === 'choga';
@@ -626,8 +580,8 @@ export function makeMaterials(style = 'palace') {
   //   (#139) 종전엔 'hanok' 이 어느 분기도 안 걸려 궁 기본값(석간주 붉은 기둥·회색 회벽)으로
   //   폴백 → 반가가 궁 목재 톤으로 렌더됐다. 마을 인스턴스는 makeMaterials('giwa') 별경로라 불침해.
   const giwa = style === 'giwa' || style === 'hanok';
-  const std = (color, rough = 0.85, extra = {}) =>
-    new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.0, ...extra });
+  const std = standard;
+  const dancheong = dancheongMaterials(style, options);
 
   // 벽: 회벽(궁) / 황토벽(절) / 심벽 회백(초가) / 흰 회벽(기와집 반가)
   const wallMat = temple
@@ -661,28 +615,30 @@ export function makeMaterials(style = 'palace') {
   // 기와집 백골 기둥·창방이 역광에서 숯색으로 죽지 않게 미량 emissive(따뜻한 백골 유지).
   const woodExtra = giwa ? { emissive: 0x2a2015 } : {};
 
+  // 결정론 호환: 구 사찰 band painter는 이 정확한 지점에서 얼룩 64개×4회 RNG를 소비했다.
+  // 새 단청 픽셀은 source key 전용 RNG라 전역값에 의존하지 않지만, 뒤이어 조립되는 담·소품의
+  // seeded stream을 이동시키지 않도록 소비 위치/횟수만 보존한다(worker/sync scene golden 계약).
+  if (temple) for (let index = 0; index < 64 * 4; index++) _texRand();
+
   const M = {
     colors: C,
     style,
+    dancheong: dancheong?.dancheong || null,
     wood: std(woodCol, temple ? 0.85 : 0.8, woodExtra),         // 기둥
     woodDark: std(choga ? 0x37281a : temple ? 0x66512f : 0x6f3626, 0.85), // 인방·문틀
     woodBoard: std(temple ? 0x574531 : 0x4a3421, 0.85),         // 박공널 목재 보드
-    // 창방·평방: 궁은 단청 색동, 절은 퇴색 금단청 밴드, 초가는 무단청 고재.
-    beamDancheong: choga
-      ? std(0x453320, 0.85)
-      : temple
-        ? std(0xffffff, 0.9, { map: makeTempleDancheongBandTexture() })
-        : std(0xffffff, 0.85, { map: makeDancheongBandTexture(false) }),
-    // 공포 바탕(뇌록). 절은 퇴색 뇌록. bracketAlt=소로 등 주홍 교차, bracketFace=마구리 연화.
-    bracket: std(temple ? 0x566b60 : C.noerok, 0.85),
-    bracketAlt: std(temple ? 0x8a5341 : C.juhong, 0.85),        // 공포 소로·부재 주홍 교차
-    bracketFace: std(0xffffff, 0.85, { map: makeYeonhwaTexture(temple) }), // 살미·첨차 마구리 연화
-    yeonmokcho: std(0xffffff, 0.85, { map: makeYeonmokchoTexture(temple) }), // 연목 마구리 연목초
-    bujeoncho: std(0xffffff, 0.85, { map: makeBujeonchoTexture(temple) }),   // 부연 마구리 부연초
-    rafter: std(choga ? 0x6b5138 : temple ? 0x556b60 : C.noerok, 0.85,
-      choga ? { emissive: 0x1a150f } : {}),                      // 서까래 (뇌록; 절 퇴색 뇌록, 초가 고재)
-    rafterEnd: std(temple ? 0xcabfa5 : C.baek, 0.8),            // 서까래 마구리(백단·헛첨차 팁)
-    accentBlue: std(C.samcheong, 0.85),
+    // 단청은 궁·사찰만. 기와/초가 팔레트는 같은 키를 단색 목재로 채워 빌더 계약을 단순하게
+    // 유지하되 CanvasTexture를 아예 만들지 않는다.
+    beamDancheong: dancheong?.beamDancheong || std(choga ? 0x453320 : 0x8b7960, 0.85),
+    bracket: dancheong?.bracket || std(choga ? 0x493823 : 0x817058, 0.85),
+    bracketAlt: dancheong?.bracketAlt || std(choga ? 0x5c432a : 0x715d46, 0.85),
+    bracketFace: dancheong?.bracketFace || std(choga ? 0x493823 : 0x817058, 0.85),
+    yeonmokcho: dancheong?.yeonmokcho || std(choga ? 0x493823 : 0x817058, 0.85),
+    bujeoncho: dancheong?.bujeoncho || std(choga ? 0x493823 : 0x817058, 0.85),
+    rafter: dancheong?.rafter || std(choga ? 0x6b5138 : 0x817058, 0.85,
+      choga ? { emissive: 0x1a150f } : {}),
+    rafterEnd: dancheong?.rafterEnd || std(choga ? 0x70543a : 0x9a8a6f, 0.8),
+    accentBlue: dancheong?.accentBlue || std(giwa ? 0x8c7c64 : 0x5a4932, 0.85),
     tileTex: makeTileTexture(),
     tileFlat: std(C.tile, 0.9),
     tileRidge: std(C.tileDark, 0.85),            // 마루: 기와 적층 톤

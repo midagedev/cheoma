@@ -55,6 +55,8 @@ The core runs standalone from the repo-root `index.html` (plus per-domain harnes
 
 **Building types & materials**: 궁(palace) / 절(temple) / 기와집(giwa) / 초가(choga). 단청 (dancheong) is type-dependent — palace & temple only. Roof builder dispatch: giwa → `roof-skeleton.js`; palace/temple/choga → `roof.js`. `src/builder/palette.js#makeMaterials` returns role-tagged materials; per-part color variety rides `instanceColor` at zero extra draw calls (adding material variants is expensive — mind draw-call budgets; town ceiling < 1000). A standalone `buildBuilding()` result must be released with `disposeBuilding()` from `src/api/building.js`; it disposes owned geometry/material/texture resources while preserving caller-owned shared `P.mats` and module-lifetime prop materials.
 
+`src/builder/dancheong.js` owns the reusable, renderer-free dancheong axes and rank policy. Palace defaults to moro; a temple compound reserves geum for its main worship hall and steps subsidiary/domestic buildings down. Cached Canvas sources are immutable and bucket-keyed; Texture/Material objects stay palette-owned so concurrent compounds and disposal cannot mutate one another. Never expose dancheong controls or allocate its textures for giwa/choga. See `docs/dancheong.md`.
+
 **Village generation** — a deterministic pipeline:
 `src/village/plan.js` (pure plan) → `src/village/populate.js` (step orchestration over `src/generators/village/*`) → `src/runtime/village/create.js` and `handle.js`. `src/village/adapter.js` is only a compatibility re-export. Convention: **`+z` = south.** Scale is a continuum (`siteR` scalar / tier): lone house → hamlet → village → town → capital → hanyang (성곽 도성 with 사대문·시전, `citywall.js`). Repeated buildings are instanced (`chunks.js`, `instancing.js`).
 

@@ -127,8 +127,16 @@ const HANOK_SECTIONS = [
   ] },
 ];
 
+const palaceDancheongSection = {
+  id: 'dancheong', titleKey: 'sec_dancheong', fields: [
+    { key: 'dancheongClarity', ctrl: 'range', min: 0, max: 1, step: 0.02, route: 'preset' },
+    { key: 'dancheongSplendor', ctrl: 'range', min: 0, max: 1, step: 0.02, route: 'preset' },
+  ],
+};
+
 // ── 특수: 관아·객사(palace 프리셋, 다포 전각) — presetOverrides ────────────
 const PALACE_SECTIONS = [
+  palaceDancheongSection,
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'roofPitch', ctrl: 'range', min: 0.6, max: 1.0, step: 0.02, route: 'preset' },
     { key: 'eaveOverhang', ctrl: 'range', min: 1.2, max: 2.2, step: 0.05, route: 'preset' },
@@ -160,6 +168,7 @@ const PALACE_SECTIONS = [
 //   칸수·월대단수 등 일곽 구조 종속 축은 배제(정전 2중월대 등 역할별 규약을 평탄화하면 고증 붕괴).
 //   route 'preset' → buildRebuildPayload 가 presetOverrides 로 묶어 adapter.rebuildParcel('palace', ...) 로.
 const PALACE_COMPOUND_SECTIONS = [
+  palaceDancheongSection,
   { id: 'roof', titleKey: 'sec_roof', fields: [
     { key: 'roofPitch', ctrl: 'range', min: 0.6, max: 1.0, step: 0.02, route: 'preset' },
     { key: 'eaveOverhang', ctrl: 'range', min: 1.2, max: 2.2, step: 0.05, route: 'preset' },
@@ -194,6 +203,10 @@ function templeSections(spec) {
       : []),
   ];
   return [
+    { id: 'dancheong', titleKey: 'sec_dancheong', fields: [
+      { key: 'dancheongClarity', ctrl: 'range', min: 0, max: 1, step: 0.02, route: 'temple' },
+      { key: 'dancheongSplendor', ctrl: 'range', min: 0, max: 1, step: 0.02, route: 'temple' },
+    ] },
     { id: 'temple-plan', titleKey: 'sec_temple_plan', fields: [
       { key: 'variant', ctrl: 'segment', route: 'temple',
         options: spec?.variantOptions?.length ? spec.variantOptions : ['compact'] },
@@ -209,6 +222,7 @@ function templeSections(spec) {
 const TEMPLE_OPTION_KEYS = [
   'variant', 'hallCount', 'courtScale', 'axisBend', 'pagoda', 'stoneLanterns',
   'includeBellPavilion', 'includeDanggan', 'includeBudo',
+  'dancheongClarity', 'dancheongSplendor',
 ];
 
 // ── 마을 패널 파라미터(#91) ── 부감 컨텍스트 패널의 "마을 상세" 축. 코어(plan.normTuning + site.makeSite +
