@@ -595,7 +595,9 @@ try {
       && focused.opening.plan?.style === 'giwa'
       && focused.opening.plan.hardware === 3
       && focused.opening.plan.meoreum === 0
-      && focused.opening.plan.lowerPanel > 0,
+      && focused.opening.plan.lowerPanel > 0
+      && focused.opening.recess === 1
+      && focused.opening.door?.hasRecess,
   `representative head house consumes one shared primary opening contract (${JSON.stringify(focused.opening)})`);
   pass(focused.thresholdLife?.count === 1
       && focused.thresholdLife.kind === 'jipsin'
@@ -611,37 +613,242 @@ try {
     `visible time changes preserve the sky and ambience crossfade contract (${JSON.stringify(focused.timeTransitionStart)})`,
   );
 
-  const heroOpeningLifecycle = await page.evaluate(async (parcelId) => {
+  // Wait only for the shader-warm handoff, then deterministically finish the real focus tween.
+  // Product pointer input remains locked until this same onDone path has installed the focus regime.
+  await page.waitForFunction(() => {
     const engine = window.__engine;
+    return !engine.village.getState().transitioning || engine.debugDof().tweenProgress != null;
+  }, null, { timeout });
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
+  await page.waitForFunction(() => !window.__engine.village.getState().transitioning, null, { timeout });
+
+  // The representative hero is a walled compound whose inner-hall leaf is
+  // legitimately occluded by its south gate. Exercise direct interaction on a
+  // regular focused choga where the planned south approach exposes the leaf and
+  // the formerly solid host wall now reads as a recessed opening.
+  const regularDoorCandidates = await page.evaluate(() => window.__engine.village.debugParcels()
+    .filter((parcel) => !parcel.hero && parcel.kind === 'choga')
+    .map((parcel) => parcel.parcelId));
+  let doorParcelId = null;
+  for (const candidate of regularDoorCandidates) {
+    await page.evaluate((parcelId) => window.__engine.village.switchTo(parcelId), candidate);
+    await page.waitForFunction((parcelId) => {
+      const engine = window.__engine;
+      return engine.village.getState().selected === parcelId
+        && (!engine.village.getState().transitioning || engine.debugDof().tweenProgress != null);
+    }, candidate, { timeout });
+    await page.evaluate(() => {
+      const engine = window.__engine;
+      if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+    });
+    await page.waitForFunction((parcelId) => {
+      const state = window.__engine.village.getState();
+      return state.selected === parcelId && !state.transitioning;
+    }, candidate, { timeout });
+    if (await page.evaluate((parcelId) => !!window.__engine.village.debugDoorScreen(parcelId), candidate)) {
+      doorParcelId = candidate;
+      break;
+    }
+  }
+  pass(doorParcelId != null,
+    `at least one regular south-focus frame exposes its actual primary leaf (${regularDoorCandidates.join(',')})`);
+  if (!doorParcelId) throw new Error('No regular focus frame exposes a primary door action');
+
+  const closedDoor = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const calls = engine.village.debugDrawCalls();
+    return {
+      state: engine.village.debugDoorInteraction(parcelId),
+      screen: engine.village.debugDoorScreen(parcelId),
+      programs: engine.renderer.info.programs?.length || 0,
+      calls,
+    };
+  }, doorParcelId);
+  pass(closedDoor.state?.valid && closedDoor.state.progress === 0 && !closedDoor.state.targetOpen
+      && closedDoor.state.hasRecess && closedDoor.state.recessDepth > 0.03
+      && !closedDoor.screen?.behind
+      && closedDoor.screen.x > 0 && closedDoor.screen.x < 1280
+      && closedDoor.screen.y > 0 && closedDoor.screen.y < 800,
+  `focused FULL primary door starts closed at a visible direct target (${JSON.stringify(closedDoor)})`);
+
+  const visibilityGate = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const root = engine.village.focusRoot();
+    const panel = root?.getObjectByName('primary-opening-panel');
+    const pivot = root?.getObjectByName('primary-door-pivot');
+    const originalLayer = pivot?.layers.mask;
+    panel.visible = false;
+    const hiddenPanel = engine.village.debugDoorScreen(parcelId) == null;
+    panel.visible = true;
+    pivot.visible = false;
+    const hiddenOwner = engine.village.debugDoorScreen(parcelId) == null;
+    pivot.visible = true;
+    pivot.layers.set(1);
+    const layerOwner = engine.village.debugDoorScreen(parcelId) == null;
+    pivot.layers.mask = originalLayer;
+    root.visible = false;
+    const hiddenRoot = engine.village.debugDoorScreen(parcelId) == null;
+    root.visible = true;
+    return { hiddenPanel, hiddenOwner, layerOwner, hiddenRoot };
+  }, doorParcelId);
+  pass(Object.values(visibilityGate).every(Boolean),
+    `door input follows visible/layer owner state (${JSON.stringify(visibilityGate)})`);
+
+  await page.mouse.move(closedDoor.screen.x, closedDoor.screen.y);
+  const doorHover = page.locator('.hlabel');
+  await doorHover.waitFor({ state: 'visible', timeout });
+  pass((await doorHover.textContent()).includes('문 열기'),
+    'actual door hover renders the localized open action in Product UI');
+
+  // A pointer sequence that turns into an OrbitControls drag must never toggle the door.
+  await page.mouse.down();
+  await page.mouse.move(closedDoor.screen.x + 12, closedDoor.screen.y);
+  await page.mouse.up();
+  const afterDrag = await page.evaluate((parcelId) => ({
+    state: window.__engine.village.debugDoorInteraction(parcelId),
+    screen: window.__engine.village.debugDoorScreen(parcelId),
+  }), doorParcelId);
+  pass(afterDrag.state?.progress === 0 && !afterDrag.state.targetOpen,
+    `door pointer drag stays an orbit gesture (${JSON.stringify(afterDrag)})`);
+
+  // Down/up must both resolve to the same unobscured moving leaf. Reverse it while
+  // moving to prove the spring inherits the exact pose instead of snapping.
+  await page.evaluate(() => window.__engine.debugSetPaused(true));
+  await page.mouse.click(afterDrag.screen.x, afterDrag.screen.y);
+  const openingDoor = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const targeted = engine.village.debugDoorInteraction(parcelId);
+    const mid = engine.village.debugAdvanceDoor(0.12, parcelId);
+    return { targeted, mid, screen: engine.village.debugDoorScreen(parcelId) };
+  }, doorParcelId);
+  pass(openingDoor.targeted?.targetOpen
+      && openingDoor.mid.progress > 0 && openingDoor.mid.progress < 1,
+  `direct click starts an interruptible door swing (${JSON.stringify(openingDoor)})`);
+  await page.mouse.click(openingDoor.screen.x, openingDoor.screen.y);
+  const interruptedDoor = await page.evaluate(({ parcelId, progress }) => {
+    const engine = window.__engine;
+    const reversed = engine.village.debugDoorInteraction(parcelId);
+    const closed = engine.village.debugAdvanceDoor(3, parcelId);
+    return { reversed, closed, inheritedError: Math.abs(reversed.progress - progress) };
+  }, { parcelId: doorParcelId, progress: openingDoor.mid.progress });
+  pass(!interruptedDoor.reversed?.targetOpen && interruptedDoor.inheritedError < 1e-9
+      && interruptedDoor.closed.progress === 0 && !interruptedDoor.closed.moving,
+  `mid-swing click reverses without a pose snap (${JSON.stringify(interruptedDoor)})`);
+
+  const reopenedScreen = await page.evaluate((parcelId) => (
+    window.__engine.village.debugDoorScreen(parcelId)
+  ), doorParcelId);
+  await page.mouse.click(reopenedScreen.x, reopenedScreen.y);
+  const openDoor = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const state = engine.village.debugAdvanceDoor(3, parcelId);
+    const root = engine.village.focusRoot();
+    const pivot = root?.getObjectByName('primary-door-pivot');
+    const frame = root?.getObjectByName('opening-frame-details');
+    const panel = root?.getObjectByName('primary-opening-panel');
+    const hardware = root?.getObjectByName('opening-hardware-details');
+    const leaf = root?.getObjectByName('primary-opening-leaf-details');
+    const openCalls = engine.village.debugDrawCalls();
+    const openPrograms = engine.renderer.info.programs?.length || 0;
+    engine.village.debugSeekDoor(0, parcelId);
+    const closedPoseCalls = engine.village.debugDrawCalls();
+    const closedPosePrograms = engine.renderer.info.programs?.length || 0;
+    engine.village.debugSeekDoor(1, parcelId);
+    return {
+      state,
+      hierarchy: {
+        panel: panel?.parent === pivot,
+        hardware: hardware?.parent === pivot,
+        leaf: leaf?.parent === pivot,
+        frameFixed: frame?.parent !== pivot,
+        recessFixed: frame?.parent !== pivot
+          && frame?.userData?.primaryDoorRecesses?.length === 1,
+      },
+      programs: [openPrograms, closedPosePrograms],
+      calls: [openCalls, closedPoseCalls],
+    };
+  }, doorParcelId);
+  pass(openDoor.state?.progress === 1 && openDoor.state.targetOpen && !openDoor.state.moving
+      && Object.values(openDoor.hierarchy).every(Boolean)
+      && openDoor.programs[0] === openDoor.programs[1] && openDoor.calls[0] === openDoor.calls[1],
+  `open leaf, ironwork, and seams share one hinge without program/draw drift (${JSON.stringify(openDoor)})`);
+  await page.evaluate(() => window.__engine.debugSetPaused(false));
+
+  await page.evaluate((parcelId) => window.__engine.village.switchTo(parcelId), heroId);
+  await page.waitForFunction((parcelId) => {
+    const engine = window.__engine;
+    return engine.village.getState().selected === parcelId
+      && (!engine.village.getState().transitioning || engine.debugDof().tweenProgress != null);
+  }, heroId, { timeout });
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, heroId, { timeout });
+
+  const heroOpeningLifecycle = await page.evaluate(async ({ parcelId, resourcesModuleUrl }) => {
+    const engine = window.__engine;
+    const { collectObjectResources, isSharedResource } = await import(resourcesModuleUrl);
     const frames = (count = 4) => new Promise((resolve) => {
       const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
       requestAnimationFrame(step);
     });
+    const settlePrograms = async (maxFrames = 36) => {
+      let previous = -1;
+      let stableFrames = 0;
+      for (let frame = 0; frame < maxFrames; frame++) {
+        await frames(1);
+        const current = engine.renderer.info.programs?.length || 0;
+        stableFrames = current === previous ? stableFrames + 1 : 0;
+        previous = current;
+        if (stableFrames >= 4) break;
+      }
+    };
+    // The focus handoff waits for async link completion, but Chrome may append
+    // its finished depth/basic programs to renderer.info a few rAFs later. Take
+    // both snapshots only after that observable list settles so delayed focus
+    // work is not misreported as a rebuild program family.
+    await settlePrograms();
     const oldRoot = engine.village.focusRoot();
-    // Focus warming is deliberately asynchronous. Register the same subtree-scoped material
-    // set before taking a program baseline so unrelated pending links cannot be charged to
-    // the rebuild when this smoke follows the CPU-heavy full contract suite.
+    // Register and finish this exact focus subtree before the baseline so
+    // delayed scene links cannot be charged to the replacement.
     engine.renderer.compile(oldRoot, engine.camera, engine.scene);
-    await frames();
+    await engine.renderer.compileAsync(oldRoot, engine.camera);
+    await settlePrograms();
+    engine.village.debugSeekDoor(1, parcelId);
+    const oldPivot = oldRoot?.getObjectByName('primary-door-pivot');
+    const oldDoorOpen = engine.village.debugDoorInteraction(parcelId)?.progress === 1;
     const oldGeometries = [];
     oldRoot?.traverse((object) => {
-      if (['opening-frame-details', 'opening-hardware-details', 'threshold-life-detail'].includes(object.name)
+      if ([
+        'opening-frame-details',
+        'primary-opening-leaf-details',
+        'opening-hardware-details',
+        'threshold-life-detail',
+      ].includes(object.name)
           && object.geometry) oldGeometries.push(object.geometry);
     });
     const disposed = new Map(oldGeometries.map((geometry) => [geometry, 0]));
+    const openingShared = oldGeometries.map((geometry) => isSharedResource(geometry));
+    const oldResources = collectObjectResources(oldRoot);
     const onDispose = (event) => disposed.set(event.target, (disposed.get(event.target) || 0) + 1);
     for (const geometry of oldGeometries) geometry.addEventListener('dispose', onDispose);
-    await engine.renderer.compileAsync(oldRoot, engine.camera);
-    const beforePrograms = engine.renderer.info.programs?.length || 0;
-    const beforeProgramKeys = new Set(
-      (engine.renderer.info.programs || []).map((program) => program.cacheKey),
-    );
+    const beforeProgramList = engine.renderer.info.programs || [];
+    const beforePrograms = beforeProgramList.length;
+    const beforeProgramKeys = new Set(beforeProgramList.map((program) => program.cacheKey));
     const rebuilt = engine.village.rebuild(parcelId, {
       building: { roofPitch: 1.08, eaveOverhang: 1.38, profileCurve: 0.56 },
     }, { refreshFlora: false });
-    await frames();
+    await settlePrograms();
     const root = engine.village.focusRoot();
     await engine.renderer.compileAsync(root, engine.camera);
+    await settlePrograms();
     const material = {
       frameEnvelope: null, hardwareEnvelope: null, hardwareKey: null,
       thresholdLifeEnvelope: null, thresholdLifeKey: null, thresholdLifeTransparent: null,
@@ -697,24 +904,42 @@ try {
         expectedClearance: plan.reveal.faceClearance + plan.frame.depth,
       };
     };
+    const afterProgramList = engine.renderer.info.programs || [];
+    const newProgramKeys = afterProgramList
+      .map((program) => program.cacheKey)
+      .filter((key) => !beforeProgramKeys.has(key));
     const result = {
       rebuilt: !!rebuilt,
       opening: engine.village.debugOpeningDetail(parcelId),
+      oldDoorOpen,
+      oldPivotClosed: Math.abs(oldPivot?.rotation?.y || 0) < 1e-9,
+      oldRootDetached: oldRoot?.parent == null,
+      oldResourceContainsOpening: oldGeometries.map((geometry) => oldResources.geometries.has(geometry)),
+      openingShared,
       oldOpeningGeometries: oldGeometries.length,
       disposed: [...disposed.values()],
       programs: [beforePrograms, engine.renderer.info.programs?.length || 0],
-      newProgramFamilies: (engine.renderer.info.programs || [])
-        .filter((program) => !beforeProgramKeys.has(program.cacheKey)).length,
+      newProgramKeys,
+      openingProgramKeys: newProgramKeys.filter((key) => !/^(?:basic|depth),/.test(key)),
+      delayedInfrastructurePrograms: newProgramKeys.filter((key) => /^(?:basic|depth),/.test(key)).length,
       material,
       primaryFace: inspectPrimaryFace(),
     };
     for (const geometry of oldGeometries) geometry.removeEventListener('dispose', onDispose);
     return result;
-  }, heroId);
+  }, {
+    parcelId: heroId,
+    resourcesModuleUrl: `/@fs${join(ROOT, 'src/core/three-resources.js')}`,
+  });
   pass(heroOpeningLifecycle.rebuilt
       && heroOpeningLifecycle.opening?.valid
       && heroOpeningLifecycle.opening.plan?.style === 'giwa'
-      && heroOpeningLifecycle.oldOpeningGeometries === 3
+      && heroOpeningLifecycle.opening.door?.progress === 0
+      && heroOpeningLifecycle.oldDoorOpen && heroOpeningLifecycle.oldPivotClosed
+      && heroOpeningLifecycle.oldRootDetached
+      && heroOpeningLifecycle.oldResourceContainsOpening.every(Boolean)
+      && heroOpeningLifecycle.openingShared.every((shared) => !shared)
+      && heroOpeningLifecycle.oldOpeningGeometries === 4
       && heroOpeningLifecycle.disposed.every((count) => count === 1)
       && heroOpeningLifecycle.material.frameEnvelope
       && !heroOpeningLifecycle.material.hardwareEnvelope
@@ -727,9 +952,13 @@ try {
         heroOpeningLifecycle.primaryFace.clearance
           - heroOpeningLifecycle.primaryFace.expectedClearance,
       ) <= 1e-5
-      && heroOpeningLifecycle.newProgramFamilies <= 1,
+      // Chrome can append already-requested scene-level basic/depth links after
+      // four stable rAFs. The opening must add no material shader family; keep a
+      // small ceiling on that separately classified infrastructure tail.
+      && heroOpeningLifecycle.openingProgramKeys.length === 0
+      && heroOpeningLifecycle.delayedInfrastructurePrograms <= 4,
   `head-house rebuild preserves positive frame/panel clearance, replaces one opening overlay, `
-    + `disposes it once, and reuses LOD/program families (${JSON.stringify(heroOpeningLifecycle)})`);
+    + `disposes it once, and adds no opening shader family (${JSON.stringify(heroOpeningLifecycle)})`);
 
   const thresholdWeather = await page.evaluate(() => {
     const engine = window.__engine;
@@ -1009,6 +1238,10 @@ try {
       && referenceContract.ornamentUse?.includes('palace 전용 경계')
       && referenceContract.openingUse?.includes('민가에 그대로 복제하지 않는다')
       && referenceContract.openingUse?.includes('경첩 띠 두 개와 고리 하나')
+      && referenceContract.openingUse?.includes('선택 FULL 주거 근경')
+      && referenceContract.openingUse?.includes('경첩 쪽 한 짝·청판·고리·띠를 같은 jamb-edge pivot')
+      && referenceContract.openingUse?.includes('관아·궁·사찰 복합체는')
+      && referenceContract.openingUse?.includes('열림 각도·감쇠 운동은 실측 복원이 아니라')
       && referenceContract.openingHref?.includes('file_seq=2839493')
       && referenceContract.openingHref?.includes('title3d=')
       && referenceContract.footwearUse?.includes('접근 쪽 문설주 바깥')
@@ -1022,6 +1255,116 @@ try {
     `Reference UI exposes authenticity evidence and applied-use mapping (${JSON.stringify(referenceContract)})`,
   );
   await page.locator('.modal .x').click();
+
+  // Palace and temple are authored multi-building compounds. Until a main-hall
+  // role is preserved through their optimized roots, product interaction must
+  // not silently choose an arbitrary duplicated or merged primary leaf.
+  const compoundPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const compoundErrors = [];
+  compoundPage.on('pageerror', (error) => compoundErrors.push(error.message));
+  await compoundPage.goto(
+    `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&vscale=capital&vpalace=1&vtemple=1&seed=42&vseed=20260716&time=day&lang=ko`,
+    { waitUntil: 'domcontentloaded', timeout },
+  );
+  await compoundPage.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
+  await compoundPage.evaluate(() => {
+    const engine = window.__engine;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
+  const compoundIds = await compoundPage.evaluate(() => (
+    window.__engine.village.debugParcels().map((parcel) => parcel.parcelId)
+  ));
+  const compoundScope = {};
+  for (const [index, parcelId] of ['palace', 'temple'].entries()) {
+    await compoundPage.evaluate(({ id, first }) => {
+      const engine = window.__engine;
+      if (first) engine.village.debugFocus(id);
+      else engine.village.switchTo(id);
+    }, { id: parcelId, first: index === 0 });
+    await compoundPage.waitForFunction((id) => {
+      const engine = window.__engine;
+      return engine.village.getState().selected === id
+        && (!engine.village.getState().transitioning || engine.debugDof().tweenProgress != null);
+    }, parcelId, { timeout });
+    await compoundPage.evaluate(() => {
+      const engine = window.__engine;
+      if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+    });
+    await compoundPage.waitForFunction((id) => {
+      const state = window.__engine.village.getState();
+      return state.selected === id && !state.transitioning;
+    }, parcelId, { timeout });
+    compoundScope[parcelId] = await compoundPage.evaluate((id) => {
+      const engine = window.__engine;
+      const root = engine.village.focusRoot();
+      let pivots = 0;
+      root?.traverse((object) => { if (object.name === 'primary-door-pivot') pivots++; });
+      return {
+        selected: engine.village.getState().selected,
+        door: engine.village.debugDoorInteraction(id),
+        screen: engine.village.debugDoorScreen(id),
+        pivots,
+      };
+    }, parcelId);
+  }
+  // A town has no landmark palace proxy, but its reserved hero is a palace-style
+  // magistracy/guest-house core. `hero` alone is therefore not a residential
+  // interaction role; the authored heroStyle must survive into runtime scope.
+  await compoundPage.goto(
+    `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&vscale=town&vpalace=0&vtemple=0&seed=42&vseed=20260716&time=day&lang=ko`,
+    { waitUntil: 'domcontentloaded', timeout },
+  );
+  await compoundPage.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
+  await compoundPage.evaluate(() => {
+    const engine = window.__engine;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
+  const magistracyId = await compoundPage.evaluate(() => (
+    window.__engine.village.debugParcels()
+      .find((parcel) => parcel.hero && parcel.heroStyle === 'palace')?.parcelId || null
+  ));
+  let magistracyScope = null;
+  if (magistracyId) {
+    await compoundPage.evaluate((id) => window.__engine.village.debugFocus(id), magistracyId);
+    await compoundPage.waitForFunction((id) => {
+      const engine = window.__engine;
+      return engine.village.getState().selected === id
+        && (!engine.village.getState().transitioning || engine.debugDof().tweenProgress != null);
+    }, magistracyId, { timeout });
+    await compoundPage.evaluate(() => {
+      const engine = window.__engine;
+      if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+    });
+    await compoundPage.waitForFunction((id) => {
+      const state = window.__engine.village.getState();
+      return state.selected === id && !state.transitioning;
+    }, magistracyId, { timeout });
+    magistracyScope = await compoundPage.evaluate((id) => {
+      const engine = window.__engine;
+      const root = engine.village.focusRoot();
+      let pivots = 0;
+      root?.traverse((object) => { if (object.name === 'primary-door-pivot') pivots++; });
+      return {
+        parcel: engine.village.debugParcels().find((candidate) => candidate.parcelId === id),
+        door: engine.village.debugDoorInteraction(id),
+        screen: engine.village.debugDoorScreen(id),
+        pivots,
+      };
+    }, magistracyId);
+  }
+  await compoundPage.close();
+  pass(['palace', 'temple'].every((id) => compoundIds.includes(id)
+      && compoundScope[id]?.selected === id
+      && compoundScope[id].door == null
+      && compoundScope[id].screen == null
+      && compoundScope[id].pivots === 0)
+      && compoundErrors.length === 0,
+  `palace/temple focus keeps ambiguous compound doors non-interactive (${JSON.stringify(compoundScope)})`);
+  pass(magistracyScope?.parcel?.heroStyle === 'palace'
+      && magistracyScope.door == null
+      && magistracyScope.screen == null
+      && magistracyScope.pivots === 0,
+  `town magistracy hero remains outside residential door interaction (${JSON.stringify(magistracyScope)})`);
 
   const texturePlateau = await page.evaluate(() => {
     const engine = window.__engine;

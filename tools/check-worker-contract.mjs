@@ -30,16 +30,19 @@ const expectedSceneHashes = {
   // stove masses with one recessed residential kitchen scene and neutralizes
   // civilian lattice textures. #30 adds deterministic world-space road UVs;
   // the texture bytes stay outside this structural hash. #16 adds shared static
-  // opening frames, window meoreum aprons, and restrained FULL-only hardware.
-  // #10 carries the four residential opening axes through the variant bytes and
-  // renders the selected openings in every FULL giwa/choga prototype.
-  // The combined FULL scene bytes intentionally move while parcel plans and
-  // public proxy hashes retain their own contracts. Sync, real module Worker,
-  // and ?worker=0 fallback stay byte-identical.
-  village: '2d1cbd0a:b51bbe86:4a1ab950:ddadc162',
-  town: '605a939c:4bd6fa38:7275608f:0c993e00',
-  capital: 'dee2eafb:024ef58b:5764883d:a882641f',
-  hanyang: 'bc5916cf:f495b683:a1d53b67:aa79ddf3',
+  // opening frames, window meoreum aprons, restrained FULL-only hardware, and
+  // splits the active primary leaf from the fixed remainder. #10 carries the
+  // four residential opening axes through the variant bytes and renders those
+  // selected openings in every FULL giwa/choga prototype. Choga and hanok keep
+  // a fixed dark recess while residential primary-door and footwear anchors
+  // share the same renderer-free opening plan. The combined FULL scene bytes
+  // intentionally move while parcel plans and public proxy hashes retain their
+  // own contracts. Sync, real module Worker, and ?worker=0 fallback stay
+  // byte-identical.
+  village: '8b45bd47:8fef9c31:4e78d07c:2340fdef',
+  town: '65e8388f:b825f667:cdf9f50f:a94132af',
+  capital: '1a8b132b:569bb21f:d7c84c94:5555983f',
+  hanyang: '0d7b08b7:36688847:b7a0ecea:436605cb',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

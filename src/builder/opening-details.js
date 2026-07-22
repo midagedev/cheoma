@@ -1,23 +1,11 @@
 import * as THREE from 'three';
 import { mergeOwnedGeometries } from '../core/merge-owned-geometries.js';
+import { openingPlacementBasis } from './opening-placement.js';
+import { createPrimaryDoorRecessGeometry } from './primary-door-panel.js';
 
-// Three assembler for the pure opening-detail-plan. Every opening contributes
-// geometry to two building-wide batches: frame/threshold reuse the existing
-// envelope wood material, while small ironwork uses one FULL-only material.
-
-const UP = new THREE.Vector3(0, 1, 0);
-
-function placementBasis(placement) {
-  const tangent = placement.tangent || { x: 1, z: 0 };
-  const outward = placement.outward || { x: 0, z: 1 };
-  const tangentLength = Math.hypot(tangent.x, tangent.z) || 1;
-  const outwardLength = Math.hypot(outward.x, outward.z) || 1;
-  const x = new THREE.Vector3(tangent.x / tangentLength, 0, tangent.z / tangentLength);
-  const z = new THREE.Vector3(outward.x / outwardLength, 0, outward.z / outwardLength);
-  const basis = new THREE.Matrix4().makeBasis(x, UP, z);
-  basis.setPosition(placement.center.x, placement.bottomY || 0, placement.center.z);
-  return basis;
-}
+// Three assembler for the pure opening-detail-plan. Fixed frame/threshold and
+// the active primary-leaf rail/seam stay separate while sharing the existing
+// envelope wood material; small ironwork uses one FULL-only material.
 
 function transformGeometry(geometry, part, basis) {
   geometry.translate(part.u || 0, part.y || 0, part.outward || 0);
@@ -47,13 +35,33 @@ function partGeometry(part, basis) {
 
 export function createOpeningDetailAssembler(target, materials) {
   const frameGeometries = [];
+  const primaryLeafGeometries = [];
   const hardwareGeometries = [];
+  const primaryRecesses = [];
   let finished = false;
 
   function add(plan, placement, owner = null) {
     if (finished) throw new Error('Opening detail assembler is already finished');
-    const basis = placementBasis(placement);
-    for (const part of plan.frame.parts) frameGeometries.push(partGeometry(part, basis));
+    const basis = openingPlacementBasis(placement);
+    for (const part of plan.frame.parts) {
+      const pivot = plan.primary && plan.kind === 'door' ? plan.anchors.pivot : null;
+      if (pivot && part.kind === 'lower-panel-rail') {
+        primaryLeafGeometries.push(partGeometry({
+          ...part, u: pivot.leafCenterU, width: pivot.leafWidth,
+        }, basis));
+        const fixedWidth = plan.width - pivot.leafWidth;
+        if (fixedWidth > 1e-5) frameGeometries.push(partGeometry({
+          ...part,
+          u: -pivot.hingeSide * pivot.leafWidth * 0.5,
+          width: fixedWidth,
+        }, basis));
+      } else if (pivot && part.kind === 'leaf-seam'
+          && Math.abs(part.u - pivot.meetingU) < 1e-6) {
+        primaryLeafGeometries.push(partGeometry(part, basis));
+      } else {
+        frameGeometries.push(partGeometry(part, basis));
+      }
+    }
     if (plan.threshold) frameGeometries.push(partGeometry(plan.threshold, basis));
     for (const part of plan.hardware) hardwareGeometries.push(partGeometry(part, basis));
 
@@ -71,6 +79,16 @@ export function createOpeningDetailAssembler(target, materials) {
     return plan;
   }
 
+  function addPrimaryRecess(plan, placement, panelDepth = plan?.wallThickness) {
+    if (finished) throw new Error('Opening detail assembler is already finished');
+    const { geometry, recessDepth } = createPrimaryDoorRecessGeometry({
+      plan, placement, panelDepth,
+    });
+    frameGeometries.push(geometry);
+    primaryRecesses.push(Object.freeze({ openingId: plan.id, recessDepth }));
+    return recessDepth;
+  }
+
   function finish() {
     if (finished) return;
     finished = true;
@@ -80,6 +98,17 @@ export function createOpeningDetailAssembler(target, materials) {
         materials.frame,
       );
       mesh.name = 'opening-frame-details';
+      mesh.userData.openingDetailTier = 'envelope';
+      mesh.userData.primaryDoorRecesses = Object.freeze(primaryRecesses.slice());
+      mesh.receiveShadow = false;
+      target.add(mesh);
+    }
+    if (primaryLeafGeometries.length) {
+      const mesh = new THREE.Mesh(
+        mergeOwnedGeometries(primaryLeafGeometries, 'Primary opening leaf geometries'),
+        materials.frame,
+      );
+      mesh.name = 'primary-opening-leaf-details';
       mesh.userData.openingDetailTier = 'envelope';
       mesh.receiveShadow = false;
       target.add(mesh);
@@ -97,5 +126,5 @@ export function createOpeningDetailAssembler(target, materials) {
     }
   }
 
-  return { add, finish };
+  return { add, addPrimaryRecess, finish };
 }

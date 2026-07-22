@@ -12,6 +12,7 @@ import {
   planResidentialOpenings,
   residentialOpeningCapabilities,
 } from '../../src/layout/residential-openings.js';
+import { createPrimaryDoorRuntime } from '../../src/interaction/primary-door.js';
 
 const bounds = (object) => {
   const box = new THREE.Box3().setFromObject(object);
@@ -169,15 +170,158 @@ function inspectPrimaryOpeningFace(panel, frame, anchor) {
   };
 }
 
+function resourceCounts(root) {
+  const geometries = new Set();
+  const materials = new Set();
+  root.traverse((object) => {
+    if (object.geometry) geometries.add(object.geometry);
+    const list = Array.isArray(object.material) ? object.material : (object.material ? [object.material] : []);
+    for (const material of list) materials.add(material);
+  });
+  return { geometries: geometries.size, materials: materials.size };
+}
+
+const matrixError = (a, b) => Math.max(...a.elements.map((value, index) => Math.abs(value - b.elements[index])));
+
+function firstRenderedHit(raycaster, root) {
+  return raycaster.intersectObject(root, true).find((hit) => {
+    let current = hit.object;
+    while (current) {
+      if (current.visible === false || !current.layers.test(raycaster.layers)) return false;
+      if (current === root) return true;
+      current = current.parent;
+    }
+    return false;
+  }) || null;
+}
+
+function inspectDoorRuntime(building) {
+  const beforeResources = resourceCounts(building);
+  const runtime = createPrimaryDoorRuntime(building);
+  if (!runtime) return null;
+  building.updateWorldMatrix(true, true);
+  const closed = {
+    frame: building.getObjectByName('opening-frame-details').matrixWorld.clone(),
+    panel: runtime.panel.matrixWorld.clone(),
+    hardware: runtime.hardware.matrixWorld.clone(),
+    leaf: runtime.leafDetails.matrixWorld.clone(),
+  };
+  const relative = (object) => runtime.panel.matrixWorld.clone().invert().multiply(object.matrixWorld);
+  const closedHardwareRelative = relative(runtime.hardware);
+  const closedLeafRelative = relative(runtime.leafDetails);
+  const center = runtime.worldCenter();
+  const quaternion = runtime.anchor.getWorldQuaternion(new THREE.Quaternion());
+  const outward = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion).normalize();
+  const raycaster = new THREE.Raycaster(
+    center.clone().addScaledVector(outward, 3),
+    outward.clone().multiplyScalar(-1),
+  );
+  const closedSurfaceName = firstRenderedHit(raycaster, building)?.object?.name || null;
+  const pickedClosed = !!runtime.raycast(raycaster);
+  runtime.panel.visible = false;
+  const hiddenPanelRejected = runtime.raycast(raycaster) == null;
+  runtime.panel.visible = true;
+  runtime.pivot.visible = false;
+  const hiddenAncestorRejected = runtime.raycast(raycaster) == null;
+  runtime.pivot.visible = true;
+  const pivotLayerMask = runtime.pivot.layers.mask;
+  runtime.pivot.layers.set(1);
+  const ownerLayerRejected = runtime.raycast(raycaster) == null;
+  runtime.pivot.layers.mask = pivotLayerMask;
+  building.visible = false;
+  const hiddenRootRejected = runtime.raycast(raycaster) == null;
+  building.visible = true;
+  runtime.seek(0.5);
+  building.updateWorldMatrix(true, true);
+  const mid = runtime.snapshot();
+  const apertureCenter = runtime.anchor.localToWorld(new THREE.Vector3(
+    mid.panelCenterU,
+    runtime.anchor.userData.openingDetailPlan.height * 0.5,
+    0,
+  ));
+  const apertureRay = new THREE.Raycaster(
+    apertureCenter.clone().addScaledVector(outward, 3),
+    outward.clone().multiplyScalar(-1),
+  );
+  const pickedMidAction = !!runtime.raycast(apertureRay);
+  const result = {
+    pickedClosed,
+    closedSurfaceName,
+    hiddenPanelRejected,
+    hiddenAncestorRejected,
+    ownerLayerRejected,
+    hiddenRootRejected,
+    pickedMidAction,
+    midAngle: mid.angle,
+    leafWidth: mid.leafWidth,
+    panelWidth: mid.panelWidth,
+    panelCenterError: Math.abs(
+      mid.panelCenterU - runtime.anchor.userData.openingDetailPlan.anchors.pivot.leafCenterU,
+    ),
+    hingeEdgeError: Math.abs(
+      Math.abs(runtime.anchor.userData.openingDetailPlan.anchors.pivot.u)
+        - runtime.anchor.userData.openingDetailPlan.width * 0.5,
+    ),
+    freeEdgeInward: -Math.sin(Math.abs(mid.angle)) * mid.leafWidth,
+    sweepRadiusError: Math.abs(
+      Math.hypot(
+        Math.cos(Math.abs(mid.angle)) * mid.leafWidth,
+        Math.sin(Math.abs(mid.angle)) * mid.leafWidth,
+      ) - mid.leafWidth,
+    ),
+    inward: mid.angle * runtime.anchor.userData.openingDetailPlan.anchors.pivot.hingeSide < 0,
+    frameFixed: matrixError(closed.frame, building.getObjectByName('opening-frame-details').matrixWorld) < 1e-9,
+    panelMoved: matrixError(closed.panel, runtime.panel.matrixWorld) > 1e-4,
+    hardwareMoved: matrixError(closed.hardware, runtime.hardware.matrixWorld) > 1e-4,
+    leafMoved: matrixError(closed.leaf, runtime.leafDetails.matrixWorld) > 1e-4,
+    hardwareRigid: matrixError(closedHardwareRelative, relative(runtime.hardware)) < 1e-6,
+    leafRigid: matrixError(closedLeafRelative, relative(runtime.leafDetails)) < 1e-6,
+    sameFrameMaterial: runtime.leafDetails.material
+      === building.getObjectByName('opening-frame-details').material,
+    resources: [beforeResources, resourceCounts(building)],
+    activePivotCount: (() => {
+      let count = 0;
+      building.traverse((object) => { if (object.name === 'primary-door-pivot') count++; });
+      return count;
+    })(),
+    movingObjects: mid.movingObjects,
+    hasLowerPanel: mid.hasLowerPanel,
+  };
+  runtime.seek(1);
+  building.updateWorldMatrix(true, true);
+  const openAction = runtime.raycast(apertureRay);
+  const openSurface = firstRenderedHit(apertureRay, building);
+  result.pickedOpenAction = !!openAction;
+  result.openSurfaceName = openSurface?.object?.name || null;
+  result.apertureDepth = openAction && openSurface
+    ? openSurface.distance - openAction.distance : null;
+  result.recessDepth = runtime.snapshot().recessDepth;
+  result.hasRecess = runtime.snapshot().hasRecess;
+  runtime.dispose();
+  building.updateWorldMatrix(true, true);
+  result.closedOnDispose = Math.abs(runtime.pivot.rotation.y) < 1e-9;
+  result.pivotRemoved = runtime.pivot.parent == null;
+  result.hostRestored = [runtime.panel, runtime.hardware, runtime.leafDetails, runtime.lowerPanel]
+    .filter(Boolean).every((object) => object.parent !== runtime.pivot);
+  result.resources.push(resourceCounts(building));
+  return result;
+}
+
 function inspectOpenings(building) {
+  const doorRuntime = inspectDoorRuntime(building);
   const counts = {
     frame: 0,
+    leaf: 0,
     hardware: 0,
     thresholdLife: 0,
     primaryAnchor: 0,
     primaryPanel: 0,
+    fixedPanels: 0,
+    recess: 0,
+    doorPivot: 0,
   };
   let frame = null;
+  let leaf = null;
   let hardware = null;
   let anchor = null;
   let primaryPanel = null;
@@ -188,10 +332,17 @@ function inspectOpenings(building) {
       : (mesh.geometry.attributes?.position?.count || 0) / 3;
   };
   building.traverse((object) => {
-    if (object.name === 'opening-frame-details') { counts.frame++; frame = object; }
+    if (object.name === 'opening-frame-details') {
+      counts.frame++;
+      counts.recess += object.userData.primaryDoorRecesses?.length || 0;
+      frame = object;
+    }
+    if (object.name === 'primary-opening-leaf-details') { counts.leaf++; leaf = object; }
     if (object.name === 'opening-hardware-details') { counts.hardware++; hardware = object; }
     if (object.name === 'threshold-life-detail') counts.thresholdLife++;
     if (object.name === 'primary-opening-anchor') { counts.primaryAnchor++; anchor = object; }
+    if (object.name === 'primary-door-pivot') counts.doorPivot++;
+    if (object.name === 'primary-opening-fixed-panels') counts.fixedPanels++;
     if (object.name === 'primary-opening-panel') {
       counts.primaryPanel++;
       primaryPanel = object;
@@ -200,20 +351,26 @@ function inspectOpenings(building) {
   return {
     counts,
     frameVertices: frame?.geometry?.attributes?.position?.count || 0,
+    leafVertices: leaf?.geometry?.attributes?.position?.count || 0,
     hardwareVertices: hardware?.geometry?.attributes?.position?.count || 0,
     frameTriangles: triangles(frame),
+    leafTriangles: triangles(leaf),
     hardwareTriangles: triangles(hardware),
     frameEnvelope: frame?.material?.userData?.lodEnvelope === true,
+    leafEnvelope: leaf?.material?.userData?.lodEnvelope === true,
+    leafSharesFrameMaterial: leaf?.material === frame?.material,
     hardwareEnvelope: hardware?.material?.userData?.lodEnvelope === true,
     hardwarePaletteKey: hardware?.material?.userData?.paletteKey || null,
+    recessPaletteKey: counts.recess ? frame?.material?.userData?.paletteKey || null : null,
     plan: anchor?.userData?.openingDetailPlan || null,
     primaryFace: inspectPrimaryOpeningFace(primaryPanel, frame, anchor),
+    doorRuntime,
   };
 }
 
 function inspectResidentialOpenings(building) {
   const plans = [];
-  const panels = [];
+  const panelOwners = [];
   const materials = new Set();
   let meshes = 0;
   building.traverse((object) => {
@@ -226,9 +383,10 @@ function inspectResidentialOpenings(building) {
     if (object.userData.residentialOpening) {
       const opening = object.userData.residentialOpening;
       const detail = object.userData.residentialOpeningDetail;
-      const alongX = Math.abs(opening.tangent.x) >= Math.abs(opening.tangent.z);
       const panelBounds = bounds(object);
-      panels.push({
+      panelOwners.push({
+        object,
+        detail,
         id: opening.id,
         kind: opening.kind,
         facade: opening.facade,
@@ -237,13 +395,56 @@ function inspectResidentialOpenings(building) {
         detailLeafCount: detail?.leafCount ?? null,
         textureRepeatX: object.material?.map?.repeat?.x ?? null,
         spanZ: { min: panelBounds.min.z, max: panelBounds.max.z },
-        renderedWidth: opening.style === 'choga'
+      });
+    }
+  });
+  building.updateWorldMatrix(true, true);
+  const panels = panelOwners.map(({ object, detail, ...panel }) => {
+    const anchor = building.getObjectsByProperty('name', 'primary-opening-anchor')
+      .find((candidate) => candidate.userData?.openingDetailPlan?.id === detail?.id);
+    if (!panel.primary || !anchor) {
+      const alongX = Math.abs(
+        object.userData.residentialOpening.tangent.x,
+      ) >= Math.abs(object.userData.residentialOpening.tangent.z);
+      return {
+        ...panel,
+        activeWidth: null,
+        renderedWidth: object.userData.residentialOpening.style === 'choga'
           ? object.geometry?.parameters?.width ?? null
           : alongX
           ? object.geometry?.parameters?.width ?? null
           : object.geometry?.parameters?.depth ?? null,
-      });
+      };
     }
+    anchor.updateWorldMatrix(true, false);
+    const inverse = anchor.matrixWorld.clone().invert();
+    const point = new THREE.Vector3();
+    const range = (candidate) => {
+      candidate.updateWorldMatrix(true, false);
+      const positions = candidate.geometry?.attributes?.position;
+      let min = Infinity, max = -Infinity;
+      for (let index = 0; positions && index < positions.count; index++) {
+        point.fromBufferAttribute(positions, index)
+          .applyMatrix4(candidate.matrixWorld)
+          .applyMatrix4(inverse);
+        min = Math.min(min, point.x);
+        max = Math.max(max, point.x);
+      }
+      return { min, max };
+    };
+    const active = range(object);
+    let min = active.min, max = active.max;
+    building.traverse((candidate) => {
+      if (!candidate.isMesh || candidate.userData?.openingDetailId !== detail.id) return;
+      const candidateRange = range(candidate);
+      min = Math.min(min, candidateRange.min);
+      max = Math.max(max, candidateRange.max);
+    });
+    return {
+      ...panel,
+      activeWidth: active.max - active.min,
+      renderedWidth: max - min,
+    };
   });
   const kitchenFrame = building.getObjectByName('kitchen-opening-frame');
   const kitchenFrameBounds = bounds(kitchenFrame);

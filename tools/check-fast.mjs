@@ -9,6 +9,7 @@ const checks = [
   './check-house-diversity.mjs',
   './check-opening-detail-contract.mjs',
   './check-threshold-life-contract.mjs',
+  './check-door-motion-contract.mjs',
   './check-building-clearance.mjs',
   './check-cinematic-turns.mjs',
   './check-cinematic-reveal.mjs',

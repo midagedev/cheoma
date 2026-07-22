@@ -10,6 +10,7 @@ import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
 import { planOpeningDetail } from './opening-detail-plan.js';
 import { createOpeningDetailAssembler } from './opening-details.js';
 import { createResidentialOpeningDetails } from './residential-opening-details.js';
+import { createPrimaryDoorPanelSegments } from './primary-door-panel.js';
 
 // 벽체·창호. 궁(palace): 전면 칸마다 세살문, 측·후면 회벽+광창.
 // 절(temple): 전면 어칸 띠살문 + 협칸(황토벽 하부 + 살창 상부), 측·후면 황토벽+작은 살창.
@@ -44,15 +45,30 @@ export function buildWalls(P, L, M) {
     mat.map.repeat.set(leaves, 1);
     mat.map.wrapS = THREE.RepeatWrapping;
     mat.map.needsUpdate = true;
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(w, H, T), mat);
-    panel.position.set(cx, y0 + H / 2, cz);
-    panel.receiveShadow = true;
-    g.add(panel);
-    openingDetails.add(planOpeningDetail({
+    const plan = planOpeningDetail({
       kind: 'door', style: temple ? 'temple' : 'palace', seed,
       width: w, height: H, wallThickness: T, leafCount: leaves,
       lowerPanelHeight: H * (temple ? 0.16 : 0.19), primary,
-    }), { ...placement, center: { x: cx, z: cz }, bottomY: y0 }, panel);
+    });
+    const detailPlacement = { ...placement, center: { x: cx, z: cz }, bottomY: y0 };
+    let panel;
+    if (primary) {
+      panel = createPrimaryDoorPanelSegments({
+        target: g,
+        plan,
+        placement: detailPlacement,
+        material: mat,
+        panelHeight: H,
+        depth: T,
+        castShadow: false,
+      }).active;
+    } else {
+      panel = new THREE.Mesh(new THREE.BoxGeometry(w, H, T), mat);
+      panel.position.set(cx, y0 + H / 2, cz);
+      panel.receiveShadow = true;
+      g.add(panel);
+    }
+    openingDetails.add(plan, detailPlacement, panel);
   };
 
   // 회벽/황토벽(하부) + 중방 + 광창/살창(상부). winFrac: 상부 창 높이 비율.
@@ -138,6 +154,39 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   // #55의 하방 판벽·툇마루 변주는 유지하되 문/창 개수와 폭은 공유 residential planner가 소유한다.
   const plankBase = !!P.plankBase;                         // 하방 판벽(전면 벽 하부 널)
   const maruStyle = P.maruStyle || 'full';                 // 툇마루: full | short | none
+  const residentialDetails = createResidentialOpeningDetails('choga', P, g, {
+    frame: M.woodDark,
+    hardware: M.hardware,
+  }, {
+    door: {
+      bottomY: y0,
+      height: 1.55,
+      wallThickness: 0.06,
+      lowerPanelHeight: 0.12,
+      // Keep the logical opening/footwear frame on the wall. Only the moving
+      // leaf sits far enough outside the solid wall for its dark recess to be
+      // visible when the door opens.
+      leafOutward: 0.06,
+      footwear: maruStyle === 'none'
+        ? { y: L.podTopY - y0, outward: 0.30, surface: 'threshold' }
+        : {
+          // The jjokmaru slab is 10cm high and centered at podTopY + 0.36.
+          // Keep the landing anchor on the board surface for every plan width.
+          y: L.podTopY + 0.36 + 0.05 - y0,
+          outward: (maruStyle === 'short' ? 0.78 : 0.95) * 0.68,
+          surface: 'jjokmaru',
+        },
+    },
+    window: {
+      bottomY: y0 + 1.10,
+      height: 0.5,
+      wallThickness: 0.06,
+    },
+  });
+  const primaryDoor = residentialDetails.plan.openings.find((opening) => opening.primary);
+  if (!primaryDoor) throw new Error('Choga residential plan has no primary door');
+  const primaryDoorMinX = primaryDoor.center.x - primaryDoor.width * 0.5;
+  const primaryDoorMaxX = primaryDoor.center.x + primaryDoor.width * 0.5;
 
   // 상단이 지붕선을 따르는 심벽 벽면(리본). axis 'x'=z고정, 'z'=x고정.
   const wallStrip = (axis, fixed, a, b) => {
@@ -196,42 +245,22 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   // 창호/문/중방 오버레이 (벽면 바로 바깥)
   const midBeam = (axis, fixed, a, b) => {
     const len = Math.abs(b - a), mid = (a + b) / 2;
+    if (len <= 1e-5) return;
     const geo = axis === 'x' ? new THREE.BoxGeometry(len, 0.11, 0.2) : new THREE.BoxGeometry(0.2, 0.11, len);
     const m = new THREE.Mesh(geo, M.woodDark);
     if (axis === 'x') m.position.set(mid, y0 + 0.95, fixed); else m.position.set(fixed, y0 + 0.95, mid);
     g.add(m);
   };
-  midBeam('x', zF, xL - cr, xR + cr); midBeam('x', zB, xL - cr, xR + cr);
+  // The beam belongs to the wall bays; split it at the planner-owned aperture
+  // so the operable leaf never swings through a renderer-only crosspiece.
+  midBeam('x', zF, xL - cr, primaryDoorMinX);
+  midBeam('x', zF, primaryDoorMaxX, xR + cr);
+  midBeam('x', zB, xL - cr, xR + cr);
   midBeam('z', xL, zB - cr, zF + cr); midBeam('z', xR, zB - cr, zF + cr);
 
   // 작은 살창: 파란 유리처럼 어둡게 죽지 않게 미색 한지 살창으로.
   const winMat = M.door.clone();
   winMat.map = M.door.map.clone(); winMat.map.repeat.set(1, 1); winMat.map.needsUpdate = true;
-  const residentialDetails = createResidentialOpeningDetails('choga', P, g, {
-    frame: M.woodDark,
-    hardware: M.hardware,
-  }, {
-    door: {
-      bottomY: y0,
-      height: 1.55,
-      wallThickness: 0.06,
-      lowerPanelHeight: 0.12,
-      footwear: maruStyle === 'none'
-        ? { y: L.podTopY - y0, outward: 0.30, surface: 'threshold' }
-        : {
-          // The jjokmaru slab is 10cm high and centered at podTopY + 0.36.
-          // Keep the landing anchor on the board surface for every plan width.
-          y: L.podTopY + 0.36 + 0.05 - y0,
-          outward: (maruStyle === 'short' ? 0.78 : 0.95) * 0.68,
-          surface: 'jjokmaru',
-        },
-    },
-    window: {
-      bottomY: y0 + 1.10,
-      height: 0.5,
-      wallThickness: 0.06,
-    },
-  });
   const panelRotation = (opening) => (
     Math.abs(opening.tangent.x) >= Math.abs(opening.tangent.z) ? 0 : Math.PI / 2
   );
@@ -243,20 +272,34 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
     residentialDetails.add(opening, win);
   };
   const door = (opening) => {
-    residentialDetails.add(opening, (detail) => {
+    const add = opening.primary
+      ? residentialDetails.addPrimaryDoor
+      : residentialDetails.add;
+    add(opening, (detail, placement) => {
       const dh = 1.55;
       const mat = M.door.clone();
       mat.map = M.door.map.clone();
       mat.map.repeat.set(detail.leafCount, 1);
       mat.map.wrapS = THREE.RepeatWrapping;
       mat.map.needsUpdate = true;
+      if (detail.primary) {
+        return createPrimaryDoorPanelSegments({
+          target: g,
+          plan: detail,
+          placement,
+          material: mat,
+          panelHeight: dh,
+          depth: 0.06,
+          castShadow: false,
+        }).active;
+      }
       const d = new THREE.Mesh(new THREE.BoxGeometry(opening.width, dh, 0.06), mat);
       d.position.set(opening.center.x, y0 + dh / 2, opening.center.z);
       d.rotation.y = panelRotation(opening);
       d.receiveShadow = true;
       g.add(d);
       return d;
-    });
+    }, 0.06);
   };
   for (const opening of residentialDetails.plan.openings) {
     if (opening.kind === 'door') door(opening);
@@ -266,9 +309,19 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   // 하방 판벽: 전면 벽 하부를 어두운 세로널로 두른 띠(회벽 대신 널). 살림 격 변주.
   if (plankBase) {
     const pbH = 0.52;
-    const band = new THREE.Mesh(new THREE.BoxGeometry((xR - xL) + 2 * cr, pbH, 0.08), M.planwall || M.woodDark);
-    band.position.set((xL + xR) / 2, L.podTopY + 0.05 + pbH / 2, zF + 0.05);
-    band.castShadow = band.receiveShadow = true; g.add(band);
+    const addBand = (a, b) => {
+      const width = b - a;
+      if (width <= 1e-5) return;
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(width, pbH, 0.08),
+        M.planwall || M.woodDark,
+      );
+      band.position.set((a + b) * 0.5, L.podTopY + 0.05 + pbH / 2, zF + 0.05);
+      band.castShadow = band.receiveShadow = true;
+      g.add(band);
+    };
+    addBand(xL - cr, primaryDoorMinX);
+    addBand(primaryDoorMaxX, xR + cr);
   }
 
   // 툇마루: 전면 칸을 잇는 낮은 널마루(쪽마루) + 동바리 — 깊은 처마 그늘 아래 열린 마루로 답답함을

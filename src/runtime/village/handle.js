@@ -60,10 +60,19 @@ import { createVillageDetailLodState } from './detail-lod.js';
 import { createThresholdLifeRuntime } from './threshold-life.js';
 import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
 import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
+import { createPrimaryDoorRuntime } from '../../interaction/primary-door.js';
 
 const PERSISTENT_YARD_FIELDS = Object.freeze([
   'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed',
 ]);
+
+function isProductPrimaryDoorParcel(parcel) {
+  if (!parcel || (parcel.kind !== 'giwa' && parcel.kind !== 'choga')) return false;
+  // `hero` is a camera/editing class, not a residential role: town/capital use
+  // heroStyle=palace for magistracy/guest-house cores. Require the authored
+  // hanok role explicitly instead of treating every hero as the head household.
+  return parcel.hero === true ? parcel.heroStyle === 'hanok' : parcel.heroStyle == null;
+}
 
 // v4 마을 어댑터 — 앱 실시간 파이프라인과 마을 생성기 사이의 단일 계약면.
 //   createVillage(opts) → VillageHandle
@@ -108,12 +117,34 @@ export function createVillageHandle(opts, seed, plan, group) {
   // a rebuilt house from permanently losing chimney smoke after focus-out.
   const focusedResidentialIds = new Set();
   const persistentOverrideIds = new Set();        // edited/rebuilt parcels remain authoritative in aerial view
+  // Residential FULL overlays have one authored household primary door. Palace,
+  // temple, and palace-style magistracy compounds deliberately stay out: their
+  // hierarchy has no product-authorized single leaf, and optimized roots may
+  // merge semantics.
+  const primaryDoorById = new Map();              // no listeners or GPU ownership
   const rebuildEnvelopeById = new Map(plan.parcels.map((parcel) => [
     parcel.id,
     captureParcelRebuildEnvelope(parcel),
   ]));
   const editWallMats = makeMaterials('giwa');      // 편집 담장 공유 재질(base 씬 wallMats 와 동일 팔레트)
   let representationDirty = false;                 // base/overlay caster 소유권 변경 → 그림자 캐시 1회 갱신
+
+  function releasePrimaryDoor(parcelId) {
+    const runtime = primaryDoorById.get(parcelId);
+    if (!runtime) return;
+    runtime.dispose();
+    primaryDoorById.delete(parcelId);
+    representationDirty = true;
+  }
+
+  function activatePrimaryDoor(parcelId, root) {
+    releasePrimaryDoor(parcelId);
+    const parcel = plan.parcels.find((candidate) => candidate.id === parcelId);
+    if (!isProductPrimaryDoorParcel(parcel)) return null;
+    const runtime = createPrimaryDoorRuntime(root);
+    if (runtime) primaryDoorById.set(parcelId, runtime);
+    return runtime;
+  }
 
   function setResidentialBaseHidden(parcel, hidden) {
     if (setParcelBaseHidden(handle, parcel, hidden)) representationDirty = true;
@@ -335,6 +366,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     else { const lm = landmarksGroup(); if (lm) { lm.visible = false; landmarksHidden = true; } }
     representationDirty = true;
     retainOverlayPrograms(g, 'hero-' + (parcel.heroStyle || 'hanok') + (snow.isActive() ? '|snow' : ''));
+    activatePrimaryDoor(parcelId, g);
     return g;
   }
   function hideHeroDetail(parcelId = null) {
@@ -343,6 +375,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     for (const id of ids) {
       const rec = heroOverrides.get(id);
       if (!rec) continue;
+      releasePrimaryDoor(id);
       nightGlow.remove(rec.glow);
       disposeTree(rec.group); overrides.remove(rec.group); heroOverrides.delete(id);
       if (heroHandle?.get(id)) heroHandle.get(id).visible = true;
@@ -663,6 +696,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (!root) return null;
       const counts = {
         anchor: 0, panel: 0, frameBatch: 0, hardwareBatch: 0, thresholdLifeBatch: 0,
+        leafDetails: 0, recess: 0, doorPivot: 0,
       };
       let plan = null;
       root.traverse((object) => {
@@ -671,14 +705,20 @@ export function createVillageHandle(opts, seed, plan, group) {
           plan = object.userData.openingDetailPlan || plan;
         }
         if (object.name === 'primary-opening-panel') counts.panel++;
-        if (object.name === 'opening-frame-details') counts.frameBatch++;
+        if (object.name === 'opening-frame-details') {
+          counts.frameBatch++;
+          counts.recess += object.userData.primaryDoorRecesses?.length || 0;
+        }
         if (object.name === 'opening-hardware-details') counts.hardwareBatch++;
         if (object.name === 'threshold-life-detail') counts.thresholdLifeBatch++;
+        if (object.name === 'primary-opening-leaf-details') counts.leafDetails++;
+        if (object.name === 'primary-door-pivot') counts.doorPivot++;
       });
       return {
         ...counts,
         valid: counts.anchor === 1 && counts.panel === 1
-          && counts.frameBatch === 1 && counts.hardwareBatch === 1,
+          && counts.frameBatch === 1 && counts.hardwareBatch === 1
+          && counts.leafDetails === 1 && counts.doorPivot === 1,
         plan: plan ? {
           id: plan.id,
           kind: plan.kind,
@@ -690,7 +730,38 @@ export function createVillageHandle(opts, seed, plan, group) {
           pivot: !!plan.anchors?.pivot,
           footwear: !!plan.anchors?.footwear,
         } : null,
+        door: primaryDoorById.get(parcelId)?.snapshot() || null,
       };
+    },
+
+    primaryDoorState(parcelId) {
+      return primaryDoorById.get(parcelId)?.snapshot() || null;
+    },
+    raycastPrimaryDoor(raycaster, parcelId) {
+      const hit = primaryDoorById.get(parcelId)?.raycast(raycaster);
+      return hit ? {
+        distance: hit.distance,
+        point: hit.point.clone(),
+        objectName: hit.object.name || null,
+      } : null;
+    },
+    togglePrimaryDoor(parcelId) {
+      const runtime = primaryDoorById.get(parcelId);
+      if (!runtime) return null;
+      representationDirty = true;
+      return runtime.toggle();
+    },
+    seekPrimaryDoor(parcelId, progress) {
+      const runtime = primaryDoorById.get(parcelId);
+      if (!runtime) return null;
+      representationDirty = true;
+      return runtime.seek(progress);
+    },
+    primaryDoorWorldPoints(parcelId) {
+      return primaryDoorById.get(parcelId)?.worldTargets() || [];
+    },
+    primaryDoorWorldFrame(parcelId) {
+      return primaryDoorById.get(parcelId)?.worldFrame() || null;
     },
 
     // 검증용 LOD 소유권 스냅샷. 각 정규 필지는 어느 순간에도 far/mid/full/overlay 중
@@ -776,7 +847,10 @@ export function createVillageHandle(opts, seed, plan, group) {
         ? prev?.getObjectByName('threshold-life-detail') || null
         : null;
       retainedLife?.parent?.remove(retainedLife);
-      if (prev) { disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId); }
+      if (prev) {
+        releasePrimaryDoor(parcelId);
+        disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId);
+      }
       persistentOverrideIds.delete(parcelId);
 
       if (parcel.hero) {
@@ -859,6 +933,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       g.applyMatrix4(parcelMatrix(parcel));
       overrides.add(g);
       overrideById.set(parcelId, g);
+      activatePrimaryDoor(parcelId, g);
       if (persist) {
         persistentOverrideIds.add(parcelId);
         for (const key of PERSISTENT_YARD_FIELDS) {
@@ -910,6 +985,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       }
       const persistent = overrideById.get(parcelId);
       if (persistent && persistentOverrideIds.has(parcelId)) {
+        activatePrimaryDoor(parcelId, persistent);
         focusedResidentialIds.add(parcelId);
         setResidentialBaseHidden(parcel, true);
         thresholdLife.attach(persistent, thresholdLifeCondition());
@@ -937,6 +1013,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         return;
       }
       focusedResidentialIds.delete(parcelId);
+      releasePrimaryDoor(parcelId);
       const g = overrideById.get(parcelId);
       if (g && persistentOverrideIds.has(parcelId)) {
         thresholdLife.detach(g);
@@ -1074,6 +1151,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       const existing = overrideById.get(parcelId) || null;
       const wasPersistent = persistentOverrideIds.has(parcelId);
       if (existing) {
+        releasePrimaryDoor(parcelId);
         overrideById.delete(parcelId);
         persistentOverrideIds.delete(parcelId);
         overrides.remove(existing);
@@ -1087,6 +1165,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         verts += object.geometry.attributes.position.count;
       });
       if (probe) {
+        releasePrimaryDoor(parcelId);
         disposeTree(probe);
         overrides.remove(probe);
         overrideById.delete(parcelId);
@@ -1094,6 +1173,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (existing) {
         overrides.add(existing);
         overrideById.set(parcelId, existing);
+        activatePrimaryDoor(parcelId, existing);
         if (wasPersistent) persistentOverrideIds.add(parcelId);
         setResidentialBaseHidden(parcel, true);
       } else {
@@ -1138,12 +1218,17 @@ export function createVillageHandle(opts, seed, plan, group) {
     get time() { return time; }, get season() { return season; }, get weather() { return weather; },
 
     update(dt) {
+      let doorMoved = false;
+      for (const runtime of primaryDoorById.values()) {
+        if (runtime.update(dt)) doorMoved = true;
+      }
       vlights.update(dt);                          // 마을 조명 리그 시간대 크로스페이드(태스크 #50)
       group.userData.update?.(dt);                 // 개울 물결 uTime
       fauna.update(dt);                            // 개·고양이·까치·새 떼 앰비언트(마을 루트 자식)
       cloudsHandle?.update(dt);                    // 산 구름·물안개 표류 + 흐르는 구름 그림자(태양 판독, #57)
       nightGlow.update(dt);                        // 창호 발광 크로스페이드 + 촛불 일렁임(밤)
       snow.update(dt);
+      return doorMoved;
     },
     // 대규모 주택 청크 LOD(매 프레임, 카메라 필요) — FAR↔MID↔FULL 거리 전환.
     //   engine.js 가 camera 를 넘겨 호출. LOD 정책이 꺼진 규모(R<340)는 no-op.
@@ -1231,6 +1316,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      for (const parcelId of [...primaryDoorById.keys()]) releasePrimaryDoor(parcelId);
       hideTempleDetail();
       detachClouds();
       ambientField.exit();
@@ -1251,6 +1337,8 @@ export function createVillageHandle(opts, seed, plan, group) {
   const nullAfterDispose = new Set([
     'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'getPickProxy', 'raycast',
     'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
+    'primaryDoorState', 'raycastPrimaryDoor', 'togglePrimaryDoor', 'seekPrimaryDoor',
+    'primaryDoorWorldPoints', 'primaryDoorWorldFrame',
   ]);
   for (const key of Object.keys(api)) {
     const method = api[key];

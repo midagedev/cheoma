@@ -131,14 +131,19 @@ GitHub #11의 건축 고증 감사는 [`architectural-authenticity.md`](architec
 
 GitHub #30의 첫 표면 파일럿은 [`surface-materials.md`](surface-materials.md)의 순수 source/Three adapter 경계를 따른다. 다져진 흙길은 사진 타일이나 비동기 로더 대신 seed 결정론 RGBA8 albedo·height를 만들고, 회전된 16m 월드 UV로 교차로까지 연속된다. 기존 vertex color가 도로 등급과 경사면 mute를 계속 소유하며 draw call·삼각형·재질 수는 늘지 않는다. 사용자에게 보이는 출처는 `credits.md` 한 곳에서 실제 Reference UI로 전달하고, 고정 OFF/ON 화면을 직접 열어 반복 띠·중원경 shimmer를 확인한다.
 
-GitHub #16의 첫 단계는 [`exterior-detail.md`](exterior-detail.md)의 공통 창호 grammar다. Three 없는 불변 plan이
+GitHub #16은 [`exterior-detail.md`](exterior-detail.md)의 공통 창호 grammar와 선택 FULL **주거** 주출입문 상호작용이다. Three 없는 불변 plan이
 문·창 크기, 창 하부 머름, 문짝 lowerPanel, reveal, frame, threshold, primary entrance와 후속 pivot/footwear
 anchor를 소유하고, `giwa.js`·`walls.js`·대표 종가 `buildHanok`은 한 assembler로 이를 렌더링한다. 문은 머름을
 갖지 않으며 기존 하부 청판 rail을 별도 의미로 보존한다. 프레임은 기존 envelope 목재에 병합하고 절제된 철물은
 texture 없는 palette material 하나로 FULL/selected overlay에만 남긴다. 신발은 이 anchor를 소비하는 순수 plan과
 얇은 Three adapter로 분리하고, 정적 prototype이 아니라 선택된 focus overlay에서만 한 켤레를 소유한다. 맑은 날의
-짚신과 `rain`의 나막신 전환은 실제 제품 경로에서 검증하며 focus-out 때 회수한다. 문 상호작용은 여전히 독립 후속
-단계이고, 아궁이 service opening과 거주 창호를 합치지 않는다.
+짚신과 `rain`의 나막신 전환은 실제 제품 경로에서 검증하며 focus-out 때 회수한다. 경첩 쪽 한 짝만 별도 owner로
+분리해 청판·고리·띠와 함께 안쪽으로 열며, 순수 임계감쇠 state와 Three runtime을 분리한다. 초가·대표 종가는
+열린 뒤 벽이 재등장하지 않도록 기존 frame batch에 고정 암부를 병합하고 초가 보·판재는 실제 개구 폭에서
+분할한다. 실제 leaf/빈 문간의 명시적 down/up만 toggle하며 모든 조상의 visibility/layer를 확인한다. `hero`는
+카메라·편집 분류일 뿐 주거 역할이 아니므로 `heroStyle: 'palace'` 관아·객사와 궁·사찰 compound는 주 전각 역할이
+최적화 root까지 보존되기 전에는 제품 runtime을 만들지 않는다. drag·focus-out·rebuild·dispose는 문 상태와 host
+graph, 신발 overlay를 각 소유권 경계에서 정리한다. 아궁이 service opening과 거주 창호는 합치지 않는다.
 
 GitHub #10은 초가·기와 ㅡ·ㄱ·ㄷ의 문·창 plan을 FULL renderer와 집 편집기에 연결했다. 문 수·창 수·문 너비·창
 너비 네 축의 기본값과 shape별 상한은 `residential-openings.js` 한 곳에서 정규화되고, Svelte는 이 capability로

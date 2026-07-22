@@ -122,13 +122,20 @@ export function planOpeningDetail(input = {}) {
   ) : null;
 
   const hardware = [];
-  const hash = hashString(`${seed}|${style}|${kind}|${width.toFixed(3)}|${height.toFixed(3)}`);
+  // Hardware identity belongs to the opening, not its current editor width.
+  // Keeping the hinge side stable prevents the moving leaf, ring, and straps
+  // from jumping to the opposite jamb during a continuous width preview.
+  const hash = hashString(`${seed}|${style}|${kind}|hinge`);
   const hingeSide = (hash & 1) === 0 ? -1 : 1;
   let pivot = null;
   let footwearAnchor = null;
   if (primary) {
     const leafWidth = width / leafCount;
-    const pivotU = hingeSide * (width * 0.5 - frameWidth * 0.55);
+    // The moving leaf ends exactly on its hinge axis. Keeping the pivot on the
+    // outer leaf edge prevents an inset sliver from sweeping through the jamb.
+    const pivotU = hingeSide * width * 0.5;
+    const leafCenterU = hingeSide * (width * 0.5 - leafWidth * 0.5);
+    const leafOutward = clamp(finite(input.leafOutward, 0), -0.2, 0.2);
     const strapLength = clamp(leafWidth * 0.27, 0.11, style === 'palace' ? 0.25 : 0.18);
     const strapU = hingeSide * (width * 0.5 - frameWidth - strapLength * 0.5);
     const hardwareDepth = 0.018;
@@ -172,7 +179,10 @@ export function planOpeningDetail(input = {}) {
       y: leafBottom,
       axis: { u: 0, y: 1, outward: 0 },
       hingeSide,
+      outward: leafOutward,
       leafWidth,
+      leafCenterU,
+      meetingU,
       leafHeight,
       maxAngle: Math.PI * 0.52,
     };
@@ -197,7 +207,7 @@ export function planOpeningDetail(input = {}) {
   }
 
   return deepFreeze({
-    version: 3,
+    version: 4,
     id: `opening-${hashString(`${seed}|${kind}|${style}`).toString(16)}`,
     seed,
     kind,

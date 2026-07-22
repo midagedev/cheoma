@@ -7,6 +7,7 @@ import { sunkPrism } from '../core/surface-clearance.js';
 import { mergeOwnedGeometries } from '../core/merge-owned-geometries.js';
 import { planOpeningDetail } from '../builder/opening-detail-plan.js';
 import { createOpeningDetailAssembler } from '../builder/opening-details.js';
+import { createPrimaryDoorPanelSegments } from '../builder/primary-door-panel.js';
 
 // 다각형 풋프린트(rect/ㄱ자/ㄷ자) 기와집 몸채: 기단 + 기둥 + 회벽 + straight-skeleton 곡면 지붕.
 // 백골(무단청) 반가 톤. buildBuilding(궁·절·초가)과 별개로, 꺾인 평면 살림집을 만든다.
@@ -230,7 +231,8 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
   doorMat.map.needsUpdate = true;
 
   const panels = [];   // secondary 창호 패널(빗꽃살) 병합 대상
-  let primaryPanelGeometry = null;
+  let primaryPanel = null;
+  let primaryFixedPanel = null;
   const details = [];
   const openingDetails = createOpeningDetailAssembler(g, {
     frame: M.woodDark,
@@ -250,23 +252,7 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     const leaves = kind === 'door'
       ? clamp(Math.round(w / 0.6), 2, 4)   // 분합문: 좁은 살문 여러 짝
       : (w > 1.7 ? 2 : 1);                 // 방 창: 1~2짝
-    const geo = new THREE.BoxGeometry(w, h, T);
-    const uv = geo.attributes.uv;
     const vmin = kind === 'win' ? VSILL : 0;    // 창은 청판 잘라내고 살+한지만
-    for (let i = 0; i < uv.count; i++) {
-      uv.setX(i, uv.getX(i) * leaves);          // 가로로 leaves 만큼 반복(짝 사이 문틀선)
-      uv.setY(i, vmin + uv.getY(i) * (1 - vmin));
-    }
-    uv.needsUpdate = true;
-    geo.rotateY(inf.theta);
-    geo.translate(opening.cx, (yb + yt) / 2, opening.cz);
-    if (primary) primaryPanelGeometry = geo;
-    else panels.push(geo);
-    if (kind === 'door') {
-      doorN++;
-      if (primary) primaryDoor = true;
-    } else winN++;
-
     const plan = planOpeningDetail({
       kind: kind === 'door' ? 'door' : 'window',
       style: 'giwa',
@@ -285,15 +271,37 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
         surface: 'podium-step',
       } : null,
     });
+    const placement = {
+      center: { x: opening.cx, z: opening.cz },
+      bottomY: yb,
+      tangent: inf.e,
+      outward: inf.N,
+    };
+    if (primary) {
+      ({ active: primaryPanel, fixed: primaryFixedPanel } = createPrimaryDoorPanelSegments({
+        target: g, plan, placement, material: doorMat,
+        panelHeight: h, depth: T, uRepeats: leaves, vMin: vmin,
+      }));
+    } else {
+      const geo = new THREE.BoxGeometry(w, h, T);
+      const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) {
+        uv.setX(i, uv.getX(i) * leaves);          // 가로로 leaves 만큼 반복(짝 사이 문틀선)
+        uv.setY(i, vmin + uv.getY(i) * (1 - vmin));
+      }
+      uv.needsUpdate = true;
+      geo.rotateY(inf.theta);
+      geo.translate(opening.cx, (yb + yt) / 2, opening.cz);
+      panels.push(geo);
+    }
+    if (kind === 'door') {
+      doorN++;
+      if (primary) primaryDoor = true;
+    } else winN++;
     details.push({
       plan,
       primary,
-      placement: {
-        center: { x: opening.cx, z: opening.cz },
-        bottomY: yb,
-        tangent: inf.e,
-        outward: inf.N,
-      },
+      placement,
     });
     return true;
   };
@@ -385,7 +393,8 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     try {
       geometry = mergeOwnedGeometries(panels, 'Hanok opening panels');
     } catch (error) {
-      primaryPanelGeometry?.dispose();
+      primaryPanel?.geometry?.dispose();
+      primaryFixedPanel?.geometry?.dispose();
       doorMat.map?.dispose();
       doorMat.dispose();
       throw error;
@@ -395,14 +404,8 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     m.castShadow = true; m.receiveShadow = true;
     g.add(m);
   }
-  let primaryPanel = null;
-  if (primaryPanelGeometry) {
-    primaryPanel = new THREE.Mesh(primaryPanelGeometry, doorMat);
-    primaryPanel.castShadow = true;
-    primaryPanel.receiveShadow = true;
-    g.add(primaryPanel);
-  }
   for (const detail of details) {
+    if (detail.primary) openingDetails.addPrimaryRecess(detail.plan, detail.placement, T);
     openingDetails.add(detail.plan, detail.placement, detail.primary ? primaryPanel : null);
   }
   openingDetails.finish();

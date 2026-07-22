@@ -738,9 +738,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     nightGlowRef.update(dt);
     // LOD가 활성화한 애니메이션만 갱신한다. 청크/overlay caster 소유권 변화도 같은 프레임에
     // 그림자 캐시를 무효화한다.
+    let doorMoved = false;
     if (village.active && village.handle) {
       if (lodSwaps && shadowCacheOn) renderer.shadowMap.needsUpdate = true;
-      village.handle.update(dt);   // 개울 물결·야간 촛불·LOD로 활성화된 동물
+      doorMoved = !!village.handle.update(dt); // 물·동물과 선택 주출입문 hinge 상태
       village.wave?.newHandle?.update(dt);   // 조립 중 새 마을의 물·하늘 새 떼도 정지하지 않는다.
     }
     // 리롤 웨이브(#56) — 옛 건물 방사 해체 → 먹안개 peak scenery handoff → 새 건물 방사 조립.
@@ -794,7 +795,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (shadowCacheOn) {
       // 무대/지오가 움직이는 프레임: 조립 낙하·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈.
       //   (heroAsm·assembly·groupAnims 은 위에서 이미 처리된 뒤라 이 시점 truthy = 진행 중.)
-      const moving = !!tween || revealCamera?.isActive() || demo.active || village.wave || !!village.heroAsm || !!assembly || groupAnims.length > 0;
+      const moving = !!tween || revealCamera?.isActive() || demo.active || village.wave
+        || !!village.heroAsm || !!assembly || groupAnims.length > 0 || doorMoved;
       if (moving || performance.now() < shadowHot) {
         renderer.shadowMap.needsUpdate = true;
       } else if (village.active && village.selected && (frames % 6) === 0) {
@@ -828,10 +830,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const hit = raycaster.intersectObjects(targets, true);
     return hit.length ? hit[0] : null;
   }
+  function setVillageRay(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+  }
   function onCanvasPointerMove(e) {
     if (demo.active) return;                                   // 시네마틱 데모 중 호버 무시(#112)
     if (villageWaveBusy()) return;                              // 웨이브 빌드·애니 중 입력 무시(#56)
-    if (village.active) { villageHover(e.clientX, e.clientY); return; }
+    if (village.active) {
+      if (!focusedDoorHover(e.clientX, e.clientY)) villageHover(e.clientX, e.clientY);
+      return;
+    }
     if (state.selected) { outline.selectedObjects = []; return; }
     const h = pick(e.clientX, e.clientY);
     const now = !!h;
@@ -847,25 +858,42 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 시네마틱 데모 중 캔버스 입력(#112): 드론(수동관람)은 탭/클릭 = 종료. 1인칭은 드래그가 시선 조작이라
     //   종료하지 않음(ESC·오버레이 종료 버튼으로만 나간다).
     if (demo.active) { if (demo.mode !== 'walk') stopDemo(); return; }
-    downPos = { x: e.clientX, y: e.clientY };
+    let doorId = null;
+    if (village.active && village.selected && !village.transitioning && !villageWaveBusy()) {
+      setVillageRay(e.clientX, e.clientY);
+      if (village.handle.raycastPrimaryDoor?.(raycaster, village.selected)) doorId = village.selected;
+    }
+    downPos = { x: e.clientX, y: e.clientY, doorId };
     // 터치엔 호버가 없으므로 탭 시작 순간 미니 라벨을 잠깐 띄운다(선택 시 villageSelectStart 가 지움).
     //   focus 중에도 허용(#95) — 다른 필지 탭 예고(villageHover 가 현 focus 필지 자신은 제외).
     if (e.pointerType === 'touch' && village.active && !village.transitioning && !villageWaveBusy()) {
-      lastHoverT = 0; villageHover(e.clientX, e.clientY);
+      lastHoverT = 0;
+      if (!focusedDoorHover(e.clientX, e.clientY)) villageHover(e.clientX, e.clientY);
     }
   }
   function onCanvasPointerUp(e) {
     ensureAudio()?.start();
     if (!downPos) return;
-    const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
+    const pointerDown = downPos;
+    const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
     downPos = null;
     if (moved > 6) return;             // 드래그(궤도 회전)는 선택으로 치지 않음
     if (village.active) {
       if (villageWaveBusy() || village.transitioning) return;     // 웨이브 빌드·애니·전환 중 클릭 무시
-      const rect = renderer.domElement.getBoundingClientRect();
-      ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(ndc, camera);
+      setVillageRay(e.clientX, e.clientY);
+      if (pointerDown.doorId === village.selected
+          && village.handle.raycastPrimaryDoor?.(raycaster, village.selected)) {
+        const door = village.handle.togglePrimaryDoor(village.selected);
+        if (door) {
+          renderer.domElement.style.cursor = 'pointer';
+          emit('villageHover', {
+            interaction: 'door', open: door.targetOpen,
+            x: e.clientX, y: e.clientY,
+          });
+          emit('doorToggle', { parcelId: village.selected, ...door });
+        }
+        return;
+      }
       const hit = village.handle.raycast(raycaster);
       if (!hit) return;
       if (village.selected) {
@@ -1293,6 +1321,26 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageMode', false);
   }
 
+  // Focus FULL overlay의 실제 주출입문만 직접 조준한다. 필지 프록시보다 먼저 검사해 문 클릭이
+  // 같은 집 재선택이나 이웃 hop으로 새지 않으며, down/up 모두 같은 문일 때만 toggle한다.
+  function focusedDoorHover(clientX, clientY) {
+    if (!village.active || !village.selected || village.transitioning || villageWaveBusy()) return false;
+    setVillageRay(clientX, clientY);
+    const hit = village.handle.raycastPrimaryDoor?.(raycaster, village.selected);
+    if (!hit) return false;
+    if (hoverParcel) {
+      village.handle.highlightParcel(hoverParcel, false);
+      hoverParcel = null;
+    }
+    const door = village.handle.primaryDoorState?.(village.selected);
+    renderer.domElement.style.cursor = 'pointer';
+    emit('villageHover', {
+      interaction: 'door', open: !!door?.targetOpen,
+      x: clientX, y: clientY,
+    });
+    return true;
+  }
+
   // 필지 호버(마을 부감): 프록시 레이캐스트 → 어댑터 먹선 하이라이트 + 커서 + 미니라벨 이벤트.
   function villageHover(clientX, clientY) {
     // 전환·웨이브 중엔 호버 봉인. focus 중(selected)에도 다른 필지 호버는 허용(#95 직접 전환 예고) —
@@ -1304,10 +1352,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const now = performance.now();
     if (now - lastHoverT < 33) return;   // ~30Hz 스로틀
     lastHoverT = now;
-    const rect = renderer.domElement.getBoundingClientRect();
-    ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-    ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(ndc, camera);
+    setVillageRay(clientX, clientY);
     const hit = village.handle.raycast(raycaster);
     let id = hit ? hit.parcelId : null;
     if (id && id === village.selected) id = null;   // 현 focus 필지는 호버 대상에서 제외
@@ -1319,6 +1364,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       hoverParcel = id;
       renderer.domElement.style.cursor = id ? 'pointer' : '';
     }
+    if (!id && !hoverParcel) renderer.domElement.style.cursor = '';
     emit('villageHover', (hit && id) ? { parcelId: id, spec: hit.buildingSpec, x: clientX, y: clientY } : null);
   }
 
@@ -2239,8 +2285,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           persist: true,
           refreshFlora: opts.refreshFlora !== false,
         });
-        if (g) warmShaders(g);   // Every replacement owns fresh materials: restore rim patches and prelink only this subtree.
-        if (g && village.selected === id) attachFocusRing(g);
+        if (g) {
+          // Rebuilds create fresh materials just like rerolls. Apply the final rim
+          // patch before their first visible frame and warm only this replacement
+          // subtree, otherwise an unpatched physical+depth pair links on demand.
+          warmShaders(g);
+          if (village.selected === id) attachFocusRing(g);
+        }
         return g;
       },
       getState: () => ({
@@ -2281,6 +2332,59 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 검증용(#16): selected/persistent overlay rebuild가 primary 창호 anchor·panel과
       // building-wide frame/hardware batch를 정확히 하나씩 재생성하는지 확인한다.
       debugOpeningDetail: (id) => village.handle?.openingDetailState(id) ?? null,
+      // 검증용(#16 후속): 실제 제품 입력이 조준하는 선택 FULL 문의 상태·화면 좌표와
+      // 결정적 시간 진행. 제품 toggle은 캔버스 down/up hit 경로만 소유한다.
+      debugDoorInteraction: (id = village.selected) => (
+        id ? village.handle?.primaryDoorState?.(id) ?? null : null
+      ),
+      debugDoorFrame(id = village.selected) {
+        if (!id) return null;
+        const frame = village.handle?.primaryDoorWorldFrame?.(id);
+        if (!frame) return null;
+        return Object.fromEntries(Object.entries(frame).map(([key, value]) => [key, value.toArray()]));
+      },
+      debugDoorScreen(id = village.selected) {
+        if (!id) return null;
+        const rect = renderer.domElement.getBoundingClientRect();
+        const points = village.handle?.primaryDoorWorldPoints?.(id) || [];
+        const projectedPoints = [];
+        const visible = [];
+        for (const point of points) {
+          const projected = point.clone().project(camera);
+          const x = rect.left + (projected.x * 0.5 + 0.5) * rect.width;
+          const y = rect.top + (-projected.y * 0.5 + 0.5) * rect.height;
+          if (projected.z > 1 || x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+          projectedPoints.push({ x, y });
+          setVillageRay(x, y);
+          if (village.handle?.raycastPrimaryDoor?.(raycaster, id)) visible.push({ x, y });
+        }
+        if (!visible.length) return null;
+        const minX = Math.min(...projectedPoints.map((point) => point.x));
+        const maxX = Math.max(...projectedPoints.map((point) => point.x));
+        const minY = Math.min(...projectedPoints.map((point) => point.y));
+        const maxY = Math.max(...projectedPoints.map((point) => point.y));
+        const target = visible[Math.floor(visible.length * 0.5)];
+        return {
+          x: target.x, y: target.y, behind: false,
+          visiblePoints: visible.length,
+          spanX: maxX - minX,
+          spanY: maxY - minY,
+        };
+      },
+      debugSeekDoor(progress, id = village.selected) {
+        if (!id) return null;
+        const state = village.handle?.seekPrimaryDoor?.(id, progress) ?? null;
+        if (state && shadowCacheOn) renderer.shadowMap.needsUpdate = true;
+        return state;
+      },
+      debugAdvanceDoor(seconds = 1, id = village.selected) {
+        if (!id || !village.handle) return null;
+        const step = 1 / 60;
+        const count = Math.max(1, Math.ceil(Math.max(0, seconds) / step));
+        for (let index = 0; index < count; index++) village.handle.update(step);
+        if (shadowCacheOn) renderer.shadowMap.needsUpdate = true;
+        return village.handle.primaryDoorState?.(id) ?? null;
+      },
       // 검증용(#22): 배치 RNG를 바꾸지 않는 남측 안전 endpoint의 기본/선택 구도와
       // 3×3 집 바운딩 가시성 근거. 실제 제품 카메라는 safe framing만 소비한다.
       debugFocusVisibility: (id) => {

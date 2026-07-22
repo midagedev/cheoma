@@ -102,7 +102,7 @@ const DICT = {
     vil_edit_title: '집 고치기', vil_edit_sub: 'edit house',
     vil_bays: '칸수', s_frontBays: '정면 칸', s_sideBays: '측면 칸',
     vil_hero_note: '이 랜드마크는 감상할 수 있지만 고쳐 지을 수 없습니다.',
-    hint_bays: '칸',
+    hint_bays: '칸', hint_open_door: '문 열기', hint_close_door: '문 닫기',
     // 모바일 바텀시트 접기/펼치기(#154)
     sheet_expand: '편집 열기', sheet_collapse: '접기',
   },
@@ -203,7 +203,7 @@ const DICT = {
     vil_edit_title: 'Edit house', vil_edit_sub: 'plan & profile',
     vil_bays: 'Bays', s_frontBays: 'Front bays', s_sideBays: 'Side bays',
     vil_hero_note: 'This landmark can be viewed but is not editable.',
-    hint_bays: 'bays',
+    hint_bays: 'bays', hint_open_door: 'Open door', hint_close_door: 'Close door',
     // Mobile bottom-sheet collapse/expand (#154)
     sheet_expand: 'Edit', sheet_collapse: 'Collapse',
   },

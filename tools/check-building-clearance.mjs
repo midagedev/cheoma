@@ -160,17 +160,27 @@ invariant(
 for (const [style, opening] of Object.entries(production.openings)) {
   invariant(opening.counts.frame === 1,
     `${style} openings use ${opening.counts.frame} frame batches instead of one`);
+  invariant(opening.counts.leaf === 1,
+    `${style} primary leaf uses ${opening.counts.leaf} detail batches instead of one`);
   invariant(opening.counts.hardware === 1,
     `${style} openings use ${opening.counts.hardware} hardware batches instead of one`);
   invariant(opening.counts.primaryAnchor === 1 && opening.counts.primaryPanel === 1,
     `${style} does not expose exactly one primary entrance`);
-  invariant(opening.frameVertices > 0 && opening.hardwareVertices > 0,
+  invariant(opening.counts.doorPivot === 0,
+    `${style} door runtime left ${opening.counts.doorPivot} pivot ghosts after disposal`);
+  invariant(opening.counts.fixedPanels === (opening.plan.leafCount > 1 ? 1 : 0),
+    `${style} fixed leaf remainder count is ${opening.counts.fixedPanels}`);
+  const expectsRecess = style === 'choga' || style === 'hanok';
+  invariant(opening.counts.recess === (expectsRecess ? 1 : 0),
+    `${style} primary recess count is ${opening.counts.recess}`);
+  invariant(opening.frameVertices > 0 && opening.leafVertices > 0 && opening.hardwareVertices > 0,
     `${style} opening detail batch is empty`);
-  invariant(opening.frameTriangles <= (style === 'hanok' ? 2400 : 1600)
+  invariant(opening.frameTriangles + opening.leafTriangles <= (style === 'hanok' ? 2400 : 1600)
       && opening.hardwareTriangles <= 240,
-    `${style} opening detail budget grew to ${opening.frameTriangles}+${opening.hardwareTriangles} triangles`);
-  invariant(opening.frameEnvelope,
-    `${style} frame no longer shares the MID envelope wood material`);
+    `${style} opening detail budget grew to ${opening.frameTriangles}+${opening.leafTriangles}`
+      + `+${opening.hardwareTriangles} triangles`);
+  invariant(opening.frameEnvelope && opening.leafEnvelope && opening.leafSharesFrameMaterial,
+    `${style} fixed/moving frame details no longer share the MID envelope wood material`);
   invariant(!opening.hardwareEnvelope && opening.hardwarePaletteKey === 'hardware',
     `${style} ironwork leaked into MID or lost its shared palette key`);
   invariant(opening.plan?.primary && opening.plan?.anchors?.pivot && opening.plan?.anchors?.footwear,
@@ -180,6 +190,41 @@ for (const [style, opening] of Object.entries(production.openings)) {
     `${style} primary entrance ironwork drifted to ${opening.plan.hardware.length} pieces`);
   invariant(opening.plan.meoreum.height === 0 && opening.plan.lowerPanel.height > 0,
     `${style} primary door conflates its lower panel with a window meoreum`);
+  const runtime = opening.doorRuntime;
+  invariant(runtime?.pickedClosed && runtime.pickedMidAction && runtime.pickedOpenAction
+      && runtime.inward && runtime.frameFixed,
+    `${style} primary door lost closed/mid/open picking, inward swing, or fixed frame ownership `
+      + `(${JSON.stringify(runtime)})`);
+  invariant(runtime.closedSurfaceName === 'primary-opening-panel'
+      && runtime.hiddenPanelRejected && runtime.hiddenAncestorRejected
+      && runtime.ownerLayerRejected && runtime.hiddenRootRejected,
+    `${style} door ray ignored rendered visibility/layer ownership (${JSON.stringify(runtime)})`);
+  invariant(Math.abs(runtime.leafWidth - opening.plan.width / opening.plan.leafCount) < EPS
+      && Math.abs(runtime.panelWidth - runtime.leafWidth) < EPS
+      && runtime.panelCenterError < EPS && runtime.hingeEdgeError < EPS
+      && runtime.freeEdgeInward < -0.01 && runtime.sweepRadiusError < EPS,
+    `${style} moving owner is not exactly one planned leaf (${JSON.stringify(runtime)})`);
+  invariant(runtime.panelMoved && runtime.hardwareMoved && runtime.leafMoved,
+    `${style} door panel, ironwork, and leaf details do not share the hinge`);
+  invariant(runtime.hardwareRigid && runtime.leafRigid && runtime.sameFrameMaterial,
+    `${style} moving door details drifted from the leaf or changed material family`);
+  invariant(runtime.hasRecess === expectsRecess
+      && (!expectsRecess || (
+        opening.recessPaletteKey === 'woodDark'
+          && runtime.openSurfaceName === 'opening-frame-details'
+          && runtime.recessDepth > 0.03
+          && runtime.apertureDepth >= runtime.recessDepth - EPS
+      )),
+    `${style} open aperture does not resolve to its fixed dark recess (${JSON.stringify(runtime)})`);
+  invariant(runtime.resources.every((resources) => (
+    resources.geometries === runtime.resources[0].geometries
+      && resources.materials === runtime.resources[0].materials
+  )),
+    `${style} door runtime allocated geometry/material resources`);
+  invariant(runtime.movingObjects === (style === 'giwa' ? 4 : 3)
+      && runtime.hasLowerPanel === (style === 'giwa') && runtime.activePivotCount === 1
+      && runtime.closedOnDispose && runtime.pivotRemoved && runtime.hostRestored,
+    `${style} door lifecycle ownership is ${JSON.stringify(runtime)}`);
   if (style === 'hanok') {
     invariant(opening.primaryFace?.clearance > 0,
       `hanok frame front fell ${Math.abs(opening.primaryFace?.clearance || 0).toFixed(3)}m behind its panel`);
@@ -230,6 +275,13 @@ for (const fixture of production.residentialFixtures) {
   for (const panel of fixture.panels) {
     invariant(Math.abs(panel.renderedWidth - panel.plannedWidth) < EPS,
       `${fixture.name}/${panel.id} width drifted ${panel.renderedWidth} != ${panel.plannedWidth}`);
+    if (panel.primary) {
+      invariant(Math.abs(
+        panel.activeWidth - panel.plannedWidth / panel.detailLeafCount,
+      ) < EPS,
+      `${fixture.name}/${panel.id} active leaf drifted ${panel.activeWidth} from `
+        + `${panel.plannedWidth / panel.detailLeafCount}`);
+    }
     if (panel.kind === 'door') {
       invariant(panel.textureRepeatX === panel.detailLeafCount,
         `${fixture.name}/${panel.id} texture has ${panel.textureRepeatX} leaves but detail has ${panel.detailLeafCount}`);
@@ -331,7 +383,7 @@ console.log(
 );
 console.log(
   `opening batches: ${Object.entries(production.openings).map(([style, opening]) => (
-    `${style} tris=${opening.frameTriangles}+${opening.hardwareTriangles}`
+    `${style} tris=${opening.frameTriangles}+${opening.leafTriangles}+${opening.hardwareTriangles}`
   )).join(', ')}`,
 );
 console.log(

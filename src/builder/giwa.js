@@ -12,6 +12,7 @@ import {
 } from '../core/surface-clearance.js';
 import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
 import { createResidentialOpeningDetails } from './residential-opening-details.js';
+import { createPrimaryDoorPanelSegments } from './primary-door-panel.js';
 
 // 기와집(ㅡ/ㄱ/ㄷ 반가 안채): 공유 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
@@ -211,6 +212,7 @@ export function buildGiwa(P, M) {
       height: yLintel - y0,
       wallThickness: T,
       lowerPanelHeight: lowerPanelTop - y0,
+      leafOutward: overlayCenterOffset(T, 0.10),
       footwear: {
         // The toenmaru slab is 12cm high and centered at podTopY + 0.42.
         // Anchor footwear on its upper face rather than through its center.
@@ -296,20 +298,43 @@ export function buildGiwa(P, M) {
       if (opening?.kind === 'door') {
         const face = visibleCenter(opening, 0.10);
         sidePanels(opening, bw, y0, yTopWall, M.plaster, alongX);
-        slab(face.x, face.z, opening.width,
-          y0, lowerPanelTop, lowerPanelMat, alongX, 0.10);
         slab(opening.center.x, opening.center.z, opening.width,
           yLintel + 0.10, yTopWall, M.plaster, alongX);
-        openingDetails.add(opening, (detail) => slab(
-          face.x,
-          face.z,
-          opening.width,
-          lowerPanelTop,
-          yLintel,
-          doorMat(detail.leafCount),
-          alongX,
-          0.10,
-        ));
+        openingDetails.add(opening, (detail, placement) => {
+          if (detail.primary) {
+            createPrimaryDoorPanelSegments({
+              target: walls,
+              plan: detail,
+              placement,
+              material: lowerPanelMat,
+              panelHeight: lowerPanelTop - y0,
+              depth: 0.10,
+              activeName: 'primary-opening-lower-panel',
+              fixedName: 'primary-opening-fixed-lower-panels',
+            });
+            return createPrimaryDoorPanelSegments({
+              target: walls,
+              plan: detail,
+              placement,
+              material: doorMat(detail.leafCount),
+              panelBottom: lowerPanelTop - y0,
+              panelHeight: yLintel - lowerPanelTop,
+              depth: 0.10,
+            }).active;
+          }
+          slab(face.x, face.z, opening.width,
+            y0, lowerPanelTop, lowerPanelMat, alongX, 0.10);
+          return slab(
+            face.x,
+            face.z,
+            opening.width,
+            lowerPanelTop,
+            yLintel,
+            doorMat(detail.leafCount),
+            alongX,
+            0.10,
+          );
+        });
       } else if (opening?.kind === 'window') {
         wallWithWindow(opening, bw, alongX,
           role === 'plank' ? plankMat(bw) : M.plaster);
