@@ -61,6 +61,35 @@ try {
       continuum: engine.village.debugContinuum(),
       zoomMax: engine.__controls.maxDistance,
     });
+    const cameraAxisDepth = (point) => {
+      if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) return null;
+      engine.camera.updateMatrixWorld(true);
+      const e = engine.camera.matrixWorldInverse.elements;
+      return -(e[2] * point[0] + e[6] * point[1] + e[10] * point[2] + e[14]);
+    };
+    const doorFocusSnapshot = (parcelId) => {
+      const dof = snapshot();
+      const door = engine.village.debugDoorFrame(parcelId);
+      const leaf = engine.village.debugDoorInteraction(parcelId);
+      const anchor = dof.anchorWorld;
+      const center = door?.center;
+      const delta = Array.isArray(anchor) && Array.isArray(center)
+        ? anchor.map((value, index) => value - center[index])
+        : null;
+      const outward = door?.outward;
+      return {
+        dof,
+        door,
+        leafWidth: leaf?.leafWidth ?? null,
+        doorDepth: cameraAxisDepth(center),
+        anchorDepthFromMatrix: cameraAxisDepth(anchor),
+        worldOffset: delta ? Math.hypot(...delta) : null,
+        verticalOffset: delta ? Math.abs(delta[1]) : null,
+        portalPlaneOffset: delta && Array.isArray(outward)
+          ? Math.abs(delta[0] * outward[0] + delta[1] * outward[1] + delta[2] * outward[2])
+          : null,
+      };
+    };
     const begin = async (action) => {
       action();
       // __noWarm makes the reveal gate an already-resolved promise. Drain its microtasks
@@ -86,6 +115,7 @@ try {
     await begin(() => engine.village.focus('p32'));
     const focusOuter = seek();
     const focusEnd = snapshot();
+    const focusOuterDoor = doorFocusSnapshot('p32');
 
     // Refresh the product LOD at the settled telephoto camera, then assert that weather
     // consumes that exact lens scale instead of re-inferring it from a roof-height target.
@@ -126,6 +156,18 @@ try {
       backgroundRestored: engine.scene.background === backgroundBefore,
     };
 
+    // A committed focused rebuild replaces the entire overlay. The semantic DoF
+    // cache must be refreshed in the same event turn rather than retaining the
+    // disposed anchor or waiting for a render-frame traversal.
+    const rebuildBefore = doorFocusSnapshot('p32');
+    const rebuildState = engine.village.debugParcelRebuild('p32');
+    const previousDoorHeight = rebuildState?.params?.doorHeightK;
+    const nextDoorHeight = previousDoorHeight < 1 ? 1.05 : 0.9;
+    const rebuilt = !!engine.village.rebuild('p32', {
+      building: { doorHeightK: nextDoorHeight },
+    }, { refreshFlora: false });
+    const rebuildAfter = doorFocusSnapshot('p32');
+
     await begin(() => engine.village.return());
     const returnOuter = seek();
     const returnEnd = snapshot();
@@ -133,6 +175,8 @@ try {
     morph = 0;
     await begin(() => engine.village.focus('p27'));
     const focusHopStart = seek();
+    const focusHopFrom = snapshot();
+    const focusHopFromDoor = doorFocusSnapshot('p27');
     await begin(() => engine.village.switchTo('p16'));
     const hop = seek(Array.from({ length: 17 }, (_, index) => index / 16));
     const hopEnd = snapshot();
@@ -191,12 +235,22 @@ try {
       fixtures: required,
       focusOuter,
       focusEnd,
+      focusOuterDoor,
       focusedOptics,
       focusedWeatherLensScale,
       depthFrame: { before: beforeDepthFrame, after: afterDepthFrame },
+      rebuild: {
+        rebuilt,
+        previousDoorHeight,
+        nextDoorHeight,
+        before: rebuildBefore,
+        after: rebuildAfter,
+      },
       returnOuter,
       returnEnd,
       focusHopStart,
+      focusHopFrom,
+      focusHopFromDoor,
       hop,
       hopEnd,
       returnHop,
@@ -219,6 +273,28 @@ try {
       sample.fov, sample.highlightThreshold, sample.highlightGain, sample.bokehRadiusScale]
       .every(Number.isFinite)
   ));
+  const finiteAnchor = (sample) => Array.isArray(sample?.anchorWorld)
+    && sample.anchorWorld.length === 3
+    && sample.anchorWorld.every(Number.isFinite);
+  const vectorDistance = (a, b) => (
+    Array.isArray(a) && Array.isArray(b) && a.length === 3 && b.length === 3
+      ? Math.hypot(...a.map((value, index) => value - b[index]))
+      : Infinity
+  );
+  const primaryDoorAligned = (sample) => {
+    const { dof, leafWidth } = sample;
+    return dof.anchorSource === 'primary-opening'
+      && finiteAnchor(dof)
+      && Number.isFinite(sample.doorDepth)
+      && Number.isFinite(sample.anchorDepthFromMatrix)
+      && Math.abs(dof.anchorDepth - sample.anchorDepthFromMatrix) < 1e-5
+      && Math.abs(dof.anchorDepth - sample.doorDepth) < 0.08
+      && sample.verticalOffset < 0.01
+      && sample.portalPlaneOffset < 0.01
+      // The semantic point is the whole fixed portal center. debugDoorFrame is
+      // the active outer-leaf center, so multi-leaf doors may differ laterally.
+      && sample.worldOffset < Math.max(0.05, (leafWidth || 0) * 2 + 0.02);
+  };
 
   pass(result.aerial.enabled === false && result.aerial.amount === 0 && result.aerial.aperture === 0,
     'aerial mode owns a zero-cost, zero-residue DoF state');
@@ -243,11 +319,20 @@ try {
 
   pass(finite(result.focusOuter) && result.focusEnd.transitioning === false && result.focusEnd.selected === 'p32',
     'outer focus-in completes with finite DoF state');
+  pass(result.focusOuter.every((sample) => (
+    sample.anchorSource === 'primary-opening-transition' && finiteAnchor(sample)
+  )),
+  'focus-in interpolates a finite controls-target to primary-opening anchor path');
   pass(maxError(result.focusOuter) < 0.01,
     `outer focus-in tracks camera-axis depth (max error ${maxError(result.focusOuter).toFixed(5)}m)`);
   pass(monotonic(result.focusOuter.map((sample) => sample.amount), 1)
       && apertureInRange(result.focusOuter),
   'focus-in aperture rises monotonically without overshoot');
+  pass(primaryDoorAligned(result.focusOuterDoor)
+      && result.focusOuterDoor.dof.semanticParcel === 'p32',
+  `settled focus owns p32's fixed primary-opening plane (depth delta ${Math.abs(
+    result.focusOuterDoor.dof.anchorDepth - result.focusOuterDoor.doorDepth
+  ).toFixed(5)}m)`);
 
   const depthJitter = Math.abs(result.depthFrame.after.dof.focus - result.depthFrame.before.dof.focus);
   pass(result.depthFrame.after.dof.depthExcluded > 0,
@@ -267,14 +352,42 @@ try {
   pass(depthJitter < 0.01 && result.depthFrame.after.dof.amount === 1,
     `settled focus does not breathe across a real Bokeh frame (${depthJitter.toFixed(6)}m)`);
 
+  const rebuildAnchorMove = vectorDistance(
+    result.rebuild.before.dof.anchorWorld,
+    result.rebuild.after.dof.anchorWorld,
+  );
+  pass(result.rebuild.rebuilt
+      && Number.isFinite(result.rebuild.previousDoorHeight)
+      && result.rebuild.nextDoorHeight !== result.rebuild.previousDoorHeight
+      && result.rebuild.after.dof.semanticParcel === 'p32'
+      && result.rebuild.after.dof.semanticWrites > result.rebuild.before.dof.semanticWrites
+      && rebuildAnchorMove > 1e-4
+      && primaryDoorAligned(result.rebuild.after),
+  `focused rebuild atomically refreshes the semantic anchor (${rebuildAnchorMove.toFixed(4)}m, writes ${
+    result.rebuild.before.dof.semanticWrites}->${result.rebuild.after.dof.semanticWrites})`);
+
   pass(maxError(result.returnOuter) < 0.01
       && monotonic(result.returnOuter.map((sample) => sample.amount), -1)
       && result.returnEnd.enabled === false && result.returnEnd.transitioning === false,
   'focus-out holds the departing house depth while DoF fades monotonically to off');
+  pass(result.returnOuter.every((sample) => (
+    sample.anchorSource === 'primary-opening-transition' && finiteAnchor(sample)
+  ))
+      && result.returnEnd.anchorSource === 'controls-target'
+      && result.returnEnd.semanticParcel == null,
+  'focus-out retains the departure portal through zero amount, then clears semantic ownership');
 
   pass(finite(result.focusHopStart) && finite(result.hop)
       && result.hopEnd.selected === 'p16' && result.hopEnd.transitioning === false,
   'long house hop completes with finite DoF state');
+  pass(primaryDoorAligned(result.focusHopFromDoor)
+      && result.focusHopFrom.anchorSource === 'primary-opening'
+      && result.focusHopFrom.semanticParcel === 'p27',
+  'settled p27 focus resolves its fixed primary-opening plane before the hop');
+  pass(result.hop.every((sample) => (
+    sample.anchorSource === 'primary-opening-transition' && finiteAnchor(sample)
+  )),
+  'house hop interpolates one finite primary-opening path instead of snapping target depth');
   pass(maxError(result.hop) < 0.01
       && result.hop.every((sample) => sample.enabled && Math.abs(sample.amount - 1) < 1e-9)
       && apertureInRange(result.hop),
