@@ -19,6 +19,7 @@ import {
   VILLAGE_LENS,
   VILLAGE_FOCUS_SKY_FRACTION,
   dollyDistanceForFov,
+  fovForDollyScale,
   lensScaleForCamera,
   referenceFovForCamera,
   referenceVillageFov,
@@ -33,6 +34,7 @@ import {
 } from '../../../src/api/village.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
 import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './expansion.js';
+import { createArchitecturalRevealRuntime } from './architectural-reveal-runtime.js';
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
 import { createCinematicRuntime } from './cinematic-runtime.js';
 import { createInkModeRuntime } from './ink-mode-runtime.js';
@@ -52,13 +54,12 @@ const moveArrive = (u) => (u >= 0.5 ? 1 : (1 - Math.pow(1 - u / 0.5, 3)));
 // 집"으로 관람할 시간을 확보한다(#46 과압축 되돌림). 먹 안개는 조립 전반부에 앞당겨 걷혀(집이 먼저
 // 드러남) 조립 후반이 맑게 보이고, 카메라는 그 동안 웅장하게 선회 줌인한다. 완료(≈8.2s)까지가 관람
 // 구간 — 유휴 대기가 아니라 카메라·조립이 계속 움직이므로 첫 인터랙션 지연 체감이 낮다.
-// window.__heroLegacy=true 면 구버전 타이밍(6.6s 착공·등속 reveal)으로 재현(before 계측).
-const HERO_REVEAL_SCALE = 0.56;        // reveal 재생 배속(12s → ~6.7s) — 구 단일건물 hero.enter 경로 전용
+// 카메라 경로 자체는 renderer-free architectural-reveal 모듈이 소유하고, 여기서는 조립과 한 clock으로 배선한다.
+// window.__heroLegacy는 기존 착공 지연 A/B 계측만 보존한다.
 const HERO_ASSEMBLE_DELAY_MS = 1100;   // enter 후 착공까지(타이틀 페이드 0.9s 직후 착공 동기)
 const HERO_ASSEMBLE_DUR = 7.0;         // 조립 길이(완료 ≈8.1s) — 안개 걷힌 뒤 관람 구간 확보(4.8→7.0)
 const HERO_REVEAL_HOLD = 0.5;          // 먹 안개 무대 유지 배율(이 진행도까지 짙게 → 조립 후반에 마을 개방)
 const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주변 먹안개 far 시작 깊이 배율(1=기본), 히어로 근접은 불변
-const HERO_SPIN_RAD = 2.35;            // 랜딩 나선 선회량(라디안 ≈135°) — "멋있게 회전"(구 1.258→2.35)
 
 // focus 전환 타임라인 통일(#92, mode-integration §5.5 원칙 3) — focus-in 은 카메라 돌리 + DoF 페이드 +
 // 링 크로스페이드 + 패널 컨텍스트 모프를 "한 타임라인"으로 구동한다. 카메라 트윈이 그 클록의 권위 —
@@ -359,6 +360,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   현재 강도에서 목표값까지 단조 보간한다.
   //   opts.onDone 은 도착 콜백(마을 도착 시 편집 패널 슬라이드 인 등).
   let tween = null;
+  let revealCamera = null;
   let focusComposition = 0;
   function setFocusComposition(weight) {
     focusComposition = clamp01(weight);
@@ -369,6 +371,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     fov, referenceFov, onDone, onProgress, dofAnchor = null, dofAmount = null,
     focusComposition: nextFocusComposition = null,
   } = {}) {
+    revealCamera?.stop('replaced', { notify: false });
     cinematic.stop();
     const currentReferenceFov = referenceFovForCamera(camera);
     const changesLens = Number.isFinite(fov) || Number.isFinite(referenceFov);
@@ -419,6 +422,27 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     isBusy: () => !!(demo.active || villageWaveBusy() || village.heroAsm || heroActive),
   });
   const viewShift = viewShiftRuntime.state;
+
+  const reducedCameraMotion = typeof matchMedia === 'function'
+    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const architecturalMotion = () => reducedCameraMotion ? 'reduced' : (perf || compact ? 'compact' : 'full');
+
+  revealCamera = createArchitecturalRevealRuntime({
+    camera,
+    controls,
+    domElement: renderer.domElement,
+    setComposition: setFocusComposition,
+    getComposition: () => focusComposition,
+    getMotion: architecturalMotion,
+    getReferenceFov: () => referenceFovForCamera(camera),
+    settleControls,
+    cancelConflictingMotion: () => {
+      tween = null;
+      cinematic.stop();
+      if (demo.active) demoRuntime.stop();
+    },
+    markActivity,
+  });
 
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
   function ensureAudio() {
@@ -627,6 +651,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     advanceCameraTween(dt);
     cinematic.update(dt);
     if (demo.active) updateDemo(dt);                                           // 시네마틱 데모 카메라 구동(#112)
+    revealCamera?.update(dt);                                                  // #22 건축 리빌/재생성 카메라
     if (assembly && assembly.update(dt)) assembly = null;
     for (const w of wings) if (w.assembly && w.assembly.update(dt)) w.assembly = null;
     if (village.heroAsm && !village.asmFrozen && village.heroAsm.update(dt)) village.heroAsm = null;   // 종가 랜딩/리플레이 조립 (#126 asmFrozen=검증 정지)
@@ -651,12 +676,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 감상 자동 회전 게이트 + ease-in 램프. 히어로·조립/확장/머지·시네마틱·트윈·선택 중엔 정지,
     // 유휴(ORBIT_IDLE_MS) 지나면 부드럽게 재개. 조작(markActivity) 시 즉시 정지.
     // 단, 마을 모드에서 조립 중(village.heroAsm)일 때는 자동 선회 연출을 허용합니다.
+    const revealInterrupted = revealCamera?.getState().reason === 'input';
+    const revealAutoOrbit = !reducedCameraMotion && !revealInterrupted;
     const orbitBusy = (heroActive && !village.heroAsm) || assembly || groupAnims.length > 0 ||
-      wings.some((w) => w.assembly) || cinematic.isActive() || tween || state.selected || demo.active ||
-      (village.active && village.selected && !village.heroAsm) || villageWaveBusy();
+      wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealCamera?.isActive() || state.selected || demo.active ||
+      (village.active && village.selected && !village.heroAsm) || (village.heroAsm && !revealAutoOrbit) || villageWaveBusy();
 
     let curRotateSpeed = ORBIT_SPEED;
-    if (village.active && village.heroAsm) {
+    if (village.active && village.heroAsm && revealAutoOrbit) {
       // 조립 중 회전 (모바일/저사양 제외, 회전각 체감을 높이기 위해 약간 더 빠르게 선회)
       curRotateSpeed = perf ? 0 : ORBIT_SPEED * 5.2;
     }
@@ -668,11 +695,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     const g = orbitGain * orbitGain * (3 - 2 * orbitGain); // smoothstep ease-in
     // 조립 중에는 유휴 타이머(orbitGain)에 구애받지 않고 무조건 웅장한 선회를 관철함
-    controls.autoRotateSpeed = village.heroAsm ? curRotateSpeed : (curRotateSpeed * g);
+    controls.autoRotateSpeed = village.heroAsm && revealAutoOrbit ? curRotateSpeed : (curRotateSpeed * g);
     // dt 를 넘겨 autoRotate 를 프레임레이트 독립으로 — 무인자 update() 는 60fps 를 가정한
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
-    if (!cinematic.isActive() && !tween && !demo.active) controls.update(dt);   // 데모 중 카메라는 updateDemo 소유
+    if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) controls.update(dt);
     const settledFocusAmount = village.active && village.selected && !village.transitioning && !tween
       ? villageCamera.updateFocusContext() : null;
     // #14: 집 선택은 줌아웃으로 풀리지 않지만 근경 보케까지 넓은 마을 문맥에 남아서는 안 된다.
@@ -766,7 +793,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (shadowCacheOn) {
       // 무대/지오가 움직이는 프레임: 조립 낙하·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈.
       //   (heroAsm·assembly·groupAnims 은 위에서 이미 처리된 뒤라 이 시점 truthy = 진행 중.)
-      const moving = !!tween || demo.active || village.wave || !!village.heroAsm || !!assembly || groupAnims.length > 0;
+      const moving = !!tween || revealCamera?.isActive() || demo.active || village.wave || !!village.heroAsm || !!assembly || groupAnims.length > 0;
       if (moving || performance.now() < shadowHot) {
         renderer.shadowMap.needsUpdate = true;
       } else if (village.active && village.selected && (frames % 6) === 0) {
@@ -1563,30 +1590,30 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       VILLAGE_LENS.hero.referenceFov,
       VILLAGE_LENS.hero.fov,
     );
-    const r = heroDistance * maxDim;
+    const visibilityScale = pr.cameraVisibility?.scale ?? 1;
+    const r = heroDistance * maxDim * visibilityScale;
     const finalTarget = pr.cameraFraming.target.clone();
     const plannedXZ = pr.cameraFraming.position.clone().sub(finalTarget).setY(0).normalize();
     const off = plannedXZ.multiplyScalar(r);
     off.y = pr.cameraFraming.position.y - finalTarget.y;
     const finalPosition = finalTarget.clone().add(off);
-    const finalFov = VILLAGE_LENS.hero.fov;
+    const finalFov = fovForDollyScale(VILLAGE_LENS.hero.fov, visibilityScale);
+    const finalReferenceFov = fovForDollyScale(VILLAGE_LENS.hero.referenceFov, visibilityScale);
 
-    // 나선 줌인 궤도 극좌표(#98②) — 최종 구도(finalPosition)를 기준각/반경/높이로 분해하고, 시작은
-    //   HERO_SPIN_RAD 만큼 앞선 각 + 1.9배 먼 반경 + 4.2m 높은 상공. 조립 내내 각속도 일정(이즈드)으로
-    //   선회하며 반경이 단조 축소돼(줌인) 집으로 파고들지 않고 finalPosition 에 정확히 안착한다.
-    const a1 = Math.atan2(off.x, off.z);
-    const r1 = Math.hypot(off.x, off.z);
-    const arc = {
-      cx: finalTarget.x, cz: finalTarget.z,
-      a0: a1 + HERO_SPIN_RAD, a1,
-      r0: r1 * 1.9, r1,
-      y0: finalPosition.y + 4.2, y1: finalPosition.y,
-    };
-    const startPos = new THREE.Vector3(arc.cx + Math.sin(arc.a0) * arc.r0, arc.y0, arc.cz + Math.cos(arc.a0) * arc.r0);
-
-    camera.position.copy(startPos); controls.target.copy(finalTarget); camera.fov = 34; // 먼 fov로 시작
-    camera.userData.villageReferenceFov = 34;
-    camera.updateProjectionMatrix(); camera.lookAt(controls.target);
+    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 마당 눈높이의
+    // 저각·망원 프레임으로 내려앉는다. seed는 선회 방향만 정하고 생성 RNG를 소비하지 않는다.
+    // 모바일은 호를 줄이며 reduced-motion은 즉시 endpoint를 적용한다.
+    revealCamera.reveal('arrival', {
+      position: finalPosition,
+      target: finalTarget,
+      fov: finalFov,
+      referenceFov: finalReferenceFov,
+      composition: 1,
+    }, {
+      seed: village.seed,
+      subjectSize: maxDim,
+      duration: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR,
+    });
     reapplyVillageFog();
     // 랜딩 먹 안개: 조립 완주까지 걸쳐 두되(hold 로 전반부 짙은 무대 유지) 조립 후반에 마을을 연다(#98④).
     //   히어로는 근접(near fog 안)이라 hold 중에도 늘 맑게 보이고, 무대(주변 마을)만 물렸다 열린다.
@@ -1607,27 +1634,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const closeupDist = finalPosition.distanceTo(finalTarget);
     // 조립 즉시 시작하되 착공 지연(delay)만큼 빈 터 유지 → 타이틀 페이드·먹안개가 착공 순간을 덮는다.
     // 완료 시 클로즈업 편집 상태로 안착(패널 슬라이드 인).
-    // 상공(startPos) → 최종 역광 클로즈업(finalPosition)으로 나선 회전 줌인. 조립 완주(delay+dur)까지
-    //   카메라가 끊김 없이 선회 도착 → 도중 autoRotate 로 넘어가며 속도 튐(lurch)이 없다(#98②).
-    tween = {
-      e: 0,
-      dur: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR,
-      arc,
-      p1: finalPosition.clone(),   // 폴백/참조용(arc 모드에선 미사용)
-      t0: finalTarget.clone(),
-      t1: finalTarget.clone(),
-      f0: 34,
-      f1: finalFov,
-      r0: 34,
-      r1: VILLAGE_LENS.hero.referenceFov,
-      changesLens: true,
-      composition0: focusComposition,
-      composition1: 1,
-      onDone: () => {
-        settleControls();
-        controls.update(); // 1프레임 회전 튕김 차단
-      }
-    };
     playHeroAssembly(g, HERO_ASSEMBLE_DUR, { delay: HERO_ASSEMBLE_DELAY_MS / 1000, onDone: () => {
       village.transitioning = false; heroActive = false; lastActivity = performance.now();
       settleControls();
@@ -1708,7 +1714,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!id) return;
     const detail = village.handle.rerollParcel(id);
     if (!detail) return;
-    if (detail.group) warmShaders(detail.group);   // 리롤 신규 오버레이 서브트리만 프리컴파일(#117) — 재조립 첫 렌더 컴파일 스톨 흡수
+    if (detail.group) warmShaders(detail.group);   // 신규 서브트리만 병렬 링크. 아래 베일+카메라 호가 잔여 준비를 가린다.
     const pr = village.handle.getPickProxy(id);
     const spec = detail.spec || pr?.buildingSpec;
     const dur = detail.compound ? HERO_ASSEMBLE_DUR : 3.0;
@@ -1723,12 +1729,24 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     startVillageReveal(dur + 0.4);                               // 재형성 무드 + 폴백 소품 은닉 마스킹
     if (pr) {
       const framing = pr.cameraFraming;
-      tweenTo(framing.position, framing.target, Math.min(1.2, dur * 0.42), {
+      const rebuildState = village.handle.parcelRebuildState?.(id);
+      revealCamera.reveal('rebuild', {
+        position: framing.position,
+        target: framing.target,
         fov: framing.fov,
         referenceFov: framing.referenceFov,
-        dofAnchor: framing.target,
-        focusComposition: 1,
-        onProgress: () => emit('villageFocusMorph', 1),
+        composition: 1,
+      }, {
+        seed: rebuildState?.rebuildSeed ?? detail.spec?.seed ?? village.seed,
+        subjectSize: pr.maxDim,
+        duration: Math.max(2.2, dur - 0.1),
+        // The capture-phase reveal handler runs before OrbitControls. Restore
+        // the focus zoom regime synchronously so the same wheel gesture both
+        // cancels choreography and performs the user's requested dolly.
+        onInterrupt: () => {
+          setZoomRegime('focus', camera.position.distanceTo(controls.target));
+          emit('villageFocusMorph', 1);
+        },
       });
     }
     playFocusAssembly(detail, dur, { onDone: () => {
@@ -1937,17 +1955,47 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     // 리롤(다시 짓기): 새 seed → 결정적 설정 → 조립 연출. 새 seed 반환.
     reroll() {
+      const from = revealCamera.capture();
       const seed = newSeed();
       state.seed = seed;
       state.expansion = 1; state.selected = false;
       applyConfig(configFromSeed(seed), { animate: true });
+      const layout = computeLayout(P);
+      const framing = buildingSpot('three-quarter', layout);
+      revealCamera.reveal('rebuild', {
+        position: framing.pos,
+        target: framing.target,
+        fov: camera.fov,
+        referenceFov: camera.fov,
+        composition: 0,
+      }, {
+        from,
+        seed,
+        subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
+        duration: 2.6,
+      });
       emit('seed', seed);
       return seed;
     },
     applySeed(seed) {
+      const from = revealCamera.capture();
       state.seed = seed >>> 0;
       state.expansion = 1; state.selected = false;
       applyConfig(configFromSeed(state.seed), { animate: true });
+      const layout = computeLayout(P);
+      const framing = buildingSpot('three-quarter', layout);
+      revealCamera.reveal('rebuild', {
+        position: framing.pos,
+        target: framing.target,
+        fov: camera.fov,
+        referenceFov: camera.fov,
+        composition: 0,
+      }, {
+        from,
+        seed: state.seed,
+        subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
+        duration: 2.6,
+      });
       emit('seed', state.seed);
       return state.seed;
     },
@@ -2225,6 +2273,27 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 검증용(#19): persistent rebuild 소유권, 필지 치수, 편집 스펙, 마당나무 충돌을
       // renderer traversal 없이 한 스냅샷으로 확인한다.
       debugParcelRebuild: (id) => village.handle?.parcelRebuildState(id) ?? null,
+      // 검증용(#22): 배치 RNG를 바꾸지 않는 남측 안전 endpoint의 기본/선택 구도와
+      // 3×3 집 바운딩 가시성 근거. 실제 제품 카메라는 safe framing만 소비한다.
+      debugFocusVisibility: (id) => {
+        const p = village.handle?.getPickProxy(id);
+        if (!p) return null;
+        const bounds = (box) => ({ min: box.min.toArray(), max: box.max.toArray() });
+        const plainFrame = (framing) => ({
+          position: framing.position.toArray(), target: framing.target.toArray(),
+          fov: framing.fov, referenceFov: framing.referenceFov,
+        });
+        return {
+          ...structuredClone(p.cameraVisibility),
+          subjectBounds: bounds(p.focusBounds || p.bbox),
+          blockerBounds: Object.fromEntries((p.cameraVisibility?.baseBlockers || []).map((blockerId) => {
+            const blocker = village.handle?.getPickProxy(blockerId);
+            return [blockerId, blocker ? bounds(blocker.focusBounds || blocker.bbox) : null];
+          })),
+          baseFraming: plainFrame(p.baseCameraFraming),
+          safeFraming: plainFrame(p.cameraFraming),
+        };
+      },
       // 검증용: 필지 목록·화면 투영(플레이라이트 결정적 호버/클릭 좌표).
       debugParcels: () => (village.handle?.getPickProxies() || []).map((p) => ({
         parcelId: p.parcelId, hero: p.buildingSpec.hero, kind: p.buildingSpec.kind,
@@ -2234,6 +2303,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         focusTargetY: +p.cameraFraming.target.y.toFixed(2),
         focusTargetLift: +(p.cameraFraming.target.y - p.worldCenter.y).toFixed(2),
         focusCameraY: +p.cameraFraming.position.y.toFixed(2),
+        focusVisibility: p.cameraVisibility ? {
+          azimuth: p.cameraVisibility.azimuth,
+          baseAzimuth: p.cameraVisibility.baseAzimuth,
+          scale: p.cameraVisibility.scale,
+          visibleRatio: p.cameraVisibility.visibleRatio,
+          occlusionRatio: p.cameraVisibility.occlusionRatio,
+          baseVisibleRatio: p.cameraVisibility.baseVisibleRatio,
+          baseOcclusionRatio: p.cameraVisibility.baseOcclusionRatio,
+          blockers: p.cameraVisibility.blockers,
+          baseBlockers: p.cameraVisibility.baseBlockers,
+        } : null,
       })),
       // 검증용(#29): FAR/MID/FULL/focus overlay 중 필지당 정확히 하나만 보이는지 상태 스냅샷.
       debugLod: (id = null) => village.handle?.lodState?.(id) ?? null,
@@ -2334,16 +2414,27 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         // 구간에 원점(숨은 본채)에 입자가 스폰돼, 마을 랜딩 시작 후에도 잔류하며 부감에 튄다(오렌지 낙수
         // 줄무늬). state.weather 는 유지(마을 무드용) — 어댑터는 입자 대신 대기 틴트로만 반영.
         weatherRef?.setWeather('clear');
-        cinematic.setProgress(0, 'reveal');
+        const layout = computeLayout(P);
+        const framing = buildingSpot('three-quarter', layout);
+        revealCamera.reveal('arrival', {
+          position: framing.pos,
+          target: framing.target,
+          fov: camera.fov,
+          referenceFov: camera.fov,
+          composition: 0,
+        }, {
+          seed: state.seed,
+          subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
+          duration: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR,
+          prime: true,
+        });
         ensureAudio(); audio.setBgmVolume(0);
       },
       enter({ onDone } = {}) {
         ensureAudio(); audio.start();
-        // before 계측 토글: __heroLegacy 면 구버전(등속 reveal·6.6s 착공)으로 재현.
-        const legacy = typeof window !== 'undefined' && !!window.__heroLegacy;
-        const revealScale = legacy ? 1 : HERO_REVEAL_SCALE;
-        const assembleDelay = legacy ? 6600 : HERO_ASSEMBLE_DELAY_MS;
-        const assembleDur = legacy ? 5 : HERO_ASSEMBLE_DUR;
+        const legacyTiming = typeof window !== 'undefined' && !!window.__heroLegacy;
+        const assembleDelay = legacyTiming ? 6600 : HERO_ASSEMBLE_DELAY_MS;
+        const assembleDur = legacyTiming ? 5 : HERO_ASSEMBLE_DUR;
         // BGM 페이드인
         const t0 = performance.now(), durMs = 2500;
         if (typeof window !== 'undefined') { window.__heroEnterT = t0; window.__heroAssembleT = null; }
@@ -2354,7 +2445,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           if (k < 1) requestAnimationFrame(stepFade);
         };
         requestAnimationFrame(stepFade);
-        cinematic.play('reveal', { timeScale: revealScale });
+        revealCamera.playPrimed();
         // 착공(조립 시작)을 크게 앞당김 — 타이틀 페이드 직후 기단이 올라오기 시작(중단 시 취소).
         let assembleTimer = setTimeout(() => {
           assembleTimer = null;
@@ -2364,7 +2455,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           if (typeof window !== 'undefined') window.__heroAssembleT = performance.now() - t0;
           startAssembly(assembleDur);
         }, assembleDelay);
-        // reveal 자연 종료·사용자 중단(cinematic 내장 interrupt) 감시 → 컨트롤 인계.
+        // reveal 자연 종료·사용자 중단을 같은 runtime 상태에서 감시 → 컨트롤 인계.
         let handed = false;
         const iv = setInterval(() => {
           if (disposed) {
@@ -2374,7 +2465,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
             return;
           }
           if (handed) { clearInterval(iv); return; }
-          if (!cinematic.isActive()) {
+          if (!revealCamera.isActive()) {
             handed = true;
             clearInterval(iv);
             if (assembleTimer) { clearTimeout(assembleTimer); assembleTimer = null; }
@@ -2389,6 +2480,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         }, 150);
       },
       skip({ onDone } = {}) {
+        revealCamera.stop('skip', { notify: false });
         cinematic.stop();
         building.visible = true;
         for (const w of wings) w.group.visible = true;
@@ -2442,6 +2534,27 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugInkPbrAwake: (awake) => inkModeRuntime.debugSetPbrAwake(awake),
     debugDof: debugDofState,
     debugDofSeek: debugSeekDofTween,
+    debugArchitecturalReveal: () => {
+      const actual = new THREE.Vector3();
+      const expected = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+      camera.getWorldDirection(actual);
+      return {
+        ...revealCamera.getState(),
+        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+        fov: camera.fov,
+        referenceFov: referenceFovForCamera(camera),
+        controlsZoomEnabled: controls.enableZoom,
+        lookErrorDeg: THREE.MathUtils.radToDeg(actual.angleTo(expected)),
+        dof: debugDofState(),
+      };
+    },
+    debugArchitecturalRevealSeek: (progress, options) => {
+      const sampled = revealCamera.seek(progress, options);
+      if (!sampled) return null;
+      if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(controls.target);
+      return controller.debugArchitecturalReveal();
+    },
     debugRenderDofFrame: () => { renderFrame(0); return debugDofState(); },
     // Deterministic camera-transition gate: applies the exact live-frame particle/LOD
     // lens policy without drawing the large scene.
@@ -2496,6 +2609,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
       if (village.heroTimer) { clearTimeout(village.heroTimer); village.heroTimer = null; }
       demoRuntime.dispose();
+      revealCamera?.dispose();
       cinematic.dispose?.();
       removeEventListener('resize', resizeAll);
       for (const ev of activityEvents) removeEventListener(ev, markActivity);

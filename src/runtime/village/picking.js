@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { planParcelFocus } from '../../generators/shared/parcel-spatial.js';
+import {
+  createFocusVisibilityIndex,
+  selectSafeFocusEndpoint,
+} from '../../camera/focus-visibility.js';
 import { VILLAGE_LENS, dollyDistanceForFov } from '../../camera/optics.js';
 import * as G from '../../core/math/geom2.js';
+import {
+  focusFeatureBlockers,
+  parcelFocusBlocker,
+} from '../../village/focus-blockers.js';
 import { buildParcelSpec } from './parcel-edit.js';
 
 const DEG = Math.PI / 180;
@@ -10,6 +18,61 @@ function parcelCameraFraming(worldCenter, focus) {
   const target = new THREE.Vector3(worldCenter.x, worldCenter.y + focus.targetLift, worldCenter.z);
   const position = new THREE.Vector3(focus.cameraX, target.y + focus.cameraLift, focus.cameraZ);
   return { position, target, fov: focus.fov, referenceFov: focus.referenceFov };
+}
+
+function threeCameraFraming(framing) {
+  return {
+    position: new THREE.Vector3(framing.position.x, framing.position.y, framing.position.z),
+    target: new THREE.Vector3(framing.target.x, framing.target.y, framing.target.z),
+    fov: framing.fov,
+    referenceFov: framing.referenceFov,
+  };
+}
+
+function threeBounds(bounds) {
+  return new THREE.Box3(
+    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
+    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
+  );
+}
+
+function applySafeParcelFramings(proxies, featureBlockers = []) {
+  const residential = proxies.filter((proxy) => (
+    proxy.baseCameraFraming && proxy.focusSafety && proxy.focusBounds && proxy.focusVolume
+  ));
+  const index = createFocusVisibilityIndex([
+    ...residential.map((proxy) => ({
+      id: proxy.parcelId,
+      bounds: proxy.focusBounds,
+      volume: proxy.focusVolume,
+    })),
+    ...featureBlockers,
+  ]);
+  for (const proxy of residential) {
+    const result = selectSafeFocusEndpoint({
+      subjectId: proxy.parcelId,
+      framing: proxy.baseCameraFraming,
+      subjectBounds: proxy.focusBounds,
+      subjectVolume: proxy.focusVolume,
+      index,
+      axisYaw: proxy.focusSafety.axisYaw,
+      azimuthMin: proxy.focusSafety.azimuthMin,
+      azimuthMax: proxy.focusSafety.azimuthMax,
+    });
+    proxy.cameraFraming = threeCameraFraming(result.framing);
+    proxy.cameraVisibility = {
+      azimuth: result.azimuth,
+      baseAzimuth: result.baseAzimuth,
+      scale: result.scale,
+      visibleRatio: result.visibleRatio,
+      occlusionRatio: result.occlusionRatio,
+      baseVisibleRatio: result.baseVisibleRatio,
+      baseOcclusionRatio: result.baseOcclusionRatio,
+      blockers: result.blockers,
+      baseBlockers: result.baseBlockers,
+      candidates: result.candidates,
+    };
+  }
 }
 
 export function buildParcelPickProxies(plan, site) {
@@ -25,6 +88,8 @@ export function buildParcelPickProxies(plan, site) {
     mesh.rotation.y = rotationY;
     mesh.userData.parcelId = parcel.id;
     mesh.updateMatrixWorld(true);
+    const baseCameraFraming = parcelCameraFraming(worldCenter, focus);
+    const focusBlocker = parcelFocusBlocker(parcel, site);
     proxies.push({
       parcelId: parcel.id,
       mesh,
@@ -33,13 +98,33 @@ export function buildParcelPickProxies(plan, site) {
       dims: new THREE.Vector3(width, height, depth),
       rotY: rotationY,
       buildingSpec: buildParcelSpec(parcel),
-      cameraFraming: parcelCameraFraming(worldCenter, focus),
+      baseCameraFraming,
+      cameraFraming: cloneCameraFraming(baseCameraFraming),
+      focusSafety: {
+        axisYaw: rotationY,
+        azimuthMin: focus.azimuthMin,
+        azimuthMax: focus.azimuthMax,
+      },
+      focusBounds: focusBlocker ? threeBounds(focusBlocker.bounds) : new THREE.Box3().setFromObject(mesh),
+      focusVolume: focusBlocker?.volume || {
+          center: { x: worldX, y: baseY + height / 2, z: worldZ },
+          half: { x: width / 2, y: height / 2, z: depth / 2 },
+          rotationY,
+        },
     });
   }
+  applySafeParcelFramings(proxies, focusFeatureBlockers(plan, site));
   return proxies;
 }
 
-export function refreshParcelPickProxy(proxy, parcel, site, buildingSpec = null) {
+export function refreshParcelPickProxy(
+  proxy,
+  parcel,
+  site,
+  buildingSpec = null,
+  peers = null,
+  plan = null,
+) {
   if (!proxy || !parcel) return null;
   const focusParcel = buildingSpec?.kind && buildingSpec.kind !== parcel.kind
     ? { ...parcel, kind: buildingSpec.kind }
@@ -56,8 +141,23 @@ export function refreshParcelPickProxy(proxy, parcel, site, buildingSpec = null)
   proxy.worldCenter.set(worldX, baseY, worldZ);
   proxy.dims.set(width, height, depth);
   proxy.rotY = rotationY;
-  proxy.cameraFraming = parcelCameraFraming(proxy.worldCenter, focus);
+  proxy.baseCameraFraming = parcelCameraFraming(proxy.worldCenter, focus);
+  proxy.cameraFraming = cloneCameraFraming(proxy.baseCameraFraming);
+  proxy.focusSafety = {
+    axisYaw: rotationY,
+    azimuthMin: focus.azimuthMin,
+    azimuthMax: focus.azimuthMax,
+  };
+  const focusBlocker = parcelFocusBlocker(focusParcel, site);
+  proxy.focusBounds = focusBlocker ? threeBounds(focusBlocker.bounds) : proxy.bbox.clone();
+  proxy.focusVolume = focusBlocker?.volume || {
+      center: { x: worldX, y: baseY + height / 2, z: worldZ },
+      half: { x: width / 2, y: height / 2, z: depth / 2 },
+      rotationY,
+    };
+  proxy.cameraVisibility = null;
   if (buildingSpec) proxy.buildingSpec = buildingSpec;
+  applySafeParcelFramings(peers || [proxy], focusFeatureBlockers(plan, site));
   return proxy;
 }
 

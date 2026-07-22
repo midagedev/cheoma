@@ -44,7 +44,7 @@ app/src/                       Svelte UI
 | --- | --- | --- |
 | 마을 어댑터 | `src/village/adapter.js` 1,523줄에 worker·handle·pick·edit·환경 결합 | 2줄 호환 façade + `src/runtime/village/`의 역할별 모듈, 최대 파일 `handle.js` 약 760줄 |
 | 마을 populate | `src/village/populate.js` 1,389줄에 모든 조립 구현 | 398줄 순서 orchestration + `src/generators/village/` 6개 생성기, 최대 302줄 |
-| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | 약 2,128줄 integration façade + scene/post/view-shift/cinematic/village-camera runtime |
+| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | integration façade + scene/post/view-shift/cinematic/architectural-reveal/village-camera runtime |
 | 공용 수학 | geometry, world edge, value noise, smoothstep가 여러 도메인에 복제 | `src/core/math/{geom2,world-edge,value-noise2,scalar}.js`가 단일 구현 소유 |
 | 필지 변환 | layout이 village instancing 내부에 의존 | `src/generators/shared/parcel-transform.js`가 소유, 기존 경로는 re-export |
 | 공개 경계 | 앱과 외부 소비자가 코어 내부 파일을 직접 import | 앱의 코어 import는 `src/api/*`로 한정, 정적 게이트로 고정 |
@@ -72,7 +72,7 @@ app/src/                       Svelte UI
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
 | `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, 계절·날씨 상태, environment, focus, post, 축방향 DoF controller, 공유 적설 재질, weather, ink, time, world edge | 상태/profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
-| `src/api/cinematic.js` | 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
+| `src/api/cinematic.js` | Three 없는 건축 arrival/rebuild 경로·clock, 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | reveal path는 Node/worker/browser; 나머지는 THREE runtime, 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
 | `src/api/rendering.js` | 해제 경합을 견디는 shader precompile | browser WebGL runtime |
 | `src/api/render-style.js` | Three·DOM 없는 `pbr | ink` 표현 상태 | Node, worker, browser |
@@ -103,6 +103,14 @@ app/src/                       Svelte UI
 - 짧게 사는 focus/wave 서브트리의 shader warm은 `src/api/rendering.js#compileSubtreeAsync`를 통한다.
   three.js 기본 `compileAsync`처럼 해제된 material의 사라진 `currentProgram`을 계속 poll하지 않으므로,
   빠른 focus-out·리롤과 GPU 링크 수명이 겹쳐도 전역 예외를 만들지 않는다.
+- 첫 등장·단독 집 재생성의 숫자 경로와 clock은 `src/cinematic/architectural-reveal.js`, 실제 camera/controls
+  수명과 capture-phase 입력 인계는 `app/src/engine/architectural-reveal-runtime.js`가 소유한다. 경로는
+  Three·DOM·전역 RNG 없이 외부 뷰어나 생성기에서도 재사용할 수 있다.
+- `src/camera/focus-visibility.js`는 Three 없는 최종 구도 후보/OBB 가시성 계산을 소유하고,
+  `runtime/village/picking.js`는 그 결과를 일반 focus와 reveal이 공유하는 pick proxy framing으로 조립한다.
+  `src/village/focus-blockers.js`가 실제 fitted 지붕 OBB와 정자·공공 소품·궁·사찰의 순수 계획 volume을
+  제공한다. picking의 넉넉한 필지 상자와 시야 판정을 분리하며, 필지 배치·RNG나 렌더 가시성을 수정하지
+  않고 공간 그리드로 대규모 마을의 후보를 국소화한다.
 
 ## 개울·대하천의 계획·렌더 표면 계약
 

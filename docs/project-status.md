@@ -70,6 +70,26 @@ GitHub #6 보행·드론 카메라는 `camera/heading.js`의 Three 독립 각운
 최대 72.2°/s 안에서 이어준다. 합성 막다른 길의 반복 왕복은 브라우저 없는 빠른 게이트로, 실제 세 규모의
 100초 경로와 앱 패스 체인은 별도 수치·브라우저 게이트로 확인한다.
 
+GitHub #22의 최초 등장과 단독 집 재생성은 `cinematic/architectural-reveal.js`의 renderer-free 경로를
+공유한다. 최초 등장은 70° 안의 완만한 establishing 호와 넓은 화각에서 출발해 기존 마당 눈높이·망원
+프레임으로 내려앉고, 재생성은 현재 화면을 정확한 시작점으로 삼아 작은 측면 호와 거리·높이의 숨 고르기만
+더한 뒤 새 필지 프레이밍에 정확히 복귀한다. seed는 선회 방향만 결정하며 전역 RNG를 소비하지 않는다.
+
+앱 adapter는 카메라·target·reference FOV·비대칭 구도를 한 프레임으로 적용하고 매 프레임 `lookAt`을
+갱신한다. capture-phase pointer/wheel/key 입력은 같은 이벤트에서 즉시 경로를 끊고 OrbitControls에 정확한
+현재 프레임을 넘긴다. 휠은 같은 이벤트가 controls에 도달하기 전에 focus 줌 범위를 복구하므로 중단만 되고
+실제 dolly가 사라지는 입력 손실이 없다. 조립은 계속하되 중단 뒤 자동 선회가 사용자의 카메라를 다시 빼앗지 않는다. 모바일은
+축소된 호, reduced-motion은 즉시 endpoint를 사용한다. 순수 경로와 실제 Hero/집 재생성 제품 경로를
+분리한 게이트가 endpoint·DoF·program plateau·입력 인계를 고정한다.
+
+최종 구도는 배치 RNG를 다시 굴리거나 renderer에서 이웃 집을 숨기지 않는다. `camera/focus-visibility.js`가
+필지의 남측 `solarAccess` 안에서 기존점·중간점·중앙점 세 개만 결정적으로 평가하고, 필요할 때 최대 20%
+마당 쪽으로 당기면서 20°→최대 24.8°의 망원 보상으로 화면 점유율을 지킨다. 공간 그리드에는 picking용
+필지 상자와 분리된 실제 fitted 처마 OBB, 계획 단계의 정자·마을 공공 소품·궁·사찰 footprint가 들어간다.
+이 실제 방해물로 3×3 가시성을 검사하며, 기존점이 막혔더라도 사용 가능한 후보가 하나라도 있으면 카메라를
+건물이나 소품 내부로 되돌리지 않는다. 이 결과가 pick proxy의 권위 있는
+`cameraFraming`이므로 일반 클릭 focus, 최초 종가 landing, 집 재생성 final이 같은 구도를 쓴다.
+
 GitHub #3 집 편집 슬라이더는 `live-edit-scheduler.js`를 단일 케이던스 소유자로 쓴다. 화면의 숫자는 모든 `input`에 즉시 반응하지만, 일반 주택 지오메트리 preview는 최신 값만 프레임에 맞춰 반영하고 최근 재생성 비용에 따라 32–96ms 사이에서 스스로 숨을 고른다. `change` 커밋은 대기 preview를 폐기하고 #19의 정확한 편집 처마·pick proxy·병합 flora를 한 번만 확정한다. 종가·관아·궁·사찰 복합체는 기존대로 커밋 시에만 재생성한다.
 
 focus-out·필지 hop·마을 이탈·앱 dispose는 같은 scheduler epoch를 취소한다. 따라서 놓지 않은 슬라이더 값이 부감이나 다음 필지에 뒤늦게 적용되지 않고, 재진입하면 마지막 확정값으로 돌아온다. 50개 입력의 1회 병합과 취소 수명주기는 순수 게이트로, 실제 Svelte range 48개 입력→1 preview→1 flora commit·시각 변화·렌더 예산은 기존 단건 재건축 브라우저 부팅 안에서 함께 검증한다.

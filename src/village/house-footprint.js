@@ -291,6 +291,17 @@ export function parcelLocalRoofBounds(parcel) {
   }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity });
 }
 
+// Runtime edits measure their generated eaves before the parcel transform. Keep
+// that committed envelope authoritative for every later spatial consumer instead
+// of making vegetation, focus cameras, and future exporters repeat the override.
+export function parcelEffectiveRoofBounds(parcel) {
+  const explicit = parcel.editRoofBounds;
+  if (explicit && [explicit.minX, explicit.maxX, explicit.minZ, explicit.maxZ].every(Number.isFinite)) {
+    return explicit;
+  }
+  return parcelLocalRoofBounds(parcel);
+}
+
 export function parcelRoofPolygons(parcel) {
   return parcelLocalRoofRectangles(parcel).map((roof) => [
     parcelWorldPoint(parcel, { x: roof.maxX, z: roof.maxZ }),
