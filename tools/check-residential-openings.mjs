@@ -25,6 +25,7 @@ import {
   buildEditedParcelSpec,
   buildParcelSpec,
   clampBuildingDimensions,
+  resolveResidentialEdit,
 } from '../src/runtime/village/parcel-edit.js';
 
 const FIXTURES = Object.freeze({
@@ -589,5 +590,37 @@ assert.deepEqual(
   Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, editedSpec.params[key]])),
   'accepted editor spec is not a canonical serializable opening boundary',
 );
+
+// Public rebuild payloads are optional patches. Successive calls must compose
+// over the last accepted values rather than silently restoring the seed variant.
+const firstEdit = resolveResidentialEdit(parcelFixture, null, {
+  building: { doorCount: 4, windowCount: 6 },
+  footprintScale: 1.33,
+  wallType: 'tile',
+});
+const secondEdit = resolveResidentialEdit(parcelFixture, firstEdit.spec, {
+  building: { doorWidthK: 99 },
+});
+assert.equal(secondEdit.spec.params.doorCount, 4, 'partial width patch reset committed door count');
+assert.equal(secondEdit.spec.params.windowCount, 6, 'partial width patch reset committed window count');
+assert.equal(secondEdit.spec.params.footprintScale, 1.33, 'partial width patch reset committed top edit');
+assert.equal(secondEdit.spec.params.doorWidthK, 0.94, 'accepted width did not match renderer clamp');
+
+// A type switch is a fresh target-kind frame. Source-only building/top values
+// disappear, after which ordinary partial patches compose in the new frame.
+const switchedEdit = resolveResidentialEdit(parcelFixture, secondEdit.spec, {
+  kind: 'choga',
+  building: { doorCount: 2 },
+});
+assert.equal(switchedEdit.kind, 'choga', 'explicit type switch was ignored');
+assert.equal(switchedEdit.spec.params.planShape, undefined, 'giwa plan leaked into choga defaults');
+assert.equal(switchedEdit.spec.params.footprintScale, 1, 'source-kind footprint edit survived type switch');
+assert.notEqual(switchedEdit.spec.params.wallType, 'tile', 'source-kind wall vocabulary survived type switch');
+const switchedPatch = resolveResidentialEdit(parcelFixture, switchedEdit.spec, {
+  building: { windowWidthK: 99 },
+});
+assert.equal(switchedPatch.spec.params.doorCount, 2, 'target-kind partial patch reset committed count');
+assert.equal(switchedPatch.spec.params.windowWidthK, 0.62, 'target-kind width missed shared clamp');
+assert.doesNotThrow(() => JSON.stringify(switchedPatch.spec), 'accepted residential state is not serializable');
 
 console.log('RESIDENTIAL OPENINGS: PASS (초가 3/5칸 + 기와 ㅡ/ㄱ/ㄷ, planner/editor state/schema)');

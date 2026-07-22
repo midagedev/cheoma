@@ -20,7 +20,7 @@ import {
 } from '../../temple/plan.js';
 import { houseMatrix, parcelMatrix } from '../../village/instancing.js';
 import { buildVillageWall } from '../../village/walls.js';
-import { toneOf, variantMirrorX, variantOv, variantThatchAge } from '../../village/variants.js';
+import { toneOf, variantMirrorX, variantOv } from '../../village/variants.js';
 import { parcelHouseTranslation, parcelLocalPoint } from '../../village/parcel-contract.js';
 import {
   captureParcelRebuildEnvelope,
@@ -35,11 +35,11 @@ import {
 } from './lighting.js';
 import {
   applyMaterialRoleTints,
-  buildEditedParcelSpec,
   buildParcelSpec,
   clampBuildingDimensions,
   parcelWallType,
   palaceCompoundDefaults,
+  resolveResidentialEdit,
 } from './parcel-edit.js';
 import {
   buildParcelPickProxies,
@@ -61,6 +61,7 @@ import { createVillageDetailLodState } from './detail-lod.js';
 import { createThresholdLifeRuntime } from './threshold-life.js';
 import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
 import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
+import { RESIDENTIAL_OPENING_PARAM_KEYS } from '../../layout/residential-openings.js';
 import { createPrimaryDoorRuntime } from '../../interaction/primary-door.js';
 import { createVillageDoorOcclusion } from './door-occlusion.js';
 
@@ -132,6 +133,14 @@ export function createVillageHandle(opts, seed, plan, group) {
   // a rebuilt house from permanently losing chimney smoke after focus-out.
   const focusedResidentialIds = new Set();
   const persistentOverrideIds = new Set();        // edited/rebuilt parcels remain authoritative in aerial view
+  // Last accepted declarative state for each authoritative residential overlay.
+  // Geometry is disposable; this renderer-free snapshot survives focus hops and
+  // makes every optional rebuild payload a patch rather than an accidental reset.
+  const committedResidentialSpecs = new Map();    // parcelId -> normalized buildParcelSpec-compatible value
+  // URL/share may serialize only kind + the four opening axes. Mark a parcel
+  // only when one of those values actually diverges; roof/yard-only edits and a
+  // full parcel reroll cannot be truthfully reconstructed by that compact form.
+  const shareableResidentialIds = new Set();
   // Residential FULL overlays have one authored household primary door. Palace,
   // temple, and palace-style magistracy compounds deliberately stay out: their
   // hierarchy has no product-authorized single leaf, and optimized roots may
@@ -888,8 +897,14 @@ export function createVillageHandle(opts, seed, plan, group) {
         if (!heroHandle) return null;
         return showHeroDetail(parcelId, heroEditOpts(parcel, newParams));
       }
-      const kind = newParams.kind || parcel.kind;
-      const gk = kind === 'giwa' ? 'giwa' : 'choga';
+      const previousEditSpec = committedResidentialSpecs.get(parcelId) || null;
+      const previousAcceptedSpec = previousEditSpec || buildParcelSpec(parcel);
+      const edit = resolveResidentialEdit(
+        parcel,
+        previousEditSpec,
+        newParams,
+      );
+      const gk = edit.kind;
       const g = new THREE.Group();
       g.name = `override-${parcelId}`;
       g.userData.exportPersistentParcel = false;
@@ -899,32 +914,27 @@ export function createVillageHandle(opts, seed, plan, group) {
       g.userData.D = parcel.plotD || 18;
       g.userData.style = gk;
       g.userData.parcel = parcel;
-      // 편집 오버라이드 정규화: 패널 키 roofCurve → 코어 buildBuilding 키 profileCurve.
-      const bld = { ...(newParams.building || {}) };
-      if (bld.roofCurve != null && bld.profileCurve == null) { bld.profileCurve = bld.roofCurve; delete bld.roofCurve; }
+      const bld = { ...edit.building };
       // 프리셋 ← 변주 ov(실제 렌더 기준) ← 편집 오버라이드. 격식 가드로 치수 클램프.
       // A cross-kind edit starts from that kind's base variant instead of interpreting a
       // choga variant index as a giwa mirror (or vice versa).
       const variantParcel = gk === parcel.kind ? parcel : { ...parcel, kind: gk, variant: 0 };
       const preset = { ...PRESETS[gk], ...variantOv(variantParcel), ...bld };
       clampBuildingDimensions(preset, gk);
-      const acceptedBuilding = Object.fromEntries(
-        Object.keys(bld).map((key) => [key, preset[key]]),
-      );
       const house = buildBuilding(preset);
       // 초가 이엉 상태(thatchAge) — 텍스처 후처리(빌더 코어 불침해).
       if (gk === 'choga') {
-        const age = newParams.thatchAge != null ? newParams.thatchAge
-          : (gk === parcel.kind && parcel.thatchAge != null
-            ? parcel.thatchAge : variantThatchAge(variantParcel));
+        const age = edit.top.thatchAge;
         applyThatchAge(house.userData.materials, age);
       }
       // 부위별 곱틴트(#55): 인스턴스와 동일 팔레트를 풀디테일에 재질 색 곱연산(신규 재질이라 clone 불필요).
       //   roofTone 은 편집 오버라이드(인덱스) 우선, 없으면 필지의 부위별 지붕톤. 벽·목·석은 필지 톤 유지.
       const changedKind = gk !== parcel.kind;
-      const roofTint = newParams.roofTone != null ? toneOf(gk, newParams.roofTone)
-        : (changedKind ? toneOf(gk, parcel.toneIdx || 0)
-          : (parcel.roofTone || toneOf(gk, parcel.toneIdx || 0)));
+      const preserveGeneratedRoofTone = !previousEditSpec
+        && newParams.roofTone === undefined && !changedKind;
+      const roofTint = preserveGeneratedRoofTone
+        ? (parcel.roofTone || toneOf(gk, parcel.toneIdx || 0))
+        : toneOf(gk, edit.top.roofTone);
       applyMaterialRoleTints(house, {
         roof: roofTint,
         wall: changedKind ? null : parcel.wallTone,
@@ -934,7 +944,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       const local = parcelHouseTranslation(parcel);
       house.position.set(local.x, 0, local.z);
       // 변주 스케일 × 풋프린트 스케일 편집.
-      const fs = Math.max(0.6, Math.min(1.6, newParams.footprintScale != null ? newParams.footprintScale : 1));
+      const fs = edit.top.footprintScale;
       const mirrorX = variantMirrorX(variantParcel);
       house.scale.set(mirrorX * (parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
       house.userData.variantMirrorX = mirrorX;
@@ -957,14 +967,9 @@ export function createVillageHandle(opts, seed, plan, group) {
         minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
       };
       // 담·마당(개별) — 유형·부속채 어휘 + 마당 소품 편집(#96). newParams 오버라이드 우선, 없으면 필지 원본값.
-      const wallType = parcelWallType(gk, newParams.wallType ?? parcel.wallType);
-      const aux = newParams.aux != null ? newParams.aux : parcel.aux;
-      const jangdok = newParams.jangdok != null ? newParams.jangdok : parcel.jangdok;
-      const yardStack = newParams.yardStack != null ? newParams.yardStack : parcel.yardStack;
-      const clothesline = newParams.clothesline != null ? newParams.clothesline : parcel.clothesline;
-      const vegBed = newParams.vegBed != null ? newParams.vegBed : parcel.vegBed;
+      const { wallType, aux, jangdok, yardStack, clothesline, vegBed } = edit.top;
       g.add(buildVillageWall(parcel.shape, editWallMats, {
-        style: wallType, kind, seed: parcel.seed, char01, aux, plotW: parcel.plotW, plotD: parcel.plotD,
+        style: wallType, kind: gk, seed: parcel.seed, char01, aux, plotW: parcel.plotW, plotD: parcel.plotD,
         gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
         wallHeightK: parcel.wallHeightK, jangdok,
         yardStack, clothesline, vegBed,
@@ -977,15 +982,21 @@ export function createVillageHandle(opts, seed, plan, group) {
         persistentOverrideIds.add(parcelId);
         g.userData.exportPersistentParcel = true;
         setResidentialBaseExportHidden(parcel, true);
+        committedResidentialSpecs.set(parcelId, edit.spec);
+        if (edit.kind !== previousAcceptedSpec.kind
+          || RESIDENTIAL_OPENING_PARAM_KEYS.some((key) => (
+            edit.spec.params[key] !== previousAcceptedSpec.params[key]
+          ))) {
+          shareableResidentialIds.add(parcelId);
+        }
         for (const key of PERSISTENT_YARD_FIELDS) {
-          if (newParams[key] !== undefined) parcel[key] = newParams[key];
+          parcel[key] = edit.top[key];
         }
         parcel.editRoofBounds = editRoofBounds;
         parcel.editBuildingBounds = editBuildingBounds;
         primaryDoorOcclusion.refreshParcel({ ...parcel, kind: gk });
-        const spec = buildEditedParcelSpec(parcel, newParams, acceptedBuilding);
         const proxy = proxyById.get(parcelId);
-        if (proxy) refreshParcelPickProxy(proxy, parcel, site, spec, proxies, plan);
+        if (proxy) refreshParcelPickProxy(proxy, parcel, site, edit.spec, proxies, plan);
         if (refreshFlora) refreshVillageFlora();
       }
       if (snow.isActive()) snow.inject(g);
@@ -1083,6 +1094,26 @@ export function createVillageHandle(opts, seed, plan, group) {
       return g ? { group: g, assembly: g.children[0] || g, compound: false } : null;
     },
 
+    // Compact JSON-safe handoff for URL/share restoration. Only authoritative
+    // residential overlays participate; generated untouched parcels reproduce
+    // from the village seed and need no redundant entry.
+    residentialOpeningEdits() {
+      const edits = [];
+      for (const parcel of plan.parcels) {
+        if (parcel.hero) continue;
+        const spec = committedResidentialSpecs.get(parcel.id);
+        if (!spec || !shareableResidentialIds.has(parcel.id)) continue;
+        edits.push({
+          parcelId: parcel.id,
+          kind: spec.kind,
+          params: Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => (
+            [key, spec.params[key]]
+          ))),
+        });
+      }
+      return edits;
+    },
+
     // ── 이 필지만 다시 굴리기(#100) — 새 시드로 이 필지의 변주(유형은 유지)만 재유도 → 오버레이 재생성. ──
     //   마을 전체·이웃 필지는 불변(집 focus 리롤이 마을 리롤로 새던 배선 분리). 기존 편집 오버라이드는
     //   폐기하고 새 시드의 기본 변주로 리셋한다. 프록시 buildingSpec 도 갱신 → 패널 기본값 동기(desync 금지).
@@ -1106,7 +1137,14 @@ export function createVillageHandle(opts, seed, plan, group) {
       const parcel = plan.parcels.find((p) => p.id === parcelId);
       if (!parcel) return null;
       const rerollSeed = (Math.random() * 0x100000000) >>> 0;
-      const envelope = rebuildEnvelopeById.get(parcelId);
+      const baseEnvelope = rebuildEnvelopeById.get(parcelId);
+      const committedKind = committedResidentialSpecs.get(parcelId)?.kind;
+      // Type is a durable user decision, while every other edit is intentionally
+      // reset by a house reroll. Feed that kind into the immutable lot envelope
+      // before deriving a fresh variant; never mutate the original envelope.
+      const envelope = committedKind && committedKind !== baseEnvelope?.kind
+        ? { ...baseEnvelope, kind: committedKind }
+        : baseEnvelope;
       const candidate = planParcelRebuild(envelope, rerollSeed, {
         char01,
         tuning: plan.opts.tuning || {},
@@ -1120,6 +1158,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (!candidate) return null;
       // Keep the object identity consumed by plan, focus ambience, and LOD maps,
       // but atomically replace its data only after the pure planner succeeds.
+      committedResidentialSpecs.delete(parcelId);
+      shareableResidentialIds.delete(parcelId);
       for (const key of Object.keys(parcel)) delete parcel[key];
       Object.assign(parcel, candidate);
       const px = proxyById.get(parcelId);

@@ -661,6 +661,86 @@ try {
   invariant(JSON.stringify(refocused.params) === JSON.stringify(after.state.params),
     'refocus discarded the rebuilt edit specification');
 
+  // #10 committed editor state: engine rebuild payloads are optional patches.
+  // A later width-only patch must retain the accepted count/top edit, the FULL
+  // plan and proxy must read the same normalized values, and the compact handoff
+  // must remain JSON-safe for the URL layer.
+  const partialEdits = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const before = engine.village.debugParcelRebuild(parcelId);
+    const doorCount = before.params.doorCount === 1 ? 2 : 1;
+    engine.village.rebuild(parcelId, {
+      building: { doorCount },
+      footprintScale: 1.37,
+    }, { refreshFlora: false });
+    engine.village.rebuild(parcelId, {
+      building: { doorWidthK: 99 },
+    }, { refreshFlora: false });
+    const state = engine.village.debugParcelRebuild(parcelId);
+    let plan = null;
+    engine.village.focusRoot()?.traverse((object) => {
+      if (!plan && object.userData.residentialOpeningPlan) {
+        plan = object.userData.residentialOpeningPlan;
+      }
+    });
+    const snapshot = engine.village.residentialOpeningEdits();
+    return {
+      doorCount,
+      state,
+      plan: plan?.params || null,
+      snapshot,
+      json: JSON.stringify(snapshot),
+    };
+  }, fixture.parcelId);
+  invariant(partialEdits.state.params.doorCount === partialEdits.doorCount
+      && partialEdits.state.params.footprintScale === 1.37,
+    `partial patch reset a committed edit: ${JSON.stringify(partialEdits.state.params)}`);
+  invariant(partialEdits.plan?.doorCount === partialEdits.state.params.doorCount
+      && partialEdits.plan?.doorWidthK === partialEdits.state.params.doorWidthK,
+    `partial patch diverged proxy/render state: ${JSON.stringify(partialEdits)}`);
+  const serializedEdit = partialEdits.snapshot.find((edit) => edit.parcelId === fixture.parcelId);
+  invariant(serializedEdit?.kind === partialEdits.state.kind
+      && JSON.stringify(serializedEdit.params) === JSON.stringify({
+        doorCount: partialEdits.state.params.doorCount,
+        windowCount: partialEdits.state.params.windowCount,
+        doorWidthK: partialEdits.state.params.doorWidthK,
+        windowWidthK: partialEdits.state.params.windowWidthK,
+      }) && partialEdits.json.length > 2,
+  `residential opening handoff drifted: ${partialEdits.json}`);
+
+  // Type changes start from target defaults, but the selected type itself is a
+  // durable decision across "rebuild this house". Every other committed edit is
+  // reset to the newly sampled variant.
+  const targetKind = partialEdits.state.kind === 'giwa' ? 'choga' : 'giwa';
+  await page.locator('.ctx.house:not([aria-hidden="true"]) .tabs .tab')
+    .nth(targetKind === 'giwa' ? 0 : 1).click();
+  await page.waitForFunction(({ parcelId, targetKind }) => (
+    window.__engine.village.debugParcelRebuild(parcelId)?.kind === targetKind
+  ), { parcelId: fixture.parcelId, targetKind }, { timeout });
+  const switched = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    engine.village.rebuild(parcelId, { footprintScale: 1.41 }, { refreshFlora: false });
+    return engine.village.debugParcelRebuild(parcelId);
+  }, fixture.parcelId);
+  invariant(switched.kind === targetKind && switched.params.footprintScale === 1.41,
+    `type switch did not establish a target-kind edit frame: ${JSON.stringify(switched)}`);
+  await page.locator('.foot.house:not([aria-hidden="true"]) button.reroll').click();
+  await page.waitForFunction(({ parcelId, targetKind }) => {
+    const state = window.__engine.village.getState();
+    const rebuilt = window.__engine.village.debugParcelRebuild(parcelId);
+    return state.selected === parcelId && !state.transitioning
+      && rebuilt?.kind === targetKind && rebuilt?.params?.footprintScale === 1;
+  }, { parcelId: fixture.parcelId, targetKind }, { timeout });
+  const typeRerolled = await page.evaluate((parcelId) => ({
+    state: window.__engine.village.debugParcelRebuild(parcelId),
+    edits: window.__engine.village.residentialOpeningEdits(),
+  }), fixture.parcelId);
+  const rerolledEdit = typeRerolled.edits.find((edit) => edit.parcelId === fixture.parcelId);
+  invariant(typeRerolled.state.kind === targetKind
+      && typeRerolled.state.params.footprintScale === 1
+      && !rerolledEdit,
+    `house reroll lost current kind or retained stale edits: ${JSON.stringify(typeRerolled)}`);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(180);
   const mobileGrip = page.locator('.sheet.context .grip');
@@ -785,6 +865,25 @@ try {
   invariant(thresholdPreview.size?.[0] >= 0.18 && thresholdPreview.size?.[0] <= 0.31
       && thresholdPreview.size?.[2] >= 0.22 && thresholdPreview.size?.[2] <= 0.31,
   `runtime footwear escaped world-metric bounds (${thresholdPreview.size?.join('×')})`);
+  const roofOnlyHandoff = await page.evaluate((selectedId) => {
+    const engine = window.__engine;
+    const other = engine.village.debugParcels().find((parcel) => (
+      parcel.editable && !parcel.hero && parcel.parcelId !== selectedId
+        && parcel.parcelId !== 'palace' && parcel.parcelId !== 'temple'
+    ));
+    if (!other) return null;
+    const before = engine.village.debugParcelRebuild(other.parcelId);
+    engine.village.rebuild(other.parcelId, {
+      building: { eaveOverhang: before.params.eaveOverhang + 0.05 },
+    }, { refreshFlora: false });
+    return {
+      parcelId: other.parcelId,
+      edits: engine.village.residentialOpeningEdits(),
+    };
+  }, fixture.parcelId);
+  invariant(roofOnlyHandoff && !roofOnlyHandoff.edits.some((edit) => (
+    edit.parcelId === roofOnlyHandoff.parcelId
+  )), `roof-only edit leaked into compact opening handoff: ${JSON.stringify(roofOnlyHandoff)}`);
   invariant(runtimeErrors.length === 0, `browser errors: ${runtimeErrors.join(' | ')}`);
 
   console.log(`screenshots: ${beforePath}, ${openingControlsPath}, ${livePreviewPath}, ${liveCommitPath}, ${afterPath}, ${aerialPath}, ${mobilePath}`);
