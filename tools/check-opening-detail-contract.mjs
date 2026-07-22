@@ -14,8 +14,8 @@ function invariant(condition, message) {
 const input = {
   kind: 'door', style: 'giwa', seed: 'contract:17',
   width: 1.72, height: 2.04, wallThickness: 0.13,
-  lowerPanelHeight: 0.42, primary: true,
-  footwear: { y: 0.4, outward: 0.78, surface: 'toenmaru' },
+  lowerPanelHeight: 0.42, primary: true, leafOutward: 0.035,
+  footwear: { y: 0.4, outward: 0.78, surface: 'toenmaru', clearSide: -1 },
 };
 Object.freeze(input.footwear);
 Object.freeze(input);
@@ -64,6 +64,7 @@ invariant(objectSeed.z === 19n && objectSeed.nested.tone === 'pine',
 invariant(nonJsonFootwear.surface === 17n, 'opening plan mutated caller-owned footwear data');
 
 invariant(first.primary && first.kind === 'door', 'primary entrance semantics were lost');
+invariant(first.version === 4, `opening schema version drifted to ${first.version}`);
 invariant(first.hardware.length === 3, 'civilian primary door does not own the restrained 2 straps/ring set');
 invariant(first.hardware.filter((part) => part.kind === 'hinge-strap').length === 2,
   'primary door hinge straps drifted');
@@ -73,14 +74,23 @@ invariant(first.hardware.filter((part) => part.kind === 'ring-handle').length ==
   'primary door ring handle drifted');
 invariant(first.anchors.pivot && first.anchors.footwear,
   'primary entrance lost pivot or footwear anchor');
-invariant(Math.abs(first.anchors.pivot.u) < first.width * 0.5,
+invariant(Math.abs(Math.abs(first.anchors.pivot.u) - first.width * 0.5) < EPS,
   'door pivot escaped the opening');
-invariant(first.anchors.pivot.leafWidth <= first.width,
+invariant(Math.abs(first.anchors.pivot.leafWidth - first.width / first.leafCount) < EPS,
   'door pivot describes a leaf wider than the opening');
+invariant(Math.abs(first.anchors.pivot.outward - input.leafOutward) < EPS,
+  'moving leaf lost its renderer-free outward pivot coordinate');
 invariant(first.anchors.footwear.outward > first.threshold.depth,
   'footwear anchor does not clear the threshold');
 invariant(first.anchors.footwear.surface === 'toenmaru',
   'builder-authored entrance landing was discarded');
+invariant(first.anchors.footwear.clearSide === -1,
+  'footwear landing side was coupled to the moving leaf');
+const narrower = planOpeningDetail({ ...input, width: 1.28 });
+const wider = planOpeningDetail({ ...input, width: 2.42 });
+invariant(narrower.anchors.pivot.hingeSide === first.anchors.pivot.hingeSide
+    && wider.anchors.pivot.hingeSide === first.anchors.pivot.hingeSide,
+  'continuous width editing flips the primary hinge side');
 invariant(first.meoreum.height === 0, 'door passage incorrectly acquired a window meoreum');
 invariant(Math.abs(first.lowerPanel.height - input.lowerPanelHeight) < EPS,
   'door lower-panel height drifted');

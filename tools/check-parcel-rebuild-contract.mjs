@@ -85,6 +85,13 @@ for (const scale of ['hamlet', 'village', 'town', 'capital', 'hanyang']) {
     const samples = plan.parcels.filter((parcel) => !parcel.hero).slice(0, 3);
     for (const parcel of samples) {
       const envelope = captureParcelRebuildEnvelope(parcel);
+      // A whole-parcel reroll retires any previous FULL edit measurement before
+      // choosing its new variant. Neither the flora roof envelope nor the door
+      // obstruction is allowed to leak into the freshly planned house.
+      envelope.editRoofBounds = { minX: -99, maxX: 99, minZ: -99, maxZ: 99 };
+      envelope.editBuildingBounds = {
+        minX: -99, maxX: 99, minY: 0, maxY: 99, minZ: -99, maxZ: 99,
+      };
       const original = stable(envelope);
       const fingerprints = new Set();
       for (const rebuildSeed of [11, 29, 47]) {
@@ -103,6 +110,9 @@ for (const scale of ['hamlet', 'village', 'town', 'capital', 'hanyang']) {
           solarPeers,
         });
         if (!a || !b) fail(`${scale}:${villageSeed}:${parcel.id} rebuild failed`);
+        if (a.editRoofBounds != null || a.editBuildingBounds != null) {
+          fail(`${scale}:${villageSeed}:${parcel.id} stale edit bounds survived reroll`);
+        }
         if (stable(a) !== stable(b)) fail(`${scale}:${villageSeed}:${parcel.id} nondeterministic`);
         const issues = parcelRebuildIssues(envelope, a);
         if (issues.length) fail(`${scale}:${villageSeed}:${parcel.id} ${issues.join(', ')}`);

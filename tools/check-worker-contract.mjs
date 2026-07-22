@@ -30,16 +30,20 @@ const expectedSceneHashes = {
   // stove masses with one recessed residential kitchen scene and neutralizes
   // civilian lattice textures. #30 adds deterministic world-space road UVs;
   // the texture bytes stay outside this structural hash. #16 adds shared static
-  // opening frames, window meoreum aprons, and restrained FULL-only hardware.
-  // #10 carries the four residential opening axes through the variant bytes and
-  // renders the selected openings in every FULL giwa/choga prototype.
-  // The combined FULL scene bytes intentionally move while parcel plans and
-  // public proxy hashes retain their own contracts. Sync, real module Worker,
-  // and ?worker=0 fallback stay byte-identical.
-  village: '2d1cbd0a:b51bbe86:4a1ab950:ddadc162',
-  town: '605a939c:4bd6fa38:7275608f:0c993e00',
-  capital: 'dee2eafb:024ef58b:5764883d:a882641f',
-  hanyang: 'bc5916cf:f495b683:a1d53b67:aa79ddf3',
+  // opening frames, window meoreum aprons, restrained FULL-only hardware, and
+  // splits the active primary leaf from the fixed remainder. #10 carries the
+  // four residential opening axes through the variant bytes and renders those
+  // selected openings in every FULL giwa/choga prototype. Choga and hanok keep
+  // a fixed dark recess while residential primary-door and footwear anchors
+  // share the same renderer-free opening plan. The reviewed 16° focus envelope
+  // also relocates the capital fixture's pavilion from a blocked `soro-003`
+  // candidate to the clear `golmok-015` candidate; the other three scene hashes
+  // retain their door-only deltas. Sync, real module Worker, and ?worker=0
+  // fallback stay byte-identical.
+  village: '8b45bd47:8fef9c31:4e78d07c:2340fdef',
+  town: '65e8388f:b825f667:cdf9f50f:a94132af',
+  capital: '9e639255:46bf4c53:e0fca787:508266ed',
+  hanyang: '0d7b08b7:36688847:b7a0ecea:436605cb',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -48,12 +52,14 @@ const expectedProxyHashes = {
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the four normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
-  // courtyard elevation. Safe candidates now scale XZ and Y together so their
-  // proxy framing cannot silently steepen the camera; scene bytes stay unchanged.
-  village: '66d1bcb5',
-  town: '8037572e',
-  capital: '46c69392',
-  hanyang: '41c3b4ad',
+  // 16° courtyard elevation. Safe candidates scale XZ and Y together so their
+  // proxy framing cannot silently steepen the camera. Raising that shared angle
+  // changes every residential camera position and therefore all four proxy
+  // hashes without changing their counts or isolation contract.
+  village: 'f307e3a9',
+  town: 'e2bc9618',
+  capital: 'b7e4361f',
+  hanyang: 'ac01325b',
 };
 
 const server = await createServer({

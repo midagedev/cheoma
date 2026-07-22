@@ -29,7 +29,7 @@ export function createResidentialOpeningDetails(kind, building, target, material
     return byBay.get(`${edgeIndex}:${bayIndex}`) || null;
   }
 
-  function add(opening, ownerOrFactory = null) {
+  function prepare(opening) {
     if (!opening || !plan.openings.includes(opening)) {
       throw new Error('Residential opening does not belong to this building plan');
     }
@@ -46,6 +46,7 @@ export function createResidentialOpeningDetails(kind, building, target, material
       meoreumHeight: opening.kind === 'window' ? profile.meoreumHeight : undefined,
       lowerPanelHeight: opening.kind === 'door' ? profile.lowerPanelHeight : undefined,
       primary: opening.primary,
+      leafOutward: opening.primary ? profile.leafOutward : undefined,
       footwear: opening.primary ? {
         ...profile.footwear,
         clearSide: opening.landing?.clearSide,
@@ -54,21 +55,40 @@ export function createResidentialOpeningDetails(kind, building, target, material
     if (Math.abs(detail.width - opening.width) > EPSILON) {
       throw new Error(`Opening detail width drifted for ${opening.id}: ${detail.width} != ${opening.width}`);
     }
+    const placement = {
+      center: opening.center,
+      bottomY: profile.bottomY,
+      tangent: opening.tangent,
+      outward: opening.outward,
+    };
+    return { detail, placement };
+  }
+
+  function addPrepared(opening, detail, placement, ownerOrFactory) {
     const owner = typeof ownerOrFactory === 'function'
-      ? ownerOrFactory(detail)
+      ? ownerOrFactory(detail, placement)
       : ownerOrFactory;
     if (owner) {
       owner.userData.residentialOpening = opening;
       owner.userData.residentialOpeningDetail = detail;
     }
-    assembler.add(detail, {
-      center: opening.center,
-      bottomY: profile.bottomY,
-      tangent: opening.tangent,
-      outward: opening.outward,
-    }, owner);
+    assembler.add(detail, placement, owner);
     added.add(opening.id);
     return detail;
+  }
+
+  function add(opening, ownerOrFactory = null) {
+    const { detail, placement } = prepare(opening);
+    return addPrepared(opening, detail, placement, ownerOrFactory);
+  }
+
+  function addPrimaryDoor(opening, ownerOrFactory, panelDepth) {
+    const { detail, placement } = prepare(opening);
+    if (!detail.primary || detail.kind !== 'door') {
+      throw new Error(`Residential primary door expected: ${opening.id}`);
+    }
+    assembler.addPrimaryRecess(detail, placement, panelDepth);
+    return addPrepared(opening, detail, placement, ownerOrFactory);
   }
 
   function finish() {
@@ -79,5 +99,5 @@ export function createResidentialOpeningDetails(kind, building, target, material
     assembler.finish();
   }
 
-  return { plan, openingAt, add, finish };
+  return { plan, openingAt, add, addPrimaryDoor, finish };
 }

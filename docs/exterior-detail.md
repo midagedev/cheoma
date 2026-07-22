@@ -3,14 +3,14 @@
 > - **상태**: 계약 + 리서치
 > - **기준일**: 2026-07-22
 > - **범위**: 궁·사찰·기와집·초가의 문·창 프레임, 창 하부 머름, 문짝 하부 청판 rail, 문지방,
->   절제된 철물·근접 민가 신발과 후속 상호작용 anchor
-> - **비범위**: 문 열림 애니메이션, 실내 생성, 인물, 특정 문화유산의 정밀 복원
+>   절제된 철물·근접 민가 신발, 선택 FULL **주거** 주출입문 상호작용
+> - **비범위**: 실내 생성, 인물, 특정 문화유산의 정밀 복원
 
 ## 1. 목적
 
 창호는 지붕 아래의 평면 텍스처가 아니라 출입·채광·환기 기능을 구분하는 건축 부재로 읽혀야 한다. 동시에
 일반 주택 수십 채가 반복되는 마을에서 집마다 별도 재질·텍스처·draw call을 만들 수는 없다. 이 계약은 확인된
-창호 어휘를 얕은 입체 실루엣으로 번역하고, MID/FAR와 결정론을 보존하면서 후속 문 상호작용과 생활 소품이 같은
+창호 어휘를 얕은 입체 실루엣으로 번역하고, MID/FAR와 결정론을 보존하면서 문 상호작용과 생활 소품이 같은
 출입구 데이터를 재사용하게 한다.
 
 ## 2. 확인된 사실
@@ -43,7 +43,9 @@
   façade를 역참조하지 않고 구현 모듈을 직접 사용해 `src/`의 의존 방향을 보존한다.
 - `src/builder/opening-details.js`는 일반 기와집 벽체, 대표 종가 `buildHanok`, 궁·사찰·초가 공용 벽체가 같은
   plan을 소비하게 한다. 문양 텍스처는 미세 살 짜임을 계속 담당하고, 얕은 jamb·head·sill·문짝 이음·문지방만
-  실루엣을 만든다.
+  실루엣을 만든다. 초가와 대표 종가는 열린 문 뒤의 벽면이 다시 드러나지 않도록 같은 opening basis에서 고정
+  암부 plane을 만들고 기존 `opening-frame-details`/`woodDark` batch에 병합한다. 초가의 중간 보와 하부 판재 띠도
+  주출입문의 실제 계획 폭에서 분할되어 개구를 가로지르지 않는다.
 - 일반 초가·기와집은 `src/layout/residential-openings.js`의 칸별 문·창 plan을
   `src/builder/residential-opening-details.js`에서 이 detail grammar와 결합한다. planner의 개수·폭·남향 primary를
   패널과 frame에 그대로 쓰며, 한 개구를 생략하거나 두 번 조립하면 fail closed한다. 부엌 아궁이는 이 목록에
@@ -55,7 +57,8 @@
   기존 청판 경계는 별도 `lowerPanel`/`lower-panel-rail`로 기록하므로 출입 통과부를 머름으로 오인하지 않는다.
 - 철물은 모든 문짝에 반복하지 않고 primary entrance 한 곳에만 둔다. 궁은 작은 경첩 띠 두 개, pivot cap 두 개,
   고리 하나의 제한된 실측 어휘를 쓰고, 민가·사찰은 더 절제된 경첩 띠 두 개와 고리 하나만 보인다. 모든 유형의
-  실제 pivot은 렌더 장식 수와 무관하게 순수 anchor 데이터로 유지한다.
+  잠재 pivot은 렌더 장식 수와 무관하게 순수 anchor 데이터로 유지한다. 이 정적 의미가 곧 제품 상호작용 허용을
+  뜻하지는 않는다.
 - 근정전 실측도의 장식판과 치수를 일반 민가에 복제하지 않는다. 현재 민가 철물은 실측도에서 확인한 기능
   어휘 중 작은 경첩 띠와 고리만 남긴 **제품 해석**이고, 보이는 pivot cap은 생략한다. 이는 특정 시대·지역·신분의
   민가 철물을 입증하거나 정밀 복원한 결과가 아니다.
@@ -69,10 +72,57 @@
   선택한 문설주와의 양의 clearance 및 placement signature를 기록한다. `src/props/threshold-life.js`는 최종 opening
   basis에서 위치·회전과 landing reference만 소비하고 집의 `footprintScale`·필지 비등방 scale은 제거한다. 따라서
   처마·문간 위치는 편집된 집을 따르되 신발 자체는 세계 단위 24~26cm 범위를 유지한다. 문을 여는 상태는 여전히
-  별도 범위다. 아궁이·솥을 위한 `kitchen-hearth.js`는 거주 창호와
+  독립된 motion/runtime 계약이 소유한다. 아궁이·솥을 위한 `kitchen-hearth.js`는 거주 창호와
   다른 service opening이므로 합치지 않는다.
 
-## 4. LOD·재질·수명 계약
+## 4. 주출입문 상호작용 계약
+
+- 제품 상호작용은 일반 기와집·초가와 `heroStyle: 'hanok'`인 대표 주거 한옥의 선택 FULL overlay에만 허용한다.
+  `hero`는 카메라·편집 분류이지 주거 의미가 아니다. 따라서 `heroStyle: 'palace'`인 관아·객사 코어와 궁·사찰
+  builder가 재사용 가능한 primary 의미 geometry를 갖더라도, 주 전각 역할이 병합 뒤까지 보존되지 않은 현재
+  compound에서는 임의의 한 문을 고르지 않는다. 실제 관아·궁·사찰 focus에는 runtime, 화면 target, pivot이 모두 없다.
+
+- `src/interaction/door-motion.js`는 Three·DOM·앱·전역 RNG 없이 불변 JSON-safe motion plan과 가변 progress
+  state를 만든다. 공개 순수 진입점은 `src/api/door-motion.js`다. 목표가 바뀌면 현재 각도와 속도를 이어받는
+  임계감쇠 운동으로 반전하며, 60Hz bounded substep 뒤 정확한 0/1에 정착한다.
+- 다짝 문 전체를 한 외곽 경첩으로 돌리지 않는다. plan의 `leafWidth`, `leafCenterU`, `meetingU`가 경첩 쪽
+  바깥 한 짝을 특정하고, builder는 `primary-opening-panel` active leaf와 고정된 나머지 짝을 별도 geometry로
+  만든다. 초가는 원래 한 짝이므로 문짝 전체가 active leaf다. 기와집의 하부 청판, active meeting seam,
+  고리와 경첩 띠만 같은 pivot을 쓰며 jamb·head·threshold·다른 leaf·창·머름은 고정된다.
+- pivot은 active leaf의 바깥 모서리와 일치하고 열린 각도는 안쪽 약 78.6°다. 개구부와 footwear의 논리 basis는
+  벽면에 고정하고 `pivot.outward`만 보이는 문짝 면을 소유하므로, 초가 암부나 기와 panel 깊이를 맞추기 위해
+  신발까지 바깥으로 밀지 않는다. hinge side는 현재 폭이 아니라 opening identity에서 파생되어 연속 폭 편집 중
+  반대 문설주로 점프하지 않는다. runtime은 실제 panel의 local
+  폭과 중심이 순수 plan의 한 짝 범위와 0.1mm 안에서 일치할 때만 활성화한다. 문 운동은 geometry·material·
+  texture·light를 새로 만들지 않고 기존 host 객체를 일시 reparent한다.
+- 필지 변주는 집을 반전하거나 X/Y/Z를 서로 다르게 늘릴 수 있다. runtime은 닫힌 panel의 affine world matrix를
+  분해하지 않고 그대로 보존하되, 경첩점에는 host scale을 상쇄한 orthonormal frame을 둔다. 따라서 문이 움직이는
+  동안 세계 공간 경첩 반경과 Gram metric이 일정하고, 닫힘·dispose 뒤에는 원래 parent/local matrix가 정확히 돌아온다.
+- 초가와 대표 종가의 암부 plane은 각각 panel 뒤 3.2cm, 5.2cm에 고정된다. 양면을 위한 네 삼각형을 기존 frame
+  batch에 합쳐 닫힌 면은 바꾸지 않고 열린 깊이만 읽히게 하며, draw call·material·shader program을 늘리지 않는다.
+- 제품 입력은 선택된 FULL focus overlay 한 곳만 대상으로 한다. pointer down/up이 모두 실제로 보이는 active
+  leaf 또는 열려 비워진 그 leaf의 문간에 있고 이동량이 6px 이하일 때만 toggle한다. 문간 hit는 순수 ray/plane
+  교차라 보이지 않는 mesh를 만들지 않는다. Three의 recursive raycast가 숨은 조상을 자동 배제하지 않는 점을
+  보완해 hit부터 선택 root까지 모든 조상의 `visible`과 raycaster layer를 검사한다. 숨은 LOD·조립 owner는 target도
+  occluder도 아니다. 선택 root 밖은 전체 scene raycast 대신 먼저 얻은 문 hit까지의 유한 선분만
+  `src/runtime/village/door-occlusion.js`의 Three 없는 uniform-grid DDA로 조회한다. 고정 인덱스는 일반집의
+  계획 몸체·지붕 또는 commit된 실제 FULL bounds, 일반 필지 담 run·문설주·상인방, 종가 담·닫힌 대문·행각 지붕,
+  정자의 다각 기단·기둥 링·위로 좁아지는 지붕, 공용 소품, 사찰의 회전 전각·담 run·닫힌 대문, 궁장과 광화문,
+  도성 성벽과 열린 홍예의 육축·상인방, 시전 다각형을 작은 record로 기록한다. 전체 담 ring이나 궁궐 precinct를
+  하나의 거대 AABB로 막지 않으므로 실제 문·홍예·중정의 빈 공간은 통과한다. 실제 마당·보호수 anchor는 flora
+  생성·교체 때 별도 인덱스로 미리 만들고 겨울에는 낙엽 수관을 제외해 줄기만 차폐한다. forest/scatter는 focus
+  수목 fade가 별도로 소유하므로 중복 등록하지 않는다. 아직 성문 문루 상부, 궁궐 내부 일곽, 사찰 소품은 이
+  외부 semantic index의 범위가 아니다. 선택 root 내부는 실제 first-surface ray가 계속 담당한다. 따라서 한양의
+  수만 tree instance를 pointermove마다 순회하거나 첫 hover에서 인덱스를 만들지 않으면서 대표적인 이웃 건축·
+  담·대문·소품·근경 수목 뒤의 문을 관통 선택하지 않는다. drag는 OrbitControls에 남으며 필지 선택으로 새지 않는다.
+- 첫 accepted `pointerdown`이 pointerId 소유권을 얻는다. mouse와 touch가 각자 primary여도 뒤 포인터가 이를
+  덮어쓰지 못하고, 일치하는 `pointerup`만 click을 완성한다. `pointercancel`, `lostpointercapture`, window blur는
+  해당 소유권을 해제해 오래된 down hit가 다음 입력에서 문을 열지 못하게 한다.
+- focus-out, LOD 전환, reroll, rebuild와 dispose는 문을 닫고 원래 parent/local transform을 복원한 뒤 빈 pivot을
+  제거한다. persistent overlay도 다시 focus될 때 닫힌 새 runtime을 얻는다. listener와 GPU resource의 수명은
+  builder/handle 소유권 밖으로 새지 않는다.
+
+## 5. LOD·재질·수명 계약
 
 - MID는 기존 `door`·`hanji`·`salchang` 텍스처와 envelope 목재를 유지한다. 프레임·문지방은 기존
   `wood`/`woodDark` 재질 그룹에 병합되므로 MID에 새 재질 그룹을 추가하지 않는다.
@@ -87,43 +137,64 @@
   때만 기존 batch를 rigid rebase하고, 하나라도 바뀌면 순수 plan과 mesh를 다시 만든다. 맑은 날은 짚신, 실제
   `rain` 전환은 나막신 plan을 소비한다.
 - 각 건물은 `primary-opening-anchor`와 `primary-opening-panel`을 정확히 하나 노출한다. anchor의 plan은 JSON-safe
-  데이터이며, 후속 interaction/footwear는 이 marker를 찾고 focus-out·rebuild·dispose 수명에 맞춰 상태를
-  소유해야 한다. Svelte가 Three 상태를 소유해서는 안 된다.
+  데이터이며 footwear와 interaction runtime은 이 marker를 찾고 focus-out·rebuild·dispose 수명에 맞춰 상태를
+  소유한다. `primary-opening-panel`은 한 짝 크기이며 제품이
+  허용한 선택 FULL 주거 runtime은 `primary-door-pivot` 하나를 추가하지만 새 재질/program 계열은 만들지 않는다.
+  Svelte는 Three 상태를 소유하지 않고 canvas pointer 결과만 표시한다.
 
-## 5. 검증
+## 6. 검증
 
 - `npm run check:opening-detail`: 순수 결정론, 불변 데이터, vocabulary, 창 머름과 문 lowerPanel의 배타성,
   frame·threshold·유형별 철물 범위,
   primary pivot/footwear anchor와 전역 RNG 비의존을 검사한다.
 - `npm run check:threshold-life`: dry/wet 종류, 실물 기반 크기 범위, 문지방·출입 폭·문설주 clearance, preview
   placement signature, JSON-safe deep freeze, 객체·BigInt seed 결정론, 전역 RNG 비의존을 검사한다.
+- `npm run check:door-motion`: 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠, 중간 반전 무스냅,
+  정확한 정착과 idempotent dispose를 검사한다.
+- `npm run check:door-occlusion`: ㄱ·ㄷ 빈 마당 통과와 실제 wing 차폐, 일반 담/대문 개구, 정자 외접 상자의
+  빈 모서리·기둥·수렴 지붕, 공용 소품, 사찰 중정·회전 전각·담/문, 궁장/광화문, 도성 성벽/홍예, 시전 다각형,
+  선택 host만 제외하는 owner 규칙, 회전된 commit bounds, 여름 수관/겨울 줄기, 필지·flora 원자 refresh와 유한
+  선분 DDA 후보 상한을 Three·DOM 없이 검사한다.
 - `npm run check:building-clearance`: 실제 궁·사찰·일반 기와·초가·대표 종가 production geometry에서
   frame/hardware가 각각 한 batch이고, primary entrance가 하나이며 철물이 MID에 섞이지 않는지 검사한다. 초가
-  기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ은 planner와 실제 패널의 개수·폭, 부엌 분리, 메시·재질 상한도 함께 검사하고,
+  기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ은 planner와 실제 패널의 개수·폭, 부엌 분리, 메시·재질 상한뿐 아니라
+  각 fixture의 닫힘/중간/열림 picking·안쪽 swing·dispose까지 함께 검사하고,
   `-1.4×0.7×1.25` mirror·비등방 host basis에서도 신발 pair의 세계 length/width가 바뀌지 않는지 확인한다.
   기와 ㅡ·ㄱ·ㄷ × 대청 좌우 primary seed × 최소·기본·최대 문 폭/개수 18개 production fixture는 실제 툇마루
   bounds 안에 신발이 남고 리턴 난간·대청 바닥·출입구와 겹치지 않는지도 검사한다.
+  같은 production fixture의 moving owner가 정확히 한 짝 폭인지, 반전·비등방 host에서도 세계 경첩 반경과
+  Gram metric이 일정한지, 안쪽 sweep, 닫힘/중간/열림 picking, frame 고정, panel/청판/seam/hardware 강체 동행,
+  고정 암부의 ray 깊이, 숨은 조상·layer 배제와 host 복원도 검사한다. 선택 root 밖의 가림은 위 순수 semantic
+  gate와 실제 앱 입력 경로가 맡는다.
 - `npm run check:app`: 네 기와집 topology가 `hardware` 재질 하나를 공유하고 FULL decomp마다 한 그룹만 가지며,
   일반 기와↔초가와 대표 종가 rebuild가 anchor/panel/frame/hardware를 정확히 하나씩 교체·해제하는지 검사한다.
   정적 마을에는 신발이 없고 focus에서만 한 batch가 생기는지, 실제 clear→rain 전환이 짚신→나막신으로 바뀌며
   이전 자원을 한 번만 해제하는지, focus-out이 이를 회수하는지도 재질·텍스처·program 상한 및 실제 Reference UI와
-  함께 검사한다.
+  함께 검사한다. 또한
+  실제 초가 focus에서 hover/click/drag/중간 반전과 열린 문간 close action이 동작하는지, 교차 pointer type·
+  cancel·lost capture·blur가 click 소유권을 깨뜨리지 않는지, 숨은 owner를 고르거나
+  compound 차폐를 관통하지 않는지, 초가→대표 종가 hop이 이전 runtime·pivot·host graph를 회수하는지,
+  대표 종가 rebuild가 네 opening/threshold geometry를 정확히 한 번 해제하는지 검사한다.
+  별도 실제 capital/town 앱은 궁·사찰과 `heroStyle: 'palace'` 관아 focus에 runtime·screen target·pivot이 생기지
+  않는 의미 기반 범위 제한을 검사한다.
 - 시각 판정은 같은 seed·카메라·시간의 전후 PNG를 직접 비교한다. 프레임이 창호지를 과도하게 가리거나 검은
   테두리로만 읽히지 않는지, 문고리가 원경에서 노이즈가 되지 않는지, 벽과 겹쳐 깜빡이지 않는지 본다.
 - 2026-07-22 고정 town ㄷ자 컷의 측정은 calls 842→849, triangles 5,841,310→5,891,054, textures 44→44였다.
   같은 초가 컷은 calls 501→505, textures 26→26이었다. Headless 시간은 성능 근거로 쓰지 않는다.
-- 머름 의미 수정과 대표 종가 통합 뒤 production opening 예산은 일반 기와 552+144, 궁 1224+208, 사찰
-  1032+144, 초가 240+144, 종가 444+144 triangles(frame+hardware)다. 실제 대표 종가 rebuild는 이전 opening
-  geometry 두 개를 각각 한 번 해제했고 rebase 후 shader program은 135→136으로 제한됐다.
-- residential plan 통합 뒤 fixture 기준 FULL 예산은 초가 기본 4개 개구/75 meshes/31 materials, 초가 최대
-  13/92/32, 기와 ㅡ 5/137/43, ㄱ 5/158/51, ㄷ 최대 20/248/64다. 개수가 늘어도 frame/hardware는 건물당
+- active leaf 분리와 가변 residential plan 통합 뒤 production opening 예산은 일반 기와 324+24+144,
+  궁 1212+24+208, 사찰 1020+24+144, 초가 244+24+144, 종가 436+24+144
+  triangles(fixed frame+moving leaf detail+hardware)다.
+- fixture 기준 FULL 예산은 초가 기본 4개 개구/78 meshes/31 materials, 초가 최대 13/95/32,
+  기와 ㅡ 5/140/43, ㄱ 5/161/51, ㄷ 최대 20/251/64다. 개수가 늘어도 frame/hardware는 건물당
   각각 한 batch이며 개구 수에 비례한 texture나 detail draw batch를 만들지 않는다.
 - 2026-07-22 신발 근접 캡처에서 focus overlay 한 켤레는 짚신 232 triangles, 나막신 184 triangles이고 모두
   calls +1, 기존 장면 워밍 뒤 programs +1이다. 실제 앱의 대표 종가 rebuild는 frame·hardware·신발 geometry를
   각각 한 번 해제하고 programs 증가를 +2 이하(기존 rebuild 계열 + vertex-color 신발 계열)로 제한했다. 정적 마을은
   신발 geometry와 call을 전혀 제출하지 않는다. 절대 시간은 비교하지 않는다.
+- `npm run shoot:door`는 실제 앱에서 닫힘/중간/열림의 정면·사선 6장을 임시 디렉터리에 만든다.
+  `CHEOMA_DOOR_TARGET=choga|hero`로 두 고정 암부 대상을 따로 촬영하며 hero는 읽기 쉬운 낮이 기본이다.
 
-## 6. 원문과 이용조건
+## 7. 원문과 이용조건
 
 - 건축공간연구원 국가한옥센터, 「한옥의 시공 — 창호와 천장」:
   https://www.hanokdb.kr/theology/sub_04

@@ -6,13 +6,14 @@
   // ContextPanel houseLabel 과 동일 우선순위: 궁궐 → 종가/관아 → 기와/초가 (giwa 이분법이 궁·히어로를 초가로 오표기하던 버그)
   const typeLabel = $derived.by(() => {
     if (!info) return '';
+    if (info.interaction === 'door') return t(info.open ? 'hint_close_door' : 'hint_open_door');
     const spec = info.spec;
     if (spec.family === 'palace-compound') return t('crumb_palace_compound');
     if (spec.family === 'temple') return t('crumb_temple');   // #147 산사
     if (spec.hero) return t(spec.heroStyle === 'hanok' ? 'crumb_hanok' : 'crumb_palace');
     return t('type_' + (spec.kind === 'giwa' ? 'giwa' : 'choga') + '_l');
   });
-  const bays = $derived(info && info.spec.params && info.spec.params.frontBays
+  const bays = $derived(info?.spec?.params?.frontBays
     ? `${info.spec.params.frontBays}×${info.spec.params.sideBays ?? 2}${t('hint_bays')}` : '');
   // 커서 우하단으로 살짝 띄우되 화면 밖으로 넘치지 않게 클램프.
   const pos = $derived(info ? {
@@ -23,7 +24,7 @@
 
 {#if info}
   <div class="hlabel" style="left:{pos.left}px; top:{pos.top}px;">
-    {#if info.spec.hero}<span class="seal" aria-hidden="true">印</span>{/if}
+    {#if info.spec?.hero}<span class="seal" aria-hidden="true">印</span>{/if}
     <span class="type">{typeLabel}</span>
     <span class="bays">{bays}</span>
   </div>
