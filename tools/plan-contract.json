@@ -4,6 +4,7 @@
   "templeRevision": "issue-12-compound-2026-07-22",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
+  "focusCameraRevision": "issue-15-focus-elevation-16deg-2026-07-23",
   "buildingSolarRevision": "issue-15-winter-sun-2026-07-21",
   "streamValleyRevision": "issue-21-visible-graded-water-2026-07-22",
   "settlementReliefRevision": "issue-40-local-relief-river-port-2026-07-22",
@@ -31,8 +32,8 @@
       "bytes": 901935
     },
     "hamlet:temple": {
-      "hash": "f7aea5d0b1a39d1204acd1432e235423a5520e55765caa0ed3f89680d2fc5501",
-      "bytes": 34854
+      "hash": "43ec224a0d782ea1eea8992244b7b98509f0923ebf9b09aa6f16632ffd5c90ec",
+      "bytes": 34855
     },
     "village:temple": {
       "hash": "232f52cb8794cf9ca500b9cc5f18b8c0c6c56f1fc88a82db88f0f14c313f3e12",
