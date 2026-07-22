@@ -18,6 +18,8 @@ function palaceBuildingDefaults() {
     podiumRailing: preset.podiumRailing,
     cornerLift: preset.cornerLift,
     ridgeH: preset.ridgeH,
+    dancheongClarity: preset.dancheongClarity,
+    dancheongSplendor: preset.dancheongSplendor,
   };
 }
 
@@ -32,6 +34,8 @@ export function palaceCompoundDefaults() {
     bracketTiers: preset.bracketTiers,
     bracketScale: preset.bracketScale,
     interBrackets: preset.interBrackets,
+    dancheongClarity: preset.dancheongClarity,
+    dancheongSplendor: preset.dancheongSplendor,
   };
 }
 

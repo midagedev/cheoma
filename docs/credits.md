@@ -164,32 +164,39 @@
 - URL: https://sitereports.nabunken.go.jp/3ddb · https://sketchfab.com/nabunken
 - 라이선스: **CC BY 4.0** (다운로드는 Sketchfab 로그인 필요).
 
+### 21. 국가유산청 · 국립문화유산연구원 — 단청 위계와 궁궐·사찰 안료 조사
+- 국가유산청 국가유산포털 단청 해설·단청장 종목 해설 / 국립문화유산연구원 2020 궁궐·사찰 단청 안료 조사·연구보고서
+- 가칠→긋기→모로→금모로→금단청의 장식 위계와, 서울·경기 궁궐의 절제된 모로단청·백토 바탕·뇌록 가칠 및 사찰 중심 불전의 금단청 차이를 함께 대조.
+- **활용 / Use:** 궁 기본 모로·사찰 주불전 금단청·부속채 단계 하향 규칙과 선명도/화려함 축, 오방색 안료 팔레트의 근거 / Basis for the palace-moro, temple-main-hall-geum hierarchy, subsidiary step-down policy, clarity/splendour controls, and obangsaek pigment palette (`src/builder/dancheong.js`, `docs/dancheong.md`).
+- URL: https://www.heritage.go.kr/heri/html/HtmlPage.do?pageNo=1_9_1_0&pg=%2Fcul%2FcultureEasySub01_13.jsp · https://nrich.go.kr/kor/boardView.do?bbs_idx=42127&bbscd=33&menuIdx=283 · https://portal.nrich.go.kr/kor/originalUsrView.do?info_idx=8560&menuIdx=1046 · https://m.cha.go.kr/public/commentary/culSelectDetail.do?ccbaAsno=00280000&ccbaCtcd=31&ccbaKdcd=22&menuId=03
+- 라이선스: 기관 공개 해설·연구정보. 원문 이미지·보고서 재배포 전에는 각 페이지의 공공누리 조건을 다시 확인.
+
 ---
 
 ## ⑤ 마을 · 읍성 문헌 (Village & walled-town sources)
 
-### 21. 경국대전 도로폭 규정 · 가사(家舍)/가대(家垈)제한
+### 22. 경국대전 도로폭 규정 · 가사(家舍)/가대(家垈)제한
 - 원전 / 민족문화대백과·우리역사넷 해설 경유
 - 대로 56척(≈17.5m)·중로 16척(≈5.0m)·소로 11척(≈3.4m) 도로 등급, 신분별 가옥 칸수·집터 면적 상한(서인 10칸·2부 ↔ 대군 60칸·1품 35부).
 - **활용 / Use:** 도로 등급별 폭·피맛길(≈3.4m)과 신분→필지 크기/가옥 칸수 그라디언트의 수치 근거 / Numeric basis for road-width tiers, the pimatgil back-alley, and the rank→lot-size/house-scale gradient (src/village/roads.js, parcels.js).
 - URL: https://encykorea.aks.ac.kr/Article/E0071922
 - 라이선스: 원전 퍼블릭 도메인, 해설은 매체별 (CC BY-SA 등).
 
-### 22. 한국의 역사마을 하회와 양동
+### 23. 한국의 역사마을 하회와 양동
 - UNESCO / 민족문화대백과 · 우리역사넷 해설
 - 배산임수·풍수 길지 입지(하회=물돌이 연화부수형, 양동=산기슭), 종가 명당 중심의 준방사형 안길·위계 배치.
 - **활용 / Use:** 씨족촌 모드의 배산임수 시드·종가 명당 앵커·중심→외곽 위계(기와→초가) 그라디언트 / Basis for the clan-village mode's baesan-imsu siting, head-house anchor, and center-to-edge hierarchy (src/village/site.js, plan.js).
 - URL: https://heritage.unesco.or.kr/한국의-역사마을-하회와-양동/
 - 라이선스: 해설 매체별 (위키 CC BY-SA 등).
 
-### 23. 담장 — 한국민속대백과사전 / 담 — 한국민족문화대백과사전
+### 24. 담장 — 한국민속대백과사전 / 담 — 한국민족문화대백과사전
 - 국립민속박물관(집필 장필구) · 한국학중앙연구원
 - 담 종류(맞담/홑담/외담·사고석담·토담)·계층별 재료 차등·"담 지붕은 몸채 지붕을 따름"·생울/바자울 등 담 아닌 경계.
 - **활용 / Use:** 담 유무·유형 확률 테이블(기와담/돌담/토담/싸리울/생울/개방)과 담 지붕을 몸채 지붕에 일치시키는 규칙 / Wall-type probability table and matching wall coping to the main-building roof (docs/village-walls-parcels.md R-P3/R-P4, src/village/variants.js, walls.js).
 - URL: https://folkency.nfm.go.kr/topic/담장 · https://encykorea.aks.ac.kr/Article/E0013772
 - 라이선스: 해설 매체별.
 
-### 24. 일제강점기 토지조사사업 지적원도(地籍原圖)
+### 25. 일제강점기 토지조사사업 지적원도(地籍原圖)
 - 조선총독부 토지조사(1910~18) / 국가기록원
 - 전국 필지 실측 원도 약 78만 장. 전통 취락 필지가 도로·수로·능선을 따라 휘는 부정형임을 확인.
 - **활용 / Use:** 필지를 직사각이 아닌 부정형 다각형(앞변 직선·측/뒷변 꺾임)으로 생성하는 근거 / Basis for generating irregular polygonal lots rather than rectangles (docs/village-walls-parcels.md R-P1, src/village/parcels.js).
@@ -202,25 +209,25 @@
 
 > 아래 사진은 형태·질감·배치의 **시각 비교 기준**으로만 사용했으며, 앱 지오메트리는 사진을 복제하지 않은 오리지널 프로시저럴 모델입니다. 개별 파일의 출처·저작자·라이선스는 `refs/**/INDEX.md`에 항목별로 기록되어 있습니다.
 
-### 25. Wikimedia Commons — 조선 건축물 사진 (궁 · 절 · 반가 · 초가)
+### 26. Wikimedia Commons — 조선 건축물 사진 (궁 · 절 · 반가 · 초가)
 - 경복궁 근정전(다포·중층 팔작), 부석사 무량수전(주심포), 수덕사 대웅전·봉정사 극락전(맞배·무단청/소박 단청), 하회 양진당·양동 관가정(백골 반가·ㅁ자 배치), 낙안·하회·외암 초가(볏짚·집줄·용마름·흙벽).
 - **활용 / Use:** 4종 프리셋(궁/절/기와집/초가)의 지붕 실루엣·단청 배색·백골 목질·볏짚 이엉·꺾인 안채 배치의 시각 검증 루프 기준 / Visual verification loop for roof silhouettes, dancheong palette, bare timber, thatch, and courtyard layout of the four presets (src/builder/palette.js, giwa.js, roof.js).
 - URL: `refs/INDEX.md`, `refs/types/INDEX.md`, `refs/choga/INDEX.md`
 - 라이선스: 항목별 CC0 / CC BY / CC BY-SA / 퍼블릭 도메인 혼재 — INDEX에 저작자·유형 명시(CC BY 계열은 표기 필수).
 
-### 26. Wikimedia Commons — 마을 · 산사 경관 사진 (부감 · 항공)
+### 27. Wikimedia Commons — 마을 · 산사 경관 사진 (부감 · 항공)
 - 하회 파노라마·항공(물돌이 입지), 양동 산비탈 위계 배치, 낙안읍성 초가 군집·돌담, 성읍(제주형), 부석사·화엄사·봉정사 산지 가람, 겹겹 능선·운해, 적송 수형.
 - **활용 / Use:** 마을 군집 밀도·경사지 필지 위계·석축 단·산수 배경 레이어·소나무 수형의 시각 기준 / Reference for cluster density, sloped-lot hierarchy, stone terraces, mountain backdrop layers, and pine form (src/village/*, src/env/mountains.js, trees.js).
 - URL: `refs/scenery/INDEX.md`, `refs/village/INDEX.md`
 - 라이선스: 항목별 CC0 / CC BY / CC BY-SA / 퍼블릭 도메인 — INDEX에 명시.
 
-### 27. 조선 산수화 · 고지도 (퍼블릭 도메인)
+### 28. 조선 산수화 · 고지도 (퍼블릭 도메인)
 - 정선 인왕제색도(1751)·금강전도(1734), 안견 몽유도원도(1447); 동궐도(궁궐 배치도)·김정호 수선전도(한양 지도).
 - **활용 / Use:** 산수화 배경의 능선 양식화·먹 농담·안개 처리 아트디렉션, 그리고 궁궐/도성 배치 문법(축·위계·행각) 참고 / Art direction for stylized ridgelines, ink gradation, and haze, plus palace/city layout grammar (src/env/mountains.js, sky.js, render/ink.js, src/village/*).
 - URL: `refs/scenery/INDEX.md` (§5 산수화, §6 고지도)
 - 라이선스: 전부 **퍼블릭 도메인** (저작권 만료).
 
-### 28. 타국 목조건축 — 형태 대조 (중국 · 일본)
+### 29. 타국 목조건축 — 형태 대조 (중국 · 일본)
 - 자금성 태화전(중층 무전 지붕·황색 유리기와), 法隆寺 金堂(운두공·아스카 목조), 사합원 등.
 - **활용 / Use:** 조선 팔작·회흑색 기와·무단청 반가가 중국(무전·유리기와)·일본(운두공·반곡)과 어떻게 다른지 경계를 정의하는 대조군 / Comparative set to define how Joseon forms differ from Chinese and Japanese timber architecture.
 - URL: `refs/INDEX.md` §3 (타국 목조건축)

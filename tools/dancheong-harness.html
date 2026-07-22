@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #cad4dc; }
+    canvas { display: block; }
+  </style>
+  <script type="importmap">
+  {"imports":{
+    "three":"/app/node_modules/three/build/three.module.js",
+    "three/addons/":"/app/node_modules/three/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { buildBuilding, disposeBuilding } from '../src/builder/index.js';
+import {
+  dancheongSourceCacheStats,
+  makeMaterials,
+} from '../src/builder/palette.js';
+import { PRESETS, computeLayout } from '../src/params.js';
+import { buildPalaceCompound, disposePalaceCompound } from '../src/village/palace.js';
+import { buildTempleCompound, disposeTempleCompound } from '../src/temple/compound.js';
+import { planTempleCompound } from '../src/temple/plan.js';
+import { mergeStatic } from '../src/village/instancing.js';
+import { buildExportScene, exportGLB } from '../src/export/gltf.js';
+
+const query = new URLSearchParams(location.search);
+const style = query.get('style') === 'temple' ? 'temple' : 'palace';
+const presetKey = style === 'palace' ? 'korea' : 'temple';
+const clarity = Number(query.get('clarity') ?? PRESETS[presetKey].dancheongClarity);
+const splendor = Number(query.get('splendor') ?? PRESETS[presetKey].dancheongSplendor);
+const probe = query.get('probe') === '1';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1);
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.04;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcad4dc);
+scene.add(new THREE.HemisphereLight(0xe3ebf1, 0x8d806c, 1.55));
+const sun = new THREE.DirectionalLight(0xfff0d5, 2.8);
+sun.position.set(-8, 14, 18);
+scene.add(sun);
+
+const params = {
+  ...PRESETS[presetKey],
+  dancheongClarity: clarity,
+  dancheongSplendor: splendor,
+};
+const building = buildBuilding(params);
+scene.add(building);
+const layout = computeLayout(params);
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(100, 100),
+  new THREE.MeshStandardMaterial({ color: 0xa99e88, roughness: 1 }),
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.1, 300);
+const target = new THREE.Vector3(0, layout.plateY + 0.35, 0);
+const maxDim = Math.max(layout.W + 4, layout.D + 4, layout.totalH);
+camera.position.set(maxDim * 0.22, layout.plateY + 0.2, maxDim * 0.72);
+camera.lookAt(target);
+
+function canvasHash(texture) {
+  const canvas = texture?.image;
+  const context = canvas?.getContext?.('2d');
+  if (!context) return null;
+  const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let hash = 2166136261;
+  for (let index = 0; index < data.length; index += 13) {
+    hash ^= data[index];
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function paletteMaterialCount(palette) {
+  return new Set(Object.values(palette).filter((value) => value?.isMaterial)).size;
+}
+
+function renderCalls(object) {
+  const holder = new THREE.Scene();
+  holder.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.5));
+  holder.add(object);
+  const bounds = new THREE.Box3().setFromObject(object);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const cam = new THREE.PerspectiveCamera(35, 1, 0.1, 1000);
+  cam.position.set(center.x + size.x, center.y + size.y * 1.1, center.z + Math.max(size.z, size.x) * 1.4);
+  cam.lookAt(center);
+  renderer.info.reset();
+  renderer.setSize(512, 512, false);
+  renderer.render(holder, cam);
+  holder.remove(object);
+  return renderer.info.render.calls;
+}
+
+let diagnostics = null;
+if (probe) {
+  const low = makeMaterials('palace', { dancheongClarity: 0.08, dancheongSplendor: 0.08 });
+  const lowTwin = makeMaterials('palace', { dancheongClarity: 0.08, dancheongSplendor: 0.08 });
+  const lowHashBefore = canvasHash(low.beamDancheong.map);
+  const high = makeMaterials('palace', { dancheongClarity: 0.96, dancheongSplendor: 0.96 });
+  const lowHashAfter = canvasHash(low.beamDancheong.map);
+  const ordinary = ['giwa', 'choga'].map((ordinaryStyle) => {
+    const mats = makeMaterials(ordinaryStyle, { dancheongClarity: 1, dancheongSplendor: 1 });
+    return {
+      style: ordinaryStyle,
+      config: mats.dancheong,
+      maps: ['beamDancheong', 'bracketFace', 'yeonmokcho', 'bujeoncho']
+        .filter((key) => !!mats[key].map),
+    };
+  });
+
+  let twinTextureDisposed = 0;
+  lowTwin.beamDancheong.map.addEventListener('dispose', () => { twinTextureDisposed++; });
+  const disposableBuilding = buildBuilding({
+    ...PRESETS.korea,
+    dancheongClarity: 0.08,
+    dancheongSplendor: 0.08,
+  });
+  const buildingDisposed = disposeBuilding(disposableBuilding);
+
+  const palaceCaller = makeMaterials('palace');
+  let palaceCallerDisposed = 0;
+  palaceCaller.beamDancheong.addEventListener('dispose', () => { palaceCallerDisposed++; });
+  const palaceProbe = buildPalaceCompound({
+    tier: 'capital', merge: true, mats: palaceCaller,
+    dancheong: { clarity: 0.94, splendor: 0.94 },
+  });
+  const palaceDerived = palaceProbe.userData.mats.beamDancheong;
+  let palaceDerivedDisposed = 0;
+  palaceDerived.addEventListener('dispose', () => { palaceDerivedDisposed++; });
+  const palaceCallsHigh = renderCalls(palaceProbe);
+  const palaceDisposed = disposePalaceCompound(palaceProbe);
+
+  const palaceDefault = buildPalaceCompound({ tier: 'capital', merge: true });
+  const palaceCallsDefault = renderCalls(palaceDefault);
+  disposePalaceCompound(palaceDefault);
+
+  const templePlan = planTempleCompound({ variant: 'extended', seed: 73 });
+  const templeCaller = makeMaterials('temple');
+  let templeCallerDisposed = 0;
+  templeCaller.beamDancheong.addEventListener('dispose', () => { templeCallerDisposed++; });
+  const templeProbe = buildTempleCompound(templePlan, {
+    mats: templeCaller,
+    dancheong: { clarity: 0.88, splendor: 0.92 },
+  });
+  const templeMain = templeProbe.getObjectByName('temple-main-hall');
+  const templeDomestic = templeProbe.getObjectByName('temple-west-yosa');
+  const templeSubsidiary = templeProbe.getObjectByName('temple-west-subsidiary');
+  let templeDerivedDisposed = 0;
+  templeMain.userData.materials.beamDancheong.addEventListener('dispose', () => { templeDerivedDisposed++; });
+  const templeCalls = renderCalls(templeProbe);
+  const templeMerged = mergeStatic([templeProbe], 'dancheong-temple-merged');
+  const templeMergedCalls = renderCalls(templeMerged);
+  const templeDisposed = disposeTempleCompound(templeProbe);
+
+  // Exercise more keys than the cache can retain. Textures are individually owned and
+  // disposed; the immutable source LRU must stay bounded.
+  for (let index = 0; index <= 28; index++) {
+    const sample = buildBuilding({
+      ...PRESETS[index % 2 ? 'korea' : 'temple'],
+      dancheongClarity: (index % 9) / 8,
+      dancheongSplendor: (Math.floor(index / 2) % 9) / 8,
+    });
+    disposeBuilding(sample);
+  }
+
+  const exportTarget = buildBuilding({
+    ...PRESETS.temple,
+    dancheongClarity: 0.84,
+    dancheongSplendor: 0.92,
+  });
+  const exportScene = buildExportScene(exportTarget);
+  let exportCanvasMaps = 0;
+  exportScene.traverse((object) => {
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (material?.map?.image instanceof HTMLCanvasElement) exportCanvasMaps++;
+    }
+  });
+  const glb = await exportGLB(exportTarget, { maxTriangles: 1_000_000 });
+  disposeBuilding(exportTarget);
+
+  diagnostics = {
+    source: {
+      immutable: lowHashBefore === lowHashAfter,
+      lowHash: lowHashBefore,
+      highHash: canvasHash(high.beamDancheong.map),
+      sameBucketSharesCanvas: low.beamDancheong.map.image === lowTwin.beamDancheong.map.image,
+      separateTextureObjects: low.beamDancheong.map !== lowTwin.beamDancheong.map,
+      cache: dancheongSourceCacheStats(),
+    },
+    scope: ordinary,
+    lifecycle: {
+      buildingDisposed,
+      twinTextureDisposed,
+      palaceDisposed,
+      palaceCallerDisposed,
+      palaceDerivedDisposed,
+      templeDisposed,
+      templeCallerDisposed,
+      templeDerivedDisposed,
+    },
+    palace: {
+      defaultGrade: palaceDefault.userData.palaceHandle.dancheong.grade,
+      callsDefault: palaceCallsDefault,
+      callsHigh: palaceCallsHigh,
+      materialCountDefault: paletteMaterialCount(palaceDefault.userData.mats),
+      materialCountHigh: paletteMaterialCount(palaceProbe.userData.mats),
+    },
+    temple: {
+      mainGrade: templeMain?.userData.materials?.dancheong?.grade,
+      subsidiaryGrade: templeSubsidiary?.userData.materials?.dancheong?.grade,
+      domesticGrade: templeDomestic?.userData.materials?.dancheong?.grade,
+      paletteCount: templeProbe.userData.dancheongPaletteCount,
+      calls: templeCalls,
+      mergedCalls: templeMergedCalls,
+    },
+    programs: renderer.info.programs.length,
+    export: {
+      canvasMaps: exportCanvasMaps,
+      glbBytes: glb instanceof ArrayBuffer ? glb.byteLength : 0,
+    },
+  };
+}
+
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.info.reset();
+renderer.render(scene, camera);
+window.__DANCHEONG_DIAG = diagnostics;
+window.__DANCHEONG_READY = true;
+document.documentElement.dataset.dancheongReady = 'true';
+</script>
+</body>
+</html>

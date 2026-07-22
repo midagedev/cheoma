@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import { PRESETS } from '../params.js';
 import { buildBuilding } from '../builder/index.js';
-import { makeMaterials, canonicalizeSharedMaterials } from '../builder/palette.js';
+import {
+  makeDancheongVariant,
+  makeMaterials,
+  canonicalizeSharedMaterials,
+} from '../builder/palette.js';
+import { resolveDancheong } from '../builder/dancheong.js';
+import {
+  addMaterialResource,
+  collectObjectResources,
+  disposeObjectResources,
+} from '../core/three-resources.js';
 import { buildCorridor } from '../layout/corridor.js';
 import { buildGate } from '../layout/gate.js';
 import { buildFence } from '../layout/fence.js';
@@ -29,6 +39,17 @@ import { mergeStatic } from './instancing.js';
 //   corners SW→SE→NE→NW(로컬 +z=남) 는 시계방향(shoelace<0)이라 좌법선이 바깥 →
 //   중심 향(우법선)으로 뒤집으려면 -1. (시각 검증 완료.)
 const INNER = -1;
+const lifecycle = new WeakMap();
+
+function collectPaletteResources(palette) {
+  const materials = new Set();
+  const textures = new Set();
+  for (const value of Object.values(palette || {})) {
+    if (value?.isMaterial) addMaterialResource(value, materials, textures);
+    else if (value?.isTexture) textures.add(value);
+  }
+  return { materials, textures };
+}
 
 // 부속·소전각 배치용 처마 외연 반치수(로컬 AABB). buildBuilding 결과는 월대·처마·마루장식까지
 // 포함하므로, 이 실측 외연을 이격 산정 기준으로 써야 지붕이 본채·이웃·행각과 겹치지 않는다(#97).
@@ -239,8 +260,26 @@ function layGeumcheon(root, cx, cz, seed) {
   root.add(bridge);
 }
 
-export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial', seed = 5, mats, merge = true, presetOverrides = null, shareMats = true } = {}) {
-  const M = mats || makeMaterials('palace');
+export function buildPalaceCompound({
+  w, d, tier = 'hanyang', variant = 'axial', seed = 5, mats,
+  merge = true, presetOverrides = null, shareMats = true, dancheong = null,
+} = {}) {
+  const explicitDancheong = dancheong ? {
+    ...dancheong,
+    ...(dancheong.clarity != null ? { dancheongClarity: dancheong.clarity } : {}),
+    ...(dancheong.splendor != null ? { dancheongSplendor: dancheong.splendor } : {}),
+  } : {};
+  const requestedDancheong = resolveDancheong('palace', {
+    ...(mats?.dancheong || {}),
+    ...(presetOverrides || {}),
+    ...explicitDancheong,
+  });
+  const sameDancheong = mats?.dancheong
+    && mats.dancheong.clarityBucket === requestedDancheong.clarityBucket
+    && mats.dancheong.splendorBucket === requestedDancheong.splendorBucket;
+  const M = mats
+    ? (sameDancheong ? mats : makeDancheongVariant(mats, requestedDancheong))
+    : makeMaterials('palace', requestedDancheong);
   // #149 재질 공유 게이트: shareMats(기본 ON) 면 전 전각이 M 한 벌을 공유 + 시각 동일 재질 통일 →
   //   부감 병합(palaceMerged)이 전각 경계까지 무너진다(한양 궁 병합 392→61콜). false 면 구 동작
   //   (전각마다 makeMaterials·통일 없음) — A/B 측정·회귀 진단용.
@@ -248,7 +287,10 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
   const spec = tierSpec(tier);
   // 편집 오버라이드(#93): 전 전각 buildBuilding 프리셋에 일괄 적용 — 궁 전체 일관 반영.
   //   칸수/월대단수 등 일곽-구조 종속 키는 호출측(edit-schema)이 보내지 않는 규약.
-  const applyOv = (p) => (presetOverrides ? Object.assign(p, presetOverrides) : p);
+  const applyOv = (p) => Object.assign(p, presetOverrides || {}, {
+    dancheongClarity: requestedDancheong.dancheongClarity,
+    dancheongSplendor: requestedDancheong.dancheongSplendor,
+  });
   // 요청 궁역(w,d)이 있으면 존중하되, 스펙 축선이 들어갈 최소치로 클램프.
   const W = Math.max(w || spec.w, spec.w);
   const D = Math.max(d || spec.d, spec.d);
@@ -437,7 +479,32 @@ export function buildPalaceCompound({ w, d, tier = 'hanyang', variant = 'axial',
     tier, variant, seed,      // seed: 어댑터가 동일 궁을 presetOverrides 로 재생성할 때 필요(#93)
     regionW: W, regionD: D,
     areas: areaHandles,       // [{ role, group, hall, center, W, D }] — 일곽별 그룹(heroHandle 유사)
+    dancheong: requestedDancheong,
   };
 
+  lifecycle.set(root, {
+    disposed: false,
+    ownsPalette: !mats,
+    palette: M,
+    callerPaletteResources: mats ? collectPaletteResources(mats) : null,
+  });
+
   return root;
+}
+
+/** Dispose one reusable palace compound without invalidating caller-provided materials. */
+export function disposePalaceCompound(root) {
+  const state = root && lifecycle.get(root);
+  if (!state || state.disposed) return false;
+  state.disposed = true;
+  const resources = collectObjectResources(root);
+  const paletteResources = collectPaletteResources(state.palette);
+  for (const material of paletteResources.materials) resources.materials.add(material);
+  for (const texture of paletteResources.textures) resources.textures.add(texture);
+  if (!state.ownsPalette) {
+    for (const material of state.callerPaletteResources.materials) resources.materials.delete(material);
+    for (const texture of state.callerPaletteResources.textures) resources.textures.delete(texture);
+  }
+  disposeObjectResources(resources);
+  return true;
 }

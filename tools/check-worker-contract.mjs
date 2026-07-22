@@ -24,21 +24,22 @@ const expectedSceneHashes = {
   // solid and sinks every building foundation. #21 reserves a monotonically
   // graded stream valley and adds the visible five-lane water ribbon. #40 adds
   // metre-scale settlement relief to every tier; explicit river mode remains a
-  // separate non-golden scenario. Sync, real module Worker, and ?worker=0
-  // fallback stay byte-identical after every change.
-  village: '9cd05326:e012b95a:c0b94200:e834531e',
-  town: '296f8c9c:b1fe0ef2:6b84da75:237bd8e4',
-  capital: '651f0d5e:ba3d0a72:0bb68ec8:493d466a',
-  hanyang: '9021def6:b212e60a:0563a64e:9437a8de',
+  // separate non-golden scenario. #56 gives temple roles distinct, bounded
+  // dancheong palettes, which intentionally changes merged material grouping.
+  // Sync, real module Worker, and ?worker=0 fallback stay byte-identical.
+  village: 'c2a7d46c:0f6d9070:38a637e7:a0d1d56a',
+  town: 'c1a9e698:e0614e9a:605c5d32:5bb48640',
+  capital: '15836798:fb6e8d1e:c100bbd4:cc001e4e',
+  hanyang: '363f908e:35b5a258:5d9e8c8f:e1300546',
 };
 const expectedProxyHashes = {
   // Lintel/eave residential targets viewed upward from the shared yard eye height, plus
   // the variable temple bounds and its south-facing 26° telephoto framing.
-  // Scene bytes stay unchanged; this revision changes camera framing only.
-  village: '8a12bd3e',
-  town: '92d039ee',
-  capital: '3fc5b991',
-  hanyang: '103480c0',
+  // #56 adds the two public dancheong edit axes to palace/temple descriptors.
+  village: '9d335f2b',
+  town: 'dcec68f4',
+  capital: '076490b7',
+  hanyang: 'acc98190',
 };
 
 const server = await createServer({

@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { PRESETS } from '../params.js';
 import { buildBuilding } from '../builder/index.js';
-import { canonicalizeSharedMaterials, makeMaterials } from '../builder/palette.js';
+import {
+  canonicalizeSharedMaterials,
+  makeDancheongVariant,
+  makeMaterials,
+} from '../builder/palette.js';
+import {
+  resolveDancheong,
+  resolveTempleRoleDancheong,
+} from '../builder/dancheong.js';
 import { buildFence } from '../layout/fence.js';
 import { buildGate } from '../layout/gate.js';
 import { buildProp } from '../props/index.js';
@@ -22,6 +30,16 @@ function collectPaletteResources(palette) {
     else if (value?.isTexture) textures.add(value);
   }
   return { materials, textures };
+}
+
+function collectPalettesResources(palettes) {
+  const resources = { materials: new Set(), textures: new Set() };
+  for (const palette of palettes) {
+    const current = collectPaletteResources(palette);
+    for (const material of current.materials) resources.materials.add(material);
+    for (const texture of current.textures) resources.textures.add(texture);
+  }
+  return resources;
 }
 
 function makeCourtMaterial(role) {
@@ -157,11 +175,27 @@ function buildEnclosures(plan, mats) {
  * Caller-provided `mats` remain caller-owned; otherwise disposeTempleCompound()
  * releases the generated palette, derived materials, geometries, and textures.
  */
-export function buildTempleCompound(planOrOptions = {}, { mats } = {}) {
+export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}) {
   const plan = planOrOptions?.schemaVersion
     ? planOrOptions
     : planTempleCompound(planOrOptions);
-  const palette = mats || makeMaterials('temple');
+  const mainDancheong = resolveDancheong('temple', dancheong || mats?.dancheong || PRESETS.temple);
+  const palette = mats || makeMaterials('temple', mainDancheong);
+  const paletteByDancheong = new Map();
+  const paletteKey = (config) => `${config.clarityBucket}:${config.splendorBucket}`;
+  const paletteFor = (config) => {
+    const key = paletteKey(config);
+    if (!paletteByDancheong.has(key)) {
+      const sameAsBase = palette.dancheong
+        && paletteKey(palette.dancheong) === key;
+      paletteByDancheong.set(key, sameAsBase ? palette : makeDancheongVariant(palette, config));
+    }
+    return paletteByDancheong.get(key);
+  };
+  const hallPalette = (spec) => paletteFor(resolveTempleRoleDancheong(mainDancheong, spec));
+  const enclosurePalette = paletteFor(resolveTempleRoleDancheong(mainDancheong, {
+    role: 'entry-gate', formality: 'domestic',
+  }));
   const root = new THREE.Group();
   root.name = `temple-compound-${plan.variant}`;
 
@@ -176,12 +210,12 @@ export function buildTempleCompound(planOrOptions = {}, { mats } = {}) {
 
   const pathMaterial = new THREE.MeshStandardMaterial({ color: 0xaaa08d, roughness: 1, metalness: 0 });
   root.add(buildPaths(plan.paths, pathMaterial));
-  root.add(buildEnclosures(plan, palette));
+  root.add(buildEnclosures(plan, enclosurePalette));
 
   const buildings = new THREE.Group();
   buildings.name = 'temple-buildings';
   plan.buildings.forEach((spec, index) => {
-    buildings.add(buildHall(spec, (plan.seed + 0x100 + index * 17) >>> 0, palette));
+    buildings.add(buildHall(spec, (plan.seed + 0x100 + index * 17) >>> 0, hallPalette(spec)));
   });
   root.add(buildings);
 
@@ -213,12 +247,17 @@ export function buildTempleCompound(planOrOptions = {}, { mats } = {}) {
     width: plan.width,
     depth: plan.depth,
     plan,
+    dancheong: mainDancheong,
   };
+  root.userData.dancheongPaletteCount = paletteByDancheong.size;
   lifecycle.set(root, {
     disposed: false,
     ownsPalette: !mats,
-    palette,
-    paletteResources: collectPaletteResources(palette),
+    callerPaletteResources: mats ? collectPaletteResources(mats) : null,
+    // `palette` may not be selected by a sparse/custom plan (for example an
+    // enclosure-only harness), but an internally-created base palette is still
+    // owned by this compound and must be released with its role variants.
+    allPaletteResources: collectPalettesResources([palette, ...paletteByDancheong.values()]),
   });
   return root;
 }
@@ -228,12 +267,11 @@ export function disposeTempleCompound(root) {
   if (!state || state.disposed) return false;
   state.disposed = true;
   const resources = collectObjectResources(root);
-  if (state.ownsPalette) {
-    for (const material of state.paletteResources.materials) resources.materials.add(material);
-    for (const texture of state.paletteResources.textures) resources.textures.add(texture);
-  } else {
-    for (const material of state.paletteResources.materials) resources.materials.delete(material);
-    for (const texture of state.paletteResources.textures) resources.textures.delete(texture);
+  for (const material of state.allPaletteResources.materials) resources.materials.add(material);
+  for (const texture of state.allPaletteResources.textures) resources.textures.add(texture);
+  if (!state.ownsPalette) {
+    for (const material of state.callerPaletteResources.materials) resources.materials.delete(material);
+    for (const texture of state.callerPaletteResources.textures) resources.textures.delete(texture);
   }
   disposeObjectResources(resources);
   return true;

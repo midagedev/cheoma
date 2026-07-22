@@ -8,6 +8,7 @@ const checks = [
   './check-building-clearance.mjs',
   './check-cinematic-turns.mjs',
   './check-dof.mjs',
+  './check-dancheong-contract.mjs',
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',
   './check-road-contract.mjs',

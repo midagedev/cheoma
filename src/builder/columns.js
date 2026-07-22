@@ -69,7 +69,7 @@ export function buildColumns(P, L, M) {
   ];
   const choga = P.style === 'choga';
   for (const r of runs) {
-    // 창방·평방: 궁은 단청 색동 띠(맵 있음), 절은 무단청 목재(맵 없음).
+    // 창방·평방: 궁·사찰은 위계별 단청 source, 기와·초가는 단색 목재.
     const mat = M.beamDancheong.clone();
     if (M.beamDancheong.map) {
       mat.map = M.beamDancheong.map.clone();

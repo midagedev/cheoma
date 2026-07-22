@@ -7,7 +7,8 @@ import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const OUT = join(ROOT, 'shots');
+// 영구 shots/를 오염시키지 않는 회귀 증거는 CHEOMA_CAPTURE_DIR로 OS 임시 폴더에 쓴다.
+const OUT = process.env.CHEOMA_CAPTURE_DIR || join(ROOT, 'shots');
 mkdirSync(OUT, { recursive: true });
 
 const MIME = {
