@@ -36,7 +36,8 @@
 
 - `src/builder/opening-detail-plan.js`는 문/창, 크기, 창 하부 머름, 문짝 하부 `lowerPanel`, reveal, 프레임,
   문지방, 철물, primary entrance,
-  pivot과 footwear anchor를 Three 없이 불변 순수 데이터로 만든다. 같은 입력과 seed는 같은 JSON을 반환하고
+  pivot·footwear anchor와 고정 개구면 중심의 `focus` anchor를 Three 없이 불변 순수 데이터로 만든다. `focus`는
+  움직이는 문짝이나 문지방이 아니라 닫힌 개구 높이의 절반과 고정 reveal 면을 가리킨다. 같은 입력과 seed는 같은 JSON을 반환하고
   전역 `Math.random`을 쓰지 않는다. 공개 결과의 seed는 number/string으로 정규화되므로 BigInt·객체 seed를 받은
   경우에도 결과 전체를 `JSON.stringify`할 수 있고, 객체 키 순서는 stable seed identity에 영향을 주지 않는다.
 - 다른 프로젝트와 앱의 후속 interaction은 `src/api/opening-detail.js`의 최소 façade를 사용한다. 내부 builder는
@@ -122,6 +123,18 @@
   제거한다. persistent overlay도 다시 focus될 때 닫힌 새 runtime을 얻는다. listener와 GPU resource의 수명은
   builder/handle 소유권 밖으로 새지 않는다.
 
+### 4.1 근경 DoF 의미 초점
+
+- 선택 주거의 근경 DoF는 `primary-opening-anchor`가 가진 불변 `focus`를 세계점으로 바꿔 사용한다. 카메라
+  `controls.target`은 구도와 OrbitControls를 계속 소유하지만 초점면을 대신하지 않으며, 경첩 운동 중인 active leaf도
+  초점점을 움직이지 않는다. 그래서 문짝을 열거나 닫아도 문틀·창살·철물이 놓인 주출입 개구면이 선명하게 남는다.
+- 세계점 탐색과 행렬 적용은 focus overlay가 생기거나 교체되는 진입·필지 hop·재건축·재굴림에서만 한 번 수행한다.
+  정착 render loop에는 overlay traversal, raycast, 초점용 객체 할당이 없다. focus-in은 현재 조준점에서 도착 문까지,
+  hop은 출발 문에서 도착 문까지 같은 camera easing으로 보간하고, focus-out은 DoF 양이 0이 될 때까지 출발 문을 고정한다.
+- 독립 주거처럼 순수 primary anchor가 정확히 하나일 때만 의미점을 채택한다. 병합 뒤 주 전각 역할을 확정할 수 없는
+  궁·사찰·관아 복합체나 잘못된 anchor는 `controls.target`으로 fail closed하며 임의의 문을 고르지 않는다. 이 경로는
+  카메라 구도, DoF kernel, 조명, LOD, 문 상호작용을 바꾸거나 GPU resource·pass·material·draw call을 추가하지 않는다.
+
 ## 5. LOD·재질·수명 계약
 
 - MID는 기존 `door`·`hanji`·`salchang` 텍스처와 envelope 목재를 유지한다. 프레임·문지방은 기존
@@ -146,7 +159,8 @@
 
 - `npm run check:opening-detail`: 순수 결정론, 불변 데이터, vocabulary, 창 머름과 문 lowerPanel의 배타성,
   frame·threshold·유형별 철물 범위,
-  primary pivot/footwear anchor와 전역 RNG 비의존을 검사한다.
+  primary pivot/footwear/focus anchor와 전역 RNG 비의존을 검사한다. focus는 개구면의 고정 중심이며 door leaf 운동과
+  독립인지도 확인한다.
 - `npm run check:threshold-life`: dry/wet 종류, 실물 기반 크기 범위, 문지방·출입 폭·문설주 clearance, preview
   placement signature, JSON-safe deep freeze, 객체·BigInt seed 결정론, 전역 RNG 비의존을 검사한다.
 - `npm run check:door-motion`: 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠, 중간 반전 무스냅,
@@ -179,6 +193,9 @@
   않는 의미 기반 범위 제한을 검사한다.
 - 시각 판정은 같은 seed·카메라·시간의 전후 PNG를 직접 비교한다. 프레임이 창호지를 과도하게 가리거나 검은
   테두리로만 읽히지 않는지, 문고리가 원경에서 노이즈가 되지 않는지, 벽과 겹쳐 깜빡이지 않는지 본다.
+- `npm run check:dof:app`은 실제 focus-in·필지 hop·focus-out과 재건축에서 조준점→문·문→문·출발 문 고정 수명,
+  복합체 fallback, 정착 프레임의 캐시 불변을 검사한다. `npm run shoot:door-dof`는 같은 주거·카메라·시간에서 기존
+  조준 깊이와 의미 문 깊이를 A/B 촬영해 primary 문양과 철물의 선명도, 뒤쪽 광원의 원형 보케를 직접 판정한다.
 - 2026-07-22 고정 town ㄷ자 컷의 측정은 calls 842→849, triangles 5,841,310→5,891,054, textures 44→44였다.
   같은 초가 컷은 calls 501→505, textures 26→26이었다. Headless 시간은 성능 근거로 쓰지 않는다.
 - active leaf 분리와 가변 residential plan 통합 뒤 production opening 예산은 일반 기와 324+24+144,

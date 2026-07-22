@@ -129,6 +129,7 @@ export function planOpeningDetail(input = {}) {
   const hingeSide = (hash & 1) === 0 ? -1 : 1;
   let pivot = null;
   let footwearAnchor = null;
+  let focusAnchor = null;
   if (primary) {
     const leafWidth = width / leafCount;
     // The moving leaf ends exactly on its hinge axis. Keeping the pivot on the
@@ -204,6 +205,12 @@ export function planOpeningDetail(input = {}) {
         ? footwear.clearSide
         : null,
     };
+    // Optical focus belongs to the fixed portal plane, never the moving leaf.
+    focusAnchor = {
+      u: 0,
+      y: height * 0.5,
+      outward: face,
+    };
   }
 
   return deepFreeze({
@@ -231,6 +238,6 @@ export function planOpeningDetail(input = {}) {
     frame: { width: frameWidth, depth: frameDepth, parts: frameParts },
     threshold,
     hardware,
-    anchors: { pivot, footwear: footwearAnchor },
+    anchors: { pivot, footwear: footwearAnchor, focus: focusAnchor },
   });
 }

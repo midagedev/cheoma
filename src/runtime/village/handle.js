@@ -691,6 +691,51 @@ export function createVillageHandle(opts, seed, plan, group) {
     };
   }
 
+  // The selected FULL-detail subtree is the sole source for architectural
+  // semantics that optimized aerial instances intentionally discard. Keep the
+  // lookup independent from primaryDoorById: optical focus belongs to the
+  // fixed portal even when product door interaction is unavailable or moving.
+  function activeDetailRoot(parcelId) {
+    if (parcelId === 'palace') return palaceOverride?.group || null;
+    if (parcelId === 'temple') return templeOverride?.group || null;
+    return heroOverrides.get(parcelId)?.group || overrideById.get(parcelId) || null;
+  }
+
+  const architecturalFocusScratch = new THREE.Vector3();
+
+  // Event-time resolver for focus-in/hop/rebuild transitions. Callers cache
+  // the returned world point; the render loop must not traverse the subtree.
+  // Compounds with zero or multiple authored primaries fail closed so an
+  // arbitrary hall can never become the optical focus by child order.
+  function architecturalFocusPoint(parcelId, target) {
+    const root = activeDetailRoot(parcelId);
+    if (!root || !target?.copy) return null;
+
+    let anchor = null;
+    let count = 0;
+    root.traverse((object) => {
+      if (object.name !== 'primary-opening-anchor') return;
+      count++;
+      if (count === 1) anchor = object;
+    });
+    if (count !== 1 || !anchor) return null;
+
+    const focus = anchor.userData?.openingDetailPlan?.anchors?.focus;
+    if (!focus
+      || !Number.isFinite(focus.u)
+      || !Number.isFinite(focus.y)
+      || !Number.isFinite(focus.outward)) return null;
+
+    root.updateWorldMatrix(true, true);
+    architecturalFocusScratch
+      .set(focus.u, focus.y, focus.outward)
+      .applyMatrix4(anchor.matrixWorld);
+    if (!Number.isFinite(architecturalFocusScratch.x)
+      || !Number.isFinite(architecturalFocusScratch.y)
+      || !Number.isFinite(architecturalFocusScratch.z)) return null;
+    return target.copy(architecturalFocusScratch);
+  }
+
   const api = {
     group,
     plan,
@@ -706,9 +751,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 검증용(#48): 현재 편집 오버레이(정규 override 또는 특수 hero override)의 월드 바운딩 크기.
     //   편집 전후로 비교해 지오가 실제로 바뀌었는지 정량 확인(스크린샷 육안 검수와 병행).
     overlayBox(parcelId) {
-      const g = parcelId === 'palace' ? (palaceOverride && palaceOverride.group)
-        : parcelId === 'temple' ? (templeOverride && templeOverride.group)
-        : heroOverrides.get(parcelId)?.group || overrideById.get(parcelId);
+      const g = activeDetailRoot(parcelId);
       if (!g) return null;
       g.updateWorldMatrix(true, true);
       const b = new THREE.Box3().setFromObject(g);
@@ -719,9 +762,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 검증·후속 interaction용: base 인스턴싱은 순수 anchor Group을 의도적으로 버리고,
     // 선택된 비인스턴스 overlay가 rebuild될 때 정확히 하나를 다시 만든다.
     openingDetailState(parcelId) {
-      const root = parcelId === 'palace' ? (palaceOverride && palaceOverride.group)
-        : parcelId === 'temple' ? (templeOverride && templeOverride.group)
-        : heroOverrides.get(parcelId)?.group || overrideById.get(parcelId);
+      const root = activeDetailRoot(parcelId);
       if (!root) return null;
       const counts = {
         anchor: 0, panel: 0, frameBatch: 0, hardwareBatch: 0, thresholdLifeBatch: 0,
@@ -762,6 +803,8 @@ export function createVillageHandle(opts, seed, plan, group) {
         door: primaryDoorById.get(parcelId)?.snapshot() || null,
       };
     },
+
+    architecturalFocusPoint,
 
     primaryDoorState(parcelId) {
       return primaryDoorById.get(parcelId)?.snapshot() || null;
@@ -1418,7 +1461,8 @@ export function createVillageHandle(opts, seed, plan, group) {
   // dispose 이후의 handle은 완전히 불활성이다. 공개 메서드를 한 번 감싸면 새 API가 추가돼도
   // enter/debug/detail 경로가 자원을 다시 만들거나 씬에 재부착하는 종료 후 누수를 자동으로 막는다.
   const nullAfterDispose = new Set([
-    'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'getPickProxy', 'raycast',
+    'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'architecturalFocusPoint',
+    'getPickProxy', 'raycast',
     'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
     'primaryDoorState', 'raycastPrimaryDoor', 'togglePrimaryDoor', 'seekPrimaryDoor',
     'primaryDoorWorldPoints', 'primaryDoorWorldFrame',

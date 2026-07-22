@@ -62,6 +62,7 @@
     "check:worker": "node tools/check-worker-contract.mjs",
     "shoot:bokeh": "node tools/shoot-bokeh-fixture.mjs",
     "shoot:door": "node tools/shoot-door-interaction.mjs",
+    "shoot:door-dof": "node tools/shoot-door-dof.mjs",
     "shoot:sky": "node tools/shoot-sky-atmosphere.mjs",
     "shoot:winter": "node tools/check-winter-app.mjs",
     "shoot:ink": "node tools/check-ink-app.mjs",

@@ -35,8 +35,13 @@ invariant(randomCalls === 0, 'opening plan touched global Math.random');
 invariant(JSON.stringify(input) === inputSnapshot, 'opening plan mutated caller input');
 invariant(JSON.stringify(first) === JSON.stringify(second), 'same opening seed is not byte-stable');
 invariant(Object.isFrozen(first) && Object.isFrozen(first.frame.parts), 'opening plan is mutable');
-invariant(first.id !== planOpeningDetail({ ...input, seed: 'contract:18' }).id,
+invariant(Object.isFrozen(first.anchors) && Object.isFrozen(first.anchors.focus),
+  'primary focus anchor is mutable');
+const differentSeed = planOpeningDetail({ ...input, seed: 'contract:18' });
+invariant(first.id !== differentSeed.id,
   'opening seed does not reach stable identity');
+invariant(JSON.stringify(first.anchors.focus) === JSON.stringify(differentSeed.anchors.focus),
+  'semantic focus anchor depends on the cosmetic opening seed');
 
 const objectSeed = Object.freeze({
   z: 19n,
@@ -72,8 +77,12 @@ invariant(first.hardware.filter((part) => part.kind === 'pivot-cap').length === 
   'palace-only visible pivot caps leaked onto a civilian door');
 invariant(first.hardware.filter((part) => part.kind === 'ring-handle').length === 1,
   'primary door ring handle drifted');
-invariant(first.anchors.pivot && first.anchors.footwear,
-  'primary entrance lost pivot or footwear anchor');
+invariant(first.anchors.pivot && first.anchors.footwear && first.anchors.focus,
+  'primary entrance lost pivot, footwear, or focus anchor');
+invariant(first.anchors.focus.u === 0
+    && Math.abs(first.anchors.focus.y - first.height * 0.5) < EPS
+    && Math.abs(first.anchors.focus.outward - first.reveal.face) < EPS,
+  'primary focus escaped the fixed opening center');
 invariant(Math.abs(Math.abs(first.anchors.pivot.u) - first.width * 0.5) < EPS,
   'door pivot escaped the opening');
 invariant(Math.abs(first.anchors.pivot.leafWidth - first.width / first.leafCount) < EPS,
@@ -88,9 +97,18 @@ invariant(first.anchors.footwear.clearSide === -1,
   'footwear landing side was coupled to the moving leaf');
 const narrower = planOpeningDetail({ ...input, width: 1.28 });
 const wider = planOpeningDetail({ ...input, width: 2.42 });
+const taller = planOpeningDetail({ ...input, height: 2.7 });
 invariant(narrower.anchors.pivot.hingeSide === first.anchors.pivot.hingeSide
     && wider.anchors.pivot.hingeSide === first.anchors.pivot.hingeSide,
   'continuous width editing flips the primary hinge side');
+invariant(narrower.anchors.focus.u === 0 && wider.anchors.focus.u === 0
+    && Math.abs(narrower.anchors.focus.y - first.anchors.focus.y) < EPS
+    && Math.abs(wider.anchors.focus.y - first.anchors.focus.y) < EPS,
+  'continuous width editing moved the fixed opening focus');
+invariant(Math.abs(taller.anchors.focus.y - taller.height * 0.5) < EPS
+    && taller.anchors.focus.y > first.anchors.focus.y
+    && Math.abs(taller.anchors.focus.outward - taller.reveal.face) < EPS,
+  'height editing did not keep focus at the fixed opening center');
 invariant(first.meoreum.height === 0, 'door passage incorrectly acquired a window meoreum');
 invariant(Math.abs(first.lowerPanel.height - input.lowerPanelHeight) < EPS,
   'door lower-panel height drifted');
@@ -109,7 +127,8 @@ for (const part of [...first.frame.parts, ...first.hardware]) {
 const secondary = planOpeningDetail({ ...input, primary: false });
 invariant(!secondary.primary && secondary.hardware.length === 0,
   'secondary door acquired repeated ironwork');
-invariant(secondary.anchors.pivot === null && secondary.anchors.footwear === null,
+invariant(secondary.anchors.pivot === null && secondary.anchors.footwear === null
+    && secondary.anchors.focus === null,
   'secondary door acquired interaction/life anchors');
 
 for (const style of OPENING_DETAIL_STYLES) {
@@ -130,7 +149,8 @@ for (const style of OPENING_DETAIL_STYLES) {
       && windowPlan.frame.parts.some((part) => part.kind === 'meoreum-rail')
       && windowPlan.meoreum.apronBottomY < windowPlan.meoreum.apertureSillY,
   `${style} window lost its meoreum apron/rail below the aperture sill`);
-  invariant(windowPlan.anchors.pivot === null && windowPlan.anchors.footwear === null,
+  invariant(windowPlan.anchors.pivot === null && windowPlan.anchors.footwear === null
+      && windowPlan.anchors.focus === null,
     `${style} window acquired entrance anchors`);
 }
 

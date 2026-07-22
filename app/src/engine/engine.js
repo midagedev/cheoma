@@ -362,8 +362,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // 카메라 트윈(선택 포커스·해제·마을 돌리인/아웃). 진행 중이면 매 프레임 lerp.
   //   opts.fov 지정 시 화각도 함께 보간(광각 부감 46 ↔ 망원 필지 20). opts.dofAnchor 는 전환 중 의미 있는
-  //   월드 초점점을 고정한다. 생략하면 보간 중인 controls.target(항상 화면 앞)을 따라가며, opts.dofAmount 는
-  //   현재 강도에서 목표값까지 단조 보간한다.
+  //   월드 초점점을 고정하고, dofAnchorFrom/To 는 같은 이즈드 진행도로 개구부 A→B 초점면을 옮긴다.
+  //   생략하면 보간 중인 controls.target(항상 화면 앞)을 따라가며, opts.dofAmount 는 현재 강도에서
+  //   목표값까지 단조 보간한다.
   //   opts.onDone 은 도착 콜백(마을 도착 시 편집 패널 슬라이드 인 등).
   let tween = null;
   let revealCamera = null;
@@ -374,13 +375,22 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   function tweenTo(pos, target, dur = 0.95, {
-    fov, referenceFov, onDone, onProgress, dofAnchor = null, dofAmount = null,
+    fov, referenceFov, onDone, onProgress,
+    dofAnchor = null, dofAnchorFrom = null, dofAnchorTo = null, dofSource = null,
+    dofAmount = null,
     focusComposition: nextFocusComposition = null,
   } = {}) {
     revealCamera?.stop('replaced', { notify: false });
     cinematic.stop();
     const currentReferenceFov = referenceFovForCamera(camera);
     const changesLens = Number.isFinite(fov) || Number.isFinite(referenceFov);
+    const hasDofPath = !!(dofAnchor?.clone || dofAnchorFrom?.clone || dofAnchorTo?.clone);
+    const pathFrom = dofAnchor?.clone?.()
+      || dofAnchorFrom?.clone?.()
+      || (hasDofPath ? controls.target.clone() : null);
+    const pathTo = dofAnchor?.clone?.()
+      || dofAnchorTo?.clone?.()
+      || (hasDofPath ? target.clone() : null);
     tween = {
       p0: camera.position.clone(), p1: pos.clone(),
       t0: controls.target.clone(), t1: target.clone(),
@@ -391,7 +401,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         : (Number.isFinite(fov) ? referenceVillageFov(fov) : currentReferenceFov),
       changesLens,
       dur, e: 0, onDone, onProgress,
-      dofAnchor: dofAnchor?.clone?.() || null,
+      dofPath: hasDofPath ? {
+        from: pathFrom,
+        to: pathTo,
+        current: pathFrom.clone(),
+        source: dofSource || 'primary-opening-transition',
+      } : null,
       dof0: post.dof.amount,
       dof1: Number.isFinite(dofAmount) ? clamp01(dofAmount) : null,
       composition0: focusComposition,
@@ -404,6 +419,39 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   const bokehPass = post.bokehPass;
   let dofTargetDepth = post.dof.focus;
+  // 근경 DoF 의미점은 현재 FULL overlay가 교체되는 이벤트에서만 한 번 계산한다.
+  // Object3D나 움직이는 문짝을 보존하지 않고 rest-pose 월드 좌표만 복사하므로 문 여닫기·조립에
+  // 초점면이 호흡하지 않으며, 렌더 루프에는 traversal·raycast·할당이 추가되지 않는다.
+  const semanticDofAnchor = new THREE.Vector3();
+  let semanticDofParcel = null;
+  let semanticDofWrites = 0;
+  let debugDofAnchor = null;
+
+  function clearSemanticDofAnchor() {
+    semanticDofParcel = null;
+  }
+
+  function resolveArchitecturalDofAnchor(parcelId, target) {
+    return parcelId && village.handle?.architecturalFocusPoint?.(parcelId, target)
+      ? target
+      : null;
+  }
+
+  function setSemanticDofAnchor(parcelId, point) {
+    if (!parcelId || !point) {
+      clearSemanticDofAnchor();
+      return null;
+    }
+    semanticDofAnchor.copy(point);
+    semanticDofParcel = parcelId;
+    semanticDofWrites++;
+    return semanticDofAnchor;
+  }
+
+  function refreshSemanticDofAnchor(parcelId) {
+    const point = resolveArchitecturalDofAnchor(parcelId, semanticDofAnchor);
+    return setSemanticDofAnchor(parcelId, point);
+  }
 
   // 트윈 핸드오프용 — OrbitControls 관성(회전 _sphericalDelta·팬 _panOffset·줌 _scale)을 0 으로.
   // three 0.185 인스턴스 필드 직접 리셋(공개 stop() 이 없어 이게 표준 패턴): 전환 중 사용자
@@ -499,10 +547,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 렌더 루프 ----------
-  const activeDofAnchor = () => tween?.dofAnchor || controls.target;
+  const activeDofAnchor = () => (
+    debugDofAnchor
+    || tween?.dofPath?.current
+    || (semanticDofParcel ? semanticDofAnchor : controls.target)
+  );
+  const activeDofSource = () => (
+    debugDofAnchor ? 'debug'
+      : tween?.dofPath?.source
+        || (semanticDofParcel ? 'primary-opening' : 'controls-target')
+  );
 
   function debugDofState() {
-    const anchorDepth = post.dof.depthAt(activeDofAnchor());
+    const anchor = activeDofAnchor();
+    const anchorDepth = post.dof.depthAt(anchor);
     return {
       enabled: post.dof.enabled,
       amount: post.dof.amount,
@@ -516,11 +574,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       bokehRadiusScale: bokehPass.uniforms.bokehRadiusScale.value,
       fov: camera.fov,
       anchorDepth,
+      anchorSource: activeDofSource(),
+      anchorWorld: anchor.toArray(),
+      semanticParcel: semanticDofParcel,
+      semanticWrites: semanticDofWrites,
       error: anchorDepth == null ? null : Math.abs(post.dof.focus - anchorDepth),
       depthExcluded: bokehPass.depthExcludedCount,
       depthDithered: bokehPass.depthDitheredCount,
       tweenProgress: tween ? clamp01(tween.e / tween.dur) : null,
-      anchored: !!tween?.dofAnchor,
+      anchored: activeDofSource() !== 'controls-target',
     };
   }
 
@@ -576,6 +638,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.position.lerpVectors(active.p0, active.p1, k);
     }
     controls.target.lerpVectors(active.t0, active.t1, k);
+    active.dofPath?.current.lerpVectors(active.dofPath.from, active.dofPath.to, k);
     // 위치·타깃과 함께 시선 방향도 매 프레임 연속 갱신한다. OrbitControls.update() 는 트윈 중
     // 게이트로 스킵되므로 여기서 직접 바라보게 해 종료 프레임의 방향 스냅을 막는다.
     if (!active.noFix) camera.lookAt(controls.target);
@@ -1269,6 +1332,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const swap = (h) => {
       village.__outerR = null;   // 마을 외곽 실반경 캐시 리셋(#80)
       focusRing.clear();         // 마을 재구성 → 근접 링 해제(오버레이 폐기됨)
+      clearSemanticDofAnchor();
       if (village.handle) { village.handle.exitVillageMode({ scene, building, ground, env }); village.handle.dispose(); }
       hoverParcel = null;
       village.handle = h;
@@ -1324,6 +1388,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 단일건물 날씨 파티클은 원점(숨은 본채)에 몰려 부감에 튀므로 억제(상태값은 유지).
     weatherRef.setWeather('clear');
     village.active = true; village.selected = null; village.transitioning = false;
+    clearSemanticDofAnchor();
     setFocusComposition(0);
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
@@ -1343,6 +1408,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     cancelVillageWave();
     stopHeroAsm();                                   // 진행 중 종가 조립·타이머 정리
     focusRing.clear();
+    clearSemanticDofAnchor();
     if (village.selected) village.handle.hideParcelDetail(village.selected);   // 오버레이(정규/특수) 해제
     else village.handle?.hideHeroDetail?.();
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
@@ -1463,10 +1529,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //   대기 중 transitioning=true 라 재클릭·줌 감시자 봉인 유지. 게이트 통과 전 상태가 바뀌면(취소·전환) 중단.
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== parcelId) return;
+      // 예열 중 live rebuild가 같은 필지 root를 교체할 수 있으므로 현재 overlay에서 늦게 해석한다.
+      const openingFocus = resolveArchitecturalDofAnchor(parcelId, new THREE.Vector3());
+      if (openingFocus) setSemanticDofAnchor(parcelId, openingFocus);
+      else clearSemanticDofAnchor();
       tweenTo(f.position, f.target, FOCUS_IN_DUR, {
         fov: f.fov, referenceFov: f.referenceFov,
         focusComposition: 1,
-        dofAnchor: f.target, dofAmount: 1,                         // 선택 필지 축깊이 고정 + 0→1 페이드
+        dofAnchorFrom: openingFocus ? controls.target : null,
+        dofAnchorTo: openingFocus,
+        dofSource: 'primary-opening-transition',
+        dofAmount: 1,                                             // 화면 target→고정 주출입문 + 0→1 페이드
         onProgress: (k) => emit('villageFocusMorph', k),         // 부감→집 패널 모프(0→1)
         onDone: () => {
           village.transitioning = false;
@@ -1491,6 +1564,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!fromId || toId === fromId) return;                       // 부감(미focus)이거나 같은 필지면 무효(재클릭 no-op)
     const pr = village.handle.getPickProxy(toId);
     if (!pr) return;
+    let fromOpeningFocus = null;
+    if (semanticDofParcel === fromId) fromOpeningFocus = semanticDofAnchor.clone();
+    else fromOpeningFocus = resolveArchitecturalDofAnchor(fromId, new THREE.Vector3());
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     stopHeroAsm();                                                // 진행 중 조립(리플레이 등) 정리
     // B 를 풀디테일 오버레이로 선표시(도착 시 근경엔 B 완성). A 오버레이는 도착까지 유지(팝 은닉).
@@ -1510,11 +1586,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #128 reveal 게이트: hop 돌리 시작을 B 오버레이 셰이더 링크 완료(cap 상한)에 묶어 첫 렌더 스톨 방지.
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== toId) return;
+      // 예열 중 교체된 목적지 root의 좌표만 커밋해 폐기된 Object3D 의미점이 되살아나지 않게 한다.
+      const toOpeningFocus = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
+      if (toOpeningFocus) setSemanticDofAnchor(toId, toOpeningFocus);
+      else clearSemanticDofAnchor();
+      const semanticTransition = !!(fromOpeningFocus || toOpeningFocus);
       tweenTo(f.position, f.target, FOCUS_HOP_DUR, {
-        // 목적지 B가 출발 카메라 뒤에 있을 수 있다. 보이지 않는 B를 고정 추적하면 시야평면을 통과할 때
-        // near→원거리 초점 점프가 생기므로, 생략된 dofAnchor가 보간 controls.target(A→B)을 따라가게 한다.
+        // 카메라·시선과 같은 진행도로 A의 고정 개구면→B의 고정 개구면을 보간한다. 의미 anchor가
+        // 없는 복합체 쪽 끝만 해당 controls.target으로 폴백해 near-plane 초점 점프를 막는다.
         fov: f.fov, referenceFov: f.referenceFov,
         focusComposition: 1,
+        dofAnchorFrom: semanticTransition ? (fromOpeningFocus || controls.target) : null,
+        dofAnchorTo: semanticTransition ? (toOpeningFocus || f.target) : null,
+        dofSource: 'primary-opening-transition',
         onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
         onDone: () => {
           village.transitioning = false;
@@ -1537,7 +1621,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     stopHeroAsm();                                   // 진행 중 조립 정리
     focusRing.clear();                               // focus-out → 근접 앰비언스 페이드아웃(#79)
     const parcelId = village.selected;
-    const departingFocus = parcelId
+    const departingSemantic = !!(parcelId && semanticDofParcel === parcelId);
+    const departingFocus = departingSemantic
+      ? semanticDofAnchor
+      : parcelId
       ? village.handle?.getPickProxy(parcelId)?.cameraFraming?.target || controls.target
       : controls.target;
     village.selected = null; village.transitioning = true;
@@ -1547,7 +1634,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     tweenTo(f.pos, f.target, FOCUS_OUT_DUR, {
       fov: f.fov, referenceFov: f.referenceFov,
       focusComposition: 0,
-      dofAnchor: departingFocus, dofAmount: 0,
+      dofAnchor: departingFocus,
+      dofSource: departingSemantic ? 'primary-opening-transition' : 'controls-target',
+      dofAmount: 0,
       onProgress: (k) => emit('villageFocusMorph', 1 - k),   // 집→부감 패널 모프(1→0)
       onDone: () => {
         village.transitioning = false;
@@ -1559,6 +1648,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         if (parcelId) setTimeout(() => { if (!village.selected && village.active) village.handle.highlightParcel(parcelId, false); }, 2000);
       },
     });
+    // focus-out 트윈이 출발점을 값으로 복사했으므로 폐기될 overlay의 의미 좌표는 즉시 놓는다.
+    clearSemanticDofAnchor();
     emit('villageReturn', { parcelId });
   }
 
@@ -1666,6 +1757,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.selected = heroId;
     setPostFocus(true);                                 // 종가 클로즈업 랜딩 → rim/flare ON
     const g = village.handle.showHeroDetail(heroId);   // 풀디테일 오버레이(원본 종가 가림)
+    refreshSemanticDofAnchor(heroId);                  // 조립 전 rest-pose의 고정 주출입문 월드점
     if (g) warmShaders(g);   // 종가 컴파운드 오버레이 서브트리만 프리컴파일(#117) — 랜딩 조립 첫 렌더 컴파일 스톨 흡수(타이틀 마스킹 구간)
     // 종가 클로즈업 프레이밍으로 스냅(타이틀이 화면을 덮는 동안 세팅 → 페이드 아웃되면 조립이 보임)
     const pr = village.handle.getPickProxy(heroId);
@@ -1784,6 +1876,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!pr) return;
     let detail = village.handle.focusAssembly(id);           // 현 오버레이(편집 보존)
     if (!detail) { const d = village.handle.showParcelDetail(id); if (!d) return; detail = d; }
+    refreshSemanticDofAnchor(id);                            // replay가 새 root를 만든 경우에도 원자 갱신
     const dur = detail.compound ? HERO_ASSEMBLE_DUR : 3.0;   // 정규 집은 짧게
     village.transitioning = true;
     lastActivity = performance.now() - ORBIT_IDLE_MS - 1000; // 조립 시작 즉시 카메라 선회
@@ -1815,6 +1908,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!id) return;
     const detail = village.handle.rerollParcel(id);
     if (!detail) return;
+    refreshSemanticDofAnchor(id);                    // 폐기된 root 좌표를 새 overlay 의미점으로 원자 교체
     if (detail.group) warmShaders(detail.group);   // 신규 서브트리만 병렬 링크. 아래 베일+카메라 호가 잔여 준비를 가린다.
     const pr = village.handle.getPickProxy(id);
     const spec = detail.spec || pr?.buildingSpec;
@@ -1900,6 +1994,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 진행 중 focus/조립 흔적 정리(부감 상태에서 호출되지만 방어)
     stopHeroAsm();
     if (village.selected) { focusRing.clear(); village.handle.hideParcelDetail(village.selected); village.selected = null; }
+    clearSemanticDofAnchor();
     setFocusComposition(0);
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     village.reveal = null;    // 진입 reveal과 웨이브 fog가 같은 scene.fog를 동시에 소유하지 않게 한다.
@@ -2247,6 +2342,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         Object.assign(village.opts, partial);
         if (village.active) {
           village.selected = null; village.transitioning = false;
+          clearSemanticDofAnchor();
           setFocusComposition(0);
           setPostFocus(false);
           // #123: 규모커밋은 비동기 빌드(forest 워커) — 구 마을 유지 중 부감 프레이밍은 새 핸들 준비 시(onReady).
@@ -2259,6 +2355,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         village.seed = newSeed();
         if (village.active) {
           village.selected = null; village.transitioning = false;
+          clearSemanticDofAnchor();
           setFocusComposition(0);
           setPostFocus(false);
           buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); });
@@ -2342,7 +2439,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           // patch before their first visible frame and warm only this replacement
           // subtree, otherwise an unpatched physical+depth pair links on demand.
           warmShaders(g);
-          if (village.selected === id) attachFocusRing(g);
+          if (village.selected === id) {
+            refreshSemanticDofAnchor(id);
+            attachFocusRing(g);
+          }
         }
         return g;
       },
@@ -2710,6 +2810,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugInk: () => inkModeRuntime.debugState(),
     debugInkPbrAwake: (awake) => inkModeRuntime.debugSetPbrAwake(awake),
     debugDof: debugDofState,
+    debugSetDofAnchor: (value) => {
+      debugDofAnchor = value == null ? null : Array.isArray(value)
+        ? new THREE.Vector3(value[0], value[1], value[2])
+        : new THREE.Vector3(value.x, value.y, value.z);
+      return debugDofState();
+    },
     debugDofSeek: debugSeekDofTween,
     debugArchitecturalReveal: () => {
       const actual = new THREE.Vector3();
@@ -2729,7 +2835,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugArchitecturalRevealSeek: (progress, options) => {
       const sampled = revealCamera.seek(progress, options);
       if (!sampled) return null;
-      if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(controls.target);
+      if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
       return controller.debugArchitecturalReveal();
     },
     debugRenderDofFrame: () => { renderFrame(0); return debugDofState(); },
@@ -2776,6 +2882,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       village.waveBuild = null;
       village.active = false;
       village.selected = null;
+      clearSemanticDofAnchor();
       village.transitioning = false;
       village.reveal = null;
       village.heroAsm = null;
