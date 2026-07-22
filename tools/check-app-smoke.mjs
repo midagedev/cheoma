@@ -59,6 +59,11 @@ try {
       && reference.text.includes('ㅡ·ㄱ·ㄷ·ㅁ')
       && reference.links.some((url) => url.includes('hanokdb.kr/theology/sub_02')),
   'National Hanok Center plan evidence renders in Product References');
+  pass(reference.text.includes('출입용 호와 채광·조망·환기용 창')
+      && reference.text.includes('창 하부 머름 apron/rail')
+      && reference.text.includes('lowerPanel')
+      && reference.links.some((url) => url.includes('hanokdb.kr/theology/sub_04')),
+  'National Hanok Center opening facts and applied lightweight grammar render in Product References');
   pass(reference.text.includes('법적 상한·규범')
       && reference.text.includes('17배 필지 비례')
       && reference.links.some((url) => url.includes('contents.history.go.kr/front/km/view.do')),
@@ -132,6 +137,16 @@ try {
       mirrorX: mirrorStats?.mirrorX ?? null,
       lengths: decomps.map((decomp) => decomp.length),
       shared: decomps.map((decomp) => decomp.filter((entry) => canonical.has(entry.material)).length),
+      hardwareEntries: decomps.map((decomp) => decomp.filter((entry) => (
+        entry.material?.userData?.paletteKey === 'hardware'
+      )).length),
+      hardwareMaterials: new Set(decomps.flatMap((decomp) => decomp
+        .filter((entry) => entry.material?.userData?.paletteKey === 'hardware')
+        .map((entry) => entry.material))).size,
+      hardwareEnvelope: decomps.some((decomp) => decomp.some((entry) => (
+        entry.material?.userData?.paletteKey === 'hardware'
+          && entry.material?.userData?.lodEnvelope === true
+      ))),
       materials: allMaterials.size,
       textures: allTextures.size,
     };
@@ -148,6 +163,12 @@ try {
     && diversityRuntime.textures <= 60;
   pass(semanticSharing,
     `single/U topology reuses semantic palette resources (${JSON.stringify(diversityRuntime)})`);
+  pass(
+    diversityRuntime.hardwareEntries.every((count) => count === 1)
+      && diversityRuntime.hardwareMaterials === 1
+      && !diversityRuntime.hardwareEnvelope,
+    `one shared ironwork group remains FULL-only across house topology (${JSON.stringify(diversityRuntime)})`,
+  );
 
   await page.evaluate((parcelId) => {
     const engine = window.__engine;
@@ -158,11 +179,21 @@ try {
     const state = window.__engine.village.getState();
     return state.selected === parcelId && !state.transitioning;
   }, diversityRuntime.mirroredId, { timeout });
+  const initialOpening = await page.evaluate((parcelId) => (
+    window.__engine.village.debugOpeningDetail(parcelId)
+  ), diversityRuntime.mirroredId);
+  pass(initialOpening?.valid && initialOpening.plan?.primary
+      && initialOpening.plan.hardware === 3
+      && initialOpening.plan.meoreum === 0
+      && initialOpening.plan.lowerPanel > 0
+      && initialOpening.plan.pivot && initialOpening.plan.footwear,
+  `focused overlay owns one reusable primary opening contract (${JSON.stringify(initialOpening)})`);
   const houseTabs = page.locator('.ctx.house:not([aria-hidden="true"]) .tabs .tab');
   await houseTabs.filter({ hasText: '초가' }).click();
   await page.waitForFunction(() => window.__engine.village.getState().spec?.kind === 'choga', null, { timeout });
   const chogaSwitch = await page.evaluate(() => {
-    const state = window.__engine.village.getState();
+    const engine = window.__engine;
+    const state = engine.village.getState();
     const panel = document.querySelector('.ctx.house:not([aria-hidden="true"])');
     const column = panel?.querySelector('input[data-key="columnHeight"]');
     return {
@@ -171,6 +202,7 @@ try {
       columnMax: Number(column?.max),
       keys: [...(panel?.querySelectorAll('[data-key]') || [])].map((element) => element.dataset.key),
       activeType: panel?.querySelector('.tabs .tab.on')?.textContent?.replace(/\s+/g, ' ').trim(),
+      opening: engine.village.debugOpeningDetail(state.selected),
     };
   });
   pass(chogaSwitch.spec.params.columnHeight === 1.95
@@ -178,7 +210,9 @@ try {
       && chogaSwitch.columnValue === 1.95
       && chogaSwitch.columnValue <= chogaSwitch.columnMax
       && !chogaSwitch.keys.some((key) => ['mainHalfW', 'wingLen', 'wingW'].includes(key))
-      && chogaSwitch.activeType?.includes('초가'),
+      && chogaSwitch.activeType?.includes('초가')
+      && chogaSwitch.opening?.valid && chogaSwitch.opening.plan?.style === 'choga'
+      && chogaSwitch.opening.plan.hardware === 3,
   `giwa→choga switch reseeds target defaults and accepted UI values (${JSON.stringify(chogaSwitch)})`);
   await houseTabs.filter({ hasText: '기와집' }).click();
   await page.waitForFunction(() => window.__engine.village.getState().spec?.kind === 'giwa', null, { timeout });
@@ -191,6 +225,7 @@ try {
       columnHeight: spec?.params?.columnHeight,
       mainHalfWMin: Number(panel?.querySelector('input[data-key="mainHalfW"]')?.min),
       mirrorX: engine.village.debugParcelStats(parcelId, { kind: 'giwa' })?.mirrorX,
+      opening: engine.village.debugOpeningDetail(parcelId),
     };
     engine.village.return();
     if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
@@ -199,7 +234,9 @@ try {
   pass(restoredType.kind === 'giwa'
       && restoredType.columnHeight === 2.9
       && Math.abs(restoredType.mainHalfWMin - 3.3) < 1e-9
-      && restoredType.mirrorX === -1,
+      && restoredType.mirrorX === -1
+      && restoredType.opening?.valid && restoredType.opening.plan?.style === 'giwa'
+      && restoredType.opening.plan.hardware === 3,
   `choga→giwa switch restores fitted variant defaults and mirror (${JSON.stringify(restoredType)})`);
 
   const zoomModes = await page.evaluate(async () => {
@@ -513,6 +550,7 @@ try {
       selected: state.selected,
       spec: state.spec,
       overlay: engine.village.debugOverlayBox(state.selected),
+      opening: engine.village.debugOpeningDetail(state.selected),
       // Visible-time changes remain animated: synchronously after the dial event, neither the
       // scene-level sky nor the hidden single-house motes have snapped to the night target yet.
       timeTransitionStart: {
@@ -525,11 +563,115 @@ try {
   // fast smoke asserts synchronous focus setup rather than wall-clock tween completion.
   pass(focused.selected === heroId && !!focused.spec, 'focus setup targets the requested parcel');
   pass(!!focused.overlay, 'focused parcel exposes a measurable detail overlay');
+  pass(focused.opening?.valid
+      && focused.opening.plan?.style === 'giwa'
+      && focused.opening.plan.hardware === 3
+      && focused.opening.plan.meoreum === 0
+      && focused.opening.plan.lowerPanel > 0,
+  `representative head house consumes one shared primary opening contract (${JSON.stringify(focused.opening)})`);
   pass(
     Math.abs(focused.timeTransitionStart.sunIntensity - 0.9) > 1e-3
       && Math.abs(focused.timeTransitionStart.moteIntensity - 0.5) > 1e-6,
     `visible time changes preserve the sky and ambience crossfade contract (${JSON.stringify(focused.timeTransitionStart)})`,
   );
+
+  const heroOpeningLifecycle = await page.evaluate(async (parcelId) => {
+    const engine = window.__engine;
+    const frames = (count = 4) => new Promise((resolve) => {
+      const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
+      requestAnimationFrame(step);
+    });
+    await frames();
+    const oldRoot = engine.village.focusRoot();
+    const oldGeometries = [];
+    oldRoot?.traverse((object) => {
+      if (['opening-frame-details', 'opening-hardware-details'].includes(object.name)
+          && object.geometry) oldGeometries.push(object.geometry);
+    });
+    const disposed = new Map(oldGeometries.map((geometry) => [geometry, 0]));
+    const onDispose = (event) => disposed.set(event.target, (disposed.get(event.target) || 0) + 1);
+    for (const geometry of oldGeometries) geometry.addEventListener('dispose', onDispose);
+    const beforePrograms = engine.renderer.info.programs?.length || 0;
+    const rebuilt = engine.village.rebuild(parcelId, {
+      building: { roofPitch: 1.08, eaveOverhang: 1.38, profileCurve: 0.56 },
+    }, { refreshFlora: false });
+    await frames();
+    const root = engine.village.focusRoot();
+    const material = { frameEnvelope: null, hardwareEnvelope: null, hardwareKey: null };
+    root?.traverse((object) => {
+      if (object.name === 'opening-frame-details') {
+        material.frameEnvelope = object.material?.userData?.lodEnvelope === true;
+      }
+      if (object.name === 'opening-hardware-details') {
+        material.hardwareEnvelope = object.material?.userData?.lodEnvelope === true;
+        material.hardwareKey = object.material?.userData?.paletteKey || null;
+      }
+    });
+    const inspectPrimaryFace = () => {
+      const anchor = root?.getObjectByName('primary-opening-anchor');
+      const panel = root?.getObjectByName('primary-opening-panel');
+      const frame = root?.getObjectByName('opening-frame-details');
+      const plan = anchor?.userData?.openingDetailPlan;
+      const panelPositions = panel?.geometry?.attributes?.position;
+      const framePositions = frame?.geometry?.attributes?.position;
+      if (!plan || !panelPositions || !framePositions) return null;
+      root.updateWorldMatrix(true, true);
+      const point = panel.position.clone();
+      let panelFront = -Infinity;
+      for (let index = 0; index < panelPositions.count; index++) {
+        point.fromBufferAttribute(panelPositions, index);
+        panel.localToWorld(point);
+        anchor.worldToLocal(point);
+        panelFront = Math.max(panelFront, point.z);
+      }
+      let frameFront = -Infinity;
+      const uLimit = plan.width * 0.5 + plan.frame.width;
+      const yMin = plan.frame.width * 1.5;
+      const yMax = plan.height + plan.frame.width;
+      for (let index = 0; index < framePositions.count; index++) {
+        point.fromBufferAttribute(framePositions, index);
+        frame.localToWorld(point);
+        anchor.worldToLocal(point);
+        if (Math.abs(point.x) <= uLimit && point.y >= yMin && point.y <= yMax) {
+          frameFront = Math.max(frameFront, point.z);
+        }
+      }
+      if (!Number.isFinite(panelFront) || !Number.isFinite(frameFront)) return null;
+      return {
+        panelFront,
+        frameFront,
+        clearance: frameFront - panelFront,
+        expectedClearance: plan.reveal.faceClearance + plan.frame.depth,
+      };
+    };
+    const result = {
+      rebuilt: !!rebuilt,
+      opening: engine.village.debugOpeningDetail(parcelId),
+      oldOpeningGeometries: oldGeometries.length,
+      disposed: [...disposed.values()],
+      programs: [beforePrograms, engine.renderer.info.programs?.length || 0],
+      material,
+      primaryFace: inspectPrimaryFace(),
+    };
+    for (const geometry of oldGeometries) geometry.removeEventListener('dispose', onDispose);
+    return result;
+  }, heroId);
+  pass(heroOpeningLifecycle.rebuilt
+      && heroOpeningLifecycle.opening?.valid
+      && heroOpeningLifecycle.opening.plan?.style === 'giwa'
+      && heroOpeningLifecycle.oldOpeningGeometries === 2
+      && heroOpeningLifecycle.disposed.every((count) => count === 1)
+      && heroOpeningLifecycle.material.frameEnvelope
+      && !heroOpeningLifecycle.material.hardwareEnvelope
+      && heroOpeningLifecycle.material.hardwareKey === 'hardware'
+      && heroOpeningLifecycle.primaryFace?.clearance > 0
+      && Math.abs(
+        heroOpeningLifecycle.primaryFace.clearance
+          - heroOpeningLifecycle.primaryFace.expectedClearance,
+      ) <= 1e-5
+      && heroOpeningLifecycle.programs[1] - heroOpeningLifecycle.programs[0] <= 1,
+  `head-house rebuild preserves positive frame/panel clearance, replaces one opening overlay, `
+    + `disposes it once, and reuses LOD/program families (${JSON.stringify(heroOpeningLifecycle)})`);
 
   const typeChange = await page.evaluate(() => {
     window.__engine.setType('choga');
@@ -736,13 +878,20 @@ try {
   const ornamentCredit = page.locator('.modal .cat li').filter({
     hasText: '국가유산청 · 한국학중앙연구원 — 궁궐 지붕 장식과 잡상',
   });
+  const openingCredit = page.locator('.modal .cat li').filter({
+    hasText: '국가유산청 국가유산포털 — 경복궁 근정전 창호 철물 정밀실측도',
+  });
   await kitchenCredit.waitFor({ state: 'visible', timeout });
   await ornamentCredit.waitFor({ state: 'visible', timeout });
+  await openingCredit.waitFor({ state: 'visible', timeout });
   const referenceContract = {
     kitchenLinks: await kitchenCredit.locator('a').count(),
     ornamentLinks: await ornamentCredit.locator('a').count(),
+    openingLinks: await openingCredit.locator('a').count(),
     kitchenUse: await kitchenCredit.locator('.it-use').textContent(),
     ornamentUse: await ornamentCredit.locator('.it-use').textContent(),
+    openingUse: await openingCredit.locator('.it-use').textContent(),
+    openingHref: await openingCredit.locator('a').getAttribute('href'),
     safeLinks: await page.locator('.modal .it-links a').evaluateAll((links) => links.every((link) => (
       link.target === '_blank'
         && link.rel.split(/\s+/).includes('noopener')
@@ -752,8 +901,13 @@ try {
   pass(
     referenceContract.kitchenLinks === 3
       && referenceContract.ornamentLinks === 2
+      && referenceContract.openingLinks === 1
       && referenceContract.kitchenUse?.includes('마당 높이 부엌 개구 안')
       && referenceContract.ornamentUse?.includes('palace 전용 경계')
+      && referenceContract.openingUse?.includes('민가에 그대로 복제하지 않는다')
+      && referenceContract.openingUse?.includes('경첩 띠 두 개와 고리 하나')
+      && referenceContract.openingHref?.includes('file_seq=2839493')
+      && referenceContract.openingHref?.includes('title3d=')
       && referenceContract.safeLinks,
     `Reference UI exposes authenticity evidence and applied-use mapping (${JSON.stringify(referenceContract)})`,
   );

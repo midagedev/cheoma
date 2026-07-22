@@ -641,6 +641,42 @@ export function createVillageHandle(opts, seed, plan, group) {
       return { x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2) };
     },
 
+    // 검증·후속 interaction용: base 인스턴싱은 순수 anchor Group을 의도적으로 버리고,
+    // 선택된 비인스턴스 overlay가 rebuild될 때 정확히 하나를 다시 만든다.
+    openingDetailState(parcelId) {
+      const root = parcelId === 'palace' ? (palaceOverride && palaceOverride.group)
+        : parcelId === 'temple' ? (templeOverride && templeOverride.group)
+        : heroOverrides.get(parcelId)?.group || overrideById.get(parcelId);
+      if (!root) return null;
+      const counts = { anchor: 0, panel: 0, frameBatch: 0, hardwareBatch: 0 };
+      let plan = null;
+      root.traverse((object) => {
+        if (object.name === 'primary-opening-anchor') {
+          counts.anchor++;
+          plan = object.userData.openingDetailPlan || plan;
+        }
+        if (object.name === 'primary-opening-panel') counts.panel++;
+        if (object.name === 'opening-frame-details') counts.frameBatch++;
+        if (object.name === 'opening-hardware-details') counts.hardwareBatch++;
+      });
+      return {
+        ...counts,
+        valid: counts.anchor === 1 && counts.panel === 1
+          && counts.frameBatch === 1 && counts.hardwareBatch === 1,
+        plan: plan ? {
+          id: plan.id,
+          kind: plan.kind,
+          style: plan.style,
+          primary: plan.primary,
+          hardware: plan.hardware.length,
+          meoreum: plan.meoreum?.height ?? null,
+          lowerPanel: plan.lowerPanel?.height ?? null,
+          pivot: !!plan.anchors?.pivot,
+          footwear: !!plan.anchors?.footwear,
+        } : null,
+      };
+    },
+
     // 검증용 LOD 소유권 스냅샷. 각 정규 필지는 어느 순간에도 far/mid/full/overlay 중
     // 정확히 하나만 논리적으로 보여야 한다. id 생략 시 전체 요약과 실패 필지를 함께 반환한다.
     lodState(parcelId = null) {
@@ -1179,7 +1215,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   // dispose 이후의 handle은 완전히 불활성이다. 공개 메서드를 한 번 감싸면 새 API가 추가돼도
   // enter/debug/detail 경로가 자원을 다시 만들거나 씬에 재부착하는 종료 후 누수를 자동으로 막는다.
   const nullAfterDispose = new Set([
-    'heroParcelId', 'heroDetailGroup', 'overlayBox', 'getPickProxy', 'raycast',
+    'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'getPickProxy', 'raycast',
     'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
   ]);
   for (const key of Object.keys(api)) {

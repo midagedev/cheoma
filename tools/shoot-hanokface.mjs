@@ -1,5 +1,6 @@
 // #99 히어로 종가 문/창 개구 검증. 코어(buildHanok) 직접 import 하네스 — 앱 dev 서버 불침해, 전용 포트 4214.
 //   사용법: node tools/shoot-hanokface.mjs [필터]
+//   CHEOMA_HANOKFACE_OUT=/절대/경로 로 throwaway 출력 위치를 지정할 수 있다.
 //   컷: front(히어로 근접 정면) · grid(시드 스윕 8) · night(hanjiGlow 발광) · L(ㄱ자) · U(ㄷ자) · rect
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const OUT = join(ROOT, 'shots');
+const OUT = process.env.CHEOMA_HANOKFACE_OUT || join(ROOT, 'shots');
 mkdirSync(OUT, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
 
@@ -174,6 +175,7 @@ const tag = process.env.TAG || 'now';
 const shots = [
   ['front-day', '/__face?view=front&time=day'],
   ['front-sunset', '/__face?view=front&time=sunset'],
+  ['detail', '/__face?view=front&time=day&az=8&el=7&dist=0.40&pad=0.92'],
   ['grid', '/__face?view=grid&time=day'],
   ['night', '/__face?view=front&time=night'],
   ['L', '/__face?view=L&time=day&az=30&el=20&dist=0.7'],

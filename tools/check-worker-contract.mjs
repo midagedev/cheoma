@@ -29,13 +29,15 @@ const expectedSceneHashes = {
   // ㅡ + mirrored ㄱ + fitted four-bay ㄷ. #11 replaces duplicated exterior
   // stove masses with one recessed residential kitchen scene and neutralizes
   // civilian lattice textures. #30 adds deterministic world-space road UVs;
-  // the texture bytes stay outside this structural hash. The combined FULL scene bytes
-  // intentionally move while parcel plans and public proxy hashes retain their own contracts.
-  // Sync, real module Worker, and ?worker=0 fallback stay byte-identical.
-  village: '190a8cdb:7ccf5a45:3db0761f:a5136921',
-  town: 'a56c54f4:884c88d4:4071509e:5897276c',
-  capital: '90921425:8c9c9825:c93e7f61:200b9bef',
-  hanyang: '23a64d20:0ab5540c:1acbc9d6:1a956b24',
+  // the texture bytes stay outside this structural hash. #16 adds shared static
+  // opening frames, window meoreum aprons, and restrained FULL-only hardware.
+  // The combined FULL scene bytes intentionally move while parcel plans and
+  // public proxy hashes retain their own contracts. Sync, real module Worker,
+  // and ?worker=0 fallback stay byte-identical.
+  village: '4b848439:966b9eff:7233f9de:4b0880f3',
+  town: 'fb425c40:a213af72:f7878b2a:322ad622',
+  capital: '40b6fc80:0c9585d4:d03d55aa:71a78ffa',
+  hanyang: '3647413d:60a39975:9fd06393:70479245',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

@@ -6,6 +6,7 @@ const checks = [
   './check-atmosphere-contract.mjs',
   './check-environment-state.mjs',
   './check-house-diversity.mjs',
+  './check-opening-detail-contract.mjs',
   './check-building-clearance.mjs',
   './check-cinematic-turns.mjs',
   './check-cinematic-reveal.mjs',
