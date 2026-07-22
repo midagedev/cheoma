@@ -35,9 +35,10 @@ const expectedSceneHashes = {
   // six residential opening axes through the variant bytes and renders those
   // selected openings in every FULL giwa/choga prototype. Choga and hanok keep
   // a fixed dark recess while residential primary-door and footwear anchors
-  // share the same renderer-free opening plan. The prior 16° focus envelope
-  // relocated the capital fixture's pavilion from a blocked `soro-003`
-  // candidate to the clear `golmok-015` candidate. #81 replaces inferred lot
+  // share the same renderer-free opening plan. The reviewed 22° focus envelope
+  // relocates the capital fixture's pavilion from `golmok-015` to the clear
+  // `soro-000` candidate and moves one hamlet sotdae outside the raised view
+  // corridor. #81 replaces inferred lot
   // lights with fixed renderer-authored opening anchors, keeps one Points draw,
   // and turns scene depth testing on. The authored position/owner attributes
   // intentionally update every scale hash; depthTest itself is covered by the
@@ -46,7 +47,7 @@ const expectedSceneHashes = {
   // must still remain byte-identical.
   village: '6fac48b4:07720f16:e0118413:d2b8b05c',
   town: '2cbd0bda:3ae321ea:439c19c3:29ad84a4',
-  capital: '20a0a22e:4e81fc5a:73af28b7:a4e51d42',
+  capital: 'cbba4756:2b6ea434:48c94ef7:0ca20ca8',
   hanyang: '6d74923b:bf1e144b:8d2f5899:b977b7e5',
 };
 const expectedProxyHashes = {
@@ -56,14 +57,14 @@ const expectedProxyHashes = {
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the six normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
-  // 20° courtyard elevation. Safe candidates scale XZ and Y together so their
+  // 22° courtyard elevation. Safe candidates scale XZ and Y together so their
   // proxy framing cannot silently steepen the camera. Raising that shared angle
   // changes every residential camera position and therefore all four proxy
   // hashes without changing their counts or isolation contract.
-  village: '4b4caf78',
-  town: 'f993be75',
-  capital: '45e0d173',
-  hanyang: '399551d9',
+  village: '987549fa',
+  town: '402050ba',
+  capital: '29d71851',
+  hanyang: 'ed41afbb',
 };
 
 const server = await createServer({
