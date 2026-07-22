@@ -157,15 +157,16 @@ async function dial() {
   await settle(1400);
   check('drag time ring → night', (await st()).time === 'night');
   await shot('dial-night');
-  // 계절 링(중간) 드래그 → autumn(150°)
-  await dragRing(1, -90, 150);
+  // 계절 링(중간, 4분할) 드래그 → autumn(90°)
+  await dragRing(1, -90, 90);
   await settle(600);
   check('drag season ring → autumn', (await st()).season === 'autumn');
   // 날씨 링(안쪽) 드래그 → snow(150°)
   await dragRing(2, -90, 150);
   await settle(2200);
   check('drag weather ring → snow', (await st()).weather === 'snow');
-  await shot('dial-autumn-snow');
+  check('snow 선택 → winter 자동 정합', (await st()).season === 'winter');
+  await shot('dial-winter-snow');
   // 석양 전환(플래그십)도 드래그로 — 씬 화이트아웃과 무관히 상태 전이 확인
   await dragRing(0, 180, 90);
   await settle(1000);

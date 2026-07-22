@@ -45,9 +45,9 @@ shots.push(['final-night', `/__edge?edge=mist&time=night&season=summer&cx=120&cy
 shots.push(['edge-az-w', `/__edge?edge=mist&time=day&cx=-40&cy=30&cz=40&tx=-150&ty=6&tz=0&steps=30`]);
 shots.push(['edge-az-n', `/__edge?edge=mist&time=day&cx=0&cy=34&cz=-40&tx=0&ty=6&tz=-150&steps=30`]);
 shots.push(['edge-az-e', `/__edge?edge=mist&time=day&cx=40&cy=30&cz=40&tx=150&ty=6&tz=0&steps=30`]);
-// 계절 가을 + 눈 교차(패치 체인 무결)
-shots.push(['chain-autumn', `/__edge?edge=mist&time=day&season=autumn&steps=30`]);
-shots.push(['chain-autumn-snow', `/__edge?edge=mist&time=day&season=autumn&snow=1&steps=30`]);
+// 겨울 + 눈 교차(패치 체인 무결)
+shots.push(['chain-winter', `/__edge?edge=mist&time=day&season=winter&steps=30`]);
+shots.push(['chain-winter-snow', `/__edge?edge=mist&time=day&season=winter&snow=1&steps=30`]);
 // 구름 그림자 드리프트 diff: 같은 뷰, 가상시간 t 상이(60 vs 220 스텝)
 shots.push(['drift-a', `/__edge?edge=mist&time=day&season=summer&cx=110&cy=100&cz=150&tx=0&ty=0&tz=0&steps=60`]);
 shots.push(['drift-b', `/__edge?edge=mist&time=day&season=summer&cx=110&cy=100&cz=150&tx=0&ty=0&tz=0&steps=220`]);

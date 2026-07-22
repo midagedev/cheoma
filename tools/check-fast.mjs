@@ -4,6 +4,7 @@ import { runVerificationChecks } from './lib/verification-runner.mjs';
 const checks = [
   './check-architecture.mjs',
   './check-atmosphere-contract.mjs',
+  './check-environment-state.mjs',
   './check-building-clearance.mjs',
   './check-cinematic-turns.mjs',
   './check-dof.mjs',

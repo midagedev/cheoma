@@ -6,22 +6,26 @@ const DEG = Math.PI / 180;
 // public structures to enter the view axis. A shallow three-quarter angle still
 // reveals bay depth while reading primarily as the house's south-facing elevation.
 const FOCUS_AZIMUTH_MAX = 14 * DEG;
-// Aim at the doors while retaining enough physical camera height to see across a
-// dense village. The protected south-light opening now keeps the foreground corridor
-// clear enough for a lower architectural viewpoint: 3° reads from the yard toward the
-// eaves and sky, while still retaining enough lift to see across a wall or gate.
-const FOCUS_ELEVATION = 3 * DEG;
-const FOCUS_DISTANCE = dollyDistanceForFov(
+// A close residential view is authored from a person's eye height in the yard.
+// Keeping this as a world-space height instead of an angle prevents larger parcels
+// and telephoto dolly distances from lifting the camera back into an aerial view.
+export const PARCEL_FOCUS_EYE_HEIGHT = 1.35;
+const FOCUS_HORIZONTAL_DISTANCE = dollyDistanceForFov(
   2.25,
   VILLAGE_LENS.parcel.referenceFov,
   VILLAGE_LENS.parcel.fov,
 );
-
-// A focused house is composed around its doors, not the roof mass. Keeping this
-// pure value beside the XZ framing lets picking, hero landing, and regression
-// checks share one semantic aim point without renderer-only corrections.
+// Aim between the lintels and eaves. A yard-height telephoto camera that targets the
+// doors still points almost horizontally, letting foreground roofs consume the sky;
+// this height keeps the selected eaves readable while the view genuinely tilts up.
+// Keeping the value beside the XZ framing lets picking, hero landing, DoF, and
+// regression checks share one semantic aim point without renderer-only corrections.
 export function parcelFocusTargetLift(height) {
-  return Math.max(1.65, Math.min(2.5, height * 0.26));
+  return Math.max(3, Math.min(5.6, height * 0.48));
+}
+
+export function parcelFocusCameraLift(targetLift) {
+  return PARCEL_FOCUS_EYE_HEIGHT - targetLift;
 }
 
 // THREE.Vector3.applyAxisAngle(Y, angle)의 연산 순서를 그대로 옮긴 순수 helper. 단순 cos/sin
@@ -86,16 +90,16 @@ export function planParcelFocus(parcel) {
   const cos = Math.cos(rotationY), sin = Math.sin(rotationY);
   const worldX = parcel.center.x + bounds.centerX * cos + bounds.centerZ * sin;
   const worldZ = parcel.center.z - bounds.centerX * sin + bounds.centerZ * cos;
-  const radius = FOCUS_DISTANCE * Math.max(width, depth, height);
-  const horizontal = radius * Math.cos(FOCUS_ELEVATION);
+  const horizontal = FOCUS_HORIZONTAL_DISTANCE * Math.max(width, depth, height);
   const localX = horizontal * Math.sin(azimuth);
   const localZ = horizontal * Math.cos(azimuth);
   const offset = rotateFocusOffsetY(
     localX,
-    radius * Math.sin(FOCUS_ELEVATION),
+    0,
     localZ,
     rotationY,
   );
+  const targetLift = parcelFocusTargetLift(height);
   return {
     width,
     depth,
@@ -105,8 +109,8 @@ export function planParcelFocus(parcel) {
     worldZ,
     cameraX: worldX + offset.x,
     cameraZ: worldZ + offset.z,
-    cameraLift: offset.y,
-    targetLift: parcelFocusTargetLift(height),
+    cameraLift: parcelFocusCameraLift(targetLift),
+    targetLift,
     fov: VILLAGE_LENS.parcel.fov,
     referenceFov: VILLAGE_LENS.parcel.referenceFov,
   };

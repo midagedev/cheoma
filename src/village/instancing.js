@@ -358,6 +358,7 @@ function createImpostorMaterial(part) {
   });
   mat.name = `impostor-${part}`;
   mat.userData.role = role;
+  if (role === 'roof') mat.userData.snowSurface = true;
   return mat;
 }
 

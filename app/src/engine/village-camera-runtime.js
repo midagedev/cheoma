@@ -13,6 +13,7 @@ import {
 
 const DEG = Math.PI / 180;
 const AERIAL_AZIMUTH = 9 * DEG;
+const FOCUS_MIN_ELEVATION = -8 * DEG;
 const NEAR_FRAC = 0.02;
 const NEAR_MIN = 0.08;
 const NEAR_MAX = 2.5;
@@ -85,8 +86,15 @@ export function createVillageCameraRuntime({
   let focusBaseElevation = 0;
   let focusElevationOffset = 0;
   let focusAppliedElevation = null;
+  const exploreMaxPolarAngle = controls.maxPolarAngle;
+  const focusMaxPolarAngle = Math.PI / 2 - FOCUS_MIN_ELEVATION;
   function setRegime(mode, closeupDistance = 0) {
     regime = mode;
+    // OrbitControls otherwise clamps every yard-level camera back above its target.
+    // A locked focus transition already has `selected`; a locked focus-out does not.
+    controls.maxPolarAngle = mode === 'focus' || (mode === 'lock' && village.selected)
+      ? focusMaxPolarAngle
+      : exploreMaxPolarAngle;
     if (mode === 'lock') {
       controls.enableZoom = false;
       return;
@@ -158,7 +166,11 @@ export function createVillageCameraRuntime({
       focusCloseupReference,
       focusBaseElevation,
     );
-    const desiredElevation = Math.max(0.02, Math.min(
+    // Close residential framing places the camera below its lintel/eave target,
+    // so a negative elevation is intentional: it is the yard looking up at the eaves.
+    // Only wide focus-context zooms crane toward the aerial elevation. A positive
+    // floor here silently undoes the authored eye height on the first settled frame.
+    const desiredElevation = Math.max(FOCUS_MIN_ELEVATION, Math.min(
       Math.PI / 2 - 0.03,
       pathElevation + focusElevationOffset,
     ));

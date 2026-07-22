@@ -2,7 +2,11 @@
 // (?seed= 공유 시 동일 결과). main.js 의 surpriseMe 큐레이션을 계승하되 Date.now 대신
 // seed 로 완전히 결정적으로 만든다.
 import { PRESETS } from '../../../src/api/building.js';
-import { DEFAULT_SUNSET_LOOK, SUNSET_LOOK_IDS } from '../../../src/api/environment.js';
+import {
+  DEFAULT_SUNSET_LOOK,
+  SUNSET_LOOK_IDS,
+  pickEnvironmentScene,
+} from '../../../src/api/environment.js';
 
 // 유형 탭 ↔ 프리셋 키 매핑. (궁=korea, 절=temple, 기와집=giwa, 초가=choga)
 export const TYPES = [
@@ -47,17 +51,25 @@ export function configFromSeed(seed) {
   if (PRESETS.giwa) presetPairs.push(['giwa', 1.2]);
   const preset = weightedPick(rng, presetPairs);
 
-  let time = weightedPick(rng, [['day', 4], ['sunset', 3], ['dawn', 2], ['night', 1.5]]);
-  // A forked stream preserves every pre-existing seed-derived building/environment value.
-  // The look remains latent outside sunset and becomes visible when the dial reaches it.
+  // Keep the legacy three environment draws on the main stream so building parameter
+  // hashes remain stable. A fork selects one complete, compatible, curated scene.
+  weightedPick(rng, [['day', 4], ['sunset', 3], ['dawn', 2], ['night', 1.5]]);
+  weightedPick(rng, [['autumn', 3], ['spring', 2.2], ['summer', 2]]);
+  weightedPick(rng, [['clear', 4], ['snow', 2.2], ['rain', 1.8]]);
+  const environmentRng = mulberry32((seed ^ 0xe1710f) >>> 0);
+  const environment = pickEnvironmentScene(environmentRng);
+  let time = environment.ti;
+
+  // A separate fork keeps a latent sunset look for non-sunset scenes.
   const sunsetRng = mulberry32((seed ^ 0x51a7e7) >>> 0);
-  const sunsetLook = weightedPick(sunsetRng, [
+  const latentSunsetLook = weightedPick(sunsetRng, [
     [DEFAULT_SUNSET_LOOK, 5],
     [SUNSET_LOOK_IDS[1], 2.8],
     [SUNSET_LOOK_IDS[2], 2.2],
   ]);
-  const season = weightedPick(rng, [['autumn', 3], ['spring', 2.2], ['summer', 2]]);
-  let weather = weightedPick(rng, [['clear', 4], ['snow', 2.2], ['rain', 1.8]]);
+  const sunsetLook = environment.su || latentSunsetLook;
+  const season = environment.se;
+  const weather = environment.we;
   if (weather === 'rain' && time === 'dawn') time = 'day';
   if (weather === 'rain' && time === 'night') time = 'sunset';
 

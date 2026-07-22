@@ -1,5 +1,5 @@
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'petals', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
+  'core', 'app', 'petals', 'winter-app', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
   'parcel-rebuild-browser', 'build',
 ]);
 
@@ -39,6 +39,9 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
+    if (/^app\/src\/(?:components\/EnvironmentDial\.svelte|engine\/engine\.js|lib\/seed\.js)$/.test(path)) {
+      select('winter environment integration changed', 'winter-app');
+    }
     if (/^app\/src\/(?:App\.svelte|components\/ContextPanel\.svelte|engine\/engine\.js|lib\/live-edit-scheduler\.js)$/.test(path)) {
       select('focused rebuild surface changed', 'parcel-rebuild-browser');
     }
@@ -56,6 +59,9 @@ function routePath(path) {
 
   if (path.startsWith('src/env/') || path.startsWith('src/render/')) {
     select('environment/rendering changed', 'app');
+    if (/^src\/env\/(?:index|mountains|paddies|seasons|sky|snow-material|terrain|trees|weather)\.js$/.test(path)) {
+      select('winter surface or environment changed', 'winter-app');
+    }
     if (/^src\/env\/(?:dof|post|stable-bokeh-pass|circular-bokeh-shader|tree-occluder|inst-fade-shader|rim|present-gate)\.js$/.test(path)) {
       select('depth/post contract changed', 'dof-app');
     }
@@ -95,6 +101,7 @@ function routePath(path) {
       || path === 'src/generators/village/houses.js') {
       select('parcel representation changed', 'lod-focus', 'lod-wave');
     }
+    if (path === 'src/village/instancing.js') select('impostor snow surface changed', 'winter-app');
     if (path === 'src/village/nightlights.js') select('wave-owned village lighting changed', 'lod-wave');
     if (path === 'src/village/populate.js') select('population lifecycle changed', 'lod-focus', 'lod-wave');
     return { gates, reasons };
@@ -111,6 +118,7 @@ function routePath(path) {
     if (/^src\/runtime\/village\/(?:lighting|night-glow|snow)\.js$/.test(path)) {
       select('runtime wave presentation changed', 'lod-wave');
     }
+    if (path === 'src/runtime/village/snow.js') select('village snow controller changed', 'winter-app');
     if (path === 'src/runtime/village/create.js') select('async handle lifecycle changed', 'lod-wave');
     if (path === 'src/runtime/village/handle.js') select('village handle changed', 'lod-focus', 'lod-wave');
     return { gates, reasons };
@@ -120,12 +128,13 @@ function routePath(path) {
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
     if (!/^src\/(?:export|share)\//.test(path)) select('worker scene graph may change', 'worker');
+    if (path === 'src/builder/palette.js') select('roof snow role changed', 'winter-app');
     return { gates, reasons };
   }
 
   if (path.startsWith('src/api/')) {
     if (path === 'src/api/environment.js') {
-      select('environment API changed', 'app', 'dof-app', 'petals', 'lod-wave');
+      select('environment API changed', 'app', 'dof-app', 'petals', 'winter-app', 'lod-wave');
       return { gates, reasons };
     }
     if (path === 'src/api/village.js') {
@@ -203,6 +212,7 @@ export function verificationCommands(plan) {
   if (has('app')) commands.push({ id: 'app', command: 'npm', args: ['run', 'check:app'] });
   if (has('dof-app')) commands.push({ id: 'dof-app', command: 'npm', args: ['run', 'check:dof:app'] });
   if (has('petals')) commands.push({ id: 'petals', command: 'npm', args: ['run', 'check:petals'] });
+  if (has('winter-app')) commands.push({ id: 'winter-app', command: 'npm', args: ['run', 'check:winter:app'] });
   if (has('worker')) commands.push({ id: 'worker', command: 'npm', args: ['run', 'check:worker'] });
   if (has('audio')) commands.push({ id: 'audio', command: 'npm', args: ['run', 'check:audio'] });
   if (has('lod-focus')) {

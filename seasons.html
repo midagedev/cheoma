@@ -38,21 +38,21 @@
   <button data-season="spring">봄 벚꽃</button>
   <button data-season="summer">여름 신록</button>
   <button data-season="autumn">가을 단풍</button>
+  <button data-season="winter">겨울 설경</button>
 </div>
-<div id="badge">joseon · 계절 프로토타입 (spring / summer / autumn)</div>
+<div id="badge">joseon · 계절 프로토타입 (spring / summer / autumn / winter)</div>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PRESETS, computeLayout } from './src/params.js';
 import { buildBuilding } from './src/builder/index.js';
 import { setupEnvironment } from './src/env/index.js';
-import { setupSeasons } from './src/env/seasons.js';
 
 const q = new URLSearchParams(location.search);
 const SHOT = q.get('shot') === '1';
 const angle = q.get('angle') || 'three-quarter';
 const timeOfDay = q.get('time') || 'day';
-const season0 = ['spring', 'summer', 'autumn'].includes(q.get('season')) ? q.get('season') : 'autumn';
+const season0 = ['spring', 'summer', 'autumn', 'winter'].includes(q.get('season')) ? q.get('season') : 'autumn';
 if (SHOT) document.body.classList.add('shot');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -90,9 +90,6 @@ const env = setupEnvironment(scene, { sun, hemi, renderer, layout });
 env.setTime(timeOfDay);
 env.setEnabled(true);
 
-// 계절
-const seasons = setupSeasons(env.group, { layout });
-
 // 카메라 (index.html 과 동일 앵글)
 const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 500);
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -121,13 +118,13 @@ function setAngle(name) {
 setAngle(angle);
 
 // 초기 계절
-seasons.setSeason(season0, { immediate: SHOT });
+env.setSeason(season0, { immediate: SHOT });
 function syncButtons(name) {
   for (const b of document.querySelectorAll('#ui button')) b.classList.toggle('on', b.dataset.season === name);
 }
 syncButtons(season0);
 for (const b of document.querySelectorAll('#ui button')) {
-  b.addEventListener('click', () => { seasons.setSeason(b.dataset.season); syncButtons(b.dataset.season); });
+  b.addEventListener('click', () => { env.setSeason(b.dataset.season); syncButtons(b.dataset.season); });
 }
 
 addEventListener('resize', () => {
@@ -141,7 +138,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   controls.update();
-  seasons.update(dt);
+  env.update(dt);
   renderer.render(scene, camera);
   frames++;
   // 파티클이 수관에서 퍼진 뒤 캡처 신호 (shot 모드)

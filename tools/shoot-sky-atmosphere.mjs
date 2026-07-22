@@ -34,7 +34,10 @@ function meanSky(png) {
 const colourDistance = (a, b) => Math.hypot(...a.map((value, index) => value - b[index]));
 function meanPixelDifference(a, b) {
   let sum = 0; let count = 0;
-  const y1 = Math.floor(a.height * 0.45);
+  // The low-angle composition deliberately places the cloud bank just above the
+  // roofline, below the old top-45% crop. Compare the authored sky/roof frame while
+  // excluding only the bottom controls and foreground bokeh.
+  const y1 = Math.floor(a.height * 0.78);
   for (let y = 0; y < y1; y++) for (let x = 0; x < a.width; x++) {
     const index = (y * a.width + x) * 4;
     sum += Math.abs(a.data[index] - b.data[index]);
@@ -170,6 +173,8 @@ try {
       horizonTextureAlpha,
       projectedClouds,
       cameraFov: engine.camera.fov,
+      cameraY: engine.camera.position.y,
+      targetY: engine.__controls.target.y,
       cameraForwardY: cameraForward.y,
       targetNdc: [targetNdc.x, targetNdc.y],
       cameraView: engine.camera.view ? {
@@ -191,12 +196,12 @@ try {
     'scene-level sky stays visible when village mode hides single-house scenery');
   pass(live.domeCameraDistance != null && live.domeCameraDistance < 0.01,
     'sky dome follows the active telephoto camera', `distance=${live.domeCameraDistance}`);
-  pass(live.compositionYFrac < -0.1,
-    'architectural lens rise preserves a visible sky band without moving the door-height target',
+  pass(live.compositionYFrac < -0.17,
+    'architectural lens rise preserves a visible sky band without moving the lintel/eave target',
     `shift=${live.compositionYFrac.toFixed(3)}`);
-  pass(live.cameraForwardY > -0.065 && live.cameraForwardY < -0.035,
-    'focus camera holds the three-degree near-ground approach',
-    `forwardY=${live.cameraForwardY.toFixed(3)}`);
+  pass(live.cameraForwardY > 0.005 && live.cameraForwardY < 0.06,
+    'yard-height focus camera looks upward toward the eaves and sky',
+    `cameraY=${live.cameraY.toFixed(2)}, targetY=${live.targetY.toFixed(2)}, forwardY=${live.cameraForwardY.toFixed(3)}`);
   pass(live.highClouds === 4 && live.minRim > 0.8,
     'four village clouds receive low-sun HDR rim lighting', `rim>=${live.minRim.toFixed(2)}`);
   pass(live.horizonClouds === 16 && live.horizonDrawCalls === 1,

@@ -7,7 +7,7 @@ function ids(files, options) {
 
 assert.deepEqual(ids(['docs/verification.md']), ['core']);
 assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
-assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'lod-wave']);
+assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'winter-app', 'lod-wave']);
 assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/village/parcel-rebuild.js']), [
@@ -30,13 +30,16 @@ assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-focus', 'lod-wave', 'build',
 ]);
+assert.deepEqual(ids(['app/src/components/EnvironmentDial.svelte']), [
+  'core', 'app', 'winter-app', 'build',
+]);
 assert.deepEqual(ids(['src/api/village.js']), [
   'core', 'app', 'worker', 'lod-focus', 'lod-wave',
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
-  'core', 'app', 'petals', 'worker', 'lod-wave',
+  'core', 'app', 'petals', 'winter-app', 'worker', 'lod-wave',
 ]);
 assert.deepEqual(ids(['package-lock.json']), ['full']);
 assert.equal(planVerification(['package-lock.json']).routes[0].full, true);

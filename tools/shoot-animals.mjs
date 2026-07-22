@@ -34,7 +34,7 @@ import { PRESETS, computeLayout } from '/src/params.js';
 import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment } from '/src/env/index.js';
 const q = new URLSearchParams(location.search);
-const season = ['spring','summer','autumn'].includes(q.get('season'))?q.get('season'):'summer';
+const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
 const timeOfDay = q.get('time')||'day';
 const preset = q.get('preset')||'korea';
 const num=(k,d)=>{const v=parseFloat(q.get(k));return Number.isFinite(v)?v:d;};

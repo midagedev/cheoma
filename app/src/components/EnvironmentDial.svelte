@@ -1,46 +1,13 @@
-<script module>
-  // ── 환경 리롤 큐레이션 풀(#58) ────────────────────────────────────────
-  // 시간·노을빛·계절·날씨의 "그림이 되는" 조합. 완전 균등 랜덤이 아니라 포토제닉 조합(골든아워·단풍·
-  // 달밤·봄비·첫눈)에 가중을 실어 리롤 결과가 늘 찍을 만한 씬이 되게 한다(밋밋한 낮+맑음은 최소).
-  // ti=시간, su=노을빛, se=계절, we=날씨, k=가중치. 계절 축엔 겨울이 없어 '눈'은 늦가을 첫눈으로만 배치.
-  // 리롤(인스턴스 pickEnvReroll)과 오토로테이션(App #64)의 유효 조합 판정이 공유하는 단일 출처.
-  export const ENV_POOL = [
-    { ti: 'sunset', su: 'gold',    se: 'autumn', we: 'clear', k: 10 }, // 골든아워+단풍 (플래그십)
-    { ti: 'sunset', su: 'crimson', se: 'autumn', we: 'clear', k: 7 },  // 붉은 가을놀
-    { ti: 'sunset', su: 'violet',  se: 'autumn', we: 'clear', k: 5 },  // 보랏빛 가을 황혼
-    { ti: 'sunset', su: 'gold',    se: 'summer', we: 'clear', k: 5 },  // 여름 금빛 노을
-    { ti: 'sunset', su: 'crimson', se: 'summer', we: 'clear', k: 5 },  // 여름 붉은 노을
-    { ti: 'sunset', su: 'violet',  se: 'spring', we: 'clear', k: 5 },  // 봄 보랏빛 황혼
-    { ti: 'sunset', su: 'crimson', se: 'autumn', we: 'rain',  k: 4 },  // 비 갠 저녁놀
-    { ti: 'night',  se: 'autumn', we: 'clear', k: 6 },  // 달빛 단풍
-    { ti: 'night',  se: 'spring', we: 'clear', k: 5 },  // 봄밤 달
-    { ti: 'night',  se: 'summer', we: 'clear', k: 4 },  // 여름 달밤
-    { ti: 'night',  se: 'autumn', we: 'snow',  k: 5 },  // 눈 내리는 밤(첫눈)
-    { ti: 'dawn',   se: 'autumn', we: 'clear', k: 5 },  // 안개 걷히는 가을 아침
-    { ti: 'dawn',   se: 'spring', we: 'clear', k: 5 },  // 봄 새벽
-    { ti: 'dawn',   se: 'autumn', we: 'rain',  k: 3 },  // 가을 새벽비
-    { ti: 'day',    se: 'autumn', we: 'clear', k: 5 },  // 청명한 단풍
-    { ti: 'day',    se: 'autumn', we: 'snow',  k: 5 },  // 단풍 위 첫눈
-    { ti: 'day',    se: 'spring', we: 'rain',  k: 6 },  // 봄비(벚꽃비)
-    { ti: 'day',    se: 'spring', we: 'clear', k: 4 },  // 화창한 봄
-    { ti: 'day',    se: 'summer', we: 'rain',  k: 4 },  // 장마 신록
-    { ti: 'day',    se: 'summer', we: 'clear', k: 2 },  // 평범한 여름낮 — 최소 가중
-  ];
-  export const envKey = (c) => `${c.ti}|${c.ti === 'sunset' ? (c.su || 'gold') : ''}|${c.se}|${c.we}`;
-
-  // 오토로테이션(#64) 계절 전진 시 유효 날씨 판정: 풀에 (계절, 날씨) 조합이 실재하면 유효로 본다.
-  // 눈은 풀상 가을(늦가을 첫눈)에만 등장 → 봄·여름으로 넘어가면 눈은 맑음으로 정리된다(비는 전 계절 유효).
-  export function weatherOkForSeason(weather, season) {
-    if (weather === 'clear') return true; // 맑음은 언제나 유효
-    return ENV_POOL.some((c) => c.se === season && c.we === weather);
-  }
-</script>
-
 <script>
   // 우상 3링 환경 다이얼 — 시간(외)·계절(중)·날씨(내).
   // 세그먼트 클릭 또는 링 드래그로 조작, 바늘이 스냅 회전(관성감). 라벨은 로케일화.
   import { t } from '../lib/i18n.svelte.js';
-  import { SUNSET_LOOK_IDS } from '../../../src/api/environment.js';
+  import {
+    SEASON_IDS,
+    SUNSET_LOOK_IDS,
+    WEATHER_IDS,
+    pickEnvironmentScene,
+  } from '../../../src/api/environment.js';
   let { time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear', shifted = false,
         flowing = false, onTime, onSunsetLook, onSeason, onWeather, onFlowToggle } = $props();
 
@@ -48,9 +15,9 @@
     { key: 'time', lp: 'time_', r: 82, band: 26, get: () => time, set: (v) => onTime?.(v),
       opts: ['dawn', 'day', 'sunset', 'night'] },
     { key: 'season', lp: 'season_', r: 54, band: 24, get: () => season, set: (v) => onSeason?.(v),
-      opts: ['spring', 'summer', 'autumn'] },
+      opts: SEASON_IDS },
     { key: 'weather', lp: 'weather_', r: 28, band: 22, get: () => weather, set: (v) => onWeather?.(v),
-      opts: ['clear', 'rain', 'snow'] },
+      opts: WEATHER_IDS },
   ];
   const label = (ring, v) => t(ring.lp + v);
 
@@ -103,15 +70,9 @@
   }
   const valueText = (ring) => label(ring, ring.get());
 
-  // ── 환경 리롤(하늘 굴리기) — 큐레이션 풀(ENV_POOL)·유효 판정은 module 스크립트에 정의(단일 출처).
+  // 순수 코어의 큐레이션 풀을 공유해 시드·UI·검증이 같은 환경 조합을 사용한다.
   function pickEnvReroll(cur) {
-    const curKey = cur ? envKey(cur) : '';
-    // 현재와 동일 조합 제외 → 최소 1축 변경 보장(동일 재추첨).
-    const pool = ENV_POOL.filter((c) => envKey(c) !== curKey);
-    const total = pool.reduce((a, c) => a + c.k, 0);
-    let r = Math.random() * total;
-    for (const c of pool) { r -= c.k; if (r <= 0) return c; }
-    return pool[pool.length - 1];
+    return pickEnvironmentScene(Math.random, cur);
   }
   if (typeof window !== 'undefined') window.__envRerollPick = pickEnvReroll; // playwright 검증 훅
 

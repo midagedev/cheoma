@@ -18,7 +18,10 @@ import {
   villageFocusEffectWeight,
   villageZoomReferenceBounds,
 } from '../src/camera/optics.js';
-import { planParcelFocus } from '../src/generators/shared/parcel-spatial.js';
+import {
+  PARCEL_FOCUS_EYE_HEIGHT,
+  planParcelFocus,
+} from '../src/generators/shared/parcel-spatial.js';
 import {
   createVillageDetailLodState,
   villageDetailWeightAt,
@@ -508,10 +511,12 @@ function assertPlanChunkContract(plan, label) {
       `${label}: chunk ${chunk.ring}/${chunk.sector} used centroid instead of nearest footprint`);
     for (const parcel of chunk.parcels) {
       const focus = planParcelFocus(parcel);
-      invariant(focus.targetLift >= 1.65 && focus.targetLift <= 2.5,
-        `${label}/${parcel.id}: focus target escaped door-height band (${focus.targetLift})`);
-      invariant(focus.targetLift < focus.height * 0.34,
-        `${label}/${parcel.id}: focus target drifted back toward the roof (${focus.targetLift}/${focus.height})`);
+      invariant(focus.targetLift >= 3 && focus.targetLift <= 5.6,
+        `${label}/${parcel.id}: focus target escaped lintel/eave band (${focus.targetLift})`);
+      invariant(focus.targetLift < focus.height * 0.49,
+        `${label}/${parcel.id}: focus target drifted above the lower roof mass (${focus.targetLift}/${focus.height})`);
+      near(focus.targetLift + focus.cameraLift, PARCEL_FOCUS_EYE_HEIGHT,
+        `${label}/${parcel.id}: focus camera left the shared yard eye height`);
       const localTarget = parcelLocalPoint(parcel, { x: focus.worldX, z: focus.worldZ });
       const localCamera = parcelLocalPoint(parcel, { x: focus.cameraX, z: focus.cameraZ });
       const solar = parcel.solarAccess;

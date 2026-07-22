@@ -30,7 +30,7 @@ import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment } from '/src/env/index.js';
 import { setupInk } from '/src/render/ink.js';
 const q = new URLSearchParams(location.search);
-const season = ['spring','summer','autumn'].includes(q.get('season'))?q.get('season'):'summer';
+const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
 const timeOfDay = q.get('time')||'day';
 const ink = q.get('mode')==='ink';
 const num=(k,d)=>{const v=parseFloat(q.get(k));return Number.isFinite(v)?v:d;};
@@ -83,14 +83,14 @@ const port = server.address().port;
 
 // 캡처 목록: [파일접미사, 쿼리]
 const shots = [];
-for (const season of ['spring', 'summer', 'autumn']) {
+for (const season of ['spring', 'summer', 'autumn', 'winter']) {
   for (const angle of ['three-quarter', 'front']) {
     shots.push([`${season}-${angle}`, `env=1&preset=korea&season=${season}&angle=${angle}&time=day`]);
   }
 }
 // --- 계곡(개울·다랑이 논) 정면 검증: 인라인 하네스 ---
 const valley = [];
-for (const season of ['spring', 'summer', 'autumn']) {
+for (const season of ['spring', 'summer', 'autumn', 'winter']) {
   valley.push([`valley-${season}`, `/__valley?season=${season}&time=day`]);
 }
 valley.push(['valley-ink-autumn', `/__valley?season=autumn&time=day&mode=ink`]);

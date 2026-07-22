@@ -32,13 +32,13 @@ const expectedSceneHashes = {
   hanyang: '9021def6:b212e60a:0563a64e:9437a8de',
 };
 const expectedProxyHashes = {
-  // Door-height residential targets at the reviewed 3° near-ground view, plus
+  // Lintel/eave residential targets viewed upward from the shared yard eye height, plus
   // the variable temple bounds and its south-facing 26° telephoto framing.
-  // Scene bytes stay unchanged; this revision changes cameraFraming.y only.
-  village: 'ed8b0319',
-  town: 'c709d861',
-  capital: '69028c0b',
-  hanyang: 'c6ba6d69',
+  // Scene bytes stay unchanged; this revision changes camera framing only.
+  village: '8a12bd3e',
+  town: '92d039ee',
+  capital: '3fc5b991',
+  hanyang: '103480c0',
 };
 
 const server = await createServer({

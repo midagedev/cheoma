@@ -11,7 +11,7 @@ import { injectWaterLook, createWaterUniforms } from './water.js';
 //   spring: 물댄 논 — water.js 하늘 반사 공유(uWet) + 옅은 모내기 점열
 //   summer: 짙은 초록 벼(이랑 줄무늬)
 //   autumn: 황금 들판(누런 + 살짝 붉은 기)
-//   겨울(weather=snow): weather.js 적설 traverse 가 논면(상향)을 덮음(별도 처리 불요)
+//   winter: 물 빠진 휴경 논. snow 날씨가 오면 공통 적설 셰이더가 그 위를 덮음.
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 
@@ -20,6 +20,7 @@ const TARGET = {
   spring: { field: 0x74804a, bund: 0x84924f, furrow: 0.18, wet: 1.0, red: 0.0 },
   summer: { field: 0x4d7a2c, bund: 0x6f7b40, furrow: 0.60, wet: 0.0, red: 0.0 },
   autumn: { field: 0xc8a338, bund: 0x9c8b4e, furrow: 0.50, wet: 0.0, red: 0.5 },
+  winter: { field: 0x82765f, bund: 0x766c57, furrow: 0.24, wet: 0.0, red: 0.0 },
 };
 
 export function buildPaddies({ valley, heightAt, waterUniforms }) {

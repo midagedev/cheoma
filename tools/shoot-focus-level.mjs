@@ -74,7 +74,7 @@ try {
   }
 
   let selected = null;
-  const expectedLift = { palace: 3.2, temple: 3 };
+  const expectedLift = { choga: 3.12, giwa: 4.32, hero: 5.6, palace: 3.2, temple: 3 };
   async function focusAndCapture(name, parcel) {
     if (selected) {
       await finishTransition('return');
@@ -89,12 +89,15 @@ try {
       .find((candidate) => candidate.parcelId === parcel.parcelId);
     const wanted = expectedLift[name];
     check(Number.isFinite(current?.focusTargetLift)
-      && (wanted == null
-        ? current.focusTargetLift >= 1.65 && current.focusTargetLift <= 2.5
-        : Math.abs(current.focusTargetLift - wanted) < 0.011),
-    `${name} aims at door height (${current?.focusTargetLift}m above base)`);
+      && Math.abs(current.focusTargetLift - wanted) < 0.011,
+    `${name} aims at its authored lintel/eave height (${current?.focusTargetLift}m above base)`);
     check(Math.abs(framing.targetY - current.focusTargetY) < 0.11,
       `${name} runtime target matches planned framing (${framing.targetY}/${current.focusTargetY})`);
+    if (name === 'giwa' || name === 'choga' || name === 'hero') {
+      const eyeHeight = current.focusCameraY - current.focusBaseY;
+      check(Math.abs(eyeHeight - 1.35) < 0.011,
+        `${name} keeps the camera at yard eye height (${eyeHeight.toFixed(2)}m)`);
+    }
 
     // Allow the settled frame, LOD ownership handoff, and Svelte panel CSS morph to
     // finish before capture. Camera motion itself was already sought deterministically.
