@@ -76,6 +76,7 @@ npm run check:wave          # 마을 재생성 scenery 배타 소유·재질 불
 npm run check:choga-roof    # 초가 지붕/벽 접합만 빠르게 검사
 npm run check:roof-seams    # straight-skeleton 기와지붕 face 이음새 검사
 npm run check:cinematic     # 막다른 길·±π·드론 시선의 각속도/각가속도 순수 계약
+npm run check:cinematic:app # 실제 Hero 등장·집 재생성·입력 인계·모바일/reduced-motion
 npm run check:app           # 실제 Vite 앱 Playwright smoke
 npm run check:ink:app       # PBR↔수묵 UI·URL·색공간·pass 휴면·모바일·픽셀 계약
 npm run check:build         # OS 임시 outDir의 격리 production build
@@ -370,6 +371,8 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-determinism.mjs` | 일부 plan 반복성 보조 검사 | worker·forest·temple 전체 계약이 아니다. |
 | `tools/verify-solo-app.mjs` | 외딴집·절 단독 populate와 browser error | 전체 앱·worker 검사가 아니다. |
 | `tools/check-cinematic-turns.mjs` | 브라우저 없이 ±π 최단각, 각속도·각가속도, 주도로 시작점, 합성 막다른 길 반복 왕복 | 실제 마을 지형과 앱 카메라 배선은 확인하지 않는다. |
+| `tools/check-cinematic-reveal.mjs` | Three 없이 arrival/rebuild의 seed 결정론, 정확한 양 끝점, 0 끝점 속도, 최대 시선 회전, compact/reduced-motion, solar-opening 안전 구도의 결정론·눈높이·망원 보상, fitted 처마/계획 공공 소품 blocker, 막힌 기존점의 hysteresis 배제 | 실제 OrbitControls·DoF·조립은 확인하지 않는다. |
+| `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
 | `tools/verify-cine.mjs` | 세 규모 drone path와 walker 100초 수학·결정론 | 앱 배선은 확인하지 않는다. |
 | `tools/verify-cinewire.mjs` | 앱 패스 경계 시선 상한·시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |
 | `tools/check-audio.mjs` | 합성음 RMS, 시간·날씨·BGM 배선, source/node teardown | 공유 `AudioContext` 자체는 닫지 않으며 시작/정지·연결/해제 identity를 비교한다. |

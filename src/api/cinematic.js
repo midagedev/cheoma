@@ -6,6 +6,7 @@ export {
   VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_ZOOM,
   dollyDistanceForFov,
+  fovForDollyScale,
   dollyScaleForFov,
   equivalentDistanceAtFov,
   lensScaleForCamera,
@@ -29,3 +30,8 @@ export {
   roofTopAt,
 } from '../cinematic/dronepath.js';
 export { createWalker } from '../cinematic/walker.js';
+export {
+  createArchitecturalReveal,
+  createArchitecturalRevealTimeline,
+  sampleArchitecturalReveal,
+} from '../cinematic/architectural-reveal.js';

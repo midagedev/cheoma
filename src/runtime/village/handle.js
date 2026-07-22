@@ -168,8 +168,11 @@ export function createVillageHandle(opts, seed, plan, group) {
     if (!p) return null;
     return {
       parcelId: p.parcelId, mesh: p.mesh, bbox: p.bbox.clone(),
+      focusBounds: p.focusBounds?.clone?.() || p.bbox.clone(),
       buildingSpec: p.buildingSpec, worldCenter: p.worldCenter.clone(),
+      baseCameraFraming: cloneCameraFraming(p.baseCameraFraming || p.cameraFraming),
       cameraFraming: cloneCameraFraming(p.cameraFraming),
+      cameraVisibility: p.cameraVisibility ? structuredClone(p.cameraVisibility) : null,
       dims: p.dims.clone(), rotY: p.rotY,
       H: p.dims.y, maxDim: Math.max(p.dims.x, p.dims.y, p.dims.z),
     };
@@ -787,7 +790,7 @@ export function createVillageHandle(opts, seed, plan, group) {
         parcel.editRoofBounds = editRoofBounds;
         const spec = buildEditedParcelSpec(parcel, newParams);
         const proxy = proxyById.get(parcelId);
-        if (proxy) refreshParcelPickProxy(proxy, parcel, site, spec);
+        if (proxy) refreshParcelPickProxy(proxy, parcel, site, spec, proxies, plan);
         if (refreshFlora) refreshVillageFlora();
       }
       if (snow.isActive()) snow.inject(g);

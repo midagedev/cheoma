@@ -7,7 +7,7 @@ import {
   parcelSolarAccessPolygon,
   parcelWorldPoint,
 } from './parcel-contract.js';
-import { parcelLocalRoofBounds } from './house-footprint.js';
+import { parcelEffectiveRoofBounds } from './house-footprint.js';
 import { planParcelFocus } from '../generators/shared/parcel-spatial.js';
 import {
   CITY_WALL_DIMENSIONS,
@@ -92,14 +92,6 @@ export function yardTreeCandidates(parcel, rng) {
     .filter((point) => !poly || G.pointInPoly(point, poly));
 }
 
-function houseRoofBounds(parcel) {
-  const explicit = parcel.editRoofBounds;
-  if (explicit && [explicit.minX, explicit.maxX, explicit.minZ, explicit.maxZ].every(Number.isFinite)) {
-    return explicit;
-  }
-  return parcelLocalRoofBounds(parcel);
-}
-
 function circleTouchesRect(point, radius, rect, clearance = 0) {
   const dx = point.x < rect.minX ? rect.minX - point.x : point.x > rect.maxX ? point.x - rect.maxX : 0;
   const dz = point.z < rect.minZ ? rect.minZ - point.z : point.z > rect.maxZ ? point.z - rect.maxZ : 0;
@@ -119,7 +111,7 @@ function roofWorldBounds(parcel, rect) {
 // 계약을 쓴다. 실제 variant 처마, 남측 활동마당, 표준 포커스 시선을 같은 수관 반경으로 검사한다.
 export function yardCanopyBlocked(parcel, localPoint, radius) {
   if (localCanopyBlocksSolarAccess(parcel, localPoint, radius)) return true;
-  if (circleTouchesRect(localPoint, radius, houseRoofBounds(parcel), 0.35)) return true;
+  if (circleTouchesRect(localPoint, radius, parcelEffectiveRoofBounds(parcel), 0.35)) return true;
   const focus = planParcelFocus(parcel);
   const camera = parcelLocalPoint(parcel, { x: focus.cameraX, z: focus.cameraZ });
   const target = parcelLocalPoint(parcel, { x: focus.worldX, z: focus.worldZ });
@@ -182,7 +174,7 @@ export function createVegetationSpatial(plan, site, { cellSize = DEFAULT_CELL_SI
 
     // 일반 forest clearing보다 좁은 실제 처마 footprint. 마당나무 query는 이것만 소비해
     // 자기 필지 안 배치를 허용하면서도 이웃집 처마까지 수관이 닿지 않게 한다.
-    const roof = houseRoofBounds(parcel);
+    const roof = parcelEffectiveRoofBounds(parcel);
     insert(expandedBounds(roofWorldBounds(parcel, roof), 0.35), (x, z, radius, point) =>
       circleTouchesRect(parcelLocalPoint(parcel, point), radius, roof, 0.35), true, true, true);
 

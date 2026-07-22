@@ -67,15 +67,24 @@ function parcelBounds(parcel) {
   };
 }
 
-function parcelFocusAzimuth(parcel, bounds) {
+function parcelFocusAzimuthRange(parcel, bounds) {
   const corridor = parcel.solarAccess;
-  if (!corridor) return FOCUS_AZIMUTH_MAX;
+  if (!corridor) return { min: -FOCUS_AZIMUTH_MAX, max: FOCUS_AZIMUTH_MAX };
   const forward = Math.max(1, corridor.localEnd - bounds.centerZ);
-  // Turn away from an off-centre fitted house, then clamp the angle so the ray at
-  // the end of the reserved solar opening still keeps a small lateral margin.
-  const sign = bounds.centerX > 0 ? -1 : 1;
-  const available = Math.max(0.2, corridor.halfWidth - 0.3 + Math.abs(bounds.centerX));
-  return sign * Math.min(FOCUS_AZIMUTH_MAX, Math.atan2(available, forward));
+  const left = Math.max(0.2, corridor.halfWidth - 0.3 + bounds.centerX);
+  const right = Math.max(0.2, corridor.halfWidth - 0.3 - bounds.centerX);
+  return {
+    min: -Math.min(FOCUS_AZIMUTH_MAX, Math.atan2(left, forward)),
+    max: Math.min(FOCUS_AZIMUTH_MAX, Math.atan2(right, forward)),
+  };
+}
+
+function parcelFocusAzimuth(parcel, bounds, range) {
+  if (!parcel.solarAccess) return FOCUS_AZIMUTH_MAX;
+  // Turn away from an off-centre fitted house. The complete safe interval is
+  // retained for the deterministic visibility selector, which may step toward
+  // the centre without leaving the reserved solar opening.
+  return bounds.centerX > 0 ? range.min : range.max;
 }
 
 // 필지 포커스 프록시와 카메라의 순수 XZ 계획. picking.js가 THREE 객체를 조립하고,
@@ -86,7 +95,8 @@ export function planParcelFocus(parcel) {
   const depth = bounds.depth * 1.08;
   const height = parcel.hero ? 14 : (parcel.kind === 'giwa' ? 9 : 6.5);
   const rotationY = parcelRotY(parcel);
-  const azimuth = parcelFocusAzimuth(parcel, bounds);
+  const azimuthRange = parcelFocusAzimuthRange(parcel, bounds);
+  const azimuth = parcelFocusAzimuth(parcel, bounds, azimuthRange);
   const cos = Math.cos(rotationY), sin = Math.sin(rotationY);
   const worldX = parcel.center.x + bounds.centerX * cos + bounds.centerZ * sin;
   const worldZ = parcel.center.z - bounds.centerX * sin + bounds.centerZ * cos;
@@ -105,6 +115,9 @@ export function planParcelFocus(parcel) {
     depth,
     height,
     rotationY,
+    azimuth,
+    azimuthMin: azimuthRange.min,
+    azimuthMax: azimuthRange.max,
     worldX,
     worldZ,
     cameraX: worldX + offset.x,

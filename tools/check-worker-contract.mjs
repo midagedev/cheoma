@@ -33,13 +33,14 @@ const expectedSceneHashes = {
   hanyang: '363f908e:35b5a258:5d9e8c8f:e1300546',
 };
 const expectedProxyHashes = {
-  // Lintel/eave residential targets viewed upward from the shared yard eye height, plus
-  // the variable temple bounds and its south-facing 26° telephoto framing.
-  // #56 adds the two public dancheong edit axes to palace/temple descriptors.
-  village: '9d335f2b',
-  town: 'dcec68f4',
-  capital: '076490b7',
-  hanyang: 'acc98190',
+  // Residential focus endpoints choose among three deterministic candidates
+  // inside the solar opening using fitted roof OBBs plus planned feature blockers.
+  // Scene bytes stay unchanged; only public camera framing hashes intentionally
+  // move. #56's palace/temple dancheong edit axes remain in the proxy contract.
+  village: 'ede9fc45',
+  town: 'ec997638',
+  capital: '18dba27e',
+  hanyang: 'dad837f5',
 };
 
 const server = await createServer({

@@ -110,6 +110,12 @@ export function dollyDistanceForFov(distance, fromFov, toFov) {
   return distance * dollyScaleForFov(fromFov, toFov);
 }
 
+/** Compensating FOV after multiplying camera-to-target distance by `scale`. */
+export function fovForDollyScale(fov, scale) {
+  if (!validFov(fov) || !Number.isFinite(scale) || scale <= 0) return fov;
+  return 2 * Math.atan(Math.tan(fov * DEG * 0.5) / scale) / DEG;
+}
+
 /** Distance as perceived at referenceFov; useful for screen-space LOD decisions. */
 export function equivalentDistanceAtFov(distance, actualFov, referenceFov) {
   if (!Number.isFinite(distance) || !validFov(actualFov) || !validFov(referenceFov)) return distance;

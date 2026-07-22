@@ -6,7 +6,7 @@
   "scripts": {
     "check": "node tools/check-fast.mjs",
     "check:all": "npm run check && npm run check:app && npm run check:ink:app && npm run check:petals && npm run check:winter:app && npm run check:worker && npm run check:audio && npm run check:temple:browser && npm run check:parcel-rebuild:browser",
-    "check:full": "npm run check:all && npm run check:dof:app && npm run check:lod:app && npm run check:build",
+    "check:full": "npm run check:all && npm run check:dof:app && npm run check:lod:app && npm run check:cinematic:app && npm run check:build",
     "check:pr": "node tools/check-pr.mjs",
     "check:verification-plan": "node tools/check-verification-plan.mjs",
     "check:verification-browser": "node tools/check-verification-browser.mjs",
@@ -20,7 +20,8 @@
     "check:ink:app": "node tools/check-ink-app.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
-    "check:cinematic": "node tools/check-cinematic-turns.mjs",
+    "check:cinematic": "node tools/check-cinematic-turns.mjs && node tools/check-cinematic-reveal.mjs",
+    "check:cinematic:app": "node tools/check-cinematic-reveal-app.mjs",
     "check:citywall": "node tools/check-citywall.mjs",
     "check:dof": "node tools/check-dof.mjs",
     "check:dancheong": "node tools/check-dancheong-contract.mjs",
