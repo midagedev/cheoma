@@ -233,6 +233,27 @@
 - URL: `refs/INDEX.md` §3 (타국 목조건축)
 - 라이선스: CC BY / CC BY-SA. **자금성 모델 등 일부는 "NoAI" 표기(생성형 AI 학습·입력 금지)** — 시각 대조로만 참고하고 학습·입력에는 사용하지 않음.
 
+### 29. 국립중앙박물관 — 인왕제색도 · 조선시대 실경산수화 해설
+- 국립중앙박물관 / 인왕제색도 큐레이터 추천·수어영상, 《우리 강산을 그리다: 화가의 시선, 조선시대 실경산수화》 전시 해설.
+- 실제 지형의 특징을 선택적으로 강조한 화면 구성, 짙은 바위와 비·안개의 여백, 작은 집과 소나무 숲의 대비를 설명.
+- **활용 / Use:** 수묵 모드의 밝은 안개 여백·농묵 지형 덩어리·실경을 존중하는 선택적 단순화 기준 / Basis for bright mist negative space, concentrated dark terrain masses, and selective simplification that preserves the real landscape character in ink mode.
+- URL: https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?relicRecommendId=962060&schM=view · https://vcm.museum.go.kr/MUSEUM/contents/M0506000000.do?arcId=18702&catCustomType=post&catId=11804 · https://www.museum.go.kr/MUSEUM/contents/M0202030000.do?act=past&exhiSpThemId=3803&listType=list&menuId=past&schM=view
+- 라이선스: 웹 열람 자료. 해설문·영상의 권리는 국립중앙박물관에 있으며, 앱에는 원문·영상·소장품 이미지를 재배포하지 않고 링크와 사실 확인에 기반한 요약만 수록.
+
+### 30. The Metropolitan Museum of Art — Korean Landscape Painting · Diamond Mountains
+- The Met / *Mountain and Water: Korean Landscape Painting, 1400–1800*, *Diamond Mountains: Travel and Nostalgia in Korean Art*.
+- 정선 산수화의 날카로운 수직선, 수목을 이루는 짧은 횡선과 점, 넓은 담묵 및 안개 속에서 솟는 산의 화면 구성을 해설.
+- **활용 / Use:** 바위·수목·건축을 구분하는 선 계층과 넓은 담묵, 화면 절단 및 대기 원근의 시각 기준 / Visual basis for the line hierarchy separating rock, foliage, and architecture, broad pale washes, assertive cropping, and atmospheric depth.
+- URL: https://www.metmuseum.org/ko/essays/mountain-and-water-korean-landscape-painting-1400-1800 · https://www.metmuseum.org/exhibitions/listings/2018/diamond-mountains/exhibition-gallery
+- 라이선스: Met 웹 해설의 이용조건 적용. 앱에는 원문·전시 이미지를 복제하지 않고 링크와 미술사적 해석을 요약해 수묵 합성 기준으로만 사용.
+
+### 31. 국가유산포털 — 정선 필 금강전도
+- 국가유산청 국가유산포털 / 국보 「정선 필 금강전도」 공식 지정 정보.
+- 작품의 공식 명칭·제작자·시대·지정 정보를 확인하는 1차 기관 메타데이터.
+- **활용 / Use:** 진경산수 근거 작품의 식별·시대 고증과 농담·선 계층 아트디렉션의 출처 교차 확인 / Primary-source cross-check for the identity and period of the true-view landscape reference used to direct ink gradation and line hierarchy.
+- URL: https://www.heritage.go.kr/heri/cul/culSelectDetail.do?VdkVgwKey=11%2C02170000%2C11&pageNo=1_1_1_1
+- 라이선스: 국가유산포털 콘텐츠별 이용조건 적용. 앱에는 링크와 공개 지정 메타데이터를 인용한 요약만 수록하고 원문·이미지는 재배포하지 않음.
+
 ---
 
 ## 제작 노트 (Production note)

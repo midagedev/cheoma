@@ -1,3 +1,4 @@
-// Reusable ink rendering and framework-neutral persisted state.
-export { createInkPass, INK_PALETTE, makePaperTexture, setupInk } from '../render/ink.js';
-export { RENDER_STYLE_IDS, normalizeRenderStyle } from '../render/ink-state.js';
+// Reusable WebGL ink rendering. Persisted state lives in the lightweight render-style API.
+export {
+  createInkPass, INK_PALETTE, InkBeautyCapturePass, makePaperTexture, setupInk,
+} from '../render/ink.js';

@@ -95,6 +95,7 @@ export function makePaperTexture(size = 2048, seed = 20260716) {
 const InkShader = {
   uniforms: {
     tDiffuse: { value: null },   // 뷰티(조명 결과, 선형)
+    tBeauty: { value: null },    // RenderPass 직후의 안정된 선형 HDR 농담 원본
     tNormal: { value: null },    // 뷰공간 노멀(0.5 인코딩)
     tDepth: { value: null },     // 깊이(비선형 [0,1])
     tPaper: { value: null },     // 한지 텍스처
@@ -127,7 +128,7 @@ const InkShader = {
   `,
   fragmentShader: /* glsl */`
     varying vec2 vUv;
-    uniform sampler2D tDiffuse, tNormal, tDepth, tPaper;
+    uniform sampler2D tDiffuse, tBeauty, tNormal, tDepth, tPaper;
     uniform vec2 resolution;
     uniform float cameraNear, cameraFar;
     uniform vec3 inkColor, paperColor;
@@ -250,7 +251,10 @@ const InkShader = {
 
       // ---- 농담 워시 (휘도 양자화) ----
       vec3 lin = texture2D(tDiffuse, vUv).rgb;
-      vec3 srgb = pow(max(lin, 0.0), vec3(1.0 / 2.2)); // 지각 톤
+      // PBR fullscreen pass가 sleep해도 농담 원본은 RenderPass 직후 texture로 고정된다.
+      // mixAmount=1에서 tDiffuse는 최종 수묵색에 관여하지 않아 sleep 경계의 색/농담 pop이 없다.
+      vec3 beautyLin = texture2D(tBeauty, vUv).rgb;
+      vec3 srgb = pow(max(beautyLin, 0.0), vec3(1.0 / 2.2)); // 지각 톤
       float lum = dot(srgb, vec3(0.299, 0.587, 0.114));
       vec3 chroma = srgb - lum;
 
@@ -305,10 +309,74 @@ const InkShader = {
   `,
 };
 
-// 뷰티 + 노멀/깊이를 함께 처리하는 커스텀 Pass.
-// RenderPass가 뷰티를 채운 뒤, 이 Pass가 노멀·깊이 오프스크린을 렌더하고 먹 합성을 수행.
+const BeautyCopyShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse;
+    void main() { gl_FragColor = texture2D(tDiffuse, vUv); }
+  `,
+};
+
+// RenderPass 직후의 raw linear-HDR beauty를 보존한다. 이후 grade/bloom/DoF/flare가
+// composer ping-pong target을 바꿔도 InkPass의 농담 입력은 이 texture 하나로 안정된다.
+export class InkBeautyCapturePass extends Pass {
+  constructor({ resolutionScale = 0.75 } = {}) {
+    super();
+    this.needsSwap = false;
+    this.resolutionScale = Math.min(1, Math.max(0.35, resolutionScale));
+    this.captureCount = 0;
+    this.target = new THREE.WebGLRenderTarget(1, 1, {
+      type: THREE.HalfFloatType,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: false,
+    });
+    this.material = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(BeautyCopyShader.uniforms),
+      vertexShader: BeautyCopyShader.vertexShader,
+      fragmentShader: BeautyCopyShader.fragmentShader,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.fsQuad = new FullScreenQuad(this.material);
+  }
+
+  setSize(width, height) {
+    this.target.setSize(
+      Math.max(1, Math.round(width * this.resolutionScale)),
+      Math.max(1, Math.round(height * this.resolutionScale)),
+    );
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    this.captureCount++;
+    const previous = renderer.getRenderTarget();
+    this.material.uniforms.tDiffuse.value = readBuffer.texture;
+    renderer.setRenderTarget(this.target);
+    this.fsQuad.render(renderer);
+    renderer.setRenderTarget(previous);
+  }
+
+  dispose() {
+    this.target.dispose();
+    this.material.dispose();
+    this.fsQuad.dispose();
+  }
+}
+
+// 안정된 raw beauty + 노멀/깊이를 함께 처리하는 커스텀 Pass.
+// InkBeautyCapturePass가 농담 원본을 보존하고, 이 Pass가 노멀·깊이와 최종 합성을 맡는다.
 export class InkPass extends Pass {
-  constructor(scene, camera, paperTexture, { resolutionScale = 0.75 } = {}) {
+  constructor(scene, camera, paperTexture, { resolutionScale = 0.75, beautyTexture = null } = {}) {
     super();
     this.scene = scene;
     this.camera = camera;
@@ -346,6 +414,8 @@ export class InkPass extends Pass {
 
     this.uniforms = THREE.UniformsUtils.clone(InkShader.uniforms);
     this.uniforms.tPaper.value = paperTexture;
+    this.uniforms.tBeauty.value = beautyTexture;
+    this.useExternalBeauty = !!beautyTexture;
     this.uniforms.cameraNear.value = camera.near;
     this.uniforms.cameraFar.value = camera.far;
     this.material = new THREE.ShaderMaterial({
@@ -408,6 +478,7 @@ export class InkPass extends Pass {
 
     // 2) 먹 합성.
     this.uniforms.tDiffuse.value = readBuffer.texture;
+    if (!this.useExternalBeauty) this.uniforms.tBeauty.value = readBuffer.texture;
     this.uniforms.tNormal.value = this.normalTarget.texture;
     this.uniforms.tDepth.value = this.normalTarget.depthTexture;
     this.uniforms.cameraNear.value = this.camera.near;
@@ -442,10 +513,15 @@ export class InkPass extends Pass {
 // 반환: { composer, inkPass, paperTexture, setSize, dispose }
 export function setupInk(renderer, scene, camera, options = {}) {
   const paperTexture = options.paperTexture || makePaperTexture();
+  const beautyPass = new InkBeautyCapturePass(options);
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const inkPass = new InkPass(scene, camera, paperTexture, options);
+  composer.addPass(beautyPass);
+  const inkPass = new InkPass(scene, camera, paperTexture, {
+    ...options,
+    beautyTexture: beautyPass.target.texture,
+  });
   if (options.uniforms) {
     for (const [k, v] of Object.entries(options.uniforms)) {
       if (inkPass.uniforms[k]) inkPass.uniforms[k].value = v;
@@ -458,6 +534,7 @@ export function setupInk(renderer, scene, camera, options = {}) {
     composer.setSize(w, h);
     // composer.setSize가 각 Pass.setSize를 호출하지만, DPR 반영 위해 명시적으로도 세팅.
     const dpr = renderer.getPixelRatio();
+    beautyPass.setSize(w * dpr, h * dpr);
     inkPass.setSize(w * dpr, h * dpr);
   };
   const size = renderer.getSize(new THREE.Vector2());
@@ -465,34 +542,43 @@ export function setupInk(renderer, scene, camera, options = {}) {
 
   return {
     composer,
+    beautyPass,
     inkPass,
     paperTexture,
     setSize,
     dispose() {
       inkPass.dispose();
+      beautyPass.dispose();
       paperTexture.dispose();
       composer.dispose();
     },
   };
 }
 
-// Unified-composer adapter: consumers that already own Render→…→Output insert this pass
-// immediately before Output instead of creating a second composer.
+// Unified-composer adapter: consumers that already own Render→…→Output insert sourcePass
+// immediately after Render and pass immediately before Output instead of creating a second composer.
 export function createInkPass(scene, camera, options = {}) {
   const paperTexture = options.paperTexture || makePaperTexture(options.paperSize, options.paperSeed);
-  const inkPass = new InkPass(scene, camera, paperTexture, options);
+  const beautyPass = new InkBeautyCapturePass(options);
+  const inkPass = new InkPass(scene, camera, paperTexture, {
+    ...options,
+    beautyTexture: beautyPass.target.texture,
+  });
   if (options.uniforms) {
     for (const [key, value] of Object.entries(options.uniforms)) {
       if (inkPass.uniforms[key]) inkPass.uniforms[key].value = value;
     }
   }
   return {
+    sourcePass: beautyPass,
     pass: inkPass,
     paperTexture,
     setSize(width, height, pixelRatio = 1) {
+      beautyPass.setSize(width * pixelRatio, height * pixelRatio);
       inkPass.setSize(width * pixelRatio, height * pixelRatio);
     },
     dispose() {
+      beautyPass.dispose();
       inkPass.dispose();
       if (!options.paperTexture) paperTexture.dispose();
     },

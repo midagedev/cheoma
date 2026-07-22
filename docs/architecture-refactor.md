@@ -75,7 +75,8 @@ app/src/                       Svelte UI
 | `src/api/cinematic.js` | 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | THREE runtime; 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
 | `src/api/rendering.js` | 해제 경합을 견디는 shader precompile | browser WebGL runtime |
-| `src/api/ink.js` | 재사용 수묵 pass·종이 texture, Three 없는 표현 상태 | 상태는 Node/worker/browser, pass는 WebGL browser runtime |
+| `src/api/render-style.js` | Three·DOM 없는 `pbr | ink` 표현 상태 | Node, worker, browser |
+| `src/api/ink.js` | 재사용 수묵 pass·raw beauty capture·종이 texture | WebGL browser runtime |
 | `src/api/props.js` | prop registry와 생성 | THREE와 canvas provider가 있는 runtime |
 | `src/api/export.js` | export 분석·GLB·download·postcard | 분석 제외 대부분 browser |
 | `src/api/index.js` | 전체 browser runtime façade | WebGL browser runtime |
@@ -84,7 +85,7 @@ app/src/                       Svelte UI
 
 ### 수묵 렌더 재사용 경계
 
-수묵 렌더는 생성 계획과 표현 상태를 섞지 않는다. `src/render/ink-state.js`의 순수 상태, `src/render/ink.js`의 WebGL pass, `src/api/ink.js`의 공개 façade까지만 코어가 소유하고, 제품 전환·URL·post 휴면은 `app/src/engine/ink-mode-runtime.js`가 소유한다. shader precompile만 제공하는 가벼운 `src/api/rendering.js`에는 WebGL 수묵 import를 섞지 않는다. 외부 프로젝트는 같은 pass를 독립 composer에 삽입할 수 있으며 `OutputPass`를 마지막 하나로 유지해야 한다. 앱은 pass를 처음 진입할 때만 만들고 dispose 때 render target과 종이 texture를 함께 회수한다. 세부 미학·색공간·깊이 계약은 [`ink-landscape.md`](ink-landscape.md)를 따른다.
+수묵 렌더는 생성 계획과 표현 상태를 섞지 않는다. `src/render/ink-state.js`와 `src/api/render-style.js`의 순수 상태, `src/render/ink.js`와 `src/api/ink.js`의 WebGL pass를 분리하고, 제품 전환·URL·post 휴면은 `app/src/engine/ink-mode-runtime.js`가 소유한다. URL 파싱과 shader precompile façade에는 WebGL 수묵 import를 섞지 않으며 `check:architecture`가 render-style closure의 Three·DOM 부재를 검사한다. 외부 프로젝트는 Render 직후 raw beauty capture와 Output 직전 Ink를 같은 composer에 삽입하고 `OutputPass`를 마지막 하나로 유지해야 한다. 앱은 pass를 처음 진입할 때만 만들고, PBR 복귀 때 둘을 비활성화하며, dispose 때 render target과 종이 texture를 함께 회수한다. 세부 미학·색공간·깊이 계약은 [`ink-landscape.md`](ink-landscape.md)를 따른다.
 
 ## 보존되는 런타임 계약
 

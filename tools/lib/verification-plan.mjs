@@ -137,7 +137,7 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
-    if (path === 'src/api/ink.js') {
+    if (path === 'src/api/ink.js' || path === 'src/api/render-style.js') {
       select('public ink rendering API changed', 'app', 'ink-app');
       return { gates, reasons };
     }

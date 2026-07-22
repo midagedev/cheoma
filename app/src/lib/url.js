@@ -3,7 +3,7 @@
 import { newSeed } from './seed.js';
 
 import { normalizeSunsetLook } from '../../../src/api/environment.js';
-import { normalizeRenderStyle } from '../../../src/api/ink.js';
+import { normalizeRenderStyle } from '../../../src/api/render-style.js';
 
 const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 

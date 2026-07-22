@@ -43,6 +43,7 @@ assert.deepEqual(ids(['src/render/ink.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['app/src/engine/ink-mode-runtime.js']), ['core', 'app', 'ink-app', 'build']);
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
 assert.deepEqual(ids(['src/api/ink.js']), ['core', 'app', 'ink-app']);
+assert.deepEqual(ids(['src/api/render-style.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
   'core', 'app', 'petals', 'winter-app', 'worker', 'lod-wave',
 ]);

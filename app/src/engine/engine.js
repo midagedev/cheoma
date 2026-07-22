@@ -2438,6 +2438,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugPostPassOrder: () => postRuntime.debugPassOrder(),
     debugPostResolution: () => postRuntime.debugResolution(),
     debugInk: () => inkModeRuntime.debugState(),
+    debugInkPbrAwake: (awake) => inkModeRuntime.debugSetPbrAwake(awake),
     debugDof: debugDofState,
     debugDofSeek: debugSeekDofTween,
     debugRenderDofFrame: () => { renderFrame(0); return debugDofState(); },

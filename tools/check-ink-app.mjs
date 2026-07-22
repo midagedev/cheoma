@@ -56,6 +56,38 @@ async function captureScene(page, name) {
   return buffer;
 }
 
+async function measureFullInkContinuity(page) {
+  return page.evaluate(() => {
+    const engine = window.__engine;
+    const gl = engine.renderer.getContext();
+    const width = gl.drawingBufferWidth, height = gl.drawingBufferHeight;
+    const read = (awake) => {
+      engine.debugInkPbrAwake(awake);
+      engine.debugRenderDofFrame();
+      gl.finish();
+      const pixels = new Uint8Array(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return pixels;
+    };
+    const asleep = read(false);
+    const awake = read(true);
+    engine.debugInkPbrAwake(false);
+    engine.debugRenderDofFrame();
+    let sum = 0, max = 0, changed = 0, signal = 0, samples = 0;
+    for (let i = 0; i < asleep.length; i += 16) {
+      for (let channel = 0; channel < 3; channel++) {
+        const delta = Math.abs(asleep[i + channel] - awake[i + channel]);
+        sum += delta;
+        max = Math.max(max, delta);
+        changed += delta > 1 ? 1 : 0;
+        signal += awake[i + channel];
+        samples++;
+      }
+    }
+    return { mean: sum / samples, max, changed: changed / samples, signal: signal / samples };
+  });
+}
+
 const server = await createServer({
   root: APP_ROOT,
   configFile: join(APP_ROOT, 'vite.config.js'),
@@ -111,6 +143,46 @@ try {
   pass(initial.buttons.length === 2 && initial.buttons[0].pressed === 'true' && initial.buttons[1].pressed === 'false',
     'render-style control exposes a two-state pressed contract');
 
+  // The art-direction sources must be visible through the product's real References path,
+  // not stranded in an implementation note that visitors cannot discover.
+  await page.locator('.seal-label .info').click();
+  await page.waitForSelector('.modal[role="dialog"]', { timeout });
+  const references = await page.evaluate(() => {
+    const items = [...document.querySelectorAll('.modal .cat li')].map((item) => ({
+      title: item.querySelector('.it-title')?.textContent?.trim() || '',
+      use: item.querySelector('.it-use')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      license: item.querySelector('.it-lic')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      links: [...item.querySelectorAll('.it-links a')].map((link) => ({
+        href: link.href,
+        target: link.target,
+        rel: link.rel,
+      })),
+    }));
+    const required = [
+      items.find((item) => item.title.startsWith('국립중앙박물관 —')),
+      items.find((item) => item.title.startsWith('The Metropolitan Museum of Art —')),
+      items.find((item) => item.title.startsWith('국가유산포털 — 정선 필 금강전도')),
+    ];
+    return {
+      found: required.filter(Boolean).length,
+      text: required.filter(Boolean).map((item) => item.use).join(' '),
+      licensed: required.filter(Boolean).every((item) => item.license.length > 8),
+      links: required.filter(Boolean).flatMap((item) => item.links),
+    };
+  });
+  pass(references.found === 3
+    && ['여백', '농묵', '선 계층'].every((term) => references.text.includes(term)),
+  'Reference modal exposes institutional ink sources and their applied visual rules');
+  pass(references.licensed && references.links.length === 6
+    && references.links.some((link) => link.href.includes('museum.go.kr'))
+    && references.links.some((link) => link.href.includes('metmuseum.org'))
+    && references.links.some((link) => link.href.includes('heritage.go.kr'))
+    && references.links.every((link) => link.target === '_blank'
+      && link.rel.includes('noopener') && link.rel.includes('noreferrer')),
+  'Reference modal renders source licenses and six safe authoritative links');
+  await page.locator('.modal .x').click();
+  await page.waitForSelector('.modal[role="dialog"]', { state: 'detached', timeout });
+
   // Native keyboard activation is the actual product path; no debug setter is used here.
   await page.locator('.render-style button:last-child').focus();
   await page.keyboard.press('Enter');
@@ -145,9 +217,12 @@ try {
   'keyboard toggle synchronizes engine, accessible UI, live URL, and share URL');
   pass(inkState.outputLast === 'OutputPass' && inkState.passes.at(-2) === 'InkPass',
     'ink remains inside the unified composer immediately before the one OutputPass', inkState.passes.join(' → '));
+  pass(inkState.passes.filter((name) => name === 'InkBeautyCapturePass').length === 1
+    && inkState.ink.sourceEnabled && inkState.ink.beautyScale <= 0.75,
+  'one reduced raw-beauty copy stabilizes ink tone before PBR passes');
   pass(!Object.values(inkState.ink.pbrPasses).some(Boolean),
     'fully covered ink mode sleeps grade, bloom, DoF, and flare', JSON.stringify(inkState.ink.pbrPasses));
-  pass(inkState.programs - initial.programs <= 5,
+  pass(inkState.programs - initial.programs <= 6,
     'ink shader vocabulary keeps program growth bounded', `programs ${initial.programs}→${inkState.programs}`);
   pass(inkState.ink.normalScale <= 0.75 && inkState.ink.normalExcluded > 0 && inkState.ink.normalDithered > 0,
     'normal/depth work is reduced-resolution, excludes atmosphere, and preserves instFade holes',
@@ -155,6 +230,13 @@ try {
   pass(inkState.ink.normalDrawCalls > 0 && inkState.ink.normalDrawCalls <= initial.sceneCalls,
     'reduced normal pass stays within the opaque scene draw budget',
     `normal=${inkState.ink.normalDrawCalls} scene=${initial.sceneCalls}`);
+
+  // Render the exact same simulation state twice and only toggle the covered PBR passes.
+  // Reading the default framebuffer synchronously avoids animation/screenshot timing noise.
+  const fullInkContinuity = await measureFullInkContinuity(page);
+  pass(fullInkContinuity.signal > 20 && fullInkContinuity.mean <= 0.05 && fullInkContinuity.max <= 1,
+    'full-ink output is pixel-stable when covered PBR passes sleep',
+    `signal=${fullInkContinuity.signal.toFixed(1)} mean=${fullInkContinuity.mean.toFixed(3)} max=${fullInkContinuity.max} changed=${(fullInkContinuity.changed * 100).toFixed(2)}%`);
   pass(difference > 28 && inkStats.chroma < pbrStats.chroma * 0.65,
     'ink frame is visually distinct and substantially desaturated',
     `diff=${difference.toFixed(1)} chroma ${pbrStats.chroma.toFixed(1)}→${inkStats.chroma.toFixed(1)}`);
@@ -182,6 +264,10 @@ try {
   await captureScene(page, 'ink-focus.png');
   pass(focusState.sample && !!focusState.selected && focusState.ink.amount >= 0.999,
     'telephoto house focus preserves fully covered ink policy');
+  const focusedInkContinuity = await measureFullInkContinuity(page);
+  pass(focusedInkContinuity.signal > 20 && focusedInkContinuity.mean <= 0.05 && focusedInkContinuity.max <= 1,
+    'focused full-ink output is pixel-stable when DoF and flare wake behind it',
+    `signal=${focusedInkContinuity.signal.toFixed(1)} mean=${focusedInkContinuity.mean.toFixed(3)} max=${focusedInkContinuity.max} changed=${(focusedInkContinuity.changed * 100).toFixed(2)}%`);
 
   await page.evaluate(() => document.querySelector('.render-style button:first-child')?.focus());
   await page.keyboard.press('Space');
@@ -195,6 +281,21 @@ try {
   pass(restored.state.renderStyle === 'pbr' && restored.ink.pbrAwake && !restored.url.includes('mode='),
     'Space-key return restores PBR policy and removes the default URL token');
   pass(restored.output === 'OutputPass', 'PBR return keeps OutputPass last');
+  const dormantBeauty = await page.evaluate(async () => {
+    const before = window.__engine.debugInk();
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    const after = window.__engine.debugInk();
+    return {
+      sourceEnabled: after.sourceEnabled,
+      inkEnabled: after.inkEnabled,
+      before: before.beautyCaptures,
+      after: after.beautyCaptures,
+    };
+  });
+  pass(!dormantBeauty.sourceEnabled && !dormantBeauty.inkEnabled
+    && dormantBeauty.after === dormantBeauty.before,
+    'PBR return disables the lazy beauty copy and restores baseline pass work',
+    JSON.stringify(dormantBeauty));
 
   // A shared ink URL must restore before the first product-ready frame rather than flash PBR.
   await page.goto(`${base}&mode=ink`, { waitUntil: 'domcontentloaded', timeout });
@@ -217,12 +318,14 @@ try {
       heights: buttons.map((button) => button.getBoundingClientRect().height),
       pressed: buttons.map((button) => button.getAttribute('aria-pressed')),
       normalScale: window.__engine.debugInk().normalScale,
+      beautyScale: window.__engine.debugInk().beautyScale,
     };
   });
   pass(mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
     'mobile control stays on-screen with 44px touch targets', JSON.stringify(mobileUi));
   pass(mobileUi.pressed[1] === 'true', 'mobile shared URL exposes the restored ink state');
-  pass(mobileUi.normalScale <= 0.5, 'compact ink uses a half-resolution normal target');
+  pass(mobileUi.normalScale <= 0.5 && mobileUi.beautyScale <= 0.5,
+    'compact ink uses half-resolution normal and raw-beauty targets');
   await mobile.close();
 
   pass(runtimeErrors.length === 0, 'ink rendering emits no runtime or shader errors', runtimeErrors.join(' | '));

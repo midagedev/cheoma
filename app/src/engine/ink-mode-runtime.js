@@ -1,4 +1,5 @@
-import { createInkPass, normalizeRenderStyle } from '../../../src/api/ink.js';
+import { createInkPass } from '../../../src/api/ink.js';
+import { normalizeRenderStyle } from '../../../src/api/render-style.js';
 
 const EPSILON = 1e-4;
 const FADE_SECONDS = 0.72;
@@ -42,6 +43,8 @@ export function createInkModeRuntime({
         silhouetteWidth: compact ? 2.2 : 2.6,
       },
     });
+    postRuntime.addPassAfterRender(ink.sourcePass, 'InkBeautyCapturePass');
+    ink.sourcePass.enabled = amount > EPSILON || target > EPSILON;
     ink.pass.enabled = amount > EPSILON;
     postRuntime.addPassBeforeOutput(ink.pass, 'InkPass');
     const size = renderer.getSize({ set(x, y) { this.x = x; this.y = y; return this; } });
@@ -54,8 +57,8 @@ export function createInkModeRuntime({
     pbrAwake = awake;
     if (post.gradePass) post.gradePass.enabled = awake;
     post.bloomPass.enabled = awake;
-    post.setEnabled(awake);
-    post.setRimEnabled?.(awake && policy.focused);
+    // Fresnel rim/sun glow belong to the raw scene beauty and cost no duplicate scene pass.
+    // Keep that source policy stable while only the covered fullscreen effects sleep.
     post.setFlareEnabled?.(awake && policy.flare);
     post.setDofAmount?.(awake ? policy.dofAmount : 0);
   }
@@ -64,6 +67,7 @@ export function createInkModeRuntime({
     amount = Math.min(1, Math.max(0, next));
     const entry = amount > EPSILON || target > EPSILON ? ensureInk() : ink;
     if (entry) {
+      entry.sourcePass.enabled = amount > EPSILON || target > EPSILON;
       entry.pass.uniforms.mixAmount.value = amount;
       entry.pass.enabled = amount > EPSILON;
     }
@@ -84,8 +88,8 @@ export function createInkModeRuntime({
     policy.focused = !!focused;
     policy.flare = !!flare;
     policy.dofAmount = Number.isFinite(dofAmount) ? Math.min(1, Math.max(0, dofAmount)) : 0;
+    post.setRimEnabled?.(policy.focused);
     if (pbrAwake) {
-      post.setRimEnabled?.(policy.focused);
       post.setFlareEnabled?.(policy.flare);
       post.setDofAmount?.(policy.dofAmount);
     }
@@ -113,6 +117,10 @@ export function createInkModeRuntime({
         transitioning: Math.abs(target - amount) > EPSILON,
         pbrAwake,
         created: !!ink,
+        inkEnabled: !!ink?.pass.enabled,
+        sourceEnabled: !!ink?.sourcePass.enabled,
+        beautyScale: ink?.sourcePass.resolutionScale ?? null,
+        beautyCaptures: ink?.sourcePass.captureCount ?? 0,
         normalScale: ink?.pass.resolutionScale ?? null,
         normalExcluded: ink?.pass.normalExcludedCount ?? 0,
         normalDithered: ink?.pass.normalDitheredCount ?? 0,
@@ -125,11 +133,15 @@ export function createInkModeRuntime({
         },
       };
     },
+    debugSetPbrAwake(awake) {
+      setPbrAwake(!!awake);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       setPbrAwake(true);
       if (ink) {
+        postRuntime.removePass(ink.sourcePass);
         postRuntime.removePass(ink.pass);
         ink.dispose();
         ink = null;
