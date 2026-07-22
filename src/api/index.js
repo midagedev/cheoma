@@ -9,3 +9,4 @@ export * from './props.js';
 export * from './temple.js';
 export * from './export.js';
 export * from './rendering.js';
+export * from './surface-materials.js';

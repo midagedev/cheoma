@@ -63,6 +63,11 @@ try {
       && reference.text.includes('17배 필지 비례')
       && reference.links.some((url) => url.includes('contents.history.go.kr/front/km/view.do')),
   'enhanced house/lot legal-limit evidence and non-literal use render in Product References');
+  pass(reference.text.includes('Wikimedia Commons · Bernard Gagnon — 낙안읍성 흙길·마당')
+      && reference.text.includes('사진 픽셀이나 자국을 복제하지 않고')
+      && reference.links.some((url) => url.includes('Naganeupseong_Village_06.jpg'))
+      && reference.links.some((url) => url.includes('Naganeupseong_Village_08.jpg')),
+  'packed-earth visual evidence, non-copying use, and CC0 source links render in Product References');
   await referenceDialog.locator('button[aria-label="닫기"]').click();
 
   // __SHOT_READY는 렌더 준비 신호이지 1.4초 진입 돌리의 완료 신호가 아니다. 실제 제품 tween의

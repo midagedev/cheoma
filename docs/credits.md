@@ -268,6 +268,13 @@
 - URL: https://www.heritage.go.kr/heri/cul/culSelectDetail.do?VdkVgwKey=11%2C02170000%2C11&pageNo=1_1_1_1
 - 라이선스: 국가유산포털 콘텐츠별 이용조건 적용. 앱에는 링크와 공개 지정 메타데이터를 인용한 요약만 수록하고 원문·이미지는 재배포하지 않음.
 
+### 35. Wikimedia Commons · Bernard Gagnon — 낙안읍성 흙길·마당
+- Bernard Gagnon, *Naganeupseong Village 06* 및 *Naganeupseong Village 08*, 낙안읍성, 순천, 2022-10-01, own work.
+- 흙 통행면과 마당의 따뜻하고 낮은 대비, 눌린 입도 변화는 보이지만 짧은 간격으로 반복되는 장식 무늬는 없다는 시각 비교 근거.
+- **활용 / Use:** 사진 픽셀이나 자국을 복제하지 않고, 흙길의 저대비 albedo·bump 범위와 반복 억제·중원경 mipmap 기준에만 번역 / Qualitative basis for low-contrast packed-earth albedo and bump, repetition control, and mipmapped mid/far quietness; no pixels or literal marks were copied.
+- URL: https://commons.wikimedia.org/wiki/File:Naganeupseong_Village_06.jpg · https://commons.wikimedia.org/wiki/File:Naganeupseong_Village_08.jpg
+- 라이선스: 저작자가 두 파일을 **CC0 1.0 Universal Public Domain Dedication**으로 공개. 앱은 사진을 번들·재배포하지 않고 링크와 독립 절차 생성 결과만 제공.
+
 ---
 
 ## 제작 노트 (Production note)

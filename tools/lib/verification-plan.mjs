@@ -1,6 +1,6 @@
 const FULL_GATES = Object.freeze([
   'core', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
-  'parcel-rebuild-browser', 'build',
+  'parcel-rebuild-browser', 'surface-browser', 'build',
 ]);
 
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$)|\.gitignore$)/;
@@ -98,6 +98,9 @@ function routePath(path) {
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
     select('village generation changed', 'app', 'worker');
+    if (path === 'src/generators/village/roads.js') {
+      select('packed-earth road rendering changed', 'surface-browser');
+    }
     if (/^src\/village\/(?:parcel-rebuild|vegetation-spatial|gardens|populate)\.js$/.test(path)) {
       select('parcel rebuild planning or flora changed', 'parcel-rebuild-browser');
     }
@@ -136,6 +139,11 @@ function routePath(path) {
     return { gates, reasons };
   }
 
+  if (path.startsWith('src/surfaces/')) {
+    select('procedural surface source or adapter changed', 'app', 'worker', 'surface-browser');
+    return { gates, reasons };
+  }
+
   if (path.startsWith('src/api/')) {
     if (path === 'src/api/ink.js' || path === 'src/api/render-style.js') {
       select('public ink rendering API changed', 'app', 'ink-app');
@@ -155,6 +163,10 @@ function routePath(path) {
     }
     if (/^src\/api\/(?:building|cinematic|export|props|rendering)\.js$/.test(path)) {
       select('public feature API changed', 'app');
+      return { gates, reasons };
+    }
+    if (/^src\/api\/surface-material(?:-plan|s)\.js$/.test(path)) {
+      select('public procedural surface API changed', 'app', 'worker', 'surface-browser');
       return { gates, reasons };
     }
   }
@@ -236,6 +248,9 @@ export function verificationCommands(plan) {
       command: 'npm',
       args: ['run', 'check:parcel-rebuild:browser'],
     });
+  }
+  if (has('surface-browser')) {
+    commands.push({ id: 'surface-browser', command: 'npm', args: ['run', 'check:surface:browser'] });
   }
   if (has('build')) commands.push({ id: 'build', command: 'npm', args: ['run', 'check:build'] });
   return commands;

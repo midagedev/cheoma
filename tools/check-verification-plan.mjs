@@ -10,6 +10,12 @@ assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
 assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'winter-app', 'lod-wave']);
 assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/generators/village/roads.js']), [
+  'core', 'app', 'worker', 'surface-browser',
+]);
+assert.deepEqual(ids(['src/surfaces/packed-earth.js']), [
+  'core', 'app', 'worker', 'surface-browser',
+]);
 assert.deepEqual(ids(['src/village/parcel-rebuild.js']), [
   'core', 'app', 'worker', 'parcel-rebuild-browser',
 ]);

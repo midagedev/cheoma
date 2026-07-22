@@ -5,7 +5,7 @@
   "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
   "scripts": {
     "check": "node tools/check-fast.mjs",
-    "check:all": "npm run check && npm run check:app && npm run check:ink:app && npm run check:petals && npm run check:winter:app && npm run check:worker && npm run check:audio && npm run check:temple:browser && npm run check:parcel-rebuild:browser",
+    "check:all": "npm run check && npm run check:app && npm run check:ink:app && npm run check:petals && npm run check:winter:app && npm run check:worker && npm run check:audio && npm run check:temple:browser && npm run check:parcel-rebuild:browser && npm run check:surface:browser",
     "check:full": "npm run check:all && npm run check:dof:app && npm run check:lod:app && npm run check:cinematic:app && npm run check:build",
     "check:pr": "node tools/check-pr.mjs",
     "check:verification-plan": "node tools/check-verification-plan.mjs",
@@ -42,6 +42,8 @@
     "check:parcel-rebuild:browser": "node tools/check-parcel-rebuild-browser.mjs",
     "check:roof-seams": "node tools/check-roof-seams.mjs",
     "check:roads": "node tools/check-road-contract.mjs",
+    "check:surface": "node tools/check-surface-materials.mjs",
+    "check:surface:browser": "node tools/check-surface-materials-browser.mjs",
     "check:temple": "node tools/check-temple-contract.mjs",
     "check:temple:browser": "node tools/check-temple-browser.mjs",
     "check:wall-gate": "node tools/check-wall-gate-contract.mjs",

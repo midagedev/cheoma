@@ -1,6 +1,8 @@
 import { smoothstep } from '../../core/math/scalar.js';
 import * as THREE from 'three';
 import { sampleRoadSurface } from '../../village/road-surface.js';
+import { createPackedEarthTile } from '../../surfaces/packed-earth.js';
+import { createPackedEarthTextures } from '../../surfaces/packed-earth-textures.js';
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 // ───────────────────────── 도로 ─────────────────────────
@@ -11,10 +13,12 @@ const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 const R_BEIGE = linCol(0x9a8b70);   // 평지 도로(밟힌 흙) — 기존값
 const R_GRASS = linCol(0x676f45);   // 지형 초지(buildSiteTerrain 과 동일 톤)
 const R_FOREST = linCol(0x435a2a);  // 지형 숲(능선)
+const ROAD_TEXTURE_METERS = 16;
+const ROAD_TEXTURE_COS = 0.8910065242; // 27°: avoid axis-aligned bands on N–S/E–W roads.
+const ROAD_TEXTURE_SIN = 0.4539904997;
+const PACKED_EARTH_SOURCE = createPackedEarthTile();
 export function buildRoads(site, roads) {
   const group = new THREE.Group(); group.name = 'village-roads';
-  // color=white + vertexColors: 색은 정점에 실어 평지는 기존 베이지 그대로, 급사면만 지형에 뮤트.
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1, metalness: 0 });
   const tmp = new THREE.Color(), terr = new THREE.Color();
   const roadColAt = (x, z, level, out) => {
     const hill = site.hillAt(x, z);
@@ -26,7 +30,7 @@ export function buildRoads(site, roads) {
     terr.copy(R_GRASS).lerp(R_FOREST, smoothstep(0.06, 0.55, hill));
     return out.copy(R_BEIGE).lerp(terr, mute);
   };
-  const pos = [], col = [], idx = [];
+  const pos = [], col = [], uv = [], idx = [];
   // terrain-cell 경계에서 이웃 clip 조각이 공유하는 정점을 재사용한다. level을 key에 포함해
   // 서로 다른 등급(색)의 겹친 길이 한 정점으로 섞이지 않게 한다.
   const pointIndex = new Map();
@@ -37,6 +41,11 @@ export function buildRoads(site, roads) {
     const index = pos.length / 3;
     pos.push(point.x, point.y, point.z);
     roadColAt(point.x, point.z, level, tmp); col.push(tmp.r, tmp.g, tmp.b);
+    // World-space UV keeps one continuous grain frame across strips, joins, and road levels.
+    uv.push(
+      (point.x * ROAD_TEXTURE_COS + point.z * ROAD_TEXTURE_SIN) / ROAD_TEXTURE_METERS,
+      (-point.x * ROAD_TEXTURE_SIN + point.z * ROAD_TEXTURE_COS) / ROAD_TEXTURE_METERS,
+    );
     pointIndex.set(key, index);
     return index;
   };
@@ -52,8 +61,25 @@ export function buildRoads(site, roads) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
+  const packedEarth = createPackedEarthTextures(PACKED_EARTH_SOURCE);
+  // Vertex colour still owns road hierarchy and slope muting. The neutral map adds only
+  // compacted-earth variation; bump uses the same scale without extra geometry or materials.
+  const roadMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    map: packedEarth.albedo,
+    bumpMap: packedEarth.height,
+    bumpScale: 0.08,
+    roughness: 1,
+    metalness: 0,
+  });
+  roadMat.name = 'packed-earth-road';
+  // Kept visibly trodden during snowfall; terrain/roof accumulation still surrounds it.
+  // This also avoids a dedicated map+bump+vertexColor snow program family for one flat plane.
+  roadMat.userData.snowSurface = false;
   const mesh = new THREE.Mesh(geo, roadMat);
   mesh.name = 'village-roads-m0';
   mesh.receiveShadow = true;

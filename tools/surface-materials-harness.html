@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #b9c4c4; }
+    canvas { display: block; }
+  </style>
+  <script type="importmap">
+  {"imports":{
+    "three":"/app/node_modules/three/build/three.module.js",
+    "three/addons/":"/app/node_modules/three/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { buildRoads } from '../src/generators/village/roads.js';
+import { disposeObjectTree } from '../src/core/three-resources.js';
+import { exportGLB } from '../src/export/gltf.js';
+
+const query = new URLSearchParams(location.search);
+const enabled = query.get('mode') !== 'off';
+const probe = query.get('probe') === '1';
+const shift = Number(query.get('shift') || 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1);
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.06;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbcc9ca);
+scene.fog = new THREE.Fog(0xbcc9ca, 85, 145);
+scene.add(new THREE.HemisphereLight(0xdbe3dc, 0x625844, 1.45));
+const sun = new THREE.DirectionalLight(0xffd6a0, 3.8);
+sun.position.set(-24, 18, 12);
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(220, 220),
+  new THREE.MeshStandardMaterial({ color: 0x6f7553, roughness: 1 }),
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.012;
+scene.add(ground);
+
+const site = { R: 105, terrainR: 105, heightAt: () => 0, hillAt: () => 0 };
+const roadData = [{
+  id: 'fixture-000', level: 'jungno', width: 7.2,
+  pts: [
+    { x: 4, z: 38 }, { x: 2, z: 20 }, { x: -3, z: 5 },
+    { x: 2, z: -15 }, { x: -4, z: -35 }, { x: 3, z: -69 },
+  ],
+}];
+const roads = buildRoads(site, roadData);
+const road = roads.getObjectByName('village-roads-m0');
+const sourceTexture = road.material.map;
+scene.add(roads);
+if (!enabled) {
+  road.material.map = null;
+  road.material.bumpMap = null;
+  road.material.needsUpdate = true;
+}
+
+// Restrained field stones provide fixed scale cues without introducing another texture.
+const stones = new THREE.InstancedMesh(
+  new THREE.DodecahedronGeometry(0.32, 0),
+  new THREE.MeshStandardMaterial({ color: 0x77715f, roughness: 1 }),
+  42,
+);
+const matrix = new THREE.Matrix4();
+for (let index = 0; index < stones.count; index++) {
+  const side = index % 2 ? -1 : 1;
+  const z = 27 - index * 2.25;
+  const x = side * (6.2 + (index % 7) * 0.18) + Math.sin(z * 0.07) * 2.2;
+  matrix.makeScale(1 + (index % 3) * 0.14, 0.55 + (index % 4) * 0.07, 0.9);
+  matrix.setPosition(x, 0.18, z);
+  stones.setMatrixAt(index, matrix);
+}
+scene.add(stones);
+
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.1, 180);
+camera.position.set(12 + shift, 4.2, 34);
+const target = new THREE.Vector3(0 + shift, 0.12, -12);
+camera.lookAt(target);
+
+function textureStatistics(texture) {
+  const { data, width, height } = texture.image;
+  const valueAt = (x, y) => {
+    const offset = (y * width + x) * 4;
+    return data[offset] * 0.2126 + data[offset + 1] * 0.7152 + data[offset + 2] * 0.0722;
+  };
+  let sum = 0, sumSq = 0, seamX = 0, seamY = 0, internal = 0, count = 0;
+  for (let y = 0; y < height; y++) {
+    seamX += Math.abs(valueAt(width - 1, y) - valueAt(0, y));
+    for (let x = 0; x < width; x++) {
+      const value = valueAt(x, y);
+      sum += value; sumSq += value * value;
+      if (x + 1 < width) { internal += Math.abs(value - valueAt(x + 1, y)); count++; }
+    }
+  }
+  for (let x = 0; x < width; x++) seamY += Math.abs(valueAt(x, height - 1) - valueAt(x, 0));
+  const samples = width * height, mean = sum / samples;
+  let variance = 0, halfX = 0, halfY = 0;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const centered = valueAt(x, y) - mean;
+    variance += centered * centered;
+    halfX += centered * (valueAt((x + width / 2) % width, y) - mean);
+    halfY += centered * (valueAt(x, (y + height / 2) % height) - mean);
+  }
+  return {
+    mean,
+    deviation: Math.sqrt(sumSq / samples - mean * mean),
+    seamRatioX: (seamX / height) / (internal / count),
+    seamRatioY: (seamY / width) / (internal / count),
+    halfCorrelationX: halfX / variance,
+    halfCorrelationY: halfY / variance,
+  };
+}
+
+let lifecycle = null, exportResult = null, plateau = null;
+if (probe) {
+  const disposable = buildRoads(site, roadData);
+  const disposableRoad = disposable.getObjectByName('village-roads-m0');
+  const owned = [disposableRoad.geometry, disposableRoad.material,
+    disposableRoad.material.map, disposableRoad.material.bumpMap];
+  const counts = new Map(owned.map((resource) => [resource, 0]));
+  for (const resource of owned) resource.addEventListener('dispose', () => {
+    counts.set(resource, counts.get(resource) + 1);
+  });
+  const resources = disposeObjectTree(disposable);
+  lifecycle = {
+    geometries: resources.geometries.size,
+    materials: resources.materials.size,
+    textures: resources.textures.size,
+    disposedOnce: [...counts.values()].every((count) => count === 1),
+  };
+
+  const json = await exportGLB(roads, { binary: false, maxTriangles: 100_000 });
+  exportResult = {
+    images: json.images?.length || 0,
+    textures: json.textures?.length || 0,
+    materials: json.materials?.length || 0,
+  };
+
+  const samples = [];
+  for (let cycle = 0; cycle < 4; cycle++) {
+    const sample = buildRoads(site, roadData);
+    scene.add(sample);
+    renderer.render(scene, camera);
+    samples.push(renderer.info.memory.textures);
+    scene.remove(sample);
+    disposeObjectTree(sample);
+    renderer.render(scene, camera);
+  }
+  plateau = { samples, spread: Math.max(...samples) - Math.min(...samples) };
+}
+
+renderer.info.reset();
+renderer.render(scene, camera);
+const roadMaterials = new Set();
+const roadTextures = new Set();
+roads.traverse((object) => {
+  const materials = Array.isArray(object.material)
+    ? object.material : (object.material ? [object.material] : []);
+  for (const material of materials) {
+    roadMaterials.add(material);
+    if (material.map) roadTextures.add(material.map);
+    if (material.bumpMap) roadTextures.add(material.bumpMap);
+  }
+});
+window.__SURFACE_DIAG = {
+  enabled,
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  materialCount: roadMaterials.size,
+  textureCount: roadTextures.size,
+  rendererTextures: renderer.info.memory.textures,
+  programs: renderer.info.programs.length,
+  source: textureStatistics(sourceTexture),
+  lifecycle,
+  export: exportResult,
+  plateau,
+};
+window.__SURFACE_READY = true;
+</script>
+</body>
+</html>

@@ -54,7 +54,8 @@ export function snowProfileForObject(object, material = object?.material) {
 }
 
 export function patchSnowMaterial(material, amountUniform, { profile = 'surface' } = {}) {
-  if (!material?.isMeshStandardMaterial || !amountUniform || material.userData?.__snowPatched) return false;
+  if (!material?.isMeshStandardMaterial || !amountUniform || material.userData?.__snowPatched
+    || material.userData?.snowSurface === false) return false;
   const P = PROFILES[profile] || PROFILES.surface;
   material.userData = material.userData || {};
   material.userData.__snowPatched = true;
