@@ -1,12 +1,19 @@
 import * as THREE from 'three';
 import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
 import { setupPost } from '../../../src/api/environment.js';
+import { createPostQualityRuntime } from './post-quality-runtime.js';
 
 /** Wire the app's flagship post-processing pipeline and its hover outline. */
 export function createPostRuntime({ renderer, scene, camera, width, height, perf = false, compact = false }) {
   const post = setupPost({ renderer, scene, camera });
   post.setDof(!perf);
   post.setFlareEnabled(!perf);
+  const qualityRuntime = createPostQualityRuntime({
+    camera,
+    bokehPass: post.bokehPass,
+    width,
+    height,
+  });
 
   const applyBloomResolution = (w, h) => {
     if (compact) post.bloomPass.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
@@ -42,6 +49,13 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
     post,
     outline,
     dofOn: !perf,
+    updateQuality(dt, referenceDepth) {
+      if (disposed) return null;
+      return qualityRuntime.update(dt, referenceDepth);
+    },
+    debugQuality() {
+      return qualityRuntime.debug();
+    },
     debugPassOrder() {
       return post.composer.passes.map((pass) => debugNames.get(pass) || pass?.name || 'Pass');
     },
@@ -56,6 +70,21 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
           width: outline.renderTargetMaskBuffer.width,
           height: outline.renderTargetMaskBuffer.height,
         },
+      };
+    },
+    debugResources() {
+      return {
+        bokehPass: post.bokehPass,
+        depthTarget: post.bokehPass._renderTargetDepth,
+        depthTexture: post.bokehPass._renderTargetDepth?.texture,
+        bokehMaterial: post.bokehPass.materialBokeh,
+        instFadeDepthMaterial: post.bokehPass._instFadeDepthMaterial,
+        lodScreenDoorDepthMaterial: post.bokehPass._lodScreenDoorDepthMaterial,
+        composerTarget1: post.composer.renderTarget1,
+        composerTarget2: post.composer.renderTarget2,
+        composerReadBuffer: post.composer.readBuffer,
+        composerWriteBuffer: post.composer.writeBuffer,
+        passCount: post.composer.passes.length,
       };
     },
     addPassBeforeOutput(pass, name = 'Pass') {
@@ -79,6 +108,7 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
     resize(w, h) {
       if (disposed) return;
       post.setSize(w, h);
+      qualityRuntime.resize(w, h);
       // composer.setSize restores bloom to full resolution, so compact mode reapplies its cap.
       applyBloomResolution(w, h);
       // OutlinePass 크기는 composer가 현재 DPR을 반영한 device px로 이미 전파한다.

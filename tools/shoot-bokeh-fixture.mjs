@@ -22,6 +22,7 @@ const ROUNDNESS_RADIUS = 20;
 const ENERGY_RADIUS = 26;
 const STRIP_RADIUS = 20;
 const ROUNDNESS_LIMIT = 1.12;
+const ANGULAR_UNIFORMITY_LIMIT = 0.32;
 
 function pixelLuminance(png, x, y) {
   const offset = (y * png.width + x) * 4;
@@ -86,6 +87,21 @@ function measureLight(png, light, background, radius = ROUNDNESS_RADIUS) {
   const delta = Math.sqrt((xx - yy) ** 2 + 4 * xy ** 2);
   const minor = Math.max(1e-9, (trace - delta) * 0.5);
   const major = Math.max(minor, (trace + delta) * 0.5);
+  const angularEnergy = Array(24).fill(0);
+  for (const sample of samples) {
+    const dx = sample.x - centroidX;
+    const dy = sample.y - centroidY;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 3 || distance > radius * 0.9) continue;
+    const angle = (Math.atan2(dy, dx) + Math.PI * 2) % (Math.PI * 2);
+    const bin = Math.min(angularEnergy.length - 1, Math.floor(angle / (Math.PI * 2) * angularEnergy.length));
+    angularEnergy[bin] += sample.weight;
+  }
+  const angularMean = angularEnergy.reduce((sum, value) => sum + value, 0) / angularEnergy.length;
+  const angularVariance = angularEnergy.reduce(
+    (sum, value) => sum + (value - angularMean) ** 2,
+    0,
+  ) / angularEnergy.length;
   return {
     name: light.name,
     x: light.x,
@@ -94,6 +110,7 @@ function measureLight(png, light, background, radius = ROUNDNESS_RADIUS) {
     centroidY,
     energy,
     aspect: Math.sqrt(major / minor),
+    angularVariation: angularMean > 0 ? Math.sqrt(angularVariance) / angularMean : Infinity,
     rmsRadius: Math.sqrt(trace),
   };
 }
@@ -106,6 +123,17 @@ function measureLights(image, lights) {
     const wide = measureLight(png, light, background, ENERGY_RADIUS);
     return { ...shape, energy: wide.energy };
   });
+}
+
+function maxChannelDifference(a, b) {
+  const first = PNG.sync.read(a);
+  const second = PNG.sync.read(b);
+  if (first.width !== second.width || first.height !== second.height) return Infinity;
+  let difference = 0;
+  for (let index = 0; index < first.data.length; index++) {
+    difference = Math.max(difference, Math.abs(first.data[index] - second.data[index]));
+  }
+  return difference;
 }
 
 function makePanStrip(frames, lightNames, scale = 4) {
@@ -149,6 +177,9 @@ const server = await createServer({
 let browser;
 const errors = [];
 try {
+  if (process.env.CHEOMA_BROWSER !== 'chrome') {
+    throw new Error('shoot:bokeh GPU evidence requires CHEOMA_BROWSER=chrome');
+  }
   await server.listen();
   const port = server.httpServer.address().port;
   browser = await launchVerificationBrowser();
@@ -166,7 +197,11 @@ try {
     + '&seed=42&vseed=20260716&time=night&season=summer&weather=clear';
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
-  await reportWebGLRenderer(page, 'bokeh-fixture');
+  const gpuInfo = await reportWebGLRenderer(page, 'bokeh-fixture');
+  if (!gpuInfo?.renderer
+      || /swiftshader|llvmpipe|software|basic render/i.test(`${gpuInfo.renderer} ${gpuInfo.vendor}`)) {
+    throw new Error(`shoot:bokeh requires a hardware Chrome renderer: ${JSON.stringify(gpuInfo)}`);
+  }
 
   // A locator screenshot includes overlapping HTML controls. Hide every canvas
   // sibling while keeping its ancestor chain laid out at the product dimensions.
@@ -283,6 +318,7 @@ try {
     camera.lookAt(engine.__controls.target);
     camera.updateMatrixWorld(true);
     engine.debugTuneDof({ amount: 1, aperture: 0.00015, maxBlur: 0.01 });
+    for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
     engine.debugRenderDofFrame();
 
     const projectedLights = lights.map((light) => {
@@ -323,20 +359,38 @@ try {
     throw new Error(`bokeh aperture stretched to ${maxAspect.toFixed(3)} (limit ${ROUNDNESS_LIMIT})`);
   }
 
+  // Preserve a stable reference at the final pan pose. The moving sequence will
+  // arrive at this exact camera again through the 13-tap path, then settle back
+  // to the reference without changing the aperture center or radius.
+  const finalTargetX = 0.105;
+  const stableFinalState = await page.evaluate((targetX) => {
+    const engine = window.__engine;
+    engine.camera.position.set(0, 0, 100);
+    engine.__controls.target.set(targetX, 0, 0);
+    engine.camera.lookAt(engine.__controls.target);
+    engine.camera.updateMatrixWorld(true);
+    engine.debugRenderDofFrame(1 / 60);
+    for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
+    return engine.debugRenderDofFrame();
+  }, finalTargetX);
+  const stableFinalReference = await page.locator('canvas').screenshot();
+  const stableFinalPath = join(outputDir, 'bokeh-final-stable-reference.png');
+  await writeFile(stableFinalPath, stableFinalReference);
+
   // Eight fixed yaw steps move the chart by roughly two pixels. This is slow
   // enough to expose screen-space kernel crawl without conflating it with a large
   // perspective/composition change.
   const panFrames = [];
   for (let index = 0; index < 8; index++) {
     const targetX = -0.105 + index * (0.21 / 7);
-    const lights = await page.evaluate(({ targetX, names }) => {
+    const frame = await page.evaluate(({ targetX, names }) => {
       const engine = window.__engine;
       engine.camera.position.set(0, 0, 100);
       engine.__controls.target.set(targetX, 0, 0);
       engine.camera.lookAt(engine.__controls.target);
       engine.camera.updateMatrixWorld(true);
-      engine.debugRenderDofFrame();
-      return names.map((name) => {
+      const state = engine.debugRenderDofFrame(1 / 60);
+      const lights = names.map((name) => {
         const object = engine.scene.getObjectByName(name);
         const projected = object.getWorldPosition(object.position.clone()).project(engine.camera);
         return {
@@ -345,9 +399,49 @@ try {
           y: (-projected.y * 0.5 + 0.5) * 600,
         };
       });
+      return { lights, state };
     }, { targetX, names: fixture.projectedLights.map((light) => light.name) });
     const image = await page.locator('canvas').screenshot();
-    panFrames.push({ targetX, lights, image, metrics: measureLights(image, lights) });
+    panFrames.push({
+      targetX,
+      lights: frame.lights,
+      state: frame.state,
+      image,
+      metrics: measureLights(image, frame.lights),
+    });
+  }
+  if (!panFrames.every((frame) => frame.state.postQuality === 0
+      && frame.state.activeBokehTaps === 13)) {
+    throw new Error('camera pan did not remain on the fully-moving 13-tap path');
+  }
+
+  const settleFrames = [];
+  for (let index = 0; index < 22; index++) {
+    const state = await page.evaluate(() => window.__engine.debugRenderDofFrame(1 / 60));
+    if ([0, 3, 7, 10, 14, 18, 21].includes(index)) {
+      const image = await page.locator('canvas').screenshot();
+      const lights = panFrames.at(-1).lights;
+      settleFrames.push({ index, lights, state, image, metrics: measureLights(image, lights) });
+    }
+  }
+  const settledState = settleFrames.at(-1).state;
+  const settledImage = settleFrames.at(-1).image;
+  const finalPixelDifference = maxChannelDifference(stableFinalReference, settledImage);
+  if (settledState.postQuality !== 1 || settledState.activeBokehTaps !== 41) {
+    throw new Error('static camera did not restore the exact stable 41-tap path');
+  }
+  if (finalPixelDifference > 1) {
+    throw new Error(`settled bokeh differs from its stable reference by ${finalPixelDifference} channels`);
+  }
+  const unobstructedNames = new Set(
+    fixture.projectedLights.map((light) => light.name).filter((name) => name !== 'foreground-over-focus'),
+  );
+  const transitionMetrics = [...panFrames, ...settleFrames]
+    .flatMap((frame) => frame.metrics)
+    .filter((sample) => unobstructedNames.has(sample.name));
+  const maxAngularVariation = Math.max(...transitionMetrics.map((sample) => sample.angularVariation));
+  if (maxAngularVariation > ANGULAR_UNIFORMITY_LIMIT) {
+    throw new Error(`moving/settling bokeh has visible radial lobes ${maxAngularVariation.toFixed(3)} (limit ${ANGULAR_UNIFORMITY_LIMIT})`);
   }
   const motion = fixture.projectedLights.map((light) => {
     const samples = panFrames.map((frame) => frame.metrics.find((sample) => sample.name === light.name));
@@ -378,18 +472,135 @@ try {
     rmsRatio: overlapOn.rmsRadius / overlapOff.rmsRadius,
     limitation: 'central-depth gather retains bloom but cannot scatter across an opaque focus plane',
   };
-  const panStrip = join(outputDir, 'bokeh-pan-strip.png');
-  await writeFile(panStrip, makePanStrip(panFrames, [
+  const panStrip = join(outputDir, 'bokeh-pan-settle-strip.png');
+  await writeFile(panStrip, makePanStrip([...panFrames, ...settleFrames], [
     'foreground-amber-left',
     'background-gold-left',
     'foreground-over-focus',
   ]));
+
+  const gpuTiming = await page.evaluate(async () => {
+    const engine = window.__engine;
+    const gl = engine.renderer.getContext();
+    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    if (!ext || typeof gl.createQuery !== 'function') return { available: false };
+    // Timer-query results on ANGLE/Metal have enough per-query jitter that
+    // comparing isolated A/B samples is flaky. Measure larger batches in
+    // alternating ABBA blocks: each block balances short-term GPU drift while
+    // keeping the total number of query waits lower than the old 12-pair gate.
+    const batchSize = 24;
+    let sawDisjoint = false;
+    const measure = async () => {
+      const resources = engine.debugPostResources();
+      const query = gl.createQuery();
+      gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+      for (let index = 0; index < batchSize; index++) {
+        resources.bokehPass.render(
+          engine.renderer,
+          resources.composerWriteBuffer,
+          resources.composerReadBuffer,
+          0,
+          false,
+        );
+      }
+      gl.endQuery(ext.TIME_ELAPSED_EXT);
+      gl.flush();
+      const deadline = performance.now() + 2000;
+      while (performance.now() < deadline
+          && !gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+        await new Promise((resolve) => setTimeout(resolve, 4));
+      }
+      if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return null;
+      sawDisjoint ||= !!gl.getParameter(ext.GPU_DISJOINT_EXT);
+      const milliseconds = gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6 / batchSize;
+      gl.deleteQuery(query);
+      return milliseconds;
+    };
+    const enterMovingAtFinalPose = () => {
+      const fov = engine.camera.fov;
+      engine.camera.fov = fov + 0.5;
+      engine.camera.updateProjectionMatrix();
+      engine.debugAdvancePostQuality(1 / 60);
+      engine.camera.fov = fov;
+      engine.camera.updateProjectionMatrix();
+      engine.debugAdvancePostQuality(1 / 60);
+    };
+    const settle = () => {
+      for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
+    };
+    const blocks = [];
+    for (let block = 0; block < 3; block++) {
+      const sequence = block % 2 === 0
+        ? ['moving', 'stable', 'stable', 'moving']
+        : ['stable', 'moving', 'moving', 'stable'];
+      const samples = [];
+      for (const quality of sequence) {
+        if (quality === 'moving') enterMovingAtFinalPose();
+        else settle();
+        samples.push({ quality, milliseconds: await measure() });
+      }
+      blocks.push(samples);
+    }
+    const disjoint = sawDisjoint || !!gl.getParameter(ext.GPU_DISJOINT_EXT);
+    if (blocks.flat().some((sample) => sample.milliseconds == null)) {
+      return { available: true, complete: false, disjoint };
+    }
+    const median = (values) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = sorted.length >> 1;
+      return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) * 0.5;
+    };
+    const moving = blocks.flatMap((samples) => samples
+      .filter((sample) => sample.quality === 'moving')
+      .map((sample) => sample.milliseconds));
+    const stable = blocks.flatMap((samples) => samples
+      .filter((sample) => sample.quality === 'stable')
+      .map((sample) => sample.milliseconds));
+    const blockRatios = blocks.map((samples) => {
+      const movingSamples = samples
+        .filter((sample) => sample.quality === 'moving')
+        .map((sample) => sample.milliseconds);
+      const stableSamples = samples
+        .filter((sample) => sample.quality === 'stable')
+        .map((sample) => sample.milliseconds);
+      return median(movingSamples) / median(stableSamples);
+    });
+    return {
+      available: true,
+      complete: true,
+      disjoint,
+      moving,
+      stable,
+      movingMedianMs: median(moving),
+      stableMedianMs: median(stable),
+      ratio: median(moving) / median(stable),
+      blockRatios,
+      blockRatioMedian: median(blockRatios),
+      winningBlocks: blockRatios.filter((ratio) => ratio < 1).length,
+      batchSize,
+    };
+  });
+  if (!gpuTiming.available || !gpuTiming.complete || gpuTiming.disjoint) {
+    throw new Error(`Chrome GPU timer unavailable or invalid: ${JSON.stringify(gpuTiming)}`);
+  }
+  if (!(gpuTiming.ratio < 0.85
+      && gpuTiming.blockRatioMedian < 0.9
+      && gpuTiming.winningBlocks >= 2)) {
+    throw new Error(`13-tap GPU median did not improve on 41 taps: ${JSON.stringify(gpuTiming)}`);
+  }
   console.log(`BOKEH FIXTURE: ${outputDir}`);
   console.log(`fixture: ${JSON.stringify({
     ...fixture,
     off,
     on,
     panStrip,
+    stableFinalPath,
+    stableFinalState,
+    settledState,
+    finalPixelDifference,
+    maxAngularVariation,
+    gpuTiming,
+    gpuInfo,
     pixelStable,
     maxAspect,
     maxMotionAspect,

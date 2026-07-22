@@ -39,7 +39,7 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
-    if (/^app\/src\/(?:App\.svelte|components\/RenderStyleToggle\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
+    if (/^app\/src\/(?:App\.svelte|components\/RenderStyleToggle\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime|post-quality-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
       select('product ink mode integration changed', 'ink-app');
     }
     if (/^app\/src\/(?:components\/EnvironmentDial\.svelte|engine\/engine\.js|lib\/seed\.js)$/.test(path)) {
@@ -51,8 +51,11 @@ function routePath(path) {
     if (path === 'app/src/engine/engine.js') {
       select('engine integration changed', 'dof-app', 'lod-focus', 'lod-wave');
     }
-    if (/^app\/src\/engine\/(?:post-runtime|scene-runtime)\.js$/.test(path)) {
+    if (/^app\/src\/engine\/(?:post-runtime|post-quality-runtime|scene-runtime)\.js$/.test(path)) {
       select('post/scene runtime changed', 'dof-app');
+    }
+    if (/^app\/src\/engine\/post(?:-quality)?-runtime\.js$/.test(path)) {
+      select('adaptive camera quality changed', 'ink-app', 'lod-focus');
     }
     if (path === 'app/src/engine/directional-shadow-runtime.js') {
       select('focused directional shadow framing changed', 'rim', 'lod-focus');
@@ -73,8 +76,11 @@ function routePath(path) {
     if (/^src\/env\/(?:index|mountains|paddies|seasons|sky|snow-material|terrain|trees|weather)\.js$/.test(path)) {
       select('winter surface or environment changed', 'winter-app');
     }
-    if (/^src\/env\/(?:dof|post|stable-bokeh-pass|circular-bokeh-shader|tree-occluder|inst-fade-shader|rim|present-gate)\.js$/.test(path)) {
+    if (/^src\/env\/(?:dof|post|post-quality-state|stable-bokeh-pass|circular-bokeh-shader|tree-occluder|inst-fade-shader|rim|present-gate)\.js$/.test(path)) {
       select('depth/post contract changed', 'dof-app');
+    }
+    if (/^src\/env\/(?:post-quality-state|stable-bokeh-pass|circular-bokeh-shader)\.js$/.test(path)) {
+      select('adaptive post policy changed', 'ink-app', 'lod-focus');
     }
     if (path === 'src/env/rim.js') select('physical rim contract changed', 'rim');
     if (/^src\/env\/(?:petals|weather|seasons)\.js$/.test(path)) {
@@ -165,6 +171,10 @@ function routePath(path) {
     }
     if (path === 'src/api/environment.js') {
       select('environment API changed', 'app', 'dof-app', 'petals', 'winter-app', 'lod-wave');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/post-quality.js') {
+      select('pure adaptive post API changed', 'app', 'ink-app', 'dof-app', 'lod-focus');
       return { gates, reasons };
     }
     if (path === 'src/api/village.js') {

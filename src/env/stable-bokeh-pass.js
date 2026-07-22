@@ -1,7 +1,11 @@
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { MeshDepthMaterial, NoBlending, RGBADepthPacking } from 'three';
 import { contributesDofDepth } from './dof.js';
-import { CIRCULAR_BOKEH_SAMPLE_COUNT, installCircularBokeh } from './circular-bokeh-shader.js';
+import {
+  CIRCULAR_BOKEH_SAMPLE_COUNT,
+  MOVING_BOKEH_SAMPLE_COUNT,
+  installCircularBokeh,
+} from './circular-bokeh-shader.js';
 import { INST_FADE_PROGRAM_VERSION, patchInstFadeShader } from './inst-fade-shader.js';
 import {
   hasLodScreenDoor,
@@ -103,6 +107,15 @@ export class StableBokehPass extends BokehPass {
   setSize(width, height) {
     super.setSize(width, height);
     this.materialBokeh.uniforms.viewportWidth.value = Math.max(1, width);
+  }
+
+  setBokehQuality(value) {
+    const quality = Math.max(0, Math.min(1, Number(value) || 0));
+    this.materialBokeh.uniforms.bokehQuality.value = quality;
+    this.bokehSampleCount = quality > 0
+      ? CIRCULAR_BOKEH_SAMPLE_COUNT
+      : MOVING_BOKEH_SAMPLE_COUNT;
+    return quality;
   }
 
   dispose() {
