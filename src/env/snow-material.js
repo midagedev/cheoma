@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  MATERIAL_PROGRAM_PATCH,
+  addMaterialProgramKey,
+} from '../render/material-program-key.js';
 
 // One accumulation shader shared by the standalone environment and village runtime.
 // Profiles only change coverage/colour constants, so materials with the same native
@@ -60,6 +64,7 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
   material.userData = material.userData || {};
   material.userData.__snowPatched = true;
   material.userData.__snowProfile = profile;
+  material.userData.__snowPatchVersion = MATERIAL_PROGRAM_PATCH.SNOW;
 
   const previousCompile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
@@ -143,10 +148,7 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
         #include <dithering_fragment>`);
   };
 
-  const baseKey = material.customProgramCacheKey
-    && material.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey
-    ? material.customProgramCacheKey() : '';
-  material.customProgramCacheKey = () => `snow-v2|${baseKey}`;
+  addMaterialProgramKey(material, MATERIAL_PROGRAM_PATCH.SNOW);
   material.needsUpdate = true;
   return true;
 }

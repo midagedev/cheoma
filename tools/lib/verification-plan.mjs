@@ -66,6 +66,10 @@ function routePath(path) {
   if (path.startsWith('src/env/') || path.startsWith('src/render/')) {
     select('environment/rendering changed', 'app');
     if (/^src\/render\/(?:ink|ink-state)\.js$/.test(path)) select('ink rendering changed', 'ink-app');
+    if (/^src\/render\/(?:material-program-key|screen-door|lod-screen-door)\.js$/.test(path)) {
+      select('shared screen-door shader contract changed',
+        'ink-app', 'dof-app', 'lod-focus', 'winter-app', 'rim');
+    }
     if (/^src\/env\/(?:index|mountains|paddies|seasons|sky|snow-material|terrain|trees|weather)\.js$/.test(path)) {
       select('winter surface or environment changed', 'winter-app');
     }

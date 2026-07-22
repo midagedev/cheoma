@@ -134,14 +134,15 @@ window.__rimAudit = () => {
         emiss: +lum(mm.emissive, mm.emissiveIntensity).toFixed(4),
         patched: !!(mm.userData && mm.userData.__rimPatched),
         rimMul,
-        // rim.js 와 동일 판정: rim 자체의 stable key와 명시적으로 합성 가능한 cloud key는
-        // 허용하고, snowvol/unknown own key만 incompatible custom으로 분류한다.
+        // rim.js 와 동일 판정: 명시적인 stock-material patch token만 합성 가능하며
+        // snowvol/unknown own key는 incompatible custom으로 분류한다.
         cck: (() => { try {
           if (!mm.customProgramCacheKey || mm.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) return false;
           const k = mm.customProgramCacheKey();
           if (typeof k !== 'string' || k.length === 0) return false;
-          if (k.startsWith('cheoma-rim-physical-v1|')) return false;
-          if (mm.userData?.__cloudShadowPatchVersion === 'cloudshadow-v1' && k.startsWith('cloudshadow|')) return false;
+          const known = new Set(['cheoma-rim-physical-v1', 'cloudshadow-v1', 'snow-v2',
+            'cheoma-lod-screen-door-v1', 'cheoma-inst-fade-v2']);
+          if (k.split('|').filter(Boolean).every((token) => known.has(token))) return false;
           return Object.prototype.hasOwnProperty.call(mm, 'customProgramCacheKey');
         } catch { return true; } })(),
       });

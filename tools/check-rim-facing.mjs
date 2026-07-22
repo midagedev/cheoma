@@ -32,6 +32,8 @@ import {
 } from '/src/env/rim.js';
 import { injectCloudShadow } from '/src/builder/palette.js';
 import { createCloudUniforms } from '/src/env/clouds.js';
+import { patchSnowMaterial } from '/src/env/snow-material.js';
+import { attachLodScreenDoorRoot } from '/src/render/lod-screen-door.js';
 
 const W = 128;
 const H = 96;
@@ -365,9 +367,76 @@ function instanceAndProgramProbe() {
   };
 }
 
+function lodProgramCompositionProbe() {
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 1));
+  const camera = new THREE.OrthographicCamera(-2, 2, 2, -2, 0.1, 20);
+  camera.position.set(0, 0, 5);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+  const plainMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
+  const lodMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
+  const lateSnowLodMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
+  plainMaterial.userData.role = 'roof';
+  lodMaterial.userData.role = 'roof';
+  lateSnowLodMaterial.userData.role = 'roof';
+  const plain = new THREE.Mesh(geometry, plainMaterial);
+  const lod = new THREE.Mesh(geometry, lodMaterial);
+  const lateSnowLod = new THREE.Mesh(geometry, lateSnowLodMaterial);
+  plain.position.x = -0.5;
+  lod.position.x = 0.5;
+  lateSnowLod.position.y = 0.8;
+  plain.frustumCulled = false;
+  lod.frustumCulled = false;
+  lateSnowLod.frustumCulled = false;
+  attachLodScreenDoorRoot(lod);
+  attachLodScreenDoorRoot(lateSnowLod);
+  const cloudUniforms = createCloudUniforms();
+  injectCloudShadow(plainMaterial, cloudUniforms);
+  injectCloudShadow(lodMaterial, cloudUniforms);
+  injectCloudShadow(lateSnowLodMaterial, cloudUniforms);
+  const snowAmount = { value: 0.7 };
+  patchSnowMaterial(plainMaterial, snowAmount, { profile: 'tile' });
+  patchSnowMaterial(lodMaterial, snowAmount, { profile: 'tile' });
+  scene.add(plain, lod, lateSnowLod);
+  const rim = createFresnelRim(scene);
+  rim.apply(scene);
+  // Real lifecycle counterpart: clear weather warms/rim-patches first, then snow arrives.
+  patchSnowMaterial(lateSnowLodMaterial, snowAmount, { profile: 'tile' });
+  rim.setStrength(0);
+  renderer.compile(scene, camera);
+  renderer.setRenderTarget(rt);
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  const plainProgram = renderer.properties.get(plainMaterial).currentProgram;
+  const lodProgram = renderer.properties.get(lodMaterial).currentProgram;
+  const lateSnowLodProgram = renderer.properties.get(lateSnowLodMaterial).currentProgram;
+  const lodPatch = readPatch(renderer, lodMaterial);
+  const result = {
+    plainKey: plainMaterial.customProgramCacheKey(),
+    lodKey: lodMaterial.customProgramCacheKey(),
+    lateSnowLodKey: lateSnowLodMaterial.customProgramCacheKey(),
+    distinctPrograms: !!plainProgram && !!lodProgram && plainProgram !== lodProgram,
+    orderIndependentProgram: !!lodProgram && lodProgram === lateSnowLodProgram,
+    plainProgramKey: plainProgram?.cacheKey || null,
+    lodProgramKey: lodProgram?.cacheKey || null,
+    discardInjected: lodPatch.fragment.includes('_screenDoorIgn'),
+    worldPositionRepaired: lodPatch.vertex.includes('worldPosition.w = 1.0'),
+  };
+  rim.dispose();
+  plainMaterial.dispose();
+  lodMaterial.dispose();
+  lateSnowLodMaterial.dispose();
+  geometry.dispose();
+  return result;
+}
+
 window.__result = {
   facing: facingProbe(),
   contracts: instanceAndProgramProbe(),
+  lodComposition: lodProgramCompositionProbe(),
 };
 window.__READY = true;
 </script></body></html>`;
@@ -467,10 +536,10 @@ try {
   check(result.facing.chainKept, 'pre-existing onBeforeCompile patch remains chained');
   check(result.facing.cloudFragmentInjected && result.facing.rimFragmentInjected,
     `real cloud-shadow and physical rim shader bodies coexist on one roof material (cloud=${result.facing.cloudFragmentInjected}, rim=${result.facing.rimFragmentInjected})`);
-  check(result.facing.composedProgramKey.startsWith('cheoma-rim-physical-v1|cloudshadow|'),
+  check(result.facing.composedProgramKey === 'cheoma-rim-physical-v1|cloudshadow-v1',
     `cloud→rim customProgramCacheKey is composed (${result.facing.composedProgramKey})`);
   check(result.facing.reverseCloudChainKept
-      && result.facing.reverseComposedProgramKey.startsWith('cloudshadow|cheoma-rim-physical-v1|'),
+      && result.facing.reverseComposedProgramKey === result.facing.composedProgramKey,
     `rim→cloud callback/cache-key is composed (${result.facing.reverseComposedProgramKey})`);
   check(result.facing.silhouetteInjected, 'compiled rim source multiplies the silhouette gate');
   check(result.facing.physicalGatesInjected && result.facing.mainSunCaptureInjected
@@ -493,6 +562,18 @@ try {
     `role tag/opening exclusion preserved (${contracts.roleKept}, patched=${contracts.openingPatched})`);
   check(contracts.organicMul === 0.7 && contracts.miscMul === 1,
     `shared shader keeps per-material multipliers organic=${contracts.organicMul} misc=${contracts.miscMul}`);
+  const lodComposition = result.lodComposition;
+  check(lodComposition.distinctPrograms
+      && lodComposition.lodKey.includes('cheoma-lod-screen-door-v1')
+      && !lodComposition.plainKey.includes('cheoma-lod-screen-door-v1'),
+    `LOD and plain cloud+snow+rim materials compile as distinct programs `
+      + `(${lodComposition.plainKey} vs ${lodComposition.lodKey})`);
+  check(lodComposition.discardInjected && lodComposition.worldPositionRepaired,
+    'compiled LOD color shader keeps screen-door discard and affine worldPosition');
+  check(lodComposition.lodKey === lodComposition.lateSnowLodKey
+      && lodComposition.orderIndependentProgram,
+    `snow-before-rim and rim-before-snow reuse one canonical LOD program `
+      + `(${lodComposition.lodKey} / ${lodComposition.lateSnowLodKey})`);
   check(errors.length === 0, `browser and shader errors: ${errors.length}`);
   if (errors.length) console.log(errors.slice(0, 8));
 } finally {

@@ -11,7 +11,11 @@ import { parcelRotY } from '../shared/parcel-transform.js';
 import { buildVillageWall } from '../../village/walls.js';
 import { CHOGA_VARIANTS, GIWA_VARIANTS } from '../../village/variants.js';
 import { chunkLodDistance } from '../../village/chunks.js';
-import { CHUNK_LOD_LEVEL, nextChunkLodLevel } from '../../village/lod-policy.js';
+import {
+  CHUNK_LOD_LEVEL,
+  createChunkLodPresentation,
+  stepChunkLodPresentation,
+} from '../../village/lod-policy.js';
 import { parcelHouseTranslation } from '../../village/parcel-contract.js';
 
 // ───────────────────────── 집 프로토타입 ─────────────────────────
@@ -114,7 +118,9 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
   }
   // far 분류와 카메라 LOD 임계는 별개이며, 순수 정책의 히스테리시스로 경계 왕복 시
   // 깜빡임을 막는다. 같은 state를 청크와 두 표현에 달아 검증 도구가 내부 탐색 없이 읽는다.
+  const presentation = createChunkLodPresentation(CHUNK_LOD_LEVEL.FAR);
   const state = {
+    ...presentation,
     chunkId: chunkGroup.name,
     level: CHUNK_LOD_LEVEL.FAR,
     distance: Infinity,
@@ -123,6 +129,7 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
     midOut: policy.midOut,
     fullIn: policy.fullIn,
     fullOut: policy.fullOut,
+    transitionWidth: policy.transitionWidth ?? null,
     swapIn: policy.fullIn,
     swapOut: policy.fullOut,
     parcelIds: new Set(chunk.parcels.map((parcel) => parcel.id)),
@@ -136,14 +143,49 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
   if (midDetail) midDetail.userData.lod = state;
   fullDetail.userData.lod = state;
 
+  const screenDoorControllers = (root) => {
+    const controllers = [];
+    const seen = new Set();
+    root?.traverse?.((object) => {
+      const controller = object.userData?.screenDoor;
+      if (!controller?.set || seen.has(controller)) return;
+      seen.add(controller);
+      controllers.push(controller);
+    });
+    return controllers;
+  };
+  const channels = legacy ? null : {
+    far: screenDoorControllers(farMass),
+    mid: screenDoorControllers(midDetail),
+    full: screenDoorControllers(fullDetail),
+  };
+
   function showOnly(level) {
+    state.weights.far = level === CHUNK_LOD_LEVEL.FAR ? 1 : 0;
+    state.weights.mid = level === CHUNK_LOD_LEVEL.MID ? 1 : 0;
+    state.weights.full = level === CHUNK_LOD_LEVEL.FULL ? 1 : 0;
     farMass.visible = level === CHUNK_LOD_LEVEL.FAR;
     if (midDetail) midDetail.visible = level === CHUNK_LOD_LEVEL.MID;
     fullDetail.visible = legacy
       ? level !== CHUNK_LOD_LEVEL.FAR
       : level === CHUNK_LOD_LEVEL.FULL;
   }
-  showOnly(state.level);
+  function showPresentation() {
+    farMass.visible = state.weights.far > 0;
+    if (midDetail) midDetail.visible = state.weights.mid > 0;
+    fullDetail.visible = state.weights.full > 0;
+    for (let i = 0; i < channels.far.length; i++) {
+      channels.far[i].set(state.channels.far);
+    }
+    for (let i = 0; i < channels.mid.length; i++) {
+      channels.mid[i].set(state.channels.mid);
+    }
+    for (let i = 0; i < channels.full.length; i++) {
+      channels.full[i].set(state.channels.full);
+    }
+  }
+  if (legacy) showOnly(state.level);
+  else showPresentation();
 
   // 반환: 이 프레임에 FAR/MID/FULL 표현 전환이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
   //   모드에서 캐스터 구성 변경(FAR castShadow=false ↔ 실제 외피 캐스팅)을 1프레임 반영하는 데 쓴다.
@@ -156,15 +198,18 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
     const d = physicalDistance / scale;
     state.physicalDistance = physicalDistance;
     state.distance = d;
-    const next = legacy
-      ? state.level === CHUNK_LOD_LEVEL.FULL
+    if (legacy) {
+      const next = state.level === CHUNK_LOD_LEVEL.FULL
         ? (d > policy.fullOut ? CHUNK_LOD_LEVEL.FAR : state.level)
-        : (d < policy.fullIn ? CHUNK_LOD_LEVEL.FULL : state.level)
-      : nextChunkLodLevel(state.level, d, policy);
-    if (next === state.level) return false;
-    state.level = next;
-    showOnly(next);
-    return true;
+        : (d < policy.fullIn ? CHUNK_LOD_LEVEL.FULL : state.level);
+      if (next === state.level) return false;
+      state.level = next;
+      showOnly(next);
+      return true;
+    }
+    const changed = stepChunkLodPresentation(state, d, policy);
+    if (changed) showPresentation();
+    return changed;
   };
 }
 

@@ -581,6 +581,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       error: anchorDepth == null ? null : Math.abs(post.dof.focus - anchorDepth),
       depthExcluded: bokehPass.depthExcludedCount,
       depthDithered: bokehPass.depthDitheredCount,
+      instFadeDepth: bokehPass.instFadeDepthCount,
+      lodScreenDoorDepth: bokehPass.lodScreenDoorDepthCount,
       tweenProgress: tween ? clamp01(tween.e / tween.dur) : null,
       anchored: activeDofSource() !== 'controls-target',
     };

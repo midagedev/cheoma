@@ -17,6 +17,11 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { contributesDofDepth } from '../env/dof.js';
 import { INST_FADE_PROGRAM_VERSION, patchInstFadeShader } from '../env/inst-fade-shader.js';
+import {
+  hasLodScreenDoor,
+  LOD_SCREEN_DOOR_PROGRAM_VERSION,
+  patchLodScreenDoorMaterial,
+} from './lod-screen-door.js';
 
 // 팔레트 (sRGB). 순흑이 아닌 짙은 먹색과 따뜻한 미색 한지.
 export const INK_PALETTE = {
@@ -396,11 +401,29 @@ export class InkPass extends Pass {
       }
     };
     this.instFadeNormalMaterial.customProgramCacheKey = () => `cheoma-ink-normal|${INST_FADE_PROGRAM_VERSION}`;
+    this.lodScreenDoorNormalMaterial = new THREE.MeshNormalMaterial();
+    this.lodScreenDoorNormalMaterial.allowOverride = false;
+    patchLodScreenDoorMaterial(this.lodScreenDoorNormalMaterial);
+    const lodCompile = this.lodScreenDoorNormalMaterial.onBeforeCompile;
+    this.lodScreenDoorNormalMaterial.onBeforeCompile = function onBeforeCompile(shader, renderer) {
+      lodCompile.call(this, shader, renderer);
+      // MeshNormalMaterial's fragment shader has no <common> chunk.
+      if (!shader.fragmentShader.includes('varying float vLodScreenDoor;')) {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#define NORMAL',
+          '#define NORMAL\nvarying float vLodScreenDoor;',
+        );
+      }
+    };
+    this.lodScreenDoorNormalMaterial.customProgramCacheKey = () =>
+      `cheoma-ink-normal|${LOD_SCREEN_DOOR_PROGRAM_VERSION}`;
     this.resolutionScale = Math.min(1, Math.max(0.35, resolutionScale));
     this.hiddenForNormal = [];
     this.materialsForNormal = [];
     this.normalExcludedCount = 0;
     this.normalDitheredCount = 0;
+    this.instFadeNormalCount = 0;
+    this.lodScreenDoorNormalCount = 0;
     this.normalDrawCalls = 0;
 
     const dt = new THREE.DepthTexture(1, 1);
@@ -445,18 +468,26 @@ export class InkPass extends Pass {
     const materials = this.materialsForNormal;
     hidden.length = 0;
     materials.length = 0;
+    let instFadeNormalCount = 0;
+    let lodScreenDoorNormalCount = 0;
     this.scene.traverseVisible((o) => {
       const renderable = o.isMesh || o.isPoints || o.isLine || o.isSprite;
       const contributes = renderable && contributesDofDepth(o);
       if (renderable && !contributes) hidden.push(o);
       if (contributes && o.isMesh && o.geometry?.getAttribute?.('instFade')) {
-        materials.push(o, o.material);
+        materials.push(o, o.material, this.instFadeNormalMaterial);
+        instFadeNormalCount++;
+      } else if (contributes && o.isMesh && hasLodScreenDoor(o)) {
+        materials.push(o, o.material, this.lodScreenDoorNormalMaterial);
+        lodScreenDoorNormalCount++;
       }
     });
     for (const o of hidden) o.visible = false;
-    for (let i = 0; i < materials.length; i += 2) materials[i].material = this.instFadeNormalMaterial;
+    for (let i = 0; i < materials.length; i += 3) materials[i].material = materials[i + 2];
     this.normalExcludedCount = hidden.length;
-    this.normalDitheredCount = materials.length / 2;
+    this.normalDitheredCount = materials.length / 3;
+    this.instFadeNormalCount = instFadeNormalCount;
+    this.lodScreenDoorNormalCount = lodScreenDoorNormalCount;
     this.scene.overrideMaterial = this.normalMaterial;
     this.scene.background = null;
     this.scene.fog = null;
@@ -470,7 +501,7 @@ export class InkPass extends Pass {
       this.scene.overrideMaterial = prevOverride;
       this.scene.background = prevBg;
       this.scene.fog = prevFog;
-      for (let i = 0; i < materials.length; i += 2) materials[i].material = materials[i + 1];
+      for (let i = 0; i < materials.length; i += 3) materials[i].material = materials[i + 1];
       for (const o of hidden) o.visible = true;
       hidden.length = 0;
       materials.length = 0;
@@ -504,6 +535,7 @@ export class InkPass extends Pass {
     this.normalTarget.dispose();
     this.normalMaterial.dispose();
     this.instFadeNormalMaterial.dispose();
+    this.lodScreenDoorNormalMaterial.dispose();
     this.material.dispose();
     this.fsQuad.dispose();
   }

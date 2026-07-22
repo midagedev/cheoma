@@ -32,8 +32,11 @@ import {
 import { chunkLodDistance, partitionParcels } from '../src/village/chunks.js';
 import { IMPOSTOR_VARIANT_COUNTS, impostorHouseSpec } from '../src/village/impostor-spec.js';
 import {
+  CHUNK_LOD_TRANSITION_STEPS,
   CHUNK_LOD_LEVEL,
+  createChunkLodPresentation,
   nextChunkLodLevel,
+  stepChunkLodPresentation,
   villageChunkLodPolicy,
 } from '../src/village/lod-policy.js';
 import { planVillage } from '../src/village/plan.js';
@@ -210,9 +213,111 @@ function assertLevel(actual, expected, message) {
   near(scaled.swapOut, scaled.fullOut, 'chunk LOD: swapOut compatibility alias drift');
   invariant(Number.isFinite(scaled.maxArcLength) && scaled.maxArcLength < scaled.ringW,
     'chunk LOD: spatial cell cap no longer tightens the ring');
+  invariant(scaled.transitionWidth > 0
+    && scaled.transitionWidth < scaled.fullOut - scaled.fullIn
+    && scaled.transitionWidth < scaled.midOut - scaled.midIn,
+  'chunk LOD: screen-door band overlaps a hysteresis dead band');
   const disabled = villageChunkLodPolicy({ R: 339, bowlR: 200 });
   invariant(!disabled.enabled && disabled.farDist === Infinity,
     'chunk LOD: small site unexpectedly enabled far representation');
+}
+
+// 인접 LOD는 시간 이징이 아니라 실제 거리로만 짧게 이행한다. signed coverage 두 채널은
+// 동일 IGN 픽셀의 보집합을 가져 매 단계 합이 1이고, 정지 카메라는 추가 GPU 갱신을 만들지 않는다.
+{
+  const policy = { midIn: 30, midOut: 36, fullIn: 10, fullOut: 14, transitionWidth: 4 };
+  const state = createChunkLodPresentation(CHUNK_LOD_LEVEL.FAR);
+  const active = (from, to, progress, label) => {
+    invariant(state.transition.active && state.transition.from === from
+      && state.transition.to === to, `${label}: wrong adjacent owners`);
+    near(state.transition.progress, progress, `${label}: distance progress drift`);
+    near(state.weights[from] + state.weights[to], 1, `${label}: coverage sum drift`);
+    near(state.channels[from], state.weights[from], `${label}: outgoing coverage drift`);
+    near(state.channels[to], -state.weights[to], `${label}: incoming complement drift`);
+  };
+
+  invariant(stepChunkLodPresentation(state, 28, policy),
+    'chunk transition: FAR→MID midpoint reported no change');
+  active('far', 'mid', 64 / 127, 'chunk transition FAR→MID');
+  invariant(!stepChunkLodPresentation(state, 28, policy),
+    'chunk transition: repeated distance was not idempotent');
+  invariant(stepChunkLodPresentation(state, 26, policy) && state.level === 'mid'
+    && !state.transition.active && state.weights.mid === 1,
+  'chunk transition: FAR→MID did not settle');
+
+  stepChunkLodPresentation(state, 8, policy);
+  active('mid', 'full', 64 / 127, 'chunk transition MID→FULL');
+  stepChunkLodPresentation(state, 9, policy);
+  active('mid', 'full', 32 / 127, 'chunk transition MID→FULL reverse');
+  stepChunkLodPresentation(state, 6, policy);
+  invariant(state.level === 'full' && !state.transition.active,
+    'chunk transition: MID→FULL did not settle');
+
+  stepChunkLodPresentation(state, 16, policy);
+  active('full', 'mid', 64 / 127, 'chunk transition FULL→MID');
+  stepChunkLodPresentation(state, 18, policy);
+  invariant(state.level === 'mid' && !state.transition.active,
+    'chunk transition: FULL→MID did not settle');
+  stepChunkLodPresentation(state, 38, policy);
+  active('mid', 'far', 64 / 127, 'chunk transition MID→FAR');
+  stepChunkLodPresentation(state, 40, policy);
+  invariant(state.level === 'far' && !state.transition.active,
+    'chunk transition: MID→FAR did not settle');
+
+  // 큰 wheel/teleport도 비인접 FAR+FULL을 동시에 열지 않되, 완료된 인접 hop은 같은 평가에서
+  // 소진해 프레임률/이벤트 샘플 수와 무관한 최종 상태를 낸다.
+  invariant(stepChunkLodPresentation(state, 0, policy)
+    && state.level === 'full' && !state.transition.active,
+  'chunk transition: one large jump did not settle directly through adjacent hops');
+  invariant(!stepChunkLodPresentation(state, 0, policy),
+    'chunk transition: settled large jump depended on a second evaluation');
+  invariant(stepChunkLodPresentation(state, 50, policy)
+    && state.level === 'far' && !state.transition.active,
+  'chunk transition: one large outward jump did not settle through adjacent hops');
+  invariant(!stepChunkLodPresentation(state, 50, policy),
+    'chunk transition: settled outward jump depended on a second evaluation');
+
+  const trace = (distances, initial = CHUNK_LOD_LEVEL.FAR) => {
+    const traced = createChunkLodPresentation(initial);
+    for (const distance of distances) stepChunkLodPresentation(traced, distance, policy);
+    return traced;
+  };
+  const sparseFarMid = trace([50, 28]);
+  const denseFarMid = trace([50, 40, 34, 31, 29, 28]);
+  near(sparseFarMid.transition.progress, denseFarMid.transition.progress,
+    'chunk transition: slow dolly and sparse wheel FAR→MID progress differ');
+  invariant(sparseFarMid.transition.from === denseFarMid.transition.from
+    && sparseFarMid.transition.to === denseFarMid.transition.to,
+  'chunk transition: slow dolly and sparse wheel FAR→MID owners differ');
+  const sparseFull = trace([50, 0]);
+  const denseFull = trace([50, 34, 28, 24, 12, 8, 4, 0]);
+  invariant(sparseFull.level === denseFull.level && sparseFull.level === 'full'
+    && !sparseFull.transition.active && !denseFull.transition.active,
+  'chunk transition: slow dolly and sparse wheel final tier differ');
+  const sparseFar = trace([50], CHUNK_LOD_LEVEL.FULL);
+  const denseFar = trace([15, 18, 30, 38, 42, 50], CHUNK_LOD_LEVEL.FULL);
+  invariant(sparseFar.level === denseFar.level && sparseFar.level === 'far'
+    && !sparseFar.transition.active && !denseFar.transition.active,
+  'chunk transition: slow outward dolly and sparse wheel final tier differ');
+
+  for (const fixture of [
+    { initial: 'far', enter: 28, reverse: 31, expected: 'far', label: 'FAR→MID' },
+    { initial: 'mid', enter: 8, reverse: 11, expected: 'mid', label: 'MID→FULL' },
+    { initial: 'full', enter: 16, reverse: 13, expected: 'full', label: 'FULL→MID' },
+    { initial: 'mid', enter: 38, reverse: 35, expected: 'mid', label: 'MID→FAR' },
+  ]) {
+    const reversed = createChunkLodPresentation(fixture.initial);
+    stepChunkLodPresentation(reversed, fixture.enter, policy);
+    invariant(reversed.transition.active, `chunk transition: ${fixture.label} did not start`);
+    stepChunkLodPresentation(reversed, fixture.reverse, policy);
+    invariant(reversed.level === fixture.expected && !reversed.transition.active,
+      `chunk transition: ${fixture.label} reversal did not return to its stable owner`);
+  }
+  invariant(!stepChunkLodPresentation(state, NaN, policy)
+    && !stepChunkLodPresentation(state, Infinity, policy),
+  'chunk transition: non-finite distance changed presentation');
+  invariant(CHUNK_LOD_TRANSITION_STEPS === 127,
+    'chunk transition: render/policy signed-byte quantization drift');
 }
 
 // 청크 거리는 centroid가 아니라 소유 필지 중 최단 거리이며, y가 제공되면 필지 대지까지의
@@ -450,6 +555,21 @@ function makeRepresentationHandle(parcel, level) {
   const rootsOverlap = parcelRepresentationState(handle, parcel, false);
   invariant(!rootsOverlap.valid && rootsOverlap.representations === 2,
     'parcel ownership: simultaneous FAR/MID roots passed exclusivity check');
+
+  handle.lod.level = CHUNK_LOD_LEVEL.FAR;
+  handle.lod.transition = {
+    active: true, from: CHUNK_LOD_LEVEL.FAR, to: CHUNK_LOD_LEVEL.MID, progress: 64 / 127,
+  };
+  handle.lod.weights = { far: 63 / 127, mid: 64 / 127, full: 0 };
+  const transition = parcelRepresentationState(handle, parcel, false);
+  invariant(transition.valid && transition.representations === 2
+    && transition.owners.join('+') === 'far+mid',
+  'parcel ownership: valid adjacent screen-door transition was rejected');
+  setParcelBaseHidden(handle, parcel, true);
+  const transitionOverlay = parcelRepresentationState(handle, parcel, true);
+  invariant(transitionOverlay.valid && transitionOverlay.representations === 1
+    && transitionOverlay.owners[0] === 'overlay',
+  'parcel ownership: overlay failed to remain sole owner over a base transition');
 }
 
 // 원거리 mass도 실제 건물 variant 어휘·역할별 선형 팔레트를 보존한다.

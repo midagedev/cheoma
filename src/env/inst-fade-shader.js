@@ -1,17 +1,20 @@
-// Shared screen-door fade shader contract for village tree color and DoF depth.
-// Both passes must discard the exact same pixels or a faded canopy remains as an
-// invisible opaque depth blob and makes focus appear to pulse.
+// Shared screen-door vocabulary for tree color+DoF and building-LOD color+shadow+DoF+ink.
+// Each participating pass must discard the same pixels or a faded object remains as an invisible
+// depth blob. Tree shadow fading is intentionally outside this module. Positive coverage keeps
+// the low IGN subset; negative coverage keeps its high, complementary subset.
+import { screenDoorDiscard } from '../render/screen-door.js';
+import {
+  MATERIAL_PROGRAM_PATCH,
+  addMaterialProgramKey,
+} from '../render/material-program-key.js';
 
-export const INST_FADE_PROGRAM_VERSION = 'cheoma-inst-fade-v1';
+export const INST_FADE_PROGRAM_VERSION = MATERIAL_PROGRAM_PATCH.INST_FADE;
 
 const VERTEX_DECLARATION = '#include <common>\nattribute float instFade;\nvarying float vInstFade;';
 const VERTEX_ASSIGNMENT = '#include <begin_vertex>\nvInstFade = instFade;';
 const FRAGMENT_DECLARATION = '#include <common>\nvarying float vInstFade;';
 const FRAGMENT_DISCARD = `#include <clipping_planes_fragment>
-  if (vInstFade < 0.999) {
-    float _ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    if (vInstFade < _ign) discard;
-  }`;
+  ${screenDoorDiscard('vInstFade')}`;
 
 export function patchInstFadeShader(shader) {
   shader.vertexShader = shader.vertexShader
@@ -20,4 +23,23 @@ export function patchInstFadeShader(shader) {
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', FRAGMENT_DECLARATION)
     .replace('#include <clipping_planes_fragment>', FRAGMENT_DISCARD);
+}
+
+const patchedMaterials = new WeakSet();
+
+// Material-level installer for tree color presentation. LOD shadows use their own draw-local
+// material contract; tree shadow parity remains a separate concern. The explicit key composes
+// safely with later snow/rim patches in any order.
+export function patchInstFadeMaterial(material) {
+  if (!material?.isMaterial || patchedMaterials.has(material)) return false;
+  patchedMaterials.add(material);
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous?.(shader, renderer);
+    patchInstFadeShader(shader);
+  };
+  material.userData.__instFadePatchVersion = INST_FADE_PROGRAM_VERSION;
+  addMaterialProgramKey(material, INST_FADE_PROGRAM_VERSION);
+  material.needsUpdate = true;
+  return true;
 }

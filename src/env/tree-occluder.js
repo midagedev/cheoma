@@ -1,6 +1,6 @@
 import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
-import { patchInstFadeShader } from './inst-fade-shader.js';
+import { patchInstFadeMaterial } from './inst-fade-shader.js';
 
 // 전경 나무 오클루더 페이드 — 프레임워크 무관 ES 모듈.
 //   setupTreeOccluder({ getSubject }) →
@@ -29,22 +29,9 @@ const SCREEN_OUT = 0.62;   // 이 반경 밖 = 페이드 없음(가장자리 나
 export function setupTreeOccluder({ getSubject } = {}) {
   // entries: { mesh, attr, pos(Float32 n*3 캐노피 월드), n, cur, tgt }
   const entries = [];
-  const patched = new WeakSet();
-
   // 공유 재질에 디더 페이드 주입(체인). seasons(vertex)·snow(fragment) 패치를 보존한다.
   function patchMaterial(mat) {
-    if (!mat || patched.has(mat)) return;
-    patched.add(mat);
-    const prev = mat.onBeforeCompile;
-    mat.onBeforeCompile = (shader, r) => {
-      if (prev) prev(shader, r);
-      // 안전 앵커: clipping chunk는 seasons·snow가 건드리지 않고 main() 앞머리에 항상 있다.
-      patchInstFadeShader(shader);
-    };
-    // Material의 기본 cache key는 onBeforeCompile.toString()을 사용한다. 별도 own key를
-    // 심으면 rim.js가 섬세한 기존 shader 변형으로 간주해 이 수목을 림 대상에서 제외한다.
-    // wrapper 자체가 fade 변형을 구분하므로 기본 key를 유지한다.
-    mat.needsUpdate = true;
+    patchInstFadeMaterial(mat);
   }
 
   const _m = new THREE.Matrix4();
