@@ -11,7 +11,7 @@ export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
 // an architectural, rather than aerial, view across the tested residential variants.
 // Keep the projection centered: a sky-biased lens shift crops the foreground yard and
 // hides the animals and household details this elevation is meant to reveal.
-export const VILLAGE_FOCUS_ELEVATION = 12 * DEG;
+export const VILLAGE_FOCUS_ELEVATION = 14 * DEG;
 export const VILLAGE_FOCUS_SKY_FRACTION = 0;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });

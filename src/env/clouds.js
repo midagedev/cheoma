@@ -646,7 +646,7 @@ export function setupClouds(group, {
   };
   const horizonSpecs = Array.from({ length: HORIZON_CLOUD_COUNT }, (_, i) => ({
     az: 0.17 + i * Math.PI * 2 / HORIZON_CLOUD_COUNT,
-    // These 9–12° centres belong to an explicit sky-facing view. The default 12°
+    // These 9–12° centres belong to an explicit sky-facing view. The default 14°
     // downward courtyard focus deliberately misses the band and updateView sleeps it;
     // when a user looks upward, regular depth testing still lets roofs and ridges
     // occlude the cloud bottoms without a depth-free layer over the architecture.
