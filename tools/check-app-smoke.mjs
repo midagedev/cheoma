@@ -667,6 +667,93 @@ try {
     `building lifecycle preserves ${lifecycleContract.sharedCount} injected + ${lifecycleContract.moduleSharedCount} module-shared resources and releases ${lifecycleContract.ownedDisposed}/${lifecycleContract.ownedCount} owned resources exactly once`,
   );
 
+  const authenticityContract = await page.evaluate(async ({ buildingModuleUrl }) => {
+    const { PRESETS, buildBuilding, disposeBuilding } = await import(buildingModuleUrl);
+    const buildings = {
+      palace: buildBuilding({ ...PRESETS.korea }),
+      templePaljak: buildBuilding({ ...PRESETS.temple, roofType: 'paljak' }),
+      jeongja: buildBuilding({ ...PRESETS.giwa, doorPattern: 'jeongja' }),
+      sesal: buildBuilding({ ...PRESETS.giwa, doorPattern: 'sesal' }),
+    };
+    const greenRatio = (building) => {
+      const canvas = building.userData.materials.door.map.image;
+      const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      let green = 0;
+      let sampled = 0;
+      for (let i = 0; i < data.length; i += 4 * 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a < 128) continue;
+        sampled++;
+        if (g > r * 1.15 && g > b * 1.15) green++;
+      }
+      return green / Math.max(1, sampled);
+    };
+    const ornamentCounts = (building) => {
+      const counts = { chwidu: 0, japsang: 0 };
+      building.traverse((object) => {
+        if (object.name === 'palace-chwidu') counts.chwidu++;
+        if (object.name === 'palace-japsang') counts.japsang++;
+      });
+      return counts;
+    };
+    const result = {
+      green: {
+        palace: greenRatio(buildings.palace),
+        jeongja: greenRatio(buildings.jeongja),
+        sesal: greenRatio(buildings.sesal),
+      },
+      palace: ornamentCounts(buildings.palace),
+      templePaljak: ornamentCounts(buildings.templePaljak),
+    };
+    for (const building of Object.values(buildings)) disposeBuilding(building);
+    return result;
+  }, { buildingModuleUrl: buildingApiUrl });
+  pass(
+    authenticityContract.green.palace > 0.03
+      && authenticityContract.green.jeongja < 0.001
+      && authenticityContract.green.sesal < 0.001,
+    `civilian lattice keeps bare timber/hanji while palace color remains (${JSON.stringify(authenticityContract.green)})`,
+  );
+  pass(
+    authenticityContract.palace.chwidu > 0
+      && authenticityContract.palace.japsang > 0
+      && authenticityContract.templePaljak.chwidu === 0
+      && authenticityContract.templePaljak.japsang === 0,
+    `palace roof ornaments do not leak into a paljak temple (${JSON.stringify(authenticityContract)})`,
+  );
+
+  // 고증 조사도 제품 신뢰 표면이다. docs/credits.md를 파싱하는 실제 Reference 모달에서
+  // 사용자가 출처→구현 해석과 원문을 함께 확인할 수 있어야 한다.
+  await page.locator('.seal-label .info').click();
+  const kitchenCredit = page.locator('.modal .cat li').filter({
+    hasText: '국사편찬위원회 · 한국학중앙연구원 — 조선 살림집 부엌·구들·굴뚝',
+  });
+  const ornamentCredit = page.locator('.modal .cat li').filter({
+    hasText: '국가유산청 · 한국학중앙연구원 — 궁궐 지붕 장식과 잡상',
+  });
+  await kitchenCredit.waitFor({ state: 'visible', timeout });
+  await ornamentCredit.waitFor({ state: 'visible', timeout });
+  const referenceContract = {
+    kitchenLinks: await kitchenCredit.locator('a').count(),
+    ornamentLinks: await ornamentCredit.locator('a').count(),
+    kitchenUse: await kitchenCredit.locator('.it-use').textContent(),
+    ornamentUse: await ornamentCredit.locator('.it-use').textContent(),
+    safeLinks: await page.locator('.modal .it-links a').evaluateAll((links) => links.every((link) => (
+      link.target === '_blank'
+        && link.rel.split(/\s+/).includes('noopener')
+        && link.rel.split(/\s+/).includes('noreferrer')
+    ))),
+  };
+  pass(
+    referenceContract.kitchenLinks === 3
+      && referenceContract.ornamentLinks === 2
+      && referenceContract.kitchenUse?.includes('마당 높이 부엌 개구 안')
+      && referenceContract.ornamentUse?.includes('palace 전용 경계')
+      && referenceContract.safeLinks,
+    `Reference UI exposes authenticity evidence and applied-use mapping (${JSON.stringify(referenceContract)})`,
+  );
+  await page.locator('.modal .x').click();
+
   const texturePlateau = await page.evaluate(() => {
     const engine = window.__engine;
     engine.village.exit();

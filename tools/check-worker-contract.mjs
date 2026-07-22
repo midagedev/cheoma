@@ -26,12 +26,15 @@ const expectedSceneHashes = {
   // metre-scale settlement relief to every tier; explicit river mode remains a
   // separate non-golden scenario. #56 gives temple roles distinct dancheong
   // palettes; #8 retains four giwa groups but changes their exact geometry to
-  // ㅡ + mirrored ㄱ + fitted four-bay ㄷ. Sync, real module Worker, and
-  // ?worker=0 fallback stay byte-identical after both changes.
-  village: '820a1338:95d7b6f6:36ceed54:15357fa2',
-  town: '993c3ab1:746f1801:97d2b468:c9cebe39',
-  capital: '87ec65e8:b24242a4:a11e9d66:f919de6a',
-  hanyang: 'd40f114e:99a94ab4:2a596b17:d3163dc2',
+  // ㅡ + mirrored ㄱ + fitted four-bay ㄷ. #11 replaces duplicated exterior
+  // stove masses with one recessed residential kitchen scene and neutralizes
+  // civilian lattice textures. The combined FULL scene bytes intentionally
+  // move while parcel plans and public proxy hashes retain their own contracts.
+  // Sync, real module Worker, and ?worker=0 fallback stay byte-identical.
+  village: '3bef3527:f934cc59:a2cc2c1e:dad78b8f',
+  town: '13af893f:6caac01d:b5226fd9:ff107199',
+  capital: '91162f32:1cb04884:ab86cf43:cd6243ea',
+  hanyang: 'd21620ee:f4b101c0:8ced9de3:b5319092',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

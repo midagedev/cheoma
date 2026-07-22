@@ -77,6 +77,28 @@ function makeDoorTexture() {
   return tex;
 }
 
+// 정자살문(살림집): 궁궐 문살의 주칠·뇌록을 재사용하지 않고 백골 목재와 한지만 쓴다.
+// 패턴 이름은 격자 짜임을 뜻하며 건물의 장식 위계까지 뜻하지 않는다.
+function makeCivilianJeongjaTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#e8dec5';
+  g.fillRect(0, 0, 256, 512);
+  g.strokeStyle = '#6a4930'; g.lineWidth = 6;
+  for (let x = 20; x <= 236; x += 27) {
+    g.beginPath(); g.moveTo(x, 8); g.lineTo(x, 502); g.stroke();
+  }
+  for (let y = 22; y <= 500; y += 31) {
+    g.beginPath(); g.moveTo(7, y); g.lineTo(249, y); g.stroke();
+  }
+  g.strokeStyle = '#563923'; g.lineWidth = 20;
+  g.strokeRect(0, 0, 256, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 // 단청 source는 불변 Canvas로 캐시하고 Texture/Material 소유권은 각 팔레트에 둔다. 따라서
 // 서로 다른 궁·사찰이 동시에 있어도 한쪽의 슬라이더가 다른 쪽 픽셀을 바꾸지 않으며, 개별 건물
 // dispose가 다른 팔레트의 texture를 끊지 않는다. 8구간(9레벨)×2축은 충분히 연속적으로 보이되 LRU가
@@ -192,25 +214,25 @@ function makeTtisalTexture() {
   return tex;
 }
 
-// 세살문(반가 상급): 촘촘한 세로살 + 상부에만 성근 가로살 + 하단 넓은 청판. 정자살(격자)·띠살(굵은 띠)과
-//   구별되는 "세로살 지배" 창호. 마을 반가 집집이 창호 살이 달라 보이게(#55).
+// 세살문(반가 상급): 촘촘한 세로살 + 상부에만 성근 가로살 + 하단 넓은 목재 청판. 정자살(격자)·
+// 띠살(굵은 띠)과 구별되는 "세로살 지배" 창호. 민가이므로 궁궐 주칠·뇌록은 쓰지 않는다.
 function makeSesalTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
   g.fillStyle = '#e9dfc8';                        // 한지
   g.fillRect(0, 0, 256, 512);
-  g.strokeStyle = '#4e6b52'; g.lineWidth = 6;      // 초록 살(정자살과 같은 색 계열, 배치가 다름)
+  g.strokeStyle = '#6b4a2e'; g.lineWidth = 6;      // 백골 목재 살
   for (let x = 16; x <= 240; x += 15) {           // 촘촘한 세로살(세살)
     g.beginPath(); g.moveTo(x, 6); g.lineTo(x, 404); g.stroke();
   }
   for (let y = 24; y <= 150; y += 34) {           // 상부에만 성근 가로살
     g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke();
   }
-  g.fillStyle = '#4e6b52';                         // 하단 청판(넓게)
+  g.fillStyle = '#765537';                         // 하단 목재 청판(넓게)
   g.fillRect(10, 408, 236, 98);
   g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 4; g.strokeRect(10, 408, 236, 98);
-  g.strokeStyle = '#7d4030'; g.lineWidth = 26;     // 붉은 문틀
+  g.strokeStyle = '#563923'; g.lineWidth = 26;     // 백골 목재 문틀
   g.strokeRect(0, 0, 256, 512);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -358,7 +380,7 @@ export function applyThatchAge(M, age) {
 //   pattern: 'jeongja'(정자살) | 'ttisal'(띠살) | 'sesal'(세살) | 'choga'(초가 띠살).
 export function applyDoorPattern(M, pattern) {
   if (!M || !M.door || !pattern) return;
-  const tex = pattern === 'jeongja' ? makeDoorTexture()
+  const tex = pattern === 'jeongja' ? makeCivilianJeongjaTexture()
     : pattern === 'sesal' ? makeSesalTexture()
     : pattern === 'ttisal' ? makeTtisalTexture()
     : pattern === 'choga' ? makeChogaDoorTexture()

@@ -5,6 +5,7 @@ import {
   thatchWallBreakpoints,
   thatchWallTopAt,
 } from './thatch-profile.js';
+import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
 
 // 벽체·창호. 궁(palace): 전면 칸마다 세살문, 측·후면 회벽+광창.
 // 절(temple): 전면 어칸 띠살문 + 협칸(황토벽 하부 + 살창 상부), 측·후면 황토벽+작은 살창.
@@ -248,55 +249,17 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   flue.position.set(ccx, 0.25, (ccz + zB) / 2);
   flue.castShadow = flue.receiveShadow = true; g.add(flue);
 
-  // ── 부엌 아궁이(+x 끝면 하부): 황토 부뚜막 + 검은 가마솥 + 어두운 화구 + 그을음 + 불씨 ──
-  // 팔레트 무수정 원칙(giwa 참고): 그을음/화구/가마솥 재질은 여기서 자체 생성.
-  // name 규약: 화구 발광면='agungiEmber', 화광='agungiFire' → src/env/smoke.js가 시간대 변조.
-  buildChogaAgungi(L, M, g, xR);
+  // 부엌 아궁이는 마당 높이의 끝방 개구 안으로 물린다. 독립 노천 화덕처럼 외벽 밖에
+  // 부뚜막 매스를 붙이지 않으며, 불씨/화광 이름은 smoke.js 시간대 계약을 그대로 쓴다.
+  g.add(buildRecessedKitchenHearth({
+    mats: M,
+    wallX: xR,
+    centerZ: -0.25,
+    floorY: 0,
+    openingWidth: 1.12,
+    openingHeight: 1.42,
+    lightRange: 3.2,
+  }));
 
   return g;
-}
-
-// 초가 아궁이: 소박한 황토 부뚜막을 부엌 끝(+x)면 바깥에 붙인다. giwa 대비 낮고 작게.
-function buildChogaAgungi(L, M, g, xR) {
-  const clayMat = new THREE.MeshStandardMaterial({ color: 0x8a6b45, roughness: 1.0, emissive: 0x1c1508 });
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0806, roughness: 1.0 });
-  const scorchMat = new THREE.MeshStandardMaterial({ color: 0x1a140f, roughness: 1.0, transparent: true, opacity: 0.85 });
-  const potMat = new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.5, metalness: 0.35 });
-  const agX = xR + 0.02;             // 끝벽 바깥면
-  const agZ = -0.25;                 // 부엌(뒤쪽)으로 살짝 치우침
-  const bodyD = 0.5, bodyH = 0.82, bodyW = 1.15;
-  const bodyCx = agX + bodyD / 2;
-  const gy = 0;                      // 아궁이는 지면(마당) 레벨
-  // 부뚜막 몸체(황토 조적 매스)
-  const body = new THREE.Mesh(new THREE.BoxGeometry(bodyD, bodyH, bodyW), clayMat);
-  body.position.set(bodyCx, gy + bodyH / 2, agZ);
-  body.castShadow = body.receiveShadow = true; g.add(body);
-  // 막돌 기초(부뚜막 밑 돌)
-  const stoneBase = new THREE.Mesh(new THREE.BoxGeometry(bodyD + 0.14, 0.2, bodyW + 0.14), M.fieldstone);
-  stoneBase.position.set(bodyCx, gy + 0.1, agZ); stoneBase.receiveShadow = true; g.add(stoneBase);
-  // 화구(어두운 사각 개구) — +x 전면 하부
-  const mouthW = 0.6, mouthH = 0.42, mouthY = gy + 0.34;
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.26, mouthH, mouthW), darkMat);
-  mouth.position.set(agX + bodyD - 0.09, mouthY, agZ); g.add(mouth);
-  // 그을음 얼룩(+x 전면)
-  const scorch = new THREE.Mesh(new THREE.PlaneGeometry(mouthW + 0.16, bodyH * 0.62), scorchMat);
-  scorch.position.set(agX + bodyD + 0.006, mouthY + 0.14, agZ); scorch.rotation.y = Math.PI / 2; g.add(scorch);
-  // 화구 상부 돌 인방
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(bodyD + 0.05, 0.1, mouthW + 0.12), M.stoneDark);
-  lintel.position.set(bodyCx, mouthY + mouthH / 2 + 0.05, agZ); lintel.castShadow = true; g.add(lintel);
-  // 가마솥(검은 무쇠 반구) — 부뚜막 상판에 앉음
-  const pot = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), potMat);
-  pot.rotation.x = Math.PI; pot.scale.set(1, 0.68, 1);
-  pot.position.set(bodyCx, gy + bodyH + 0.02, agZ); pot.castShadow = true; g.add(pot);
-  // 불씨 발광면(밤·밥짓는 시간) — smoke.js가 emissiveIntensity 시간대 변조
-  const ember = new THREE.Mesh(
-    new THREE.PlaneGeometry(mouthW * 0.8, mouthH * 0.7),
-    new THREE.MeshStandardMaterial({ color: 0x1a0d04, emissive: 0xff5a1e, emissiveIntensity: 0, roughness: 1.0, side: THREE.DoubleSide }));
-  ember.name = 'agungiEmber';
-  ember.position.set(agX + bodyD - 0.05, mouthY - 0.02, agZ);
-  ember.rotation.y = Math.PI / 2; g.add(ember);
-  // 화광 PointLight(밤 주변 온기) — smoke.js가 강도/가시성 제어
-  const fire = new THREE.PointLight(0xff6a24, 0, 4.0, 2);
-  fire.castShadow = false; fire.visible = false; fire.name = 'agungiFire';
-  fire.position.set(agX + bodyD + 0.2, mouthY + 0.05, agZ); g.add(fire);
 }

@@ -244,28 +244,33 @@ export function buildRoof(P, L, M) {
   }
 
   if (!isMatbae) {
-    // 취두 (팔작): 용마루 끝 말린 장식
-    for (const sign of [1, -1]) {
-      const s = new THREE.Shape();
-      s.moveTo(0, 0); s.lineTo(0.55, 0); s.lineTo(0.55, 0.35);
-      s.quadraticCurveTo(0.5, 0.75, 0.15, 0.9);
-      s.quadraticCurveTo(0.28, 0.55, 0.18, 0.4);
-      s.lineTo(0, 0.35); s.closePath();
-      const geo = new THREE.ExtrudeGeometry(s, { depth: 0.58, bevelEnabled: false });
-      geo.translate(0, 0, -0.29); // z 방향 중심 정렬 (depth 반영)
-      const chwidu = new THREE.Mesh(geo, M.tileRidge);
-      // 말린 끝(x+)이 용마루 중앙(x=0) 쪽을 향하게: 오른쪽 끝은 좌우 미러
-      chwidu.scale.x = sign === 1 ? -1 : 1;
-      chwidu.position.set(sign * (xr - 0.05), L.ridgeY + 0.20, 0);
-      chwidu.castShadow = true;
-      g.add(chwidu);
-      // 십자 교차: 같은 shape을 Y축 90° 회전·축소해 겹쳐 어느 각도에서도 실루엣 유지
-      const chwidu2 = new THREE.Mesh(geo, M.tileRidge);
-      chwidu2.rotation.y = Math.PI / 2;
-      chwidu2.scale.setScalar(0.85);
-      chwidu2.position.copy(chwidu.position);
-      chwidu2.castShadow = true;
-      g.add(chwidu2);
+    // 취두는 이 생성기의 궁궐 위계 표지다. 지붕 형식만 팔작으로 바꾼 사찰·민가에 장식이
+    // 누출되지 않도록 형태 분기와 건물 유형 분기를 분리한다.
+    if (isPalace) {
+      for (const sign of [1, -1]) {
+        const s = new THREE.Shape();
+        s.moveTo(0, 0); s.lineTo(0.55, 0); s.lineTo(0.55, 0.35);
+        s.quadraticCurveTo(0.5, 0.75, 0.15, 0.9);
+        s.quadraticCurveTo(0.28, 0.55, 0.18, 0.4);
+        s.lineTo(0, 0.35); s.closePath();
+        const geo = new THREE.ExtrudeGeometry(s, { depth: 0.58, bevelEnabled: false });
+        geo.translate(0, 0, -0.29); // z 방향 중심 정렬 (depth 반영)
+        const chwidu = new THREE.Mesh(geo, M.tileRidge);
+        chwidu.name = 'palace-chwidu';
+        // 말린 끝(x+)이 용마루 중앙(x=0) 쪽을 향하게: 오른쪽 끝은 좌우 미러
+        chwidu.scale.x = sign === 1 ? -1 : 1;
+        chwidu.position.set(sign * (xr - 0.05), L.ridgeY + 0.20, 0);
+        chwidu.castShadow = true;
+        g.add(chwidu);
+        // 십자 교차: 같은 shape을 Y축 90° 회전·축소해 겹쳐 어느 각도에서도 실루엣 유지
+        const chwidu2 = new THREE.Mesh(geo, M.tileRidge);
+        chwidu2.name = 'palace-chwidu';
+        chwidu2.rotation.y = Math.PI / 2;
+        chwidu2.scale.setScalar(0.85);
+        chwidu2.position.copy(chwidu.position);
+        chwidu2.castShadow = true;
+        g.add(chwidu2);
+      }
     }
 
     // 내림마루: 용마루 끝 → 합각 밑변 모서리 (합각 경사변을 따르는 직선). 궁=양성바름.
@@ -305,29 +310,34 @@ export function buildRoof(P, L, M) {
       snout.castShadow = true; g.add(snout);
     }
 
-    // 잡상(궁): 추녀마루 위 홀수 열. 처마쪽(앞)=삿갓 쓴 대당사부 → 위로 손오공·저팔계·사오정(유사 반복).
-    // 개수는 추녀마루 길이에 비례(격식 높을수록 많이, 3~11 홀수) — 근정전급 ≈ 7.
-    let nJab = Math.round(frontPoint(1, vStar, 1).distanceTo(frontPoint(1, 1, 1)) / 0.65);
-    nJab = Math.max(3, Math.min(11, nJab));
-    if (nJab % 2 === 0) nJab -= 1;
-    // 개수가 늘어도 추녀마루 구간(vStar~0.92) 안에 머물도록 간격 자동 축소
-    const jabStep = Math.min(0.09, (0.90 - (vStar + 0.05)) / Math.max(1, nJab - 1));
-    for (const sx of [1, -1]) for (const sz of [1, -1]) {
-      for (let k = 0; k < nJab; k++) {
-        const p = frontPoint(sx, 0.92 - k * jabStep, sz);
-        p.y += 0.18;
-        const lead = k === 0;
-        const s = lead ? 0.20 : 0.15 - k * 0.008;
-        const body = new THREE.Mesh(new THREE.BoxGeometry(s * 0.7, s, s * 0.7), M.tileRidge);
-        body.position.set(p.x, p.y + s / 2, p.z); body.castShadow = true;
-        body.userData.asmGroup = 'finial'; g.add(body);       // 잡상: 지붕 직후 미니팝
-        const head = new THREE.Mesh(new THREE.SphereGeometry(s * 0.42, 8, 6), M.tileRidge);
-        head.position.set(p.x, p.y + s + s * 0.35, p.z); head.castShadow = true;
-        head.userData.asmGroup = 'finial'; g.add(head);
-        if (lead) {
-          const hat = new THREE.Mesh(new THREE.ConeGeometry(s * 0.62, s * 0.4, 8), M.tileRidge);
-          hat.position.set(p.x, p.y + s + s * 0.72, p.z); hat.castShadow = true;
-          hat.userData.asmGroup = 'finial'; g.add(hat);
+    if (isPalace) {
+      // 잡상(궁): 추녀마루 위 홀수 열. 처마쪽(앞)=삿갓 쓴 대당사부 → 위로 손오공·저팔계·사오정(유사 반복).
+      // 개수는 추녀마루 길이에 비례(격식 높을수록 많이, 3~11 홀수) — 근정전급 ≈ 7.
+      let nJab = Math.round(frontPoint(1, vStar, 1).distanceTo(frontPoint(1, 1, 1)) / 0.65);
+      nJab = Math.max(3, Math.min(11, nJab));
+      if (nJab % 2 === 0) nJab -= 1;
+      // 개수가 늘어도 추녀마루 구간(vStar~0.92) 안에 머물도록 간격 자동 축소
+      const jabStep = Math.min(0.09, (0.90 - (vStar + 0.05)) / Math.max(1, nJab - 1));
+      for (const sx of [1, -1]) for (const sz of [1, -1]) {
+        for (let k = 0; k < nJab; k++) {
+          const p = frontPoint(sx, 0.92 - k * jabStep, sz);
+          p.y += 0.18;
+          const lead = k === 0;
+          const s = lead ? 0.20 : 0.15 - k * 0.008;
+          const body = new THREE.Mesh(new THREE.BoxGeometry(s * 0.7, s, s * 0.7), M.tileRidge);
+          body.name = 'palace-japsang';
+          body.position.set(p.x, p.y + s / 2, p.z); body.castShadow = true;
+          body.userData.asmGroup = 'finial'; g.add(body);       // 잡상: 지붕 직후 미니팝
+          const head = new THREE.Mesh(new THREE.SphereGeometry(s * 0.42, 8, 6), M.tileRidge);
+          head.name = 'palace-japsang';
+          head.position.set(p.x, p.y + s + s * 0.35, p.z); head.castShadow = true;
+          head.userData.asmGroup = 'finial'; g.add(head);
+          if (lead) {
+            const hat = new THREE.Mesh(new THREE.ConeGeometry(s * 0.62, s * 0.4, 8), M.tileRidge);
+            hat.name = 'palace-japsang';
+            hat.position.set(p.x, p.y + s + s * 0.72, p.z); hat.castShadow = true;
+            hat.userData.asmGroup = 'finial'; g.add(hat);
+          }
         }
       }
     }

@@ -1,6 +1,7 @@
-// 헤드리스 스크린샷: 초가 R5 폴리시 + 아궁이 검증 → shots/choga-r5-*.png
+// 헤드리스 스크린샷: 초가 R5 폴리시 + 아궁이 검증 → OS 임시 폴더
 // 사용법: node tools/shoot-choga-r5.mjs [group]
 //   group = choga | agungi | chimney | regress | all(기본)
+//   CHEOMA_CHOGA_R5_OUT=/절대/경로 로 출력 위치를 명시할 수 있다.
 //
 // env 직접 import 하네스(/__cr5): index.html 앱 경로 회피(다른 에이전트가 자주 깨뜨림).
 // 플래그십 룩(post.js) + 날씨(적설 0 고정) + 연기/불씨 전진을 실제 앱과 동일하게 배선.
@@ -9,12 +10,13 @@
 //   window.__frameInfo()            : {W,D,totalH,xEave,zEave} 레이아웃 치수 반환
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const OUT = join(ROOT, 'shots');
+const OUT = process.env.CHEOMA_CHOGA_R5_OUT || mkdtempSync(join(tmpdir(), 'cheoma-choga-r5-'));
 mkdirSync(OUT, { recursive: true });
 const GROUP = process.argv[2] || 'all';
 
@@ -154,12 +156,12 @@ if (want('choga')) {
 
 // ---------------- 2) 아궁이 (주간 + 야간 불씨) ----------------
 if (want('agungi')) {
-  // 아궁이는 부엌 끝(+x)면 하부(x≈W/2+0.5, z≈-0.25, 화구 y≈0.34) — 근접 조준.
+  // 아궁이는 부엌 끝(+x)면의 마당 높이 개구 안(x≈W/2, z≈-0.25) — 근접 조준.
   for (const t of ['day', 'night', 'sunset']) {
     await open(`${base}/__cr5?preset=choga&frame=side&time=${t}`);
     const L = await info();
-    const ex = L.W / 2 + 0.55; // 화구 전면(+x) 대략 x
-    await aim([ex + 2.4, 1.55, 1.7, ex - 0.15, 0.45, -0.25]);
+    const ex = L.W / 2; // 부엌 끝 외벽
+    await aim([ex + 3.1, 1.55, 1.9, ex + 0.02, 0.65, -0.25]);
     await advance(2.0);
     await save(`agungi-${t}`);
   }
