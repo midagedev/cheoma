@@ -274,6 +274,7 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     plist.forEach((p, i) => locate.set(p.id, { meshes, index: i, mat: mats[i] }));
   }
   const hidden = new Set();
+  const exportHidden = new Set();
   function setHidden(id, on) {
     const rec = locate.get(id);
     if (!rec) return;
@@ -281,7 +282,29 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     const m = on ? ZERO : rec.mat;
     for (const inst of rec.meshes) { inst.setMatrixAt(rec.index, m); inst.instanceMatrix.needsUpdate = true; }
   }
-  group.userData = { kind, tier, setHidden, isHidden: (id) => hidden.has(id), locate };
+  // Focus hiding is presentation-only and export normally restores the pristine
+  // authored matrix. A committed edit is different: its FULL override becomes
+  // the exported architecture, so the superseded base instance must stay
+  // collapsed in the immutable export snapshot as well. Keep this ownership
+  // separate from live visibility so focusing an unedited house remains export-
+  // invariant.
+  function setExportHidden(id, on) {
+    const rec = locate.get(id);
+    if (!rec) return;
+    if (on) exportHidden.add(id); else exportHidden.delete(id);
+    const matrix = on ? ZERO : rec.mat;
+    const seen = new Set();
+    for (const inst of rec.meshes) {
+      const snapshot = inst[EXPORT_INSTANCE_MATRIX];
+      if (!snapshot || seen.has(snapshot)) continue;
+      seen.add(snapshot);
+      matrix.toArray(snapshot.array, rec.index * 16);
+    }
+  }
+  group.userData = {
+    kind, tier, setHidden, isHidden: (id) => hidden.has(id),
+    setExportHidden, isExportHidden: (id) => exportHidden.has(id), locate,
+  };
   return group;
 }
 
@@ -497,6 +520,7 @@ export function mergeStatic(objects, name = 'merged-static', opts = {}) {
 //   1회 slice 로 보관 → 펼 때 그대로 복사(byte 일치). 색·재질·드로우콜 불변(지오 position 부분 갱신만).
 function attachSourceHideHandle(group, meshRanges) {
   const hidden = new Set();
+  const exportHidden = new Set();
   const srcIds = new Set();
   for (const mr of meshRanges) {
     for (const id of mr.ranges.keys()) srcIds.add(id);
@@ -508,13 +532,35 @@ function attachSourceHideHandle(group, meshRanges) {
       for (const id of hidden) {
         if (mr.ranges.has(id) && mr.saved.has(id)) { needsSnapshot = true; break; }
       }
+      if (!needsSnapshot) {
+        for (const id of exportHidden) {
+          if (mr.ranges.has(id)) { needsSnapshot = true; break; }
+        }
+      }
       if (!needsSnapshot) return null;
       const current = mr.mesh.geometry.attributes.position.array;
       const snapshot = current.slice();
       for (const id of hidden) {
+        if (exportHidden.has(id)) continue;
         const range = mr.ranges.get(id);
         const saved = mr.saved.get(id);
         if (range && saved) snapshot.set(saved, range.start * 3);
+      }
+      // Export-only hiding can be requested before or after live presentation
+      // hiding. Collapse a still-visible range in the snapshot without touching
+      // the renderer-owned position buffer.
+      for (const id of exportHidden) {
+        if (hidden.has(id)) continue;
+        const range = mr.ranges.get(id);
+        if (!range?.count) continue;
+        const start = range.start * 3;
+        const count = range.count * 3;
+        const ax = snapshot[start], ay = snapshot[start + 1], az = snapshot[start + 2];
+        for (let k = 0; k < count; k += 3) {
+          snapshot[start + k] = ax;
+          snapshot[start + k + 1] = ay;
+          snapshot[start + k + 2] = az;
+        }
       }
       return snapshot;
     };
@@ -537,7 +583,13 @@ function attachSourceHideHandle(group, meshRanges) {
     }
     if (on) hidden.add(id); else hidden.delete(id);
   }
+  function setExportHidden(id, on) {
+    if (!srcIds.has(id)) return;
+    if (on) exportHidden.add(id); else exportHidden.delete(id);
+  }
   group.userData.setHidden = setHidden;
   group.userData.isHidden = (id) => hidden.has(id);
+  group.userData.setExportHidden = setExportHidden;
+  group.userData.isExportHidden = (id) => exportHidden.has(id);
   group.userData.srcIds = srcIds;
 }

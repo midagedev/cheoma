@@ -134,9 +134,17 @@ export function combineHouseHandles(kind, groups) {
       const list = owner.get(id);
       if (list) for (const uh of list) uh.setHidden(id, on);
     },
+    setExportHidden(id, on) {
+      const list = owner.get(id);
+      if (list) for (const uh of list) uh.setExportHidden?.(id, on);
+    },
     isHidden(id) {
       const list = owner.get(id);
       return list?.length ? list.every((uh) => uh.isHidden(id)) : false;
+    },
+    isExportHidden(id) {
+      const list = owner.get(id);
+      return list?.length ? list.every((uh) => uh.isExportHidden?.(id)) : false;
     },
   };
 }
@@ -153,7 +161,9 @@ export function combineSourceHideHandles(groups) {
   return {
     locate: owner,
     setHidden(id, on) { const uh = owner.get(id); if (uh) uh.setHidden(id, on); },
+    setExportHidden(id, on) { const uh = owner.get(id); if (uh) uh.setExportHidden?.(id, on); },
     isHidden(id) { const uh = owner.get(id); return uh ? uh.isHidden(id) : false; },
+    isExportHidden(id) { const uh = owner.get(id); return uh ? uh.isExportHidden?.(id) === true : false; },
   };
 }
 

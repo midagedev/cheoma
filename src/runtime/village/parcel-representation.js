@@ -16,6 +16,23 @@ export function setParcelBaseHidden(handle, parcel, hidden) {
   return changed;
 }
 
+// A persistent edited overlay owns exported architecture as well as live
+// presentation. Unlike setParcelBaseHidden, this updates only the immutable GLB
+// source snapshots; transient focus must never call it.
+export function setParcelBaseExportHidden(handle, parcel, hidden) {
+  if (!handle || !parcel) return false;
+  const houses = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga'];
+  const sources = [houses?.userData, handle.walls, handle.impostors];
+  let changed = false;
+  for (const source of sources) {
+    if (!source?.setExportHidden) continue;
+    if (source.isExportHidden?.(parcel.id) === hidden) continue;
+    source.setExportHidden(parcel.id, hidden);
+    changed = true;
+  }
+  return changed;
+}
+
 // 검증·디버그가 정책값만 보며 자기검증하지 않도록 실제 은닉 핸들과 청크 루트 가시성을 읽는다.
 // 필지에는 어느 순간에도 far mass/mid envelope/full/overlay 중 정확히 한 표현만 활성이어야 한다.
 export function parcelRepresentationState(handle, parcel, overlayVisible = false) {

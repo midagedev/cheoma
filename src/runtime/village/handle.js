@@ -55,6 +55,7 @@ import { createVillageFaunaController } from './fauna.js';
 import {
   parcelRepresentationState,
   setParcelBaseHidden,
+  setParcelBaseExportHidden,
 } from './parcel-representation.js';
 import { createVillageDetailLodState } from './detail-lod.js';
 import { createThresholdLifeRuntime } from './threshold-life.js';
@@ -162,6 +163,10 @@ export function createVillageHandle(opts, seed, plan, group) {
 
   function setResidentialBaseHidden(parcel, hidden) {
     if (setParcelBaseHidden(handle, parcel, hidden)) representationDirty = true;
+  }
+
+  function setResidentialBaseExportHidden(parcel, hidden) {
+    setParcelBaseExportHidden(handle, parcel, hidden);
   }
 
   // ── #129 오버레이 셰이더 프로그램 앵커(반복 focus-in/hop 재컴파일 방지) ────────────
@@ -887,6 +892,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       const gk = kind === 'giwa' ? 'giwa' : 'choga';
       const g = new THREE.Group();
       g.name = `override-${parcelId}`;
+      g.userData.exportPersistentParcel = false;
+      g.userData.parcelId = parcelId;
       g.userData.snowRoofKind = gk;   // 이 집 종류(giwa/choga) — 눈 흰틴트 게이트(#131, 초가 톤다운)
       g.userData.W = parcel.plotW || 20;
       g.userData.D = parcel.plotD || 18;
@@ -968,6 +975,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       activatePrimaryDoor(parcelId, g);
       if (persist) {
         persistentOverrideIds.add(parcelId);
+        g.userData.exportPersistentParcel = true;
+        setResidentialBaseExportHidden(parcel, true);
         for (const key of PERSISTENT_YARD_FIELDS) {
           if (newParams[key] !== undefined) parcel[key] = newParams[key];
         }
