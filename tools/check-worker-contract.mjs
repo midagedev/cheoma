@@ -35,11 +35,11 @@ const expectedSceneHashes = {
   // six residential opening axes through the variant bytes and renders those
   // selected openings in every FULL giwa/choga prototype. Choga and hanok keep
   // a fixed dark recess while residential primary-door and footwear anchors
-  // share the same renderer-free opening plan. The reviewed 16° focus envelope
-  // also relocates the capital fixture's pavilion from a blocked `soro-003`
-  // candidate to the clear `golmok-015` candidate; the other three scene hashes
-  // retain their door-only deltas. Sync, real module Worker, and ?worker=0
-  // fallback stay byte-identical.
+  // share the same renderer-free opening plan. The prior 16° focus envelope
+  // relocated the capital fixture's pavilion from a blocked `soro-003`
+  // candidate to the clear `golmok-015` candidate. Raising only the camera
+  // pitch to 18° keeps these four scene hashes stable. Sync, real module Worker,
+  // and ?worker=0 fallback stay byte-identical.
   village: 'a11c8fe3:07366219:ccfcdc20:382faa03',
   town: '56e38b49:9ca91523:de8fc9bb:203922ad',
   capital: '9cf72f8f:2044e2af:12cdc393:ead3a36b',
@@ -52,14 +52,14 @@ const expectedProxyHashes = {
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the six normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
-  // 16° courtyard elevation. Safe candidates scale XZ and Y together so their
+  // 18° courtyard elevation. Safe candidates scale XZ and Y together so their
   // proxy framing cannot silently steepen the camera. Raising that shared angle
   // changes every residential camera position and therefore all four proxy
   // hashes without changing their counts or isolation contract.
-  village: '4c6a4535',
-  town: '3f842a67',
-  capital: 'd4658493',
-  hanyang: 'fd6c704f',
+  village: 'ac62d5b1',
+  town: 'a22c9d89',
+  capital: '1aab6629',
+  hanyang: '30ae4e31',
 };
 
 const server = await createServer({
