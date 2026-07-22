@@ -1,7 +1,9 @@
 import { candleFlicker } from '../../env/night-glow.js';
+import { hashString } from '../../rng.js';
 
 const WARM_LIGHT = 0xffb35c;
 const TRANSITION_RATE = 2.4;
+const TAU = Math.PI * 2;
 const EMPTY_OWNER = Object.freeze({ length: 0 });
 
 function levelForTime(name) {
@@ -31,7 +33,6 @@ function collectGlowMaterials(root) {
 export function createVillageNightGlow(root, onLevelChange = () => {}) {
   const records = new Map();
   const owners = new WeakMap();
-  let phaseIndex = 0;
   let elapsed = 0;
   let level = 0;
   let targetLevel = 0;
@@ -39,9 +40,10 @@ export function createVillageNightGlow(root, onLevelChange = () => {}) {
   let transitionStarted = false;
   let disposed = false;
 
-  function acquire(ownerRoot) {
+  function acquire(ownerRoot, ownerKey) {
     const materials = collectGlowMaterials(ownerRoot);
-    for (const material of materials) {
+    for (let index = 0; index < materials.length; index++) {
+      const material = materials[index];
       const existing = records.get(material);
       if (existing) {
         existing.ownerCount++;
@@ -50,7 +52,10 @@ export function createVillageNightGlow(root, onLevelChange = () => {}) {
       records.set(material, {
         material,
         intensity: material.userData.hanjiGlow,
-        phase: phaseIndex++ * 1.7,
+        // Acquisition order changes with focus hops and verification probes.
+        // Derive the candle phase from the semantic owner and stable material
+        // traversal slot so identical scene state has identical light motion.
+        phase: (hashString(`${ownerKey}|${index}`) / 0x100000000) * TAU,
         ownerCount: 1,
         patched: false,
         original: {
@@ -118,16 +123,17 @@ export function createVillageNightGlow(root, onLevelChange = () => {}) {
     onLevelChange(dt, level);
   }
 
-  acquire(root);
+  acquire(root, 'village-base');
 
   return {
     setTime,
     update,
     setBoost(value) { if (!disposed) boost = value; },
     resetTransition() { if (!disposed) transitionStarted = false; },
-    add(additionalRoot) {
+    add(additionalRoot, ownerKey = additionalRoot?.userData?.parcelId
+      || additionalRoot?.name || 'village-overlay') {
       if (disposed) return EMPTY_OWNER;
-      const materials = acquire(additionalRoot);
+      const materials = acquire(additionalRoot, String(ownerKey));
       // Keep the existing length check cheap while ownership details remain private.
       const owner = Object.freeze({ length: materials.length });
       owners.set(owner, { materials, active: true });

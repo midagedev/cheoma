@@ -267,7 +267,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   function registerResidentialGlow(parcelId, root) {
     const previous = residentialGlowById.get(parcelId);
     if (previous) nightGlow.remove(previous);
-    const owner = nightGlow.add(root);
+    const owner = nightGlow.add(root, `residential:${parcelId}`);
     residentialGlowById.set(parcelId, owner);
     refreshNightLightOwner(parcelId, root);
   }
@@ -408,7 +408,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     heroOverrides.set(parcelId, rec);
     activeHeroId = parcelId;
     // 생성 뒤 얹는 focus overlay의 한지 재질도 현재 시간대의 창호 발광 수명에 합류시킨다.
-    const hg = nightGlow.add(g);
+    const hg = nightGlow.add(g, `hero:${parcelId}`);
     if (hg.length) rec.glow = hg;
     refreshNightLightOwner(parcelId, g);
     if (heroHandle && heroHandle.get(parcelId)) heroHandle.get(parcelId).visible = false;
@@ -498,7 +498,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     const activeOverrides = Object.keys(palaceCurrentOverrides).length ? palaceCurrentOverrides : null;
     const g = buildPalaceOverlay(activeOverrides);
     overrides.add(g);
-    palaceOverride = { group: g, comp: g.children[0], glow: nightGlow.add(g) };
+    palaceOverride = { group: g, comp: g.children[0], glow: nightGlow.add(g, 'palace') };
     refreshNightLightOwner('palace', g);
     if (palaceVisNode) palaceVisNode.visible = false; palaceHidden = true;   // #140-B 부감 병합본(또는 미병합 폴백) 은닉
     representationDirty = true;
@@ -604,7 +604,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     templeHidden = true;
     if (snow.isActive()) snow.inject(built.wrapper);
     retainOverlayPrograms(built.wrapper, `temple${snow.isActive() ? '|snow' : ''}`);
-    templeOverride.glow = nightGlow.add(built.wrapper);
+    templeOverride.glow = nightGlow.add(built.wrapper, 'temple');
     refreshNightLightOwner('temple', built.wrapper);
     representationDirty = true;
     return built.wrapper;
@@ -1322,40 +1322,58 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (!parcel) return null;
       const existing = overrideById.get(parcelId) || null;
       const wasPersistent = persistentOverrideIds.has(parcelId);
+      // Keep the exact interactive runtime alive while its authoritative root is
+      // temporarily detached. Recreating it would close an open or moving door.
+      const existingDoor = existing ? (primaryDoorById.get(parcelId) || null) : null;
+      if (existingDoor) primaryDoorById.delete(parcelId);
       if (existing) {
-        releasePrimaryDoor(parcelId);
         releaseResidentialGlow(parcelId);
         overrideById.delete(parcelId);
         persistentOverrideIds.delete(parcelId);
         overrides.remove(existing);
       }
-      const probe = this.rebuildParcel(parcelId, newParams);
+      let probe = null;
       let meshes = 0, verts = 0, mirrorX = 1;
-      probe?.traverse((object) => {
-        if (object.userData?.variantMirrorX != null) mirrorX = object.userData.variantMirrorX;
-        if (!object.isMesh || !object.geometry?.attributes?.position) return;
-        meshes++;
-        verts += object.geometry.attributes.position.count;
-      });
-      if (probe) {
-        releasePrimaryDoor(parcelId);
-        releaseResidentialGlow(parcelId);
-        disposeTree(probe);
-        overrides.remove(probe);
-        overrideById.delete(parcelId);
+      try {
+        probe = this.rebuildParcel(parcelId, newParams);
+        probe?.traverse((object) => {
+          if (object.userData?.variantMirrorX != null) mirrorX = object.userData.variantMirrorX;
+          if (!object.isMesh || !object.geometry?.attributes?.position) return;
+          meshes++;
+          verts += object.geometry.attributes.position.count;
+        });
+        return probe ? { meshes, verts, mirrorX } : null;
+      } finally {
+        // A failed build may throw after registering a partial overlay but before
+        // returning it. Remove whichever transient group owns the slot, then
+        // restore the exact pre-probe representation even if disposal itself
+        // fails. This diagnostic API must never consume user-authored state.
+        try {
+          const transient = overrideById.get(parcelId);
+          if (transient && transient !== existing) {
+            // Detach first so even a defensive cleanup exception cannot leave a
+            // second house visible beside the restored authoritative overlay.
+            overrideById.delete(parcelId);
+            overrides.remove(transient);
+            releasePrimaryDoor(parcelId);
+            releaseResidentialGlow(parcelId);
+            disposeTree(transient);
+          }
+        } finally {
+          if (existing) {
+            overrides.add(existing);
+            overrideById.set(parcelId, existing);
+            if (existingDoor) primaryDoorById.set(parcelId, existingDoor);
+            else activatePrimaryDoor(parcelId, existing);
+            registerResidentialGlow(parcelId, existing);
+            if (wasPersistent) persistentOverrideIds.add(parcelId);
+            setResidentialBaseHidden(parcel, true);
+          } else {
+            setResidentialBaseHidden(parcel, false);
+          }
+          representationDirty = true;
+        }
       }
-      if (existing) {
-        overrides.add(existing);
-        overrideById.set(parcelId, existing);
-        activatePrimaryDoor(parcelId, existing);
-        registerResidentialGlow(parcelId, existing);
-        if (wasPersistent) persistentOverrideIds.add(parcelId);
-        setResidentialBaseHidden(parcel, true);
-      } else {
-        setResidentialBaseHidden(parcel, false);
-      }
-      representationDirty = true;
-      return probe ? { meshes, verts, mirrorX } : null;
     },
 
     // 먹선 아웃라인 하이라이트 토글. on=true 면 해당 필지에 아웃라인+은은한 발광.
@@ -1499,6 +1517,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (palaceOverride) nightGlow.remove(palaceOverride.glow);
       hideTempleDetail();
       nightGlow.dispose();
+      group.userData.nightLights?.dispose?.();
       detachClouds();
       ambientField.exit();
       treeOccluder?.dispose();
