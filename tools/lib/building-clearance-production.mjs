@@ -200,6 +200,54 @@ function inspectOpenings(building) {
   };
 }
 
+function inspectResidentialOpenings(building) {
+  const plans = [];
+  const panels = [];
+  const materials = new Set();
+  let meshes = 0;
+  building.traverse((object) => {
+    if (object.isMesh) {
+      meshes++;
+      const owned = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of owned) if (material) materials.add(material);
+    }
+    if (object.userData.residentialOpeningPlan) plans.push(object.userData.residentialOpeningPlan);
+    if (object.userData.residentialOpening) {
+      const opening = object.userData.residentialOpening;
+      const detail = object.userData.residentialOpeningDetail;
+      const alongX = Math.abs(opening.tangent.x) >= Math.abs(opening.tangent.z);
+      const panelBounds = bounds(object);
+      panels.push({
+        id: opening.id,
+        kind: opening.kind,
+        facade: opening.facade,
+        primary: opening.primary,
+        plannedWidth: opening.width,
+        detailLeafCount: detail?.leafCount ?? null,
+        textureRepeatX: object.material?.map?.repeat?.x ?? null,
+        spanZ: { min: panelBounds.min.z, max: panelBounds.max.z },
+        renderedWidth: opening.style === 'choga'
+          ? object.geometry?.parameters?.width ?? null
+          : alongX
+          ? object.geometry?.parameters?.width ?? null
+          : object.geometry?.parameters?.depth ?? null,
+      });
+    }
+  });
+  const kitchenFrame = building.getObjectByName('kitchen-opening-frame');
+  const kitchenFrameBounds = bounds(kitchenFrame);
+  return {
+    planCount: plans.length,
+    plan: plans[0] || null,
+    panels,
+    meshes,
+    materials: materials.size,
+    details: inspectOpenings(building),
+    kitchenCount: HEARTH_NAMES.every((name) => building.getObjectByName(name)) ? 1 : 0,
+    kitchenFrameSpanZ: { min: kitchenFrameBounds.min.z, max: kitchenFrameBounds.max.z },
+  };
+}
+
 export function inspectBuildingClearance() {
   const giwaParams = { ...PRESETS.giwa, mats: testMaterials() };
   const giwa = buildBuilding(giwaParams);
@@ -278,6 +326,37 @@ export function inspectBuildingClearance() {
     disposeBuilding(building);
     return { name, ...shape };
   });
+  const residentialFixtures = [
+    ['choga-default', { ...PRESETS.choga }],
+    ['choga-min', {
+      ...PRESETS.choga,
+      doorCount: 1, windowCount: 1, doorWidthK: 0.32, windowWidthK: 0.18,
+    }],
+    ['choga-max', {
+      ...PRESETS.choga,
+      frontBays: 5, doorCount: 99, windowCount: 99, doorWidthK: 0.72, windowWidthK: 0.62,
+    }],
+    ['choga-tight-kitchen', {
+      ...PRESETS.choga,
+      frontBays: 3, sideBays: 2,
+      centerBayW: 3, middleBayW: 2.6, endBayW: 2.6,
+      centerBayD: 1.4, endBayD: 1.4, columnRadius: 0.12,
+      windowCount: 99, windowWidthK: 0.62,
+    }],
+    ['giwa-leaf-one', { ...PRESETS.giwa, doorWidthK: 0.6 }],
+    ['giwa-single', { ...PRESETS.giwa, planShape: 'single' }],
+    ['giwa-l', { ...PRESETS.giwa, planShape: 'l' }],
+    ['giwa-u-max', {
+      ...PRESETS.giwa,
+      planShape: 'u', bays: 4, mainHalfW: 5,
+      doorCount: 99, windowCount: 99, doorWidthK: 0.94, windowWidthK: 0.78,
+    }],
+  ].map(([name, params]) => {
+    const building = buildBuilding({ ...params, mats: testMaterials() });
+    const report = inspectResidentialOpenings(building);
+    disposeBuilding(building);
+    return { name, ...report };
+  });
   const result = {
     ownedMergeFailure: inspectOwnedMergeFailure(),
     giwa: {
@@ -292,6 +371,7 @@ export function inspectBuildingClearance() {
     matbaeGableTucks,
     hearths,
     openings,
+    residentialFixtures,
     chogaNonfinite: chogaNonfiniteProbe,
   };
   disposeBuilding(giwa);

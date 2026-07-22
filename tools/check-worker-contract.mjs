@@ -31,23 +31,26 @@ const expectedSceneHashes = {
   // civilian lattice textures. #30 adds deterministic world-space road UVs;
   // the texture bytes stay outside this structural hash. #16 adds shared static
   // opening frames, window meoreum aprons, and restrained FULL-only hardware.
+  // #10 carries the four residential opening axes through the variant bytes and
+  // renders the selected openings in every FULL giwa/choga prototype.
   // The combined FULL scene bytes intentionally move while parcel plans and
   // public proxy hashes retain their own contracts. Sync, real module Worker,
   // and ?worker=0 fallback stay byte-identical.
-  village: '4b848439:966b9eff:7233f9de:4b0880f3',
-  town: 'fb425c40:a213af72:f7878b2a:322ad622',
-  capital: '40b6fc80:0c9585d4:d03d55aa:71a78ffa',
-  hanyang: '3647413d:60a39975:9fd06393:70479245',
+  village: '2d1cbd0a:b51bbe86:4a1ab950:ddadc162',
+  town: '605a939c:4bd6fa38:7275608f:0c993e00',
+  capital: 'dee2eafb:024ef58b:5764883d:a882641f',
+  hanyang: 'bc5916cf:f495b683:a1d53b67:aa79ddf3',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
   // #56's palace/temple dancheong edit axes remain in the proxy contract. #8 also
   // exposes the authored giwa bay width so the shape-aware editor can start at
   // the first effective mainHalfW rather than presenting a dead slider range.
-  village: '0ad40baa',
-  town: 'ac44cf8c',
-  capital: '5ec8ed67',
-  hanyang: '7db20a4b',
+  // #10 adds the four normalized residential opening axes to the public proxy.
+  village: 'c9b09ace',
+  town: 'cea55d72',
+  capital: 'b66bc825',
+  hanyang: 'c38072ad',
 };
 
 const server = await createServer({

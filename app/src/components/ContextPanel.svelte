@@ -82,6 +82,12 @@
   // 표시값 — 편집 전엔 필드 기본(def) 을 fallback(#146: 종가 평면형/칸수는 spec.params 에 없어 def 로
   //   초기 표시하되, 미편집이면 페이로드엔 안 실려 렌더 불변). def 없으면 min.
   const showVal = (f) => (typeof params[f.key] === 'number' ? params[f.key] : (f.def ?? f.min));
+  const displayValue = (f, value = showVal(f)) => f.format === 'percent'
+    ? `${Math.round(Number(value) * 100)}%`
+    : f.unitKey
+      ? `${Number(value) | 0}${t(f.unitKey)}`
+      : Number(value).toFixed(2);
+  const fieldLabel = (f) => t('s_' + f.key);
   function range(f, value) { params[f.key] = value; onLive?.(f.key, value); }
   function rangeCommit(f, value) { params[f.key] = value; onCommit?.(f.key, value); }
   function stepField(f, dir) {
@@ -302,20 +308,21 @@
     {#each sec.fields as f (f.key)}
       {#if f.ctrl === 'range'}
         <label class="row">
-          <span class="rl">{t('s_' + f.key)}</span>
+          <span class="rl">{fieldLabel(f)}{#if f.showBounds}<small class="bounds">{displayValue(f, f.min)}–{displayValue(f, f.max)}</small>{/if}</span>
           <input type="range" data-key={f.key} min={f.min} max={f.max} step={f.step}
             value={showVal(f)}
+            aria-label={fieldLabel(f)} aria-valuetext={displayValue(f)}
             oninput={(e) => range(f, parseFloat(e.currentTarget.value))}
             onchange={(e) => rangeCommit(f, parseFloat(e.currentTarget.value))} />
-          <span class="rv">{Number(showVal(f)).toFixed(2)}</span>
+          <span class="rv">{displayValue(f)}</span>
         </label>
       {:else if f.ctrl === 'stepper'}
-        <div class="row bays">
-          <span class="rl">{t('s_' + f.key)}</span>
+        <div class="row bays" data-key={f.key}>
+          <span class="rl">{fieldLabel(f)}{#if f.showBounds}<small class="bounds">{displayValue(f, f.min)}–{displayValue(f, f.max)}</small>{/if}</span>
           <div class="stepper">
-            <button onclick={() => stepField(f, -1)} disabled={(showVal(f) | 0) <= f.min} aria-label="less">−</button>
-            <span class="num">{showVal(f) | 0}</span>
-            <button onclick={() => stepField(f, 1)} disabled={(showVal(f) | 0) >= f.max} aria-label="more">+</button>
+            <button onclick={() => stepField(f, -1)} disabled={(showVal(f) | 0) <= f.min} aria-label={`${fieldLabel(f)} ${t('edit_less')}`}>−</button>
+            <span class="num" aria-live="polite">{displayValue(f)}</span>
+            <button onclick={() => stepField(f, 1)} disabled={(showVal(f) | 0) >= f.max} aria-label={`${fieldLabel(f)} ${t('edit_more')}`}>+</button>
           </div>
         </div>
       {:else if f.ctrl === 'segment'}
@@ -420,6 +427,7 @@
   .row { display: grid; grid-template-columns: 78px 1fr 38px; align-items: center; gap: 8px; }
   .row.bays, .row.seg { grid-template-columns: 78px 1fr; }
   .rl { font-size: 12.5px; color: var(--ink); }
+  .bounds { display: block; margin-top: 2px; color: var(--ink-faint); font-size: 9px; font-weight: 500; }
   .rv { font-size: 11px; color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
   .stepper { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
   .stepper button { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--ink-hair); background: transparent; color: var(--ink); font-size: 16px; line-height: 1; display: grid; place-items: center; transition: all 0.14s ease; }
@@ -469,7 +477,7 @@
   .hbtn:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
 
   /* 터치: 타깃 확대. */
-  @media (pointer: coarse) {
+  @media (max-width: 600px), (pointer: coarse) {
     .crumb.root, .crumb.leaf { font-size: 28px; }
     .scaleval { font-size: 16px; }
     .toggle { padding: 13px 6px; font-size: 14px; }

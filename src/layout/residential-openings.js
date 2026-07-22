@@ -10,7 +10,10 @@ import {
   giwaFootprintPoints,
 } from './giwa-footprint.js';
 import { normalizeChogaShape } from './choga-shape.js';
-import { planGiwaKitchenOpening } from './kitchen-opening-spatial.js';
+import {
+  planChogaKitchenOpening,
+  planGiwaKitchenOpening,
+} from './kitchen-opening-spatial.js';
 
 export const RESIDENTIAL_OPENING_PARAM_KEYS = Object.freeze([
   'doorCount',
@@ -175,8 +178,10 @@ function chogaSlots(building) {
     openingKind: 'door',
     primaryEligible: true,
   };
-  // A second household door may use the west wall. The east-side center remains
-  // reserved for the independent kitchen/service opening owned by #11.
+  // A second household door may use the west wall. The east wall shares its
+  // actual kitchen frame reservation with the renderer; remove every slot whose
+  // maximum legal window width can touch that service opening, not merely the
+  // bay nearest its center.
   const secondarySource = westSide[westSide.length - 1];
   const secondary = {
     ...secondarySource,
@@ -184,14 +189,20 @@ function chogaSlots(building) {
     openingKind: 'door',
     primaryEligible: false,
   };
-  const serviceSlot = eastSide.reduce((best, slot) => (
-    Math.abs(slot.center.z + 0.25) < Math.abs(best.center.z + 0.25) ? slot : best
-  ), eastSide[0]);
+  const kitchen = planChogaKitchenOpening(east);
+  const maxWindowK = WIDTH_CAPABILITIES.choga.windowWidthK.max;
+  const eastWindows = eastSide.filter((slot) => {
+    const halfWidth = slot.availableWidth * maxWindowK / 2;
+    return !spansOverlap(
+      { min: slot.center.z - halfWidth, max: slot.center.z + halfWidth },
+      kitchen.spanZ,
+    );
+  });
   const windows = [
     ...front.filter((_, index) => index !== primaryIndex),
     ...rear,
     ...westSide.filter((slot) => slot.id !== secondarySource.id),
-    ...eastSide.filter((slot) => slot.id !== serviceSlot.id),
+    ...eastWindows,
   ];
   return { doors: [primary, secondary], windows };
 }
@@ -314,6 +325,17 @@ function seededOrder(slots, seed) {
   ));
 }
 
+function orderedWindowSlots(style, slots, seed) {
+  if (style !== 'choga') return seededOrder(slots, seed);
+  // Preserve the established 초가삼간 face: default counts should still read
+  // as a central front door flanked by front windows. Wider cottages vary which
+  // front bays are used by seed, then continue deterministically around the
+  // side/rear walls when the requested count grows.
+  const front = slots.filter((slot) => slot.facade === 'front');
+  const other = slots.filter((slot) => slot.facade !== 'front');
+  return [...seededOrder(front, seed), ...seededOrder(other, seed)];
+}
+
 function compareIds(a, b) {
   return a.id === b.id ? 0 : a.id < b.id ? -1 : 1;
 }
@@ -423,7 +445,7 @@ export function planResidentialOpenings(kind, building = {}, seed = building?.se
   const capabilities = capabilitiesFor(style, slots);
   const params = normalizeWithCapabilities(source, capabilities);
   const doorSlots = orderedDoorSlots(slots.doors, stableSeed).slice(0, params.doorCount);
-  const windowSlots = seededOrder(slots.windows, stableSeed).slice(0, params.windowCount);
+  const windowSlots = orderedWindowSlots(style, slots.windows, stableSeed).slice(0, params.windowCount);
   const openings = [
     ...doorSlots.map((slot, index) => plannedOpening(slot, style, params.doorWidthK, index === 0)),
     ...windowSlots.map((slot) => plannedOpening(slot, style, params.windowWidthK, false)),
