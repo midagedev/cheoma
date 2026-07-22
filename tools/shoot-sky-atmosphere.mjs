@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
+import { VILLAGE_FOCUS_ELEVATION } from '../src/camera/optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -20,6 +21,10 @@ const pass = (condition, message, detail = '') => {
 };
 
 function meanSky(png) {
+  // The product frame is courtyard-first, so this sample intentionally includes the
+  // upper roof mass as well as the smaller remaining sky. The sunset-look threshold
+  // below is correspondingly modest: it catches a no-op profile without requiring a
+  // sky-dominant composition that would crop the architecture again.
   const x0 = 0, x1 = Math.floor(png.width * 0.70);
   const y0 = 0, y1 = Math.floor(png.height * 0.42);
   const sum = [0, 0, 0]; let count = 0;
@@ -170,6 +175,8 @@ try {
       horizonOpacity: horizonBank?.material?.opacity ?? 0,
       horizonDistance: horizonBank?.userData?.distance ?? 0,
       horizonColor: horizonBank?.material?.color?.toArray?.() || null,
+      horizonViewActive: horizonBank?.userData?.viewActive ?? null,
+      horizonVisible: !!horizonBank?.visible,
       horizonTextureAlpha,
       projectedClouds,
       cameraFov: engine.camera.fov,
@@ -196,28 +203,68 @@ try {
     'scene-level sky stays visible when village mode hides single-house scenery');
   pass(live.domeCameraDistance != null && live.domeCameraDistance < 0.01,
     'sky dome follows the active telephoto camera', `distance=${live.domeCameraDistance}`);
-  pass(live.compositionYFrac < -0.17,
-    'architectural lens rise preserves a visible sky band without moving the lintel/eave target',
+  pass(Math.abs(live.compositionYFrac) < 1e-6,
+    'focus projection stays centered so the foreground courtyard is not cropped for extra sky',
     `shift=${live.compositionYFrac.toFixed(3)}`);
-  pass(live.cameraForwardY > 0.005 && live.cameraForwardY < 0.06,
-    'yard-height focus camera looks upward toward the eaves and sky',
-    `cameraY=${live.cameraY.toFixed(2)}, targetY=${live.targetY.toFixed(2)}, forwardY=${live.cameraForwardY.toFixed(3)}`);
+  pass(Math.abs(live.cameraForwardY + Math.sin(VILLAGE_FOCUS_ELEVATION)) < 0.002,
+    'focus camera holds the exact ten-degree courtyard-reading approach',
+    `forwardY=${live.cameraForwardY.toFixed(3)}`);
   pass(live.highClouds === 4 && live.minRim > 0.8,
     'four village clouds receive low-sun HDR rim lighting', `rim>=${live.minRim.toFixed(2)}`);
   pass(live.horizonClouds === 16 && live.horizonDrawCalls === 1,
     'an instanced cloud ring composes every telephoto azimuth in one draw call',
     `projected=${JSON.stringify(live.projectedClouds)}, target=${live.targetNdc.map((v) => v.toFixed(2))}, distance=${live.horizonDistance.toFixed(0)}, opacity=${live.horizonOpacity.toFixed(2)}, color=${live.horizonColor?.map((v) => v.toFixed(2))}, alpha=${JSON.stringify(live.horizonTextureAlpha)}, view=${JSON.stringify(live.cameraView)}, fov=${live.cameraFov.toFixed(1)}, fy=${live.cameraForwardY.toFixed(2)}`);
-  pass(live.rays === 3 && live.visibleRays >= 1 && live.maxRayOpacity >= 0.025,
-    'cloud-linked crepuscular rays are active in the focus view', `visible=${live.visibleRays}, opacity=${live.maxRayOpacity.toFixed(3)}`);
+  pass(live.projectedClouds.length === 0 && live.horizonViewActive === false
+      && !live.horizonVisible && live.rays === 3 && live.visibleRays === 0,
+    'courtyard focus sleeps the off-frame cloud bank and all linked rays before render',
+    `projected=${live.projectedClouds.length}, active=${live.horizonViewActive}, bank=${live.horizonVisible}, rays=${live.visibleRays}`);
   pass(live.shadowStrength > 0.25,
     'the same cloud layer drives readable terrain/building shadows', `strength=${live.shadowStrength.toFixed(3)}`);
   pass(live.drawCalls < 1000, 'sunset sky additions preserve the town draw-call ceiling', `calls=${live.drawCalls}`);
 
-  const withBankPath = join(outDir, 'focus-sunset-violet-with-cloud-bank.png');
+  const withBankPath = join(outDir, 'focus-sunset-violet-forced-cloud-bank.png');
   const withoutBankPath = join(outDir, 'focus-sunset-violet-without-cloud-bank.png');
+  const bankRenderCost = await page.evaluate(() => {
+    const engine = window.__engine;
+    const clouds = engine.village.exportRoot()?.getObjectByName('clouds');
+    const bank = clouds?.getObjectByName('horizon-cloud-bank');
+    const rays = [];
+    clouds?.traverse((object) => {
+      if (object.name?.startsWith('cloud-light-ray-')) rays.push(object);
+    });
+    engine.debugSetPaused(true);
+    const saved = [bank?.visible, ...rays.map((ray) => ray.visible)];
+    const programsBefore = engine.renderer.info.programs?.length ?? 0;
+    if (bank) bank.visible = false;
+    for (const ray of rays) ray.visible = false;
+    const sleepingCalls = engine.village.debugDrawCalls();
+    if (bank) bank.visible = true;
+    for (const ray of rays) ray.visible = true;
+    const forcedCalls = engine.village.debugDrawCalls();
+    const programsWarmed = engine.renderer.info.programs?.length ?? 0;
+    if (bank) bank.visible = false;
+    for (const ray of rays) ray.visible = false;
+    engine.village.debugDrawCalls();
+    const programsPlateau = engine.renderer.info.programs?.length ?? 0;
+    if (bank) bank.visible = saved[0];
+    rays.forEach((ray, index) => { ray.visible = saved[index + 1]; });
+    engine.debugRenderDofFrame();
+    return {
+      saved, sleepingCalls, forcedCalls, programsBefore, programsWarmed, programsPlateau,
+    };
+  });
+  pass(bankRenderCost.saved.every((visible) => visible === false)
+      && bankRenderCost.forcedCalls - bankRenderCost.sleepingCalls === 4,
+    'the default view avoids one bank and three ray submissions',
+    `calls=${bankRenderCost.sleepingCalls} sleeping/${bankRenderCost.forcedCalls} forced`);
+  pass(bankRenderCost.programsPlateau === bankRenderCost.programsWarmed,
+    'view sleep/wake reuses the same shader-program families',
+    `programs=${bankRenderCost.programsBefore}→${bankRenderCost.programsWarmed}→${bankRenderCost.programsPlateau}`);
   await page.evaluate(() => {
-    window.__engine.debugSetPaused(true);
-    window.__engine.debugRenderDofFrame();
+    const engine = window.__engine;
+    const cloud = engine.village.exportRoot()?.getObjectByName('horizon-cloud-bank');
+    if (cloud) cloud.visible = true;
+    engine.debugRenderDofFrame();
   });
   await page.screenshot({ path: withBankPath });
   await page.evaluate(() => {
@@ -230,7 +277,7 @@ try {
   await page.evaluate(() => {
     const engine = window.__engine;
     const cloud = engine.village.exportRoot()?.getObjectByName('horizon-cloud-bank');
-    if (cloud) cloud.visible = true;
+    if (cloud) cloud.visible = cloud.userData.viewActive;
     engine.debugRenderDofFrame();
     engine.debugSetPaused(false);
   });
@@ -238,14 +285,14 @@ try {
     PNG.sync.read(await readFile(withBankPath)),
     PNG.sync.read(await readFile(withoutBankPath)),
   );
-  pass(bankPixelDifference > 1.0,
-    'the distant cloud bank contributes visible pixels, not only scene objects',
-    `mean Δ=${bankPixelDifference.toFixed(3)}`);
+  pass(bankPixelDifference < 0.1,
+  'forcing the off-frame bank on adds no hidden pixels to the courtyard composition',
+  `projected=${live.projectedClouds.length}, mean Δ=${bankPixelDifference.toFixed(3)}`);
 
   const dGC = colourDistance(gold.mean, crimson.mean);
   const dCV = colourDistance(crimson.mean, violet.mean);
   const dGV = colourDistance(gold.mean, violet.mean);
-  pass(Math.min(dGC, dCV, dGV) > 3.0,
+  pass(Math.min(dGC, dCV, dGV) > 1.5,
     'gold, crimson and violet renders are pixel-distinct', `Δ=${dGC.toFixed(1)}/${dCV.toFixed(1)}/${dGV.toFixed(1)}`);
 
   const day = await capture('focus-day-clouds', 'day', 'gold');
@@ -258,11 +305,12 @@ try {
     });
     return {
       raysVisible: rays.some((ray) => ray.visible),
+      bankActive: clouds?.getObjectByName('horizon-cloud-bank')?.userData?.viewActive ?? null,
       maxRim: Math.max(0, ...highs.map((cloud) => cloud.material.userData.cloudRim?.strength?.value ?? 0)),
     };
   });
-  pass(!dayState.raysVisible && dayState.maxRim < 0.02,
-    'midday retires low-sun rays and rim instead of leaving a permanent effect');
+  pass(!dayState.bankActive && !dayState.raysVisible && dayState.maxRim < 0.02,
+    'midday keeps the off-frame bank asleep and retires low-sun rays/rim');
 
   const night = await capture('focus-night-moon-clouds', 'night', 'gold');
   const nightState = await page.evaluate(() => {
@@ -273,15 +321,18 @@ try {
     return {
       moonVisible: !!moon?.visible,
       moonNdc: moonPoint ? [moonPoint.x, moonPoint.y, moonPoint.z] : null,
+      bankActive: root?.getObjectByName('horizon-cloud-bank')?.userData?.viewActive ?? null,
       shadowStrength: root?.userData?.cloudUniforms?.uCloudStr?.value ?? 0,
     };
   });
   pass(nightState.moonVisible, 'moon remains in the village focus sky');
-  pass(!!nightState.moonNdc && Math.abs(nightState.moonNdc[0]) < 1 && Math.abs(nightState.moonNdc[1]) < 1.05,
-    'the near-ground focus angle brings the low moon into the authored house view',
+  pass(!!nightState.moonNdc && nightState.moonNdc.every(Number.isFinite),
+    'courtyard-first focus keeps a valid camera-relative moon even when it leaves the default frame',
     `ndc=${nightState.moonNdc?.map((value) => value.toFixed(2))}`);
   pass(nightState.shadowStrength > 0.05 && nightState.shadowStrength < 0.3,
     'moonlit cloud shadows remain subtle at night', `strength=${nightState.shadowStrength.toFixed(3)}`);
+  pass(nightState.bankActive === false,
+    'night keeps the same off-frame cloud-bank sleep contract in courtyard focus');
 
   // The architectural focus framing intentionally follows the south-facing house,
   // so the moon is not guaranteed to share that azimuth. Turn toward it once and
@@ -300,6 +351,7 @@ try {
     engine.__controls.target.copy(target);
     engine.camera.lookAt(target);
     engine.camera.updateMatrixWorld(true);
+    engine.village.exportRoot()?.getObjectByName('clouds')?.userData?.updateView?.(engine.camera);
     engine.debugRenderDofFrame();
   });
   const moonFramedPath = join(outDir, 'night-moon-framed.png');
@@ -333,12 +385,19 @@ try {
         }
       }
     });
-    return { moonNdc: point ? [point.x, point.y, point.z] : null, cloudInFrame, frameLocalOpacity };
+    return {
+      moonNdc: point ? [point.x, point.y, point.z] : null,
+      bankActive: bank?.userData?.viewActive ?? null,
+      bankVisible: !!bank?.visible,
+      cloudInFrame,
+      frameLocalOpacity,
+    };
   });
   pass(!!moonFrame.moonNdc && Math.abs(moonFrame.moonNdc[0]) < 0.8 && Math.abs(moonFrame.moonNdc[1]) < 0.8,
     'the night sky can frame the moon without abandoning camera-relative atmosphere',
     `ndc=${moonFrame.moonNdc?.map((value) => value.toFixed(2))}`);
-  pass(moonFrame.cloudInFrame, 'moon-facing composition retains a cloud silhouette');
+  pass(moonFrame.bankActive === true && moonFrame.bankVisible && moonFrame.cloudInFrame,
+    'an explicit sky-facing composition wakes the cloud bank and retains a silhouette');
   pass(moonFrame.frameLocalOpacity < 0.12,
     'nearby shadow-source billboards fade before becoming a cloud ceiling',
     `opacity=${moonFrame.frameLocalOpacity.toFixed(3)}`);

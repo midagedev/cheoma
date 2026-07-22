@@ -52,7 +52,8 @@ const SUN_GLOW_DIST = 430;
 //    않게 작게(코어만 밝고 헤일로는 은은). sunset 금빛 최대, day 절제, night 없음.
 // rimWrap 은 태양 '반대쪽' 실루엣 에지에 남기는 잔여 림(0=완전 소거). 낮게 잡아 태양 쪽
 // 가장자리만 빛나고 반대편은 어둡게 — 광학적 역광. 정오·순광 소거는 setTime 의 altGate 와
-// update 의 backlit 게이트가 담당하므로 여기 rim 값은 '역광일 때의 최대 강도'다.
+// material Fresnel 경로의 역광·직사광 판정은 rim.js가 실제 directional light로 담당한다.
+// 여기 rim 값은 저고도 시간 프로필의 최대 에너지이며, pass 폴백만 화면 역광 게이트를 쓴다.
 // sat: R4 색분리용 채도 그레이드(선형 HDR·ACES 전, RimPass 말미 적용). 조명 스플릿으로 hue
 // 다양성을 확보한 뒤 살짝 끌어올려 웜·쿨을 함께 또렷하게. 1.0=무변(day/night 무드 보존).
 // 단독으로는 단색조를 더 주황으로 만들 뿐이라 반드시 조명 스플릿 이후의 보정 역할만 한다.
@@ -567,7 +568,7 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   let disposed = false;
   let enabled = true;
   let rimOn = true;                 // setRimEnabled 마스터(부감 OFF·focus ON). fresnel=uRimScale, pass=rimPass.enabled
-  let rimBase = 0;                  // cur.rim × altGate(저고도) — update 가 backlit 을 곱해 최종 강도
+  let rimBase = 0;                  // cur.rim × altGate(저고도); 실제 역광 기하는 rim.js 소유
   let scanTick = 0;                 // fresnel 재질 self-heal 스캔 카운터(마을 리롤·focus-in 새 재질 포착)
   function updateRimScale() { if (fresnelRim) fresnelRim.setScale((enabled && rimOn) ? 1 : 0); }
   let glowIntensity = 0;
@@ -639,9 +640,10 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     bokehPass.uniforms.highlightThreshold.value = Math.max(0.48, cur.bloomThreshold * 0.9);
     // 저고도 게이트: 림은 태양이 낮을 때(골든아워)만 성립하고 정오로 갈수록 소거된다.
     const altGate = 1.0 - THREE.MathUtils.smoothstep(cur.dir.y, 0.20, 0.52);
-    rimBase = cur.rim * altGate;   // update() 가 backlit 을 곱해 최종 강도(두 모드 공통 저장)
+    rimBase = cur.rim * altGate;
     if (useFresnel) {
-      // 재질 프레넬: 색·지수·wrap 은 여기서, 강도(rimBase×backlit)와 태양 뷰방향은 update() 에서.
+      // 재질 프레넬: 색·지수는 여기서, 기본 강도와 태양 뷰방향은 update() 에서.
+      // wrap setter는 하위호환 API지만 물리 rim 에는 암부 잔광을 더하지 않는다.
       // 지수 remap: 뷰벡터 프레넬(1-N·V)은 스크린 노멀 그레이징(1-N.z)보다 넓게 잡히므로(면 전체가
       //   그레이징으로 물듦) POST_TUNING.rimPower 에 오프셋을 더해 실루엣 에지에 집중시킨다.
       //   강도는 지수 상향에 따른 총 에너지 감소를 보정해 살짝 올린다(처마 킥 인상 유지).
@@ -714,21 +716,20 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     // parallax and keeps the sun inside the sky shell at every village scale.
     sunGlow.position.copy(camera.position).addScaledVector(cur.dir, SUN_GLOW_DIST);
     _v.copy(cur.dir).transformDirection(camera.matrixWorldInverse); // 뷰공간 태양 방향(단위)
-    // 역광 게이트(엄격): -_v.z = dot(뷰전방, 태양) — 태양이 카메라 전방·피사체 뒤에 있을수록 1.
-    // 순광/측광 뷰에서도 최소 18% 림 강도가 잔존하도록 게이트 완화
-    const rawBacklit = THREE.MathUtils.smoothstep(-_v.z, 0.06, 0.5);
-    const backlit = THREE.MathUtils.lerp(0.18, 1.0, rawBacklit);
+    // 구 스크린 패스만 카메라 전방 역광 게이트를 소비한다. 물리 재질 rim은
+    // directionalLights[0]의 실제 방향을 프래그먼트별로 판정하므로 cur.dir 기반 최소값을 더하지 않는다.
+    const passBacklit = THREE.MathUtils.smoothstep(-_v.z, 0.06, 0.5);
     if (useFresnel) {
-      // 재질 프레넬: 뷰공간 태양 방향 + 최종 강도(rimBase×backlit×enabled)를 공유 uniform 에.
+      // 재질 프레넬: 뷰공간 태양 방향 + 시간대 기본 강도만 공유 uniform 에.
       //   FRES_STR_MUL: 지수 상향(에지 집중)에 따른 총 에너지 감소를 보정하는 배율(처마 킥 인상 유지).
       fresnelRim.setSunViewDir(_v);
-      fresnelRim.setStrength(enabled ? rimBase * backlit * 1.6 : 0);
+      fresnelRim.setStrength(enabled ? rimBase * 1.6 : 0);
       // 새 재질(마을 리롤·focus-in 오버레이·단일건물 rebuild) self-heal 패치. 대략 0.4s 주기.
       if ((++scanTick % 24) === 0) fresnelRim.apply(scene);
     } else {
       const len = Math.hypot(_v.x, _v.y);
       if (len > 1e-4) rimPass.uniforms.sunScreenDir.value.set(_v.x / len, _v.y / len);
-      rimPass.uniforms.backlit.value = backlit;
+      rimPass.uniforms.backlit.value = passBacklit;
     }
 
     // ── 태양 렌즈 플레어(#67): 스크린 위치·강도 갱신 ─────────────────────────
@@ -834,7 +835,7 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     rimDebug = {
       mode: RIM_MODE,
       get patched() { return fresnelRim ? fresnelRim.patchedCount : 0; },
-      get coverage() { return fresnelRim ? fresnelRim.coverage : null; },  // {total,building,misc,organic}
+      get coverage() { return fresnelRim ? fresnelRim.coverage : null; },  // + cloudShadow/cloudRoof composition
       get groupMultipliers() { return fresnelRim ? fresnelRim.groupMultipliers : null; },
       get strength() { return useFresnel ? fresnelRim.uniforms.uRimStrength.value : (rimPass ? rimPass.uniforms.rimStrength.value : 0); },
       get scale() { return useFresnel ? fresnelRim.uniforms.uRimScale.value : (rimPass && rimPass.enabled ? 1 : 0); },

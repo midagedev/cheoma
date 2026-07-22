@@ -47,10 +47,13 @@ const expectedProxyHashes = {
   // exposes the authored giwa bay width so the shape-aware editor can start at
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the four normalized residential opening axes to the public proxy.
-  village: 'c9b09ace',
-  town: 'cea55d72',
-  capital: 'b66bc825',
-  hanyang: 'c38072ad',
+  // Product focus keeps the door-height target at the exact reviewed ten-degree
+  // courtyard elevation. Safe candidates now scale XZ and Y together so their
+  // proxy framing cannot silently steepen the camera; scene bytes stay unchanged.
+  village: '66d1bcb5',
+  town: '8037572e',
+  capital: '46c69392',
+  hanyang: '41c3b4ad',
 };
 
 const server = await createServer({

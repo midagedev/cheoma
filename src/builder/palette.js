@@ -856,6 +856,10 @@ export function injectCloudShadow(mat, cloudUniforms) {
   if (!mat || !mat.isMaterial || !cloudUniforms) return false;
   if (mat.userData.__cloudShadowPatched) return false;
   mat.userData.__cloudShadowPatched = true;
+  // Explicit composition contract for later material patches (notably env/rim.js).  The patch
+  // only multiplies diffuseColor at color_fragment and preserves previous callbacks, so it is
+  // safe to chain when each participant also composes customProgramCacheKey.
+  mat.userData.__cloudShadowPatchVersion = 'cloudshadow-v1';
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     if (prev) prev(shader, renderer);

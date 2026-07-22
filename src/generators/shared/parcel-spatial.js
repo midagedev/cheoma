@@ -1,31 +1,29 @@
 import { facingY } from '../../core/math/geom2.js';
-import { VILLAGE_LENS, dollyDistanceForFov } from '../../camera/optics.js';
+import {
+  VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_LENS,
+  dollyDistanceForFov,
+} from '../../camera/optics.js';
 
 const DEG = Math.PI / 180;
 // Stay inside the south-light opening instead of orbiting far enough sideways for
 // public structures to enter the view axis. A shallow three-quarter angle still
 // reveals bay depth while reading primarily as the house's south-facing elevation.
 const FOCUS_AZIMUTH_MAX = 14 * DEG;
-// A close residential view is authored from a person's eye height in the yard.
-// Keeping this as a world-space height instead of an angle prevents larger parcels
-// and telephoto dolly distances from lifting the camera back into an aerial view.
-export const PARCEL_FOCUS_EYE_HEIGHT = 1.35;
-const FOCUS_HORIZONTAL_DISTANCE = dollyDistanceForFov(
+// Aim at the doors from the shared product-tested courtyard elevation. The protected
+// south-light opening keeps the camera on the house axis; the lift clears walls and
+// gates without turning the close view into an aerial survey.
+const FOCUS_DISTANCE = dollyDistanceForFov(
   2.25,
   VILLAGE_LENS.parcel.referenceFov,
   VILLAGE_LENS.parcel.fov,
 );
-// Aim between the lintels and eaves. A yard-height telephoto camera that targets the
-// doors still points almost horizontally, letting foreground roofs consume the sky;
-// this height keeps the selected eaves readable while the view genuinely tilts up.
-// Keeping the value beside the XZ framing lets picking, hero landing, DoF, and
-// regression checks share one semantic aim point without renderer-only corrections.
-export function parcelFocusTargetLift(height) {
-  return Math.max(3, Math.min(5.6, height * 0.48));
-}
 
-export function parcelFocusCameraLift(targetLift) {
-  return PARCEL_FOCUS_EYE_HEIGHT - targetLift;
+// A focused house is composed around its doors, not the roof mass. Keeping this
+// pure value beside the XZ framing lets picking, hero landing, and regression
+// checks share one semantic aim point without renderer-only corrections.
+export function parcelFocusTargetLift(height) {
+  return Math.max(1.65, Math.min(2.5, height * 0.26));
 }
 
 // THREE.Vector3.applyAxisAngle(Y, angle)의 연산 순서를 그대로 옮긴 순수 helper. 단순 cos/sin
@@ -100,12 +98,13 @@ export function planParcelFocus(parcel) {
   const cos = Math.cos(rotationY), sin = Math.sin(rotationY);
   const worldX = parcel.center.x + bounds.centerX * cos + bounds.centerZ * sin;
   const worldZ = parcel.center.z - bounds.centerX * sin + bounds.centerZ * cos;
-  const horizontal = FOCUS_HORIZONTAL_DISTANCE * Math.max(width, depth, height);
+  const radius = FOCUS_DISTANCE * Math.max(width, depth, height);
+  const horizontal = radius * Math.cos(VILLAGE_FOCUS_ELEVATION);
   const localX = horizontal * Math.sin(azimuth);
   const localZ = horizontal * Math.cos(azimuth);
   const offset = rotateFocusOffsetY(
     localX,
-    0,
+    radius * Math.sin(VILLAGE_FOCUS_ELEVATION),
     localZ,
     rotationY,
   );
@@ -122,7 +121,7 @@ export function planParcelFocus(parcel) {
     worldZ,
     cameraX: worldX + offset.x,
     cameraZ: worldZ + offset.z,
-    cameraLift: parcelFocusCameraLift(targetLift),
+    cameraLift: offset.y,
     targetLift,
     fov: VILLAGE_LENS.parcel.fov,
     referenceFov: VILLAGE_LENS.parcel.referenceFov,

@@ -7,10 +7,12 @@
 
 const DEG = Math.PI / 180;
 export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
-// Architectural-camera rise for close parcel views. A yard-level camera keeps aiming
-// between the lintels and eaves while an asymmetric projection places that target
-// lower in frame, preserving the south-light corridor and opening the sky.
-export const VILLAGE_FOCUS_SKY_FRACTION = 0.18;
+// Shared close-parcel pose. Ten degrees keeps the courtyard readable while retaining
+// an architectural, rather than aerial, view across the tested residential variants.
+// Keep the projection centered: a sky-biased lens shift crops the foreground yard and
+// hides the animals and household details this elevation is meant to reveal.
+export const VILLAGE_FOCUS_ELEVATION = 10 * DEG;
+export const VILLAGE_FOCUS_SKY_FRACTION = 0;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 

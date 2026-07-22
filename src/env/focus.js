@@ -90,11 +90,19 @@ function makeRing({
   // 필지 치수(buildParcel 이 root.userData 에 심음). 없으면 보수적 기본값.
   const ud = group.userData || {};
   const W = ud.W || 20, D = ud.D || 18, style = ud.style || 'hanok';
+  const residential = style === 'choga' || style === 'hanok' || style === 'giwa';
 
   // 마당(닭 무리) 월드 앵커: parcel.yard(월드) 우선, 없으면 필지 로컬 앞마당(+z 대문측·+x off-axis)을
   //   오버레이 월드행렬로 변환(회전 반영). buildParcel 좌표규약: +z=남(대문), 몸채는 -z(북).
   let yardX, yardZ, yardR;
-  if (parcel && parcel.yard && Number.isFinite(parcel.yard.x)) {
+  if (parcel?.hero && residential) {
+    // Residential hero compounds have a deep south gate and side corridors. The
+    // regular parcel yard anchor sits immediately behind that gate, hiding the whole
+    // flock even at the courtyard camera elevation. Keep domestic life in the open
+    // inner yard; formal government/palace heroes never opt into this domestic policy.
+    const local = new THREE.Vector3(W * 0.18, 0, D * 0.10).applyMatrix4(group.matrixWorld);
+    yardX = local.x; yardZ = local.z;
+  } else if (parcel && parcel.yard && Number.isFinite(parcel.yard.x)) {
     yardX = parcel.yard.x; yardZ = parcel.yard.z; yardR = parcel.yard.r;
   } else {
     const local = new THREE.Vector3(W * 0.08, 0, D * 0.24).applyMatrix4(group.matrixWorld);
@@ -102,11 +110,12 @@ function makeRing({
   }
   if (yardR == null) yardR = Math.max(1.4, Math.min(3.2, Math.min(W, D) * 0.11));
 
-  // 소동물: 격식 건물(궁·절) 마당엔 닭 부적절 → 주거형만 기본 점등(parcel.chickens 로 강제 가능).
-  const residential = style === 'choga' || style === 'hanok' || style === 'giwa';
-  const wantChickens = chickens != null
+  // 소동물: 격식 건물(궁·절·관아) 마당엔 닭이 부적절하다. 호출자가 base flock 중복을
+  // 피하려고 `chickens`를 명시해도 주거 style 경계 밖에서는 국내 가축을 되살리지 않는다.
+  const requestedChickens = chickens != null
     ? !!chickens
-    : parcel && parcel.chickens != null ? !!parcel.chickens : residential;
+    : parcel && parcel.chickens != null ? !!parcel.chickens : true;
+  const wantChickens = residential && requestedChickens;
   const cowSite = parcel && parcel.cowSite ? parcel.cowSite : null;
 
   // 1) 소동물 — 이미 populate base flock이 있는 필지는 그 LOD-managed flock을 그대로 쓴다.
@@ -120,6 +129,7 @@ function makeRing({
     chickens: wantChickens,
   }) : null;
   container.userData.hasAnimals = !!animals;
+  container.userData.hasChickens = wantChickens;
 
   // 2) 굴뚝 연기·아궁이 — 오버레이 내부 몸채 조회(교체 self-heal). choga=M.mud 재질, giwa/hanok=name='chimney'.
   const getBuilding = () => group.getObjectByName('building') || group.getObjectByName('hanok') || null;

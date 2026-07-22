@@ -17,6 +17,7 @@ import {
 } from '../../../src/api/environment.js';
 import {
   VILLAGE_LENS,
+  VILLAGE_FOCUS_ELEVATION,
   VILLAGE_FOCUS_SKY_FRACTION,
   dollyDistanceForFov,
   fovForDollyScale,
@@ -1566,7 +1567,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       emit('villageMode', true); onDone?.(); return;
     }
     village.selected = heroId;
-    setZoomRegime('lock');                              // 눈높이→문 상향 구도를 OrbitControls 극각 상한에서 보존
     setPostFocus(true);                                 // 종가 클로즈업 랜딩 → rim/flare ON
     const g = village.handle.showHeroDetail(heroId);   // 풀디테일 오버레이(원본 종가 가림)
     if (g) warmShaders(g);   // 종가 컴파운드 오버레이 서브트리만 프리컴파일(#117) — 랜딩 조립 첫 렌더 컴파일 스톨 흡수(타이틀 마스킹 구간)
@@ -1582,8 +1582,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
     heroSunAz = rotY + Math.PI + 25 * DEG;   // 배면 +25° 사선 역광(정배면보다 처마·측면 실루엣 림이 예쁨)
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
-    // 시선점은 문 인방과 처마 사이를 지키되 카메라는 마당의 사람 눈높이에 둔다. 필지 크기와
-    // 망원 dolly가 커져도 부감으로 떠오르지 않아, 종가 랜딩→일반 집 전환이 같은 저각을 유지한다.
+    // 시선점은 문 높이를 지키고 마당·생활 디테일을 읽을 수 있는 공유 고도를 쓴다.
+    // 일반 필지 planParcelFocus와 같은 값이라 종가 랜딩→임의 집 전환에도 시점이 튀지 않는다.
+    const el = VILLAGE_FOCUS_ELEVATION;
     // 더 먼 자리에서 좁은 화각으로 같은 화면 점유율을 유지해 처마·산세가 망원으로 압축된다.
     const heroDistance = dollyDistanceForFov(
       1.85,
@@ -1594,14 +1595,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const r = heroDistance * maxDim * visibilityScale;
     const finalTarget = pr.cameraFraming.target.clone();
     const plannedXZ = pr.cameraFraming.position.clone().sub(finalTarget).setY(0).normalize();
-    const off = plannedXZ.multiplyScalar(r);
-    off.y = pr.cameraFraming.position.y - finalTarget.y;
+    const off = plannedXZ.multiplyScalar(r * Math.cos(el));
+    off.y = r * Math.sin(el);
     const finalPosition = finalTarget.clone().add(off);
     const finalFov = fovForDollyScale(VILLAGE_LENS.hero.fov, visibilityScale);
-    const finalReferenceFov = fovForDollyScale(VILLAGE_LENS.hero.referenceFov, visibilityScale);
+    const finalReferenceFov = fovForDollyScale(
+      VILLAGE_LENS.hero.referenceFov,
+      visibilityScale,
+    );
 
-    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 마당 눈높이의
-    // 저각·망원 프레임으로 내려앉는다. seed는 선회 방향만 정하고 생성 RNG를 소비하지 않는다.
+    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 10°의
+    // 마당·문높이 망원 프레임으로 내려앉는다. seed는 선회 방향만 정하고 생성 RNG를 소비하지 않는다.
     // 모바일은 호를 줄이며 reduced-motion은 즉시 endpoint를 적용한다.
     revealCamera.reveal('arrival', {
       position: finalPosition,
@@ -2712,6 +2716,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     get frozen() { return !!village.asmFrozen; },
     freeze(b) { village.asmFrozen = !!b; },
     seek(t) { if (village.heroAsm && village.heroAsm.seek) { village.heroAsm.seek(t); renderFrame(); } },
+    finish() { if (village.heroAsm) { village.heroAsm.skip(); renderFrame(); } },
     maxScaleDev() {
       const g = village.handle?.heroDetailGroup?.();
       if (!g) return null;

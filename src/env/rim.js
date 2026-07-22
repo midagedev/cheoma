@@ -24,8 +24,9 @@ import * as THREE from 'three';
 //  - 반투명: 오버레이·유리·입자성(빗물 리벌릿·웅덩이 등). 실루엣 대상이 아님.
 //  - 개구부(role 'opening')·야간 발광(userData.hanjiGlow: 창호·문·석등 화창)·자체발광 지배
 //    재질(#66/#70): 림이 발광과 충돌.
-//  - customProgramCacheKey 를 재정의한 재질(#52 snowvol shell/ground): 델리킷한 프로그램 캐시키
-//    분리에 온비포컴파일 변형을 얹으면 캐시키 충돌·AO 오재사용 회귀 위험 → 건드리지 않는다.
+//  - 알려지지 않은 customProgramCacheKey 재질(#52 snowvol shell/ground): 델리킷한 프로그램 캐시키
+//    분리에 변형을 얹으면 캐시키 충돌·AO 오재사용 회귀 위험 → 건드리지 않는다. diffuseColor 곱셈과
+//    callback/key 체인을 명시한 cloudshadow-v1만 안전 합성 대상으로 허용한다.
 //  - 지형·물면(넓은 완사면·수면): 프레넬은 이웃 샘플이 없어 "평면의 실루엣 에지"와 "평면 내부의
 //    그레이징"을 구분할 수 없다(그게 프레넬의 본질). 넓은 지면이 그레이징에서 전면 금빛으로 물드는
 //    오탐(구 RimPass 가 깊이-이차미분 엣지 게이트로 힘겹게 막던 것)을 재질 프레넬로는 막을 방법이
@@ -53,6 +54,66 @@ const RIM_ROLES = new Set(['roof', 'wall', 'wood', 'stone']);
 // 재질군별 강도 계수(상수 노출). 건물=온전, 소품/담장/동물=절제, 유기물(나무/풀/마당초목)=은은.
 export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.7 };
 
+// A local Fresnel term cannot tell a broad grazing plane from a true silhouette.  Keep the
+// full-strength band inside ~4.6° of the tangent and fade it out before the surface is wider
+// than ~17.5° from the tangent.  This preserves the sunset edge while preventing an oblique
+// plaster wall or roof plane from being treated as one large emissive surface.
+export const RIM_FACING_GATE = Object.freeze({ full: 0.08, cutoff: 0.30 });
+
+// Sunset's authored peak is intentionally strong (rim 2.05 × runtime 1.6).  Bound the
+// pre-group additive energy so a tangent edge can seed bloom without turning grass or pale
+// plaster into an HDR-white emitter.  Group multipliers remain outside the cap, preserving
+// building > misc > organic hierarchy at both ordinary and peak strength.
+export const RIM_BASE_ENERGY_CAP = 0.26;
+
+// A rim fragment must satisfy all three physical conditions: the surface normal faces the
+// authored sun, camera and sun lie on opposing sides, and Three's direct-light accumulator is
+// non-zero.  The stock lighting loop additionally captures the already-shadowed first sun;
+// combining that visibility with directDiffuse prevents a later unshadowed fill from reviving
+// rim in the sun's shadow, without another sampler fetch or program variant.
+export const RIM_SOLAR_GATE = Object.freeze({
+  facingStart: 0.005,
+  facingFull: 0.10,
+  backlitStart: 0.15,
+  backlitFull: 0.55,
+  directStart: 0.002,
+  directFull: 0.08,
+});
+
+// Capture Three's first directional light immediately before and after its stock shadow
+// attenuation.  WebGLLights orders shadow-casting directionals first, and the
+// product owns exactly one such sun followed by an unshadowed village fill.  Capturing here is
+// both more exact and cheaper than sampling directionalShadowMap a second time in the rim
+// block; the fill can no longer make a main-sun-shadowed fragment look sunlit.
+//
+// Three is pinned to r185.1.  Expand only this one stock chunk and splice two assignments around
+// its directional shadow attenuation.  All nested chunks and the unroll pragmas remain stock, so
+// material/light program keys and variants stay unchanged.
+function rimLightsFragmentBegin() {
+  const source = THREE.ShaderChunk.lights_fragment_begin;
+  const directionalStart = source.indexOf('#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )');
+  const infoCall = '\t\tgetDirectionalLightInfo( directionalLight, directLight );';
+  const directCall = '\t\tRE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const infoAt = source.indexOf(infoCall, directionalStart);
+  const callAt = source.indexOf(directCall, directionalStart);
+  if (directionalStart < 0 || infoAt < 0 || callAt < 0) {
+    throw new Error('cheoma rim: unsupported Three lights_fragment_begin contract');
+  }
+  const beforeShadow = `
+\t\t#if ( UNROLLED_LOOP_INDEX == 0 )
+\t\t\t_rimMainSunUnshadowed = directLight.color;
+\t\t#endif`;
+  const afterShadow = `#if ( UNROLLED_LOOP_INDEX == 0 )
+\t\t\t_rimMainSunShadowed = directLight.color;
+\t\t#endif
+
+`;
+  const infoEnd = infoAt + infoCall.length;
+  return `${source.slice(0, infoEnd)}${beforeShadow}${source.slice(infoEnd, callAt)}${afterShadow}${source.slice(callAt)}`;
+}
+
+const RIM_LIGHTS_FRAGMENT_BEGIN = rimLightsFragmentBegin();
+
 // 유기물 그룹 판정용 조상 그룹 이름(나무 스캐터·마당 초목·focus 풀).
 const ORGANIC_NAMES = new Set(['trees', 'village-flora', 'focusGrass']);
 
@@ -66,9 +127,8 @@ export function createFresnelRim(scene) {
     // r185 Color(hex)는 sRGB 입력을 working-linear로 자동 변환한다. 추가 변환하면 이중 디코드된다.
     uRimColor: { value: new THREE.Color(0xffc070) },
     uSunViewDir: { value: new THREE.Vector3(0, 0, 1) }, // 뷰공간 태양 방향(post 가 매 프레임 세팅)
-    uRimStrength: { value: 0.0 },   // cur.rim × altGate(저고도) × backlit(역광) — post 가 세팅
+    uRimStrength: { value: 0.0 },   // cur.rim × altGate(저고도) × runtime 보정 — 물리 역광은 fragment가 판정
     uRimPower: { value: 1.92 },     // 프레넬 지수(담백하고 예리한 에지 실선 복원)
-    uRimWrap: { value: 0.18 },      // 태양 반대편 실루엣 잔여 림(과도한 그늘 림 억제)
     uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
     uRimNear: { value: 24.0 },      // 근경 거리 게이트 시작(뷰공간 깊이) — 근경 focus 림 불변
     uRimFar: { value: 175.0 },      // 원경 능선·far 건물 제외(#119: 부감/전환 원경 림 과다 하향, 210→175)
@@ -84,7 +144,7 @@ export function createFresnelRim(scene) {
   };
 
   // 커버리지 카운트(검증 로그): 재질군별 패치 수 — 나무·풀·소품 포함 증명·제외 준수 확인.
-  const counts = { total: 0, building: 0, misc: 0, organic: 0 };
+  const counts = { total: 0, building: 0, misc: 0, organic: 0, cloudShadow: 0, cloudRoof: 0 };
 
   // 자체발광 지배 판정: 선형 emissive 휘도 × emissiveIntensity. 임계 낮게(0.2) 잡되 지붕 볏짚·
   //   진흙·정자 마루의 미량 anti-crush emissive(휘도 <0.02)는 통과시킨다.
@@ -95,14 +155,19 @@ export function createFresnelRim(scene) {
     return lum > 0.2;
   }
 
-  // customProgramCacheKey 를 비어있지 않게 재정의한 재질(#52 snowvol)은 건드리지 않는다.
-  function hasCustomCacheKey(mat) {
+  // Known cloud-shadow is a color-multiply patch with an explicit chain contract.  Other own
+  // program keys (snow shells, bespoke shaders) remain excluded: silently composing an unknown
+  // key can alias shader programs even when onBeforeCompile itself happens to chain.
+  function hasIncompatibleCustomCacheKey(mat) {
     try {
       if (!mat.customProgramCacheKey) return false;
       if (mat.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) return false;
       const k = mat.customProgramCacheKey();
-      return typeof k === 'string' && k.length > 0 && (k.startsWith('snowvol_') || mat.hasOwnProperty('customProgramCacheKey'));
-    } catch { return false; }
+      if (typeof k !== 'string' || k.length === 0) return false;
+      const cloudComposable = mat.userData.__cloudShadowPatchVersion === 'cloudshadow-v1'
+        && k.startsWith('cloudshadow|');
+      return !cloudComposable;
+    } catch { return true; }
   }
 
   function includable(mat) {
@@ -112,7 +177,7 @@ export function createFresnelRim(scene) {
     if (mat.userData.role === 'opening') return false;
     if (mat.userData.hanjiGlow) return false;
     if (emissiveDominant(mat)) return false;
-    if (hasCustomCacheKey(mat)) return false;
+    if (hasIncompatibleCustomCacheKey(mat)) return false;
     return true;
   }
 
@@ -128,15 +193,30 @@ export function createFresnelRim(scene) {
     if (!includable(mat)) return;
     mat.userData.__rimPatched = true;
     counts.total++; counts[group]++;
+    if (mat.userData.__cloudShadowPatchVersion === 'cloudshadow-v1') {
+      counts.cloudShadow++;
+      if (mat.userData.role === 'roof') counts.cloudRoof++;
+    }
     const groupUniform = groupUniforms[group] || groupUniforms.misc;
+    const facingFull = RIM_FACING_GATE.full.toFixed(2);
+    const facingCutoff = RIM_FACING_GATE.cutoff.toFixed(2);
+    const energyCap = RIM_BASE_ENERGY_CAP.toFixed(2);
+    const solarFacingStart = RIM_SOLAR_GATE.facingStart.toFixed(3);
+    const solarFacingFull = RIM_SOLAR_GATE.facingFull.toFixed(2);
+    const backlitStart = RIM_SOLAR_GATE.backlitStart.toFixed(2);
+    const backlitFull = RIM_SOLAR_GATE.backlitFull.toFixed(2);
+    const directStart = RIM_SOLAR_GATE.directStart.toFixed(3);
+    const directFull = RIM_SOLAR_GATE.directFull.toFixed(2);
     const prev = mat.onBeforeCompile;
+    const prevProgramKey = (mat.customProgramCacheKey
+      && mat.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey)
+      ? mat.customProgramCacheKey : null;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
       shader.uniforms.uRimColor = u.uRimColor;
       shader.uniforms.uSunViewDir = u.uSunViewDir;
       shader.uniforms.uRimStrength = u.uRimStrength;
       shader.uniforms.uRimPower = u.uRimPower;
-      shader.uniforms.uRimWrap = u.uRimWrap;
       shader.uniforms.uRimScale = u.uRimScale;
       shader.uniforms.uRimNear = u.uRimNear;
       shader.uniforms.uRimFar = u.uRimFar;
@@ -147,11 +227,14 @@ export function createFresnelRim(scene) {
           uniform vec3 uSunViewDir;
           uniform float uRimStrength;
           uniform float uRimPower;
-          uniform float uRimWrap;
           uniform float uRimScale;
           uniform float uRimNear;
           uniform float uRimFar;
           uniform float uRimGroupMul;`)
+        .replace('#include <lights_fragment_begin>', `
+          vec3 _rimMainSunUnshadowed = vec3(0.0);
+          vec3 _rimMainSunShadowed = vec3(0.0);
+          ${RIM_LIGHTS_FRAGMENT_BEGIN}`)
         .replace('#include <opaque_fragment>', `
           {
             // 프레넬(그레이징): 자기 실루엣 에지에서 최대. 이웃/타표면 샘플 전무 → X-ray 불가.
@@ -160,18 +243,43 @@ export function createFresnelRim(scene) {
             //   양면 풀은 faceDirection 보정 → 재질군 전반에서 안전하고 #76 건물 룩과 동일.
             vec3 _rn = nonPerturbedNormal;
             vec3 _rv = normalize(vViewPosition);              // 표면→카메라(뷰공간)
-            float _fres = pow(1.0 - clamp(dot(_rn, _rv), 0.0, 1.0), uRimPower);
-            // 태양쪽 실루엣만(역광 정합). 반대편은 uRimWrap 잔여.
-            float _side = clamp(dot(_rn, uSunViewDir), 0.0, 1.0);
+            float _ndv = clamp(dot(_rn, _rv), 0.0, 1.0);
+            float _fres = pow(1.0 - _ndv, uRimPower);
+            // 광원 가산은 진짜 접선 실루엣에만 허용한다. 넓은 벽·지붕면이 비스듬히
+            // 보일 때 프레넬 전체가 자체발광처럼 뜨는 회귀를 막고, 접선 ${facingFull} 안쪽은 보존.
+            float _silhouette = 1.0 - smoothstep(${facingFull}, ${facingCutoff}, _ndv);
+            // 실제 주 태양은 그림자를 캐스트하는 첫 번째 방향광이다. 재질 프레넬만으로는
+            // 실제 태양을 받는지 알 수 없으므로 N·L, V·L, 주 태양 visibility를 모두 요구한다.
+            // stock shadow 전후의 색 비율을 써서 태양 intensity와 무관한 실제 가시율을 얻는다.
+            // 뒤따르는 비그림자 fill·점광원이 그늘 림을 되살릴 수 없다.
+            vec3 _sunDir = normalize(uSunViewDir);
+            #if ( NUM_DIR_LIGHTS > 0 )
+              _sunDir = normalize(directionalLights[0].direction);
+            #endif
+            float _sunN = dot(_rn, _sunDir);
+            float _sunFacing = smoothstep(${solarFacingStart}, ${solarFacingFull}, _sunN);
+            float _backlit = smoothstep(${backlitStart}, ${backlitFull}, -dot(_rv, _sunDir));
+            vec3 _rimLuma = vec3(0.2126, 0.7152, 0.0722);
+            float _mainSunBefore = dot(_rimMainSunUnshadowed, _rimLuma);
+            float _mainSunAfter = dot(_rimMainSunShadowed, _rimLuma);
+            float _mainSunVisibility = clamp(_mainSunAfter / max(_mainSunBefore, 1e-5), 0.0, 1.0);
+            float _directLuma = dot(reflectedLight.directDiffuse, _rimLuma);
+            float _directGate = smoothstep(${directStart}, ${directFull}, _directLuma)
+              * _mainSunVisibility * (receiveShadow ? 1.0 : 0.0);
             // 근경 거리 게이트(원경·far 건물 제외). vViewPosition 길이 = 뷰공간 깊이.
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
-            float _rim = _fres * mix(uRimWrap, 1.0, _side) * _df * uRimStrength * uRimScale;
+            float _rim = _fres * _silhouette * _sunFacing * _backlit * _directGate
+              * _df * uRimStrength * uRimScale;
             // 톤매핑 전(선형 HDR)에 outgoingLight 로 가산 → bloom 이 밝은 처마 킥을 흡수,
             // OutputPass ACES 가 한 번만 롤오프. 재질군 uniform으로 유기물/소품 강도를 절제.
-            outgoingLight += uRimColor * max(_rim, 0.0) * uRimGroupMul;
+            outgoingLight += uRimColor * min(max(_rim, 0.0), ${energyCap}) * uRimGroupMul;
           }
           #include <opaque_fragment>`);
     };
+    // Stock Material derives its key from onBeforeCompile.toString(), but a previous explicit
+    // key (cloud-shadow) overrides that.  Give rim a stable version and retain the full prior
+    // key so cloud→rim and rim→cloud both remain distinct, cache-safe chains.
+    mat.customProgramCacheKey = () => `cheoma-rim-physical-v1|${prevProgramKey ? prevProgramKey.call(mat) : ''}`;
     mat.needsUpdate = true;
   }
 
@@ -197,7 +305,8 @@ export function createFresnelRim(scene) {
     setColor(c) { u.uRimColor.value.copy(c); },
     setStrength(s) { u.uRimStrength.value = s; },
     setPower(p) { u.uRimPower.value = p; },
-    setWrap(w) { u.uRimWrap.value = w; },
+    // 기존 post/runtime 호출을 깨지 않는 호환 no-op. 물리 림은 암부 wrap을 만들지 않는다.
+    setWrap(_w) {},
     setScale(s) { u.uRimScale.value = s; },
     setNearFar(n, f) { u.uRimNear.value = n; u.uRimFar.value = f; },
     setSunViewDir(v) { u.uSunViewDir.value.copy(v); },

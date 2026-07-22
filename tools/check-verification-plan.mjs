@@ -7,6 +7,7 @@ function ids(files, options) {
 
 assert.deepEqual(ids(['docs/verification.md']), ['core']);
 assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
+assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
 assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'winter-app', 'lod-wave']);
 assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);

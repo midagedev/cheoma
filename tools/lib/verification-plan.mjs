@@ -1,6 +1,6 @@
 const FULL_GATES = Object.freeze([
   'core', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
-  'parcel-rebuild-browser', 'surface-browser', 'build',
+  'rim', 'parcel-rebuild-browser', 'surface-browser', 'build',
 ]);
 
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$)|\.gitignore$)/;
@@ -69,6 +69,7 @@ function routePath(path) {
     if (/^src\/env\/(?:dof|post|stable-bokeh-pass|circular-bokeh-shader|tree-occluder|inst-fade-shader|rim|present-gate)\.js$/.test(path)) {
       select('depth/post contract changed', 'dof-app');
     }
+    if (path === 'src/env/rim.js') select('physical rim contract changed', 'rim');
     if (/^src\/env\/(?:petals|weather|seasons)\.js$/.test(path)) {
       select('seasonal particle/weather contract changed', 'petals');
     }
@@ -232,6 +233,7 @@ export function verificationCommands(plan) {
   if (has('app')) commands.push({ id: 'app', command: 'npm', args: ['run', 'check:app'] });
   if (has('ink-app')) commands.push({ id: 'ink-app', command: 'npm', args: ['run', 'check:ink:app'] });
   if (has('dof-app')) commands.push({ id: 'dof-app', command: 'npm', args: ['run', 'check:dof:app'] });
+  if (has('rim')) commands.push({ id: 'rim', command: 'npm', args: ['run', 'check:rim'] });
   if (has('petals')) commands.push({ id: 'petals', command: 'npm', args: ['run', 'check:petals'] });
   if (has('winter-app')) commands.push({ id: 'winter-app', command: 'npm', args: ['run', 'check:winter:app'] });
   if (has('worker')) commands.push({ id: 'worker', command: 'npm', args: ['run', 'check:worker'] });

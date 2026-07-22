@@ -6,6 +6,7 @@ import {
   waveFadeController,
 } from '../src/core/lod.js';
 import {
+  VILLAGE_FOCUS_ELEVATION,
   VILLAGE_LENS,
   VILLAGE_ZOOM,
   dollyDistanceForFov,
@@ -18,10 +19,7 @@ import {
   villageFocusEffectWeight,
   villageZoomReferenceBounds,
 } from '../src/camera/optics.js';
-import {
-  PARCEL_FOCUS_EYE_HEIGHT,
-  planParcelFocus,
-} from '../src/generators/shared/parcel-spatial.js';
+import { planParcelFocus } from '../src/generators/shared/parcel-spatial.js';
 import {
   createVillageDetailLodState,
   villageDetailWeightAt,
@@ -59,6 +57,8 @@ function assertLevel(actual, expected, message) {
 // 광각/망원 변화는 화면 점유율을 유지하는 실제 dolly이고, 그 물리 거리는 LOD에서
 // 이전 렌즈의 등가 거리로 환산돼 소동물·낙엽이 조기 소거되지 않아야 한다.
 {
+  near(VILLAGE_FOCUS_ELEVATION, 10 * Math.PI / 180,
+    'optics: reviewed residential focus elevation drift');
   for (const profile of Object.values(VILLAGE_LENS)) {
     const referenceDistance = 100;
     const opticalDistance = dollyDistanceForFov(
@@ -519,12 +519,16 @@ function assertPlanChunkContract(plan, label) {
       `${label}: chunk ${chunk.ring}/${chunk.sector} used centroid instead of nearest footprint`);
     for (const parcel of chunk.parcels) {
       const focus = planParcelFocus(parcel);
-      invariant(focus.targetLift >= 3 && focus.targetLift <= 5.6,
-        `${label}/${parcel.id}: focus target escaped lintel/eave band (${focus.targetLift})`);
-      invariant(focus.targetLift < focus.height * 0.49,
-        `${label}/${parcel.id}: focus target drifted above the lower roof mass (${focus.targetLift}/${focus.height})`);
-      near(focus.targetLift + focus.cameraLift, PARCEL_FOCUS_EYE_HEIGHT,
-        `${label}/${parcel.id}: focus camera left the shared yard eye height`);
+      invariant(focus.targetLift >= 1.65 && focus.targetLift <= 2.5,
+        `${label}/${parcel.id}: focus target escaped door-height band (${focus.targetLift})`);
+      invariant(focus.targetLift < focus.height * 0.34,
+        `${label}/${parcel.id}: focus target drifted back toward the roof (${focus.targetLift}/${focus.height})`);
+      const focusHorizontal = Math.hypot(
+        focus.cameraX - focus.worldX,
+        focus.cameraZ - focus.worldZ,
+      );
+      near(Math.atan2(focus.cameraLift, focusHorizontal), VILLAGE_FOCUS_ELEVATION,
+        `${label}/${parcel.id}: focus camera left the shared courtyard elevation`);
       const localTarget = parcelLocalPoint(parcel, { x: focus.worldX, z: focus.worldZ });
       const localCamera = parcelLocalPoint(parcel, { x: focus.cameraX, z: focus.cameraZ });
       const solar = parcel.solarAccess;
