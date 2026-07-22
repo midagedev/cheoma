@@ -70,6 +70,10 @@
   let villageOpts = $state({ scale: 'village', character: 'yeoyeom', includePalace: false, includeTemple: false, ...villageDefaults() });
   let villageSeed = $state(0);
   let villageHouses = $state(0);               // 현재 마을 호수(패널 표시)
+  // `?village=1&vedit=...` 부팅 중에는 아직 runtime snapshot이 비어 있다. 최초
+  // rebuild가 끝날 때까지만 decoded state를 보존해 중간 villageMode 이벤트의
+  // replaceState가 복원 payload를 지우지 않게 한다.
+  let pendingResidentialRestore = null;
   // focus 연속체(#92): villageEditing = 현재 focus 필지 { parcelId, spec }(focus-in START 에 설정,
   //   focus-out 완료(villageReturnDone)에 null). focusMorph(0=마을·1=집)는 카메라 focus 트윈 진행을
   //   engine 이 흘려준다 → 단일 컨텍스트 패널이 카메라와 한 클록으로 crossfade(원칙 2·3).
@@ -130,11 +134,39 @@
     // ?village=1 직행 부감 경로를 타서 히어로 랜딩이 재생되지 않는다(#59 "새로고침해도 재발생 안 됨"의
     // 원인). URL 을 담백하게 두어 새로고침마다 마을 우선 히어로 랜딩이 다시 재생되게 한다. 명시적
     // 마을 진입(?village=1·모드 토글로 들어간 비-home 세션)만 village 계약을 URL 에 반영한다.
+    const runtimeRecords = engine?.village?.residentialOpeningEdits?.();
+    const residentialState = pendingResidentialRestore || {
+      records: Array.isArray(runtimeRecords) ? runtimeRecords : [],
+      focusedParcelId: engine?.village?.getState?.().selected || null,
+    };
+    const hasResidentialEdits = residentialState.records.length > 0;
     writeUrl(ui, {
       overrides,
-      village: (sceneVillage && !villageHome) ? { seed: villageSeed, ...villageOpts } : null,
+      // A default landing remains terse until the first committed residential
+      // edit. From then on it becomes an explicit village URL so a reload can
+      // reproduce both the village seed/options and the edited houses.
+      village: (sceneVillage && (!villageHome || hasResidentialEdits))
+        ? { seed: villageSeed, ...villageOpts } : null,
       flow: flowing,
+      residentialEdits: residentialState.records,
+      focusedParcelId: residentialState.focusedParcelId,
     });
+  }
+
+  function restoreResidentialEdits(state) {
+    if (!state?.records?.length || !sceneVillage) return;
+    // Re-enter through the public rebuild boundary so kind changes, clamps,
+    // persistent overlay ownership, flora clearance, and future schema changes
+    // follow the same path as a panel commit.
+    for (const record of state.records) {
+      engine.village.rebuild(record.parcelId, {
+        kind: record.kind,
+        building: { ...record.params },
+      });
+    }
+    if (state.focusedParcelId) engine.village.focus(state.focusedParcelId);
+    pendingResidentialRestore = null;
+    syncUrl();
   }
   function pullState() {
     const s = engine.getState();
@@ -192,6 +224,12 @@
       };
     }
     const url = readUrl();
+    if (url.village && url.residentialEdits.length) {
+      pendingResidentialRestore = {
+        records: url.residentialEdits,
+        focusedParcelId: url.focusedParcelId,
+      };
+    }
     // 성능 프로파일: 터치/좁은 뷰포트 → perf(경량), 폰급 → compact(pixelRatio·bloom 하향).
     engine = createEngine({ container, perf: device.perf, compact: device.compact });
 
@@ -220,6 +258,7 @@
       if (p && p.spec) { seedEdit(p); }
       chromaFaded = false;
       armFocusWatchdog();                       // #155 전환 개시 → 스톨 감시 무장
+      syncUrl();                                // committed-edit URL의 focus id도 전환 시작 프레임에 확정
     });
     // 카메라 focus 트윈 진행 → 패널 컨텍스트 모프(같은 클록, 원칙 3). 감시 타이머는 전환 개시(Start/Return)에서
     //   한 번 무장하고 여기선 재무장하지 않는다 — 완료 이벤트가 정상 전환에서 먼저 해제하고, 안 오면 상한 발동(#155).
@@ -229,6 +268,7 @@
       seedEdit(p);
       chromaFaded = false;
       clearFocusWatchdog(); focusMorphLatched = false;   // #155 근접 안착 → 감시 해제
+      syncUrl();
     });
     // focus-out START — 패널은 집 컨텍스트를 유지한 채 모프가 역행(villageFocusMorph 가 1→0).
     engine.on('villageReturn', () => {
@@ -241,6 +281,7 @@
       liveEdit.cancel();
       villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false;
       clearFocusWatchdog(); focusMorphLatched = false;
+      syncUrl();
     });
     // 리롤 웨이브(#56): 진행 중 입력·버튼 잠금, 완료 시 호수·URL 갱신.
     engine.on('villageWave', (w) => {
@@ -316,7 +357,9 @@
     villageOpts.includePalace = (url.vpalace && (villageOpts.scale === 'capital' || villageOpts.scale === 'hanyang')) || villageOpts.scale === 'hanyang';
     villageOpts.includeTemple = url.vtemple;
     villageSeed = url.vseed != null ? url.vseed : newSeed();
-    syncUrl();
+    // A valid incoming edit payload must survive the synchronous villageMode
+    // event emitted by enter(). pendingResidentialRestore supplies it there.
+    if (!pendingResidentialRestore) syncUrl();
 
     // 기본 인터랙티브 부팅(#62): 마을 우선 진입 — 타이틀 동안 마을 사전 생성, 클릭 시 종가 클로즈업
     // 랜딩. ?shot·?hero=0·?village=1은 기존 부팅 계약(단일건물·직행 부감)대로 villageHome이 아니지만,
@@ -328,7 +371,10 @@
     }
 
     // ?village=1 진입 — 히어로 없이 곧장 마을 부감.
-    if (url.village) engine.village.enter({ ...villageOpts }, villageSeed);
+    if (url.village) {
+      engine.village.enter({ ...villageOpts }, villageSeed);
+      restoreResidentialEdits(pendingResidentialRestore);
+    }
 
     // 마을 사전 생성(#46): 히어로 타이틀이 화면을 덮는 동안(3D 조립 시작 전) 기본 시드 마을을
     // CPU 생성 + GPU 프리워밍까지 미리 끝내 hidden 보관 → 첫 마을 진입 시 프리징 없이 먹 안개
@@ -386,7 +432,14 @@
   }
   // 이 집 다시 짓기(#19): 예약된 이웃·도로는 보존하되 필지 내부 경계부터 집 변주, 마당 소품,
   //   과실수까지 하나의 결정론적 transaction으로 재생성한다. 마을 전체 리롤과는 분리한다.
-  function rerollHouse() { if (sceneVillage && villageEditing && !villageZooming && !waving) { engine.village.rerollParcel(); chromaFaded = false; scheduleFlowTick(); } }
+  function rerollHouse() {
+    if (sceneVillage && villageEditing && !villageZooming && !waving) {
+      engine.village.rerollParcel();
+      syncUrl();
+      chromaFaded = false;
+      scheduleFlowTick();
+    }
+  }
   // 단일건물 씬(?hero=0·?village=1 레거시) 액션바 도장 = 새 씨앗 재생성. 마을 씬에선 도장 미노출(리롤은 패널 소유).
   function reroll() {
     if (rerollCooldown || waving || sceneVillage) return;
@@ -688,7 +741,8 @@
     // Compound planners may change the valid controls and clamp ranges when a
     // variant changes. Refresh the declarative spec after the core accepts the
     // rebuild; Svelte still owns no THREE state.
-    acceptVillageSpec(rebuilt);
+    const accepted = acceptVillageSpec(rebuilt);
+    if (accepted && refreshFlora) syncUrl();
   }
   // Geometry-backed range controls receive many more input events than useful
   // rendered frames. The reusable scheduler keeps the label immediate, merges
@@ -724,6 +778,7 @@
     liveEdit.cancel();
     const rebuilt = engine.village.rebuild(villageEditing.parcelId, { kind });
     if (!acceptVillageSpec(rebuilt)) editParams = { kind };
+    else syncUrl();
   }
   function closeVillageEdit() { liveEdit.cancel(); engine.village.return(); }
 </script>
