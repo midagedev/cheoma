@@ -47,7 +47,7 @@ const expectedProxyHashes = {
   // exposes the authored giwa bay width so the shape-aware editor can start at
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the four normalized residential opening axes to the public proxy.
-  // Product focus keeps the door-height target at the exact reviewed ten-degree
+  // Product focus keeps the door-height target at the exact reviewed shared
   // courtyard elevation. Safe candidates now scale XZ and Y together so their
   // proxy framing cannot silently steepen the camera; scene bytes stay unchanged.
   village: '66d1bcb5',
