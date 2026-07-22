@@ -75,6 +75,8 @@ const DICT = {
     time_dawn: '아침', time_day: '낮', time_sunset: '석양', time_night: '밤',
     season_spring: '봄', season_summer: '여름', season_autumn: '가을', season_winter: '겨울',
     weather_clear: '맑음', weather_rain: '비', weather_snow: '눈',
+    render_style: '그림 방식', render_pbr: '풍경', render_ink: '수묵',
+    render_pbr_tip: '빛과 색으로 보기', render_ink_tip: '진경산수 수묵으로 보기',
     // ── 마을 모드 ──
     mode_house: '집 보기', mode_village: '둘러보기',
     mode_to_village: '마을 둘러보기 — 확대·축소는 보기를 바꾸지 않습니다',
@@ -173,6 +175,8 @@ const DICT = {
     time_dawn: 'Dawn', time_day: 'Day', time_sunset: 'Sunset', time_night: 'Night',
     season_spring: 'Spring', season_summer: 'Summer', season_autumn: 'Autumn', season_winter: 'Winter',
     weather_clear: 'Clear', weather_rain: 'Rain', weather_snow: 'Snow',
+    render_style: 'Rendering style', render_pbr: 'Scenery', render_ink: 'Ink',
+    render_pbr_tip: 'View with light and color', render_ink_tip: 'View as a true-view ink landscape',
     // ── Village mode ──
     mode_house: 'House', mode_village: 'Explore',
     mode_to_village: 'Explore freely — zoom does not change views',

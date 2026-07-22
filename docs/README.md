@@ -26,6 +26,7 @@
 | 문서 | 상태 | 용도와 주의점 |
 | --- | --- | --- |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
+| [`ink-landscape.md`](ink-landscape.md) | 계약 + 리서치 | 조선 진경산수 근거, PBR↔수묵 렌더·색공간·성능·접근성 계약. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
 | [`dancheong.md`](dancheong.md) | 계약 + 리서치 | 궁 기본 모로·사찰 중심 불전 금단청 위계, 선명도/격식 축, 불변 source 캐시·수명·성능 계약과 공식 근거. |

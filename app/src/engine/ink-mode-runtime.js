@@ -1,0 +1,141 @@
+import { createInkPass, normalizeRenderStyle } from '../../../src/api/ink.js';
+
+const EPSILON = 1e-4;
+const FADE_SECONDS = 0.72;
+
+/**
+ * Product render-style state machine.
+ *
+ * Ink stays inside the app's one composer and immediately before its one OutputPass.
+ * PBR effects remain live beneath the transition, then sleep only after the paper image
+ * fully covers them. The reverse transition wakes them behind an opaque ink frame first,
+ * so neither direction exposes a pass-enable pop.
+ */
+export function createInkModeRuntime({
+  renderer,
+  scene,
+  camera,
+  postRuntime,
+  compact = false,
+  reducedMotion = false,
+} = {}) {
+  const { post } = postRuntime;
+  let style = 'pbr';
+  let amount = 0;
+  let target = 0;
+  let ink = null;
+  let disposed = false;
+  let pbrAwake = true;
+  const policy = {
+    focused: true,
+    flare: !!post.flarePass.enabled,
+    dofAmount: post.dof.amount,
+  };
+
+  function ensureInk() {
+    if (ink) return ink;
+    ink = createInkPass(scene, camera, {
+      // Edges tolerate a reduced normal/depth target; color and paper remain full resolution.
+      resolutionScale: compact ? 0.5 : 0.75,
+      uniforms: {
+        mixAmount: amount,
+        silhouetteWidth: compact ? 2.2 : 2.6,
+      },
+    });
+    ink.pass.enabled = amount > EPSILON;
+    postRuntime.addPassBeforeOutput(ink.pass, 'InkPass');
+    const size = renderer.getSize({ set(x, y) { this.x = x; this.y = y; return this; } });
+    ink.setSize(size.x, size.y, renderer.getPixelRatio());
+    return ink;
+  }
+
+  function setPbrAwake(awake) {
+    if (pbrAwake === awake) return;
+    pbrAwake = awake;
+    if (post.gradePass) post.gradePass.enabled = awake;
+    post.bloomPass.enabled = awake;
+    post.setEnabled(awake);
+    post.setRimEnabled?.(awake && policy.focused);
+    post.setFlareEnabled?.(awake && policy.flare);
+    post.setDofAmount?.(awake ? policy.dofAmount : 0);
+  }
+
+  function applyAmount(next) {
+    amount = Math.min(1, Math.max(0, next));
+    const entry = amount > EPSILON || target > EPSILON ? ensureInk() : ink;
+    if (entry) {
+      entry.pass.uniforms.mixAmount.value = amount;
+      entry.pass.enabled = amount > EPSILON;
+    }
+    if (amount >= 1 - EPSILON && target >= 1 - EPSILON) setPbrAwake(false);
+    else if (amount < 1 - EPSILON) setPbrAwake(true);
+  }
+
+  function setMode(value, { immediate = false } = {}) {
+    style = normalizeRenderStyle(value);
+    target = style === 'ink' ? 1 : 0;
+    if (target > 0) ensureInk();
+    if (target === 0) setPbrAwake(true);
+    if (immediate || reducedMotion) applyAmount(target);
+    return style;
+  }
+
+  function setFocusPolicy({ focused = policy.focused, flare = focused, dofAmount = policy.dofAmount } = {}) {
+    policy.focused = !!focused;
+    policy.flare = !!flare;
+    policy.dofAmount = Number.isFinite(dofAmount) ? Math.min(1, Math.max(0, dofAmount)) : 0;
+    if (pbrAwake) {
+      post.setRimEnabled?.(policy.focused);
+      post.setFlareEnabled?.(policy.flare);
+      post.setDofAmount?.(policy.dofAmount);
+    }
+  }
+
+  function update(dt) {
+    if (disposed || Math.abs(target - amount) <= EPSILON) return false;
+    const step = Math.max(0, Math.min(0.1, dt || 0)) / FADE_SECONDS;
+    applyAmount(target > amount ? Math.min(target, amount + step) : Math.max(target, amount - step));
+    return true;
+  }
+
+  return {
+    setMode,
+    setFocusPolicy,
+    update,
+    resize(width, height) {
+      ink?.setSize(width, height, renderer.getPixelRatio());
+    },
+    debugState() {
+      return {
+        style,
+        amount,
+        target,
+        transitioning: Math.abs(target - amount) > EPSILON,
+        pbrAwake,
+        created: !!ink,
+        normalScale: ink?.pass.resolutionScale ?? null,
+        normalExcluded: ink?.pass.normalExcludedCount ?? 0,
+        normalDithered: ink?.pass.normalDitheredCount ?? 0,
+        normalDrawCalls: ink?.pass.normalDrawCalls ?? 0,
+        pbrPasses: {
+          grade: !!post.gradePass?.enabled,
+          bloom: !!post.bloomPass.enabled,
+          bokeh: !!post.bokehPass.enabled,
+          flare: !!post.flarePass.enabled,
+        },
+      };
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      setPbrAwake(true);
+      if (ink) {
+        postRuntime.removePass(ink.pass);
+        ink.dispose();
+        ink = null;
+      }
+    },
+    get style() { return style; },
+    get amount() { return amount; },
+  };
+}

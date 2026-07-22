@@ -1,8 +1,9 @@
-// URL 쿼리 ↔ 상태 양방향 동기화. seed 는 항상, 나머지(preset/time/sunset/season/weather/exp)는
+// URL 쿼리 ↔ 상태 양방향 동기화. seed 는 항상, 나머지(preset/time/sunset/season/weather/mode/exp)는
 // 사용자가 명시적으로 바꿨을 때만 URL 에 실어 공유 시 정확히 재현되게 한다.
 import { newSeed } from './seed.js';
 
 import { normalizeSunsetLook } from '../../../src/api/environment.js';
+import { normalizeRenderStyle } from '../../../src/api/ink.js';
 
 const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 
@@ -23,6 +24,7 @@ export function readUrl() {
     sunsetLook: out.sunset != null ? normalizeSunsetLook(out.sunset) : null,
     season: out.season || null,
     weather: out.weather || null,
+    renderStyle: normalizeRenderStyle(q.get('mode')),
     exp: out.exp != null ? Math.max(1, parseInt(out.exp, 10) || 1) : null,
     hero: q.get('hero') !== '0',
     shot: q.get('shot') === '1',
@@ -50,6 +52,7 @@ export function writeUrl(state, { overrides = {}, village = null, flow = false }
   put('sunset', state.sunsetLook, overrides.sunsetLook);
   put('season', state.season, overrides.season);
   put('weather', state.weather, overrides.weather);
+  put('mode', state.renderStyle, state.renderStyle === 'ink');
   put('exp', state.expansion, state.expansion > 1);
   put('flow', 1, !!flow); // 오토로테이션 활성 상태 공유(#64)
   // 마을 모드 파라미터
@@ -71,6 +74,7 @@ export function shareUrl(state, overrides) {
   if (overrides.sunsetLook) q.set('sunset', state.sunsetLook);
   if (overrides.season) q.set('season', state.season);
   if (overrides.weather) q.set('weather', state.weather);
+  if (state.renderStyle === 'ink') q.set('mode', 'ink');
   if (state.expansion > 1) q.set('exp', String(state.expansion));
   return `${location.origin}${location.pathname}?${q.toString()}`;
 }

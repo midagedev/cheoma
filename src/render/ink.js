@@ -15,6 +15,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { contributesDofDepth } from '../env/dof.js';
+import { INST_FADE_PROGRAM_VERSION, patchInstFadeShader } from '../env/inst-fade-shader.js';
 
 // 팔레트 (sRGB). 순흑이 아닌 짙은 먹색과 따뜻한 미색 한지.
 export const INK_PALETTE = {
@@ -34,7 +36,7 @@ function mulberry32(seed) {
   };
 }
 
-function makePaperTexture(size = 2048, seed = 20260716) {
+export function makePaperTexture(size = 2048, seed = 20260716) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
   const ctx = cv.getContext('2d');
@@ -104,14 +106,17 @@ const InkShader = {
     levels: { value: 5.0 },        // 농담 단계
     silhouetteWidth: { value: 2.6 }, // 실루엣 먹선 두께(px)
     silhouetteBoost: { value: 1.0 },
-    normalEdge: { value: 0.9 },    // 내부 윤곽선 강도
-    depthEdge: { value: 1.0 },     // 실루엣 강도
+    normalEdge: { value: 0.24 },   // 내부 윤곽선은 처마/기둥 암시만 — 저폴리 수목 면선 억제
+    depthEdge: { value: 0.78 },    // 실루엣도 벡터 외곽선보다 붓 농담에 종속
     ditherAmt: { value: 0.55 },    // 단계 사이 디더(번짐)
     chromaKeep: { value: 0.07 },   // 잔여 채도 (5~10%)
     fogNear: { value: 38.0 },      // 여백 페이드 시작 (월드 거리, 씬 fog와 동기화)
     fogFar: { value: 150.0 },      // 여백 페이드 끝 (월드 거리)
     aerial: { value: 1.0 },        // 원경 여백 수렴 강도
     seed: { value: 11.0 },         // 고정 노이즈 시드
+    mixAmount: { value: 1.0 },     // 제품 PBR↔수묵 크로스페이드
+    acesOutput: { value: 0.0 },    // OutputPass ACES 앞에서 목표 한지색 역보정
+    toneMappingExposure: { value: 1.0 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -128,6 +133,7 @@ const InkShader = {
     uniform vec3 inkColor, paperColor;
     uniform float levels, silhouetteWidth, silhouetteBoost, normalEdge, depthEdge;
     uniform float ditherAmt, chromaKeep, fogNear, fogFar, aerial, seed;
+    uniform float mixAmount, acesOutput, toneMappingExposure;
 
     // 값 노이즈 (해시 기반, 스크린 좌표의 결정론적 함수 → 시드 고정).
     float hash(vec2 p){
@@ -158,6 +164,33 @@ const InkShader = {
     // Sobel용 정규 깊이 [0,1] (임계 튜닝 안정화).
     float linDepth(vec2 uv){
       return clamp((worldDepth(uv) - cameraNear) / (cameraFar - cameraNear), 0.0, 1.0);
+    }
+
+    // 앱의 OutputPass는 ACES+sRGB를 정확히 한 번, 마지막에 적용한다. 수묵 결과도
+    // 같은 선형-HDR 체인 안에서 섞기 위해 목표 display-linear 한지색을 ACES 이전 값으로
+    // 되돌린다. standalone NoToneMapping 경로는 이 함수를 건너뛴다.
+    vec3 inverseRRTAndODTFit(vec3 y){
+      vec3 A = y * 0.983729 - 1.0;
+      vec3 B = y * 0.4329510 - 0.0245786;
+      vec3 C = y * 0.238081 + 0.000090537;
+      vec3 disc = max(B * B - 4.0 * A * C, vec3(0.0));
+      return max((-B - sqrt(disc)) / (2.0 * A), vec3(0.0));
+    }
+    vec3 beforeOutputToneMapping(vec3 target){
+      if (acesOutput < 0.5) return target;
+      const mat3 invACESOutputMat = mat3(
+        vec3(0.64303825, 0.05926869, 0.00596190),
+        vec3(0.31118675, 0.93143649, 0.06392902),
+        vec3(0.04577546, 0.00929492, 0.93011838)
+      );
+      const mat3 invACESInputMat = mat3(
+        vec3( 1.76474097, -0.14702785, -0.03633683),
+        vec3(-0.67577768,  1.16025151, -0.16243644),
+        vec3(-0.08896329, -0.01322366,  1.19877327)
+      );
+      vec3 fitted = max(invACESOutputMat * clamp(target, 0.0, 0.995), vec3(0.0));
+      vec3 aces = inverseRRTAndODTFit(fitted);
+      return max(invACESInputMat * aces * (0.6 / max(toneMappingExposure, 1e-4)), vec3(0.0));
     }
 
     void main(){
@@ -203,7 +236,11 @@ const InkShader = {
       // (씬 안개와 같은 월드 거리로 페이드해 좌표계 불일치 아티팩트 방지)
       float far = smoothstep(fogNear, fogFar, wz);
       sil *= (1.0 - far);
-      crease *= (1.0 - far) * (1.0 - dc * 0.3);
+      // 원경의 수많은 저폴리 수관·기와를 철사처럼 모두 따지 않는다. 진경산수의 원경은
+      // 개별 폴리곤선보다 수평 점묘/먹 덩어리로 읽혀야 하므로 내부 윤곽을 먼저 거둔다.
+      float detailFar = smoothstep(70.0, 230.0, wz);
+      crease *= (1.0 - far) * (1.0 - dc * 0.3) * (1.0 - detailFar);
+      sil *= mix(1.0, 0.42, detailFar);
 
       // 붓 농도 변주 + 미세 끊김 → 순수한 벡터선이 아닌 필선.
       float inkAmt = max(sil, crease);
@@ -261,21 +298,42 @@ const InkShader = {
       // 종이 최고 밝기 제한 없이 미색 유지.
       col = clamp(col, 0.0, 1.0);
 
-      // OutputPass가 선형→sRGB 변환하므로 여기서 sRGB→선형 되돌림.
-      gl_FragColor = vec4(pow(col, vec3(2.2)), 1.0);
+      // source와 수묵 모두 선형-HDR로 유지하고 OutputPass가 톤매핑·sRGB를 한 번만 맡는다.
+      // mix=0은 비트맵을 건드리지 않는 항등이라 전환 시작/종료에 색상 팝이 없다.
+      gl_FragColor = vec4(mix(lin, beforeOutputToneMapping(col), mixAmount), 1.0);
     }
   `,
 };
 
 // 뷰티 + 노멀/깊이를 함께 처리하는 커스텀 Pass.
 // RenderPass가 뷰티를 채운 뒤, 이 Pass가 노멀·깊이 오프스크린을 렌더하고 먹 합성을 수행.
-class InkPass extends Pass {
-  constructor(scene, camera, paperTexture) {
+export class InkPass extends Pass {
+  constructor(scene, camera, paperTexture, { resolutionScale = 0.75 } = {}) {
     super();
     this.scene = scene;
     this.camera = camera;
 
     this.normalMaterial = new THREE.MeshNormalMaterial();
+    this.instFadeNormalMaterial = new THREE.MeshNormalMaterial();
+    this.instFadeNormalMaterial.allowOverride = false;
+    this.instFadeNormalMaterial.onBeforeCompile = (shader) => {
+      patchInstFadeShader(shader);
+      // MeshNormalMaterial's fragment shader is the one stock material without
+      // <common>; provide the varying declaration after its NORMAL define.
+      if (!shader.fragmentShader.includes('varying float vInstFade;')) {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#define NORMAL',
+          '#define NORMAL\nvarying float vInstFade;',
+        );
+      }
+    };
+    this.instFadeNormalMaterial.customProgramCacheKey = () => `cheoma-ink-normal|${INST_FADE_PROGRAM_VERSION}`;
+    this.resolutionScale = Math.min(1, Math.max(0.35, resolutionScale));
+    this.hiddenForNormal = [];
+    this.materialsForNormal = [];
+    this.normalExcludedCount = 0;
+    this.normalDitheredCount = 0;
+    this.normalDrawCalls = 0;
 
     const dt = new THREE.DepthTexture(1, 1);
     dt.type = THREE.UnsignedIntType;
@@ -299,8 +357,10 @@ class InkPass extends Pass {
   }
 
   setSize(width, height) {
-    this.normalTarget.setSize(width, height);
-    this.uniforms.resolution.value.set(width, height);
+    const w = Math.max(1, Math.round(width * this.resolutionScale));
+    const h = Math.max(1, Math.round(height * this.resolutionScale));
+    this.normalTarget.setSize(w, h);
+    this.uniforms.resolution.value.set(w, h);
   }
 
   render(renderer, writeBuffer, readBuffer /*, deltaTime, maskActive */) {
@@ -311,24 +371,40 @@ class InkPass extends Pass {
     // 반투명 객체(안개 띠·대기 레이어)는 솔리드 실루엣이 아니므로 깊이/노멀
     // 버퍼에서 제외한다. overrideMaterial이 이들을 불투명으로 만들면 가짜
     // 깊이 벽이 생겨 지평선에 헛 먹선이 돈다. (뷰티에는 그대로 렌더돼 여백처럼 밝아짐)
-    const hidden = [];
-    this.scene.traverse((o) => {
-      if (o.visible && o.isMesh && o.material && o.material.transparent) {
-        o.visible = false;
-        hidden.push(o);
+    const hidden = this.hiddenForNormal;
+    const materials = this.materialsForNormal;
+    hidden.length = 0;
+    materials.length = 0;
+    this.scene.traverseVisible((o) => {
+      const renderable = o.isMesh || o.isPoints || o.isLine || o.isSprite;
+      const contributes = renderable && contributesDofDepth(o);
+      if (renderable && !contributes) hidden.push(o);
+      if (contributes && o.isMesh && o.geometry?.getAttribute?.('instFade')) {
+        materials.push(o, o.material);
       }
     });
+    for (const o of hidden) o.visible = false;
+    for (let i = 0; i < materials.length; i += 2) materials[i].material = this.instFadeNormalMaterial;
+    this.normalExcludedCount = hidden.length;
+    this.normalDitheredCount = materials.length / 2;
     this.scene.overrideMaterial = this.normalMaterial;
     this.scene.background = null;
     this.scene.fog = null;
     const prevTarget = renderer.getRenderTarget();
-    renderer.setRenderTarget(this.normalTarget);
-    renderer.clear();
-    renderer.render(this.scene, this.camera);
-    this.scene.overrideMaterial = prevOverride;
-    this.scene.background = prevBg;
-    this.scene.fog = prevFog;
-    for (const o of hidden) o.visible = true;
+    try {
+      renderer.setRenderTarget(this.normalTarget);
+      renderer.clear();
+      renderer.render(this.scene, this.camera);
+      this.normalDrawCalls = renderer.info.render.calls;
+    } finally {
+      this.scene.overrideMaterial = prevOverride;
+      this.scene.background = prevBg;
+      this.scene.fog = prevFog;
+      for (let i = 0; i < materials.length; i += 2) materials[i].material = materials[i + 1];
+      for (const o of hidden) o.visible = true;
+      hidden.length = 0;
+      materials.length = 0;
+    }
 
     // 2) 먹 합성.
     this.uniforms.tDiffuse.value = readBuffer.texture;
@@ -336,6 +412,12 @@ class InkPass extends Pass {
     this.uniforms.tDepth.value = this.normalTarget.depthTexture;
     this.uniforms.cameraNear.value = this.camera.near;
     this.uniforms.cameraFar.value = this.camera.far;
+    if (this.scene.fog?.isFog) {
+      this.uniforms.fogNear.value = this.scene.fog.near;
+      this.uniforms.fogFar.value = this.scene.fog.far;
+    }
+    this.uniforms.acesOutput.value = renderer.toneMapping === THREE.ACESFilmicToneMapping ? 1 : 0;
+    this.uniforms.toneMappingExposure.value = renderer.toneMappingExposure;
 
     if (this.renderToScreen) {
       renderer.setRenderTarget(null);
@@ -350,6 +432,7 @@ class InkPass extends Pass {
   dispose() {
     this.normalTarget.dispose();
     this.normalMaterial.dispose();
+    this.instFadeNormalMaterial.dispose();
     this.material.dispose();
     this.fsQuad.dispose();
   }
@@ -362,7 +445,7 @@ export function setupInk(renderer, scene, camera, options = {}) {
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const inkPass = new InkPass(scene, camera, paperTexture);
+  const inkPass = new InkPass(scene, camera, paperTexture, options);
   if (options.uniforms) {
     for (const [k, v] of Object.entries(options.uniforms)) {
       if (inkPass.uniforms[k]) inkPass.uniforms[k].value = v;
@@ -389,6 +472,29 @@ export function setupInk(renderer, scene, camera, options = {}) {
       inkPass.dispose();
       paperTexture.dispose();
       composer.dispose();
+    },
+  };
+}
+
+// Unified-composer adapter: consumers that already own Render→…→Output insert this pass
+// immediately before Output instead of creating a second composer.
+export function createInkPass(scene, camera, options = {}) {
+  const paperTexture = options.paperTexture || makePaperTexture(options.paperSize, options.paperSeed);
+  const inkPass = new InkPass(scene, camera, paperTexture, options);
+  if (options.uniforms) {
+    for (const [key, value] of Object.entries(options.uniforms)) {
+      if (inkPass.uniforms[key]) inkPass.uniforms[key].value = value;
+    }
+  }
+  return {
+    pass: inkPass,
+    paperTexture,
+    setSize(width, height, pixelRatio = 1) {
+      inkPass.setSize(width * pixelRatio, height * pixelRatio);
+    },
+    dispose() {
+      inkPass.dispose();
+      if (!options.paperTexture) paperTexture.dispose();
     },
   };
 }

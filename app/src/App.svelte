@@ -13,6 +13,7 @@
   import EnvironmentDial from './components/EnvironmentDial.svelte';
   import ParamPanel from './components/ParamPanel.svelte';
   import ModeToggle from './components/ModeToggle.svelte';
+  import RenderStyleToggle from './components/RenderStyleToggle.svelte';
   import ContextPanel from './components/ContextPanel.svelte';
   import HoverLabel from './components/HoverLabel.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
@@ -29,7 +30,7 @@
 
   let ui = $state({
     seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
-    expansion: 1, selected: false, canMerge: false, params: {}, maxExpansion: 3,
+    expansion: 1, selected: false, canMerge: false, params: {}, maxExpansion: 3, renderStyle: 'pbr',
   });
   let overrides = $state({ preset: false, time: false, sunsetLook: false, season: false, weather: false });
   let heroVisible = $state(false);
@@ -139,6 +140,7 @@
     const s = engine.getState();
     ui.preset = s.preset; ui.time = s.time; ui.sunsetLook = s.sunsetLook; ui.season = s.season;
     ui.weather = s.weather; ui.expansion = s.expansion; ui.selected = s.selected;
+    ui.renderStyle = s.renderStyle;
     ui.canMerge = s.canMerge;
     ui.params = engine.getParams();
     ui.maxExpansion = engine.maxExpansion();
@@ -304,6 +306,7 @@
     if (url.flowsec != null) flowIntervalMs = Math.round(url.flowsec * 1000);
 
     engine.start(cfg, url.seed);
+    engine.setRenderStyle(url.renderStyle, { immediate: true });
     pullState();
     if (url.exp && url.exp > 1) engine.setExpansion(url.exp);
 
@@ -515,6 +518,7 @@
     applyWeather(v);
     syncUrl(); scheduleFlowTick();
   }
+  function setRenderStyle(v) { engine.setRenderStyle(v); syncUrl(); wake(); }
 
   // 흐름 클록(rAF 기반) — "실제 표시된" 프레임 간격만 적산해 interval 마다 정확히 한 칸 전진한다.
   // setTimeout 은 소프트웨어GL 초기 셰이더 컴파일이 메인스레드를 수 초 블록하는 동안에도 wall-clock
@@ -717,7 +721,10 @@
 
 {#if !cine.active}
   <!-- 히어로 랜딩 중 은닉(#118 U4) — chroma 와 동일 0.9s 페이드로 복원(하드 마운트 팝 방지). -->
-  <div class="modewrap" class:hero={heroChrome}><ModeToggle {mode} onToggle={toggleMode} /></div>
+  <div class="modewrap" class:hero={heroChrome}>
+    <ModeToggle {mode} onToggle={toggleMode} />
+    <RenderStyleToggle mode={ui.renderStyle} onToggle={setRenderStyle} />
+  </div>
 {/if}
 
 <!-- 시네마틱 데모 중엔 크롬을 페이드(감상 우선) — .chroma 3초 감상 페이드와 별개 게이트.
