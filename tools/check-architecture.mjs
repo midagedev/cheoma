@@ -8,6 +8,7 @@ const SRC = join(ROOT, 'src');
 const APP = join(ROOT, 'app', 'src');
 const API_PLAN = join(SRC, 'api', 'village-plan.js');
 const API_RENDER_STYLE = join(SRC, 'api', 'render-style.js');
+const API_RESIDENTIAL_OPENINGS = join(SRC, 'api', 'residential-openings.js');
 const SOURCE_EXT = new Set(['.js', '.mjs', '.svelte']);
 
 function walk(dir) {
@@ -130,51 +131,48 @@ for (const cycle of cycles) {
   errors.push(`src import cycle: ${cycle.map((file) => relative(SRC, file)).join(' -> ')}`);
 }
 
-// 순수 planner의 전체 dependency closure에는 THREE·DOM·browser scheduling이 없어야 한다.
-const planClosure = new Set();
-const queue = [API_PLAN];
-while (queue.length) {
-  const file = queue.pop();
-  if (planClosure.has(file)) continue;
-  planClosure.add(file);
-  for (const dep of graph.get(file) || []) if (dep.startsWith(SRC + sep)) queue.push(dep);
-}
-const browserGlobal = /\b(?:window|document|location|navigator|Worker|requestAnimationFrame|AudioContext)\b/;
-for (const file of planClosure) {
-  const rel = relative(ROOT, file);
-  for (const specifier of externals.get(file) || []) {
-    if (specifier === 'three' || specifier.startsWith('three/')) {
-      errors.push(`pure plan closure imports THREE: ${rel} -> ${specifier}`);
-    }
+function dependencyClosure(entry) {
+  const closure = new Set();
+  const queue = [entry];
+  while (queue.length) {
+    const file = queue.pop();
+    if (closure.has(file)) continue;
+    closure.add(file);
+    for (const dep of graph.get(file) || []) if (dep.startsWith(SRC + sep)) queue.push(dep);
   }
-  // 주석 속 단어로 오탐하지 않도록 실행 코드에서 흔히 쓰는 토큰 형태만 확인한다.
-  const code = sourceByFile.get(file)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '');
-  if (browserGlobal.test(code)) errors.push(`pure plan closure uses browser global: ${rel}`);
+  return closure;
 }
 
-// URL/state consumers must not pull the WebGL ink renderer (and therefore THREE/DOM) at app boot.
-const renderStyleClosure = new Set();
-const renderStyleQueue = [API_RENDER_STYLE];
-while (renderStyleQueue.length) {
-  const file = renderStyleQueue.pop();
-  if (renderStyleClosure.has(file)) continue;
-  renderStyleClosure.add(file);
-  for (const dep of graph.get(file) || []) if (dep.startsWith(SRC + sep)) renderStyleQueue.push(dep);
-}
-for (const file of renderStyleClosure) {
-  const rel = relative(ROOT, file);
-  for (const specifier of externals.get(file) || []) {
-    if (specifier === 'three' || specifier.startsWith('three/')) {
-      errors.push(`render-style closure imports THREE: ${rel} -> ${specifier}`);
+const browserGlobal = /\b(?:window|document|location|navigator|Worker|requestAnimationFrame|AudioContext)\b/;
+
+function checkPureClosure(closure, label) {
+  for (const file of closure) {
+    const rel = relative(ROOT, file);
+    for (const specifier of externals.get(file) || []) {
+      if (specifier === 'three' || specifier.startsWith('three/')) {
+        errors.push(`${label} closure imports THREE: ${rel} -> ${specifier}`);
+      }
     }
+    // 주석·문자열 속 단어로 오탐하지 않도록 실행 토큰만 확인한다.
+    const code = sourceByFile.get(file)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '')
+      .replace(/(['"])(?:\\.|(?!\1)[^\\\r\n])*\1/g, '');
+    if (browserGlobal.test(code)) errors.push(`${label} closure uses browser global: ${rel}`);
   }
-  const code = sourceByFile.get(file)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '');
-  if (browserGlobal.test(code)) errors.push(`render-style closure uses browser global: ${rel}`);
 }
+
+// 순수 planner의 전체 dependency closure에는 THREE·DOM·browser scheduling이 없어야 한다.
+const planClosure = dependencyClosure(API_PLAN);
+checkPureClosure(planClosure, 'pure plan');
+
+// #10 주거 개구 계획은 renderer/UI가 함께 쓰는 JSON-safe 재사용 경계다.
+const residentialOpeningClosure = dependencyClosure(API_RESIDENTIAL_OPENINGS);
+checkPureClosure(residentialOpeningClosure, 'residential-opening');
+
+// URL/state consumers must not pull the WebGL ink renderer (and therefore THREE/DOM) at app boot.
+const renderStyleClosure = dependencyClosure(API_RENDER_STYLE);
+checkPureClosure(renderStyleClosure, 'render-style');
 
 const hotspots = [...walk(SRC), ...walk(APP)]
   .map((file) => ({ file: relative(ROOT, file), lines: sourceByFile.get(file).split('\n').length }))
@@ -187,7 +185,7 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${renderStyleClosure.size} pure render-style modules, 0 cycles)`);
+console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${residentialOpeningClosure.size} residential-opening modules, ${renderStyleClosure.size} pure render-style modules, 0 cycles)`);
 if (hotspots.length) {
   console.log('Refactor hotspots (warning only):');
   for (const item of hotspots) console.log(`  ${String(item.lines).padStart(4)}  ${item.file}`);

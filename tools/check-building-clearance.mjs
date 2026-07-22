@@ -10,6 +10,7 @@ import {
   overlayCenterOffset,
   sunkPrism,
 } from '../src/core/surface-clearance.js';
+import { planGiwaKitchenOpening } from '../src/api/residential-openings.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const EPS = 1e-5;
@@ -61,6 +62,20 @@ const production = await inspectProductionGeometry();
 invariant(production.ownedMergeFailure.threw
     && production.ownedMergeFailure.disposed.every((count) => count === 1),
   `owned geometry merge failure leaked inputs (${JSON.stringify(production.ownedMergeFailure)})`);
+const finiteValues = (value) => {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (!value || typeof value !== 'object') return true;
+  return Object.values(value).every(finiteValues);
+};
+invariant(finiteValues(production.chogaNonfinite),
+  'production choga nonfinite fallback leaked NaN/Infinity into geometry');
+invariant(
+  Math.abs(production.chogaNonfinite.W - 8.2) < EPS
+    && Math.abs(production.chogaNonfinite.D - 4.4) < EPS
+    && production.chogaNonfinite.xCount === 4
+    && production.chogaNonfinite.zCount === 3,
+  `production choga fallback footprint drifted (${JSON.stringify(production.chogaNonfinite)})`,
+);
 function checkGiwaPodium(label, shape) {
   for (const [name, count] of Object.entries(shape.layerCounts)) {
     invariant(count === 1, `${label} ${name} has ${count} depth owners`);
@@ -128,6 +143,12 @@ for (const [style, hearth] of Object.entries(production.hearths)) {
     `${style} kitchen threshold left the yard-level floor`,
   );
 }
+const giwaKitchen = planGiwaKitchenOpening(production.hearths.giwa.wallX);
+invariant(
+  Math.abs(production.hearths.giwa.openingSpanZ.min - giwaKitchen.openingSpanZ.min) < EPS
+    && Math.abs(production.hearths.giwa.openingSpanZ.max - giwaKitchen.openingSpanZ.max) < EPS,
+  'production giwa kitchen no longer consumes the shared pure opening span',
+);
 
 for (const [style, opening] of Object.entries(production.openings)) {
   invariant(opening.counts.frame === 1,
@@ -182,5 +203,10 @@ console.log(
 );
 console.log(
   `hanok primary frame/panel clearance=${production.openings.hanok.primaryFace.clearance.toFixed(3)}m`,
+);
+console.log(
+  `choga nonfinite fallback=${production.chogaNonfinite.W.toFixed(1)}×`
+  + `${production.chogaNonfinite.D.toFixed(1)}m, bays=`
+  + `${production.chogaNonfinite.xCount - 1}×${production.chogaNonfinite.zCount - 1}`,
 );
 console.log('BUILDING CLEARANCE: PASS');
