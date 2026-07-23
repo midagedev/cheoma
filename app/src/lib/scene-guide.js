@@ -49,24 +49,3 @@ export function sceneGuideIsVisible({
     && !references
     && !toast;
 }
-
-export function createSceneGuidePolicy({ storage } = {}) {
-  let dismissed = sceneGuideWasDismissed(storage);
-
-  return Object.freeze({
-    get dismissed() {
-      return dismissed;
-    },
-
-    isVisible(state) {
-      return sceneGuideIsVisible({ ...state, dismissed });
-    },
-
-    dismiss() {
-      // The current session must dismiss immediately even when persistence is
-      // unavailable. A later reload remains fail-open by design.
-      dismissed = true;
-      return persistSceneGuideDismissal(storage);
-    },
-  });
-}

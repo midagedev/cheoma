@@ -182,6 +182,11 @@
 
   @media (max-height: 520px) and (orientation: landscape) {
     .scene-guide { bottom: max(12px, calc(env(safe-area-inset-bottom) + 8px)); }
+    /* Coarse-pointer landscape keeps the whole card above ActionBar's 64px
+       visual/input envelope (z42), including safe-area displacement. */
+    .scene-guide.touch {
+      bottom: max(88px, calc(env(safe-area-inset-bottom) + 82px));
+    }
     .paper { padding-block: 10px; }
     .title { margin-bottom: 7px; }
     ul { gap-block: 5px; }

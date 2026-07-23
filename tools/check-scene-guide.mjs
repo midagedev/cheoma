@@ -4,7 +4,6 @@ import { createRequire } from 'node:module';
 import {
   SCENE_GUIDE_DISMISSED_VALUE,
   SCENE_GUIDE_STORAGE_KEY,
-  createSceneGuidePolicy,
   persistSceneGuideDismissal,
   sceneGuideIsVisible,
   sceneGuideWasDismissed,
@@ -63,18 +62,28 @@ for (const blocker of [
 }
 
 const storage = new MemoryStorage();
-const policy = createSceneGuidePolicy({ storage });
-assert.equal(storage.reads, 1, 'policy reads persistence once');
-assert.equal(policy.dismissed, false);
-assert.equal(policy.isVisible(visibleState), true);
-assert.equal(policy.isVisible({ ...visibleState, locale: 'ko' }), true, 'locale is not policy state');
-assert.equal(policy.dismiss(), true, 'successful persistence is reported');
-assert.equal(policy.dismissed, true, 'dismissal applies immediately');
-assert.equal(policy.isVisible(visibleState), false);
+let dismissed = sceneGuideWasDismissed(storage);
+assert.equal(storage.reads, 1, 'App can seed one reactive dismissed state from storage');
+assert.equal(dismissed, false);
+assert.equal(sceneGuideIsVisible({ ...visibleState, dismissed }), true);
+assert.equal(
+  sceneGuideIsVisible({ ...visibleState, dismissed, locale: 'ko' }),
+  true,
+  'locale is not policy state',
+);
+// App updates its one Svelte $state before/alongside this independent best-effort
+// write. The helpers contain no closure that could drift from that state.
+dismissed = true;
+assert.equal(persistSceneGuideDismissal(storage), true, 'successful persistence is reported');
+assert.equal(sceneGuideIsVisible({ ...visibleState, dismissed }), false);
 assert.equal(storage.writes, 1);
 assert.equal(storage.values.get(SCENE_GUIDE_STORAGE_KEY), SCENE_GUIDE_DISMISSED_VALUE);
 assert.equal(sceneGuideWasDismissed(storage), true);
-assert.equal(createSceneGuidePolicy({ storage }).isVisible(visibleState), false, 'revisit stays hidden');
+assert.equal(
+  sceneGuideIsVisible({ ...visibleState, dismissed: sceneGuideWasDismissed(storage) }),
+  false,
+  'revisit stays hidden',
+);
 
 storage.values.set(SCENE_GUIDE_STORAGE_KEY, 'unknown-value');
 assert.equal(sceneGuideWasDismissed(storage), false, 'unknown versions/values fail open');
@@ -85,13 +94,24 @@ const failingStorage = {
   getItem() { throw new Error('read denied'); },
   setItem() { throw new Error('write denied'); },
 };
-const failOpenPolicy = createSceneGuidePolicy({ storage: failingStorage });
-assert.equal(failOpenPolicy.isVisible(visibleState), true, 'read failure shows the guide');
-assert.equal(failOpenPolicy.dismiss(), false, 'write failure is reported without throwing');
-assert.equal(failOpenPolicy.dismissed, true, 'write failure still dismisses this session');
-assert.equal(failOpenPolicy.isVisible(visibleState), false);
+let failOpenDismissed = sceneGuideWasDismissed(failingStorage);
 assert.equal(
-  createSceneGuidePolicy({ storage: failingStorage }).isVisible(visibleState),
+  sceneGuideIsVisible({ ...visibleState, dismissed: failOpenDismissed }),
+  true,
+  'read failure shows the guide',
+);
+failOpenDismissed = true;
+assert.equal(persistSceneGuideDismissal(failingStorage), false, 'write failure is reported without throwing');
+assert.equal(
+  sceneGuideIsVisible({ ...visibleState, dismissed: failOpenDismissed }),
+  false,
+  'App-owned session state still dismisses after write failure',
+);
+assert.equal(
+  sceneGuideIsVisible({
+    ...visibleState,
+    dismissed: sceneGuideWasDismissed(failingStorage),
+  }),
   true,
   'a later storage-denied session remains fail-open',
 );
@@ -110,6 +130,11 @@ assert.equal(compiled.warnings.length, 0, 'SceneGuide should compile without Sve
 assert.match(componentSource, /\.scene-guide\s*\{[^}]*pointer-events:\s*none/s);
 assert.match(componentSource, /\.dismiss\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px/s);
 assert.match(componentSource, /\.dismiss\s*\{[^}]*pointer-events:\s*auto/s);
+assert.match(
+  componentSource,
+  /@media \(max-height: 520px\) and \(orientation: landscape\)[\s\S]*?\.scene-guide\.touch\s*\{[^}]*bottom:\s*max\(88px,\s*calc\(env\(safe-area-inset-bottom\) \+ 82px\)\)/,
+  'landscape touch guide must clear the raised ActionBar input envelope',
+);
 assert.equal((componentSource.match(/onclick=/g) || []).length, 1, 'only dismiss owns pointer input');
 for (const forbidden of ['autofocus', '<dialog', 'scrim', '.focus(', 'setTimeout']) {
   assert.equal(componentSource.includes(forbidden), false, `SceneGuide must not contain ${forbidden}`);
