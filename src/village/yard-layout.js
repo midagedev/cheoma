@@ -4,12 +4,23 @@
 // here prevents a visually harmless renderer refactor from silently moving a shed
 // or jar platform through an already accepted tree.
 
+import * as G from '../core/math/geom2.js';
+import { parcelEffectiveRoofBounds } from './house-footprint.js';
+import {
+  localCanopyBlocksSolarAccess,
+  parcelHouseTranslation,
+} from './parcel-contract.js';
+
 export const YARD_HARD_GAP = 0.12;
+export const YARD_LIFE_MAX_HEIGHT = 1.2;
 
 const AUX_ROOF_OVERHANG = 0.28;
 const AUX_MAX_YAW = 0.1;
 const JAR_OVERHANG = 0.12;
 const GARDEN_STONE_MARGIN = 0.08;
+const YARD_LIFE_WALL_GAP = 0.18;
+const YARD_LIFE_ROOF_GAP = 0.22;
+const YARD_LIFE_GATE_GAP = 0.82;
 
 function rectangle(kind, mode, x, z, halfWidth, halfDepth) {
   return { kind, mode, shape: 'rect', x, z, halfWidth, halfDepth };
@@ -181,14 +192,13 @@ export function yardHardObstacles(parcel, gardenOptions) {
   return out;
 }
 
-export function yardTreeIntersectsHardObstacle(point, footprint, obstacles) {
+export function yardCircleIntersectsHardObstacle(point, radius, obstacles, gap = YARD_HARD_GAP) {
+  const safeRadius = Math.max(0, Number.isFinite(radius) ? radius : 0);
+  const safeGap = Math.max(0, Number.isFinite(gap) ? gap : 0);
   for (const obstacle of obstacles || []) {
-    const rawRadius = obstacle.mode === 'canopy'
-      ? footprint?.canopyRadius : footprint?.trunkRadius;
-    const radius = Math.max(0, Number.isFinite(rawRadius) ? rawRadius : 0) + YARD_HARD_GAP;
     if (obstacle.shape === 'circle') {
       if (Math.hypot(point.x - obstacle.x, point.z - obstacle.z)
-        <= radius + obstacle.radius) return true;
+        <= safeRadius + safeGap + obstacle.radius) return true;
       continue;
     }
     const dx = point.x < obstacle.x - obstacle.halfWidth
@@ -199,7 +209,239 @@ export function yardTreeIntersectsHardObstacle(point, footprint, obstacles) {
       ? obstacle.z - obstacle.halfDepth - point.z
       : point.z > obstacle.z + obstacle.halfDepth
         ? point.z - obstacle.z - obstacle.halfDepth : 0;
-    if (Math.hypot(dx, dz) <= radius) return true;
+    if (Math.hypot(dx, dz) <= safeRadius + safeGap) return true;
+  }
+  return false;
+}
+
+function circleIntersectsRectangle(point, radius, rectangle) {
+  const dx = point.x < rectangle.minX
+    ? rectangle.minX - point.x
+    : point.x > rectangle.maxX ? point.x - rectangle.maxX : 0;
+  const dz = point.z < rectangle.minZ
+    ? rectangle.minZ - point.z
+    : point.z > rectangle.maxZ ? point.z - rectangle.maxZ : 0;
+  return Math.hypot(dx, dz) <= radius;
+}
+
+function normalizedLifeRect(footprint) {
+  if (footprint?.shape !== 'rect'
+    || !Number.isFinite(footprint.halfX)
+    || !Number.isFinite(footprint.halfZ)) return null;
+  const yaw = Number.isFinite(footprint.yaw) ? footprint.yaw : 0;
+  const halfX = Math.max(0.05, footprint.halfX);
+  const halfZ = Math.max(0.05, footprint.halfZ);
+  const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));
+  return {
+    shape: 'rect',
+    halfX,
+    halfZ,
+    yaw,
+    envelopeX: halfX * c + halfZ * s,
+    envelopeZ: halfX * s + halfZ * c,
+  };
+}
+
+function lifeRectPolygon(point, footprint) {
+  const c = Math.cos(footprint.yaw), s = Math.sin(footprint.yaw);
+  return [
+    { x: footprint.halfX, z: footprint.halfZ },
+    { x: -footprint.halfX, z: footprint.halfZ },
+    { x: -footprint.halfX, z: -footprint.halfZ },
+    { x: footprint.halfX, z: -footprint.halfZ },
+  ].map((corner) => ({
+    x: point.x + corner.x * c + corner.z * s,
+    z: point.z - corner.x * s + corner.z * c,
+  }));
+}
+
+function polygonDistance(left, right) {
+  if (left.some((point) => G.pointInPoly(point, right))
+    || right.some((point) => G.pointInPoly(point, left))) return 0;
+  let distance = Infinity;
+  for (let i = 0; i < left.length; i++) {
+    distance = Math.min(
+      distance,
+      G.segmentPolygonDistance(left[i], left[(i + 1) % left.length], right),
+    );
+  }
+  return distance;
+}
+
+function pointToLifeRectDistance(point, center, footprint) {
+  const c = Math.cos(footprint.yaw), s = Math.sin(footprint.yaw);
+  const dx = point.x - center.x, dz = point.z - center.z;
+  const localX = dx * c - dz * s;
+  const localZ = dx * s + dz * c;
+  const outsideX = Math.max(0, Math.abs(localX) - footprint.halfX);
+  const outsideZ = Math.max(0, Math.abs(localZ) - footprint.halfZ);
+  return Math.hypot(outsideX, outsideZ);
+}
+
+function lifeRectIntersectsHardObstacle(point, footprint, obstacles) {
+  const polygon = lifeRectPolygon(point, footprint);
+  for (const obstacle of obstacles || []) {
+    if (obstacle.shape === 'circle') {
+      if (pointToLifeRectDistance(
+        { x: obstacle.x, z: obstacle.z },
+        point,
+        footprint,
+      ) <= obstacle.radius + YARD_HARD_GAP) return true;
+      continue;
+    }
+    const obstaclePolygon = [
+      { x: obstacle.x - obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
+      { x: obstacle.x + obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
+      { x: obstacle.x + obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
+      { x: obstacle.x - obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
+    ];
+    if (polygonDistance(polygon, obstaclePolygon) <= YARD_HARD_GAP) return true;
+  }
+  return false;
+}
+
+function circleFitsParcel(point, radius, points) {
+  if (!points?.length || !G.pointInPoly(point, points)) return false;
+  const clearance = radius + YARD_LIFE_WALL_GAP;
+  for (let i = 0; i < points.length; i++) {
+    if (G.distToSeg(point, points[i], points[(i + 1) % points.length]).d <= clearance) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function lifeRectFitsParcel(point, footprint, points) {
+  if (!points?.length) return false;
+  return lifeRectPolygon(point, footprint).every((corner) => G.pointInPoly(corner, points)
+    && points.every((edge, index) =>
+      G.distToSeg(corner, edge, points[(index + 1) % points.length]).d > YARD_LIFE_WALL_GAP));
+}
+
+function lifeRectIntersectsRoof(point, footprint, roof) {
+  const roofPolygon = [
+    { x: roof.minX, z: roof.minZ },
+    { x: roof.maxX, z: roof.minZ },
+    { x: roof.maxX, z: roof.maxZ },
+    { x: roof.minX, z: roof.maxZ },
+  ];
+  return polygonDistance(lifeRectPolygon(point, footprint), roofPolygon) <= YARD_LIFE_ROOF_GAP;
+}
+
+function lifeRectBlocksSolarAccess(parcel, point, footprint) {
+  const corridor = parcel.solarAccess;
+  if (!corridor) return localCanopyBlocksSolarAccess(
+    parcel,
+    point,
+    Math.hypot(footprint.halfX, footprint.halfZ),
+  );
+  const corridorPolygon = [
+    { x: -corridor.halfWidth, z: corridor.localStart },
+    { x: corridor.halfWidth, z: corridor.localStart },
+    { x: corridor.halfWidth, z: corridor.localEnd },
+    { x: -corridor.halfWidth, z: corridor.localEnd },
+  ];
+  return polygonDistance(lifeRectPolygon(point, footprint), corridorPolygon) <= 1e-9;
+}
+
+function gateApproach(parcel, roof) {
+  const house = parcelHouseTranslation(parcel);
+  const start = { x: house.x, z: roof.maxZ + 0.15 };
+  const gate = parcel.access?.gateLocalPoint;
+  if (Number.isFinite(gate?.x) && Number.isFinite(gate?.z)) return { start, gate };
+  const front = parcel.shape?.pts?.reduce(
+    (best, point) => !best || point.z > best.z ? point : best,
+    null,
+  );
+  return { start, gate: front ? { x: 0, z: front.z } : { x: 0, z: parcel.plotD * 0.5 } };
+}
+
+function lifeSlotTemplates(parcel, envelopeX, envelopeZ, slotClass, roof) {
+  const halfW = parcel.plotW * 0.5;
+  const halfD = parcel.plotD * 0.5;
+  const sideX = Math.max(0, halfW - envelopeX - 0.22);
+  const serviceZ = Math.min(
+    halfD - envelopeZ - 0.22,
+    Math.max(-parcel.plotD * 0.02, roof.maxZ + envelopeZ + YARD_LIFE_ROOF_GAP),
+  );
+  const frontZ = Math.min(halfD - envelopeZ - 0.22, parcel.plotD * 0.24);
+  const middleZ = Math.min(halfD - envelopeZ - 0.22, parcel.plotD * 0.11);
+  if (slotClass === 'open-work-yard') {
+    return [
+      { id: 'work-right-front', x: sideX, z: frontZ },
+      { id: 'work-left-front', x: -sideX, z: frontZ },
+      { id: 'work-right-middle', x: sideX, z: middleZ },
+      { id: 'work-left-middle', x: -sideX, z: middleZ },
+    ];
+  }
+  return [
+    { id: 'service-right-near', x: sideX, z: serviceZ },
+    { id: 'service-left-near', x: -sideX, z: serviceZ },
+    { id: 'service-right-front', x: sideX, z: frontZ },
+    { id: 'service-left-front', x: -sideX, z: frontZ },
+  ];
+}
+
+// 계절 생활상은 필지 RNG와 독립된 후보 슬롯만 요청한다. 이 함수는 후보 순서를
+// 고정하고 실제 지붕·대문 접근·일조·담·기존 hard object를 모두 통과한 자리만 돌려준다.
+// 호출자는 parcel 전용 hash RNG로 하나를 고르며, 선택된 모든 계절 record를 flora obstacle로
+// 바꿔 아직 심지 않은 마당나무의 trunk를 예약한다.
+export function yardLifePotentialSlots(
+  parcel,
+  { footprint, radius = 0.6, height = 1, slotClass = 'service-edge', obstacles } = {},
+) {
+  const safeRect = normalizedLifeRect(footprint);
+  const safeRadius = Math.max(0.05, Number.isFinite(radius) ? radius : 0.6);
+  const safeHeight = Number.isFinite(height) ? height : Infinity;
+  if (!parcel || parcel.hero || !['giwa', 'choga'].includes(parcel.kind)
+    || !Number.isFinite(parcel.plotW) || !Number.isFinite(parcel.plotD)
+    || safeHeight <= 0 || safeHeight > YARD_LIFE_MAX_HEIGHT) return [];
+
+  const roof = parcelEffectiveRoofBounds(parcel);
+  if (![roof.minX, roof.maxX, roof.minZ, roof.maxZ].every(Number.isFinite)) return [];
+  const hard = obstacles || yardHardObstacles(parcel);
+  const approach = gateApproach(parcel, roof);
+  const envelopeX = safeRect?.envelopeX ?? safeRadius;
+  const envelopeZ = safeRect?.envelopeZ ?? safeRadius;
+  return lifeSlotTemplates(parcel, envelopeX, envelopeZ, slotClass, roof).filter((slot) => {
+    const point = { x: slot.x, z: slot.z };
+    if (safeRect) {
+      if (!lifeRectFitsParcel(point, safeRect, parcel.shape?.pts)) return false;
+      if (lifeRectIntersectsRoof(point, safeRect, roof)) return false;
+      if (lifeRectIntersectsHardObstacle(point, safeRect, hard)) return false;
+      if (lifeRectBlocksSolarAccess(parcel, point, safeRect)) return false;
+      if (G.segmentPolygonDistance(
+        approach.start,
+        approach.gate,
+        lifeRectPolygon(point, safeRect),
+      ) <= YARD_LIFE_GATE_GAP) return false;
+      return true;
+    }
+    if (!circleFitsParcel(point, safeRadius, parcel.shape?.pts)) return false;
+    if (circleIntersectsRectangle(point, safeRadius + YARD_LIFE_ROOF_GAP, roof)) return false;
+    if (yardCircleIntersectsHardObstacle(point, safeRadius, hard)) return false;
+    if (localCanopyBlocksSolarAccess(parcel, point, safeRadius)) return false;
+    if (G.distToSeg(point, approach.start, approach.gate).d <= safeRadius + YARD_LIFE_GATE_GAP) {
+      return false;
+    }
+    return true;
+  }).map((slot) => ({
+    id: slot.id,
+    class: slotClass,
+    x: slot.x,
+    z: slot.z,
+    ...(safeRect ? { footprint: { ...safeRect } } : {}),
+    radius: safeRadius,
+    height: safeHeight,
+  }));
+}
+
+export function yardTreeIntersectsHardObstacle(point, footprint, obstacles) {
+  for (const obstacle of obstacles || []) {
+    const rawRadius = obstacle.mode === 'canopy'
+      ? footprint?.canopyRadius : footprint?.trunkRadius;
+    const radius = Math.max(0, Number.isFinite(rawRadius) ? rawRadius : 0) + YARD_HARD_GAP;
+    if (yardCircleIntersectsHardObstacle(point, radius, [obstacle], 0)) return true;
   }
   return false;
 }
