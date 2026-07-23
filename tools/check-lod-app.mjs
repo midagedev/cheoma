@@ -1689,21 +1689,26 @@ try {
     const engine = window.__engine;
     const ring = window.__edgeMistTestRef;
     const ridge = window.__ridgeMistTestRef;
+    // Retain only the explicit test fixtures before disposal. The public engine
+    // intentionally clears its raw Three.js resources once ownership ends.
+    const camera = engine.camera;
+    const renderer = engine.renderer;
+    const scene = engine.scene;
     engine.dispose();
     const ringOpacity = ring?.material?.opacity;
     const ridgeQuaternion = ridge?.quaternion?.toArray?.();
     let callbacksCallable = true;
     try {
-      engine.camera.position.x += 137;
-      engine.camera.position.z -= 83;
-      engine.camera.lookAt(
-        engine.camera.position.x + 100,
-        engine.camera.position.y,
-        engine.camera.position.z,
+      camera.position.x += 137;
+      camera.position.z -= 83;
+      camera.lookAt(
+        camera.position.x + 100,
+        camera.position.y,
+        camera.position.z,
       );
-      engine.camera.updateMatrixWorld(true);
-      ring?.onBeforeRender?.(engine.renderer, engine.scene, engine.camera);
-      ridge?.onBeforeRender?.(engine.renderer, engine.scene, engine.camera);
+      camera.updateMatrixWorld(true);
+      ring?.onBeforeRender?.(renderer, scene, camera);
+      ridge?.onBeforeRender?.(renderer, scene, camera);
     } catch {
       callbacksCallable = false;
     }

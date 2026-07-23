@@ -18,7 +18,7 @@
   import HoverLabel from './components/HoverLabel.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
   import CinematicOverlay from './components/CinematicOverlay.svelte';
-  import { exportGLB, analyzeExport, filenameFor, triggerDownload } from '../../src/api/export.js';
+  import { analyzeExport, filenameFor, triggerDownload } from '../../src/api/export.js';
   import { t } from './lib/i18n.svelte.js';
   import {
     SEASON_IDS,
@@ -414,14 +414,14 @@
       exportHouse: async () => {
         if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
         const r = engine.village.focusRoot(); if (!r) return { ok: false, reason: 'no-focus' };
-        const b = await exportGLB(r);
+        const b = await engine.exportGLB(r);
         if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
         return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) } : { ok: false, over: !!b.overBudget };
       },
       exportVillage: async (opts) => {
         if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
         const r = engine.village.exportRoot(); if (!r) return { ok: false, reason: 'no-village' };
-        const b = await exportGLB(r, opts);
+        const b = await engine.exportGLB(r, opts);
         if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
         return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) }
           : { ok: false, over: !!b.overBudget, triangles: b.triangles, limit: b.limit };
@@ -675,7 +675,7 @@
     await tick();
     if (!lifecycleCurrent(epoch) || !await waitLifecycleFrames(2, epoch)) return;
     try {
-      const result = await exportGLB(target);
+      const result = await engine.exportGLB(target);
       if (!lifecycleCurrent(epoch)) return;
       if (result && result.overBudget) {
         showToast(t('glb_toobig'));

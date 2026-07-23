@@ -4,8 +4,9 @@
 // earlier, which leaves currentProgram undefined and raises a global isReady
 // TypeError outside the returned Promise. Missing programs here mean the owner
 // has already been released, so they are simply removed from the pending set.
-export function compileSubtreeAsync(renderer, root, camera, targetScene = null) {
+export function compileSubtreeAsync(renderer, root, camera, targetScene = null, { signal } = {}) {
   if (!renderer?.compile || !root || !camera) return Promise.resolve(root);
+  if (signal?.aborted) return Promise.resolve(root);
 
   let materials;
   try {
@@ -16,7 +17,18 @@ export function compileSubtreeAsync(renderer, root, camera, targetScene = null) 
   if (!(materials instanceof Set) || materials.size === 0) return Promise.resolve(root);
 
   return new Promise((resolve) => {
+    let timer = null;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer != null) clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve(root);
+    };
     const poll = () => {
+      timer = null;
+      if (signal?.aborted) { finish(); return; }
       for (const material of materials) {
         let program;
         try {
@@ -32,9 +44,10 @@ export function compileSubtreeAsync(renderer, root, camera, targetScene = null) 
           materials.delete(material);
         }
       }
-      if (materials.size === 0) resolve(root);
-      else setTimeout(poll, 10);
+      if (materials.size === 0) finish();
+      else timer = setTimeout(poll, 10);
     };
-    setTimeout(poll, 10);
+    signal?.addEventListener('abort', finish, { once: true });
+    timer = setTimeout(poll, 10);
   });
 }

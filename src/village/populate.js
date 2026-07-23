@@ -102,6 +102,7 @@ export function* populateVillageSteps(plan, opts = {}) {
   const site = plan.site;
   const root = new THREE.Group();
   root.name = `village-${plan.opts.scale}`;
+  opts.onRoot?.(root);
   const char01 = typeof plan.opts.char01 === 'number' ? plan.opts.char01 : 0.5;
 
   // 물 uniform(개울 공유)

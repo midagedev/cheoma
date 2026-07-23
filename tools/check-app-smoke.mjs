@@ -1963,6 +1963,15 @@ try {
     lifecycleHook?.armPreload();
     lifecycleHook?.armVeil();
     lifecycleHook?.armReroll();
+    // Start real engine-owned async work on this existing boot. chunkNodes=1
+    // guarantees the export yields before teardown; hanyang guarantees preload
+    // cannot finish synchronously and re-acquire the cache after disposal.
+    engine.village.preload({ scale: 'hanyang', includeTemple: true }, 0x1100cafe);
+    const exportTarget = engine.village.exportRoot();
+    const pendingExport = engine.exportGLB(exportTarget, { chunkNodes: 1 }).then(
+      () => 'resolved',
+      (error) => error?.name || 'unknown',
+    );
     const param = document.querySelector('.panel input[type="range"]');
     if (param) {
       armed.param = true;
@@ -1973,6 +1982,14 @@ try {
     const replacementNames = ['__device', '__envflow', '__glb', '__envRerollPick', '__appLifecycle'];
     const replacementHooks = Object.fromEntries(replacementNames.map((name) => [name, { owner: `new:${name}` }]));
     for (const name of replacementNames) window[name] = replacementHooks[name];
+    const retainedEngineHooks = {
+      viewshift: window.__viewshift,
+      hero: window.__hero,
+      asm: window.__asm,
+    };
+    const engineHookNames = ['__viewshift', '__hero', '__asm'];
+    const replacementEngineHooks = Object.fromEntries(engineHookNames.map((name) => [name, { owner: `new:${name}` }]));
+    for (const name of engineHookNames) window[name] = replacementEngineHooks[name];
 
     const { disposeApp } = await import('/src/main.js');
     tearingDown = true;
@@ -1981,17 +1998,57 @@ try {
     const sharedDisposePromise = firstDispose === secondDispose;
     await Promise.all([firstDispose, secondDispose]);
     engine.dispose(); // retained callers remain harmless after the owned dispose
+    const exportOutcome = await pendingExport;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const replacementHooksPreserved = replacementNames.every((name) => window[name] === replacementHooks[name]);
+    const replacementEngineHooksPreserved = engineHookNames.every((name) => window[name] === replacementEngineHooks[name]);
     for (const name of replacementNames) delete window[name]; // remove harness-owned sentinels
+    for (const name of engineHookNames) delete window[name];
+
+    const lateCallsAfterFlush = { ...lateCalls };
+    tearingDown = false;
+    const disposedState = engine.getState();
+    const disposedSeed = disposedState.seed;
+    const unsubscribe = engine.on('state', () => {});
+    engine.setParam('W', 999);
+    retainedEngineHooks.viewshift.setEnabled(true);
+    retainedEngineHooks.asm.seek(0.5);
+    const postDisposeExport = await engine.exportGLB(exportTarget).then(
+      () => 'resolved',
+      (error) => error?.name || 'unknown',
+    );
+    const apiAfterDispose = {
+      unsubscribe: typeof unsubscribe,
+      stateStable: engine.getState().seed === disposedSeed,
+      paramsPlain: !!engine.getParams() && !Array.isArray(engine.getParams()),
+      villageReady: engine.village.isReady(),
+      villagePlan: engine.village.debugPlan(),
+      villageRoot: engine.village.exportRoot(),
+      villageParcels: engine.village.debugParcels(),
+      cineActive: engine.cine.isActive(),
+      cineAvailable: engine.cine.available(),
+      cinePasses: engine.cine.passList(),
+      rerollStable: engine.reroll() === disposedSeed,
+      resourcesNull: engine.renderer === null && engine.scene === null
+        && engine.camera === null && engine.__controls === null,
+      postDisposeExport,
+      retainedHooksNeutral: retainedEngineHooks.viewshift.enabled === false
+        && retainedEngineHooks.viewshift.x === 0
+        && retainedEngineHooks.hero.selected == null
+        && retainedEngineHooks.hero.dofAmount === 0
+        && retainedEngineHooks.asm.active === false,
+    };
 
     return {
       armed,
       replacementHooksPreserved,
+      replacementEngineHooksPreserved,
       sharedDisposePromise,
       disposeCalls,
-      lateCalls,
+      lateCalls: lateCallsAfterFlush,
+      exportOutcome,
+      apiAfterDispose,
       villageAfterFlush: {
         ready: engine.village.isReady(),
         plan: engine.village.debugPlan(),
@@ -2019,6 +2076,8 @@ try {
     `final app boot arms preload, veil, focus reroll, and ParamPanel debounce (${JSON.stringify(teardown.armed)})`);
   pass(teardown.replacementHooksPreserved,
     'unmount preserves debug hooks that a newer owner replaced by identity');
+  pass(teardown.replacementEngineHooksPreserved,
+    'engine teardown preserves each engine debug hook replaced by a newer owner');
   pass(teardown.sharedDisposePromise && teardown.disposeCalls === 2,
     `disposeApp shares one Svelte unmount and retained engine.dispose stays idempotent (${JSON.stringify({
       shared: teardown.sharedDisposePromise,
@@ -2032,6 +2091,25 @@ try {
     calls: teardown.lateCalls,
     village: teardown.villageAfterFlush,
   })})`);
+  pass(teardown.exportOutcome === 'AbortError',
+    `dispose aborts an in-flight engine-owned GLB export (${teardown.exportOutcome})`);
+  pass(
+    teardown.apiAfterDispose.unsubscribe === 'function'
+      && teardown.apiAfterDispose.stateStable
+      && teardown.apiAfterDispose.paramsPlain
+      && teardown.apiAfterDispose.villageReady === false
+      && teardown.apiAfterDispose.villagePlan == null
+      && teardown.apiAfterDispose.villageRoot == null
+      && teardown.apiAfterDispose.villageParcels.length === 0
+      && teardown.apiAfterDispose.cineActive === false
+      && teardown.apiAfterDispose.cineAvailable === false
+      && teardown.apiAfterDispose.cinePasses.length === 0
+      && teardown.apiAfterDispose.rerollStable
+      && teardown.apiAfterDispose.resourcesNull
+      && teardown.apiAfterDispose.postDisposeExport === 'AbortError'
+      && teardown.apiAfterDispose.retainedHooksNeutral,
+    `disposed engine API is table-driven fail-closed (${JSON.stringify(teardown.apiAfterDispose)})`,
+  );
   pass(!teardown.canvasConnected && teardown.canvasCount === 0 && teardown.appChildren === 0,
     'disposeApp unmounts the component tree and removes the renderer canvas');
   pass(

@@ -125,7 +125,7 @@ try {
 
     const result = await page.evaluate(async () => {
       const NativeWorker = window.Worker;
-      const workerStats = { started: 0, succeeded: 0, failed: 0 };
+      const workerStats = { started: 0, succeeded: 0, failed: 0, terminated: 0 };
       window.Worker = class ContractWorker extends NativeWorker {
         constructor(...args) {
           super(...args);
@@ -135,6 +135,10 @@ try {
             else workerStats.failed++;
           });
           this.addEventListener('error', () => workerStats.failed++);
+        }
+        terminate() {
+          workerStats.terminated++;
+          return super.terminate();
         }
       };
 
@@ -350,6 +354,43 @@ try {
         }
         return { pass: failures.length === 0, checked, failures };
       };
+
+      const abortName = async (promise) => {
+        try { await promise; return 'resolved'; }
+        catch (error) { return error?.name || 'unknown'; }
+      };
+      const preAborted = new AbortController();
+      preAborted.abort();
+      const preAbortName = await abortName(createVillageAsync(
+        { scale: 'village', seed: 20260716 },
+        { signal: preAborted.signal },
+      ));
+      const duringAbort = new AbortController();
+      const abortSteps = [];
+      const duringAbortName = await abortName(createVillageAsync(
+        { scale: 'village', seed: 20260717 },
+        {
+          signal: duringAbort.signal,
+          budgetMs: -1,
+          onStep(label) {
+            abortSteps.push(label);
+            if (label === 'terrain') duringAbort.abort();
+          },
+        },
+      ));
+      const stepsAtAbort = abortSteps.length;
+      const schedulerFailureName = await abortName(createVillageAsync(
+        { scale: 'village', seed: 20260718 },
+        { nextFrame() { throw new Error('scheduler-fail'); } },
+      ));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const abortContract = {
+        preAbortName,
+        duringAbortName,
+        schedulerFailureName,
+        steps: abortSteps,
+        stopped: abortSteps.length === stepsAtAbort,
+      };
       const scales = ['village', 'town', 'capital', 'hanyang'];
       const cases = [];
       for (const scale of scales) {
@@ -401,7 +442,7 @@ try {
           asyncLandmarkLenses,
         });
       }
-      return { cases, workerStats };
+      return { cases, workerStats, abortContract };
     });
     await page.close();
     return { ...result, errors };
@@ -437,11 +478,18 @@ try {
     }
     const workerPass = mode === 'worker'
       ? result.workerStats.started === 1
-        && result.workerStats.succeeded === result.cases.length
+        && result.workerStats.succeeded >= result.cases.length
         && result.workerStats.failed === 0
-      : result.workerStats.started === 0;
-    failed ||= !workerPass || result.errors.length > 0;
+        && result.workerStats.terminated === 0
+      : result.workerStats.started === 0 && result.workerStats.terminated === 0;
+    const abortPass = result.abortContract.preAbortName === 'AbortError'
+      && result.abortContract.duringAbortName === 'AbortError'
+      && result.abortContract.schedulerFailureName === 'Error'
+      && result.abortContract.stopped
+      && result.abortContract.steps.at(-1) === 'terrain';
+    failed ||= !workerPass || !abortPass || result.errors.length > 0;
     console.log(`worker messages: ${JSON.stringify(result.workerStats)} ${workerPass ? 'PASS' : 'FAIL'}`);
+    console.log(`abort lifecycle: ${JSON.stringify(result.abortContract)} ${abortPass ? 'PASS' : 'FAIL'}`);
     for (const error of result.errors) console.error(error);
   }
 } finally {

@@ -28,7 +28,7 @@ import {
   villageScreenDistanceForCamera,
 } from '../../../src/api/cinematic.js';
 import { setupAudio } from '../../../src/api/audio.js';
-import { capturePostcard } from '../../../src/api/export.js';
+import { capturePostcard, exportGLB as exportCoreGLB } from '../../../src/api/export.js';
 import { compileSubtreeAsync } from '../../../src/api/rendering.js';
 import {
   createRerollWave, createVillage, createVillageAsync,
@@ -39,6 +39,9 @@ import { createArchitecturalRevealRuntime } from './architectural-reveal-runtime
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
 import { createCinematicRuntime } from './cinematic-runtime.js';
 import { createDirectionalShadowRuntime } from './directional-shadow-runtime.js';
+import {
+  combineAbortSignals, createAbortError, createTaskOwner, guardApiMethods,
+} from './engine-lifetime.js';
 import { createInkModeRuntime } from './ink-mode-runtime.js';
 import { createPostRuntime } from './post-runtime.js';
 import { createSceneRuntime } from './scene-runtime.js';
@@ -75,6 +78,7 @@ const FOCUS_HOP_DUR = 1.5;             // 집(A)→집(B) 직접 전환(#95) —
 //   잔여 링크는 checkShaderErrors=false 로 논블록). 병렬 컴파일 미지원 환경에서는 program readiness가
 //   즉시 완료되므로 사실상 대기 없음(현행 타이밍 보존).
 const REVEAL_WARM_CAP_MS = 200;
+
 export function createEngine({ container, perf = false, compact = false } = {}) {
   // 모바일 성능 프로파일. perf: 터치/좁은 뷰포트(폰·태블릿) → DoF off·그림자맵 하향.
   // compact: 폰급(최소변 ≤520) → pixelRatio 1.5·저해상 bloom(필레이트 절감). 데스크톱은 무변.
@@ -95,6 +99,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     expansion: 1, selected: false, canMerge: false,
   };
   let disposed = false;
+  const engineAbort = new AbortController();
+  const tasks = createTaskOwner(() => !disposed);
   let P = {}; // 현재 파라미터
 
   // ---------- 렌더러 / 씬 / 카메라 ----------
@@ -120,6 +126,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let orbitGain = 0;                        // 0..1 회전 강도(램프)
   let lastActivity = performance.now();     // 마지막 사용자 조작 시각
   let heroActive = false;                   // 히어로 시퀀스 진행 중 플래그
+  let legacyHeroAssembleTimer = null;
+  let legacyHeroPoll = null;
+  let legacyHeroFadeFrame = null;
   // 히어로 역광 방위(#98 사용자 지시). 종가 랜딩 시 종가 배면(frontDir+180±) 쪽으로 태양 방위를 고정해,
   //   정측면에서 멈춘 카메라가 집을 역광으로 보게 한다(처마 실루엣 골든 림). 태양 고도·색은 시간대(석양)
   //   그대로 두고 방위만 매 프레임 회전(env sky 가 sun.position 을 세팅한 뒤 덮어씀). null=미적용(비히어로).
@@ -168,7 +177,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     cache: { key: null, handle: null },
     reveal: null,   // 진입 시 먹 안개 reveal 모션 상태 { e, dur }
     heroAsm: null,  // 종가 랜딩/리플레이 조립 애니(#62·#59) — 렌더 루프가 매 프레임 update
-    heroTimer: null, // 랜딩 착공 지연 타이머(중단 시 취소)
     // ── 보기별 줌 범위(#14) ──
     aerialDist: 0,          // 46° 부감의 실제 카메라↔중심 거리(villageAerial 갱신)
     aerialReferenceDist: 0, // 42° 화면 등가 거리 — 광각/망원 줌 범위의 공통 기준
@@ -259,8 +267,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const REBUILD_ANIM_SEC = 0.8;     // 짧게 — 파라미터 미세조정 반복이 답답하지 않게
   let rebuildTimer = null;
   function scheduleRebuild() {
-    if (rebuildTimer) clearTimeout(rebuildTimer);
-    rebuildTimer = setTimeout(() => {
+    if (rebuildTimer) tasks.clearAfter(rebuildTimer);
+    rebuildTimer = tasks.after(() => {
       rebuildTimer = null;
       regenerate();                                        // regenerate 가 audio.setLayout 도 갱신
       startAssembly(REBUILD_ANIM_SEC, { includeWings: true });
@@ -729,6 +737,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let frames = 0;
   const clock = new THREE.Clock();
   let debugPaused = false;
+  let shotReadyOwned = false;
+  let heroEnterTimingOwned = false;
+  let heroEnterTimingValue = null;
+  let heroAssembleTimingOwned = false;
+  let heroAssembleTimingValue = null;
   renderer.setAnimationLoop(() => {
     const elapsed = clock.getDelta();
     if (debugPaused) return;
@@ -871,8 +884,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         if (!bootAudioWarmed) {
           bootAudioWarmed = true;
           const warm = () => { if (disposed) return; try { ensureAudio()?.prefetchCurrentTrack?.(); } catch {} };
-          if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 3000 });
-          else setTimeout(warm, 500);
+          tasks.idle(warm, { timeout: 3000 });
         }
       }
     }
@@ -905,7 +917,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     inkModeRuntime.update(dt);
     renderFrame(dt);
     frames++;
-    if (frames === 3) window.__SHOT_READY = true;
+    if (frames === 3) { window.__SHOT_READY = true; shotReadyOwned = true; }
   });
 
   // ---------- 호버/선택 (레이캐스트) ----------
@@ -1171,7 +1183,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (village.cache.handle) { village.cache.handle.dispose(); village.cache = { key: null, handle: null }; }
     if (villageAsyncBuild()) {
       const tok = (village.pregen = { key });
-      createVillageAsync({ ...opts, seed: seed >>> 0 }).then((h) => {
+      createVillageAsync(
+        { ...opts, seed: seed >>> 0 },
+        { signal: engineAbort.signal },
+      ).then((h) => {
         if (village.pregen !== tok) { h.dispose(); return; }   // 더 최신 프리로드 시작됨 → 폐기
         village.pregen = null;
         // 그 사이 캐시에 최신분이 들어왔거나 활성 마을이 같은 key 면 폐기.
@@ -1272,7 +1287,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     post.rimRescan?.(root);
     if (typeof renderer.compile !== 'function' || !root) return Promise.resolve();
     if (typeof window !== 'undefined' && window.__noWarm) return Promise.resolve();   // A/B 계측 게이트(#117 검증용)
-    try { return compileSubtreeAsync(renderer, root, cam, root === scene ? null : scene).catch(() => {}); }
+    try {
+      return compileSubtreeAsync(
+        renderer, root, cam, root === scene ? null : scene,
+        { signal: engineAbort.signal },
+      ).catch(() => {});
+    }
     catch { return Promise.resolve(); }
   }
 
@@ -1310,9 +1330,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   보장(초과분 잔여 링크는 checkShaderErrors=false 로 논블록).
   function afterWarm(promise, capMs, fn) {
     let done = false;
-    const go = () => { if (done || disposed) return; done = true; fn(); };
+    let cap = null;
+    const go = () => {
+      if (done || disposed) return;
+      done = true;
+      tasks.clearAfter(cap);
+      fn();
+    };
     Promise.resolve(promise).then(go, go);
-    setTimeout(go, capMs);
+    cap = tasks.after(go, capMs);
   }
 
   // 다음 enter/setOpts 가 즉시(무생성) 가능한지 — App 이 먹 안개 마스킹 필요 여부 판단에 사용.
@@ -1343,12 +1369,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 나중에 시작됐든 먼저 진행 중이던 wave(build 포함)를 회수해 late promotion을 막는다.
     cancelVillageWave();
     if (demo.active) stopDemo();   // 마을 재생성(리롤·규모·재진입) 시 데모 정지(스테일 패스 방지)
-    if (village.heroTimer) { clearTimeout(village.heroTimer); village.heroTimer = null; }
     village.heroAsm = null;
     const key = villageKey(village.opts, village.seed);
 
     // 새 핸들 확정 후 스왑(구 마을은 그때까지 유지). enterVillageMode·env 전파·reveal·warmShaders(#117/#128).
     const swap = (h) => {
+      if (disposed) { h?.dispose?.(); return; }
       village.__outerR = null;   // 마을 외곽 실반경 캐시 리셋(#80)
       focusRing.clear();         // 마을 재구성 → 근접 링 해제(오버레이 폐기됨)
       clearSemanticDofAnchor();
@@ -1363,8 +1389,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       updateWeatherColliders();
       startVillageReveal();
       bumpShadow(3000);   // #140-A 새 마을 지오 등장 + reveal·예열 정착 동안 그림자 갱신(캐시 개시는 retire 소유)
-      requestAnimationFrame(() => {
-        if (disposed) return;
+      tasks.frame(() => {
         const warm = (village.active && village.handle) ? warmShaders(village.handle.group) : Promise.resolve();
         retireShaderErrorCheck(warm);   // #128: 첫 마을 예열 완료 후 셰이더 에러 체크 은퇴. 1회 게이트.
       });
@@ -1382,11 +1407,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //     forceSync(히어로 랜딩 등 buildVillage 직후 village.handle 동기 의존 경로)는 제외.
     if (!forceSync && villageAsyncBuild() && village.active && village.handle) {
       const tok = (village.build = { key });
-      createVillageAsync({ ...village.opts, seed: village.seed }).then((h) => {
+      createVillageAsync(
+        { ...village.opts, seed: village.seed },
+        { signal: engineAbort.signal },
+      ).then((h) => {
         if (village.build !== tok) { h.dispose(); return; }   // 더 최신 빌드 시작됨(연속 커밋) → 폐기
         village.build = null; swap(h);
-      }, () => {
+      }, (error) => {
         if (village.build !== tok) return;                     // 폴백: 동기 빌드
+        if (disposed || error?.name === 'AbortError') { village.build = null; return; }
         village.build = null; swap(createVillage({ ...village.opts, seed: village.seed }));
       });
       return;
@@ -1664,7 +1693,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         setZoomRegime('explore');
         emit('villageFocusMorph', 0);
         emit('villageReturnDone', { parcelId });
-        if (parcelId) setTimeout(() => { if (!village.selected && village.active) village.handle.highlightParcel(parcelId, false); }, 2000);
+        if (parcelId) tasks.after(() => {
+          if (!village.selected && village.active) village.handle?.highlightParcel(parcelId, false);
+        }, 2000);
       },
     });
     // focus-out 트윈이 출발점을 값으로 복사했으므로 폐기될 overlay의 의미 좌표는 즉시 놓는다.
@@ -1687,8 +1718,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   집 모드↔마을 모드는 별도 씬이 아니라 이 종가 클로즈업 ↔ 부감 사이의 카메라 돌리로 일원화된다.
 
   function stopHeroAsm() {
-    if (village.heroTimer) { clearTimeout(village.heroTimer); village.heroTimer = null; }
     if (village.heroAsm) { village.heroAsm.skip(); village.heroAsm = null; }   // skip → onDone(폴백 병합본 복원)
+  }
+
+  function cancelLegacyHeroEnter() {
+    tasks.clearAfter(legacyHeroAssembleTimer);
+    tasks.clearEvery(legacyHeroPoll);
+    tasks.clearFrame(legacyHeroFadeFrame);
+    legacyHeroAssembleTimer = null;
+    legacyHeroPoll = null;
+    legacyHeroFadeFrame = null;
   }
   // 종가 컴파운드 조립 — 핵심 assembly.js(playAssembly)는 podium/columns/roof 등 부재 이름으로 파트를
   //   찾는데, 종가 오버레이(buildParcel 'hanok'/'palace' 컴파운드)는 그 이름 구조가 없어 아무것도 안
@@ -1841,8 +1880,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //   0 에 갇혀 효과음만 들리던 회귀 수정). setBgmVolume 은 볼륨 배수라 audio 미start 여도 안전.
     ensureAudio();
     { const t0 = performance.now(), durMs = 2500;
-      const stepFade = () => { if (disposed) return; const k = Math.min(1, (performance.now() - t0) / durMs); audio?.setBgmVolume(k); if (k < 1) requestAnimationFrame(stepFade); };
-      requestAnimationFrame(stepFade); }
+      const stepFade = () => {
+        const k = Math.min(1, (performance.now() - t0) / durMs);
+        audio?.setBgmVolume(k);
+        if (k < 1) tasks.frame(stepFade);
+      };
+      tasks.frame(stepFade); }
     const closeupDist = finalPosition.distanceTo(finalTarget);
     // 조립 즉시 시작하되 착공 지연(delay)만큼 빈 터 유지 → 타이틀 페이드·먹안개가 착공 순간을 덮는다.
     // 완료 시 클로즈업 편집 상태로 안착(패널 슬라이드 인).
@@ -2027,7 +2070,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const startWave = (newHandle) => {
       // 현재 토큰은 startWave 호출 직전에 비워진다. 이후에도 busy/선택/전환이 남았다면 빌드 중
       // 다른 화면 흐름이 소유권을 얻은 것이므로 incoming 핸들을 폐기한다.
-      if (villageWaveBusy() || village.selected || village.transitioning
+      if (disposed || villageWaveBusy() || village.selected || village.transitioning
         || !village.active || village.handle !== oldHandle) { newHandle.dispose(); return; }
       newHandle.setTime(state.time);              // env 상태 선적용(웨이브 중 옛 마을과 톤 일치)
       newHandle.setSeason(state.season, {});
@@ -2069,10 +2112,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     };
     if (villageAsyncBuild()) {
       const tok = (village.waveBuild = { seed: useSeed });   // 이전 waveBuild 토큰 자동 무효화(최신 커밋 승리)
-      createVillageAsync({ ...useOpts, seed: useSeed }).then((h) => {
+      createVillageAsync(
+        { ...useOpts, seed: useSeed },
+        { signal: engineAbort.signal },
+      ).then((h) => {
         if (village.waveBuild !== tok) { h.dispose(); return; }
         village.waveBuild = null; startWave(h);
-      }, () => { if (village.waveBuild === tok) { village.waveBuild = null; startWave(createVillage({ ...useOpts, seed: useSeed })); } });
+      }, (error) => {
+        if (village.waveBuild !== tok) return;
+        village.waveBuild = null;
+        if (!disposed && error?.name !== 'AbortError') startWave(createVillage({ ...useOpts, seed: useSeed }));
+      });
     } else {
       startWave(createVillage({ ...useOpts, seed: useSeed }));
     }
@@ -2154,6 +2204,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 컨트롤러 API ----------
+  let viewShiftHook = null;
+  let heroHook = null;
+  let assemblyHook = null;
   const controller = {
     on, emit,
     getState: () => ({ ...state }),
@@ -2674,6 +2727,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       return onWanted;
     },
 
+    // Engine lifetime owns every app export. A caller may add a narrower signal,
+    // but cannot outlive engine disposal or resume against released scene resources.
+    exportGLB(target, opts = {}) {
+      const combined = combineAbortSignals(engineAbort.signal, opts.signal);
+      return exportCoreGLB(target, { ...opts, signal: combined.signal })
+        .finally(() => combined.dispose());
+    },
+
     // 사진 찍기: 현재 뷰 → 낙관 합성 PNG. 기존 postcard API 이름은 호환을 위해 유지한다.
     postcard({ download = true } = {}) {
       const prev = renderer.getPixelRatio();
@@ -2724,44 +2785,49 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         ensureAudio(); audio.setBgmVolume(0);
       },
       enter({ onDone } = {}) {
+        cancelLegacyHeroEnter();
         ensureAudio(); audio.start();
         const legacyTiming = typeof window !== 'undefined' && !!window.__heroLegacy;
         const assembleDelay = legacyTiming ? 6600 : HERO_ASSEMBLE_DELAY_MS;
         const assembleDur = legacyTiming ? 5 : HERO_ASSEMBLE_DUR;
         // BGM 페이드인
         const t0 = performance.now(), durMs = 2500;
-        if (typeof window !== 'undefined') { window.__heroEnterT = t0; window.__heroAssembleT = null; }
+        if (typeof window !== 'undefined') {
+          window.__heroEnterT = t0;
+          window.__heroAssembleT = null;
+          heroEnterTimingOwned = true;
+          heroEnterTimingValue = t0;
+          heroAssembleTimingOwned = true;
+          heroAssembleTimingValue = null;
+        }
         const stepFade = () => {
-          if (disposed) return;
           const k = Math.min(1, (performance.now() - t0) / durMs);
           audio?.setBgmVolume(k);
-          if (k < 1) requestAnimationFrame(stepFade);
+          legacyHeroFadeFrame = k < 1 ? tasks.frame(stepFade) : null;
         };
-        requestAnimationFrame(stepFade);
+        legacyHeroFadeFrame = tasks.frame(stepFade);
         revealCamera.playPrimed();
         // 착공(조립 시작)을 크게 앞당김 — 타이틀 페이드 직후 기단이 올라오기 시작(중단 시 취소).
-        let assembleTimer = setTimeout(() => {
-          assembleTimer = null;
-          if (disposed) return;
+        legacyHeroAssembleTimer = tasks.after(() => {
+          legacyHeroAssembleTimer = null;
           building.visible = true;
           for (const w of wings) w.group.visible = true;
-          if (typeof window !== 'undefined') window.__heroAssembleT = performance.now() - t0;
+          if (typeof window !== 'undefined') {
+            heroAssembleTimingValue = performance.now() - t0;
+            heroAssembleTimingOwned = true;
+            window.__heroAssembleT = heroAssembleTimingValue;
+          }
           startAssembly(assembleDur);
         }, assembleDelay);
         // reveal 자연 종료·사용자 중단을 같은 runtime 상태에서 감시 → 컨트롤 인계.
         let handed = false;
-        const iv = setInterval(() => {
-          if (disposed) {
-            handed = true;
-            clearInterval(iv);
-            if (assembleTimer) { clearTimeout(assembleTimer); assembleTimer = null; }
-            return;
-          }
-          if (handed) { clearInterval(iv); return; }
+        legacyHeroPoll = tasks.every(() => {
+          if (handed) { tasks.clearEvery(legacyHeroPoll); legacyHeroPoll = null; return; }
           if (!revealCamera.isActive()) {
             handed = true;
-            clearInterval(iv);
-            if (assembleTimer) { clearTimeout(assembleTimer); assembleTimer = null; }
+            tasks.clearEvery(legacyHeroPoll); legacyHeroPoll = null;
+            tasks.clearAfter(legacyHeroAssembleTimer); legacyHeroAssembleTimer = null;
+            tasks.clearFrame(legacyHeroFadeFrame); legacyHeroFadeFrame = null;
             building.visible = true;
             for (const w of wings) w.group.visible = true;
             audio?.setBgmVolume(1);
@@ -2773,6 +2839,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         }, 150);
       },
       skip({ onDone } = {}) {
+        cancelLegacyHeroEnter();
         revealCamera.stop('skip', { notify: false });
         cinematic.stop();
         building.visible = true;
@@ -2916,6 +2983,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     dispose() {
       if (disposed) return;
       disposed = true;
+      engineAbort.abort();
+      tasks.cancelAll();
+      cancelLegacyHeroEnter();
       renderer.setAnimationLoop(null);
       village.pregen = null;
       village.build = null;
@@ -2930,8 +3000,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       hoverParcel = null;
       tween = null;
       groupAnims = [];
-      if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
-      if (village.heroTimer) { clearTimeout(village.heroTimer); village.heroTimer = null; }
+      rebuildTimer = null;
       demoRuntime.dispose();
       revealCamera?.dispose();
       cinematic.dispose?.();
@@ -2978,65 +3047,151 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       renderer.dispose();
       renderer.domElement.remove();
       for (const eventName of Object.keys(listeners)) listeners[eventName] = [];
-      if (typeof window !== 'undefined' && window.__engine === controller) {
-        delete window.__engine;
-        delete window.__viewshift;
-        delete window.__hero;
-        delete window.__asm;
+      controller.renderer = null;
+      controller.scene = null;
+      controller.camera = null;
+      controller.__controls = null;
+      if (typeof window !== 'undefined') {
+        const engineSlotOwned = window.__engine === controller;
+        if (window.__viewshift === viewShiftHook) delete window.__viewshift;
+        if (window.__hero === heroHook) delete window.__hero;
+        if (window.__asm === assemblyHook) delete window.__asm;
+        if (engineSlotOwned && shotReadyOwned && window.__SHOT_READY === true) delete window.__SHOT_READY;
+        if (engineSlotOwned && heroEnterTimingOwned
+            && window.__heroEnterT === heroEnterTimingValue) delete window.__heroEnterT;
+        if (engineSlotOwned && heroAssembleTimingOwned
+            && window.__heroAssembleT === heroAssembleTimingValue) delete window.__heroAssembleT;
+        if (engineSlotOwned) delete window.__engine;
       }
     },
   };
 
+  // Stable post-dispose contract. Commands become no-ops, queries return fresh
+  // neutral values, and async work rejects with AbortError. Only these four API
+  // namespaces are wrapped; raw Three objects are never traversed or monkey-patched.
+  const disposedResults = Object.freeze({
+    on: () => () => {},
+    getState: () => ({ ...state }),
+    getParams: () => ({ ...P }),
+    getLayout: () => computeLayout(P),
+    maxExpansion: () => wingCount(state.preset) + 1,
+    setRenderStyle: () => state.renderStyle,
+    reroll: () => state.seed,
+    applySeed: () => state.seed,
+    setSunsetLook: () => state.sunsetLook,
+    toggleAudio: () => false,
+    postcard: () => null,
+    exportGLB: () => Promise.reject(createAbortError()),
+    __debugAssemblyActive: () => false,
+    __debugFreezeRebuild: () => null,
+    debugPostPassOrder: () => [],
+    debugSetPaused: () => false,
+    debugAdvanceFocusRing: () => 0,
+    'village.heroId': () => null,
+    'village.focused': () => false,
+    'village.preload': () => null,
+    'village.isReady': () => false,
+    'village.reroll': () => village.seed,
+    'village.rerollWave': () => null,
+    'village.isWaving': () => false,
+    'village.debugWave': () => ({
+      building: false, active: false, old: null, incoming: null, presentation: null,
+    }),
+    'village.debugStartWave': () => null,
+    'village.debugSeekWave': () => null,
+    'village.debugResumeWave': () => false,
+    'village.debugCancelWave': () => false,
+    'village.exportRoot': () => null,
+    'village.focusRoot': () => null,
+    'village.residentialOpeningEdits': () => [],
+    'village.rebuild': () => null,
+    'village.getState': () => ({
+      active: false, selected: null, transitioning: false, hover: null,
+      opts: { ...village.opts }, seed: village.seed, spec: null, stats: null, warnings: [],
+    }),
+    'village.debugParcels': () => [],
+    'village.debugDrawCalls': () => 0,
+    'cine.start': () => false,
+    'cine.isActive': () => false,
+    'cine.available': () => false,
+    'cine.getState': () => ({
+      active: false, mode: null, pass: null, index: 0, chain: [], single: null, t: 0,
+      turnRateDeg: 0,
+    }),
+    'cine.passList': () => [],
+    'cine.debugWalker': () => null,
+    'cine.debugCam': () => null,
+  });
+  function disposedResult(path) {
+    const factory = disposedResults[path];
+    if (factory) return factory();
+    if (path.startsWith('debug') || path.includes('.debug')) return null;
+    return undefined;
+  }
+  const guardOptions = (scope, skip) => ({
+    scope,
+    skip,
+    isDisposed: () => disposed,
+    onDisposed: disposedResult,
+  });
+  guardApiMethods(controller, guardOptions('', ['dispose']));
+  guardApiMethods(controller.village, guardOptions('village'));
+  guardApiMethods(controller.hero, guardOptions('hero'));
+  guardApiMethods(controller.cine, guardOptions('cine'));
+
   // 스크린샷/디버그 훅 (playwright 검증용)
   window.__engine = controller;
   // #124 뷰포트 중심 보정 검증 훅 — 현재/목표 시프트 px, 활성·프러스텀 offset 상태.
-  window.__viewshift = {
-    get enabled() { return viewShift.enabled; },
-    get x() { return viewShift.curX; }, get y() { return viewShift.curY; },
-    get tx() { return viewShift.tgtX; }, get ty() { return viewShift.tgtY; },
-    get compositionYFrac() { return viewShift.compositionYFrac; },
-    get viewEnabled() { return !!(camera.view && camera.view.enabled); },
+  viewShiftHook = {
+    get enabled() { return !disposed && viewShift.enabled; },
+    get x() { return disposed ? 0 : viewShift.curX; }, get y() { return disposed ? 0 : viewShift.curY; },
+    get tx() { return disposed ? 0 : viewShift.tgtX; }, get ty() { return disposed ? 0 : viewShift.tgtY; },
+    get compositionYFrac() { return disposed ? 0 : viewShift.compositionYFrac; },
+    get viewEnabled() { return !disposed && !!(camera.view && camera.view.enabled); },
     setEnabled: (b) => controller.setViewShiftEnabled(b),
   };
+  window.__viewshift = viewShiftHook;
   // #98 히어로 감동 계측 훅 — 조립 중 선회(방위각)·조립 단계·근접 링 강도·날씨 입자·무대(fog) 를
   // 코드/수치로만 검증(스크린샷 없이). village 내부 상태는 비노출이라 여기서만 읽기 전용 게터로 흘린다.
-  window.__hero = {
-    get selected() { return village.selected; },
-    get transitioning() { return village.transitioning; },
-    get heroAsm() { return !!village.heroAsm; },
-    get reveal() { return village.reveal ? { e: village.reveal.e, dur: village.reveal.dur } : null; },
-    get focusStrength() { return focusRing.strength; },
-    get focusRetiring() { return focusRing.retiringCount; },
+  heroHook = {
+    get selected() { return disposed ? null : village.selected; },
+    get transitioning() { return !disposed && village.transitioning; },
+    get heroAsm() { return !disposed && !!village.heroAsm; },
+    get reveal() { return !disposed && village.reveal ? { e: village.reveal.e, dur: village.reveal.dur } : null; },
+    get focusStrength() { return disposed ? 0 : focusRing.strength; },
+    get focusRetiring() { return disposed ? 0 : focusRing.retiringCount; },
     // 방위각(라디안): 카메라가 타깃을 기준으로 도는 각. 조립 중 매초 변화율>0 을 단언.
-    get az() { return Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z); },
-    get target() { return { x: controls.target.x, y: controls.target.y, z: controls.target.z }; },
-    get camPos() { return { x: camera.position.x, y: camera.position.y, z: camera.position.z }; },
-    get fogNear() { return scene.fog ? scene.fog.near : null; },
-    get fogFar() { return scene.fog ? scene.fog.far : null; },
-    get siteR() { return village.handle?.plan?.site?.R ?? null; },
+    get az() { return disposed ? 0 : Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z); },
+    get target() { return disposed ? null : { x: controls.target.x, y: controls.target.y, z: controls.target.z }; },
+    get camPos() { return disposed ? null : { x: camera.position.x, y: camera.position.y, z: camera.position.z }; },
+    get fogNear() { return !disposed && scene.fog ? scene.fog.near : null; },
+    get fogFar() { return !disposed && scene.fog ? scene.fog.far : null; },
+    get siteR() { return disposed ? null : village.handle?.plan?.site?.R ?? null; },
     // #24 DoF: Bokeh uniform과 활성 의미 앵커의 카메라축 깊이 계측.
-    get dofOn() { return !!(bokehPass && bokehPass.enabled); },
-    get dofFocus() { return bokehPass ? bokehPass.uniforms.focus.value : null; },
-    get dofTargetDepth() { return post.dof.depthAt(activeDofAnchor()) ?? dofTargetDepth; },
+    get dofOn() { return !disposed && !!(bokehPass && bokehPass.enabled); },
+    get dofFocus() { return !disposed && bokehPass ? bokehPass.uniforms.focus.value : null; },
+    get dofTargetDepth() { return disposed ? null : post.dof.depthAt(activeDofAnchor()) ?? dofTargetDepth; },
     // 하위 호환 이름. 이제 잘못된 유클리드 거리가 아니라 실제 Bokeh 축깊이를 반환한다.
-    get dofTargetDist() { return post.dof.depthAt(activeDofAnchor()) ?? dofTargetDepth; },
-    get dofAmount() { return post.dof.amount; },
-    get dofAperture() { return bokehPass ? bokehPass.uniforms.aperture.value : null; },
+    get dofTargetDist() { return disposed ? null : post.dof.depthAt(activeDofAnchor()) ?? dofTargetDepth; },
+    get dofAmount() { return disposed ? 0 : post.dof.amount; },
+    get dofAperture() { return !disposed && bokehPass ? bokehPass.uniforms.aperture.value : null; },
     // #98 역광: 태양 방위(sun.position 실측)·히어로 종가 frontDir(rotY)·카메라 방위 — 역광 구도 단언.
-    get sunAz() { return Math.atan2(sun.position.x, sun.position.z); },
-    get heroRotY() { return village.heroRotY != null ? village.heroRotY : null; },
+    get sunAz() { return disposed ? 0 : Math.atan2(sun.position.x, sun.position.z); },
+    get heroRotY() { return !disposed && village.heroRotY != null ? village.heroRotY : null; },
     get timeState() { return state.time; },
   };
+  window.__hero = heroHook;
   // #126 두부 조립 검증 훅 — 정지 seek(결정론 프레임)·활성·오버레이 청크 최대 스케일편차(정착 후
   //   재움직임=재트리거/늦은반동 검출). seek 은 heroAsm.update 와 경합하므로 캡처 시 __asmFreeze 로 정지.
-  window.__asm = {
-    get active() { return !!village.heroAsm; },
+  assemblyHook = {
+    get active() { return !disposed && !!village.heroAsm; },
     get starts() { return village.asmStarts || 0; },   // compound 조립 인스턴스화 누적(재트리거=히어로 랜딩 중 delta>1)
-    get frozen() { return !!village.asmFrozen; },
-    freeze(b) { village.asmFrozen = !!b; },
-    seek(t) { if (village.heroAsm && village.heroAsm.seek) { village.heroAsm.seek(t); renderFrame(); } },
-    finish() { if (village.heroAsm) { village.heroAsm.skip(); renderFrame(); } },
+    get frozen() { return !disposed && !!village.asmFrozen; },
+    freeze(b) { if (!disposed) village.asmFrozen = !!b; },
+    seek(t) { if (!disposed && village.heroAsm?.seek) { village.heroAsm.seek(t); renderFrame(); } },
+    finish() { if (!disposed && village.heroAsm) { village.heroAsm.skip(); renderFrame(); } },
     maxScaleDev() {
+      if (disposed) return null;
       const g = village.handle?.heroDetailGroup?.();
       if (!g) return null;
       let m = 0;
@@ -3044,6 +3199,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       return +m.toFixed(4);
     },
   };
+  window.__asm = assemblyHook;
 
   return controller;
 }
