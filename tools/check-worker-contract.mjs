@@ -157,6 +157,7 @@ try {
         { parcelLocalPoint },
         { yardHardObstacles, yardTreeIntersectsHardObstacle },
         { SCATTER_TREE_VISUAL_RADIUS },
+        { decodeSceneSnapshot, encodeSceneSnapshot },
       ] = await Promise.all([
         import('/src/village/adapter.js'),
         import('/tools/lib/hash-three-group.mjs'),
@@ -168,6 +169,7 @@ try {
         import('/src/village/parcel-contract.js'),
         import('/src/village/yard-layout.js'),
         import('/src/generators/village/trees.js'),
+        import('/app/src/lib/scene-snapshot.js'),
       ]);
       const probeLifecycle = (handle) => {
         const owned = new Set();
@@ -446,12 +448,145 @@ try {
           asyncLandmarkLenses,
         });
       }
-      return { cases, workerStats, abortContract };
+
+      // #108: one deliberately tiny scene proves that the canonical URL
+      // option envelope feeds the same sync, real-worker, and ?worker=0
+      // generation paths. Keep this outside the four historical scene goldens:
+      // it is a transport/determinism acceptance case, not a fifth art golden.
+      const advancedInput = {
+        state: {
+          seed: 108,
+          preset: 'korea',
+          time: 'day',
+          sunsetLook: 'gold',
+          season: 'summer',
+          weather: 'clear',
+          renderStyle: 'pbr',
+          expansion: 1,
+        },
+        overrides: {
+          preset: true,
+          time: true,
+          sunsetLook: true,
+          season: true,
+          weather: true,
+        },
+        village: {
+          seed: 20260724,
+          scale: 'solo',
+          character: 'yeoyeom',
+          includePalace: false,
+          includeTemple: false,
+          siteR: 30,
+          undAmpK: 0,
+          ridgeHK: 0.5,
+          streamMeanderK: 2.5,
+          stream: false,
+          river: true,
+          paddyDensityK: 0,
+          treeDensityK: 0,
+          cityWall: false,
+          sijeon: false,
+          char01: 0.2,
+          diversityK: 0,
+          houses: 1,
+          wallWeights: {
+            tile: 1.5,
+            stone: 1.25,
+            mud: 0.75,
+            brush: 0.5,
+            hedge: 1,
+            open: 0,
+          },
+        },
+      };
+      const advancedPayload = encodeSceneSnapshot(advancedInput);
+      const advancedDecoded = decodeSceneSnapshot(advancedPayload);
+      const advancedRoundtrip = advancedDecoded && encodeSceneSnapshot({
+        state: {
+          seed: advancedDecoded.seed,
+          preset: advancedDecoded.preset,
+          time: advancedDecoded.time,
+          sunsetLook: advancedDecoded.sunsetLook,
+          season: advancedDecoded.season,
+          weather: advancedDecoded.weather,
+          renderStyle: advancedDecoded.renderStyle,
+          expansion: advancedDecoded.expansion,
+        },
+        overrides: advancedDecoded.overrides,
+        village: advancedDecoded.village,
+        flow: advancedDecoded.flow,
+        residentialEdits: advancedDecoded.residentialEdits,
+        focusedParcelId: advancedDecoded.focusedParcelId,
+        view: advancedDecoded.view,
+      });
+      const decodedOptions = advancedDecoded?.village;
+      const codecPass = !!advancedPayload
+        && advancedRoundtrip === advancedPayload
+        && decodedOptions?.siteR === 30
+        && decodedOptions?.houses === 1
+        && decodedOptions?.stream === false
+        && decodedOptions?.river === true
+        && decodedOptions?.wallWeights?.tile === 1.5
+        && decodedOptions?.wallWeights?.stone === 1.25
+        && decodedOptions?.wallWeights?.mud === 0.75
+        && decodedOptions?.wallWeights?.brush === 0.5
+        && decodedOptions?.wallWeights?.hedge === 1
+        && decodedOptions?.wallWeights?.open === 0;
+
+      let advancedCase = {
+        codecPass,
+        payload: advancedPayload,
+        roundtrip: advancedRoundtrip,
+        equal: false,
+        planOptionsPass: false,
+        steps: [],
+      };
+      if (decodedOptions) {
+        const sync = createVillage(decodedOptions);
+        const steps = [];
+        const asyncHandle = await createVillageAsync(decodedOptions, {
+          budgetMs: 8,
+          nextFrame: (callback) => requestAnimationFrame(callback),
+          onStep: (label) => steps.push(label),
+        });
+        const syncHash = hashThreeGroup(sync.group);
+        const asyncHash = hashThreeGroup(asyncHandle.group);
+        const syncProxyHash = hashVillagePickProxies(sync);
+        const asyncProxyHash = hashVillagePickProxies(asyncHandle);
+        const tuning = sync.plan.opts.tuning;
+        const planOptionsPass = sync.plan.opts.siteR === 30
+          && sync.plan.opts.target === 1
+          && sync.plan.site.stream === null
+          && tuning.stream === false
+          && tuning.river === true
+          && tuning.treeDensityK === 0
+          && tuning.paddyDensityK === 0
+          && tuning.wallWeights?.tile === 1.5
+          && tuning.wallWeights?.open === 0;
+        advancedCase = {
+          codecPass,
+          payload: advancedPayload,
+          roundtrip: advancedRoundtrip,
+          equal: syncHash.hash === asyncHash.hash
+            && syncProxyHash.hash === asyncProxyHash.hash,
+          planOptionsPass,
+          steps,
+          syncHash,
+          asyncHash,
+          syncProxyHash,
+          asyncProxyHash,
+        };
+        sync.dispose();
+        asyncHandle.dispose();
+      }
+      return { cases, advancedCase, workerStats, abortContract };
     });
     await page.close();
     return { ...result, errors };
   }
 
+  const advancedModeHashes = [];
   for (const mode of ['worker', 'fallback']) {
     const result = await compare(mode);
     console.log(`\n${mode === 'worker' ? 'async worker' : 'async fallback (?worker=0)'}`);
@@ -480,9 +615,36 @@ try {
       }
       if (!item.vegetation.pass) console.log(`          vegetation ${JSON.stringify(item.vegetation)}`);
     }
+    const advanced = result.advancedCase;
+    const advancedStepsEqual = JSON.stringify(advanced.steps) === JSON.stringify(expectedSteps);
+    const advancedProxyApiPass = advanced.syncProxyHash?.singleContract
+      && advanced.asyncProxyHash?.singleContract;
+    const advancedPass = advanced.codecPass
+      && advanced.equal
+      && advanced.planOptionsPass
+      && advancedStepsEqual
+      && advancedProxyApiPass;
+    failed ||= !advancedPass;
+    console.log(`snapshot  ${advancedPass ? 'PASS' : 'FAIL'}  ${advanced.syncHash?.hash || 'no-scene'}`
+      + `  proxy=${advanced.syncProxyHash?.hash || 'no-proxy'}`
+      + `  payload=${advanced.payload?.length || 0}b`);
+    if (!advanced.codecPass) {
+      console.log(`          codec payload=${JSON.stringify(advanced.payload)} roundtrip=${JSON.stringify(advanced.roundtrip)}`);
+    }
+    if (!advanced.equal) {
+      console.log(`          async ${advanced.asyncHash?.hash || 'no-scene'}  proxy=${advanced.asyncProxyHash?.hash || 'no-proxy'}`);
+    }
+    if (!advanced.planOptionsPass) console.log('          decoded advanced options did not reach the planner intact');
+    if (!advancedStepsEqual) console.log(`          steps ${JSON.stringify(advanced.steps)}`);
+    if (!advancedProxyApiPass) console.log('          snapshot getPickProxy descriptor parity/isolation contract failed');
+    advancedModeHashes.push({
+      mode,
+      scene: advanced.syncHash?.hash,
+      proxy: advanced.syncProxyHash?.hash,
+    });
     const workerPass = mode === 'worker'
       ? result.workerStats.started === 1
-        && result.workerStats.succeeded >= result.cases.length
+        && result.workerStats.succeeded >= result.cases.length + 1
         && result.workerStats.failed === 0
         && result.workerStats.terminated === 0
       : result.workerStats.started === 0 && result.workerStats.terminated === 0;
@@ -496,6 +658,11 @@ try {
     console.log(`abort lifecycle: ${JSON.stringify(result.abortContract)} ${abortPass ? 'PASS' : 'FAIL'}`);
     for (const error of result.errors) console.error(error);
   }
+  const snapshotCrossModePass = advancedModeHashes.length === 2
+    && advancedModeHashes[0].scene === advancedModeHashes[1].scene
+    && advancedModeHashes[0].proxy === advancedModeHashes[1].proxy;
+  failed ||= !snapshotCrossModePass;
+  console.log(`\nsnapshot sync/worker/fallback: ${snapshotCrossModePass ? 'PASS' : 'FAIL'} ${JSON.stringify(advancedModeHashes)}`);
 } finally {
   await browser?.close();
   await server.close();

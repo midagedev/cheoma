@@ -6,6 +6,7 @@
   import { readUrl, shareUrl, writeUrl } from './lib/url.js';
   import { shareSceneLink } from './lib/share-scene.js';
   import { buildRebuildPayload, villageDefaults } from './lib/edit-schema.js';
+  import { pickStandaloneParams } from './lib/standalone-param-spec.js';
   import { createLiveEditScheduler } from './lib/live-edit-scheduler.js';
   import { device, initDevice } from './lib/device.svelte.js';
   import Hero from './components/Hero.svelte';
@@ -157,6 +158,20 @@
   // rebuild가 끝날 때까지만 decoded state를 보존해 중간 villageMode 이벤트의
   // replaceState가 복원 payload를 지우지 않게 한다.
   let pendingResidentialRestore = null;
+  // A focused semantic view can only be applied after the normal focus runtime
+  // has installed that parcel's canonical target/lens. It is consumed by the
+  // matching villageSelect completion event, never sampled in the render loop.
+  let pendingSceneView = null;
+  // A received canonical scene remains canonical in the address bar. While its
+  // village/focus camera is restoring, all eager engine events are suppressed
+  // so they cannot downgrade it to the smaller legacy query contract.
+  let canonicalSceneAddress = false;
+  let canonicalRestorePending = false;
+  // Only committed standalone slider differences are portable. The baseline is
+  // the current seed/type's generated P; type and reroll establish a new epoch.
+  let standaloneParamDefaults = {};
+  let standaloneParamOverrides = $state({});
+  let paramCommitEpoch = $state(0);
   // focus 연속체(#92): villageEditing = 현재 focus 필지 { parcelId, spec }(focus-in START 에 설정,
   //   focus-out 완료(villageReturnDone)에 null). focusMorph(0=마을·1=집)는 카메라 focus 트윈 진행을
   //   engine 이 흘려준다 → 단일 컨텍스트 패널이 카메라와 한 클록으로 crossfade(원칙 2·3).
@@ -219,11 +234,19 @@
   let walkYaw = 0, walkPitch = 0, walkManual = false, walkRaf = null;
 
   function currentResidentialState() {
+    if (!sceneVillage) return { records: [], focusedParcelId: null };
     const runtimeRecords = engine?.village?.residentialOpeningEdits?.();
     return pendingResidentialRestore || {
       records: Array.isArray(runtimeRecords) ? runtimeRecords : [],
       focusedParcelId: engine?.village?.getState?.().selected || null,
     };
+  }
+
+  function completeCanonicalRestore() {
+    if (!canonicalRestorePending) return;
+    canonicalRestorePending = false;
+    scheduleFlowTick();
+    syncUrl();
   }
 
   function syncUrl() {
@@ -233,33 +256,67 @@
     // 마을 진입(?village=1·모드 토글로 들어간 비-home 세션)만 village 계약을 URL 에 반영한다.
     const residentialState = currentResidentialState();
     const hasResidentialEdits = residentialState.records.length > 0;
-    writeUrl(ui, {
+    if (canonicalRestorePending) return;
+    const sceneState = engine?.getState?.() || ui;
+    const villageState = engine?.village?.getState?.();
+    let sceneView = null;
+    if (canonicalSceneAddress) {
+      sceneView = engine?.captureView?.();
+      // A transitioning camera has no canonical semantic view. Leave the last
+      // settled URL untouched until the engine emits its settled-view boundary.
+      if (!sceneView) return;
+    }
+    writeUrl(sceneState, {
       overrides,
       // A default landing remains terse until the first committed residential
       // edit. From then on it becomes an explicit village URL so a reload can
       // reproduce both the village seed/options and the edited houses.
-      village: (sceneVillage && (!villageHome || hasResidentialEdits))
-        ? { seed: villageSeed, ...villageOpts } : null,
+      village: canonicalSceneAddress && sceneVillage
+        ? { seed: villageState.seed, ...villageState.opts }
+        : (sceneVillage && (!villageHome || hasResidentialEdits))
+          ? { seed: villageSeed, ...villageOpts } : null,
       flow: flowing,
       residentialEdits: residentialState.records,
       focusedParcelId: residentialState.focusedParcelId,
+      view: sceneView,
+      standaloneParams: sceneVillage ? {} : standaloneParamOverrides,
+      canonical: canonicalSceneAddress,
     });
   }
 
-  function restoreResidentialEdits(state) {
-    if (!state?.records?.length || !sceneVillage) return;
+  function restoreVillageSnapshot(state) {
+    if (!state || !sceneVillage) return;
     // Re-enter through the public rebuild boundary so kind changes, clamps,
     // persistent overlay ownership, flora clearance, and future schema changes
     // follow the same path as a panel commit.
-    for (const record of state.records) {
-      engine.village.rebuild(record.parcelId, {
+    const records = state.records || [];
+    let rebuilt = false;
+    for (let index = 0; index < records.length; index++) {
+      const record = records[index];
+      rebuilt = !!engine.village.rebuild(record.parcelId, {
         kind: record.kind,
         building: { ...record.params },
-      });
+      }, { refreshFlora: false }) || rebuilt;
     }
-    if (state.focusedParcelId) engine.village.focus(state.focusedParcelId);
+    if (rebuilt) engine.village.refreshCommittedFlora();
     pendingResidentialRestore = null;
-    syncUrl();
+    if (state.focusedParcelId) {
+      pendingSceneView = canonicalRestorePending
+        ? { parcelId: state.focusedParcelId, view: state.view }
+        : state.view ? { parcelId: state.focusedParcelId, view: state.view } : null;
+      engine.village.focus(state.focusedParcelId);
+      // Stable IDs can disappear after a future planner migration. Failing soft
+      // to the aerial scene is safer than applying a focus-relative view around
+      // the wrong target.
+      if (engine.village.getState().selected !== state.focusedParcelId) {
+        pendingSceneView = canonicalRestorePending ? { parcelId: null, view: null } : null;
+      }
+    } else if (state.view) {
+      pendingSceneView = { parcelId: null, view: state.view };
+    } else if (canonicalRestorePending) {
+      pendingSceneView = { parcelId: null, view: null };
+    }
+    if (!canonicalRestorePending) syncUrl();
   }
   function pullState() {
     const s = engine.getState();
@@ -330,10 +387,15 @@
       if (appLifecycleHook) window.__appLifecycle = appLifecycleHook;
     }
     const url = readUrl();
-    if (url.village && url.residentialEdits.length) {
+    canonicalSceneAddress = url.sceneSnapshot;
+    canonicalRestorePending = url.sceneSnapshot;
+    if (url.village && (
+      url.sceneSnapshot || url.residentialEdits.length || url.focusedParcelId || url.sceneView
+    )) {
       pendingResidentialRestore = {
         records: url.residentialEdits,
         focusedParcelId: url.focusedParcelId,
+        view: url.sceneView,
       };
     }
     // 성능 프로파일: 터치/좁은 뷰포트 → perf(경량), 폰급 → compact(pixelRatio·bloom 하향).
@@ -342,6 +404,9 @@
     engine.on('state', () => pullState());
     engine.on('seed', (seed) => { ui.seed = seed; syncUrl(); });
     engine.on('select', (v) => { ui.selected = v; if (v) { chromaFaded = false; } });
+    engine.on('viewSettled', () => {
+      if (canonicalSceneAddress && !canonicalRestorePending) syncUrl();
+    });
 
     // 마을 모드 이벤트 — 씬 스왑(단일건물↔마을). villageHome 세션은 여기서 벗어나지 않는다(부감/클로즈업만).
     engine.on('villageMode', (on) => {
@@ -351,6 +416,7 @@
         liveEdit.cancel();
         villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0;
         villageZooming = false; waving = false; heroLanding = false; pendingCommit = null;
+        pendingSceneView = null;
         clearFocusWatchdog(); focusMorphLatched = false;
       }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
       else pullVillage();
@@ -374,6 +440,19 @@
       seedEdit(p);
       chromaFaded = false;
       clearFocusWatchdog(); focusMorphLatched = false;   // #155 근접 안착 → 감시 해제
+      if (pendingSceneView?.parcelId === p.parcelId) {
+        if (pendingSceneView.view) engine.village.restoreView(pendingSceneView.view);
+        pendingSceneView = null;
+        completeCanonicalRestore();
+      }
+      syncUrl();
+    });
+    engine.on('villageExplore', () => {
+      if (!sceneVillage) return;
+      if (pendingSceneView?.parcelId != null) return;
+      if (pendingSceneView?.view) engine.village.restoreView(pendingSceneView.view);
+      if (pendingSceneView) pendingSceneView = null;
+      completeCanonicalRestore();
       syncUrl();
     });
     // focus-out START — 패널은 집 컨텍스트를 유지한 채 모프가 역행(villageFocusMorph 가 1→0).
@@ -459,16 +538,31 @@
     if (url.flowsec != null) flowIntervalMs = Math.round(url.flowsec * 1000);
 
     engine.start(cfg, url.seed);
+    standaloneParamDefaults = pickStandaloneParams(engine.getParams());
+    standaloneParamOverrides = Object.fromEntries(
+      Object.entries(url.standaloneParams || {})
+        .filter(([key, value]) => Math.abs(value - standaloneParamDefaults[key]) > 1e-8),
+    );
+    if (Object.keys(standaloneParamOverrides).length
+        && !engine.setParams(standaloneParamOverrides, { immediate: true, animate: false })) {
+      standaloneParamOverrides = {};
+    }
     engine.setRenderStyle(url.renderStyle, { immediate: true });
     pullState();
     if (url.exp && url.exp > 1) engine.setExpansion(url.exp);
 
     // 마을 옵션 초기화(URL)
-    if (url.vscale) villageOpts.scale = url.vscale;
-    if (url.vchar) villageOpts.character = url.vchar;
-    villageOpts.includePalace = (url.vpalace && (villageOpts.scale === 'capital' || villageOpts.scale === 'hanyang')) || villageOpts.scale === 'hanyang';
-    villageOpts.includeTemple = url.vtemple;
-    villageSeed = url.vseed != null ? url.vseed : newSeed();
+    if (url.villageOptions) {
+      const { seed: snapshotVillageSeed, ...snapshotVillageOptions } = url.villageOptions;
+      Object.assign(villageOpts, snapshotVillageOptions);
+      villageSeed = snapshotVillageSeed;
+    } else {
+      if (url.vscale) villageOpts.scale = url.vscale;
+      if (url.vchar) villageOpts.character = url.vchar;
+      villageOpts.includePalace = (url.vpalace && (villageOpts.scale === 'capital' || villageOpts.scale === 'hanyang')) || villageOpts.scale === 'hanyang';
+      villageOpts.includeTemple = url.vtemple;
+      villageSeed = url.vseed != null ? url.vseed : newSeed();
+    }
     // A valid incoming edit payload must survive the synchronous villageMode
     // event emitted by enter(). pendingResidentialRestore supplies it there.
     if (!pendingResidentialRestore) syncUrl();
@@ -485,7 +579,10 @@
     // ?village=1 진입 — 히어로 없이 곧장 마을 부감.
     if (url.village) {
       engine.village.enter({ ...villageOpts }, villageSeed);
-      restoreResidentialEdits(pendingResidentialRestore);
+      restoreVillageSnapshot(pendingResidentialRestore);
+    } else {
+      if (url.sceneView) engine.restoreView(url.sceneView);
+      completeCanonicalRestore();
     }
 
     // 마을 사전 생성(#46): 히어로 타이틀이 화면을 덮는 동안(3D 조립 시작 전) 기본 시드 마을을
@@ -586,8 +683,12 @@
     rerollCooldown = true;
     setLifecycleTimeout(() => (rerollCooldown = false), 500);
     overrides = { preset: false, time: false, season: false, weather: false };
+    standaloneParamOverrides = {};
+    standaloneParamDefaults = {};
+    paramCommitEpoch += 1;
     engine.reroll();
     pullState();
+    standaloneParamDefaults = pickStandaloneParams(engine.getParams());
     chromaFaded = false;
     scheduleFlowTick();   // 수동 개입 → 타이머 리셋(흐름 유지)
   }
@@ -621,14 +722,22 @@
   async function shareScene() {
     const epoch = lifecycleEpoch;
     const residentialState = currentResidentialState();
+    const villageState = engine?.village?.getState?.();
+    const sceneView = engine.captureView();
+    if (!sceneView) {
+      showToast(t('share_failed'));
+      return;
+    }
     // The default landing intentionally keeps the address bar terse. A shared
     // scene is different: always serialize the active village so its seed,
     // scale, landmarks, flow state, and committed opening edits reproduce.
-    const url = shareUrl(ui, overrides, {
-      village: sceneVillage ? { seed: villageSeed, ...villageOpts } : null,
+    const url = shareUrl(engine.getState(), overrides, {
+      village: sceneVillage ? { seed: villageState.seed, ...villageState.opts } : null,
       flow: flowing,
       residentialEdits: residentialState.records,
       focusedParcelId: residentialState.focusedParcelId,
+      view: sceneView,
+      standaloneParams: sceneVillage ? {} : standaloneParamOverrides,
     });
     const nav = typeof navigator === 'undefined' ? null : navigator;
     const outcome = await shareSceneLink({
@@ -769,7 +878,10 @@
     const dt = flowLast ? (now - flowLast) / 1000 : 0;
     flowLast = now;
     const hidden = typeof document !== 'undefined' && document.hidden;
-    if (!flowing || shot || heroVisible || hidden) { flowAcc = 0; return; }
+    if (!flowing || shot || heroVisible || canonicalRestorePending || hidden) {
+      flowAcc = 0;
+      return;
+    }
     // 스톨 프레임(컴파일 히치·탭 복귀·저사양 <1fps)은 0 이 아니라 상한 FLOW_STALL_S 만큼만 기여 —
     // 탭 30초 비움이 여러 스텝을 몰아 당기진 않되, 지속 저fps 환경에서도 흐름은 멈추지 않는다.
     const step = Math.min(dt, FLOW_STALL_S, flowIntervalMs / 1000);
@@ -804,10 +916,26 @@
     syncUrl();
     scheduleFlowTick();               // 켜짐/꺼짐 모두 흐름 클록 리셋(재개 시 온전한 interval)
   }
-  function setType(v) { engine.setType(v); overrides.preset = true; pullState(); syncUrl(); }
+  function setType(v) {
+    standaloneParamOverrides = {};
+    standaloneParamDefaults = {};
+    paramCommitEpoch += 1;
+    engine.setType(v);
+    overrides.preset = true;
+    pullState();
+    standaloneParamDefaults = pickStandaloneParams(engine.getParams());
+    syncUrl();
+  }
   function setExpansion(n) { engine.setExpansion(n); pullState(); syncUrl(); }
   function mergeNeighbor() { engine.merge(); pullState(); syncUrl(); }
-  function setParam(k, v) { engine.setParam(k, v); }
+  function setParam(k, v, epoch = paramCommitEpoch) {
+    if (epoch !== paramCommitEpoch || !engine.setParam(k, v)) return;
+    const next = { ...standaloneParamOverrides };
+    if (Math.abs(v - standaloneParamDefaults[k]) <= 1e-8) delete next[k];
+    else next[k] = v;
+    standaloneParamOverrides = next;
+    syncUrl();
+  }
   function closePanel() { engine.clearSelection(); }
 
   // ---------- 마을 모드 액션 ----------
@@ -866,6 +994,10 @@
   function setScale(s) {
     if (villageZooming) return;
     villageOpts.scale = s;
+    // A restored continuous-radius snapshot legitimately takes precedence over
+    // its display tier. An explicit tier click is a new user decision, so clear
+    // that hidden override or the visible scale control would appear inert.
+    villageOpts.siteR = null;
     // 궁은 도성 규모(capital·hanyang)만. hanyang 은 궁 기본 ON(도성=궁성), 그 외 도성 미만은 OFF.
     if (s === 'hanyang') villageOpts.includePalace = true;
     else if (s !== 'capital') villageOpts.includePalace = false;
@@ -1064,6 +1196,7 @@
     maxExpansion={ui.maxExpansion}
     canMerge={ui.canMerge}
     params={ui.params}
+    {paramCommitEpoch}
     onType={setType}
     onExpansion={setExpansion}
     onMerge={mergeNeighbor}

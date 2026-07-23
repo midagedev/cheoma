@@ -1088,6 +1088,12 @@ export function createVillageHandle(opts, seed, plan, group) {
       return g;
     },
 
+    // Canonical reloads replay committed parcels with flora refresh deferred.
+    // Rebuild the shared batch once after every accepted roof/yard bound exists.
+    refreshCommittedFlora() {
+      return refreshVillageFlora();
+    },
+
     // ── focus 오버레이 통합(#92) — 어느 필지든 풀디테일 오버레이로 승격 ──
     //   mode-integration §4: "focus 필지는 풀디테일 오버레이(buildParcel)". 종가·궁만이 아니라 정규
     //   필지도 focus-in 하면 개별 집으로 승격 → (1) 편집이 즉시 반영되고 (2) 조립 리플레이가 가능하며
@@ -1539,7 +1545,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   const nullAfterDispose = new Set([
     'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'architecturalFocusPoint',
     'getPickProxy', 'raycast',
-    'rebuildParcel', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
+    'rebuildParcel', 'refreshCommittedFlora', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
     'primaryDoorState', 'raycastPrimaryDoor', 'togglePrimaryDoor', 'seekPrimaryDoor',
     'primaryDoorWorldPoints', 'primaryDoorWorldFrame',
   ]);

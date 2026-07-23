@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import {
+  SCENE_SNAPSHOT_QUERY_KEY,
+  decodeSceneSnapshot,
+} from '../app/src/lib/scene-snapshot.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -224,11 +228,17 @@ try {
   await page.screenshot({ path: join(shotDir, 'ink-ui.png') });
   const inkPng = await captureScene(page, 'ink-aerial.png');
   const pbrStats = imageStats(pbrPng), inkStats = imageStats(inkPng), difference = meanDifference(pbrPng, inkPng);
+  const sharedInkUrl = new URL(inkState.shared);
+  const sharedInkSnapshot = decodeSceneSnapshot(
+    sharedInkUrl.searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
 
   pass(transitionSamples.every((value, i) => i === 0 || value + 1e-4 >= transitionSamples[i - 1]),
     'PBR→ink mix is monotonic', transitionSamples.map((v) => v.toFixed(2)).join('→'));
   pass(inkState.state.renderStyle === 'ink' && inkState.active === 'true'
-    && inkState.url.includes('mode=ink') && inkState.shared.includes('mode=ink'),
+    && inkState.url.includes('mode=ink')
+    && [...sharedInkUrl.searchParams.keys()].join() === SCENE_SNAPSHOT_QUERY_KEY
+    && sharedInkSnapshot?.renderStyle === 'ink',
   'keyboard toggle synchronizes engine, accessible UI, live URL, and share URL');
   pass(inkState.outputLast === 'OutputPass' && inkState.passes.at(-2) === 'InkPass',
     'ink remains inside the unified composer immediately before the one OutputPass', inkState.passes.join(' → '));

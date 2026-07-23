@@ -13,6 +13,10 @@
 // adv 섹션은 "고급" 접기로 숨긴다(과밀 제어). 라벨키는 i18n s_<key>/sec_<id>.
 
 import { residentialOpeningCapabilities } from '../../../src/api/residential-openings.js';
+import {
+  VILLAGE_NUMBER_OPTION_SPECS,
+  villageOptionDefaults,
+} from '../../../src/api/village-options.js';
 
 function openingSection(kind, spec) {
   const capabilities = residentialOpeningCapabilities(kind, spec?.params || {});
@@ -280,21 +284,28 @@ const TEMPLE_OPTION_KEYS = [
 //   tierGate/tierHint: 해당 tier 미만에서 비활성 + 비활성 사유 i18n 키.
 const VILLAGE_SECTIONS = [
   { id: 'terrain', titleKey: 'vsec_terrain', fields: [
-    { key: 'undAmpK', ctrl: 'range', min: 0, max: 2.2, step: 0.05, def: 1 },        // 기복(언듈레이션) 진폭
-    { key: 'ridgeHK', ctrl: 'range', min: 0.5, max: 1.6, step: 0.02, def: 1 },      // 배산 능선·봉우리 높이
-    { key: 'streamMeanderK', ctrl: 'range', min: 0, max: 2.5, step: 0.05, def: 1 }, // 개울 사행(굽이)
+    { key: 'undAmpK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.undAmpK,
+      def: VILLAGE_NUMBER_OPTION_SPECS.undAmpK.default },        // 기복(언듈레이션) 진폭
+    { key: 'ridgeHK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.ridgeHK,
+      def: VILLAGE_NUMBER_OPTION_SPECS.ridgeHK.default },        // 배산 능선·봉우리 높이
+    { key: 'streamMeanderK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.streamMeanderK,
+      def: VILLAGE_NUMBER_OPTION_SPECS.streamMeanderK.default }, // 개울 사행(굽이)
     { key: 'stream', ctrl: 'toggle', def: true },                                    // 개울 유무(off=마른 마을)
     { key: 'river', ctrl: 'toggle', def: false, tierGate: 'capital', tierHint: 'vil_river_hint' }, // 큰 물길
   ] },
   { id: 'composition', titleKey: 'vsec_composition', fields: [
-    { key: 'paddyDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },    // 논 비율
-    { key: 'treeDensityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },     // 나무 밀도
+    { key: 'paddyDensityK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.paddyDensityK,
+      def: VILLAGE_NUMBER_OPTION_SPECS.paddyDensityK.default }, // 논 비율
+    { key: 'treeDensityK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.treeDensityK,
+      def: VILLAGE_NUMBER_OPTION_SPECS.treeDensityK.default },  // 나무 밀도
     { key: 'cityWall', ctrl: 'toggle', tri: true, def: 'auto', tierGate: 'hamlet', tierHint: 'vil_citywall_hint' }, // 성곽(auto=hanyang, 초락부터 강제 가능)
     { key: 'sijeon', ctrl: 'toggle', tri: true, def: 'auto', tierGate: 'capital', tierHint: 'vil_sijeon_hint' },    // 시전(대로 필요→capital+)
   ] },
   { id: 'vocab', titleKey: 'vsec_vocab', fields: [
-    { key: 'char01', ctrl: 'range', min: 0, max: 1, step: 0.02, def: 0.5, auto: true }, // 초가↔기와 비율(미조정=규모파생)
-    { key: 'diversityK', ctrl: 'range', min: 0, max: 2, step: 0.05, def: 1 },       // 집 변주 강도
+    { key: 'char01', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.char01,
+      def: 0.5, auto: true }, // 초가↔기와 비율(미조정=규모파생)
+    { key: 'diversityK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.diversityK,
+      def: VILLAGE_NUMBER_OPTION_SPECS.diversityK.default }, // 집 변주 강도
   ] },
 ];
 
@@ -304,11 +315,7 @@ export function villageSchema() { return VILLAGE_SECTIONS; }
 // App villageOpts 초기값(#91). 전부 코어 no-op 기본 → 무변경 시 현행 픽셀 불변(결정론). char01 은
 //   null(=규모 파생 auto), tri-state 는 'auto'. setOpts 에 이 값들이 그대로 실려도 코어가 기본으로 해석.
 export function villageDefaults() {
-  return {
-    undAmpK: 1, ridgeHK: 1, streamMeanderK: 1, stream: true, river: false,
-    paddyDensityK: 1, treeDensityK: 1, cityWall: 'auto', sijeon: 'auto',
-    char01: null, diversityK: 1,
-  };
+  return villageOptionDefaults();
 }
 
 // spec → { family, tabs, sections }. family 로 라이브 전략(정규=드래그 라이브, 특수=놓을 때 정착)이 갈린다.

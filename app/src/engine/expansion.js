@@ -6,10 +6,10 @@
 
 import * as THREE from 'three';
 import { buildBuilding, computeLayout, disposeBuilding } from '../../../src/api/building.js';
+import { standaloneMaxExpansion } from '../lib/standalone-param-spec.js';
 
 // 확장 가능한(격자) 프리셋의 최대 날개 수. giwa 는 이미 ㄱ자 단일 동이라 확장 대상 아님.
-const WING_MAX = { korea: 2, temple: 2, choga: 2, giwa: 0 };
-export function wingCount(preset) { return WING_MAX[preset] ?? 0; }
+export function wingCount(preset) { return standaloneMaxExpansion(preset) - 1; }
 
 // P.style(palace/temple/choga/giwa) → WING_MAX 키(korea/temple/choga/giwa).
 const STYLE_KEY = { palace: 'korea', temple: 'temple', choga: 'choga', giwa: 'giwa' };

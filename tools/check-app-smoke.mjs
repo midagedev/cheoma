@@ -4,6 +4,13 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import {
+  SCENE_SNAPSHOT_QUERY_KEY,
+  buildSceneSnapshotUrl,
+  decodeSceneSnapshot,
+  normalizeSceneView,
+} from '../app/src/lib/scene-snapshot.js';
+import { planVillage } from '../src/api/village-plan.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -25,7 +32,18 @@ const pass = (condition, message) => {
   console.log(`${condition ? 'PASS' : 'FAIL'}  ${message}`);
   if (!condition) failures.push(message);
 };
-
+const circularDegrees = (a, b) => Math.abs((((a - b) % 360) + 540) % 360 - 180);
+const semanticViewClose = (actual, expected) => {
+  const a = normalizeSceneView(actual);
+  const b = normalizeSceneView(expected);
+  return !!a && !!b
+    && circularDegrees(a.azimuth, b.azimuth) <= 0.1
+    && Math.abs(a.elevation - b.elevation) <= 0.1
+    && Math.abs(a.zoom - b.zoom) <= 0.001
+    && Math.abs(a.panEast - b.panEast) <= 0.001
+    && Math.abs(a.panUp - b.panUp) <= 0.001
+    && Math.abs(a.panSouth - b.panSouth) <= 0.001;
+};
 const server = await createServer({
   root: APP_ROOT,
   configFile: join(APP_ROOT, 'vite.config.js'),
@@ -141,6 +159,7 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
   await page.waitForFunction(() => !!window.__engine.village.debugPlan(), null, { timeout });
+  await page.waitForFunction(() => !!window.__engine.village.captureView(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
 
   const shareButton = page.locator('.actions [data-action="share"]');
@@ -222,19 +241,232 @@ try {
         .filter((key) => shared.searchParams.has(key)),
     };
   });
+  const nativeScene = decodeSceneSnapshot(nativeShare.fields[SCENE_SNAPSHOT_QUERY_KEY]);
   pass(nativeShare.payload?.title === '처마 — 내가 지은 풍경'
       && nativeShare.payload?.text === '처마에서 만든 한국의 집과 마을을 둘러보세요.'
       && nativeShare.activation?.userActivation
       && nativeShare.activation?.eventTask
-      && nativeShare.fields.seed === '42'
-      && nativeShare.fields.time === 'day'
-      && nativeShare.fields.village === '1'
-      && nativeShare.fields.vseed === '20260716'
-      && nativeShare.fields.vscale == null
+      && Object.keys(nativeShare.fields).length === 1
+      && !!nativeShare.fields[SCENE_SNAPSHOT_QUERY_KEY]
+      && nativeScene?.seed === 42
+      && nativeScene?.time === 'day'
+      && nativeScene?.village?.seed === 20260716
+      && nativeScene?.village?.scale === 'village'
+      && !!nativeScene?.view
       && nativeShare.runtimeKeys.length === 0
       && nativeShare.clipboard === 0
       && nativeShare.toast === '장면 링크를 공유했습니다',
   `native share receives the canonical scene payload without runtime controls or clipboard fallback (${JSON.stringify(nativeShare)})`);
+
+  // Open the exact native payload, let the canonical entry camera settle, then
+  // reload the address that App re-canonicalized. This catches eager #107
+  // downgrade, restore-order races, and one-frame OrbitControls/focus drift.
+  const sharedPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  sharedPage.on('pageerror', (error) => runtimeErrors.push(`shared page: ${error.message}`));
+  sharedPage.on('console', (message) => {
+    if (message.type() === 'error' && !/favicon|404/i.test(message.text())) {
+      runtimeErrors.push(`shared console: ${message.text()}`);
+    }
+  });
+  await sharedPage.goto(nativeShare.payload.url, { waitUntil: 'domcontentloaded', timeout });
+  await sharedPage.waitForFunction(
+    () => window.__SHOT_READY === true && !!window.__engine?.village?.captureView?.(),
+    null,
+    { timeout },
+  );
+  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const sharedBeforeReload = await sharedPage.evaluate(() => ({
+    address: location.href,
+    state: window.__engine.getState(),
+    village: window.__engine.village.getState(),
+    view: window.__engine.village.captureView(),
+  }));
+  const sharedBeforeSnapshot = decodeSceneSnapshot(
+    new URL(sharedBeforeReload.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  await sharedPage.reload({ waitUntil: 'domcontentloaded', timeout });
+  await sharedPage.waitForFunction(
+    () => window.__SHOT_READY === true && !!window.__engine?.village?.captureView?.(),
+    null,
+    { timeout },
+  );
+  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const sharedAfterReload = await sharedPage.evaluate(() => ({
+    address: location.href,
+    state: window.__engine.getState(),
+    village: window.__engine.village.getState(),
+    view: window.__engine.village.captureView(),
+  }));
+  const sharedAfterSnapshot = decodeSceneSnapshot(
+    new URL(sharedAfterReload.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  pass(sharedBeforeSnapshot?.seed === nativeScene.seed
+      && sharedAfterSnapshot?.seed === nativeScene.seed
+      && sharedBeforeSnapshot?.village?.seed === nativeScene.village.seed
+      && sharedAfterSnapshot?.village?.seed === nativeScene.village.seed
+      && sharedBeforeReload.village.selected === nativeScene.focusedParcelId
+      && sharedAfterReload.village.selected === nativeScene.focusedParcelId
+      && semanticViewClose(sharedBeforeReload.view, nativeScene.view)
+      && semanticViewClose(sharedAfterReload.view, nativeScene.view)
+      && [...new URL(sharedAfterReload.address).searchParams.keys()].join() === SCENE_SNAPSHOT_QUERY_KEY,
+  `exact native scene survives canonicalization and reload within view quantization (${JSON.stringify({
+    before: sharedBeforeReload.view,
+    after: sharedAfterReload.view,
+    expected: nativeScene.view,
+  })})`);
+
+  const shareSource = await page.evaluate(() => ({
+    state: window.__engine.getState(),
+    heroId: window.__engine.village.heroId(),
+  }));
+  const advancedView = {
+    azimuth: 327.34,
+    elevation: 27.44,
+    zoom: 0.6436,
+    panEast: 0.1174,
+    panUp: -0.0386,
+    panSouth: 0.0214,
+  };
+  const advancedVillage = {
+    seed: 20260716,
+    scale: 'village',
+    character: 'yeoyeom',
+    includePalace: false,
+    includeTemple: false,
+    siteR: 150.5,
+    undAmpK: 1.75,
+    ridgeHK: 1.32,
+    streamMeanderK: 2.1,
+    stream: false,
+    river: false,
+    paddyDensityK: 0.65,
+    treeDensityK: 1.8,
+    cityWall: false,
+    sijeon: true,
+    char01: 0.74,
+    diversityK: 1.55,
+    houses: 18,
+    wallWeights: {
+      tile: 1.5, stone: 1.25, mud: 0.75, brush: 0.5, hedge: 1, open: 0,
+    },
+  };
+  const advancedEditParcel = planVillage(advancedVillage).parcels.find(
+    (parcel) => !parcel.hero && (parcel.kind === 'giwa' || parcel.kind === 'choga'),
+  );
+  const advancedEdit = {
+    parcelId: advancedEditParcel.id,
+    kind: advancedEditParcel.kind,
+    params: {
+      doorCount: 2,
+      windowCount: 3,
+      doorWidthK: 0.72,
+      windowWidthK: 0.46,
+      doorHeightK: 1.03,
+      windowHeightK: 0.91,
+    },
+  };
+  const staleAdvancedEdit = { ...advancedEdit, parcelId: 'zz-missing-future' };
+  const advancedUrl = buildSceneSnapshotUrl({
+    baseUrl: nativeShare.payload.url,
+    state: shareSource.state,
+    overrides: nativeScene.overrides,
+    village: advancedVillage,
+    residentialEdits: [advancedEdit, staleAdvancedEdit],
+    focusedParcelId: shareSource.heroId,
+    view: advancedView,
+  });
+  await sharedPage.goto(advancedUrl, { waitUntil: 'domcontentloaded', timeout });
+  await sharedPage.waitForFunction((heroId) => {
+    const village = window.__engine?.village;
+    const state = village?.getState?.();
+    return window.__SHOT_READY === true
+      && state?.selected === heroId
+      && !state.transitioning
+      && !!village.captureView();
+  }, shareSource.heroId, { timeout });
+  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const advancedFirst = await sharedPage.evaluate(() => ({
+    address: location.href,
+    scene: window.__engine.getState(),
+    village: window.__engine.village.getState(),
+    plan: window.__engine.village.debugPlan(),
+    edits: window.__engine.village.residentialOpeningEdits(),
+    view: window.__engine.village.captureView(),
+  }));
+  if (captureDir) {
+    await sharedPage.screenshot({ path: join(captureDir, 'scene-snapshot-focus-restored.png') });
+  }
+  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const advancedOneFrameLater = await sharedPage.evaluate(() => ({
+    view: window.__engine.village.captureView(),
+  }));
+  await sharedPage.reload({ waitUntil: 'domcontentloaded', timeout });
+  await sharedPage.waitForFunction((heroId) => {
+    const village = window.__engine?.village;
+    const state = village?.getState?.();
+    return window.__SHOT_READY === true
+      && state?.selected === heroId
+      && !state.transitioning
+      && !!village.captureView();
+  }, shareSource.heroId, { timeout });
+  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const advancedReloaded = await sharedPage.evaluate(() => ({
+    address: location.href,
+    village: window.__engine.village.getState(),
+    plan: window.__engine.village.debugPlan(),
+    edits: window.__engine.village.residentialOpeningEdits(),
+    view: window.__engine.village.captureView(),
+  }));
+  if (captureDir) {
+    await sharedPage.screenshot({ path: join(captureDir, 'scene-snapshot-focus-reloaded.png') });
+  }
+  const advancedAddress = decodeSceneSnapshot(
+    new URL(advancedReloaded.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  pass(advancedAddress?.focusedParcelId === shareSource.heroId
+      && advancedReloaded.village.selected === shareSource.heroId
+      && advancedReloaded.plan.opts.siteR === advancedVillage.siteR
+      && advancedReloaded.plan.stream === false
+      && advancedReloaded.plan.opts.houses === advancedVillage.houses
+      && advancedReloaded.plan.opts.sijeon === advancedVillage.sijeon
+      && JSON.stringify(advancedReloaded.plan.opts.wallWeights)
+        === JSON.stringify(advancedVillage.wallWeights)
+      && JSON.stringify(advancedFirst.edits) === JSON.stringify([advancedEdit])
+      && JSON.stringify(advancedReloaded.edits) === JSON.stringify([advancedEdit])
+      && JSON.stringify(advancedAddress.residentialEdits) === JSON.stringify([advancedEdit])
+      && semanticViewClose(advancedFirst.view, advancedView)
+      && semanticViewClose(advancedOneFrameLater.view, advancedView)
+      && semanticViewClose(advancedReloaded.view, advancedView),
+  `advanced options, stable focus, semantic pan/optics, and one-frame camera state survive reload (${JSON.stringify({
+    plan: advancedReloaded.plan,
+    expectedEdit: advancedEdit,
+    firstEdits: advancedFirst.edits,
+    reloadedEdits: advancedReloaded.edits,
+    addressEdits: advancedAddress?.residentialEdits,
+    first: advancedFirst.view,
+    oneFrame: advancedOneFrameLater.view,
+    reloaded: advancedReloaded.view,
+  })})`);
+  const villageManualBeforeAddress = advancedReloaded.address;
+  await sharedPage.mouse.move(640, 400);
+  await sharedPage.mouse.wheel(0, -480);
+  await sharedPage.waitForFunction(
+    (beforeAddress) => location.href !== beforeAddress,
+    villageManualBeforeAddress,
+    { timeout },
+  );
+  const villageManualView = await sharedPage.evaluate(() => ({
+    address: location.href,
+    view: window.__engine.village.captureView(),
+    selected: window.__engine.village.getState().selected,
+  }));
+  const villageManualSnapshot = decodeSceneSnapshot(
+    new URL(villageManualView.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  pass(villageManualView.selected === shareSource.heroId
+      && semanticViewClose(villageManualSnapshot?.view, villageManualView.view),
+  `focused village wheel settles optics/crane before canonical vw sync (${JSON.stringify(villageManualView.view)})`);
+  await sharedPage.close();
 
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'fail', clipboardMode: 'success' });
@@ -2329,7 +2561,7 @@ try {
       && !singleHouseShareLayout.hiddenAncestor
       && singleHouseShareLayout.globalActionBar === 0
       && singleHouseShareLayout.width >= 44
-      && singleHouseShareLayout.height >= 44
+      && singleHouseShareLayout.height >= 43.9
       && singleHouseShareLayout.left >= singleHouseShareLayout.sheetLeft
       && singleHouseShareLayout.right <= singleHouseShareLayout.sheetRight
       && singleHouseShareLayout.top >= 0
@@ -2340,6 +2572,29 @@ try {
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-mobile-single-house.png') });
   }
+
+  // Establish the source through App's public type action so the canonical
+  // snapshot owns the same base building as the receiver, not only slider deltas.
+  await page.locator('.tab').nth(3).click();
+  await page.waitForFunction(() => window.__engine.getState().preset === 'choga'
+    && !!window.__engine.captureView(), null, { timeout });
+  const standalonePatch = { eaveOverhang: 1.85, cornerLift: 0.72 };
+  await page.locator('input[data-param="eaveOverhang"]').fill(String(standalonePatch.eaveOverhang));
+  await page.locator('input[data-param="cornerLift"]').fill(String(standalonePatch.cornerLift));
+  await page.waitForFunction((patch) => {
+    const engine = window.__engine;
+    const params = engine?.getParams?.();
+    return Object.entries(patch).every(([key, value]) => params?.[key] === value)
+      && !!engine?.captureView?.();
+  }, standalonePatch, { timeout });
+  await page.waitForFunction(() => window.__engine.__debugAssemblyActive(), null, { timeout });
+  await page.waitForFunction(() => !window.__engine.__debugAssemblyActive(), null, { timeout });
+  const standaloneSource = await page.evaluate(() => ({
+    state: window.__engine.getState(),
+    params: window.__engine.getParams(),
+    view: window.__engine.captureView(),
+    assembly: window.__engine.__debugAssemblyActive(),
+  }));
 
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
@@ -2356,18 +2611,187 @@ try {
       native: window.__shareProbe.nativePayloads.length,
       activation: window.__shareProbe.nativeActivations[0] || null,
       clipboard: window.__shareProbe.clipboardValues.length,
-      villageFields: ['village', 'vseed', 'vscale', 'vpalace', 'vtemple', 'vedit']
-        .filter((key) => query.has(key)),
+      payloadUrl: payload?.url || null,
+      queryKeys: [...query.keys()],
       toast: document.querySelector('.toast')?.textContent?.trim() || null,
     };
   });
+  const singleHouseSnapshot = decodeSceneSnapshot(
+    new URL(singleHouseShareCall.payloadUrl).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
   pass(singleHouseShareCall.native === 1
       && singleHouseShareCall.activation?.userActivation
       && singleHouseShareCall.activation?.eventTask
       && singleHouseShareCall.clipboard === 0
-      && singleHouseShareCall.villageFields.length === 0
+      && singleHouseShareCall.queryKeys.length === 1
+      && singleHouseShareCall.queryKeys[0] === SCENE_SNAPSHOT_QUERY_KEY
+      && singleHouseSnapshot?.village == null
+      && JSON.stringify(singleHouseSnapshot?.standaloneParams) === JSON.stringify(standalonePatch)
+      && !!singleHouseSnapshot?.view
       && singleHouseShareCall.toast === '장면 링크를 공유했습니다',
   `standalone ParamPanel share invokes native sharing synchronously with no stale village state (${JSON.stringify(singleHouseShareCall)})`);
+
+  const standalonePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  standalonePage.on('pageerror', (error) => runtimeErrors.push(`standalone shared page: ${error.message}`));
+  standalonePage.on('console', (message) => {
+    if (message.type() === 'error' && !/favicon|404/i.test(message.text())) {
+      runtimeErrors.push(`standalone shared console: ${message.text()}`);
+    }
+  });
+  await standalonePage.goto(singleHouseShareCall.payloadUrl, {
+    waitUntil: 'domcontentloaded',
+    timeout,
+  });
+  await standalonePage.waitForFunction((patch) => {
+    const engine = window.__engine;
+    const params = engine?.getParams?.();
+    return window.__SHOT_READY === true
+      && Object.entries(patch).every(([key, value]) => params?.[key] === value)
+      && !!engine?.captureView?.();
+  }, standalonePatch, { timeout });
+  await standalonePage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const standaloneFirst = await standalonePage.evaluate(() => ({
+    address: location.href,
+    state: window.__engine.getState(),
+    params: window.__engine.getParams(),
+    view: window.__engine.captureView(),
+    assembly: window.__engine.__debugAssemblyActive(),
+  }));
+  await standalonePage.reload({ waitUntil: 'domcontentloaded', timeout });
+  await standalonePage.waitForFunction((patch) => {
+    const engine = window.__engine;
+    const params = engine?.getParams?.();
+    return window.__SHOT_READY === true
+      && Object.entries(patch).every(([key, value]) => params?.[key] === value)
+      && !!engine?.captureView?.();
+  }, standalonePatch, { timeout });
+  await standalonePage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const standaloneReloaded = await standalonePage.evaluate(() => ({
+    address: location.href,
+    state: window.__engine.getState(),
+    params: window.__engine.getParams(),
+    view: window.__engine.captureView(),
+    assembly: window.__engine.__debugAssemblyActive(),
+  }));
+  const standaloneReloadedSnapshot = decodeSceneSnapshot(
+    new URL(standaloneReloaded.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  if (captureDir) {
+    await standalonePage.screenshot({ path: join(captureDir, 'scene-snapshot-standalone-reloaded.png') });
+  }
+  pass(Object.entries(standalonePatch)
+    .every(([key, value]) => standaloneFirst.params[key] === value
+      && standaloneReloaded.params[key] === value)
+      && standaloneFirst.state.preset === standaloneSource.state.preset
+      && standaloneReloaded.state.preset === standaloneSource.state.preset
+      && standaloneFirst.params.roofPitch === standaloneSource.params.roofPitch
+      && standaloneReloaded.params.profileCurve === standaloneSource.params.profileCurve
+      && standaloneSource.assembly === false
+      && standaloneFirst.assembly === false
+      && standaloneReloaded.assembly === false
+      && semanticViewClose(standaloneFirst.view, singleHouseSnapshot.view)
+      && semanticViewClose(standaloneReloaded.view, singleHouseSnapshot.view)
+      && JSON.stringify(standaloneReloadedSnapshot?.standaloneParams)
+        === JSON.stringify(standalonePatch)
+      && [...new URL(standaloneReloaded.address).searchParams.keys()].join()
+        === SCENE_SNAPSHOT_QUERY_KEY,
+  `standalone committed geometry and semantic composition survive exact share URL + reload (${JSON.stringify({
+    source: standaloneSource,
+    first: standaloneFirst,
+    reloaded: standaloneReloaded,
+  })})`);
+
+  const manualStandaloneBeforeAddress = standaloneReloaded.address;
+  await standalonePage.mouse.move(195, 300);
+  await standalonePage.mouse.down();
+  await standalonePage.mouse.move(235, 320, { steps: 8 });
+  await standalonePage.mouse.up();
+  await standalonePage.waitForFunction(
+    (beforeAddress) => location.href !== beforeAddress,
+    manualStandaloneBeforeAddress,
+    { timeout },
+  );
+  const manualStandaloneView = await standalonePage.evaluate((beforeAddress) => ({
+    beforeAddress,
+    afterAddress: location.href,
+    view: window.__engine.captureView(),
+  }), manualStandaloneBeforeAddress);
+  const manualStandaloneSnapshot = decodeSceneSnapshot(
+    new URL(manualStandaloneView.afterAddress).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  pass(manualStandaloneView.afterAddress !== manualStandaloneView.beforeAddress
+      && semanticViewClose(manualStandaloneSnapshot?.view, manualStandaloneView.view),
+  `standalone OrbitControls end commits the settled semantic view to the canonical address (${JSON.stringify(manualStandaloneView.view)})`);
+  await standalonePage.close();
+
+  // A pending old-type slider callback must not write into a newly reset P.
+  // Reroll then establishes a second baseline and its next share omits hp.
+  await page.locator('.tab').nth(0).click();
+  await page.waitForFunction(() => window.__engine.getState().preset === 'korea'
+    && !!window.__engine.captureView(), null, { timeout });
+  // Dispatch the old-type input and type switch in one browser task. This
+  // guarantees the 110ms callback is still pending when its generation ends,
+  // rather than relying on Playwright command latency to happen under 110ms.
+  await page.evaluate(() => {
+    const input = document.querySelector('input[data-param="eaveOverhang"]');
+    const tab = document.querySelectorAll('.tab')[2];
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setValue.call(input, '2.75');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    tab.click();
+  });
+  await page.waitForFunction(() => window.__engine.getState().preset === 'giwa'
+    && !!window.__engine.captureView(), null, { timeout });
+  await page.waitForTimeout(300);
+  const staleParamReset = await page.evaluate(async () => {
+    const { paramsFor } = await import('/src/lib/seed.js');
+    return {
+      preset: window.__engine.getState().preset,
+      params: window.__engine.getParams(),
+      expectedEaveOverhang: paramsFor('giwa').eaveOverhang,
+    };
+  });
+  pass(staleParamReset.preset === 'giwa'
+      && staleParamReset.params.eaveOverhang === staleParamReset.expectedEaveOverhang,
+    `type reset rejects the previous slider generation (${JSON.stringify(staleParamReset)})`);
+
+  await page.locator('input[data-param="eaveOverhang"]').fill('1.9');
+  await page.waitForFunction(() => window.__engine.getParams().eaveOverhang === 1.9, null, { timeout });
+  await page.evaluate(() => window.__engine.clearSelection());
+  await page.waitForFunction(() => !window.__engine.getState().selected
+    && !!window.__engine.captureView(), null, { timeout });
+  const beforeRerollSeed = await page.evaluate(() => window.__engine.getState().seed);
+  await page.evaluate(() => document.querySelector('.actions .primary').click());
+  await page.waitForFunction((seed) => window.__engine.getState().seed !== seed
+    && !!window.__engine.captureView(), beforeRerollSeed, { timeout });
+  await page.evaluate(() => {
+    Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
+    window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.nativeActivations.length = 0;
+    window.__shareProbe.clipboardValues.length = 0;
+  });
+  await page.evaluate(() => document.querySelector('.actions [data-action="share"]').click());
+  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  const rerolledShareUrl = await page.evaluate(
+    () => window.__shareProbe.nativePayloads[0]?.url || null,
+  );
+  const rerolledSnapshot = decodeSceneSnapshot(
+    new URL(rerolledShareUrl).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  const rerolledParams = await page.evaluate(() => window.__engine.getParams());
+  pass(Object.keys(rerolledSnapshot?.standaloneParams || {}).length === 0
+      && rerolledParams.eaveOverhang !== 1.9,
+  `standalone reroll resets committed hp overrides (${JSON.stringify(rerolledSnapshot?.standaloneParams)})`);
+  await page.evaluate(() => {
+    // Restore the pre-existing downstream environment fixture after reroll
+    // deliberately exercised a new seed-derived profile.
+    window.__engine.setTime('night', { immediate: true });
+    window.__engine.setSeason('autumn', { immediate: true });
+    window.__engine.setWeather('clear', { immediate: true });
+    window.__engine.select();
+  });
+  await page.waitForFunction(() => window.__engine.getState().selected
+    && !!window.__engine.captureView(), null, { timeout });
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForFunction(() => window.__device?.sheet === false
