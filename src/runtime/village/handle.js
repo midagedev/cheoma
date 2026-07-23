@@ -1044,6 +1044,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       g.add(buildVillageWall(parcel.shape, editWallMats, {
         style: wallType, kind: gk, seed: parcel.seed, char01, aux, plotW: parcel.plotW, plotD: parcel.plotD,
         gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
+        parcel, site, baseY: parcel.baseY,
         wallHeightK: parcel.wallHeightK, jangdok,
         yardStack, clothesline, vegBed,
       }));

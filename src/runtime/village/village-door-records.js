@@ -177,6 +177,9 @@ function villageGateRecords(parcel, layout, baseY, prefix) {
 function villageWallRecords(parcel, site, char01) {
   const records = [];
   const style = parcel.wallType || 'stone';
+  const baseY = Number.isFinite(parcel.baseY) ? parcel.baseY
+    : Number.isFinite(parcel.padY) ? parcel.padY
+      : (typeof site?.heightAt === 'function' ? site.heightAt(parcel.center.x, parcel.center.z) : 0);
   const layout = villageWallLayout(parcel.shape, {
     style,
     plotW: parcel.plotW,
@@ -185,10 +188,10 @@ function villageWallRecords(parcel, site, char01) {
     gateT: parcel.access?.gateT,
     char01,
     wallHeightK: parcel.wallHeightK,
+    parcel,
+    site,
+    baseY,
   }, makeRng((((parcel.seed | 0) || 7) ^ 0x51de) >>> 0));
-  const baseY = Number.isFinite(parcel.baseY) ? parcel.baseY
-    : Number.isFinite(parcel.padY) ? parcel.padY
-      : (typeof site?.heightAt === 'function' ? site.heightAt(parcel.center.x, parcel.center.z) : 0);
   const prefix = `parcel:${parcel.id}:wall`;
   records.push(...villageGateRecords(parcel, layout, baseY, prefix));
   for (const edge of layout.edgeLayouts) {
@@ -205,7 +208,13 @@ function villageWallRecords(parcel, site, char01) {
         x: run.b.x + dx / length * grow,
         z: run.b.z + dz / length * grow,
       });
-      const solid = semanticSegmentPrism(start, end, layout.thickness, baseY, baseY + edge.height);
+      const solid = semanticSegmentPrism(
+        start,
+        end,
+        layout.thickness,
+        baseY + (run.bottomOffset || 0),
+        baseY + edge.height + (run.topOffset || 0),
+      );
       if (solid) records.push(ownedRecord(
         `${prefix}:edge:${edge.index}:${spanIndex}`, 'parcel-wall', parcel.id, solid,
       ));
@@ -215,8 +224,9 @@ function villageWallRecords(parcel, site, char01) {
     const post = layout.cornerPosts[postIndex];
     const width = post.thickness * 1.2;
     const point = parcelPoint(parcel, post.point);
-    const solid = semanticPrism(localRect(point, width, width), baseY,
-      baseY + (style === 'tile' ? post.height + 0.32 : post.height * 0.98));
+    const postBaseY = baseY + (post.bottomOffset || 0);
+    const solid = semanticPrism(localRect(point, width, width), postBaseY,
+      postBaseY + (style === 'tile' ? post.height + 0.32 : post.height * 0.98));
     records.push(ownedRecord(
       `${prefix}:corner:${postIndex}`, 'parcel-wall', parcel.id, solid,
     ));

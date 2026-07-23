@@ -78,7 +78,7 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
   for (const edge of layout.edgeLayouts) {
     for (const run of edge.runs) {
       g.add(makeEdgeRun(
-        style, coping, run.a, run.b, edge.height, th,
+        style, coping, run.a, run.b, edge.height, th, run,
         layout.centerX, layout.centerZ, M, rng,
       ));
     }
@@ -97,7 +97,10 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
   // 모서리 기둥(솔리드): 실 모서리(인접 변 역할이 다른 꼭짓점)에만 — 뒷변 꺾임점 제외.
   if (style === 'stone' || style === 'mud' || style === 'tile') {
     for (const post of layout.cornerPosts) {
-      cornerPostAt(g, post.point.x, post.point.z, post.height, post.thickness, style, M);
+      cornerPostAt(
+        g, post.point.x, post.point.z, post.height, post.thickness, style, M,
+        post.bottomOffset || 0,
+      );
     }
   }
 
@@ -112,7 +115,7 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
 
 // 임의의 로컬 변(a→b)에 담 한 run 을 앉힌다 — run 로컬 +X=변 방향, +Z=바깥 법선(두께).
 //   style 별 run 지오는 기존 헬퍼 재사용(makeSolidRun/makeBrushRun/makeHedgeRun).
-function makeEdgeRun(style, coping, a, b, H, th, cx, cz, M, rng) {
+function makeEdgeRun(style, coping, a, b, H, th, run, cx, cz, M, rng) {
   const ex = b.x - a.x, ez = b.z - a.z;
   const L = Math.hypot(ex, ez);
   if (L < 0.05) return new THREE.Group();
@@ -122,11 +125,14 @@ function makeEdgeRun(style, coping, a, b, H, th, cx, cz, M, rng) {
   if ((-dz) * (mx - cx) + dx * (mz - cz) < 0) { dx = -dx; dz = -dz; }
   const rotY = Math.atan2(-dz, dx);                        // +X→(dx,dz), +Z→perpR(e)=바깥
   const solid = style !== 'brush' && style !== 'hedge';
-  const grow = solid ? 0.4 : 0;                            // 모서리 겹침(기둥이 이음새 가림)
+  const grow = solid ? (run.grow || 0) : 0;                // 모서리·단차 겹침(이음새 가림)
+  const bottomOffset = solid ? (run.bottomOffset || 0) : 0;
+  const topOffset = solid ? (run.topOffset || 0) : 0;
+  const runHeight = H + topOffset - bottomOffset;
   const child = style === 'brush' ? makeBrushRun(L + grow, H, M.mud, M.jipjul, rng)
     : style === 'hedge' ? makeHedgeRun(L + grow, H, rng)
-    : makeSolidRun(style, coping, L + grow, H, th, M, rng);
-  child.position.set(mx, 0, mz); child.rotation.y = rotY;
+    : makeSolidRun(style, coping, L + grow, runHeight, th, M, rng);
+  child.position.set(mx, bottomOffset, mz); child.rotation.y = rotY;
   return child;
 }
 
@@ -344,7 +350,7 @@ function makeBrushRun(L, H, postMat, twigMat, rng) {
 }
 
 // 모서리 기둥(솔리드 담 마감) — 로컬 (x,z) 한 꼭짓점. tile=회벽+기와 캡, stone=돌 기둥.
-function cornerPostAt(g, x, z, H, th, style, M) {
+function cornerPostAt(g, x, z, H, th, style, M, bottomOffset = 0) {
   const p = new THREE.Group();
   if (style === 'tile') {
     const baseH = Math.min(0.72, H * 0.36), top = H - 0.1;
@@ -358,7 +364,7 @@ function cornerPostAt(g, x, z, H, th, style, M) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(th * 1.15, H * 0.98, th * 1.15), M.fieldstone);
     b.position.y = H * 0.49; b.castShadow = true; p.add(b);
   }
-  p.position.set(x, 0, z);
+  p.position.set(x, bottomOffset, z);
   g.add(p);
 }
 

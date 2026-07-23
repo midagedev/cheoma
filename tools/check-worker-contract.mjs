@@ -48,11 +48,13 @@ const expectedSceneHashes = {
   // opening dimensions. The intentional geometry/material/triangle change updates
   // every scale hash while pick proxies remain byte-identical. Front-side rejection,
   // source depth, and the fixed 1+1 draw family are covered by the dedicated lighting
-  // gates. Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: '43a45a5f:b76ab503:0d571587:30875415',
-  town: '8fc3184d:0efcc73d:2dd5c94c:093354fb',
-  capital: 'cc685883:9b225ec9:316863cb:eaeab51f',
-  hanyang: '5cd4e702:f1540c58:b9589d4e:e67fbe86',
+  // gates. #112 splits solid walls on rendered terrain into bounded horizontal
+  // steps while preserving flat/soft-boundary output and every pick proxy byte.
+  // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
+  village: 'ca4213e8:9de82f9e:d7419395:6f27213a',
+  town: '54c7f37b:81c31de3:6d46b1ee:ab077b05',
+  capital: 'caac704d:93a66435:8ecdeab9:8d429eef',
+  hanyang: '6a67571b:07ed5e15:62c28c0e:1be97a8b',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

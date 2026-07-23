@@ -68,7 +68,7 @@ export function buildKindDecomps(kind) {
 }
 
 // 필지 → 컴파운드(집 + 마당 담). rot 은 로컬 +z 를 도로쪽(frontDir+yaw)으로. 비최적화(디버그) 경로.
-export function placeParcel(parcel, protos, wallMats, char01 = 0.5) {
+export function placeParcel(parcel, protos, wallMats, char01 = 0.5, site = null) {
   const g = new THREE.Group();
   g.name = `parcel-${parcel.kind}`;
   const kind = parcel.kind;
@@ -83,6 +83,7 @@ export function placeParcel(parcel, protos, wallMats, char01 = 0.5) {
     style: parcel.wallType || 'stone', kind: parcel.kind, seed: parcel.seed, char01,
     aux: parcel.aux, plotW: parcel.plotW, plotD: parcel.plotD,
     gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
+    parcel, site, baseY: parcel.baseY,
     wallHeightK: parcel.wallHeightK, jangdok: parcel.jangdok,
     yardStack: parcel.yardStack, clothesline: parcel.clothesline, vegBed: parcel.vegBed,
   }));
@@ -214,11 +215,12 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
 }
 
 // 필지 담·마당(어휘 격상: tile/stone/brush + 부속채) 을 필지 배치 변환까지 얹어 반환 — mergeStatic 이 구워 붙인다.
-export function buildCourtyard(parcel, wallMats, char01) {
+export function buildCourtyard(parcel, wallMats, char01, site = null) {
   const g = buildVillageWall(parcel.shape, wallMats, {
     style: parcel.wallType || 'stone', kind: parcel.kind, seed: parcel.seed, char01,
     aux: parcel.aux, plotW: parcel.plotW, plotD: parcel.plotD,
     gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
+    parcel, site, baseY: parcel.baseY,
     // #55: 담 높이 연속 변주 + 마당 부속 소품(신분 상관). 전부 공유 재질 → 병합 후 드로우콜 불변.
     wallHeightK: parcel.wallHeightK, jangdok: parcel.jangdok,
     yardStack: parcel.yardStack, clothesline: parcel.clothesline, vegBed: parcel.vegBed,

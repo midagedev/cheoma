@@ -226,7 +226,7 @@ export function* populateVillageSteps(plan, opts = {}) {
         };
         const buildFullDetail = (into, screenDoor = false) => {
           buildHouses(into, 'full', screenDoor);
-          const walls = chunk.parcels.map((p) => buildCourtyard(p, wallMats, char01));
+          const walls = chunk.parcels.map((p) => buildCourtyard(p, wallMats, char01, site));
           // #148: ids 로 필지별 정점 레인지 기록 → focus 오버레이가 그 필지 병합 담만 접어 이중 렌더 제거.
           const wg = mergeStatic(walls, `village-walls-${chunk.ring}-${chunk.sector}`, {
             ids: chunk.parcels.map((p) => p.id), screenDoor,
@@ -281,7 +281,7 @@ export function* populateVillageSteps(plan, opts = {}) {
         variants: [collectOpeningGlowAnchors(protos.choga, { space: 'local' })],
         variantAware: false,
       };
-      for (const p of regular) root.add(placeParcel(p, protos, wallMats, char01));
+      for (const p of regular) root.add(placeParcel(p, protos, wallMats, char01, site));
     }
     // 히어로(종가·반가 대형) — landmarks 전체 병합에선 빼되 "히어로별 개별 병합" 그룹으로 root 직속.
     //   개별 그룹이라 어댑터가 하나씩 visible 토글 + buildParcel 풀디테일 오버레이로 교체(랜딩·클로즈업·

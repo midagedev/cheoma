@@ -77,6 +77,7 @@ npm run shoot:bokeh:proof              # source scatter·강제 triangle·자원
 npm run shoot:focus-level   # 24° 주택·종가·관아 hero·궁·사찰 실제 앱 구도 6장
 npm run shoot:focus-shadow  # 원점 고정/선택 필지 추종 물리 태양 그림자 같은 카메라 비교
 npm run shoot:lod-transition # 한양 FAR→MID·MID→FULL 전후/중간 6장
+npm run shoot:wall-steps    # 실제 경사지 필지의 좌·우 솔리드 담 단차 2장
 npm run shoot:sky           # 실제 앱의 낮/세 석양/밤·구름·달·광선·그림자 캡처
 npm run shoot:winter        # check:winter:app과 같은 겨울/설경 PNG 증거 생성
 npm run shoot:ink           # check:ink:app과 같은 부감 PBR/수묵·근경 PNG 증거 생성
@@ -263,7 +264,10 @@ map은 `three@0.185.1`로 고정하되, 자동 smoke는 동일 URL을 로컬 설
     해석 수면에서 과도하게 뜨지 않는지, `-x` 흐름을 거슬러 올라가는 구간이 없는지 검사한다.
   - capital/hanyang의 명시적 대하천은 60–120m 실제 수면, 충적 어깨, 상설교 없는 나루, 접합된 남안 길, 최소 5/8가구의 포구 취락을 함께 검사한다. 각 렌더 단면의 실제 `point.half`로 수면 매입과 world-edge 6m 여유를 검사해 안개 밴드의 테이퍼를 순수 계약으로 고정한다.
 - `check:wall-gate`
-  - 실제 `buildVillageWall()`로 `tile/stone/mud/brush/hedge/open` 6종을 만들어 plan의 `gateEdge/gateT`와 물리 문틀 중심·회전이 일치하는지 검사한다. `shape.edges`가 없는 hero의 비전면 대문과 finite geometry도 함께 검사한다.
+  - 실제 `buildVillageWall()`로 `tile/stone/mud/brush/hedge/open` 6종을 만들어 plan의 `gateEdge/gateT`와 물리 문틀 중심·회전이 일치하는지 검사한다. `shape.edges`가 없는 hero의 비전면 대문, 세 솔리드 재질의 경사지 run 높이, finite geometry도 함께 검사한다.
+- `check:wall-step`
+  - 평탄 지형의 다섯 담 유형이 이전 layout과 정확히 같은지, 실제 terrain-grid를 읽는 `tile/stone/mud`만 경사면에서 수평 단을 만드는지 검사한다.
+  - 단 높이 0.36m, 변당 run 6개 상한, 평평한 대문 landing, renderer와 문 occlusion semantic record의 y 범위 일치를 Three·DOM·전역 RNG 없이 고정한다.
 - `check:wave`
   - 실제 `createRerollWave()`를 번들해 전 구간의 정적 scenery가 old/incoming 중 정확히 하나만 보이고, handoff peak에 veil=1·shadow=0인지 검사한다.
   - 공유 재질 identity·opacity·transparent·depthWrite·version이 불변이며, 궁 병합 root가 건물 tofu wave에 합류하고 cancel/dispose가 반복해도 소유권과 transform이 정상화되는지 확인한다.
@@ -553,7 +557,9 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-edge-mist.mjs` | 수평 운해의 아이레벨 유지, 10°→18° 단조 감쇠, 20° 부감 억제, 비정상 카메라 입력 fail-closed | Three 없는 순수 가중치 계약이며 실제 matrix 배선·운해 미감은 `shoot:lod-transition`이 맡는다. |
 | `tools/check-road-contract.mjs` | stable ID·junction 양방향 참조, 자기교차·좁은 lens, 곡률, road spatial index | 지형·재질에서 길이 자연스럽게 읽히는지는 시각 하네스로 본다. |
 | `tools/check-layout-contract.mjs` | 남향 군집·도로측 대문·실제 지붕 fit·단건 재굴림·도로/개울/논·집 사이 겨울 일조·정자 실면적/화면 폭·높이 있는 마을 소품·보호수·밀도 계약 | 대표 seed 순수 데이터 검사로, 실제 광학적 차폐 미감은 앱 캡처로 확인한다. |
-| `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전·finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |
+| `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |
+| `tools/check-wall-step-contract.mjs` | 평탄 exactness, 수평 단·대문 landing·변당 6 run 상한, renderer/semantic y 공유 | 순수 계약이며 실제 마을 안의 율동·가림은 `npm run shoot:wall-steps` 좌·우 PNG를 직접 본다. |
+| `tools/shoot-wall-steps.mjs` | 실제 `village:1:p8`의 강한 돌담 단차를 양쪽 카메라에서 촬영하고 calls/triangles·WebGL renderer 기록 | 대표 필지 한 건의 시각 판정이며 모든 규모/seed의 수학은 `check:wall-step`과 layout/worker 게이트가 맡는다. |
 | `tools/check-yard-layout-contract.mjs` | 마당나무와 부속채·장독대·낟가리·빨래줄·텃밭·정원석의 의미별 footprint, 장독대/부속채 충돌 재현, 수목 유지율 | 실제 수관/밑동의 XZ 계약이며 계절별 가지 실루엣의 미감은 focus 이미지로 본다. |
 | `tools/check-parcel-rebuild-contract.mjs` | 불변 필지 envelope, 재건축 결정론, 정자 일조/카메라, 실제 편집 처마와 마당 수목 재배치 | renderer/DOM 없이 실행하며 UI·부감 지속 소유권은 앱 게이트가 맡는다. |
 | `tools/check-live-edit-scheduler.mjs` | 50→1 최신값 병합, 재생성 비용 기반 cooldown, commit 우선권, focus epoch 취소·dispose | DOM/THREE 없는 순수 케이던스이며 실제 slider·지오 변화는 공유 앱 게이트가 맡는다. |

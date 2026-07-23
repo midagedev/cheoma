@@ -78,6 +78,7 @@ function routePath(path) {
     'tools/lib/bokeh-scatter-proof.mjs': ['bokeh-fixture'],
     'tools/lib/bokeh-source-stress.mjs': ['bokeh-fixture'],
     'tools/check-rim-facing.mjs': ['rim'],
+    'tools/shoot-wall-steps.mjs': ['app'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
