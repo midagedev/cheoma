@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 
-// Close-detail particle candidates for issue #96.
-//
-// Point and world representations intentionally wrap the same TypedArrays. The
-// simulation owns each array once; these views only describe how WebGL reads it.
+// Reusable world-space detail particles. Simulation modules own each TypedArray
+// once; render views only describe how WebGL reads those arrays.
 
 function sharedInstanceAttribute(attribute) {
   const view = new THREE.InstancedBufferAttribute(
@@ -48,7 +46,7 @@ function bindOwnedDepthMaterial(material, depthMaterial) {
   };
 }
 
-function makePetalBaseGeometry() {
+export function createLeafSaddleGeometry() {
   // Four triangles around a raised centre form a shallow, light-catching saddle.
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -88,14 +86,14 @@ vec3 rotateXYZ(vec3 p, vec3 a) {
 }
 `;
 
-export function createPetalWorldRepresentation(pointGeometry, {
+export function createPetalWorldRepresentation(sourceGeometry, {
   renderOrder = 18,
   // aSize is an artistic scalar, not metres. Species scaling maps the current
   // ranges to ~1.9–4.0cm spring petals and ~5.7–12cm autumn leaves end-to-end.
   worldScale = 0.015,
 } = {}) {
-  const geometry = makePetalBaseGeometry();
-  const source = pointGeometry.attributes;
+  const geometry = createLeafSaddleGeometry();
+  const source = sourceGeometry.attributes;
   geometry.setAttribute('aOffset', sharedInstanceAttribute(source.position));
   geometry.setAttribute('aSize', sharedInstanceAttribute(source.aSize));
   geometry.setAttribute('aColor', sharedInstanceAttribute(source.aColor));
@@ -269,7 +267,7 @@ export function createPetalWorldRepresentation(pointGeometry, {
   };
 }
 
-export function createMoteWorldRepresentation(pointGeometry, {
+export function createMoteWorldRepresentation(sourceGeometry, {
   renderOrder = 4,
   // Dust is a visible scattering clump; the firefly includes its luminous
   // envelope as a 2–3cm volume and lets optics, rather than geometry, make the
@@ -278,7 +276,7 @@ export function createMoteWorldRepresentation(pointGeometry, {
   fireflyRadius = 0.014,
 } = {}) {
   const geometry = makeOctahedronBaseGeometry();
-  const source = pointGeometry.attributes;
+  const source = sourceGeometry.attributes;
   geometry.setAttribute('aOffset', sharedInstanceAttribute(source.position));
   geometry.setAttribute('aRand', sharedInstanceAttribute(source.aRand));
   geometry.instanceCount = source.position.count;

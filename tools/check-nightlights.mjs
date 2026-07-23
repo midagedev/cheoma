@@ -173,23 +173,26 @@ const sources = {
 const ownerIds = [regular.id, choga.id, hero.id, "palace"];
 
 function snapshot(api) {
-  const points = api.group.getObjectByName("nightlight-points");
+  const mesh = api.group.getObjectByName("nightlight-physical");
   const attributes = {};
   for (const name of [
     "position",
+    "uv",
+    "aAnchor",
+    "aOutward",
+    "aOpeningSize",
     "aPhase",
     "aLit",
     "aThreshold",
     "aWarm",
-    "aScale",
   ]) {
-    attributes[name] = bytes(points.geometry.getAttribute(name));
+    attributes[name] = bytes(mesh.geometry.getAttribute(name));
   }
   return JSON.stringify({
     state: api.debugState(),
     owners: ownerIds.map((id) => api.debugOwner(id)),
     attributes,
-    depthWrite: points.material.depthWrite,
+    depthWrite: mesh.material.depthWrite,
   });
 }
 
@@ -268,15 +271,15 @@ assert.equal(
   "identical nightlight inputs are not byte-deterministic",
 );
 
-const points = first.group.getObjectByName("nightlight-points");
+const mesh = first.group.getObjectByName("nightlight-physical");
 assert(
-  points?.isPoints && first.group.children.length === 1,
-  "nightlights lost their single Points owner",
+  mesh?.isMesh && first.group.children.length === 1,
+  "nightlights lost their single physical hanji owner",
 );
-const dofDepthMaterial = points.userData.dofDepthMaterial;
+const dofDepthMaterial = mesh.userData.dofDepthMaterial;
 assert(
   dofDepthMaterial?.isShaderMaterial,
-  "nightlights lost their explicit packed-depth Points material",
+  "nightlights lost their explicit packed-depth material",
 );
 const drawableMaterials = new Set();
 const drawableTextures = new Set();
@@ -304,9 +307,9 @@ assert.equal(
 );
 assert.equal(drawableTextures.size, 0, "nightlights allocated a texture");
 assert.equal(
-  dofDepthMaterialForObject(points),
+  dofDepthMaterialForObject(mesh),
   dofDepthMaterial,
-  "nightlight Points did not publish its owned packed-depth material",
+  "nightlight mesh did not publish its owned packed-depth material",
 );
 assert.equal(
   dofDepthMaterial.allowOverride,
@@ -320,40 +323,29 @@ assert.equal(
 );
 assert.equal(
   dofDepthMaterial.uniforms,
-  points.material.uniforms,
+  mesh.material.uniforms,
   "nightlight color and packed-depth materials stopped sharing uniform identity",
 );
 assert.equal(
   dofDepthMaterial.vertexShader,
-  points.material.vertexShader,
-  "nightlight color and packed-depth paths stopped sharing exact point sizing/visibility",
+  mesh.material.vertexShader,
+  "nightlight color and packed-depth paths stopped sharing exact geometry/visibility",
 );
 assert(
-  dofDepthMaterial.fragmentShader.includes("gl_PointCoord - 0.5") &&
-    dofDepthMaterial.fragmentShader.includes(
-      "if (r > 0.5 || vIntensity <= 0.002) discard",
-    ) &&
-    dofDepthMaterial.fragmentShader.includes(
-      "float core = smoothstep(0.5, 0.0, r)",
-    ) &&
-    dofDepthMaterial.fragmentShader.includes(
-      "float glow = pow(core, 1.8) + 0.35 * pow(core, 5.0)",
-    ) &&
-    dofDepthMaterial.fragmentShader.includes(
-      "glow * vIntensity * 0.6 <= 0.18",
-    ) &&
+  dofDepthMaterial.fragmentShader.includes("nightlightPaperProfile") &&
+    dofDepthMaterial.fragmentShader.includes("paper * vIntensity * 0.72 <= 0.18") &&
     dofDepthMaterial.fragmentShader.includes("packDepthToRGBA(gl_FragCoord.z)"),
-  "nightlight packed-depth fragment drifted from its visible bright-core silhouette",
+  "nightlight packed-depth fragment drifted from its visible hanji silhouette",
 );
 const resources = first.debugState();
 assert.deepEqual(
   resources,
   {
-    pointCount: 11,
+    lightCount: 11,
     ownerCount: 4,
     drawCalls: 1,
     dofDepthDrawCalls: 1,
-    triangles: 0,
+    triangles: 22,
     materials: 2,
     programs: 2,
     textures: 0,
@@ -363,12 +355,12 @@ assert.deepEqual(
   "nightlight resource budget changed",
 );
 assert.equal(
-  points.material.depthTest,
+  mesh.material.depthTest,
   true,
   "nightlights no longer use scene depth",
 );
 assert.equal(
-  points.material.depthWrite,
+  mesh.material.depthWrite,
   false,
   "nightlights write into scene depth",
 );
@@ -378,7 +370,7 @@ assert.equal(
   "nightlights allocated a scene light",
 );
 assert.equal(
-  empty.debugState().pointCount,
+  empty.debugState().lightCount,
   0,
   "features without authored anchors created free-floating lights",
 );
@@ -475,10 +467,10 @@ close(p13Owner.selected[0].y, p13Expected.y, "production p13 y");
 close(p13Owner.selected[0].z, p13Expected.z, "production p13 z");
 
 const baseOwner = JSON.stringify(first.debugOwner(regular.id));
-const basePositionBytes = bytes(points.geometry.getAttribute("position"));
-const geometry = points.geometry;
-const material = points.material;
-const positionAttribute = geometry.getAttribute("position");
+const basePositionBytes = bytes(mesh.geometry.getAttribute("aAnchor"));
+const geometry = mesh.geometry;
+const material = mesh.material;
+const positionAttribute = geometry.getAttribute("aAnchor");
 const overlay = new THREE.Group();
 overlay.position.set(-4, 2.5, 6);
 overlay.rotation.y = -0.28;
@@ -512,14 +504,14 @@ close(overlayOwner.selected[0].x, overlayExpected.x, "overlay village-local x");
 close(overlayOwner.selected[0].y, overlayExpected.y, "overlay village-local y");
 close(overlayOwner.selected[0].z, overlayExpected.z, "overlay village-local z");
 assert.equal(
-  first.debugState().pointCount,
-  resources.pointCount,
-  "overlay refresh changed point capacity",
+  first.debugState().lightCount,
+  resources.lightCount,
+  "overlay refresh changed light capacity",
 );
-assert.equal(points.geometry, geometry, "overlay refresh replaced geometry");
-assert.equal(points.material, material, "overlay refresh replaced material");
+assert.equal(mesh.geometry, geometry, "overlay refresh replaced geometry");
+assert.equal(mesh.material, material, "overlay refresh replaced material");
 assert.equal(
-  points.geometry.getAttribute("position"),
+  mesh.geometry.getAttribute("aAnchor"),
   positionAttribute,
   "overlay refresh replaced the fixed position buffer",
 );
@@ -586,18 +578,18 @@ assert.equal(
   "cross-kind null restore did not recover the base parcel policy",
 );
 
-assert.equal(points.visible, false, "nightlights start visible during day");
+assert.equal(mesh.visible, false, "nightlights start visible during day");
 first.setLevel(1);
 assert.equal(
-  points.visible,
+  mesh.visible,
   true,
   "nightlights did not become visible at night",
 );
 first.group.userData.waveFade.setWeight(0);
-assert.equal(points.visible, false, "wave zero did not hide nightlights");
+assert.equal(mesh.visible, false, "wave zero did not hide nightlights");
 first.group.userData.waveFade.setWeight(0.5);
 assert.equal(
-  points.visible,
+  mesh.visible,
   true,
   "partial wave did not restore nightlight visibility",
 );
@@ -607,7 +599,7 @@ assert.equal(
   "wave weight did not reach the shader",
 );
 first.group.userData.waveFade.setWeight(Number.NaN);
-assert.equal(points.visible, false, "invalid wave weight remained visible");
+assert.equal(mesh.visible, false, "invalid wave weight remained visible");
 first.group.userData.waveFade.setWeight(1);
 first.update(0, 1, Number.POSITIVE_INFINITY);
 close(
@@ -644,7 +636,6 @@ dofDepthMaterial.addEventListener("dispose", () => {
 const beforeDisposeBytes = bytes(positionAttribute);
 const beforeDisposeTime = material.uniforms.uTime.value;
 const beforeDisposeNight = material.uniforms.uNight.value;
-const beforeDisposePixelRatio = material.uniforms.uPixelRatio.value;
 const beforeDisposeLensScale = material.uniforms.uLensScale.value;
 const beforeDisposeWave = material.uniforms.uWave.value;
 first.dispose();
@@ -665,11 +656,11 @@ assert.equal(
   "nightlight packed-depth material was not disposed exactly once",
 );
 assert.equal(
-  points.userData.dofDepthMaterial,
+  mesh.userData.dofDepthMaterial,
   undefined,
   "disposed nightlights retained their packed-depth material contract",
 );
-assert.equal(points.visible, false, "disposed nightlights remained visible");
+assert.equal(mesh.visible, false, "disposed nightlights remained visible");
 assert.equal(
   first.refreshOwner(regular.id, overlay),
   false,
@@ -696,11 +687,6 @@ assert.equal(
   "disposed API changed night level",
 );
 assert.equal(
-  material.uniforms.uPixelRatio.value,
-  beforeDisposePixelRatio,
-  "disposed API changed pixel ratio",
-);
-assert.equal(
   material.uniforms.uLensScale.value,
   beforeDisposeLensScale,
   "disposed API changed lens scale",
@@ -715,7 +701,7 @@ assert.equal(
   true,
   "disposed API changed material depth state",
 );
-assert.equal(points.visible, false, "disposed API revived its drawable");
+assert.equal(mesh.visible, false, "disposed API revived its drawable");
 
 repeat.dispose();
 empty.dispose();

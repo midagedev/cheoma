@@ -228,38 +228,36 @@ async function resourcePlateau() {
       getWind: () => ({ dirX: 1, dirZ: 0, speed: 0.3, gust: 1 }),
     });
     petals.setSeason('spring');
-    const petalWorld = petals.getWorldRepresentation();
-    scene.add(petals.points, petalWorld.object);
+    const petalObject = petals.object;
+    scene.add(petalObject);
     for (let frame = 0; frame < 12; frame++) {
       petals.update(1 / 30, {
         t: frame / 30, viewHeight: 8, present: 1,
         wind: { dirX: 1, dirZ: 0, speed: 0.3, gust: 1 },
       });
     }
-    petals.setRepresentation(cycle % 2 ? 'points' : 'world');
     renderer.render(scene, camera);
-    const petalColor = petalWorld.object.material;
-    petalWorld.object.material = petalWorld.object.userData.dofDepthMaterial;
-    petalWorld.object.visible = true;
+    const petalColor = petalObject.material;
+    petalObject.material = petalObject.userData.dofDepthMaterial;
+    petalObject.visible = true;
     renderer.render(scene, camera);
-    petalWorld.object.material = petalColor;
+    petalObject.material = petalColor;
 
     const motes = setupMotes({
-      scene, renderer, count: 24, fireflies: true, representation: 'world',
+      scene, renderer, count: 24, fireflies: true,
     });
     scene.add(motes.group);
     motes.setEnabled(true);
     motes.setSeason('summer', { immediate: true });
     motes.setTime('night', { immediate: true });
     motes.update(1 / 30);
-    const moteWorld = motes.getWorldRepresentation();
     renderer.render(scene, camera);
-    const moteColor = moteWorld.object.material;
-    moteWorld.object.material = moteWorld.object.userData.dofDepthMaterial;
+    const moteColor = motes.object.material;
+    motes.object.material = motes.object.userData.dofDepthMaterial;
     renderer.render(scene, camera);
-    moteWorld.object.material = moteColor;
+    motes.object.material = moteColor;
 
-    scene.remove(petals.points, petalWorld.object);
+    scene.remove(petalObject);
     petals.dispose();
     scene.remove(motes.group);
     motes.dispose();
@@ -284,17 +282,17 @@ window.__run = async () => {
     petalA.update(1 / 30, args);
     petalB.update(1 / 30, args);
   }
-  const petalWorld = petalA.getWorldRepresentation();
-  petalWorld.object.visible = true;
+  const petalObject = petalA.object;
+  petalObject.visible = true;
   const petalHashA = hashFloatArrays(
-    petalA.points.geometry.attributes.position.array,
-    petalA.points.geometry.attributes.aSize.array,
-    petalA.points.geometry.attributes.aRot.array,
+    petalA.object.geometry.attributes.aOffset.array,
+    petalA.object.geometry.attributes.aSize.array,
+    petalA.object.geometry.attributes.aRot.array,
   );
   const petalHashB = hashFloatArrays(
-    petalB.points.geometry.attributes.position.array,
-    petalB.points.geometry.attributes.aSize.array,
-    petalB.points.geometry.attributes.aRot.array,
+    petalB.object.geometry.attributes.aOffset.array,
+    petalB.object.geometry.attributes.aSize.array,
+    petalB.object.geometry.attributes.aRot.array,
   );
 
   const moteSceneA = new THREE.Scene();
@@ -305,15 +303,15 @@ window.__run = async () => {
   const motesB = setupMotes({
     scene: moteSceneB, renderer, count: 160, fireflies: true,
   });
-  const moteWorld = motesA.getWorldRepresentation();
-  moteWorld.object.visible = true;
+  const moteObject = motesA.object;
+  moteObject.visible = true;
   const moteHashA = hashFloatArrays(
-    motesA.points.geometry.attributes.position.array,
-    motesA.points.geometry.attributes.aRand.array,
+    motesA.object.geometry.attributes.aOffset.array,
+    motesA.object.geometry.attributes.aRand.array,
   );
   const moteHashB = hashFloatArrays(
-    motesB.points.geometry.attributes.position.array,
-    motesB.points.geometry.attributes.aRand.array,
+    motesB.object.geometry.attributes.aOffset.array,
+    motesB.object.geometry.attributes.aRand.array,
   );
 
   const petalDepthFixture = petalFixture();
@@ -340,25 +338,25 @@ window.__run = async () => {
     backend,
     petal: {
       hashes: [petalHashA, petalHashB],
-      shared: petalWorld.sharesSourceArrays(),
-      stats: petalWorld.stats,
-      dofContract: contributesDofDepth(petalWorld.object)
-        && dofDepthMaterialForObject(petalWorld.object)
-          === petalWorld.object.userData.dofDepthMaterial,
+      shared: petalDepthFixture.world.sharesSourceArrays(),
+      stats: petalDepthFixture.world.stats,
+      dofContract: contributesDofDepth(petalObject)
+        && dofDepthMaterialForObject(petalObject)
+          === petalObject.userData.dofDepthMaterial,
       depth: petalDepth,
       inactiveDepth: petalInactiveDepth,
-      depthUsesOffset: petalWorld.object.userData.dofDepthMaterial.vertexShader.includes('aOffset'),
+      depthUsesOffset: petalObject.userData.dofDepthMaterial.vertexShader.includes('aOffset'),
     },
     mote: {
       hashes: [moteHashA, moteHashB],
-      shared: moteWorld.sharesSourceArrays(),
-      stats: moteWorld.stats,
-      dofContract: contributesDofDepth(moteWorld.object)
-        && dofDepthMaterialForObject(moteWorld.object)
-          === moteWorld.object.userData.dofDepthMaterial,
+      shared: moteDepthFixture.world.sharesSourceArrays(),
+      stats: moteDepthFixture.world.stats,
+      dofContract: contributesDofDepth(moteObject)
+        && dofDepthMaterialForObject(moteObject)
+          === moteObject.userData.dofDepthMaterial,
       depth: moteDepth,
       inactiveDepth: moteInactiveDepth,
-      depthUsesOffset: moteWorld.object.userData.dofDepthMaterial.vertexShader.includes('aOffset'),
+      depthUsesOffset: moteObject.userData.dofDepthMaterial.vertexShader.includes('aOffset'),
       fireflyPeak,
       visiblePixels,
       occludedPixels,

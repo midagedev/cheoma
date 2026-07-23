@@ -13,9 +13,9 @@ import {
 import {
   advanceRainPrecipitation,
   advanceSnowPrecipitation,
-  createRainLinesRepresentation,
+  createPhysicalRainRepresentation,
+  createPhysicalSnowRepresentation,
   createRainPrecipitationState,
-  createSnowPointsRepresentation,
   createSnowPrecipitationState,
 } from './weather-physical-geometry.js';
 
@@ -77,7 +77,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // 하늘 입자 필드 중심(#98). 눈·비 낙하 박스는 원점 기준 ±boxHalf 로 좁게(밀도 유지) 두되, 이 중심을
   //   매 프레임 카메라 타깃으로 옮겨(setWeatherCenter) "보는 곳에 눈/비가 온다"를 보장한다. 단일건물은
   //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 파티클
-  //   representation과 계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
+  //   physical geometry와 계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
   let fieldCX = 0, fieldCZ = 0;
   let disposed = false;
   let fogModifierRegistered = false;
@@ -88,7 +88,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   //   브릿지로 받는다. present(조기노출)와 viewHeight(시선 타깃 대비 높이)는 아래
   //   update/센터에서 판정해 넘긴다.
   let season = 'summer';
-  let petalCamDist = NaN, petalViewHeight = null, petalDetail = null, petalLensScale = 1;
+  let petalCamDist = NaN, petalViewHeight = null, petalDetail = null;
   // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
   //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
   //   마을에선 앱 building.visible=false 라 present 로는 못 켜므로 centerAway(fieldC)를 OR 로 함께 본다.
@@ -98,17 +98,17 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // ---------- 파티클 시스템 ----------
   // #131: 낙하 눈·비 커튼만 유지(값싼 입자). 처마 낙수(drips)·착지 스플래시·지붕 볼륨(snowvol/rainflow)은
   //   제거 — 비는 지붕/지면 별도 처리 없이 그냥 내리고, 눈은 아래 patchSnow 흰틴트로 지붕이 희어진다.
-  // 눈·비 위치/속도/크기/위상은 renderer가 아니라 이 CPU state가 단독 소유한다. 현재 제품의
-  // Points/Lines와 #96 물리 geometry 비교는 같은 state를 참조하므로 seed/trajectory 차이가
-  // 표현 방식의 품질·성능 비교에 섞이지 않는다.
+  // 눈·비 위치/속도/크기/위상은 renderer가 아니라 이 CPU state가 단독 소유한다. 인스턴스
+  // geometry는 이 배열을 직접 참조하므로 별도의 renderer 상태나 복사본이 없다. 두 입자는
+  // 실제 월드 크기·가림·광학 깊이를 가지며, 부감에서는 기존 visibility sleep 계약으로 쉰다.
   const snowState = createSnowPrecipitationState({ top: yTop() });
   const rainState = createRainPrecipitationState({ top: yTop() });
-  const snow = createSnowPointsRepresentation(snowState);
-  const rain = createRainLinesRepresentation(rainState);
+  const snow = createPhysicalSnowRepresentation(snowState);
+  const rain = createPhysicalRainRepresentation(rainState);
   const petals = createPetalField({ getWind, lowPerf });
   scene.add(snow.object);
   scene.add(rain.object);
-  scene.add(petals.points);
+  scene.add(petals.object);
 
   // ---------- 재질 패치(적설/젖음) ----------
   // material.uuid → { mat, roughness } (원본 roughness 보관)
@@ -298,7 +298,6 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       camDist: petalCamDist,
       viewHeight: petalViewHeight,
       detailWeight: petalDetail,
-      lensScale: petalLensScale,
       present: petalPresent,
       wind: getWind(t),
     });
@@ -348,7 +347,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       scene.remove(system.object);
       system.dispose();
     }
-    scene.remove(petals.points); petals.dispose();   // 계절 입자 필드(#111)
+    scene.remove(petals.object); petals.dispose();   // 계절 입자 필드(#111)
     if (typeof window !== 'undefined' && window.__wx === weatherDebug) delete window.__wx;
   }
 
@@ -391,7 +390,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
         fieldCX = x; fieldCZ = z;
         snow.object.position.set(x, 0, z);
         rain.object.position.set(x, 0, z);
-        petals.points.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
+        petals.object.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
       }
       const visualDist = Number.isFinite(visualDistance) ? visualDistance : camDist;
       // The village runtime already owns the compensated-lens scale. Its physical and visual
@@ -423,7 +422,6 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       // 기존 3-인자 호출은 camDist 근사치를 사용하도록 보존한다.
       petalCamDist = visualDist;
       petalViewHeight = Number.isFinite(viewHeight) ? Math.max(0, viewHeight) : null;
-      petalLensScale = lensScale;
       petalDetail = Number.isFinite(detailWeight)
         ? Math.max(0, Math.min(1, detailWeight)) : null;
     },

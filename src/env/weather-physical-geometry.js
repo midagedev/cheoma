@@ -111,8 +111,7 @@ export function createRainPrecipitationState({
     const offset = index * 3;
     positions[offset] = (rng() * 2 - 1) * half;
     // Preserve the historical x,z,y,speed,length RNG consumption exactly.
-    // FULL-only opacity derives from a hash so adding the prototype cannot move
-    // any current FAR particle.
+    // Opacity derives from a hash, so visual metadata never moves the trajectory stream.
     positions[offset + 2] = (rng() * 2 - 1) * half;
     positions[offset + 1] = bottom + rng() * state.height;
     state.speeds[index] = rng.range(30, 46);
@@ -224,138 +223,6 @@ export function advanceRainPrecipitation(state, {
     positions[offset + 1] = y;
     positions[offset + 2] = wrap(z, half);
   }
-}
-
-function createSnowPointMaterial() {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      uFade: { value: 0 },
-      uScale: { value: 340 },
-      uLensScale: { value: 1 },
-      uNearA: { value: 5 },
-      uNearB: { value: 15 },
-      uMaxPx: { value: 22 },
-    },
-    transparent: true,
-    depthWrite: false,
-    vertexShader: `
-      attribute float aSize;
-      attribute float aOpacity;
-      uniform float uScale;
-      uniform float uLensScale;
-      uniform float uNearA;
-      uniform float uNearB;
-      uniform float uMaxPx;
-      varying float vOp;
-      varying float vNear;
-      void main() {
-        vOp = aOpacity;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * mv;
-        float dcam = -mv.z;
-        float visualDepth = dcam / max(uLensScale, 0.0001);
-        vNear = smoothstep(uNearA, uNearB, visualDepth);
-        gl_PointSize = min(aSize * (uScale * uLensScale / max(dcam, 1.0)), uMaxPx);
-      }`,
-    fragmentShader: `
-      uniform float uFade;
-      varying float vOp;
-      varying float vNear;
-      void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        float a = smoothstep(0.5, 0.12, length(uv)) * vOp * uFade * vNear;
-        if (a < 0.01) discard;
-        gl_FragColor = vec4(1.0, 1.0, 1.0, a);
-      }`,
-  });
-}
-
-export function createSnowPointsRepresentation(state) {
-  const geometry = new THREE.BufferGeometry();
-  const position = new THREE.BufferAttribute(state.positions, 3);
-  geometry.setAttribute('position', position);
-  geometry.setAttribute('aSize', new THREE.BufferAttribute(state.sizes, 1));
-  geometry.setAttribute('aOpacity', new THREE.BufferAttribute(state.opacities, 1));
-  const material = createSnowPointMaterial();
-  const object = new THREE.Points(geometry, material);
-  object.name = 'weatherSnow';
-  object.frustumCulled = false;
-  object.renderOrder = 20;
-  object.visible = false;
-
-  return {
-    kind: 'snow-points',
-    object,
-    sourcePositions: state.positions,
-    sync({ level = 1 } = {}) {
-      position.needsUpdate = true;
-      material.uniforms.uFade.value = level;
-    },
-    setLens({ lensScale = 1, visualDistance = 75 } = {}) {
-      material.uniforms.uLensScale.value = lensScale;
-      material.uniforms.uScale.value = 340
-        * Math.min(2.2, Math.max(1, visualDistance / 75));
-    },
-    setCenterSpread(value = 1) {
-      const spread = centerSpread(value);
-      object.scale.set(spread, 1, spread);
-    },
-    get centerSpread() { return object.scale.x; },
-    dispose: disposeOwned(geometry, material),
-  };
-}
-
-export function createRainLinesRepresentation(state) {
-  const linePositions = new Float32Array(state.count * 6);
-  const geometry = new THREE.BufferGeometry();
-  const position = new THREE.BufferAttribute(linePositions, 3);
-  geometry.setAttribute('position', position);
-  const material = new THREE.LineBasicMaterial({
-    color: 0xbccde0,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  });
-  const object = new THREE.LineSegments(geometry, material);
-  object.name = 'weatherRain';
-  object.frustumCulled = false;
-  object.renderOrder = 21;
-  object.visible = false;
-
-  const sync = ({ level = 1 } = {}) => {
-    for (let index = 0; index < state.count; index++) {
-      const source = index * 3;
-      const target = index * 6;
-      const length = state.lengths[index];
-      const x = state.positions[source];
-      const y = state.positions[source + 1];
-      const z = state.positions[source + 2];
-      linePositions[target] = x;
-      linePositions[target + 1] = y;
-      linePositions[target + 2] = z;
-      linePositions[target + 3] = x - state.leanX * length;
-      linePositions[target + 4] = y - length;
-      linePositions[target + 5] = z - state.leanZ * length;
-    }
-    position.needsUpdate = true;
-    material.opacity = 0.3 * level;
-  };
-  sync({ level: 0 });
-
-  return {
-    kind: 'rain-lines',
-    object,
-    sourcePositions: state.positions,
-    derivedPositions: linePositions,
-    sync,
-    setLens() {},
-    setCenterSpread(value = 1) {
-      const spread = centerSpread(value);
-      object.scale.set(spread, 1, spread);
-    },
-    get centerSpread() { return object.scale.x; },
-    dispose: disposeOwned(geometry, material),
-  };
 }
 
 function copyBaseGeometry(base, count) {

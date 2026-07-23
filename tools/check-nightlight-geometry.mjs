@@ -86,12 +86,9 @@ const bytes = (attribute) =>
     attribute.array.byteLength,
   ).toString('hex');
 
-function buildBoth(ownerCount) {
+function buildOne(ownerCount) {
   const [plan, sources] = fixture(ownerCount);
-  return {
-    points: buildNightLights(plan, null, sources, { representation: 'points' }),
-    physical: buildNightLights(plan, null, sources, { representation: 'physical' }),
-  };
+  return buildNightLights(plan, null, sources);
 }
 
 const originalRandom = Math.random;
@@ -102,7 +99,7 @@ Math.random = () => {
 };
 let pair;
 try {
-  pair = buildBoth(8);
+  pair = buildOne(8);
 } finally {
   Math.random = originalRandom;
 }
@@ -117,35 +114,30 @@ Math.random = () => {
 };
 let repeat;
 try {
-  repeat = buildBoth(8);
+  repeat = buildOne(8);
 } finally {
   Math.random = originalRandom;
 }
 assert.equal(randomCalls, baselineCalls, 'physical representation changed random consumption');
 
-const points = pair.points.group.getObjectByName('nightlight-points');
-const physical = pair.physical.group.getObjectByName('nightlight-physical');
-const repeatPhysical = repeat.physical.group.getObjectByName('nightlight-physical');
-assert(points?.isPoints, 'A/B fixture lost FAR Points');
+const physical = pair.group.getObjectByName('nightlight-physical');
+const repeatPhysical = repeat.group.getObjectByName('nightlight-physical');
 assert(physical?.isMesh && physical.geometry.isInstancedBufferGeometry,
-  'FULL proxy is not one instanced physical batch');
-assert.equal(pair.physical.group.children.length, 1,
+  'nightlight proxy is not one instanced physical batch');
+assert.equal(pair.group.children.length, 1,
   'physical path allocated a per-owner Object3D');
-assert.equal(physical.geometry.instanceCount, points.geometry.getAttribute('position').count,
-  'physical and point paths changed slot identity');
+assert.equal(physical.geometry.instanceCount, 24,
+  'physical path changed deterministic slot capacity');
 
-for (const [pointName, physicalName] of [
-  ['position', 'aAnchor'],
-  ['aPhase', 'aPhase'],
-  ['aLit', 'aLit'],
-  ['aThreshold', 'aThreshold'],
-  ['aWarm', 'aWarm'],
+for (const physicalName of [
+  'aAnchor',
+  'aOutward',
+  'aOpeningSize',
+  'aPhase',
+  'aLit',
+  'aThreshold',
+  'aWarm',
 ]) {
-  assert.equal(
-    bytes(points.geometry.getAttribute(pointName)),
-    bytes(physical.geometry.getAttribute(physicalName)),
-    `${pointName} diverged between FAR and physical representations`,
-  );
   assert.equal(
     bytes(physical.geometry.getAttribute(physicalName)),
     bytes(repeatPhysical.geometry.getAttribute(physicalName)),
@@ -153,9 +145,9 @@ for (const [pointName, physicalName] of [
   );
 }
 
-const physicalState = pair.physical.debugState();
+const physicalState = pair.debugState();
 assert.deepEqual(physicalState, {
-  pointCount: 24,
+  lightCount: 24,
   ownerCount: 8,
   drawCalls: 1,
   dofDepthDrawCalls: 1,
@@ -166,7 +158,7 @@ assert.deepEqual(physicalState, {
   lights: 0,
   depthTest: true,
 }, 'physical batch resource contract changed');
-assert.deepEqual(pair.physical.debugRepresentation(), {
+assert.deepEqual(pair.debugRepresentation(), {
   representation: 'physical',
   attributeBytes: 80 + 24 * (3 + 3 + 2 + 1 + 1 + 1 + 1) * 4,
   activeObject: 'nightlight-physical',
@@ -202,9 +194,9 @@ assert(
 
 // A hundred houses remain one color/depth program family; only instance bytes
 // and submitted triangles scale with source count.
-const large = buildBoth(100);
-const largePhysicalState = large.physical.debugState();
-assert.equal(large.physical.group.children.length, 1);
+const large = buildOne(100);
+const largePhysicalState = large.debugState();
+assert.equal(large.group.children.length, 1);
 assert.equal(largePhysicalState.drawCalls, physicalState.drawCalls);
 assert.equal(largePhysicalState.dofDepthDrawCalls, physicalState.dofDepthDrawCalls);
 assert.equal(largePhysicalState.materials, physicalState.materials);
@@ -213,7 +205,7 @@ assert.equal(largePhysicalState.lights, 0);
 assert.equal(largePhysicalState.textures, 0);
 assert.equal(
   largePhysicalState.triangles,
-  largePhysicalState.pointCount * 2,
+  largePhysicalState.lightCount * 2,
   'physical triangle budget stopped matching one quad per slot',
 );
 
@@ -225,7 +217,7 @@ const overlay = new THREE.Group();
 overlay.userData.openingGlowAnchors = [
   anchor('replacement', 7, 2, 4, { x: -1, y: 0, z: 0 }, 1.8, 1.1),
 ];
-assert.equal(pair.physical.refreshOwner('owner-0', overlay), true);
+assert.equal(pair.refreshOwner('owner-0', overlay), true);
 assert.equal(physical.geometry, beforeGeometry);
 assert.equal(physical.material, beforeMaterial);
 assert.equal(physical.geometry.getAttribute('aAnchor'), beforeAnchorAttribute);
@@ -233,14 +225,13 @@ assert.equal(beforeAnchorAttribute.needsUpdate, undefined);
 assert.equal(beforeAnchorAttribute.version, 1,
   'physical refresh did not mark the fixed instance buffer dirty exactly once');
 
-// Physical and point paths share the same near handoff and become visible only
-// when the village night/wave contracts permit them.
-pair.physical.setLevel(1);
+// The physical path becomes visible only when village night/wave contracts permit it.
+pair.setLevel(1);
 assert.equal(physical.visible, true);
-pair.physical.group.userData.waveFade.setWeight(0);
+pair.group.userData.waveFade.setWeight(0);
 assert.equal(physical.visible, false);
-pair.physical.group.userData.waveFade.setWeight(1);
-pair.physical.update(0.5, 1, 1.4);
+pair.group.userData.waveFade.setWeight(1);
+pair.update(0.5, 1, 1.4);
 assert.equal(physical.material.uniforms.uTime.value, 0.5);
 
 let geometryDisposals = 0;
@@ -249,43 +240,19 @@ let depthDisposals = 0;
 physical.geometry.addEventListener('dispose', () => geometryDisposals++);
 physical.material.addEventListener('dispose', () => materialDisposals++);
 physical.userData.dofDepthMaterial.addEventListener('dispose', () => depthDisposals++);
-pair.physical.dispose();
-pair.physical.dispose();
+pair.dispose();
+pair.dispose();
 assert.equal(geometryDisposals, 1);
 assert.equal(materialDisposals, 1);
 assert.equal(depthDisposals, 1);
-assert.equal(pair.physical.group.children.length, 0);
+assert.equal(pair.group.children.length, 0);
 assert.equal(physical.userData.dofDepthMaterial, undefined);
 assert.equal(physical.visible, false);
 
-// The real-app A/B hook allocates the alternate path lazily, keeps exactly one
-// child active, and releases both representations when the owner is disposed.
-assert.equal(pair.points.debugSetRepresentationForTest('physical'), true);
-const lazyPhysical = pair.points.group.getObjectByName('nightlight-physical');
-assert(lazyPhysical?.isMesh);
-assert.equal(pair.points.group.children.length, 1);
-assert.deepEqual(
-  pair.points.debugRepresentation().allocatedRepresentations,
-  ['physical', 'points'],
-);
-assert.equal(pair.points.debugSetRepresentationForTest('points'), true);
-let switchedGeometryDisposals = 0;
-points.geometry.addEventListener('dispose', () => switchedGeometryDisposals++);
-lazyPhysical.geometry.addEventListener('dispose', () => switchedGeometryDisposals++);
-pair.points.dispose();
-pair.points.dispose();
-assert.equal(switchedGeometryDisposals, 2,
-  'A/B owner did not dispose both lazily allocated geometries exactly once');
-assert.equal(pair.points.group.children.length, 0);
-
-for (const api of [
-  repeat.points,
-  repeat.physical,
-  large.points,
-  large.physical,
-]) api.dispose();
+repeat.dispose();
+large.dispose();
 
 console.log(
   'NIGHTLIGHT PHYSICAL GEOMETRY: PASS '
-  + '(same deterministic slots, 1+1 draws, front-only depth, dispose plateau)',
+  + '(deterministic slots, 1+1 draws, front-only depth, dispose plateau)',
 );

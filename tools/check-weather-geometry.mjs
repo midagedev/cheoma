@@ -152,22 +152,16 @@ try {
   assert.ok(snowA.generations.some((value) => value > 0), 'snow respawn path was not exercised');
   assert.ok(rainA.generations.some((value) => value > 0), 'rain respawn path was not exercised');
 
-  const snowFar = weather.createSnowPointsRepresentation(snowA);
   const snowFull = weather.createPhysicalSnowRepresentation(snowA);
-  const rainFar = weather.createRainLinesRepresentation(rainA);
   const rainFull = weather.createPhysicalRainRepresentation(rainA);
-  for (const representation of [snowFar, snowFull]) {
+  for (const [representation, positions] of [
+    [snowFull, snowA.positions],
+    [rainFull, rainA.positions],
+  ]) {
     assert.strictEqual(
       representation.sourcePositions,
-      snowA.positions,
-      `${representation.kind} copied the snow simulation positions`,
-    );
-  }
-  for (const representation of [rainFar, rainFull]) {
-    assert.strictEqual(
-      representation.sourcePositions,
-      rainA.positions,
-      `${representation.kind} copied the rain simulation positions`,
+      positions,
+      `${representation.kind} copied the simulation positions`,
     );
   }
   assert.strictEqual(
@@ -180,14 +174,10 @@ try {
     rainA.positions,
     'physical rain instance centers are not the owner positions',
   );
-  for (const pair of [[snowFar, snowFull], [rainFar, rainFull]]) {
-    for (const representation of pair) representation.setCenterSpread(2.25);
-    assert.equal(pair[0].centerSpread, 2.25, `${pair[0].kind} lost view-owned field coverage`);
-    assert.equal(
-      pair[1].centerSpread,
-      pair[0].centerSpread,
-      `${pair[1].kind} changed world centers relative to FAR`,
-    );
+  for (const representation of [snowFull, rainFull]) {
+    representation.setCenterSpread(2.25);
+    assert.equal(representation.centerSpread, 2.25,
+      `${representation.kind} lost view-owned field coverage`);
   }
   assert.ok(
     snowFull.object.isMesh && snowFull.object.geometry.isInstancedBufferGeometry,
@@ -227,22 +217,18 @@ try {
     rain: weather.precipitationStateBytes(rainA),
   };
   const attributeBytes = Object.fromEntries(
-    [snowFar, snowFull, rainFar, rainFull]
+    [snowFull, rainFull]
       .map((representation) => [
         representation.kind,
         weather.representationAttributeBytes(representation),
       ]),
   );
-  assert.ok(
-    attributeBytes['snow-physical'] <= attributeBytes['snow-points'] + 1024,
-    'snow FULL copied viewport-sized or per-instance transform data',
-  );
-  assert.ok(
-    attributeBytes['rain-physical'] < attributeBytes['rain-lines'],
-    'rain FULL attributes exceed the duplicated line endpoint buffer',
-  );
+  assert.ok(attributeBytes['snow-physical'] < 3000,
+    'snow geometry allocated per-instance transforms or viewport data');
+  assert.ok(attributeBytes['rain-physical'] < 2600,
+    'rain geometry allocated per-instance transforms or viewport data');
 
-  for (const representation of [snowFar, snowFull, rainFar, rainFull]) {
+  for (const representation of [snowFull, rainFull]) {
     const geometryDisposed = disposalCounter(representation.object.geometry);
     const materialDisposed = disposalCounter(representation.object.material);
     const depth = representation.object.userData.dofDepthMaterial;
@@ -258,11 +244,8 @@ try {
   // measured by the visual harness; this catches accidental resources before upload.
   for (let cycle = 0; cycle < 12; cycle++) {
     const state = weather.createSnowPrecipitationState({ count: 32 });
-    const far = weather.createSnowPointsRepresentation(state);
     const full = weather.createPhysicalSnowRepresentation(state);
-    assert.equal(far.object.geometry.attributes.position.array, state.positions);
     assert.equal(full.object.geometry.attributes.aCenter.array, state.positions);
-    far.dispose();
     full.dispose();
   }
 
