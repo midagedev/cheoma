@@ -9,6 +9,7 @@ import { buildRoof } from './roof.js';
 import { buildGiwa } from './giwa.js';
 import { disposeBuilding, registerBuildingResources } from './lifecycle.js';
 import { normalizeChogaShape } from '../layout/choga-shape.js';
+import { attachShadowDepthTextureLifecycle } from '../render/shadow-depth-texture-lifecycle.js';
 
 export { disposeBuilding };
 
@@ -32,6 +33,7 @@ export function buildBuilding(P) {
     const root = buildGiwa(params, M);
     root.userData.layout = computeLayout(params);
     root.userData.materials = M;
+    attachShadowDepthTextureLifecycle(root);
     return registerBuildingResources(root, M, !params.mats);
   }
   const L = computeLayout(params);
@@ -52,5 +54,6 @@ export function buildBuilding(P) {
 
   root.userData.layout = L;
   root.userData.materials = M;
+  attachShadowDepthTextureLifecycle(root);
   return registerBuildingResources(root, M, !params.mats);
 }

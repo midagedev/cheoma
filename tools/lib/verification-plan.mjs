@@ -2,7 +2,7 @@ import { FAST_CHECK_PATHS } from './fast-checks.mjs';
 import { gateCommand } from './verification-gates.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -53,6 +53,7 @@ function routePath(path) {
     'tools/check-app-smoke.mjs': ['app'],
     'tools/check-detail-particle-geometry.mjs': ['particle-geometry'],
     'tools/check-instance-upload-browser.mjs': ['instance-upload'],
+    'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -117,7 +118,10 @@ function routePath(path) {
     if (/^src\/render\/(?:ink|ink-state)\.js$/.test(path)) select('ink rendering changed', 'ink-app');
     if (/^src\/render\/(?:material-program-key|screen-door|lod-screen-door)\.js$/.test(path)) {
       select('shared screen-door shader contract changed',
-        'ink-app', 'dof-app', 'lod-focus', 'winter-app', 'rim');
+        'ink-app', 'dof-app', 'lod-focus', 'winter-app', 'rim', 'building-lifecycle');
+    }
+    if (path === 'src/render/shadow-depth-texture-lifecycle.js') {
+      select('building shadow texture lifecycle changed', 'building-lifecycle');
     }
     if (/^src\/env\/(?:index|mountains|paddies|seasons|sky|snow-material|terrain|trees|weather)\.js$/.test(path)) {
       select('winter surface or environment changed', 'winter-app');
@@ -230,6 +234,9 @@ function routePath(path) {
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
     if (!/^src\/(?:export|share)\//.test(path)) select('worker scene graph may change', 'worker');
+    if (path.startsWith('src/builder/')) {
+      select('public building resource lifecycle changed', 'building-lifecycle');
+    }
     if (path === 'src/core/buffer-update-range.js') {
       select('BufferAttribute upload range ownership changed', 'instance-upload', 'lod-wave');
     }
@@ -287,6 +294,9 @@ function routePath(path) {
     }
     if (/^src\/api\/(?:building|cinematic|export|props|rendering)\.js$/.test(path)) {
       select('public feature API changed', 'app');
+      if (path === 'src/api/building.js') {
+        select('public building lifecycle changed', 'building-lifecycle');
+      }
       return { gates, reasons };
     }
     if (/^src\/api\/surface-material(?:-plan|s)\.js$/.test(path)) {
@@ -374,6 +384,7 @@ export function verificationCommands(plan) {
   if (has('petals')) commands.push(gateCommand('petals'));
   if (has('particle-geometry')) commands.push(gateCommand('particle-geometry'));
   if (has('instance-upload')) commands.push(gateCommand('instance-upload'));
+  if (has('building-lifecycle')) commands.push(gateCommand('building-lifecycle'));
   if (has('winter-app')) commands.push(gateCommand('winter-app'));
   if (has('worker')) commands.push(gateCommand('worker'));
   if (has('audio')) commands.push(gateCommand('audio'));
