@@ -162,8 +162,11 @@ export function createArchitecturalRevealRuntime({
     return { ...getState(), sample };
   }
 
-  function interrupt() {
+  function interrupt(event) {
     if (phase !== 'playing') return;
+    // A modal owns its keyboard interaction. `keydown` is captured on window so
+    // it must opt out here, before the dialog's focus trap receives the event.
+    if (event?.target?.closest?.('[aria-modal="true"]')) return;
     // Capture-phase listeners run before OrbitControls' target listener, so the
     // same pointerdown that cancels the reveal can immediately begin an orbit.
     finish('input');

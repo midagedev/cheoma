@@ -5,15 +5,31 @@
   let { seed = 0, onInfo } = $props();
   const seedStr = $derived('#' + String(seed >>> 0).slice(-4).padStart(4, '0'));
   const infoLabel = $derived(i18n.lang === 'ko' ? '참고 자료' : 'References & credits');
+
+  function openInfo(event) {
+    onInfo?.(event.currentTarget);
+  }
 </script>
 
 <div class="seal-label">
-  <button class="brand" onclick={onInfo} aria-label={infoLabel} title={infoLabel}>
+  <button
+    class="brand"
+    data-reference-trigger="brand"
+    onclick={openInfo}
+    aria-label={infoLabel}
+    title={infoLabel}
+  >
     <span class="stamp" aria-hidden="true">처마</span>
   </button>
   <div class="meta">
     <span class="seed" title={'seed ' + (seed >>> 0)}>{seedStr}</span>
-    <button class="info" onclick={onInfo} aria-label={infoLabel} title={infoLabel}>ⓘ</button>
+    <button
+      class="info"
+      data-reference-trigger="info"
+      onclick={openInfo}
+      aria-label={infoLabel}
+      title={infoLabel}
+    >ⓘ</button>
   </div>
   <div class="lang">
     <button class:on={i18n.lang === 'en'} onclick={() => setLang('en')}>EN</button>

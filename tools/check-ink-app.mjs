@@ -129,7 +129,7 @@ try {
   await page.addStyleTag({
     content: [
       'body.ink-scene-capture * { visibility: hidden !important; opacity: 0 !important; }',
-      'body.ink-scene-capture #app, body.ink-scene-capture .stage,',
+      'body.ink-scene-capture #app, body.ink-scene-capture .app-surface, body.ink-scene-capture .stage,',
       'body.ink-scene-capture .stage canvas { visibility: visible !important; opacity: 1 !important; }',
     ].join(' '),
   });

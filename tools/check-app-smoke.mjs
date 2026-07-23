@@ -54,9 +54,149 @@ try {
   // docs/credits.md is the public product-reference source of truth.  Verify the
   // newly applied house-plan and legal-limit evidence reaches the actual modal,
   // including authoritative links and the non-literal-use qualification.
-  await page.locator('button.info[aria-label="참고 자료"]').click();
-  const referenceDialog = page.locator('[role="dialog"][aria-label="참고 자료"]');
+  const referenceInfoTrigger = page.locator('button.info[aria-label="참고 자료"]');
+  await referenceInfoTrigger.focus();
+  await referenceInfoTrigger.press('Enter');
+  const referenceDialog = page.getByRole('dialog', { name: '참고 자료' });
   await referenceDialog.waitFor({ state: 'visible', timeout });
+  await page.waitForFunction(() => document.activeElement?.id === 'reference-modal-title', null, { timeout });
+  const referenceA11y = await referenceDialog.evaluate((dialog) => {
+    const surface = document.querySelector('[data-app-surface]');
+    const labelledBy = dialog.getAttribute('aria-labelledby');
+    return {
+      activeTitle: document.activeElement?.id === labelledBy,
+      labelledBy,
+      title: labelledBy ? document.getElementById(labelledBy)?.textContent?.trim() : null,
+      modal: dialog.getAttribute('aria-modal'),
+      surfaceInert: surface?.inert === true,
+      surfaceHidden: surface?.getAttribute('aria-hidden'),
+      hiddenAncestor: !!dialog.closest('[inert], [aria-hidden="true"]'),
+    };
+  });
+  pass(referenceA11y.activeTitle
+      && referenceA11y.labelledBy === 'reference-modal-title'
+      && referenceA11y.title === '참고 자료'
+      && referenceA11y.modal === 'true'
+      && referenceA11y.surfaceInert
+      && referenceA11y.surfaceHidden === 'true'
+      && !referenceA11y.hiddenAncestor,
+  `References opens at its labelled title while the app surface is inert (${JSON.stringify(referenceA11y)})`);
+
+  const closeReference = referenceDialog.getByRole('button', { name: '닫기' });
+  await closeReference.focus();
+  await page.keyboard.press('Shift+Tab');
+  const wrappedBackward = await referenceDialog.evaluate((dialog) => {
+    const focusable = [...dialog.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((element) => element.getClientRects().length > 0);
+    return document.activeElement === focusable.at(-1);
+  });
+  await page.keyboard.press('Tab');
+  const wrappedForward = await referenceDialog.evaluate((dialog) => {
+    const focusable = [...dialog.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((element) => element.getClientRects().length > 0);
+    return document.activeElement === focusable[0];
+  });
+  await referenceDialog.focus();
+  await page.keyboard.press('Shift+Tab');
+  const dialogWrappedBackward = await referenceDialog.evaluate((dialog) => {
+    const focusable = [...dialog.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((element) => element.getClientRects().length > 0);
+    return document.activeElement === focusable.at(-1);
+  });
+  await referenceDialog.focus();
+  await page.keyboard.press('Tab');
+  const dialogWrappedForward = await referenceDialog.evaluate((dialog) => {
+    const focusable = [...dialog.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((element) => element.getClientRects().length > 0);
+    return document.activeElement === focusable[0];
+  });
+  await page.evaluate(() => {
+    document.body.tabIndex = -1;
+    document.body.focus();
+    document.body.removeAttribute('tabindex');
+  });
+  const recoveredFocus = await referenceDialog.evaluate((dialog) => (
+    dialog.contains(document.activeElement) && document.activeElement?.id === 'reference-modal-title'
+  ));
+  pass(wrappedBackward
+      && wrappedForward
+      && dialogWrappedBackward
+      && dialogWrappedForward
+      && recoveredFocus,
+  'References traps forward/backward Tab from focusable and dialog entry points, and recovers programmatic focus escape');
+
+  const revealCapture = await page.evaluate(async ({ runtimeModuleUrl, threeModuleUrl }) => {
+    const [{ createArchitecturalRevealRuntime }, THREE] = await Promise.all([
+      import(runtimeModuleUrl),
+      import(threeModuleUrl),
+    ]);
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+    camera.position.set(0, 2, 8);
+    const controls = { target: new THREE.Vector3(0, 1, 0), enabled: true };
+    const canvas = document.createElement('canvas');
+    const runtime = createArchitecturalRevealRuntime({ camera, controls, domElement: canvas });
+    runtime.reveal('arrival', {
+      position: { x: 1, y: 2, z: 7 },
+      target: { x: 0, y: 1, z: 0 },
+      fov: 30,
+      referenceFov: 30,
+      composition: 0,
+    }, { duration: 1, subjectSize: 4 });
+    document.getElementById('reference-modal-title')?.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab', bubbles: true, cancelable: true,
+    }));
+    const modalKeyKeptReveal = runtime.isPlaying();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'x', bubbles: true, cancelable: true,
+    }));
+    const backgroundKeyInterrupted = runtime.getState().reason === 'input';
+    runtime.dispose();
+    return { modalKeyKeptReveal, backgroundKeyInterrupted };
+  }, {
+    runtimeModuleUrl: `/@fs${join(APP_ROOT, 'src/engine/architectural-reveal-runtime.js')}`,
+    threeModuleUrl: `/@fs${join(APP_ROOT, 'node_modules/three/build/three.module.js')}`,
+  });
+  pass(revealCapture.modalKeyKeptReveal && revealCapture.backgroundKeyInterrupted,
+    `modal keyboard input cannot interrupt the background architectural reveal (${JSON.stringify(revealCapture)})`);
+
+  await page.waitForFunction(() => window.__engine.cine.available(), null, { timeout });
+  const walkStartedBehindReferences = await page.evaluate(() => window.__engine.cine.start('walk'));
+  await page.waitForFunction(() => {
+    const state = window.__engine.cine.getState();
+    return state.active && state.mode === 'walk' && !!window.__engine.cine.debugWalker();
+  }, null, { timeout });
+  await page.evaluate(() => window.__engine.cine.setAutoStroll(false));
+  const referenceScrollLink = referenceDialog.locator('.scroll a[href]').first();
+  await referenceScrollLink.focus();
+  await referenceDialog.locator('.scroll').evaluate((scroll) => { scroll.scrollTop = 0; });
+  const walkBeforeModalKeys = await page.evaluate(() => window.__engine.cine.debugWalker()?.pos);
+  await page.keyboard.down('ArrowDown');
+  await page.waitForFunction(() => document.querySelector('[role="dialog"] .scroll')?.scrollTop > 0, null, { timeout });
+  await page.waitForTimeout(120);
+  await page.keyboard.up('ArrowDown');
+  await page.keyboard.down('w');
+  await page.waitForTimeout(120);
+  await page.keyboard.up('w');
+  const modalWalkIsolation = await referenceDialog.evaluate((dialog) => ({
+    scrollTop: dialog.querySelector('.scroll')?.scrollTop || 0,
+    focusInside: dialog.contains(document.activeElement),
+    cine: window.__engine.cine.getState(),
+    walker: window.__engine.cine.debugWalker(),
+  }));
+  pass(walkStartedBehindReferences
+      && modalWalkIsolation.scrollTop > 0
+      && modalWalkIsolation.focusInside
+      && modalWalkIsolation.cine.active
+      && modalWalkIsolation.cine.mode === 'walk'
+      && modalWalkIsolation.walker?.pos.x === walkBeforeModalKeys?.x
+      && modalWalkIsolation.walker?.pos.z === walkBeforeModalKeys?.z,
+  `References keeps Arrow/WASD out of active walk while preserving internal scrolling (${JSON.stringify({
+    before: walkBeforeModalKeys,
+    after: modalWalkIsolation,
+  })})`);
+  await page.evaluate(() => window.__engine.cine.stop());
+  await page.waitForFunction(() => !window.__engine.cine.getState().active, null, { timeout });
+
   const reference = await referenceDialog.evaluate((dialog) => ({
     text: dialog.textContent.replace(/\s+/g, ' ').trim(),
     links: [...dialog.querySelectorAll('a')].map((anchor) => anchor.href),
@@ -102,7 +242,130 @@ try {
       && reference.links.some((url) => url.includes('Naganeupseong_Village_06.jpg'))
       && reference.links.some((url) => url.includes('Naganeupseong_Village_08.jpg')),
   'packed-earth visual evidence, non-copying use, and CC0 source links render in Product References');
-  await referenceDialog.locator('button[aria-label="닫기"]').click();
+
+  await closeReference.click();
+  await referenceDialog.waitFor({ state: 'detached', timeout });
+  await page.waitForFunction((trigger) => document.activeElement === trigger, await referenceInfoTrigger.elementHandle(), { timeout });
+  pass(await referenceInfoTrigger.evaluate((trigger) => document.activeElement === trigger),
+    'closing References returns focus to the exact info trigger');
+
+  await referenceInfoTrigger.press('Enter');
+  await referenceDialog.waitFor({ state: 'visible', timeout });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('[role="dialog"]');
+    return dialog?.classList.contains('sheet')
+      && Math.abs(innerHeight - dialog.getBoundingClientRect().bottom) < 1;
+  }, null, { timeout });
+  const mobileReference = await referenceDialog.evaluate((dialog) => {
+    const scroll = dialog.querySelector('.scroll');
+    const rect = dialog.getBoundingClientRect();
+    const before = scroll.scrollTop;
+    scroll.scrollTop = Math.min(240, scroll.scrollHeight - scroll.clientHeight);
+    return {
+      sheet: dialog.classList.contains('sheet'),
+      left: rect.left,
+      right: innerWidth - rect.right,
+      bottom: innerHeight - rect.bottom,
+      height: rect.height,
+      viewportHeight: innerHeight,
+      scrollable: scroll.scrollHeight > scroll.clientHeight,
+      scrolled: scroll.scrollTop > before,
+      bodyScroll: scrollY,
+      surfaceInert: document.querySelector('[data-app-surface]')?.inert === true,
+      focusInside: dialog.contains(document.activeElement),
+    };
+  });
+  pass(mobileReference.sheet
+      && Math.abs(mobileReference.left) < 1
+      && Math.abs(mobileReference.right) < 1
+      && Math.abs(mobileReference.bottom) < 1
+      && mobileReference.height < mobileReference.viewportHeight
+      && mobileReference.scrollable
+      && mobileReference.scrolled
+      && mobileReference.bodyScroll === 0
+      && mobileReference.surfaceInert
+      && mobileReference.focusInside,
+  `390x844 References sheet stays bounded and owns scrolling (${JSON.stringify(mobileReference)})`);
+  await referenceDialog.getByRole('button', { name: '닫기' }).click();
+  await referenceDialog.waitFor({ state: 'detached', timeout });
+  await page.waitForFunction(() => {
+    const surface = document.querySelector('[data-app-surface]');
+    return document.activeElement === surface
+      && surface?.inert === false
+      && !surface.hasAttribute('aria-hidden');
+  }, null, { timeout });
+  const mobileCloseFallback = await page.locator('[data-app-surface]').evaluate((surface) => ({
+    focused: document.activeElement === surface,
+    inert: surface.inert,
+    hidden: surface.getAttribute('aria-hidden'),
+  }));
+  pass(mobileCloseFallback.focused
+      && !mobileCloseFallback.inert
+      && mobileCloseFallback.hidden == null,
+  `References close without a mounted trigger restores the active app surface after inert clears (${JSON.stringify(mobileCloseFallback)})`);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await referenceInfoTrigger.waitFor({ state: 'visible', timeout });
+  const remountInfoOpener = await referenceInfoTrigger.elementHandle();
+  await referenceInfoTrigger.press('Enter');
+  await referenceDialog.waitFor({ state: 'visible', timeout });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.classList.contains('sheet'), null, { timeout });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]')?.classList.contains('sheet'), null, { timeout });
+  const responsiveInfoFallback = await referenceInfoTrigger.elementHandle();
+  const responsiveOpenerReplaced = await page.evaluate(
+    ({ opener, fallback }) => opener !== fallback,
+    { opener: remountInfoOpener, fallback: responsiveInfoFallback },
+  );
+  await referenceDialog.getByRole('button', { name: '닫기' }).click();
+  await referenceDialog.waitFor({ state: 'detached', timeout });
+  await page.waitForFunction(
+    (trigger) => document.activeElement === trigger,
+    responsiveInfoFallback,
+    { timeout },
+  );
+  pass(responsiveOpenerReplaced
+      && await referenceInfoTrigger.evaluate((trigger) => document.activeElement === trigger),
+  'responsive References close returns focus to the remounted equivalent info trigger');
+
+  const modalEscapeParcel = await page.evaluate(() => {
+    const engine = window.__engine;
+    const parcelId = engine.village.debugParcels()[0]?.parcelId;
+    engine.village.debugFocus(parcelId);
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+    return parcelId;
+  });
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, modalEscapeParcel, { timeout });
+  const referenceBrandTrigger = page.locator('button.brand[aria-label="참고 자료"]');
+  await referenceBrandTrigger.focus();
+  const backgroundBeforeEscape = await page.evaluate(() => ({
+    village: window.__engine.village.getState(),
+    cine: window.__engine.cine.getState(),
+  }));
+  await referenceBrandTrigger.press('Enter');
+  await referenceDialog.waitFor({ state: 'visible', timeout });
+  await page.keyboard.press('Escape');
+  await referenceDialog.waitFor({ state: 'detached', timeout });
+  await page.waitForFunction((trigger) => document.activeElement === trigger, await referenceBrandTrigger.elementHandle(), { timeout });
+  const backgroundAfterEscape = await page.evaluate(() => ({
+    village: window.__engine.village.getState(),
+    cine: window.__engine.cine.getState(),
+  }));
+  pass(backgroundAfterEscape.village.selected === backgroundBeforeEscape.village.selected
+      && backgroundAfterEscape.village.transitioning === backgroundBeforeEscape.village.transitioning
+      && backgroundAfterEscape.cine.active === backgroundBeforeEscape.cine.active
+      && await referenceBrandTrigger.evaluate((trigger) => document.activeElement === trigger),
+  'modal Escape closes only References, preserves the focused scene, and returns to the brand trigger');
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.village.return();
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
 
   // __SHOT_READY는 렌더 준비 신호이지 1.4초 진입 돌리의 완료 신호가 아니다. 실제 제품 tween의
   // onDone을 결정적으로 실행해 explore 줌 범위가 설치된 상태에서 보기 계약을 검사한다.
