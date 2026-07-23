@@ -7,6 +7,7 @@
   //   variant='context'  : 단일 컨텍스트 패널(#92) — 데스크톱 우측 드로어(넓음, 편집 스키마 수용), 모바일
   //                        은 detent [full, half, peek] 상주 시트(스크림 없음 — 부감에서 줌·필지 조작 유지).
   //                        detent prop 으로 컨텍스트 전환 시 외부에서 detent 요청(부감=peek, 근접=half).
+  import { tick } from 'svelte';
   import { device } from '../lib/device.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
 
@@ -29,6 +30,8 @@
   let dragY = $state(null);                // 드래그 중 실시간 translateY(px), null=스냅
   let dragging = $state(false);
   let suppressClick = false;
+  let surface = $state(null);
+  let grip = $state(null);
 
   const detentY = (name) => {
     const H = sheetH || 1;
@@ -38,6 +41,40 @@
     return H + 40;                          // hidden
   };
   const transY = $derived(dragY != null ? dragY : detentY(snap));
+  // context peek는 손잡이만 실제 화면에 남는다. 화면 아래로 이동한 header/footer/body는 expanded일 때만
+  // 키보드·접근성 소유권을 되찾는다. 데스크톱과 일반 right sheet는 기존 open 의미를 그대로 쓴다.
+  const contentInteractive = $derived(open
+    && (!device.sheet || !isCard || (snap !== 'peek' && snap !== 'hidden')));
+
+  // 닫힘/peek 전환이 현재 포커스를 inert로 만들 때만 다음의 계속 보이는 소유자로 회수한다.
+  // References가 앱 표면을 inert로 만든 중첩 상태에서는 모달의 포커스를 절대 빼앗지 않는다.
+  let previousOpen = null;
+  let previousContentInteractive = null;
+  $effect.pre(() => {
+    const nextOpen = open;
+    const nextInteractive = contentInteractive;
+    if (previousOpen == null || previousContentInteractive == null) {
+      previousOpen = nextOpen;
+      previousContentInteractive = nextInteractive;
+      return;
+    }
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    let destination = null;
+    if (previousOpen && !nextOpen && surface?.contains(active)) {
+      destination = () => document.querySelector('[data-app-surface]');
+    } else if (previousContentInteractive && !nextInteractive && nextOpen
+      && surface?.contains(active) && active?.closest('[data-sheet-content]')) {
+      destination = () => grip;
+    }
+    previousOpen = nextOpen;
+    previousContentInteractive = nextInteractive;
+    if (destination) {
+      void tick().then(() => {
+        const target = destination();
+        if (target?.isConnected && !target.closest('[inert]')) target.focus({ preventScroll: true });
+      });
+    }
+  });
 
   // 외부 open 제어 → 진입(half)/이탈(hidden).
   let openedAt = 0;
@@ -99,14 +136,17 @@
     <div class="scrim" class:show={open && snap !== 'hidden'} onclick={scrimClose} aria-hidden="true"></div>
   {/if}
   <aside
+    bind:this={surface}
     bind:clientHeight={sheetH}
     class="sheet {variant} hanji-surface" class:open class:dragging
     data-snap={snap}
     style="transform: translateY({transY}px)"
     aria-hidden={!open}
     aria-label={ariaLabel}
+    inert={!open}
   >
     <div
+      bind:this={grip}
       class="grip" class:context={variant === 'context'} role="button" tabindex="0"
       aria-label={variant === 'context' ? (snap === 'peek' ? t('sheet_expand') : t('sheet_collapse')) : 'drag handle'}
       aria-expanded={variant === 'context' ? snap !== 'peek' : undefined}
@@ -129,19 +169,40 @@
     </div>
     <!-- #118 U1: context 헤더/푸터는 grip 아래 고정 도킹 — half detent(하단 46% 감춤)에서도 상단
          가시 영역에 남아 브레드크럼·주요 액션이 항상 보인다(바텀시트는 하단이 뷰포트 밖으로 밀리므로). -->
-    {#if header}<div class="sheethead">{@render header()}</div>{/if}
-    {#if footer}<div class="sheetfoot">{@render footer()}</div>{/if}
-    <div class="scroll" style="gap:{gap}px">{@render children?.()}</div>
+    {#if header}
+      <div data-sheet-content class="sheethead" inert={!contentInteractive} aria-hidden={!contentInteractive}>
+        {@render header()}
+      </div>
+    {/if}
+    {#if footer}
+      <div data-sheet-content class="sheetfoot" inert={!contentInteractive} aria-hidden={!contentInteractive}>
+        {@render footer()}
+      </div>
+    {/if}
+    <div
+      data-sheet-content
+      class="scroll"
+      style="gap:{gap}px"
+      inert={!contentInteractive}
+      aria-hidden={!contentInteractive}
+    >{@render children?.()}</div>
   </aside>
 {:else if variant === 'right'}
-  <aside class="panel hanji-surface" class:open aria-hidden={!open} style="gap:{gap}px">
+  <aside
+    bind:this={surface}
+    class="panel hanji-surface"
+    class:open
+    aria-hidden={!open}
+    inert={!open}
+    style="gap:{gap}px"
+  >
     {#if closable}<button class="close" onclick={onClose} aria-label="close">×</button>{/if}
     {@render children?.()}
   </aside>
 {:else if variant === 'context'}
   <!-- 단일 컨텍스트 패널(#92) 데스크톱 — 좌상단 자동높이 카드. #118 U1: 헤더(브레드크럼)·푸터(액션)를
        스크롤 밖 고정, 상세만 내부 스크롤 → 기본 펼침이어도 주요 액션이 폴드 아래 매몰되지 않는다. -->
-  <aside class="ctxcard hanji-surface" class:open aria-hidden={!open}>
+  <aside bind:this={surface} class="ctxcard hanji-surface" class:open aria-hidden={!open} inert={!open}>
     {#if header}<div class="ctxhead">{@render header()}</div>{/if}
     <div class="ctxscroll" style="gap:{gap}px">{@render children?.()}</div>
     {#if footer}<div class="ctxfoot">{@render footer()}</div>{/if}
