@@ -50,11 +50,15 @@ const expectedSceneHashes = {
   // source depth, and the fixed 1+1 draw family are covered by the dedicated lighting
   // gates. #112 splits solid walls on rendered terrain into bounded horizontal
   // steps while preserving flat/soft-boundary output and every pick proxy byte.
+  // #122 writes each temple hall's role-ranked roof/bracket/eave/massing grammar
+  // and actual eave polygon into the pure plan. Temple meshes and serialized
+  // plans therefore change at every scale, while residential geometry and pick
+  // proxies remain unchanged.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: 'ca4213e8:9de82f9e:d7419395:6f27213a',
-  town: '54c7f37b:81c31de3:6d46b1ee:ab077b05',
-  capital: 'caac704d:93a66435:8ecdeab9:8d429eef',
-  hanyang: '6a67571b:07ed5e15:62c28c0e:1be97a8b',
+  village: '089c40b0:962ffb12:7695c335:724597c8',
+  town: '66734b4e:aa496306:29632b4b:c38d6c78',
+  capital: '32b7209b:e64634d5:0558697c:53238c77',
+  hanyang: 'ddaf67c1:8063fd77:4b593521:def6c357',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

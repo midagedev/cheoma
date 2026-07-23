@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "baselineCommit": "93f5a4e",
-  "templeRevision": "issue-12-compound-2026-07-22",
+  "templeRevision": "issue-122-role-hierarchy-2026-07-23",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
   "focusCameraRevision": "issue-95-focus-telephoto-7-10deg-2026-07-23",
@@ -32,24 +32,24 @@
       "bytes": 901936
     },
     "hamlet:temple": {
-      "hash": "97e1154d923da577f190db4ccd4bc14c47dec02c47dff1c007fe21b87671f211",
-      "bytes": 34838
+      "hash": "013d086bac111ad3c744eb8ba9d54e522117ad71ea77a44f6b5fddf245f3d7c4",
+      "bytes": 35496
     },
     "village:temple": {
-      "hash": "d2c96f518231378a24110a5e455bd27d36f87d5519db03b2ddc7add511811134",
-      "bytes": 88895
+      "hash": "e2eac58f72029f45361d19b6c88229c3ed7ad709fa888a123d129f706aedebc5",
+      "bytes": 91528
     },
     "town:temple": {
-      "hash": "095e24485989c11503191d353135ff4112dcd43806de426e0fe103aab895f750",
-      "bytes": 193957
+      "hash": "36620153df6b6d108b6c9eb51bc4bb2f4aaeff85a527461cfa01607563f3a6ed",
+      "bytes": 196594
     },
     "capital:temple": {
-      "hash": "8b541c4fde9d2da05d4f27dfd029ae310d1c1c12d02a6be45e3400d91f6a26e7",
-      "bytes": 171639
+      "hash": "2796e191b448ebdd8add78087d2387319d97b3d276d51e9f1d95174b3b89712f",
+      "bytes": 176273
     },
     "hanyang:temple": {
-      "hash": "8e92c6e6c9d52a390aefe1fa5e8422b41c56a4d80d0015c2dbeb4d807ca801fe",
-      "bytes": 888918
+      "hash": "36e339fb23283a6ac4b9062bbb25efe536c73f9d7c51d1aa79e1d302419e6965",
+      "bytes": 893552
     }
   }
 }
