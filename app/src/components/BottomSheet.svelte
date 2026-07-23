@@ -1,10 +1,9 @@
 <script>
-  // 반응형 패널 셸. 데스크톱은 기존 우측 한지 패널(.panel) / 좌상 카드(.vcard) 그대로,
+  // 반응형 패널 셸. 데스크톱은 우측 한지 패널(.panel) / 좌상 컨텍스트 카드(.ctxcard),
   // 모바일(device.sheet)에서는 드래그 핸들·detent(반개/전개)·스크림을 갖춘 바텀 시트로 전환.
   // 내용은 children 스니펫으로 받아 부모의 스타일 스코프를 유지한다(.tab/.step/.opt 등 그대로).
   //
   //   variant='right'    : 집 고치기 패널. 모바일 detent [full, half], half 아래로 끌면 닫힘, 스크림.
-  //   variant='leftCard' : 마을 옵션. 모바일 detent [full, half, peek], 닫히지 않고 peek 로 접힘, 스크림 없음(씬 계속 선택 가능).
   //   variant='context'  : 단일 컨텍스트 패널(#92) — 데스크톱 우측 드로어(넓음, 편집 스키마 수용), 모바일
   //                        은 detent [full, half, peek] 상주 시트(스크림 없음 — 부감에서 줌·필지 조작 유지).
   //                        detent prop 으로 컨텍스트 전환 시 외부에서 detent 요청(부감=peek, 근접=half).
@@ -19,8 +18,8 @@
     //   모바일 시트는 상단 도킹(half detent 에서 아래 밀려나 감춰지지 않도록 grip 아래로). context 만 사용.
     header = null, footer = null,
   } = $props();
-  // 상주·소형카드 계열(스크림 없이 씬 조작 유지, peek detent 허용).
-  const isCard = $derived(variant === 'leftCard' || variant === 'context');
+  // 상주 컨텍스트 카드(스크림 없이 씬 조작 유지, peek detent 허용).
+  const isCard = $derived(variant === 'context');
 
   // 모바일 시트 상태머신 — translateY(px, 아래로 +)로 detent 표현.
   //   full(0) → half → peek(H-peekPx) → hidden(H+40).
@@ -45,7 +44,7 @@
   $effect(() => {
     if (!device.sheet) return;
     if (open) {
-      // 카드 계열(마을 옵션·컨텍스트)은 peek 로 진입 — 씬·액션바를 가리지 않고 손잡이만 노출.
+      // 컨텍스트 카드는 peek 로 진입 — 씬·액션바를 가리지 않고 손잡이만 노출.
       // 집 편집(right)은 half 로 진입.
       if (snap === 'hidden') { snap = isCard ? 'peek' : 'half'; openedAt = performance.now(); }
     } else snap = 'hidden';
@@ -87,11 +86,10 @@
   }
   // 핸들 탭 = detent 토글(드래그 후 클릭은 무시).
   //   context(#154): 기본 접힘(peek)이라 손잡이는 접힘↔펼침 2-state 토글 — '편집 열기' 버튼 은유.
-  //   그 외 카드(leftCard)는 3-state 순환, right 는 full↔half.
+  //   right 는 full↔half.
   function tapGrip() {
     if (suppressClick) { suppressClick = false; return; }
     if (variant === 'context') snap = snap === 'peek' ? 'half' : 'peek';
-    else if (isCard) snap = snap === 'peek' ? 'half' : snap === 'half' ? 'full' : 'peek';
     else snap = snap === 'full' ? 'half' : 'full';
   }
 </script>
@@ -148,10 +146,6 @@
     <div class="ctxscroll" style="gap:{gap}px">{@render children?.()}</div>
     {#if footer}<div class="ctxfoot">{@render footer()}</div>{/if}
   </aside>
-{:else}
-  <aside class="vcard hanji-surface" class:open aria-hidden={!open} style="gap:{gap}px">
-    {@render children?.()}
-  </aside>
 {/if}
 
 <style>
@@ -177,26 +171,8 @@
   }
   .close:hover { background: rgba(44, 38, 32, 0.06); }
 
-  /* ---------- 데스크톱 좌상 카드 (마을 옵션) ---------- */
-  .vcard {
-    position: fixed;
-    left: clamp(10px, 1.6vw, 22px);
-    top: calc(clamp(10px, 1.6vh, 22px) + 52px);
-    z-index: 32;
-    width: 216px;
-    max-width: 78vw;
-    padding: 14px 15px 16px;
-    border-radius: 9px;
-    display: flex; flex-direction: column;
-    transform: translateX(-118%);
-    opacity: 0;
-    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
-    pointer-events: none;
-  }
-  .vcard.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
-
   /* ---------- 데스크톱 단일 컨텍스트 카드(#92) — 좌상단(ModeToggle 아래) 자동높이, 편집 시 늘어나 스크롤 ----------
-     마을 옵션(구 vcard) 자리를 계승해 다이얼(우상단)·액션바(우하단)와 충돌하지 않는다(시프트 불필요). */
+     다이얼(우상단)·액션바(우하단)와 충돌하지 않는다(시프트 불필요). */
   .ctxcard {
     position: fixed;
     left: clamp(10px, 1.6vw, 22px);

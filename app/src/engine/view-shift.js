@@ -1,5 +1,5 @@
 const SHIFT_FRAC = 0.5;
-const PANEL_SELECTOR = '.ctxcard, .vcard, .panel, .sheet';
+const PANEL_SELECTOR = '.ctxcard, .panel, .sheet';
 
 /**
  * Keep the subject centered in the visible viewport when UI panels cover part

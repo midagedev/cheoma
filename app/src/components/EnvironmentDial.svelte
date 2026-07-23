@@ -1,6 +1,7 @@
 <script>
   // 우상 3링 환경 다이얼 — 시간(외)·계절(중)·날씨(내).
   // 세그먼트 클릭 또는 링 드래그로 조작, 바늘이 스냅 회전(관성감). 라벨은 로케일화.
+  import { onMount } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
     SEASON_IDS,
@@ -74,7 +75,14 @@
   function pickEnvReroll(cur) {
     return pickEnvironmentScene(Math.random, cur);
   }
-  if (typeof window !== 'undefined') window.__envRerollPick = pickEnvReroll; // playwright 검증 훅
+  onMount(() => {
+    if (typeof window === 'undefined') return undefined;
+    const hook = pickEnvReroll;
+    window.__envRerollPick = hook; // playwright 검증 훅
+    return () => {
+      if (window.__envRerollPick === hook) delete window.__envRerollPick;
+    };
+  });
 
   let spins = $state(0);
   function rollEnv() {
