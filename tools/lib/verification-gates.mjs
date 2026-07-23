@@ -4,6 +4,7 @@ export const VERIFICATION_GATES = Object.freeze({
   app: Object.freeze({ script: 'check:app', resource: 'browser', tier: 'checkpoint', description: 'Full application smoke' }),
   'ink-app': Object.freeze({ script: 'check:ink:app', resource: 'browser', tier: 'checkpoint', description: 'Ink mode application contract' }),
   petals: Object.freeze({ script: 'check:petals', resource: 'browser', tier: 'checkpoint', description: 'Seasonal particle and weather contract' }),
+  'particle-geometry': Object.freeze({ script: 'check:particle-geometry', resource: 'browser', tier: 'checkpoint', description: 'Physical precipitation, close-detail particle, and hanji-light geometry' }),
   'winter-app': Object.freeze({ script: 'check:winter:app', resource: 'browser', tier: 'checkpoint', description: 'Winter application surface' }),
   worker: Object.freeze({ script: 'check:worker', resource: 'browser', tier: 'checkpoint', description: 'Sync, Worker, and fallback scene parity' }),
   audio: Object.freeze({ script: 'check:audio', resource: 'browser', tier: 'checkpoint', description: 'Audio lifecycle contract' }),
@@ -21,7 +22,8 @@ export const VERIFICATION_GATES = Object.freeze({
 });
 
 export const ALL_PROFILE = Object.freeze([
-  'docs', 'core-full', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio',
+  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
+  'winter-app', 'worker', 'audio',
   'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
 

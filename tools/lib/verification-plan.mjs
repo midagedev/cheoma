@@ -2,9 +2,9 @@ import { FAST_CHECK_PATHS } from './fast-checks.mjs';
 import { gateCommand } from './verification-gates.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'temple-browser',
-  'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser', 'surface-browser',
-  'cinematic-app', 'build',
+  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'winter-app', 'worker', 'audio',
+  'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
+  'surface-browser', 'cinematic-app', 'build',
 ]);
 
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
@@ -51,6 +51,7 @@ function routePath(path) {
   }
   const browserToolGates = {
     'tools/check-app-smoke.mjs': ['app'],
+    'tools/check-detail-particle-geometry.mjs': ['particle-geometry'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -135,6 +136,9 @@ function routePath(path) {
     if (/^src\/env\/(?:petals|weather|seasons)\.js$/.test(path)) {
       select('seasonal particle/weather contract changed', 'petals');
     }
+    if (/^src\/env\/(?:detail-particle-geometry|motes|petals|seasons|weather|weather-physical-geometry)\.js$/.test(path)) {
+      select('physical particle representation changed', 'particle-geometry');
+    }
     if (path === 'src/env/petals.js') select('focus particle LOD changed', 'lod-focus');
     if (/^src\/env\/(?:weather|seasons)\.js$/.test(path)) {
       select('wave environment synchronization changed', 'lod-wave');
@@ -180,6 +184,9 @@ function routePath(path) {
       select('parcel representation changed', 'lod-focus', 'lod-wave');
     }
     if (path === 'src/village/instancing.js') select('impostor snow surface changed', 'winter-app');
+    if (/^src\/village\/(?:nightlight-physical-geometry|nightlights)\.js$/.test(path)) {
+      select('physical hanji-light representation changed', 'particle-geometry');
+    }
     if (path === 'src/village/nightlights.js') {
       select('wave-owned, source-depth village lighting changed', 'dof-app', 'lod-wave');
     }
@@ -237,6 +244,10 @@ function routePath(path) {
     }
     if (path === 'src/api/environment.js') {
       select('environment API changed', 'app', 'dof-app', 'petals', 'winter-app', 'lod-wave');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/particles.js') {
+      select('physical particle API changed', 'app', 'particle-geometry');
       return { gates, reasons };
     }
     if (path === 'src/api/post-quality.js') {
@@ -346,6 +357,7 @@ export function verificationCommands(plan) {
   if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));
   if (has('rim')) commands.push(gateCommand('rim'));
   if (has('petals')) commands.push(gateCommand('petals'));
+  if (has('particle-geometry')) commands.push(gateCommand('particle-geometry'));
   if (has('winter-app')) commands.push(gateCommand('winter-app'));
   if (has('worker')) commands.push(gateCommand('worker'));
   if (has('audio')) commands.push(gateCommand('audio'));

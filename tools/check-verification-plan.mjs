@@ -30,8 +30,18 @@ assert.deepEqual(ids(['src/env/bokeh-source-scatter.js']), [
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
 assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'lod-app']);
 assert.deepEqual(ids(['src/env/snow-material.js']), ['core', 'app', 'rim', 'winter-app']);
-assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'winter-app', 'lod-wave']);
-assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
+assert.deepEqual(ids(['src/env/weather.js']), [
+  'core', 'app', 'petals', 'particle-geometry', 'winter-app', 'lod-wave',
+]);
+assert.deepEqual(ids(['src/env/petals.js']), [
+  'core', 'app', 'petals', 'particle-geometry', 'lod-focus',
+]);
+assert.deepEqual(ids(['src/env/motes.js']), [
+  'core', 'app', 'particle-geometry', 'lod-app',
+]);
+assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
+  'core', 'app', 'particle-geometry',
+]);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'lod-app']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
@@ -91,7 +101,7 @@ assert.deepEqual(ids(['src/builder/palette.js']), [
   'core', 'app', 'rim', 'winter-app', 'worker',
 ]);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
-  'core', 'app', 'petals', 'winter-app', 'worker', 'lod-wave',
+  'core', 'app', 'petals', 'particle-geometry', 'winter-app', 'worker', 'lod-wave',
 ]);
 assert.deepEqual(ids(['package-lock.json']), ['full']);
 assert.equal(planVerification(['package-lock.json']).routes[0].full, true);
@@ -130,7 +140,14 @@ for (const helper of [
 }
 assert.deepEqual(ids(['tools/shoot-bokeh-scatter-proof.mjs']), ['core', 'bokeh-fixture']);
 assert.deepEqual(ids(['src/village/nightlights.js']), [
-  'core', 'app', 'dof-app', 'worker', 'lod-wave',
+  'core', 'app', 'dof-app', 'particle-geometry', 'worker', 'lod-wave',
+]);
+assert.deepEqual(ids(['src/village/nightlight-physical-geometry.js']), [
+  'core', 'app', 'particle-geometry', 'worker',
+]);
+assert.deepEqual(ids(['src/api/particles.js']), ['core', 'app', 'particle-geometry']);
+assert.deepEqual(ids(['tools/check-detail-particle-geometry.mjs']), [
+  'core', 'particle-geometry',
 ]);
 const bokehCommands = verificationCommands(planVerification(['src/env/bokeh-source-scatter.js']));
 assert.deepEqual(
@@ -147,13 +164,22 @@ assert.deepEqual(impactedFastChecks(['src/env/circular-bokeh-shader.js']), [
 assert.deepEqual(impactedFastChecks(['src/camera/optics.js']), [
   './check-architecture.mjs', './check-dof.mjs', './check-plan-contract.mjs', './check-lod.mjs',
 ]);
+assert.deepEqual(impactedFastChecks(['src/env/weather-physical-geometry.js']), [
+  './check-architecture.mjs', './check-weather-geometry.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['src/village/nightlight-physical-geometry.js']), [
+  './check-architecture.mjs', './check-nightlight-geometry.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['src/village/nightlights.js']).includes(
+  './check-nightlight-geometry.mjs',
+), true);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [
   'core', 'app', 'dof-app', 'rim', 'worker', 'lod-app', 'cinematic-app',
 ]);
 assert.deepEqual(ALL_PROFILE, [
-  'docs', 'core-full', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio',
-  'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
+  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
+  'winter-app', 'worker', 'audio', 'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [
   ...ALL_PROFILE, 'dof-app', 'rim', 'lod-app', 'cinematic-app', 'build',
