@@ -1,9 +1,13 @@
+import { FAST_CHECK_PATHS } from './fast-checks.mjs';
+import { gateCommand } from './verification-gates.mjs';
+
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'dof-app', 'lod-focus', 'lod-wave',
-  'rim', 'parcel-rebuild-browser', 'surface-browser', 'build',
+  'core', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'temple-browser',
+  'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser', 'surface-browser',
+  'cinematic-app', 'build',
 ]);
 
-const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$)|\.gitignore$)/;
+const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
 
 function add(gates, ...items) {
@@ -18,7 +22,15 @@ function routePath(path) {
     reasons.push(reason);
   };
 
-  if (DOC_PATH.test(path)) return { gates, reasons: ['documentation only'] };
+  if (DOC_PATH.test(path)) {
+    select('documentation only', 'docs');
+    return { gates, reasons };
+  }
+
+  if (path === '.gitignore') {
+    select('change-discovery and worktree hygiene changed', 'core');
+    return { gates, reasons };
+  }
 
   if (/^(?:package(?:-lock)?\.json|app\/package(?:-lock)?\.json|app\/vite\.config\.js)$/.test(path)) {
     return { full: true, reasons: ['dependency or build configuration changed'] };
@@ -32,6 +44,31 @@ function routePath(path) {
   }
   if (path === 'src/main.js' || ROOT_HTML.test(path)) {
     return { full: true, reasons: ['standalone entrypoint requires the full matrix'] };
+  }
+  if (FAST_CHECK_PATHS.includes(path) || path === 'tools/plan-contract.json') {
+    select('browser-free contract changed; run it through impacted core routing', 'core');
+    return { gates, reasons };
+  }
+  const browserToolGates = {
+    'tools/check-app-smoke.mjs': ['app'],
+    'tools/check-ink-app.mjs': ['ink-app'],
+    'tools/verify-petals.mjs': ['petals'],
+    'tools/check-winter-app.mjs': ['winter-app'],
+    'tools/check-worker-contract.mjs': ['worker'],
+    'tools/check-audio.mjs': ['audio'],
+    'tools/check-temple-browser.mjs': ['temple-browser'],
+    'tools/check-parcel-rebuild-browser.mjs': ['parcel-rebuild-browser'],
+    'tools/check-surface-materials-browser.mjs': ['surface-browser'],
+    'tools/check-dof-app.mjs': ['dof-app'],
+    'tools/shoot-bokeh-fixture.mjs': ['bokeh-fixture'],
+    'tools/check-rim-facing.mjs': ['rim'],
+    'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
+    'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
+    'tools/check-app-build.mjs': ['build'],
+  };
+  if (browserToolGates[path]) {
+    select('existing browser contract changed; run its owning gate', ...browserToolGates[path]);
+    return { gates, reasons };
   }
   if (path.startsWith('tools/')) {
     return { full: true, reasons: ['verification implementation changed'] };
@@ -82,7 +119,9 @@ function routePath(path) {
     if (/^src\/env\/(?:post-quality-state|stable-bokeh-pass|circular-bokeh-shader)\.js$/.test(path)) {
       select('adaptive post policy changed', 'ink-app', 'lod-focus');
     }
-    if (path === 'src/env/rim.js') select('physical rim contract changed', 'rim');
+    if (/^src\/env\/(?:rim|clouds|snow-material)\.js$/.test(path)) {
+      select('physical rim inputs changed', 'rim');
+    }
     if (/^src\/env\/(?:petals|weather|seasons)\.js$/.test(path)) {
       select('seasonal particle/weather contract changed', 'petals');
     }
@@ -102,8 +141,10 @@ function routePath(path) {
 
   if (path.startsWith('src/camera/') || path.startsWith('src/cinematic/')) {
     select('camera/cinematic behavior changed', 'app');
+    if (path.startsWith('src/cinematic/')) select('cinematic product path changed', 'cinematic-app');
     if (path === 'src/camera/optics.js') {
-      select('optical transition changed', 'dof-app', 'lod-focus', 'lod-wave');
+      select('optical transition and pick-proxy framing changed',
+        'dof-app', 'lod-focus', 'lod-wave', 'worker', 'rim', 'cinematic-app');
     }
     if (path === 'src/camera/directional-shadow-anchor.js') {
       select('focused directional shadow framing changed', 'rim', 'lod-focus');
@@ -151,11 +192,24 @@ function routePath(path) {
     return { gates, reasons };
   }
 
+  if (path.startsWith('src/temple/')) {
+    select('reusable temple plan or assembly changed', 'app', 'worker', 'temple-browser', 'lod-focus');
+    return { gates, reasons };
+  }
+
+  if (path.startsWith('src/interaction/')
+    || /^src\/api\/(?:door-motion|opening-detail|residential-openings|threshold-life)\.js$/.test(path)) {
+    select('residential interaction or opening contract changed', 'app', 'dof-app', 'parcel-rebuild-browser');
+    return { gates, reasons };
+  }
+
   if (/^src\/(?:builder|layout|props|anim|core|export|share)\//.test(path)
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
     if (!/^src\/(?:export|share)\//.test(path)) select('worker scene graph may change', 'worker');
-    if (path === 'src/builder/palette.js') select('roof snow role changed', 'winter-app');
+    if (path === 'src/builder/palette.js') {
+      select('roof snow and rim material roles changed', 'winter-app', 'rim');
+    }
     return { gates, reasons };
   }
 
@@ -185,6 +239,10 @@ function routePath(path) {
       select('village plan API changed', 'app', 'worker');
       return { gates, reasons };
     }
+    if (path === 'src/api/temple.js' || path === 'src/api/temple-plan.js') {
+      select('public temple API changed', 'app', 'worker', 'temple-browser', 'lod-focus');
+      return { gates, reasons };
+    }
     if (path === 'src/api/shadow-framing.js') {
       select('directional shadow framing API changed', 'app', 'rim', 'lod-focus');
       return { gates, reasons };
@@ -211,13 +269,18 @@ export function normalizeVerificationPath(value) {
   return path;
 }
 
-export function planVerification(paths, { forceFullReason = null, newPaths = [] } = {}) {
+export function planVerification(paths, {
+  forceFullReason = null,
+  newPaths = [],
+  pureChecks = ['./check-architecture.mjs'],
+} = {}) {
   const files = [...new Set(paths.map(normalizeVerificationPath))].sort();
   const fileSet = new Set(files);
   const normalizedNewPaths = new Set(
     newPaths.map(normalizeVerificationPath).filter((path) => fileSet.has(path)),
   );
-  const gates = new Set(['core']);
+  const documentationOnly = files.length > 0 && files.every((path) => DOC_PATH.test(path));
+  const gates = new Set(documentationOnly ? ['docs'] : ['core']);
   const routes = [];
   let fullReason = forceFullReason;
 
@@ -248,6 +311,7 @@ export function planVerification(paths, { forceFullReason = null, newPaths = [] 
     full: !!fullReason,
     fullReason,
     gates: [...gates],
+    pureChecks: documentationOnly ? [] : [...new Set(pureChecks)].sort(),
     routes,
   };
 }
@@ -255,33 +319,38 @@ export function planVerification(paths, { forceFullReason = null, newPaths = [] 
 export function verificationCommands(plan) {
   if (plan.full) return [{ id: 'full', command: 'npm', args: ['run', 'check:full'] }];
 
-  const commands = [{ id: 'core', command: 'npm', args: ['run', 'check'] }];
+  const commands = [];
   const has = (gate) => plan.gates.includes(gate);
-  if (has('app')) commands.push({ id: 'app', command: 'npm', args: ['run', 'check:app'] });
-  if (has('ink-app')) commands.push({ id: 'ink-app', command: 'npm', args: ['run', 'check:ink:app'] });
-  if (has('dof-app')) commands.push({ id: 'dof-app', command: 'npm', args: ['run', 'check:dof:app'] });
-  if (has('rim')) commands.push({ id: 'rim', command: 'npm', args: ['run', 'check:rim'] });
-  if (has('petals')) commands.push({ id: 'petals', command: 'npm', args: ['run', 'check:petals'] });
-  if (has('winter-app')) commands.push({ id: 'winter-app', command: 'npm', args: ['run', 'check:winter:app'] });
-  if (has('worker')) commands.push({ id: 'worker', command: 'npm', args: ['run', 'check:worker'] });
-  if (has('audio')) commands.push({ id: 'audio', command: 'npm', args: ['run', 'check:audio'] });
-  if (has('lod-focus')) {
-    commands.push({ id: 'lod-focus', command: 'npm', args: ['run', 'check:lod:focus'] });
-  }
-  if (has('lod-wave')) {
-    commands.push({ id: 'lod-wave', command: 'npm', args: ['run', 'check:wave:app'] });
+  if (has('docs')) commands.push(gateCommand('docs'));
+  if (has('core')) commands.push({
+    id: 'core',
+    command: process.execPath,
+    args: ['tools/check-selected.mjs', ...(plan.pureChecks || ['./check-architecture.mjs'])],
+    resource: 'cpu',
+  });
+  if (has('app')) commands.push(gateCommand('app'));
+  if (has('ink-app')) commands.push(gateCommand('ink-app'));
+  if (has('dof-app')) commands.push(gateCommand('dof-app'));
+  if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));
+  if (has('rim')) commands.push(gateCommand('rim'));
+  if (has('petals')) commands.push(gateCommand('petals'));
+  if (has('winter-app')) commands.push(gateCommand('winter-app'));
+  if (has('worker')) commands.push(gateCommand('worker'));
+  if (has('audio')) commands.push(gateCommand('audio'));
+  if (has('temple-browser')) commands.push(gateCommand('temple-browser'));
+  if (has('lod-focus') && has('lod-wave')) {
+    commands.push(gateCommand('lod-app'));
+  } else if (has('lod-focus')) {
+    commands.push(gateCommand('lod-focus'));
+  } else if (has('lod-wave')) {
+    commands.push(gateCommand('lod-wave'));
   }
   if (has('parcel-rebuild-browser')) {
-    commands.push({
-      id: 'parcel-rebuild-browser',
-      command: 'npm',
-      args: ['run', 'check:parcel-rebuild:browser'],
-    });
+    commands.push(gateCommand('parcel-rebuild-browser'));
   }
-  if (has('surface-browser')) {
-    commands.push({ id: 'surface-browser', command: 'npm', args: ['run', 'check:surface:browser'] });
-  }
-  if (has('build')) commands.push({ id: 'build', command: 'npm', args: ['run', 'check:build'] });
+  if (has('surface-browser')) commands.push(gateCommand('surface-browser'));
+  if (has('cinematic-app')) commands.push(gateCommand('cinematic-app'));
+  if (has('build')) commands.push(gateCommand('build'));
   return commands;
 }
 

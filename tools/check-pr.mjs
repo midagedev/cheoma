@@ -1,15 +1,23 @@
 import { readFile } from 'node:fs/promises';
-import { spawn, spawnSync } from 'node:child_process';
-import { performance } from 'node:perf_hooks';
-import { planVerification, verificationCommands } from './lib/verification-plan.mjs';
+import { spawnSync } from 'node:child_process';
+import {
+  normalizeVerificationPath,
+  planVerification,
+  verificationCommands,
+} from './lib/verification-plan.mjs';
+import { impactedFastChecks } from './lib/verification-impact.mjs';
+import { runCommandSuite } from './lib/verification-runner.mjs';
 
 function parseArgs(argv) {
-  const options = { dryRun: false, json: false, full: false, base: null, filesFrom: null };
+  const options = {
+    dryRun: false, json: false, full: false, serial: false, base: null, filesFrom: null,
+  };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--full') options.full = true;
+    else if (arg === '--serial') options.serial = true;
     else if (arg === '--base' || arg === '--files-from') {
       const value = argv[++index];
       if (!value) throw new Error(`${arg} requires a value`);
@@ -71,7 +79,7 @@ async function collectChangedFiles(options) {
   const mergeBase = git(['merge-base', 'HEAD', base]).trim();
   if (!mergeBase) throw new Error(`no merge base for ${base}`);
   if (options.filesFrom) {
-    const files = await readInjectedFiles(options.filesFrom);
+    const files = (await readInjectedFiles(options.filesFrom)).map(normalizeVerificationPath);
     const basePaths = new Set(git(['ls-tree', '-r', '--name-only', mergeBase]).split('\n').filter(Boolean));
     return { files, newPaths: files.filter((path) => !basePaths.has(path)), base };
   }
@@ -103,25 +111,9 @@ function printHuman(plan, commands, { base, collectionError }) {
   for (const command of commands) console.log(`RUN    ${printableCommand(command)}`);
 }
 
-async function runCommand(command) {
-  const executable = process.platform === 'win32' && command.command === 'npm' ? 'npm.cmd' : command.command;
-  const started = performance.now();
-  const code = await new Promise((resolve, reject) => {
-    const child = spawn(executable, command.args, { stdio: 'inherit', env: process.env });
-    child.on('error', reject);
-    child.on('exit', (exitCode, signal) => {
-      if (signal) reject(new Error(`${command.id} terminated by ${signal}`));
-      else resolve(exitCode ?? 1);
-    });
-  });
-  const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  if (code !== 0) throw new Error(`${command.id} failed with exit ${code} after ${seconds}s`);
-  console.log(`DONE   ${command.id} ${seconds}s`);
-}
-
 const options = parseArgs(process.argv.slice(2));
 if (options.help) {
-  console.log('Usage: node tools/check-pr.mjs [--dry-run] [--json] [--full] [--base REF] [--files-from FILE|-]');
+  console.log('Usage: node tools/check-pr.mjs [--dry-run] [--json] [--full] [--serial] [--base REF] [--files-from FILE|-]');
   console.log('       --json prints the plan without executing it');
   process.exit(0);
 }
@@ -138,7 +130,11 @@ if (!options.full) {
 const forceFullReason = options.full ? '--full requested' : collectionError;
 let plan;
 try {
-  plan = planVerification(collected.files, { forceFullReason, newPaths: collected.newPaths });
+  plan = planVerification(collected.files, {
+    forceFullReason,
+    newPaths: collected.newPaths,
+    pureChecks: impactedFastChecks(collected.files),
+  });
 } catch (error) {
   collectionError ||= `verification planning failed closed: ${error.message}`;
   plan = planVerification([], { forceFullReason: collectionError });
@@ -153,5 +149,6 @@ if (options.json) {
 
 // JSON is a machine-readable plan. Never append child-process logs to it.
 if (!options.dryRun && !options.json) {
-  for (const command of commands) await runCommand(command);
+  const result = await runCommandSuite(commands, options.serial ? { jobs: 1, browserJobs: 1 } : {});
+  if (!result.ok) process.exitCode = 1;
 }

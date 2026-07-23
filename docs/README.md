@@ -6,10 +6,8 @@
 
 1. [`AGENTS.md`](../AGENTS.md) — 코드 경계, 핵심 아키텍처, 결정론·성능 불변식, 기본 명령.
 2. 이 문서 — 어떤 문서가 현재 계약이고 어떤 문서가 참고 자료인지 확인.
-3. [`project-status.md`](project-status.md) — 현재 마무리 방향, 활성 작업, 유지·보류 결정.
-4. [`architecture-refactor.md`](architecture-refactor.md) — 현재 진행 중인 구조 개선의 목표 레이어와 마이그레이션 순서.
-5. 작업별 계약 — 사찰 터 이력은 [`SANSA-HANDOFF.md`](../SANSA-HANDOFF.md), 현재 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md).
-6. [`verification.md`](verification.md) — 실제로 쓸 수 있는 검증 도구와 알려진 공백.
+3. [`agent-workflow.md`](agent-workflow.md) — worktree·병렬 소유권·inner/checkpoint/merge 검증 경로.
+4. `agent-workflow.md`의 경로별 표에서 지금 바꿀 도메인의 문서만 읽는다. `project-status.md`와 완료 기록은 관련 결정 이력을 확인할 때만 연다.
 
 문서와 코드가 충돌하면 현재 코드와 실행 결과가 우선이다. 의도에 관한 충돌은 `AGENTS.md` → 활성 작업 브리프 → 현재 계약 문서 → 리서치/스냅샷 순으로 해석하고, 차이가 확인되면 같은 작업에서 문서도 갱신한다.
 
@@ -25,6 +23,7 @@
 
 | 문서 | 상태 | 용도와 주의점 |
 | --- | --- | --- |
+| [`agent-workflow.md`](agent-workflow.md) | 계약 | 독립 worktree·claim·인계·정리와 세 단계 검증의 빠른 표준 경로. |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
 | [`ink-landscape.md`](ink-landscape.md) | 계약 + 리서치 | 조선 진경산수 근거, PBR↔수묵 렌더·색공간·성능·접근성 계약. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |

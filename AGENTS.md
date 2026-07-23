@@ -26,21 +26,24 @@ Repository contract gates run from the root:
 
 ```bash
 npm run check          # architecture + plan goldens + pure geometry invariants
-npm run check:pr       # changed-file router: fast core + affected browser/worker gates
+npm run check:pr       # changed-file router: impacted pure + affected browser/worker gates
+npm run check:list     # generated gate catalog and all/full profiles
 npm run check:app      # isolated full-app browser smoke
 npm run check:worker   # sync / real Worker / fallback scene + picking contracts
 npm run check:all      # all repository contract groups
 npm run check:full     # merge gate: all + DoF/LOD app flows + production build
+npm run wt -- status   # worktree ownership, dependency links, dirty/base state
 ```
 
-There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`), so run the tools with plain node:
+There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`). Prefer the matching npm script so browser work takes the shared lock; when no script exists, use the lock wrapper:
 
 ```bash
 npm install                        # at repo root, one-time (chromium reuses the shared Playwright cache)
-node tools/shoot-<feature>.mjs
+npm run shoot:<feature>
+node tools/run-browser-locked.mjs -- node tools/<browser-harness>.mjs
 ```
 
-For normal iteration, start with `npm run check:pr -- --dry-run`, then run `npm run check:pr`. The router always runs the fast core contracts, unions only the browser/worker gates affected by the changed paths, and fails closed to `check:full` for unknown paths, verification tooling, dependency manifests, or an unresolved merge base. `npm run check` runs its isolated contracts with bounded parallelism (`CHEOMA_CHECK_JOBS`, default up to 4). Run `check:full` once before merging; it preserves the full Hanyang/continuous-frame coverage and adds a production build.
+For normal iteration, start with `npm run check:pr -- --dry-run`, then run `npm run check:pr`. The router uses static import impact plus reviewed domain boundaries to run only affected browser-free contracts and browser/worker gates; documentation-only patches run `check:docs`. Unknown/new paths, shared verification infrastructure, dependency manifests, public aggregate APIs, and unresolved merge bases fail closed to `check:full`. Focus+wave selections coalesce into one `check:lod:app` boot. The suite overlaps one CPU job with one serial browser lane by default (`CHEOMA_GATE_JOBS`, `CHEOMA_BROWSER_JOBS`); a shared Git-dir lock keeps browser gates from separate worktrees serial too. Leave one successful `check:full` on the final unchanged HEAD before merging; rerun it whenever that diff changes. See `docs/agent-workflow.md` for worktree claims, handoff, and safe cleanup.
 
 Canonical browser harnesses use `CHEOMA_BROWSER=auto`: they prefer an installed Chrome, which may use the host GPU, and fall back to Playwright's bundled Chromium. Use `CHEOMA_BROWSER=chrome` or `CHEOMA_BROWSER=chromium` to require one backend. Harnesses using this launcher log the selected browser and, when applicable, the WebGL renderer; never compare wall time across different backends. `check:worker` deliberately stays on Playwright-pinned Chromium because its byte goldens include browser-runtime floating-point behavior and it does not render WebGL.
 
@@ -126,7 +129,7 @@ Headless ANGLE serializes shader linking, so absolute frame-ms from headless run
 
 - Start at `docs/README.md` for the document map and status labels. Not every file in `docs/` is a current implementation contract; research and dated snapshots are marked there.
 - `docs/project-status.md` holds the current wrap-up direction and stable user decisions migrated from Claude Code memory.
-- `docs/architecture-refactor.md` records the completed first structure pass and the current reuse/boundary contract. Public consumer entrypoints live in `src/api/`; internal modules must not import that façade. Run `npm run check` before browser-heavy gates.
+- `docs/architecture-refactor.md` records the completed first structure pass and the current reuse/boundary contract. Public consumer entrypoints live in `src/api/`; internal modules must not import that façade. Let `npm run check:pr` select the necessary pure contracts before browser-heavy gates; reserve the full `npm run check` set for merge profiles or explicit broad audits.
 - `docs/verification.md` is the canonical harness map. In particular, `tools/check-determinism.mjs` does not compare worker vs sync and does not hash temple data, while `tools/verify-forest.mjs` is obsolete.
 - `SANSA-HANDOFF.md` records the reviewed #5 temple-site history. `docs/temple-generator.md` is the current #12 contract for the implemented reusable multi-building compounds, stone props, editor, lifecycle, and render budgets.
 - Historical, visual, or performance research that changes the product has one evidence contract. Record each source and the exact decision it informed in the relevant self-contained domain document. Add the selected user-facing sources to `docs/credits.md` with institution, title, applied-to mapping, canonical URL, and current licensing note; `app/src/lib/credits.js` parses that file for `ReferenceModal.svelte`, so do not maintain a second hardcoded UI list. Before merging, open the real References UI, check the rendered applied-use text, and open every new URL (including direct PDFs) in a browser to confirm that it resolves to the intended institution or primary source. If the browser blocks an attachment endpoint, verify its final HTTP status, disposition, length, and file magic instead. A source list that exists only in a task note, PR body, or private memory is incomplete.
