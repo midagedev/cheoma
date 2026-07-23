@@ -155,14 +155,15 @@
 - anchor는 움직이는 primary 문짝과 분리된 **고정 한지 면**이다. 보이는 불빛 중심은 실제 panel 외측으로
   `OPENING_FACE_CLEARANCE` 2cm만 분리하며, 같은 opening id의 실제 한지 emissive가 근경 LOD를 이어받는다.
   좌표 변환을 두 번 적용하거나 벽·지붕·담 위에 자유 부유하는 보정점은 허용하지 않는다.
-- 기존 원경 `THREE.Points`는 색 패스에서 `depthTest=true`, `depthWrite=false`를 사용한다. 집 몸체·지붕·담·지형·
-  수목처럼 카메라에 가까운 불투명 표면이 빛을 정상적으로 가리고, additive·bloom·DoF 보케는 가림 뒤의 픽셀을
-  되살리지 않는다. DoF가 켜진 프레임에는 같은 점 크기·원형 discard·가시성 vertex 계약을 쓰는 전용 packed-depth
-  material로 기존 depth target에 한 번 더 그려 source-depth scatter의 실제 광원 깊이를 제공한다. 반대 벽을 뚫거나
-  지붕·하늘 위로 비치는 점은 실패다.
-- seed-stable 점등 분포는 일부 방을 어둡게 유지한다. 낮에는 제출하지 않고, 밤의 색 패스는 현재의 단일
-  `THREE.Points` geometry/material/program을 재사용한다. source-depth 지원은 같은 geometry를 쓰는 depth material·
-  program 각 1개와 DoF 프레임의 depth draw 1회만 더하며 triangle·texture·render target·색 draw 증가는 0이다.
+- 원경 창불은 opening의 실제 폭·높이·외향 법선을 소비하는 front-only instanced 한지 면이다. 색 패스에서
+  `depthTest=true`, `depthWrite=false`를 사용하므로 집 몸체·지붕·담·지형·수목처럼 카메라에 가까운 불투명 표면이
+  빛을 정상적으로 가리고, additive·bloom·DoF 보케는 가림 뒤의 픽셀을 되살리지 않는다. DoF가 켜진 프레임에는
+  같은 instance buffer·vertex shader·uniform·한지 profile을 쓰는 전용 packed-depth material로 기존 depth target에
+  한 번 더 그려 source-depth scatter의 실제 광원 깊이를 제공한다. 반대 벽을 뚫거나 지붕·하늘 위로 비치는 면은 실패다.
+- seed-stable 점등 분포는 일부 방을 어둡게 유지한다. 낮에는 제출하지 않고, 밤의 색 패스는 단일 physical
+  instanced geometry/material/program을 재사용한다. source-depth 지원은 같은 geometry·instance state를 쓰는 depth
+  material/program 각 1개와 DoF 프레임의 depth draw 1회만 더한다. 슬롯당 2 triangle 외에 texture·render target·
+  색 draw 증가는 0이다.
   `PointLight`, 집별 mesh/material, 프레임별 scene traversal·raycast·heap allocation도 0이어야 한다.
 - FAR/MID/FULL은 하나의 불빛 의미를 중복 소유하지 않는다. 렌즈 등가 거리와 근경 fade는 기존 uniform에
   합성하고, focus/rebuild/reroll/hop과 wave의 old/incoming exclusive ownership에서 팝·잔상·이중 불빛이 없어야
@@ -196,11 +197,11 @@
 - `npm run check:nightlights`는 실제 초가·기와 ㅡ·ㄱ·ㄷ prototype에서 수집한 38개 opening anchor의 id/한지 면/
   외향 법선, mirror, JSON-safe deep freeze와 반복 결정론을 검사한다. 이어 실제 `planVillage` 필지 변환과 합성
   hero·궁 소유자, 저작 anchor가 없는 사찰·정자의 fail-closed, 고정 owner slot, focus overlay 교체·원복,
-  wave·dispose 수명과 단일 Points 색 패스의 1 draw/0 triangle/1 material/1 program/0 texture/0 light, DoF depth의
+  wave·dispose 수명과 단일 물리 색 패스의 1 draw/슬롯당 2 triangle/1 material/1 program/0 texture/0 light, DoF depth의
   추가 1 draw/1 material/1 program/0 target 예산을 검사한다.
-- `npm run shoot:nightlights`는 실제 앱의 고정 seed에서 aerial/MID/focus 밤 프레임과 같은 카메라의 정면·후면
-  depth-on/depth-off 프레임을 촬영한다. 한지 면에 붙은 절제된 따뜻한 bloom/bokeh, 불투명 집·담 뒤의 실제
-  깊이 가림, 어두운 방의 공존과 자유 부유점 부재를 직접 판정한다. 같은 실행에서 focus와 재건축이 고정 owner
+- `node tools/shoot-nightlights.mjs`는 실제 앱의 고정 seed에서 aerial/MID/focus 밤 프레임과 같은 카메라의 정면 한지와
+  후면 rejection pair를 촬영한다. 한지 면에 붙은 절제된 따뜻한 bloom/bokeh, front-side·불투명 집·담 뒤의 실제
+  깊이 가림, 어두운 방의 공존과 자유 부유면 부재를 직접 판정한다. 같은 실행에서 focus와 재건축이 고정 owner
   slot·geometry·material을 재사용하면서 실제 opening 위치를 따라가는지도 확인한다.
 - `check:worker`는 sync/Worker/fallback의 scene bytes·일반 dispose 수명을, `check:parcel-rebuild:browser`는
   focus/edit/probe 실패 뒤 창불·문 owner 복원을 맡는다. `check:app`은 항목별 References UI와 전체 앱 부팅을

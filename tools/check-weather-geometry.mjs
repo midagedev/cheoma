@@ -1,4 +1,5 @@
-// Renderer-free contracts for issue #96's precipitation A/B prototype.
+// Renderer-free contracts for issue #96's deterministic precipitation state
+// and single physical world-geometry representation.
 // Run directly: node tools/check-weather-geometry.mjs
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -9,6 +10,7 @@ import { spawn } from 'node:child_process';
 const ROOT = resolve(import.meta.dirname, '..');
 const scratch = await mkdtemp(join(tmpdir(), 'cheoma-weather-geometry-check-'));
 const bundle = join(scratch, 'weather-physical-geometry.mjs');
+const stateBundle = join(scratch, 'weather-particle-state.mjs');
 const esbuild = join(ROOT, 'app/node_modules/.bin/esbuild');
 const three = join(ROOT, 'app/node_modules/three/build/three.module.js');
 
@@ -72,7 +74,17 @@ try {
     `--outfile=${bundle}`,
     '--log-level=error',
   ]);
-  const weather = await import(bundle);
+  await run(esbuild, [
+    'src/env/weather-particle-state.js',
+    '--bundle',
+    '--format=esm',
+    '--platform=node',
+    `--outfile=${stateBundle}`,
+    '--log-level=error',
+  ]);
+  const rendering = await import(bundle);
+  const state = await import(stateBundle);
+  const weather = { ...rendering, ...state };
 
   const snowA = weather.createSnowPrecipitationState({ count: 96, top: 18 });
   const snowB = weather.createSnowPrecipitationState({ count: 96, top: 18 });
@@ -80,6 +92,21 @@ try {
   const rainB = weather.createRainPrecipitationState({ count: 96, top: 18 });
   assertStateEqual(snowA, snowB, 'snow initial state');
   assertStateEqual(rainA, rainB, 'rain initial state');
+
+  const boundsState = weather.createSnowPrecipitationState({ count: 24, top: 18 });
+  const oldHeight = boundsState.height;
+  const oldRatios = Array.from({ length: boundsState.count }, (_, index) => (
+    (boundsState.positions[index * 3 + 1] - boundsState.bottom) / oldHeight
+  ));
+  assert.equal(weather.setPrecipitationBounds(boundsState, { bottom: 2, top: 30 }), true);
+  assert.equal(boundsState.bottom, 2);
+  assert.equal(boundsState.top, 30);
+  assert.equal(boundsState.height, 28);
+  for (let index = 0; index < boundsState.count; index++) {
+    const nextRatio = (boundsState.positions[index * 3 + 1] - boundsState.bottom) / boundsState.height;
+    assert.ok(Math.abs(nextRatio - oldRatios[index]) < 1e-6,
+      'snow bounds update changed deterministic vertical distribution');
+  }
 
   const snowLegacyRng = makeLegacyRng(weather.WEATHER_PARTICLE_SEED ^ 0x1111);
   const rainLegacyRng = makeLegacyRng(weather.WEATHER_PARTICLE_SEED ^ 0x2222);
@@ -174,11 +201,6 @@ try {
     rainA.positions,
     'physical rain instance centers are not the owner positions',
   );
-  for (const representation of [snowFull, rainFull]) {
-    representation.setCenterSpread(2.25);
-    assert.equal(representation.centerSpread, 2.25,
-      `${representation.kind} lost view-owned field coverage`);
-  }
   assert.ok(
     snowFull.object.isMesh && snowFull.object.geometry.isInstancedBufferGeometry,
     'snow FULL is not instanced world geometry',
@@ -189,6 +211,17 @@ try {
   );
   assert.equal(snowFull.triangles, snowA.count * 6, 'snow FULL triangle accounting drifted');
   assert.equal(rainFull.triangles, rainA.count * 12, 'rain FULL triangle accounting drifted');
+  const snowBase = snowFull.object.geometry.getAttribute('position');
+  const snowBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (let index = 0; index < snowBase.count; index++) {
+    for (let axis = 0; axis < 3; axis++) {
+      const value = snowBase.array[index * 3 + axis];
+      snowBounds.min[axis] = Math.min(snowBounds.min[axis], value);
+      snowBounds.max[axis] = Math.max(snowBounds.max[axis], value);
+    }
+  }
+  assert.ok(Math.max(...snowBounds.max.map((value, axis) => value - snowBounds.min[axis])) <= 1.000001,
+    'snow base span no longer maps uWorldScale to actual centimetres');
   assert.ok(
     !/gl_PointSize|gl_PointCoord|cameraPosition/.test(snowFull.object.material.vertexShader),
     'snow FULL regressed to a point or camera billboard',
@@ -205,8 +238,8 @@ try {
     assert.equal(depth.uniforms.uFade.value, 0.5, `${full.kind} depth fade is not shared with color`);
     assert.match(
       depth.fragmentShader,
-      /weatherDepthHash[\s\S]*clamp\(uFade/,
-      `${full.kind} fade writes one opaque DoF plate instead of matching coverage`,
+      /weatherDepthHash[\s\S]*uFade \* uAlphaScale \* vOpacity/,
+      `${full.kind} depth coverage diverges from visible alpha`,
     );
     full.sync({ level: 1, time: 1 });
     assert.equal(depth.uniforms.uFade.value, 1, `${full.kind} stable depth does not activate`);

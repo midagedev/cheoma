@@ -48,8 +48,8 @@ await page.addInitScript(() => {
     const effVisible = (o) => { let p = o; while (p) { if (!p.visible) return false; p = p.parent; } return true; };
     // 스크린 중심(NDC 0,0) 광선과 입자 필드 중심의 XZ 근접도 — "보는 곳에 눈/비가 오는가".
     const camXZ = { x: cam.position.x, z: cam.position.z };
-    const snow = byName('weatherSnow'), rain = byName('weatherRain');
-    // env motes(넓은 헤이즈)와 focus 링 motes(마당 먼지)를 분리 계측 — 둘 다 name='dustMotes'.
+    const snow = byName('weatherSnowPhysical'), rain = byName('weatherRainPhysical');
+    // env motes(넓은 헤이즈)와 focus 링 motes(마당 먼지)를 분리 계측 — 같은 물리 표현 이름을 쓴다.
     const allMotes = []; scene.traverse((o) => { if (o.name === 'dustMotes') allMotes.push(o); });
     const leaves = byName('seasonLeaves');
     const fr = byName('focusRing');
@@ -64,7 +64,7 @@ await page.addInitScript(() => {
       fogNear: hero.fogNear != null ? +hero.fogNear.toFixed(1) : null,
       fogFar: hero.fogFar != null ? +hero.fogFar.toFixed(1) : null,
       siteR: hero.siteR,
-      snow: snow ? { vis: effVisible(snow), uFade: snow.material?.uniforms?.uFade?.value ?? null, distToTarget: +dist2(worldPos(snow), hero.target).toFixed(1) } : null,
+      snow: snow ? { vis: effVisible(snow), alphaScale: snow.material?.uniforms?.uAlphaScale?.value ?? null, distToTarget: +dist2(worldPos(snow), hero.target).toFixed(1) } : null,
       rain: rain ? { vis: effVisible(rain), distToTarget: +dist2(worldPos(rain), hero.target).toFixed(1) } : null,
       motes: { anyVis: anyMoteVis, instances: allMotes.length, envVis: allMotes[0] ? effVisible(allMotes[0]) : false },
       leaves: leaves ? { vis: effVisible(leaves), count: leaves.count ?? 0 } : null,
@@ -170,7 +170,7 @@ await wait(500);
 async function measureAmbient(label) {
   const p = await probe();
   console.log(`\n  [${label}] selected=${p.selected} transitioning=${p.transitioning} focusStrength=${p.focusStrength} ringChildren=${p.focusRingChildren}`);
-  console.log(`    snow:  ${p.snow ? `vis=${p.snow.vis} uFade=${(p.snow.uFade ?? 0).toFixed(2)} distToTarget=${p.snow.distToTarget}` : 'null'}`);
+  console.log(`    snow:  ${p.snow ? `vis=${p.snow.vis} alphaScale=${(p.snow.alphaScale ?? 0).toFixed(2)} distToTarget=${p.snow.distToTarget}` : 'null'}`);
   console.log(`    rain:  ${p.rain ? `vis=${p.rain.vis} distToTarget=${p.rain.distToTarget}` : 'null'}`);
   console.log(`    motes: ${p.motes ? `anyVis=${p.motes.anyVis} instances=${p.motes.instances} envVis=${p.motes.envVis}` : 'null'}`);
   console.log(`    leaves:${p.leaves ? `vis=${p.leaves.vis} count=${p.leaves.count}` : 'null'}`);
@@ -196,7 +196,7 @@ await wait(3000);
 const aerialSnow = await measureAmbient('AERIAL · snow+winter');
 console.log('\n[③ 원경 정책 단언]');
 console.log(`  부감 DoF off(흐릿한 마을 금지): dofOn=${aerialSnow.dofOn}  ASSERT false: ${aerialSnow.dofOn === false ? 'PASS' : 'FAIL'}`);
-console.log(`  부감 카메라볼륨 입자>0: snow.vis=${aerialSnow.snow.vis} rain.vis=${aerialRain.rain.vis}  ASSERT: ${aerialSnow.snow.vis ? 'PASS' : 'FAIL'}`);
+console.log(`  부감 물리 강수 휴면: snow.vis=${aerialSnow.snow.vis} rain.vis=${aerialRain.rain.vis}  ASSERT both false: ${!aerialSnow.snow.vis && !aerialRain.rain.vis ? 'PASS' : 'FAIL'}`);
 console.log(`  부감 낙엽 OFF(고도 게이트): leaves.vis=${aerialSnow.leaves.vis}  ASSERT false: ${aerialSnow.leaves.vis === false ? 'PASS' : 'FAIL'}`);
 
 // 부감→집(家) focus-in — DoF 도착 오차 <1m(#102 경로2: 부감→집).

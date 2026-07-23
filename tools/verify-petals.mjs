@@ -9,7 +9,7 @@
 //   ① 발현 매트릭스: {spring,summer,autumn,winter} × {근경(camDist 30), 부감(camDist 210)}
 //   ② 팔랑거림: 무풍에서 입자 x 변위 비단조(플러터) + 낙하 y 단조 감소
 //   ③ 카메라 추종: 중심 ±80m 이동 후 입자 AABB 가 카메라 주변을 감쌈
-//   ④ 눈·비 회귀: 물리 geometry count·world scale·부감 spread, rain count
+//   ④ 눈·비 회귀: 물리 geometry count·world scale·부감 CPU/draw 휴면, rain count
 //   ⑤ 조기노출: 원점 빈 터(building 숨김·중심 원점)에서 count 0, 건물 복귀 후 상승(게이트 미고착)
 //   ⑥ 광학 계약: 눈·꽃잎은 픽셀 크기 보상이 아니라 실제 월드 크기와 명시적 DoF depth를 유지
 //   ⑦ pageerror 0
@@ -57,9 +57,14 @@ window.__season = (n) => window.__W.setSeason(n);
 window.__weather = (n,o) => window.__W.setWeather(n,o);
 window.__ppos = () => { const p = window.__W._petals.object.position; return [p.x,p.y,p.z]; };
 window.__aabb = () => { const b = window.__W._petals.aabb(); return { min:[b.min.x,b.min.y,b.min.z], max:[b.max.x,b.max.y,b.max.z] }; };
-window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnowPhysical'); return { worldScale: s.material.uniforms.uWorldScale.value, spread: s.material.uniforms.uCenterSpread.value, vis: s.visible, n: s.geometry.instanceCount, depth: !!s.userData.dofDepthMaterial }; };
+window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnowPhysical'); return { worldScale: s.material.uniforms.uWorldScale.value, vis: s.visible, n: s.geometry.instanceCount, depth: !!s.userData.dofDepthMaterial }; };
 window.__petalOptics = () => { const p = window.__W._petals.object; return { worldScale: p.material.uniforms.uWorldScale.value, level: window.__W._petals.level, depth: !!p.userData.dofDepthMaterial }; };
 window.__rain = () => { const r = window.__scene.getObjectByName('weatherRainPhysical'); return { vis: r.visible, n: r.geometry.instanceCount, depth: !!r.userData.dofDepthMaterial }; };
+window.__precipState = (kind) => {
+  const name = kind === 'rain' ? 'weatherRainPhysical' : 'weatherSnowPhysical';
+  const values = window.__scene.getObjectByName(name).geometry.attributes.aCenter.array;
+  return Array.from(values.slice(0, 24));
+};
 window.__setWind = (v) => { window.__windScale = v; };
 window.__ready = true;
 `;
@@ -148,18 +153,23 @@ check('③AABB 카메라 주변', follow.aabb.min[0] < 80 && follow.aabb.max[0] 
 // ── ④ 눈·비 물리 geometry 회귀 ──
 const wx = await page.evaluate((dt) => {
   window.__mk({ bv: true }); window.__weather('snow', { immediate: true });
-  window.__drive(30, dt, { x: 0, z: 0, d: 42 });
+  window.__drive(30, dt, { x: 0, z: 0, d: 42, w: 1 });
   const snowNear = window.__snow();
-  window.__drive(5, dt, { x: 0, z: 0, d: 210 });
+  const snowStateBeforeSleep = window.__precipState('snow');
+  window.__drive(5, dt, { x: 0, z: 0, d: 210, w: 0 });
   const snowAerial = window.__snow();
+  const snowStateAfterSleep = window.__precipState('snow');
   window.__mk({ bv: true }); window.__weather('rain', { immediate: true });
-  window.__drive(30, dt, { x: 0, z: 0, d: 42 });
+  window.__drive(30, dt, { x: 0, z: 0, d: 42, w: 1 });
   const rain = window.__rain();
-  return { snowNear, snowAerial, rain };
+  return { snowNear, snowAerial, rain, snowStateBeforeSleep, snowStateAfterSleep };
 }, DT);
 check('④snow count', wx.snowNear.n === 3600 && wx.snowNear.vis, `n=${wx.snowNear.n} vis=${wx.snowNear.vis}`);
 check('④snow 실제 크기', approx(wx.snowNear.worldScale, 0.012, 1e-6), `worldScale=${wx.snowNear.worldScale}`);
-check('④snow 부감 spread', approx(wx.snowAerial.spread, 3, 0.01), `spread=${wx.snowAerial.spread.toFixed(2)}`);
+check('④snow 부감 휴면', !wx.snowAerial.vis, `vis=${wx.snowAerial.vis}`);
+check('④snow 부감 CPU state 휴면',
+  JSON.stringify(wx.snowStateBeforeSleep) === JSON.stringify(wx.snowStateAfterSleep),
+  `stable=${JSON.stringify(wx.snowStateBeforeSleep) === JSON.stringify(wx.snowStateAfterSleep)}`);
 check('④snow 물리 depth', wx.snowNear.depth, `depth=${wx.snowNear.depth}`);
 check('④rain count·depth', wx.rain.n === 2600 && wx.rain.vis && wx.rain.depth, `n=${wx.rain.n} vis=${wx.rain.vis} depth=${wx.rain.depth}`);
 
@@ -183,9 +193,9 @@ const optical = await page.evaluate((dt) => {
   return { snow: window.__snow(), petal: window.__petalOptics() };
 }, DT);
 check('⑥snow world 크기·depth', approx(optical.snow.worldScale, 0.012, 1e-6)
-    && optical.snow.depth && approx(optical.snow.spread, 1, 0.01),
-`worldScale=${optical.snow.worldScale} spread=${optical.snow.spread.toFixed(2)} depth=${optical.snow.depth}`);
-check('⑥petal world 크기·depth·발현', approx(optical.petal.worldScale, 0.015, 1e-6)
+    && optical.snow.depth,
+`worldScale=${optical.snow.worldScale} depth=${optical.snow.depth}`);
+check('⑥petal world 크기·depth·발현', approx(optical.petal.worldScale, 0.03, 1e-6)
     && optical.petal.depth && optical.petal.level > 0.3,
 `worldScale=${optical.petal.worldScale} depth=${optical.petal.depth} level=${optical.petal.level.toFixed(3)}`);
 

@@ -73,7 +73,9 @@ app/src/                       Svelte UI
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
 | `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, 계절·날씨 상태, environment, focus, post, 축방향 DoF controller, 공유 적설 재질, weather, ink, time, world edge | 상태/profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
-| `src/api/particles.js` | 결정론 강수 상태·진행 함수와 물리 강수 표현, 꽃잎·낙엽·mote 근경 geometry, 계절 필드와 mote runtime. 외부 소비자는 `src/env/` 내부 파일 대신 이 façade를 사용한다 | 상태는 Node, worker, browser; geometry/runtime은 THREE가 있는 runtime |
+| `src/api/particle-state.js` | Three·DOM 없는 결정론 강수 상태·진행·bounds 재매핑. 시뮬레이션 전용 소비자는 이 작은 진입점만 가져간다 | Node, worker, browser |
+| `src/api/particles.js` | 순수 상태의 편의 재노출과 물리 강수 표현, 꽃잎·낙엽·mote 근경 geometry, 계절 필드와 mote runtime. Three runtime 소비자는 `src/env/` 내부 파일 대신 이 façade를 사용한다 | THREE가 있는 runtime |
+| `src/api/lighting.js` | 실제 한지 opening anchor를 소비하는 물리 instanced HDR 면광원 batch | THREE가 있는 runtime |
 | `src/api/post-quality.js` | 프레임레이트 독립 adaptive-post 품질 상태 | Node, worker, browser |
 | `src/api/cinematic.js` | Three 없는 건축 arrival/rebuild 경로·clock, 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | reveal path는 Node/worker/browser; 나머지는 THREE runtime, 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
@@ -211,10 +213,10 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 
 마을의 연속 구도와 focus 전환의 시각 언어·초점 계산은 생성기나 앱 전환마다 복제하지 않는다.
 
-- `src/camera/optics.js`가 부감 46° 광각, 일반 필지 10°·hero 7°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 일반 필지와 hero는 각각 23°와 21° reference FOV에서 보상해 약 137mm/196mm 세로 화각의 원근 압축을 얻는다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈도 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를 사용한다. Points 기반 강수·꽃잎·mote·실용광은 좁은 authored lens에서 보상 dolly 거리가 늘어도 geometry와 같은 크기를 갖도록 전체 lens scale을 받고, 각 shader의 pixel cap만 최종 상한으로 남긴다.
+- `src/camera/optics.js`가 부감 46° 광각, 일반 필지 10°·hero 7°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 일반 필지와 hero는 각각 23°와 21° reference FOV에서 보상해 약 137mm/196mm 세로 화각의 원근 압축을 얻는다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈도 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를 사용한다. 강수·꽃잎·mote·한지 실용광은 실제 월드 크기의 mesh라 보상 dolly와 authored camera가 투영 크기를 자연스럽게 결정하며, point-size·pixel-cap 보정으로 형상을 키우지 않는다. `lensScale`은 필요한 경우 오직 근접 handoff와 detail 휴면 거리를 정규화한다.
 - `src/env/dof.js`가 월드 초점점을 카메라 전방축 깊이로 변환하고 DoF enable·amount·aperture를 한 controller에서 소유한다. focus-in/out은 선택 필지 축깊이를 붙들고, 필지 hop은 보간되는 시선을 따라간다.
 - 제품 PBR composer는 `Render → Grade/Rim → Bokeh → Bloom → Flare → Outline → Output` 순서를 지킨다. 조리개에 의한 광학적 흐림과 원판상이 먼저 만들어지고, bloom은 그 결과에 센서·후처리 헤이즈를 더한다. Output은 마지막 하나에서만 ACES와 sRGB 변환을 한다.
-- `StableBokehPass`의 일반 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 기본 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. 단, 실제 소스 깊이가 필요한 입자·스프라이트는 `userData.dofDepthMaterial`에 `allowOverride=false`인 packed-depth 재질을 명시적으로 소유할 수 있다. 원경 창불은 색 재질과 vertex shader·uniform 객체를 공유하고 같은 점 크기·점등/근접/wave 가시성·원형 discard를 쓰며 기존 packed-depth prepass에 한 draw만 더한다. 넓고 투명한 태양 글로우는 이 명시적 깊이 계약에 넣지 않고 배경/원경 gather로 처리해, 대기 꼬리가 불투명 깊이 가림막이 되는 일을 막는다. 수묵 normal은 소스 전용 깊이 재질을 소비하지 않아 Points/Sprite를 표면 노멀로 오인하지 않는다. stock override depth가 opacity dither를 재현하지 못하므로 중간 opacity의 `alphaHash` 재질은 완전 불투명 occluder로 쓰지 않고, 가중치 1에서만 일반 depth에 합류한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
+- `StableBokehPass`의 일반 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 기본 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. 단, 실제 소스 깊이가 필요한 입자·광원 mesh는 `userData.dofDepthMaterial`에 `allowOverride=false`인 packed-depth 재질을 명시적으로 소유할 수 있다. 물리 꽃잎은 color/main depth/DoF depth에서 같은 screen-door coverage를 쓰고, 강수·mote·한지 면광원은 color와 전용 depth가 같은 instance buffer·vertex 상태·가시성 조건을 공유한다. 한지 창불은 authored opening 폭·높이·외향 법선을 가진 front-only quad batch로 기존 packed-depth prepass에 한 draw만 더한다. 넓고 투명한 태양 글로우는 이 명시적 깊이 계약에 넣지 않고 배경/원경 gather로 처리해, 대기 꼬리가 불투명 깊이 가림막이 되는 일을 막는다. 수묵 normal은 소스 전용 깊이 재질을 소비하지 않아 입자·광원 mesh를 표면 노멀로 오인하지 않는다. stock override depth가 opacity dither를 재현하지 못하므로 중간 opacity의 `alphaHash` 재질은 완전 불투명 occluder로 쓰지 않고, 가중치 1에서만 일반 depth에 합류한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
 - 일반 표면의 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. 이 gather는 stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보한다. 제품 앱은 모든 카메라 writer와 view-offset이 끝난 뒤 position/quaternion/FOV/view-offset의 화면 등가 속도를 할당 없이 측정한다. 이동 중 일반 픽셀은 세 반경과 대칭 중심을 유지한 13개 부분집합만 읽되, 그 부분집합이 HDR 광원을 만나면 최대 41개를 써 원형 형태를 보존한다. 정착 hold 뒤에는 같은 shader/program 안에서 모든 픽셀의 41개 결과를 시간 기반으로 복원한다. 정착 품질 1은 기존 41개 합산 순서와 결과를 그대로 사용한다. composer 크기·DPR·focus·aperture·pass enable은 바꾸지 않으며 수묵/compact에서 이미 잠든 DoF를 깨우지 않는다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다.
 - 작은 HDR 광원은 destination 중심에서 역으로 찾지 않는다. 기존 반해상도 normalized highlight prefilter target/pass가 subpixel source를 연속 데이터로 만든다. 프레임당 한 번의 이 반해상도 pass는 analytic RGB/compactness 37 + exact ownership 4 + adjacent guard 12 = 실제 `tColor` 53 fetch를 쓴다. RGB는 정규화된 source energy를 저장하고 alpha는 broad `0`, gather-removal support `0.25`, exact 2×2 ownership `1`을 함께 인코딩하며 depth를 저장하지 않는다. Gather는 `0.125`, scatter와 strict-depth self identity는 `0.75`에서 소비한다. 이 네 값은 renderer-free `bokeh-source-contract.js`가 단일 소유한다. Strict-depth 예외는 exact destination ownership과 full-resolution destination color floor·동일 hue·같은 초점면/깊이를 모두 요구하며, 곡면 emitter를 끊는 화면 거리 상수를 두지 않는다. `BokehSourceScatter`는 full-resolution source를 서로 겹치지 않는 2×2 셀로 소유해 앞쪽 source depth와 CoC를 구한 뒤 현재 composer destination에 채워진 원판을 직접 가산한다. 셀 좌표는 viewport 크기의 grid buffer 없이 `gl_InstanceID`에서 절차적으로 계산하며, 필요한 CoC가 하드웨어 `ALIASED_POINT_SIZE_RANGE`를 넘으면 같은 material/uniform의 외접 3-vertex instanced triangle backend로 자동 전환한다. 두 backend 모두 같은 한 draw로 실행되고 별도 render target 없이 프로그램 1개, draw call 1개만 더한다. 각 source의 RGB 합을 `πr²`로 나누고 연속 원판 profile 적분을 정규화하므로 반지름이 커질수록 같은 총에너지가 넓게 퍼져 peak·평균 밝기는 `1/r²`로 낮아진다. 961×601 마지막 부분 셀과 block phase, 같은 2×2 셀의 다른 hue 근접 차폐물, DPR 2 pass-only GPU 진단이 이 계약의 실제 브라우저 반례다. fitted source-area 상수나 threshold 기반 밝기 바닥을 다시 넣지 않는다.
 
@@ -222,14 +224,16 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 
 ## 물리 디테일 입자 재사용 계약
 
-`src/api/particles.js`는 강수의 Three 없는 결정론 상태·진행 함수, 그 상태를 소비하는 물리 강수 표현,
-꽃잎·낙엽·mote의 근경 geometry, 제품 계절 필드와 mote runtime을 한 공개 경계에서 제공한다. 상태 계층은
+`src/api/particle-state.js`는 강수의 Three 없는 결정론 상태·진행·bounds 재매핑을 제공하고,
+`src/api/particles.js`는 그 상태를 소비하는 물리 강수 표현, 꽃잎·낙엽·mote의 근경 geometry와 제품 runtime을
+제공한다. 한지 창 HDR geometry는 입자가 아니라 `src/api/lighting.js`가 소유한다. 상태 계층은
 seed로 정해진 위치·위상·크기·종류·불투명도를 한 번만 소유하고, 렌더 계층은 그 동일 buffer를 한 개의 물리
 월드 지오메트리로 읽는다. 가까운 장면에서 Points와 mesh를 동시에 유지하거나 서로 다른 seed·simulation을
 가진 FULL/FAR 복제본을 만들지 않는다.
 
 보이는 물리 입자는 color와 DoF depth에서 동일한 instance attribute, 시간·바람·활성 uniform, 월드 변위,
-회전과 alpha/discard 조건을 소비한다. stock `MeshDepthMaterial`로 동적 offset을 잃지 않으며,
+종별 곡면 실루엣·normal, 회전과 alpha/discard 조건을 소비한다. 꽃잎의 일반 depth도 같은 coverage를 쓴다.
+stock `MeshDepthMaterial`로 동적 offset을 잃지 않으며,
 `userData.dofDepthMaterial`의 명시적 packed-depth 재질은 `allowOverride=false`로 둔다. 따라서 돌풍 밖의
 꽃잎, 꺼진 반딧불, 거리·날씨로 휴면한 입자는 색에는 없는데 불투명 깊이만 남는 가짜 가림막이 되지 않는다.
 디테일 band 밖에서는 같은 물리 표현을 숨기고 simulation과 draw를 함께 쉬게 한다.
@@ -241,9 +245,9 @@ seed로 정해진 위치·위상·크기·종류·불투명도를 한 번만 소
 
 크기는 pixel cap이나 망원 lens scale이 아니라 실제 월드 폭으로 저작한다. 눈 결정은 `1.3–3.2cm`, 봄
 꽃잎은 `2–5.4cm`, 가을 낙엽은 `6–12cm` 범위를 지킨다. 화면에서 더 큰 원형상은 geometry를 키우지 않고
-실제 source 깊이와 조리개 광학이 만든다. 한지 창의 작은 HDR 광원도 필지 폭으로 추정한 점이 아니라 건물
-opening plan이 제공한 실제 고정 한지 opening anchor와 외향 법선, mirror·fit·필지 변환을 소비한다.
-저작 anchor가 없으면 빛과 전용 depth 모두 만들지 않는다.
+실제 source 깊이와 조리개 광학이 만든다. 별도 lighting 경계의 한지 HDR 광원도 필지 폭으로 추정한 점이 아니라
+건물 opening plan이 제공한 실제 고정 한지 opening anchor·폭·높이·외향 법선과 mirror·fit·필지 변환을 소비한다.
+저작 anchor가 없으면 물리 면과 전용 depth 모두 만들지 않는다.
 
 ## 계절·날씨와 적설 재사용 계약
 

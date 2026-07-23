@@ -10,7 +10,8 @@ import { buildPaddies } from './paddies.js';
 import { setupCritters } from './critters.js';
 import { setupAnimals } from './animals.js';
 import { setupSmoke } from './smoke.js';
-import { setupMotes, setupLanternSway } from './motes.js';
+import { setupMotes } from './motes.js';
+import { setupLanternSway } from './lantern-sway.js';
 import { setupClouds, createCloudUniforms } from './clouds.js';
 export { createFocusRing } from './focus.js';   // 앰비언스 근접 링(#79) — focus-in 필지 풀 앰비언스
 export { setupGrass } from './grass.js';         // focus 링 바람 풀(#90) — 줌인 한정 인스턴스드 풀
@@ -122,11 +123,15 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   group.add(smoke.group);
 
   // 앰비언트 생명감(태스크 #32): 공기 중 먼지 모트 + 처마 등롱 미세 흔들림.
-  //  - 모트: 역광 게이트로 골든아워에 빛을 받아 반짝(THREE.Points 단일 드로우). renderer 는
+  //  - 모트: 역광 게이트로 골든아워에 빛을 받는 단일 물리 인스턴스 draw. renderer 는
   //    ink 모드 감지(NoToneMapping)용 read-only. sun.position(=태양·달 방향)으로 forward-scatter.
   //  - 등롱: sky.js 가 만든 등롱 bulb/light 를 env 그룹 traverse 로 찾아 진자 요동(위치만).
   //    둘 다 env group 자식/게이트에 함께 묶인다.
-  const motes = setupMotes({ scene, sun, renderer });
+  const motes = setupMotes({
+    sun,
+    renderer,
+    isInk: () => renderer.toneMapping === THREE.NoToneMapping,
+  });
   group.add(motes.group);
   const lanternSway = setupLanternSway({ scene, getBuilding: () => scene.getObjectByName('building') });
 
@@ -254,6 +259,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     setEnabled(false);
     disposed = true;
     fogMods.length = 0;
+    motes.dispose();
     seasons.dispose();
     sky.dispose();
     scene.remove(group);

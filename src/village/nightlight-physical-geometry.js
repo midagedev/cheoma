@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 
-// Shared deterministic light modulation. The point and physical paths inject
-// this exact source so an A/B changes representation only, not room timing.
+// Shared deterministic modulation for the single physical hanji-light path.
 export const NIGHTLIGHT_FLICK_GLSL = /* glsl */`
 float nightlightFlick(float t, float ph) {
   float breathe = 0.5 * sin(t * 1.7 + ph) + 0.5 * sin(t * 0.63 + ph * 1.7);
@@ -132,9 +131,8 @@ function instancedAttribute(array, itemSize) {
 }
 
 /**
- * Build one front-facing physical hanji proxy batch from the same owner/slot
- * arrays used by the FAR Points representation. No randomness or per-house
- * Object3D/material is introduced.
+ * Build one front-facing physical hanji proxy batch from renderer-authored
+ * owner/slot arrays. No randomness or per-house Object3D/material is introduced.
  */
 export function createPhysicalNightlightBatch({
   count,
@@ -196,6 +194,18 @@ export function createPhysicalNightlightBatch({
   mesh.frustumCulled = false;
   mesh.renderOrder = 4;
   mesh.userData.dofDepthMaterial = depthMaterial;
+  let disposed = false;
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    mesh.visible = false;
+    mesh.removeFromParent();
+    delete mesh.userData.dofDepthMaterial;
+    geometry.dispose();
+    material.dispose();
+    depthMaterial.dispose();
+  }
 
   return {
     object: mesh,
@@ -220,8 +230,8 @@ export function createPhysicalNightlightBatch({
       textures: 0,
       lights: 0,
       attributeBytes:
-        // Shared unit-quad position + uv attributes are 80 bytes.
-        80
+        // Shared unit-quad position + uv + Uint16 index buffers are 92 bytes.
+        92
         + arrays.position.byteLength
         + arrays.outward.byteLength
         + arrays.openingSize.byteLength
@@ -230,5 +240,6 @@ export function createPhysicalNightlightBatch({
         + arrays.threshold.byteLength
         + arrays.warm.byteLength,
     }),
+    dispose,
   };
 }

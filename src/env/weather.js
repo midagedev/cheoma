@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { normalizeVillageLensScale } from '../camera/optics.js';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
 import { createPetalField } from './petals.js';
@@ -11,23 +10,26 @@ import {
   SNOW_MELT_SECONDS,
 } from './snow-material.js';
 import {
-  advanceRainPrecipitation,
-  advanceSnowPrecipitation,
   createPhysicalRainRepresentation,
   createPhysicalSnowRepresentation,
+} from './weather-physical-geometry.js';
+import {
+  advanceRainPrecipitation,
+  advanceSnowPrecipitation,
   createRainPrecipitationState,
   createSnowPrecipitationState,
-} from './weather-physical-geometry.js';
+  setPrecipitationBounds,
+} from './weather-particle-state.js';
 
 // 날씨 시뮬레이터 (눈·비).
 //   setupWeather(scene, { layout, getBuilding, getGround })
 //     → { setWeather(name, opts), update(dt), applyAtmosphere({mode}), onBuildingChanged(), dispose(), get weather() }
 //   name: 'clear' | 'rain' | 'snow'
 //
-// 구현 방침 (#131 물리 제거·사용자 결정): 눈·비는 "값싼 낙하 입자 + 재질/대기 틴트"로만 표현한다.
-//  적설 볼륨 쉘·빗물 지붕 리벌릿·처마 낙수·착지 스플래시 같은 지붕/지면 물리 상호작용은 전부 제거했다
+// 구현 방침 (#131, #96): 눈·비 자체는 실제 월드 크기와 깊이를 가진 낙하 geometry로 표현하되,
+//  적설 볼륨 쉘·빗물 지붕 리벌릿·처마 낙수·착지 스플래시 같은 비싼 표면 상호작용은 만들지 않는다
 //  ("비는 지붕 별도 처리 불필요, 눈은 지붕 희게 칠하는 것으로 충분").
-//  - 강설/강우 낙하 커튼은 scene 에 직접 붙는 파티클(건물 재생성과 무관하게 유지).
+//  - 강설/강우는 scene 에 직접 붙는 인스턴스 geometry(건물 재생성과 무관하게 유지).
 //  - 눈 룩 = 지붕 흰틴트: 건물 재질을 traverse 해 onBeforeCompile 로 "월드 노멀 상향" 기반 흰색
 //    블렌딩을 주입 — 위를 향한 면(지붕·기단 윗면·난간 위)에만 눈이 걸린다(볼륨 지오 없음, 값싼 셰이더).
 //    강도는 공유 uniform uSnowAmount(0~1) 로 제어, setWeather('snow') 시 수십 초에 걸쳐 서서히 희어진다
@@ -52,7 +54,9 @@ const WET_GROUND = new THREE.Color(0x6b6154);  // 젖은 마당(암부 톤다운
 // env 를 넘기면(권장) 대기 틴트 모디파이어를 env.addFogModifier 로 자동 등록해 시간대 크로스페이드
 // 중에도 비/눈 fog 틴트가 씻기지 않고 레벨(페이드)로 합성된다(태스크 #50). 없으면 소비자가
 // applyAtmosphere 를 직접 호출하는 기존 경로로 동작(하위호환).
-export function setupWeather(scene, { layout, getBuilding, getGround, env = null, lowPerf = false }) {
+export function setupWeather(scene, {
+  layout, getBuilding, getGround, env = null, sun = null, lowPerf = false,
+}) {
   let L = layout;
   let name = 'clear';
   let roofColliders = []; // 지붕 충돌 박스 목록 (AABB Box3 배열)
@@ -77,7 +81,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   // 하늘 입자 필드 중심(#98). 눈·비 낙하 박스는 원점 기준 ±boxHalf 로 좁게(밀도 유지) 두되, 이 중심을
   //   매 프레임 카메라 타깃으로 옮겨(setWeatherCenter) "보는 곳에 눈/비가 온다"를 보장한다. 단일건물은
   //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 파티클
-  //   physical geometry와 계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
+  //   낙하 geometry와 계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
   let fieldCX = 0, fieldCZ = 0;
   let disposed = false;
   let fogModifierRegistered = false;
@@ -89,6 +93,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   //   update/센터에서 판정해 넘긴다.
   let season = 'summer';
   let petalCamDist = NaN, petalViewHeight = null, petalDetail = null;
+  let precipitationDetail = 1;
   // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
   //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
   //   마을에선 앱 building.visible=false 라 present 로는 못 켜므로 centerAway(fieldC)를 OR 로 함께 본다.
@@ -96,7 +101,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   let petalPresent = 1;
 
   // ---------- 파티클 시스템 ----------
-  // #131: 낙하 눈·비 커튼만 유지(값싼 입자). 처마 낙수(drips)·착지 스플래시·지붕 볼륨(snowvol/rainflow)은
+  // #131: 낙하 눈·비만 유지. 처마 낙수(drips)·착지 스플래시·지붕 볼륨(snowvol/rainflow)은
   //   제거 — 비는 지붕/지면 별도 처리 없이 그냥 내리고, 눈은 아래 patchSnow 흰틴트로 지붕이 희어진다.
   // 눈·비 위치/속도/크기/위상은 renderer가 아니라 이 CPU state가 단독 소유한다. 인스턴스
   // geometry는 이 배열을 직접 참조하므로 별도의 renderer 상태나 복사본이 없다. 두 입자는
@@ -105,7 +110,11 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
   const rainState = createRainPrecipitationState({ top: yTop() });
   const snow = createPhysicalSnowRepresentation(snowState);
   const rain = createPhysicalRainRepresentation(rainState);
-  const petals = createPetalField({ getWind, lowPerf });
+  const petals = createPetalField({
+    getWind,
+    getLightDirection: sun ? () => sun.position : null,
+    lowPerf,
+  });
   scene.add(snow.object);
   scene.add(rain.object);
   scene.add(petals.object);
@@ -214,12 +223,16 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
 
   function onBuildingChanged() {
     collectMaterials();
+    const top = yTop();
+    setPrecipitationBounds(snowState, { top });
+    setPrecipitationBounds(rainState, { top });
     snowUniform.value = accumLevel * SNOW_AMOUNT_MAX; // 새 재질에 현재 적설 흰틴트 즉시 반영
     applyWetness();
   }
 
   function update(dt) {
     t += dt;
+    const wind = getWind(t);
     // 눈발·비 파티클 가시성은 빠르게(수 초) 페이드.
     // 비↔눈 교차는 겹침 없이 순차(태스크 #50): 들어오는 강수는 나가는 강수가 옅어진(≤0.15) 뒤에
     //   오른다 — clear↔단일 전환은 지연 없음(반대 강수 레벨이 0이라 즉시 목표 추종).
@@ -252,35 +265,35 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
     applyGround();
 
     // 파티클 가시성/갱신 — 낙하 눈·비 커튼만(값싼 입자, 하늘 소속). 처마 낙수·스플래시·볼륨은 #131 로 제거.
-    const snowVis = snowLevel > 0.003;
-    const rainVis = rainLevel > 0.003;
+    const snowVis = snowLevel * precipitationDetail > 0.003;
+    const rainVis = rainLevel * precipitationDetail > 0.003;
     snow.object.visible = snowVis;
     rain.object.visible = rainVis;
     if (snowVis) {
       advanceSnowPrecipitation(snowState, {
         dt,
         time: t,
-        wind: getWind(t),
+        wind,
         centerX: fieldCX,
         centerZ: fieldCZ,
         roofColliders,
         collide: !lowPerf,
         top: yTop(),
       });
-      snow.sync({ level: snowLevel, time: t });
+      snow.sync({ level: snowLevel * precipitationDetail, time: t });
     }
     if (rainVis) {
       advanceRainPrecipitation(rainState, {
         dt,
         time: t,
-        wind: getWind(t),
+        wind,
         centerX: fieldCX,
         centerZ: fieldCZ,
         roofColliders,
         collide: !lowPerf,
         top: yTop(),
       });
-      rain.sync({ level: rainLevel, time: t });
+      rain.sync({ level: rainLevel * precipitationDetail, time: t });
     }
 
     // 계절 입자(봄 꽃잎·가을 낙엽): 조기노출 게이트(원점 빈 터 억제) + 카메라 추종 볼륨. 눈·비처럼
@@ -299,7 +312,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       viewHeight: petalViewHeight,
       detailWeight: petalDetail,
       present: petalPresent,
-      wind: getWind(t),
+      wind,
     });
   }
 
@@ -347,7 +360,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       scene.remove(system.object);
       system.dispose();
     }
-    scene.remove(petals.object); petals.dispose();   // 계절 입자 필드(#111)
+    petals.dispose();   // 계절 입자 필드(#111)
     if (typeof window !== 'undefined' && window.__wx === weatherDebug) delete window.__wx;
   }
 
@@ -384,7 +397,7 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       viewHeight,
       detailWeight,
       visualDistance = camDist,
-      explicitLensScale = null,
+      _explicitLensScale = null,
     ) {
       if (Number.isFinite(x) && Number.isFinite(z) && (x !== fieldCX || z !== fieldCZ)) {
         fieldCX = x; fieldCZ = z;
@@ -393,30 +406,10 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
         petals.object.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
       }
       const visualDist = Number.isFinite(visualDistance) ? visualDistance : camDist;
-      // The village runtime already owns the compensated-lens scale. Its physical and visual
-      // distances are measured from terrain height, while this field follows controls.target
-      // (usually the roof line). Prefer the explicit scale so target height cannot make point
-      // sprites breathe; retain ratio inference for standalone/legacy callers.
-      const inferredLensScale = Number.isFinite(camDist)
-        && Number.isFinite(visualDist) && visualDist > 1e-6
-        ? camDist / visualDist : 1;
-      const lensScale = normalizeVillageLensScale(
-        Number.isFinite(explicitLensScale) ? explicitLensScale : inferredLensScale,
-      );
-      // 화면 등가 거리 대응(#98·#116 원경 정책). 두 축으로 나눠 부감 강수를 "커튼"으로 만든다:
-      //   ① uScale: 부감에서 눈송이가 벼룩처럼 작아지는 걸 상쇄하되 완만하게(최대 2.2×). 셰이더 사이즈
-      //      캡(uMaxPx)이 초대형 스프라이트를 막으므로 예전(5×)처럼 과증폭할 필요가 없다 — 과증폭이
-      //      바로 부감 "흰 솜뭉치 블롭"의 원인이었다.
-      //   ② 낙하 볼륨 xz 분산: 카메라가 멀수록(부감) ±boxHalf 박스를 넓게 편다(최대 3×). 3600 입자가
-      //      마을 중심 ±46 에 뭉쳐 블롭이 되던 걸, 넓은 면적에 흩어 "원경에 깔리는 강수 커튼"으로 만든다.
-      //      근경(hero·focus, camDist 작음)은 1× 라 기존 밀도·룩 무변(히어로는 셰이더 근접페이드가 담당).
-      if (Number.isFinite(visualDist)) {
-        // uLensScale이 보상 dolly만 상쇄하고, uScale의 미적 고도 곡선은 화면 등가 거리가 소유한다.
-        snow.setLens({ lensScale, visualDistance: visualDist });
-        const spread = Math.min(3.0, Math.max(1, visualDist / 60));
-        snow.setCenterSpread(spread);
-        rain.setCenterSpread(spread);
-      }
+      // 강수도 공통 디테일 가중치를 직접 소비한다. 중간 band에서는 color/depth가 함께 옅어지고,
+      // 원경 0에서는 CPU state advance와 draw를 모두 쉰다. 개별 크기는 월드 단위 그대로다.
+      precipitationDetail = Number.isFinite(detailWeight)
+        ? Math.max(0, Math.min(1, detailWeight)) : 1;
       // 계절 입자는 눈·비와 달리 근경 디테일이다. 4번째 인자는 절대 world Y가 아니라
       // 카메라와 현재 시선 타깃/지면 사이의 수직 높이다. petals가 공통 디테일 밴드로 소거한다.
       // 기존 3-인자 호출은 camDist 근사치를 사용하도록 보존한다.

@@ -26,7 +26,7 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
 // 연출(staging) 오브젝트 — 항상 제외. 대부분은 어댑터/엔진이 씬에 붙이므로 populate root 엔 없지만
 //   방어적으로 이름 필터. 입자/스프라이트/라인은 타입으로도 잡는다.
-const STAGING_NAME_RE = /^(skyDome|moon|clouds|edge-mist-ring|ridge-mist|focusRing|worldedge|village-nightlights|nightlight-points|flare|lensflare|dust|motes|lanternGlow)/;
+const STAGING_NAME_RE = /^(skyDome|moon|clouds|edge-mist-ring|ridge-mist|focusRing|worldedge|village-nightlights|nightlight-physical|flare|lensflare|dust|motes|lanternGlow)/;
 // 지형·물·논 — opts.includeTerrain 게이트(기본 true).
 const TERRAIN_NAME_RE = /^(village-terrain|village-stream|village-paddies)$/;
 // 수목·정원·소동물 — opts.includeScenery(=pretty) 게이트(기본 true). populate 단계의

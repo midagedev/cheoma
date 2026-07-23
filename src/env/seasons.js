@@ -1,6 +1,6 @@
 import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
-import { createLeafSaddleGeometry } from './detail-particle-geometry.js';
+import { createLeafSaddleGeometry, LEAF_SHAPE_GLSL } from './detail-particle-geometry.js';
 import { getWind } from './wind.js';
 
 // 계절 시스템 — 가을 단풍·봄 벚꽃·여름 신록·겨울 휴면색.
@@ -16,7 +16,7 @@ import { getWind } from './wind.js';
 //  - 계절 전환은 항상 여름(초록)을 경유해 보간 → 빨강↔분홍 직접 보간의 진흙색을 피한다.
 //  - 지면은 terrain 재질에 aGround 마스크 기반 곱연산 틴트(가을 마른 금빛/봄 신록)를
 //    주입 — 박석 마당은 유지, 풀·숲 원경만 은은하게.
-//  - 낙하 파티클: 나무 수관에서 흩날리는 낙엽/벚꽃잎(얕은 4-triangle 곡면).
+//  - 낙하 파티클: 나무 수관에서 흩날리는 낙엽/벚꽃잎(종별 저폴리 곡면).
 //    바람 사인 요동 + 회전 낙하 + 지면/수관 끝 페이드.
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
@@ -210,6 +210,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
       envGroup.remove(leaves.mesh);
       leaves.mesh.geometry.dispose();
       leaves.mesh.material.dispose();
+      leaves.depthMaterial?.dispose();
       if (leaves.tex) leaves.tex.dispose();
     }
     if (litter) {
@@ -409,12 +410,43 @@ function buildLeaves(treeInsts) {
     side: THREE.DoubleSide,
   });
   const geo = createLeafSaddleGeometry();
+  geo.setAttribute('aLeafSpecies', new THREE.InstancedBufferAttribute(new Float32Array(N), 1));
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute float aLeafSpecies;
+        ${LEAF_SHAPE_GLSL}`)
+      .replace('#include <beginnormal_vertex>', `
+        vec3 objectNormal = leafSpeciesNormal(aLeafSpecies);`)
+      .replace('#include <begin_vertex>', `
+        vec3 transformed = leafSpeciesShape(aLeafSpecies);`);
+  };
+  mat.customProgramCacheKey = () => 'cheoma-season-leaf-species-v1';
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   mesh.name = 'seasonLeaves';
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
   mesh.frustumCulled = false;
   mesh.renderOrder = 16;
   mesh.visible = false;
+  const depthMaterial = new THREE.ShaderMaterial({
+    vertexShader: `
+      attribute float aLeafSpecies;
+      ${LEAF_SHAPE_GLSL}
+      void main() {
+        vec4 local = vec4(leafSpeciesShape(aLeafSpecies), 1.0);
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * local;
+      }`,
+    fragmentShader: `
+      #include <packing>
+      void main() { gl_FragColor = packDepthToRGBA(gl_FragCoord.z); }`,
+    side: THREE.DoubleSide,
+    blending: THREE.NoBlending,
+    depthTest: true,
+    depthWrite: true,
+  });
+  depthMaterial.allowOverride = false;
+  depthMaterial.name = 'season-leaf-dof-depth';
+  mesh.userData.dofDepthMaterial = depthMaterial;
 
   // 파티클 상태
   const st = [];
@@ -449,25 +481,29 @@ function buildLeaves(treeInsts) {
     fallScale = spring ? 0.6 : 1.0;
     sizeScale = spring ? 0.45 : 1.0;
     // 카메라 카드 대신 공유 곡면 geometry가 월드에서 실제로 회전한다. 수종별 차이는
-    // 실제 크기와 팔레트로 유지한다.
+    // 실루엣·곡면 normal·실제 크기·팔레트로 유지한다.
     const GINKGO = [0xf2c53d, 0xf0b429, 0xe8b21f, 0xf5ce4a];       // 순수 황금(은행)
     const MAPLE  = [0xc0392b, 0xd35400, 0xe0491f, 0xb83a1e, 0xd9622b]; // 진홍~주황(단풍)
     const WARM   = [0xd9772b, 0xc86a2a, 0xcf9a3a, 0xbe7d34];       // 벚·잡목 낙엽(오렌지-브라운)
     const SP     = [0xf3c4d6, 0xf0b0c8, 0xe79bbf, 0xfad9e6];       // 봄 벚꽃
     const col = new THREE.Color();
+    const species = geo.attributes.aLeafSpecies.array;
     for (let i = 0; i < N; i++) {
       const sp = st[i].e.sp;
       let pal;
-      if (spring) pal = SP;
-      else if (sp === 'ginkgo') pal = GINKGO;
-      else if (sp === 'maple') pal = MAPLE;
-      else if (sp === 'misc') pal = (i & 1) ? GINKGO : MAPLE;
-      else pal = WARM;
+      if (spring) { pal = SP; species[i] = 0; }
+      else if (sp === 'ginkgo') { pal = GINKGO; species[i] = 1; }
+      else if (sp === 'maple') { pal = MAPLE; species[i] = 2; }
+      else if (sp === 'misc') {
+        pal = (i & 1) ? GINKGO : MAPLE;
+        species[i] = (i & 1) ? 1 : 2;
+      } else { pal = WARM; species[i] = 0; }
       col.copy(linCol(pal[(i * 5) % pal.length]));
       const j = 0.85 + ((i * 2654435761) % 1000) / 1000 * 0.3;  // 개체 밝기 편차
       mesh.setColorAt(i, col.multiplyScalar(j));
     }
     mesh.instanceColor.needsUpdate = true;
+    geo.attributes.aLeafSpecies.needsUpdate = true;
   }
 
   function writeOne(i, globalFade) {
@@ -515,7 +551,7 @@ function buildLeaves(treeInsts) {
     mesh.instanceMatrix.needsUpdate = true;
   }
 
-  return { mesh, setSeason, update, prewarm };
+  return { mesh, depthMaterial, setSeason, update, prewarm };
 }
 
 // ---------- 낙엽 지면 누적 ----------

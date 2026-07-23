@@ -160,7 +160,7 @@ assert.deepEqual(physicalState, {
 }, 'physical batch resource contract changed');
 assert.deepEqual(pair.debugRepresentation(), {
   representation: 'physical',
-  attributeBytes: 80 + 24 * (3 + 3 + 2 + 1 + 1 + 1 + 1) * 4,
+  attributeBytes: 92 + 24 * (3 + 3 + 2 + 1 + 1 + 1 + 1) * 4,
   activeObject: 'nightlight-physical',
   allocatedRepresentations: ['physical'],
 }, 'physical attribute-memory accounting changed');

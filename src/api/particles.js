@@ -6,12 +6,13 @@ export {
   WEATHER_PARTICLE_SEED,
   advanceRainPrecipitation,
   advanceSnowPrecipitation,
-  createPhysicalRainRepresentation,
-  createPhysicalSnowRepresentation,
   createRainPrecipitationState,
   createSnowPrecipitationState,
-  precipitationStateBytes,
-  representationAttributeBytes,
+  setPrecipitationBounds,
+} from './particle-state.js';
+export {
+  createPhysicalRainRepresentation,
+  createPhysicalSnowRepresentation,
 } from '../env/weather-physical-geometry.js';
 export {
   createLeafSaddleGeometry,

@@ -146,6 +146,14 @@ assert.deepEqual(ids(['src/village/nightlight-physical-geometry.js']), [
   'core', 'app', 'particle-geometry', 'worker',
 ]);
 assert.deepEqual(ids(['src/api/particles.js']), ['core', 'app', 'particle-geometry']);
+assert.deepEqual(ids(['src/api/particle-state.js']), ['core', 'particle-geometry']);
+assert.deepEqual(ids(['src/api/lighting.js']), ['core', 'app', 'particle-geometry']);
+assert.deepEqual(ids(['src/env/weather-particle-state.js']), [
+  'core', 'app', 'particle-geometry',
+]);
+assert.deepEqual(ids(['src/env/lantern-sway.js']), [
+  'core', 'app', 'lod-app',
+]);
 assert.deepEqual(ids(['tools/check-detail-particle-geometry.mjs']), [
   'core', 'particle-geometry',
 ]);

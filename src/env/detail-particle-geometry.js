@@ -46,18 +46,92 @@ function bindOwnedDepthMaterial(material, depthMaterial) {
   };
 }
 
+function ownedRepresentationDisposer(object, geometry, material) {
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    object.visible = false;
+    object.removeFromParent();
+    delete object.userData.dofDepthMaterial;
+    geometry.dispose();
+    // bindOwnedDepthMaterial makes the color material own depth teardown.
+    material.dispose();
+  };
+}
+
 export function createLeafSaddleGeometry() {
-  // Four triangles around a raised centre form a shallow, light-catching saddle.
+  // One normalized fan topology morphs between cherry petal, ginkgo fan, and
+  // maple palmate silhouettes without adding a draw call.
+  const petal = [
+    [0, -0.5], [0.12, -0.43], [0.24, -0.28], [0.31, -0.06],
+    [0.31, 0.16], [0.25, 0.35], [0.12, 0.5], [0, 0.41],
+    [-0.12, 0.5], [-0.25, 0.35], [-0.31, 0.16], [-0.31, -0.06],
+    [-0.24, -0.28], [-0.12, -0.43], [-0.04, -0.49], [0.04, -0.49],
+  ];
+  const ginkgo = [
+    [0, -0.5], [0.06, -0.34], [0.18, -0.24], [0.34, -0.15],
+    [0.47, 0.04], [0.48, 0.27], [0.35, 0.45], [0.12, 0.5],
+    [0, 0.38], [-0.12, 0.5], [-0.35, 0.45], [-0.48, 0.27],
+    [-0.47, 0.04], [-0.34, -0.15], [-0.18, -0.24], [-0.06, -0.34],
+  ];
+  const maple = [
+    [0, -0.5], [0.05, -0.22], [0.24, -0.32], [0.16, -0.09],
+    [0.45, 0.02], [0.21, 0.14], [0.33, 0.42], [0.08, 0.28],
+    [0, 0.5], [-0.08, 0.28], [-0.33, 0.42], [-0.21, 0.14],
+    [-0.45, 0.02], [-0.16, -0.09], [-0.24, -0.32], [-0.05, -0.22],
+  ];
+  const shape = (outline) => {
+    const values = [0, 0, 0.075];
+    for (let index = 0; index < outline.length; index++) {
+      const [x, y] = outline[index];
+      const z = (index % 2 ? 1 : -1) * 0.012 - x * x * 0.035 + y * y * 0.018;
+      values.push(x, y, z);
+    }
+    return values;
+  };
+  const indices = [];
+  for (let index = 0; index < petal.length; index++) {
+    indices.push(0, index + 1, ((index + 1) % petal.length) + 1);
+  }
+  const vertexNormals = (positions) => {
+    const values = new Float32Array(positions.length);
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const edgeAB = new THREE.Vector3();
+    const edgeAC = new THREE.Vector3();
+    const face = new THREE.Vector3();
+    for (let index = 0; index < indices.length; index += 3) {
+      const ia = indices[index] * 3;
+      const ib = indices[index + 1] * 3;
+      const ic = indices[index + 2] * 3;
+      a.fromArray(positions, ia);
+      b.fromArray(positions, ib);
+      c.fromArray(positions, ic);
+      face.crossVectors(edgeAB.subVectors(b, a), edgeAC.subVectors(c, a));
+      for (const offset of [ia, ib, ic]) {
+        values[offset] += face.x;
+        values[offset + 1] += face.y;
+        values[offset + 2] += face.z;
+      }
+    }
+    for (let offset = 0; offset < values.length; offset += 3) {
+      a.fromArray(values, offset).normalize().toArray(values, offset);
+    }
+    return values;
+  };
+  const petalShape = shape(petal);
+  const ginkgoShape = shape(ginkgo);
+  const mapleShape = shape(maple);
   const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
-    0, 0, 0.16,
-    0, 1, 0,
-    0.62, 0.05, -0.08,
-    0, -1, 0.02,
-    -0.62, 0.05, -0.08,
-  ], 3));
-  geometry.setIndex([0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1]);
-  geometry.computeVertexNormals();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(petalShape, 3));
+  geometry.setAttribute('aGinkgoShape', new THREE.Float32BufferAttribute(ginkgoShape, 3));
+  geometry.setAttribute('aMapleShape', new THREE.Float32BufferAttribute(mapleShape, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(vertexNormals(petalShape), 3));
+  geometry.setAttribute('aGinkgoNormal', new THREE.Float32BufferAttribute(vertexNormals(ginkgoShape), 3));
+  geometry.setAttribute('aMapleNormal', new THREE.Float32BufferAttribute(vertexNormals(mapleShape), 3));
+  geometry.setIndex(indices);
   return geometry;
 }
 
@@ -86,11 +160,70 @@ vec3 rotateXYZ(vec3 p, vec3 a) {
 }
 `;
 
+export const LEAF_SHAPE_GLSL = /* glsl */`
+attribute vec3 aGinkgoShape;
+attribute vec3 aMapleShape;
+attribute vec3 aGinkgoNormal;
+attribute vec3 aMapleNormal;
+vec3 leafSpeciesShape(float species) {
+  vec3 shape = mix(position, aGinkgoShape, step(0.5, species));
+  return mix(shape, aMapleShape, step(1.5, species));
+}
+vec3 leafSpeciesNormal(float species) {
+  vec3 shapeNormal = mix(normal, aGinkgoNormal, step(0.5, species));
+  return normalize(mix(shapeNormal, aMapleNormal, step(1.5, species)));
+}
+`;
+
+const PARTICLE_DEPTH_COVERAGE_GLSL = /* glsl */`
+float detailDepthHash(vec2 point) {
+  return fract(52.9829189 * fract(dot(point, vec2(0.06711056, 0.00583715))));
+}
+`;
+
+const PETAL_VERTEX_STATE_GLSL = /* glsl */`
+attribute vec3 aOffset;
+attribute float aSize;
+attribute vec3 aColor;
+attribute float aRot;
+attribute float aRotSpd;
+attribute float aOpacity;
+attribute float aSpecies;
+attribute float aThresh;
+uniform float uFade;
+uniform float uTime;
+uniform float uActive;
+uniform float uWorldScale;
+${ROTATE_GLSL}
+${LEAF_SHAPE_GLSL}
+void petalVertexState(
+  out vec4 clipPosition,
+  out vec3 worldNormal,
+  out float visibleAlpha
+) {
+  float speed = abs(aRotSpd);
+  vec3 angles = vec3(
+    sin(uTime * (0.72 + speed * 0.13) + aRot * 1.7) * (0.52 + aSpecies * 0.11),
+    aRot * 0.61 + uTime * aRotSpd * 0.23,
+    aRot + uTime * aRotSpd
+  );
+  vec3 silhouette = leafSpeciesShape(aSpecies);
+  float speciesScale = mix(0.48, 1.0, step(0.5, aSpecies));
+  vec3 local = rotateXYZ(silhouette * (aSize * uWorldScale * speciesScale), angles);
+  vec3 rotatedNormal = normalize(rotateXYZ(leafSpeciesNormal(aSpecies), angles));
+  vec4 world = modelMatrix * vec4(aOffset + local, 1.0);
+  clipPosition = projectionMatrix * viewMatrix * world;
+  worldNormal = normalize(mat3(modelMatrix) * rotatedNormal);
+  float gust = smoothstep(aThresh - 0.16, aThresh + 0.04, uActive);
+  visibleAlpha = aOpacity * uFade * gust;
+}
+`;
+
 export function createPetalWorldRepresentation(sourceGeometry, {
   renderOrder = 18,
   // aSize is an artistic scalar, not metres. Species scaling maps the current
   // ranges to ~1.9–4.0cm spring petals and ~5.7–12cm autumn leaves end-to-end.
-  worldScale = 0.015,
+  worldScale = 0.03,
 } = {}) {
   const geometry = createLeafSaddleGeometry();
   const source = sourceGeometry.attributes;
@@ -113,58 +246,30 @@ export function createPetalWorldRepresentation(sourceGeometry, {
       uLightDir: { value: new THREE.Vector3(-0.35, 0.82, 0.44).normalize() },
     },
     vertexShader: /* glsl */`
-      attribute vec3 aOffset;
-      attribute float aSize;
-      attribute vec3 aColor;
-      attribute float aRot;
-      attribute float aRotSpd;
-      attribute float aOpacity;
-      attribute float aSpecies;
-      attribute float aThresh;
-      uniform float uTime;
-      uniform float uWorldScale;
       varying vec3 vColor;
       varying vec3 vNormal;
-      varying float vOpacity;
-      varying float vThreshold;
-      ${ROTATE_GLSL}
+      varying float vVisibleAlpha;
+      ${PETAL_VERTEX_STATE_GLSL}
       void main() {
-        float speed = abs(aRotSpd);
-        vec3 angles = vec3(
-          sin(uTime * (0.72 + speed * 0.13) + aRot * 1.7) * (0.52 + aSpecies * 0.11),
-          aRot * 0.61 + uTime * aRotSpd * 0.23,
-          aRot + uTime * aRotSpd
-        );
-        vec3 silhouette = position;
-        silhouette.x *= mix(0.72, 1.12, step(0.5, aSpecies));
-        float speciesScale = mix(0.48, 1.0, step(0.5, aSpecies));
-        vec3 local = rotateXYZ(silhouette * (aSize * uWorldScale * speciesScale), angles);
-        vec3 rotatedNormal = normalize(rotateXYZ(normal, angles));
-        vec4 world = modelMatrix * vec4(aOffset + local, 1.0);
-        gl_Position = projectionMatrix * viewMatrix * world;
+        vec4 clipPosition;
+        petalVertexState(clipPosition, vNormal, vVisibleAlpha);
+        gl_Position = clipPosition;
         vColor = aColor;
-        vNormal = normalize(mat3(modelMatrix) * rotatedNormal);
-        vOpacity = aOpacity;
-        vThreshold = aThresh;
       }`,
     fragmentShader: /* glsl */`
       precision highp float;
-      uniform float uFade;
-      uniform float uActive;
       uniform vec3 uLightDir;
       varying vec3 vColor;
       varying vec3 vNormal;
-      varying float vOpacity;
-      varying float vThreshold;
+      varying float vVisibleAlpha;
+      ${PARTICLE_DEPTH_COVERAGE_GLSL}
       void main() {
-        float gust = smoothstep(vThreshold - 0.16, vThreshold + 0.04, uActive);
-        float alpha = vOpacity * uFade * gust;
-        if (alpha < 0.02) discard;
+        if (vVisibleAlpha < 0.02 || detailDepthHash(gl_FragCoord.xy) > vVisibleAlpha) discard;
         float wrap = 0.58 + 0.42 * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-        gl_FragColor = vec4(vColor * wrap, alpha);
+        gl_FragColor = vec4(vColor * wrap, 1.0);
       }`,
     side: THREE.DoubleSide,
-    transparent: true,
+    transparent: false,
     depthTest: true,
     depthWrite: true,
   });
@@ -177,42 +282,20 @@ export function createPetalWorldRepresentation(sourceGeometry, {
       uWorldScale: material.uniforms.uWorldScale,
     },
     vertexShader: /* glsl */`
-      attribute vec3 aOffset;
-      attribute float aSize;
-      attribute float aRot;
-      attribute float aRotSpd;
-      attribute float aOpacity;
-      attribute float aSpecies;
-      attribute float aThresh;
-      uniform float uTime;
-      uniform float uWorldScale;
-      varying float vOpacity;
-      varying float vThreshold;
-      ${ROTATE_GLSL}
+      varying float vVisibleAlpha;
+      ${PETAL_VERTEX_STATE_GLSL}
       void main() {
-        float speed = abs(aRotSpd);
-        vec3 angles = vec3(
-          sin(uTime * (0.72 + speed * 0.13) + aRot * 1.7) * (0.52 + aSpecies * 0.11),
-          aRot * 0.61 + uTime * aRotSpd * 0.23,
-          aRot + uTime * aRotSpd
-        );
-        vec3 silhouette = position;
-        silhouette.x *= mix(0.72, 1.12, step(0.5, aSpecies));
-        float speciesScale = mix(0.48, 1.0, step(0.5, aSpecies));
-        vec3 local = rotateXYZ(silhouette * (aSize * uWorldScale * speciesScale), angles);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(aOffset + local, 1.0);
-        vOpacity = aOpacity;
-        vThreshold = aThresh;
+        vec4 clipPosition;
+        vec3 unusedNormal;
+        petalVertexState(clipPosition, unusedNormal, vVisibleAlpha);
+        gl_Position = clipPosition;
       }`,
     fragmentShader: /* glsl */`
       #include <packing>
-      uniform float uFade;
-      uniform float uActive;
-      varying float vOpacity;
-      varying float vThreshold;
+      varying float vVisibleAlpha;
+      ${PARTICLE_DEPTH_COVERAGE_GLSL}
       void main() {
-        float gust = smoothstep(vThreshold - 0.16, vThreshold + 0.04, uActive);
-        if (vOpacity * uFade * gust < 0.02) discard;
+        if (vVisibleAlpha < 0.02 || detailDepthHash(gl_FragCoord.xy) > vVisibleAlpha) discard;
         gl_FragColor = packDepthToRGBA(gl_FragCoord.z);
       }`,
     side: THREE.DoubleSide,
@@ -237,6 +320,7 @@ export function createPetalWorldRepresentation(sourceGeometry, {
     geometry.attributes.aSpecies,
   ];
 
+  const dispose = ownedRepresentationDisposer(object, geometry, material);
   return {
     object,
     material,
@@ -249,7 +333,7 @@ export function createPetalWorldRepresentation(sourceGeometry, {
     },
     stats: {
       instances: geometry.instanceCount,
-      triangles: geometry.instanceCount * 4,
+      triangles: geometry.instanceCount * 16,
       sharedCpuBytes: attributeBytes(source),
       baseGeometryBytes: baseGeometryBytes(geometry),
       colorPrograms: 1,
@@ -260,12 +344,73 @@ export function createPetalWorldRepresentation(sourceGeometry, {
         && geometry.attributes.aSize.array === source.aSize.array
         && geometry.attributes.aRot.array === source.aRot.array;
     },
-    dispose() {
-      geometry.dispose();
-      material.dispose();
-    },
+    dispose,
   };
 }
+
+const MOTE_VERTEX_STATE_GLSL = /* glsl */`
+attribute vec3 aOffset;
+attribute vec4 aRand;
+uniform float uTime;
+uniform float uIntensity;
+uniform float uFirefly;
+uniform vec3 uSunDir;
+uniform float uDrift;
+uniform vec3 uWindDir;
+uniform float uWindSway;
+uniform float uGust;
+uniform float uNearA;
+uniform float uNearB;
+uniform float uLensScale;
+uniform float uDustRadius;
+uniform float uFireflyRadius;
+${ROTATE_GLSL}
+void moteVertexState(
+  out vec4 clipPosition,
+  out vec3 worldNormal,
+  out vec3 viewDirection,
+  out float visibleAlpha,
+  out float firefly
+) {
+  vec3 p = aOffset;
+  float ph = aRand.x;
+  float fm = aRand.y;
+  p.x += uDrift * sin(uTime * 0.50 * fm + ph);
+  p.y += uDrift * 0.55 * sin(uTime * 0.37 * fm + ph * 1.7 + 1.3);
+  p.z += uDrift * cos(uTime * 0.43 * fm + ph * 2.1);
+  float windAmp = uWindSway * (0.35 + uGust);
+  float ws = 0.5 + 0.5 * sin(uTime * 0.30 + ph);
+  p.x += uWindDir.x * windAmp * ws;
+  p.z += uWindDir.z * windAmp * ws;
+
+  firefly = step(aRand.z, -0.0001);
+  float radius = mix(uDustRadius, uFireflyRadius, firefly) * aRand.w;
+  vec3 angles = vec3(
+    ph + uTime * (0.31 + fm * 0.11),
+    ph * 1.7 + uTime * 0.23,
+    ph * 2.3 - uTime * 0.19
+  );
+  vec3 local = rotateXYZ(position * radius, angles);
+  vec3 rotatedNormal = normalize(rotateXYZ(normal, angles));
+  vec4 world = modelMatrix * vec4(p + local, 1.0);
+  vec4 mv = viewMatrix * world;
+  clipPosition = projectionMatrix * mv;
+  viewDirection = normalize(world.xyz - cameraPosition);
+  worldNormal = normalize(mat3(modelMatrix) * rotatedNormal);
+
+  float visualDepth = -mv.z / max(uLensScale, 0.0001);
+  float nearFade = smoothstep(uNearA, uNearB, visualDepth);
+  float forward = max(dot(viewDirection, normalize(uSunDir)), 0.0);
+  float shimmer = 0.12 + 0.88 * forward * forward * forward;
+  float twinkle = 0.72 + 0.28 * sin(uTime * (1.7 + fm) + ph * 3.1);
+  float dustAlpha = abs(aRand.z) * uIntensity * shimmer * twinkle * nearFade;
+  float pulseBase = 0.5 + 0.5 * sin(uTime * (0.72 + fm * 0.31) + ph * 2.7);
+  float pulse = pulseBase * pulseBase;
+  pulse *= pulse * pulse * pulse;
+  float fireflyAlpha = (0.18 + 0.82 * pulse) * 0.88 * nearFade * uFirefly;
+  visibleAlpha = mix(dustAlpha, fireflyAlpha, firefly);
+}
+`;
 
 export function createMoteWorldRepresentation(sourceGeometry, {
   renderOrder = 4,
@@ -300,87 +445,39 @@ export function createMoteWorldRepresentation(sourceGeometry, {
       uFireflyRadius: { value: fireflyRadius },
     },
     vertexShader: /* glsl */`
-      attribute vec3 aOffset;
-      attribute vec4 aRand;
-      uniform float uTime;
-      uniform vec3 uSunDir;
-      uniform float uDrift;
-      uniform vec3 uWindDir;
-      uniform float uWindSway;
-      uniform float uGust;
-      uniform float uNearA;
-      uniform float uNearB;
-      uniform float uLensScale;
-      uniform float uDustRadius;
-      uniform float uFireflyRadius;
-      varying float vAlpha;
+      varying float vVisibleAlpha;
       varying float vFirefly;
       varying float vFacing;
-      ${ROTATE_GLSL}
+      ${MOTE_VERTEX_STATE_GLSL}
       void main() {
-        vec3 p = aOffset;
-        float ph = aRand.x;
-        float fm = aRand.y;
-        p.x += uDrift * sin(uTime * 0.50 * fm + ph);
-        p.y += uDrift * 0.55 * sin(uTime * 0.37 * fm + ph * 1.7 + 1.3);
-        p.z += uDrift * cos(uTime * 0.43 * fm + ph * 2.1);
-        float windAmp = uWindSway * (0.35 + uGust);
-        float ws = 0.5 + 0.5 * sin(uTime * 0.30 + ph);
-        p.x += uWindDir.x * windAmp * ws;
-        p.z += uWindDir.z * windAmp * ws;
-
-        float ff = step(aRand.z, -0.0001);
-        float radius = mix(uDustRadius, uFireflyRadius, ff) * aRand.w;
-        vec3 angles = vec3(
-          ph + uTime * (0.31 + fm * 0.11),
-          ph * 1.7 + uTime * 0.23,
-          ph * 2.3 - uTime * 0.19
+        vec4 clipPosition;
+        vec3 worldNormal;
+        vec3 viewDirection;
+        moteVertexState(
+          clipPosition, worldNormal, viewDirection, vVisibleAlpha, vFirefly
         );
-        vec3 local = rotateXYZ(position * radius, angles);
-        vec3 n = normalize(rotateXYZ(normal, angles));
-        vec4 world = modelMatrix * vec4(p + local, 1.0);
-        vec4 mv = viewMatrix * world;
-        gl_Position = projectionMatrix * mv;
-
-        float visualDepth = -mv.z / max(uLensScale, 0.0001);
-        float nearFade = smoothstep(uNearA, uNearB, visualDepth);
-        vec3 viewDir = normalize(world.xyz - cameraPosition);
-        float forward = max(dot(viewDir, normalize(uSunDir)), 0.0);
-        float shimmer = 0.12 + 0.88 * forward * forward * forward;
-        float twinkle = 0.72 + 0.28 * sin(uTime * (1.7 + fm) + ph * 3.1);
-        float dustAlpha = abs(aRand.z) * shimmer * twinkle * nearFade;
-        float pulseBase = 0.5 + 0.5 * sin(uTime * (0.72 + fm * 0.31) + ph * 2.7);
-        float pulse = pulseBase * pulseBase;
-        pulse *= pulse * pulse * pulse;
-        float fireflyAlpha = (0.18 + 0.82 * pulse) * 0.88 * nearFade;
-        vFirefly = ff;
-        vAlpha = mix(dustAlpha, fireflyAlpha, ff);
-        vFacing = 0.35 + 0.65 * abs(dot(normalize(mat3(modelMatrix) * n), -viewDir));
+        gl_Position = clipPosition;
+        vFacing = 0.35 + 0.65 * abs(dot(worldNormal, -viewDirection));
       }`,
     fragmentShader: /* glsl */`
       precision highp float;
-      uniform float uIntensity;
-      uniform float uFirefly;
       uniform vec3 uColor;
       uniform vec3 uFireflyColor;
-      varying float vAlpha;
+      varying float vVisibleAlpha;
       varying float vFirefly;
       varying float vFacing;
       void main() {
-        float enabledFirefly = vFirefly * uFirefly;
-        if (vFirefly > 0.5 && enabledFirefly < 0.001) discard;
-        float alpha = vAlpha * mix(uIntensity, enabledFirefly, vFirefly);
-        if (alpha < 0.008) discard;
+        if (vVisibleAlpha < 0.008) discard;
         // A compact HDR centre is a real world volume, allowing source-depth DoF
         // to form an aperture image without a camera-facing sprite.
         float emission = mix(1.0, 7.0, vFirefly);
         vec3 color = mix(uColor * vFacing, uFireflyColor * emission, vFirefly);
-        gl_FragColor = vec4(color, min(alpha, 1.0));
+        gl_FragColor = vec4(color, min(vVisibleAlpha, 1.0));
       }`,
     side: THREE.DoubleSide,
     transparent: true,
     depthTest: true,
-    depthWrite: true,
+    depthWrite: false,
   });
 
   const depthMaterial = new THREE.ShaderMaterial({
@@ -400,65 +497,24 @@ export function createMoteWorldRepresentation(sourceGeometry, {
       uFireflyRadius: material.uniforms.uFireflyRadius,
     },
     vertexShader: /* glsl */`
-      attribute vec3 aOffset;
-      attribute vec4 aRand;
-      uniform float uTime;
-      uniform float uIntensity;
-      uniform float uFirefly;
-      uniform vec3 uSunDir;
-      uniform float uDrift;
-      uniform vec3 uWindDir;
-      uniform float uWindSway;
-      uniform float uGust;
-      uniform float uNearA;
-      uniform float uNearB;
-      uniform float uLensScale;
-      uniform float uDustRadius;
-      uniform float uFireflyRadius;
       varying float vVisibleAlpha;
-      ${ROTATE_GLSL}
+      ${MOTE_VERTEX_STATE_GLSL}
       void main() {
-        vec3 p = aOffset;
-        float ph = aRand.x;
-        float fm = aRand.y;
-        p.x += uDrift * sin(uTime * 0.50 * fm + ph);
-        p.y += uDrift * 0.55 * sin(uTime * 0.37 * fm + ph * 1.7 + 1.3);
-        p.z += uDrift * cos(uTime * 0.43 * fm + ph * 2.1);
-        float windAmp = uWindSway * (0.35 + uGust);
-        float ws = 0.5 + 0.5 * sin(uTime * 0.30 + ph);
-        p.x += uWindDir.x * windAmp * ws;
-        p.z += uWindDir.z * windAmp * ws;
-
-        float ff = step(aRand.z, -0.0001);
-        float radius = mix(uDustRadius, uFireflyRadius, ff) * aRand.w;
-        vec3 angles = vec3(
-          ph + uTime * (0.31 + fm * 0.11),
-          ph * 1.7 + uTime * 0.23,
-          ph * 2.3 - uTime * 0.19
+        vec4 clipPosition;
+        vec3 unusedNormal;
+        vec3 unusedViewDirection;
+        float unusedFirefly;
+        moteVertexState(
+          clipPosition, unusedNormal, unusedViewDirection, vVisibleAlpha, unusedFirefly
         );
-        vec3 local = rotateXYZ(position * radius, angles);
-        vec4 world = modelMatrix * vec4(p + local, 1.0);
-        vec4 mv = viewMatrix * world;
-        gl_Position = projectionMatrix * mv;
-
-        float visualDepth = -mv.z / max(uLensScale, 0.0001);
-        float nearFade = smoothstep(uNearA, uNearB, visualDepth);
-        vec3 viewDir = normalize(world.xyz - cameraPosition);
-        float forward = max(dot(viewDir, normalize(uSunDir)), 0.0);
-        float shimmer = 0.12 + 0.88 * forward * forward * forward;
-        float twinkle = 0.72 + 0.28 * sin(uTime * (1.7 + fm) + ph * 3.1);
-        float dustAlpha = abs(aRand.z) * uIntensity * shimmer * twinkle * nearFade;
-        float pulseBase = 0.5 + 0.5 * sin(uTime * (0.72 + fm * 0.31) + ph * 2.7);
-        float pulse = pulseBase * pulseBase;
-        pulse *= pulse * pulse * pulse;
-        float fireflyAlpha = (0.18 + 0.82 * pulse) * 0.88 * nearFade * uFirefly;
-        vVisibleAlpha = mix(dustAlpha, fireflyAlpha, ff);
+        gl_Position = clipPosition;
       }`,
     fragmentShader: /* glsl */`
       #include <packing>
       varying float vVisibleAlpha;
+      ${PARTICLE_DEPTH_COVERAGE_GLSL}
       void main() {
-        if (vVisibleAlpha < 0.008) discard;
+        if (vVisibleAlpha < 0.008 || detailDepthHash(gl_FragCoord.xy) > vVisibleAlpha) discard;
         gl_FragColor = packDepthToRGBA(gl_FragCoord.z);
       }`,
     side: THREE.DoubleSide,
@@ -476,6 +532,7 @@ export function createMoteWorldRepresentation(sourceGeometry, {
   object.visible = false;
   object.userData.dofDepthMaterial = depthMaterial;
 
+  const dispose = ownedRepresentationDisposer(object, geometry, material);
   return {
     object,
     material,
@@ -492,9 +549,6 @@ export function createMoteWorldRepresentation(sourceGeometry, {
       return geometry.attributes.aOffset.array === source.position.array
         && geometry.attributes.aRand.array === source.aRand.array;
     },
-    dispose() {
-      geometry.dispose();
-      material.dispose();
-    },
+    dispose,
   };
 }

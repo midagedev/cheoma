@@ -136,14 +136,14 @@ function routePath(path) {
     if (/^src\/env\/(?:petals|weather|seasons)\.js$/.test(path)) {
       select('seasonal particle/weather contract changed', 'petals');
     }
-    if (/^src\/env\/(?:detail-particle-geometry|motes|petals|seasons|weather|weather-physical-geometry)\.js$/.test(path)) {
+    if (/^src\/env\/(?:detail-particle-geometry|motes|petals|seasons|weather|weather-particle-state|weather-physical-geometry)\.js$/.test(path)) {
       select('physical particle representation changed', 'particle-geometry');
     }
     if (path === 'src/env/petals.js') select('focus particle LOD changed', 'lod-focus');
     if (/^src\/env\/(?:weather|seasons)\.js$/.test(path)) {
       select('wave environment synchronization changed', 'lod-wave');
     }
-    if (/^src\/env\/(?:focus|animals|critters|grass|motes|smoke|wind)\.js$/.test(path)) {
+    if (/^src\/env\/(?:focus|animals|critters|grass|lantern-sway|motes|smoke|wind)\.js$/.test(path)) {
       select('near-detail and wave-owned LOD changed', 'lod-focus', 'lod-wave');
     }
     if (/^src\/env\/(?:clouds|edge-mist-view)\.js$/.test(path)) {
@@ -248,6 +248,14 @@ function routePath(path) {
     }
     if (path === 'src/api/particles.js') {
       select('physical particle API changed', 'app', 'particle-geometry');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/particle-state.js') {
+      select('pure precipitation state API changed', 'particle-geometry');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/lighting.js') {
+      select('physical lighting API changed', 'app', 'particle-geometry');
       return { gates, reasons };
     }
     if (path === 'src/api/post-quality.js') {

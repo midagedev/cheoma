@@ -403,14 +403,7 @@ export function buildNightLights(plan, _site, sources = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
-      drawable.visible = false;
-      group.remove(drawable);
-      if (drawable.userData.dofDepthMaterial === dofDepthMat) {
-        delete drawable.userData.dofDepthMaterial;
-      }
-      batch.geometry.dispose();
-      batch.material.dispose();
-      batch.depthMaterial.dispose();
+      batch.dispose();
     },
   };
   group.userData.nightLights = api;

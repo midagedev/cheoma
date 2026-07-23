@@ -258,7 +258,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     (dt, level) => group.userData.updateNightLights?.(dt, level, detailLod?.lensScale ?? 1),
   );
   // FULL overlays own fresh hanji materials and renderer-authored opening
-  // anchors. Keep material emissive ownership and the single Points owner slot
+  // anchors. Keep material emissive ownership and the single physical batch owner slot
   // in lockstep, but only at overlay lifecycle events (never per frame).
   const residentialGlowById = new Map();
   const refreshNightLightOwner = (ownerId, overlayRoot = null) => {

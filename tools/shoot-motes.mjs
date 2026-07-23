@@ -72,8 +72,8 @@ window.__setTime=(name)=>{env.setTime(name);};
 window.__setInk=(on)=>{renderer.toneMapping=on?THREE.NoToneMapping:THREE.ACESFilmicToneMapping;};
 window.__advance=(secs)=>{const n=Math.max(1,Math.round(secs/0.05));for(let i=0;i<n;i++)env.update(0.05);};
 window.__motesVisible=()=>{const m=scene.getObjectByName('dustMotes');return m?m.visible:null;};
-window.__boost=(k,szk)=>{const m=scene.getObjectByName('dustMotes');if(!m)return;m.material.uniforms.uIntensity.value*=k;if(szk)m.material.uniforms.uSize.value*=szk;};
-window.__motesCount=()=>{const m=scene.getObjectByName('dustMotes');return m?m.geometry.getAttribute('position').count:null;};
+window.__boost=(k,szk)=>{const m=scene.getObjectByName('dustMotes');if(!m)return;m.material.uniforms.uIntensity.value*=k;if(szk){m.material.uniforms.uDustRadius.value*=szk;m.material.uniforms.uFireflyRadius.value*=szk;}};
+window.__motesCount=()=>{const m=scene.getObjectByName('dustMotes');return m?m.geometry.instanceCount:null;};
 window.__lanternPos=()=>{
   const envg=scene.getObjectByName('environment');const out=[];
   if(!envg)return out;

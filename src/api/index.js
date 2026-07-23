@@ -5,6 +5,7 @@ export * from './village.js';
 export * from './environment.js';
 export * from './post-quality.js';
 export * from './particles.js';
+export * from './lighting.js';
 export * from './cinematic.js';
 export * from './audio.js';
 export * from './props.js';

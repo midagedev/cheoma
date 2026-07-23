@@ -24,8 +24,8 @@ import {
 //
 // 제외(그리고 그 근거):
 //  - 비-lit 재질(MeshBasic/ShaderMaterial 등): vViewPosition·nonPerturbedNormal 이 없어 주입 시
-//    컴파일 실패. 타입 게이트(Standard/Physical 만)로 하늘·능선·구름·낙엽/벚꽃 파티클·원경 창불(
-//    nightlights)·먹 스프라이트가 자동 제외된다.
+//    컴파일 실패. 타입 게이트(Standard/Physical 만)로 하늘·능선·구름·Shader 기반 디테일 입자·
+//    원경 창불(nightlights)·먹 스프라이트가 자동 제외된다.
 //  - 반투명: 오버레이·유리·입자성(빗물 리벌릿·웅덩이 등). 실루엣 대상이 아님.
 //  - 개구부(role 'opening')·야간 발광(userData.hanjiGlow: 창호·문·석등 화창)·자체발광 지배
 //    재질(#66/#70): 림이 발광과 충돌.
@@ -123,7 +123,7 @@ const RIM_LIGHTS_FRAGMENT_BEGIN = rimLightsFragmentBegin();
 const ORGANIC_NAMES = new Set(['trees', 'village-flora', 'focusGrass']);
 
 // 그레이징 오탐(넓은 완사면·도로 광역 금빛)·수면은 프레넬로 실루엣 분리가 불가 → 이름으로 명시 제외.
-//   (하늘·능선·구름·낙엽·원경 창불 등은 MeshBasic/Points/Sprite 라 타입 게이트로 이미 제외.)
+//   (하늘·능선·구름·디테일 입자·원경 창불 등은 MeshBasic/Shader/Points/Sprite 타입이라 이미 제외.)
 const SKIP_NAMES = new Set(['terrain', 'stream', 'paddyField', 'village-roads-m0']);
 
 export function createFresnelRim(scene) {
@@ -284,7 +284,7 @@ export function createFresnelRim(scene) {
 
   // 씬(또는 하위 그룹)을 훑어 대상 재질을 패치. 이미 패치된 재질은 즉시 스킵(멱등·저비용).
   //   마을 리롤·focus-in 오버레이(풀·소동물) 등 새 재질이 붙어도 재호출로 self-heal(post 가 throttle 로 호출).
-  //   입자(Points)·스프라이트·물면/지형(이름)은 오브젝트 단위로 스킵한다.
+  //   Points·스프라이트·물면/지형(이름)은 오브젝트 단위로 스킵하고 Shader 입자는 재질 타입에서 빠진다.
   function apply(root = scene) {
     if (!root) return;
     root.traverse((o) => {

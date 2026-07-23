@@ -103,9 +103,9 @@ async function sampleSequence(page, prefix, points) {
   return frames;
 }
 
-async function capturePointProjectionStats(page, prefix) {
+async function capturePhysicalDetailStats(page, prefix) {
   // Camera seeking freezes the separate village ink-fog reveal. Let the real loop
-  // settle that veil before judging the 7° product frame or point projection.
+  // settle that veil before judging the 7° product frame or physical detail tiers.
   await page.evaluate(() => window.__engine.debugSetPaused(false));
   await page.waitForTimeout(1600);
   await page.evaluate(() => window.__engine.debugSetPaused(true));
@@ -126,55 +126,42 @@ async function capturePointProjectionStats(page, prefix) {
       const material = object.material;
       const uniforms = material?.uniforms || {};
       const position = object.geometry?.attributes?.position;
-      const size = object.geometry?.attributes?.aSize;
-      const rand = object.geometry?.attributes?.aRand;
-      const scale = object.geometry?.attributes?.aScale;
       if (!position) return null;
-      const lensScale = uniforms.uLensScale?.value ?? null;
-      const pixelRatio = uniforms.uPixelRatio?.value ?? 1;
-      const maxPx = kind === 'motes'
-        ? 4 * pixelRatio
-        : (uniforms.uMaxPx?.value ?? Infinity) * (kind === 'nightlights' ? pixelRatio : 1);
-      const minPx = kind === 'motes'
-        ? pixelRatio
-        : (kind === 'nightlights' ? (uniforms.uMinPx?.value ?? 0) * pixelRatio : 0);
-      let depthMin = Infinity, depthMax = -Infinity;
-      let rawMin = Infinity, rawMax = -Infinity, pxMin = Infinity, pxMax = -Infinity;
-      let clipped = 0, measured = 0;
-      const point = object.position.clone();
-      for (let index = 0; index < position.count; index++) {
-        point.fromBufferAttribute(position, index);
-        object.localToWorld(point);
-        point.applyMatrix4(camera.matrixWorldInverse);
-        const depth = -point.z;
-        if (!(depth > 0)) continue;
-        let raw;
-        if (kind === 'snow' || kind === 'petals') {
-          raw = size.getX(index) * uniforms.uScale.value * lensScale / Math.max(depth, 1);
-        } else if (kind === 'motes') {
-          raw = uniforms.uSize.value * rand.getW(index) * pixelRatio
-            * (50 * lensScale / depth);
-        } else {
-          raw = uniforms.uSizeBase.value * scale.getX(index) * pixelRatio * lensScale / depth;
+      const openingSize = object.geometry?.attributes?.aOpeningSize;
+      let openingMax = 0;
+      if (openingSize) {
+        for (let index = 0; index < openingSize.count; index++) {
+          openingMax = Math.max(openingMax, openingSize.getX(index), openingSize.getY(index));
         }
-        const px = Math.max(minPx, Math.min(maxPx, raw));
-        depthMin = Math.min(depthMin, depth); depthMax = Math.max(depthMax, depth);
-        rawMin = Math.min(rawMin, raw); rawMax = Math.max(rawMax, raw);
-        pxMin = Math.min(pxMin, px); pxMax = Math.max(pxMax, px);
-        if (raw >= maxPx) clipped++;
-        measured++;
       }
+      const authoredSize = kind === 'snow' || kind === 'petals'
+        ? [uniforms.uWorldScale?.value ?? 0]
+        : kind === 'motes'
+          ? [uniforms.uDustRadius?.value ?? 0, uniforms.uFireflyRadius?.value ?? 0]
+          : [openingMax];
+      const instances = object.geometry?.instanceCount || object.count || 1;
+      const baseTriangles = object.geometry?.index
+        ? object.geometry.index.count / 3
+        : position.count / 3;
       return {
-        name: object.name, kind, visible: worldVisible(object), count: position.count, measured,
-        lensScale, depthMin, depthMax, rawMin, rawMax, pxMin, pxMax, maxPx, clipped,
+        name: object.name,
+        kind,
+        visible: worldVisible(object),
+        isMesh: object.isMesh === true,
+        instances,
+        triangles: baseTriangles * instances,
+        authoredSize,
+        hasPointSizeUniform: !!(
+          uniforms.uPixelRatio || uniforms.uSize || uniforms.uSizeBase || uniforms.uMaxPx
+        ),
       };
     };
     const layers = [];
     engine.scene.traverse((object) => {
-      const kind = object.name === 'weatherSnow' ? 'snow'
-        : object.name === 'seasonPetals' ? 'petals'
+      const kind = object.name === 'weatherSnowPhysical' ? 'snow'
+        : object.name === 'seasonPetalsWorld' ? 'petals'
           : object.name === 'dustMotes' ? 'motes'
-            : object.name === 'nightlight-points' ? 'nightlights' : null;
+            : object.name === 'nightlight-physical' ? 'nightlights' : null;
       if (kind) layers.push(summarize(object, kind));
     });
     engine.debugRenderDofFrame();
@@ -524,15 +511,17 @@ try {
   const heroFrame = await captureSettledFocusFrame(arrivalPage, 'arrival');
   console.log(`HERO FRAME: ${JSON.stringify(heroFrame)}`);
   assertReadableHouseFrame(heroFrame, 'default hero arrival', { minHeight: 0.24 });
-  const pointProjection = await capturePointProjectionStats(arrivalPage, 'arrival');
-  console.log(`HERO POINT PROJECTION: ${JSON.stringify(pointProjection)}`);
-  invariant(Math.abs(pointProjection.fov - VILLAGE_LENS.hero.fov) < 1e-9
-      && pointProjection.layers.length >= 4,
-  '7-degree hero frame exposes weather, petal, mote, and practical-light point tiers');
-  invariant(pointProjection.layers.every((layer) => (
-    Math.abs(layer.lensScale - pointProjection.optics.lensScale) < 1e-6
-      && layer.pxMax <= layer.maxPx + 1e-6
-  )), '7-degree point tiers consume the full optical scale while preserving their pixel caps');
+  const physicalDetail = await capturePhysicalDetailStats(arrivalPage, 'arrival');
+  console.log(`HERO PHYSICAL DETAIL: ${JSON.stringify(physicalDetail)}`);
+  invariant(Math.abs(physicalDetail.fov - VILLAGE_LENS.hero.fov) < 1e-9
+      && physicalDetail.layers.length >= 4,
+  '7-degree hero frame exposes weather, petal, mote, and practical-light physical tiers');
+  invariant(physicalDetail.layers.every((layer) => (
+    layer.isMesh
+      && layer.triangles > 0
+      && !layer.hasPointSizeUniform
+      && layer.authoredSize.every((value) => Number.isFinite(value) && value > 0)
+  )), 'physical detail tiers keep authored world dimensions and need no point-size pixel caps');
   const heroAnimalPixels = await captureAnimalPixelDelta(arrivalPage, heroFrame.parcelId, 'arrival');
   console.log(`HERO ANIMAL PIXELS: ${JSON.stringify(heroAnimalPixels)}`);
   invariant(heroAnimalPixels.toggled && heroAnimalPixels.changed >= 100,

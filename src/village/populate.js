@@ -441,7 +441,7 @@ export function* populateVillageSteps(plan, opts = {}) {
   const animals = buildVillageAnimals(root, plan, site);
 
   // 10) 실제 고정 한지 면 기반 원경 창불(#60/#81). 위치는 위 prototype/compound renderer가
-  //     확정했고 이 레이어는 단일 Points로만 표현한다. 깊이 가림과 근경 emissive handoff를 유지한다.
+  //     확정했고 이 레이어는 단일 물리 instanced batch로 표현한다. 깊이 가림과 근경 emissive handoff를 유지한다.
   const nightLights = buildNightLights(plan, site, nightLightSources);
   root.add(nightLights.group);
 
@@ -478,7 +478,7 @@ export function* populateVillageSteps(plan, opts = {}) {
     flockCenters: animals.flockCenters, cowAnchors: animals.cowAnchors,
     debugFlockCenter: () => animals.flockCenters[0] || null,
     debugCowAnchor: () => animals.cowAnchors[0] || null,
-    // 창불 발광 포인트 점등 레벨 갱신(어댑터 stepNightGlow 가 vnight 를 넘겨줌, #60/#50 정합).
+    // 창불 한지 면 점등 레벨 갱신(어댑터 stepNightGlow 가 vnight 를 넘겨줌, #60/#50 정합).
     updateNightLights: (dt, level, lensScale) => nightLights.update(dt, level, lensScale),
     refreshNightLights: (ownerId, overlayRoot = null) => nightLights.refreshOwner(ownerId, overlayRoot),
     debugNightLights: () => nightLights.debugState(),

@@ -286,6 +286,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getBuilding: () => building,
     getGround: () => ground,
     env, // 대기 틴트를 fog 모디파이어로 자동 등록 — 비/눈 중 시간 크로스페이드에도 틴트 유지
+    sun,
     lowPerf: perf, // 모바일 perf 프로파일은 볼륨 시뮬(눈 쉘·빗물 흐름) 폴백 → 셰이더 틴트만(#52)
   });
   

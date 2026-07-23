@@ -17,8 +17,8 @@ import { createPetalWorldRepresentation } from './detail-particle-geometry.js';
 //   viewHeight(시선 타깃 대비 카메라 높이)도 weather 가 넘긴다.
 //
 // 눈과의 차이(팔랑거림): 눈은 거의 수직 낙하 + 미세 흔들림. 꽃잎/낙엽은 (1) 훨씬 느린 부유 낙하,
-//   (2) 개별 위상·진폭의 큰 좌우 플러터(사인 합성 → 변위 시계열 비단조), (3) 스프라이트 개별 회전
-//   (프래그먼트에서 gl_PointCoord 회전). 낙엽은 꽃잎보다 크고 회전이 격해 "구르듯" 떨어진다.
+//   (2) 개별 위상·진폭의 큰 좌우 플러터(사인 합성 → 변위 시계열 비단조), (3) 월드 곡면의 개별 회전.
+//   낙엽은 꽃잎보다 크고 회전이 격해 "구르듯" 떨어진다.
 
 const TAU = Math.PI * 2;
 const FIELD_SEED = 0x9e7a1;
@@ -27,18 +27,16 @@ const FIELD_SEED = 0x9e7a1;
 const SEASON_CFG = {
   spring: {
     colors: [0xffe3ec, 0xffd0dd, 0xf9b8cc, 0xfff2f6, 0xf6c6d7, 0xffdce6],
-    shape: 0.0,           // 0=둥근 꽃잎
-    size: [1.3, 2.8],     // 스프라이트 픽셀 기준(uScale 로 원근 보정). #116 근접 과대(손바닥) 톤다운.
+    size: [1.3, 2.8],     // 월드 곡면 배율: 최종 장축 약 1.9–4.0cm.
     fall: [0.75, 1.7],    // 낙하 속도(부유감 — 눈 2.4~6.0 보다 훨씬 느림)
     flutter: [1.3, 2.9],  // 좌우 팔랑 진폭
     freq: [0.5, 1.25],    // 팔랑 주파수(rad/s)
-    rot: [0.5, 1.7],      // 스프라이트 회전 속도
+    rot: [0.5, 1.7],      // 월드 곡면 회전 속도
     windCarry: 3.2,
   },
   autumn: {
     colors: [0xc7452a, 0xd8792a, 0xd9a531, 0xb85a26, 0xa8662e, 0xcf8b3a, 0xbf5a2b],
-    shape: 1.0,           // 1=뾰족한 잎
-    size: [1.9, 4.0],     // #116 근접 과대 톤다운(잎은 꽃잎보다 크게 유지)
+    size: [1.9, 4.0],     // 월드 곡면 장축 약 5.7–12cm(꽃잎보다 크게 유지)
     fall: [1.2, 2.6],     // 낙엽은 꽃잎보다 조금 빠르되 여전히 느림
     flutter: [1.6, 3.3],
     freq: [0.45, 1.15],
@@ -77,7 +75,7 @@ const MAPLE_COLS = [0xc0392b, 0xd35400, 0xe0491f, 0xb83a1e, 0xd9622b];
 
 // createPetalField({ getWind, lowPerf }) →
 //   { object, setSeason(name), update(dt, {t, camDist, viewHeight, present, wind}), get level, get count, get season, aabb(), dispose() }
-export function createPetalField({ getWind, lowPerf = false } = {}) {
+export function createPetalField({ getWind, getLightDirection = null, lowPerf = false } = {}) {
   // #125 대폭 감축(사용자: "색종이 축제 아니라 바람에 이따금 지는 잎"). 기존 1200 → 460. 실제 동시
   //   가시 수는 아래 돌풍 게이트(uActive)가 더 조인다 — 잔잔할 땐 한 자릿수~십수 장, 돌풍에 잠깐 늘었다
   //   잦아든다. per-frame 갱신 루프도 N 감축분만큼 저비용(성능 우선).
@@ -132,6 +130,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   // the instanced view and never submitted as a second draw.
   const worldDetail = createPetalWorldRepresentation(geo, { renderOrder: 18 });
   const object = worldDetail.object;
+  let disposed = false;
   let season = 'summer';          // 'spring'|'autumn' 이면 활성, 그 외 OFF
   let level = 0;                  // 현재 유효 강도(season*present*altGate)
   let activeSmooth = 0;           // #125 돌풍 게이트 평활값(간헐 리듬)
@@ -150,7 +149,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     const autumn = name === 'autumn';
     const cr = makeRng(FIELD_SEED ^ (name === 'spring' ? 0x5091 : 0xa07a));
     for (let i = 0; i < N; i++) {
-      // 가을=은행(황금)·단풍(주홍~주황) 개체별 배정, 봄=벚꽃 꽃잎(분홍). 실루엣은 aSpecies 로 종별 텍스처.
+      // 가을=은행(황금 부채꼴)·단풍(주홍 장상) 개체별 배정, 봄=벚꽃 꽃잎.
       let hex, species;
       if (autumn) {
         const isGinkgo = cr() < 0.5;
@@ -191,6 +190,10 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     level = active ? Math.max(0, Math.min(1, present)) * alt : 0;
     worldDetail.material.uniforms.uFade.value = level;
     worldDetail.material.uniforms.uTime.value = t;
+    const lightDirection = getLightDirection?.();
+    if (lightDirection?.isVector3 && lightDirection.lengthSq() > 1e-8) {
+      worldDetail.material.uniforms.uLightDir.value.copy(lightDirection).normalize();
+    }
     const visible = level > 0.002;
     object.visible = visible;
     if (!visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
@@ -236,6 +239,9 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   }
 
   function dispose() {
+    if (disposed) return;
+    disposed = true;
+    object.visible = false;
     geo.dispose();
     worldDetail.dispose();
   }

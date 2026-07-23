@@ -23,7 +23,6 @@ import {
   createMoteWorldRepresentation,
 } from ${JSON.stringify(resolve(ROOT, 'src/env/detail-particle-geometry.js'))};
 import {
-  contributesDofDepth,
   dofDepthMaterialForObject,
 } from ${JSON.stringify(resolve(ROOT, 'src/env/dof.js'))};
 
@@ -315,12 +314,55 @@ window.__run = async () => {
   );
 
   const petalDepthFixture = petalFixture();
+  const petalShapes = [
+    petalDepthFixture.world.geometry.attributes.position.array,
+    petalDepthFixture.world.geometry.attributes.aGinkgoShape.array,
+    petalDepthFixture.world.geometry.attributes.aMapleShape.array,
+  ];
+  const petalShapeHashes = petalShapes.map((shape) => hashFloatArrays(shape));
+  const petalNormals = [
+    petalDepthFixture.world.geometry.attributes.normal.array,
+    petalDepthFixture.world.geometry.attributes.aGinkgoNormal.array,
+    petalDepthFixture.world.geometry.attributes.aMapleNormal.array,
+  ];
+  const petalNormalHashes = petalNormals.map((normal) => hashFloatArrays(normal));
+  const petalNormalsUnitLength = petalNormals.every((normal) => {
+    for (let index = 0; index < normal.length; index += 3) {
+      const length = Math.hypot(normal[index], normal[index + 1], normal[index + 2]);
+      if (Math.abs(length - 1) > 1e-5) return false;
+    }
+    return true;
+  });
+  const petalShapeSpans = petalShapes.map((shape) => {
+    let minY = Infinity, maxY = -Infinity;
+    for (let index = 1; index < shape.length; index += 3) {
+      minY = Math.min(minY, shape[index]);
+      maxY = Math.max(maxY, shape[index]);
+    }
+    return maxY - minY;
+  });
   const petalDepth = renderExplicitDepth(petalDepthFixture.world);
+  const petalColorCoverage = [0.2, 0.5, 1].map((fade) => {
+    petalDepthFixture.world.material.uniforms.uFade.value = fade;
+    return renderColor(petalDepthFixture.world);
+  });
+  const petalDepthCoverage = [0.2, 0.5, 1].map((fade) => {
+    petalDepthFixture.world.material.uniforms.uFade.value = fade;
+    const depth = renderExplicitDepth(petalDepthFixture.world);
+    return depth.left.count + depth.right.count;
+  });
+  petalDepthFixture.world.material.uniforms.uFade.value = 1;
   petalDepthFixture.world.material.uniforms.uActive.value = 0;
   const petalInactiveDepth = renderExplicitDepth(petalDepthFixture.world);
 
   const moteDepthFixture = moteFixture();
   const moteDepth = renderExplicitDepth(moteDepthFixture.world);
+  const moteDepthCoverage = [0.2, 0.5, 1].map((level) => {
+    moteDepthFixture.world.material.uniforms.uFirefly.value = level;
+    const depth = renderExplicitDepth(moteDepthFixture.world);
+    return depth.left.count + depth.right.count;
+  });
+  moteDepthFixture.world.material.uniforms.uFirefly.value = 1;
   const fireflyPeak = renderHalfFloatPeak(moteDepthFixture.world);
   const visiblePixels = renderColor(moteDepthFixture.world, false);
   const occludedPixels = renderColor(moteDepthFixture.world, true);
@@ -340,10 +382,15 @@ window.__run = async () => {
       hashes: [petalHashA, petalHashB],
       shared: petalDepthFixture.world.sharesSourceArrays(),
       stats: petalDepthFixture.world.stats,
-      dofContract: contributesDofDepth(petalObject)
-        && dofDepthMaterialForObject(petalObject)
-          === petalObject.userData.dofDepthMaterial,
+      shapeHashes: petalShapeHashes,
+      shapeSpans: petalShapeSpans,
+      normalHashes: petalNormalHashes,
+      normalsUnitLength: petalNormalsUnitLength,
+      colorCoverage: petalColorCoverage,
+      dofContract: dofDepthMaterialForObject(petalObject)
+        === petalObject.userData.dofDepthMaterial,
       depth: petalDepth,
+      depthCoverage: petalDepthCoverage,
       inactiveDepth: petalInactiveDepth,
       depthUsesOffset: petalObject.userData.dofDepthMaterial.vertexShader.includes('aOffset'),
     },
@@ -351,10 +398,10 @@ window.__run = async () => {
       hashes: [moteHashA, moteHashB],
       shared: moteDepthFixture.world.sharesSourceArrays(),
       stats: moteDepthFixture.world.stats,
-      dofContract: contributesDofDepth(moteObject)
-        && dofDepthMaterialForObject(moteObject)
-          === moteObject.userData.dofDepthMaterial,
+      dofContract: dofDepthMaterialForObject(moteObject)
+        === moteObject.userData.dofDepthMaterial,
       depth: moteDepth,
+      depthCoverage: moteDepthCoverage,
       inactiveDepth: moteInactiveDepth,
       depthUsesOffset: moteObject.userData.dofDepthMaterial.vertexShader.includes('aOffset'),
       fireflyPeak,
@@ -419,6 +466,13 @@ function separatedDepth(depth) {
 check('petal deterministic buffers', result.petal.hashes[0] === result.petal.hashes[1],
   result.petal.hashes.join(' / '));
 check('petal single CPU owner', result.petal.shared, JSON.stringify(result.petal.stats));
+check('petal/ginkgo/maple keep distinct normalized silhouettes',
+  new Set(result.petal.shapeHashes).size === 3
+    && result.petal.shapeSpans.every((span) => Math.abs(span - 1) < 1e-6),
+  `${result.petal.shapeHashes.join('/')} spans=${result.petal.shapeSpans.join('/')}`);
+check('petal/ginkgo/maple normals follow each physical surface',
+  new Set(result.petal.normalHashes).size === 3 && result.petal.normalsUnitLength,
+  result.petal.normalHashes.join('/'));
 check('petal explicit DoF material', result.petal.dofContract && result.petal.depthUsesOffset,
   `contract=${result.petal.dofContract} aOffset=${result.petal.depthUsesOffset}`);
 check('petal two-instance physical depth', separatedDepth(result.petal.depth),
@@ -426,6 +480,14 @@ check('petal two-instance physical depth', separatedDepth(result.petal.depth),
 check('petal inactive gust writes no depth',
   result.petal.inactiveDepth.left.count + result.petal.inactiveDepth.right.count === 0,
   JSON.stringify(result.petal.inactiveDepth));
+check('petal alpha produces monotonic depth coverage',
+  result.petal.depthCoverage[0] < result.petal.depthCoverage[1]
+    && result.petal.depthCoverage[1] < result.petal.depthCoverage[2],
+  result.petal.depthCoverage.join(' < '));
+check('petal color uses the same monotonic surface coverage',
+  result.petal.colorCoverage[0] < result.petal.colorCoverage[1]
+    && result.petal.colorCoverage[1] < result.petal.colorCoverage[2],
+  result.petal.colorCoverage.join(' < '));
 check('mote deterministic buffers', result.mote.hashes[0] === result.mote.hashes[1],
   result.mote.hashes.join(' / '));
 check('mote single CPU owner', result.mote.shared, JSON.stringify(result.mote.stats));
@@ -436,6 +498,10 @@ check('mote two-instance physical depth', separatedDepth(result.mote.depth),
 check('disabled firefly writes no depth',
   result.mote.inactiveDepth.left.count + result.mote.inactiveDepth.right.count === 0,
   JSON.stringify(result.mote.inactiveDepth));
+check('mote alpha produces monotonic depth coverage',
+  result.mote.depthCoverage[0] < result.mote.depthCoverage[1]
+    && result.mote.depthCoverage[1] < result.mote.depthCoverage[2],
+  result.mote.depthCoverage.join(' < '));
 check('firefly is compact HDR source', result.mote.fireflyPeak > 1.0,
   `linear peak=${result.mote.fireflyPeak.toFixed(3)}`);
 check('world volume obeys opaque occlusion',

@@ -670,10 +670,8 @@ try {
     const villageRoot = engine.village.exportRoot();
     const existing = engine.village.focusRoot();
     const beforeDoor = engine.village.debugSeekDoor(0.64, parcelId);
-    let nightLights = null;
-    villageRoot.traverse((object) => {
-      if (object.name === 'nightlight-points') nightLights = object.parent?.userData?.nightLights || null;
-    });
+    const nightLights = villageRoot
+      .getObjectByName('village-nightlights')?.userData?.nightLights || null;
     const beforeOwner = JSON.stringify(nightLights?.debugOwner(parcelId) || null);
     const prototype = Object.getPrototypeOf(existing);
     const hadOwnTraverse = Object.hasOwn(prototype, 'traverse');
