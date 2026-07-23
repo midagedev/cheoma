@@ -28,11 +28,24 @@ const EXACT_IMPACT = new Map([
   ['src/env/weather-physical-geometry.js', [
     './check-weather-geometry.mjs',
   ]],
+  ['src/core/buffer-update-range.js', [
+    './check-instance-upload.mjs',
+    './check-wave-contract.mjs',
+  ]],
+  ['src/village/instancing.js', [
+    './check-instance-upload.mjs',
+  ]],
+  ['src/village/wave.js', [
+    './check-instance-upload.mjs',
+    './check-wave-contract.mjs',
+  ]],
   ['src/village/nightlight-physical-geometry.js', [
     './check-nightlight-geometry.mjs',
+    './check-instance-upload.mjs',
   ]],
   ['src/village/nightlights.js', [
     './check-nightlight-geometry.mjs',
+    './check-instance-upload.mjs',
   ]],
 ]);
 

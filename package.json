@@ -29,6 +29,8 @@
     "check:door-occlusion": "node tools/check-door-occlusion-contract.mjs",
     "check:winter:app": "node tools/run-browser-locked.mjs -- node tools/check-winter-app.mjs",
     "check:ink:app": "node tools/run-browser-locked.mjs -- node tools/check-ink-app.mjs",
+    "check:instance-upload": "node tools/check-instance-upload.mjs",
+    "check:instance-upload:browser": "node tools/run-browser-locked.mjs -- node tools/check-instance-upload-browser.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:cinematic": "node tools/check-cinematic-turns.mjs && node tools/check-cinematic-reveal.mjs",

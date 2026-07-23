@@ -43,6 +43,15 @@ function fixture() {
 
   const makeRoot = () => {
     const root = new THREE.Group();
+    const chunk = new THREE.Group();
+    chunk.name = 'village-chunk-fixture';
+    const instance = new THREE.InstancedMesh(geometry, material, 3);
+    const matrix = new THREE.Matrix4();
+    for (let index = 0; index < instance.count; index++) {
+      instance.setMatrixAt(index, matrix.makeTranslation(index * 4 - 4, 0, 0));
+    }
+    instance.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    chunk.add(instance);
     const roads = new THREE.Group();
     roads.name = 'village-roads';
     const roadMesh = new THREE.Mesh(geometry, material);
@@ -57,8 +66,8 @@ function fixture() {
     const weights = [];
     ambient.userData.waveFade = { setWeight: (value) => weights.push(value) };
 
-    root.add(roads, palace, ambient);
-    return { root, roads, roadMesh, palace, weights };
+    root.add(chunk, roads, palace, ambient);
+    return { root, chunk, instance, roads, roadMesh, palace, weights };
   };
 
   const old = makeRoot();
@@ -146,4 +155,38 @@ invariant(finish.incoming.palace.scale.x === 1 && finish.materialIntact(),
   'dispose left a structure transform or material mutation behind');
 finish.dispose();
 
-console.log('WAVE CONTRACT: PASS (exclusive scenery handoff, opaque materials, palace tofu, cancel/dispose)');
+const upload = fixture();
+const uploadAttribute = upload.old.instance.instanceMatrix;
+const assertFullRange = (label) => invariant(
+  uploadAttribute.updateRanges.length === 1
+    && uploadAttribute.updateRanges[0].start === 0
+    && uploadAttribute.updateRanges[0].count === uploadAttribute.array.length,
+  `${label} did not retain one explicit full instance range`,
+);
+uploadAttribute.clearUpdateRanges();
+let uploadVersion = uploadAttribute.version;
+upload.wave.seek(0.25);
+assertFullRange('active wave frame');
+invariant(uploadAttribute.version === uploadVersion + 1,
+  'active wave frame dirtied instanceMatrix more than once');
+uploadAttribute.clearUpdateRanges();
+uploadVersion = uploadAttribute.version;
+upload.wave.seek(0.26);
+assertFullRange('next active wave frame');
+invariant(uploadAttribute.version === uploadVersion + 1,
+  'next active wave frame did not own exactly one full update');
+uploadAttribute.clearUpdateRanges();
+uploadVersion = uploadAttribute.version;
+upload.wave.seek(0.5);
+assertFullRange('terminal hidden wave frame');
+invariant(uploadAttribute.version === uploadVersion + 1,
+  'terminal hidden wave frame did not dirty exactly once');
+uploadAttribute.clearUpdateRanges();
+uploadVersion = uploadAttribute.version;
+upload.wave.seek(0.5);
+invariant(uploadAttribute.version === uploadVersion && uploadAttribute.updateRanges.length === 0,
+  'repeated terminal wave frame dirtied an unchanged matrix');
+upload.wave.cancel();
+upload.dispose();
+
+console.log('WAVE CONTRACT: PASS (exclusive scenery handoff, opaque materials, full instance uploads, palace tofu, cancel/dispose)');

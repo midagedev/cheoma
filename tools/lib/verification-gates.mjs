@@ -5,6 +5,7 @@ export const VERIFICATION_GATES = Object.freeze({
   'ink-app': Object.freeze({ script: 'check:ink:app', resource: 'browser', tier: 'checkpoint', description: 'Ink mode application contract' }),
   petals: Object.freeze({ script: 'check:petals', resource: 'browser', tier: 'checkpoint', description: 'Seasonal particle and weather contract' }),
   'particle-geometry': Object.freeze({ script: 'check:particle-geometry', resource: 'browser', tier: 'checkpoint', description: 'Physical precipitation, close-detail particle, and hanji-light geometry' }),
+  'instance-upload': Object.freeze({ script: 'check:instance-upload:browser', resource: 'browser', tier: 'checkpoint', description: 'Sparse parcel BufferAttribute GPU uploads' }),
   'winter-app': Object.freeze({ script: 'check:winter:app', resource: 'browser', tier: 'checkpoint', description: 'Winter application surface' }),
   worker: Object.freeze({ script: 'check:worker', resource: 'browser', tier: 'checkpoint', description: 'Sync, Worker, and fallback scene parity' }),
   audio: Object.freeze({ script: 'check:audio', resource: 'browser', tier: 'checkpoint', description: 'Audio lifecycle contract' }),
@@ -22,7 +23,7 @@ export const VERIFICATION_GATES = Object.freeze({
 });
 
 export const ALL_PROFILE = Object.freeze([
-  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
+  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload',
   'winter-app', 'worker', 'audio',
   'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
