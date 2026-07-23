@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "../app/node_modules/vite/dist/node/index.js";
 import {
-  ENERGY_RADIUS,
   edgeEnergy,
   makePanStrip,
   maxChannelDifference,
@@ -45,12 +44,21 @@ const timeout = Number(process.env.CHEOMA_BOKEH_TIMEOUT_MS) || 180_000;
 const scatterProofEnabled = process.env.CHEOMA_BOKEH_SCATTER_PROOF === "1";
 const ROUNDNESS_LIMIT = 1.13;
 const ANGULAR_UNIFORMITY_LIMIT = 0.32;
-const SOURCE_PAN_PAIR_ENERGY_MIN = 0.35;
-const SOURCE_PAN_PAIR_ENERGY_MAX = 1.35;
 const SOURCE_PAN_ENERGY_STEP_LIMIT = 0.23;
+const SOURCE_PAN_INPUT_ENERGY_MIN = 0.35;
+const SOURCE_PAN_INPUT_ENERGY_MAX = 0.5;
+const SOURCE_PAN_RADIUS_RATIO_MIN = 0.95;
+const SOURCE_PAN_RADIUS_RATIO_MAX = 1.05;
 const TELEPHOTO_CORE_MAGNIFICATION_MIN = 4;
 const TELEPHOTO_EDGE_DROP_MIN = 0.34;
-const BASELINE_RADIUS_SCALE = 2.4;
+const LEGACY_RADIUS_SCALE = 2.4;
+const PREVIOUS_PRODUCT_RADIUS_SCALE = 3.1;
+const PRODUCT_MEASUREMENT_RADIUS = Math.ceil(
+  0.01 *
+    CIRCULAR_BOKEH_DEFAULTS.radiusScale *
+    BOKEH_OPTICAL_CHART_VIEWPORT.width *
+    0.8660254,
+) + 16;
 
 // Background-subtracted luminance covariance. The square root of its eigenvalue
 // ratio is 1 for a circle and grows as a highlight stretches into an ellipse.
@@ -184,40 +192,49 @@ try {
       2.0,
       2.2,
       2.3,
-      BASELINE_RADIUS_SCALE,
-      2.6,
+      LEGACY_RADIUS_SCALE,
       2.8,
-      3.0,
+      PREVIOUS_PRODUCT_RADIUS_SCALE,
+      3.5,
+      3.8,
+      4.0,
+      4.2,
       CIRCULAR_BOKEH_DEFAULTS.radiusScale,
     ],
+    PRODUCT_MEASUREMENT_RADIUS,
   );
   console.log(`linear-HDR sweep ${JSON.stringify(linearSweep)}`);
   for (const [name, samples] of Object.entries(linearSweep)) {
     const first = samples[0];
     const last = samples.at(-1);
-    const baseline = samples.find(
-      (sample) => sample.scale === BASELINE_RADIUS_SCALE,
+    const previousProduct = samples.find(
+      (sample) => sample.scale === PREVIOUS_PRODUCT_RADIUS_SCALE,
     );
-    if (!baseline || last.scale !== CIRCULAR_BOKEH_DEFAULTS.radiusScale) {
+    if (
+      !previousProduct ||
+      last.scale !== CIRCULAR_BOKEH_DEFAULTS.radiusScale
+    ) {
       throw new Error(
-        `linear-HDR sweep missed baseline/product radii for ${name}`,
+        `linear-HDR sweep missed previous/product radii for ${name}`,
       );
     }
     const radiusRatio =
-      last.expectedCoCRadius / Math.max(1e-9, baseline.expectedCoCRadius);
-    const peakRatio = last.peak / Math.max(1e-9, baseline.peak);
+      last.expectedCoCRadius /
+      Math.max(1e-9, previousProduct.expectedCoCRadius);
+    const peakRatio = last.peak / Math.max(1e-9, previousProduct.peak);
     const coreRatio =
-      last.opticalCoreMean / Math.max(1e-9, baseline.opticalCoreMean);
+      last.opticalCoreMean /
+      Math.max(1e-9, previousProduct.opticalCoreMean);
     const expectedAreaDilution = 1 / (radiusRatio * radiusRatio);
     if (
-      radiusRatio < 1.28 ||
+      radiusRatio < 1.4 ||
       Math.abs(peakRatio / expectedAreaDilution - 1) > 0.12 ||
       Math.abs(coreRatio / expectedAreaDilution - 1) > 0.12
     ) {
       throw new Error(
         `product bokeh did not grow and dilute by disc area for ${name}: ${JSON.stringify(
           {
-            baseline,
+            previousProduct,
             product: last,
             radiusRatio,
             peakRatio,
@@ -337,9 +354,28 @@ try {
       .sort(),
   );
 
+  const overlapName = "foreground-over-focus";
+  const captureWithoutSource = async (sourceName) => {
+    await page.evaluate((name) => {
+      const engine = window.__engine;
+      engine.scene.getObjectByName(name).visible = false;
+      engine.debugRenderDofFrame();
+    }, sourceName);
+    const baseline = await page.locator("canvas").screenshot();
+    await page.evaluate((name) => {
+      const engine = window.__engine;
+      engine.scene.getObjectByName(name).visible = true;
+      engine.debugRenderDofFrame();
+    }, sourceName);
+    return baseline;
+  };
+  const openSourceBaseline = await captureWithoutSource(
+    "foreground-open-pair",
+  );
+  const cardSourceBaseline = await captureWithoutSource(overlapName);
+
   const onMetrics = measureLights(repeat, fixture.projectedLights);
   const offMetrics = measureLights(offImage, fixture.projectedLights);
-  const overlapName = "foreground-over-focus";
   const maxAspect = Math.max(
     ...onMetrics
       .filter((sample) => sample.name !== overlapName)
@@ -354,19 +390,20 @@ try {
     fixture.projectedLights.find((light) => light.name === name);
   const openPair = measurePositiveDelta(
     repeat,
-    offImage,
+    openSourceBaseline,
     lightByName("foreground-open-pair"),
-    ENERGY_RADIUS,
+    PRODUCT_MEASUREMENT_RADIUS,
   );
   const cardPair = measurePositiveDelta(
     repeat,
-    offImage,
+    cardSourceBaseline,
     lightByName(overlapName),
-    ENERGY_RADIUS,
+    PRODUCT_MEASUREMENT_RADIUS,
   );
   const telephotoProfile = measureDiscProfile(
     repeat,
     lightByName("foreground-open-pair"),
+    PRODUCT_MEASUREMENT_RADIUS,
   );
   // For a filled circular disc RMS radius is R/sqrt(2), so this converts the
   // positive-delta covariance into a comparable effective diameter.
@@ -381,6 +418,8 @@ try {
   if (!(
     openPair.aspect <= ROUNDNESS_LIMIT &&
     cardPair.aspect <= ROUNDNESS_LIMIT &&
+    openPair.angularVariation <= ANGULAR_UNIFORMITY_LIMIT &&
+    cardPair.angularVariation <= ANGULAR_UNIFORMITY_LIMIT &&
     openPair.centroidError <= 2 &&
     cardPair.centroidError <= 2 &&
     pairEnergyRatio >= 0.35 &&
@@ -556,11 +595,18 @@ try {
       { targetX, names: fixture.projectedLights.map((light) => light.name) },
     );
     const image = await page.locator("canvas").screenshot();
-    await page.evaluate(() => {
+    await page.evaluate((sourceName) => {
       const engine = window.__engine;
+      engine.scene.getObjectByName(sourceName).visible = false;
+      engine.debugRenderDofFrame();
+    }, overlapName);
+    const dofBaselineAtPose = await page.locator("canvas").screenshot();
+    await page.evaluate((sourceName) => {
+      const engine = window.__engine;
+      engine.scene.getObjectByName(sourceName).visible = true;
       engine.debugTuneDof({ amount: 0 });
       engine.debugRenderDofFrame();
-    });
+    }, overlapName);
     const offImageAtPose = await page.locator("canvas").screenshot();
     await page.evaluate((sourceName) => {
       const engine = window.__engine;
@@ -574,23 +620,17 @@ try {
       engine.debugTuneDof({ amount: 1 });
       engine.debugRenderDofFrame();
     }, overlapName);
-    const openDelta = measurePositiveDelta(
+    const renderedCard = measurePositiveDelta(
       image,
-      offImageAtPose,
-      frame.lights.find((light) => light.name === "foreground-open-pair"),
-      ENERGY_RADIUS,
-    );
-    const cardDelta = measurePositiveDelta(
-      image,
-      offImageAtPose,
+      dofBaselineAtPose,
       frame.lights.find((light) => light.name === overlapName),
-      ENERGY_RADIUS,
+      PRODUCT_MEASUREMENT_RADIUS,
     );
     const sharpInput = measurePositiveDelta(
       offImageAtPose,
       sharpBaselineAtPose,
       frame.lights.find((light) => light.name === overlapName),
-      ENERGY_RADIUS,
+      PRODUCT_MEASUREMENT_RADIUS,
     );
     panFrames.push({
       targetX,
@@ -600,20 +640,21 @@ try {
       offImage: offImageAtPose,
       metrics: measureLights(image, frame.lights),
       sourceDelta: {
-        open: openDelta,
-        card: cardDelta,
+        renderedCard,
         sharpInput,
-        pairEnergyRatio: cardDelta.energy / Math.max(1, openDelta.energy),
       },
     });
   }
   const repairedPanEnergy = panFrames.map(
     (frame) =>
-      frame.sourceDelta.card.energy /
+      frame.sourceDelta.renderedCard.energy /
       Math.max(1, frame.sourceDelta.sharpInput.energy),
   );
   const repairedPanRms = panFrames.map(
-    (frame) => frame.sourceDelta.card.rmsRadius,
+    (frame) => frame.sourceDelta.renderedCard.rmsRadius,
+  );
+  const repairedPanRadiusRatio = repairedPanRms.map(
+    (radius) => radius / cardPair.rmsRadius,
   );
   const repairedEnergyMean =
     repairedPanEnergy.reduce((sum, value) => sum + value, 0) /
@@ -621,6 +662,7 @@ try {
   const repairedPanStability = {
     integratedEnergy: repairedPanEnergy,
     rmsRadius: repairedPanRms,
+    radiusRatio: repairedPanRadiusRatio,
     maxRelativeEnergyStep: Math.max(
       ...repairedPanEnergy
         .slice(1)
@@ -639,17 +681,38 @@ try {
         .map((value, index) => Math.abs(value - repairedPanRms[index])),
     ),
   };
+  const panCentroidError = (frame, name) => {
+    const light = frame.lights.find((sample) => sample.name === name);
+    const rendered = frame.metrics.find((sample) => sample.name === name);
+    return Math.hypot(
+      rendered.centroidX - light.x,
+      rendered.centroidY - light.y,
+    );
+  };
   if (
     !panFrames.every(
       (frame) =>
         frame.state.postQuality === 0 &&
         frame.state.activeBokehTaps === 13 &&
-        frame.sourceDelta.open.aspect <= ROUNDNESS_LIMIT &&
-        frame.sourceDelta.card.aspect <= ROUNDNESS_LIMIT &&
-        frame.sourceDelta.open.centroidError <= 2 &&
-        frame.sourceDelta.card.centroidError <= 2 &&
-        frame.sourceDelta.pairEnergyRatio >= SOURCE_PAN_PAIR_ENERGY_MIN &&
-        frame.sourceDelta.pairEnergyRatio <= SOURCE_PAN_PAIR_ENERGY_MAX,
+        frame.metrics.find(
+          (sample) => sample.name === "foreground-open-pair",
+        ).aspect <= ROUNDNESS_LIMIT &&
+        frame.sourceDelta.renderedCard.aspect <= ROUNDNESS_LIMIT &&
+        frame.sourceDelta.renderedCard.angularVariation <=
+          ANGULAR_UNIFORMITY_LIMIT &&
+        panCentroidError(frame, "foreground-open-pair") <= 2 &&
+        frame.sourceDelta.renderedCard.centroidError <= 2 &&
+        frame.sourceDelta.renderedCard.energy > 0 &&
+        frame.sourceDelta.renderedCard.energy /
+          Math.max(1, frame.sourceDelta.sharpInput.energy) >=
+          SOURCE_PAN_INPUT_ENERGY_MIN &&
+        frame.sourceDelta.renderedCard.energy /
+          Math.max(1, frame.sourceDelta.sharpInput.energy) <=
+          SOURCE_PAN_INPUT_ENERGY_MAX &&
+        frame.sourceDelta.renderedCard.rmsRadius / cardPair.rmsRadius >=
+          SOURCE_PAN_RADIUS_RATIO_MIN &&
+        frame.sourceDelta.renderedCard.rmsRadius / cardPair.rmsRadius <=
+          SOURCE_PAN_RADIUS_RATIO_MAX,
     ) ||
     repairedPanStability.maxRelativeEnergyStep > SOURCE_PAN_ENERGY_STEP_LIMIT ||
     repairedPanStability.relativeEnergyRange > 0.3 ||
@@ -767,6 +830,8 @@ try {
         "background-gold-left",
         "foreground-over-focus",
       ],
+      2,
+      PRODUCT_MEASUREMENT_RADIUS,
     ),
   );
 

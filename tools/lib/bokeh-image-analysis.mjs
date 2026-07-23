@@ -204,6 +204,7 @@ export function measurePositiveDelta(
       annulusEnergy: 0,
       annulusMean: 0,
       aspect: Infinity,
+      angularVariation: Infinity,
       rmsRadius: 0,
       centroidError: Infinity,
     };
@@ -227,12 +228,34 @@ export function measurePositiveDelta(
   const delta = Math.sqrt((xx - yy) ** 2 + 4 * xy ** 2);
   const minor = Math.max(1e-9, (trace - delta) * 0.5);
   const major = Math.max(minor, (trace + delta) * 0.5);
+  const angularEnergy = Array(24).fill(0);
+  for (const sample of samples) {
+    const dx = sample.x - centroidX;
+    const dy = sample.y - centroidY;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 3 || distance > radius * 0.9) continue;
+    const angle = (Math.atan2(dy, dx) + Math.PI * 2) % (Math.PI * 2);
+    const bin = Math.min(
+      angularEnergy.length - 1,
+      Math.floor(angle / (Math.PI * 2) * angularEnergy.length),
+    );
+    angularEnergy[bin] += sample.weight;
+  }
+  const angularMean = angularEnergy.reduce((sum, value) => sum + value, 0)
+    / angularEnergy.length;
+  const angularVariance = angularEnergy.reduce(
+    (sum, value) => sum + (value - angularMean) ** 2,
+    0,
+  ) / angularEnergy.length;
   return {
     name: light.name,
     energy,
     annulusEnergy,
     annulusMean: annulusEnergy / Math.max(1, annulusPixels),
     aspect: Math.sqrt(major / minor),
+    angularVariation: angularMean > 0
+      ? Math.sqrt(angularVariance) / angularMean
+      : Infinity,
     rmsRadius: Math.sqrt(trace),
     centroidError: Math.hypot(centroidX - light.x, centroidY - light.y),
   };
@@ -316,8 +339,13 @@ export function positiveDeltaImage(onImage, offImage, gain = 1) {
   return PNG.sync.write(delta);
 }
 
-export function makePanStrip(frames, lightNames, scale = 4) {
-  const cropSize = STRIP_RADIUS * 2 + 1;
+export function makePanStrip(
+  frames,
+  lightNames,
+  scale = 4,
+  radius = STRIP_RADIUS,
+) {
+  const cropSize = radius * 2 + 1;
   const strip = new PNG({
     width: frames.length * cropSize * scale,
     height: lightNames.length * cropSize * scale,
@@ -330,15 +358,15 @@ export function makePanStrip(frames, lightNames, scale = 4) {
       );
       const cx = Math.round(light.x);
       const cy = Math.round(light.y);
-      for (let sy = -STRIP_RADIUS; sy <= STRIP_RADIUS; sy++) {
-        for (let sx = -STRIP_RADIUS; sx <= STRIP_RADIUS; sx++) {
+      for (let sy = -radius; sy <= radius; sy++) {
+        for (let sx = -radius; sx <= radius; sx++) {
           const source = ((cy + sy) * png.width + cx + sx) * 4;
           for (let oy = 0; oy < scale; oy++) {
             for (let ox = 0; ox < scale; ox++) {
               const dx = column * cropSize * scale
-                + (sx + STRIP_RADIUS) * scale + ox;
+                + (sx + radius) * scale + ox;
               const dy = row * cropSize * scale
-                + (sy + STRIP_RADIUS) * scale + oy;
+                + (sy + radius) * scale + oy;
               const target = (dy * strip.width + dx) * 4;
               png.data.copy(strip.data, target, source, source + 4);
             }

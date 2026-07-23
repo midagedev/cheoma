@@ -20,9 +20,10 @@ export const CIRCULAR_BOKEH_DEFAULTS = Object.freeze({
   highlightKnee: 0.52,
   highlightGain: 0.55,
   // Spend the complete bounded maxblur disc. The authored outer ring remains at
-  // sqrt(0.75) of that radius, while a tiny lantern face expands into a legible
-  // telephoto aperture image instead of reading as a softened point.
-  radiusScale: 3.1,
+  // sqrt(0.75) of that radius, while a tiny lantern face expands into a broad
+  // telephoto aperture image. Source scatter normalizes by the disc area, so this
+  // larger radius also lowers peak/core luminance instead of inventing light.
+  radiusScale: 4.4,
 });
 
 function glslFloat(value) {

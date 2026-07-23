@@ -292,7 +292,7 @@ invariant(
 );
 near(
   CIRCULAR_BOKEH_DEFAULTS.radiusScale,
-  3.1,
+  4.4,
   "cinematic bokeh lost its expanded telephoto aperture radius",
 );
 invariant(

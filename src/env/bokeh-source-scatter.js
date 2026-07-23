@@ -95,11 +95,24 @@ const SOURCE_WEIGHT_LINES = OWNED_OFFSETS.map(
     `      componentPeak${sourceIndex}\n` +
     "    );",
 ).join("\n    ");
+const SOURCE_DISTANCE_LINES = OWNED_OFFSETS.map(
+  ([x, y], index) => {
+    const component = VECTOR_COMPONENTS[index];
+    return (
+      `if (vSourceRadii.${component} > 0.0) {\n` +
+      `      sourceDistances.${component} = length(destinationPixel` +
+      ` - (vCellPixel + vec2(${x.toFixed(1)}, ${y.toFixed(1)})));\n` +
+      `      hasApertureSupport = hasApertureSupport` +
+      ` || sourceDistances.${component} <= vSourceRadii.${component} + 0.5;\n` +
+      "    }"
+    );
+  },
+).join("\n    ");
 const SOURCE_PROFILE_LINES = OWNED_OFFSETS.map(
-  ([x, y], index) =>
+  (_, index) =>
     `if (vSourceRadii.${VECTOR_COMPONENTS[index]} > 0.0) {\n` +
-    `      float sourceDistance${index} = length(destinationPixel` +
-    ` - (vCellPixel + vec2(${x.toFixed(1)}, ${y.toFixed(1)})));\n` +
+    `      float sourceDistance${index}` +
+    ` = sourceDistances.${VECTOR_COMPONENTS[index]};\n` +
     `      bool acceptsSource${index} =` +
     ` vSourceDepths.${VECTOR_COMPONENTS[index]}` +
     " <= destinationDepth + depthEpsilon;\n" +
@@ -384,6 +397,14 @@ export const BOKEH_SCATTER_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
+    vec2 destinationPixel = gl_FragCoord.xy;
+    vec4 sourceDistances = vec4(1e20);
+    bool hasApertureSupport = false;
+    ${SOURCE_DISTANCE_LINES}
+    // Point and triangle primitives circumscribe the circular aperture. Skip
+    // their unsupported corners before the destination depth texture fetch.
+    if (!hasApertureSupport) discard;
+
     vec2 destinationUv = gl_FragCoord.xy / viewportSize;
     float packedDepth = unpackRGBAToDepth(texture2D(tDepth, destinationUv));
     float destinationDepth = -perspectiveDepthToViewZ(
@@ -393,7 +414,6 @@ export const BOKEH_SCATTER_FRAGMENT_SHADER = /* glsl */ `
     );
     float depthEpsilon = max(0.01, destinationDepth * 0.0001);
 
-    vec2 destinationPixel = gl_FragCoord.xy;
     vec3 destinationColor = vec3(0.0);
     float destinationPeak = -1.0;
     float destinationCompact = 0.0;
