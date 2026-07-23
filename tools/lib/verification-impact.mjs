@@ -90,6 +90,16 @@ const CHECK_CLOSURES = new Map(FAST_CHECKS.map((check) => {
   const entry = resolve(TOOLS, check);
   return [check, new Set([...dependencyClosure(entry)].map((path) => relative(ROOT, path).split(sep).join('/')))];
 }));
+export const API_REUSE_DEPENDENCIES = Object.freeze(
+  [...dependencyClosure(join(ROOT, 'examples', 'api-building', 'main.js'))]
+    .map((path) => relative(ROOT, path).split(sep).join('/')),
+);
+const API_REUSE_CLOSURE = new Set(API_REUSE_DEPENDENCIES);
+
+/** Keep the standalone browser gate aligned with the example's real ESM graph. */
+export function isApiReuseDependency(path) {
+  return API_REUSE_CLOSURE.has(path);
+}
 
 /** Select only browser-free contracts whose static dependency closure intersects the patch. */
 export function impactedFastChecks(paths) {

@@ -1,8 +1,9 @@
 import { FAST_CHECK_PATHS } from './fast-checks.mjs';
 import { gateCommand } from './verification-gates.mjs';
+import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -21,6 +22,10 @@ function routePath(path) {
     add(gates, ...items);
     reasons.push(reason);
   };
+
+  if (isApiReuseDependency(path) || path.startsWith('examples/api-building/')) {
+    select('standalone public building dependency changed', 'api-reuse');
+  }
 
   if (DOC_PATH.test(path)) {
     select('documentation only', 'docs');
@@ -54,6 +59,7 @@ function routePath(path) {
     'tools/check-detail-particle-geometry.mjs': ['particle-geometry'],
     'tools/check-instance-upload-browser.mjs': ['instance-upload'],
     'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
+    'tools/check-api-reuse-example.mjs': ['api-reuse'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -82,6 +88,10 @@ function routePath(path) {
   }
   if (path.startsWith('tools/')) {
     return { full: true, reasons: ['verification implementation changed'] };
+  }
+
+  if (path.startsWith('examples/api-building/')) {
+    return { gates, reasons };
   }
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
@@ -237,6 +247,9 @@ function routePath(path) {
     if (path.startsWith('src/builder/')) {
       select('public building resource lifecycle changed', 'building-lifecycle');
     }
+    if (path === 'src/core/three-resources.js') {
+      select('public building disposal primitive changed', 'building-lifecycle');
+    }
     if (path === 'src/core/buffer-update-range.js') {
       select('BufferAttribute upload range ownership changed', 'instance-upload', 'lod-wave');
     }
@@ -385,6 +398,7 @@ export function verificationCommands(plan) {
   if (has('particle-geometry')) commands.push(gateCommand('particle-geometry'));
   if (has('instance-upload')) commands.push(gateCommand('instance-upload'));
   if (has('building-lifecycle')) commands.push(gateCommand('building-lifecycle'));
+  if (has('api-reuse')) commands.push(gateCommand('api-reuse'));
   if (has('winter-app')) commands.push(gateCommand('winter-app'));
   if (has('worker')) commands.push(gateCommand('worker'));
   if (has('audio')) commands.push(gateCommand('audio'));

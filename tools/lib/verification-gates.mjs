@@ -7,6 +7,7 @@ export const VERIFICATION_GATES = Object.freeze({
   'particle-geometry': Object.freeze({ script: 'check:particle-geometry', resource: 'browser', tier: 'checkpoint', description: 'Physical precipitation, close-detail particle, and hanji-light geometry' }),
   'instance-upload': Object.freeze({ script: 'check:instance-upload:browser', resource: 'browser', tier: 'checkpoint', description: 'Sparse parcel BufferAttribute GPU uploads' }),
   'building-lifecycle': Object.freeze({ script: 'check:building-lifecycle', resource: 'browser', tier: 'checkpoint', description: 'Public building GPU texture and shadow-depth lifecycle' }),
+  'api-reuse': Object.freeze({ script: 'check:api-reuse', resource: 'browser', tier: 'checkpoint', description: 'Standalone public building API consumer and disposal' }),
   'winter-app': Object.freeze({ script: 'check:winter:app', resource: 'browser', tier: 'checkpoint', description: 'Winter application surface' }),
   worker: Object.freeze({ script: 'check:worker', resource: 'browser', tier: 'checkpoint', description: 'Sync, Worker, and fallback scene parity' }),
   audio: Object.freeze({ script: 'check:audio', resource: 'browser', tier: 'checkpoint', description: 'Audio lifecycle contract' }),
@@ -24,7 +25,7 @@ export const VERIFICATION_GATES = Object.freeze({
 });
 
 export const ALL_PROFILE = Object.freeze([
-  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle',
+  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse',
   'winter-app', 'worker', 'audio',
   'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);

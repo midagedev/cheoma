@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cheoma · public API building example</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Georgia, "AppleMyungjo", "Nanum Myeongjo", serif;
+      background: #d9d6c9;
+      color: #332b24;
+    }
+    * { box-sizing: border-box; }
+    html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .label {
+      position: fixed;
+      inset: 20px auto auto 22px;
+      max-width: min(32rem, calc(100vw - 44px));
+      padding: 12px 15px;
+      border: 1px solid rgba(75, 60, 45, .15);
+      border-radius: 12px;
+      background: rgba(244, 239, 226, .78);
+      box-shadow: 0 10px 34px rgba(57, 44, 32, .12);
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+    }
+    .label strong { display: block; font-size: 15px; font-weight: 500; letter-spacing: .04em; }
+    .label span {
+      display: block;
+      margin-top: 4px;
+      font: 11px/1.45 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+      color: rgba(51, 43, 36, .62);
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <main id="app" aria-label="src/api/building.js로 렌더한 기와집"></main>
+  <div class="label">
+    <strong>cheoma public API</strong>
+    <span>Svelte·마을·후처리 없이 src/api/building.js만으로 만든 단독 기와집</span>
+  </div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
