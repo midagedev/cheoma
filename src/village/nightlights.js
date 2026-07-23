@@ -3,6 +3,10 @@ import { normalizeVillageLensScale } from '../camera/optics.js';
 import { hashString, makeRng } from '../rng.js';
 import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
 import { houseMatrix } from '../generators/shared/parcel-transform.js';
+import {
+  NIGHTLIGHT_FLICK_GLSL,
+  createPhysicalNightlightBatch,
+} from './nightlight-physical-geometry.js';
 
 // 원경 창불 발광 포인트(태스크 #60, #81) — 부감 야경의 마법.
 //   실제 renderer가 확정한 고정 한지 면 anchor만 소비한다. 필지 크기나 처마 치수를 이 레이어에서
@@ -18,6 +22,9 @@ import { houseMatrix } from '../generators/shared/parcel-transform.js';
 //     늦게·어둡게, 일부는 아예 불 꺼짐(빈집·잠듦). 결정론(parcel.seed) — 같은 시드 같은 점등.
 //   · 거리 곡선: gl_PointSize 는 거리 감쇠하되 min/max 로 클램프(원거리에서도 읽히는 하한). 근접
 //     밴드(uFadeNear..uFadeNearEnd)에서 투명도 0 으로 페이드 아웃 → 눈높이에선 점광 잔재 없음.
+//   · #96 A/B: 동일 owner/slot 배열은 저작된 한지 면 방향·크기도 보관한다. 선택적 physical 경로는
+//     그 배열을 단일 InstancedBufferGeometry로 그리며 같은 near fade 뒤 실제 FULL 한지가 이어받는다.
+//     기본 제품 경로 변경은 제품 count의 GPU·시각 판정과 함께 상위 통합에서 한 번만 결정한다.
 //
 //   드로우콜: Points 1개. 결정론: Math.random 미사용(전부 parcel/plan seed).
 
@@ -79,14 +86,27 @@ function featureProfile(feature, count, litBase, scale, seedSalt) {
 }
 
 function transformAnchors(anchors, matrix) {
+  const linear = new THREE.Matrix3().setFromMatrix4(matrix);
   return (anchors || []).map((anchor) => {
+    const sourceOutward = new THREE.Vector3(
+      anchor.outward.x, anchor.outward.y, anchor.outward.z,
+    ).normalize();
     const position = new THREE.Vector3(
       anchor.position.x, anchor.position.y, anchor.position.z,
     ).applyMatrix4(matrix);
-    const outward = new THREE.Vector3(
-      anchor.outward.x, anchor.outward.y, anchor.outward.z,
-    ).transformDirection(matrix);
-    return { ...anchor, position, outward };
+    const outward = sourceOutward.clone().transformDirection(matrix);
+    const sourceRight = new THREE.Vector3()
+      .crossVectors(new THREE.Vector3(0, 1, 0), sourceOutward)
+      .normalize();
+    const widthScale = sourceRight.applyMatrix3(linear).length();
+    const heightScale = new THREE.Vector3(0, 1, 0).applyMatrix3(linear).length();
+    return {
+      ...anchor,
+      position,
+      outward,
+      width: anchor.width * widthScale,
+      height: anchor.height * heightScale,
+    };
   });
 }
 
@@ -141,24 +161,25 @@ attribute float aScale;
 varying float vIntensity;
 varying float vWarm;
 
-// 호롱불 일렁임(결정론) — night-glow.candleFlicker 경량판(숨쉬기 + 미세 지터).
-float flick(float t, float ph) {
-  float breathe = 0.5 * sin(t * 1.7 + ph) + 0.5 * sin(t * 0.63 + ph * 1.7);
-  float jitter = sin(t * 9.3 + ph * 3.1);
-  return clamp(1.0 + 0.12 * breathe + 0.03 * jitter, 0.62, 1.15);
-}
+${NIGHTLIGHT_FLICK_GLSL}
 
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  // Point primitives with negative clip-space w are driver-sensitive. Reject
+  // sources behind the camera before point-size clamping can turn them into
+  // large screen-edge cards during a wide aerial orbit.
+  if (mv.z >= -0.001 || aLit <= 0.002) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    return;
+  }
   float dist = max(-mv.z, 0.001);
   float visualDist = dist / max(uLensScale, 0.0001);
-  // 집집이 다른 문턱을 uNight 이 넘을 때 서서히 점등(0.16 밴드 → 크로스페이드 부드럽게).
-  float on = smoothstep(aThreshold, aThreshold + 0.16, uNight);
-  float fl = flick(uTime, aPhase);
-  float base = aLit * on * fl;
-  // 근접 페이드: 아주 가까우면 0(재질 창호광이 바통 터치), 멀어질수록 1.
-  float nearFade = smoothstep(uFadeNear, uFadeNearEnd, visualDist);
-  vIntensity = base * nearFade * uWave;
+  // 근접 페이드는 실제 FULL 창호 emissive와의 중복을 막는다.
+  float base = aLit
+    * smoothstep(aThreshold, aThreshold + 0.16, uNight)
+    * nightlightFlick(uTime, aPhase);
+  vIntensity = nightlightIntensity(aLit, aThreshold, aPhase, visualDist);
   vWarm = aWarm;
   if (vIntensity <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
   // 거리 감쇠 + 하/상한 클램프(원거리에서도 읽히는 최소 픽셀).
@@ -213,9 +234,12 @@ void main() {
 // `sources` contains renderer-authored variant catalogs and already-placed
 // compound anchors. It is deliberately assembled by populate rather than
 // reconstructed from plan dimensions here.
-export function buildNightLights(plan, _site, sources = {}) {
+export function buildNightLights(plan, _site, sources = {}, options = {}) {
   const group = new THREE.Group();
   group.name = 'village-nightlights';
+  const representation = options.representation === 'physical'
+    ? 'physical'
+    : 'points';
 
   const ownerAnchors = sources.owners instanceof Map ? sources.owners : new Map();
   const records = [];
@@ -291,6 +315,9 @@ export function buildNightLights(plan, _site, sources = {}) {
           depthTest: true,
         };
       },
+      debugRepresentation() {
+        return { representation, attributeBytes: 0 };
+      },
       dispose() {},
     };
     group.userData.nightLights = empty;
@@ -303,6 +330,8 @@ export function buildNightLights(plan, _site, sources = {}) {
   const aThreshold = new Float32Array(pointCount);
   const aWarm = new Float32Array(pointCount);
   const aScale = new Float32Array(pointCount);
+  const outward = new Float32Array(pointCount * 3);
+  const openingSize = new Float32Array(pointCount * 2);
 
   function writeOwner(record, anchors) {
     const selected = selectAnchors(anchors, record.profile.desired, record.seed);
@@ -322,6 +351,14 @@ export function buildNightLights(plan, _site, sources = {}) {
       pos[index * 3] = anchor ? anchor.position.x : 0;
       pos[index * 3 + 1] = anchor ? anchor.position.y : 0;
       pos[index * 3 + 2] = anchor ? anchor.position.z : 0;
+      outward[index * 3] = anchor ? anchor.outward.x : 0;
+      outward[index * 3 + 1] = anchor ? anchor.outward.y : 0;
+      outward[index * 3 + 2] = anchor ? anchor.outward.z : 1;
+      // Keep the luminous paper inside the authored frame. This remains a
+      // shallow proxy and fades before the actual FULL hanji emissive takes
+      // over; it never becomes a second close-up window surface.
+      openingSize[index * 2] = anchor ? anchor.width * 0.88 : 0;
+      openingSize[index * 2 + 1] = anchor ? anchor.height * 0.82 : 0;
       aPhase[index] = values.phase;
       aLit[index] = anchor ? values.lit : 0;
       aThreshold[index] = values.threshold;
@@ -330,15 +367,6 @@ export function buildNightLights(plan, _site, sources = {}) {
     }
   }
   for (const record of records) writeOwner(record, record.baseAnchors);
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('aPhase', new THREE.BufferAttribute(aPhase, 1));
-  geo.setAttribute('aLit', new THREE.BufferAttribute(aLit, 1));
-  geo.setAttribute('aThreshold', new THREE.BufferAttribute(aThreshold, 1));
-  geo.setAttribute('aWarm', new THREE.BufferAttribute(aWarm, 1));
-  geo.setAttribute('aScale', new THREE.BufferAttribute(aScale, 1));
-  geo.computeBoundingSphere();
 
   const dpr = clamp(typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1, 1, 2);
   const uniforms = {
@@ -355,42 +383,106 @@ export function buildNightLights(plan, _site, sources = {}) {
     uColorCandle: { value: COLOR_CANDLE.clone() },
     uColorLamp: { value: COLOR_LAMP.clone() },
   };
-  const mat = new THREE.ShaderMaterial({
-    uniforms, vertexShader: VERT, fragmentShader: FRAG,
-    transparent: true, depthTest: true, depthWrite: false,
-    blending: THREE.CustomBlending,
-    blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  const sourceArrays = Object.freeze({
+    position: pos,
+    outward,
+    openingSize,
+    phase: aPhase,
+    lit: aLit,
+    threshold: aThreshold,
+    warm: aWarm,
   });
-  const dofDepthMat = new THREE.ShaderMaterial({
-    uniforms,
-    vertexShader: VERT,
-    fragmentShader: DOF_DEPTH_FRAG,
-    depthTest: true,
-    depthWrite: true,
-    blending: THREE.NoBlending,
-    toneMapped: false,
-  });
-  dofDepthMat.name = 'nightlight-dof-depth';
-  // StableBokehPass sets scene.overrideMaterial for the packed-depth prepass.
-  // Opt this exact Points shader out of that replacement.
-  dofDepthMat.allowOverride = false;
-  dofDepthMat.customProgramCacheKey = () => 'cheoma-nightlight-dof-depth-v1';
+  function createRepresentation(mode) {
+    if (mode === 'physical') {
+      return createPhysicalNightlightBatch({
+        count: pointCount,
+        arrays: sourceArrays,
+        uniforms,
+      });
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('aPhase', new THREE.BufferAttribute(aPhase, 1));
+    geometry.setAttribute('aLit', new THREE.BufferAttribute(aLit, 1));
+    geometry.setAttribute('aThreshold', new THREE.BufferAttribute(aThreshold, 1));
+    geometry.setAttribute('aWarm', new THREE.BufferAttribute(aWarm, 1));
+    geometry.setAttribute('aScale', new THREE.BufferAttribute(aScale, 1));
+    geometry.computeBoundingSphere();
 
-  const points = new THREE.Points(geo, mat);
-  points.name = 'nightlight-points';
-  points.frustumCulled = false;
+    const material = new THREE.ShaderMaterial({
+      uniforms, vertexShader: VERT, fragmentShader: FRAG,
+      transparent: true, depthTest: true, depthWrite: false,
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+    });
+    const depthMaterial = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: VERT,
+      fragmentShader: DOF_DEPTH_FRAG,
+      depthTest: true,
+      depthWrite: true,
+      blending: THREE.NoBlending,
+      toneMapped: false,
+    });
+    depthMaterial.name = 'nightlight-dof-depth';
+    depthMaterial.allowOverride = false;
+    depthMaterial.customProgramCacheKey = () => 'cheoma-nightlight-dof-depth-v1';
+
+    const object = new THREE.Points(geometry, material);
+    object.name = 'nightlight-points';
+    object.frustumCulled = false;
+    return {
+      object,
+      geometry,
+      material,
+      depthMaterial,
+      dynamicAttributes: Object.freeze([
+        'position', 'aPhase', 'aLit', 'aThreshold', 'aWarm', 'aScale',
+      ]),
+      resource: Object.freeze({
+        drawCalls: 1,
+        dofDepthDrawCalls: 1,
+        triangles: 0,
+        materials: 2,
+        programs: 2,
+        textures: 0,
+        lights: 0,
+        attributeBytes:
+          pos.byteLength
+          + aPhase.byteLength
+          + aLit.byteLength
+          + aThreshold.byteLength
+          + aWarm.byteLength
+          + aScale.byteLength,
+      }),
+    };
+  }
+  const renderers = new Map();
+  let activeRepresentation = representation;
+  const initial = createRepresentation(activeRepresentation);
+  renderers.set(activeRepresentation, initial);
+  let drawable = initial.object;
+  let mat = initial.material;
+  let dofDepthMat = initial.depthMaterial;
+  let resource = initial.resource;
+  function bindActive(batch) {
+    drawable = batch.object;
+    mat = batch.material;
+    dofDepthMat = batch.depthMaterial;
+    resource = batch.resource;
+  }
   // Transparent ordering stays stable while the normal depth buffer still
   // occludes lights behind walls, terrain, roofs, and courtyard objects.
-  points.renderOrder = 4;
-  points.visible = false;
-  points.userData.dofDepthMaterial = dofDepthMat;
-  group.add(points);
+  drawable.renderOrder = 4;
+  drawable.visible = false;
+  drawable.userData.dofDepthMaterial = dofDepthMat;
+  group.add(drawable);
 
   let level = 0;
   let waveWeight = 1;
   let disposed = false;
   const syncVisibility = () => {
-    points.visible = !disposed && level > 0.001 && waveWeight > 0.001;
+    drawable.visible = !disposed && level > 0.001 && waveWeight > 0.001;
   };
   group.userData.waveFade = {
     setWeight(value) {
@@ -429,8 +521,10 @@ export function buildNightLights(plan, _site, sources = {}) {
       writeOwner(record, overlayRoot
         ? overlayAnchorsInVillageSpace(overlayRoot)
         : record.baseAnchors);
-      for (const name of ['position', 'aPhase', 'aLit', 'aThreshold', 'aWarm', 'aScale']) {
-        geo.attributes[name].needsUpdate = true;
+      for (const batch of renderers.values()) {
+        for (const name of batch.dynamicAttributes) {
+          batch.geometry.attributes[name].needsUpdate = true;
+        }
       }
       return true;
     },
@@ -451,10 +545,29 @@ export function buildNightLights(plan, _site, sources = {}) {
       }
       uniforms.uLensScale.value = normalizeVillageLensScale(lensScale);
       syncVisibility();
-      if (points.visible) uniforms.uTime.value += dt || 0;
+      if (drawable.visible) uniforms.uTime.value += dt || 0;
     },
     setDepthTestForTest(value) {
       if (!disposed) mat.depthTest = value !== false;
+    },
+    debugSetRepresentationForTest(nextRepresentation) {
+      if (disposed) return false;
+      const nextMode = nextRepresentation === 'physical' ? 'physical' : 'points';
+      if (nextMode === activeRepresentation) return true;
+      let next = renderers.get(nextMode);
+      if (!next) {
+        next = createRepresentation(nextMode);
+        renderers.set(nextMode, next);
+      }
+      drawable.visible = false;
+      group.remove(drawable);
+      activeRepresentation = nextMode;
+      bindActive(next);
+      drawable.renderOrder = 4;
+      drawable.userData.dofDepthMaterial = dofDepthMat;
+      group.add(drawable);
+      syncVisibility();
+      return true;
     },
     debugOwner(ownerId) {
       const record = recordById.get(ownerId);
@@ -472,30 +585,38 @@ export function buildNightLights(plan, _site, sources = {}) {
       return {
         pointCount,
         ownerCount: records.length,
-        drawCalls: 1,
-        dofDepthDrawCalls: 1,
-        triangles: 0,
-        materials: 2,
-        programs: 2,
-        textures: 0,
-        lights: 0,
+        drawCalls: resource.drawCalls,
+        dofDepthDrawCalls: resource.dofDepthDrawCalls,
+        triangles: resource.triangles,
+        materials: resource.materials,
+        programs: resource.programs,
+        textures: resource.textures,
+        lights: resource.lights,
         depthTest: mat.depthTest,
+      };
+    },
+    debugRepresentation() {
+      return {
+        representation: activeRepresentation,
+        attributeBytes: resource.attributeBytes,
+        activeObject: drawable.name,
+        allocatedRepresentations: [...renderers.keys()].sort(),
       };
     },
     dispose() {
       if (disposed) return;
       disposed = true;
-      points.visible = false;
-      // The village handle disposes the remaining scene tree generically. Take
-      // this owned drawable out first so geometry/material receive exactly one
-      // dispose event while the API becomes inert immediately.
-      group.remove(points);
-      if (points.userData.dofDepthMaterial === dofDepthMat) {
-        delete points.userData.dofDepthMaterial;
+      for (const batch of renderers.values()) {
+        batch.object.visible = false;
+        group.remove(batch.object);
+        if (batch.object.userData.dofDepthMaterial === batch.depthMaterial) {
+          delete batch.object.userData.dofDepthMaterial;
+        }
+        batch.geometry.dispose();
+        batch.material.dispose();
+        batch.depthMaterial.dispose();
       }
-      geo.dispose();
-      mat.dispose();
-      dofDepthMat.dispose();
+      renderers.clear();
     },
   };
   group.userData.nightLights = api;
