@@ -253,16 +253,17 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 
 ## 현재 남은 개선 후보
 
-다음 파일은 크지만 줄 수만으로 분할하지 않는다.
+다음 파일은 크지만 줄 수만으로 분할하지 않는다. 현재 줄 수는 매번 달라지므로 `check:architecture`의 hotspot
+출력을 보고, 문서에는 안전한 분리 조건만 유지한다.
 
-| 파일 | 현재 줄 수(근사) | 다음 안전 조건 |
-| --- | ---: | --- |
-| `app/src/engine/engine.js` | 2,128 | village/focus lifecycle의 명확한 상태기계 계약과 전용 앱 하네스가 있을 때 추가 추출 |
-| `src/builder/palette.js` | 899 | canvas/texture provider 주입과 material/shader identity 검사 마련 후 분리 |
-| `src/env/post.js` | 873 | pass 순서·program plateau·대표 픽셀 게이트는 마련됨. 실제 재사용 소비자가 pass 단위 소유권을 요구할 때만 추가 분리 |
-| `src/builder/roof.js` | 826 | 지붕 유형별 geometry hash와 근접 시각 게이트 마련 후 분리 |
-| `src/env/critters.js` | 817 | proto/배치/애니메이션별 수치·시각 계약 마련 후 분리 |
-| `app/src/App.svelte` | 785 | UI 상태 소유권을 먼저 명시한 뒤 화면 orchestration 분리 |
+| 파일 | 다음 안전 조건 |
+| --- | --- |
+| `app/src/engine/engine.js` | village/focus lifecycle의 명확한 상태기계 계약과 전용 앱 하네스가 있을 때 추가 추출 |
+| `src/builder/palette.js` | canvas/texture provider 주입과 material/shader identity 검사 마련 후 분리 |
+| `src/env/post.js` | 실제 재사용 소비자가 pass 단위 소유권을 요구할 때만 추가 분리 |
+| `src/builder/roof.js` | 지붕 유형별 geometry hash와 근접 시각 게이트 마련 후 분리 |
+| `src/env/critters.js` | proto/배치/애니메이션별 수치·시각 계약 마련 후 분리 |
+| `app/src/App.svelte` | UI 상태 소유권을 먼저 명시한 뒤 화면 orchestration 분리 |
 
 가장 자연스러운 후속 순서는 palette의 browser 의존 주입, engine의 village/focus controller, façade를 사용하는 최소 외부 예제, 마지막으로 `@cheoma/core`·`@cheoma/three` 패키지 manifest다. 현재 검증보다 위험한 이동은 먼저 게이트를 추가한 뒤 수행한다.
 

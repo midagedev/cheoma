@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { planVerification, verificationCommands } from './lib/verification-plan.mjs';
+import {
+  ALL_PROFILE,
+  FULL_PROFILE,
+  VERIFICATION_GATES,
+} from './lib/verification-gates.mjs';
+import { impactedFastChecks } from './lib/verification-impact.mjs';
 
 function ids(files, options) {
   return verificationCommands(planVerification(files, options)).map((command) => command.id);
 }
 
-assert.deepEqual(ids(['docs/verification.md']), ['core']);
+assert.deepEqual(ids(['docs/verification.md']), ['docs']);
+assert.deepEqual(ids(['docs/verification.md', 'src/env/post.js']), ['docs', 'core', 'app', 'dof-app']);
 assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
 assert.deepEqual(ids(['src/env/post-quality-state.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
@@ -14,9 +25,11 @@ assert.deepEqual(ids(['src/env/circular-bokeh-shader.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
+assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'lod-app']);
+assert.deepEqual(ids(['src/env/snow-material.js']), ['core', 'app', 'rim', 'winter-app']);
 assert.deepEqual(ids(['src/env/weather.js']), ['core', 'app', 'petals', 'winter-app', 'lod-wave']);
 assert.deepEqual(ids(['src/env/petals.js']), ['core', 'app', 'petals', 'lod-focus']);
-assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'lod-focus', 'lod-wave']);
+assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'lod-app']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
@@ -28,13 +41,13 @@ assert.deepEqual(ids(['src/village/parcel-rebuild.js']), [
   'core', 'app', 'worker', 'parcel-rebuild-browser',
 ]);
 assert.deepEqual(ids(['src/village/wave.js']), ['core', 'app', 'lod-wave']);
-assert.deepEqual(ids(['src/env/focus.js']), ['core', 'app', 'lod-focus', 'lod-wave']);
-assert.deepEqual(ids(['src/env/animals.js']), ['core', 'app', 'lod-focus', 'lod-wave']);
+assert.deepEqual(ids(['src/env/focus.js']), ['core', 'app', 'lod-app']);
+assert.deepEqual(ids(['src/env/animals.js']), ['core', 'app', 'lod-app']);
 assert.deepEqual(ids(['src/runtime/village/ambient-field.js']), [
-  'core', 'app', 'worker', 'lod-focus', 'lod-wave', 'parcel-rebuild-browser',
+  'core', 'app', 'worker', 'lod-app', 'parcel-rebuild-browser',
 ]);
 assert.deepEqual(ids(['src/runtime/village/handle.js']), [
-  'core', 'app', 'worker', 'lod-focus', 'lod-wave', 'parcel-rebuild-browser',
+  'core', 'app', 'worker', 'lod-app', 'parcel-rebuild-browser',
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
 assert.deepEqual(ids(['app/src/App.svelte']), [
@@ -44,7 +57,7 @@ assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
   'core', 'app', 'parcel-rebuild-browser', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
-  'core', 'app', 'dof-app', 'lod-focus', 'lod-wave', 'build',
+  'core', 'app', 'dof-app', 'lod-app', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/post-quality-runtime.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus', 'build',
@@ -59,7 +72,7 @@ assert.deepEqual(ids(['app/src/components/EnvironmentDial.svelte']), [
   'core', 'app', 'winter-app', 'build',
 ]);
 assert.deepEqual(ids(['src/api/village.js']), [
-  'core', 'app', 'worker', 'lod-focus', 'lod-wave',
+  'core', 'app', 'worker', 'lod-app',
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/api/shadow-framing.js']), ['core', 'app', 'rim', 'lod-focus']);
@@ -71,6 +84,9 @@ assert.deepEqual(ids(['app/src/engine/ink-mode-runtime.js']), ['core', 'app', 'i
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
 assert.deepEqual(ids(['src/api/ink.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/api/render-style.js']), ['core', 'app', 'ink-app']);
+assert.deepEqual(ids(['src/builder/palette.js']), [
+  'core', 'app', 'rim', 'winter-app', 'worker',
+]);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
   'core', 'app', 'petals', 'winter-app', 'worker', 'lod-wave',
 ]);
@@ -80,12 +96,68 @@ assert.deepEqual(ids(['src/unmapped-future-domain.js']), ['full']);
 assert.deepEqual(ids(['src/env/new-bokeh-backend.js'], {
   newPaths: ['src/env/new-bokeh-backend.js'],
 }), ['full']);
-assert.deepEqual(ids(['docs/new-note.md'], { newPaths: ['docs/new-note.md'] }), ['core']);
+assert.deepEqual(ids(['docs/new-note.md'], { newPaths: ['docs/new-note.md'] }), ['docs']);
 assert.deepEqual(ids(['docs/verification.md'], { forceFullReason: 'base lookup failed' }), ['full']);
 assert.throws(() => planVerification(['../outside.js']), /unsafe verification path/);
 assert.throws(() => planVerification(['/absolute.js']), /unsafe verification path/);
 
 const deduped = planVerification(['src/env/post.js', './src/env/post.js']);
 assert.deepEqual(deduped.files, ['src/env/post.js']);
+
+assert.deepEqual(ids(['src/temple/plan.js']), [
+  'core', 'app', 'worker', 'temple-browser', 'lod-focus',
+]);
+assert.deepEqual(ids(['src/interaction/door-motion.js']), [
+  'core', 'app', 'dof-app', 'parcel-rebuild-browser',
+]);
+assert.deepEqual(ids(['src/cinematic/architectural-reveal.js']), [
+  'core', 'app', 'cinematic-app',
+]);
+assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
+assert.deepEqual(ids(['tools/shoot-bokeh-fixture.mjs']), ['core', 'bokeh-fixture']);
+assert.deepEqual(impactedFastChecks(['docs/verification.md']), []);
+assert.deepEqual(impactedFastChecks(['.gitignore']), [
+  './check-architecture.mjs', './check-verification-plan.mjs', './check-worktree-contract.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['src/env/circular-bokeh-shader.js']), [
+  './check-architecture.mjs', './check-dof.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['src/camera/optics.js']), [
+  './check-architecture.mjs', './check-dof.mjs', './check-plan-contract.mjs', './check-lod.mjs',
+]);
+
+assert.deepEqual(ids(['src/camera/optics.js']), [
+  'core', 'app', 'dof-app', 'rim', 'worker', 'lod-app', 'cinematic-app',
+]);
+assert.deepEqual(ALL_PROFILE, [
+  'docs', 'core-full', 'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio',
+  'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
+]);
+assert.deepEqual(FULL_PROFILE, [
+  ...ALL_PROFILE, 'dof-app', 'rim', 'lod-app', 'cinematic-app', 'build',
+]);
+for (const id of new Set([...ALL_PROFILE, ...FULL_PROFILE])) {
+  assert.equal(typeof VERIFICATION_GATES[id]?.script, 'string', `${id} must map to a script`);
+}
+const packageScripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts;
+for (const [id, gate] of Object.entries(VERIFICATION_GATES)) {
+  assert.equal(typeof packageScripts[gate.script], 'string', `${id} must map to npm script ${gate.script}`);
+}
+
+const scratch = mkdtempSync(join(tmpdir(), 'cheoma-check-pr-files-'));
+try {
+  const list = join(scratch, 'files.txt');
+  writeFileSync(list, './src/env/post.js\n');
+  const injected = spawnSync(process.execPath, ['tools/check-pr.mjs', '--json', '--files-from', list], {
+    cwd: new URL('..', import.meta.url),
+    encoding: 'utf8',
+  });
+  assert.equal(injected.status, 0, injected.stderr);
+  const injectedPlan = JSON.parse(injected.stdout);
+  assert.equal(injectedPlan.full, false);
+  assert.deepEqual(injectedPlan.files, ['src/env/post.js']);
+} finally {
+  rmSync(scratch, { recursive: true, force: true });
+}
 
 console.log('VERIFICATION PLAN: PASS (routing union, dedupe, unsafe/unknown fail-closed)');
