@@ -98,7 +98,16 @@ assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
 assert.deepEqual(ids(['src/api/ink.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/api/render-style.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/builder/palette.js']), [
-  'core', 'app', 'rim', 'winter-app', 'worker',
+  'core', 'app', 'rim', 'building-lifecycle', 'winter-app', 'worker',
+]);
+assert.deepEqual(ids(['src/builder/index.js']), [
+  'core', 'app', 'building-lifecycle', 'worker',
+]);
+assert.deepEqual(ids(['src/render/shadow-depth-texture-lifecycle.js']), [
+  'core', 'app', 'building-lifecycle',
+]);
+assert.deepEqual(ids(['src/api/building.js']), [
+  'core', 'app', 'building-lifecycle',
 ]);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
   'core', 'app', 'petals', 'particle-geometry', 'winter-app', 'worker', 'lod-wave',
@@ -166,6 +175,9 @@ assert.deepEqual(ids(['tools/check-detail-particle-geometry.mjs']), [
 assert.deepEqual(ids(['tools/check-instance-upload-browser.mjs']), [
   'core', 'instance-upload',
 ]);
+assert.deepEqual(ids(['tools/check-building-texture-lifecycle.mjs']), [
+  'core', 'building-lifecycle',
+]);
 const bokehCommands = verificationCommands(planVerification(['src/env/bokeh-source-scatter.js']));
 assert.deepEqual(
   bokehCommands.find((command) => command.id === 'bokeh-fixture')?.args,
@@ -205,7 +217,7 @@ assert.deepEqual(ids(['src/camera/optics.js']), [
 ]);
 assert.deepEqual(ALL_PROFILE, [
   'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
-  'instance-upload', 'winter-app', 'worker', 'audio', 'temple-browser',
+  'instance-upload', 'building-lifecycle', 'winter-app', 'worker', 'audio', 'temple-browser',
   'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [
