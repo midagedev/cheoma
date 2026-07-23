@@ -745,6 +745,9 @@ export async function runBokehSourceStress(page, threeModuleUrl) {
             sourcePixel,
             destinationPixel,
             sourceDepth,
+            sourceRadius: sourceRadiusAtZ(
+              engine.camera.position.z - sourceDepth,
+            ),
             frontDestinationDepth,
             backDestinationDepth,
             sourceColor,
@@ -1346,6 +1349,17 @@ export function assertBokehSourceStress(sourceStress) {
   }
   const sameBlockOccluder =
     sourceStress.sameBlockNearDepthDifferentHueOccluder;
+  const sourceInputEnergy =
+    0.2126 * sameBlockOccluder.sourceColor[0] +
+    0.7152 * sameBlockOccluder.sourceColor[1] +
+    0.0722 * sameBlockOccluder.sourceColor[2];
+  const expectedBackControl =
+    sourceInputEnergy *
+    BOKEH_SOURCE_CONTRACT.profileCore /
+    (Math.PI *
+      sameBlockOccluder.sourceRadius *
+      sameBlockOccluder.sourceRadius *
+      BOKEH_SOURCE_CONTRACT.profileIntegral);
   const sharesOwnershipBlock =
     Math.floor((sameBlockOccluder.sourcePixel[0] - 0.5) / 2) ===
       Math.floor((sameBlockOccluder.destinationPixel[0] - 0.5) / 2) &&
@@ -1360,10 +1374,12 @@ export function assertBokehSourceStress(sourceStress) {
     sameBlockOccluder.hueCosineSquared >= 0.990025 ||
     sameBlockOccluder.ownershipAlpha <
       BOKEH_SOURCE_CONTRACT.exactOwnershipCutoff ||
-    sameBlockOccluder.sourceOpen.positive <= 0 ||
+    sameBlockOccluder.sourceOpen.positive < sourceInputEnergy * 0.97 ||
+    sameBlockOccluder.sourceOpen.positive > sourceInputEnergy * 1.03 ||
     sameBlockOccluder.frontDestination.positive <= 0 ||
     sameBlockOccluder.frontLeak.samples !== 1 ||
-    sameBlockOccluder.backControl.positive <= 0.002 ||
+    sameBlockOccluder.backControl.positive < expectedBackControl * 0.8 ||
+    sameBlockOccluder.backControl.positive > expectedBackControl * 1.2 ||
     sameBlockOccluder.frontLeak.positive /
       sameBlockOccluder.backControl.positive >
       0.01 ||
@@ -1372,7 +1388,7 @@ export function assertBokehSourceStress(sourceStress) {
       0.01
   ) {
     throw new Error(
-      `same-block near-depth different-hue occluder entered source self identity: ${JSON.stringify(sourceStress)}`,
+      `same-block near-depth different-hue occluder entered source self identity: ${JSON.stringify({ sourceInputEnergy, expectedBackControl, sourceStress })}`,
     );
   }
   if (

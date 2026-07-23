@@ -12,7 +12,12 @@ export async function runBokehMaxDprGpuDiagnostic(page, maxPixelRatio = 2) {
       const previousScatterEnabled = pass.debugSourceScatter().enabled;
       const samples = [];
       let disjoint = false;
-      const sequence = [false, true, true, false, true, false, false, true];
+      const sequence = [
+        false, true, true, false,
+        true, false, false, true,
+        false, true, true, false,
+        true, false, false, true,
+      ];
       try {
         renderer.setPixelRatio(requestedPixelRatio);
         engine.resize();
@@ -26,7 +31,7 @@ export async function runBokehMaxDprGpuDiagnostic(page, maxPixelRatio = 2) {
             drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
           };
         }
-        const batchSize = 10;
+        const batchSize = 16;
         for (const enabled of sequence) {
           pass.setSourceScatterEnabled(enabled);
           const query = gl.createQuery();
@@ -82,6 +87,27 @@ export async function runBokehMaxDprGpuDiagnostic(page, maxPixelRatio = 2) {
             .filter((sample) => sample.enabled)
             .map((sample) => sample.milliseconds),
         );
+        // Compare within each mirrored ABBA/BAAB block before taking the
+        // median. Pairing the two states inside the same short time window
+        // cancels thermal/clock drift that independent global medians retain.
+        const blockComparisons = [];
+        for (let index = 0; index < samples.length; index += 4) {
+          const block = samples.slice(index, index + 4);
+          const off = block.filter((sample) => !sample.enabled);
+          const on = block.filter((sample) => sample.enabled);
+          const offMeanMs =
+            off.reduce((sum, sample) => sum + sample.milliseconds, 0) /
+            off.length;
+          const onMeanMs =
+            on.reduce((sum, sample) => sum + sample.milliseconds, 0) /
+            on.length;
+          blockComparisons.push({
+            offMeanMs,
+            onMeanMs,
+            deltaMs: onMeanMs - offMeanMs,
+            ratio: onMeanMs / offMeanMs,
+          });
+        }
         return {
           available:
             samples.length === sequence.length &&
@@ -90,10 +116,11 @@ export async function runBokehMaxDprGpuDiagnostic(page, maxPixelRatio = 2) {
           pixelRatio: renderer.getPixelRatio(),
           drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
           samples,
+          blockComparisons,
           offMedianMs,
           onMedianMs,
-          deltaMs: onMedianMs - offMedianMs,
-          ratio: onMedianMs / offMedianMs,
+          deltaMs: median(blockComparisons.map((block) => block.deltaMs)),
+          ratio: median(blockComparisons.map((block) => block.ratio)),
         };
       } finally {
         pass.setSourceScatterEnabled(previousScatterEnabled);
