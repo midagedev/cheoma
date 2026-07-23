@@ -1,7 +1,10 @@
 // Current-scene link sharing. This module is deliberately DOM-, Svelte-, and
 // three-free so URL canonicalization and the Web Share/clipboard decision can
 // be checked without booting the product.
-import { encodeResidentialEditState } from './residential-edit-url.js';
+import {
+  RESIDENTIAL_EDIT_QUERY_KEY,
+  encodeResidentialEditState,
+} from './residential-edit-url.js';
 
 export const VILLAGE_SCALE_IDS = Object.freeze([
   'solo', 'hamlet', 'village', 'town', 'capital', 'hanyang',
@@ -36,8 +39,11 @@ export function buildSceneShareUrl({
   const base = new URL(baseUrl);
   const query = new URLSearchParams();
   query.set('seed', String(state.seed >>> 0));
+  // Runtime-only entry flags can select a different seed-derived startup time
+  // (notably shot=1 bypasses the product's sunset default). Since those flags
+  // are intentionally stripped, pin the currently rendered time explicitly.
+  query.set('time', String(state.time));
   put(query, 'preset', state.preset, overrides.preset);
-  put(query, 'time', state.time, overrides.time);
   put(query, 'sunset', state.sunsetLook, overrides.sunsetLook);
   put(query, 'season', state.season, overrides.season);
   put(query, 'weather', state.weather, overrides.weather);
@@ -56,7 +62,7 @@ export function buildSceneShareUrl({
       records: residentialEdits,
       focusedParcelId,
     });
-    put(query, 'vedit', editPayload, !!editPayload);
+    put(query, RESIDENTIAL_EDIT_QUERY_KEY, editPayload, !!editPayload);
   }
 
   return `${base.origin}${base.pathname}?${query.toString()}`;

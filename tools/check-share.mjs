@@ -6,7 +6,10 @@ import {
   buildSceneShareUrl,
   shareSceneLink,
 } from '../app/src/lib/share-scene.js';
-import { decodeResidentialEditState } from '../app/src/lib/residential-edit-url.js';
+import {
+  RESIDENTIAL_EDIT_QUERY_KEY,
+  decodeResidentialEditState,
+} from '../app/src/lib/residential-edit-url.js';
 
 const state = {
   seed: 42,
@@ -63,7 +66,7 @@ assert.equal(parsed.origin, 'https://cheoma.midagedev.com');
 assert.equal(parsed.pathname, '/view/');
 assert.equal(parsed.hash, '');
 assert.deepEqual(
-  Object.fromEntries([...query].filter(([key]) => key !== 'vedit')),
+  Object.fromEntries([...query].filter(([key]) => key !== RESIDENTIAL_EDIT_QUERY_KEY)),
   {
     seed: '42',
     preset: 'giwa',
@@ -83,7 +86,7 @@ assert.deepEqual(
   },
   'canonical scene fields changed',
 );
-assert.deepEqual(decodeResidentialEditState(query.get('vedit')), {
+assert.deepEqual(decodeResidentialEditState(query.get(RESIDENTIAL_EDIT_QUERY_KEY)), {
   version: 1,
   records,
   focusedParcelId: 'regular-3',
@@ -92,13 +95,14 @@ for (const key of ['hero', 'worker', 'shot', 'lang', 'flowsec']) {
   assert.equal(query.has(key), false, `${key} leaked into the shared scene URL`);
 }
 
-// Default vocabulary remains terse while still pinning the scene seed. Runtime
-// parameters from the source address never leak through.
+// Default vocabulary stays compact, but time is always explicit: removing
+// shot=1 must not turn its seed-derived daytime scene into the product's
+// implicit sunset when the recipient opens the link.
 const terse = new URL(buildSceneShareUrl({
   baseUrl: 'https://cheoma.midagedev.com/?shot=1&post=0',
-  state: { ...state, renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, time: 'day', renderStyle: 'pbr', expansion: 1 },
 }));
-assert.deepEqual(Object.fromEntries(terse.searchParams), { seed: '42' });
+assert.deepEqual(Object.fromEntries(terse.searchParams), { seed: '42', time: 'day' });
 
 const payload = {
   title: 'cheoma — scene',
