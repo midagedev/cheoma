@@ -2,8 +2,8 @@
 //
 // Captures one stable regular house from the real Vite app at vseed=20260716.
 // All three frames use the same front camera. `front-final` and `rear-depth-on`
-// retain the product material; `rear-depth-off` changes only the Points
-// material's verification hook so a rear light reveals where it would leak.
+// retain the product material; `rear-depth-off` changes only the physical
+// batch material's verification hook so a rear light reveals where it would leak.
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -231,10 +231,10 @@ try {
 
   const fixture = await page.evaluate(() => {
     const engine = window.__engine;
-    let points = null;
-    engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
-    const api = points?.parent?.userData?.nightLights;
-    if (!points || !api) throw new Error('missing product nightlight Points API');
+    let batch = null;
+    engine.scene.traverse((object) => { if (object.name === 'nightlight-physical') batch = object; });
+    const api = batch?.parent?.userData?.nightLights;
+    if (!batch || !api) throw new Error('missing product physical nightlight API');
     const regular = engine.village.debugParcels()
       .filter((parcel) => !parcel.hero && parcel.editable && (parcel.kind === 'giwa' || parcel.kind === 'choga'))
       .map((parcel) => ({ parcel, owner: api.debugOwner(parcel.parcelId) }))
@@ -330,9 +330,9 @@ try {
       stableMidFrames = state?.level === 'mid' ? stableMidFrames + 1 : 0;
       if (stableMidFrames >= 3) break;
     }
-    let points = null;
-    engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
-    const api = points?.parent?.userData?.nightLights;
+    let batch = null;
+    engine.scene.traverse((object) => { if (object.name === 'nightlight-physical') batch = object; });
+    const api = batch?.parent?.userData?.nightLights;
     engine.debugAdvancePost(2);
     engine.debugRenderDofFrame();
     return {
@@ -385,9 +385,9 @@ try {
 
   const focusedOwner = await page.evaluate((parcelId) => {
     const engine = window.__engine;
-    let points = null;
-    engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
-    return points.parent.userData.nightLights.debugOwner(parcelId);
+    let batch = null;
+    engine.scene.traverse((object) => { if (object.name === 'nightlight-physical') batch = object; });
+    return batch.parent.userData.nightLights.debugOwner(parcelId);
   }, fixture.parcel.parcelId);
   await page.evaluate(() => {
     const engine = window.__engine;
@@ -431,9 +431,9 @@ try {
     const freezeCss = document.createElement('style');
     freezeCss.textContent = '* { animation: none !important; transition: none !important; }';
     document.head.appendChild(freezeCss);
-    let points = null;
-    engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
-    const api = points.parent.userData.nightLights;
+    let batch = null;
+    engine.scene.traverse((object) => { if (object.name === 'nightlight-physical') batch = object; });
+    const api = batch.parent.userData.nightLights;
     return { owner: api.debugOwner(parcelId), resource: api.debugState() };
   }, fixture.parcel.parcelId);
 
@@ -486,9 +486,9 @@ try {
   async function capture(name, depthTest) {
     const state = await page.evaluate((enabled) => {
       const engine = window.__engine;
-      let points = null;
-      engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
-      const api = points.parent.userData.nightLights;
+      let batch = null;
+      engine.scene.traverse((object) => { if (object.name === 'nightlight-physical') batch = object; });
+      const api = batch.parent.userData.nightLights;
       api.setDepthTestForTest(enabled);
       engine.debugRenderDofFrame();
       engine.debugRenderDofFrame();
@@ -512,9 +512,9 @@ try {
   const rearOff = await capture('rear-depth-off', false);
   await page.evaluate(() => {
     const engine = window.__engine;
-    let points = null;
-    engine.scene.traverse((object) => { if (object.name === 'nightlight-points') points = object; });
-    points.parent.userData.nightLights.setDepthTestForTest(true);
+    let batch = null;
+    engine.scene.traverse((object) => { if (object.name === 'nightlight-physical') batch = object; });
+    batch.parent.userData.nightLights.setDepthTestForTest(true);
     engine.debugRenderDofFrame();
   });
 
@@ -574,14 +574,13 @@ try {
   'front authored opening is inside the final frame');
   pass(framing.rearNdc[2] >= -1 && framing.rearNdc[2] <= 1
       && Math.abs(framing.rearNdc[0]) <= 1 && Math.abs(framing.rearNdc[1]) <= 1,
-  'rear authored opening is inside the A/B frame');
+  'rear authored opening is inside the front-side rejection frame');
   pass(frontPixels.warmPixels > 0, 'front final contains warm pixels at its authored opening',
     `warm=${frontPixels.warmPixels} peak=${frontPixels.peak.x},${frontPixels.peak.y}`);
   pass(cameraStable && frontFinal.state.depthTest && rearOn.state.depthTest && !rearOff.state.depthTest,
-    'front final and rear depth A/B preserve one camera and change only depthTest');
-  pass(rearPixels.changedPixels > 4 && rearPixels.maxChannelDelta >= 8
-      && rearPixels.signedBrightnessGain > 0,
-  'depthTest hides the rear light behind opaque village surfaces',
+    'front final and rear rejection pair preserve one camera and change only depthTest');
+  pass(rearPixels.changedPixels === 0 && rearPixels.maxChannelDelta === 0,
+  'front-only physical hanji rejects the rear face even when depth testing is disabled',
   `center=${rearPixels.center.x},${rearPixels.center.y} changed=${rearPixels.changedPixels} maxΔ=${rearPixels.maxChannelDelta}`);
   pass(focusDelta?.matched > 0 && rebuildDelta?.matched > 0 && rebuildDelta.max > 0.005,
     'focus/rebuild refresh the same authored owner slot',
@@ -595,10 +594,10 @@ try {
   'actual product MID uses the base MID root and restores the aerial owner',
   `levels=${midProbe.levels.join('→')} restored=${midRestored?.lod?.level || 'none'}`);
   pass(resource.drawCalls === 1 && resource.dofDepthDrawCalls === 1
-      && resource.triangles === 0 && resource.lights === 0
+      && resource.triangles === resource.lightCount * 2 && resource.lights === 0
       && resource.textures === 0 && resource.materials === 2
       && resource.programs === 2 && resource.depthTest === true,
-  'nightlights keep one color draw plus one exact DoF depth draw with no lights/textures/triangles',
+  'nightlights keep one color draw plus one exact DoF depth draw with no lights/textures',
   `draw=${resource.drawCalls}+${resource.dofDepthDrawCalls} depth, material=${resource.materials}, program=${resource.programs}`);
   pass(errors.length === 0, 'browser console remains clean', errors[0] || '');
 

@@ -7,6 +7,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
 const APP = join(ROOT, 'app', 'src');
 const API_PLAN = join(SRC, 'api', 'village-plan.js');
+const API_PARTICLE_STATE = join(SRC, 'api', 'particle-state.js');
 const API_RENDER_STYLE = join(SRC, 'api', 'render-style.js');
 const API_RESIDENTIAL_OPENINGS = join(SRC, 'api', 'residential-openings.js');
 const SOURCE_EXT = new Set(['.js', '.mjs', '.svelte']);
@@ -166,6 +167,10 @@ function checkPureClosure(closure, label) {
 const planClosure = dependencyClosure(API_PLAN);
 checkPureClosure(planClosure, 'pure plan');
 
+// Worker/external particle simulation must not instantiate a WebGL dependency.
+const particleStateClosure = dependencyClosure(API_PARTICLE_STATE);
+checkPureClosure(particleStateClosure, 'particle-state');
+
 // #10 주거 개구 계획은 renderer/UI가 함께 쓰는 JSON-safe 재사용 경계다.
 const residentialOpeningClosure = dependencyClosure(API_RESIDENTIAL_OPENINGS);
 checkPureClosure(residentialOpeningClosure, 'residential-opening');
@@ -185,7 +190,7 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${residentialOpeningClosure.size} residential-opening modules, ${renderStyleClosure.size} pure render-style modules, 0 cycles)`);
+console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${particleStateClosure.size} particle-state modules, ${residentialOpeningClosure.size} residential-opening modules, ${renderStyleClosure.size} pure render-style modules, 0 cycles)`);
 if (hotspots.length) {
   console.log('Refactor hotspots (warning only):');
   for (const item of hotspots) console.log(`  ${String(item.lines).padStart(4)}  ${item.file}`);

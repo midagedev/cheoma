@@ -156,13 +156,17 @@ try {
     const focusOuter = seek();
     const focusOuterDoor = doorFocusSnapshot("p32");
 
-    // Refresh the product LOD at the settled telephoto camera, then assert that weather
-    // consumes that exact lens scale instead of re-inferring it from a roof-height target.
+    // Refresh product LOD at the settled telephoto camera. Physical precipitation keeps
+    // a world-space size; the camera projection supplies magnification without a point-size
+    // lens uniform or target-height inference.
     engine.debugAdvanceFocusRing(0);
     const focusedOptics = engine.debugSyncCameraEnvironment();
-    const focusedSnow = engine.scene.getObjectByName("weatherSnow");
-    const focusedWeatherLensScale =
-      focusedSnow?.material?.uniforms?.uLensScale?.value ?? null;
+    const focusedSnow = engine.scene.getObjectByName("weatherSnowPhysical");
+    const focusedWeatherPhysical = {
+      isMesh: focusedSnow?.isMesh === true,
+      worldScale: focusedSnow?.material?.uniforms?.uWorldScale?.value ?? null,
+      hasPointSizeUniform: !!focusedSnow?.material?.uniforms?.uSize,
+    };
 
     // Warm the stable program once, then render the exact same final camera pose
     // through moving 13-tap and restored 41-tap quality. Uniform changes must not
@@ -171,7 +175,7 @@ try {
     const nightLightsApi = nightLightsGroup?.userData?.nightLights;
     const nightLightsLevelBefore =
       nightLightsGroup
-        ?.getObjectByName("nightlight-points")
+        ?.getObjectByName("nightlight-physical")
         ?.material?.uniforms?.uNight?.value ?? 0;
     // The deterministic app fixture starts in daylight. Expose the real product
     // source briefly so this depth-frame contract exercises its companion packed-
@@ -471,7 +475,7 @@ try {
       focusEnd,
       focusOuterDoor,
       focusedOptics,
-      focusedWeatherLensScale,
+      focusedWeatherPhysical,
       postQuality,
       depthFrame: { before: beforeDepthFrame, after: afterDepthFrame },
       rebuild: {
@@ -601,11 +605,10 @@ try {
     "telephoto house view can zoom out to village context without distance-owned focus-out",
   );
   pass(
-    Number.isFinite(result.focusedWeatherLensScale) &&
-      Math.abs(
-        result.focusedWeatherLensScale - result.focusedOptics.lensScale,
-      ) < 1e-9,
-    "focused weather particles consume the shared village lens scale without target-height breathing",
+    result.focusedWeatherPhysical.isMesh &&
+      Math.abs(result.focusedWeatherPhysical.worldScale - 0.012) < 1e-9 &&
+      !result.focusedWeatherPhysical.hasPointSizeUniform,
+    "focused weather keeps authored world size and lets the physical camera supply magnification",
   );
   pass(
     result.focusEnd.bokehSamples === 41 &&

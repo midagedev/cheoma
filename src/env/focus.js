@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { setupAnimals } from './animals.js';
 import { setupSmoke } from './smoke.js';
-import { setupMotes, setupLanternSway } from './motes.js';
+import { setupMotes } from './motes.js';
+import { setupLanternSway } from './lantern-sway.js';
 import { makePresenceGate } from './present-gate.js';
 import { setupGrass } from './grass.js';
 import { attachOverlayLanterns, getLanternMaterials } from '../layout/props.js';
@@ -143,7 +144,8 @@ function makeRing({
   const moteR = Math.min(radius, Math.max(5.5, Math.max(W, D) * 0.5));
   const motes = setupMotes({
     scene, sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 90,
-    fireflies: true, // 기존 Points 중 ~8% 재사용 — 여름·맑은 밤에만 희박한 보케 씨앗
+    isInk: () => renderer?.toneMapping === THREE.NoToneMapping,
+    fireflies: true, // 인스턴스 중 ~8% — 여름·맑은 밤에만 희박한 물리 보케 씨앗
   });
   motes.group.position.set(worldX, groundY, worldZ);
   container.add(motes.group);
@@ -238,6 +240,7 @@ function makeRing({
     disposed = true;
     smoke.setEnabled(false);    // 건물의 아궁이 불씨(그룹 밖 라이트)까지 소등 후 해제
     lantern.setEnabled(false);
+    motes.dispose();
     scene.remove(container);
     disposeSubtree(container);
   }
@@ -560,7 +563,7 @@ export function createAmbientField(scene, {
       dead() { return phase === 'out' && baseStrength < 0.02; },
       dispose() {
         if (subs.sway) subs.sway.setEnabled(false);
-        if (subs.motes) subs.motes.setEnabled(false);
+        if (subs.motes) subs.motes.dispose();
         scene.remove(container);
         disposeCell(container);
       },
@@ -572,6 +575,7 @@ export function createAmbientField(scene, {
     const moteR = Math.max(5.5, Math.max(desc.W, desc.D) * 0.5);
     const motes = setupMotes({
       scene, sun: _sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 70,
+      isInk: () => renderer?.toneMapping === THREE.NoToneMapping,
       fireflies: true,
     });
     motes.group.position.set(desc.cx, desc.baseY, desc.cz);

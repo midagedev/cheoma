@@ -102,8 +102,8 @@ const villageHandle = createVillage({ scale, seed, includePalace, includeTemple,
 villageHandle.enterVillageMode({ scene, building: null, ground, env });
 villageHandle.setTime(startTime);
 
-// 드로우콜 증분 실측용: nl=0 이면 창불 Points 를 강제 은닉(같은 씬 delta 계측).
-if (q.get('nl') === '0') { villageHandle.group.traverse((o) => { if (o.name === 'nightlight-points') o.userData._forceHide = true; }); }
+// 드로우콜 증분 실측용: nl=0 이면 물리 창불 batch를 강제 은닉(같은 씬 delta 계측).
+if (q.get('nl') === '0') { villageHandle.group.traverse((o) => { if (o.name === 'nightlight-physical') o.userData._forceHide = true; }); }
 
 const R = villageHandle.plan.site.R;
 if (scene.fog) { scene.fog.near = R * 2.2; scene.fog.far = R * 7.0; }
@@ -147,18 +147,18 @@ function computeGlowStats() {
   return { warmPx, warmPct: +(100 * warmPx / npx).toFixed(3), maxL: +maxL.toFixed(3), meanL: +(sumL / npx).toFixed(3) };
 }
 
-// 결정론 판정: 창불 Points 버퍼(위치·속성) 해시 — GPU 비결정(AA) 무관하게 점등 패턴 동일성 검증.
+// 결정론 판정: 물리 창불 instance 버퍼 해시 — GPU 비결정(AA) 무관하게 점등 패턴 동일성 검증.
 function nlHash() {
-  let pts = null;
-  villageHandle.group.traverse((o) => { if (o.name === 'nightlight-points') pts = o; });
-  if (!pts) return 'none';
-  const g = pts.geometry;
+  let batch = null;
+  villageHandle.group.traverse((o) => { if (o.name === 'nightlight-physical') batch = o; });
+  if (!batch) return 'none';
+  const g = batch.geometry;
   let h = 2166136261 >>> 0;
-  for (const k of ['position', 'aPhase', 'aLit', 'aThreshold', 'aWarm', 'aScale']) {
+  for (const k of ['aAnchor', 'aOutward', 'aOpeningSize', 'aPhase', 'aLit', 'aThreshold', 'aWarm']) {
     const a = g.attributes[k] && g.attributes[k].array; if (!a) continue;
     for (let i = 0; i < a.length; i++) { h ^= Math.round(a[i] * 1000) | 0; h = Math.imul(h, 16777619) >>> 0; }
   }
-  return (h >>> 0).toString(16) + ':n' + g.attributes.position.count;
+  return (h >>> 0).toString(16) + ':n' + g.instanceCount;
 }
 
 let frame = 0;

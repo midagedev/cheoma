@@ -25,6 +25,15 @@ const EXACT_IMPACT = new Map([
     './check-plan-contract.mjs',
     './check-lod.mjs',
   ]],
+  ['src/env/weather-physical-geometry.js', [
+    './check-weather-geometry.mjs',
+  ]],
+  ['src/village/nightlight-physical-geometry.js', [
+    './check-nightlight-geometry.mjs',
+  ]],
+  ['src/village/nightlights.js', [
+    './check-nightlight-geometry.mjs',
+  ]],
 ]);
 
 function resolveImport(from, specifier) {

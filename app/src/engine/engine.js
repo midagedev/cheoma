@@ -286,6 +286,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getBuilding: () => building,
     getGround: () => ground,
     env, // 대기 틴트를 fog 모디파이어로 자동 등록 — 비/눈 중 시간 크로스페이드에도 틴트 유지
+    sun,
     lowPerf: perf, // 모바일 perf 프로파일은 볼륨 시뮬(눈 쉘·빗물 흐름) 폴백 → 셰이더 틴트만(#52)
   });
   
@@ -2525,8 +2526,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           const y = rect.top + (-projected.y * 0.5 + 0.5) * rect.height;
           if (projected.z > 1 || x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
           projectedPoints.push({ x, y });
-          setVillageRay(x, y);
-          if (village.handle?.raycastPrimaryDoor?.(raycaster, id)) visible.push({ x, y });
+          // CDP/browser pointer coordinates are stored at float precision. Test
+          // the same representable input we return so a projected double that
+          // lies on an occlusion edge cannot pass here and miss in PointerEvent.
+          const inputX = Math.fround(x);
+          const inputY = Math.fround(y);
+          setVillageRay(inputX, inputY);
+          if (village.handle?.raycastPrimaryDoor?.(raycaster, id)) {
+            visible.push({ x: inputX, y: inputY });
+          }
         }
         if (!visible.length) return null;
         const minX = Math.min(...projectedPoints.map((point) => point.x));

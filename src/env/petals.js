@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { normalizeVillageLensScale } from '../camera/optics.js';
 import { DEFAULT_DETAIL_BANDS, fadeBeyond } from '../core/lod.js';
 import { makeRng } from '../rng.js';
+import { createPetalWorldRepresentation } from './detail-particle-geometry.js';
 
 // 계절 입자 필드(태스크 #111) — 봄 벚꽃 꽃잎 · 가을 낙엽의 "카메라 추종 볼륨".
 //
@@ -17,8 +17,8 @@ import { makeRng } from '../rng.js';
 //   viewHeight(시선 타깃 대비 카메라 높이)도 weather 가 넘긴다.
 //
 // 눈과의 차이(팔랑거림): 눈은 거의 수직 낙하 + 미세 흔들림. 꽃잎/낙엽은 (1) 훨씬 느린 부유 낙하,
-//   (2) 개별 위상·진폭의 큰 좌우 플러터(사인 합성 → 변위 시계열 비단조), (3) 스프라이트 개별 회전
-//   (프래그먼트에서 gl_PointCoord 회전). 낙엽은 꽃잎보다 크고 회전이 격해 "구르듯" 떨어진다.
+//   (2) 개별 위상·진폭의 큰 좌우 플러터(사인 합성 → 변위 시계열 비단조), (3) 월드 곡면의 개별 회전.
+//   낙엽은 꽃잎보다 크고 회전이 격해 "구르듯" 떨어진다.
 
 const TAU = Math.PI * 2;
 const FIELD_SEED = 0x9e7a1;
@@ -27,18 +27,16 @@ const FIELD_SEED = 0x9e7a1;
 const SEASON_CFG = {
   spring: {
     colors: [0xffe3ec, 0xffd0dd, 0xf9b8cc, 0xfff2f6, 0xf6c6d7, 0xffdce6],
-    shape: 0.0,           // 0=둥근 꽃잎
-    size: [1.3, 2.8],     // 스프라이트 픽셀 기준(uScale 로 원근 보정). #116 근접 과대(손바닥) 톤다운.
+    size: [1.3, 2.8],     // 월드 곡면 배율: 최종 장축 약 1.9–4.0cm.
     fall: [0.75, 1.7],    // 낙하 속도(부유감 — 눈 2.4~6.0 보다 훨씬 느림)
     flutter: [1.3, 2.9],  // 좌우 팔랑 진폭
     freq: [0.5, 1.25],    // 팔랑 주파수(rad/s)
-    rot: [0.5, 1.7],      // 스프라이트 회전 속도
+    rot: [0.5, 1.7],      // 월드 곡면 회전 속도
     windCarry: 3.2,
   },
   autumn: {
     colors: [0xc7452a, 0xd8792a, 0xd9a531, 0xb85a26, 0xa8662e, 0xcf8b3a, 0xbf5a2b],
-    shape: 1.0,           // 1=뾰족한 잎
-    size: [1.9, 4.0],     // #116 근접 과대 톤다운(잎은 꽃잎보다 크게 유지)
+    size: [1.9, 4.0],     // 월드 곡면 장축 약 5.7–12cm(꽃잎보다 크게 유지)
     fall: [1.2, 2.6],     // 낙엽은 꽃잎보다 조금 빠르되 여전히 느림
     flutter: [1.6, 3.3],
     freq: [0.45, 1.15],
@@ -71,66 +69,13 @@ export function petalDetailWeight(viewHeight, camDist = NaN, sharedWeight = null
   return measured ? weight : 1; // 신호 없음(env 단독 하네스 초기) → 근경 취급
 }
 
-
-// 잎 실루엣 절차 생성(#116) — "낙엽을 낙엽답게": 원형 점이 아니라 은행잎(부채꼴)·단풍잎(손바닥)
-//   형태를 흰 알파로 그린다(색은 aColor 로 곱함). 셀 중심(32,32), 위=−y. kind 0=벚꽃 꽃잎·1=은행·2=단풍.
-//   회전은 프래그에서 gl_PointCoord 를 vRot 로 돌려 적용하므로, 잎을 셀 안쪽(반경≤24)에 그려
-//   회전 시 모서리가 인접 픽셀을 건드리지 않게 여백을 남긴다.
-function drawLeafShape(g, kind) {
-  g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineJoin = 'round';
-  if (kind === 0) {                       // 벚꽃 꽃잎(둥근 타원 + 끝 파임)
-    g.beginPath();
-    g.moveTo(0, 21);
-    g.bezierCurveTo(15, 13, 14, -13, 3, -19);
-    g.quadraticCurveTo(0, -15, -3, -19);
-    g.bezierCurveTo(-14, -13, -15, 13, 0, 21);
-    g.fill();
-  } else if (kind === 1) {                 // 은행잎(부채꼴 + 중앙 결각 + 잎자루)
-    g.beginPath();
-    g.moveTo(0, 20);
-    g.quadraticCurveTo(-17, 12, -22, -9);
-    g.quadraticCurveTo(-13, -19, -4, -11);
-    g.quadraticCurveTo(0, -8, 4, -11);
-    g.quadraticCurveTo(13, -19, 22, -9);
-    g.quadraticCurveTo(17, 12, 0, 20);
-    g.fill();
-    g.lineWidth = 2.6; g.beginPath(); g.moveTo(0, 18); g.lineTo(0, 29); g.stroke();
-  } else {                                 // 단풍잎(5갈래 손바닥 + 잎자루)
-    const tips = [0, 65, 135, 225, 295];
-    const R = 23;
-    g.beginPath();
-    for (let i = 0; i < tips.length; i++) {
-      const a = tips[i] * Math.PI / 180;
-      const x = Math.sin(a) * R, y = -Math.cos(a) * R;
-      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
-      const n = tips[(i + 1) % tips.length];
-      const mid = (tips[i] + (n > tips[i] ? n : n + 360)) / 2;
-      const bottom = Math.abs(((mid % 360) + 360) % 360 - 180) < 20;
-      const rv = bottom ? 5 : 10;
-      const av = mid * Math.PI / 180;
-      g.lineTo(Math.sin(av) * rv, -Math.cos(av) * rv);
-    }
-    g.closePath(); g.fill();
-    g.lineWidth = 2.6; g.beginPath(); g.moveTo(0, 6); g.lineTo(0, 30); g.stroke();
-  }
-}
-
-function makeLeafTex(kind) {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-  const g = c.getContext('2d'); g.clearRect(0, 0, 64, 64);
-  g.save(); g.translate(32, 32); drawLeafShape(g, kind); g.restore();
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 // 가을 잎 종별 팔레트: 은행=순수 황금, 단풍=진홍~주황(#116).
 const GINKGO_COLS = [0xf2c53d, 0xf0b429, 0xe8b21f, 0xf5ce4a];
 const MAPLE_COLS = [0xc0392b, 0xd35400, 0xe0491f, 0xb83a1e, 0xd9622b];
 
 // createPetalField({ getWind, lowPerf }) →
-//   { points, setSeason(name), update(dt, {t, camDist, viewHeight, present, wind}), get level, get count, get season, aabb(), dispose() }
-export function createPetalField({ getWind, lowPerf = false } = {}) {
+//   { object, setSeason(name), update(dt, {t, camDist, viewHeight, present, wind}), get level, get count, get season, aabb(), dispose() }
+export function createPetalField({ getWind, getLightDirection = null, lowPerf = false } = {}) {
   // #125 대폭 감축(사용자: "색종이 축제 아니라 바람에 이따금 지는 잎"). 기존 1200 → 460. 실제 동시
   //   가시 수는 아래 돌풍 게이트(uActive)가 더 조인다 — 잔잔할 땐 한 자릿수~십수 장, 돌풍에 잠깐 늘었다
   //   잦아든다. per-frame 갱신 루프도 N 감축분만큼 저비용(성능 우선).
@@ -152,7 +97,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   const aSpecies = new Float32Array(N);  // 잎 종(0=꽃잎,1=은행,2=단풍) — setSeason 에서 배정
   const aThresh = new Float32Array(N);   // #125 돌풍 게이트 임계값(개체별) — uActive 가 이걸 넘어야 보임
 
-  // CPU 궤적 상태(월드 로컬 — points.position 이 카메라 타깃으로 이설)
+  // CPU 궤적 상태(월드 로컬 — object.position 이 카메라 타깃으로 이설)
   const bx = new Float32Array(N), bz = new Float32Array(N), py = new Float32Array(N);
   const phase = new Float32Array(N);     // 팔랑 위상
   const fAmp = new Float32Array(N);      // 팔랑 진폭
@@ -180,81 +125,12 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   geo.setAttribute('aSpecies', new THREE.BufferAttribute(aSpecies, 1));
   geo.setAttribute('aThresh', new THREE.BufferAttribute(aThresh, 1));
 
-  const texPetal = makeLeafTex(0), texGinkgo = makeLeafTex(1), texMaple = makeLeafTex(2);
-
-  const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      uFade: { value: 0 },
-      uScale: { value: 180 },   // #125 근경 과대 재조정(260→180) — 사람 스케일 대비 자연스러운 꽃잎·낙엽
-      uLensScale: { value: 1 },
-      uTime: { value: 0 },
-      uMaxPx: { value: 15.0 }, // #125 스프라이트 상한(px) 26→15 — 근경/1인칭 "손바닥만한" 잎 방지(사용자 피드백)
-      uActive: { value: 0 },    // #125 돌풍 게이트(0..1) — 개체별 aThresh 를 넘긴 잎만 보임(간헐 리듬)
-      uTexPetal: { value: texPetal },   // 잎 실루엣 텍스처(종별) — 회전은 프래그에서 gl_PointCoord 로.
-      uTexGinkgo: { value: texGinkgo },
-      uTexMaple: { value: texMaple },
-    },
-    transparent: true, depthWrite: false,
-    vertexShader: `
-      attribute float aSize;
-      attribute vec3 aColor;
-      attribute float aRot;
-      attribute float aRotSpd;
-      attribute float aOpacity;
-      attribute float aSpecies;
-      attribute float aThresh;
-      uniform float uScale;
-      uniform float uLensScale;
-      uniform float uTime;
-      uniform float uMaxPx;
-      uniform float uActive;
-      varying vec3 vCol;
-      varying float vRot;
-      varying float vOp;
-      varying float vSpecies;
-      varying float vGust;
-      void main() {
-        vCol = aColor;
-        vOp = aOpacity;
-        vSpecies = aSpecies;
-        // #125 돌풍 게이트: uActive 가 개체 임계(aThresh)를 넘어야 서서히 나타남 → 잔잔할 땐 드물게,
-        //   돌풍에 잠깐 늘었다 잦아든다("바람에 이따금 지는 잎").
-        vGust = smoothstep(aThresh - 0.16, aThresh + 0.04, uActive);
-        vRot = aRot + uTime * aRotSpd;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * mv;
-        gl_PointSize = min(aSize * (uScale * uLensScale / max(-mv.z, 1.0)), uMaxPx);
-      }`,
-    fragmentShader: `
-      uniform float uFade;
-      uniform sampler2D uTexPetal;
-      uniform sampler2D uTexGinkgo;
-      uniform sampler2D uTexMaple;
-      varying vec3 vCol;
-      varying float vRot;
-      varying float vOp;
-      varying float vSpecies;
-      varying float vGust;
-      void main() {
-        // gl_PointCoord 를 vRot 로 회전 → 잎 실루엣 텍스처를 종별로 샘플(떨어지며 팔랑·구르는 잎).
-        vec2 uv = gl_PointCoord - 0.5;
-        float c = cos(vRot), s = sin(vRot);
-        vec2 cell = mat2(c, -s, s, c) * uv + 0.5;
-        vec4 tx = (vSpecies < 0.5) ? texture2D(uTexPetal, cell)
-                : (vSpecies < 1.5) ? texture2D(uTexGinkgo, cell)
-                                   : texture2D(uTexMaple, cell);
-        float a = tx.a * vOp * uFade * vGust;
-        if (a < 0.02) discard;
-        gl_FragColor = vec4(vCol, a);
-      }`,
-  });
-
-  const points = new THREE.Points(geo, mat);
-  points.name = 'seasonPetals';
-  points.frustumCulled = false;   // 카메라 타깃으로 이설되므로 컬링 부적합(눈·비와 동일)
-  points.renderOrder = 18;        // 눈(20)·비(21) 아래(대기 입자 레이어)
-  points.visible = false;
-
+  // A single world-space geometry owns the color and exact packed-depth paths.
+  // The source geometry below is CPU state only; its attributes are shared by
+  // the instanced view and never submitted as a second draw.
+  const worldDetail = createPetalWorldRepresentation(geo, { renderOrder: 18 });
+  const object = worldDetail.object;
+  let disposed = false;
   let season = 'summer';          // 'spring'|'autumn' 이면 활성, 그 외 OFF
   let level = 0;                  // 현재 유효 강도(season*present*altGate)
   let activeSmooth = 0;           // #125 돌풍 게이트 평활값(간헐 리듬)
@@ -264,12 +140,16 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   function setSeason(name) {
     const active = name === 'spring' || name === 'autumn';
     season = name;
-    if (!active) { points.visible = false; level = 0; return; }
+    if (!active) {
+      object.visible = false;
+      level = 0;
+      return;
+    }
     const cfg = SEASON_CFG[name];
     const autumn = name === 'autumn';
     const cr = makeRng(FIELD_SEED ^ (name === 'spring' ? 0x5091 : 0xa07a));
     for (let i = 0; i < N; i++) {
-      // 가을=은행(황금)·단풍(주홍~주황) 개체별 배정, 봄=벚꽃 꽃잎(분홍). 실루엣은 aSpecies 로 종별 텍스처.
+      // 가을=은행(황금 부채꼴)·단풍(주홍 장상) 개체별 배정, 봄=벚꽃 꽃잎.
       let hex, species;
       if (autumn) {
         const isGinkgo = cr() < 0.5;
@@ -292,6 +172,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     geo.attributes.aSize.needsUpdate = true;
     geo.attributes.aRotSpd.needsUpdate = true;
     geo.attributes.aSpecies.needsUpdate = true;
+    worldDetail.syncSeasonAttributes();
   }
 
   const posAttr = geo.attributes.position;
@@ -302,16 +183,20 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   //   wind: getWind(t) 결과(공유 바람).
   function update(dt, {
     t = 0, camDist = NaN, viewHeight = null, detailWeight = null,
-    lensScale = 1, present = 1, wind = null,
+    present = 1, wind = null,
   } = {}) {
     const active = season === 'spring' || season === 'autumn';
     const alt = petalDetailWeight(viewHeight, camDist, detailWeight);
     level = active ? Math.max(0, Math.min(1, present)) * alt : 0;
-    mat.uniforms.uFade.value = level;
-    mat.uniforms.uTime.value = t;
-    mat.uniforms.uLensScale.value = normalizeVillageLensScale(lensScale);
-    points.visible = level > 0.002;
-    if (!points.visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
+    worldDetail.material.uniforms.uFade.value = level;
+    worldDetail.material.uniforms.uTime.value = t;
+    const lightDirection = getLightDirection?.();
+    if (lightDirection?.isVector3 && lightDirection.lengthSq() > 1e-8) {
+      worldDetail.material.uniforms.uLightDir.value.copy(lightDirection).normalize();
+    }
+    const visible = level > 0.002;
+    object.visible = visible;
+    if (!visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
 
     const cfg = SEASON_CFG[season];
     const w = wind || (getWind ? getWind(t) : { dirX: 1, dirZ: 0, speed: 0.2, gust: 0 });
@@ -320,7 +205,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     const gustBase = season === 'spring' ? 0.34 : 0.12;
     const gustTarget = Math.min(1, gustBase + (w.gust || 0) * 0.85);
     activeSmooth += (gustTarget - activeSmooth) * Math.min(1, dt * 1.4);
-    mat.uniforms.uActive.value = activeSmooth;
+    worldDetail.material.uniforms.uActive.value = activeSmooth;
     const wx = w.dirX * w.speed, wz = w.dirZ * w.speed;
     const carry = cfg.windCarry;
     const swirl = 1.0 + w.gust * 1.8;   // 돌풍에 팔랑이 격해진다
@@ -344,22 +229,25 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
         + Math.cos(t * fFreq[i] * 0.85 + ph) * fAmp[i] * 0.8 * swirl;
     }
     posAttr.needsUpdate = true;
+    worldDetail.syncPosition();
   }
 
   function aabb() {
     const box = new THREE.Box3().setFromBufferAttribute(posAttr);
-    box.translate(points.position);   // 카메라 이설분 반영(월드 AABB)
+    box.translate(object.position);   // 카메라 이설분 반영(월드 AABB)
     return box;
   }
 
   function dispose() {
+    if (disposed) return;
+    disposed = true;
+    object.visible = false;
     geo.dispose();
-    mat.dispose();
-    texPetal.dispose(); texGinkgo.dispose(); texMaple.dispose();
+    worldDetail.dispose();
   }
 
   return {
-    points, setSeason, update, aabb, dispose,
+    object, setSeason, update, aabb, dispose,
     get level() { return level; },
     get count() { return level > 0.01 ? N : 0; },
     get season() { return season; },

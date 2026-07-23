@@ -242,6 +242,7 @@ const weather = setupWeather(scene, {
   // env 를 넘기면 날씨 대기 틴트가 env fog 모디파이어로 자동 등록돼 시간대 크로스페이드 중에도
   // 비/눈 fog 가 파티클과 동조해 서서히 물든다(태스크 #50, 팝 제거).
   env,
+  sun,
 });
 weatherRef = weather;
 // shot 모드는 프레임 예산이 짧아 적설 페이드가 다 오르기 전에 캡처되므로 즉시 적용.
