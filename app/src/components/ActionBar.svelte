@@ -5,65 +5,49 @@
   // onReroll: 단일건물 씬(레거시)에서만 전달 — 마을 씬은 리롤/리플레이를 컨텍스트 패널이 소유(#100)하므로
   //   null 이면 도장 미노출. shifted: 우측 편집 패널이 열리면(데스크톱) 패널 왼쪽으로 밀어 가려지지 않게.
   // onDrone/onWalk: 마을 부감에서만 전달(시네마틱 데모 진입). null 이면 미노출.
-  // shareOnly: 터치 focus/edit에서 바텀시트와 충돌하는 나머지 액션은 숨기고, 현재 장면 URL 공유만
-  //   좌상 컨트롤 아래의 고정 44px 타깃으로 유지한다.
   let {
     onReroll = null, onPostcard = null, onShare = null, onToggleAudio = null,
     audioOn = false, busy = false, raised = false, shifted = false,
-    onDrone = null, onWalk = null, shareOnly = false,
+    onDrone = null, onWalk = null,
   } = $props();
 </script>
 
-<div class="actions" class:raised class:shifted class:share-only={shareOnly}>
-  {#if shareOnly}
-    <button
-      class="seal round share-compact"
-      data-action="share"
-      onclick={onShare}
-      title={t('act_share_tip')}
-      aria-label={t('act_share')}
-    >
-      <svg class="share-glyph" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 15.5V4m0 0L7.5 8.5M12 4l4.5 4.5M5.5 13v6.5h13V13"></path>
-      </svg>
+<div class="actions" class:raised class:shifted>
+  {#if onReroll}
+    <button class="seal primary" onclick={onReroll} disabled={busy} title={t('act_rebuild_tip')}>
+      <span class="face">{t('act_rebuild')}</span>
     </button>
-  {:else}
-    {#if onReroll}
-      <button class="seal primary" onclick={onReroll} disabled={busy} title={t('act_rebuild_tip')}>
-        <span class="face">{t('act_rebuild')}</span>
-      </button>
-    {/if}
-    {#if onDrone}
-      <button class="seal round" onclick={onDrone} disabled={busy} title={t('act_drone_tip')} aria-label={t('act_drone_tip')}>
-        <span class="face glyph">▷</span>
-      </button>
-    {/if}
-    {#if onWalk}
-      <button class="seal round" onclick={onWalk} disabled={busy} title={t('act_walk_tip')} aria-label={t('act_walk_tip')}>
-        <span class="face glyph">步</span>
-      </button>
-    {/if}
-    {#if onPostcard}
-      <button class="seal" data-action="postcard" onclick={onPostcard} title={t('act_postcard_tip')}>
-        <span class="face">{t('act_postcard')}</span>
-      </button>
-    {/if}
-    {#if onShare}
-      <button class="seal" data-action="share" onclick={onShare} title={t('act_share_tip')}>
-        <span class="face">{t('act_share')}</span>
-      </button>
-    {/if}
-    {#if onToggleAudio}
-      <button
-        class="seal round"
-        class:active={audioOn}
-        onclick={onToggleAudio}
-        title={audioOn ? t('act_sound_on_tip') : t('act_sound_off_tip')}
-        aria-pressed={audioOn}
-      >
-        <span class="face note">♪</span>
-      </button>
-    {/if}
+  {/if}
+  {#if onDrone}
+    <button class="seal round" onclick={onDrone} disabled={busy} title={t('act_drone_tip')} aria-label={t('act_drone_tip')}>
+      <span class="face glyph">▷</span>
+    </button>
+  {/if}
+  {#if onWalk}
+    <button class="seal round" onclick={onWalk} disabled={busy} title={t('act_walk_tip')} aria-label={t('act_walk_tip')}>
+      <span class="face glyph">步</span>
+    </button>
+  {/if}
+  {#if onPostcard}
+    <button class="seal" data-action="postcard" onclick={onPostcard} title={t('act_postcard_tip')}>
+      <span class="face">{t('act_postcard')}</span>
+    </button>
+  {/if}
+  {#if onShare}
+    <button class="seal" data-action="share" onclick={onShare} title={t('act_share_tip')}>
+      <span class="face">{t('act_share')}</span>
+    </button>
+  {/if}
+  {#if onToggleAudio}
+    <button
+      class="seal round"
+      class:active={audioOn}
+      onclick={onToggleAudio}
+      title={audioOn ? t('act_sound_on_tip') : t('act_sound_off_tip')}
+      aria-pressed={audioOn}
+    >
+      <span class="face note">♪</span>
+    </button>
   {/if}
 </div>
 
@@ -80,29 +64,12 @@
   }
   /* 우측 한지 패널(width min(320px,84vw))이 열리면 액션바를 패널 왼쪽으로 밀어 가려지지 않게 한다. */
   .actions.shifted { transform: translateX(calc(-1 * min(320px, 84vw) - 14px)); }
-  /* 터치 focus/edit: 전체 액션바 대신 링크 공유만 좌상 컨트롤 스택 아래에 둔다.
-     z=48은 모바일 컨텍스트 시트(46)가 full로 올라와도 이 전역 액션의 접근성을 보존한다. */
-  .actions.share-only {
-    right: auto;
-    left: clamp(10px, 1.6vw, 22px);
-    top: clamp(116px, calc(1.6vh + 106px), 128px);
-    bottom: auto;
-    z-index: 48;
-    transform: none;
-  }
   /* 모바일: safe-area(노치·홈 인디케이터) 존중 + 엄지 도달. */
   @media (pointer: coarse) {
     .actions {
       right: max(14px, env(safe-area-inset-right));
       bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
       z-index: 42;   /* peek 옵션 시트(46)보다 아래지만 스크림 위 */
-    }
-    .actions.share-only {
-      right: auto;
-      left: max(10px, calc(env(safe-area-inset-left) + 6px));
-      top: max(116px, calc(env(safe-area-inset-top) + 108px));
-      bottom: auto;
-      z-index: 48;
     }
   }
   /* 마을 부감 peek 옵션 시트(손잡이+제목 ≈80px) 위로 올림. */
@@ -140,10 +107,6 @@
   }
   .seal.round { border-radius: 50%; width: 52px; min-width: 52px; height: 52px; padding: 0; }
   .seal .note { font-size: 20px; color: var(--ink-faint); }
-  .seal .share-glyph {
-    width: 23px; height: 23px; fill: none; stroke: var(--seal-deep);
-    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
-  }
   /* 시네마틱 진입(드론 ▷ / 거닐기 步) — 먹빛 전각 글리프. */
   .seal .glyph { font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1; }
   .seal.round.active { background: var(--seal); border-color: var(--seal-deep); }

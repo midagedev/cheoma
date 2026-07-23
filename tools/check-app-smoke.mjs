@@ -1,6 +1,6 @@
 // Full-app browser smoke: app bootstrap → village → focus wiring.
 // Uses an isolated Vite cache and ephemeral port, leaving any user dev server untouched.
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
@@ -9,6 +9,10 @@ import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verificati
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-app-smoke-'));
+const captureDir = process.env.CHEOMA_APP_SMOKE_CAPTURE_DIR
+  ? resolve(process.env.CHEOMA_APP_SMOKE_CAPTURE_DIR)
+  : null;
+if (captureDir) await mkdir(captureDir, { recursive: true });
 const timeout = Number(process.env.CHEOMA_APP_SMOKE_TIMEOUT_MS) || 90_000;
 const FOOTWEAR_REFERENCE_URLS = Object.freeze([
   'https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400100019700000&mode=V',
@@ -75,6 +79,35 @@ try {
         })),
       },
     });
+    const shareProbe = {
+      nativeMode: 'success',
+      clipboardMode: 'success',
+      nativePayloads: [],
+      clipboardValues: [],
+    };
+    Object.defineProperty(window, '__shareProbe', {
+      configurable: false,
+      value: shareProbe,
+    });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async (payload) => {
+        shareProbe.nativePayloads.push(structuredClone(payload));
+        if (shareProbe.nativeMode === 'abort') {
+          throw new DOMException('share dismissed', 'AbortError');
+        }
+        if (shareProbe.nativeMode === 'fail') throw new Error('native share failed');
+      },
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (value) => {
+          shareProbe.clipboardValues.push(value);
+          if (shareProbe.clipboardMode === 'fail') throw new Error('clipboard failed');
+        },
+      },
+    });
   });
   runtimeErrors = [];
   page.on('pageerror', (error) => runtimeErrors.push(`page: ${error.message}`));
@@ -89,6 +122,126 @@ try {
   await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
   await page.waitForFunction(() => !!window.__engine.village.debugPlan(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
+
+  const shareButton = page.locator('.actions [data-action="share"]');
+  await shareButton.waitFor({ state: 'visible', timeout });
+  const desktopShareLayout = await shareButton.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const panel = document.querySelector('.ctxcard')?.getBoundingClientRect();
+    const overlap = panel
+      ? Math.max(0, Math.min(rect.right, panel.right) - Math.max(rect.left, panel.left))
+        * Math.max(0, Math.min(rect.bottom, panel.bottom) - Math.max(rect.top, panel.top))
+      : 0;
+    return {
+      count: document.querySelectorAll('[data-action="share"]').length,
+      left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+      width: rect.width, height: rect.height,
+      viewport: [innerWidth, innerHeight],
+      panelOverlap: overlap,
+    };
+  });
+  pass(desktopShareLayout.count === 1
+      && desktopShareLayout.width >= 44
+      && desktopShareLayout.height >= 44
+      && desktopShareLayout.left >= 0
+      && desktopShareLayout.top >= 0
+      && desktopShareLayout.right <= 1280
+      && desktopShareLayout.bottom <= 800
+      && desktopShareLayout.panelOverlap === 0,
+  `1280x800 aerial share action is unique, bounded, and clear of ContextPanel (${JSON.stringify(desktopShareLayout)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'share-desktop-aerial.png') });
+  }
+
+  // Exercise the product handler, not only the pure platform adapter. Enter
+  // preserves the same transient activation as click because share() is called
+  // synchronously before the first await in App.
+  await page.evaluate(() => {
+    Object.assign(window.__shareProbe, { nativeMode: 'abort', clipboardMode: 'success' });
+    window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.clipboardValues.length = 0;
+  });
+  await shareButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
+  const abortedShare = await page.evaluate(() => ({
+    native: window.__shareProbe.nativePayloads.length,
+    clipboard: window.__shareProbe.clipboardValues.length,
+    toast: document.querySelector('.toast')?.textContent?.trim() || null,
+  }));
+  pass(abortedShare.native === 1 && abortedShare.clipboard === 0 && abortedShare.toast == null,
+    `keyboard-native AbortError stays silent and does not copy (${JSON.stringify(abortedShare)})`);
+
+  await page.evaluate(() => {
+    Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
+    window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.clipboardValues.length = 0;
+  });
+  await shareButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유했습니다', null, { timeout });
+  const nativeShare = await page.evaluate(() => {
+    const payload = window.__shareProbe.nativePayloads[0];
+    const shared = new URL(payload.url);
+    const fields = Object.fromEntries(shared.searchParams);
+    return {
+      payload,
+      fields,
+      clipboard: window.__shareProbe.clipboardValues.length,
+      toast: document.querySelector('.toast')?.textContent?.trim() || null,
+      runtimeKeys: ['hero', 'worker', 'shot', 'lang', 'flowsec', 'post']
+        .filter((key) => shared.searchParams.has(key)),
+    };
+  });
+  pass(nativeShare.payload?.title === '처마 — 내가 지은 풍경'
+      && nativeShare.payload?.text === '처마에서 만든 한국의 집과 마을을 둘러보세요.'
+      && nativeShare.fields.seed === '42'
+      && nativeShare.fields.time === 'day'
+      && nativeShare.fields.village === '1'
+      && nativeShare.fields.vseed === '20260716'
+      && nativeShare.fields.vscale == null
+      && nativeShare.runtimeKeys.length === 0
+      && nativeShare.clipboard === 0
+      && nativeShare.toast === '장면 링크를 공유했습니다',
+  `native share receives the canonical scene payload without runtime controls or clipboard fallback (${JSON.stringify(nativeShare)})`);
+
+  await page.evaluate(() => {
+    Object.assign(window.__shareProbe, { nativeMode: 'fail', clipboardMode: 'success' });
+    window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.clipboardValues.length = 0;
+  });
+  await shareButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 복사했습니다', null, { timeout });
+  const copiedShare = await page.evaluate(() => ({
+    native: window.__shareProbe.nativePayloads.length,
+    copied: window.__shareProbe.clipboardValues,
+    payloadUrl: window.__shareProbe.nativePayloads[0]?.url,
+    toast: document.querySelector('.toast')?.textContent?.trim() || null,
+  }));
+  pass(copiedShare.native === 1
+      && copiedShare.copied.length === 1
+      && copiedShare.copied[0] === copiedShare.payloadUrl
+      && copiedShare.toast === '장면 링크를 복사했습니다',
+  `native failure copies exactly the canonical URL and reports success (${JSON.stringify(copiedShare)})`);
+
+  await page.evaluate(() => {
+    Object.assign(window.__shareProbe, { nativeMode: 'fail', clipboardMode: 'fail' });
+    window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.clipboardValues.length = 0;
+  });
+  await shareButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유하지 못했습니다', null, { timeout });
+  const failedShare = await page.evaluate(() => ({
+    native: window.__shareProbe.nativePayloads.length,
+    clipboard: window.__shareProbe.clipboardValues.length,
+    toast: document.querySelector('.toast')?.textContent?.trim() || null,
+  }));
+  pass(failedShare.native === 1 && failedShare.clipboard === 1
+      && failedShare.toast === '장면 링크를 공유하지 못했습니다',
+  `native and clipboard failure surface one localized failure toast (${JSON.stringify(failedShare)})`);
 
   // docs/credits.md is the public product-reference source of truth.  Verify the
   // newly applied house-plan and legal-limit evidence reaches the actual modal,
@@ -467,6 +620,36 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   const contextSheet = page.locator('.sheet.context');
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
+  const mobileAerialShare = page.locator('.actions [data-action="share"]');
+  await mobileAerialShare.waitFor({ state: 'visible', timeout });
+  const mobileAerialShareLayout = await mobileAerialShare.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const sheet = document.querySelector('.sheet.context')?.getBoundingClientRect();
+    const overlap = sheet
+      ? Math.max(0, Math.min(rect.right, sheet.right) - Math.max(rect.left, sheet.left))
+        * Math.max(0, Math.min(rect.bottom, Math.min(sheet.bottom, innerHeight)) - Math.max(rect.top, sheet.top))
+      : 0;
+    return {
+      count: document.querySelectorAll('[data-action="share"]').length,
+      left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+      width: rect.width, height: rect.height,
+      sheetTop: sheet?.top ?? null,
+      viewport: [innerWidth, innerHeight],
+      sheetOverlap: overlap,
+    };
+  });
+  pass(mobileAerialShareLayout.count === 1
+      && mobileAerialShareLayout.width >= 44
+      && mobileAerialShareLayout.height >= 44
+      && mobileAerialShareLayout.left >= 0
+      && mobileAerialShareLayout.top >= 0
+      && mobileAerialShareLayout.right <= 390
+      && mobileAerialShareLayout.bottom <= 844
+      && mobileAerialShareLayout.sheetOverlap === 0,
+  `390x844 aerial share action is unique, bounded, and clear of the peek sheet (${JSON.stringify(mobileAerialShareLayout)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'share-mobile-aerial.png') });
+  }
   const contextGrip = contextSheet.locator('.grip');
   const mobilePeek = await contextSheet.evaluate((sheet) => ({
     snap: sheet.dataset.snap,
@@ -511,6 +694,29 @@ try {
   const mobileReducedTransition = await contextSheet.evaluate((sheet) => (
     Number.parseFloat(getComputedStyle(sheet).transitionDuration) || 0
   ));
+  const mobileFocusShare = contextSheet.locator('.foot.house [data-action="share"]');
+  await mobileFocusShare.waitFor({ state: 'visible', timeout });
+  const mobileFocusShareLayout = await mobileFocusShare.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const sheet = button.closest('.sheet')?.getBoundingClientRect();
+    const sibling = button.parentElement?.querySelector('.hbtn.reroll')?.getBoundingClientRect();
+    const siblingOverlap = sibling
+      ? Math.max(0, Math.min(rect.right, sibling.right) - Math.max(rect.left, sibling.left))
+        * Math.max(0, Math.min(rect.bottom, sibling.bottom) - Math.max(rect.top, sibling.top))
+      : 0;
+    return {
+      count: document.querySelectorAll('[data-action="share"]').length,
+      inStickyFooter: !!button.closest('.sheetfoot'),
+      owner: button.closest('[data-context-owner]')?.dataset.contextOwner || null,
+      globalActionBar: document.querySelectorAll('.actions').length,
+      left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+      width: rect.width, height: rect.height,
+      sheetLeft: sheet?.left ?? null,
+      sheetRight: sheet?.right ?? null,
+      viewport: [innerWidth, innerHeight],
+      siblingOverlap,
+    };
+  });
   pass(mobileReducedOwner.directOwners.join() === 'house'
       && mobileReducedOwner.inactiveInert
       && mobileReducedOwner.focusTarget === 'house'
@@ -519,6 +725,21 @@ try {
     owner: mobileReducedOwner,
     transition: mobileReducedTransition,
   })})`);
+  pass(mobileFocusShareLayout.count === 1
+      && mobileFocusShareLayout.inStickyFooter
+      && mobileFocusShareLayout.owner === 'house'
+      && mobileFocusShareLayout.globalActionBar === 0
+      && mobileFocusShareLayout.width >= 44
+      && mobileFocusShareLayout.height >= 44
+      && mobileFocusShareLayout.left >= mobileFocusShareLayout.sheetLeft
+      && mobileFocusShareLayout.right <= mobileFocusShareLayout.sheetRight
+      && mobileFocusShareLayout.top >= 0
+      && mobileFocusShareLayout.bottom <= 844
+      && mobileFocusShareLayout.siblingOverlap === 0,
+  `390x844 focus share moves into the visible sticky house owner without a global duplicate (${JSON.stringify(mobileFocusShareLayout)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'share-mobile-focus.png') });
+  }
   await page.evaluate(() => window.__engine.village.return());
   await seekViewTransition(1, true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });

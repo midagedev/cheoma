@@ -20,8 +20,8 @@
     spec = null, params = {}, onType, onLive, onCommit, onRerollHouse, houseBusy = false,
     // glb 내보내기(#112) — onExportVillage(부감 전체)·onExportHouse(focus 건물)·exporting(스피너·중복 방지)
     onExportVillage = null, onExportHouse = null, exporting = false,
-    // 공통
-    onBack,
+    // 공통. onShare는 큰 액션바를 숨기는 터치 focus/edit에서만 App이 전달한다.
+    onShare = null, onBack,
   } = $props();
 
   // ── 모프 크로스페이드(원칙 2) — 마을은 먼저 빠지고 집은 뒤이어 든다(0.4~0.6 겹침). ──
@@ -311,6 +311,20 @@
           <button class="hbtn reroll wide" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
             <span class="hk" aria-hidden="true">⚄</span>{t('vil_reroll_house')}
           </button>
+          {#if onShare}
+            <button
+              class="hbtn share"
+              data-action="share"
+              onclick={() => onShare?.()}
+              title={t('act_share_tip')}
+              aria-label={t('act_share')}
+            >
+              <svg class="share-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 15.5V4m0 0L7.5 8.5M12 4l4.5 4.5M5.5 13v6.5h13V13"></path>
+              </svg>
+              {t('act_share')}
+            </button>
+          {/if}
         </div>
         {#if onExportHouse}
           <button class="hbtn glb wide" onclick={() => onExportHouse?.()} disabled={houseBusy || exporting} title={t('glb_house_tip')}>
@@ -528,7 +542,17 @@
     box-shadow: 0 2px 8px rgba(120, 40, 30, 0.28);
   }
   .hbtn.reroll:hover:not(:disabled) { transform: translateY(-1px); }
+  .hbtn.share {
+    flex: 0 0 auto; min-width: 76px;
+    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink);
+  }
+  .hbtn.share:hover { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
+  .hbtn.share .share-glyph {
+    width: 18px; height: 18px; fill: none; stroke: var(--seal-deep);
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  }
   .hbtn:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
+  .hbtn:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
 
   /* 터치: 타깃 확대. */
   @media (max-width: 600px), (pointer: coarse) {

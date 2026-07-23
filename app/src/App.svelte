@@ -1021,10 +1021,6 @@
       onDrone={cineButtons ? startDrone : null}
       onWalk={cineButtons && !device.perf ? startWalk : null}
     />
-  {:else}
-    <!-- 터치 focus/edit에서는 큰 액션바가 시트를 가리므로 링크 공유만 별도 44px 액션으로 유지한다.
-         PNG 사진 저장은 장면 URL 공유와 의미가 달라 이 축약 액션에 섞지 않는다. -->
-    <ActionBar onShare={shareScene} shareOnly />
   {/if}
 </div>
 
@@ -1054,6 +1050,7 @@
     onCommit={villageCommit}
     onRerollHouse={rerollHouse}
     onBack={closeVillageEdit}
+    onShare={hideActions ? shareScene : null}
     onExportVillage={villageAerial ? exportVillage : null}
     onExportHouse={villageEditing && !villageZooming ? exportHouse : null}
     exporting={exporting}
