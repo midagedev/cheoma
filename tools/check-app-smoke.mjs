@@ -369,6 +369,189 @@ try {
       && await referenceInfoTrigger.evaluate((trigger) => document.activeElement === trigger),
   'responsive References close returns focus to the remounted equivalent info trigger');
 
+  // ContextPanel keeps both visual subtrees mounted for its camera-synchronised crossfade, but
+  // only one may own keyboard/accessibility input. Inspect direct ownership separately from the
+  // app-surface inert inherited while References is open.
+  const contextA11y = (owner) => page.evaluate((expectedOwner) => {
+    const roots = [...document.querySelectorAll('[data-context-owner]')];
+    const active = document.activeElement;
+    return {
+      directOwners: [...new Set(roots.filter((root) => !root.inert).map((root) => root.dataset.contextOwner))],
+      inactiveInert: roots.filter((root) => root.dataset.contextOwner !== expectedOwner)
+        .every((root) => root.inert && root.getAttribute('aria-hidden') === 'true'),
+      activeClear: !active?.closest('[inert]'),
+      activeOwner: active?.closest('[data-context-owner]')?.dataset.contextOwner || null,
+      focusTarget: active?.dataset?.contextFocus || null,
+      effectiveOwners: [...new Set(roots
+        .filter((root) => !root.closest('[inert]'))
+        .map((root) => root.dataset.contextOwner))],
+    };
+  }, owner);
+  const seekViewTransition = async (progress, finish = false) => {
+    await page.waitForFunction(() => window.__engine.debugDof().tweenProgress != null, null, { timeout });
+    await page.evaluate(({ progress: value, finish: done }) => {
+      window.__engine.debugDofSeek(value, { finish: done });
+    }, { progress, finish });
+  };
+
+  await page.locator('[data-context-focus="village"]').focus();
+  await page.keyboard.press('Tab');
+  const desktopAerialOwner = await contextA11y('village');
+  pass(desktopAerialOwner.directOwners.join() === 'village'
+      && desktopAerialOwner.inactiveInert
+      && desktopAerialOwner.activeClear
+      && desktopAerialOwner.activeOwner === 'village',
+  `desktop aerial Tab enters only the visible village controls (${JSON.stringify(desktopAerialOwner)})`);
+
+  const contextParcel = await page.evaluate(() => (
+    window.__engine.village.debugParcels().find((parcel) => !parcel.hero)?.parcelId
+      || window.__engine.village.debugParcels()[0]?.parcelId
+  ));
+  await page.locator('.ctx.village input.scale').focus();
+  await page.evaluate((parcelId) => window.__engine.village.debugFocus(parcelId), contextParcel);
+  await seekViewTransition(0.6);
+  await page.waitForFunction(() => document.activeElement?.dataset?.contextFocus === 'house', null, { timeout });
+  const desktopHouseOwner = await contextA11y('house');
+  await page.keyboard.press('Tab');
+  const desktopHouseTabOwner = await contextA11y('house');
+  pass(desktopHouseOwner.directOwners.join() === 'house'
+      && desktopHouseOwner.inactiveInert
+      && desktopHouseOwner.focusTarget === 'house'
+      && desktopHouseTabOwner.activeOwner === 'house',
+  `desktop focus crossfade hands village focus to the house breadcrumb and skips hidden controls (${JSON.stringify({
+    handoff: desktopHouseOwner,
+    tab: desktopHouseTabOwner,
+  })})`);
+  await seekViewTransition(1, true);
+
+  await page.locator('[data-context-focus="house"]').focus();
+  await page.evaluate(() => window.__engine.village.return());
+  await seekViewTransition(0.6);
+  await page.waitForFunction(() => document.activeElement?.dataset?.contextFocus === 'village', null, { timeout });
+  const desktopReturnOwner = await contextA11y('village');
+  pass(desktopReturnOwner.directOwners.join() === 'village'
+      && desktopReturnOwner.inactiveInert
+      && desktopReturnOwner.focusTarget === 'village',
+  `desktop return crossfade hands house focus to the village heading (${JSON.stringify(desktopReturnOwner)})`);
+  await seekViewTransition(1, true);
+
+  // A modal is the outer owner: a simultaneous context transition may update which subtree is
+  // ready underneath it, but must not steal focus through the inert app surface.
+  await referenceInfoTrigger.press('Enter');
+  await referenceDialog.waitFor({ state: 'visible', timeout });
+  await page.waitForFunction(() => document.activeElement?.id === 'reference-modal-title', null, { timeout });
+  await page.evaluate((parcelId) => window.__engine.village.debugFocus(parcelId), contextParcel);
+  await seekViewTransition(0.6);
+  const nestedContextOwner = await contextA11y('house');
+  const nestedModalOwner = await referenceDialog.evaluate((dialog) => ({
+    focusInside: dialog.contains(document.activeElement),
+    surfaceInert: document.querySelector('[data-app-surface]')?.inert === true,
+  }));
+  pass(nestedContextOwner.directOwners.join() === 'house'
+      && nestedContextOwner.inactiveInert
+      && nestedContextOwner.effectiveOwners.length === 0
+      && nestedModalOwner.focusInside
+      && nestedModalOwner.surfaceInert,
+  `References remains the sole effective owner during a context crossfade (${JSON.stringify({
+    context: nestedContextOwner,
+    modal: nestedModalOwner,
+  })})`);
+  await referenceDialog.getByRole('button', { name: '닫기' }).click();
+  await referenceDialog.waitFor({ state: 'detached', timeout });
+  await seekViewTransition(1, true);
+  await page.evaluate(() => window.__engine.village.return());
+  await seekViewTransition(1, true);
+
+  // The mobile context sheet starts at peek: only its visible grip is interactive. Expanded
+  // content regains ownership, and a programmatic collapse recovers focused content to the grip.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const contextSheet = page.locator('.sheet.context');
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
+  const contextGrip = contextSheet.locator('.grip');
+  const mobilePeek = await contextSheet.evaluate((sheet) => ({
+    snap: sheet.dataset.snap,
+    sheetInert: sheet.inert,
+    contentInert: [...sheet.querySelectorAll('[data-sheet-content]')]
+      .every((part) => part.inert && part.getAttribute('aria-hidden') === 'true'),
+  }));
+  await contextGrip.focus();
+  await page.keyboard.press('Tab');
+  const peekTabSkippedContent = await page.evaluate(() => !document.activeElement?.closest('[data-sheet-content]'));
+  pass(mobilePeek.snap === 'peek'
+      && !mobilePeek.sheetInert
+      && mobilePeek.contentInert
+      && peekTabSkippedContent,
+  `mobile peek exposes only its visible grip to Tab (${JSON.stringify(mobilePeek)})`);
+
+  await contextGrip.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half'
+    && [...document.querySelectorAll('.sheet.context [data-sheet-content]')].every((part) => !part.inert), null, { timeout });
+  await page.locator('.ctx.village input.scale').focus();
+  await contextGrip.evaluate((grip) => grip.click());
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek'
+    && document.activeElement?.classList.contains('grip'), null, { timeout });
+  const mobileCollapseFocus = await contextSheet.evaluate((sheet) => ({
+    snap: sheet.dataset.snap,
+    gripFocused: document.activeElement === sheet.querySelector('.grip'),
+    contentInert: [...sheet.querySelectorAll('[data-sheet-content]')].every((part) => part.inert),
+  }));
+  pass(mobileCollapseFocus.snap === 'peek'
+      && mobileCollapseFocus.gripFocused
+      && mobileCollapseFocus.contentInert,
+  `mobile collapse recovers content focus to the visible grip (${JSON.stringify(mobileCollapseFocus)})`);
+
+  await contextGrip.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('.ctx.village input.scale').focus();
+  await page.evaluate((parcelId) => window.__engine.village.debugFocus(parcelId), contextParcel);
+  await seekViewTransition(1, true);
+  await page.waitForFunction(() => document.activeElement?.dataset?.contextFocus === 'house', null, { timeout });
+  const mobileReducedOwner = await contextA11y('house');
+  const mobileReducedTransition = await contextSheet.evaluate((sheet) => (
+    Number.parseFloat(getComputedStyle(sheet).transitionDuration) || 0
+  ));
+  pass(mobileReducedOwner.directOwners.join() === 'house'
+      && mobileReducedOwner.inactiveInert
+      && mobileReducedOwner.focusTarget === 'house'
+      && mobileReducedTransition <= 0.001,
+  `reduced-motion mobile focus keeps one owner without restoring long sheet motion (${JSON.stringify({
+    owner: mobileReducedOwner,
+    transition: mobileReducedTransition,
+  })})`);
+  await page.evaluate(() => window.__engine.village.return());
+  await seekViewTransition(1, true);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForFunction(() => window.__device?.sheet === false
+    && !!document.querySelector('.ctxcard:not([inert])'), null, { timeout });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+  await page.locator('.ctx.village input.scale').focus();
+  const panelHideStarted = await page.evaluate(() => window.__engine.cine.start('drone'));
+  if (panelHideStarted) {
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('.ctxcard');
+      return panel?.inert && panel.getAttribute('aria-hidden') === 'true'
+        && document.activeElement === document.querySelector('[data-app-surface]');
+    }, null, { timeout: 10_000 });
+  }
+  const hiddenPanel = await page.locator('.ctxcard').evaluate((panel) => ({
+    inert: panel.inert,
+    hidden: panel.getAttribute('aria-hidden'),
+    focusedSurface: document.activeElement === document.querySelector('[data-app-surface]'),
+  }));
+  pass(panelHideStarted
+      && hiddenPanel.inert
+      && hiddenPanel.hidden === 'true'
+      && hiddenPanel.focusedSurface,
+  `a fully hidden BottomSheet returns its focused control to the app surface (${JSON.stringify(hiddenPanel)})`);
+  await page.evaluate(() => window.__engine.cine.stop());
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('.ctxcard');
+    return panel && !panel.inert && panel.getAttribute('aria-hidden') === 'false';
+  }, null, { timeout });
+
   const modalEscapeParcel = await page.evaluate(() => {
     const engine = window.__engine;
     const parcelId = engine.village.debugParcels()[0]?.parcelId;

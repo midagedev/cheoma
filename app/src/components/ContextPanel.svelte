@@ -4,6 +4,7 @@
   //   같은 패널 안에서 crossfade 모프한다. 모프 진행 morph(0=마을·1=집)는 App 이 카메라 focus 트윈 진행에서
   //   흘려받아(engine onProgress) 카메라·DoF·링과 한 클록으로 그린다(원칙 3). 패널은 마을 씬에서 상주
   //   (히어로 랜딩 중엔 App 이 open=false 로 숨김).
+  import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import { schemaFor, villageSchema } from '../lib/edit-schema.js';
   import BottomSheet from './BottomSheet.svelte';
@@ -29,6 +30,42 @@
   const villageOpacity = $derived(1 - smoothstep(0.28, 0.72, morph));
   const houseOpacity = $derived(smoothstep(0.28, 0.72, morph));
   const houseActive = $derived(morph >= 0.5);   // 포인터·손잡이 컨텍스트
+
+  // 크로스페이드 중에도 키보드·접근성 소유자는 하나다. inert 적용 전 포커스가 퇴장하는 본문/푸터 안에
+  // 있을 때만 다음 컨텍스트의 브레드크럼으로 옮긴다. 캔버스·환경 UI·References에 있던 포커스는 건드리지
+  // 않는다. $effect.pre가 DOM attribute 갱신 전에 activeElement를 읽고 tick 뒤 새 heading/trigger를 찾는다.
+  let stackRoot = $state(null);
+  let footerRoot = $state(null);
+  let headerRoot = $state(null);
+  let previousHouseActive = null;
+  $effect.pre(() => {
+    const nextHouseActive = houseActive;
+    if (previousHouseActive == null) {
+      previousHouseActive = nextHouseActive;
+      return;
+    }
+    if (previousHouseActive === nextHouseActive) return;
+
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    const outgoingOwner = previousHouseActive ? 'house' : 'village';
+    const outgoing = [
+      stackRoot?.querySelector(`[data-context-owner="${outgoingOwner}"]`),
+      footerRoot?.querySelector(`[data-context-owner="${outgoingOwner}"]`),
+    ];
+    const outgoingHeader = headerRoot?.querySelector(`[data-context-focus="${outgoingOwner}"]`);
+    const moveFocus = !!active
+      && (active === outgoingHeader || outgoing.some((root) => root?.contains(active)));
+    previousHouseActive = nextHouseActive;
+    if (!moveFocus) return;
+
+    void tick().then(() => {
+      const nextOwner = nextHouseActive ? 'house' : 'village';
+      const destination = headerRoot?.querySelector(`[data-context-focus="${nextOwner}"]`);
+      if (destination?.isConnected && !destination.closest('[inert]')) {
+        destination.focus({ preventScroll: true });
+      }
+    });
+  });
 
   // ── 브레드크럼 ──
   const houseLabel = $derived.by(() => {
@@ -108,13 +145,15 @@
 
 <BottomSheet {open} variant="context" closable={false} gap={13} {detent} ariaLabel="context panel" {header} {footer}>
   <!-- 모프 스택: 마을·집 섹션이 같은 그리드 셀에 겹쳐 crossfade. -->
-  <div class="stack">
+  <div bind:this={stackRoot} class="stack">
     <!-- 마을 섹션(부감) -->
     <div
       class="ctx village"
       style="opacity:{villageOpacity}; transform: translateY({-8 * morph}px);"
       style:pointer-events={houseActive ? 'none' : 'auto'}
       aria-hidden={houseActive}
+      inert={houseActive}
+      data-context-owner="village"
     >
       <section>
         <div class="scalehead">
@@ -168,6 +207,8 @@
       style="opacity:{houseOpacity}; transform: translateY({12 * (1 - morph)}px);"
       style:pointer-events={houseActive ? 'auto' : 'none'}
       aria-hidden={!houseActive}
+      inert={!houseActive}
+      data-context-owner="house"
     >
       {#if editable}
         {#if schema.family === 'palace-compound'}
@@ -211,12 +252,21 @@
 
 <!-- ── 고정 헤더: 브레드크럼(마을 → 필지). 집 컨텍스트에서 '마을'을 누르면 focus-out. ── -->
 {#snippet header()}
-  <div class="crumbs">
-    <button
-      class="crumb root" class:link={houseActive}
-      onclick={() => { if (houseActive) onBack?.(); }}
-      aria-label={t('vil_title')}
-    >{t('vil_title')}</button>
+  <div bind:this={headerRoot} class="crumbs">
+    {#if houseActive}
+      <button
+        class="crumb root link"
+        onclick={() => onBack?.()}
+        aria-label={t('vil_title')}
+        data-context-focus="house"
+      >{t('vil_title')}</button>
+    {:else}
+      <h3
+        class="crumb root"
+        tabindex="-1"
+        data-context-focus="village"
+      >{t('vil_title')}</h3>
+    {/if}
     <span class="sep" style="opacity:{houseOpacity}" aria-hidden="true">›</span>
     <span class="crumb leaf" style="opacity:{houseOpacity}">{houseLabel}</span>
     {#if !houseActive && houses > 0}<span class="count">{houses}{t('vil_houses')}</span>{/if}
@@ -226,13 +276,15 @@
 <!-- ── 고정 푸터(#118 U1): 부감=마을 액션 / 근접=집 액션이 morph 로 crossfade(섹션 스택과 한 클록).
      기본 펼침 상세가 길어도 주요 액션이 폴드 아래로 매몰되지 않게 스크롤 밖에 상주한다. ── -->
 {#snippet footer()}
-  <div class="footstack">
+  <div bind:this={footerRoot} class="footstack">
     <!-- 마을 액션(부감): 다시 짓기(웨이브) + 내보내기 -->
     <div
       class="foot village"
       style="opacity:{villageOpacity}"
       style:pointer-events={houseActive ? 'none' : 'auto'}
       aria-hidden={houseActive}
+      inert={houseActive}
+      data-context-owner="village"
     >
       <button class="rebuild" onclick={() => onReroll?.()} disabled={waving} title={t('vil_reroll_tip')}>
         <span class="rk" aria-hidden="true">再</span>{t('vil_reroll')}
@@ -251,6 +303,8 @@
       style="opacity:{houseOpacity}"
       style:pointer-events={houseActive ? 'auto' : 'none'}
       aria-hidden={!houseActive}
+      inert={!houseActive}
+      data-context-owner="house"
     >
       {#if spec}
         <div class="house-actions">
@@ -354,7 +408,7 @@
     border-bottom: 1px solid var(--ink-line); padding-bottom: 9px;
   }
   .crumb { background: none; border: none; padding: 0; font-family: var(--brush); color: var(--ink); }
-  .crumb.root { font-size: 26px; line-height: 1; cursor: default; }
+  .crumb.root { margin: 0; font-size: 26px; line-height: 1; cursor: default; }
   .crumb.root.link { cursor: pointer; color: var(--ink-soft); }
   .crumb.root.link:hover { color: var(--seal-deep); }
   .sep { font-size: 20px; color: var(--ink-faint); transition: opacity 0.2s ease; }
