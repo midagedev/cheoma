@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
+import { VILLAGE_LENS, dollyScaleForFov } from '../src/camera/optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -404,10 +405,14 @@ try {
   pass(result.aerial.enabled === false && result.aerial.amount === 0 && result.aerial.aperture === 0,
     'aerial mode owns a zero-cost, zero-residue DoF state');
   pass(result.returnEnd.fov === 46
-      && result.focusEnd.fov === 20
+      && result.focusEnd.fov === 10
       && monotonic(result.focusOuter.map((sample) => sample.fov), -1)
-      && monotonic(result.returnOuter.map((sample) => sample.fov), 1),
-  'lens continuum moves monotonically from wide aerial to telephoto house framing');
+      && monotonic(result.returnOuter.map((sample) => sample.fov), 1)
+      && result.focusedOptics.lensScale > 2
+      && Math.abs(result.focusedOptics.lensScale - dollyScaleForFov(
+        VILLAGE_LENS.parcel.referenceFov, VILLAGE_LENS.parcel.fov,
+      )) < 1e-6,
+  'lens continuum moves monotonically from wide aerial to compensated telephoto house framing');
   pass(result.focusEnd.continuum.aerialReferenceDist > 0
       && result.focusEnd.continuum.focusMaxReferenceDist
         >= result.focusEnd.continuum.aerialReferenceDist

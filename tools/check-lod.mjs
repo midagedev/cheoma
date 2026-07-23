@@ -8,9 +8,12 @@ import {
 import {
   VILLAGE_FOCUS_ELEVATION,
   VILLAGE_LENS,
+  VILLAGE_LENS_SCALE_MAX,
+  VILLAGE_LENS_SCALE_MIN,
   VILLAGE_ZOOM,
   dollyDistanceForFov,
   lensScaleForCamera,
+  normalizeVillageLensScale,
   referenceFovForCamera,
   referenceVillageFov,
   villageScreenDistance,
@@ -60,8 +63,12 @@ function assertLevel(actual, expected, message) {
 // 광각/망원 변화는 화면 점유율을 유지하는 실제 dolly이고, 그 물리 거리는 LOD에서
 // 이전 렌즈의 등가 거리로 환산돼 소동물·낙엽이 조기 소거되지 않아야 한다.
 {
-  near(VILLAGE_FOCUS_ELEVATION, 22 * Math.PI / 180,
+  near(VILLAGE_FOCUS_ELEVATION, 24 * Math.PI / 180,
     'optics: reviewed residential focus elevation drift');
+  near(VILLAGE_LENS.parcel.fov, 10,
+    'optics: practical 10-degree parcel lens drift');
+  near(VILLAGE_LENS.hero.fov, 7,
+    'optics: 200mm-like 7-degree hero lens drift');
   for (const profile of Object.values(VILLAGE_LENS)) {
     const referenceDistance = 100;
     const opticalDistance = dollyDistanceForFov(
@@ -78,6 +85,17 @@ function assertLevel(actual, expected, message) {
       && VILLAGE_LENS.palace.fov < VILLAGE_LENS.palace.referenceFov
       && VILLAGE_LENS.temple.fov < VILLAGE_LENS.temple.referenceFov,
   'optics: wide-aerial/telephoto-close continuum inverted');
+  const heroLensScale = dollyDistanceForFov(
+    1, VILLAGE_LENS.hero.referenceFov, VILLAGE_LENS.hero.fov,
+  );
+  near(VILLAGE_LENS_SCALE_MAX, heroLensScale,
+    'optics: point projection cap does not cover the narrowest authored lens');
+  near(normalizeVillageLensScale(heroLensScale + 10), heroLensScale,
+    'optics: point projection exceeded the authored optical scale');
+  near(normalizeVillageLensScale(0.1), VILLAGE_LENS_SCALE_MIN,
+    'optics: point projection minimum clamp drift');
+  near(normalizeVillageLensScale(Number.NaN), 1,
+    'optics: invalid point projection scale did not fail to identity');
   near(referenceVillageFov(VILLAGE_LENS.aerial.fov), VILLAGE_LENS.aerial.referenceFov,
     'optics: aerial reference mapping drift');
   near(referenceVillageFov(VILLAGE_LENS.parcel.fov), VILLAGE_LENS.parcel.referenceFov,
@@ -657,10 +675,16 @@ function assertPlanChunkContract(plan, label) {
       invariant(solarT > 0 && solarT < 1 && Math.abs(solarX) <= solar.halfWidth - 0.2,
         `${label}/${parcel.id}: focus camera left its south-light opening (${solarX}/${solar.halfWidth})`);
       const cameraY = (parcel.baseY || 0) + focus.targetLift + focus.cameraLift;
-      const distance = chunkLodDistance(chunk, focus.cameraX, focus.cameraZ, cameraY);
-      invariant(distance < policy.fullIn,
+      const physicalDistance = chunkLodDistance(chunk, focus.cameraX, focus.cameraZ, cameraY);
+      const visualDistance = villageScreenDistance(
+        physicalDistance,
+        focus.fov,
+        focus.referenceFov,
+      );
+      invariant(visualDistance < policy.fullIn,
         `${label}/${parcel.id}: focus camera cannot reach FULL for chunk ${chunk.ring}/${chunk.sector} `
-        + `(${distance.toFixed(2)} >= ${policy.fullIn.toFixed(2)})`);
+        + `(${visualDistance.toFixed(2)} visual / ${physicalDistance.toFixed(2)} physical `
+        + `>= ${policy.fullIn.toFixed(2)})`);
     }
   }
   invariant(chunks.every((chunk) => chunk.parcels.length > 0),

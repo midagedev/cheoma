@@ -210,12 +210,12 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 
 마을의 연속 구도와 focus 전환의 시각 언어·초점 계산은 생성기나 앱 전환마다 복제하지 않는다.
 
-- `src/camera/optics.js`가 부감 46° 광각, 일반 필지 20°·hero 18°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈는 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를, point sprite 크기는 별도 lens scale을 사용한다.
+- `src/camera/optics.js`가 부감 46° 광각, 일반 필지 10°·hero 7°·궁 24°·사찰 26° 망원과 피사체 화면 크기를 보존하는 dolly 변환을 소유한다. 일반 필지와 hero는 각각 23°와 21° reference FOV에서 보상해 약 137mm/196mm 세로 화각의 원근 압축을 얻는다. 궁·사찰처럼 FOV만으로 종전 구도를 추론할 수 없는 렌즈도 `referenceFov`를 framing→tween→camera LOD로 명시 전달한다. 소동물·강수·낙엽의 휴면은 화면 등가 거리를 사용한다. Points 기반 강수·꽃잎·mote·실용광은 좁은 authored lens에서 보상 dolly 거리가 늘어도 geometry와 같은 크기를 갖도록 전체 lens scale을 받고, 각 shader의 pixel cap만 최종 상한으로 남긴다.
 - `src/env/dof.js`가 월드 초점점을 카메라 전방축 깊이로 변환하고 DoF enable·amount·aperture를 한 controller에서 소유한다. focus-in/out은 선택 필지 축깊이를 붙들고, 필지 hop은 보간되는 시선을 따라간다.
 - `StableBokehPass`의 깊이 패스에는 depth를 쓰는 mesh만 참여한다. Points·Line·Sprite·`depthWrite=false`·`userData.dofDepth=false` 객체는 제외하고, `instFade` 수목은 color와 depth에서 같은 dither 함수를 공유한다. stock override depth가 opacity dither를 재현하지 못하므로 중간 opacity의 `alphaHash` 재질은 완전 불투명 occluder로 쓰지 않고, 가중치 1에서만 일반 depth에 합류한다. 임시 가시성·재질·override·배경은 한 프레임 안에서 복원한다.
 - 근경 색 합성은 중심 1개와 8/12/20개 동심원, 총 41개의 고정 표본을 쓴다. stock과 같은 color-fetch 예산 안에서 화면 좌표 난수 없이 원형 aperture와 패닝 안정성을 확보하고, 탭별 판정 대신 평균 뒤 한 번만 HDR 광원 격리를 판정한다. 제품 앱은 모든 카메라 writer와 view-offset이 끝난 뒤 position/quaternion/FOV/view-offset의 화면 등가 속도를 할당 없이 측정한다. 이동 중 일반 픽셀은 세 반경과 대칭 중심을 유지한 13개 부분집합만 읽되, 그 부분집합이 HDR 광원을 만나면 최대 41개를 써 원형 보케를 보존한다. 정착 hold 뒤에는 같은 shader/program 안에서 모든 픽셀의 41개 결과를 시간 기반으로 복원한다. 정착 품질 1은 기존 41개 합산 순서와 결과를 그대로 사용한다. composer 크기·DPR·depth target·focus·aperture·pass enable은 바꾸지 않으며 수묵/compact에서 이미 잠든 DoF를 깨우지 않는다. 0.45 device-pixel 미만 blur는 한 번의 color fetch로 조기 반환한다. 중앙 depth 기반 gather라 초점면 불투명 표면과 정확히 겹친 전경 광원은 원판으로 산란하지 못하며, 이를 고정 fixture로 기록한다.
 
-화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·13/41 품질 상태와 셰이더 계약은 `npm run check:dof`, 실제 46°→20° 제품 전환·depth prepass·자원 identity는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·pan→settle·최종 픽셀 동일성과 Chrome GPU query는 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
+화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·13/41 품질 상태와 셰이더 계약은 `npm run check:dof`, 실제 46°→10° 제품 전환·depth prepass·자원 identity는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·pan→settle·최종 픽셀 동일성과 Chrome GPU query는 `npm run shoot:bokeh` 산출물을 직접 열어 검증한다.
 
 ## 계절·날씨와 적설 재사용 계약
 
@@ -235,7 +235,7 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 - 16개 원경 적운은 하나의 `InstancedMesh`다. translation은 sky dome처럼 카메라를 따르지만 azimuth는 월드에 고정돼 회전하면 다른 구름이 나타난다. 이 레이어가 근경 실루엣, HDR rim, 달의 alpha 가림, 구름 틈 빛줄기를 맡는다.
 - sky dome과 달은 `environment` 지형 그룹이 아니라 scene-level `sky-atmosphere`가 소유한다. 마을 모드가 단일건물 지형을 숨겨도 하늘은 끊기지 않으며, enable/dispose는 environment lifecycle이 명시적으로 정리한다.
 
-일반 필지 focus는 순수 계획의 남측 접근·정확한 22° 카메라 고도·1.65–2.5m 문 높이 target을 유지한다. 10° 제품 프레임에서 마당과 생활 디테일을 더 열어 달라는 연속 사용자 검수를 반영해 12°·14°·16°·18°·20°를 거쳐 22°로 올렸으며, 기와·초가·종가 실앱에서 집 전체와 전경 마당이 잘리지 않는 것을 다시 확인했다. 안전 가시성 후보의 dolly scale은 수평·수직 offset에 함께 적용해 직접 `집 보기`도 이 각도를 바꾸지 않는다. 앱의 `view-shift.js`는 UI 패널 offset만 합성하며 별도 하늘 편향은 0이다. -13% 편향은 집과 마당을 화면 아래로 밀어 전경을 잘랐으므로 되돌리지 않는다. focus hop/in/out, 리롤, 옵션 변경은 같은 카메라 timeline에서 이 값을 보존하거나 탐색용 0으로 초기화한다. 종가 compound의 닭은 일반 필지용 대문측 anchor를 재사용하면 담과 솟을대문 뒤에 완전히 숨으므로, 같은 강체 좌표계의 열린 안마당 anchor를 쓴다. 이 주거용 anchor와 닭 기본값은 `hanok`/`giwa`/`choga`에만 적용하고 관아·궁궐형 hero에는 적용하지 않는다. 최초 종가 landing과 상단 `집 보기` 직접 진입은 선택 건축 볼륨뿐 아니라 마당 표본, focus 동물 ray와 ON/OFF 픽셀 기여, 대문·등롱 같은 생활 디테일을 같은 실앱 게이트로 검사한다. `check:atmosphere`가 프로필·태양방향을, `check:cinematic:app`이 제품 구도를, `shoot:sky`가 실제 앱 픽셀·구름/달/광선·draw call을 검사한다.
+일반 필지 focus는 순수 계획의 남측 접근·정확한 24° 카메라 고도·1.65–2.5m 문 높이 target을 유지한다. 초기 10° 카메라 고도에서 마당과 생활 디테일을 더 열어 달라는 연속 사용자 검수를 반영해 12°·14°·16°·18°·20°·22°를 거쳐 24°로 올렸으며, 기와·초가·종가 실앱에서 집 전체와 전경 마당이 잘리지 않는 것을 다시 확인했다. 안전 가시성 후보의 dolly scale은 수평·수직 offset에 함께 적용해 직접 `집 보기`도 이 각도를 바꾸지 않는다. 앱의 `view-shift.js`는 UI 패널 offset만 합성하며 별도 하늘 편향은 0이다. -13% 편향은 집과 마당을 화면 아래로 밀어 전경을 잘랐으므로 되돌리지 않는다. focus hop/in/out, 리롤, 옵션 변경은 같은 카메라 timeline에서 이 값을 보존하거나 탐색용 0으로 초기화한다. 종가 compound의 닭은 일반 필지용 대문측 anchor를 재사용하면 담과 솟을대문 뒤에 완전히 숨으므로, 같은 강체 좌표계의 열린 안마당 anchor를 쓴다. 이 주거용 anchor와 닭 기본값은 `hanok`/`giwa`/`choga`에만 적용하고 관아·궁궐형 hero에는 적용하지 않는다. 최초 종가 landing과 상단 `집 보기` 직접 진입은 선택 건축 볼륨뿐 아니라 마당 표본, focus 동물 ray와 ON/OFF 픽셀 기여, 대문·등롱 같은 생활 디테일을 같은 실앱 게이트로 검사한다. `check:atmosphere`가 프로필·태양방향을, `check:cinematic:app`이 제품 구도를, `shoot:sky`가 실제 앱 픽셀·구름/달/광선·draw call을 검사한다.
 
 ## 병렬 작업 소유권
 

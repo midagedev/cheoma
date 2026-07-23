@@ -108,13 +108,25 @@ try {
         return Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1
           && Math.abs(projected.z) <= 1;
       };
-      const rayVisible = (object, point) => {
+      const objectPath = (object) => {
+        const parts = [];
+        for (let current = object; current && current !== detailRoot; current = current.parent) {
+          parts.push(current.name || current.type || 'Object3D');
+        }
+        return parts.reverse().join('/');
+      };
+      const rayProbe = (object, point) => {
         const direction = point.clone().sub(camera.position);
         const distance = direction.length();
         raycaster.set(camera.position, direction.normalize());
         const first = raycaster.intersectObject(detailRoot, true)
           .find((hit) => hit.distance <= distance + 0.2);
-        return first?.object === object;
+        return {
+          visible: first?.object === object,
+          blocker: first && first.object !== object ? objectPath(first.object) : null,
+          hitDistance: first ? +first.distance.toFixed(2) : null,
+          targetDistance: +distance.toFixed(2),
+        };
       };
       const yardDetails = [];
       detailRoot?.traverse((object) => {
@@ -127,14 +139,26 @@ try {
           }
           parent = parent.parent;
         }
-        const named = ['lantern-bulb', 'courtyard-ground'].includes(object.name);
+        // A ground mesh is not a household detail and must not make this
+        // close-focus evidence pass by itself.
+        const named = object.name === 'lantern-bulb';
         if (!named && !(semantic && object.isMesh)) return;
         const point = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
         const framed = inFrame(point);
+        const projected = point.clone().project(camera);
+        const ray = framed ? rayProbe(object, point) : null;
         yardDetails.push({
           name: object.name || semantic,
+          path: objectPath(object),
           inFrame: framed,
-          visible: framed && rayVisible(object, point),
+          visible: framed && ray.visible,
+          blocker: ray?.blocker ?? null,
+          hitDistance: ray?.hitDistance ?? null,
+          targetDistance: ray?.targetDistance ?? null,
+          screen: framed ? {
+            x: +((projected.x + 1) * 0.5).toFixed(3),
+            y: +((1 - projected.y) * 0.5).toFixed(3),
+          } : null,
         });
       });
       const ring = engine.scene.children.find((child) => (
@@ -148,6 +172,7 @@ try {
         top: (1 - maxY) * 0.5,
         bottom: (1 - minY) * 0.5,
         height: (maxY - minY) * 0.5,
+        yardDetails,
         yardDetailsInFrame: yardDetails.filter((detail) => detail.inFrame).length,
         yardDetailsVisible: yardDetails.filter((detail) => detail.visible).length,
         hasChickens: ring?.userData?.hasChickens ?? false,

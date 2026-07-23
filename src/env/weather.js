@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { normalizeVillageLensScale } from '../camera/optics.js';
 import { makeRng } from '../rng.js';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
@@ -570,9 +571,9 @@ export function setupWeather(scene, { layout, getBuilding, getGround, env = null
       const inferredLensScale = Number.isFinite(camDist)
         && Number.isFinite(visualDist) && visualDist > 1e-6
         ? camDist / visualDist : 1;
-      const lensScale = Math.max(0.5, Math.min(2,
+      const lensScale = normalizeVillageLensScale(
         Number.isFinite(explicitLensScale) ? explicitLensScale : inferredLensScale,
-      ));
+      );
       // 화면 등가 거리 대응(#98·#116 원경 정책). 두 축으로 나눠 부감 강수를 "커튼"으로 만든다:
       //   ① uScale: 부감에서 눈송이가 벼룩처럼 작아지는 걸 상쇄하되 완만하게(최대 2.2×). 셰이더 사이즈
       //      캡(uMaxPx)이 초대형 스프라이트를 막으므로 예전(5×)처럼 과증폭할 필요가 없다 — 과증폭이

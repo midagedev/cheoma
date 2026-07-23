@@ -35,20 +35,24 @@ const expectedSceneHashes = {
   // six residential opening axes through the variant bytes and renders those
   // selected openings in every FULL giwa/choga prototype. Choga and hanok keep
   // a fixed dark recess while residential primary-door and footwear anchors
-  // share the same renderer-free opening plan. The reviewed 22° focus envelope
-  // relocates the capital fixture's pavilion from `golmok-015` to the clear
-  // `soro-000` candidate and moves one hamlet sotdae outside the raised view
-  // corridor. #81 replaces inferred lot
+  // share the same renderer-free opening plan. The reviewed 24° focus elevation
+  // and #95's 10° parcel lens lengthen the protected focus corridor while the
+  // projected house size stays fixed. Pavilions and public props therefore move
+  // only among already-valid planned candidates. The structural byte change is
+  // confined to roots downstream of those positions (merged landmarks and the
+  // terrain's structure-clearance colour field in the reviewed capital split);
+  // houses, roads, paddies, temple, trees, flora, animals, night lights, and bloom
+  // stay byte-identical. #81 replaces inferred lot
   // lights with fixed renderer-authored opening anchors, keeps one Points draw,
   // and turns scene depth testing on. The authored position/owner attributes
   // intentionally update every scale hash; depthTest itself is covered by the
   // pure and browser nightlight gates rather than this structural hasher. Sync,
   // real module Worker, and ?worker=0 fallback
   // must still remain byte-identical.
-  village: '6fac48b4:07720f16:e0118413:d2b8b05c',
-  town: '2cbd0bda:3ae321ea:439c19c3:29ad84a4',
-  capital: 'cbba4756:2b6ea434:48c94ef7:0ca20ca8',
-  hanyang: '6d74923b:bf1e144b:8d2f5899:b977b7e5',
+  village: 'cd2f7b80:7e165a00:cff4aef7:efec50d0',
+  town: '4c691e34:daa75710:21740011:51854026',
+  capital: 'b99ed1df:3d77b8c5:28438f07:f9e8b4c5',
+  hanyang: '02960618:ef00c4b8:df99d5b3:6a78441e',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -57,14 +61,14 @@ const expectedProxyHashes = {
   // the first effective mainHalfW rather than presenting a dead slider range.
   // #10 adds the six normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
-  // 22° courtyard elevation. Safe candidates scale XZ and Y together so their
-  // proxy framing cannot silently steepen the camera. Raising that shared angle
-  // changes every residential camera position and therefore all four proxy
-  // hashes without changing their counts or isolation contract.
-  village: '987549fa',
-  town: '402050ba',
-  capital: '29d71851',
-  hanyang: 'ed41afbb',
+  // 24° courtyard elevation. #95 applies the 10° physical parcel lens from the
+  // authored 23° reference lens, so compensated camera positions and FOV fields
+  // change together. Safe candidates still scale XZ and Y together and all four
+  // proxy counts/isolation contracts remain unchanged.
+  village: 'd74a022d',
+  town: 'ce2b9e6b',
+  capital: '95d20636',
+  hanyang: '89e2cc97',
 };
 
 const server = await createServer({
