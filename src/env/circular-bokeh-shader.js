@@ -22,7 +22,7 @@ export const CIRCULAR_BOKEH_DEFAULTS = Object.freeze({
   // Spend the complete bounded maxblur disc. The authored outer ring remains at
   // sqrt(0.75) of that radius, while a tiny lantern face expands into a legible
   // telephoto aperture image instead of reading as a softened point.
-  radiusScale: 2.4,
+  radiusScale: 3.1,
 });
 
 function glslFloat(value) {
