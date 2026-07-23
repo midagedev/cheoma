@@ -1,7 +1,7 @@
 # 에이전트 친화적 구조 계약
 
 > - **상태**: 1차 구조 개선 완료 / 후속 개선의 기준선
-> - **기준일**: 2026-07-22
+> - **기준일**: 2026-07-23
 > - **목표**: 동작과 결정론을 보존하면서 변경 이유가 다른 코드를 분리하고, 생성 엔진을 앱 밖에서도 재사용 가능하게 유지
 
 ## Beck 단순 설계 규칙
@@ -73,6 +73,7 @@ app/src/                       Svelte UI
 | `src/api/building.js` | 건물·필지·한옥·궁 생성, layout/preset, assembly/tofu animation | THREE와 canvas provider가 있는 runtime |
 | `src/api/village.js` | plan, 단계별 populate, granular village generators, sync/async handle, reroll wave | browser/worker 지원 runtime |
 | `src/api/environment.js` | 순수 atmosphere profile/석양 resolver, 계절·날씨 상태, environment, focus, post, 축방향 DoF controller, 공유 적설 재질, weather, ink, time, world edge | 상태/profile은 Node/worker/browser, 나머지는 WebGL browser runtime |
+| `src/api/particles.js` | 결정론 강수 상태·진행 함수와 물리 강수 표현, 꽃잎·낙엽·mote 근경 geometry, 계절 필드와 mote runtime. 외부 소비자는 `src/env/` 내부 파일 대신 이 façade를 사용한다 | 상태는 Node, worker, browser; geometry/runtime은 THREE가 있는 runtime |
 | `src/api/post-quality.js` | 프레임레이트 독립 adaptive-post 품질 상태 | Node, worker, browser |
 | `src/api/cinematic.js` | Three 없는 건축 arrival/rebuild 경로·clock, 건물 카메라 drive, 마을 광학·dolly 정책, drone path, walker와 obstacle helper | reveal path는 Node/worker/browser; 나머지는 THREE runtime, 녹화 drive는 browser |
 | `src/api/audio.js` | Web Audio 환경음·음악 orchestration | browser |
@@ -218,6 +219,31 @@ sleep/wake·wave 수명은 `npm run check:lod:app`으로 검증한다. `window._
 - 작은 HDR 광원은 destination 중심에서 역으로 찾지 않는다. 기존 반해상도 normalized highlight prefilter target/pass가 subpixel source를 연속 데이터로 만든다. 프레임당 한 번의 이 반해상도 pass는 analytic RGB/compactness 37 + exact ownership 4 + adjacent guard 12 = 실제 `tColor` 53 fetch를 쓴다. RGB는 정규화된 source energy를 저장하고 alpha는 broad `0`, gather-removal support `0.25`, exact 2×2 ownership `1`을 함께 인코딩하며 depth를 저장하지 않는다. Gather는 `0.125`, scatter와 strict-depth self identity는 `0.75`에서 소비한다. 이 네 값은 renderer-free `bokeh-source-contract.js`가 단일 소유한다. Strict-depth 예외는 exact destination ownership과 full-resolution destination color floor·동일 hue·같은 초점면/깊이를 모두 요구하며, 곡면 emitter를 끊는 화면 거리 상수를 두지 않는다. `BokehSourceScatter`는 full-resolution source를 서로 겹치지 않는 2×2 셀로 소유해 앞쪽 source depth와 CoC를 구한 뒤 현재 composer destination에 채워진 원판을 직접 가산한다. 셀 좌표는 viewport 크기의 grid buffer 없이 `gl_InstanceID`에서 절차적으로 계산하며, 필요한 CoC가 하드웨어 `ALIASED_POINT_SIZE_RANGE`를 넘으면 같은 material/uniform의 외접 3-vertex instanced triangle backend로 자동 전환한다. 두 backend 모두 같은 한 draw로 실행되고 별도 render target 없이 프로그램 1개, draw call 1개만 더한다. 각 source의 RGB 합을 `πr²`로 나누고 연속 원판 profile 적분을 정규화하므로 반지름이 커질수록 같은 총에너지가 넓게 퍼져 peak·평균 밝기는 `1/r²`로 낮아진다. 961×601 마지막 부분 셀과 block phase, 같은 2×2 셀의 다른 hue 근접 차폐물, DPR 2 pass-only GPU 진단이 이 계약의 실제 브라우저 반례다. fitted source-area 상수나 threshold 기반 밝기 바닥을 다시 넣지 않는다.
 
 화각·dolly·LOD 등가는 `npm run check:lod`, 순수 축깊이·13/41 gather·prefilter/scatter 자원 계약은 `npm run check:dof`, 실제 46°→10° 제품 전환·depth prepass·자원 identity는 `npm run check:dof:app`으로 검사한다. 자연 장면은 `npm run shoot:dof`, 원형비·반지름별 선형 HDR 에너지/peak 희석·pan→settle는 `npm run shoot:bokeh`, source scatter ON/OFF와 Chrome GPU/resource 증거는 `npm run shoot:bokeh:proof` 산출물을 직접 열어 검증한다.
+
+## 물리 디테일 입자 재사용 계약
+
+`src/api/particles.js`는 강수의 Three 없는 결정론 상태·진행 함수, 그 상태를 소비하는 물리 강수 표현,
+꽃잎·낙엽·mote의 근경 geometry, 제품 계절 필드와 mote runtime을 한 공개 경계에서 제공한다. 상태 계층은
+seed로 정해진 위치·위상·크기·종류·불투명도를 한 번만 소유하고, 렌더 계층은 그 동일 buffer를 한 개의 물리
+월드 지오메트리로 읽는다. 가까운 장면에서 Points와 mesh를 동시에 유지하거나 서로 다른 seed·simulation을
+가진 FULL/FAR 복제본을 만들지 않는다.
+
+보이는 물리 입자는 color와 DoF depth에서 동일한 instance attribute, 시간·바람·활성 uniform, 월드 변위,
+회전과 alpha/discard 조건을 소비한다. stock `MeshDepthMaterial`로 동적 offset을 잃지 않으며,
+`userData.dofDepthMaterial`의 명시적 packed-depth 재질은 `allowOverride=false`로 둔다. 따라서 돌풍 밖의
+꽃잎, 꺼진 반딧불, 거리·날씨로 휴면한 입자는 색에는 없는데 불투명 깊이만 남는 가짜 가림막이 되지 않는다.
+디테일 band 밖에서는 같은 물리 표현을 숨기고 simulation과 draw를 함께 쉬게 한다.
+
+같은 renderer·같은 결정론 상태에서 제품 focus 7°/24°와 aerial 46°/31°를 번갈아 측정한 ABBA 결과,
+별도 Points/FAR 경로의 최대 절대 차이는 약 `0.059ms`, 16.7ms frame의 `0.35%` 이하였다. 반복 block과
+실행 사이에서 어느 쪽이 빠른지도 뒤집혔고 제품 aerial 입자의 실제 duty cycle은 이미 0이므로, 이 차이는
+두 번째 표현·shader·자원 수명을 유지할 성능 근거가 아니다. 원경은 Points fallback 대신 휴면한다.
+
+크기는 pixel cap이나 망원 lens scale이 아니라 실제 월드 폭으로 저작한다. 눈 결정은 `1.3–3.2cm`, 봄
+꽃잎은 `2–5.4cm`, 가을 낙엽은 `6–12cm` 범위를 지킨다. 화면에서 더 큰 원형상은 geometry를 키우지 않고
+실제 source 깊이와 조리개 광학이 만든다. 한지 창의 작은 HDR 광원도 필지 폭으로 추정한 점이 아니라 건물
+opening plan이 제공한 실제 고정 한지 opening anchor와 외향 법선, mirror·fit·필지 변환을 소비한다.
+저작 anchor가 없으면 빛과 전용 depth 모두 만들지 않는다.
 
 ## 계절·날씨와 적설 재사용 계약
 
