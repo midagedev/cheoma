@@ -297,8 +297,9 @@ function ensureInk() {
 }
 
 // ---------- 피사계 심도(DoF) 컴포저 (pbr 전용, 지연 생성) ----------
-// RenderPass → BokehPass → OutputPass. RenderPass/BokehPass 는 오프스크린(선형)에서
-// 처리되고 마지막 OutputPass 가 캔버스에 렌더될 때만 ACES 톤매핑+sRGB 를 한 번 적용한다
+// RenderPass → BokehPass → OutputPass. BokehPass 내부의 반해상도 광원 prefilter와
+// source scatter까지 오프스크린(선형)에서 처리되고 마지막 OutputPass 가 캔버스에
+// 렌더될 때만 ACES 톤매핑+sRGB 를 한 번 적용한다
 // (renderer.render 직접 경로와 색 일치). focus 는 매 프레임 controls.target의 카메라축 깊이로 갱신.
 let dof = null;
 function ensureDof() {
@@ -321,8 +322,8 @@ function ensureDof() {
 }
 
 // ---------- 플래그십 룩 컴포저 (pbr 전용, 지연 생성) ----------
-// RenderPass → RimPass(골든아워 림) → UnrealBloomPass(광원 헤이즈)
-//            → BokehPass(DoF 흡수, opt-in) → OutputPass. bloom·rim 은 선형 HDR 에서
+// RenderPass → RimPass(골든아워 림) → BokehPass(DoF 흡수, opt-in)
+//            → UnrealBloomPass(광원 헤이즈) → OutputPass. DoF·bloom·rim 은 선형 HDR 에서
 // 처리되고 OutputPass 가 ACES+sRGB 를 한 번만 적용(이중 과노출 방지).
 // post 가 켜지면 DoF 는 이 컴포저의 bokeh 로 처리되어 별도 dof 컴포저는 쓰지 않는다.
 let post = null;

@@ -5,9 +5,9 @@
 //         setFocusPoint(worldPoint), setDofAmount(0..1), setEnabled(bool), bloomPass, rimPass }
 //
 // 이 앱의 메인 룩을 한 컴포저로 통합한다(기존 main.js DoF BokehPass 흡수):
-//   fresnel(기본): RenderPass → GradePass(채도) → UnrealBloomPass → BokehPass(opt-in)
+//   fresnel(기본): RenderPass → GradePass(채도) → BokehPass(opt-in) → UnrealBloomPass
 //                  → FlarePass → OutputPass(ACES+sRGB 1회)  + 재질 프레넬 림(rim.js)
-//   pass(?rim=pass): RenderPass → RimPass(스크린스페이스 림+채도) → Bloom → Bokeh
+//   pass(?rim=pass): RenderPass → RimPass(스크린스페이스 림+채도) → Bokeh → Bloom
 //                  → FlarePass → OutputPass  (구 방식 — A/B·성능 비교용 폴백)
 //
 // 설계 원칙
@@ -522,6 +522,10 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   sunGlow.name = 'sunGlow';
   sunGlow.renderOrder = -40;   // 불투명 뒤·달무리 근처
   sunGlow.visible = false;
+  // This broad atmospheric sprite intentionally stays out of the packed-depth
+  // source contract. Writing its translucent tail as one opaque plane would
+  // occlude unrelated bokeh; the rendered broad-source fixture proves that its
+  // image-space compact evidence stays zero.
   scene.add(sunGlow);
 
   // 림 구현 선택(#76): 기본 'fresnel'(재질 프레넬), ?rim=pass 면 구 RimPass(A/B·성능 비교).
@@ -541,11 +545,6 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   const rimPass = useFresnel ? null : new RimPass(scene, camera);
   composer.addPass(useFresnel ? gradePass : rimPass);
 
-  const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(size.x, size.y), 0.6, 0.75, 0.6,
-  );
-  composer.addPass(bloomPass);
-
   // DoF(피사계 심도) — 기존 main.js BokehPass 흡수. 기본 off, setDof 로 토글.
   const bokehPass = new StableBokehPass(scene, camera, {
     focus: 40, aperture: DEFAULT_DOF_APERTURE, maxblur: 0.01,
@@ -554,7 +553,14 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   const dof = createDofController({ camera, pass: bokehPass, aperture: DEFAULT_DOF_APERTURE });
   composer.addPass(bokehPass);
 
-  // 태양 렌즈 플레어(#67): bloom·DoF 뒤·OutputPass(ACES) 앞에 가산. bloom 이후라 고스트가
+  // Optical blur precedes sensor bloom: a tiny HDR source first forms one aperture
+  // image, then bloom adds its continuous halo instead of being scattered again.
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(size.x, size.y), 0.6, 0.75, 0.6,
+  );
+  composer.addPass(bloomPass);
+
+  // 태양 렌즈 플레어(#67): DoF·bloom 뒤·OutputPass(ACES) 앞에 가산. bloom 이후라 고스트가
   //   블러로 뭉개지지 않고 렌즈 아티팩트로 또렷이 얹힌다. 모바일 lowPerf 는 스킵(초저비용이지만
   //   풀스크린 패스 하나라도 필레이트 절약). fresnel 은 자체 depth, pass 는 rimPass depth 재사용.
   const flarePass = useFresnel ? new FlarePass({ scene, camera }) : new FlarePass({ rimPass });
@@ -850,7 +856,8 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     composer, setTime, setSunsetLook, setSize, update,
     setDof, setDofAmount, setDofAperture, setFocus, setFocusPoint,
     setEnabled, setWeather, setFlareEnabled, setRimEnabled,
-    renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass, sunGlow, fresnelRim,
+    renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass,
+    sunGlow, fresnelRim,
     dof,
     get sunsetLook() { return sunsetLook; },
     // 마을 리롤·focus-in 오버레이 직후 명시 재패치용(선택 — update() throttle 스캔이 이미 self-heal).

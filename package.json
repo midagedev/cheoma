@@ -65,6 +65,7 @@
     "check:yard": "node tools/check-yard-layout-contract.mjs",
     "check:worker": "node tools/run-browser-locked.mjs -- node tools/check-worker-contract.mjs",
     "shoot:bokeh": "node tools/run-browser-locked.mjs -- node tools/shoot-bokeh-fixture.mjs",
+    "shoot:bokeh:proof": "node tools/run-browser-locked.mjs -- node tools/shoot-bokeh-scatter-proof.mjs",
     "shoot:door": "node tools/run-browser-locked.mjs -- node tools/shoot-door-interaction.mjs",
     "shoot:door-dof": "node tools/run-browser-locked.mjs -- node tools/shoot-door-dof.mjs",
     "shoot:nightlights": "node tools/run-browser-locked.mjs -- node tools/shoot-nightlights.mjs",

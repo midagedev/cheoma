@@ -23,6 +23,28 @@ function materialContributesDofDepth(material) {
     && !(material.alphaHash === true && material.opacity < 0.999);
 }
 
+/**
+ * Return a renderable's explicit packed-depth material, if it owns one.
+ *
+ * Points and Sprites are excluded from the generic opaque-depth policy because
+ * replacing them with MeshDepthMaterial changes their primitive, size, and
+ * alpha silhouette. A source that needs its own optical depth may instead attach
+ * one material at `object.userData.dofDepthMaterial`. `allowOverride=false` is
+ * required so the material actually survives BokehPass's scene override.
+ */
+export function dofDepthMaterialForObject(object) {
+  if (!object) return null;
+  if (!(object.isMesh || object.isPoints || object.isLine || object.isSprite)) return null;
+  if (object.userData?.dofDepth === false) return null;
+  const material = object.userData?.dofDepthMaterial;
+  if (!material
+    || material.isMaterial !== true
+    || material.visible === false
+    || material.depthWrite === false
+    || material.allowOverride !== false) return null;
+  return material;
+}
+
 /** Return a world point's positive depth along the camera forward axis. */
 export function focusDepthForPoint(camera, point) {
   if (!camera || !point || ![point.x, point.y, point.z].every(Number.isFinite)) return null;

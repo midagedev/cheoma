@@ -61,6 +61,13 @@ function routePath(path) {
     'tools/check-surface-materials-browser.mjs': ['surface-browser'],
     'tools/check-dof-app.mjs': ['dof-app'],
     'tools/shoot-bokeh-fixture.mjs': ['bokeh-fixture'],
+    'tools/shoot-bokeh-scatter-proof.mjs': ['bokeh-fixture'],
+    'tools/lib/bokeh-gpu-diagnostic.mjs': ['bokeh-fixture'],
+    'tools/lib/bokeh-image-analysis.mjs': ['bokeh-fixture'],
+    'tools/lib/bokeh-linear-sweep.mjs': ['bokeh-fixture'],
+    'tools/lib/bokeh-optical-chart.mjs': ['bokeh-fixture'],
+    'tools/lib/bokeh-scatter-proof.mjs': ['bokeh-fixture'],
+    'tools/lib/bokeh-source-stress.mjs': ['bokeh-fixture'],
     'tools/check-rim-facing.mjs': ['rim'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
@@ -119,6 +126,9 @@ function routePath(path) {
     if (/^src\/env\/(?:post-quality-state|stable-bokeh-pass|circular-bokeh-shader)\.js$/.test(path)) {
       select('adaptive post policy changed', 'ink-app', 'lod-focus');
     }
+    if (/^src\/env\/(?:stable-bokeh-pass|circular-bokeh-shader|bokeh-highlight-prefilter|bokeh-source-contract|bokeh-source-scatter)\.js$/.test(path)) {
+      select('compact-source bokeh changed', 'dof-app', 'ink-app', 'lod-focus', 'bokeh-fixture');
+    }
     if (/^src\/env\/(?:rim|clouds|snow-material)\.js$/.test(path)) {
       select('physical rim inputs changed', 'rim');
     }
@@ -170,7 +180,9 @@ function routePath(path) {
       select('parcel representation changed', 'lod-focus', 'lod-wave');
     }
     if (path === 'src/village/instancing.js') select('impostor snow surface changed', 'winter-app');
-    if (path === 'src/village/nightlights.js') select('wave-owned village lighting changed', 'lod-wave');
+    if (path === 'src/village/nightlights.js') {
+      select('wave-owned, source-depth village lighting changed', 'dof-app', 'lod-wave');
+    }
     if (path === 'src/village/populate.js') select('population lifecycle changed', 'lod-focus', 'lod-wave');
     return { gates, reasons };
   }

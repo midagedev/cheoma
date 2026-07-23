@@ -189,6 +189,27 @@ void main() {
 }
 `;
 
+// The color Points material does not write scene depth, but compact HDR source
+// transfer needs the light's own camera-space depth rather than the wall behind
+// it. This companion uses the exact same vertex shader and uniform objects, then
+// repeats only the color shader's circular discard before packing depth.
+const DOF_DEPTH_FRAG = `
+precision highp float;
+#include <packing>
+varying float vIntensity;
+void main() {
+  vec2 uv = gl_PointCoord - 0.5;
+  float r = length(uv);
+  if (r > 0.5 || vIntensity <= 0.002) discard;
+  float core = smoothstep(0.5, 0.0, r);
+  float glow = pow(core, 1.8) + 0.35 * pow(core, 5.0);
+  // Match the visible radial profile and retain only the source-bright core.
+  // The dim additive tail remains bloom haze, not an opaque DoF source plane.
+  if (glow * vIntensity * 0.6 <= 0.18) discard;
+  gl_FragColor = packDepthToRGBA(gl_FragCoord.z);
+}
+`;
+
 // `sources` contains renderer-authored variant catalogs and already-placed
 // compound anchors. It is deliberately assembled by populate rather than
 // reconstructed from plan dimensions here.
@@ -257,7 +278,18 @@ export function buildNightLights(plan, _site, sources = {}) {
       setDepthTestForTest() {},
       debugOwner() { return null; },
       debugState() {
-        return { pointCount: 0, ownerCount: 0, drawCalls: 0, triangles: 0, depthTest: true };
+        return {
+          pointCount: 0,
+          ownerCount: 0,
+          drawCalls: 0,
+          dofDepthDrawCalls: 0,
+          triangles: 0,
+          materials: 0,
+          programs: 0,
+          textures: 0,
+          lights: 0,
+          depthTest: true,
+        };
       },
       dispose() {},
     };
@@ -329,6 +361,20 @@ export function buildNightLights(plan, _site, sources = {}) {
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   });
+  const dofDepthMat = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: VERT,
+    fragmentShader: DOF_DEPTH_FRAG,
+    depthTest: true,
+    depthWrite: true,
+    blending: THREE.NoBlending,
+    toneMapped: false,
+  });
+  dofDepthMat.name = 'nightlight-dof-depth';
+  // StableBokehPass sets scene.overrideMaterial for the packed-depth prepass.
+  // Opt this exact Points shader out of that replacement.
+  dofDepthMat.allowOverride = false;
+  dofDepthMat.customProgramCacheKey = () => 'cheoma-nightlight-dof-depth-v1';
 
   const points = new THREE.Points(geo, mat);
   points.name = 'nightlight-points';
@@ -337,6 +383,7 @@ export function buildNightLights(plan, _site, sources = {}) {
   // occludes lights behind walls, terrain, roofs, and courtyard objects.
   points.renderOrder = 4;
   points.visible = false;
+  points.userData.dofDepthMaterial = dofDepthMat;
   group.add(points);
 
   let level = 0;
@@ -426,9 +473,10 @@ export function buildNightLights(plan, _site, sources = {}) {
         pointCount,
         ownerCount: records.length,
         drawCalls: 1,
+        dofDepthDrawCalls: 1,
         triangles: 0,
-        materials: 1,
-        programs: 1,
+        materials: 2,
+        programs: 2,
         textures: 0,
         lights: 0,
         depthTest: mat.depthTest,
@@ -442,8 +490,12 @@ export function buildNightLights(plan, _site, sources = {}) {
       // this owned drawable out first so geometry/material receive exactly one
       // dispose event while the API becomes inert immediately.
       group.remove(points);
+      if (points.userData.dofDepthMaterial === dofDepthMat) {
+        delete points.userData.dofDepthMaterial;
+      }
       geo.dispose();
       mat.dispose();
+      dofDepthMat.dispose();
     },
   };
   group.userData.nightLights = api;

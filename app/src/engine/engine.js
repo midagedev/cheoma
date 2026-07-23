@@ -4,7 +4,7 @@
 //
 //   createEngine({ container }) → controller
 //
-// 렌더 경로는 플래그십 룩(env/post.js): Render → Grade/Rim → Bloom → Bokeh → Flare → Outline → Output.
+// 렌더 경로는 플래그십 룩(env/post.js): Render → Grade/Rim → Bokeh → Bloom → Flare → Outline → Output.
 // 히어로/조립/포스트카드/셔플/환경 훅은 코어 모듈을 직접 재사용한다.
 
 import * as THREE from 'three';
@@ -586,6 +586,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       depthDithered: bokehPass.depthDitheredCount,
       instFadeDepth: bokehPass.instFadeDepthCount,
       lodScreenDoorDepth: bokehPass.lodScreenDoorDepthCount,
+      sourceDepthMaterials: bokehPass.sourceDepthMaterialCount,
       tweenProgress: tween ? clamp01(tween.e / tween.dur) : null,
       anchored: activeDofSource() !== 'controls-target',
       ...postRuntime.debugQuality(),
