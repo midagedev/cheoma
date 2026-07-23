@@ -29,6 +29,86 @@
   let appSurface = $state();
   let engine = null;
 
+  // App owns every browser task it schedules.  A component instance gets one
+  // epoch; unmount invalidates that epoch before the engine is disposed, then
+  // cancels every outstanding callback.  Promise-backed waits resolve false on
+  // cancellation so async functions can finish without retaining dead state.
+  let lifecycleEpoch = 0;
+  let lifecycleActive = false;
+  const lifecycleTimers = new Map();
+  const lifecycleFrames = new Map();
+
+  function beginLifecycle() {
+    lifecycleEpoch += 1;
+    lifecycleActive = true;
+    return lifecycleEpoch;
+  }
+  function lifecycleCurrent(epoch = lifecycleEpoch) {
+    return lifecycleActive && epoch === lifecycleEpoch;
+  }
+  function setLifecycleTimeout(callback, delay, onCancel = null) {
+    if (!lifecycleActive) { onCancel?.(); return null; }
+    const epoch = lifecycleEpoch;
+    const handle = setTimeout(() => {
+      lifecycleTimers.delete(handle);
+      if (lifecycleCurrent(epoch)) callback();
+      else onCancel?.();
+    }, delay);
+    lifecycleTimers.set(handle, onCancel);
+    return handle;
+  }
+  function clearLifecycleTimeout(handle) {
+    if (handle == null) return;
+    clearTimeout(handle);
+    const onCancel = lifecycleTimers.get(handle);
+    lifecycleTimers.delete(handle);
+    onCancel?.();
+  }
+  function requestLifecycleFrame(callback, onCancel = null) {
+    if (!lifecycleActive) { onCancel?.(); return null; }
+    const epoch = lifecycleEpoch;
+    const handle = requestAnimationFrame((now) => {
+      lifecycleFrames.delete(handle);
+      if (lifecycleCurrent(epoch)) callback(now);
+      else onCancel?.();
+    });
+    lifecycleFrames.set(handle, onCancel);
+    return handle;
+  }
+  function cancelLifecycleFrame(handle) {
+    if (handle == null) return;
+    cancelAnimationFrame(handle);
+    const onCancel = lifecycleFrames.get(handle);
+    lifecycleFrames.delete(handle);
+    onCancel?.();
+  }
+  function waitLifecycleTimeout(delay, epoch = lifecycleEpoch) {
+    if (!lifecycleCurrent(epoch)) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      setLifecycleTimeout(() => resolve(lifecycleCurrent(epoch)), delay, () => resolve(false));
+    });
+  }
+  async function waitLifecycleFrames(count = 1, epoch = lifecycleEpoch) {
+    for (let i = 0; i < count; i++) {
+      const advanced = await new Promise((resolve) => {
+        requestLifecycleFrame(() => resolve(lifecycleCurrent(epoch)), () => resolve(false));
+      });
+      if (!advanced || !lifecycleCurrent(epoch)) return false;
+    }
+    return true;
+  }
+  function endLifecycle(epoch) {
+    if (!lifecycleCurrent(epoch)) return;
+    lifecycleActive = false;
+    lifecycleEpoch += 1;
+    const timers = [...lifecycleTimers.entries()];
+    const frames = [...lifecycleFrames.entries()];
+    lifecycleTimers.clear();
+    lifecycleFrames.clear();
+    for (const [handle, onCancel] of timers) { clearTimeout(handle); onCancel?.(); }
+    for (const [handle, onCancel] of frames) { cancelAnimationFrame(handle); onCancel?.(); }
+  }
+
   let ui = $state({
     seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
     expansion: 1, selected: false, canMerge: false, params: {}, maxExpansion: 3, renderStyle: 'pbr',
@@ -95,12 +175,14 @@
                                                //   트윈이 계속 이벤트를 흘리는 저사양·잔류 케이스 방어). 다음 전환
                                                //   개시(Start/Return)에서 해제 — 새 트윈의 morph 는 정상 반영.
   const FOCUS_SETTLE_CAP_MS = 3500;            // 최장 정상 전환(<2s) + 셰이더 컴파일 히치 여유
-  function clearFocusWatchdog() { if (focusWatchdog) { clearTimeout(focusWatchdog); focusWatchdog = null; } }
+  function clearFocusWatchdog() {
+    if (focusWatchdog != null) { clearLifecycleTimeout(focusWatchdog); focusWatchdog = null; }
+  }
   function armFocusWatchdog() {
     clearFocusWatchdog();
     focusMorphLatched = false;                 // 새 전환 개시 → morph 이벤트 다시 수용
     if (heroLanding) return;                   // 히어로 랜딩(조립 수 초)은 감시 제외 — villageSelect 가 정리
-    focusWatchdog = setTimeout(reconcileFocusState, FOCUS_SETTLE_CAP_MS);
+    focusWatchdog = setLifecycleTimeout(reconcileFocusState, FOCUS_SETTLE_CAP_MS);
   }
   function reconcileFocusState() {
     focusWatchdog = null;
@@ -125,8 +207,12 @@
   let cine = $state({ active: false, mode: null, pass: null });   // engine 'cinematic' 이벤트로 갱신
   let exporting = $state(false);               // glb 익스포트 진행(스피너·중복 클릭 방지)
   let toast = $state(null);                    // 안내 토스트 문구(overBudget 등) — null 이면 숨김
-  let toastTimer;
-  const showToast = (msg, ms = 3600) => { toast = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast = null; }, ms); };
+  let toastTimer = null;
+  const showToast = (msg, ms = 3600) => {
+    toast = msg;
+    clearLifecycleTimeout(toastTimer);
+    toastTimer = setLifecycleTimeout(() => { toast = null; toastTimer = null; }, ms);
+  };
   // 데스크톱 1인칭 조작: WASD/화살표 이동 + 마우스 시선. autoStroll 기본, 수동 입력 시 해제(다시 안 켬).
   const walkKeys = new Set();
   let walkYaw = 0, walkPitch = 0, walkManual = false, walkRaf = null;
@@ -185,11 +271,14 @@
   }
 
   // ---------- 크로마 자동 페이드 (3초 무조작 → 감상 모드) ----------
-  let idleTimer;
+  let idleTimer = null;
   function wake() {
     if (chromaFaded) chromaFaded = false;
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => { if (!ui.selected && !villageEditing && !refOpen) chromaFaded = true; }, 3000);
+    clearLifecycleTimeout(idleTimer);
+    idleTimer = setLifecycleTimeout(() => {
+      idleTimer = null;
+      if (!ui.selected && !villageEditing && !refOpen) chromaFaded = true;
+    }, 3000);
   }
 
   // ---------- 모바일 크롬 가시성 (바텀 시트가 하단을 점유하는 상황) ----------
@@ -215,15 +304,25 @@
   let hideSeal = $derived(sheetLayout && (editing || (sceneVillage && !villageEditing)));
 
   onMount(() => {
-    initDevice();
+    const epoch = beginLifecycle();
+    const disposeDevice = initDevice();
+    const deviceHook = new Proxy(device, {}); // per-mount identity over the shared reactive state
+    const envflowHook = {
+      toggle: () => { if (lifecycleCurrent(epoch)) toggleFlow(); },
+      get flowing() { return flowing; },
+      get interval() { return flowIntervalMs; },
+    };
+    const appLifecycleHook = import.meta.env.DEV ? {
+      // Existing production paths, re-armed only by the browser teardown gate.
+      armPreload: () => scheduleVillagePreload(),
+      armVeil: () => withVeil(() => engine?.village.enter({ ...villageOpts }, villageSeed)),
+      armReroll: () => scheduleVillageReroll({ force: true }),
+    } : null;
     if (typeof window !== 'undefined') {
-      window.__device = device;                                    // playwright 검증용
+      window.__device = deviceHook;                                // playwright 검증용
       // 오토로테이션 검증 훅(#64) — 크로마 페이드로 버튼이 숨어도 상태 확인·토글 가능.
-      window.__envflow = {
-        toggle: () => toggleFlow(),
-        get flowing() { return flowing; },
-        get interval() { return flowIntervalMs; },
-      };
+      window.__envflow = envflowHook;
+      if (appLifecycleHook) window.__appLifecycle = appLifecycleHook;
     }
     const url = readUrl();
     if (url.village && url.residentialEdits.length) {
@@ -306,23 +405,29 @@
 
     // glb 익스포트 검증 훅(#112) — 실제 코어(exportGLB/analyzeExport)를 앱 대상(마을·focus)에 태워
     //   직렬화 가능한 결과만 반환(스크린샷 없는 수치 단언). __hero/__engine 계열과 동일한 비침습 훅.
-    if (typeof window !== 'undefined') {
-      window.__glb = {
-        hasFocus: () => !!engine.village.focusRoot(),
-        analyzeVillage: () => { const r = engine.village.exportRoot(); return r ? analyzeExport(r) : null; },
-        exportHouse: async () => {
-          const r = engine.village.focusRoot(); if (!r) return { ok: false, reason: 'no-focus' };
-          const b = await exportGLB(r);
-          return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) } : { ok: false, over: !!b.overBudget };
-        },
-        exportVillage: async (opts) => {
-          const r = engine.village.exportRoot(); if (!r) return { ok: false, reason: 'no-village' };
-          const b = await exportGLB(r, opts);
-          return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) }
-            : { ok: false, over: !!b.overBudget, triangles: b.triangles, limit: b.limit };
-        },
-      };
-    }
+    const glbHook = {
+      hasFocus: () => lifecycleCurrent(epoch) && !!engine?.village.focusRoot(),
+      analyzeVillage: () => {
+        if (!lifecycleCurrent(epoch)) return null;
+        const r = engine.village.exportRoot(); return r ? analyzeExport(r) : null;
+      },
+      exportHouse: async () => {
+        if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
+        const r = engine.village.focusRoot(); if (!r) return { ok: false, reason: 'no-focus' };
+        const b = await exportGLB(r);
+        if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
+        return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) } : { ok: false, over: !!b.overBudget };
+      },
+      exportVillage: async (opts) => {
+        if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
+        const r = engine.village.exportRoot(); if (!r) return { ok: false, reason: 'no-village' };
+        const b = await exportGLB(r, opts);
+        if (!lifecycleCurrent(epoch)) return { ok: false, reason: 'unmounted' };
+        return b instanceof ArrayBuffer ? { ok: true, bytes: b.byteLength, name: filenameFor(r) }
+          : { ok: false, over: !!b.overBudget, triangles: b.triangles, limit: b.limit };
+      },
+    };
+    if (typeof window !== 'undefined') window.__glb = glbHook;
 
     // 초기 설정: seed 기반 + URL 명시 오버라이드.
     const cfg = configFromSeed(url.seed);
@@ -382,9 +487,7 @@
     // CPU 생성 + GPU 프리워밍까지 미리 끝내 hidden 보관 → 첫 마을 진입 시 프리징 없이 먹 안개
     // reveal+돌리인만. 타이틀이 덮는 지금 실행해야 생성 프리징이 안 보인다(reveal 재생 중이면 버벅임).
     // 타이틀 없는 진입(hero off·shot·직행)은 첫 토글에서 먹 안개 마스킹 → 여기서 앞당기지 않음.
-    if (heroVisible) {
-      requestAnimationFrame(() => requestAnimationFrame(() => engine?.village.preload({ ...villageOpts }, villageSeed)));
-    }
+    if (heroVisible) scheduleVillagePreload();
 
     // 활동 감지 → 크로마 페이드.
     for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
@@ -396,17 +499,32 @@
     // 오토로테이션 흐름 클록 시작 — rAF 루프는 항상 돌며 매 프레임 게이트를 자체 검사한다(흐름 활성 +
     // shot 아님 + 히어로 미표시 + 탭 활성). 히어로 표시 중엔 acc 가 매 프레임 리셋돼 보류되고, 히어로
     // 해제 시 acc=0 에서 자연히 흐름이 시작된다(hero.enter onDone 재예약은 무해한 명시적 리셋).
-    flowRaf = requestAnimationFrame(flowFrame);
+    flowRaf = requestLifecycleFrame(flowFrame);
 
+    let cleaned = false;
     return () => {
+      if (cleaned) return;
+      cleaned = true;
+      // Abort App-owned continuations before any resource they could touch.
+      endLifecycle(epoch);
       for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) removeEventListener(ev, wake);
       removeEventListener('keydown', onKey);
-      cancelAnimationFrame(flowRaf);
+      cancelLifecycleFrame(flowRaf); flowRaf = null;
       stopWalkFeed();
-      clearTimeout(toastTimer);
+      clearLifecycleTimeout(idleTimer); idleTimer = null;
+      clearLifecycleTimeout(toastTimer); toastTimer = null;
       clearFocusWatchdog();
       liveEdit.dispose();
-      engine?.dispose();
+      disposeDevice();
+      if (typeof window !== 'undefined') {
+        if (window.__device === deviceHook) delete window.__device;
+        if (window.__envflow === envflowHook) delete window.__envflow;
+        if (window.__glb === glbHook) delete window.__glb;
+        if (appLifecycleHook && window.__appLifecycle === appLifecycleHook) delete window.__appLifecycle;
+      }
+      const ownedEngine = engine;
+      engine = null;
+      ownedEngine?.dispose();
     };
   });
 
@@ -437,10 +555,15 @@
     // onDone 은 랜딩 시퀀스 완료(정상=villageSelect 후 · 예외=종가 없음 폴백 즉시) 양 경로에서 호출된다.
     //   여기서 heroLanding 을 확실히 해제해 #118 U4 크롬이 폴백/조기클릭 엣지에서도 스턱되지 않게 한다
     //   (정상 경로는 villageSelect 가 이미 해제 → 무해한 중복).
-    const onDone = () => { heroLanding = false; scheduleFlowTick(); };
+    const epoch = lifecycleEpoch;
+    const onDone = () => {
+      if (!lifecycleCurrent(epoch)) return;
+      heroLanding = false;
+      scheduleFlowTick();
+    };
     if (villageHome) { heroLanding = true; engine.village.enterHero({ ...villageOpts }, villageSeed, { onDone }); }
     else engine.hero.enter({ onDone });
-    setTimeout(() => { heroVisible = false; }, 900);
+    setLifecycleTimeout(() => { heroVisible = false; }, 900);
   }
   // 이 집 다시 짓기(#19): 예약된 이웃·도로는 보존하되 필지 내부 경계부터 집 변주, 마당 소품,
   //   과실수까지 하나의 결정론적 transaction으로 재생성한다. 마을 전체 리롤과는 분리한다.
@@ -456,7 +579,7 @@
   function reroll() {
     if (rerollCooldown || waving || sceneVillage) return;
     rerollCooldown = true;
-    setTimeout(() => (rerollCooldown = false), 500);
+    setLifecycleTimeout(() => (rerollCooldown = false), 500);
     overrides = { preset: false, time: false, season: false, weather: false };
     engine.reroll();
     pullState();
@@ -471,10 +594,23 @@
     if (villageEditing || villageZooming) {
       engine.village.return();
       // focus-out 돌리(FOCUS_OUT_DUR≈1.7s) 완료 후 웨이브 — 부감 도착·정리 보장.
-      setTimeout(() => { if (sceneVillage && !waving) engine.village.rerollWave(); }, 1850);
+      scheduleVillageReroll();
     } else {
       engine.village.rerollWave();
     }
+  }
+  function scheduleVillageReroll({ force = false } = {}) {
+    setLifecycleTimeout(() => {
+      if (force || (sceneVillage && !waving)) engine.village.rerollWave();
+    }, 1850);
+  }
+  function scheduleVillagePreload() {
+    const epoch = lifecycleEpoch;
+    const opts = { ...villageOpts };
+    const seed = villageSeed;
+    void waitLifecycleFrames(2, epoch).then((ready) => {
+      if (ready && lifecycleCurrent(epoch)) engine?.village.preload(opts, seed);
+    });
   }
   function postcard() { engine.postcard({ download: true }); }
   function toggleAudio() { audioOn = !audioOn; engine.toggleAudio(audioOn); }
@@ -493,7 +629,7 @@
     addEventListener('pointermove', onWalkMouse, { passive: true });
     const feed = () => {
       if (!cine.active || cine.mode !== 'walk') { walkRaf = null; return; }
-      walkRaf = requestAnimationFrame(feed);
+      walkRaf = requestLifecycleFrame(feed);
       const fwd = (walkKeys.has('w') || walkKeys.has('ArrowUp') ? 1 : 0) - (walkKeys.has('s') || walkKeys.has('ArrowDown') ? 1 : 0);
       const strafe = (walkKeys.has('d') || walkKeys.has('ArrowRight') ? 1 : 0) - (walkKeys.has('a') || walkKeys.has('ArrowLeft') ? 1 : 0);
       const run = walkKeys.has('shift');
@@ -503,10 +639,10 @@
         walkYaw = 0; walkPitch = 0;
       }
     };
-    walkRaf = requestAnimationFrame(feed);
+    walkRaf = requestLifecycleFrame(feed);
   }
   function stopWalkFeed() {
-    if (walkRaf != null) { cancelAnimationFrame(walkRaf); walkRaf = null; }
+    if (walkRaf != null) { cancelLifecycleFrame(walkRaf); walkRaf = null; }
     removeEventListener('keydown', onWalkKey);
     removeEventListener('keyup', onWalkKeyUp);
     removeEventListener('pointermove', onWalkMouse);
@@ -530,15 +666,17 @@
   // ---------- glb 내보내기(#104·#112) ----------
   // 대형 마을은 sanitize+parse 가 수 초 블록 가능 → 스피너 페인트 후(rAF 2회 양보) 실행 + 중복 클릭 방지.
   async function runExport(getTarget) {
-    if (exporting) return;
+    const epoch = lifecycleEpoch;
+    if (exporting || !lifecycleCurrent(epoch)) return;
     const target = getTarget();
     if (!target) { showToast(t('glb_error')); return; }
     exporting = true;
     chromaFaded = false;
     await tick();
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    if (!lifecycleCurrent(epoch) || !await waitLifecycleFrames(2, epoch)) return;
     try {
       const result = await exportGLB(target);
+      if (!lifecycleCurrent(epoch)) return;
       if (result && result.overBudget) {
         showToast(t('glb_toobig'));
       } else if (result instanceof ArrayBuffer) {
@@ -548,10 +686,11 @@
         showToast(t('glb_error'));
       }
     } catch (err) {
+      if (!lifecycleCurrent(epoch)) return;
       console.error('glb export failed', err);
       showToast(t('glb_error'));
     } finally {
-      exporting = false;
+      if (lifecycleCurrent(epoch)) exporting = false;
     }
   }
   function exportVillage() { runExport(() => engine.village.exportRoot()); }
@@ -593,7 +732,7 @@
   // 히어로 미표시 + 탭 활성. 게이트 오프면 acc 리셋 → 재개 시 다시 온전한 interval(선행/누수 전진 없음).
   // 프레임당 최대 1회 전진(dt≤STALL≤간격 클램프로 acc 초과분<간격 보장) → 이중 전진 원천 차단.
   function flowFrame(now) {
-    flowRaf = requestAnimationFrame(flowFrame);
+    flowRaf = requestLifecycleFrame(flowFrame);
     const dt = flowLast ? (now - flowLast) / 1000 : 0;
     flowLast = now;
     const hidden = typeof document !== 'undefined' && document.hidden;
@@ -642,15 +781,23 @@
   // 먹 안개 마스킹(#46): 오버레이가 화면을 완전히 덮은 뒤 동기 생성 fn 을 실행 → 생성 프리징 은닉,
   // 완료 후 페이드 아웃(마을이 안개에서 드러남 + 돌리인). 조작 직후 오버레이 페이드 인은 즉시 반응.
   async function withVeil(fn) {
+    const epoch = lifecycleEpoch;
+    if (!lifecycleCurrent(epoch)) return;
     veilPending++;                              // #133 재진입 가드: 파라미터 연타로 withVeil 이 겹치면
     veil = true;
-    await tick();
-    // 오버레이 opacity 1 도달까지 대기(CSS 트랜지션) — 이후에 생성해야 프리징이 안 보인다.
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    await new Promise((r) => setTimeout(r, 260));
-    try { fn(); } finally {
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      if (--veilPending === 0) veil = false;    // 마지막 호출 완료 시에만 베일 해제(앞 호출 finally 가 뒤 호출 재생성 프레임을 조기 노출하지 않게)
+    try {
+      await tick();
+      if (!lifecycleCurrent(epoch)) return;
+      // 오버레이 opacity 1 도달까지 대기(CSS 트랜지션) — 이후에 생성해야 프리징이 안 보인다.
+      if (!await waitLifecycleFrames(2, epoch)) return;
+      if (!await waitLifecycleTimeout(260, epoch)) return;
+      if (!lifecycleCurrent(epoch)) return;
+      fn();
+      await waitLifecycleFrames(2, epoch);
+    } finally {
+      veilPending = Math.max(0, veilPending - 1);
+      if (lifecycleCurrent(epoch) && veilPending === 0) veil = false;
+      // 마지막 호출 완료 시에만 베일 해제(앞 호출 finally 가 뒤 호출 재생성 프레임을 조기 노출하지 않게)
     }
   }
   function toggleMode(target) {

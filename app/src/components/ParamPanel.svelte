@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { TYPES } from '../lib/seed.js';
   import { t } from '../lib/i18n.svelte.js';
   import BottomSheet from './BottomSheet.svelte';
@@ -30,6 +31,10 @@
     clearTimeout(timers[key]);
     timers[key] = setTimeout(() => onParam?.(key, value), 110);
   }
+  onDestroy(() => {
+    for (const timer of Object.values(timers)) clearTimeout(timer);
+    timers = {};
+  });
 </script>
 
 <BottomSheet {open} {onClose} variant="right" ariaLabel="build panel">

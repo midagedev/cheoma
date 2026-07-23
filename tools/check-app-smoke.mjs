@@ -37,6 +37,45 @@ try {
   const port = server.httpServer.address().port;
   browser = await launchVerificationBrowser();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.addInitScript(() => {
+    const nativeAdd = EventTarget.prototype.addEventListener;
+    const nativeRemove = EventTarget.prototype.removeEventListener;
+    const active = [];
+    const captureOf = (options) => (typeof options === 'boolean' ? options : !!options?.capture);
+    const appCaller = () => {
+      const lines = (new Error().stack || '').split('\n');
+      const wrapper = lines.findIndex((line) => line.includes('trackedAdd'));
+      return wrapper >= 0 && /\/(?:app\/)?src\//.test(lines[wrapper + 1] || '');
+    };
+    EventTarget.prototype.addEventListener = function trackedAdd(type, listener, options) {
+      if (listener && appCaller()) {
+        const capture = captureOf(options);
+        if (!active.some((entry) => entry.target === this && entry.type === type
+          && entry.listener === listener && entry.capture === capture)) {
+          active.push({ target: this, type, listener, capture });
+        }
+      }
+      return nativeAdd.call(this, type, listener, options);
+    };
+    EventTarget.prototype.removeEventListener = function trackedRemove(type, listener, options) {
+      const capture = captureOf(options);
+      const index = active.findIndex((entry) => entry.target === this && entry.type === type
+        && entry.listener === listener && entry.capture === capture);
+      if (index >= 0) active.splice(index, 1);
+      return nativeRemove.call(this, type, listener, options);
+    };
+    Object.defineProperty(window, '__listenerAudit', {
+      configurable: false,
+      value: {
+        active: () => active.map((entry) => ({
+          type: entry.type,
+          target: entry.target === window ? 'window'
+            : entry.target === document ? 'document'
+              : entry.target?.tagName?.toLowerCase?.() || entry.target?.constructor?.name || 'unknown',
+        })),
+      },
+    });
+  });
   runtimeErrors = [];
   page.on('pageerror', (error) => runtimeErrors.push(`page: ${error.message}`));
   page.on('console', (message) => {
@@ -1857,7 +1896,7 @@ try {
   pass(texturePlateau.thresholdLifeCount === 0,
     'village exit/focus-out releases threshold footwear from the retained village handle');
 
-  const teardown = await page.evaluate(() => {
+  const teardown = await page.evaluate(async () => {
     const engine = window.__engine;
     const canvas = engine.renderer.domElement;
     const environment = engine.scene.getObjectByName('environment');
@@ -1893,11 +1932,74 @@ try {
     for (const resource of geometries) resource.addEventListener('dispose', onGeometryDispose);
     for (const resource of materials) resource.addEventListener('dispose', onMaterialDispose);
     for (const resource of textures) resource.addEventListener('dispose', onTextureDispose);
-    engine.dispose();
-    engine.dispose();
+
+    const lateCalls = { preload: 0, enter: 0, rerollWave: 0, setOpts: 0, setParam: 0, render: 0, compile: 0 };
+    let tearingDown = false;
+    const wrapLate = (owner, key, counter = key) => {
+      const original = owner[key];
+      owner[key] = function trackedLateCall(...args) {
+        if (tearingDown) lateCalls[counter] += 1;
+        return original.apply(this, args);
+      };
+    };
+    for (const key of ['preload', 'enter', 'rerollWave', 'setOpts']) wrapLate(engine.village, key);
+    wrapLate(engine, 'setParam');
+    wrapLate(engine.renderer, 'render');
+    if (typeof engine.renderer.compileAsync === 'function') wrapLate(engine.renderer, 'compileAsync', 'compile');
+
+    let disposeCalls = 0;
+    const ownedDispose = engine.dispose.bind(engine);
+    engine.dispose = () => { disposeCalls += 1; return ownedDispose(); };
+
+    // Re-arm the exact App-owned paths while the existing smoke app is live.
+    // The ParamPanel input covers its separate debounce owner as well.
+    const lifecycleHook = window.__appLifecycle;
+    const armed = {
+      preload: typeof lifecycleHook?.armPreload === 'function',
+      veil: typeof lifecycleHook?.armVeil === 'function',
+      reroll: typeof lifecycleHook?.armReroll === 'function',
+      param: false,
+    };
+    lifecycleHook?.armPreload();
+    lifecycleHook?.armVeil();
+    lifecycleHook?.armReroll();
+    const param = document.querySelector('.panel input[type="range"]');
+    if (param) {
+      armed.param = true;
+      param.value = String(Number(param.min || 0) + Number(param.step || 0.01));
+      param.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    const replacementNames = ['__device', '__envflow', '__glb', '__envRerollPick', '__appLifecycle'];
+    const replacementHooks = Object.fromEntries(replacementNames.map((name) => [name, { owner: `new:${name}` }]));
+    for (const name of replacementNames) window[name] = replacementHooks[name];
+
+    const { disposeApp } = await import('/src/main.js');
+    tearingDown = true;
+    const firstDispose = disposeApp();
+    const secondDispose = disposeApp();
+    const sharedDisposePromise = firstDispose === secondDispose;
+    await Promise.all([firstDispose, secondDispose]);
+    engine.dispose(); // retained callers remain harmless after the owned dispose
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const replacementHooksPreserved = replacementNames.every((name) => window[name] === replacementHooks[name]);
+    for (const name of replacementNames) delete window[name]; // remove harness-owned sentinels
+
     return {
+      armed,
+      replacementHooksPreserved,
+      sharedDisposePromise,
+      disposeCalls,
+      lateCalls,
+      villageAfterFlush: {
+        ready: engine.village.isReady(),
+        plan: engine.village.debugPlan(),
+        root: !!engine.village.exportRoot(),
+      },
       canvasConnected: canvas.isConnected,
       canvasCount: document.querySelectorAll('canvas').length,
+      appChildren: document.getElementById('app')?.childElementCount ?? -1,
       environmentConnected: !!environment?.parent,
       environmentResources: {
         geometries: [disposedGeometries.size, geometries.size],
@@ -1905,12 +2007,33 @@ try {
         textures: [disposedTextures.size, textures.size],
       },
       duplicateDisposals: [...disposeCounts.values()].filter((count) => count !== 1).length,
-      hooks: ['__engine', '__viewshift', '__hero', '__asm', '__wx', '__rim', '__flare', '__season']
+      hooks: [
+        '__engine', '__viewshift', '__hero', '__asm', '__wx', '__rim', '__flare', '__season',
+        '__device', '__envflow', '__glb', '__envRerollPick', '__appLifecycle',
+      ]
         .filter((name) => name in window),
+      listeners: window.__listenerAudit.active(),
     };
   });
-  await page.waitForTimeout(100);
-  pass(!teardown.canvasConnected && teardown.canvasCount === 0, 'engine.dispose removes the renderer canvas');
+  pass(Object.values(teardown.armed).every(Boolean),
+    `final app boot arms preload, veil, focus reroll, and ParamPanel debounce (${JSON.stringify(teardown.armed)})`);
+  pass(teardown.replacementHooksPreserved,
+    'unmount preserves debug hooks that a newer owner replaced by identity');
+  pass(teardown.sharedDisposePromise && teardown.disposeCalls === 2,
+    `disposeApp shares one Svelte unmount and retained engine.dispose stays idempotent (${JSON.stringify({
+      shared: teardown.sharedDisposePromise,
+      calls: teardown.disposeCalls,
+    })})`);
+  pass(Object.values(teardown.lateCalls).every((count) => count === 0)
+      && !teardown.villageAfterFlush.ready
+      && teardown.villageAfterFlush.plan == null
+      && !teardown.villageAfterFlush.root,
+  `App unmount aborts late village, prewarm, and edit work (${JSON.stringify({
+    calls: teardown.lateCalls,
+    village: teardown.villageAfterFlush,
+  })})`);
+  pass(!teardown.canvasConnected && teardown.canvasCount === 0 && teardown.appChildren === 0,
+    'disposeApp unmounts the component tree and removes the renderer canvas');
   pass(
     !teardown.environmentConnected
       && Object.values(teardown.environmentResources).every(([disposedCount, ownedCount]) => (
@@ -1919,7 +2042,9 @@ try {
       && teardown.duplicateDisposals === 0,
     `engine.dispose releases each environment resource exactly once (${JSON.stringify(teardown.environmentResources)}, duplicates ${teardown.duplicateDisposals})`,
   );
-  pass(teardown.hooks.length === 0, `engine.dispose removes owned debug hooks (${teardown.hooks.join(', ') || 'none'})`);
+  pass(teardown.hooks.length === 0, `App and engine teardown remove owned debug hooks (${teardown.hooks.join(', ') || 'none'})`);
+  pass(teardown.listeners.length === 0,
+    `App, device, environment, and engine remove source-owned DOM listeners (${JSON.stringify(teardown.listeners)})`);
   pass(runtimeErrors.length === 0, `browser reports no runtime errors (${runtimeErrors.length})`);
   if (runtimeErrors.length) console.log(runtimeErrors.slice(0, 5).join('\n'));
 

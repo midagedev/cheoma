@@ -1,5 +1,5 @@
 // 빠른 정적 구조 게이트: 경계, 상대 import 해석, src 순환, public API 방향, 순수 plan closure.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +13,11 @@ const API_PLAN = join(SRC, 'api', 'village-plan.js');
 const API_PARTICLE_STATE = join(SRC, 'api', 'particle-state.js');
 const API_RENDER_STYLE = join(SRC, 'api', 'render-style.js');
 const API_RESIDENTIAL_OPENINGS = join(SRC, 'api', 'residential-openings.js');
+const APP_COMPONENT = join(APP, 'App.svelte');
+const APP_MAIN = join(APP, 'main.js');
+const BOTTOM_SHEET = join(APP, 'components', 'BottomSheet.svelte');
+const LEGACY_VILLAGE_PANEL = join(APP, 'components', 'VillagePanel.svelte');
+const VIEW_SHIFT = join(APP, 'engine', 'view-shift.js');
 const SOURCE_EXT = new Set(['.js', '.mjs', '.svelte']);
 
 function walk(dir) {
@@ -149,6 +154,38 @@ const moduleScripts = [...exampleHtml.matchAll(/<script\b([^>]*)>/gi)]
   .map((attributes) => attributes.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1] || null);
 if (moduleScripts.length !== 1 || moduleScripts[0] !== './main.js') {
   errors.push(`building example must load only ./main.js as a module: ${moduleScripts.join(', ')}`);
+}
+
+// App teardown is one explicit ownership boundary.  Scheduling primitives may
+// occur only inside the lifecycle wrapper block at the top of App.svelte; every
+// feature below it must use that cancellable epoch instead of escaping unmount.
+const appSource = readFileSync(APP_COMPONENT, 'utf8');
+const schedulerEnd = appSource.indexOf('  let ui = $state(');
+const appFeatureSource = schedulerEnd >= 0 ? appSource.slice(schedulerEnd) : appSource;
+const executableAppFeatures = appFeatureSource
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\/\/.*$/gm, '')
+  .replace(/(['"])(?:\\.|(?!\1)[^\\\r\n])*\1/g, '');
+for (const primitive of ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame']) {
+  if (new RegExp(`\\b${primitive}\\s*\\(`).test(executableAppFeatures)) {
+    errors.push(`App feature bypasses lifecycle scheduler: ${primitive}`);
+  }
+}
+const mainSource = readFileSync(APP_MAIN, 'utf8');
+if (!/export\s+function\s+disposeApp\s*\(/.test(mainSource)
+  || !/\bunmount\s*\(\s*app\s*\)/.test(mainSource)
+  || !/if\s*\(\s*!disposePromise\s*\)/.test(mainSource)) {
+  errors.push('main.js must expose one idempotent Svelte disposeApp boundary');
+}
+
+// ContextPanel replaced the old split village card.  Keep the deleted module,
+// its BottomSheet variant/CSS, and its view-shift selector out of the app graph.
+if (existsSync(LEGACY_VILLAGE_PANEL)) errors.push('legacy VillagePanel.svelte must stay deleted');
+for (const file of [BOTTOM_SHEET, VIEW_SHIFT]) {
+  const source = readFileSync(file, 'utf8');
+  if (/leftCard|\.vcard\b/.test(source)) {
+    errors.push(`legacy village-card branch remains: ${relative(ROOT, file)}`);
+  }
 }
 
 // Tarjan SCC: src 내부 순환은 병렬 변경과 재사용 경계를 흐리므로 즉시 실패시킨다.
