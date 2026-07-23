@@ -22,8 +22,8 @@ function run(command, args, cwd = repo) {
   return execFileSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function wt(args) {
-  return run(process.execPath, [tool, ...args]);
+function wt(args, cwd = repo) {
+  return run(process.execPath, [tool, ...args], cwd);
 }
 
 try {
@@ -70,7 +70,8 @@ try {
   assert.equal(readFileSync(ignoredEvidence, 'utf8'), 'must survive refused cleanup\n');
   rmSync(join(taskPath, 'shots'), { recursive: true });
 
-  wt(['cleanup', 'task']);
+  const cleanupOutput = wt(['cleanup', 'task'], taskPath);
+  assert.doesNotMatch(cleanupOutput, /branch retained/);
   assert.equal(existsSync(taskPath), false);
   const commonDir = run('git', ['rev-parse', '--git-common-dir']).trim();
   const claimPath = join(repo, commonDir, 'cheoma-worktrees', 'claims', 'task.json');

@@ -524,7 +524,9 @@ if (!command || command === 'help' || command === '--help') {
     if (worktree.branch?.startsWith('codex/')) {
       branchRetained = git(
         ['-C', primary.path, 'update-ref', '-d', `refs/heads/${worktree.branch}`, worktree.head],
-        { allowFailure: true },
+        // cleanup may be invoked from the worktree being removed. Give the
+        // post-remove child process a surviving cwd instead of process.cwd().
+        { allowFailure: true, cwd: primary.path },
       ).status !== 0;
     }
     removeClaimUnlocked(claim.slug);
