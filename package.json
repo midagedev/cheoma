@@ -51,6 +51,7 @@
     "check:particle-geometry:unlocked": "node tools/check-weather-geometry.mjs && node tools/check-nightlight-geometry.mjs && node tools/check-detail-particle-geometry.mjs",
     "check:layout": "node tools/check-layout-contract.mjs",
     "check:live-edit": "node tools/check-live-edit-scheduler.mjs",
+    "check:scene-guide": "node tools/check-scene-guide.mjs",
     "check:scene-snapshot": "node tools/check-scene-snapshot.mjs",
     "check:share": "npm run check:scene-snapshot && node tools/check-share.mjs",
     "check:shader-warm": "node tools/check-shader-warm.mjs",

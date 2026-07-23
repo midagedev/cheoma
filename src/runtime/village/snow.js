@@ -49,9 +49,13 @@ export function createVillageSnowController(villageGroup) {
   return {
     inject,
     isActive: () => target > 0,
-    setWeather(name) {
+    setWeather(name, opts = {}) {
       target = name === 'snow' ? 1 : 0;
       if (target > 0) inject(villageGroup);
+      if (opts.immediate) {
+        accumulated = target > 0 ? (opts.accum ?? 1) : 0;
+        amountUniform.value = accumulated * SNOW_AMOUNT_MAX;
+      }
     },
     update(dt) {
       if (pinned != null) accumulated = pinned;

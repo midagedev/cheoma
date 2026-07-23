@@ -367,6 +367,14 @@ URL/share 레코드에 확장하지 않는다.
 마을 옵션 범위는 `src/api/village-options.js`의 planner 공용 순수 스펙을 사용하므로 UI·생성기·URL이 별도
 min/max/default 모델로 갈라지지 않는다.
 
+### `npm run check:scene-guide`
+
+`tools/check-scene-guide.mjs`는 DOM·Three 없이 최초 장면 안내의 표시 정책과 versioned localStorage
+fail-open을 검사한다. stable 마을만 허용하고 Hero/landing/wave/veil/cinematic/References/toast를 모두
+차단하며, 로케일은 방문 기록을 바꾸지 않는다. Svelte 컴파일 경고 0, root `pointer-events:none`,
+닫기 `44×44px`, Hero의 visible focus ring, App의 capture-phase canvas dismissal과 `app-surface` inert 상속,
+모든 village focus/explore/wave 종착점이 한 guarded `viewSettled` 경계를 쓰는지도 고정한다.
+
 ### `npm run check:share`
 
 `tools/check-share.mjs`는 위 코덱과 플랫폼 어댑터를 함께 검사한다. #107의 여러 legacy query를 base로 받아도
@@ -379,6 +387,10 @@ min/max/default 모델로 갈라지지 않는다.
 
 `tools/check-app-smoke.mjs`는 임시 cache와 포트로 실제 Svelte/Vite 앱을 부팅해 다음을 확인한다.
 
+- fresh desktop의 첫 stable 마을 프레임에서만 SceneGuide가 focus/scrim 없이 나타나고, 같은 페이지의
+  390×844 touch copy·bounds·44px 닫기를 검사한다. 카드 위 실제 wheel이 카메라에 그대로 도달하면서
+  안내를 닫고 기록하며, focus↔aerial과 canonical reload에서 재등장하지 않는다. canonical restore는
+  최종 의미 카메라가 정착한 뒤 `replaceState`를 정확히 한 번만 호출한다.
 - URL seed/scale이 plan에 도달하고 village scene과 canvas가 생성된다.
 - 마을 둘러보기·집 보기의 화면 등가 줌 범위와 near plane 값이 유효하다.
 - 집 보기 최소 거리가 착지 구도의 42%를 유지해 최대 줌인에서도 카메라가 건물 내부로 들어가지 않는다.
@@ -622,6 +634,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-shader-warm.mjs` | GPU program polling 중 해제된 material 회수, 살아 있는 program 완료 대기, compile 실패 no-op | 실제 WebGL 경합은 `verify-panels.mjs`의 빠른 hero focus-out/리롤 pageerror 0으로 보완한다. |
 | `tools/check-parcel-rebuild-browser.mjs` | 실제 range preview/commit/취소, 여섯 개구부 축의 부분 patch·종류 변경·재굴림, 두 버튼, 재건축 commit, 남측 카메라, 정자 clearance, flora batch, focus-out 지속 LOD, program/draw-call delta | seed 7의 대표 과실수 필지 한 건이며 전체 규모/seed 수학은 순수 게이트가 맡는다. |
 | `tools/check-residential-edit-url.mjs` | stable sort된 compact `vedit` v1 왕복·기본 URL 생략·8필지/768자 상한·malformed fail-closed | renderer 없는 codec 계약이며 실제 commit/reload는 browser 게이트가 맡는다. |
+| `tools/check-scene-guide.mjs` | stable/unseen 표시 정책, blocker 전체, storage fail-open, Svelte/a11y/input ownership, 공통 semantic settle 경계 | 실제 desktop/touch 배치·stage 입력·재방문은 같은 `check:app` 부팅이 맡는다. |
 | `tools/check-scene-snapshot.mjs` | versioned canonical scene v1, 전체 advanced 마을 옵션, 단일건물 다섯 `hp` 축, stable focus, 두 모드 의미 카메라 양자화, 미래 필드, byte 왕복, URL 예산 | 실제 Web Share·focus/reload·한 프레임 카메라 수렴은 `check:app`, sync/Worker scene parity는 `check:worker`가 맡는다. |
 | `tools/check-residential-edit-url-browser.mjs` | 실제 여섯 축 commit→URL→reload→focus geometry 복원과 malformed payload 전부 거부 | 대표 p2 한 필지이며 모든 seed의 배치 미감은 대신하지 않는다. |
 | `tools/shoot-layout-solar.mjs` | 실제 앱의 부감·공중·기와/초가 focus, `frontDir`·`solarAccess`·보호수 overlay와 가림 진단 | seed·규모·시간·계절·날씨를 `CHEOMA_LAYOUT_*`로 고정한다. `CHEOMA_LAYOUT_SCENE=parcel`과 `CHEOMA_LAYOUT_PARCEL=p254`처럼 정확한 필지도 재현하며 PNG는 OS 임시 폴더에 쓴다. |

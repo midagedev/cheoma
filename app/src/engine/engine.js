@@ -54,6 +54,7 @@ import {
   restoreSemanticOrbit,
   semanticLogZoom,
   semanticLogZoomRatio,
+  timeAdjustedDampingFactor,
 } from './semantic-view-runtime.js';
 
 const DEG = Math.PI / 180;
@@ -357,7 +358,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
 
-  function reapplyEnvBase(opts) {
+  function reapplyEnvBase(opts = {}) {
     env.setTime(state.time, opts); // sky.apply → fog/bg/exposure/조명
   }
   function refreshAtmosphere() {
@@ -402,6 +403,21 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       panScale: contract.panScale,
       zoom,
     });
+  }
+
+  // One semantic stability boundary for URL snapshots and first-scene UI.
+  // Callers invoke this only after controls/tween ownership has settled; an
+  // unrepresentable frame fails closed instead of publishing an early view.
+  function emitSettledView() {
+    if (semanticViewGestureActive) {
+      requestSemanticViewSettlement();
+      return false;
+    }
+    const view = captureSceneView();
+    if (!view) return false;
+    retireSemanticViewSettlement();
+    emit('viewSettled', { view });
+    return true;
   }
 
   function restoreSceneView(view) {
@@ -451,6 +467,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     dofAmount = null,
     focusComposition: nextFocusComposition = null,
   } = {}) {
+    retireSemanticViewSettlement();
     revealCamera?.stop('replaced', { notify: false });
     cinematic.stop();
     const currentReferenceFov = referenceFovForCamera(camera);
@@ -565,6 +582,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getReferenceFov: () => referenceFovForCamera(camera),
     settleControls,
     cancelConflictingMotion: () => {
+      retireSemanticViewSettlement();
       tween = null;
       cinematic.stop();
       if (demo.active) demoRuntime.stop();
@@ -573,14 +591,30 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   });
   let semanticViewSettlePending = false;
   let semanticViewSettleFrames = 0;
-  const onControlsEnd = () => {
+  let semanticViewGestureActive = false;
+  function beginSemanticViewGesture() {
+    semanticViewGestureActive = true;
+    retireSemanticViewSettlement();
+  }
+  function requestSemanticViewSettlement() {
     semanticViewSettlePending = true;
     semanticViewSettleFrames = 0;
-  };
+  }
+  function endSemanticViewGesture() {
+    semanticViewGestureActive = false;
+    requestSemanticViewSettlement();
+  }
+  function retireSemanticViewSettlement() {
+    semanticViewSettlePending = false;
+    semanticViewSettleFrames = 0;
+  }
+  const onControlsStart = beginSemanticViewGesture;
+  const onControlsEnd = endSemanticViewGesture;
+  controls.addEventListener('start', onControlsStart);
   controls.addEventListener('end', onControlsEnd);
 
   function updateSemanticViewSettlement() {
-    if (!semanticViewSettlePending || tween || revealCamera?.isActive?.()
+    if (!semanticViewSettlePending || semanticViewGestureActive || tween || revealCamera?.isActive?.()
         || cinematic.isActive() || demo.active) return;
     const spherical = controls._sphericalDelta;
     const pan = controls._panOffset;
@@ -592,9 +626,30 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     );
     semanticViewSettleFrames = inertia <= 1e-7 ? semanticViewSettleFrames + 1 : 0;
     if (semanticViewSettleFrames < 2) return;
-    semanticViewSettlePending = false;
-    semanticViewSettleFrames = 0;
-    if (captureSceneView()) emit('viewSettled', {});
+    emitSettledView();
+  }
+
+  function updateOrbitControls(dt, elapsed) {
+    if (!controls.enableDamping) {
+      controls.update(dt);
+      return;
+    }
+    const baseDamping = controls.dampingFactor;
+    const adjustedDamping = timeAdjustedDampingFactor(baseDamping, elapsed);
+    if (adjustedDamping == null) {
+      controls.update(dt);
+      return;
+    }
+    // OrbitControls uses dampingFactor both to apply this frame's share and to
+    // retain the tail. Temporarily substituting the wall-time-equivalent factor
+    // preserves the exact 60 Hz curve at 30/60/120 Hz and after a throttled
+    // frame, while autoRotate still consumes the separately clamped dt.
+    controls.dampingFactor = adjustedDamping;
+    try {
+      controls.update(dt);
+    } finally {
+      controls.dampingFactor = baseDamping;
+    }
   }
 
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
@@ -785,7 +840,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const cb = active.onDone;
     tween = null;
     cb?.();
-    if (!village.active) emit('viewSettled', {});
+    if (!village.active) emitSettledView();
   }
 
   function advanceCameraTween(dt) {
@@ -885,7 +940,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // dt 를 넘겨 autoRotate 를 프레임레이트 독립으로 — 무인자 update() 는 60fps 를 가정한
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
-    if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) controls.update(dt);
+    if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) {
+      updateOrbitControls(dt, elapsed);
+    }
     const settledFocusAmount = village.active && village.selected && !village.transitioning && !tween
       ? villageCamera.updateFocusContext() : null;
     // Focus context may crane the camera after OrbitControls consumes its
@@ -1229,6 +1286,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function settleVillageExplore() {
     setZoomRegime('explore');
     emit('villageExplore', {});
+    emitSettledView();
   }
   function restoreVillageView(view) {
     if (!village.active || village.transitioning || villageWaveBusy()) return false;
@@ -1531,6 +1589,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   function enterVillage(opts = null, seed = null) {
+    retireSemanticViewSettlement();
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
     // 재진입(활성): 비동기 빌드일 수 있어 프레이밍 트윈을 onReady 로(새 핸들 site.R 기준). 구 마을 유지 중 부감.
@@ -1661,6 +1720,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const pr = village.handle.getPickProxy(parcelId);
     if (!pr) return;
+    retireSemanticViewSettlement();
     if (hoverParcel && hoverParcel !== parcelId) village.handle.highlightParcel(hoverParcel, false);
     hoverParcel = null;
     village.handle.highlightParcel(parcelId, true);   // 돌리인 동안 추적 하이라이트
@@ -1700,6 +1760,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           setZoomRegime('focus', closeupDist);                    // 집 보기 안의 근접·문맥 줌 범위
           emit('villageFocusMorph', 1);
           emit('villageSelect', { parcelId, spec: pr.buildingSpec });
+          emitSettledView();
         },
       });
     });
@@ -1717,6 +1778,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!fromId || toId === fromId) return;                       // 부감(미focus)이거나 같은 필지면 무효(재클릭 no-op)
     const pr = village.handle.getPickProxy(toId);
     if (!pr) return;
+    retireSemanticViewSettlement();
     let fromOpeningFocus = null;
     if (semanticDofParcel === fromId) fromOpeningFocus = semanticDofAnchor.clone();
     else fromOpeningFocus = resolveArchitecturalDofAnchor(fromId, new THREE.Vector3());
@@ -1760,6 +1822,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           setZoomRegime('focus', closeupDist);
           emit('villageFocusMorph', 1);
           emit('villageSelect', { parcelId: toId, spec: pr.buildingSpec });
+          emitSettledView();
         },
       });
     });
@@ -2007,6 +2070,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       weatherRef?.setWeather(state.weather);               // 랜딩 조립 정착 후 날씨 복원
       updateWeatherColliders();
       emit('villageSelect', { parcelId: heroId, spec: pr.buildingSpec });
+      emitSettledView();
       onDone?.();
     } });
   }
@@ -2062,6 +2126,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
       emit('villageSelect', { parcelId: id, spec: pr.buildingSpec });      // 패널 재슬라이드인
+      emitSettledView();
     } });
   }
 
@@ -2118,6 +2183,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
       emit('villageSelect', { parcelId: id, spec });             // 패널 재슬라이드인(새 시드 기본값)
+      emitSettledView();
     } });
   }
 
@@ -2154,6 +2220,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   function startVillageWave({ seed, buildOpts, reframe = false } = {}) {
     if (!village.active || !village.handle || village.wave || village.transitioning) return null;
+    retireSemanticViewSettlement();
     // 반대 방향 경합도 latest request가 이긴다. 진행 중 regular async 결과는 토큰 불일치로
     // 완성 즉시 dispose되고 현재 oldHandle을 건드리지 않는다.
     village.build = null;
@@ -2294,17 +2361,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     focusRing.setSeason?.(name, opts);
   }
 
-  function commitWeather(name) {
+  function commitWeather(name, opts = {}) {
     state.weather = name;
     bumpShadow(1800);
-    if (forEachPresentedVillageHandle((handle) => handle.setWeather(name))) {
-      reapplyEnvBase();
+    weatherRef?.setWeather(name, opts);
+    if (forEachPresentedVillageHandle((handle) => handle.setWeather(name, opts))) {
+      reapplyEnvBase(opts);
       reapplyVillageFog();
     } else {
-      reapplyEnvBase();
+      reapplyEnvBase(opts);
       refreshAtmosphere();
     }
-    weatherRef?.setWeather(name);
     audio?.setWeather(name);
   }
 
@@ -2348,8 +2415,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         seed,
         subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
         duration: 2.6,
-        onDone: () => emit('viewSettled', {}),
-        onInterrupt: () => emit('viewSettled', {}),
+        onDone: emitSettledView,
+        onInterrupt: requestSemanticViewSettlement,
       });
       emit('seed', seed);
       return seed;
@@ -2372,8 +2439,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         seed: state.seed,
         subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
         duration: 2.6,
-        onDone: () => emit('viewSettled', {}),
-        onInterrupt: () => emit('viewSettled', {}),
+        onDone: emitSettledView,
+        onInterrupt: requestSemanticViewSettlement,
       });
       emit('seed', state.seed);
       return state.seed;
@@ -2475,13 +2542,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setSeason(name, opts = {}) {
       const next = resolveEnvironmentChange(state, { season: name });
       commitSeason(next.season, opts);
-      if (next.weather !== state.weather) commitWeather(next.weather);
+      if (next.weather !== state.weather) commitWeather(next.weather, opts);
       emit('state', { ...state });
     },
-    setWeather(name) {
+    setWeather(name, opts = {}) {
       const next = resolveEnvironmentChange(state, { weather: name });
-      if (next.season !== state.season) commitSeason(next.season);
-      commitWeather(next.weather);
+      if (next.season !== state.season) commitSeason(next.season, opts);
+      commitWeather(next.weather, opts);
       emit('state', { ...state });
     },
 
@@ -3139,6 +3206,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       groupAnims = [];
       rebuildTimer = null;
       demoRuntime.dispose();
+      controls.removeEventListener('start', onControlsStart);
       controls.removeEventListener('end', onControlsEnd);
       revealCamera?.dispose();
       cinematic.dispose?.();

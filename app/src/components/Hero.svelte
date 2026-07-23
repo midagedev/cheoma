@@ -27,7 +27,10 @@
     transition: opacity 0.85s ease;
   }
   .hero.leaving { opacity: 0; pointer-events: none; }
-  .hero:focus-visible { outline: none; }
+  .hero:focus-visible {
+    outline: 3px solid var(--seal);
+    outline-offset: -7px;
+  }
 
   .title {
     display: inline-flex; align-items: center; gap: 0.32em;
