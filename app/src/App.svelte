@@ -26,6 +26,7 @@
   } from '../../src/api/environment.js';
 
   let container;
+  let appSurface = $state();
   let engine = null;
 
   let ui = $state({
@@ -37,6 +38,7 @@
   let heroLeaving = $state(false);
   let chromaFaded = $state(false);
   let refOpen = $state(false);                 // 참고 자료 모달
+  let refOpener = $state(null);
   let audioOn = $state(false);
   let rerollCooldown = $state(false);
 
@@ -409,10 +411,20 @@
   });
 
   function onKey(e) {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || refOpen || e.defaultPrevented) return;
     if (cine.active) { engine.cine.stop(); return; }  // 시네마틱 데모 중이면 먼저 종료
     if (sceneVillage) { engine.village.escape(); }   // 클로즈업이면 부감 복귀(escape 가 selected 판정)
     else if (ui.selected) { engine.clearSelection(); }
+  }
+
+  function openReferences(opener) {
+    refOpener = opener;
+    refOpen = true;
+    chromaFaded = false;
+  }
+
+  function closeReferences() {
+    refOpen = false;
   }
 
   // ---------- 액션 ----------
@@ -783,6 +795,14 @@
   function closeVillageEdit() { liveEdit.cancel(); engine.village.return(); }
 </script>
 
+<div
+  bind:this={appSurface}
+  class="app-surface"
+  data-app-surface
+  tabindex="-1"
+  inert={refOpen}
+  aria-hidden={refOpen ? 'true' : undefined}
+>
 <div class="stage" bind:this={container}></div>
 
 {#if heroVisible}
@@ -803,7 +823,7 @@
 <!-- 시네마틱 데모 중엔 크롬을 페이드(감상 우선) — .chroma 3초 감상 페이드와 별개 게이트.
      히어로 랜딩(heroChrome) 동안에도 은닉(#118 U4), 랜딩 종료 시 자연 복원. -->
 <div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
-  {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={() => { refOpen = true; chromaFaded = false; }} />{/if}
+  {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={openReferences} />{/if}
   <EnvironmentDial
     time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
     shifted={ui.selected && !sheetLayout}
@@ -870,8 +890,6 @@
   />
 {/if}
 
-<ReferenceModal open={refOpen} onClose={() => { refOpen = false; }} />
-
 <!-- 시네마틱 데모 오버레이(#112): 종료 창구 + 현재 장면 라벨. -->
 <CinematicOverlay active={cine.active} mode={cine.mode} pass={cine.pass} onExit={stopCine} />
 
@@ -879,6 +897,14 @@
 {#if toast}
   <div class="toast" role="status" aria-live="polite">{toast}</div>
 {/if}
+</div>
+
+<ReferenceModal
+  open={refOpen}
+  onClose={closeReferences}
+  returnFocus={refOpener}
+  fallbackFocus={appSurface}
+/>
 
 <style>
   .stage { position: fixed; inset: 0; z-index: 0; }

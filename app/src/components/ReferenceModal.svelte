@@ -2,13 +2,25 @@
   // 신뢰도(참고 자료) 모달 — 씬 위 한지 오버레이. 별도 라우트 없이 열림/닫힘.
   // 콘텐츠는 docs/credits.md(단일 출처) → lib/credits.js 파싱본. 로케일(i18n)에 따라 ko/en 표시.
   // 데스크톱은 중앙 다이얼로그, 모바일(device.sheet)은 safe-area 존중 풀스크린 바텀 시트.
+  import { tick } from 'svelte';
   import { i18n } from '../lib/i18n.svelte.js';
   import { device } from '../lib/device.svelte.js';
   import { CREDITS } from '../lib/credits.js';
 
-  let { open = false, onClose } = $props();
+  let { open = false, onClose, returnFocus = null, fallbackFocus = null } = $props();
+  let dialog = $state();
+  let title = $state();
   const lang = $derived(i18n.lang);
   const isKo = $derived(lang === 'ko');
+  const titleId = 'reference-modal-title';
+  const FOCUSABLE = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',');
 
   // 정적 라벨(브랜드 요소가 아닌 UI 문구 — 여기서만 로케일화).
   const L = {
@@ -38,25 +50,108 @@
     return out;
   }
 
-  function onKey(e) { if (e.key === 'Escape' && open) { e.preventDefault(); onClose?.(); } }
+  function focusableElements() {
+    if (!dialog) return [];
+    return [...dialog.querySelectorAll(FOCUSABLE)].filter((element) => (
+      !element.closest('[inert]')
+      && element.getClientRects().length > 0
+      && getComputedStyle(element).visibility !== 'hidden'
+    ));
+  }
+
+  function requestClose() {
+    onClose?.();
+  }
+
+  function onKey(e) {
+    // `inert` removes the background DOM from interaction, but window-level
+    // shortcuts (for example first-person walk) still see bubbled key events.
+    // The dialog owns its whole keyboard boundary; browser defaults such as
+    // arrow-key scrolling remain intact unless the focus trap handles the key.
+    e.stopPropagation();
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      requestClose();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+
+    const focusable = focusableElements();
+    if (!focusable.length) {
+      e.preventDefault();
+      title?.focus({ preventScroll: true });
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    const active = document.activeElement;
+    const escaped = !dialog?.contains(active);
+    const atEntry = active === title || active === dialog || escaped;
+    if (e.shiftKey && (active === first || atEntry)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (active === last || atEntry)) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  $effect(() => {
+    if (!open) return;
+    const opener = returnFocus;
+    const stableFallback = fallbackFocus;
+    let active = true;
+    const recoverFocus = (event) => {
+      if (active && dialog && !dialog.contains(event.target)) {
+        title?.focus({ preventScroll: true });
+      }
+    };
+
+    document.addEventListener('focusin', recoverFocus);
+    tick().then(() => {
+      if (active) title?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      active = false;
+      document.removeEventListener('focusin', recoverFocus);
+      tick().then(() => {
+        if (open) return;
+        const triggerKind = opener?.dataset?.referenceTrigger;
+        const fallback = triggerKind === 'brand' || triggerKind === 'info'
+          ? document.querySelector(`[data-reference-trigger="${triggerKind}"]`)
+          : null;
+        const target = [opener, fallback, stableFallback].find((candidate) => (
+          candidate?.isConnected
+          && !candidate.disabled
+          && !candidate.closest?.('[inert]')
+        ));
+        target?.focus({ preventScroll: true });
+      });
+    };
+  });
 </script>
 
-<svelte:window onkeydown={onKey} />
-
 {#if open}
-  <div class="scrim" onclick={onClose} aria-hidden="true"></div>
+  <div class="scrim" onclick={requestClose} aria-hidden="true"></div>
   <div
+    bind:this={dialog}
     class="modal hanji-surface"
     class:sheet={device.sheet}
-    role="dialog" aria-modal="true" aria-label={lab.title}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby={titleId}
+    tabindex="-1"
+    onkeydown={onKey}
   >
     <header class="head">
       <span class="seal" aria-hidden="true">처마</span>
       <div class="titles">
-        <h2>{lab.title}</h2>
+        <h2 bind:this={title} id={titleId} tabindex="-1">{lab.title}</h2>
         <span class="sub">{lab.sub}</span>
       </div>
-      <button class="x" onclick={onClose} aria-label={lab.close}>×</button>
+      <button class="x" onclick={requestClose} aria-label={lab.close}>×</button>
     </header>
 
     <div class="scroll">
