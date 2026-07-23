@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { normalizeVillageLensScale } from '../camera/optics.js';
 import { DEFAULT_DETAIL_BANDS, fadeBeyond } from '../core/lod.js';
 import { makeRng } from '../rng.js';
+import { createPetalWorldRepresentation } from './detail-particle-geometry.js';
 
 // 계절 입자 필드(태스크 #111) — 봄 벚꽃 꽃잎 · 가을 낙엽의 "카메라 추종 볼륨".
 //
@@ -255,6 +256,8 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   points.renderOrder = 18;        // 눈(20)·비(21) 아래(대기 입자 레이어)
   points.visible = false;
 
+  let representation = 'points';
+  let worldDetail = null;
   let season = 'summer';          // 'spring'|'autumn' 이면 활성, 그 외 OFF
   let level = 0;                  // 현재 유효 강도(season*present*altGate)
   let activeSmooth = 0;           // #125 돌풍 게이트 평활값(간헐 리듬)
@@ -264,7 +267,12 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
   function setSeason(name) {
     const active = name === 'spring' || name === 'autumn';
     season = name;
-    if (!active) { points.visible = false; level = 0; return; }
+    if (!active) {
+      points.visible = false;
+      if (worldDetail) worldDetail.object.visible = false;
+      level = 0;
+      return;
+    }
     const cfg = SEASON_CFG[name];
     const autumn = name === 'autumn';
     const cr = makeRng(FIELD_SEED ^ (name === 'spring' ? 0x5091 : 0xa07a));
@@ -292,6 +300,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     geo.attributes.aSize.needsUpdate = true;
     geo.attributes.aRotSpd.needsUpdate = true;
     geo.attributes.aSpecies.needsUpdate = true;
+    if (worldDetail) worldDetail.syncSeasonAttributes();
   }
 
   const posAttr = geo.attributes.position;
@@ -310,8 +319,15 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     mat.uniforms.uFade.value = level;
     mat.uniforms.uTime.value = t;
     mat.uniforms.uLensScale.value = normalizeVillageLensScale(lensScale);
-    points.visible = level > 0.002;
-    if (!points.visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
+    const visible = level > 0.002;
+    points.visible = visible && representation === 'points';
+    if (worldDetail) {
+      worldDetail.object.position.copy(points.position);
+      worldDetail.object.visible = visible && representation === 'world';
+      worldDetail.material.uniforms.uFade.value = level;
+      worldDetail.material.uniforms.uTime.value = t;
+    }
+    if (!visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
 
     const cfg = SEASON_CFG[season];
     const w = wind || (getWind ? getWind(t) : { dirX: 1, dirZ: 0, speed: 0.2, gust: 0 });
@@ -321,6 +337,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     const gustTarget = Math.min(1, gustBase + (w.gust || 0) * 0.85);
     activeSmooth += (gustTarget - activeSmooth) * Math.min(1, dt * 1.4);
     mat.uniforms.uActive.value = activeSmooth;
+    if (worldDetail) worldDetail.material.uniforms.uActive.value = activeSmooth;
     const wx = w.dirX * w.speed, wz = w.dirZ * w.speed;
     const carry = cfg.windCarry;
     const swirl = 1.0 + w.gust * 1.8;   // 돌풍에 팔랑이 격해진다
@@ -344,6 +361,33 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
         + Math.cos(t * fFreq[i] * 0.85 + ph) * fAmp[i] * 0.8 * swirl;
     }
     posAttr.needsUpdate = true;
+    if (worldDetail) worldDetail.syncPosition();
+  }
+
+  // Lazily build the close-detail world geometry. The instance attributes wrap
+  // the point field's existing TypedArrays, so the simulation remains the sole
+  // CPU owner and the A/B representations cannot drift by seed or phase.
+  function getWorldRepresentation() {
+    if (!worldDetail) {
+      worldDetail = createPetalWorldRepresentation(geo, { renderOrder: points.renderOrder });
+      worldDetail.object.position.copy(points.position);
+      worldDetail.material.uniforms.uFade.value = mat.uniforms.uFade.value;
+      worldDetail.material.uniforms.uTime.value = mat.uniforms.uTime.value;
+      worldDetail.material.uniforms.uActive.value = mat.uniforms.uActive.value;
+      worldDetail.object.visible = points.visible && representation === 'world';
+    }
+    return worldDetail;
+  }
+
+  function setRepresentation(value) {
+    representation = value === 'world' ? 'world' : 'points';
+    const visible = level > 0.002;
+    points.visible = visible && representation === 'points';
+    if (representation === 'world') {
+      getWorldRepresentation().object.visible = visible;
+    } else if (worldDetail) {
+      worldDetail.object.visible = false;
+    }
   }
 
   function aabb() {
@@ -356,12 +400,14 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     geo.dispose();
     mat.dispose();
     texPetal.dispose(); texGinkgo.dispose(); texMaple.dispose();
+    if (worldDetail) worldDetail.dispose();
   }
 
   return {
-    points, setSeason, update, aabb, dispose,
+    points, setSeason, update, aabb, dispose, getWorldRepresentation, setRepresentation,
     get level() { return level; },
     get count() { return level > 0.01 ? N : 0; },
     get season() { return season; },
+    get representation() { return representation; },
   };
 }

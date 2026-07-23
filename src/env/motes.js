@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { normalizeVillageLensScale } from '../camera/optics.js';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
+import { createMoteWorldRepresentation } from './detail-particle-geometry.js';
 
 // 앰비언트 생명감 — 무엇도 완전히 정지해 있지 않되, 모든 움직임은 미세하게.
 //   setupMotes({ scene, sun, renderer })      → 공기 중 먼지 모트(THREE.Points 단일 드로우)
@@ -130,7 +131,10 @@ void main() {
 // opts(선택): radius/centerY/count/ySpan 로 볼륨을 좁혀 근접 링(마당 볼륨 한정)에 재사용한다.
 //   기본값 = 기존 상수(집 단독 모드 호출자 무회귀). fade(setFade)=활성/해제 크로스페이드 배율.
 //   ySpan: 수직 눌림 계수(작을수록 납작한 공기층). 근접 링은 낮춰 "대기 헤이즈"가 아닌 "마당 먼지"로.
-export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan, fireflies = false } = {}) {
+export function setupMotes({
+  scene, sun, renderer, radius, centerY, count, ySpan, fireflies = false,
+  representation = 'points',
+} = {}) {
   let time = 'sunset';
   let season = 'summer';
   let enabled = false;
@@ -203,6 +207,8 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   points.renderOrder = 4;    // 연기(3) 뒤, 불투명 이후
   points.frustumCulled = false;
 
+  let activeRepresentation = representation === 'world' ? 'world' : 'points';
+  let worldDetail = null;
   const group = new THREE.Group();
   group.name = 'motes';
   group.add(points);
@@ -228,11 +234,52 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   }
   setTimeTarget(time);
 
+  function syncWorldUniforms() {
+    if (!worldDetail) return;
+    const source = mat.uniforms;
+    const target = worldDetail.material.uniforms;
+    target.uTime.value = source.uTime.value;
+    target.uIntensity.value = source.uIntensity.value;
+    target.uColor.value.copy(source.uColor.value);
+    target.uFirefly.value = source.uFirefly.value;
+    target.uFireflyColor.value.copy(source.uFireflyColor.value);
+    target.uSunDir.value.copy(source.uSunDir.value);
+    target.uDrift.value = source.uDrift.value;
+    target.uWindDir.value.copy(source.uWindDir.value);
+    target.uWindSway.value = source.uWindSway.value;
+    target.uGust.value = source.uGust.value;
+    target.uNearA.value = source.uNearA.value;
+    target.uNearB.value = source.uNearB.value;
+    target.uLensScale.value = source.uLensScale.value;
+  }
+
+  function getWorldRepresentation() {
+    if (!worldDetail) {
+      worldDetail = createMoteWorldRepresentation(geo, { renderOrder: points.renderOrder });
+      group.add(worldDetail.object);
+      syncWorldUniforms();
+    }
+    return worldDetail;
+  }
+
+  function setRepresentation(value) {
+    activeRepresentation = value === 'world' ? 'world' : 'points';
+    if (activeRepresentation === 'world') getWorldRepresentation();
+    points.visible = activeRepresentation === 'points';
+    if (worldDetail) worldDetail.object.visible = activeRepresentation === 'world';
+  }
+
+  if (activeRepresentation === 'world') getWorldRepresentation();
+
   function update(dt) {
     if (!enabled || fade <= 0.002) return;
     // ink 모드에선 비표시(반투명 글린트가 먹 뷰티 패스에 이물감).
-    points.visible = !isInk();
-    if (!points.visible) return;
+    const particleObject = activeRepresentation === 'world'
+      ? getWorldRepresentation().object
+      : points;
+    points.visible = activeRepresentation === 'points' && !isInk();
+    if (worldDetail) worldDetail.object.visible = activeRepresentation === 'world' && !isInk();
+    if (!particleObject.visible) return;
     t += dt;
     const u = mat.uniforms;
     u.uTime.value = t;
@@ -250,6 +297,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
     u.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
     u.uWindDir.value.set(w.dirX, 0, w.dirZ);
     u.uGust.value = w.gust;
+    syncWorldUniforms();
   }
 
   function setTime(name, opts = {}) {
@@ -260,6 +308,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
       mat.uniforms.uIntensity.value = curInt * fade;
       mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
       mat.uniforms.uColor.value.copy(tgtColor);
+      syncWorldUniforms();
     }
   }
   function setSeason(name, opts = {}) {
@@ -268,6 +317,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
     if (opts.immediate) {
       curFirefly = tgtFirefly;
       mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
+      syncWorldUniforms();
     }
   }
   function setWeather(weather) {
@@ -276,6 +326,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
       : Math.max(weather?.rain || 0, weather?.snow || 0, weather?.accum || 0);
     wetSuppression = Math.max(0, Math.min(1, wet));
     mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
+    syncWorldUniforms();
   }
   function applyPresentation() { group.visible = enabled && fade > 0.002; }
   function setEnabled(v) { enabled = !!v; applyPresentation(); }
@@ -284,14 +335,28 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
     fade = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
     mat.uniforms.uIntensity.value = curInt * fade;
     mat.uniforms.uFirefly.value = curFirefly * fade * (1 - wetSuppression) * lastCalm;
+    syncWorldUniforms();
     applyPresentation();
   }
 
   function setLensScale(value) {
     mat.uniforms.uLensScale.value = normalizeVillageLensScale(value);
+    syncWorldUniforms();
   }
 
-  return { group, setTime, setSeason, setWeather, setEnabled, update, setFade, setLensScale };
+  syncWorldUniforms();
+
+  function dispose() {
+    geo.dispose();
+    mat.dispose();
+    if (worldDetail) worldDetail.dispose();
+  }
+
+  return {
+    group, setTime, setSeason, setWeather, setEnabled, update, setFade, setLensScale, dispose,
+    points, getWorldRepresentation, setRepresentation,
+    get representation() { return activeRepresentation; },
+  };
 }
 
 // ── 처마 등롱 진자 미세 요동 ────────────────────────────────────────────────
