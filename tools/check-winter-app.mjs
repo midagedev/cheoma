@@ -68,6 +68,20 @@ try {
   });
   const clearPng = await page.screenshot({ path: join(shotDir, 'winter-clear.png') });
 
+  const immediate = await page.evaluate(() => {
+    const engine = window.__engine;
+    const root = engine.scene.children.find((object) => object.name.startsWith('village-') && !object.name.includes('light'));
+    const villageSnow = () => root?.userData?.getSnowInfo?.();
+    engine.setWeather('snow');
+    const smoothSnow = { village: villageSnow(), global: { snow: window.__wx?.snow, accum: window.__wx?.accum } };
+    engine.setWeather('clear', { immediate: true });
+    const clearNow = { village: villageSnow(), global: { snow: window.__wx?.snow, accum: window.__wx?.accum } };
+    engine.setWeather('snow', { immediate: true, accum: 0.35 });
+    const snowNow = { village: villageSnow(), global: { snow: window.__wx?.snow, accum: window.__wx?.accum } };
+    engine.setWeather('clear', { immediate: true });
+    return { smoothSnow, clearNow, snowNow };
+  });
+
   const snow = await page.evaluate(async () => {
     const engine = window.__engine;
     engine.setWeather('snow');
@@ -113,6 +127,15 @@ try {
   const clearLuma = luma(clearPng), snowLuma = luma(snowPng);
 
   pass(clear.state.season === 'winter' && clear.state.weather === 'clear', 'clear winter is a first-class stable state');
+  pass(immediate.smoothSnow.village?.target === 1 && immediate.smoothSnow.village?.accum === 0,
+    'ordinary village snow keeps the authored accumulation crossfade',
+    JSON.stringify(immediate.smoothSnow));
+  pass(immediate.clearNow.village?.accum === 0 && immediate.clearNow.global.snow === 0 && immediate.clearNow.global.accum === 0,
+    'immediate clear synchronously resets village and global weather',
+    JSON.stringify(immediate.clearNow));
+  pass(immediate.snowNow.village?.accum === 0.35 && immediate.snowNow.global.snow === 1 && immediate.snowNow.global.accum === 0.35,
+    'immediate snow synchronously forwards the requested accumulation to both runtimes',
+    JSON.stringify(immediate.snowNow));
   pass(snow.state.season === 'winter' && snow.state.weather === 'snow', 'snow remains coherently coupled to winter');
   pass(snow.terrainPatched && snow.forestPatched, 'village terrain and forest consume the shared accumulation shader');
   const requiredProfiles = ['tile', 'thatch', 'terrain', 'foliage'];

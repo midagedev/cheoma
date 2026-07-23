@@ -358,7 +358,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
 
-  function reapplyEnvBase(opts) {
+  function reapplyEnvBase(opts = {}) {
     env.setTime(state.time, opts); // sky.apply → fog/bg/exposure/조명
   }
   function refreshAtmosphere() {
@@ -2361,17 +2361,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     focusRing.setSeason?.(name, opts);
   }
 
-  function commitWeather(name) {
+  function commitWeather(name, opts = {}) {
     state.weather = name;
     bumpShadow(1800);
-    if (forEachPresentedVillageHandle((handle) => handle.setWeather(name))) {
-      reapplyEnvBase();
+    weatherRef?.setWeather(name, opts);
+    if (forEachPresentedVillageHandle((handle) => handle.setWeather(name, opts))) {
+      reapplyEnvBase(opts);
       reapplyVillageFog();
     } else {
-      reapplyEnvBase();
+      reapplyEnvBase(opts);
       refreshAtmosphere();
     }
-    weatherRef?.setWeather(name);
     audio?.setWeather(name);
   }
 
@@ -2542,13 +2542,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setSeason(name, opts = {}) {
       const next = resolveEnvironmentChange(state, { season: name });
       commitSeason(next.season, opts);
-      if (next.weather !== state.weather) commitWeather(next.weather);
+      if (next.weather !== state.weather) commitWeather(next.weather, opts);
       emit('state', { ...state });
     },
-    setWeather(name) {
+    setWeather(name, opts = {}) {
       const next = resolveEnvironmentChange(state, { weather: name });
-      if (next.season !== state.season) commitSeason(next.season);
-      commitWeather(next.weather);
+      if (next.season !== state.season) commitSeason(next.season, opts);
+      commitWeather(next.weather, opts);
       emit('state', { ...state });
     },
 

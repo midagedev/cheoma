@@ -88,7 +88,7 @@ function isProductPrimaryDoorParcel(parcel) {
 //   .raycast(raycaster) → 위 프록시 디스크립터 | null (히트한 필지)
 //   .rebuildParcel(parcelId, newParams) → 해당 필지만 풀디테일로 재생성(집 편집 반영)
 //   .highlightParcel(parcelId, on)      → 먹선 아웃라인 하이라이트 토글(호버 표시)
-//   .setTime(name, opts) / .setSeason(name, opts) / .setWeather(name)  → env 상태 전파
+//   .setTime(name, opts) / .setSeason(name, opts) / .setWeather(name, opts)  → env 상태 전파
 //   .update(dt)       매 프레임(개울 물결·야간 촛불 일렁임)
 //   .prepareWavePresentation(app)                   → 새 마을 scene-direct 앰비언스만 사전 연결
 //   .enterVillageMode(app) / .exitVillageMode(app)  → 앱 단일건물 씬 ↔ 마을 씬 스왑
@@ -1410,9 +1410,9 @@ export function createVillageHandle(opts, seed, plan, group) {
       fauna.setSeason(name);
       ambientField.setSeason(name, immediate);
     },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
-    setWeather(name) {
+    setWeather(name, opts = {}) {
       weather = name;
-      snow.setWeather(name);
+      snow.setWeather(name, opts);
       refreshFocusedThresholdLife();
     },
     get time() { return time; }, get season() { return season; }, get weather() { return weather; },
