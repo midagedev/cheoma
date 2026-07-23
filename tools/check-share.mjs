@@ -7,13 +7,13 @@ import {
   shareSceneLink,
 } from '../app/src/lib/share-scene.js';
 import {
-  RESIDENTIAL_EDIT_QUERY_KEY,
-  decodeResidentialEditState,
-} from '../app/src/lib/residential-edit-url.js';
+  SCENE_SNAPSHOT_QUERY_KEY,
+  decodeSceneSnapshot,
+} from '../app/src/lib/scene-snapshot.js';
 
 const state = {
   seed: 42,
-  preset: 'giwa',
+  preset: 'korea',
   time: 'sunset',
   sunsetLook: 'crimson',
   season: 'autumn',
@@ -45,7 +45,9 @@ assert.ok(VILLAGE_SCALE_IDS.includes('solo'), 'solo cannot survive the shared UR
 assert.deepEqual(SHARE_OUTCOMES, ['shared', 'copied', 'cancelled', 'failed']);
 
 const url = buildSceneShareUrl({
-  baseUrl: 'https://cheoma.midagedev.com/view/?hero=0&worker=0&shot=1&lang=ko&flowsec=1#debug',
+  // A #107 URL is accepted as a base, but sharing migrates it to one canonical
+  // snapshot rather than preserving either legacy state or runtime flags.
+  baseUrl: 'https://cheoma.midagedev.com/view/?seed=9&time=day&village=1&vseed=8&vscale=town&hero=0&worker=0&shot=1&lang=ko&flowsec=1#debug',
   state,
   overrides,
   flow: true,
@@ -58,6 +60,14 @@ const url = buildSceneShareUrl({
   },
   residentialEdits: records,
   focusedParcelId: 'regular-3',
+  view: {
+    azimuth: 18.24,
+    elevation: 27.06,
+    zoom: 0.4567,
+    panEast: 0.1,
+    panUp: -0.02,
+    panSouth: 0,
+  },
 });
 const parsed = new URL(url);
 const query = parsed.searchParams;
@@ -65,31 +75,24 @@ const query = parsed.searchParams;
 assert.equal(parsed.origin, 'https://cheoma.midagedev.com');
 assert.equal(parsed.pathname, '/view/');
 assert.equal(parsed.hash, '');
-assert.deepEqual(
-  Object.fromEntries([...query].filter(([key]) => key !== RESIDENTIAL_EDIT_QUERY_KEY)),
-  {
-    seed: '42',
-    preset: 'giwa',
-    time: 'sunset',
-    sunset: 'crimson',
-    season: 'autumn',
-    weather: 'clear',
-    mode: 'ink',
-    exp: '2',
-    flow: '1',
-    village: '1',
-    vseed: '7',
-    vscale: 'solo',
-    vchar: 'banchon',
-    vpalace: '1',
-    vtemple: '1',
-  },
-  'canonical scene fields changed',
-);
-assert.deepEqual(decodeResidentialEditState(query.get(RESIDENTIAL_EDIT_QUERY_KEY)), {
-  version: 1,
-  records,
-  focusedParcelId: 'regular-3',
+assert.deepEqual([...query.keys()], [SCENE_SNAPSHOT_QUERY_KEY]);
+const snapshot = decodeSceneSnapshot(query.get(SCENE_SNAPSHOT_QUERY_KEY));
+assert.equal(snapshot.seed, 42);
+assert.equal(snapshot.time, 'sunset');
+assert.equal(snapshot.village.seed, 7);
+assert.equal(snapshot.village.scale, 'solo');
+assert.equal(snapshot.village.character, 'banchon');
+assert.equal(snapshot.village.includePalace, true);
+assert.equal(snapshot.village.includeTemple, true);
+assert.deepEqual(snapshot.residentialEdits, records);
+assert.equal(snapshot.focusedParcelId, 'regular-3');
+assert.deepEqual(snapshot.view, {
+  azimuth: 18.2,
+  elevation: 27.1,
+  zoom: 0.457,
+  panEast: 0.1,
+  panUp: -0.02,
+  panSouth: 0,
 });
 for (const key of ['hero', 'worker', 'shot', 'lang', 'flowsec']) {
   assert.equal(query.has(key), false, `${key} leaked into the shared scene URL`);
@@ -102,7 +105,31 @@ const terse = new URL(buildSceneShareUrl({
   baseUrl: 'https://cheoma.midagedev.com/?shot=1&post=0',
   state: { ...state, time: 'day', renderStyle: 'pbr', expansion: 1 },
 }));
-assert.deepEqual(Object.fromEntries(terse.searchParams), { seed: '42', time: 'day' });
+assert.deepEqual([...terse.searchParams.keys()], [SCENE_SNAPSHOT_QUERY_KEY]);
+assert.deepEqual(decodeSceneSnapshot(terse.searchParams.get(SCENE_SNAPSHOT_QUERY_KEY)), {
+  version: 1,
+  seed: 42,
+  time: 'day',
+  preset: null,
+  sunsetLook: null,
+  season: null,
+  weather: null,
+  renderStyle: 'pbr',
+  expansion: 1,
+  flow: false,
+  village: null,
+  residentialEdits: [],
+  focusedParcelId: null,
+  view: null,
+  standaloneParams: {},
+  overrides: {
+    preset: false,
+    time: true,
+    sunsetLook: false,
+    season: false,
+    weather: false,
+  },
+});
 
 const payload = {
   title: 'cheoma — scene',

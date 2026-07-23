@@ -10,6 +10,10 @@ import {
   villageFocusEffectWeight as focusEffectWeightForDistance,
   villageZoomReferenceBounds,
 } from '../../../src/api/cinematic.js';
+import {
+  captureSemanticOrbit,
+  restoreSemanticOrbit,
+} from './semantic-view-runtime.js';
 
 const DEG = Math.PI / 180;
 const AERIAL_AZIMUTH = 9 * DEG;
@@ -26,6 +30,7 @@ export function createVillageCameraRuntime({
   village,
 } = {}) {
   const focusDirection = new THREE.Vector3();
+  const semanticTarget = new THREE.Vector3();
   function outerRadius(handle = village.handle) {
     if (handle === village.handle && village.__outerR != null) return village.__outerR;
     const plan = handle.plan;
@@ -136,6 +141,99 @@ export function createVillageCameraRuntime({
     );
   }
 
+  function semanticBounds(mode) {
+    return villageZoomReferenceBounds(
+      mode,
+      referenceAerialDistance(),
+      mode === 'focus' ? focusCloseupReference : 0,
+    );
+  }
+
+  function semanticTargetContract(mode) {
+    if (mode === 'explore') {
+      const frame = aerial();
+      return {
+        target: semanticTarget.copy(frame.target),
+        scale: Math.max(1, outerRadius()),
+      };
+    }
+    const framing = village.handle?.getPickProxy?.(village.selected)?.cameraFraming;
+    if (!framing?.target || !(focusCloseupReference > 0)) return null;
+    return {
+      target: semanticTarget.copy(framing.target),
+      scale: Math.max(1, focusCloseupReference),
+    };
+  }
+
+  // A shareable view is relative to the current semantic target. It intentionally
+  // omits raw world position/target/quaternion: those become stale when a
+  // deterministic planner improves while parcel identity and composition remain
+  // meaningful.
+  function captureView() {
+    const mode = village.selected ? 'focus' : 'explore';
+    if (!village.active || village.transitioning || village.wave || regime !== mode) return null;
+    const direction = focusDirection.subVectors(camera.position, controls.target);
+    const distance = direction.length();
+    if (!(distance > 1e-6)) return null;
+    const referenceDistance = villageScreenDistanceForCamera(distance, camera);
+    const bounds = semanticBounds(mode);
+    const span = bounds.max - bounds.min;
+    const targetContract = semanticTargetContract(mode);
+    if (!(span > 1e-6) || !targetContract) return null;
+    return captureSemanticOrbit({
+      position: camera.position,
+      target: controls.target,
+      canonicalTarget: targetContract.target,
+      panScale: targetContract.scale,
+      zoom: (referenceDistance - bounds.min) / span,
+    });
+  }
+
+  function restoreView(view) {
+    if (!view || !village.active || village.transitioning || village.wave) return false;
+    const mode = village.selected ? 'focus' : 'explore';
+    const zoom = Number(view.zoom);
+    if (!Number.isFinite(zoom) || zoom < 0 || zoom > 1) return false;
+
+    if (mode === 'explore') {
+      camera.fov = VILLAGE_LENS.aerial.fov;
+      camera.userData.villageReferenceFov = VILLAGE_LENS.aerial.referenceFov;
+      camera.updateProjectionMatrix();
+      setRegime('explore');
+    } else if (regime !== 'focus' || !(focusCloseupReference > 0)) {
+      return false;
+    }
+    const targetContract = semanticTargetContract(mode);
+    if (!targetContract) return false;
+    const bounds = semanticBounds(mode);
+    const referenceDistance = bounds.min + (bounds.max - bounds.min) * zoom;
+    const distance = actualDistance(referenceDistance);
+    const orbit = restoreSemanticOrbit(view, {
+      canonicalTarget: targetContract.target,
+      panScale: targetContract.scale,
+      distance,
+    });
+    if (!orbit) return false;
+    controls.target.set(orbit.target.x, orbit.target.y, orbit.target.z);
+    camera.position.set(orbit.position.x, orbit.position.y, orbit.position.z);
+    camera.near = near();
+    camera.updateProjectionMatrix();
+    camera.lookAt(controls.target);
+    controls.update(0);
+    if (mode === 'focus') {
+      const elevation = Number(view.elevation) * DEG;
+      const pathElevation = villageFocusContextElevation(
+        referenceDistance,
+        referenceAerialDistance(),
+        focusCloseupReference,
+        focusBaseElevation,
+      );
+      focusElevationOffset = elevation - pathElevation;
+      focusAppliedElevation = elevation;
+    }
+    return true;
+  }
+
   // 망원 근경을 남측 축으로 직선 후퇴시키면 근경 프레임 밖에 예약된 정자·높은 공공 오브젝트가
   // 넓어진 시야에서 선택 집을 가릴 수 있다. 같은 일조 개방축 위에서 줌아웃 진행도만큼 크레인 업하되,
   // 사용자가 OrbitControls로 더한 수직 오프셋은 다음 프레임에도 보존한다.
@@ -186,6 +284,8 @@ export function createVillageCameraRuntime({
     distanceAtFraction,
     focusEffectWeight,
     updateFocusContext,
+    captureView,
+    restoreView,
     debugContinuum: () => ({
       mode: regime,
       active: village.active,

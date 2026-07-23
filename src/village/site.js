@@ -35,8 +35,10 @@ export const SCALE_ANCHORS = [
 // 외딴집 하한(#114): 슬라이더 매핑(scale01)·명명 tier 는 hamlet(74) 그대로 두고, 절대 siteR 로만
 //   그 아래(집 한 채·절 하나 스케일)까지 내려간다. tier 는 'hamlet' 유지 → populate 문법 무수정 감쇠.
 const SOLO_FIELD = { siteR: 30, ridgeH: 30, benchDrop: 1.6, undAmp: 0.42 };
-const R_MIN = SOLO_FIELD.siteR;                           // 외딴집(집 한 채) 분지 하한
-const R_MAX = SCALE_ANCHORS[SCALE_ANCHORS.length - 1].siteR * 1.04;
+export const VILLAGE_SITE_R_MIN = SOLO_FIELD.siteR;       // 외딴집(집 한 채) 분지 하한
+export const VILLAGE_SITE_R_MAX = SCALE_ANCHORS[SCALE_ANCHORS.length - 1].siteR * 1.04;
+const R_MIN = VILLAGE_SITE_R_MIN;
+const R_MAX = VILLAGE_SITE_R_MAX;
 const clampR = (R) => clampN(R, R_MIN, R_MAX);
 
 // ── 산·숲·지형 외곽 = 숲 near LOD 밴드에 밀착(#143) ──

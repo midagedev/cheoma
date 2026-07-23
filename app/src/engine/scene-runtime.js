@@ -54,6 +54,7 @@ export function createSceneRuntime({ container, pixelRatioCap = 2, shadowSize = 
   );
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.minPolarAngle = 0.03;
   controls.maxPolarAngle = Math.PI / 2 - 0.02;
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0;

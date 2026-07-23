@@ -10,6 +10,11 @@ import {
   encodeResidentialEditState,
 } from './residential-edit-url.js';
 import {
+  SCENE_SNAPSHOT_QUERY_KEY,
+  buildSceneSnapshotUrl,
+  decodeSceneSnapshot,
+} from './scene-snapshot.js';
+import {
   VILLAGE_SCALE_IDS,
   buildSceneShareUrl,
 } from './share-scene.js';
@@ -18,8 +23,41 @@ const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 
 const CHARS = ['minchon', 'yeoyeom', 'banchon'];
 
+function urlStateFromSnapshot(snapshot) {
+  const village = snapshot.village;
+  return {
+    seed: snapshot.seed,
+    hasSeed: true,
+    preset: snapshot.preset,
+    time: snapshot.time,
+    sunsetLook: snapshot.sunsetLook,
+    season: snapshot.season,
+    weather: snapshot.weather,
+    renderStyle: snapshot.renderStyle,
+    exp: snapshot.expansion > 1 ? snapshot.expansion : null,
+    hero: false,
+    shot: false,
+    flow: snapshot.flow,
+    flowsec: null,
+    village: !!village,
+    vseed: village?.seed ?? null,
+    vscale: village?.scale ?? null,
+    vchar: village?.character ?? null,
+    vpalace: village?.includePalace ?? false,
+    vtemple: village?.includeTemple ?? false,
+    villageOptions: village,
+    residentialEdits: snapshot.residentialEdits,
+    focusedParcelId: snapshot.focusedParcelId,
+    sceneView: snapshot.view,
+    standaloneParams: snapshot.standaloneParams,
+    sceneSnapshot: true,
+  };
+}
+
 export function readUrl() {
   const q = new URLSearchParams(location.search);
+  const snapshot = decodeSceneSnapshot(q.get(SCENE_SNAPSHOT_QUERY_KEY));
+  if (snapshot) return urlStateFromSnapshot(snapshot);
   const out = {};
   for (const k of KEYS) { if (q.has(k)) out[k] = q.get(k); }
   const seed = out.seed != null ? (parseInt(out.seed, 10) >>> 0) : newSeed();
@@ -49,6 +87,10 @@ export function readUrl() {
     vtemple: q.get('vtemple') === '1',
     residentialEdits: residentialEdits?.records || [],
     focusedParcelId: residentialEdits?.focusedParcelId || null,
+    villageOptions: null,
+    sceneView: null,
+    standaloneParams: {},
+    sceneSnapshot: false,
   };
 }
 
@@ -56,8 +98,30 @@ export function readUrl() {
 //   village: 마을 모드일 때 { seed, scale, character, includePalace, includeTemple } — 없으면 마을 파라미터 제거.
 export function writeUrl(state, {
   overrides = {}, village = null, flow = false, residentialEdits = [], focusedParcelId = null,
+  view = null, standaloneParams = {}, canonical = false,
 } = {}) {
+  if (canonical) {
+    const portable = buildSceneSnapshotUrl({
+      baseUrl: location.href,
+      state,
+      overrides,
+      village,
+      flow,
+      residentialEdits,
+      focusedParcelId,
+      view,
+      standaloneParams,
+    });
+    if (!portable) return false;
+    const next = new URL(portable);
+    history.replaceState(null, '', `${next.pathname}${next.search}`);
+    return true;
+  }
   const q = new URLSearchParams(location.search);
+  // A non-canonical/legacy write must remove any stale scene payload first;
+  // otherwise the snapshot decoder would win over the mutable legacy keys on
+  // the next reload. Canonical sessions stay in the branch above.
+  q.delete(SCENE_SNAPSHOT_QUERY_KEY);
   q.set('seed', String(state.seed >>> 0));
   const put = (k, v, cond) => { if (cond) q.set(k, String(v)); else q.delete(k); };
   put('preset', state.preset, overrides.preset);
@@ -79,10 +143,12 @@ export function writeUrl(state, {
   put(RESIDENTIAL_EDIT_QUERY_KEY, editPayload, !!village && !!editPayload);
   const url = `${location.pathname}?${q.toString()}`;
   history.replaceState(null, '', url);
+  return true;
 }
 
 export function shareUrl(state, overrides, {
-  village = null, flow = false, residentialEdits = [], focusedParcelId = null,
+  village = null, flow = false, residentialEdits = [], focusedParcelId = null, view = null,
+  standaloneParams = {},
 } = {}) {
   return buildSceneShareUrl({
     baseUrl: location.href,
@@ -92,5 +158,7 @@ export function shareUrl(state, overrides, {
     flow,
     residentialEdits,
     focusedParcelId,
+    view,
+    standaloneParams,
   });
 }

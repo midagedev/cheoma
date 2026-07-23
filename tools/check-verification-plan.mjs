@@ -47,6 +47,7 @@ assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
 ]);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/village/options.js']), ['core', 'share', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
 ]);
@@ -69,6 +70,21 @@ assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
 assert.deepEqual(ids(['app/src/App.svelte']), [
   'core', 'app', 'ink-app', 'parcel-rebuild-browser', 'build',
 ]);
+assert.deepEqual(ids(['app/src/lib/scene-snapshot.js']), [
+  'core', 'share', 'app', 'build',
+]);
+assert.deepEqual(ids(['app/src/lib/standalone-param-spec.js']), [
+  'core', 'share', 'app', 'build',
+]);
+assert.deepEqual(ids(['app/src/engine/semantic-view-runtime.js']), [
+  'core', 'share', 'app', 'dof-app', 'lod-app', 'build',
+]);
+assert.deepEqual(ids(['app/src/lib/standalone-param-spec.js'], {
+  newPaths: ['app/src/lib/standalone-param-spec.js'],
+}), ['core', 'share', 'app', 'build']);
+assert.deepEqual(ids(['app/src/engine/semantic-view-runtime.js'], {
+  newPaths: ['app/src/engine/semantic-view-runtime.js'],
+}), ['core', 'share', 'app', 'dof-app', 'lod-app', 'build']);
 assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
   'core', 'app', 'parcel-rebuild-browser', 'build',
 ]);
@@ -91,6 +107,8 @@ assert.deepEqual(ids(['src/api/village.js']), [
   'core', 'app', 'worker', 'lod-app',
 ]);
 assert.deepEqual(ids(['src/api/village-plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/api/village-options.js']), ['core', 'share', 'app', 'worker']);
+assert.deepEqual(ids(['src/api/environment-state.js']), ['core', 'share']);
 assert.deepEqual(ids(['src/api/shadow-framing.js']), ['core', 'app', 'rim', 'lod-focus']);
 assert.deepEqual(ids(['src/api/post-quality.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
@@ -149,6 +167,7 @@ assert.deepEqual(ids(['src/cinematic/architectural-reveal.js']), [
   'core', 'app', 'cinematic-app',
 ]);
 assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
+assert.deepEqual(ids(['tools/check-scene-snapshot.mjs']), ['core', 'share']);
 assert.deepEqual(ids(['tools/shoot-bokeh-fixture.mjs']), ['core', 'bokeh-fixture']);
 for (const helper of [
   'tools/lib/bokeh-gpu-diagnostic.mjs',

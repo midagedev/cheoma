@@ -2,23 +2,18 @@
   import { onDestroy } from 'svelte';
   import { TYPES } from '../lib/seed.js';
   import { t } from '../lib/i18n.svelte.js';
+  import { STANDALONE_PARAM_SPECS } from '../lib/standalone-param-spec.js';
   import BottomSheet from './BottomSheet.svelte';
 
   // 우측 한지 파라미터 패널 — 집 선택 시 슬라이드 인. 라벨은 로케일화(t).
   let {
     open = false, preset = 'korea', expansion = 1, maxExpansion = 3, canMerge = false,
-    params = {}, onType, onExpansion, onMerge, onParam, onShare = null, onClose,
+    params = {}, paramCommitEpoch = 0,
+    onType, onExpansion, onMerge, onParam, onShare = null, onClose,
   } = $props();
 
   // 코어가 즉시 지원하는 슬라이더만 노출(params 에 존재하는 수치 키에 한함). 라벨키 s_<key>.
-  const SLIDER_DEFS = [
-    { key: 'roofPitch', min: 0.4, max: 0.95, step: 0.01 },
-    { key: 'riseScale', min: 0.6, max: 1.3, step: 0.01 },
-    { key: 'eaveOverhang', min: 1.0, max: 3.0, step: 0.05 },
-    { key: 'cornerLift', min: 0, max: 1.6, step: 0.01 },
-    { key: 'profileCurve', min: 0, max: 1, step: 0.01 },
-  ];
-  const sliders = $derived(SLIDER_DEFS.filter((d) => typeof params[d.key] === 'number'));
+  const sliders = $derived(STANDALONE_PARAM_SPECS.filter((d) => typeof params[d.key] === 'number'));
 
   // 큰 글리프 一/ㄱ/ㄷ 는 평면 상형 → 로케일 불변, 캡션만 로케일화.
   const STEPS = [ { n: 1, g: '一', k: 'step_single' }, { n: 2, g: 'ㄱ', k: 'step_l' }, { n: 3, g: 'ㄷ', k: 'step_u' } ];
@@ -26,15 +21,27 @@
 
   // 슬라이더 디바운스 재생성.
   let timers = {};
-  function slide(key, value) {
-    params[key] = value; // 라벨 즉시 반영
-    clearTimeout(timers[key]);
-    timers[key] = setTimeout(() => onParam?.(key, value), 110);
-  }
-  onDestroy(() => {
+  function clearTimers() {
     for (const timer of Object.values(timers)) clearTimeout(timer);
     timers = {};
+  }
+  function slide(key, value) {
+    params[key] = value; // 라벨 즉시 반영
+    const epoch = paramCommitEpoch;
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(() => onParam?.(key, value, epoch), 110);
+  }
+  // A type change can replace P while a slider's 110ms commit is pending.
+  // Cancel that old-generation callback rather than leaking (for example)
+  // roofPitch into a giwa spec that does not own it.
+  $effect(() => {
+    const generation = `${preset}:${paramCommitEpoch}`;
+    return () => {
+      void generation;
+      clearTimers();
+    };
   });
+  onDestroy(clearTimers);
 </script>
 
 <BottomSheet {open} {onClose} variant="right" ariaLabel="build panel">
@@ -102,6 +109,7 @@
       <label class="row">
         <span class="rl">{t('s_' + d.key)}</span>
         <input
+          data-param={d.key}
           type="range" min={d.min} max={d.max} step={d.step}
           value={params[d.key]}
           oninput={(e) => slide(d.key, parseFloat(e.currentTarget.value))}

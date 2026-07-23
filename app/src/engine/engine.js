@@ -33,7 +33,9 @@ import { compileSubtreeAsync } from '../../../src/api/rendering.js';
 import {
   createRerollWave, createVillage, createVillageAsync,
 } from '../../../src/api/village.js';
+import { VILLAGE_WALL_STYLE_IDS } from '../../../src/api/village-options.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
+import { normalizeStandaloneParamPatch } from '../lib/standalone-param-spec.js';
 import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './expansion.js';
 import { createArchitecturalRevealRuntime } from './architectural-reveal-runtime.js';
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
@@ -47,6 +49,12 @@ import { createPostRuntime } from './post-runtime.js';
 import { createSceneRuntime } from './scene-runtime.js';
 import { createViewShift } from './view-shift.js';
 import { createVillageCameraRuntime } from './village-camera-runtime.js';
+import {
+  captureSemanticOrbit,
+  restoreSemanticOrbit,
+  semanticLogZoom,
+  semanticLogZoomRatio,
+} from './semantic-view-runtime.js';
 
 const DEG = Math.PI / 180;
 const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
@@ -369,6 +377,60 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     return expandedBuildingSpot(computeLayout(P), state.expansion);
   }
 
+  function houseSemanticContract() {
+    const layout = computeLayout(P);
+    const frame = buildingSpot('three-quarter', layout);
+    return {
+      target: frame.target,
+      panScale: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
+      referenceDistance: frame.pos.distanceTo(frame.target),
+    };
+  }
+
+  function captureSceneView() {
+    if (village.active) return villageCamera.captureView();
+    if (tween || revealCamera?.isActive?.() || cinematic.isActive()
+        || demo.active || !controls.enabled) return null;
+    const contract = houseSemanticContract();
+    const distance = camera.position.distanceTo(controls.target);
+    const zoom = semanticLogZoom(distance / contract.referenceDistance);
+    if (zoom == null) return null;
+    return captureSemanticOrbit({
+      position: camera.position,
+      target: controls.target,
+      canonicalTarget: contract.target,
+      panScale: contract.panScale,
+      zoom,
+    });
+  }
+
+  function restoreSceneView(view) {
+    if (village.active) return restoreVillageView(view);
+    if (!view || demo.active || cinematic.isActive() || revealCamera?.isPlaying?.()) return false;
+    const contract = houseSemanticContract();
+    const distanceRatio = semanticLogZoomRatio(Number(view.zoom));
+    if (distanceRatio == null) return false;
+    const orbit = restoreSemanticOrbit(view, {
+      canonicalTarget: contract.target,
+      panScale: contract.panScale,
+      distance: contract.referenceDistance * distanceRatio,
+    });
+    if (!orbit) return false;
+    tween = null;
+    revealCamera?.stop?.('scene-restore', { notify: false });
+    settleControls();
+    controls.target.set(orbit.target.x, orbit.target.y, orbit.target.z);
+    camera.position.set(orbit.position.x, orbit.position.y, orbit.position.z);
+    camera.near = Math.min(2.5, Math.max(
+      0.08,
+      camera.position.distanceTo(controls.target) * 0.02,
+    ));
+    camera.updateProjectionMatrix();
+    camera.lookAt(controls.target);
+    controls.update(0);
+    return true;
+  }
+
   // 카메라 트윈(선택 포커스·해제·마을 돌리인/아웃). 진행 중이면 매 프레임 lerp.
   //   opts.fov 지정 시 화각도 함께 보간(광각 부감 46 ↔ 망원 필지 10). opts.dofAnchor 는 전환 중 의미 있는
   //   월드 초점점을 고정하고, dofAnchorFrom/To 는 같은 이즈드 진행도로 개구부 A→B 초점면을 옮긴다.
@@ -509,6 +571,31 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     },
     markActivity,
   });
+  let semanticViewSettlePending = false;
+  let semanticViewSettleFrames = 0;
+  const onControlsEnd = () => {
+    semanticViewSettlePending = true;
+    semanticViewSettleFrames = 0;
+  };
+  controls.addEventListener('end', onControlsEnd);
+
+  function updateSemanticViewSettlement() {
+    if (!semanticViewSettlePending || tween || revealCamera?.isActive?.()
+        || cinematic.isActive() || demo.active) return;
+    const spherical = controls._sphericalDelta;
+    const pan = controls._panOffset;
+    const inertia = Math.max(
+      Math.abs(spherical?.theta || 0),
+      Math.abs(spherical?.phi || 0),
+      Math.sqrt(pan?.lengthSq?.() || 0),
+      Math.abs((controls._scale ?? 1) - 1),
+    );
+    semanticViewSettleFrames = inertia <= 1e-7 ? semanticViewSettleFrames + 1 : 0;
+    if (semanticViewSettleFrames < 2) return;
+    semanticViewSettlePending = false;
+    semanticViewSettleFrames = 0;
+    if (captureSceneView()) emit('viewSettled', {});
+  }
 
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
   function ensureAudio() {
@@ -698,6 +785,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const cb = active.onDone;
     tween = null;
     cb?.();
+    if (!village.active) emit('viewSettled', {});
   }
 
   function advanceCameraTween(dt) {
@@ -800,6 +888,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) controls.update(dt);
     const settledFocusAmount = village.active && village.selected && !village.transitioning && !tween
       ? villageCamera.updateFocusContext() : null;
+    // Focus context may crane the camera after OrbitControls consumes its
+    // damping. Persist only that final physical frame, never the pre-crane pose.
+    updateSemanticViewSettlement();
     // #14: 집 선택은 줌아웃으로 풀리지 않지만 근경 보케까지 넓은 마을 문맥에 남아서는 안 된다.
     // 화면 등가 거리를 따라 1→0으로 줄여 가까운 집의 원형 보케는 보존하고, 넓은 집 보기에서는
     // Bokeh pass를 완전히 쉬게 한다. focus-in/out/hop 중에는 카메라 tween이 amount를 단독 소유한다.
@@ -1135,6 +1226,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const setZoomRegime = (mode, closeupDist = 0) => villageCamera.setRegime(mode, closeupDist);
   const villageNear = () => villageCamera.near();
   const reapplyVillageFog = () => villageCamera.reapplyFog();
+  function settleVillageExplore() {
+    setZoomRegime('explore');
+    emit('villageExplore', {});
+  }
+  function restoreVillageView(view) {
+    if (!village.active || village.transitioning || villageWaveBusy()) return false;
+    // A canonical reload owns the settled composition. Retire the default entry
+    // dolly without firing its completion callback, clear OrbitControls inertia,
+    // then apply the target-relative semantic view atomically.
+    tween = null;
+    settleControls();
+    return villageCamera.restoreView(view);
+  }
 
   // 배율별 후처리(mode-integration §5): 마을 부감은 RimPass(매 프레임 씬 노멀 재렌더)가 도성 규모에서
   // 60fps 위험이라 OFF. focus-in(집 근접)·단일건물 씬은 ON. rim OFF 시 FlarePass 가림 판정이 스테일
@@ -1165,7 +1269,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const tune = `${n(opts.undAmpK, 1)},${n(opts.ridgeHK, 1)},${n(opts.streamMeanderK, 1)},${opts.stream === false ? 0 : 1},${opts.river === true ? 1 : 0}`
       + `|${n(opts.paddyDensityK, 1)},${n(opts.treeDensityK, 1)},${n(opts.cityWall, 'a')},${n(opts.sijeon, 'a')}`
       + `|${opts.char01 == null ? 'a' : opts.char01},${n(opts.diversityK, 1)}`
-      + `|h${opts.houses == null ? 'a' : opts.houses}`;   // #114 집 수 오버라이드(0="절 하나만" 등)
+      + `|r${opts.siteR == null ? 'a' : opts.siteR}|h${opts.houses == null ? 'a' : opts.houses}`
+      + `|w${VILLAGE_WALL_STYLE_IDS.map((key) => n(opts.wallWeights?.[key], 1)).join(',')}`;
     return `${base}|${tune}`;
   }
 
@@ -1429,7 +1534,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
     // 재진입(활성): 비동기 빌드일 수 있어 프레이밍 트윈을 onReady 로(새 핸들 site.R 기준). 구 마을 유지 중 부감.
-    if (village.active) { setFocusComposition(0); setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); }); emit('villageMode', true); return; }
+    if (village.active) { setFocusComposition(0); setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); }); emit('villageMode', true); return; }
     // 단일건물 선택·호버 상태 정리
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
@@ -1443,7 +1548,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       ? camera.userData.villageReferenceFov : camera.fov;
     setPostFocus(false);                 // 부감 진입 → RimPass·flare OFF(성능)
     // 첫 진입은 동기(handle 無) → onReady 즉시 실행. 프레이밍 트윈을 onReady 로 두어 async 폴백에도 정합.
-    buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.4, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); });
+    buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.4, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); });
     updateWeatherColliders();
     emit('villageMode', true);
   }
@@ -1690,7 +1795,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         village.transitioning = false;
         setPostFocus(false);              // 부감 도착 → rim/flare OFF(전환 중엔 유지해 팝 방지)
         if (parcelId) village.handle.hideParcelDetail(parcelId);   // 부감 거리에서 오버레이 해제(팝 은닉)
-        setZoomRegime('explore');
+        settleVillageExplore();
         emit('villageFocusMorph', 0);
         emit('villageReturnDone', { parcelId });
         if (parcelId) tasks.after(() => {
@@ -2175,7 +2280,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     reapplyVillageFog();
     updateWeatherColliders();   // 새 seed/규모의 지붕·마당 AABB로 눈·비 충돌 대상을 즉시 교체
     bumpShadow(2000);   // #140-A 웨이브 완료 후 새 마을 정착 프레임 그림자 갱신
-    setZoomRegime('explore');
+    settleVillageExplore();
     emit('villageSeed', village.seed);
     emit('villageWave', { phase: 'done' });
   }
@@ -2212,6 +2317,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getState: () => ({ ...state }),
     getParams: () => ({ ...P }),
     getLayout: () => computeLayout(P),
+    captureView: captureSceneView,
+    restoreView: restoreSceneView,
 
     start(cfg, seed = 0) { state.seed = seed >>> 0; applyConfig(cfg, { animate: false }); },
 
@@ -2241,6 +2348,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         seed,
         subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
         duration: 2.6,
+        onDone: () => emit('viewSettled', {}),
+        onInterrupt: () => emit('viewSettled', {}),
       });
       emit('seed', seed);
       return seed;
@@ -2263,6 +2372,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         seed: state.seed,
         subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
         duration: 2.6,
+        onDone: () => emit('viewSettled', {}),
+        onInterrupt: () => emit('viewSettled', {}),
       });
       emit('seed', state.seed);
       return state.seed;
@@ -2284,10 +2395,33 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       emit('state', { ...state });
     },
 
+    // URL restore and the panel share one all-or-none boundary. Immediate
+    // restore performs exactly one flat regeneration; live panel commits keep
+    // the existing short tofu settle.
+    setParams(patch, { immediate = false, animate = !immediate } = {}) {
+      const normalized = normalizeStandaloneParamPatch(patch, {
+        allowedKeys: Object.keys(P).filter((key) => typeof P[key] === 'number'),
+      });
+      if (!normalized) return false;
+      if (rebuildTimer) {
+        tasks.clearAfter(rebuildTimer);
+        rebuildTimer = null;
+      }
+      Object.assign(P, normalized);
+      if (immediate) {
+        regenerate();
+        building.visible = true;
+        if (animate) startAssembly(REBUILD_ANIM_SEC, { includeWings: true });
+        if (state.selected) refreshGhost();
+      } else {
+        scheduleRebuild();
+      }
+      return true;
+    },
+
     // 파라미터 슬라이더. UI 110ms 디바운스 + 여기 debounce 로 조작을 멈추면 1회 재조립(두부 정착).
     setParam(key, value) {
-      P[key] = value;
-      scheduleRebuild();
+      return controller.setParams({ [key]: value });
     },
 
     // 칸 확장 스테퍼: 1→2→3. 늘어난 날개만 조립 애니로 자라남.
@@ -2418,7 +2552,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           setFocusComposition(0);
           setPostFocus(false);
           // #123: 규모커밋은 비동기 빌드(forest 워커) — 구 마을 유지 중 부감 프레이밍은 새 핸들 준비 시(onReady).
-          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); });
+          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); });
           emit('villageMode', true);
         }
       },
@@ -2430,7 +2564,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           clearSemanticDofAnchor();
           setFocusComposition(0);
           setPostFocus(false);
-          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: () => setZoomRegime('explore') }); });
+          buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); });
         }
         emit('villageSeed', village.seed);
         return village.seed;
@@ -2498,6 +2632,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         return d?.group ?? null;
       },
       residentialOpeningEdits: () => village.handle?.residentialOpeningEdits?.() ?? [],
+      captureView: () => villageCamera.captureView(),
+      restoreView: (view) => restoreVillageView(view),
       // 필지 편집 반영(#48, 라이브 스로틀은 App). 정규 필지는 오버레이 단일 집 교체, 특수(종가·관아)는
       //   컴파운드 오버레이 재생성. 편집 시 오버레이가 새로 만들어져 근접 앰비언스 링 앵커가 스테일해지므로
       //   focus 중인 그 필지면 새 오버레이에 링을 재부착(정규·특수 모두 — #92 정규도 오버레이+링).
@@ -2518,6 +2654,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         }
         return g;
       },
+      refreshCommittedFlora: () => village.handle?.refreshCommittedFlora?.() ?? null,
       getState: () => ({
         active: village.active, selected: village.selected, transitioning: village.transitioning,
         hover: hoverParcel,
@@ -3002,6 +3139,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       groupAnims = [];
       rebuildTimer = null;
       demoRuntime.dispose();
+      controls.removeEventListener('end', onControlsEnd);
       revealCamera?.dispose();
       cinematic.dispose?.();
       removeEventListener('resize', resizeAll);
@@ -3105,6 +3243,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     'village.focusRoot': () => null,
     'village.residentialOpeningEdits': () => [],
     'village.rebuild': () => null,
+    'village.refreshCommittedFlora': () => null,
     'village.getState': () => ({
       active: false, selected: null, transitioning: false, hover: null,
       opts: { ...village.opts }, seed: village.seed, spec: null, stats: null, warnings: [],

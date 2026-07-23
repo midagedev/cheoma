@@ -4,6 +4,8 @@ export { planVillage } from '../village/plan.js';
 export * from './temple-plan.js';
 export {
   SCALE_ANCHORS,
+  VILLAGE_SITE_R_MAX,
+  VILLAGE_SITE_R_MIN,
   siteConfigFor,
   resolveSiteR,
   scale01ToR,
@@ -11,6 +13,15 @@ export {
   tierForR,
   makeSite,
 } from '../village/site.js';
+export {
+  VILLAGE_NUMBER_OPTION_SPECS,
+  VILLAGE_OPTION_DEFAULTS,
+  VILLAGE_WALL_STYLE_IDS,
+  VILLAGE_WALL_WEIGHT_SPEC,
+  normalizeVillageTuningOptions,
+  normalizeVillageWallWeights,
+  villageOptionDefaults,
+} from '../village/options.js';
 export { ROAD_WIDTH } from '../village/roads.js';
 export { planRiverPort } from '../village/river-port-plan.js';
 export { createSettlementRelief } from '../village/settlement-relief.js';

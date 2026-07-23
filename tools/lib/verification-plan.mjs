@@ -11,10 +11,17 @@ const FULL_GATES = Object.freeze([
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
 // New code normally fails closed. These paths are the reviewed exception for
-// #107: the platform adapter is covered by the dedicated pure contract below,
+// #107–#108: the platform adapter and portable semantic state are covered by the dedicated pure contract below,
 // and the contract entrypoint routes only to that gate.
 const REVIEWED_NEW_PATHS = new Set([
+  'app/src/lib/scene-snapshot.js',
   'app/src/lib/share-scene.js',
+  'app/src/lib/standalone-param-spec.js',
+  'app/src/engine/semantic-view-runtime.js',
+  'src/api/environment-state.js',
+  'src/api/village-options.js',
+  'src/village/options.js',
+  'tools/check-scene-snapshot.mjs',
   'tools/check-share.mjs',
 ]);
 
@@ -57,7 +64,7 @@ function routePath(path) {
   if (path === 'src/main.js' || ROOT_HTML.test(path)) {
     return { full: true, reasons: ['standalone entrypoint requires the full matrix'] };
   }
-  if (path === 'tools/check-share.mjs') {
+  if (path === 'tools/check-share.mjs' || path === 'tools/check-scene-snapshot.mjs') {
     select('scene-share pure contract changed', 'share');
     return { gates, reasons };
   }
@@ -108,7 +115,8 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
-    if (/^app\/src\/lib\/(?:share-scene|url)\.js$/.test(path)) {
+    if (/^app\/src\/lib\/(?:scene-snapshot|share-scene|standalone-param-spec|url)\.js$/.test(path)
+      || path === 'app/src/engine/semantic-view-runtime.js') {
       select('scene-share canonical URL or platform adapter changed', 'share');
     }
     if (/^app\/src\/(?:App\.svelte|components\/RenderStyleToggle\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime|post-quality-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
@@ -132,7 +140,7 @@ function routePath(path) {
     if (path === 'app/src/engine/directional-shadow-runtime.js') {
       select('focused directional shadow framing changed', 'rim', 'lod-focus');
     }
-    if (/^app\/src\/engine\/(?:view-shift|village-camera-runtime)\.js$/.test(path)) {
+    if (/^app\/src\/engine\/(?:semantic-view-runtime|view-shift|village-camera-runtime)\.js$/.test(path)) {
       select('camera runtime changed', 'dof-app', 'lod-focus', 'lod-wave');
     }
     return { gates, reasons };
@@ -203,6 +211,9 @@ function routePath(path) {
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
     select('village generation changed', 'app', 'worker');
+    if (path === 'src/village/options.js' || path === 'src/village/site.js') {
+      select('portable village option meaning changed', 'share');
+    }
     if (path === 'src/generators/village/roads.js') {
       select('packed-earth road rendering changed', 'surface-browser');
     }
@@ -280,6 +291,14 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/environment-state.js') {
+      select('portable environment state boundary changed', 'share');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/village-options.js') {
+      select('portable village option boundary changed', 'share', 'app', 'worker');
+      return { gates, reasons };
+    }
     if (path === 'src/api/ink.js' || path === 'src/api/render-style.js') {
       select('public ink rendering API changed', 'app', 'ink-app');
       return { gates, reasons };

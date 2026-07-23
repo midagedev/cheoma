@@ -26,6 +26,7 @@ import { planPavilion } from './pavilion-plan.js';
 import { planPublicProps } from './public-props-plan.js';
 import { planRiverPort } from './river-port-plan.js';
 import { attachRoadJunctions } from './road-topology.js';
+import { normalizeVillageTuningOptions } from './options.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -114,42 +115,11 @@ function char01ForR(R, seed) {
 }
 const charLabel = (c) => (c < 0.34 ? 'minchon' : c < 0.66 ? 'yeoyeom' : 'banchon');
 
-// ── 마을 생성 옵션 정규화(#91) ── 지형·구성·어휘 축의 스칼라/오버라이드/토글을 클램프·기본값 적용.
-//   무옵션(전부 기본) 시 현행 정확 재현이 최우선 게이트 → 각 기본값은 현행 로직과 동치(배율 1·auto·미지정).
-const clampNum = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v)) ? Math.min(hi, Math.max(lo, v)) : d;
-const triState = (v) => (v === true ? true : v === false ? false : 'auto');   // 강제 ON/OFF/자동(tier)
-function normWallWeights(w) {   // 담장 스타일 분포 배율(유형별). 미지정/전부기본 → null(무영향, 픽셀 불변).
-  if (!w || typeof w !== 'object') return null;
-  const out = {}; let any = false;
-  for (const k of ['tile', 'stone', 'mud', 'brush', 'hedge', 'open']) {
-    if (typeof w[k] === 'number' && isFinite(w[k])) { out[k] = Math.min(3, Math.max(0, w[k])); any = true; }
-  }
-  return any ? out : null;
-}
-function normTuning(opts) {
-  return {
-    // 지형(site.js makeSite): 현행값 배율 + 개울 토글
-    undAmpK: clampNum(opts.undAmpK, 0, 2.2, 1),          // 기복(언듈레이션) 진폭
-    ridgeHK: clampNum(opts.ridgeHK, 0.5, 1.6, 1),        // 배산 능선·봉우리 높이
-    streamMeanderK: clampNum(opts.streamMeanderK, 0, 2.5, 1),  // 개울 사행 정도
-    stream: opts.stream === false ? false : true,        // 개울 유무(off=내륙 마른 마을)
-    river: opts.river === true,                           // 큰 마을의 넓은 물길(명시 선택)
-    // 구성
-    treeDensityK: clampNum(opts.treeDensityK, 0, 2, 1),  // 나무 밀도(populate scatterTrees)
-    paddyDensityK: clampNum(opts.paddyDensityK, 0, 2, 1),// 논 밀도(planPaddies)
-    cityWall: triState(opts.cityWall),                   // 성곽 강제 ON/OFF (auto=hanyang)
-    sijeon: triState(opts.sijeon),                       // 시전 강제 ON/OFF (auto=hanyang; daero 필요)
-    // 어휘(variants.js)
-    diversityK: clampNum(opts.diversityK, 0, 2, 1),      // 다양성 강도(집 지터 배율)
-    wallWeights: normWallWeights(opts.wallWeights),      // 담장 스타일 분포
-  };
-}
-
 export function planVillage(opts = {}) {
   const warnings = [];
   const seed = (typeof opts.seed === 'number' ? opts.seed
     : typeof opts.seed === 'string' ? hashString(opts.seed) : 20260716) >>> 0;
-  const tuning = normTuning(opts);
+  const tuning = normalizeVillageTuningOptions(opts);
 
   // ── 연속 스케일(#89) ── siteR(분지 반경, m) 하나가 규모의 진입점. opts.scale 은 프리셋명('capital')
   //   | 절대 siteR(m, >1) | 0..1 정규화(슬라이더) 모두 허용, opts.siteR(m) 은 명시 우선. 지형은 연속
