@@ -1,4 +1,4 @@
-// Controlled visual proof for issue #24: the product's real post stack must turn
+// Controlled visual proof for issues #24/#88: the product's real post stack must turn
 // isolated foreground/background HDR lights into round aperture images, while a
 // subject on the focus plane stays sharp. Captures live in an OS temp directory.
 //
@@ -6,331 +6,116 @@
 // boots the normal engine and StableBokehPass, pauses the product loop, then swaps
 // only the visible scene content for a deterministic optical chart. No production
 // object, pass, shader, or draw call is added by this tool.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { PNG } from 'pngjs';
-import { createServer } from '../app/node_modules/vite/dist/node/index.js';
-import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { createServer } from "../app/node_modules/vite/dist/node/index.js";
+import {
+  edgeEnergy,
+  makePanStrip,
+  maxChannelDifference,
+  measureCardLeak,
+  measureDiscProfile,
+  measureLights,
+  measurePositiveDelta,
+} from "./lib/bokeh-image-analysis.mjs";
+import { measureLinearBokehSweep } from "./lib/bokeh-linear-sweep.mjs";
+import {
+  BOKEH_OPTICAL_CHART_VIEWPORT,
+  installBokehOpticalChart,
+} from "./lib/bokeh-optical-chart.mjs";
+import { runBokehScatterProof } from "./lib/bokeh-scatter-proof.mjs";
+import {
+  assertBokehSourceStress,
+  runBokehSourceStress,
+} from "./lib/bokeh-source-stress.mjs";
+import { runBokehMaxDprGpuDiagnostic } from "./lib/bokeh-gpu-diagnostic.mjs";
+import {
+  launchVerificationBrowser,
+  reportWebGLRenderer,
+} from "./lib/verification-browser.mjs";
 
-const ROOT = resolve(import.meta.dirname, '..');
-const APP_ROOT = join(ROOT, 'app');
-const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-bokeh-fixture-cache-'));
-const outputDir = await mkdtemp(join(tmpdir(), 'cheoma-bokeh-fixture-'));
+const ROOT = resolve(import.meta.dirname, "..");
+const APP_ROOT = join(ROOT, "app");
+const cacheDir = await mkdtemp(join(tmpdir(), "cheoma-bokeh-fixture-cache-"));
+const outputDir = await mkdtemp(join(tmpdir(), "cheoma-bokeh-fixture-"));
 const timeout = Number(process.env.CHEOMA_BOKEH_TIMEOUT_MS) || 180_000;
-const ROUNDNESS_RADIUS = 20;
-const ENERGY_RADIUS = 26;
-const STRIP_RADIUS = 20;
+const scatterProofEnabled = process.env.CHEOMA_BOKEH_SCATTER_PROOF === "1";
 const ROUNDNESS_LIMIT = 1.12;
 const ANGULAR_UNIFORMITY_LIMIT = 0.32;
-
-function pixelLuminance(png, x, y) {
-  const offset = (y * png.width + x) * 4;
-  return 0.2126 * png.data[offset]
-    + 0.7152 * png.data[offset + 1]
-    + 0.0722 * png.data[offset + 2];
-}
+const SOURCE_PAN_ANNULUS_RATIO_MIN = 0.28;
+const SOURCE_PAN_ANNULUS_MEAN_MIN = 0.8;
+const SOURCE_PAN_ENERGY_STEP_LIMIT = 0.23;
+const TELEPHOTO_CORE_MAGNIFICATION_MIN = 4;
+const TELEPHOTO_EDGE_DROP_MIN = 0.34;
 
 // Background-subtracted luminance covariance. The square root of its eigenvalue
 // ratio is 1 for a circle and grows as a highlight stretches into an ellipse.
-function estimateBackground(png) {
-  let energy = 0;
-  let count = 0;
-  const origins = [[8, 8], [png.width - 16, 8], [8, png.height - 16], [png.width - 16, png.height - 16]];
-  for (const [originX, originY] of origins) {
-    for (let y = originY; y < originY + 8; y++) {
-      for (let x = originX; x < originX + 8; x++) {
-        energy += pixelLuminance(png, x, y);
-        count++;
-      }
-    }
-  }
-  return energy / count;
-}
-
-function measureLight(png, light, background, radius = ROUNDNESS_RADIUS) {
-  const cx = Math.round(light.x);
-  const cy = Math.round(light.y);
-  const samples = [];
-  for (let y = cy - radius; y <= cy + radius; y++) {
-    for (let x = cx - radius; x <= cx + radius; x++) {
-      const luminance = pixelLuminance(png, x, y);
-      samples.push({ x, y, luminance });
-    }
-  }
-  let energy = 0;
-  let weightedX = 0;
-  let weightedY = 0;
-  for (const sample of samples) {
-    sample.weight = Math.max(0, sample.luminance - background);
-    energy += sample.weight;
-    weightedX += sample.x * sample.weight;
-    weightedY += sample.y * sample.weight;
-  }
-  if (!(energy > 0)) throw new Error(`${light.name} has no measurable HDR bokeh energy`);
-  const centroidX = weightedX / energy;
-  const centroidY = weightedY / energy;
-  let xx = 0;
-  let yy = 0;
-  let xy = 0;
-  for (const sample of samples) {
-    const dx = sample.x - centroidX;
-    const dy = sample.y - centroidY;
-    xx += sample.weight * dx * dx;
-    yy += sample.weight * dy * dy;
-    xy += sample.weight * dx * dy;
-  }
-  xx /= energy;
-  yy /= energy;
-  xy /= energy;
-  const trace = xx + yy;
-  const delta = Math.sqrt((xx - yy) ** 2 + 4 * xy ** 2);
-  const minor = Math.max(1e-9, (trace - delta) * 0.5);
-  const major = Math.max(minor, (trace + delta) * 0.5);
-  const angularEnergy = Array(24).fill(0);
-  for (const sample of samples) {
-    const dx = sample.x - centroidX;
-    const dy = sample.y - centroidY;
-    const distance = Math.hypot(dx, dy);
-    if (distance < 3 || distance > radius * 0.9) continue;
-    const angle = (Math.atan2(dy, dx) + Math.PI * 2) % (Math.PI * 2);
-    const bin = Math.min(angularEnergy.length - 1, Math.floor(angle / (Math.PI * 2) * angularEnergy.length));
-    angularEnergy[bin] += sample.weight;
-  }
-  const angularMean = angularEnergy.reduce((sum, value) => sum + value, 0) / angularEnergy.length;
-  const angularVariance = angularEnergy.reduce(
-    (sum, value) => sum + (value - angularMean) ** 2,
-    0,
-  ) / angularEnergy.length;
-  return {
-    name: light.name,
-    x: light.x,
-    y: light.y,
-    centroidX,
-    centroidY,
-    energy,
-    aspect: Math.sqrt(major / minor),
-    angularVariation: angularMean > 0 ? Math.sqrt(angularVariance) / angularMean : Infinity,
-    rmsRadius: Math.sqrt(trace),
-  };
-}
-
-function measureLights(image, lights) {
-  const png = PNG.sync.read(image);
-  const background = estimateBackground(png);
-  return lights.map((light) => {
-    const shape = measureLight(png, light, background);
-    const wide = measureLight(png, light, background, ENERGY_RADIUS);
-    return { ...shape, energy: wide.energy };
-  });
-}
-
-function maxChannelDifference(a, b) {
-  const first = PNG.sync.read(a);
-  const second = PNG.sync.read(b);
-  if (first.width !== second.width || first.height !== second.height) return Infinity;
-  let difference = 0;
-  for (let index = 0; index < first.data.length; index++) {
-    difference = Math.max(difference, Math.abs(first.data[index] - second.data[index]));
-  }
-  return difference;
-}
-
-function makePanStrip(frames, lightNames, scale = 4) {
-  const cropSize = STRIP_RADIUS * 2 + 1;
-  const strip = new PNG({
-    width: frames.length * cropSize * scale,
-    height: lightNames.length * cropSize * scale,
-  });
-  for (let column = 0; column < frames.length; column++) {
-    const png = PNG.sync.read(frames[column].image);
-    for (let row = 0; row < lightNames.length; row++) {
-      const light = frames[column].lights.find((candidate) => candidate.name === lightNames[row]);
-      const cx = Math.round(light.x);
-      const cy = Math.round(light.y);
-      for (let sy = -STRIP_RADIUS; sy <= STRIP_RADIUS; sy++) {
-        for (let sx = -STRIP_RADIUS; sx <= STRIP_RADIUS; sx++) {
-          const source = ((cy + sy) * png.width + cx + sx) * 4;
-          for (let oy = 0; oy < scale; oy++) {
-            for (let ox = 0; ox < scale; ox++) {
-              const dx = column * cropSize * scale + (sx + STRIP_RADIUS) * scale + ox;
-              const dy = row * cropSize * scale + (sy + STRIP_RADIUS) * scale + oy;
-              const target = (dy * strip.width + dx) * 4;
-              png.data.copy(strip.data, target, source, source + 4);
-            }
-          }
-        }
-      }
-    }
-  }
-  return PNG.sync.write(strip);
-}
-
 const server = await createServer({
   root: APP_ROOT,
-  configFile: join(APP_ROOT, 'vite.config.js'),
+  configFile: join(APP_ROOT, "vite.config.js"),
   cacheDir,
-  logLevel: 'error',
-  server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false },
+  logLevel: "error",
+  server: { host: "127.0.0.1", port: 0, strictPort: false, hmr: false },
 });
 
 let browser;
 const errors = [];
 try {
-  if (process.env.CHEOMA_BROWSER !== 'chrome') {
-    throw new Error('shoot:bokeh GPU evidence requires CHEOMA_BROWSER=chrome');
+  if (process.env.CHEOMA_BROWSER !== "chrome") {
+    throw new Error("shoot:bokeh GPU evidence requires CHEOMA_BROWSER=chrome");
   }
   await server.listen();
   const port = server.httpServer.address().port;
   browser = await launchVerificationBrowser();
-  const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
+  const page = await browser.newPage({
+    viewport: BOKEH_OPTICAL_CHART_VIEWPORT,
+  });
   page.setDefaultTimeout(timeout);
-  await page.addInitScript(() => { window.__noWarm = true; });
-  page.on('pageerror', (error) => errors.push(`page: ${error.message}`));
-  page.on('console', (message) => {
-    if (message.type() === 'error' && !/favicon|404/i.test(message.text())) {
+  await page.addInitScript(() => {
+    window.__noWarm = true;
+  });
+  page.on("pageerror", (error) => errors.push(`page: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error" && !/favicon|404/i.test(message.text())) {
       errors.push(`console: ${message.text()}`);
     }
   });
 
-  const url = `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&shot=1`
-    + '&seed=42&vseed=20260716&time=night&season=summer&weather=clear';
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
-  await page.waitForFunction(() => window.__SHOT_READY === true && !!window.__engine, null, { timeout });
-  const gpuInfo = await reportWebGLRenderer(page, 'bokeh-fixture');
-  if (!gpuInfo?.renderer
-      || /swiftshader|llvmpipe|software|basic render/i.test(`${gpuInfo.renderer} ${gpuInfo.vendor}`)) {
-    throw new Error(`shoot:bokeh requires a hardware Chrome renderer: ${JSON.stringify(gpuInfo)}`);
+  const url =
+    `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&shot=1` +
+    "&seed=42&vseed=20260716&time=night&season=summer&weather=clear";
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+  await page.waitForFunction(
+    () => window.__SHOT_READY === true && !!window.__engine,
+    null,
+    { timeout },
+  );
+  const gpuInfo = await reportWebGLRenderer(page, "bokeh-fixture");
+  if (
+    !gpuInfo?.renderer ||
+    /swiftshader|llvmpipe|software|basic render/i.test(
+      `${gpuInfo.renderer} ${gpuInfo.vendor}`,
+    )
+  ) {
+    throw new Error(
+      `shoot:bokeh requires a hardware Chrome renderer: ${JSON.stringify(gpuInfo)}`,
+    );
   }
 
   // A locator screenshot includes overlapping HTML controls. Hide every canvas
   // sibling while keeping its ancestor chain laid out at the product dimensions.
   await page.evaluate(() => {
-    const canvas = document.querySelector('canvas');
-    for (const element of document.body.querySelectorAll('*')) {
+    const canvas = document.querySelector("canvas");
+    for (const element of document.body.querySelectorAll("*")) {
       if (element === canvas || element.contains(canvas)) continue;
-      element.style.setProperty('visibility', 'hidden', 'important');
+      element.style.setProperty("visibility", "hidden", "important");
     }
   });
 
-  const fixture = await page.evaluate(async (threeModuleUrl) => {
-    const THREE = await import(threeModuleUrl);
-    const engine = window.__engine;
-    engine.setViewShiftEnabled(false);
-    engine.setWeather('clear');
-    engine.setSeason('summer', { immediate: true });
-    engine.setTime('night', { immediate: true });
-    engine.debugSetPaused(true);
-
-    // Detach (do not dispose) the product roots for this transient page. The real
-    // composer, camera and update/debug paths remain in place, while the depth pass
-    // traverses only the optical chart and its counters stay easy to interpret.
-    for (const child of [...engine.scene.children]) engine.scene.remove(child);
-    engine.scene.background = new THREE.Color(0x01030a);
-    engine.scene.fog = null;
-
-    const chart = new THREE.Group();
-    chart.name = 'bokeh-optical-chart';
-    engine.scene.add(chart);
-
-    const material = (r, g, b) => new THREE.MeshBasicMaterial({
-      color: new THREE.Color(r, g, b),
-      fog: false,
-    });
-    const addBox = (name, size, position, color) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material(...color));
-      mesh.name = name;
-      mesh.position.set(...position);
-      chart.add(mesh);
-      return mesh;
-    };
-
-    // A quiet, deep backdrop gives both light banks room to form clean discs.
-    addBox('backdrop', [520, 300, 1], [0, 0, -220], [0.002, 0.004, 0.012]);
-
-    // Focus-plane subject: a restrained, gate-like chart with fine edges. It is
-    // deliberately below the bloom threshold, so sharpness is attributable to DoF.
-    addBox('focus-field', [20, 20, 0.35], [0, 0, -0.35], [0.006, 0.009, 0.016]);
-    addBox('focus-left-post', [1.1, 14, 1.5], [-4.6, 0, 0], [0.075, 0.105, 0.14]);
-    addBox('focus-right-post', [1.1, 14, 1.5], [4.6, 0, 0], [0.075, 0.105, 0.14]);
-    addBox('focus-lower-roof', [14, 0.75, 1.8], [0, 6.1, 0], [0.16, 0.09, 0.045]);
-    addBox('focus-upper-roof', [10.8, 0.58, 1.9], [0, 7.25, 0], [0.24, 0.15, 0.065]);
-    addBox('focus-sill', [10.2, 0.45, 1.2], [0, -6.5, 0], [0.055, 0.075, 0.1]);
-    const focusRing = new THREE.Mesh(
-      new THREE.TorusGeometry(2.15, 0.17, 12, 64),
-      material(0.28, 0.22, 0.11),
-    );
-    focusRing.name = 'focus-plane-ring';
-    focusRing.position.z = 0.9;
-    chart.add(focusRing);
-    addBox('focus-needle-v', [0.12, 5.5, 0.8], [0, 0, 1.0], [0.18, 0.22, 0.26]);
-    addBox('focus-needle-h', [5.5, 0.12, 0.8], [0, 0, 1.0], [0.18, 0.22, 0.26]);
-
-    const lights = [];
-    const sphere = new THREE.SphereGeometry(1, 16, 12);
-    const addLight = (name, position, radius, color) => {
-      const mesh = new THREE.Mesh(sphere, material(...color));
-      mesh.name = name;
-      mesh.position.set(...position);
-      mesh.scale.setScalar(radius);
-      chart.add(mesh);
-      lights.push(mesh);
-    };
-
-    // At camera z=100 these banks sit 20m in front and 240m behind the focus
-    // plane. The default 0.00015 aperture therefore reaches the product max-blur
-    // radius on both sides, making the aperture shape legible without exaggeration.
-    // Source radii are chosen for similar ~4px emissive faces before DoF despite
-    // the different perspective scales. This models a lantern/firefly glow rather
-    // than an unattainable mathematical delta, while remaining much smaller than
-    // the resulting aperture image.
-    addLight('foreground-amber-left', [-5.9, 3.8, 80], 0.04, [11.0, 4.2, 0.75]);
-    addLight('foreground-rose-right', [6.1, 2.1, 80], 0.04, [10.5, 1.7, 1.15]);
-    addLight('foreground-moon-left', [-6.6, -3.6, 80], 0.04, [3.0, 5.8, 11.0]);
-    addLight('foreground-gold-right', [5.7, -4.0, 80], 0.04, [12.0, 6.2, 1.0]);
-    // Edge-case probe: an out-of-focus foreground emitter directly over an
-    // opaque focus-plane field. This exposes the foreground-bleed limitation of
-    // a screen-space gather blur instead of letting the dark far backdrop hide it.
-    addLight('foreground-over-focus', [1.4, -1.4, 80], 0.04, [11.5, 3.4, 0.65]);
-
-    addLight('background-gold-left', [-58, 30, -140], 0.4, [12.0, 5.4, 0.8]);
-    addLight('background-blue-left', [-53, -31, -140], 0.4, [2.4, 5.0, 11.5]);
-    addLight('background-rose-right', [58, 27, -140], 0.4, [11.0, 1.8, 1.0]);
-    addLight('background-amber-right', [55, -33, -140], 0.4, [12.0, 6.5, 1.1]);
-
-    const camera = engine.camera;
-    camera.position.set(0, 0, 100);
-    camera.near = 0.1;
-    camera.far = 500;
-    camera.fov = 35;
-    camera.clearViewOffset();
-    camera.updateProjectionMatrix();
-    engine.__controls.target.set(0, 0, 0);
-    camera.lookAt(engine.__controls.target);
-    camera.updateMatrixWorld(true);
-    // Finish any load-time camera handoff, then establish the chart's exact focus
-    // depth once before the 0-vs-default pair. Both captures start from one state.
-    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
-    camera.position.set(0, 0, 100);
-    camera.fov = 35;
-    camera.updateProjectionMatrix();
-    engine.__controls.target.set(0, 0, 0);
-    camera.lookAt(engine.__controls.target);
-    camera.updateMatrixWorld(true);
-    engine.debugTuneDof({ amount: 1, aperture: 0.00015, maxBlur: 0.01 });
-    for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
-    engine.debugRenderDofFrame();
-
-    const projectedLights = lights.map((light) => {
-      const p = light.getWorldPosition(new THREE.Vector3()).project(camera);
-      return {
-        name: light.name,
-        x: Math.round((p.x * 0.5 + 0.5) * 960),
-        y: Math.round((-p.y * 0.5 + 0.5) * 600),
-      };
-    });
-    return { projectedLights, focusDepth: 100, fixtureDrawCalls: chart.children.length };
-  }, `/@fs${join(APP_ROOT, 'node_modules/three/build/three.module.js')}`);
+  const threeModuleUrl =
+    `/@fs${join(APP_ROOT, "node_modules/three/build/three.module.js")}`;
+  const fixture = await installBokehOpticalChart(page, threeModuleUrl);
 
   const capture = async (name, amount) => {
     const state = await page.evaluate((value) => {
@@ -340,25 +125,337 @@ try {
       return engine.debugDof();
     }, amount);
     const path = join(outputDir, `${name}.png`);
-    await page.locator('canvas').screenshot({ path });
+    await page.locator("canvas").screenshot({ path });
     console.log(`${path} ${JSON.stringify(state)}`);
     return path;
   };
 
-  const off = await capture('bokeh-hdr-off', 0);
-  const on = await capture('bokeh-hdr-default', 1);
-  const repeatState = await page.evaluate(() => window.__engine.debugRenderDofFrame());
-  const repeat = await page.locator('canvas').screenshot();
+  const off = await capture("bokeh-hdr-off", 0);
+  const prefilterAfterOff = await page.evaluate(() => {
+    const prefilter =
+      window.__engine.debugPostResources().bokehPass.highlightPrefilter;
+    return {
+      renderCount: prefilter.renderCount,
+      width: prefilter.target.width,
+      height: prefilter.target.height,
+      depthBuffer: prefilter.target.depthBuffer,
+      stencilBuffer: prefilter.target.stencilBuffer,
+    };
+  });
+  const on = await capture("bokeh-hdr-default", 1);
+  const prefilterAfterOn = await page.evaluate(() => {
+    const prefilter =
+      window.__engine.debugPostResources().bokehPass.highlightPrefilter;
+    return {
+      renderCount: prefilter.renderCount,
+      width: prefilter.target.width,
+      height: prefilter.target.height,
+      depthBuffer: prefilter.target.depthBuffer,
+      stencilBuffer: prefilter.target.stencilBuffer,
+    };
+  });
+  if (
+    prefilterAfterOn.renderCount !== prefilterAfterOff.renderCount + 1 ||
+    prefilterAfterOn.width !== 480 ||
+    prefilterAfterOn.height !== 300 ||
+    prefilterAfterOn.depthBuffer ||
+    prefilterAfterOn.stencilBuffer
+  ) {
+    throw new Error(
+      `highlight prefilter resource/pass contract failed: ${JSON.stringify({
+        prefilterAfterOff,
+        prefilterAfterOn,
+      })}`,
+    );
+  }
+  const linearSweep = await measureLinearBokehSweep(
+    page,
+    fixture.projectedLights.filter(
+      ({ name }) =>
+        name === "foreground-open-pair" || name === "foreground-over-focus",
+    ),
+    [1.35, 1.65, 1.85, 2.0, 2.2, 2.3, 2.4],
+  );
+  console.log(`linear-HDR sweep ${JSON.stringify(linearSweep)}`);
+  for (const [name, samples] of Object.entries(linearSweep)) {
+    const first = samples[0];
+    const last = samples.at(-1);
+    const energyValues = samples.map((sample) => sample.integratedEnergy);
+    const energyRange =
+      (Math.max(...energyValues) - Math.min(...energyValues)) /
+      Math.max(
+        1e-9,
+        energyValues.reduce((sum, value) => sum + value, 0) /
+          energyValues.length,
+      );
+    const signedEnergyValues = samples.map(
+      (sample) => sample.signedIntegratedEnergy,
+    );
+    const signedEnergyRange =
+      (Math.max(...signedEnergyValues) - Math.min(...signedEnergyValues)) /
+      Math.max(
+        1e-9,
+        signedEnergyValues.reduce((sum, value) => sum + value, 0) /
+          signedEnergyValues.length,
+      );
+    const monotone = (key) =>
+      samples
+        .slice(1)
+        .every((sample, index) => sample[key] < samples[index][key]);
+    const increasing = (key) =>
+      samples
+        .slice(1)
+        .every((sample, index) => sample[key] > samples[index][key]);
+    const largeRadiusPeakArea = samples
+      .slice(-4)
+      .map(
+        (sample) =>
+          sample.peak * sample.expectedCoCRadius * sample.expectedCoCRadius,
+      );
+    const largeRadiusCoreArea = samples
+      .slice(-4)
+      .map(
+        (sample) =>
+          sample.opticalCoreMean *
+          sample.expectedCoCRadius *
+          sample.expectedCoCRadius,
+      );
+    const peakAreaMean =
+      largeRadiusPeakArea.reduce((sum, value) => sum + value, 0) /
+      largeRadiusPeakArea.length;
+    const peakAreaRange =
+      (Math.max(...largeRadiusPeakArea) -
+        Math.min(...largeRadiusPeakArea)) /
+      Math.max(1e-9, peakAreaMean);
+    const coreAreaMean =
+      largeRadiusCoreArea.reduce((sum, value) => sum + value, 0) /
+      largeRadiusCoreArea.length;
+    const coreAreaRange =
+      (Math.max(...largeRadiusCoreArea) -
+        Math.min(...largeRadiusCoreArea)) /
+      Math.max(1e-9, coreAreaMean);
+    if (
+      !samples
+        .slice(1)
+        .every(
+          (sample, index) =>
+            sample.expectedCoCArea > samples[index].expectedCoCArea,
+        ) ||
+      !increasing("covarianceArea") ||
+      !increasing("rmsRadius") ||
+      !(last.covarianceArea > first.covarianceArea * 1.5) ||
+      !samples
+        .slice(1)
+        .every(
+          (sample, index) =>
+            sample.peak <= samples[index].peak * 1.03,
+        ) ||
+      peakAreaRange > 0.15 ||
+      coreAreaRange > 0.1 ||
+      !monotone("opticalDiscMean") ||
+      !(last.peak < first.peak * 0.75) ||
+      !(last.opticalDiscMean < first.opticalDiscMean * 0.75) ||
+      energyRange > 0.05 ||
+      signedEnergyRange > 0.05 ||
+      samples.some((sample) => sample.negativeEnergyRatio > 0.03)
+    ) {
+      throw new Error(
+        `linear-HDR radius/energy contract failed for ${name}: ${JSON.stringify(
+          {
+            energyRange,
+            signedEnergyRange,
+            largeRadiusPeakArea,
+            peakAreaRange,
+            largeRadiusCoreArea,
+            coreAreaRange,
+            samples,
+          },
+        )}`,
+      );
+    }
+  }
+  const repeatState = await page.evaluate(() =>
+    window.__engine.debugRenderDofFrame(),
+  );
+  const repeat = await page.locator("canvas").screenshot();
+  const offImage = await readFile(off);
   const pixelStable = repeat.equals(await readFile(on));
-  if (!pixelStable) throw new Error('static bokeh fixture changed between identical product frames');
+  if (!pixelStable)
+    throw new Error(
+      "static bokeh fixture changed between identical product frames",
+    );
+  const programKeysBefore = await page.evaluate(() =>
+    (window.__engine.renderer.info.programs || [])
+      .map((program) => program.cacheKey)
+      .sort(),
+  );
 
   const onMetrics = measureLights(repeat, fixture.projectedLights);
-  const offMetrics = measureLights(await readFile(off), fixture.projectedLights);
-  const maxAspect = Math.max(...onMetrics.map((sample) => sample.aspect));
+  const offMetrics = measureLights(offImage, fixture.projectedLights);
+  const overlapName = "foreground-over-focus";
+  const maxAspect = Math.max(
+    ...onMetrics
+      .filter((sample) => sample.name !== overlapName)
+      .map((sample) => sample.aspect),
+  );
   if (maxAspect > ROUNDNESS_LIMIT) {
-    throw new Error(`bokeh aperture stretched to ${maxAspect.toFixed(3)} (limit ${ROUNDNESS_LIMIT})`);
+    throw new Error(
+      `bokeh aperture stretched to ${maxAspect.toFixed(3)} (limit ${ROUNDNESS_LIMIT})`,
+    );
   }
-
+  const lightByName = (name) =>
+    fixture.projectedLights.find((light) => light.name === name);
+  const openPair = measurePositiveDelta(
+    repeat,
+    offImage,
+    lightByName("foreground-open-pair"),
+  );
+  const cardPair = measurePositiveDelta(
+    repeat,
+    offImage,
+    lightByName(overlapName),
+  );
+  const telephotoProfile = measureDiscProfile(
+    repeat,
+    lightByName("foreground-open-pair"),
+  );
+  // For a filled circular disc RMS radius is R/sqrt(2), so this converts the
+  // positive-delta covariance into a comparable effective diameter.
+  telephotoProfile.cardEffectiveDiameterPx =
+    cardPair.rmsRadius * 2 * Math.SQRT2;
+  telephotoProfile.cardEffectiveMagnification =
+    telephotoProfile.cardEffectiveDiameterPx /
+    Math.max(1e-9, telephotoProfile.projectedEmitterDiameterPx);
+  const pairAnnulusRatio =
+    cardPair.annulusEnergy / Math.max(1, openPair.annulusEnergy);
+  if (!(
+    openPair.aspect <= ROUNDNESS_LIMIT &&
+    cardPair.aspect <= ROUNDNESS_LIMIT &&
+    openPair.centroidError <= 2 &&
+    cardPair.centroidError <= 2 &&
+    openPair.annulusMean >= 1 &&
+    cardPair.annulusMean >= 1 &&
+    pairAnnulusRatio >= 0.35
+  )) {
+    throw new Error(
+      `source-depth paired bokeh failed: ${JSON.stringify({
+        openPair,
+        cardPair,
+        pairAnnulusRatio,
+      })}`,
+    );
+  }
+  if (!(
+    telephotoProfile.coreMagnification >= TELEPHOTO_CORE_MAGNIFICATION_MIN &&
+    telephotoProfile.outerMagnification > telephotoProfile.coreMagnification &&
+    telephotoProfile.edgeDrop >= TELEPHOTO_EDGE_DROP_MIN &&
+    telephotoProfile.cardEffectiveMagnification >=
+      TELEPHOTO_CORE_MAGNIFICATION_MIN
+  )) {
+    throw new Error(
+      `telephoto bokeh scale/rim profile failed: ${JSON.stringify(telephotoProfile)}`,
+    );
+  }
+  const controlByName = (name) =>
+    fixture.projectedControls.find((control) => control.name === name);
+  const dimLeak = measureCardLeak(
+    repeat,
+    offImage,
+    controlByName("dim-foreground-bar"),
+    fixture.focusCardBounds,
+    "left",
+  );
+  const farLeak = measureCardLeak(
+    repeat,
+    offImage,
+    controlByName("background-edge-control"),
+    fixture.focusCardBounds,
+    "right",
+  );
+  if (
+    dimLeak.maxPositiveChannel > 1 ||
+    dimLeak.meanPositiveLuminance > 0.25 ||
+    farLeak.maxPositiveChannel > 1 ||
+    farLeak.meanPositiveLuminance > 0.25
+  ) {
+    throw new Error(
+      `source-depth negative control leaked into focus card: ${JSON.stringify({
+        dimLeak,
+        farLeak,
+      })}`,
+    );
+  }
+  const edgeControl = controlByName("focus-edge-control");
+  const edgeEnergyOff = edgeEnergy(offImage, edgeControl);
+  const edgeEnergyOn = edgeEnergy(repeat, edgeControl);
+  const edgeEnergyRatio = edgeEnergyOn / Math.max(1, edgeEnergyOff);
+  if (edgeEnergyRatio < 0.98) {
+    throw new Error(
+      `non-HDR focus edge lost energy under source probing (${edgeEnergyRatio})`,
+    );
+  }
+  // Prove that the two zero-leak controls are not probe misses: at the exact same
+  // projected positions and coverage, make the dim source HDR and move the far
+  // source in front of the card. Both must then register inside the sampled card
+  // strips before their original HDR/depth rejection state is restored.
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    const dim = engine.scene.getObjectByName("dim-foreground-bar");
+    const far = engine.scene.getObjectByName("background-edge-control");
+    dim.material.color.setRGB(11, 4.2, 0.75);
+    far.position.set(2.1, 1, 80);
+    far.scale.setScalar(0.04);
+    far.updateMatrixWorld(true);
+    engine.debugRenderDofFrame();
+  });
+  const counterfactualImage = await page.locator("canvas").screenshot();
+  const counterfactualPath = join(
+    outputDir,
+    "bokeh-source-rejection-counterfactual.png",
+  );
+  await writeFile(counterfactualPath, counterfactualImage);
+  const controlCounterfactuals = {
+    dimAsHdr: measureCardLeak(
+      counterfactualImage,
+      repeat,
+      controlByName("dim-foreground-bar"),
+      fixture.focusCardBounds,
+      "left",
+    ),
+    farAsNear: measureCardLeak(
+      counterfactualImage,
+      repeat,
+      controlByName("background-edge-control"),
+      fixture.focusCardBounds,
+      "right",
+    ),
+  };
+  if (
+    controlCounterfactuals.dimAsHdr.maxPositiveChannel < 4 ||
+    controlCounterfactuals.dimAsHdr.meanPositiveLuminance < 0.5 ||
+    controlCounterfactuals.farAsNear.maxPositiveChannel < 4 ||
+    controlCounterfactuals.farAsNear.meanPositiveLuminance < 0.5
+  ) {
+    throw new Error(
+      `source rejection controls missed the card probe: ${JSON.stringify(controlCounterfactuals)}`,
+    );
+  }
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    const dim = engine.scene.getObjectByName("dim-foreground-bar");
+    const far = engine.scene.getObjectByName("background-edge-control");
+    dim.material.color.setRGB(0.2, 0.14, 0.08);
+    far.position.set(25.2, 12, -140);
+    far.scale.setScalar(0.4);
+    far.updateMatrixWorld(true);
+    engine.debugRenderDofFrame();
+  });
+  const restoredControlImage = await page.locator("canvas").screenshot();
+  if (maxChannelDifference(repeat, restoredControlImage) > 1) {
+    throw new Error(
+      "source rejection counterfactual did not restore the byte-stable fixture",
+    );
+  }
   // Preserve a stable reference at the final pan pose. The moving sequence will
   // arrive at this exact camera again through the 13-tap path, then settle back
   // to the reference without changing the aperture center or radius.
@@ -373,8 +470,8 @@ try {
     for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
     return engine.debugRenderDofFrame();
   }, finalTargetX);
-  const stableFinalReference = await page.locator('canvas').screenshot();
-  const stableFinalPath = join(outputDir, 'bokeh-final-stable-reference.png');
+  const stableFinalReference = await page.locator("canvas").screenshot();
+  const stableFinalPath = join(outputDir, "bokeh-final-stable-reference.png");
   await writeFile(stableFinalPath, stableFinalReference);
 
   // Eight fixed yaw steps move the chart by roughly two pixels. This is slow
@@ -383,107 +480,249 @@ try {
   const panFrames = [];
   for (let index = 0; index < 8; index++) {
     const targetX = -0.105 + index * (0.21 / 7);
-    const frame = await page.evaluate(({ targetX, names }) => {
+    const frame = await page.evaluate(
+      ({ targetX, names }) => {
+        const engine = window.__engine;
+        engine.camera.position.set(0, 0, 100);
+        engine.__controls.target.set(targetX, 0, 0);
+        engine.camera.lookAt(engine.__controls.target);
+        engine.camera.updateMatrixWorld(true);
+        const state = engine.debugRenderDofFrame(1 / 60);
+        const lights = names.map((name) => {
+          const object = engine.scene.getObjectByName(name);
+          const projected = object
+            .getWorldPosition(object.position.clone())
+            .project(engine.camera);
+          return {
+            name,
+            x: (projected.x * 0.5 + 0.5) * 960,
+            y: (-projected.y * 0.5 + 0.5) * 600,
+          };
+        });
+        return { lights, state };
+      },
+      { targetX, names: fixture.projectedLights.map((light) => light.name) },
+    );
+    const image = await page.locator("canvas").screenshot();
+    await page.evaluate(() => {
       const engine = window.__engine;
-      engine.camera.position.set(0, 0, 100);
-      engine.__controls.target.set(targetX, 0, 0);
-      engine.camera.lookAt(engine.__controls.target);
-      engine.camera.updateMatrixWorld(true);
-      const state = engine.debugRenderDofFrame(1 / 60);
-      const lights = names.map((name) => {
-        const object = engine.scene.getObjectByName(name);
-        const projected = object.getWorldPosition(object.position.clone()).project(engine.camera);
-        return {
-          name,
-          x: (projected.x * 0.5 + 0.5) * 960,
-          y: (-projected.y * 0.5 + 0.5) * 600,
-        };
-      });
-      return { lights, state };
-    }, { targetX, names: fixture.projectedLights.map((light) => light.name) });
-    const image = await page.locator('canvas').screenshot();
+      engine.debugTuneDof({ amount: 0 });
+      engine.debugRenderDofFrame();
+    });
+    const offImageAtPose = await page.locator("canvas").screenshot();
+    await page.evaluate((sourceName) => {
+      const engine = window.__engine;
+      engine.scene.getObjectByName(sourceName).visible = false;
+      engine.debugRenderDofFrame();
+    }, overlapName);
+    const sharpBaselineAtPose = await page.locator("canvas").screenshot();
+    await page.evaluate((sourceName) => {
+      const engine = window.__engine;
+      engine.scene.getObjectByName(sourceName).visible = true;
+      engine.debugTuneDof({ amount: 1 });
+      engine.debugRenderDofFrame();
+    }, overlapName);
+    const openDelta = measurePositiveDelta(
+      image,
+      offImageAtPose,
+      frame.lights.find((light) => light.name === "foreground-open-pair"),
+    );
+    const cardDelta = measurePositiveDelta(
+      image,
+      offImageAtPose,
+      frame.lights.find((light) => light.name === overlapName),
+    );
+    const sharpInput = measurePositiveDelta(
+      offImageAtPose,
+      sharpBaselineAtPose,
+      frame.lights.find((light) => light.name === overlapName),
+    );
     panFrames.push({
       targetX,
       lights: frame.lights,
       state: frame.state,
       image,
+      offImage: offImageAtPose,
       metrics: measureLights(image, frame.lights),
+      sourceDelta: {
+        open: openDelta,
+        card: cardDelta,
+        sharpInput,
+        annulusRatio:
+          cardDelta.annulusEnergy / Math.max(1, openDelta.annulusEnergy),
+      },
     });
   }
-  if (!panFrames.every((frame) => frame.state.postQuality === 0
-      && frame.state.activeBokehTaps === 13)) {
-    throw new Error('camera pan did not remain on the fully-moving 13-tap path');
+  const repairedPanEnergy = panFrames.map(
+    (frame) =>
+      frame.sourceDelta.card.annulusEnergy /
+      Math.max(1, frame.sourceDelta.sharpInput.energy),
+  );
+  const repairedPanRms = panFrames.map(
+    (frame) => frame.sourceDelta.card.rmsRadius,
+  );
+  const repairedEnergyMean =
+    repairedPanEnergy.reduce((sum, value) => sum + value, 0) /
+    repairedPanEnergy.length;
+  const repairedPanStability = {
+    annulusEnergy: repairedPanEnergy,
+    rmsRadius: repairedPanRms,
+    maxRelativeEnergyStep: Math.max(
+      ...repairedPanEnergy
+        .slice(1)
+        .map(
+          (value, index) =>
+            Math.abs(value - repairedPanEnergy[index]) /
+            Math.max(1e-9, (value + repairedPanEnergy[index]) * 0.5),
+        ),
+    ),
+    relativeEnergyRange:
+      (Math.max(...repairedPanEnergy) - Math.min(...repairedPanEnergy)) /
+      Math.max(1e-9, repairedEnergyMean),
+    maxRmsRadiusStep: Math.max(
+      ...repairedPanRms
+        .slice(1)
+        .map((value, index) => Math.abs(value - repairedPanRms[index])),
+    ),
+  };
+  if (
+    !panFrames.every(
+      (frame) =>
+        frame.state.postQuality === 0 &&
+        frame.state.activeBokehTaps === 13 &&
+        frame.sourceDelta.open.aspect <= ROUNDNESS_LIMIT &&
+        frame.sourceDelta.card.aspect <= ROUNDNESS_LIMIT &&
+        frame.sourceDelta.open.centroidError <= 2 &&
+        frame.sourceDelta.card.centroidError <= 2 &&
+        frame.sourceDelta.open.annulusMean >= SOURCE_PAN_ANNULUS_MEAN_MIN &&
+        frame.sourceDelta.card.annulusMean >= SOURCE_PAN_ANNULUS_MEAN_MIN &&
+        frame.sourceDelta.annulusRatio >= SOURCE_PAN_ANNULUS_RATIO_MIN,
+    ) ||
+    repairedPanStability.maxRelativeEnergyStep > SOURCE_PAN_ENERGY_STEP_LIMIT ||
+    repairedPanStability.relativeEnergyRange > 0.3 ||
+    repairedPanStability.maxRmsRadiusStep > 0.75
+  ) {
+    throw new Error(
+      `camera pan lost moving source-depth bokeh: ${JSON.stringify({
+        frames: panFrames.map((frame) => ({
+          state: frame.state,
+          sourceDelta: frame.sourceDelta,
+        })),
+        repairedPanStability,
+      })}`,
+    );
   }
 
   const settleFrames = [];
   for (let index = 0; index < 22; index++) {
-    const state = await page.evaluate(() => window.__engine.debugRenderDofFrame(1 / 60));
+    const state = await page.evaluate(() =>
+      window.__engine.debugRenderDofFrame(1 / 60),
+    );
     if ([0, 3, 7, 10, 14, 18, 21].includes(index)) {
-      const image = await page.locator('canvas').screenshot();
+      const image = await page.locator("canvas").screenshot();
       const lights = panFrames.at(-1).lights;
-      settleFrames.push({ index, lights, state, image, metrics: measureLights(image, lights) });
+      settleFrames.push({
+        index,
+        lights,
+        state,
+        image,
+        metrics: measureLights(image, lights),
+      });
     }
   }
   const settledState = settleFrames.at(-1).state;
   const settledImage = settleFrames.at(-1).image;
-  const finalPixelDifference = maxChannelDifference(stableFinalReference, settledImage);
+  const finalPixelDifference = maxChannelDifference(
+    stableFinalReference,
+    settledImage,
+  );
   if (settledState.postQuality !== 1 || settledState.activeBokehTaps !== 41) {
-    throw new Error('static camera did not restore the exact stable 41-tap path');
+    throw new Error(
+      "static camera did not restore the exact stable 41-tap path",
+    );
   }
   if (finalPixelDifference > 1) {
-    throw new Error(`settled bokeh differs from its stable reference by ${finalPixelDifference} channels`);
+    throw new Error(
+      `settled bokeh differs from its stable reference by ${finalPixelDifference} channels`,
+    );
   }
   const unobstructedNames = new Set(
-    fixture.projectedLights.map((light) => light.name).filter((name) => name !== 'foreground-over-focus'),
+    fixture.projectedLights
+      .map((light) => light.name)
+      .filter((name) => name !== "foreground-over-focus"),
   );
   const transitionMetrics = [...panFrames, ...settleFrames]
     .flatMap((frame) => frame.metrics)
     .filter((sample) => unobstructedNames.has(sample.name));
-  const maxAngularVariation = Math.max(...transitionMetrics.map((sample) => sample.angularVariation));
+  const maxAngularVariation = Math.max(
+    ...transitionMetrics.map((sample) => sample.angularVariation),
+  );
   if (maxAngularVariation > ANGULAR_UNIFORMITY_LIMIT) {
-    throw new Error(`moving/settling bokeh has visible radial lobes ${maxAngularVariation.toFixed(3)} (limit ${ANGULAR_UNIFORMITY_LIMIT})`);
+    throw new Error(
+      `moving/settling bokeh has visible radial lobes ${maxAngularVariation.toFixed(3)} (limit ${ANGULAR_UNIFORMITY_LIMIT})`,
+    );
   }
-  const motion = fixture.projectedLights.map((light) => {
-    const samples = panFrames.map((frame) => frame.metrics.find((sample) => sample.name === light.name));
-    const energies = samples.map((sample) => sample.energy);
-    const aspects = samples.map((sample) => sample.aspect);
-    const centers = samples.map((sample) => sample.centroidX);
-    const meanEnergy = energies.reduce((sum, value) => sum + value, 0) / energies.length;
-    return {
-      name: light.name,
-      energyRange: (Math.max(...energies) - Math.min(...energies)) / meanEnergy,
-      maxAspect: Math.max(...aspects),
-      centroidTravel: Math.max(...centers) - Math.min(...centers),
-    };
-  });
+  const motion = fixture.projectedLights
+    .filter((light) => light.name !== overlapName)
+    .map((light) => {
+      const samples = panFrames.map((frame) =>
+        frame.metrics.find((sample) => sample.name === light.name),
+      );
+      const energies = samples.map((sample) => sample.energy);
+      const aspects = samples.map((sample) => sample.aspect);
+      const centers = samples.map((sample) => sample.centroidX);
+      const meanEnergy =
+        energies.reduce((sum, value) => sum + value, 0) / energies.length;
+      return {
+        name: light.name,
+        energyRange:
+          (Math.max(...energies) - Math.min(...energies)) / meanEnergy,
+        maxAspect: Math.max(...aspects),
+        centroidTravel: Math.max(...centers) - Math.min(...centers),
+      };
+    });
   const maxMotionAspect = Math.max(...motion.map((sample) => sample.maxAspect));
   if (maxMotionAspect > ROUNDNESS_LIMIT) {
-    throw new Error(`moving bokeh aperture stretched to ${maxMotionAspect.toFixed(3)} (limit ${ROUNDNESS_LIMIT})`);
+    throw new Error(
+      `moving bokeh aperture stretched to ${maxMotionAspect.toFixed(3)} (limit ${ROUNDNESS_LIMIT})`,
+    );
   }
   // This value is diagnostic rather than a golden: subpixel raster coverage and
   // browser color math can shift total crop energy even when the aperture moves
   // coherently. The pan strip is the visual temporal-crawl acceptance artifact.
-  const maxEnergyRange = Math.max(...motion.map((sample) => sample.energyRange));
-  const overlapName = 'foreground-over-focus';
+  const maxEnergyRange = Math.max(
+    ...motion.map((sample) => sample.energyRange),
+  );
   const overlapOn = onMetrics.find((sample) => sample.name === overlapName);
   const overlapOff = offMetrics.find((sample) => sample.name === overlapName);
   const overlapProbe = {
     name: overlapName,
     rmsRatio: overlapOn.rmsRadius / overlapOff.rmsRadius,
-    limitation: 'central-depth gather retains bloom but cannot scatter across an opaque focus plane',
+    openPair,
+    cardPair,
+    annulusRatio: pairAnnulusRatio,
+    recovery:
+      "disjoint compact-source energy is scattered from its owned front depth",
   };
-  const panStrip = join(outputDir, 'bokeh-pan-settle-strip.png');
-  await writeFile(panStrip, makePanStrip([...panFrames, ...settleFrames], [
-    'foreground-amber-left',
-    'background-gold-left',
-    'foreground-over-focus',
-  ]));
+  const panStrip = join(outputDir, "bokeh-pan-settle-strip.png");
+  await writeFile(
+    panStrip,
+    makePanStrip(
+      [...panFrames, ...settleFrames],
+      [
+        "foreground-amber-left",
+        "background-gold-left",
+        "foreground-over-focus",
+      ],
+    ),
+  );
 
   const gpuTiming = await page.evaluate(async () => {
     const engine = window.__engine;
     const gl = engine.renderer.getContext();
-    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    if (!ext || typeof gl.createQuery !== 'function') return { available: false };
+    const ext = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+    if (!ext || typeof gl.createQuery !== "function")
+      return { available: false };
     // Timer-query results on ANGLE/Metal have enough per-query jitter that
     // comparing isolated A/B samples is flaky. Measure larger batches in
     // alternating ABBA blocks: each block balances short-term GPU drift while
@@ -506,13 +745,16 @@ try {
       gl.endQuery(ext.TIME_ELAPSED_EXT);
       gl.flush();
       const deadline = performance.now() + 2000;
-      while (performance.now() < deadline
-          && !gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+      while (
+        performance.now() < deadline &&
+        !gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)
+      ) {
         await new Promise((resolve) => setTimeout(resolve, 4));
       }
       if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return null;
       sawDisjoint ||= !!gl.getParameter(ext.GPU_DISJOINT_EXT);
-      const milliseconds = gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6 / batchSize;
+      const milliseconds =
+        gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6 / batchSize;
       gl.deleteQuery(query);
       return milliseconds;
     };
@@ -530,12 +772,13 @@ try {
     };
     const blocks = [];
     for (let block = 0; block < 3; block++) {
-      const sequence = block % 2 === 0
-        ? ['moving', 'stable', 'stable', 'moving']
-        : ['stable', 'moving', 'moving', 'stable'];
+      const sequence =
+        block % 2 === 0
+          ? ["moving", "stable", "stable", "moving"]
+          : ["stable", "moving", "moving", "stable"];
       const samples = [];
       for (const quality of sequence) {
-        if (quality === 'moving') enterMovingAtFinalPose();
+        if (quality === "moving") enterMovingAtFinalPose();
         else settle();
         samples.push({ quality, milliseconds: await measure() });
       }
@@ -548,20 +791,26 @@ try {
     const median = (values) => {
       const sorted = [...values].sort((a, b) => a - b);
       const middle = sorted.length >> 1;
-      return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) * 0.5;
+      return sorted.length % 2
+        ? sorted[middle]
+        : (sorted[middle - 1] + sorted[middle]) * 0.5;
     };
-    const moving = blocks.flatMap((samples) => samples
-      .filter((sample) => sample.quality === 'moving')
-      .map((sample) => sample.milliseconds));
-    const stable = blocks.flatMap((samples) => samples
-      .filter((sample) => sample.quality === 'stable')
-      .map((sample) => sample.milliseconds));
+    const moving = blocks.flatMap((samples) =>
+      samples
+        .filter((sample) => sample.quality === "moving")
+        .map((sample) => sample.milliseconds),
+    );
+    const stable = blocks.flatMap((samples) =>
+      samples
+        .filter((sample) => sample.quality === "stable")
+        .map((sample) => sample.milliseconds),
+    );
     const blockRatios = blocks.map((samples) => {
       const movingSamples = samples
-        .filter((sample) => sample.quality === 'moving')
+        .filter((sample) => sample.quality === "moving")
         .map((sample) => sample.milliseconds);
       const stableSamples = samples
-        .filter((sample) => sample.quality === 'stable')
+        .filter((sample) => sample.quality === "stable")
         .map((sample) => sample.milliseconds);
       return median(movingSamples) / median(stableSamples);
     });
@@ -581,35 +830,106 @@ try {
     };
   });
   if (!gpuTiming.available || !gpuTiming.complete || gpuTiming.disjoint) {
-    throw new Error(`Chrome GPU timer unavailable or invalid: ${JSON.stringify(gpuTiming)}`);
+    throw new Error(
+      `Chrome GPU timer unavailable or invalid: ${JSON.stringify(gpuTiming)}`,
+    );
   }
-  if (!(gpuTiming.ratio < 0.85
-      && gpuTiming.blockRatioMedian < 0.9
-      && gpuTiming.winningBlocks >= 2)) {
-    throw new Error(`13-tap GPU median did not improve on 41 taps: ${JSON.stringify(gpuTiming)}`);
+  if (!(
+    gpuTiming.ratio < 0.85 &&
+    gpuTiming.blockRatioMedian < 0.9 &&
+    gpuTiming.winningBlocks >= 2
+  )) {
+    throw new Error(
+      `13-tap GPU median did not improve on 41 taps: ${JSON.stringify(gpuTiming)}`,
+    );
+  }
+  const programKeysAfter = await page.evaluate(() =>
+    (window.__engine.renderer.info.programs || [])
+      .map((program) => program.cacheKey)
+      .sort(),
+  );
+  const programKeysStable =
+    JSON.stringify(programKeysBefore) === JSON.stringify(programKeysAfter);
+  if (!programKeysStable) {
+    throw new Error(
+      "source-depth ON/OFF and pan path created a new shader program",
+    );
+  }
+  const scatterProof = await runBokehScatterProof({
+    page,
+    outputDir,
+    fixture,
+    overlapName,
+    roundnessLimit: ROUNDNESS_LIMIT,
+    angularUniformityLimit: ANGULAR_UNIFORMITY_LIMIT,
+    enabled: scatterProofEnabled,
+  });
+  await page.setViewportSize({ width: 961, height: 601 });
+  await page.evaluate(
+    () =>
+      new Promise((resolveFrame) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolveFrame)),
+      ),
+  );
+  const sourceStress = await runBokehSourceStress(
+    page,
+    threeModuleUrl,
+  );
+  await page.setViewportSize(BOKEH_OPTICAL_CHART_VIEWPORT);
+  assertBokehSourceStress(sourceStress);
+  const maxDprGpu = scatterProofEnabled
+    ? await runBokehMaxDprGpuDiagnostic(page, 2)
+    : null;
+  if (
+    maxDprGpu &&
+    (!maxDprGpu.available ||
+      maxDprGpu.disjoint ||
+      maxDprGpu.pixelRatio !== 2 ||
+      maxDprGpu.ratio > 2.5 ||
+      maxDprGpu.deltaMs > 4)
+  ) {
+    throw new Error(
+      `max-DPR pass-only GPU diagnostic failed: ${JSON.stringify(maxDprGpu)}`,
+    );
   }
   console.log(`BOKEH FIXTURE: ${outputDir}`);
-  console.log(`fixture: ${JSON.stringify({
-    ...fixture,
-    off,
-    on,
-    panStrip,
-    stableFinalPath,
-    stableFinalState,
-    settledState,
-    finalPixelDifference,
-    maxAngularVariation,
-    gpuTiming,
-    gpuInfo,
-    pixelStable,
-    maxAspect,
-    maxMotionAspect,
-    maxEnergyRange,
-    overlapProbe,
-    onMetrics,
-    motion,
-    repeatState,
-  })}`);
+  console.log(
+    `fixture: ${JSON.stringify({
+      ...fixture,
+      off,
+      on,
+      panStrip,
+      stableFinalPath,
+      stableFinalState,
+      settledState,
+      finalPixelDifference,
+      maxAngularVariation,
+      gpuTiming,
+      gpuInfo,
+      pixelStable,
+      maxAspect,
+      maxMotionAspect,
+      maxEnergyRange,
+      overlapProbe,
+      telephotoProfile,
+      linearEnergy: linearSweep,
+      highlightPrefilter: {
+        afterOff: prefilterAfterOff,
+        afterOn: prefilterAfterOn,
+      },
+      counterfactualPath,
+      controlCounterfactuals,
+      repairedPanStability,
+      negativeControls: { dimLeak, farLeak, edgeEnergyRatio },
+      programKeysStable,
+      onMetrics,
+      motion,
+      repeatState,
+      scatterProof,
+      sourceStress,
+      maxDprGpu,
+    })}`,
+  );
   console.log(`runtime errors: ${errors.length}`);
   for (const error of errors) console.log(error);
   if (errors.length) process.exitCode = 1;

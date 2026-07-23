@@ -594,10 +594,12 @@ try {
       && midRestored?.selected == null,
   'actual product MID uses the base MID root and restores the aerial owner',
   `levels=${midProbe.levels.join('→')} restored=${midRestored?.lod?.level || 'none'}`);
-  pass(resource.drawCalls === 1 && resource.triangles === 0 && resource.lights === 0
-      && resource.textures === 0 && resource.materials === 1 && resource.depthTest === true,
-  'nightlight resource state remains one draw with zero lights/textures/triangles',
-  `draw=${resource.drawCalls} light=${resource.lights} texture=${resource.textures} tri=${resource.triangles}`);
+  pass(resource.drawCalls === 1 && resource.dofDepthDrawCalls === 1
+      && resource.triangles === 0 && resource.lights === 0
+      && resource.textures === 0 && resource.materials === 2
+      && resource.programs === 2 && resource.depthTest === true,
+  'nightlights keep one color draw plus one exact DoF depth draw with no lights/textures/triangles',
+  `draw=${resource.drawCalls}+${resource.dofDepthDrawCalls} depth, material=${resource.materials}, program=${resource.programs}`);
   pass(errors.length === 0, 'browser console remains clean', errors[0] || '');
 
   console.log(`PIXEL  front opening @ ${frontPixels.center.x},${frontPixels.center.y}; warm=${frontPixels.warmPixels}`);

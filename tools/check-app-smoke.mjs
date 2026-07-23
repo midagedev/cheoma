@@ -530,7 +530,7 @@ try {
   const postOrder = await page.evaluate(() => window.__engine.debugPostPassOrder());
   pass(
     JSON.stringify(postOrder) === JSON.stringify([
-      'RenderPass', 'GradePass', 'UnrealBloomPass', 'BokehPass',
+      'RenderPass', 'GradePass', 'BokehPass', 'UnrealBloomPass',
       'FlarePass', 'OutlinePass', 'OutputPass',
     ]),
     `post passes preserve the output-last contract (${postOrder.join(' → ')})`,

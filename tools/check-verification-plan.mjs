@@ -22,7 +22,10 @@ assert.deepEqual(ids(['src/env/post-quality-state.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/circular-bokeh-shader.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
+  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+]);
+assert.deepEqual(ids(['src/env/bokeh-source-scatter.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
 assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'lod-app']);
@@ -115,6 +118,25 @@ assert.deepEqual(ids(['src/cinematic/architectural-reveal.js']), [
 ]);
 assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
 assert.deepEqual(ids(['tools/shoot-bokeh-fixture.mjs']), ['core', 'bokeh-fixture']);
+for (const helper of [
+  'tools/lib/bokeh-gpu-diagnostic.mjs',
+  'tools/lib/bokeh-image-analysis.mjs',
+  'tools/lib/bokeh-linear-sweep.mjs',
+  'tools/lib/bokeh-optical-chart.mjs',
+  'tools/lib/bokeh-scatter-proof.mjs',
+  'tools/lib/bokeh-source-stress.mjs',
+]) {
+  assert.deepEqual(ids([helper]), ['core', 'bokeh-fixture'], `${helper} must run its owning fixture`);
+}
+assert.deepEqual(ids(['tools/shoot-bokeh-scatter-proof.mjs']), ['core', 'bokeh-fixture']);
+assert.deepEqual(ids(['src/village/nightlights.js']), [
+  'core', 'app', 'dof-app', 'worker', 'lod-wave',
+]);
+const bokehCommands = verificationCommands(planVerification(['src/env/bokeh-source-scatter.js']));
+assert.deepEqual(
+  bokehCommands.find((command) => command.id === 'bokeh-fixture')?.args,
+  ['run', 'shoot:bokeh:proof'],
+);
 assert.deepEqual(impactedFastChecks(['docs/verification.md']), []);
 assert.deepEqual(impactedFastChecks(['.gitignore']), [
   './check-architecture.mjs', './check-verification-plan.mjs', './check-worktree-contract.mjs',

@@ -9,7 +9,7 @@ export const VERIFICATION_GATES = Object.freeze({
   audio: Object.freeze({ script: 'check:audio', resource: 'browser', tier: 'checkpoint', description: 'Audio lifecycle contract' }),
   'temple-browser': Object.freeze({ script: 'check:temple:browser', resource: 'browser', tier: 'checkpoint', description: 'Temple WebGL assembly and disposal' }),
   'dof-app': Object.freeze({ script: 'check:dof:app', resource: 'browser', tier: 'checkpoint', description: 'Product depth-of-field flow' }),
-  'bokeh-fixture': Object.freeze({ script: 'shoot:bokeh', resource: 'exclusive', tier: 'checkpoint', description: 'Controlled bokeh image and hardware GPU query' }),
+  'bokeh-fixture': Object.freeze({ script: 'shoot:bokeh:proof', resource: 'exclusive', tier: 'checkpoint', description: 'Controlled bokeh image, source-scatter resource proof, and hardware GPU query' }),
   rim: Object.freeze({ script: 'check:rim', resource: 'browser', tier: 'checkpoint', description: 'Physical rim shader contract' }),
   'lod-focus': Object.freeze({ script: 'check:lod:focus', resource: 'browser', tier: 'checkpoint', description: 'Focused LOD lifecycle' }),
   'lod-wave': Object.freeze({ script: 'check:wave:app', resource: 'browser', tier: 'checkpoint', description: 'Wave handoff lifecycle' }),

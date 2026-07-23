@@ -73,6 +73,7 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
       };
     },
     debugResources() {
+      const bokehResources = post.bokehPass.debugResources();
       return {
         bokehPass: post.bokehPass,
         depthTarget: post.bokehPass._renderTargetDepth,
@@ -80,6 +81,8 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
         bokehMaterial: post.bokehPass.materialBokeh,
         instFadeDepthMaterial: post.bokehPass._instFadeDepthMaterial,
         lodScreenDoorDepthMaterial: post.bokehPass._lodScreenDoorDepthMaterial,
+        sunGlow: post.sunGlow,
+        ...bokehResources,
         composerTarget1: post.composer.renderTarget1,
         composerTarget2: post.composer.renderTarget2,
         composerReadBuffer: post.composer.readBuffer,
