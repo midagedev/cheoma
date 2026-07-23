@@ -7,7 +7,7 @@
   // 우측 한지 파라미터 패널 — 집 선택 시 슬라이드 인. 라벨은 로케일화(t).
   let {
     open = false, preset = 'korea', expansion = 1, maxExpansion = 3, canMerge = false,
-    params = {}, onType, onExpansion, onMerge, onParam, onClose,
+    params = {}, onType, onExpansion, onMerge, onParam, onShare = null, onClose,
   } = $props();
 
   // 코어가 즉시 지원하는 슬라이더만 노출(params 에 존재하는 수치 키에 한함). 라벨키 s_<key>.
@@ -38,9 +38,25 @@
 </script>
 
 <BottomSheet {open} {onClose} variant="right" ariaLabel="build panel">
-  <div class="head">
-    <span class="ko">{t('panel_title')}</span>
-    <span class="en">plan &amp; profile</span>
+  <div class="head" class:shareable={!!onShare}>
+    <div class="title">
+      <span class="ko">{t('panel_title')}</span>
+      <span class="en">plan &amp; profile</span>
+    </div>
+    {#if onShare}
+      <button
+        class="share"
+        data-action="share"
+        onclick={() => onShare?.()}
+        title={t('act_share_tip')}
+        aria-label={t('act_share')}
+      >
+        <svg class="share-glyph" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 15.5V4m0 0L7.5 8.5M12 4l4.5 4.5M5.5 13v6.5h13V13"></path>
+        </svg>
+        {t('act_share')}
+      </button>
+    {/if}
   </div>
 
   <!-- 유형 탭 -->
@@ -97,9 +113,28 @@
 </BottomSheet>
 
 <style>
-  .head { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--ink-line); padding-bottom: 10px; }
+  .head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border-bottom: 1px solid var(--ink-line); padding-bottom: 10px;
+  }
+  .head.shareable { padding-top: 8px; }
+  .title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
   .head .ko { font-family: var(--brush); font-size: 30px; color: var(--ink); }
   .head .en { font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-faint); }
+  .share {
+    flex: none; min-width: 76px; min-height: 44px;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 9px 11px; border-radius: 5px;
+    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink);
+    font-family: var(--serif); font-size: 13px; font-weight: 700;
+    transition: transform 0.12s ease, background 0.15s ease;
+  }
+  .share:hover { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
+  .share:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  .share-glyph {
+    width: 18px; height: 18px; fill: none; stroke: var(--seal-deep);
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  }
 
   section { display: flex; flex-direction: column; gap: 9px; }
   h4 {
@@ -170,6 +205,7 @@
 
   /* 터치: 타깃 확대 — 탭·스테퍼·병합·슬라이더 thumb 를 손가락에 맞게. */
   @media (pointer: coarse) {
+    .share { min-height: 48px; padding: 11px; font-size: 14px; }
     .tab { padding: 12px 2px; }
     .tab .tl { font-size: 15px; }
     .step { padding: 13px 2px; }

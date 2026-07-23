@@ -10,6 +10,13 @@ const FULL_GATES = Object.freeze([
 
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
+// New code normally fails closed. These paths are the reviewed exception for
+// #107: the platform adapter is covered by the dedicated pure contract below,
+// and the contract entrypoint routes only to that gate.
+const REVIEWED_NEW_PATHS = new Set([
+  'app/src/lib/share-scene.js',
+  'tools/check-share.mjs',
+]);
 
 function add(gates, ...items) {
   for (const item of items) gates.add(item);
@@ -49,6 +56,10 @@ function routePath(path) {
   }
   if (path === 'src/main.js' || ROOT_HTML.test(path)) {
     return { full: true, reasons: ['standalone entrypoint requires the full matrix'] };
+  }
+  if (path === 'tools/check-share.mjs') {
+    select('scene-share pure contract changed', 'share');
+    return { gates, reasons };
   }
   if (FAST_CHECK_PATHS.includes(path) || path === 'tools/plan-contract.json') {
     select('browser-free contract changed; run it through impacted core routing', 'core');
@@ -97,6 +108,9 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
+    if (/^app\/src\/lib\/(?:share-scene|url)\.js$/.test(path)) {
+      select('scene-share canonical URL or platform adapter changed', 'share');
+    }
     if (/^app\/src\/(?:App\.svelte|components\/RenderStyleToggle\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime|post-quality-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
       select('product ink mode integration changed', 'ink-app');
     }
@@ -348,7 +362,7 @@ export function planVerification(paths, {
 
   for (const path of files) {
     const route = routePath(path);
-    if (normalizedNewPaths.has(path) && !DOC_PATH.test(path)) {
+    if (normalizedNewPaths.has(path) && !DOC_PATH.test(path) && !REVIEWED_NEW_PATHS.has(path)) {
       route.full = true;
       route.reasons.unshift('new path fails closed until its verification boundary is reviewed');
     }
@@ -388,6 +402,12 @@ export function verificationCommands(plan) {
     id: 'core',
     command: process.execPath,
     args: ['tools/check-selected.mjs', ...(plan.pureChecks || ['./check-architecture.mjs'])],
+    resource: 'cpu',
+  });
+  if (has('share')) commands.push({
+    id: 'share',
+    command: 'npm',
+    args: ['run', 'check:share'],
     resource: 'cpu',
   });
   if (has('app')) commands.push(gateCommand('app'));

@@ -1,12 +1,15 @@
 <script>
-  // 우하: 주요 액션(도장 모양 버튼) — (다시 짓기) / 사진 찍기 / 사운드.
+  // 우하: 주요 액션(도장 모양 버튼) — (다시 짓기) / 사진 저장 / 장면 링크 공유 / 사운드.
   import { t } from '../lib/i18n.svelte.js';
   // raised: 마을 부감에서 하단 peek 옵션 시트 위로 액션바를 올려 겹침 방지(모바일).
   // onReroll: 단일건물 씬(레거시)에서만 전달 — 마을 씬은 리롤/리플레이를 컨텍스트 패널이 소유(#100)하므로
   //   null 이면 도장 미노출. shifted: 우측 편집 패널이 열리면(데스크톱) 패널 왼쪽으로 밀어 가려지지 않게.
   // onDrone/onWalk: 마을 부감에서만 전달(시네마틱 데모 진입). null 이면 미노출.
-  let { onReroll = null, onPostcard, onToggleAudio, audioOn = false, busy = false, raised = false, shifted = false,
-    onDrone = null, onWalk = null } = $props();
+  let {
+    onReroll = null, onPostcard = null, onShare = null, onToggleAudio = null,
+    audioOn = false, busy = false, raised = false, shifted = false,
+    onDrone = null, onWalk = null,
+  } = $props();
 </script>
 
 <div class="actions" class:raised class:shifted>
@@ -25,18 +28,27 @@
       <span class="face glyph">步</span>
     </button>
   {/if}
-  <button class="seal" onclick={onPostcard} title={t('act_postcard_tip')}>
-    <span class="face">{t('act_postcard')}</span>
-  </button>
-  <button
-    class="seal round"
-    class:active={audioOn}
-    onclick={onToggleAudio}
-    title={audioOn ? t('act_sound_on_tip') : t('act_sound_off_tip')}
-    aria-pressed={audioOn}
-  >
-    <span class="face note">♪</span>
-  </button>
+  {#if onPostcard}
+    <button class="seal" data-action="postcard" onclick={onPostcard} title={t('act_postcard_tip')}>
+      <span class="face">{t('act_postcard')}</span>
+    </button>
+  {/if}
+  {#if onShare}
+    <button class="seal" data-action="share" onclick={onShare} title={t('act_share_tip')}>
+      <span class="face">{t('act_share')}</span>
+    </button>
+  {/if}
+  {#if onToggleAudio}
+    <button
+      class="seal round"
+      class:active={audioOn}
+      onclick={onToggleAudio}
+      title={audioOn ? t('act_sound_on_tip') : t('act_sound_off_tip')}
+      aria-pressed={audioOn}
+    >
+      <span class="face note">♪</span>
+    </button>
+  {/if}
 </div>
 
 <style>
