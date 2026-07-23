@@ -205,6 +205,13 @@
 - URL: https://webzine.nfm.go.kr/2018/09/06/%EB%B9%9B%EC%9C%BC%EB%A1%9C-%EB%B0%9D%ED%9E%88%EA%B3%A0-%EC%A1%B0%EB%AA%85%EC%9C%BC%EB%A1%9C-%ED%86%B5%ED%95%98%EB%8B%A4/
 - 라이선스: 국립민속박물관 공개 웹진 해설(2026-07-23 열람). 앱에는 링크와 사실·제품 해석의 요약만 싣고 원문·전시 사진은 재배포하지 않는다. 자산 재사용 전 기관의 최신 저작권·공공누리 조건을 다시 확인한다.
 
+### 39. 국가유산청 · 국립문화유산연구원 · 한국학중앙연구원 — 사찰 전각 역할과 건축 위계
+- 국립문화유산연구원 「가람배치」, 한국민족문화대백과사전 「절」·「보제루」, 국가유산포털 「칠곡 송림사 대웅전」·「영주 부석사 안양루」·「영주 부석사 범종각」.
+- 금당·강당·경루·종루·승방의 역할과 위치가 구분되고, 중심 불전도 맞배/팔작·주심포/다포의 실제 사례가 함께 존재함을 교차 확인. 기관 자료는 전국 사찰의 보편 높이 비율이나 공포 빈도 통계를 제공하지 않는다.
+- **활용 / Use:** 주불전 4 → 부불전 3 → 강당·누각 2 → 요사·선방 1의 순수 plan 위계와 seed-stable 지붕·공포 repertoire, 낮아지는 기둥·기단·처마 깊이, 실제 처마 polygon 기반 경계·충돌·남측 일조로 번역한다. 숫자 간격은 근경 식별성과 병합 성능을 위한 제품 결정이며 특정 문화유산의 실측 복원이 아니다. 궁궐 전용 잡상·취두는 사찰에 추가하지 않는다 / Basis for a pure plan-owned hierarchy from principal worship hall to subsidiary hall, lecture or pavilion, and domestic quarters; seed-stable roof/bracket repertoires; restrained massing and eave steps; and one actual eave polygon shared by rendering, bounds, collision, and southern solar access. Numeric gaps are product decisions for close-range legibility and merged performance, not a measured reconstruction, and palace-only ornaments remain excluded (`src/temple/role-hierarchy.js`, `src/temple/plan.js`, `src/temple/compound.js`, `docs/temple-generator.md`).
+- URL: https://portal.nrich.go.kr/kor/archeologyUsrView.do?idx=10011&menuIdx=792 · https://encykorea.aks.ac.kr/Article/E0049782 · https://encykorea.aks.ac.kr/Article/E0023528 · https://www.heritage.go.kr/heri/cul/culGuidePostDetail.do?ccbaCpno=1123721310000&ccgbGbtype=IND&ccgbGbtypeNo=1&pageNo=1_5_0_0 · https://www.heritage.go.kr/heri/cul/culSelectDetail.do?ccbaAsno=0021830000000&ccbaCpno=1123721830000&ccbaCtcd=37&ccbaKdcd=12&pageNo=1_1_1_0 · https://heritage.go.kr/heri/cul/culSelectDetail.do?ccbaCpno=1123721840000
+- 라이선스: 국립문화유산연구원 「가람배치」는 **공공누리 제4유형**, 한국민족문화대백과와 국가유산포털은 각 항목의 출처표시·이용조건 적용. 2026-07-23 canonical 페이지를 확인했으며 앱은 링크와 독자 요약만 수록하고 원문 문장·사진·도면·보호 자산을 복제하지 않는다. 별도 재사용 전 최신 조건을 다시 확인한다.
+
 ---
 
 ## ⑤ 마을 · 읍성 문헌 (Village & walled-town sources)

@@ -35,6 +35,28 @@ Math.random = () => {
 
 const plan = planTempleCompound({ variant, seed });
 const compound = buildTempleCompound(plan);
+compound.updateMatrixWorld(true);
+const hallBounds = plan.buildings.map((spec) => {
+  const hall = compound.getObjectByName(`temple-${spec.id}`);
+  const roof = hall?.getObjectByName('roof');
+  const size = roof
+    ? new THREE.Box3().setFromObject(roof).getSize(new THREE.Vector3())
+    : new THREE.Vector3();
+  return {
+    id: spec.id,
+    role: spec.role,
+    architectureId: spec.architectureId,
+    architecturalRank: spec.architecturalRank,
+    roof: spec.roofGrammar.type,
+    bracket: spec.bracketGrammar.family,
+    eave: {
+      plannedWidth: spec.eaveFootprint.width,
+      plannedDepth: spec.eaveFootprint.depth,
+      renderedWidth: +size.x.toFixed(3),
+      renderedDepth: +size.z.toFixed(3),
+    },
+  };
+});
 const renderRoot = merged ? mergeStatic([compound], 'temple-viewer-merged') : compound;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc7d1d7);
@@ -144,6 +166,13 @@ if (lifecycleProbe) {
 // automated contract. The animation loop below exists only for manual orbiting.
 controls.update();
 renderer.render(scene, camera);
+const materials = new Set();
+let palaceOrnaments = 0;
+renderRoot.traverse((object) => {
+  const current = Array.isArray(object.material) ? object.material : [object.material];
+  for (const material of current) if (material?.isMaterial) materials.add(material);
+  if (object.name === 'palace-japsang' || object.name === 'palace-chwidu') palaceOrnaments++;
+});
 window.__TEMPLE_DIAG = {
   variant,
   merged,
@@ -157,12 +186,19 @@ window.__TEMPLE_DIAG = {
     props: plan.props.length,
   },
   roles: plan.buildings.map((building) => building.role),
+  architecture: hallBounds,
   issues: templePlanIssues(plan),
   camera: {
     fov: camera.fov,
     southOffset: +(camera.position.z - controls.target.z).toFixed(3),
   },
-  render: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles },
+  render: {
+    calls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    programs: renderer.info.programs?.length || 0,
+    materials: materials.size,
+    palaceOrnaments,
+  },
   lifecycle,
 };
 window.__TEMPLE_READY = true;

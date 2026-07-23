@@ -170,19 +170,19 @@
           {#if cat.note}<p class="catnote">{cat.note}</p>{/if}
           <ul>
             {#each cat.items as it}
-              <li>
-                <div class="it-title">{it.title}</div>
-                {#each it.meta as m}<div class="it-meta">{m}</div>{/each}
+              <li data-reference-item={it.title}>
+                <div class="it-title" data-reference-field="title">{it.title}</div>
+                {#each it.meta as m}<div class="it-meta" data-reference-field="scope">{m}</div>{/each}
                 {#if it.use}
-                  <div class="it-use"><span class="k">{lab.use}</span>{isKo ? it.use.ko : (it.use.en || it.use.ko)}</div>
+                  <div class="it-use" data-reference-field="application"><span class="k">{lab.use}</span>{isKo ? it.use.ko : (it.use.en || it.use.ko)}</div>
                 {/if}
                 {#if it.links.length}
-                  <div class="it-links">
+                  <div class="it-links" data-reference-field="sources">
                     {#each it.links as u}<a href={u} target="_blank" rel="noopener noreferrer">{host(u)}</a>{/each}
                   </div>
                 {/if}
                 {#if it.refs.length}<div class="it-refs">{it.refs.join(' · ')}</div>{/if}
-                {#if it.license}<div class="it-lic it-license"><span class="k">{lab.license}</span>{#each segs(it.license) as s}{#if s.b}<strong>{s.t}</strong>{:else}{s.t}{/if}{/each}</div>{/if}
+                {#if it.license}<div class="it-lic it-license" data-reference-field="license"><span class="k">{lab.license}</span>{#each segs(it.license) as s}{#if s.b}<strong>{s.t}</strong>{:else}{s.t}{/if}{/each}</div>{/if}
               </li>
             {/each}
           </ul>
