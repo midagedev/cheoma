@@ -18,7 +18,8 @@ import {
   collectObjectResources,
   disposeObjectResources,
 } from '../core/three-resources.js';
-import { planTempleCompound } from './plan.js';
+import { normalizeTemplePlan, planTempleCompound } from './plan.js';
+import { templeHallBuilderParams } from './role-hierarchy.js';
 
 const lifecycle = new WeakMap();
 
@@ -69,29 +70,20 @@ function polygonMesh(polygon, material, y, name) {
 }
 
 function hallPreset(spec, seed, mats) {
-  const domestic = spec.formality === 'domestic';
-  const pavilion = spec.formality === 'pavilion';
+  const architecture = {
+    architecturalRank: spec.architecturalRank,
+    roofGrammar: spec.roofGrammar,
+    bracketGrammar: spec.bracketGrammar,
+    eaveGrammar: spec.eaveGrammar,
+    massingGrammar: spec.massingGrammar,
+  };
   return {
     ...PRESETS.temple,
+    ...templeHallBuilderParams(architecture),
     seed,
     mats,
     frontBays: spec.frontBays,
     sideBays: spec.sideBays,
-    ...(domestic ? {
-      bracketTiers: 0,
-      bracketScale: 0.85,
-      columnHeight: 3.15,
-      podiumTierH: 0.65,
-      doubleEave: false,
-      ridgeH: 0.32,
-    } : {}),
-    ...(pavilion ? {
-      bracketTiers: 1,
-      bracketScale: 1.05,
-      columnHeight: 3.35,
-      podiumTierH: 0.55,
-      sideBays: 2,
-    } : {}),
   };
 }
 
@@ -103,6 +95,13 @@ function buildHall(spec, seed, mats) {
   building.scale.setScalar(spec.scale || 1);
   building.userData.templeId = spec.id;
   building.userData.templeRole = spec.role;
+  building.userData.templeArchitecture = {
+    id: spec.architectureId,
+    architecturalRank: spec.architecturalRank,
+    roofGrammar: spec.roofGrammar,
+    bracketGrammar: spec.bracketGrammar,
+    eaveGrammar: spec.eaveGrammar,
+  };
   return building;
 }
 
@@ -176,9 +175,10 @@ function buildEnclosures(plan, mats) {
  * releases the generated palette, derived materials, geometries, and textures.
  */
 export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}) {
-  const plan = planOrOptions?.schemaVersion
-    ? planOrOptions
-    : planTempleCompound(planOrOptions);
+  const suppliedPlan = Object.hasOwn(planOrOptions || {}, 'schemaVersion')
+    || Array.isArray(planOrOptions?.buildings);
+  const sourcePlan = suppliedPlan ? planOrOptions : planTempleCompound(planOrOptions);
+  const plan = normalizeTemplePlan(sourcePlan);
   const mainDancheong = resolveDancheong('temple', dancheong || mats?.dancheong || PRESETS.temple);
   const palette = mats || makeMaterials('temple', mainDancheong);
   const paletteByDancheong = new Map();
@@ -240,6 +240,7 @@ export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}
   // The conservative signature skips shader-patched materials.
   canonicalizeSharedMaterials(root);
   root.userData.mats = palette;
+  root.userData.templeSchemaVersion = plan.schemaVersion;
   root.userData.parcelLike = { id: 'temple', style: 'temple', variant: plan.variant };
   root.userData.templeHandle = {
     seed: plan.seed,

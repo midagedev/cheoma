@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   buildTempleCompound,
   disposeTempleCompound,
+  normalizeTemplePlan,
   planTempleCompound,
   templePlanIssues,
 } from '../src/api/temple.js';
@@ -17,6 +18,7 @@ const shot = query.get('shot') === '1';
 const debug = query.get('debug') === '1';
 const lifecycleProbe = query.get('probe') === '1';
 const merged = query.get('merged') === '1';
+const inputSchemaVersion = query.get('schema') === '1' ? 1 : 2;
 if (shot) document.body.classList.add('shot');
 for (const link of document.querySelectorAll('[data-variant]')) {
   link.classList.toggle('on', link.dataset.variant === variant);
@@ -33,8 +35,42 @@ Math.random = () => {
   return randomState / 0x100000000;
 };
 
-const plan = planTempleCompound({ variant, seed });
-const compound = buildTempleCompound(plan);
+const authoredPlan = planTempleCompound({ variant, seed });
+const inputPlan = JSON.parse(JSON.stringify(authoredPlan));
+if (inputSchemaVersion === 1) {
+  inputPlan.schemaVersion = 1;
+  for (const building of inputPlan.buildings) {
+    for (const field of [
+      'architecturalRank', 'architectureId', 'roofGrammar', 'bracketGrammar',
+      'eaveGrammar', 'massingGrammar', 'eaveFootprint',
+    ]) delete building[field];
+    building.footprint = { width: 1, depth: 1 };
+  }
+}
+const plan = normalizeTemplePlan(inputPlan);
+const compound = buildTempleCompound(inputPlan);
+compound.updateMatrixWorld(true);
+const hallBounds = plan.buildings.map((spec) => {
+  const hall = compound.getObjectByName(`temple-${spec.id}`);
+  const roof = hall?.getObjectByName('roof');
+  const size = roof
+    ? new THREE.Box3().setFromObject(roof).getSize(new THREE.Vector3())
+    : new THREE.Vector3();
+  return {
+    id: spec.id,
+    role: spec.role,
+    architectureId: spec.architectureId,
+    architecturalRank: spec.architecturalRank,
+    roof: spec.roofGrammar.type,
+    bracket: spec.bracketGrammar.family,
+    eave: {
+      plannedWidth: spec.eaveFootprint.width,
+      plannedDepth: spec.eaveFootprint.depth,
+      renderedWidth: +size.x.toFixed(3),
+      renderedDepth: +size.z.toFixed(3),
+    },
+  };
+});
 const renderRoot = merged ? mergeStatic([compound], 'temple-viewer-merged') : compound;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc7d1d7);
@@ -144,9 +180,18 @@ if (lifecycleProbe) {
 // automated contract. The animation loop below exists only for manual orbiting.
 controls.update();
 renderer.render(scene, camera);
+const materials = new Set();
+let palaceOrnaments = 0;
+renderRoot.traverse((object) => {
+  const current = Array.isArray(object.material) ? object.material : [object.material];
+  for (const material of current) if (material?.isMaterial) materials.add(material);
+  if (object.name === 'palace-japsang' || object.name === 'palace-chwidu') palaceOrnaments++;
+});
 window.__TEMPLE_DIAG = {
   variant,
   merged,
+  inputSchemaVersion,
+  schemaVersion: compound.userData.templeSchemaVersion,
   size: { width: plan.width, depth: plan.depth },
   renderedBounds: { x: +size.x.toFixed(3), y: +size.y.toFixed(3), z: +size.z.toFixed(3) },
   counts: {
@@ -157,12 +202,19 @@ window.__TEMPLE_DIAG = {
     props: plan.props.length,
   },
   roles: plan.buildings.map((building) => building.role),
+  architecture: hallBounds,
   issues: templePlanIssues(plan),
   camera: {
     fov: camera.fov,
     southOffset: +(camera.position.z - controls.target.z).toFixed(3),
   },
-  render: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles },
+  render: {
+    calls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    programs: renderer.info.programs?.length || 0,
+    materials: materials.size,
+    palaceOrnaments,
+  },
   lifecycle,
 };
 window.__TEMPLE_READY = true;

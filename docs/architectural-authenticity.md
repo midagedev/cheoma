@@ -59,7 +59,26 @@
 
 담 종류, 몸채 지붕과 담 지붕의 관계, 계층별 경계, 비워 둔 마당 중심과 가장자리 생활물의 근거·알고리즘은 [`village-walls-parcels.md`](village-walls-parcels.md)가 소유한다. 이번 감사에서는 담장을 일괄 추가하거나 마당 중앙에 장식물을 채우지 않았다. 기존 `yard-layout.js`의 장독대·낟가리·빨래줄·텃밭·부속채 footprint와 도로측 대문 계약을 유지한다.
 
-## 3. 2026-07-22 감사 체크리스트
+### 2.5 사찰 전각의 역할 위계
+
+- 국립문화유산연구원은 가람배치를 금당·문·강당·경루·종루·승방의 규모와 상호 거리·위치에 공간 규칙이
+  있는 체계로 설명한다.
+- 한국학중앙연구원 「절」은 불전, 강당, 승당/승방, 살림 공간, 산문, 종각의 기능을 구분한다. 「보제루」는
+  주불전 앞 누각이 법요·설법과 진입 기능을 맡고 종각이 곁에 놓이는 사례를 설명한다.
+- 국가유산포털의 송림사 대웅전(5×3칸 다포 겹처마 맞배)과 부석사 무량수전(주심포 팔작)은 중심 불전도
+  하나의 지붕·공포 형식으로 고정할 수 없음을 보여 준다. 부석사 안양루·범종각은 불전이 아니라 각루로
+  분류된다.
+
+**구현 해석**: `src/temple/role-hierarchy.js`가 주불전 4, 부불전 3, 강당·누각 2, 요사·선방 1의 상대
+위계와 송림사 맞배·다포/무량수전 팔작·주심포의 seed-stable 지붕 repertoire를 순수 데이터로 만든다. 각 plan building은 지붕·공포·처마·기둥/기단
+grammar와 실제 처마 polygon을 완전히 기록하고 renderer·경계·충돌·남측 일조가 이를 함께 쓴다. 렌더러는
+역할명을 보고 두 번째 문법을 만들지 않는다.
+
+**한계**: 출처는 역할과 사례별 형식을 확인하지만 전국 사찰의 보편 높이 비율·처마 깊이·공포 빈도 통계를
+제시하지 않는다. 1–4 rank와 수치 간격은 특정 문화유산의 실측 복원이 아니라 역할 식별성과 병합 성능을
+위한 제품 결정이다. 단청 위계는 기존 계약을 유지하고, 팔작 변형에도 궁궐 전용 잡상·취두를 추가하지 않는다.
+
+## 3. 2026-07-23 감사 체크리스트
 
 | 항목 | 감사 결과 | 이번 수정 | 남은 한계 |
 | --- | --- | --- | --- |
@@ -73,12 +92,14 @@
 | 담장·대문 | 기존 조사 계약과 일치 | 변경 없음 | 지역·계층별 재료 비율의 추가 표본 필요 |
 | 마당 생활상 | 중심은 비우고 가장자리 기능물을 배치 | 변경 없음 | 계절·생업별 사용 흔적의 다양성은 별도 과제 |
 | 단청 | 궁·사찰 전용 경계가 이미 있음 | 민가 창호에서 궁궐색 누출만 차단 | 색·문양 위계 자체는 #56/`dancheong.md` 범위 |
+| 사찰 전각 역할 | 모든 전각이 같은 주거형 temple preset의 작은 복제로 읽혔음 | plan-owned rank·지붕·공포·처마·매스 grammar와 실제 처마 충돌 footprint로 분리 | 수치 단계는 전국 실측 통계가 아닌 절제된 제품 해석 |
 
 ## 4. 자동 계약
 
 - `npm run check:building-clearance`는 두 살림집의 부엌 장면에 `kitchen-opening`, `kitchen-threshold`, `kitchen-door`, `hearth-pot`, `agungiEmber`, `agungiFire`가 한 번씩 있고, 개구가 외벽 밖 독립 매스로 되돌아가지 않는지 검사한다.
 - 같은 gate는 초가 기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ의 실제 FULL 패널 수·폭이 plan과 일치하고, 주출입 anchor와 frame/hardware batch가 하나이며 부엌 service opening이 분리돼 있는지 검사한다.
 - `npm run check:app`은 실제 브라우저에서 민가 정자살·세살의 녹색 우세 픽셀이 사라지고 궁궐 창호색은 남는지, 합성 팔작 사찰에는 궁궐 지붕 장식이 없고 궁에는 있는지 검사한다.
+- `npm run check:temple`은 30개 순수 fixture에서 역할 위계·seed 변주·실제 처마 polygon·경계/충돌·남측 일조를 검사한다. `npm run check:temple:browser`는 같은 grammar가 실제 roof bounds에 나타나는지, raw/merged 삼각형과 역할 수가 같은지, palace 장식이 0인지, 140 calls·12 programs·72 materials 상한과 dispose를 검사한다.
 - 같은 앱 게이트는 실제 낙관으로 Reference 모달을 열어 이 감사의 선별 출처 묶음과 #81의 AURI·국립민속박물관
   항목, 근거와 제품 번역의 제한, 원문 링크와 안전한 외부 링크 속성을 확인한다.
 - `npm run check:worker`는 이 FULL 건물 지오메트리 변경 뒤에도 sync/Worker/fallback 장면이 바이트 수준에서 일치하는지 검사한다. plan과 seed RNG는 이번 수정에서 바뀌지 않는다.
@@ -91,6 +112,7 @@
    날리거나 벽·지붕·하늘에 자유 부유해서는 안 된다.
 4. 민가 창호는 궁궐의 주칠·뇌록과 분리되고 백골 목재·한지 몸체와 어울려야 한다.
 5. 궁의 잡상 실루엣은 유지하고 사찰 팔작 변형에는 나타나지 않아야 한다.
+6. 남측 망원에서 주불전은 가장 높은 처마·기단·공포 밀도로 읽히되 궁궐처럼 과장되지 않고, 부불전·강당·요사·누각은 서로 다른 낮은 단계로 읽혀야 한다.
 
 ## 6. 사용한 원문
 
@@ -102,5 +124,9 @@
 - 한국학중앙연구원 한국민족문화대백과사전, 「굴뚝」: https://encykorea.aks.ac.kr/Article/E0006741
 - 한국학중앙연구원 한국민족문화대백과사전, 「잡상」: https://encykorea.aks.ac.kr/Article/E0048208
 - 국가유산청 국가유산포털, 「궁궐 지붕 위 동물 조각상」: https://www.heritage.go.kr/heri/html/HtmlPage.do?pageNo=1&pg=%2Fcul%2FcultureEasySub01_14.jsp
+- 국립문화유산연구원, 「가람배치」: https://portal.nrich.go.kr/kor/archeologyUsrView.do?idx=10011&menuIdx=792
+- 한국학중앙연구원 한국민족문화대백과사전, 「절」·「보제루」: https://encykorea.aks.ac.kr/Article/E0049782 · https://encykorea.aks.ac.kr/Article/E0023528
+- 국가유산청 국가유산포털, 「칠곡 송림사 대웅전」·「영주 부석사 안양루」·「영주 부석사 범종각」: https://www.heritage.go.kr/heri/cul/culGuidePostDetail.do?ccbaCpno=1123721310000&ccgbGbtype=IND&ccgbGbtypeNo=1&pageNo=1_5_0_0 · https://www.heritage.go.kr/heri/cul/culSelectDetail.do?ccbaAsno=0021830000000&ccbaCpno=1123721830000&ccbaCtcd=37&ccbaKdcd=12&pageNo=1_1_1_0 · https://heritage.go.kr/heri/cul/culSelectDetail.do?ccbaCpno=1123721840000
+- 국가유산 디지털 서비스, 「영주 부석사 실측조사보고서(도판)」: https://digital.khs.go.kr/buis/buisDetail.do?bizUid=13898748261677900003&ctptNo=1113700180000&ctptUid=13898859665883200019
 
-모든 URL은 2026-07-22 열람했다. 기관 공개 웹페이지의 권리는 각 기관에 있으며 이 저장소는 원문 이미지·도해를 복제하지 않고 사실 확인과 구현 해석을 요약한다. 재배포나 별도 자산화 전에는 각 페이지의 최신 이용조건을 다시 확인한다.
+모든 URL은 2026-07-23 재확인했다. 기관 공개 웹페이지의 권리는 각 기관에 있으며 이 저장소는 원문 이미지·도해를 복제하지 않고 사실 확인과 구현 해석을 요약한다. 재배포나 별도 자산화 전에는 각 페이지의 최신 이용조건을 다시 확인한다.

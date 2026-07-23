@@ -1,4 +1,8 @@
 import { makeRng } from '../rng.js';
+import {
+  templeHallEaveFootprint,
+  templeRoleArchitecture,
+} from './role-hierarchy.js';
 
 // Framework- and renderer-free Korean temple compound planner.
 // Local coordinates follow the repository convention: +z is south/entrance,
@@ -6,6 +10,7 @@ import { makeRng } from '../rng.js';
 // none of them may infer a second layout from the variant name.
 
 export const TEMPLE_VARIANTS = Object.freeze(['compact', 'courtyard', 'extended']);
+export const TEMPLE_PLAN_SCHEMA_VERSION = 2;
 
 export const TEMPLE_VARIANT_SPECS = Object.freeze({
   compact: Object.freeze({ min: 22, max: 30, width: 26, depth: 28, minHalls: 1, maxHalls: 2 }),
@@ -53,15 +58,151 @@ export function templeCompoundDefaultsForSite(siteR, seed = 1) {
   return { variant, width: round(width), depth: round(depth) };
 }
 
+function withHallArchitecture(building, seed) {
+  const architecture = templeRoleArchitecture(building.role, { seed, id: building.id });
+  const eave = templeHallEaveFootprint({
+    architecture,
+    frontBays: building.frontBays,
+    sideBays: building.sideBays,
+    scale: building.scale,
+    yaw: building.yaw,
+    position: building.position,
+  });
+  return {
+    ...building,
+    formality: architecture.formality,
+    architecturalRank: architecture.architecturalRank,
+    architectureId: architecture.id,
+    roofGrammar: architecture.roofGrammar,
+    bracketGrammar: architecture.bracketGrammar,
+    eaveGrammar: architecture.eaveGrammar,
+    massingGrammar: architecture.massingGrammar,
+    eaveFootprint: {
+      localWidth: round(eave.localWidth),
+      localDepth: round(eave.localDepth),
+      width: round(eave.width),
+      depth: round(eave.depth),
+      polygon: eave.polygon.map((corner) => point(corner.x, corner.z)),
+    },
+    // Compatibility consumers use the already-oriented AABB. It is derived
+    // from the same actual eave rectangle rather than a hand-authored plot box.
+    footprint: { width: round(eave.width), depth: round(eave.depth) },
+  };
+}
+
 function hall(id, role, x, z, {
   yaw = 0, frontBays = 3, sideBays = 2, scale = 0.8,
-  footprintW = 12, footprintD = 7, formality = 'hall',
+  seed = 1,
 } = {}) {
-  return {
-    id, role, style: 'temple', position: point(x, z), yaw: round(yaw, 6),
-    frontBays, sideBays, scale: round(scale), formality,
-    footprint: { width: round(footprintW), depth: round(footprintD) },
-  };
+  return withHallArchitecture({
+    id,
+    role,
+    style: 'temple',
+    position: point(x, z),
+    yaw: round(yaw, 6),
+    frontBays,
+    sideBays,
+    scale: round(scale),
+  }, seed);
+}
+
+const PLAN_ARRAY_FIELDS = Object.freeze([
+  'courtyards', 'enclosures', 'buildings', 'gates', 'props', 'paths',
+]);
+
+function assertPlanCollections(plan) {
+  for (const field of PLAN_ARRAY_FIELDS) {
+    if (!Array.isArray(plan[field])) throw new TypeError(`TemplePlan.${field} must be an array`);
+  }
+}
+
+function completeHallArchitecture(building) {
+  const finiteFields = (object, fields) => fields.every((field) => Number.isFinite(object?.[field]));
+  return Number.isInteger(building?.architecturalRank)
+    && typeof building.architectureId === 'string' && building.architectureId.length > 0
+    && typeof building.formality === 'string' && building.formality.length > 0
+    && typeof building.roofGrammar?.family === 'string'
+    && typeof building.roofGrammar?.type === 'string'
+    && finiteFields(building.roofGrammar, [
+      'pitch', 'profileCurve', 'ridgeHeight', 'gableOverhang', 'cornerLift', 'planCurve',
+    ])
+    && typeof building.bracketGrammar?.family === 'string'
+    && Number.isInteger(building.bracketGrammar?.tiers)
+    && Number.isInteger(building.bracketGrammar?.interBrackets)
+    && Number.isFinite(building.bracketGrammar?.scale)
+    && typeof building.bracketGrammar?.density === 'string'
+    && finiteFields(building.eaveGrammar, ['overhang', 'drop'])
+    && Number.isInteger(building.eaveGrammar?.layers)
+    && finiteFields(building.massingGrammar, ['columnHeight', 'podiumTierHeight'])
+    && Number.isInteger(building.massingGrammar?.podiumTiers);
+}
+
+function expectedHallEave(building) {
+  return templeHallEaveFootprint({
+    architecture: {
+      roofGrammar: building.roofGrammar,
+      eaveGrammar: building.eaveGrammar,
+    },
+    frontBays: building.frontBays,
+    sideBays: building.sideBays,
+    scale: building.scale,
+    yaw: building.yaw,
+    position: building.position,
+  });
+}
+
+function hallEaveMatches(building, tolerance = 0.002) {
+  const polygon = building.eaveFootprint?.polygon;
+  if (polygon?.length !== 4) return false;
+  const expected = expectedHallEave(building);
+  return expected.polygon.every((corner, index) => (
+    Math.hypot(corner.x - polygon[index].x, corner.z - polygon[index].z) <= tolerance
+  ))
+    && Math.abs(expected.width - building.eaveFootprint.width) <= tolerance
+    && Math.abs(expected.depth - building.eaveFootprint.depth) <= tolerance
+    && Math.abs(expected.width - building.footprint?.width) <= tolerance
+    && Math.abs(expected.depth - building.footprint?.depth) <= tolerance;
+}
+
+/**
+ * Normalize the pure TemplePlan input boundary.
+ *
+ * Schema v1 did not own hall architecture. Its deterministic upgrade is the
+ * only compatibility layer allowed to recover grammar from a role; renderers
+ * and all v2 consumers receive the complete plan-owned grammar.
+ */
+export function normalizeTemplePlan(plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    throw new TypeError('TemplePlan must be an object');
+  }
+  if (!Number.isInteger(plan.schemaVersion)) {
+    throw new TypeError('TemplePlan.schemaVersion is required');
+  }
+  if (!Number.isInteger(plan.seed) || plan.seed < 0 || plan.seed > 0xffffffff) {
+    throw new TypeError('TemplePlan.seed must be an unsigned 32-bit integer');
+  }
+  if (plan.schemaVersion !== 1 && plan.schemaVersion !== TEMPLE_PLAN_SCHEMA_VERSION) {
+    throw new RangeError(
+      `unsupported TemplePlan schemaVersion ${plan.schemaVersion}; expected 1 or ${TEMPLE_PLAN_SCHEMA_VERSION}`,
+    );
+  }
+  assertPlanCollections(plan);
+  if (plan.schemaVersion === 1) {
+    return normalizeTemplePlan({
+      ...plan,
+      schemaVersion: TEMPLE_PLAN_SCHEMA_VERSION,
+      buildings: plan.buildings.map((building) => withHallArchitecture({ ...building }, plan.seed)),
+    });
+  }
+  for (const building of plan.buildings) {
+    if (!completeHallArchitecture(building)) {
+      throw new TypeError(`TemplePlan v2 building ${building?.id || '<unknown>'} has incomplete architecture`);
+    }
+    if (!hallEaveMatches(building)) {
+      throw new TypeError(`TemplePlan v2 building ${building.id} has a stale eave footprint`);
+    }
+  }
+  return plan;
 }
 
 function prop(id, role, kind, x, z, {
@@ -77,7 +218,7 @@ function prop(id, role, kind, x, z, {
 function commonPlan(seed, variant, width, depth, settings) {
   const halfW = width / 2, halfD = depth / 2;
   return {
-    schemaVersion: 1,
+    schemaVersion: TEMPLE_PLAN_SCHEMA_VERSION,
     seed,
     variant,
     width: round(width),
@@ -115,11 +256,11 @@ function planCompact(plan) {
   });
   const candidates = [
     hall('main-hall', 'main-hall', 0, mainZ, {
-      frontBays: 3, sideBays: 2, scale: 0.82, footprintW: 12, footprintD: 7,
+      frontBays: 3, sideBays: 2, scale: 0.82, seed: plan.seed,
     }),
     hall('west-yosa', 'yosa', -width * 0.35, 2.5, {
       yaw: -Math.PI / 2, frontBays: 3, sideBays: 2, scale: 0.66,
-      footprintW: 5.8, footprintD: 9.5, formality: 'domestic',
+      seed: plan.seed,
     }),
   ];
   plan.buildings = candidates.slice(0, settings.hallCount);
@@ -183,16 +324,16 @@ function planCourtyard(plan) {
   });
   const candidates = [
     hall('main-hall', 'main-hall', axisX, mainZ, {
-      frontBays: 3, sideBays: 3, scale: 0.9, footprintW: 13, footprintD: 9.5,
+      frontBays: 3, sideBays: 3, scale: 0.9, seed: plan.seed,
     }),
     hall('west-yosa', 'yosa', -width * 0.37, -1, {
-      yaw: -Math.PI / 2, scale: 0.72, footprintW: 6.2, footprintD: 10.5, formality: 'domestic',
+      yaw: -Math.PI / 2, scale: 0.72, seed: plan.seed,
     }),
     hall('east-seonbang', 'seonbang', width * 0.37, -1, {
-      yaw: Math.PI / 2, scale: 0.72, footprintW: 6.2, footprintD: 10.5, formality: 'domestic',
+      yaw: Math.PI / 2, scale: 0.72, seed: plan.seed,
     }),
     hall('bell-pavilion', 'bell-pavilion', width * 0.34, depth * 0.29, {
-      frontBays: 3, sideBays: 2, scale: 0.62, footprintW: 9, footprintD: 5.5, formality: 'pavilion',
+      frontBays: 3, sideBays: 2, scale: 0.62, seed: plan.seed,
     }),
   ];
   plan.buildings = candidates.slice(0, settings.hallCount)
@@ -242,25 +383,25 @@ function planExtended(plan) {
   });
   const candidates = [
     hall('main-hall', 'main-hall', axisX, mainZ, {
-      frontBays: 5, sideBays: 3, scale: 0.9, footprintW: 19.2, footprintD: 9.7,
+      frontBays: 5, sideBays: 3, scale: 0.9, seed: plan.seed,
     }),
     hall('west-subsidiary', 'subsidiary-hall', axisX - sideX, mainZ + 0.5, {
-      scale: 0.78, footprintW: 11.3, footprintD: 6.5,
+      scale: 0.78, seed: plan.seed,
     }),
     hall('east-subsidiary', 'subsidiary-hall', axisX + sideX, mainZ + 0.5, {
-      scale: 0.78, footprintW: 11.3, footprintD: 6.5,
+      scale: 0.78, seed: plan.seed,
     }),
     hall('west-yosa', 'yosa', -width * 0.40, -depth * 0.06, {
-      yaw: -Math.PI / 2, scale: 0.72, footprintW: 6.2, footprintD: 10.5, formality: 'domestic',
+      yaw: -Math.PI / 2, scale: 0.72, seed: plan.seed,
     }),
     hall('east-seonbang', 'seonbang', width * 0.40, -depth * 0.06, {
-      yaw: Math.PI / 2, scale: 0.72, footprintW: 6.2, footprintD: 10.5, formality: 'domestic',
+      yaw: Math.PI / 2, scale: 0.72, seed: plan.seed,
     }),
     hall('lecture-hall', 'lecture-hall', -width * 0.35, depth * 0.24, {
-      scale: 0.68, footprintW: 10, footprintD: 6, formality: 'domestic',
+      scale: 0.68, seed: plan.seed,
     }),
     hall('bell-pavilion', 'bell-pavilion', width * 0.35, depth * 0.24, {
-      scale: 0.68, footprintW: 10, footprintD: 6, formality: 'pavilion',
+      scale: 0.68, seed: plan.seed,
     }),
   ];
   plan.buildings = candidates.slice(0, settings.hallCount)
@@ -313,19 +454,76 @@ export function planTempleCompound(options = {}) {
   return plan;
 }
 
-function buildingAabb(building) {
-  // footprint is the already-oriented local-precinct AABB. Keeping this render-
-  // independent avoids duplicating exact roof math in the pure planner.
-  const width = building.footprint.width;
-  const depth = building.footprint.depth;
+function buildingPolygon(building) {
+  if (building.eaveFootprint?.polygon?.length === 4) return building.eaveFootprint.polygon;
+  const width = building.footprint?.width || 0;
+  const depth = building.footprint?.depth || 0;
+  return rect(building.position.x, building.position.z, width, depth);
+}
+
+function polygonBounds(polygon) {
+  const xs = polygon.map((corner) => corner.x);
+  const zs = polygon.map((corner) => corner.z);
   return {
-    minX: building.position.x - width / 2, maxX: building.position.x + width / 2,
-    minZ: building.position.z - depth / 2, maxZ: building.position.z + depth / 2,
+    minX: Math.min(...xs), maxX: Math.max(...xs),
+    minZ: Math.min(...zs), maxZ: Math.max(...zs),
   };
 }
 
 const boxesOverlap = (a, b, gap = 0) => a.minX < b.maxX + gap && a.maxX > b.minX - gap
   && a.minZ < b.maxZ + gap && a.maxZ > b.minZ - gap;
+
+function polygonAxes(polygon) {
+  return polygon.map((corner, index) => {
+    const next = polygon[(index + 1) % polygon.length];
+    const dx = next.x - corner.x;
+    const dz = next.z - corner.z;
+    const length = Math.hypot(dx, dz) || 1;
+    return { x: -dz / length, z: dx / length };
+  });
+}
+
+function projection(polygon, axis) {
+  const values = polygon.map((corner) => corner.x * axis.x + corner.z * axis.z);
+  return { min: Math.min(...values), max: Math.max(...values) };
+}
+
+function polygonsOverlap(a, b, gap = 0) {
+  for (const axis of [...polygonAxes(a), ...polygonAxes(b)]) {
+    const pa = projection(a, axis);
+    const pb = projection(b, axis);
+    if (pa.max + gap <= pb.min || pb.max + gap <= pa.min) return false;
+  }
+  return true;
+}
+
+function pointInPolygon(pointValue, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    if (((a.z > pointValue.z) !== (b.z > pointValue.z))
+      && pointValue.x < (b.x - a.x) * (pointValue.z - a.z) / (b.z - a.z) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function pointSegmentDistance(pointValue, a, b) {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const denom = dx * dx + dz * dz;
+  const t = denom > 1e-12
+    ? clamp(((pointValue.x - a.x) * dx + (pointValue.z - a.z) * dz) / denom, 0, 1)
+    : 0;
+  return Math.hypot(pointValue.x - (a.x + dx * t), pointValue.z - (a.z + dz * t));
+}
+
+function circleIntersectsPolygon(center, radius, polygon) {
+  if (pointInPolygon(center, polygon)) return true;
+  return polygon.some((corner, index) =>
+    pointSegmentDistance(center, corner, polygon[(index + 1) % polygon.length]) <= radius);
+}
 
 // Lightweight invariant helper used by Node gates and downstream consumers.
 // It deliberately checks semantic safety (bounds, overlaps, south-light lane)
@@ -333,16 +531,25 @@ const boxesOverlap = (a, b, gap = 0) => a.minX < b.maxX + gap && a.maxX > b.minX
 export function templePlanIssues(plan) {
   const issues = [];
   const bounds = plan.bounds;
-  const boxes = plan.buildings.map((building) => ({ building, box: buildingAabb(building) }));
-  for (const { building, box } of boxes) {
+  const buildings = plan.buildings.map((building) => {
+    const polygon = buildingPolygon(building);
+    return { building, polygon, box: polygonBounds(polygon) };
+  });
+  for (const { building, polygon, box } of buildings) {
+    if (!completeHallArchitecture(building)) {
+      issues.push(`${building.id}: architectural hierarchy is incomplete`);
+    } else if (!hallEaveMatches(building)) {
+      issues.push(`${building.id}: eave footprint drifted from architecture`);
+    }
     if (box.minX < bounds.minX + 0.6 || box.maxX > bounds.maxX - 0.6
       || box.minZ < bounds.minZ + 0.6 || box.maxZ > bounds.maxZ - 0.6) {
       issues.push(`${building.id}: footprint leaves precinct`);
     }
   }
-  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-    if (boxesOverlap(boxes[i].box, boxes[j].box, 0.45)) {
-      issues.push(`${boxes[i].building.id}/${boxes[j].building.id}: building footprints overlap`);
+  for (let i = 0; i < buildings.length; i++) for (let j = i + 1; j < buildings.length; j++) {
+    if (boxesOverlap(buildings[i].box, buildings[j].box, 0.45)
+      && polygonsOverlap(buildings[i].polygon, buildings[j].polygon, 0.45)) {
+      issues.push(`${buildings[i].building.id}/${buildings[j].building.id}: building eaves overlap`);
     }
   }
   for (const item of plan.props) {
@@ -350,10 +557,11 @@ export function templePlanIssues(plan) {
       || item.position.z - item.radius < bounds.minZ || item.position.z + item.radius > bounds.maxZ) {
       issues.push(`${item.id}: prop leaves precinct`);
     }
-    for (const { building, box } of boxes) {
+    for (const { building, box, polygon } of buildings) {
       if (item.position.x + item.radius > box.minX && item.position.x - item.radius < box.maxX
-        && item.position.z + item.radius > box.minZ && item.position.z - item.radius < box.maxZ) {
-        issues.push(`${item.id}/${building.id}: prop overlaps building`);
+        && item.position.z + item.radius > box.minZ && item.position.z - item.radius < box.maxZ
+        && circleIntersectsPolygon(item.position, item.radius, polygon)) {
+        issues.push(`${item.id}/${building.id}: prop overlaps building eave`);
       }
     }
   }
@@ -363,8 +571,15 @@ export function templePlanIssues(plan) {
       minX: solar.origin.x - solar.halfWidth, maxX: solar.origin.x + solar.halfWidth,
       minZ: solar.origin.z, maxZ: solar.southZ,
     };
-    for (const { building, box } of boxes) {
-      if (building.role !== solar.role && boxesOverlap(lane, box)) {
+    const lanePolygon = rect(
+      solar.origin.x,
+      (solar.origin.z + solar.southZ) / 2,
+      solar.halfWidth * 2,
+      solar.southZ - solar.origin.z,
+    );
+    for (const { building, box, polygon } of buildings) {
+      if (building.role !== solar.role && boxesOverlap(lane, box)
+        && polygonsOverlap(lanePolygon, polygon)) {
         issues.push(`${building.id}: blocks main-hall south-light lane`);
       }
     }
