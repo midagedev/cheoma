@@ -23,16 +23,20 @@ const REVIEWED_NEW_PATHS = new Set([
   'app/src/lib/standalone-param-spec.js',
   'app/src/engine/semantic-view-runtime.js',
   'src/api/environment-state.js',
+  'src/api/sijeon.js',
+  'src/api/sijeon-plan.js',
   'src/api/village-options.js',
   'src/generators/village/sijeon.js',
   'src/village/sijeon-plan.js',
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
   'tools/check-scene-guide.mjs',
+  'tools/check-api-reuse-suite.mjs',
   'tools/check-sijeon-contract.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',
+  'tools/shoot-sijeon-app.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -88,6 +92,7 @@ function routePath(path) {
     'tools/check-instance-upload-browser.mjs': ['instance-upload'],
     'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
     'tools/check-api-reuse-example.mjs': ['api-reuse'],
+    'tools/check-api-reuse-suite.mjs': ['api-reuse'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -108,7 +113,8 @@ function routePath(path) {
     'tools/check-rim-facing.mjs': ['rim'],
     'tools/shoot-hanyang.mjs': ['app'],
     'tools/shoot-wall-steps.mjs': ['app'],
-    'tools/shoot-sijeon.mjs': ['app'],
+    'tools/shoot-sijeon.mjs': ['app', 'api-reuse'],
+    'tools/shoot-sijeon-app.mjs': ['app', 'api-reuse'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
@@ -223,6 +229,12 @@ function routePath(path) {
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
     select('village generation changed', 'app', 'worker');
+    if (path === 'src/generators/village/sijeon.js') {
+      select(
+        'reusable sijeon rendering, material lifecycle, snow, rim, and wave contracts changed',
+        'api-reuse', 'winter-app', 'rim', 'lod-wave',
+      );
+    }
     if (path === 'src/village/options.js' || path === 'src/village/site.js') {
       select('portable village option meaning changed', 'share');
     }
@@ -303,6 +315,17 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/sijeon.js') {
+      select(
+        'public sijeon renderer and lifecycle API changed',
+        'app', 'api-reuse', 'winter-app', 'worker', 'rim', 'lod-wave',
+      );
+      return { gates, reasons };
+    }
+    if (path === 'src/api/sijeon-plan.js') {
+      select('public renderer-free sijeon planning API changed', 'app', 'api-reuse', 'worker');
+      return { gates, reasons };
+    }
     if (path === 'src/api/environment-state.js') {
       select('portable environment state boundary changed', 'share');
       return { gates, reasons };

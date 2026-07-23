@@ -11,7 +11,8 @@
 
 현재 `src/api/building.js`는 parcel·hanok·palace API도 함께 재노출하고 palette가 일부 환경 helper를 참조하므로,
 native ESM은 그 재노출 dependency도 해석한다. 이 예제의 “최소”는 byte-minimal module graph가 아니라 외부 소비자
-코드와 실행 scene의 최소 경계를 뜻한다. 새 façade와 package export 분리는 이 작업 범위가 아니다.
+코드와 실행 scene의 최소 경계를 뜻한다. 시전은 아래의 독립 façade를 사용하며, package export map 분리는 아직
+이 문서의 범위가 아니다.
 
 ES module은 `file://`에서 열지 말고 저장소 루트를 정적 HTTP 서버로 제공한다. 먼저 루트 Playwright와 앱의
 고정 Three를 설치한다. 자동 smoke는 CDN 요청을 로컬 설치본으로 대체하므로 실행 시 네트워크가 필요 없다.
@@ -56,6 +57,49 @@ disposeBuilding(building);
 필요한 기능만 담은 `src/api/building.js` 대신 전체 `src/api/index.js`를 사용하면 village, environment,
 audio 등 browser runtime 전체 dependency graph가 따라온다. 단독 건물 소비자는 좁은 진입점을 사용한다.
 
+## 시전 계획과 렌더러
+
+시전행랑은 순수 계획과 Three 렌더러를 별도 진입점으로 제공한다. 배치·footprint·2칸 façade 데이터만
+필요한 worker나 서버 도구는 `src/api/sijeon-plan.js`를 사용한다. 이 모듈은 DOM과 Three를 import하지
+않으며 전역 `Math.random`을 소비하지 않는다.
+
+```js
+import {
+  planSijeon,
+  planSijeonFacade,
+} from './cheoma/src/api/sijeon-plan.js';
+
+const shops = planSijeon(roadsResult, site);
+const facade = planSijeonFacade(shops[0]);
+```
+
+실제 geometry가 필요하면 `src/api/sijeon.js`를 사용한다. `buildSijeon()`은 `{ frame, opening, bench,
+storage, roof }` 다섯 `THREE.Material`과 `heightAt(x, z)`를 빌리며 새 material이나 texture를 만들지
+않는다. 반환 root는 점포 수와 무관하게 역할별로 병합된 geometry를 소유한다.
+
+```js
+import {
+  buildSijeon,
+  disposeSijeon,
+} from './cheoma/src/api/sijeon.js';
+
+const row = buildSijeon(shops, {
+  materials: { frame, opening, bench, storage, roof },
+  heightAt: (x, z) => terrainHeightAt(x, z),
+});
+scene.add(row);
+
+scene.remove(row);
+disposeSijeon(row); // true
+disposeSijeon(row); // false
+
+// 빌린 다섯 material은 여전히 유효하다. 마지막 사용자가 끝난 뒤 호출자가 해제한다.
+```
+
+`buildSijeon`은 이 borrowed-material 공개 계약만 뜻한다. 제품 마을 조립기가 자체 색과 적설 역할을
+붙이는 내부 어댑터는 `buildVillageSijeon`이라는 별도 이름을 사용하므로 외부 renderer 호출과 인자·소유권이
+뒤섞이지 않는다. `src/api/index.js`와 `src/api/village.js`도 같은 구분을 유지한다.
+
 ## Three는 한 인스턴스만 사용한다
 
 코어와 외부 scene이 서로 다른 Three를 쓰면 `instanceof`, prototype patch, addon geometry가 조용히
@@ -84,6 +128,8 @@ peer dependency로 두는 것이 이 계약과 맞다.
 | --- | --- | --- |
 | `buildBuilding()` 원본 root의 geometry·파생 material/texture | 건물 | scene 분리 후 `disposeBuilding(root)` |
 | `P.mats`로 주입한 palette | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
+| `buildSijeon()` 반환 root의 병합 geometry | 시전 renderer | scene 분리 후 `disposeSijeon(root)` |
+| `buildSijeon()`에 주입한 다섯 material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | 외부 scene, camera, renderer, light, ground | 외부 통합 | 각 통합의 teardown에서 별도 해제 |
 | 모듈 수명 공유 prop 자원 | cheoma 모듈 | 개별 건물 dispose 대상 아님 |
 
@@ -102,7 +148,13 @@ mounted.dispose(); // false, 아무 자원도 다시 만들지 않음
 
 ## 실행 계약
 
-`tools/check-api-reuse-example.mjs`는 전체 앱이나 Vite를 부팅하지 않고 정적 페이지 하나만 연다.
+`npm run check:api-reuse`는 browser lock을 한 번만 잡고 다음 세 계약을 순서대로 실행한다.
+
+- `tools/check-api-reuse-example.mjs`: 전체 앱이나 Vite 없이 정적 건물 예제와 단일 Three identity·수명을 검사한다.
+- `tools/shoot-sijeon.mjs street-day`: 공개 시전 API만으로 borrowed-material renderer·눈/림/wave·dispose를 검사한다.
+- `tools/shoot-sijeon-app.mjs`: `shot=1` 없이 실제 Vite 한양 제품 카메라·view shift·post·부감 림 정책에서 데스크톱·모바일 시전 픽셀 기여를 검사한다.
+
+첫 번째 정적 예제의 세부 계약은 다음과 같다.
 
 - `THREE.REVISION === '185'`와 root/mesh `instanceof`로 단일 Three identity를 확인한다.
 - 유한한 실제 bounds, draw call, triangle 제출을 확인한다.

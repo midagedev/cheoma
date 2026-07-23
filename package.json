@@ -16,7 +16,7 @@
     "check:build": "node tools/check-app-build.mjs",
     "check:audio": "node tools/run-browser-locked.mjs -- node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
-    "check:api-reuse": "node tools/run-browser-locked.mjs -- node tools/check-api-reuse-example.mjs",
+    "check:api-reuse": "node tools/run-browser-locked.mjs -- node tools/check-api-reuse-suite.mjs",
     "check:residential-openings": "node tools/check-residential-openings.mjs",
     "check:residential-edit-url": "node tools/check-residential-edit-url.mjs",
     "check:residential-edit-url:browser": "node tools/run-browser-locked.mjs -- node tools/check-residential-edit-url-browser.mjs",

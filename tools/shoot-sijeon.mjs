@@ -57,12 +57,12 @@ import * as THREE from 'three';
 import { setupInk } from '/src/render/ink.js';
 import { createFresnelRim } from '/src/env/rim.js';
 import { createVillageSnowController } from '/src/runtime/village/snow.js';
-import { planSijeon } from '/src/village/sijeon-plan.js';
+import { planSijeon } from '/src/api/sijeon-plan.js';
 import { createRerollWave } from '/src/village/wave.js';
 import {
   buildSijeon,
   disposeSijeon,
-} from '/src/generators/village/sijeon.js';
+} from '/src/api/sijeon.js';
 
 const query = new URLSearchParams(location.search);
 const view = query.get('view') || 'street';

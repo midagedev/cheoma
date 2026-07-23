@@ -52,7 +52,13 @@ assert.deepEqual(ids(['src/village/sijeon-plan.js'], {
 }), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/sijeon.js'], {
   newPaths: ['src/generators/village/sijeon.js'],
-}), ['core', 'app', 'worker']);
+}), ['core', 'app', 'rim', 'api-reuse', 'winter-app', 'worker', 'lod-wave']);
+assert.deepEqual(ids(['src/api/sijeon.js'], {
+  newPaths: ['src/api/sijeon.js'],
+}), ['core', 'app', 'rim', 'api-reuse', 'winter-app', 'worker', 'lod-wave']);
+assert.deepEqual(ids(['src/api/sijeon-plan.js'], {
+  newPaths: ['src/api/sijeon-plan.js'],
+}), ['core', 'app', 'api-reuse', 'worker']);
 assert.deepEqual(ids(['src/village/options.js']), ['core', 'share', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
@@ -199,7 +205,13 @@ assert.deepEqual(ids(['tools/check-sijeon-contract.mjs'], {
 }), ['core']);
 assert.deepEqual(ids(['tools/shoot-sijeon.mjs'], {
   newPaths: ['tools/shoot-sijeon.mjs'],
-}), ['core', 'app']);
+}), ['core', 'app', 'api-reuse']);
+assert.deepEqual(ids(['tools/shoot-sijeon-app.mjs'], {
+  newPaths: ['tools/shoot-sijeon-app.mjs'],
+}), ['core', 'app', 'api-reuse']);
+assert.deepEqual(ids(['tools/check-api-reuse-suite.mjs'], {
+  newPaths: ['tools/check-api-reuse-suite.mjs'],
+}), ['core', 'api-reuse']);
 assert.deepEqual(ids(['tools/shoot-bokeh-fixture.mjs']), ['core', 'bokeh-fixture']);
 for (const helper of [
   'tools/lib/bokeh-gpu-diagnostic.mjs',

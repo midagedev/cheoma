@@ -2,6 +2,17 @@
 // 순수 plan만 필요하면 './village-plan.js'를 직접 import해 browser/THREE 의존을 피한다.
 export * from './building.js';
 export * from './village.js';
+// These explicit bindings take precedence over aggregate star exports and keep
+// the reusable renderer distinct from the product-only village palette adapter.
+export {
+  SIJEON_FACADE_BAYS,
+  SIJEON_FACADE_SCHEMA_VERSION,
+  SIJEON_PLACEMENT,
+  buildSijeon,
+  disposeSijeon,
+  planSijeon,
+  planSijeonFacade,
+} from './sijeon.js';
 export * from './environment.js';
 export * from './post-quality.js';
 export * from './particles.js';

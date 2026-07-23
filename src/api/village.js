@@ -1,5 +1,6 @@
 // 마을 계획부터 THREE 조립·runtime handle까지의 공개 API.
 export * from './village-plan.js';
+export { buildSijeon, disposeSijeon } from './sijeon.js';
 export { populateVillage, populateVillageSteps } from '../village/populate.js';
 export { createVillage, createVillageAsync } from '../village/adapter.js';
 export { createRerollWave } from '../village/wave.js';
@@ -8,7 +9,7 @@ export {
   buildFeatureObjects,
   buildHeroParcel,
   buildPaddyFields,
-  buildSijeon,
+  buildVillageSijeon,
   buildTempleCluster,
   collectMaterialSets,
 } from '../generators/village/features.js';

@@ -35,7 +35,7 @@ function sijeonMaterial(color, roughness, role) {
 // Village palette adapter for the reusable sijeon renderer. These five plain
 // PBR materials are the only caller-owned resources it needs: no hidden canvas
 // textures, emissive edge light, or full hanok palette allocation.
-export function buildSijeon(shops, site) {
+export function buildVillageSijeon(shops, site) {
   const materials = {
     frame: sijeonMaterial(0x6f3626, 0.85, 'wood'),
     opening: sijeonMaterial(0x241a14, 0.96, 'opening'),
