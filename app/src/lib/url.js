@@ -9,10 +9,13 @@ import {
   decodeResidentialEditState,
   encodeResidentialEditState,
 } from './residential-edit-url.js';
+import {
+  VILLAGE_SCALE_IDS,
+  buildSceneShareUrl,
+} from './share-scene.js';
 
 const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 
-const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const CHARS = ['minchon', 'yeoyeom', 'banchon'];
 
 export function readUrl() {
@@ -40,7 +43,7 @@ export function readUrl() {
     // 마을 모드
     village: q.get('village') === '1',
     vseed: vseedRaw != null ? (parseInt(vseedRaw, 10) >>> 0) : null,
-    vscale: SCALES.includes(q.get('vscale')) ? q.get('vscale') : null,
+    vscale: VILLAGE_SCALE_IDS.includes(q.get('vscale')) ? q.get('vscale') : null,
     vchar: CHARS.includes(q.get('vchar')) ? q.get('vchar') : null,
     vpalace: q.get('vpalace') === '1',
     vtemple: q.get('vtemple') === '1',
@@ -79,26 +82,15 @@ export function writeUrl(state, {
 }
 
 export function shareUrl(state, overrides, {
-  village = null, residentialEdits = [], focusedParcelId = null,
+  village = null, flow = false, residentialEdits = [], focusedParcelId = null,
 } = {}) {
-  const q = new URLSearchParams();
-  q.set('seed', String(state.seed >>> 0));
-  if (overrides.preset) q.set('preset', state.preset);
-  if (overrides.time) q.set('time', state.time);
-  if (overrides.sunsetLook) q.set('sunset', state.sunsetLook);
-  if (overrides.season) q.set('season', state.season);
-  if (overrides.weather) q.set('weather', state.weather);
-  if (state.renderStyle === 'ink') q.set('mode', 'ink');
-  if (state.expansion > 1) q.set('exp', String(state.expansion));
-  if (village) {
-    q.set('village', '1');
-    q.set('vseed', String(village.seed >>> 0));
-    if (village.scale !== 'village') q.set('vscale', village.scale);
-    if (village.character !== 'yeoyeom') q.set('vchar', village.character);
-    if (village.includePalace) q.set('vpalace', '1');
-    if (village.includeTemple) q.set('vtemple', '1');
-    const editPayload = encodeResidentialEditState({ records: residentialEdits, focusedParcelId });
-    if (editPayload) q.set(RESIDENTIAL_EDIT_QUERY_KEY, editPayload);
-  }
-  return `${location.origin}${location.pathname}?${q.toString()}`;
+  return buildSceneShareUrl({
+    baseUrl: location.href,
+    state,
+    overrides,
+    village,
+    flow,
+    residentialEdits,
+    focusedParcelId,
+  });
 }

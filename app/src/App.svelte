@@ -3,7 +3,8 @@
   import { PRESETS } from '../../src/api/building.js';
   import { createEngine } from './engine/engine.js';
   import { configFromSeed, paramsFor, newSeed, FLAGSHIP_TIME } from './lib/seed.js';
-  import { readUrl, writeUrl } from './lib/url.js';
+  import { readUrl, shareUrl, writeUrl } from './lib/url.js';
+  import { shareSceneLink } from './lib/share-scene.js';
   import { buildRebuildPayload, villageDefaults } from './lib/edit-schema.js';
   import { createLiveEditScheduler } from './lib/live-edit-scheduler.js';
   import { device, initDevice } from './lib/device.svelte.js';
@@ -217,16 +218,20 @@
   const walkKeys = new Set();
   let walkYaw = 0, walkPitch = 0, walkManual = false, walkRaf = null;
 
+  function currentResidentialState() {
+    const runtimeRecords = engine?.village?.residentialOpeningEdits?.();
+    return pendingResidentialRestore || {
+      records: Array.isArray(runtimeRecords) ? runtimeRecords : [],
+      focusedParcelId: engine?.village?.getState?.().selected || null,
+    };
+  }
+
   function syncUrl() {
     // villageHome(기본 인터랙티브 부팅)은 village 파라미터를 URL 에 쓰지 않는다 — 써 두면 새로고침이
     // ?village=1 직행 부감 경로를 타서 히어로 랜딩이 재생되지 않는다(#59 "새로고침해도 재발생 안 됨"의
     // 원인). URL 을 담백하게 두어 새로고침마다 마을 우선 히어로 랜딩이 다시 재생되게 한다. 명시적
     // 마을 진입(?village=1·모드 토글로 들어간 비-home 세션)만 village 계약을 URL 에 반영한다.
-    const runtimeRecords = engine?.village?.residentialOpeningEdits?.();
-    const residentialState = pendingResidentialRestore || {
-      records: Array.isArray(runtimeRecords) ? runtimeRecords : [],
-      focusedParcelId: engine?.village?.getState?.().selected || null,
-    };
+    const residentialState = currentResidentialState();
     const hasResidentialEdits = residentialState.records.length > 0;
     writeUrl(ui, {
       overrides,
@@ -613,6 +618,34 @@
     });
   }
   function postcard() { engine.postcard({ download: true }); }
+  async function shareScene() {
+    const epoch = lifecycleEpoch;
+    const residentialState = currentResidentialState();
+    // The default landing intentionally keeps the address bar terse. A shared
+    // scene is different: always serialize the active village so its seed,
+    // scale, landmarks, flow state, and committed opening edits reproduce.
+    const url = shareUrl(ui, overrides, {
+      village: sceneVillage ? { seed: villageSeed, ...villageOpts } : null,
+      flow: flowing,
+      residentialEdits: residentialState.records,
+      focusedParcelId: residentialState.focusedParcelId,
+    });
+    const nav = typeof navigator === 'undefined' ? null : navigator;
+    const outcome = await shareSceneLink({
+      title: t('share_title'),
+      text: t('share_text'),
+      url,
+    }, {
+      share: typeof nav?.share === 'function' ? nav.share.bind(nav) : null,
+      writeText: typeof nav?.clipboard?.writeText === 'function'
+        ? nav.clipboard.writeText.bind(nav.clipboard)
+        : null,
+    });
+    if (!lifecycleCurrent(epoch) || outcome === 'cancelled') return;
+    if (outcome === 'shared') showToast(t('share_shared'));
+    else if (outcome === 'copied') showToast(t('share_copied'));
+    else showToast(t('share_failed'));
+  }
   function toggleAudio() { audioOn = !audioOn; engine.toggleAudio(audioOn); }
 
   // ---------- 시네마틱 데모 모드(#112) ----------
@@ -981,12 +1014,17 @@
   {#if !hideActions}
     <ActionBar
       onReroll={sceneVillage ? null : reroll} onPostcard={postcard} onToggleAudio={toggleAudio}
+      onShare={shareScene}
       audioOn={audioOn} busy={rerollCooldown || waving}
       raised={sheetLayout && villageAerial}
       shifted={ui.selected && !sheetLayout}
       onDrone={cineButtons ? startDrone : null}
       onWalk={cineButtons && !device.perf ? startWalk : null}
     />
+  {:else}
+    <!-- 터치 focus/edit에서는 큰 액션바가 시트를 가리므로 링크 공유만 별도 44px 액션으로 유지한다.
+         PNG 사진 저장은 장면 URL 공유와 의미가 달라 이 축약 액션에 섞지 않는다. -->
+    <ActionBar onShare={shareScene} shareOnly />
   {/if}
 </div>
 
