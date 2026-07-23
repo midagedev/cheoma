@@ -35,6 +35,7 @@ import {
 } from '../../../src/api/village.js';
 import { VILLAGE_WALL_STYLE_IDS } from '../../../src/api/village-options.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
+import { buildingNavigationTargetFromProxy } from '../lib/building-navigation.js';
 import { normalizeStandaloneParamPatch } from '../lib/standalone-param-spec.js';
 import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './expansion.js';
 import { createArchitecturalRevealRuntime } from './architectural-reveal-runtime.js';
@@ -50,6 +51,7 @@ import { createSceneRuntime } from './scene-runtime.js';
 import { createViewShift } from './view-shift.js';
 import { createVillageCameraRuntime } from './village-camera-runtime.js';
 import {
+  advanceCameraTweenClock,
   captureSemanticOrbit,
   restoreSemanticOrbit,
   semanticLogZoom,
@@ -110,6 +112,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let disposed = false;
   const engineAbort = new AbortController();
   const tasks = createTaskOwner(() => !disposed);
+  const reducedMotionMedia = typeof matchMedia === 'function'
+    ? matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
+  let reducedCameraMotion = reducedMotionMedia?.matches === true;
+  const onReducedMotionChange = (event) => { reducedCameraMotion = event.matches === true; };
+  reducedMotionMedia?.addEventListener?.('change', onReducedMotionChange);
   let P = {}; // 현재 파라미터
 
   // ---------- 렌더러 / 씬 / 카메라 ----------
@@ -355,7 +363,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera,
     postRuntime,
     compact,
-    reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
+    reducedMotion: reducedCameraMotion,
   });
 
   function reapplyEnvBase(opts = {}) {
@@ -502,6 +510,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dof1: perf ? 0 : (Number.isFinite(dofAmount) ? clamp01(dofAmount) : null),
       composition0: focusComposition,
       composition1: Number.isFinite(nextFocusComposition) ? clamp01(nextFocusComposition) : null,
+      // The first animation-loop advance lands on the endpoint when reduced
+      // motion is active. Never finish here: consumers rely on Start and Done
+      // being separated by one rendered frame.
+      reducedMotion: reducedCameraMotion,
       // 검증 토글(before/after 계측용). window.__flowNoFix=true 면 이번 트윈은 방향 연속화·핸드오프
       // 리셋을 끈다(구버전 버그 재현). 미설정=수정본. 트윈 시작 시 1회만 읽어 핫 루프 오염 방지.
       noFix: typeof window !== 'undefined' && !!window.__flowNoFix,
@@ -568,8 +580,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   });
   const viewShift = viewShiftRuntime.state;
 
-  const reducedCameraMotion = typeof matchMedia === 'function'
-    && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const architecturalMotion = () => reducedCameraMotion ? 'reduced' : (perf || compact ? 'compact' : 'full');
 
   revealCamera = createArchitecturalRevealRuntime({
@@ -846,9 +856,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function advanceCameraTween(dt) {
     const active = tween;
     if (!active) return;
-    active.e = Math.min(active.dur, active.e + dt);
-    applyCameraTween(active, active.e / active.dur);
-    if (active.e >= active.dur) finishCameraTween(active);
+    const next = advanceCameraTweenClock(active.e, active.dur, dt, active.reducedMotion);
+    if (!next) return;
+    active.e = next.elapsed;
+    applyCameraTween(active, next.progress);
+    if (next.done) finishCameraTween(active);
   }
 
   // 회귀 하네스용 결정적 seek. 컴포저를 수백 프레임 돌리지 않고 실제 제품 트윈을 같은 진행도에서
@@ -2587,6 +2599,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       focus: (id) => { if (village.active && !village.transitioning && !villageWaveBusy() && !village.selected) villageSelect(id); },
       // focus 중 필지→필지 직접 전환(#95): 현재 focus 상태에서 B 로 부감 미경유 이동. 검증·프로그램 진입.
       switchTo: (id) => { if (village.active && !village.transitioning && !villageWaveBusy() && village.selected) villageSwitch(id); },
+      // Pointer picking remains the sole scene model. Keyboard UI receives only
+      // stable JSON semantics and reuses focus()/switchTo() for activation.
+      navigationTargets: () => (village.handle?.getPickProxies?.() || [])
+        .map(buildingNavigationTargetFromProxy)
+        .filter(Boolean),
       heroId: () => village.handle?.heroParcelId?.() ?? null,
       // focus 중 여부(App 이 再 버튼 노출·모드 판단) — selected 이면서 전환 완료 상태.
       focused: () => !!(village.active && village.selected),
@@ -3208,6 +3225,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       demoRuntime.dispose();
       controls.removeEventListener('start', onControlsStart);
       controls.removeEventListener('end', onControlsEnd);
+      reducedMotionMedia?.removeEventListener?.('change', onReducedMotionChange);
       revealCamera?.dispose();
       cinematic.dispose?.();
       removeEventListener('resize', resizeAll);
@@ -3310,6 +3328,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     'village.exportRoot': () => null,
     'village.focusRoot': () => null,
     'village.residentialOpeningEdits': () => [],
+    'village.navigationTargets': () => [],
     'village.rebuild': () => null,
     'village.refreshCommittedFlora': () => null,
     'village.getState': () => ({

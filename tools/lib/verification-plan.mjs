@@ -11,12 +11,14 @@ const FULL_GATES = Object.freeze([
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
 // New code normally fails closed. These paths are the reviewed exception for
-// #107–#108 and #113: the platform adapters, portable semantic state, and
-// first-scene guide policy have dedicated pure contracts below.
+// #107–#108, #113, and #114: the platform adapters, portable semantic state,
+// first-scene guide, and keyboard navigation policy have dedicated pure
+// contracts below.
 const REVIEWED_NEW_PATHS = new Set([
   'app/src/components/SceneGuide.svelte',
   'app/src/lib/scene-snapshot.js',
   'app/src/lib/scene-guide.js',
+  'app/src/lib/building-navigation.js',
   'app/src/lib/share-scene.js',
   'app/src/lib/standalone-param-spec.js',
   'app/src/engine/semantic-view-runtime.js',
@@ -25,6 +27,7 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
   'tools/check-scene-guide.mjs',
+  'tools/check-building-navigation.mjs',
   'tools/check-share.mjs',
 ]);
 

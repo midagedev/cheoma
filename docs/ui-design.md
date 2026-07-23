@@ -106,6 +106,25 @@
 - 방문 기록은 URL/share 상태와 분리된 `cheoma-scene-guide-v1` localStorage 한 항목이다. 읽기 실패는
   unseen으로 취급하고, 쓰기 실패여도 현재 세션에서는 즉시 사라진다. 로케일 변경은 방문 기록을 초기화하지 않는다.
 
+## 4.7 키보드 건물 탐색
+
+포인터로 필지를 집기 어려운 사용자는 `ContextPanel` 공통 헤더의 네이티브 건물 선택기와 명시적
+보기/이동 버튼으로 같은 마을 카메라 경로를 쓴다. 캔버스에 `role="application"`이나 Arrow/WASD
+키맵을 만들지 않는다. 후보는 엔진의 기존 pick proxy stable ID에서 `{id,type}`만 받아오며 UI가 plan,
+Object3D, 바운드나 별도 장면 모델을 소유하지 않는다.
+
+- option 변경은 목적지만 고르고 카메라를 움직이지 않는다. 버튼 활성화만 aerial `focus(id)` 또는
+  focus `switchTo(id)`를 호출한다.
+- 선택기는 마을/집 morph owner 밖에 상주한다. 전환 중 버튼은 `aria-disabled`와 실행 guard로 중복을
+  막되 포커스와 native select를 보존한다.
+- 현재 건물은 도착 `villageSelect`에서만, 둘러보기는 도착 `villageReturnDone`에서만 live region에
+  반영한다. 출발 이벤트를 현재 위치로 읽지 않는다.
+- References의 기존 app-surface `inert`, cinematic 패널 은닉, wave 잠금을 그대로 상속한다.
+- reduced motion은 카메라 API를 우회하지 않고 공통 tween을 첫 렌더 프레임에 끝낸다. 시작과 완료를
+  같은 입력 호출 스택에서 동기 발생시키지 않는다.
+
+세부 데이터·검증 계약은 [`building-navigation.md`](building-navigation.md)에 있다.
+
 ## 5. 단계
 
 - **P1 (지금)**: 스캐폴드 + 히어로 + 리롤 + 환경 다이얼 + 사진 찍기 (단일 건물 씬)

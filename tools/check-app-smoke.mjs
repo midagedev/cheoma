@@ -993,6 +993,194 @@ try {
       && await referenceInfoTrigger.evaluate((trigger) => document.activeElement === trigger),
   'responsive References close returns focus to the remounted equivalent info trigger');
 
+  // #114: the persistent native navigator is the keyboard alternative to
+  // pointer-only scene picking. Candidate data must be stable JSON from the
+  // existing pick-proxy address space, never a second UI-side scene traversal.
+  const buildingNavigation = page.locator('[data-building-navigation]');
+  const buildingSelect = buildingNavigation.locator('select');
+  const buildingAction = buildingNavigation.locator('button.navaction');
+  await buildingNavigation.waitFor({ state: 'visible', timeout });
+  const navigationContract = await page.evaluate(() => {
+    const first = window.__engine.village.navigationTargets();
+    const second = window.__engine.village.navigationTargets();
+    const options = [...document.querySelectorAll('[data-building-navigation] option')]
+      .map((option) => option.value);
+    return {
+      first,
+      second,
+      options,
+      parcelIds: window.__engine.village.debugParcels().map((parcel) => parcel.parcelId),
+      json: JSON.parse(JSON.stringify(first)),
+      keys: first.map((target) => Object.keys(target).sort()),
+    };
+  });
+  pass(navigationContract.first.length > 1
+      && navigationContract.first.length === new Set(navigationContract.first.map((target) => target.id)).size
+      && navigationContract.first.every((target, index) => (
+        target.id === navigationContract.parcelIds[index]
+        && navigationContract.keys[index].join() === 'id,type'
+      ))
+      && JSON.stringify(navigationContract.first) === JSON.stringify(navigationContract.second)
+      && JSON.stringify(navigationContract.first) === JSON.stringify(navigationContract.json)
+      && JSON.stringify(navigationContract.options) === JSON.stringify(
+        navigationContract.first.map((target) => target.id),
+      ),
+  `building navigation preserves pick-proxy order as duplicate-free JSON-only targets (${JSON.stringify({
+    count: navigationContract.first.length,
+    first: navigationContract.first.slice(0, 4),
+  })})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'building-navigation-desktop.png') });
+  }
+
+  await page.evaluate(() => {
+    const events = [];
+    const engine = window.__engine;
+    const offs = [
+      engine.on('villageSelectStart', ({ parcelId }) => events.push(`start:${parcelId}`)),
+      engine.on('villageSelect', ({ parcelId }) => events.push(`done:${parcelId}`)),
+      engine.on('villageReturn', ({ parcelId }) => events.push(`return:${parcelId}`)),
+      engine.on('villageReturnDone', ({ parcelId }) => events.push(`returned:${parcelId}`)),
+    ];
+    window.__buildingNavigationAudit = { events, dispose: () => offs.forEach((off) => off()) };
+  });
+  await buildingSelect.focus();
+  await page.keyboard.press('Home');
+  const keyboardTargetA = await buildingSelect.inputValue();
+  const selectFocusRing = await buildingSelect.evaluate((select) => {
+    const style = getComputedStyle(select);
+    return { width: style.outlineWidth, style: style.outlineStyle };
+  });
+  await page.keyboard.press('Tab');
+  const actionBeforeFocus = await buildingAction.evaluate((button) => ({
+    active: document.activeElement === button,
+    label: button.getAttribute('aria-label'),
+    disabled: button.getAttribute('aria-disabled'),
+  }));
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter'); // busy guard: no duplicate transition
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, keyboardTargetA, { timeout });
+  const keyboardFocusA = await buildingNavigation.evaluate((navigation) => ({
+    activeAction: document.activeElement === navigation.querySelector('button.navaction'),
+    actionDisabled: navigation.querySelector('button.navaction')?.getAttribute('aria-disabled'),
+    selectDisabled: navigation.querySelector('select')?.disabled,
+    status: navigation.querySelector('[role="status"]')?.textContent?.replace(/\s+/g, ' ').trim(),
+    events: window.__buildingNavigationAudit.events.slice(),
+  }));
+  pass(selectFocusRing.style !== 'none'
+      && Number.parseFloat(selectFocusRing.width) >= 2
+      && actionBeforeFocus.active
+      && actionBeforeFocus.label?.includes(':')
+      && actionBeforeFocus.disabled === 'false'
+      && keyboardFocusA.activeAction
+      && keyboardFocusA.actionDisabled === 'true'
+      && !keyboardFocusA.selectDisabled
+      && keyboardFocusA.status?.includes('현재 보고 있는 건물')
+      && keyboardFocusA.events.filter((event) => event === `start:${keyboardTargetA}`).length === 1
+      && keyboardFocusA.events.filter((event) => event === `done:${keyboardTargetA}`).length === 1,
+  `keyboard-only aerial focus keeps a visible focus ring, live status, and one activation (${JSON.stringify({
+    target: keyboardTargetA,
+    before: actionBeforeFocus,
+    after: keyboardFocusA,
+    focusRing: selectFocusRing,
+  })})`);
+
+  // Playwright cannot drive Chrome/macOS's out-of-process native select popup
+  // with synthetic Arrow keys. Commit the real select's change event through
+  // selectOption, then keep the product transition and return keyboard-only.
+  await buildingSelect.selectOption(navigationContract.first.at(-1).id);
+  await buildingSelect.focus();
+  const keyboardTargetB = await buildingSelect.inputValue();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, keyboardTargetB, { timeout });
+  const keyboardHop = await buildingNavigation.evaluate((navigation) => ({
+    activeAction: document.activeElement === navigation.querySelector('button.navaction'),
+    status: navigation.querySelector('[role="status"]')?.textContent?.replace(/\s+/g, ' ').trim(),
+    events: window.__buildingNavigationAudit.events.slice(),
+  }));
+  pass(keyboardTargetB !== keyboardTargetA
+      && keyboardHop.activeAction
+      && keyboardHop.status?.includes('현재 보고 있는 건물')
+      && keyboardHop.events.filter((event) => event === `start:${keyboardTargetB}`).length === 1
+      && keyboardHop.events.filter((event) => event === `done:${keyboardTargetB}`).length === 1,
+  `native-selector focus hop uses keyboard activation without duplicate busy work (${JSON.stringify({
+    from: keyboardTargetA,
+    to: keyboardTargetB,
+    events: keyboardHop.events,
+  })})`);
+
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !state.selected && !state.transitioning;
+  }, null, { timeout });
+  const keyboardReturn = await buildingNavigation.evaluate((navigation) => ({
+    activeAction: document.activeElement === navigation.querySelector('button.navaction'),
+    status: navigation.querySelector('[role="status"]')?.textContent?.replace(/\s+/g, ' ').trim(),
+    events: window.__buildingNavigationAudit.events.slice(),
+  }));
+  pass(keyboardReturn.activeAction
+      && keyboardReturn.status?.includes('둘러보기에서 선택할 수 있습니다')
+      && keyboardReturn.events.filter((event) => event.startsWith('return:')).length === 1
+      && keyboardReturn.events.filter((event) => event.startsWith('returned:')).length === 1,
+  `keyboard Escape returns to Explore while preserving navigator focus (${JSON.stringify(keyboardReturn)})`);
+
+  // Reduced motion finishes through the same camera tween on its first render
+  // advance. A synchronous completion would invert or collapse consumer event
+  // ordering, so inspect the event list in the same click task and then await
+  // the resulting product completion.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await buildingSelect.focus();
+  await page.keyboard.press('Home');
+  const reducedTarget = await buildingSelect.inputValue();
+  await page.keyboard.press('Tab');
+  const reducedImmediate = await buildingAction.evaluate((button) => {
+    const audit = window.__buildingNavigationAudit;
+    audit.events.length = 0;
+    const startedAt = performance.now();
+    button.click();
+    return {
+      startedAt,
+      events: audit.events.slice(),
+      active: document.activeElement === button,
+    };
+  });
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, reducedTarget, { timeout: Math.min(timeout, 2000) });
+  const reducedEvidence = await page.evaluate((startedAt) => ({
+    elapsed: performance.now() - startedAt,
+    events: window.__buildingNavigationAudit.events.slice(),
+  }), reducedImmediate.startedAt);
+  pass(reducedImmediate.active
+      && reducedImmediate.events.length === 1
+      && reducedImmediate.events[0] === `start:${reducedTarget}`
+      && reducedEvidence.elapsed < 1000
+      && reducedEvidence.events.join() === `start:${reducedTarget},done:${reducedTarget}`,
+  `reduced-motion focus is asynchronous but settles on the next tween frame (${JSON.stringify({
+    immediate: reducedImmediate,
+    complete: reducedEvidence,
+  })})`);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !state.selected && !state.transitioning;
+  }, null, { timeout: Math.min(timeout, 2000) });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => {
+    window.__buildingNavigationAudit.dispose();
+    delete window.__buildingNavigationAudit;
+  });
+
   // ContextPanel keeps both visual subtrees mounted for its camera-synchronised crossfade, but
   // only one may own keyboard/accessibility input. Inspect direct ownership separately from the
   // app-surface inert inherited while References is open.
@@ -1005,6 +1193,7 @@ try {
         .every((root) => root.inert && root.getAttribute('aria-hidden') === 'true'),
       activeClear: !active?.closest('[inert]'),
       activeOwner: active?.closest('[data-context-owner]')?.dataset.contextOwner || null,
+      inNavigation: !!active?.closest('[data-building-navigation]'),
       focusTarget: active?.dataset?.contextFocus || null,
       effectiveOwners: [...new Set(roots
         .filter((root) => !root.closest('[inert]'))
@@ -1024,8 +1213,9 @@ try {
   pass(desktopAerialOwner.directOwners.join() === 'village'
       && desktopAerialOwner.inactiveInert
       && desktopAerialOwner.activeClear
-      && desktopAerialOwner.activeOwner === 'village',
-  `desktop aerial Tab enters only the visible village controls (${JSON.stringify(desktopAerialOwner)})`);
+      && desktopAerialOwner.activeOwner == null
+      && desktopAerialOwner.inNavigation,
+  `desktop aerial Tab enters the persistent building navigator before the visible village controls (${JSON.stringify(desktopAerialOwner)})`);
 
   const contextParcel = await page.evaluate(() => (
     window.__engine.village.debugParcels().find((parcel) => !parcel.hero)?.parcelId
@@ -1057,8 +1247,9 @@ try {
   pass(desktopHouseOwner.directOwners.join() === 'house'
       && desktopHouseOwner.inactiveInert
       && desktopHouseOwner.focusTarget === 'house'
-      && desktopHouseTabOwner.activeOwner === 'house',
-  `desktop focus crossfade hands village focus to the house breadcrumb and skips hidden controls (${JSON.stringify({
+      && desktopHouseTabOwner.activeOwner == null
+      && desktopHouseTabOwner.inNavigation,
+  `desktop focus crossfade hands village focus to the house breadcrumb, then enters the persistent navigator (${JSON.stringify({
     handoff: desktopHouseOwner,
     tab: desktopHouseTabOwner,
   })})`);
@@ -1111,12 +1302,14 @@ try {
   const nestedModalOwner = await referenceDialog.evaluate((dialog) => ({
     focusInside: dialog.contains(document.activeElement),
     surfaceInert: document.querySelector('[data-app-surface]')?.inert === true,
+    navigationInert: !!document.querySelector('[data-building-navigation]')?.closest('[inert]'),
   }));
   pass(nestedContextOwner.directOwners.join() === 'house'
       && nestedContextOwner.inactiveInert
       && nestedContextOwner.effectiveOwners.length === 0
       && nestedModalOwner.focusInside
-      && nestedModalOwner.surfaceInert,
+      && nestedModalOwner.surfaceInert
+      && nestedModalOwner.navigationInert,
   `References remains the sole effective owner during a context crossfade (${JSON.stringify({
     context: nestedContextOwner,
     modal: nestedModalOwner,
@@ -1181,6 +1374,41 @@ try {
   await contextGrip.press('Enter');
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half'
     && [...document.querySelectorAll('.sheet.context [data-sheet-content]')].every((part) => !part.inert), null, { timeout });
+  await page.waitForFunction(() => {
+    const sheet = document.querySelector('.sheet.context');
+    return sheet && sheet.getBoundingClientRect().top < innerHeight * 0.6;
+  }, null, { timeout });
+  const mobileNavigationLayout = await buildingNavigation.evaluate((navigation) => {
+    const rect = navigation.getBoundingClientRect();
+    const sheet = navigation.closest('.sheet')?.getBoundingClientRect();
+    const footer = navigation.closest('.sheet')?.querySelector('.sheetfoot')?.getBoundingClientRect();
+    const select = navigation.querySelector('select')?.getBoundingClientRect();
+    const action = navigation.querySelector('button')?.getBoundingClientRect();
+    const overlap = footer
+      ? Math.max(0, Math.min(rect.right, footer.right) - Math.max(rect.left, footer.left))
+        * Math.max(0, Math.min(rect.bottom, footer.bottom) - Math.max(rect.top, footer.top))
+      : 0;
+    return {
+      bounds: [rect.left, rect.top, rect.right, rect.bottom],
+      sheet: sheet ? [sheet.left, sheet.top, sheet.right, Math.min(sheet.bottom, innerHeight)] : null,
+      select: select ? [select.width, select.height] : null,
+      action: action ? [action.width, action.height] : null,
+      footerOverlap: overlap,
+      viewport: [innerWidth, innerHeight],
+    };
+  });
+  pass(mobileNavigationLayout.sheet
+      && mobileNavigationLayout.bounds[0] >= mobileNavigationLayout.sheet[0]
+      && mobileNavigationLayout.bounds[1] >= mobileNavigationLayout.sheet[1]
+      && mobileNavigationLayout.bounds[2] <= mobileNavigationLayout.sheet[2]
+      && mobileNavigationLayout.bounds[3] <= mobileNavigationLayout.sheet[3]
+      && mobileNavigationLayout.select?.[1] >= 44
+      && mobileNavigationLayout.action?.[1] >= 44
+      && mobileNavigationLayout.footerOverlap === 0,
+  `390x844 expanded sheet keeps the building navigator visible, 44px, and clear of sticky actions (${JSON.stringify(mobileNavigationLayout)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'building-navigation-mobile.png') });
+  }
   await page.locator('.ctx.village input.scale').focus();
   await contextGrip.evaluate((grip) => grip.click());
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek'
@@ -1200,7 +1428,10 @@ try {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.locator('.ctx.village input.scale').focus();
   await page.evaluate((parcelId) => window.__engine.village.debugFocus(parcelId), contextParcel);
-  await seekViewTransition(1, true);
+  await page.waitForFunction((parcelId) => {
+    const state = window.__engine.village.getState();
+    return state.selected === parcelId && !state.transitioning;
+  }, contextParcel, { timeout });
   await page.waitForFunction(() => document.activeElement?.dataset?.contextFocus === 'house', null, { timeout });
   const mobileReducedOwner = await contextA11y('house');
   const mobileReducedTransition = await contextSheet.evaluate((sheet) => (
@@ -1253,7 +1484,10 @@ try {
     await page.screenshot({ path: join(captureDir, 'share-mobile-focus.png') });
   }
   await page.evaluate(() => window.__engine.village.return());
-  await seekViewTransition(1, true);
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !state.selected && !state.transitioning;
+  }, null, { timeout });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForFunction(() => window.__device?.sheet === false
@@ -3286,6 +3520,7 @@ try {
       villagePlan: engine.village.debugPlan(),
       villageRoot: engine.village.exportRoot(),
       villageParcels: engine.village.debugParcels(),
+      navigationTargets: engine.village.navigationTargets(),
       cineActive: engine.cine.isActive(),
       cineAvailable: engine.cine.available(),
       cinePasses: engine.cine.passList(),
@@ -3361,6 +3596,7 @@ try {
       && teardown.apiAfterDispose.villagePlan == null
       && teardown.apiAfterDispose.villageRoot == null
       && teardown.apiAfterDispose.villageParcels.length === 0
+      && teardown.apiAfterDispose.navigationTargets.length === 0
       && teardown.apiAfterDispose.cineActive === false
       && teardown.apiAfterDispose.cineAvailable === false
       && teardown.apiAfterDispose.cinePasses.length === 0

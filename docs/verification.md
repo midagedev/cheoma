@@ -66,6 +66,7 @@ npm run check:particle-geometry # 강수·꽃잎/모트·한지 불빛의 단일
 npm run check:instance-upload # 필지 표현의 CPU 배열 부분 변경·복원·export 불변 계약
 npm run check:instance-upload:browser # 실제 WebGL bufferSubData 부분 전송 증거
 npm run check:api-reuse      # src/api/building.js만 쓰는 외부 소비자·dispose smoke
+npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
 npm run check:full            # 머지 직전 전체 profile + production build
 npm run check:docs            # Markdown local link와 문서 지도
@@ -284,6 +285,11 @@ map은 `three@0.185.1`로 고정하되, 자동 smoke는 동일 URL을 로컬 설
 - `check:live-edit`
   - 50개 동시 입력이 한 preview로 병합되고, 빠른 재생성은 32ms 하한을 쓰며 cooldown 중 최신 값이 유실되지 않는지 검사한다.
   - commit이 대기 preview를 폐기해 정확히 한 번만 실행되고, focus epoch 취소 뒤 이미 dequeue된 callback도 다른 필지에 적용되지 않으며 dispose 뒤 입력을 거부하는지 검사한다.
+- `check:building-navigation`
+  - pick proxy에서 받은 stable ID와 건물 유형만 중복 없이 전달하고 입력 순서를 보존하는지, 잘못된 ID·유형은
+    fail-closed하는지 Three·DOM 없이 검사한다.
+  - 후보 수·안착한 현재 건물의 상태 모델과 reduced-motion 공통 카메라 클록이 첫 advance에서 완료되되
+    입력 호출 스택에서 동기 완료되지 않는 경계를 검사한다.
 - `check:lod`
   - 부감 46° 광각, 필지 10°·hero 7°·궁 24°·사찰 26° 망원과 보상 dolly가 피사체 화면 크기를 보존하고 생활·입자 LOD를 화면 등가 거리로 유지하는지 검사. 강수·꽃잎·mote·한지 실용광은 point-size/pixel-cap 없이 authored world dimensions를 유지하고 물리 카메라가 투영 크기를 결정한다. `check:particle-geometry`는 실제 geometry 크기와 color/DoF coverage를, `check:cinematic:app`은 7° 제품 프레임에서 네 물리 tier와 양의 triangle/world-size 계약을 검사한다.
   - 모든 한양 주택 청크의 `FAR ↔ MID ↔ FULL` 거리 경계와 양방향 히스테리시스, 3D 대지 거리, 공간 분할을 검사.
@@ -375,6 +381,13 @@ fail-open을 검사한다. stable 마을만 허용하고 Hero/landing/wave/veil/
 닫기 `44×44px`, Hero의 visible focus ring, App의 capture-phase canvas dismissal과 `app-surface` inert 상속,
 모든 village focus/explore/wave 종착점이 한 guarded `viewSettled` 경계를 쓰는지도 고정한다.
 
+### `npm run check:building-navigation`
+
+`tools/check-building-navigation.mjs`는 native 선택기가 소비하는 renderer-free 의미 경계를 검사한다.
+pick proxy에서 `{id,type}`만 만들고 순서·유형별 ordinal·중복 제거·ID 상한을 고정하며, explore/focus/empty
+상태가 selected stable ID만으로 결정되는지 확인한다. 같은 순수 게이트의 카메라 clock fixture는 일반
+duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한다.
+
 ### `npm run check:share`
 
 `tools/check-share.mjs`는 위 코덱과 플랫폼 어댑터를 함께 검사한다. #107의 여러 legacy query를 base로 받아도
@@ -420,6 +433,13 @@ fail-open을 검사한다. stable 마을만 허용하고 Hero/landing/wave/veil/
   다른 UI나 References의 포커스는 건드리지 않는다. 데스크톱 왕복, References 중첩, 모바일
   peek/expanded/collapse, reduced-motion 즉시 전환과 완전한 BottomSheet 은닉에서 hidden control이 Tab 순서에
   들어오지 않는지 같은 `check:app` 부팅으로 검사한다.
+- 같은 ContextPanel 공통 헤더의 native 건물 선택기는 pick proxy 순서의 중복 없는 JSON `{id,type}`만
+  표시한다. macOS Chrome의 프로세스 밖 option popup 대신 Playwright `selectOption()`으로 native
+  `change` 경계를 확정한 뒤 실제 키보드 Tab/Enter로 aerial→focus→hop, Escape로 복귀하며 busy 중 버튼 포커스, select 활성,
+  중복 transition 차단, `:focus-visible`, settled live status를 확인한다. References 중에는 선택기까지
+  app-surface `inert` 아래에 있고, 390×844 expanded sheet에서는 44px select/action이 sticky footer와
+  겹치지 않는다. reduced-motion은 클릭 스택에서는 Start만 발생하고 공통 카메라 tween의 다음 렌더
+  advance에서 Done이 발생한다. 엔진 dispose 뒤 후보 query는 빈 배열이다.
 - 같은 앱 부팅에서 공유 버튼의 Enter 활성화와 실제 Web Share payload를 확인한다. 호출 순간의
   `navigator.userActivation.isActive`와 trusted click dispatch task를 함께 기록해, 첫 `await` 전에 동기적으로
   native 공유를 시작하지 않으면 스텁 자체가 거부한다. native 성공은 clipboard를 건드리지 않고,
