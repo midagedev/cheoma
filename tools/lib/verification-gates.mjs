@@ -7,7 +7,7 @@ export const VERIFICATION_GATES = Object.freeze({
   'particle-geometry': Object.freeze({ script: 'check:particle-geometry', resource: 'browser', tier: 'checkpoint', description: 'Physical precipitation, close-detail particle, and hanji-light geometry' }),
   'instance-upload': Object.freeze({ script: 'check:instance-upload:browser', resource: 'browser', tier: 'checkpoint', description: 'Sparse parcel BufferAttribute GPU uploads' }),
   'building-lifecycle': Object.freeze({ script: 'check:building-lifecycle', resource: 'browser', tier: 'checkpoint', description: 'Public building GPU texture and shadow-depth lifecycle' }),
-  'api-reuse': Object.freeze({ script: 'check:api-reuse', resource: 'browser', tier: 'checkpoint', description: 'Standalone public building API consumer and disposal' }),
+  'api-reuse': Object.freeze({ script: 'check:api-reuse', resource: 'browser', tier: 'checkpoint', description: 'Public building and sijeon API reuse, lifecycle, and product-camera proof' }),
   'winter-app': Object.freeze({ script: 'check:winter:app', resource: 'browser', tier: 'checkpoint', description: 'Winter application surface' }),
   worker: Object.freeze({ script: 'check:worker', resource: 'browser', tier: 'checkpoint', description: 'Sync, Worker, and fallback scene parity' }),
   audio: Object.freeze({ script: 'check:audio', resource: 'browser', tier: 'checkpoint', description: 'Audio lifecycle contract' }),

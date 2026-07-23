@@ -11,9 +11,9 @@ const FULL_GATES = Object.freeze([
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
 // New code normally fails closed. These paths are the reviewed exception for
-// #107–#108, #113, and #114: the platform adapters, portable semantic state,
-// first-scene guide, and keyboard navigation policy have dedicated pure
-// contracts below.
+// #107–#108, #113–#114, and #128: the platform adapters, portable semantic
+// state, first-scene guide, keyboard navigation, and sijeon plan/renderer have
+// dedicated contracts below.
 const REVIEWED_NEW_PATHS = new Set([
   'app/src/components/SceneGuide.svelte',
   'app/src/lib/scene-snapshot.js',
@@ -23,12 +23,20 @@ const REVIEWED_NEW_PATHS = new Set([
   'app/src/lib/standalone-param-spec.js',
   'app/src/engine/semantic-view-runtime.js',
   'src/api/environment-state.js',
+  'src/api/sijeon.js',
+  'src/api/sijeon-plan.js',
   'src/api/village-options.js',
+  'src/generators/village/sijeon.js',
+  'src/village/sijeon-plan.js',
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
   'tools/check-scene-guide.mjs',
+  'tools/check-api-reuse-suite.mjs',
+  'tools/check-sijeon-contract.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-share.mjs',
+  'tools/shoot-sijeon.mjs',
+  'tools/shoot-sijeon-app.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -84,6 +92,7 @@ function routePath(path) {
     'tools/check-instance-upload-browser.mjs': ['instance-upload'],
     'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
     'tools/check-api-reuse-example.mjs': ['api-reuse'],
+    'tools/check-api-reuse-suite.mjs': ['api-reuse'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -102,7 +111,10 @@ function routePath(path) {
     'tools/lib/bokeh-scatter-proof.mjs': ['bokeh-fixture'],
     'tools/lib/bokeh-source-stress.mjs': ['bokeh-fixture'],
     'tools/check-rim-facing.mjs': ['rim'],
+    'tools/shoot-hanyang.mjs': ['app'],
     'tools/shoot-wall-steps.mjs': ['app'],
+    'tools/shoot-sijeon.mjs': ['app', 'api-reuse'],
+    'tools/shoot-sijeon-app.mjs': ['app', 'api-reuse'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
@@ -217,6 +229,12 @@ function routePath(path) {
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
     select('village generation changed', 'app', 'worker');
+    if (path === 'src/generators/village/sijeon.js') {
+      select(
+        'reusable sijeon rendering, material lifecycle, snow, rim, and wave contracts changed',
+        'api-reuse', 'winter-app', 'rim', 'lod-wave',
+      );
+    }
     if (path === 'src/village/options.js' || path === 'src/village/site.js') {
       select('portable village option meaning changed', 'share');
     }
@@ -297,6 +315,17 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/sijeon.js') {
+      select(
+        'public sijeon renderer and lifecycle API changed',
+        'app', 'api-reuse', 'winter-app', 'worker', 'rim', 'lod-wave',
+      );
+      return { gates, reasons };
+    }
+    if (path === 'src/api/sijeon-plan.js') {
+      select('public renderer-free sijeon planning API changed', 'app', 'api-reuse', 'worker');
+      return { gates, reasons };
+    }
     if (path === 'src/api/environment-state.js') {
       select('portable environment state boundary changed', 'share');
       return { gates, reasons };

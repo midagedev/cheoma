@@ -47,6 +47,18 @@ assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
 ]);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/village/sijeon-plan.js'], {
+  newPaths: ['src/village/sijeon-plan.js'],
+}), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/generators/village/sijeon.js'], {
+  newPaths: ['src/generators/village/sijeon.js'],
+}), ['core', 'app', 'rim', 'api-reuse', 'winter-app', 'worker', 'lod-wave']);
+assert.deepEqual(ids(['src/api/sijeon.js'], {
+  newPaths: ['src/api/sijeon.js'],
+}), ['core', 'app', 'rim', 'api-reuse', 'winter-app', 'worker', 'lod-wave']);
+assert.deepEqual(ids(['src/api/sijeon-plan.js'], {
+  newPaths: ['src/api/sijeon-plan.js'],
+}), ['core', 'app', 'api-reuse', 'worker']);
 assert.deepEqual(ids(['src/village/options.js']), ['core', 'share', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
@@ -188,6 +200,18 @@ assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
 assert.deepEqual(ids(['tools/check-scene-snapshot.mjs']), ['core', 'share']);
 assert.deepEqual(ids(['tools/check-scene-guide.mjs']), ['core']);
 assert.deepEqual(ids(['tools/check-building-navigation.mjs']), ['core']);
+assert.deepEqual(ids(['tools/check-sijeon-contract.mjs'], {
+  newPaths: ['tools/check-sijeon-contract.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/shoot-sijeon.mjs'], {
+  newPaths: ['tools/shoot-sijeon.mjs'],
+}), ['core', 'app', 'api-reuse']);
+assert.deepEqual(ids(['tools/shoot-sijeon-app.mjs'], {
+  newPaths: ['tools/shoot-sijeon-app.mjs'],
+}), ['core', 'app', 'api-reuse']);
+assert.deepEqual(ids(['tools/check-api-reuse-suite.mjs'], {
+  newPaths: ['tools/check-api-reuse-suite.mjs'],
+}), ['core', 'api-reuse']);
 assert.deepEqual(ids(['tools/shoot-bokeh-fixture.mjs']), ['core', 'bokeh-fixture']);
 for (const helper of [
   'tools/lib/bokeh-gpu-diagnostic.mjs',
@@ -201,6 +225,7 @@ for (const helper of [
 }
 assert.deepEqual(ids(['tools/shoot-bokeh-scatter-proof.mjs']), ['core', 'bokeh-fixture']);
 assert.deepEqual(ids(['tools/shoot-wall-steps.mjs']), ['core', 'app']);
+assert.deepEqual(ids(['tools/shoot-hanyang.mjs']), ['core', 'app']);
 assert.deepEqual(ids(['src/village/nightlights.js']), [
   'core', 'app', 'dof-app', 'particle-geometry', 'instance-upload', 'worker', 'lod-wave',
 ]);

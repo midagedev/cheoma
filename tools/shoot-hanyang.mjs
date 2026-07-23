@@ -63,6 +63,7 @@ scene.add(new THREE.HemisphereLight(L.hemi[0], L.hemi[1], L.hemi[2]));
 
 const cen = plan.site.center;
 let campos, target, fov = 44;
+let subject = null;
 if (view === 'aerial') {
   campos = new THREE.Vector3(0.16 * R, 0.95 * R, 1.85 * R);
   target = new THREE.Vector3(0, 0.02 * R, -0.12 * R);
@@ -122,6 +123,25 @@ if (view === 'aerial') {
   fov = 42;
   campos = new THREE.Vector3(Pl.x + R * 0.30, py + R * 0.34, Pl.z + R * 0.52);
   target = new THREE.Vector3(Pl.x, py + 6, Pl.z - R * 0.05);
+} else if (view === 'sijeon') {
+  // 실제 한양 plan의 도심 시전 중 중심에 가까운 한 칸을 기준으로, 대로 위에서
+  // 연속 행랑을 사선으로 본다. 고립 fixture가 놓치는 성곽·도로·인접 필지 맥락을 확인한다.
+  const shops = plan.features.sijeon || [];
+  if (!shops.length) throw new Error('sijeon view requires planned Hanyang market rows');
+  const shop = shops.reduce((best, candidate) => {
+    const distance = Math.hypot(candidate.center.x - cen.x, candidate.center.z - cen.z);
+    return !best || distance < best.distance ? { shop: candidate, distance } : best;
+  }, null).shop;
+  const front = new THREE.Vector3(shop.frontDir.x, 0, shop.frontDir.z).normalize();
+  const along = new THREE.Vector3(-front.z, 0, front.x);
+  const sy = plan.site.heightAt(shop.center.x, shop.center.z);
+  fov = 38;
+  campos = new THREE.Vector3(shop.center.x, sy + 2.25, shop.center.z)
+    .addScaledVector(front, shop.d * 0.5 + 5.8)
+    .addScaledVector(along, -17);
+  target = new THREE.Vector3(shop.center.x, sy + 1.65, shop.center.z)
+    .addScaledVector(along, 9);
+  subject = { kind: 'sijeon', id: shop.id, center: shop.center, frontDir: shop.frontDir };
 } else if (view === 'cull') {
   // 컬링 증명: 도성 중심에서 북(-z)만 바라봄 → 남쪽 청크는 뒤로 컬링돼야 함(calls 감소).
   fov = 55;
@@ -169,7 +189,7 @@ renderer.setAnimationLoop(() => {
       else if (state.level === 'far' || state.level === 'impostor') lod.far++;
       else lod.invalid++;
     }
-    window.__PLAN = { scale, seed, view, R, stats: plan.stats, warnings: plan.warnings,
+    window.__PLAN = { scale, seed, view, subject, R, stats: plan.stats, warnings: plan.warnings,
       lod,
       perf: { calls: ri.render.calls, triangles: ri.render.triangles, programs: ri.programs?.length || 0,
         geometries: ri.memory.geometries, textures: ri.memory.textures } };
@@ -201,6 +221,8 @@ const shots = [
   ['hanyang-west-gate', 'scale=hanyang&view=west&time=day'],
   ['hanyang-north', 'scale=hanyang&view=north&time=day'],
   ['hanyang-sunset', 'scale=hanyang&view=aerial&time=sunset'],
+  ['hanyang-sijeon-day', 'scale=hanyang&view=sijeon&time=day'],
+  ['hanyang-sijeon-sunset', 'scale=hanyang&view=sijeon&time=sunset'],
   ['hanyang-cull', 'scale=hanyang&view=cull&time=day'],
   ['hanyang-eye', 'scale=hanyang&view=eye&time=day'],
   ['hanyang-palace', 'scale=hanyang&view=palace&time=sunset'],

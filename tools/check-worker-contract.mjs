@@ -54,11 +54,14 @@ const expectedSceneHashes = {
   // and actual eave polygon into the pure plan. Temple meshes and serialized
   // plans therefore change at every scale, while residential geometry and pick
   // proxies remain unchanged.
+  // #128 preserves every sijeon placement byte and replaces only the Hanyang
+  // market-row meshes with the planned two-bay column/opening/bench grammar.
+  // The other scales and all pick proxies therefore remain byte-identical.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
   village: '089c40b0:962ffb12:7695c335:724597c8',
   town: '66734b4e:aa496306:29632b4b:c38d6c78',
   capital: '32b7209b:e64634d5:0558697c:53238c77',
-  hanyang: 'ddaf67c1:8063fd77:4b593521:def6c357',
+  hanyang: '9c9c0ab0:fa79d358:5840e18a:d597599c',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

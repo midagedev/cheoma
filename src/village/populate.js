@@ -35,7 +35,7 @@ import {
   buildFeatureObjects,
   buildHeroParcel,
   buildPaddyFields,
-  buildSijeon,
+  buildVillageSijeon,
   collectMaterialSets,
 } from '../generators/village/features.js';
 import {
@@ -337,7 +337,9 @@ export function* populateVillageSteps(plan, opts = {}) {
   // 6.5) 성곽·사대문 + 시전행랑(한양) — 링 전체를 두르는 큰 오브젝트라 랜드마크 병합(중심 바운딩)에
   //   넣지 않고 자체 그룹으로 추가한다(성곽은 소수 재질, 시전은 자체 병합).
   if (plan.features && plan.features.cityWall) root.add(buildCityWall(plan.features.cityWall, site));
-  if (plan.features && plan.features.sijeon && plan.features.sijeon.length) root.add(buildSijeon(plan.features.sijeon, site));
+  if (plan.features && plan.features.sijeon && plan.features.sijeon.length) {
+    root.add(buildVillageSijeon(plan.features.sijeon, site));
+  }
   yield 'features+wall+sijeon';
 
   // 병합 반영(optimize) — 로드·논·랜드마크를 재질별로 접는다.
