@@ -87,7 +87,10 @@ export function planPavilion({
     ? G.add(entrance, G.add(G.mul(lateral, site.R * 0.10), G.mul(axis, site.R * 0.05)))
     : G.add(G.lerp(center, entrance, 0.30), G.mul(lateral, site.R * 0.06));
   const roadSpatial = createRoadSpatialIndex(roads);
-  const maxRadius = Math.max(36, site.R * 0.68);
+  // A 10° parcel lens protects a longer perspective-narrowing focus corridor. Keep
+  // the same nearest-first search, but let compact walled villages reach the first
+  // clearing beyond the former 0.68R cap (the village/42 regression is at 0.72R).
+  const maxRadius = Math.max(36, site.R * 0.75);
 
   const clearAt = (point) => {
     const footprint = pavilionFootprint({ ...point, radius: PAVILION_ROOF_RADIUS });

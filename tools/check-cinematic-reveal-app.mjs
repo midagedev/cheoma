@@ -10,6 +10,7 @@ import { countChangedPixels } from './lib/png-metrics.mjs';
 import {
   VILLAGE_FOCUS_ELEVATION,
   VILLAGE_LENS,
+  dollyScaleForFov,
   fovForDollyScale,
 } from '../src/camera/optics.js';
 
@@ -24,6 +25,9 @@ const invariant = (condition, message) => {
   if (!condition) failures.push(message);
 };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+const monotonic = (values, direction, epsilon = 1e-7) => values.every((value, index) => (
+  index === 0 || direction * (value - values[index - 1]) >= -epsilon
+));
 const FOCUS_ELEVATION_DEG = VILLAGE_FOCUS_ELEVATION * 180 / Math.PI;
 
 const server = await createServer({
@@ -89,13 +93,100 @@ async function sampleSequence(page, prefix, points) {
       const engine = window.__engine;
       const reveal = engine.debugArchitecturalRevealSeek(progress, { finish });
       if (window.__asm?.active) window.__asm.seek(progress);
+      const optics = engine.debugSyncCameraEnvironment();
       const dof = engine.debugRenderDofFrame();
-      return { ...reveal, dof, programs: engine.renderer.info.programs?.length || 0 };
+      return { ...reveal, optics, dof, programs: engine.renderer.info.programs?.length || 0 };
     }, { progress, finish: progress >= 1 });
     frames.push(state);
     await page.screenshot({ path: join(outputDir, `${prefix}-${index}-${String(progress).replace('.', '_')}.png`) });
   }
   return frames;
+}
+
+async function capturePointProjectionStats(page, prefix) {
+  // Camera seeking freezes the separate village ink-fog reveal. Let the real loop
+  // settle that veil before judging the 7° product frame or point projection.
+  await page.evaluate(() => window.__engine.debugSetPaused(false));
+  await page.waitForTimeout(1600);
+  await page.evaluate(() => window.__engine.debugSetPaused(true));
+  const stats = await page.evaluate(() => {
+    const engine = window.__engine;
+    const camera = engine.camera;
+    const optics = engine.debugSyncCameraEnvironment();
+    engine.scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+
+    const worldVisible = (object) => {
+      for (let current = object; current; current = current.parent) {
+        if (!current.visible) return false;
+      }
+      return true;
+    };
+    const summarize = (object, kind) => {
+      const material = object.material;
+      const uniforms = material?.uniforms || {};
+      const position = object.geometry?.attributes?.position;
+      const size = object.geometry?.attributes?.aSize;
+      const rand = object.geometry?.attributes?.aRand;
+      const scale = object.geometry?.attributes?.aScale;
+      if (!position) return null;
+      const lensScale = uniforms.uLensScale?.value ?? null;
+      const pixelRatio = uniforms.uPixelRatio?.value ?? 1;
+      const maxPx = kind === 'motes'
+        ? 4 * pixelRatio
+        : (uniforms.uMaxPx?.value ?? Infinity) * (kind === 'nightlights' ? pixelRatio : 1);
+      const minPx = kind === 'motes'
+        ? pixelRatio
+        : (kind === 'nightlights' ? (uniforms.uMinPx?.value ?? 0) * pixelRatio : 0);
+      let depthMin = Infinity, depthMax = -Infinity;
+      let rawMin = Infinity, rawMax = -Infinity, pxMin = Infinity, pxMax = -Infinity;
+      let clipped = 0, measured = 0;
+      const point = object.position.clone();
+      for (let index = 0; index < position.count; index++) {
+        point.fromBufferAttribute(position, index);
+        object.localToWorld(point);
+        point.applyMatrix4(camera.matrixWorldInverse);
+        const depth = -point.z;
+        if (!(depth > 0)) continue;
+        let raw;
+        if (kind === 'snow' || kind === 'petals') {
+          raw = size.getX(index) * uniforms.uScale.value * lensScale / Math.max(depth, 1);
+        } else if (kind === 'motes') {
+          raw = uniforms.uSize.value * rand.getW(index) * pixelRatio
+            * (50 * lensScale / depth);
+        } else {
+          raw = uniforms.uSizeBase.value * scale.getX(index) * pixelRatio * lensScale / depth;
+        }
+        const px = Math.max(minPx, Math.min(maxPx, raw));
+        depthMin = Math.min(depthMin, depth); depthMax = Math.max(depthMax, depth);
+        rawMin = Math.min(rawMin, raw); rawMax = Math.max(rawMax, raw);
+        pxMin = Math.min(pxMin, px); pxMax = Math.max(pxMax, px);
+        if (raw >= maxPx) clipped++;
+        measured++;
+      }
+      return {
+        name: object.name, kind, visible: worldVisible(object), count: position.count, measured,
+        lensScale, depthMin, depthMax, rawMin, rawMax, pxMin, pxMax, maxPx, clipped,
+      };
+    };
+    const layers = [];
+    engine.scene.traverse((object) => {
+      const kind = object.name === 'weatherSnow' ? 'snow'
+        : object.name === 'seasonPetals' ? 'petals'
+          : object.name === 'dustMotes' ? 'motes'
+            : object.name === 'nightlight-points' ? 'nightlights' : null;
+      if (kind) layers.push(summarize(object, kind));
+    });
+    engine.debugRenderDofFrame();
+    return {
+      fov: camera.fov,
+      referenceFov: camera.userData.villageReferenceFov,
+      optics,
+      layers: layers.filter(Boolean),
+    };
+  });
+  await page.screenshot({ path: join(outputDir, `${prefix}-7deg-particles.png`) });
+  return stats;
 }
 
 async function captureFocusVisibilityPair(page, parcelId, prefix) {
@@ -401,6 +492,29 @@ try {
   );
   invariant(arrivalStart.start.fov > arrivalStart.end.fov && arrivalEnd.fov === arrivalEnd.end.fov,
     'initial arrival lands wide-to-telephoto on the authored lens');
+  const arrivalFovs = arrival.map((state) => state.fov);
+  const arrivalReferenceFovs = arrival.map((state) => state.referenceFov);
+  const arrivalLensScales = arrival.map((state) => state.optics.lensScale);
+  const arrivalOccupancy = arrival.map((state) => 1 / (
+    state.optics.visualDistance * Math.tan(state.referenceFov * Math.PI / 360)
+  ));
+  console.log(`ARRIVAL OPTICS: ${JSON.stringify(arrival.map((state, index) => ({
+    progress: [0, 0.28, 0.56, 0.82, 1][index],
+    fov: +state.fov.toFixed(3),
+    referenceFov: +state.referenceFov.toFixed(3),
+    physicalDistance: +state.optics.physicalDistance.toFixed(3),
+    visualDistance: +state.optics.visualDistance.toFixed(3),
+    lensScale: +state.optics.lensScale.toFixed(3),
+    occupancy: +arrivalOccupancy[index].toFixed(6),
+  })))}`);
+  invariant(monotonic(arrivalFovs, -1) && monotonic(arrivalReferenceFovs, -1),
+    'arrival narrows actual and reference FOV monotonically');
+  invariant(monotonic(arrivalLensScales, 1)
+      && arrival.every((state) => Math.abs(state.optics.lensScale
+        - dollyScaleForFov(state.referenceFov, state.fov)) < 1e-6),
+  'arrival increases compensated optical compression with the authored lens scale');
+  invariant(monotonic(arrivalOccupancy, 1),
+    'arrival grows the selected architecture monotonically while the lens compresses');
   invariant(arrival.every((state) => state.lookErrorDeg < 1e-4), 'arrival calls lookAt on every sampled live frame');
   invariant(arrival.every((state) => state.dof.error == null || state.dof.error < 0.04), 'arrival keeps DoF on the moving architectural target');
   invariant(dist(arrivalEnd.position, arrivalEnd.end.position) < 1e-6 && dist(arrivalEnd.target, arrivalEnd.end.target) < 1e-6,
@@ -410,6 +524,15 @@ try {
   const heroFrame = await captureSettledFocusFrame(arrivalPage, 'arrival');
   console.log(`HERO FRAME: ${JSON.stringify(heroFrame)}`);
   assertReadableHouseFrame(heroFrame, 'default hero arrival', { minHeight: 0.24 });
+  const pointProjection = await capturePointProjectionStats(arrivalPage, 'arrival');
+  console.log(`HERO POINT PROJECTION: ${JSON.stringify(pointProjection)}`);
+  invariant(Math.abs(pointProjection.fov - VILLAGE_LENS.hero.fov) < 1e-9
+      && pointProjection.layers.length >= 4,
+  '7-degree hero frame exposes weather, petal, mote, and practical-light point tiers');
+  invariant(pointProjection.layers.every((layer) => (
+    Math.abs(layer.lensScale - pointProjection.optics.lensScale) < 1e-6
+      && layer.pxMax <= layer.maxPx + 1e-6
+  )), '7-degree point tiers consume the full optical scale while preserving their pixel caps');
   const heroAnimalPixels = await captureAnimalPixelDelta(arrivalPage, heroFrame.parcelId, 'arrival');
   console.log(`HERO ANIMAL PIXELS: ${JSON.stringify(heroAnimalPixels)}`);
   invariant(heroAnimalPixels.toggled && heroAnimalPixels.changed >= 100,
@@ -429,6 +552,25 @@ try {
   ));
   invariant(selectedHeroCandidate && !selectedHeroCandidate.cameraBlocked,
     'hero safe endpoint never places the camera inside a neighbouring house proxy');
+  const actualHeroCameraCollision = await arrivalPage.evaluate(() => {
+    const engine = window.__engine;
+    const selected = engine.village.getState().selected;
+    const camera = engine.camera.position;
+    const inside = [];
+    for (const parcel of engine.village.debugParcels()) {
+      if (parcel.parcelId === selected) continue;
+      const bounds = engine.village.debugFocusVisibility(parcel.parcelId)?.subjectBounds;
+      if (!bounds) continue;
+      if (camera.x >= bounds.min[0] && camera.x <= bounds.max[0]
+        && camera.y >= bounds.min[1] && camera.y <= bounds.max[1]
+        && camera.z >= bounds.min[2] && camera.z <= bounds.max[2]) {
+        inside.push(parcel.parcelId);
+      }
+    }
+    return inside;
+  });
+  invariant(actualHeroCameraCollision.length === 0,
+    'actual 7-degree arrival endpoint stays outside every neighbouring house volume');
   const xzDirection = (position, target) => {
     const x = position[0] - target[0], z = position[2] - target[2];
     const length = Math.hypot(x, z);

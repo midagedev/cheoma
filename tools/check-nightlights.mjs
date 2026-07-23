@@ -11,6 +11,7 @@ const built = await esbuild.build({
     contents: `
       export * as THREE from 'three';
       export { buildNightLights } from './src/village/nightlights.js';
+      export { VILLAGE_LENS_SCALE_MAX } from './src/camera/optics.js';
       export { houseMatrix } from './src/generators/shared/parcel-transform.js';
       export { planVillage } from './src/village/plan.js';
     `,
@@ -26,7 +27,9 @@ const built = await esbuild.build({
   logLevel: 'silent',
 });
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(built.outputFiles[0].contents).toString('base64')}`;
-const { THREE, buildNightLights, houseMatrix, planVillage } = await import(moduleUrl);
+const {
+  THREE, VILLAGE_LENS_SCALE_MAX, buildNightLights, houseMatrix, planVillage,
+} = await import(moduleUrl);
 
 const EPS = 1e-10;
 const close = (actual, expected, message) => {
@@ -318,6 +321,12 @@ assert.equal(material.uniforms.uWave.value, 0.5, 'wave weight did not reach the 
 first.group.userData.waveFade.setWeight(Number.NaN);
 assert.equal(points.visible, false, 'invalid wave weight remained visible');
 first.group.userData.waveFade.setWeight(1);
+first.update(0, 1, Number.POSITIVE_INFINITY);
+close(material.uniforms.uLensScale.value, 1,
+  'invalid nightlight lens scale did not fail to identity');
+first.update(0, 1, VILLAGE_LENS_SCALE_MAX + 1);
+close(material.uniforms.uLensScale.value, VILLAGE_LENS_SCALE_MAX,
+  'nightlight projection clipped before the narrowest authored lens');
 first.update(0.25, 1, 1.4);
 assert.equal(material.uniforms.uTime.value, 0.25, 'visible update did not advance deterministic flicker time');
 first.group.userData.waveFade.setWeight(0.65);

@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+  VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_LENS,
+  dollyDistanceForFov,
+  dollyScaleForFov,
+} from '../src/camera/optics.js';
+import {
   createArchitecturalReveal,
   createArchitecturalRevealTimeline,
   sampleArchitecturalReveal,
@@ -61,6 +67,49 @@ for (let index = 1; index <= samples; index++) {
   previous = current;
 }
 assert.ok(maxTurnRate < 28, `arrival look direction turns too quickly (${maxTurnRate.toFixed(2)}°/s)`);
+
+// #95: the product hero now ends on a 200mm-like 7° vertical FOV. The reveal
+// must make that compression emerge continuously while compensated distance
+// preserves a monotonic subject build-up; an endpoint-only assertion misses a
+// mid-path zoom reversal or a final framing pop.
+const heroTarget = { x: 0, y: 5.2, z: 0 };
+const heroPhysicalDistance = dollyDistanceForFov(
+  50,
+  VILLAGE_LENS.hero.referenceFov,
+  VILLAGE_LENS.hero.fov,
+);
+const heroAzimuth = 14 / DEG;
+const heroClose = frame({
+  x: Math.sin(heroAzimuth) * Math.cos(VILLAGE_FOCUS_ELEVATION) * heroPhysicalDistance,
+  y: heroTarget.y + Math.sin(VILLAGE_FOCUS_ELEVATION) * heroPhysicalDistance,
+  z: Math.cos(heroAzimuth) * Math.cos(VILLAGE_FOCUS_ELEVATION) * heroPhysicalDistance,
+}, heroTarget, VILLAGE_LENS.hero.fov, VILLAGE_LENS.hero.referenceFov, 0);
+const opticalArrival = createArchitecturalReveal({
+  kind: 'arrival', from, to: heroClose, seed: 20260716, subjectSize: 22, motion: 'full',
+});
+const opticalSamples = Array.from({ length: 241 }, (_, index) => (
+  sampleArchitecturalReveal(opticalArrival, index / 240)
+));
+const nondecreasing = (values, epsilon = 1e-9) => values.every((value, index) => (
+  index === 0 || value >= values[index - 1] - epsilon
+));
+const nonincreasing = (values, epsilon = 1e-9) => values.every((value, index) => (
+  index === 0 || value <= values[index - 1] + epsilon
+));
+assert.ok(nonincreasing(opticalSamples.map((sample) => sample.fov)),
+  '200mm-like arrival actual FOV must narrow monotonically');
+assert.ok(nonincreasing(opticalSamples.map((sample) => sample.referenceFov)),
+  '200mm-like arrival reference FOV must narrow monotonically');
+assert.ok(nondecreasing(opticalSamples.map((sample) => (
+  dollyScaleForFov(sample.referenceFov, sample.fov)
+))), '200mm-like arrival compression must emerge monotonically');
+assert.ok(nondecreasing(opticalSamples.map((sample) => 1 / (
+  distance(sample.position, sample.target) * Math.tan(sample.fov * Math.PI / 360)
+)), 1e-7), '200mm-like arrival must not shrink the architecture mid-transition');
+near(opticalSamples.at(-1).position, heroClose.position);
+near(opticalSamples.at(-1).target, heroClose.target);
+assert.ok(distance(opticalSamples.at(-1).position, opticalSamples.at(-2).position) < 0.01,
+  '200mm-like arrival must settle without an endpoint position snap');
 
 const rebuilt = frame({ x: 2.8, y: 1.35, z: 32.5 }, { x: 0.6, y: 4.8, z: -0.4 }, 20, 23, 1);
 const rebuild = createArchitecturalReveal({

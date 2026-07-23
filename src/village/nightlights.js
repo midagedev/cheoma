@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { normalizeVillageLensScale } from '../camera/optics.js';
 import { hashString, makeRng } from '../rng.js';
 import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
 import { houseMatrix } from '../generators/shared/parcel-transform.js';
@@ -401,8 +402,7 @@ export function buildNightLights(plan, _site, sources = {}) {
         level = clamp01(value);
         uniforms.uNight.value = level;
       }
-      uniforms.uLensScale.value = Number.isFinite(lensScale)
-        ? clamp(lensScale, 0.5, 2) : 1;
+      uniforms.uLensScale.value = normalizeVillageLensScale(lensScale);
       syncVisibility();
       if (points.visible) uniforms.uTime.value += dt || 0;
     },

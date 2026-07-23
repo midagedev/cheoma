@@ -7,22 +7,35 @@
 
 const DEG = Math.PI / 180;
 export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
-// Shared close-parcel pose. Twenty-two degrees keeps the courtyard readable while retaining
+// Shared close-parcel pose. Twenty-four degrees keeps the courtyard readable while retaining
 // an architectural, rather than aerial, view across the tested residential variants.
 // Keep the projection centered: a sky-biased lens shift crops the foreground yard and
 // hides the animals and household details this elevation is meant to reveal.
-export const VILLAGE_FOCUS_ELEVATION = 22 * DEG;
+export const VILLAGE_FOCUS_ELEVATION = 24 * DEG;
 export const VILLAGE_FOCUS_SKY_FRACTION = 0;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 
 export const VILLAGE_LENS = Object.freeze({
   aerial: lens(46, 42),
-  parcel: lens(20, 23),
-  hero: lens(18, 21),
+  parcel: lens(10, 23),
+  hero: lens(7, 21),
   palace: lens(24, 32),
   temple: lens(26, 34),
 });
+
+// Point-based ambience follows the same compensated dolly as geometry. Keep its
+// accepted scale derived from the authored lens set so adding a narrower profile
+// cannot silently shrink weather, petals, motes, or practical lights. Individual
+// shaders still own their final pixel-size cap.
+export const VILLAGE_LENS_SCALE_MIN = 0.5;
+export const VILLAGE_LENS_SCALE_MAX = Math.max(...Object.values(VILLAGE_LENS)
+  .map((profile) => dollyScaleForFov(profile.referenceFov, profile.fov)));
+
+export function normalizeVillageLensScale(value) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(VILLAGE_LENS_SCALE_MIN, Math.min(VILLAGE_LENS_SCALE_MAX, value));
+}
 
 // 휠/핀치는 현재 보기 안의 구도만 바꾸고 explore↔focus 상태를 전환하지 않는다.
 // 화면 등가 거리(reference FOV 기준)로 한 번 정의해 광각 부감·망원 근경이 같은 범위를 소비한다.

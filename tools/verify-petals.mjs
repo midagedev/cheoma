@@ -1,4 +1,4 @@
-// 계절 입자 필드(#111) 수치 검증 — 스크린샷·PNG 없이 코드·수치 단언만.
+// 계절 입자 필드(#111) 수치 검증 — 스크린샷·PNG 없이 코드·WebGL 픽셀 단언.
 //   node tools/verify-petals.mjs
 //
 // 방식: esbuild(app/node_modules)로 src/env/weather.js(+petals.js) 를 브라우저 번들로 묶어 전용 포트
@@ -11,13 +11,15 @@
 //   ③ 카메라 추종: 중심 ±80m 이동 후 입자 AABB 가 카메라 주변을 감쌈
 //   ④ 눈·비 회귀: snow count(3600)·uScale(#116 근경 340→부감 748), rain count(2600)
 //   ⑤ 조기노출: 원점 빈 터(building 숨김·중심 원점)에서 count 0, 건물 복귀 후 상승(게이트 미고착)
-//   ⑥ 보상 dolly: 눈·꽃잎 point-size와 거리 gate가 동일한 화면 크기를 유지
+//   ⑥ 보상 dolly: 눈·꽃잎 point-size와 거리 gate가 동일한 화면 크기를 유지하며
+//      production snow shader의 21°/42m와 7°/127m 단일점 픽셀이 일치
 //   ⑦ pageerror 0
 
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
+import { VILLAGE_LENS_SCALE_MAX } from '../src/camera/optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -59,6 +61,75 @@ window.__ppos = () => { const p = window.__W._petals.points.position; return [p.
 window.__aabb = () => { const b = window.__W._petals.aabb(); return { min:[b.min.x,b.min.y,b.min.z], max:[b.max.x,b.max.y,b.max.z] }; };
 window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnow'); return { us: s.material.uniforms.uScale.value, ls: s.material.uniforms.uLensScale.value, spread: s.scale.x, vis: s.visible, n: s.geometry.attributes.position.count }; };
 window.__petalOptics = () => { const p = window.__W._petals.points; return { ls: p.material.uniforms.uLensScale.value, level: window.__W._petals.level }; };
+window.__pointOptics = (physicalDepth) => {
+  const summarize = (points) => {
+    const uniforms = points.material.uniforms;
+    const sizes = points.geometry.attributes.aSize.array;
+    const scale = uniforms.uScale.value;
+    const lens = uniforms.uLensScale.value;
+    const maxPx = uniforms.uMaxPx.value;
+    let rawMin = Infinity, rawMax = -Infinity, capped = 0;
+    for (const size of sizes) {
+      const raw = size * scale * lens / physicalDepth;
+      rawMin = Math.min(rawMin, raw); rawMax = Math.max(rawMax, raw);
+      if (raw >= maxPx) capped++;
+    }
+    return {
+      physicalDepth, visualDepth: physicalDepth / lens, lens,
+      rawMin, rawMax, pxMin: Math.min(rawMin, maxPx), pxMax: Math.min(rawMax, maxPx),
+      maxPx, capped, count: sizes.length,
+    };
+  };
+  return {
+    snow: summarize(window.__scene.getObjectByName('weatherSnow')),
+    petals: summarize(window.__W._petals.points),
+  };
+};
+window.__renderSnowPoint = ({ depth, fov, lens }) => {
+  const source = window.__scene.getObjectByName('weatherSnow');
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  geometry.setAttribute('aSize', new THREE.Float32BufferAttribute([
+    source.geometry.attributes.aSize.getX(0),
+  ], 1));
+  geometry.setAttribute('aOpacity', new THREE.Float32BufferAttribute([1], 1));
+  const material = source.material.clone();
+  material.uniforms.uFade.value = 1;
+  material.uniforms.uLensScale.value = lens;
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  const scene = new THREE.Scene();
+  scene.add(points);
+  const camera = new THREE.PerspectiveCamera(fov, 1, 0.1, 500);
+  camera.position.z = depth;
+  camera.lookAt(0, 0, 0);
+  const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+  renderer.setPixelRatio(1);
+  renderer.setSize(128, 128, false);
+  renderer.setClearColor(0x000000, 1);
+  const target = new THREE.WebGLRenderTarget(128, 128, {
+    depthBuffer: true, stencilBuffer: false,
+  });
+  renderer.setRenderTarget(target);
+  renderer.render(scene, camera);
+  const pixels = new Uint8Array(128 * 128 * 4);
+  renderer.readRenderTargetPixels(target, 0, 0, 128, 128, pixels);
+  let minX = 128, maxX = -1, minY = 128, maxY = -1, coverage = 0;
+  for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+    const offset = (y * 128 + x) * 4;
+    if (pixels[offset] + pixels[offset + 1] + pixels[offset + 2] <= 12) continue;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    coverage++;
+  }
+  target.dispose(); geometry.dispose(); material.dispose(); renderer.dispose();
+  return {
+    active: source.visible && source.material.uniforms.uFade.value > 0,
+    width: maxX >= minX ? maxX - minX + 1 : 0,
+    height: maxY >= minY ? maxY - minY + 1 : 0,
+    coverage,
+  };
+};
 window.__rain = () => { const r = window.__scene.getObjectByName('weatherRain'); return { vis: r.visible, n: r.geometry.attributes.position.count/2 }; };
 window.__setWind = (v) => { window.__windScale = v; };
 window.__ready = true;
@@ -188,6 +259,47 @@ check('⑥snow 화면등가 크기', approx(optical.snow.us, 340, 1)
 check('⑥petal 화면등가 크기·발현', approx(optical.petal.ls, expectedLens, 0.01)
     && optical.petal.level > 0.3,
 `lens=${optical.petal.ls.toFixed(3)} level=${optical.petal.level.toFixed(3)}`);
+
+// #95: 7° hero의 약 3× compensated dolly에서도 world-space 입자 투영은
+// reference 42m와 같은 크기를 유지하고, 기존 물리적 point-size 상한을 넘지 않는다.
+const narrowOptical = await page.evaluate(({ dt, lens }) => {
+  const visualDepth = 42;
+  const physicalDepth = visualDepth * lens;
+  window.__mk({ bv: true }); window.__season('spring'); window.__weather('snow', { immediate: true });
+  window.__drive(30, dt, { x: 0, z: 0, d: physicalDepth, v: visualDepth, y: 28, w: 1 });
+  return window.__pointOptics(physicalDepth);
+}, { dt: DT, lens: VILLAGE_LENS_SCALE_MAX });
+check('⑥hero 7° snow lens-scale', approx(narrowOptical.snow.lens, VILLAGE_LENS_SCALE_MAX, 1e-6)
+    && approx(narrowOptical.snow.visualDepth, 42, 1e-6),
+`physical=${narrowOptical.snow.physicalDepth.toFixed(2)} visual=${narrowOptical.snow.visualDepth.toFixed(2)} lens=${narrowOptical.snow.lens.toFixed(3)}`);
+check('⑥hero 7° snow point-size cap', narrowOptical.snow.pxMax <= narrowOptical.snow.maxPx + 1e-6,
+`px=${narrowOptical.snow.pxMin.toFixed(2)}–${narrowOptical.snow.pxMax.toFixed(2)} cap=${narrowOptical.snow.maxPx} clipped=${narrowOptical.snow.capped}/${narrowOptical.snow.count}`);
+check('⑥hero 7° petal lens-scale', approx(narrowOptical.petals.lens, VILLAGE_LENS_SCALE_MAX, 1e-6)
+    && approx(narrowOptical.petals.visualDepth, 42, 1e-6),
+`physical=${narrowOptical.petals.physicalDepth.toFixed(2)} visual=${narrowOptical.petals.visualDepth.toFixed(2)} lens=${narrowOptical.petals.lens.toFixed(3)}`);
+check('⑥hero 7° petal point-size cap', narrowOptical.petals.pxMax <= narrowOptical.petals.maxPx + 1e-6,
+`px=${narrowOptical.petals.pxMin.toFixed(2)}–${narrowOptical.petals.pxMax.toFixed(2)} cap=${narrowOptical.petals.maxPx} clipped=${narrowOptical.petals.capped}/${narrowOptical.petals.count}`);
+
+// Execute the production snow vertex/fragment shader, not a JS restatement of
+// gl_PointSize. Removing uLensScale from GLSL makes the compensated result about
+// one third as wide and must fail this pixel contract.
+const pointPixels = await page.evaluate(({ lens }) => {
+  const referenceDepth = 42;
+  return {
+    reference: window.__renderSnowPoint({ depth: referenceDepth, fov: 21, lens: 1 }),
+    compensated: window.__renderSnowPoint({
+      depth: referenceDepth * lens, fov: 7, lens,
+    }),
+  };
+}, { lens: VILLAGE_LENS_SCALE_MAX });
+const coverageRatio = pointPixels.compensated.coverage / Math.max(1, pointPixels.reference.coverage);
+check('⑥hero 7° production shader pixel parity', pointPixels.reference.active
+    && pointPixels.compensated.active
+    && pointPixels.reference.width > 4
+    && Math.abs(pointPixels.compensated.width - pointPixels.reference.width) <= 1
+    && Math.abs(pointPixels.compensated.height - pointPixels.reference.height) <= 1
+    && coverageRatio >= 0.9 && coverageRatio <= 1.1,
+`reference=${pointPixels.reference.width}×${pointPixels.reference.height}/${pointPixels.reference.coverage}px compensated=${pointPixels.compensated.width}×${pointPixels.compensated.height}/${pointPixels.compensated.coverage}px ratio=${coverageRatio.toFixed(3)}`);
 
 // ── ⑦ pageerror ──
 check('⑦pageerror 0', errors.length === 0, errors.join(' | ') || 'none');

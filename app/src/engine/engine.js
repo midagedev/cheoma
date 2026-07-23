@@ -361,7 +361,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // 카메라 트윈(선택 포커스·해제·마을 돌리인/아웃). 진행 중이면 매 프레임 lerp.
-  //   opts.fov 지정 시 화각도 함께 보간(광각 부감 46 ↔ 망원 필지 20). opts.dofAnchor 는 전환 중 의미 있는
+  //   opts.fov 지정 시 화각도 함께 보간(광각 부감 46 ↔ 망원 필지 10). opts.dofAnchor 는 전환 중 의미 있는
   //   월드 초점점을 고정하고, dofAnchorFrom/To 는 같은 이즈드 진행도로 개구부 A→B 초점면을 옮긴다.
   //   생략하면 보간 중인 controls.target(항상 화면 앞)을 따라가며, opts.dofAmount 는 현재 강도에서
   //   목표값까지 단조 보간한다.
@@ -1810,7 +1810,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       visibilityScale,
     );
 
-    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 22°의
+    // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 24°의
     // 마당·문높이 망원 프레임으로 내려앉는다. seed는 선회 방향만 정하고 생성 RNG를 소비하지 않는다.
     // 모바일은 호를 줄이며 reduced-motion은 즉시 endpoint를 적용한다.
     revealCamera.reveal('arrival', {
@@ -2867,9 +2867,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     },
     // Deterministic camera-transition gate: applies the exact live-frame particle/LOD
     // lens policy without drawing the large scene.
-    debugSyncCameraEnvironment: () => syncCameraDependentEnvironment(
-      village.active ? village.handle?.detailLodState?.() : null,
-    ),
+    debugSyncCameraEnvironment: () => {
+      if (village.active && village.handle) {
+        village.handle.updateLod(camera, controls.target, 0);
+      }
+      return syncCameraDependentEnvironment(
+        village.active ? village.handle?.detailLodState?.() : null,
+      );
+    },
     debugSetPaused(paused = true) {
       debugPaused = !!paused;
       clock.getDelta();

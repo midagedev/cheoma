@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { normalizeVillageLensScale } from '../camera/optics.js';
 import { DEFAULT_DETAIL_BANDS, fadeBeyond } from '../core/lod.js';
 import { makeRng } from '../rng.js';
 
@@ -308,8 +309,7 @@ export function createPetalField({ getWind, lowPerf = false } = {}) {
     level = active ? Math.max(0, Math.min(1, present)) * alt : 0;
     mat.uniforms.uFade.value = level;
     mat.uniforms.uTime.value = t;
-    mat.uniforms.uLensScale.value = Number.isFinite(lensScale)
-      ? Math.max(0.5, Math.min(2, lensScale)) : 1;
+    mat.uniforms.uLensScale.value = normalizeVillageLensScale(lensScale);
     points.visible = level > 0.002;
     if (!points.visible) return;   // 비가시면 CPU 궤적 갱신 생략(성능)
 

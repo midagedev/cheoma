@@ -539,6 +539,11 @@ export function setupClouds(group, {
   //   가로지르게 되며(그림자 커버리지) 잔여 빌보드가 프레임 중앙에 어른거릴 수 있어 0.85→0.92 로
   //   높여 부감 프레임을 더 비운다(#81 의도 강화). overheadFade(=마을) 게이트 안이라 env 무영향.
   const OF_LO = -30, OF_HI = 6, OF_DEPTH = 0.92;   // dyEye(=카메라y−구름y) 밴드 & 최대 감쇠율
+  // Preserve the old 18°/16:9 fade endpoints in screen terms: at 4.6 plane
+  // widths the billboard occupied ~38% of the frame, and at 2.8 widths ~64%.
+  // Expressing that authored limit as coverage keeps 7°/10° telephoto views
+  // from restoring the shadow-source plane while it still fills the screen.
+  const CLOUD_FRAME_FULL = 0.38, CLOUD_FRAME_HIDDEN = 0.64;
 
   // ── 마을 부감 커버리지(#108) ─────────────────────────────────────────────────
   // 진단(tools/verify-cloudshadow.mjs): env 식 배치(rad = terrainMax·r + 40 + 표류 ±120)에선 블롭이
@@ -623,10 +628,14 @@ export function setupClouds(group, {
         // ceiling when the user rotates toward the sky. Keep the physical shadow source,
         // but hand visible close-up sky detail to the camera-relative horizon bank.
         const distance = cam.position.distanceTo(mesh.position);
-        // A 150 m plane still fills a 20° lens from several plane-widths away.
-        // Keep it out until its apparent width is below roughly 20°, then restore
-        // it gradually below 12°. The horizon bank supplies the closer silhouettes.
-        const proximity = smoothstep(mesh.userData.w * 2.8, mesh.userData.w * 4.6, distance);
+        const verticalFov = Number.isFinite(cam.fov) ? cam.fov * Math.PI / 180 : 18 * Math.PI / 180;
+        const aspect = Number.isFinite(cam.aspect) && cam.aspect > 0 ? cam.aspect : 16 / 9;
+        const halfFrameAtDepth = distance * Math.tan(verticalFov * 0.5) * aspect;
+        const frameFraction = halfFrameAtDepth > 1e-6
+          ? mesh.userData.w * 0.5 / halfFrameAtDepth : Infinity;
+        // The local plane remains the physical ground-shadow source even while
+        // hidden. The camera-relative horizon bank supplies close sky silhouettes.
+        const proximity = 1 - smoothstep(CLOUD_FRAME_FULL, CLOUD_FRAME_HIDDEN, frameFraction);
         mesh.material.opacity = base * (1 - g * OF_DEPTH) * proximity;
       }
     };
@@ -644,7 +653,7 @@ export function setupClouds(group, {
   // The bank is inside the sun/moon sprites and can therefore create real alpha occlusion.
   const HORIZON_CLOUD_COUNT = 16;
   // At the low-cloud distance this subtends roughly 14–20° after deterministic scale
-  // variation: one or two silhouettes in a 20° telephoto frame, never a white ceiling.
+  // variation: one or two silhouettes at the edge of a telephoto frame, never a white ceiling.
   const HORIZON_CLOUD_W = 18;
   const HORIZON_CLOUD_H = 10;
   const HORIZON_CLOUD_OPACITY = 0.72;
@@ -674,7 +683,7 @@ export function setupClouds(group, {
   };
   const horizonSpecs = Array.from({ length: HORIZON_CLOUD_COUNT }, (_, i) => ({
     az: 0.17 + i * Math.PI * 2 / HORIZON_CLOUD_COUNT,
-    // These 9–12° centres belong to an explicit sky-facing view. The default 22°
+    // These 9–12° centres belong to an explicit sky-facing view. The default 24°
     // downward courtyard focus deliberately misses the band and updateView sleeps it;
     // when a user looks upward, regular depth testing still lets roofs and ridges
     // occlude the cloud bottoms without a depth-free layer over the architecture.

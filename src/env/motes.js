@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { normalizeVillageLensScale } from '../camera/optics.js';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
 
@@ -287,8 +288,7 @@ export function setupMotes({ scene, sun, renderer, radius, centerY, count, ySpan
   }
 
   function setLensScale(value) {
-    mat.uniforms.uLensScale.value = Number.isFinite(value)
-      ? Math.max(0.5, Math.min(2, value)) : 1;
+    mat.uniforms.uLensScale.value = normalizeVillageLensScale(value);
   }
 
   return { group, setTime, setSeason, setWeather, setEnabled, update, setFade, setLensScale };
