@@ -10,6 +10,7 @@ import {
 // none of them may infer a second layout from the variant name.
 
 export const TEMPLE_VARIANTS = Object.freeze(['compact', 'courtyard', 'extended']);
+export const TEMPLE_PLAN_SCHEMA_VERSION = 2;
 
 export const TEMPLE_VARIANT_SPECS = Object.freeze({
   compact: Object.freeze({ min: 22, max: 30, width: 26, depth: 28, minHalls: 1, maxHalls: 2 }),
@@ -57,18 +58,18 @@ export function templeCompoundDefaultsForSite(siteR, seed = 1) {
   return { variant, width: round(width), depth: round(depth) };
 }
 
-function hall(id, role, x, z, {
-  yaw = 0, frontBays = 3, sideBays = 2, scale = 0.8,
-  seed = 1,
-} = {}) {
-  const position = point(x, z);
-  const architecture = templeRoleArchitecture(role, { seed, id });
+function withHallArchitecture(building, seed) {
+  const architecture = templeRoleArchitecture(building.role, { seed, id: building.id });
   const eave = templeHallEaveFootprint({
-    architecture, frontBays, sideBays, scale, yaw, position,
+    architecture,
+    frontBays: building.frontBays,
+    sideBays: building.sideBays,
+    scale: building.scale,
+    yaw: building.yaw,
+    position: building.position,
   });
   return {
-    id, role, style: 'temple', position, yaw: round(yaw, 6),
-    frontBays, sideBays, scale: round(scale),
+    ...building,
     formality: architecture.formality,
     architecturalRank: architecture.architecturalRank,
     architectureId: architecture.id,
@@ -89,6 +90,121 @@ function hall(id, role, x, z, {
   };
 }
 
+function hall(id, role, x, z, {
+  yaw = 0, frontBays = 3, sideBays = 2, scale = 0.8,
+  seed = 1,
+} = {}) {
+  return withHallArchitecture({
+    id,
+    role,
+    style: 'temple',
+    position: point(x, z),
+    yaw: round(yaw, 6),
+    frontBays,
+    sideBays,
+    scale: round(scale),
+  }, seed);
+}
+
+const PLAN_ARRAY_FIELDS = Object.freeze([
+  'courtyards', 'enclosures', 'buildings', 'gates', 'props', 'paths',
+]);
+
+function assertPlanCollections(plan) {
+  for (const field of PLAN_ARRAY_FIELDS) {
+    if (!Array.isArray(plan[field])) throw new TypeError(`TemplePlan.${field} must be an array`);
+  }
+}
+
+function completeHallArchitecture(building) {
+  const finiteFields = (object, fields) => fields.every((field) => Number.isFinite(object?.[field]));
+  return Number.isInteger(building?.architecturalRank)
+    && typeof building.architectureId === 'string' && building.architectureId.length > 0
+    && typeof building.formality === 'string' && building.formality.length > 0
+    && typeof building.roofGrammar?.family === 'string'
+    && typeof building.roofGrammar?.type === 'string'
+    && finiteFields(building.roofGrammar, [
+      'pitch', 'profileCurve', 'ridgeHeight', 'gableOverhang', 'cornerLift', 'planCurve',
+    ])
+    && typeof building.bracketGrammar?.family === 'string'
+    && Number.isInteger(building.bracketGrammar?.tiers)
+    && Number.isInteger(building.bracketGrammar?.interBrackets)
+    && Number.isFinite(building.bracketGrammar?.scale)
+    && typeof building.bracketGrammar?.density === 'string'
+    && finiteFields(building.eaveGrammar, ['overhang', 'drop'])
+    && Number.isInteger(building.eaveGrammar?.layers)
+    && finiteFields(building.massingGrammar, ['columnHeight', 'podiumTierHeight'])
+    && Number.isInteger(building.massingGrammar?.podiumTiers);
+}
+
+function expectedHallEave(building) {
+  return templeHallEaveFootprint({
+    architecture: {
+      roofGrammar: building.roofGrammar,
+      eaveGrammar: building.eaveGrammar,
+    },
+    frontBays: building.frontBays,
+    sideBays: building.sideBays,
+    scale: building.scale,
+    yaw: building.yaw,
+    position: building.position,
+  });
+}
+
+function hallEaveMatches(building, tolerance = 0.002) {
+  const polygon = building.eaveFootprint?.polygon;
+  if (polygon?.length !== 4) return false;
+  const expected = expectedHallEave(building);
+  return expected.polygon.every((corner, index) => (
+    Math.hypot(corner.x - polygon[index].x, corner.z - polygon[index].z) <= tolerance
+  ))
+    && Math.abs(expected.width - building.eaveFootprint.width) <= tolerance
+    && Math.abs(expected.depth - building.eaveFootprint.depth) <= tolerance
+    && Math.abs(expected.width - building.footprint?.width) <= tolerance
+    && Math.abs(expected.depth - building.footprint?.depth) <= tolerance;
+}
+
+/**
+ * Normalize the pure TemplePlan input boundary.
+ *
+ * Schema v1 did not own hall architecture. Its deterministic upgrade is the
+ * only compatibility layer allowed to recover grammar from a role; renderers
+ * and all v2 consumers receive the complete plan-owned grammar.
+ */
+export function normalizeTemplePlan(plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    throw new TypeError('TemplePlan must be an object');
+  }
+  if (!Number.isInteger(plan.schemaVersion)) {
+    throw new TypeError('TemplePlan.schemaVersion is required');
+  }
+  if (!Number.isInteger(plan.seed) || plan.seed < 0 || plan.seed > 0xffffffff) {
+    throw new TypeError('TemplePlan.seed must be an unsigned 32-bit integer');
+  }
+  if (plan.schemaVersion !== 1 && plan.schemaVersion !== TEMPLE_PLAN_SCHEMA_VERSION) {
+    throw new RangeError(
+      `unsupported TemplePlan schemaVersion ${plan.schemaVersion}; expected 1 or ${TEMPLE_PLAN_SCHEMA_VERSION}`,
+    );
+  }
+  assertPlanCollections(plan);
+  if (plan.schemaVersion === 1) {
+    return normalizeTemplePlan({
+      ...plan,
+      schemaVersion: TEMPLE_PLAN_SCHEMA_VERSION,
+      buildings: plan.buildings.map((building) => withHallArchitecture({ ...building }, plan.seed)),
+    });
+  }
+  for (const building of plan.buildings) {
+    if (!completeHallArchitecture(building)) {
+      throw new TypeError(`TemplePlan v2 building ${building?.id || '<unknown>'} has incomplete architecture`);
+    }
+    if (!hallEaveMatches(building)) {
+      throw new TypeError(`TemplePlan v2 building ${building.id} has a stale eave footprint`);
+    }
+  }
+  return plan;
+}
+
 function prop(id, role, kind, x, z, {
   yaw = 0, scale = 1, radius = 0.8, heightClass = 'low', stories,
 } = {}) {
@@ -102,7 +218,7 @@ function prop(id, role, kind, x, z, {
 function commonPlan(seed, variant, width, depth, settings) {
   const halfW = width / 2, halfD = depth / 2;
   return {
-    schemaVersion: 1,
+    schemaVersion: TEMPLE_PLAN_SCHEMA_VERSION,
     seed,
     variant,
     width: round(width),
@@ -420,28 +536,10 @@ export function templePlanIssues(plan) {
     return { building, polygon, box: polygonBounds(polygon) };
   });
   for (const { building, polygon, box } of buildings) {
-    const completeArchitecture = Number.isInteger(building.architecturalRank)
-      && building.architectureId
-      && building.roofGrammar?.type
-      && building.bracketGrammar?.family
-      && Number.isFinite(building.eaveGrammar?.overhang)
-      && Number.isFinite(building.massingGrammar?.columnHeight);
-    if (!completeArchitecture) issues.push(`${building.id}: architectural hierarchy is incomplete`);
-    if (building.eaveFootprint?.polygon?.length === 4) {
-      const expected = templeHallEaveFootprint({
-        architecture: {
-          roofGrammar: building.roofGrammar,
-          eaveGrammar: building.eaveGrammar,
-        },
-        frontBays: building.frontBays,
-        sideBays: building.sideBays,
-        scale: building.scale,
-        yaw: building.yaw,
-        position: building.position,
-      });
-      const mismatch = expected.polygon.some((corner, index) =>
-        Math.hypot(corner.x - polygon[index].x, corner.z - polygon[index].z) > 0.002);
-      if (mismatch) issues.push(`${building.id}: eave footprint drifted from architecture`);
+    if (!completeHallArchitecture(building)) {
+      issues.push(`${building.id}: architectural hierarchy is incomplete`);
+    } else if (!hallEaveMatches(building)) {
+      issues.push(`${building.id}: eave footprint drifted from architecture`);
     }
     if (box.minX < bounds.minX + 0.6 || box.maxX > bounds.maxX - 0.6
       || box.minZ < bounds.minZ + 0.6 || box.maxZ > bounds.maxZ - 0.6) {

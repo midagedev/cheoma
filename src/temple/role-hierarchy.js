@@ -20,7 +20,8 @@ const freezeGrammar = (grammar) => Object.freeze({
 });
 
 const MAIN_MATBAE = freezeGrammar({
-  id: 'principal-matbae-jusimpo',
+  // Chilgok Songnimsa Daeungjeon: matbae roof with dapo brackets.
+  id: 'principal-matbae-dapo',
   architecturalRank: 4,
   formality: 'hall',
   roofGrammar: {
@@ -34,11 +35,11 @@ const MAIN_MATBAE = freezeGrammar({
     planCurve: 0.08,
   },
   bracketGrammar: {
-    family: 'jusimpo',
-    tiers: 1,
-    interBrackets: 0,
-    scale: 1.42,
-    density: 'column-head',
+    family: 'dapo',
+    tiers: 2,
+    interBrackets: 1,
+    scale: 1.18,
+    density: 'column-and-intercolumn',
   },
   eaveGrammar: {
     overhang: 1.82,
@@ -53,7 +54,8 @@ const MAIN_MATBAE = freezeGrammar({
 });
 
 const MAIN_PALJAK = freezeGrammar({
-  id: 'principal-paljak-dapo',
+  // Buseoksa Muryangsujeon: paljak roof with jusimpo brackets.
+  id: 'principal-paljak-jusimpo',
   architecturalRank: 4,
   formality: 'hall',
   roofGrammar: {
@@ -67,11 +69,11 @@ const MAIN_PALJAK = freezeGrammar({
     planCurve: 0.18,
   },
   bracketGrammar: {
-    family: 'dapo',
-    tiers: 2,
-    interBrackets: 1,
-    scale: 1.18,
-    density: 'column-and-intercolumn',
+    family: 'jusimpo',
+    tiers: 1,
+    interBrackets: 0,
+    scale: 1.42,
+    density: 'column-head',
   },
   eaveGrammar: {
     overhang: 1.88,

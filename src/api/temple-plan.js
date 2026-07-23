@@ -1,7 +1,9 @@
 // DOM- and THREE-free temple planning API for workers and external generators.
 export {
+  TEMPLE_PLAN_SCHEMA_VERSION,
   TEMPLE_VARIANTS,
   TEMPLE_VARIANT_SPECS,
+  normalizeTemplePlan,
   planTempleCompound,
   templeCompoundDefaultsForSite,
   templePlanIssues,

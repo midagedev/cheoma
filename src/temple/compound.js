@@ -18,7 +18,7 @@ import {
   collectObjectResources,
   disposeObjectResources,
 } from '../core/three-resources.js';
-import { planTempleCompound } from './plan.js';
+import { normalizeTemplePlan, planTempleCompound } from './plan.js';
 import { templeHallBuilderParams } from './role-hierarchy.js';
 
 const lifecycle = new WeakMap();
@@ -175,9 +175,10 @@ function buildEnclosures(plan, mats) {
  * releases the generated palette, derived materials, geometries, and textures.
  */
 export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}) {
-  const plan = planOrOptions?.schemaVersion
-    ? planOrOptions
-    : planTempleCompound(planOrOptions);
+  const suppliedPlan = Object.hasOwn(planOrOptions || {}, 'schemaVersion')
+    || Array.isArray(planOrOptions?.buildings);
+  const sourcePlan = suppliedPlan ? planOrOptions : planTempleCompound(planOrOptions);
+  const plan = normalizeTemplePlan(sourcePlan);
   const mainDancheong = resolveDancheong('temple', dancheong || mats?.dancheong || PRESETS.temple);
   const palette = mats || makeMaterials('temple', mainDancheong);
   const paletteByDancheong = new Map();
@@ -239,6 +240,7 @@ export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}
   // The conservative signature skips shader-patched materials.
   canonicalizeSharedMaterials(root);
   root.userData.mats = palette;
+  root.userData.templeSchemaVersion = plan.schemaVersion;
   root.userData.parcelLike = { id: 'temple', style: 'temple', variant: plan.variant };
   root.userData.templeHandle = {
     seed: plan.seed,

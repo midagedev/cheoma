@@ -79,6 +79,13 @@ try {
       for (const hall of diag.architecture) {
         invariant(hall.architectureId && hall.roof && hall.bracket,
           `${label}:${hall.id}: incomplete renderer grammar`);
+        if (hall.architecturalRank === 4) {
+          const principalPair = `${hall.architectureId}:${hall.roof}:${hall.bracket}`;
+          invariant([
+            'principal-matbae-dapo:matbae:dapo',
+            'principal-paljak-jusimpo:paljak:jusimpo',
+          ].includes(principalPair), `${label}:${hall.id}: unsupported principal pairing ${principalPair}`);
+        }
         invariant(hall.eave.renderedWidth >= hall.eave.plannedWidth - 0.1
             && hall.eave.renderedWidth <= hall.eave.plannedWidth + 0.9
             && hall.eave.renderedDepth >= hall.eave.plannedDepth - 0.1
@@ -110,6 +117,39 @@ try {
       `${variant}: merge reduced ${raw.render.calls} calls by less than 85%`);
     invariant(JSON.stringify(raw.counts) === JSON.stringify(merged.counts), `${variant}: semantic counts drifted`);
   }
+
+  await page.goto(
+    `http://127.0.0.1:${port}/temple.html?variant=courtyard&shot=1&merged=1&schema=1`,
+    { waitUntil: 'load' },
+  );
+  await page.waitForFunction(() => document.documentElement.dataset.templeReady === 'true', null, { timeout: 45000 });
+  const legacy = await page.evaluate(() => JSON.parse(document.getElementById('app').dataset.templeDiag));
+  const canonical = diagnostics.get('courtyard:merged');
+  invariant(legacy.inputSchemaVersion === 1 && legacy.schemaVersion === 2,
+    `legacy TemplePlan did not cross the v1→v2 input boundary: ${JSON.stringify({
+      input: legacy.inputSchemaVersion, output: legacy.schemaVersion,
+    })}`);
+  invariant(JSON.stringify(legacy.architecture) === JSON.stringify(canonical.architecture),
+    'legacy TemplePlan rendered a different hall architecture after upgrade');
+  invariant(legacy.render.calls === canonical.render.calls
+      && legacy.render.triangles === canonical.render.triangles
+      && legacy.render.programs === canonical.render.programs
+      && legacy.render.materials === canonical.render.materials,
+  `legacy TemplePlan changed the deterministic render budget: ${JSON.stringify(legacy.render)}`);
+  const unsupportedSchema = await page.evaluate(async () => {
+    const { buildTempleCompound, planTempleCompound } = await import('/src/api/temple.js');
+    const plan = planTempleCompound({ variant: 'compact', seed: 122 });
+    try {
+      buildTempleCompound({ ...plan, schemaVersion: 99 });
+      return null;
+    } catch (error) {
+      return { name: error.name, message: error.message };
+    }
+  });
+  invariant(unsupportedSchema?.name === 'RangeError'
+      && unsupportedSchema.message.includes('unsupported TemplePlan schemaVersion 99'),
+  `renderer boundary did not reject a future TemplePlan schema: ${JSON.stringify(unsupportedSchema)}`);
+
   if (captureDir) {
     await mkdir(captureDir, { recursive: true });
     for (const variant of variants) for (const view of ['focus', 'aerial']) {

@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   buildTempleCompound,
   disposeTempleCompound,
+  normalizeTemplePlan,
   planTempleCompound,
   templePlanIssues,
 } from '../src/api/temple.js';
@@ -17,6 +18,7 @@ const shot = query.get('shot') === '1';
 const debug = query.get('debug') === '1';
 const lifecycleProbe = query.get('probe') === '1';
 const merged = query.get('merged') === '1';
+const inputSchemaVersion = query.get('schema') === '1' ? 1 : 2;
 if (shot) document.body.classList.add('shot');
 for (const link of document.querySelectorAll('[data-variant]')) {
   link.classList.toggle('on', link.dataset.variant === variant);
@@ -33,8 +35,20 @@ Math.random = () => {
   return randomState / 0x100000000;
 };
 
-const plan = planTempleCompound({ variant, seed });
-const compound = buildTempleCompound(plan);
+const authoredPlan = planTempleCompound({ variant, seed });
+const inputPlan = JSON.parse(JSON.stringify(authoredPlan));
+if (inputSchemaVersion === 1) {
+  inputPlan.schemaVersion = 1;
+  for (const building of inputPlan.buildings) {
+    for (const field of [
+      'architecturalRank', 'architectureId', 'roofGrammar', 'bracketGrammar',
+      'eaveGrammar', 'massingGrammar', 'eaveFootprint',
+    ]) delete building[field];
+    building.footprint = { width: 1, depth: 1 };
+  }
+}
+const plan = normalizeTemplePlan(inputPlan);
+const compound = buildTempleCompound(inputPlan);
 compound.updateMatrixWorld(true);
 const hallBounds = plan.buildings.map((spec) => {
   const hall = compound.getObjectByName(`temple-${spec.id}`);
@@ -176,6 +190,8 @@ renderRoot.traverse((object) => {
 window.__TEMPLE_DIAG = {
   variant,
   merged,
+  inputSchemaVersion,
+  schemaVersion: compound.userData.templeSchemaVersion,
   size: { width: plan.width, depth: plan.depth },
   renderedBounds: { x: +size.x.toFixed(3), y: +size.y.toFixed(3), z: +size.z.toFixed(3) },
   counts: {

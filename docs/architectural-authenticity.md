@@ -70,7 +70,7 @@
   분류된다.
 
 **구현 해석**: `src/temple/role-hierarchy.js`가 주불전 4, 부불전 3, 강당·누각 2, 요사·선방 1의 상대
-위계와 seed-stable 지붕 repertoire를 순수 데이터로 만든다. 각 plan building은 지붕·공포·처마·기둥/기단
+위계와 송림사 맞배·다포/무량수전 팔작·주심포의 seed-stable 지붕 repertoire를 순수 데이터로 만든다. 각 plan building은 지붕·공포·처마·기둥/기단
 grammar와 실제 처마 polygon을 완전히 기록하고 renderer·경계·충돌·남측 일조가 이를 함께 쓴다. 렌더러는
 역할명을 보고 두 번째 문법을 만들지 않는다.
 
@@ -127,5 +127,6 @@ grammar와 실제 처마 polygon을 완전히 기록하고 renderer·경계·충
 - 국립문화유산연구원, 「가람배치」: https://portal.nrich.go.kr/kor/archeologyUsrView.do?idx=10011&menuIdx=792
 - 한국학중앙연구원 한국민족문화대백과사전, 「절」·「보제루」: https://encykorea.aks.ac.kr/Article/E0049782 · https://encykorea.aks.ac.kr/Article/E0023528
 - 국가유산청 국가유산포털, 「칠곡 송림사 대웅전」·「영주 부석사 안양루」·「영주 부석사 범종각」: https://www.heritage.go.kr/heri/cul/culGuidePostDetail.do?ccbaCpno=1123721310000&ccgbGbtype=IND&ccgbGbtypeNo=1&pageNo=1_5_0_0 · https://www.heritage.go.kr/heri/cul/culSelectDetail.do?ccbaAsno=0021830000000&ccbaCpno=1123721830000&ccbaCtcd=37&ccbaKdcd=12&pageNo=1_1_1_0 · https://heritage.go.kr/heri/cul/culSelectDetail.do?ccbaCpno=1123721840000
+- 국가유산 디지털 서비스, 「영주 부석사 실측조사보고서(도판)」: https://digital.khs.go.kr/buis/buisDetail.do?bizUid=13898748261677900003&ctptNo=1113700180000&ctptUid=13898859665883200019
 
 모든 URL은 2026-07-23 재확인했다. 기관 공개 웹페이지의 권리는 각 기관에 있으며 이 저장소는 원문 이미지·도해를 복제하지 않고 사실 확인과 구현 해석을 요약한다. 재배포나 별도 자산화 전에는 각 페이지의 최신 이용조건을 다시 확인한다.

@@ -143,13 +143,14 @@
   - 국가유산포털 「칠곡 송림사 대웅전」: https://www.heritage.go.kr/heri/cul/culGuidePostDetail.do?ccbaCpno=1123721310000&ccgbGbtype=IND&ccgbGbtypeNo=1&pageNo=1_5_0_0
   - 국가유산포털 「영주 부석사 안양루」: https://www.heritage.go.kr/heri/cul/culSelectDetail.do?ccbaAsno=0021830000000&ccbaCpno=1123721830000&ccbaCtcd=37&ccbaKdcd=12&pageNo=1_1_1_0
   - 국가유산포털 「영주 부석사 범종각」: https://heritage.go.kr/heri/cul/culSelectDetail.do?ccbaCpno=1123721840000
+  - 국가유산 디지털 서비스 「영주 부석사 실측조사보고서(도판)」: https://digital.khs.go.kr/buis/buisDetail.do?bizUid=13898748261677900003&ctptNo=1113700180000&ctptUid=13898859665883200019
 - 확인한 사실: 가람은 금당·문·강당·경루·종루·승방의 규모·거리·위치가 구분되는 공간 체계이고, 불전은
   본존을 봉안하는 중심 건물, 강당은 설법·법요, 승방/주고는 수행·거주·살림, 산문·종각은 진입과 의식
   법구의 별도 역할을 맡는다. 보제루는 중심 불전 앞에서 강당 기능과 진입 기능을 겸할 수 있다. 실제 중심
   불전도 송림사 대웅전의 5×3칸 다포 겹처마 맞배와 부석사 무량수전의 주심포 팔작처럼 하나의 지붕/공포
   형식으로 고정되지 않는다.
 - 적용: `src/temple/role-hierarchy.js`의 주불전 4 → 부불전 3 → 강당/누각 2 → 요사/선방 1 상대 위계,
-  seed-stable 맞배/주심포·팔작/다포 repertoire, 낮아지는 기둥·기단·처마·공포 밀도와 같은 plan-owned
+  seed-stable 송림사 맞배/다포·부석사 무량수전 팔작/주심포 repertoire, 낮아지는 기둥·기단·처마·공포 밀도와 같은 plan-owned
   `roofGrammar`/`bracketGrammar`/`eaveGrammar`로 번역한다. 실제 처마 polygon이 경계·충돌·남측 일조와
   renderer의 공통 입력이다.
 - 한계: 기관 자료는 역할 구분과 사례별 형식을 확인하지만, 전국 사찰의 보편 높이·처마 깊이·공포 밀도
