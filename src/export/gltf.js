@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { abortError, throwIfAborted } from '../runtime/abort.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // glTF(.glb) 익스포트 (#104)
@@ -107,12 +108,13 @@ function cleanMaterial(material, cache) {
 
 // ── 인스턴스 베이크: InstancedMesh → 지오/재질 공유 개별 Mesh N개(instanceColor 소실).
 //    지오·재질을 공유하므로 GLB 는 지오를 1회만 저장(노드 N개). 예산 가드 이후에만 호출.
-function pristineGeometry(node) {
+function pristineGeometry(node, ownedGeometries) {
   const snapshot = node[EXPORT_POSITION_SNAPSHOT];
   if (typeof snapshot !== 'function') return node.geometry;
   const positions = snapshot();
   if (!positions) return node.geometry;
   const geometry = node.geometry.clone();
+  ownedGeometries?.add(geometry);
   const position = geometry.getAttribute('position');
   if (!position || position.array.length !== positions.length) {
     throw new Error(`GLB export position snapshot mismatch: ${node.name || '(unnamed)'}`);
@@ -126,12 +128,12 @@ function pristineInstanceMatrix(node) {
   return node[EXPORT_INSTANCE_MATRIX] || node.instanceMatrix;
 }
 
-function bakeInstanced(node, matCache) {
+function bakeInstanced(node, matCache, ownedGeometries) {
   const g = new THREE.Group();
   const mat = cleanMaterial(node.material, matCache);
   const m = new THREE.Matrix4();
   const matrices = pristineInstanceMatrix(node);
-  const geometry = pristineGeometry(node);
+  const geometry = pristineGeometry(node, ownedGeometries);
   for (let i = 0; i < node.count; i++) {
     m.fromArray(matrices.array, i * 16);
     const mesh = new THREE.Mesh(geometry, mat);
@@ -143,21 +145,23 @@ function bakeInstanced(node, matCache) {
 
 // 동기/청크 정화가 같은 스냅샷 규칙을 공유한다. 특히 instance attributes는 항상 clone해,
 // 비동기 GLTFExporter가 도는 동안 focus 전환이 원본 버퍼를 바꿔도 출력이 흔들리지 않게 한다.
-function sanitizeNode(node, opts, matCache) {
+function sanitizeNode(node, opts, matCache, ownedGeometries) {
   let out;
   if (node.isInstancedMesh) {
     if (opts.instancing === 'bake') {
-      out = bakeInstanced(node, matCache);
+      out = bakeInstanced(node, matCache, ownedGeometries);
     } else {
       const im = new THREE.InstancedMesh(
-        pristineGeometry(node), cleanMaterial(node.material, matCache), node.count,
+        pristineGeometry(node, ownedGeometries), cleanMaterial(node.material, matCache), node.count,
       );
       im.instanceMatrix = pristineInstanceMatrix(node).clone();
       if (node.instanceColor) im.instanceColor = node.instanceColor.clone();
       out = im;
     }
   } else if (node.isMesh) {
-    out = new THREE.Mesh(pristineGeometry(node), cleanMaterial(node.material, matCache));
+    out = new THREE.Mesh(
+      pristineGeometry(node, ownedGeometries), cleanMaterial(node.material, matCache),
+    );
   } else {
     out = new THREE.Group();
   }
@@ -172,15 +176,15 @@ function sanitizeNode(node, opts, matCache) {
 // ── 순회 재구성: 필터를 통과한 노드만 새 경량 트리로 복제(지오는 참조 공유).
 //    clone(true) 를 피하는 이유: Object3D.copy 가 userData 를 JSON 왕복 복제하는데
 //    building.userData.materials/layout 에 THREE 객체가 있어 무겁고 위험하다.
-function sanitize(node, opts, matCache) {
+function sanitize(node, opts, matCache, ownedGeometries) {
   const verdict = classify(node, opts);
   if (verdict === 'skip') return null;
 
-  const out = sanitizeNode(node, opts, matCache);
+  const out = sanitizeNode(node, opts, matCache, ownedGeometries);
   // userData 는 의도적으로 비운 채 유지(extras 누출 방지).
 
   for (const child of node.children) {
-    const c = sanitize(child, opts, matCache);
+    const c = sanitize(child, opts, matCache, ownedGeometries);
     if (c) out.add(c);
   }
 
@@ -239,21 +243,39 @@ export function buildExportScene(target, opts = {}) {
 //    마을 익스포트 ~0.6s 블록). sanitize 를 노드 예산 단위로 끊어 requestAnimationFrame 사이사이
 //    양보하면 rAF·입력·베일 애니가 살아있는 채로 트리가 재구성된다. 출력 트리·순서·재질 dedup 은
 //    동기 sanitize 와 완전 동일(같은 재귀 순서, 같은 matCache) — GLB 바이트 동일성 보존.
-function nextFrame() {
-  if (typeof requestAnimationFrame === 'function') return new Promise((r) => requestAnimationFrame(() => r()));
-  return new Promise((r) => setTimeout(r, 0));
+function nextFrame(signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(abortError('GLB export aborted')); return; }
+    const useAnimationFrame = typeof requestAnimationFrame === 'function';
+    let handle;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      if (useAnimationFrame) cancelAnimationFrame(handle);
+      else clearTimeout(handle);
+      cleanup();
+      reject(abortError('GLB export aborted'));
+    };
+    const done = () => { cleanup(); resolve(); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    handle = useAnimationFrame ? requestAnimationFrame(done) : setTimeout(done, 0);
+  });
 }
-async function sanitizeChunked(node, opts, matCache, budget) {
+async function sanitizeChunked(node, opts, matCache, ownedGeometries, budget, signal) {
+  throwIfAborted(signal, 'GLB export aborted');
   const verdict = classify(node, opts);
   if (verdict === 'skip') return null;
 
-  const out = sanitizeNode(node, opts, matCache);
+  const out = sanitizeNode(node, opts, matCache, ownedGeometries);
 
   // 노드 예산 소진 시 다음 프레임으로 양보(자식 순회 전에 검사해 깊은 서브트리도 균등 분할).
-  if (--budget.left <= 0) { budget.left = budget.size; await nextFrame(); }
+  if (--budget.left <= 0) {
+    budget.left = budget.size;
+    await nextFrame(signal);
+    throwIfAborted(signal, 'GLB export aborted');
+  }
 
   for (const child of node.children) {
-    const c = await sanitizeChunked(child, opts, matCache, budget);
+    const c = await sanitizeChunked(child, opts, matCache, ownedGeometries, budget, signal);
     if (c) out.add(c);
   }
 
@@ -267,10 +289,12 @@ export async function exportGLB(target, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   if (o.pretty === false) o.includeScenery = false;
   if (!target) throw new Error('exportGLB: target 이 없습니다');
+  throwIfAborted(o.signal, 'GLB export aborted');
 
   target.updateMatrixWorld(true);
 
   const stats = analyzeExport(target, o);
+  throwIfAborted(o.signal, 'GLB export aborted');
   if (stats.triangles > o.maxTriangles) {
     return {
       overBudget: true,
@@ -293,18 +317,32 @@ export async function exportGLB(target, opts = {}) {
   //   순서·재질 dedup 은 동기 sanitize 와 동일 → GLB 바이트 불변. (익스포트 총시간의 대부분은
   //   GLTFExporter.parseAsync 의 동기 이미지 임베딩·버퍼 패킹으로, 그건 애드온 내부라 여기서 청킹 불가.)
   const matCache = new Map();
-  const root = await sanitizeChunked(target, o, matCache, { left: o.chunkNodes || 500, size: o.chunkNodes || 500 });
-  if (!root) throw new Error('exportGLB: 익스포트할 지오가 없습니다(전부 필터됨)');
+  const ownedGeometries = new Set();
+  try {
+    const budgetSize = Math.max(1, o.chunkNodes || 500);
+    const root = await sanitizeChunked(
+      target, o, matCache, ownedGeometries,
+      { left: budgetSize, size: budgetSize }, o.signal,
+    );
+    throwIfAborted(o.signal, 'GLB export aborted');
+    if (!root) throw new Error('exportGLB: 익스포트할 지오가 없습니다(전부 필터됨)');
 
-  const exporter = new GLTFExporter();
-  const result = await exporter.parseAsync(root, {
-    binary: o.binary,
-    onlyVisible: true,       // 남은 숨은 노드(있다면) 제외.
-    trs: false,
-    includeCustomExtensions: false,
-    maxTextureSize: o.maxTextureSize || Infinity,
-  });
-  return result;             // binary:true → ArrayBuffer, false → glTF JSON 객체.
+    const exporter = new GLTFExporter();
+    const result = await exporter.parseAsync(root, {
+      binary: o.binary,
+      onlyVisible: true,       // 남은 숨은 노드(있다면) 제외.
+      trs: false,
+      includeCustomExtensions: false,
+      maxTextureSize: o.maxTextureSize || Infinity,
+    });
+    throwIfAborted(o.signal, 'GLB export aborted');
+    return result;             // binary:true → ArrayBuffer, false → glTF JSON 객체.
+  } finally {
+    // cleanMaterial/pristineGeometry가 만든 export 전용 GPU identity만 회수한다. map/texture와
+    // 일반 geometry는 원본 씬과 공유하므로 절대 dispose하지 않는다.
+    for (const material of matCache.values()) material.dispose();
+    for (const geometry of ownedGeometries) geometry.dispose();
+  }
 }
 
 // ── 파일명 규약: cheoma-<kind>[-<변형>].glb ──────────────────────────────────

@@ -1,3 +1,5 @@
+import { abortError } from '../abort.js';
+
 let forestWorker = null; // null=미시도, false=사용 불가, Worker=활성
 let jobSequence = 0;
 const jobs = new Map();
@@ -46,8 +48,12 @@ function getForestWorker() {
 }
 
 // opts+seed → worker crunch 결과. 사용 불가·실패는 reject하며 호출자가 동기 fallback을 선택한다.
-export function crunchForestInWorker(opts, seed) {
+export function crunchForestInWorker(opts, seed, { signal } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError('Village forest generation aborted'));
+      return;
+    }
     const worker = getForestWorker();
     if (!worker) {
       reject(new Error('no-worker'));
@@ -55,14 +61,23 @@ export function crunchForestInWorker(opts, seed) {
     }
 
     const id = ++jobSequence;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      if (!jobs.delete(id)) return;
+      cleanup();
+      reject(abortError('Village forest generation aborted'));
+    };
     jobs.set(id, (data) => {
+      cleanup();
       if (data?.ok) resolve(data.crunch);
       else reject(new Error(data?.error || 'worker-fail'));
     });
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
       worker.postMessage({ opts, seed, id });
     } catch (error) {
       jobs.delete(id);
+      cleanup();
       reject(error);
     }
   });

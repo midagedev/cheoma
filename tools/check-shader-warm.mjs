@@ -36,4 +36,15 @@ invariant(await compileSubtreeAsync(failedRenderer, root, camera, scene) === roo
 invariant(await compileSubtreeAsync(null, root, camera, scene) === root,
   'missing renderer did not remain a no-op');
 
-console.log('SHADER WARM CONTRACT: PASS (released materials + live polling + failure fallback)');
+let abortPolls = 0;
+const abortController = new AbortController();
+const pending = compileSubtreeAsync({
+  compile: () => new Set([live]),
+  properties: { get: () => ({ currentProgram: { isReady: () => { abortPolls++; return false; } } }) },
+}, root, camera, scene, { signal: abortController.signal });
+abortController.abort();
+invariant(await pending === root, 'aborted warm did not resolve to the original subtree');
+await new Promise((resolve) => setTimeout(resolve, 30));
+invariant(abortPolls === 0, `aborted warm kept polling (${abortPolls})`);
+
+console.log('SHADER WARM CONTRACT: PASS (released materials + live polling + abort + failure fallback)');

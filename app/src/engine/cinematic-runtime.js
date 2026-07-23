@@ -56,9 +56,18 @@ export function createCinematicRuntime({
     desiredLook: camera.position.clone(),
     smoothedLook: camera.position.clone(),
   };
+  let disposed = false;
+  let pendingStart = null;
+
+  function cancelPendingStart() {
+    if (pendingStart == null) return;
+    clearTimeout(pendingStart);
+    pendingStart = null;
+  }
 
   const available = () => !!(
-    village.active
+    !disposed
+    && village.active
     && village.handle
     && !village.wave
     && !village.heroAsm
@@ -85,10 +94,13 @@ export function createCinematicRuntime({
   }
 
   function start(mode = 'drone', opts = {}) {
+    if (disposed) return false;
     if (!available()) return false;
+    cancelPendingStart();
     if (village.selected) {
       returnFromFocus();
-      setTimeout(() => {
+      pendingStart = setTimeout(() => {
+        pendingStart = null;
         if (available() && !village.selected) start(mode, opts);
       }, focusOutDuration * 1000 + 140);
       return true;
@@ -144,6 +156,7 @@ export function createCinematicRuntime({
   }
 
   function update(dt) {
+    if (disposed) return;
     let lookAt;
     if (state.mode === 'walk') {
       const { pos, dir } = state.walker.update(dt, state.input);
@@ -208,6 +221,8 @@ export function createCinematicRuntime({
   }
 
   function stop() {
+    cancelPendingStart();
+    if (disposed) return;
     if (!state.active) return;
     state.active = false;
     const wasWalk = state.mode === 'walk';
@@ -278,6 +293,9 @@ export function createCinematicRuntime({
       turnarounds: state.walker.turnaroundCount(),
     } : null),
     dispose() {
+      if (disposed) return;
+      disposed = true;
+      cancelPendingStart();
       state.active = false;
       state.walker = null;
       state.chain = [];

@@ -101,6 +101,9 @@ app/src/                       Svelte UI
 - `buildBuilding()`의 기존 반환 구조. 새 `disposeBuilding(root)`는 해당 root의 소유 자원만 정리하고 외부 `P.mats`와 모듈 수명 공유 소품 재질은 건드리지 않는다.
 - 기단·대지·창호처럼 맞닿는 보이는 면은 `polygonOffset`으로 덮지 않는다. `src/core/surface-clearance.js`의 월드 단위 간격을 공유하고, 가장 낮은 기초만 상단 높이 불변으로 대지 아래에 묻힌다.
 - `VillageHandle.dispose()`는 내부 공유 identity를 정확히 한 번 해제하며, 종료 뒤 public method는 씬이나 자원을 다시 만들지 않는다.
+- 앱 engine은 하나의 `AbortController`와 예약 작업 소유자(timeout/interval/rAF/idle)를 갖는다. `dispose()`는 자원 해제 전에 먼저 둘을 닫아 async village·shader warm·GLB export가 늦게 cache/scene/renderer를 다시 잡지 못하게 한다. 종료 후 controller/village/hero/cine API는 명령 no-op·질의 중립값·async `AbortError`로 fail-closed하며 이중 종료는 멱등이다.
+- `createVillageAsync(..., { signal })`는 기본 rAF/타이머와 worker job을 분리 취소하고, 완성 전 partial root의 소유 자원을 회수한다. 공유 Forest Worker는 다른 생성을 위해 유지하고 취소된 job 매핑만 떼어낸다.
+- `exportGLB(..., { signal })`는 청킹 순회 전·후와 exporter 전·후에 취소를 확인한다. export가 새로 만든 material·position-snapshot geometry만 `finally`에서 해제하고, 원본 geometry·texture는 절대 해제하지 않는다.
 - 같은 seed의 RNG 소비 순서와 sync/worker/fallback 결과.
 - `populateVillageSteps`의 label과 순서.
 - object `name`, `userData`, material role·identity, pick proxy framing.
