@@ -6,7 +6,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as G from '../src/core/math/geom2.js';
 import { planVillage } from '../src/api/village-plan.js';
+import { makeRng } from '../src/rng.js';
 import { parcelRoofPolygons } from '../src/village/house-footprint.js';
+import { villageWallLayout } from '../src/village/wall-contract.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const requireApp = createRequire(join(ROOT, 'app', 'package.json'));
@@ -160,7 +162,70 @@ function verifyRenderedGate(parcel, style, suffix = '') {
 for (const style of STYLES) verifyRenderedGate(regular, style);
 verifyRenderedGate(hero, 'tile', ':hero');
 
+const slopeSite = {
+  R: 64,
+  terrainR: 64,
+  heightAt(x, z) { return x * 0.09 + z * 0.015; },
+};
+const slopeParcel = {
+  id: 'slope-render-fixture',
+  kind: 'giwa',
+  seed: 19,
+  center: { x: 0, z: 0 },
+  frontDir: { x: 0, z: 1 },
+  shape: {
+    pts: [
+      { x: 8, z: 6 }, { x: -8, z: 6 },
+      { x: -8, z: -6 }, { x: 8, z: -6 },
+    ],
+    roles: ['front', 'left', 'back', 'right'],
+  },
+  plotW: 16,
+  plotD: 12,
+  baseY: 0,
+  access: { gateEdge: 0, gateT: 0.5 },
+};
+
+for (const style of ['tile', 'stone', 'mud']) {
+  const opts = {
+    style,
+    kind: slopeParcel.kind,
+    seed: slopeParcel.seed,
+    char01: 0.5,
+    wallHeightK: 1,
+    plotW: slopeParcel.plotW,
+    plotD: slopeParcel.plotD,
+    gateEdge: slopeParcel.access.gateEdge,
+    gateT: slopeParcel.access.gateT,
+    parcel: slopeParcel,
+    site: slopeSite,
+    baseY: slopeParcel.baseY,
+  };
+  const layout = villageWallLayout(
+    slopeParcel.shape,
+    opts,
+    makeRng((slopeParcel.seed ^ 0x51de) >>> 0),
+  );
+  const wall = buildVillageWall(slopeParcel.shape, wallMats, opts);
+  let childIndex = 0;
+  for (const edge of layout.edgeLayouts) {
+    for (const run of edge.runs) {
+      const child = wall.children[childIndex++];
+      invariant(Math.abs(child.position.y - (run.bottomOffset || 0)) <= EPSILON,
+        `${style}: rendered step bottom drifted on edge ${edge.index}`);
+      const body = child.children[style === 'stone' ? 0 : 1];
+      body.geometry.computeBoundingBox();
+      const localTop = body.position.y + body.geometry.boundingBox.max.y;
+      const expectedTop = edge.height + (run.topOffset || 0) - (run.bottomOffset || 0) - 0.18;
+      invariant(Math.abs(localTop - expectedTop) <= 1e-6,
+        `${style}: rendered step top drifted on edge ${edge.index}`);
+    }
+    if (edge.gate) childIndex++;
+  }
+  verifyFiniteGeometry(wall, `${style}:slope-render`);
+}
+
 console.log(
-  `WALL GATE CONTRACT: PASS (${STYLES.length} styles, hero ${hero.access.gateRole} gate, `
+  `WALL GATE CONTRACT: PASS (${STYLES.length} styles, 3 stepped solids, hero ${hero.access.gateRole} gate, `
   + `${objects} objects, ${vertices} vertices, ${(performance.now() - startedAt).toFixed(0)}ms)`,
 );

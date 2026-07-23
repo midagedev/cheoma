@@ -1,5 +1,26 @@
 import * as G from '../core/math/geom2.js';
-import { rectangularParcelShape } from './parcel-contract.js';
+import {
+  parcelWorldPoint,
+  rectangularParcelShape,
+} from './parcel-contract.js';
+import {
+  terrainMeshSegmentRange,
+} from './terrain-grid.js';
+
+// Korean masonry walls descend a slope as level courses rather than pitched
+// spans. These bounds keep that rhythm readable without turning one parcel edge
+// into an unbounded geometry multiplier.
+export const VILLAGE_WALL_STEP = Object.freeze({
+  rise: 0.36,
+  triggerRelief: 0.24,
+  minRun: 1.2,
+  gateLanding: 0.8,
+  maxRunsPerEdge: 6,
+  maxDrop: 1.44,
+  maxRise: 1.44,
+  terrainSink: 0.06,
+  minVisible: 0.82,
+});
 
 // Renderer-free geometry decisions shared by the village wall builder and
 // pointer occlusion. Keeping the gate split and height RNG consumption here
@@ -79,6 +100,190 @@ export function splitVillageWallGate(a, b, requestedT, requestedGap) {
   };
 }
 
+const samePoint = (a, b) => Math.abs(a.x - b.x) <= 1e-8 && Math.abs(a.z - b.z) <= 1e-8;
+const quantize = (value, step) => Math.round(value / step) * step;
+const quantizeDown = (value, step) => Math.floor(value / step) * step;
+const quantizeUp = (value, step) => Math.ceil(value / step) * step;
+
+function steppedWallContext(opts) {
+  const parcel = opts.parcel;
+  const site = opts.site;
+  const terrainR = site?.terrainR || site?.R;
+  const baseY = Number.isFinite(opts.baseY) ? opts.baseY
+    : Number.isFinite(parcel?.baseY) ? parcel.baseY
+      : Number.isFinite(parcel?.padY) ? parcel.padY : null;
+  if (!parcel?.center || !parcel?.frontDir || !Number.isFinite(terrainR)
+    || typeof site?.heightAt !== 'function' || !Number.isFinite(baseY)) return null;
+  return { parcel, site, baseY };
+}
+
+// A terrain segment is piecewise linear. Its extrema occur at the grid axes or
+// the `fu + fv = 1` triangle diagonal, so sampling those exact crossings avoids
+// returning to the analytic height approximation that #112 replaced.
+function sampleTerrainRange(context, a, b) {
+  return terrainMeshSegmentRange(
+    context.site,
+    parcelWorldPoint(context.parcel, a),
+    parcelWorldPoint(context.parcel, b),
+  );
+}
+
+function stepOffsets(context, a, b, height) {
+  const range = sampleTerrainRange(context, a, b);
+  const { rise, maxDrop, maxRise, terrainSink, minVisible } = VILLAGE_WALL_STEP;
+  const mean = (range.min + range.max) * 0.5;
+  let topOffset = quantize(mean - context.baseY, rise);
+  const requiredVisible = range.max - context.baseY - height + minVisible;
+  topOffset = Math.max(topOffset, quantizeUp(requiredVisible, rise));
+  topOffset = Math.max(-maxDrop, Math.min(maxRise, topOffset));
+  let bottomOffset = Math.min(0, quantizeDown(range.min - context.baseY - terrainSink, rise));
+  bottomOffset = Math.max(-maxDrop, bottomOffset);
+  return { bottomOffset, topOffset };
+}
+
+function appendCoalescedRun(runs, run) {
+  const previous = runs[runs.length - 1];
+  if (previous
+    && samePoint(previous.b, run.a)
+    && previous.bottomOffset === run.bottomOffset
+    && previous.topOffset === run.topOffset) {
+    previous.b = run.b;
+    return;
+  }
+  runs.push(run);
+}
+
+function planSteppedSpan(context, a, b, height, grow, budget, pinnedSide = null) {
+  const length = G.dist(a, b);
+  if (length < 0.05) return [{ a, b, grow }];
+  const { minRun, gateLanding } = VILLAGE_WALL_STEP;
+  if (budget <= 1 || (pinnedSide && length < gateLanding + minRun)) {
+    return pinnedSide
+      ? [{ a, b, grow, bottomOffset: 0, topOffset: 0 }]
+      : [{ a, b, grow }];
+  }
+  const landing = pinnedSide && length >= gateLanding + minRun
+    ? Math.min(gateLanding, length * 0.35)
+    : 0;
+  const freeLength = length - landing;
+  const freeBudget = Math.max(1, budget - (landing > 0 ? 1 : 0));
+  const cells = Math.max(1, Math.min(freeBudget, Math.floor(freeLength / minRun)));
+  const runs = [];
+  const pointAt = (distance) => G.lerp(a, b, distance / length);
+  if (pinnedSide === 'start' && landing > 0) {
+    appendCoalescedRun(runs, {
+      a, b: pointAt(landing), grow,
+      bottomOffset: 0, topOffset: 0,
+    });
+  }
+  const startDistance = pinnedSide === 'start' ? landing : 0;
+  const endDistance = pinnedSide === 'end' ? length - landing : length;
+  for (let index = 0; index < cells; index++) {
+    const start = startDistance + (endDistance - startDistance) * index / cells;
+    const end = startDistance + (endDistance - startDistance) * (index + 1) / cells;
+    const runA = pointAt(start), runB = pointAt(end);
+    appendCoalescedRun(runs, {
+      a: runA,
+      b: runB,
+      grow,
+      ...stepOffsets(context, runA, runB, height),
+    });
+  }
+  if (pinnedSide === 'end' && landing > 0) {
+    appendCoalescedRun(runs, {
+      a: pointAt(length - landing), b, grow,
+      bottomOffset: 0, topOffset: 0,
+    });
+  }
+  const clampFrom = (start, end, direction) => {
+    let previousTop = runs[start].topOffset || 0;
+    let previousBottom = runs[start].bottomOffset || 0;
+    for (let index = start + direction; index !== end; index += direction) {
+      const run = runs[index];
+      run.topOffset = Math.max(
+        previousTop - VILLAGE_WALL_STEP.rise,
+        Math.min(previousTop + VILLAGE_WALL_STEP.rise, run.topOffset || 0),
+      );
+      run.bottomOffset = Math.max(
+        previousBottom - VILLAGE_WALL_STEP.rise,
+        Math.min(previousBottom + VILLAGE_WALL_STEP.rise, run.bottomOffset || 0),
+      );
+      previousTop = run.topOffset;
+      previousBottom = run.bottomOffset;
+    }
+  };
+  if (runs.length > 1) {
+    if (pinnedSide === 'end' && landing > 0) clampFrom(runs.length - 1, -1, -1);
+    else if (pinnedSide === 'start' && landing > 0) clampFrom(0, runs.length, 1);
+    else {
+      const rise = VILLAGE_WALL_STEP.rise;
+      for (let pass = 0; pass < runs.length; pass++) {
+        for (let index = 1; index < runs.length; index++) {
+          const left = runs[index - 1], right = runs[index];
+          if (left.topOffset < right.topOffset - rise) left.topOffset = right.topOffset - rise;
+          if (right.topOffset < left.topOffset - rise) right.topOffset = left.topOffset - rise;
+          if (left.bottomOffset > right.bottomOffset + rise) left.bottomOffset = right.bottomOffset + rise;
+          if (right.bottomOffset > left.bottomOffset + rise) right.bottomOffset = left.bottomOffset + rise;
+        }
+      }
+    }
+  }
+  const coalesced = [];
+  for (const run of runs) appendCoalescedRun(coalesced, run);
+  if (coalesced.every((run) => (run.bottomOffset || 0) === 0 && (run.topOffset || 0) === 0)) {
+    return [{ a, b, grow }];
+  }
+  return coalesced;
+}
+
+function edgeStepBudgets(spans) {
+  if (spans.length <= 1) return [VILLAGE_WALL_STEP.maxRunsPerEdge];
+  const budgets = new Array(spans.length).fill(1);
+  let remaining = VILLAGE_WALL_STEP.maxRunsPerEdge - spans.length;
+  const lengths = spans.map((span) => G.dist(span.a, span.b));
+  while (remaining-- > 0) {
+    let best = 0;
+    for (let index = 1; index < spans.length; index++) {
+      if (lengths[index] / budgets[index] > lengths[best] / budgets[best]) best = index;
+    }
+    budgets[best]++;
+  }
+  return budgets;
+}
+
+function steppedEdgeRuns(context, spans, height, grow) {
+  if (!context || !spans.length) return spans.map(({ a, b }) => ({ a, b, grow }));
+  const fullRange = sampleTerrainRange(context, spans[0].edgeA, spans[0].edgeB);
+  if (fullRange.max - fullRange.min < VILLAGE_WALL_STEP.triggerRelief) {
+    return spans.map(({ a, b }) => ({ a, b, grow }));
+  }
+  const budgets = edgeStepBudgets(spans);
+  return spans.flatMap((span, index) => planSteppedSpan(
+    context, span.a, span.b, height, grow, budgets[index], span.pinnedSide,
+  ));
+}
+
+function endpointStepOffsets(edgeLayouts, point) {
+  let found = false;
+  let bottomOffset = 0, topOffset = 0;
+  for (const edge of edgeLayouts) {
+    for (const run of edge.runs) {
+      if (!samePoint(run.a, point) && !samePoint(run.b, point)) continue;
+      const bottom = run.bottomOffset || 0;
+      const top = run.topOffset || 0;
+      if (!found) {
+        bottomOffset = bottom;
+        topOffset = top;
+        found = true;
+      } else {
+        bottomOffset = Math.min(bottomOffset, bottom);
+        topOffset = Math.max(topOffset, top);
+      }
+    }
+  }
+  return { bottomOffset, topOffset };
+}
+
 // Complete structural wall layout. Cosmetic stone/thatch jitter remains in the
 // renderer, while every solid run, skipped shared edge, height multiplier, and
 // gate opening is resolved here for renderer/interaction parity.
@@ -110,6 +315,9 @@ export function villageWallLayout(shape, opts = {}, rng = Math.random) {
   }, rng);
   const thickness = style === 'tile' ? 0.42 : 0.5;
   const solid = style !== 'brush' && style !== 'hedge';
+  const stepContext = style === 'tile' || style === 'stone' || style === 'mud'
+    ? steppedWallContext(opts)
+    : null;
   const grow = solid ? 0.4 : 0;
   const edgeLayouts = [];
   let gate = null;
@@ -122,14 +330,21 @@ export function villageWallLayout(shape, opts = {}, rng = Math.random) {
     const height = baseHeight * heightK;
     const a = pts[index], b = pts[(index + 1) % count];
     if (index !== gateEdge) {
-      edgeLayouts.push({ index, height, runs: [{ a, b, grow }], gate: null });
+      const runs = steppedEdgeRuns(stepContext, [{
+        a, b, edgeA: a, edgeB: b, pinnedSide: null,
+      }], height, grow);
+      edgeLayouts.push({ index, height, runs, gate: null });
       continue;
     }
     const split = splitVillageWallGate(a, b, gateT, gap);
-    const runs = [];
+    const spans = [];
     if (split) {
-      if (G.dist(a, split.left) > 0.05) runs.push({ a, b: split.left, grow });
-      if (G.dist(split.right, b) > 0.05) runs.push({ a: split.right, b, grow });
+      if (G.dist(a, split.left) > 0.05) spans.push({
+        a, b: split.left, edgeA: a, edgeB: b, pinnedSide: 'end',
+      });
+      if (G.dist(split.right, b) > 0.05) spans.push({
+        a: split.right, b, edgeA: a, edgeB: b, pinnedSide: 'start',
+      });
       gate = {
         edge: index,
         centerT: split.centerT,
@@ -137,6 +352,7 @@ export function villageWallLayout(shape, opts = {}, rng = Math.random) {
         height,
       };
     }
+    const runs = steppedEdgeRuns(stepContext, spans, height, grow);
     edgeLayouts.push({ index, height, runs, gate });
   }
 
@@ -144,7 +360,15 @@ export function villageWallLayout(shape, opts = {}, rng = Math.random) {
   if (style === 'stone' || style === 'mud' || style === 'tile') {
     for (let index = 0; index < count; index++) {
       if (roles[(index - 1 + count) % count] === roles[index]) continue;
-      cornerPosts.push({ point: pts[index], height: baseHeight, thickness });
+      const offsets = endpointStepOffsets(edgeLayouts, pts[index]);
+      const post = {
+        point: pts[index],
+        height: baseHeight + offsets.topOffset - offsets.bottomOffset,
+        thickness,
+      };
+      if (offsets.bottomOffset !== 0) post.bottomOffset = offsets.bottomOffset;
+      if (offsets.topOffset !== 0) post.topOffset = offsets.topOffset;
+      cornerPosts.push(post);
     }
   }
   return {

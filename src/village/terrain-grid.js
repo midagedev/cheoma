@@ -42,6 +42,48 @@ export function terrainMeshHeightAt(site, x, z) {
     : b * (1 - fu) + c * (1 - fv) + d * (fu + fv - 1);
 }
 
+// Exact extrema along a straight world-space segment on the rendered grid.
+// Each triangle is planar, so extrema occur only at the endpoints, grid axes,
+// or the renderer's `fu + fv = 1` diagonal. Consumers that must meet actual
+// terrain geometry (walls, water, bridges) should not approximate this range
+// with site.heightAt or arbitrary uniform samples.
+export function terrainMeshSegmentRange(site, a, b) {
+  const terrainR = site.terrainR || site.R;
+  const size = terrainGridSize(site);
+  const grid = (point) => ({
+    u: (point.x + terrainR) / (2 * terrainR) * size,
+    v: (point.z + terrainR) / (2 * terrainR) * size,
+  });
+  const start = grid(a), end = grid(b);
+  const parameters = [0, 1];
+  const addCrossings = (from, to) => {
+    if (Math.abs(to - from) <= 1e-12) return;
+    const first = Math.ceil(Math.min(from, to));
+    const last = Math.floor(Math.max(from, to));
+    for (let boundary = first; boundary <= last; boundary++) {
+      const t = (boundary - from) / (to - from);
+      if (t > 1e-10 && t < 1 - 1e-10) parameters.push(t);
+    }
+  };
+  addCrossings(start.u, end.u);
+  addCrossings(start.v, end.v);
+  addCrossings(start.u + start.v, end.u + end.v);
+  parameters.sort((left, right) => left - right);
+
+  let min = Infinity, max = -Infinity;
+  let previous = -Infinity;
+  for (const t of parameters) {
+    if (Math.abs(t - previous) <= 1e-10) continue;
+    const x = a.x + (b.x - a.x) * t;
+    const z = a.z + (b.z - a.z) * t;
+    const height = terrainMeshHeightAt(site, x, z);
+    min = Math.min(min, height);
+    max = Math.max(max, height);
+    previous = t;
+  }
+  return { min, max, range: max - min };
+}
+
 // The analytic channel can dip below the renderer's triangulated heightfield
 // between grid samples. Water and bridges share this rendered-surface contract so
 // a valid pure stream never disappears underneath a coarse terrain triangle.

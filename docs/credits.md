@@ -223,12 +223,12 @@
 - URL: https://heritage.unesco.or.kr/한국의-역사마을-하회와-양동/
 - 라이선스: 해설 매체별 (위키 CC BY-SA 등).
 
-### 28. 담장 — 한국민속대백과사전 / 담 — 한국민족문화대백과사전
-- 국립민속박물관(집필 장필구) · 한국학중앙연구원
-- 담 종류(맞담/홑담/외담·사고석담·토담)·계층별 재료 차등·"담 지붕은 몸채 지붕을 따름"·생울/바자울 등 담 아닌 경계.
-- **활용 / Use:** 담 유무·유형 확률 테이블(기와담/돌담/토담/싸리울/생울/개방)과 담 지붕을 몸채 지붕에 일치시키는 규칙 / Wall-type probability table and matching wall coping to the main-building roof (docs/village-walls-parcels.md R-P3/R-P4, src/village/variants.js, walls.js).
-- URL: https://folkency.nfm.go.kr/topic/담장 · https://encykorea.aks.ac.kr/Article/E0013772
-- 라이선스: 해설 매체별.
+### 28. 담장 — 한국민속대백과사전 / 담 — 한국민족문화대백과사전 / 마당 구성의 다양성 — 우리역사넷
+- 국립민속박물관(집필 장필구) · 한국학중앙연구원 · 국사편찬위원회 한국문화사 39권(집필 천득염)
+- 담 종류(맞담/홑담/외담·사고석담·토담)·계층별 재료 차등·"담 지붕은 몸채 지붕을 따름"·생울/바자울 등 담 아닌 경계. 우리역사넷은 한국 담장이 경사면에서 윗면을 기울이지 않고 수평 단을 만들며 내려오는 특성을 설명한다.
+- **활용 / Use:** 담 유무·유형 확률 테이블과 몸채에 맞춘 coping에 더해, 실제 삼각분할 지형 위 솔리드 담을 제한된 수의 수평 단으로 나누고 대문 landing을 평평하게 유지하는 규칙 / Wall-type probabilities, matching coping, and bounded horizontal stepped runs with a level gate landing on rendered terrain (docs/village-walls-parcels.md R-P3/R-P4, src/village/wall-contract.js, walls.js).
+- URL: https://folkency.nfm.go.kr/topic/담장 · https://encykorea.aks.ac.kr/Article/E0013772 · https://contents.history.go.kr/mobile/km/view.do?levelId=km_039_0030_0030_0080
+- 라이선스: 국립민속박물관·한국학중앙연구원은 항목별 이용조건 적용. 국사편찬위원회 자료는 저작권 정책상 권리 보유 범위가 자료마다 다르므로 출처·저자·URL을 표시한 사실 요약과 링크만 사용하고 원문·도판은 재배포하지 않음(2026-07-23 열람); 재사용 전 각 기관의 최신 조건을 다시 확인.
 
 ### 29. 일제강점기 토지조사사업 지적원도(地籍原圖)
 - 조선총독부 토지조사(1910~18) / 국가기록원

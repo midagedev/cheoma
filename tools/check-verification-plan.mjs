@@ -161,6 +161,7 @@ for (const helper of [
   assert.deepEqual(ids([helper]), ['core', 'bokeh-fixture'], `${helper} must run its owning fixture`);
 }
 assert.deepEqual(ids(['tools/shoot-bokeh-scatter-proof.mjs']), ['core', 'bokeh-fixture']);
+assert.deepEqual(ids(['tools/shoot-wall-steps.mjs']), ['core', 'app']);
 assert.deepEqual(ids(['src/village/nightlights.js']), [
   'core', 'app', 'dof-app', 'particle-geometry', 'instance-upload', 'worker', 'lod-wave',
 ]);
@@ -226,6 +227,12 @@ assert.deepEqual(impactedFastChecks(['src/village/wave.js']), [
 ]);
 assert.deepEqual(impactedFastChecks(['src/core/buffer-update-range.js']), [
   './check-architecture.mjs', './check-instance-upload.mjs', './check-wave-contract.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
+  './check-architecture.mjs',
+  './check-door-occlusion-contract.mjs',
+  './check-wall-gate-contract.mjs',
+  './check-wall-step-contract.mjs',
 ]);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [

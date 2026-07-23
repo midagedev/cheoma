@@ -66,6 +66,7 @@
     "check:temple": "node tools/check-temple-contract.mjs",
     "check:temple:browser": "node tools/run-browser-locked.mjs -- node tools/check-temple-browser.mjs",
     "check:wall-gate": "node tools/check-wall-gate-contract.mjs",
+    "check:wall-step": "node tools/check-wall-step-contract.mjs",
     "check:wave": "node tools/check-wave-contract.mjs",
     "check:wave:app": "node tools/run-browser-locked.mjs -- node tools/check-lod-app.mjs --scenario=wave",
     "check:yard": "node tools/check-yard-layout-contract.mjs",
@@ -82,6 +83,7 @@
     "shoot:focus-shadow": "node tools/run-browser-locked.mjs -- node tools/shoot-focus-shadow.mjs",
     "shoot:lod-transition": "node tools/run-browser-locked.mjs -- node tools/shoot-lod-transition.mjs",
     "shoot:threshold-life": "node tools/run-browser-locked.mjs -- node tools/shoot-threshold-life.mjs",
+    "shoot:wall-steps": "node tools/run-browser-locked.mjs -- node tools/shoot-wall-steps.mjs",
     "shoot:wave": "node tools/run-browser-locked.mjs -- node tools/shoot-wave.mjs village",
     "shoot:wave:full": "node tools/run-browser-locked.mjs -- node tools/shoot-wave.mjs hamlet,village,capital,hanyang",
     "wt": "node tools/worktree.mjs"
