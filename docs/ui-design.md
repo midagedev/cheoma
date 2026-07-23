@@ -90,6 +90,22 @@
 ### 성능 전제
 - 마을 뷰 실시간 60fps: 집 프로토타입 서브지오메트리 InstancedMesh 병합(수십 채→수 드로우), 호버 아웃라인은 프록시 1개 대상. capital 75호가 기준선.
 
+## 4.6 최초 안정 장면 조작 안내
+
+첫 방문자는 Hero와 마을 전환이 끝난 첫 안정 프레임에서만 작은 `SceneGuide`를 본다. 안내는 씬 위를 덮는
+투어나 모달이 아니라 한지 카드 한 장이다. 데스크톱은 드래그 궤도·휠 줌·집 선택·`Esc`/둘러보기 복귀를,
+터치는 한 손가락 궤도·두 손가락 줌/팬·집 탭·둘러보기 복귀를 실제 제품 입력과 같은 말로 설명한다.
+
+- 표시 정책은 `app/src/lib/scene-guide.js`의 순수 함수가 소유한다. `unseen + village scene + stable`일 때만
+  보이고 Hero, landing, wave, veil, cinematic, References, toast 중 하나라도 활성화되면 숨는다.
+- 컴포넌트 root는 `pointer-events: none`이다. 최소 `44×44px`인 명시적 닫기 버튼만 입력을 받으며
+  autofocus, focus trap, scrim, timeout, 카메라 이동을 만들지 않는다.
+- App은 `.app-surface` 안에 컴포넌트를 두어 References 모달의 `inert` 경계를 그대로 상속한다. 첫 실제
+  canvas `pointerdown`/`wheel` 또는 닫기에서 정책의 `dismiss()`를 호출하되 원래 이벤트를 취소하거나
+  전파 중단하지 않는다.
+- 방문 기록은 URL/share 상태와 분리된 `cheoma-scene-guide-v1` localStorage 한 항목이다. 읽기 실패는
+  unseen으로 취급하고, 쓰기 실패여도 현재 세션에서는 즉시 사라진다. 로케일 변경은 방문 기록을 초기화하지 않는다.
+
 ## 5. 단계
 
 - **P1 (지금)**: 스캐폴드 + 히어로 + 리롤 + 환경 다이얼 + 사진 찍기 (단일 건물 씬)
