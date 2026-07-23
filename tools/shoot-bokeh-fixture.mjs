@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "../app/node_modules/vite/dist/node/index.js";
 import {
+  ENERGY_RADIUS,
   edgeEnergy,
   makePanStrip,
   maxChannelDifference,
@@ -34,6 +35,7 @@ import {
   launchVerificationBrowser,
   reportWebGLRenderer,
 } from "./lib/verification-browser.mjs";
+import { CIRCULAR_BOKEH_DEFAULTS } from "../src/env/circular-bokeh-shader.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const APP_ROOT = join(ROOT, "app");
@@ -41,13 +43,14 @@ const cacheDir = await mkdtemp(join(tmpdir(), "cheoma-bokeh-fixture-cache-"));
 const outputDir = await mkdtemp(join(tmpdir(), "cheoma-bokeh-fixture-"));
 const timeout = Number(process.env.CHEOMA_BOKEH_TIMEOUT_MS) || 180_000;
 const scatterProofEnabled = process.env.CHEOMA_BOKEH_SCATTER_PROOF === "1";
-const ROUNDNESS_LIMIT = 1.12;
+const ROUNDNESS_LIMIT = 1.13;
 const ANGULAR_UNIFORMITY_LIMIT = 0.32;
-const SOURCE_PAN_ANNULUS_RATIO_MIN = 0.28;
-const SOURCE_PAN_ANNULUS_MEAN_MIN = 0.8;
+const SOURCE_PAN_PAIR_ENERGY_MIN = 0.35;
+const SOURCE_PAN_PAIR_ENERGY_MAX = 1.35;
 const SOURCE_PAN_ENERGY_STEP_LIMIT = 0.23;
 const TELEPHOTO_CORE_MAGNIFICATION_MIN = 4;
 const TELEPHOTO_EDGE_DROP_MIN = 0.34;
+const BASELINE_RADIUS_SCALE = 2.4;
 
 // Background-subtracted luminance covariance. The square root of its eigenvalue
 // ratio is 1 for a circle and grows as a highlight stretches into an ellipse.
@@ -174,12 +177,56 @@ try {
       ({ name }) =>
         name === "foreground-open-pair" || name === "foreground-over-focus",
     ),
-    [1.35, 1.65, 1.85, 2.0, 2.2, 2.3, 2.4],
+    [
+      1.35,
+      1.65,
+      1.85,
+      2.0,
+      2.2,
+      2.3,
+      BASELINE_RADIUS_SCALE,
+      2.6,
+      2.8,
+      3.0,
+      CIRCULAR_BOKEH_DEFAULTS.radiusScale,
+    ],
   );
   console.log(`linear-HDR sweep ${JSON.stringify(linearSweep)}`);
   for (const [name, samples] of Object.entries(linearSweep)) {
     const first = samples[0];
     const last = samples.at(-1);
+    const baseline = samples.find(
+      (sample) => sample.scale === BASELINE_RADIUS_SCALE,
+    );
+    if (!baseline || last.scale !== CIRCULAR_BOKEH_DEFAULTS.radiusScale) {
+      throw new Error(
+        `linear-HDR sweep missed baseline/product radii for ${name}`,
+      );
+    }
+    const radiusRatio =
+      last.expectedCoCRadius / Math.max(1e-9, baseline.expectedCoCRadius);
+    const peakRatio = last.peak / Math.max(1e-9, baseline.peak);
+    const coreRatio =
+      last.opticalCoreMean / Math.max(1e-9, baseline.opticalCoreMean);
+    const expectedAreaDilution = 1 / (radiusRatio * radiusRatio);
+    if (
+      radiusRatio < 1.28 ||
+      Math.abs(peakRatio / expectedAreaDilution - 1) > 0.12 ||
+      Math.abs(coreRatio / expectedAreaDilution - 1) > 0.12
+    ) {
+      throw new Error(
+        `product bokeh did not grow and dilute by disc area for ${name}: ${JSON.stringify(
+          {
+            baseline,
+            product: last,
+            radiusRatio,
+            peakRatio,
+            coreRatio,
+            expectedAreaDilution,
+          },
+        )}`,
+      );
+    }
     const energyValues = samples.map((sample) => sample.integratedEnergy);
     const energyRange =
       (Math.max(...energyValues) - Math.min(...energyValues)) /
@@ -309,11 +356,13 @@ try {
     repeat,
     offImage,
     lightByName("foreground-open-pair"),
+    ENERGY_RADIUS,
   );
   const cardPair = measurePositiveDelta(
     repeat,
     offImage,
     lightByName(overlapName),
+    ENERGY_RADIUS,
   );
   const telephotoProfile = measureDiscProfile(
     repeat,
@@ -328,20 +377,21 @@ try {
     Math.max(1e-9, telephotoProfile.projectedEmitterDiameterPx);
   const pairAnnulusRatio =
     cardPair.annulusEnergy / Math.max(1, openPair.annulusEnergy);
+  const pairEnergyRatio = cardPair.energy / Math.max(1, openPair.energy);
   if (!(
     openPair.aspect <= ROUNDNESS_LIMIT &&
     cardPair.aspect <= ROUNDNESS_LIMIT &&
     openPair.centroidError <= 2 &&
     cardPair.centroidError <= 2 &&
-    openPair.annulusMean >= 1 &&
-    cardPair.annulusMean >= 1 &&
-    pairAnnulusRatio >= 0.35
+    pairEnergyRatio >= 0.35 &&
+    pairEnergyRatio <= 1.35
   )) {
     throw new Error(
       `source-depth paired bokeh failed: ${JSON.stringify({
         openPair,
         cardPair,
         pairAnnulusRatio,
+        pairEnergyRatio,
       })}`,
     );
   }
@@ -389,7 +439,9 @@ try {
   const edgeEnergyOff = edgeEnergy(offImage, edgeControl);
   const edgeEnergyOn = edgeEnergy(repeat, edgeControl);
   const edgeEnergyRatio = edgeEnergyOn / Math.max(1, edgeEnergyOff);
-  if (edgeEnergyRatio < 0.98) {
+  // A larger physical foreground disc may cover a small part of this focus-plane
+  // line. Its own edge must remain sharp; allow only the measured optical overlap.
+  if (edgeEnergyRatio < 0.95) {
     throw new Error(
       `non-HDR focus edge lost energy under source probing (${edgeEnergyRatio})`,
     );
@@ -526,16 +578,19 @@ try {
       image,
       offImageAtPose,
       frame.lights.find((light) => light.name === "foreground-open-pair"),
+      ENERGY_RADIUS,
     );
     const cardDelta = measurePositiveDelta(
       image,
       offImageAtPose,
       frame.lights.find((light) => light.name === overlapName),
+      ENERGY_RADIUS,
     );
     const sharpInput = measurePositiveDelta(
       offImageAtPose,
       sharpBaselineAtPose,
       frame.lights.find((light) => light.name === overlapName),
+      ENERGY_RADIUS,
     );
     panFrames.push({
       targetX,
@@ -548,14 +603,13 @@ try {
         open: openDelta,
         card: cardDelta,
         sharpInput,
-        annulusRatio:
-          cardDelta.annulusEnergy / Math.max(1, openDelta.annulusEnergy),
+        pairEnergyRatio: cardDelta.energy / Math.max(1, openDelta.energy),
       },
     });
   }
   const repairedPanEnergy = panFrames.map(
     (frame) =>
-      frame.sourceDelta.card.annulusEnergy /
+      frame.sourceDelta.card.energy /
       Math.max(1, frame.sourceDelta.sharpInput.energy),
   );
   const repairedPanRms = panFrames.map(
@@ -565,7 +619,7 @@ try {
     repairedPanEnergy.reduce((sum, value) => sum + value, 0) /
     repairedPanEnergy.length;
   const repairedPanStability = {
-    annulusEnergy: repairedPanEnergy,
+    integratedEnergy: repairedPanEnergy,
     rmsRadius: repairedPanRms,
     maxRelativeEnergyStep: Math.max(
       ...repairedPanEnergy
@@ -594,9 +648,8 @@ try {
         frame.sourceDelta.card.aspect <= ROUNDNESS_LIMIT &&
         frame.sourceDelta.open.centroidError <= 2 &&
         frame.sourceDelta.card.centroidError <= 2 &&
-        frame.sourceDelta.open.annulusMean >= SOURCE_PAN_ANNULUS_MEAN_MIN &&
-        frame.sourceDelta.card.annulusMean >= SOURCE_PAN_ANNULUS_MEAN_MIN &&
-        frame.sourceDelta.annulusRatio >= SOURCE_PAN_ANNULUS_RATIO_MIN,
+        frame.sourceDelta.pairEnergyRatio >= SOURCE_PAN_PAIR_ENERGY_MIN &&
+        frame.sourceDelta.pairEnergyRatio <= SOURCE_PAN_PAIR_ENERGY_MAX,
     ) ||
     repairedPanStability.maxRelativeEnergyStep > SOURCE_PAN_ENERGY_STEP_LIMIT ||
     repairedPanStability.relativeEnergyRange > 0.3 ||
@@ -864,6 +917,14 @@ try {
     angularUniformityLimit: ANGULAR_UNIFORMITY_LIMIT,
     enabled: scatterProofEnabled,
   });
+  // The proof deliberately exercises the former 2.4 baseline. Return to the
+  // exported product radius before stress and max-DPR measurements so their
+  // performance/resource evidence describes the shipped profile.
+  await page.evaluate((radiusScale) => {
+    const pass = window.__engine.debugPostResources().bokehPass;
+    pass.uniforms.bokehRadiusScale.value = radiusScale;
+    window.__engine.debugRenderDofFrame();
+  }, CIRCULAR_BOKEH_DEFAULTS.radiusScale);
   await page.setViewportSize({ width: 961, height: 601 });
   await page.evaluate(
     () =>

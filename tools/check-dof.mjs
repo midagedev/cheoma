@@ -292,7 +292,7 @@ invariant(
 );
 near(
   CIRCULAR_BOKEH_DEFAULTS.radiusScale,
-  2.4,
+  3.1,
   "cinematic bokeh lost its expanded telephoto aperture radius",
 );
 invariant(
@@ -479,7 +479,8 @@ installCircularBokeh(fakeBokehMaterial);
 invariant(
   fakeBokehMaterial.uniforms.focus.value === 1 &&
     fakeBokehMaterial.uniforms.highlightGain.value > 0 &&
-    fakeBokehMaterial.uniforms.bokehRadiusScale.value === 2.4 &&
+    fakeBokehMaterial.uniforms.bokehRadiusScale.value ===
+      CIRCULAR_BOKEH_DEFAULTS.radiusScale &&
     fakeBokehMaterial.uniforms.bokehQuality.value === 1 &&
     fakeBokehMaterial.uniforms.tHighlight.value === null &&
     fakeBokehMaterial.fragmentShader === CIRCULAR_BOKEH_FRAGMENT_SHADER &&
