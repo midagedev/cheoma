@@ -132,6 +132,12 @@ assert.match(componentSource, /\.dismiss\s*\{[^}]*min-width:\s*44px[^}]*min-heig
 assert.match(componentSource, /\.dismiss\s*\{[^}]*pointer-events:\s*auto/s);
 assert.match(
   componentSource,
+  /:\s*\['↻',\s*'＋',\s*'⌂',\s*'↩'\]/,
+  'desktop exit should use a return mark while the localized copy names Esc once',
+);
+assert.doesNotMatch(componentSource, /class:word|\.mark\.word/, 'guide marks share one visual grammar');
+assert.match(
+  componentSource,
   /@media \(max-height: 520px\) and \(orientation: landscape\)[\s\S]*?\.scene-guide\.touch\s*\{[^}]*bottom:\s*max\(88px,\s*calc\(env\(safe-area-inset-bottom\) \+ 82px\)\)/,
   'landscape touch guide must clear the raised ActionBar input envelope',
 );
@@ -161,5 +167,77 @@ for (const key of [
   assert.equal((i18nSource.match(new RegExp(`${key}:`, 'g')) || []).length, 2, `${key} needs ko/en copy`);
 }
 assert.match(i18nSource, /hero_enter:\s*'Enter'/, 'English hero copy must be input-neutral');
+
+const appSource = await readFile(new URL('../app/src/App.svelte', import.meta.url), 'utf8');
+assert.match(appSource, /onpointerdowncapture=\{dismissSceneGuide\}/);
+assert.match(appSource, /onwheelcapture=\{dismissSceneGuide\}/);
+assert.match(
+  appSource,
+  /function dismissSceneGuide\(\)\s*\{[^}]*sceneGuideDismissed = true;[^}]*persistSceneGuideDismissal/s,
+  'canvas input and close share one session-first dismissal path',
+);
+assert.doesNotMatch(
+  appSource.match(/function dismissSceneGuide\(\)[\s\S]*?\n  \}/)?.[0] || '',
+  /preventDefault|stopPropagation/,
+  'guide dismissal must not consume stage input',
+);
+const appSurfaceIndex = appSource.indexOf('data-app-surface');
+const guideIndex = appSource.indexOf('<SceneGuide ');
+const referenceIndex = appSource.indexOf('<ReferenceModal');
+const appSurfaceCloseIndex = appSource.lastIndexOf('</div>', referenceIndex);
+assert.ok(
+  guideIndex > appSurfaceIndex && guideIndex < appSurfaceCloseIndex,
+  'SceneGuide must inherit the app-surface inert boundary',
+);
+assert.match(
+  appSource,
+  /try \{ sceneGuideStorage = window\.localStorage; \}\s*catch \{ sceneGuideStorage = null; \}/,
+  'localStorage getter denial must fail open before helper calls',
+);
+
+const heroSource = await readFile(new URL('../app/src/components/Hero.svelte', import.meta.url), 'utf8');
+assert.match(heroSource, /\.hero:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--seal\)/s);
+assert.doesNotMatch(heroSource, /\.hero:focus-visible\s*\{[^}]*outline:\s*none/s);
+
+const engineSource = await readFile(new URL('../app/src/engine/engine.js', import.meta.url), 'utf8');
+assert.equal(
+  (engineSource.match(/emit\('viewSettled'/g) || []).length,
+  1,
+  'all stable endpoints must publish through one guarded semantic boundary',
+);
+assert.match(
+  engineSource,
+  /function emitSettledView\(\)[\s\S]{0,420}?retireSemanticViewSettlement\(\);[\s\S]{0,80}?emit\('viewSettled'/,
+  'a semantic endpoint must retire stale manual OrbitControls settlement before publishing',
+);
+assert.match(
+  engineSource,
+  /function tweenTo\([\s\S]{0,420}?retireSemanticViewSettlement\(\);/,
+  'programmatic camera ownership must retire a pending manual end before any warm/tween delay',
+);
+assert.equal(
+  (engineSource.match(/onInterrupt: requestSemanticViewSettlement/g) || []).length,
+  2,
+  'interrupted standalone reveals must defer publication until the same input settles',
+);
+assert.match(
+  engineSource,
+  /controls\.addEventListener\('start', onControlsStart\);[\s\S]{0,100}?controls\.addEventListener\('end', onControlsEnd\)/,
+  'manual gesture ownership must bracket semantic settlement',
+);
+assert.match(
+  engineSource,
+  /if \(!semanticViewSettlePending \|\| semanticViewGestureActive \|\| tween/,
+  'a held pointer must block early quiet-frame publication',
+);
+const settledVillageSelections = [...engineSource.matchAll(
+  /emit\('villageSelect',[\s\S]{0,180}?emitSettledView\(\);/g,
+)];
+assert.equal(settledVillageSelections.length, 5, 'every village focus/replay landing settles exactly once');
+assert.match(
+  engineSource,
+  /function settleVillageExplore\(\)[\s\S]{0,300}?emit\('villageExplore'[\s\S]{0,120}?emitSettledView\(\)/,
+  'aerial and wave endpoints share the same settled-view boundary',
+);
 
 console.log('scene guide policy: PASS');

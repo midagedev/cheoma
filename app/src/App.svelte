@@ -8,8 +8,14 @@
   import { buildRebuildPayload, villageDefaults } from './lib/edit-schema.js';
   import { pickStandaloneParams } from './lib/standalone-param-spec.js';
   import { createLiveEditScheduler } from './lib/live-edit-scheduler.js';
+  import {
+    persistSceneGuideDismissal,
+    sceneGuideIsVisible,
+    sceneGuideWasDismissed,
+  } from './lib/scene-guide.js';
   import { device, initDevice } from './lib/device.svelte.js';
   import Hero from './components/Hero.svelte';
+  import SceneGuide from './components/SceneGuide.svelte';
   import SealLabel from './components/SealLabel.svelte';
   import ActionBar from './components/ActionBar.svelte';
   import EnvironmentDial from './components/EnvironmentDial.svelte';
@@ -123,6 +129,9 @@
   let refOpener = $state(null);
   let audioOn = $state(false);
   let rerollCooldown = $state(false);
+  let sceneGuideDismissed = $state(false);
+  let sceneGuideStable = $state(false);
+  let sceneGuideStorage = null;
 
   // ---------- 오토로테이션("시간 흐르기" #64) ----------
   // 활성 시 FLOW_INTERVAL 마다 시간대를 한 칸 전진(dawn→day→sunset→night→dawn…). 전환은 기존
@@ -242,11 +251,11 @@
     };
   }
 
-  function completeCanonicalRestore() {
+  function completeCanonicalRestore({ deferSync = false } = {}) {
     if (!canonicalRestorePending) return;
     canonicalRestorePending = false;
     scheduleFlowTick();
-    syncUrl();
+    if (!deferSync) syncUrl();
   }
 
   function syncUrl() {
@@ -364,10 +373,25 @@
   // 데스크톱(perf=false)은 종전대로 유지. 낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
   let hideActions = $derived(device.perf && editing);
   let hideSeal = $derived(sheetLayout && (editing || (sceneVillage && !villageEditing)));
+  let sceneGuideVisible = $derived(sceneGuideIsVisible({
+    dismissed: sceneGuideDismissed,
+    sceneVillage,
+    stable: sceneGuideStable,
+    heroVisible,
+    heroLanding,
+    waving,
+    veil,
+    cinematic: cine.active,
+    references: refOpen,
+    toast: !!toast,
+  }));
 
   onMount(() => {
     const epoch = beginLifecycle();
     const disposeDevice = initDevice();
+    try { sceneGuideStorage = window.localStorage; }
+    catch { sceneGuideStorage = null; }
+    sceneGuideDismissed = sceneGuideWasDismissed(sceneGuideStorage);
     const deviceHook = new Proxy(device, {}); // per-mount identity over the shared reactive state
     const envflowHook = {
       toggle: () => { if (lifecycleCurrent(epoch)) toggleFlow(); },
@@ -405,6 +429,7 @@
     engine.on('seed', (seed) => { ui.seed = seed; syncUrl(); });
     engine.on('select', (v) => { ui.selected = v; if (v) { chromaFaded = false; } });
     engine.on('viewSettled', () => {
+      if (sceneVillage) sceneGuideStable = true;
       if (canonicalSceneAddress && !canonicalRestorePending) syncUrl();
     });
 
@@ -413,6 +438,7 @@
       sceneVillage = on;
       // 마을 씬 이탈 = 랜딩 종료(정상 완주든 폴백/리버트든) → heroLanding 해제로 #118 U4 크롬 스턱 방지.
       if (!on) {
+        sceneGuideStable = false;
         liveEdit.cancel();
         villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0;
         villageZooming = false; waving = false; heroLanding = false; pendingCommit = null;
@@ -426,6 +452,7 @@
     // focus-in START(집 클릭·집 보기·프로그램 진입·랜딩) — 스펙 선전달(#92)로 패널이 돌리 중 집 컨텍스트로
     //   모프하기 시작한다(도착 대기 없음). editParams 를 즉시 시드해 슬라이더가 렌더값에서 출발.
     engine.on('villageSelectStart', (p) => {
+      sceneGuideStable = false;
       hoverInfo = null; villageZooming = true;
       if (p && p.spec) { seedEdit(p); }
       chromaFaded = false;
@@ -443,20 +470,21 @@
       if (pendingSceneView?.parcelId === p.parcelId) {
         if (pendingSceneView.view) engine.village.restoreView(pendingSceneView.view);
         pendingSceneView = null;
-        completeCanonicalRestore();
+        completeCanonicalRestore({ deferSync: true });
       }
-      syncUrl();
+      if (!canonicalSceneAddress) syncUrl();
     });
     engine.on('villageExplore', () => {
       if (!sceneVillage) return;
       if (pendingSceneView?.parcelId != null) return;
       if (pendingSceneView?.view) engine.village.restoreView(pendingSceneView.view);
       if (pendingSceneView) pendingSceneView = null;
-      completeCanonicalRestore();
-      syncUrl();
+      completeCanonicalRestore({ deferSync: true });
+      if (!canonicalSceneAddress) syncUrl();
     });
     // focus-out START — 패널은 집 컨텍스트를 유지한 채 모프가 역행(villageFocusMorph 가 1→0).
     engine.on('villageReturn', () => {
+      sceneGuideStable = false;
       liveEdit.cancel();
       villageZooming = true; hoverInfo = null; armFocusWatchdog();
     });   // #155
@@ -466,19 +494,26 @@
       liveEdit.cancel();
       villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false;
       clearFocusWatchdog(); focusMorphLatched = false;
-      syncUrl();
+      if (!canonicalSceneAddress) syncUrl();
     });
     // 리롤 웨이브(#56): 진행 중 입력·버튼 잠금, 완료 시 호수·URL 갱신.
     engine.on('villageWave', (w) => {
       waving = w.phase === 'start';
+      if (w.phase === 'start') sceneGuideStable = false;
       if (w.phase === 'done') {
         // #151 웨이브 중 유실된 최신 커밋이 큐에 있으면 완료 즉시 자동 재커밋 → 마지막 값으로 수렴. 큐를 먼저
         //   비우고 villageOpts(소스오브트루스, 웨이브 중 세터가 갱신) 를 그대로 다시 웨이브 커밋(연쇄 1회로 종료).
         if (pendingCommit) { pendingCommit = null; engine.village.setOpts({ ...villageOpts }, { wave: true }); return; }
-        pullVillage(); syncUrl(); chromaFaded = false;
+        pullVillage();
+        if (!canonicalSceneAddress) syncUrl();
+        chromaFaded = false;
       }
     });
-    engine.on('villageSeed', (s) => { villageSeed = s; pullVillage(); syncUrl(); });
+    engine.on('villageSeed', (s) => {
+      villageSeed = s;
+      pullVillage();
+      if (!canonicalSceneAddress) syncUrl();
+    });
 
     // 시네마틱 데모(#112): 진입/패스 전환/종료 상태를 크롬 최소화·오버레이 라벨에 반영.
     engine.on('cinematic', (c) => {
@@ -617,6 +652,7 @@
       clearLifecycleTimeout(toastTimer); toastTimer = null;
       clearFocusWatchdog();
       liveEdit.dispose();
+      sceneGuideStorage = null;
       disposeDevice();
       if (typeof window !== 'undefined') {
         if (window.__device === deviceHook) delete window.__device;
@@ -645,6 +681,12 @@
 
   function closeReferences() {
     refOpen = false;
+  }
+
+  function dismissSceneGuide() {
+    if (!sceneGuideVisible) return;
+    sceneGuideDismissed = true;
+    persistSceneGuideDismissal(sceneGuideStorage);
   }
 
   // ---------- 액션 ----------
@@ -1115,7 +1157,12 @@
   inert={refOpen}
   aria-hidden={refOpen ? 'true' : undefined}
 >
-<div class="stage" bind:this={container}></div>
+<div
+  class="stage"
+  bind:this={container}
+  onpointerdowncapture={dismissSceneGuide}
+  onwheelcapture={dismissSceneGuide}
+></div>
 
 {#if heroVisible}
   <Hero onEnter={enterHero} leaving={heroLeaving} />
@@ -1213,6 +1260,8 @@
 {#if toast}
   <div class="toast" role="status" aria-live="polite">{toast}</div>
 {/if}
+
+<SceneGuide visible={sceneGuideVisible} onDismiss={dismissSceneGuide} />
 </div>
 
 <ReferenceModal

@@ -10,6 +10,10 @@ import {
   decodeSceneSnapshot,
   normalizeSceneView,
 } from '../app/src/lib/scene-snapshot.js';
+import {
+  SCENE_GUIDE_DISMISSED_VALUE,
+  SCENE_GUIDE_STORAGE_KEY,
+} from '../app/src/lib/scene-guide.js';
 import { planVillage } from '../src/api/village-plan.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
@@ -58,7 +62,8 @@ try {
   await server.listen();
   const port = server.httpServer.address().port;
   browser = await launchVerificationBrowser();
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const productContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await productContext.newPage();
   await page.addInitScript(() => {
     const nativeAdd = EventTarget.prototype.addEventListener;
     const nativeRemove = EventTarget.prototype.removeEventListener;
@@ -162,6 +167,141 @@ try {
   await page.waitForFunction(() => !!window.__engine.village.captureView(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
 
+  const sceneGuide = page.locator('[data-scene-guide]');
+  await sceneGuide.waitFor({ state: 'visible', timeout });
+  const desktopGuide = await sceneGuide.evaluate((guide) => {
+    const rect = guide.getBoundingClientRect();
+    const dismiss = guide.querySelector('.dismiss')?.getBoundingClientRect();
+    const active = document.activeElement;
+    return {
+      input: guide.dataset.input,
+      text: guide.textContent?.replace(/\s+/g, ' ').trim(),
+      pointerEvents: getComputedStyle(guide).pointerEvents,
+      dismissPointerEvents: getComputedStyle(guide.querySelector('.dismiss')).pointerEvents,
+      bounds: [rect.left, rect.top, rect.right, rect.bottom],
+      dismiss: dismiss ? [dismiss.width, dismiss.height] : null,
+      viewport: [innerWidth, innerHeight],
+      focusInside: guide.contains(active),
+      modal: guide.matches('[aria-modal="true"]') || !!guide.querySelector('[aria-modal="true"]'),
+    };
+  });
+  pass(desktopGuide.input === 'desktop'
+      && desktopGuide.text.includes('드래그해 마을 둘러보기')
+      && desktopGuide.text.includes('휠로 확대·축소')
+      && desktopGuide.text.includes('집을 눌러 가까이 보기')
+      && desktopGuide.text.includes('Esc 또는 둘러보기로 돌아가기')
+      && desktopGuide.pointerEvents === 'none'
+      && desktopGuide.dismissPointerEvents === 'auto'
+      && desktopGuide.dismiss?.[0] >= 44
+      && desktopGuide.dismiss?.[1] >= 44
+      && desktopGuide.bounds[0] >= 0
+      && desktopGuide.bounds[1] >= 0
+      && desktopGuide.bounds[2] <= desktopGuide.viewport[0]
+      && desktopGuide.bounds[3] <= desktopGuide.viewport[1]
+      && !desktopGuide.focusInside
+      && !desktopGuide.modal,
+  `fresh desktop stable frame shows one bounded nonmodal guide without stealing focus (${JSON.stringify(desktopGuide)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'scene-guide-desktop.png') });
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(
+    () => window.__device?.sheet === true && innerWidth === 390 && innerHeight === 844,
+    null,
+    { timeout },
+  );
+  await page.evaluate(() => { window.__device.touch = true; });
+  await page.waitForFunction(
+    () => document.querySelector('[data-scene-guide]')?.dataset.input === 'touch',
+    null,
+    { timeout },
+  );
+  await page.waitForFunction(
+    () => {
+      const sheet = document.querySelector('.sheet.context[data-snap="peek"]');
+      return sheet?.getBoundingClientRect().top >= 740;
+    },
+    null,
+    { timeout },
+  );
+  const touchGuide = await sceneGuide.evaluate((guide) => {
+    const rect = guide.getBoundingClientRect();
+    const dismiss = guide.querySelector('.dismiss')?.getBoundingClientRect();
+    const sheet = document.querySelector('.sheet.context')?.getBoundingClientRect();
+    return {
+      text: guide.textContent?.replace(/\s+/g, ' ').trim(),
+      bounds: [rect.left, rect.top, rect.right, rect.bottom],
+      dismiss: dismiss ? [dismiss.width, dismiss.height] : null,
+      sheetTop: sheet?.top ?? null,
+      viewport: [innerWidth, innerHeight],
+    };
+  });
+  pass(touchGuide.text.includes('한 손가락으로 드래그해 둘러보기')
+      && touchGuide.text.includes('두 손가락으로 확대·축소하고 이동')
+      && touchGuide.text.includes('집을 탭해 가까이 보기')
+      && touchGuide.text.includes('둘러보기로 돌아가기')
+      && touchGuide.bounds[0] >= 0
+      && touchGuide.bounds[1] >= 0
+      && touchGuide.bounds[2] <= touchGuide.viewport[0]
+      && touchGuide.bounds[3] <= touchGuide.viewport[1]
+      && touchGuide.bounds[3] <= touchGuide.sheetTop
+      && touchGuide.dismiss?.[0] >= 44
+      && touchGuide.dismiss?.[1] >= 44,
+  `390x844 touch copy and 44px dismissal stay inside the first scene (${JSON.stringify(touchGuide)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'scene-guide-touch.png') });
+  }
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForFunction(
+    () => window.__device?.sheet === false && innerWidth === 1280 && innerHeight === 800,
+    null,
+    { timeout },
+  );
+  await page.evaluate(() => { window.__device.touch = false; });
+  await page.waitForFunction(
+    () => document.querySelector('[data-scene-guide]')?.dataset.input === 'desktop'
+      && window.__device?.sheet === false,
+    null,
+    { timeout },
+  );
+  const guideInput = await page.evaluate(() => {
+    const guide = document.querySelector('[data-scene-guide]');
+    const rect = guide.getBoundingClientRect();
+    return {
+      point: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      view: window.__engine.village.captureView(),
+    };
+  });
+  await page.mouse.move(guideInput.point.x, guideInput.point.y);
+  await page.mouse.wheel(0, -120);
+  await page.waitForFunction(
+    ({ key, beforeZoom }) => {
+      const view = window.__engine?.village?.captureView?.();
+      return !document.querySelector('[data-scene-guide]')
+        && localStorage.getItem(key) === 'dismissed'
+        && Math.abs((view?.zoom ?? beforeZoom) - beforeZoom) > 0.001;
+    },
+    { key: SCENE_GUIDE_STORAGE_KEY, beforeZoom: guideInput.view.zoom },
+    { timeout },
+  );
+  const guideDismissal = await page.evaluate((key) => ({
+    stored: localStorage.getItem(key),
+    view: window.__engine.village.captureView(),
+  }), SCENE_GUIDE_STORAGE_KEY);
+  pass(guideDismissal.stored === SCENE_GUIDE_DISMISSED_VALUE
+      && Math.abs(guideDismissal.view.zoom - guideInput.view.zoom) > 0.001,
+  `wheel through the pointer-transparent card both controls the camera and persists dismissal (${JSON.stringify({
+    before: guideInput.view.zoom,
+    after: guideDismissal.view.zoom,
+    stored: guideDismissal.stored,
+  })})`);
+
+  // The guide layout checks intentionally outlast the 3s appreciation fade.
+  // Wake the existing ActionBar before exercising its trusted keyboard share.
+  await page.mouse.move(32, 32);
+  await page.waitForFunction(() => !document.querySelector('.chroma')?.classList.contains('faded'), null, { timeout });
   const shareButton = page.locator('.actions [data-action="share"]');
   await shareButton.waitFor({ state: 'visible', timeout });
   const desktopShareLayout = await shareButton.evaluate((button) => {
@@ -201,9 +341,30 @@ try {
     window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
+  await page.mouse.move(34, 34);
+  await page.waitForFunction(() => !document.querySelector('.chroma')?.classList.contains('faded'), null, { timeout });
   await shareButton.focus();
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  await page.waitForFunction(
+    () => window.__shareProbe.nativePayloads.length === 1,
+    null,
+    { timeout: Math.min(timeout, 5000) },
+  ).catch(() => {});
+  const abortShareDispatch = await page.evaluate(() => {
+    const button = document.querySelector('.actions [data-action="share"]');
+    return {
+      payloads: window.__shareProbe.nativePayloads.length,
+      active: document.activeElement === button,
+      connected: !!button?.isConnected,
+      disabled: !!button?.disabled,
+      chroma: document.querySelector('.chroma')?.className,
+      toast: document.querySelector('.toast')?.textContent?.trim() || null,
+      view: window.__engine.captureView(),
+    };
+  });
+  if (abortShareDispatch.payloads !== 1) {
+    throw new Error(`keyboard share did not dispatch: ${JSON.stringify(abortShareDispatch)}`);
+  }
   await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
   const abortedShare = await page.evaluate(() => ({
     native: window.__shareProbe.nativePayloads.length,
@@ -224,9 +385,12 @@ try {
     window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
+  await page.mouse.move(36, 36);
+  await page.waitForFunction(() => !document.querySelector('.chroma')?.classList.contains('faded'), null, { timeout });
   await shareButton.focus();
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유했습니다', null, { timeout });
+  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
   const nativeShare = await page.evaluate(() => {
     const payload = window.__shareProbe.nativePayloads[0];
     const shared = new URL(payload.url);
@@ -261,7 +425,22 @@ try {
   // Open the exact native payload, let the canonical entry camera settle, then
   // reload the address that App re-canonicalized. This catches eager #107
   // downgrade, restore-order races, and one-frame OrbitControls/focus drift.
-  const sharedPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  // Reuse the product session: dismissal is localStorage-backed and must survive
+  // a newly opened shared scene plus reload in the same browser context.
+  const sharedPage = await productContext.newPage();
+  await sharedPage.addInitScript((sceneKey) => {
+    const nativeReplaceState = history.replaceState.bind(history);
+    const canonicalWrites = [];
+    history.replaceState = (state, title, nextUrl) => {
+      const resolved = new URL(nextUrl ?? location.href, location.href);
+      if (resolved.searchParams.has(sceneKey)) canonicalWrites.push(resolved.href);
+      return nativeReplaceState(state, title, nextUrl);
+    };
+    Object.defineProperty(window, '__canonicalHistoryWrites', {
+      configurable: false,
+      value: canonicalWrites,
+    });
+  }, SCENE_SNAPSHOT_QUERY_KEY);
   sharedPage.on('pageerror', (error) => runtimeErrors.push(`shared page: ${error.message}`));
   sharedPage.on('console', (message) => {
     if (message.type() === 'error' && !/favicon|404/i.test(message.text())) {
@@ -280,6 +459,9 @@ try {
     state: window.__engine.getState(),
     village: window.__engine.village.getState(),
     view: window.__engine.village.captureView(),
+    canonicalWrites: [...window.__canonicalHistoryWrites],
+    guideVisible: !!document.querySelector('[data-scene-guide]'),
+    guideStored: localStorage.getItem('cheoma-scene-guide-v1'),
   }));
   const sharedBeforeSnapshot = decodeSceneSnapshot(
     new URL(sharedBeforeReload.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
@@ -296,6 +478,9 @@ try {
     state: window.__engine.getState(),
     village: window.__engine.village.getState(),
     view: window.__engine.village.captureView(),
+    canonicalWrites: [...window.__canonicalHistoryWrites],
+    guideVisible: !!document.querySelector('[data-scene-guide]'),
+    guideStored: localStorage.getItem('cheoma-scene-guide-v1'),
   }));
   const sharedAfterSnapshot = decodeSceneSnapshot(
     new URL(sharedAfterReload.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
@@ -308,11 +493,26 @@ try {
       && sharedAfterReload.village.selected === nativeScene.focusedParcelId
       && semanticViewClose(sharedBeforeReload.view, nativeScene.view)
       && semanticViewClose(sharedAfterReload.view, nativeScene.view)
+      && sharedBeforeReload.canonicalWrites.length === 1
+      && sharedAfterReload.canonicalWrites.length === 1
+      && !sharedBeforeReload.guideVisible
+      && !sharedAfterReload.guideVisible
+      && sharedBeforeReload.guideStored === SCENE_GUIDE_DISMISSED_VALUE
+      && sharedAfterReload.guideStored === SCENE_GUIDE_DISMISSED_VALUE
       && [...new URL(sharedAfterReload.address).searchParams.keys()].join() === SCENE_SNAPSHOT_QUERY_KEY,
-  `exact native scene survives canonicalization and reload within view quantization (${JSON.stringify({
+  `exact native scene writes once per stable restore while the dismissed guide stays absent (${JSON.stringify({
     before: sharedBeforeReload.view,
     after: sharedAfterReload.view,
     expected: nativeScene.view,
+    selected: [sharedBeforeReload.village.selected, sharedAfterReload.village.selected],
+    expectedSelected: nativeScene.focusedParcelId,
+    snapshots: [sharedBeforeSnapshot, sharedAfterSnapshot],
+    guide: [
+      [sharedBeforeReload.guideVisible, sharedBeforeReload.guideStored],
+      [sharedAfterReload.guideVisible, sharedAfterReload.guideStored],
+    ],
+    fields: [...new URL(sharedAfterReload.address).searchParams.keys()],
+    writes: [sharedBeforeReload.canonicalWrites.length, sharedAfterReload.canonicalWrites.length],
   })})`);
 
   const shareSource = await page.evaluate(() => ({
@@ -831,7 +1031,23 @@ try {
     window.__engine.village.debugParcels().find((parcel) => !parcel.hero)?.parcelId
       || window.__engine.village.debugParcels()[0]?.parcelId
   ));
+  await page.evaluate(() => {
+    const audit = { count: 0, off: null };
+    audit.off = window.__engine.on('viewSettled', () => { audit.count += 1; });
+    window.__sceneGuideSettleAudit = audit;
+  });
   await page.locator('.ctx.village input.scale').focus();
+  await page.mouse.move(640, 120);
+  await page.mouse.down();
+  await page.mouse.move(666, 126, { steps: 2 });
+  // Pointer capture moves focus to the canvas. Restore the outgoing control so
+  // this existing accessibility assertion can still observe the context handoff
+  // while the physical orbit gesture remains held.
+  await page.locator('.ctx.village input.scale').focus();
+  await page.evaluate(() => new Promise((resolveFrame) => (
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)))
+  )));
+  const heldBeforeFocus = await page.evaluate(() => window.__sceneGuideSettleAudit.count);
   await page.evaluate((parcelId) => window.__engine.village.debugFocus(parcelId), contextParcel);
   await seekViewTransition(0.6);
   await page.waitForFunction(() => document.activeElement?.dataset?.contextFocus === 'house', null, { timeout });
@@ -847,6 +1063,16 @@ try {
     tab: desktopHouseTabOwner,
   })})`);
   await seekViewTransition(1, true);
+  const heldAfterFocus = await page.evaluate(() => window.__sceneGuideSettleAudit.count);
+  await page.mouse.up();
+  await page.waitForFunction(() => window.__sceneGuideSettleAudit?.count === 1, null, { timeout });
+  const focusSettles = await page.evaluate(() => window.__sceneGuideSettleAudit.count);
+  pass(heldBeforeFocus === 0 && heldAfterFocus === 0 && focusSettles === 1,
+    `held orbit input defers a completed focus until pointer-up, then publishes once (${JSON.stringify({
+      heldBeforeFocus,
+      heldAfterFocus,
+      focusSettles,
+    })})`);
 
   await page.locator('[data-context-focus="house"]').focus();
   await page.evaluate(() => window.__engine.village.return());
@@ -858,6 +1084,21 @@ try {
       && desktopReturnOwner.focusTarget === 'village',
   `desktop return crossfade hands house focus to the village heading (${JSON.stringify(desktopReturnOwner)})`);
   await seekViewTransition(1, true);
+  const returnSettles = await page.evaluate(() => {
+    const audit = window.__sceneGuideSettleAudit;
+    const count = audit.count;
+    audit.off?.();
+    delete window.__sceneGuideSettleAudit;
+    return {
+      count,
+      guideVisible: !!document.querySelector('[data-scene-guide]'),
+      stored: localStorage.getItem('cheoma-scene-guide-v1'),
+    };
+  });
+  pass(returnSettles.count === 2
+      && !returnSettles.guideVisible
+      && returnSettles.stored === SCENE_GUIDE_DISMISSED_VALUE,
+  `aerial return publishes one more settled view without reviving the guide (${JSON.stringify(returnSettles)})`);
 
   // A modal is the outer owner: a simultaneous context transition may update which subtree is
   // ready underneath it, but must not steal focus through the inert app surface.

@@ -76,6 +76,12 @@ assert.deepEqual(ids(['app/src/lib/scene-snapshot.js']), [
 assert.deepEqual(ids(['app/src/lib/standalone-param-spec.js']), [
   'core', 'share', 'app', 'build',
 ]);
+assert.deepEqual(ids(['app/src/lib/scene-guide.js']), [
+  'core', 'app', 'build',
+]);
+assert.deepEqual(ids(['app/src/components/SceneGuide.svelte']), [
+  'core', 'app', 'build',
+]);
 assert.deepEqual(ids(['app/src/engine/semantic-view-runtime.js']), [
   'core', 'share', 'app', 'dof-app', 'lod-app', 'build',
 ]);
@@ -85,6 +91,12 @@ assert.deepEqual(ids(['app/src/lib/standalone-param-spec.js'], {
 assert.deepEqual(ids(['app/src/engine/semantic-view-runtime.js'], {
   newPaths: ['app/src/engine/semantic-view-runtime.js'],
 }), ['core', 'share', 'app', 'dof-app', 'lod-app', 'build']);
+assert.deepEqual(ids(['app/src/lib/scene-guide.js'], {
+  newPaths: ['app/src/lib/scene-guide.js'],
+}), ['core', 'app', 'build']);
+assert.deepEqual(ids(['app/src/components/SceneGuide.svelte'], {
+  newPaths: ['app/src/components/SceneGuide.svelte'],
+}), ['core', 'app', 'build']);
 assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
   'core', 'app', 'parcel-rebuild-browser', 'build',
 ]);
@@ -168,6 +180,7 @@ assert.deepEqual(ids(['src/cinematic/architectural-reveal.js']), [
 ]);
 assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
 assert.deepEqual(ids(['tools/check-scene-snapshot.mjs']), ['core', 'share']);
+assert.deepEqual(ids(['tools/check-scene-guide.mjs']), ['core']);
 assert.deepEqual(ids(['tools/shoot-bokeh-fixture.mjs']), ['core', 'bokeh-fixture']);
 for (const helper of [
   'tools/lib/bokeh-gpu-diagnostic.mjs',

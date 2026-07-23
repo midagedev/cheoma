@@ -14,7 +14,7 @@
   const instructionKeys = $derived(touchLayout
     ? ['guide_touch_orbit', 'guide_touch_zoom', 'guide_touch_house', 'guide_touch_exit']
     : ['guide_desktop_orbit', 'guide_desktop_zoom', 'guide_desktop_house', 'guide_desktop_exit']);
-  const marks = $derived(touchLayout ? ['1', '2', '⌂', '↩'] : ['↻', '＋', '⌂', 'Esc']);
+  const marks = $derived(touchLayout ? ['1', '2', '⌂', '↩'] : ['↻', '＋', '⌂', '↩']);
 </script>
 
 {#if visible}
@@ -30,7 +30,7 @@
       <ul>
         {#each instructionKeys as key, i}
           <li>
-            <span class="mark" class:word={marks[i] === 'Esc'} aria-hidden="true">{marks[i]}</span>
+            <span class="mark" aria-hidden="true">{marks[i]}</span>
             <span>{t(key)}</span>
           </li>
         {/each}
@@ -120,13 +120,6 @@
     font-size: 13px;
     font-weight: 700;
     line-height: 1;
-  }
-
-  .mark.word {
-    border-radius: 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 8px;
-    letter-spacing: -0.04em;
   }
 
   .dismiss {

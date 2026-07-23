@@ -404,6 +404,21 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     });
   }
 
+  // One semantic stability boundary for URL snapshots and first-scene UI.
+  // Callers invoke this only after controls/tween ownership has settled; an
+  // unrepresentable frame fails closed instead of publishing an early view.
+  function emitSettledView() {
+    if (semanticViewGestureActive) {
+      requestSemanticViewSettlement();
+      return false;
+    }
+    const view = captureSceneView();
+    if (!view) return false;
+    retireSemanticViewSettlement();
+    emit('viewSettled', { view });
+    return true;
+  }
+
   function restoreSceneView(view) {
     if (village.active) return restoreVillageView(view);
     if (!view || demo.active || cinematic.isActive() || revealCamera?.isPlaying?.()) return false;
@@ -451,6 +466,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     dofAmount = null,
     focusComposition: nextFocusComposition = null,
   } = {}) {
+    retireSemanticViewSettlement();
     revealCamera?.stop('replaced', { notify: false });
     cinematic.stop();
     const currentReferenceFov = referenceFovForCamera(camera);
@@ -565,6 +581,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getReferenceFov: () => referenceFovForCamera(camera),
     settleControls,
     cancelConflictingMotion: () => {
+      retireSemanticViewSettlement();
       tween = null;
       cinematic.stop();
       if (demo.active) demoRuntime.stop();
@@ -573,14 +590,30 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   });
   let semanticViewSettlePending = false;
   let semanticViewSettleFrames = 0;
-  const onControlsEnd = () => {
+  let semanticViewGestureActive = false;
+  function beginSemanticViewGesture() {
+    semanticViewGestureActive = true;
+    retireSemanticViewSettlement();
+  }
+  function requestSemanticViewSettlement() {
     semanticViewSettlePending = true;
     semanticViewSettleFrames = 0;
-  };
+  }
+  function endSemanticViewGesture() {
+    semanticViewGestureActive = false;
+    requestSemanticViewSettlement();
+  }
+  function retireSemanticViewSettlement() {
+    semanticViewSettlePending = false;
+    semanticViewSettleFrames = 0;
+  }
+  const onControlsStart = beginSemanticViewGesture;
+  const onControlsEnd = endSemanticViewGesture;
+  controls.addEventListener('start', onControlsStart);
   controls.addEventListener('end', onControlsEnd);
 
   function updateSemanticViewSettlement() {
-    if (!semanticViewSettlePending || tween || revealCamera?.isActive?.()
+    if (!semanticViewSettlePending || semanticViewGestureActive || tween || revealCamera?.isActive?.()
         || cinematic.isActive() || demo.active) return;
     const spherical = controls._sphericalDelta;
     const pan = controls._panOffset;
@@ -592,9 +625,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     );
     semanticViewSettleFrames = inertia <= 1e-7 ? semanticViewSettleFrames + 1 : 0;
     if (semanticViewSettleFrames < 2) return;
-    semanticViewSettlePending = false;
-    semanticViewSettleFrames = 0;
-    if (captureSceneView()) emit('viewSettled', {});
+    emitSettledView();
   }
 
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
@@ -785,7 +816,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const cb = active.onDone;
     tween = null;
     cb?.();
-    if (!village.active) emit('viewSettled', {});
+    if (!village.active) emitSettledView();
   }
 
   function advanceCameraTween(dt) {
@@ -1229,6 +1260,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function settleVillageExplore() {
     setZoomRegime('explore');
     emit('villageExplore', {});
+    emitSettledView();
   }
   function restoreVillageView(view) {
     if (!village.active || village.transitioning || villageWaveBusy()) return false;
@@ -1531,6 +1563,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   function enterVillage(opts = null, seed = null) {
+    retireSemanticViewSettlement();
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
     // 재진입(활성): 비동기 빌드일 수 있어 프레이밍 트윈을 onReady 로(새 핸들 site.R 기준). 구 마을 유지 중 부감.
@@ -1661,6 +1694,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const pr = village.handle.getPickProxy(parcelId);
     if (!pr) return;
+    retireSemanticViewSettlement();
     if (hoverParcel && hoverParcel !== parcelId) village.handle.highlightParcel(hoverParcel, false);
     hoverParcel = null;
     village.handle.highlightParcel(parcelId, true);   // 돌리인 동안 추적 하이라이트
@@ -1700,6 +1734,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           setZoomRegime('focus', closeupDist);                    // 집 보기 안의 근접·문맥 줌 범위
           emit('villageFocusMorph', 1);
           emit('villageSelect', { parcelId, spec: pr.buildingSpec });
+          emitSettledView();
         },
       });
     });
@@ -1717,6 +1752,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!fromId || toId === fromId) return;                       // 부감(미focus)이거나 같은 필지면 무효(재클릭 no-op)
     const pr = village.handle.getPickProxy(toId);
     if (!pr) return;
+    retireSemanticViewSettlement();
     let fromOpeningFocus = null;
     if (semanticDofParcel === fromId) fromOpeningFocus = semanticDofAnchor.clone();
     else fromOpeningFocus = resolveArchitecturalDofAnchor(fromId, new THREE.Vector3());
@@ -1760,6 +1796,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           setZoomRegime('focus', closeupDist);
           emit('villageFocusMorph', 1);
           emit('villageSelect', { parcelId: toId, spec: pr.buildingSpec });
+          emitSettledView();
         },
       });
     });
@@ -2007,6 +2044,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       weatherRef?.setWeather(state.weather);               // 랜딩 조립 정착 후 날씨 복원
       updateWeatherColliders();
       emit('villageSelect', { parcelId: heroId, spec: pr.buildingSpec });
+      emitSettledView();
       onDone?.();
     } });
   }
@@ -2062,6 +2100,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
       emit('villageSelect', { parcelId: id, spec: pr.buildingSpec });      // 패널 재슬라이드인
+      emitSettledView();
     } });
   }
 
@@ -2118,6 +2157,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
       emit('villageSelect', { parcelId: id, spec });             // 패널 재슬라이드인(새 시드 기본값)
+      emitSettledView();
     } });
   }
 
@@ -2154,6 +2194,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   function startVillageWave({ seed, buildOpts, reframe = false } = {}) {
     if (!village.active || !village.handle || village.wave || village.transitioning) return null;
+    retireSemanticViewSettlement();
     // 반대 방향 경합도 latest request가 이긴다. 진행 중 regular async 결과는 토큰 불일치로
     // 완성 즉시 dispose되고 현재 oldHandle을 건드리지 않는다.
     village.build = null;
@@ -2348,8 +2389,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         seed,
         subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
         duration: 2.6,
-        onDone: () => emit('viewSettled', {}),
-        onInterrupt: () => emit('viewSettled', {}),
+        onDone: emitSettledView,
+        onInterrupt: requestSemanticViewSettlement,
       });
       emit('seed', seed);
       return seed;
@@ -2372,8 +2413,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         seed: state.seed,
         subjectSize: Math.max(layout.W + 4, layout.D + 4, layout.totalH),
         duration: 2.6,
-        onDone: () => emit('viewSettled', {}),
-        onInterrupt: () => emit('viewSettled', {}),
+        onDone: emitSettledView,
+        onInterrupt: requestSemanticViewSettlement,
       });
       emit('seed', state.seed);
       return state.seed;
@@ -3139,6 +3180,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       groupAnims = [];
       rebuildTimer = null;
       demoRuntime.dispose();
+      controls.removeEventListener('start', onControlsStart);
       controls.removeEventListener('end', onControlsEnd);
       revealCamera?.dispose();
       cinematic.dispose?.();
