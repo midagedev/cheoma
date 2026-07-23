@@ -88,6 +88,8 @@ app/src/                       Svelte UI
 | `src/api/index.js` | 전체 browser runtime façade | WebGL browser runtime |
 
 외부 프로젝트는 bare `three`를 하나만 사용해야 한다. 이 레포처럼 alias/dedupe를 적용하거나 향후 패키징 시 `three@0.185.1`을 peer dependency로 둔다.
+단독 건물의 import map, 최소 scene, 재생성·해제 순서는 [`external-reuse.md`](external-reuse.md)와
+실행 가능한 [`examples/api-building/`](../examples/api-building/)을 기준으로 한다.
 
 ### 수묵 렌더 재사용 경계
 

@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
 const APP = join(ROOT, 'app', 'src');
+const API_BUILDING_EXAMPLE = join(ROOT, 'examples', 'api-building');
+const API_BUILDING_EXAMPLE_HTML = join(API_BUILDING_EXAMPLE, 'index.html');
+const API_BUILDING = join(SRC, 'api', 'building.js');
 const API_PLAN = join(SRC, 'api', 'village-plan.js');
 const API_PARTICLE_STATE = join(SRC, 'api', 'particle-state.js');
 const API_RENDER_STYLE = join(SRC, 'api', 'render-style.js');
@@ -40,7 +43,7 @@ function resolveRelative(from, specifier) {
   }) || null;
 }
 
-const files = [...walk(SRC), ...walk(APP)];
+const files = [...walk(SRC), ...walk(APP), ...walk(API_BUILDING_EXAMPLE)];
 const sourceByFile = new Map(files.map((file) => [file, readFileSync(file, 'utf8')]));
 const graph = new Map();
 const externals = new Map();
@@ -54,6 +57,11 @@ for (const file of files) {
       bare.push(specifier);
       if (file.startsWith(SRC + sep) && (specifier === 'svelte' || specifier.startsWith('svelte/'))) {
         errors.push(`src must not import Svelte: ${relative(ROOT, file)} -> ${specifier}`);
+      }
+      if (file.startsWith(API_BUILDING_EXAMPLE + sep)
+        && specifier !== 'three'
+        && !specifier.startsWith('three/addons/')) {
+        errors.push(`building example imports unsupported package: ${relative(ROOT, file)} -> ${specifier}`);
       }
       continue;
     }
@@ -74,6 +82,11 @@ for (const file of files) {
       && !target.startsWith(join(SRC, 'api') + sep)) {
       errors.push(`app bypasses public facade: ${relative(ROOT, file)} -> ${relative(ROOT, target)}`);
     }
+    if (file.startsWith(API_BUILDING_EXAMPLE + sep)
+      && !target.startsWith(API_BUILDING_EXAMPLE + sep)
+      && target !== API_BUILDING) {
+      errors.push(`building example bypasses its public API: ${relative(ROOT, file)} -> ${relative(ROOT, target)}`);
+    }
     if (file.startsWith(join(SRC, 'core') + sep)
       && !target.startsWith(join(SRC, 'core') + sep)
       && target !== join(SRC, 'rng.js')
@@ -92,6 +105,50 @@ for (const file of files) {
   }
   graph.set(file, [...new Set(deps)]);
   externals.set(file, bare);
+}
+
+// Copyable browser import maps must resolve the core and every transitive addon
+// through one exact three release. Runtime instanceof checks cover identity; this
+// static check keeps the example itself honest before a browser is started.
+const exampleHtml = readFileSync(API_BUILDING_EXAMPLE_HTML, 'utf8');
+const importMapSource = exampleHtml.match(
+  /<script\s+type=["']importmap["']\s*>([\s\S]*?)<\/script>/i,
+)?.[1];
+if (!importMapSource) {
+  errors.push('building example has no import map');
+} else {
+  try {
+    const importMap = JSON.parse(importMapSource);
+    const imports = importMap.imports || {};
+    const expected = {
+      three: 'https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js',
+      'three/addons/': 'https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/',
+    };
+    for (const [specifier, url] of Object.entries(expected)) {
+      if (imports[specifier] !== url) {
+        errors.push(`building example import map must pin ${specifier} to ${url}`);
+      }
+    }
+    const unsupported = Object.keys(imports).filter((specifier) => !Object.hasOwn(expected, specifier));
+    if (unsupported.length) {
+      errors.push(`building example import map has unsupported entries: ${unsupported.join(', ')}`);
+    }
+    const unsupportedSections = Object.keys(importMap)
+      .filter((section) => section !== 'imports');
+    if (unsupportedSections.length) {
+      errors.push(`building example import map has unsupported sections: ${unsupportedSections.join(', ')}`);
+    }
+  } catch (error) {
+    errors.push(`building example import map is invalid JSON: ${error.message}`);
+  }
+}
+
+const moduleScripts = [...exampleHtml.matchAll(/<script\b([^>]*)>/gi)]
+  .map((match) => match[1])
+  .filter((attributes) => /\btype\s*=\s*["']module["']/i.test(attributes))
+  .map((attributes) => attributes.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1] || null);
+if (moduleScripts.length !== 1 || moduleScripts[0] !== './main.js') {
+  errors.push(`building example must load only ./main.js as a module: ${moduleScripts.join(', ')}`);
 }
 
 // Tarjan SCC: src 내부 순환은 병렬 변경과 재사용 경계를 흐리므로 즉시 실패시킨다.

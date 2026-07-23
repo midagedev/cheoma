@@ -25,6 +25,7 @@
 | --- | --- | --- |
 | [`agent-workflow.md`](agent-workflow.md) | 계약 | 독립 worktree·claim·인계·정리와 세 단계 검증의 빠른 표준 경로. |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
+| [`external-reuse.md`](external-reuse.md) | 계약 | `src/api/building.js`만 쓰는 최소 외부 scene, 단일 Three, 생성·재생성·dispose 소유권과 독립 smoke. |
 | [`ink-landscape.md`](ink-landscape.md) | 계약 + 리서치 | 조선 진경산수 근거, PBR↔수묵 렌더·색공간·성능·접근성 계약. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |

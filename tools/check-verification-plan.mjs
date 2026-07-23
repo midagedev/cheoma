@@ -9,7 +9,10 @@ import {
   FULL_PROFILE,
   VERIFICATION_GATES,
 } from './lib/verification-gates.mjs';
-import { impactedFastChecks } from './lib/verification-impact.mjs';
+import {
+  API_REUSE_DEPENDENCIES,
+  impactedFastChecks,
+} from './lib/verification-impact.mjs';
 
 function ids(files, options) {
   return verificationCommands(planVerification(files, options)).map((command) => command.id);
@@ -28,7 +31,7 @@ assert.deepEqual(ids(['src/env/bokeh-source-scatter.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
-assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'lod-app']);
+assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/env/snow-material.js']), ['core', 'app', 'rim', 'winter-app']);
 assert.deepEqual(ids(['src/env/weather.js']), [
   'core', 'app', 'petals', 'particle-geometry', 'winter-app', 'lod-wave',
@@ -42,7 +45,7 @@ assert.deepEqual(ids(['src/env/motes.js']), [
 assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
   'core', 'app', 'particle-geometry',
 ]);
-assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'lod-app']);
+assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
@@ -98,17 +101,27 @@ assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
 assert.deepEqual(ids(['src/api/ink.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/api/render-style.js']), ['core', 'app', 'ink-app']);
 assert.deepEqual(ids(['src/builder/palette.js']), [
-  'core', 'app', 'rim', 'building-lifecycle', 'winter-app', 'worker',
+  'core', 'app', 'rim', 'building-lifecycle', 'api-reuse', 'winter-app', 'worker',
 ]);
 assert.deepEqual(ids(['src/builder/index.js']), [
-  'core', 'app', 'building-lifecycle', 'worker',
+  'core', 'app', 'building-lifecycle', 'api-reuse', 'worker',
 ]);
 assert.deepEqual(ids(['src/render/shadow-depth-texture-lifecycle.js']), [
-  'core', 'app', 'building-lifecycle',
+  'core', 'app', 'building-lifecycle', 'api-reuse',
+]);
+assert.deepEqual(ids(['src/core/three-resources.js']), [
+  'core', 'app', 'building-lifecycle', 'api-reuse', 'worker',
 ]);
 assert.deepEqual(ids(['src/api/building.js']), [
-  'core', 'app', 'building-lifecycle',
+  'core', 'app', 'building-lifecycle', 'api-reuse',
 ]);
+assert.deepEqual(ids(['src/layout/hanok.js']), [
+  'core', 'app', 'api-reuse', 'worker',
+]);
+assert.deepEqual(ids(['examples/api-building/main.js']), ['core', 'api-reuse']);
+assert.deepEqual(ids(['src/village/palace.js']), ['core', 'app', 'api-reuse', 'worker']);
+assert.deepEqual(ids(['src/rng.js']), ['core', 'app', 'api-reuse', 'worker']);
+assert.deepEqual(ids(['src/props/threshold-life.js']), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/env/weather.js', 'src/village/plan.js']), [
   'core', 'app', 'petals', 'particle-geometry', 'winter-app', 'worker', 'lod-wave',
 ]);
@@ -155,10 +168,10 @@ assert.deepEqual(ids(['src/village/nightlight-physical-geometry.js']), [
   'core', 'app', 'particle-geometry', 'instance-upload', 'worker',
 ]);
 assert.deepEqual(ids(['src/village/instancing.js']), [
-  'core', 'app', 'instance-upload', 'winter-app', 'worker', 'lod-app',
+  'core', 'app', 'instance-upload', 'api-reuse', 'winter-app', 'worker', 'lod-app',
 ]);
 assert.deepEqual(ids(['src/core/buffer-update-range.js']), [
-  'core', 'app', 'instance-upload', 'worker', 'lod-wave',
+  'core', 'app', 'instance-upload', 'api-reuse', 'worker', 'lod-wave',
 ]);
 assert.deepEqual(ids(['src/api/particles.js']), ['core', 'app', 'particle-geometry']);
 assert.deepEqual(ids(['src/api/particle-state.js']), ['core', 'particle-geometry']);
@@ -177,6 +190,9 @@ assert.deepEqual(ids(['tools/check-instance-upload-browser.mjs']), [
 ]);
 assert.deepEqual(ids(['tools/check-building-texture-lifecycle.mjs']), [
   'core', 'building-lifecycle',
+]);
+assert.deepEqual(ids(['tools/check-api-reuse-example.mjs']), [
+  'core', 'api-reuse',
 ]);
 const bokehCommands = verificationCommands(planVerification(['src/env/bokeh-source-scatter.js']));
 assert.deepEqual(
@@ -213,11 +229,18 @@ assert.deepEqual(impactedFastChecks(['src/core/buffer-update-range.js']), [
 ]);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [
-  'core', 'app', 'dof-app', 'rim', 'worker', 'lod-app', 'cinematic-app',
+  'core', 'app', 'dof-app', 'rim', 'api-reuse', 'worker', 'lod-app', 'cinematic-app',
 ]);
+for (const path of API_REUSE_DEPENDENCIES) {
+  assert.equal(
+    planVerification([path]).gates.includes('api-reuse'),
+    true,
+    `${path} must retain the standalone API reuse gate`,
+  );
+}
 assert.deepEqual(ALL_PROFILE, [
   'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
-  'instance-upload', 'building-lifecycle', 'winter-app', 'worker', 'audio', 'temple-browser',
+  'instance-upload', 'building-lifecycle', 'api-reuse', 'winter-app', 'worker', 'audio', 'temple-browser',
   'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [
