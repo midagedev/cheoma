@@ -15,6 +15,7 @@ import {
   captureSemanticOrbit,
   semanticLogZoom,
   semanticLogZoomRatio,
+  timeAdjustedDampingFactor,
 } from '../app/src/engine/semantic-view-runtime.js';
 
 const state = {
@@ -259,6 +260,29 @@ assert.equal(semanticLogZoom(Math.exp(8) * 2), null);
 const middleZoom = semanticLogZoom(1);
 assert.equal(middleZoom, 0.5);
 assert.equal(semanticLogZoomRatio(middleZoom), 1);
+const baseDamping = 0.05;
+const residualAfterOneSecond = (factor, fps) => Math.pow(1 - factor, fps);
+const damping30 = timeAdjustedDampingFactor(baseDamping, 1 / 30);
+const damping60 = timeAdjustedDampingFactor(baseDamping, 1 / 60);
+const damping120 = timeAdjustedDampingFactor(baseDamping, 1 / 120);
+const damping5 = timeAdjustedDampingFactor(baseDamping, 1 / 5);
+const dampingOneSecond = timeAdjustedDampingFactor(baseDamping, 1);
+const dampingFourSeconds = timeAdjustedDampingFactor(baseDamping, 4);
+const expectedOneSecondResidual = Math.pow(1 - baseDamping, 60);
+assert.ok(Math.abs(damping60 - baseDamping) < 1e-12);
+assert.ok(Math.abs(residualAfterOneSecond(damping30, 30) - expectedOneSecondResidual) < 1e-12);
+assert.ok(Math.abs(residualAfterOneSecond(damping60, 60) - expectedOneSecondResidual) < 1e-12);
+assert.ok(Math.abs(residualAfterOneSecond(damping120, 120) - expectedOneSecondResidual) < 1e-12);
+assert.ok(Math.abs(residualAfterOneSecond(damping5, 5) - expectedOneSecondResidual) < 1e-12);
+assert.ok(Math.abs((1 - dampingOneSecond) - expectedOneSecondResidual) < 1e-12);
+assert.ok(Math.abs((1 - dampingFourSeconds) - Math.pow(1 - baseDamping, 240)) < 1e-12);
+const dampingQuarterSecond = timeAdjustedDampingFactor(baseDamping, 0.25);
+const dampingHalfSecond = timeAdjustedDampingFactor(baseDamping, 0.5);
+assert.ok(Math.abs(
+  (1 - dampingQuarterSecond) * (1 - dampingQuarterSecond)
+    - (1 - dampingHalfSecond),
+) < 1e-12, 'time-adjusted damping must preserve composition across split frames');
+assert.equal(timeAdjustedDampingFactor(baseDamping, -1), null);
 assert.equal(captureSemanticOrbit({
   position: { x: 0, y: 0, z: 5 },
   target: { x: 0, y: 0, z: 0 },

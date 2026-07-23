@@ -8,6 +8,19 @@ export const MIN_SEMANTIC_VIEW_ELEVATION = 1.1;
 export const MAX_SEMANTIC_VIEW_ELEVATION = 88.3;
 export const MAX_SEMANTIC_VIEW_PAN = 2;
 
+// OrbitControls 0.185 applies dampingFactor once per rendered frame and ignores
+// its update(deltaTime) argument for damping. Convert the authored 60 Hz factor
+// into the mathematically equivalent factor for the actual wall-time interval.
+export function timeAdjustedDampingFactor(baseFactor, elapsedSeconds, referenceFps = 60) {
+  const base = Number(baseFactor);
+  const elapsed = Number(elapsedSeconds);
+  const fps = Number(referenceFps);
+  if (!Number.isFinite(base) || base < 0 || base > 1
+      || !Number.isFinite(elapsed) || elapsed < 0
+      || !Number.isFinite(fps) || !(fps > 0)) return null;
+  return 1 - Math.pow(1 - base, elapsed * fps);
+}
+
 export function captureSemanticOrbit({
   position,
   target,

@@ -2943,26 +2943,83 @@ try {
   })})`);
 
   const manualStandaloneBeforeAddress = standaloneReloaded.address;
-  await standalonePage.mouse.move(195, 300);
-  await standalonePage.mouse.down();
-  await standalonePage.mouse.move(235, 320, { steps: 8 });
-  await standalonePage.mouse.up();
+  const manualStandaloneBeforeView = standaloneReloaded.view;
+  await standalonePage.evaluate(() => {
+    const audit = { starts: 0, ends: 0, settled: 0 };
+    window.__engine.__controls.addEventListener('start', () => { audit.starts += 1; });
+    window.__engine.__controls.addEventListener('end', () => { audit.ends += 1; });
+    window.__engine.on('viewSettled', () => { audit.settled += 1; });
+    window.__standaloneOrbitAudit = audit;
+  });
+  const dragStandalone = async ({ from, to }) => {
+    await standalonePage.mouse.move(from.x, from.y);
+    await standalonePage.mouse.down();
+    await standalonePage.mouse.move(to.x, to.y, { steps: 8 });
+    await standalonePage.mouse.up();
+  };
+  const waitForStandaloneInput = () => standalonePage.waitForFunction(
+    (before) => {
+      const current = window.__engine?.captureView?.();
+      if (!current) return false;
+      const azimuthDelta = Math.abs((((current.azimuth - before.azimuth) % 360) + 540) % 360 - 180);
+      return azimuthDelta > 0.25
+        || Math.abs(current.elevation - before.elevation) > 0.25
+        || Math.abs(current.zoom - before.zoom) > 0.002
+        || Math.abs(current.panEast - before.panEast) > 0.002
+        || Math.abs(current.panUp - before.panUp) > 0.002
+        || Math.abs(current.panSouth - before.panSouth) > 0.002;
+    },
+    manualStandaloneBeforeView,
+    { timeout: 3_000 },
+  ).then(() => true, () => false);
+
+  // This late mobile page competes with two retained product pages in the
+  // full merge profile. Make input ownership explicit and fail fast if the
+  // trusted drag itself was not delivered; a moved camera with an unchanged
+  // URL is the separate product settlement failure below.
+  await standalonePage.bringToFront();
+  await dragStandalone({ from: { x: 195, y: 300 }, to: { x: 235, y: 320 } });
+  const standaloneInputMoved = await waitForStandaloneInput();
+  if (!standaloneInputMoved) {
+    const hit = await standalonePage.evaluate(() => {
+      const node = document.elementFromPoint(195, 300);
+      return { tag: node?.tagName || null, className: node?.className || null };
+    });
+    throw new Error(`standalone OrbitControls fixture delivered no camera movement: ${JSON.stringify(hit)}`);
+  }
   await standalonePage.waitForFunction(
     (beforeAddress) => location.href !== beforeAddress,
     manualStandaloneBeforeAddress,
-    { timeout },
-  );
+    { timeout: 10_000 },
+  ).catch(async (error) => {
+    const evidence = await standalonePage.evaluate(() => ({
+      address: location.href,
+      view: window.__engine?.captureView?.() || null,
+      reveal: window.__engine?.debugArchitecturalReveal?.() || null,
+      audit: window.__standaloneOrbitAudit || null,
+    }));
+    throw new Error(`standalone camera moved but semantic URL did not settle: ${JSON.stringify(evidence)}`, {
+      cause: error,
+    });
+  });
   const manualStandaloneView = await standalonePage.evaluate((beforeAddress) => ({
     beforeAddress,
     afterAddress: location.href,
     view: window.__engine.captureView(),
+    audit: window.__standaloneOrbitAudit,
   }), manualStandaloneBeforeAddress);
   const manualStandaloneSnapshot = decodeSceneSnapshot(
     new URL(manualStandaloneView.afterAddress).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
   );
   pass(manualStandaloneView.afterAddress !== manualStandaloneView.beforeAddress
-      && semanticViewClose(manualStandaloneSnapshot?.view, manualStandaloneView.view),
-  `standalone OrbitControls end commits the settled semantic view to the canonical address (${JSON.stringify(manualStandaloneView.view)})`);
+      && semanticViewClose(manualStandaloneSnapshot?.view, manualStandaloneView.view)
+      && manualStandaloneView.audit.starts === 1
+      && manualStandaloneView.audit.ends === 1
+      && manualStandaloneView.audit.settled === 1,
+  `standalone OrbitControls end commits the settled semantic view to the canonical address (${JSON.stringify({
+    view: manualStandaloneView.view,
+    audit: manualStandaloneView.audit,
+  })})`);
   await standalonePage.close();
 
   // A pending old-type slider callback must not write into a newly reset P.

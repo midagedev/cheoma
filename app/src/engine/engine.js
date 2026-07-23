@@ -54,6 +54,7 @@ import {
   restoreSemanticOrbit,
   semanticLogZoom,
   semanticLogZoomRatio,
+  timeAdjustedDampingFactor,
 } from './semantic-view-runtime.js';
 
 const DEG = Math.PI / 180;
@@ -628,6 +629,29 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emitSettledView();
   }
 
+  function updateOrbitControls(dt, elapsed) {
+    if (!controls.enableDamping) {
+      controls.update(dt);
+      return;
+    }
+    const baseDamping = controls.dampingFactor;
+    const adjustedDamping = timeAdjustedDampingFactor(baseDamping, elapsed);
+    if (adjustedDamping == null) {
+      controls.update(dt);
+      return;
+    }
+    // OrbitControls uses dampingFactor both to apply this frame's share and to
+    // retain the tail. Temporarily substituting the wall-time-equivalent factor
+    // preserves the exact 60 Hz curve at 30/60/120 Hz and after a throttled
+    // frame, while autoRotate still consumes the separately clamped dt.
+    controls.dampingFactor = adjustedDamping;
+    try {
+      controls.update(dt);
+    } finally {
+      controls.dampingFactor = baseDamping;
+    }
+  }
+
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
   function ensureAudio() {
     if (audio) return audio;
@@ -916,7 +940,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // dt 를 넘겨 autoRotate 를 프레임레이트 독립으로 — 무인자 update() 는 60fps 를 가정한
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
-    if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) controls.update(dt);
+    if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) {
+      updateOrbitControls(dt, elapsed);
+    }
     const settledFocusAmount = village.active && village.selected && !village.transitioning && !tween
       ? villageCamera.updateFocusContext() : null;
     // Focus context may crane the camera after OrbitControls consumes its
