@@ -83,16 +83,36 @@ try {
       nativeMode: 'success',
       clipboardMode: 'success',
       nativePayloads: [],
+      nativeActivations: [],
       clipboardValues: [],
+      activeClick: null,
     };
     Object.defineProperty(window, '__shareProbe', {
       configurable: false,
       value: shareProbe,
     });
+    // Remember the exact trusted click object seen in capture. window.event is
+    // that same object only while dispatch is still running, so the native
+    // stub below rejects any call moved behind App's first await even if
+    // Chromium's transient userActivation outlives the event task.
+    document.addEventListener('click', (event) => {
+      if (!event.isTrusted) return;
+      shareProbe.activeClick = event;
+    }, true);
     Object.defineProperty(navigator, 'share', {
       configurable: true,
       value: async (payload) => {
+        const activation = {
+          userActivation: navigator.userActivation?.isActive === true,
+          eventTask: window.event === shareProbe.activeClick
+            && window.event?.isTrusted === true
+            && window.event?.type === 'click',
+        };
+        shareProbe.nativeActivations.push(activation);
         shareProbe.nativePayloads.push(structuredClone(payload));
+        if (!activation.userActivation || !activation.eventTask) {
+          throw new Error('native share lost user activation');
+        }
         if (shareProbe.nativeMode === 'abort') {
           throw new DOMException('share dismissed', 'AbortError');
         }
@@ -159,6 +179,7 @@ try {
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'abort', clipboardMode: 'success' });
     window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
   await shareButton.focus();
@@ -167,15 +188,21 @@ try {
   await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
   const abortedShare = await page.evaluate(() => ({
     native: window.__shareProbe.nativePayloads.length,
+    activation: window.__shareProbe.nativeActivations[0] || null,
     clipboard: window.__shareProbe.clipboardValues.length,
     toast: document.querySelector('.toast')?.textContent?.trim() || null,
   }));
-  pass(abortedShare.native === 1 && abortedShare.clipboard === 0 && abortedShare.toast == null,
+  pass(abortedShare.native === 1
+      && abortedShare.activation?.userActivation
+      && abortedShare.activation?.eventTask
+      && abortedShare.clipboard === 0
+      && abortedShare.toast == null,
     `keyboard-native AbortError stays silent and does not copy (${JSON.stringify(abortedShare)})`);
 
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
     window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
   await shareButton.focus();
@@ -187,6 +214,7 @@ try {
     const fields = Object.fromEntries(shared.searchParams);
     return {
       payload,
+      activation: window.__shareProbe.nativeActivations[0] || null,
       fields,
       clipboard: window.__shareProbe.clipboardValues.length,
       toast: document.querySelector('.toast')?.textContent?.trim() || null,
@@ -196,6 +224,8 @@ try {
   });
   pass(nativeShare.payload?.title === '처마 — 내가 지은 풍경'
       && nativeShare.payload?.text === '처마에서 만든 한국의 집과 마을을 둘러보세요.'
+      && nativeShare.activation?.userActivation
+      && nativeShare.activation?.eventTask
       && nativeShare.fields.seed === '42'
       && nativeShare.fields.time === 'day'
       && nativeShare.fields.village === '1'
@@ -209,6 +239,7 @@ try {
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'fail', clipboardMode: 'success' });
     window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
   await shareButton.focus();
@@ -216,11 +247,14 @@ try {
   await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 복사했습니다', null, { timeout });
   const copiedShare = await page.evaluate(() => ({
     native: window.__shareProbe.nativePayloads.length,
+    activation: window.__shareProbe.nativeActivations[0] || null,
     copied: window.__shareProbe.clipboardValues,
     payloadUrl: window.__shareProbe.nativePayloads[0]?.url,
     toast: document.querySelector('.toast')?.textContent?.trim() || null,
   }));
   pass(copiedShare.native === 1
+      && copiedShare.activation?.userActivation
+      && copiedShare.activation?.eventTask
       && copiedShare.copied.length === 1
       && copiedShare.copied[0] === copiedShare.payloadUrl
       && copiedShare.toast === '장면 링크를 복사했습니다',
@@ -229,6 +263,7 @@ try {
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'fail', clipboardMode: 'fail' });
     window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
   await shareButton.focus();
@@ -236,10 +271,14 @@ try {
   await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유하지 못했습니다', null, { timeout });
   const failedShare = await page.evaluate(() => ({
     native: window.__shareProbe.nativePayloads.length,
+    activation: window.__shareProbe.nativeActivations[0] || null,
     clipboard: window.__shareProbe.clipboardValues.length,
     toast: document.querySelector('.toast')?.textContent?.trim() || null,
   }));
-  pass(failedShare.native === 1 && failedShare.clipboard === 1
+  pass(failedShare.native === 1
+      && failedShare.activation?.userActivation
+      && failedShare.activation?.eventTask
+      && failedShare.clipboard === 1
       && failedShare.toast === '장면 링크를 공유하지 못했습니다',
   `native and clipboard failure surface one localized failure toast (${JSON.stringify(failedShare)})`);
 
@@ -2240,9 +2279,104 @@ try {
       && magistracyScope.pivots === 0,
   `town magistracy hero remains outside residential door interaction (${JSON.stringify(magistracyScope)})`);
 
-  const texturePlateau = await page.evaluate(() => {
+  // Return this existing app boot to the standalone house, select it, and
+  // exercise the narrow ParamPanel owner. The global ActionBar is deliberately
+  // absent while hideActions=true, so ParamPanel must own exactly one share
+  // action instead of dropping the capability.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
     const engine = window.__engine;
     engine.village.exit();
+    engine.select();
+  });
+  await page.waitForFunction(() => {
+    const sheet = document.querySelector('.sheet.right');
+    return window.__device?.sheet === true
+      && !window.__engine.village.getState().active
+      && sheet?.dataset.snap === 'half'
+      && sheet.getAttribute('aria-hidden') === 'false'
+      && !sheet.inert;
+  }, null, { timeout });
+  const singleHouseShare = page.locator('.sheet.right [data-action="share"]');
+  await singleHouseShare.waitFor({ state: 'visible', timeout });
+  const singleHouseShareLayout = await singleHouseShare.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const sheet = button.closest('.sheet.right')?.getBoundingClientRect();
+    const title = button.parentElement?.querySelector('.title')?.getBoundingClientRect();
+    const close = button.closest('.sheet.right')?.querySelector('.grip .x')?.getBoundingClientRect();
+    const overlap = (a, b) => b
+      ? Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+        * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+      : 0;
+    return {
+      count: document.querySelectorAll('[data-action="share"]').length,
+      owner: button.closest('.sheet.right')?.getAttribute('aria-label') || null,
+      ownerInert: button.closest('.sheet.right')?.inert ?? null,
+      hiddenAncestor: !!button.closest('[inert], [aria-hidden="true"]'),
+      globalActionBar: document.querySelectorAll('.actions').length,
+      left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+      width: rect.width, height: rect.height,
+      sheetLeft: sheet?.left ?? null,
+      sheetRight: sheet?.right ?? null,
+      titleOverlap: overlap(rect, title),
+      closeOverlap: overlap(rect, close),
+      viewport: [innerWidth, innerHeight],
+    };
+  });
+  pass(singleHouseShareLayout.count === 1
+      && singleHouseShareLayout.owner === 'build panel'
+      && singleHouseShareLayout.ownerInert === false
+      && !singleHouseShareLayout.hiddenAncestor
+      && singleHouseShareLayout.globalActionBar === 0
+      && singleHouseShareLayout.width >= 44
+      && singleHouseShareLayout.height >= 44
+      && singleHouseShareLayout.left >= singleHouseShareLayout.sheetLeft
+      && singleHouseShareLayout.right <= singleHouseShareLayout.sheetRight
+      && singleHouseShareLayout.top >= 0
+      && singleHouseShareLayout.bottom <= 844
+      && singleHouseShareLayout.titleOverlap === 0
+      && singleHouseShareLayout.closeOverlap === 0,
+  `390x844 standalone edit share stays in the active ParamPanel owner without a global duplicate (${JSON.stringify(singleHouseShareLayout)})`);
+  if (captureDir) {
+    await page.screenshot({ path: join(captureDir, 'share-mobile-single-house.png') });
+  }
+
+  await page.evaluate(() => {
+    Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
+    window.__shareProbe.nativePayloads.length = 0;
+    window.__shareProbe.nativeActivations.length = 0;
+    window.__shareProbe.clipboardValues.length = 0;
+  });
+  await singleHouseShare.click();
+  await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유했습니다', null, { timeout });
+  const singleHouseShareCall = await page.evaluate(() => {
+    const payload = window.__shareProbe.nativePayloads[0];
+    const query = new URL(payload?.url || location.href).searchParams;
+    return {
+      native: window.__shareProbe.nativePayloads.length,
+      activation: window.__shareProbe.nativeActivations[0] || null,
+      clipboard: window.__shareProbe.clipboardValues.length,
+      villageFields: ['village', 'vseed', 'vscale', 'vpalace', 'vtemple', 'vedit']
+        .filter((key) => query.has(key)),
+      toast: document.querySelector('.toast')?.textContent?.trim() || null,
+    };
+  });
+  pass(singleHouseShareCall.native === 1
+      && singleHouseShareCall.activation?.userActivation
+      && singleHouseShareCall.activation?.eventTask
+      && singleHouseShareCall.clipboard === 0
+      && singleHouseShareCall.villageFields.length === 0
+      && singleHouseShareCall.toast === '장면 링크를 공유했습니다',
+  `standalone ParamPanel share invokes native sharing synchronously with no stale village state (${JSON.stringify(singleHouseShareCall)})`);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForFunction(() => window.__device?.sheet === false
+    && !!document.querySelector('.panel:not([inert])')
+    && document.querySelectorAll('[data-action="share"]').length === 1
+    && !!document.querySelector('.actions [data-action="share"]'), null, { timeout });
+
+  const texturePlateau = await page.evaluate(() => {
+    const engine = window.__engine;
     let thresholdLifeCount = 0;
     engine.village.exportRoot()?.traverse((object) => {
       if (object.name === 'threshold-life-detail') thresholdLifeCount++;

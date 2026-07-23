@@ -1068,6 +1068,7 @@
     onExpansion={setExpansion}
     onMerge={mergeNeighbor}
     onParam={setParam}
+    onShare={hideActions ? shareScene : null}
     onClose={closePanel}
   />
 {/if}
