@@ -27,6 +27,7 @@ import { planPublicProps } from './public-props-plan.js';
 import { planRiverPort } from './river-port-plan.js';
 import { attachRoadJunctions } from './road-topology.js';
 import { normalizeVillageTuningOptions } from './options.js';
+import { planSijeon } from './sijeon-plan.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -507,42 +508,6 @@ export function planVillage(opts = {}) {
       parcelDebug: planParcels.lastDebug,
     },
   };
-}
-
-// ── 시전행랑(선형 상업) ── 간선(daero=주작대로·종로) 양측 파사드를 따라 연속 배치된 연립 점포.
-//   점포 칸(pitch)을 연이어 놓아 벽식 상가 열을 이룬다. 교차점 주변 밀도 최대(중심 근접만), 성문
-//   접근 구간(양 끝)은 비운다. 반환 각 항목 poly 는 blockers 로도 쓰여 일반 필지 침범을 막는다.
-function planSijeon(roadsResult, site, char01) {
-  const shops = [];
-  const arterials = roadsResult.roads.filter((r) => r.level === 'daero');
-  const pitch = 6.2, depth = 8.5, setback = 1.4, runCap = 26;
-  const bowlR = site.bowlR;
-  const others = (road) => arterials.filter((r) => r !== road);
-  let sid = 0;
-  for (const road of arterials) {
-    const fine = G.resample(road.pts, pitch);
-    if (fine.length < 8) continue;
-    const hw = road.width / 2;
-    const oth = others(road);
-    for (let side = 1; side >= -1; side -= 2) {
-      let run = 0;
-      for (let i = 3; i < fine.length - 3 && run < runCap; i++) {
-        const smp = fine[i];
-        if (G.dist(smp.pt, site.center) > bowlR * 0.9) continue;   // 도심 상업 집중(외곽 성글게)
-        const inward = G.mul(G.perpL(smp.tan), side);
-        const base = G.add(smp.pt, G.mul(inward, hw + setback));
-        // 다른 간선(교차점) 너무 근접하면 건너뜀(상가 파일업·z-fighting 방지).
-        let clash = false;
-        for (const o of oth) { if (G.distToPolyline(base, o.pts).d < o.width / 2 + depth) { clash = true; break; } }
-        if (clash) continue;
-        const poly = G.frontageParcel(base, smp.tan, inward, pitch * 0.5, depth, 0);
-        shops.push({ id: `s${sid++}`, poly, center: G.polyCentroid(poly),
-          frontDir: G.norm(G.mul(inward, -1)), x: base.x, z: base.z, w: pitch, d: depth });
-        run++;
-      }
-    }
-  }
-  return shops;
 }
 
 // 다랑이 논: 개울 남쪽 저지를 완만한 계단식 필드로 분할(등고 순응 지터).

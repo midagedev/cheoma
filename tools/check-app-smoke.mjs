@@ -867,6 +867,11 @@ try {
       title: item.querySelector('.it-title')?.textContent?.trim() || '',
       text: item.textContent.replace(/\s+/g, ' ').trim(),
       links: [...item.querySelectorAll('a')].map((anchor) => anchor.href),
+      anchors: [...item.querySelectorAll('a')].map((anchor) => ({
+        href: anchor.href,
+        target: anchor.target,
+        rel: anchor.rel,
+      })),
       license: item.querySelector('.it-license')?.textContent?.replace(/\s+/g, ' ').trim() || '',
     })),
   }));
@@ -905,6 +910,21 @@ try {
       && reference.links.some((url) => url.includes('Naganeupseong_Village_06.jpg'))
       && reference.links.some((url) => url.includes('Naganeupseong_Village_08.jpg')),
   'packed-earth visual evidence, non-copying use, and CC0 source links render in Product References');
+  const sijeonEvidence = reference.items.find((item) => (
+    item.title.includes('한양 시전행랑의 칸·표식·발굴 유구')
+  ));
+  pass(sijeonEvidence?.text.includes('기존 위치·footprint를 보존한 순수 2칸 계획')
+      && sijeonEvidence.text.includes('bench·개방 비율·후면 저장·모든 수치는 제품 결정')
+      && sijeonEvidence.text.includes('정확한 형식이 불확실하므로 rendered v1에서는 제외')
+      && sijeonEvidence.links.some((url) => url.includes('km_003_0040_0020_0010'))
+      && sijeonEvidence.links.some((url) => url.includes('arcvGroupNo=2177'))
+      && sijeonEvidence.anchors.every((anchor) => (
+        anchor.target === '_blank'
+          && anchor.rel.split(/\s+/).includes('noopener')
+          && anchor.rel.split(/\s+/).includes('noreferrer')
+      ))
+      && sijeonEvidence.license.includes('All rights reserved'),
+  'sijeon evidence, product limits, canonical links, and safe external-link attributes render in Product References');
 
   await closeReference.click();
   await referenceDialog.waitFor({ state: 'detached', timeout });

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { makeMaterials } from '../../builder/palette.js';
 import { buildPavilion } from '../../builder/pavilion.js';
 import { buildBridge } from '../../builder/bridge.js';
 import { buildFerryCrossing } from '../../builder/ferry.js';
@@ -25,47 +24,32 @@ import {
   computePadY,
   featurePadMaterials,
 } from './pads.js';
+import { buildSijeon as renderSijeon } from './sijeon.js';
 
-function gableRoof(width, depth, height, material) {
-  const halfWidth = width / 2, halfDepth = depth / 2;
-  const positions = [
-    -halfWidth, 0, -halfDepth, halfWidth, 0, -halfDepth,
-    halfWidth, 0, halfDepth, -halfWidth, 0, halfDepth,
-    -halfWidth, height, 0, halfWidth, height, 0,
-  ];
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex([3, 2, 5, 3, 5, 4, 1, 0, 4, 1, 4, 5, 0, 3, 4, 2, 1, 5]);
-  geometry.computeVertexNormals();
-  return new THREE.Mesh(geometry, material);
+function sijeonMaterial(color, roughness, role) {
+  const material = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+  material.userData.role = role;
+  return material;
 }
 
+// Village palette adapter for the reusable sijeon renderer. These five plain
+// PBR materials are the only caller-owned resources it needs: no hidden canvas
+// textures, emissive edge light, or full hanok palette allocation.
 export function buildSijeon(shops, site) {
-  const materials = makeMaterials('giwa');
-  const tileMaterial = materials.tileFlat.clone();
-  tileMaterial.side = THREE.DoubleSide;
-  const group = new THREE.Group();
-  for (const shop of shops) {
-    const unit = new THREE.Group();
-    const width = shop.w * 0.96, depth = shop.d * 0.86, bodyHeight = 3;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(width, bodyHeight, depth), materials.plaster);
-    body.position.y = bodyHeight / 2;
-    body.castShadow = true;
-    body.receiveShadow = true;
-    unit.add(body);
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(width + 0.1, 0.4, depth + 0.1), materials.woodDark);
-    beam.position.y = bodyHeight - 0.2;
-    unit.add(beam);
-    const roof = gableRoof(width + 1.4, depth + 1.6, 1.7, tileMaterial);
-    roof.position.y = bodyHeight;
-    roof.castShadow = true;
-    roof.receiveShadow = true;
-    unit.add(roof);
-    unit.position.set(shop.center.x, site.heightAt(shop.center.x, shop.center.z), shop.center.z);
-    unit.rotation.y = G.facingY(shop.frontDir);
-    group.add(unit);
+  const materials = {
+    frame: sijeonMaterial(0x6f3626, 0.85, 'wood'),
+    opening: sijeonMaterial(0x241a14, 0.96, 'opening'),
+    bench: sijeonMaterial(0x765031, 0.9, 'wood'),
+    storage: sijeonMaterial(0xd4cbb5, 0.97, 'wall'),
+    roof: sijeonMaterial(0x45494e, 0.9, 'roof'),
+  };
+  materials.roof.userData.snowSurface = true;
+  try {
+    return renderSijeon(shops, { materials, heightAt: site?.heightAt });
+  } catch (error) {
+    for (const material of Object.values(materials)) material.dispose();
+    throw error;
   }
-  return mergeStatic([group], 'village-sijeon');
 }
 
 // 컴파운드 내부의 실제 door/hanji material set을 야간 패치 대상으로 모은다.

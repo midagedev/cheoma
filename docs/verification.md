@@ -644,6 +644,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-dof-app.mjs` | 실제 광각↔망원 focus, 조준점→문·문→문·focus-out 의미 초점 수명, rebuild/reroll 갱신·복합체 fallback, 13/41 frame과 StableBokeh 깊이 제외·상태/자원 복원 | 대표 focus의 moving/stable frame만 렌더하며 미감 판정을 대신하지 않는다. |
 | `tools/check-edge-mist.mjs` | 수평 운해의 아이레벨 유지, 10°→18° 단조 감쇠, 20° 부감 억제, 비정상 카메라 입력 fail-closed | Three 없는 순수 가중치 계약이며 실제 matrix 배선·운해 미감은 `shoot:lod-transition`이 맡는다. |
 | `tools/check-road-contract.mjs` | stable ID·junction 양방향 참조, 자기교차·좁은 lens, 곡률, road spatial index | 지형·재질에서 길이 자연스럽게 읽히는지는 시각 하네스로 본다. |
+| `tools/check-sijeon-contract.mjs` | 기존 시전 위치 bytes, 순수 2칸 façade schema, 필지·도로 회랑 경계, 유한값·직렬화·결정론·무전역 RNG | Three 재질·병합 geometry와 실제 한양 화면은 `shoot:sijeon`, app/worker 게이트가 맡는다. |
 | `tools/check-layout-contract.mjs` | 남향 군집·도로측 대문·실제 지붕 fit·단건 재굴림·도로/개울/논·집 사이 겨울 일조·정자 실면적/화면 폭·높이 있는 마을 소품·보호수·밀도 계약 | 대표 seed 순수 데이터 검사로, 실제 광학적 차폐 미감은 앱 캡처로 확인한다. |
 | `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |
 | `tools/check-wall-step-contract.mjs` | 평탄 exactness, 수평 단·대문 landing·변당 6 run 상한, renderer/semantic y 공유 | 순수 계약이며 실제 마을 안의 율동·가림은 `npm run shoot:wall-steps` 좌·우 PNG를 직접 본다. |
@@ -676,7 +677,8 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-focus-shadow.mjs` | 같은 원거리 집과 카메라의 원점 고정/필지 추종 석양 그림자 A/B | PNG는 OS 임시 폴더에 쓰며 처마·기단·마당의 실제 음영을 직접 판정한다. |
 | `tools/check-wave-contract.mjs` | scenery 배타 소유, 공유 재질 불변, 궁 tofu wave, cancel/dispose 멱등성 | 순수 계약으로 먹안개 미감과 실제 shader program 수는 보지 않는다. |
 | `tools/shoot-wave.mjs` | 실제 Vite 앱의 고정 progress 전환, 재질/version/cache key 불변, 그림자·program plateau | 기본은 대표 village 한 규모이며 `shoot:wave:full`이 전체 규모를 담당한다. old/new seed·환경·구간은 `CHEOMA_WAVE_*`로 고정한다. |
-| `tools/shoot-hanyang.mjs` | 한양 aerial/high/남·동·서·북문/eye/cull과 draw-call·triangle 수 | 절대 frame time은 판단하지 않으며 임시 출력 디렉터리를 명시한다. |
+| `tools/shoot-hanyang.mjs` | 한양 aerial/high/남·동·서·북문/eye/cull, 실제 plan의 중심 시전 거리 낮·석양과 draw-call·triangle 수 | 절대 frame time은 판단하지 않으며 임시 출력 디렉터리를 명시한다. 시전 근경은 성곽·도로·인접 필지 맥락을 확인하고, 격리 renderer/수묵 계약은 `shoot:sijeon`이 맡는다. |
+| `tools/shoot-sijeon.mjs` | 같은 순수 시전 plan을 낮·석양 PBR과 실제 수묵 composer에서 거리 아이레벨·사선·전체 부감으로 촬영하고 geometry hash·draw/material/texture·dispose 계약 기록 | 제품 한양의 지형·성곽·인접 건물 맥락은 별도 앱/한양 캡처로 확인하며, headless wall time을 성능 수치로 쓰지 않는다. |
 | `tools/shoot-vcritters.mjs` | 근경 소동물 wake·원경 sleep과 새 떼 유지, 대표 컷 | 기본 출력은 OS 임시 디렉터리이며 `CHEOMA_CRITTER_OUT`으로 재지정할 수 있다. |
 | `tools/verify-gltf.mjs` | FULL/FAR 카메라 독립 export, scenery·transient focus 제외, commit된 일반집 overlay 포함과 대체 base LOD 제외, GLB 라운드트립·예산 | 기본 출력은 OS 임시 디렉터리이며 `CHEOMA_GLTF_OUT`으로 재지정할 수 있다. |
 | `tools/check-rim-facing.mjs` | 실제 WebGL에서 N·V 실루엣, 실제 태양 N·L, V·L 역광, directDiffuse=0·그림자·제품형 비그림자 fill·`receiveShadow=false` 반례, 50% penumbra 비율, 실제 cloud-shadow callback/cache-key 합성, LOD/일반 cloud+snow+rim 프로그램 분리와 동차 `worldPosition` 복원, 추가 shadow fetch 0, HDR 에너지 상한, instanceColor·program plateau; `--app`은 시간을 멈춘 최종 24° 석양 focus에서 실제 마을 cloud+rim 지붕과 OFF/ON A/B | 고정 fixture와 대표 실앱 한 장이 모든 seed·재질의 미학을 대신하지 않는다. |
@@ -705,6 +707,7 @@ Headless ANGLE은 shader link를 직렬화하므로 절대 frame time을 실제 
 | 근경 DoF 의미 초점 | `check:opening-detail` + `check:dof:app` + 같은 카메라 `shoot:door-dof` PNG 직접 판정 |
 | shader/material/post/roof | 라우터 게이트 + program count와 고정 시드 이미지 직접 판정 |
 | 건축 고증·공식 자료 반영 | [`architectural-authenticity.md`](architectural-authenticity.md) 체크리스트 + `check:building-clearance` + `check:app` Reference UI + 같은 카메라 전후 PNG |
+| 한양 시전행랑 | [`sijeon.md`](sijeon.md) + `check:sijeon` + app/worker + `shoot:sijeon`의 거리·사선·전체 PBR/수묵 PNG와 draw/program/texture 비교 |
 | 창호 외관·철물·주거 primary 문 상호작용 | [`exterior-detail.md`](exterior-detail.md) + `check:opening-detail` + `check:door-motion` + `check:door-occlusion` + `check:building-clearance` + `check:app`의 실제 visible/layer ray·semantic grid 가림·궁/사찰 제외·hop/rebuild 수명·Reference UI + `CHEOMA_DOOR_TARGET=choga\|hero npm run shoot:door` 정면/사선 PNG·calls/programs/textures |
 | 물리 강수·꽃잎/모트·실제 창호 야간 불빛 (#81/#96) | [`architecture-refactor.md`](architecture-refactor.md)의 particle-state/particles/lighting 경계 + [`exterior-detail.md`](exterior-detail.md) §4.2 + `check:particle-geometry`의 world geometry·종별 normal·결정론·가림·명시적 DoF depth + `check:nightlights`의 실제 anchor·owner 수명 + `check:worker` scene bytes + `check:parcel-rebuild:browser` owner 복원 + `check:app` 항목별 References UI |
 | 사찰 터 배치 | 아래 사찰 매트릭스 + 머지 전 `check:full` |

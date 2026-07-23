@@ -11,9 +11,9 @@ const FULL_GATES = Object.freeze([
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
 // New code normally fails closed. These paths are the reviewed exception for
-// #107–#108, #113, and #114: the platform adapters, portable semantic state,
-// first-scene guide, and keyboard navigation policy have dedicated pure
-// contracts below.
+// #107–#108, #113–#114, and #128: the platform adapters, portable semantic
+// state, first-scene guide, keyboard navigation, and sijeon plan/renderer have
+// dedicated contracts below.
 const REVIEWED_NEW_PATHS = new Set([
   'app/src/components/SceneGuide.svelte',
   'app/src/lib/scene-snapshot.js',
@@ -24,11 +24,15 @@ const REVIEWED_NEW_PATHS = new Set([
   'app/src/engine/semantic-view-runtime.js',
   'src/api/environment-state.js',
   'src/api/village-options.js',
+  'src/generators/village/sijeon.js',
+  'src/village/sijeon-plan.js',
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
   'tools/check-scene-guide.mjs',
+  'tools/check-sijeon-contract.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-share.mjs',
+  'tools/shoot-sijeon.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -102,7 +106,9 @@ function routePath(path) {
     'tools/lib/bokeh-scatter-proof.mjs': ['bokeh-fixture'],
     'tools/lib/bokeh-source-stress.mjs': ['bokeh-fixture'],
     'tools/check-rim-facing.mjs': ['rim'],
+    'tools/shoot-hanyang.mjs': ['app'],
     'tools/shoot-wall-steps.mjs': ['app'],
+    'tools/shoot-sijeon.mjs': ['app'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],

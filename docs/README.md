@@ -33,6 +33,7 @@
 | [`house-diversity.md`](house-diversity.md) | 계약 | 일반 주택의 필지·살림 위계, ㅡ·ㄱ·ㄷ 레퍼토리, ㄷ 최소 4칸과 실제 처마 fit·성능 예산. |
 | [`architectural-authenticity.md`](architectural-authenticity.md) | 계약 + 리서치 | 지붕 장식·민가 창호·부엌/구들·담장/마당 감사, 사실→경량 구현 번역, 완료/잔여 체크리스트와 공식 근거. |
 | [`surface-materials.md`](surface-materials.md) | 계약 + 리서치 | 재사용 가능한 결정론 표면 source/Three adapter 경계, 흙길 월드 UV·색공간·LOD·수명·성능·A/B 채택 기준. |
+| [`sijeon.md`](sijeon.md) | 계약 + 리서치 | 한양 시전행랑의 연속 칸·열주·후퇴 점포 전면 근거, 경량 façade plan/renderer 경계와 사료가 정하지 않는 형식의 한계. |
 | [`exterior-detail.md`](exterior-detail.md) | 계약 + 리서치 | 공통 문·창 순수 grammar, 창 하부 머름·문 lowerPanel·frame·threshold·절제된 철물, FULL/MID 경계와 focus 전용 짚신·우천 나막신. |
 | [`building-navigation.md`](building-navigation.md) | 계약 | native 건물 선택기, stable pick-proxy ID, focus/switch 재사용, busy·modal·live-region·reduced-motion 경계. |
 | [`project-status.md`](project-status.md) | 계약 | 프로젝트 마무리 방향, 유지해야 할 사용자 결정, 현재 작업 상태. |
