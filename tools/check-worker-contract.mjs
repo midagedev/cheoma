@@ -42,17 +42,17 @@ const expectedSceneHashes = {
   // confined to roots downstream of those positions (merged landmarks and the
   // terrain's structure-clearance colour field in the reviewed capital split);
   // houses, roads, paddies, temple, trees, flora, animals, night lights, and bloom
-  // stay byte-identical. #81 replaces inferred lot
-  // lights with fixed renderer-authored opening anchors, keeps one Points draw,
-  // and turns scene depth testing on. The authored position/owner attributes
-  // intentionally update every scale hash; depthTest itself is covered by the
-  // pure and browser nightlight gates rather than this structural hasher. Sync,
-  // real module Worker, and ?worker=0 fallback
-  // must still remain byte-identical.
-  village: 'cd2f7b80:7e165a00:cff4aef7:efec50d0',
-  town: '4c691e34:daa75710:21740011:51854026',
-  capital: 'b99ed1df:3d77b8c5:28438f07:f9e8b4c5',
-  hanyang: '02960618:ef00c4b8:df99d5b3:6a78441e',
+  // stay byte-identical. #81 replaces inferred lot lights with fixed renderer-
+  // authored opening anchors. #96 replaces their point sprite with one physical
+  // instanced hanji quad batch that carries authored anchor, outward normal, and
+  // opening dimensions. The intentional geometry/material/triangle change updates
+  // every scale hash while pick proxies remain byte-identical. Front-side rejection,
+  // source depth, and the fixed 1+1 draw family are covered by the dedicated lighting
+  // gates. Sync, real module Worker, and ?worker=0 fallback must still match exactly.
+  village: '43a45a5f:b76ab503:0d571587:30875415',
+  town: '8fc3184d:0efcc73d:2dd5c94c:093354fb',
+  capital: 'cc685883:9b225ec9:316863cb:eaeab51f',
+  hanyang: '5cd4e702:f1540c58:b9589d4e:e67fbe86',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -417,7 +417,8 @@ try {
       const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && landmarkLensPass
         && item.lifecyclePass && item.vegetation.pass;
       failed ||= !pass;
-      console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`);
+      console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`
+        + `  objects=${item.syncHash.objects} triangles=${item.syncHash.triangles}`);
       if (!item.equal) console.log(`          async ${item.asyncHash.hash}  proxy=${item.asyncProxyHash.hash}`);
       if (!baselineEqual) {
         console.log(`          expected ${expectedSceneHashes[item.scale]}  proxy=${expectedProxyHashes[item.scale]}`);
