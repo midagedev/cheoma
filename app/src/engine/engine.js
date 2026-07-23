@@ -2526,8 +2526,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           const y = rect.top + (-projected.y * 0.5 + 0.5) * rect.height;
           if (projected.z > 1 || x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
           projectedPoints.push({ x, y });
-          setVillageRay(x, y);
-          if (village.handle?.raycastPrimaryDoor?.(raycaster, id)) visible.push({ x, y });
+          // CDP/browser pointer coordinates are stored at float precision. Test
+          // the same representable input we return so a projected double that
+          // lies on an occlusion edge cannot pass here and miss in PointerEvent.
+          const inputX = Math.fround(x);
+          const inputY = Math.fround(y);
+          setVillageRay(inputX, inputY);
+          if (village.handle?.raycastPrimaryDoor?.(raycaster, id)) {
+            visible.push({ x: inputX, y: inputY });
+          }
         }
         if (!visible.length) return null;
         const minX = Math.min(...projectedPoints.map((point) => point.x));

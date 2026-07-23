@@ -719,6 +719,20 @@ try {
   pass(Object.values(visibilityGate).every(Boolean),
     `door input follows visible/layer owner state (${JSON.stringify(visibilityGate)})`);
 
+  await page.waitForFunction(() => {
+    const engine = window.__engine;
+    const shift = window.__viewshift;
+    return !engine.village.getState().transitioning
+      && !engine.village.isWaving()
+      && (!shift || (Math.abs(shift.x - shift.tx) < 0.25 && Math.abs(shift.y - shift.ty) < 0.25));
+  }, null, { timeout });
+  const restoredDoorScreen = await page.evaluate((parcelId) => (
+    window.__engine.village.debugDoorScreen(parcelId)
+  ), doorParcelId);
+  pass(restoredDoorScreen != null,
+    `door target remains actionable after visible/layer owner state is restored (${JSON.stringify(restoredDoorScreen)})`);
+  closedDoor.screen = restoredDoorScreen;
+
   await page.mouse.move(closedDoor.screen.x, closedDoor.screen.y);
   const doorHover = page.locator('.hlabel');
   await doorHover.waitFor({ state: 'visible', timeout });
