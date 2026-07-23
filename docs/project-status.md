@@ -147,6 +147,14 @@ GitHub #96은 Three 없는 강수 상태·진행·bounds 재매핑을 `src/api/p
 임의 점을 만들지 않고 #81의 실제 고정 한지 opening anchor·폭·높이·외향 법선·mirror/fit/필지 변환과 정확한
 source depth를 사용하며, anchor가 없으면 color와 depth 모두 fail closed한다.
 
+GitHub #102는 focus·편집으로 한 필지만 바뀔 때 같은 batch 전체를 다시 보내던 GPU 전송을 줄인다.
+`src/core/buffer-update-range.js`가 Three r185의 component 단위 `updateRanges`를 소유하고, 집은 선택 instance의
+행렬 16성분, 담·FAR mass는 해당 source position lane, 한지 창불은 owner의 고정 slot만 갱신한다. 같은 상태의
+재호출은 no-op이며 hide→show와 GLB export의 pristine snapshot은 바이트 단위로 유지한다. 반대로 tofu wave처럼
+모든 행렬을 실제로 쓰는 경로는 명시적 full upload라서 희소 갱신으로 가장하지 않는다. 8필지 실제 WebGL
+fixture에서 부분 전송은 `704B`, 기존 전체 전송은 `5,632B`였고 `bufferData` 재할당 없이 87.5% 줄었다.
+장면 구조·draw call·결정론은 바꾸지 않으며 CPU 계약과 실제 `bufferSubData` 계측을 별도 영구 게이트로 둔다.
+
 후속 GitHub #49는 가림의 실제 주체였던 정자를 중심선 점검에서 화면 폭 계약으로 보강한다. 정자의 공유 physical spec과 주택 지붕 실루엣을 사용해 카메라 쪽으로 좁아지는 focus envelope를 예약하며, 장승·솟대·우물·낟가리 같은 마을 소품도 높이 기반 겨울 일조와 같은 구도 판정을 소비한다. 낮은 소품과 이웃 지붕은 전경 깊이감으로 남기고, 넓은 정자 처마가 선택 집의 문·마당을 덮는 경우만 결정론적으로 다른 빈터를 고른다.
 
 GitHub #21은 개울을 지형 위에 얹은 장식 리본이 아니라 계획과 렌더가 공유하는 하곡으로 만든다. 넓은 어깨는

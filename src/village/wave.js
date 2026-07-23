@@ -30,6 +30,7 @@
 
 import * as THREE from 'three';
 import { tofuScale, tofuBob } from '../anim/assembly.js';
+import { markAttributeFull } from '../core/buffer-update-range.js';
 import { waveFadeController } from '../core/lod.js';
 import { makeRng } from '../rng.js';
 
@@ -203,13 +204,13 @@ function setMeshHidden(m) {
   if (m._st === 'hid') return;
   const dst = m.mesh.instanceMatrix.array, src = m.rest;
   for (let i = 0; i < m.count; i++) writeInst(dst, src, i * 16, 0);
-  m.mesh.instanceMatrix.needsUpdate = true; m._st = 'hid';
+  markAttributeFull(m.mesh.instanceMatrix); m._st = 'hid';
 }
 function setMeshRest(m) {
   m.mesh.visible = true;
   if (m._st === 'rest') return;
   m.mesh.instanceMatrix.array.set(m.rest);
-  m.mesh.instanceMatrix.needsUpdate = true; m._st = 'rest';
+  markAttributeFull(m.mesh.instanceMatrix); m._st = 'rest';
 }
 
 // tp: 해당 위상 로컬 진행(0..1). disassemble=true 면 유닛 진행을 1→0(역재생)으로 뒤집는다.
@@ -229,7 +230,7 @@ function applyInstances(rootC, tp, disassemble) {
       if (disassemble) uu = 1 - uu;
       writeInst(dst, src, i * 16, uu);
     }
-    m.mesh.instanceMatrix.needsUpdate = true; m._st = 'act';
+    markAttributeFull(m.mesh.instanceMatrix); m._st = 'act';
   }
 }
 

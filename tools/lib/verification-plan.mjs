@@ -2,7 +2,7 @@ import { FAST_CHECK_PATHS } from './fast-checks.mjs';
 import { gateCommand } from './verification-gates.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -52,6 +52,7 @@ function routePath(path) {
   const browserToolGates = {
     'tools/check-app-smoke.mjs': ['app'],
     'tools/check-detail-particle-geometry.mjs': ['particle-geometry'],
+    'tools/check-instance-upload-browser.mjs': ['instance-upload'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -167,7 +168,7 @@ function routePath(path) {
   }
 
   if (path === 'src/village/wave.js') {
-    select('exclusive scenery handoff changed', 'app', 'lod-wave');
+    select('exclusive scenery handoff changed', 'app', 'instance-upload', 'lod-wave');
     return { gates, reasons };
   }
 
@@ -183,9 +184,12 @@ function routePath(path) {
       || path === 'src/generators/village/houses.js') {
       select('parcel representation changed', 'lod-focus', 'lod-wave');
     }
+    if (path === 'src/village/instancing.js') {
+      select('sparse parcel GPU buffers changed', 'instance-upload');
+    }
     if (path === 'src/village/instancing.js') select('impostor snow surface changed', 'winter-app');
     if (/^src\/village\/(?:nightlight-physical-geometry|nightlights)\.js$/.test(path)) {
-      select('physical hanji-light representation changed', 'particle-geometry');
+      select('physical hanji-light representation changed', 'particle-geometry', 'instance-upload');
     }
     if (path === 'src/village/nightlights.js') {
       select('wave-owned, source-depth village lighting changed', 'dof-app', 'lod-wave');
@@ -226,6 +230,9 @@ function routePath(path) {
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
     if (!/^src\/(?:export|share)\//.test(path)) select('worker scene graph may change', 'worker');
+    if (path === 'src/core/buffer-update-range.js') {
+      select('BufferAttribute upload range ownership changed', 'instance-upload', 'lod-wave');
+    }
     if (path === 'src/builder/palette.js') {
       select('roof snow and rim material roles changed', 'winter-app', 'rim');
     }
@@ -366,6 +373,7 @@ export function verificationCommands(plan) {
   if (has('rim')) commands.push(gateCommand('rim'));
   if (has('petals')) commands.push(gateCommand('petals'));
   if (has('particle-geometry')) commands.push(gateCommand('particle-geometry'));
+  if (has('instance-upload')) commands.push(gateCommand('instance-upload'));
   if (has('winter-app')) commands.push(gateCommand('winter-app'));
   if (has('worker')) commands.push(gateCommand('worker'));
   if (has('audio')) commands.push(gateCommand('audio'));

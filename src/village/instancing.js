@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
+import {
+  markAttributeItems,
+  markAttributeRange,
+} from '../core/buffer-update-range.js';
 import { toneOf } from './variants.js';
 import { impostorHouseSpec } from './impostor-spec.js';
 import {
@@ -269,6 +273,7 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     for (let g = 0; g < decomp.length; g++) {
       const { material, geometry, castShadow, receiveShadow } = decomp[g];
       const inst = new THREE.InstancedMesh(geometry, material, n);
+      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       inst.name = tier === 'full'
         ? `inst-${kind}-v${v}-m${g}`
         : `inst-${kind}-${tier}-v${v}-m${g}`;
@@ -283,7 +288,6 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
         const t = roleTone(kind, plist[i], role);
         col.setRGB(t[0], t[1], t[2]); inst.setColorAt(i, col);
       }
-      inst.instanceMatrix.needsUpdate = true;
       if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       // setHidden mutates instanceMatrix in place. Keep one immutable authored snapshot for
       // GLB export; cloning here (before any focus can hide a parcel) also prevents the export
@@ -298,10 +302,14 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
   const exportHidden = new Set();
   function setHidden(id, on) {
     const rec = locate.get(id);
-    if (!rec) return;
+    if (!rec || (on ? hidden.has(id) : !hidden.has(id))) return false;
     if (on) hidden.add(id); else hidden.delete(id);
     const m = on ? ZERO : rec.mat;
-    for (const inst of rec.meshes) { inst.setMatrixAt(rec.index, m); inst.instanceMatrix.needsUpdate = true; }
+    for (const inst of rec.meshes) {
+      inst.setMatrixAt(rec.index, m);
+      markAttributeItems(inst.instanceMatrix, rec.index);
+    }
+    return true;
   }
   // Focus hiding is presentation-only and export normally restores the pristine
   // authored matrix. A committed edit is different: its FULL override becomes
@@ -556,6 +564,7 @@ function attachSourceHideHandle(group, meshRanges) {
   for (const mr of meshRanges) {
     for (const id of mr.ranges.keys()) srcIds.add(id);
     mr.saved = new Map();
+    mr.mesh.geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
     // Reconstruct an independent pristine position buffer lazily. Persisting a second complete
     // copy for every wall/FAR mesh would waste memory; only hidden source ranges need saved data.
     mr.mesh[EXPORT_POSITION_SNAPSHOT] = () => {
@@ -610,7 +619,7 @@ function attachSourceHideHandle(group, meshRanges) {
       } else {
         const sv = mr.saved.get(id); if (sv) arr.set(sv, s);
       }
-      pos.needsUpdate = true;
+      markAttributeRange(pos, s, cnt);
     }
     if (on) hidden.add(id); else hidden.delete(id);
   }

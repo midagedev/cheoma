@@ -127,7 +127,8 @@ void main() {
 `;
 
 function instancedAttribute(array, itemSize) {
-  return new THREE.InstancedBufferAttribute(array, itemSize);
+  return new THREE.InstancedBufferAttribute(array, itemSize)
+    .setUsage(THREE.DynamicDrawUsage);
 }
 
 /**

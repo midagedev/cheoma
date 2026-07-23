@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markAttributeItems } from '../core/buffer-update-range.js';
 import { normalizeVillageLensScale } from '../camera/optics.js';
 import { hashString, makeRng } from '../rng.js';
 import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
@@ -155,6 +156,9 @@ export function buildNightLights(plan, _site, sources = {}) {
       parcel,
       baseAnchors: baseAnchors || [],
       selected: [],
+      refreshSource: null,
+      refreshSeed: seed >>> 0,
+      refreshKind: parcel ? (parcel.hero ? 'hero' : profile.kind) : 'feature',
     };
     lightCount += profile.capacity;
     records.push(record);
@@ -327,22 +331,38 @@ export function buildNightLights(plan, _site, sources = {}) {
       if (disposed) return false;
       const record = recordById.get(ownerId);
       if (!record) return false;
+      let nextSeed = record.seed;
+      let nextKind = record.refreshKind;
       if (record.parcel) {
-        record.seed = Number.isFinite(record.parcel.seed)
+        nextSeed = Number.isFinite(record.parcel.seed)
           ? record.parcel.seed >>> 0
           : hashString(record.id);
         const overlayKind = overlayRoot?.userData?.style;
         const regularKind = overlayKind === 'giwa' || overlayKind === 'choga'
           ? overlayKind : record.parcel.kind;
+        nextKind = record.parcel.hero ? 'hero' : regularKind;
+        if (record.refreshSource === overlayRoot
+          && record.refreshSeed === nextSeed
+          && record.refreshKind === nextKind) return false;
+        record.seed = nextSeed;
         record.profile = record.parcel.hero
           ? heroProfile(record.parcel)
           : regularProfile(record.parcel, regularKind);
+      } else if (record.refreshSource === overlayRoot) {
+        return false;
       }
       writeOwner(record, overlayRoot
         ? overlayAnchorsInVillageSpace(overlayRoot)
         : record.baseAnchors);
+      record.refreshSource = overlayRoot;
+      record.refreshSeed = nextSeed;
+      record.refreshKind = nextKind;
       for (const name of batch.dynamicAttributes) {
-        batch.geometry.attributes[name].needsUpdate = true;
+        markAttributeItems(
+          batch.geometry.attributes[name],
+          record.start,
+          record.profile.capacity,
+        );
       }
       return true;
     },
