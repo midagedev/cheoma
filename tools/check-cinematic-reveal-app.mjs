@@ -68,8 +68,21 @@ async function focusRegularHouse(page) {
     engine.village.focus(parcel.parcelId);
     return parcel.parcelId;
   });
-  await page.waitForFunction(() => window.__engine.debugDof().tweenProgress != null, null, { timeout });
-  await page.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
+  // Normal motion exposes an inspectable tween that the deterministic harness
+  // seeks to its endpoint. Reduced motion intentionally completes on the first
+  // rendered frame, so the tween may already be retired before Playwright can
+  // observe it. Accept that settled product state without waiting for a debug
+  // object that is no longer supposed to exist.
+  await page.waitForFunction((parcelId) => {
+    const engine = window.__engine;
+    const state = engine.village.getState();
+    return engine.debugDof().tweenProgress != null
+      || (state.selected === parcelId && state.transitioning === false);
+  }, id, { timeout });
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    if (engine.debugDof().tweenProgress != null) engine.debugDofSeek(1, { finish: true });
+  });
   await page.waitForFunction(() => window.__engine.village.getState().transitioning === false, null, { timeout });
   return id;
 }

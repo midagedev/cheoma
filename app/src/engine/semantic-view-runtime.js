@@ -21,6 +21,32 @@ export function timeAdjustedDampingFactor(baseFactor, elapsedSeconds, referenceF
   return 1 - Math.pow(1 - base, elapsed * fps);
 }
 
+// Camera tweens are advanced only from the renderer's animation loop. Reduced
+// motion therefore resolves on the first rendered frame instead of completing
+// synchronously inside a button/key handler, which preserves Start → Done event
+// ordering and still removes the visible travel.
+export function advanceCameraTweenClock(
+  elapsedSeconds,
+  durationSeconds,
+  deltaSeconds,
+  reducedMotion = false,
+) {
+  const duration = Number(durationSeconds);
+  const elapsed = Number(elapsedSeconds);
+  const delta = Number(deltaSeconds);
+  if (!(duration > 0) || !Number.isFinite(duration)
+      || !Number.isFinite(elapsed) || elapsed < 0
+      || !Number.isFinite(delta) || delta < 0) return null;
+  const nextElapsed = reducedMotion
+    ? duration
+    : Math.min(duration, elapsed + delta);
+  return {
+    elapsed: nextElapsed,
+    progress: nextElapsed / duration,
+    done: nextElapsed >= duration,
+  };
+}
+
 export function captureSemanticOrbit({
   position,
   target,

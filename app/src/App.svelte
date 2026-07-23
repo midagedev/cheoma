@@ -163,6 +163,8 @@
   let villageOpts = $state({ scale: 'village', character: 'yeoyeom', includePalace: false, includeTemple: false, ...villageDefaults() });
   let villageSeed = $state(0);
   let villageHouses = $state(0);               // 현재 마을 호수(패널 표시)
+  let buildingTargets = $state([]);             // pick proxy에서 온 JSON-only 키보드 탐색 후보
+  let settledBuildingId = $state(null);         // 카메라 안착 이벤트에서만 갱신(전환 출발점 선점 금지)
   // `?village=1&vedit=...` 부팅 중에는 아직 runtime snapshot이 비어 있다. 최초
   // rebuild가 끝날 때까지만 decoded state를 보존해 중간 villageMode 이벤트의
   // replaceState가 복원 payload를 지우지 않게 한다.
@@ -217,8 +219,10 @@
     if (!st.selected) {                         // 엔진은 부감(비-focus) → 마을 섹션으로 확정(갇힌 morph 해소)
       liveEdit.cancel();
       villageEditing = null; villageZooming = false; focusMorph = 0;
+      settledBuildingId = null;
     } else {                                    // 엔진은 특정 필지 focus → 집 섹션으로 확정
       villageZooming = false; focusMorph = 1;
+      settledBuildingId = st.selected;
       if (!villageEditing && st.spec) seedEdit({ parcelId: st.selected, spec: st.spec });
     }
   }
@@ -339,6 +343,7 @@
   function pullVillage() {
     const vs = engine.village.getState();
     villageHouses = vs.stats ? vs.stats.houses : 0;
+    buildingTargets = engine.village.navigationTargets();
   }
 
   // ---------- 크로마 자동 페이드 (3초 무조작 → 감상 모드) ----------
@@ -442,6 +447,7 @@
         liveEdit.cancel();
         villageEditing = null; hoverInfo = null; villageHome = false; focusMorph = 0;
         villageZooming = false; waving = false; heroLanding = false; pendingCommit = null;
+        buildingTargets = []; settledBuildingId = null;
         pendingSceneView = null;
         clearFocusWatchdog(); focusMorphLatched = false;
       }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
@@ -465,6 +471,8 @@
     engine.on('villageSelect', (p) => {
       villageZooming = false; heroLanding = false; focusMorph = 1;
       seedEdit(p);
+      settledBuildingId = p.parcelId;
+      pullVillage();                            // 리롤/종류 변경 뒤의 의미 라벨도 현재 proxy에서 갱신
       chromaFaded = false;
       clearFocusWatchdog(); focusMorphLatched = false;   // #155 근접 안착 → 감시 해제
       if (pendingSceneView?.parcelId === p.parcelId) {
@@ -493,6 +501,7 @@
     engine.on('villageReturnDone', () => {
       liveEdit.cancel();
       villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false;
+      settledBuildingId = null;
       clearFocusWatchdog(); focusMorphLatched = false;
       if (!canonicalSceneAddress) syncUrl();
     });
@@ -1144,9 +1153,22 @@
     liveEdit.cancel();
     const rebuilt = engine.village.rebuild(villageEditing.parcelId, { kind });
     if (!acceptVillageSpec(rebuilt)) editParams = { kind };
-    else syncUrl();
+    else {
+      // Only a kind change can alter a navigation label. Ordinary live previews
+      // must not clone every Hanyang pick proxy on each geometry frame.
+      pullVillage();
+      syncUrl();
+    }
   }
   function closeVillageEdit() { liveEdit.cancel(); engine.village.return(); }
+  function navigateBuilding(id) {
+    if (!sceneVillage || villageZooming || waving || veil || cine.active) return;
+    if (!buildingTargets.some((target) => target.id === id)) return;
+    const state = engine.village.getState();
+    if (!state.active || state.transitioning || state.selected === id) return;
+    if (state.selected) engine.village.switchTo(id);
+    else engine.village.focus(id);
+  }
 </script>
 
 <div
@@ -1222,6 +1244,10 @@
     onVillageOpt={setVillageOpt}
     waving={waving}
     houseBusy={villageZooming || waving}
+    navigationTargets={buildingTargets}
+    navigationSelectedId={settledBuildingId}
+    navigationBusy={villageZooming || waving || veil}
+    onNavigateTarget={navigateBuilding}
     spec={villageEditing?.spec}
     params={editParams}
     onType={villageSetType}

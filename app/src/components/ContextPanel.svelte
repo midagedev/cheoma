@@ -6,6 +6,11 @@
   //   (히어로 랜딩 중엔 App 이 open=false 로 숨김).
   import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
+  import {
+    buildingNavigationStatus,
+    normalizeBuildingNavigationTargets,
+    resolveBuildingNavigationTarget,
+  } from '../lib/building-navigation.js';
   import { schemaFor, villageSchema } from '../lib/edit-schema.js';
   import BottomSheet from './BottomSheet.svelte';
 
@@ -18,6 +23,10 @@
     villageParams = {}, onVillageOpt = null,
     // 집 섹션(근접)
     spec = null, params = {}, onType, onLive, onCommit, onRerollHouse, houseBusy = false,
+    // 키보드 건물 탐색(#114). engine navigationTargets()의 JSON-only `{id,type}`만 소비한다.
+    // selector는 모프 owner 밖의 공통 헤더에 남고, App은 focus()/switchTo() 중 하나만 onNavigateTarget에 연결한다.
+    navigationTargets = [], navigationSelectedId = null, navigationBusy = false,
+    onNavigateTarget = null,
     // glb 내보내기(#112) — onExportVillage(부감 전체)·onExportHouse(focus 건물)·exporting(스피너·중복 방지)
     onExportVillage = null, onExportHouse = null, exporting = false,
     // 공통. onShare는 큰 액션바를 숨기는 터치 focus/edit에서만 App이 전달한다.
@@ -76,6 +85,83 @@
     const k = params.kind || spec.kind;
     return t(k === 'giwa' ? 'type_giwa_l' : 'type_choga_l');
   });
+
+  // ── 지속적인 의미 기반 건물 선택기(#114) ──
+  // native select가 후보 선택을 소유하고 명시적 버튼만 카메라 전환을 시작한다. 키 입력은 canvas에
+  // 전달하지 않는다. pointer focus나 reroll로 현재 선택/목록이 바뀌면 stable id로 한 번만 재조정한다.
+  const NAVIGATION_LABEL_KEYS = {
+    'head-house': 'crumb_hanok',
+    government: 'crumb_palace',
+    palace: 'crumb_palace_compound',
+    temple: 'crumb_temple',
+    giwa: 'type_giwa_l',
+    choga: 'type_choga_l',
+  };
+  const normalizedNavigationTargets = $derived(normalizeBuildingNavigationTargets(navigationTargets));
+  let navigationDraftId = $state('');
+  let observedNavigationSelectedId = $state(undefined);
+  $effect(() => {
+    const selected = resolveBuildingNavigationTarget(
+      normalizedNavigationTargets,
+      navigationSelectedId,
+    );
+    const selectedId = selected?.id ?? null;
+    if (observedNavigationSelectedId !== selectedId) {
+      observedNavigationSelectedId = selectedId;
+      navigationDraftId = selectedId || normalizedNavigationTargets[0]?.id || '';
+      return;
+    }
+    if (!resolveBuildingNavigationTarget(normalizedNavigationTargets, navigationDraftId)) {
+      navigationDraftId = selectedId || normalizedNavigationTargets[0]?.id || '';
+    }
+  });
+  const navigationDraft = $derived(resolveBuildingNavigationTarget(
+    normalizedNavigationTargets,
+    navigationDraftId,
+  ));
+  const navigationState = $derived(buildingNavigationStatus(
+    normalizedNavigationTargets,
+    navigationSelectedId,
+  ));
+  const navigationCurrent = $derived(navigationState.selected);
+  const navigationActionUnavailable = $derived(
+    navigationBusy
+      || !navigationDraft
+      || navigationDraft.id === navigationCurrent?.id
+      || typeof onNavigateTarget !== 'function',
+  );
+  const navigationLabelKey = (target) => NAVIGATION_LABEL_KEYS[target?.type] || 'vil_title';
+  const navigationTargetLabel = (target) => {
+    const label = t(navigationLabelKey(target));
+    return target?.type === 'giwa' || target?.type === 'choga'
+      ? `${label} ${target.ordinal}`
+      : label;
+  };
+  const navigationStatusText = $derived.by(() => {
+    if (navigationState.kind === 'focus') {
+      return `${navigationTargetLabel(navigationState.selected)} · ${t('nav_current_status')}`;
+    }
+    if (navigationState.kind === 'explore') {
+      return `${navigationState.total}${t('nav_count_suffix')} · ${t('nav_explore_status')}`;
+    }
+    return t('nav_empty_status');
+  });
+  const navigationActionLabel = $derived(
+    navigationBusy
+      ? t('nav_moving')
+      : navigationDraft?.id === navigationCurrent?.id
+        ? t('nav_current')
+        : t(houseActive ? 'nav_move' : 'nav_view'),
+  );
+  const navigationActionAccessibleLabel = $derived(
+    navigationDraft
+      ? `${navigationActionLabel}: ${navigationTargetLabel(navigationDraft)}`
+      : navigationActionLabel,
+  );
+  function activateNavigationTarget() {
+    if (navigationActionUnavailable) return;
+    onNavigateTarget?.(navigationDraft.id);
+  }
 
   // ── 마을 규모 슬라이더(기존 VillagePanel 계약 그대로) ──
   //   'solo'(#114) = 외딴집(집 한 채, siteR30). 절 토글과 조합하면 "산사 하나만" 구성.
@@ -252,24 +338,59 @@
 
 <!-- ── 고정 헤더: 브레드크럼(마을 → 필지). 집 컨텍스트에서 '마을'을 누르면 focus-out. ── -->
 {#snippet header()}
-  <div bind:this={headerRoot} class="crumbs">
-    {#if houseActive}
-      <button
-        class="crumb root link"
-        onclick={() => onBack?.()}
-        aria-label={t('vil_title')}
-        data-context-focus="house"
-      >{t('vil_title')}</button>
-    {:else}
-      <h3
-        class="crumb root"
-        tabindex="-1"
-        data-context-focus="village"
-      >{t('vil_title')}</h3>
+  <div bind:this={headerRoot} class="contexthead">
+    <div class="crumbs">
+      {#if houseActive}
+        <button
+          class="crumb root link"
+          onclick={() => onBack?.()}
+          aria-label={t('vil_title')}
+          data-context-focus="house"
+        >{t('vil_title')}</button>
+      {:else}
+        <h3
+          class="crumb root"
+          tabindex="-1"
+          data-context-focus="village"
+        >{t('vil_title')}</h3>
+      {/if}
+      <span class="sep" style="opacity:{houseOpacity}" aria-hidden="true">›</span>
+      <span class="crumb leaf" style="opacity:{houseOpacity}">{houseLabel}</span>
+      {#if !houseActive && houses > 0}<span class="count">{houses}{t('vil_houses')}</span>{/if}
+    </div>
+
+    {#if normalizedNavigationTargets.length}
+      <div class="buildingnav" data-building-navigation>
+        <label class="navlabel" for="building-navigation">{t('nav_building')}</label>
+        <div class="navcontrols">
+          <select
+            id="building-navigation"
+            value={navigationDraftId}
+            aria-describedby="building-navigation-status"
+            onchange={(event) => (navigationDraftId = event.currentTarget.value)}
+          >
+            {#each normalizedNavigationTargets as target (target.id)}
+              <option value={target.id}>{navigationTargetLabel(target)}</option>
+            {/each}
+          </select>
+          <button
+            class="navaction"
+            type="button"
+            aria-disabled={navigationActionUnavailable}
+            aria-busy={navigationBusy || undefined}
+            aria-label={navigationActionAccessibleLabel}
+            onclick={activateNavigationTarget}
+          >{navigationActionLabel}</button>
+        </div>
+        <p
+          id="building-navigation-status"
+          class="navstatus"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >{navigationStatusText}</p>
+      </div>
     {/if}
-    <span class="sep" style="opacity:{houseOpacity}" aria-hidden="true">›</span>
-    <span class="crumb leaf" style="opacity:{houseOpacity}">{houseLabel}</span>
-    {#if !houseActive && houses > 0}<span class="count">{houses}{t('vil_houses')}</span>{/if}
   </div>
 {/snippet}
 
@@ -417,6 +538,7 @@
 
 <style>
   /* ── 브레드크럼 ── */
+  .contexthead { display: flex; flex-direction: column; gap: 9px; }
   .crumbs {
     display: flex; align-items: baseline; gap: 7px;
     border-bottom: 1px solid var(--ink-line); padding-bottom: 9px;
@@ -428,6 +550,23 @@
   .sep { font-size: 20px; color: var(--ink-faint); transition: opacity 0.2s ease; }
   .crumb.leaf { font-size: 26px; line-height: 1; color: var(--seal-deep); transition: opacity 0.2s ease; }
   .count { margin-left: auto; font-size: 11px; color: var(--seal); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ── 키보드 건물 탐색(#114): 모프와 무관한 native select + 명시적 이동. ── */
+  .buildingnav { display: flex; flex-direction: column; gap: 5px; padding-bottom: 9px; border-bottom: 1px solid var(--ink-line); }
+  .navlabel { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; color: var(--ink-faint); text-transform: uppercase; }
+  .navcontrols { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  .navcontrols select, .navaction {
+    min-height: 44px; border-radius: 4px; border: 1px solid var(--ink-hair);
+    background: rgba(244, 239, 228, 0.62); color: var(--ink); font: 700 12px/1.2 var(--serif);
+  }
+  .navcontrols select { min-width: 0; width: 100%; padding: 7px 26px 7px 8px; }
+  .navaction { min-width: 62px; padding: 7px 10px; background: var(--ink); color: var(--paper); }
+  .navaction:hover[aria-disabled='false'] { background: var(--seal-deep); }
+  .navaction[aria-disabled='true'] { opacity: 0.48; cursor: default; }
+  .navcontrols select:focus-visible, .navaction:focus-visible {
+    outline: 2px solid var(--seal); outline-offset: 2px;
+  }
+  .navstatus { min-height: 1.2em; margin: 0; font-size: 10.5px; line-height: 1.2; color: var(--ink-faint); }
 
   /* ── 모프 스택 ── */
   .stack { display: grid; }
@@ -557,6 +696,8 @@
   /* 터치: 타깃 확대. */
   @media (max-width: 600px), (pointer: coarse) {
     .crumb.root, .crumb.leaf { font-size: 28px; }
+    .navcontrols select, .navaction { min-height: 44px; font-size: 14px; }
+    .navaction { min-width: 74px; }
     .scaleval { font-size: 16px; }
     .toggle { padding: 13px 6px; font-size: 14px; }
     .rebuild { padding: 14px; font-size: 15px; }
