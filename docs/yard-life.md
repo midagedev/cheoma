@@ -235,10 +235,17 @@
 한 계절에 보이지 않는 slot도 식생과 hard-object 계획 전에 예약한다. 그래야 계절을 바꿨을 때
 새 장작더미나 개상이 나무 줄기, 장독대, 담, 부속채를 뚫지 않는다. 모든 후보는 실제 지붕,
 대문 접근 회랑, `solarAccess`, 기존 `yardHardObstacles`, 마당나무 줄기, 도로·담 경계를
-공유해서 검사한다.
+공유해서 검사한다. 같은 의미 slot이라도 계절 footprint 때문에 좌표가 달라질 수 있으므로 예약
+합집합 key는 owner·slot 이름뿐 아니라 local X/Z를 포함한다. 솔리드 담은 계획선이 아니라
+`tile 0.42m`, `stone/mud 0.50m`의 실제 몸체 두께와 `YARD_HARD_GAP`을 포함한 안쪽 여유를 쓴다.
 
 동일 입력은 byte-identical이어야 하고 전역 RNG를 소비하지 않는다. renderer가 필지 index,
 계절 이름, 부유도를 다시 hash해 두 번째 배치를 만들지 않는다.
+
+`src/village/yard-life-record-contract.js`는 이 JSON 경계의 renderer-independent validator다.
+schema version, motif별 정확한 계절·날씨 집합, variant별 중복 없는 part 종류와 개수, part와 일치하는
+재료 역할, 유한한 world transform·oriented footprint를 geometry 할당 전에 검사한다. worker·서버·외부
+저장소 소비자는 Three 없는 `src/api/yard-life-plan.js`의 `validateYardLifeRecords()`를 사용한다.
 
 ### 5.2 희소성
 
@@ -252,6 +259,9 @@
 
 정확한 밀도는 역사 통계가 아니라 제품 결정이다. fixture에서 규모별 범위와 결정론을 고정하되
 그 값을 역사적 가구 비율이라고 설명하지 않는다.
+현재 5개 규모·3개 seed 계약은 eligible 1,414가구 중 80가구, 약 5.7%를 선택한다. 후보가 충분한
+규모에서 모든 희소 hash가 빗나가면 가장 선택에 가까웠던 안전한 한 가구만 결정론적으로 승격해
+작은 마을이 완전히 빈 결과가 되는 것을 막는다.
 
 ### 5.3 renderer와 계절 전환
 
@@ -262,18 +272,26 @@
 - 근경·망원에서는 같은 실제 world geometry가 카메라 광학으로 커져야 하며 screen-space
   billboard를 따로 유지하지 않음
 - 수묵·적설·물리 림은 같은 geometry와 기존 재질 역할을 소비하고 전용 복제 mesh를 만들지 않음
+- 근경 풀은 기존 후보 RNG를 끝까지 동일하게 소비한 뒤 세 계절 slot 합집합과 겹치는 후보만
+  안정적으로 제거함. 재추첨·밀도 보충·두 번째 grass mesh는 만들지 않음
+- 부감 진입은 coverage 0을 한 번만 반영하고 전환을 보이지 않는 목표 상태로 정착시킨 뒤,
+  이후 프레임에는 record scan·typed-array 할당·GPU upload를 하지 않음
 
 가을 타작은 비·눈 조건에서 가중치 0으로 간다. 봄 준비는 눈 조건에서 숨기고 비가 오는 경우
-서비스 가장자리의 작은 기물만 유지할 수 있다. 겨울 장작은 맑음·흐림·눈에 남으며, 덮개는
+서비스 가장자리의 작은 기물만 유지할 수 있다. 겨울 장작은 맑음·비·눈에 남으며, 덮개는
 날씨 순간 상태가 아니라 seed-stable 변주다.
 
 ### 5.4 wave·rebuild·dispose
 
 - 리롤 wave에서 old/new 생활상은 투명 crossfade하지 않고 정적 마을 scenery의 배타 handoff를 따름
 - focus 거리 LOD는 현재 소유자 하나만 wake하고 old generation의 update가 남지 않음
-- 단일 필지 rebuild는 예약 slot과 현재 spec을 다시 검사해 계절 그룹의 한 record만 원자적으로 교체
+- 단일 필지 rebuild는 예약 slot과 현재 spec을 다시 검사한 뒤 결정론적 공유 batch 전체를 원자적으로 교체
+- byte-identical record rebuild는 live mesh identity와 진행 중 계절·날씨 전환을 그대로 보존하고 교체하지 않음
+- 실제 record가 바뀌어도 같은 ID는 현재 전환 가중치를 이어받아 flora commit 중 hard cut이 생기지 않음
 - dispose는 renderer 소유 geometry를 정확히 한 번 해제하고 caller가 빌려준 material을 해제하지 않음
 - 계절·날씨·거리 전환은 geometry/material/texture 수를 늘리지 않음
+- rebuild는 입력 record와 저장된 shared-LOD callback의 모든 가중치를 먼저 검증·계산하고 나서만
+  batch를 교체함. callback 예외나 잘못된 record는 기존 mesh identity·가시성·dispose 소유권을 보존함
 
 ## 6. 시각 판정 기준
 
@@ -286,6 +304,7 @@
 - 눈·비·석양에서 비현실적 발광, z-fighting, 투명 정렬, 지면 부유가 없는가
 - 마당 전체가 소품으로 붐비지 않고 실제 생활 후 잠시 남은 흔적처럼 보이는가
 - 부감 전후 program·draw·texture 예산과 sleep 상태가 고정되는가
+- 실제 제품의 같은 정지 카메라에서 layer OFF/ON 픽셀 차이가 반복 캡처 노이즈보다 충분히 큰가
 
 ## 7. 선별 출처·접근·권리
 

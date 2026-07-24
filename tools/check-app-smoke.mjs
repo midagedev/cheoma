@@ -925,6 +925,24 @@ try {
       ))
       && sijeonEvidence.license.includes('All rights reserved'),
   'sijeon evidence, product limits, canonical links, and safe external-link attributes render in Product References');
+  const yardLifeEvidence = reference.items.find((item) => (
+    item.title.includes('계절 농가 마당 생활 / Seasonal rural-yard life')
+  ));
+  pass(yardLifeEvidence?.text.includes('선택된 소수 일반 농가에만')
+      && yardLifeEvidence.text.includes('실제 못자리는 주택 마당에 만들지 않고')
+      && yardLifeEvidence.text.includes('모든 수치, 겨울 장작의 선택 짚 덮개는 충돌 안전·가독성·기후 동선을 위한 명시적 제품 해석이며 역사적 평균이나 전국 표준이 아니다')
+      && yardLifeEvidence.links.some((url) => url.includes('nfm.go.kr/home/subIndex/11.do'))
+      && yardLifeEvidence.links.some((url) => url.includes('/2021/09/01/'))
+      && yardLifeEvidence.links.some((url) => url.includes('press_190905.pdf'))
+      && yardLifeEvidence.links.some((url) => url.includes('/2021/07/30/'))
+      && yardLifeEvidence.links.some((url) => url.includes('km_036_0050_0040_0030_0020'))
+      && yardLifeEvidence.anchors.every((anchor) => (
+        anchor.target === '_blank'
+          && anchor.rel.split(/\s+/).includes('noopener')
+          && anchor.rel.split(/\s+/).includes('noreferrer')
+      ))
+      && yardLifeEvidence.license.includes('All rights reserved'),
+  'yard-life evidence, sparse scope, rejected anachronisms, product limits, and safe links render in Product References');
 
   await closeReference.click();
   await referenceDialog.waitFor({ state: 'detached', timeout });

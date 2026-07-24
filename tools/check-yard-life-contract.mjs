@@ -2,18 +2,26 @@ import * as G from '../src/core/math/geom2.js';
 import { planVillage } from '../src/api/village-plan.js';
 import { parcelWorldPoint } from '../src/village/parcel-contract.js';
 import { parcelEffectiveRoofBounds } from '../src/village/house-footprint.js';
+import { createRoadSpatialIndex } from '../src/village/road-spatial.js';
 import {
   planYardLife,
   YARD_LIFE_MOTIFS,
   YARD_LIFE_SCHEMA_VERSION,
+  validateYardLifeRecords,
   yardLifeHouseholdEligible,
   yardLifeRecordsToHardObstacles,
-} from '../src/village/yard-life-plan.js';
+} from '../src/api/yard-life-plan.js';
 import {
+  YARD_HEDGE_INWARD_CLEARANCE,
   YARD_HARD_GAP,
   YARD_LIFE_MAX_HEIGHT,
+  yardLifeWallInwardClearance,
   yardLifePotentialSlots,
 } from '../src/village/yard-layout.js';
+import {
+  VILLAGE_SOLID_WALL_THICKNESS,
+  villageWallLayout,
+} from '../src/village/wall-contract.js';
 
 const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const SEEDS = [7, 42, 20260716];
@@ -37,6 +45,23 @@ const EPS = 1e-9;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+invariant(Math.abs(YARD_HEDGE_INWARD_CLEARANCE - 0.86) <= EPS,
+  'hedge inward clearance drifted from its conservative renderer envelope');
+invariant(Math.abs(yardLifeWallInwardClearance('stone') - 0.37) <= EPS
+    && Math.abs(yardLifeWallInwardClearance('mud') - 0.37) <= EPS
+    && Math.abs(yardLifeWallInwardClearance('tile') - 0.33) <= EPS,
+'yard-life solid-wall clearance drifted from renderer thickness plus hard gap');
+
+function expectRecordRejection(record, label) {
+  let rejected = false;
+  try {
+    validateYardLifeRecords([record]);
+  } catch {
+    rejected = true;
+  }
+  invariant(rejected, `record validator accepted ${label}`);
 }
 
 function deepFrozen(value) {
@@ -69,11 +94,21 @@ function polygonDistance(left, right) {
   return distance;
 }
 
-function parcelBoundaryDistance(point, parcel) {
+function polygonBoundaryDistance(left, right) {
   let distance = Infinity;
-  const points = parcel.shape?.pts || [];
-  for (let i = 0; i < points.length; i++) {
-    distance = Math.min(distance, G.distToSeg(point, points[i], points[(i + 1) % points.length]).d);
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i], b = left[(i + 1) % left.length];
+    for (let j = 0; j < right.length; j++) {
+      const c = right[j], d = right[(j + 1) % right.length];
+      if (G.segIntersect(a, b, c, d)) return 0;
+      distance = Math.min(
+        distance,
+        G.distToSeg(a, c, d).d,
+        G.distToSeg(b, c, d).d,
+        G.distToSeg(c, a, b).d,
+        G.distToSeg(d, a, b).d,
+      );
+    }
   }
   return distance;
 }
@@ -132,6 +167,7 @@ let eligibleTotal = 0;
 let ownerTotal = 0;
 let recordTotal = 0;
 let obstacleTotal = 0;
+let hedgeRecordTotal = 0;
 let fallbackFixture = null;
 const scaleStats = new Map(SCALES.map((scale) => [scale, { eligible: 0, owners: 0 }]));
 
@@ -176,8 +212,11 @@ for (const scale of SCALES) for (const seed of SEEDS) {
   invariant(parcelBytes === JSON.stringify(plan.parcels), `${scale}:${seed} mutated its parcels`);
   invariant(deepFrozen(first), `${scale}:${seed} plan records are not deeply frozen`);
   invariant(JSON.stringify(JSON.parse(bytes)) === bytes, `${scale}:${seed} is not JSON-safe`);
+  invariant(validateYardLifeRecords(first).length === first.length,
+    `${scale}:${seed} public record validator rejected planner output`);
 
   const parcels = new Map(plan.parcels.map((parcel) => [parcel.id, parcel]));
+  const roadSpatial = createRoadSpatialIndex(plan.roads);
   const eligible = plan.parcels.filter(yardLifeHouseholdEligible).length;
   const byOwner = new Map();
   const ids = new Set();
@@ -185,6 +224,7 @@ for (const scale of SCALES) for (const seed of SEEDS) {
     const label = `${scale}:${seed}:${record.id}`;
     const parcel = parcels.get(record.owner.parcelId);
     invariant(parcel && yardLifeHouseholdEligible(parcel), `${label} has an ineligible owner`);
+    if (parcel.wallType === 'hedge') hedgeRecordTotal++;
     invariant(record.schema === YARD_LIFE_SCHEMA_VERSION, `${label} schema drifted`);
     invariant(record.motif === MOTIFS[record.season], `${label} season/motif mismatch`);
     invariant(JSON.stringify(record.weather) === JSON.stringify({ allow: WEATHER[record.season] }),
@@ -229,9 +269,31 @@ for (const scale of SCALES) for (const seed of SEEDS) {
       `${label} local/world yaw mismatch`);
 
     const polygon = footprintPolygon(record);
-    invariant(polygon.every((corner) => G.pointInPoly(corner, parcel.shape.pts)
-      && parcelBoundaryDistance(corner, parcel) > 0.17),
+    const worldPolygon = polygon.map((point) => parcelWorldPoint(parcel, point));
+    const boundaryClearance = yardLifeWallInwardClearance(parcel.wallType);
+    invariant(polygon.every((corner) => G.pointInPoly(corner, parcel.shape.pts))
+      && polygonBoundaryDistance(polygon, parcel.shape.pts) >= boundaryClearance - EPS,
     `${label} pierces the wall boundary`);
+    invariant(!roadSpatial.intersectsRoadCorridor(worldPolygon, 0.2),
+      `${label} enters an actual road corridor`);
+    const solidThickness = VILLAGE_SOLID_WALL_THICKNESS[parcel.wallType] || 0;
+    if (solidThickness > 0) {
+      const wall = villageWallLayout(parcel.shape, {
+        style: parcel.wallType,
+        plotW: parcel.plotW,
+        plotD: parcel.plotD,
+        gateEdge: parcel.access?.gateEdge,
+        gateT: parcel.access?.gateT,
+        wallHeightK: 1,
+      }, () => 0.5);
+      for (const edge of wall.edgeLayouts) for (const run of edge.runs) {
+        invariant(
+          G.segmentPolygonDistance(run.a, run.b, polygon)
+            >= solidThickness * 0.5 + YARD_HARD_GAP - EPS,
+          `${label} intersects rendered ${parcel.wallType} wall run ${edge.index}`,
+        );
+      }
+    }
     const roof = parcelEffectiveRoofBounds(parcel);
     const roofPolygon = [
       { x: roof.minX, z: roof.minZ }, { x: roof.maxX, z: roof.minZ },
@@ -322,30 +384,38 @@ for (const scale of SCALES) for (const seed of SEEDS) {
 
   const obstacles = yardLifeRecordsToHardObstacles(first);
   invariant(deepFrozen(obstacles), `${scale}:${seed} obstacles are not deeply frozen`);
-  const expectedObstacleCount = new Set(first.map((record) =>
-    `${record.owner.parcelId}|${record.slot}`)).size;
+  const obstacleKey = (record) => (
+    `${record.owner.parcelId}|${record.slot}|${record.local.x}|${record.local.z}`
+  );
+  const expectedObstacleCount = new Set(first.map(obstacleKey)).size;
   invariant(obstacles.length === expectedObstacleCount,
     `${scale}:${seed} did not preserve the potential-slot union`);
   for (const [ownerId, records] of byOwner) {
     const owned = yardLifeRecordsToHardObstacles(first, ownerId);
-    const expectedOwnedCount = new Set(records.map((record) => record.slot)).size;
+    const expectedOwnedCount = new Set(records.map(obstacleKey)).size;
     invariant(owned.length === expectedOwnedCount && owned.every((obstacle) =>
       obstacle.ownerId === ownerId && obstacle.mode === 'trunk'
-      && obstacle.kind === 'yard-life' && obstacle.shape === 'circle'),
+      && obstacle.kind === 'yard-life' && obstacle.shape === 'circle'
+      && typeof obstacle.slot === 'string'),
     `${scale}:${seed}:${ownerId} obstacle adapter leaked ownership`);
     const expectedRadius = new Map();
     for (const record of records) {
-      expectedRadius.set(record.slot, Math.max(
-        expectedRadius.get(record.slot) || 0,
+      const key = obstacleKey(record);
+      expectedRadius.set(key, Math.max(
+        expectedRadius.get(key) || 0,
         Math.hypot(record.footprint.halfX, record.footprint.halfZ) + YARD_HARD_GAP,
       ));
     }
-    invariant(owned.every((obstacle) =>
-      Math.abs(obstacle.radius - expectedRadius.get(obstacle.id.split(':').at(-1))) <= EPS),
+    invariant(owned.every((obstacle) => {
+      const key = `${obstacle.ownerId}|${obstacle.slot}|${obstacle.x}|${obstacle.z}`;
+      return Math.abs(obstacle.radius - expectedRadius.get(key)) <= EPS;
+    }),
     `${scale}:${seed}:${ownerId} obstacle envelope drifted`);
   }
 
   const owners = byOwner.size;
+  invariant(eligible < 8 || owners >= 1,
+    `${scale}:${seed} lost yard life despite a representative eligible population`);
   invariant(owners <= Math.max(1, Math.ceil(eligible * 0.18)),
     `${scale}:${seed} yard life is not sparse (${owners}/${eligible})`);
   scaleStats.get(scale).eligible += eligible;
@@ -359,12 +429,13 @@ for (const scale of SCALES) for (const seed of SEEDS) {
 
 for (const [scale, stats] of scaleStats) {
   const density = stats.owners / stats.eligible;
-  invariant(density >= 0.015 && density <= 0.13,
+  invariant(stats.owners > 0 && density >= 0.025 && density <= 0.13,
     `${scale} aggregate density escaped sparse bounds (${stats.owners}/${stats.eligible})`);
 }
 const density = ownerTotal / eligibleTotal;
 invariant(density >= 0.035 && density <= 0.12,
   `aggregate yard-life density escaped sparse bounds (${ownerTotal}/${eligibleTotal})`);
+invariant(hedgeRecordTotal > 0, 'fixture matrix did not exercise hedge boundary clearance');
 
 invariant(fallbackFixture, 'no fixture exercised heightAt fallback');
 const fallbackParcels = structuredClone(fallbackFixture.plan.parcels);
@@ -387,8 +458,31 @@ invariant(fallbackRecords.every((record) =>
 const collisionParcelById = new Map(
   fallbackFixture.plan.parcels.map((parcel) => [parcel.id, parcel]),
 );
+const springRecord = fallbackFixture.records.find((record) => record.season === 'spring');
+invariant(springRecord, 'record validator fixture has no spring record');
+const malformedWeather = structuredClone(springRecord);
+malformedWeather.weather.allow.push('snow');
+expectRecordRejection(malformedWeather, 'motif-incompatible weather');
+const malformedYaw = structuredClone(springRecord);
+malformedYaw.footprint.yaw = Number.NaN;
+expectRecordRejection(malformedYaw, 'non-finite footprint yaw');
+const malformedRole = structuredClone(springRecord);
+malformedRole.materialRoles.push('stone');
+expectRecordRejection(malformedRole, 'extra material role');
+const duplicatePart = structuredClone(springRecord);
+duplicatePart.parts.push({ ...duplicatePart.parts[0] });
+expectRecordRejection(duplicatePart, 'duplicate semantic part');
+const missingPart = structuredClone(springRecord);
+missingPart.parts.pop();
+missingPart.materialRoles = [...new Set(missingPart.parts.map((part) => part.materialRole))];
+expectRecordRejection(missingPart, 'missing required semantic part');
 const collisionRecord = fallbackFixture.records[0];
 const collisionParcel = collisionParcelById.get(collisionRecord.owner.parcelId);
+const numericIdParcel = structuredClone(collisionParcel);
+numericIdParcel.id = 1;
+invariant(!yardLifeHouseholdEligible(numericIdParcel)
+    && planYardLife([numericIdParcel], { seed: 31 }).length === 0,
+'planner accepted a numeric parcel id that its public record validator rejects');
 const collisionOptions = {
   footprint: collisionRecord.footprint,
   height: collisionRecord.height,

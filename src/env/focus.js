@@ -71,7 +71,7 @@ function disposeSubtree(obj) {
 // 단일 링 인스턴스(활성 또는 페이드아웃 중). 자기 컨테이너·서브시스템·게이트를 소유한다.
 function makeRing({
   scene, heightAt, sun, renderer, group, parcel, radius, seed, getWeather, vol, season,
-  chickens,
+  chickens, grassObstacles,
 }) {
   const container = new THREE.Group();
   container.name = 'focusRing';
@@ -170,7 +170,7 @@ function makeRing({
     bounds: { W, D }, matrix: parcelRigid,
     yard: { x: yardLocal.x, z: yardLocal.z, r: yardR },
     style, gateW: GATE_W[style] || 2.4,
-    sun, seed: (seed ^ 0x3aa9) >>> 0, season,
+    sun, seed: (seed ^ 0x3aa9) >>> 0, season, grassObstacles,
   });
 
   // 5) 지붕 적설/빗물(#131): 눈 쌓임 볼륨 쉘·빗물 리벌릿 물리는 사용자 지시로 제거(roofcapture +
@@ -295,7 +295,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
   //   season: 풀 색 계절(spring|summer|autumn|winter). 기본 현행 유지(마지막 setSeason 값).
   function set({
     group, parcel = null, radius = 18, seed = 4343, getWeather = null, season,
-    chickens = null,
+    chickens = null, grassObstacles = null,
   } = {}) {
     if (!group) return;
     if (season) curSeason = season;
@@ -303,6 +303,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
     const next = makeRing({
       scene, heightAt, sun: _sun, renderer, group, parcel, radius,
       seed: seed >>> 0, getWeather, vol: VOL, season: curSeason, chickens,
+      grassObstacles,
     });
     try {
       next.setTime(curTime, true);   // 시간대 프로파일 즉시 정합(발현 세기는 strength 로 페이드)

@@ -10,6 +10,7 @@ import {
   localCanopyBlocksSolarAccess,
   parcelHouseTranslation,
 } from './parcel-contract.js';
+import { VILLAGE_SOLID_WALL_THICKNESS } from './wall-contract.js';
 
 export const YARD_HARD_GAP = 0.12;
 export const YARD_LIFE_MAX_HEIGHT = 1.2;
@@ -19,8 +20,21 @@ const AUX_MAX_YAW = 0.1;
 const JAR_OVERHANG = 0.12;
 const GARDEN_STONE_MARGIN = 0.08;
 const YARD_LIFE_WALL_GAP = 0.18;
+const HEDGE_MAX_BLOB_RADIUS = 0.70;
+const HEDGE_MAX_NORMAL_JITTER = 0.04;
+// `walls.js#makeHedgeRun` places at most 0.70m-radius blobs with ±0.04m
+// normal jitter. Yard-life footprints therefore reserve that whole inward
+// vegetation band plus the shared hard-object breathing room.
+export const YARD_HEDGE_INWARD_CLEARANCE =
+  HEDGE_MAX_BLOB_RADIUS + HEDGE_MAX_NORMAL_JITTER + YARD_HARD_GAP;
 const YARD_LIFE_ROOF_GAP = 0.22;
 const YARD_LIFE_GATE_GAP = 0.82;
+
+export function yardLifeWallInwardClearance(style = 'stone') {
+  if (style === 'hedge') return YARD_HEDGE_INWARD_CLEARANCE;
+  const solidThickness = VILLAGE_SOLID_WALL_THICKNESS[style] || 0;
+  return Math.max(YARD_LIFE_WALL_GAP, solidThickness * 0.5 + YARD_HARD_GAP);
+}
 
 function rectangle(kind, mode, x, z, halfWidth, halfDepth) {
   return { kind, mode, shape: 'rect', x, z, halfWidth, halfDepth };
@@ -300,22 +314,37 @@ function lifeRectIntersectsHardObstacle(point, footprint, obstacles) {
   return false;
 }
 
-function circleFitsParcel(point, radius, points) {
+function circleFitsParcel(
+  point,
+  radius,
+  points,
+  edgeClearance = YARD_LIFE_WALL_GAP,
+  allowExactClearance = false,
+) {
   if (!points?.length || !G.pointInPoly(point, points)) return false;
-  const clearance = radius + YARD_LIFE_WALL_GAP;
+  const clearance = radius + edgeClearance;
   for (let i = 0; i < points.length; i++) {
-    if (G.distToSeg(point, points[i], points[(i + 1) % points.length]).d <= clearance) {
+    const distance = G.distToSeg(point, points[i], points[(i + 1) % points.length]).d;
+    if (allowExactClearance ? distance < clearance : distance <= clearance) {
       return false;
     }
   }
   return true;
 }
 
-function lifeRectFitsParcel(point, footprint, points) {
+function lifeRectFitsParcel(
+  point,
+  footprint,
+  points,
+  edgeClearance = YARD_LIFE_WALL_GAP,
+  allowExactClearance = false,
+) {
   if (!points?.length) return false;
   return lifeRectPolygon(point, footprint).every((corner) => G.pointInPoly(corner, points)
     && points.every((edge, index) =>
-      G.distToSeg(corner, edge, points[(index + 1) % points.length]).d > YARD_LIFE_WALL_GAP));
+      allowExactClearance
+        ? G.distToSeg(corner, edge, points[(index + 1) % points.length]).d >= edgeClearance
+        : G.distToSeg(corner, edge, points[(index + 1) % points.length]).d > edgeClearance));
 }
 
 function lifeRectIntersectsRoof(point, footprint, roof) {
@@ -359,19 +388,34 @@ function gateApproach(parcel, roof) {
 function lifeSlotTemplates(parcel, envelopeX, envelopeZ, slotClass, roof) {
   const halfW = parcel.plotW * 0.5;
   const halfD = parcel.plotD * 0.5;
-  const sideX = Math.max(0, halfW - envelopeX - 0.22);
+  const edgeInset = yardLifeWallInwardClearance(parcel.wallType);
+  const sideX = Math.max(0, halfW - envelopeX - edgeInset);
+  const solarHalfWidth = Number.isFinite(parcel.solarAccess?.halfWidth)
+    ? parcel.solarAccess.halfWidth : 0;
+  const innerX = Math.min(
+    sideX,
+    Math.max(envelopeX + YARD_HARD_GAP, solarHalfWidth + envelopeX + YARD_HARD_GAP),
+  );
+  const roofClearZ = roof.maxZ + envelopeZ + YARD_LIFE_ROOF_GAP;
   const serviceZ = Math.min(
-    halfD - envelopeZ - 0.22,
+    halfD - envelopeZ - edgeInset,
     Math.max(-parcel.plotD * 0.02, roof.maxZ + envelopeZ + YARD_LIFE_ROOF_GAP),
   );
-  const frontZ = Math.min(halfD - envelopeZ - 0.22, parcel.plotD * 0.24);
-  const middleZ = Math.min(halfD - envelopeZ - 0.22, parcel.plotD * 0.11);
+  const frontZ = Math.min(
+    halfD - envelopeZ - edgeInset,
+    Math.max(parcel.plotD * 0.24, roofClearZ),
+  );
+  const middleZ = Math.min(halfD - envelopeZ - edgeInset, parcel.plotD * 0.11);
   if (slotClass === 'open-work-yard') {
     return [
       { id: 'work-right-front', x: sideX, z: frontZ },
       { id: 'work-left-front', x: -sideX, z: frontZ },
+      { id: 'work-right-inner-front', x: innerX, z: frontZ },
+      { id: 'work-left-inner-front', x: -innerX, z: frontZ },
       { id: 'work-right-middle', x: sideX, z: middleZ },
       { id: 'work-left-middle', x: -sideX, z: middleZ },
+      { id: 'work-right-inner-middle', x: innerX, z: middleZ },
+      { id: 'work-left-inner-middle', x: -innerX, z: middleZ },
     ];
   }
   return [
@@ -403,10 +447,17 @@ export function yardLifePotentialSlots(
   const approach = gateApproach(parcel, roof);
   const envelopeX = safeRect?.envelopeX ?? safeRadius;
   const envelopeZ = safeRect?.envelopeZ ?? safeRadius;
+  const edgeClearance = yardLifeWallInwardClearance(parcel.wallType);
   return lifeSlotTemplates(parcel, envelopeX, envelopeZ, slotClass, roof).filter((slot) => {
     const point = { x: slot.x, z: slot.z };
     if (safeRect) {
-      if (!lifeRectFitsParcel(point, safeRect, parcel.shape?.pts)) return false;
+      if (!lifeRectFitsParcel(
+        point,
+        safeRect,
+        parcel.shape?.pts,
+        edgeClearance,
+        true,
+      )) return false;
       if (lifeRectIntersectsRoof(point, safeRect, roof)) return false;
       if (lifeRectIntersectsHardObstacle(point, safeRect, hard)) return false;
       if (lifeRectBlocksSolarAccess(parcel, point, safeRect)) return false;
@@ -417,7 +468,13 @@ export function yardLifePotentialSlots(
       ) <= YARD_LIFE_GATE_GAP) return false;
       return true;
     }
-    if (!circleFitsParcel(point, safeRadius, parcel.shape?.pts)) return false;
+    if (!circleFitsParcel(
+      point,
+      safeRadius,
+      parcel.shape?.pts,
+      edgeClearance,
+      true,
+    )) return false;
     if (circleIntersectsRectangle(point, safeRadius + YARD_LIFE_ROOF_GAP, roof)) return false;
     if (yardCircleIntersectsHardObstacle(point, safeRadius, hard)) return false;
     if (localCanopyBlocksSolarAccess(parcel, point, safeRadius)) return false;

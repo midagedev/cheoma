@@ -62,7 +62,8 @@ function ownerSeed(parcel, seed) {
 
 export function yardLifeHouseholdEligible(parcel) {
   if (!parcel || parcel.hero || !['giwa', 'choga'].includes(parcel.kind)) return false;
-  if (!parcel.id || !Number.isFinite(parcel.plotW) || !Number.isFinite(parcel.plotD)) return false;
+  if (typeof parcel.id !== 'string' || !parcel.id
+    || !Number.isFinite(parcel.plotW) || !Number.isFinite(parcel.plotD)) return false;
   // v1 is agricultural yard life: choga is accepted directly; giwa needs one
   // existing livelihood/lot signal rather than being treated as a generic prop host.
   return parcel.kind === 'choga'
@@ -197,10 +198,14 @@ export function planYardLife(parcels, { seed = 0, heightAt } = {}) {
     return left < right ? -1 : left > right ? 1 : 0;
   });
   const records = [];
+  const viable = [];
+  let eligibleCount = 0;
   for (const parcel of ordered) {
     if (!yardLifeHouseholdEligible(parcel)) continue;
+    eligibleCount++;
     const rng = makeRng(ownerSeed(parcel, seed));
-    if (rng() >= selectionProbability(parcel)) continue;
+    const probability = selectionProbability(parcel);
+    const selectionRoll = rng();
 
     const drafts = motifDrafts(parcel, rng);
     const placements = [];
@@ -224,8 +229,30 @@ export function planYardLife(parcels, { seed = 0, heightAt } = {}) {
       placements.push({ draft, slot });
     }
     if (placements.length !== drafts.length) continue;
-    for (const { draft, slot } of placements) {
-      records.push(makeRecord(parcel, draft, slot, heightAt));
+    viable.push({
+      ownerId: parcel.id,
+      priority: selectionRoll / probability,
+      parcel,
+      placements,
+    });
+    if (selectionRoll < probability) {
+      for (const { draft, slot } of placements) {
+        records.push(makeRecord(parcel, draft, slot, heightAt));
+      }
+    }
+  }
+  // A ten-house hamlet should not randomly lose the feature altogether. When a
+  // sufficiently large eligible population has at least one collision-safe
+  // household but every independent sparse roll misses, promote only the most
+  // nearly selected viable owner. This remains seed-local, deterministic, and
+  // bounded to one owner rather than raising density for every parcel.
+  if (records.length === 0 && eligibleCount >= 8 && viable.length) {
+    viable.sort((left, right) => (
+      left.priority - right.priority
+      || left.ownerId.localeCompare(right.ownerId)
+    ));
+    for (const { draft, slot } of viable[0].placements) {
+      records.push(makeRecord(viable[0].parcel, draft, slot, heightAt));
     }
   }
   return deepFreeze(records);
@@ -245,19 +272,25 @@ export function yardLifeRecordsToHardObstacles(records, parcelId = null) {
       || !Number.isFinite(record.footprint.halfZ)
       || !Number.isFinite(record.local?.x)
       || !Number.isFinite(record.local?.z)) continue;
-    const key = `${ownerId}|${record.slot}`;
+    // Slot ids describe a semantic edge, not one fixed coordinate: footprints
+    // with different dimensions are inset to different local x/z positions.
+    // Collapse only records that truly share the same authored point.
+    const localX = Object.is(record.local.x, -0) ? 0 : record.local.x;
+    const localZ = Object.is(record.local.z, -0) ? 0 : record.local.z;
+    const key = `${ownerId}|${record.slot}|${localX}|${localZ}`;
     const prior = groups.get(key);
     const radius = Math.hypot(record.footprint.halfX, record.footprint.halfZ) + YARD_HARD_GAP;
     if (!prior || radius > prior.radius) {
       groups.set(key, {
-        id: `yard-life-obstacle:${ownerId}:${record.slot}`,
+        id: `yard-life-obstacle:${ownerId}:${record.slot}:${localX}:${localZ}`,
         ownerId,
         kind: 'yard-life',
         motif: record.motif,
+        slot: record.slot,
         mode: 'trunk',
         shape: 'circle',
-        x: record.local.x,
-        z: record.local.z,
+        x: localX,
+        z: localZ,
         radius,
         height: record.height,
       });

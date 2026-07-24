@@ -13,6 +13,20 @@ export {
   planSijeon,
   planSijeonFacade,
 } from './sijeon.js';
+export {
+  YARD_LIFE_MOTIFS,
+  YARD_LIFE_MATERIAL_ROLES,
+  YARD_LIFE_PRESENTATION_SEASONS,
+  YARD_LIFE_SCHEMA_VERSION,
+  YARD_LIFE_SEASONS,
+  YARD_LIFE_WEATHER,
+  buildYardLife,
+  disposeYardLife,
+  planYardLife,
+  validateYardLifeRecords,
+  yardLifeHouseholdEligible,
+  yardLifeRecordsToHardObstacles,
+} from './yard-life.js';
 export * from './environment.js';
 export * from './post-quality.js';
 export * from './particles.js';

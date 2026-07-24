@@ -55,7 +55,7 @@ import {
   buildYardLife,
   disposeYardLife,
   YARD_LIFE_MATERIAL_ROLES,
-} from '/src/generators/village/yard-life.js';
+} from '/src/api/yard-life.js';
 import { createVillageYardLife } from '/src/runtime/village/yard-life.js';
 
 const renderer = new THREE.WebGLRenderer({
@@ -275,6 +275,34 @@ async function runContracts() {
   assert(initial.resources.geometries === initial.allocatedDrawCalls,
     'geometry count diverged from role batches', initial);
 
+  const beforeRejectedTransition = yardLife.debug();
+  let rejectedSeasonDuration = false;
+  try {
+    yardLife.setSeason('autumn', { duration: Number.NaN });
+  } catch {
+    rejectedSeasonDuration = true;
+  }
+  const afterRejectedSeason = yardLife.debug();
+  assert(rejectedSeasonDuration
+    && afterRejectedSeason.season === beforeRejectedTransition.season
+    && afterRejectedSeason.seasonTransitioning === beforeRejectedTransition.seasonTransitioning
+    && JSON.stringify(afterRejectedSeason.weights)
+      === JSON.stringify(beforeRejectedTransition.weights),
+  'invalid season duration mutated presentation state', afterRejectedSeason);
+  let rejectedWeatherDuration = false;
+  try {
+    yardLife.setWeather('rain', { duration: Number.NaN });
+  } catch {
+    rejectedWeatherDuration = true;
+  }
+  const afterRejectedWeather = yardLife.debug();
+  assert(rejectedWeatherDuration
+    && afterRejectedWeather.weather === beforeRejectedTransition.weather
+    && afterRejectedWeather.weatherTransitioning === beforeRejectedTransition.weatherTransitioning
+    && JSON.stringify(afterRejectedWeather.weights)
+      === JSON.stringify(beforeRejectedTransition.weights),
+  'invalid weather duration mutated presentation state', afterRejectedWeather);
+
   const meshes = [];
   yardLife.group.traverse((object) => {
     if (object.isMesh) meshes.push(object);
@@ -285,6 +313,8 @@ async function runContracts() {
     assert(mesh.material.transparent === false, 'yard-life material became transparent', mesh.name);
     assert(mesh.material.depthWrite === true, 'yard-life material disabled depthWrite', mesh.name);
     assert(mesh.geometry.getAttribute('instFade'), 'color mesh lacks instFade coverage', mesh.name);
+    assert(mesh.geometry.getAttribute('instFade').usage === THREE.DynamicDrawUsage,
+      'per-frame instFade coverage is not marked for dynamic uploads', mesh.name);
     assert(mesh.customDepthMaterial?.allowOverride === false,
       'custom depth material allows override', mesh.name);
     assert(mesh.customDistanceMaterial?.allowOverride === false,
@@ -319,6 +349,37 @@ async function runContracts() {
   assert(mixedSeason.weights[1] > 0 && mixedSeason.weights[1] < 1,
     'incoming season did not crossfade', mixedSeason.weights);
 
+  const transitionMeshes = [...yardLife.group.children];
+  const transitionGeometries = [...ownedGeometries(yardLife.group)];
+  const transitionDisposals = transitionGeometries.map((geometry) => {
+    const state = { count: 0 };
+    geometry.addEventListener('dispose', () => state.count++);
+    return state;
+  });
+  const skippedBefore = mixedSeason.skippedRebuilds;
+  assert(!yardLife.rebuild(cloneRecords()),
+    'byte-identical records replaced live geometry');
+  const afterNoopRebuild = yardLife.debug();
+  assert(afterNoopRebuild.skippedRebuilds === skippedBefore + 1
+      && afterNoopRebuild.seasonTransitioning
+      && JSON.stringify(afterNoopRebuild.weights) === JSON.stringify(mixedSeason.weights)
+      && yardLife.group.children.every((mesh, index) => mesh === transitionMeshes[index])
+      && transitionDisposals.every((state) => state.count === 0),
+  'byte-identical rebuild disturbed an active transition or ownership',
+  afterNoopRebuild);
+
+  assert(yardLife.rebuild(cloneRecords(0.018)),
+    'changed records did not rebuild');
+  const afterChangedRebuild = yardLife.debug();
+  assert(afterChangedRebuild.seasonTransitioning
+      && afterChangedRebuild.weights.every((value, index) => (
+        Math.abs(value - mixedSeason.weights[index]) < 1e-6
+      ))
+      && yardLife.group.children.some((mesh, index) => mesh !== transitionMeshes[index])
+      && transitionDisposals.every((state) => state.count === 1),
+  'changed rebuild hard-cut the active transition or leaked old geometry',
+  afterChangedRebuild);
+
   yardLife.update(0.55);
   yardLife.setWeather('rain', { duration: 1 });
   const weatherAdvanced = yardLife.update(0.45);
@@ -351,6 +412,18 @@ async function runContracts() {
   const sleeping = usePresentation('winter', 'snow', 1, 0);
   assert(!yardLife.group.visible && sleeping.submittedDrawCalls === 0,
     'aerial LOD did not sleep the whole layer', sleeping);
+  const sleepScanCount = sleeping.lodScanCount;
+  const sleepCount = sleeping.lodSleepCount;
+  for (let frame = 0; frame < 20; frame++) {
+    assert(!yardLife.updateLod(null, { groundActive: false, groundWeight: 0 }),
+      'steady aerial LOD reported a false invalidation');
+  }
+  const steadySleep = yardLife.debug();
+  assert(steadySleep.detailSleeping
+      && steadySleep.lodScanCount === sleepScanCount
+      && steadySleep.lodSleepCount === sleepCount + 20,
+  'steady aerial LOD scanned or allocated instead of taking the O(1) sleep path',
+  steadySleep);
   const halfWave = usePresentation('winter', 'snow', 0.36, 1);
   assert(Math.abs(halfWave.weights[2] - 0.36) < 1e-5,
     'wave weight was not composed', halfWave.weights);
@@ -405,6 +478,44 @@ async function runContracts() {
   assert(initialHash === geometryHash(yardLife.group)
     && yardLife.debug().recordCount === beforeRejectedRebuild.recordCount,
   'rejected rebuild disturbed the live geometry');
+
+  const atomic = buildYardLife(cloneRecords(0, 0.18, ':atomic'), {
+    materials,
+    season: 'spring',
+    weather: 'clear',
+  });
+  let rejectStoredLod = false;
+  const storedWeightAt = () => {
+    if (rejectStoredLod) throw new Error('intentional stored LOD failure');
+    return 0.72;
+  };
+  atomic.updateLod(null, { groundActive: true, groundWeight: 1 }, storedWeightAt);
+  const atomicBefore = atomic.debug();
+  const atomicHash = geometryHash(atomic.group);
+  const atomicMeshes = [...atomic.group.children];
+  const atomicGeometryDisposals = [...ownedGeometries(atomic.group)].map((geometry) => {
+    const state = { count: 0 };
+    geometry.addEventListener('dispose', () => state.count++);
+    return state;
+  });
+  rejectStoredLod = true;
+  let rejectedStoredLod = false;
+  try {
+    atomic.rebuild(cloneRecords(0.2, 0.18, ':atomic-next'));
+  } catch {
+    rejectedStoredLod = true;
+  }
+  const atomicAfter = atomic.debug();
+  assert(rejectedStoredLod
+    && atomicAfter.rebuildCount === atomicBefore.rebuildCount
+    && atomicAfter.records[0].id === atomicBefore.records[0].id
+    && geometryHash(atomic.group) === atomicHash
+    && atomic.group.children.length === atomicMeshes.length
+    && atomic.group.children.every((mesh, index) => mesh === atomicMeshes[index])
+    && atomicGeometryDisposals.every((state) => state.count === 0),
+  'throwing stored LOD callback disturbed live rebuild ownership', atomicAfter);
+  assert(disposeYardLife(atomic) && atomicGeometryDisposals.every((state) => state.count === 1),
+    'atomic rebuild fixture did not dispose the preserved live geometry exactly once');
 
   let fallbackCalls = 0;
   const missingY = cloneRecords().slice(0, 1);

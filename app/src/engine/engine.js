@@ -2604,6 +2604,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       navigationTargets: () => (village.handle?.getPickProxies?.() || [])
         .map(buildingNavigationTargetFromProxy)
         .filter(Boolean),
+      debugYardLife: () => village.handle?.debugYardLife?.() || null,
       heroId: () => village.handle?.heroParcelId?.() ?? null,
       // focus 중 여부(App 이 再 버튼 노출·모드 판단) — selected 이면서 전환 완료 상태.
       focused: () => !!(village.active && village.selected),

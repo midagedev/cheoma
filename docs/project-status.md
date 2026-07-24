@@ -1,7 +1,7 @@
 # 프로젝트 방향과 현재 상태
 
 > - **상태**: 현재 계약
-> - **기준일**: 2026-07-23
+> - **기준일**: 2026-07-24
 > - **근거**: Claude Code 프로젝트 메모리의 안정된 결정, 현재 코드, 영구 회귀 게이트
 
 ## 한 줄 방향
@@ -219,6 +219,26 @@ GLB는 transient focus 표현은 제외하되 commit된 일반집 overlay와 그
 GitHub #12 복합 가람 생성기는 [`temple-generator.md`](temple-generator.md)의 계약대로 구현됐다. Three 없는 순수 local-space 계획과 Three.js 조립·dispose를 분리하고, 22–30m 암자형·36–48m 중정형·52–72m 다원형을 제공한다. 마을은 실제 직사각 footprint를 필지·도로·식생 전에 예약하며, 편집 패널은 전각 수·중정 여백·축 굴절·석탑·석등·종루·당간지주·부도를 계획 옵션으로 갱신한다. 남측 일조 통로와 26° focus 카메라는 같은 `frontDir` 계약을 쓴다.
 
 사찰 원본 조립 트리는 편집·두부 조립용으로만 유지하고, 부감에서는 재질별 병합해 대표 다원형을 2,681콜에서 111콜로 낮춘다. 순수 계약과 독립 WebGL 수명주기/성능 게이트, 실제 앱 focus 캡처를 분리해 일상 검증은 가볍게 유지한다.
+
+GitHub #131은 농가 전체를 소품으로 채우지 않고 결정론적으로 선택한 약 5.7%의 가구에만 봄 볍씨 준비·가을
+타작·겨울 땔감 기록을 함께 계획한다. Three 없는 `yard-life-plan.js`가 필지별 hash stream과 실제
+처마·대문 동선·일조·마당 hard object를 사용하고, `yard-life-record-contract.js`가 worker나 외부 저장 경계를
+건넌 JSON의 정확한 계절·날씨·variant·part·재료·footprint를 geometry 할당 전에 검증한다. 세 계절의 서비스·작업
+슬롯을 좌표까지 포함한 정확한 합집합으로 먼저 예약한다. 실제 돌·흙·기와담 몸체 반두께와 hard gap, 도로 회랑을
+공유하므로 계절 전환이 담·과실수·근경 풀을 관통시키지 않으며, 리빌드는 편집으로 바뀐 주거 종류에서 다시 계획한다.
+대표 seed의 작은 마을에서도 충분한 후보가 있으면 가장 가까이 선택된 한 가구를 결정론적으로 남겨 규모별 희소성이
+우연히 0이 되지 않게 한다.
+
+재사용 renderer는 호출자가 빌려준 texture 없는 여섯 역할 material을 소유하지 않고 최대 여섯 개의 고정
+opaque screen-door batch로 물리 geometry를 만든다. 격리 fixture는 최대 6 역할 draw·texture 0·program 3을
+지키고, 계절·날씨·shared detail LOD·wave는 새 자원 없이 가중치만 바꾼다. byte-identical rebuild는 메시를
+교체하지 않고, 바뀐 record는 같은 ID의 진행 중 전환 가중치를 이어받는다. 저장된 LOD callback까지 먼저 평가한
+뒤에만 geometry를 교체해 실패한 rebuild가 기존 메시 identity나 dispose 소유권을 흔들지 않는다. 부감 진입 때
+한 번만 0 coverage를 올린 뒤 배열 할당·record scan 없이 CPU와 draw를 함께 쉬고, 제품 세 계절은 같은 카메라
+layer OFF/ON 픽셀 기여와 자원 plateau를 고정한다.
+근경 풀은 기존 RNG 후보를 모두 만든 뒤 생활상 합집합과 겹친 후보만 안정적으로 제거하므로 위치 스트림·한
+InstancedMesh·드로우콜은 그대로다. 근거와 제품 번역 한계는 [`yard-life.md`](yard-life.md), 재사용 API와
+검증 분리는 [`external-reuse.md`](external-reuse.md)·[`verification.md`](verification.md)에 고정했다.
 
 구조의 다음 후보는 palette의 canvas provider 주입과 engine village/focus controller지만, 새 기능보다 자동 검증을 먼저 추가하는 조건으로만 진행한다.
 

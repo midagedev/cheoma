@@ -3,7 +3,7 @@ import { gateCommand } from './verification-gates.mjs';
 import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -11,8 +11,8 @@ const FULL_GATES = Object.freeze([
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
 const ROOT_HTML = /^[^/]+\.html$/;
 // New code normally fails closed. These paths are the reviewed exception for
-// #107–#108, #113–#114, and #128: the platform adapters, portable semantic
-// state, first-scene guide, keyboard navigation, and sijeon plan/renderer have
+// #107–#108, #113–#114, #128, and #131: the platform adapters, portable semantic
+// state, first-scene guide, keyboard navigation, sijeon, and yard-life boundaries have
 // dedicated contracts below.
 const REVIEWED_NEW_PATHS = new Set([
   'app/src/components/SceneGuide.svelte',
@@ -25,18 +25,29 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/api/environment-state.js',
   'src/api/sijeon.js',
   'src/api/sijeon-plan.js',
+  'src/api/yard-life.js',
+  'src/api/yard-life-plan.js',
   'src/api/village-options.js',
   'src/generators/village/sijeon.js',
+  'src/generators/village/yard-life.js',
+  'src/generators/village/yard-life-geometry.js',
+  'src/generators/village/yard-life-product.js',
+  'src/runtime/village/yard-life.js',
   'src/village/sijeon-plan.js',
+  'src/village/yard-life-plan.js',
+  'src/village/yard-life-record-contract.js',
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
   'tools/check-scene-guide.mjs',
   'tools/check-api-reuse-suite.mjs',
   'tools/check-sijeon-contract.mjs',
+  'tools/check-yard-life-contract.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',
   'tools/shoot-sijeon-app.mjs',
+  'tools/shoot-yard-life.mjs',
+  'tools/shoot-yard-life-app.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -115,6 +126,8 @@ function routePath(path) {
     'tools/shoot-wall-steps.mjs': ['app'],
     'tools/shoot-sijeon.mjs': ['app', 'api-reuse'],
     'tools/shoot-sijeon-app.mjs': ['app', 'api-reuse'],
+    'tools/shoot-yard-life.mjs': ['yard-life'],
+    'tools/shoot-yard-life-app.mjs': ['app', 'yard-life'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
@@ -235,6 +248,21 @@ function routePath(path) {
         'api-reuse', 'winter-app', 'rim', 'lod-wave',
       );
     }
+    if (path === 'src/generators/village/yard-life.js'
+      || path === 'src/generators/village/yard-life-geometry.js'
+      || path === 'src/generators/village/yard-life-product.js') {
+      select(
+        'reusable yard-life rendering, seasonal transition, LOD, wave, and lifecycle contracts changed',
+        'yard-life', 'winter-app', 'lod-focus', 'lod-wave',
+      );
+    }
+    if (path === 'src/village/yard-life-plan.js'
+      || path === 'src/village/yard-life-record-contract.js') {
+      select('renderer-free yard-life planning and collision contract changed', 'yard-life');
+    }
+    if (path === 'src/village/yard-layout.js') {
+      select('shared yard-life slot and hard-object geometry changed', 'yard-life');
+    }
     if (path === 'src/village/options.js' || path === 'src/village/site.js') {
       select('portable village option meaning changed', 'share');
     }
@@ -276,6 +304,9 @@ function routePath(path) {
     if (path === 'src/runtime/village/snow.js') select('village snow controller changed', 'winter-app');
     if (path === 'src/runtime/village/create.js') select('async handle lifecycle changed', 'lod-wave');
     if (path === 'src/runtime/village/handle.js') select('village handle changed', 'lod-focus', 'lod-wave');
+    if (path === 'src/runtime/village/yard-life.js') {
+      select('yard-life product runtime and shared detail LOD changed', 'yard-life', 'lod-focus', 'lod-wave');
+    }
     return { gates, reasons };
   }
 
@@ -324,6 +355,17 @@ function routePath(path) {
     }
     if (path === 'src/api/sijeon-plan.js') {
       select('public renderer-free sijeon planning API changed', 'app', 'api-reuse', 'worker');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/yard-life.js') {
+      select(
+        'public yard-life renderer and lifecycle API changed',
+        'app', 'yard-life', 'winter-app', 'worker', 'lod-focus', 'lod-wave',
+      );
+      return { gates, reasons };
+    }
+    if (path === 'src/api/yard-life-plan.js') {
+      select('public renderer-free yard-life planning API changed', 'app', 'yard-life', 'worker');
       return { gates, reasons };
     }
     if (path === 'src/api/environment-state.js') {
@@ -474,6 +516,7 @@ export function verificationCommands(plan) {
   if (has('instance-upload')) commands.push(gateCommand('instance-upload'));
   if (has('building-lifecycle')) commands.push(gateCommand('building-lifecycle'));
   if (has('api-reuse')) commands.push(gateCommand('api-reuse'));
+  if (has('yard-life')) commands.push(gateCommand('yard-life'));
   if (has('winter-app')) commands.push(gateCommand('winter-app'));
   if (has('worker')) commands.push(gateCommand('worker'));
   if (has('audio')) commands.push(gateCommand('audio'));

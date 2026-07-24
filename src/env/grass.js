@@ -200,9 +200,33 @@ function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
   return pts;
 }
 
+// 생업 오브젝트는 계절 전환 전에 세 계절의 잠재 위치를 모두 예약한다. 기존 RNG 스트림과
+// 풀 분포는 먼저 완전히 소비하고, 그 결정적 후보 배열만 안정 필터링한다. 재시도·보충 배치는
+// 하지 않으므로 새 난수 소비나 계절별 풀 팝 없이 같은 한 InstancedMesh를 유지한다.
+function clearGrassObstacles(placements, obstacles) {
+  if (!Array.isArray(obstacles) || obstacles.length === 0) return placements;
+  const circles = obstacles.filter((obstacle) => (
+    obstacle?.shape === 'circle'
+    && Number.isFinite(obstacle.x)
+    && Number.isFinite(obstacle.z)
+    && Number.isFinite(obstacle.radius)
+    && obstacle.radius >= 0
+  ));
+  if (circles.length === 0) return placements;
+
+  const filtered = placements.filter((placement) => !circles.some((obstacle) => (
+    Math.hypot(placement.x - obstacle.x, placement.z - obstacle.z) <= obstacle.radius
+  )));
+  filtered.lanes = { road: 0, alley: 0, rest: 0, yard: 0 };
+  for (const placement of filtered) {
+    if (Object.hasOwn(filtered.lanes, placement.lane)) filtered.lanes[placement.lane]++;
+  }
+  return filtered;
+}
+
 export function setupGrass(parent, {
   bounds = { W: 20, D: 18 }, matrix = null, yard = null, style = 'hanok', gateW = 2.0,
-  sun = null, seed = 4343, count, season = 'summer',
+  sun = null, seed = 4343, count, season = 'summer', grassObstacles = null,
 } = {}) {
   const W = bounds.W || 20, D = bounds.D || 18;
   // 밀도 상향(#106): #90 기저 공식 대비 ~1.75× (길가·고샅 어깨로 재배치하며 무성함 강화). 상한 1200
@@ -212,7 +236,10 @@ export function setupGrass(parent, {
 
   const geoRng = makeRng((seed ^ 0x9e3d) >>> 0);
   const { geo, trisPerTuft } = buildTuftGeometry(geoRng);
-  const pts = buildPlacements({ W, D, yard, style, gateW, seed: (seed ^ 0x51ed) >>> 0, count: N });
+  const candidates = buildPlacements({
+    W, D, yard, style, gateW, seed: (seed ^ 0x51ed) >>> 0, count: N,
+  });
+  const pts = clearGrassObstacles(candidates, grassObstacles);
 
   // ── 재질(MeshStandardMaterial 패치) ──
   const uGrassTime = { value: 0 };

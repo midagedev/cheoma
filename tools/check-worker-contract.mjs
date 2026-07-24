@@ -57,11 +57,16 @@ const expectedSceneHashes = {
   // #128 preserves every sijeon placement byte and replaces only the Hanyang
   // market-row meshes with the planned two-bay column/opening/bench grammar.
   // The other scales and all pick proxies therefore remain byte-identical.
+  // #131 adds one stable named yard-life group at every scale and, for selected
+  // households, texture-free seasonal geometry that is prebuilt but asleep in
+  // summer. Its physical hedge envelope removes the one Hanyang golden household
+  // whose seasonal footprint would enter the rendered shrub band; other golden
+  // scales and every parcel pick proxy remain exact.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: '089c40b0:962ffb12:7695c335:724597c8',
-  town: '66734b4e:aa496306:29632b4b:c38d6c78',
-  capital: '32b7209b:e64634d5:0558697c:53238c77',
-  hanyang: '9c9c0ab0:fa79d358:5840e18a:d597599c',
+  village: 'ae1af164:287a8084:452f2525:e178edfe',
+  town: 'a306bb06:d9edffa4:db9607bf:c955fb6e',
+  capital: '53b4e2bb:48fb5b8b:3e9b9356:3e67cdff',
+  hanyang: 'f4d92850:e3b6d6c2:e300b7b3:32aa4d5e',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -159,8 +164,10 @@ try {
         { makeVegetationMask, yardCanopyBlocked },
         { parcelLocalPoint },
         { yardHardObstacles, yardTreeIntersectsHardObstacle },
+        { planYardLife, yardLifeRecordsToHardObstacles },
         { SCATTER_TREE_VISUAL_RADIUS },
         { decodeSceneSnapshot, encodeSceneSnapshot },
+        { Material },
       ] = await Promise.all([
         import('/src/village/adapter.js'),
         import('/tools/lib/hash-three-group.mjs'),
@@ -171,10 +178,13 @@ try {
         import('/src/village/vegetation-spatial.js'),
         import('/src/village/parcel-contract.js'),
         import('/src/village/yard-layout.js'),
+        import('/src/village/yard-life-plan.js'),
         import('/src/generators/village/trees.js'),
         import('/app/src/lib/scene-snapshot.js'),
+        import('/app/node_modules/three/build/three.module.js'),
       ]);
       const probeLifecycle = (handle) => {
+        const yardLife = handle.group.userData.yardLife || null;
         const owned = new Set();
         const shared = new Set();
         const add = (resource) => {
@@ -210,6 +220,7 @@ try {
           finish() {
             for (const resource of owned) resource.removeEventListener('dispose', onOwned);
             for (const resource of shared) resource.removeEventListener('dispose', onShared);
+            const yardLifeDebug = yardLife?.debug?.() || null;
             return {
               owned: owned.size,
               disposed: counts.size,
@@ -220,6 +231,10 @@ try {
                 .map(([resource, count]) => ({ type: resource.type || resource.constructor?.name, name: resource.name || '', count })),
               shared: shared.size,
               sharedDisposals,
+              yardLifeDisposed: yardLifeDebug?.disposed === true
+                && yardLifeDebug?.productMaterialsDisposed === true
+                && yardLifeDebug?.resources?.geometries === 0
+                && yardLifeDebug?.resources?.derivedMaterials === 0,
             };
           },
         };
@@ -296,6 +311,13 @@ try {
           const gardenOptions = Number.isFinite(anchor.hwagyeX)
             ? { exact: true, side: anchor.gardenSide, hwagyeX: anchor.hwagyeX }
             : undefined;
+          const hardObstacles = parcel ? [
+            ...yardHardObstacles(parcel, gardenOptions),
+            ...yardLifeRecordsToHardObstacles(
+              handle.group.userData.yardLifeRecords,
+              anchor.parcelId,
+            ),
+          ] : [];
           const blocked = !parcel || !(anchor.radius > 0)
             || !(anchor.trunkRadius > 0)
             || yardCanopyBlocked(parcel, local, anchor.radius)
@@ -303,7 +325,7 @@ try {
             || yardTreeIntersectsHardObstacle(local, {
               canopyRadius: anchor.radius,
               trunkRadius: anchor.trunkRadius,
-            }, yardHardObstacles(parcel, gardenOptions));
+            }, hardObstacles);
           checked++;
           if (blocked && failures.length < 8) failures.push({
             name: 'flora-yard', index, parcelId: anchor.parcelId,
@@ -320,6 +342,62 @@ try {
           });
         }
         return { pass: failures.length === 0, checked, failures };
+      };
+      const yardLifeContract = (handle) => {
+        const debug = handle.debugYardLife?.();
+        const records = handle.group.userData.yardLifeRecords || [];
+        const source = JSON.stringify(debug?.records || []);
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < source.length; index++) {
+          hash ^= source.charCodeAt(index);
+          hash = Math.imul(hash, 0x01000193);
+        }
+        const signature = (hash >>> 0).toString(16).padStart(8, '0');
+        const group = handle.group.getObjectByName('village-yard-life');
+        const pass = !!debug
+          && debug.season === 'summer'
+          && debug.weather === 'clear'
+          && debug.recordCount === records.length
+          && debug.records?.length === records.length
+          && debug.activeRecords === 0
+          && debug.submittedDrawCalls === 0
+          && debug.allocatedDrawCalls <= 6
+          && debug.textures === 0
+          && debug.productBorrowedMaterials === 6
+          && debug.productMaterialsDisposed === false
+          && group?.visible === false
+          && typeof group?.userData.waveFade?.setWeight === 'function';
+        return {
+          pass,
+          recordCount: debug?.recordCount ?? -1,
+          activeRecords: debug?.activeRecords ?? -1,
+          allocatedDrawCalls: debug?.allocatedDrawCalls ?? -1,
+          signature,
+        };
+      };
+      const crossKindYardLifeContract = (handle) => {
+        const first = handle.group.userData.yardLifeRecords?.[0];
+        if (!first) return { pass: true, skipped: true };
+        const parcelId = first.owner.parcelId;
+        const parcel = handle.plan.parcels.find((candidate) => candidate.id === parcelId);
+        if (!parcel || !['giwa', 'choga'].includes(parcel.kind)) {
+          return { pass: false, skipped: false, reason: 'missing residential owner' };
+        }
+        const kind = parcel.kind === 'choga' ? 'giwa' : 'choga';
+        const rebuilt = handle.rebuildParcel(parcelId, { kind }, { persist: true });
+        const planningParcels = handle.plan.parcels.map((candidate) => (
+          candidate.id === parcelId ? { ...candidate, kind } : candidate
+        ));
+        const expected = planYardLife(planningParcels, { seed: handle.plan.seed });
+        const actual = handle.group.userData.yardLifeRecords || [];
+        return {
+          pass: !!rebuilt && JSON.stringify(actual) === JSON.stringify(expected),
+          skipped: false,
+          parcelId,
+          kind,
+          expectedRecords: expected.filter((record) => record.owner.parcelId === parcelId).length,
+          actualRecords: actual.filter((record) => record.owner.parcelId === parcelId).length,
+        };
       };
       const landmarkLensContract = (handle, { requirePalace = false, requireTemple = true } = {}) => {
         const DEG = Math.PI / 180;
@@ -387,6 +465,33 @@ try {
           },
         },
       ));
+      const lateAbort = new AbortController();
+      const lateAbortSteps = [];
+      const yardLifeDisposals = new Map();
+      const originalMaterialDispose = Material.prototype.dispose;
+      Material.prototype.dispose = function disposeTrackedYardLifeMaterial() {
+        if (this.name?.startsWith('yard-life-')
+          || this.name?.startsWith('village-yard-life-')) {
+          yardLifeDisposals.set(this.name, (yardLifeDisposals.get(this.name) || 0) + 1);
+        }
+        return originalMaterialDispose.call(this);
+      };
+      let lateAbortName;
+      try {
+        lateAbortName = await abortName(createVillageAsync(
+          { scale: 'capital', seed: 20260716 },
+          {
+            signal: lateAbort.signal,
+            budgetMs: -1,
+            onStep(label) {
+              lateAbortSteps.push(label);
+              if (label === 'flora') lateAbort.abort();
+            },
+          },
+        ));
+      } finally {
+        Material.prototype.dispose = originalMaterialDispose;
+      }
       const stepsAtAbort = abortSteps.length;
       const schedulerFailureName = await abortName(createVillageAsync(
         { scale: 'village', seed: 20260718 },
@@ -399,6 +504,11 @@ try {
         schedulerFailureName,
         steps: abortSteps,
         stopped: abortSteps.length === stepsAtAbort,
+        lateAbortName,
+        lateAbortSteps,
+        lateAbortYardLifeDisposals: Object.fromEntries(yardLifeDisposals),
+        lateAbortYardLifeLifecycle: yardLifeDisposals.size === 14
+          && [...yardLifeDisposals.values()].every((count) => count === 1),
       };
       const scales = ['village', 'town', 'capital', 'hanyang'];
       const cases = [];
@@ -416,6 +526,15 @@ try {
         const syncProxyHash = hashVillagePickProxies(sync);
         const asyncProxyHash = hashVillagePickProxies(asyncHandle);
         const vegetation = vegetationContract(sync);
+        const syncYardLife = yardLifeContract(sync);
+        const asyncYardLife = yardLifeContract(asyncHandle);
+        const yardLifePass = syncYardLife.pass
+          && asyncYardLife.pass
+          && syncYardLife.recordCount === asyncYardLife.recordCount
+          && syncYardLife.signature === asyncYardLife.signature;
+        const crossKindYardLife = scale === 'capital'
+          ? crossKindYardLifeContract(sync)
+          : { pass: true, skipped: true };
         const lensRequirements = { requirePalace: scale === 'hanyang', requireTemple: true };
         const syncLandmarkLenses = landmarkLensContract(sync, lensRequirements);
         const asyncLandmarkLenses = landmarkLensContract(asyncHandle, lensRequirements);
@@ -433,6 +552,7 @@ try {
           && result.disposed === result.owned
           && result.duplicates === 0
           && result.sharedDisposals === 0
+          && result.yardLifeDisposed
         )) && inactive;
         cases.push({
           scale,
@@ -447,6 +567,10 @@ try {
           asyncLifecycle,
           inactive,
           vegetation,
+          yardLifePass: yardLifePass && crossKindYardLife.pass,
+          syncYardLife,
+          asyncYardLife,
+          crossKindYardLife,
           syncLandmarkLenses,
           asyncLandmarkLenses,
         });
@@ -600,7 +724,7 @@ try {
       const proxyApiPass = item.syncProxyHash.singleContract && item.asyncProxyHash.singleContract;
       const landmarkLensPass = item.syncLandmarkLenses.pass && item.asyncLandmarkLenses.pass;
       const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && landmarkLensPass
-        && item.lifecyclePass && item.vegetation.pass;
+        && item.lifecyclePass && item.vegetation.pass && item.yardLifePass;
       failed ||= !pass;
       console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`
         + `  objects=${item.syncHash.objects} triangles=${item.syncHash.triangles}`);
@@ -617,6 +741,9 @@ try {
         console.log(`          lifecycle sync=${JSON.stringify(item.syncLifecycle)} async=${JSON.stringify(item.asyncLifecycle)} inactive=${item.inactive}`);
       }
       if (!item.vegetation.pass) console.log(`          vegetation ${JSON.stringify(item.vegetation)}`);
+      if (!item.yardLifePass) {
+        console.log(`          yard-life sync=${JSON.stringify(item.syncYardLife)} async=${JSON.stringify(item.asyncYardLife)} crossKind=${JSON.stringify(item.crossKindYardLife)}`);
+      }
     }
     const advanced = result.advancedCase;
     const advancedStepsEqual = JSON.stringify(advanced.steps) === JSON.stringify(expectedSteps);
@@ -653,9 +780,12 @@ try {
       : result.workerStats.started === 0 && result.workerStats.terminated === 0;
     const abortPass = result.abortContract.preAbortName === 'AbortError'
       && result.abortContract.duringAbortName === 'AbortError'
+      && result.abortContract.lateAbortName === 'AbortError'
       && result.abortContract.schedulerFailureName === 'Error'
       && result.abortContract.stopped
-      && result.abortContract.steps.at(-1) === 'terrain';
+      && result.abortContract.steps.at(-1) === 'terrain'
+      && result.abortContract.lateAbortSteps.at(-1) === 'flora'
+      && result.abortContract.lateAbortYardLifeLifecycle;
     failed ||= !workerPass || !abortPass || result.errors.length > 0;
     console.log(`worker messages: ${JSON.stringify(result.workerStats)} ${workerPass ? 'PASS' : 'FAIL'}`);
     console.log(`abort lifecycle: ${JSON.stringify(result.abortContract)} ${abortPass ? 'PASS' : 'FAIL'}`);

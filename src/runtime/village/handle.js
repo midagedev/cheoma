@@ -57,9 +57,10 @@ import {
   setParcelBaseHidden,
   setParcelBaseExportHidden,
 } from './parcel-representation.js';
-import { createVillageDetailLodState } from './detail-lod.js';
+import { createVillageDetailLodState, villageDetailWeightAt } from './detail-lod.js';
 import { createThresholdLifeRuntime } from './threshold-life.js';
 import { yardHardObstacles, yardTreeIntersectsHardObstacle } from '../../village/yard-layout.js';
+import { yardLifeRecordsToHardObstacles } from '../../village/yard-life-plan.js';
 import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
 import { RESIDENTIAL_OPENING_PARAM_KEYS } from '../../layout/residential-openings.js';
 import { createPrimaryDoorRuntime } from '../../interaction/primary-door.js';
@@ -253,6 +254,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     }
   }
   let detailLod = null;
+  const yardLifeWeightAt = (point) => villageDetailWeightAt(detailLod, point);
   const nightGlow = createVillageNightGlow(
     group,
     (dt, level) => group.userData.updateNightLights?.(dt, level, detailLod?.lensScale ?? 1),
@@ -681,7 +683,11 @@ export function createVillageHandle(opts, seed, plan, group) {
   const snow = createVillageSnowController(group);
   const fauna = createVillageFaunaController({ group, plan, site, seed, time, season });
   function refreshVillageFlora() {
-    const flora = group.userData.replaceFlora?.(season);
+    const kindByParcel = new Map();
+    for (const [parcelId, spec] of committedResidentialSpecs) {
+      if (spec?.kind) kindByParcel.set(parcelId, spec.kind);
+    }
+    const flora = group.userData.replaceFlora?.(season, { kindByParcel });
     if (!flora) return null;
     fauna.setTreePerches(flora.guardianAnchors, flora.yardTreeAnchors);
     primaryDoorOcclusion.refreshFlora(flora);
@@ -708,6 +714,14 @@ export function createVillageHandle(opts, seed, plan, group) {
     root.userData.style = root.userData.style
       || (parcel.hero ? parcel.heroStyle || 'hanok' : parcel.kind === 'giwa' ? 'giwa' : 'choga');
     root.userData.parcel = parcel;
+    // The focus ring rebuilds its grass from the selected parcel's local frame.
+    // Reserve the same all-season livelihood union as aerial flora so a motif
+    // never appears through grass when its season fades in. The adapter already
+    // includes the physical footprint gap; grass only needs a stable point test.
+    const grassObstacles = yardLifeRecordsToHardObstacles(
+      group.userData.yardLifeRecords,
+      parcelId,
+    );
     return {
       group: root,
       parcel,
@@ -717,6 +731,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       // populate가 이미 둔 닭은 마을 공통 거리 LOD가 계속 소유한다. 같은 필지 focus ring은
       // 두 번째 flock을 만들지 않고, base가 없는 필지에서만 근접 닭을 생성한다.
       chickens: !fauna.hasResidentialFlock(parcelId),
+      grassObstacles,
     };
   }
 
@@ -1406,12 +1421,13 @@ export function createVillageHandle(opts, seed, plan, group) {
     },
     setSeason(name, { immediate = false } = {}) {
       season = name;
-      group.userData.setSeason?.(name);
+      group.userData.setSeason?.(name, { immediate });
       fauna.setSeason(name);
       ambientField.setSeason(name, immediate);
     },  // 마당 과실수 잎·꽃·열매 계절 토글(#41)
     setWeather(name, opts = {}) {
       weather = name;
+      group.userData.setWeather?.(name, opts);
       snow.setWeather(name, opts);
       refreshFocusedThresholdLife();
     },
@@ -1423,12 +1439,13 @@ export function createVillageHandle(opts, seed, plan, group) {
         if (runtime.update(dt)) doorMoved = true;
       }
       vlights.update(dt);                          // 마을 조명 리그 시간대 크로스페이드(태스크 #50)
-      group.userData.update?.(dt);                 // 개울 물결 uTime
+      const yardLifeChanged = !!group.userData.update?.(dt); // 물결 + 계절 생활상 screen-door 전환
       fauna.update(dt);                            // 개·고양이·까치·새 떼 앰비언트(마을 루트 자식)
       cloudsHandle?.update(dt);                    // 산 구름·물안개 표류 + 흐르는 구름 그림자(태양 판독, #57)
       nightGlow.update(dt);                        // 창호 발광 크로스페이드 + 촛불 일렁임(밤)
       snow.update(dt);
-      return doorMoved;
+      // 캐시된 햇빛 그림자도 불투명 screen-door coverage와 같은 프레임으로 갱신되어야 한다.
+      return doorMoved || yardLifeChanged;
     },
     // 대규모 주택 청크 LOD(매 프레임, 카메라 필요) — FAR↔MID↔FULL 거리 전환.
     //   engine.js 가 camera 를 넘겨 호출. LOD 정책이 꺼진 규모(R<340)는 no-op.
@@ -1436,6 +1453,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       cloudsHandle?.updateView?.(camera);              // 화면 밖 원경 뱅크·빛줄기는 렌더 제출 전에 sleep
       detailLod = createVillageDetailLodState(camera, target, site, detailLod);
       const swaps = group.userData.updateChunkLod?.(camera, detailLod.lensScale) || 0;
+      const yardLifeChanged = group.userData.yardLife
+        ?.updateLod(camera, detailLod, yardLifeWeightAt) || false;
       treeOccluder?.setSubject(target);              // 부감 중심이 아니라 현재 선택/시선 필지를 가리는 나무를 판정
       treeOccluder?.update(camera, dt);              // 색 렌더 횟수와 무관하게 애니메이션 프레임당 1회
       const faunaChanged = fauna.updateLod(camera, detailLod);  // 새 떼 + 카메라 셀 근접 소동물
@@ -1444,13 +1463,17 @@ export function createVillageHandle(opts, seed, plan, group) {
       // 캐시 무효화 신호로 합친다. focus-out 마지막 프레임의 잔상 그림자를 남기지 않는다.
       const ownershipChanged = representationDirty;
       representationDirty = false;
-      return swaps + Number(ownershipChanged) + Number(faunaChanged);
+      return swaps + Number(ownershipChanged) + Number(faunaChanged) + Number(yardLifeChanged);
     },
 
     // focus ring·검증 도구가 같은 프레임의 생활 디테일 강도를 공유한다(복제 임계값 금지).
     detailLodState() {
       const state = detailLod || createVillageDetailLodState(null, null, site);
       return { ...state, anchor: { ...state.anchor } };
+    },
+
+    debugYardLife() {
+      return group.userData.debugYardLife?.() || null;
     },
 
     // 웨이브 중 새 마을은 아직 fog·조명·구름·단일집 가시성을 소유하면 안 되지만, scene 직속
@@ -1529,6 +1552,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       ambientField.exit();
       treeOccluder?.dispose();
       group.userData.deactivateMist?.();
+      group.userData.yardLife?.dispose?.();
       disposeTree(group, keptMats);
       thresholdLife.dispose();
       // #129 프로그램 앵커 최종 해제 — 오버레이 dispose 는 __kept 를 건너뛰므로 마을 파기 시 여기서 정리.

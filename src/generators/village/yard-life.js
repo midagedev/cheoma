@@ -1,6 +1,20 @@
 import * as THREE from 'three';
-import { mergeOwnedGeometries } from '../../core/merge-owned-geometries.js';
 import { patchInstFadeMaterial } from '../../env/inst-fade-shader.js';
+import {
+  createYardLifeBatches,
+  disposeYardLifeBatches,
+} from './yard-life-geometry.js';
+import {
+  YARD_LIFE_MATERIAL_ROLES,
+  YARD_LIFE_SEASONS,
+  YARD_LIFE_WEATHER,
+  validateYardLifeRecords as validateRecords,
+} from '../../village/yard-life-record-contract.js';
+export {
+  YARD_LIFE_MATERIAL_ROLES,
+  YARD_LIFE_SEASONS,
+  YARD_LIFE_WEATHER,
+} from '../../village/yard-life-record-contract.js';
 
 // Reusable physical renderer for the renderer-free yard-life record contract.
 //
@@ -9,78 +23,7 @@ import { patchInstFadeMaterial } from '../../env/inst-fade-shader.js';
 // caller-owned MeshStandardMaterial inputs. Derived fade materials and all
 // geometries belong to the returned handle; the borrowed inputs remain untouched.
 
-export const YARD_LIFE_MATERIAL_ROLES = Object.freeze([
-  'wood',
-  'onggi',
-  'straw',
-  'stone',
-  'chaff',
-  'fiber',
-]);
-
-export const YARD_LIFE_SEASONS = Object.freeze([
-  'spring',
-  'summer',
-  'autumn',
-  'winter',
-]);
-
-export const YARD_LIFE_WEATHER = Object.freeze([
-  'clear',
-  'rain',
-  'snow',
-]);
-
-const MOTIFS = Object.freeze({
-  'spring-seed-prep': {
-    season: 'spring',
-    variants: new Set(['onggi-bowl', 'wooden-bowl']),
-    kinds: new Set(['water-bowl', 'seed-basket']),
-  },
-  'autumn-threshing': {
-    season: 'autumn',
-    variants: new Set(['gesang', 'taetdol']),
-    kinds: new Set([
-      'threshing-bench',
-      'threshing-stone',
-      'bound-sheaf',
-      'chaff-patch',
-    ]),
-  },
-  'winter-fuel': {
-    season: 'winter',
-    variants: new Set(['firewood-stack', 'straw-covered-firewood']),
-    kinds: new Set(['split-log', 'stack-support', 'straw-cover']),
-  },
-});
-
-const EXPECTED_ROLES = Object.freeze({
-  'water-bowl': new Set(['onggi', 'wood']),
-  'seed-basket': new Set(['fiber']),
-  'threshing-bench': new Set(['wood']),
-  'threshing-stone': new Set(['stone']),
-  'bound-sheaf': new Set(['straw']),
-  'chaff-patch': new Set(['chaff']),
-  'split-log': new Set(['wood']),
-  'stack-support': new Set(['wood']),
-  'straw-cover': new Set(['straw']),
-});
-
-const COUNT_LIMITS = Object.freeze({
-  'water-bowl': [1, 1],
-  'seed-basket': [1, 2],
-  'threshing-bench': [1, 1],
-  'threshing-stone': [1, 1],
-  'bound-sheaf': [2, 4],
-  'chaff-patch': [1, 1],
-  'split-log': [8, 14],
-  'stack-support': [1, 1],
-  'straw-cover': [1, 1],
-});
-
 const LOD_EPSILON = 0.002;
-const BOUNDS_EPSILON = 1e-4;
-const UP = new THREE.Vector3(0, 1, 0);
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -89,144 +32,6 @@ function clamp01(value) {
 function finite(value, label) {
   if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite`);
   return value;
-}
-
-function positive(value, label) {
-  const result = finite(value, label);
-  if (!(result > 0)) throw new RangeError(`${label} must be positive`);
-  return result;
-}
-
-function countOf(part, label) {
-  const count = part?.count ?? 1;
-  if (!Number.isInteger(count)) throw new TypeError(`${label}.count must be an integer`);
-  const limits = COUNT_LIMITS[part.kind];
-  if (!limits || count < limits[0] || count > limits[1]) {
-    throw new RangeError(
-      `${label}.count for ${part.kind} must be ${limits?.[0] ?? 0}..${limits?.[1] ?? 0}`,
-    );
-  }
-  return count;
-}
-
-function normalizeRecord(record, index, heightAt) {
-  const label = `yard-life record[${index}]`;
-  if (!record || typeof record !== 'object') throw new TypeError(`${label} must be an object`);
-  if (record.schema !== 1) throw new RangeError(`${label}.schema must be 1`);
-  if (typeof record.id !== 'string' || !record.id || record.id.length > 160) {
-    throw new TypeError(`${label}.id must be a non-empty string no longer than 160 characters`);
-  }
-  if (typeof record.owner?.parcelId !== 'string' || !record.owner.parcelId) {
-    throw new TypeError(`${label}.owner.parcelId must be a non-empty string`);
-  }
-  const motif = MOTIFS[record.motif];
-  if (!motif) throw new RangeError(`${label}.motif is unsupported`);
-  if (record.season !== motif.season) {
-    throw new RangeError(`${label}.season does not match ${record.motif}`);
-  }
-  if (!motif.variants.has(record.variant)) {
-    throw new RangeError(`${label}.variant is unsupported for ${record.motif}`);
-  }
-  if (record.footprint?.shape !== 'rect') {
-    throw new RangeError(`${label}.footprint must be an oriented rect`);
-  }
-  const halfX = positive(record.footprint.halfX, `${label}.footprint.halfX`);
-  const halfZ = positive(record.footprint.halfZ, `${label}.footprint.halfZ`);
-  const x = finite(record.world?.x, `${label}.world.x`);
-  const z = finite(record.world?.z, `${label}.world.z`);
-  let y = record.world?.y;
-  if (!Number.isFinite(y)) {
-    if (typeof heightAt !== 'function') {
-      throw new TypeError(`${label}.world.y must be finite when heightAt is absent`);
-    }
-    y = heightAt(x, z);
-  }
-  finite(y, `${label} base height`);
-  const yaw = finite(record.world?.yaw, `${label}.world.yaw`);
-  const scale = positive(record.scale ?? 1, `${label}.scale`);
-  positive(record.height, `${label}.height`);
-
-  if (!Array.isArray(record.weather?.allow) || record.weather.allow.length === 0) {
-    throw new TypeError(`${label}.weather.allow must be a non-empty array`);
-  }
-  const allowedWeather = new Set();
-  for (const name of record.weather.allow) {
-    if (!YARD_LIFE_WEATHER.includes(name)) {
-      throw new RangeError(`${label}.weather.allow contains unsupported weather ${name}`);
-    }
-    allowedWeather.add(name);
-  }
-  if (!Array.isArray(record.parts) || record.parts.length === 0) {
-    throw new TypeError(`${label}.parts must be a non-empty array`);
-  }
-  const parts = record.parts.map((part, partIndex) => {
-    const partLabel = `${label}.parts[${partIndex}]`;
-    if (!part || !motif.kinds.has(part.kind)) {
-      throw new RangeError(`${partLabel}.kind is unsupported for ${record.motif}`);
-    }
-    if (!EXPECTED_ROLES[part.kind]?.has(part.materialRole)) {
-      throw new RangeError(`${partLabel}.materialRole is unsupported for ${part.kind}`);
-    }
-    return {
-      kind: part.kind,
-      materialRole: part.materialRole,
-      count: countOf(part, partLabel),
-    };
-  });
-
-  const kinds = new Set(parts.map((part) => part.kind));
-  if (record.variant === 'onggi-bowl'
-    && !parts.some((part) => part.kind === 'water-bowl' && part.materialRole === 'onggi')) {
-    throw new RangeError(`${label} onggi-bowl requires an onggi water-bowl`);
-  }
-  if (record.variant === 'wooden-bowl'
-    && !parts.some((part) => part.kind === 'water-bowl' && part.materialRole === 'wood')) {
-    throw new RangeError(`${label} wooden-bowl requires a wood water-bowl`);
-  }
-  if (record.variant === 'gesang'
-    && (!kinds.has('threshing-bench') || kinds.has('threshing-stone'))) {
-    throw new RangeError(`${label} gesang requires only the threshing-bench primary`);
-  }
-  if (record.variant === 'taetdol'
-    && (!kinds.has('threshing-stone') || kinds.has('threshing-bench'))) {
-    throw new RangeError(`${label} taetdol requires only the threshing-stone primary`);
-  }
-  const hasCover = kinds.has('straw-cover');
-  if ((record.variant === 'straw-covered-firewood') !== hasCover) {
-    throw new RangeError(`${label} winter cover must match the seed-stable variant`);
-  }
-
-  const materialRoles = new Set(record.materialRoles || []);
-  for (const part of parts) {
-    if (!materialRoles.has(part.materialRole)) {
-      throw new RangeError(`${label}.materialRoles is missing ${part.materialRole}`);
-    }
-  }
-
-  return {
-    source: record,
-    id: record.id,
-    ownerId: record.owner.parcelId,
-    season: record.season,
-    motif: record.motif,
-    variant: record.variant,
-    weather: allowedWeather,
-    parts,
-    world: { x, y, z, yaw },
-    footprint: { halfX, halfZ },
-    scale,
-  };
-}
-
-function validateRecords(records, heightAt) {
-  if (!Array.isArray(records)) throw new TypeError('yard-life records must be an array');
-  const ids = new Set();
-  return records.map((record, index) => {
-    const normalized = normalizeRecord(record, index, heightAt);
-    if (ids.has(normalized.id)) throw new RangeError(`duplicate yard-life id ${normalized.id}`);
-    ids.add(normalized.id);
-    return normalized;
-  });
 }
 
 function materialTextures(material) {
@@ -273,265 +78,6 @@ function createDerivedMaterials(materials) {
   }
 }
 
-function matrix({
-  x = 0,
-  y = 0,
-  z = 0,
-  rx = 0,
-  ry = 0,
-  rz = 0,
-  sx = 1,
-  sy = 1,
-  sz = 1,
-} = {}) {
-  return new THREE.Matrix4().compose(
-    new THREE.Vector3(x, y, z),
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
-    new THREE.Vector3(sx, sy, sz),
-  );
-}
-
-function place(geometry, transform) {
-  geometry.applyMatrix4(matrix(transform));
-  return geometry;
-}
-
-function box(width, height, depth, transform = {}) {
-  return place(
-    new THREE.BoxGeometry(width, height, depth, 1, 1, 1),
-    { y: height / 2, ...transform },
-  );
-}
-
-function cylinder(radiusTop, radiusBottom, height, segments, transform = {}, openEnded = false) {
-  return place(
-    new THREE.CylinderGeometry(
-      radiusTop,
-      radiusBottom,
-      height,
-      segments,
-      1,
-      openEnded,
-    ),
-    { y: height / 2, ...transform },
-  );
-}
-
-function torus(radius, tube, segments, transform = {}) {
-  return place(
-    new THREE.TorusGeometry(radius, tube, 4, segments),
-    transform,
-  );
-}
-
-function dodeca(radius, transform = {}) {
-  return place(new THREE.DodecahedronGeometry(radius, 0), transform);
-}
-
-function circle(radius, segments, transform = {}) {
-  return place(new THREE.CircleGeometry(radius, segments), transform);
-}
-
-function strawCoverGeometry() {
-  const hx = 0.67;
-  const hz = 0.34;
-  const baseY = 0.43;
-  const ridgeY = 0.62;
-  const positions = [
-    -hx, baseY, -hz,
-    hx, baseY, -hz,
-    hx, baseY, hz,
-    -hx, baseY, hz,
-    -hx, ridgeY, 0,
-    hx, ridgeY, 0,
-  ];
-  const indices = [
-    0, 4, 5, 0, 5, 1,
-    4, 3, 2, 4, 2, 5,
-    0, 4, 3,
-    1, 2, 5,
-  ];
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function springGeometries(record, part) {
-  if (part.kind === 'water-bowl') {
-    return [
-      cylinder(0.29, 0.24, 0.14, 10, { x: -0.25 }, true),
-      circle(0.235, 10, { x: -0.25, y: 0.012, rx: -Math.PI / 2 }),
-      torus(0.29, 0.025, 10, { x: -0.25, y: 0.14, rx: Math.PI / 2 }),
-    ];
-  }
-  const geometries = [];
-  for (let index = 0; index < part.count; index++) {
-    const radius = part.count === 1 ? 0.2 : 0.18;
-    const x = part.count === 1 ? 0.24 : 0.25;
-    const z = part.count === 1 ? 0 : (index === 0 ? -0.18 : 0.18);
-    const height = index === 0 ? 0.24 : 0.22;
-    geometries.push(
-      cylinder(radius * 1.05, radius * 0.82, height, 8, { x, z }, true),
-      torus(radius * 1.05, 0.022, 8, { x, y: height, z, rx: Math.PI / 2 }),
-    );
-  }
-  return geometries;
-}
-
-function autumnGeometries(record, part) {
-  if (part.kind === 'threshing-bench') {
-    const geometries = [];
-    for (const z of [-0.16, 0, 0.16]) {
-      geometries.push(cylinder(0.075, 0.075, 1.55, 7, {
-        y: 0.46,
-        z,
-        rz: Math.PI / 2,
-      }));
-    }
-    for (const x of [-0.58, 0.58]) {
-      for (const z of [-0.16, 0.16]) {
-        geometries.push(box(0.12, 0.42, 0.12, { x, z }));
-      }
-    }
-    return geometries;
-  }
-  if (part.kind === 'threshing-stone') {
-    return [dodeca(1, {
-      y: 0.16,
-      sx: 0.36,
-      sy: 0.16,
-      sz: 0.28,
-    })];
-  }
-  if (part.kind === 'bound-sheaf') {
-    const positions = [
-      [-0.58, -0.22],
-      [0.58, -0.2],
-      [-0.48, 0.21],
-      [0.48, 0.22],
-    ];
-    const geometries = [];
-    for (let index = 0; index < part.count; index++) {
-      const [x, z] = positions[index];
-      const height = 0.78 + index * 0.045;
-      const tieY = height * 0.55;
-      geometries.push(
-        cylinder(0.08, 0.13, tieY, 7, { x, z }),
-        cylinder(0.18, 0.075, height - tieY, 7, {
-          x,
-          y: tieY + (height - tieY) / 2,
-          z,
-        }),
-        torus(0.105, 0.018, 7, {
-          x,
-          y: tieY,
-          z,
-          rx: Math.PI / 2,
-        }),
-      );
-    }
-    return geometries;
-  }
-  return [circle(1, 12, {
-    y: 0.012,
-    rx: -Math.PI / 2,
-    sx: 0.6,
-    sy: 0.375,
-  })];
-}
-
-function winterGeometries(record, part) {
-  if (part.kind === 'stack-support') {
-    return [
-      cylinder(0.045, 0.045, 1.18, 7, {
-        y: 0.045,
-        z: -0.19,
-        rz: Math.PI / 2,
-      }),
-      cylinder(0.045, 0.045, 1.18, 7, {
-        y: 0.045,
-        z: 0.19,
-        rz: Math.PI / 2,
-      }),
-    ];
-  }
-  if (part.kind === 'split-log') {
-    const geometries = [];
-    const columns = 4;
-    for (let index = 0; index < part.count; index++) {
-      const layer = Math.floor(index / columns);
-      const column = index % columns;
-      const x = (column - 1.5) * 0.3 + (layer % 2 ? 0.045 : 0);
-      const y = 0.15 + layer * 0.13;
-      const z = index % 2 ? 0.012 : -0.012;
-      const radius = 0.047 + (index % 3) * 0.004;
-      geometries.push(cylinder(radius, radius * 0.88, 0.5, 7, {
-        x,
-        y,
-        z,
-        rx: Math.PI / 2,
-      }));
-    }
-    return geometries;
-  }
-  return [strawCoverGeometry()];
-}
-
-function partGeometries(record, part) {
-  if (record.season === 'spring') return springGeometries(record, part);
-  if (record.season === 'autumn') return autumnGeometries(record, part);
-  return winterGeometries(record, part);
-}
-
-function hashString(value) {
-  let hash = 2166136261 >>> 0;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619) >>> 0;
-  }
-  return hash;
-}
-
-function normalizeGeometry(source, record, part, primitiveIndex) {
-  const geometry = source.index ? source.toNonIndexed() : source;
-  if (geometry !== source) source.dispose();
-  const transform = matrix({
-    x: record.world.x,
-    y: record.world.y,
-    z: record.world.z,
-    ry: record.world.yaw,
-    sx: record.scale,
-    sy: record.scale,
-    sz: record.scale,
-  });
-  geometry.applyMatrix4(transform);
-  if (!geometry.attributes.normal) geometry.computeVertexNormals();
-  const count = geometry.attributes.position.count;
-  if (!geometry.attributes.uv) {
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(count * 2), 2));
-  }
-  const tint = new Float32Array(count * 3);
-  const seed = hashString(`${record.id}|${part.kind}|${primitiveIndex}`);
-  for (let vertex = 0; vertex < count; vertex++) {
-    const bits = Math.imul(seed ^ (vertex + 1), 2246822519) >>> 0;
-    const value = 0.88 + (bits / 0xffffffff) * 0.18;
-    tint[vertex * 3] = value;
-    tint[vertex * 3 + 1] = value;
-    tint[vertex * 3 + 2] = value;
-  }
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(tint, 3));
-  geometry.setAttribute('instFade', new THREE.Float32BufferAttribute(new Float32Array(count), 1));
-  for (const name of Object.keys(geometry.attributes)) {
-    if (name === 'position' || name === 'normal' || name === 'uv'
-      || name === 'color' || name === 'instFade') continue;
-    geometry.deleteAttribute(name);
-  }
-  geometry.morphAttributes = {};
-  return geometry;
-}
-
 function createShadowMaterial(kind) {
   const material = kind === 'distance'
     ? new THREE.MeshDistanceMaterial()
@@ -540,111 +86,6 @@ function createShadowMaterial(kind) {
   material.allowOverride = false;
   patchInstFadeMaterial(material);
   return material;
-}
-
-function disposeBatches(batches) {
-  for (const batch of batches) batch.geometry.dispose();
-}
-
-function recordBoundsFromBatches(batches, records) {
-  const bounds = records.map((record) => ({
-    id: record.id,
-    minX: Infinity,
-    maxX: -Infinity,
-    minZ: Infinity,
-    maxZ: -Infinity,
-    halfX: record.footprint.halfX,
-    halfZ: record.footprint.halfZ,
-  }));
-  for (const batch of batches) {
-    const positions = batch.geometry.attributes.position.array;
-    for (const range of batch.ranges) {
-      const record = records[range.recordIndex];
-      const result = bounds[range.recordIndex];
-      const cosine = Math.cos(record.world.yaw);
-      const sine = Math.sin(record.world.yaw);
-      const end = range.start + range.count;
-      for (let vertex = range.start; vertex < end; vertex++) {
-        const offset = vertex * 3;
-        const dx = positions[offset] - record.world.x;
-        const dz = positions[offset + 2] - record.world.z;
-        const localX = cosine * dx - sine * dz;
-        const localZ = sine * dx + cosine * dz;
-        result.minX = Math.min(result.minX, localX);
-        result.maxX = Math.max(result.maxX, localX);
-        result.minZ = Math.min(result.minZ, localZ);
-        result.maxZ = Math.max(result.maxZ, localZ);
-      }
-    }
-  }
-  for (const result of bounds) {
-    if (result.minX < -result.halfX - BOUNDS_EPSILON
-      || result.maxX > result.halfX + BOUNDS_EPSILON
-      || result.minZ < -result.halfZ - BOUNDS_EPSILON
-      || result.maxZ > result.halfZ + BOUNDS_EPSILON) {
-      throw new RangeError(`yard-life geometry escaped planned footprint for ${result.id}`);
-    }
-  }
-  return bounds;
-}
-
-function createBatches(records, derivedMaterials, depthMaterial, distanceMaterial) {
-  const byRole = new Map(YARD_LIFE_MATERIAL_ROLES.map((role) => [role, []]));
-  const batches = [];
-  try {
-    for (let recordIndex = 0; recordIndex < records.length; recordIndex++) {
-      const record = records[recordIndex];
-      for (let partIndex = 0; partIndex < record.parts.length; partIndex++) {
-        const part = record.parts[partIndex];
-        const geometries = partGeometries(record, part);
-        for (let primitiveIndex = 0; primitiveIndex < geometries.length; primitiveIndex++) {
-          byRole.get(part.materialRole).push({
-            geometry: normalizeGeometry(
-              geometries[primitiveIndex],
-              record,
-              part,
-              partIndex * 32 + primitiveIndex,
-            ),
-            recordIndex,
-          });
-        }
-      }
-    }
-
-    for (const role of YARD_LIFE_MATERIAL_ROLES) {
-      const entries = byRole.get(role);
-      if (!entries.length) continue;
-      let cursor = 0;
-      const ranges = [];
-      for (const entry of entries) {
-        const count = entry.geometry.attributes.position.count;
-        ranges.push({ recordIndex: entry.recordIndex, start: cursor, count });
-        cursor += count;
-      }
-      const sourceGeometries = entries.map((entry) => entry.geometry);
-      byRole.set(role, []);
-      const geometry = mergeOwnedGeometries(
-        sourceGeometries,
-        `Yard-life ${role} geometries`,
-      );
-      const mesh = new THREE.Mesh(geometry, derivedMaterials[role]);
-      mesh.name = `yard-life-${role}`;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.customDepthMaterial = depthMaterial;
-      mesh.customDistanceMaterial = distanceMaterial;
-      mesh.userData.dofDepthMaterial = depthMaterial;
-      batches.push({ role, mesh, geometry, ranges });
-    }
-    const bounds = recordBoundsFromBatches(batches, records);
-    return { batches, bounds };
-  } catch (error) {
-    disposeBatches(batches);
-    for (const entries of byRole.values()) {
-      for (const entry of entries) entry.geometry.dispose();
-    }
-    throw error;
-  }
 }
 
 /**
@@ -678,14 +119,20 @@ export function buildYardLife(records, {
   let currentSeason = season;
   let currentWeather = weather;
   let rebuildCount = 0;
+  let skippedRebuilds = 0;
   let updateCount = 0;
   let skippedUpdates = 0;
+  let lodScanCount = 0;
+  let lodSleepCount = 0;
   let lastDetail = null;
   let lastWeightAt = null;
+  let recordFingerprint = null;
+  let detailSleeping = false;
 
   let seasonState;
   let weatherState;
   let detailWeights;
+  let detailScratch;
   let presentationWeights;
 
   function makeTransitionState(length, name) {
@@ -708,19 +155,81 @@ export function buildYardLife(records, {
     return record.weather.has(currentWeather) ? 1 : 0;
   }
 
-  function initializeStates(nextRecords) {
+  function recordSetFingerprint(nextRecords) {
+    return JSON.stringify(nextRecords, (_key, value) => (
+      value instanceof Set ? [...value].sort() : value
+    ));
+  }
+
+  function preserveTransition(nextState, previousState, previousRecords, nextRecords) {
+    if (!previousState?.active || !previousRecords?.length) return;
+    const previousIndexById = new Map(
+      previousRecords.map((record, index) => [record.id, index]),
+    );
+    let preserved = false;
+    for (let index = 0; index < nextRecords.length; index++) {
+      const previousIndex = previousIndexById.get(nextRecords[index].id);
+      if (previousIndex == null) continue;
+      const value = previousState.current[previousIndex];
+      nextState.from[index] = value;
+      nextState.current[index] = value;
+      preserved ||= Math.abs(value - nextState.target[index]) > 1e-6;
+    }
+    if (!preserved) return;
+    nextState.elapsed = 0;
+    nextState.duration = Math.max(
+      0,
+      previousState.duration - previousState.elapsed,
+    );
+    nextState.active = nextState.duration > 0;
+    if (!nextState.active) nextState.current.set(nextState.target);
+  }
+
+  function createPresentationStates(nextRecords, nextDetailWeights) {
     const length = nextRecords.length;
-    seasonState = makeTransitionState(length, currentSeason);
-    weatherState = makeTransitionState(length, currentWeather);
-    detailWeights = new Float32Array(length);
-    presentationWeights = new Float32Array(length);
-    detailWeights.fill(1);
+    const nextSeasonState = makeTransitionState(length, currentSeason);
+    const nextWeatherState = makeTransitionState(length, currentWeather);
+    const nextPresentationWeights = new Float32Array(length);
     for (let index = 0; index < length; index++) {
       const seasonValue = seasonTarget(nextRecords[index]);
       const weatherValue = weatherTarget(nextRecords[index]);
-      seasonState.current[index] = seasonState.target[index] = seasonValue;
-      weatherState.current[index] = weatherState.target[index] = weatherValue;
+      nextSeasonState.current[index] = nextSeasonState.target[index] = seasonValue;
+      nextWeatherState.current[index] = nextWeatherState.target[index] = weatherValue;
     }
+    preserveTransition(
+      nextSeasonState,
+      seasonState,
+      normalizedRecords,
+      nextRecords,
+    );
+    preserveTransition(
+      nextWeatherState,
+      weatherState,
+      normalizedRecords,
+      nextRecords,
+    );
+    return {
+      seasonState: nextSeasonState,
+      weatherState: nextWeatherState,
+      detailWeights: nextDetailWeights,
+      presentationWeights: nextPresentationWeights,
+    };
+  }
+
+  function resolveDetailWeights(nextRecords, detail, weightAt, target = null) {
+    const resolvedWeights = target?.length === nextRecords.length
+      ? target
+      : new Float32Array(nextRecords.length);
+    const allowed = detail?.groundActive !== false;
+    const fallback = allowed ? clamp01(detail?.groundWeight ?? 1) : 0;
+    const resolveWeight = typeof weightAt === 'function' ? weightAt : null;
+    for (let index = 0; index < nextRecords.length; index++) {
+      const resolved = allowed && resolveWeight
+        ? resolveWeight(nextRecords[index].world)
+        : fallback;
+      resolvedWeights[index] = clamp01(resolved);
+    }
+    return resolvedWeights;
   }
 
   function applyPresentation() {
@@ -762,24 +271,62 @@ export function buildYardLife(records, {
 
   function installRecords(nextRecords, nextHeightAt) {
     const validated = validateRecords(nextRecords, nextHeightAt);
-    const next = createBatches(validated, derived, depthMaterial, distanceMaterial);
+    const nextFingerprint = recordSetFingerprint(validated);
+    if (nextFingerprint === recordFingerprint) return false;
+    // Resolve the stored product LOD policy before allocating or replacing any
+    // geometry. A throwing callback therefore leaves the live records, batches,
+    // visibility, and ownership graph untouched.
+    const nextDetailWeights = resolveDetailWeights(
+      validated,
+      lastDetail,
+      lastWeightAt,
+      detailScratch,
+    );
+    const nextStates = createPresentationStates(validated, nextDetailWeights);
+    const next = createYardLifeBatches(
+      validated,
+      derived,
+      depthMaterial,
+      distanceMaterial,
+    );
     const previous = batches;
+    const previousDetailWeights = detailWeights;
     for (const batch of previous) group.remove(batch.mesh);
     batches = next.batches;
     normalizedRecords = validated;
+    recordFingerprint = nextFingerprint;
     recordBounds = next.bounds;
-    initializeStates(validated);
+    seasonState = nextStates.seasonState;
+    weatherState = nextStates.weatherState;
+    detailWeights = nextStates.detailWeights;
+    detailScratch = previousDetailWeights?.length === validated.length
+      ? previousDetailWeights
+      : new Float32Array(validated.length);
+    presentationWeights = nextStates.presentationWeights;
+    detailSleeping = lastDetail?.groundActive === false;
     for (const batch of batches) group.add(batch.mesh);
-    disposeBatches(previous);
-    if (lastDetail || lastWeightAt) api.updateLod(null, lastDetail, lastWeightAt);
-    else applyPresentation();
+    disposeYardLifeBatches(previous);
+    applyPresentation();
+    return true;
+  }
+
+  function normalizeTransitionOptions(opts) {
+    if (opts == null || typeof opts !== 'object') {
+      throw new TypeError('yard-life transition options must be an object');
+    }
+    return {
+      immediate: !!opts.immediate,
+      duration: Math.max(
+        0,
+        finite(opts.duration ?? defaultDuration, 'yard-life transition duration'),
+      ),
+    };
   }
 
   function beginTransition(state, targetForRecord, {
-    immediate = false,
-    duration = defaultDuration,
-  } = {}) {
-    const nextDuration = Math.max(0, finite(duration, 'yard-life transition duration'));
+    immediate,
+    duration,
+  }) {
     state.from.set(state.current);
     let changed = false;
     for (let index = 0; index < normalizedRecords.length; index++) {
@@ -788,8 +335,8 @@ export function buildYardLife(records, {
       if (Math.abs(state.current[index] - target) > 1e-6) changed = true;
     }
     state.elapsed = 0;
-    state.duration = nextDuration;
-    state.active = changed && !immediate && nextDuration > 0;
+    state.duration = duration;
+    state.active = changed && !immediate && duration > 0;
     if (!state.active) state.current.set(state.target);
     return changed;
   }
@@ -813,28 +360,49 @@ export function buildYardLife(records, {
     return true;
   }
 
+  function settleTransition(state) {
+    if (!state.active) return false;
+    state.current.set(state.target);
+    state.from.set(state.target);
+    state.elapsed = state.duration;
+    state.active = false;
+    return true;
+  }
+
   const api = {
     group,
     setSeason(name, opts = {}) {
       if (disposed) return false;
       if (!YARD_LIFE_SEASONS.includes(name)) throw new RangeError(`unsupported yard-life season ${name}`);
+      const transition = normalizeTransitionOptions(opts);
       currentSeason = name;
       seasonState.name = name;
-      const changed = beginTransition(seasonState, seasonTarget, opts);
-      applyPresentation();
+      const changed = beginTransition(seasonState, seasonTarget, {
+        ...transition,
+        immediate: transition.immediate || detailSleeping,
+      });
+      if (!detailSleeping) applyPresentation();
       return changed;
     },
     setWeather(name, opts = {}) {
       if (disposed) return false;
       if (!YARD_LIFE_WEATHER.includes(name)) throw new RangeError(`unsupported yard-life weather ${name}`);
+      const transition = normalizeTransitionOptions(opts);
       currentWeather = name;
       weatherState.name = name;
-      const changed = beginTransition(weatherState, weatherTarget, opts);
-      applyPresentation();
+      const changed = beginTransition(weatherState, weatherTarget, {
+        ...transition,
+        immediate: transition.immediate || detailSleeping,
+      });
+      if (!detailSleeping) applyPresentation();
       return changed;
     },
     update(dt) {
       if (disposed) return false;
+      if (detailSleeping) {
+        skippedUpdates++;
+        return false;
+      }
       const delta = Math.max(0, Math.min(0.25, Number.isFinite(dt) ? dt : 0));
       const seasonChanged = advanceTransition(seasonState, delta);
       const weatherChanged = advanceTransition(weatherState, delta);
@@ -849,19 +417,43 @@ export function buildYardLife(records, {
     },
     updateLod(_camera, detail = null, weightAt = null) {
       if (disposed) return false;
-      lastDetail = detail;
-      lastWeightAt = typeof weightAt === 'function' ? weightAt : null;
-      const allowed = detail?.groundActive !== false;
-      const fallback = allowed ? clamp01(detail?.groundWeight ?? 1) : 0;
+      const nextWeightAt = typeof weightAt === 'function' ? weightAt : null;
+      if (detail?.groundActive === false && detailSleeping) {
+        lastDetail = detail;
+        lastWeightAt = nextWeightAt;
+        lodSleepCount++;
+        return false;
+      }
+      const nextDetailWeights = resolveDetailWeights(
+        normalizedRecords,
+        detail,
+        nextWeightAt,
+        detailScratch,
+      );
+      lodScanCount++;
       let weightChanged = false;
       for (let index = 0; index < normalizedRecords.length; index++) {
-        const record = normalizedRecords[index];
-        const resolved = allowed && lastWeightAt
-          ? lastWeightAt(record.world)
-          : fallback;
-        const nextWeight = clamp01(resolved);
+        const nextWeight = nextDetailWeights[index];
         if (Math.abs(detailWeights[index] - nextWeight) > 1e-6) weightChanged = true;
-        detailWeights[index] = nextWeight;
+      }
+      lastDetail = detail;
+      lastWeightAt = nextWeightAt;
+      if (!weightChanged) {
+        if (detail?.groundActive === false) {
+          detailSleeping = true;
+          settleTransition(seasonState);
+          settleTransition(weatherState);
+        }
+        return false;
+      }
+      detailScratch = detailWeights;
+      detailWeights = nextDetailWeights;
+      detailSleeping = detail?.groundActive === false;
+      if (detailSleeping) {
+        // A fully covered layer has no visible intermediate state to preserve.
+        // Settle once so future aerial frames can remain O(1).
+        settleTransition(seasonState);
+        settleTransition(weatherState);
       }
       const visibilityChanged = applyPresentation();
       return weightChanged || visibilityChanged;
@@ -869,11 +461,15 @@ export function buildYardLife(records, {
     setWaveFade(value) {
       if (disposed) return false;
       waveWeight = clamp01(value);
+      if (detailSleeping) return false;
       return applyPresentation();
     },
     rebuild(nextRecords, { heightAt: nextHeightAt = heightAt } = {}) {
       if (disposed) return false;
-      installRecords(nextRecords, nextHeightAt);
+      if (!installRecords(nextRecords, nextHeightAt)) {
+        skippedRebuilds++;
+        return false;
+      }
       rebuildCount++;
       return true;
     },
@@ -910,6 +506,13 @@ export function buildYardLife(records, {
           motif: record.motif,
           season: record.season,
           variant: record.variant,
+          slot: record.source.slot,
+          local: record.source.local ? {
+            x: record.source.local.x,
+            y: record.source.local.y,
+            z: record.source.local.z,
+            yaw: record.source.local.yaw,
+          } : null,
           world: { ...record.world },
           footprint: {
             shape: 'rect',
@@ -923,14 +526,18 @@ export function buildYardLife(records, {
         recordBounds: recordBounds.map((bounds) => ({ ...bounds })),
         weights: [...presentationWeights],
         rebuildCount,
+        skippedRebuilds,
         updateCount,
         skippedUpdates,
+        lodScanCount,
+        lodSleepCount,
+        detailSleeping,
       };
     },
     dispose() {
       if (disposed) return false;
       disposed = true;
-      disposeBatches(batches);
+      disposeYardLifeBatches(batches);
       batches = [];
       group.clear();
       for (const material of Object.values(derived)) material.dispose();
