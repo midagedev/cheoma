@@ -117,13 +117,16 @@ for (const path of [
   }), ['core', 'app', 'worker', 'mja-house-browser']);
 }
 for (const path of [
+  'src/builder/choga-frame-plan.js',
   'src/builder/giwa-middle-gate.js',
   'src/layout/giwa-roof-envelope.js',
   'src/layout/giwa-through-passage.js',
 ]) {
   assert.deepEqual(ids([path], {
     newPaths: [path],
-  }), ['core', 'app', 'building-lifecycle', 'api-reuse', 'worker', 'mja-house-browser']);
+  }), path === 'src/builder/choga-frame-plan.js'
+    ? ['core', 'app', 'building-lifecycle', 'api-reuse', 'worker']
+    : ['core', 'app', 'building-lifecycle', 'api-reuse', 'worker', 'mja-house-browser']);
 }
 assert.deepEqual(ids(['src/village/mja-house-geometry.js'], {
   newPaths: ['src/village/mja-house-geometry.js'],
@@ -137,6 +140,9 @@ assert.deepEqual(ids(['src/api/mja-house.js'], {
 assert.deepEqual(ids(['tools/shoot-mja-house.mjs'], {
   newPaths: ['tools/shoot-mja-house.mjs'],
 }), ['core', 'mja-house-browser']);
+assert.deepEqual(ids(['tools/shoot-thatch.mjs'], {
+  newPaths: ['tools/shoot-thatch.mjs'],
+}), ['core', 'app']);
 assert.deepEqual(ids(['tools/shoot-drainage.mjs'], {
   newPaths: ['tools/shoot-drainage.mjs'],
 }), ['core', 'app', 'surface-browser']);

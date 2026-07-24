@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { buildBuilding, disposeBuilding } from '../../src/builder/index.js';
 import { PRESETS, computeLayout, giwaFootprint } from '../../src/params.js';
+import {
+  createThatchRoofProfile,
+  thatchRoofSurfaceHeightAt,
+} from '../../src/builder/thatch-profile.js';
 import { buildParcel } from '../../src/layout/parcel.js';
 import { mergeOwnedGeometries } from '../../src/core/merge-owned-geometries.js';
 import { planThresholdLife } from '../../src/props/threshold-life-plan.js';
@@ -13,6 +17,7 @@ import {
   residentialOpeningCapabilities,
 } from '../../src/layout/residential-openings.js';
 import { createPrimaryDoorRuntime } from '../../src/interaction/primary-door.js';
+import { CHOGA_VARIANTS } from '../../src/village/variants.js';
 
 const bounds = (object) => {
   const box = new THREE.Box3().setFromObject(object);
@@ -127,6 +132,46 @@ function inspectHearth(building, wallX) {
     openingSpanZ: { min: openingBounds.min.z, max: openingBounds.max.z },
     thresholdBounds: bounds(hearth.getObjectByName('kitchen-threshold')),
   };
+}
+
+const CHOGA_FRAME_PREFIXES = Object.freeze({
+  changbang: 'choga-changbang-',
+  jangyeo: 'choga-jangyeo-',
+  dori: 'choga-dori-',
+});
+
+function inspectChogaFrame(name, overrides) {
+  const params = { ...PRESETS.choga, ...overrides, mats: testMaterials() };
+  const building = buildBuilding(params);
+  const profile = createThatchRoofProfile(params, building.userData.layout);
+  const members = Object.fromEntries(
+    Object.keys(CHOGA_FRAME_PREFIXES).map((member) => [
+      member,
+      { count: 0, vertexCount: 0, minClearance: Infinity, minVertex: null },
+    ]),
+  );
+  const point = new THREE.Vector3();
+  building.updateWorldMatrix(true, true);
+  building.traverse((object) => {
+    const entry = Object.entries(CHOGA_FRAME_PREFIXES)
+      .find(([, prefix]) => object.name.startsWith(prefix));
+    const positions = object.geometry?.attributes?.position;
+    if (!entry || !positions) return;
+    const [member] = entry;
+    const report = members[member];
+    report.count++;
+    for (let index = 0; index < positions.count; index++) {
+      point.fromBufferAttribute(positions, index).applyMatrix4(object.matrixWorld);
+      const clearance = thatchRoofSurfaceHeightAt(profile, point.x, point.z) - point.y;
+      report.vertexCount++;
+      if (clearance < report.minClearance) {
+        report.minClearance = clearance;
+        report.minVertex = point.toArray();
+      }
+    }
+  });
+  disposeBuilding(building);
+  return { name, members };
 }
 
 function inspectPrimaryOpeningFace(panel, frame, anchor) {
@@ -841,6 +886,9 @@ export function inspectBuildingClearance() {
       dry: inspectThresholdAdapter(openings.choga, 'dry'),
       wet: inspectThresholdAdapter(openings.giwa, 'wet'),
     },
+    chogaFrames: CHOGA_VARIANTS.map((variant) => (
+      inspectChogaFrame(variant.name, variant.ov)
+    )),
   };
   disposeBuilding(giwa);
   return result;

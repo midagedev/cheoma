@@ -80,10 +80,15 @@ const expectedSceneHashes = {
   // scene bytes and fitted pick bounds change. Detached FULL-only aux probabilities
   // remain unchanged and are deliberately outside this cross-LOD hierarchy.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: '7f02ed28:7255229e:caeb868e:ea929794',
-  town: 'c1020ad2:5be166c0:8ccc3fea:256875da',
-  capital: '56a24044:fd2ab3d0:2deb3a00:00029d10',
-  hanyang: '418133d3:fdd55a1f:beb70108:957ea95b',
+  // #145 moves only the existing choga 창방·장여·도리 vertices into one
+  // roof-aware 민도리 stack and removes the unsupported beam overrun beyond the
+  // column lines. Object, material, and triangle ownership stay unchanged; the
+  // pure and production clearance gates verify the new geometry at every house
+  // tier. Pick proxies and all planning bytes remain exact.
+  village: '30aae2ac:67300a8e:1657cd96:cccac33c',
+  town: 'ec250326:8ea1a230:39885fea:f985ee2a',
+  capital: 'ce9b1c00:03902e90:2e51d270:8e22fde0',
+  hanyang: '6282c5af:0f2092af:19c57588:df98f3eb',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

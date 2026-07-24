@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { planChogaMindoriFrame } from './choga-frame-plan.js';
 
 // 다포식 공포. 하나의 포(包) 유닛을 부품 목록으로 정의하고,
 // 둘레의 모든 배치 지점에 InstancedMesh로 뿌린다.
@@ -10,28 +11,27 @@ export function buildBrackets(P, L, M) {
 
   // ---- 민도리집(초가): 공포 없이 도리(둥근 보)+장여(받침보)만 사방에 두른다 ----
   if (P.style === 'choga') {
-    const lastX = L.xPos.length - 1, lastZ = L.zPos.length - 1;
-    const zF = L.zPos[lastZ], zB = L.zPos[0], xL = L.xPos[0], xR = L.xPos[lastX];
-    // 도리는 처마 롤 아래로 낮춰 뭉침 방지, 길이는 벽 안쪽으로 짧게(모서리서 교차·돌출 X).
-    const doY = L.plateY - 0.02;   // 도리 높이(처마 롤 밑에 들어감)
-    const jyY = L.plateY - 0.16;   // 장여 높이
-    const dori = (len) => new THREE.CylinderGeometry(0.09, 0.09, len, 10);
-    const runs = [
-      { len: L.W - 0.3, x: 0, z: zF + 0.05, axis: 'x' },
-      { len: L.W - 0.3, x: 0, z: zB - 0.05, axis: 'x' },
-      { len: L.D - 0.3, x: xL - 0.05, z: 0, axis: 'z' },
-      { len: L.D - 0.3, x: xR + 0.05, z: 0, axis: 'z' },
-    ];
-    for (const r of runs) {
-      const p = new THREE.Mesh(dori(r.len), M.wood);
+    // 도리 윗면은 우진각 지붕의 전역 최저점인 처마선 아래에 두고, 장여는 그 밑면에
+    // 정확히 맞댄다. plateY 기준 배치는 양끝 도리가 지붕을 뚫는 검은 패치를 만들었다.
+    const frame = planChogaMindoriFrame(L);
+    const dori = (len) => new THREE.CylinderGeometry(
+      frame.doriRadius,
+      frame.doriRadius,
+      len,
+      10,
+    );
+    for (const r of frame.supportRuns) {
+      const p = new THREE.Mesh(dori(r.length), M.wood);
+      p.name = `choga-dori-${r.id}`;
       if (r.axis === 'x') p.rotation.z = Math.PI / 2; else p.rotation.x = Math.PI / 2;
-      p.position.set(r.x, doY, r.z);
+      p.position.set(r.x, frame.doriCenterY, r.z);
       p.castShadow = true;
       g.add(p);
       const jy = new THREE.Mesh(
-        r.axis === 'x' ? new THREE.BoxGeometry(r.len, 0.12, 0.14)
-                       : new THREE.BoxGeometry(0.14, 0.12, r.len), M.woodDark);
-      jy.position.set(r.x, jyY, r.z);
+        r.axis === 'x' ? new THREE.BoxGeometry(r.length, frame.jangyeoHeight, 0.14)
+                       : new THREE.BoxGeometry(0.14, frame.jangyeoHeight, r.length), M.woodDark);
+      jy.name = `choga-jangyeo-${r.id}`;
+      jy.position.set(r.x, frame.jangyeoCenterY, r.z);
       jy.castShadow = true;
       g.add(jy);
     }
