@@ -89,10 +89,13 @@ const expectedSceneHashes = {
   // detached building whose exact roof footprint survives FAR/MID/FULL. Every
   // accepted source is merged once by borrowed palette role, so the scene bytes
   // deliberately change while sync, real Worker, and fallback remain identical.
-  village: '604a620f:9b8dc19b:aa2b8a37:be7623bd',
-  town: 'bfbe9f07:8824c127:40283f23:588fbec7',
-  capital: 'c0244f9b:5649191f:77ee058c:437c35c9',
-  hanyang: '9c1b0ef4:fe82e974:e2dc750a:96a003d4',
+  // #153 removes the pick-box-derived fill/edge resources and keeps one reusable
+  // roof-footprint corner marker. Planning and proxy bytes stay exact; only the
+  // runtime scene resource topology changes.
+  village: 'b73b2604:1baba4b2:b8930cfa:e532cf36',
+  town: '3c1b27a4:a3b42e9e:0e857896:045386c0',
+  capital: '6e8322e0:1d1981e6:3194a001:9de9b602',
+  hanyang: '910da473:1b964cfb:ca3aa72f:37289a0d',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

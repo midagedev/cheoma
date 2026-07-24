@@ -6,7 +6,7 @@ import {
   disposeObjectResources,
   disposeObjectTree,
 } from '../../core/three-resources.js';
-import { PRESETS } from '../../params.js';
+import { PRESETS, computeLayout } from '../../params.js';
 import { buildBuilding } from '../../builder/index.js';
 import { buildParcel } from '../../layout/parcel.js';
 import { makeMaterials, applyThatchAge } from '../../builder/palette.js';
@@ -23,7 +23,14 @@ import { buildVillageWall } from '../../village/walls.js';
 import { buildAuxiliaryBuilding } from '../../village/auxiliary-building-geometry.js';
 import { planParcelAuxiliary } from '../../village/auxiliary-building-plan.js';
 import { toneOf, variantMirrorX, variantOv } from '../../village/variants.js';
-import { parcelHouseTranslation, parcelLocalPoint } from '../../village/parcel-contract.js';
+import {
+  parcelHouseTranslation,
+  parcelLocalPoint,
+  parcelWorldPoint,
+} from '../../village/parcel-contract.js';
+import { parcelRoofPolygons } from '../../village/house-footprint.js';
+import { impostorHouseSpec } from '../../village/impostor-spec.js';
+import { parcelGroundY } from '../../village/solar-access.js';
 import {
   captureParcelRebuildEnvelope,
   planParcelRebuild,
@@ -216,11 +223,63 @@ export function createVillageHandle(opts, seed, plan, group) {
     if (m && m.isMaterial && m.userData && !m.userData.__kept) { m.userData.__kept = true; keptMats.push(m); }
   }
 
-  // ── 하이라이트(먹선 아웃라인 + 은은한 발광 박스) — 재사용 1벌을 이동/스케일. ──
+  // ── 하이라이트(실제 지붕 처마 모서리 표식) — 깊이 가림되는 선 자원 1벌을 재사용. ──
   const hi = createParcelHighlight();
-  hi.group.visible = false;
+  hi.clear();
   group.add(hi.group);
   let highlighted = null;
+
+  function residentialHighlightMarker(parcel, proxy) {
+    const baseY = parcelGroundY(parcel, site);
+    const explicit = parcel.editRoofBounds;
+    if (explicit && [explicit.minX, explicit.maxX, explicit.minZ, explicit.maxZ].every(Number.isFinite)) {
+      const params = proxy.buildingSpec?.params || {};
+      const kind = proxy.buildingSpec?.kind === 'giwa' ? 'giwa' : 'choga';
+      const layout = computeLayout({ ...PRESETS[kind], ...params });
+      const scaleY = (Number.isFinite(parcel.sy) ? parcel.sy : 1)
+        * (Number.isFinite(params.footprintScale) ? params.footprintScale : 1);
+      return {
+        contours: [{
+          polygon: [
+            parcelWorldPoint(parcel, { x: explicit.maxX, z: explicit.maxZ }),
+            parcelWorldPoint(parcel, { x: explicit.minX, z: explicit.maxZ }),
+            parcelWorldPoint(parcel, { x: explicit.minX, z: explicit.minZ }),
+            parcelWorldPoint(parcel, { x: explicit.maxX, z: explicit.minZ }),
+          ],
+          y: baseY + layout.eaveEdgeY * scaleY,
+        }],
+        source: 'edited-roof-footprint',
+      };
+    }
+
+    const polygons = parcelRoofPolygons(parcel);
+    if (parcel.mjaHouse?.kind === 'mja-banga') {
+      const wingEaves = parcel.mjaHouse.wings.map((wing) => (
+        wing.building.podiumTierH + wing.building.columnHeight + 0.35
+      ));
+      const gateWing = parcel.mjaHouse.wings.find((wing) => wing.id === parcel.mjaHouse.gate?.wingId);
+      const gateEave = gateWing
+        ? gateWing.building.podiumTierH + gateWing.building.columnHeight + 0.35
+        : wingEaves.at(-1);
+      return {
+        contours: polygons.map((polygon, index) => ({
+          polygon,
+          y: baseY + (index < wingEaves.length ? wingEaves[index] : gateEave),
+        })),
+        source: 'roof-footprints',
+      };
+    }
+
+    const spec = impostorHouseSpec(parcel);
+    const scaleY = Number.isFinite(parcel.sy) ? parcel.sy : 1;
+    return {
+      contours: polygons.map((polygon, index) => ({
+        polygon,
+        y: baseY + (spec.roofs[index]?.eaveY ?? spec.body.y1) * scaleY,
+      })),
+      source: polygons.length > 1 ? 'roof-footprints' : 'roof-footprint',
+    };
+  }
 
   // ── 픽킹 프록시(필지 바운딩) — 렌더 트리에 넣지 않고 레이캐스트 전용. ──
   const proxies = buildParcelPickProxies(plan, site);
@@ -1475,13 +1534,31 @@ export function createVillageHandle(opts, seed, plan, group) {
       }
     },
 
-    // 먹선 아웃라인 하이라이트 토글. on=true 면 해당 필지에 아웃라인+은은한 발광.
+    // 주거는 실제 fitted 처마 footprint, landmark는 지면 focus footprint의 절제된
+    // 모서리 표식만 쓴다. 레이캐스트용 픽킹 box는 렌더하지 않는다.
     highlightParcel(parcelId, on) {
-      if (!on) { if (highlighted === parcelId) { hi.group.visible = false; highlighted = null; } return; }
+      if (!on) {
+        if (highlighted === parcelId) {
+          hi.clear();
+          highlighted = null;
+        }
+        return;
+      }
       const p = proxyById.get(parcelId);
       if (!p) return;
-      hi.set(p.worldCenter, p.dims, p.rotY);
-      hi.group.visible = true;
+      const parcel = plan.parcels.find((candidate) => candidate.id === parcelId);
+      const residential = parcel && (parcel.kind === 'giwa' || parcel.kind === 'choga')
+        ? residentialHighlightMarker(parcel, p)
+        : null;
+      const volume = p.focusVolume;
+      hi.show(parcelId, {
+        ...residential,
+        center: volume?.center || p.worldCenter,
+        half: volume?.half || { x: p.dims.x * 0.5, z: p.dims.z * 0.5 },
+        rotationY: volume?.rotationY ?? p.rotY,
+        y: p.worldCenter.y + 0.14,
+        source: residential?.source || 'focus-footprint',
+      });
       highlighted = parcelId;
     },
 

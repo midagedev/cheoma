@@ -518,26 +518,145 @@ export function buildLandmarkPickProxies(plan, site, {
 export function createParcelHighlight() {
   const group = new THREE.Group();
   group.name = 'village-highlight';
-  const box = new THREE.BoxGeometry(1, 1, 1);
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box),
-    new THREE.LineBasicMaterial({ color: 0x2e2a28, transparent: true, opacity: 0.85 }));
-  const glow = new THREE.Mesh(box.clone(), new THREE.MeshBasicMaterial({
-    color: 0xffe6b0,
+  group.userData.kind = 'parcel-corner-marker';
+  const maxCorners = 16;
+  const capacity = maxCorners * 4;
+  const positions = new Float32Array(capacity * 3);
+  const geometry = new THREE.BufferGeometry();
+  const position = new THREE.BufferAttribute(positions, 3);
+  position.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', position);
+  geometry.setDrawRange(0, 0);
+  const corners = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({
+    color: 0xe5b86d,
     transparent: true,
-    opacity: 0.10,
-    blending: THREE.AdditiveBlending,
+    opacity: 0.84,
+    depthTest: true,
     depthWrite: false,
+    toneMapped: false,
   }));
-  group.add(edges, glow);
-  const scale = new THREE.Vector3();
+  corners.name = 'parcel-corner-marker';
+  corners.frustumCulled = false;
+  group.add(corners);
+
+  const fallback = [
+    { x: 0, z: 0 }, { x: 0, z: 0 }, { x: 0, z: 0 }, { x: 0, z: 0 },
+  ];
+  const expanded = Array.from({ length: maxCorners }, () => ({ x: 0, z: 0 }));
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  function validPolygon(polygon) {
+    return polygon?.length >= 3 && polygon.length <= maxCorners
+      && polygon.every((point) => Number.isFinite(point?.x) && Number.isFinite(point?.z));
+  }
+
+  function fallbackFootprint({ center, half, rotationY = 0 }) {
+    if (!center || !half) return null;
+    const halfX = Math.max(0.5, half.x);
+    const halfZ = Math.max(0.5, half.z);
+    if (![center.x, center.z, halfX, halfZ, rotationY].every(Number.isFinite)) return null;
+    const cos = Math.cos(rotationY);
+    const sin = Math.sin(rotationY);
+    const local = [
+      [-halfX, -halfZ], [halfX, -halfZ], [halfX, halfZ], [-halfX, halfZ],
+    ];
+    for (let index = 0; index < local.length; index++) {
+      const [x, z] = local[index];
+      fallback[index].x = center.x + x * cos + z * sin;
+      fallback[index].z = center.z - x * sin + z * cos;
+    }
+    return fallback;
+  }
+
+  function writeVertex(offset, point, y) {
+    positions[offset] = point.x;
+    positions[offset + 1] = y;
+    positions[offset + 2] = point.z;
+  }
+
   return {
     group,
-    set(worldCenter, dimensions, rotationY) {
-      group.position.set(worldCenter.x, worldCenter.y + dimensions.y / 2, worldCenter.z);
-      group.rotation.y = rotationY;
-      scale.copy(dimensions).multiplyScalar(1.01);
-      edges.scale.copy(scale);
-      glow.scale.copy(scale);
+    show(parcelId, marker) {
+      const requested = Array.isArray(marker.contours)
+        ? marker.contours.filter((contour) => validPolygon(contour?.polygon)
+          && Number.isFinite(contour?.y))
+        : [];
+      const fallbackPolygon = requested.length ? null : fallbackFootprint(marker);
+      const contours = requested.length
+        ? requested
+        : (fallbackPolygon ? [{ polygon: fallbackPolygon, y: marker.y }] : []);
+      let vertex = 0;
+      let cornerCount = 0;
+      let contourCount = 0;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const contour of contours) {
+        const source = contour.polygon;
+        if (cornerCount + source.length > maxCorners) break;
+        let centerX = 0;
+        let centerZ = 0;
+        for (const point of source) {
+          centerX += point.x;
+          centerZ += point.z;
+        }
+        centerX /= source.length;
+        centerZ /= source.length;
+
+        // A small outward bias keeps the marker legible beside the exact eave
+        // silhouette. Real roofs still depth-occlude it; no fill or vertical
+        // pick volume can cover the house.
+        for (let index = 0; index < source.length; index++) {
+          const dx = source[index].x - centerX;
+          const dz = source[index].z - centerZ;
+          const distance = Math.hypot(dx, dz) || 1;
+          expanded[index].x = source[index].x + dx / distance * 0.18;
+          expanded[index].z = source[index].z + dz / distance * 0.18;
+        }
+
+        const y = Number.isFinite(contour.y)
+          ? contour.y
+          : (Number.isFinite(marker.y) ? marker.y : marker.center.y + 0.14);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        for (let index = 0; index < source.length; index++) {
+          const current = expanded[index];
+          const previous = expanded[(index + source.length - 1) % source.length];
+          const next = expanded[(index + 1) % source.length];
+          for (const neighbour of [previous, next]) {
+            const dx = neighbour.x - current.x;
+            const dz = neighbour.z - current.z;
+            const length = Math.hypot(dx, dz) || 1;
+            const tick = clamp(length * 0.22, 0.8, 2.2);
+            writeVertex(vertex * 3, current, y);
+            vertex++;
+            writeVertex(vertex * 3, {
+              x: current.x + dx / length * tick,
+              z: current.z + dz / length * tick,
+            }, y);
+            vertex++;
+          }
+        }
+        cornerCount += source.length;
+        contourCount++;
+      }
+      position.needsUpdate = true;
+      geometry.setDrawRange(0, vertex);
+      group.userData.parcelId = parcelId;
+      group.userData.source = marker.source || 'focus-footprint';
+      group.userData.cornerCount = cornerCount;
+      group.userData.contourCount = contourCount;
+      group.userData.minY = Number.isFinite(minY) ? minY : null;
+      group.userData.maxY = Number.isFinite(maxY) ? maxY : null;
+      group.visible = vertex > 0;
+    },
+    clear() {
+      group.visible = false;
+      group.userData.parcelId = null;
+      group.userData.source = null;
+      group.userData.cornerCount = 0;
+      group.userData.contourCount = 0;
+      group.userData.minY = null;
+      group.userData.maxY = null;
     },
   };
 }
