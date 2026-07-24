@@ -12,6 +12,8 @@ export const DRAINAGE_MATERIAL_ROLES = Object.freeze(['ground']);
 
 const lifecycleByRoot = new WeakMap();
 const EPSILON = 1e-8;
+const CROSSING_SLAB_COUNT = 3;
+const CROSSING_SLAB_TOP_VARIATION = 0.0025;
 
 function linearColor(hex) {
   const color = new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
@@ -201,7 +203,17 @@ function buildDitchGeometry(runs) {
   return geometry;
 }
 
-function applyCrossingColors(geometry) {
+function stableUnit(seed, channel) {
+  const text = `${seed ?? 'crossing'}:${channel}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) / 0x100000000;
+}
+
+function applyCrossingColors(geometry, shade = 1) {
   const normals = geometry.getAttribute('normal');
   const colors = new Float32Array(normals.count * 3);
   for (let index = 0; index < normals.count; index++) {
@@ -209,36 +221,88 @@ function applyCrossingColors(geometry) {
     const color = ny > 0.5
       ? CROSSING_COLORS.top
       : (ny < -0.5 ? CROSSING_COLORS.bottom : CROSSING_COLORS.side);
-    colors[index * 3] = color[0];
-    colors[index * 3 + 1] = color[1];
-    colors[index * 3 + 2] = color[2];
+    colors[index * 3] = Math.min(1, color[0] * shade);
+    colors[index * 3 + 1] = Math.min(1, color[1] * shade);
+    colors[index * 3 + 2] = Math.min(1, color[2] * shade);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return geometry;
 }
 
-function makeCrossingGeometry(crossing) {
-  const geometry = applyCrossingColors(new THREE.BoxGeometry(
-    crossing.width,
-    crossing.thickness,
-    crossing.span,
-  ));
-  // center.y is the authoritative deck top, not its volume centre.
-  geometry.translate(0, -crossing.thickness * 0.5, 0);
-  geometry.rotateY(crossing.yaw);
-  geometry.translate(
-    crossing.center.x,
-    crossing.center.y,
-    crossing.center.z,
+function crossingSlabLayout(crossing) {
+  const gap = Math.min(0.018, crossing.span * 0.022);
+  const usableSpan = crossing.span - gap * (CROSSING_SLAB_COUNT - 1);
+  if (usableSpan <= EPSILON) {
+    throw new RangeError('drainage crossing span is too short for three slabs');
+  }
+  const weights = Array.from(
+    { length: CROSSING_SLAB_COUNT },
+    (_unused, index) => 0.94 + stableUnit(crossing.id, `span-${index}`) * 0.12,
   );
-  return geometry;
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const fullWidthSlab = Math.floor(
+    stableUnit(crossing.id, 'full-width') * CROSSING_SLAB_COUNT,
+  );
+  let cursor = -crossing.span * 0.5;
+  return weights.map((weight, index) => {
+    const span = index === CROSSING_SLAB_COUNT - 1
+      ? crossing.span * 0.5 - cursor
+      : usableSpan * weight / weightTotal;
+    const widthScale = index === fullWidthSlab
+      ? 1
+      : 0.965 + stableUnit(crossing.id, `width-${index}`) * 0.02;
+    const width = crossing.width * widthScale;
+    const xFreedom = Math.max(0, (crossing.width - width) * 0.5);
+    const x = index === fullWidthSlab
+      ? 0
+      : (stableUnit(crossing.id, `x-${index}`) * 2 - 1) * xFreedom;
+    const top = (
+      stableUnit(crossing.id, `top-${index}`) * 2 - 1
+    ) * CROSSING_SLAB_TOP_VARIATION;
+    const thickness = crossing.thickness * (
+      0.95 + stableUnit(crossing.id, `thickness-${index}`) * 0.1
+    );
+    const slab = {
+      x,
+      z: cursor + span * 0.5,
+      top,
+      span,
+      width,
+      thickness,
+      shade: 0.965 + stableUnit(crossing.id, `shade-${index}`) * 0.07,
+    };
+    cursor += span + gap;
+    return slab;
+  });
+}
+
+function makeCrossingGeometries(crossing) {
+  return crossingSlabLayout(crossing).map((slab) => {
+    const geometry = applyCrossingColors(new THREE.BoxGeometry(
+      slab.width,
+      slab.thickness,
+      slab.span,
+    ), slab.shade);
+    // center.y is the authoritative nominal deck top. Three deterministic,
+    // narrowly separated slabs remain within ±2.5 mm of that landing plane.
+    geometry.translate(slab.x, slab.top - slab.thickness * 0.5, slab.z);
+    geometry.rotateY(crossing.yaw);
+    geometry.translate(
+      crossing.center.x,
+      crossing.center.y,
+      crossing.center.z,
+    );
+    return geometry;
+  });
 }
 
 function buildCrossingGeometry(crossings) {
   if (!crossings.length) return null;
   const sources = [];
   try {
-    for (const crossing of crossings) sources.push(makeCrossingGeometry(crossing));
+    for (const crossing of crossings) {
+      sources.push(...makeCrossingGeometries(crossing));
+    }
   } catch (error) {
     for (const geometry of sources) geometry.dispose();
     throw error;
