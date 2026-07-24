@@ -23,7 +23,7 @@ const MIME = {
 
 const HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>html,body{margin:0;height:100%;overflow:hidden;background:#cfd8e0}#app{width:100%;height:100%}</style>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"/app/node_modules/three/build/three.module.js","three/addons/":"/app/node_modules/three/examples/jsm/"}}</script>
 </head><body><div id="app"></div>
 <script type="module">
 import * as THREE from 'three';
@@ -50,7 +50,7 @@ sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-22;sun.shadow.camera.r
 sun.shadow.camera.far=260;sun.shadow.bias=-0.0001;sun.shadow.normalBias=0.05;scene.add(sun);
 const hemi=new THREE.HemisphereLight(0xbdd0e4,0x8a7a63,0.9);scene.add(hemi);
 const P={...PRESETS[preset]};
-for(const key of ['frontBays','sideBays','eaveOverhang','centerBayW','endBayW']){
+for(const key of ['frontBays','sideBays','eaveOverhang','centerBayW','middleBayW','endBayW']){
   if(q.has(key))P[key]=num(key,P[key]);
 }
 const building=buildBuilding(P);building.name='building';scene.add(building);
@@ -60,6 +60,11 @@ env.setSeason(season,{immediate:true});env.setTime(timeOfDay);env.setEnabled(tru
 const weather=setupWeather(scene,{layout,getBuilding:()=>scene.getObjectByName('building'),getGround:()=>null});
 weather.setWeather(weatherKind,{immediate:true});
 if(weatherKind==='clear'&&window.__wx)window.__wx.setAccum(0);
+if(q.get('isolate')==='1'){
+  for(const child of scene.children){
+    if(child!==building&&child!==sun&&child!==hemi)child.visible=false;
+  }
+}
 window.__env=env;window.__wx=window.__wx;
 const camera=new THREE.PerspectiveCamera(28,innerWidth/innerHeight,0.1,500);
 const maxDim=Math.max(layout.W+4,layout.D+4,layout.totalH);
@@ -84,6 +89,7 @@ function place(frame){
 place(q.get('frame')||'tq');
 window.__aim=(cx,cy,cz,tx,ty,tz)=>{camera.position.set(cx,cy,cz);target.set(tx,ty,tz);camera.lookAt(target);};
 window.__frameInfo=()=>({W:layout.W,D:layout.D,totalH:layout.totalH,xEave:layout.xEave,zEave:layout.zEave,podTopY:layout.podTopY,eaveEdgeY:layout.eaveEdgeY,ridgeY:layout.ridgeY});
+window.__renderInfo=()=>({calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,programs:renderer.info.programs?.length??0,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures});
 window.__advance=(secs)=>{const n=Math.max(1,Math.round(secs/0.05));for(let i=0;i<n;i++){env.update(0.05);weather.update(0.05);}};
 let frames=0;
 renderer.setAnimationLoop(()=>{
@@ -123,13 +129,25 @@ async function info() { return await page.evaluate(() => window.__frameInfo()); 
 async function save(name, clip) {
   const file = join(OUT, `thatch-${TAG}-${name}.png`);
   await page.screenshot(clip ? { path: file, clip } : { path: file });
-  console.log('saved', file);
+  const metrics = await page.evaluate(() => window.__renderInfo());
+  console.log('saved', file, JSON.stringify(metrics));
 }
 
 // 1) 표준 프레임(초가)
 for (const [fr, t] of [['tq','day'],['front','day'],['roofclose','day'],['eave','day'],['tq','sunset'],['tq','night']]) {
   await open(`${base}/__th?preset=choga&frame=${fr}&time=${t}`);
   await save(`${fr}-${t}`);
+}
+
+// #145: 가구 위계의 3/4/5칸 모두에서 민도리 상부가 우진각 어깨를 뚫지 않는지 같은 프레임으로 비교.
+const hierarchy = [
+  ['3bay', 'frontBays=3&centerBayW=2.4&middleBayW=2.2&endBayW=2.0'],
+  ['4bay', 'frontBays=4&centerBayW=2.7&middleBayW=2.4&endBayW=2.2'],
+  ['5bay', 'frontBays=5&centerBayW=3.0&middleBayW=2.4&endBayW=2.1'],
+];
+for (const [name, shape] of hierarchy) {
+  await open(`${base}/__th?preset=choga&frame=tq&time=day&post=0&isolate=1&${shape}`);
+  await save(`hierarchy-${name}-day`);
 }
 
 // 2) 처마 끝 매크로: 정면 우측 처마 코너를 (a)측면 실루엣 (b)위-바깥 외면

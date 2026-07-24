@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { planChogaMindoriFrame } from './choga-frame-plan.js';
 
 // 배흘림 프로파일 LatheGeometry — 기둥 높이의 1/3 지점이 가장 굵다
 function columnGeometry(radius, height, entasis) {
@@ -56,18 +57,24 @@ export function buildColumns(P, L, M) {
   }
 
   // 창방 (기둥머리 연결보) + 평방 (다포의 넓은 받침보) — 사방 둘레
-  const capH = 0.34, flatH = 0.20;
-  const yCap = L.colTopY + capH / 2;
+  const choga = P.style === 'choga';
+  const mindori = choga ? planChogaMindoriFrame(L) : null;
+  const capH = mindori?.changbangHeight ?? 0.34;
+  const flatH = 0.20;
+  const yCap = mindori?.changbangCenterY ?? (L.colTopY + capH / 2);
   const yFlat = L.colTopY + capH + flatH / 2;
   const mkBeam = (len, h, d) => new THREE.BoxGeometry(len, h, d);
 
-  const runs = [
+  const runs = mindori?.changbangRuns.map((run) => ({
+    ...run,
+    len: run.length,
+    rotY: run.axis === 'x' ? 0 : Math.PI / 2,
+  })) ?? [
     { len: L.W + 0.5, x: 0, z: zs[0], rotY: 0 },
     { len: L.W + 0.5, x: 0, z: zs[lastZ], rotY: 0 },
     { len: L.D + 0.5, x: xs[0], z: 0, rotY: Math.PI / 2 },
     { len: L.D + 0.5, x: xs[lastX], z: 0, rotY: Math.PI / 2 },
   ];
-  const choga = P.style === 'choga';
   for (const r of runs) {
     // 창방·평방: 궁·사찰은 위계별 단청 source, 기와·초가는 단색 목재.
     const mat = M.beamDancheong.clone();
@@ -77,6 +84,7 @@ export function buildColumns(P, L, M) {
       mat.map.needsUpdate = true;
     }
     const cb = new THREE.Mesh(mkBeam(r.len, capH, 0.26), mat);
+    if (choga) cb.name = `choga-changbang-${r.id}`;
     cb.position.set(r.x, yCap, r.z); cb.rotation.y = r.rotY;
     cb.castShadow = true; g.add(cb);
     // 초가(민도리집)는 넓은 평방 생략 — 얇은 창방만.

@@ -87,6 +87,19 @@ invariant(
     && production.chogaNonfinite.zCount === 3,
   `production choga fallback footprint drifted (${JSON.stringify(production.chogaNonfinite)})`,
 );
+for (const frame of production.chogaFrames) {
+  for (const [member, report] of Object.entries(frame.members)) {
+    invariant(report.count === 4,
+      `${frame.name} rendered ${report.count} ${member} runs instead of four`);
+    invariant(report.vertexCount > 0,
+      `${frame.name} rendered an empty ${member} geometry`);
+    invariant(
+      report.minClearance >= 0.02 - EPS,
+      `${frame.name} ${member} enters the thatch roof at `
+        + `${JSON.stringify(report.minVertex)} (${report.minClearance.toFixed(6)}m clearance)`,
+    );
+  }
+}
 function checkGiwaPodium(label, shape) {
   for (const [name, count] of Object.entries(shape.layerCounts)) {
     invariant(count === 1, `${label} ${name} has ${count} depth owners`);

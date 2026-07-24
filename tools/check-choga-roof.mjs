@@ -9,6 +9,7 @@ import {
   thatchWallBreakpoints,
   thatchWallTopAt,
 } from '../src/builder/thatch-profile.js';
+import { planChogaMindoriFrame } from '../src/builder/choga-frame-plan.js';
 import { CHOGA_VARIANTS } from '../src/village/variants.js';
 import { makeRng } from '../src/rng.js';
 
@@ -110,6 +111,7 @@ function checkCase(name, overrides, verifySampler = false) {
   const L = computeLayout(P);
   const profile = createThatchRoofProfile(P, L);
   const vertices = makeSurface(profile);
+  const mindori = planChogaMindoriFrame(L);
 
   let roundTripError = 0;
   for (let ib = 0; ib <= NB; ib += 4) {
@@ -160,6 +162,42 @@ function checkCase(name, overrides, verifySampler = false) {
   invariant(maxClearance <= 0.002, `${name}: wall protrudes ${maxClearance.toFixed(6)}m at ${JSON.stringify(maxPoint)}`);
   invariant(minClearance >= -0.10, `${name}: wall gap ${minClearance.toFixed(6)}m at ${JSON.stringify(minPoint)}`);
 
+  let minFrameClearance = Infinity;
+  let minFramePoint = null;
+  const frameMembers = [
+    ['changbang', mindori.changbangRuns, 0.13, mindori.changbangTopY],
+    ['jangyeo', mindori.supportRuns, 0.07, mindori.jangyeoTopY],
+    ['dori', mindori.supportRuns, mindori.doriRadius, mindori.doriTopY],
+  ];
+  for (const [member, runs, halfDepth, topY] of frameMembers) {
+    for (const run of runs) {
+      for (let step = 0; step <= 128; step++) {
+        const along = -run.length / 2 + run.length * (step / 128);
+        for (const across of [-halfDepth, 0, halfDepth]) {
+          const x = run.x + (run.axis === 'x' ? along : across);
+          const z = run.z + (run.axis === 'x' ? across : along);
+          const clearance = thatchRoofSurfaceHeightAt(profile, x, z) - topY;
+          if (clearance < minFrameClearance) {
+            minFrameClearance = clearance;
+            minFramePoint = { member, run: run.id, x, z };
+          }
+        }
+      }
+    }
+  }
+  invariant(
+    minFrameClearance >= mindori.roofClearance - 1e-6,
+    `${name}: mindori frame pierces roof by ${minFrameClearance.toFixed(6)}m at ${JSON.stringify(minFramePoint)}`,
+  );
+  invariant(
+    Math.abs(mindori.jangyeoTopY - mindori.doriBottomY) < 1e-12,
+    `${name}: jangyeo no longer meets the dori (${mindori.jangyeoTopY} != ${mindori.doriBottomY})`,
+  );
+  invariant(
+    Math.abs(mindori.changbangTopY - mindori.jangyeoBottomY) < 1e-12,
+    `${name}: changbang no longer meets the jangyeo (${mindori.changbangTopY} != ${mindori.jangyeoBottomY})`,
+  );
+
   if (name === 'preset') {
     invariant(profile.planExponent === 4.2, `preset plan exponent changed: ${profile.planExponent}`);
     const positions = new Float32Array(vertices.flatMap(({ x, y, z }) => [x, y, z]));
@@ -177,13 +215,21 @@ function checkCase(name, overrides, verifySampler = false) {
       `${name}: unexpected plan exponent ${profile.planExponent}`,
     );
   }
-  return { name, samples, minClearance, maxClearance, roundTripError };
+  return {
+    name,
+    samples,
+    minClearance,
+    maxClearance,
+    minFrameClearance,
+    roundTripError,
+  };
 }
 
 function printResult(result) {
   console.log(
     `${result.name.padEnd(13)} samples=${String(result.samples).padStart(5)} `
     + `clearance=${result.minClearance.toFixed(4)}..${result.maxClearance.toFixed(4)}m `
+    + `frame=${result.minFrameClearance.toFixed(4)}m `
     + `inverse=${result.roundTripError.toExponential(1)}`,
   );
 }
