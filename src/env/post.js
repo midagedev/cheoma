@@ -640,10 +640,14 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
     bloomPass.strength = cur.bloomStrength;
     bloomPass.radius = cur.bloomRadius;
     bloomPass.threshold = cur.bloomThreshold;
-    // Bloom and circular DoF consume the same linear-HDR image. Deriving the bokeh
-    // threshold from the time profile keeps dim night lanterns eligible without
-    // mistaking sunlit plaster for an emitter during day/dawn transitions.
-    bokehPass.uniforms.highlightThreshold.value = Math.max(0.48, cur.bloomThreshold * 0.9);
+    // Bloom may softly affect a broad warm surface, but optical source discs are
+    // reserved for a much smaller HDR set. Keeping this threshold above ordinary
+    // sunlit plaster prevents roofs, foliage, and contrast edges from becoming a
+    // field of expensive pseudo-emitters; authored lantern/window cores remain HDR.
+    bokehPass.uniforms.highlightThreshold.value = Math.max(
+      1.2,
+      cur.bloomThreshold * 1.25,
+    );
     // 저고도 게이트: 림은 태양이 낮을 때(골든아워)만 성립하고 정오로 갈수록 소거된다.
     const altGate = 1.0 - THREE.MathUtils.smoothstep(cur.dir.y, 0.20, 0.52);
     rimBase = cur.rim * altGate;

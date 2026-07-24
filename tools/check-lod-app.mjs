@@ -639,10 +639,10 @@ try {
   const adaptiveQualityValid = adaptiveQuality
     && adaptiveMidpointValid
     && adaptiveQuality.moving.postQuality === 0
-    && adaptiveQuality.moving.activeBokehTaps === 13
+    && adaptiveQuality.moving.activeBokehTaps === 1
     && adaptiveQuality.stableBefore.postQuality === 1
     && adaptiveQuality.stableAfter.postQuality === 1
-    && adaptiveQuality.stableAfter.activeBokehTaps === 41
+    && adaptiveQuality.stableAfter.activeBokehTaps === 13
     && adaptiveMidpointDepthMeshes > 0
     && adaptiveQuality.expectedDepthBefore >= adaptiveMidpointDepthMeshes
     && adaptiveQuality.stableBefore.lodScreenDoorDepth === adaptiveQuality.expectedDepthBefore

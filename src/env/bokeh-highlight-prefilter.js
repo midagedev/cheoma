@@ -221,7 +221,7 @@ export class BokehHighlightPrefilter {
     this.uniforms = {
       tColor: { value: null },
       sourceTexel: { value: new Vector2(1, 1) },
-      highlightThreshold: { value: 0.78 },
+      highlightThreshold: { value: 1.2 },
       highlightKnee: { value: 0.52 },
     };
     this.material = new ShaderMaterial({
