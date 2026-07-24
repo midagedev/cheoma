@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { planParcelFocus } from '../../generators/shared/parcel-spatial.js';
 import {
   createFocusVisibilityIndex,
+  sampleFocusSubjectSurface,
   selectSafeFocusEndpoint,
   VILLAGE_FOCUS_CAMERA_CLEARANCE,
   VILLAGE_FOCUS_TERRAIN_CLEARANCE,
@@ -18,6 +19,7 @@ import {
 } from '../../village/focus-blockers.js';
 import { terrainWarpInner } from '../../village/terrain-surface.js';
 import {
+  terrainMeshFocusCutaway,
   terrainGridStep,
   terrainMeshCameraSafeScale,
 } from '../../village/terrain-grid.js';
@@ -83,6 +85,9 @@ function visibilityDescriptor(result) {
     telephotoPreserved: result.telephotoPreserved,
     terrainMinClearance: result.terrainMinClearance,
     terrainEndpointClearance: result.terrainEndpointClearance,
+    terrainCutaway: result.terrainCutaway
+      ? structuredClone(result.terrainCutaway)
+      : null,
     visibleRatio: result.visibleRatio,
     occlusionRatio: result.occlusionRatio,
     baseVisibleRatio: result.baseVisibleRatio,
@@ -90,6 +95,132 @@ function visibilityDescriptor(result) {
     blockers: result.blockers,
     baseBlockers: result.baseBlockers,
     candidates: result.candidates,
+  };
+}
+
+const FOCUS_TERRAIN_CUTAWAY_CACHE = new WeakMap();
+
+function focusTerrainCutaway(proxy, site, safeTerrainRadius, framing) {
+  const samples = sampleFocusSubjectSurface(
+    framing.position,
+    proxy.focusBounds,
+    proxy.focusVolume,
+  );
+  return terrainMeshFocusCutaway(
+    site,
+    framing.position,
+    framing.target,
+    samples,
+    { maxRadius: safeTerrainRadius },
+  );
+}
+
+function focusSafeTerrainRadius(plan, site) {
+  return plan && site
+    ? Math.max(1, terrainWarpInner(plan, site) - terrainGridStep(site))
+    : Infinity;
+}
+
+function focusCameraSafeScale(site, maxRadius, framing) {
+  return terrainMeshCameraSafeScale(
+    site,
+    framing.target,
+    framing.position,
+    {
+      clearance: VILLAGE_FOCUS_TERRAIN_CLEARANCE,
+      endpointClearance: VILLAGE_FOCUS_CAMERA_CLEARANCE,
+      maxRadius,
+    },
+  );
+}
+
+export function focusTerrainCutawayForProxy(proxy, plan, site, framing) {
+  if (!proxy?.focusBounds || !framing?.position || !framing?.target || !site) {
+    return null;
+  }
+  const cached = FOCUS_TERRAIN_CUTAWAY_CACHE.get(proxy);
+  if (cached
+    && cached.site === site
+    && cached.bounds === proxy.focusBounds
+    && cached.volume === proxy.focusVolume
+    && cached.px === framing.position.x
+    && cached.py === framing.position.y
+    && cached.pz === framing.position.z
+    && cached.tx === framing.target.x
+    && cached.ty === framing.target.y
+    && cached.tz === framing.target.z) {
+    return cached.result;
+  }
+  const safeTerrainRadius = focusSafeTerrainRadius(plan, site);
+  const cutaway = focusTerrainCutaway(
+    proxy,
+    site,
+    safeTerrainRadius,
+    framing,
+  );
+  const safety = cutaway.active && !cutaway.available
+    ? focusCameraSafeScale(site, safeTerrainRadius, framing)
+    : null;
+  const result = {
+    ...cutaway,
+    safeScale: safety?.scale ?? 1,
+  };
+  FOCUS_TERRAIN_CUTAWAY_CACHE.set(proxy, {
+    site,
+    bounds: proxy.focusBounds,
+    volume: proxy.focusVolume,
+    px: framing.position.x,
+    py: framing.position.y,
+    pz: framing.position.z,
+    tx: framing.target.x,
+    ty: framing.target.y,
+    tz: framing.target.z,
+    result,
+  });
+  return result;
+}
+
+function solveTerrainAwareFocus(proxy, options, framing, site, safeTerrainRadius) {
+  // Object visibility chooses the authored south-opening angle first. Terrain is
+  // then presented through one camera near plane, preserving the original
+  // distance, FOV and telephoto perspective. Only a cutaway that would reach the
+  // house itself falls back to the former safe dolly.
+  const authored = selectSafeFocusEndpoint({ ...options, framing });
+  const cutaway = focusTerrainCutaway(
+    proxy,
+    site,
+    safeTerrainRadius,
+    authored.framing,
+  );
+  if (!cutaway.active || cutaway.available) {
+    return {
+      ...authored,
+      terrainScale: 1,
+      terrainLimited: cutaway.active,
+      telephotoPreserved: true,
+      terrainMinClearance: cutaway.minClearance,
+      terrainEndpointClearance: cutaway.cameraClearance,
+      terrainCutaway: cutaway,
+    };
+  }
+  const fallback = selectSafeFocusEndpoint({
+    ...options,
+    framing,
+    constrainEndpoint: (candidate) => focusCameraSafeScale(
+      site,
+      safeTerrainRadius,
+      candidate,
+    ),
+  });
+  const finalCutaway = focusTerrainCutaway(
+    proxy,
+    site,
+    safeTerrainRadius,
+    fallback.framing,
+  );
+  return {
+    ...fallback,
+    terrainCutaway: finalCutaway,
   };
 }
 
@@ -105,24 +236,12 @@ function applySafeParcelFramings(proxies, featureBlockers = [], plan = null, sit
     })),
     ...featureBlockers,
   ]);
-  const safeTerrainRadius = plan && site
-    ? Math.max(1, terrainWarpInner(plan, site) - terrainGridStep(site))
-    : Infinity;
+  const safeTerrainRadius = focusSafeTerrainRadius(plan, site);
   const heroParcels = plan?.parcels?.filter((parcel) => parcel.hero) || [];
   const primaryHero = heroParcels.find((parcel) => parcel.heroStyle === 'hanok')
     || heroParcels[0]
     || null;
   for (const proxy of residential) {
-    const constrainEndpoint = site ? (framing) => terrainMeshCameraSafeScale(
-      site,
-      framing.target,
-      framing.position,
-      {
-        clearance: VILLAGE_FOCUS_TERRAIN_CLEARANCE,
-        endpointClearance: VILLAGE_FOCUS_CAMERA_CLEARANCE,
-        maxRadius: safeTerrainRadius,
-      },
-    ) : null;
     const options = {
       subjectId: proxy.parcelId,
       subjectBounds: proxy.focusBounds,
@@ -131,21 +250,33 @@ function applySafeParcelFramings(proxies, featureBlockers = [], plan = null, sit
       axisYaw: proxy.focusSafety.axisYaw,
       azimuthMin: proxy.focusSafety.azimuthMin,
       azimuthMax: proxy.focusSafety.azimuthMax,
-      constrainEndpoint,
     };
-    const result = selectSafeFocusEndpoint({
-      ...options,
-      framing: proxy.baseCameraFraming,
-    });
+    const result = site
+      ? solveTerrainAwareFocus(
+        proxy,
+        options,
+        proxy.baseCameraFraming,
+        site,
+        safeTerrainRadius,
+      )
+      : selectSafeFocusEndpoint({ ...options, framing: proxy.baseCameraFraming });
     proxy.cameraFraming = threeCameraFraming(result.framing);
     proxy.cameraVisibility = visibilityDescriptor(result);
 
     if (proxy.parcelId === primaryHero?.id) {
       proxy.baseHeroCameraFraming = threeCameraFraming(heroCameraFraming(proxy));
-      const heroResult = selectSafeFocusEndpoint({
-        ...options,
-        framing: proxy.baseHeroCameraFraming,
-      });
+      const heroResult = site
+        ? solveTerrainAwareFocus(
+          proxy,
+          options,
+          proxy.baseHeroCameraFraming,
+          site,
+          safeTerrainRadius,
+        )
+        : selectSafeFocusEndpoint({
+          ...options,
+          framing: proxy.baseHeroCameraFraming,
+        });
       proxy.heroCameraFraming = threeCameraFraming(heroResult.framing);
       proxy.heroCameraVisibility = visibilityDescriptor(heroResult);
     } else {

@@ -192,15 +192,23 @@ function subjectVolumeSamples(camera, volume) {
   return samples;
 }
 
+// The same nine points define both object visibility and the focus-only terrain
+// cutaway. Keeping one sampler prevents the near plane from preserving a centre
+// ray while clipping a roof corner that the visibility selector considered part
+// of the subject.
+export function sampleFocusSubjectSurface(camera, bounds, volume = null) {
+  return volume
+    ? subjectVolumeSamples(camera, volume)
+    : subjectSamples(camera, bounds);
+}
+
 function scoreCandidate(framing, subjectBounds, subjectVolume, blockers) {
   const camera = framing.position;
   const containing = blockers.filter((blocker) => pointInsideVolume(camera, blocker, 0.2));
   if (containing.length) {
     return { visibleRatio: 0, occlusionRatio: 1, blockers: containing.map((item) => item.id), cameraBlocked: true };
   }
-  const samples = subjectVolume
-    ? subjectVolumeSamples(camera, subjectVolume)
-    : subjectSamples(camera, subjectBounds);
+  const samples = sampleFocusSubjectSurface(camera, subjectBounds, subjectVolume);
   const blockedBy = new Set();
   let visible = 0;
   for (const sample of samples) {

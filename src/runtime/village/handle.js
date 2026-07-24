@@ -46,6 +46,7 @@ import {
   buildLandmarkPickProxies,
   cloneCameraFraming,
   createParcelHighlight,
+  focusTerrainCutawayForProxy,
   refreshParcelPickProxy,
 } from './picking.js';
 import { createVillageNightGlow } from './night-glow.js';
@@ -928,6 +929,15 @@ export function createVillageHandle(opts, seed, plan, group) {
       return proxies.map(describePickProxy);
     },
 
+    // Focus-only camera cutaway. The handle owns the exact rendered terrain
+    // contract and fitted subject volume; the app supplies only its live camera
+    // frame and receives one projection near distance with no render resources.
+    focusTerrainCutaway(parcelId, position, target) {
+      const proxy = proxyById.get(parcelId);
+      if (!proxy || !position || !target) return null;
+      return focusTerrainCutawayForProxy(proxy, plan, site, { position, target });
+    },
+
     // 레이캐스터(마우스→광선) 로 히트한 필지 디스크립터 반환(없으면 null).
     raycast(raycaster) {
       const hits = raycaster.intersectObjects(proxyGroup.children, false);
@@ -1574,7 +1584,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   // enter/debug/detail 경로가 자원을 다시 만들거나 씬에 재부착하는 종료 후 누수를 자동으로 막는다.
   const nullAfterDispose = new Set([
     'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'architecturalFocusPoint',
-    'getPickProxy', 'raycast',
+    'getPickProxy', 'focusTerrainCutaway', 'raycast',
     'rebuildParcel', 'refreshCommittedFlora', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
     'primaryDoorState', 'raycastPrimaryDoor', 'togglePrimaryDoor', 'seekPrimaryDoor',
     'primaryDoorWorldPoints', 'primaryDoorWorldFrame',

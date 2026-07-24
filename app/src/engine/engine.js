@@ -869,6 +869,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const p = clamp01(progress);
     active.e = active.dur * p;
     const easedProgress = applyCameraTween(active, p);
+    syncVillageNear();
     camera.updateMatrixWorld(true);
     if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
     const sampled = debugDofState();
@@ -1047,14 +1048,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       }
     }
     audio?.update(dt);
-    // #145 부감 z-fight: 카메라↔타깃 거리 종속 near 램프(부감=큰 near로 원거리 깊이정밀도 확보,
-    //   근접=작은 near로 근경 클리핑 없음). 보기 안 줌·트윈 중 매 프레임 부드럽게 추종(팝 없음).
+    // #145 부감 z-fight + #136 focus 지형 절단: 기본은 거리 종속 near 램프(부감=큰 near로
+    //   원거리 깊이정밀도 확보, 근접=작은 near로 클리핑 없음). 선택 집 시선이 실제 능선을 통과하면
+    //   집 앞 안전 깊이 안에서만 그 능선 뒤로 near를 더 옮긴다.
     //   walk/drone(demo)은 자체 near(0.08) 관리라 제외. 변화 미미하면 updateProjectionMatrix 생략(정적 부감 무비용).
     //   viewShiftRuntime.update 직전에 둬 offset 재적용이 새 near 위에 얹힌다(#124 정합).
-    if (village.active && !demo.active) {
-      const nn = villageNear();
-      if (Math.abs(nn - camera.near) > 1e-3) { camera.near = nn; camera.updateProjectionMatrix(); }
-    }
+    syncVillageNear();
     viewShiftRuntime.update(dt);   // 뷰포트 중심 보정(#124) — 투영만 시프트
     // 모든 카메라 writer와 최종 view-offset이 반영된 제품 프레임만 품질 이력에 넣는다.
     // prewarm/postcard/debug renderFrame 호출은 이 경계를 지나지 않아 임시 카메라가 오염시키지 않는다.
@@ -1292,6 +1291,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const villageAerial = (handle = village.handle) => villageCamera.aerial(handle);
   const setZoomRegime = (mode, closeupDist = 0) => villageCamera.setRegime(mode, closeupDist);
   const villageNear = () => villageCamera.near();
+  function syncVillageNear() {
+    if (!village.active || demo.active) return camera.near;
+    const next = villageNear();
+    if (Math.abs(next - camera.near) > 1e-3) {
+      camera.near = next;
+      camera.updateProjectionMatrix();
+    }
+    return camera.near;
+  }
   const reapplyVillageFog = () => villageCamera.reapplyFog();
   function settleVillageExplore() {
     setZoomRegime('explore');

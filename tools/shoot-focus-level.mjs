@@ -305,15 +305,26 @@ try {
     const terrainEvidence = await page.evaluate((id) => ({
       visibility: window.__engine.village.debugFocusVisibility(id),
       dof: window.__engine.debugDof(),
+      camera: window.__engine.village.debugCamera(),
+      continuum: window.__engine.village.debugContinuum(),
     }), terrainRegression.parcelId);
     console.log(`FOCUS TERRAIN p31: ${JSON.stringify(terrainEvidence)}`);
+    const cutaway = terrainEvidence.visibility.terrainCutaway;
     check(terrainEvidence.visibility.terrainLimited
-      && terrainEvidence.visibility.terrainMinClearance >= 1 - 1e-6
-      && terrainEvidence.visibility.terrainEndpointClearance >= 1.2 - 1e-6,
-    `p31 camera keeps an exact rendered-terrain corridor (${terrainEvidence.visibility.terrainMinClearance?.toFixed(3)}m ray, ${terrainEvidence.visibility.terrainEndpointClearance?.toFixed(3)}m eye)`);
+      && cutaway?.active
+      && cutaway.available
+      && cutaway.minClearance < 0
+      && cutaway.near <= cutaway.subjectNear - 1.2,
+    `p31 clips the proven terrain crossing before the house (${cutaway?.near.toFixed(3)}m/${cutaway?.subjectNear.toFixed(3)}m)`);
+    check(Math.abs(terrainEvidence.camera.near - cutaway.near) < 1e-3
+      && Math.abs(terrainEvidence.continuum.focusCutaway.near - cutaway.near) < 1e-3,
+    `p31 applies one shared live-camera cutaway (${terrainEvidence.camera.near.toFixed(3)}m)`);
     check(terrainEvidence.visibility.telephotoPreserved
-      && terrainEvidence.visibility.safeFraming.fov <= 30,
-    `p31 stays within the architectural fallback lens (${terrainEvidence.visibility.safeFraming.fov.toFixed(2)}°)`);
+      && Math.abs(terrainEvidence.visibility.safeFraming.fov - 10) < 1e-9
+      && terrainEvidence.visibility.safeFraming.position.every((value, index) => (
+        Math.abs(value - terrainEvidence.visibility.baseFraming.position[index]) < 1e-9
+      )),
+    `p31 retains the authored distant telephoto frame (${terrainEvidence.visibility.safeFraming.fov.toFixed(2)}°)`);
     check(Math.abs(terrainEvidence.dof.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
       && Math.abs(terrainEvidence.dof.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
       && terrainEvidence.dof.bokehSamples === 41,

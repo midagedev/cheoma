@@ -726,8 +726,9 @@ try {
   invariant(await rebuildPage.evaluate((id) => window.__engine.village.getState().selected === id, parcelId),
     'camera interruption does not lose focused parcel ownership');
 
-  // #132 merge gate: the deterministic capital parcel that used to put the 10°
-  // camera behind a hill must consume the exact terrain-shortened product frame.
+  // #136 merge gate: the deterministic capital parcel that used to put the 10°
+  // camera behind a hill must retain that authored telephoto frame and clip only
+  // the foreground depth interval before the nearest sampled house face.
   await rebuildPage.addInitScript(() => { window.__noWarm = true; });
   await rebuildPage.goto(
     `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,
@@ -744,21 +745,50 @@ try {
     const visibility = engine.village.debugFocusVisibility('p31');
     engine.village.debugFocus('p31');
     for (let index = 0; index < 6; index++) await Promise.resolve();
-    const settled = engine.debugDofSeek(1, { finish: true });
+    const transition = [];
+    let settled = null;
+    for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+      settled = engine.debugDofSeek(progress, { finish: progress === 1 });
+      transition.push({
+        progress,
+        camera: engine.village.debugCamera(),
+        continuum: engine.village.debugContinuum(),
+      });
+    }
     return {
       visibility,
       settled,
+      transition,
       camera: engine.camera.position.toArray(),
       target: engine.__controls.target.toArray(),
+      near: engine.camera.near,
       fov: engine.camera.fov,
       referenceFov: engine.camera.userData.villageReferenceFov,
     };
   });
+  console.log(`FOCUS TERRAIN TRANSITION: ${JSON.stringify(terrainRegression.transition)}`);
+  const terrainSettledDistance = Math.hypot(...terrainRegression.camera.map((
+    value,
+    index,
+  ) => value - terrainRegression.target[index]));
   const terrainSafe = terrainRegression.visibility.safeFraming;
+  const terrainCutaway = terrainRegression.visibility.terrainCutaway;
   invariant(terrainRegression.visibility.terrainLimited
-      && terrainRegression.visibility.terrainMinClearance >= 1 - 1e-6
-      && terrainRegression.visibility.terrainEndpointClearance >= 1.2 - 1e-6,
-  `capital/7/p31 keeps the exact rendered-terrain corridor (${terrainRegression.visibility.terrainMinClearance.toFixed(3)}m ray, ${terrainRegression.visibility.terrainEndpointClearance.toFixed(3)}m eye)`);
+      && terrainCutaway.active
+      && terrainCutaway.available
+      && terrainCutaway.minClearance < 0
+      && terrainCutaway.near <= terrainCutaway.subjectNear - 1.2,
+  `capital/7/p31 proves the authored ray crosses terrain and resolves it before the house (${terrainCutaway.near.toFixed(3)}m near, ${terrainCutaway.subjectNear.toFixed(3)}m subject)`);
+  invariant(Math.abs(terrainRegression.near - terrainCutaway.near) < 1e-3,
+    `capital/7/p31 applies the shared projection cutaway to the live camera (${terrainRegression.near.toFixed(3)}m)`);
+  invariant(terrainRegression.transition.every(({ camera, continuum }) => (
+    Number.isFinite(camera.near)
+      && camera.near > 0
+      && (!continuum.focusCutaway?.active || (
+        continuum.focusCutaway.available
+          && camera.near <= continuum.focusCutaway.subjectNear - 0.5 + 1e-3
+      ))
+  )), 'capital/7/p31 focus-in keeps every sampled near plane in front of the house');
   invariant(Math.hypot(...terrainRegression.camera.map((value, index) => (
     value - terrainSafe.position[index]
   ))) < 1e-6
@@ -766,8 +796,92 @@ try {
         value - terrainSafe.target[index]
       ))) < 1e-6
       && Math.abs(terrainRegression.fov - terrainSafe.fov) < 1e-9
+      && Math.hypot(...terrainSafe.position.map((value, index) => (
+        value - terrainRegression.visibility.baseFraming.position[index]
+      ))) < 1e-6
+      && Math.abs(terrainRegression.fov - 10) < 1e-9
       && terrainRegression.referenceFov === VILLAGE_LENS.parcel.referenceFov,
-  `capital/7/p31 product focus consumes the safe frame with fixed reference optics (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
+  `capital/7/p31 product focus retains the authored distant telephoto frame (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
+  const terrainInk = await rebuildPage.evaluate(() => {
+    const engine = window.__engine;
+    engine.setRenderStyle('ink', { immediate: true });
+    engine.debugRenderDofFrame();
+    return {
+      near: engine.camera.near,
+      ink: engine.debugInk(),
+      selected: engine.village.getState().selected,
+    };
+  });
+  await rebuildPage.screenshot({ path: join(outputDir, 'terrain-p31-ink.png') });
+  invariant(terrainInk.selected === 'p31'
+      && terrainInk.ink.amount >= 0.999
+      && Math.abs(terrainInk.near - terrainCutaway.near) < 1e-3,
+  `capital/7/p31 ink normal/depth keeps the same camera cutaway (${terrainInk.near.toFixed(3)}m)`);
+  await rebuildPage.evaluate(() => {
+    window.__engine.setRenderStyle('pbr', { immediate: true });
+    window.__engine.debugRenderDofFrame();
+  });
+  const terrainRebuild = await rebuildPage.evaluate(async () => {
+    const engine = window.__engine;
+    const originalKind = engine.village.getState().spec.kind;
+    const editedKind = originalKind === 'giwa' ? 'choga' : 'giwa';
+    const before = engine.village.debugContinuum().focusCutaway;
+    engine.village.rebuild('p31', { kind: editedKind });
+    await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    const edited = {
+      camera: engine.village.debugCamera(),
+      cutaway: engine.village.debugContinuum().focusCutaway,
+    };
+    engine.village.rebuild('p31', { kind: originalKind });
+    await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    return {
+      before,
+      edited,
+      restored: {
+        camera: engine.village.debugCamera(),
+        cutaway: engine.village.debugContinuum().focusCutaway,
+      },
+      selected: engine.village.getState().selected,
+    };
+  });
+  invariant(terrainRebuild.selected === 'p31'
+      && terrainRebuild.edited.cutaway.available
+      && Math.abs(
+        terrainRebuild.edited.cutaway.subjectNear - terrainRebuild.before.subjectNear
+      ) > 1e-3
+      && Math.abs(
+        terrainRebuild.edited.camera.near - terrainRebuild.edited.cutaway.near
+      ) < 1e-3
+      && terrainRebuild.restored.cutaway.available
+      && Math.abs(
+        terrainRebuild.restored.cutaway.subjectNear - terrainRebuild.edited.cutaway.subjectNear
+      ) > 1e-3
+      && Math.abs(
+        terrainRebuild.restored.camera.near - terrainRebuild.restored.cutaway.near
+      ) < 1e-3,
+  'capital/7/p31 kind rebuild invalidates cached subject bounds on both switches without stale cutaway depth');
+  const terrainZoom = await rebuildPage.evaluate(async () => {
+    const engine = window.__engine;
+    const before = engine.village.debugContinuum();
+    engine.village.debugDolly(before.focusMaxReferenceDist / before.aerialReferenceDist);
+    await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    return {
+      camera: engine.village.debugCamera(),
+      continuum: engine.village.debugContinuum(),
+      fov: engine.camera.fov,
+      referenceFov: engine.camera.userData.villageReferenceFov,
+    };
+  });
+  invariant(terrainZoom.camera.selected === 'p31'
+      && terrainZoom.camera.dist > terrainSettledDistance + 5
+      && Math.abs(terrainZoom.fov - 10) < 1e-9
+      && terrainZoom.referenceFov === VILLAGE_LENS.parcel.referenceFov,
+  `capital/7/p31 focus zoom-out retains ownership and the telephoto lens (${terrainZoom.camera.dist.toFixed(1)}m, ${terrainZoom.fov.toFixed(2)}°)`);
+  invariant(!terrainZoom.continuum.focusCutaway?.active
+      && terrainZoom.continuum.focusCutaway?.boundaryRays > 0
+      && terrainZoom.camera.near <= 2.5 + 1e-3,
+  `capital/7/p31 high focus zoom-out clears the proven terrain and preserves village context (${terrainZoom.camera.near.toFixed(3)}m near)`);
   await rebuildPage.close();
 
   // Reduced motion is a real immediate endpoint, including the explicit duration override.

@@ -149,6 +149,163 @@ function radialExitScale(start, end, maxRadius) {
   return Math.max(0, Math.min(1, exit));
 }
 
+function terrainMeshSegmentObstruction(site, start, end, threshold, maxT) {
+  const parameters = terrainMeshSegmentParameters(site, start, end, maxT);
+  let leftT = parameters[0];
+  let left = clearanceAt(site, start, end, leftT);
+  let min = left;
+  const contact = left < threshold;
+  let clear = !contact;
+  let unsafeT = null;
+  for (const rightT of parameters.slice(1)) {
+    const right = clearanceAt(site, start, end, rightT);
+    min = Math.min(min, right);
+    if (!clear && right >= threshold) {
+      // The low face sample may begin inside the building's ordinary terrain
+      // contact. Arm foreground detection only after that ray has left the
+      // subject-owned ground interval.
+      clear = true;
+    } else if (clear && unsafeT == null && right < threshold) {
+      const span = left - right;
+      unsafeT = span <= 1e-12
+        ? leftT
+        : leftT + (rightT - leftT) * ((left - threshold) / span);
+    }
+    leftT = rightT;
+    left = right;
+  }
+  return { min, unsafeT, contact };
+}
+
+/**
+ * Resolve one camera near plane that removes terrain in front of a focus subject.
+ *
+ * A perspective near plane clips color, packed DoF depth, ink normal/depth and
+ * vegetation with the same projection, so it is a much smaller ownership
+ * boundary than teaching every material and override pass a camera tunnel.
+ * `samples` are the nine camera-facing points owned by focus visibility. The
+ * plane is accepted only when every blocking terrain interval ends at least
+ * `subjectClearance` before the nearest sampled house surface.
+ */
+export function terrainMeshFocusCutaway(site, camera, target, samples, {
+  clearance = 0.08,
+  planeMargin = 0.35,
+  subjectClearance = 1.2,
+  maxRadius = Infinity,
+} = {}) {
+  const points = Array.isArray(samples) ? samples : [];
+  if (!site || !camera || !target || !points.length) {
+    return {
+      active: false,
+      available: false,
+      near: 0,
+      requiredNear: Infinity,
+      subjectNear: 0,
+      minClearance: -Infinity,
+      cameraClearance: -Infinity,
+      blockedRays: 0,
+      contactRays: 0,
+      boundaryRays: 0,
+      reason: 'invalid-input',
+    };
+  }
+  const fx = target.x - camera.x;
+  const fy = target.y - camera.y;
+  const fz = target.z - camera.z;
+  const length = Math.hypot(fx, fy, fz);
+  if (!(length > 1e-6)) {
+    return {
+      active: false,
+      available: false,
+      near: 0,
+      requiredNear: Infinity,
+      subjectNear: 0,
+      minClearance: -Infinity,
+      cameraClearance: -Infinity,
+      blockedRays: 0,
+      contactRays: 0,
+      boundaryRays: 0,
+      reason: 'degenerate-view',
+    };
+  }
+  const forward = { x: fx / length, y: fy / length, z: fz / length };
+  let requiredNear = 0;
+  let subjectNear = Infinity;
+  let minClearance = Infinity;
+  let blockedRays = 0;
+  let contactRays = 0;
+  let boundaryRays = 0;
+
+  for (const sample of points) {
+    const sampleDepth = (sample.x - camera.x) * forward.x
+      + (sample.y - camera.y) * forward.y
+      + (sample.z - camera.z) * forward.z;
+    if (!(sampleDepth > 0)) continue;
+    subjectNear = Math.min(subjectNear, sampleDepth);
+
+    // Work from subject→camera so the first unsafe parameter is also the
+    // farthest obstruction from the eye and therefore the required near depth.
+    const radialScale = radialExitScale(sample, camera, maxRadius);
+    if (radialScale < 1 - 1e-9) {
+      boundaryRays++;
+    }
+    // `maxRadius` bounds the regular, analytically exact grid before the rendered
+    // outer warp. Crossing that boundary is diagnostic, not an obstruction:
+    // treating all unknown outer depth as solid would erase the village context
+    // during the high focus zoom-out even when its crane-up ray clears every
+    // proven ridge. Only an actual triangle crossing inside the exact region may
+    // raise the projection plane.
+    const obstruction = terrainMeshSegmentObstruction(
+      site,
+      sample,
+      camera,
+      clearance,
+      radialScale,
+    );
+    minClearance = Math.min(minClearance, obstruction.min);
+    if (obstruction.contact) contactRays++;
+    if (obstruction.unsafeT != null) {
+      blockedRays++;
+      requiredNear = Math.max(
+        requiredNear,
+        sampleDepth * (1 - obstruction.unsafeT),
+      );
+    }
+  }
+
+  if (!Number.isFinite(subjectNear)) {
+    return {
+      active: false,
+      available: false,
+      near: 0,
+      requiredNear: Infinity,
+      subjectNear: 0,
+      minClearance,
+      cameraClearance: clearanceAt(site, camera, camera, 0),
+      blockedRays,
+      contactRays,
+      boundaryRays,
+      reason: 'subject-behind-camera',
+    };
+  }
+  const active = requiredNear > 1e-6;
+  const near = active ? requiredNear + Math.max(0, planeMargin) : 0;
+  const available = !active || near <= subjectNear - Math.max(0, subjectClearance);
+  return {
+    active,
+    available,
+    near,
+    requiredNear,
+    subjectNear,
+    minClearance,
+    cameraClearance: clearanceAt(site, camera, camera, 0),
+    blockedRays,
+    contactRays,
+    boundaryRays,
+    reason: !active ? 'clear' : available ? 'cutaway' : 'subject-overlap',
+  };
+}
+
 function firstClearanceCrossing(site, start, end, threshold, maxT) {
   const parameters = terrainMeshSegmentParameters(site, start, end, maxT);
   let previousT = parameters[0];

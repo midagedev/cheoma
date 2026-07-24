@@ -17,9 +17,9 @@ import {
 
 const DEG = Math.PI / 180;
 const AERIAL_AZIMUTH = 9 * DEG;
-const NEAR_FRAC = 0.02;
-const NEAR_MIN = 0.08;
-const NEAR_MAX = 2.5;
+const BASE_NEAR_FRAC = 0.02;
+const BASE_NEAR_MIN = 0.08;
+const BASE_NEAR_MAX = 2.5;
 
 // 마을 배율의 카메라 프레이밍·보기별 줌·깊이 범위를 한곳에서 관리한다.
 export function createVillageCameraRuntime({
@@ -90,6 +90,20 @@ export function createVillageCameraRuntime({
   let focusBaseElevation = 0;
   let focusElevationOffset = 0;
   let focusAppliedElevation = null;
+  let focusCutawayState = null;
+
+  function readFocusCutaway() {
+    if (!village.active || !village.selected || !village.handle?.focusTerrainCutaway) {
+      focusCutawayState = null;
+      return null;
+    }
+    focusCutawayState = village.handle.focusTerrainCutaway(
+      village.selected,
+      camera.position,
+      controls.target,
+    );
+    return focusCutawayState;
+  }
   function setRegime(mode, closeupDistance = 0) {
     regime = mode;
     if (mode === 'lock') {
@@ -113,8 +127,32 @@ export function createVillageCameraRuntime({
   }
 
   function near() {
-    const distance = camera.position.distanceTo(controls.target);
-    return Math.min(NEAR_MAX, Math.max(NEAR_MIN, distance * NEAR_FRAC));
+    let distance = camera.position.distanceTo(controls.target);
+    const baseNear = () => Math.min(
+      BASE_NEAR_MAX,
+      Math.max(BASE_NEAR_MIN, distance * BASE_NEAR_FRAC),
+    );
+    let cutaway = readFocusCutaway();
+    if (!cutaway) return baseNear();
+    // A plane that reaches the nearest house surface is rejected. Only this
+    // exceptional case moves the real camera into the first terrain-safe
+    // interval, retaining the current narrow lens instead of widening it.
+    for (let attempt = 0; attempt < 3
+      && cutaway?.active && !cutaway.available
+      && cutaway.safeScale > 1e-6 && cutaway.safeScale < 1 - 1e-6; attempt++) {
+      camera.position.lerp(controls.target, 1 - cutaway.safeScale);
+      camera.lookAt(controls.target);
+      distance = camera.position.distanceTo(controls.target);
+      cutaway = readFocusCutaway();
+    }
+    focusCutawayState = cutaway;
+    if (!cutaway?.active || !cutaway.available) return baseNear();
+    // Leave a finite interval before the sampled front face even when floating
+    // point noise puts a plane exactly on its accepted limit.
+    return Math.min(
+      cutaway.subjectNear - 0.5,
+      Math.max(baseNear(), cutaway.near),
+    );
   }
 
   function reapplyFog() {
@@ -312,6 +350,19 @@ export function createVillageCameraRuntime({
         'focus', referenceAerialDistance(), focusCloseupReference,
       ).max).toFixed(1),
       focusEffectWeight: +focusEffectWeight().toFixed(3),
+      focusCutaway: focusCutawayState ? {
+        active: focusCutawayState.active,
+        available: focusCutawayState.available,
+        near: +focusCutawayState.near.toFixed(3),
+        subjectNear: +focusCutawayState.subjectNear.toFixed(3),
+        blockedRays: focusCutawayState.blockedRays,
+        contactRays: focusCutawayState.contactRays,
+        boundaryRays: focusCutawayState.boundaryRays,
+        minClearance: +focusCutawayState.minClearance.toFixed(3),
+        cameraClearance: +focusCutawayState.cameraClearance.toFixed(3),
+        safeScale: +focusCutawayState.safeScale.toFixed(6),
+        reason: focusCutawayState.reason,
+      } : null,
       elevation: +(Math.asin(Math.max(-1, Math.min(1,
         focusDirection.subVectors(camera.position, controls.target).y
           / Math.max(1e-6, camera.position.distanceTo(controls.target)),
