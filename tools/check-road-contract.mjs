@@ -8,11 +8,16 @@ import {
 } from '../src/village/road-topology.js';
 import { createRoadSpatialIndex } from '../src/village/road-spatial.js';
 import { parcelWorldPoint } from '../src/village/parcel-contract.js';
+import {
+  boundsOfPoints,
+  createVerificationSpatialGrid,
+} from './lib/verification-spatial-grid.mjs';
 
 const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const SEEDS = [7, 42, 20260716];
 const MAX_TURN = Math.PI / 4;
 const POSITION_EPSILON = 2e-4;
+const INTERSECTION_EPSILON = 1e-5;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -46,7 +51,7 @@ function bruteClearance(roads, point, ownRoad, margin) {
     && G.distToPolyline(point, road.pts).d < road.width * 0.5 + margin);
 }
 
-function tolerantSegmentIntersection(a, b, c, d, epsilon = 1e-5) {
+function tolerantSegmentIntersection(a, b, c, d, epsilon = INTERSECTION_EPSILON) {
   const hit = G.segIntersect(a, b, c, d);
   if (hit) return hit;
   for (const [point, otherA, otherB] of [
@@ -63,14 +68,19 @@ function tolerantSegmentIntersection(a, b, c, d, epsilon = 1e-5) {
   return null;
 }
 
-function bruteRoadIntersections(a, b) {
+function bruteRoadIntersections(a, b, segmentPairs = null) {
   const intersections = [];
-  for (let ai = 0; ai < a.pts.length - 1; ai++) {
-    for (let bi = 0; bi < b.pts.length - 1; bi++) {
-      const hit = tolerantSegmentIntersection(
-        a.pts[ai], a.pts[ai + 1], b.pts[bi], b.pts[bi + 1],
-      );
-      if (hit) intersections.push(hit);
+  const visit = (ai, bi) => {
+    const hit = tolerantSegmentIntersection(
+      a.pts[ai], a.pts[ai + 1], b.pts[bi], b.pts[bi + 1],
+    );
+    if (hit) intersections.push(hit);
+  };
+  if (segmentPairs) {
+    for (const [ai, bi] of segmentPairs) visit(ai, bi);
+  } else {
+    for (let ai = 0; ai < a.pts.length - 1; ai++) {
+      for (let bi = 0; bi < b.pts.length - 1; bi++) visit(ai, bi);
     }
   }
   return intersections;
@@ -82,6 +92,29 @@ function uniqueIntersections(intersections) {
     if (!unique.some((point) => G.dist(point, hit) <= POSITION_EPSILON)) unique.push(hit);
   }
   return unique;
+}
+
+function allPairs(length) {
+  const pairs = [];
+  for (let left = 0; left < length; left++) {
+    for (let right = left + 1; right < length; right++) pairs.push([left, right]);
+  }
+  return pairs;
+}
+
+function intersectionSnapshot(roads, pairs, segmentPairsByRoadPair = null) {
+  return JSON.stringify(pairs.flatMap(([left, right]) => (
+    uniqueIntersections(bruteRoadIntersections(
+      roads[left],
+      roads[right],
+      segmentPairsByRoadPair?.get(`${left}:${right}`) || null,
+    )).map((point) => ({
+      left: roads[left].id,
+      right: roads[right].id,
+      x: point.x,
+      z: point.z,
+    }))
+  )));
 }
 
 function nearestRoadEndpoint(roads, point, level = null) {
@@ -101,6 +134,8 @@ let junctionCount = 0;
 let maxTurn = 0;
 let spatialProbes = 0;
 let geometricConnections = 0;
+let segmentPairCandidates = 0;
+let segmentPairBrute = 0;
 
 for (const scale of SCALES) {
   for (const seed of SEEDS) {
@@ -175,28 +210,69 @@ for (const scale of SCALES) {
       roads: new Set(junction.connections.map((connection) => connection.roadId)),
     }));
     const roadArray = [...roads.values()];
-    for (let a = 0; a < roadArray.length; a++) {
-      for (let b = a + 1; b < roadArray.length; b++) {
-        const roadA = roadArray[a], roadB = roadArray[b];
-        const hits = uniqueIntersections(bruteRoadIntersections(roadA, roadB));
-        const physicalMergeRadius = Math.min(roadA.width, roadB.width) * 0.5 + POSITION_EPSILON;
-        for (let first = 0; first < hits.length; first++) {
-          for (let second = first + 1; second < hits.length; second++) {
-            invariant(G.dist(hits[first], hits[second]) > physicalMergeRadius,
-              `${scale}:${seed} narrow road lens ${roadA.id}/${roadB.id}`);
-          }
+    const segments = roadArray.flatMap((road, roadIndex) => (
+      road.pts.slice(0, -1).map((point, segmentIndex) => ({
+        roadIndex,
+        segmentIndex,
+        points: [point, road.pts[segmentIndex + 1]],
+      }))
+    ));
+    const segmentGrid = createVerificationSpatialGrid(
+      segments,
+      (segment) => boundsOfPoints(segment.points, INTERSECTION_EPSILON),
+    );
+    const segmentPairsByRoadPair = new Map();
+    for (const [left, right] of segmentGrid.candidatePairs()) {
+      const segmentA = segments[left], segmentB = segments[right];
+      if (segmentA.roadIndex === segmentB.roadIndex) continue;
+      const key = `${segmentA.roadIndex}:${segmentB.roadIndex}`;
+      let pairs = segmentPairsByRoadPair.get(key);
+      if (!pairs) {
+        pairs = [];
+        segmentPairsByRoadPair.set(key, pairs);
+      }
+      pairs.push([segmentA.segmentIndex, segmentB.segmentIndex]);
+      segmentPairCandidates++;
+    }
+    const candidatePairs = [...segmentPairsByRoadPair.keys()]
+      .map((key) => key.split(':').map(Number))
+      .sort(([leftA, rightA], [leftB, rightB]) => leftA - leftB || rightA - rightB);
+    for (let left = 0; left < roadArray.length; left++) {
+      for (let right = left + 1; right < roadArray.length; right++) {
+        segmentPairBrute += (roadArray[left].pts.length - 1) * (roadArray[right].pts.length - 1);
+      }
+    }
+    if (scale === 'town' && seed === 7) {
+      invariant(
+        intersectionSnapshot(roadArray, candidatePairs, segmentPairsByRoadPair)
+          === intersectionSnapshot(roadArray, allPairs(roadArray.length)),
+        'town:7 road grid changed brute-force intersection results or order',
+      );
+    }
+    for (const [a, b] of candidatePairs) {
+      const roadA = roadArray[a], roadB = roadArray[b];
+      const hits = uniqueIntersections(bruteRoadIntersections(
+        roadA,
+        roadB,
+        segmentPairsByRoadPair.get(`${a}:${b}`),
+      ));
+      const physicalMergeRadius = Math.min(roadA.width, roadB.width) * 0.5 + POSITION_EPSILON;
+      for (let first = 0; first < hits.length; first++) {
+        for (let second = first + 1; second < hits.length; second++) {
+          invariant(G.dist(hits[first], hits[second]) > physicalMergeRadius,
+            `${scale}:${seed} narrow road lens ${roadA.id}/${roadB.id}`);
         }
-        for (const hit of hits) {
-          const match = junctionRoadSets.find((entry) => entry.roads.has(roadA.id)
-            && entry.roads.has(roadB.id)
-            && G.dist(entry.junction.point, hit) <= physicalMergeRadius);
-          invariant(match,
-            `${scale}:${seed} missing junction ${roadA.id}/${roadB.id} at ${hit.x},${hit.z}`);
-          invariant(roadA.junctionIds.includes(match.junction.id)
-            && roadB.junctionIds.includes(match.junction.id),
-          `${scale}:${seed} missing junction backref ${roadA.id}/${roadB.id}`);
-          geometricConnections++;
-        }
+      }
+      for (const hit of hits) {
+        const match = junctionRoadSets.find((entry) => entry.roads.has(roadA.id)
+          && entry.roads.has(roadB.id)
+          && G.dist(entry.junction.point, hit) <= physicalMergeRadius);
+        invariant(match,
+          `${scale}:${seed} missing junction ${roadA.id}/${roadB.id} at ${hit.x},${hit.z}`);
+        invariant(roadA.junctionIds.includes(match.junction.id)
+          && roadB.junctionIds.includes(match.junction.id),
+        `${scale}:${seed} missing junction backref ${roadA.id}/${roadB.id}`);
+        geometricConnections++;
       }
     }
 
@@ -262,5 +338,6 @@ for (const scale of ['capital', 'hanyang']) {
 console.log(
   `ROAD CONTRACT: PASS (${roadCount} roads, ${junctionCount} junctions, `
   + `${geometricConnections} geometric connections, ${spatialProbes} spatial probes, `
+  + `${segmentPairCandidates}/${segmentPairBrute} segment intersection pairs, `
   + `max turn ${(maxTurn * 180 / Math.PI).toFixed(2)}°)`,
 );

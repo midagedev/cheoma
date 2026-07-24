@@ -1,7 +1,7 @@
 # 검증 가이드
 
 > - **상태**: 현재 계약
-> - **기준일**: 2026-07-23
+> - **기준일**: 2026-07-25
 
 이 프로젝트에는 전통적인 unit-test/lint/typecheck 프레임워크가 없다. 대신 빠른 정적·golden 계약, 실제 Worker, 전체 앱 Playwright smoke, 도메인별 시각 하네스를 위험에 맞게 조합한다.
 
@@ -177,6 +177,15 @@ renderer와 dispose를 확인하고, 마지막으로 실제 Vite 한양 앱의 �
 
 `tools/check-fast.mjs`가 다음 계약을 독립 Node process로 격리해 제한 병렬 실행한다. 기본 동시성은 `min(4, availableParallelism)`이고 `CHEOMA_CHECK_JOBS=1`처럼 재현할 수 있다. 상세 출력은 선언 순서로 묶여 나오며 개별/전체 시간이 표시된다. 첫 실패는 즉시 알리고 새 검사를 더 배정하지 않되 이미 실행 중인 격리 process는 정리될 때까지 기다린다.
 
+road/layout 검증에서 실제 교차 가능성이 없는 모든 쌍까지 도메인 판정식에 넣지 않는다.
+`tools/lib/verification-spatial-grid.mjs`의 검증 전용 inclusive AABB grid가 원래 배열 ordinal을 보존한
+후보만 반환하고, 정확한 도로 교차·일조·필지·처마 판정식은 기존 함수가 계속 단일 원천으로 소유한다.
+별도 빠른 계약은 음수 cell, cell 경계 접촉, 중복 bounds, 여러 cell을 덮는 큰 bounds, 빈 입력과
+결정론 표본을 여러 cell 크기에서 brute-force 후보/쌍 및 순서와 대조한다. road와 layout의 실제 고정
+cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검증 비교 수를 줄일 뿐 제품 계획이나
+표본 수를 줄이지 않는다. 전체 시간은 여전히 반복 `planVillage` 생성이 지배하므로 좁은 단계의 개선을
+수십 초짜리 제품 성능 향상으로 과장하지 않는다.
+
 - `check:architecture`
   - `src/`→Svelte/app 금지.
   - 앱의 코어 import는 `src/api/`로 한정.
@@ -261,6 +270,7 @@ renderer와 dispose를 확인하고, 마지막으로 실제 Vite 한양 앱의 �
   - 도로 ID 유일성, 교차/T접속 junction의 양방향 역참조, 자기교차 0, 국소 회전 45° 이하를 검사한다. 독립 brute-force 교차 목록과 비교해 누락된 junction도 찾는다.
   - 같은 두 도로가 물리적 merge 반경 안에서 다시 만나 바늘구멍형 lens를 남기지 않는지 역검사한다.
   - `road-spatial.js`의 최근접·폭 포함 clearance를 brute-force 결과와 비교하고, 같은 seed의 도로·junction snapshot 결정론을 확인한다.
+  - 각 도로 segment AABB가 교차할 수 있는 stable 후보에만 segment brute를 적용하되, `town:7`의 실제 교차 목록과 순서를 전체 road-pair oracle과 대조한다.
 - `check:surface`
   - Three·DOM 없는 packed-earth source의 고정 hash, seed 결정론, 전역 `Math.random` 미사용과 호출자 변경 격리를 검사한다.
   - albedo 평균·표준편차와 wrap 경계 기울기가 저대비·무봉합 예산 안인지, 어댑터가 albedo sRGB/height non-color와 repeat·trilinear mipmap·anisotropy를 명시하는지 검사한다.
@@ -276,6 +286,7 @@ renderer와 dispose를 확인하고, 마지막으로 실제 Vite 한양 앱의 �
   - 모든 규모·seed의 개울 1,095개 종단에서 다섯 수면 lane이 실제 terrain-grid 삼각면보다 clearance 위인지,
     해석 수면에서 과도하게 뜨지 않는지, `-x` 흐름을 거슬러 올라가는 구간이 없는지 검사한다.
   - capital/hanyang의 명시적 대하천은 60–120m 실제 수면, 충적 어깨, 상설교 없는 나루, 접합된 남안 길, 최소 5/8가구의 포구 취락을 함께 검사한다. 각 렌더 단면의 실제 `point.half`로 수면 매입과 world-edge 6m 여유를 검사해 안개 밴드의 테이퍼를 순수 계약으로 고정한다.
+  - 겨울 일조 corridor↔실제 obstruction, 필지/처마↔외부 필지, 이웃 처마 envelope는 같은 stable AABB grid로 후보만 좁힌다. `town:7`의 모든 실제 query가 전체 bounds oracle과 같은 ordinal 목록인지 먼저 확인한 뒤 기존 exact 판정을 실행한다.
 - `check:wall-gate`
   - 실제 `buildVillageWall()`로 `tile/stone/mud/brush/hedge/open` 6종을 만들어 plan의 `gateEdge/gateT`와 물리 문틀 중심·회전이 일치하는지 검사한다. `shape.edges`가 없는 hero의 비전면 대문, 세 솔리드 재질의 경사지 run 높이, finite geometry도 함께 검사한다.
 - `check:wall-step`

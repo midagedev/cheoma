@@ -41,6 +41,7 @@ import { makeVegetationMask } from '../src/village/vegetation-spatial.js';
 import {
   buildingBlocksSolarAccess,
   circleBlocksSolarAccess,
+  parcelObstructionPolygons,
 } from '../src/village/solar-access.js';
 import { templeFootprint } from '../src/village/temple-plan.js';
 import {
@@ -59,6 +60,12 @@ import {
   circleBlocksParcelFocusFrame,
   parcelFocusViewEnvelope,
 } from '../src/village/view-clearance.js';
+import {
+  boundsOfPoints,
+  boundsOverlap,
+  createVerificationSpatialGrid,
+  unionBounds,
+} from './lib/verification-spatial-grid.mjs';
 
 const SCALES = ['hamlet', 'village', 'town', 'capital', 'hanyang'];
 const SEEDS = [7, 42, 20260716];
@@ -107,6 +114,19 @@ function pointPolygonClearance(point, polygon) {
     distance = Math.min(distance, G.distToSeg(point, polygon[i], polygon[(i + 1) % polygon.length]).d);
   }
   return distance;
+}
+
+function bruteBoundsQuery(bounds, queries) {
+  return bounds.flatMap((record, index) => (
+    queries.some((query) => boundsOverlap(record, query)) ? [index] : []
+  ));
+}
+
+function assertBoundsQueryParity(actual, bounds, queries, message) {
+  invariant(
+    JSON.stringify(actual) === JSON.stringify(bruteBoundsQuery(bounds, queries)),
+    message,
+  );
 }
 
 function assertGuardianContract(plan, label, scale, {
@@ -169,6 +189,9 @@ let rerollChecks = 0;
 let paddyFields = 0;
 let publicProps = 0;
 let streamSections = 0;
+let solarCandidateComparisons = 0, solarBruteComparisons = 0;
+let parcelCandidateComparisons = 0, parcelBruteComparisons = 0;
+let roofCandidateComparisons = 0, roofBruteComparisons = 0;
 
 for (const scale of SCALES) {
   let scaleHouseCount = 0;
@@ -244,6 +267,33 @@ for (const scale of SCALES) {
       ...plan.parcels,
       ...(plan.features.palace?.poly ? [plan.features.palace] : []),
     ];
+    const parcelBounds = spatialParcels.map((parcel) => boundsOfPoints(parcel.poly));
+    const parcelGrid = createVerificationSpatialGrid(
+      spatialParcels,
+      (_, index) => parcelBounds[index],
+    );
+    const roofBoundsByParcel = roofsByParcel.map((roofs) => roofs.map((roof) => boundsOfPoints(roof)));
+    const roofEnvelopeBounds = roofBoundsByParcel.map((bounds, index) => (
+      bounds.length > 0 ? unionBounds(bounds) : boundsOfPoints(plan.parcels[index].poly)
+    ));
+    const roofEnvelopeGrid = createVerificationSpatialGrid(
+      plan.parcels,
+      (_, index) => roofEnvelopeBounds[index],
+    );
+    const remainingRoofCounts = new Uint32Array(roofsByParcel.length + 1);
+    for (let index = roofsByParcel.length - 1; index >= 0; index--) {
+      remainingRoofCounts[index] = remainingRoofCounts[index + 1] + roofsByParcel[index].length;
+    }
+    const blockerBounds = spatialParcels.map((parcel) => {
+      const polygons = parcelObstructionPolygons(parcel);
+      return unionBounds((polygons.length > 0 ? polygons : [parcel.poly]).map((polygon) => (
+        boundsOfPoints(polygon)
+      )));
+    });
+    const blockerGrid = createVerificationSpatialGrid(
+      spatialParcels,
+      (_, index) => blockerBounds[index],
+    );
     const solarProbeTarget = spatialParcels.find((parcel) => parcel.kind === 'giwa' || parcel.kind === 'choga');
     if (solarProbeTarget) {
       const makeProbe = (z) => ({
@@ -333,7 +383,19 @@ for (const scale of SCALES) {
         invariant(!G.polysOverlap(parcelSolarAccessPolygon(target), obstacle),
           `${label} a tall public structure blocks ${target.id || 'palace'} solar access`);
       }
-      for (let blockerIndex = 0; blockerIndex < spatialParcels.length; blockerIndex++) {
+      const solarBounds = boundsOfPoints(parcelSolarAccessPolygon(target));
+      const blockerCandidates = blockerGrid.query(solarBounds);
+      if (scale === 'town' && seed === 7) {
+        assertBoundsQueryParity(
+          blockerCandidates,
+          blockerBounds,
+          [solarBounds],
+          `${label}:${target.id} solar blocker broad-phase parity drift`,
+        );
+      }
+      solarBruteComparisons += spatialParcels.length - 1;
+      solarCandidateComparisons += blockerCandidates.length - Number(blockerCandidates.includes(targetIndex));
+      for (const blockerIndex of blockerCandidates) {
         const blocker = spatialParcels[blockerIndex];
         if (target === blocker) continue;
         invariant(!buildingBlocksSolarAccess(target, blocker, plan.site),
@@ -457,7 +519,20 @@ for (const scale of SCALES) {
             `${parcelLabel} roof clearance ${clearance} < ${HOUSE_ROOF_CLEARANCE}`);
         }
       }
-      for (const other of spatialParcels) {
+      const parcelQueries = [parcelBounds[parcelIndex], ...roofBoundsByParcel[parcelIndex]];
+      const parcelCandidates = parcelGrid.queryUnion(parcelQueries);
+      if (scale === 'town' && seed === 7) {
+        assertBoundsQueryParity(
+          parcelCandidates,
+          parcelBounds,
+          parcelQueries,
+          `${parcelLabel} parcel broad-phase parity drift`,
+        );
+      }
+      parcelBruteComparisons += spatialParcels.length - 1;
+      parcelCandidateComparisons += parcelCandidates.length - Number(parcelCandidates.includes(parcelIndex));
+      for (const otherIndex of parcelCandidates) {
+        const other = spatialParcels[otherIndex];
         if (other === parcel) continue;
         invariant(!G.polysOverlap(parcel.poly, other.poly),
           `${parcelLabel} parcel overlaps ${other.id || 'palace'}`);
@@ -466,7 +541,19 @@ for (const scale of SCALES) {
             `${parcelLabel} roof overlaps foreign parcel ${other.id || 'palace'}`);
         }
       }
-      for (let otherIndex = parcelIndex + 1; otherIndex < plan.parcels.length; otherIndex++) {
+      const roofCandidates = roofEnvelopeGrid.query(roofEnvelopeBounds[parcelIndex]);
+      if (scale === 'town' && seed === 7) {
+        assertBoundsQueryParity(
+          roofCandidates,
+          roofEnvelopeBounds,
+          [roofEnvelopeBounds[parcelIndex]],
+          `${parcelLabel} roof broad-phase parity drift`,
+        );
+      }
+      roofBruteComparisons += roofs.length * remainingRoofCounts[parcelIndex + 1];
+      for (const otherIndex of roofCandidates) {
+        if (otherIndex <= parcelIndex) continue;
+        roofCandidateComparisons += roofs.length * roofsByParcel[otherIndex].length;
         for (const roof of roofs) for (const otherRoof of roofsByParcel[otherIndex]) {
           invariant(!G.polysOverlap(roof, otherRoof),
             `${parcelLabel} roof overlaps ${plan.parcels[otherIndex].id} roof`);
@@ -667,5 +754,8 @@ console.log(
   + `${(maxFacing * 180 / Math.PI).toFixed(1)}°, max access ${maxAccess.toFixed(1)}m, `
   + `min house fit ${minHouseFit.toFixed(2)}, min scale ${minHouseScale.toFixed(2)}, `
   + `min roof clearance ${minRoofClearance.toFixed(2)}m, `
+  + `candidates solar ${solarCandidateComparisons}/${solarBruteComparisons}, `
+  + `parcel ${parcelCandidateComparisons}/${parcelBruteComparisons}, `
+  + `roof ${roofCandidateComparisons}/${roofBruteComparisons}, `
   + `${paddyFields} paddies, ${streamSections} creek + ${riverSections} river sections, ${indexedCells} indexed cells)`,
 );
