@@ -189,6 +189,13 @@ GitHub #40은 지형의 크기와 무관한 30–46m 지역 파장의 자연 기
 
 GitHub #25·#26의 하늘은 금빛·홍빛·보랏빛 세 석양을 `src/env/atmosphere-profiles.js`의 순수 프로필로 묶어 sky·조명·fog·post가 같은 상태를 소비한다. 스타일은 UI와 `?sunset=` URL로 재현되며 별도 seed fork를 써 마을 생성 RNG를 바꾸지 않는다. 카메라를 따르는 하늘 돔과 달은 단일건물/마을 전환에도 남고, 월드 방위가 고정된 16개 원경 구름은 한 InstancedMesh로 모든 근경 방위를 감싼다. 상공 구름은 실제 지면 그림자 위치를 소유하되 actual FOV와 aspect로 계산한 화면 폭이 약 64%를 넘으면 보이는 면만 감추고, 약 38% 아래에서 완전히 복귀한다. 원경 구름은 HDR 림·달 가림·저고도 빛줄기를 표현한다. 둘을 같은 거대 billboard로 합쳐 7°/10° 근경 화면을 천장처럼 덮지 않는다.
 
+GitHub #161은 과장된 원형 glow를 실제 렌즈 화각이 확대하는 0.52° 달 원반과 지름 5° 근접 corona로
+교체한다. 원반과 강한 corona는 구름 alpha 앞에서 연속 감쇠하고 약한 산란 corona만 뒤에 남아, 짙은 구름이
+달을 가리면서도 외곽광 전체를 같은 실루엣으로 잘라내지 않는다. 세 레이어는 실제 scene depth와 방향광 방위를
+공유한다. Three 없는 각크기·투영·합성 계약을 외부 API로 재사용하며 기존 대비 draw 하나와 material 하나만
+늘고 새 shader program·geometry·texture·pass·render target·light는 없다. NASA·WMO·Applied Optics의
+사실, 제품 계수, 22° halo·천문력 비대상은 `architecture-refactor.md`와 References #46에 함께 노출한다.
+
 GitHub #18·#28의 환경은 봄·여름·가을·겨울과 맑음·비·눈의 호환 행렬을 `environment-state.js`로 분리했다. seed·UI·엔진이 같은 순수 상태를 사용해 눈은 겨울, 겨울의 비는 봄비로 일관되게 이동한다. 겨울은 낙엽 진 수목·휴경 논·차가운 지형·능선 설선을 갖고, 눈이 오면 `snow-material.js`의 공유 shader가 지붕뿐 아니라 지형·식생·외부 소품까지 한 축적 시계로 덮는다. 새 적설 geometry 없이 draw call 증가는 1, 실제 앱 program 증가는 24로 제한한다.
 
 같은 작업에서 오래된 패널 하네스가 3.6초 scenery wave 도중의 구 plan을 완료 상태로 오인하던 판정을 고쳤다.

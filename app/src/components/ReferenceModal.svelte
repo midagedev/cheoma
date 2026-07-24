@@ -35,6 +35,7 @@
   const REFERENCE_TOPICS = new Map([
     ['국사편찬위원회·서울역사박물관·국가유산청 — 조선 길가 배수와 제한적 마을 수로 / Roadside drainage and exceptional village waterways', 'drainage'],
     ['국가한옥센터·한국건축역사학회·대한건축학회·한국주거학회 — 안동문화권 ㅁ자형 뜰집의 지역·기후·계층 한계 / Regional, climatic, and social limits of Andong-area enclosed houses', 'mja-hanok'],
+    ['NASA · WMO · Applied Optics — 달 각지름·달무리·구름 투과 / Lunar angular size, corona, and cloud transmission', 'moon-optics'],
   ]);
 
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };

@@ -7,6 +7,10 @@ import { PNG } from 'pngjs';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 import { VILLAGE_FOCUS_ELEVATION } from '../src/camera/optics.js';
+import {
+  MOON_ANGULAR_DIAMETER_DEG,
+  projectedAngularDiameterPixels,
+} from '../src/api/moon-optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -53,6 +57,60 @@ function meanPixelDifference(a, b) {
   return sum / Math.max(1, count);
 }
 
+const pixelLuminance = (png, x, y) => {
+  const index = (y * png.width + x) * 4;
+  return 0.2126 * png.data[index] + 0.7152 * png.data[index + 1] + 0.0722 * png.data[index + 2];
+};
+
+function meanDiscLuminance(png, radius) {
+  const cx = Math.floor(png.width * 0.5);
+  const cy = Math.floor(png.height * 0.5);
+  let sum = 0; let count = 0;
+  const bound = Math.ceil(radius);
+  for (let y = cy - bound; y <= cy + bound; y++) for (let x = cx - bound; x <= cx + bound; x++) {
+    if ((x - cx) ** 2 + (y - cy) ** 2 > radius ** 2) continue;
+    sum += pixelLuminance(png, x, y);
+    count++;
+  }
+  return sum / Math.max(1, count);
+}
+
+function meanAnnulusLuminance(png, innerRadius, outerRadius) {
+  const cx = Math.floor(png.width * 0.5);
+  const cy = Math.floor(png.height * 0.5);
+  let sum = 0; let count = 0;
+  const bound = Math.ceil(outerRadius);
+  for (let y = cy - bound; y <= cy + bound; y++) for (let x = cx - bound; x <= cx + bound; x++) {
+    const radius2 = (x - cx) ** 2 + (y - cy) ** 2;
+    if (radius2 < innerRadius ** 2 || radius2 > outerRadius ** 2) continue;
+    sum += pixelLuminance(png, x, y);
+    count++;
+  }
+  return sum / Math.max(1, count);
+}
+
+function brightDiscDiameter(png, expectedDiameter) {
+  const cx = Math.floor(png.width * 0.5);
+  const cy = Math.floor(png.height * 0.5);
+  const bound = Math.ceil(expectedDiameter * 0.8 + 4);
+  let maximum = 0;
+  for (let y = cy - bound; y <= cy + bound; y++) for (let x = cx - bound; x <= cx + bound; x++) {
+    maximum = Math.max(maximum, pixelLuminance(png, x, y));
+  }
+  const threshold = Math.max(150, maximum - 24);
+  let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+  for (let y = cy - bound; y <= cy + bound; y++) for (let x = cx - bound; x <= cx + bound; x++) {
+    if (pixelLuminance(png, x, y) < threshold) continue;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  return {
+    diameter: Number.isFinite(minX) ? ((maxX - minX + 1) + (maxY - minY + 1)) * 0.5 : 0,
+    maximum,
+    threshold,
+  };
+}
+
 const server = await createServer({
   root: APP_ROOT,
   configFile: join(APP_ROOT, 'vite.config.js'),
@@ -84,9 +142,44 @@ try {
     const engine = window.__engine;
     window.__noWarm = true;
     const id = engine.village.heroId() || engine.village.debugParcels()[0]?.parcelId;
+    window.__skyFocusId = id;
     engine.village.debugFocus(id);
   });
   await page.waitForFunction(() => window.__engine.village.getState().transitioning, null, { timeout: 10_000 });
+  await page.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !!state.selected && !state.transitioning;
+  }, null, { timeout: 10_000 });
+
+  // Capture the real product aerial endpoint rather than the startup reveal
+  // camera, then return to the same focused parcel for the remaining fixture.
+  await page.evaluate(() => window.__engine.village.return());
+  await page.waitForFunction(
+    () => window.__engine.debugDof().tweenProgress != null,
+    null,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !state.selected && !state.transitioning;
+  }, null, { timeout: 10_000 });
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    window.__moonAerialFrame = {
+      position: engine.camera.position.clone(),
+      target: engine.__controls.target.clone(),
+      fov: engine.camera.fov,
+      referenceFov: engine.camera.userData.villageReferenceFov,
+    };
+    engine.village.debugFocus(window.__skyFocusId);
+  });
+  await page.waitForFunction(
+    () => window.__engine.debugDof().tweenProgress != null,
+    null,
+    { timeout: 10_000 },
+  );
   await page.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
   await page.waitForFunction(() => {
     const state = window.__engine.village.getState();
@@ -347,7 +440,8 @@ try {
     // An off-screen camera-relative object is correctly culled before its
     // onBeforeRender callback, so derive the celestial offset from the shared
     // directional light instead of reading a potentially stale moon transform.
-    const target = sun.position.clone().normalize().multiplyScalar(460).add(engine.camera.position);
+    const distance = moon.userData.optics?.distance || 460;
+    const target = sun.position.clone().normalize().multiplyScalar(distance).add(engine.camera.position);
     engine.__controls.target.copy(target);
     engine.camera.lookAt(target);
     engine.camera.updateMatrixWorld(true);
@@ -401,11 +495,412 @@ try {
   pass(moonFrame.frameLocalOpacity < 0.12,
     'nearby shadow-source billboards fade before becoming a cloud ceiling',
     `opacity=${moonFrame.frameLocalOpacity.toFixed(3)}`);
+
+  const moonRuntime = await page.evaluate(() => {
+    const engine = window.__engine;
+    const moon = engine.scene.getObjectByName('moon');
+    const disk = moon?.getObjectByName('moon-disk');
+    const transmitted = moon?.getObjectByName('moon-corona-transmitted');
+    const scattered = moon?.getObjectByName('moon-corona-scattered');
+    const clouds = engine.village.exportRoot()?.getObjectByName('clouds');
+    const bank = clouds?.getObjectByName('horizon-cloud-bank');
+    const highOrders = [];
+    clouds?.traverse((object) => {
+      if (object.name?.startsWith('high-cloud-')) highOrders.push(object.renderOrder);
+    });
+    const layers = [disk, transmitted, scattered];
+    engine.renderer.render(engine.scene, engine.camera);
+    engine.renderer.render(engine.scene, engine.camera);
+    const resourcesBefore = {
+      programs: engine.renderer.info.programs?.length ?? 0,
+      geometries: engine.renderer.info.memory.geometries,
+      textures: engine.renderer.info.memory.textures,
+    };
+    const savedVisible = layers.map((layer) => layer?.visible);
+    layers.forEach((layer) => { if (layer) layer.visible = false; });
+    engine.renderer.render(engine.scene, engine.camera);
+    const withoutMoonCalls = engine.renderer.info.render.calls;
+    layers.forEach((layer, index) => { if (layer) layer.visible = savedVisible[index]; });
+    engine.renderer.render(engine.scene, engine.camera);
+    const withMoonCalls = engine.renderer.info.render.calls;
+    const resourcesAfter = {
+      programs: engine.renderer.info.programs?.length ?? 0,
+      geometries: engine.renderer.info.memory.geometries,
+      textures: engine.renderer.info.memory.textures,
+    };
+    engine.debugRenderDofFrame();
+    return {
+      count: layers.filter(Boolean).length,
+      names: layers.map((layer) => layer?.name),
+      transparent: layers.map((layer) => layer?.material?.transparent),
+      depthTest: layers.map((layer) => layer?.material?.depthTest),
+      depthWrite: layers.map((layer) => layer?.material?.depthWrite),
+      frustumCulled: layers.map((layer) => layer?.frustumCulled),
+      orders: layers.map((layer) => layer?.renderOrder),
+      ancestorOrders: [moon?.renderOrder, clouds?.renderOrder],
+      cloudOrders: [bank?.renderOrder, ...highOrders],
+      sharedGeometry: transmitted?.geometry === scattered?.geometry,
+      sharedMap: transmitted?.material?.map === scattered?.material?.map,
+      distinctMaterials: transmitted?.material !== scattered?.material,
+      diskSegments: disk?.geometry?.parameters
+        ? [disk.geometry.parameters.widthSegments, disk.geometry.parameters.heightSegments]
+        : null,
+      textureSize: transmitted?.material?.map?.image
+        ? [transmitted.material.map.image.width, transmitted.material.map.image.height]
+        : null,
+      drawDelta: withMoonCalls - withoutMoonCalls,
+      resourcesBefore,
+      resourcesAfter,
+    };
+  });
+  pass(moonRuntime.count === 3
+      && moonRuntime.names.join('|')
+        === 'moon-disk|moon-corona-transmitted|moon-corona-scattered',
+    'the reusable Moon assembly owns exactly one disc and two named corona layers');
+  pass(moonRuntime.transparent.every(Boolean)
+      && moonRuntime.depthTest.every(Boolean)
+      && moonRuntime.depthWrite.every((value) => value === false),
+    'all Moon layers preserve transparent blending while opaque scene depth owns occlusion');
+  pass(moonRuntime.frustumCulled.every((value) => value === false),
+    'camera-relative Moon layers cannot be stranded by previous-frame frustum bounds');
+  pass(moonRuntime.ancestorOrders.every((value) => value === 0)
+      && moonRuntime.orders.join('|') === '0|-1|4'
+      && moonRuntime.cloudOrders.every((value) => value >= 1 && value <= 3),
+    'transparent sorting keeps transmitted corona and disc before clouds and scattered corona after');
+  pass(moonRuntime.sharedGeometry && moonRuntime.sharedMap && moonRuntime.distinctMaterials,
+    'the two corona lanes share geometry and texture while retaining independent opacity');
+  pass(moonRuntime.diskSegments?.join('|') === '24|16'
+      && moonRuntime.textureSize?.join('|') === '128|128',
+    'the optical correction retains the original lightweight disc and texture resolution');
+  pass(moonRuntime.drawDelta === 3,
+    'the complete night Moon costs three scene submissions', `delta=${moonRuntime.drawDelta}`);
+  pass(JSON.stringify(moonRuntime.resourcesBefore) === JSON.stringify(moonRuntime.resourcesAfter),
+    'Moon hide/show reuses the warmed program, geometry, and texture plateau',
+    `${JSON.stringify(moonRuntime.resourcesBefore)}→${JSON.stringify(moonRuntime.resourcesAfter)}`);
+
+  // Measure the raw physical disc without post-process bloom/DoF or corona. The
+  // product camera and scene remain real; only unrelated cloud/glow layers sleep.
+  const projectionPaths = [];
+  for (const fov of [46, 10, 7]) {
+    await page.evaluate((nextFov) => {
+      const engine = window.__engine;
+      const moon = engine.scene.getObjectByName('moon');
+      const clouds = engine.village.exportRoot()?.getObjectByName('clouds');
+      const transmitted = moon?.getObjectByName('moon-corona-transmitted');
+      const scattered = moon?.getObjectByName('moon-corona-scattered');
+      if (!window.__moonOpticsRestore) {
+        window.__moonOpticsRestore = {
+          fov: engine.camera.fov,
+          position: engine.camera.position.clone(),
+          target: engine.__controls.target.clone(),
+          referenceFov: engine.camera.userData.villageReferenceFov,
+          cloudsVisible: clouds?.visible,
+          transmittedVisible: transmitted?.visible,
+          scatteredVisible: scattered?.visible,
+        };
+      }
+      const heroId = engine.village.heroId();
+      const heroFrame = heroId
+        ? engine.village.debugFocusVisibility(heroId)?.hero?.safeFraming
+        : null;
+      window.__moonHeroFrame = heroFrame;
+      const restore = window.__moonOpticsRestore;
+      if (nextFov === 7 && heroFrame) {
+        engine.camera.position.fromArray(heroFrame.position);
+        engine.camera.userData.villageReferenceFov = heroFrame.referenceFov;
+      } else if (nextFov === 46 && window.__moonAerialFrame) {
+        engine.camera.position.copy(window.__moonAerialFrame.position);
+        engine.camera.userData.villageReferenceFov = window.__moonAerialFrame.referenceFov;
+      } else if (restore?.position) {
+        engine.camera.position.copy(restore.position);
+        engine.camera.userData.villageReferenceFov = restore.referenceFov;
+      }
+      const distance = moon?.userData?.optics?.distance || 460;
+      let sun = null;
+      engine.scene.traverse((object) => { if (!sun && object.isDirectionalLight) sun = object; });
+      const target = sun.position.clone().normalize().multiplyScalar(distance).add(engine.camera.position);
+      engine.camera.fov = nextFov;
+      engine.camera.updateProjectionMatrix();
+      engine.__controls.target.copy(target);
+      engine.camera.lookAt(target);
+      engine.camera.updateMatrixWorld(true);
+      if (clouds) clouds.visible = false;
+      if (transmitted) transmitted.visible = false;
+      if (scattered) scattered.visible = false;
+      engine.renderer.render(engine.scene, engine.camera);
+    }, fov);
+    const path = join(outDir, `moon-disc-${fov}deg.png`);
+    await page.screenshot({ path });
+    projectionPaths.push({ fov, path });
+  }
+  const projectionMeasures = [];
+  for (const { fov, path } of projectionPaths) {
+    const png = PNG.sync.read(await readFile(path));
+    const expected = projectedAngularDiameterPixels(
+      MOON_ANGULAR_DIAMETER_DEG,
+      fov,
+      png.height,
+    );
+    projectionMeasures.push({ fov, expected, ...brightDiscDiameter(png, expected) });
+  }
+  const productProjectionFrames = await page.evaluate(() => ({
+    aerialFov: window.__moonAerialFrame?.fov,
+    focusFov: window.__moonOpticsRestore?.fov,
+    heroFov: window.__moonHeroFrame?.fov,
+  }));
+  pass(Math.abs(productProjectionFrames.aerialFov - 46) < 1e-9
+      && Math.abs(productProjectionFrames.focusFov - 10) < 1e-9
+      && Math.abs(productProjectionFrames.heroFov - 7) < 1e-9,
+    'isolated 46°/10°/7° measurements inherit actual aerial, parcel, and planned hero endpoints');
+  for (const measure of projectionMeasures) {
+    const tolerance = Math.max(2, measure.expected * 0.12);
+    pass(Math.abs(measure.diameter - measure.expected) <= tolerance,
+      `${measure.fov}° camera projects the 0.52° lunar disc at its angular size`,
+      `actual=${measure.diameter.toFixed(1)}px expected=${measure.expected.toFixed(1)}px`);
+  }
+  pass(projectionMeasures.every((measure, index) => (
+    index === 0 || measure.diameter > projectionMeasures[index - 1].diameter
+  )), '46° → 10° → 7° optics magnify the same physical Moon monotonically');
+
+  // Put one existing horizon-cloud instance directly on the Moon ray. This changes
+  // no product resource and lets the real NormalBlending/render-order stack prove
+  // continuous source attenuation plus a residual scattered corona.
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    const moon = engine.scene.getObjectByName('moon');
+    const clouds = engine.village.exportRoot()?.getObjectByName('clouds');
+    const bank = clouds?.getObjectByName('horizon-cloud-bank');
+    const transmitted = moon?.getObjectByName('moon-corona-transmitted');
+    const scattered = moon?.getObjectByName('moon-corona-scattered');
+    const highs = [];
+    const rays = [];
+    clouds?.traverse((object) => {
+      if (object.name?.startsWith('high-cloud-')) highs.push(object);
+      if (object.name?.startsWith('cloud-light-ray-')) rays.push(object);
+    });
+    const restore = window.__moonOpticsRestore;
+    window.__moonCloudRestore = {
+      matrices: bank?.instanceMatrix?.array?.slice(),
+      bankVisible: bank?.visible,
+      bankViewActive: bank?.userData?.viewActive,
+      bankOpacity: bank?.material?.opacity,
+      highVisible: highs.map((object) => object.visible),
+      rayVisible: rays.map((object) => object.visible),
+    };
+    engine.camera.fov = 7;
+    engine.camera.updateProjectionMatrix();
+    if (clouds) clouds.visible = true;
+    if (transmitted) transmitted.visible = restore?.transmittedVisible ?? true;
+    if (scattered) scattered.visible = restore?.scatteredVisible ?? true;
+    highs.forEach((object) => { object.visible = false; });
+    rays.forEach((object) => { object.visible = false; });
+    if (bank) {
+      const distance = 84;
+      const direction = moon.position.clone().sub(engine.camera.position).normalize();
+      const position = engine.camera.position.clone().addScaledVector(direction, distance);
+      const worldMatrix = engine.camera.matrixWorld.clone().setPosition(position);
+      const parentInverse = bank.matrixWorld.clone().invert();
+      const localMatrix = parentInverse.multiply(worldMatrix);
+      const zeroMatrix = worldMatrix.clone().makeScale(0, 0, 0);
+      bank.setMatrixAt(0, localMatrix);
+      for (let index = 1; index < bank.count; index++) bank.setMatrixAt(index, zeroMatrix);
+      bank.instanceMatrix.needsUpdate = true;
+      bank.visible = true;
+      bank.userData.viewActive = true;
+    }
+    engine.debugRenderDofFrame();
+    engine.renderer.render(engine.scene, engine.camera);
+    window.__moonCloudResources = {
+      programs: engine.renderer.info.programs?.length ?? 0,
+      geometries: engine.renderer.info.memory.geometries,
+      textures: engine.renderer.info.memory.textures,
+    };
+  });
+
+  async function captureMoonCloud(alpha, name, scatteredVisible = true) {
+    await page.evaluate(({ opacity, showScattered }) => {
+      const engine = window.__engine;
+      const moon = engine.scene.getObjectByName('moon');
+      const bank = engine.village.exportRoot()?.getObjectByName('horizon-cloud-bank');
+      const scattered = moon?.getObjectByName('moon-corona-scattered');
+      if (bank) bank.material.opacity = opacity;
+      if (scattered) scattered.visible = showScattered;
+      engine.renderer.render(engine.scene, engine.camera);
+    }, { opacity: alpha, showScattered: scatteredVisible });
+    const path = join(outDir, `${name}.png`);
+    await page.screenshot({ path });
+    return { path, png: PNG.sync.read(await readFile(path)) };
+  }
+
+  const cloudClear = await captureMoonCloud(0, 'moon-cloud-clear');
+  const cloudHalf = await captureMoonCloud(0.5, 'moon-cloud-half');
+  const cloudOpaque = await captureMoonCloud(1, 'moon-cloud-opaque');
+  const cloudOpaqueNoScatter = await captureMoonCloud(1, 'moon-cloud-opaque-no-scatter', false);
+  const cloudHalfReverse = await captureMoonCloud(0.5, 'moon-cloud-half-reverse');
+  const cloudClearReverse = await captureMoonCloud(0, 'moon-cloud-clear-reverse');
+  const expectedHeroDisc = projectedAngularDiameterPixels(
+    MOON_ANGULAR_DIAMETER_DEG,
+    7,
+    cloudClear.png.height,
+  );
+  const coreRadius = expectedHeroDisc * 0.20;
+  const coreLuminance = [cloudClear, cloudHalf, cloudOpaque]
+    .map(({ png }) => meanDiscLuminance(png, coreRadius));
+  const halfReverseLuminance = meanDiscLuminance(cloudHalfReverse.png, coreRadius);
+  const clearReverseLuminance = meanDiscLuminance(cloudClearReverse.png, coreRadius);
+  pass(coreLuminance[0] > coreLuminance[1] && coreLuminance[1] > coreLuminance[2],
+    'real cloud alpha continuously attenuates the direct lunar disc',
+    `core=${coreLuminance.map((value) => value.toFixed(1)).join('→')}`);
+  pass(coreLuminance[2] < coreLuminance[0] * 0.85,
+    'maximum-density textured cloud materially attenuates the lunar core',
+    `clear=${coreLuminance[0].toFixed(1)} dense=${coreLuminance[2].toFixed(1)}`);
+  pass(Math.abs(coreLuminance[1] - halfReverseLuminance) <= 2
+      && Math.abs(coreLuminance[0] - clearReverseLuminance) <= 2,
+    'forward and reverse cloud-opacity sweeps are visually stable',
+    `half Δ=${Math.abs(coreLuminance[1] - halfReverseLuminance).toFixed(2)}, clear Δ=${Math.abs(coreLuminance[0] - clearReverseLuminance).toFixed(2)}`);
+  const annulusInner = expectedHeroDisc * 0.55;
+  const annulusOuter = expectedHeroDisc * 0.90;
+  const opaqueCorona = meanAnnulusLuminance(cloudOpaque.png, annulusInner, annulusOuter);
+  const opaqueNoScatter = meanAnnulusLuminance(
+    cloudOpaqueNoScatter.png,
+    annulusInner,
+    annulusOuter,
+  );
+  pass(opaqueCorona - opaqueNoScatter > 0.2,
+    'a faint scattered corona survives maximum cloud-density attenuation',
+    `annulus Δ=${(opaqueCorona - opaqueNoScatter).toFixed(2)}`);
+
+  async function captureComposedMoonCloud(alpha) {
+    await page.evaluate((opacity) => {
+      const engine = window.__engine;
+      const moon = engine.scene.getObjectByName('moon');
+      const bank = engine.village.exportRoot()?.getObjectByName('horizon-cloud-bank');
+      const scattered = moon?.getObjectByName('moon-corona-scattered');
+      if (bank) bank.material.opacity = opacity;
+      if (scattered) scattered.visible = true;
+      engine.debugRenderDofFrame();
+    }, alpha);
+    const suffix = String(Math.round(alpha * 100)).padStart(3, '0');
+    const path = join(outDir, `moon-cloud-product-${suffix}.png`);
+    await page.screenshot({ path });
+    return { alpha, path, png: PNG.sync.read(await readFile(path)) };
+  }
+  const composedAlphas = [
+    0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50,
+    0.55, 0.60, 0.65, 0.70, 0.72, 0.73, 0.74, 0.75, 0.80, 0.85, 0.90, 0.95, 1,
+  ];
+  const composedSweep = [];
+  for (const alpha of composedAlphas) composedSweep.push(await captureComposedMoonCloud(alpha));
+  const composedCore = composedSweep.map(({ png }) => meanDiscLuminance(png, coreRadius));
+  const uniformComposedCore = composedAlphas
+    .map((alpha, index) => ({ alpha, value: composedCore[index] }))
+    .filter(({ alpha }) => Math.abs(alpha * 20 - Math.round(alpha * 20)) < 1e-9);
+  const composedDrops = uniformComposedCore.slice(1).map(({ value }, index) => (
+    uniformComposedCore[index].value - value
+  ));
+  const composedDropChanges = composedDrops.slice(1).map((value, index) => (
+    Math.abs(value - composedDrops[index])
+  ));
+  const composedTotalDrop = Math.max(
+    1e-6,
+    uniformComposedCore[0].value - uniformComposedCore.at(-1).value,
+  );
+  pass(composedCore.every((value, index) => index === 0 || value <= composedCore[index - 1] + 0.5),
+    'the product DoF+bloom stack attenuates a clouded Moon monotonically');
+  pass(Math.max(...composedDrops) / composedTotalDrop < 0.25
+      && Math.max(...composedDropChanges) / composedTotalDrop < 0.15,
+    'the night bloom soft knee prevents a discontinuous source pop during cloud transit',
+    `max step/total=${(Math.max(...composedDrops) / composedTotalDrop).toFixed(3)}, `
+      + `max slope change/total=${(Math.max(...composedDropChanges) / composedTotalDrop).toFixed(3)}`);
+
+  const moonCloudResources = await page.evaluate(() => {
+    const engine = window.__engine;
+    const moon = engine.scene.getObjectByName('moon');
+    const clouds = engine.village.exportRoot()?.getObjectByName('clouds');
+    const bank = clouds?.getObjectByName('horizon-cloud-bank');
+    const highs = [];
+    const rays = [];
+    clouds?.traverse((object) => {
+      if (object.name?.startsWith('high-cloud-')) highs.push(object);
+      if (object.name?.startsWith('cloud-light-ray-')) rays.push(object);
+    });
+    const restore = window.__moonCloudRestore;
+    if (bank && restore?.matrices) {
+      bank.instanceMatrix.array.set(restore.matrices);
+      bank.instanceMatrix.needsUpdate = true;
+      bank.visible = restore.bankVisible;
+      bank.userData.viewActive = restore.bankViewActive;
+      bank.material.opacity = restore.bankOpacity;
+    }
+    highs.forEach((object, index) => { object.visible = restore?.highVisible[index]; });
+    rays.forEach((object, index) => { object.visible = restore?.rayVisible[index]; });
+    const opticsRestore = window.__moonOpticsRestore;
+    if (opticsRestore) {
+      engine.camera.fov = opticsRestore.fov;
+      engine.camera.position.copy(opticsRestore.position);
+      engine.camera.updateProjectionMatrix();
+      engine.camera.userData.villageReferenceFov = opticsRestore.referenceFov;
+      engine.__controls.target.copy(opticsRestore.target);
+      engine.camera.lookAt(opticsRestore.target);
+      engine.camera.updateMatrixWorld(true);
+      if (clouds) clouds.visible = opticsRestore.cloudsVisible;
+      const transmitted = moon?.getObjectByName('moon-corona-transmitted');
+      const scattered = moon?.getObjectByName('moon-corona-scattered');
+      if (transmitted) transmitted.visible = opticsRestore.transmittedVisible;
+      if (scattered) scattered.visible = opticsRestore.scatteredVisible;
+    }
+    engine.renderer.render(engine.scene, engine.camera);
+    const after = {
+      programs: engine.renderer.info.programs?.length ?? 0,
+      geometries: engine.renderer.info.memory.geometries,
+      textures: engine.renderer.info.memory.textures,
+    };
+    engine.debugRenderDofFrame();
+    return { before: window.__moonCloudResources, after };
+  });
+  pass(JSON.stringify(moonCloudResources.before) === JSON.stringify(moonCloudResources.after),
+    'cloud-opacity sweep stays on the warmed resource plateau',
+    `${JSON.stringify(moonCloudResources.before)}→${JSON.stringify(moonCloudResources.after)}`);
+
+  await page.locator('[data-reference-trigger="info"]').click();
+  const moonReference = page.locator('[data-reference-topic="moon-optics"]');
+  await moonReference.waitFor({ state: 'visible', timeout: 10_000 });
+  const referenceState = await moonReference.evaluate((item) => ({
+    title: item.querySelector('[data-reference-field="title"]')?.textContent || '',
+    application: item.querySelector('[data-reference-field="application"]')?.textContent || '',
+    license: item.querySelector('[data-reference-field="license"]')?.textContent || '',
+    links: [...item.querySelectorAll('[data-reference-field="sources"] a')].map((link) => ({
+      href: link.href,
+      target: link.target,
+      rel: link.rel,
+    })),
+  }));
+  pass(referenceState.title.includes('NASA · WMO · Applied Optics')
+      && referenceState.application.includes('0.52°')
+      && referenceState.application.includes('22° halo')
+      && referenceState.license.includes('원문 문장·사진·도표는 복제하지 않고'),
+    'References #46 exposes the Moon evidence, product translation, limits, and license');
+  pass(referenceState.links.length === 7
+      && referenceState.links.every((link) => (
+        link.href.startsWith('https://')
+        && link.target === '_blank'
+        && link.rel.split(/\s+/).includes('noopener')
+        && link.rel.split(/\s+/).includes('noreferrer')
+      )),
+    'References #46 renders all canonical sources as safe external links',
+    `links=${referenceState.links.length}`);
+  await page.locator('.modal .x').click();
+
   await page.evaluate(() => window.__engine.debugSetPaused(false));
   pass(errors.length === 0, 'browser console and page errors remain empty', errors.slice(0, 4).join(' | '));
 
   console.log(`SKY SHOTS: ${outDir}`);
-  console.log([gold.path, crimson.path, violet.path, day.path, night.path, moonFramedPath].join('\n'));
+  console.log([
+    gold.path, crimson.path, violet.path, day.path, night.path, moonFramedPath,
+    ...projectionPaths.map(({ path }) => path),
+    cloudClear.path, cloudHalf.path, cloudOpaque.path,
+    ...composedSweep.filter(({ alpha }) => [0, 0.5, 1].includes(alpha)).map(({ path }) => path),
+  ].join('\n'));
 } finally {
   await browser?.close();
   await server.close();

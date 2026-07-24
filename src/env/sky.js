@@ -8,21 +8,28 @@ import {
   normalizeSunsetLook,
   resolveAtmosphereProfile,
 } from './atmosphere-profiles.js';
+import {
+  DEFAULT_MOON_OPTICS,
+  MOON_CORONA_ENERGY,
+  MOON_CORONA_PROFILE,
+  MOON_RENDER_ORDER,
+} from './moon-optics.js';
 
 export { TIME_PRESETS } from './atmosphere-profiles.js';
 
-// 달무리(halo) 텍스처: 중심 흰빛 → 가장자리 투명 방사 그라디언트.
-function makeGlowTexture() {
+// 달 코로나 텍스처. 직접광 원반 안쪽은 비워 단단한 0.52° 경계를 보존하고,
+// 바로 바깥의 회절광에서 시작해 5° 안에서 낮은 에너지로 사라진다.
+function makeMoonCoronaTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d');
-  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grad.addColorStop(0.0, 'rgba(255,255,255,0.9)');
-  grad.addColorStop(0.18, 'rgba(255,255,255,0.5)');
-  grad.addColorStop(0.5, 'rgba(255,255,255,0.14)');
-  grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+  const half = c.width * 0.5;
+  const grad = g.createRadialGradient(half, half, 0, half, half, half);
+  for (const [position, alpha] of MOON_CORONA_PROFILE) {
+    grad.addColorStop(position, `rgba(255,255,255,${alpha})`);
+  }
   g.fillStyle = grad;
-  g.fillRect(0, 0, 128, 128);
+  g.fillRect(0, 0, c.width, c.height);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -127,37 +134,92 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   // 달 + 달무리 (야간). scene-level sky 자식이며 environment lifecycle이 함께 켜고 정리한다.
   const moonGroup = new THREE.Group();
   moonGroup.name = 'moon';
-  moonGroup.renderOrder = -50;
+  moonGroup.userData.optics = DEFAULT_MOON_OPTICS;
   const moonDisk = new THREE.Mesh(
-    new THREE.SphereGeometry(11, 24, 16),
+    new THREE.SphereGeometry(DEFAULT_MOON_OPTICS.diskRadius, 24, 16),
     // 트윈 페이드용 반투명(정착 야간 opacity=1 == 기존 불투명 룩).
-    new THREE.MeshBasicMaterial({ color: 0xf4efda, fog: false, depthWrite: false, transparent: true, opacity: 1 })
-  );
-  moonGroup.add(moonDisk);
-  const haloTex = makeGlowTexture();
-  const halo = new THREE.Mesh(
-    new THREE.PlaneGeometry(72, 72),
     new THREE.MeshBasicMaterial({
-      map: haloTex, color: 0xccd6ec, transparent: true, opacity: 0.55,
-      depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, fog: false,
+      color: 0xf4efda, fog: false, depthTest: true, depthWrite: false,
+      transparent: true, opacity: 1,
     })
   );
-  halo.renderOrder = -51;
-  moonGroup.add(halo);
+  moonDisk.name = 'moon-disk';
+  // The moon is camera-relative. Its world-space bounds still describe the
+  // previous frame until onBeforeRender repositions the group, so culling here
+  // would prevent that lifecycle hook from ever repairing the placement.
+  moonDisk.frustumCulled = false;
+  moonDisk.renderOrder = MOON_RENDER_ORDER.disk;
+  moonDisk.userData.angularDiameterDeg = DEFAULT_MOON_OPTICS.diskAngularDiameterDeg;
+  moonGroup.add(moonDisk);
+  const coronaTex = makeMoonCoronaTexture();
+  const coronaGeometry = new THREE.PlaneGeometry(
+    DEFAULT_MOON_OPTICS.coronaSpan,
+    DEFAULT_MOON_OPTICS.coronaSpan,
+  );
+  const makeCorona = (name, opacity, renderOrder, layer) => {
+    const mesh = new THREE.Mesh(
+      coronaGeometry,
+      new THREE.MeshBasicMaterial({
+        map: coronaTex, color: 0xd5def2, transparent: true, opacity,
+        depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending, fog: false,
+      }),
+    );
+    mesh.name = name;
+    mesh.renderOrder = renderOrder;
+    mesh.userData = {
+      angularDiameterDeg: DEFAULT_MOON_OPTICS.coronaAngularDiameterDeg,
+      layer,
+      baseOpacity: opacity,
+    };
+    return mesh;
+  };
+  const transmittedCorona = makeCorona(
+    'moon-corona-transmitted',
+    MOON_CORONA_ENERGY.transmitted,
+    MOON_RENDER_ORDER.coronaTransmitted,
+    'transmitted',
+  );
+  const scatteredCorona = makeCorona(
+    'moon-corona-scattered',
+    MOON_CORONA_ENERGY.scattered,
+    MOON_RENDER_ORDER.coronaScattered,
+    'scattered',
+  );
+  transmittedCorona.frustumCulled = false;
+  scatteredCorona.frustumCulled = false;
+  moonGroup.add(transmittedCorona, scatteredCorona);
+  const coronaLayers = [transmittedCorona, scatteredCorona];
+  moonGroup.userData.coronaLayers = Object.freeze([
+    Object.freeze({
+      name: transmittedCorona.name,
+      opacity: MOON_CORONA_ENERGY.transmitted,
+      renderOrder: MOON_RENDER_ORDER.coronaTransmitted,
+    }),
+    Object.freeze({
+      name: scatteredCorona.name,
+      opacity: MOON_CORONA_ENERGY.scattered,
+      renderOrder: MOON_RENDER_ORDER.coronaScattered,
+    }),
+  ]);
   moonGroup.visible = false;
   skyRoot.add(moonGroup);
 
   const moonOffset = new THREE.Vector3();
   const placeMoonForCamera = (camera) => {
+    // The product directional light position is the shared celestial direction
+    // source. Focused hero views may rotate it without rebuilding the sky state.
+    moonOffset.copy(sun.position).normalize().multiplyScalar(DEFAULT_MOON_OPTICS.distance);
     moonGroup.position.copy(camera.position).add(moonOffset);
     moonGroup.updateMatrixWorld(true);
   };
   moonDisk.onBeforeRender = (rend, sc, camera) => placeMoonForCamera(camera);
-  halo.onBeforeRender = (rend, sc, camera) => {
-    placeMoonForCamera(camera);
-    halo.lookAt(camera.position);
-    halo.updateMatrixWorld();
-  };
+  for (const corona of coronaLayers) {
+    corona.onBeforeRender = (rend, sc, camera) => {
+      placeMoonForCamera(camera);
+      corona.lookAt(camera.position);
+      corona.updateMatrixWorld();
+    };
+  }
 
   // ── 상태(State) 표현 ──────────────────────────────────────────────────────
   // 보간 가능한 모든 시간대 필드를 한 객체로. 색은 setHex(sRGB→선형) 디코드된 THREE.Color 로
@@ -270,8 +332,10 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     moonGroup.visible = m > 0.02;
     if (m > 0.02) {
       moonDisk.material.opacity = m;
-      halo.material.opacity = 0.55 * m;
-      moonOffset.copy(cur.sunDir).multiplyScalar(460);
+      for (const corona of coronaLayers) {
+        corona.material.opacity = corona.userData.baseOpacity * m;
+      }
+      moonOffset.copy(cur.sunDir).multiplyScalar(DEFAULT_MOON_OPTICS.distance);
       moonGroup.position.copy(moonOffset); // deterministic fallback before first camera render
       moonGroup.updateMatrixWorld(true);
     }

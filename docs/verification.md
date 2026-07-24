@@ -605,10 +605,14 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 - 원경 구름 16개가 한 draw call이고 실제 픽셀을 만들며, 상공 구름과 같은 태양 상태로 rim·빛줄기·지면 그림자를 내는지 검사한다.
 - sky-facing 10° 근경에서 지면 그림자를 소유한 상공 billboard는 actual FOV/aspect 기준 화면 폭이 64%를 넘기 전에 사라지고, 원경 bank가 실루엣을 이어 받아 형태 없는 구름 천장을 만들지 않는지 검사한다.
 - 세 석양 이미지가 실제로 구분되고 낮에는 저고도 rim/광선이 꺼지는지 검사한다.
-- 밤에는 달과 구름을 같은 프레임에 둘 수 있고, 근접한 그림자용 billboard가 망원 하늘을 덮지 않으며 달빛 그림자가 낮보다 약한지 검사한다.
+- 밤에는 0.52° 원반과 5° corona를 actual FOV로 투영해 달과 구름을 같은 프레임에 둘 수 있는지 검사한다. 직접 원반과 transmitted corona는 구름보다 먼저, scattered corona는 뒤에 놓이며 세 레이어 모두 opaque scene depth를 검사한다. 두 corona는 geometry/texture/program을 공유하고 기존보다 draw 하나·material 하나만 늘며 pass·render target·light를 추가하지 않는다.
+- 근접한 그림자용 billboard가 망원 하늘을 덮지 않고 달빛 그림자가 낮보다 약한지, 46°→10°→7°로 좁아질 때 화면 속 달 지름이 실제 투영식대로 단조롭게 커지는지, 구름 alpha 전·중·후에도 원반은 감쇠하고 약한 외곽 산란광은 남는지 검사한다.
+- 구름 alpha를 0.05 간격과 bloom 임계 부근 0.72/0.73/0.74에서 왕복시킨 실제 DoF+bloom 결과가 단조롭고, 전체 감쇠 대비 최대 한 스텝은 0.25 미만, 이웃 스텝의 기울기 변화는 0.15 미만인지 검사해 threshold pop을 막는다.
 - 전체 town 장면 draw call이 1,000 미만이고 browser error가 없는지 검사한다.
 
-PNG는 OS 임시 폴더에 남긴다. 하늘·구름·focus composition 변경에서는 수치 PASS만 보지 말고 금빛 석양과 달 프레임을 직접 연다.
+PNG는 OS 임시 폴더에 남긴다. 하늘·구름·focus composition 변경에서는 수치 PASS만 보지 말고 금빛 석양,
+구름 전·중·후 달 프레임, 46°/10°/7° 달 투영을 직접 연다. 같은 browser boot에서 References #46의 적용
+문구·한계·라이선스와 각 canonical 링크의 `target="_blank" rel="noopener noreferrer"`도 항목 내부에서 확인한다.
 
 ### `npm run shoot:focus-level`
 
