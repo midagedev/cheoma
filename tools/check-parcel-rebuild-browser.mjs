@@ -809,11 +809,22 @@ try {
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
   await mobileGrip.click();
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
-  // data-snap changes before the 420ms transform finishes. Hover waits for a
-  // stable, event-receiving grip, avoiding a stale pre-transition hit point.
-  await mobileGrip.hover();
+  // data-snap changes before the 420ms transform finishes. Wait on the actual
+  // sheet transition instead of relying on locator hover stability: in the full
+  // serial browser lane the element can resume moving between hover and the
+  // following mouse command, making pointerdown land on the canvas.
+  await mobileGrip.evaluate(async (grip) => {
+    const sheet = grip.closest('.sheet');
+    await Promise.all((sheet?.getAnimations() || []).map(
+      (animation) => animation.finished.catch(() => {}),
+    ));
+  });
   const gripBox = await mobileGrip.boundingBox();
   invariant(gripBox, 'mobile editor grip has no layout box');
+  await page.mouse.move(
+    gripBox.x + gripBox.width / 2,
+    gripBox.y + gripBox.height / 2,
+  );
   await page.mouse.down();
   invariant(await page.locator('.sheet.context').evaluate((sheet) => sheet.classList.contains('dragging')),
     'mobile grip missed pointerdown');
