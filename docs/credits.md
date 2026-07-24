@@ -251,6 +251,20 @@
 - URL: https://folkency.nfm.go.kr/topic/담장 · https://encykorea.aks.ac.kr/Article/E0013772 · https://contents.history.go.kr/mobile/km/view.do?levelId=km_039_0030_0030_0080
 - 라이선스: 국립민속박물관·한국학중앙연구원은 항목별 이용조건 적용. 국사편찬위원회 자료는 저작권 정책상 권리 보유 범위가 자료마다 다르므로 출처·저자·URL을 표시한 사실 요약과 링크만 사용하고 원문·도판은 재배포하지 않음(2026-07-23 열람); 재사용 전 각 기관의 최신 조건을 다시 확인.
 
+### 42. 한국학중앙연구원·국립문화유산연구원·국가유산청 — 판담·판축과 돌 하부 / Formed earth walls and stone bases
+- 한국민족문화대백과사전 「담」 · 국가유산 지식이음 「판축(版築)」 · 국가유산 디지털 서비스 「산청 단계마을 옛 담장」.
+- 「담」은 토담의 진흙·지푸라기·석회·잔돌과 하회 판담의 널틀·탈형을 직접 설명한다. 「판축」은 판틀 안에 흙·모래를 층상으로 넣고 다져 차례로 올리는 일반 공법을 설명하지만, 주요 한국 사례가 성곽·기단·고분이므로 조선 민가 판담의 보편 lift 높이나 가시적 표면 줄무늬를 확정하지 않는다. 단계마을 자료의 하부 큰 돌 60–90cm와 상부 작은 돌·진흙 교대 쌓기는 특정 마을 토석담 사례이며 전국 토담 규격이 아니다.
+- **활용 / Use:** 기존 `mud` 담장의 footprint·낮은 돌 굽·coping을 보존하면서 가까운 거리에서만 낮은 대비의 불규칙 수평 band, 소수의 널 이음, 드문 짧은 짚 섬유를 암시한다. band 간격·이음·섬유 밀도와 현재 돌 굽 높이는 실측 복원이나 전국 표준이 아닌 seed-stable 제품 해석이다. 규칙적 벽돌 줄눈, 깊은 장식 홈, 표면 전체의 노란 짚, 단계마을 60–90cm의 직접 복제를 배제한다 / Preserves the current mud-wall footprint, low stone foot, and coping while adding only subtle irregular horizontal bands, a few form joints, and sparse short straw fibres at close range. Band spacing, joints, fibre density, and the current foot height are seed-stable product interpretations—not measured reconstruction or national standards. Regular brick joints, deep decorative grooves, a yellow straw-covered surface, and literal copying of Dangye's 60–90cm case dimension are excluded (`docs/mud-wall.md`).
+- URL: https://encykorea.aks.ac.kr/Article/E0013772 · https://portal.nrich.go.kr/kor/archeologyUsrView.do?idx=8681&menuIdx=&sk=&st_char=13 · https://digital.khs.go.kr/heri/heriDetail.do?ctptNo=4413802600000&ctptUid=13898859729459705411
+- 라이선스: 2026-07-24 세 canonical 페이지를 로그인 없이 HTTP 200과 의도한 자료명으로 확인. 국립문화유산연구원 판축 항목은 **공공누리 제4유형(출처표시+상업적 이용금지+변경금지)**이고, 한국학중앙연구원·국가유산청 페이지는 각 기관·항목별 이용조건이 적용된다. 앱은 원문·사진·도판을 복제하지 않고 링크·출처를 밝힌 사실 요약과 독자 procedural geometry만 사용하며, 별도 자산 재사용 전 최신 조건을 다시 확인한다.
+
+### 43. Getty Conservation Institute — 토벽의 물·습기 거동 / Moisture behaviour of earthen walls
+- *Terra Literature Review: An Overview of Research in Earthen Architecture Conservation* (Getty Conservation Institute, 2008).
+- 토벽 보존 연구를 종합해 비에 의한 습윤·건조, 모세관 상승, 벽 하부의 splash-back을 수분 관련 열화 경로로 구분한다. 이는 한국 토담의 역사적 얼룩 색·높이·빈도를 기록한 자료가 아니라 국제 토질 건축의 일반 물성 근거다.
+- **활용 / Use:** 이번 범위는 생성 시점에 고정되는 희미하고 불규칙한 하부 darkening만 도출한다. 정확한 색·높이·잔류 강도는 제품 결정이며 live rain tween은 후속 비대상이다. 균일한 검은 띠, 기본 이끼·곰팡이·백화, 깊은 침식, 발광·투명도는 근거 없이 더하지 않는다 / The current scope derives only a faint, irregular lower darkening authored once at construction time. Exact colour, height, and residual strength are product choices, while live rain tweening remains a future non-goal. A uniform black belt, default moss/mould/efflorescence, deep erosion, emissive light, and transparency are not inferred (`docs/mud-wall.md`).
+- URL: https://www.getty.edu/conservation/publications_resources/pdf_publications/terra_literature_review.html
+- 라이선스: 2026-07-24 canonical 출판 페이지가 Getty의 자료 페이지로 HTTP 200 도착함을 확인. 출판물은 © 2008 J. Paul Getty Trust이며 Getty의 publication terms와 수록된 제3자 권리가 적용된다. 앱은 원문·도판·PDF를 재배포하지 않고 링크와 사실 요약만 제공하며, 별도 인용·자산 재사용 전 최신 이용조건과 필요한 허락을 확인한다.
+
 ### 29. 일제강점기 토지조사사업 지적원도(地籍原圖)
 - 조선총독부 토지조사(1910~18) / 국가기록원
 - 전국 필지 실측 원도 약 78만 장. 전통 취락 필지가 도로·수로·능선을 따라 휘는 부정형임을 확인.

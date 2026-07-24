@@ -8,6 +8,10 @@ export {
   YARD_LIFE_PRESENTATION_SEASONS,
   YARD_LIFE_WEATHER,
 } from './yard-life.js';
+export {
+  buildMudWallSurfaceGeometry,
+  disposeMudWallSurfaceGeometry,
+} from './mud-wall.js';
 export { populateVillage, populateVillageSteps } from '../village/populate.js';
 export { createVillage, createVillageAsync } from '../village/adapter.js';
 export { createRerollWave } from '../village/wave.js';

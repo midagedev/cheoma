@@ -23,6 +23,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'app/src/lib/standalone-param-spec.js',
   'app/src/engine/semantic-view-runtime.js',
   'src/api/environment-state.js',
+  'src/api/mud-wall.js',
+  'src/api/mud-wall-plan.js',
   'src/api/sijeon.js',
   'src/api/sijeon-plan.js',
   'src/api/yard-life.js',
@@ -34,10 +36,14 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/generators/village/yard-life-product.js',
   'src/runtime/village/yard-life.js',
   'src/village/sijeon-plan.js',
+  'src/village/mud-wall-geometry.js',
+  'src/village/mud-wall-surface-plan.js',
   'src/village/yard-life-plan.js',
   'src/village/yard-life-record-contract.js',
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
+  'tools/check-surface-browser-suite.mjs',
+  'tools/check-mud-wall-contract.mjs',
   'tools/check-scene-guide.mjs',
   'tools/check-api-reuse-suite.mjs',
   'tools/check-sijeon-contract.mjs',
@@ -48,6 +54,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/shoot-sijeon-app.mjs',
   'tools/shoot-yard-life.mjs',
   'tools/shoot-yard-life-app.mjs',
+  'tools/mud-wall-surface-harness.html',
+  'tools/shoot-mud-wall.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -122,8 +130,11 @@ function routePath(path) {
     'tools/lib/bokeh-scatter-proof.mjs': ['bokeh-fixture'],
     'tools/lib/bokeh-source-stress.mjs': ['bokeh-fixture'],
     'tools/check-rim-facing.mjs': ['rim'],
+    'tools/check-surface-browser-suite.mjs': ['surface-browser'],
     'tools/shoot-hanyang.mjs': ['app'],
     'tools/shoot-wall-steps.mjs': ['app'],
+    'tools/mud-wall-surface-harness.html': ['surface-browser'],
+    'tools/shoot-mud-wall.mjs': ['app', 'surface-browser'],
     'tools/shoot-sijeon.mjs': ['app', 'api-reuse'],
     'tools/shoot-sijeon-app.mjs': ['app', 'api-reuse'],
     'tools/shoot-yard-life.mjs': ['yard-life'],
@@ -241,7 +252,14 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
+    if (path === 'src/village/mud-wall-surface-plan.js') {
+      select('renderer-free bounded mud-wall surface planning changed');
+      return { gates, reasons };
+    }
     select('village generation changed', 'app', 'worker');
+    if (path === 'src/village/walls.js' || path === 'src/village/mud-wall-geometry.js') {
+      select('physical packed-earth wall surface changed', 'surface-browser');
+    }
     if (path === 'src/generators/village/sijeon.js') {
       select(
         'reusable sijeon rendering, material lifecycle, snow, rim, and wave contracts changed',
@@ -346,6 +364,15 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/mud-wall-plan.js') {
+      select('public renderer-free mud-wall planning API changed');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/mud-wall.js') {
+      select('public borrowed-material mud-wall geometry API changed',
+        'app', 'surface-browser');
+      return { gates, reasons };
+    }
     if (path === 'src/api/sijeon.js') {
       select(
         'public sijeon renderer and lifecycle API changed',

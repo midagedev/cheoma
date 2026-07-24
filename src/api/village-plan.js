@@ -4,6 +4,7 @@ export { planVillage } from '../village/plan.js';
 export * from './temple-plan.js';
 export * from './sijeon-plan.js';
 export * from './yard-life-plan.js';
+export * from './mud-wall-plan.js';
 export {
   SCALE_ANCHORS,
   VILLAGE_SITE_R_MAX,
