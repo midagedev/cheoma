@@ -37,6 +37,7 @@ import {
   resolveAtmosphereProfile,
   resolvePostProfile,
 } from './atmosphere-profiles.js';
+import { resolveMoonBloomGate } from './moon-optics.js';
 import { createFresnelRim } from './rim.js';
 import { createDofController, DEFAULT_DOF_APERTURE } from './dof.js';
 import { StableBokehPass } from './stable-bokeh-pass.js';
@@ -639,7 +640,13 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   function applyPS() {
     bloomPass.strength = cur.bloomStrength;
     bloomPass.radius = cur.bloomRadius;
-    bloomPass.threshold = cur.bloomThreshold;
+    // A hard 0.01-wide cutoff made the telephoto Moon lose most of its bloom in
+    // one frame as a cloud crossed the threshold. Treat the authored night value
+    // as the midpoint of a restrained soft knee instead. Day/sunset retain the
+    // stock narrow gate so ordinary plaster and foliage do not become emitters.
+    const bloomGate = resolveMoonBloomGate(cur.bloomThreshold);
+    bloomPass.threshold = bloomGate.threshold;
+    bloomPass.highPassUniforms.smoothWidth.value = bloomGate.smoothWidth;
     // Bloom may softly affect a broad warm surface, but optical source discs are
     // reserved for a much smaller HDR set. Keeping this threshold above ordinary
     // sunlit plaster prevents roofs, foliage, and contrast edges from becoming a

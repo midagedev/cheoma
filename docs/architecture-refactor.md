@@ -273,6 +273,36 @@ stock `MeshDepthMaterial`로 동적 offset을 잃지 않으며,
 - 16개 원경 적운은 하나의 `InstancedMesh`다. translation은 sky dome처럼 카메라를 따르지만 azimuth는 월드에 고정돼 회전하면 다른 구름이 나타난다. 이 레이어가 근경 실루엣, HDR rim, 달의 alpha 가림, 구름 틈 빛줄기를 맡는다.
 - sky dome과 달은 `environment` 지형 그룹이 아니라 scene-level `sky-atmosphere`가 소유한다. 마을 모드가 단일건물 지형을 숨겨도 하늘은 끊기지 않으며, enable/dispose는 environment lifecycle이 명시적으로 정리한다.
 
+### 달 원반·근접 산란광·구름 감쇠 (#161)
+
+**원문 사실.** NASA는 지상에서 보는 달의 각지름을 약 0.5°로 설명하고, 달 반지름과 평균 거리로 계산한
+값도 약 0.52°다. WMO의 `corona`는 얇은 구름·안개 속 작은 물방울이나 얼음 입자에서 생기는 회절 현상이며
+가장 안쪽 고리는 보통 지름 5° 이하다. 이는 광원에서 반지름 22°에 생기는 얼음 결정 굴절의 `22° halo`와
+다른 현상이다. 구름의 관측 밝기는 반사·산란·투과가 합성된 결과라서, 광학 두께가 커지면 달 원반은
+흐려지다 가려져도 주변 산란광까지 같은 비율로 사라진다고 볼 수 없다. 근거와 원문 링크는
+[`credits.md`](credits.md)의 #46에 함께 둔다.
+
+**제품 해석.** Three·DOM 없는 `src/env/moon-optics.js`가 달 거리와 무관한 고정 각지름 0.52°, 실제
+vertical FOV 기반 픽셀 투영, 지름 5°의 절제된 무채색 corona를 소유한다. renderer-free 소비자는 좁은
+`src/api/moon-optics.js`를 사용하고, 이미 환경 렌더 graph를 쓰는 소비자만 `src/api/environment.js`
+aggregate를 사용할 수 있다. 관측 날짜·위치를 모르는 seed 장면이므로 달 크기를 무작위화하지 않는다. 렌더에서는 직접 원반과
+corona 에너지 0.40을 구름보다 먼저, 더 약한 산란 corona 0.02를 구름보다 뒤에 합성한다. 따라서 cloud alpha
+`a`에서 원반은 `1-a`, corona는 `0.40(1-a)+0.02`로 연속 감쇠하고, 원반 내부가 빈 corona profile이
+단단한 달 가장자리를 보존한다. 모든 레이어는 실제 scene depth를 검사해 산·집 뒤에서 새지 않는다.
+카메라 상대 달은 실제 방향광 위치를 공유해 hero 역광 방위에도 맞고, 프러스텀 판정 전의 이전-frame 위치에
+묶이지 않도록 세 작은 레이어만 컬링에서 제외한다. 야간 bloom은 기존 0.32 임계의 뜻을 유지하되 선형
+휘도 ±0.10의 soft knee로만 넓혀, 구름을 통과한 달이 임계를 넘는 한 프레임에 광량 대부분을 잃지 않는다.
+시간대 tween에서는 authored threshold 0.32→0.60 구간의 smoothstep으로 knee를 연속 해제하고,
+0.60 이상의 낮·석양은 기존 0.01 폭을 그대로 유지한다.
+
+**한계와 예산.** 이는 회절 고리의 파장별 미세 구조, 22° halo, 달 위상·리브레이션·천문력·대기 굴절,
+구름 미세물리를 시뮬레이션하지 않는다. 0.40/0.02 분배와 5° 폭은 아름다움과 읽기성을 위한 제품 계수이지
+측광 실측값이 아니며 야간 bloom knee도 센서 측정값이 아닌 연속성 계수다. 기존 원반+glow 두 draw를 원반+공유 geometry/texture의 corona 두 draw로 바꿔
+야간에 draw 하나와 material 하나만 늘린다. 기존 128² texture와 24×16 원반 분할을 유지하고 shader
+program·geometry·texture·pass·render target·light는 늘리지 않는다.
+달이 화면 밖이어도 이전-frame bounds가 다시 진입을 막지 않도록 야간에는 세 레이어 submission을 유지한다.
+따라서 화면 안의 기존 두 레이어 대비 증분은 하나지만, 화면 밖에서의 절대 예산도 세 draw임을 게이트에 기록한다.
+
 일반 필지 focus는 순수 계획의 남측 접근·정확한 24° 카메라 고도·1.65–2.5m 문 높이 target을 유지한다. 초기 10° 카메라 고도에서 마당과 생활 디테일을 더 열어 달라는 연속 사용자 검수를 반영해 12°·14°·16°·18°·20°·22°를 거쳐 24°로 올렸으며, 기와·초가·종가 실앱에서 집 전체와 전경 마당이 잘리지 않는 것을 다시 확인했다. 안전 가시성 후보의 dolly scale은 수평·수직 offset에 함께 적용해 직접 `집 보기`도 이 각도를 바꾸지 않는다. 앱의 `view-shift.js`는 UI 패널 offset만 합성하며 별도 하늘 편향은 0이다. -13% 편향은 집과 마당을 화면 아래로 밀어 전경을 잘랐으므로 되돌리지 않는다. focus hop/in/out, 리롤, 옵션 변경은 같은 카메라 timeline에서 이 값을 보존하거나 탐색용 0으로 초기화한다. 종가 compound의 닭은 일반 필지용 대문측 anchor를 재사용하면 담과 솟을대문 뒤에 완전히 숨으므로, 같은 강체 좌표계의 열린 안마당 anchor를 쓴다. 이 주거용 anchor와 닭 기본값은 `hanok`/`giwa`/`choga`에만 적용하고 관아·궁궐형 hero에는 적용하지 않는다. 최초 종가 landing과 상단 `집 보기` 직접 진입은 선택 건축 볼륨뿐 아니라 마당 표본, focus 동물 ray와 ON/OFF 픽셀 기여, 대문·등롱 같은 생활 디테일을 같은 실앱 게이트로 검사한다. `check:atmosphere`가 프로필·태양방향을, `check:cinematic:app`이 제품 구도를, `shoot:sky`가 실제 앱 픽셀·구름/달/광선·draw call을 검사한다.
 
 ## 병렬 작업 소유권
