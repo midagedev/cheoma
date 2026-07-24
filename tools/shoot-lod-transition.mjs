@@ -89,6 +89,9 @@ try {
     if (!edgeMist) throw new Error('edge mist ring is unavailable');
     const auxiliary = root.getObjectByName('village-auxiliaries');
     if (!auxiliary) throw new Error('persistent auxiliary root is unavailable');
+    const highlight = root.getObjectByName('village-highlight');
+    const marker = highlight?.getObjectByName('parcel-corner-marker');
+    if (!highlight || !marker) throw new Error('parcel corner marker is unavailable');
     window.__lodShotProgramKeys = new Set(
       (engine.renderer.info.programs || []).map((program) => program.cacheKey),
     );
@@ -103,6 +106,11 @@ try {
         root: auxiliary.uuid,
         geometries: auxiliary.children.map((child) => child.geometry?.uuid || null),
         materials: auxiliary.children.map((child) => child.material?.uuid || null),
+      },
+      highlight: {
+        group: highlight.uuid,
+        geometry: marker.geometry?.uuid,
+        material: marker.material?.uuid,
       },
     };
   });
@@ -170,6 +178,18 @@ try {
       const actual = engine.village.debugLod(prepared.parcelId);
       const edgeMist = root.getObjectByName('edge-mist-ring');
       const auxiliary = root.getObjectByName('village-auxiliaries');
+      const highlight = root.getObjectByName('village-highlight');
+      const marker = highlight?.getObjectByName('parcel-corner-marker');
+      const range = marker?.geometry?.drawRange;
+      const markerPosition = marker?.geometry?.attributes?.position;
+      const markerCount = Math.min(range?.count || 0, markerPosition?.count || 0);
+      let markerMinY = Infinity;
+      let markerMaxY = -Infinity;
+      for (let index = 0; index < markerCount; index++) {
+        const y = markerPosition.getY(index);
+        markerMinY = Math.min(markerMinY, y);
+        markerMaxY = Math.max(markerMaxY, y);
+      }
       const programKeys = (engine.renderer.info.programs || []).map((program) => program.cacheKey);
       const addedPrograms = programKeys.filter((key) => !window.__lodShotProgramKeys.has(key));
       window.__lodShotProgramKeys = new Set(programKeys);
@@ -192,6 +212,36 @@ try {
               child.geometry?.uuid === prepared.auxiliary.geometries[index]
               && child.material?.uuid === prepared.auxiliary.materials[index]
             )),
+        } : null,
+        highlight: highlight && marker ? {
+          visible: highlight.visible,
+          parcelId: highlight.userData.parcelId,
+          kind: highlight.userData.kind,
+          source: highlight.userData.source,
+          cornerCount: highlight.userData.cornerCount,
+          contourCount: highlight.userData.contourCount,
+          childCount: highlight.children.length,
+          meshCount: highlight.children.filter((child) => child.isMesh).length,
+          lineSegmentsCount: highlight.children.filter((child) => child.isLineSegments).length,
+          drawCount: markerCount,
+          minY: markerCount > 0 ? markerMinY : null,
+          maxY: markerCount > 0 ? markerMaxY : null,
+          ySpan: markerCount > 0 ? markerMaxY - markerMinY : Infinity,
+          heightRatio: (() => {
+            if (!highlight.userData.parcelId || markerCount <= 0) return null;
+            const bounds = engine.village.debugFocusVisibility(
+              highlight.userData.parcelId,
+            )?.subjectBounds;
+            const height = bounds ? bounds.max[1] - bounds.min[1] : 0;
+            return height > 1e-6 ? (markerMinY - bounds.min[1]) / height : null;
+          })(),
+          depthTest: marker.material.depthTest,
+          depthWrite: marker.material.depthWrite,
+          transparent: marker.material.transparent,
+          opacity: marker.material.opacity,
+          identityStable: highlight.uuid === prepared.highlight.group
+            && marker.geometry?.uuid === prepared.highlight.geometry
+            && marker.material?.uuid === prepared.highlight.material,
         } : null,
         calls: engine.village.debugDrawCalls(),
         triangles: engine.renderer.info.render.triangles,
@@ -351,6 +401,7 @@ try {
     const state = engine.village.getState();
     const lod = engine.village.debugLod(parcelId);
     const root = engine.village.focusRoot();
+    const highlight = engine.village.exportRoot().getObjectByName('village-highlight');
     let auxiliaryMeshes = 0;
     root?.traverseVisible?.((object) => {
       if (object.isMesh && /^auxiliary-building-/.test(object.name || '')) {
@@ -364,6 +415,8 @@ try {
       baseAuxiliaryVisible: lod?.auxiliaryVisible,
       overlay: lod?.overlay,
       auxiliaryMeshes,
+      highlightVisible: highlight?.visible ?? null,
+      highlightParcelId: highlight?.userData?.parcelId ?? null,
       camera: {
         position: engine.camera.position.toArray(),
         target: engine.__controls.target.toArray(),
@@ -411,6 +464,24 @@ try {
       || !capture.auxiliary?.visible
       || !capture.auxiliary?.ownerVisible
       || capture.auxiliary?.ownerHidden
+      || !capture.highlight?.visible
+      || capture.highlight.parcelId !== prepared.parcelId
+      || capture.highlight.kind !== 'parcel-corner-marker'
+      || !/^(?:edited-roof-footprint|roof-footprints?)$/.test(capture.highlight.source)
+      || capture.highlight.cornerCount < 4
+      || capture.highlight.contourCount < 1
+      || capture.highlight.childCount !== 1
+      || capture.highlight.meshCount !== 0
+      || capture.highlight.lineSegmentsCount !== 1
+      || capture.highlight.drawCount !== capture.highlight.cornerCount * 4
+      || !Number.isFinite(capture.highlight.heightRatio)
+      || capture.highlight.heightRatio < 0.45
+      || capture.highlight.heightRatio > 0.88
+      || !capture.highlight.depthTest
+      || capture.highlight.depthWrite
+      || !capture.highlight.transparent
+      || capture.highlight.opacity > 0.9
+      || !capture.highlight.identityStable
       || Math.abs(capture.edgeMist.opacity) > 1e-6
       || Math.abs(capture.edgeMist.viewWeight) > 1e-6
   )) || !captureStateValid || !transitionBudgetsValid || passParity.visibleLodMeshes <= 0
@@ -428,7 +499,8 @@ try {
     || !passParity.dofRestored || !passParity.inkRestored
     || focusCapture.selected !== prepared.parcelId || focusCapture.transitioning
     || !focusCapture.overlay || !focusCapture.baseAuxiliaryHidden
-    || focusCapture.baseAuxiliaryVisible || focusCapture.auxiliaryMeshes !== 3) process.exitCode = 1;
+    || focusCapture.baseAuxiliaryVisible || focusCapture.auxiliaryMeshes !== 3
+    || focusCapture.highlightVisible || focusCapture.highlightParcelId !== null) process.exitCode = 1;
 } finally {
   await browser?.close();
   await server.close();

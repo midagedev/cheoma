@@ -745,6 +745,51 @@ try {
       let frames = 0;
       let maxOverlays = 0;
 
+      function highlightState(root) {
+        const group = root?.getObjectByName?.('village-highlight');
+        const marker = group?.getObjectByName?.('parcel-corner-marker');
+        if (!group || !marker) return { available: false };
+        const range = marker.geometry?.drawRange;
+        const position = marker.geometry?.attributes?.position;
+        const drawCount = Math.min(range?.count || 0, position?.count || 0);
+        let minY = Infinity;
+        let maxY = -Infinity;
+        for (let index = 0; index < drawCount; index++) {
+          const y = position.getY(index);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+        return {
+          available: true,
+          visible: group.visible,
+          parcelId: group.userData.parcelId ?? null,
+          kind: group.userData.kind ?? null,
+          source: group.userData.source ?? null,
+          cornerCount: group.userData.cornerCount ?? 0,
+          contourCount: group.userData.contourCount ?? 0,
+          childCount: group.children.length,
+          meshCount: group.children.filter((child) => child.isMesh).length,
+          lineSegmentsCount: group.children.filter((child) => child.isLineSegments).length,
+          drawCount,
+          minY: drawCount > 0 ? minY : null,
+          maxY: drawCount > 0 ? maxY : null,
+          ySpan: drawCount > 0 ? maxY - minY : null,
+          heightRatio: (() => {
+            if (!group.userData.parcelId || drawCount <= 0) return null;
+            const bounds = engine.village.debugFocusVisibility(
+              group.userData.parcelId,
+            )?.subjectBounds;
+            const height = bounds ? bounds.max[1] - bounds.min[1] : 0;
+            return height > 1e-6 ? (minY - bounds.min[1]) / height : null;
+          })(),
+          depthTest: marker.material?.depthTest,
+          depthWrite: marker.material?.depthWrite,
+          transparent: marker.material?.transparent,
+          geometry: marker.geometry?.uuid || null,
+          material: marker.material?.uuid || null,
+        };
+      }
+
       function inspect(phase) {
         const lod = engine.village.debugLod();
         const state = engine.village.getState();
@@ -836,7 +881,7 @@ try {
             failures: lod.failures,
           });
         }
-        return { lod, state, fauna };
+        return { lod, state, fauna, highlight: highlightState(root) };
       }
 
       if (action === 'focus') engine.village.debugFocus(parcelId);
@@ -867,10 +912,12 @@ try {
         action, parcelId, frames, finished, failures,
         immediateState: immediate.state,
         immediateFauna: immediate.fauna,
+        immediateHighlight: immediate.highlight,
         immediateCounts: immediate.lod.counts,
         immediateById,
         finalState: final.state,
         finalFauna: final.fauna,
+        finalHighlight: final.highlight,
         finalCounts: final.lod.counts,
         finalById,
         seenLevels: [...seenLevels],
@@ -951,6 +998,18 @@ try {
       && owner.uuids.length === 1 && owner.uuids[0] === ownerUuid(id)
       && owner.policyValid;
   };
+  const activeHighlight = (state, parcelId) => state?.available
+    && state.visible && state.parcelId === parcelId
+    && state.kind === 'parcel-corner-marker'
+    && /^(?:edited-roof-footprint|roof-footprints?)$/.test(state.source)
+    && state.cornerCount >= 4 && state.contourCount >= 1
+    && state.childCount === 1 && state.meshCount === 0 && state.lineSegmentsCount === 1
+    && state.drawCount === state.cornerCount * 4
+    && Number.isFinite(state.heightRatio)
+    && state.heightRatio >= 0.45 && state.heightRatio <= 0.88
+    && state.depthTest === true && state.depthWrite === false && state.transparent === true;
+  const hiddenHighlight = (state) => state?.available
+    && !state.visible && state.parcelId === null;
   const focus = await traceTransition('focus', first, {
     immediateIds: [first], finalIds: [first], finalSelected: first,
     reuseIds: [first], ownerUuids: { [first]: ownerUuid(first) },
@@ -972,6 +1031,10 @@ try {
     + `(${JSON.stringify({ immediate: focus.immediateFauna, final: focus.finalFauna })})`);
   pass(focus.finalCounts.overlay === 1 && focus.finalById[first]?.valid,
     'focus-in settles with one valid selected overlay');
+  pass(activeHighlight(focus.immediateHighlight, first)
+      && hiddenHighlight(focus.finalHighlight),
+  `focus-in reuses one depth-tested fitted-eave marker, then retires it at arrival `
+    + `(${JSON.stringify({ immediate: focus.immediateHighlight, final: focus.finalHighlight })})`);
   pass(focus.seenLevels.includes('mid'),
     `focus-in observes the real MID envelope root (${focus.seenLevels.join(' → ')})`);
   const focusShadow = await page.evaluate(() => {
@@ -1141,6 +1204,11 @@ try {
   pass(!hop.finalById[first]?.overlay && hop.finalById[second]?.overlay
       && hop.finalCounts.overlay === 1,
   'hop returns the old base only after the new overlay settles');
+  pass(activeHighlight(hop.immediateHighlight, second)
+      && hiddenHighlight(hop.finalHighlight)
+      && hop.immediateHighlight.geometry === focus.immediateHighlight.geometry
+      && hop.immediateHighlight.material === focus.immediateHighlight.material,
+  'focus hop moves the same one-draw fitted-eave marker to B and hides it at arrival');
 
   const focusOut = await traceTransition('return', null, {
     immediateIds: [second], finalIds: [second], finalSelected: null,
@@ -1153,6 +1221,11 @@ try {
   pass(focusOut.immediateState.selected === null && focusOut.immediateState.transitioning
       && focusOut.immediateById[second]?.overlay,
   'focus-out keeps the overlay during the synchronous camera handoff');
+  pass(activeHighlight(focusOut.immediateHighlight, second)
+      && activeHighlight(focusOut.finalHighlight, second)
+      && focusOut.immediateHighlight.geometry === focus.immediateHighlight.geometry
+      && focusOut.immediateHighlight.material === focus.immediateHighlight.material,
+  'focus-out keeps the reusable fitted-eave marker through aerial arrival without a fill mesh');
   pass(stableOwner(focusOut.immediateFauna, second)
       && stableOwner(focusOut.finalFauna, second)
       && focusOut.finalFauna?.ownerAnimals?.[second]?.activeCount === 0
@@ -1188,6 +1261,30 @@ try {
       && Object.values(aerialLife.critterActive).every((active) => active === false)
       && aerialLife.petalLevel === 0,
   `focus-out returns fauna and leaves to aerial sleep (${JSON.stringify(aerialLife)})`);
+
+  const retiredHighlight = await page.evaluate(async () => {
+    const engine = window.__engine;
+    const root = engine.village.exportRoot();
+    const group = root?.getObjectByName?.('village-highlight');
+    const marker = group?.getObjectByName?.('parcel-corner-marker');
+    const started = performance.now();
+    while (group?.visible && performance.now() - started < 2600) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return {
+      visible: group?.visible ?? null,
+      parcelId: group?.userData?.parcelId ?? null,
+      childCount: group?.children?.length ?? null,
+      geometry: marker?.geometry?.uuid || null,
+      material: marker?.material?.uuid || null,
+    };
+  });
+  pass(retiredHighlight.visible === false && retiredHighlight.parcelId === null
+      && retiredHighlight.childCount === 1
+      && retiredHighlight.geometry === focus.immediateHighlight.geometry
+      && retiredHighlight.material === focus.immediateHighlight.material,
+  `focus-out location marker retires after its existing 2s hold without reallocating `
+    + `(${JSON.stringify(retiredHighlight)})`);
 
   // Camera arrival and ring retirement have different durations. Wait for both ambient systems
   // to become structurally empty instead of relying on an arbitrary number of frames.
