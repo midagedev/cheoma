@@ -56,7 +56,9 @@ import {
   cloneCameraFraming,
   createParcelHighlight,
   focusTerrainCutawayForProxy,
+  refreshPalacePickProxy,
   refreshParcelPickProxy,
+  refreshTemplePickProxy,
 } from './picking.js';
 import { createVillageNightGlow } from './night-glow.js';
 import { createVillageSnowController } from './snow.js';
@@ -295,6 +297,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     return {
       parcelId: p.parcelId, mesh: p.mesh, bbox: p.bbox.clone(),
       focusBounds: p.focusBounds?.clone?.() || p.bbox.clone(),
+      focusSubject: p.focusSubject ? structuredClone(p.focusSubject) : null,
       buildingSpec: p.buildingSpec, worldCenter: p.worldCenter.clone(),
       baseCameraFraming: cloneCameraFraming(p.baseCameraFraming || p.cameraFraming),
       cameraFraming: cloneCameraFraming(p.cameraFraming),
@@ -752,6 +755,25 @@ export function createVillageHandle(opts, seed, plan, group) {
     };
   }
 
+  function refreshPalaceProxy() {
+    const proxy = proxyById.get('palace');
+    const activeHandle = palaceOverride?.comp?.userData?.palaceHandle || palaceHandle;
+    if (proxy) {
+      refreshPalacePickProxy(proxy, activeHandle);
+      proxy.buildingSpec = palaceSpec();
+    }
+    return proxy;
+  }
+
+  function refreshTempleProxy() {
+    const proxy = proxyById.get('temple');
+    if (proxy) {
+      refreshTemplePickProxy(proxy, templeCurrentPlan);
+      proxy.buildingSpec = templeSpec();
+    }
+    return proxy;
+  }
+
   // Palace and temple proxies join the same address space as residential parcels.
   for (const proxy of buildLandmarkPickProxies(plan, site, {
     palaceHandle, palaceInner, palaceSpec,
@@ -1054,13 +1076,14 @@ export function createVillageHandle(opts, seed, plan, group) {
       // 궁궐 컴파운드(#93): presetOverrides 로 오버레이 재생성(일곽 병합 유지). 특수 커밋 경로(pointerup).
       if (parcelId === 'palace') {
         if (!palaceEditable()) return null;
-        return showPalaceDetail(newParams.presetOverrides || null);
+        const group = showPalaceDetail(newParams.presetOverrides || null);
+        refreshPalaceProxy();
+        return group;
       }
       if (parcelId === 'temple') {
         if (!templeEditable()) return null;
         const group = showTempleDetail(newParams.templeOptions || newParams);
-        const proxy = proxyById.get('temple');
-        if (proxy) proxy.buildingSpec = templeSpec();
+        refreshTempleProxy();
         return group;
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);
@@ -1370,15 +1393,14 @@ export function createVillageHandle(opts, seed, plan, group) {
         if (!palaceEditable()) return null;
         palaceHandle.seed = (Math.random() * 0x100000000) >>> 0;    // 궁 다일곽 배치 변주 재굴림
         const g = withSeededBuild(palaceHandle.seed, () => showPalaceDetail(null));
-        const px = proxyById.get('palace'); if (px) px.buildingSpec = palaceSpec();
+        const px = refreshPalaceProxy();
         return g ? { group: g, compound: true, assembly: g, spec: px ? px.buildingSpec : palaceSpec() } : null;
       }
       if (parcelId === 'temple') {
         if (!templeEditable()) return null;
         templeSeed = (Math.random() * 0x100000000) >>> 0;
         const g = withSeededBuild(templeSeed, () => showTempleDetail());
-        const px = proxyById.get('temple');
-        if (px) px.buildingSpec = templeSpec();
+        const px = refreshTempleProxy();
         return g ? { group: g, compound: true, assembly: g, spec: px ? px.buildingSpec : templeSpec() } : null;
       }
       const parcel = plan.parcels.find((p) => p.id === parcelId);

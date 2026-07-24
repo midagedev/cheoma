@@ -64,6 +64,9 @@ try {
       null,
       { timeout },
     );
+    // `shot=1` keeps unrelated motion deterministic but normally disables the
+    // product UI-aware projection. This fixture explicitly owns that contract.
+    await page.evaluate(() => window.__viewshift?.setEnabled(true));
   }
 
   // Start an actual product transition, drain the no-warm reveal microtasks, then
@@ -94,15 +97,29 @@ try {
       const THREE = await import(threeUrl);
       const visibility = engine.village.debugFocusVisibility(id);
       const bounds = visibility.subjectBounds;
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const x of [bounds.min[0], bounds.max[0]]) {
+      const semantic = visibility.focusSubject;
+      const semanticPoints = [];
+      const addFootprint = (footprint, y) => {
+        for (const point of footprint || []) semanticPoints.push({ x: point.x, y, z: point.z });
+      };
+      if (semantic?.representative) {
+        addFootprint(semantic.representative.footprint, semantic.representative.minY);
+        addFootprint(semantic.representative.footprint, semantic.representative.maxY);
+      }
+      if (semantic?.courtyard) addFootprint(semantic.courtyard.footprint, semantic.courtyard.y);
+      for (const anchor of semantic?.anchors || []) {
+        if (anchor?.point) semanticPoints.push(anchor.point);
+      }
+      if (!semanticPoints.length) for (const x of [bounds.min[0], bounds.max[0]]) {
         for (const y of [bounds.min[1], bounds.max[1]]) {
-          for (const z of [bounds.min[2], bounds.max[2]]) {
-            const projected = camera.position.clone().set(x, y, z).project(camera);
-            minX = Math.min(minX, projected.x); maxX = Math.max(maxX, projected.x);
-            minY = Math.min(minY, projected.y); maxY = Math.max(maxY, projected.y);
-          }
+          for (const z of [bounds.min[2], bounds.max[2]]) semanticPoints.push({ x, y, z });
         }
+      }
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const point of semanticPoints) {
+        const projected = camera.position.clone().set(point.x, point.y, point.z).project(camera);
+        minX = Math.min(minX, projected.x); maxX = Math.max(maxX, projected.x);
+        minY = Math.min(minY, projected.y); maxY = Math.max(maxY, projected.y);
       }
       const forward = target.clone().sub(camera.position).normalize();
       const detailRoot = engine.village.focusRoot();
@@ -230,6 +247,8 @@ try {
         top: (1 - maxY) * 0.5,
         bottom: (1 - minY) * 0.5,
         height: (maxY - minY) * 0.5,
+        safeRect: window.__viewshift?.safeRect ?? null,
+        viewportFit: window.__viewshift?.fit ?? null,
         yardDetails,
         yardDetailsInFrame: yardDetails.filter((detail) => detail.inFrame).length,
         yardDetailsVisible: yardDetails.filter((detail) => detail.visible).length,
@@ -303,6 +322,11 @@ try {
     // finish before capture. Camera motion itself was already sought deterministically.
     await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame())));
     await page.waitForTimeout(300);
+    await page.waitForFunction(() => {
+      const shift = window.__viewshift;
+      return shift && Math.abs(shift.x - shift.tx) < 0.25
+        && Math.abs(shift.y - shift.ty) < 0.25;
+    }, null, { timeout });
     const frame = await measureFocusedFrame(parcel.parcelId);
     console.log(`FOCUS FRAME ${name}: ${JSON.stringify(frame)}`);
     if (name === 'giwa' || name === 'choga' || name === 'hero' || name === 'terrain-p31') {
@@ -314,6 +338,23 @@ try {
         && frame.left >= 0.02 && frame.right <= 0.98 && frame.height >= 0.12,
       `${name} house volume remains uncropped and readable (${(frame.top * 100).toFixed(1)}–${(frame.bottom * 100).toFixed(1)}%, height ${(frame.height * 100).toFixed(1)}%)`);
     }
+    const safe = frame.safeRect;
+    const px = {
+      left: frame.left * 1440,
+      right: frame.right * 1440,
+      top: frame.top * 900,
+      bottom: frame.bottom * 900,
+    };
+    check(safe?.usable
+      && px.left >= safe.left - 1
+      && px.right <= safe.right + 1
+      && px.top >= safe.top - 1
+      && px.bottom <= safe.bottom + 1
+      && frame.viewportFit?.fitted
+      && !frame.viewportFit?.overflow,
+    `${name} semantic architecture and courtyard fit the live UI-safe viewport (${
+      JSON.stringify({ px, safe, fit: frame.viewportFit })
+    })`);
     if (name === 'giwa' || name === 'choga') {
       const animalPixels = await captureFocusedAnimalPixels(parcel.parcelId);
       residentialEvidence.push({ name, frame, animalPixels });
@@ -387,6 +428,11 @@ try {
   check(!!terrainRegression, 'capital seed 7 terrain-occluded regression parcel p31 is available');
   if (terrainRegression) {
     await focusAndCapture('terrain-p31', terrainRegression);
+    await page.waitForFunction(
+      () => window.__engine.debugDof().postQualityMode === 'stable',
+      null,
+      { timeout },
+    );
     const terrainEvidence = await page.evaluate((id) => ({
       visibility: window.__engine.village.debugFocusVisibility(id),
       dof: window.__engine.debugDof(),
@@ -443,6 +489,105 @@ try {
     check(!formalFrame.hasChickens,
       'formal government hero does not inherit the residential inner-yard chickens');
   }
+
+  // One additional mobile boot owns both landmark frames. The context sheet
+  // remains at its product-default peek detent; top controls, dial, actions, and
+  // the visible sheet grip all participate in the live safe rectangle.
+  const mobile = await browser.newPage({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+  });
+  mobile.setDefaultTimeout(timeout);
+  await mobile.addInitScript(() => { window.__noWarm = true; });
+  mobile.on('pageerror', (error) => runtimeErrors.push(`mobile pageerror: ${error.message}`));
+  mobile.on('console', (message) => {
+    if (message.type() === 'error' && !/favicon|404|Failed to load resource/i.test(message.text())) {
+      runtimeErrors.push(`mobile console: ${message.text()}`);
+    }
+  });
+  await mobile.goto(`${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&seed=20260718&vseed=7&time=day&weather=clear`, {
+    waitUntil: 'domcontentloaded',
+    timeout,
+  });
+  await mobile.waitForFunction(
+    () => window.__SHOT_READY === true
+      && window.__engine?.village?.getState()?.active
+      && window.__device?.sheet === true,
+    null,
+    { timeout },
+  );
+  await mobile.evaluate(() => window.__viewshift?.setEnabled(true));
+
+  async function mobileFocus(parcelId) {
+    return mobile.evaluate(async (id) => {
+      const engine = window.__engine;
+      if (engine.village.getState().selected) {
+        engine.village.return();
+        for (let index = 0; index < 6; index++) await Promise.resolve();
+        engine.debugDofSeek(1, { finish: true });
+      }
+      engine.village.debugFocus(id);
+      for (let index = 0; index < 6; index++) await Promise.resolve();
+      engine.debugDofSeek(1, { finish: true });
+    }, parcelId);
+  }
+
+  async function mobileSemanticFrame(parcelId) {
+    await mobileFocus(parcelId);
+    await mobile.waitForFunction(() => {
+      const shift = window.__viewshift;
+      return document.querySelector('.sheet.context')?.dataset.snap === 'peek'
+        && shift?.safeRect?.usable
+        && shift.fit?.fitted
+        && !shift.fit?.overflow
+        && Math.abs(shift.x - shift.tx) < 0.25
+        && Math.abs(shift.y - shift.ty) < 0.25;
+    }, null, { timeout });
+    return mobile.evaluate((id) => {
+      const engine = window.__engine;
+      const subject = engine.village.debugFocusVisibility(id).focusSubject;
+      const points = [];
+      const add = (footprint, y) => {
+        for (const point of footprint || []) points.push({ x: point.x, y, z: point.z });
+      };
+      add(subject.representative.footprint, subject.representative.minY);
+      add(subject.representative.footprint, subject.representative.maxY);
+      if (subject.courtyard) add(subject.courtyard.footprint, subject.courtyard.y);
+      for (const anchor of subject.anchors || []) if (anchor.point) points.push(anchor.point);
+      const box = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
+      for (const point of points) {
+        const projected = engine.camera.position.clone().set(point.x, point.y, point.z).project(engine.camera);
+        const x = (projected.x + 1) * innerWidth * 0.5;
+        const y = (1 - projected.y) * innerHeight * 0.5;
+        box.left = Math.min(box.left, x);
+        box.right = Math.max(box.right, x);
+        box.top = Math.min(box.top, y);
+        box.bottom = Math.max(box.bottom, y);
+      }
+      return {
+        box,
+        safe: window.__viewshift.safeRect,
+        fit: window.__viewshift.fit,
+        snap: document.querySelector('.sheet.context')?.dataset.snap,
+      };
+    }, parcelId);
+  }
+
+  for (const parcelId of ['palace', 'temple']) {
+    const mobileFrame = await mobileSemanticFrame(parcelId);
+    check(mobileFrame.snap === 'peek'
+      && mobileFrame.box.left >= mobileFrame.safe.left - 1
+      && mobileFrame.box.right <= mobileFrame.safe.right + 1
+      && mobileFrame.box.top >= mobileFrame.safe.top - 1
+      && mobileFrame.box.bottom <= mobileFrame.safe.bottom + 1,
+    `mobile ${parcelId} semantic frame clears top chrome and peek sheet (${
+      JSON.stringify(mobileFrame)
+    })`);
+    await mobile.screenshot({ path: join(outputDir, `mobile-${parcelId}.png`) });
+  }
+  await mobile.close();
 
   check(runtimeErrors.length === 0, `browser reports no runtime errors (${runtimeErrors.length})`);
 } finally {

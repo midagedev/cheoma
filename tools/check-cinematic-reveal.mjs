@@ -17,6 +17,12 @@ import {
   selectSafeFocusEndpoint,
 } from '../src/camera/focus-visibility.js';
 import {
+  fitFocusFraming,
+  focusSubjectFitPoints,
+  safeViewportRect,
+  transformFocusSubject,
+} from '../src/camera/focus-framing.js';
+import {
   focusFeatureBlockers,
   focusPlanningBlockers,
   parcelFocusBlocker,
@@ -44,6 +50,85 @@ const frame = (position, target, fov, referenceFov = fov, composition = 0) => ({
   position, target, fov, referenceFov, composition,
 });
 const near = (a, b, epsilon = EPS) => assert.ok(distance(a, b) <= epsilon, `${JSON.stringify(a)} != ${JSON.stringify(b)}`);
+
+// #155: UI adapters provide only physical viewport insets. The reusable camera
+// policy must preserve lens/axis/elevation while dollying a representative hall
+// and its flat courtyard into that safe rectangle.
+const semanticSubject = transformFocusSubject({
+  id: 'fixture-compound',
+  representative: {
+    id: 'main-hall',
+    role: 'main-hall',
+    footprint: [
+      { x: -9, z: 1 }, { x: 9, z: 1 }, { x: 9, z: -6 }, { x: -9, z: -6 },
+    ],
+    minY: 0,
+    maxY: 11,
+  },
+  courtyard: {
+    id: 'court',
+    role: 'worship',
+    footprint: [
+      { x: -14, z: 20 }, { x: 14, z: 20 }, { x: 14, z: -1 }, { x: -14, z: -1 },
+    ],
+    y: 0.02,
+  },
+  target: { x: 0, y: 3.2, z: 2 },
+}, { x: 21, y: 4, z: -13, rotationY: 0.37 });
+const semanticFrame = frame(
+  { x: 42, y: 20, z: 54 },
+  semanticSubject.target,
+  VILLAGE_LENS.temple.fov,
+  VILLAGE_LENS.temple.referenceFov,
+);
+const desktopLayout = {
+  width: 1440,
+  height: 900,
+  insets: { left: 322, right: 186, top: 0, bottom: 138 },
+  gutter: 16,
+};
+const safeDesktop = safeViewportRect(desktopLayout);
+assert.deepEqual(
+  [safeDesktop.left, safeDesktop.right, safeDesktop.top, safeDesktop.bottom],
+  [338, 1238, 16, 746],
+  'actual product chrome must reduce to one stable safe rectangle',
+);
+const fittedSemantic = fitFocusFraming({
+  framing: semanticFrame,
+  subject: semanticSubject,
+  viewport: desktopLayout,
+});
+assert.ok(fittedSemantic.fitted && !fittedSemantic.overflow && fittedSemantic.scale > 1,
+  'semantic compound fixture must require and receive a physical dolly-out');
+assert.ok(
+  fittedSemantic.projectedBounds.left >= safeDesktop.left - EPS
+    && fittedSemantic.projectedBounds.right <= safeDesktop.right + EPS
+    && fittedSemantic.projectedBounds.top >= safeDesktop.top - EPS
+    && fittedSemantic.projectedBounds.bottom <= safeDesktop.bottom + EPS,
+  'representative hall and courtyard fit points must remain inside the safe viewport',
+);
+assert.equal(fittedSemantic.framing.fov, semanticFrame.fov,
+  'safe viewport fitting must preserve the authored physical lens');
+near(fittedSemantic.framing.target, semanticFrame.target);
+const semanticBaseDirection = direction(semanticFrame);
+const semanticFitDirection = direction(fittedSemantic.framing);
+assert.ok(angle(semanticBaseDirection, semanticFitDirection) < EPS,
+  'safe viewport fitting must preserve approach axis and elevation');
+assert.equal(focusSubjectFitPoints(semanticSubject).length, 12,
+  'semantic fitting must sample a hall volume plus only the courtyard ground plane');
+const unusableSemantic = fitFocusFraming({
+  framing: semanticFrame,
+  subject: semanticSubject,
+  viewport: {
+    width: 390,
+    height: 844,
+    insets: { left: 0, right: 0, top: 0, bottom: 760 },
+    gutter: 16,
+  },
+});
+assert.ok(!unusableSemantic.fitted && unusableSemantic.overflow
+  && unusableSemantic.scale === 1,
+'a nearly full sheet must fail closed instead of shrinking architecture into a thumbnail');
 
 const from = frame({ x: -14, y: 9, z: 29 }, { x: 0, y: 4.2, z: 0 }, 28, 28, 0);
 const close = frame({ x: 1.5, y: 1.35, z: 34 }, { x: 0, y: 5.2, z: 0 }, 18, 21, 1);

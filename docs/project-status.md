@@ -1,7 +1,7 @@
 # 프로젝트 방향과 현재 상태
 
 > - **상태**: 현재 계약
-> - **기준일**: 2026-07-24
+> - **기준일**: 2026-07-25
 > - **근거**: Claude Code 프로젝트 메모리의 안정된 결정, 현재 코드, 영구 회귀 게이트
 
 ## 한 줄 방향
@@ -111,6 +111,20 @@ run·대문 개구도 별도 공간 인덱스의 first surface로 검사하며, 
 지형 능선은 이 권위 프레임을 다시 당기지 않는다. `village/terrain-grid.js`가 같은 3×3 집 앞면 표본의
 정확한 삼각면 교차를 projection near 거리 하나로 줄이고, `village-camera-runtime.js`가 모든 카메라
 writer 뒤에서 이를 적용한다. 집을 침범하지 않는 한 렌더러별 clipping patch나 FOV 보상은 만들지 않는다.
+
+GitHub #155는 이 방해물 회피 결과와 제품 UI 사이의 마지막 구도 경계를 분리한다.
+`camera/focus-framing.js`는 Three·DOM 없는 순수 의미 subject를 대표 건축의 실제 처마 footprint 상·하단,
+열린 마당/조정의 지면 footprint, 세부 anchor로 축약한다. 일반 주거는 fitted 지붕과 문·생활 detail,
+관아형 hero는 중앙 전각과 조정, 궁은 정전과 조정, 사찰은 주불전과 예불 중정을 사용한다. 빈 마당 위를
+거대한 고체 AABB로 간주하지 않으며, 사찰 변형·궁 재굴림 뒤에는 새 plan/assembler handle에서 descriptor만
+갱신해 렌더 트리를 순회하거나 새 GPU 자원을 만들지 않는다.
+
+앱의 `view-shift.js`는 실제 보이는 카드·패널·시트·가이드·모드·다이얼·액션을 중앙 safe rectangle 하나로
+줄인다. 투영 중심은 그 영역을 계속 따라가고, focus-in·hop·arrival·reroll 수명주기 경계에서만 의미 subject가
+전부 들어오는 최소 거리로 같은 카메라 ray를 물리적으로 dolly-out한다. actual/reference FOV, target,
+남향축·고도·DoF 의미 초점은 바뀌지 않고, 화면 대부분을 UI가 덮어 안전 영역이 28%보다 작으면 fail-closed한다.
+데스크톱과 모바일 실제 앱 게이트는 궁의 정전+조정과 사찰의 주불전+예불 중정이 살아 있는 safe rectangle 안에
+드는지 직접 투영해 검사한다.
 
 GitHub #3 집 편집 슬라이더는 `live-edit-scheduler.js`를 단일 케이던스 소유자로 쓴다. 화면의 숫자는 모든 `input`에 즉시 반응하지만, 일반 주택 지오메트리 preview는 최신 값만 프레임에 맞춰 반영하고 최근 재생성 비용에 따라 32–96ms 사이에서 스스로 숨을 고른다. `change` 커밋은 대기 preview를 폐기하고 #19의 정확한 편집 처마·pick proxy·병합 flora를 한 번만 확정한다. 종가·관아·궁·사찰 복합체는 기존대로 커밋 시에만 재생성한다.
 
