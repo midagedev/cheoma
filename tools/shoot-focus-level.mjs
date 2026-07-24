@@ -10,7 +10,10 @@ import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 import { countChangedPixels } from './lib/png-metrics.mjs';
-import { VILLAGE_FOCUS_ELEVATION } from '../src/camera/optics.js';
+import {
+  VILLAGE_FOCUS_DOF_APERTURE,
+  VILLAGE_FOCUS_ELEVATION,
+} from '../src/camera/optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -233,7 +236,7 @@ try {
     await page.waitForTimeout(300);
     const frame = await measureFocusedFrame(parcel.parcelId);
     console.log(`FOCUS FRAME ${name}: ${JSON.stringify(frame)}`);
-    if (name === 'giwa' || name === 'choga' || name === 'hero') {
+    if (name === 'giwa' || name === 'choga' || name === 'hero' || name === 'terrain-p31') {
       check(Math.abs(frame.elevation - FOCUS_ELEVATION_DEG) < 0.02,
         `${name} runtime keeps the exact shared focus elevation (${frame.elevation.toFixed(2)}°)`);
       check(Math.abs(frame.composition) < 1e-6,
@@ -294,6 +297,27 @@ try {
     `temple editor restores extended semantic defaults (${edit.extended.spec.params.hallCount} halls)`);
     check(edit.extended.box.x > edit.compact.box.x + 20 && edit.extended.box.z > edit.compact.box.z + 20,
       `temple editor rebuilds the reserved compound geometry (${JSON.stringify({ compact: edit.compact.box, extended: edit.extended.box })})`);
+  }
+  const terrainRegression = parcels.find((parcel) => parcel.parcelId === 'p31');
+  check(!!terrainRegression, 'capital seed 7 terrain-occluded regression parcel p31 is available');
+  if (terrainRegression) {
+    await focusAndCapture('terrain-p31', terrainRegression);
+    const terrainEvidence = await page.evaluate((id) => ({
+      visibility: window.__engine.village.debugFocusVisibility(id),
+      dof: window.__engine.debugDof(),
+    }), terrainRegression.parcelId);
+    console.log(`FOCUS TERRAIN p31: ${JSON.stringify(terrainEvidence)}`);
+    check(terrainEvidence.visibility.terrainLimited
+      && terrainEvidence.visibility.terrainMinClearance >= 1 - 1e-6
+      && terrainEvidence.visibility.terrainEndpointClearance >= 1.2 - 1e-6,
+    `p31 camera keeps an exact rendered-terrain corridor (${terrainEvidence.visibility.terrainMinClearance?.toFixed(3)}m ray, ${terrainEvidence.visibility.terrainEndpointClearance?.toFixed(3)}m eye)`);
+    check(terrainEvidence.visibility.telephotoPreserved
+      && terrainEvidence.visibility.safeFraming.fov <= 30,
+    `p31 stays within the architectural fallback lens (${terrainEvidence.visibility.safeFraming.fov.toFixed(2)}°)`);
+    check(Math.abs(terrainEvidence.dof.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
+      && Math.abs(terrainEvidence.dof.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
+      && terrainEvidence.dof.bokehSamples === 41,
+    `p31 restores the strengthened settled physical DoF (${terrainEvidence.dof.aperture}, ${terrainEvidence.dof.bokehSamples} taps)`);
   }
   check(residentialEvidence.some((entry) => (
     entry.animalPixels.toggled && entry.animalPixels.changed >= 20

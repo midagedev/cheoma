@@ -8,7 +8,11 @@ import {
   launchVerificationBrowser,
   reportWebGLRenderer,
 } from "./lib/verification-browser.mjs";
-import { VILLAGE_LENS, dollyScaleForFov } from "../src/camera/optics.js";
+import {
+  VILLAGE_FOCUS_DOF_APERTURE,
+  VILLAGE_LENS,
+  dollyScaleForFov,
+} from "../src/camera/optics.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const APP_ROOT = join(ROOT, "app");
@@ -613,8 +617,10 @@ try {
   pass(
     result.focusEnd.bokehSamples === 41 &&
       result.focusEnd.highlightThreshold >= 0.48 &&
-      result.focusEnd.highlightGain > 0,
-    "one adaptive gather plus compact-source scatter owns focused bokeh",
+      result.focusEnd.highlightGain > 0 &&
+      Math.abs(result.focusEnd.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12 &&
+      Math.abs(result.focusEnd.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12,
+    "one strengthened physical aperture, adaptive gather, and compact-source scatter own focused bokeh",
   );
   pass(
     result.postQuality.moving.postQuality === 0 &&

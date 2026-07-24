@@ -11,7 +11,6 @@ import {
   VILLAGE_FOCUS_ELEVATION,
   VILLAGE_LENS,
   dollyScaleForFov,
-  fovForDollyScale,
 } from '../src/camera/optics.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -541,7 +540,8 @@ try {
     `default hero arrival focus animals make a real local pixel contribution (${heroAnimalPixels.changed} changed pixels)`);
   const heroVisibility = await arrivalPage.evaluate(() => {
     const engine = window.__engine;
-    return engine.village.debugFocusVisibility(engine.village.getState().selected);
+    const visibility = engine.village.debugFocusVisibility(engine.village.getState().selected);
+    return visibility.hero || visibility;
   });
   console.log(`HERO VISIBILITY: ${Math.round(heroVisibility.baseVisibleRatio * 100)}% -> ${Math.round(heroVisibility.visibleRatio * 100)}% (azimuth ${((heroVisibility.baseAzimuth || 0) * 180 / Math.PI).toFixed(1)}° -> ${((heroVisibility.azimuth || 0) * 180 / Math.PI).toFixed(1)}°, scale ${heroVisibility.scale})`);
   invariant(heroVisibility.visibleRatio >= heroVisibility.baseVisibleRatio,
@@ -589,17 +589,10 @@ try {
   invariant(arrivedDirection[0] * safeDirection[0] + arrivedDirection[1] * safeDirection[1]
       > 1 - 1e-9,
   'hero arrival consumes the safe endpoint azimuth instead of rebuilding the authored base ray');
-  const expectedArrivalFov = fovForDollyScale(
-    VILLAGE_LENS.hero.fov,
-    heroVisibility.scale,
-  );
-  const expectedArrivalReferenceFov = fovForDollyScale(
-    VILLAGE_LENS.hero.referenceFov,
-    heroVisibility.scale,
-  );
-  invariant(Math.abs(heroFrame.cameraFov - expectedArrivalFov) < 1e-9
-      && Math.abs(heroFrame.cameraReferenceFov - expectedArrivalReferenceFov) < 1e-9,
-  `hero arrival retains the safe endpoint scale through its compensating lens (${heroVisibility.scale}, ${heroFrame.cameraFov.toFixed(2)}°)`);
+  invariant(Math.abs(heroFrame.cameraFov - heroVisibility.safeFraming.fov) < 1e-9
+      && Math.abs(heroFrame.cameraReferenceFov - heroVisibility.safeFraming.referenceFov) < 1e-9
+      && heroVisibility.safeFraming.referenceFov === VILLAGE_LENS.hero.referenceFov,
+  `hero arrival consumes its separately solved frame and fixed reference lens (${heroVisibility.scale}, ${heroFrame.cameraFov.toFixed(2)}°)`);
   await arrivalPage.close();
 
   // Focused-house reroll: real public product command, deterministic seeks and PNGs.
@@ -732,6 +725,49 @@ try {
   }
   invariant(await rebuildPage.evaluate((id) => window.__engine.village.getState().selected === id, parcelId),
     'camera interruption does not lose focused parcel ownership');
+
+  // #132 merge gate: the deterministic capital parcel that used to put the 10°
+  // camera behind a hill must consume the exact terrain-shortened product frame.
+  await rebuildPage.addInitScript(() => { window.__noWarm = true; });
+  await rebuildPage.goto(
+    `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,
+    { waitUntil: 'domcontentloaded', timeout },
+  );
+  await rebuildPage.waitForFunction(() => (
+    window.__SHOT_READY === true
+      && window.__engine?.village?.getState()?.active
+      && window.__engine.village.debugPlan()?.seed === 7
+      && !window.__engine.village.debugCamera().transitioning
+  ), null, { timeout });
+  const terrainRegression = await rebuildPage.evaluate(async () => {
+    const engine = window.__engine;
+    const visibility = engine.village.debugFocusVisibility('p31');
+    engine.village.debugFocus('p31');
+    for (let index = 0; index < 6; index++) await Promise.resolve();
+    const settled = engine.debugDofSeek(1, { finish: true });
+    return {
+      visibility,
+      settled,
+      camera: engine.camera.position.toArray(),
+      target: engine.__controls.target.toArray(),
+      fov: engine.camera.fov,
+      referenceFov: engine.camera.userData.villageReferenceFov,
+    };
+  });
+  const terrainSafe = terrainRegression.visibility.safeFraming;
+  invariant(terrainRegression.visibility.terrainLimited
+      && terrainRegression.visibility.terrainMinClearance >= 1 - 1e-6
+      && terrainRegression.visibility.terrainEndpointClearance >= 1.2 - 1e-6,
+  `capital/7/p31 keeps the exact rendered-terrain corridor (${terrainRegression.visibility.terrainMinClearance.toFixed(3)}m ray, ${terrainRegression.visibility.terrainEndpointClearance.toFixed(3)}m eye)`);
+  invariant(Math.hypot(...terrainRegression.camera.map((value, index) => (
+    value - terrainSafe.position[index]
+  ))) < 1e-6
+      && Math.hypot(...terrainRegression.target.map((value, index) => (
+        value - terrainSafe.target[index]
+      ))) < 1e-6
+      && Math.abs(terrainRegression.fov - terrainSafe.fov) < 1e-9
+      && terrainRegression.referenceFov === VILLAGE_LENS.parcel.referenceFov,
+  `capital/7/p31 product focus consumes the safe frame with fixed reference optics (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
   await rebuildPage.close();
 
   // Reduced motion is a real immediate endpoint, including the explicit duration override.
