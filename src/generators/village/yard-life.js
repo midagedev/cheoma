@@ -213,8 +213,14 @@ export function buildYardLife(records, {
     for (let index = 0; index < length; index++) {
       const seasonValue = seasonTarget(nextRecords[index]);
       const weatherValue = weatherTarget(nextRecords[index]);
-      nextSeasonState.current[index] = nextSeasonState.target[index] = seasonValue;
-      nextWeatherState.current[index] = nextWeatherState.target[index] = weatherValue;
+      nextSeasonState.from[index]
+        = nextSeasonState.current[index]
+        = nextSeasonState.target[index]
+        = seasonValue;
+      nextWeatherState.from[index]
+        = nextWeatherState.current[index]
+        = nextWeatherState.target[index]
+        = weatherValue;
     }
     preserveTransition(
       nextSeasonState,

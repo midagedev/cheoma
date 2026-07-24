@@ -368,13 +368,18 @@ async function runContracts() {
   'byte-identical rebuild disturbed an active transition or ownership',
   afterNoopRebuild);
 
-  assert(yardLife.rebuild(cloneRecords(0.018)),
+  const changedRecords = cloneRecords(0.018);
+  const addedAutumn = cloneRecords(0.55)[1];
+  addedAutumn.id = 'fixture:autumn-added';
+  changedRecords.push(addedAutumn);
+  assert(yardLife.rebuild(changedRecords),
     'changed records did not rebuild');
   const afterChangedRebuild = yardLife.debug();
   assert(afterChangedRebuild.seasonTransitioning
-      && afterChangedRebuild.weights.every((value, index) => (
+      && afterChangedRebuild.weights.slice(0, 3).every((value, index) => (
         Math.abs(value - mixedSeason.weights[index]) < 1e-6
       ))
+      && afterChangedRebuild.weights[3] === 1
       && yardLife.group.children.some((mesh, index) => mesh !== transitionMeshes[index])
       && transitionDisposals.every((state) => state.count === 1),
   'changed rebuild hard-cut the active transition or leaked old geometry',
@@ -385,8 +390,9 @@ async function runContracts() {
   // update() caps the first 0.45s sample to 0.25s, then advances another 0.1s.
   const expectedSeasonMix = 0.35 * 0.35 * (3 - 2 * 0.35);
   assert(Math.abs(afterRebuildAdvance.weights[0] - (1 - expectedSeasonMix)) < 1e-6
-      && Math.abs(afterRebuildAdvance.weights[1] - expectedSeasonMix) < 1e-6,
-  'geometry-only rebuild restarted the active transition easing curve',
+      && Math.abs(afterRebuildAdvance.weights[1] - expectedSeasonMix) < 1e-6
+      && afterRebuildAdvance.weights[3] === 1,
+  'changed rebuild distorted the carried transition or a new record target',
   afterRebuildAdvance);
 
   yardLife.update(0.45);
