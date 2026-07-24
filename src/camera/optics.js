@@ -13,6 +13,10 @@ export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
 // hides the animals and household details this elevation is meant to reveal.
 export const VILLAGE_FOCUS_ELEVATION = 24 * DEG;
 export const VILLAGE_FOCUS_SKY_FRACTION = 0;
+// Product close-focus coefficient for the existing physical depth gather. A
+// compensated telephoto dolly preserves local axial depth differences, so this
+// is intentionally one stable value rather than a raw camera-distance multiplier.
+export const VILLAGE_FOCUS_DOF_APERTURE = 0.0002;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 

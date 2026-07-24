@@ -235,6 +235,12 @@ export function createVillageHandle(opts, seed, plan, group) {
       baseCameraFraming: cloneCameraFraming(p.baseCameraFraming || p.cameraFraming),
       cameraFraming: cloneCameraFraming(p.cameraFraming),
       cameraVisibility: p.cameraVisibility ? structuredClone(p.cameraVisibility) : null,
+      baseHeroCameraFraming: p.baseHeroCameraFraming
+        ? cloneCameraFraming(p.baseHeroCameraFraming) : null,
+      heroCameraFraming: p.heroCameraFraming
+        ? cloneCameraFraming(p.heroCameraFraming) : null,
+      heroCameraVisibility: p.heroCameraVisibility
+        ? structuredClone(p.heroCameraVisibility) : null,
       dims: p.dims.clone(), rotY: p.rotY,
       H: p.dims.y, maxDim: Math.max(p.dims.x, p.dims.y, p.dims.z),
     };

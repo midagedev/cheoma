@@ -76,13 +76,15 @@ const expectedProxyHashes = {
   // #10 adds the six normalized residential opening axes to the public proxy.
   // Product focus keeps the door-height target at the exact reviewed shared
   // 24° courtyard elevation. #95 applies the 10° physical parcel lens from the
-  // authored 23° reference lens, so compensated camera positions and FOV fields
-  // change together. Safe candidates still scale XZ and Y together and all four
-  // proxy counts/isolation contracts remain unchanged.
-  village: 'd74a022d',
-  town: 'ce2b9e6b',
-  capital: '95d20636',
-  hanyang: '89e2cc97',
+  // authored 23° reference lens. #132 shortens any mountain-crossing ray inside
+  // the rendered terrain's first safe interval and widens only actual FOV; the
+  // authored reference lens stays fixed so LOD remains screen-equivalent. Safe
+  // candidates still scale XZ and Y together and all four proxy counts/isolation
+  // contracts remain unchanged.
+  village: '7772a271',
+  town: 'e52d4318',
+  capital: '0ecf2caf',
+  hanyang: '63c90052',
 };
 
 const server = await createServer({
