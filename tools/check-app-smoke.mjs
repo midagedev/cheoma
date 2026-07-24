@@ -955,8 +955,8 @@ try {
       && mudWallEvidence.links.some((url) => url.includes('encykorea.aks.ac.kr/Article/E0013772'))
       && mudWallEvidence.links.some((url) => url.includes('idx=8681'))
       && mudWallEvidence.links.some((url) => url.includes('ctptNo=4413802600000'))
-      && mudWallMoisture?.text.includes('희미하고 고정된 하부 darkening')
-      && mudWallMoisture.text.includes('실시간 우천 tween은 이번 범위가 아니다')
+      && mudWallMoisture?.text.includes('생성 시점에 고정되는 희미하고 불규칙한 하부 darkening')
+      && mudWallMoisture.text.includes('live rain tween은 후속 비대상이다')
       && mudWallMoisture.links.some((url) => url.includes('terra_literature_review.html'))
       && [...mudWallEvidence.anchors, ...mudWallMoisture.anchors].every((anchor) => (
         anchor.target === '_blank'

@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #c4d0cf; }
+    canvas { display: block; }
+  </style>
+  <script type="importmap">
+  {"imports":{
+    "three":"/app/node_modules/three/build/three.module.js",
+    "three/addons/":"/app/node_modules/three/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import {
+  buildMudWallSurfaceGeometry,
+  disposeMudWallSurfaceGeometry,
+  planMudWallSurface,
+} from '../src/api/mud-wall.js';
+
+const query = new URLSearchParams(location.search);
+const mode = query.get('mode') || 'full';
+const view = query.get('view') || 'close';
+const LENGTH = 8.4;
+const TOP = 2.12;
+const FOOT = 0.38;
+const THICKNESS = 0.42;
+const plan = planMudWallSurface({
+  length: LENGTH,
+  height: TOP,
+  footHeight: FOOT,
+  seed: 'mud-wall-browser-fixture',
+});
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1);
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.02;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xc4d0cf);
+scene.fog = new THREE.Fog(0xc4d0cf, 28, 65);
+scene.add(new THREE.HemisphereLight(0xe1e8df, 0x625441, 1.28));
+const sun = new THREE.DirectionalLight(0xffd39c, 3.7);
+sun.position.set(-8, 10, 7);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 7, bottom: -4, near: 1, far: 32 });
+scene.add(sun);
+
+const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x6c7654, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), groundMaterial);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const earthMaterial = new THREE.MeshStandardMaterial({
+  color: 0xa77745,
+  roughness: 0.98,
+  metalness: 0,
+  vertexColors: mode !== 'base',
+});
+const stoneMaterial = new THREE.MeshStandardMaterial({
+  color: 0x777064,
+  roughness: 1,
+  metalness: 0,
+});
+const strawMaterial = new THREE.MeshStandardMaterial({
+  color: 0xc49b58,
+  roughness: 1,
+  metalness: 0,
+});
+
+let surface = null;
+let bodyGeometry;
+if (mode === 'base') {
+  bodyGeometry = new THREE.BoxGeometry(LENGTH, TOP - FOOT, THICKNESS);
+  bodyGeometry.translate(0, (TOP + FOOT) * 0.5, 0);
+} else {
+  surface = buildMudWallSurfaceGeometry(plan, THICKNESS, {
+    packed: mode !== 'no-packed',
+    fibres: mode !== 'no-fibres',
+    damp: mode !== 'no-damp',
+  });
+  bodyGeometry = surface.body;
+}
+
+const wall = new THREE.Group();
+const foot = new THREE.Mesh(
+  new THREE.BoxGeometry(LENGTH + 0.08, FOOT, THICKNESS * 1.04),
+  stoneMaterial,
+);
+foot.position.y = FOOT * 0.5;
+foot.castShadow = foot.receiveShadow = true;
+wall.add(foot);
+const body = new THREE.Mesh(bodyGeometry, earthMaterial);
+body.castShadow = body.receiveShadow = true;
+wall.add(body);
+if (surface?.fibres) {
+  const fibres = new THREE.Mesh(surface.fibres, strawMaterial);
+  fibres.castShadow = fibres.receiveShadow = true;
+  wall.add(fibres);
+}
+const coping = new THREE.Mesh(
+  new THREE.BoxGeometry(LENGTH + 0.16, 0.18, THICKNESS + 0.28),
+  strawMaterial,
+);
+coping.position.y = TOP + 0.09;
+coping.castShadow = true;
+wall.add(coping);
+scene.add(wall);
+
+// A few restrained physical objects provide scale and highlight the shared depth path.
+for (const x of [-3.5, 3.5]) {
+  const jar = new THREE.Mesh(
+    new THREE.SphereGeometry(0.26, 12, 8),
+    new THREE.MeshStandardMaterial({ color: 0x3d2b20, roughness: 0.6 }),
+  );
+  jar.scale.y = 1.25;
+  jar.position.set(x, 0.32, 0.62);
+  jar.castShadow = jar.receiveShadow = true;
+  scene.add(jar);
+}
+
+const camera = new THREE.PerspectiveCamera(
+  view === 'aerial' ? 34 : 27,
+  innerWidth / innerHeight,
+  0.1,
+  90,
+);
+if (view === 'aerial') {
+  camera.position.set(11.5, 9.5, 15.5);
+  camera.lookAt(0, 0.95, 0);
+} else {
+  camera.position.set(4.3, 2.55, 7.1);
+  camera.lookAt(0.25, 1.08, 0);
+}
+
+const detailBounds = new THREE.Box3();
+if (surface?.body) detailBounds.expandByObject(body);
+if (surface?.fibres) {
+  const fibreMesh = wall.children.find((child) => child.geometry === surface.fibres);
+  detailBounds.expandByObject(fibreMesh);
+}
+const insideEnvelope = mode === 'base' || (
+  detailBounds.min.x >= -LENGTH * 0.5 - 1e-5
+  && detailBounds.max.x <= LENGTH * 0.5 + 1e-5
+  && detailBounds.min.y >= FOOT - 1e-5
+  && detailBounds.max.y <= TOP + 1e-5
+  && detailBounds.min.z >= -THICKNESS * 0.5 - 1e-5
+  && detailBounds.max.z <= THICKNESS * 0.5 + 1e-5
+);
+
+const probe = buildMudWallSurfaceGeometry(plan, THICKNESS);
+const disposalCounts = { body: 0, fibres: 0 };
+probe.body.addEventListener('dispose', () => { disposalCounts.body++; });
+probe.fibres.addEventListener('dispose', () => { disposalCounts.fibres++; });
+disposeMudWallSurfaceGeometry(probe);
+
+renderer.info.reset();
+renderer.render(scene, camera);
+const materialTextures = new Set();
+scene.traverse((object) => {
+  const materials = Array.isArray(object.material)
+    ? object.material
+    : (object.material ? [object.material] : []);
+  for (const material of materials) {
+    for (const value of Object.values(material)) {
+      if (value?.isTexture) materialTextures.add(value);
+    }
+  }
+});
+const bodyTriangles = bodyGeometry.attributes.position.count / 3;
+const fibreTriangles = surface?.fibres
+  ? surface.fibres.attributes.position.count / 3
+  : 0;
+window.__MUD_WALL_DIAG = {
+  mode,
+  view,
+  plan: {
+    lifts: plan.lifts.length,
+    joints: plan.joints.length,
+    fibres: plan.fibres.length,
+    damp: plan.damp.length,
+  },
+  insideEnvelope,
+  bounds: detailBounds.isEmpty() ? null : {
+    min: detailBounds.min.toArray(),
+    max: detailBounds.max.toArray(),
+  },
+  bodyTriangles,
+  fibreTriangles,
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  programs: renderer.info.programs.length,
+  materialTextures: materialTextures.size,
+  rendererTextures: renderer.info.memory.textures,
+  disposalCounts,
+};
+window.__MUD_WALL_READY = true;
+</script>
+</body>
+</html>

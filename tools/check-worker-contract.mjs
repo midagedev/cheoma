@@ -64,11 +64,16 @@ const expectedSceneHashes = {
   // safe owner when a sufficiently populated small tier would otherwise select
   // none. Those scene-graph and placement changes update every scale hash while
   // every parcel pick proxy remains exact.
+  // #135 replaces only FULL mud-wall body boxes with bounded inward packed-earth
+  // surfaces and sparse physical fibre geometry. Existing mud/jipjul materials,
+  // wall footprints, parcel transforms, gates, LOD ownership, and every pick
+  // proxy remain exact. The geometry bytes and triangle totals therefore change
+  // at every scale without changing planning or selection state.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: '3d9b6a43:1c420c87:6118177d:774925ff',
-  town: '07eceb47:09957c99:4579c14b:1120328f',
-  capital: '2e6c94e9:010a4ebd:8e2ab5e0:04dd6855',
-  hanyang: '59813ff9:b1add501:00688f7b:2a17a5ad',
+  village: 'f055589b:b3ba612d:f3fc2485:5e12236f',
+  town: '1627c8f7:5c44f9ab:361bee35:8bb497c5',
+  capital: '93b484a4:70fe6266:318a61b8:2ee966ca',
+  hanyang: 'acfdf9da:1cc5c5da:aabade04:6c3b5b64',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

@@ -72,6 +72,7 @@
     "check:temple:browser": "node tools/run-browser-locked.mjs -- node tools/check-temple-browser.mjs",
     "check:wall-gate": "node tools/check-wall-gate-contract.mjs",
     "check:mud-wall": "node tools/check-mud-wall-contract.mjs",
+    "shoot:mud-wall": "node tools/run-browser-locked.mjs -- node tools/shoot-mud-wall.mjs",
     "check:wall-step": "node tools/check-wall-step-contract.mjs",
     "check:wave": "node tools/check-wave-contract.mjs",
     "check:wave:app": "node tools/run-browser-locked.mjs -- node tools/check-lod-app.mjs --scenario=wave",

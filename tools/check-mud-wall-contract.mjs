@@ -55,6 +55,9 @@ assert(fixture.damp.every((profile) =>
   profile.points.length <= MUD_WALL_SURFACE_LIMITS.maxDampPointsPerFace));
 assert(fixture.joints.every((joint) =>
   joint.depth >= 0 && joint.depth <= MUD_WALL_SURFACE_LIMITS.maxDetailDepth));
+assert(fixture.joints.every((joint) =>
+  Math.abs(joint.tilt) * 0.5 + Math.abs(joint.wave)
+    <= MUD_WALL_SURFACE_LIMITS.maxJointDrift));
 assert(fixture.fibres.every((fibre) =>
   fibre.depth >= 0 && fibre.depth <= MUD_WALL_SURFACE_LIMITS.maxDetailDepth));
 assert(fixture.damp.every((profile) =>
