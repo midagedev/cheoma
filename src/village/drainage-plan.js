@@ -11,13 +11,13 @@ export const DRAINAGE_PLAN_SCHEMA_VERSION = 1;
 // shallow physical banks form the readable groove. The bounded upstream lift is
 // only enough to bridge small grid undulations while keeping a downhill bed.
 export const DRAINAGE_PLAN_LIMITS = deepFreeze({
-  sampleSpacing: 2.4,
+  sampleSpacing: 1.0,
   shoulder: 0.22,
   width: 0.48,
   bedWidth: 0.14,
-  depth: 0.12,
+  depth: 0.04,
   bedClearance: 0.012,
-  maxBedLift: 0.06,
+  maxBedLift: 0.025,
   minimumGrade: 0.001,
   minimumOutletDrop: 0.05,
   obstacleClearance: 0.1,
@@ -180,7 +180,9 @@ function splitHydrologicRuns(points) {
         fitted = fitVisibleBed(candidate);
         if (fitted) {
           runs.push({ points: candidate, ...fitted });
-          cursor = end;
+          // Consecutive bounded records share one endpoint so the physical
+          // channel has no one-sample hole at maxRunPoints boundaries.
+          cursor = end - 1;
           break;
         }
       }
@@ -246,6 +248,7 @@ function makeRoadSideRuns(road, side, site, roadSpatial, obstacles) {
         x: point.x,
         y: run.bed[index],
         z: point.z,
+        surfaceY: point.terrainY,
         s,
         depth: DRAINAGE_PLAN_LIMITS.depth,
       };
@@ -454,9 +457,16 @@ export function validateRoadsideDrainagePlan(plan) {
       finite(point.x, `${run.id} point.x`);
       finite(point.y, `${run.id} point.y`);
       finite(point.z, `${run.id} point.z`);
+      finite(point.surfaceY, `${run.id} point.surfaceY`);
       finite(point.s, `${run.id} point.s`);
       if (point.depth !== DRAINAGE_PLAN_LIMITS.depth) {
         throw new RangeError(`${run.id} has an unsupported depth`);
+      }
+      const lift = point.y - point.surfaceY;
+      if (lift + EPSILON < DRAINAGE_PLAN_LIMITS.bedClearance
+        || lift > DRAINAGE_PLAN_LIMITS.bedClearance
+          + DRAINAGE_PLAN_LIMITS.maxBedLift + EPSILON) {
+        throw new RangeError(`${run.id} has an unsupported terrain lift`);
       }
       if (index) {
         length += G.dist(run.points[index - 1], point);

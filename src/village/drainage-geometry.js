@@ -4,7 +4,8 @@ import { mergeOwnedGeometries } from '../core/merge-owned-geometries.js';
 // Lightweight Three adapter for the renderer-free roadside-drainage plan.
 //
 // The plan is already in the world frame: run point y is the authoritative bed
-// elevation and y + depth is its lip. Crossing center.y is the top of the deck,
+// elevation, surfaceY is the exact terrain under it, and y + depth is its lip.
+// Crossing center.y is the top of the deck,
 // while yaw aligns local +Z with the gate-to-road travel axis. This module does
 // not resample terrain, choose placements, or consume global RNG.
 
@@ -21,8 +22,9 @@ function linearColor(hex) {
 }
 
 const DITCH_COLORS = Object.freeze({
-  lip: linearColor(0x796c51),
-  bed: linearColor(0x5b5445),
+  outer: linearColor(0x9a865f),
+  lip: linearColor(0x88795d),
+  bed: linearColor(0x706858),
 });
 
 const CROSSING_COLORS = Object.freeze({
@@ -49,8 +51,12 @@ function validatePoint(point, label) {
   requireFinite(point.x, `${label}.x`);
   requireFinite(point.y, `${label}.y`);
   requireFinite(point.z, `${label}.z`);
+  requireFinite(point.surfaceY, `${label}.surfaceY`);
   requireFinite(point.depth, `${label}.depth`);
   if (point.depth <= 0) throw new RangeError(`${label}.depth must be positive`);
+  if (point.y <= point.surfaceY) {
+    throw new RangeError(`${label}.y must remain above its terrain surface`);
+  }
 }
 
 function validateRun(run, index) {
@@ -146,26 +152,32 @@ function buildDitchGeometry(runs) {
 
   for (const run of runs) {
     const baseVertex = positions.length / 3;
-    const offsets = [
-      -run.width * 0.5,
-      -run.bedWidth * 0.5,
-      run.bedWidth * 0.5,
-      run.width * 0.5,
-    ];
+    const halfWidth = run.width * 0.5;
+    const halfBed = run.bedWidth * 0.5;
+    const halfLip = (halfWidth + halfBed) * 0.5;
+    const offsets = [-halfWidth, -halfLip, -halfBed, halfBed, halfLip, halfWidth];
     for (let pointIndex = 0; pointIndex < run.points.length; pointIndex++) {
       const point = run.points[pointIndex];
       const { nx, nz } = pointFrame(run.points, pointIndex);
+      // The outer rails return to the same shallow raised bed plane instead of
+      // ending as vertical ribbons. One-metre plan sampling follows exact terrain
+      // triangle changes closely enough to keep this blend above the shared mesh.
+      const outerY = point.y;
       const heights = [
+        outerY,
         point.y + point.depth,
         point.y,
         point.y,
         point.y + point.depth,
+        outerY,
       ];
       const railColors = [
+        DITCH_COLORS.outer,
         DITCH_COLORS.lip,
         DITCH_COLORS.bed,
         DITCH_COLORS.bed,
         DITCH_COLORS.lip,
+        DITCH_COLORS.outer,
       ];
       for (let rail = 0; rail < offsets.length; rail++) {
         positions.push(
@@ -180,9 +192,9 @@ function buildDitchGeometry(runs) {
     // The cross-section advances from -perpL to +perpL. This winding keeps the
     // open earth channel front-facing toward +Y without a double-sided material.
     for (let pointIndex = 0; pointIndex < run.points.length - 1; pointIndex++) {
-      const row = baseVertex + pointIndex * 4;
-      const nextRow = row + 4;
-      for (let rail = 0; rail < 3; rail++) {
+      const row = baseVertex + pointIndex * offsets.length;
+      const nextRow = row + offsets.length;
+      for (let rail = 0; rail < offsets.length - 1; rail++) {
         const a = row + rail;
         const b = nextRow + rail;
         const c = nextRow + rail + 1;

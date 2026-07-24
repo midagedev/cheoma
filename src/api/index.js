@@ -35,6 +35,15 @@ export {
   planMudWallSurface,
   validateMudWallSurfacePlan,
 } from './mud-wall.js';
+export {
+  buildDrainage,
+  disposeDrainage,
+  DRAINAGE_MATERIAL_ROLES,
+  DRAINAGE_PLAN_LIMITS,
+  DRAINAGE_PLAN_SCHEMA_VERSION,
+  planRoadsideDrainage,
+  validateRoadsideDrainagePlan,
+} from './drainage.js';
 export * from './environment.js';
 export * from './post-quality.js';
 export * from './particles.js';

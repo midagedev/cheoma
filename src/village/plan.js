@@ -28,6 +28,7 @@ import { planRiverPort } from './river-port-plan.js';
 import { attachRoadJunctions } from './road-topology.js';
 import { normalizeVillageTuningOptions } from './options.js';
 import { planSijeon } from './sijeon-plan.js';
+import { planRoadsideDrainage } from './drainage-plan.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -485,6 +486,16 @@ export function planVillage(opts = {}) {
     ],
   });
 
+  // 도로·필지·논이 모두 확정된 뒤에만 배수 계약을 세운다. 배수 계획은 RNG를 소비하지
+  // 않으므로 기존 마을의 후속 결정론을 바꾸지 않으며, 농촌 규모는 고증상 명시적인 empty
+  // plan을 유지한다. renderer는 이 world-space plan을 그대로 조립할 뿐 배치를 추론하지 않는다.
+  const drainage = planRoadsideDrainage({
+    roads: roadsResult.roads,
+    parcels,
+    site,
+    productionPolygons: paddies || [],
+  });
+
   const allPts = [...roadsResult.roads.flatMap((r) => r.pts), ...parcels.map((p) => p.center)];
   const bounds = G.boundsOfPts(allPts.length ? allPts : [site.center]);
 
@@ -495,6 +506,7 @@ export function planVillage(opts = {}) {
     nodes: roadsResult.nodes,
     parcels,
     paddies,
+    drainage,
     features,
     bounds,
     stats: {
@@ -505,6 +517,8 @@ export function planVillage(opts = {}) {
       bowlK,                                     // footprint 종속 분지 계수(#120)
       roads: roadsResult.roads.length,
       paddies: paddies ? paddies.length : 0,
+      drainageRuns: drainage.runs.length,
+      drainageCrossings: drainage.crossings.length,
       parcelDebug: planParcels.lastDebug,
     },
   };
