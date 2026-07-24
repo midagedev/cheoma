@@ -3,7 +3,7 @@
 > - **상태**: 구현 계약 + 리서치
 > - **관련 이슈**: GitHub #135, 상위 폴리시 #75
 > - **조사 기준일**: 2026-07-24
-> - **대상**: 일반 마을의 `mud` 담장 표면과 그 거리·우천 변화
+> - **대상**: 일반 마을 `mud` 담장의 생성 시점 불변 표면과 희미한 하부 습윤 흔적
 > - **비대상**: 특정 마을·연대·장인의 배합과 공정에 대한 실측 복원
 
 이 문서는 단색 상자에 가까운 토담을 재료와 축조 방식이 읽히는 표면으로 개선하되, 공개 자료가
@@ -64,14 +64,16 @@ Getty Conservation Institute의 *Terra Literature Review*는 토벽 열화에서
 습윤·건조, 모세관 상승, 벽 하부의 splash-back을 구분한다. 이 자료는 한국 담장 형식의
 역사자료가 아니라 토질 건축 보존 연구를 정리한 국제 문헌이다.
 
-따라서 지면 가까운 낮고 불규칙한 습윤 영역은 물리적으로 타당한 **제품 번역**으로만 쓴다.
-정확한 색과 높이는 실측값이 아니며 다음을 지킨다.
+따라서 지면 가까운 낮고 불규칙한 습윤 흔적은 물리적으로 타당한 **제품 번역**으로만 쓴다.
+이번 구현은 날씨 simulation이 아니라 생성 시점에 고정되는 희미한 authored trace다. 정확한 색과
+높이는 실측값이 아니며 다음을 지킨다.
 
-- 비가 오면 아래에서 시작하는 저주파 darkening이 연속적으로 강해지고, 그치면 천천히 약해진다.
-- 마른 상태에는 매우 약한 누적 흔적만 허용하며 검은 띠처럼 둘레를 균일하게 감지 않는다.
+- 아래에서 시작하는 저주파 darkening을 매우 약하게 남기며 검은 띠처럼 둘레를 균일하게 감지 않는다.
 - 기본 표현에 녹색 이끼, 검은 곰팡이, 염류 백화, 깊은 침식 구멍을 함께 발명하지 않는다.
 - 습윤은 roughness·색·미세 relief의 절제된 변화이며 발광, 투명도, `polygonOffset`이 아니다.
-- 지면과 만나는 돌 굽·담 몸체의 경계는 유지하고, 비 표현이 그 구조를 지우지 않는다.
+- 지면과 만나는 돌 굽·담 몸체의 경계는 유지하고, 하부 흔적이 그 구조를 지우지 않는다.
+- 후속 live-weather 확장은 같은 profile 위의 연속 weight만 허용하며, 별도 젖은 mesh나 hard cut을
+  만들지 않는다. 이는 #135의 현재 완료 조건이 아니다.
 
 ## 2. cheoma 제품 계약
 
@@ -106,13 +108,15 @@ entrypoint는 JSON 직렬화 가능한 불변 결과만 반환하고 `THREE.Mate
 - 표면 relief가 필요하면 기존 몸체 envelope 안의 미세 변화로 제한하고 새 planning footprint가
   되지 않게 한다.
 
-### 2.3 거리·날씨·모드
+### 2.3 기존 LOD·모드와 후속 날씨 경계
 
-- **근경**: 얕은 다짐 리듬, 드문 섬유, 낮은 습윤 변화가 실제 조명과 깊이를 받아 읽힌다.
-- **중경**: 섬유·작은 골재는 사라지고 band와 하부 색조만 낮은 대비로 합쳐진다.
-- **원경**: 기존 토담 실루엣과 평균색만 남고 추가 detail의 simulation과 draw를 잠재운다.
-- 계절은 흙 배합을 다시 뽑지 않는다. 날씨는 같은 profile의 습윤 weight만 tween하며 hard cut이나
-  별도 젖은 mesh를 만들지 않는다.
+- 새 표면 geometry는 기존 FULL mud-wall 소유권과 정적 병합 수명주기에만 들어간다.
+- MID/FAR 담장은 기존 LOD 생성·가시성 계약을 그대로 쓰며, 별도의 detail simulation이나 sleeper를
+  추가하지 않는다. 거리 전환 때문에 profile을 다시 뽑거나 표면 크기를 바꾸지 않는다.
+- 계절·날씨는 흙 배합과 static damp trace를 다시 뽑지 않는다. clear/rain tween과 동적 wetness는
+  이번 범위의 비대상이다.
+- 후속 weather 표현을 추가한다면 같은 불변 profile의 weight만 연속적으로 바꾸고 hard cut이나
+  별도 젖은 mesh를 만들지 않아야 한다.
 - PBR color와 shadow/depth/DoF가 서로 다른 표면 위치·coverage를 쓰지 않는다. 수묵 모드에서는
   섬유 선을 과장하지 않고 큰 면·돌 굽·수평 리듬만 보존한다.
 - exclusive wave 중에는 기존 벽 subtree의 소유권과 가시성 전환을 따르며 별도 crossfade material을
@@ -135,8 +139,8 @@ entrypoint는 JSON 직렬화 가능한 불변 결과만 반환하고 `THREE.Mate
 2. `lift` off / on: 규칙적 벽돌 줄눈이나 장식 띠처럼 읽히지 않는지.
 3. `fibre` off / on: 짚이 표면 전체의 노란 털이나 낟가리로 변하지 않는지.
 4. `damp` off / on: 하부가 검은 균일 띠가 아니며 돌 굽과 지면 접촉이 읽히는지.
-5. clear → rain → clear: 같은 무늬가 연속적으로 젖고 마르며 hard cut·seed 변화가 없는지.
-6. FULL → MID → FAR: detail이 튀거나 크기가 역전되지 않고 평균색으로 자연스럽게 축약되는지.
+5. clear / rain: 현재 static profile과 자원 수가 날씨 전환으로 다시 생성되거나 달라지지 않는지.
+6. FULL → MID → FAR: 기존 LOD 소유권이 유지되고 새 별도 simulation·draw가 생기지 않는지.
 7. PBR / ink / DoF / snow / wave: coverage·depth·그림자·소유권이 서로 어긋나지 않는지.
 
 정량 기록은 sync/Worker/fallback plan hash, program·draw·triangle·texture delta, 최대 profile
