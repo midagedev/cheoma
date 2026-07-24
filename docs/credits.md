@@ -265,6 +265,13 @@
 - URL: https://www.getty.edu/conservation/publications_resources/pdf_publications/terra_literature_review.html
 - 라이선스: 2026-07-24 canonical 출판 페이지가 Getty의 자료 페이지로 HTTP 200 도착함을 확인. 출판물은 © 2008 J. Paul Getty Trust이며 Getty의 publication terms와 수록된 제3자 권리가 적용된다. 앱은 원문·도판·PDF를 재배포하지 않고 링크와 사실 요약만 제공하며, 별도 인용·자산 재사용 전 최신 이용조건과 필요한 허락을 확인한다.
 
+### 44. 국사편찬위원회·서울역사박물관·국가유산청 — 조선 길가 배수와 제한적 마을 수로 / Roadside drainage and exceptional village waterways
+- 우리역사넷 「조선 초기의 도로」 · 인사도시유적전시관 16세기 배수로 유구 · 국가유산포털 「외암마을」.
+- 우리역사넷은 한양 성내 도로 양쪽의 법정 2척 도랑과 도로·도랑·다리의 수선 관리를 설명한다. 인사동 유적은 낮은 종로·시전행랑 주변 침수를 막고 상업지와 배후 주거지의 경계를 이룬 실제 16세기 배수로를 보존한다. 외암마을의 계곡물을 끌어 생활·방화·정원에 쓴 인공 수로는 국가유산청이 다른 마을에서 보기 어려운 독특한 요소로 설명하므로 전국 촌락의 기본값으로 일반화하지 않는다.
+- **활용 / Use:** 실제 낮은 유출구가 이어지는 Hanyang 계획가로에는 최대 양측, capital 대로·중로에는 한쪽 정적 측구만 허용하고 일반 hamlet/village/town은 `none`으로 둔다. 한양의 약 62cm 법정값은 도시 규범이지 농촌 평균이 아니며, 도랑 단면·빈도와 실제 대문 접근 교차에서만 생기는 단일 `stone-slab` 건넘(낮은 판석 2~3매)의 치수는 접근·충돌·성능을 위한 명시적 제품 조정값이다. 외암형 생활·방화 수로와 실시간 빗물 수위·유량·침수 시뮬레이션은 이번 범위에 넣지 않는다 / Allows at most two static side drains on planned Hanyang streets and one side on capital daero/jungno, always requiring a real downhill outlet; ordinary hamlet/village/town plans remain `none`. Hanyang's roughly 62cm statutory value is an urban rule, not a rural average. Ditch section/frequency and the dimensions of a single `stone-slab` crossing (two or three low slabs), emitted only where a ditch meets stored gate access, are explicit product-tuned choices for access, collision safety, and performance. Oeam-like domestic/fire-water channels and live rain level, flow, or flooding simulation are excluded (`docs/drainage.md`).
+- URL: https://contents.history.go.kr/front/nh/view.do?levelId=nh_024_0060_0010_0010 · https://museum.seoul.go.kr/www/intro/annexIntro/annex_insadosi/annex_insadosi_02.jsp?sso=ok · https://www.heritage.go.kr/heri/html/HtmlPage.do?pageNo=4_2_2_0&pg=%2Funesco%2FHeritage%2FHeritage_99_08.jsp
+- 라이선스: 2026-07-24 세 기관의 공개 canonical 페이지에서 자료명과 본문을 확인. 각 기관·항목의 저작권 정책이 적용되며 서울역사박물관·국가유산포털 페이지는 원문·이미지 재배포 권리를 일괄 부여하지 않는다. 앱은 원문 문장·사진·도판을 복제하지 않고 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용하며, 별도 자산 재사용 전 최신 이용조건을 다시 확인한다.
+
 ### 29. 일제강점기 토지조사사업 지적원도(地籍原圖)
 - 조선총독부 토지조사(1910~18) / 국가기록원
 - 전국 필지 실측 원도 약 78만 장. 전통 취락 필지가 도로·수로·능선을 따라 휘는 부정형임을 확인.
