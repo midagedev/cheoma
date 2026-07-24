@@ -27,6 +27,7 @@ import {
   clampBuildingDimensions,
   resolveResidentialEdit,
 } from '../src/runtime/village/parcel-edit.js';
+import { variantOv } from '../src/village/variants.js';
 
 const FIXTURES = Object.freeze({
   choga3: Object.freeze({
@@ -558,9 +559,10 @@ for (const [kind, params] of [
 }
 
 const defaultSpec = buildParcelSpec(parcelFixture);
+const selectedVariantDefaults = variantOv(parcelFixture);
 assert.deepEqual(
   Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, defaultSpec.params[key]])),
-  RESIDENTIAL_OPENING_DEFAULTS.giwa,
+  Object.fromEntries(RESIDENTIAL_OPENING_PARAM_KEYS.map((key) => [key, selectedVariantDefaults[key]])),
   'parcel edit state did not serialize planner defaults',
 );
 const chogaSparse = buildParcelSpec({ ...parcelFixture, kind: 'choga', variant: 0 });

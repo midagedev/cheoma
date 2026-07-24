@@ -97,10 +97,10 @@ const prototypeSignature = GIWA_VARIANTS.map((variant) => [
   variant.ov?.bays ?? null,
 ]);
 invariant(JSON.stringify(prototypeSignature) === JSON.stringify([
-  ['giwa-l', null, 'l', 3],
+  ['giwa-l', null, 'l', 4],
   ['giwa-l-flip', 0, null, null],
   ['giwa-single', null, 'single', 3],
-  ['giwa-u', null, 'u', 4],
+  ['giwa-u', null, 'u', 5],
 ]), 'default ㅡ/ㄱ/ㄷ prototype groups changed');
 
 const defaultVillage = planVillage({ scale: 'town', seed: 141 });

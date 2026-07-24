@@ -74,11 +74,16 @@ const expectedSceneHashes = {
   // exact terrain heights and gate crossings; sync, Worker, and fallback consume
   // identical records. Pick proxies and every pre-existing scene subtree remain
   // byte-identical.
+  // #144 keeps the existing prototype counts but changes ordinary-house choice
+  // and dimensions to a fitted 3/4/5-bay, 0/1/2-connected-wing hierarchy.
+  // FULL/MID/FAR consume the same variant geometry, so every scale's residential
+  // scene bytes and fitted pick bounds change. Detached FULL-only aux probabilities
+  // remain unchanged and are deliberately outside this cross-LOD hierarchy.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: 'f055589b:b3ba612d:f3fc2485:5e12236f',
-  town: '1627c8f7:5c44f9ab:361bee35:8bb497c5',
-  capital: '7c533c2e:ff4df988:1d48dedb:e1bb2a24',
-  hanyang: 'a3c9f41a:3d182476:3277aa6d:56a8d12e',
+  village: '7f02ed28:7255229e:caeb868e:ea929794',
+  town: 'c1020ad2:5be166c0:8ccc3fea:256875da',
+  capital: '56a24044:fd2ab3d0:2deb3a00:00029d10',
+  hanyang: '418133d3:fdd55a1f:beb70108:957ea95b',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -93,10 +98,12 @@ const expectedProxyHashes = {
   // the house falls back to the first safe camera interval. Safe candidates still
   // scale XZ and Y together and all four proxy counts/isolation contracts remain
   // unchanged.
-  village: '7772a271',
-  town: 'e52d4318',
-  capital: 'a7c7136c',
-  hanyang: '63c90052',
+  // #144 intentionally changes the same ordinary-house fitted roof bounds read
+  // by focus/edit proxies; stable IDs and proxy counts remain unchanged.
+  village: '06b2c416',
+  town: '3f3acf18',
+  capital: '4422852b',
+  hanyang: 'ae222d0e',
 };
 
 const server = await createServer({
