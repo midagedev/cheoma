@@ -59,6 +59,36 @@ assert.deepEqual(ids(['src/api/sijeon.js'], {
 assert.deepEqual(ids(['src/api/sijeon-plan.js'], {
   newPaths: ['src/api/sijeon-plan.js'],
 }), ['core', 'app', 'api-reuse', 'worker']);
+assert.deepEqual(ids(['src/village/yard-life-plan.js'], {
+  newPaths: ['src/village/yard-life-plan.js'],
+}), ['core', 'app', 'yard-life', 'worker']);
+assert.deepEqual(ids(['src/generators/village/yard-life.js'], {
+  newPaths: ['src/generators/village/yard-life.js'],
+}), ['core', 'app', 'yard-life', 'winter-app', 'worker', 'lod-app']);
+assert.deepEqual(ids(['src/generators/village/yard-life-geometry.js'], {
+  newPaths: ['src/generators/village/yard-life-geometry.js'],
+}), ['core', 'app', 'yard-life', 'winter-app', 'worker', 'lod-app']);
+assert.deepEqual(ids(['src/generators/village/yard-life-product.js'], {
+  newPaths: ['src/generators/village/yard-life-product.js'],
+}), ['core', 'app', 'yard-life', 'winter-app', 'worker', 'lod-app']);
+assert.deepEqual(ids(['src/village/yard-life-record-contract.js'], {
+  newPaths: ['src/village/yard-life-record-contract.js'],
+}), ['core', 'app', 'yard-life', 'worker']);
+assert.deepEqual(ids(['src/village/yard-layout.js']), [
+  'core', 'app', 'yard-life', 'worker',
+]);
+assert.deepEqual(ids(['src/runtime/village/yard-life.js'], {
+  newPaths: ['src/runtime/village/yard-life.js'],
+}), ['core', 'app', 'yard-life', 'worker', 'lod-app']);
+assert.deepEqual(ids(['src/api/yard-life.js'], {
+  newPaths: ['src/api/yard-life.js'],
+}), ['core', 'app', 'yard-life', 'winter-app', 'worker', 'lod-app']);
+assert.deepEqual(ids(['src/api/yard-life-plan.js'], {
+  newPaths: ['src/api/yard-life-plan.js'],
+}), ['core', 'app', 'yard-life', 'worker']);
+assert.deepEqual(ids(['tools/shoot-yard-life-app.mjs'], {
+  newPaths: ['tools/shoot-yard-life-app.mjs'],
+}), ['core', 'app', 'yard-life']);
 assert.deepEqual(ids(['src/village/options.js']), ['core', 'share', 'app', 'worker']);
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
@@ -209,6 +239,12 @@ assert.deepEqual(ids(['tools/shoot-sijeon.mjs'], {
 assert.deepEqual(ids(['tools/shoot-sijeon-app.mjs'], {
   newPaths: ['tools/shoot-sijeon-app.mjs'],
 }), ['core', 'app', 'api-reuse']);
+assert.deepEqual(ids(['tools/check-yard-life-contract.mjs'], {
+  newPaths: ['tools/check-yard-life-contract.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/shoot-yard-life.mjs'], {
+  newPaths: ['tools/shoot-yard-life.mjs'],
+}), ['core', 'yard-life']);
 assert.deepEqual(ids(['tools/check-api-reuse-suite.mjs'], {
   newPaths: ['tools/check-api-reuse-suite.mjs'],
 }), ['core', 'api-reuse']);
@@ -294,9 +330,17 @@ assert.deepEqual(impactedFastChecks(['src/core/buffer-update-range.js']), [
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-architecture.mjs',
+  './check-house-diversity.mjs',
   './check-door-occlusion-contract.mjs',
+  './check-plan-contract.mjs',
+  './check-temple-contract.mjs',
+  './check-road-contract.mjs',
+  './check-layout-contract.mjs',
   './check-wall-gate-contract.mjs',
   './check-wall-step-contract.mjs',
+  './check-yard-layout-contract.mjs',
+  './check-yard-life-contract.mjs',
+  './check-parcel-rebuild-contract.mjs',
 ]);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [
@@ -311,7 +355,7 @@ for (const path of API_REUSE_DEPENDENCIES) {
 }
 assert.deepEqual(ALL_PROFILE, [
   'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
-  'instance-upload', 'building-lifecycle', 'api-reuse', 'winter-app', 'worker', 'audio', 'temple-browser',
+  'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio', 'temple-browser',
   'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [

@@ -20,9 +20,11 @@ import {
   yardSeokjiPosition,
   yardTreeIntersectsHardObstacle,
 } from './yard-layout.js';
+import { yardLifeRecordsToHardObstacles } from './yard-life-plan.js';
 
 // 마당 과실수 · 반가 정원 · 마을 보호수(당산나무) — 태스크 #41 (docs Q4·Q5, R-G1/R-G2/R-T1).
-//   buildVillageFlora(plan, site, seed) → { group, setSeason(name), guardianAnchors, yardTreeAnchors, drawCalls }
+//   buildVillageFlora(plan, site, seed, { yardLifeRecords })
+//     → { group, setSeason(name), guardianAnchors, yardTreeAnchors, drawCalls }
 //
 // 고증 요지:
 //   · 마당 중앙은 비운다(困 자 금기 — 작업 공간). 과실수는 뒤안·담 모퉁이(집 벽에서 떨어져)에만.
@@ -269,7 +271,7 @@ function safeYardTreeSlot(parcel, point, footprint, spatial, hardObstacles, occu
 }
 
 // ───────────────────────── 최상위 ─────────────────────────
-export function buildVillageFlora(plan, site, seed) {
+export function buildVillageFlora(plan, site, seed, { yardLifeRecords = [] } = {}) {
   const group = new THREE.Group(); group.name = 'village-flora';
 
   // 재질(마을 1벌 — 계절 틴트가 다른 마을에 새지 않게 호출마다 신규). flatShading 로우폴리.
@@ -355,7 +357,13 @@ export function buildVillageFlora(plan, site, seed) {
       continue;
     }
     // 정규 필지: 과실수 슬롯
-    const hardObstacles = yardHardObstacles(p);
+    // Reserve the union of every distinct seasonal slot. Spring/winter prefer
+    // separate service edges and autumn owns an open work-yard slot, so dormant
+    // geometry can never reveal a tree through the next visible household task.
+    const hardObstacles = [
+      ...yardHardObstacles(p),
+      ...yardLifeRecordsToHardObstacles(yardLifeRecords, p.id),
+    ];
     if (ct && ct.species && ct.species.length) {
       const slots = yardTreeCandidates(p, trng);
       for (const species of ct.species) {

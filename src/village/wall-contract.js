@@ -33,6 +33,15 @@ export const VILLAGE_WALL_STYLE_HEIGHT = Object.freeze({
   hedge: 1.1,
 });
 
+// Exact renderer body widths for wall styles that form a continuous solid run.
+// Planning clients use these widths instead of maintaining a second estimate of
+// how far the centered wall body extends inside a parcel.
+export const VILLAGE_SOLID_WALL_THICKNESS = Object.freeze({
+  tile: 0.42,
+  stone: 0.5,
+  mud: 0.5,
+});
+
 export function villageWallProfile(shape, {
   style = 'stone',
   plotW,
@@ -313,7 +322,7 @@ export function villageWallLayout(shape, opts = {}, rng = Math.random) {
     char01: typeof opts.char01 === 'number' ? opts.char01 : 0.5,
     wallHeightK: opts.wallHeightK,
   }, rng);
-  const thickness = style === 'tile' ? 0.42 : 0.5;
+  const thickness = VILLAGE_SOLID_WALL_THICKNESS[style] ?? 0.5;
   const solid = style !== 'brush' && style !== 'hedge';
   const stepContext = style === 'tile' || style === 'stone' || style === 'mud'
     ? steppedWallContext(opts)

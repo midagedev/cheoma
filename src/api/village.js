@@ -1,6 +1,13 @@
 // 마을 계획부터 THREE 조립·runtime handle까지의 공개 API.
 export * from './village-plan.js';
 export { buildSijeon, disposeSijeon } from './sijeon.js';
+export {
+  buildYardLife,
+  disposeYardLife,
+  YARD_LIFE_MATERIAL_ROLES,
+  YARD_LIFE_PRESENTATION_SEASONS,
+  YARD_LIFE_WEATHER,
+} from './yard-life.js';
 export { populateVillage, populateVillageSteps } from '../village/populate.js';
 export { createVillage, createVillageAsync } from '../village/adapter.js';
 export { createRerollWave } from '../village/wave.js';

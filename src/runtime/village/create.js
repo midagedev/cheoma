@@ -58,6 +58,7 @@ export function createVillageAsync(opts = {}, {
       workerAbort.abort();
       try { steps?.return?.(); } catch {}
       if (partialRoot) {
+        partialRoot.userData.yardLife?.dispose?.();
         disposeObjectTree(partialRoot);
         partialRoot.clear();
         partialRoot = null;

@@ -75,6 +75,8 @@
     "check:wave": "node tools/check-wave-contract.mjs",
     "check:wave:app": "node tools/run-browser-locked.mjs -- node tools/check-lod-app.mjs --scenario=wave",
     "check:yard": "node tools/check-yard-layout-contract.mjs",
+    "check:yard-life": "node tools/check-yard-life-contract.mjs",
+    "check:yard-life:browser": "node tools/run-browser-locked.mjs -- node tools/check-yard-life-browser.mjs",
     "check:worker": "node tools/run-browser-locked.mjs -- node tools/check-worker-contract.mjs",
     "shoot:bokeh": "node tools/run-browser-locked.mjs -- node tools/shoot-bokeh-fixture.mjs",
     "shoot:bokeh:proof": "node tools/run-browser-locked.mjs -- node tools/shoot-bokeh-scatter-proof.mjs",
@@ -90,6 +92,8 @@
     "shoot:sijeon": "node tools/run-browser-locked.mjs -- node tools/shoot-sijeon.mjs",
     "shoot:threshold-life": "node tools/run-browser-locked.mjs -- node tools/shoot-threshold-life.mjs",
     "shoot:wall-steps": "node tools/run-browser-locked.mjs -- node tools/shoot-wall-steps.mjs",
+    "shoot:yard-life": "node tools/run-browser-locked.mjs -- node tools/shoot-yard-life.mjs",
+    "shoot:yard-life:app": "node tools/run-browser-locked.mjs -- node tools/shoot-yard-life-app.mjs",
     "shoot:wave": "node tools/run-browser-locked.mjs -- node tools/shoot-wave.mjs village",
     "shoot:wave:full": "node tools/run-browser-locked.mjs -- node tools/shoot-wave.mjs hamlet,village,capital,hanyang",
     "wt": "node tools/worktree.mjs"

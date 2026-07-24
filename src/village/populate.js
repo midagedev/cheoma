@@ -22,6 +22,7 @@ import {
 import { villageChunkLodPolicy } from './lod-policy.js';
 import { buildCityWall } from './citywall.js';
 import { buildVillageFlora } from './gardens.js';
+import { planYardLife } from './yard-life-plan.js';
 import { buildSpringBloom } from '../layout/bloom.js';
 import { buildForest } from './forest.js';
 // #123: forest 입력 빌더(마스크·거리필드·외곽신축·고정반경)는 워커 공유 위해 forest-crunch 로 이설.
@@ -53,6 +54,7 @@ import {
   makeHouseProtos,
   placeParcel,
 } from '../generators/village/houses.js';
+import { createVillageYardLife } from '../generators/village/yard-life-product.js';
 import { parcelRotY } from '../generators/shared/parcel-transform.js';
 
 // 기존 내부 import 경로 호환. 신규 소비자는 generators/village/*를 사용한다.
@@ -414,8 +416,37 @@ export function* populateVillageSteps(plan, opts = {}) {
   root.add(forest.group);
   yield 'forest';
 
-  // 8) 마당 과실수·반가 정원·마을 보호수(당산나무) — 레이어별 정적 병합(드로우콜 ~5), 계절 토글.
-  let flora = buildVillageFlora(plan, site, plan.seed);
+  // 8) 드문 계절 생업상 + 마당 과실수·반가 정원·마을 보호수(당산나무).
+  //    세 계절의 잠재 생활 슬롯을 한 번에 예약해 flora가 어느 계절에서도 그 자리를 침범하지
+  //    않게 한다. renderer는 여름/원경에서 잠들지만 같은 물리 geometry를 계속 소유한다.
+  const yardLifeHeightAt = (x, z, parcel = null) => (
+    Number.isFinite(parcel?.baseY) ? parcel.baseY : site.heightAt(x, z)
+  );
+  let yardLifeSeason = 'summer';
+  let yardLifeWeather = 'clear';
+  let yardLifeRecords = planYardLife(plan.parcels, {
+    seed: plan.seed,
+    heightAt: yardLifeHeightAt,
+  });
+  const yardLife = createVillageYardLife(yardLifeRecords, {
+    heightAt: yardLifeHeightAt,
+    season: yardLifeSeason,
+    weather: yardLifeWeather,
+  });
+  // Async generation can abort immediately after the `flora` yield, before the
+  // final root metadata is installed. Expose the lifecycle owner now so partial
+  // cleanup can release source materials plus custom depth/distance materials.
+  root.userData.yardLife = yardLife;
+  root.userData.yardLifeRecords = yardLifeRecords;
+  root.add(yardLife.group);
+
+  let flora;
+  try {
+    flora = buildVillageFlora(plan, site, plan.seed, { yardLifeRecords });
+  } catch (error) {
+    yardLife.dispose();
+    throw error;
+  }
   root.add(flora.group);
   yield 'flora';
 
@@ -424,9 +455,29 @@ export function* populateVillageSteps(plan, opts = {}) {
   // promoting every yard to several permanent draw calls, and lets the shared
   // yard-layout contract move or omit a tree when a shed, jar terrace, stack, or
   // edited roof now occupies its former slot.
-  const replaceFlora = (season = 'summer') => {
-    const next = buildVillageFlora(plan, site, plan.seed);
+  const planCurrentYardLife = (kindByParcel = null) => {
+    const planningParcels = kindByParcel?.size
+      ? plan.parcels.map((parcel) => {
+        const kind = kindByParcel.get(parcel.id);
+        return kind && kind !== parcel.kind ? { ...parcel, kind } : parcel;
+      })
+      : plan.parcels;
+    return planYardLife(planningParcels, {
+      seed: plan.seed,
+      heightAt: yardLifeHeightAt,
+    });
+  };
+  const replaceFlora = (season = yardLifeSeason, { kindByParcel = null } = {}) => {
+    const nextRecords = planCurrentYardLife(kindByParcel);
+    const next = buildVillageFlora(plan, site, plan.seed, { yardLifeRecords: nextRecords });
     next.setSeason(season);
+    try {
+      yardLife.rebuild(nextRecords, { heightAt: yardLifeHeightAt });
+    } catch (error) {
+      next.dispose?.();
+      throw error;
+    }
+    yardLifeRecords = nextRecords;
     root.remove(flora.group);
     flora.dispose?.();
     flora = next;
@@ -436,6 +487,7 @@ export function* populateVillageSteps(plan, opts = {}) {
       root.userData.guardianAnchors = flora.guardianAnchors;
       root.userData.yardTreeAnchors = flora.yardTreeAnchors;
       root.userData.gardenAnchors = flora.gardenAnchors;
+      root.userData.yardLifeRecords = yardLifeRecords;
     }
     return flora;
   };
@@ -461,7 +513,8 @@ export function* populateVillageSteps(plan, opts = {}) {
   yield 'animals+night+bloom+cloudshadow';
 
   root.userData = {
-    plan, waterU, matSets, houseHandle, heroHandle, optimize, flora, animals, nightLights, bloom, forest,
+    plan, waterU, matSets, houseHandle, heroHandle, optimize,
+    flora, yardLife, yardLifeRecords, animals, nightLights, bloom, forest,
     palaceCore,   // 궁 편집 핸들(#93) — 미병합 palace-core 그룹(궁 없으면 null), userData.palaceCompound 로 일곽 접근
     palaceMerged, // #140-B 부감 병합본(궁 없거나 비최적화면 null) — 어댑터가 focus-in 시 가리고 오버레이로 교체(히어로 #62 동형)
     templeCore, templeMerged, templeSiteMerged,
@@ -470,7 +523,19 @@ export function* populateVillageSteps(plan, opts = {}) {
     cloudUniforms: cloudU, edge: site.edge, terrainMax: site.terrainR,
     setWaterTime: (name) => setVillageWaterTime(waterU, name),   // 개울 물 시간대 톤(어댑터 setTime 이 호출)
     setAnimalsTime: (name) => { for (const a of animals.handles) a.setTime(name); },
-    setSeason: (name) => { terrain.setSeason(name); flora.setSeason(name); bloom.setSeason(name); forest.setSeason(name); for (const a of animals.handles) a.setSeason(name); },
+    setSeason: (name, opts = {}) => {
+      yardLifeSeason = name;
+      terrain.setSeason(name);
+      flora.setSeason(name);
+      yardLife.setSeason(name, opts);
+      bloom.setSeason(name);
+      forest.setSeason(name);
+      for (const a of animals.handles) a.setSeason(name);
+    },
+    setWeather: (name, opts = {}) => {
+      yardLifeWeather = name;
+      yardLife.setWeather(name, opts);
+    },
     replaceFlora,
     deactivateMist: () => { mist?.deactivate(); ridgeMist?.deactivate(); },
     // 엣지 헤이즈·운해 링·능선 물안개 색을 대기(fog)색과 동기화 — 어댑터 fog 모디파이어가 매 틱 호출(#50 정합).
@@ -486,7 +551,13 @@ export function* populateVillageSteps(plan, opts = {}) {
     refreshNightLights: (ownerId, overlayRoot = null) => nightLights.refreshOwner(ownerId, overlayRoot),
     debugNightLights: () => nightLights.debugState(),
     debugNightLightOwner: (ownerId) => nightLights.debugOwner(ownerId),
-    update: (dt) => { waterU.uTime.value += dt; for (const a of animals.handles) a.update(dt); },
+    debugYardLife: () => yardLife.debug(),
+    update: (dt) => {
+      waterU.uTime.value += dt;
+      const yardLifeChanged = yardLife.update(dt);
+      for (const a of animals.handles) a.update(dt);
+      return yardLifeChanged;
+    },
     // 런타임 LOD — 대규모 주택 청크 FAR↔MID↔FULL(매 프레임, 카메라 필요).
     //   engine.js 렌더 루프에서 camera 넘겨 호출. 정책이 꺼진 규모(R<340)는 빈 배열이라 no-op.
     updateChunkLod: (camera, lensScale = 1) => {
