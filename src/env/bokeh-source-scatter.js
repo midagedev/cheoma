@@ -37,7 +37,7 @@ const OWNED_SAMPLE_LINES = OWNED_OFFSETS.map(
     `vec2 ownedUv${index} = cellUv` +
     ` + vec2(${x.toFixed(1)}, ${y.toFixed(1)}) * sourceTexel;\n` +
     `    vec3 ownedSource${index} = gatedRawSource(ownedUv${index});\n` +
-    `    float ownedLuminance${index} = luminance(ownedSource${index});\n` +
+    `    float ownedLuminance${index} = sourceLuminance(ownedSource${index});\n` +
     `    if (ownedLuminance${index} > 0.0) {\n` +
     `      float ownedDepth${index} = viewDepth(ownedUv${index});\n` +
     `      float ownedRadius${index} = sourceRadiusAtDepth(ownedDepth${index});\n` +
@@ -91,7 +91,10 @@ const SOURCE_WEIGHT_LINES = OWNED_OFFSETS.map(
   (_, sourceIndex) =>
     `vSourceWeights.${VECTOR_COMPONENTS[sourceIndex]} = smoothstep(\n` +
     "      highlightThreshold,\n" +
-    "      highlightThreshold + max(highlightKnee, 0.0001),\n" +
+    // Compact ownership has already rejected ordinary surfaces. Keep only a
+    // narrow acceptance shoulder here so a real source becomes one optical disc
+    // instead of retaining a hot pin at its centre.
+    "      highlightThreshold + max(highlightKnee * 0.25, 0.0001),\n" +
     `      componentPeak${sourceIndex}\n` +
     "    );",
 ).join("\n    ");
@@ -196,7 +199,7 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
   varying vec4 vSourceWeights;
   varying vec2 vCellPixel;
 
-  float luminance(vec3 color) {
+  float sourceLuminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
   }
 
@@ -286,6 +289,9 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
       || any(greaterThan(uv, vec2(1.0)))) return vec3(0.0);
     vec3 color = texture2D(tColor, uv).rgb;
     float peak = max(max(color.r, color.g), color.b);
+    // The sparse prefilter has already accepted this exact 2x2 block because at
+    // least one texel crossed the real HDR threshold. Keep the source's dim
+    // antialiased shoulder attached to that core for energy conservation.
     vec3 gatedSource = color * step(highlightThreshold * 0.05, peak);
     return gatedSource;
   }
@@ -452,7 +458,7 @@ export class BokehSourceScatter {
       farClip: { value: 2000 },
       radiusScale: { value: 1.55 },
       viewportWidth: { value: 1 },
-      highlightThreshold: { value: 0.78 },
+      highlightThreshold: { value: 1.2 },
       highlightKnee: { value: 0.52 },
       triangleBackend: { value: 0 },
     };

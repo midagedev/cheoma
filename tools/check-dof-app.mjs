@@ -173,8 +173,9 @@ try {
     };
 
     // Warm the stable program once, then render the exact same final camera pose
-    // through moving 13-tap and restored 41-tap quality. Uniform changes must not
-    // create or resize any post/depth resource or disturb the depth filter.
+    // through the moving center-only surface path and settled 13-tap selective
+    // reconstruction. HDR source scatter remains active in both states. Uniform
+    // changes must not create/resize a resource or disturb the depth filter.
     const nightLightsGroup = engine.scene.getObjectByName("village-nightlights");
     const nightLightsApi = nightLightsGroup?.userData?.nightLights;
     const nightLightsLevelBefore =
@@ -547,8 +548,8 @@ try {
         sample.anchorDepth,
         sample.fov,
         sample.highlightThreshold,
-        sample.highlightGain,
         sample.bokehRadiusScale,
+        sample.surfaceRadiusPx,
       ].every(Number.isFinite),
     );
   const finiteAnchor = (sample) =>
@@ -619,23 +620,23 @@ try {
     "focused weather keeps authored world size and lets the physical camera supply magnification",
   );
   pass(
-    result.focusEnd.bokehSamples === 41 &&
-      result.focusEnd.highlightThreshold >= 0.48 &&
-      result.focusEnd.highlightGain > 0 &&
+    result.focusEnd.bokehSamples === 13 &&
+      result.focusEnd.highlightThreshold >= 1.2 &&
+      result.focusEnd.surfaceRadiusPx <= 3.25 &&
       Math.abs(result.focusEnd.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12 &&
       Math.abs(result.focusEnd.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12,
-    "one strengthened physical aperture, adaptive gather, and compact-source scatter own focused bokeh",
+    "large compact-source bokeh and bounded contrast-aware surface defocus own focused DoF",
   );
   pass(
     result.postQuality.moving.postQuality === 0 &&
       result.postQuality.moving.postQualityMode === "moving" &&
-      result.postQuality.moving.bokehSamples === 13 &&
-      result.postQuality.moving.activeBokehTaps === 13 &&
+      result.postQuality.moving.bokehSamples === 1 &&
+      result.postQuality.moving.activeBokehTaps === 1 &&
       result.postQuality.stable.postQuality === 1 &&
       result.postQuality.stable.postQualityMode === "stable" &&
-      result.postQuality.stable.bokehSamples === 41 &&
-      result.postQuality.stable.activeBokehTaps === 41,
-    "final camera motion uses 13 taps and restores the exact 41-tap stable kernel",
+      result.postQuality.stable.bokehSamples === 13 &&
+      result.postQuality.stable.activeBokehTaps === 13,
+    "camera motion sleeps surface reconstruction and restores only the bounded 13-tap kernel",
   );
   pass(
     monotonic(result.postQuality.settle, 1) &&
@@ -670,7 +671,7 @@ try {
         result.postQuality.memoryBefore.textures &&
       result.postQuality.memoryAfter.geometries ===
         result.postQuality.memoryBefore.geometries,
-    "13/41 transitions preserve packed depth, pass order, shader program, targets, materials, and GPU resource counts",
+    "1/13 surface transitions preserve packed depth, pass order, shader program, targets, materials, and GPU resource counts",
   );
   pass(
     result.postQuality.depthParity,

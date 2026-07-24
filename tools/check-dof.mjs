@@ -287,8 +287,8 @@ invariant(
   "circular bokeh sample contract diverged from its generated kernel",
 );
 invariant(
-  CIRCULAR_BOKEH_SAMPLE_COUNT <= 41,
-  "cinematic bokeh exceeded the stock pass color-fetch budget",
+  CIRCULAR_BOKEH_SAMPLE_COUNT === 13,
+  "selective surface bokeh lost its bounded 13-tap budget",
 );
 near(
   CIRCULAR_BOKEH_DEFAULTS.radiusScale,
@@ -296,9 +296,9 @@ near(
   "cinematic bokeh lost its expanded telephoto aperture radius",
 );
 invariant(
-  MOVING_BOKEH_SAMPLE_COUNT === 13 &&
+  MOVING_BOKEH_SAMPLE_COUNT === 1 &&
     MOVING_BOKEH_SAMPLE_COUNT === CIRCULAR_BOKEH_MOVING_KERNEL.length,
-  "moving bokeh lost its 13-tap budget",
+  "moving bokeh stopped sleeping ordinary surface reconstruction",
 );
 invariant(
   CIRCULAR_BOKEH_KERNEL.every(([x, y]) => Math.hypot(x, y) <= 1 + EPS),
@@ -311,8 +311,8 @@ for (const [x, y] of CIRCULAR_BOKEH_KERNEL) {
 }
 invariant(
   JSON.stringify([...radialCounts.values()].sort((a, b) => a - b)) ===
-    "[1,8,12,20]",
-  "circular bokeh lost its center + 8/12/20 concentric aperture budget",
+    "[1,4,4,4]",
+  "selective surface bokeh lost its center + three paired rings",
 );
 for (let i = 1; i < CIRCULAR_BOKEH_KERNEL.length; i += 2) {
   const a = CIRCULAR_BOKEH_KERNEL[i];
@@ -327,8 +327,8 @@ for (const [x, y] of CIRCULAR_BOKEH_MOVING_KERNEL) {
 }
 invariant(
   JSON.stringify([...movingRadialCounts.values()].sort((a, b) => a - b)) ===
-    "[1,4,4,4]",
-  "moving bokeh stopped sampling every authored aperture ring",
+    "[1]",
+  "moving bokeh stopped using only the stable center sample",
 );
 near(
   CIRCULAR_BOKEH_MOVING_KERNEL[0][0],
@@ -340,12 +340,6 @@ near(
   0,
   "moving bokeh lost its optical center",
 );
-for (let i = 1; i < CIRCULAR_BOKEH_MOVING_KERNEL.length; i += 2) {
-  const a = CIRCULAR_BOKEH_MOVING_KERNEL[i];
-  const b = CIRCULAR_BOKEH_MOVING_KERNEL[i + 1];
-  near(a[0], -b[0], `moving bokeh pair ${i} shifted the optical center`);
-  near(a[1], -b[1], `moving bokeh pair ${i} shifted the optical center`);
-}
 invariant(
   !/uniform\s+\w+\s+\w+\s*\[/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
   "circular bokeh introduced a dynamically indexed custom uniform array",
@@ -358,68 +352,57 @@ invariant(
   !/uniform\s+float\s+(?:u)?time\b/i.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
   "circular bokeh became time-varying",
 );
-const movingCalls = (
+const surfaceCalls = (
   CIRCULAR_BOKEH_FRAGMENT_SHADER.match(
-    /\bvec3\s+movingSample\d+\s*=\s*texture2D\s*\(/g,
-  ) || []
-).length;
-const fullOnlyCalls =
-  (CIRCULAR_BOKEH_FRAGMENT_SHADER.match(/\baccumulateFullSample\s*\(/g) || [])
-    .length - 1;
-invariant(
-  movingCalls === MOVING_BOKEH_SAMPLE_COUNT &&
-    movingCalls + fullOnlyCalls === CIRCULAR_BOKEH_SAMPLE_COUNT,
-  "adaptive bokeh shader fetch counts diverged from the 13/41 contract",
-);
-const movingHighlightCalls = (
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.match(
-    /\bvec4\s+movingHighlight\d+\s*=\s*texture2D\s*\(\s*tHighlight/g,
+    /\bvec3\s+surfaceSample\d+\s*=\s*texture2D\s*\(/g,
   ) || []
 ).length;
 invariant(
-  movingHighlightCalls === MOVING_BOKEH_SAMPLE_COUNT &&
+  surfaceCalls + 1 === CIRCULAR_BOKEH_SAMPLE_COUNT &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec4 highlightSample = texture2D(tHighlight, uv);",
+      "vec3 centerColor = texture2D(tColor, vUv).rgb;",
     ),
-  "adaptive bokeh stopped consuming the normalized highlight prefilter",
+  "selective surface fetches diverged from the 1/13 contract",
+);
+const surfaceHighlightCalls = (
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.match(
+    /\bvec4\s+surfaceHighlight\d+\s*=\s*texture2D\s*\(\s*tHighlight/g,
+  ) || []
+).length;
+invariant(
+  surfaceHighlightCalls + 1 === CIRCULAR_BOKEH_SAMPLE_COUNT &&
+    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+      "vec4 centerHighlight = texture2D(tHighlight, vUv);",
+    ),
+  "selective bokeh stopped consuming compact-source ownership",
 );
 const sharpBranch = CIRCULAR_BOKEH_FRAGMENT_SHADER.slice(
   CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("if (blurRadiusPx < 0.45)"),
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("float cocMix ="),
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("vec3 centerColor ="),
 );
 invariant(
   (sharpBranch.match(/texture2D\s*\(\s*tColor\b/g) || []).length === 1 &&
-    !sharpBranch.includes("considerForegroundSource") &&
-    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("resolvedPeak") &&
-    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("20.0 / max("),
-  "obsolete reverse source probe or fitted source-area constant survived",
+    !sharpBranch.includes("tHighlight"),
+  "sharp focus stopped taking the direct one-fetch path",
 );
 invariant(
   CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-    "return max(color - transferHighlightMean, vec3(0.0));",
+    "vec3 withoutTransferredSource",
   ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "rawHighlightSum += rawHighlight;",
+      "step(highlightThreshold * 0.05, brightness)",
     ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "transferHighlightSum += scatterCandidate;",
+      "step(0.5, bokehSourceScatter)",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec3 scatterCandidate = sampleColor",
-    ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("* compactWeight;") &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
       `${BOKEH_SOURCE_CONTRACT.gatherSupportCutoff}`,
     ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "step(highlightThreshold * 0.05, brightness)",
+      "colorSum += withoutTransferredSource",
     ) &&
-    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("compactPeak") &&
-    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "sampleColor * step(0.0001, highlightSample.a)",
-    ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("if (bokehSourceScatter > 0.5)"),
-  "compact source gather stopped transferring the continuous gated candidate",
+    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 centerBase ="),
+  "compact source stopped transferring exactly once out of the surface image",
 );
 const samplerUniforms = [
   ...CIRCULAR_BOKEH_FRAGMENT_SHADER.matchAll(
@@ -439,36 +422,35 @@ invariant(
 invariant(
   /uniform\s+float\s+bokehQuality\s*;/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "if (bokehQuality > 0.0 || preserveHighlight)",
+      "if (bokehQuality <= 0.0 || cappedRadiusPx < 0.65)",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("preserveHighlight") &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("outputQuality >= 1.0"),
-  "adaptive bokeh lost its moving/HDR branch or exact stable result",
+    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+      "contrastGate * radiusGate * cocGate",
+    ),
+  "selective bokeh lost its moving sleep or contrast-gated stable surface",
 );
 invariant(
   !/#define[^\n]*bokehQuality/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
   "adaptive bokeh quality created a shader-program variant",
 );
 invariant(
-  (CIRCULAR_BOKEH_FRAGMENT_SHADER.match(/\bsmoothstep\s*\(/g) || []).length ===
-    4 &&
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+    "float cappedRadiusPx = min(blurRadiusPx, surfaceRadiusPx);",
+  ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec3 color = colorSum / sampleCount;",
+      "float lumaSpan = lumaMax - lumaMin;",
     ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec3 rawHighlightMean = rawHighlightSum / sampleCount;",
+      "float relativeSpan = lumaSpan / max(lumaMax, 0.12);",
     ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec3 preservedColor = max(color - rawHighlightMean, vec3(0.0));",
+      "smoothstep(surfaceContrastLow, surfaceContrastHigh, lumaSpan)",
     ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "return mix(color, analyticColor, highlight);",
+      "gl_FragColor = vec4(mix(centerBase, surfaceColor, surfaceMix), 1.0);",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "float profileIntegral = 0.82 + 2.0 * rimStrength / 6.0;",
-    ) &&
-    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("reconstructionBrightness"),
-  "bounded reconstruction stopped redistributing the gathered source mean",
+    CIRCULAR_BOKEH_DEFAULTS.surfaceRadiusPx <= 3.25,
+  "ordinary surfaces stopped using the bounded contrast-aware reconstruction",
 );
 const fakeBokehMaterial = {
   uniforms: { focus: { value: 1 } },
@@ -478,9 +460,10 @@ const fakeBokehMaterial = {
 installCircularBokeh(fakeBokehMaterial);
 invariant(
   fakeBokehMaterial.uniforms.focus.value === 1 &&
-    fakeBokehMaterial.uniforms.highlightGain.value > 0 &&
     fakeBokehMaterial.uniforms.bokehRadiusScale.value ===
       CIRCULAR_BOKEH_DEFAULTS.radiusScale &&
+    fakeBokehMaterial.uniforms.surfaceRadiusPx.value ===
+      CIRCULAR_BOKEH_DEFAULTS.surfaceRadiusPx &&
     fakeBokehMaterial.uniforms.bokehQuality.value === 1 &&
     fakeBokehMaterial.uniforms.tHighlight.value === null &&
     fakeBokehMaterial.fragmentShader === CIRCULAR_BOKEH_FRAGMENT_SHADER &&
@@ -650,12 +633,10 @@ const highlightPrefilterSource = await readFile(
 );
 invariant(
   BOKEH_HIGHLIGHT_PREFILTER_ANALYTIC_TAP_COUNT === 37 &&
-    BOKEH_HIGHLIGHT_PREFILTER_OWNERSHIP_TAP_COUNT === 4 &&
+  BOKEH_HIGHLIGHT_PREFILTER_OWNERSHIP_TAP_COUNT === 4 &&
     BOKEH_HIGHLIGHT_PREFILTER_GUARD_EXTRA_TAP_COUNT === 12 &&
     BOKEH_HIGHLIGHT_PREFILTER_TOTAL_TAP_COUNT === 53 &&
-  highlightPrefilterSource.includes(
-    "PREFILTER_KERNEL.length !==",
-  ) &&
+    highlightPrefilterSource.includes("PREFILTER_KERNEL.length !==") &&
     highlightPrefilterSource.includes(
       "const PREFILTER_SAMPLE_LINES = PREFILTER_KERNEL.map",
     ) &&

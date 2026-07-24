@@ -210,7 +210,13 @@ export async function measureLinearBokehSweep(
 
       const result = {};
       const originalScale = pass.uniforms.bokehRadiusScale.value;
+      const originalQuality = pass.uniforms.bokehQuality.value;
       try {
+        // Measure the compact-source optical path in isolation. The product's
+        // contrast-aware surface reconstruction is intentionally independent
+        // of source radius and would otherwise contaminate an ON/OFF source
+        // delta when the fixture changes a light to black.
+        pass.uniforms.bokehQuality.value = 0;
         for (const sample of samples) {
           const source = engine.scene.getObjectByName(sample.name);
           if (!source)
@@ -241,6 +247,7 @@ export async function measureLinearBokehSweep(
         }
       } finally {
         pass.uniforms.bokehRadiusScale.value = originalScale;
+        pass.uniforms.bokehQuality.value = originalQuality;
         engine.debugRenderDofFrame();
       }
       return result;

@@ -352,8 +352,8 @@ try {
     || Math.abs(edgeMistView.restored.viewWeight) > 1e-6
     || passParity.dofLodScreenDoor !== passParity.visibleLodMeshes
     || passParity.inkLodScreenDoor !== passParity.visibleLodMeshes
-    || adaptive.movingDof.postQuality !== 0 || adaptive.movingDof.activeBokehTaps !== 13
-    || adaptive.stableDof.postQuality !== 1 || adaptive.stableDof.activeBokehTaps !== 41
+    || adaptive.movingDof.postQuality !== 0 || adaptive.movingDof.activeBokehTaps !== 1
+    || adaptive.stableDof.postQuality !== 1 || adaptive.stableDof.activeBokehTaps !== 13
     || adaptive.movingDof.lodScreenDoorDepth !== adaptive.stableDof.lodScreenDoorDepth
     || !adaptive.resourcesStable || !adaptiveLodParity
     || !passParity.dofRestored || !passParity.inkRestored) process.exitCode = 1;
