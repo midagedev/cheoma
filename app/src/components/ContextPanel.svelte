@@ -183,14 +183,28 @@
   const vIsAuto = (f) => f.auto === true && typeof villageParams[f.key] !== 'number';
   // tri-state(cityWall·sijeon) 켜짐 판정 — true 강제 or ('auto' 이고 hanyang tier). 표시·클릭 방향에 사용.
   const vTriOn = (f) => { const v = villageParams[f.key]; return v === true || ((v == null || v === 'auto') && scale === 'hanyang'); };
-  const vPlainOn = (f) => villageParams[f.key] == null ? f.def !== false : villageParams[f.key] === true;
+  const vPlainOn = (f) => {
+    const value = villageParams[f.key];
+    if (f.onValue !== undefined) {
+      return typeof f.isOn === 'function' ? f.isOn(value) : value === f.onValue;
+    }
+    return value == null ? f.def !== false : value === true;
+  };
   const vDisabled = (f) => {
+    if (Array.isArray(f.scales) && !f.scales.includes(scale)) return true;
     const gateIdx = SCALES.indexOf(f.tierGate);
     return gateIdx >= 0 && scaleIdx < gateIdx;
   };
   function vRange(f, value) { onVillageOpt?.(f.key, value); }
   function vToggleTri(f) { onVillageOpt?.(f.key, vTriOn(f) ? false : true); }   // 강제 ON/OFF(‘auto’ 이탈)
-  function vTogglePlain(f) { onVillageOpt?.(f.key, !vPlainOn(f)); }
+  function vTogglePlain(f) {
+    if (vDisabled(f)) return;
+    if (f.onValue !== undefined) {
+      onVillageOpt?.(f.key, vPlainOn(f) ? (f.offValue ?? null) : f.onValue);
+      return;
+    }
+    onVillageOpt?.(f.key, !vPlainOn(f));
+  }
 
   // ── 집 편집 스키마(통합 패널의 단일 구현) ──
   const editable = $derived(!!spec && spec.editable === true);

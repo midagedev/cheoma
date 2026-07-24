@@ -10,10 +10,12 @@ import {
 } from './residential-edit-url.js';
 import { weatherOkForSeason } from '../../../src/api/environment-state.js';
 import {
+  VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
   VILLAGE_NUMBER_OPTION_SPECS,
   VILLAGE_OPTION_DEFAULTS,
   VILLAGE_WALL_STYLE_IDS,
   VILLAGE_WALL_WEIGHT_SPEC,
+  isVillageMjaHouseProductContext,
 } from '../../../src/api/village-options.js';
 import {
   STANDALONE_PARAM_SPECS,
@@ -44,11 +46,15 @@ const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 // untrusted URLs without coupling fail-soft parsing to v1's terse key lengths.
 const FIELD_KEY_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const BASE36_RE = /^[0-9a-z]+$/;
+const VILLAGE_DEPENDENT_FIELDS = Object.freeze([
+  'z', 'ch', 'pa', 'te',
+  'sr', 'u', 'rh', 'sm', 'st', 'rv', 'pd', 'td', 'cw', 'sj', 'c1', 'dv', 'hs', 'ww', 'mh',
+  'f', 'ed',
+]);
 const KNOWN_FIELDS = new Set([
   's', 't', 'p', 'su', 'se', 'we', 'm', 'x', 'fl',
-  'vs', 'z', 'ch', 'pa', 'te',
-  'sr', 'u', 'rh', 'sm', 'st', 'rv', 'pd', 'td', 'cw', 'sj', 'c1', 'dv', 'hs', 'ww',
-  'f', 'vw', 'ed', 'hp',
+  'vs', ...VILLAGE_DEPENDENT_FIELDS,
+  'vw', 'hp',
 ]);
 
 const FIELD_SEPARATOR = '~';
@@ -311,6 +317,7 @@ function canonicalVillage(village) {
   if (village.includeTemple != null && typeof village.includeTemple !== 'boolean') return null;
   if (village.stream != null && typeof village.stream !== 'boolean') return null;
   if (village.river != null && typeof village.river !== 'boolean') return null;
+  if (village.mjaHouse != null && !isVillageMjaHouseProductContext(village.mjaHouse)) return null;
   const character = village.character ?? 'yeoyeom';
   const options = { ...VILLAGE_OPTION_DEFAULTS };
   for (const spec of Object.values(VILLAGE_NUMBER_FIELDS)) {
@@ -329,6 +336,7 @@ function canonicalVillage(village) {
   const wallWeights = canonicalWallWeights(village.wallWeights);
   if (wallWeights === undefined) return null;
   options.wallWeights = wallWeights;
+  if (village.mjaHouse != null) options.mjaHouse = VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT;
   return {
     seed,
     scale,
@@ -417,6 +425,7 @@ export function encodeSceneSnapshot({
     }
     pushField(fields, 'ww', encodeWallWeights(normalizedVillage.wallWeights),
       !!normalizedVillage.wallWeights);
+    pushField(fields, 'mh', '1', !!normalizedVillage.mjaHouse);
     pushField(fields, 'f', focusedParcelId, !!focusedParcelId);
     if (residentialEdits.length) {
       const edits = encodeResidentialEditState({ records: residentialEdits });
@@ -536,6 +545,10 @@ export function decodeSceneSnapshot(payload) {
       if (!wallWeights) return null;
       village.wallWeights = wallWeights;
     }
+    if (fields.has('mh')) {
+      if (fields.get('mh') !== '1') return null;
+      village.mjaHouse = VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT;
+    }
     if (fields.has('f')) {
       focusedParcelId = fields.get('f');
       if (!SAFE_ID_RE.test(focusedParcelId)) return null;
@@ -548,10 +561,7 @@ export function decodeSceneSnapshot(payload) {
       residentialEdits = edits.records;
       focusedParcelId ||= edits.focusedParcelId;
     }
-  } else if ([...fields.keys()].some((key) => (
-    ['z', 'ch', 'pa', 'te', 'sr', 'u', 'rh', 'sm', 'st', 'rv', 'pd', 'td', 'cw', 'sj',
-      'c1', 'dv', 'hs', 'ww', 'f', 'ed'].includes(key)
-  ))) {
+  } else if ([...fields.keys()].some((key) => VILLAGE_DEPENDENT_FIELDS.includes(key))) {
     return null;
   }
   if (fields.has('hp')) {

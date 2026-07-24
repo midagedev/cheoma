@@ -15,6 +15,10 @@ import {
   SCENE_GUIDE_STORAGE_KEY,
 } from '../app/src/lib/scene-guide.js';
 import { planVillage } from '../src/api/village-plan.js';
+import {
+  VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
+  isVillageMjaHouseProductContext,
+} from '../src/api/village-options.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -30,6 +34,13 @@ const FOOTWEAR_REFERENCE_URLS = Object.freeze([
   'https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400000297500000&mode=V',
   'https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?pageSize=10&relicRecommendCategory=&relicRecommendId=165924&sc=&schM=view&sv=',
   'https://www.korea.net/koreanet/fileDownload?fileUrl=FILE%2FPDF%2Fgeneral%2F201209_liveinkorea_en.pdf',
+]);
+const MJA_HANOK_REFERENCE_URLS = Object.freeze([
+  'https://www.hanokdb.kr/theology/sub_02',
+  'https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001493607',
+  'https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001497233',
+  'https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART003276541',
+  'https://journal.khousing.or.kr/articles/xml/RJPM/',
 ]);
 const failures = [];
 const pass = (condition, message) => {
@@ -166,6 +177,34 @@ try {
   await page.waitForFunction(() => !!window.__engine.village.debugPlan(), null, { timeout });
   await page.waitForFunction(() => !!window.__engine.village.captureView(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
+
+  const mjaToggle = page.locator('[data-vkey="mjaHouse"]');
+  await mjaToggle.waitFor({ state: 'visible', timeout });
+  const mjaDefaultUi = await mjaToggle.evaluate((button) => ({
+    checked: button.getAttribute('aria-checked'),
+    disabled: button.disabled,
+    label: button.getAttribute('aria-label'),
+    row: button.closest('.row')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+  }));
+  pass(mjaDefaultUi.checked === 'false'
+      && !mjaDefaultUi.disabled
+      && mjaDefaultUi.label === 'ㅁ자 뜰집'
+      && mjaDefaultUi.row.includes('ㅁ자 뜰집'),
+  `village-scale mjaHouse opt-in renders default-off with its localized label (${JSON.stringify(mjaDefaultUi)})`);
+  await mjaToggle.click();
+  await page.waitForFunction(() => (
+    document.querySelector('[data-vkey="mjaHouse"]')?.getAttribute('aria-checked') === 'true'
+  ), null, { timeout });
+  pass(await mjaToggle.getAttribute('aria-checked') === 'true'
+      && isVillageMjaHouseProductContext(VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT),
+  'mjaHouse object toggle enters the schema-owned product context');
+  await mjaToggle.click();
+  await page.waitForFunction(() => (
+    !window.__engine.village.isWaving()
+      && window.__engine.village.debugPlan()?.opts?.mjaHouse == null
+  ), null, { timeout });
+  pass(await mjaToggle.getAttribute('aria-checked') === 'false',
+    'mjaHouse object toggle returns to null/default-off before snapshot checks');
 
   const sceneGuide = page.locator('[data-scene-guide]');
   await sceneGuide.waitFor({ state: 'visible', timeout });
@@ -982,6 +1021,22 @@ try {
           && anchor.rel.split(/\s+/).includes('noreferrer')
       )),
   'drainage evidence, bounded city scope, product crossing limits, canonical links, and safe attributes render in Product References');
+  const mjaHanokEvidence = reference.items.find((item) => item.topic === 'mja-hanok');
+  pass(mjaHanokEvidence?.title.includes('안동문화권 ㅁ자형 뜰집의 지역·기후·계층 한계')
+      && mjaHanokEvidence.text.includes('일반 주택의 ㅁ자는 기본 off')
+      && mjaHanokEvidence.text.includes('기와집 fitted frame')
+      && mjaHanokEvidence.text.includes('기존 30° 겨울 일조 계약')
+      && mjaHanokEvidence.text.includes('weather·위도·rank·wealth 자동 선택')
+      && mjaHanokEvidence.text.includes('튼ㅁ자·겹집·궁 행각·사찰 배치의 혼용은 배제')
+      && MJA_HANOK_REFERENCE_URLS.every((url) => mjaHanokEvidence.links.includes(url))
+      && mjaHanokEvidence.links.length === MJA_HANOK_REFERENCE_URLS.length
+      && mjaHanokEvidence.anchors.every((anchor) => (
+        anchor.target === '_blank'
+          && anchor.rel.split(/\s+/).includes('noopener')
+          && anchor.rel.split(/\s+/).includes('noreferrer')
+      ))
+      && mjaHanokEvidence.license.includes('CC BY-NC 4.0'),
+  'mja-hanok evidence, opt-in acceptance/exclusions, five canonical links, and safe attributes render in Product References');
 
   await closeReference.click();
   await referenceDialog.waitFor({ state: 'detached', timeout });
