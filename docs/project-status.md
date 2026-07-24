@@ -232,7 +232,7 @@ GitHub #131은 농가 전체를 소품으로 채우지 않고 결정론적으로
 재사용 renderer는 호출자가 빌려준 texture 없는 여섯 역할 material을 소유하지 않고 최대 여섯 개의 고정
 opaque screen-door batch로 물리 geometry를 만든다. 격리 fixture는 최대 6 역할 draw·texture 0·program 3을
 지키고, 계절·날씨·shared detail LOD·wave는 새 자원 없이 가중치만 바꾼다. byte-identical rebuild는 메시를
-교체하지 않고, 바뀐 record는 같은 ID의 진행 중 전환 가중치를 이어받는다. 저장된 LOD callback까지 먼저 평가한
+교체하지 않고, 바뀐 record는 같은 ID의 진행 중 전환 가중치와 원래 easing 시간곡선을 이어받는다. 저장된 LOD callback까지 먼저 평가한
 뒤에만 geometry를 교체해 실패한 rebuild가 기존 메시 identity나 dispose 소유권을 흔들지 않는다. 부감 진입 때
 한 번만 0 coverage를 올린 뒤 배열 할당·record scan 없이 CPU와 draw를 함께 쉬고, 제품 세 계절은 같은 카메라
 layer OFF/ON 픽셀 기여와 자원 plateau를 고정한다.

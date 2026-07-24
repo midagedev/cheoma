@@ -167,21 +167,41 @@ export function buildYardLife(records, {
       previousRecords.map((record, index) => [record.id, index]),
     );
     let preserved = false;
+    let targetChanged = false;
+    const preservedIndices = [];
     for (let index = 0; index < nextRecords.length; index++) {
       const previousIndex = previousIndexById.get(nextRecords[index].id);
       if (previousIndex == null) continue;
       const value = previousState.current[previousIndex];
-      nextState.from[index] = value;
+      const sameTarget = Math.abs(
+        previousState.target[previousIndex] - nextState.target[index],
+      ) <= 1e-6;
+      nextState.from[index] = sameTarget
+        ? previousState.from[previousIndex]
+        : value;
       nextState.current[index] = value;
+      preservedIndices.push(index);
+      targetChanged ||= !sameTarget;
       preserved ||= Math.abs(value - nextState.target[index]) > 1e-6;
     }
     if (!preserved) return;
-    nextState.elapsed = 0;
-    nextState.duration = Math.max(
-      0,
-      previousState.duration - previousState.elapsed,
-    );
-    nextState.active = nextState.duration > 0;
+    if (targetChanged) {
+      // A semantic target changed under a stable ID. Preserve the visible value,
+      // then ease every carried record over the old transition's remaining time.
+      for (const index of preservedIndices) {
+        nextState.from[index] = nextState.current[index];
+      }
+      nextState.elapsed = 0;
+      nextState.duration = Math.max(
+        0,
+        previousState.duration - previousState.elapsed,
+      );
+    } else {
+      // A geometry-only rebuild must stay on the exact original time curve.
+      nextState.elapsed = previousState.elapsed;
+      nextState.duration = previousState.duration;
+    }
+    nextState.active = nextState.duration > nextState.elapsed;
     if (!nextState.active) nextState.current.set(nextState.target);
   }
 

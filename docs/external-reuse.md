@@ -164,7 +164,7 @@ disposeYardLife(yardLife); // false
 
 `rebuild(nextRecords)`는 byte-identical record면 `false`를 반환하고 live geometry를 유지한다. 실제 내용이
 바뀌면 같은 파생 material을 재사용해 geometry만 원자적으로 교체하고, 같은 record ID의 진행 중 계절·날씨
-가중치를 이어받는다. 제품 팔레트와 shared detail LOD를 연결하고 여섯 source material까지 소유하는 내부
+가중치와 같은 target의 원래 easing 시간곡선을 이어받는다. 제품 팔레트와 shared detail LOD를 연결하고 여섯 source material까지 소유하는 내부
 어댑터는 `createVillageYardLife`라는 별도 이름을 쓰며 공개 borrowed-material renderer와 소유권을 섞지 않는다.
 
 ## Three는 한 인스턴스만 사용한다

@@ -59,14 +59,16 @@ const expectedSceneHashes = {
   // The other scales and all pick proxies therefore remain byte-identical.
   // #131 adds one stable named yard-life group at every scale and, for selected
   // households, texture-free seasonal geometry that is prebuilt but asleep in
-  // summer. Its physical hedge envelope removes the one Hanyang golden household
-  // whose seasonal footprint would enter the rendered shrub band; other golden
-  // scales and every parcel pick proxy remain exact.
+  // summer. The reviewed planner reserves every exact seasonal position, clears
+  // the rendered solid-wall body plus hard gap, and retains one deterministic
+  // safe owner when a sufficiently populated small tier would otherwise select
+  // none. Those scene-graph and placement changes update every scale hash while
+  // every parcel pick proxy remains exact.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
-  village: 'ae1af164:287a8084:452f2525:e178edfe',
-  town: 'a306bb06:d9edffa4:db9607bf:c955fb6e',
-  capital: '53b4e2bb:48fb5b8b:3e9b9356:3e67cdff',
-  hanyang: 'f4d92850:e3b6d6c2:e300b7b3:32aa4d5e',
+  village: '3d9b6a43:1c420c87:6118177d:774925ff',
+  town: '07eceb47:09957c99:4579c14b:1120328f',
+  capital: '2e6c94e9:010a4ebd:8e2ab5e0:04dd6855',
+  hanyang: '59813ff9:b1add501:00688f7b:2a17a5ad',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

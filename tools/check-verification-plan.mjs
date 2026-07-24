@@ -330,9 +330,17 @@ assert.deepEqual(impactedFastChecks(['src/core/buffer-update-range.js']), [
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-architecture.mjs',
+  './check-house-diversity.mjs',
   './check-door-occlusion-contract.mjs',
+  './check-plan-contract.mjs',
+  './check-temple-contract.mjs',
+  './check-road-contract.mjs',
+  './check-layout-contract.mjs',
   './check-wall-gate-contract.mjs',
   './check-wall-step-contract.mjs',
+  './check-yard-layout-contract.mjs',
+  './check-yard-life-contract.mjs',
+  './check-parcel-rebuild-contract.mjs',
 ]);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [

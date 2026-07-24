@@ -380,7 +380,16 @@ async function runContracts() {
   'changed rebuild hard-cut the active transition or leaked old geometry',
   afterChangedRebuild);
 
-  yardLife.update(0.55);
+  yardLife.update(0.1);
+  const afterRebuildAdvance = yardLife.debug();
+  // update() caps the first 0.45s sample to 0.25s, then advances another 0.1s.
+  const expectedSeasonMix = 0.35 * 0.35 * (3 - 2 * 0.35);
+  assert(Math.abs(afterRebuildAdvance.weights[0] - (1 - expectedSeasonMix)) < 1e-6
+      && Math.abs(afterRebuildAdvance.weights[1] - expectedSeasonMix) < 1e-6,
+  'geometry-only rebuild restarted the active transition easing curve',
+  afterRebuildAdvance);
+
+  yardLife.update(0.45);
   yardLife.setWeather('rain', { duration: 1 });
   const weatherAdvanced = yardLife.update(0.45);
   const mixedWeather = yardLife.debug();
