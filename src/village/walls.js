@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { markSharedResource } from '../core/three-resources.js';
 import * as G from '../core/math/geom2.js';
-import { makeRng } from '../rng.js';
+import { hashString, makeRng } from '../rng.js';
 import {
   villageWallLayout,
 } from './wall-contract.js';
+import { buildMudWallSurfaceGeometry } from './mud-wall-geometry.js';
+import { planMudWallSurface } from './mud-wall-surface-plan.js';
 import {
   yardAuxLayout,
   yardClotheslineLayout,
@@ -76,10 +78,14 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
   // 변 단위 run. 실제 road-side edge만 대문으로 분할하고, 남측 front가 다른 변이면 일반 담으로
   // 닫는다. 높이 차등(edge.heightK) + 밀착 담 공유(edge.share)도 같은 edge 메타를 소비한다.
   for (const edge of layout.edgeLayouts) {
-    for (const run of edge.runs) {
+    for (let runIndex = 0; runIndex < edge.runs.length; runIndex++) {
+      const run = edge.runs[runIndex];
       g.add(makeEdgeRun(
         style, coping, run.a, run.b, edge.height, th, run,
-        layout.centerX, layout.centerZ, M, rng,
+        layout.centerX, layout.centerZ, M, rng, {
+          enabled: opts.mudSurface !== false,
+          seed: mudSurfaceRunSeed(seed, edge.index, runIndex, run),
+        },
       ));
     }
     if (edge.gate) {
@@ -115,7 +121,7 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
 
 // 임의의 로컬 변(a→b)에 담 한 run 을 앉힌다 — run 로컬 +X=변 방향, +Z=바깥 법선(두께).
 //   style 별 run 지오는 기존 헬퍼 재사용(makeSolidRun/makeBrushRun/makeHedgeRun).
-function makeEdgeRun(style, coping, a, b, H, th, run, cx, cz, M, rng) {
+function makeEdgeRun(style, coping, a, b, H, th, run, cx, cz, M, rng, mudSurface) {
   const ex = b.x - a.x, ez = b.z - a.z;
   const L = Math.hypot(ex, ez);
   if (L < 0.05) return new THREE.Group();
@@ -131,9 +137,25 @@ function makeEdgeRun(style, coping, a, b, H, th, run, cx, cz, M, rng) {
   const runHeight = H + topOffset - bottomOffset;
   const child = style === 'brush' ? makeBrushRun(L + grow, H, M.mud, M.jipjul, rng)
     : style === 'hedge' ? makeHedgeRun(L + grow, H, rng)
-    : makeSolidRun(style, coping, L + grow, runHeight, th, M, rng);
+    : makeSolidRun(style, coping, L + grow, runHeight, th, M, rng, mudSurface);
   child.position.set(mx, bottomOffset, mz); child.rotation.y = rotY;
   return child;
+}
+
+function mudSurfaceRunSeed(seed, edgeIndex, runIndex, run) {
+  const metric = (value) => Number(value || 0).toFixed(6);
+  return hashString([
+    'mud-wall-run-v1',
+    seed >>> 0,
+    edgeIndex,
+    runIndex,
+    metric(run.a?.x),
+    metric(run.a?.z),
+    metric(run.b?.x),
+    metric(run.b?.z),
+    metric(run.bottomOffset),
+    metric(run.topOffset),
+  ].join('|'));
 }
 
 function placeGatePosts(g, a, b, t, gap, H, postMat, barMat, style, M) {
@@ -149,7 +171,7 @@ function placeGatePosts(g, a, b, t, gap, H, postMat, barMat, style, M) {
 
 // 솔리드 담 한 스팬(로컬 X=길이). stone=막돌 돌담, mud=토담(흙+짚), tile=사괴석+회벽.
 //   coping: 'tile'(기와 지붕띠) | 'thatch'(이엉 지붕띠) | 'none'. 몸채 지붕과 일치(R-P4).
-function makeSolidRun(style, coping, L, H, th, M, rng) {
+function makeSolidRun(style, coping, L, H, th, M, rng, mudSurface = null) {
   const s = new THREE.Group();
   const wallTop = H - 0.18;
   if (style === 'stone') {
@@ -161,8 +183,53 @@ function makeSolidRun(style, coping, L, H, th, M, rng) {
     const foot = Math.min(0.4, H * 0.22);
     const base = new THREE.Mesh(new THREE.BoxGeometry(L, foot, th * 1.04), M.fieldstone);
     base.position.y = foot / 2; base.castShadow = base.receiveShadow = true; s.add(base);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(L, wallTop - foot, th), M.mud);
-    body.position.y = (foot + wallTop) / 2; body.castShadow = body.receiveShadow = true; s.add(body);
+    let body;
+    let fibreGeometry = null;
+    if (mudSurface?.enabled !== false) {
+      const surface = planMudWallSurface({
+        length: L,
+        height: wallTop,
+        footHeight: foot,
+        seed: mudSurface?.seed ?? 0,
+      });
+      const geometry = buildMudWallSurfaceGeometry(surface, th);
+      fibreGeometry = geometry.fibres;
+      if (!M.mud.vertexColors) {
+        M.mud.vertexColors = true;
+        M.mud.needsUpdate = true;
+      }
+      body = new THREE.Mesh(geometry.body, M.mud);
+      body.userData.mudWallSurface = {
+        enabled: true,
+        schema: surface.schema,
+        seed: surface.seed,
+        lifts: surface.lifts.length,
+        joints: surface.joints.length,
+        fibres: surface.fibres.length,
+        damp: surface.damp.length,
+      };
+    } else {
+      body = new THREE.Mesh(new THREE.BoxGeometry(L, wallTop - foot, th), M.mud);
+      body.position.y = (foot + wallTop) / 2;
+      body.userData.mudWallSurface = { enabled: false };
+    }
+    body.name = 'mud-wall-body';
+    body.castShadow = body.receiveShadow = true;
+    // Keep the structural body as child 1: stepped-wall verification and edit
+    // tooling use the established base/body ordering.
+    s.add(body);
+    if (fibreGeometry) {
+      const surface = body.userData.mudWallSurface;
+      const fibres = new THREE.Mesh(fibreGeometry, M.jipjul);
+      fibres.name = 'mud-wall-fibres';
+      fibres.castShadow = fibres.receiveShadow = true;
+      fibres.userData.mudWallSurface = {
+        schema: surface.schema,
+        seed: surface.seed,
+        fibres: surface.fibres,
+      };
+      s.add(fibres);
+    }
   } else {
     // tile(반가): 사괴석 하단 + 회벽 상단.
     const baseH = Math.min(0.72, H * 0.36);
