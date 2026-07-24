@@ -1876,7 +1876,7 @@ try {
   }, diversityRuntime.mirroredId);
   pass(restoredType.kind === 'giwa'
       && restoredType.columnHeight === 2.9
-      && Math.abs(restoredType.mainHalfWMin - 3.3) < 1e-9
+      && Math.abs(restoredType.mainHalfWMin - 4.4) < 1e-9
       && restoredType.mirrorX === -1
       && restoredType.opening?.valid && restoredType.opening.thresholdLifeBatch === 1
       && restoredType.opening.plan?.style === 'giwa'

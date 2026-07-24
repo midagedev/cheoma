@@ -13,6 +13,38 @@ export const GIWA_VARIANT = Object.freeze({
   U: 3,
 });
 
+// Historical house-size limits establish only a monotone direction here; they
+// are not observed averages and must not become literal 10/30/60-bay houses.
+// Keep human-scale bay width in the builders, and let a household step increase
+// the main range and connected ranges instead.
+const compositionLevel = (level, targetMainBays, targetConnectedWings) =>
+  Object.freeze({ level, targetMainBays, targetConnectedWings });
+
+export const HOUSEHOLD_COMPOSITION_LEVELS = Object.freeze({
+  small: compositionLevel('small', 3, 0),
+  medium: compositionLevel('medium', 4, 1),
+  large: compositionLevel('large', 5, 2),
+});
+
+// Calibrated against the fixed-seed household01 distributions: village keeps
+// large compounds rare, while capital/Hanyang expose a natural upper tail.
+const HOUSEHOLD_COMPOSITION_MEDIUM = 0.28;
+const HOUSEHOLD_COMPOSITION_LARGE = 0.5;
+
+// Pure, deterministic composition centre for every renderer/LOD. The caller
+// may pass householdDiversityProfile() or its scalar score. Seed-local choice
+// retains adjacent forms around the target, while physical parcel and roof fit
+// remain the final authority and may step an oversized form down.
+export function householdCompositionPolicy(profileOrScore = 0) {
+  const candidate = Number.isFinite(profileOrScore)
+    ? profileOrScore
+    : profileOrScore?.household01;
+  const score = clamp01(Number.isFinite(candidate) ? candidate : 0);
+  if (score >= HOUSEHOLD_COMPOSITION_LARGE) return HOUSEHOLD_COMPOSITION_LEVELS.large;
+  if (score >= HOUSEHOLD_COMPOSITION_MEDIUM) return HOUSEHOLD_COMPOSITION_LEVELS.medium;
+  return HOUSEHOLD_COMPOSITION_LEVELS.small;
+}
+
 export function householdDiversityProfile(parcel, char01 = 0.5, wealth = 0.5) {
   const area = Math.max(0, (parcel.plotW || 0) * (parcel.plotD || 0));
   const lot01 = clamp01((Math.sqrt(area) - 9) / 9);
@@ -40,18 +72,25 @@ export function householdDiversityProfile(parcel, char01 = 0.5, wealth = 0.5) {
 // solver remains the final authority and may still fall back to L or ㅡ.
 export function pickGiwaHouseVariant(parcel, char01, wealth, roll, resolvedProfile = null) {
   const profile = resolvedProfile || householdDiversityProfile(parcel, char01, wealth);
+  const composition = householdCompositionPolicy(profile);
   const uEligible = profile.area >= 175
     && (parcel.plotW || 0) >= 13
     && (parcel.plotD || 0) >= 12
-    && profile.household01 >= 0.54;
+    && composition.targetConnectedWings >= 2;
   const uChance = uEligible
-    ? Math.min(0.46, clamp01(0.08
-      + (profile.household01 - 0.54) * 1.5
-      + (profile.lot01 - 0.45) * 0.20))
+    ? Math.min(0.68, clamp01(0.48
+      + (profile.household01 - HOUSEHOLD_COMPOSITION_LARGE) * 0.75
+      + (profile.lot01 - 0.45) * 0.18))
     : 0;
-  const singleChance = Math.max(0.08, Math.min(0.58,
-    0.18 + (0.48 - profile.household01) * 0.95 + (0.36 - profile.lot01) * 0.20,
-  ));
+  const singleChance = composition.targetConnectedWings === 0
+    ? Math.max(0.58, Math.min(0.82,
+      0.68 + (0.28 - profile.household01) * 0.45 + (0.36 - profile.lot01) * 0.18,
+    ))
+    : composition.targetConnectedWings === 1
+      ? Math.max(0.08, Math.min(0.22,
+        0.14 + (0.4 - profile.household01) * 0.25,
+      ))
+      : 0.04;
   const r = clamp01(roll);
   // One seeded quantile keeps the ordering intelligible: low draw=modest ㅡ,
   // middle=ㄱ, high draw=eligible ㄷ.  Household inputs move the cut points.

@@ -7,7 +7,11 @@
 //   전부 parcel.seed 결정론 → 같은 seed 는 픽셀 동일. 편집(override)이 이 기본값을 덮는다.
 
 import { makeRng } from '../rng.js';
-import { householdDiversityProfile, pickGiwaHouseVariant } from './house-diversity.js';
+import {
+  householdCompositionPolicy,
+  householdDiversityProfile,
+  pickGiwaHouseVariant,
+} from './house-diversity.js';
 
 // ── 프로토 풀(평면·치수·상태 사다리). st=스테이처(0=웅크린 민가 … 1=당당한 대가), 신분(rank)과 상관 ──
 //   치수(기둥높이·기단높이·용마루높이)를 변주에 baking → 스카이라인 처마선이 들쭉날쭉(드로우콜 불변).
@@ -25,13 +29,14 @@ export const CHOGA_VARIANTS = [
           plankBase: false, maruStyle: 'short' } },
   // 여염: 중간 규모, 어칸이 협칸보다 확연히 넓음, 후면 창 1, 하방 판벽, 온전한 툇마루.
   { name: 'choga-mid', st: 0.5, thatchAge: 0.45,
-    ov: { frontBays: 3, centerBayW: 3.2, middleBayW: 2.6, endBayW: 2.5, columnHeight: 2.25, podiumTierH: 0.32, ridgeH: 0.31,
+    ov: { frontBays: 4, centerBayW: 2.7, middleBayW: 2.4, endBayW: 2.2, columnHeight: 2.25, podiumTierH: 0.32, ridgeH: 0.31,
           doorCount: 1, windowCount: 3, doorWidthK: 0.4, windowWidthK: 0.24,
           doorHeightK: 1, windowHeightK: 1,
           plankBase: true, maruStyle: 'full' } },
-  // 부농: 정면 5칸 대형, 어칸 대폭 강조, 높은 벽·기단, 후면·측면 창 다수, 판벽, 넓은 툇마루.
+  // 부농: 정면 5칸 대형. 칸 수로 길이를 늘리되 한 칸 자체를 궁궐처럼 키우지 않아
+  // 넓은 일반 필지에서 축소 fallback 없이 살아남고 인간 척도를 보존한다.
   { name: 'choga-bunong', st: 0.9, thatchAge: 0.12,
-    ov: { frontBays: 5, centerBayW: 3.5, middleBayW: 2.9, endBayW: 2.7, columnHeight: 2.55, podiumTierH: 0.46, ridgeH: 0.37, roofPitch: 0.57, thatchThick: 0.42,
+    ov: { frontBays: 5, centerBayW: 3.0, middleBayW: 2.4, endBayW: 2.1, columnHeight: 2.55, podiumTierH: 0.46, ridgeH: 0.37, roofPitch: 0.57, thatchThick: 0.42,
           doorCount: 1, windowCount: 7, doorWidthK: 0.48, windowWidthK: 0.3,
           doorHeightK: 1.06, windowHeightK: 1.15,
           plankBase: true, maruStyle: 'full' } },
@@ -43,16 +48,17 @@ export const CHOGA_VARIANTS = [
 //   doorPattern은 buildBuilding이 기존 재료에 적용하고 변주별 소유를 유지한다(#55).
 export const GIWA_VARIANTS = [
   { name: 'giwa-l', st: 0.52,
-    ov: { planShape: 'l', bays: 3, columnHeight: 2.9, podiumTierH: 0.46, ridgeH: 0.4, doorPattern: 'ttisal',
-      doorCount: 2, windowCount: 3, doorWidthK: 0.9, windowWidthK: 0.5,
+    ov: { planShape: 'l', bays: 4, mainHalfW: 4.4, mainHalfD: 2.2, wingLen: 3.8, wingW: 2.2,
+      columnHeight: 2.9, podiumTierH: 0.46, ridgeH: 0.4, doorPattern: 'ttisal',
+      doorCount: 3, windowCount: 4, doorWidthK: 0.9, windowWidthK: 0.5,
       doorHeightK: 1, windowHeightK: 1 } },
   { name: 'giwa-l-flip', st: 0.52, mirrorOf: 0 },
   { name: 'giwa-single', st: 0.2,
-    ov: { planShape: 'single', bays: 3, mainHalfW: 3.7, mainHalfD: 2.0, columnHeight: 2.65, podiumTierH: 0.38, ridgeH: 0.36, doorPattern: 'ttisal',
+    ov: { planShape: 'single', bays: 3, mainHalfW: 3.3, mainHalfD: 1.8, columnHeight: 2.65, podiumTierH: 0.38, ridgeH: 0.36, doorPattern: 'ttisal',
       doorCount: 1, windowCount: 2, doorWidthK: 0.82, windowWidthK: 0.42,
       doorHeightK: 0.94, windowHeightK: 0.9 } },
   { name: 'giwa-u', st: 0.88,
-    ov: { planShape: 'u', bays: 4, mainHalfW: 5.0, mainHalfD: 2.2, wingLen: 3.4, wingW: 2.15, columnHeight: 3.35, podiumTierH: 0.7, ridgeH: 0.49, doorPattern: 'jeongja',
+    ov: { planShape: 'u', bays: 5, mainHalfW: 5.5, mainHalfD: 2.3, wingLen: 4.2, wingW: 2.3, columnHeight: 3.35, podiumTierH: 0.7, ridgeH: 0.49, doorPattern: 'jeongja',
       doorCount: 4, windowCount: 6, doorWidthK: 0.92, windowWidthK: 0.55,
       doorHeightK: 1.04, windowHeightK: 1.14 } },
 ];
@@ -99,15 +105,14 @@ function assignRoleTones(parcel, kind, wealth, rng, dK = 1) {
 function variantsFor(kind) { return kind === 'giwa' ? GIWA_VARIANTS : CHOGA_VARIANTS; }
 const clampIdx = (list, i) => Math.min(list.length - 1, Math.max(0, i | 0));
 
-// 초가 신분(rank)↔스테이처(st) 상관 가중 선택. 기와집은 필지·살림·마을 규모까지 읽는
-// house-diversity 정책을 쓴다. 바닥값(0.04)은 초가 사다리의 낮은 확률 다양성을 유지한다.
-function pickChogaVariant(rank, roll) {
-  const list = CHOGA_VARIANTS;
-  const w = list.map((v) => Math.max(0.04, 1 - Math.abs(rank - (v.st != null ? v.st : 0.5)) * 1.6));
-  const sum = w.reduce((a, b) => a + b, 0);
-  let r = roll * sum;
-  for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return i; }
-  return list.length - 1;
+// 초가도 같은 household composition budget을 읽는다. 작은 살림은 삼간 민가,
+// 중간은 여염집, 큰 살림은 드문 오간 부농을 중심으로 하되 인접 단계의 seed 변주는
+// 남긴다. 실제 처마 fit이 맞지 않으면 house-footprint가 작은 variant로 내린다.
+function pickChogaVariant(profile, roll) {
+  const composition = householdCompositionPolicy(profile);
+  if (composition.level === 'small') return roll < 0.82 ? 0 : 1;
+  if (composition.level === 'medium') return roll < 0.12 ? 0 : roll < 0.9 ? 1 : 2;
+  return roll < 0.18 ? 1 : 2;
 }
 
 // parcel.variant 의 프리셋 오버라이드(ov). 미러 항목은 원본(mirrorOf)의 ov. 편집 기준·치수 표시에 사용.
@@ -261,7 +266,7 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   const stature = clamp01(wealth * 0.72 + household.household01 * 0.28);
   parcel.variant = kind === 'giwa'
     ? pickGiwaHouseVariant(parcel, char01, wealth, variantRoll, household)
-    : pickChogaVariant(rank, variantRoll);
+    : pickChogaVariant(household, variantRoll);
   // 좌향은 plan의 frontDir 하나가 필지 poly·패드·집·담·픽킹을 모두 결정한다. 예전의 별도
   // yaw는 검증 뒤 실제 렌더만 최대 ±6° 돌려 필지 경계와 집을 어긋나게 했다. RNG 한 칸은
   // 이후 색·살림 변주의 seed 계약을 보존하려고 소비하되 두 번째 공간 회전은 만들지 않는다.
