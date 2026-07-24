@@ -13,6 +13,10 @@ const SAMPLE_Y = Object.freeze([0.16, 0.54, 0.92]);
 const GRID_CELL = 24;
 const EPS = 1e-9;
 
+export const VILLAGE_FOCUS_TERRAIN_CLEARANCE = 1;
+export const VILLAGE_FOCUS_CAMERA_CLEARANCE = 1.2;
+export const VILLAGE_FOCUS_TELEPHOTO_FOV_MAX = 30;
+
 const copyPoint = (point) => ({ x: point.x, y: point.y, z: point.z });
 const copyBounds = (bounds) => ({ min: copyPoint(bounds.min), max: copyPoint(bounds.max) });
 const copyVolume = (volume) => volume ? ({
@@ -43,7 +47,23 @@ function framingAtCandidate(framing, axisYaw, azimuth, scale) {
     position,
     target: copyPoint(framing.target),
     fov: fovForDollyScale(framing.fov, scale),
-    referenceFov: fovForDollyScale(framing.referenceFov, scale),
+    // referenceFov is the authored screen-equivalent lens. Keeping it fixed
+    // makes LOD, particles, and zoom bounds invariant under this safety dolly.
+    referenceFov: framing.referenceFov,
+  };
+}
+
+function scaleFramingDistance(framing, scale) {
+  const safeScale = clamp(scale, 0, 1);
+  return {
+    position: {
+      x: framing.target.x + (framing.position.x - framing.target.x) * safeScale,
+      y: framing.target.y + (framing.position.y - framing.target.y) * safeScale,
+      z: framing.target.z + (framing.position.z - framing.target.z) * safeScale,
+    },
+    target: copyPoint(framing.target),
+    fov: fovForDollyScale(framing.fov, safeScale),
+    referenceFov: framing.referenceFov,
   };
 }
 
@@ -245,6 +265,8 @@ export function selectSafeFocusEndpoint({
   axisYaw = 0,
   azimuthMin = -14 * Math.PI / 180,
   azimuthMax = 14 * Math.PI / 180,
+  constrainEndpoint = null,
+  telephotoFovMax = VILLAGE_FOCUS_TELEPHOTO_FOV_MAX,
 }) {
   const dx = framing.position.x - framing.target.x;
   const dz = framing.position.z - framing.target.z;
@@ -260,36 +282,69 @@ export function selectSafeFocusEndpoint({
   ].filter((value, index, list) => list.findIndex((other) => (
     Math.abs(other.azimuth - value.azimuth) < EPS && Math.abs(other.scale - value.scale) < EPS
   )) === index);
-  const candidateFramings = definitions.map(({ azimuth, scale }) => (
+  const requestedFramings = definitions.map(({ azimuth, scale }) => (
     framingAtCandidate(framing, axisYaw, azimuth, scale)
   ));
+  const constraints = requestedFramings.map((candidate) => {
+    const result = constrainEndpoint?.(candidate);
+    if (!result) return { scale: 1, blocked: false };
+    const scale = Number.isFinite(result.scale) ? clamp(result.scale, 0, 1) : 0;
+    return { ...result, scale, blocked: result.blocked === true || scale <= EPS };
+  });
+  const candidateFramings = requestedFramings.map((candidate, index) => (
+    scaleFramingDistance(candidate, constraints[index].scale)
+  ));
   const blockers = queryBlockers(index, subjectId, candidateFramings, subjectBounds);
-  const candidates = definitions.map(({ azimuth, scale }, index) => {
+  const candidates = definitions.map(({ azimuth, scale: requestedScale }, index) => {
     const candidateFraming = candidateFramings[index];
+    const constraint = constraints[index];
+    const objectScore = scoreCandidate(candidateFraming, subjectBounds, subjectVolume, blockers);
+    const scale = requestedScale * constraint.scale;
     return {
       azimuth,
+      requestedScale,
       scale,
       framing: candidateFraming,
-      ...scoreCandidate(candidateFraming, subjectBounds, subjectVolume, blockers),
+      terrainScale: constraint.scale,
+      terrainLimited: constraint.limited === true || constraint.scale < 1 - EPS,
+      terrainBlocked: constraint.blocked,
+      telephotoPreserved: !constrainEndpoint
+        || candidateFraming.fov <= telephotoFovMax + EPS,
+      terrainMinClearance: constraint.minClearance ?? null,
+      terrainEndpointClearance: constraint.endpointClearance ?? null,
+      ...objectScore,
+      cameraBlocked: objectScore.cameraBlocked || constraint.blocked,
     };
   });
   // Maximum sampled visibility wins. Stable candidate order keeps the authored
   // endpoint on a tie; one-sample noise is not enough to move the camera.
   const base = candidates[0];
+  if (constrainEndpoint && candidates.every((candidate) => candidate.terrainBlocked)) {
+    throw new RangeError(`No target-connected terrain-safe focus endpoint for ${subjectId}`);
+  }
   const usable = candidates.filter((candidate) => !candidate.cameraBlocked);
   let selected = usable[0] || base;
   for (const candidate of usable.slice(1)) {
-    if (candidate.visibleRatio > selected.visibleRatio + EPS) selected = candidate;
+    if (candidate.visibleRatio > selected.visibleRatio + EPS
+      || (Math.abs(candidate.visibleRatio - selected.visibleRatio) <= EPS
+        && candidate.scale > selected.scale + EPS)) selected = candidate;
   }
   // The authored endpoint only wins the one-sample hysteresis tie when it is
   // itself usable. Falling back into a roof merely because it had the authored
   // azimuth turns a visibility preference into a hard camera collision.
   if (!base.cameraBlocked
+    && base.scale >= selected.scale - EPS
     && selected.visibleRatio < base.visibleRatio + 1 / 9 - EPS) selected = base;
   return {
     framing: selected.framing,
     azimuth: selected.azimuth,
     scale: selected.scale,
+    requestedScale: selected.requestedScale,
+    terrainScale: selected.terrainScale,
+    terrainLimited: selected.terrainLimited,
+    telephotoPreserved: selected.telephotoPreserved,
+    terrainMinClearance: selected.terrainMinClearance,
+    terrainEndpointClearance: selected.terrainEndpointClearance,
     baseAzimuth,
     visibleRatio: selected.visibleRatio,
     occlusionRatio: selected.occlusionRatio,
@@ -300,6 +355,13 @@ export function selectSafeFocusEndpoint({
     candidates: candidates.map((candidate) => ({
       azimuth: candidate.azimuth,
       scale: candidate.scale,
+      requestedScale: candidate.requestedScale,
+      terrainScale: candidate.terrainScale,
+      terrainLimited: candidate.terrainLimited,
+      terrainBlocked: candidate.terrainBlocked,
+      telephotoPreserved: candidate.telephotoPreserved,
+      terrainMinClearance: candidate.terrainMinClearance,
+      terrainEndpointClearance: candidate.terrainEndpointClearance,
       visibleRatio: candidate.visibleRatio,
       occlusionRatio: candidate.occlusionRatio,
       cameraBlocked: candidate.cameraBlocked,

@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
 import { setupPost } from '../../../src/api/environment.js';
+import { VILLAGE_FOCUS_DOF_APERTURE } from '../../../src/api/cinematic.js';
 import { createPostQualityRuntime } from './post-quality-runtime.js';
 
 /** Wire the app's flagship post-processing pipeline and its hover outline. */
 export function createPostRuntime({ renderer, scene, camera, width, height, perf = false, compact = false }) {
   const post = setupPost({ renderer, scene, camera });
+  post.setDofAperture(VILLAGE_FOCUS_DOF_APERTURE);
   post.setDof(!perf);
   post.setFlareEnabled(!perf);
   const qualityRuntime = createPostQualityRuntime({

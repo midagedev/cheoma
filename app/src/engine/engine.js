@@ -17,10 +17,8 @@ import {
 } from '../../../src/api/environment.js';
 import {
   VILLAGE_LENS,
-  VILLAGE_FOCUS_ELEVATION,
   VILLAGE_FOCUS_SKY_FRACTION,
   dollyDistanceForFov,
-  fovForDollyScale,
   lensScaleForCamera,
   referenceFovForCamera,
   referenceVillageFov,
@@ -2009,27 +2007,25 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
     heroSunAz = rotY + Math.PI + 25 * DEG;   // 배면 +25° 사선 역광(정배면보다 처마·측면 실루엣 림이 예쁨)
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
-    // 시선점은 문 높이를 지키고 마당·생활 디테일을 읽을 수 있는 공유 고도를 쓴다.
-    // 일반 필지 planParcelFocus와 같은 값이라 종가 랜딩→임의 집 전환에도 시점이 튀지 않는다.
-    const el = VILLAGE_FOCUS_ELEVATION;
-    // 더 먼 자리에서 좁은 화각으로 같은 화면 점유율을 유지해 처마·산세가 망원으로 압축된다.
-    const heroDistance = dollyDistanceForFov(
-      1.85,
-      VILLAGE_LENS.hero.referenceFov,
-      VILLAGE_LENS.hero.fov,
-    );
-    const visibilityScale = pr.cameraVisibility?.scale ?? 1;
-    const r = heroDistance * maxDim * visibilityScale;
-    const finalTarget = pr.cameraFraming.target.clone();
-    const plannedXZ = pr.cameraFraming.position.clone().sub(finalTarget).setY(0).normalize();
-    const off = plannedXZ.multiplyScalar(r * Math.cos(el));
-    off.y = r * Math.sin(el);
-    const finalPosition = finalTarget.clone().add(off);
-    const finalFov = fovForDollyScale(VILLAGE_LENS.hero.fov, visibilityScale);
-    const finalReferenceFov = fovForDollyScale(
-      VILLAGE_LENS.hero.referenceFov,
-      visibilityScale,
-    );
+    const heroFraming = pr.heroCameraFraming;
+    let finalPosition;
+    let finalTarget;
+    let finalFov;
+    let finalReferenceFov;
+    if (heroFraming) {
+      finalPosition = heroFraming.position.clone();
+      finalTarget = heroFraming.target.clone();
+      finalFov = heroFraming.fov;
+      finalReferenceFov = heroFraming.referenceFov;
+    } else {
+      // Old/custom handles may not expose the separately terrain-solved 7°
+      // endpoint. Reuse the already safe ordinary frame instead of extending
+      // its ray back out through the same hill with a reconstructed hero dolly.
+      finalTarget = pr.cameraFraming.target.clone();
+      finalPosition = pr.cameraFraming.position.clone();
+      finalFov = pr.cameraFraming.fov;
+      finalReferenceFov = pr.cameraFraming.referenceFov;
+    }
 
     // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 24°의
     // 마당·문높이 망원 프레임으로 내려앉는다. seed는 선회 방향만 정하고 생성 RNG를 소비하지 않는다.
@@ -2849,6 +2845,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         });
         return {
           ...structuredClone(p.cameraVisibility),
+          hero: p.heroCameraVisibility ? {
+            ...structuredClone(p.heroCameraVisibility),
+            baseFraming: plainFrame(p.baseHeroCameraFraming),
+            safeFraming: plainFrame(p.heroCameraFraming),
+          } : null,
           subjectBounds: bounds(p.focusBounds || p.bbox),
           blockerBounds: Object.fromEntries((p.cameraVisibility?.baseBlockers || []).map((blockerId) => {
             const blocker = village.handle?.getPickProxy(blockerId);

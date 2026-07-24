@@ -4,6 +4,7 @@ import {
   VILLAGE_LENS,
   dollyDistanceForFov,
   dollyScaleForFov,
+  equivalentDistanceAtFov,
 } from '../src/camera/optics.js';
 import {
   createArchitecturalReveal,
@@ -18,6 +19,10 @@ import {
   focusFeatureBlockers,
   parcelFocusBlocker,
 } from '../src/village/focus-blockers.js';
+import {
+  terrainMeshCameraSafeScale,
+  terrainMeshSegmentClearance,
+} from '../src/village/terrain-grid.js';
 
 const EPS = 1e-9;
 const DEG = 180 / Math.PI;
@@ -197,6 +202,84 @@ assert.deepEqual(
   safeFocus,
   'safe endpoint selection must be deterministic',
 );
+
+// #132: a telephoto endpoint may sit behind the rendered terrain even when no
+// building proxy blocks it. Safety shortening keeps the 24° ray and projected
+// house size, while the authored reference lens stays fixed so LOD does not pop.
+const terrainSite = {
+  R: 150,
+  terrainR: 150,
+  heightAt(x, z) {
+    const ridge = Math.max(0, 12 - Math.abs(z - 21) * 1.4);
+    return ridge + x * 0;
+  },
+};
+const terrainTarget = { x: 0, y: 2.2, z: 0 };
+const terrainCamera = { x: 0, y: 18, z: 42 };
+const unsafeTerrainRay = terrainMeshSegmentClearance(
+  terrainSite,
+  terrainTarget,
+  terrainCamera,
+);
+assert.ok(unsafeTerrainRay.min < 0, 'fixture telephoto ray must cross the rendered ridge');
+const terrainSafety = terrainMeshCameraSafeScale(
+  terrainSite,
+  terrainTarget,
+  terrainCamera,
+  { clearance: 1, endpointClearance: 1.2, maxRadius: 140 },
+);
+assert.ok(terrainSafety.scale > 0 && terrainSafety.scale < 1,
+  'terrain safety must retain the first connected ray interval');
+assert.ok(terrainSafety.minClearance >= 1 - 1e-8);
+assert.ok(terrainSafety.endpointClearance >= 1.2 - 1e-8);
+
+const constrainedFocus = selectSafeFocusEndpoint({
+  subjectId: 'subject',
+  framing: focusBase,
+  subjectBounds,
+  index: createFocusVisibilityIndex([{ id: 'subject', bounds: subjectBounds }]),
+  telephotoFovMax: 45,
+  constrainEndpoint: () => ({
+    scale: 0.5,
+    limited: true,
+    minClearance: 1,
+    endpointClearance: 1.2,
+  }),
+});
+assert.equal(constrainedFocus.candidates.length, 3,
+  'terrain safety must preserve the exact three authored focus candidates');
+assert.equal(constrainedFocus.scale, 0.5);
+assert.equal(constrainedFocus.framing.referenceFov, focusBase.referenceFov,
+  'safety dolly must not rewrite the authored LOD reference lens');
+assert.ok(Math.abs(
+  distance(constrainedFocus.framing.position, constrainedFocus.framing.target)
+    / distance(focusBase.position, focusBase.target)
+    - 0.5
+) < EPS);
+assert.ok(Math.abs(
+  Math.tan(constrainedFocus.framing.fov * Math.PI / 360) * constrainedFocus.scale
+    - Math.tan(focusBase.fov * Math.PI / 360)
+) < EPS, 'terrain dolly must preserve projected architecture size');
+assert.ok(Math.abs(
+  equivalentDistanceAtFov(
+    distance(constrainedFocus.framing.position, constrainedFocus.framing.target),
+    constrainedFocus.framing.fov,
+    constrainedFocus.framing.referenceFov,
+  )
+    - equivalentDistanceAtFov(
+      distance(focusBase.position, focusBase.target),
+      focusBase.fov,
+      focusBase.referenceFov,
+    )
+) < EPS, 'terrain dolly must preserve screen-equivalent LOD distance');
+assert.throws(() => selectSafeFocusEndpoint({
+  subjectId: 'invalid-subject',
+  framing: focusBase,
+  subjectBounds,
+  index: createFocusVisibilityIndex([{ id: 'invalid-subject', bounds: subjectBounds }]),
+  constrainEndpoint: () => ({ scale: Number.NaN }),
+}), /No target-connected terrain-safe focus endpoint/,
+'invalid terrain constraints must fail closed instead of placing the camera at the target');
 
 const trappedIndex = createFocusVisibilityIndex([
   { id: 'subject', bounds: subjectBounds },

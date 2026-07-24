@@ -3,13 +3,24 @@ import { planParcelFocus } from '../../generators/shared/parcel-spatial.js';
 import {
   createFocusVisibilityIndex,
   selectSafeFocusEndpoint,
+  VILLAGE_FOCUS_CAMERA_CLEARANCE,
+  VILLAGE_FOCUS_TERRAIN_CLEARANCE,
 } from '../../camera/focus-visibility.js';
-import { VILLAGE_LENS, dollyDistanceForFov } from '../../camera/optics.js';
+import {
+  VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_LENS,
+  dollyDistanceForFov,
+} from '../../camera/optics.js';
 import * as G from '../../core/math/geom2.js';
 import {
   focusFeatureBlockers,
   parcelFocusBlocker,
 } from '../../village/focus-blockers.js';
+import { terrainWarpInner } from '../../village/terrain-surface.js';
+import {
+  terrainGridStep,
+  terrainMeshCameraSafeScale,
+} from '../../village/terrain-grid.js';
 import { buildParcelSpec } from './parcel-edit.js';
 
 const DEG = Math.PI / 180;
@@ -36,7 +47,53 @@ function threeBounds(bounds) {
   );
 }
 
-function applySafeParcelFramings(proxies, featureBlockers = []) {
+function heroCameraFraming(proxy) {
+  const target = proxy.baseCameraFraming.target;
+  const direction = proxy.baseCameraFraming.position.clone().sub(target).normalize();
+  const maxDim = Math.max(proxy.dims.x, proxy.dims.y, proxy.dims.z);
+  const distance = dollyDistanceForFov(
+    1.85,
+    VILLAGE_LENS.hero.referenceFov,
+    VILLAGE_LENS.hero.fov,
+  ) * maxDim;
+  // Keep the authored 24° approach even if a stale base framing arrives from an
+  // older snapshot. The safe selector scales both axes together after this.
+  const horizontal = Math.cos(VILLAGE_FOCUS_ELEVATION) * distance;
+  const horizontalDirection = direction.setY(0).normalize();
+  return {
+    position: {
+      x: target.x + horizontalDirection.x * horizontal,
+      y: target.y + Math.sin(VILLAGE_FOCUS_ELEVATION) * distance,
+      z: target.z + horizontalDirection.z * horizontal,
+    },
+    target: { x: target.x, y: target.y, z: target.z },
+    fov: VILLAGE_LENS.hero.fov,
+    referenceFov: VILLAGE_LENS.hero.referenceFov,
+  };
+}
+
+function visibilityDescriptor(result) {
+  return {
+    azimuth: result.azimuth,
+    baseAzimuth: result.baseAzimuth,
+    scale: result.scale,
+    requestedScale: result.requestedScale,
+    terrainScale: result.terrainScale,
+    terrainLimited: result.terrainLimited,
+    telephotoPreserved: result.telephotoPreserved,
+    terrainMinClearance: result.terrainMinClearance,
+    terrainEndpointClearance: result.terrainEndpointClearance,
+    visibleRatio: result.visibleRatio,
+    occlusionRatio: result.occlusionRatio,
+    baseVisibleRatio: result.baseVisibleRatio,
+    baseOcclusionRatio: result.baseOcclusionRatio,
+    blockers: result.blockers,
+    baseBlockers: result.baseBlockers,
+    candidates: result.candidates,
+  };
+}
+
+function applySafeParcelFramings(proxies, featureBlockers = [], plan = null, site = null) {
   const residential = proxies.filter((proxy) => (
     proxy.baseCameraFraming && proxy.focusSafety && proxy.focusBounds && proxy.focusVolume
   ));
@@ -48,30 +105,54 @@ function applySafeParcelFramings(proxies, featureBlockers = []) {
     })),
     ...featureBlockers,
   ]);
+  const safeTerrainRadius = plan && site
+    ? Math.max(1, terrainWarpInner(plan, site) - terrainGridStep(site))
+    : Infinity;
+  const heroParcels = plan?.parcels?.filter((parcel) => parcel.hero) || [];
+  const primaryHero = heroParcels.find((parcel) => parcel.heroStyle === 'hanok')
+    || heroParcels[0]
+    || null;
   for (const proxy of residential) {
-    const result = selectSafeFocusEndpoint({
+    const constrainEndpoint = site ? (framing) => terrainMeshCameraSafeScale(
+      site,
+      framing.target,
+      framing.position,
+      {
+        clearance: VILLAGE_FOCUS_TERRAIN_CLEARANCE,
+        endpointClearance: VILLAGE_FOCUS_CAMERA_CLEARANCE,
+        maxRadius: safeTerrainRadius,
+      },
+    ) : null;
+    const options = {
       subjectId: proxy.parcelId,
-      framing: proxy.baseCameraFraming,
       subjectBounds: proxy.focusBounds,
       subjectVolume: proxy.focusVolume,
       index,
       axisYaw: proxy.focusSafety.axisYaw,
       azimuthMin: proxy.focusSafety.azimuthMin,
       azimuthMax: proxy.focusSafety.azimuthMax,
+      constrainEndpoint,
+    };
+    const result = selectSafeFocusEndpoint({
+      ...options,
+      framing: proxy.baseCameraFraming,
     });
     proxy.cameraFraming = threeCameraFraming(result.framing);
-    proxy.cameraVisibility = {
-      azimuth: result.azimuth,
-      baseAzimuth: result.baseAzimuth,
-      scale: result.scale,
-      visibleRatio: result.visibleRatio,
-      occlusionRatio: result.occlusionRatio,
-      baseVisibleRatio: result.baseVisibleRatio,
-      baseOcclusionRatio: result.baseOcclusionRatio,
-      blockers: result.blockers,
-      baseBlockers: result.baseBlockers,
-      candidates: result.candidates,
-    };
+    proxy.cameraVisibility = visibilityDescriptor(result);
+
+    if (proxy.parcelId === primaryHero?.id) {
+      proxy.baseHeroCameraFraming = threeCameraFraming(heroCameraFraming(proxy));
+      const heroResult = selectSafeFocusEndpoint({
+        ...options,
+        framing: proxy.baseHeroCameraFraming,
+      });
+      proxy.heroCameraFraming = threeCameraFraming(heroResult.framing);
+      proxy.heroCameraVisibility = visibilityDescriptor(heroResult);
+    } else {
+      proxy.baseHeroCameraFraming = null;
+      proxy.heroCameraFraming = null;
+      proxy.heroCameraVisibility = null;
+    }
   }
 }
 
@@ -113,7 +194,7 @@ export function buildParcelPickProxies(plan, site) {
         },
     });
   }
-  applySafeParcelFramings(proxies, focusFeatureBlockers(plan, site));
+  applySafeParcelFramings(proxies, focusFeatureBlockers(plan, site), plan, site);
   return proxies;
 }
 
@@ -143,6 +224,8 @@ export function refreshParcelPickProxy(
   proxy.rotY = rotationY;
   proxy.baseCameraFraming = parcelCameraFraming(proxy.worldCenter, focus);
   proxy.cameraFraming = cloneCameraFraming(proxy.baseCameraFraming);
+  proxy.baseHeroCameraFraming = null;
+  proxy.heroCameraFraming = null;
   proxy.focusSafety = {
     axisYaw: rotationY,
     azimuthMin: focus.azimuthMin,
@@ -156,8 +239,9 @@ export function refreshParcelPickProxy(
       rotationY,
     };
   proxy.cameraVisibility = null;
+  proxy.heroCameraVisibility = null;
   if (buildingSpec) proxy.buildingSpec = buildingSpec;
-  applySafeParcelFramings(peers || [proxy], focusFeatureBlockers(plan, site));
+  applySafeParcelFramings(peers || [proxy], focusFeatureBlockers(plan, site), plan, site);
   return proxy;
 }
 
