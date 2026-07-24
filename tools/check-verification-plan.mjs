@@ -156,6 +156,12 @@ assert.deepEqual(ids(['src/api/mja-house.js'], {
 assert.deepEqual(ids(['tools/shoot-mja-house.mjs'], {
   newPaths: ['tools/shoot-mja-house.mjs'],
 }), ['core', 'mja-house-browser']);
+assert.deepEqual(ids(['tools/check-render-budget-contract.mjs'], {
+  newPaths: ['tools/check-render-budget-contract.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/lib/render-budget-contract.mjs'], {
+  newPaths: ['tools/lib/render-budget-contract.mjs'],
+}), ['core', 'lod-focus']);
 assert.deepEqual(ids(['tools/shoot-thatch.mjs'], {
   newPaths: ['tools/shoot-thatch.mjs'],
 }), ['core', 'app']);

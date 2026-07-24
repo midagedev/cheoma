@@ -4,6 +4,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import {
+  HANYANG_RENDER_BUDGET,
+  RENDER_BUDGET_METRICS,
+  RENDER_BUDGET_STATES,
+  evaluateRenderBudget,
+} from './lib/render-budget-contract.mjs';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -335,24 +341,27 @@ try {
   }
 
   async function sceneMetrics(label) {
-    const metrics = await page.evaluate(() => {
+    const samples = await page.evaluate(() => {
       const engine = window.__engine;
-      const calls = engine.village.debugDrawCalls();
-      return {
-        calls,
+      const capture = () => ({
+        calls: engine.renderer.info.render.calls,
         triangles: engine.renderer.info.render.triangles,
         programs: engine.renderer.info.programs?.length ?? 0,
         geometries: engine.renderer.info.memory.geometries,
         textures: engine.renderer.info.memory.textures,
-      };
+      });
+      engine.village.debugDrawCalls();
+      return [capture(), capture()];
     });
+    const metrics = samples[1];
     pass(Number.isFinite(metrics.calls) && metrics.calls > 0
         && Number.isFinite(metrics.triangles) && metrics.triangles > 0,
     `${label} scene-only renderer counters are finite`);
-    return metrics;
+    return { ...metrics, samples };
   }
 
   const performance = {};
+  performance.aerial = await sceneMetrics('aerial');
 
   const legacyOverload = await page.evaluate(async ({ housesModuleUrl, threeModuleUrl }) => {
     const [{ attachChunkLodSwap }, THREE] = await Promise.all([
@@ -1057,7 +1066,6 @@ try {
       && focusShadow.requestedNdc[2] >= -1 && focusShadow.requestedNdc[2] <= 1,
   `focused Hanyang parcel owns a texel-centred physical sun shadow `
     + `(${JSON.stringify(focusShadow?.requestedNdc)})`);
-  performance.focus = await sceneMetrics('focus');
   const nearLife = await page.evaluate(async () => {
     await new Promise((resolveFrame) => {
       requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
@@ -1095,6 +1103,7 @@ try {
   `focused view wakes nearby ground fauna (${JSON.stringify(nearLife)})`);
   pass(nearLife.petalLevel > 0.002,
     `focused autumn view wakes camera-local leaves (${nearLife.petalLevel})`);
+  performance.focus = await sceneMetrics('focus');
 
   // 선택 overlay를 유지한 채 해당 청크가 fullOut 밖, midIn 안에 머물도록 카메라만 물린다.
   // 실제 focus regime 안에서 선택 overlay를 유지한 채 안정된 MID root를 잰다.
@@ -1149,14 +1158,16 @@ try {
       if (stableMidFrames >= 3) break;
     }
     const mid = engine.village.debugLod(parcelId);
-    const calls = engine.village.debugDrawCalls();
-    const metrics = {
-      calls,
+    const captureMetrics = () => ({
+      calls: engine.renderer.info.render.calls,
       triangles: engine.renderer.info.render.triangles,
       programs: engine.renderer.info.programs?.length ?? 0,
       geometries: engine.renderer.info.memory.geometries,
       textures: engine.renderer.info.memory.textures,
-    };
+    });
+    engine.village.debugDrawCalls();
+    const metricSamples = [captureMetrics(), captureMetrics()];
+    const metrics = { ...metricSamples[1], samples: metricSamples };
 
     camera.position.copy(saved.position);
     controls.target.copy(saved.target);
@@ -1244,7 +1255,6 @@ try {
     requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
   }));
   performance.focusOut = await sceneMetrics('focus-out');
-  performance.aerial = { ...performance.focusOut };
   const aerialLife = await page.evaluate(() => {
     const root = window.__engine.village.exportRoot();
     const fauna = root?.userData?.faunaLod;
@@ -1830,10 +1840,26 @@ try {
   }
 
   if (runFocusScenario) {
-    console.log(`PERF  aerial   calls=${performance.aerial.calls} triangles=${performance.aerial.triangles}`);
-    console.log(`PERF  mid      calls=${performance.mid.calls} triangles=${performance.mid.triangles}`);
-    console.log(`PERF  focus    calls=${performance.focus.calls} triangles=${performance.focus.triangles}`);
-    console.log(`PERF  focusOut calls=${performance.focusOut.calls} triangles=${performance.focusOut.triangles}`);
+    const budgetReport = {
+      fixture: HANYANG_RENDER_BUDGET.fixture,
+      states: RENDER_BUDGET_STATES.map((state) => ({
+        state,
+        samples: performance[state].samples,
+      })),
+    };
+    const budgetResult = evaluateRenderBudget(HANYANG_RENDER_BUDGET, budgetReport);
+    if (budgetResult.ok) {
+      pass(true, 'Hanyang aerial/MID/focus/focus-out render budgets and plateaus stay bounded');
+    } else {
+      for (const violation of budgetResult.violations) pass(false, `render budget: ${violation}`);
+    }
+    for (const state of RENDER_BUDGET_STATES) {
+      const metrics = performance[state];
+      console.log(
+        `PERF  ${state.padEnd(8)} `
+        + RENDER_BUDGET_METRICS.map((metric) => `${metric}=${metrics[metric]}`).join(' '),
+      );
+    }
   }
 
   const mistTeardown = runFocusScenario ? await page.evaluate(() => {
