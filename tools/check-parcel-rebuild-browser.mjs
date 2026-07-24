@@ -103,6 +103,8 @@ try {
       import(pavilionModuleUrl),
     ]);
     const expected = planParcelFocus(parcel);
+    const visibility = engine.village.debugFocusVisibility(parcelId);
+    const safeFraming = visibility.safeFraming;
     const target = engine.__controls.target;
     const camera = engine.camera.position;
     const dx = camera.x - target.x;
@@ -117,8 +119,15 @@ try {
     engine.village.debugDrawCalls();
     return {
       state: engine.village.debugParcelRebuild(parcelId),
-      cameraError: Math.hypot(camera.x - expected.cameraX, camera.z - expected.cameraZ),
-      targetError: Math.hypot(target.x - expected.worldX, target.z - expected.worldZ),
+      cameraError: Math.hypot(
+        camera.x - safeFraming.position[0],
+        camera.z - safeFraming.position[2],
+      ),
+      targetError: Math.hypot(
+        target.x - safeFraming.target[0],
+        target.z - safeFraming.target[2],
+      ),
+      baseTargetError: Math.hypot(target.x - expected.worldX, target.z - expected.worldZ),
       pavilionDistance: Math.hypot(pavilion.x - closestX, pavilion.z - closestZ),
       pavilionClearance: (pavilion.radius || 4.5) + PAVILION_VIEW_CLEARANCE,
       pavilionBlocks: pavilionBlocksParcelFocus(parcel, pavilion),
@@ -132,8 +141,8 @@ try {
     focusModuleUrl: `/@fs${join(ROOT, 'src/generators/shared/parcel-spatial.js')}`,
     pavilionModuleUrl: `/@fs${join(ROOT, 'src/village/pavilion-plan.js')}`,
   });
-  invariant(before.cameraError < 0.15 && before.targetError < 0.15,
-    `live camera drifted from the south-light framing (${before.cameraError}/${before.targetError})`);
+  invariant(before.cameraError < 0.15 && before.targetError < 0.15 && before.baseTargetError < 0.15,
+    `live camera drifted from the authoritative safe south-light framing (${before.cameraError}/${before.targetError}/${before.baseTargetError})`);
   invariant(!before.pavilionBlocks && before.pavilionDistance > before.pavilionClearance,
     `pavilion blocks the live focus ray (${before.pavilionDistance} <= ${before.pavilionClearance})`);
 

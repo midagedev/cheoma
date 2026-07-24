@@ -114,10 +114,14 @@ const expectedProxyHashes = {
   // same oriented auxiliary volumes now participate in the camera solver.
   // The fixed Hanyang cohort has one affected safe framing; smaller cohorts keep
   // their prior camera bytes because no auxiliary intersects their candidates.
-  village: 'ae3dd5ea',
-  town: '6a4ac3bd',
-  capital: '9788a2ef',
-  hanyang: 'dc26ddb8',
+  // #151 adds stable renderer-free household-detail anchors. A detail may choose
+  // another one of the same three bounded south-opening candidates only inside
+  // the existing one-of-nine architectural hysteresis; scene bytes, proxy
+  // counts, and sync/Worker/fallback parity remain unchanged.
+  village: 'c1a9c692',
+  town: '269d1931',
+  capital: 'f9baba40',
+  hanyang: 'a84cc496',
 };
 
 const server = await createServer({

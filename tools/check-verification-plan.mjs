@@ -404,6 +404,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-mja-house-plan.mjs',
   './check-mja-house-integration.mjs',
   './check-door-occlusion-contract.mjs',
+  './check-cinematic-reveal.mjs',
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',
   './check-road-contract.mjs',

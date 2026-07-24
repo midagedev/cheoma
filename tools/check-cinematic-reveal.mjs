@@ -20,6 +20,8 @@ import {
   focusFeatureBlockers,
   focusPlanningBlockers,
   parcelFocusBlocker,
+  parcelFocusDetailAnchors,
+  parcelWallFocusBlockers,
 } from '../src/village/focus-blockers.js';
 import {
   terrainMeshCameraSafeScale,
@@ -205,6 +207,70 @@ assert.deepEqual(
   safeFocus,
   'safe endpoint selection must be deterministic',
 );
+
+// #151: stable renderer-free household anchors may open the opposite side of
+// the same solar corridor. The selected house remains the architectural subject,
+// but its fitted roof must still act as the first surface for low yard details.
+const detailIndex = createFocusVisibilityIndex([
+  { id: 'subject', bounds: subjectBounds },
+]);
+const oppositeDetail = [{ id: 'yard:jangdok', point: { x: -6.5, y: 0.3, z: -15 } }];
+const detailFocus = selectSafeFocusEndpoint({
+  subjectId: 'subject',
+  framing: focusBase,
+  subjectBounds,
+  index: detailIndex,
+  detailAnchors: oppositeDetail,
+});
+assert.equal(detailFocus.candidates.length, 3,
+  'yard-aware focus must retain exactly three bounded camera candidates');
+assert.deepEqual(detailFocus.candidates.map((candidate) => Math.round(candidate.azimuth * DEG)), [14, 0, -14],
+  'planned detail direction may sample the opposite edge but never leave the solar opening');
+assert.deepEqual(detailFocus.candidates.map((candidate) => candidate.requestedScale), [1, 0.9, 0.8],
+  'detail-aware candidates must preserve the existing safe telephoto dolly contract');
+assert.equal(detailFocus.baseDetailVisibleCount, 0,
+  'same-side authored camera must begin behind the fitted subject roof');
+assert.deepEqual(detailFocus.baseDetailBlockers, ['subject'],
+  'the selected house remains a first-surface blocker for its yard-detail rays');
+assert.equal(detailFocus.detailVisibleCount, 1);
+assert.equal(detailFocus.detailVisibleRatio, 1);
+assert.equal(Math.round(detailFocus.azimuth * DEG), -14,
+  'an equally safe opposite-side view must win when it alone reveals the yard detail');
+assert.equal(detailFocus.visibleRatio, 1,
+  'detail preference must preserve complete architectural surface visibility');
+assert.ok(Math.abs(focusElevation(detailFocus.framing) - focusElevation(focusBase)) < EPS,
+  'detail-aware candidate must preserve the authored camera elevation');
+assert.deepEqual(selectSafeFocusEndpoint({
+  subjectId: 'subject',
+  framing: focusBase,
+  subjectBounds,
+  index: detailIndex,
+  detailAnchors: oppositeDetail,
+}), detailFocus, 'detail-aware focus selection must be deterministic');
+
+const detailTradeoff = (height) => selectSafeFocusEndpoint({
+  subjectId: 'subject',
+  framing: focusBase,
+  subjectBounds,
+  index: createFocusVisibilityIndex([
+    { id: 'subject', bounds: subjectBounds },
+    {
+      id: 'opposite-low-obstruction',
+      bounds: { min: { x: -12, y: 0, z: 0 }, max: { x: -4, y: height, z: 7 } },
+    },
+  ]),
+  detailAnchors: [{ id: 'yard:work', point: { x: -15, y: 0.3, z: 0 } }],
+});
+const oneSampleTradeoff = detailTradeoff(1.5);
+assert.equal(oneSampleTradeoff.visibleRatio, 8 / 9);
+assert.equal(oneSampleTradeoff.detailVisibleRatio, 1,
+  'detail may resolve an exact one-of-nine architectural hysteresis choice');
+assert.equal(Math.round(oneSampleTradeoff.azimuth * DEG), -14);
+const unsafeTradeoff = detailTradeoff(4);
+assert.equal(unsafeTradeoff.visibleRatio, 1);
+assert.equal(unsafeTradeoff.detailVisibleRatio, 0);
+assert.equal(Math.round(unsafeTradeoff.azimuth * DEG), 14,
+  'detail must not outweigh a loss of more than one architectural surface sample');
 
 // #132: a telephoto endpoint may sit behind the rendered terrain even when no
 // building proxy blocks it. Safety shortening keeps the 24° ray and projected
@@ -402,6 +468,96 @@ const editedHouseBlocker = parcelFocusBlocker({
 assert.ok(Math.abs(editedHouseBlocker.volume.half.x - 6) < EPS
   && Math.abs(editedHouseBlocker.volume.half.z - 4) < EPS,
   'committed edited eaves must replace the generated variant envelope for focus safety');
+const plannedHousehold = {
+  ...houseParcel,
+  id: 'yard-detail-owner',
+  center: { x: 10, z: 20 },
+  frontDir: { x: 0, z: 1 },
+  baseY: 3,
+  plotW: 20,
+  plotD: 18,
+  jangdok: 2,
+};
+const plannedDetailAnchors = parcelFocusDetailAnchors(plannedHousehold, site);
+assert.equal(plannedDetailAnchors.length, 1,
+  'one planned jangdok platform must yield one representative detail anchor');
+assert.ok(Object.isFrozen(plannedDetailAnchors[0])
+  && Object.isFrozen(plannedDetailAnchors[0].point),
+  'planned detail anchor and its world point must be immutable');
+near(plannedDetailAnchors[0].point, { x: 1.94, y: 3.5, z: 12.21 });
+assert.deepEqual(parcelFocusDetailAnchors(plannedHousehold, site), plannedDetailAnchors,
+  'planned household detail anchors must be stable without RNG');
+assert.deepEqual(parcelFocusDetailAnchors({
+  ...plannedHousehold,
+  jangdok: 0,
+}, site), [], 'an empty enclosed yard must not invent a camera detail target');
+assert.deepEqual(parcelFocusDetailAnchors({
+  ...plannedHousehold,
+  hero: true,
+}, site), [], 'a hero compound must not inherit regular-house yard anchors');
+const walledHousehold = {
+  ...plannedHousehold,
+  center: { x: 0, z: 0 },
+  yaw: 0,
+  baseY: 0,
+  wallType: 'stone',
+  wallHeightK: 1,
+  shape: {
+    pts: [
+      { x: 10, z: 9 }, { x: -10, z: 9 },
+      { x: -10, z: -9 }, { x: 10, z: -9 },
+    ],
+    roles: ['front', 'left', 'back', 'right'],
+  },
+  access: { gateEdge: 0, gateT: 0.5 },
+};
+const plannedWallBlockers = parcelWallFocusBlockers(walledHousehold, site, 0.5);
+assert.ok(plannedWallBlockers.some((entry) => entry.id.startsWith('wall:yard-detail-owner:0:'))
+  && plannedWallBlockers.some((entry) => entry.id.startsWith('gate:yard-detail-owner:post:')),
+  'planned detail blockers must preserve the actual split wall runs and gate opening');
+assert.deepEqual(parcelWallFocusBlockers(walledHousehold, site, 0.5), plannedWallBlockers,
+  'wall and gate first-surface blockers must be deterministic without global RNG');
+assert.deepEqual(parcelWallFocusBlockers({
+  ...walledHousehold,
+  hero: true,
+}, site, 0.5), [], 'a hero compound must not inherit the regular parcel wall layout');
+const wallRayFraming = {
+  position: { x: 0, y: 5, z: 30 },
+  target: { x: 0, y: 1, z: -6 },
+  fov: 10,
+  referenceFov: 10,
+};
+const wallRaySubject = {
+  min: { x: -1, y: 0, z: -7 },
+  max: { x: 1, y: 3, z: -5 },
+};
+const wallRayIndex = createFocusVisibilityIndex([
+  { id: 'yard-detail-owner', bounds: wallRaySubject },
+]);
+const wallRayAnchor = [{ id: 'yard:work', point: { x: 4, y: 0.5, z: 0 } }];
+const wallBlindResult = selectSafeFocusEndpoint({
+  subjectId: 'yard-detail-owner',
+  framing: wallRayFraming,
+  subjectBounds: wallRaySubject,
+  index: wallRayIndex,
+  detailAnchors: wallRayAnchor,
+});
+const wallAwareResult = selectSafeFocusEndpoint({
+  subjectId: 'yard-detail-owner',
+  framing: wallRayFraming,
+  subjectBounds: wallRaySubject,
+  index: wallRayIndex,
+  detailIndex: createFocusVisibilityIndex([
+    { id: 'yard-detail-owner', bounds: wallRaySubject },
+    ...plannedWallBlockers,
+  ]),
+  detailAnchors: wallRayAnchor,
+});
+assert.equal(wallBlindResult.baseDetailVisibleCount, 1,
+  'fixture must prove the wall-free detail query would report a false clear ray');
+assert.equal(wallAwareResult.baseDetailVisibleCount, 0);
+assert.ok(wallAwareResult.baseDetailBlockers.some((id) => id.startsWith('wall:yard-detail-owner:0:')),
+  'actual front-wall runs must be the first surface for a low yard-detail ray outside the gate');
 const plannedProps = focusFeatureBlockers({
   features: {
     props: [{
