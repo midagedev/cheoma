@@ -13,6 +13,7 @@ export const VERIFICATION_GATES = Object.freeze({
   worker: Object.freeze({ script: 'check:worker', resource: 'browser', tier: 'checkpoint', description: 'Sync, Worker, and fallback scene parity' }),
   audio: Object.freeze({ script: 'check:audio', resource: 'browser', tier: 'checkpoint', description: 'Audio lifecycle contract' }),
   'temple-browser': Object.freeze({ script: 'check:temple:browser', resource: 'browser', tier: 'checkpoint', description: 'Temple WebGL assembly and disposal' }),
+  'mja-house-browser': Object.freeze({ script: 'check:mja-house:browser', resource: 'browser', tier: 'checkpoint', description: 'Opt-in enclosed-house visual, resource, and lifecycle contract' }),
   'dof-app': Object.freeze({ script: 'check:dof:app', resource: 'browser', tier: 'checkpoint', description: 'Product depth-of-field flow' }),
   'bokeh-fixture': Object.freeze({ script: 'shoot:bokeh:proof', resource: 'exclusive', tier: 'checkpoint', description: 'Controlled bokeh image, source-scatter resource proof, and hardware GPU query' }),
   rim: Object.freeze({ script: 'check:rim', resource: 'browser', tier: 'checkpoint', description: 'Physical rim shader contract' }),
@@ -28,7 +29,7 @@ export const VERIFICATION_GATES = Object.freeze({
 export const ALL_PROFILE = Object.freeze([
   'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse',
   'yard-life', 'winter-app', 'worker', 'audio',
-  'temple-browser', 'parcel-rebuild-browser', 'surface-browser',
+  'temple-browser', 'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
 
 export const FULL_PROFILE = Object.freeze([

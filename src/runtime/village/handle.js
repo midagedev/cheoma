@@ -66,6 +66,7 @@ import { yardCanopyBlocked } from '../../village/vegetation-spatial.js';
 import { RESIDENTIAL_OPENING_PARAM_KEYS } from '../../layout/residential-openings.js';
 import { createPrimaryDoorRuntime } from '../../interaction/primary-door.js';
 import { createVillageDoorOcclusion } from './door-occlusion.js';
+import { buildMjaHouse, disposeMjaHouse } from '../../village/mja-house-geometry.js';
 
 const PERSISTENT_YARD_FIELDS = Object.freeze([
   'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed',
@@ -73,6 +74,7 @@ const PERSISTENT_YARD_FIELDS = Object.freeze([
 
 function isProductPrimaryDoorParcel(parcel) {
   if (!parcel || (parcel.kind !== 'giwa' && parcel.kind !== 'choga')) return false;
+  if (parcel.mjaHouse) return false;
   // `hero` is a camera/editing class, not a residential role: town/capital use
   // heroStyle=palace for magistracy/guest-house cores. Require the authored
   // hanok role explicitly instead of treating every hero as the head household.
@@ -349,7 +351,11 @@ export function createVillageHandle(opts, seed, plan, group) {
   // 히어로 필지 편집 가능 여부(heroHandle 있어야 종가만 분리 은닉 가능). 프록시 스펙에 반영 —
   //   editable: 패널이 컨트롤을 열지 판단, compound: 컴파운드(hanok 종가)라 유형탭·칸수 대신 매무새만 노출.
   for (const p of proxies) {
-    if (p.buildingSpec && p.buildingSpec.hero) { p.buildingSpec.editable = !!heroHandle; p.buildingSpec.compound = true; }
+    if (p.buildingSpec && p.buildingSpec.hero) {
+      const parcel = heroParcels.find((candidate) => candidate.id === p.parcelId);
+      p.buildingSpec.editable = !!heroHandle && !parcel?.mjaHouse;
+      p.buildingSpec.compound = true;
+    }
   }
   const heroOverrides = new Map();   // hero parcelId -> { id, group, glow }; hop 동안 A/B 동시 소유
   let activeHeroId = null;           // 기존 무인자 heroDetailGroup()이 돌려줄 마지막 hero
@@ -393,11 +399,25 @@ export function createVillageHandle(opts, seed, plan, group) {
     g.userData.D = parcel.plotD || 18;
     g.userData.style = parcel.heroStyle || 'hanok';
     g.userData.parcel = parcel;
-    const opts = { seed: parcel.seed || 7, style: parcel.heroStyle || 'hanok', plotW: parcel.plotW, plotD: parcel.plotD };
-    if (editOpts.roofOpts) opts.roofOpts = editOpts.roofOpts;
-    if (editOpts.presetOverrides) opts.presetOverrides = editOpts.presetOverrides;
-    if (editOpts.wallH != null) opts.wallH = editOpts.wallH;
-    g.add(buildParcel(opts));
+    if (parcel.mjaHouse) {
+      const compound = buildMjaHouse(parcel.mjaHouse);
+      g.add(compound);
+      // Exact reusable lifecycle first; remove the released subtree so the
+      // generic outer overlay cleanup can safely dispose threshold/glow extras
+      // without double-disposing compound resources.
+      g.userData.disposeCompound = () => {
+        const disposed = disposeMjaHouse(compound);
+        compound.removeFromParent();
+        return disposed;
+      };
+      g.userData.mjaHouse = true;
+    } else {
+      const opts = { seed: parcel.seed || 7, style: parcel.heroStyle || 'hanok', plotW: parcel.plotW, plotD: parcel.plotD };
+      if (editOpts.roofOpts) opts.roofOpts = editOpts.roofOpts;
+      if (editOpts.presetOverrides) opts.presetOverrides = editOpts.presetOverrides;
+      if (editOpts.wallH != null) opts.wallH = editOpts.wallH;
+      g.add(buildParcel(opts));
+    }
     g.rotation.y = G.facingY(parcel.frontDir);
     g.position.set(parcel.center.x, parcel.baseY != null ? parcel.baseY : 0, parcel.center.z);
     return g;
@@ -410,7 +430,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 같은 hero의 편집/리롤만 교체한다. 다른 hero A는 hop 도착까지 유지하고 엔진이 A id로 해제한다.
     hideHeroDetail(parcelId);
     const g = buildHeroCompound(parcel, editOpts || {});
-    thresholdLife.attach(g, thresholdLifeCondition());
+    if (!parcel.mjaHouse) thresholdLife.attach(g, thresholdLifeCondition());
     overrides.add(g);
     if (snow.isActive()) snow.inject(g);
     const rec = { id: parcelId, group: g };
@@ -423,7 +443,12 @@ export function createVillageHandle(opts, seed, plan, group) {
     if (heroHandle && heroHandle.get(parcelId)) heroHandle.get(parcelId).visible = false;
     else { const lm = landmarksGroup(); if (lm) { lm.visible = false; landmarksHidden = true; } }
     representationDirty = true;
-    retainOverlayPrograms(g, 'hero-' + (parcel.heroStyle || 'hanok') + (snow.isActive() ? '|snow' : ''));
+    if (!parcel.mjaHouse) {
+      retainOverlayPrograms(
+        g,
+        'hero-' + (parcel.heroStyle || 'hanok') + (snow.isActive() ? '|snow' : ''),
+      );
+    }
     activatePrimaryDoor(parcelId, g);
     return g;
   }
@@ -436,6 +461,7 @@ export function createVillageHandle(opts, seed, plan, group) {
       releasePrimaryDoor(id);
       nightGlow.remove(rec.glow);
       refreshNightLightOwner(id, null);
+      rec.group.userData.disposeCompound?.();
       disposeTree(rec.group); overrides.remove(rec.group); heroOverrides.delete(id);
       if (heroHandle?.get(id)) heroHandle.get(id).visible = true;
       changed = true;
@@ -1560,6 +1586,8 @@ export function createVillageHandle(opts, seed, plan, group) {
         releaseResidentialGlow(parcelId, false);
       }
       for (const record of heroOverrides.values()) nightGlow.remove(record.glow);
+      for (const record of heroOverrides.values()) record.group.userData.disposeCompound?.();
+      for (const base of heroHandle?.values?.() || []) base.userData.disposeCompound?.();
       if (palaceOverride) nightGlow.remove(palaceOverride.glow);
       hideTempleDetail();
       nightGlow.dispose();

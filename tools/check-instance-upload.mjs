@@ -156,6 +156,70 @@ merged.userData.setHidden('parcel-3', false);
 assert.equal(bytes(mergedPosition.array), mergedBefore,
   'merged source position bytes did not restore exactly');
 
+// Default static merging retains the historical material-only grouping and shadow-flag OR.
+// The explicit strict mode instead keeps each authored cast/receive pair without multiplying
+// materials or accepting object semantics that cannot survive geometry baking.
+const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x445566 });
+const shadowSources = [
+  new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shadowMaterial),
+  new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shadowMaterial),
+];
+shadowSources[0].castShadow = true;
+shadowSources[0].receiveShadow = false;
+shadowSources[1].castShadow = false;
+shadowSources[1].receiveShadow = true;
+shadowSources[1].position.x = 2;
+const legacyShadowMerge = mergeStatic(shadowSources, 'legacy-shadow-merge');
+assert.equal(legacyShadowMerge.children.length, 1,
+  'default merge no longer groups by material only');
+assert.equal(legacyShadowMerge.children[0].castShadow, true);
+assert.equal(legacyShadowMerge.children[0].receiveShadow, true);
+
+const strictShadowMerge = mergeStatic(shadowSources, 'strict-shadow-merge', {
+  partitionShadowFlags: true,
+});
+assert.equal(strictShadowMerge.children.length, 2,
+  'strict merge did not partition shared material by shadow state');
+assert.deepEqual(
+  strictShadowMerge.children
+    .map((mesh) => `${mesh.castShadow ? 1 : 0}${mesh.receiveShadow ? 1 : 0}`)
+    .sort(),
+  ['01', '10'],
+);
+assert(strictShadowMerge.children.every((mesh) => mesh.material === shadowMaterial),
+  'strict shadow partition cloned a shared material');
+
+const assertStrictMergeRejects = (mesh, pattern) => {
+  const parent = new THREE.Group();
+  parent.add(mesh);
+  assert.throws(
+    () => mergeStatic([mesh], 'strict-rejection-fixture', { partitionShadowFlags: true }),
+    pattern,
+  );
+  assert.equal(mesh.parent, parent, 'strict rejection detached the source from its parent');
+};
+const callbackMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMaterial);
+callbackMesh.onBeforeShadow = () => {};
+assertStrictMergeRejects(callbackMesh, /cannot preserve onBeforeShadow/);
+
+const coloredInstance = new THREE.InstancedMesh(
+  new THREE.PlaneGeometry(1, 1),
+  shadowMaterial,
+  1,
+);
+coloredInstance.setColorAt(0, new THREE.Color(0xff0000));
+assertStrictMergeRejects(coloredInstance, /cannot bake per-instance color/);
+
+const customAttributeMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMaterial);
+customAttributeMesh.geometry.setAttribute(
+  'weight',
+  new THREE.Float32BufferAttribute(
+    new Float32Array(customAttributeMesh.geometry.attributes.position.count),
+    1,
+  ),
+);
+assertStrictMergeRejects(customAttributeMesh, /cannot discard "weight" attribute/);
+
 const anchor = (id, x, outward = { x: 0, y: 0, z: 1 }) => ({
   openingId: id,
   kind: 'window',

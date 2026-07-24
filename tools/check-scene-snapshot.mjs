@@ -17,6 +17,11 @@ import {
   semanticLogZoomRatio,
   timeAdjustedDampingFactor,
 } from '../app/src/engine/semantic-view-runtime.js';
+import { villageSchema } from '../app/src/lib/edit-schema.js';
+import {
+  VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
+  isVillageMjaHouseProductContext,
+} from '../src/api/village-options.js';
 
 const state = {
   seed: 42,
@@ -203,6 +208,43 @@ assert.deepEqual(decodeSceneSnapshot(defaults).village, {
   houses: null,
   wallWeights: null,
 });
+assert.equal(Object.hasOwn(decodeSceneSnapshot(defaults).village, 'mjaHouse'), false,
+  'default-off decode shape gained an mjaHouse field');
+assert.equal(encodeSceneSnapshot({
+  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  village: { ...decodeSceneSnapshot(defaults).village, mjaHouse: null },
+  view: { azimuth: 9, elevation: 31, zoom: 0.5 },
+}), defaults, 'explicit null mjaHouse changed default-off snapshot bytes');
+
+const mjaField = villageSchema()
+  .flatMap((section) => section.fields)
+  .find((field) => field.key === 'mjaHouse');
+assert.ok(mjaField, 'village vocabulary omitted the mjaHouse opt-in');
+assert.equal(mjaField.def, null);
+assert.deepEqual(mjaField.scales, ['hamlet', 'village']);
+assert.equal(mjaField.tierHint, 'vil_mja_house_hint');
+assert.equal(mjaField.isOn({ ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT }), true,
+  'object toggle depends on reference identity');
+assert.equal(mjaField.isOn({ ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT, region: 'future' }), false,
+  'object toggle accepted a non-product context');
+
+const mjaEnabled = encodeSceneSnapshot({
+  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  village: {
+    ...decodeSceneSnapshot(defaults).village,
+    mjaHouse: { ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT },
+  },
+  view: { azimuth: 9, elevation: 31, zoom: 0.5 },
+});
+assert.equal(mjaEnabled, '1~s.16~t.1~vs.7~mh.1~vw.2i.8m.dw');
+const decodedMja = decodeSceneSnapshot(mjaEnabled);
+assert.equal(isVillageMjaHouseProductContext(decodedMja.village.mjaHouse), true);
+assert.deepEqual(decodedMja.village.mjaHouse, VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT);
+assert.equal(encodeSceneSnapshot({
+  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  village: decodedMja.village,
+  view: decodedMja.view,
+}), mjaEnabled, 'mjaHouse changed bytes after canonical round trip');
 
 const wrappedView = encodeSceneSnapshot({
   state: { ...state, renderStyle: 'pbr', expansion: 1 },
@@ -307,6 +349,11 @@ for (const malformed of [
   '1~s.16~t.1~vs.7~f.../escape',
   '1~s.16~t.1~vs.7~u.zzzz',
   '1~s.16~t.1~vs.7~ed.invalid',
+  '1~s.16~t.1~vs.7~mh.0',
+  '1~s.16~t.1~vs.7~mh.2',
+  '1~s.16~t.1~vs.7~mh.1~mh.1',
+  '1~s.16~t.1~mh.1',
+  '1~s.16~t.1~vs.7~z.3~mh.1',
   '1~s.16~t.1~hp.z.1',
   '1~s.16~t.1~hp.1.zzz',
   '1~s.16~t.1~x.2',
@@ -330,6 +377,20 @@ for (const invalid of [
   { state, village: { ...advancedVillage, character: 'future' } },
   { state, village: { ...advancedVillage, stream: 'false' } },
   { state, village: { ...advancedVillage, includePalace: 1 } },
+  { state, village: { ...advancedVillage, mjaHouse: true } },
+  { state, village: {
+    ...advancedVillage,
+    mjaHouse: { ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT, region: 'future' },
+  } },
+  { state, village: {
+    ...advancedVillage,
+    mjaHouse: { ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT, extra: 'not-canonical' },
+  } },
+  { state, village: {
+    ...advancedVillage,
+    scale: 'town',
+    mjaHouse: VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
+  } },
   { state, village: { ...advancedVillage, siteR: 287.45 } },
   { state, village: { ...advancedVillage, wallWeights: { tile: 4 } } },
   { state, village: { ...advancedVillage, wallWeights: { future: 1 } } },

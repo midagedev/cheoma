@@ -181,6 +181,7 @@ try {
         { planYardLife, yardLifeRecordsToHardObstacles },
         { SCATTER_TREE_VISUAL_RADIUS },
         { decodeSceneSnapshot, encodeSceneSnapshot },
+        { VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT },
         { Material },
       ] = await Promise.all([
         import('/src/village/adapter.js'),
@@ -195,6 +196,7 @@ try {
         import('/src/village/yard-life-plan.js'),
         import('/src/generators/village/trees.js'),
         import('/app/src/lib/scene-snapshot.js'),
+        import('/src/village/options.js'),
         import('/app/node_modules/three/build/three.module.js'),
       ]);
       const probeLifecycle = (handle) => {
@@ -455,6 +457,57 @@ try {
         }
         return { pass: failures.length === 0, checked, failures };
       };
+      const mjaStaticContract = (handle) => {
+        const parcels = handle.plan.parcels.filter((parcel) => parcel.mjaHouse);
+        const parcel = parcels[0];
+        const access = parcel?.access;
+        const proxy = parcel && handle.getPickProxy(parcel.id);
+        const detail = parcel && handle.showParcelDetail(parcel.id);
+        const anchors = [];
+        detail?.group?.traverse((object) => {
+          if (object.name === 'primary-opening-anchor') anchors.push(object);
+        });
+        const compound = detail?.group?.getObjectByName('mja-house');
+        const anchor = anchors[0];
+        const pass = parcels.length === 1
+          && parcel?.id === 'p0'
+          && handle.plan.stats?.mjaHouses === 1
+          && parcel.mjaHouse.kind === 'mja-banga'
+          && parcel.mjaHouse.wings.length === 2
+          && parcel.mjaHouse.wings[0]?.roofSystem === 'independent-paljak'
+          && parcel.mjaHouse.wings[1]?.roofSystem === 'continuous-u'
+          && parcel.mjaHouse.gate?.id === 'mja:gate:south'
+          && parcel.mjaHouse.gate?.kind === 'integrated-middle-gate'
+          && parcel.mjaHouse.gate?.wingId === parcel.mjaHouse.wings[1]?.id
+          && parcel.solarAccess?.localStart === parcel.mjaHouse.solarTarget.point.z
+          && parcel.solarAccess?.halfWidth === (
+            parcel.mjaHouse.solarTarget.corridor[1].x
+              - parcel.mjaHouse.solarTarget.corridor[0].x
+          ) * 0.5
+          && access?.gateRole === 'front'
+          && typeof access.roadId === 'string' && access.roadId.length > 0
+          && Number.isFinite(access.gatePoint?.x) && Number.isFinite(access.gatePoint?.z)
+          && Number.isFinite(access.roadPoint?.x) && Number.isFinite(access.roadPoint?.z)
+          && proxy?.buildingSpec?.editable === false
+          && proxy?.buildingSpec?.compound === true
+          && detail?.compound === true
+          && compound?.userData.mjaHouseHandle?.doorMotion === 'static'
+          && compound?.userData.mjaDoorMotionExcluded === true
+          && anchors.length === 1
+          && anchor?.userData.openingDetailPlan?.mjaStatic === true
+          && handle.primaryDoorState(parcel.id) === null
+          && handle.togglePrimaryDoor(parcel.id) === null;
+        return {
+          pass,
+          parcelCount: parcels.length,
+          parcelId: parcel?.id || null,
+          roadId: access?.roadId || null,
+          editable: proxy?.buildingSpec?.editable,
+          compound: detail?.compound === true,
+          anchorCount: anchors.length,
+          doorMotion: compound?.userData.mjaHouseHandle?.doorMotion || null,
+        };
+      };
 
       const abortName = async (promise) => {
         try { await promise; return 'resolved'; }
@@ -552,6 +605,12 @@ try {
         const lensRequirements = { requirePalace: scale === 'hanyang', requireTemple: true };
         const syncLandmarkLenses = landmarkLensContract(sync, lensRequirements);
         const asyncLandmarkLenses = landmarkLensContract(asyncHandle, lensRequirements);
+        const defaultMjaOff = !sync.plan.parcels.some((parcel) => parcel.mjaHouse)
+          && !asyncHandle.plan.parcels.some((parcel) => parcel.mjaHouse)
+          && sync.plan.opts.mjaHouse === undefined
+          && asyncHandle.plan.opts.mjaHouse === undefined
+          && sync.plan.stats?.mjaHouses === undefined
+          && asyncHandle.plan.stats?.mjaHouses === undefined;
         const syncProbe = probeLifecycle(sync);
         const asyncProbe = probeLifecycle(asyncHandle);
         sync.dispose();
@@ -587,8 +646,64 @@ try {
           crossKindYardLife,
           syncLandmarkLenses,
           asyncLandmarkLenses,
+          defaultMjaOff,
         });
       }
+
+      // #141 is intentionally absent from every historical scene golden above.
+      // One explicit product context must create exactly one static p0 compound,
+      // and that opt-in scene/picking/lifecycle contract must remain identical
+      // through synchronous, real Worker, and ?worker=0 fallback generation.
+      const mjaOptions = {
+        scale: 'village',
+        seed: 141,
+        includeTemple: false,
+        mjaHouse: VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
+      };
+      const mjaSync = createVillage(mjaOptions);
+      const mjaSteps = [];
+      const mjaAsync = await createVillageAsync(mjaOptions, {
+        budgetMs: 8,
+        nextFrame: (callback) => requestAnimationFrame(callback),
+        onStep: (label) => mjaSteps.push(label),
+      });
+      const mjaSyncHash = hashThreeGroup(mjaSync.group);
+      const mjaAsyncHash = hashThreeGroup(mjaAsync.group);
+      const mjaSyncProxyHash = hashVillagePickProxies(mjaSync);
+      const mjaAsyncProxyHash = hashVillagePickProxies(mjaAsync);
+      const mjaSyncStatic = mjaStaticContract(mjaSync);
+      const mjaAsyncStatic = mjaStaticContract(mjaAsync);
+      const mjaSyncProbe = probeLifecycle(mjaSync);
+      const mjaAsyncProbe = probeLifecycle(mjaAsync);
+      mjaSync.dispose();
+      mjaSync.dispose();
+      mjaAsync.dispose();
+      mjaAsync.dispose();
+      const mjaInactive = postDisposeInactive(mjaSync) && postDisposeInactive(mjaAsync);
+      const mjaSyncLifecycle = mjaSyncProbe.finish();
+      const mjaAsyncLifecycle = mjaAsyncProbe.finish();
+      const mjaLifecyclePass = [mjaSyncLifecycle, mjaAsyncLifecycle].every((lifecycle) => (
+        lifecycle.owned > 0
+        && lifecycle.disposed === lifecycle.owned
+        && lifecycle.duplicates === 0
+        && lifecycle.sharedDisposals === 0
+        && lifecycle.yardLifeDisposed
+      )) && mjaInactive;
+      const mjaCase = {
+        equal: mjaSyncHash.hash === mjaAsyncHash.hash
+          && mjaSyncProxyHash.hash === mjaAsyncProxyHash.hash,
+        steps: mjaSteps,
+        syncHash: mjaSyncHash,
+        asyncHash: mjaAsyncHash,
+        syncProxyHash: mjaSyncProxyHash,
+        asyncProxyHash: mjaAsyncProxyHash,
+        syncStatic: mjaSyncStatic,
+        asyncStatic: mjaAsyncStatic,
+        lifecyclePass: mjaLifecyclePass,
+        syncLifecycle: mjaSyncLifecycle,
+        asyncLifecycle: mjaAsyncLifecycle,
+        inactive: mjaInactive,
+      };
 
       // #108: one deliberately tiny scene proves that the canonical URL
       // option envelope feeds the same sync, real-worker, and ?worker=0
@@ -721,13 +836,14 @@ try {
         sync.dispose();
         asyncHandle.dispose();
       }
-      return { cases, advancedCase, workerStats, abortContract };
+      return { cases, mjaCase, advancedCase, workerStats, abortContract };
     });
     await page.close();
     return { ...result, errors };
   }
 
   const advancedModeHashes = [];
+  const mjaModeHashes = [];
   for (const mode of ['worker', 'fallback']) {
     const result = await compare(mode);
     console.log(`\n${mode === 'worker' ? 'async worker' : 'async fallback (?worker=0)'}`);
@@ -738,7 +854,7 @@ try {
       const proxyApiPass = item.syncProxyHash.singleContract && item.asyncProxyHash.singleContract;
       const landmarkLensPass = item.syncLandmarkLenses.pass && item.asyncLandmarkLenses.pass;
       const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && landmarkLensPass
-        && item.lifecyclePass && item.vegetation.pass && item.yardLifePass;
+        && item.lifecyclePass && item.vegetation.pass && item.yardLifePass && item.defaultMjaOff;
       failed ||= !pass;
       console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`
         + `  objects=${item.syncHash.objects} triangles=${item.syncHash.triangles}`);
@@ -758,7 +874,38 @@ try {
       if (!item.yardLifePass) {
         console.log(`          yard-life sync=${JSON.stringify(item.syncYardLife)} async=${JSON.stringify(item.asyncYardLife)} crossKind=${JSON.stringify(item.crossKindYardLife)}`);
       }
+      if (!item.defaultMjaOff) console.log('          default village unexpectedly enabled an mja house');
     }
+    const mja = result.mjaCase;
+    const mjaStepsEqual = JSON.stringify(mja.steps) === JSON.stringify(expectedSteps);
+    const mjaProxyApiPass = mja.syncProxyHash.singleContract
+      && mja.asyncProxyHash.singleContract;
+    const mjaPass = mja.equal
+      && mjaStepsEqual
+      && mjaProxyApiPass
+      && mja.syncStatic.pass
+      && mja.asyncStatic.pass
+      && mja.lifecyclePass;
+    failed ||= !mjaPass;
+    console.log(`mja optin ${mjaPass ? 'PASS' : 'FAIL'}  ${mja.syncHash.hash}`
+      + `  proxy=${mja.syncProxyHash.hash}`
+      + `  objects=${mja.syncHash.objects} triangles=${mja.syncHash.triangles}`);
+    if (!mja.equal) {
+      console.log(`          async ${mja.asyncHash.hash}  proxy=${mja.asyncProxyHash.hash}`);
+    }
+    if (!mjaStepsEqual) console.log(`          steps ${JSON.stringify(mja.steps)}`);
+    if (!mjaProxyApiPass) console.log('          mja getPickProxy descriptor parity/isolation contract failed');
+    if (!mja.syncStatic.pass || !mja.asyncStatic.pass) {
+      console.log(`          static sync=${JSON.stringify(mja.syncStatic)} async=${JSON.stringify(mja.asyncStatic)}`);
+    }
+    if (!mja.lifecyclePass) {
+      console.log(`          lifecycle sync=${JSON.stringify(mja.syncLifecycle)} async=${JSON.stringify(mja.asyncLifecycle)} inactive=${mja.inactive}`);
+    }
+    mjaModeHashes.push({
+      mode,
+      scene: mja.syncHash.hash,
+      proxy: mja.syncProxyHash.hash,
+    });
     const advanced = result.advancedCase;
     const advancedStepsEqual = JSON.stringify(advanced.steps) === JSON.stringify(expectedSteps);
     const advancedProxyApiPass = advanced.syncProxyHash?.singleContract
@@ -788,7 +935,7 @@ try {
     });
     const workerPass = mode === 'worker'
       ? result.workerStats.started === 1
-        && result.workerStats.succeeded >= result.cases.length + 1
+        && result.workerStats.succeeded >= result.cases.length + 2
         && result.workerStats.failed === 0
         && result.workerStats.terminated === 0
       : result.workerStats.started === 0 && result.workerStats.terminated === 0;
@@ -810,6 +957,11 @@ try {
     && advancedModeHashes[0].proxy === advancedModeHashes[1].proxy;
   failed ||= !snapshotCrossModePass;
   console.log(`\nsnapshot sync/worker/fallback: ${snapshotCrossModePass ? 'PASS' : 'FAIL'} ${JSON.stringify(advancedModeHashes)}`);
+  const mjaCrossModePass = mjaModeHashes.length === 2
+    && mjaModeHashes[0].scene === mjaModeHashes[1].scene
+    && mjaModeHashes[0].proxy === mjaModeHashes[1].proxy;
+  failed ||= !mjaCrossModePass;
+  console.log(`mja sync/worker/fallback: ${mjaCrossModePass ? 'PASS' : 'FAIL'} ${JSON.stringify(mjaModeHashes)}`);
 } finally {
   await browser?.close();
   await server.close();

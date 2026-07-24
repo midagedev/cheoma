@@ -28,6 +28,27 @@ export const VILLAGE_WALL_WEIGHT_SPEC = Object.freeze({
   default: 1,
 });
 
+// Product vocabulary for the one evidence-bounded enclosed-house opt-in. These
+// strings are provenance labels, not an automatic region/climate/status
+// classifier: direct core consumers may supply another explicit JSON-safe
+// context to planMjaHouse(). Keeping this context outside the default options
+// object preserves the byte shape of every existing default village plan.
+export const VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT = Object.freeze({
+  enabled: true,
+  form: 'mja',
+  region: 'andong-cultural-area',
+  climate: 'cold-winter-wind-shelter-context',
+  household: 'lineage-head-house-context',
+});
+
+export function isVillageMjaHouseProductContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const expected = VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT;
+  const keys = Object.keys(value);
+  return keys.length === Object.keys(expected).length
+    && Object.entries(expected).every(([key, expectedValue]) => value[key] === expectedValue);
+}
+
 export const VILLAGE_OPTION_DEFAULTS = Object.freeze({
   siteR: null,
   undAmpK: 1,

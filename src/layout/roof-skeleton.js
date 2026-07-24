@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { tileSurfaceMaterial, sugiwaMaterial } from '../builder/palette.js';
 import { resampleChainPreservingKnots } from './chain-sampling.js';
-import { computeSkeleton } from './skeleton.js';
+import { giwaRoofEnvelope } from './giwa-roof-envelope.js';
 
 // 다각형 풋프린트 + straight skeleton → 곡면 기와지붕.
 // rect / ㄱ자(L) / ㄷ자(U) 지원. skeleton 의 ridge/valley/hip 라인을 마루로 얹고,
@@ -33,27 +33,24 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   const g = new THREE.Group();
   g.name = 'skeleton-roof';
 
-  const sk = computeSkeleton(footprint);
+  const envelope = giwaRoofEnvelope(footprint, {
+    eaveY,
+    eaveOverhang,
+    riseScale,
+    cornerLift,
+    planCurve,
+    ridgeH,
+  });
+  const sk = envelope.skeleton;
   const poly = sk.poly;
   const n = poly.length;
-  const edges = sk.edges;
 
   const yOf = (h) => eaveY + h * riseScale;
 
   // ── 처마 다각형(마이터 오프셋) + 코너별 앙곡·안허리곡 ──
   // eaveVertex[i] = poly[i] + (outward_prev + outward_cur) * overhang (+ 볼록 코너 안허리곡)
-  const eaveV = [];
-  const eaveLift = [];
-  for (let i = 0; i < n; i++) {
-    const oPrev = neg(edges[(i - 1 + n) % n].normal); // 바깥 법선
-    const oCur = neg(edges[i].normal);
-    const convex = edges[i].startConvex;
-    const bis = norm(add(oPrev, oCur));
-    const extra = convex ? planCurve : 0;
-    const off = add(scl(add(oPrev, oCur), eaveOverhang), scl(bis, extra));
-    eaveV.push({ x: poly[i].x + off.x, z: poly[i].z + off.z });
-    eaveLift.push(convex ? cornerLift : 0);
-  }
+  const eaveV = envelope.footprint;
+  const eaveLift = envelope.eaveLifts;
 
   const NU = 14, NV = 8;
   const fprofile = (v) => Math.pow(v, 1 + profileCurve);      // 높이 분율(오목)
@@ -452,9 +449,6 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 
 // ── 벡터 유틸 ──
 const sub = (a, b) => ({ x: a.x - b.x, z: a.z - b.z });
-const add = (a, b) => ({ x: a.x + b.x, z: a.z + b.z });
-const scl = (a, s) => ({ x: a.x * s, z: a.z * s });
-const neg = (a) => ({ x: -a.x, z: -a.z });
 const dot = (a, b) => a.x * b.x + a.z * b.z;
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const norm = (a) => { const l = Math.hypot(a.x, a.z) || 1; return { x: a.x / l, z: a.z / l }; };

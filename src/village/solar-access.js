@@ -50,6 +50,13 @@ export function parcelObstructionPolygons(parcel) {
 
 export function parcelRoofTopY(parcel, site) {
   const baseY = parcelGroundY(parcel, site);
+  if (parcel?.mjaHouse?.kind === 'mja-banga') {
+    const localTop = Math.max(
+      parcel.mjaHouse.gate?.roofTopY || 0,
+      ...parcel.mjaHouse.wings.map((wing) => wing.roofTopY || 0),
+    );
+    return baseY + localTop;
+  }
   if (parcel.kind !== 'choga' && parcel.kind !== 'giwa') return baseY + 14;
   const spec = impostorHouseSpec(parcel);
   const sy = Number.isFinite(parcel.sy) ? parcel.sy : 1;

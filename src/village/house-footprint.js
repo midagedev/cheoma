@@ -274,7 +274,29 @@ export function assignFittedVariationSequence(
 
 // FULL/MID/FAR가 공유하는 실제 variant 지붕 치수에서 순수 XZ footprint를 파생한다.
 // 필지 충돌, 식생 clearance, 회귀 게이트가 서로 다른 상자를 추정하지 않게 하는 단일 진실원이다.
+function mjaLocalRoofPolygons(parcel) {
+  const plan = parcel?.mjaHouse;
+  if (plan?.kind !== 'mja-banga' || !Array.isArray(plan.wings)) return null;
+  const polygons = [
+    ...plan.wings.map((wing) => wing.roofFootprint),
+    plan.gate?.roofFootprint,
+  ].filter((polygon) => Array.isArray(polygon) && polygon.length >= 3);
+  return polygons.length ? polygons : null;
+}
+
 export function parcelLocalRoofRectangles(parcel) {
+  const mjaRoofs = mjaLocalRoofPolygons(parcel);
+  if (mjaRoofs) {
+    return mjaRoofs.map((roof) => {
+      const bounds = roof.reduce((result, point) => ({
+        minX: Math.min(result.minX, point.x),
+        maxX: Math.max(result.maxX, point.x),
+        minZ: Math.min(result.minZ, point.z),
+        maxZ: Math.max(result.maxZ, point.z),
+      }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity });
+      return bounds;
+    });
+  }
   const spec = impostorHouseSpec(parcel);
   const sx = parcel.sx || 1, sz = parcel.sz || 1;
   const local = parcelHouseTranslation(parcel);
@@ -308,10 +330,12 @@ export function parcelEffectiveRoofBounds(parcel) {
 }
 
 export function parcelRoofPolygons(parcel) {
-  return parcelLocalRoofRectangles(parcel).map((roof) => [
-    parcelWorldPoint(parcel, { x: roof.maxX, z: roof.maxZ }),
-    parcelWorldPoint(parcel, { x: roof.minX, z: roof.maxZ }),
-    parcelWorldPoint(parcel, { x: roof.minX, z: roof.minZ }),
-    parcelWorldPoint(parcel, { x: roof.maxX, z: roof.minZ }),
+  const mjaRoofs = mjaLocalRoofPolygons(parcel);
+  const localRoofs = mjaRoofs || parcelLocalRoofRectangles(parcel).map((roof) => [
+    { x: roof.maxX, z: roof.maxZ },
+    { x: roof.minX, z: roof.maxZ },
+    { x: roof.minX, z: roof.minZ },
+    { x: roof.maxX, z: roof.minZ },
   ]);
+  return localRoofs.map((roof) => roof.map((point) => parcelWorldPoint(parcel, point)));
 }

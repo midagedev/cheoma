@@ -44,6 +44,16 @@ export {
   planRoadsideDrainage,
   validateRoadsideDrainagePlan,
 } from './drainage.js';
+export {
+  buildMjaHouse,
+  disposeMjaHouse,
+} from './mja-house.js';
+export {
+  MJA_HOUSE_PLAN_LIMITS,
+  MJA_HOUSE_PLAN_SCHEMA_VERSION,
+  planMjaHouse,
+  validateMjaHousePlan,
+} from './mja-house-plan.js';
 export * from './environment.js';
 export * from './post-quality.js';
 export * from './particles.js';

@@ -31,7 +31,10 @@ import { compileSubtreeAsync } from '../../../src/api/rendering.js';
 import {
   createRerollWave, createVillage, createVillageAsync,
 } from '../../../src/api/village.js';
-import { VILLAGE_WALL_STYLE_IDS } from '../../../src/api/village-options.js';
+import {
+  VILLAGE_WALL_STYLE_IDS,
+  isVillageMjaHouseProductContext,
+} from '../../../src/api/village-options.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
 import { buildingNavigationTargetFromProxy } from '../lib/building-navigation.js';
 import { normalizeStandaloneParamPatch } from '../lib/standalone-param-spec.js';
@@ -1346,7 +1349,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       + `|${n(opts.paddyDensityK, 1)},${n(opts.treeDensityK, 1)},${n(opts.cityWall, 'a')},${n(opts.sijeon, 'a')}`
       + `|${opts.char01 == null ? 'a' : opts.char01},${n(opts.diversityK, 1)}`
       + `|r${opts.siteR == null ? 'a' : opts.siteR}|h${opts.houses == null ? 'a' : opts.houses}`
-      + `|w${VILLAGE_WALL_STYLE_IDS.map((key) => n(opts.wallWeights?.[key], 1)).join(',')}`;
+      + `|w${VILLAGE_WALL_STYLE_IDS.map((key) => n(opts.wallWeights?.[key], 1)).join(',')}`
+      + (opts.mjaHouse == null
+        ? ''
+        : isVillageMjaHouseProductContext(opts.mjaHouse)
+          ? '|mja.1'
+          : `|mja.${JSON.stringify(opts.mjaHouse)}`);
     return `${base}|${tune}`;
   }
 

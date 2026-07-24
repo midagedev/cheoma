@@ -48,6 +48,16 @@ export function parcelRotY(parcel) {
 }
 
 function parcelBounds(parcel) {
+  const mja = parcel?.mjaHouse;
+  const outer = mja?.kind === 'mja-banga' ? mja.bounds?.outer : null;
+  if (outer && [outer.minX, outer.maxX, outer.minZ, outer.maxZ].every(Number.isFinite)) {
+    return {
+      width: outer.maxX - outer.minX,
+      depth: outer.maxZ - outer.minZ,
+      centerX: (outer.minX + outer.maxX) * 0.5,
+      centerZ: (outer.minZ + outer.maxZ) * 0.5,
+    };
+  }
   const points = parcel.shape?.pts;
   if (!points || points.length < 3) {
     return { width: parcel.plotW, depth: parcel.plotD, centerX: 0, centerZ: 0 };
@@ -91,7 +101,13 @@ export function planParcelFocus(parcel) {
   const bounds = parcelBounds(parcel);
   const width = bounds.width * 1.08;
   const depth = bounds.depth * 1.08;
-  const height = parcel.hero ? 14 : (parcel.kind === 'giwa' ? 9 : 6.5);
+  const mjaHeight = parcel?.mjaHouse?.kind === 'mja-banga'
+    ? Math.max(
+      parcel.mjaHouse.gate?.roofTopY || 0,
+      ...parcel.mjaHouse.wings.map((wing) => wing.roofTopY || 0),
+    ) + 0.35
+    : null;
+  const height = mjaHeight || (parcel.hero ? 14 : (parcel.kind === 'giwa' ? 9 : 6.5));
   const rotationY = parcelRotY(parcel);
   const azimuthRange = parcelFocusAzimuthRange(parcel, bounds);
   const azimuth = parcelFocusAzimuth(parcel, bounds, azimuthRange);

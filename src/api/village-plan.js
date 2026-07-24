@@ -6,6 +6,7 @@ export * from './sijeon-plan.js';
 export * from './yard-life-plan.js';
 export * from './mud-wall-plan.js';
 export * from './drainage-plan.js';
+export * from './mja-house-plan.js';
 export {
   SCALE_ANCHORS,
   VILLAGE_SITE_R_MAX,
@@ -19,9 +20,11 @@ export {
 } from '../village/site.js';
 export {
   VILLAGE_NUMBER_OPTION_SPECS,
+  VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
   VILLAGE_OPTION_DEFAULTS,
   VILLAGE_WALL_STYLE_IDS,
   VILLAGE_WALL_WEIGHT_SPEC,
+  isVillageMjaHouseProductContext,
   normalizeVillageTuningOptions,
   normalizeVillageWallWeights,
   villageOptionDefaults,

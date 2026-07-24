@@ -1056,6 +1056,9 @@
     if (s === 'solo' && villageOpts.cityWall === true) villageOpts.cityWall = 'auto';
     // 집 없음(#114)은 외딴집 전용 구성 — 규모를 키우면 해제(보이지 않는 houses:0 잔존 방지).
     if (s !== 'solo' && villageOpts.houses != null) villageOpts.houses = null;
+    // 안동문화권 ㅁ자 종가는 초락·마을의 한 채짜리 opt-in이다. 다른 규모로 이동하면
+    // 비활성 토글 뒤에 선택을 숨겨 공유 URL/캐시가 존재하지 않는 집을 약속하지 않게 한다.
+    if (s !== 'hamlet' && s !== 'village') villageOpts.mjaHouse = null;
     commitVillageOpts();
   }
   // character(민촌/여염/반촌) 셀렉터는 폐지(사용자 지시) — UI 미노출, villageOpts.character 는 내부 기본값(yeoyeom) 유지.

@@ -105,6 +105,38 @@ assert.deepEqual(ids(['src/api/drainage-plan.js'], {
 assert.deepEqual(ids(['src/api/drainage.js'], {
   newPaths: ['src/api/drainage.js'],
 }), ['core', 'app', 'worker', 'surface-browser']);
+assert.deepEqual(ids(['src/village/mja-house-plan.js'], {
+  newPaths: ['src/village/mja-house-plan.js'],
+}), ['core', 'app', 'worker', 'mja-house-browser']);
+for (const path of [
+  'src/village/mja-house-plan-core.js',
+  'src/village/mja-house-plan-contract.js',
+]) {
+  assert.deepEqual(ids([path], {
+    newPaths: [path],
+  }), ['core', 'app', 'worker', 'mja-house-browser']);
+}
+for (const path of [
+  'src/builder/giwa-middle-gate.js',
+  'src/layout/giwa-roof-envelope.js',
+  'src/layout/giwa-through-passage.js',
+]) {
+  assert.deepEqual(ids([path], {
+    newPaths: [path],
+  }), ['core', 'app', 'building-lifecycle', 'api-reuse', 'worker', 'mja-house-browser']);
+}
+assert.deepEqual(ids(['src/village/mja-house-geometry.js'], {
+  newPaths: ['src/village/mja-house-geometry.js'],
+}), ['core', 'app', 'worker', 'mja-house-browser']);
+assert.deepEqual(ids(['src/api/mja-house-plan.js'], {
+  newPaths: ['src/api/mja-house-plan.js'],
+}), ['core', 'app', 'worker', 'mja-house-browser']);
+assert.deepEqual(ids(['src/api/mja-house.js'], {
+  newPaths: ['src/api/mja-house.js'],
+}), ['core', 'app', 'worker', 'mja-house-browser']);
+assert.deepEqual(ids(['tools/shoot-mja-house.mjs'], {
+  newPaths: ['tools/shoot-mja-house.mjs'],
+}), ['core', 'mja-house-browser']);
 assert.deepEqual(ids(['tools/shoot-drainage.mjs'], {
   newPaths: ['tools/shoot-drainage.mjs'],
 }), ['core', 'app', 'surface-browser']);
@@ -346,6 +378,8 @@ assert.deepEqual(impactedFastChecks(['src/core/buffer-update-range.js']), [
 assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-architecture.mjs',
   './check-house-diversity.mjs',
+  './check-mja-house-plan.mjs',
+  './check-mja-house-integration.mjs',
   './check-door-occlusion-contract.mjs',
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',
@@ -372,7 +406,7 @@ for (const path of API_REUSE_DEPENDENCIES) {
 assert.deepEqual(ALL_PROFILE, [
   'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
   'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio', 'temple-browser',
-  'parcel-rebuild-browser', 'surface-browser',
+  'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [
   ...ALL_PROFILE, 'dof-app', 'rim', 'lod-app', 'cinematic-app', 'build',

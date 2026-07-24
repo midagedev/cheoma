@@ -14,7 +14,9 @@
 
 import { residentialOpeningCapabilities } from '../../../src/api/residential-openings.js';
 import {
+  VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
   VILLAGE_NUMBER_OPTION_SPECS,
+  isVillageMjaHouseProductContext,
   villageOptionDefaults,
 } from '../../../src/api/village-options.js';
 
@@ -306,6 +308,12 @@ const VILLAGE_SECTIONS = [
       def: 0.5, auto: true }, // 초가↔기와 비율(미조정=규모파생)
     { key: 'diversityK', ctrl: 'range', ...VILLAGE_NUMBER_OPTION_SPECS.diversityK,
       def: VILLAGE_NUMBER_OPTION_SPECS.diversityK.default }, // 집 변주 강도
+    // ㅁ자 뜰집은 전국 기본 변주가 아니라 근거 문맥을 가진 명시적 opt-in이다. 객체 토글의
+    // on/off 값과 판정을 스키마에 함께 두어 패널이 객체 참조 동일성이나 truthy 값에 기대지 않는다.
+    { key: 'mjaHouse', ctrl: 'toggle', def: null,
+      onValue: VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT, offValue: null,
+      isOn: isVillageMjaHouseProductContext,
+      scales: ['hamlet', 'village'], tierHint: 'vil_mja_house_hint' },
   ] },
 ];
 
