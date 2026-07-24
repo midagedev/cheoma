@@ -34,6 +34,9 @@
   const disclaimer = $derived(isKo ? CREDITS.disclaimer.ko : (CREDITS.disclaimer.en || CREDITS.disclaimer.ko));
 
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+  const localizedUse = (item) => (
+    isKo ? item.use.ko : (item.use.en || item.use.ko)
+  );
 
   // **볼드** 세그먼트 분해 — <strong> 로 렌더(먹 강조 유지). 일반 구간의 홑별표(*이탤릭*)는 제거.
   function segs(text) {
@@ -174,7 +177,7 @@
                 <div class="it-title" data-reference-field="title">{it.title}</div>
                 {#each it.meta as m}<div class="it-meta" data-reference-field="scope">{m}</div>{/each}
                 {#if it.use}
-                  <div class="it-use" data-reference-field="application"><span class="k">{lab.use}</span>{isKo ? it.use.ko : (it.use.en || it.use.ko)}</div>
+                  <div class="it-use" data-reference-field="application"><span class="k">{lab.use}</span>{#each segs(localizedUse(it)) as s}{#if s.b}<strong>{s.t}</strong>{:else}{s.t}{/if}{/each}</div>
                 {/if}
                 {#if it.links.length}
                   <div class="it-links" data-reference-field="sources">

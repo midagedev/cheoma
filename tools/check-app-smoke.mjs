@@ -2346,6 +2346,11 @@ try {
     `window blur clears the pending door click (${JSON.stringify(afterBlur)})`);
 
   // A pointer sequence that turns into an OrbitControls drag must never toggle the door.
+  const preDragCamera = await page.evaluate(() => ({
+    position: window.__engine.camera.position.toArray(),
+    quaternion: window.__engine.camera.quaternion.toArray(),
+    target: window.__engine.__controls.target.toArray(),
+  }));
   await page.mouse.down();
   await page.mouse.move(closedDoor.screen.x + 12, closedDoor.screen.y);
   await page.mouse.up();
@@ -2360,11 +2365,18 @@ try {
   // moving to prove the spring inherits the exact pose instead of snapping.
   await page.evaluate(() => window.__engine.debugSetPaused(true));
   // OrbitControls damping can keep moving the camera for a few frames after the
-  // drag's pointerup. Freeze first, then resolve the click point from that exact
-  // frame instead of reusing the pre-freeze projection above.
-  const pausedDoorScreen = await page.evaluate((parcelId) => (
-    window.__engine.village.debugDoorScreen(parcelId)
-  ), doorParcelId);
+  // drag's pointerup. Freeze first, restore the exact pre-drag camera, then
+  // resolve the click point. This keeps the drag assertion independent from
+  // host frame rate without bypassing the pointer path under test.
+  const pausedDoorScreen = await page.evaluate(({ parcelId, pose }) => {
+    const engine = window.__engine;
+    engine.camera.position.fromArray(pose.position);
+    engine.camera.quaternion.fromArray(pose.quaternion);
+    engine.__controls.target.fromArray(pose.target);
+    engine.camera.updateMatrixWorld(true);
+    return engine.village.debugDoorScreen(parcelId);
+  }, { parcelId: doorParcelId, pose: preDragCamera });
+  if (!pausedDoorScreen) throw new Error('Door projection did not recover after restoring the pre-drag camera');
   await page.mouse.click(pausedDoorScreen.x, pausedDoorScreen.y);
   const openingDoor = await page.evaluate((parcelId) => {
     const engine = window.__engine;
