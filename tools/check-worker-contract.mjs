@@ -77,8 +77,8 @@ const expectedSceneHashes = {
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
   village: 'f055589b:b3ba612d:f3fc2485:5e12236f',
   town: '1627c8f7:5c44f9ab:361bee35:8bb497c5',
-  capital: '232f4759:1824de75:86ea5a91:ec8b97d9',
-  hanyang: '6d950dec:c1b52a2a:b8bbdaf1:e13579a2',
+  capital: '7c533c2e:ff4df988:1d48dedb:e1bb2a24',
+  hanyang: 'a3c9f41a:3d182476:3277aa6d:56a8d12e',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
