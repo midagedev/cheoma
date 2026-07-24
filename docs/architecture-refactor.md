@@ -120,8 +120,9 @@ app/src/                       Svelte UI
 - `src/camera/focus-visibility.js`는 Three 없는 최종 구도 후보/OBB 가시성 계산을 소유하고,
   `runtime/village/picking.js`는 그 결과를 일반 focus와 reveal이 공유하는 pick proxy framing으로 조립한다.
   `src/village/focus-blockers.js`가 실제 fitted 지붕 OBB와 정자·공공 소품·궁·사찰의 순수 계획 volume을
-  제공한다. picking의 넉넉한 필지 상자와 시야 판정을 분리하며, 필지 배치·RNG나 렌더 가시성을 수정하지
-  않고 공간 그리드로 대규모 마을의 후보를 국소화한다.
+  제공한다. 같은 모듈의 계획된 마당 소품 anchor는 기존 세 후보 안에서만 구도 tie를 풀며, 선택 주택
+  지붕과 `wall-contract.js`를 공유하는 담 run·대문 개구도 소품 first surface로 남는다. picking의 넉넉한 필지 상자와 시야 판정을 분리하며, 필지
+  배치·RNG·렌더 가시성·GPU 자원을 수정하지 않고 공간 그리드로 대규모 마을의 후보를 국소화한다.
 
 ## 개울·대하천의 계획·렌더 표면 계약
 

@@ -14,9 +14,11 @@ import {
   VILLAGE_FOCUS_DOF_APERTURE,
   VILLAGE_FOCUS_ELEVATION,
 } from '../src/camera/optics.js';
+import { CIRCULAR_BOKEH_SAMPLE_COUNT } from '../src/env/circular-bokeh-shader.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
+const GIWA_YARD_DETAIL_FIXTURE = 'p13';
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-cache-'));
 const outputDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-shots-'));
 const timeout = Number(process.env.CHEOMA_FOCUS_LEVEL_TIMEOUT_MS) || 90_000;
@@ -106,11 +108,6 @@ try {
       const detailRoot = engine.village.focusRoot();
       detailRoot?.updateWorldMatrix(true, true);
       const raycaster = new THREE.Raycaster();
-      const inFrame = (point) => {
-        const projected = point.clone().project(camera);
-        return Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1
-          && Math.abs(projected.z) <= 1;
-      };
       const objectPath = (object) => {
         const parts = [];
         for (let current = object; current && current !== detailRoot; current = current.parent) {
@@ -118,17 +115,86 @@ try {
         }
         return parts.reverse().join('/');
       };
-      const rayProbe = (object, point) => {
-        const direction = point.clone().sub(camera.position);
-        const distance = direction.length();
-        raycaster.set(camera.position, direction.normalize());
-        const first = raycaster.intersectObject(detailRoot, true)
-          .find((hit) => hit.distance <= distance + 0.2);
+      const projectedBounds = (object) => {
+        const box = new THREE.Box3().setFromObject(object);
+        const min = { x: Infinity, y: Infinity, z: Infinity };
+        const max = { x: -Infinity, y: -Infinity, z: -Infinity };
+        for (const x of [box.min.x, box.max.x]) {
+          for (const y of [box.min.y, box.max.y]) {
+            for (const z of [box.min.z, box.max.z]) {
+              const projected = new THREE.Vector3(x, y, z).project(camera);
+              min.x = Math.min(min.x, projected.x);
+              min.y = Math.min(min.y, projected.y);
+              min.z = Math.min(min.z, projected.z);
+              max.x = Math.max(max.x, projected.x);
+              max.y = Math.max(max.y, projected.y);
+              max.z = Math.max(max.z, projected.z);
+            }
+          }
+        }
+        return {
+          min,
+          max,
+          inFrame: max.x >= -1 && min.x <= 1
+            && max.y >= -1 && min.y <= 1
+            && max.z >= -1 && min.z <= 1,
+        };
+      };
+      const rayProbe = (object, ndcX, ndcY) => {
+        raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+        const first = raycaster.intersectObject(detailRoot, true)[0];
         return {
           visible: first?.object === object,
           blocker: first && first.object !== object ? objectPath(first.object) : null,
           hitDistance: first ? +first.distance.toFixed(2) : null,
-          targetDistance: +distance.toFixed(2),
+        };
+      };
+      const visibilityProbe = (object) => {
+        const bounds = projectedBounds(object);
+        if (!bounds.inFrame) {
+          return {
+            inFrame: false,
+            visible: false,
+            visibleSamples: 0,
+            sampleCount: 0,
+            blocker: null,
+            hitDistance: null,
+            screen: null,
+          };
+        }
+        const clipped = {
+          minX: Math.max(-1, bounds.min.x),
+          maxX: Math.min(1, bounds.max.x),
+          minY: Math.max(-1, bounds.min.y),
+          maxY: Math.min(1, bounds.max.y),
+        };
+        const probes = [];
+        // Fixed screen-space samples make evidence independent of mesh vertex order
+        // while requiring more than a single grazing pixel to count as readable.
+        for (const xWeight of [0.2, 0.5, 0.8]) {
+          for (const yWeight of [0.2, 0.5, 0.8]) {
+            const x = THREE.MathUtils.lerp(clipped.minX, clipped.maxX, xWeight);
+            const y = THREE.MathUtils.lerp(clipped.minY, clipped.maxY, yWeight);
+            probes.push(rayProbe(object, x, y));
+          }
+        }
+        const visibleSamples = probes.filter((probe) => probe.visible).length;
+        const firstBlocker = probes.find((probe) => probe.blocker);
+        const center = {
+          x: (clipped.minX + clipped.maxX) * 0.5,
+          y: (clipped.minY + clipped.maxY) * 0.5,
+        };
+        return {
+          inFrame: true,
+          visible: visibleSamples >= 2,
+          visibleSamples,
+          sampleCount: probes.length,
+          blocker: firstBlocker?.blocker ?? null,
+          hitDistance: firstBlocker?.hitDistance ?? null,
+          screen: {
+            x: +((center.x + 1) * 0.5).toFixed(3),
+            y: +((1 - center.y) * 0.5).toFixed(3),
+          },
         };
       };
       const yardDetails = [];
@@ -146,22 +212,11 @@ try {
         // close-focus evidence pass by itself.
         const named = object.name === 'lantern-bulb';
         if (!named && !(semantic && object.isMesh)) return;
-        const point = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
-        const framed = inFrame(point);
-        const projected = point.clone().project(camera);
-        const ray = framed ? rayProbe(object, point) : null;
+        const visibility = visibilityProbe(object);
         yardDetails.push({
           name: object.name || semantic,
           path: objectPath(object),
-          inFrame: framed,
-          visible: framed && ray.visible,
-          blocker: ray?.blocker ?? null,
-          hitDistance: ray?.hitDistance ?? null,
-          targetDistance: ray?.targetDistance ?? null,
-          screen: framed ? {
-            x: +((projected.x + 1) * 0.5).toFixed(3),
-            y: +((1 - projected.y) * 0.5).toFixed(3),
-          } : null,
+          ...visibility,
         });
       });
       const ring = engine.scene.children.find((child) => (
@@ -179,6 +234,20 @@ try {
         yardDetailsInFrame: yardDetails.filter((detail) => detail.inFrame).length,
         yardDetailsVisible: yardDetails.filter((detail) => detail.visible).length,
         hasChickens: ring?.userData?.hasChickens ?? false,
+        detailSelection: {
+          azimuth: visibility.azimuth,
+          baseAzimuth: visibility.baseAzimuth,
+          selected: Number.isFinite(visibility.detailCount)
+            ? `${visibility.detailVisibleCount}/${visibility.detailCount}`
+            : null,
+          candidates: visibility.candidates?.map((candidate) => ({
+            azimuth: candidate.azimuth,
+            scale: candidate.scale,
+            detail: `${candidate.detailVisibleCount}/${candidate.detailCount}`,
+            architectural: candidate.visibleRatio,
+            blocked: candidate.cameraBlocked,
+          })) ?? [],
+        },
       };
     }, parcelId);
   }
@@ -260,9 +329,25 @@ try {
 
   await loadVillage('vscale=capital&vpalace=1&vtemple=1&seed=20260718&vseed=7&time=day&weather=clear');
   await reportWebGLRenderer(page, 'focus-level');
-  const parcels = await page.evaluate(() => window.__engine.village.debugParcels());
+  const parcels = await page.evaluate(() => window.__engine.village.debugParcels().map((parcel) => ({
+    ...parcel,
+    focusVisibility: window.__engine.village.debugFocusVisibility(parcel.parcelId),
+  })));
+  // Fixed before/after fixture: do not search the implementation's diagnostics
+  // for a passing house. In this seed p13 has one planned detail hidden from the
+  // authored base frame and exposed by a bounded south-opening candidate.
+  const giwaDetailFixture = parcels.find((parcel) => (
+    parcel.parcelId === GIWA_YARD_DETAIL_FIXTURE
+  ));
+  check(giwaDetailFixture?.family === 'regular' && giwaDetailFixture?.kind === 'giwa',
+    `capital fixed yard-detail fixture remains a regular giwa (${giwaDetailFixture?.parcelId || 'missing'})`);
+  check(giwaDetailFixture?.focusVisibility?.baseDetailVisibleCount === 0
+      && giwaDetailFixture?.focusVisibility?.detailVisibleCount >= 1,
+    `fixed ${GIWA_YARD_DETAIL_FIXTURE} bounded focus improves planned detail visibility (${
+      giwaDetailFixture?.focusVisibility?.baseDetailVisibleCount
+    }→${giwaDetailFixture?.focusVisibility?.detailVisibleCount})`);
   const picks = [
-    ['giwa', parcels.find((parcel) => parcel.family === 'regular' && parcel.kind === 'giwa')],
+    ['giwa', giwaDetailFixture],
     ['choga', parcels.find((parcel) => parcel.family === 'regular' && parcel.kind !== 'giwa')],
     ['palace', parcels.find((parcel) => parcel.parcelId === 'palace')],
     ['temple', parcels.find((parcel) => parcel.parcelId === 'temple')],
@@ -327,8 +412,11 @@ try {
     `p31 retains the authored distant telephoto frame (${terrainEvidence.visibility.safeFraming.fov.toFixed(2)}°)`);
     check(Math.abs(terrainEvidence.dof.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
       && Math.abs(terrainEvidence.dof.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
-      && terrainEvidence.dof.bokehSamples === 41,
-    `p31 restores the strengthened settled physical DoF (${terrainEvidence.dof.aperture}, ${terrainEvidence.dof.bokehSamples} taps)`);
+      && terrainEvidence.dof.postQuality === 1
+      && terrainEvidence.dof.postQualityMode === 'stable'
+      && terrainEvidence.dof.bokehSamples === CIRCULAR_BOKEH_SAMPLE_COUNT
+      && terrainEvidence.dof.activeBokehTaps === CIRCULAR_BOKEH_SAMPLE_COUNT,
+    `p31 restores the settled adaptive physical DoF (${terrainEvidence.dof.aperture}, ${terrainEvidence.dof.bokehSamples} active taps)`);
   }
   check(residentialEvidence.some((entry) => (
     entry.animalPixels.toggled && entry.animalPixels.changed >= 20

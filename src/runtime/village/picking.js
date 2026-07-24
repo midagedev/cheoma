@@ -15,7 +15,9 @@ import {
 import * as G from '../../core/math/geom2.js';
 import {
   focusPlanningBlockers,
+  parcelFocusDetailAnchors,
   parcelFocusBlocker,
+  parcelWallFocusBlockers,
 } from '../../village/focus-blockers.js';
 import { terrainWarpInner } from '../../village/terrain-surface.js';
 import {
@@ -92,6 +94,13 @@ function visibilityDescriptor(result) {
     occlusionRatio: result.occlusionRatio,
     baseVisibleRatio: result.baseVisibleRatio,
     baseOcclusionRatio: result.baseOcclusionRatio,
+    detailCount: result.detailCount,
+    detailVisibleCount: result.detailVisibleCount,
+    detailVisibleRatio: result.detailVisibleRatio,
+    baseDetailVisibleCount: result.baseDetailVisibleCount,
+    baseDetailVisibleRatio: result.baseDetailVisibleRatio,
+    detailBlockers: result.detailBlockers,
+    baseDetailBlockers: result.baseDetailBlockers,
     blockers: result.blockers,
     baseBlockers: result.baseBlockers,
     candidates: result.candidates,
@@ -228,13 +237,18 @@ function applySafeParcelFramings(proxies, featureBlockers = [], plan = null, sit
   const residential = proxies.filter((proxy) => (
     proxy.baseCameraFraming && proxy.focusSafety && proxy.focusBounds && proxy.focusVolume
   ));
-  const index = createFocusVisibilityIndex([
+  const architecturalItems = [
     ...residential.map((proxy) => ({
       id: proxy.parcelId,
       bounds: proxy.focusBounds,
       volume: proxy.focusVolume,
     })),
     ...featureBlockers,
+  ];
+  const index = createFocusVisibilityIndex(architecturalItems);
+  const detailIndex = createFocusVisibilityIndex([
+    ...architecturalItems,
+    ...residential.flatMap((proxy) => proxy.focusWallBlockers || []),
   ]);
   const safeTerrainRadius = focusSafeTerrainRadius(plan, site);
   const heroParcels = plan?.parcels?.filter((parcel) => parcel.hero) || [];
@@ -246,7 +260,9 @@ function applySafeParcelFramings(proxies, featureBlockers = [], plan = null, sit
       subjectId: proxy.parcelId,
       subjectBounds: proxy.focusBounds,
       subjectVolume: proxy.focusVolume,
+      detailAnchors: proxy.focusDetailAnchors,
       index,
+      detailIndex,
       axisYaw: proxy.focusSafety.axisYaw,
       azimuthMin: proxy.focusSafety.azimuthMin,
       azimuthMax: proxy.focusSafety.azimuthMax,
@@ -323,6 +339,8 @@ export function buildParcelPickProxies(plan, site) {
           half: { x: width / 2, y: height / 2, z: depth / 2 },
           rotationY,
         },
+      focusDetailAnchors: parcelFocusDetailAnchors(parcel, site),
+      focusWallBlockers: parcelWallFocusBlockers(parcel, site, plan.opts?.char01),
     });
   }
   applySafeParcelFramings(proxies, focusPlanningBlockers(plan, site), plan, site);
@@ -338,9 +356,18 @@ export function refreshParcelPickProxy(
   plan = null,
 ) {
   if (!proxy || !parcel) return null;
-  const focusParcel = buildingSpec?.kind && buildingSpec.kind !== parcel.kind
-    ? { ...parcel, kind: buildingSpec.kind }
-    : parcel;
+  const params = buildingSpec?.params || {};
+  const focusParcel = buildingSpec ? {
+    ...parcel,
+    kind: buildingSpec.kind || parcel.kind,
+    wallType: params.wallType ?? parcel.wallType,
+    aux: params.aux ?? parcel.aux,
+    auxRequested: params.aux ?? parcel.auxRequested,
+    jangdok: params.jangdok ?? parcel.jangdok,
+    yardStack: params.yardStack ?? parcel.yardStack,
+    clothesline: params.clothesline ?? parcel.clothesline,
+    vegBed: params.vegBed ?? parcel.vegBed,
+  } : parcel;
   const baseY = parcel.baseY ?? site.heightAt(parcel.center.x, parcel.center.z);
   const focus = planParcelFocus(focusParcel);
   const { width, depth, height, rotationY, worldX, worldZ } = focus;
@@ -369,6 +396,8 @@ export function refreshParcelPickProxy(
       half: { x: width / 2, y: height / 2, z: depth / 2 },
       rotationY,
     };
+  proxy.focusDetailAnchors = parcelFocusDetailAnchors(focusParcel, site);
+  proxy.focusWallBlockers = parcelWallFocusBlockers(focusParcel, site, plan?.opts?.char01);
   proxy.cameraVisibility = null;
   proxy.heroCameraVisibility = null;
   if (buildingSpec) proxy.buildingSpec = buildingSpec;

@@ -2,14 +2,16 @@
 //
 // Parcel planning owns the south-facing axis. This module never invents a new
 // target or lens policy: it only tries the authored angle plus two bounded steps
-// toward the centre of that parcel's reserved solar opening, compensating the
-// short dolly within the residential telephoto range. The result is suitable for
-// ordinary focus and hero reveal endpoints without consuming generation RNG.
+// inside that parcel's reserved solar opening, compensating the short dolly
+// within the residential telephoto range. Stable planned detail anchors may aim
+// those steps toward the opposite opening edge without consuming generation RNG.
+// The result is suitable for ordinary focus and hero reveal endpoints.
 
 import { fovForDollyScale } from './optics.js';
 
 const SAMPLE_U = Object.freeze([0.08, 0.5, 0.92]);
 const SAMPLE_Y = Object.freeze([0.16, 0.54, 0.92]);
+const ARCHITECTURAL_HYSTERESIS = 1 / (SAMPLE_U.length * SAMPLE_Y.length);
 const GRID_CELL = 24;
 const EPS = 1e-9;
 
@@ -229,6 +231,54 @@ function scoreCandidate(framing, subjectBounds, subjectVolume, blockers) {
   };
 }
 
+function validDetailAnchors(anchors) {
+  if (!Array.isArray(anchors)) return [];
+  return anchors.flatMap((anchor, index) => {
+    const point = anchor?.point;
+    if (![point?.x, point?.y, point?.z].every(Number.isFinite)) return [];
+    return [{
+      id: String(anchor.id ?? `detail:${index}`),
+      point: copyPoint(point),
+    }];
+  });
+}
+
+function detailAnchorBounds(anchors) {
+  const bounds = {
+    min: { x: Infinity, y: Infinity, z: Infinity },
+    max: { x: -Infinity, y: -Infinity, z: -Infinity },
+  };
+  for (const { point } of anchors) {
+    for (const axis of ['x', 'y', 'z']) {
+      bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+      bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+    }
+  }
+  return bounds;
+}
+
+function scoreDetailAnchors(framing, anchors, blockers) {
+  const blockedBy = new Set();
+  let visible = 0;
+  for (const anchor of anchors) {
+    let first = null;
+    for (const blocker of blockers) {
+      const entry = segmentBlockerEntry(framing.position, anchor.point, blocker, 0.08);
+      if (entry != null && (!first || entry < first.entry)) {
+        first = { entry, id: blocker.id };
+      }
+    }
+    if (first) blockedBy.add(first.id);
+    else visible++;
+  }
+  return {
+    detailCount: anchors.length,
+    detailVisibleCount: visible,
+    detailVisibleRatio: anchors.length ? visible / anchors.length : 0,
+    detailBlockers: [...blockedBy].sort(),
+  };
+}
+
 export function createFocusVisibilityIndex(items, cellSize = GRID_CELL) {
   const cells = new Map();
   for (const item of items) {
@@ -270,23 +320,39 @@ export function selectSafeFocusEndpoint({
   subjectBounds,
   subjectVolume = null,
   index,
+  detailIndex = index,
   axisYaw = 0,
   azimuthMin = -14 * Math.PI / 180,
   azimuthMax = 14 * Math.PI / 180,
   constrainEndpoint = null,
   telephotoFovMax = VILLAGE_FOCUS_TELEPHOTO_FOV_MAX,
+  detailAnchors = [],
 }) {
+  const details = validDetailAnchors(detailAnchors);
   const dx = framing.position.x - framing.target.x;
   const dz = framing.position.z - framing.target.z;
   const baseAzimuth = clamp(normalizeAngle(Math.atan2(dx, dz) - axisYaw), azimuthMin, azimuthMax);
   const centre = clamp(0, azimuthMin, azimuthMax);
-  // Move toward the solar-opening centre in two bounded steps. Crossing to the
-  // opposite edge is visually excessive and can put a long telephoto camera in
-  // another parcel even when the sightline itself is clear.
+  const meanDetailDirection = details.reduce((sum, anchor) => ({
+    x: sum.x + anchor.point.x - framing.target.x,
+    z: sum.z + anchor.point.z - framing.target.z,
+  }), { x: 0, z: 0 });
+  const detailAzimuth = details.length
+    && Math.hypot(meanDetailDirection.x, meanDetailDirection.z) > EPS
+    ? clamp(
+      normalizeAngle(Math.atan2(meanDetailDirection.x, meanDetailDirection.z) - axisYaw),
+      azimuthMin,
+      azimuthMax,
+    )
+    : centre;
+  // Keep exactly three bounded samples. With no authored detail, retain the
+  // established move toward the solar-opening centre. Stable detail anchors may
+  // instead request the opposite edge of that same opening, allowing a low yard
+  // object behind the fitted roof to become first-surface visible.
   const definitions = [
     { azimuth: baseAzimuth, scale: 1 },
-    { azimuth: (baseAzimuth + centre) * 0.5, scale: 0.9 },
-    { azimuth: centre, scale: 0.8 },
+    { azimuth: (baseAzimuth + detailAzimuth) * 0.5, scale: 0.9 },
+    { azimuth: detailAzimuth, scale: 0.8 },
   ].filter((value, index, list) => list.findIndex((other) => (
     Math.abs(other.azimuth - value.azimuth) < EPS && Math.abs(other.scale - value.scale) < EPS
   )) === index);
@@ -303,10 +369,19 @@ export function selectSafeFocusEndpoint({
     scaleFramingDistance(candidate, constraints[index].scale)
   ));
   const blockers = queryBlockers(index, subjectId, candidateFramings, subjectBounds);
+  // A selected house is the subject for its 3×3 architectural surface rays, but
+  // its fitted roof is a first-surface blocker for low yard details. Query the
+  // the detail index without excluding subjectId only for these detail rays.
+  // Product callers extend that immutable grid with renderer-free wall/gate
+  // runs; pure consumers may keep the architectural index as the default.
+  const detailBlockers = details.length
+    ? queryBlockers(detailIndex, null, candidateFramings, detailAnchorBounds(details))
+    : [];
   const candidates = definitions.map(({ azimuth, scale: requestedScale }, index) => {
     const candidateFraming = candidateFramings[index];
     const constraint = constraints[index];
     const objectScore = scoreCandidate(candidateFraming, subjectBounds, subjectVolume, blockers);
+    const detailScore = scoreDetailAnchors(candidateFraming, details, detailBlockers);
     const scale = requestedScale * constraint.scale;
     return {
       azimuth,
@@ -321,28 +396,47 @@ export function selectSafeFocusEndpoint({
       terrainMinClearance: constraint.minClearance ?? null,
       terrainEndpointClearance: constraint.endpointClearance ?? null,
       ...objectScore,
+      ...detailScore,
       cameraBlocked: objectScore.cameraBlocked || constraint.blocked,
     };
   });
-  // Maximum sampled visibility wins. Stable candidate order keeps the authored
-  // endpoint on a tie; one-sample noise is not enough to move the camera.
+  // Architecture remains the primary safety signal. Stable planned detail
+  // anchors may choose only among candidates inside the existing one-of-nine
+  // architectural sample hysteresis; they can never rescue a broadly occluded
+  // house or a camera inside a blocker.
   const base = candidates[0];
   if (constrainEndpoint && candidates.every((candidate) => candidate.terrainBlocked)) {
     throw new RangeError(`No target-connected terrain-safe focus endpoint for ${subjectId}`);
   }
   const usable = candidates.filter((candidate) => !candidate.cameraBlocked);
   let selected = usable[0] || base;
-  for (const candidate of usable.slice(1)) {
-    if (candidate.visibleRatio > selected.visibleRatio + EPS
-      || (Math.abs(candidate.visibleRatio - selected.visibleRatio) <= EPS
-        && candidate.scale > selected.scale + EPS)) selected = candidate;
+  if (details.length && usable.length) {
+    const bestArchitecturalRatio = Math.max(...usable.map((candidate) => candidate.visibleRatio));
+    const detailEligible = usable.filter((candidate) => (
+      candidate.visibleRatio >= bestArchitecturalRatio - ARCHITECTURAL_HYSTERESIS - EPS
+    ));
+    [selected] = detailEligible;
+    for (const candidate of detailEligible.slice(1)) {
+      if (candidate.detailVisibleRatio > selected.detailVisibleRatio + EPS
+        || (Math.abs(candidate.detailVisibleRatio - selected.detailVisibleRatio) <= EPS
+          && (candidate.visibleRatio > selected.visibleRatio + EPS
+            || (Math.abs(candidate.visibleRatio - selected.visibleRatio) <= EPS
+              && candidate.scale > selected.scale + EPS)))) selected = candidate;
+    }
+  } else {
+    for (const candidate of usable.slice(1)) {
+      if (candidate.visibleRatio > selected.visibleRatio + EPS
+        || (Math.abs(candidate.visibleRatio - selected.visibleRatio) <= EPS
+          && candidate.scale > selected.scale + EPS)) selected = candidate;
+    }
   }
   // The authored endpoint only wins the one-sample hysteresis tie when it is
   // itself usable. Falling back into a roof merely because it had the authored
   // azimuth turns a visibility preference into a hard camera collision.
-  if (!base.cameraBlocked
+  if (!details.length
+    && !base.cameraBlocked
     && base.scale >= selected.scale - EPS
-    && selected.visibleRatio < base.visibleRatio + 1 / 9 - EPS) selected = base;
+    && selected.visibleRatio < base.visibleRatio + ARCHITECTURAL_HYSTERESIS - EPS) selected = base;
   return {
     framing: selected.framing,
     azimuth: selected.azimuth,
@@ -358,6 +452,13 @@ export function selectSafeFocusEndpoint({
     occlusionRatio: selected.occlusionRatio,
     baseVisibleRatio: base.visibleRatio,
     baseOcclusionRatio: base.occlusionRatio,
+    detailCount: selected.detailCount,
+    detailVisibleCount: selected.detailVisibleCount,
+    detailVisibleRatio: selected.detailVisibleRatio,
+    baseDetailVisibleCount: base.detailVisibleCount,
+    baseDetailVisibleRatio: base.detailVisibleRatio,
+    detailBlockers: selected.detailBlockers,
+    baseDetailBlockers: base.detailBlockers,
     blockers: selected.blockers,
     baseBlockers: base.blockers,
     candidates: candidates.map((candidate) => ({
@@ -372,6 +473,10 @@ export function selectSafeFocusEndpoint({
       terrainEndpointClearance: candidate.terrainEndpointClearance,
       visibleRatio: candidate.visibleRatio,
       occlusionRatio: candidate.occlusionRatio,
+      detailCount: candidate.detailCount,
+      detailVisibleCount: candidate.detailVisibleCount,
+      detailVisibleRatio: candidate.detailVisibleRatio,
+      detailBlockers: candidate.detailBlockers,
       cameraBlocked: candidate.cameraBlocked,
       blockers: candidate.blockers,
     })),
