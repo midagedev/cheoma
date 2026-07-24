@@ -199,6 +199,8 @@ function placeHall(root, preset, cx, czNorthFace, depth, name) {
 function layJojeong(root, cx, cz, W, D, depth, frontZ, gateZ) {
   const M = root.userData.mats;
   const netW = W - 2 * depth;
+  const courtMinZ = Math.min(frontZ, gateZ);
+  const courtMaxZ = Math.max(frontZ, gateZ);
   // 박석: 밝은 회백색 거친 판석 평면(흙 마당 대신).
   const bakseok = new THREE.Mesh(
     new THREE.PlaneGeometry(netW - 0.4, (gateZ - frontZ) - 0.4),
@@ -233,6 +235,17 @@ function layJojeong(root, cx, cz, W, D, depth, frontZ, gateZ) {
   inst.instanceMatrix.needsUpdate = true;
   inst.castShadow = inst.receiveShadow = true;
   root.add(inst);
+  return {
+    id: 'jojeong',
+    role: 'state-court',
+    footprint: [
+      { x: cx - netW * 0.5, z: courtMaxZ },
+      { x: cx + netW * 0.5, z: courtMaxZ },
+      { x: cx + netW * 0.5, z: courtMinZ },
+      { x: cx - netW * 0.5, z: courtMinZ },
+    ],
+    y: 0.02,
+  };
 }
 
 // 금천 + 금천교(진입부). 명당수는 동서류(x축), 홍예교가 남북(축선)으로 건넌다.
@@ -386,11 +399,49 @@ export function buildPalaceCompound({
     // 전각 + 월대.
     const preset = applyOv(hallPreset(A.role, (seed ^ (0x1000 * (i + 1))) >>> 0));
     preset.mats = hallMats;   // #149 공유 재질셋(shareMats 시 M, 아니면 undefined=구 동작)
-    const { group: hall, frontZ } = placeHall(grp, preset, 0, northFace, A.corridorDepth, `hall-${A.role}`);
+    const {
+      group: hall,
+      frontZ,
+      layout: hallLayout,
+    } = placeHall(grp, preset, 0, northFace, A.corridorDepth, `hall-${A.role}`);
 
     // 조정(정전 전용): 박석·어도·품계석.
+    let focusSemantic = null;
     if (A.court === 'jojeong') {
-      layJojeong(grp, 0, cz, A.W, A.D, A.corridorDepth, frontZ, southGateZ - 1.0);
+      const court = layJojeong(
+        grp,
+        0,
+        cz,
+        A.W,
+        A.D,
+        A.corridorDepth,
+        frontZ,
+        southGateZ - 1.0,
+      );
+      const hallZ = hall.position.z;
+      const hallFootprint = [
+        { x: -hallLayout.xEave, z: hallZ + hallLayout.zEave },
+        { x: hallLayout.xEave, z: hallZ + hallLayout.zEave },
+        { x: hallLayout.xEave, z: hallZ - hallLayout.zEave },
+        { x: -hallLayout.xEave, z: hallZ - hallLayout.zEave },
+      ];
+      const courtCenterZ = (court.footprint[0].z + court.footprint[2].z) * 0.5;
+      focusSemantic = {
+        id: 'palace:jeongjeon-court',
+        representative: {
+          id: 'hall-jeongjeon',
+          role: 'jeongjeon',
+          footprint: hallFootprint,
+          minY: 0,
+          maxY: hallLayout.totalH,
+        },
+        courtyard: court,
+        target: {
+          x: 0,
+          y: 3.2,
+          z: hallZ * 0.62 + courtCenterZ * 0.38,
+        },
+      };
     }
     // 침전 부속(satellites): 본채 좌우 옆칸(side-aisle)에 이격된 소채. 본채 월대가 마당 깊이를
     // 대부분 차지하므로, 본채 실측 외연과 행각 사이 여유폭에서 겹치지 않는 최대 scale 을 역산해
@@ -419,7 +470,15 @@ export function buildPalaceCompound({
     }
 
     const finalGrp = finalize(grp);
-    areaHandles.push({ role: A.role, group: finalGrp, hall, center: { x: 0, z: cz }, W: A.W, D: A.D });
+    areaHandles.push({
+      role: A.role,
+      group: finalGrp,
+      hall,
+      center: { x: 0, z: cz },
+      W: A.W,
+      D: A.D,
+      focusSemantic,
+    });
     southFace = northFace;   // 다음 일곽은 이 북면에서 시작(담 공유)
   }
 
@@ -486,6 +545,7 @@ export function buildPalaceCompound({
     tier, variant, seed,      // seed: 어댑터가 동일 궁을 presetOverrides 로 재생성할 때 필요(#93)
     regionW: W, regionD: D,
     areas: areaHandles,       // [{ role, group, hall, center, W, D }] — 일곽별 그룹(heroHandle 유사)
+    focusSemantic: areaHandles.find((area) => area.role === 'jeongjeon')?.focusSemantic || null,
     dancheong: requestedDancheong,
   };
 

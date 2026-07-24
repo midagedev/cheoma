@@ -12,6 +12,10 @@ import {
   VILLAGE_LENS,
   dollyDistanceForFov,
 } from '../../camera/optics.js';
+import {
+  focusSubjectBounds,
+  transformFocusSubject,
+} from '../../camera/focus-framing.js';
 import * as G from '../../core/math/geom2.js';
 import {
   focusPlanningBlockers,
@@ -25,6 +29,7 @@ import {
   terrainGridStep,
   terrainMeshCameraSafeScale,
 } from '../../village/terrain-grid.js';
+import { templeFocusSubject } from '../../temple/focus-subject.js';
 import { buildParcelSpec } from './parcel-edit.js';
 
 const DEG = Math.PI / 180;
@@ -49,6 +54,67 @@ function threeBounds(bounds) {
     new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
     new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
   );
+}
+
+function volumeFootprint(volume) {
+  const cos = Math.cos(volume.rotationY || 0);
+  const sin = Math.sin(volume.rotationY || 0);
+  return [
+    { x: -volume.half.x, z: volume.half.z },
+    { x: volume.half.x, z: volume.half.z },
+    { x: volume.half.x, z: -volume.half.z },
+    { x: -volume.half.x, z: -volume.half.z },
+  ].map((point) => ({
+    x: volume.center.x + point.x * cos + point.z * sin,
+    z: volume.center.z - point.x * sin + point.z * cos,
+  }));
+}
+
+function parcelFocusSubject({
+  parcel,
+  focusVolume,
+  detailAnchors,
+  target,
+  worldCenter,
+  width,
+  depth,
+  height,
+  rotationY,
+}) {
+  const representative = {
+    id: `${parcel.id}:architecture`,
+    role: parcel.hero ? (parcel.heroStyle || 'head-house') : 'house',
+    footprint: volumeFootprint(focusVolume),
+    minY: focusVolume.center.y - focusVolume.half.y,
+    maxY: focusVolume.center.y + focusVolume.half.y,
+  };
+  const compoundVolume = {
+    center: {
+      x: worldCenter.x,
+      y: worldCenter.y + height * 0.5,
+      z: worldCenter.z,
+    },
+    half: { x: width * 0.5, y: height * 0.5, z: depth * 0.5 },
+    rotationY,
+  };
+  return {
+    id: parcel.id,
+    representative,
+    // Hero parcels own a compound/courtyard envelope wider than the one
+    // representative roof used for first-surface visibility. Keep that envelope
+    // flat so empty air above the yard does not force an aerial-scale frame.
+    courtyard: parcel.hero && parcel.heroStyle === 'palace' ? {
+      id: `${parcel.id}:compound-yard`,
+      role: 'compound',
+      footprint: volumeFootprint(compoundVolume),
+      y: worldCenter.y + 0.02,
+    } : null,
+    anchors: (detailAnchors || []).map((anchor) => ({
+      id: anchor.id,
+      point: { ...anchor.point },
+    })),
+    target: { x: target.x, y: target.y, z: target.z },
+  };
 }
 
 function heroCameraFraming(proxy) {
@@ -318,6 +384,12 @@ export function buildParcelPickProxies(plan, site) {
     mesh.updateMatrixWorld(true);
     const baseCameraFraming = parcelCameraFraming(worldCenter, focus);
     const focusBlocker = parcelFocusBlocker(parcel, site);
+    const focusVolume = focusBlocker?.volume || {
+      center: { x: worldX, y: baseY + height / 2, z: worldZ },
+      half: { x: width / 2, y: height / 2, z: depth / 2 },
+      rotationY,
+    };
+    const focusDetailAnchors = parcelFocusDetailAnchors(parcel, site);
     proxies.push({
       parcelId: parcel.id,
       mesh,
@@ -334,12 +406,19 @@ export function buildParcelPickProxies(plan, site) {
         azimuthMax: focus.azimuthMax,
       },
       focusBounds: focusBlocker ? threeBounds(focusBlocker.bounds) : new THREE.Box3().setFromObject(mesh),
-      focusVolume: focusBlocker?.volume || {
-          center: { x: worldX, y: baseY + height / 2, z: worldZ },
-          half: { x: width / 2, y: height / 2, z: depth / 2 },
-          rotationY,
-        },
-      focusDetailAnchors: parcelFocusDetailAnchors(parcel, site),
+      focusVolume,
+      focusDetailAnchors,
+      focusSubject: parcelFocusSubject({
+        parcel,
+        focusVolume,
+        detailAnchors: focusDetailAnchors,
+        target: baseCameraFraming.target,
+        worldCenter,
+        width,
+        depth,
+        height,
+        rotationY,
+      }),
       focusWallBlockers: parcelWallFocusBlockers(parcel, site, plan.opts?.char01),
     });
   }
@@ -397,6 +476,17 @@ export function refreshParcelPickProxy(
       rotationY,
     };
   proxy.focusDetailAnchors = parcelFocusDetailAnchors(focusParcel, site);
+  proxy.focusSubject = parcelFocusSubject({
+    parcel: focusParcel,
+    focusVolume: proxy.focusVolume,
+    detailAnchors: proxy.focusDetailAnchors,
+    target: proxy.baseCameraFraming.target,
+    worldCenter: proxy.worldCenter,
+    width,
+    depth,
+    height,
+    rotationY,
+  });
   proxy.focusWallBlockers = parcelWallFocusBlockers(focusParcel, site, plan?.opts?.char01);
   proxy.cameraVisibility = null;
   proxy.heroCameraVisibility = null;
@@ -419,9 +509,12 @@ function landmarkCameraFraming(
   rotationY,
   width,
   depth,
-  { lens, azimuth, elevation, targetY, fit, padding },
+  { lens, azimuth, elevation, targetY, fit, padding, focusSubject = null },
 ) {
-  const extent = Math.max(width, depth);
+  const semanticBounds = focusSubjectBounds(focusSubject);
+  const semanticWidth = semanticBounds ? semanticBounds.max.x - semanticBounds.min.x : width;
+  const semanticDepth = semanticBounds ? semanticBounds.max.z - semanticBounds.min.z : depth;
+  const extent = Math.max(semanticWidth, semanticDepth);
   // First reproduce the established composition at its reference lens, including
   // padding, then dolly the whole radius. Scaling only the fit term subtly enlarges
   // monumental compounds when switching to the telephoto profile.
@@ -434,7 +527,13 @@ function landmarkCameraFraming(
     radius * Math.cos(elevation * DEG) * Math.cos(azimuth * DEG),
   );
   offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
-  const target = new THREE.Vector3(worldCenter.x, worldCenter.y + targetY, worldCenter.z);
+  const target = focusSubject?.target
+    ? new THREE.Vector3(
+      focusSubject.target.x,
+      focusSubject.target.y,
+      focusSubject.target.z,
+    )
+    : new THREE.Vector3(worldCenter.x, worldCenter.y + targetY, worldCenter.z);
   return {
     position: target.clone().add(offset),
     target,
@@ -443,16 +542,71 @@ function landmarkCameraFraming(
   };
 }
 
-export function palaceCameraFraming(worldCenter, rotationY, width, depth) {
+export function palaceCameraFraming(worldCenter, rotationY, width, depth, focusSubject = null) {
   return landmarkCameraFraming(worldCenter, rotationY, width, depth, {
-    lens: VILLAGE_LENS.palace, azimuth: 40, elevation: 20, targetY: 3.2, fit: 1.12, padding: 0.12,
+    lens: VILLAGE_LENS.palace,
+    azimuth: 40,
+    elevation: 20,
+    targetY: 3.2,
+    fit: 1.12,
+    padding: 0.12,
+    focusSubject,
   });
 }
 
-export function templeCameraFraming(worldCenter, rotationY, width, depth) {
+export function templeCameraFraming(worldCenter, rotationY, width, depth, focusSubject = null) {
   return landmarkCameraFraming(worldCenter, rotationY, width, depth, {
-    lens: VILLAGE_LENS.temple, azimuth: 24, elevation: 17, targetY: 3, fit: 1.16, padding: 0.14,
+    lens: VILLAGE_LENS.temple,
+    azimuth: 24,
+    elevation: 17,
+    targetY: 3,
+    fit: 1.16,
+    padding: 0.14,
+    focusSubject,
   });
+}
+
+function refreshLandmarkFocusProxy(proxy, localFocusSubject, cameraFramingForSubject) {
+  if (!proxy) return null;
+  const focusSubject = transformFocusSubject(localFocusSubject, {
+    x: proxy.worldCenter.x,
+    y: proxy.worldCenter.y,
+    z: proxy.worldCenter.z,
+    rotationY: proxy.rotY,
+  });
+  const cameraFraming = cameraFramingForSubject(
+    proxy.worldCenter,
+    proxy.rotY,
+    proxy.dims.x,
+    proxy.dims.z,
+    focusSubject,
+  );
+  const semanticBounds = focusSubjectBounds(focusSubject);
+  proxy.focusSubject = focusSubject;
+  proxy.focusBounds = semanticBounds ? threeBounds(semanticBounds) : proxy.bbox.clone();
+  proxy.baseCameraFraming = cloneCameraFraming(cameraFraming);
+  proxy.cameraFraming = cameraFraming;
+  return proxy;
+}
+
+// Compound edits replace their pure layout/assembler roots without rebuilding
+// the whole village. Refresh only the renderer-free semantic camera descriptor;
+// callers deliberately decide when a new camera lifecycle should consume it so
+// a live edit never steals an orbit the visitor composed by hand.
+export function refreshPalacePickProxy(proxy, palaceHandle) {
+  return refreshLandmarkFocusProxy(
+    proxy,
+    palaceHandle?.focusSemantic,
+    palaceCameraFraming,
+  );
+}
+
+export function refreshTemplePickProxy(proxy, templePlan) {
+  return refreshLandmarkFocusProxy(
+    proxy,
+    templeFocusSubject(templePlan),
+    templeCameraFraming,
+  );
 }
 
 /** Build non-residential focus proxies after palace metadata is available. */
@@ -474,6 +628,20 @@ export function buildLandmarkPickProxies(plan, site, {
     mesh.rotation.y = rotY;
     mesh.userData.parcelId = 'palace';
     mesh.updateMatrixWorld(true);
+    const focusSubject = transformFocusSubject(palaceHandle?.focusSemantic, {
+      x: feature.x,
+      y: baseY,
+      z: feature.z,
+      rotationY: rotY,
+    });
+    const semanticBounds = focusSubjectBounds(focusSubject);
+    const cameraFraming = palaceCameraFraming(
+      worldCenter,
+      rotY,
+      width,
+      depth,
+      focusSubject,
+    );
     proxies.push({
       parcelId: 'palace',
       mesh,
@@ -482,7 +650,10 @@ export function buildLandmarkPickProxies(plan, site, {
       dims: new THREE.Vector3(width, height, depth),
       rotY,
       buildingSpec: palaceSpec(),
-      cameraFraming: palaceCameraFraming(worldCenter, rotY, width, depth),
+      baseCameraFraming: cloneCameraFraming(cameraFraming),
+      cameraFraming,
+      focusSubject,
+      focusBounds: semanticBounds ? threeBounds(semanticBounds) : new THREE.Box3().setFromObject(mesh),
     });
   }
 
@@ -499,6 +670,23 @@ export function buildLandmarkPickProxies(plan, site, {
     mesh.rotation.y = rotY;
     mesh.userData.parcelId = 'temple';
     mesh.updateMatrixWorld(true);
+    const localFocusSubject = templeFocusSubject(
+      templeHandle?.plan || feature.compound,
+    );
+    const focusSubject = transformFocusSubject(localFocusSubject, {
+      x: feature.x,
+      y: groundY,
+      z: feature.z,
+      rotationY: rotY,
+    });
+    const semanticBounds = focusSubjectBounds(focusSubject);
+    const cameraFraming = templeCameraFraming(
+      worldCenter,
+      rotY,
+      width,
+      depth,
+      focusSubject,
+    );
     proxies.push({
       parcelId: 'temple',
       mesh,
@@ -509,7 +697,10 @@ export function buildLandmarkPickProxies(plan, site, {
       buildingSpec: templeSpec ? templeSpec() : {
         parcelId: 'temple', family: 'temple', style: 'temple', editable: false, landmark: true,
       },
-      cameraFraming: templeCameraFraming(worldCenter, rotY, width, depth),
+      baseCameraFraming: cloneCameraFraming(cameraFraming),
+      cameraFraming,
+      focusSubject,
+      focusBounds: semanticBounds ? threeBounds(semanticBounds) : new THREE.Box3().setFromObject(mesh),
     });
   }
   return proxies;

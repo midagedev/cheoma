@@ -438,6 +438,77 @@ async function captureAnimalPixelDelta(page, parcelId, prefix) {
   return { toggled: offResult.toggled, changed: countChangedPixels(on, off), ...state };
 }
 
+async function captureUiSafeSemanticFrame(page, parcelId, prefix) {
+  await page.evaluate((id) => {
+    const engine = window.__engine;
+    window.__viewshift?.setEnabled(true);
+    const selected = engine.village.getState().selected;
+    if (selected !== id) {
+      if (selected) engine.village.switchTo(id);
+      else engine.village.focus(id);
+    }
+  }, parcelId);
+  await page.waitForFunction((id) => {
+    const state = window.__engine.village.getState();
+    return state.selected === id && !state.transitioning;
+  }, parcelId, { timeout });
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.debugDofSeek(1, { finish: true });
+  });
+  await page.waitForFunction(() => {
+    const shift = window.__viewshift;
+    return !window.__engine.village.getState().transitioning
+      && shift?.safeRect?.usable
+      && shift.fit?.fitted
+      && !shift.fit?.overflow
+      && Math.abs(shift.x - shift.tx) < 0.25
+      && Math.abs(shift.y - shift.ty) < 0.25;
+  }, null, { timeout });
+  const result = await page.evaluate((id) => {
+    const engine = window.__engine;
+    const subject = engine.village.debugFocusVisibility(id).focusSubject;
+    const points = [];
+    const add = (footprint, y) => {
+      for (const point of footprint || []) points.push({ x: point.x, y, z: point.z });
+    };
+    add(subject.representative.footprint, subject.representative.minY);
+    add(subject.representative.footprint, subject.representative.maxY);
+    if (subject.courtyard) add(subject.courtyard.footprint, subject.courtyard.y);
+    for (const anchor of subject.anchors || []) if (anchor.point) points.push(anchor.point);
+    const box = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
+    for (const point of points) {
+      const projected = engine.camera.position.clone().set(point.x, point.y, point.z).project(engine.camera);
+      const x = (projected.x + 1) * innerWidth * 0.5;
+      const y = (1 - projected.y) * innerHeight * 0.5;
+      box.left = Math.min(box.left, x);
+      box.right = Math.max(box.right, x);
+      box.top = Math.min(box.top, y);
+      box.bottom = Math.max(box.bottom, y);
+    }
+    return {
+      box,
+      safe: window.__viewshift.safeRect,
+      fit: window.__viewshift.fit,
+      fov: engine.camera.fov,
+      target: engine.__controls.target.toArray(),
+    };
+  }, parcelId);
+  await page.screenshot({ path: join(outputDir, `${prefix}.png`) });
+  return result;
+}
+
+function assertUiSafeSemanticFrame(frame, label) {
+  invariant(frame.safe?.usable
+      && frame.fit?.fitted
+      && !frame.fit?.overflow
+      && frame.box.left >= frame.safe.left - 1
+      && frame.box.right <= frame.safe.right + 1
+      && frame.box.top >= frame.safe.top - 1
+      && frame.box.bottom <= frame.safe.bottom + 1,
+  `${label} keeps representative architecture and its courtyard inside the live UI-safe viewport (${JSON.stringify(frame)})`);
+}
+
 function assertReadableHouseFrame(focusFrame, label, { minHeight = 0.19 } = {}) {
   invariant(focusFrame.bottom <= 0.84,
     `${label} keeps the selected roof/wall volume clear of the bottom crop (${(focusFrame.bottom * 100).toFixed(1)}%)`);
@@ -665,14 +736,36 @@ try {
     'safe endpoint remains inside the south-facing solar-opening angle');
   invariant(rebuildVisibility.safeFraming.fov <= 26,
     'safe endpoint remains on the residential telephoto lens');
-  invariant(
-    dist(rebuildEnd.end.position, {
-      x: rebuildVisibility.safeFraming.position[0],
-      y: rebuildVisibility.safeFraming.position[1],
-      z: rebuildVisibility.safeFraming.position[2],
-    }) < 1e-6,
-    'ordinary click focus and cinematic final share the same authoritative safe framing',
-  );
+  const rebuildViewportFit = await rebuildPage.evaluate(() => window.__viewshift?.fit ?? null);
+  const safeBasePosition = {
+    x: rebuildVisibility.safeFraming.position[0],
+    y: rebuildVisibility.safeFraming.position[1],
+    z: rebuildVisibility.safeFraming.position[2],
+  };
+  const safeBaseTarget = {
+    x: rebuildVisibility.safeFraming.target[0],
+    y: rebuildVisibility.safeFraming.target[1],
+    z: rebuildVisibility.safeFraming.target[2],
+  };
+  const baseDirection = {
+    x: safeBasePosition.x - safeBaseTarget.x,
+    y: safeBasePosition.y - safeBaseTarget.y,
+    z: safeBasePosition.z - safeBaseTarget.z,
+  };
+  const finalDirection = {
+    x: rebuildEnd.end.position.x - rebuildEnd.end.target.x,
+    y: rebuildEnd.end.position.y - rebuildEnd.end.target.y,
+    z: rebuildEnd.end.position.z - rebuildEnd.end.target.z,
+  };
+  const baseLength = Math.hypot(baseDirection.x, baseDirection.y, baseDirection.z);
+  const finalLength = Math.hypot(finalDirection.x, finalDirection.y, finalDirection.z);
+  invariant(rebuildViewportFit?.fitted && !rebuildViewportFit.overflow
+      && dist(rebuildEnd.end.target, safeBaseTarget) < 1e-6
+      && finalLength >= baseLength - 1e-6
+      && (baseDirection.x * finalDirection.x
+        + baseDirection.y * finalDirection.y
+        + baseDirection.z * finalDirection.z) / (baseLength * finalLength) > 1 - 1e-9,
+  'ordinary click and cinematic final share the safe architectural ray while live UI may only dolly it outward');
   await rebuildPage.evaluate(() => window.__engine.debugSetPaused(false));
   await rebuildPage.waitForFunction(() => window.__engine.village.getState().transitioning === false, null, { timeout });
 
@@ -882,6 +975,19 @@ try {
       && terrainZoom.continuum.focusCutaway?.boundaryRays > 0
       && terrainZoom.camera.near <= 2.5 + 1e-3,
   `capital/7/p31 high focus zoom-out clears the proven terrain and preserves village context (${terrainZoom.camera.near.toFixed(3)}m near)`);
+  for (const [parcelId, lens] of [
+    ['palace', VILLAGE_LENS.palace],
+    ['temple', VILLAGE_LENS.temple],
+  ]) {
+    const semanticFrame = await captureUiSafeSemanticFrame(
+      rebuildPage,
+      parcelId,
+      `semantic-${parcelId}-desktop`,
+    );
+    assertUiSafeSemanticFrame(semanticFrame, `desktop ${parcelId}`);
+    invariant(Math.abs(semanticFrame.fov - lens.fov) < 1e-9,
+      `desktop ${parcelId} UI fitting preserves its authored ${lens.fov}° lens`);
+  }
   await rebuildPage.close();
 
   // Reduced motion is a real immediate endpoint, including the explicit duration override.
@@ -925,6 +1031,23 @@ try {
       && (!mobile.dof.enabled || mobile.dof.error == null || mobile.dof.error < 0.04),
   'compact phone frame keeps lookAt coherent and respects the mobile DoF-off policy');
   await mobilePage.screenshot({ path: join(outputDir, 'rebuild-mobile-mid.png') });
+  await mobilePage.goto(
+    `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,
+    { waitUntil: 'domcontentloaded', timeout },
+  );
+  await mobilePage.waitForFunction(() => (
+    window.__SHOT_READY === true
+      && window.__engine?.village?.getState()?.active
+      && window.__device?.sheet === true
+  ), null, { timeout });
+  for (const parcelId of ['palace', 'temple']) {
+    const semanticFrame = await captureUiSafeSemanticFrame(
+      mobilePage,
+      parcelId,
+      `semantic-${parcelId}-mobile`,
+    );
+    assertUiSafeSemanticFrame(semanticFrame, `mobile ${parcelId}`);
+  }
   await mobilePage.close();
 } finally {
   await browser?.close().catch(() => {});

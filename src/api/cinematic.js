@@ -26,6 +26,10 @@ export {
   shortestAngleDelta,
 } from '../camera/heading.js';
 export {
+  fitFocusFraming,
+  safeViewportRect,
+} from '../camera/focus-framing.js';
+export {
   buildObstacles,
   createDronePaths,
   mainRoad,

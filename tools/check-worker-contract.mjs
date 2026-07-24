@@ -121,10 +121,15 @@ const expectedProxyHashes = {
   // another one of the same three bounded south-opening candidates only inside
   // the existing one-of-nine architectural hysteresis; scene bytes, proxy
   // counts, and sync/Worker/fallback parity remain unchanged.
-  village: 'c1a9c692',
-  town: '269d1931',
-  capital: 'f9baba40',
-  hanyang: 'a84cc496',
+  // #155 adds the JSON-safe semantic focus subject consumed by the app's
+  // UI-safe viewport adapter. Regular houses expose their fitted roof/detail
+  // anchors, while palace/temple proxies expose representative hall + flat
+  // courtyard bounds and frame those instead of the full reserved precinct.
+  // Scene bytes remain exact; only the public proxy descriptor changes.
+  village: '8cbe0499',
+  town: '5ca9f35a',
+  capital: '666f336b',
+  hanyang: 'cdafe208',
 };
 
 const server = await createServer({
@@ -498,7 +503,13 @@ try {
           }
           checked++;
           const framing = proxy.cameraFraming;
-          const extent = Math.max(proxy.dims.x, proxy.dims.z);
+          const semanticWidth = proxy.focusBounds
+            ? proxy.focusBounds.max.x - proxy.focusBounds.min.x
+            : proxy.dims.x;
+          const semanticDepth = proxy.focusBounds
+            ? proxy.focusBounds.max.z - proxy.focusBounds.min.z
+            : proxy.dims.z;
+          const extent = Math.max(semanticWidth, semanticDepth);
           const expectedReferenceDistance = (extent * 0.5)
             / Math.tan(spec.profile.referenceFov * 0.5 * DEG) * spec.fit
             + extent * spec.padding;

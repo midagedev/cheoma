@@ -566,12 +566,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     controls._scale = 1;
   }
 
-  // ---------- 뷰포트 중심 보정(#124) — 패널 점유 시 피사체를 "가시 영역" 중심으로 ----------
-  // 데스크톱 좌측 컨텍스트 카드(.ctxcard)·우측 패널(.panel)·모바일 하단 시트(.sheet)가 화면을 가리면,
-  //   그 반대편(패널이 없는 가시 영역)의 중심에 피사체가 오도록 camera.setViewOffset 으로 프러스텀만
-  //   비대칭 시프트한다. 카메라 위치·시선·프레이밍은 불변 — 오직 투영(projectionMatrix)만 민다. 그래서
-  //   레이캐스트(setFromCamera)·DoF 초점(거리)·FlarePass 태양 투영이 모두 같은 offset 행렬을 경유해
-  //   자동 정합한다(별도 보정 불필요). cur/tgt 는 "피사체 화면 시프트 px": curX>0=오른쪽, curY>0=위.
+  // ---------- UI-safe 포커스 프레이밍(#124·#155) ----------
+  // 컨텍스트 카드·패널·시트뿐 아니라 실제 보이는 가이드/모드/다이얼/액션 chrome을 한 중앙 safe rect로
+  //   축약한다. camera.setViewOffset은 그 영역의 중심으로 투영만 계속 옮기므로 raycast·DoF·flare가
+  //   같은 행렬을 쓴다. 포커스 lifecycle 경계에서는 대표 건물의 물리 부피와 열린 마당/조정을 이 영역에
+  //   담는 데 필요한 최소 거리만 같은 시선축으로 dolly-out한다. FOV·target·방위·고도는 바꾸지 않는다.
+  //   cur/tgt 는 "피사체 화면 시프트 px": curX>0=오른쪽, curY>0=위.
   //   프러스텀 매핑은 offsetX=-curX(축 point NDC=+2·curX/W → 오른쪽), offsetY=+curY(NDC=+2·curY/H → 위).
   // 데모·리롤·히어로 연출 중에는 홀드하고, focus 트윈 중에는 패널 모프와 함께 추종한다.
   const viewShiftRuntime = createViewShift({
@@ -580,6 +580,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     isBusy: () => !!(demo.active || villageWaveBusy() || village.heroAsm || heroActive),
   });
   const viewShift = viewShiftRuntime.state;
+  const focusFramingForViewport = (proxy, framing = proxy?.cameraFraming) => (
+    proxy && framing
+      ? viewShiftRuntime.fitFraming(framing, proxy.focusSubject)
+      : framing
+  );
 
   const architecturalMotion = () => reducedCameraMotion ? 'reduced' : (perf || compact ? 'compact' : 'full');
 
@@ -1760,14 +1765,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (detail?.group) attachFocusRing(detail);
     const warmP = detail?.group ? warmShaders(detail.group) : Promise.resolve();   // 오버레이 서브트리 프리컴파일(#117)
     renderer.domElement.style.cursor = '';
-    const f = pr.cameraFraming;
-    const closeupDist = f.position.distanceTo(f.target);
     emit('villageSelectStart', { parcelId, spec: pr.buildingSpec });
     emit('villageHover', null);
     // #128 reveal 게이트: 돌리인 시작을 오버레이 셰이더 링크 완료(cap 상한)에 묶어 첫 렌더 스톨 방지.
     //   대기 중 transitioning=true 라 재클릭·줌 감시자 봉인 유지. 게이트 통과 전 상태가 바뀌면(취소·전환) 중단.
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== parcelId) return;
+      // SelectStart removes the explore guide and morphs the product chrome.
+      // Sample after Svelte's queued DOM flush, otherwise the physical endpoint
+      // is fitted to UI that disappears before the camera arrives.
+      const f = focusFramingForViewport(pr);
+      const closeupDist = f.position.distanceTo(f.target);
       // 예열 중 live rebuild가 같은 필지 root를 교체할 수 있으므로 현재 overlay에서 늦게 해석한다.
       const openingFocus = resolveArchitecturalDofAnchor(parcelId, new THREE.Vector3());
       if (openingFocus) setSemanticDofAnchor(parcelId, openingFocus);
@@ -1820,13 +1828,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.handle.highlightParcel(toId, true);                   // 돌리 동안 B 추적 하이라이트
     if (detail.group) attachFocusRing(detail);                   // 앰비언스 링 A→B 크로스페이드(set 이 A 링 retiring)
     renderer.domElement.style.cursor = '';
-    const f = pr.cameraFraming;
-    const closeupDist = f.position.distanceTo(f.target);
     emit('villageSelectStart', { parcelId: toId, spec: pr.buildingSpec, reseed: true });   // 패널 유형·기본값 갱신
     emit('villageHover', null);
     // #128 reveal 게이트: hop 돌리 시작을 B 오버레이 셰이더 링크 완료(cap 상한)에 묶어 첫 렌더 스톨 방지.
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== toId) return;
+      const f = focusFramingForViewport(pr);
+      const closeupDist = f.position.distanceTo(f.target);
       // 예열 중 교체된 목적지 root의 좌표만 커밋해 폐기된 Object3D 의미점이 되살아나지 않게 한다.
       const toOpeningFocus = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
       if (toOpeningFocus) setSemanticDofAnchor(toId, toOpeningFocus);
@@ -2029,18 +2037,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     let finalFov;
     let finalReferenceFov;
     if (heroFraming) {
-      finalPosition = heroFraming.position.clone();
-      finalTarget = heroFraming.target.clone();
-      finalFov = heroFraming.fov;
-      finalReferenceFov = heroFraming.referenceFov;
+      const fittedHero = focusFramingForViewport(pr, heroFraming);
+      finalPosition = fittedHero.position.clone();
+      finalTarget = fittedHero.target.clone();
+      finalFov = fittedHero.fov;
+      finalReferenceFov = fittedHero.referenceFov;
     } else {
       // Old/custom handles may not expose the separately terrain-solved 7°
       // endpoint. Reuse the already safe ordinary frame instead of extending
       // its ray back out through the same hill with a reconstructed hero dolly.
-      finalTarget = pr.cameraFraming.target.clone();
-      finalPosition = pr.cameraFraming.position.clone();
-      finalFov = pr.cameraFraming.fov;
-      finalReferenceFov = pr.cameraFraming.referenceFov;
+      const fittedFocus = focusFramingForViewport(pr);
+      finalTarget = fittedFocus.target.clone();
+      finalPosition = fittedFocus.position.clone();
+      finalFov = fittedFocus.fov;
+      finalReferenceFov = fittedFocus.referenceFov;
     }
 
     // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 24°의
@@ -2179,7 +2189,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageHover', null);
     startVillageReveal(dur + 0.4);                               // 재형성 무드 + 폴백 소품 은닉 마스킹
     if (pr) {
-      const framing = pr.cameraFraming;
+      const framing = focusFramingForViewport(pr);
       const rebuildState = village.handle.parcelRebuildState?.(id);
       revealCamera.reveal('rebuild', {
         position: framing.position,
@@ -2868,6 +2878,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
             safeFraming: plainFrame(p.heroCameraFraming),
           } : null,
           subjectBounds: bounds(p.focusBounds || p.bbox),
+          focusSubject: p.focusSubject ? structuredClone(p.focusSubject) : null,
           blockerBounds: Object.fromEntries((p.cameraVisibility?.baseBlockers || []).map((blockerId) => {
             const blocker = village.handle?.getPickProxy(blockerId);
             return [blockerId, blocker ? bounds(blocker.focusBounds || blocker.bbox) : null];
@@ -3391,6 +3402,26 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     get x() { return disposed ? 0 : viewShift.curX; }, get y() { return disposed ? 0 : viewShift.curY; },
     get tx() { return disposed ? 0 : viewShift.tgtX; }, get ty() { return disposed ? 0 : viewShift.tgtY; },
     get compositionYFrac() { return disposed ? 0 : viewShift.compositionYFrac; },
+    get safeRect() {
+      return disposed || !viewShift.safeRect ? null : {
+        left: viewShift.safeRect.left,
+        right: viewShift.safeRect.right,
+        top: viewShift.safeRect.top,
+        bottom: viewShift.safeRect.bottom,
+        width: viewShift.safeRect.width,
+        height: viewShift.safeRect.height,
+        usable: viewShift.safeRect.usable,
+      };
+    },
+    get fit() {
+      const fit = viewShift.lastFit;
+      return disposed || !fit ? null : {
+        scale: fit.scale,
+        fitted: fit.fitted,
+        overflow: fit.overflow,
+        projectedBounds: fit.projectedBounds ? { ...fit.projectedBounds } : null,
+      };
+    },
     get viewEnabled() { return !disposed && !!(camera.view && camera.view.enabled); },
     setEnabled: (b) => controller.setViewShiftEnabled(b),
   };
