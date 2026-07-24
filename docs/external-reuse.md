@@ -11,7 +11,7 @@
 
 현재 `src/api/building.js`는 parcel·hanok·palace API도 함께 재노출하고 palette가 일부 환경 helper를 참조하므로,
 native ESM은 그 재노출 dependency도 해석한다. 이 예제의 “최소”는 byte-minimal module graph가 아니라 외부 소비자
-코드와 실행 scene의 최소 경계를 뜻한다. 시전과 계절 마당 생활상은 아래의 독립 façade를 사용하며, package export map 분리는 아직
+코드와 실행 scene의 최소 경계를 뜻한다. 시전, 계절 마당 생활상, 토담 표면은 아래의 독립 façade를 사용하며, package export map 분리는 아직
 이 문서의 범위가 아니다.
 
 ES module은 `file://`에서 열지 말고 저장소 루트를 정적 HTTP 서버로 제공한다. 먼저 루트 Playwright와 앱의
@@ -167,6 +167,49 @@ disposeYardLife(yardLife); // false
 가중치와 같은 target의 원래 easing 시간곡선을 이어받는다. 제품 팔레트와 shared detail LOD를 연결하고 여섯 source material까지 소유하는 내부
 어댑터는 `createVillageYardLife`라는 별도 이름을 쓰며 공개 borrowed-material renderer와 소유권을 섞지 않는다.
 
+## 토담 표면 계획과 geometry
+
+토담은 footprint와 담장 배치 없이도 표면만 재사용할 수 있다. worker나 서버는 Three 없는
+`src/api/mud-wall-plan.js`에서 다짐 lift, 얕은 이음, 짚 섬유, 하부 흔적을 불변 JSON으로 계획한다.
+`height`는 돌 굽을 포함한 담 몸체의 윗면이고 `footHeight`는 노출 흙 몸체의 아랫면이다.
+
+```js
+import { planMudWallSurface } from './cheoma/src/api/mud-wall-plan.js';
+
+const plan = planMudWallSurface({
+  length: 6.4,
+  height: 1.55,
+  footHeight: 0.34,
+  seed: 'courtyard-west-run',
+});
+```
+
+실제 Three geometry는 `src/api/mud-wall.js`가 만든다. 반환된 `body`는 vertex color multiplier를
+가지므로 호출자가 붙이는 몸체 material은 `vertexColors: true`여야 한다. `fibres`에는 color attribute가
+없고 호출자가 고른 짚 material의 색을 그대로 쓴다. 두 geometry는 모두 구조 담장의
+`±thickness / 2` 안쪽에만 놓여 planning footprint, picking, 일조권을 넓히지 않는다.
+
+```js
+import * as THREE from 'three';
+import {
+  buildMudWallSurfaceGeometry,
+  disposeMudWallSurfaceGeometry,
+} from './cheoma/src/api/mud-wall.js';
+
+const geometry = buildMudWallSurfaceGeometry(plan, 0.34);
+const body = new THREE.Mesh(geometry.body, earthMaterial);
+const fibres = geometry.fibres
+  ? new THREE.Mesh(geometry.fibres, strawMaterial)
+  : null;
+
+// mesh를 scene과 부모에서 먼저 분리한다. material은 호출자 소유다.
+disposeMudWallSurfaceGeometry(geometry);
+```
+
+`packed`, `fibres`, `damp` 옵션은 같은 카메라의 기여도 비교용 생성 옵션이다. 제품은 모두 켠 기본값만
+사용하며 프레임마다 분기하거나 geometry를 다시 만들지 않는다. 반환 geometry만 façade가 소유하고
+호출자가 주입한 material·texture·scene은 해제하지 않는다.
+
 ## Three는 한 인스턴스만 사용한다
 
 코어와 외부 scene이 서로 다른 Three를 쓰면 `instanceof`, prototype patch, addon geometry가 조용히
@@ -199,6 +242,8 @@ peer dependency로 두는 것이 이 계약과 맞다.
 | `buildSijeon()`에 주입한 다섯 material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | `buildYardLife()` handle의 병합 geometry·파생 전환 material | 마당 생활상 renderer | scene 분리 후 `disposeYardLife(handle)` |
 | `buildYardLife()`에 주입한 여섯 source material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
+| `buildMudWallSurfaceGeometry()`의 `body`·`fibres` geometry | 토담 표면 façade | mesh 분리 후 `disposeMudWallSurfaceGeometry(result)` |
+| 토담 body·fibre에 붙인 material·texture | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | 외부 scene, camera, renderer, light, ground | 외부 통합 | 각 통합의 teardown에서 별도 해제 |
 | 모듈 수명 공유 prop 자원 | cheoma 모듈 | 개별 건물 dispose 대상 아님 |
 

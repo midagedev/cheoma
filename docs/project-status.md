@@ -187,6 +187,13 @@ GitHub #11의 건축 고증 감사는 [`architectural-authenticity.md`](architec
 
 GitHub #30의 첫 표면 파일럿은 [`surface-materials.md`](surface-materials.md)의 순수 source/Three adapter 경계를 따른다. 다져진 흙길은 사진 타일이나 비동기 로더 대신 seed 결정론 RGBA8 albedo·height를 만들고, 회전된 16m 월드 UV로 교차로까지 연속된다. 기존 vertex color가 도로 등급과 경사면 mute를 계속 소유하며 draw call·삼각형·재질 수는 늘지 않는다. 사용자에게 보이는 출처는 `credits.md` 한 곳에서 실제 Reference UI로 전달하고, 고정 OFF/ON 화면을 직접 열어 반복 띠·중원경 shimmer를 확인한다.
 
+GitHub #135의 토담 표면은 [`mud-wall.md`](mud-wall.md)의 판담·판축·돌 하부·토벽 수분 근거와 한계를 따른다.
+Three 없는 불변 plan이 낮은 수의 다짐 lift, 수 mm 깊이의 불규칙 이음, 드문 짚 섬유, 생성 시점에 고정되는
+하부 흔적을 계획하고, Three adapter는 모든 정점을 기존 담장 envelope 안쪽에만 만든다. 제품은 기존 `mud`와
+`jipjul` 재질 및 정적 병합을 그대로 쓰므로 필지별 재질·texture·draw group을 늘리지 않는다. 한양 MID/FAR은
+원래 담장을 생략하므로 새 디테일도 FULL 근경에서만 자연스럽게 나타난다. `shoot:mud-wall`은 공개 API A/B 다섯
+기여도와 실제 `village:1:p3` 근경·부감 프레임을 한 browser boot에서 기록한다.
+
 GitHub #16은 [`exterior-detail.md`](exterior-detail.md)의 공통 창호 grammar와 선택 FULL **주거** 주출입문 상호작용이다. Three 없는 불변 plan이
 문·창 크기, 창 하부 머름, 문짝 lowerPanel, reveal, frame, threshold, primary entrance와 후속 pivot/footwear
 anchor를 소유하고, `giwa.js`·`walls.js`·대표 종가 `buildHanok`은 한 assembler로 이를 렌더링한다. 문은 머름을
