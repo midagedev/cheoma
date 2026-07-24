@@ -13,6 +13,7 @@ import {
 } from '../src/cinematic/architectural-reveal.js';
 import {
   createFocusVisibilityIndex,
+  sampleFocusSubjectSurface,
   selectSafeFocusEndpoint,
 } from '../src/camera/focus-visibility.js';
 import {
@@ -21,6 +22,7 @@ import {
 } from '../src/village/focus-blockers.js';
 import {
   terrainMeshCameraSafeScale,
+  terrainMeshFocusCutaway,
   terrainMeshSegmentClearance,
 } from '../src/village/terrain-grid.js';
 
@@ -232,6 +234,65 @@ assert.ok(terrainSafety.scale > 0 && terrainSafety.scale < 1,
   'terrain safety must retain the first connected ray interval');
 assert.ok(terrainSafety.minClearance >= 1 - 1e-8);
 assert.ok(terrainSafety.endpointClearance >= 1.2 - 1e-8);
+
+// #136: the product keeps the authored distant telephoto frame when the whole
+// terrain obstruction can be removed by one projection near plane before the
+// nearest sampled house face. The same camera-facing 3×3 surface used for object
+// visibility owns this pure cutaway, so a clear centre cannot hide a clipped
+// eave corner.
+const terrainSubjectSamples = sampleFocusSubjectSurface(terrainCamera, subjectBounds);
+const terrainCutaway = terrainMeshFocusCutaway(
+  terrainSite,
+  terrainCamera,
+  terrainTarget,
+  terrainSubjectSamples,
+  { maxRadius: 140 },
+);
+assert.equal(terrainSubjectSamples.length, 9);
+assert.ok(terrainCutaway.active && terrainCutaway.available,
+  'rendered ridge must resolve to an available focus near-plane cutaway');
+assert.ok(terrainCutaway.minClearance < 0 && terrainCutaway.blockedRays > 0,
+  'cutaway fixture must prove the authored telephoto rays cross terrain');
+assert.ok(terrainCutaway.near > terrainCutaway.requiredNear
+  && terrainCutaway.near <= terrainCutaway.subjectNear - 1.2,
+  'cutaway plane must clear the ridge while retaining the complete house interval');
+assert.deepEqual(
+  terrainMeshFocusCutaway(
+    terrainSite,
+    terrainCamera,
+    terrainTarget,
+    terrainSubjectSamples,
+    { maxRadius: 140 },
+  ),
+  terrainCutaway,
+  'focus terrain cutaway must be deterministic',
+);
+const highContextCamera = { x: 0, y: 80, z: 100 };
+const highContextCutaway = terrainMeshFocusCutaway(
+  { R: 150, terrainR: 150, heightAt: () => 0 },
+  highContextCamera,
+  terrainTarget,
+  sampleFocusSubjectSurface(highContextCamera, subjectBounds),
+  { maxRadius: 30 },
+);
+assert.ok(highContextCutaway.boundaryRays > 0
+  && !highContextCutaway.active
+  && highContextCutaway.available,
+  'leaving the exact outer-grid radius must not erase a clear high village-context frame');
+const contactBounds = {
+  min: { x: -4, y: -4, z: -2 },
+  max: { x: 4, y: 8, z: 2 },
+};
+const groundContactCutaway = terrainMeshFocusCutaway(
+  { R: 150, terrainR: 150, heightAt: () => 0 },
+  terrainCamera,
+  terrainTarget,
+  sampleFocusSubjectSurface(terrainCamera, contactBounds),
+);
+assert.ok(groundContactCutaway.contactRays > 0
+  && groundContactCutaway.blockedRays === 0
+  && !groundContactCutaway.active,
+  'a low house-face sample may leave its ground contact without inventing a foreground ridge');
 
 const constrainedFocus = selectSafeFocusEndpoint({
   subjectId: 'subject',
