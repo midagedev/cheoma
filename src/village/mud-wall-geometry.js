@@ -81,9 +81,23 @@ function liftAt(plan, y) {
   return null;
 }
 
-function jointWeight(joint, y) {
+function jointDrift(joint) {
+  return Math.abs(finite(joint.tilt)) * 0.5 + Math.abs(finite(joint.wave));
+}
+
+function jointWeight(joint, x, y, length) {
   const halfWidth = Math.max(EPSILON, finite(joint.width) * 0.5);
-  return Math.max(0, 1 - Math.abs(y - finite(joint.y)) / halfWidth);
+  const normalizedX = x / Math.max(EPSILON, length);
+  const center = finite(joint.y)
+    + finite(joint.tilt) * normalizedX
+    + finite(joint.wave) * Math.sin(
+      finite(joint.phase) + normalizedX * Math.PI * 2,
+    );
+  const shape = Math.max(0, 1 - Math.abs(y - center) / halfWidth);
+  const irregularStrength = 0.72 + 0.28 * (
+    0.5 + 0.5 * Math.sin(finite(joint.phase) * 1.73 + normalizedX * Math.PI * 6)
+  );
+  return shape * irregularStrength;
 }
 
 function dampAtX(damp, x) {
@@ -119,7 +133,7 @@ function faceSample(plan, side, x, y, thickness, options) {
     const lift = liftAt(plan, y);
     if (lift) shade *= clamp(finite(lift.colorK, 1), 0.45, 1.1);
     for (const joint of plan.joints || []) {
-      const weight = jointWeight(joint, y);
+      const weight = jointWeight(joint, x, y, plan.bounds.length);
       if (weight <= 0) continue;
       inset += finite(joint.depth) * weight;
       shade *= 1 - (1 - clamp(finite(joint.colorK, 1), 0.45, 1.1)) * weight;
@@ -168,9 +182,9 @@ function addSideFace(buffers, plan, side, thickness, options) {
     bodyTop,
     ...(options.packed ? (plan.lifts || []).flatMap((lift) => [lift.bottom, lift.top]) : []),
     ...(options.packed ? (plan.joints || []).flatMap((joint) => [
-      joint.y - joint.width * 0.5,
+      joint.y - joint.width * 0.5 - jointDrift(joint),
       joint.y,
-      joint.y + joint.width * 0.5,
+      joint.y + joint.width * 0.5 + jointDrift(joint),
     ]) : []),
     ...(damp?.points || []).map((point) => point.y),
   ], bodyBottom, bodyTop);

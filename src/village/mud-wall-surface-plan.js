@@ -8,13 +8,14 @@ export const MUD_WALL_SURFACE_SCHEMA_VERSION = 1;
 // multiplier. `depth` is always an inward-only envelope: a renderer must keep
 // every detail at or inside the structural wall faces at ±thickness / 2.
 export const MUD_WALL_SURFACE_LIMITS = deepFreeze({
-  targetLiftHeight: 0.36,
+  targetLiftHeight: 0.5,
   maxLifts: 6,
   maxJoints: 5,
   fibreDensityPerSquareMetre: 0.65,
   maxFibresPerFace: 18,
   maxDampPointsPerFace: 9,
   maxDetailDepth: 0.012,
+  maxJointDrift: 0.014,
 });
 
 const SIDES = Object.freeze([-1, 1]);
@@ -64,15 +65,18 @@ function planLifts(bodyBottom, bodyTop, rng) {
       id: `lift-${index + 1}`,
       bottom,
       top,
-      colorK: rng.range(0.955, 1.015),
+      colorK: rng.range(0.975, 1.015),
     });
     if (index < liftCount - 1) {
       joints.push({
         id: `joint-${index + 1}`,
         y: top,
-        width: rng.range(0.016, 0.026),
-        depth: rng.range(0.005, MUD_WALL_SURFACE_LIMITS.maxDetailDepth),
-        colorK: rng.range(0.82, 0.9),
+        width: rng.range(0.038, 0.064),
+        depth: rng.range(0.0015, 0.0038),
+        colorK: rng.range(0.93, 0.975),
+        tilt: rng.range(-0.012, 0.012),
+        wave: rng.range(0.003, 0.008),
+        phase: rng.range(0, Math.PI * 2),
       });
     }
     bottom = top;
@@ -270,8 +274,14 @@ export function validateMudWallSurfacePlan(plan) {
   for (const [index, joint] of plan.joints.entries()) {
     const y = finite(joint.y, `mud-wall joints[${index}].y`);
     const width = positiveFinite(joint.width, `mud-wall joints[${index}].width`);
+    const tilt = finite(joint.tilt, `mud-wall joints[${index}].tilt`);
+    const wave = finite(joint.wave, `mud-wall joints[${index}].wave`);
+    finite(joint.phase, `mud-wall joints[${index}].phase`);
+    const drift = Math.abs(tilt) * 0.5 + Math.abs(wave);
     if (Math.abs(y - plan.lifts[index].top) > EPSILON
-      || y - width * 0.5 < bodyBottom || y + width * 0.5 > bodyTop) {
+      || drift > MUD_WALL_SURFACE_LIMITS.maxJointDrift
+      || y - width * 0.5 - drift < bodyBottom
+      || y + width * 0.5 + drift > bodyTop) {
       throw new RangeError('mud-wall joint must remain on its adjacent lift boundary');
     }
     assertDepth(joint.depth, `mud-wall joints[${index}].depth`);
