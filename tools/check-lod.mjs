@@ -530,11 +530,13 @@ function makeRepresentationHandle(parcel, level) {
   const houses = makeHideSource([parcel.id]);
   const walls = makeHideSource([parcel.id]);
   const impostors = makeHideSource([parcel.id]);
+  const auxiliaries = makeHideSource([parcel.id]);
   impostors.locate.set(parcel.id, { lod });
   return {
     [parcel.kind]: { userData: houses },
     walls,
     impostors,
+    auxiliaries,
     lod,
   };
 }
@@ -546,7 +548,8 @@ function makeRepresentationHandle(parcel, level) {
   for (const level of [CHUNK_LOD_LEVEL.FAR, CHUNK_LOD_LEVEL.MID, CHUNK_LOD_LEVEL.FULL]) {
     const handle = makeRepresentationHandle(parcel, level);
     const state = parcelRepresentationState(handle, parcel, false);
-    invariant(state.valid && state.representations === 1,
+    invariant(state.valid && state.representations === 1
+      && state.auxiliaryPresent && state.auxiliaryVisible && !state.auxiliaryHidden,
       `parcel ownership: ${level} base is not exclusive`);
     assertLevel(state.level, level, `parcel ownership: ${level} level drift`);
     near(state.distance, 12.346, `parcel ownership: ${level} distance debug rounding`, 1e-6);
@@ -558,7 +561,8 @@ function makeRepresentationHandle(parcel, level) {
     const overlay = parcelRepresentationState(handle, parcel, true);
     invariant(overlay.valid && overlay.representations === 1 && overlay.overlay,
       `parcel ownership: ${level} overlay did not become sole owner`);
-    invariant(overlay.baseHidden && overlay.wallHidden && overlay.impostorHidden,
+    invariant(overlay.baseHidden && overlay.wallHidden && overlay.impostorHidden
+      && overlay.auxiliaryHidden && !overlay.auxiliaryVisible,
       `parcel ownership: ${level} hide did not cover all base sources`);
 
     invariant(setParcelBaseHidden(handle, parcel, false),

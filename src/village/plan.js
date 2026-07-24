@@ -32,6 +32,8 @@ import { normalizeVillageTuningOptions } from './options.js';
 import { planSijeon } from './sijeon-plan.js';
 import { planRoadsideDrainage } from './drainage-plan.js';
 import { planMjaHouse } from './mja-house-plan.js';
+import { planParcelAuxiliary } from './auxiliary-building-plan.js';
+import { yardHardObstacles } from './yard-layout.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -449,6 +451,28 @@ export function planVillage(opts = {}) {
       assignFittedVariation(p, char01, tuning);
     }
   });
+  // The variation roll retains the historical boolean probability, but a real
+  // outbuilding is accepted only after its roof footprint can live inside the
+  // final fitted parcel without blocking a gate, winter sun, the main house, or
+  // existing yard work. A salted parcel-local planner keeps this pass outside
+  // the shared village RNG window.
+  const auxiliaryPeers = [
+    ...parcels,
+    ...(features.palace?.center ? [features.palace] : []),
+  ];
+  for (const parcel of parcels) {
+    parcel.auxRequested = !!parcel.aux;
+    const auxiliary = planParcelAuxiliary(parcel, {
+      site,
+      peers: auxiliaryPeers,
+      hardObstacles: yardHardObstacles({
+        ...parcel,
+        auxiliary: null,
+      }),
+    });
+    parcel.auxiliary = auxiliary;
+    if (!auxiliary) parcel.aux = false;
+  }
 
   // ── 5) 정자 ──
   // 씨족촌의 동구 정자 / 읍치·도성의 중심 정자라는 의미는 유지하되, 고정 좌표를 찍어
@@ -613,6 +637,7 @@ export function planVillage(opts = {}) {
       houses: parcels.length,
       giwa: parcels.filter((p) => p.kind === 'giwa').length,
       choga: parcels.filter((p) => p.kind === 'choga').length,
+      auxiliaries: parcels.filter((p) => p.auxiliary).length,
       satellites: satellites.length,            // 위성 부락 필지 수(#120)
       bowlK,                                     // footprint 종속 분지 계수(#120)
       roads: roadsResult.roads.length,

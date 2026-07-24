@@ -6,6 +6,10 @@ import {
   parcelWorldPoint,
 } from './parcel-contract.js';
 import { parcelRoofPolygons } from './house-footprint.js';
+import {
+  auxiliarySolarObstruction,
+  auxiliaryWorldFootprint,
+} from './auxiliary-building-plan.js';
 
 // A conservative low winter-sun design angle. This is a layout invariant rather
 // than a real-time sun simulation: roofs that cannot shadow a 1.5m south window
@@ -44,8 +48,34 @@ export function circleBlocksSolarAccess(target, obstruction, site) {
 }
 
 export function parcelObstructionPolygons(parcel) {
-  if (parcel.kind === 'choga' || parcel.kind === 'giwa') return parcelRoofPolygons(parcel);
+  if (parcel.kind === 'choga' || parcel.kind === 'giwa') {
+    return [
+      ...parcelRoofPolygons(parcel),
+      ...(
+        parcel.auxiliary
+          ? [auxiliaryWorldFootprint(parcel, parcel.auxiliary)]
+          : []
+      ),
+    ].filter((polygon) => polygon.length >= 3);
+  }
   return parcel.poly?.length ? [parcel.poly] : [];
+}
+
+export function parcelObstructionRecords(parcel, site) {
+  const main = parcel.kind === 'choga' || parcel.kind === 'giwa'
+    ? parcelRoofPolygons(parcel).map((polygon) => ({
+        polygon,
+        roofTopY: parcelRoofTopY(parcel, site),
+        role: 'main-house',
+      }))
+    : (parcel.poly?.length ? [{
+        polygon: parcel.poly,
+        roofTopY: parcelRoofTopY(parcel, site),
+        role: 'compound',
+      }] : []);
+  const auxiliary = auxiliarySolarObstruction(parcel, parcel.auxiliary, site);
+  if (auxiliary) main.push({ ...auxiliary, role: 'auxiliary-building' });
+  return main;
 }
 
 export function parcelRoofTopY(parcel, site) {
@@ -63,13 +93,13 @@ export function parcelRoofTopY(parcel, site) {
   return baseY + Math.max(...spec.roofs.map((roof) => roof.ridgeY * sy));
 }
 
-export function parcelBuildingSolarAccessPolygon(target, blocker, site) {
+function parcelSolarAccessForRoofTop(target, roofTopY, site) {
   const corridor = target.solarAccess;
   if (!corridor) return parcelSolarAccessPolygon(target);
   const targetY = parcelGroundY(target, site) + BUILDING_SOLAR_TARGET_LIFT;
   const shadowLength = Math.max(
     0,
-    (parcelRoofTopY(blocker, site) - targetY) / Math.tan(BUILDING_SOLAR_ALTITUDE),
+    (roofTopY - targetY) / Math.tan(BUILDING_SOLAR_ALTITUDE),
   );
   const localEnd = Math.min(corridor.localEnd, corridor.localStart + shadowLength);
   return [
@@ -80,7 +110,15 @@ export function parcelBuildingSolarAccessPolygon(target, blocker, site) {
   ];
 }
 
+export function parcelBuildingSolarAccessPolygon(target, blocker, site) {
+  return parcelSolarAccessForRoofTop(target, parcelRoofTopY(blocker, site), site);
+}
+
 export function buildingBlocksSolarAccess(target, blocker, site) {
-  const corridor = parcelBuildingSolarAccessPolygon(target, blocker, site);
-  return parcelObstructionPolygons(blocker).some((roof) => G.polysOverlap(corridor, roof));
+  return parcelObstructionRecords(blocker, site).some((obstruction) => (
+    G.polysOverlap(
+      parcelSolarAccessForRoofTop(target, obstruction.roofTopY, site),
+      obstruction.polygon,
+    )
+  ));
 }

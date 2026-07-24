@@ -1,6 +1,7 @@
 import * as G from '../core/math/geom2.js';
 import { parcelRotY } from '../generators/shared/parcel-spatial.js';
 import { parcelEffectiveRoofBounds } from './house-footprint.js';
+import { parcelWorldPoint } from './parcel-contract.js';
 import { PAVILION_HEIGHT, PAVILION_ROOF_RADIUS } from './pavilion-plan.js';
 import { publicPropObstruction } from './public-props-plan.js';
 import { parcelGroundY, parcelRoofTopY } from './solar-access.js';
@@ -52,6 +53,25 @@ export function parcelFocusBlocker(parcel, site) {
     y: Math.max(0.05, (topY - baseY) * 0.5),
     z: Math.max(0.05, (roof.maxZ - roof.minZ) * 0.5),
   }, rotationY);
+}
+
+export function parcelAuxiliaryFocusBlocker(parcel, site) {
+  const spec = parcel?.auxiliary;
+  if (!spec || !Number.isFinite(spec.local?.x) || !Number.isFinite(spec.local?.z)
+    || !Number.isFinite(spec.local?.yaw) || !Number.isFinite(spec.body?.width)
+    || !Number.isFinite(spec.body?.depth) || !Number.isFinite(spec.roof?.overhang)
+    || !Number.isFinite(spec.roofTopY)) return null;
+  const baseY = parcelGroundY(parcel, site);
+  const center = parcelWorldPoint(parcel, spec.local);
+  return blocker(`auxiliary:${parcel.id}:${spec.id}`, {
+    x: center.x,
+    y: baseY + spec.roofTopY * 0.5,
+    z: center.z,
+  }, {
+    x: spec.body.width * 0.5 + spec.roof.overhang,
+    y: spec.roofTopY * 0.5,
+    z: spec.body.depth * 0.5 + spec.roof.overhang,
+  }, parcelRotY(parcel) + spec.local.yaw);
 }
 
 function circularFeatureBlocker(id, feature, radius, height, site) {
@@ -127,9 +147,11 @@ export function focusFeatureBlockers(plan, site) {
   return result;
 }
 
-export function focusVisibilityBlockers(plan, site) {
+export function focusPlanningBlockers(plan, site) {
   return [
-    ...(plan?.parcels || []).map((parcel) => parcelFocusBlocker(parcel, site)).filter(Boolean),
+    ...(plan?.parcels || [])
+      .map((parcel) => parcelAuxiliaryFocusBlocker(parcel, site))
+      .filter(Boolean),
     ...focusFeatureBlockers(plan, site),
   ];
 }

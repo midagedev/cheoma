@@ -23,6 +23,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'app/src/lib/standalone-param-spec.js',
   'app/src/engine/semantic-view-runtime.js',
   'src/api/environment-state.js',
+  'src/api/auxiliary-building.js',
+  'src/api/auxiliary-building-plan.js',
   'src/api/drainage.js',
   'src/api/drainage-plan.js',
   'src/api/mud-wall.js',
@@ -44,6 +46,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/layout/giwa-roof-envelope.js',
   'src/layout/giwa-through-passage.js',
   'src/village/sijeon-plan.js',
+  'src/village/auxiliary-building-geometry.js',
+  'src/village/auxiliary-building-plan.js',
   'src/village/drainage-plan.js',
   'src/village/drainage-geometry.js',
   'src/village/mud-wall-geometry.js',
@@ -56,6 +60,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/village/yard-life-record-contract.js',
   'src/village/options.js',
   'tools/check-scene-snapshot.mjs',
+  'tools/check-auxiliary-building-geometry.mjs',
+  'tools/check-auxiliary-building-plan.mjs',
   'tools/check-drainage-plan.mjs',
   'tools/check-surface-browser-suite.mjs',
   'tools/check-mud-wall-contract.mjs',
@@ -275,6 +281,13 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/village/') || path.startsWith('src/generators/')) {
+    if (path === 'src/village/auxiliary-building-plan.js'
+      || path === 'src/village/auxiliary-building-geometry.js') {
+      select(
+        'independent auxiliary placement, geometry, LOD, edit, and export ownership changed',
+        'parcel-rebuild-browser', 'lod-focus', 'lod-wave',
+      );
+    }
     if (path === 'src/village/mud-wall-surface-plan.js') {
       select('renderer-free bounded mud-wall surface planning changed');
       return { gates, reasons };
@@ -409,6 +422,14 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/auxiliary-building-plan.js'
+      || path === 'src/api/auxiliary-building.js') {
+      select(
+        'public auxiliary planning or borrowed-material renderer API changed',
+        'app', 'worker', 'parcel-rebuild-browser', 'lod-focus', 'lod-wave',
+      );
+      return { gates, reasons };
+    }
     if (path === 'src/api/mja-house-plan.js'
       || path === 'src/api/mja-house.js') {
       select(

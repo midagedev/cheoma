@@ -59,6 +59,22 @@ function sampleBody(spec, wantedInside) {
 const l = findPlanShape('l');
 const u = findPlanShape('u');
 u.parcel.center.x = 44;
+const auxiliaryHalfWidth = 1.5 + 0.28;
+const auxiliaryHalfDepth = 1 + 0.28;
+l.parcel.auxiliary = {
+  id: 'aux-0',
+  role: 'storehouse',
+  local: { x: 12, z: 0, yaw: 0 },
+  body: { width: 3, depth: 2, height: 1.8 },
+  roof: { form: 'gable', covering: 'tile', overhang: 0.28, rise: 0.6 },
+  roofTopY: 2.4,
+  footprint: [
+    { x: 12 - auxiliaryHalfWidth, z: -auxiliaryHalfDepth },
+    { x: 12 + auxiliaryHalfWidth, z: -auxiliaryHalfDepth },
+    { x: 12 + auxiliaryHalfWidth, z: auxiliaryHalfDepth },
+    { x: 12 - auxiliaryHalfWidth, z: auxiliaryHalfDepth },
+  ],
+};
 
 const pavilion = { x: 88, z: 0, sides: 6, radius: 4.5, rot: 0, baseY: 0 };
 const props = [{ name: 'well', x: 116, z: 0, scale: 1, baseY: 0 }];
@@ -125,6 +141,17 @@ const selectedRay = ray(selectedPoint.x, l.spec.body.y0 + 0.08, selectedPoint.z)
 invariant(occlusion.find(selectedRay, 1)?.parcelId === l.parcel.id, 'house baseline did not hit');
 invariant(occlusion.find(selectedRay, 1, { excludeParcelId: l.parcel.id }) === null,
   'selected parcel was not excluded');
+invariant(
+  occlusion.find(ray(12, 0.5, 0), 1, { excludeParcelId: l.parcel.id })?.kind
+    === 'auxiliary-building',
+  'selected parcel incorrectly excluded its independent auxiliary building',
+);
+invariant(
+  occlusion.find(ray(12 + auxiliaryHalfWidth + 0.2, 0.5, 0), 1, {
+    excludeParcelId: l.parcel.id,
+  }) === null,
+  'auxiliary door occluder exceeded its exact roof footprint',
+);
 
 // Owner exclusion applies only to the selected host building. Its independently
 // rendered wall remains a blocker, while the visible road gate aperture remains

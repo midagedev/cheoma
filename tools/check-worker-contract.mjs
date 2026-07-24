@@ -85,10 +85,14 @@ const expectedSceneHashes = {
   // column lines. Object, material, and triangle ownership stay unchanged; the
   // pure and production clearance gates verify the new geometry at every house
   // tier. Pick proxies and all planning bytes remain exact.
-  village: '30aae2ac:67300a8e:1657cd96:cccac33c',
-  town: 'ec250326:8ea1a230:39885fea:f985ee2a',
-  capital: 'ce9b1c00:03902e90:2e51d270:8e22fde0',
-  hanyang: '6282c5af:0f2092af:19c57588:df98f3eb',
+  // #146 replaces the old FULL-only wall decoration with one parcel-planned
+  // detached building whose exact roof footprint survives FAR/MID/FULL. Every
+  // accepted source is merged once by borrowed palette role, so the scene bytes
+  // deliberately change while sync, real Worker, and fallback remain identical.
+  village: '604a620f:9b8dc19b:aa2b8a37:be7623bd',
+  town: 'bfbe9f07:8824c127:40283f23:588fbec7',
+  capital: 'c0244f9b:5649191f:77ee058c:437c35c9',
+  hanyang: '9c1b0ef4:fe82e974:e2dc750a:96a003d4',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -105,10 +109,15 @@ const expectedProxyHashes = {
   // unchanged.
   // #144 intentionally changes the same ordinary-house fitted roof bounds read
   // by focus/edit proxies; stable IDs and proxy counts remain unchanged.
-  village: '06b2c416',
-  town: '3f3acf18',
-  capital: '4422852b',
-  hanyang: 'ae222d0e',
+  // #146 keeps the fitted main-house bounds and proxy count exact. The public
+  // editor descriptor reports only safely accepted auxiliary requests, and the
+  // same oriented auxiliary volumes now participate in the camera solver.
+  // The fixed Hanyang cohort has one affected safe framing; smaller cohorts keep
+  // their prior camera bytes because no auxiliary intersects their candidates.
+  village: 'ae3dd5ea',
+  town: '6a4ac3bd',
+  capital: '9788a2ef',
+  hanyang: 'dc26ddb8',
 };
 
 const server = await createServer({
@@ -403,6 +412,45 @@ try {
           signature,
         };
       };
+      const auxiliaryContract = (handle) => {
+        const planned = handle.plan.parcels.filter((parcel) => parcel.auxiliary);
+        const group = handle.group.getObjectByName('village-auxiliaries');
+        const sourceIds = group?.userData?.srcIds;
+        const source = JSON.stringify(planned.map((parcel) => [
+          parcel.id,
+          parcel.auxiliary,
+        ]));
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < source.length; index++) {
+          hash ^= source.charCodeAt(index);
+          hash = Math.imul(hash, 0x01000193);
+        }
+        const states = planned.map((parcel) => handle.lodState(parcel.id));
+        const empty = planned.length === 0
+          && handle.plan.stats?.auxiliaries === 0
+          && group == null;
+        const populated = planned.length > 0
+          && handle.plan.stats?.auxiliaries === planned.length
+          && group?.children.length > 0
+          && group.children.length <= 6
+          && sourceIds instanceof Set
+          && sourceIds.size === planned.length
+          && planned.every((parcel) => sourceIds.has(parcel.id))
+          && states.every((state) => state?.auxiliaryPresent
+            && state.auxiliaryVisible
+            && !state.auxiliaryHidden)
+          && group.children.every((mesh) => mesh.isMesh
+            && mesh.castShadow
+            && mesh.receiveShadow);
+        const pass = empty || populated;
+        return {
+          pass,
+          planned: planned.length,
+          meshes: group?.children.length ?? -1,
+          sourceIds: sourceIds?.size ?? -1,
+          signature: (hash >>> 0).toString(16).padStart(8, '0'),
+        };
+      };
       const crossKindYardLifeContract = (handle) => {
         const first = handle.group.userData.yardLifeRecords?.[0];
         if (!first) return { pass: true, skipped: true };
@@ -607,6 +655,13 @@ try {
         const vegetation = vegetationContract(sync);
         const syncYardLife = yardLifeContract(sync);
         const asyncYardLife = yardLifeContract(asyncHandle);
+        const syncAuxiliary = auxiliaryContract(sync);
+        const asyncAuxiliary = auxiliaryContract(asyncHandle);
+        const auxiliaryPass = syncAuxiliary.pass
+          && asyncAuxiliary.pass
+          && syncAuxiliary.planned === asyncAuxiliary.planned
+          && syncAuxiliary.meshes === asyncAuxiliary.meshes
+          && syncAuxiliary.signature === asyncAuxiliary.signature;
         const yardLifePass = syncYardLife.pass
           && asyncYardLife.pass
           && syncYardLife.recordCount === asyncYardLife.recordCount
@@ -653,6 +708,9 @@ try {
           inactive,
           vegetation,
           yardLifePass: yardLifePass && crossKindYardLife.pass,
+          auxiliaryPass,
+          syncAuxiliary,
+          asyncAuxiliary,
           syncYardLife,
           asyncYardLife,
           crossKindYardLife,
@@ -866,7 +924,8 @@ try {
       const proxyApiPass = item.syncProxyHash.singleContract && item.asyncProxyHash.singleContract;
       const landmarkLensPass = item.syncLandmarkLenses.pass && item.asyncLandmarkLenses.pass;
       const pass = item.equal && stepsEqual && baselineEqual && proxyApiPass && landmarkLensPass
-        && item.lifecyclePass && item.vegetation.pass && item.yardLifePass && item.defaultMjaOff;
+        && item.lifecyclePass && item.vegetation.pass && item.yardLifePass
+        && item.auxiliaryPass && item.defaultMjaOff;
       failed ||= !pass;
       console.log(`${item.scale.padEnd(9)} ${pass ? 'PASS' : 'FAIL'}  ${item.syncHash.hash}  proxy=${item.syncProxyHash.hash}`
         + `  objects=${item.syncHash.objects} triangles=${item.syncHash.triangles}`);
@@ -885,6 +944,9 @@ try {
       if (!item.vegetation.pass) console.log(`          vegetation ${JSON.stringify(item.vegetation)}`);
       if (!item.yardLifePass) {
         console.log(`          yard-life sync=${JSON.stringify(item.syncYardLife)} async=${JSON.stringify(item.asyncYardLife)} crossKind=${JSON.stringify(item.crossKindYardLife)}`);
+      }
+      if (!item.auxiliaryPass) {
+        console.log(`          auxiliary sync=${JSON.stringify(item.syncAuxiliary)} async=${JSON.stringify(item.asyncAuxiliary)}`);
       }
       if (!item.defaultMjaOff) console.log('          default village unexpectedly enabled an mja house');
     }

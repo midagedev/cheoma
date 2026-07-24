@@ -10,6 +10,7 @@ import {
   yardHardObstacles,
   yardTreeIntersectsHardObstacle,
 } from '../src/village/yard-layout.js';
+import { auxiliaryLocalFootprint } from '../src/village/auxiliary-building-plan.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const requireApp = createRequire(join(ROOT, 'app', 'package.json'));
@@ -146,13 +147,28 @@ invariant(hamletAnchors.length === 2, `hamlet:7:p0 retained ${hamletAnchors.leng
 
 const hanyang = fixtures.get('hanyang:7');
 const hanyangAnchorOwners = new Set(hanyang.flora.yardTreeAnchors.map((anchor) => anchor.parcelId));
-const hanyangParcel = hanyang.plan.parcels.find((parcel) => hanyangAnchorOwners.has(parcel.id)
-  && yardTreeIntersectsHardObstacle(
-    { x: 7.67, z: -7.41 },
-    { trunkRadius: 0.1, canopyRadius: 0.1 },
-    yardHardObstacles(parcel),
-  ));
+const hanyangParcel = hanyang.plan.parcels.find(
+  (parcel) => hanyangAnchorOwners.has(parcel.id) && parcel.auxiliary,
+);
 invariant(hanyangParcel, 'hanyang:7 lost the aux-building collision fixture');
+const hanyangAuxFootprint = auxiliaryLocalFootprint(hanyangParcel.auxiliary);
+const hanyangAuxCenter = hanyangAuxFootprint.reduce(
+  (center, point) => ({ x: center.x + point.x, z: center.z + point.z }),
+  { x: 0, z: 0 },
+);
+hanyangAuxCenter.x /= hanyangAuxFootprint.length;
+hanyangAuxCenter.z /= hanyangAuxFootprint.length;
+const hanyangAuxObstacle = yardHardObstacles(hanyangParcel)
+  .find((obstacle) => obstacle.kind === 'auxiliary-building');
+invariant(
+  JSON.stringify(hanyangAuxObstacle?.points) === JSON.stringify(hanyangAuxFootprint),
+  'hanyang:7 auxiliary hard obstacle drifted from its planned roof footprint',
+);
+invariant(yardTreeIntersectsHardObstacle(
+  hanyangAuxCenter,
+  { trunkRadius: 0.1, canopyRadius: 0.1 },
+  yardHardObstacles(hanyangParcel),
+), 'hanyang:7 planned auxiliary footprint is not reserved');
 const hanyangParcelId = hanyangParcel.id;
 const hanyangAnchors = snapshotParcel(hanyang, hanyangParcelId);
 invariant(hanyangAnchors.length >= 1,

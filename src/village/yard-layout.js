@@ -11,12 +11,11 @@ import {
   parcelHouseTranslation,
 } from './parcel-contract.js';
 import { VILLAGE_SOLID_WALL_THICKNESS } from './wall-contract.js';
+import { auxiliaryHardObstacle } from './auxiliary-building-plan.js';
 
 export const YARD_HARD_GAP = 0.12;
 export const YARD_LIFE_MAX_HEIGHT = 1.2;
 
-const AUX_ROOF_OVERHANG = 0.28;
-const AUX_MAX_YAW = 0.1;
 const JAR_OVERHANG = 0.12;
 const GARDEN_STONE_MARGIN = 0.08;
 const YARD_LIFE_WALL_GAP = 0.18;
@@ -42,18 +41,6 @@ function rectangle(kind, mode, x, z, halfWidth, halfDepth) {
 
 function circle(kind, mode, x, z, radius) {
   return { kind, mode, shape: 'circle', x, z, radius };
-}
-
-export function yardAuxLayout(plotW, plotD) {
-  const width = Math.min(plotW * 0.3, 3.2);
-  const depth = Math.min(plotD * 0.22, 2.6);
-  return {
-    width,
-    depth,
-    roofOverhang: AUX_ROOF_OVERHANG,
-    x: plotW / 2 - width / 2 - 0.4,
-    z: -plotD / 2 + depth / 2 + 0.6,
-  };
 }
 
 export function yardJangdokLayout(plotW, plotD, level) {
@@ -118,18 +105,6 @@ export function yardSeokjiPosition(parcel, side, hero = parcel.hero) {
     : { x: rock.x - side * 1.1, z: rock.z + 1.0 };
 }
 
-function auxObstacle(plotW, plotD) {
-  const layout = yardAuxLayout(plotW, plotD);
-  const rawHalfWidth = layout.width / 2 + layout.roofOverhang;
-  const rawHalfDepth = layout.depth / 2 + layout.roofOverhang;
-  const c = Math.cos(AUX_MAX_YAW), s = Math.sin(AUX_MAX_YAW);
-  return rectangle(
-    'aux', 'canopy', layout.x, layout.z,
-    rawHalfWidth * c + rawHalfDepth * s,
-    rawHalfWidth * s + rawHalfDepth * c,
-  );
-}
-
 function stackObstacle(plotW, plotD) {
   // The rendered stack radius is sampled in [0.7, 1.05]. This rectangle is the
   // exact XZ envelope of every possible circle and does not consume the wall RNG.
@@ -175,7 +150,8 @@ export function yardHardObstacles(parcel, gardenOptions) {
   const plotD = parcel.plotD;
   const out = [];
 
-  if (parcel.aux) out.push(auxObstacle(plotW, plotD));
+  const auxiliary = auxiliaryHardObstacle(parcel.auxiliary);
+  if (auxiliary) out.push(auxiliary);
 
   const jangdok = yardJangdokLayout(plotW, plotD, parcel.jangdok || 0);
   if (jangdok.rows > 0) {
@@ -210,6 +186,15 @@ export function yardCircleIntersectsHardObstacle(point, radius, obstacles, gap =
   const safeRadius = Math.max(0, Number.isFinite(radius) ? radius : 0);
   const safeGap = Math.max(0, Number.isFinite(gap) ? gap : 0);
   for (const obstacle of obstacles || []) {
+    if (obstacle.shape === 'polygon') {
+      const points = obstacle.points || [];
+      if (points.length >= 3 && (
+        G.pointInPoly(point, points)
+        || points.some((edge, index) =>
+          G.distToSeg(point, edge, points[(index + 1) % points.length]).d <= safeRadius + safeGap)
+      )) return true;
+      continue;
+    }
     if (obstacle.shape === 'circle') {
       if (Math.hypot(point.x - obstacle.x, point.z - obstacle.z)
         <= safeRadius + safeGap + obstacle.radius) return true;
@@ -303,12 +288,15 @@ function lifeRectIntersectsHardObstacle(point, footprint, obstacles) {
       ) <= obstacle.radius + YARD_HARD_GAP) return true;
       continue;
     }
-    const obstaclePolygon = [
-      { x: obstacle.x - obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
-      { x: obstacle.x + obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
-      { x: obstacle.x + obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
-      { x: obstacle.x - obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
-    ];
+    const obstaclePolygon = obstacle.shape === 'polygon'
+      ? obstacle.points
+      : [
+          { x: obstacle.x - obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
+          { x: obstacle.x + obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
+          { x: obstacle.x + obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
+          { x: obstacle.x - obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
+        ];
+    if (!obstaclePolygon?.length) continue;
     if (polygonDistance(polygon, obstaclePolygon) <= YARD_HARD_GAP) return true;
   }
   return false;

@@ -18,6 +18,7 @@ import { parcelHouseTranslation } from '../../village/parcel-contract.js';
 import { impostorHouseSpec } from '../../village/impostor-spec.js';
 import { palaceOuterPrecinctPlan } from '../../village/palace-precinct-plan.js';
 import { villageWallLayout } from '../../village/wall-contract.js';
+import { auxiliaryWorldFootprint } from '../../village/auxiliary-building-plan.js';
 import {
   SEMANTIC_RAY_EPS,
   semanticCylinder,
@@ -117,6 +118,38 @@ function localRect(center, width, depth, yaw = 0) {
     { x: center.x + halfW, z: center.z + halfD },
     { x: center.x - halfW, z: center.z + halfD },
   ].map((point) => rotateLocalPoint(point, center, yaw));
+}
+
+function auxiliaryBuildingRecord(parcel, site) {
+  const spec = parcel?.auxiliary;
+  if (!spec || !Number.isFinite(spec.body?.width) || !Number.isFinite(spec.body?.depth)
+    || !Number.isFinite(spec.body?.height) || !Number.isFinite(spec.roofTopY)) return null;
+  const baseY = Number.isFinite(parcel.baseY) ? parcel.baseY
+    : Number.isFinite(parcel.padY) ? parcel.padY
+      : (typeof site?.heightAt === 'function'
+          ? site.heightAt(parcel.center.x, parcel.center.z) : 0);
+  const body = localRect(
+    spec.local,
+    spec.body.width,
+    spec.body.depth,
+    spec.local.yaw,
+  ).map((point) => parcelPoint(parcel, point));
+  const roof = auxiliaryWorldFootprint(parcel, spec);
+  if (roof.length < 3) return null;
+  return {
+    id: `parcel:${parcel.id}:auxiliary:${spec.id}`,
+    kind: 'auxiliary-building',
+    parcelId: parcel.id,
+    ownerId: parcel.id,
+    // The selected parcel's main house is excluded so its own door surface can
+    // win, but a detached building in the same yard remains a real first-surface
+    // obstruction just like that parcel's wall.
+    excludeWithOwner: false,
+    solids: [
+      semanticPrism(body, baseY, baseY + spec.body.height),
+      semanticPrism(roof, baseY + spec.body.height, baseY + spec.roofTopY),
+    ],
+  };
 }
 
 function ownedRecord(id, kind, parcelId, solid) {
@@ -371,8 +404,9 @@ export function buildVillageDoorParcelRecords(parcel, site, char01) {
   if (!house) return [];
   return [
     house,
+    auxiliaryBuildingRecord(parcel, site),
     ...(parcel.hero ? heroCompoundRecords(parcel, site) : villageWallRecords(parcel, site, char01)),
-  ];
+  ].filter(Boolean);
 }
 
 function cityWallRecords(spec, site) {

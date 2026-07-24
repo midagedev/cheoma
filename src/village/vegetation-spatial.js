@@ -20,6 +20,10 @@ import {
   templeFootprint,
 } from './temple-plan.js';
 import { pavilionFootprint } from './pavilion-plan.js';
+import {
+  auxiliaryLocalFootprint,
+  auxiliaryWorldFootprint,
+} from './auxiliary-building-plan.js';
 
 // Forest, near scatter, and future yard/guardian planners share this worker-safe
 // footprint index. Obstacles are inserted into every grid cell touched by their
@@ -112,6 +116,8 @@ function roofWorldBounds(parcel, rect) {
 export function yardCanopyBlocked(parcel, localPoint, radius) {
   if (localCanopyBlocksSolarAccess(parcel, localPoint, radius)) return true;
   if (circleTouchesRect(localPoint, radius, parcelEffectiveRoofBounds(parcel), 0.35)) return true;
+  const auxiliary = auxiliaryLocalFootprint(parcel.auxiliary);
+  if (auxiliary.length && circleIntersectsPolygon(localPoint, radius, auxiliary)) return true;
   const focus = planParcelFocus(parcel);
   const camera = parcelLocalPoint(parcel, { x: focus.cameraX, z: focus.cameraZ });
   const target = parcelLocalPoint(parcel, { x: focus.worldX, z: focus.worldZ });
@@ -178,6 +184,14 @@ export function createVegetationSpatial(plan, site, { cellSize = DEFAULT_CELL_SI
     insert(expandedBounds(roofWorldBounds(parcel, roof), 0.35), (x, z, radius, point) =>
       circleTouchesRect(parcelLocalPoint(parcel, point), radius, roof, 0.35), true, true, true);
 
+    // The settlement-wide forest already clears the whole parcel. Yard and
+    // neighbouring-yard canopies need the exact independent roof footprint so
+    // a crown cannot pass through the physical all-LOD auxiliary layer.
+    const auxiliary = auxiliaryWorldFootprint(parcel, parcel.auxiliary);
+    if (auxiliary.length) {
+      insert(boundsOfPoints(auxiliary), (x, z, radius, point) =>
+        circleIntersectsPolygon(point, radius, auxiliary), true, true, true);
+    }
   }
 
   for (const road of (plan.roads || [])) {

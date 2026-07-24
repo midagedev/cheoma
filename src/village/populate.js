@@ -12,6 +12,7 @@ import {
   buildChunkImpostor,
   createImpostorMaterials,
   mergeStatic,
+  parcelMatrix,
 } from './instancing.js';
 import {
   partitionParcels,
@@ -48,6 +49,10 @@ import {
 import { scatterTrees } from '../generators/village/trees.js';
 import { buildRoads } from '../generators/village/roads.js';
 import { buildDrainage } from './drainage-geometry.js';
+import {
+  buildAuxiliaryBuilding,
+  disposeAuxiliaryBuilding,
+} from './auxiliary-building-geometry.js';
 import {
   attachChunkLodSwap,
   buildCourtyard,
@@ -209,6 +214,32 @@ export function* populateVillageSteps(plan, opts = {}) {
       };
       if (giwaPool) matSets.push(giwaPool.matset);
       if (chogaPool) matSets.push(chogaPool.matset);
+      // An independent outbuilding is one parcel-planned physical object, not a
+      // FULL-only wall decoration or three separate LOD copies. Bake every safe
+      // spec into one small material-partitioned root that remains stable while
+      // the owning house moves FAR ↔ MID ↔ FULL. Per-parcel source ranges keep
+      // focus/edit/export ownership as precise as houses and walls.
+      const auxiliarySources = [];
+      try {
+        for (const parcel of regular.filter((candidate) => candidate.auxiliary)) {
+          const source = buildAuxiliaryBuilding(parcel.auxiliary, wallMats);
+          auxiliarySources.push({ parcel, source });
+          source.applyMatrix4(parcelMatrix(parcel));
+        }
+        if (auxiliarySources.length) {
+          const auxiliaryMerged = mergeStatic(
+            auxiliarySources.map((entry) => entry.source),
+            'village-auxiliaries',
+            { ids: auxiliarySources.map((entry) => entry.parcel.id) },
+          );
+          root.add(auxiliaryMerged);
+          houseHandle.auxiliaries = combineSourceHideHandles([auxiliaryMerged]);
+        } else {
+          houseHandle.auxiliaries = null;
+        }
+      } finally {
+        for (const entry of auxiliarySources) disposeAuxiliaryBuilding(entry.source);
+      }
       // 대규모 주택 3단계 LOD: 한양의 모든 정규 청크를 FAR mass / 실제 외피 MID / FULL로 만든다.
       //   중앙 청크를 항상 FULL로 남기면 부감에서도 수백 draw와 수백만 tri를 제출해, 외곽만 줄인
       //   성능 이득을 대부분 잃는다. 카메라-소유 필지 3D 거리가 현재 단계를 정하므로 중앙/외곽이

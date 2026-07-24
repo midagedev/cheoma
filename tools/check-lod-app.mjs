@@ -212,8 +212,13 @@ try {
     // A→B can prove that both retiring and arriving overlays reuse stable flock objects.
     const ownerStates = ownerParcelIds
       .map((id) => lod.parcels.find((state) => state.parcelId === id)).filter(Boolean);
-    const first = ownerStates.find((state) => state.level === 'far')
+    const first = ownerStates.find((state) => state.level === 'far' && state.auxiliaryPresent)
+      || ownerStates.find((state) => state.auxiliaryPresent)
+      || ownerStates.find((state) => state.level === 'far')
       || ownerStates[0] || far[0] || lod.parcels.find((state) => state.far) || lod.parcels[0];
+    const auxiliaryFixture = lod.parcels.find((state) =>
+      state.level === 'far' && state.auxiliaryPresent)
+      || lod.parcels.find((state) => state.auxiliaryPresent);
     const second = ownerStates.find((state) => state.parcelId !== first?.parcelId
       && state.chunkId !== first?.chunkId)
       || ownerStates.find((state) => state.parcelId !== first?.parcelId)
@@ -233,6 +238,9 @@ try {
       entry.count++;
       entry.uuids.push(handle.group?.uuid || null);
     }
+    const auxiliaryRoot = root?.getObjectByName?.('village-auxiliaries') || null;
+    const auxiliaryParcels = (root?.userData?.plan?.parcels || [])
+      .filter((parcel) => parcel.auxiliary);
     return {
       plan: engine.village.debugPlan(),
       heroes: engine.village.debugParcels()
@@ -263,6 +271,18 @@ try {
       crittersVisible: critters?.visible === true,
       groundMeshes,
       chunkLens,
+      auxiliary: {
+        planned: auxiliaryParcels.length,
+        sourceIds: auxiliaryRoot?.userData?.srcIds?.size || 0,
+        rootUuid: auxiliaryRoot?.uuid || null,
+        visible: auxiliaryRoot?.visible === true,
+        meshes: auxiliaryRoot?.children?.filter((child) => child.isMesh).length || 0,
+        materials: new Set(
+          auxiliaryRoot?.children?.filter((child) => child.isMesh)
+            .map((child) => child.material?.uuid).filter(Boolean) || [],
+        ).size,
+        fixture: auxiliaryFixture?.parcelId || null,
+      },
     };
   }, runFocusScenario);
 
@@ -272,6 +292,14 @@ try {
     `LOD snapshot covers every regular parcel (${boot.lodCount}/${boot.regularCount})`);
   pass(boot.lodValid && boot.lodFailures.length === 0,
     `aerial parcel representations are exclusive (${boot.lodFailures.join(', ') || 'no failures'})`);
+  pass(boot.auxiliary.planned > 0
+      && boot.auxiliary.sourceIds === boot.auxiliary.planned
+      && boot.auxiliary.visible && !!boot.auxiliary.rootUuid
+      && boot.auxiliary.meshes > 0 && boot.auxiliary.meshes <= 6
+      && boot.auxiliary.materials === boot.auxiliary.meshes
+      && !!boot.auxiliary.fixture,
+  `one persistent material-batched auxiliary root covers every planned owner `
+    + `(${JSON.stringify(boot.auxiliary)})`);
   const requiredCandidates = runFocusScenario
     ? [boot.candidates.first, boot.candidates.second]
     : [boot.candidates.first];
@@ -859,6 +887,32 @@ try {
   }
 
   if (runFocusScenario) {
+  const auxiliaryFixture = boot.auxiliary.fixture;
+  const auxiliaryIn = await traceTransition('focus', auxiliaryFixture, {
+    immediateIds: [auxiliaryFixture],
+    finalIds: [auxiliaryFixture],
+    finalSelected: auxiliaryFixture,
+  });
+  pass(auxiliaryIn.finished && auxiliaryIn.failures.length === 0
+      && auxiliaryIn.immediateState.selected === auxiliaryFixture
+      && auxiliaryIn.immediateState.transitioning
+      && auxiliaryIn.immediateById[auxiliaryFixture]?.overlay
+      && auxiliaryIn.immediateById[auxiliaryFixture]?.baseHidden
+      && auxiliaryIn.immediateById[auxiliaryFixture]?.auxiliaryPresent
+      && auxiliaryIn.immediateById[auxiliaryFixture]?.auxiliaryHidden
+      && !auxiliaryIn.immediateById[auxiliaryFixture]?.auxiliaryVisible
+      && auxiliaryIn.finalById[auxiliaryFixture]?.valid,
+  `focus synchronously transfers ${auxiliaryFixture}'s planned auxiliary to one overlay`);
+  const auxiliaryOut = await traceTransition('return', null, {
+    immediateIds: [auxiliaryFixture],
+    finalIds: [auxiliaryFixture],
+    finalSelected: null,
+  });
+  pass(auxiliaryOut.finished && auxiliaryOut.failures.length === 0
+      && !auxiliaryOut.finalById[auxiliaryFixture]?.overlay
+      && auxiliaryOut.finalById[auxiliaryFixture]?.auxiliaryVisible,
+  `focus-out restores ${auxiliaryFixture}'s persistent auxiliary source`);
+
   if (boot.heroes.length >= 2) {
     const [heroA, heroB] = boot.heroes;
     const heroIn = await traceTransition('focus', heroA, {

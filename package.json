@@ -21,6 +21,7 @@
     "check:residential-edit-url": "node tools/check-residential-edit-url.mjs",
     "check:residential-edit-url:browser": "node tools/run-browser-locked.mjs -- node tools/check-residential-edit-url-browser.mjs",
     "check:atmosphere": "node tools/check-atmosphere-contract.mjs",
+    "check:auxiliary-building": "node tools/check-auxiliary-building-plan.mjs && node tools/check-auxiliary-building-geometry.mjs",
     "check:environment": "node tools/check-environment-state.mjs",
     "check:house-diversity": "node tools/check-house-diversity.mjs",
     "check:mja-house": "node tools/check-mja-house-plan.mjs && node tools/check-mja-house-integration.mjs",

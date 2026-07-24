@@ -59,10 +59,11 @@ try {
 
   const prepared = await page.evaluate(async () => {
     const engine = window.__engine;
-    const parcelId = 'p13';
-    if (!engine.village.debugParcels().some((parcel) => parcel.parcelId === parcelId)) {
-      throw new Error(`missing deterministic ${parcelId} LOD fixture`);
-    }
+    const root = engine.village.exportRoot();
+    const parcelId = root.userData.plan.parcels.find((parcel) => (
+      parcel.auxiliary && engine.village.debugLod(parcel.id)?.far
+    ))?.id;
+    if (!parcelId) throw new Error('missing deterministic all-LOD auxiliary fixture');
     const finishTransition = async (label) => {
       for (let index = 0; index < 80; index++) {
         const sample = engine.debugDofSeek(1, { finish: true });
@@ -86,6 +87,8 @@ try {
     engine.debugRenderDofFrame();
     const edgeMist = engine.village.exportRoot().getObjectByName('edge-mist-ring');
     if (!edgeMist) throw new Error('edge mist ring is unavailable');
+    const auxiliary = root.getObjectByName('village-auxiliaries');
+    if (!auxiliary) throw new Error('persistent auxiliary root is unavailable');
     window.__lodShotProgramKeys = new Set(
       (engine.renderer.info.programs || []).map((program) => program.cacheKey),
     );
@@ -95,6 +98,11 @@ try {
         geometry: edgeMist.geometry.uuid,
         material: edgeMist.material.uuid,
         map: edgeMist.material.map?.uuid,
+      },
+      auxiliary: {
+        root: auxiliary.uuid,
+        geometries: auxiliary.children.map((child) => child.geometry?.uuid || null),
+        materials: auxiliary.children.map((child) => child.material?.uuid || null),
       },
     };
   });
@@ -161,6 +169,7 @@ try {
       engine.debugRenderDofFrame();
       const actual = engine.village.debugLod(prepared.parcelId);
       const edgeMist = root.getObjectByName('edge-mist-ring');
+      const auxiliary = root.getObjectByName('village-auxiliaries');
       const programKeys = (engine.renderer.info.programs || []).map((program) => program.cacheKey);
       const addedPrograms = programKeys.filter((key) => !window.__lodShotProgramKeys.has(key));
       window.__lodShotProgramKeys = new Set(programKeys);
@@ -173,6 +182,16 @@ try {
           identityStable: edgeMist.geometry.uuid === prepared.edgeMist.geometry
             && edgeMist.material.uuid === prepared.edgeMist.material
             && edgeMist.material.map?.uuid === prepared.edgeMist.map,
+        } : null,
+        auxiliary: auxiliary ? {
+          visible: auxiliary.visible,
+          ownerVisible: actual?.auxiliaryVisible,
+          ownerHidden: actual?.auxiliaryHidden,
+          identityStable: auxiliary.uuid === prepared.auxiliary.root
+            && auxiliary.children.every((child, index) => (
+              child.geometry?.uuid === prepared.auxiliary.geometries[index]
+              && child.material?.uuid === prepared.auxiliary.materials[index]
+            )),
         } : null,
         calls: engine.village.debugDrawCalls(),
         triangles: engine.renderer.info.render.triangles,
@@ -203,9 +222,23 @@ try {
   const edgeMistView = await page.evaluate((prepared) => {
     const engine = window.__engine;
     const ring = engine.village.exportRoot().getObjectByName('edge-mist-ring');
-    const programsBefore = engine.renderer.info.programs?.length || 0;
     const dx = engine.__controls.target.x - engine.camera.position.x;
     const dz = engine.__controls.target.z - engine.camera.position.z;
+    // The dynamically selected all-LOD auxiliary fixture may never look close
+    // enough to the horizon to submit the mist material during the six house
+    // captures. Compile that dormant existing program once, then measure repeat
+    // activation rather than treating first use as runtime churn.
+    engine.camera.lookAt(
+      engine.camera.position.x + dx,
+      engine.camera.position.y,
+      engine.camera.position.z + dz,
+    );
+    engine.camera.updateMatrixWorld(true);
+    engine.debugRenderDofFrame();
+    engine.camera.lookAt(engine.__controls.target);
+    engine.camera.updateMatrixWorld(true);
+    engine.debugRenderDofFrame();
+    const programsBefore = engine.renderer.info.programs?.length || 0;
     engine.camera.lookAt(
       engine.camera.position.x + dx,
       engine.camera.position.y,
@@ -226,7 +259,7 @@ try {
       programDelta: (engine.renderer.info.programs?.length || 0) - programsBefore,
     };
   }, prepared);
-  const passParity = await page.evaluate(() => {
+  const passParity = await page.evaluate((parcelId) => {
     const engine = window.__engine;
     const channelSymbol = Symbol.for('cheoma.lodScreenDoorChannel');
     const renderables = [];
@@ -251,7 +284,7 @@ try {
     engine.debugRenderDofFrame();
     const dof = engine.debugDof();
     const dofRestored = restored();
-    const lodStableBefore = engine.village.debugLod('p13');
+    const lodStableBefore = engine.village.debugLod(parcelId);
     const resourcesBefore = engine.debugPostResources();
     const fov = engine.camera.fov;
     engine.camera.fov = fov + 0.5;
@@ -262,11 +295,11 @@ try {
     engine.debugAdvancePostQuality(1 / 60);
     engine.debugRenderDofFrame();
     const movingDof = engine.debugDof();
-    const lodMoving = engine.village.debugLod('p13');
+    const lodMoving = engine.village.debugLod(parcelId);
     for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
     engine.debugRenderDofFrame();
     const stableDof = engine.debugDof();
-    const lodStableAfter = engine.village.debugLod('p13');
+    const lodStableAfter = engine.village.debugLod(parcelId);
     const resourcesAfter = engine.debugPostResources();
     const adaptiveResourceKeys = [
       'depthTarget', 'depthTexture', 'bokehMaterial', 'instFadeDepthMaterial',
@@ -306,10 +339,42 @@ try {
       inkRestored,
       adaptiveQuality,
     };
-  });
+  }, prepared.parcelId);
+  const focusCapture = await page.evaluate(async (parcelId) => {
+    const engine = window.__engine;
+    engine.village.focus(parcelId);
+    for (let index = 0; index < 80; index++) {
+      const sample = engine.debugDofSeek(1, { finish: true });
+      if (sample) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const state = engine.village.getState();
+    const lod = engine.village.debugLod(parcelId);
+    const root = engine.village.focusRoot();
+    let auxiliaryMeshes = 0;
+    root?.traverseVisible?.((object) => {
+      if (object.isMesh && /^auxiliary-building-/.test(object.name || '')) {
+        auxiliaryMeshes++;
+      }
+    });
+    return {
+      selected: state.selected,
+      transitioning: state.transitioning,
+      baseAuxiliaryHidden: lod?.auxiliaryHidden,
+      baseAuxiliaryVisible: lod?.auxiliaryVisible,
+      overlay: lod?.overlay,
+      auxiliaryMeshes,
+      camera: {
+        position: engine.camera.position.toArray(),
+        target: engine.__controls.target.toArray(),
+        fov: engine.camera.fov,
+      },
+    };
+  }, prepared.parcelId);
+  await page.screenshot({ path: join(outputDir, 'focus-auxiliary.png') });
   const report = {
     fixture: prepared.parcelId, viewport: '1440x900', captures, edgeMistView,
-    passParity, errors, outputDir,
+    passParity, focusCapture, errors, outputDir,
   };
   await writeFile(join(outputDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`LOD TRANSITION SHOTS: ${JSON.stringify(report, null, 2)}`);
@@ -342,6 +407,10 @@ try {
   if (errors.length || captures.some((capture) => (
     !capture.actual?.valid || capture.addedPrograms.length > 0
       || !capture.edgeMist?.identityStable
+      || !capture.auxiliary?.identityStable
+      || !capture.auxiliary?.visible
+      || !capture.auxiliary?.ownerVisible
+      || capture.auxiliary?.ownerHidden
       || Math.abs(capture.edgeMist.opacity) > 1e-6
       || Math.abs(capture.edgeMist.viewWeight) > 1e-6
   )) || !captureStateValid || !transitionBudgetsValid || passParity.visibleLodMeshes <= 0
@@ -356,7 +425,10 @@ try {
     || adaptive.stableDof.postQuality !== 1 || adaptive.stableDof.activeBokehTaps !== 13
     || adaptive.movingDof.lodScreenDoorDepth !== adaptive.stableDof.lodScreenDoorDepth
     || !adaptive.resourcesStable || !adaptiveLodParity
-    || !passParity.dofRestored || !passParity.inkRestored) process.exitCode = 1;
+    || !passParity.dofRestored || !passParity.inkRestored
+    || focusCapture.selected !== prepared.parcelId || focusCapture.transitioning
+    || !focusCapture.overlay || !focusCapture.baseAuxiliaryHidden
+    || focusCapture.baseAuxiliaryVisible || focusCapture.auxiliaryMeshes !== 3) process.exitCode = 1;
 } finally {
   await browser?.close();
   await server.close();
