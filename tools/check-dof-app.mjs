@@ -204,15 +204,19 @@ try {
       ) {
         visibleSentinels.push(object);
       }
-      if (
-        object.visible &&
-        object.isMesh &&
-        object.geometry?.getAttribute?.("instFade")
-      ) {
-        materialSentinels.push([object, object.material]);
-      }
     });
     engine.scene.traverseVisible((object) => {
+      if (
+        object.isMesh &&
+        object.geometry?.getAttribute?.("instFade") &&
+        !object.userData?.dofDepthMaterial
+      ) {
+        // StableBokeh uses the generic instFade depth material only for
+        // effectively visible meshes without a more specific source-depth
+        // contract. Hidden seasonal batches and explicit physical depth owners
+        // belong to disjoint checks below.
+        materialSentinels.push([object, object.material]);
+      }
       if (!object.userData?.dofDepthMaterial) return;
       sourceDepthSentinels.push([
         object,
