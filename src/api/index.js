@@ -27,6 +27,12 @@ export {
   yardLifeHouseholdEligible,
   yardLifeRecordsToHardObstacles,
 } from './yard-life.js';
+export {
+  MUD_WALL_SURFACE_LIMITS,
+  MUD_WALL_SURFACE_SCHEMA_VERSION,
+  planMudWallSurface,
+  validateMudWallSurfacePlan,
+} from './mud-wall-plan.js';
 export * from './environment.js';
 export * from './post-quality.js';
 export * from './particles.js';

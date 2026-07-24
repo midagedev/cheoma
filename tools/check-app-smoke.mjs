@@ -943,6 +943,29 @@ try {
       ))
       && yardLifeEvidence.license.includes('All rights reserved'),
   'yard-life evidence, sparse scope, rejected anachronisms, product limits, and safe links render in Product References');
+  const mudWallEvidence = reference.items.find((item) => (
+    item.title.includes('판담·판축과 돌 하부 / Formed earth walls and stone bases')
+  ));
+  const mudWallMoisture = reference.items.find((item) => (
+    item.title.includes('토벽의 물·습기 거동 / Moisture behaviour of earthen walls')
+  ));
+  pass(mudWallEvidence?.text.includes('기존 mud 담장의 footprint·낮은 돌 굽·coping을 보존')
+      && mudWallEvidence.text.includes('실측 복원이나 전국 표준이 아닌 seed-stable 제품 해석')
+      && mudWallEvidence.text.includes('규칙적 벽돌 줄눈, 깊은 장식 홈')
+      && mudWallEvidence.links.some((url) => url.includes('encykorea.aks.ac.kr/Article/E0013772'))
+      && mudWallEvidence.links.some((url) => url.includes('idx=8681'))
+      && mudWallEvidence.links.some((url) => url.includes('ctptNo=4413802600000'))
+      && mudWallMoisture?.text.includes('희미하고 고정된 하부 darkening')
+      && mudWallMoisture.text.includes('실시간 우천 tween은 이번 범위가 아니다')
+      && mudWallMoisture.links.some((url) => url.includes('terra_literature_review.html'))
+      && [...mudWallEvidence.anchors, ...mudWallMoisture.anchors].every((anchor) => (
+        anchor.target === '_blank'
+          && anchor.rel.split(/\s+/).includes('noopener')
+          && anchor.rel.split(/\s+/).includes('noreferrer')
+      ))
+      && mudWallEvidence.license.includes('공공누리 제4유형')
+      && mudWallMoisture.license.includes('J. Paul Getty Trust'),
+  'mud-wall evidence, conservative scope, static moisture limit, canonical links, and safe attributes render in Product References');
 
   await closeReference.click();
   await referenceDialog.waitFor({ state: 'detached', timeout });

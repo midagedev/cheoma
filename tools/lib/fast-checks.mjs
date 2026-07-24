@@ -30,6 +30,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-surface-materials.mjs',
   './check-layout-contract.mjs',
   './check-wall-gate-contract.mjs',
+  './check-mud-wall-contract.mjs',
   './check-wall-step-contract.mjs',
   './check-wave-contract.mjs',
   './check-yard-layout-contract.mjs',
