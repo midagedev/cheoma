@@ -865,6 +865,7 @@ try {
     links: [...dialog.querySelectorAll('a')].map((anchor) => anchor.href),
     items: [...dialog.querySelectorAll('li')].map((item) => ({
       title: item.querySelector('.it-title')?.textContent?.trim() || '',
+      topic: item.dataset.referenceTopic || '',
       text: item.textContent.replace(/\s+/g, ' ').trim(),
       links: [...item.querySelectorAll('a')].map((anchor) => anchor.href),
       anchors: [...item.querySelectorAll('a')].map((anchor) => ({
@@ -966,6 +967,21 @@ try {
       && mudWallEvidence.license.includes('공공누리 제4유형')
       && mudWallMoisture.license.includes('J. Paul Getty Trust'),
   'mud-wall evidence, conservative scope, static moisture limit, canonical links, and safe attributes render in Product References');
+  const drainageEvidence = reference.items.find((item) => item.topic === 'drainage');
+  pass(drainageEvidence?.title.includes('조선 길가 배수와 제한적 마을 수로')
+      && drainageEvidence.text.includes('Hanyang 계획가로에는 최대 양측')
+      && drainageEvidence.text.includes('일반 hamlet/village/town은 none')
+      && drainageEvidence.text.includes('stone-slab')
+      && drainageEvidence.text.includes('실시간 빗물 수위·유량·침수 시뮬레이션은 이번 범위에 넣지 않는다')
+      && drainageEvidence.links.some((url) => url.includes('nh_024_0060_0010_0010'))
+      && drainageEvidence.links.some((url) => url.includes('annex_insadosi_02.jsp'))
+      && drainageEvidence.links.some((url) => url.includes('Heritage_99_08.jsp'))
+      && drainageEvidence.anchors.every((anchor) => (
+        anchor.target === '_blank'
+          && anchor.rel.split(/\s+/).includes('noopener')
+          && anchor.rel.split(/\s+/).includes('noreferrer')
+      )),
+  'drainage evidence, bounded city scope, product crossing limits, canonical links, and safe attributes render in Product References');
 
   await closeReference.click();
   await referenceDialog.waitFor({ state: 'detached', timeout });

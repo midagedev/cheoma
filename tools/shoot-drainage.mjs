@@ -199,7 +199,7 @@ drainage.traverse((object) => {
   }
 });
 const expectedTriangles = drainagePlan.runs.reduce(
-  (sum, run) => sum + Math.max(0, run.points.length - 1) * 6,
+  (sum, run) => sum + Math.max(0, run.points.length - 1) * 10,
   0,
 ) + drainagePlan.crossings.length * 36;
 const ownedTriangles = meshes.reduce(

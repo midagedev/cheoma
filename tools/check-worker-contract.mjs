@@ -69,11 +69,16 @@ const expectedSceneHashes = {
   // wall footprints, parcel transforms, gates, LOD ownership, and every pick
   // proxy remain exact. The geometry bytes and triangle totals therefore change
   // at every scale without changing planning or selection state.
+  // #139 adds no scene object to village/town, and adds one bounded physical
+  // drainage group only to eligible capital/Hanyang roads. The pure plan owns
+  // exact terrain heights and gate crossings; sync, Worker, and fallback consume
+  // identical records. Pick proxies and every pre-existing scene subtree remain
+  // byte-identical.
   // Sync, real module Worker, and ?worker=0 fallback must still match exactly.
   village: 'f055589b:b3ba612d:f3fc2485:5e12236f',
   town: '1627c8f7:5c44f9ab:361bee35:8bb497c5',
-  capital: '93b484a4:70fe6266:318a61b8:2ee966ca',
-  hanyang: 'acfdf9da:1cc5c5da:aabade04:6c3b5b64',
+  capital: '232f4759:1824de75:86ea5a91:ec8b97d9',
+  hanyang: '6d950dec:c1b52a2a:b8bbdaf1:e13579a2',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

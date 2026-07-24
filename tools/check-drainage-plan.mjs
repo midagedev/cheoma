@@ -94,6 +94,8 @@ function assertPlanContract(village, drainage) {
 
     for (const point of run.points) {
       const terrainY = terrainMeshHeightAt(village.site, point.x, point.z);
+      invariant(Math.abs(point.surfaceY - terrainY) <= 1e-8,
+        `${run.id} lost its exact terrain surface datum`);
       const lift = point.y - terrainY;
       invariant(lift + 1e-8 >= DRAINAGE_PLAN_LIMITS.bedClearance,
         `${run.id} hides its bed below terrain`);
@@ -158,6 +160,8 @@ for (const scale of ['hamlet', 'village', 'town', 'capital', 'hanyang']) {
   const first = build(village);
   const second = build(village);
   invariant(JSON.stringify(first) === JSON.stringify(second), `${scale} drainage is not deterministic`);
+  invariant(JSON.stringify(village.drainage) === JSON.stringify(first),
+    `${scale} integrated village drainage drifted from the public pure planner`);
   assertPlanContract(village, first);
   runCount += first.runs.length;
   crossingCount += first.crossings.length;
