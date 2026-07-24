@@ -1,6 +1,6 @@
 # 길가 배수로와 대문 건넘
 
-> - **상태**: 구현 전 계약 + 리서치
+> - **상태**: 현재 계약 + 리서치
 > - **조사일**: 2026-07-24
 > - **범위**: 조선 한양의 법정 도로 도랑, 발굴된 도심 배수로, 전통마을의 제한적 물길을 근거로 한
 >   정적 길가 배수 계획. 실시간 강우 수리·침수 시뮬레이션은 포함하지 않는다.
@@ -103,7 +103,12 @@ fail-closed한다.
 
 - 상부 폭은 도로 폭의 작은 비율로 계산하되, 한양의 약 0.62m를 모든 선택 구간의 고정값으로 쓰지 않는다.
 - 깊이는 사람이 빠지는 절벽이나 성곽 해자가 아니라 맨흙·잔돌로 마감된 낮은 V/U형 측구로 제한한다.
-- 중심선 높이는 실제 삼각분할 지형을 읽고 하류 방향으로 역구배가 생기지 않게 단조화한다.
+- 중심선 높이는 실제 삼각분할 지형을 읽고 하류 방향으로 역구배가 생기지 않게 단조화한다. v1은
+  공용 지형 격자를 도랑마다 다시 세분하거나 boolean 절삭하지 않는다. 대신 보이는 바닥을 실제 지형보다
+  12mm 위에 두고, 최대 2.5cm의 상류 보정 안에서만 단조 경사를 만들며, 그 위에 4cm 이하의
+  낮은 U자 입술을 세운다. 단면 바깥 rail은 같은 얕은 bed plane으로 되붙이고 1m마다 실제
+  삼각 지형을 다시 읽어 긴 chord가 지표 아래로 파고들지 않게 한다.
+  이 범위로 성립하지 않는 구간은 도랑을 띄우거나 지형 아래 숨기지 않고 생략한다.
 - 장거리 직선 홈 대신 도로 polyline의 완만한 곡률을 따르며 junction에서 서로 겹치거나 막힌
   쐐기를 만들지 않는다.
 
@@ -124,10 +129,14 @@ fail-closed한다.
 
 ## 4. 렌더·성능·모드 경계
 
-- 도랑은 실제 지형에 파인 낮은 물리 geometry와 깊이를 사용한다. 노면 위에 검은 선 texture를
-  얹거나 `polygonOffset`으로 교차를 숨기지 않는다.
-- 같은 재질과 vertex color를 사용하는 segment를 정적 병합하고, 대문 건넘도 기존 fieldstone
-  재질을 빌린다. 도랑·집 수에 비례한 material/program/texture를 만들지 않는다.
+- 도랑은 월드 공간의 낮은 U자 물리 geometry·법선·깊이를 사용한다. 바닥 전 폭이 공용 terrain보다
+  명시적인 12mm 위에 있어 첫 표면이 되고, 양쪽 4cm 입술과 얕은 bed plane으로 되붙는 바깥 사면
+  사이가 얕은 홈으로 읽힌다. 노면 위 검은 선
+  texture나 카메라 의존 `polygonOffset`은 쓰지 않는다. 실제 terrain boolean 절삭을 생략하는 이유는
+  0.48m 측구 때문에 수백 m 공용 지형 격자를 국소 재분할·직렬화하지 않고도 동일한 색상·DoF·수묵
+  depth를 한 물리 단면으로 보존하기 위해서다.
+- 같은 단일 재질과 vertex color를 사용하는 모든 segment와 판석을 각각 정적 병합한다.
+  도랑·집 수에 비례한 material/program/texture를 만들지 않는다.
 - 기본 측구에는 물 mesh, 흐름 animation, 반사 pass, 입자, foam을 두지 않는다. 비가 내려도
   수위·유량·침수·토사 이동을 실시간 계산하지 않는다.
 - 계절·날씨는 기존 지형 팔레트와 조명 결과만 공유한다. `rain` 상태가 계획 record나 충돌 경계를
@@ -154,6 +163,18 @@ fail-closed한다.
 - 맑음/비/눈 전환에서 geometry·material·program·draw identity 불변
 - 도랑 없는 일반 마을과 도랑 있는 Hanyang/capital 간선도로를 함께 확인
 - sync/Worker/fallback scene hash와 production References UI의 출처·활용·한계·링크 확인
+
+### 구현 결과
+
+- `src/village/drainage-plan.js`가 도로·필지·논·실제 삼각 지형에서 `surfaceY`까지 담은 불변
+  world-space `runs`/`crossings`를 만들고 `src/api/drainage-plan.js`가 Three 없는 재사용 경계를 제공한다.
+- `src/village/drainage-geometry.js`는 모든 도랑을 한 indexed mesh, 모든 판석을 한 merged mesh로
+  조립한다. 한 계획은 최대 두 mesh, 한 texture-free material family, shadow caster 0을 유지한다.
+- `src/village/plan.js`가 후속 RNG 소비가 끝난 뒤 이 계획을 붙이고 `populate.js`는 계획을 다시
+  해석하지 않는다. 빈 농촌 계획은 renderer와 material을 만들지 않는다.
+- `npm run check:drainage`가 정책·경사·지형·도로·수계·생산지·대문축·불변/직렬화 계약을,
+  `npm run shoot:drainage`가 실제 capital 제품의 동일 카메라 ON/OFF, 자원 예산, 반복 plan/geometry
+  hash와 근경·부감 PNG를 검사한다. 이 브라우저 증거는 `check:surface:browser`에 포함된다.
 
 ## 6. 출처
 
