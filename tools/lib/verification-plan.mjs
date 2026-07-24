@@ -72,6 +72,7 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-sijeon-contract.mjs',
   'tools/check-yard-life-contract.mjs',
   'tools/check-building-navigation.mjs',
+  'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',
   'tools/shoot-sijeon-app.mjs',
@@ -82,6 +83,7 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/shoot-mud-wall.mjs',
   'tools/shoot-mja-house.mjs',
   'tools/shoot-drainage.mjs',
+  'tools/lib/render-budget-contract.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -169,6 +171,7 @@ function routePath(path) {
     'tools/shoot-yard-life-app.mjs': ['app', 'yard-life'],
     'tools/shoot-thatch.mjs': ['app'],
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
+    'tools/lib/render-budget-contract.mjs': ['lod-focus'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
   };

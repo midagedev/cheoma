@@ -334,6 +334,22 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
     경로에서 shader/runtime 오류가 없는지 검사한다.
   - 선택 필지의 base flock UUID가 근경 wake·필지 hop·원경 sleep 전체에서 같고, 같은 필지 focus ring에 두 번째 닭 무리가 없는지 검사.
   - 규모 wave의 old/incoming 장면 환경 동기, 고정 조명 풀, 입력 잠금, pending build 이탈 후 stale promotion·scene-direct 잔여 0을 검사.
+  - 같은 Hanyang 부팅의 실제 초기 aerial, settled focus, stable MID, settled focus-out을 후처리 없는 scene
+    render로 계측한다. 각 상태는 한 번 직접 render한 결과와 그 즉시 재읽은
+    `calls/triangles/programs/geometries/textures` 표본이 plateau이고 아래 독립 상한을 지켜야 하며,
+    aerial→focus-out 누적 잔류는 calls +2, triangles +10,000, programs +64,
+    geometries +128, textures +32로 별도 제한한다.
+    frame-ms·GPU timer·wall time은 backend 의존 합격선으로 사용하지 않는다.
+
+    | 상태 | calls | triangles | programs | geometries | textures |
+    |---|---:|---:|---:|---:|---:|
+    | aerial | 540 | 2,000,000 | 144 | 920 | 104 |
+    | focus | 1,000 | 7,500,000 | 192 | 1,050 | 128 |
+    | MID | 900 | 3,500,000 | 192 | 1,050 | 128 |
+    | focus-out | 540 | 2,000,000 | 192 | 1,024 | 128 |
+
+    상한은 Chrome/Chromium 고정 fixture의 작은 변동 여유만 포함한다. 자동 갱신하지 않으며, 기능상 필요한
+    증가는 PR의 상태별 전후 수치와 이유를 리뷰하고 최적화로 내려간 값은 함께 ratchet한다.
 - `check:citywall`
   - 79개 contour(R=74/128/176/250/400/440/500, 64-seed 순환 + 실제 실패 seed)에서 `+z=남`, 폐합, 자기교차 없음, world-edge 내부를 검사.
   - 사대문 위치·외향 normal·성문 구멍이 같은 contour sampler와 일치하며, 육축은 고밀도 지형 표본에 묻히되 18.5m 물리 상한을 넘지 않는지 검사.
@@ -638,6 +654,11 @@ focus-in/hop/out 중에는 카메라 target과 같은 경로를 따라간다. 44
 - `wave`: 더 작은 town→village 제품 경로에서 근경 wake부터 부감 sleep, old/incoming ambient ownership, 환경 동기, 고정 조명 pool, 실제 wave 종료, pending solo build 취소와 stale promotion 방지를 검증한다.
 - `full`: 두 시나리오를 한 browser/page에서 이어 실행해 merge gate의 Hanyang 연속-frame 범위를 보존한다.
 
+`focus`와 `full`은 같은 부팅 안에서 schema v1 렌더 예산도 평가한다. `tools/lib/render-budget-contract.mjs`는
+Three/DOM 없이 fixture·상태·정수 counter·독립 ceiling·focus-out delta를 검증한다. exact boundary와
+각 metric `+1`, metric 간 상쇄 금지, 상태 누락/중복, fixture/schema drift, non-finite/unsafe counter,
+plateau와 잔류 실패는 `check-render-budget-contract.mjs`의 빠른 반례가 소유한다.
+
 wave 관련 반복 수정은 `check:wave`와 `check:wave:app`으로 빠르게 확인하고, merge 전 `check:full`에서 Hanyang 범위를 한 번 더 확인한다.
 
 ### `npm run check:audio`
@@ -733,7 +754,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-door-interaction.mjs` | 실제 앱의 보이는 주거 primary 문 닫힘/중간/열림을 정면·사선 6장으로 촬영 | `CHEOMA_DOOR_TARGET=giwa\|choga\|hero`로 대상을 고른다. 초가·hero에서는 문틀·고정 짝 유지, 경첩 sweep, 열린 뒤 벽 대신 고정 암부가 보이는지 직접 판정하며 PNG는 OS 임시 폴더에 쓴다. hero는 제품 카메라를 바꾸지 않고 debug opening world frame의 마당 안쪽 검증 시점을 쓴다. |
 | `tools/check-citywall.mjs` | 성곽 단일 contour, 실제 terrain-grid에 밀착한 사대문·벽·indexed 도로, gate/parcel/warp 경계 | 재질·산세와의 조화는 `shoot-hanyang.mjs`의 동일 seed 전후 이미지를 직접 본다. |
 | `tools/check-lod.mjs` | 주택 FAR/MID/FULL 히스테리시스, 거리 기반 보색 screen-door, 필지 안정/이행/overlay 소유권, 시선-셀 생활 디테일의 순수 계약 | 실제 draw-local channel·root 가시성·focus/wave 수명은 앱 게이트가 맡는다. |
-| `tools/check-lod-app.mjs` | `focus/wave/full` 선택 실행: Hanyang screen-door channel/자원·focus/hop/out, 실제 카메라 -Z 기반 수평 운해의 두 방위 중간각·수평/24° 끝점·자원 plateau·dispose, town→village fast wave 또는 Hanyang 전체 연속 흐름 | 빠른 wave가 Hanyang multi-chunk full을 대체하지 않아 merge 전 `check:full`을 유지한다. |
+| `tools/check-lod-app.mjs` | `focus/wave/full` 선택 실행: Hanyang screen-door channel/자원·focus/hop/out, 실제 aerial/MID/focus/focus-out 렌더 예산·plateau·잔류, 실제 카메라 -Z 기반 수평 운해의 두 방위 중간각·수평/24° 끝점·dispose, town→village fast wave 또는 Hanyang 전체 연속 흐름 | 빠른 wave가 Hanyang multi-chunk full을 대체하지 않아 merge 전 `check:full`을 유지한다. 절대 frame 시간은 판정하지 않는다. |
 | `tools/shoot-lod-transition.mjs` | Hanyang 고정 seed에서 계획 별채를 가진 FAR 필지를 동적으로 선택해 FAR↔MID↔FULL 전후/중간과 10° focus source 교체를 촬영하고, 수평 운해 부감 0·수평 복원, 별채 root/geometry/material identity, program/draw/triangle/pass parity를 기록 | 고정 seed·카메라 한 세트이며 모든 방위·시간대의 운해 미감을 대신하지 않는다. |
 | `tools/check-shadow-framing.mjs` | 광선 직교 basis, texel-stable anchor, 광선축 보존, fallback과 byte 결정론 | Three/DOM 없는 순수 framing 계약이며 제품 focus 수명은 앱 게이트가 맡는다. |
 | `tools/check-directional-shadow-runtime.mjs` | 실제 태양 불변, proxy shadow camera 방향/중심, cache cell, dispose 복원 | 작은 Three fixture로 실제 대규모 장면의 음영 미감은 보지 않는다. |
