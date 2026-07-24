@@ -8,7 +8,9 @@ import {
   reportWebGLRenderer,
 } from './lib/verification-browser.mjs';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = process.env.CHEOMA_REPO_ROOT
+  ? resolve(process.env.CHEOMA_REPO_ROOT)
+  : resolve(import.meta.dirname, '..');
 const MIME = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -64,11 +66,16 @@ const crossingMesh = drainage.getObjectByName('road-drainage-stone-crossings');
 if (!ditchMesh || !crossingMesh) throw new Error('drainage named meshes are incomplete');
 
 const target = drainagePlan.crossings[0];
-const travel = {
-  x: Math.sin(target.yaw),
-  z: Math.cos(target.yaw),
+const gateDelta = {
+  x: target.gatePoint.x - target.center.x,
+  z: target.gatePoint.z - target.center.z,
 };
-const right = { x: travel.z, z: -travel.x };
+const gateDistance = Math.hypot(gateDelta.x, gateDelta.z);
+const towardGate = {
+  x: gateDelta.x / gateDistance,
+  z: gateDelta.z / gateDistance,
+};
+const right = { x: towardGate.z, z: -towardGate.x };
 const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.05, 420);
 
 const sun = new THREE.DirectionalLight(0xffd1a0, 3.4);
@@ -83,24 +90,27 @@ scene.add(new THREE.HemisphereLight(0xe2e8df, 0x62543f, 1.35));
 
 function setView(view) {
   if (view === 'aerial') {
+    const targetX = target.center.x + gateDelta.x * 0.5;
+    const targetZ = target.center.z + gateDelta.z * 0.5;
+    camera.fov = 40;
+    camera.position.set(
+      targetX - towardGate.x * 24 + right.x * 19,
+      target.center.y + 28,
+      targetZ - towardGate.z * 24 + right.z * 19,
+    );
+    camera.lookAt(targetX, target.center.y + 0.1, targetZ);
+  } else {
+    const cameraBack = Math.max(7.5, Math.min(10, gateDistance * 0.8));
     camera.fov = 36;
     camera.position.set(
-      target.center.x - travel.x * 16 + right.x * 13,
-      target.center.y + 18,
-      target.center.z - travel.z * 16 + right.z * 13,
-    );
-    camera.lookAt(target.center.x, target.center.y - 0.03, target.center.z);
-  } else {
-    camera.fov = 28;
-    camera.position.set(
-      target.center.x - travel.x * 3.6 + right.x * 2.65,
-      target.center.y + 2.35,
-      target.center.z - travel.z * 3.6 + right.z * 2.65,
+      target.center.x - towardGate.x * cameraBack + right.x * 2.8,
+      target.center.y + 4.2,
+      target.center.z - towardGate.z * cameraBack + right.z * 2.8,
     );
     camera.lookAt(
-      target.center.x + travel.x * 0.05,
-      target.center.y - 0.035,
-      target.center.z + travel.z * 0.05,
+      target.center.x + gateDelta.x * 0.56,
+      target.center.y + 0.75,
+      target.center.z + gateDelta.z * 0.56,
     );
   }
   camera.updateProjectionMatrix();
@@ -377,8 +387,10 @@ try {
     invariant(measure.programDelta <= 1,
       `${measure.view} drainage program delta drifted (${measure.programDelta})`);
   }
-  invariant(deltas.close >= 0.005,
+  invariant(deltas.close >= 0.1,
     `close drainage contribution is not visible (${deltas.close.toFixed(4)})`);
+  invariant(deltas.aerial >= 0.005,
+    `aerial drainage contribution vanished (${deltas.aerial.toFixed(4)})`);
   invariant(deltas.aerial < deltas.close,
     `drainage did not recede with distance (${deltas.close.toFixed(4)} -> ${deltas.aerial.toFixed(4)})`);
 
