@@ -8,7 +8,6 @@ import {
 import { buildMudWallSurfaceGeometry } from './mud-wall-geometry.js';
 import { planMudWallSurface } from './mud-wall-surface-plan.js';
 import {
-  yardAuxLayout,
   yardClotheslineLayout,
   yardGardenPatchLayout,
   yardJangdokLayout,
@@ -45,7 +44,10 @@ const JAR_GEO = markSharedResource(new THREE.SphereGeometry(0.3, 10, 8));
 
 // 담+마당(어휘 격상) — populate 가 parcelMatrix 로 배치 후 병합. wallMats 는 전 필지 공유 1벌.
 //   shape: { pts:[{x,z}...](로컬), roles:[...], edges?:[{role,heightK,share}] } — parcels.js 산출.
-//   opts: { style, kind, seed, char01, aux, plotW, plotD }
+//   opts: { style, kind, seed, char01, aux, auxRequested, plotW, plotD }
+// `auxRequested` preserves the historical yard-RNG window even when the pure
+// planner rejects an unsafe request. The independent building itself is planned
+// once and rendered through parcel.auxiliary; `aux` is the accepted UI state.
 export function buildVillageWall(shape, wallMats, opts = {}) {
   const style = opts.style || 'stone';
   const kind = opts.kind === 'giwa' ? 'giwa' : 'choga';
@@ -66,7 +68,7 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
     placeGatePosts(g, pts[gateEdge], pts[(gateEdge + 1) % n], layout.gate.centerT,
       layout.gate.gap, layout.gate.height, M.mud, M.jipjul, 'brush');
     g.add(makeGardenPatch(plotW, plotD, M));               // 개방 마당의 정체성(텃밭) — 항상
-    if (opts.aux) g.add(makeAux(plotW, plotD, 'brush', M, rng));
+    if (opts.auxRequested ?? opts.aux) consumeLegacyAuxVariation(rng);
     g.add(makeYardProps(plotW, plotD, { ...opts, vegBed: false }, M, rng));  // 장독대·낟가리·빨래줄
     return g;
   }
@@ -110,8 +112,10 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
     }
   }
 
-  // 부속채(광·헛간): 앞마당 한쪽 구석에 낮은 작은 채. 병합 대상(공유 재질).
-  if (opts.aux) g.add(makeAux(plotW, plotD, style, M, rng));
+  // The former renderer-only shed consumed two values before the later yard
+  // props. Preserve that window so promoting it into a pure parcel plan does
+  // not reshuffle jars, stacks, clotheslines, or garden details.
+  if (opts.auxRequested ?? opts.aux) consumeLegacyAuxVariation(rng);
 
   // 마당 부속 소품(장독대·낟가리·빨래줄·텃밭) — 공유 재질 병합(0 신규 드로우콜).
   g.add(makeYardProps(plotW, plotD, opts, M, rng));
@@ -455,27 +459,7 @@ function gatePosts(g, gap, hd, H, postMat, barMat, style, M) {
   }
 }
 
-// 부속채(광·헛간): 앞마당 우측 구석 낮은 작은 채(벽 + 얕은 맞배 지붕). 병합용 공유 재질.
-function makeAux(plotW, plotD, style, M, rng) {
-  const a = new THREE.Group(); a.name = 'aux';
-  const layout = yardAuxLayout(plotW, plotD);
-  const w = layout.width, d = layout.depth, h = 1.7 + rng() * 0.2;
-  const wallMat = style === 'brush' ? M.mud : M.plaster;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-  body.position.y = h / 2; body.castShadow = body.receiveShadow = true; a.add(body);
-  // 얕은 맞배 지붕: 초가풍(brush)=이엉, 그 외=기와톤
-  const roofMat = style === 'brush' ? M.thatch : M.tileConvex;
-  const rise = 0.6, over = layout.roofOverhang;
-  for (const sx of [1, -1]) {
-    const plane = new THREE.Mesh(new THREE.BoxGeometry(w + over * 2, 0.1, d / 2 + over), roofMat);
-    plane.position.set(0, h + rise / 2, sx * (d / 4));
-    plane.rotation.x = sx * Math.atan2(rise, d / 2 + over);
-    plane.castShadow = true; a.add(plane);
-  }
-  const ridge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.12, 0.14), style === 'brush' ? M.jipjul : M.tileRidge);
-  ridge.position.y = h + rise; ridge.castShadow = true; a.add(ridge);
-  // 앞마당 우측 뒤 구석(도로 반대편 -z, +x)에 배치 — 본채·대문과 겹치지 않게
-  a.position.set(layout.x, 0, layout.z);
-  a.rotation.y = (rng() - 0.5) * 0.2;
-  return a;
+function consumeLegacyAuxVariation(rng) {
+  rng(); // former body height
+  rng(); // former yaw
 }

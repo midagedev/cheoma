@@ -54,7 +54,9 @@ const stable = (parcel) => JSON.stringify({
   seed: parcel.seed, rebuildSeed: parcel.rebuildSeed,
   variant: parcel.variant, sx: parcel.sx, sy: parcel.sy, sz: parcel.sz,
   wallType: parcel.wallType, wallHeightK: parcel.wallHeightK,
-  aux: parcel.aux, jangdok: parcel.jangdok, yardStack: parcel.yardStack,
+  aux: parcel.aux, auxRequested: parcel.auxRequested,
+  auxiliary: parcel.auxiliary,
+  jangdok: parcel.jangdok, yardStack: parcel.yardStack,
   clothesline: parcel.clothesline, vegBed: parcel.vegBed,
   courtyardTree: parcel.courtyardTree,
 });
@@ -67,6 +69,7 @@ const anchors = (flora, parcelId) => flora.yardTreeAnchors
   }));
 
 let rebuilt = 0;
+let rebuiltAuxiliaries = 0;
 let floraCases = 0;
 let varied = 0;
 let floraChanges = 0;
@@ -132,6 +135,7 @@ for (const scale of ['hamlet', 'village', 'town', 'capital', 'hanyang']) {
         if (a.plotW < envelope.plotW * 0.879 || a.plotD < envelope.plotD * 0.879) {
           fail(`${scale}:${villageSeed}:${parcel.id} accumulated shrink`);
         }
+        if (a.auxiliary) rebuiltAuxiliaries++;
         fingerprints.add(stable(a));
         rebuilt++;
       }
@@ -204,6 +208,7 @@ for (const scale of ['hamlet', 'village', 'town', 'capital', 'hanyang']) {
 }
 
 if (varied === 0) fail('rebuild seeds produced no variation');
+if (rebuiltAuxiliaries === 0) fail('rebuild matrix produced no planned auxiliary');
 if (floraCases < 4) fail(`only ${floraCases} rebuild fixtures contained a real yard tree`);
 if (floraChanges === 0) fail('flora commits never changed a rebuilt tree owner');
-console.log(`PARCEL REBUILD CONTRACT: PASS (${rebuilt} deterministic rebuilds, ${varied} varied envelopes, ${floraCases} flora commits, ${floraChanges} changed owners)`);
+console.log(`PARCEL REBUILD CONTRACT: PASS (${rebuilt} deterministic rebuilds, ${rebuiltAuxiliaries} auxiliaries, ${varied} varied envelopes, ${floraCases} flora commits, ${floraChanges} changed owners)`);

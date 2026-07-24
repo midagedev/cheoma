@@ -20,6 +20,8 @@ import {
 } from '../../temple/plan.js';
 import { houseMatrix, parcelMatrix } from '../../village/instancing.js';
 import { buildVillageWall } from '../../village/walls.js';
+import { buildAuxiliaryBuilding } from '../../village/auxiliary-building-geometry.js';
+import { planParcelAuxiliary } from '../../village/auxiliary-building-plan.js';
 import { toneOf, variantMirrorX, variantOv } from '../../village/variants.js';
 import { parcelHouseTranslation, parcelLocalPoint } from '../../village/parcel-contract.js';
 import {
@@ -1097,14 +1099,45 @@ export function createVillageHandle(opts, seed, plan, group) {
         minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
       };
       // 담·마당(개별) — 유형·부속채 어휘 + 마당 소품 편집(#96). newParams 오버라이드 우선, 없으면 필지 원본값.
-      const { wallType, aux, jangdok, yardStack, clothesline, vegBed } = edit.top;
+      const { wallType, jangdok, yardStack, clothesline, vegBed } = edit.top;
+      const auxRequested = !!edit.top.aux;
+      const auxiliaryParcel = {
+        ...parcel,
+        kind: gk,
+        wallType,
+        aux: edit.top.aux,
+        auxRequested,
+        jangdok,
+        yardStack,
+        clothesline,
+        vegBed,
+        editRoofBounds,
+        auxiliary: null,
+      };
+      const auxiliary = planParcelAuxiliary(auxiliaryParcel, {
+        site,
+        peers: [
+          ...plan.parcels,
+          ...(plan.features?.palace?.center ? [plan.features.palace] : []),
+        ],
+        hardObstacles: yardHardObstacles(auxiliaryParcel),
+      });
+      // A toggle is a request for a safe independent building, not permission
+      // to overlap the house or gate. Fail closed and keep the accepted editor
+      // spec truthful when an unusually small edited lot has no valid slot.
+      const aux = !!auxiliary;
+      edit.top.aux = aux;
+      edit.spec.params.aux = aux;
+      g.userData.auxiliarySpec = auxiliary;
       g.add(buildVillageWall(parcel.shape, editWallMats, {
-        style: wallType, kind: gk, seed: parcel.seed, char01, aux, plotW: parcel.plotW, plotD: parcel.plotD,
+        style: wallType, kind: gk, seed: parcel.seed, char01, aux, auxRequested,
+        plotW: parcel.plotW, plotD: parcel.plotD,
         gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
         parcel, site, baseY: parcel.baseY,
         wallHeightK: parcel.wallHeightK, jangdok,
         yardStack, clothesline, vegBed,
       }));
+      if (auxiliary) g.add(buildAuxiliaryBuilding(auxiliary, editWallMats));
       g.applyMatrix4(parcelMatrix(parcel));
       overrides.add(g);
       overrideById.set(parcelId, g);
@@ -1123,6 +1156,8 @@ export function createVillageHandle(opts, seed, plan, group) {
         for (const key of PERSISTENT_YARD_FIELDS) {
           parcel[key] = edit.top[key];
         }
+        parcel.auxiliary = auxiliary;
+        parcel.auxRequested = auxRequested;
         parcel.editRoofBounds = editRoofBounds;
         parcel.editBuildingBounds = editBuildingBounds;
         primaryDoorOcclusion.refreshParcel({ ...parcel, kind: gk });

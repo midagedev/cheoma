@@ -18,6 +18,7 @@ import {
 } from '../src/camera/focus-visibility.js';
 import {
   focusFeatureBlockers,
+  focusPlanningBlockers,
   parcelFocusBlocker,
 } from '../src/village/focus-blockers.js';
 import {
@@ -424,5 +425,42 @@ assert.ok(!publicPropFocus.candidates.find((candidate) => (
   Math.abs(candidate.azimuth - publicPropFocus.azimuth) < EPS
     && Math.abs(candidate.scale - publicPropFocus.scale) < EPS
 ))?.cameraBlocked, 'selector must hand off to an unblocked endpoint around planned public objects');
+
+const auxiliaryParcel = {
+  id: 'auxiliary-owner',
+  kind: 'choga',
+  center: { x: focusBase.position.x, z: focusBase.position.z },
+  frontDir: { x: 0, z: 1 },
+  baseY: 0,
+  auxiliary: {
+    id: 'aux-0',
+    local: { x: 0, z: 0, yaw: 0 },
+    body: { width: 2.4, depth: 2.2 },
+    roof: { overhang: 0.28 },
+    roofTopY: 3,
+  },
+};
+const plannedAuxiliary = focusPlanningBlockers({
+  parcels: [auxiliaryParcel],
+  features: {},
+}, site);
+assert.equal(plannedAuxiliary.length, 1,
+  'planned auxiliary must enter the production external-blocker set exactly once');
+const auxiliaryFocus = selectSafeFocusEndpoint({
+  subjectId: 'subject',
+  framing: focusBase,
+  subjectBounds,
+  index: createFocusVisibilityIndex([
+    { id: 'subject', bounds: subjectBounds },
+    ...plannedAuxiliary,
+  ]),
+});
+assert.ok(auxiliaryFocus.candidates[0].cameraBlocked,
+  'planned auxiliary must reject a camera physically placed inside it');
+assert.ok(!auxiliaryFocus.candidates.find((candidate) => (
+  Math.abs(candidate.azimuth - auxiliaryFocus.azimuth) < EPS
+    && Math.abs(candidate.scale - auxiliaryFocus.scale) < EPS
+))?.cameraBlocked,
+'selector must hand off to an unblocked endpoint around a planned auxiliary');
 
 console.log(`CINEMATIC REVEAL: PASS (arrival max look turn ${maxTurnRate.toFixed(2)}°/s, exact endpoints, compact/reduced policies, ${Math.round(safeFocus.baseVisibleRatio * 100)}%→${Math.round(safeFocus.visibleRatio * 100)}% safe focus visibility)`);

@@ -368,9 +368,15 @@ plotW 10~26m) 정합용 제안치이며, 조정 여지 있음.
    record가 함께 소비한다. 평탄 필지는 byte-equivalent legacy run이고, 경사 필지는 변당 최대 6개의
    수평 run·0.36m 단·대문 landing을 사용하므로 pitched wall이나 렌더/상호작용 높이 이중 계약이 없다.
    마당나무는 뒤안→측면 후보에서 실제 처마·일조·focus 시선·이웃 수관을 통과한 자리만 채택한다.
-   `yard-layout.js`는 담 renderer와 정원이 함께 쓰는 부속채·장독대·낟가리·빨래줄·텃밭·정원석 위치를
-   소유한다. 높은 부속채·낟가리·빨래줄은 수관 전체로 피하고, 낮은 소품은 줄기 밑동만 피해서 자연스러운
-   가지 돌출을 남긴다. 안전한 후보가 없으면 소품을 관통시키거나 나무를 축소하지 않고 해당 나무를 생략한다.
+   독립 별채의 위치·원래 크기·맞배지붕·처마 footprint는 Three 없는 `auxiliary-building-plan.js`가
+   실제 본채 처마, 필지 경계, 집↔대문 접근축, 자기 집과 이웃집의 30° 겨울 일조, 기존 마당 hard object를
+   함께 통과한 뒤 한 번 확정한다. `yard-layout.js`는 이 정확한 polygon과 장독대·낟가리·빨래줄·텃밭·
+   정원석 footprint를 flora와 공유한다. 높은 별채·낟가리·빨래줄은 수관 전체로 피하고, 낮은 소품은 줄기
+   밑동만 피해서 자연스러운 가지 돌출을 남긴다. 안전한 별채 후보가 없으면 축소·관통시키지 않고 요청을
+   거부한다. commit된 편집 처마가 있으면 생성 variant보다 그 경계를 우선한다. 승인된 별채는 기존
+   기와/초가 palette를 빌린 전역 병합 root 한 벌로 FULL/MID/FAR에서 같은 좌표·scale·silhouette를
+   유지하며, focus/edit/export는 소유 필지의 source range만 접는다. 같은 oriented volume은 초기 및
+   편집 갱신 focus camera 후보의 물리 blocker로도 사용한다.
 
 ### 남은 갭
 

@@ -58,6 +58,50 @@ disposeBuilding(building);
 필요한 기능만 담은 `src/api/building.js` 대신 전체 `src/api/index.js`를 사용하면 village, environment,
 audio 등 browser runtime 전체 dependency graph가 따라온다. 단독 건물 소비자는 좁은 진입점을 사용한다.
 
+## 독립 별채 계획과 renderer
+
+필지에 딸린 광·헛간 같은 작은 독립채는 배치와 Three geometry를 분리한다. worker·서버·편집 검증은
+`src/api/auxiliary-building-plan.js`의 `planParcelAuxiliary()`를 사용한다. 입력 필지는 실제 `shape`,
+fitted 본채 변주, 남측 `solarAccess`, 도로측 대문 접근 정보를 이미 가져야 한다. 반환값은 parcel-local
+위치·yaw·몸체·맞배지붕과 처마를 포함한 불변 footprint이며, 안전한 원래 크기를 놓을 수 없으면 `null`이다.
+renderer가 카메라나 LOD마다 좌표·scale을 다시 고르면 안 된다.
+
+```js
+import {
+  planParcelAuxiliary,
+} from './cheoma/src/api/auxiliary-building-plan.js';
+
+const auxiliary = planParcelAuxiliary(parcel, {
+  site,
+  peers: villagePlan.parcels,
+  hardObstacles: yardHardObjects,
+});
+```
+
+실제 geometry는 `src/api/auxiliary-building.js`가 만든다. tile 별채는 `plaster/tileConvex/tileRidge`,
+thatch 별채는 `mud/thatch/jipjul` 역할 material을 호출자에게 빌린다. 새 material·texture를 만들지
+않으며 반환 root는 3 mesh·48 triangle의 geometry만 소유한다.
+
+```js
+import {
+  buildAuxiliaryBuilding,
+  disposeAuxiliaryBuilding,
+} from './cheoma/src/api/auxiliary-building.js';
+
+const root = buildAuxiliaryBuilding(auxiliary, materials);
+scene.add(root);
+
+scene.remove(root);
+disposeAuxiliaryBuilding(root); // true
+disposeAuxiliaryBuilding(root); // false
+
+// 빌린 material과 texture는 호출자가 계속 소유한다.
+```
+
+제품 마을은 여러 별채를 재질 역할별 root 하나로 병합하지만 이 공개 builder는 한 계획의 정확한 local
+transform을 보존한다. 별채의 기존 요청 확률과 치수는 역사 자료의 실측 빈도가 아니라 제품 정책이며,
+한옥 자료는 몸채·부속채·마당이라는 공간 어휘를 확인하는 범위에서만 쓴다.
+
 ## 시전 계획과 렌더러
 
 시전행랑은 순수 계획과 Three 렌더러를 별도 진입점으로 제공한다. 배치·footprint·2칸 façade 데이터만

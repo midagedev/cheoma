@@ -47,6 +47,22 @@ assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
 ]);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
+for (const path of [
+  'src/village/auxiliary-building-plan.js',
+  'src/village/auxiliary-building-geometry.js',
+  'src/api/auxiliary-building-plan.js',
+  'src/api/auxiliary-building.js',
+]) {
+  assert.deepEqual(ids([path], {
+    newPaths: [path],
+  }), ['core', 'app', 'worker', 'lod-app', 'parcel-rebuild-browser']);
+}
+for (const path of [
+  'tools/check-auxiliary-building-plan.mjs',
+  'tools/check-auxiliary-building-geometry.mjs',
+]) {
+  assert.deepEqual(ids([path], { newPaths: [path] }), ['core']);
+}
 assert.deepEqual(ids(['src/village/sijeon-plan.js'], {
   newPaths: ['src/village/sijeon-plan.js'],
 }), ['core', 'app', 'worker']);
@@ -383,6 +399,7 @@ assert.deepEqual(impactedFastChecks(['src/core/buffer-update-range.js']), [
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-architecture.mjs',
+  './check-auxiliary-building-plan.mjs',
   './check-house-diversity.mjs',
   './check-mja-house-plan.mjs',
   './check-mja-house-integration.mjs',
@@ -397,6 +414,8 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-yard-layout-contract.mjs',
   './check-yard-life-contract.mjs',
   './check-parcel-rebuild-contract.mjs',
+  './check-lod.mjs',
+  './check-citywall.mjs',
 ]);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [

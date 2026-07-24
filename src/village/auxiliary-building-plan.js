@@ -60,6 +60,18 @@ function roofFootprint(local, body, roof) {
 }
 
 function roofPolygons(parcel) {
+  const edited = parcel?.editRoofBounds;
+  if ([edited?.minX, edited?.maxX, edited?.minZ, edited?.maxZ]
+    .every(Number.isFinite)
+    && edited.maxX > edited.minX
+    && edited.maxZ > edited.minZ) {
+    return [rectangle(
+      (edited.minX + edited.maxX) * 0.5,
+      (edited.minZ + edited.maxZ) * 0.5,
+      (edited.maxX - edited.minX) * 0.5,
+      (edited.maxZ - edited.minZ) * 0.5,
+    )];
+  }
   return parcelLocalRoofRectangles(parcel).map((roof) => rectangle(
     (roof.minX + roof.maxX) * 0.5,
     (roof.minZ + roof.maxZ) * 0.5,

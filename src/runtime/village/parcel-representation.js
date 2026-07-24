@@ -5,7 +5,12 @@ import { CHUNK_LOD_LEVEL } from '../../village/lod-policy.js';
 export function setParcelBaseHidden(handle, parcel, hidden) {
   if (!handle || !parcel) return false;
   const houses = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga'];
-  const sources = [houses?.userData, handle.walls, handle.impostors];
+  const sources = [
+    houses?.userData,
+    handle.walls,
+    handle.impostors,
+    handle.auxiliaries,
+  ];
   let changed = false;
   for (const source of sources) {
     if (!source?.setHidden) continue;
@@ -22,7 +27,12 @@ export function setParcelBaseHidden(handle, parcel, hidden) {
 export function setParcelBaseExportHidden(handle, parcel, hidden) {
   if (!handle || !parcel) return false;
   const houses = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga'];
-  const sources = [houses?.userData, handle.walls, handle.impostors];
+  const sources = [
+    houses?.userData,
+    handle.walls,
+    handle.impostors,
+    handle.auxiliaries,
+  ];
   let changed = false;
   for (const source of sources) {
     if (!source?.setExportHidden) continue;
@@ -39,12 +49,17 @@ export function parcelRepresentationState(handle, parcel, overlayVisible = false
   if (!handle || !parcel) return null;
   const houses = handle[parcel.kind === 'giwa' ? 'giwa' : 'choga']?.userData;
   const impostors = handle.impostors;
+  const auxiliaries = handle.auxiliaries;
   const impostorOwner = impostors?.locate?.get(parcel.id) || null;
+  const auxiliaryOwner = auxiliaries?.locate?.get(parcel.id) || null;
   const lod = impostorOwner?.lod || null;
   const level = lod?.level || CHUNK_LOD_LEVEL.FULL;
   const baseHidden = houses?.isHidden(parcel.id) === true;
   const wallHidden = handle.walls?.isHidden(parcel.id) === true;
   const impostorHidden = impostors?.isHidden(parcel.id) === true;
+  const auxiliaryHidden = auxiliaries?.isHidden(parcel.id) === true;
+  const auxiliaryPresent = !!auxiliaryOwner;
+  const auxiliaryVisible = auxiliaryPresent && !auxiliaryHidden;
   const fullRootVisible = lod?.fullRoot ? lod.fullRoot.visible : true;
   const farRootVisible = lod?.farRoot ? lod.farRoot.visible
     : lod?.impostorRoot ? lod.impostorRoot.visible : false;
@@ -79,7 +94,9 @@ export function parcelRepresentationState(handle, parcel, overlayVisible = false
     && weights[transition.from] > 0 && weights[transition.to] > 0
     && Math.abs(transitionWeight - 1) < 1e-6;
   const overlayValid = overlay && representations === 1
-    && baseHidden && wallHidden && (!impostorOwner || impostorHidden);
+    && baseHidden && wallHidden
+    && (!impostorOwner || impostorHidden)
+    && (!auxiliaryOwner || auxiliaryHidden);
   const valid = overlay ? overlayValid : representations === tierOwners.length
     && (transitionActive ? transitionValid : stableValid);
 
@@ -110,6 +127,9 @@ export function parcelRepresentationState(handle, parcel, overlayVisible = false
     baseHidden,
     wallHidden,
     impostorHidden,
+    auxiliaryPresent,
+    auxiliaryHidden,
+    auxiliaryVisible,
     representations,
     valid,
   };

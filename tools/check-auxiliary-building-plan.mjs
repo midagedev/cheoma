@@ -215,9 +215,15 @@ try {
       seed,
       includePalace: scale === 'capital' || scale === 'hanyang',
     });
-    for (const parcel of plan.parcels.filter((candidate) => candidate.aux && !candidate.hero)) {
+    for (const parcel of plan.parcels.filter(
+      (candidate) => candidate.auxRequested && !candidate.hero,
+    )) {
       requested++;
-      const hardObstacles = yardHardObstacles(parcel)
+      const hardObstacles = yardHardObstacles({
+        ...parcel,
+        aux: parcel.auxRequested,
+        auxiliary: null,
+      })
         .filter((obstacle) => !['aux', 'auxiliary-building'].includes(obstacle.kind));
       const before = JSON.stringify(parcel);
       Math.random = () => {
@@ -238,6 +244,10 @@ try {
         `${scale}:${seed}:${parcel.id} planner mutated its parcel`);
       invariant(JSON.stringify(a) === JSON.stringify(b),
         `${scale}:${seed}:${parcel.id} planner is nondeterministic`);
+      invariant(JSON.stringify(a) === JSON.stringify(parcel.auxiliary),
+        `${scale}:${seed}:${parcel.id} stored auxiliary diverged from the pure planner`);
+      invariant(parcel.aux === !!parcel.auxiliary,
+        `${scale}:${seed}:${parcel.id} accepted editor state is not truthful`);
       if (!a) continue;
       planned++;
       if (parcel.kind === 'giwa') giwa++;
@@ -289,6 +299,41 @@ invariant(planParcelAuxiliary(first.parcel, {
   site: first.site,
   peers: [peer],
 }) === null, 'planner placed an auxiliary through a neighbour winter-sun opening');
+
+// Runtime footprint editing owns the committed eave envelope. This exact
+// village/seed/parcel fixture used to approve the old storehouse position even
+// though a supported 1.6× house edit expanded the main roof through it.
+const editedPlan = planVillage({ scale: 'village', seed: 91 });
+const editedSource = editedPlan.parcels.find((parcel) => parcel.id === 'p24');
+invariant(editedSource?.auxiliary,
+  'edited-roof regression fixture lost its planned auxiliary');
+const generatedRoofBounds = G.boundsOfPts(
+  parcelLocalRoofRectangles(editedSource).flatMap((roof) => rectangle(roof)),
+);
+const editedHouse = parcelHouseTranslation(editedSource);
+const footprintScale = 1.6;
+const editRoofBounds = {
+  minX: editedHouse.x + (generatedRoofBounds.minX - editedHouse.x) * footprintScale,
+  maxX: editedHouse.x + (generatedRoofBounds.maxX - editedHouse.x) * footprintScale,
+  minZ: editedHouse.z + (generatedRoofBounds.minZ - editedHouse.z) * footprintScale,
+  maxZ: editedHouse.z + (generatedRoofBounds.maxZ - editedHouse.z) * footprintScale,
+};
+invariant(G.polysOverlap(editedSource.auxiliary.footprint, rectangle(editRoofBounds)),
+  'edited-roof regression fixture no longer exercises the former overlap');
+const editedParcel = {
+  ...editedSource,
+  editRoofBounds,
+  auxiliary: null,
+};
+const editedAuxiliary = planParcelAuxiliary(editedParcel, {
+  enabled: true,
+  site: editedPlan.site,
+  peers: editedPlan.parcels,
+  hardObstacles: yardHardObstacles(editedParcel),
+});
+invariant(!editedAuxiliary
+    || !G.polysOverlap(editedAuxiliary.footprint, rectangle(editRoofBounds)),
+  'planner ignored the committed edited roof envelope');
 
 const tiny = {
   ...first.parcel,

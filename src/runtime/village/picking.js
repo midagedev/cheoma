@@ -14,7 +14,7 @@ import {
 } from '../../camera/optics.js';
 import * as G from '../../core/math/geom2.js';
 import {
-  focusFeatureBlockers,
+  focusPlanningBlockers,
   parcelFocusBlocker,
 } from '../../village/focus-blockers.js';
 import { terrainWarpInner } from '../../village/terrain-surface.js';
@@ -325,7 +325,7 @@ export function buildParcelPickProxies(plan, site) {
         },
     });
   }
-  applySafeParcelFramings(proxies, focusFeatureBlockers(plan, site), plan, site);
+  applySafeParcelFramings(proxies, focusPlanningBlockers(plan, site), plan, site);
   return proxies;
 }
 
@@ -372,7 +372,7 @@ export function refreshParcelPickProxy(
   proxy.cameraVisibility = null;
   proxy.heroCameraVisibility = null;
   if (buildingSpec) proxy.buildingSpec = buildingSpec;
-  applySafeParcelFramings(peers || [proxy], focusFeatureBlockers(plan, site), plan, site);
+  applySafeParcelFramings(peers || [proxy], focusPlanningBlockers(plan, site), plan, site);
   return proxy;
 }
 

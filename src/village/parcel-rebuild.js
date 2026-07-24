@@ -10,6 +10,8 @@ import {
   pavilionBlocksParcelFocus,
 } from './pavilion-plan.js';
 import { buildingBlocksSolarAccess } from './solar-access.js';
+import { planParcelAuxiliary } from './auxiliary-building-plan.js';
+import { yardHardObstacles } from './yard-layout.js';
 
 // A focused-house rebuild may redraw its yard inside the already reserved lot,
 // but it must never renegotiate neighbours, roads, streams, or solar access.
@@ -113,6 +115,7 @@ export function planParcelRebuild(
         baseSeed: variationSeed,
         attempts,
       })) continue;
+      candidate.auxRequested = !!candidate.aux;
       // Runtime rebuilds may adjust the wall envelope and therefore the pure focus
       // framing. The village pavilion is a full-height building with broad eaves,
       // not a point prop: keep both the daylight opening and the camera frame clear
@@ -128,6 +131,16 @@ export function planParcelRebuild(
         // be rejected for entering that deliberately broad palace corridor.
         || (peer.kind !== 'palace' && buildingBlocksSolarAccess(peer, candidate, site))
       ))) continue;
+      const auxiliary = planParcelAuxiliary(candidate, {
+        site,
+        peers: solarPeers,
+        hardObstacles: yardHardObstacles({
+          ...candidate,
+          auxiliary: null,
+        }),
+      });
+      candidate.auxiliary = auxiliary;
+      if (!auxiliary) candidate.aux = false;
       return candidate;
     }
   }

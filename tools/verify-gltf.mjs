@@ -59,6 +59,7 @@ const TEX_KEYS = ['map','normalMap','roughnessMap','metalnessMap','emissiveMap',
 const SCENERY_RE = /^(?:trees|forest-|village-(?:trees|forest|flora|bloom|critters)|animals|cow|birds|critters|v-(?:dogs|cats|magpies))/;
 function countScene(obj) {
   let meshes = 0, tris = 0, points = 0, impostors = 0, overrides = 0;
+  let auxiliaryMeshes = 0;
   let scenery = 0, tex = 0, texWithImage = 0, instanced = 0, zeroInstances = 0;
   const matrix = new THREE.Matrix4();
   const mats = new Set();
@@ -73,6 +74,9 @@ function countScene(obj) {
       const base = idx ? idx.count / 3 : (p ? p.count / 3 : 0);
       if (base <= 0) return;
       meshes++; tris += base * (n.isInstancedMesh ? n.count : 1);
+      if (/^(?:village-auxiliaries-m|auxiliary-building-)/.test(n.name || '')) {
+        auxiliaryMeshes++;
+      }
       if (n.isInstancedMesh) {
         instanced++;
         for (let index = 0; index < n.count; index++) {
@@ -86,7 +90,7 @@ function countScene(obj) {
     }
   });
   return {
-    meshes, tris, materials: mats.size, points, impostors, overrides,
+    meshes, tris, materials: mats.size, points, impostors, overrides, auxiliaryMeshes,
     scenery, tex, texWithImage, instanced, zeroInstances,
   };
 }
@@ -122,6 +126,7 @@ function exportSummary(root, opts) {
 function sameExportShape(a, b) {
   return a.meshes === b.meshes && a.tris === b.tris && a.instanced === b.instanced
     && a.impostors === b.impostors && a.overrides === b.overrides
+    && a.auxiliaryMeshes === b.auxiliaryMeshes
     && a.fingerprint === b.fingerprint;
 }
 function roundtrip(buffer) {
@@ -214,7 +219,9 @@ async function runAll() {
 
     // 실제 FAR 소스까지 가진 정규 필지를 focus해 FULL instance matrix, FAR mass position,
     // merged wall position을 동시에 접는다. Export 결과는 그 presentation mutation과 무관해야 한다.
-    const focusParcel = handle.plan.parcels.find((parcel) => !parcel.hero && handle.lodState(parcel.id)?.far);
+    const focusParcel = handle.plan.parcels.find((parcel) => (
+      !parcel.hero && parcel.auxiliary && handle.lodState(parcel.id)?.far
+    ));
     const detail = focusParcel ? handle.showParcelDetail(focusParcel.id) : null;
     const focusedState = focusParcel ? handle.lodState(focusParcel.id) : null;
     const focusFull = exportSummary(root, {});
@@ -226,6 +233,8 @@ async function runAll() {
       baseHidden: focusedState?.baseHidden === true,
       wallHidden: focusedState?.wallHidden === true,
       impostorHidden: focusedState?.impostorHidden === true,
+      auxiliaryHidden: focusedState?.auxiliaryHidden === true,
+      auxiliaryVisible: focusedState?.auxiliaryVisible === true,
       fullSame: sameExportShape(sc, focusFull),
       leanSame: sameExportShape(lw, focusLean),
       baseFull: sc,
@@ -243,6 +252,7 @@ async function runAll() {
       building: { windowCount: 1, windowWidthK: 0.31 },
     }, { persist: true, refreshFlora: false }) : null;
     const editedState = focusParcel ? handle.parcelRebuildState(focusParcel.id) : null;
+    const editedLodState = focusParcel ? handle.lodState(focusParcel.id) : null;
     const editedFull = exportSummary(root, {});
     const editedLean = exportSummary(root, { fullDetail: false });
     const committedEdit = {
@@ -254,6 +264,10 @@ async function runAll() {
       fullOverrides: editedFull.overrides,
       leanOverrides: editedLean.overrides,
       fullZeroDelta: editedFull.zeroInstances - sc.zeroInstances,
+      auxiliaryAccepted: !!editedGroup?.userData?.auxiliarySpec,
+      auxiliaryHidden: editedLodState?.auxiliaryHidden === true,
+      fullAuxiliaryMeshDelta: editedFull.auxiliaryMeshes - sc.auxiliaryMeshes,
+      leanAuxiliaryMeshDelta: editedLean.auxiliaryMeshes - lw.auxiliaryMeshes,
       baseFull: sc,
       editedFull,
       baseLean: lw,
@@ -373,13 +387,17 @@ if (results) {
     const fi = h.focusInvariant || {};
     const focusOk = !!fi.parcelId && fi.detailCreated && fi.stateValid
       && fi.baseHidden && fi.wallHidden && fi.impostorHidden
+      && fi.auxiliaryHidden && !fi.auxiliaryVisible
       && fi.fullSame && fi.leanSame
       && fi.focusFull?.overrides === 0 && fi.focusLean?.overrides === 0;
     const ce = h.committedEdit || {};
     const committedOk = ce.created && ce.marked && ce.persistent
       && ce.fullChanged && ce.leanChanged
       && ce.fullOverrides >= 2 && ce.leanOverrides >= 2
-      && ce.fullZeroDelta > 0;
+      && ce.fullZeroDelta > 0
+      && ce.auxiliaryAccepted && ce.auxiliaryHidden
+      && ce.fullAuxiliaryMeshDelta === 3
+      && ce.leanAuxiliaryMeshDelta === 3;
     if (!overOk) fails.push(`hanyang: guard not tripped (tris ${B(h.analyzeTris)} vs limit ${B(h.limit)}, overBudget=${h.overBudget})`);
     if (!filterOk) fails.push(`hanyang: FULL/FAR export selection drift `
       + `(full impostors=${h.sanitizedImpostors}, points=${h.sanitizedPoints}, `
@@ -387,15 +405,16 @@ if (results) {
     if (!preOk) fails.push(`hanyang: src had no impostors (test premise broken)`);
     if (!focusOk) fails.push(`hanyang: focus changed export `
       + `(parcel=${fi.parcelId}, detail=${fi.detailCreated}, state=${fi.stateValid}, `
-      + `hidden=${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden}, `
+      + `hidden=${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden}/${fi.auxiliaryHidden}, `
       + `same=${fi.fullSame}/${fi.leanSame}, overrides=${fi.focusFull?.overrides}/${fi.focusLean?.overrides})`);
     if (!committedOk) fails.push(`hanyang: committed edit missing from export `
       + `(created=${ce.created}, marked=${ce.marked}, persistent=${ce.persistent}, `
       + `changed=${ce.fullChanged}/${ce.leanChanged}, overrides=${ce.fullOverrides}/${ce.leanOverrides}, `
-      + `zeroDelta=${ce.fullZeroDelta})`);
+      + `zeroDelta=${ce.fullZeroDelta}, auxiliary=${ce.auxiliaryAccepted}/${ce.auxiliaryHidden}, `
+      + `auxMeshes=${ce.fullAuxiliaryMeshDelta}/${ce.leanAuxiliaryMeshDelta})`);
     console.log(`analyzeTris ${B(h.analyzeTris)} > limit ${B(h.limit)} → overBudget=${h.overBudget}${overOk ? '' : '✗'} · srcImpostors ${h.srcImpostors}${preOk ? '' : '✗'} → FULL impostors ${h.sanitizedImpostors}/points ${h.sanitizedPoints} · FAR impostors ${h.lightweightImpostors}/tris ${B(h.lightweightTris)}${filterOk ? '' : '✗'}`);
-    console.log(`focus ${fi.parcelId || 'none'} hidden(base/wall/FAR) ${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden} · FULL ${fi.baseFull?.fingerprint}→${fi.focusFull?.fingerprint} · FAR ${fi.baseLean?.fingerprint}→${fi.focusLean?.fingerprint} · overrides ${fi.focusFull?.overrides}/${fi.focusLean?.overrides}${focusOk ? '' : '✗'}`);
-    console.log(`committed edit persistent/marked ${ce.persistent}/${ce.marked} · FULL ${ce.baseFull?.fingerprint}→${ce.editedFull?.fingerprint} · FAR ${ce.baseLean?.fingerprint}→${ce.editedLean?.fingerprint} · overrides ${ce.fullOverrides}/${ce.leanOverrides} · zero base delta ${ce.fullZeroDelta}${committedOk ? '' : '✗'}`);
+    console.log(`focus ${fi.parcelId || 'none'} hidden(base/wall/FAR/aux) ${fi.baseHidden}/${fi.wallHidden}/${fi.impostorHidden}/${fi.auxiliaryHidden} · FULL ${fi.baseFull?.fingerprint}→${fi.focusFull?.fingerprint} · FAR ${fi.baseLean?.fingerprint}→${fi.focusLean?.fingerprint} · overrides ${fi.focusFull?.overrides}/${fi.focusLean?.overrides}${focusOk ? '' : '✗'}`);
+    console.log(`committed edit persistent/marked ${ce.persistent}/${ce.marked} · FULL ${ce.baseFull?.fingerprint}→${ce.editedFull?.fingerprint} · FAR ${ce.baseLean?.fingerprint}→${ce.editedLean?.fingerprint} · overrides ${ce.fullOverrides}/${ce.leanOverrides} · zero base delta ${ce.fullZeroDelta} · auxiliary accepted/hidden ${ce.auxiliaryAccepted}/${ce.auxiliaryHidden} · aux mesh Δ ${ce.fullAuxiliaryMeshDelta}/${ce.leanAuxiliaryMeshDelta}${committedOk ? '' : '✗'}`);
     if (h.suggestions) console.log('  안내:', h.suggestions.join(' | '));
   }
 }

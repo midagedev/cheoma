@@ -945,8 +945,10 @@ try {
       && reference.text.includes('ㅡ·ㄱ·ㄷ·ㅁ')
       && reference.text.includes('앱의 칸·충돌 안전 범위')
       && reference.text.includes('역사적 빈도나 보편 비례가 아닌')
+      && reference.text.includes('독립 별채는 몸채·부속채·마당이라는 공간 어휘만 참고')
+      && reference.text.includes('배치 확률·치수·안전 clearance를 역사적 실측 분포로 주장하지 않는다')
       && reference.links.some((url) => url.includes('hanokdb.kr/theology/sub_02')),
-  'National Hanok Center semantic-slot evidence and non-historical safety bounds render in Product References');
+  'National Hanok Center house/auxiliary vocabulary and non-historical product bounds render in Product References');
   pass(reference.text.includes('출입용 호와 채광·조망·환기용 창')
       && reference.text.includes('창 하부 머름 apron/rail')
       && reference.text.includes('lowerPanel')

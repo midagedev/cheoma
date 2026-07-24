@@ -9,6 +9,7 @@ import { PRESETS } from '../../params.js';
 import { parcelMatrix, decomposeByMaterial, mirrorDecomp, shareMaterials } from '../../village/instancing.js';
 import { parcelRotY } from '../shared/parcel-transform.js';
 import { buildVillageWall } from '../../village/walls.js';
+import { buildAuxiliaryBuilding } from '../../village/auxiliary-building-geometry.js';
 import { CHOGA_VARIANTS, GIWA_VARIANTS } from '../../village/variants.js';
 import { chunkLodDistance } from '../../village/chunks.js';
 import {
@@ -81,12 +82,14 @@ export function placeParcel(parcel, protos, wallMats, char01 = 0.5, site = null)
   // 마당 담 — 유형(tile/stone/brush)·부속채 어휘. 필지 부정형 shape 를 따라 변별 담.
   g.add(buildVillageWall(parcel.shape, wallMats, {
     style: parcel.wallType || 'stone', kind: parcel.kind, seed: parcel.seed, char01,
-    aux: parcel.aux, plotW: parcel.plotW, plotD: parcel.plotD,
+    aux: parcel.aux, auxRequested: parcel.auxRequested,
+    plotW: parcel.plotW, plotD: parcel.plotD,
     gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
     parcel, site, baseY: parcel.baseY,
     wallHeightK: parcel.wallHeightK, jangdok: parcel.jangdok,
     yardStack: parcel.yardStack, clothesline: parcel.clothesline, vegBed: parcel.vegBed,
   }));
+  if (parcel.auxiliary) g.add(buildAuxiliaryBuilding(parcel.auxiliary, wallMats));
   g.rotation.y = parcelRotY(parcel);
   g.position.set(parcel.center.x, parcel.baseY || 0, parcel.center.z);
   g.userData.parcel = parcel;
@@ -218,7 +221,8 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
 export function buildCourtyard(parcel, wallMats, char01, site = null) {
   const g = buildVillageWall(parcel.shape, wallMats, {
     style: parcel.wallType || 'stone', kind: parcel.kind, seed: parcel.seed, char01,
-    aux: parcel.aux, plotW: parcel.plotW, plotD: parcel.plotD,
+    aux: parcel.aux, auxRequested: parcel.auxRequested,
+    plotW: parcel.plotW, plotD: parcel.plotD,
     gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
     parcel, site, baseY: parcel.baseY,
     // #55: 담 높이 연속 변주 + 마당 부속 소품(신분 상관). 전부 공유 재질 → 병합 후 드로우콜 불변.
