@@ -11,7 +11,8 @@
 
 현재 `src/api/building.js`는 parcel·hanok·palace API도 함께 재노출하고 palette가 일부 환경 helper를 참조하므로,
 native ESM은 그 재노출 dependency도 해석한다. 이 예제의 “최소”는 byte-minimal module graph가 아니라 외부 소비자
-코드와 실행 scene의 최소 경계를 뜻한다. 시전, 계절 마당 생활상, 토담 표면은 아래의 독립 façade를 사용하며, package export map 분리는 아직
+코드와 실행 scene의 최소 경계를 뜻한다. 시전, 계절 마당 생활상, 토담 표면, 길가 배수는 아래의
+독립 façade를 사용하며, package export map 분리는 아직
 이 문서의 범위가 아니다.
 
 ES module은 `file://`에서 열지 말고 저장소 루트를 정적 HTTP 서버로 제공한다. 먼저 루트 Playwright와 앱의
@@ -210,6 +211,53 @@ disposeMudWallSurfaceGeometry(geometry);
 사용하며 프레임마다 분기하거나 geometry를 다시 만들지 않는다. 반환 geometry만 façade가 소유하고
 호출자가 주입한 material·texture·scene은 해제하지 않는다.
 
+## 길가 배수 계획과 renderer
+
+도로 배수는 마을 전체 runtime 없이도 순수 계획과 정적 geometry를 따로 재사용할 수 있다.
+`src/api/drainage-plan.js`는 Three·DOM·전역 `Math.random` 없이 도로, 필지의 저장된 대문 접근,
+실제 삼각 지형, 생산지 polygon을 받아 world-space `runs`와 `crossings`를 만든다.
+
+```js
+import {
+  planRoadsideDrainage,
+  validateRoadsideDrainagePlan,
+} from './cheoma/src/api/drainage-plan.js';
+
+const drainage = planRoadsideDrainage({
+  roads: villagePlan.roads,
+  parcels: villagePlan.parcels,
+  site: villagePlan.site,
+  productionPolygons: villagePlan.paddies,
+});
+validateRoadsideDrainagePlan(drainage);
+```
+
+일반 hamlet/village/town은 빈 계획을 반환한다. Hanyang 계획가로와 capital 간선도 실제 낮은
+유출구가 성립하는 구간만 남기므로, 외부 소비자도 renderer 단계에서 임의의 도랑을 추가하거나 카메라에
+맞춰 좌표를 바꾸지 않는다. `point.surfaceY`는 정확한 삼각 지형 높이, `point.y`는 보이는 도랑
+바닥의 절대 높이이고 `crossing.center.y`는 판석의 명목 상면이다.
+
+```js
+import {
+  buildDrainage,
+  disposeDrainage,
+} from './cheoma/src/api/drainage.js';
+
+const root = buildDrainage(drainage, {
+  materials: { ground: vertexColorGroundMaterial },
+});
+scene.add(root);
+
+scene.remove(root);
+disposeDrainage(root); // true
+disposeDrainage(root); // false
+```
+
+빌린 `ground`는 `MeshStandardMaterial`이며 `vertexColors: true`여야 하고 호출자 소유로 남는다.
+재질을 생략하면 renderer가 texture 없는 기본 material 하나를 만들고 `disposeDrainage()`가 함께
+해제한다. 어느 경로든 root는 도랑 한 mesh와 판석 한 mesh 이하의 geometry만 소유하고 shadow caster,
+물 animation, 별도 depth material을 만들지 않는다.
+
 ## Three는 한 인스턴스만 사용한다
 
 코어와 외부 scene이 서로 다른 Three를 쓰면 `instanceof`, prototype patch, addon geometry가 조용히
@@ -244,6 +292,8 @@ peer dependency로 두는 것이 이 계약과 맞다.
 | `buildYardLife()`에 주입한 여섯 source material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | `buildMudWallSurfaceGeometry()`의 `body`·`fibres` geometry | 토담 표면 façade | mesh 분리 후 `disposeMudWallSurfaceGeometry(result)` |
 | 토담 body·fibre에 붙인 material·texture | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
+| `buildDrainage()` 반환 root의 도랑·판석 geometry와 생략 시 기본 material | 배수 renderer | scene 분리 후 `disposeDrainage(root)` |
+| `buildDrainage()`에 주입한 `ground` material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | 외부 scene, camera, renderer, light, ground | 외부 통합 | 각 통합의 teardown에서 별도 해제 |
 | 모듈 수명 공유 prop 자원 | cheoma 모듈 | 개별 건물 dispose 대상 아님 |
 

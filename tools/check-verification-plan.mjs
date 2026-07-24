@@ -93,6 +93,21 @@ assert.deepEqual(ids(['src/village/options.js']), ['core', 'share', 'app', 'work
 assert.deepEqual(ids(['src/generators/village/roads.js']), [
   'core', 'app', 'worker', 'surface-browser',
 ]);
+assert.deepEqual(ids(['src/village/drainage-plan.js'], {
+  newPaths: ['src/village/drainage-plan.js'],
+}), ['core', 'app', 'worker', 'surface-browser']);
+assert.deepEqual(ids(['src/village/drainage-geometry.js'], {
+  newPaths: ['src/village/drainage-geometry.js'],
+}), ['core', 'app', 'worker', 'surface-browser']);
+assert.deepEqual(ids(['src/api/drainage-plan.js'], {
+  newPaths: ['src/api/drainage-plan.js'],
+}), ['core', 'app', 'worker', 'surface-browser']);
+assert.deepEqual(ids(['src/api/drainage.js'], {
+  newPaths: ['src/api/drainage.js'],
+}), ['core', 'app', 'worker', 'surface-browser']);
+assert.deepEqual(ids(['tools/shoot-drainage.mjs'], {
+  newPaths: ['tools/shoot-drainage.mjs'],
+}), ['core', 'app', 'surface-browser']);
 assert.deepEqual(ids(['src/surfaces/packed-earth.js']), [
   'core', 'app', 'worker', 'surface-browser',
 ]);
@@ -335,6 +350,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',
   './check-road-contract.mjs',
+  './check-drainage-plan.mjs',
   './check-layout-contract.mjs',
   './check-wall-gate-contract.mjs',
   './check-wall-step-contract.mjs',

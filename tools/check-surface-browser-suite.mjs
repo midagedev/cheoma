@@ -7,6 +7,7 @@ if (process.env.CHEOMA_BROWSER_LOCK_HELD !== '1') {
 const checks = [
   ['packed-earth road surface', 'tools/check-surface-materials-browser.mjs'],
   ['physical mud-wall surface', 'tools/shoot-mud-wall.mjs'],
+  ['physical roadside drainage', 'tools/shoot-drainage.mjs'],
 ];
 
 for (const [label, script] of checks) {

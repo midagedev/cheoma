@@ -47,6 +47,7 @@ import {
 } from '../generators/village/terrain.js';
 import { scatterTrees } from '../generators/village/trees.js';
 import { buildRoads } from '../generators/village/roads.js';
+import { buildDrainage } from './drainage-geometry.js';
 import {
   attachChunkLodSwap,
   buildCourtyard,
@@ -163,9 +164,15 @@ export function* populateVillageSteps(plan, opts = {}) {
     owners: new Map(),
   };
 
-  // 3) 도로 · 4) 논 (병합 후 추가)
+  // 3) 도로·배수 · 4) 논 (병합 후 추가)
   const roadsGroup = (plan.roads && plan.roads.length) ? buildRoads(site, plan.roads) : null;
+  const drainageGroup = plan.drainage
+    && (plan.drainage.runs?.length || plan.drainage.crossings?.length)
+    ? buildDrainage(plan.drainage)
+    : null;
   const paddyGroup = plan.paddies ? buildPaddyFields(site, plan.paddies) : null;
+  // Keep the established progress label: callers treat this as one static
+  // surface assembly checkpoint rather than a list of every child layer.
   yield 'roads+paddy';
 
   // 5) 필지(집·담·문)
@@ -348,6 +355,9 @@ export function* populateVillageSteps(plan, opts = {}) {
   // 도로는 buildRoads가 처음부터 단일 indexed mesh로 조립한다. mergeStatic을 다시 거치면
   // 불필요하게 non-indexed 복제되어 정점·메모리만 약 4배 늘어난다.
   if (roadsGroup) root.add(roadsGroup);
+  // 배수도 세계 좌표의 두 indexed mesh(도랑·건넘) 이하로 이미 정적 조립된다. 별도 병합은
+  // vertex color와 독립 lifecycle만 흐리고 성능 이득이 없으므로 그대로 한 그룹으로 붙인다.
+  if (drainageGroup?.children.length) root.add(drainageGroup);
   if (optimize) {
     if (paddyGroup) root.add(mergeStatic([paddyGroup], 'village-paddies'));
     if (landmarks.length) root.add(mergeStatic(landmarks, 'village-landmarks'));
@@ -514,7 +524,7 @@ export function* populateVillageSteps(plan, opts = {}) {
 
   root.userData = {
     plan, waterU, matSets, houseHandle, heroHandle, optimize,
-    flora, yardLife, yardLifeRecords, animals, nightLights, bloom, forest,
+    flora, yardLife, yardLifeRecords, animals, nightLights, bloom, forest, drainageGroup,
     palaceCore,   // 궁 편집 핸들(#93) — 미병합 palace-core 그룹(궁 없으면 null), userData.palaceCompound 로 일곽 접근
     palaceMerged, // #140-B 부감 병합본(궁 없거나 비최적화면 null) — 어댑터가 focus-in 시 가리고 오버레이로 교체(히어로 #62 동형)
     templeCore, templeMerged, templeSiteMerged,

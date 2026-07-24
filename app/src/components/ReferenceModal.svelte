@@ -32,11 +32,15 @@
   const INTRO_EN = 'Each entry maps to what it shaped in the app, not the source alone. Licenses are as of the survey date (2026-07); re-verify before redistribution or commercial use.';
   const intro = $derived(isKo ? CREDITS.intro : INTRO_EN);
   const disclaimer = $derived(isKo ? CREDITS.disclaimer.ko : (CREDITS.disclaimer.en || CREDITS.disclaimer.ko));
+  const REFERENCE_TOPICS = new Map([
+    ['국사편찬위원회·서울역사박물관·국가유산청 — 조선 길가 배수와 제한적 마을 수로 / Roadside drainage and exceptional village waterways', 'drainage'],
+  ]);
 
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
   const localizedUse = (item) => (
     isKo ? item.use.ko : (item.use.en || item.use.ko)
   );
+  const referenceTopic = (item) => REFERENCE_TOPICS.get(item.title);
 
   // **볼드** 세그먼트 분해 — <strong> 로 렌더(먹 강조 유지). 일반 구간의 홑별표(*이탤릭*)는 제거.
   function segs(text) {
@@ -173,7 +177,7 @@
           {#if cat.note}<p class="catnote">{cat.note}</p>{/if}
           <ul>
             {#each cat.items as it}
-              <li data-reference-item={it.title}>
+              <li data-reference-item={it.title} data-reference-topic={referenceTopic(it)}>
                 <div class="it-title" data-reference-field="title">{it.title}</div>
                 {#each it.meta as m}<div class="it-meta" data-reference-field="scope">{m}</div>{/each}
                 {#if it.use}
