@@ -1350,7 +1350,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       + `|${opts.char01 == null ? 'a' : opts.char01},${n(opts.diversityK, 1)}`
       + `|r${opts.siteR == null ? 'a' : opts.siteR}|h${opts.houses == null ? 'a' : opts.houses}`
       + `|w${VILLAGE_WALL_STYLE_IDS.map((key) => n(opts.wallWeights?.[key], 1)).join(',')}`
-      + (isVillageMjaHouseProductContext(opts.mjaHouse) ? '|mja.1' : '');
+      + (opts.mjaHouse == null
+        ? ''
+        : isVillageMjaHouseProductContext(opts.mjaHouse)
+          ? '|mja.1'
+          : `|mja.${JSON.stringify(opts.mjaHouse)}`);
     return `${base}|${tune}`;
   }
 

@@ -317,7 +317,9 @@ function canonicalVillage(village) {
   if (village.includeTemple != null && typeof village.includeTemple !== 'boolean') return null;
   if (village.stream != null && typeof village.stream !== 'boolean') return null;
   if (village.river != null && typeof village.river !== 'boolean') return null;
-  if (village.mjaHouse != null && !isVillageMjaHouseProductContext(village.mjaHouse)) return null;
+  if (village.mjaHouse != null
+      && (!isVillageMjaHouseProductContext(village.mjaHouse)
+        || (scale !== 'hamlet' && scale !== 'village'))) return null;
   const character = village.character ?? 'yeoyeom';
   const options = { ...VILLAGE_OPTION_DEFAULTS };
   for (const spec of Object.values(VILLAGE_NUMBER_FIELDS)) {
@@ -547,6 +549,7 @@ export function decodeSceneSnapshot(payload) {
     }
     if (fields.has('mh')) {
       if (fields.get('mh') !== '1') return null;
+      if (scale !== 'hamlet' && scale !== 'village') return null;
       village.mjaHouse = VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT;
     }
     if (fields.has('f')) {

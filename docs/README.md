@@ -31,6 +31,7 @@
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
 | [`dancheong.md`](dancheong.md) | 계약 + 리서치 | 궁 기본 모로·사찰 중심 불전 금단청 위계, 선명도/격식 축, 불변 source 캐시·수명·성능 계약과 공식 근거. |
 | [`house-diversity.md`](house-diversity.md) | 계약 | 일반 주택의 필지·살림 위계, ㅡ·ㄱ·ㄷ 레퍼토리, ㄷ 최소 4칸과 실제 처마 fit·성능 예산. |
+| [`mja-hanok.md`](mja-hanok.md) | 계약 + 리서치 | 안동문화권 ㅁ자 뜰집의 한계와 opt-in, 북측 一자 팔작 + 연속 ㄷ자 익사·중문채, 실제 fit·남측 접근·30° 일조 계약. |
 | [`architectural-authenticity.md`](architectural-authenticity.md) | 계약 + 리서치 | 지붕 장식·민가 창호·부엌/구들·담장/마당 감사, 사실→경량 구현 번역, 완료/잔여 체크리스트와 공식 근거. |
 | [`surface-materials.md`](surface-materials.md) | 계약 + 리서치 | 재사용 가능한 결정론 표면 source/Three adapter 경계, 흙길 월드 UV·색공간·LOD·수명·성능·A/B 채택 기준. |
 | [`mud-wall.md`](mud-wall.md) | 계약 + 리서치 | 판담·짚·돌 굽·하부 습윤 근거와 순수 profile, footprint·정적 병합·거리 LOD·성능 경계. |

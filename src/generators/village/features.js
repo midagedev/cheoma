@@ -25,6 +25,10 @@ import {
   featurePadMaterials,
 } from './pads.js';
 import { buildSijeon as renderSijeon } from './sijeon.js';
+import {
+  buildMjaHouse,
+  disposeMjaHouse,
+} from '../../village/mja-house-geometry.js';
 
 function sijeonMaterial(color, roughness, role) {
   const material = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
@@ -133,13 +137,23 @@ export function buildPaddyFields(site, paddies) {
 
 export function buildHeroParcel(parcel, site) {
   const group = new THREE.Group();
-  group.add(buildParcel({
-    seed: parcel.seed || 7,
-    style: parcel.heroStyle || 'hanok',
-    plotW: parcel.plotW,
-    plotD: parcel.plotD,
-    lanterns: false,
-  }));
+  if (parcel.mjaHouse) {
+    const compound = buildMjaHouse(parcel.mjaHouse);
+    group.add(compound);
+    group.userData.disposeCompound = () => {
+      const disposed = disposeMjaHouse(compound);
+      compound.removeFromParent();
+      return disposed;
+    };
+  } else {
+    group.add(buildParcel({
+      seed: parcel.seed || 7,
+      style: parcel.heroStyle || 'hanok',
+      plotW: parcel.plotW,
+      plotD: parcel.plotD,
+      lanterns: false,
+    }));
+  }
   group.rotation.y = G.facingY(parcel.frontDir);
   group.position.set(
     parcel.center.x,

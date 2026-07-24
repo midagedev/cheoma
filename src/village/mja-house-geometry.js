@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { buildBuilding, disposeBuilding } from '../builder/index.js';
+import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
 import { makeMaterials } from '../builder/palette.js';
+import { attachShadowDepthTextureLifecycle } from '../render/shadow-depth-texture-lifecycle.js';
 import { validateMjaHousePlan } from './mja-house-plan.js';
+import { mergeStatic } from './instancing.js';
 import {
   addMaterialResource,
   collectObjectResources,
@@ -21,22 +24,7 @@ const PRIMARY_RUNTIME_NAMES = new Set([
   'primary-door-rigid-frame',
   'primary-door-pivot',
 ]);
-
-function finite(value, label) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) throw new TypeError(`MJA ${label} must be finite`);
-  return number;
-}
-
-function pointXZ(value, label) {
-  if (!value || typeof value !== 'object') {
-    throw new TypeError(`MJA ${label} must be an {x,z} point`);
-  }
-  return {
-    x: finite(value.x, `${label}.x`),
-    z: finite(value.z, `${label}.z`),
-  };
-}
+const AMBIENCE_ROOT_NAMES = new Set(['chimney', 'agungi']);
 
 function collectPaletteResources(palette) {
   const resources = { materials: new Set(), textures: new Set() };
@@ -57,6 +45,26 @@ function disposeBorrowingTree(root, paletteResources) {
   disposeObjectResources(resources);
 }
 
+function releaseSourceGeometries(root) {
+  root?.traverse?.((object) => {
+    if (!object.geometry?.dispose) return;
+    object.geometry.dispose();
+    // Keep the detached source tree only as the builder lifecycle's material
+    // ownership ledger. Clearing the released geometry prevents a later
+    // disposeBuilding() from dispatching a second dispose event.
+    object.geometry = null;
+  });
+}
+
+function disposeTreeGeometries(root) {
+  const geometries = collectObjectResources(root).geometries;
+  disposeObjectResources({
+    geometries,
+    materials: new Set(),
+    textures: new Set(),
+  });
+}
+
 function courtyardGeometry(polygon) {
   const shape = new THREE.Shape();
   polygon.forEach((point, index) => {
@@ -75,176 +83,6 @@ function buildCourtyard(plan, mats) {
   mesh.position.y = Number.isFinite(plan.courtyard.y) ? plan.courtyard.y : 0.012;
   mesh.receiveShadow = true;
   return mesh;
-}
-
-function gateYaw(gate) {
-  if (Number.isFinite(gate.yaw)) return gate.yaw;
-  if (Number.isFinite(gate.rotationY)) return gate.rotationY;
-  const outward = gate.outward && pointXZ(gate.outward, 'gate.outward');
-  return outward ? Math.atan2(outward.x, outward.z) : 0;
-}
-
-function gateMesh(geometry, material, name, castShadow = true) {
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = name;
-  mesh.castShadow = castShadow;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-// A restrained 솟을대문-like entrance assembled only from the supplied giwa
-// palette. The open leaves preserve a real camera/person passage; no alpha cutout
-// or facade impostor is used for the compound's authoritative south entrance.
-function buildSouthGate(gatePlan, mats) {
-  const root = new THREE.Group();
-  root.name = 'mja-south-gate';
-  const center = pointXZ(gatePlan.center || gatePlan.position, 'gate.center');
-  const width = finite(gatePlan.width, 'gate.width');
-  const clearHeight = finite(gatePlan.height, 'gate.height');
-  const roofPlan = gatePlan.roof || {};
-  const baseY = Number.isFinite(gatePlan.center?.y)
-    ? gatePlan.center.y
-    : (Number.isFinite(gatePlan.y) ? gatePlan.y : 0);
-  const depth = Math.max(
-    1.25,
-    Math.min(2.4, Number(gatePlan.depth) || Number(roofPlan.depth) || width * 0.55),
-  );
-  const post = Math.max(0.18, Math.min(0.28, width * 0.085));
-  const postX = width * 0.5 + post * 0.5;
-  const postHeight = Number.isFinite(gatePlan.postHeight)
-    ? Math.max(clearHeight, gatePlan.postHeight)
-    : clearHeight + 0.34;
-
-  for (const xSign of [-1, 1]) {
-    for (const zSign of [-1, 1]) {
-      const column = gateMesh(
-        new THREE.BoxGeometry(post, postHeight, post),
-        mats.wood,
-        'mja-gate-column',
-      );
-      column.position.set(xSign * postX, postHeight * 0.5, zSign * depth * 0.36);
-      root.add(column);
-    }
-  }
-
-  for (const zSign of [-1, 1]) {
-    const lintel = gateMesh(
-      new THREE.BoxGeometry(width + post * 2.8, 0.22, 0.2),
-      mats.woodDark,
-      'mja-gate-lintel',
-    );
-    lintel.position.set(0, clearHeight + 0.08, zSign * depth * 0.36);
-    root.add(lintel);
-  }
-
-  const sill = gateMesh(
-    new THREE.BoxGeometry(width + post * 0.8, 0.11, depth * 0.82),
-    mats.stoneDark,
-    'mja-gate-sill',
-    false,
-  );
-  sill.position.y = 0.055;
-  root.add(sill);
-
-  const leafGap = 0.08;
-  const leafWidth = (width - leafGap) * 0.5;
-  const leafHeight = Math.max(1.65, clearHeight - 0.2);
-  for (const sign of [-1, 1]) {
-    const hinge = new THREE.Group();
-    hinge.name = 'mja-gate-open-leaf-hinge';
-    hinge.position.set(sign * width * 0.5, 0.12, depth * 0.34 + 0.035);
-    hinge.rotation.y = sign * 1.12;
-    const leaf = gateMesh(
-      new THREE.BoxGeometry(leafWidth, leafHeight, 0.075),
-      mats.woodBoard,
-      'mja-gate-open-leaf',
-    );
-    leaf.position.set(-sign * leafWidth * 0.5, leafHeight * 0.5, 0);
-    hinge.add(leaf);
-    root.add(hinge);
-  }
-
-  finite(roofPlan.overhang, 'gate.roof.overhang');
-  // width/depth are the already-expanded authoritative roof envelope; the
-  // stored overhang documents how it was derived and must not be added twice.
-  const roofWidth = finite(roofPlan.width, 'gate.roof.width');
-  const roofRun = finite(roofPlan.depth, 'gate.roof.depth') * 0.5;
-  const roofEaveY = finite(roofPlan.eaveY, 'gate.roof.eaveY') - baseY;
-  const roofRidgeY = finite(roofPlan.ridgeY, 'gate.roof.ridgeY') - baseY;
-  const roofRise = roofRidgeY - roofEaveY;
-  if (!(roofRise > 0)) throw new RangeError('MJA gate roof ridge must be above its eave');
-  const roofSlope = Math.hypot(roofRun, roofRise);
-  const pitch = Math.atan2(roofRise, roofRun);
-  for (const sign of [-1, 1]) {
-    const roof = gateMesh(
-      new THREE.BoxGeometry(roofWidth, 0.13, roofSlope),
-      mats.tileFlat,
-      'mja-gate-roof-slope',
-    );
-    roof.position.set(0, roofEaveY + roofRise * 0.5, sign * roofRun * 0.5);
-    roof.rotation.x = sign * pitch;
-    root.add(roof);
-  }
-  const rollCount = Math.max(7, Math.round((roofWidth - 0.18) / 0.34));
-  const rollGeometry = new THREE.CylinderGeometry(0.042, 0.042, roofSlope * 1.01, 8);
-  const rolls = new THREE.InstancedMesh(rollGeometry, mats.tileConvex, rollCount * 2);
-  rolls.name = 'mja-gate-roof-tile-rolls';
-  const up = new THREE.Vector3(0, 1, 0);
-  const direction = new THREE.Vector3();
-  const position = new THREE.Vector3();
-  const quaternion = new THREE.Quaternion();
-  const matrix = new THREE.Matrix4();
-  const scale = new THREE.Vector3(1, 1, 1);
-  let instance = 0;
-  for (const sign of [-1, 1]) {
-    direction.set(0, -roofRise, sign * roofRun).normalize();
-    quaternion.setFromUnitVectors(up, direction);
-    for (let index = 0; index < rollCount; index++) {
-      const t = rollCount === 1 ? 0.5 : index / (rollCount - 1);
-      position.set(
-        -roofWidth * 0.5 + 0.1 + (roofWidth - 0.2) * t,
-        roofEaveY + roofRise * 0.5 + 0.075,
-        sign * roofRun * 0.5,
-      );
-      matrix.compose(position, quaternion, scale);
-      rolls.setMatrixAt(instance++, matrix);
-    }
-  }
-  rolls.instanceMatrix.needsUpdate = true;
-  rolls.castShadow = true;
-  root.add(rolls);
-
-  const gableGeometry = new THREE.BufferGeometry();
-  gableGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
-    -roofWidth * 0.5, roofEaveY, -roofRun,
-    -roofWidth * 0.5, roofEaveY, roofRun,
-    -roofWidth * 0.5, roofRidgeY, 0,
-    roofWidth * 0.5, roofEaveY, roofRun,
-    roofWidth * 0.5, roofEaveY, -roofRun,
-    roofWidth * 0.5, roofRidgeY, 0,
-  ], 3));
-  gableGeometry.setIndex([0, 1, 2, 3, 4, 5]);
-  gableGeometry.computeVertexNormals();
-  root.add(gateMesh(gableGeometry, mats.plaster, 'mja-gate-gable-ends'));
-
-  const ridge = gateMesh(
-    new THREE.CylinderGeometry(0.1, 0.1, roofWidth + 0.12, 10),
-    mats.tileRidge,
-    'mja-gate-roof-ridge',
-  );
-  ridge.rotation.z = Math.PI * 0.5;
-  ridge.position.y = roofRidgeY + 0.06;
-  root.add(ridge);
-
-  root.position.set(center.x, baseY, center.z);
-  root.rotation.y = gateYaw(gatePlan);
-  root.userData.mjaGate = {
-    id: gatePlan.id || 'south-gate',
-    width,
-    height: clearHeight,
-    outward: gatePlan.outward || { x: 0, z: 1 },
-  };
-  return root;
 }
 
 function primaryWingId(plan) {
@@ -324,6 +162,22 @@ function ensureSinglePrimaryAnchor(root) {
   return anchors[0];
 }
 
+function detachAmbienceRoots(buildings, renderSource, root) {
+  const ambience = new THREE.Group();
+  ambience.name = 'mja-house-ambience-details';
+  root.add(ambience);
+  renderSource.updateWorldMatrix(true, true);
+  for (const building of buildings) {
+    const owned = [];
+    building.traverse((object) => {
+      if (AMBIENCE_ROOT_NAMES.has(object.name)) owned.push(object);
+    });
+    for (const object of owned) ambience.attach(object);
+  }
+  ambience.userData.asmChunked = true;
+  return ambience;
+}
+
 /**
  * Assemble one renderer-free MJA plan into reusable local-space Three geometry.
  * A caller-supplied giwa palette remains caller-owned. When omitted, the root
@@ -335,22 +189,64 @@ export function buildMjaHouse(planInput, { mats } = {}) {
   const paletteResources = collectPaletteResources(palette);
   const root = new THREE.Group();
   root.name = 'mja-house';
+  const renderSource = new THREE.Group();
+  renderSource.name = 'mja-house-render-source';
   const details = new THREE.Group();
   details.name = 'mja-house-details';
   const buildings = [];
+  let ambience = null;
+  let staticRender = null;
 
   try {
     details.add(buildCourtyard(plan, palette));
-    details.add(buildSouthGate(plan.gate, palette));
-    root.add(details);
+    renderSource.add(details);
 
     const authoritativeWingId = primaryWingId(plan);
     for (const wing of plan.wings) {
       const building = buildWing(wing, palette);
       buildings.push(building);
-      root.add(building);
+      renderSource.add(building);
     }
 
+    // Retain the one renderer-authored wing anchor as a transform-only audit
+    // object. The authoritative compound anchor remains the only object with
+    // the public primary-opening-anchor name.
+    renderSource.updateWorldMatrix(true, true);
+    const authoredAnchor = renderSource.getObjectByName(
+      `mja-${authoritativeWingId}-primary-opening-anchor`,
+    );
+    if (!authoredAnchor) throw new Error(`MJA authored primary anchor missing: ${authoritativeWingId}`);
+    root.attach(authoredAnchor);
+    // Chimney and hearth names are a real close-range ambience API. Keep these
+    // two tiny subtrees physical and semantic; the large static envelope alone
+    // is flattened.
+    ambience = detachAmbienceRoots(buildings, renderSource, root);
+
+    // Preserve authored window-light metadata before the hierarchy is flattened.
+    root.userData.openingGlowAnchors = collectOpeningGlowAnchors(
+      renderSource,
+      { space: 'local' },
+    );
+    // Keep three semantic assembly/culling chunks: yard, north anchae, and the
+    // one continuous ㄷ wing whose body owns the middle-gate passage. Exact
+    // shadow-state partitioning avoids promoting intentionally unlit walls.
+    staticRender = new THREE.Group();
+    staticRender.name = 'mja-house-static';
+    const sources = [
+      ['courtyard', details],
+      ...buildings.map((building, index) => [plan.wings[index].role, building]),
+    ];
+    for (const [role, source] of sources) {
+      const chunk = mergeStatic([source], `mja-house-${role}`, {
+        partitionShadowFlags: true,
+        reattachShadowDepthTextureLifecycle: true,
+      });
+      chunk.userData.asmChunked = true;
+      staticRender.add(chunk);
+    }
+    attachShadowDepthTextureLifecycle(staticRender);
+    releaseSourceGeometries(renderSource);
+    root.add(staticRender);
     root.add(createCompoundPrimaryAnchor(plan, authoritativeWingId));
     ensureSinglePrimaryAnchor(root);
     root.userData.mjaHouseHandle = {
@@ -367,13 +263,17 @@ export function buildMjaHouse(planInput, { mats } = {}) {
       disposed: false,
       buildings,
       details,
+      ambience,
+      staticRender,
       paletteResources,
       ownsPalette: !mats,
     });
     return root;
   } catch (error) {
+    if (staticRender) disposeTreeGeometries(staticRender);
     for (const building of buildings) disposeBuilding(building);
     disposeBorrowingTree(details, paletteResources);
+    disposeBorrowingTree(ambience, paletteResources);
     if (!mats) {
       disposeObjectResources({
         geometries: new Set(),
@@ -389,8 +289,10 @@ export function disposeMjaHouse(root) {
   const state = root && lifecycle.get(root);
   if (!state || state.disposed) return false;
   state.disposed = true;
+  disposeTreeGeometries(state.staticRender);
   for (const building of state.buildings) disposeBuilding(building);
   disposeBorrowingTree(state.details, state.paletteResources);
+  disposeBorrowingTree(state.ambience, state.paletteResources);
   if (state.ownsPalette) {
     disposeObjectResources({
       geometries: new Set(),

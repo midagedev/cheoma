@@ -12,6 +12,8 @@ import {
 import * as G from '../core/math/geom2.js';
 import {
   attachParcelSpatialContract,
+  parcelLocalPoint,
+  parcelRoadAccess,
   parcelWorldPoint,
   rectangularParcelShape,
 } from './parcel-contract.js';
@@ -29,6 +31,7 @@ import { attachRoadJunctions } from './road-topology.js';
 import { normalizeVillageTuningOptions } from './options.js';
 import { planSijeon } from './sijeon-plan.js';
 import { planRoadsideDrainage } from './drainage-plan.js';
+import { planMjaHouse } from './mja-house-plan.js';
 
 // v4 마을 자동 구성 진입점. 순수 데이터 VillagePlan 을 반환한다(렌더는 populate.js).
 //
@@ -61,6 +64,79 @@ function reservedParcel(center, frontDir, plotW, plotD, fields = {}) {
 // 돌린 뒤에도 기존 안길이 본채를 관통하지 않도록 필지 중심을 대문에서 북쪽으로 물린다.
 function coreCenterBehindGate(gate, frontDir, plotD) {
   return G.sub(gate, G.mul(G.norm(frontDir), plotD * 0.5));
+}
+
+function attachOptInMjaHouse({
+  context,
+  core,
+  coreRoadAnchor,
+  roads,
+  char01,
+  tuning,
+}) {
+  if (!context || !core || core.heroStyle !== 'hanok' || !coreRoadAnchor || !roads?.length) {
+    return null;
+  }
+  // The pure reusable planner requires the same fitted source frame and stored
+  // road-side gate that every downstream renderer/camera will consume. The
+  // reserved clan core is always p0; assign that stable ID before frontage
+  // planning so the deep-frozen record never needs a later mutation.
+  core.id = 'p0';
+  if (!assignFittedVariation(core, char01, tuning)) return null;
+  const gateLocal = parcelLocalPoint(core, coreRoadAnchor);
+  // Several lateral clan lanes share the exact gate endpoint. Select the one
+  // segment that actually approaches along the south-facing axis; a nearest
+  // distance tie alone would often choose the first sideways branch.
+  let approach = null;
+  for (const road of roads) {
+    for (let index = 0; index < road.pts.length - 1; index++) {
+      const a = road.pts[index], b = road.pts[index + 1];
+      const nearest = G.distToSeg(coreRoadAnchor, a, b);
+      if (nearest.d > 2) continue;
+      const tangent = G.norm(G.sub(b, a));
+      const alignment = Math.abs(G.dot(tangent, core.frontDir));
+      if (!approach
+        || alignment > approach.alignment + 1e-9
+        || (Math.abs(alignment - approach.alignment) <= 1e-9
+          && nearest.d < approach.distance - 1e-9)) {
+        approach = { road, a, b, alignment, distance: nearest.d };
+      }
+    }
+  }
+  if (!approach?.road?.id || approach.alignment < Math.SQRT1_2) return null;
+  const localA = parcelLocalPoint(core, approach.a);
+  const localB = parcelLocalPoint(core, approach.b);
+  const outward = localA.z > localB.z ? approach.a : approach.b;
+  const outwardLocal = localA.z > localB.z ? localA : localB;
+  if (outwardLocal.z <= gateLocal.z + 0.25) return null;
+  const outwardDistance = G.dist(outward, coreRoadAnchor);
+  if (!outward || !Number.isFinite(outwardDistance) || outwardDistance <= 1e-8) return null;
+  // Keep the provenance point on the actual final road segment, but no farther
+  // than four metres from the parcel gate. It is a stored access direction, not
+  // a second renderer-only approach path.
+  const roadPoint = G.lerp(
+    coreRoadAnchor,
+    outward,
+    Math.min(1, 4 / outwardDistance),
+  );
+  const access = parcelRoadAccess(core, approach.road.id, roadPoint);
+  if (!access || access.gateRole !== 'front') return null;
+  core.access = access;
+
+  const mjaHouse = planMjaHouse({ context, parcel: core });
+  if (!mjaHouse) return null;
+  core.mjaHouse = mjaHouse;
+  // The north anchae receives winter sun through the real south gate gap. Keep
+  // the internal start point authored by the reusable plan and extend that
+  // narrow opening to the existing parcel-exterior clearance distance.
+  const corridor = mjaHouse.solarTarget.corridor;
+  const xs = corridor.map((point) => point.x);
+  core.solarAccess = {
+    localStart: mjaHouse.solarTarget.point.z,
+    localEnd: core.solarAccess.localEnd,
+    halfWidth: (Math.max(...xs) - Math.min(...xs)) * 0.5,
+  };
+  return mjaHouse;
 }
 
 function roadStreamCrossing(road, site, cityWall) {
@@ -278,6 +354,30 @@ export function planVillage(opts = {}) {
     roadsResult.roads.push(...riverPort.roads);
     roadsResult.nodes.junctions = attachRoadJunctions(roadsResult.roads);
     features.riverPort = riverPort;
+  }
+
+  // The enclosed Andong-area house is never inferred from weather, rank, or
+  // coordinates. Only an explicit source-context opt-in may replace the one
+  // reserved clan head house, and only at the hamlet/village scales that
+  // actually own that role. Default plans do not enter this branch, preserving
+  // their exact object shape and RNG stream.
+  let mjaHouse = null;
+  if (opts.mjaHouse != null) {
+    const mjaScale = siteR >= resolveSiteR('hamlet')
+      && (scale === 'hamlet' || scale === 'village');
+    const mjaCore = mjaScale
+      ? blockers.find((blocker) => blocker.hero && blocker.heroStyle === 'hanok')
+      : null;
+    mjaHouse = attachOptInMjaHouse({
+      context: opts.mjaHouse,
+      core: mjaCore,
+      coreRoadAnchor,
+      roads: roadsResult.roads,
+      char01,
+      tuning,
+    });
+    if (mjaHouse) norm.mjaHouse = mjaHouse.context;
+    else warnings.push('ㅁ자 반가는 초락·마을의 fitted 종가와 명시적 지역·기후·가계 문맥에서만 구성됨');
   }
 
   // ── 3.25) 사찰 대지·진입로 예약 ── 사찰은 남은 급사면에 사후 삽입되는 장식물이 아니라,
@@ -519,6 +619,7 @@ export function planVillage(opts = {}) {
       paddies: paddies ? paddies.length : 0,
       drainageRuns: drainage.runs.length,
       drainageCrossings: drainage.crossings.length,
+      ...(mjaHouse ? { mjaHouses: 1 } : {}),
       parcelDebug: planParcels.lastDebug,
     },
   };

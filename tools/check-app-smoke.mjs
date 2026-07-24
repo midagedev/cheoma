@@ -41,6 +41,7 @@ const MJA_HANOK_REFERENCE_URLS = Object.freeze([
   'https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001497233',
   'https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART003276541',
   'https://journal.khousing.or.kr/articles/xml/RJPM/',
+  'https://m.korea.kr/news/policyNewsView.do?cateId=&newsId=148944036&pageIndex=12&repCode_P=&smenu=',
 ]);
 const failures = [];
 const pass = (condition, message) => {
@@ -487,11 +488,36 @@ try {
     }
   });
   await sharedPage.goto(nativeShare.payload.url, { waitUntil: 'domcontentloaded', timeout });
-  await sharedPage.waitForFunction(
-    () => window.__SHOT_READY === true && !!window.__engine?.village?.captureView?.(),
-    null,
-    { timeout },
-  );
+  try {
+    await sharedPage.waitForFunction(
+      () => window.__SHOT_READY === true && !!window.__engine?.village?.captureView?.(),
+      null,
+      { timeout },
+    );
+  } catch (error) {
+    const diagnostic = await sharedPage.evaluate(() => ({
+      url: location.href,
+      ready: window.__SHOT_READY,
+      engine: !!window.__engine,
+      village: !!window.__engine?.village,
+      view: window.__engine?.village?.captureView?.() || null,
+      villageState: window.__engine?.village?.getState?.() || null,
+      wave: window.__engine?.village?.debugWave?.() || null,
+      waving: window.__engine?.village?.isWaving?.() ?? null,
+      plan: window.__engine?.village?.debugPlan?.()?.stats || null,
+      body: document.body?.innerText?.replace(/\s+/g, ' ').slice(0, 240) || '',
+      canvases: document.querySelectorAll('canvas').length,
+      visibility: document.visibilityState,
+    })).catch((diagnosticError) => ({
+      evaluationError: diagnosticError instanceof Error
+        ? diagnosticError.message
+        : String(diagnosticError),
+    }));
+    throw new Error(
+      `shared scene bootstrap timed out: ${JSON.stringify({ diagnostic, runtimeErrors })}`,
+      { cause: error },
+    );
+  }
   await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
   const sharedBeforeReload = await sharedPage.evaluate(() => ({
     address: location.href,
@@ -1026,6 +1052,8 @@ try {
       && mjaHanokEvidence.text.includes('일반 주택의 ㅁ자는 기본 off')
       && mjaHanokEvidence.text.includes('기와집 fitted frame')
       && mjaHanokEvidence.text.includes('기존 30° 겨울 일조 계약')
+      && mjaHanokEvidence.text.includes('좌우 익사와 중문채')
+      && mjaHanokEvidence.text.includes('독립 팔작 다섯 채와 별도 솟을대문을 겹치지 않는다')
       && mjaHanokEvidence.text.includes('weather·위도·rank·wealth 자동 선택')
       && mjaHanokEvidence.text.includes('튼ㅁ자·겹집·궁 행각·사찰 배치의 혼용은 배제')
       && MJA_HANOK_REFERENCE_URLS.every((url) => mjaHanokEvidence.links.includes(url))
@@ -1036,7 +1064,7 @@ try {
           && anchor.rel.split(/\s+/).includes('noreferrer')
       ))
       && mjaHanokEvidence.license.includes('CC BY-NC 4.0'),
-  'mja-hanok evidence, opt-in acceptance/exclusions, five canonical links, and safe attributes render in Product References');
+  'mja-hanok evidence, roof/gate topology, six canonical links, and safe attributes render in Product References');
 
   await closeReference.click();
   await referenceDialog.waitFor({ state: 'detached', timeout });

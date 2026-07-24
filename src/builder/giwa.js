@@ -3,6 +3,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildSkeletonRoof } from '../layout/roof-skeleton.js';
 import { giwaFootprint, giwaFootprintPolygon } from '../params.js';
 import { giwaFrontRange } from '../layout/giwa-footprint.js';
+import {
+  giwaThroughPassage,
+  isGiwaThroughPassageBay,
+} from '../layout/giwa-through-passage.js';
+import { buildGiwaMiddleGate } from './giwa-middle-gate.js';
 import { planGiwaKitchenOpening } from '../layout/kitchen-opening-spatial.js';
 import * as G from '../core/math/geom2.js';
 import {
@@ -104,6 +109,7 @@ export function buildGiwa(P, M) {
   const root = new THREE.Group();
   root.name = 'building';
   const footprint = giwaFootprint(P);
+  const throughPassage = giwaThroughPassage(P);
   const { a, b, w, c } = footprint;
   // 정규 풋프린트(기둥/벽 중심선): ㅡ/ㄱ/ㄷ 모두 같은 순수 생성기를 쓴다.
   // buildSkeletonRoof는 CW 감김에서 바깥 법선(윗면)이 나오도록 검증됨.
@@ -297,9 +303,11 @@ export function buildGiwa(P, M) {
       const tm = (k + 0.5) / nb;
       const cx = A.x + (B.x - A.x) * tm, cz = A.z + (B.z - A.z) * tm;
       const bw = len / nb - colR * 1.8;
-      // 대청: 안마당을 향한 본채 정면 중앙 칸은 개방 (아래 대청 블록에서 처리)
+      // 대청: 안마당을 향한 본채 정면 중앙 칸은 개방 (아래 대청 블록에서 처리).
+      // Opt-in 중문채는 같은 중앙 칸을 반대쪽 외벽까지 관통시킨다.
       const mainFront = alongX && Math.abs(A.z - b) < 1e-7 && Math.abs(B.z - b) < 1e-7;
-      if (mainFront && k === cbay && nb >= 3) continue;
+      if ((mainFront && k === cbay && nb >= 3)
+        || isGiwaThroughPassageBay(A, B, k, nb, throughPassage)) continue;
       const opening = openingDetails.openingAt(i, k);
 
       if (opening?.kind === 'door') {
@@ -361,7 +369,7 @@ export function buildGiwa(P, M) {
   openingDetails.finish();
   root.add(columns); root.add(walls);
 
-  // ── 대청·툇마루 (밝은 우물마루 + 세로널 판벽 뒷벽 + 계자난간) ──
+  // ── 대청·툇마루 / 중문채 관통 통로 ──
   const mfloorY = podTopY + 0.42;   // 걸터앉는 마루 높이
   const dep = 1.25;                 // 툇마루 내밀기
   const front = giwaFrontRange(P);
@@ -369,78 +377,88 @@ export function buildGiwa(P, M) {
   const mW = mX1 - mX0, mcx = (mX0 + mX1) / 2, frontZ = front.z;
   const maruMat = () => { const m = M.maru.clone(); m.map = M.maru.map.clone(); m.map.repeat.set(4, 2); m.map.needsUpdate = true; return m; };
 
-  // 툇마루(전면 걸터앉는 마루)
-  const maru = new THREE.Mesh(new THREE.BoxGeometry(mW, 0.12, dep), maruMat());
-  maru.name = 'toenmaru';
-  maru.position.set(mcx, mfloorY, frontZ + dep / 2);
-  maru.castShadow = maru.receiveShadow = true; root.add(maru);
-  const dh = mfloorY - podTopY;
-  for (let x = mX0 + 0.6; x <= mX1 - 0.4; x += 1.5) {
-    const dong = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, dh, 8), M.wood);
-    dong.position.set(x, podTopY + dh / 2, frontZ + dep - 0.18);
-    dong.castShadow = true; root.add(dong);
-  }
-
-  // 대청: 중앙 개방칸 안쪽 우물마루 + 밝은 세로널 판벽 뒷벽(emissive로 실내 어둠 완화)
-  const hallW = Math.min(2.2, Math.max(1.4, mW * 0.34));
-  const hallCx = mcx;                  // 평면마다 달라지는 안마당 정면의 중앙 개방칸
-  const hallFloorMat = M.maru.clone();
-  hallFloorMat.map = M.maru.map.clone(); hallFloorMat.map.repeat.set(2, 3); hallFloorMat.map.needsUpdate = true;
-  hallFloorMat.emissive = new THREE.Color(0x1c140b);   // 안쪽이 검게 죽지 않게 미량 자발광
-  const hall = new THREE.Mesh(new THREE.BoxGeometry(hallW, 0.12, 2 * b - 0.3), hallFloorMat);
-  hall.name = 'daecheong-floor';
-  hall.position.set(hallCx, mfloorY, 0);
-  hall.castShadow = hall.receiveShadow = true; root.add(hall);
-  // 대청 뒷벽(세로널 판벽) — 밝은 목재 + emissive
-  const backMat = M.pungpan.clone();
-  backMat.map = M.pungpan.map.clone(); backMat.map.repeat.set(3, 2); backMat.map.needsUpdate = true;
-  backMat.emissive = new THREE.Color(0x3a2c18);
-  const planwall = new THREE.Mesh(new THREE.BoxGeometry(hallW, colH - 0.2, 0.1), backMat);
-  planwall.position.set(hallCx, podTopY + (colH - 0.2) / 2, -b + 0.12);
-  planwall.receiveShadow = true; root.add(planwall);
-  // 대청 좌우 판벽(개방칸 옆면) — 공간감
-  for (const sx of [-1, 1]) {
-    const sw = new THREE.Mesh(new THREE.BoxGeometry(0.1, colH - 0.4, 2 * b - 0.4), plankMat(2 * b));
-    sw.position.set(hallCx + sx * hallW / 2, podTopY + (colH - 0.4) / 2, 0);
-    sw.receiveShadow = true; root.add(sw);
-  }
-  // 대청 개방칸 상부 인방벽(상인방~창방 공백 채움) — 정면 개구부가 액자처럼 읽히게
-  const transom = new THREE.Mesh(new THREE.BoxGeometry(hallW, yTopWall - (yLintel + 0.1), 0.1), M.plaster);
-  transom.position.set(hallCx, (yLintel + 0.1 + yTopWall) / 2, frontZ - 0.02);
-  transom.receiveShadow = true; root.add(transom);
-  const lintelBeam = new THREE.Mesh(new THREE.BoxGeometry(hallW + 0.1, 0.16, 0.2), woodTrim);
-  lintelBeam.position.set(hallCx, yLintel + 0.05, frontZ - 0.02);
-  lintelBeam.castShadow = true; root.add(lintelBeam);
-
-  // 계자난간: 툇마루 앞·옆 테두리 (난간대 + 동자기둥 + 치마널). 대청 앞은 비워 진입 확보.
-  const railTopY = mfloorY + 0.52, railBotY = mfloorY + 0.08;
-  const rz = frontZ + dep - 0.06;
-  const railMat = M.wood, apronMat = woodTrim;
-  const postGeo = new THREE.BoxGeometry(0.07, 0.5, 0.07);
-  // 전면 난간(대청 앞 gap 제외) — 좌/우 두 구간
-  const gapHalf = hallW / 2 + 0.2;
-  const addFrontRail = (fx0, fx1) => {
-    if (fx1 - fx0 < 0.12) return;
-    const top = new THREE.Mesh(new THREE.BoxGeometry(fx1 - fx0, 0.08, 0.1), railMat);
-    top.position.set((fx0 + fx1) / 2, railTopY, rz); top.castShadow = true; root.add(top);
-    const apron = new THREE.Mesh(new THREE.BoxGeometry(fx1 - fx0, 0.16, 0.05), apronMat);
-    apron.position.set((fx0 + fx1) / 2, railBotY + 0.12, rz); root.add(apron);
-    for (let x = fx0 + 0.1; x <= fx1 - 0.05; x += 0.5) {
-      const p = new THREE.Mesh(postGeo, railMat);
-      p.position.set(x, mfloorY + 0.27, rz); p.castShadow = true; root.add(p);
+  if (throughPassage) {
+    root.add(buildGiwaMiddleGate(throughPassage, {
+      halfWidth: a,
+      halfDepth: b,
+      columnRadius: colR,
+      podiumTopY: podTopY,
+      materials: M,
+    }));
+  } else {
+    // 툇마루(전면 걸터앉는 마루)
+    const maru = new THREE.Mesh(new THREE.BoxGeometry(mW, 0.12, dep), maruMat());
+    maru.name = 'toenmaru';
+    maru.position.set(mcx, mfloorY, frontZ + dep / 2);
+    maru.castShadow = maru.receiveShadow = true; root.add(maru);
+    const dh = mfloorY - podTopY;
+    for (let x = mX0 + 0.6; x <= mX1 - 0.4; x += 1.5) {
+      const dong = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, dh, 8), M.wood);
+      dong.position.set(x, podTopY + dh / 2, frontZ + dep - 0.18);
+      dong.castShadow = true; root.add(dong);
     }
-  };
-  addFrontRail(mX0 + 0.1, hallCx - gapHalf);
-  addFrontRail(hallCx + gapHalf, mX1 - 0.1);
-  // 좌우 짧은 리턴 난간
-  for (const [zx, zz] of [[mX0 + 0.1, 'L'], [mX1 - 0.1, 'R']]) {
-    const top = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, dep - 0.1), railMat);
-    top.name = 'toenmaru-return-railing';
-    top.position.set(zx, railTopY, frontZ + dep / 2); top.castShadow = true; root.add(top);
-    for (let z = frontZ + 0.2; z <= frontZ + dep - 0.1; z += 0.5) {
-      const p = new THREE.Mesh(postGeo, railMat);
-      p.name = 'toenmaru-return-railing';
-      p.position.set(zx, mfloorY + 0.27, z); p.castShadow = true; root.add(p);
+
+    // 대청: 중앙 개방칸 안쪽 우물마루 + 밝은 세로널 판벽 뒷벽(emissive로 실내 어둠 완화)
+    const hallW = Math.min(2.2, Math.max(1.4, mW * 0.34));
+    const hallCx = mcx;                  // 평면마다 달라지는 안마당 정면의 중앙 개방칸
+    const hallFloorMat = M.maru.clone();
+    hallFloorMat.map = M.maru.map.clone(); hallFloorMat.map.repeat.set(2, 3); hallFloorMat.map.needsUpdate = true;
+    hallFloorMat.emissive = new THREE.Color(0x1c140b);   // 안쪽이 검게 죽지 않게 미량 자발광
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(hallW, 0.12, 2 * b - 0.3), hallFloorMat);
+    hall.name = 'daecheong-floor';
+    hall.position.set(hallCx, mfloorY, 0);
+    hall.castShadow = hall.receiveShadow = true; root.add(hall);
+    // 대청 뒷벽(세로널 판벽) — 밝은 목재 + emissive
+    const backMat = M.pungpan.clone();
+    backMat.map = M.pungpan.map.clone(); backMat.map.repeat.set(3, 2); backMat.map.needsUpdate = true;
+    backMat.emissive = new THREE.Color(0x3a2c18);
+    const planwall = new THREE.Mesh(new THREE.BoxGeometry(hallW, colH - 0.2, 0.1), backMat);
+    planwall.position.set(hallCx, podTopY + (colH - 0.2) / 2, -b + 0.12);
+    planwall.receiveShadow = true; root.add(planwall);
+    // 대청 좌우 판벽(개방칸 옆면) — 공간감
+    for (const sx of [-1, 1]) {
+      const sw = new THREE.Mesh(new THREE.BoxGeometry(0.1, colH - 0.4, 2 * b - 0.4), plankMat(2 * b));
+      sw.position.set(hallCx + sx * hallW / 2, podTopY + (colH - 0.4) / 2, 0);
+      sw.receiveShadow = true; root.add(sw);
+    }
+    // 대청 개방칸 상부 인방벽(상인방~창방 공백 채움) — 정면 개구부가 액자처럼 읽히게
+    const transom = new THREE.Mesh(new THREE.BoxGeometry(hallW, yTopWall - (yLintel + 0.1), 0.1), M.plaster);
+    transom.position.set(hallCx, (yLintel + 0.1 + yTopWall) / 2, frontZ - 0.02);
+    transom.receiveShadow = true; root.add(transom);
+    const lintelBeam = new THREE.Mesh(new THREE.BoxGeometry(hallW + 0.1, 0.16, 0.2), woodTrim);
+    lintelBeam.position.set(hallCx, yLintel + 0.05, frontZ - 0.02);
+    lintelBeam.castShadow = true; root.add(lintelBeam);
+
+    // 계자난간: 툇마루 앞·옆 테두리 (난간대 + 동자기둥 + 치마널). 대청 앞은 비워 진입 확보.
+    const railTopY = mfloorY + 0.52, railBotY = mfloorY + 0.08;
+    const rz = frontZ + dep - 0.06;
+    const railMat = M.wood, apronMat = woodTrim;
+    const postGeo = new THREE.BoxGeometry(0.07, 0.5, 0.07);
+    // 전면 난간(대청 앞 gap 제외) — 좌/우 두 구간
+    const gapHalf = hallW / 2 + 0.2;
+    const addFrontRail = (fx0, fx1) => {
+      if (fx1 - fx0 < 0.12) return;
+      const top = new THREE.Mesh(new THREE.BoxGeometry(fx1 - fx0, 0.08, 0.1), railMat);
+      top.position.set((fx0 + fx1) / 2, railTopY, rz); top.castShadow = true; root.add(top);
+      const apron = new THREE.Mesh(new THREE.BoxGeometry(fx1 - fx0, 0.16, 0.05), apronMat);
+      apron.position.set((fx0 + fx1) / 2, railBotY + 0.12, rz); root.add(apron);
+      for (let x = fx0 + 0.1; x <= fx1 - 0.05; x += 0.5) {
+        const p = new THREE.Mesh(postGeo, railMat);
+        p.position.set(x, mfloorY + 0.27, rz); p.castShadow = true; root.add(p);
+      }
+    };
+    addFrontRail(mX0 + 0.1, hallCx - gapHalf);
+    addFrontRail(hallCx + gapHalf, mX1 - 0.1);
+    // 좌우 짧은 리턴 난간
+    for (const zx of [mX0 + 0.1, mX1 - 0.1]) {
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, dep - 0.1), railMat);
+      top.name = 'toenmaru-return-railing';
+      top.position.set(zx, railTopY, frontZ + dep / 2); top.castShadow = true; root.add(top);
+      for (let z = frontZ + 0.2; z <= frontZ + dep - 0.1; z += 0.5) {
+        const p = new THREE.Mesh(postGeo, railMat);
+        p.name = 'toenmaru-return-railing';
+        p.position.set(zx, mfloorY + 0.27, z); p.castShadow = true; root.add(p);
+      }
     }
   }
 

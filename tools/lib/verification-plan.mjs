@@ -5,7 +5,7 @@ import { isApiReuseDependency } from './verification-impact.mjs';
 const FULL_GATES = Object.freeze([
   'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
-  'surface-browser', 'cinematic-app', 'build',
+  'mja-house-browser', 'surface-browser', 'cinematic-app', 'build',
 ]);
 
 const DOC_PATH = /^(?:docs\/|refs\/|README\.md$|AGENTS\.md$|CLAUDE\.md$|SANSA-HANDOFF\.md$|LICENSE(?:\.|$))/;
@@ -27,6 +27,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/api/drainage-plan.js',
   'src/api/mud-wall.js',
   'src/api/mud-wall-plan.js',
+  'src/api/mja-house.js',
+  'src/api/mja-house-plan.js',
   'src/api/sijeon.js',
   'src/api/sijeon-plan.js',
   'src/api/yard-life.js',
@@ -36,12 +38,19 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/generators/village/yard-life.js',
   'src/generators/village/yard-life-geometry.js',
   'src/generators/village/yard-life-product.js',
+  'src/builder/giwa-middle-gate.js',
   'src/runtime/village/yard-life.js',
+  'src/layout/giwa-roof-envelope.js',
+  'src/layout/giwa-through-passage.js',
   'src/village/sijeon-plan.js',
   'src/village/drainage-plan.js',
   'src/village/drainage-geometry.js',
   'src/village/mud-wall-geometry.js',
   'src/village/mud-wall-surface-plan.js',
+  'src/village/mja-house-geometry.js',
+  'src/village/mja-house-plan-contract.js',
+  'src/village/mja-house-plan-core.js',
+  'src/village/mja-house-plan.js',
   'src/village/yard-life-plan.js',
   'src/village/yard-life-record-contract.js',
   'src/village/options.js',
@@ -49,6 +58,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-drainage-plan.mjs',
   'tools/check-surface-browser-suite.mjs',
   'tools/check-mud-wall-contract.mjs',
+  'tools/check-mja-house-integration.mjs',
+  'tools/check-mja-house-plan.mjs',
   'tools/check-scene-guide.mjs',
   'tools/check-api-reuse-suite.mjs',
   'tools/check-sijeon-contract.mjs',
@@ -61,6 +72,7 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/shoot-yard-life-app.mjs',
   'tools/mud-wall-surface-harness.html',
   'tools/shoot-mud-wall.mjs',
+  'tools/shoot-mja-house.mjs',
   'tools/shoot-drainage.mjs',
 ]);
 
@@ -124,6 +136,7 @@ function routePath(path) {
     'tools/check-worker-contract.mjs': ['worker'],
     'tools/check-audio.mjs': ['audio'],
     'tools/check-temple-browser.mjs': ['temple-browser'],
+    'tools/shoot-mja-house.mjs': ['mja-house-browser'],
     'tools/check-parcel-rebuild-browser.mjs': ['parcel-rebuild-browser'],
     'tools/check-surface-materials-browser.mjs': ['surface-browser'],
     'tools/check-dof-app.mjs': ['dof-app'],
@@ -263,6 +276,16 @@ function routePath(path) {
       select('renderer-free bounded mud-wall surface planning changed');
       return { gates, reasons };
     }
+    if (path === 'src/village/mja-house-plan.js'
+      || path === 'src/village/mja-house-plan-core.js'
+      || path === 'src/village/mja-house-plan-contract.js'
+      || path === 'src/village/mja-house-geometry.js') {
+      select(
+        'opt-in enclosed-house plan, rendering, or lifecycle changed',
+        'app', 'worker', 'mja-house-browser',
+      );
+      return { gates, reasons };
+    }
     select('village generation changed', 'app', 'worker');
     if (path === 'src/village/drainage-plan.js'
       || path === 'src/village/drainage-geometry.js') {
@@ -354,6 +377,14 @@ function routePath(path) {
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
     if (!/^src\/(?:export|share)\//.test(path)) select('worker scene graph may change', 'worker');
+    if (path === 'src/builder/giwa-middle-gate.js'
+      || path === 'src/layout/giwa-roof-envelope.js'
+      || path === 'src/layout/giwa-through-passage.js') {
+      select(
+        'shared giwa roof or integrated passage contract changed',
+        'building-lifecycle', 'mja-house-browser',
+      );
+    }
     if (path.startsWith('src/builder/')) {
       select('public building resource lifecycle changed', 'building-lifecycle');
     }
@@ -375,6 +406,14 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/mja-house-plan.js'
+      || path === 'src/api/mja-house.js') {
+      select(
+        'public opt-in enclosed-house planning or renderer API changed',
+        'app', 'worker', 'mja-house-browser',
+      );
+      return { gates, reasons };
+    }
     if (path === 'src/api/drainage-plan.js') {
       select('public renderer-free roadside drainage planning API changed',
         'app', 'worker', 'surface-browser');
@@ -569,6 +608,7 @@ export function verificationCommands(plan) {
   if (has('worker')) commands.push(gateCommand('worker'));
   if (has('audio')) commands.push(gateCommand('audio'));
   if (has('temple-browser')) commands.push(gateCommand('temple-browser'));
+  if (has('mja-house-browser')) commands.push(gateCommand('mja-house-browser'));
   if (has('lod-focus') && has('lod-wave')) {
     commands.push(gateCommand('lod-app'));
   } else if (has('lod-focus')) {

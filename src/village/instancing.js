@@ -85,6 +85,94 @@ function normalizeGeo(src, worldMatrix, keepColor) {
   return g;
 }
 
+const STRICT_MERGE_ATTRIBUTES = new Set(['position', 'normal', 'uv', 'color']);
+const STRICT_MERGE_CALLBACKS = [
+  'onBeforeRender',
+  'onAfterRender',
+  'onBeforeShadow',
+  'onAfterShadow',
+];
+const SHADOW_DEPTH_TEXTURE_LIFECYCLE = Symbol.for('cheoma.shadowDepthTextureLifecycle');
+const DEFAULT_OBJECT_LAYER_MASK = new THREE.Layers().mask;
+
+function strictMergeLabel(object) {
+  return object.name ? `"${object.name}"` : object.type || 'Object3D';
+}
+
+function assertStrictMergeNode(object, opts = {}) {
+  const label = strictMergeLabel(object);
+  if (!object.visible) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve hidden object ${label}`);
+  }
+  if (object.layers.mask !== DEFAULT_OBJECT_LAYER_MASK) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve layers on ${label}`);
+  }
+  if (object.renderOrder !== 0) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve renderOrder on ${label}`);
+  }
+  if (!object.isMesh && !object.isInstancedMesh) return;
+  if (object.frustumCulled === false) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve frustumCulled=false on ${label}`);
+  }
+  if (object.isSkinnedMesh || object.skeleton) {
+    throw new Error(`decomposeByMaterial strict merge cannot bake skinned mesh ${label}`);
+  }
+  if (object.isBatchedMesh) {
+    throw new Error(`decomposeByMaterial strict merge cannot bake batched mesh ${label}`);
+  }
+  if (Array.isArray(object.material)) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve multi-material groups on ${label}`);
+  }
+  if (object.customDepthMaterial || object.customDistanceMaterial) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve custom shadow material on ${label}`);
+  }
+  for (const callback of STRICT_MERGE_CALLBACKS) {
+    if (callback === 'onBeforeShadow'
+      && opts.reattachShadowDepthTextureLifecycle === true
+      && object[SHADOW_DEPTH_TEXTURE_LIFECYCLE]) continue;
+    if (object[callback] !== THREE.Object3D.prototype[callback]) {
+      throw new Error(`decomposeByMaterial strict merge cannot preserve ${callback} on ${label}`);
+    }
+  }
+
+  const geometry = object.geometry;
+  if (!geometry?.isBufferGeometry || !geometry.attributes?.position) {
+    throw new Error(`decomposeByMaterial strict merge requires position BufferGeometry on ${label}`);
+  }
+  if (geometry.isInstancedBufferGeometry) {
+    throw new Error(`decomposeByMaterial strict merge cannot bake InstancedBufferGeometry ${label}`);
+  }
+  if (Object.keys(geometry.morphAttributes || {}).length
+    || object.morphTargetInfluences
+    || object.morphTargetDictionary) {
+    throw new Error(`decomposeByMaterial strict merge cannot bake morph targets on ${label}`);
+  }
+  if (geometry.drawRange.start !== 0) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve drawRange on ${label}`);
+  }
+  const availableCount = geometry.index?.count ?? geometry.attributes.position.count;
+  if (geometry.drawRange.count !== Infinity && geometry.drawRange.count < availableCount) {
+    throw new Error(`decomposeByMaterial strict merge cannot preserve drawRange on ${label}`);
+  }
+  for (const [attributeName, attribute] of Object.entries(geometry.attributes)) {
+    if (!STRICT_MERGE_ATTRIBUTES.has(attributeName)) {
+      throw new Error(
+        `decomposeByMaterial strict merge cannot discard "${attributeName}" attribute on ${label}`,
+      );
+    }
+    if (!attribute?.isBufferAttribute || attribute.isInterleavedBufferAttribute) {
+      throw new Error(
+        `decomposeByMaterial strict merge cannot normalize "${attributeName}" attribute on ${label}`,
+      );
+    }
+  }
+  if (object.isInstancedMesh) {
+    if (object.instanceColor || object.morphTexture) {
+      throw new Error(`decomposeByMaterial strict merge cannot bake per-instance color/morph data on ${label}`);
+    }
+  }
+}
+
 // 비인덱스 지오의 삼각 와인딩 반전(정점 1↔2 스왑) — 미러(음determinant)로 뒤집힌 앞면 복원.
 function reverseWinding(g) {
   for (const key of Object.keys(g.attributes)) {
@@ -179,14 +267,31 @@ export function shareMaterials(canon, variant, keepOwn = null) {
 //   opts.trackSrc(#148): true 면 재질별 병합 지오 안에서 소스별(o/조상 userData.__mergeSrc) 정점
 //     레인지를 함께 반환(srcRanges: Map<srcId,{start,count}> — 정점 단위). 병합 담의 필지별 은닉용.
 //     traverse 는 깊이우선(root→o0 서브트리→o1…)이라 재질 리스트 내 같은 src 기여가 연속 → 단일 레인지.
+//   opts.partitionShadowFlags: true 면 재질뿐 아니라 castShadow/receiveShadow 쌍까지 병합 키로 삼는다.
+//     이 모드는 손실 없는 정적 병합만 허용하므로 bake 할 수 없는 렌더 의미를 발견하면 즉시 throw 한다.
 // 반환: [{ material, geometry, castShadow, receiveShadow, srcRanges? }]
 export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
   const trackSrc = !!opts.trackSrc;
+  const partitionShadowFlags = opts.partitionShadowFlags === true;
   root.updateMatrixWorld(true);
-  const groups = new Map();   // material -> { list:[geo], cast, recv, runs:[{src,count}] }
+  // 기본 경로는 기존 material -> entry 구조와 순서를 그대로 유지한다. opt-in 경로만
+  // material -> shadow-state -> entry 로 한 단계 더 나눠 그림자 상태의 OR 승격을 막는다.
+  const groups = new Map();
   const push = (mat, geo, cast, recv, src) => {
-    let e = groups.get(mat);
-    if (!e) { e = { list: [], cast: false, recv: false, runs: [] }; groups.set(mat, e); }
+    let e;
+    if (partitionShadowFlags) {
+      let shadowGroups = groups.get(mat);
+      if (!shadowGroups) { shadowGroups = new Map(); groups.set(mat, shadowGroups); }
+      const shadowKey = `${cast ? 1 : 0}${recv ? 1 : 0}`;
+      e = shadowGroups.get(shadowKey);
+      if (!e) {
+        e = { list: [], cast: !!cast, recv: !!recv, runs: [] };
+        shadowGroups.set(shadowKey, e);
+      }
+    } else {
+      e = groups.get(mat);
+      if (!e) { e = { list: [], cast: false, recv: false, runs: [] }; groups.set(mat, e); }
+    }
     e.list.push(geo); e.cast = e.cast || cast; e.recv = e.recv || recv;
     if (trackSrc) e.runs.push({ src, count: geo.attributes.position.count });
   };
@@ -198,6 +303,7 @@ export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
   };
 
   root.traverse((o) => {
+    if (partitionShadowFlags) assertStrictMergeNode(o, opts);
     if (!o.isMesh && !o.isInstancedMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     // 멀티머티리얼(groups)까지 완벽 지원하려면 group 분해 필요하나, 이 코드베이스 메시는
@@ -221,24 +327,27 @@ export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
   });
 
   const out = [];
-  for (const [material, e] of groups) {
-    const geometry = e.list.length === 1 ? e.list[0] : mergeGeometries(e.list, false);
-    if (!geometry) continue;
-    const rec = { material, geometry, castShadow: e.cast, receiveShadow: e.recv };
-    if (trackSrc) {
-      const ranges = new Map();   // srcId -> {start,count}(정점). 연속 run 이라 누적=단일 레인지.
-      let cursor = 0;
-      for (const r of e.runs) {
-        if (r.src !== undefined) {
-          let rr = ranges.get(r.src);
-          if (!rr) { rr = { start: cursor, count: 0 }; ranges.set(r.src, rr); }
-          rr.count += r.count;
+  for (const [material, value] of groups) {
+    const entries = partitionShadowFlags ? value.values() : [value];
+    for (const e of entries) {
+      const geometry = e.list.length === 1 ? e.list[0] : mergeGeometries(e.list, false);
+      if (!geometry) continue;
+      const rec = { material, geometry, castShadow: e.cast, receiveShadow: e.recv };
+      if (trackSrc) {
+        const ranges = new Map();   // srcId -> {start,count}(정점). 연속 run 이라 누적=단일 레인지.
+        let cursor = 0;
+        for (const r of e.runs) {
+          if (r.src !== undefined) {
+            let rr = ranges.get(r.src);
+            if (!rr) { rr = { start: cursor, count: 0 }; ranges.set(r.src, rr); }
+            rr.count += r.count;
+          }
+          cursor += r.count;
         }
-        cursor += r.count;
+        rec.srcRanges = ranges;
       }
-      rec.srcRanges = ranges;
+      out.push(rec);
     }
-    out.push(rec);
   }
   return out;
 }
@@ -533,10 +642,18 @@ export function mergeStatic(objects, name = 'merged-static', opts = {}) {
   const parents = objects.map((o) => ({ o, parent: o.parent }));
   if (ids) objects.forEach((o, i) => { if (ids[i] !== undefined) o.userData.__mergeSrc = ids[i]; });
   for (const { o } of parents) combined.add(o);
-  const decomp = decomposeByMaterial(combined, null, { trackSrc: !!ids });
-  // 원복(원본 트리 훼손 금지 — 병합은 사본 지오만 사용)
-  for (const { o, parent } of parents) { if (parent) parent.add(o); else combined.remove(o); }
-  if (ids) objects.forEach((o) => { delete o.userData.__mergeSrc; });
+  let decomp;
+  try {
+    decomp = decomposeByMaterial(combined, null, {
+      trackSrc: !!ids,
+      partitionShadowFlags: opts.partitionShadowFlags === true,
+      reattachShadowDepthTextureLifecycle: opts.reattachShadowDepthTextureLifecycle === true,
+    });
+  } finally {
+    // 원복(원본 트리 훼손 금지 — 병합은 사본 지오만 사용). strict 검증 실패도 원본을 떼어두지 않는다.
+    for (const { o, parent } of parents) { if (parent) parent.add(o); else combined.remove(o); }
+    if (ids) objects.forEach((o) => { delete o.userData.__mergeSrc; });
+  }
 
   const group = new THREE.Group(); group.name = name;
   const meshRanges = [];   // [{ mesh, ranges:Map<id,{start,count}> }]

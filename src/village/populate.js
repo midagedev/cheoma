@@ -304,7 +304,21 @@ export function* populateVillageSteps(plan, opts = {}) {
         p.id,
         collectOpeningGlowAnchors(raw, { space: 'world' }),
       );
+      if (p.mjaHouse) {
+        // The reusable compound already owns shadow-correct semantic chunks
+        // and a lifecycle. Re-merging it would erase chimney/hearth ambience
+        // and bypass disposeMjaHouse().
+        root.add(raw);
+        heroHandle.set(p.id, raw);
+        continue;
+      }
       const g = mergeStatic([raw], `hero-${p.id}`);
+      // mergeStatic owns cloned world-space geometry while retaining the source
+      // material identities. Release the now-unreachable compound geometry
+      // immediately; this closes the latent leak in the existing head-house path.
+      raw.traverse((object) => {
+        if (object.isMesh || object.isInstancedMesh) object.geometry?.dispose?.();
+      });
       root.add(g);
       heroHandle.set(p.id, g);
     }

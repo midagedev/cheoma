@@ -9,6 +9,11 @@ import {
   giwaFootprintMetrics,
   giwaFootprintPoints,
 } from './giwa-footprint.js';
+import {
+  giwaThroughPassage,
+  isGiwaThroughPassageBay,
+  isGiwaThroughPassageOuterEdge,
+} from './giwa-through-passage.js';
 import { normalizeChogaShape } from './choga-shape.js';
 import {
   planChogaKitchenOpening,
@@ -260,6 +265,7 @@ function spansOverlap(a, b) {
 function giwaSlots(building) {
   const footprint = giwaFootprintMetrics(building);
   const points = giwaFootprintPoints(building);
+  const throughPassage = giwaThroughPassage(building);
   const bay = footprint.bay;
   const clearance = Math.max(0.2, footprint.columnRadius * 1.8);
   const doors = [];
@@ -298,13 +304,22 @@ function giwaSlots(building) {
         ? (slot.edgeCenterOffset <= 0 ? 1 : -1)
         : null,
     }));
+    const usableSlots = isGiwaThroughPassageOuterEdge(a, b, throughPassage)
+      ? []
+      : slots.filter((slot) => !isGiwaThroughPassageBay(
+        a,
+        b,
+        slot.bayIndex,
+        slot.bayCount,
+        throughPassage,
+      ));
     if (surface === 'courtyard') {
       // The main-front center is the open daecheong only when the range has the
       // same three-bay minimum used by the production builder.
       const daecheong = mainFront && slots.length >= 3 ? Math.floor(slots.length / 2) : -1;
-      doors.push(...slots.filter((_, index) => index !== daecheong));
+      doors.push(...usableSlots.filter((slot) => slot.bayIndex !== daecheong));
     } else {
-      windows.push(...slots);
+      windows.push(...usableSlots);
     }
   }
 

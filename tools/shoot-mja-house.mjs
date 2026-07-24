@@ -109,6 +109,15 @@ const plan = planMjaHouse({
   },
 });
 if (!plan) throw new Error('MJA renderer fixture was not eligible');
+if (plan.wings.length !== 2
+  || plan.wings[0]?.role !== 'north-anchae'
+  || plan.wings[0]?.roofSystem !== 'independent-paljak'
+  || plan.wings[1]?.role !== 'courtyard-wing'
+  || plan.wings[1]?.roofSystem !== 'continuous-u'
+  || plan.gate?.kind !== 'integrated-middle-gate'
+  || plan.gate?.wingId !== plan.wings[1].id) {
+  throw new Error('MJA renderer fixture lost its two-system roof or integrated gate topology');
+}
 const mats = makeMaterials('giwa');
 const borrowedDisposeCounts = new Map();
 for (const value of Object.values(mats)) {
@@ -220,6 +229,24 @@ function everyDisposedOnce(records) {
 
 const compound = buildMjaHouse(plan, { mats });
 const repeated = buildMjaHouse(plan, { mats });
+const topologyChunks = [
+  'mja-house-courtyard',
+  'mja-house-north-anchae',
+  'mja-house-courtyard-wing',
+];
+if (topologyChunks.some((name) => !compound.getObjectByName(name))
+  || compound.getObjectByName('mja-south-gate')) {
+  throw new Error('MJA semantic batches do not match the planned roof and gate topology');
+}
+const ambienceDetails = compound.getObjectByName('mja-house-ambience-details');
+const ambienceCounts = { chimney: 0, agungi: 0 };
+ambienceDetails?.traverse((object) => {
+  if (object.name in ambienceCounts) ambienceCounts[object.name]++;
+});
+if (ambienceCounts.chimney !== 2 || ambienceCounts.agungi !== 2) {
+  throw new Error('MJA static batching dropped close-range chimney or hearth details: '
+    + JSON.stringify(ambienceCounts));
+}
 const compoundHash = transformHash(compound);
 const repeatedHash = transformHash(repeated);
 if (compoundHash !== repeatedHash) {
@@ -376,11 +403,36 @@ if (!plateauStable) {
 
 renderer.render(scene, camera);
 const resources = resourceStats(compound);
+const staticBatch = compound.getObjectByName('mja-house-static');
+const sourceBatch = compound.getObjectByName('mja-house-render-source');
+const glowAnchors = compound.userData.openingGlowAnchors;
+if (!staticBatch || sourceBatch || resources.meshes > 220
+  || renderer.info.render.calls > 400
+  || (renderer.info.programs?.length ?? 0) > 12) {
+  throw new Error('MJA static batching budget regressed: ' + JSON.stringify({
+    staticBatch: !!staticBatch,
+    sourceBatch: !!sourceBatch,
+    meshes: resources.meshes,
+    calls: renderer.info.render.calls,
+    programs: renderer.info.programs?.length ?? 0,
+  }));
+}
+if (!Array.isArray(glowAnchors) || glowAnchors.length === 0) {
+  throw new Error('MJA static batching dropped renderer-authored opening glow anchors');
+}
 window.__MJA_AUDIT = {
   view,
   schema: plan.schema,
   kind: plan.kind,
   wings: plan.wings.length,
+  topology: {
+    roofSystems: plan.wings.map((wing) => wing.roofSystem),
+    northRoofWidth: plan.wings[0].building.mainHalfW * 2,
+    courtyardWidth: plan.courtyard.width,
+    gate: plan.gate.kind,
+    chunks: topologyChunks,
+    ambience: ambienceCounts,
+  },
   transformHash: compoundHash,
   deterministic: compoundHash === repeatedHash,
   primary: {
@@ -390,6 +442,10 @@ window.__MJA_AUDIT = {
     planToAuthoredError: authoredDoorCenterPoint.distanceTo(expectedFocusPoint),
   },
   compound: resources,
+  staticBatch: {
+    meshes: resources.meshes,
+    openingGlowAnchors: glowAnchors.length,
+  },
   frame: {
     calls: renderer.info.render.calls,
     triangles: renderer.info.render.triangles,

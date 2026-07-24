@@ -353,6 +353,7 @@ for (const malformed of [
   '1~s.16~t.1~vs.7~mh.2',
   '1~s.16~t.1~vs.7~mh.1~mh.1',
   '1~s.16~t.1~mh.1',
+  '1~s.16~t.1~vs.7~z.3~mh.1',
   '1~s.16~t.1~hp.z.1',
   '1~s.16~t.1~hp.1.zzz',
   '1~s.16~t.1~x.2',
@@ -384,6 +385,11 @@ for (const invalid of [
   { state, village: {
     ...advancedVillage,
     mjaHouse: { ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT, extra: 'not-canonical' },
+  } },
+  { state, village: {
+    ...advancedVillage,
+    scale: 'town',
+    mjaHouse: VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
   } },
   { state, village: { ...advancedVillage, siteR: 287.45 } },
   { state, village: { ...advancedVillage, wallWeights: { tile: 4 } } },

@@ -158,11 +158,12 @@ invariant(JSON.stringify(plan) === JSON.stringify(repeat), 'mja plan is not dete
 const roles = plan.wings.map((wing) => wing.role);
 invariant(JSON.stringify(roles) === JSON.stringify([
   'north-anchae',
-  'east-wing',
-  'west-wing',
-  'south-east',
-  'south-west',
+  'courtyard-wing',
 ]), 'mja semantic wing order drifted');
+invariant(plan.wings[0].roofSystem === 'independent-paljak'
+  && plan.wings[1].roofSystem === 'continuous-u'
+  && plan.wings[1].building.throughPassage?.enabled === true,
+'mja roof systems did not preserve the anchae + integrated ㄷ-wing composition');
 for (const wing of plan.wings) {
   invariant(wing.building.seed === (wing.building.seed >>> 0),
     `${wing.id} lacks a stable builder seed`);
@@ -187,9 +188,6 @@ for (const wing of plan.wings) {
       `${wing.id} roof lost fitted clearance`);
   }
 }
-for (const point of plan.gate.roofFootprint) {
-  invariant(G.pointInPoly(point, parcel.shape.pts), 'gate roof left parcel');
-}
 
 invariant(plan.courtyard.width >= MJA_HOUSE_PLAN_LIMITS.minCourtyardWidth
   && plan.courtyard.depth >= MJA_HOUSE_PLAN_LIMITS.minCourtyardDepth,
@@ -199,8 +197,11 @@ invariant(plan.gate.center.x === plan.gate.parcelGate.x
   && plan.gate.roadAxis.z >= Math.SQRT1_2,
 'mja gate is not aligned to stored south access');
 invariant(plan.gate.heightKind === 'clear-opening'
-  && plan.gate.roof.ridgeY === plan.gate.roofTopY,
-'mja gate height/roof semantics drifted');
+  && plan.gate.kind === 'integrated-middle-gate'
+  && plan.gate.wingId === 'mja:wing:courtyard-wing'
+  && plan.gate.roofSystem === 'continuous-u'
+  && plan.gate.roofTopY === plan.wings[1].roofTopY,
+'mja gate is not integrated into the continuous courtyard wing');
 
 const primary = plan.openings.find((opening) => opening.id === plan.primaryOpeningId);
 invariant(primary?.wingId === 'mja:wing:north-anchae'
@@ -219,14 +220,8 @@ const expectedShadow = (plan.solarTarget.southRoofTopY - plan.solarTarget.point.
 invariant(Math.abs(plan.solarTarget.shadowReach - expectedShadow) <= 1e-9
   && plan.solarTarget.margin >= MJA_HOUSE_PLAN_LIMITS.minSolarMargin,
 'mja courtyard does not preserve 30-degree winter solar access');
-const southWingRoofTopY = Math.max(...plan.wings
-  .filter((wing) => wing.role === 'south-east' || wing.role === 'south-west')
-  .map((wing) => wing.roofTopY));
-invariant(plan.solarTarget.southRoofTopY === Math.max(
-  plan.gate.roof.ridgeY,
-  southWingRoofTopY,
-) && southWingRoofTopY > plan.gate.roof.ridgeY,
-'mja solar check did not use the actual taller south-wing roofs');
+invariant(plan.solarTarget.southRoofTopY === plan.wings[1].roofTopY,
+  'mja solar check did not use the integrated south roof system');
 
 const offsetPlan = planMjaHouse({
   context: {
@@ -242,21 +237,46 @@ invariant(offsetPlan && offsetPlan.gate.center.x === 2
   && offsetPlan.context.region.raw === '영남 북부의 명시적 선택',
 'free-text provenance or off-centre stored gate was not preserved');
 
-const malformed = clone(plan);
-malformed.wings[0].building.planShape = 'u';
-let rejected = false;
-try {
-  validateMjaHousePlan(malformed);
-} catch {
-  rejected = true;
+for (const mutate of [
+  (value) => { value.wings[0].building.planShape = 'u'; },
+  (value) => { value.wings[0].building.mainHalfW += 0.1; },
+  (value) => { value.wings[0].roofFootprint[0].x += 0.01; },
+  (value) => { value.wings[1].roofTopY += 0.01; },
+  (value) => { value.wings[1].building.throughPassage.width += 0.1; },
+  (value) => { value.wings[1].building.throughPassage.leafAngle += 0.1; },
+  (value) => { value.bounds.outer.width += 0.1; },
+  (value) => { value.bounds.roof.minX += 0.1; },
+  (value) => { value.gate.roofTopY += 0.1; },
+  (value) => { value.gate.passage[0].x += 0.1; },
+  (value) => { value.gate.approach.from.x += 0.1; },
+  (value) => { value.gate.approach.length += 0.1; },
+  (value) => { value.gate.roadPoint.x += 0.1; },
+  (value) => { value.openings[0].center.x += 0.1; },
+  (value) => { value.solarTarget.point.z += 0.1; },
+  (value) => { value.solarTarget.corridor[0].x += 0.1; },
+]) {
+  const malformed = clone(plan);
+  mutate(malformed);
+  let rejected = false;
+  try {
+    validateMjaHousePlan(malformed);
+  } catch {
+    rejected = true;
+  }
+  invariant(rejected, 'mja validator accepted a renderer-divergent derived field');
 }
-invariant(rejected, 'mja validator accepted a renderer-divergent wing');
 
-const source = readFileSync(fileURLToPath(
-  new URL('../src/village/mja-house-plan.js', import.meta.url),
-), 'utf8');
-invariant(!/from\s+['"]three['"]|\bTHREE\b|\bdocument\s*\.|\bwindow\s*\.|Math\.random/.test(source),
-  'mja planner contains a renderer, DOM, or ambient-random dependency');
+for (const path of [
+  '../src/village/mja-house-plan.js',
+  '../src/village/mja-house-plan-core.js',
+  '../src/village/mja-house-plan-contract.js',
+]) {
+  const source = readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+  invariant(
+    !/from\s+['"]three['"]|\bTHREE\b|\bdocument\s*\.|\bwindow\s*\.|Math\.random/.test(source),
+    `${path} contains a renderer, DOM, or ambient-random dependency`,
+  );
+}
 
 const iterations = 500;
 const started = performance.now();
