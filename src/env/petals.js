@@ -39,7 +39,9 @@ const SEASON_CFG = {
     // 사용자 지시(2026-07-25) 2단계: "낙엽같은게 조금 더 컸으면" → "윤곽을 알아볼 수 있게 살짝 과장해서
     // 키우고". 구 [1.9,4.0](5.7~12cm)의 2.4배. 장축 약 13.7–28.8cm로, 실물 오동·플라타너스
     // (20~30cm) 상단에 해당한다 — 단풍 기준으로는 과장이지만 수종 밴드 안이라 고증 주장은 유지된다.
-    // `speciesScale`(0.48~1.0)이 절반 수종을 6.6~13.8cm로 되돌려 크기 편차도 남는다.
+    // 주의: `detail-particle-geometry.js`의 `speciesScale = mix(0.48, 1.0, step(0.5, aSpecies))`는
+    // 가을 수종(은행 1·단풍 2) 둘 다 1.0이고 0.48은 **봄 꽃잎(0)에만** 적용된다. 즉 가을 잎에는
+    // 작은 쪽 안전판이 없고 전량이 이 범위를 쓴다 — 여기가 실질 상한이다.
     // seasons.js 수관 방출 낙엽의 `sizeScale` 2.4와 같은 비율 — 두 계통이 한 화면에서 어긋나지 않는다.
     size: [4.56, 9.6],    // 월드 곡면 장축 약 13.7–28.8cm(꽃잎보다 크게 유지)
     fall: [1.2, 2.6],     // 낙엽은 꽃잎보다 조금 빠르되 여전히 느림
@@ -90,10 +92,16 @@ export function createPetalField({ getWind, getLightDirection = null } = {}) {
   //   델타 0(단일 InstancedMesh), 비용은 per-frame 궤적 루프뿐. 실제 체감 밀도를 정하는 것은 N이 아니라
   //   아래 가을 `gustBase`이므로 그쪽을 함께 올렸다.
   const N = 680;
-  const half = 44;             // 수평 반경(카메라 타깃 주변 볼륨) — 눈 볼륨(46)과 유사
+  // 계절별 볼륨. 눈(46)에 맞춘 88×88×41m 박스는 근접 focus 프레임(거리 47m·fov 20° ≈ 폭 16m) 밖에
+  //   잎을 대부분 두어, N을 올려도 화면에는 몇 장만 남는다(2026-07-25 판정 실측: 680장 중 프레임 내
+  //   판독 가능 18장, 화면 점유 0.048%). 가을만 볼륨을 조여 **같은 N·같은 드로우콜로 화면 밀도만** 올린다.
+  //   봄 꽃보라는 넓은 볼륨을 유지한다 — 벚꽃은 성기게 흩날리는 것이 정격이고, 같은 조임을 적용하면
+  //   3.75배가 되어 #125가 거부한 색종이로 넘어간다.
+  const SEASON_VOLUME = { spring: { half: 44, yTop: 40 }, autumn: { half: 28, yTop: 26 } };
+  let half = SEASON_VOLUME.spring.half;   // 수평 반경(카메라 타깃 주변 볼륨)
   const yBottom = -1.0;
-  const yTop = 40.0;
-  const H = yTop - yBottom;
+  let yTop = SEASON_VOLUME.spring.yTop;
+  let H = yTop - yBottom;
 
   const rng = makeRng(FIELD_SEED);
 
@@ -157,6 +165,20 @@ export function createPetalField({ getWind, getLightDirection = null } = {}) {
     }
     const cfg = SEASON_CFG[name];
     const autumn = name === 'autumn';
+    // 볼륨 전환은 기존 궤적을 **비율 유지로 재척도**한다(재생성이 아니라). 그래야 계절 전환이 위상 점프
+    //   없이 이어지고, 상태가 이전 상태의 순수 함수라 결정론도 유지된다.
+    const vol = SEASON_VOLUME[name] || SEASON_VOLUME.spring;
+    if (vol.half !== half || vol.yTop !== yTop) {
+      const sxz = vol.half / half;
+      const nextH = vol.yTop - yBottom;
+      const sy = nextH / H;
+      for (let i = 0; i < N; i++) {
+        bx[i] *= sxz; bz[i] *= sxz;
+        py[i] = yBottom + (py[i] - yBottom) * sy;
+      }
+      // 팔랑 진폭(fAmp)은 아래 루프에서 계절 cfg 로 재생성되므로 여기서 손대지 않는다.
+      half = vol.half; yTop = vol.yTop; H = nextH;
+    }
     const cr = makeRng(FIELD_SEED ^ (name === 'spring' ? 0x5091 : 0xa07a));
     for (let i = 0; i < N; i++) {
       // 가을=은행(황금 부채꼴)·단풍(주홍 장상) 개체별 배정, 봄=벚꽃 꽃잎.
@@ -213,9 +235,10 @@ export function createPetalField({ getWind, getLightDirection = null } = {}) {
     // #125 돌풍 게이트: 계절 기저(봄=꽃보라로 조금 더 풍성, 가을=희소) + 돌풍 가산, 완만 평활
     //   → "잠깐 늘었다 잦아드는" 리듬(기존 바람 필드 gust 재사용). 잔잔할 땐 한 자릿수~십수 장만 보임.
     // 가을 기저는 #125에서 0.12(희소)였다. 2026-07-25 사용자 지시("가을 분위기 나게 좀 더 많이")로
-    //   0.26까지 올린다 — 봄 꽃보라(0.34)보다는 여전히 성기고, 돌풍 가산이 남아 "잠깐 늘었다 잦아드는"
+    //   올렸고, 1차 판정이 "개선은 크지만 아직 가을 분위기 아님"(프레임 내 18장·점유 0.048%)이라
+    //   0.30까지 올린다 — 봄 꽃보라(0.34)보다는 여전히 성기고, 돌풍 가산이 남아 "잠깐 늘었다 잦아드는"
     //   리듬은 유지된다. 0.34 이상으로 올리면 #125가 금지한 색종이 축제로 되돌아간다.
-    const gustBase = season === 'spring' ? 0.34 : 0.26;
+    const gustBase = season === 'spring' ? 0.34 : 0.30;
     const gustTarget = Math.min(1, gustBase + (w.gust || 0) * 0.85);
     activeSmooth += (gustTarget - activeSmooth) * Math.min(1, dt * 1.4);
     worldDetail.material.uniforms.uActive.value = activeSmooth;
