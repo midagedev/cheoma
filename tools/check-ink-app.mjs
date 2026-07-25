@@ -193,12 +193,15 @@ try {
       links: required.filter(Boolean).flatMap((item) => item.links),
     };
   });
-  // 2026-07-25: 대상별 선 계층은 아직 구현되지 않았으므로(ink.js 는 씬 전체 단일 silhouetteWidth)
-  // credits 활용 문장을 실제 구현으로 축소했다. 게이트도 구현된 축만 요구한다.
+  // 2026-07-25: credits 활용 문장을 실제 구현으로 축소했다(당시 ink.js 는 씬 전체 단일 silhouetteWidth).
+  // 2026-07-26: 계화 이중 필법이 들어와 선 계층이 **건축/자연 두 계열까지** 구현됐으므로 문장을 되돌렸다.
+  //   게이트는 두 가지를 동시에 요구한다 — 구현된 축(두 계열)을 주장하는 것과, 구현되지 않은 축
+  //   (바위 vs 수목)을 주장하지 않는 것. 어느 한쪽만 보면 과대주장 또는 과소주장이 조용히 통과한다.
   pass(references.found === 3
     && ['여백', '농묵', '대기 원근', '화면 절단'].every((term) => references.text.includes(term))
-    && references.text.includes('선 계층은 현재 구현되어 있지 않다'),
-  'Reference modal exposes institutional ink sources and only their implemented visual rules');
+    && references.text.includes('건축/자연 두 계열로 구현')
+    && references.text.includes('바위와 수목을 서로 구분하지는 않는다'),
+  'Reference modal claims the implemented line hierarchy and no more');
   pass(references.licensed && references.links.length === 6
     && references.links.some((link) => link.href.includes('museum.go.kr'))
     && references.links.some((link) => link.href.includes('metmuseum.org'))
