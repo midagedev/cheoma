@@ -40,6 +40,7 @@ import { buildingNavigationTargetFromProxy } from '../lib/building-navigation.js
 import { normalizeStandaloneParamPatch } from '../lib/standalone-param-spec.js';
 import { buildWings, disposeWing, wingCount, buildNextWing, ghostSpec } from './expansion.js';
 import { createArchitecturalRevealRuntime } from './architectural-reveal-runtime.js';
+import { createFrameClock } from './frame-clock.js';
 import { buildingSpot, expandedBuildingSpot } from './camera-framing.js';
 import { createCinematicRuntime } from './cinematic-runtime.js';
 import { createDirectionalShadowRuntime } from './directional-shadow-runtime.js';
@@ -96,10 +97,16 @@ const FOCUS_HOP_DUR = 1.5;             // 집(A)→집(B) 직접 전환(#95) —
 const REVEAL_WARM_CAP_MS = 200;
 
 export function createEngine({ container, perf = false, compact = false } = {}) {
-  // 모바일 성능 프로파일. perf: 터치/좁은 뷰포트(폰·태블릿) → DoF off·그림자맵 하향.
-  // compact: 폰급(최소변 ≤520) → pixelRatio 1.5·저해상 bloom(필레이트 절감). 데스크톱은 무변.
+  // 모바일 성능 프로파일(둘 다 진짜 폰만 — device.svelte.js 술어 참조).
+  //   perf   : 그림자맵 하향 + 눈·비 지붕 충돌 생략(메인스레드 CPU).
+  //   compact: pixelRatio 1.5 + 저해상 bloom + 수묵 내부 타깃(필레이트·텍스처 메모리).
+  // 그림자맵은 필레이트가 아니라 메모리 문제다: 4096²=64MB 는 iOS Safari 의 문서화되지 않은 WebGL
+  // 메모리 상한에서 컨텍스트 소실 위험이라 폰에 쓰지 않는다. 다만 1536²(9MB)와 2048²(16MB)의 차이는
+  // 7MB 뿐이고 처마 그림자 경계의 시각 차이는 뚜렷해, 폰도 2048²를 쓴다(감사 M2·R6).
+  // PR_CAP 1.5 는 유일하게 전 프레임 필레이트를 곱하는 항목이라 실기기 A/B 전에는 올리지 않는다
+  // (감사 M1·R9 — `?fxcompact=0` 훅으로 같은 URL에서 2로 비교할 수 있다).
   const PR_CAP = compact ? 1.5 : 2;
-  const SHADOW_SIZE = compact ? 1536 : perf ? 2048 : 4096;
+  const SHADOW_SIZE = perf || compact ? 2048 : 4096;
   // ---------- 이벤트 버스 (Svelte 로 상태 변화 통지) ----------
   const listeners = {};
   const emit = (ev, payload) => { (listeners[ev] || []).forEach((f) => f(payload)); };
@@ -317,7 +324,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getGround: () => ground,
     env, // 대기 틴트를 fog 모디파이어로 자동 등록 — 비/눈 중 시간 크로스페이드에도 틴트 유지
     sun,
-    lowPerf: perf, // 모바일 perf 프로파일은 볼륨 시뮬(눈 쉘·빗물 흐름) 폴백 → 셰이더 틴트만(#52)
+    // 폰 프로파일이 실제로 바꾸는 것은 눈·비의 지붕 충돌 판정 하나다(weather.js collide). 판정은
+    // 입자(눈 3600·비 2600)×콜라이더(집 수) 선형 주사라 메인스레드 CPU가 규모에 비례해 커진다 —
+    // village 규모에서 프레임당 눈 118,800회. weather.js 가 콜라이더 개수로 상한을 걸어, 한적한
+    // 규모에서는 폰에서도 충돌을 켠다(감사 M16). #52 볼륨 시뮬 언급은 #131 이 그 시스템을 전
+    // 디바이스에서 제거해 무효가 됐다.
+    lowPerf: perf,
   });
   
   function updateWeatherColliders() {
@@ -351,17 +363,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   nightGlowRef = setupNightGlow({ getBuilding: () => building });
 
   // ---------- 플래그십 후처리 (메인 룩) ----------
-  // 모바일은 DoF/flare를 끄고, compact는 bloom 내부 타깃을 반해상도로 유지한다.
+  // DoF·flare 는 전 디바이스 공통(focus 문맥이 소유). compact 만 bloom 내부 타깃을 반해상도로 둔다 —
+  // bloom 은 저주파 블러라 시각 손실이 거의 없는 반면 비용은 타깃 밑면적에 비례하는 유일한 항목이다.
   const postRuntime = createPostRuntime({
     renderer,
     scene,
     camera,
     width: container.clientWidth,
     height: container.clientHeight,
-    perf,
     compact,
   });
-  const { post, outline, dofOn } = postRuntime;
+  const { post, outline } = postRuntime;
   const inkModeRuntime = createInkModeRuntime({
     renderer,
     scene,
@@ -508,11 +520,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         current: pathFrom.clone(),
         source: dofSource || 'primary-opening-transition',
       } : null,
-      dof0: perf ? 0 : post.dof.amount,
-      // Mobile/perf owns a hard zero-cost DoF policy. Normalize the target once at
-      // the shared tween boundary so focus-in, hop, reroll, and future callers
-      // cannot wake Bokeh after setPostFocus() has put it to sleep.
-      dof1: perf ? 0 : (Number.isFinite(dofAmount) ? clamp01(dofAmount) : null),
+      dof0: post.dof.amount,
+      // DoF 는 디바이스와 무관하게 focus 문맥이 단독 소유한다(docs/look-grammar.md §5 — 통합자는
+      // 성능을 이유로 끄지 않는다). 종전에는 perf 가 여기서 목표를 0으로 정규화해 focus-in/hop/리롤이
+      // Bokeh 를 깨우지 못하게 하는 이중 잠금이었다. 부감은 여전히 setPostFocus 계약으로 amount=0
+      // 이므로 비용은 근접 프레임에만 발생한다.
+      dof1: Number.isFinite(dofAmount) ? clamp01(dofAmount) : null,
       composition0: focusComposition,
       composition1: Number.isFinite(nextFocusComposition) ? clamp01(nextFocusComposition) : null,
       // The first animation-loop advance lands on the endpoint when reduced
@@ -590,7 +603,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       : framing
   );
 
-  const architecturalMotion = () => reducedCameraMotion ? 'reduced' : (perf || compact ? 'compact' : 'full');
+  // 안무 프로파일: 접근성(prefers-reduced-motion)만 축소한다. 폰도 authored 된 전체 안무를 받는다 —
+  // 감사(docs/mobile-effects-audit.md M14)가 측정한 종전 폰 경로는 길이는 8.1초 그대로인데 카메라
+  // 이동만 57.6 → 18.5m 로 줄어, 8초 동안 거의 정지한 프레임을 보여 주면서 아낀 GPU 비용은 0이었다
+  // (카메라 경로는 CPU 산술이고, 조립 구간은 지오메트리가 이미 움직여 그림자가 이미 hot 이다).
+  // 코어의 'compact' 프로파일은 재사용 소비자를 위해 남아 있다(architectural-reveal.js).
+  const architecturalMotion = () => reducedCameraMotion ? 'reduced' : 'full';
 
   revealCamera = createArchitecturalRevealRuntime({
     camera,
@@ -773,7 +791,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   function renderFrame(postDt) {
-    if (dofOn && post.dof.amount > 0) {
+    if (post.dof.amount > 0) {
       // Bokeh focus는 유클리드 거리가 아니라 카메라 시선축(view-space -Z) 깊이다. 전환 앵커가
       // 화면 중심 밖에 있어도 post가 그 축 깊이를 계산해 선택 집의 초점면을 정확히 유지한다.
       dofTargetDepth = post.setFocusPoint(activeDofAnchor());
@@ -883,7 +901,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const easedProgress = applyCameraTween(active, p);
     syncVillageNear();
     camera.updateMatrixWorld(true);
-    if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
+    if (post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
     const sampled = debugDofState();
     if (finish && p >= 1) finishCameraTween(active);
     return { ...sampled, easedProgress, finished: tween !== active };
@@ -908,10 +926,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let heroEnterTimingValue = null;
   let heroAssembleTimingOwned = false;
   let heroAssembleTimingValue = null;
+  // 애니메이션 시간은 프레임 수가 아니라 벽시계다. 정책과 그 근거는 frame-clock.js 에 있고,
+  // 스파이크만 잘라 저fps 에서도 authored 길이가 지켜진다(종전 `min(elapsed, 0.05)` 은 20fps 천장이라
+  // 프레임이 길어지는 만큼 모든 연출이 느려졌다). 감쇠는 아래에서 raw elapsed 를 따로 받는다.
+  const frameClock = createFrameClock();
   renderer.setAnimationLoop(() => {
     const elapsed = clock.getDelta();
     if (debugPaused) return;
-    const dt = Math.min(elapsed, 0.05);
+    const dt = frameClock.step(elapsed);
     advanceCameraTween(dt);
     cinematic.update(dt);
     if (demo.active) updateDemo(dt);                                           // 시네마틱 데모 카메라 구동(#112)
@@ -948,8 +970,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     let curRotateSpeed = ORBIT_SPEED;
     if (village.active && village.heroAsm && revealAutoOrbit) {
-      // 조립 중 회전 (모바일/저사양 제외, 회전각 체감을 높이기 위해 약간 더 빠르게 선회)
-      curRotateSpeed = perf ? 0 : ORBIT_SPEED * 5.2;
+      // 조립 중 회전 (회전각 체감을 높이기 위해 약간 더 빠르게 선회). 폰도 돈다 — 종전의 perf?0 은
+      // M14 와 합쳐 폰의 히어로 랜딩을 사실상 무동작으로 만들었고, 선회의 한계 비용은 0이다
+      // (조립 구간은 지오메트리가 이미 움직여 그림자가 hot).
+      curRotateSpeed = ORBIT_SPEED * 5.2;
     }
 
     if (!orbitBusy && performance.now() - lastActivity > ORBIT_IDLE_MS) {
@@ -974,7 +998,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #14: 집 선택은 줌아웃으로 풀리지 않지만 근경 보케까지 넓은 마을 문맥에 남아서는 안 된다.
     // 화면 등가 거리를 따라 1→0으로 줄여 가까운 집의 원형 보케는 보존하고, 넓은 집 보기에서는
     // Bokeh pass를 완전히 쉬게 한다. focus-in/out/hop 중에는 카메라 tween이 amount를 단독 소유한다.
-    if (settledFocusAmount != null && !perf) inkModeRuntime.setFocusPolicy({ dofAmount: settledFocusAmount });
+    if (settledFocusAmount != null) inkModeRuntime.setFocusPolicy({ dofAmount: settledFocusAmount });
     // 카메라/시선 셀 LOD는 이 프레임에 한 번만 계산한다. weather·focus·동물·필지 필드가
     // 같은 ground/particle weight를 소비해 서로 다른 거리에서 팝하지 않게 한다.
     let frameDetailLod = null;
@@ -1342,15 +1366,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // 배율별 후처리(mode-integration §5): 마을 부감은 RimPass(매 프레임 씬 노멀 재렌더)가 도성 규모에서
   // 60fps 위험이라 OFF. focus-in(집 근접)·단일건물 씬은 ON. rim OFF 시 FlarePass 가림 판정이 스테일
-  // depth 로 오작동하므로 flare 도 동반 토글(모바일 perf 분기와 합성 — 한 곳에서 관리). 부감엔 flare 불필요.
+  // depth 로 오작동하므로 flare 도 동반 토글. 부감엔 flare 불필요.
+  //   게이트 축은 focus 문맥 하나다 — 디바이스 분기는 없다. 종전의 `&& !perf` 는 폰에서 근접 보케와
+  //   역광 플레어(이 앱의 서명 광학)를 통째로 지웠다(감사 M4·M8, look-grammar §5).
   function setPostFocus(focused, dofAmount = focused ? 1 : 0) {
-    // 부감(focus=null)은 DoF off — 마을 전체가 얕은 심도로 뭉개지지 않게(#80 완성도, hanyang·모바일 특히).
+    // 부감(focus=null)은 DoF off — 마을 전체가 얕은 심도로 뭉개지지 않게(#80 완성도, hanyang 특히).
     // 수묵 상태기계가 이 PBR 정책을 기억하므로, 먹 화면 아래에서는 비싼 패스가 잠들어도 PBR 복귀 시
     // 현재 focus 문맥으로 정확히 깨어난다.
     inkModeRuntime.setFocusPolicy({
       focused,
-      flare: focused && !perf,
-      dofAmount: focused && !perf ? dofAmount : 0,
+      flare: focused,
+      dofAmount: focused ? dofAmount : 0,
     });
   }
 
@@ -3206,6 +3232,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         : new THREE.Vector3(value.x, value.y, value.z);
       return debugDofState();
     },
+    // 애니메이션 클록 상태(검증용) — 저fps에서 authored 길이가 벽시계로 지켜지는지 판정한다.
+    //   raw = 마지막 프레임의 실제 벽시계 델타, dt = 스파이크 클램프 후 실제로 소비된 값,
+    //   ratio = dt/raw (1이면 벽시계 충실, <1이면 그만큼 연출이 느려짐).
+    debugFrameClock: () => frameClock.debug(),
     debugDofSeek: debugSeekDofTween,
     debugArchitecturalReveal: () => {
       const actual = new THREE.Vector3();
@@ -3225,7 +3255,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugArchitecturalRevealSeek: (progress, options) => {
       const sampled = revealCamera.seek(progress, options);
       if (!sampled) return null;
-      if (dofOn && post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
+      if (post.dof.amount > 0) dofTargetDepth = post.setFocusPoint(activeDofAnchor());
       return controller.debugArchitecturalReveal();
     },
     debugRenderDofFrame: (dt = 0) => {

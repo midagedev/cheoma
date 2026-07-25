@@ -14,7 +14,7 @@ const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
 // (마당 닭·굴뚝 연기·먼지 모트·등롱 흔들림 + 날씨 시 지붕 적설/빗물)를 점등한다. 앰비언스는 배율에
 // 종속 — 부감은 저비용 세트, focus-in 은 근접 링.
 //
-//   const ring = createFocusRing(scene, { heightAt, sun?, renderer?, lowPerf? });
+//   const ring = createFocusRing(scene, { heightAt, sun?, renderer? });
 //   ring.set({ group, parcel, radius = 18, seed, getWeather? });  // group=풀디테일 buildParcel 컴파운드
 //   ring.clear();                                     // focus-out — 페이드아웃 후 dispose
 //   ring.update(dt, timeName, detailLod);             // 매 프레임. 지상/입자 LOD와 같은 연속 강도
@@ -70,7 +70,7 @@ function disposeSubtree(obj) {
 
 // 단일 링 인스턴스(활성 또는 페이드아웃 중). 자기 컨테이너·서브시스템·게이트를 소유한다.
 function makeRing({
-  scene, heightAt, sun, renderer, group, parcel, radius, seed, getWeather, vol, season,
+  scene, heightAt, sun, renderer, group, parcel, radius, seed, getWeather, season,
   chickens, grassObstacles,
 }) {
   const container = new THREE.Group();
@@ -251,11 +251,8 @@ function makeRing({
   return { setTime, setSeason, update, beginOut, dead, dispose, lanterns: ringLanterns, get strength() { return strength; }, get phase() { return phase; } };
 }
 
-export function createFocusRing(scene, { heightAt = () => 0, sun = null, renderer = null, lowPerf = false } = {}) {
+export function createFocusRing(scene, { heightAt = () => 0, sun = null, renderer = null } = {}) {
   const _sun = sun || findSun(scene);
-  // 지붕 적설/빗물 볼륨 생성 여부(#84): 모바일 lowPerf·?snowvol=0 은 미생성(틴트만) 폴백 존중.
-  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-  const VOL = !lowPerf && q.get('snowvol') !== '0';
   let active = null;
   const retiring = [];
   let curTime = 'day';
@@ -305,7 +302,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
     if (active) { active.beginOut(); retiring.push(active); active = null; }
     const next = makeRing({
       scene, heightAt, sun: _sun, renderer, group, parcel, radius,
-      seed: seed >>> 0, getWeather, vol: VOL, season: curSeason, chickens,
+      seed: seed >>> 0, getWeather, season: curSeason, chickens,
       grassObstacles,
     });
     try {
@@ -371,7 +368,7 @@ export function createFocusRing(scene, { heightAt = () => 0, sun = null, rendere
 // updateLod(camera) 경로에서 구동하며, 비선택(인스턴스) 이웃 필지에 계층별 앰비언스를 점등한다.
 //   (선택 필지 자체는 engine focusRing 이 풀 오버레이 링으로 담당 — 필드는 excluded 로 제외해 중복 방지.)
 //
-//   const field = createAmbientField(scene, { heightAt, sun, renderer, lowPerf, deferSceneServices });
+//   const field = createAmbientField(scene, { heightAt, sun, renderer, deferSceneServices });
 //   field.setParcels(descriptors);         // 어댑터가 필지 서술자 배열 주입(월드좌표·치수·굴뚝·seed)
 //   field.setExcluded(fn);                 // (id)=>bool — 오버레이(선택) 필지 제외
 //   field.setTime(name, immediate); field.setSeason(name);
@@ -407,7 +404,6 @@ export function createAmbientField(scene, {
   heightAt = () => 0,
   sun = null,
   renderer = null,
-  lowPerf = false,
   // 웨이브의 새 필드는 smoke/motes/bulb만 미리 붙인다. PointLight 10개와 전역 lookahead는
   // 옛 필드가 해제되는 승격 프레임에 넘겨받아 light-count shader variant를 늘리지 않는다.
   deferSceneServices = false,

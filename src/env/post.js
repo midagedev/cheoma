@@ -511,7 +511,7 @@ class FlarePass extends Pass {
   }
 }
 
-export function setupPost({ renderer, scene, camera, lowPerf = false }) {
+export function setupPost({ renderer, scene, camera }) {
   const size = renderer.getSize(new THREE.Vector2());
 
   // ---- 태양 글로우 스프라이트 (bloom 시드 + 대기 헤이즈). scene 에 직접 추가. ----
@@ -562,10 +562,12 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   composer.addPass(bloomPass);
 
   // 태양 렌즈 플레어(#67): DoF·bloom 뒤·OutputPass(ACES) 앞에 가산. bloom 이후라 고스트가
-  //   블러로 뭉개지지 않고 렌즈 아티팩트로 또렷이 얹힌다. 모바일 lowPerf 는 스킵(초저비용이지만
-  //   풀스크린 패스 하나라도 필레이트 절약). fresnel 은 자체 depth, pass 는 rimPass depth 재사용.
+  //   블러로 뭉개지지 않고 렌즈 아티팩트로 또렷이 얹힌다. fresnel 은 자체 depth, pass 는 rimPass
+  //   depth 재사용. 기본 ON — 태양 고도·프레임 내 여부·날씨·sky 게이트가 이미 대부분의 프레임에서
+  //   발현을 막으므로 디바이스 분기를 두지 않는다. 소비자는 setFlareEnabled 로 토글한다
+  //   (종전의 lowPerf 파라미터는 어떤 호출자도 넘기지 않는 죽은 인자였다 —
+  //   docs/mobile-effects-audit.md M10).
   const flarePass = useFresnel ? new FlarePass({ scene, camera }) : new FlarePass({ rimPass });
-  flarePass.enabled = !lowPerf;
   composer.addPass(flarePass);
 
   const outputPass = new OutputPass();
@@ -819,7 +821,7 @@ export function setupPost({ renderer, scene, camera, lowPerf = false }) {
   function setWeather(name) {
     flareWxTarget = (name === 'rain' || name === 'snow') ? 0.1 : 1.0;
   }
-  // 플레어 패스 온/오프(모바일 lowPerf 스킵·A/B 검증). 초기값은 lowPerf 로 이미 설정됨.
+  // 플레어 패스 온/오프(부감 OFF·A/B 검증). 기본값 ON.
   function setFlareEnabled(v) { flarePass.enabled = !!v; }
   // 림 온/오프(부감 OFF·focus ON). 계약 불변(engine setPostFocus 가 호출).
   //   fresnel(기본): uRimScale 마스터만 토글 — 매 프레임 씬 재렌더가 없어 성능 부담 없음

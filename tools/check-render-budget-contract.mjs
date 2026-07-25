@@ -99,11 +99,17 @@ for (const invalid of [Number.NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 
   const report = atLimits();
   const aerial = report.states.find((entry) => entry.state === 'aerial');
   const focusOut = report.states.find((entry) => entry.state === 'focusOut');
+  // 초과 픽스처는 예산 표에서 파생시킨다 — 하드코딩하면 예산을 조정할 때 조용히 무의미해진다
+  // (실제로 128→144 재저작에서 이 케이스가 깨져 드러났다).
+  const geometryDelta = HANYANG_RENDER_BUDGET.deltas
+    .find((entry) => entry.from === 'aerial' && entry.to === 'focusOut' && entry.metric === 'geometries');
+  const overBudget = geometryDelta.max + 1;
   aerial.samples[0].geometries = 0;
   aerial.samples[1].geometries = 0;
-  focusOut.samples[0].geometries = 129;
-  focusOut.samples[1].geometries = 129;
-  expectFailure(HANYANG_RENDER_BUDGET, report, /delta aerial->focusOut\.geometries 129 exceeds 128/);
+  focusOut.samples[0].geometries = overBudget;
+  focusOut.samples[1].geometries = overBudget;
+  expectFailure(HANYANG_RENDER_BUDGET, report,
+    new RegExp(`delta aerial->focusOut\\.geometries ${overBudget} exceeds ${geometryDelta.max}`));
 }
 {
   const report = atLimits();

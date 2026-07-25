@@ -111,6 +111,44 @@ npm run build
 
 clean snapshot이 필요하면 사용자 dev server와 기존 산출물을 건드리지 않는 임시 `outDir`를 사용한다. 반복 incremental build를 같은 별도 outDir에 덮어쓰면 boot-time uniform 오류가 날 수 있다.
 
+## 애니메이션 클록 계약 (`node tools/check-frame-clock.mjs`)
+
+`npm run check`(browser-free) 안에 포함된다. `app/src/engine/frame-clock.js`의 스파이크 클램프 정책만
+순수하게 검사한다 — authored 연출 길이(히어로 arrival 8.1초)가 프레임레이트와 무관하게 벽시계로
+완주하는지, 단발 스톨은 여전히 잘리는지, 60fps 정상 주행은 불변인지.
+
+이 게이트는 실제 회귀에서 나왔다. 종전 정책은 렌더 루프의 `Math.min(elapsed, 0.05)` 한 줄이었고
+그것은 스파이크 가드가 아니라 **20fps 천장**이었다. 프레임이 0.05초를 넘는 순간부터 리빌 카메라·조립·
+트윈·웨이브·먹안개가 모두 `0.05 / 프레임 시간` 배로 느려졌다. 폰 에뮬레이션 실측으로 8.1초 안무가
+벽시계 8초에 progress 0.0147 까지만 진행했고, 사용자에게는 "모바일에서 히어로 카메라가 회전하지
+않는다"로 보였다. **기존 22개 게이트가 하나도 이것을 잡지 못했다** — 전부 결정론 seek(`debugArchitecturalRevealSeek`)
+으로 안무를 검사해 벽시계 페이싱을 우회했기 때문이다. 그래서 정책을 three 의존이 없는 모듈로 떼어
+고정했고, 게이트는 종전 정책의 반례(5fps 에서 8.1초 → 32.6초)까지 같은 자리에 남긴다.
+
+연출 페이싱을 만질 때는 이 게이트와 함께 `window.__engine.debugFrameClock()`을 본다 —
+`ratio`(=적용된 dt / 실제 벽시계 델타)가 1이면 그 프레임이 벽시계에 충실했다는 뜻이고, 1보다 작으면
+그만큼 연출이 느려지고 있다는 뜻이다.
+
+## 모바일 프로파일 오버라이드 훅 (`?fxperf` / `?fxcompact`)
+
+앱은 진짜 폰(거친 포인터 + 최소변 ≤ 520)에만 두 개의 성능 프로파일을 적용한다 —
+`perf`(그림자맵 2048² + 눈·비 지붕 충돌의 콜라이더 상한)와 `compact`(pixelRatio 1.5 + 반해상도 bloom +
+수묵 내부 타깃 0.5). 두 술어를 URL로 직접 뒤집어 **같은 씬·같은 뷰포트에서 축 하나만** 비교할 수 있다.
+
+```
+?fxperf=0     perf 프로파일 강제 해제       ?fxperf=1     비-폰에도 강제 적용
+?fxcompact=0  compact 프로파일 강제 해제    ?fxcompact=1  비-폰에도 강제 적용
+```
+
+`window.__device`의 `phone`/`perf`/`compact`로 실제 적용 결과를 읽는다. 오버라이드는 부팅 시 한 번만
+읽으므로(씬 주소 `syncUrl`이 쿼리를 다시 써도 유지) 리사이즈·회전 뒤에도 그대로 산다.
+
+용도는 두 가지다. ① 헤드리스 A/B — 같은 결정론 프레임(`?hero=0&village=1&worker=0&shot=1&vscale=capital&vseed=7`)
+에 폰 에뮬레이션을 걸고 `fxcompact`만 뒤집어 픽셀 수·프로그램 수 델타를 구조적으로 비교한다.
+② 실기기 A/B — 폰에서 두 URL을 번갈아 열어 체감을 본다. `docs/mobile-effects-audit.md` §7의 체크리스트가
+그 절차이며, **`compact` 기본값(pixelRatio 1.5)은 그 실기기 확인 전에는 올리지 않는다** — 감사에서 유일하게
+전 프레임 필레이트를 곱하는 항목이다.
+
 ## #81 영구 게이트 — 실제 창호 야간 불빛
 
 - `npm run check:nightlights`는 실제 초가·기와 ㅡ·ㄱ·ㄷ prototype에서 수집한 38개 anchor의 opening id,
@@ -793,6 +831,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-relief.mjs` | 지형 기복·패드 접지·축대·물 시간대, 한양 대하천 양안·나루 원·근경 | 필지 성토 3m 초과·부유, 직사각 수면 끝, 나루배·포구 취락의 실루엣은 이미지로 직접 판정한다. 사찰 path/mask는 별도 확인한다. |
 | `tools/verify-panels.mjs` | 앱 패널의 개울/성곽/논 옵션, wave commit·시드 유지, hero focus-out/리롤 예외 | 먼저 `cd app && npx vite build --outDir dist-panels --emptyOutDir`로 전용 빌드를 만든다. |
 | `tools/verify-forest.mjs` | 폐기된 캐노피 쉘 이력 | 현재는 실패 예상이므로 실행하지 않는다. |
+| `tools/verify-snowdome.mjs` | 폐기된 적설 볼륨 쉘(#85) 이력 | #131이 `src/env/snowvol.js`·`roofcapture.js`를 삭제했으므로 import 자체가 실패한다. 실행하지 않는다. 눈 룩은 지붕 흰틴트(`snow-material.js`)가 대체하며 `check:winter:app`·`shoot:winter`가 판정한다. |
 
 ## 시각·성능 판정
 

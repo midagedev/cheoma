@@ -5,11 +5,15 @@ import { VILLAGE_FOCUS_DOF_APERTURE } from '../../../src/api/cinematic.js';
 import { createPostQualityRuntime } from './post-quality-runtime.js';
 
 /** Wire the app's flagship post-processing pipeline and its hover outline. */
-export function createPostRuntime({ renderer, scene, camera, width, height, perf = false, compact = false }) {
+export function createPostRuntime({ renderer, scene, camera, width, height, compact = false }) {
   const post = setupPost({ renderer, scene, camera });
   post.setDofAperture(VILLAGE_FOCUS_DOF_APERTURE);
-  post.setDof(!perf);
-  post.setFlareEnabled(!perf);
+  // DoF·플레어는 전 디바이스에서 살아 있다. 둘은 focus 문맥이 소유하고(engine setPostFocus), 부감은
+  // amount=0·flare off 계약이라 근접 프레임에만 비용이 든다. 종전의 폰 하드 OFF 는 측정된 대가가
+  // 프로그램 +9(focus 136→145)뿐이었는데 앱의 서명 광학을 통째로 지웠다 —
+  // docs/mobile-effects-audit.md M3·M4, docs/look-grammar.md §5.
+  post.setDof(true);
+  post.setFlareEnabled(true);
   const qualityRuntime = createPostQualityRuntime({
     camera,
     bokehPass: post.bokehPass,
@@ -50,7 +54,6 @@ export function createPostRuntime({ renderer, scene, camera, width, height, perf
   return {
     post,
     outline,
-    dofOn: !perf,
     updateQuality(dt, referenceDepth) {
       if (disposed) return null;
       return qualityRuntime.update(dt, referenceDepth);

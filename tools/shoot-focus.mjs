@@ -257,16 +257,6 @@ await ev('window.__advance(2)');
 const rainVis = await ev('window.__rainVisible()');
 await save('wx-rain-on', true);
 console.log('WX-RAIN rivulets visible=%s', rainVis);
-// 6d) ?snowvol=0 폴백 — 볼륨 미생성 확인
-await page.goto(`${base}/__focus?time=day&snowvol=0`, { waitUntil: 'load' });
-await page.waitForFunction('window.__SHOT_READY === true', null, { timeout: 30000 });
-await ev('window.__ringSet("choga")');
-await ev('window.__advance(4)');
-await ev('window.__setWx({ accum: 1, snow: 1 })');
-await ev('window.__advance(2)');
-const volFallback = await ev('window.__snowVisible()');
-console.log('WX-FALLBACK ?snowvol=0 snowShell visible=%s (false 여야 폴백 정상)', volFallback);
-
 // 6e) 기와 지붕(hanok) 적설/빗물 — 볏짚 돔 대비 기왓골에 잘 읽히는 대조 컷
 await open('day');
 await ev('window.__ringSet("hanok")');

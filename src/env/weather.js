@@ -46,6 +46,11 @@ const WET_FACTOR = 0.45; // 젖음 시 roughness 감쇠(원본*(1-0.45))
 // 그 진행도이며, 선형 램프로 오른다(이징은 앞이 급해 "즉시 하얘짐"으로 읽힘).
 const WET_DOWN = 3.0;    // 마당 젖음 회복 시간(초)
 
+// 폰 프로파일에서 지붕 충돌 판정을 유지하는 활성 콜라이더 상한. 판정은 입자수 × 콜라이더수의
+// 선형 주사이므로 12개면 프레임당 눈 43,200 + 비 31,200회로, 점-AABB 한 번이 최대 6번의 부동소수
+// 비교인 작업량이다. 이보다 밀집한 구역(도성 시가지)에서만 통과로 폴백한다.
+const PHONE_COLLIDE_BUDGET = 12;
+
 const GROUND_SNOW = new THREE.Color(0xeaeef4); // 지면 적설 톤
 const RAIN_FOG = new THREE.Color(0x39424e);    // 비 대기 색
 const SNOW_FOG = new THREE.Color(0xccd2da);    // 눈 대기 색(밝은 흐림)
@@ -54,12 +59,26 @@ const WET_GROUND = new THREE.Color(0x6b6154);  // 젖은 마당(암부 톤다운
 // env 를 넘기면(권장) 대기 틴트 모디파이어를 env.addFogModifier 로 자동 등록해 시간대 크로스페이드
 // 중에도 비/눈 fog 틴트가 씻기지 않고 레벨(페이드)로 합성된다(태스크 #50). 없으면 소비자가
 // applyAtmosphere 를 직접 호출하는 기존 경로로 동작(하위호환).
+// lowPerf(폰 프로파일)가 지금 실제로 바꾸는 것은 지붕 충돌 판정의 활성 콜라이더 상한 하나다.
+// #131 이 적설 볼륨·빗물 흐름을 전 디바이스에서 제거했고, 꽃잎 밀도 하향은 복원됐다
+// (docs/mobile-effects-audit.md M16·M17).
 export function setupWeather(scene, {
   layout, getBuilding, getGround, env = null, sun = null, lowPerf = false,
 }) {
   let L = layout;
   let name = 'clear';
   let roofColliders = []; // 지붕 충돌 박스 목록 (AABB Box3 배열)
+  // 지붕 충돌 판정의 활성 집합. 낙하 박스(필드 중심 ±half)와 겹치는 콜라이더만 담는다 — 박스 밖
+  // 콜라이더는 입자가 도달할 수 없으므로 이 추림은 판정 결과를 바꾸지 않는다(흔들림·거스트가 half 를
+  // 조금 넘길 수 있어 마진을 준다). 판정 비용이 "마을 전체 집 수"에서 "지금 눈·비가 내리는 구역의
+  // 집 수"로 줄어, 폰에서도 대부분의 프레임에서 충돌을 켤 수 있게 된다(docs/mobile-effects-audit.md M16).
+  const COLLIDE_BOX_MARGIN = 10;
+  let activeColliders = [];
+  // 추림 결과 메모 — 콜라이더 집합이 교체되거나 필드 중심이 유의미하게 움직일 때만 다시 계산한다
+  // (매 프레임 filter 로 배열을 새로 만들면 렌더 루프에서 GC 를 만든다). 허용 이동은 마진보다
+  // 훨씬 작게 두어, 캐시를 쓰는 동안에도 입자가 도달할 수 있는 콜라이더가 빠지지 않게 한다.
+  const COLLIDE_CACHE_SLACK = 2;
+  let colliderVersion = 0, cachedVersion = -1, cachedCX = NaN, cachedCZ = NaN;
 
   // 공유 적설 uniform — 모든 패치 재질이 같은 객체를 참조 → 한 번 갱신으로 전체 반영.
   const snowUniform = { value: 0 };
@@ -113,11 +132,27 @@ export function setupWeather(scene, {
   const petals = createPetalField({
     getWind,
     getLightDirection: sun ? () => sun.position : null,
-    lowPerf,
   });
   scene.add(snow.object);
   scene.add(rain.object);
   scene.add(petals.object);
+
+  // 낙하 박스와 겹치는 콜라이더만 activeColliders 로 추린다. 입자는 필드 중심 ±half 안에서
+  // wrap 되고 흔들림·거스트만 그 밖으로 조금 나가므로, 마진을 더한 박스와 겹치지 않는 콜라이더는
+  // 어떤 입자도 맞힐 수 없다 — 결과 동일, 판정 비용만 줄어든다(데스크톱 포함).
+  function refreshActiveColliders() {
+    if (cachedVersion === colliderVersion
+      && Math.abs(fieldCX - cachedCX) <= COLLIDE_CACHE_SLACK
+      && Math.abs(fieldCZ - cachedCZ) <= COLLIDE_CACHE_SLACK) return;
+    cachedVersion = colliderVersion; cachedCX = fieldCX; cachedCZ = fieldCZ;
+    if (roofColliders.length === 0) { if (activeColliders.length) activeColliders = []; return; }
+    const half = Math.max(snowState.half, rainState.half) + COLLIDE_BOX_MARGIN;
+    const minX = fieldCX - half, maxX = fieldCX + half;
+    const minZ = fieldCZ - half, maxZ = fieldCZ + half;
+    activeColliders = roofColliders.filter((box) => (
+      box.max.x >= minX && box.min.x <= maxX && box.max.z >= minZ && box.min.z <= maxZ
+    ));
+  }
 
   // ---------- 재질 패치(적설/젖음) ----------
   // material.uuid → { mat, roughness } (원본 roughness 보관)
@@ -269,6 +304,12 @@ export function setupWeather(scene, {
     const rainVis = rainLevel * precipitationDetail > 0.003;
     snow.object.visible = snowVis;
     rain.object.visible = rainVis;
+    // 충돌 게이트는 디바이스가 아니라 이 프레임의 실제 판정량으로 키를 잡는다. 비용은
+    // 입자수(눈 3600·비 2600) × 콜라이더수의 선형 주사라 규모에 비례하고 디바이스와는 무관하다.
+    // 활성 집합이 작으면(단일건물·한적한 마을·근접 프레임) 폰에서도 눈·비가 지붕에 걸리고,
+    // 도성 밀집 구역에서만 통과로 폴백한다.
+    if (snowVis || rainVis) refreshActiveColliders();
+    const collide = !lowPerf || activeColliders.length <= PHONE_COLLIDE_BUDGET;
     if (snowVis) {
       advanceSnowPrecipitation(snowState, {
         dt,
@@ -276,8 +317,8 @@ export function setupWeather(scene, {
         wind,
         centerX: fieldCX,
         centerZ: fieldCZ,
-        roofColliders,
-        collide: !lowPerf,
+        roofColliders: activeColliders,
+        collide,
         top: yTop(),
       });
       snow.sync({ level: snowLevel * precipitationDetail, time: t });
@@ -289,8 +330,8 @@ export function setupWeather(scene, {
         wind,
         centerX: fieldCX,
         centerZ: fieldCZ,
-        roofColliders,
-        collide: !lowPerf,
+        roofColliders: activeColliders,
+        collide,
         top: yTop(),
       });
       rain.sync({ level: rainLevel * precipitationDetail, time: t });
@@ -386,6 +427,7 @@ export function setupWeather(scene, {
     setAccum,
     setRoofColliders(boxes) {
       roofColliders = boxes || [];
+      colliderVersion++;   // 활성 집합 추림 캐시 무효화
     },
     // 하늘 입자 낙하 필드 중심 이설(#98). 마을 부감·종가 클로즈업처럼 시선이 원점을 벗어난 뷰에서
     //   눈·비가 화면 밖(원점)에만 쌓여 안 보이던 문제를 해소한다. 낙하 파티클 오브젝트만 이동(처마

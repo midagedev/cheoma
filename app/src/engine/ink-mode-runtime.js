@@ -37,13 +37,19 @@ export function createInkModeRuntime({
     if (ink) return ink;
     ink = createInkPass(scene, camera, {
       // Edges tolerate a reduced normal/depth target; color and paper remain full resolution.
+      // The phone's 0.5 is the one ink knob that multiplies fill rate, so it stays until the
+      // real-device A/B in docs/mobile-effects-audit.md §7 (M11/R9). `?fxcompact=0` flips it.
       resolutionScale: compact ? 0.5 : 0.75,
       // The paper is broad, low-frequency grain. A bounded source avoids walking a 4M-pixel
       // canvas on the first input event while preserving lazy GPU allocation in default PBR.
-      paperSize: compact ? 512 : 1024,
+      // 1024 is shared with the phone: the phone-only 512 saved 3 MB of texture memory
+      // (RGBA 1024² 4 MB vs 512² 1 MB) and bought a visible hanji-grain tile repeat, and the
+      // silhouette width is a uniform constant that costs nothing at all
+      // (docs/mobile-effects-audit.md M12·M13).
+      paperSize: 1024,
       uniforms: {
         mixAmount: amount,
-        silhouetteWidth: compact ? 2.2 : 2.6,
+        silhouetteWidth: 2.6,
       },
     });
     postRuntime.addPassAfterRender(ink.sourcePass, 'InkBeautyCapturePass');

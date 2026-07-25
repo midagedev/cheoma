@@ -362,7 +362,33 @@ try {
       + `detail depth without changing its stable tier (${JSON.stringify(boot.chunkLens)})`);
   }
 
+  // 표본은 프레임 수가 아니라 **자원 고원(plateau)** 에서 뜬다.
+  //
+  // 이 값들이 먹이는 델타 예산(aerial→focusOut)의 의미는 "focus 오버레이 잔여물"이고, 그 비교가
+  // 성립하려면 두 끝점이 같은 정착 상태여야 한다. 종전에는 aerial 이 긴 부팅 시퀀스 뒤에,
+  // focusOut 은 고정 3 프레임 뒤에 측정돼 정착 정도가 달랐다. 애니메이션 클록을 벽시계로 고치자
+  // (app/src/engine/frame-clock.js) 그 비대칭이 드러났다 — 프레임당 진행이 실제 시간을 따르면서
+  // aerial 기준선이 849→771 로 더 깊이 정착했고, focusOut 은 거의 그대로여서 델타만 71→130 으로
+  // 벌어졌다. 오버레이는 양쪽 모두 이미 해제돼 있었고 절대 예산도 모두 통과했다 — 즉 자원 회귀가
+  // 아니라 표본 시점의 비대칭이었다. 고원에서 뜨면 두 끝점이 같은 조건이 되어 델타가 다시
+  // 잔여물만 뜻한다. dispose 계약들이 쓰는 것과 같은 관용구다.
+  async function settleResources() {
+    await page.evaluate(() => new Promise((resolveFrame) => {
+      let stable = 0, previous = -1, frames = 0;
+      const step = () => {
+        const geometries = window.__engine.renderer.info.memory.geometries;
+        stable = geometries === previous ? stable + 1 : 0;
+        previous = geometries;
+        // 연속 8 프레임 불변이면 정착. 상한 240 프레임은 저fps 환경에서도 무한 대기하지 않게.
+        if (stable >= 8 || ++frames > 240) resolveFrame();
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }));
+  }
+
   async function sceneMetrics(label) {
+    await settleResources();
     const samples = await page.evaluate(() => {
       const engine = window.__engine;
       const capture = () => ({
@@ -1276,9 +1302,6 @@ try {
       && focusOut.finalCounts.midDetail === 0 && focusOut.finalCounts.fullDetail === 0,
   `settled aerial view puts every regular house on the shared FAR tier `
     + `(${focusOut.finalCounts.farMass}/${boot.regularCount})`);
-  await page.evaluate(() => new Promise((resolveFrame) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
-  }));
   performance.focusOut = await sceneMetrics('focus-out');
   const aerialLife = await page.evaluate(() => {
     const root = window.__engine.village.exportRoot();

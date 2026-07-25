@@ -376,7 +376,12 @@
   let cineButtons = $derived(villageAerial && !waving && !veil && !cine.active && !heroLanding);
   // 편집 중엔 액션바 숨김(모든 터치 디바이스 — 세로 시트/가로·태블릿 사이드 패널과 겹침 방지).
   // 데스크톱(perf=false)은 종전대로 유지. 낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
-  let hideActions = $derived(device.perf && editing);
+  // 편집 중 전역 액션바 은닉은 성능이 아니라 레이아웃 문제다 — 시트(세로 좁은 화면)나 축소 사이드
+  //   패널이 하단을 점유해 겹치기 때문이고, 이때 공유 액션은 시트 푸터로 이동한다(아래 onShare).
+  //   그래서 device.perf 가 아니라 레이아웃 술어로 키를 잡는다. perf 를 진짜 폰으로 좁힌 뒤
+  //   (docs/mobile-effects-audit.md P1) 좁은 비터치 창이 시트 레이아웃인데 액션바까지 띄우는
+  //   겹침이 생겼고, check:app 의 시트 푸터 공유 단정이 그것을 잡았다.
+  let hideActions = $derived((device.sheet || device.landscapePhone) && editing);
   let hideSeal = $derived(sheetLayout && (editing || (sceneVillage && !villageEditing)));
   let sceneGuideVisible = $derived(sceneGuideIsVisible({
     dismissed: sceneGuideDismissed,
@@ -813,9 +818,15 @@
   function startWalk() { if (!waving) engine.cine.start('walk'); }
   function stopCine() { engine.cine.stop(); }
 
-  // 데스크톱 1인칭 입력 — cine walk 활성 동안만 rAF 로 키/마우스 델타를 walker 에 피드(모바일은 autoStroll).
+  // 데스크톱 1인칭 입력 — cine walk 활성 동안만 rAF 로 키/마우스 델타를 walker 에 피드.
+  //   폰은 입력 피드 없이 walker 의 autoStroll 로 완주한다(키보드가 없으니 그게 맞다). 종전에는
+  //   그 이유로 "거닐기" 버튼 자체를 폰에서 지웠는데, 데모는 이미 전 디바이스에서 돌아가므로
+  //   터치 사용자만 자동 산책을 못 보는 과잉이었다(docs/mobile-effects-audit.md U1·U2).
   function startWalkFeed() {
-    if (cine.mode !== 'walk' || device.perf) return;   // 터치/저사양은 autoStroll 전용
+    // 게이트 축은 성능이 아니라 입력 장치다 — 키보드 없는 거친 포인터에는 autoStroll 이 정답이고,
+    //   pointermove 를 시선에 물리면 터치 드래그가 궤도 조작과 싸운다. 태블릿도 여기 포함된다
+    //   (perf 를 진짜 폰으로 좁혀도 태블릿은 계속 autoStroll — docs/mobile-effects-audit.md U2).
+    if (cine.mode !== 'walk' || device.touch) return;
     walkKeys.clear(); walkYaw = 0; walkPitch = 0; walkManual = false;
     addEventListener('keydown', onWalkKey);
     addEventListener('keyup', onWalkKeyUp);
@@ -1223,7 +1234,7 @@
       raised={sheetLayout && villageAerial}
       shifted={ui.selected && !sheetLayout}
       onDrone={cineButtons ? startDrone : null}
-      onWalk={cineButtons && !device.perf ? startWalk : null}
+      onWalk={cineButtons ? startWalk : null}
     />
   {/if}
 </div>

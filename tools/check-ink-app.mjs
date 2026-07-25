@@ -409,17 +409,28 @@ try {
   pass(mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
     'mobile control stays on-screen with 44px touch targets', JSON.stringify(mobileUi));
   pass(mobileUi.pressed[1] === 'true', 'mobile shared URL exposes the restored ink state');
-  pass(mobileUi.normalScale <= 0.5 && mobileUi.beautyScale <= 0.5 && mobileUi.paperSize <= 512,
-    'compact ink uses half-resolution targets and a bounded paper source');
-  pass(mobileUi.movingDof.postQuality === 0
-      && mobileUi.movingDof.activeBokehTaps === 0
-      && mobileUi.movingDof.enabled === false
-      && mobileUi.movingDof.amount === 0
-      && mobileUi.movingDof.aperture === 0
+  // Re-authored 2026-07-25 (docs/mobile-effects-audit.md R7/M12). The paper source is broad,
+  // low-frequency grain, and the phone-only 512 bought a visible tile repeat for 3 MB of texture
+  // memory. What actually needs bounding on a phone is the *fill-rate* term, which is the
+  // normal/beauty resolution scale — that stays at 0.5 until the §7 real-device A/B.
+  pass(mobileUi.normalScale <= 0.5 && mobileUi.beautyScale <= 0.5 && mobileUi.paperSize === 1024,
+    'compact ink bounds its fill-rate targets while keeping the full-resolution paper source');
+  // Re-authored 2026-07-25 (docs/mobile-effects-audit.md R2/M3-M9). The old form asserted a hard
+  // device-keyed DoF-off policy, which docs/look-grammar.md §5 forbids: integrators are not turned
+  // off for performance. The phone now runs the same focus-owned DoF as the desktop, so what this
+  // frame must prove is the *adaptive* contract instead — a moving phone frame keeps Bokeh awake
+  // and correctly focused on its subject while the quality runtime collapses it to a single tap,
+  // and ink still puts it to sleep under an opaque paper image.
+  pass(mobileUi.movingDof.enabled === true
+      && mobileUi.movingDof.amount === 1
+      && mobileUi.movingDof.error != null && mobileUi.movingDof.error < 1e-6
+      && mobileUi.movingDof.postQualityMode === 'moving'
+      && mobileUi.movingDof.postQuality === 0
+      && mobileUi.movingDof.activeBokehTaps === 1
       && mobileUi.pbrInk.pbrAwake
-      && !mobileUi.pbrInk.pbrPasses.bokeh
+      && mobileUi.pbrInk.pbrPasses.bokeh
       && !mobileUi.restoredInk.pbrPasses.bokeh,
-  'compact/mobile PBR focus keeps DoF asleep while adaptive quality tracks motion');
+  'compact/mobile PBR focus keeps the restored DoF on its subject at one moving tap, and ink sleeps it');
   await mobile.close();
 
   pass(runtimeErrors.length === 0, 'ink rendering emits no runtime or shader errors', runtimeErrors.join(' | '));

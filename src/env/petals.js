@@ -73,13 +73,15 @@ export function petalDetailWeight(viewHeight, camDist = NaN, sharedWeight = null
 const GINKGO_COLS = [0xf2c53d, 0xf0b429, 0xe8b21f, 0xf5ce4a];
 const MAPLE_COLS = [0xc0392b, 0xd35400, 0xe0491f, 0xb83a1e, 0xd9622b];
 
-// createPetalField({ getWind, lowPerf }) →
+// createPetalField({ getWind }) →
 //   { object, setSeason(name), update(dt, {t, camDist, viewHeight, present, wind}), get level, get count, get season, aabb(), dispose() }
-export function createPetalField({ getWind, getLightDirection = null, lowPerf = false } = {}) {
+export function createPetalField({ getWind, getLightDirection = null } = {}) {
   // #125 대폭 감축(사용자: "색종이 축제 아니라 바람에 이따금 지는 잎"). 기존 1200 → 460. 실제 동시
   //   가시 수는 아래 돌풍 게이트(uActive)가 더 조인다 — 잔잔할 땐 한 자릿수~십수 장, 돌풍에 잠깐 늘었다
   //   잦아든다. per-frame 갱신 루프도 N 감축분만큼 저비용(성능 우선).
-  const N = lowPerf ? 220 : 460;
+  // 460 은 전 디바이스 공통이다 — 종전의 폰 220 은 계절감을 절반으로 깎으면서 아낀 것이 단일
+  //   InstancedMesh 안의 인스턴스 240개(드로우콜·프로그램 델타 0)뿐이었다(docs/mobile-effects-audit.md M17).
+  const N = 460;
   const half = 44;             // 수평 반경(카메라 타깃 주변 볼륨) — 눈 볼륨(46)과 유사
   const yBottom = -1.0;
   const yTop = 40.0;

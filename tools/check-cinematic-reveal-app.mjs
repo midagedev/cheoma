@@ -1202,7 +1202,16 @@ try {
     'reduced-motion endpoint keeps lookAt and DoF coherent');
   await reducedPage.close();
 
-  // Phone/perf profile keeps choreography but selects the compact path.
+  // Phone profile runs the same authored choreography as the desktop.
+  //
+  // This assertion was re-authored on 2026-07-25 (docs/mobile-effects-audit.md M14/R1). Its previous
+  // form demanded `motion === 'compact'`, which was a gate written around a reduction that cost
+  // nothing to remove: the compact arrival kept the full 8.1 s length but cut camera travel from
+  // 57.6 m to 18.5 m, so a phone viewer watched a nearly frozen frame for eight seconds while the
+  // GPU saved exactly zero (camera paths are CPU arithmetic, and the assembly window already holds
+  // shadows hot because the geometry itself is moving). The phone now selects 'full'. The core
+  // 'compact' profile still exists in architectural-reveal.js for reuse consumers and is asserted
+  // by check-cinematic-reveal.mjs.
   const mobilePage = await browser.newPage({
     viewport: { width: 390, height: 844 }, deviceScaleFactor: 1,
     isMobile: true, hasTouch: true,
@@ -1219,10 +1228,13 @@ try {
     engine.debugRenderDofFrame();
     return state;
   });
-  invariant(mobile.active && mobile.motion === 'compact', 'phone/perf path selects compact camera motion');
-  invariant(mobile.lookErrorDeg < 1e-4
-      && (!mobile.dof.enabled || mobile.dof.error == null || mobile.dof.error < 0.04),
-  'compact phone frame keeps lookAt coherent and respects the mobile DoF-off policy');
+  invariant(mobile.active && mobile.motion === 'full', 'phone path runs the full authored camera choreography');
+  // DoF is now device-independent: the focus context owns it everywhere (look-grammar §5). The phone
+  // therefore has to satisfy the *coherent* branch, not the disabled one — a phone frame that woke
+  // Bokeh without tracking the subject depth (the measured 28.4 m focus error) fails here.
+  invariant(mobile.lookErrorDeg < 1e-4 && mobile.dof.enabled
+      && (mobile.dof.error == null || mobile.dof.error < 0.04),
+  'phone frame keeps lookAt coherent and focuses the restored DoF on its subject');
   await mobilePage.screenshot({ path: join(outputDir, 'rebuild-mobile-mid.png') });
   await mobilePage.goto(
     `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,
