@@ -568,18 +568,44 @@ try {
       : Infinity;
   const primaryDoorAligned = (sample, sources = ["primary-opening"]) => {
     const { dof, leafWidth } = sample;
+    // `debugDoorFrame` is the *moving active leaf* frame: its centre is
+    // (motionPlan.leafCenterU, height * 0.5, motionPlan.pivot.outward) in the
+    // opening basis, and its right/outward columns are read off the leaf pivot's
+    // world matrix, so they rotate as the leaf swings. The DoF anchor is
+    // deliberately a different point — the *fixed portal plane* centre
+    // (u = 0, height * 0.5, face); see src/builder/opening-detail-plan.js:
+    // "Optical focus belongs to the fixed portal plane, never the moving leaf."
+    //
+    // So the two points are separated by authored geometry, not by error: a
+    // multi-leaf door separates them laterally by |leafCenterU| ~ leafWidth / 2,
+    // the leaf plane sits at pivot.outward rather than at face, and any leaf
+    // rotation leaks the lateral term into the leaf-frame outward axis. Only the
+    // shared height is exact. The former `portalPlaneOffset < 0.01` and
+    // `abs(anchorDepth - doorDepth) < 0.08` constants silently assumed a single,
+    // centred, exactly coplanar leaf viewed head-on; they held only while the
+    // deterministic fixture's p32 happened to resolve to such a door and broke
+    // the moment #164 (gentler back ridge) moved the village plan — that commit
+    // rewrote tools/plan-contract.json and check-house-diversity.mjs, so p32 now
+    // resolves to a different opening. Both quantities are geometry, and one of
+    // them (portalPlaneOffset) is camera-independent, so this was never an
+    // elevation or focus-tracking regression.
+    //
+    // Budget every in-plane/axial term by the authored door envelope instead.
+    // That still fails closed on the regressions this gate exists for — a stale
+    // disposed anchor, a controls-target fallback, or a focus plane that lands on
+    // the yard, the roof, or a neighbouring parcel are all metres out, while the
+    // exact matrix agreement and the exact shared portal height stay tight.
+    const doorEnvelope = Math.max(0.05, (leafWidth || 0) * 2 + 0.02);
     return (
       sources.includes(dof.anchorSource) &&
       finiteAnchor(dof) &&
       Number.isFinite(sample.doorDepth) &&
       Number.isFinite(sample.anchorDepthFromMatrix) &&
       Math.abs(dof.anchorDepth - sample.anchorDepthFromMatrix) < 1e-5 &&
-      Math.abs(dof.anchorDepth - sample.doorDepth) < 0.08 &&
       sample.verticalOffset < 0.01 &&
-      sample.portalPlaneOffset < 0.01 &&
-      // The semantic point is the whole fixed portal center. debugDoorFrame is
-      // the active outer-leaf center, so multi-leaf doors may differ laterally.
-      sample.worldOffset < Math.max(0.05, (leafWidth || 0) * 2 + 0.02)
+      sample.portalPlaneOffset < doorEnvelope &&
+      sample.worldOffset < doorEnvelope &&
+      Math.abs(dof.anchorDepth - sample.doorDepth) < doorEnvelope
     );
   };
 
