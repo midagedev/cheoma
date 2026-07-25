@@ -13,6 +13,7 @@ import {
   createPhysicalRainRepresentation,
   createPhysicalSnowRepresentation,
 } from './weather-physical-geometry.js';
+import { precipitationPresence } from '../core/lod.js';
 import {
   advanceRainPrecipitation,
   advanceSnowPrecipitation,
@@ -93,7 +94,11 @@ export function setupWeather(scene, {
   //   update/센터에서 판정해 넘긴다.
   let season = 'summer';
   let petalCamDist = NaN, petalViewHeight = null, petalDetail = null;
-  let precipitationDetail = 1;
+  // 강수 전용 밴드(look-audit R3). 눈·비는 하늘·대기 소속이라 지면 생활 디테일 밴드를 공유하지
+  //   않는다 — 부감에서도 반드시 발현하고, 거리에 따라 낙하 볼륨·입자 치수·밀도만 조절한다.
+  //   계절 입자(꽃잎·낙엽)는 근경 디테일이므로 기존 detailWeight 밴드를 그대로 쓴다.
+  let precip = precipitationPresence(NaN);
+  let precipViewDistance = NaN;
   // 꽃잎/낙엽 조기노출 게이트(#61): 원점 빈 터(단일건물 재생성 중)에선 억제, 씬이 정착하면 스멀스멀.
   //   present = 건물이 서 있거나(단일건물) 필드 중심이 원점을 벗어났을 때(마을 부감·focus·히어로 랜딩).
   //   마을에선 앱 building.visible=false 라 present 로는 못 켜므로 centerAway(fieldC)를 OR 로 함께 본다.
@@ -265,11 +270,16 @@ export function setupWeather(scene, {
     applyGround();
 
     // 파티클 가시성/갱신 — 낙하 눈·비 커튼만(값싼 입자, 하늘 소속). 처마 낙수·스플래시·볼륨은 #131 로 제거.
-    const snowVis = snowLevel * precipitationDetail > 0.003;
-    const rainVis = rainLevel * precipitationDetail > 0.003;
+    //   가시성은 강수 레벨 하나로 판정한다: 거리 밴드는 표현(볼륨·치수·밀도)만 바꾸고 절대 끄지 않는다.
+    const snowVis = snowLevel > 0.003;
+    const rainVis = rainLevel > 0.003;
     snow.object.visible = snowVis;
     rain.object.visible = rainVis;
+    // 볼륨이 확대된 부감에서는 지붕 충돌 판정이 의미를 잃는다(로컬 좌표계가 스케일되어 콜라이더
+    //   월드 박스와 맞지 않고, 그 거리에선 지붕에 걸리는 한 송이가 화면에 기여하지도 않는다).
+    const collide = !lowPerf && precip.boxScale <= 1.15;
     if (snowVis) {
+      snow.setPresentation({ boxScale: precip.boxScale, density: precip.density });
       advanceSnowPrecipitation(snowState, {
         dt,
         time: t,
@@ -277,12 +287,17 @@ export function setupWeather(scene, {
         centerX: fieldCX,
         centerZ: fieldCZ,
         roofColliders,
-        collide: !lowPerf,
+        collide,
         top: yTop(),
       });
-      snow.sync({ level: snowLevel * precipitationDetail, time: t });
+      snow.sync({ level: snowLevel, time: t });
     }
     if (rainVis) {
+      rain.setPresentation({
+        boxScale: precip.boxScale,
+        lengthScale: precip.rainLength,
+        density: precip.density,
+      });
       advanceRainPrecipitation(rainState, {
         dt,
         time: t,
@@ -290,10 +305,10 @@ export function setupWeather(scene, {
         centerX: fieldCX,
         centerZ: fieldCZ,
         roofColliders,
-        collide: !lowPerf,
+        collide,
         top: yTop(),
       });
-      rain.sync({ level: rainLevel * precipitationDetail, time: t });
+      rain.sync({ level: rainLevel, time: t });
     }
 
     // 계절 입자(봄 꽃잎·가을 낙엽): 조기노출 게이트(원점 빈 터 억제) + 카메라 추종 볼륨. 눈·비처럼
@@ -335,6 +350,17 @@ export function setupWeather(scene, {
       // 이징된 강수 레벨(0..1) — 외부 소비자(post 렌즈 플레어 등)가 엔진 배선 없이 읽는 읽기 전용 신호.
       get rain() { return rainLevel; },
       get snow() { return snowLevel; },
+      // 강수 전용 밴드의 현재 해석(look-audit R3 검증용): 화면 등가 거리 → 볼륨·치수·밀도 배율.
+      get precip() {
+        return {
+          view: Number.isFinite(precipViewDistance) ? +precipViewDistance.toFixed(1) : null,
+          boxScale: +precip.boxScale.toFixed(2),
+          rainLength: +precip.rainLength.toFixed(2),
+          density: +precip.density.toFixed(2),
+          rainInstances: rain.object.geometry.instanceCount,
+          snowInstances: snow.object.geometry.instanceCount,
+        };
+      },
       // 계절 입자 필드(#111): env.setSeason 이 이 브릿지로 season 을 전달(engine 은 weather 에 season 미전달).
       //   'spring'|'autumn' 만 꽃잎/낙엽 발현. 읽기 전용 petalLevel 로 검증/외부 소비.
       setSeason: (name) => { season = name; petals.setSeason(name); },
@@ -406,10 +432,13 @@ export function setupWeather(scene, {
         petals.object.position.set(x, 0, z);   // 계절 입자도 카메라 타깃 추종(#111)
       }
       const visualDist = Number.isFinite(visualDistance) ? visualDistance : camDist;
-      // 강수도 공통 디테일 가중치를 직접 소비한다. 중간 band에서는 color/depth가 함께 옅어지고,
-      // 원경 0에서는 CPU state advance와 draw를 모두 쉰다. 개별 크기는 월드 단위 그대로다.
-      precipitationDetail = Number.isFinite(detailWeight)
-        ? Math.max(0, Math.min(1, detailWeight)) : 1;
+      // 강수는 지면 디테일 가중치(detailWeight)를 소비하지 않는다 — 그 밴드는 부감에서 0이 되어
+      // 비 오는 날 부감의 강수를 통째로 지웠다(look-audit R3). 대신 화면 등가 거리만 읽어
+      // 낙하 볼륨·입자 치수·밀도를 조절한다(절대 0이 되지 않는 전용 밴드).
+      if (visualDist !== precipViewDistance) {
+        precipViewDistance = visualDist;
+        precip = precipitationPresence(visualDist);
+      }
       // 계절 입자는 눈·비와 달리 근경 디테일이다. 4번째 인자는 절대 world Y가 아니라
       // 카메라와 현재 시선 타깃/지면 사이의 수직 높이다. petals가 공통 디테일 밴드로 소거한다.
       // 기존 3-인자 호출은 camDist 근사치를 사용하도록 보존한다.

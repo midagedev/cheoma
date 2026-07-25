@@ -59,6 +59,12 @@ export function villageDetailReach(pitchDeg, policy = VILLAGE_DETAIL_REACH) {
 // 카메라가 보는 지면 셀의 생활 디테일 정책. 절대 월드 Y가 아니라 카메라-시선 타깃의 수직차를
 // 사용하므로 산지의 높은 필지에서도 근접 동물·입자가 사라지지 않는다. spatial은 소동물,
 // altitude는 비선택 필지 앰비언스, particles는 낙엽/꽃잎처럼 지면 맥락이 필요한 입자에 쓴다.
+//
+// 여기에 속하지 않는 두 표현이 있다(look-audit R3·R4):
+//  - 강수(비·눈 낙하)는 하늘·대기 소속이라 `core/lod.js` PRECIPITATION_BAND 를 쓴다. 이 밴드로
+//    게이트하면 부감에서 0이 되어 "비 오는 날인데 비가 없는" 상태가 된다.
+//  - 굴뚝 연기는 부감에서 마을이 살아있음을 전하는 표현이라 `core/lod.js` AERIAL_LIFE_BAND 로
+//    강도만 낮추고 0으로 닫지 않는다. 서브픽셀이 되는 소동물·모트·풀만 이 밴드가 소거한다.
 export const VILLAGE_DETAIL_LOD = Object.freeze({
   spatial: Object.freeze({ full: 32, hidden: 72 }),
   view: Object.freeze({ full: 56, hidden: 104 }),

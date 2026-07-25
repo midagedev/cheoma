@@ -1649,8 +1649,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 단일건물 선택·호버 상태 정리
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
-    // 단일건물 날씨 파티클은 원점(숨은 본채)에 몰려 부감에 튀므로 억제(상태값은 유지).
-    weatherRef.setWeather('clear');
+    // 마을 부감도 사용자/시드 날씨를 유지한다. 원점 억제 사유는 사라졌다: 낙하 필드는 매 프레임
+    //   카메라 타깃을 따라오고(setWeatherCenter, #98), 처마 낙수·스플래시 같은 건물 앵커 FX 는
+    //   #131 로 제거됐다. 여기서 'clear' 로 덮으면 weather=rain/snow 인 부감에서 강수가 통째로
+    //   사라져 날씨 자체가 소거된다(look-audit R3 — enterVillageHero 는 이미 같은 이유로 유지한다).
+    weatherRef.setWeather(state.weather);
     village.active = true; village.selected = null; village.transitioning = false;
     clearSemanticDofAnchor();
     setFocusComposition(0);
@@ -2673,6 +2676,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         .map(buildingNavigationTargetFromProxy)
         .filter(Boolean),
       debugYardLife: () => village.handle?.debugYardLife?.() || null,
+      // 검증용: 이번 프레임의 공용 디테일 LOD 상태(지면·입자 가중치, tier, 화면 등가 거리).
+      //   강수 전용 밴드(R3)·부감 생명감(R4) 회귀를 수치로 고정하려면 이 상태가 읽혀야 한다.
+      debugDetailLod: () => village.handle?.detailLodState?.() || null,
       heroId: () => village.handle?.heroParcelId?.() ?? null,
       // focus 중 여부(App 이 再 버튼 노출·모드 판단) — selected 이면서 전환 완료 상태.
       focused: () => !!(village.active && village.selected),
@@ -3411,6 +3417,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       opts: { ...village.opts }, seed: village.seed, spec: null, stats: null, warnings: [],
     }),
     'village.debugParcels': () => [],
+    'village.debugDetailLod': () => null,
     'village.debugDrawCalls': () => 0,
     'cine.start': () => false,
     'cine.isActive': () => false,

@@ -160,9 +160,11 @@ try {
     const focusOuter = seek();
     const focusOuterDoor = doorFocusSnapshot("p32");
 
-    // Refresh product LOD at the settled telephoto camera. Physical precipitation keeps
-    // a world-space size; the camera projection supplies magnification without a point-size
-    // lens uniform or target-height inference.
+    // Refresh product LOD at the settled telephoto camera. Physical precipitation keeps its
+    // authored world size and stays real oriented world geometry: no point-size lens uniform,
+    // no camera-facing billboard, no target-height inference. Its only screen-referenced term
+    // is a per-particle projective size floor (a flake/streak may not fall below ~1px) with a
+    // hard absolute cap, which cannot inflate close particles into discs (look-audit R3).
     engine.debugAdvanceFocusRing(0);
     const focusedOptics = engine.debugSyncCameraEnvironment();
     const focusedSnow = engine.scene.getObjectByName("weatherSnowPhysical");
@@ -170,6 +172,10 @@ try {
       isMesh: focusedSnow?.isMesh === true,
       worldScale: focusedSnow?.material?.uniforms?.uWorldScale?.value ?? null,
       hasPointSizeUniform: !!focusedSnow?.material?.uniforms?.uSize,
+      screenFloor: focusedSnow?.material?.uniforms?.uScreenSize?.value ?? null,
+      screenFloorCap: focusedSnow?.material?.uniforms?.uScreenSizeCap?.value ?? null,
+      cameraFacing: /gl_PointSize|gl_PointCoord|cameraPosition/
+        .test(focusedSnow?.material?.vertexShader || ""),
     };
 
     // Warm the stable program once, then render the exact same final camera pose
@@ -616,8 +622,12 @@ try {
   pass(
     result.focusedWeatherPhysical.isMesh &&
       Math.abs(result.focusedWeatherPhysical.worldScale - 0.012) < 1e-9 &&
-      !result.focusedWeatherPhysical.hasPointSizeUniform,
-    "focused weather keeps authored world size and lets the physical camera supply magnification",
+      !result.focusedWeatherPhysical.hasPointSizeUniform &&
+      !result.focusedWeatherPhysical.cameraFacing &&
+      result.focusedWeatherPhysical.screenFloor > 0 &&
+      result.focusedWeatherPhysical.screenFloor <= 0.006 &&
+      result.focusedWeatherPhysical.screenFloorCap <= 1,
+    "focused weather keeps authored world size with a capped per-particle projective size floor",
   );
   pass(
     result.focusEnd.bokehSamples === 13 &&
