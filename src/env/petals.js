@@ -36,7 +36,12 @@ const SEASON_CFG = {
   },
   autumn: {
     colors: [0xc7452a, 0xd8792a, 0xd9a531, 0xb85a26, 0xa8662e, 0xcf8b3a, 0xbf5a2b],
-    size: [1.9, 4.0],     // 월드 곡면 장축 약 5.7–12cm(꽃잎보다 크게 유지)
+    // 사용자 지시(2026-07-25) 2단계: "낙엽같은게 조금 더 컸으면" → "윤곽을 알아볼 수 있게 살짝 과장해서
+    // 키우고". 구 [1.9,4.0](5.7~12cm)의 2.4배. 장축 약 13.7–28.8cm로, 실물 오동·플라타너스
+    // (20~30cm) 상단에 해당한다 — 단풍 기준으로는 과장이지만 수종 밴드 안이라 고증 주장은 유지된다.
+    // `speciesScale`(0.48~1.0)이 절반 수종을 6.6~13.8cm로 되돌려 크기 편차도 남는다.
+    // seasons.js 수관 방출 낙엽의 `sizeScale` 2.4와 같은 비율 — 두 계통이 한 화면에서 어긋나지 않는다.
+    size: [4.56, 9.6],    // 월드 곡면 장축 약 13.7–28.8cm(꽃잎보다 크게 유지)
     fall: [1.2, 2.6],     // 낙엽은 꽃잎보다 조금 빠르되 여전히 느림
     flutter: [1.6, 3.3],
     freq: [0.45, 1.15],
@@ -81,7 +86,10 @@ export function createPetalField({ getWind, getLightDirection = null } = {}) {
   //   잦아든다. per-frame 갱신 루프도 N 감축분만큼 저비용(성능 우선).
   // 460 은 전 디바이스 공통이다 — 종전의 폰 220 은 계절감을 절반으로 깎으면서 아낀 것이 단일
   //   InstancedMesh 안의 인스턴스 240개(드로우콜·프로그램 델타 0)뿐이었다(docs/mobile-effects-audit.md M17).
-  const N = 460;
+  // 2026-07-25 사용자: "좀 더 많이 날려도 좋겠어 가을 분위기 나게" → 460→680(1.5배). 드로우콜·프로그램
+  //   델타 0(단일 InstancedMesh), 비용은 per-frame 궤적 루프뿐. 실제 체감 밀도를 정하는 것은 N이 아니라
+  //   아래 가을 `gustBase`이므로 그쪽을 함께 올렸다.
+  const N = 680;
   const half = 44;             // 수평 반경(카메라 타깃 주변 볼륨) — 눈 볼륨(46)과 유사
   const yBottom = -1.0;
   const yTop = 40.0;
@@ -204,7 +212,10 @@ export function createPetalField({ getWind, getLightDirection = null } = {}) {
     const w = wind || (getWind ? getWind(t) : { dirX: 1, dirZ: 0, speed: 0.2, gust: 0 });
     // #125 돌풍 게이트: 계절 기저(봄=꽃보라로 조금 더 풍성, 가을=희소) + 돌풍 가산, 완만 평활
     //   → "잠깐 늘었다 잦아드는" 리듬(기존 바람 필드 gust 재사용). 잔잔할 땐 한 자릿수~십수 장만 보임.
-    const gustBase = season === 'spring' ? 0.34 : 0.12;
+    // 가을 기저는 #125에서 0.12(희소)였다. 2026-07-25 사용자 지시("가을 분위기 나게 좀 더 많이")로
+    //   0.26까지 올린다 — 봄 꽃보라(0.34)보다는 여전히 성기고, 돌풍 가산이 남아 "잠깐 늘었다 잦아드는"
+    //   리듬은 유지된다. 0.34 이상으로 올리면 #125가 금지한 색종이 축제로 되돌아간다.
+    const gustBase = season === 'spring' ? 0.34 : 0.26;
     const gustTarget = Math.min(1, gustBase + (w.gust || 0) * 0.85);
     activeSmooth += (gustTarget - activeSmooth) * Math.min(1, dt * 1.4);
     worldDetail.material.uniforms.uActive.value = activeSmooth;

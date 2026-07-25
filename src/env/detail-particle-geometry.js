@@ -222,7 +222,10 @@ void petalVertexState(
 export function createPetalWorldRepresentation(sourceGeometry, {
   renderOrder = 18,
   // aSize is an artistic scalar, not metres. Species scaling maps the current
-  // ranges to ~1.9–4.0cm spring petals and ~5.7–12cm autumn leaves end-to-end.
+  // ranges to ~1.9–4.0cm spring petals and ~13.7–28.8cm autumn leaves end-to-end
+  // (autumn was raised 2.4× on 2026-07-25 by user direction — "make the silhouette
+  // readable, slightly exaggerated". That lands on the real 오동·플라타너스 20~30cm
+  // band rather than 단풍 ~10cm, so it is an exaggeration of species mix, not of botany.)
   worldScale = 0.03,
 } = {}) {
   const geometry = createLeafSaddleGeometry();

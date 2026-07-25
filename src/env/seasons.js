@@ -402,7 +402,10 @@ function buildLeaves(treeInsts) {
   // #125 개수 대폭 감축(사용자: "색종이 축제 아니라 바람에 이따금 지는 잎"). 640→~150. 나무 방출
   //   낙엽은 마을 중심 근경에서만 보이는 보조분(원점 밖 focus 근경은 petals 담당) → 성기게 충분.
   //   per-frame 갱신 루프도 감축분만큼 저비용(성능 우선).
-  const N = Math.min(160, emitters.length * 4);
+  // 2026-07-25 사용자가 반대 방향을 지시했다: "좀 더 많이 날려도 좋겠어 가을 분위기 나게". 1.6배까지만
+  //   올린다 — #125의 "색종이 축제 금지"가 여전히 상한이고, 구 640은 그 상한을 넘은 값이었다.
+  //   드로우콜은 단일 InstancedMesh라 불변이고 비용은 per-frame 행렬 합성 루프에만 붙는다.
+  const N = Math.min(260, emitters.length * 6);
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,
@@ -479,7 +482,11 @@ function buildLeaves(treeInsts) {
   function setSeason(name) {
     const spring = name === 'spring';
     fallScale = spring ? 0.6 : 1.0;
-    sizeScale = spring ? 0.45 : 1.0;
+    // 가을 2.4배는 사용자 지시(2026-07-25 "낙엽같은게 조금 더 컸으면" → "윤곽을 알아볼 수 있게 살짝
+    // 과장해서 키우고")다. 14~29cm는 오동·플라타너스(20~30cm) 상단이라 단풍 기준으로는 과장이지만
+    // 수종 밴드를 벗어나지 않는다. petals.js autumn `size` 2.4배와 같은 비율로 묶여 있다.
+    // 봄 벚꽃잎은 실물이 2~3cm이므로 배율을 함께 올리지 않는다(0.45 유지 → 2.7~5.4cm).
+    sizeScale = spring ? 0.45 : 2.4;
     // 카메라 카드 대신 공유 곡면 geometry가 월드에서 실제로 회전한다. 수종별 차이는
     // 실루엣·곡면 normal·실제 크기·팔레트로 유지한다.
     const GINKGO = [0xf2c53d, 0xf0b429, 0xe8b21f, 0xf5ce4a];       // 순수 황금(은행)
