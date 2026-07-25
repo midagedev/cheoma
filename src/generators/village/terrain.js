@@ -209,33 +209,45 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
 //   스캔해 목표 중턱높이의 "안쪽(분지를 바라보는) 사면" 첫 교차점을 찾는다(원점 아닌 center 기준 —
 //   분지가 북으로 물려 있어 원점 스캔은 능선 먼 쪽에 놓여 근사면에 가려짐). 그 지형면 살짝 위에
 //   카메라 대면 뱅크를 얹고 분지쪽으로 조금 당겨 아이레벨 진입 시점에서 능선에 걸친 원경 물안개로 읽힌다.
+//   두 단(段)으로 쌓는다: 능선 중턱 밴드(원경) + 그 앞 낮은 밴드(중경). 아이레벨 근접 focus 는
+//   배산임수 규약상 항상 북쪽 산을 배경으로 두는데(집이 남향이므로 카메라는 남에서 북을 본다),
+//   마을 fog 는 부감용으로 near=R*2.2 까지 밀려 있어 그 배경 사면에 대기 원근이 하나도 걸리지 않는다.
+//   결과가 처마선 위를 가득 메운 맨 사면이다 — 골든이 안개로 소실시켜 여백으로 읽히게 했던 자리.
+//   수평 운해 링을 안으로 되돌리면 부감이 다시 탁해지므로(rIn 0.58 회귀), 아이레벨 전용인 이
+//   직립 빌보드가 그 몫을 갖는다. 부감에서는 카메라 대면 평면이 거의 엣지온이라 기여가 미미하다.
 export function computeRidgeMistAnchors(site) {
   const R = site.R, Hmax = site.Hmax;
   const C = site.center;
-  const targetH = Hmax * 0.34;                 // 중턱 목표 표고
   const arc = [Math.PI * 1.12, Math.PI * 1.9]; // center 기준 북(-z) 중심 뒤쪽 호
-  const count = R > 150 ? 4 : 3;
   const rMax = R * 1.35;
   const anchors = [];
-  for (let i = 0; i < count; i++) {
-    const t = count > 1 ? i / (count - 1) : 0.5;
-    const th = arc[0] + (arc[1] - arc[0]) * t;
-    const cxu = Math.cos(th), czu = Math.sin(th);
-    // center 에서 밖으로 스캔 → 표고가 targetH 를 처음 넘는 반경(분지쪽 근사면).
-    let hitR = null;
-    for (let r = R * 0.35; r <= rMax; r += R * 0.02) {
-      if (site.heightAt(C.x + cxu * r, C.z + czu * r) >= targetH) { hitR = r; break; }
+  const band = (targetH, count, spec) => {
+    for (let i = 0; i < count; i++) {
+      const t = count > 1 ? i / (count - 1) : 0.5;
+      const th = arc[0] + (arc[1] - arc[0]) * t;
+      const cxu = Math.cos(th), czu = Math.sin(th);
+      // center 에서 밖으로 스캔 → 표고가 targetH 를 처음 넘는 반경(분지쪽 근사면).
+      let hitR = null;
+      for (let r = R * 0.35; r <= rMax; r += R * 0.02) {
+        if (site.heightAt(C.x + cxu * r, C.z + czu * r) >= targetH) { hitR = r; break; }
+      }
+      if (hitR == null) continue;               // 이 방위에 뚜렷한 능선 없음(개활) → 생략
+      const x = C.x + cxu * hitR, z = C.z + czu * hitR;
+      const gy = site.heightAt(x, z);
+      // 분지쪽으로 살짝 당겨(뱅크가 사면 앞에 걸리게) + 지형 위 소량 리프트.
+      const pull = R * spec.pull;
+      anchors.push({
+        x: x - cxu * pull, y: gy + Hmax * spec.lift, z: z - czu * pull,
+        w: R * spec.w, h: Hmax * spec.h, op: spec.op,
+      });
     }
-    if (hitR == null) continue;                 // 이 방위에 뚜렷한 능선 없음(개활) → 생략
-    const x = C.x + cxu * hitR, z = C.z + czu * hitR;
-    const gy = site.heightAt(x, z);
-    // 분지쪽으로 살짝 당겨(뱅크가 사면 앞에 걸리게) + 지형 위 소량 리프트.
-    const pull = R * 0.05;
-    anchors.push({
-      x: x - cxu * pull, y: gy + Hmax * 0.08, z: z - czu * pull,
-      w: R * 0.72, h: Hmax * 0.6, op: 0.36,
-    });
-  }
+  };
+  // 원경 밴드(능선 중턱) — 위치·개수·크기는 검증된 기존 값을 유지한다. 키우면 부감에서 산 사면에
+  //   넓은 회색 얼룩으로 남는다(A/B 실측: count 5 · h 0.74 는 능선 매스를 지웠다).
+  band(Hmax * 0.34, R > 150 ? 4 : 3, { pull: 0.05, lift: 0.08, w: 0.72, h: 0.62, op: 0.38 });
+  // 중경 밴드(분지 안쪽 낮은 어깨) — 배경 사면과 마을 사이에 한 겹을 더 넣어 3단 원근을 만든다.
+  //   낮고 옅게: 이 겹이 진해지면 근접 프레임이 통째로 흐려진다.
+  band(Hmax * 0.16, R > 150 ? 3 : 2, { pull: 0.10, lift: 0.04, w: 0.52, h: 0.30, op: 0.20 });
   return anchors;
 }
 

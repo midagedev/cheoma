@@ -44,11 +44,17 @@ const SEASON_COL = {
 };
 
 // 시간대별 역광 글로우 세기·틴트. sunset/dawn 최대(골든아워), day 미약, night 극미·쿨.
+//
+// 세기 상한은 "끝단이 금빛으로 살짝 발광"이다. 이전 sunset 1.9 는 uGrassWarm(선형 ≈1.0,0.59,0.20)에
+//   곱해져 blade 끝의 emissive 를 1.9 까지 올렸다 — bloomThreshold(sunset 0.80) 를 두 배 넘겨
+//   전 포기가 흰~형광 노랑으로 타올라 담장 아래가 불꽃 노이즈로 읽혔다(docs/look-grammar.md §3
+//   입자·생명감: 발광은 역광을 보여주는 장치이지 그 자체가 광원이 아니다).
+//   이제 피크가 임계 바로 위(≈0.82×R)에 머물러 끝단만 헤일로를 얻는다.
 const TIME_GLOW = {
-  dawn:   { int: 1.5, warm: 0xffd9a0 },
-  day:    { int: 0.5, warm: 0xeef0e4 },
-  sunset: { int: 1.9, warm: 0xffca7a },
-  night:  { int: 0.25, warm: 0xb9c6e0 },
+  dawn:   { int: 0.72, warm: 0xffd9a0 },
+  day:    { int: 0.26, warm: 0xeef0e4 },
+  sunset: { int: 0.82, warm: 0xffca7a },
+  night:  { int: 0.14, warm: 0xb9c6e0 },
 };
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
@@ -310,7 +316,10 @@ export function setupGrass(parent, {
         vec4 gWorld = modelMatrix * mvPosition;
         vec3 gView = normalize(gWorld.xyz - cameraPosition);
         float gFwd = max(dot(gView, normalize(uSunDir)), 0.0);
-        vGrassGlowV = pow(gFwd, 3.0) * (0.15 + 0.85 * aBladeH) * uGrassGlow;
+        // 전방산란은 시선이 태양축에 거의 맞을 때만 성립한다. 지수 3 은 측광 화각에서도 절반쯤
+        //   남아 마당 전체가 균일하게 발광했다 → 6 으로 좁혀 진짜 역광 프레임에만 피어나게 한다.
+        //   또 뿌리 바닥값을 거의 없애(0.15→0.04) 발광이 잎끝 실루엣에 모이게 한다.
+        vGrassGlowV = pow(gFwd, 6.0) * (0.04 + 0.96 * aBladeH * aBladeH) * uGrassGlow;
         mvPosition = modelViewMatrix * mvPosition;
         gl_Position = projectionMatrix * mvPosition;`);
 

@@ -129,6 +129,7 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
     level: CHUNK_LOD_LEVEL.FAR,
     distance: Infinity,
     physicalDistance: Infinity,
+    detailReach: 1,
     midIn: policy.midIn,
     midOut: policy.midOut,
     fullIn: policy.fullIn,
@@ -193,14 +194,18 @@ export function attachChunkLodSwap(chunkGroup, farMass, midDetail, fullDetail, c
 
   // 반환: 이 프레임에 FAR/MID/FULL 표현 전환이 일어나면 true — 렌더 루프(#140-E)가 그림자 캐시
   //   모드에서 캐스터 구성 변경(FAR castShadow=false ↔ 실제 외피 캐스팅)을 1프레임 반영하는 데 쓴다.
-  chunkGroup.userData.lodUpdate = (camera, lensScale = 1) => {
+  chunkGroup.userData.lodUpdate = (camera, lensScale = 1, detailReach = 1) => {
     if (!camera?.position) return false;
     const physicalDistance = chunkLodDistance(
       chunk, camera.position.x, camera.position.z, camera.position.y,
     );
     const scale = Number.isFinite(lensScale) && lensScale > 1e-6 ? lensScale : 1;
-    const d = physicalDistance / scale;
+    // 깊이 배율은 화면 등가 거리 위에 곱해진다(lod-policy.js villageDetailReach). 1이면 이전과
+    // 완전히 같은 키이므로 부감·히어로 착지·격리 fixture 는 픽셀 단위로 무회귀다.
+    const reach = Number.isFinite(detailReach) && detailReach > 1e-6 ? detailReach : 1;
+    const d = physicalDistance / (scale * reach);
     state.physicalDistance = physicalDistance;
+    state.detailReach = reach;
     state.distance = d;
     if (legacy) {
       const next = state.level === CHUNK_LOD_LEVEL.FULL

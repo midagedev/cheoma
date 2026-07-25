@@ -33,6 +33,12 @@ import {
 const DEFAULT_CELL_SIZE = 24;
 const PARCEL_CLEARANCE = 3;
 const ROAD_CLEARANCE = 3;
+// 주거 focus 카메라가 서는 자리에서 가장 가까운 수관 표면까지의 최소 거리. 사람이 집을 바라보고
+// 설 만한 빈 자리 하나에 해당한다. 위쪽으로 키우면 필지마다 숲에 공터가 생겨 원경 캐노피 매스가
+// 얇아진다 — 실측으로 10m 는 수묵 모드의 농묵·여백 계약(`check-ink-app`: 상단 밝은 화소 9.3%→7.1%,
+// 톤 스팬 98.8→92.9)을 깨뜨렸고 6m 는 통과한다(10.3%/97.2). 그러므로 이 값은 시야 확보의 최소치이며
+// 룩 예산의 상한이다.
+const FOCUS_EYE_CLEARANCE = 6;
 
 function distToSegmentSquared(x, z, a, b) {
   const abx = b.x - a.x, abz = b.z - a.z;
@@ -191,6 +197,20 @@ export function createVegetationSpatial(plan, site, { cellSize = DEFAULT_CELL_SI
     if (auxiliary.length) {
       insert(boundsOfPoints(auxiliary), (x, z, radius, point) =>
         circleIntersectsPolygon(point, radius, auxiliary), true, true, true);
+    }
+
+    // 주거 근접 focus 카메라가 서는 자리는 숲이 비켜야 한다. 지형·건축 blocker 만 보는 시야 선택기는
+    // 수목을 알지 못하므로, 사면 필지에서는 카메라가 그대로 수관 안에 설 수 있다 — 그러면 프레임 전체가
+    // 저폴리 캐노피 한 장이 된다(capital/4 p23 실측: 피사체 43m, 가림 나무 6.9m, 오클루더 페이드는
+    // 수관 중심이 카메라 뒤/화면 밖이라 발현하지 않는다). 카메라 위치는 `planParcelFocus` 가 주는
+    // 순수 plan 파생값이므로 이 배제는 sync/worker 양쪽에서 같은 숲을 만든다.
+    const focus = planParcelFocus(parcel);
+    if (Number.isFinite(focus.cameraX) && Number.isFinite(focus.cameraZ)) {
+      const eye = { x: focus.cameraX, z: focus.cameraZ };
+      insert(circleBounds(eye.x, eye.z, FOCUS_EYE_CLEARANCE), (x, z, radius) => {
+        const combined = FOCUS_EYE_CLEARANCE + radius;
+        return (x - eye.x) ** 2 + (z - eye.z) ** 2 < combined * combined;
+      });
     }
   }
 

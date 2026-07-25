@@ -54,6 +54,26 @@ const WINTER_RIDGE = {
 };
 const WINTER_RIDGE_AMT = { dawn: 0.22, day: 0.42, sunset: 0.18, night: 0.10 };
 
+// ── 돔 ↔ 대기(fog) 결합 (R5 / U1) ────────────────────────────────────────────
+// 돔은 fog:false 라 대기 원근에 참여하지 않는다. 그래서 지평 아래(=지형이 끝난 뒤의 배경)까지
+// 노을 그라디언트가 그대로 깔리면 지형 절단면이 하늘에 하드컷으로 붙어 "떠 있는 디오라마 원반"이
+// 된다. 해법: 돔 텍스처에 현재 대기색을 알파 램프로 덮어 지평 아래를 fog 색으로 수렴시킨다
+//   — scene.background(=fog 색)와 돔 지평이 같은 색이 되므로 지형 외곽·수관 실루엣이
+//     "끝"이 아니라 대기로 소실되는 방향으로 읽힌다(운해 링·능선 물안개가 그 위를 마감).
+// 지평 위에도 낮은 잔여 헤이즈를 남겨(HAZE_TOP) 하늘만 채도가 튀고 지형이 눌리는 대비를 완화한다.
+// pos 규약: 0=천저(nadir) · 0.5=지평 · 1=천정(zenith) — 프로필 sky 스톱과 동일 공간.
+// 지평 아래는 사실상 대기색으로 수렴시킨다(docs/look-grammar §3 "지평 밴드는 fog색 수렴"):
+// 남긴 프로필 계조가 배경을 지형 헤이즈보다 밝게 만들면 절단면에 다시 단차가 생긴다(A/B 실측).
+// 배경의 시각적 흥미는 칠해진 그라디언트가 아니라 능선 겹침·운무가 만든다.
+const DOME_HAZE = [
+  { pos: 1.00, a: 0.07 },   // 천정: 프로필 색 거의 그대로(하늘은 유지 — 되돌리면 밋밋한 공백)
+  { pos: 0.62, a: 0.20 },   // 지평 위 ≈+22°: 옅은 대기 헤이즈
+  { pos: 0.52, a: 0.66 },   // 지평 바로 위: 대기색 우세 + 노을 온기 잔향(아이레벨·히어로 화각)
+  { pos: 0.44, a: 0.93 },   // 지평 아래 ≈−11°: 대기색 = scene.background 와 사실상 동일
+  { pos: 0.00, a: 0.97 },
+];
+const HAZE_EPS = 1 / 512;   // sRGB 1/2 LSB — 이보다 작은 변화로는 텍스처를 다시 올리지 않는다
+
 // 전환 길이·이징 ---------------------------------------------------------------
 const DUR_TIME = 1.8;      // 시간대 크로스페이드(초) — 짧은 타임랩스감(그림자가 스윽 돈다)
 const SEASON_RATE = 2.6;   // 가을 능선 틴트 지수 접근 속도(seasons.js 수목 틴트와 결이 맞게)
@@ -94,7 +114,12 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   };
   skyRoot.add(dome);
 
+  // 현재 대기(fog)색의 원시 sRGB — 돔 헤이즈 오버레이 색. syncHaze 가 갱신한다.
+  const hazeSRGB = { r: 0.77, g: 0.64, b: 0.56 };
+  const _hazeTmp = { r: 0, g: 0, b: 0 };
+
   // 스톱 배열({pos, r,g,b})로 돔 캔버스를 다시 그린다(텍스처 재사용).
+  //   + 대기 결합 오버레이(DOME_HAZE): 지평 아래를 현재 fog 색으로 수렴시킨다.
   function buildDomeFromStops(stops) {
     const grad = domeCtx.createLinearGradient(0, 0, 0, 256);
     for (const s of stops) {
@@ -103,7 +128,24 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     }
     domeCtx.fillStyle = grad;
     domeCtx.fillRect(0, 0, 4, 256);
+    const hR = Math.round(hazeSRGB.r * 255), hG = Math.round(hazeSRGB.g * 255), hB = Math.round(hazeSRGB.b * 255);
+    const haze = domeCtx.createLinearGradient(0, 0, 0, 256);
+    for (const s of DOME_HAZE) haze.addColorStop(1 - s.pos, `rgba(${hR},${hG},${hB},${s.a})`);
+    domeCtx.fillStyle = haze;
+    domeCtx.fillRect(0, 0, 4, 256);
     domeTex.needsUpdate = true;
+  }
+
+  // 최종 합성 대기색(날씨 틴트·마을 모디파이어 이후)으로 돔 헤이즈를 맞춘다. env 의 fog 합성 훅이
+  //   매 프레임 호출하므로 실변화가 없으면 텍스처를 다시 올리지 않는다(정착 상태 비용 0).
+  function syncHaze(color) {
+    if (!color) return;
+    color.getRGB(_hazeTmp, THREE.SRGBColorSpace);
+    if (Math.abs(_hazeTmp.r - hazeSRGB.r) < HAZE_EPS
+      && Math.abs(_hazeTmp.g - hazeSRGB.g) < HAZE_EPS
+      && Math.abs(_hazeTmp.b - hazeSRGB.b) < HAZE_EPS) return;
+    hazeSRGB.r = _hazeTmp.r; hazeSRGB.g = _hazeTmp.g; hazeSRGB.b = _hazeTmp.b;
+    buildDomeFromStops(cur.stops);
   }
 
   // 처마 네 모서리 등불: 따뜻한 PointLight + 작은 발광 구
@@ -339,6 +381,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       moonGroup.position.copy(moonOffset); // deterministic fallback before first camera render
       moonGroup.updateMatrixWorld(true);
     }
+    // 돔 헤이즈는 시간대 base fog 로 먼저 맞춘다(모디파이어가 있으면 같은 프레임에 syncHaze 가 덮는다).
+    cur.fogColor.getRGB(hazeSRGB, THREE.SRGBColorSpace);
     buildDomeFromStops(cur.stops);
   }
 
@@ -454,7 +498,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   }
 
   return {
-    apply, setSunsetLook, setSeason, update, updateFlicker, getBaseFog, isTweening,
+    apply, setSunsetLook, setSeason, update, updateFlicker, getBaseFog, isTweening, syncHaze,
     setEnabled, dispose, root: skyRoot, dome, lanterns,
     get sunsetLook() { return sunsetLook; },
   };

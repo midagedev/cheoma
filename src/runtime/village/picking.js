@@ -8,7 +8,7 @@ import {
   VILLAGE_FOCUS_TERRAIN_CLEARANCE,
 } from '../../camera/focus-visibility.js';
 import {
-  VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_HERO_FOCUS_ELEVATION,
   VILLAGE_LENS,
   dollyDistanceForFov,
 } from '../../camera/optics.js';
@@ -126,14 +126,14 @@ function heroCameraFraming(proxy) {
     VILLAGE_LENS.hero.referenceFov,
     VILLAGE_LENS.hero.fov,
   ) * maxDim;
-  // Keep the authored 24° approach even if a stale base framing arrives from an
+  // Keep the authored hero approach even if a stale base framing arrives from an
   // older snapshot. The safe selector scales both axes together after this.
-  const horizontal = Math.cos(VILLAGE_FOCUS_ELEVATION) * distance;
+  const horizontal = Math.cos(VILLAGE_HERO_FOCUS_ELEVATION) * distance;
   const horizontalDirection = direction.setY(0).normalize();
   return {
     position: {
       x: target.x + horizontalDirection.x * horizontal,
-      y: target.y + Math.sin(VILLAGE_FOCUS_ELEVATION) * distance,
+      y: target.y + Math.sin(VILLAGE_HERO_FOCUS_ELEVATION) * distance,
       z: target.z + horizontalDirection.z * horizontal,
     },
     target: { x: target.x, y: target.y, z: target.z },

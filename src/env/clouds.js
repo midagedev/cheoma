@@ -1,6 +1,6 @@
 import { smoothstep } from '../core/math/scalar.js';
 import { disposeObjectTree } from '../core/three-resources.js';
-import { edgeMistViewWeight } from './edge-mist-view.js';
+import { edgeMistViewWeight, ridgeMistViewWeight } from './edge-mist-view.js';
 import * as THREE from 'three';
 
 // 산 구름·물안개 + 흐르는 구름 그림자 (태스크 #51 축② → #68 재설계로 형태·대응 강화).
@@ -363,27 +363,59 @@ function makeLightRayGeometry() {
 //   → { mesh, update(fogColor) }  — 색은 대기(fog)색을 살짝 밝힌 톤(호출부가 매 틱 갱신).
 export function buildEdgeMistRing(edge, {
   groundY = null, yBase = 8, yAmp = 2.5, rIn = 0.6, rMid = 0.85, rOut = 1.12,
-  opacity = 0.52, thickness = 3.0, seed = 1,
+  opacity = 0.52, thickness = 3.0, outerDrop = 0, yCap = Infinity, seed = 1,
 } = {}) {
   const NS = 176;
   const pos = [], uv = [], idx = [];
   let s = seed >>> 0;
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  const ph1 = rnd() * 6.28, ph2 = rnd() * 6.28;
-  const gY = (x, z) => (groundY ? groundY(x, z) : 0);
+  const ph1 = rnd() * 6.28, ph2 = rnd() * 6.28, ph3 = rnd() * 6.28;
+  // yCap: 운해가 고이는 최대 표고. 등고를 그대로 따라가면 밴드가 능선 정수리까지 올라타 부감에서
+  //   산 사면 전체에 드리워 매스를 지운다(탁한 룩). 분지에 "고이는" 높이를 상한으로 두면 능선은
+  //   운해 위로 솟고 낮은 절단면만 잠긴다 — 겸재 진경산수의 운무 절단.
+  const gY = (x, z) => Math.min(groundY ? groundY(x, z) : 0, yCap);
+  // ── 방위·고도 종속 두께(docs/oriental-painting-research.md §1·§4) ─────────────
+  // 균등한 링은 부감에서 "회색 도넛"으로 읽힌다. 실제 운무는 냉기가 고이는 낮은 골에 두껍게 눌리고
+  //   능선 어깨에서는 얇아져 산 매스가 안개 위로 솟는다. 그 법칙을 두 항으로 굽는다:
+  //     pool  = 테두리 표고가 yCap 아래로 얼마나 잠겼는가(골=1, 능선 어깨=0)
+  //     swirl = 저주파 하모닉(2/3/5θ) — 같은 표고에서도 밴드가 끊기고 뭉치게
+  //   결과 strength 는 밴드의 반경 폭·수직 두께·불투명도를 함께 스케일한다. 불투명도는 셰이더가
+  //   아니라 알파 텍스처의 u 축(강도 램프)으로 전달한다 — 새 재질·define·프로그램 분기 0.
+  const depthSpan = Number.isFinite(yCap) ? Math.max(1, yCap * 0.55) : 0;
+  //   ×NORM: 두 항의 곱은 평균이 0.6 부근이라 그대로 쓰면 링의 총 헤이즈 예산이 4할 줄어든다
+  //     (야간 부감 평균 휘도 −27% 실측). 상한 1 에서 포화시키되 평균을 예전 균일값 근처로 되돌려,
+  //     "총량은 같고 분포만 굽는" 변경이 되게 한다.
+  const strengthAt = (th, hEdge) => {
+    const swirl = 0.5 + 0.5 * (
+      0.52 * Math.sin(2 * th + ph1) + 0.30 * Math.sin(3 * th + ph2) + 0.18 * Math.sin(5 * th + ph3)
+    );
+    const pool = depthSpan > 0 ? Math.max(0, Math.min(1, (yCap - hEdge) / depthSpan)) : 1;
+    const NORM = 1.34;
+    return Math.max(0.14, Math.min(1, (0.30 + 0.70 * pool) * (0.52 + 0.62 * swirl) * NORM));
+  };
   for (let is = 0; is <= NS; is++) {
     const th = (is / NS) * Math.PI * 2;
     const Redge = edge.edgeRadiusAt(th);
     const cx = Math.cos(th), cz = Math.sin(th);
     // 저주파 리프트 출렁임(운해가 능선 등고를 따라 얇아지고 두꺼워짐). 정수 하모닉이라 2π 에서 닫힘.
     const lift = yBase + yAmp * (0.6 * Math.sin(2 * th + ph1) + 0.4 * Math.sin(3 * th + ph2));
+    const hEdgeRaw = groundY ? groundY(cx * Redge * rMid, cz * Redge * rMid) : 0;
+    const w = strengthAt(th, hEdgeRaw);
+    // 얇은 방위는 반경 폭도 함께 좁힌다(rMid 로 수축) — 알파만 낮추면 넓고 흐린 얼룩이 남는다.
+    const span = 0.42 + 0.58 * w;
+    const rI = rMid + (rIn - rMid) * span;
+    const rO = rMid + (rOut - rMid) * span;
+    const th2 = thickness * (0.34 + 0.66 * w);
     // 각 행은 자기 반경의 지형 표고 + 리프트 위에 떠 등고를 따라 밴드가 드리운다(중간 행이 불투명).
-    const xi = cx * Redge * rIn,  zi = cz * Redge * rIn;
+    const xi = cx * Redge * rI,   zi = cz * Redge * rI;
     const xm = cx * Redge * rMid, zm = cz * Redge * rMid;
-    const xo = cx * Redge * rOut, zo = cz * Redge * rOut;
-    pos.push(xi, gY(xi, zi) + lift + thickness, zi); uv.push(is / NS, 0);
-    pos.push(xm, gY(xm, zm) + lift, zm);              uv.push(is / NS, 0.5);
-    pos.push(xo, gY(xo, zo) + lift - thickness * 0.6, zo); uv.push(is / NS, 1);
+    const xo = cx * Redge * rO,   zo = cz * Redge * rO;
+    pos.push(xi, gY(xi, zi) + lift + th2, zi); uv.push(w, 0);
+    pos.push(xm, gY(xm, zm) + lift, zm);       uv.push(w, 0.5);
+    // 외곽 행은 지형이 끝난 밖이다. 거기서 자체 표고를 쓰면 해석적 산 함수가 계속 솟아 밴드가
+    //   허공에 뜨거나 절단면 아래로 파고든다 → 테두리(rMid) 표고를 물려받아 밖으로 완만히
+    //   내려앉게 한다(outerDrop). 절단면 밖에 고인 저층 안개로 읽혀 원반 경계를 지운다.
+    pos.push(xo, gY(xm, zm) + lift - th2 * 0.6 - outerDrop * w, zo); uv.push(w, 1);
   }
   for (let is = 0; is < NS; is++) {
     const a = is * 3, b = is * 3 + 3;
@@ -395,15 +427,24 @@ export function buildEdgeMistRing(edge, {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  // 반경 방향 알파 그라디언트(가운데 불투명 → 안·밖 투명).
+  // 알파 룩업: v = 반경 방향 그라디언트(가운데 불투명 → 안·밖 투명), u = 방위별 강도 램프.
+  //   정점이 uv.x 로 자기 방위의 strength 를 들고 오므로 두께·폭과 같은 계수로 농도가 함께 접힌다.
+  //   u 축을 쓰지 않던 기존 텍스처를 2D 로 넓힌 것뿐이라 재질·프로그램·드로우콜은 그대로다.
   const c = document.createElement('canvas');
-  c.width = 8; c.height = 64;
+  c.width = 64; c.height = 64;
   const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 64);
-  grad.addColorStop(0.0, 'rgba(255,255,255,0)');
-  grad.addColorStop(0.5, 'rgba(255,255,255,0.9)');
-  grad.addColorStop(1.0, 'rgba(255,255,255,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, 8, 64);
+  const img = g.createImageData(64, 64);
+  for (let y = 0; y < 64; y++) {
+    const v = (y + 0.5) / 64;
+    // 기존 0 → 0.9 → 0 삼각 램프와 같은 프로파일(가운데 피크).
+    const radial = 0.9 * (1 - Math.abs(v - 0.5) * 2);
+    for (let x = 0; x < 64; x++) {
+      const i = (y * 64 + x) * 4;
+      img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(255 * radial * ((x + 0.5) / 64));
+    }
+  }
+  g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.MeshBasicMaterial({
@@ -476,9 +517,13 @@ export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(ww, hh), mat);
     mesh.position.set(a.x, a.y, a.z);
     mesh.renderOrder = 2;
+    const baseOpacity = mat.opacity;
     mesh.onBeforeRender = (rend, sc, cam) => {   // yaw 만 카메라로(직립 유지) — 사면에 걸친 수직 뱅크
       mesh.lookAt(cam.position.x, mesh.position.y, cam.position.z);
       mesh.up.copy(_up);
+      // 시선각 가중치: 아이레벨 전강도 → 부감 바닥값(회색 얼룩 방지, 능선 겹침 완화는 유지).
+      const el = cam?.matrixWorld?.elements;
+      mat.opacity = baseOpacity * ridgeMistViewWeight(el ? -el[9] : NaN);
     };
     root.add(mesh);
     mats.push(mat);

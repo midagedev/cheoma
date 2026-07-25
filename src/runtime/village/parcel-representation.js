@@ -105,6 +105,11 @@ export function parcelRepresentationState(handle, parcel, overlayVisible = false
     chunkId: lod?.chunkId || null,
     level,
     distance: Number.isFinite(lod?.distance) ? +lod.distance.toFixed(3) : null,
+    // 검증 하네스가 특정 LOD 밴드로 카메라를 물릴 때 키 식(렌즈 보정 × 시선 피치 상세 깊이)을
+    // 복제하지 않고 런타임이 실제로 쓴 물리↔키 환산비를 읽을 수 있도록 함께 노출한다.
+    physicalDistance: Number.isFinite(lod?.physicalDistance)
+      ? +lod.physicalDistance.toFixed(3) : null,
+    detailReach: Number.isFinite(lod?.detailReach) ? lod.detailReach : null,
     swapIn: lod?.swapIn ?? null,
     swapOut: lod?.swapOut ?? null,
     far: !!impostorOwner,

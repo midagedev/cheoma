@@ -1,4 +1,5 @@
 import { DEFAULT_DETAIL_BANDS } from '../core/lod.js';
+import { smoothstep } from '../core/math/scalar.js';
 
 // 한양급 주택 청크의 단일 LOD 정책. 계획·런타임·계약 검사가 같은 임계값과
 // 히스테리시스 전이를 사용하도록 THREE 없는 순수 모듈에 둔다.
@@ -29,6 +30,31 @@ export const VILLAGE_CHUNK_LOD = Object.freeze({
 // screen-door coverage의 고정 단계 수. 순수 정책이 먼저 양자화해 같은 거리의 반복 평가가
 // draw-local 채널 변경이나 그림자 캐시 무효화를 만들지 않는다.
 export const CHUNK_LOD_TRANSITION_STEPS = 127;
+
+// 상세 표현(FULL/MID)이 카메라로부터 뻗는 깊이. 청크 LOD 키는 화면 등가 거리이므로 보정 dolly가
+// 클수록 같은 임계값이 더 먼 물리 거리까지 FULL 을 승격시킨다. 주거 근접 렌즈에서는 그 반경이
+// 도성 전체(≈290m)를 덮어, 눈높이 시선이 프레임에 담는 원경 필지 수백 채가 전부 FULL 로 올라온다.
+//
+// 시선 피치로 그 깊이를 다시 건다. 부감(survey)에서는 지붕 평면이 화면을 채우므로 먼 필지도 실제로
+// 읽히지만, 눈높이에서는 앞줄 집·담·나무가 뒤를 가려 원경 FULL 은 화면에 기여하지 않고 비용만 낸다
+// (이 엔진에는 occlusion culling 이 없으므로 그 비용은 전부 실비다). 따라서 낮은 시선일수록
+// FULL/MID 반경을 줄인다 — "가까운 것만 FULL, 낮은 카메라라도 원경 필지는 MID/FAR".
+//
+// 렌더 시점 가중치일 뿐이라 plan/populate 산출에는 전혀 들어가지 않는다(worker/sync 해시 불변).
+export const VILLAGE_DETAIL_REACH = Object.freeze({
+  // 히어로 착지(24°)·부감(31°)은 온전한 깊이를 유지한다.
+  surveyPitchDeg: 22,
+  // 주거 근접(9°)·1인칭 보행(≈0°)이 최소 깊이를 받는다.
+  eyeLevelPitchDeg: 11,
+  eyeLevelFactor: 0.56,
+});
+
+/** 시선 피치(수평 아래 각도, 도)에 따른 FULL/MID 깊이 배율. 피치를 모르면 부감으로 간주한다. */
+export function villageDetailReach(pitchDeg, policy = VILLAGE_DETAIL_REACH) {
+  if (!Number.isFinite(pitchDeg)) return 1;
+  const survey = smoothstep(policy.eyeLevelPitchDeg, policy.surveyPitchDeg, pitchDeg);
+  return policy.eyeLevelFactor + (1 - policy.eyeLevelFactor) * survey;
+}
 
 // 카메라가 보는 지면 셀의 생활 디테일 정책. 절대 월드 Y가 아니라 카메라-시선 타깃의 수직차를
 // 사용하므로 산지의 높은 필지에서도 근접 동물·입자가 사라지지 않는다. spatial은 소동물,

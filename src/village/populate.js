@@ -130,15 +130,20 @@ export function* populateVillageSteps(plan, opts = {}) {
   const terrain = buildSiteTerrain(site, cloudU, warpInner, clearDist);
   root.add(terrain.mesh);
   yield 'terrain';
-  // 저층 운해 링 — 비정형 외곽선을 따라 지형 등고에 밀착(groundY)해 배산 능선 사면을 감고 분지
-  //   가장자리에 얕게 고인다. rIn 을 안으로 넓혀(≈0.58) 능선 중턱까지 걸치므로 부감에선 "감는 운해",
-  //   아이레벨에선 "사면 원경 물안개"로 함께 읽힌다. lift 는 지형 위 소량(등고 위로 살짝 뜸).
+  // 저층 운해 링 — 비정형 외곽선을 따라 지형 등고에 밀착(groundY)해 분지 가장자리에 고인다.
+  //   yCap 아래에서만 등고를 따르므로 능선은 운해 위로 솟고 낮은 절단면만 잠긴다(운무 절단).
+  //   부감에선 "테두리를 지우는 운해", 아이레벨에선 "사면 원경 물안개"로 함께 읽힌다.
   const mist = site.edge
     ? buildEdgeMistRing(site.edge, {
         groundY: site.heightAt,
-        rIn: 0.58, rMid: 0.84, rOut: 1.12,
+        // R5/U1: 불투명 정점(rMid)을 지형 테두리에 맞춘다. 안쪽 시작을 0.58→0.78 로 물려 분지
+        //   내부·산 매스를 흐리게 덮던 탁한 룩(골든의 대가)으로 돌아가지 않으면서, 부감에서
+        //   절단면·외곽 수관 실루엣만 대기로 지운다. rOut 을 더 늘리면 밖으로 뻗은 밴드가 시선에
+        //   거의 나란해져 프레임을 가로지르는 하드한 웨지로 읽히므로 1.17 이 상한이다.
+        rIn: 0.78, rMid: 0.99, rOut: 1.17,
         yBase: Math.max(5, site.Hmax * 0.09), yAmp: Math.max(2.5, site.Hmax * 0.05),
-        thickness: Math.max(4, site.Hmax * 0.12), opacity: 0.5,
+        thickness: Math.max(4, site.Hmax * 0.16), outerDrop: site.Hmax * 0.05,
+        yCap: site.Hmax * 0.46, opacity: 0.5,
         seed: (plan.seed ^ 0x3117) >>> 0,
       })
     : null;
@@ -615,10 +620,10 @@ export function* populateVillageSteps(plan, opts = {}) {
     },
     // 런타임 LOD — 대규모 주택 청크 FAR↔MID↔FULL(매 프레임, 카메라 필요).
     //   engine.js 렌더 루프에서 camera 넘겨 호출. 정책이 꺼진 규모(R<340)는 빈 배열이라 no-op.
-    updateChunkLod: (camera, lensScale = 1) => {
+    updateChunkLod: (camera, lensScale = 1, detailReach = 1) => {
       let swaps = 0;   // #140-E 이 프레임에 FAR/MID/FULL 전환이 일어난 청크 수(그림자 1프레임 갱신 트리거)
       for (const child of root.children) {
-        if (child.userData.lodUpdate?.(camera, lensScale)) swaps++;
+        if (child.userData.lodUpdate?.(camera, lensScale, detailReach)) swaps++;
       }
       return swaps;
     },

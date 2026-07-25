@@ -4,6 +4,7 @@ import {
   MATERIAL_PROGRAM_PATCH,
   addMaterialProgramKey,
 } from '../render/material-program-key.js';
+import { VILLAGE_LENS, dollyScaleForFov } from '../camera/optics.js';
 
 // 재질 프레넬 골든아워 림 (태스크 #76 도입 · #101 전 오브젝트 확장) — RimPass(스크린스페이스) 대체.
 //
@@ -35,8 +36,9 @@ import {
 //  - 지형·물면(넓은 완사면·수면): 프레넬은 이웃 샘플이 없어 "평면의 실루엣 에지"와 "평면 내부의
 //    그레이징"을 구분할 수 없다(그게 프레넬의 본질). 넓은 지면이 그레이징에서 전면 금빛으로 물드는
 //    오탐(구 RimPass 가 깊이-이차미분 엣지 게이트로 힘겹게 막던 것)을 재질 프레넬로는 막을 방법이
-//    없다. → 이름으로 명시 제외(terrain/stream/paddyField). 나무·풀·소품은 곡률/소형 지오라 프레넬이
-//    실루엣에 자연 집중하므로 오탐이 없다.
+//    없다. → 이름으로 명시 제외: env 경로는 패치 자체를 건너뛰고(SKIP_NAMES), 마을 경로는 패치를
+//    유지한 채 그룹 계수를 0 으로 눌러(GROUND_NAMES) 프로그램 분기 없이 기여만 없앤다.
+//    나무·풀·소품은 곡률/소형 지오라 프레넬이 실루엣에 자연 집중하므로 오탐이 없다.
 //
 // 강도 정책(#101): 재질군별 계수. 건물은 온전(처마 킥 주인공), 소품·담장·동물은 절제, 나무·풀 등
 //   유기물은 실루엣만 은은한 금빛(전면 금빛 도배 방지 — 구 RimPass 인상 계승). 계수는 상수 노출.
@@ -57,33 +59,60 @@ import {
 const RIM_ROLES = new Set(['roof', 'wall', 'wood', 'stone']);
 
 // 재질군별 강도 계수(상수 노출). 건물=온전, 소품/담장/동물=절제, 유기물(나무/풀/마당초목)=은은.
-export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.7 };
+// ground=0: 넓은 지면·수면은 패치는 유지하되(프로그램 분기 방지) 기여를 0 으로 눌러 제외한다.
+export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.7, ground: 0.0 };
 
-// A local Fresnel term cannot tell a broad grazing plane from a true silhouette.  Keep the
-// full-strength band inside ~4.6° of the tangent and fade it out before the surface is wider
-// than ~17.5° from the tangent.  This preserves the sunset edge while preventing an oblique
-// plaster wall or roof plane from being treated as one large emissive surface.
-export const RIM_FACING_GATE = Object.freeze({ full: 0.08, cutoff: 0.30 });
+// A local Fresnel term cannot tell a broad grazing plane from a true silhouette, so a gate is
+// still wanted — but only against surfaces that face the camera nearly head-on. The Fresnel
+// exponent (post drives it to ~4.9 at sunset) already concentrates energy at the tangent; a
+// narrow hard gate on top of it erased the eave line itself. Full strength holds out to ~6° of
+// the tangent and the band closes by ~25°, which is wide enough for every tile row and eave to
+// read as a lit thread while a broad plaster or roof plane stays a surface, not a wash.
+export const RIM_FACING_GATE = Object.freeze({ full: 0.10, cutoff: 0.42 });
 
-// Sunset's authored peak is intentionally strong (rim 2.05 × runtime 1.6).  Bound the
-// pre-group additive energy so a tangent edge can seed bloom without turning grass or pale
-// plaster into an HDR-white emitter.  Group multipliers remain outside the cap, preserving
+// The tangent edge is meant to clip and seed bloom — that overexposed thread along the eave is
+// the look. Cap only far enough to stop a whole pale plaster face or grass clump from becoming a
+// flat HDR-white emitter. Group multipliers remain outside the cap, preserving
 // building > misc > organic hierarchy at both ordinary and peak strength.
-export const RIM_BASE_ENERGY_CAP = 0.26;
+export const RIM_BASE_ENERGY_CAP = 0.34;
 
-// A rim fragment must satisfy all three physical conditions: the surface normal faces the
-// authored sun, camera and sun lie on opposing sides, and Three's direct-light accumulator is
-// non-zero.  The stock lighting loop additionally captures the already-shadowed first sun;
-// combining that visibility with directDiffuse prevents a later unshadowed fill from reviving
-// rim in the sun's shadow, without another sampler fetch or program variant.
+// The physical conditions still shape the rim, but as attenuation rather than as an all-or-nothing
+// switch. Real backlit edges glow even in shadow and even somewhat off the sun axis, because the
+// whole sky is a source at golden hour — so each condition keeps a floor. The stock lighting loop
+// captures the already-shadowed first sun; combining that visibility with directDiffuse keeps a
+// later unshadowed fill from reviving a full-strength rim inside the sun's shadow, without another
+// sampler fetch or program variant.
 export const RIM_SOLAR_GATE = Object.freeze({
-  facingStart: 0.005,
-  facingFull: 0.10,
-  backlitStart: 0.15,
-  backlitFull: 0.55,
+  facingStart: -0.05,
+  facingFull: 0.12,
+  backlitStart: 0.02,
+  backlitFull: 0.45,
+  // 순광·측광 뷰에 남기는 최소 강도. 골든이 전역 backlit 게이트에 두었던 0.18 바닥과 같은 뜻 —
+  // 림은 역광에서 읽히는 것이 본질이므로 이 값이 커지면 방향성이 무너진다.
+  backlitFloor: 0.20,
   directStart: 0.002,
   directFull: 0.08,
+  shadowFloor: 0.45,
 });
+
+// The distance fade exists to drop rim off *apparent* background — distant ridges and far
+// buildings — but it reads raw view-space depth. A compensated telephoto dolly holds the
+// subject's projected size while moving the camera 2.3× (close parcel) to 3.0× (hero) farther,
+// so the authored 24/175m band lands in front of the subject and fades the rim off the thing
+// the frame is about. Scale the band by the same dolly the close lens applies.
+const RIM_LENS_DOLLY = dollyScaleForFov(
+  VILLAGE_LENS.parcel.referenceFov,
+  VILLAGE_LENS.parcel.fov,
+);
+export const RIM_DISTANCE_GATE = Object.freeze({
+  near: 24 * RIM_LENS_DOLLY,
+  far: 175 * RIM_LENS_DOLLY,
+});
+
+// Anti-solar silhouette residual (the former `uRimWrap`). post.js authors this for the legacy
+// screen pass and scales it down for the material path, which lands below the value at which a
+// shaded edge still reads at all. Floor it here: the material rim owns its own sky-scatter term.
+export const RIM_WRAP_FLOOR = 0.10;
 
 // Capture Three's first directional light immediately before and after its stock shadow
 // attenuation.  WebGLLights orders shadow-casting directionals first, and the
@@ -119,12 +148,29 @@ function rimLightsFragmentBegin() {
 
 const RIM_LIGHTS_FRAGMENT_BEGIN = rimLightsFragmentBegin();
 
-// 유기물 그룹 판정용 조상 그룹 이름(나무 스캐터·마당 초목·focus 풀).
-const ORGANIC_NAMES = new Set(['trees', 'village-flora', 'focusGrass']);
+// 유기물 그룹 판정용 조상 그룹 이름(나무 스캐터·마당 초목·봄 개화 관목·focus 풀).
+//   'trees'/'focusGrass' 는 단일건물·focus 링 경로, 'village-*' 는 마을 경로다. 마을 이름이
+//   빠져 있던 동안 숲·스캐터 나무·개화 관목이 misc(×1.0)로 분류돼 건물급 림을 받았다.
+//   숲은 'village-forest' 가 아니라 'forest-trees' 로 지정한다 — 같은 부모 아래의 화강암
+//   노두(forest-rocks)는 유기물이 아니고 절제 대상도 아니므로 misc 로 남아야 한다.
+const ORGANIC_NAMES = new Set([
+  'trees', 'focusGrass',
+  'village-flora', 'village-trees', 'forest-trees', 'village-bloom',
+]);
 
 // 그레이징 오탐(넓은 완사면·도로 광역 금빛)·수면은 프레넬로 실루엣 분리가 불가 → 이름으로 명시 제외.
 //   (하늘·능선·구름·디테일 입자·원경 창불 등은 MeshBasic/Shader/Points/Sprite 타입이라 이미 제외.)
 const SKIP_NAMES = new Set(['terrain', 'stream', 'paddyField', 'village-roads-m0']);
+
+// 같은 근거의 마을 경로 이름. 위 목록은 env 하네스 이름이고 제품 마을은 'village-' 접두를 쓰므로
+// 제품의 지형·수면은 이 제외를 한 번도 받지 못했다. 9° 눈높이에서는 지면 전체가 그레이징에 들어와
+// 프레임이 단일 주황 워시로 물든다(docs/look-grammar.md §2-3 채도 규율 위반, 전 프레임 평균 +25/255 측정).
+//
+// 여기서 패치 자체를 건너뛰면 안 된다: 이 재질들은 seasons·cloudshadow·snow 패치를 이미 갖고 있어
+// rim 프로그램 키만 빠지면 같은 설정을 공유했던 재질과 프로그램이 갈라진다(hanyang 근경 +8 실측).
+// 대신 소스는 그대로 두고 그룹 계수 uniform 을 0 으로 준다 — 프로그램 변형 0, 림 기여 정확히 0.
+// 그룹 계수를 셰이더 리터럴이 아니라 uniform 으로 나눈 설계의 목적이 바로 이런 분기다.
+const GROUND_NAMES = new Set(['village-terrain', 'village-stream']);
 
 export function createFresnelRim(scene) {
   // 모든 패치 재질이 참조 공유하는 uniform(seasons 패턴). 한 번 갱신하면 패치된 전 재질에 반영.
@@ -134,9 +180,10 @@ export function createFresnelRim(scene) {
     uSunViewDir: { value: new THREE.Vector3(0, 0, 1) }, // 뷰공간 태양 방향(post 가 매 프레임 세팅)
     uRimStrength: { value: 0.0 },   // cur.rim × altGate(저고도) × runtime 보정 — 물리 역광은 fragment가 판정
     uRimPower: { value: 1.92 },     // 프레넬 지수(담백하고 예리한 에지 실선 복원)
+    uRimWrap: { value: RIM_WRAP_FLOOR }, // 태양 반대편 실루엣 잔여(하늘 산란광) — 0이면 그늘 에지 소거
     uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
-    uRimNear: { value: 24.0 },      // 근경 거리 게이트 시작(뷰공간 깊이) — 근경 focus 림 불변
-    uRimFar: { value: 175.0 },      // 원경 능선·far 건물 제외(#119: 부감/전환 원경 림 과다 하향, 210→175)
+    uRimNear: { value: RIM_DISTANCE_GATE.near }, // 근경 거리 게이트 시작(뷰공간 깊이·렌즈 보정)
+    uRimFar: { value: RIM_DISTANCE_GATE.far },   // 원경 능선·far 건물 제외(#119 비율 유지·렌즈 보정)
   };
 
   // 그룹 계수는 셰이더 리터럴이 아니라 재질별 uniform으로 전달한다. onBeforeCompile 클로저의
@@ -146,10 +193,13 @@ export function createFresnelRim(scene) {
     building: { value: RIM_GROUP_MUL.building },
     misc: { value: RIM_GROUP_MUL.misc },
     organic: { value: RIM_GROUP_MUL.organic },
+    ground: { value: RIM_GROUP_MUL.ground },
   };
 
   // 커버리지 카운트(검증 로그): 재질군별 패치 수 — 나무·풀·소품 포함 증명·제외 준수 확인.
-  const counts = { total: 0, building: 0, misc: 0, organic: 0, cloudShadow: 0, cloudRoof: 0 };
+  const counts = {
+    total: 0, building: 0, misc: 0, organic: 0, ground: 0, cloudShadow: 0, cloudRoof: 0,
+  };
 
   // 자체발광 지배 판정: 선형 emissive 휘도 × emissiveIntensity. 임계 낮게(0.2) 잡되 지붕 볏짚·
   //   진흙·정자 마루의 미량 anti-crush emissive(휘도 <0.02)는 통과시킨다.
@@ -184,8 +234,10 @@ export function createFresnelRim(scene) {
     return true;
   }
 
-  // 재질군 판정: 조상 그룹이 유기물이면 organic, role 이 건물 부위면 building, 그 외 lit=misc.
+  // 재질군 판정: 지면·수면이면 ground(기여 0), 조상 그룹이 유기물이면 organic,
+  //   role 이 건물 부위면 building, 그 외 lit=misc.
   function groupOf(o, mat) {
+    if (o.name && GROUND_NAMES.has(o.name)) return 'ground';
     let n = o, hops = 0;
     while (n && hops < 4) { if (ORGANIC_NAMES.has(n.name)) return 'organic'; n = n.parent; hops++; }
     const role = mat.userData.role;
@@ -208,8 +260,10 @@ export function createFresnelRim(scene) {
     const solarFacingFull = RIM_SOLAR_GATE.facingFull.toFixed(2);
     const backlitStart = RIM_SOLAR_GATE.backlitStart.toFixed(2);
     const backlitFull = RIM_SOLAR_GATE.backlitFull.toFixed(2);
+    const backlitFloor = RIM_SOLAR_GATE.backlitFloor.toFixed(2);
     const directStart = RIM_SOLAR_GATE.directStart.toFixed(3);
     const directFull = RIM_SOLAR_GATE.directFull.toFixed(2);
+    const shadowFloor = RIM_SOLAR_GATE.shadowFloor.toFixed(2);
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
@@ -217,6 +271,7 @@ export function createFresnelRim(scene) {
       shader.uniforms.uSunViewDir = u.uSunViewDir;
       shader.uniforms.uRimStrength = u.uRimStrength;
       shader.uniforms.uRimPower = u.uRimPower;
+      shader.uniforms.uRimWrap = u.uRimWrap;
       shader.uniforms.uRimScale = u.uRimScale;
       shader.uniforms.uRimNear = u.uRimNear;
       shader.uniforms.uRimFar = u.uRimFar;
@@ -227,6 +282,7 @@ export function createFresnelRim(scene) {
           uniform vec3 uSunViewDir;
           uniform float uRimStrength;
           uniform float uRimPower;
+          uniform float uRimWrap;
           uniform float uRimScale;
           uniform float uRimNear;
           uniform float uRimFar;
@@ -245,27 +301,30 @@ export function createFresnelRim(scene) {
             vec3 _rv = normalize(vViewPosition);              // 표면→카메라(뷰공간)
             float _ndv = clamp(dot(_rn, _rv), 0.0, 1.0);
             float _fres = pow(1.0 - _ndv, uRimPower);
-            // 광원 가산은 진짜 접선 실루엣에만 허용한다. 넓은 벽·지붕면이 비스듬히
-            // 보일 때 프레넬 전체가 자체발광처럼 뜨는 회귀를 막고, 접선 ${facingFull} 안쪽은 보존.
+            // 카메라를 정면으로 마주보는 면만 제외한다(넓은 벽면이 통째로 자체발광처럼 뜨는 회귀).
+            // 접선~${facingCutoff} 구간은 프레넬 지수가 이미 에지에 집중시키므로 그대로 통과시킨다.
             float _silhouette = 1.0 - smoothstep(${facingFull}, ${facingCutoff}, _ndv);
-            // 실제 주 태양은 그림자를 캐스트하는 첫 번째 방향광이다. 재질 프레넬만으로는
-            // 실제 태양을 받는지 알 수 없으므로 N·L, V·L, 주 태양 visibility를 모두 요구한다.
+            // 실제 주 태양은 그림자를 캐스트하는 첫 번째 방향광이다. 세 물리 조건(N·L, V·L,
+            // 주 태양 visibility)은 유지하되 곱하기 0 이 아니라 바닥값 있는 감쇠로 쓴다 —
+            // 골든아워엔 하늘 전체가 광원이라 그늘·측광 실루엣도 산란광으로 빛난다.
             // stock shadow 전후의 색 비율을 써서 태양 intensity와 무관한 실제 가시율을 얻는다.
-            // 뒤따르는 비그림자 fill·점광원이 그늘 림을 되살릴 수 없다.
+            // 뒤따르는 비그림자 fill·점광원은 그늘 림을 '전강도로' 되살릴 수 없다.
             vec3 _sunDir = normalize(uSunViewDir);
             #if ( NUM_DIR_LIGHTS > 0 )
               _sunDir = normalize(directionalLights[0].direction);
             #endif
             float _sunN = dot(_rn, _sunDir);
-            float _sunFacing = smoothstep(${solarFacingStart}, ${solarFacingFull}, _sunN);
-            float _backlit = smoothstep(${backlitStart}, ${backlitFull}, -dot(_rv, _sunDir));
+            float _sunFacing = mix(uRimWrap, 1.0,
+              smoothstep(${solarFacingStart}, ${solarFacingFull}, _sunN));
+            float _backlit = mix(${backlitFloor}, 1.0,
+              smoothstep(${backlitStart}, ${backlitFull}, -dot(_rv, _sunDir)));
             vec3 _rimLuma = vec3(0.2126, 0.7152, 0.0722);
             float _mainSunBefore = dot(_rimMainSunUnshadowed, _rimLuma);
             float _mainSunAfter = dot(_rimMainSunShadowed, _rimLuma);
             float _mainSunVisibility = clamp(_mainSunAfter / max(_mainSunBefore, 1e-5), 0.0, 1.0);
             float _directLuma = dot(reflectedLight.directDiffuse, _rimLuma);
-            float _directGate = smoothstep(${directStart}, ${directFull}, _directLuma)
-              * _mainSunVisibility * (receiveShadow ? 1.0 : 0.0);
+            float _directGate = mix(${shadowFloor}, 1.0,
+              smoothstep(${directStart}, ${directFull}, _directLuma) * _mainSunVisibility);
             // 근경 거리 게이트(원경·far 건물 제외). vViewPosition 길이 = 뷰공간 깊이.
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
             float _rim = _fres * _silhouette * _sunFacing * _backlit * _directGate
@@ -304,8 +363,11 @@ export function createFresnelRim(scene) {
     setColor(c) { u.uRimColor.value.copy(c); },
     setStrength(s) { u.uRimStrength.value = s; },
     setPower(p) { u.uRimPower.value = p; },
-    // 기존 post/runtime 호출을 깨지 않는 호환 no-op. 물리 림은 암부 wrap을 만들지 않는다.
-    setWrap(_w) {},
+    // post 는 구 스크린패스 기준값을 축소해 넘긴다(cur.rimWrap × 0.4). 재질 프레넬의 반대편
+    // 실루엣 잔여는 그보다 커야 그늘 처마선이 읽히므로 바닥값으로 받친다.
+    setWrap(w) {
+      u.uRimWrap.value = Math.max(RIM_WRAP_FLOOR, Number.isFinite(w) ? w : 0);
+    },
     setScale(s) { u.uRimScale.value = s; },
     setNearFar(n, f) { u.uRimNear.value = n; u.uRimFar.value = f; },
     setSunViewDir(v) { u.uSunViewDir.value.copy(v); },
@@ -316,6 +378,7 @@ export function createFresnelRim(scene) {
         building: groupUniforms.building.value,
         misc: groupUniforms.misc.value,
         organic: groupUniforms.organic.value,
+        ground: groupUniforms.ground.value,
       };
     },
     // 패치 자체는 되돌리지 않되(셰이더는 무해히 잔존), 강도·마스터를 0 으로 눌러 잔여 림 소거.

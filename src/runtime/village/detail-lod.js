@@ -3,7 +3,7 @@ import {
   lensScaleForCamera,
   villageScreenDistanceForCamera,
 } from '../../camera/optics.js';
-import { VILLAGE_DETAIL_LOD } from '../../village/lod-policy.js';
+import { VILLAGE_DETAIL_LOD, villageDetailReach } from '../../village/lod-policy.js';
 
 export const VILLAGE_DETAIL_TIER = Object.freeze({
   FAR: 'far',
@@ -46,6 +46,7 @@ export function createVillageDetailLodState(camera, target, site, previous = nul
       anchor: { x: 0, y: 0, z: 0 }, altitude: Infinity,
       viewDistance: Infinity, visualAltitude: Infinity, visualDistance: Infinity,
       detailDistance: Infinity, lensScale: 1,
+      viewPitchDeg: 90, chunkReach: 1,
       tier: VILLAGE_DETAIL_TIER.FAR,
       groundWeight: 0, particleWeight: 0, groundActive: false,
       aerialWeight: 1,
@@ -80,9 +81,15 @@ export function createVillageDetailLodState(camera, target, site, previous = nul
   const particleWeight = Math.min(particleAltitudeWeight, particleViewWeight);
   const detailDistance = Math.max(visualAltitude, visualDistance * 0.72);
   const tier = nextDetailTier(previous?.tier, detailDistance);
+  // 시선 피치는 카메라→시선 타깃 광선에서 읽는다. matrixWorld 를 읽지 않으므로 위치만 가진
+  // 격리 하네스 fixture 에서도 정의되고, 타깃이 없으면 카메라 아래를 보는 것과 같아 부감이 된다.
+  const viewPitchDeg = viewDistance > 1e-6
+    ? Math.asin(Math.max(-1, Math.min(1, dy / viewDistance))) * 180 / Math.PI
+    : 90;
   return {
     anchor: { x, y, z }, altitude, viewDistance, visualAltitude, visualDistance,
     detailDistance, lensScale, tier,
+    viewPitchDeg, chunkReach: villageDetailReach(viewPitchDeg),
     groundWeight, particleWeight,
     // tier는 셀 밀도/히스테리시스의 이산 상태이고, 가시성은 연속 weight가 끝까지 소유한다.
     // 낮은 고도로 멀리 보는 구도에서 tier가 먼저 FAR가 되더라도 남은 10~20%를 갑자기

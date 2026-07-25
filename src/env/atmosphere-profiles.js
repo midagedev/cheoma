@@ -79,16 +79,23 @@ export const SUNSET_LOOKS = deepFreeze({
     ...profile({
       // A clearer, aerosol-rich afterglow: hot peach at the horizon, red lower sky,
       // restrained plum above. Ambient light stays mauve so foliage does not turn brown.
+      //
+      // 채도 규율(docs/look-grammar.md §2-3): 붉은 노을의 정체성은 하늘·태양·플레어가 갖고,
+      //   앰비언트와 대기색은 중성에 가까워야 한다. 이전 hemiGround 0x925f50 / fog 0xbd8d89 는
+      //   장미빛 자체가 아래에서 올라와 회벽·그림자·미드톤까지 물들였고(A/B 실측: 같은 컷의
+      //   gold 대비 프레임 평균 채도는 같은데 밝기 −16%, 흰 재질의 색조가 마젠타로 이동),
+      //   결과가 "붉은 노을"이 아니라 단일 장미색 워시였다. 마젠타 성분만 덜어 흙빛으로 옮긴다
+      //   — 하늘 스톱·태양색·플레어는 불변이므로 룩 정체성은 유지된다.
       sky: [[0.0, '#f6a266'], [0.26, '#d96862'], [0.57, '#8d587e'], [1.0, '#3d4d80']],
       sunDir: [-16, 8, -45], sunColor: 0xff9168, sunInt: 2.25,
-      hemiSky: 0x8d87b2, hemiGround: 0x925f50, hemiInt: 0.70,
-      fog: 0xbd8d89, fogNear: 70, fogFar: 462, exposure: 1.09,
-      ridgeNear: 0x57445b, ridgeFar: 0xb98a84, mist: 0xd2aaa1, mistOp: 0.61,
+      hemiSky: 0x8a90b6, hemiGround: 0x8e6a54, hemiInt: 0.70,
+      fog: 0xc09a8b, fogNear: 70, fogFar: 462, exposure: 1.11,
+      ridgeNear: 0x54465b, ridgeFar: 0xbc9184, mist: 0xd3b0a4, mistOp: 0.61,
       lantern: 0.15,
     }, {
       bloomStrength: 0.61, bloomRadius: 0.37, bloomThreshold: 0.80,
       rim: 1.98, rimColor: 0xffad7d, rimPower: 1.75, rimWrap: 0.13,
-      sunGlow: 0.90, sunGlowSize: 39, sunGlowColor: 0xff9974, sat: 1.17,
+      sunGlow: 0.90, sunGlowSize: 39, sunGlowColor: 0xff9974, sat: 1.14,
       flare: 0.96, flareColor: 0xffad86,
     }),
   },

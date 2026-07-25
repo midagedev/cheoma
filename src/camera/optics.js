@@ -7,12 +7,23 @@
 
 const DEG = Math.PI / 180;
 export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
-// Shared close-parcel pose. Twenty-four degrees keeps the courtyard readable while retaining
-// an architectural, rather than aerial, view across the tested residential variants.
-// Keep the projection centered: a sky-biased lens shift crops the foreground yard and
-// hides the animals and household details this elevation is meant to reveal.
-export const VILLAGE_FOCUS_ELEVATION = 24 * DEG;
-export const VILLAGE_FOCUS_SKY_FRACTION = 0;
+// Shared close-parcel pose. The flagship look is a backlit golden-hour rim, and a rim only
+// exists where a silhouette edge stands against the sky; bokeh only exists where the frame
+// carries depth spread. Both die at survey elevations, so the residential close view stays in
+// the eye-level architectural band where the eave curve, not the courtyard plan, is the subject.
+// Courtyard readability is bought with azimuth, distance, and target lift instead — the yard
+// still reads over the wall from here.
+export const VILLAGE_FOCUS_ELEVATION = 9 * DEG;
+// Compose the subject below center so the eave line cuts sky rather than sitting against the far
+// hillside. Normalized lens shift only — no camera pose or focus distance moves. A 배산임수 village
+// always puts the ridge behind a south-facing house, so this shift alone cannot manufacture sky;
+// the ridge-mist bands (generators/village/terrain.js) dissolve that backdrop into 여백, and this
+// only buys room above the eave for it. Larger values crop the near yard out of frame.
+export const VILLAGE_FOCUS_SKY_FRACTION = 0.13;
+// The hero landing keeps its own authored approach. It arrives on a compound courtyard whose
+// wings only read from above, and its frame is a settled cinematic beat rather than the shared
+// close-parcel pose, so lowering the residential elevation must not follow it.
+export const VILLAGE_HERO_FOCUS_ELEVATION = 24 * DEG;
 // Product close-focus coefficient for the existing physical depth gather. A
 // compensated telephoto dolly preserves local axial depth differences, so this
 // is intentionally one stable value rather than a raw camera-distance multiplier.
@@ -22,7 +33,16 @@ const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 
 export const VILLAGE_LENS = Object.freeze({
   aerial: lens(46, 42),
-  parcel: lens(10, 23),
+  // The residential close lens is the one place where focal length decides whether the flagship
+  // look can exist at all. At 10° the compensated dolly stood 96m off a 9m house: the top frame
+  // ray was −2° no matter how far the lens shifted, so no sky ever reached the frame and the rim
+  // had nothing to stand against, while the 2.33× depth compression flattened four neighbouring
+  // parcels and the palace into one amber mass behind the subject. 16° halves the dolly (≈60m),
+  // lifts the top ray above the horizon, and restores subject dominance. Everything derived from
+  // this profile — RIM_DISTANCE_GATE, chunk/detail LOD screen distance, zoom bounds, DoF spread —
+  // is computed from the lens rather than hardcoded, so they follow. docs/look-restoration-plan.md
+  // "1-0 잔여".
+  parcel: lens(16, 23),
   hero: lens(7, 21),
   palace: lens(24, 32),
   temple: lens(26, 34),

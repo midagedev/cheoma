@@ -155,6 +155,9 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     scene.fog.color.copy(b.color); scene.fog.near = b.near; scene.fog.far = b.far;
     if (scene.background && scene.background.isColor) scene.background.copy(b.color);
     for (const fn of fogMods) { try { fn(scene); } catch (e) { /* 모디파이어 오류가 루프를 깨지 않게 */ } }
+    // 돔 지평 밴드를 "최종" 대기색에 맞춘다(R5) — 날씨 틴트·마을 모디파이어까지 반영된 색이라야
+    //   지형 외곽이 배경과 같은 색으로 소실된다. 변화 없으면 sky 쪽에서 no-op.
+    sky.syncHaze(scene.fog.color);
   }
   function composeFogNow() { if (enabled && !immediateMode) applyFogBaseAndMods(); }
   function addFogModifier(fn) { if (!disposed && fn && !fogMods.includes(fn)) { fogMods.push(fn); composeFogNow(); } }

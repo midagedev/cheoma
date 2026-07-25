@@ -1743,6 +1743,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     warmFocusRingShaders();   // #128: 방금 생성된 링 컨테이너(scene 직속) 프리컴파일 — 링 첫 렌더 링크 스톨 흡수
   }
 
+  // 하늘 확보용 렌즈 시프트(VILLAGE_FOCUS_SKY_FRACTION)는 눈높이 주거 근접 포즈의 것이다.
+  // 궁·절은 처마선이 아니라 축선 위 일곽 전체가 피사체이고, 그 프레임은 위에서 내려보는 20°/17°
+  // 랜드마크 렌즈로 authored 됐다. 여기에 같은 시프트를 걸면 ① 여백을 얻지 못하면서
+  // ② 좁은 모바일 안전영역에서 일곽 하단이 시트 밖으로 밀려난다(check-cinematic-reveal-app 실측).
+  const focusCompositionFor = (parcelId) => (parcelId === 'palace' || parcelId === 'temple' ? 0 : 1);
+
   // 필지 focus-in(클릭·집 보기 토글·프로그램 진입 공통) — mode-integration §5.5 원칙 1·3.
   //   모든 필지를 풀디테일 오버레이로 승격(showParcelDetail: 종가=컴파운드, 정규=단일 집) → 편집·리플레이·
   //   근접 링 앵커 확보(§4). 카메라 돌리 + DoF 램프 + 링 크로스페이드 + 패널 컨텍스트 모프를 FOCUS_IN_DUR
@@ -1782,7 +1788,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       else clearSemanticDofAnchor();
       tweenTo(f.position, f.target, FOCUS_IN_DUR, {
         fov: f.fov, referenceFov: f.referenceFov,
-        focusComposition: 1,
+        focusComposition: focusCompositionFor(parcelId),
         dofAnchorFrom: openingFocus ? controls.target : null,
         dofAnchorTo: openingFocus,
         dofSource: 'primary-opening-transition',
@@ -1844,7 +1850,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         // 카메라·시선과 같은 진행도로 A의 고정 개구면→B의 고정 개구면을 보간한다. 의미 anchor가
         // 없는 복합체 쪽 끝만 해당 controls.target으로 폴백해 near-plane 초점 점프를 막는다.
         fov: f.fov, referenceFov: f.referenceFov,
-        focusComposition: 1,
+        focusComposition: focusCompositionFor(toId),
         dofAnchorFrom: semanticTransition ? (fromOpeningFocus || controls.target) : null,
         dofAnchorTo: semanticTransition ? (toOpeningFocus || f.target) : null,
         dofSource: 'primary-opening-transition',
@@ -2061,7 +2067,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       target: finalTarget,
       fov: finalFov,
       referenceFov: finalReferenceFov,
-      composition: 1,
+      // 하늘 확보용 렌즈 시프트는 눈높이 주거 근접 포즈의 것이다. 히어로 착지는 자기 고도
+      // (VILLAGE_HERO_FOCUS_ELEVATION)로 내려앉는 별개의 연출 비트이고, 그 피사체는 처마선이
+      // 아니라 위에서만 읽히는 종가 마당·행각이므로 정중앙 투영을 유지한다. 여기서 시프트를
+      // 걸면 마당과 마당의 생활상이 프레임 아래로 잘려나간다.
+      composition: 0,
     }, {
       seed: village.seed,
       subjectSize: maxDim,
