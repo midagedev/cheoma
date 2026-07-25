@@ -2,6 +2,7 @@ import { smoothstep } from '../../core/math/scalar.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../../rng.js';
+import { bakeSphericalNormals, canopyCenter, FOLIAGE_PROFILE, foliageLeafMass } from '../../core/foliage-geometry.js';
 import { createValueNoise2D } from '../../core/math/value-noise2.js';
 import { setupTreeOccluder } from '../../env/tree-occluder.js';
 import { makeEcotoneField } from '../../village/forest.js';
@@ -15,21 +16,62 @@ export const SCATTER_TREE_VISUAL_RADIUS = Object.freeze({
 
 // ───────────────────────── 수목(숲·능선) ─────────────────────────
 // hillAt 로 능선·산에만 밀집. mask(x,z)=true 인 자리(마을·도로·논)는 제외.
-function makeTreeProtos() {
-  // 소나무(상록): 짧은 갈색 줄기 + 짙은 청록 원뿔 2~3층.
-  const pine = [];
-  const trunkP = new THREE.CylinderGeometry(0.16, 0.24, 2.0, 5); trunkP.translate(0, 1.0, 0);
-  pine.push(tintGeo(trunkP, 0x6a4a2e));
-  for (let k = 0; k < 3; k++) {
-    const c = new THREE.ConeGeometry(2.1 - k * 0.5, 2.4, 7); c.translate(0, 2.4 + k * 1.5, 0);
-    pine.push(tintGeo(c, [0x2f4428, 0x35492d, 0x273a21][k % 3]));
+//
+// 룩 복원 Phase 3.5 단계 0·1(docs/tree-look.md §5) — 원뿔 3층(=크리스마스트리 픽토그램)과 등축구
+//   롤리팝을 동양화 잎덩이 어휘로 교체한다. 소나무는 굽은 줄기 + 층운형 잎덩이 3단(원리 ③),
+//   활엽은 비대칭 덩이 뭉치(원리 ①). 캐노피에는 수관 매스 중심 기준 구체 노멀을 구워
+//   수묵 모드의 내부 폴리곤 필선을 없앤다(§3.3) — 재질의 flatShading 해제가 전제.
+// ★ 불변 계약: SCATTER_TREE_VISUAL_RADIUS(pine 2.1 / broad 2.64)를 넘지 않는다(배치 수용 판정 공유).
+//   활엽 캐노피 하단은 2.09m 를 유지한다 — 급사면 접지 sink 식(#142)이 이 값을 상수로 갖는다.
+//   삼각형: 소나무 62→72(굽은 줄기 2마디 비용), 활엽 100→60. 인스턴스 캡이 2050/3500 이라
+//   합계 델타는 한양 부감에서 +1만 삼각 수준이다(예산 2M).
+
+// 층운형 잎덩이 2덩이 — 층마다 값이 다른 녹(아래 짙고 위 밝게 = 위에서 오는 빛, 원리 ④·⑤).
+//   각 덩이는 20면체를 위도 프로파일로 조각한 것이라 근경에서도 마름모·결정으로 읽히지 않는다.
+const PINE_TIERS = [
+  { hex: 0x243821, radius: 1.82, x: 0.24, y: 3.95, z: -0.10, up: 2.05, down: 2.10,
+    profile: FOLIAGE_PROFILE.pine, jitter: 0.16, phase: 0.4, lean: 0.34, spin: 0.22 },
+  { hex: 0x364c2d, radius: 1.30, x: 0.58, y: 5.60, z: 0.16, up: 1.05, down: 1.30,
+    profile: FOLIAGE_PROFILE.broad, jitter: 0.18, phase: 1.3, lean: 0.22, spin: 1.05 },
+];
+// 비대칭 덩이 뭉치 — 주덩이 + 빛 받는 어깨 덩이(한 나무 안에서 농담이 갈린다).
+const BROAD_LUMPS = [
+  { hex: 0x445f2c, radius: 2.50, x: -0.10, y: 4.35, z: 0.06, up: 2.16, down: 2.26,
+    profile: FOLIAGE_PROFILE.broad, jitter: 0.17, phase: 0.7, lean: 0.30, spin: 0.36 },
+  { hex: 0x5b7a3a, radius: 1.36, x: 0.62, y: 5.05, z: -0.46, up: 1.15, down: 1.50,
+    profile: FOLIAGE_PROFILE.broad, jitter: 0.18, phase: 2.1, lean: 0.20, spin: 0.95 },
+];
+
+// 굽은 줄기(적송): 두 마디를 누적 경사로 쌓아 수관 드리프트와 축을 맞춘다. 4분할 각기둥(마디 16 삼각)
+//   — 반경 0.2m 대라 분할수를 늘려도 화면에 나타나지 않는다.
+function bentTrunkParts(segments, hex) {
+  const parts = [];
+  for (const s of segments) {
+    const g = new THREE.CylinderGeometry(s.rt, s.rb, s.len, 4);
+    g.translate(0, s.len / 2, 0);
+    if (s.tilt) g.rotateZ(s.tilt);
+    g.translate(s.x, s.y, s.z);
+    parts.push(tintGeo(g, hex));
   }
-  // 활엽(잡목): 줄기 + 둥근 덩어리.
-  const broad = [];
+  return parts;
+}
+// 잎덩이를 만들고 수관 매스 중심 기준 구체 노멀을 구운 뒤 덩이별 색으로 틴트.
+function tintedCanopy(lumps) {
+  const center = canopyCenter(lumps);
+  return lumps.map((l) => tintGeo(bakeSphericalNormals(foliageLeafMass(l), center), l.hex));
+}
+function makeTreeProtos() {
+  // 소나무(상록): 굽은 갈색 줄기 + 짙은 청록 잎덩이 2덩이.
+  const pine = [
+    ...bentTrunkParts([
+      { rt: 0.20, rb: 0.26, len: 1.85, x: 0, y: 0, z: 0, tilt: -0.05 },
+      { rt: 0.13, rb: 0.20, len: 1.70, x: 0.10, y: 1.75, z: 0, tilt: -0.16 },
+    ], 0x6a4a2e),
+    ...tintedCanopy(PINE_TIERS),
+  ];
+  // 활엽(잡목): 곧은 줄기 + 비대칭 덩이 뭉치.
   const t2 = new THREE.CylinderGeometry(0.14, 0.2, 2.4, 5); t2.translate(0, 1.2, 0);
-  broad.push(tintGeo(t2, 0x6b5540));
-  const blob = new THREE.IcosahedronGeometry(2.4, 1); blob.scale(1.1, 0.92, 1.1); blob.translate(0, 4.3, 0);
-  broad.push(tintGeo(blob, 0x4e6d34));
+  const broad = [tintGeo(t2, 0x6b5540), ...tintedCanopy(BROAD_LUMPS)];
   return {
     pine: mergeGeometries(pine, false),
     broad: mergeGeometries(broad, false),
@@ -51,7 +93,8 @@ function tintGeo(geo, hex) {
 export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
   const group = new THREE.Group(); group.name = 'village-trees';
   const protos = makeTreeProtos();
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true });
+  // flatShading 해제 — 프로토에 구운 구체 노멀을 살린다(docs/tree-look.md §3.6-3). 프로그램 수 불변.
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: false });
   const rng = makeRng(seed ^ 0x77ee);
   const R = site.R;
   const TR = site.terrainR || R;
@@ -183,7 +226,9 @@ export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
     //   크런치 활엽과 동조). 소나무는 종전대로 밑동 매립 하드닝만.
     let sink;
     if (broadTree) {
-      const canopyBottom = 2.09 * s;                                   // 프로토 blob 하단(스케일 반영)
+      // 프로토 수관 하단(스케일 반영). Phase 3.5 의 덩이 뭉치도 주덩이 아래 꼭지를 이 높이에 두어
+      //   이 상수와 배치 y 를 그대로 유지한다(BROAD_LUMPS 주덩이 y 4.35 − down 2.26 = 2.09).
+      const canopyBottom = 2.09 * s;
       // 완경사부터 캐노피 하단을 지면에 밀착(smoothstep 조기 포화) + 급사면 내리막 가장자리 매립 마진.
       sink = smoothstep(0.04, 0.22, slopeR) * canopyBottom + 1.4 * s * slopeR;
     } else {

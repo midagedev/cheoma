@@ -2,6 +2,7 @@ import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
+import { bakeSphericalNormals, FOLIAGE_PROFILE, foliageLeafMass } from '../core/foliage-geometry.js';
 import { parcelMatrix } from '../generators/shared/parcel-transform.js';
 import * as G from '../core/math/geom2.js';
 
@@ -20,7 +21,6 @@ import * as G from '../core/math/geom2.js';
 const TAU = Math.PI * 2;
 const M4 = () => new THREE.Matrix4();
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
-const ico = (r) => new THREE.IcosahedronGeometry(r, 0);
 
 // 진달래 연분홍~자주 / 개나리 노랑 팔레트(instanceColor 곱, SRGB→linear). 스타일라이즈드 산수화 무드.
 const AZALEA_COLORS = [0xe77fb3, 0xd9679e, 0xee95c4, 0xcf5b93, 0xe070a8].map((h) => linCol(h));
@@ -28,16 +28,23 @@ const FORSYTHIA_COLORS = [0xffd54f, 0xffc107, 0xffcc33, 0xf7c948, 0xffd966].map(
 
 // 관목 프로토(로우폴리 ico 덩어리 병합). 단색(재질 흰색×instanceColor) → 개체마다 색을 달리한다.
 //   진달래=낮고 둥근 무덤(꽃 무리), 개나리=성글고 높은 분수형(휘어진 가지 인상).
+// 룩 복원 Phase 3.5(docs/tree-look.md §5) — 관목 덩이도 등축구가 아니라 불규칙 붓점 덩이로 굽고,
+//   관목 매스 중심에서 구체 노멀을 전사한다. look-grammar §2-2 가 금지한 "기와는 골까지 파면서
+//   관목이 8면체" 상태를 해소하고, 수묵 모드에서 관목 내부 폴리곤 필선이 사라진다.
+//   최대 XZ 반경(|x| + r×1.08)은 구 ico 와 동일 — 봄 개화 띠의 배치·간격 계약 불변.
 function mergeBlobs(specs, sy0) {
   const blobs = [];
-  for (const [r, x, y, z, sy] of specs) {
-    const g = ico(r);
+  for (const [i, [r, x, y, z, sy]] of specs.entries()) {
+    const g = foliageLeafMass({
+      radius: r, up: r * 0.85, down: r * 0.85, profile: FOLIAGE_PROFILE.shrub,
+      jitter: 0.2, phase: i * 1.1 + 0.2, spin: i * 0.9, lean: r * 0.1,
+    });
     g.applyMatrix4(M4().makeTranslation(x, y, z).multiply(M4().makeScale(1.08, sy != null ? sy : sy0, 1.08)));
     blobs.push(g);
   }
   const m = mergeGeometries(blobs, false);
   m.deleteAttribute('uv');
-  return m;
+  return bakeSphericalNormals(m);
 }
 function makeAzaleaProto() {
   return mergeBlobs([
@@ -249,8 +256,9 @@ export function buildSpringBloom(plan, site, warp, mask) {
   const az = scatterAzalea(site, warp, mask, (seed ^ 0xa2) >>> 0);
   const fo = scatterForsythia(plan, site, (seed ^ 0xf0) >>> 0);
 
-  // 공유 재질 1개(흰색 × instanceColor). flatShading 로우폴리 — 로컬 면 음영으로 관목 볼륨.
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, flatShading: true });
+  // 공유 재질 1개(흰색 × instanceColor). flatShading 해제 — 구운 구체 노멀로 관목이 하나의 둥근
+  //   덩이로 셰이딩된다(패싯 소멸, 역광 림 연속화). 프로그램 수 불변.
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, flatShading: false });
 
   const meshes = [];
   const mk = (proto, data, name) => {

@@ -37,13 +37,14 @@ const CRAG_TARGET_K = 12;      // #137 크래그 밀도 톤다운(22→12): 능�
 export const GRANITE = 0xa5a29a;
 const GRANITE_COL = linCol(GRANITE);
 // 나무 프로토 삼각수(triCount 회계용) — forest.js 프로토와 일치.
-const PINE_TRIS = 24, BROAD_TRIS = 20, FAR_TRIS = 40;
+const PINE_TRIS = 20, BROAD_TRIS = 20, FAR_TRIS = 40;
 // Instancing matrix의 x/z scale에 곱해야 실제 prototype 수평 bound가 된다. 배치 후 footprint 검증과
 // 브라우저 계약이 이 값을 공유해 "matrix scale=시각 반경"이라는 잘못된 가정을 막는다.
 export const FOREST_VISUAL_RADIUS = Object.freeze({
   pine: 1.55,
   broad: 1.97,
-  // makeCanopyBlobProto의 두 번째 offset blob까지 포함한 실제 XZ bound 1.451529m.
+  // makeCanopyBlobProto 요철 돔의 실제 XZ bound(1.322m)를 덮는 상한. 구 이중 blob(1.4515m) 값 유지 —
+  //   상한을 내리면 배치 수용 집합이 넓어져 골든이 또 흔들린다.
   far: 1.46,
   // 최대 scale(1.25)·형상 perturb(1.1)·중심 이동 hypot(0.4,0.4)을 합친 해석 상한 1.9407을 올림.
   rock: 1.95,
@@ -152,11 +153,33 @@ const BROAD = {
   winter: [linCol(0x8a7c60), linCol(0x9a8f72), linCol(0x746850)],
 };
 const _c = new THREE.Color();
-function pineColor(season, t, out) {
+
+// 농담(濃淡) 층화 — docs/tree-look.md §3.4 결손 2·원리 ⑤("농담이 곧 깊이다". 인왕제색도는 원산을
+//   오히려 짙게 덧칠해 화면을 세웠다). 구 팔레트는 그루별 배율이 0.9~1.1(±10%)뿐이어서 ink.js 의
+//   5단 양자화에서 수림 전체가 한두 밴드로 뭉쳤다 = "균질한 회색 수림"(감사 R7 의 나무측 실체).
+//   값 폭을 의도적으로 벌려 최소 두 밴드에 걸치게 한다. 축은 둘:
+//     · 그루별 t — 고주파 모자이크(±16%). 인접 그루의 농담이 갈려 수관에 결이 생긴다.
+//     · 고도 hillBias — 저주파 밴드(±20%). 능선 수림은 짙고 차갑게(먹), 산자락은 밝고 따뜻하게.
+//       원경 클러스터 블롭 색은 멤버 평균이므로 t 항은 상쇄되고 이 저주파 항만 살아남는다
+//       → 부감에서 능선·중사면·산자락이 서로 다른 농담 밴드로 읽힌다(원리 ②의 톤 덩어리).
+//   침엽은 한 단 더 짙게(deep) 눌러 수종 간 값 간격을 벌린다.
+//   ★ rng 를 새로 소비하지 않는다 — t·mosaic 은 호출부의 기존 자리 그대로이므로 배치·인스턴스
+//     매트릭스는 바이트 불변이고, 바뀌는 것은 instanceColor 4버퍼뿐이다. 워커와 동기 경로가
+//     이 함수를 공유하므로 두 경로는 계속 바이트 동일하다.
+const VALUE_T = 0.32, VALUE_HILL = 0.40, COOL_HILL = 0.16;
+function stratifyValue(out, t, hillBias, deep) {
+  out.multiplyScalar((0.84 + VALUE_T * t) * (1.20 - VALUE_HILL * hillBias) * (deep ? 0.92 : 1));
+  // 값 배분의 색 짝: 능선은 대기 산란 쪽으로 차갑게, 산자락은 잎 반사광 쪽으로 따뜻하게.
+  const cool = COOL_HILL * (hillBias - 0.35);
+  out.r *= 1 - cool * 0.9;
+  out.b *= 1 + cool * 1.4;
+  return out;
+}
+
+function pineColor(season, t, hillBias, out) {
   const arr = PINE[season] || PINE.summer;
   out.copy(arr[0]).lerp(arr[1], t);
-  out.multiplyScalar(0.9 + 0.2 * t);
-  return out;
+  return stratifyValue(out, t, hillBias, true);
 }
 function broadColor(season, t, hillBias, mosaic, out) {
   const arr = BROAD[season] || BROAD.summer;
@@ -165,13 +188,11 @@ function broadColor(season, t, hillBias, mosaic, out) {
     const idx = f * (arr.length - 1);
     const i0 = Math.floor(idx), i1 = Math.min(arr.length - 1, i0 + 1);
     out.copy(arr[i0]).lerp(arr[i1], idx - i0);
-    out.multiplyScalar(0.9 + 0.2 * t);
   } else {
     out.copy(arr[0]).lerp(arr[1], t);
     if (arr[2]) out.lerp(arr[2], (1 - mosaic) * 0.4);
-    out.multiplyScalar(0.9 + 0.2 * t);
   }
-  return out;
+  return stratifyValue(out, t, hillBias, false);
 }
 
 const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
@@ -300,7 +321,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       if (!far) {
         if (isPine) {
           pineM.push(m);
-          for (const se of SEASONS) { pineColor(se, t, _c); pineC[se].push(_c.r, _c.g, _c.b); }
+          for (const se of SEASONS) { pineColor(se, t, hillBias, _c); pineC[se].push(_c.r, _c.g, _c.b); }
           if (hill > 0.7) ridgePine++;
         } else {
           broadM.push(m);
@@ -313,7 +334,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
         if (!cl) { cl = { sx: 0, sy: 0, sz: 0, ss: 0, n: 0, col: { spring: [0, 0, 0], summer: [0, 0, 0], autumn: [0, 0, 0], winter: [0, 0, 0] } }; clusters.set(ck, cl); }
         cl.sx += p.x; cl.sy += y; cl.sz += p.z; cl.ss += s; cl.n++;
         for (const se of SEASONS) {
-          if (isPine) pineColor(se, t, _c); else broadColor(se, t, hillBias, mosaic, _c);
+          if (isPine) pineColor(se, t, hillBias, _c); else broadColor(se, t, hillBias, mosaic, _c);
           const a = cl.col[se]; a[0] += _c.r; a[1] += _c.g; a[2] += _c.b;
         }
       }

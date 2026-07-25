@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
+import { bakeSphericalNormals, FOLIAGE_PROFILE, foliageLeafMass } from '../core/foliage-geometry.js';
 import { parcelMatrix } from './instancing.js';
 import { YARD_SPECIES } from './variants.js';
 import { buildParcelLanternGeo, getLanternMaterials, lanternStyleFor } from '../layout/props.js';
@@ -40,6 +41,20 @@ const TAU = Math.PI * 2;
 const M4 = () => new THREE.Matrix4();
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
+
+// 룩 복원 Phase 3.5(docs/tree-look.md §5) — 잎덩이는 등축구가 아니라 불규칙 붓점 덩이(원리 ①)로 굽고,
+//   수관 매스 중심에서 구체 노멀을 전사해 수묵 모드의 캐노피 내부 폴리곤 필선을 없앤다(§3.3).
+//   ★ 최대 XZ 반경 rr·최대 |y| 0.85rr 은 구 ico(rr) 와 같게 유지한다(foliageLeafMass 가 XZ 를
+//     정규화한다) — 마당 나무 수용 판정이
+//     프로토 footprint 반경(yardTreeCanopyRadius)을 쓰므로 반경이 바뀌면 배치 결정이 달라진다.
+function leafLump(rr, phase, profile = FOLIAGE_PROFILE.broad) {
+  // inward: 모든 정점이 구 ico(rr) 반경 안에 머문다 → 프로토 footprint 반경이 커지지 않는다.
+  //   마당 나무 수용 판정이 이 반경을 쓰므로(yardTreeCanopyRadius) 필수다.
+  return foliageLeafMass({
+    radius: rr, up: rr * 0.85, down: rr * 0.85, profile, jitter: 0.18, phase, spin: phase * 0.7,
+    inward: true,
+  });
+}
 // 담장이 있는 작은 필지의 과실수는 수고는 유지하고 수관만 전정된 비율로 심는다.
 // x/z만 줄여 꽃·열매가 읽히는 높이와 바닥 접지는 보존한다.
 const YARD_CROWN_SCALE = Object.freeze({ min: 0.45, max: 0.75, heroMin: 0.55, heroMax: 0.8 });
@@ -124,7 +139,7 @@ function makeFruitProto(species, seed) {
     const ang = i / I.clumps * TAU + rng.range(-0.4, 0.4);
     const sp = i === 0 ? 0 : rng.range(I.spread * 0.5, I.spread);
     const by = crownY + rng.range(-0.3, 0.6) + (i === 0 ? 0.35 : 0);
-    const g = ico(rr, 0);
+    const g = leafLump(rr, i * 0.9);
     g.applyMatrix4(M4().makeTranslation(Math.cos(ang) * sp, by, Math.sin(ang) * sp).multiply(M4().makeScale(1.15, I.squashY, 1.15)));
     leaf.push(tint(g, rng.pick(I.greens)));
   }
@@ -138,7 +153,7 @@ function makeFruitProto(species, seed) {
     accent.push(tint(d, I.accentCol));
   }
   const mergedWood = mergeGeometries(wood, false);
-  const mergedLeaf = mergeGeometries(leaf, false);
+  const mergedLeaf = bakeSphericalNormals(mergeGeometries(leaf, false));
   const mergedAccent = accent.length ? mergeGeometries(accent, false) : null;
   return {
     wood: mergedWood,
@@ -179,7 +194,7 @@ function makeGuardianProto(kind, seed) {
     const ang = i / blobs * TAU + rng.range(-0.3, 0.3);
     const sp = i === 0 ? 0 : rng.range(ginkgo ? 2.0 : 3.4, ginkgo ? 5.2 : 8.6);
     const by = crownY + rng.range(-1.3, 1.1) - sp * (ginkgo ? 0.05 : 0.14);
-    const g = ico(rr, 1);
+    const g = leafLump(rr, i * 0.7);
     g.applyMatrix4(M4().makeTranslation(Math.cos(ang) * sp, by, Math.sin(ang) * sp).multiply(M4().makeScale(ginkgo ? 1.0 : 1.28, ginkgo ? 0.95 : 0.6, ginkgo ? 1.0 : 1.28)));
     leaf.push(tint(g, rng.pick(greens)));
   }
@@ -191,7 +206,7 @@ function makeGuardianProto(kind, seed) {
     p.translate(Math.cos(a) * 1.02, 1.55, Math.sin(a) * 1.02);
     wood.push(tint(p, HANJI));
   }
-  return { wood: mergeGeometries(wood, false), leaf: mergeGeometries(leaf, false) };
+  return { wood: mergeGeometries(wood, false), leaf: bakeSphericalNormals(mergeGeometries(leaf, false)) };
 }
 
 // ───────────────────────── 정원 점경물 (반가) ─────────────────────────
@@ -276,7 +291,8 @@ export function buildVillageFlora(plan, site, seed, { yardLifeRecords = [] } = {
 
   // 재질(마을 1벌 — 계절 틴트가 다른 마을에 새지 않게 호출마다 신규). flatShading 로우폴리.
   const woodMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, flatShading: true });
-  const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true });
+  // 잎 재질만 flatShading 해제(구운 구체 노멀 유효화). 목재·석재는 패싯 질감이 대비축이라 유지.
+  const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: false });
   const blossomMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, flatShading: true });
   const fruitMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, flatShading: true });
   const stoneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true });

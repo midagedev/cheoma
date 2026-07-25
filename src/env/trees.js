@@ -2,6 +2,7 @@ import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
+import { bakeSphericalNormals, canopyCenter, FOLIAGE_PROFILE, foliageLeafMass } from '../core/foliage-geometry.js';
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 
@@ -62,46 +63,61 @@ function bentTrunk(rng, height, r0, bend, bark) {
   return { parts, topX: x, topY: y };
 }
 
-// 소나무(장송): 넓게 퍼진 둥근 우산형 수관 — 납작한 덩어리 여러 개. (상록)
+// 룩 복원 Phase 3.5(docs/tree-look.md §5 단계 0·1) — 등축구·원뿔 어휘를 동양화 잎덩이로 교체한다.
+//   잎덩이 여러 장을 하나의 수관 매스로 보고 그 중심에서 구체 노멀을 전사해야(§2.2) 덩이 경계의
+//   노멀 불연속까지 사라지고, 수묵 모드의 캐노피 내부 폴리곤 필선이 셰이더 수정 없이 소멸한다(§3.3).
+//   재질의 flatShading 해제가 전제다(§3.6-3).
+function canopyParts(lumps, species) {
+  const center = canopyCenter(lumps);
+  return lumps.map((l) => tint(bakeSphericalNormals(foliageLeafMass(l), center), l.hex, 1, species));
+}
+// 층/뭉치 스펙 → 잎덩이 스펙(위치 기반 지터 + 값이 다른 녹). i 를 위상으로 써 층마다 다른 실루엣.
+function foliageSpecs(specs, rng, greens, ox = 0, oy = 0) {
+  return specs.map((s, i) => {
+    const ang = (i / specs.length) * Math.PI * 2 + rng.range(-0.45, 0.45);
+    const sp = s.spread ? s.spread * rng.range(0.85, 1.12) : 0;
+    return {
+      radius: s.radius, spin: ang * 0.5 + i, phase: i * 0.8 + 0.3, jitter: 0.2,
+      profile: s.profile || FOLIAGE_PROFILE.broad,
+      x: ox + s.axis * ox + Math.cos(ang) * sp, y: oy + s.dy, z: Math.sin(ang) * sp,
+      up: s.up, down: s.down, lean: s.radius * 0.18,
+      hex: greens[i % greens.length],
+    };
+  });
+}
+
+// 소나무(장송): 굽은 줄기 + 옆으로 벌어진 우산형 잎덩이 층(원리 ③ 층운형). (상록)
 function makePineBroad(seed) {
   const rng = makeRng(seed);
   const H = 8;
   const { parts, topX, topY } = bentTrunk(rng, H * 0.72, 0.26, 0.16, 0x7c5334);
-  // 상록 침엽 톤: 활엽수의 따뜻한 초록과 구분되도록 더 짙고 차가운 청록.
-  const greens = [0x2f4428, 0x384f2f, 0x273a21];
-  const blobs = 6;
-  for (let i = 0; i < blobs; i++) {
-    const rr = rng.range(1.4, 2.2);
-    const g = new THREE.IcosahedronGeometry(rr, 1);
-    const ang = (i / blobs) * Math.PI * 2 + rng.range(-0.4, 0.4);
-    // 더 넓고 낮게 퍼진 우산형(층진 소나무 수관) — 둥근 활엽 덩어리로 안 읽히게.
-    const spread = i === 0 ? 0 : rng.range(1.4, 3.0);
-    const bx = topX + Math.cos(ang) * spread;
-    const bz = Math.sin(ang) * spread;
-    const by = topY + rng.range(-0.6, 0.8) + (i === 0 ? 0.7 : 0);
-    place(g, bx, by, bz, 0, 1.18, 0.48, 1.18);
-    parts.push(tint(g, rng.pick(greens), 1, SPECIES.pine));
-  }
+  // 상록 침엽 톤: 활엽의 따뜻한 초록과 구분되는 짙고 차가운 청록. 아래 그늘 → 위 수광 값 램프.
+  const greens = [0x22331d, 0x2c4026, 0x35492d, 0x3e5533];
+  const lumps = foliageSpecs([
+    { radius: 2.45, dy: 0.70, spread: 0, up: 1.15, down: 1.45, axis: 0 },
+    { radius: 1.95, dy: -0.15, spread: 2.35, up: 0.95, down: 1.30, axis: 0 },
+    { radius: 1.70, dy: 0.30, spread: 2.80, up: 0.90, down: 1.20, axis: 0 },
+    { radius: 1.45, dy: 1.00, spread: 1.85, up: 0.95, down: 1.15, axis: 0 },
+  ], rng, greens, topX, topY);
+  parts.push(...canopyParts(lumps, SPECIES.pine));
   return mergeGeometries(parts, false);
 }
 
-// 소나무(능선형): 곧은 줄기 + 수평 원뿔 층 (기울어 자란 수형). (상록)
+// 소나무(능선형): 기울어 자란 줄기 + 기울기를 따라 오르는 납작한 잎덩이 층. (상록)
 function makePineTiered(seed) {
   const rng = makeRng(seed);
   const H = 8.5;
   const lean = rng.range(0.05, 0.16);
   const { parts, topX, topY } = bentTrunk(rng, H * 0.82, 0.22, lean, 0x81583a);
-  const greens = [0x2c4026, 0x35492d, 0x243620];
-  const tiers = 5;
-  for (let i = 0; i < tiers; i++) {
-    const t = i / (tiers - 1);
-    const rad = 2.6 * (1 - t * 0.62);
-    const g = new THREE.ConeGeometry(rad, 1.5, 7, 1);
-    const ty = topY - H * 0.42 + t * H * 0.5;
-    const tx = topX * (0.3 + 0.7 * t) + rng.range(-0.2, 0.2);
-    place(g, tx, ty, rng.range(-0.2, 0.2), rng.range(0, 6.28), 1, 0.7, 1);
-    parts.push(tint(g, rng.pick(greens), 1, SPECIES.pine));
-  }
+  const greens = [0x1f2f1a, 0x2c4026, 0x35492d, 0x3d5330];
+  // 층 중심이 기울기 축(topX)을 따라 오르며 반경이 줄어든다 — 원뿔 스택이 아니라 벌어진 층.
+  const lumps = foliageSpecs([
+    { radius: 2.30, dy: -H * 0.34, spread: 0.55, up: 1.00, down: 1.30, axis: -0.7 },
+    { radius: 1.95, dy: -H * 0.14, spread: 0.85, up: 0.92, down: 1.20, axis: -0.45 },
+    { radius: 1.55, dy: H * 0.04, spread: 0.95, up: 0.85, down: 1.05, axis: -0.2 },
+    { radius: 1.15, dy: H * 0.20, spread: 0.70, up: 0.85, down: 0.95, axis: 0 },
+  ], rng, greens, topX, topY);
+  parts.push(...canopyParts(lumps, SPECIES.pine));
   return mergeGeometries(parts, false);
 }
 
@@ -116,15 +132,22 @@ function makeBroadleaf(seed, opts) {
   const trunk = new THREE.CylinderGeometry(trunkR1, trunkR0, H * 0.6, 7, 1);
   place(trunk, 0, H * 0.3, 0);
   const parts = [tint(trunk, trunkHex)];
+  // 등축구 클럼프 → 크기가 다른 비대칭 덩이 뭉치(원리 ①의 군집 리듬). 반경·높이 비율은 종별 authoring
+  //   (clumpR·spread·squashY)을 그대로 소비해 수형 구분(은행 좁고 곧게 / 벚 낮고 퍼짐)을 보존한다.
+  const lumps = [];
   for (let i = 0; i < clumps; i++) {
-    const rr = clumpR * rng.range(0.82, 1.16);
-    const g = new THREE.IcosahedronGeometry(rr, 1);
+    const rr = clumpR * rng.range(0.82, 1.16) * 1.12;
     const ang = (i / clumps) * Math.PI * 2 + rng.range(-0.35, 0.35);
     const sp = i === 0 ? 0 : rng.range(spread * 0.45, spread);
     const by = H * crownBase + rng.range(-0.3, 1.1) + (i === 0 ? 0.9 : 0);
-    place(g, Math.cos(ang) * sp, by, Math.sin(ang) * sp, 0, 1.12, squashY, 1.12);
-    parts.push(tint(g, rng.pick(greens), 1, species));
+    lumps.push({
+      radius: rr, spin: i * 1.1 + ang * 0.4, phase: i * 0.85 + 0.4, jitter: 0.2,
+      profile: FOLIAGE_PROFILE.broad, lean: rr * 0.16,
+      x: Math.cos(ang) * sp, y: by, z: Math.sin(ang) * sp,
+      up: rr * squashY * 0.86, down: rr * squashY * 0.86, hex: rng.pick(greens),
+    });
   }
+  parts.push(...canopyParts(lumps, species));
   return mergeGeometries(parts, false);
 }
 
@@ -182,7 +205,8 @@ export function buildTrees({ seed = 70707, clearance = 18, heightAt = () => 0, m
     cherry: makeCherry(seed + 6),
   };
   const mat = new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 0.92, metalness: 0, flatShading: true,
+    // flatShading 해제 — 프로토에 구운 구체 노멀을 살린다(docs/tree-look.md §3.6-3).
+    vertexColors: true, roughness: 0.92, metalness: 0, flatShading: false,
   });
 
   const rng = makeRng(seed);

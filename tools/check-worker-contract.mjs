@@ -107,10 +107,20 @@ const expectedSceneHashes = {
   // 피사체 43m, 가림 나무 6.9m) 그러면 프레임 전체가 저폴리 캐노피 한 장이 된다. 시야 선택기는
   // 지형·건축 blocker 만 보므로 수목은 배치 단계에서 비켜야 한다. 나무 수가 소폭 줄어 삼각형이
   // 함께 줄어들고, 재질·프로그램·필지·건물 소유권은 불변이다.
-  village: 'd5c6e141:c6be9971:a22bc069:ca6ce3ed',
-  town: '51fe2dac:87e0c81c:1a333001:ef6d62ba',
-  capital: '8845fec6:d744d546:85c26dd8:86226f76',
-  hanyang: 'f407cc43:21c707e9:71a3af66:8388fbfd',
+  // 룩 복원 Phase 3.5(나무 룩 단계 0·1, docs/tree-look.md §5): 식생 프로토 지오메트리와 계절색만
+  // 바뀐 재기준이다. 캐노피 어휘를 원뿔·등축구에서 "위도 프로파일로 조각한 20면체 잎덩이"로 바꾸고
+  // (구체 노멀 전사 + 재질 flatShading 해제), 계절 팔레트에 고도·그루별 농담 층화를 넣었다.
+  //   · 배치 결정론 불변: 크런치는 rng 를 새로 소비하지 않고(t·mosaic 은 기존 자리 그대로) 색만
+  //     다르게 계산한다. 프로토 XZ 반경도 FOREST_VISUAL_RADIUS·SCATTER_TREE_VISUAL_RADIUS 안이며,
+  //     마당 과실수는 inward 모드로 구 ico 반경 이내에 머물러 수용 집합이 좁아지지 않는다.
+  //   · 그래서 네 규모의 pick proxy 바이트는 전부 불변이고(주거·필지·도로·논 소유권 불침해),
+  //     바뀐 것은 나무·관목 지오메트리 속성과 instanceColor 버퍼다.
+  //   · 재기준 시점에 sync / 실제 module Worker / ?worker=0 폴백 세 경로가 서로 바이트 동일했다
+  //     — 결정론 손상이 아니라 의도된 씬 변화다.
+  village: '916e80c9:051940e3:f1b1ae3b:4f93aca5',
+  town: '899f061b:cce96cff:4dba4eaf:8e5b5e81',
+  capital: '8362c877:604b82ad:86060afb:1d62b3bf',
+  hanyang: 'c7a1ea4b:41adbaf1:76d3b125:4251c7b1',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
