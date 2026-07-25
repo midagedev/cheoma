@@ -25,6 +25,8 @@ import {
   featurePadMaterials,
 } from './pads.js';
 import { buildSijeon as renderSijeon } from './sijeon.js';
+import { planSijeonFacade } from '../../village/sijeon-plan.js';
+import { tileSurfaceMaterial } from '../../builder/palette.js';
 import {
   buildMjaHouse,
   disposeMjaHouse,
@@ -36,24 +38,48 @@ function sijeonMaterial(color, roughness, role) {
   return material;
 }
 
-// Village palette adapter for the reusable sijeon renderer. These five plain
-// PBR materials are the only caller-owned resources it needs: no hidden canvas
+// Village palette adapter for the reusable sijeon renderer. These plain PBR
+// materials are the only caller-owned resources it needs: no hidden canvas
 // textures, emissive edge light, or full hanok palette allocation.
-export function buildVillageSijeon(shops, site) {
+//
+// 고증 수정(docs/architectural-authenticity.md §7.5 W2):
+//   - `frame`: 종전 0x6f3626 은 궁 석간주 계열 산화적색이었다. 시전은 민간 상업건축이므로 주칠
+//     위계에 들지 않는다 → 반가 문틀과 같은 백골 계열 갈색(§7.5 W1 과 동일 값).
+//   - `opening`: 종전 0x241a14 는 day 노출에서도 완전한 검정 공동으로 읽혀 `sijeon.md` §3.2-4 가
+//     명시 금지한 "빈 동굴"이 됐다. 후퇴 배면을 판독 가능한 널 목재 톤으로 올리고, plan 이 얹은
+//     판문 한 짝(openings[].panel)이 그 앞에 서서 면과 깊이를 함께 만든다.
+//   - `roof`: 종전은 텍스처 없는 균일 진회색 평판이라 기와가 아닌 판형 지붕으로 읽혔고,
+//     `snowSurface` 계약이 전제하는 기와와도 어긋났다. `palette` 가 오면 마을이 **이미 가진** 공유
+//     기와 캔버스(mats.tileTex)를 tileSurfaceMaterial 로 재사용한다 — 새 캔버스를 만들지 않으므로
+//     `sijeon.md` §4.1 의 "새 텍스처 0" 예산 안이다(§7.7-4: 공유 자원 재사용은 예산 소비가 아니다).
+//     시전 배치는 전 점포가 같은 6.2×8.5 라 지붕면 재질 한 벌로 열 전체를 덮는다 → 재질 수 불변.
+export function buildVillageSijeon(shops, site, palette = null) {
   const materials = {
-    frame: sijeonMaterial(0x6f3626, 0.85, 'wood'),
-    opening: sijeonMaterial(0x241a14, 0.96, 'opening'),
+    frame: sijeonMaterial(0x6a5a44, 0.85, 'wood'),
+    opening: sijeonMaterial(0x453527, 0.94, 'opening'),
     bench: sijeonMaterial(0x765031, 0.9, 'wood'),
     storage: sijeonMaterial(0xd4cbb5, 0.97, 'wall'),
-    roof: sijeonMaterial(0x45494e, 0.9, 'roof'),
+    roof: sijeonRoofMaterial(shops, palette),
   };
   materials.roof.userData.snowSurface = true;
+  // 깊은 처마 밑 후퇴 배면은 그림자 안이라 색만 올려선 검게 죽는다. 팔레트가 이미 같은 문제에 쓰는
+  //   미량 emissive 관례(백골 목재·이엉의 emissive)를 따라, 배면이 널 목재로 판독되게 바닥을 올린다.
+  materials.opening.emissive.setHex(0x17120b);
   try {
     return renderSijeon(shops, { materials, heightAt: site?.heightAt });
   } catch (error) {
     for (const material of Object.values(materials)) material.dispose();
     throw error;
   }
+}
+
+// 지붕면 기와 재질 한 벌. 반복수는 실제 지붕 폭·경사 길이에서 나와야 기와 골이 원경에서도 방향성을
+//   갖는다(개별 수키와 모델링은 불필요). palette 가 없는 경로(코어 하네스 등)는 종전 단색으로 폴백.
+function sijeonRoofMaterial(shops, palette) {
+  const sample = Array.isArray(shops) && shops.length ? shops[0] : null;
+  if (!palette?.tileTex || !sample) return sijeonMaterial(0x45494e, 0.9, 'roof');
+  const { roof } = planSijeonFacade(sample);
+  return tileSurfaceMaterial(palette, roof.width, Math.hypot(roof.depth / 2, roof.rise), 0.6);
 }
 
 // 컴파운드 내부의 실제 door/hanji material set을 야간 패치 대상으로 모은다.

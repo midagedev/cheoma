@@ -395,23 +395,44 @@ export function applyDoorPattern(M, pattern) {
   M.door.needsUpdate = true;
 }
 
-// 막돌 기단·화방벽(초가): 불규칙한 자연석을 흙으로 물려 쌓은 거친 돌벽 질감.
+// 막돌 텍스처 한 타일이 덮는 월드 면적(m). 256×128 캔버스가 이 치수를 덮으므로 픽셀은 월드에서
+//   정사각(6.25mm)이고, 돌 하나(지름 16~64px)는 0.10~0.40m — 전형 20~35cm에 든다. 소비처는 담·기단의
+//   실치수를 이 값으로 나눠 UV(또는 repeat)를 정해야 한다. 안 그러면 한 타일이 담 한 면 전체로 늘어나
+//   돌이 가로로 늘어난 대형 물방울로 읽힌다(docs/architectural-authenticity.md §7.5 W3).
+export const FIELDSTONE_TILE = Object.freeze({ w: 1.6, h: 0.8 });
+
+// 막돌 기단·화방벽(초가): 크기가 제각각인 각진 자연석을 흙 줄눈으로 물려 쌓은 거친 돌벽 질감.
 function makeFieldstoneTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#8a7a60';                          // 흙 줄눈(모르타르) 바탕
+  g.fillStyle = '#786951';                          // 흙 줄눈(모르타르) 바탕 — 돌과 명도차를 벌린다
   g.fillRect(0, 0, 256, 128);
-  // 불규칙 막돌: 크기·색 제각각인 둥근 돌을 겹쳐 채움
+  // 각진 막돌 윤곽. 다각형 꼭짓점 지터는 돌 인덱스 해시에서 파생해 _texRand 소비 횟수를 돌당 6회로
+  //   보존한다(시드 창을 공유하는 담·소품 스트림 불변 = worker/sync 씬 골든 계약).
+  const facet = (i, k) => {
+    const h = Math.imul(i * 73856093 ^ k * 19349663, 0x27d4eb2d) >>> 0;
+    return h / 0x100000000;
+  };
   for (let i = 0; i < 90; i++) {
     const x = _texRand() * 256, y = _texRand() * 128;
     const rw = 10 + _texRand() * 22, rh = 8 + _texRand() * 16;
     const v = 150 + Math.round(_texRand() * 45);
+    const rot = _texRand() * 0.6 - 0.3;
+    const sides = 6 + (Math.imul(i, 2654435761) >>> 29) % 3;   // 6~8각(모서리가 살아 있는 자연석)
+    g.beginPath();
+    for (let k = 0; k <= sides; k++) {
+      const a = rot + (k / sides) * Math.PI * 2;
+      const rk = 0.74 + facet(i, k % sides) * 0.4;             // 반경 요동 → 불규칙 각석
+      const px = x + Math.cos(a) * rw * rk, py = y + Math.sin(a) * rh * rk;
+      if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    }
+    g.closePath();
     g.fillStyle = `rgb(${v + 8},${v - 4},${v - 28})`; // 온기 도는 자연석(황갈)
-    g.beginPath(); g.ellipse(x, y, rw, rh, _texRand() * 0.6 - 0.3, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = 'rgba(60,50,36,0.35)'; g.lineWidth = 1.5; g.stroke();  // 돌 사이 그늘
-    g.fillStyle = 'rgba(255,250,238,0.10)';          // 상단 하이라이트
-    g.beginPath(); g.ellipse(x, y - rh * 0.4, rw * 0.7, rh * 0.3, 0, 0, Math.PI * 2); g.fill();
+    g.fill();
+    g.strokeStyle = 'rgba(44,35,24,0.62)'; g.lineWidth = 2.1; g.stroke();  // 돌 사이 흙 줄눈 그늘
+    g.fillStyle = 'rgba(255,250,238,0.13)';          // 위로 향한 면(층이 세로로도 읽히게)
+    g.beginPath(); g.ellipse(x, y - rh * 0.42, rw * 0.62, rh * 0.26, rot, 0, Math.PI * 2); g.fill();
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -651,7 +672,11 @@ export function makeMaterials(style = 'palace', options = {}) {
     style,
     dancheong: dancheong?.dancheong || null,
     wood: std(woodCol, temple ? 0.85 : 0.8, woodExtra),         // 기둥
-    woodDark: std(choga ? 0x37281a : temple ? 0x66512f : 0x6f3626, 0.85), // 인방·문틀
+    // 인방·문틀. 기와집·반가(giwa/hanok)는 궁 기본값(0x6f3626 = 석간주 계열 산화적색)으로 떨어지면
+    //   안 된다 — 주칠·석간주는 궁·관아·사찰 채색 위계이고 반가 창호 인방·문틀은 백골 또는 진한 고재다
+    //   (docs/architectural-authenticity.md §2.2·§5-4·§7.5 W1). 백골 기둥(0x9a8a6f)과 같은 색조에서
+    //   명도만 한 단계 내린 갈색을 쓴다.
+    woodDark: std(choga ? 0x37281a : temple ? 0x66512f : giwa ? 0x6a5a44 : 0x6f3626, 0.85),
     woodBoard: std(temple ? 0x574531 : 0x4a3421, 0.85),         // 박공널 목재 보드
     // 단청은 궁·사찰만. 기와/초가 팔레트는 같은 키를 단색 목재로 채워 빌더 계약을 단순하게
     // 유지하되 CanvasTexture를 아예 만들지 않는다.
@@ -680,6 +705,9 @@ export function makeMaterials(style = 'palace', options = {}) {
     yongmaru: std(0xffffff, 1.0, { map: makeYongmaruTexture(), emissive: 0x0e0a05 }), // 용마름 롤(새끼줄 감김 텍스처)
     mud: std(0x9a7a54, 1.0, { emissive: 0x2a2013 }), // 진흙 굴뚝·부뚜막(초가) — 따뜻한 황토
     jipjul: std(0xb8ad90, 1.0),                  // 집줄(지붕 새끼 그물)·눌림대 새끼 — 바랜 볏짚 회금빛
+    // 옹기(장독) 유약: 어두운 갈흑에 약한 반사. 종전엔 woodDark(문틀)를 재사용해 문틀 색을 고치면
+    //   장독 색이 함께 흔들렸다 — 재료가 다르므로 전용 색으로 분리한다(§7.5 W1 회귀 주의).
+    onggi: std(0x35251b, 0.55),
     fieldstone: std(0xffffff, 0.98, { map: makeFieldstoneTexture() }), // 막돌 기단·화방벽(초가)
     jeondol: std(0xffffff, 0.95, { map: makeJeondolTexture() }), // 전돌 굴뚝(반가)
     plaster: wallMat,                            // 벽·포벽 공용

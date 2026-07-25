@@ -129,9 +129,31 @@ function buildTuftGeometry(rng) {
 // 성긴 밴드만 남긴다(#90 은 마당 안 중심이었다). 반환 pt.lane 으로 분포 검증(verify-ambfield).
 // 비움: 대문 진입 동선·건물 발자국·마당 중앙 동선·마당(닭) 중심. 담장 밑동 밀착(제곱 편향)으로 성토
 //   패드 밖 낮은 노면 위로 뜨는 것을 억제한다(패드 축대 부유 방지).
-function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
+// 담 밑동 스커트(#§7.5 W3-3): 담 몸체 바로 밑 wallSkirt(m) 안에서는 밀도와 키를 함께 떨어뜨린다.
+//   종전 배치는 담장 밑동으로 제곱 편향해 무성하게 몰렸고(부유 억제 목적), 그 결과 근접 컷에서
+//   토담 하부 습윤 흔적·막돌 굽이 양면에서 완전히 가려 authored 디테일이 화면에서 사라졌다
+//   (docs/architectural-authenticity.md §7.3 A4 / §7.4-8). 밑동을 비우지는 않는다 — 처마 낙수선·
+//   그늘·통행으로 눌린 짧은 잔풀은 실제로 있으므로, 무성함을 밖으로 한 뼘 밀고 밑동은 낮게 남긴다.
+//   밀도만 줄이면 부족하다: 총 개수는 목표치까지 다시 채워지고 살아남은 포기의 최대 키는 그대로여서
+//   화면상 가림 높이가 거의 안 변한다(실측). 그래서 이 띠 안에서는 s·hVar 곱에 절대 상한을 걸어
+//   최대 키를 강제로 낮춘다 — blade 지오 최대 높이 0.74m 기준 밑동에서 ≈0.26m(막돌 굽 0.37m 아래).
+const skirtKeep = (k) => 0.18 + 0.82 * k * k;
+const skirtHeightCap = (k) => 0.35 + 0.65 * k;
+
+function buildPlacements({ W, D, yard, style, gateW, seed, count, wallSkirt = 0.55 }) {
   const rng = makeRng(seed);
   const hw = W / 2, hd = D / 2;
+  // dWall = 담 평면까지의 거리. 통과하면 s 배율을 돌려준다(탈락 시 null).
+  const skirt = Math.max(0, wallSkirt);
+  const pressed = (dWall, s, hVar) => {
+    if (skirt <= 0) return 1;
+    const k = Math.min(1, Math.max(0, dWall) / skirt);
+    if (k >= 1) return 1;
+    if (rng() > skirtKeep(k)) return null;
+    const cap = skirtHeightCap(k);
+    const product = s * hVar;
+    return product > cap ? cap / product : 1;
+  };
 
   // 건물 발자국(북쪽 몸채) 회피 — 마당 안 배치에만 적용.
   const bHalfW = W * 0.30;
@@ -156,9 +178,12 @@ function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
   let a = 0;
   while (nRoad < tRoad && a++ < tRoad * 40) {
     const x = (rng() * 2 - 1) * (hw + 0.6);
-    const z = hd + 0.12 + 0.1 + rng() * rng() * 1.7;   // 제곱 편향 → 담장 밑 무성, 길 쪽 성기게(성토 패드 밖 부유 억제)
+    const z = hd + 0.12 + 0.1 + rng() * rng() * 1.7;   // 제곱 편향(성토 패드 밖 부유 억제) — 밑동은 아래 스커트가 눌러 준다
     if (Math.abs(x) < gateGapX && rng() > 0.15) continue;
-    pts.push({ x, z, ext: true, lane: 'road', yaw: rng() * TAU, s: 0.6 + rng() * 0.5, hVar: 0.8 + rng() * 0.45 });
+    const s0 = 0.6 + rng() * 0.5, h0 = 0.8 + rng() * 0.45;
+    const k = pressed(z - hd, s0, h0);
+    if (k === null) continue;
+    pts.push({ x, z, ext: true, lane: 'road', yaw: rng() * TAU, s: s0 * k, hVar: h0 });
     nRoad++;
   }
 
@@ -168,7 +193,10 @@ function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
     const side = rng() < 0.5 ? 1 : -1;
     const x = side * (hw + 0.12 + 0.1 + rng() * rng() * 1.5);
     const z = (rng() * 1.35 - 0.35) * hd;               // 앞(z>0) 편향, 뒤쪽도 약간
-    pts.push({ x, z, ext: true, lane: 'alley', yaw: rng() * TAU, s: 0.55 + rng() * 0.45, hVar: 0.75 + rng() * 0.4 });
+    const s0 = 0.55 + rng() * 0.45, h0 = 0.75 + rng() * 0.4;
+    const k = pressed(Math.abs(x) - hw, s0, h0);
+    if (k === null) continue;
+    pts.push({ x, z, ext: true, lane: 'alley', yaw: rng() * TAU, s: s0 * k, hVar: h0 });
     nAlley++;
   }
 
@@ -182,7 +210,10 @@ function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
     else if (pick === 2) { x = hw + out; z = (rng() * 2 - 1) * (hd - 0.4); }
     else if (pick === 3) { x = -hw - out; z = (rng() * 2 - 1) * (hd - 0.4); }
     else { x = (rng() * 2 - 1) * (hw - 0.4); z = hd + out; if (Math.abs(x) < gateGapX) continue; }
-    pts.push({ x, z, ext: true, lane: 'rest', yaw: rng() * TAU, s: 0.5 + rng() * 0.35, hVar: 0.7 + rng() * 0.3 });
+    const s0 = 0.5 + rng() * 0.35, h0 = 0.7 + rng() * 0.3;
+    const k = pressed(out, s0, h0);
+    if (k === null) continue;
+    pts.push({ x, z, ext: true, lane: 'rest', yaw: rng() * TAU, s: s0 * k, hVar: h0 });
     nRest++;
   }
 
@@ -198,7 +229,10 @@ function buildPlacements({ W, D, yard, style, gateW, seed, count }) {
     const ed = Math.min(hw - Math.abs(x), hd - Math.abs(z));   // 최근접 벽까지
     const w = ed <= band ? (0.9 - 0.55 * (ed / band)) : 0.03;  // 담장 밑만, 중앙 거의 없음
     if (rng() > w) continue;
-    pts.push({ x, z, ext: false, lane: 'yard', yaw: rng() * TAU, s: 0.7 + rng() * 0.5, hVar: 0.82 + rng() * 0.4 });
+    const s0 = 0.7 + rng() * 0.5, h0 = 0.82 + rng() * 0.4;
+    const k = pressed(ed, s0, h0);
+    if (k === null) continue;
+    pts.push({ x, z, ext: false, lane: 'yard', yaw: rng() * TAU, s: s0 * k, hVar: h0 });
     nYard++;
   }
 
@@ -233,6 +267,7 @@ function clearGrassObstacles(placements, obstacles) {
 export function setupGrass(parent, {
   bounds = { W: 20, D: 18 }, matrix = null, yard = null, style = 'hanok', gateW = 2.0,
   sun = null, seed = 4343, count, season = 'summer', grassObstacles = null,
+  wallSkirt = 0.55,
 } = {}) {
   const W = bounds.W || 20, D = bounds.D || 18;
   // 밀도 상향(#106): #90 기저 공식 대비 ~1.75× (길가·고샅 어깨로 재배치하며 무성함 강화). 상한 1200
@@ -243,7 +278,7 @@ export function setupGrass(parent, {
   const geoRng = makeRng((seed ^ 0x9e3d) >>> 0);
   const { geo, trisPerTuft } = buildTuftGeometry(geoRng);
   const candidates = buildPlacements({
-    W, D, yard, style, gateW, seed: (seed ^ 0x51ed) >>> 0, count: N,
+    W, D, yard, style, gateW, seed: (seed ^ 0x51ed) >>> 0, count: N, wallSkirt,
   });
   const pts = clearGrassObstacles(candidates, grassObstacles);
 

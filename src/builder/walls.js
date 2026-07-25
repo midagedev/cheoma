@@ -11,6 +11,7 @@ import { planOpeningDetail } from './opening-detail-plan.js';
 import { createOpeningDetailAssembler } from './opening-details.js';
 import { createResidentialOpeningDetails } from './residential-opening-details.js';
 import { createPrimaryDoorPanelSegments } from './primary-door-panel.js';
+import { FIELDSTONE_TILE } from './palette.js';
 
 // 벽체·창호. 궁(palace): 전면 칸마다 세살문, 측·후면 회벽+광창.
 // 절(temple): 전면 어칸 띠살문 + 협칸(황토벽 하부 + 살창 상부), 측·후면 황토벽+작은 살창.
@@ -222,10 +223,12 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   // ── 막돌 기단/화방벽: 벽 하부를 두른 낮은 자연석 켜(다듬은 장대석 아님) ──
   // 흙벽 앞에 살짝 내밀어 붙인 거친 돌 띠. 정면은 툇마루가 가리므로 측·후면 위주로 읽힌다.
   const baseH = 0.62;                       // 막돌 켜 높이(낮게)
+  // 막돌 반복은 공유 월드 타일 치수(FIELDSTONE_TILE)로만 정한다 — 담·기단·화방벽에서 돌 하나가
+  //   같은 물리 크기로 읽혀야 한다(§7.5 W3). 정수 반복으로 스냅하면 길이에 따라 돌 크기가 흔들린다.
   const fsMat = (lenM) => {
     const m = M.fieldstone.clone();
     m.map = M.fieldstone.map.clone();
-    m.map.repeat.set(Math.max(2, Math.round(lenM / 1.1)), 1);
+    m.map.repeat.set(Math.max(1, lenM / FIELDSTONE_TILE.w), Math.max(1, baseH / FIELDSTONE_TILE.h));
     m.map.needsUpdate = true; return m;
   };
   const stoneBand = (axis, fixed, a, b, out) => {

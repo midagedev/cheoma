@@ -88,10 +88,33 @@ function assertFacade(facade, label) {
       && building.minZ >= lot.minZ && building.maxZ <= lot.maxZ,
   `${label}: building mass escaped the planned footprint`);
 
+  // 개구는 빈 공동이 아니다: 칸마다 판문 한 짝이 기둥 뒷면과 후퇴 배면 사이에 서고, 남은 폭으로
+  // 배면 목재 면이 보인다(docs/architectural-authenticity.md §7.5 W2-3 / sijeon.md §3.2-4).
+  invariant(facade.openings.every((opening) => opening.panel?.role === 'plank-shutter'),
+    `${label}: a shop opening lost its plank shutter`);
+  for (const opening of facade.openings) {
+    const panel = opening.panel;
+    const panelBounds = boxBounds(panel);
+    const openingBounds = boxBounds(opening);
+    const columnBack = Math.min(...facade.columns.map((column) => boxBounds(column).minZ));
+    invariant(panelBounds.maxZ <= columnBack + 1e-9,
+      `${label}: plank shutter crossed the column line`);
+    invariant(panelBounds.minZ > openingBounds.maxZ,
+      `${label}: plank shutter fell behind the recessed back face`);
+    invariant(panel.size.width > 0 && panel.size.width < opening.size.width,
+      `${label}: plank shutter must leave part of the opening readable`);
+    invariant(panelBounds.minX >= openingBounds.minX - 1e-9
+        && panelBounds.maxX <= openingBounds.maxX + 1e-9,
+    `${label}: plank shutter escaped its bay opening`);
+    invariant(panel.side === (panel.bay === 0 ? -1 : 1),
+      `${label}: plank shutter folded to a non-deterministic side`);
+  }
+
   const physicalParts = [
     ...facade.columns,
     ...facade.lintels,
     ...facade.openings,
+    ...facade.openings.map((opening) => opening.panel),
     ...facade.benches,
     facade.storage,
   ];

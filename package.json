@@ -75,7 +75,7 @@
     "check:temple": "node tools/check-temple-contract.mjs",
     "check:temple:browser": "node tools/run-browser-locked.mjs -- node tools/check-temple-browser.mjs",
     "check:wall-gate": "node tools/check-wall-gate-contract.mjs",
-    "check:mud-wall": "node tools/check-mud-wall-contract.mjs",
+    "check:mud-wall": "node tools/check-mud-wall-contract.mjs && npm run shoot:mud-wall",
     "shoot:mud-wall": "node tools/run-browser-locked.mjs -- node tools/shoot-mud-wall.mjs",
     "shoot:mja-house": "node tools/run-browser-locked.mjs -- node tools/shoot-mja-house.mjs",
     "shoot:drainage": "node tools/run-browser-locked.mjs -- node tools/shoot-drainage.mjs",

@@ -112,6 +112,10 @@ export function* populateVillageSteps(plan, opts = {}) {
   root.name = `village-${plan.opts.scale}`;
   opts.onRoot?.(root);
   const char01 = typeof plan.opts.char01 === 'number' ? plan.opts.char01 : 0.5;
+  // 필지 담 팔레트 참조를 이 스코프로 끌어올린다(생성 시점은 아래 필지 단계 그대로 — makeMaterials 는
+  //   시드 창의 _texRand 를 소비하므로 호출을 앞으로 옮기면 이어지는 담·소품 스트림이 밀린다).
+  //   시전행랑 지붕이 이 팔레트의 공유 기와 캔버스를 재사용한다(§7.5 W2-2).
+  let villagePalette = null;
 
   // 물 uniform(개울 공유)
   const waterU = createWaterUniforms();
@@ -189,6 +193,7 @@ export function* populateVillageSteps(plan, opts = {}) {
   if (plan.parcels && plan.parcels.length) {
     // 담장 공유 재질셋(전 필지 1벌) — 유형(tile/stone/brush) 무관 단일 팔레트라 병합 후 드로우콜 최소.
     const wallMats = makeMaterials('giwa');
+    villagePalette = wallMats;
     // 필지 성토 패드 높이(집·마당·담이 한 레벨). 인접 필지 낙차 → 계단식 단차.
     for (const p of plan.parcels) p.baseY = computePadY(p, site);
     root.add(buildParcelPads(plan.parcels, site));   // 기단 상면 + 축대(옹벽) — 2 드로우콜
@@ -397,7 +402,7 @@ export function* populateVillageSteps(plan, opts = {}) {
   //   넣지 않고 자체 그룹으로 추가한다(성곽은 소수 재질, 시전은 자체 병합).
   if (plan.features && plan.features.cityWall) root.add(buildCityWall(plan.features.cityWall, site));
   if (plan.features && plan.features.sijeon && plan.features.sijeon.length) {
-    root.add(buildVillageSijeon(plan.features.sijeon, site));
+    root.add(buildVillageSijeon(plan.features.sijeon, site, villagePalette));
   }
   yield 'features+wall+sijeon';
 

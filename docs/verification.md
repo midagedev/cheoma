@@ -400,15 +400,28 @@ plan 기준값은 `tools/plan-contract.json`에 있다. 의도된 기능 변경�
 
 `check:mud-wall`은 공개 `src/api/mud-wall-plan.js`만 import해 같은 입력의 byte-stable 불변 JSON,
 전역 `Math.random` 비소비, JSON 왕복, lift/joint/fibre/damp 상한, 구조 외곽을 향하는 잘못된 depth와
-과도한 joint drift 거절을 1초 미만에 검사한다.
+과도한 joint drift 거절을 1초 미만에 검사한다. **2026-07-25부터 이 순수 계약만으로는 부족하다는 감사
+결론(`docs/architectural-authenticity.md` §7.7-2)에 따라 `check:mud-wall`이 이어서 `shoot:mud-wall`
+브라우저 축까지 돌린다** — 수치 계약이 전부 통과하는데 화면의 담 하부는 다른 시스템이 덮고 있었던
+사례를 순수 게이트가 잡지 못했기 때문이다.
 
 `shoot:mud-wall`은 한 browser boot에서 공개 `src/api/mud-wall.js`의 고정 close 카메라
 `base/no-packed/no-fibres/no-damp/full`과 aerial base/full을 렌더한다. 모든 detail bounds가 구조
 `±thickness / 2` 안에 있고 fixture body/fibre가 3,000/500 triangles 이하이며 material texture가 0,
 program family 증분이 2 이하인지 검사한다. 각 기여도의 실제 픽셀 차이와 원경 축소를 수치화한 뒤,
 같은 browser에서 실제 `village:1:p3`의 product wall을 근경·부감으로 촬영해 plan이 내부 제품 adapter와
-정적 병합 뒤에도 남는지 확인한다. PNG는 OS 임시 폴더에 쓰며 사람이 다짐 이음이 목재 사이딩처럼
-규칙적이지 않은지, 짚이 노란 표면층이 되지 않는지, 하부 흔적이 검은 띠가 아닌지를 최종 판정한다.
+정적 병합 뒤에도 남는지 확인한다.
+
+여기에 **고정 근경 판독 축**(`view=base`, 앞담 바깥 2.4m·눈높이 2.35m에서 담 밑동을 내려봄)이 붙는다.
+같은 카메라로 담+마당 / 담만 / 담 없음 / 담+focus 링 풀 네 프레임을 찍고, "담 없음 ↔ 담만" 차로 담
+실루엣 마스크를 만든 뒤 막돌 굽 띠(하부 38%)에서 풀이 덮은 비율이 30% 이하인지 검사한다. 진단 프레임
+이후 렌더 루프를 멈추는 것이 필수다 — 계속 렌더하면 스크린샷 시점의 LOD 스왑 상태가 로드마다 달라져
+픽셀 판정이 재현되지 않는다. 이 축의 한계는 도구 주석과 §7.7-2에 명시돼 있다(굽 가림률은 총체적 회귀만
+잡는 경보선이고, fixture 풀 밀도가 제품 focus 링보다 성기다).
+
+PNG는 OS 임시 폴더에 쓰며 사람이 다짐 이음이 목재 사이딩처럼 규칙적이지 않은지, 짚이 노란 표면층이
+되지 않는지, 하부 흔적이 검은 띠가 아닌지, 그리고 `base-*` 컷에서 막돌이 개별 자연석으로·이엉 coping이
+집줄 감긴 짚으로 읽히는지를 최종 판정한다.
 
 ### `npm run check:drainage` / `npm run shoot:drainage`
 

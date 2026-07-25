@@ -2937,19 +2937,59 @@ try {
       templePaljak: buildBuilding({ ...PRESETS.temple, roofType: 'paljak' }),
       jeongja: buildBuilding({ ...PRESETS.giwa, doorPattern: 'jeongja' }),
       sesal: buildBuilding({ ...PRESETS.giwa, doorPattern: 'sesal' }),
+      choga: buildBuilding({ ...PRESETS.choga }),
     };
-    const greenRatio = (building) => {
+    // 창호 채색 위계는 두 방향으로 새면 안 된다. 종전 검사는 뇌록(녹색) 누출만 봤고, 그래서
+    // 주칠(산화적색) 누출은 어떤 게이트도 보지 않아 세 라운드를 통과했다
+    // (docs/architectural-authenticity.md §7.3 A1 / §7.7-1). 이제 대칭으로 상한을 둔다.
+    //
+    // 판별 기준은 r/g ≥ 1.6 이다. 실측 분리가 깨끗하다 — 궁 석간주·주칠은 r/g 1.92~2.06,
+    // 민가·절 목재 갈색의 최대치는 1.43(woodBoard 0x4a3421·옹기 0x35251b)이라 양쪽 여유가 크다.
+    // 초록처럼 1.15 로 잡으면 어떤 따뜻한 백골·한지도 걸리므로 상수는 대칭이 아니라 정합이다.
+    const VERMILION = 1.6;
+    const canvasRatio = (building, test) => {
       const canvas = building.userData.materials.door.map.image;
       const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-      let green = 0;
+      let hit = 0;
       let sampled = 0;
       for (let i = 0; i < data.length; i += 4 * 4) {
         const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
         if (a < 128) continue;
         sampled++;
-        if (g > r * 1.15 && g > b * 1.15) green++;
+        if (test(r, g, b)) hit++;
       }
-      return green / Math.max(1, sampled);
+      return hit / Math.max(1, sampled);
+    };
+    const greenRatio = (building) => canvasRatio(
+      building, (r, g, b) => g > r * 1.15 && g > b * 1.15,
+    );
+    const vermilionRatio = (building) => canvasRatio(
+      building, (r, g) => r > g * VERMILION,
+    );
+    // 근본 처방(§7.7-3): 유형별 팔레트에서 "적색 우세 목재 재질이 없다"를 한 곳에서 단정한다.
+    // 창호 텍스처 픽셀만 보면 A1 처럼 재질 색상값으로 새는 회귀(문틀·인방·머름)를 놓친다.
+    // 구조 목부재(기둥·인방·문틀·널·마루)는 어떤 팔레트에서도 단청이 덮지 않는다. 반면 공포·창방·
+    // 서까래 계열은 dancheongMaterials 가 갈아끼우는 채색 축이고, 사찰 주홍·장단은 고증상 옳다.
+    // 그래서 두 집합을 나눠 판정한다 — 안 나누면 절의 정당한 bracketAlt(#98533f)가 위반으로 잡힌다.
+    const STRUCTURAL_WOOD_KEYS = ['wood', 'woodDark', 'woodBoard', 'planwall', 'maru'];
+    const DANCHEONG_WOOD_KEYS = [
+      'beamDancheong', 'bracket', 'bracketAlt', 'bracketFace',
+      'yeonmokcho', 'bujeoncho', 'rafter', 'rafterEnd', 'accentBlue',
+    ];
+    const vermilionWood = (building, keys) => {
+      const materials = building.userData.materials || {};
+      const hits = [];
+      for (const key of keys) {
+        const color = materials[key]?.color;
+        if (!color) continue;
+        // ColorManagement 가 켜져 있으면 Color 성분은 선형이라 비율이 과장된다. 작성된 sRGB 16진값
+        // 으로 되돌려 판정한다(캔버스 픽셀 검사와 같은 색공간).
+        const hex = color.getHexString();
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        if (r > g * VERMILION) hits.push(`${key}:#${hex}`);
+      }
+      return hits;
     };
     const ornamentCounts = (building) => {
       const counts = { chwidu: 0, japsang: 0 };
@@ -2965,6 +3005,19 @@ try {
         jeongja: greenRatio(buildings.jeongja),
         sesal: greenRatio(buildings.sesal),
       },
+      vermilion: {
+        palace: vermilionRatio(buildings.palace),
+        jeongja: vermilionRatio(buildings.jeongja),
+        sesal: vermilionRatio(buildings.sesal),
+        choga: vermilionRatio(buildings.choga),
+      },
+      vermilionWood: {
+        palaceStructural: vermilionWood(buildings.palace, STRUCTURAL_WOOD_KEYS),
+        templeStructural: vermilionWood(buildings.templePaljak, STRUCTURAL_WOOD_KEYS),
+        templeDancheong: vermilionWood(buildings.templePaljak, DANCHEONG_WOOD_KEYS),
+        giwa: vermilionWood(buildings.jeongja, [...STRUCTURAL_WOOD_KEYS, ...DANCHEONG_WOOD_KEYS]),
+        choga: vermilionWood(buildings.choga, [...STRUCTURAL_WOOD_KEYS, ...DANCHEONG_WOOD_KEYS]),
+      },
       palace: ornamentCounts(buildings.palace),
       templePaljak: ornamentCounts(buildings.templePaljak),
     };
@@ -2976,6 +3029,24 @@ try {
       && authenticityContract.green.jeongja < 0.001
       && authenticityContract.green.sesal < 0.001,
     `civilian lattice keeps bare timber/hanji while palace color remains (${JSON.stringify(authenticityContract.green)})`,
+  );
+  pass(
+    authenticityContract.vermilion.palace > 0.03
+      && authenticityContract.vermilion.jeongja < 0.001
+      && authenticityContract.vermilion.sesal < 0.001
+      && authenticityContract.vermilion.choga < 0.001,
+    `civilian lattice stays free of oxide-red juchil while palace vermilion remains (${JSON.stringify(authenticityContract.vermilion)})`,
+  );
+  pass(
+    // 대조군: 궁은 구조 목부재에 석간주를 갖는다(이게 0이면 검사가 무의미해진 것).
+    authenticityContract.vermilionWood.palaceStructural.length > 0
+      // 절은 단청 축에만 주홍이 있고 구조 목부재는 백골·고재다.
+      && authenticityContract.vermilionWood.templeStructural.length === 0
+      && authenticityContract.vermilionWood.templeDancheong.length > 0
+      // 기와집·초가는 단청 재질 자체를 만들지 않으므로 두 축 전부 0이어야 한다.
+      && authenticityContract.vermilionWood.giwa.length === 0
+      && authenticityContract.vermilionWood.choga.length === 0,
+    `oxide-red timber stays inside the palace/temple polychrome hierarchy (${JSON.stringify(authenticityContract.vermilionWood)})`,
   );
   pass(
     authenticityContract.palace.chwidu > 0

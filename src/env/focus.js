@@ -171,6 +171,9 @@ function makeRing({
     yard: { x: yardLocal.x, z: yardLocal.z, r: yardR },
     style, gateW: GATE_W[style] || 2.4,
     sun, seed: (seed ^ 0x3aa9) >>> 0, season, grassObstacles,
+    // 담 밑동은 낮게 비켜 준다 — mud-wall.md 가 authored 한 하부 습윤 흔적·막돌 굽이 근접 컷에서
+    //   보여야 한다(docs/architectural-authenticity.md §7.5 W3-3). 배제 규칙 본문은 grass.js.
+    wallSkirt: 0.55,
   });
 
   // 5) 지붕 적설/빗물(#131): 눈 쌓임 볼륨 쉘·빗물 리벌릿 물리는 사용자 지시로 제거(roofcapture +

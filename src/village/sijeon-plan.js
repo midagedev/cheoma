@@ -161,6 +161,15 @@ export function planSijeonFacade(shop) {
   const openingSill = 0.22;
   const openingTop = lintelY - lintelHeight / 2 - 0.08;
   const openingHeight = openingTop - openingSill;
+  // 판문(plank shutter): 개구 한 짝을 밖으로 접어 세운 널문. 발굴이 확인한 것은 기둥·마룻장과 함께
+  //   "문짝"을 갖춘 목조건축이므로(서울역사박물관 청진동 유구), 개구를 빈 공동으로 남기면 사료가
+  //   확인한 부재를 지우고 현대 쇼윈도·동굴로 읽힌다(docs/sijeon.md §3.2-4, architectural-
+  //   authenticity.md §7.5 W2-3). 기둥 뒷면과 후퇴 배면 사이에 한 장 서므로 가로 진입로(streetEdgeZ)
+  //   밖으로 나가지 않고, 남은 개구 폭으로는 배면 목재 면이 그대로 보인다.
+  //   좌우 칸은 각각 바깥쪽으로 접혀 결정론적이다 — 칸별 난수 없음.
+  const panelThickness = 0.07;
+  const panelZ = frontZ - columnDepth - 0.04;
+  const panelWidth = openingWidth * 0.44;
   const openings = [-bayWidth / 2, bayWidth / 2].map((x, bay) => box(
     'recessed-opening',
     x,
@@ -169,7 +178,20 @@ export function planSijeonFacade(shop) {
     openingWidth,
     openingHeight,
     openingDepth,
-    { bay, recessed: true },
+    {
+      bay,
+      recessed: true,
+      panel: box(
+        'plank-shutter',
+        x + (bay === 0 ? -1 : 1) * (openingWidth - panelWidth) / 2,
+        openingSill + openingHeight / 2,
+        panelZ,
+        panelWidth,
+        openingHeight,
+        panelThickness,
+        { bay, side: bay === 0 ? -1 : 1 },
+      ),
+    },
   ));
 
   const benchHeight = 0.58;

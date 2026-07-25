@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { markSharedResource } from '../core/three-resources.js';
 import * as G from '../core/math/geom2.js';
+import { FIELDSTONE_TILE } from '../builder/palette.js';
 import { hashString, makeRng } from '../rng.js';
 import {
   villageWallLayout,
@@ -41,6 +42,28 @@ const HEDGE_MAT = markSharedResource(new THREE.MeshStandardMaterial({
 const HEDGE_GEO = markSharedResource(new THREE.IcosahedronGeometry(1, 0));
 // 옹기(장독) 공유 지오 — 둥근 항아리 근사(스케일로 개체차). 병합 대상이라 재질은 wallMats 재사용.
 const JAR_GEO = markSharedResource(new THREE.SphereGeometry(0.3, 10, 8));
+
+// 막돌 면 UV 를 실치수로 환산: 담 한 면이 텍스처 한 장으로 늘어나던 것을 고정 월드 스케일
+//   (FIELDSTONE_TILE)로 타일링해 돌 하나가 어느 담·기단에서나 20~35cm로 읽히게 한다.
+//   BoxGeometry 면 순서는 +x,-x,+y,-y,+z,-z 이고 각 면의 [u축,v축] 은 아래 표와 같다.
+//   공유 재질의 map.repeat 을 건드리지 않으므로 재질·텍스처·드로우콜 델타 0이고, mergeStatic 이
+//   UV 를 그대로 굽기 때문에 병합 후에도 유지된다.
+const FS_FACE_AXES = [[2, 1], [2, 1], [0, 2], [0, 2], [0, 1], [0, 1]];
+function fieldstoneBox(w, h, d) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const uv = geo.attributes.uv;
+  const per = uv.count / 6;
+  const dims = [w, h, d];
+  for (let face = 0; face < 6; face++) {
+    const su = dims[FS_FACE_AXES[face][0]] / FIELDSTONE_TILE.w;
+    const sv = dims[FS_FACE_AXES[face][1]] / FIELDSTONE_TILE.h;
+    for (let i = face * per; i < (face + 1) * per; i++) {
+      uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+    }
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
 
 // 담+마당(어휘 격상) — populate 가 parcelMatrix 로 배치 후 병합. wallMats 는 전 필지 공유 1벌.
 //   shape: { pts:[{x,z}...](로컬), roles:[...], edges?:[{role,heightK,share}] } — parcels.js 산출.
@@ -97,7 +120,7 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
           M.mud, M.jipjul, 'brush');
       } else {
         placeGatePosts(g, a, b, edge.gate.centerT, edge.gate.gap, edge.gate.height,
-          M.wood, M.woodDark, style === 'tile' ? 'tile' : 'stone', M);
+          M.wood, M.wood, style === 'tile' ? 'tile' : 'stone', M);
       }
     }
   }
@@ -180,12 +203,12 @@ function makeSolidRun(style, coping, L, H, th, M, rng, mudSurface = null) {
   const wallTop = H - 0.18;
   if (style === 'stone') {
     // 막돌 돌담: fieldstone 텍스처 박스.
-    const body = new THREE.Mesh(new THREE.BoxGeometry(L, wallTop, th), M.fieldstone);
+    const body = new THREE.Mesh(fieldstoneBox(L, wallTop, th), M.fieldstone);
     body.position.y = wallTop / 2; body.castShadow = body.receiveShadow = true; s.add(body);
   } else if (style === 'mud') {
     // 토담: 흙+짚 다짐(mud 톤) + 낮은 막돌 밑동(비 튐 방지 굽) — 하부 fieldstone 굽.
     const foot = Math.min(0.4, H * 0.22);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(L, foot, th * 1.04), M.fieldstone);
+    const base = new THREE.Mesh(fieldstoneBox(L, foot, th * 1.04), M.fieldstone);
     base.position.y = foot / 2; base.castShadow = base.receiveShadow = true; s.add(base);
     let body;
     let fibreGeometry = null;
@@ -237,7 +260,7 @@ function makeSolidRun(style, coping, L, H, th, M, rng, mudSurface = null) {
   } else {
     // tile(반가): 사괴석 하단 + 회벽 상단.
     const baseH = Math.min(0.72, H * 0.36);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(L, baseH, th * 1.04), M.fieldstone);
+    const base = new THREE.Mesh(fieldstoneBox(L, baseH, th * 1.04), M.fieldstone);
     base.position.y = baseH / 2; base.castShadow = base.receiveShadow = true; s.add(base);
     const upper = new THREE.Mesh(new THREE.BoxGeometry(L, wallTop - baseH, th * 0.9), M.plaster);
     upper.position.y = (baseH + wallTop) / 2; upper.castShadow = upper.receiveShadow = true; s.add(upper);
@@ -247,14 +270,31 @@ function makeSolidRun(style, coping, L, H, th, M, rng, mudSurface = null) {
   return s;
 }
 
-// 이엉 지붕띠(초가 필지 담 coping, R-P4): 짚 두께층 + 둥근 짚 마루. M.thatch 재사용.
+// 이엉 지붕띠(초가 필지 담 coping, R-P4): 짚 두께층 + 짚 마루 + 마루를 눌러 감은 집줄(새끼줄) 띠.
+//   종전엔 매끈한 대형 반원 튜브 하나여서 담 높이의 1/3을 차지한 발포 튜브·방수포로 읽혔다
+//   (docs/architectural-authenticity.md §7.5 W3-2). 고치는 축은 둘이다.
+//   ① 단면 반경을 내려 담 몸체가 프레임의 주체로 남게 한다.
+//   ② 초가 지붕이 이미 쓰는 M.jipjul 로 마루를 감은 새끼줄 링을 일정 간격으로 걸어 결을 만든다
+//      (새 재질·텍스처 0). 링은 마루를 감싸는 토러스라 곡면에서 뜨지 않는다.
+//   담 한 변은 여러 run 으로 쪼개져 맞닿으므로 run 끝을 테이퍼하지 않는다 — 이음마다 거짓 단절이 생긴다.
 function makeThatchCoping(L, eaveY, th, M) {
   const c = new THREE.Group();
   const w = th + 0.32;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(L + 0.06, 0.2, w), M.thatch);
-  body.position.y = eaveY + 0.1; body.castShadow = true; c.add(body);
-  const ridge = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.42, w * 0.42, L + 0.04, 9), M.thatch);
-  ridge.rotation.z = Math.PI / 2; ridge.position.y = eaveY + 0.24; ridge.castShadow = true; c.add(ridge);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(L + 0.06, 0.18, w), M.thatch);
+  body.position.y = eaveY + 0.09; body.castShadow = true; c.add(body);
+  const r = w * 0.27;
+  const ridgeY = eaveY + 0.18 + r * 0.62;
+  const ridge = new THREE.Mesh(new THREE.CylinderGeometry(r, r, L + 0.04, 9), M.thatch);
+  ridge.rotation.z = Math.PI / 2; ridge.position.y = ridgeY; ridge.castShadow = true; c.add(ridge);
+  const nRope = Math.max(2, Math.min(16, Math.round(L / 0.8)));
+  for (let i = 0; i < nRope; i++) {
+    const rope = new THREE.Mesh(
+      new THREE.TorusGeometry(r + 0.012, 0.021, 5, 9), M.jipjul,
+    );
+    rope.rotation.y = Math.PI / 2;                      // 토러스 평면을 마루 축(X)에 직교
+    rope.position.set(-L / 2 + L * ((i + 0.5) / nRope), ridgeY, 0);
+    rope.castShadow = true; c.add(rope);
+  }
   return c;
 }
 
@@ -303,13 +343,13 @@ function makeYardProps(plotW, plotD, opts, M, rng) {
     const rows = layout.rows, perRow = layout.perRow;
     const platW = layout.width, platD = layout.depth;
     const px = layout.x, pz = layout.z;
-    const plat = new THREE.Mesh(new THREE.BoxGeometry(platW, 0.14, platD), M.fieldstone);
+    const plat = new THREE.Mesh(fieldstoneBox(platW, 0.14, platD), M.fieldstone);
     plat.position.set(px, 0.07, pz); plat.receiveShadow = true; g.add(plat);
     for (let r = 0; r < rows; r++) {
       const n = Math.max(1, perRow - r);            // 뒤열일수록 큰 독 적게
       for (let c = 0; c < n; c++) {
         const js = 0.62 + rng() * 0.7;
-        const jar = new THREE.Mesh(JAR_GEO, M.woodDark);   // 옹기(어두운 유약) — woodDark 재사용
+        const jar = new THREE.Mesh(JAR_GEO, M.onggi);      // 옹기(어두운 유약) — 문틀과 분리된 전용 색
         jar.scale.set(js, js * (1.05 + rng() * 0.35), js);
         const jx = px + (n === 1 ? 0 : (-platW / 2 + 0.3 + c * (platW - 0.6) / (n - 1)));
         jar.position.set(jx, 0.14 + 0.26 * js, pz - platD / 2 + 0.32 + r * 0.52);
@@ -341,7 +381,7 @@ function makeYardProps(plotW, plotD, opts, M, rng) {
       post.position.set(lx + dx * s * span / 2, ph / 2, lz + dz * s * span / 2);
       post.castShadow = true; g.add(post);
     }
-    const line = new THREE.Mesh(new THREE.BoxGeometry(span, 0.02, 0.02), M.woodDark);
+    const line = new THREE.Mesh(new THREE.BoxGeometry(span, 0.02, 0.02), M.wood);
     line.position.set(lx, ph - 0.05, lz); line.rotation.y = -ang; g.add(line);
     const nCloth = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < nCloth; i++) {
@@ -425,14 +465,14 @@ function cornerPostAt(g, x, z, H, th, style, M, bottomOffset = 0) {
   const p = new THREE.Group();
   if (style === 'tile') {
     const baseH = Math.min(0.72, H * 0.36), top = H - 0.1;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(th * 1.2, baseH, th * 1.2), M.fieldstone);
+    const b = new THREE.Mesh(fieldstoneBox(th * 1.2, baseH, th * 1.2), M.fieldstone);
     b.position.y = baseH / 2; b.castShadow = true; p.add(b);
     const u = new THREE.Mesh(new THREE.BoxGeometry(th * 1.1, top - baseH, th * 1.1), M.plaster);
     u.position.y = (baseH + top) / 2; u.castShadow = true; p.add(u);
     const cap = new THREE.Mesh(new THREE.ConeGeometry(th * 0.95, 0.3, 4), M.tileRidge);
     cap.rotation.y = Math.PI / 4; cap.position.y = top + 0.12; cap.castShadow = true; p.add(cap);
   } else {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(th * 1.15, H * 0.98, th * 1.15), M.fieldstone);
+    const b = new THREE.Mesh(fieldstoneBox(th * 1.15, H * 0.98, th * 1.15), M.fieldstone);
     b.position.y = H * 0.49; b.castShadow = true; p.add(b);
   }
   p.position.set(x, bottomOffset, z);
@@ -448,8 +488,10 @@ function gatePosts(g, gap, hd, H, postMat, barMat, style, M) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(pr, pr * 1.1, pH, style === 'brush' ? 7 : 8), postMat);
     post.position.set(sx * gap / 2, pH / 2, hd); post.castShadow = true; g.add(post);
   }
+  // 인방은 기둥과 같은 백골 목재(M.wood). 담 병합 그룹의 재질 집합을 늘리지 않으려고 woodDark 대신
+  //   이미 기둥이 쓰는 M.wood 로 접는다(옹기가 전용 재질을 쓰는 대가를 상계 → 드로우콜 델타 0).
   const lintel = new THREE.Mesh(new THREE.BoxGeometry(gap + 0.34, style === 'brush' ? 0.08 : 0.2, 0.2),
-    style === 'brush' ? barMat : M.woodDark);
+    style === 'brush' ? barMat : M.wood);
   lintel.position.set(0, pH - 0.18, hd); lintel.castShadow = true; g.add(lintel);
   if (style === 'tile') {
     // 솟을대문 힌트: 상방 위 작은 기와 지붕(용마루 + 양면 골)

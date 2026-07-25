@@ -129,6 +129,8 @@ function buildShopUnit(shop, materials, unitBox) {
   }
   for (const opening of facade.openings) {
     addBox(unit, unitBox, opening, materials.opening);
+    // 판문 한 짝(plan 파생 순수값). 기존 frame 재질을 빌려 쓰므로 새 재질·텍스처·드로우콜이 없다.
+    if (opening.panel) addBox(unit, unitBox, opening.panel, materials.frame);
   }
   for (const bench of facade.benches) {
     addDisplayBench(unit, unitBox, bench, materials.bench);

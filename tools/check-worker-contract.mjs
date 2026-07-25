@@ -117,10 +117,20 @@ const expectedSceneHashes = {
   //     바뀐 것은 나무·관목 지오메트리 속성과 instanceColor 버퍼다.
   //   · 재기준 시점에 sync / 실제 module Worker / ?worker=0 폴백 세 경로가 서로 바이트 동일했다
   //     — 결정론 손상이 아니라 의도된 씬 변화다.
-  village: '916e80c9:051940e3:f1b1ae3b:4f93aca5',
-  town: '899f061b:cce96cff:4dba4eaf:8e5b5e81',
-  capital: '8362c877:604b82ad:86060afb:1d62b3bf',
-  hanyang: 'c7a1ea4b:41adbaf1:76d3b125:4251c7b1',
+  // Phase 4 고증 수정(docs/architectural-authenticity.md §7.5 W1·W2·W3): 재료 판독성만 바꾼 재기준.
+  //   ① 막돌 면(담 몸체·토담 굽·사괴석 하단·장독 platform·모서리 기둥)의 UV 를 공유 월드 타일
+  //      치수로 환산한다 — 정점 위치·면 수·재질·텍스처는 그대로이고 uv 속성 값만 바뀐다.
+  //   ② 초가 담 이엉 coping 의 마루 반경이 내려가고 집줄(M.jipjul, 기존 재질) 링이 걸린다 — 정점이
+  //      늘어나므로 삼각형 총계가 함께 오른다.
+  //   ③ 한양 시전 개구마다 판문 한 짝(plan 파생 순수값)이 서고, 지붕면이 마을이 이미 가진 공유 기와
+  //      캔버스를 재사용하는 재질로 바뀐다 — 시전은 여전히 단일 병합 그룹이다.
+  //   plan 은 손대지 않았다: 네 규모의 pick proxy 바이트가 전부 불변이고(placement·필지·도로·논·
+  //   yard-life 소유권 불침해), 재기준 시점에 sync / 실제 module Worker / ?worker=0 폴백 세 경로가
+  //   서로 바이트 동일했다 — 결정론 손상이 아니라 의도된 씬 변화다.
+  village: '49c29540:a8a85962:f9398c93:25ad2d80',
+  town: '67ebc4f7:d0798fa5:e3d532d5:ac86d955',
+  capital: '6870d128:18ebf626:25c178bf:c96c94d4',
+  hanyang: '292372b5:23917575:03c24a27:9337cfb9',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
