@@ -24,17 +24,33 @@ const lerpN = (a, b, t) => a + (b - a) * t;
 //   기존 5 이산 프리셋을 "연속 함수의 앵커(제어점)"로 재해석한다. 각 앵커에서 정확히 재현(회귀 안전),
 //   중간 임의 R 은 보간. 사용자 피드백: 4버튼 대신 스케일 슬라이더 하나(hamlet↔hanyang 매끈 연결).
 //   benchDrop = 분지 내부 완경사 총 낙차(주산측 → 개울측), undAmp = 저진폭 언듈레이션 진폭.
+//
+// ── 뒷산(주산) 완만화 ── 사용자 지시: "뒷산의 높이를 좀 낮추면 림패스 만들어내기가 훨씬 유리할 것
+//   같아. 하늘도 보기 좋고. 이거 좀 더 완만하게 만들자". ridgeH 는 배산 매스의 유일한 고도 스칼라
+//   (ridgeMass·mainPeaks·안산·능선 노이즈·운해 밴드가 모두 Hmax=ridgeH·rHK 종속)라 여기 한 곳만 내리면
+//   전 소비처가 비례 추종한다. 근거 세 가지:
+//   (1) 광학 — 석양 태양은 고도 9.5°(sunDir [-16,8,-45])이고 방위가 주산(-z)쪽이다. 부감 프레임의
+//       상단 광선은 -8°(부감 31° 하향 × 46° 렌즈)이므로, 능선 크레스트가 카메라 기준 -8° 아래로
+//       내려가야 능선 위에 하늘 밴드가 열린다. 구값에서 hamlet/village/capital 은 크레스트가 -0.9~-6°
+//       라 프레임 상단이 통째로 산이었다(측정: aerialRidgeDeg).
+//   (2) 고증 — 실제 배산임수 취락의 주산은 마을에서 수백 m~수 km 떨어져 앙각 10~20°다. 렌더 예산 때문에
+//       지형 반경을 마을+버퍼로 조인(#143) 이 씬에서 구 ridgeH 는 마을 중심 앙각 43~49°(=협곡 벽)였다.
+//       지형 반경을 넓히는 것은 금지된 레버이므로, 고도를 낮추는 것이 실제 산세에 가까워지는 유일한 축이다.
+//   (3) 룩 — 처마선 실루엣은 하늘(또는 소실된 원경 대기)에 걸려야 읽힌다. 어두운 산 벽 앞의 지붕선은
+//       역광 림을 받아도 대비를 못 얻는다(docs/look-grammar.md §3 건물·지형 항).
+//   분지 서사는 유지한다: 산은 여전히 마을보다 높고 감싸며(앙각 25~33°), 스케일이 커질수록 앙각이
+//   완만해지는 기존 위계도 그대로다. 숲 밀도·지형 반경은 불침해(hillAt·bowlR 정규화가 Hmax 종속).
 export const SCALE_ANCHORS = [
-  { name: 'hamlet',  siteR: 74,  ridgeH: 46,  benchDrop: 2.6, undAmp: 0.50 },
-  { name: 'village', siteR: 128, ridgeH: 68,  benchDrop: 3.6, undAmp: 0.62 },
-  { name: 'town',    siteR: 176, ridgeH: 88,  benchDrop: 4.6, undAmp: 0.72 },
-  { name: 'capital', siteR: 250, ridgeH: 124, benchDrop: 5.6, undAmp: 0.82 },
+  { name: 'hamlet',  siteR: 74,  ridgeH: 26,  benchDrop: 2.6, undAmp: 0.50 },
+  { name: 'village', siteR: 128, ridgeH: 43,  benchDrop: 3.6, undAmp: 0.62 },
+  { name: 'town',    siteR: 176, ridgeH: 57,  benchDrop: 4.6, undAmp: 0.72 },
+  { name: 'capital', siteR: 250, ridgeH: 84,  benchDrop: 5.6, undAmp: 0.82 },
   // 한양 도성급(#47): capital 대비 선형 2배 = 면적 4배. 내사산이 도성을 감싸는 큰 분지.
-  { name: 'hanyang', siteR: 500, ridgeH: 150, benchDrop: 8.0, undAmp: 1.02 },
+  { name: 'hanyang', siteR: 500, ridgeH: 112, benchDrop: 8.0, undAmp: 1.02 },
 ];
 // 외딴집 하한(#114): 슬라이더 매핑(scale01)·명명 tier 는 hamlet(74) 그대로 두고, 절대 siteR 로만
 //   그 아래(집 한 채·절 하나 스케일)까지 내려간다. tier 는 'hamlet' 유지 → populate 문법 무수정 감쇠.
-const SOLO_FIELD = { siteR: 30, ridgeH: 30, benchDrop: 1.6, undAmp: 0.42 };
+const SOLO_FIELD = { siteR: 30, ridgeH: 18, benchDrop: 1.6, undAmp: 0.42 };
 export const VILLAGE_SITE_R_MIN = SOLO_FIELD.siteR;       // 외딴집(집 한 채) 분지 하한
 export const VILLAGE_SITE_R_MAX = SCALE_ANCHORS[SCALE_ANCHORS.length - 1].siteR * 1.04;
 const R_MIN = VILLAGE_SITE_R_MIN;
@@ -341,13 +357,17 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   function mainPeaks(x, z) {
     // Rm = R·mtnK: 대규모(한양)에서 봉우리·팔을 분지 쪽으로 압축(#127) — 소규모는 mtnK=1 이라 현행 불변.
     const Rm = R * mtnK;
+    // 뒷산 완만화: 크레스트 초과분만 깎는다(주봉 1.18→1.12, 부봉 0.86·0.92→0.80·0.86, 팔 0.60→0.56).
+    //   초과분이 부감 프레임 상단에서 하늘을 가장 먼저 막는 지점이라서다. 주봉은 여전히 크레스트보다
+    //   12% 솟아 실루엣의 정점을 갖는다(1.04 까지 내려 A/B 해보니 능선이 매끈한 호로 뭉개져 실루엣
+    //   우선 규율에 어긋났다 — docs/look-grammar.md §2-2). 절대 고도는 ridgeH 가 이미 내렸다.
     const peaks = [
-      { x: -0.10 * Rm, z: mountainZ,             h: Hmax * 1.18, s: 0.52 * Rm },
-      { x: -0.52 * Rm, z: mountainZ + 0.16 * Rm, h: Hmax * 0.86, s: 0.44 * Rm },
-      { x:  0.50 * Rm, z: mountainZ + 0.12 * Rm, h: Hmax * 0.92, s: 0.44 * Rm },
+      { x: -0.10 * Rm, z: mountainZ,             h: Hmax * 1.12, s: 0.52 * Rm },
+      { x: -0.52 * Rm, z: mountainZ + 0.16 * Rm, h: Hmax * 0.80, s: 0.44 * Rm },
+      { x:  0.50 * Rm, z: mountainZ + 0.12 * Rm, h: Hmax * 0.86, s: 0.44 * Rm },
       // 좌청룡·우백호: 옆으로 감싸 내려오는 팔(동·서 중턱). #115-0: 바깥으로 밀어(±1.08R) 마을 옆 벽 압박 완화.
-      { x: -1.08 * Rm, z: -0.34 * Rm, h: Hmax * 0.60, s: 0.42 * Rm },
-      { x:  1.08 * Rm, z: -0.34 * Rm, h: Hmax * 0.60, s: 0.42 * Rm },
+      { x: -1.08 * Rm, z: -0.34 * Rm, h: Hmax * 0.56, s: 0.42 * Rm },
+      { x:  1.08 * Rm, z: -0.34 * Rm, h: Hmax * 0.56, s: 0.42 * Rm },
     ];
     let h = 0;
     for (const p of peaks) {

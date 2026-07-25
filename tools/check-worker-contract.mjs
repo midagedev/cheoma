@@ -127,10 +127,16 @@ const expectedSceneHashes = {
   //   plan 은 손대지 않았다: 네 규모의 pick proxy 바이트가 전부 불변이고(placement·필지·도로·논·
   //   yard-life 소유권 불침해), 재기준 시점에 sync / 실제 module Worker / ?worker=0 폴백 세 경로가
   //   서로 바이트 동일했다 — 결정론 손상이 아니라 의도된 씬 변화다.
-  village: '49c29540:a8a85962:f9398c93:25ad2d80',
-  town: '67ebc4f7:d0798fa5:e3d532d5:ac86d955',
-  capital: '6870d128:18ebf626:25c178bf:c96c94d4',
-  hanyang: '292372b5:23917575:03c24a27:9337cfb9',
+  // 룩 복원 Phase 2 뒷산 완만화(src/village/site.js SCALE_ANCHORS.ridgeH·mainPeaks): 사용자 지시로
+  //   배산 능선 고도를 규모별 −25~−43% 낮추고 봉우리 초과분을 깎았다. 지형 heightfield 가 바뀌므로
+  //   지형·숲·기복 패드·필지 앉힘 y 가 전부 따라 움직이는, 의도된 씬 변화다(하늘 밴드 확보 + 역광
+  //   실루엣). 지형 반경·숲 밀도·필지 수 분포는 불변이며(시드 8개 평균 town 63.1→63.0), 재기준
+  //   시점에 sync / 실제 module Worker / ?worker=0 폴백 세 경로가 서로 바이트 동일했다 — 결정론
+  //   손상이 아니다.
+  village: '269f1fcb:d55df385:7ddf50cc:8f21a325',
+  town: '587fc2dc:5dec31f6:bf128c15:cd043658',
+  capital: 'e5cffeca:2a5e97f6:e0028615:b6a1a572',
+  hanyang: '7145ebad:25343185:7173cee3:5d0a1163',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -165,10 +171,12 @@ const expectedProxyHashes = {
   // 10°→16° 로 광각화됐다. `planParcelFocus` 가 그 고도와 렌즈로 카메라 오프셋·거리·fov 를 모두
   // 푸므로 네 규모의 프록시 카메라 바이트가 함께 움직인다. 프록시 개수·ID·피사체 경계·격리
   // 계약은 그대로다.
-  village: '67c01713',
-  town: 'c969fbdc',
-  capital: '1eb20267',
-  hanyang: 'fc3be91f',
+  // 뒷산 완만화(위 씬 재기준과 같은 변경): 필지 지반고와 사면이 바뀌므로 focus 카메라가 푸는
+  //   오프셋·거리·near 컷어웨이 바이트가 함께 움직인다. 프록시 개수·ID·피사체 경계·격리 계약은 그대로다.
+  village: '794d1a99',
+  town: 'c41c0e59',
+  capital: 'b652961a',
+  hanyang: '0f53368a',
 };
 
 const server = await createServer({

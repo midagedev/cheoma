@@ -60,18 +60,41 @@ export const SUNSET_LOOKS = deepFreeze({
   gold: {
     label: { ko: '금빛 노을', en: 'Golden sunset' },
     ...profile({
-      // Existing flagship look, preserved byte-for-byte as the default profile.
-      sky: [[0.0, '#f3b877'], [0.26, '#e8a074'], [0.55, '#a87e97'], [1.0, '#45598c']],
-      sunDir: [-16, 8, -45], sunColor: 0xffa85c, sunInt: 2.3,
+      // 기본 노을 = 훨씬 따뜻한 붉은 골든아워. 사용자 지시: "붉은 노을의 느낌을 좋아해".
+      //
+      // 채도 규율(docs/look-grammar.md §2-3)을 지키면서 붉게 가는 방법은 축을 나누는 것이다.
+      //   과감하게 붉히는 축 = 하늘 스톱·태양색·림·태양 글로우·플레어(=하이라이트·발광·역광).
+      //   중성에 가깝게 지키는 축 = hemiGround(지면 바운스)·hemiSky(천정 산란)·fog 계열.
+      // Phase 1 에서 crimson 프로필이 실패한 이유가 후자였다: 장미빛 앰비언트·대기색이 아래에서
+      //   올라와 회벽·그림자·미드톤까지 물들여 "붉은 노을"이 아니라 단일 장미색 워시가 됐다.
+      //   그래서 여기서도 hemiGround 0x9c7856·hemiSky 0x8593bd 는 손대지 않는다 — 태양 반대편
+      //   (그림자면)은 여전히 차갑고 중성이며, 그 결과 실제 붉은 노을 사진 특유의 높은 색온도
+      //   대비(따뜻한 수광면 ↔ 중성 암부)가 생긴다. fog·ridgeFar·mist 는 하늘과 하이라이트가
+      //   붉어진 만큼만 살짝 따라간다(원경 대기와 하늘 사이 색상 하드컷 방지, §3 하늘 항).
+      // 하늘 스톱 규약: pos 0.5=지평. 0.55 스톱이 "능선 바로 위" 밴드로, 뒷산 완만화(site.js)로
+      //   방금 열린 하늘 밴드가 정확히 여기다 → 진홍(0xc2495c)을 그 자리에 놓고, 천정은 남색
+      //   (0x3c4a86)으로 남겨 진홍→자주→남색 그라디언트를 만든다. 천정까지 붉히면 하늘 전체가
+      //   한 색이 되어 대비가 죽는다.
+      // 실측 근거(A/B): 부감 프레임은 31° 하향 × 46° 렌즈라 상단 광선이 지평 아래 −8° 다. 즉 화면에
+      //   보이는 하늘 밴드는 돔 pos≈0.44~0.50 구간이고, 그 구간은 DOME_HAZE(alpha 0.66~0.93)가
+      //   대기색으로 수렴시킨다(sky.js — 지형 절단면 하드컷 방지 계약). 따라서 "부감에서 붉은 노을"은
+      //   fog 계열이 담당하고 프로필 하늘 스톱은 아이레벨·히어로 화각에서 발현한다. fog 를 마젠타가
+      //   아닌 주홍 쪽(hue≈20°)으로만 올려 원경 대기는 노을빛으로 물들이되, 마을 바닥 미드톤은
+      //   불변으로 유지한다(town 부감 A/B 실측: 하늘 밴드 r−b 45→96·원경 능선 밴드 32→63 =
+      //   노을은 대기가 받고, 마을 바닥은 r−b 30.5→31.8·luma 43.8→42.3 = 미드톤 워시 없음).
+      sky: [[0.0, '#ff9d52'], [0.26, '#f26334'], [0.55, '#c2495c'], [1.0, '#3c4a86']],
+      sunDir: [-16, 8, -45], sunColor: 0xff9448, sunInt: 2.38,
       hemiSky: 0x8593bd, hemiGround: 0x9c7856, hemiInt: 0.72,
-      fog: 0xc4a48e, fogNear: 70, fogFar: 470, exposure: 1.11,
-      ridgeNear: 0x574863, ridgeFar: 0xc2a284, mist: 0xd8c0ad, mistOp: 0.6,
+      fog: 0xcc9376, fogNear: 70, fogFar: 470, exposure: 1.13,
+      ridgeNear: 0x574863, ridgeFar: 0xcc9678, mist: 0xdeb69c, mistOp: 0.6,
       lantern: 0.15,
     }, {
-      bloomStrength: 0.62, bloomRadius: 0.38, bloomThreshold: 0.80,
-      rim: 2.05, rimColor: 0xffc070, rimPower: 1.7, rimWrap: 0.13,
-      sunGlow: 0.92, sunGlowSize: 40, sunGlowColor: 0xffb570, sat: 1.18,
-      flare: 1.0, flareColor: 0xffc078,
+      // rim 2.05 는 그대로 둔다 — tools/check-rim-facing.mjs 의 HDR 에너지 상한(2.05×1.6)이
+      //   이 숫자를 기준으로 캘리브레이션돼 있고, 붉힘은 rimColor 로만 가져간다(휘도는 오히려 감소).
+      bloomStrength: 0.66, bloomRadius: 0.38, bloomThreshold: 0.80,
+      rim: 2.05, rimColor: 0xffa757, rimPower: 1.7, rimWrap: 0.13,
+      sunGlow: 0.98, sunGlowSize: 42, sunGlowColor: 0xff8f45, sat: 1.20,
+      flare: 1.0, flareColor: 0xffa155,
     }),
   },
   crimson: {

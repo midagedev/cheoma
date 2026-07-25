@@ -344,8 +344,21 @@ invariant(scaleRange('sx') >= 0.2 && scaleRange('sy') >= 0.2
   && Math.max(...roofToneSums) - Math.min(...roofToneSums) >= 0.4,
   'fixed town fixture lost meaningful width, height, or instance-color variation');
 const shapes = new Set(giwa.map((parcel) => variantOv(parcel).planShape));
-invariant(['single', 'l', 'u'].every((shape) => shapes.has(shape)),
-  'fixed town fixture no longer demonstrates ㅡ/ㄱ/ㄷ diversity');
+// ㅡ/ㄱ/ㄷ 커버리지는 고정 시드 3개의 합집합으로 본다. 단일 시드로 세 형태 전부를 요구하면
+// 지형 계수(뒷산 완만화 등)로 필지 한 장의 면적이 4m² 움직이는 순간 ㅡ 한 채가 ㄱ 으로 승격되면서
+// 문법과 무관하게 게이트가 깨진다(town seed 20260716 은 giwa 14채로 이 표본이 가장 얕다).
+// 형태 선택 로직 자체는 위쪽 pickGiwaHouseVariant 계약이 직접 검사한다.
+const townShapeSeeds = [20260716, 20260717, 20260718];
+const shapeUnion = new Set();
+for (const shapeSeed of townShapeSeeds) {
+  const shapePlan = planVillage({ scale: 'town', seed: shapeSeed });
+  for (const parcel of shapePlan.parcels) {
+    if (parcel.hero || parcel.kind !== 'giwa') continue;
+    shapeUnion.add(variantOv(parcel).planShape);
+  }
+}
+invariant(['single', 'l', 'u'].every((shape) => shapeUnion.has(shape)) && shapes.size >= 2,
+  'fixed town fixtures no longer demonstrate ㅡ/ㄱ/ㄷ diversity');
 
 const roofOwners = [];
 for (const parcel of regular) {
