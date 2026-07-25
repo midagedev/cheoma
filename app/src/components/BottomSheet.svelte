@@ -1,53 +1,43 @@
 <script>
-  // 반응형 패널 셸. 데스크톱은 우측 한지 패널(.panel) / 좌상 컨텍스트 카드(.ctxcard),
-  // 모바일(device.sheet)에서는 드래그 핸들·detent(반개/전개)·스크림을 갖춘 바텀 시트로 전환.
-  // 내용은 children 스니펫으로 받아 부모의 스타일 스코프를 유지한다(.tab/.step/.opt 등 그대로).
+  // 만들기 패널 셸(#158 B안). 하나의 컨텍스트 패널만 남았으므로 셸도 하나의 성격 —
+  // "씬을 가리지 않는 만들기 표면" — 을 세 뷰포트 형태로 표현한다.
   //
-  //   variant='right'    : 집 고치기 패널. 모바일 detent [full, half], half 아래로 끌면 닫힘, 스크림.
-  //   variant='context'  : 단일 컨텍스트 패널(#92) — 데스크톱 우측 드로어(넓음, 편집 스키마 수용), 모바일
-  //                        은 detent [full, half, peek] 상주 시트(스크림 없음 — 부감에서 줌·필지 조작 유지).
-  //                        detent prop 으로 컨텍스트 전환 시 외부에서 detent 요청(부감=peek, 근접=half).
+  //   데스크톱(넓은 창)   : 좌하 카드(.ctxcard) — 낙관 위, 다이얼(우상)·공유 독(우하)과 충돌 없음
+  //   가로 폰            : 좌측 42% 오버레이 패널(.ctxcard.landscape) — P1(가로폰 26px 스크롤) 해소
+  //   세로 좁은 화면      : 바텀 시트(.sheet.context) — detent 2개(peek / half)
+  //
+  // detent 는 translateY 가 아니라 **가시 높이**로 정의한다(P2 근인). 시트는 항상 뷰포트 안에
+  // 있고 max-height 만 바뀌므로 스크롤 본문이 화면 밖으로 밀려나지 않는다. 펼침 상한이 58vh 라서
+  // 편집 중에도 씬이 42% 이상 상시 보인다(§4 지표: 편집 중 씬 ≥40%).
   import { tick } from 'svelte';
   import { device } from '../lib/device.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
 
   let {
-    open = false, onClose, variant = 'right', ariaLabel = 'panel',
-    closable = true, gap = 18, peekPx = 80, detent = null, children,
-    // #118 U1: context 패널 sticky 헤더/푸터 — 상세만 내부 스크롤, 액션은 항상 가시.
-    //   header(브레드크럼)·footer(액션)를 스크롤 밖 고정 영역으로 렌더한다. 데스크톱은 카드 하단 푸터,
-    //   모바일 시트는 상단 도킹(half detent 에서 아래 밀려나 감춰지지 않도록 grip 아래로). context 만 사용.
+    open = false, ariaLabel = 'panel', gap = 13, peekPx = 80, detent = null, children,
+    // sticky 헤더/푸터 — 상세만 내부 스크롤, 탭·주요 액션은 항상 가시.
     header = null, footer = null,
   } = $props();
-  // 상주 컨텍스트 카드(스크림 없이 씬 조작 유지, peek detent 허용).
-  const isCard = $derived(variant === 'context');
 
-  // 모바일 시트 상태머신 — translateY(px, 아래로 +)로 detent 표현.
-  //   full(0) → half → peek(H-peekPx) → hidden(H+40).
-  let sheetH = $state(0);
-  const HALF = 0.46;                       // half 에서 아래로 감출 비율(≈54% 표시)
+  // 시트 상태머신 — 2 detent(peek / half). 'hidden' 은 open=false(연출 중 숨김) 전용.
+  const HALF_VH = 0.58;                       // 펼침 상한(씬 ≥42% 상시 가시)
+  let viewportH = $state(0);
   let snap = $state('hidden');
-  let dragY = $state(null);                // 드래그 중 실시간 translateY(px), null=스냅
+  let dragH = $state(null);                   // 드래그 중 실시간 가시 높이(px), null=스냅
   let dragging = $state(false);
   let suppressClick = false;
   let surface = $state(null);
   let grip = $state(null);
 
-  const detentY = (name) => {
-    const H = sheetH || 1;
-    if (name === 'full') return 0;
-    if (name === 'half') return H * HALF;
-    if (name === 'peek') return Math.max(0, H - peekPx);
-    return H + 40;                          // hidden
-  };
-  const transY = $derived(dragY != null ? dragY : detentY(snap));
-  // context peek는 손잡이만 실제 화면에 남는다. 화면 아래로 이동한 header/footer/body는 expanded일 때만
-  // 키보드·접근성 소유권을 되찾는다. 데스크톱과 일반 right sheet는 기존 open 의미를 그대로 쓴다.
-  const contentInteractive = $derived(open
-    && (!device.sheet || !isCard || (snap !== 'peek' && snap !== 'hidden')));
+  const halfPx = $derived(Math.round((viewportH || 0) * HALF_VH));
+  const detentH = (name) => (name === 'half' ? halfPx : peekPx);
+  const sheetMax = $derived(dragH != null ? dragH : detentH(snap));
+  const expanded = $derived(snap === 'half');
+  // peek 에서는 손잡이만 실제로 보인다 → 그때만 본문이 키보드·접근성 소유권을 내놓는다.
+  const contentInteractive = $derived(open && (!device.sheet || expanded));
 
-  // 닫힘/peek 전환이 현재 포커스를 inert로 만들 때만 다음의 계속 보이는 소유자로 회수한다.
-  // References가 앱 표면을 inert로 만든 중첩 상태에서는 모달의 포커스를 절대 빼앗지 않는다.
+  // 닫힘/접힘이 현재 포커스를 inert 로 만들 때만 계속 보이는 소유자로 회수한다.
+  // References 가 앱 표면을 inert 로 만든 중첩 상태에서는 모달 포커스를 절대 빼앗지 않는다.
   let previousOpen = null;
   let previousContentInteractive = null;
   $effect.pre(() => {
@@ -76,238 +66,175 @@
     }
   });
 
-  // 외부 open 제어 → 진입(half)/이탈(hidden).
-  let openedAt = 0;
+  // 외부 open 제어 → 진입(peek)/이탈(hidden).
   $effect(() => {
     if (!device.sheet) return;
-    if (open) {
-      // 컨텍스트 카드는 peek 로 진입 — 씬·액션바를 가리지 않고 손잡이만 노출.
-      // 집 편집(right)은 half 로 진입.
-      if (snap === 'hidden') { snap = isCard ? 'peek' : 'half'; openedAt = performance.now(); }
-    } else snap = 'hidden';
+    if (open) { if (snap === 'hidden') snap = 'peek'; }
+    else snap = 'hidden';
   });
-  // 외부 detent 요청(#92 컨텍스트 전환 — 부감=peek, 근접=half). 드래그 중이 아니면 부드럽게 스냅.
+  // 외부 detent 요청(#158 P3): App 이 컨텍스트에 따라 실제로 값을 넘긴다 — 부감=peek, 근접=half.
+  //   focus-in 이 시트를 자동으로 펼치므로 모바일 첫 사용자가 손잡이를 찾지 않아도 편집에 도달한다.
   $effect(() => {
     if (!device.sheet || !open || detent == null || dragging) return;
-    if ((detent === 'full' || detent === 'half' || detent === 'peek') && snap !== 'hidden') snap = detent;
+    if ((detent === 'half' || detent === 'peek') && snap !== 'hidden') snap = detent;
   });
-  // 선택 탭(캔버스)의 후속 click/compat-mouse 가 갓 나타난 스크림에 떨어져 곧바로 닫히는 것을 방지.
-  function scrimClose() {
-    if (performance.now() - openedAt < 350) return;
-    onClose?.();
-  }
 
-  let startPY = 0, startY = 0, movedBy = 0;
+  let startPY = 0, startH = 0, movedBy = 0;
   function down(e) {
     if (!device.sheet) return;
     dragging = true; movedBy = 0;
-    startPY = e.clientY; startY = detentY(snap); dragY = startY;
+    startPY = e.clientY; startH = detentH(snap); dragH = startH;
     e.currentTarget.setPointerCapture?.(e.pointerId);
   }
   function move(e) {
     if (!dragging) return;
-    const dy = e.clientY - startPY;
+    const dy = e.clientY - startPY;                 // 아래로 끌면 +
     movedBy = Math.max(movedBy, Math.abs(dy));
-    dragY = Math.max(-24, Math.min(sheetH + 40, startY + dy));
+    dragH = Math.max(peekPx, Math.min(halfPx, startH - dy));
   }
   function up() {
     if (!dragging) return;
     dragging = false;
-    const y = dragY; dragY = null;
+    const h = dragH; dragH = null;
     suppressClick = movedBy > 6;
-    const allowed = isCard ? ['full', 'half', 'peek'] : ['full', 'half'];
-    if (variant === 'right' && y > detentY('half') + sheetH * 0.16) { onClose?.(); return; }
-    let best = allowed[0], bd = 1e9;
-    for (const a of allowed) { const d = Math.abs(y - detentY(a)); if (d < bd) { bd = d; best = a; } }
-    snap = best;
+    snap = Math.abs(h - halfPx) <= Math.abs(h - peekPx) ? 'half' : 'peek';
   }
-  // 핸들 탭 = detent 토글(드래그 후 클릭은 무시).
-  //   context(#154): 기본 접힘(peek)이라 손잡이는 접힘↔펼침 2-state 토글 — '편집 열기' 버튼 은유.
-  //   right 는 full↔half.
+  // 손잡이 탭 = 접힘↔펼침 2-state 토글('만들기 열기' 버튼 은유).
   function tapGrip() {
     if (suppressClick) { suppressClick = false; return; }
-    if (variant === 'context') snap = snap === 'peek' ? 'half' : 'peek';
-    else snap = snap === 'full' ? 'half' : 'full';
+    snap = expanded ? 'peek' : 'half';
   }
 </script>
 
+<svelte:window bind:innerHeight={viewportH} />
+
 {#if device.sheet}
-  {#if variant === 'right'}
-    <div class="scrim" class:show={open && snap !== 'hidden'} onclick={scrimClose} aria-hidden="true"></div>
-  {/if}
   <aside
     bind:this={surface}
-    bind:clientHeight={sheetH}
-    class="sheet {variant} hanji-surface" class:open class:dragging
+    class="sheet context hanji-surface" class:open class:dragging
     data-snap={snap}
-    style="transform: translateY({transY}px)"
+    data-make-panel
+    style="max-height: {sheetMax}px"
     aria-hidden={!open}
     aria-label={ariaLabel}
     inert={!open}
   >
     <div
       bind:this={grip}
-      class="grip" class:context={variant === 'context'} role="button" tabindex="0"
-      aria-label={variant === 'context' ? (snap === 'peek' ? t('sheet_expand') : t('sheet_collapse')) : 'drag handle'}
-      aria-expanded={variant === 'context' ? snap !== 'peek' : undefined}
+      class="grip context" role="button" tabindex="0"
+      aria-label={expanded ? t('sheet_collapse') : t('sheet_expand')}
+      aria-expanded={expanded}
       onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}
       onclick={tapGrip}
       onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tapGrip(); } }}
     >
-      {#if variant === 'context'}
-        <!-- #154 접힘 기본 → 손잡이를 명시적 '편집 열기'/'접기' 버튼처럼(셰브런+라벨). 3D 뷰를 비워 둔다. -->
-        <span class="peekbtn">
-          <span class="chev" class:open={snap !== 'peek'} aria-hidden="true"></span>
-          <span class="lbl">{snap === 'peek' ? t('sheet_expand') : t('sheet_collapse')}</span>
-        </span>
-      {:else}
-        <span class="bar"></span>
-        {#if closable}
-          <button class="x" onclick={(e) => { e.stopPropagation(); onClose?.(); }} aria-label="close">×</button>
-        {/if}
-      {/if}
+      <span class="peekbtn">
+        <span class="chev" class:open={expanded} aria-hidden="true"></span>
+        <span class="lbl">{expanded ? t('sheet_collapse') : `${t('axis_make')} · ${t('sheet_expand')}`}</span>
+      </span>
     </div>
-    <!-- #118 U1: context 헤더/푸터는 grip 아래 고정 도킹 — half detent(하단 46% 감춤)에서도 상단
-         가시 영역에 남아 브레드크럼·주요 액션이 항상 보인다(바텀시트는 하단이 뷰포트 밖으로 밀리므로). -->
     {#if header}
       <div data-sheet-content class="sheethead" inert={!contentInteractive} aria-hidden={!contentInteractive}>
         {@render header()}
       </div>
     {/if}
-    {#if footer}
-      <div data-sheet-content class="sheetfoot" inert={!contentInteractive} aria-hidden={!contentInteractive}>
-        {@render footer()}
-      </div>
-    {/if}
     <div
       data-sheet-content
+      data-panel-scroll
       class="scroll"
       style="gap:{gap}px"
       inert={!contentInteractive}
       aria-hidden={!contentInteractive}
     >{@render children?.()}</div>
+    {#if footer}
+      <div data-sheet-content class="sheetfoot" inert={!contentInteractive} aria-hidden={!contentInteractive}>
+        {@render footer()}
+      </div>
+    {/if}
   </aside>
-{:else if variant === 'right'}
+{:else}
+  <!-- 데스크톱 좌하 카드 / 가로 폰 좌측 오버레이. 브레드크럼은 이 셸 밖(좌상)으로 나갔다(#158). -->
   <aside
     bind:this={surface}
-    class="panel hanji-surface"
+    class="ctxcard hanji-surface"
     class:open
+    class:landscape={device.landscapePhone}
+    data-make-panel
     aria-hidden={!open}
+    aria-label={ariaLabel}
     inert={!open}
-    style="gap:{gap}px"
   >
-    {#if closable}<button class="close" onclick={onClose} aria-label="close">×</button>{/if}
-    {@render children?.()}
-  </aside>
-{:else if variant === 'context'}
-  <!-- 단일 컨텍스트 패널(#92) 데스크톱 — 좌상단 자동높이 카드. #118 U1: 헤더(브레드크럼)·푸터(액션)를
-       스크롤 밖 고정, 상세만 내부 스크롤 → 기본 펼침이어도 주요 액션이 폴드 아래 매몰되지 않는다. -->
-  <aside bind:this={surface} class="ctxcard hanji-surface" class:open aria-hidden={!open} inert={!open}>
     {#if header}<div class="ctxhead">{@render header()}</div>{/if}
-    <div class="ctxscroll" style="gap:{gap}px">{@render children?.()}</div>
+    <div class="ctxscroll" data-panel-scroll style="gap:{gap}px">{@render children?.()}</div>
     {#if footer}<div class="ctxfoot">{@render footer()}</div>{/if}
   </aside>
 {/if}
 
 <style>
-  /* ---------- 데스크톱 우측 패널 (기존 .panel 그대로 — 셀렉터·룩 보존) ---------- */
-  .panel {
-    position: fixed;
-    top: 0; right: 0; bottom: 0;
-    width: min(320px, 84vw);
-    z-index: 30;
-    padding: clamp(18px, 3vh, 30px) clamp(16px, 2vw, 24px);
-    transform: translateX(104%);
-    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-  .panel.open { transform: translateX(0); }
-  .close {
-    position: absolute; top: 12px; right: 14px;
-    width: 30px; height: 30px; border-radius: 50%;
-    border: 1px solid var(--ink-hair); background: transparent;
-    font-size: 20px; line-height: 1; color: var(--ink-soft);
-  }
-  .close:hover { background: rgba(44, 38, 32, 0.06); }
-
-  /* ---------- 데스크톱 단일 컨텍스트 카드(#92) — 좌상단(ModeToggle 아래) 자동높이, 편집 시 늘어나 스크롤 ----------
-     다이얼(우상단)·액션바(우하단)와 충돌하지 않는다(시프트 불필요). */
+  /* ---------- 데스크톱 좌하 "만들기" 카드 ----------
+     좌상은 브레드크럼 하나만 쓰므로 3중 점유(P4)가 정의상 사라진다. 카드는 낙관 위에 앉고
+     다이얼(우상)·공유 독(우하)과 겹치지 않는다. 상한은 62vh — 스크롤 가시 높이 ≥200px 확보. */
   .ctxcard {
     position: fixed;
     left: clamp(10px, 1.6vw, 22px);
-    top: calc(clamp(10px, 1.6vh, 22px) + 52px);
+    bottom: calc(clamp(16px, 3vh, 34px) + 58px);
     z-index: 32;
-    width: min(300px, 84vw);
-    max-height: calc(100vh - clamp(10px, 1.6vh, 22px) - 200px);
+    width: min(304px, 84vw);
+    max-height: min(62vh, calc(100vh - 108px));
     padding: 0;
     border-radius: 9px;
     display: flex; flex-direction: column;
-    overflow: hidden;                          /* #118 U1: 카드 자체는 스크롤 안 함 — 상세 영역만 스크롤 */
+    overflow: hidden;                          /* 카드 자체는 스크롤 안 함 — 상세 영역만 */
     transform: translateX(-118%);
     opacity: 0;
     transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
     pointer-events: none;
   }
   .ctxcard.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
-  /* #118 U1: 고정 헤더(브레드크럼) / 스크롤 상세 / 고정 푸터(액션) 3분할. */
-  .ctxhead { flex: none; padding: 15px 16px 0; }
+  /* 가로 폰(P1): 데스크톱 카드의 200px 상수 클램프를 벗어나 좌측 42% 전高 오버레이로. */
+  .ctxcard.landscape {
+    top: max(8px, env(safe-area-inset-top));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: max(8px, calc(env(safe-area-inset-left) + 4px));
+    width: min(340px, 42vw);
+    max-height: none;
+  }
+  .ctxhead { flex: none; padding: 12px 14px 0; }
   .ctxscroll {
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
     display: flex; flex-direction: column;
-    padding: 12px 16px 14px;
+    padding: 11px 14px 12px;
     overscroll-behavior: contain;
   }
-  .ctxfoot { flex: none; padding: 13px 16px 16px; border-top: 1px solid var(--ink-line); }
+  .ctxfoot { flex: none; padding: 10px 14px 12px; border-top: 1px solid var(--ink-line); }
+  .ctxcard.landscape .ctxhead { padding: 8px 12px 0; }
+  .ctxcard.landscape .ctxscroll { padding: 8px 12px 10px; }
+  .ctxcard.landscape .ctxfoot { padding: 8px 12px 10px; }
 
-  /* ---------- 모바일 바텀 시트 ---------- */
-  .scrim {
-    position: fixed; inset: 0; z-index: 33;
-    background: rgba(24, 18, 12, 0.22);
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.35s ease;
-  }
-  .scrim.show { opacity: 1; pointer-events: auto; }
-
+  /* ---------- 세로 모바일 바텀 시트: 2 detent, 가시 높이로 정의 ---------- */
   .sheet {
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 46;
-    max-height: 88vh;
     border-radius: 18px 18px 0 0;
     display: flex; flex-direction: column;
-    transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
-    will-change: transform;
+    overflow: hidden;
+    transition: max-height 0.42s cubic-bezier(0.22, 1, 0.36, 1), transform 0.32s ease;
+    will-change: max-height;
     touch-action: none;
     box-shadow: 0 -6px 26px rgba(30, 22, 14, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
   }
   .sheet.dragging { transition: none; }
-  .sheet[aria-hidden='true'] { pointer-events: none; }
+  .sheet[aria-hidden='true'] { transform: translateY(110%); pointer-events: none; }
 
   .grip {
     position: relative;
     flex: none;
-    height: 30px;
+    height: 46px;
     display: grid; place-items: center;
-    cursor: grab;
+    cursor: pointer;
     touch-action: none;
   }
-  .grip:active { cursor: grabbing; }
-  .grip .bar {
-    width: 44px; height: 5px; border-radius: 3px;
-    background: var(--ink-faint); opacity: 0.55;
-  }
-  .grip .x {
-    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-    width: 34px; height: 34px; border-radius: 50%;
-    border: 1px solid var(--ink-hair); background: transparent;
-    font-size: 22px; line-height: 1; color: var(--ink-soft);
-    display: grid; place-items: center;
-  }
-  /* #154 context 접힘/펼침 손잡이 — 명시적 '편집 열기'/'접기' 버튼(셰브런+라벨). 접힘 기본이라 이 버튼이
-     유일한 펼침 창구다(3D 뷰는 비워 둠). 데스크톱은 이 시트 자체가 없어 무영향. */
-  .grip.context { height: 46px; cursor: pointer; }
   .peekbtn {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 8px 18px; border-radius: 999px;
@@ -322,18 +249,23 @@
   }
   .peekbtn .chev.open { transform: rotate(45deg); margin-top: -2px; }   /* 펼침=아래(접기) */
   .scroll {
+    flex: 1 1 auto; min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
     display: flex; flex-direction: column;
-    padding: 0 clamp(16px, 5vw, 22px) calc(20px + env(safe-area-inset-bottom));
+    padding: 0 clamp(16px, 5vw, 22px) 12px;
   }
-  /* #118 U1 모바일: 헤더·푸터를 grip 아래 고정 도킹 — half detent 상단 가시대에 남아 액션이 감춰지지
-     않는다(바텀시트 하단은 뷰포트 밖으로 밀림). 푸터 아래 border 로 스크롤 상세와 구분. */
-  .sheethead { flex: none; padding: 2px clamp(16px, 5vw, 22px) 0; }
+  .sheethead { flex: none; padding: 2px clamp(16px, 5vw, 22px) 8px; }
+  /* 접힘(peek)에서는 손잡이만 보인다 — 잘린 헤더 조각이 씬 위에 남지 않게. */
+  .sheet[data-snap='peek'] .sheethead,
+  .sheet[data-snap='peek'] .scroll,
+  .sheet[data-snap='peek'] .sheetfoot { visibility: hidden; }
+  /* 푸터는 시트가 늘 뷰포트 안에 있으므로 실제 하단에 도킹된다(구 상단 도킹 우회 불필요). */
   .sheetfoot {
-    flex: none; padding: 12px clamp(16px, 5vw, 22px) 13px;
-    border-bottom: 1px solid var(--ink-line);
+    flex: none;
+    padding: 9px clamp(16px, 5vw, 22px) calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--ink-line);
   }
 </style>

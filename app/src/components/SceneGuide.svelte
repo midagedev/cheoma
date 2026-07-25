@@ -11,10 +11,12 @@
   } = $props();
 
   const touchLayout = $derived(touch ?? device.touch);
+  // 문 열기/닫기는 호버 힌트에만 있어 터치 사용자에게는 존재하지 않는 인터랙션이었다(#158 P7).
+  // 안내 카드에 한 줄로 올려 두 입력 방식 모두에서 발견 가능하게 한다.
   const instructionKeys = $derived(touchLayout
-    ? ['guide_touch_orbit', 'guide_touch_zoom', 'guide_touch_house', 'guide_touch_exit']
-    : ['guide_desktop_orbit', 'guide_desktop_zoom', 'guide_desktop_house', 'guide_desktop_exit']);
-  const marks = $derived(touchLayout ? ['1', '2', '⌂', '↩'] : ['↻', '＋', '⌂', '↩']);
+    ? ['guide_touch_orbit', 'guide_touch_zoom', 'guide_touch_house', 'guide_touch_door', 'guide_touch_exit']
+    : ['guide_desktop_orbit', 'guide_desktop_zoom', 'guide_desktop_house', 'guide_desktop_door', 'guide_desktop_exit']);
+  const marks = $derived(touchLayout ? ['1', '2', '⌂', '戶', '↩'] : ['↻', '＋', '⌂', '戶', '↩']);
 </script>
 
 {#if visible}
@@ -47,13 +49,21 @@
 {/if}
 
 <style>
+  /* 하단은 만들기 패널(좌하)·공유 독(우하)이 쓰므로, 데스크톱 안내는 상단 자유 대역
+     (좌상 브레드크럼과 우상 보기 카드 사이)에 좌우 인셋으로 클램프해 앉힌다 — 어느 액션도
+     시각적으로 가리지 않는다(#158 P5: 구 안내는 드론 버튼을 반쯤 덮었다). */
+  /* Insets are chosen so the card cannot intersect either bottom-left panel or
+     top-right view card on any axis, whatever the window height does to the
+     panel's 62vh box: 340px clears the panel column, 250px clears the dial. */
   .scene-guide {
     position: fixed;
-    left: 50%;
-    bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
+    left: 340px;
+    right: 250px;
+    top: max(20px, calc(env(safe-area-inset-top) + 14px));
     z-index: 18;
-    width: min(548px, calc(100vw - 32px));
-    transform: translateX(-50%);
+    width: auto;
+    max-width: 548px;
+    margin: 0 auto;
     pointer-events: none;
     animation: guide-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
@@ -152,16 +162,25 @@
   }
 
   @keyframes guide-in {
-    from { opacity: 0; transform: translate(-50%, 8px); }
-    to { opacity: 1; transform: translate(-50%, 0); }
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
-  /* Portrait touch UI has a bottom-sheet peek and raised action bar. Keep the
-     guide above both without claiming any of their input area. */
+  /* Narrow desktop windows keep the same insets with a tighter right edge, so the
+     card shrinks instead of sliding under the view card. */
+  @media (max-width: 1180px) {
+    .scene-guide { right: 216px; max-width: 520px; }
+  }
+
+  /* Portrait touch UI: the top belongs to the breadcrumb and the view card, so
+     the guide sits between them and the peek sheet, clear of the raised dock. */
   @media (max-width: 768px) and (orientation: portrait) {
     .scene-guide.touch {
+      left: 12px;
+      right: 12px;
+      top: auto;
       bottom: max(170px, calc(env(safe-area-inset-bottom) + 164px));
-      width: min(366px, calc(100vw - 24px));
+      max-width: min(366px, calc(100vw - 24px));
     }
     .paper { padding: 14px 50px 15px 14px; }
     ul { gap: 8px 11px; }
@@ -173,15 +192,21 @@
     ul { grid-template-columns: 1fr; }
   }
 
+  /* Landscape phone: the make panel owns the left 42% and the dock the bottom
+     right, so the guide is clamped into the remaining upper-right band. */
   @media (max-height: 520px) and (orientation: landscape) {
-    .scene-guide { bottom: max(12px, calc(env(safe-area-inset-bottom) + 8px)); }
-    /* Coarse-pointer landscape keeps the whole card above ActionBar's 64px
-       visual/input envelope (z42), including safe-area displacement. */
     .scene-guide.touch {
+      /* Between the left make panel and the right view card, above the dock. */
+      left: calc(min(340px, 42vw) + 16px);
+      right: 200px;
+      top: auto;
       bottom: max(88px, calc(env(safe-area-inset-bottom) + 82px));
+      max-width: none;
     }
     .paper { padding-block: 10px; }
     .title { margin-bottom: 7px; }
-    ul { gap-block: 5px; }
+    /* The clamped band is narrow, so one line per row instead of two cramped columns. */
+    ul { grid-template-columns: 1fr; gap: 5px; }
+    li { font-size: 11.5px; }
   }
 </style>

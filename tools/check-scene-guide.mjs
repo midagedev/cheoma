@@ -130,10 +130,17 @@ assert.equal(compiled.warnings.length, 0, 'SceneGuide should compile without Sve
 assert.match(componentSource, /\.scene-guide\s*\{[^}]*pointer-events:\s*none/s);
 assert.match(componentSource, /\.dismiss\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px/s);
 assert.match(componentSource, /\.dismiss\s*\{[^}]*pointer-events:\s*auto/s);
+// #158 P7: a fifth line teaches the door interaction, which previously existed only
+// as a hover hint and was therefore invisible to touch users.
 assert.match(
   componentSource,
-  /:\s*\['↻',\s*'＋',\s*'⌂',\s*'↩'\]/,
-  'desktop exit should use a return mark while the localized copy names Esc once',
+  /:\s*\['↻',\s*'＋',\s*'⌂',\s*'戶',\s*'↩'\]/,
+  'desktop guide keeps the return mark and adds the door mark',
+);
+assert.match(
+  componentSource,
+  /\?\s*\['1',\s*'2',\s*'⌂',\s*'戶',\s*'↩'\]/,
+  'touch guide keeps the same five marks',
 );
 assert.doesNotMatch(componentSource, /class:word|\.mark\.word/, 'guide marks share one visual grammar');
 assert.match(
@@ -162,6 +169,8 @@ for (const key of [
   'guide_touch_zoom',
   'guide_touch_house',
   'guide_touch_exit',
+  'guide_desktop_door',
+  'guide_touch_door',
   'guide_dismiss',
 ]) {
   assert.equal((i18nSource.match(new RegExp(`${key}:`, 'g')) || []).length, 2, `${key} needs ko/en copy`);

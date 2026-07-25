@@ -19,9 +19,7 @@
   import SealLabel from './components/SealLabel.svelte';
   import ActionBar from './components/ActionBar.svelte';
   import EnvironmentDial from './components/EnvironmentDial.svelte';
-  import ParamPanel from './components/ParamPanel.svelte';
-  import ModeToggle from './components/ModeToggle.svelte';
-  import RenderStyleToggle from './components/RenderStyleToggle.svelte';
+  import Breadcrumb from './components/Breadcrumb.svelte';
   import ContextPanel from './components/ContextPanel.svelte';
   import HoverLabel from './components/HoverLabel.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
@@ -179,10 +177,11 @@
   let canonicalSceneAddress = false;
   let canonicalRestorePending = false;
   // Only committed standalone slider differences are portable. The baseline is
-  // the current seed/type's generated P; type and reroll establish a new epoch.
+  // the current seed/type's generated P; a reroll establishes a new baseline.
+  // (#158: the legacy authoring panel is retired, so overrides only arrive from
+  // a received canonical URL and are cleared by reroll.)
   let standaloneParamDefaults = {};
   let standaloneParamOverrides = $state({});
-  let paramCommitEpoch = $state(0);
   // focus 연속체(#92): villageEditing = 현재 focus 필지 { parcelId, spec }(focus-in START 에 설정,
   //   focus-out 완료(villageReturnDone)에 null). focusMorph(0=마을·1=집)는 카메라 focus 트윈 진행을
   //   engine 이 흘려준다 → 단일 컨텍스트 패널이 카메라와 한 클록으로 crossfade(원칙 2·3).
@@ -361,28 +360,34 @@
   // sheetLayout: 바텀 시트 레이아웃(세로 좁은 화면). editing: 우측 편집 시트가 열림.
   let sheetLayout = $derived(device.sheet);
   let editing = $derived(ui.selected || !!villageEditing || villageZooming);
-  // 보기(파생): focus(편집·전환) 중이면 항상 집 보기, 아니면 마을 씬=둘러보기·단일건물=집 보기.
-  //   ?village=1 세션도 선택 중 둘러보기가 켜지지 않으며, 둘러보기를 누르면 명시적으로 focus-out한다.
-  let mode = $derived(
-    (villageEditing || villageZooming) ? 'house' : (sceneVillage ? 'village' : 'house')
-  );
-  // 히어로 랜딩 크롬 은닉(#118 U4): 타이틀 표시(heroVisible)~종가 랜딩(heroLanding) 동안 ModeToggle·
-  //   EnvironmentDial·ActionBar·낙관을 숨긴다(ContextPanel 과 동일 연출). 랜딩 종료 시 chroma 페이드로
+  // 컨텍스트 표시는 이제 만들기 패널의 2탭(모프 기준)과 좌상 브레드크럼이 소유한다 — 별도 mode
+  //   파생값은 필요 없다(#158: ModeToggle 폐기). 탭 클릭은 toggleMode 가 그대로 카메라를 전환한다.
+  // 히어로 랜딩 크롬 은닉(#118 U4): 타이틀 표시(heroVisible)~종가 랜딩(heroLanding) 동안 3축 크롬
+  //   전체를 숨긴다. 랜딩 종료 시 chroma 페이드로
   //   복원(전환은 opacity 트랜지션 1회 — chroma 감상 페이드와 이중 적용 없이 부드럽게).
   let heroChrome = $derived(heroVisible || heroLanding);
   // 마을 부감: 하단 peek 옵션 시트 위로 액션바를 올림.
   let villageAerial = $derived(sceneVillage && !villageEditing && !villageZooming);
   // 시네마틱 진입 버튼(드론/거닐기)은 마을 부감에서만 — focus·전환·웨이브·먹안개·데모 중엔 미노출.
   let cineButtons = $derived(villageAerial && !waving && !veil && !cine.active && !heroLanding);
-  // 편집 중엔 액션바 숨김(모든 터치 디바이스 — 세로 시트/가로·태블릿 사이드 패널과 겹침 방지).
-  // 데스크톱(perf=false)은 종전대로 유지. 낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
-  // 편집 중 전역 액션바 은닉은 성능이 아니라 레이아웃 문제다 — 시트(세로 좁은 화면)나 축소 사이드
-  //   패널이 하단을 점유해 겹치기 때문이고, 이때 공유 액션은 시트 푸터로 이동한다(아래 onShare).
-  //   그래서 device.perf 가 아니라 레이아웃 술어로 키를 잡는다. perf 를 진짜 폰으로 좁힌 뒤
-  //   (docs/mobile-effects-audit.md P1) 좁은 비터치 창이 시트 레이아웃인데 액션바까지 띄우는
-  //   겹침이 생겼고, check:app 의 시트 푸터 공유 단정이 그것을 잡았다.
-  let hideActions = $derived((device.sheet || device.landscapePhone) && editing);
+  // #158 P9: 공유 독은 편집 중에도 상주한다(구 hideActions 폐기 — 종전엔 시트/가로폰 레이아웃
+  //   술어로 전역 액션바를 숨기고 공유를 시트 푸터로 옮겼다). 만들기 패널은 세로 모바일에서
+  //   58vh 상한 시트, 가로 폰에서 좌측 42% 패널이라 독과 겹치지 않는 슬롯을 쓴다.
+  //   낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
   let hideSeal = $derived(sheetLayout && (editing || (sceneVillage && !villageEditing)));
+  // 만들기 시트 detent 요청(#158 P3): 부감=peek, 근접(편집·전환)=half. 구현은 사문화됐던 detent prop 을
+  //   실제로 전달하는 것 — focus-in 이 모바일에서 패널을 자동으로 펼친다.
+  let makeDetent = $derived((villageEditing || villageZooming) ? 'half' : 'peek');
+  // 브레드크럼 leaf 라벨(구 ContextPanel 헤더에서 이설). 좌상 단독 슬롯이 소유한다.
+  let crumbLabel = $derived.by(() => {
+    const spec = villageEditing?.spec;
+    if (!spec) return '';
+    if (spec.family === 'palace-compound') return t('crumb_palace_compound');
+    if (spec.family === 'temple') return t('crumb_temple');
+    if (spec.hero) return t(spec.heroStyle === 'hanok' ? 'crumb_hanok' : 'crumb_palace');
+    const kind = editParams.kind || spec.kind;
+    return t(kind === 'giwa' ? 'type_giwa_l' : 'type_choga_l');
+  });
   let sceneGuideVisible = $derived(sceneGuideIsVisible({
     dismissed: sceneGuideDismissed,
     sceneVillage,
@@ -741,7 +746,6 @@
     overrides = { preset: false, time: false, season: false, weather: false };
     standaloneParamOverrides = {};
     standaloneParamDefaults = {};
-    paramCommitEpoch += 1;
     engine.reroll();
     pullState();
     standaloneParamDefaults = pickStandaloneParams(engine.getParams());
@@ -978,27 +982,10 @@
     syncUrl();
     scheduleFlowTick();               // 켜짐/꺼짐 모두 흐름 클록 리셋(재개 시 온전한 interval)
   }
-  function setType(v) {
-    standaloneParamOverrides = {};
-    standaloneParamDefaults = {};
-    paramCommitEpoch += 1;
-    engine.setType(v);
-    overrides.preset = true;
-    pullState();
-    standaloneParamDefaults = pickStandaloneParams(engine.getParams());
-    syncUrl();
-  }
-  function setExpansion(n) { engine.setExpansion(n); pullState(); syncUrl(); }
-  function mergeNeighbor() { engine.merge(); pullState(); syncUrl(); }
-  function setParam(k, v, epoch = paramCommitEpoch) {
-    if (epoch !== paramCommitEpoch || !engine.setParam(k, v)) return;
-    const next = { ...standaloneParamOverrides };
-    if (Math.abs(v - standaloneParamDefaults[k]) <= 1e-8) delete next[k];
-    else next[k] = v;
-    standaloneParamOverrides = next;
-    syncUrl();
-  }
-  function closePanel() { engine.clearSelection(); }
+  // #158: 레거시 ParamPanel(단일건물 유형·확장·병합·슬라이더)은 정식 폐기됐다 — 만들기 축은 마을
+  //   경로 하나만 남는다. 단일건물 씬은 여전히 부팅·복원되며(?hero=0·?shot=1·공유 URL), 커밋된
+  //   standaloneParams 는 URL 계약으로 계속 복원·공유되지만 그 값을 새로 저작하는 UI 표면은 없다.
+  //   따라서 setType/setExpansion/merge/setParam/closePanel 핸들러도 함께 폐기했다.
 
   // ---------- 마을 모드 액션 ----------
   // 먹 안개 마스킹(#46): 오버레이가 화면을 완전히 덮은 뒤 동기 생성 fn 을 실행 → 생성 프리징 은닉,
@@ -1207,90 +1194,78 @@
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
 <div class="veil" class:on={veil} aria-hidden="true"></div>
 
-{#if !cine.active}
-  <!-- 히어로 랜딩 중 은닉(#118 U4) — chroma 와 동일 0.9s 페이드로 복원(하드 마운트 팝 방지). -->
-  <div class="modewrap" class:hero={heroChrome}>
-    <ModeToggle {mode} onToggle={toggleMode} />
-    <RenderStyleToggle mode={ui.renderStyle} onToggle={setRenderStyle} />
-  </div>
-{/if}
-
-<!-- 시네마틱 데모 중엔 크롬을 페이드(감상 우선) — .chroma 3초 감상 페이드와 별개 게이트.
-     히어로 랜딩(heroChrome) 동안에도 은닉(#118 U4), 랜딩 종료 시 자연 복원. -->
+<!-- 3축 크롬(#158 B안): 좌상 브레드크럼 · 우상 보기 카드 · 좌하 만들기 패널 · 우하 공유 독.
+     전부 .chroma 안에 있어 3초 감상 페이드가 실제로 "씬만 남기기"가 된다(P6 — 구 구현은 가장 큰
+     크롬인 패널과 좌상 토글이 남아 의도와 반대였다). 시네마틱·히어로 랜딩 중에도 같은 게이트로 은닉. -->
 <div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
-  {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={openReferences} />{/if}
+  {#if sceneVillage && !heroLanding && !cine.active}
+    <Breadcrumb
+      houseLabel={crumbLabel}
+      houses={villageHouses}
+      houseActive={focusMorph >= 0.5}
+      busy={villageZooming || waving}
+      onBack={closeVillageEdit}
+    />
+  {/if}
+  {#if sceneVillage}
+    <!-- 만들기 패널(#92→#158): 마을(부감)·집(근접) 컨텍스트가 명시적 2탭 + 모프로 전환된다.
+         히어로 랜딩·시네마틱 중엔 숨김(연출). 탭은 카메라 전환을 실행한다. -->
+    <ContextPanel
+      open={!heroLanding && !cine.active}
+      morph={focusMorph}
+      detent={makeDetent}
+      onTab={toggleMode}
+      tabBusy={villageZooming || waving}
+      scale={villageOpts.scale}
+      includePalace={villageOpts.includePalace}
+      includeTemple={villageOpts.includeTemple}
+      onScale={setScale}
+      onPalace={togglePalace}
+      onTemple={toggleTemple}
+      onReroll={rerollVillage}
+      villageParams={villageOpts}
+      onVillageOpt={setVillageOpt}
+      waving={waving}
+      houseBusy={villageZooming || waving}
+      navigationTargets={buildingTargets}
+      navigationSelectedId={settledBuildingId}
+      navigationBusy={villageZooming || waving || veil}
+      onNavigateTarget={navigateBuilding}
+      spec={villageEditing?.spec}
+      params={editParams}
+      onType={villageSetType}
+      onLive={villageLive}
+      onCommit={villageCommit}
+      onRerollHouse={rerollHouse}
+    />
+  {/if}
   <EnvironmentDial
     time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
-    shifted={ui.selected && !sheetLayout}
+    renderStyle={ui.renderStyle} onRenderStyle={setRenderStyle}
     flowing={flowing}
     onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
     onFlowToggle={toggleFlow}
   />
-  {#if !hideActions}
-    <ActionBar
-      onReroll={sceneVillage ? null : reroll} onPostcard={postcard} onToggleAudio={toggleAudio}
-      onShare={shareScene}
-      audioOn={audioOn} busy={rerollCooldown || waving}
-      raised={sheetLayout && villageAerial}
-      shifted={ui.selected && !sheetLayout}
-      onDrone={cineButtons ? startDrone : null}
-      onWalk={cineButtons ? startWalk : null}
-    />
-  {/if}
+  <ActionBar
+    onReroll={sceneVillage ? null : reroll} onPostcard={postcard} onToggleAudio={toggleAudio}
+    onShare={shareScene}
+    onExport={sceneVillage
+      ? (villageAerial ? exportVillage : (villageEditing && !villageZooming ? exportHouse : null))
+      : null}
+    exporting={exporting}
+    audioOn={audioOn} busy={rerollCooldown || waving}
+    raised={sheetLayout && villageAerial}
+    lifted={sheetLayout && sceneVillage && !villageAerial}
+    onDrone={cineButtons ? startDrone : null}
+    onWalk={cineButtons ? startWalk : null}
+  />
+
+  <!-- 낙관은 탭 순서 마지막(브랜드·언어·참고자료) — 3축 크롬 뒤에 읽힌다. -->
+  {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={openReferences} />{/if}
 </div>
 
 {#if sceneVillage}
-  <!-- 단일 컨텍스트 패널(#92): 마을(부감)·집(근접) 섹션이 한 패널 안에서 focusMorph 로 crossfade.
-       히어로 랜딩·시네마틱 중엔 숨김(연출). 브레드크럼 '마을' 클릭 = focus-out. -->
-  <ContextPanel
-    open={!heroLanding && !cine.active}
-    morph={focusMorph}
-    detent={null}
-    scale={villageOpts.scale}
-    includePalace={villageOpts.includePalace}
-    includeTemple={villageOpts.includeTemple}
-    houses={villageHouses}
-    onScale={setScale}
-    onPalace={togglePalace}
-    onTemple={toggleTemple}
-    onReroll={rerollVillage}
-    villageParams={villageOpts}
-    onVillageOpt={setVillageOpt}
-    waving={waving}
-    houseBusy={villageZooming || waving}
-    navigationTargets={buildingTargets}
-    navigationSelectedId={settledBuildingId}
-    navigationBusy={villageZooming || waving || veil}
-    onNavigateTarget={navigateBuilding}
-    spec={villageEditing?.spec}
-    params={editParams}
-    onType={villageSetType}
-    onLive={villageLive}
-    onCommit={villageCommit}
-    onRerollHouse={rerollHouse}
-    onBack={closeVillageEdit}
-    onShare={hideActions ? shareScene : null}
-    onExportVillage={villageAerial ? exportVillage : null}
-    onExportHouse={villageEditing && !villageZooming ? exportHouse : null}
-    exporting={exporting}
-  />
   <HoverLabel info={hoverInfo} />
-{:else}
-  <ParamPanel
-    open={ui.selected}
-    preset={ui.preset}
-    expansion={ui.expansion}
-    maxExpansion={ui.maxExpansion}
-    canMerge={ui.canMerge}
-    params={ui.params}
-    {paramCommitEpoch}
-    onType={setType}
-    onExpansion={setExpansion}
-    onMerge={mergeNeighbor}
-    onParam={setParam}
-    onShare={hideActions ? shareScene : null}
-    onClose={closePanel}
-  />
 {/if}
 
 <!-- 시네마틱 데모 오버레이(#112): 종료 창구 + 현재 장면 라벨. -->
@@ -1313,12 +1288,9 @@
 
 <style>
   .stage { position: fixed; inset: 0; z-index: 0; }
+  /* 3축 크롬 전체가 이 그룹 안에 있다(#158 P6) — 감상 페이드 후 화면에 씬만 남는다. */
   .chroma { transition: opacity 0.9s ease; }
   .chroma.faded { opacity: 0; pointer-events: none; }
-  /* ModeToggle 은 chroma 감상 페이드에서 제외(상시 노출)하되, 히어로 랜딩(#118 U4) 동안만 은닉 —
-     chroma 와 동일 0.9s 트랜지션으로 랜딩 종료 시 함께 복원(팝/깜빡임 방지). */
-  .modewrap { transition: opacity 0.9s ease; }
-  .modewrap.hero { opacity: 0; pointer-events: none; }
 
   /* 먹 안개 트랜지션(#46) — 한지 바탕 수묵 크로스페이드. 생성 프리징을 덮어 튐/프리즈를 은닉. */
   .veil {

@@ -178,6 +178,20 @@ try {
   await page.waitForFunction(() => !!window.__engine.village.captureView(), null, { timeout });
   await reportWebGLRenderer(page, 'app-smoke');
 
+  // #158: the make panel keeps every axis but expands one group at a time, so a
+  // harness that reads a field must open its owning group first (the product path
+  // a user takes). Scale/type controls stay pinned above the groups.
+  const openMakeGroup = async (owner, groupId) => {
+    await page.evaluate(({ contextOwner, group }) => {
+      const header = document.querySelector(`.ctx.${contextOwner} [data-group="${group}"]`);
+      if (header && header.getAttribute('aria-expanded') === 'false') header.click();
+    }, { contextOwner: owner, group: groupId });
+    await page.waitForFunction(({ contextOwner, group }) => !!document.querySelector(
+      `.ctx.${contextOwner} [data-group-body="${group}"]`,
+    ), { contextOwner: owner, group: groupId }, { timeout });
+  };
+  await openMakeGroup('village', 'vocab');
+
   const mjaToggle = page.locator('[data-vkey="mjaHouse"]');
   await mjaToggle.waitFor({ state: 'visible', timeout });
   const mjaDefaultUi = await mjaToggle.evaluate((button) => ({
@@ -1388,6 +1402,7 @@ try {
       activeClear: !active?.closest('[inert]'),
       activeOwner: active?.closest('[data-context-owner]')?.dataset.contextOwner || null,
       inNavigation: !!active?.closest('[data-building-navigation]'),
+      inMakeTabs: !!active?.closest('.axistabs'),
       focusTarget: active?.dataset?.contextFocus || null,
       effectiveOwners: [...new Set(roots
         .filter((root) => !root.closest('[inert]'))
@@ -1401,15 +1416,28 @@ try {
     }, { progress, finish });
   };
 
+  // #158 re-authored: the breadcrumb is its own top-left slot and the make panel
+  // follows it in DOM order, so the first Tab enters the explicit context tabs and
+  // the persistent navigator is the next stop inside the same panel. The invariant
+  // being protected is unchanged - exactly one context owner is not inert and no
+  // focus lands inside an inert subtree.
   await page.locator('[data-context-focus="village"]').focus();
   await page.keyboard.press('Tab');
   const desktopAerialOwner = await contextA11y('village');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  const desktopAerialNavigator = await contextA11y('village');
   pass(desktopAerialOwner.directOwners.join() === 'village'
       && desktopAerialOwner.inactiveInert
       && desktopAerialOwner.activeClear
       && desktopAerialOwner.activeOwner == null
-      && desktopAerialOwner.inNavigation,
-  `desktop aerial Tab enters the persistent building navigator before the visible village controls (${JSON.stringify(desktopAerialOwner)})`);
+      && desktopAerialOwner.inMakeTabs
+      && desktopAerialNavigator.inNavigation
+      && desktopAerialNavigator.activeClear,
+  `desktop aerial Tab enters the make context tabs and then the persistent building navigator (${JSON.stringify({
+    first: desktopAerialOwner,
+    navigator: desktopAerialNavigator,
+  })})`);
 
   const contextParcel = await page.evaluate(() => (
     window.__engine.village.debugParcels().find((parcel) => !parcel.hero)?.parcelId
@@ -1438,12 +1466,14 @@ try {
   const desktopHouseOwner = await contextA11y('house');
   await page.keyboard.press('Tab');
   const desktopHouseTabOwner = await contextA11y('house');
+  // #158: the first Tab after the breadcrumb enters the make panel's context tabs
+  // (the navigator follows inside the same panel).
   pass(desktopHouseOwner.directOwners.join() === 'house'
       && desktopHouseOwner.inactiveInert
       && desktopHouseOwner.focusTarget === 'house'
       && desktopHouseTabOwner.activeOwner == null
-      && desktopHouseTabOwner.inNavigation,
-  `desktop focus crossfade hands village focus to the house breadcrumb, then enters the persistent navigator (${JSON.stringify({
+      && desktopHouseTabOwner.inMakeTabs,
+  `desktop focus crossfade hands village focus to the house breadcrumb, then enters the make context tabs (${JSON.stringify({
     handoff: desktopHouseOwner,
     tab: desktopHouseTabOwner,
   })})`);
@@ -1631,27 +1661,33 @@ try {
   const mobileReducedTransition = await contextSheet.evaluate((sheet) => (
     Number.parseFloat(getComputedStyle(sheet).transitionDuration) || 0
   ));
-  const mobileFocusShare = contextSheet.locator('.foot.house [data-action="share"]');
+  // #158 re-authored (P9): share, photo, and model export are owned by the single
+  // share dock, which now stays mounted while editing (hideActions retired) and is
+  // lifted above the expanded sheet instead of hidden behind it.
+  const mobileFocusShare = page.locator('.actions [data-action="share"]');
   await mobileFocusShare.waitFor({ state: 'visible', timeout });
   const mobileFocusShareLayout = await mobileFocusShare.evaluate((button) => {
     const rect = button.getBoundingClientRect();
-    const sheet = button.closest('.sheet')?.getBoundingClientRect();
-    const sibling = button.parentElement?.querySelector('.hbtn.reroll')?.getBoundingClientRect();
-    const siblingOverlap = sibling
-      ? Math.max(0, Math.min(rect.right, sibling.right) - Math.max(rect.left, sibling.left))
-        * Math.max(0, Math.min(rect.bottom, sibling.bottom) - Math.max(rect.top, sibling.top))
+    const sheet = document.querySelector('.sheet.context')?.getBoundingClientRect();
+    const sheetOverlap = sheet
+      ? Math.max(0, Math.min(rect.right, sheet.right) - Math.max(rect.left, sheet.left))
+        * Math.max(0, Math.min(rect.bottom, Math.min(sheet.bottom, innerHeight)) - Math.max(rect.top, sheet.top))
+      : 0;
+    const reroll = document.querySelector('.foot.house .hbtn.reroll')?.getBoundingClientRect();
+    const rerollOverlap = reroll
+      ? Math.max(0, Math.min(rect.right, reroll.right) - Math.max(rect.left, reroll.left))
+        * Math.max(0, Math.min(rect.bottom, reroll.bottom) - Math.max(rect.top, reroll.top))
       : 0;
     return {
       count: document.querySelectorAll('[data-action="share"]').length,
-      inStickyFooter: !!button.closest('.sheetfoot'),
-      owner: button.closest('[data-context-owner]')?.dataset.contextOwner || null,
+      inDock: !!button.closest('.actions'),
+      panelShareOwners: document.querySelectorAll('[data-make-panel] [data-action="share"]').length,
       globalActionBar: document.querySelectorAll('.actions').length,
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
       width: rect.width, height: rect.height,
-      sheetLeft: sheet?.left ?? null,
-      sheetRight: sheet?.right ?? null,
       viewport: [innerWidth, innerHeight],
-      siblingOverlap,
+      sheetOverlap,
+      rerollOverlap,
     };
   });
   pass(mobileReducedOwner.directOwners.join() === 'house'
@@ -1663,17 +1699,18 @@ try {
     transition: mobileReducedTransition,
   })})`);
   pass(mobileFocusShareLayout.count === 1
-      && mobileFocusShareLayout.inStickyFooter
-      && mobileFocusShareLayout.owner === 'house'
-      && mobileFocusShareLayout.globalActionBar === 0
+      && mobileFocusShareLayout.inDock
+      && mobileFocusShareLayout.panelShareOwners === 0
+      && mobileFocusShareLayout.globalActionBar === 1
       && mobileFocusShareLayout.width >= 44
       && mobileFocusShareLayout.height >= 44
-      && mobileFocusShareLayout.left >= mobileFocusShareLayout.sheetLeft
-      && mobileFocusShareLayout.right <= mobileFocusShareLayout.sheetRight
+      && mobileFocusShareLayout.left >= 0
+      && mobileFocusShareLayout.right <= 390
       && mobileFocusShareLayout.top >= 0
       && mobileFocusShareLayout.bottom <= 844
-      && mobileFocusShareLayout.siblingOverlap === 0,
-  `390x844 focus share moves into the visible sticky house owner without a global duplicate (${JSON.stringify(mobileFocusShareLayout)})`);
+      && mobileFocusShareLayout.sheetOverlap === 0
+      && mobileFocusShareLayout.rerollOverlap === 0,
+  `390x844 focus keeps one share action in the dock, clear of the expanded sheet (${JSON.stringify(mobileFocusShareLayout)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-mobile-focus.png') });
   }
@@ -1867,6 +1904,7 @@ try {
   const houseTabs = page.locator('.ctx.house:not([aria-hidden="true"]) .tabs .tab');
   await houseTabs.filter({ hasText: '초가' }).click();
   await page.waitForFunction(() => window.__engine.village.getState().spec?.kind === 'choga', null, { timeout });
+  await openMakeGroup('house', 'proportion');
   const chogaSwitch = await page.evaluate(() => {
     const engine = window.__engine;
     const state = engine.village.getState();
@@ -1893,6 +1931,7 @@ try {
   `giwa→choga switch reseeds target defaults and accepted UI values (${JSON.stringify(chogaSwitch)})`);
   await houseTabs.filter({ hasText: '기와집' }).click();
   await page.waitForFunction(() => window.__engine.village.getState().spec?.kind === 'giwa', null, { timeout });
+  await openMakeGroup('house', 'plan');
   const restoredType = await page.evaluate((parcelId) => {
     const engine = window.__engine;
     const spec = engine.village.getState().spec;
@@ -1942,7 +1981,9 @@ try {
     };
 
     const expectedFocus = engine.village.heroId();
-    document.querySelector('.mode .seg:last-child')?.click();
+    // #158: the explicit [村][家] tabs of the make panel replaced ModeToggle and
+    // drive the same camera transition.
+    document.querySelector('#make-tab-house')?.click();
     await drainTransition();
     const focusStart = engine.village.debugContinuum();
     const focusDistance = engine.village.debugDolly(0.99);
@@ -1951,7 +1992,7 @@ try {
       state: engine.village.getState(),
       continuum: engine.village.debugContinuum(),
       maxDistance: engine.__controls.maxDistance,
-      labels: [...document.querySelectorAll('.mode .seg')]
+      labels: [...document.querySelectorAll('.axistabs .axistab')]
         .map((button) => button.textContent.replace(/\s+/g, ' ').trim()),
     };
 
@@ -3263,137 +3304,88 @@ try {
       && magistracyScope.pivots === 0,
   `town magistracy hero remains outside residential door interaction (${JSON.stringify(magistracyScope)})`);
 
-  // Return this existing app boot to the standalone house, select it, and
-  // exercise the narrow ParamPanel owner. The global ActionBar is deliberately
-  // absent while hideActions=true, so ParamPanel must own exactly one share
-  // action instead of dropping the capability.
+  // #158 re-authored: the legacy ParamPanel is retired, so the standalone scene has
+  // no authoring panel. What must not regress is the portable contract - a received
+  // canonical scene restores its committed standalone params, the single share dock
+  // owns the payload, and reroll clears the overrides.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => {
     const engine = window.__engine;
     engine.village.exit();
     engine.select();
   });
-  await page.waitForFunction(() => {
-    const sheet = document.querySelector('.sheet.right');
-    return window.__device?.sheet === true
-      && !window.__engine.village.getState().active
-      && sheet?.dataset.snap === 'half'
-      && sheet.getAttribute('aria-hidden') === 'false'
-      && !sheet.inert;
-  }, null, { timeout });
-  const singleHouseShare = page.locator('.sheet.right [data-action="share"]');
+  await page.waitForFunction(() => window.__device?.sheet === true
+    && !window.__engine.village.getState().active
+    && document.querySelectorAll('[data-make-panel]').length === 0
+    && document.querySelectorAll('[data-action="share"]').length === 1
+    && !!document.querySelector('.actions [data-action="share"]'), null, { timeout });
+  const singleHouseShare = page.locator('.actions [data-action="share"]');
   await singleHouseShare.waitFor({ state: 'visible', timeout });
   const singleHouseShareLayout = await singleHouseShare.evaluate((button) => {
     const rect = button.getBoundingClientRect();
-    const sheet = button.closest('.sheet.right')?.getBoundingClientRect();
-    const title = button.parentElement?.querySelector('.title')?.getBoundingClientRect();
-    const close = button.closest('.sheet.right')?.querySelector('.grip .x')?.getBoundingClientRect();
-    const overlap = (a, b) => b
+    const primary = document.querySelector('.actions .primary')?.getBoundingClientRect();
+    const overlap = (a, b) => (b
       ? Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
         * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
-      : 0;
+      : 0);
     return {
       count: document.querySelectorAll('[data-action="share"]').length,
-      owner: button.closest('.sheet.right')?.getAttribute('aria-label') || null,
-      ownerInert: button.closest('.sheet.right')?.inert ?? null,
-      hiddenAncestor: !!button.closest('[inert], [aria-hidden="true"]'),
-      globalActionBar: document.querySelectorAll('.actions').length,
+      inDock: !!button.closest('.actions'),
+      legacyPanels: document.querySelectorAll('.panel, .sheet.right, [data-make-panel]').length,
+      legacyParamInputs: document.querySelectorAll('input[data-param]').length,
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
       width: rect.width, height: rect.height,
-      sheetLeft: sheet?.left ?? null,
-      sheetRight: sheet?.right ?? null,
-      titleOverlap: overlap(rect, title),
-      closeOverlap: overlap(rect, close),
+      primaryOverlap: primary ? overlap(rect, primary) : 0,
       viewport: [innerWidth, innerHeight],
     };
   });
   pass(singleHouseShareLayout.count === 1
-      && singleHouseShareLayout.owner === 'build panel'
-      && singleHouseShareLayout.ownerInert === false
-      && !singleHouseShareLayout.hiddenAncestor
-      && singleHouseShareLayout.globalActionBar === 0
+      && singleHouseShareLayout.inDock
+      && singleHouseShareLayout.legacyPanels === 0
+      && singleHouseShareLayout.legacyParamInputs === 0
       && singleHouseShareLayout.width >= 44
       && singleHouseShareLayout.height >= 43.9
-      && singleHouseShareLayout.left >= singleHouseShareLayout.sheetLeft
-      && singleHouseShareLayout.right <= singleHouseShareLayout.sheetRight
+      && singleHouseShareLayout.left >= 0
+      && singleHouseShareLayout.right <= 390
       && singleHouseShareLayout.top >= 0
       && singleHouseShareLayout.bottom <= 844
-      && singleHouseShareLayout.titleOverlap === 0
-      && singleHouseShareLayout.closeOverlap === 0,
-  `390x844 standalone edit share stays in the active ParamPanel owner without a global duplicate (${JSON.stringify(singleHouseShareLayout)})`);
+      && singleHouseShareLayout.primaryOverlap === 0,
+  `390x844 standalone scene keeps one bounded share action in the dock and no legacy panel (${JSON.stringify(singleHouseShareLayout)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-mobile-single-house.png') });
   }
 
-  // Establish the source through App's public type action so the canonical
-  // snapshot owns the same base building as the receiver, not only slider deltas.
-  await page.locator('.tab').nth(3).click();
-  await page.waitForFunction(() => window.__engine.getState().preset === 'choga'
-    && !!window.__engine.captureView(), null, { timeout });
+  // Establish the standalone source through the portable contract: a canonical URL
+  // carrying committed slider deltas, restored by App into the real engine.
   const standalonePatch = { eaveOverhang: 1.85, cornerLift: 0.72 };
-  await page.locator('input[data-param="eaveOverhang"]').fill(String(standalonePatch.eaveOverhang));
-  await page.locator('input[data-param="cornerLift"]').fill(String(standalonePatch.cornerLift));
-  await page.waitForFunction((patch) => {
-    const engine = window.__engine;
-    const params = engine?.getParams?.();
-    return Object.entries(patch).every(([key, value]) => params?.[key] === value)
-      && !!engine?.captureView?.();
-  }, standalonePatch, { timeout });
-  await page.waitForFunction(() => window.__engine.__debugAssemblyActive(), null, { timeout });
-  await page.waitForFunction(() => !window.__engine.__debugAssemblyActive(), null, { timeout });
-  const standaloneSource = await page.evaluate(() => ({
-    state: window.__engine.getState(),
-    params: window.__engine.getParams(),
-    view: window.__engine.captureView(),
-    assembly: window.__engine.__debugAssemblyActive(),
-  }));
-
-  await page.evaluate(() => {
-    Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
-    window.__shareProbe.nativePayloads.length = 0;
-    window.__shareProbe.nativeActivations.length = 0;
-    window.__shareProbe.clipboardValues.length = 0;
+  const standaloneSourceState = await page.evaluate(() => window.__engine.getState());
+  const standaloneRestoreUrl = buildSceneSnapshotUrl({
+    baseUrl: `http://127.0.0.1:${port}/`,
+    state: { ...standaloneSourceState, preset: 'choga' },
+    overrides: { preset: true, time: true, season: true, weather: true },
+    village: null,
+    standaloneParams: standalonePatch,
   });
-  await singleHouseShare.click();
-  await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유했습니다', null, { timeout });
-  const singleHouseShareCall = await page.evaluate(() => {
-    const payload = window.__shareProbe.nativePayloads[0];
-    const query = new URL(payload?.url || location.href).searchParams;
-    return {
-      native: window.__shareProbe.nativePayloads.length,
-      activation: window.__shareProbe.nativeActivations[0] || null,
-      clipboard: window.__shareProbe.clipboardValues.length,
-      payloadUrl: payload?.url || null,
-      queryKeys: [...query.keys()],
-      toast: document.querySelector('.toast')?.textContent?.trim() || null,
-    };
-  });
-  const singleHouseSnapshot = decodeSceneSnapshot(
-    new URL(singleHouseShareCall.payloadUrl).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
-  );
-  pass(singleHouseShareCall.native === 1
-      && singleHouseShareCall.activation?.userActivation
-      && singleHouseShareCall.activation?.eventTask
-      && singleHouseShareCall.clipboard === 0
-      && singleHouseShareCall.queryKeys.length === 1
-      && singleHouseShareCall.queryKeys[0] === SCENE_SNAPSHOT_QUERY_KEY
-      && singleHouseSnapshot?.village == null
-      && JSON.stringify(singleHouseSnapshot?.standaloneParams) === JSON.stringify(standalonePatch)
-      && !!singleHouseSnapshot?.view
-      && singleHouseShareCall.toast === '장면 링크를 공유했습니다',
-  `standalone ParamPanel share invokes native sharing synchronously with no stale village state (${JSON.stringify(singleHouseShareCall)})`);
-
   const standalonePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await standalonePage.addInitScript(() => {
+    const shareProbe = { nativePayloads: [], clipboardValues: [] };
+    Object.defineProperty(window, '__shareProbe', { configurable: false, value: shareProbe });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async (payload) => { shareProbe.nativePayloads.push(structuredClone(payload)); },
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (value) => { shareProbe.clipboardValues.push(value); } },
+    });
+  });
   standalonePage.on('pageerror', (error) => runtimeErrors.push(`standalone shared page: ${error.message}`));
   standalonePage.on('console', (message) => {
     if (message.type() === 'error' && !/favicon|404/i.test(message.text())) {
       runtimeErrors.push(`standalone shared console: ${message.text()}`);
     }
   });
-  await standalonePage.goto(singleHouseShareCall.payloadUrl, {
-    waitUntil: 'domcontentloaded',
-    timeout,
-  });
+  await standalonePage.goto(standaloneRestoreUrl, { waitUntil: 'domcontentloaded', timeout });
   await standalonePage.waitForFunction((patch) => {
     const engine = window.__engine;
     const params = engine?.getParams?.();
@@ -3408,6 +3400,8 @@ try {
     params: window.__engine.getParams(),
     view: window.__engine.captureView(),
     assembly: window.__engine.__debugAssemblyActive(),
+    villageActive: window.__engine.village.getState().active,
+    legacyPanels: document.querySelectorAll('.panel, .sheet.right, input[data-param]').length,
   }));
   await standalonePage.reload({ waitUntil: 'domcontentloaded', timeout });
   await standalonePage.waitForFunction((patch) => {
@@ -3434,27 +3428,62 @@ try {
   pass(Object.entries(standalonePatch)
     .every(([key, value]) => standaloneFirst.params[key] === value
       && standaloneReloaded.params[key] === value)
-      && standaloneFirst.state.preset === standaloneSource.state.preset
-      && standaloneReloaded.state.preset === standaloneSource.state.preset
-      && standaloneFirst.params.roofPitch === standaloneSource.params.roofPitch
-      && standaloneReloaded.params.profileCurve === standaloneSource.params.profileCurve
-      && standaloneSource.assembly === false
+      && standaloneFirst.state.preset === 'choga'
+      && standaloneReloaded.state.preset === 'choga'
+      && standaloneFirst.villageActive === false
+      && standaloneFirst.legacyPanels === 0
       && standaloneFirst.assembly === false
       && standaloneReloaded.assembly === false
-      && semanticViewClose(standaloneFirst.view, singleHouseSnapshot.view)
-      && semanticViewClose(standaloneReloaded.view, singleHouseSnapshot.view)
       && JSON.stringify(standaloneReloadedSnapshot?.standaloneParams)
         === JSON.stringify(standalonePatch)
       && [...new URL(standaloneReloaded.address).searchParams.keys()].join()
         === SCENE_SNAPSHOT_QUERY_KEY,
-  `standalone committed geometry and semantic composition survive exact share URL + reload (${JSON.stringify({
-    source: standaloneSource,
+  `received standalone params survive restore + reload without any authoring panel (${JSON.stringify({
     first: standaloneFirst,
     reloaded: standaloneReloaded,
   })})`);
 
-  const manualStandaloneBeforeAddress = standaloneReloaded.address;
-  const manualStandaloneBeforeView = standaloneReloaded.view;
+  // The share payload contract is unchanged: the dock share serializes the same
+  // committed standalone params and no stale village state.
+  await standalonePage.mouse.move(32, 32);
+  await standalonePage.locator('.actions [data-action="share"]').click();
+  await standalonePage.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  const standaloneShare = await standalonePage.evaluate(() => ({
+    payloadUrl: window.__shareProbe.nativePayloads[0]?.url || null,
+    queryKeys: [...new URL(window.__shareProbe.nativePayloads[0]?.url || location.href).searchParams.keys()],
+    clipboard: window.__shareProbe.clipboardValues.length,
+    toast: document.querySelector('.toast')?.textContent?.trim() || null,
+  }));
+  const standaloneShareSnapshot = decodeSceneSnapshot(
+    new URL(standaloneShare.payloadUrl).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  pass(standaloneShare.queryKeys.length === 1
+      && standaloneShare.queryKeys[0] === SCENE_SNAPSHOT_QUERY_KEY
+      && standaloneShareSnapshot?.village == null
+      && JSON.stringify(standaloneShareSnapshot?.standaloneParams) === JSON.stringify(standalonePatch)
+      && !!standaloneShareSnapshot?.view
+      && standaloneShare.clipboard === 0
+      && standaloneShare.toast === '장면 링크를 공유했습니다',
+  `standalone dock share serializes the committed params with no stale village state (${JSON.stringify(standaloneShare)})`);
+
+  // Reroll establishes a new baseline, so the next share omits the overrides.
+  const standaloneBeforeRerollSeed = await standalonePage.evaluate(() => window.__engine.getState().seed);
+  await standalonePage.evaluate(() => { window.__shareProbe.nativePayloads.length = 0; });
+  await standalonePage.locator('.actions .primary').click();
+  await standalonePage.waitForFunction((seed) => window.__engine.getState().seed !== seed
+    && !!window.__engine.captureView(), standaloneBeforeRerollSeed, { timeout });
+  await standalonePage.locator('.actions [data-action="share"]').click();
+  await standalonePage.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  const rerolledSnapshot = decodeSceneSnapshot(
+    new URL(await standalonePage.evaluate(() => window.__shareProbe.nativePayloads[0].url))
+      .searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
+  );
+  const rerolledParams = await standalonePage.evaluate(() => window.__engine.getParams());
+  pass(Object.keys(rerolledSnapshot?.standaloneParams || {}).length === 0
+      && rerolledParams.eaveOverhang !== standalonePatch.eaveOverhang,
+  `standalone reroll resets committed hp overrides (${JSON.stringify(rerolledSnapshot?.standaloneParams)})`);
+
+  const manualStandaloneBeforeView = await standalonePage.evaluate(() => window.__engine.captureView());
   await standalonePage.evaluate(() => {
     const audit = { starts: 0, ends: 0, settled: 0 };
     window.__engine.__controls.addEventListener('start', () => { audit.starts += 1; });
@@ -3489,6 +3518,7 @@ try {
   // trusted drag itself was not delivered; a moved camera with an unchanged
   // URL is the separate product settlement failure below.
   await standalonePage.bringToFront();
+  const standaloneAddressBeforeDrag = await standalonePage.evaluate(() => location.href);
   await dragStandalone({ from: { x: 195, y: 300 }, to: { x: 235, y: 320 } });
   const standaloneInputMoved = await waitForStandaloneInput();
   if (!standaloneInputMoved) {
@@ -3500,7 +3530,7 @@ try {
   }
   await standalonePage.waitForFunction(
     (beforeAddress) => location.href !== beforeAddress,
-    manualStandaloneBeforeAddress,
+    standaloneAddressBeforeDrag,
     { timeout: 10_000 },
   ).catch(async (error) => {
     const evidence = await standalonePage.evaluate(() => ({
@@ -3518,7 +3548,7 @@ try {
     afterAddress: location.href,
     view: window.__engine.captureView(),
     audit: window.__standaloneOrbitAudit,
-  }), manualStandaloneBeforeAddress);
+  }), standaloneAddressBeforeDrag);
   const manualStandaloneSnapshot = decodeSceneSnapshot(
     new URL(manualStandaloneView.afterAddress).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
   );
@@ -3533,67 +3563,8 @@ try {
   })})`);
   await standalonePage.close();
 
-  // A pending old-type slider callback must not write into a newly reset P.
-  // Reroll then establishes a second baseline and its next share omits hp.
-  await page.locator('.tab').nth(0).click();
-  await page.waitForFunction(() => window.__engine.getState().preset === 'korea'
-    && !!window.__engine.captureView(), null, { timeout });
-  // Dispatch the old-type input and type switch in one browser task. This
-  // guarantees the 110ms callback is still pending when its generation ends,
-  // rather than relying on Playwright command latency to happen under 110ms.
   await page.evaluate(() => {
-    const input = document.querySelector('input[data-param="eaveOverhang"]');
-    const tab = document.querySelectorAll('.tab')[2];
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    setValue.call(input, '2.75');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    tab.click();
-  });
-  await page.waitForFunction(() => window.__engine.getState().preset === 'giwa'
-    && !!window.__engine.captureView(), null, { timeout });
-  await page.waitForTimeout(300);
-  const staleParamReset = await page.evaluate(async () => {
-    const { paramsFor } = await import('/src/lib/seed.js');
-    return {
-      preset: window.__engine.getState().preset,
-      params: window.__engine.getParams(),
-      expectedEaveOverhang: paramsFor('giwa').eaveOverhang,
-    };
-  });
-  pass(staleParamReset.preset === 'giwa'
-      && staleParamReset.params.eaveOverhang === staleParamReset.expectedEaveOverhang,
-    `type reset rejects the previous slider generation (${JSON.stringify(staleParamReset)})`);
-
-  await page.locator('input[data-param="eaveOverhang"]').fill('1.9');
-  await page.waitForFunction(() => window.__engine.getParams().eaveOverhang === 1.9, null, { timeout });
-  await page.evaluate(() => window.__engine.clearSelection());
-  await page.waitForFunction(() => !window.__engine.getState().selected
-    && !!window.__engine.captureView(), null, { timeout });
-  const beforeRerollSeed = await page.evaluate(() => window.__engine.getState().seed);
-  await page.evaluate(() => document.querySelector('.actions .primary').click());
-  await page.waitForFunction((seed) => window.__engine.getState().seed !== seed
-    && !!window.__engine.captureView(), beforeRerollSeed, { timeout });
-  await page.evaluate(() => {
-    Object.assign(window.__shareProbe, { nativeMode: 'success', clipboardMode: 'success' });
-    window.__shareProbe.nativePayloads.length = 0;
-    window.__shareProbe.nativeActivations.length = 0;
-    window.__shareProbe.clipboardValues.length = 0;
-  });
-  await page.evaluate(() => document.querySelector('.actions [data-action="share"]').click());
-  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
-  const rerolledShareUrl = await page.evaluate(
-    () => window.__shareProbe.nativePayloads[0]?.url || null,
-  );
-  const rerolledSnapshot = decodeSceneSnapshot(
-    new URL(rerolledShareUrl).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
-  );
-  const rerolledParams = await page.evaluate(() => window.__engine.getParams());
-  pass(Object.keys(rerolledSnapshot?.standaloneParams || {}).length === 0
-      && rerolledParams.eaveOverhang !== 1.9,
-  `standalone reroll resets committed hp overrides (${JSON.stringify(rerolledSnapshot?.standaloneParams)})`);
-  await page.evaluate(() => {
-    // Restore the pre-existing downstream environment fixture after reroll
-    // deliberately exercised a new seed-derived profile.
+    // Restore the pre-existing downstream environment fixture on the retained boot.
     window.__engine.setTime('night', { immediate: true });
     window.__engine.setSeason('autumn', { immediate: true });
     window.__engine.setWeather('clear', { immediate: true });
@@ -3604,7 +3575,7 @@ try {
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForFunction(() => window.__device?.sheet === false
-    && !!document.querySelector('.panel:not([inert])')
+    && document.querySelectorAll('.panel, .sheet.right, input[data-param]').length === 0
     && document.querySelectorAll('[data-action="share"]').length === 1
     && !!document.querySelector('.actions [data-action="share"]'), null, { timeout });
 
@@ -3723,13 +3694,13 @@ try {
     engine.dispose = () => { disposeCalls += 1; return ownedDispose(); };
 
     // Re-arm the exact App-owned paths while the existing smoke app is live.
-    // The ParamPanel input covers its separate debounce owner as well.
+    // (#158: the ParamPanel debounce owner is retired, so only the three App
+    // lifecycle paths remain armable here.)
     const lifecycleHook = window.__appLifecycle;
     const armed = {
       preload: typeof lifecycleHook?.armPreload === 'function',
       veil: typeof lifecycleHook?.armVeil === 'function',
       reroll: typeof lifecycleHook?.armReroll === 'function',
-      param: false,
     };
     lifecycleHook?.armPreload();
     lifecycleHook?.armVeil();
@@ -3743,12 +3714,6 @@ try {
       () => 'resolved',
       (error) => error?.name || 'unknown',
     );
-    const param = document.querySelector('.panel input[type="range"]');
-    if (param) {
-      armed.param = true;
-      param.value = String(Number(param.min || 0) + Number(param.step || 0.01));
-      param.dispatchEvent(new Event('input', { bubbles: true }));
-    }
 
     const replacementNames = ['__device', '__envflow', '__glb', '__envRerollPick', '__appLifecycle'];
     const replacementHooks = Object.fromEntries(replacementNames.map((name) => [name, { owner: `new:${name}` }]));
@@ -3845,7 +3810,7 @@ try {
     };
   });
   pass(Object.values(teardown.armed).every(Boolean),
-    `final app boot arms preload, veil, focus reroll, and ParamPanel debounce (${JSON.stringify(teardown.armed)})`);
+    `final app boot arms preload, veil, and focus reroll (${JSON.stringify(teardown.armed)})`);
   pass(teardown.replacementHooksPreserved,
     'unmount preserves debug hooks that a newer owner replaced by identity');
   pass(teardown.replacementEngineHooksPreserved,

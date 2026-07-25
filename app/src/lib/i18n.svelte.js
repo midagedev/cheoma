@@ -16,6 +16,9 @@ const DICT = {
     guide_touch_zoom: '두 손가락으로 확대·축소하고 이동',
     guide_touch_house: '집을 탭해 가까이 보기',
     guide_touch_exit: '둘러보기로 돌아가기',
+    // P7(#158): 문 인터랙션은 호버 힌트에만 있어 터치에서 영구 미노출이었다 → 안내 카드에 상시 1줄.
+    guide_desktop_door: '가까이서 문을 눌러 열고 닫기',
+    guide_touch_door: '가까이서 문을 탭해 열고 닫기',
     guide_dismiss: '조작 안내 닫기',
     act_rebuild: '다시 짓기', act_rebuild_tip: '다시 짓기 (새 씨앗)',
     act_replay: '다시 보기', act_replay_tip: '종가 다시 짓는 장면 보기',
@@ -126,6 +129,16 @@ const DICT = {
     hint_bays: '칸', hint_open_door: '문 열기', hint_close_door: '문 닫기',
     // 모바일 바텀시트 접기/펼치기(#154)
     sheet_expand: '편집 열기', sheet_collapse: '접기',
+    // ── UI 3축 재구성(#158 B안): 보기 / 만들기 / 공유 ──
+    axis_view: '보기', axis_make: '만들기', axis_share: '공유',
+    crumb_back_tip: '마을로 돌아가기',
+    crumb_busy: '이동 중',
+    // 커밋 대가 배지 — 같은 룩의 슬라이더가 서로 다른 대가를 갖는다는 것을 그룹 헤더에 표시(P10).
+    cost_wave: '마을 재생성', cost_wave_tip: '값을 놓으면 마을을 통째로 다시 짓습니다',
+    cost_live: '즉시 반영', cost_live_tip: '드래그하는 동안 바로 반영됩니다',
+    cost_settle: '놓을 때', cost_settle_tip: '손을 놓는 순간 다시 짓습니다',
+    nav_group_landmark: '랜드마크', nav_group_houses: '집',
+    nav_group_more: '외',
   },
   en: {
     hero_enter: 'Enter',
@@ -138,6 +151,8 @@ const DICT = {
     guide_touch_zoom: 'Pinch or drag with two fingers to zoom and pan',
     guide_touch_house: 'Tap a house to move closer',
     guide_touch_exit: 'Choose Explore to return',
+    guide_desktop_door: 'Up close, click a door to open or close it',
+    guide_touch_door: 'Up close, tap a door to open or close it',
     guide_dismiss: 'Dismiss controls guide',
     act_rebuild: 'Rebuild', act_rebuild_tip: 'Rebuild (new seed)',
     act_replay: 'Replay', act_replay_tip: 'Watch the head house rise again',
@@ -248,6 +263,15 @@ const DICT = {
     hint_bays: 'bays', hint_open_door: 'Open door', hint_close_door: 'Close door',
     // Mobile bottom-sheet collapse/expand (#154)
     sheet_expand: 'Edit', sheet_collapse: 'Collapse',
+    // ── Three-axis UI (#158, option B): View / Make / Share ──
+    axis_view: 'View', axis_make: 'Make', axis_share: 'Share',
+    crumb_back_tip: 'Back to the village',
+    crumb_busy: 'Moving',
+    cost_wave: 'rebuilds village', cost_wave_tip: 'Releasing the control rebuilds the whole village',
+    cost_live: 'live', cost_live_tip: 'Applies while you drag',
+    cost_settle: 'on release', cost_settle_tip: 'Rebuilds when you release',
+    nav_group_landmark: 'Landmarks', nav_group_houses: 'Houses',
+    nav_group_more: 'of',
   },
 };
 

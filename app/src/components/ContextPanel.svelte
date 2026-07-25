@@ -1,13 +1,18 @@
 <script>
-  // 단일 컨텍스트 패널(#92, mode-integration §5.5 원칙 2) — VillagePanel + VillageEditPanel 을 하나로.
-  //   헤더 브레드크럼(마을 → 필지 유형), 부감=마을 섹션(규모·궁·절·다시 짓기), 근접=집 섹션(스키마 주도)이
-  //   같은 패널 안에서 crossfade 모프한다. 모프 진행 morph(0=마을·1=집)는 App 이 카메라 focus 트윈 진행에서
-  //   흘려받아(engine onProgress) 카메라·DoF·링과 한 클록으로 그린다(원칙 3). 패널은 마을 씬에서 상주
-  //   (히어로 랜딩 중엔 App 이 open=false 로 숨김).
+  // "만들기" 패널(#158 B안, mode-integration §5.5 재해석) — 구 단일 컨텍스트 패널의 승계자.
+  //   ① 명시적 2탭 [둘러보기(村) / 집 보기(家)] 가 컨텍스트를 선언하고 **카메라와 동기**된다
+  //      (탭 클릭 = focus-in/focus-out 실행). 모프(crossfade)는 그대로 유지되므로 §5.5 원칙 2는
+  //      "모프"에서 "탭 + 모프"로 재해석된다 — 컨텍스트는 여전히 하나, 표시만 명시적이다.
+  //   ② 그룹 아코디언(동시 1개 펼침) — 전 축을 계속 노출하되(사용자 지시: 숨기지 말 것) 한 번에
+  //      한 그룹만 펼쳐 스크롤 초과(P11)를 구조적으로 없앤다.
+  //   ③ 그룹 헤더의 커밋 대가 배지(P10) — 마을 축=마을 재생성 / 정규 필지=즉시 / 컴파운드=놓을 때.
+  //   브레드크럼은 이 패널 밖(좌상 Breadcrumb)으로 나갔고, 공유·사진·모델 내보내기는 공유 독이
+  //   단독 소유한다(P9) — 패널 푸터에는 "만들기" 액션(다시 짓기)만 남는다.
   import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
     buildingNavigationStatus,
+    groupBuildingNavigationTargets,
     normalizeBuildingNavigationTargets,
     resolveBuildingNavigationTarget,
   } from '../lib/building-navigation.js';
@@ -16,36 +21,30 @@
 
   let {
     open = false, morph = 0, detent = null,
+    // 컨텍스트 탭 — onTab('village'|'house') 이 카메라 전환을 실행한다(모프와 한 클록).
+    onTab = null, tabBusy = false,
     // 마을 섹션(부감)
-    scale = 'village', includePalace = false, includeTemple = false, houses = 0,
+    scale = 'village', includePalace = false, includeTemple = false,
     onScale, onPalace, onTemple, onReroll, waving = false,
-    // 마을 상세 파라미터(#91) — 지형·구성·어휘. villageParams 는 App villageOpts 서브셋, onVillageOpt(key,value) 커밋.
     villageParams = {}, onVillageOpt = null,
     // 집 섹션(근접)
     spec = null, params = {}, onType, onLive, onCommit, onRerollHouse, houseBusy = false,
-    // 키보드 건물 탐색(#114). engine navigationTargets()의 JSON-only `{id,type}`만 소비한다.
-    // selector는 모프 owner 밖의 공통 헤더에 남고, App은 focus()/switchTo() 중 하나만 onNavigateTarget에 연결한다.
+    // 키보드 건물 탐색(#114·#158 P8): 랜드마크/집 그룹 + 상한 20(선택 대상은 항상 포함).
     navigationTargets = [], navigationSelectedId = null, navigationBusy = false,
     onNavigateTarget = null,
-    // glb 내보내기(#112) — onExportVillage(부감 전체)·onExportHouse(focus 건물)·exporting(스피너·중복 방지)
-    onExportVillage = null, onExportHouse = null, exporting = false,
-    // 공통. onShare는 큰 액션바를 숨기는 터치 focus/edit에서만 App이 전달한다.
-    onShare = null, onBack,
   } = $props();
 
-  // ── 모프 크로스페이드(원칙 2) — 마을은 먼저 빠지고 집은 뒤이어 든다(0.4~0.6 겹침). ──
+  // ── 모프 크로스페이드(원칙 2) — 마을은 먼저 빠지고 집은 뒤이어 든다. ──
   const smoothstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  // 겹침 넓게(0.28~0.72) — 중간 진행에서 두 섹션이 함께 비쳐 crossfade 로 읽히게(빈 골짜기 방지).
   const villageOpacity = $derived(1 - smoothstep(0.28, 0.72, morph));
   const houseOpacity = $derived(smoothstep(0.28, 0.72, morph));
   const houseActive = $derived(morph >= 0.5);   // 포인터·손잡이 컨텍스트
 
   // 크로스페이드 중에도 키보드·접근성 소유자는 하나다. inert 적용 전 포커스가 퇴장하는 본문/푸터 안에
-  // 있을 때만 다음 컨텍스트의 브레드크럼으로 옮긴다. 캔버스·환경 UI·References에 있던 포커스는 건드리지
-  // 않는다. $effect.pre가 DOM attribute 갱신 전에 activeElement를 읽고 tick 뒤 새 heading/trigger를 찾는다.
+  // 있을 때만 다음 컨텍스트의 브레드크럼(좌상, 이 컴포넌트 밖)으로 옮긴다. 캔버스·환경 UI·References 에
+  // 있던 포커스는 건드리지 않는다.
   let stackRoot = $state(null);
   let footerRoot = $state(null);
-  let headerRoot = $state(null);
   let previousHouseActive = null;
   $effect.pre(() => {
     const nextHouseActive = houseActive;
@@ -61,7 +60,9 @@
       stackRoot?.querySelector(`[data-context-owner="${outgoingOwner}"]`),
       footerRoot?.querySelector(`[data-context-owner="${outgoingOwner}"]`),
     ];
-    const outgoingHeader = headerRoot?.querySelector(`[data-context-focus="${outgoingOwner}"]`);
+    const outgoingHeader = typeof document === 'undefined'
+      ? null
+      : document.querySelector(`[data-context-focus="${outgoingOwner}"]`);
     const moveFocus = !!active
       && (active === outgoingHeader || outgoing.some((root) => root?.contains(active)));
     previousHouseActive = nextHouseActive;
@@ -69,26 +70,14 @@
 
     void tick().then(() => {
       const nextOwner = nextHouseActive ? 'house' : 'village';
-      const destination = headerRoot?.querySelector(`[data-context-focus="${nextOwner}"]`);
+      const destination = document.querySelector(`[data-context-focus="${nextOwner}"]`);
       if (destination?.isConnected && !destination.closest('[inert]')) {
         destination.focus({ preventScroll: true });
       }
     });
   });
 
-  // ── 브레드크럼 ──
-  const houseLabel = $derived.by(() => {
-    if (!spec) return '';
-    if (spec.family === 'palace-compound') return t('crumb_palace_compound');   // 궁궐(#93)
-    if (spec.family === 'temple') return t('crumb_temple');   // 산사(#147) — 줌 전용 랜드마크
-    if (spec.hero) return t(spec.heroStyle === 'hanok' ? 'crumb_hanok' : 'crumb_palace');
-    const k = params.kind || spec.kind;
-    return t(k === 'giwa' ? 'type_giwa_l' : 'type_choga_l');
-  });
-
   // ── 지속적인 의미 기반 건물 선택기(#114) ──
-  // native select가 후보 선택을 소유하고 명시적 버튼만 카메라 전환을 시작한다. 키 입력은 canvas에
-  // 전달하지 않는다. pointer focus나 reroll로 현재 선택/목록이 바뀌면 stable id로 한 번만 재조정한다.
   const NAVIGATION_LABEL_KEYS = {
     'head-house': 'crumb_hanok',
     government: 'crumb_palace',
@@ -98,25 +87,30 @@
     choga: 'type_choga_l',
   };
   const normalizedNavigationTargets = $derived(normalizeBuildingNavigationTargets(navigationTargets));
+  const navigationGroups = $derived(groupBuildingNavigationTargets(normalizedNavigationTargets, {
+    selectedId: navigationSelectedId,
+  }));
+  // 옵션은 그룹으로 상한이 걸리므로 draft 유효성은 "보이는 후보" 기준으로 판정한다.
+  const visibleNavigationTargets = $derived(navigationGroups.flatMap((group) => group.targets));
   let navigationDraftId = $state('');
   let observedNavigationSelectedId = $state(undefined);
   $effect(() => {
     const selected = resolveBuildingNavigationTarget(
-      normalizedNavigationTargets,
+      visibleNavigationTargets,
       navigationSelectedId,
     );
     const selectedId = selected?.id ?? null;
     if (observedNavigationSelectedId !== selectedId) {
       observedNavigationSelectedId = selectedId;
-      navigationDraftId = selectedId || normalizedNavigationTargets[0]?.id || '';
+      navigationDraftId = selectedId || visibleNavigationTargets[0]?.id || '';
       return;
     }
-    if (!resolveBuildingNavigationTarget(normalizedNavigationTargets, navigationDraftId)) {
-      navigationDraftId = selectedId || normalizedNavigationTargets[0]?.id || '';
+    if (!resolveBuildingNavigationTarget(visibleNavigationTargets, navigationDraftId)) {
+      navigationDraftId = selectedId || visibleNavigationTargets[0]?.id || '';
     }
   });
   const navigationDraft = $derived(resolveBuildingNavigationTarget(
-    normalizedNavigationTargets,
+    visibleNavigationTargets,
     navigationDraftId,
   ));
   const navigationState = $derived(buildingNavigationStatus(
@@ -137,6 +131,9 @@
       ? `${label} ${target.ordinal}`
       : label;
   };
+  const navigationGroupLabel = (group) => (group.targets.length < group.total
+    ? `${t(group.labelKey)} · ${group.targets.length} / ${group.total}`
+    : t(group.labelKey));
   const navigationStatusText = $derived.by(() => {
     if (navigationState.kind === 'focus') {
       return `${navigationTargetLabel(navigationState.selected)} · ${t('nav_current_status')}`;
@@ -163,8 +160,7 @@
     onNavigateTarget?.(navigationDraft.id);
   }
 
-  // ── 마을 규모 슬라이더(기존 VillagePanel 계약 그대로) ──
-  //   'solo'(#114) = 외딴집(집 한 채, siteR30). 절 토글과 조합하면 "산사 하나만" 구성.
+  // ── 마을 규모(그룹 밖 상주 — 규모는 이 패널의 헤드라인 축) ──
   const SCALES = ['solo', 'hamlet', 'village', 'town', 'capital', 'hanyang'];
   const idx = $derived(Math.max(0, SCALES.indexOf(scale)));
   let dragVal = $state(null);
@@ -174,14 +170,34 @@
   function slideInput(v) { dragVal = v; }
   function slideCommit(v) { dragVal = null; const a = SCALES[Math.round(v)]; if (a !== scale) onScale?.(a); }
 
-  // ── 마을 상세 파라미터(#91) — 지형·구성·어휘 스키마 렌더 + 커밋(라이브 없음 = 재생성 파라미터) ──
+  // ── 그룹 아코디언(동시 1개 펼침) ──
   const vSections = villageSchema();
-  let showVDetail = $state(true);   // 기본 펼침(사용자 지시 2026-07-19: 고급설정 숨기지 말 것)
+  const schema = $derived(schemaFor(spec));
+  const editable = $derived(!!spec && spec.editable === true);
+  // 기본 펼침 = 각 컨텍스트의 첫 그룹. 사용자 지시("고급설정 숨기지 말 것")는 *전 축 노출* 요구이므로
+  // 축은 모두 남아 있고, 한 번에 한 그룹만 펼쳐 폴드 초과만 없앤다.
+  let openVillageGroup = $state(vSections[0]?.id || null);
+  let openHouseGroup = $state(null);
+  // 스키마 정체성(유형·컴파운드 가족)이 바뀌면 첫 그룹으로 되돌린다 — 사라진 그룹이 열린 채로 남지 않게.
+  let observedSchemaKey = null;
+  $effect(() => {
+    const key = `${schema.family}:${schema.kind || schema.heroStyle || ''}:${schema.sections.map((s) => s.id).join(',')}`;
+    if (observedSchemaKey === key) return;
+    observedSchemaKey = key;
+    openHouseGroup = schema.sections[0]?.id || null;
+  });
+  const toggleVillageGroup = (id) => { openVillageGroup = openVillageGroup === id ? null : id; };
+  const toggleHouseGroup = (id) => { openHouseGroup = openHouseGroup === id ? null : id; };
+
+  const TYPES = [
+    { key: 'giwa', l: 'type_giwa_l', s: 'type_giwa_s' },
+    { key: 'choga', l: 'type_choga_l', s: 'type_choga_s' },
+  ];
+
+  // ── 마을 상세 파라미터 표시 규약(#91 계승) ──
   const scaleIdx = $derived(Math.max(0, SCALES.indexOf(scale)));
-  // range 표시값: 코어 no-op 기본(def) 을 fallback. char01(auto) 은 값이 null 이면 def 로 표시하되 미전송.
   const vShow = (f) => (typeof villageParams[f.key] === 'number' ? villageParams[f.key] : (f.def ?? f.min));
   const vIsAuto = (f) => f.auto === true && typeof villageParams[f.key] !== 'number';
-  // tri-state(cityWall·sijeon) 켜짐 판정 — true 강제 or ('auto' 이고 hanyang tier). 표시·클릭 방향에 사용.
   const vTriOn = (f) => { const v = villageParams[f.key]; return v === true || ((v == null || v === 'auto') && scale === 'hanyang'); };
   const vPlainOn = (f) => {
     const value = villageParams[f.key];
@@ -195,8 +211,9 @@
     const gateIdx = SCALES.indexOf(f.tierGate);
     return gateIdx >= 0 && scaleIdx < gateIdx;
   };
+  const vDisplay = (f) => (vIsAuto(f) ? t('vil_char_auto') : Number(vShow(f)).toFixed(2));
   function vRange(f, value) { onVillageOpt?.(f.key, value); }
-  function vToggleTri(f) { onVillageOpt?.(f.key, vTriOn(f) ? false : true); }   // 강제 ON/OFF(‘auto’ 이탈)
+  function vToggleTri(f) { onVillageOpt?.(f.key, vTriOn(f) ? false : true); }
   function vTogglePlain(f) {
     if (vDisabled(f)) return;
     if (f.onValue !== undefined) {
@@ -206,18 +223,7 @@
     onVillageOpt?.(f.key, !vPlainOn(f));
   }
 
-  // ── 집 편집 스키마(통합 패널의 단일 구현) ──
-  const editable = $derived(!!spec && spec.editable === true);
-  const schema = $derived(schemaFor(spec));
-  const basic = $derived(schema.sections.filter((s) => !s.adv));
-  const adv = $derived(schema.sections.filter((s) => s.adv));
-  let showAdv = $state(true);   // 기본 펼침(사용자 지시 2026-07-19)
-  const TYPES = [
-    { key: 'giwa', l: 'type_giwa_l', s: 'type_giwa_s' },
-    { key: 'choga', l: 'type_choga_l', s: 'type_choga_s' },
-  ];
-  // 표시값 — 편집 전엔 필드 기본(def) 을 fallback(#146: 종가 평면형/칸수는 spec.params 에 없어 def 로
-  //   초기 표시하되, 미편집이면 페이로드엔 안 실려 렌더 불변). def 없으면 min.
+  // ── 집 편집 표시 규약(#48 계승) ──
   const showVal = (f) => (typeof params[f.key] === 'number' ? params[f.key] : (f.def ?? f.min));
   const displayValue = (f, value = showVal(f)) => f.format === 'percent'
     ? `${Math.round(Number(value) * 100)}%`
@@ -234,7 +240,6 @@
   }
   function pick(f, value) { params[f.key] = value; onCommit?.(f.key, value); }
   function toggleField(f) { const v = !params[f.key]; params[f.key] = v; onCommit?.(f.key, v); }
-  // segment 옵션 라벨: wallType→wall_*, doorPattern→door_*, planShape→step_*(#146 구 패널 어휘 재사용).
   const optLabel = (key, o) => t((key === 'wallType' ? 'wall_'
     : key === 'doorPattern' ? 'door_'
     : key === 'planShape' ? 'step_'
@@ -243,19 +248,60 @@
     : '') + o);
 </script>
 
-<BottomSheet {open} variant="context" closable={false} gap={13} {detent} ariaLabel="context panel" {header} {footer}>
+<BottomSheet {open} gap={11} {detent} ariaLabel="make panel" {header} {footer}>
+  <!-- 건물 선택기는 sticky 헤더가 아니라 스크롤 본문 최상단에 둔다(#158 P8·P1): 헤더에서 44~90px 를
+       상시 점유해 가로 폰의 스크롤 창을 절반으로 깎던 원인이었다. 모프 owner 밖(컨텍스트 공통)에 남는다. -->
+  {#if navigationGroups.length}
+    <div class="buildingnav" data-building-navigation>
+      <label class="navlabel" for="building-navigation">{t('nav_building')}</label>
+      <div class="navcontrols">
+        <select
+          id="building-navigation"
+          value={navigationDraftId}
+          aria-describedby="building-navigation-status"
+          onchange={(event) => (navigationDraftId = event.currentTarget.value)}
+        >
+          {#each navigationGroups as group (group.id)}
+            <optgroup label={navigationGroupLabel(group)}>
+              {#each group.targets as target (target.id)}
+                <option value={target.id}>{navigationTargetLabel(target)}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+        <button
+          class="navaction"
+          type="button"
+          aria-disabled={navigationActionUnavailable}
+          aria-busy={navigationBusy || undefined}
+          aria-label={navigationActionAccessibleLabel}
+          onclick={activateNavigationTarget}
+        >{navigationActionLabel}</button>
+      </div>
+      <p
+        id="building-navigation-status"
+        class="navstatus"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >{navigationStatusText}</p>
+    </div>
+  {/if}
+
   <!-- 모프 스택: 마을·집 섹션이 같은 그리드 셀에 겹쳐 crossfade. -->
   <div bind:this={stackRoot} class="stack">
-    <!-- 마을 섹션(부감) -->
+    <!-- 마을 컨텍스트(부감) -->
     <div
       class="ctx village"
       style="opacity:{villageOpacity}; transform: translateY({-8 * morph}px);"
       style:pointer-events={houseActive ? 'none' : 'auto'}
       aria-hidden={houseActive}
       inert={houseActive}
+      role="tabpanel"
+      aria-labelledby="make-tab-village"
       data-context-owner="village"
     >
-      <section>
+      <section class="pinned">
         <div class="scalehead">
           <h4>{t('vil_scale')}</h4>
           <span class="scaleval">{t('scale_' + shownAnchor)}</span>
@@ -266,22 +312,22 @@
           oninput={(e) => slideInput(parseFloat(e.currentTarget.value))}
           onchange={(e) => slideCommit(parseFloat(e.currentTarget.value))}
           aria-label={t('vil_scale')}
+          aria-valuetext={t('scale_' + shownAnchor)}
         />
         <div class="ends"><span>{t('scale_solo')}</span><span>{t('scale_hanyang')}</span></div>
-      </section>
-
-      <section>
         <div class="toggles">
           <button class="toggle" class:on={includePalace} disabled={!palaceScale}
-            onclick={() => onPalace?.()} title={!palaceScale ? t('vil_palace_hint') : ''}>
+            onclick={() => onPalace?.()} title={!palaceScale ? t('vil_palace_hint') : ''}
+            aria-pressed={includePalace}>
             <span class="dot" aria-hidden="true"></span>{t('vil_palace')}
           </button>
-          <button class="toggle" class:on={includeTemple} onclick={() => onTemple?.()}>
+          <button class="toggle" class:on={includeTemple} onclick={() => onTemple?.()}
+            aria-pressed={includeTemple}>
             <span class="dot" aria-hidden="true"></span>{t('vil_temple')}
           </button>
-          <!-- 외딴집(#114)에서만: 집 없이 = 빈 산세/절 하나만(절 토글과 조합) -->
           {#if shownAnchor === 'solo' && onVillageOpt}
             <button class="toggle" class:on={villageParams.houses === 0}
+              aria-pressed={villageParams.houses === 0}
               onclick={() => onVillageOpt('houses', villageParams.houses === 0 ? null : 0)}>
               <span class="dot" aria-hidden="true"></span>{t('vil_nohouse')}
             </button>
@@ -289,25 +335,23 @@
         </div>
       </section>
 
-      <!-- 마을 상세(#91): 지형·구성·어휘 파라미터. 과밀 제어로 접기(기본 닫힘). 변경 시 재생성(시드 유지). -->
       {#if onVillageOpt}
-        <button class="advtoggle" class:open={showVDetail} onclick={() => (showVDetail = !showVDetail)} aria-expanded={showVDetail}>
-          <span class="chev" aria-hidden="true">{showVDetail ? '−' : '+'}</span>{t('vil_detail')}
-        </button>
-        {#if showVDetail}
-          {#each vSections as vsec (vsec.id)}{@render villageSection(vsec)}{/each}
-        {/if}
+        {#each vSections as vsec (vsec.id)}
+          {@render groupHeader(vsec, openVillageGroup === vsec.id, () => toggleVillageGroup(vsec.id))}
+          {#if openVillageGroup === vsec.id}{@render villageSection(vsec)}{/if}
+        {/each}
       {/if}
-      <!-- 마을 액션(다시 짓기·내보내기)은 sticky 푸터로 이설(#118 U1) — footer 스니펫 참조. -->
     </div>
 
-    <!-- 집 섹션(근접) -->
+    <!-- 집 컨텍스트(근접) -->
     <div
       class="ctx house"
       style="opacity:{houseOpacity}; transform: translateY({12 * (1 - morph)}px);"
       style:pointer-events={houseActive ? 'auto' : 'none'}
       aria-hidden={!houseActive}
       inert={!houseActive}
+      role="tabpanel"
+      aria-labelledby="make-tab-house"
       data-context-owner="house"
     >
       {#if editable}
@@ -318,7 +362,7 @@
         {:else if schema.family === 'hero'}
           <p class="note">{t(schema.heroStyle === 'hanok' ? 'vil_hero_edit_note' : 'vil_palace_edit_note')}</p>
         {:else}
-          <section>
+          <section class="pinned">
             <h4>{t('sec_type')}</h4>
             <div class="tabs">
               {#each TYPES as ty}
@@ -331,88 +375,58 @@
           </section>
         {/if}
 
-        {#each basic as sec (sec.id)}{@render editSection(sec)}{/each}
-
-        {#if adv.length}
-          <button class="advtoggle" class:open={showAdv} onclick={() => (showAdv = !showAdv)} aria-expanded={showAdv}>
-            <span class="chev" aria-hidden="true">{showAdv ? '−' : '+'}</span>{t('edit_advanced')}
-          </button>
-          {#if showAdv}{#each adv as sec (sec.id)}{@render editSection(sec)}{/each}{/if}
-        {/if}
+        {#each schema.sections as sec (sec.id)}
+          {@render groupHeader(sec, openHouseGroup === sec.id, () => toggleHouseGroup(sec.id))}
+          {#if openHouseGroup === sec.id}{@render editSection(sec)}{/if}
+        {/each}
       {:else if spec}
         <div class="hero-note">
           <span class="mark" aria-hidden="true">印</span>
           <p>{t('vil_hero_note')}</p>
         </div>
       {/if}
-      <!-- 집 액션(다시 짓기·내보내기)은 sticky 푸터로 이설(#118 U1) — footer 스니펫 참조. -->
     </div>
   </div>
 </BottomSheet>
 
-<!-- ── 고정 헤더: 브레드크럼(마을 → 필지). 집 컨텍스트에서 '마을'을 누르면 focus-out. ── -->
+<!-- ── 고정 헤더: 축 라벨 + 컨텍스트 2탭 + 건물 선택기 ── -->
 {#snippet header()}
-  <div bind:this={headerRoot} class="contexthead">
-    <div class="crumbs">
-      {#if houseActive}
-        <button
-          class="crumb root link"
-          onclick={() => onBack?.()}
-          aria-label={t('vil_title')}
-          data-context-focus="house"
-        >{t('vil_title')}</button>
-      {:else}
-        <h3
-          class="crumb root"
-          tabindex="-1"
-          data-context-focus="village"
-        >{t('vil_title')}</h3>
-      {/if}
-      <span class="sep" style="opacity:{houseOpacity}" aria-hidden="true">›</span>
-      <span class="crumb leaf" style="opacity:{houseOpacity}">{houseLabel}</span>
-      {#if !houseActive && houses > 0}<span class="count">{houses}{t('vil_houses')}</span>{/if}
+  <div class="makehead">
+    <div class="axisrow">
+      <span class="axislabel">{t('axis_make')}</span>
     </div>
-
-    {#if normalizedNavigationTargets.length}
-      <div class="buildingnav" data-building-navigation>
-        <label class="navlabel" for="building-navigation">{t('nav_building')}</label>
-        <div class="navcontrols">
-          <select
-            id="building-navigation"
-            value={navigationDraftId}
-            aria-describedby="building-navigation-status"
-            onchange={(event) => (navigationDraftId = event.currentTarget.value)}
-          >
-            {#each normalizedNavigationTargets as target (target.id)}
-              <option value={target.id}>{navigationTargetLabel(target)}</option>
-            {/each}
-          </select>
-          <button
-            class="navaction"
-            type="button"
-            aria-disabled={navigationActionUnavailable}
-            aria-busy={navigationBusy || undefined}
-            aria-label={navigationActionAccessibleLabel}
-            onclick={activateNavigationTarget}
-          >{navigationActionLabel}</button>
-        </div>
-        <p
-          id="building-navigation-status"
-          class="navstatus"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >{navigationStatusText}</p>
-      </div>
-    {/if}
+    <div class="axistabs" role="tablist" aria-label={t('axis_make')}>
+      <button
+        id="make-tab-village"
+        class="axistab" class:on={!houseActive}
+        type="button"
+        role="tab"
+        aria-selected={!houseActive}
+        aria-busy={tabBusy || undefined}
+        title={t('mode_to_village')}
+        onclick={() => onTab?.('village')}
+      >
+        <span class="glyph" aria-hidden="true">村</span><span class="lab">{t('mode_village')}</span>
+      </button>
+      <button
+        id="make-tab-house"
+        class="axistab" class:on={houseActive}
+        type="button"
+        role="tab"
+        aria-selected={houseActive}
+        aria-busy={tabBusy || undefined}
+        title={t('mode_to_house')}
+        onclick={() => onTab?.('house')}
+      >
+        <span class="glyph" aria-hidden="true">家</span><span class="lab">{t('mode_house')}</span>
+      </button>
+    </div>
   </div>
 {/snippet}
 
-<!-- ── 고정 푸터(#118 U1): 부감=마을 액션 / 근접=집 액션이 morph 로 crossfade(섹션 스택과 한 클록).
-     기본 펼침 상세가 길어도 주요 액션이 폴드 아래로 매몰되지 않게 스크롤 밖에 상주한다. ── -->
+<!-- ── 고정 푸터: "만들기" 액션 한 줄. 공유·사진·모델은 공유 독 단독 소유(P9). ── -->
 {#snippet footer()}
   <div bind:this={footerRoot} class="footstack">
-    <!-- 마을 액션(부감): 다시 짓기(웨이브) + 내보내기 -->
     <div
       class="foot village"
       style="opacity:{villageOpacity}"
@@ -424,15 +438,8 @@
       <button class="rebuild" onclick={() => onReroll?.()} disabled={waving} title={t('vil_reroll_tip')}>
         <span class="rk" aria-hidden="true">再</span>{t('vil_reroll')}
       </button>
-      {#if onExportVillage}
-        <button class="glb" onclick={() => onExportVillage?.()} disabled={waving || exporting} title={t('glb_village_tip')}>
-          <span class="gk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('glb_village')}
-        </button>
-      {/if}
     </div>
 
-    <!-- 집 액션(근접, #19): 필지·집·마당·수목을 한 번에 다시 짓기 / 3D 모델 내보내기.
-         마을 다시 짓기는 마을 액션 전용 — 집 컨텍스트에 마을 리롤 진입 경로 없음. -->
     <div
       class="foot house"
       style="opacity:{houseOpacity}"
@@ -446,42 +453,39 @@
           <button class="hbtn reroll wide" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
             <span class="hk" aria-hidden="true">⚄</span>{t('vil_reroll_house')}
           </button>
-          {#if onShare}
-            <button
-              class="hbtn share"
-              data-action="share"
-              onclick={() => onShare?.()}
-              title={t('act_share_tip')}
-              aria-label={t('act_share')}
-            >
-              <svg class="share-glyph" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 15.5V4m0 0L7.5 8.5M12 4l4.5 4.5M5.5 13v6.5h13V13"></path>
-              </svg>
-              {t('act_share')}
-            </button>
-          {/if}
         </div>
-        {#if onExportHouse}
-          <button class="hbtn glb wide" onclick={() => onExportHouse?.()} disabled={houseBusy || exporting} title={t('glb_house_tip')}>
-            <span class="hk" aria-hidden="true">⬗</span>{exporting ? t('glb_exporting') : t('act_glb')}
-          </button>
-        {/if}
       {/if}
     </div>
   </div>
 {/snippet}
 
+<!-- 그룹 헤더(아코디언 + 커밋 대가 배지). 동시에 하나만 펼쳐진다. -->
+{#snippet groupHeader(sec, isOpen, toggle)}
+  <button
+    class="advtoggle group"
+    class:open={isOpen}
+    type="button"
+    data-group={sec.id}
+    aria-expanded={isOpen}
+    onclick={toggle}
+  >
+    <span class="chev" aria-hidden="true">{isOpen ? '−' : '+'}</span>
+    <span class="gname">{t(sec.titleKey)}</span>
+    <span class="costbadge {sec.cost}" data-cost={sec.cost} title={t('cost_' + sec.cost + '_tip')}>{t('cost_' + sec.cost)}</span>
+  </button>
+{/snippet}
+
 {#snippet villageSection(vsec)}
-  <section class="vdetail">
-    <h4>{t(vsec.titleKey)}</h4>
+  <section class="vdetail" data-group-body={vsec.id}>
     {#each vsec.fields as f (f.key)}
       {#if f.ctrl === 'range'}
         <label class="row">
           <span class="rl">{t('s_' + f.key)}</span>
           <input type="range" data-vkey={f.key} min={f.min} max={f.max} step={f.step}
             value={vShow(f)}
+            aria-label={t('s_' + f.key)} aria-valuetext={vDisplay(f)}
             onchange={(e) => vRange(f, parseFloat(e.currentTarget.value))} />
-          <span class="rv">{vIsAuto(f) ? t('vil_char_auto') : Number(vShow(f)).toFixed(2)}</span>
+          <span class="rv">{vDisplay(f)}</span>
         </label>
       {:else if f.ctrl === 'toggle'}
         <div class="row">
@@ -505,8 +509,7 @@
 {/snippet}
 
 {#snippet editSection(sec)}
-  <section>
-    <h4>{t(sec.titleKey)}</h4>
+  <section data-group-body={sec.id}>
     {#if sec.noteKey}<p class="editnote">{t(sec.noteKey)}</p>{/if}
     {#each sec.fields as f (f.key)}
       {#if f.ctrl === 'range'}
@@ -551,22 +554,37 @@
 {/snippet}
 
 <style>
-  /* ── 브레드크럼 ── */
-  .contexthead { display: flex; flex-direction: column; gap: 9px; }
-  .crumbs {
-    display: flex; align-items: baseline; gap: 7px;
-    border-bottom: 1px solid var(--ink-line); padding-bottom: 9px;
+  /* ── 헤더: 축 라벨 · 컨텍스트 탭 · 건물 선택기 ── */
+  .makehead { display: flex; flex-direction: column; gap: 8px; }
+  .axisrow { display: flex; align-items: baseline; justify-content: space-between; }
+  .axislabel {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink-faint);
   }
-  .crumb { background: none; border: none; padding: 0; font-family: var(--brush); color: var(--ink); }
-  .crumb.root { margin: 0; font-size: 26px; line-height: 1; cursor: default; }
-  .crumb.root.link { cursor: pointer; color: var(--ink-soft); }
-  .crumb.root.link:hover { color: var(--seal-deep); }
-  .sep { font-size: 20px; color: var(--ink-faint); transition: opacity 0.2s ease; }
-  .crumb.leaf { font-size: 26px; line-height: 1; color: var(--seal-deep); transition: opacity 0.2s ease; }
-  .count { margin-left: auto; font-size: 11px; color: var(--seal); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .axistabs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    padding: 3px; border-radius: 7px;
+    background: rgba(44, 38, 32, 0.07); border: 1px solid var(--ink-hair);
+  }
+  .axistab {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 38px; padding: 7px 6px; border: none; border-radius: 5px;
+    background: transparent; color: var(--ink-soft);
+    font-family: var(--serif); letter-spacing: 0.03em;
+    transition: background 0.16s ease, color 0.16s ease;
+  }
+  .axistab .glyph { font-size: 15px; font-weight: 700; opacity: 0.8; }
+  .axistab .lab { font-size: 13px; font-weight: 700; }
+  .axistab:hover { background: rgba(44, 38, 32, 0.06); }
+  .axistab.on {
+    background: var(--seal); color: var(--paper);
+    box-shadow: 0 1px 4px rgba(120, 40, 30, 0.34), inset 0 0 0 1px rgba(255, 220, 210, 0.2);
+  }
+  .axistab.on .glyph { opacity: 1; }
+  .axistab:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
 
-  /* ── 키보드 건물 탐색(#114): 모프와 무관한 native select + 명시적 이동. ── */
-  .buildingnav { display: flex; flex-direction: column; gap: 5px; padding-bottom: 9px; border-bottom: 1px solid var(--ink-line); }
+  /* ── 건물 선택기(#114) — 랜드마크/집 optgroup + 상한 20(P8) ── */
+  .buildingnav { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--ink-line); }
   .navlabel { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; color: var(--ink-faint); text-transform: uppercase; }
   .navcontrols { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
   .navcontrols select, .navaction {
@@ -584,12 +602,13 @@
 
   /* ── 모프 스택 ── */
   .stack { display: grid; }
-  .stack > .ctx { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 13px; transition: opacity 0.12s linear; }
+  .stack > .ctx { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 9px; transition: opacity 0.12s linear; }
 
   section { display: flex; flex-direction: column; gap: 8px; }
+  section.pinned { padding-bottom: 4px; }
   h4 { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.2em; color: var(--ink-faint); text-transform: uppercase; }
 
-  /* ── 마을 섹션 ── */
+  /* ── 마을 규모 ── */
   .scalehead { display: flex; align-items: baseline; justify-content: space-between; }
   .scaleval { font-size: 14px; font-weight: 700; color: var(--ink); font-family: var(--serif); }
   .ends { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--ink-faint); letter-spacing: 0.04em; }
@@ -613,28 +632,28 @@
   .toggle.on { border-color: var(--seal-deep); color: var(--seal-deep); }
   .toggle.on .dot { background: var(--seal); border-color: var(--seal-deep); }
   .toggle:disabled { opacity: 0.4; cursor: default; }
-  /* 다시 짓기(리롤 웨이브) — 주묵 전각 액션. */
-  .rebuild {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 10px; border-radius: 5px; font-size: 13px; font-weight: 700;
-    background: var(--seal); border: 1px solid var(--seal-deep); color: var(--paper);
-    background-image: var(--hanji), linear-gradient(160deg, #bb3e31 0%, #a5322a 60%, #8f2a23 100%);
-    box-shadow: 0 2px 8px rgba(120, 40, 30, 0.28); transition: transform 0.12s ease, filter 0.2s ease;
+
+  /* ── 그룹 아코디언 헤더 + 커밋 대가 배지(P10) ── */
+  .advtoggle {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 7px 2px; background: transparent; border: none;
+    border-top: 1px solid var(--ink-hair);
+    color: var(--ink); font-size: 11.5px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; cursor: pointer; text-align: left;
   }
-  .rebuild .rk { font-size: 15px; }
-  .rebuild:hover:not(:disabled) { transform: translateY(-1px); }
-  .rebuild:disabled { filter: saturate(0.6) opacity(0.6); cursor: default; }
-  /* glb 내보내기 — 먹빛 보조 액션(주묵 다시 짓기와 위계 구분). */
-  .glb {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 9px; border-radius: 5px; font-size: 12.5px; font-weight: 700;
-    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink);
-    transition: transform 0.12s ease, background 0.15s ease, filter 0.2s ease;
+  .advtoggle:hover { color: var(--seal-deep); }
+  .advtoggle:focus-visible { outline: 2px solid var(--seal); outline-offset: 1px; }
+  .advtoggle .chev { flex: none; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 3px; border: 1px solid var(--ink-hair); font-size: 13px; line-height: 1; }
+  .advtoggle .gname { flex: 1 1 auto; min-width: 0; }
+  .advtoggle.open .gname { color: var(--seal-deep); }
+  .costbadge {
+    flex: none; padding: 2px 6px; border-radius: 3px;
+    font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: none;
+    border: 1px solid var(--ink-hair); color: var(--ink-faint); background: rgba(44, 38, 32, 0.04);
   }
-  .glb .gk { font-size: 14px; color: var(--ink-soft); }
-  .glb:hover:not(:disabled) { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
-  .glb:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
-  .hbtn.glb.wide { flex: none; width: 100%; margin-top: 8px; }
+  .costbadge.wave { color: var(--seal-deep); border-color: rgba(138, 40, 31, 0.42); background: rgba(177, 54, 43, 0.08); }
+  .costbadge.live { color: var(--ink-soft); }
+  .costbadge.settle { color: var(--ink-soft); border-style: dashed; }
 
   /* ── 집 섹션 ── */
   .editnote { margin: -2px 0 2px; font-size: 11.5px; line-height: 1.45; color: var(--ink-faint); font-style: italic; }
@@ -663,11 +682,7 @@
   .tgl .knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--paper); box-shadow: 0 1px 2px rgba(60, 30, 20, 0.35); transition: transform 0.16s ease; }
   .tgl.on { background: var(--seal); border-color: var(--seal-deep); }
   .tgl.on .knob { transform: translateX(18px); }
-  .advtoggle { display: flex; align-items: center; gap: 8px; align-self: flex-start; padding: 6px 2px; background: transparent; border: none; color: var(--ink-faint); font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; cursor: pointer; }
-  .advtoggle:hover { color: var(--ink); }
-  .advtoggle .chev { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 3px; border: 1px solid var(--ink-hair); font-size: 13px; line-height: 1; }
   .note { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); font-style: italic; }
-  /* 마을 상세(#91) — 편집 섹션과 동일 룩 계승. tierhint = 하위 tier 비활성 사유(예: 시전=도성부터). */
   .vdetail { gap: 7px; }
   .tierhint { font-size: 9.5px; color: var(--ink-faint); font-weight: 600; letter-spacing: 0.02em; }
   .hero-note { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 6px; background: rgba(177, 54, 43, 0.06); border: 1px dashed var(--seal); }
@@ -677,11 +692,19 @@
   input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--seal); border: 1.5px solid var(--paper); box-shadow: 0 1px 3px rgba(60, 30, 20, 0.4); cursor: pointer; }
   input[type='range']::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: var(--seal); border: 1.5px solid var(--paper); cursor: pointer; }
 
-  /* ── sticky 푸터(#118 U1) — 부감/근접 액션을 같은 셀에 겹쳐 morph crossfade(섹션 스택과 동일 클록). ── */
+  /* ── 푸터: 만들기 액션 한 줄(모프 crossfade) ── */
   .footstack { display: grid; }
   .footstack > .foot { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 8px; transition: opacity 0.12s linear; }
-
-  /* 집 액션(#19): 필지 transaction을 시작하는 주묵 전각. */
+  .rebuild {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px; border-radius: 5px; font-size: 13px; font-weight: 700;
+    background: var(--seal); border: 1px solid var(--seal-deep); color: var(--paper);
+    background-image: var(--hanji), linear-gradient(160deg, #bb3e31 0%, #a5322a 60%, #8f2a23 100%);
+    box-shadow: 0 2px 8px rgba(120, 40, 30, 0.28); transition: transform 0.12s ease, filter 0.2s ease;
+  }
+  .rebuild .rk { font-size: 15px; }
+  .rebuild:hover:not(:disabled) { transform: translateY(-1px); }
+  .rebuild:disabled { filter: saturate(0.6) opacity(0.6); cursor: default; }
   .house-actions { display: flex; flex-direction: row; gap: 8px; }
   .hbtn {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px;
@@ -695,27 +718,20 @@
     box-shadow: 0 2px 8px rgba(120, 40, 30, 0.28);
   }
   .hbtn.reroll:hover:not(:disabled) { transform: translateY(-1px); }
-  .hbtn.share {
-    flex: 0 0 auto; min-width: 76px;
-    background: transparent; border: 1px solid var(--ink-hair); color: var(--ink);
-  }
-  .hbtn.share:hover { background: rgba(44, 38, 32, 0.06); transform: translateY(-1px); }
-  .hbtn.share .share-glyph {
-    width: 18px; height: 18px; fill: none; stroke: var(--seal-deep);
-    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
-  }
   .hbtn:disabled { filter: saturate(0.6) opacity(0.55); cursor: default; }
   .hbtn:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
 
   /* 터치: 타깃 확대. */
   @media (max-width: 600px), (pointer: coarse) {
-    .crumb.root, .crumb.leaf { font-size: 28px; }
+    .axistab { min-height: 44px; }
+    .axistab .lab { font-size: 14px; }
     .navcontrols select, .navaction { min-height: 44px; font-size: 14px; }
     .navaction { min-width: 74px; }
     .scaleval { font-size: 16px; }
     .toggle { padding: 13px 6px; font-size: 14px; }
     .rebuild { padding: 14px; font-size: 15px; }
     .hbtn { padding: 14px 8px; font-size: 14px; }
+    .advtoggle { min-height: 44px; font-size: 12.5px; }
     input[type='range'].scale { height: 5px; }
     input[type='range'].scale::-webkit-slider-thumb { width: 26px; height: 26px; }
     input[type='range'].scale::-moz-range-thumb { width: 26px; height: 26px; }
@@ -732,5 +748,12 @@
     input[type='range'] { height: 5px; }
     input[type='range']::-webkit-slider-thumb { width: 24px; height: 24px; }
     input[type='range']::-moz-range-thumb { width: 24px; height: 24px; }
+  }
+  /* 가로 폰: 세로 여유가 없어 장식(축 라벨)만 접고 44px 타깃은 유지한다(P1 지표 ≥200px 는 건물
+     선택기를 sticky 헤더에서 스크롤 본문으로 내려 확보했다). */
+  @media (max-height: 520px) and (orientation: landscape) {
+    .axislabel { display: none; }
+    .navlabel { font-size: 9px; }
+    .row { min-height: 36px; }
   }
 </style>

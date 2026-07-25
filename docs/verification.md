@@ -527,8 +527,9 @@ texture 0, shadow caster 0인지 확인한다. 두 번째 실제 마을의 plan 
 편집을 보존한다. focus는 편집과 독립된 stable parcel ID이고, 카메라는 raw pose 대신 canonical target 기준
 방위 0.1°·고도 0.1°·화면 등가 zoom 0.001·피사체 크기 정규화 pan 0.001의 작은 의미 상태를 쓴다.
 단일 건물도 같은 의미 카메라를 쓰되 현재 건물의 canonical 3/4 target·크기·기준 거리로 정규화한다.
-ParamPanel의 다섯 공개 축(`roofPitch`, `riseScale`, `eaveOverhang`, `cornerLift`, `profileCurve`)은
+단일건물 다섯 공개 축(`roofPitch`, `riseScale`, `eaveOverhang`, `cornerLift`, `profileCurve`)은
 공용 순수 스펙의 범위·step을 통과한 실제 커밋 차이만 `hp`에 순서 고정으로 기록하고, 미편집 기본값은 생략한다.
+(#158 로 레거시 ParamPanel 은 폐기됐다 — 이 축은 받은 canonical URL 의 복원·재공유 계약으로만 남는다.)
 마을의 compact 주거 편집은 기존 계약대로 kind와 여섯 개구 축만 보존하며, 지붕·마당·reroll 세부는
 URL/share 레코드에 확장하지 않는다.
 
@@ -609,12 +610,12 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
   native 공유를 시작하지 않으면 스텁 자체가 거부한다. native 성공은 clipboard를 건드리지 않고,
   `AbortError`는 토스트 없이 끝나며, native 실패→clipboard 성공과 두 경로 실패는 각각
   복사 성공/실패 토스트로 이어져야 한다. 1280×800 부감과 390×844 부감·근경에서 44px 이상 target이 화면 및
-  자기 owner 안에 있고 패널·형제 액션과 겹치지 않는지 검사하며, 모바일 근경은 전역 overlay 없이
-  ContextPanel의 활성 house sticky footer 하나만 공유 액션을 소유한다. 같은 390×844 부팅을 단일건물 선택으로
-  전환한 뒤에는 전역 ActionBar 없이 활성 ParamPanel owner 안의 44px 이상 공유 액션 하나만 남고, native
-  payload의 `scene`에서 이전 마을 상태가 사라지는지도 확인한다. 실제 두 ParamPanel 축을 커밋한 payload는
-  별도 페이지의 최초 프레임과 reload에서 같은 건물 파라미터·의미 구도를 복원하며, restore는 조립 애니메이션을
-  재생하지 않는다. type 변경 직전 지연 slider commit과 reroll 뒤에는 이전 `hp`가 새 기준 P로 새지 않고,
+  자기 owner 안에 있고 패널·형제 액션과 겹치지 않는지 검사하며, #158 이후 모바일 근경도 **공유 독 하나**만
+  공유 액션을 소유한다(패널 푸터·레거시 패널의 공유 중복 0, 독은 펼쳐진 시트 위로 올라가 겹치지 않는다).
+  같은 390×844 부팅을 단일건물 선택으로 전환한 뒤에는 레거시 패널이 아예 없고 독의 44px 이상 공유 액션
+  하나만 남으며, native payload의 `scene`에서 이전 마을 상태가 사라지는지도 확인한다. 두 단일건물 축을 담은
+  canonical URL 은 별도 페이지의 최초 프레임과 reload에서 같은 건물 파라미터·의미 구도를 복원하며, restore는
+  조립 애니메이션을 재생하지 않는다. reroll 뒤에는 이전 `hp`가 새 기준 P로 새지 않고,
   OrbitControls `end` 뒤에는 damping과 focus crane 보정까지 정착한 canonical 주소의 `vw`를 기록한다.
   #107 legacy URL에서 얻은 실제 native payload를
   새 페이지에서 열어 canonicalization 뒤 다시 reload하고, seed/time/마을과 한 프레임 뒤 의미 카메라가 양자화
@@ -625,6 +626,33 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
   최초 정착/재로드 두 상태, standalone reload 한 상태의 PNG만 선택적으로 남긴다.
 - 엔진 종료가 환경의 geometry/material/texture를 정확히 한 번씩 해제하고 environment group을 scene에서 분리한다.
 - `engine.dispose()`를 두 번 호출해도 안전하고 canvas와 엔진 소유 debug hook(`__season` 포함)이 남지 않는다.
+
+함정 — `check:app`의 shared-scene 단계는 `village.captureView()`가 non-null 이 될 때까지 기다린다. 이 값은
+뷰 시프트(#124) 램프가 수렴해 의미 카메라가 정착한 뒤에만 생긴다. 소프트웨어 렌더(ANGLE/SwiftShader)에서
+두 제품 페이지가 동시에 열려 fps가 떨어지면 이 램프가 수십 초까지 늘어나 기본 90초 타임아웃을 넘길 수 있다.
+그때는 크롬 계약 위반이 아니라 프레임 예산 문제이므로 `CHEOMA_APP_SMOKE_TIMEOUT_MS`를 늘려 재확인하고,
+큰 면적의 `backdrop-filter` 같은 프레임당 크롬 비용을 먼저 의심한다.
+
+### `npm run check:ui-shell`
+
+`tools/check-ui-shell.mjs`는 [보기/만들기/공유] 3축 크롬의 기하 계약을 고정한다(`ui-consolidation.md` §4·§5).
+의도적으로 레이아웃 전용이다 — WebGL 이미지 판정도, 프레임 시간도 쓰지 않는다.
+
+- 뷰포트 5종(1280×800 / 1024×640 fine pointer, 844×390 / 390×844 / 360×780 coarse pointer)에서
+  부감 · 집 편집 · 시네마틱 · 수묵 · 감상 페이드를 돌며 측정한다.
+- 만들기 패널의 스크롤 가시 높이 ≥200px, 스크롤 최하단 마지막 컨트롤의 `inViewport`,
+  사진·공유·모델·다시 짓기·컨텍스트 탭·보기 카드·브레드크럼 루트의 `elementFromPoint` 히트테스트,
+  편집 중 패널이 덮지 않는 프레임 비율 ≥40%, 크롬 박스의 뷰포트 포함, 안내 카드·독·패널·보기 카드의
+  교차면적 0, coarse pointer 44px 타깃, 그룹 아코디언 동시 1개, 그룹별 커밋 대가 배지를 단언한다.
+- 세로 모바일은 부감에서 시트가 `peek`으로 접혀 있고 focus-in 이 사용자의 조작 없이 `half`로 펼쳐지는지
+  (사문화됐던 `detent` 계약) 확인한다.
+- 감상 페이드는 3.4초 무조작 뒤 `.chroma.faded` 와 `.chroma` 밖 크롬 0개로 "씬만 남기기"를 고정한다.
+- `?shot=1`은 뷰 시프트 오프셋 0·흐름 비활성·canvas 안 크롬 0으로 골든 캡처 픽셀 불변 레버를 확인한다.
+- 캡처는 `_wt-out/ui-shell/<viewport>-<state>.png`(또는 `CHEOMA_UI_SHELL_SHOT_DIR`).
+  `CHEOMA_UI_SHELL_BREAK=<css>`로 위반 CSS를 주입하면 같은 게이트가 FAIL 한다(게이트 자기 검증).
+
+`check:pr`은 `app/src/App.svelte`·`app/src/components/**`·`app/src/styles/**`와
+`lib/{device.svelte,edit-schema,building-navigation,i18n.svelte,scene-guide}.js` 변경을 이 게이트로 라우팅한다.
 
 ### `npm run check:ink:app`
 
@@ -645,7 +673,11 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 
 `tools/check-parcel-rebuild-browser.mjs`는 실제 과실수가 있고 정자에 가까운 일반 필지를 격리 Vite 앱에서 선택한다.
 
-- 집 푸터가 `이 집 다시 짓기`와 `내보내기` 두 동작만 제공하고 “다시 보기”·“GLB” 레거시 문구가 없는지 검사한다.
+- 집 푸터가 `이 집 다시 짓기` 하나만 제공하고(#158: 내보내기·공유는 공유 독 소유) “다시 보기”·“GLB”
+  레거시 문구가 없는지, 독에 `내보내기`가 있는지 검사한다. 만들기 패널은 그룹 아코디언(동시 1개)이므로
+  하네스는 축을 읽기 전에 그 그룹을 실제로 펼친다.
+- 세로 모바일 시트는 detent 2개(peek / half ≤58vh)다. 상단까지 끌어도 세 번째 `full` detent 로 가지 않고
+  capped 펼침으로 정착하며, 그 상태에서 씬 가시율 ≥40%·스크롤 창 ≥200px 를 함께 단언한다.
 - 실제 처마 range에 48개 `input`을 한 task에서 보내 숫자와 처마 footprint가 change 전에 최신값으로 보이되 지오메트리 preview는 1회, flora identity는 그대로인지 검사한다. `change` 뒤에는 flora batch가 정확히 한 번 교체되고, 대기 input 직후 focus-out해도 stale rebuild가 없으며 재진입 값은 마지막 commit으로 복원돼야 한다.
 - 실제 버튼을 눌러 마을 seed를 바꾸지 않은 채 필지 경계·집·마당·수목이 새 seed로 커밋되는지 확인한다.
 - 편집 처마·마당 hard object·일조/시선에 대한 수목 충돌이 0이고 flora가 여전히 단일 병합 group/layer 예산을 지키는지 검사한다.

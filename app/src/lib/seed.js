@@ -8,13 +8,8 @@ import {
   pickEnvironmentScene,
 } from '../../../src/api/environment.js';
 
-// 유형 탭 ↔ 프리셋 키 매핑. (궁=korea, 절=temple, 기와집=giwa, 초가=choga)
-export const TYPES = [
-  { key: 'korea', label: '궁', sub: '전각' },
-  { key: 'temple', label: '절', sub: '불전' },
-  { key: 'giwa', label: '기와집', sub: '반가' },
-  { key: 'choga', label: '초가', sub: '민가' },
-];
+// (#158) 유형 탭 ↔ 프리셋 매핑 상수는 레거시 ParamPanel 과 함께 폐기됐다. 유형 어휘는
+// 만들기 패널의 i18n 키(type_*)가, 프리셋 목록은 코어 PRESETS 가 각각 소유한다.
 
 // 플래그십 첫인상 기본 시간대(골든아워 역광 = 메인 룩). 신선 방문(seed·time 파라미터
 // 모두 없음)에만 강제한다 — 공유된 ?seed 링크는 시드에서 파생된 시간대를 그대로 재현.

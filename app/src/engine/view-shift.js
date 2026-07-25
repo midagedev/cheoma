@@ -3,14 +3,18 @@ import {
   safeViewportRect,
 } from '../../../src/api/cinematic.js';
 
+// #158: the three-axis chrome. The make-panel shells (.ctxcard / .sheet), the view
+// card (.dial) and the share dock (.actions) are the same classes as before; the
+// retired ModeToggle (.mode) and legacy right drawer (.panel) are replaced by the
+// top-left breadcrumb, which is small but must still be measured so a corner
+// control cannot claim a whole strip.
 const OCCLUSION_SELECTOR = [
   '.ctxcard',
-  '.panel',
   '.sheet',
   '.scene-guide',
   '.dial',
   '.actions',
-  '.mode',
+  '[data-breadcrumb]',
 ].join(', ');
 const SAFE_GUTTER = 16;
 

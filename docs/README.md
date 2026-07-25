@@ -43,7 +43,8 @@
 | [`project-status.md`](project-status.md) | 계약 | 프로젝트 마무리 방향, 유지해야 할 사용자 결정, 현재 작업 상태. |
 | [`verification.md`](verification.md) | 계약 | 빌드·문법·Playwright·결정론 검증의 실제 사용 범위와 함정. |
 | [`mode-integration.md`](mode-integration.md) | 계약 | 모드/카메라/focus 통합. `ui-design.md`의 초기 모드 구상보다 우선한다. |
-| [`ui-design.md`](ui-design.md) | 리서치 | 초기 UI 설계와 상호작용 언어. 현재 focus 연속체는 `mode-integration.md`를 따른다. |
+| [`ui-design.md`](ui-design.md) | 리서치 | 초기 UI 설계와 상호작용 언어. 현재 focus 연속체는 `mode-integration.md`, 크롬 레이아웃은 `ui-consolidation.md`를 따른다. |
+| [`ui-consolidation.md`](ui-consolidation.md) | 계약 | [보기/만들기/공유] 3축 크롬의 슬롯·detent·판정 지표와 구현 결과. UI 표면 변경은 이 문서와 `check:ui-shell`을 함께 갱신한다. |
 | [`joseon-city.md`](joseon-city.md) | 리서치 | 도성·읍성·촌락·사찰 입지와 가람 원리. 사찰 작업은 특히 §5·§7G 참조. |
 | [`palace-layout.md`](palace-layout.md) | 리서치 | 궁궐 다일곽·축선·행각 공유 규칙과 구현 파라미터. |
 | [`village-walls-parcels.md`](village-walls-parcels.md) | 리서치 | 담장·필지·정원·보호수의 실증 근거와 알고리즘 번역. |

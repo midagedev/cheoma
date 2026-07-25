@@ -3,7 +3,7 @@ import { gateCommand } from './verification-gates.mjs';
 import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ui-shell', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'mja-house-browser', 'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -16,6 +16,10 @@ const ROOT_HTML = /^[^/]+\.html$/;
 // dedicated contracts below.
 const REVIEWED_NEW_PATHS = new Set([
   'app/src/components/SceneGuide.svelte',
+  // #158 three-axis UI: the breadcrumb succeeds ModeToggle and the shell gate
+  // owns the geometry contract that let P1–P5 survive to release.
+  'app/src/components/Breadcrumb.svelte',
+  'tools/check-ui-shell.mjs',
   'app/src/lib/scene-snapshot.js',
   'app/src/lib/scene-guide.js',
   'app/src/lib/building-navigation.js',
@@ -141,6 +145,7 @@ function routePath(path) {
   }
   const browserToolGates = {
     'tools/check-app-smoke.mjs': ['app'],
+    'tools/check-ui-shell.mjs': ['ui-shell'],
     'tools/check-detail-particle-geometry.mjs': ['particle-geometry'],
     'tools/check-instance-upload-browser.mjs': ['instance-upload'],
     'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
@@ -196,11 +201,21 @@ function routePath(path) {
 
   if (path === 'app/index.html' || path.startsWith('app/src/') || path.startsWith('app/public/')) {
     select('application surface changed', 'app', 'build');
+    // #158: the three-axis chrome owns its own geometry/reachability contract.
+    // Route only the paths that can move a chrome box, not the engine runtimes.
+    if (path === 'app/src/App.svelte'
+      || path.startsWith('app/src/components/')
+      || path.startsWith('app/src/styles/')
+      || /^app\/src\/lib\/(?:device\.svelte|edit-schema|building-navigation|i18n\.svelte|scene-guide)\.js$/.test(path)) {
+      select('UI shell layout surface changed', 'ui-shell');
+    }
     if (/^app\/src\/lib\/(?:scene-snapshot|share-scene|standalone-param-spec|url)\.js$/.test(path)
       || path === 'app/src/engine/semantic-view-runtime.js') {
       select('scene-share canonical URL or platform adapter changed', 'share');
     }
-    if (/^app\/src\/(?:App\.svelte|components\/RenderStyleToggle\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime|post-quality-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
+    // #158: the render-style control now lives inside the view card (EnvironmentDial),
+    // so that component owns the product ink-mode integration surface.
+    if (/^app\/src\/(?:App\.svelte|components\/EnvironmentDial\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime|post-quality-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
       select('product ink mode integration changed', 'ink-app');
     }
     if (/^app\/src\/(?:components\/EnvironmentDial\.svelte|engine\/engine\.js|lib\/seed\.js)$/.test(path)) {
@@ -634,6 +649,7 @@ export function verificationCommands(plan) {
     resource: 'cpu',
   });
   if (has('app')) commands.push(gateCommand('app'));
+  if (has('ui-shell')) commands.push(gateCommand('ui-shell'));
   if (has('ink-app')) commands.push(gateCommand('ink-app'));
   if (has('dof-app')) commands.push(gateCommand('dof-app'));
   if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));

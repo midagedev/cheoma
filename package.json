@@ -13,6 +13,7 @@
     "check:verification-plan": "node tools/check-verification-plan.mjs",
     "check:verification-browser": "node tools/check-verification-browser.mjs",
     "check:app": "node tools/run-browser-locked.mjs -- node tools/check-app-smoke.mjs",
+    "check:ui-shell": "node tools/run-browser-locked.mjs -- node tools/check-ui-shell.mjs",
     "check:build": "node tools/check-app-build.mjs",
     "check:audio": "node tools/run-browser-locked.mjs -- node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",

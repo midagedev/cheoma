@@ -38,7 +38,8 @@ cheoma의 수묵 모드는 3D 장면을 단순한 흑백 외곽선으로 바꾸�
 - `src/render/ink.js`는 재사용 가능한 `InkPass`, 종이 texture, normal/depth 선별과 셰이더를 소유한다. 앱·Svelte·URL을 알지 않는다.
 - `src/api/ink.js`가 외부 소비자에게 WebGL 수묵 pass를 공개한다. URL은 이 무거운 그래프가 아니라 `src/api/render-style.js`만 소비하며, shader warm 전용 `src/api/rendering.js`의 가벼운 import 계약도 유지한다.
 - `app/src/engine/ink-mode-runtime.js`가 제품 전환, post pass 휴면, composer 삽입·제거, dispose를 소유한다.
-- `app/src/components/RenderStyleToggle.svelte`는 키보드와 보조기기 상태를 표현하고 엔진 상태는 가지지 않는다.
+- 렌더 스타일 컨트롤(`.render-style` 세그먼트)은 `app/src/components/EnvironmentDial.svelte`의 "보기" 카드 안에
+  있다(#158에서 구 `RenderStyleToggle.svelte`를 흡수). 키보드와 보조기기 상태만 표현하고 엔진 상태는 가지지 않는다.
 
 `mode=ink`는 카메라의 `explore | focus`와 독립된 **표현 모드**다. 공유 URL은 수묵일 때만 `?mode=ink`를 기록하며 PBR은 파라미터를 제거해 기존 URL을 보존한다. 새로고침은 첫 준비 프레임 전에 URL 상태를 복원한다.
 

@@ -1,7 +1,8 @@
-# UI 정돈 감사 · 재설계안
+# UI 정돈 감사 · 재설계안 · 구현 결과
 
-상태: **감사·제안** (구현 계약 아님). 사용자가 A/B 중 한 안을 고르면 그 안이 계약으로 승격되고, 이 문서의
-"승계" 절이 `ui-design.md`·`mode-integration.md` 개정 범위를 지정한다.
+상태: **구현 계약** (§3-B안 채택·구현 완료, 2026-07-25). §1~§2는 구현 이전 감사 기록(스냅샷)이고,
+§3-B안과 §5(구현 결과)가 현재 계약이다. §4 판정 지표는 `tools/check-ui-shell.mjs`(`npm run check:ui-shell`)로
+고정됐다. UI 표면을 바꾸는 라운드는 이 문서 §5와 그 게이트를 함께 갱신한다.
 
 기준 커밋: `142d637`. 측정 환경: 고정 스냅샷 dev 서버, Chrome(headless), deviceScaleFactor 1,
 뷰포트 1280×800 / 1024×640 / 844×390(coarse pointer) / 390×844(coarse) / 360×780(coarse).
@@ -392,5 +393,91 @@ cd <snapshot>/app && npx vite --config <전용 config: host 127.0.0.1, port 454x
   스크롤 최하단에서 마지막 컨트롤 `inViewport === true`, 주요 액션 히트테스트가 `hittable`,
   `.crumb.root.link` 히트테스트가 `hittable`, 편집 중 씬 가시율 ≥ 40%.
 
-구현 라운드에서는 위 지표를 `tools/`의 앱 하네스로 고정해야 한다(현재 이 항목들을 검사하는 게이트는 없다 —
-그래서 P1~P4가 릴리스 직전까지 남았다). 헤드리스 절대 프레임 시간은 판정에 쓰지 않는다.
+구현 라운드에서는 위 지표를 `tools/`의 앱 하네스로 고정해야 한다(감사 시점에는 이 항목들을 검사하는 게이트가
+없었다 — 그래서 P1~P4가 릴리스 직전까지 남았다). 헤드리스 절대 프레임 시간은 판정에 쓰지 않는다.
+
+**구현됨**: `tools/check-ui-shell.mjs` = `npm run check:ui-shell`. 뷰포트 5종
+(1280×800 / 1024×640 fine pointer, 844×390 / 390×844 / 360×780 coarse pointer)에서
+부감·집 편집·시네마틱·수묵·공유(독) 상태를 돌며 다음을 측정한다.
+
+| 지표 | 구현 단정 |
+|---|---|
+| 패널 가시 높이 | `[data-panel-scroll]`의 뷰포트 클립 높이 ≥ **200px** (집 편집 상태) |
+| 스크롤 최하단 도달 | `scrollTop = scrollHeight` 뒤 마지막 `input/select/button`이 `inViewport && insideScroll` |
+| 주요 액션 히트테스트 | `elementFromPoint` 기준 사진·공유·모델·다시 짓기·탭·보기 카드·브레드크럼 루트가 `hittable` |
+| 편집 중 씬 가시율 | 48×48 샘플 그리드에서 만들기 패널이 덮지 않은 비율 ≥ **40%** (전 크롬 커버리지도 증거로 기록) |
+| 크롬 경계 | 모든 크롬 박스가 뷰포트 안, 안내 카드 ↔ 독/패널/보기 카드 교차면적 0, 독 ↔ 패널 교차면적 0 |
+| 터치 타깃 | coarse pointer 뷰포트에서 크롬 인터랙티브 요소 ≥ 44px |
+| 아코디언 | 그룹 헤더 ≥3개 · 동시 펼침 본문 ≤1개 · 다른 그룹을 펼치면 앞 그룹이 접힘 |
+| 커밋 대가 | 모든 그룹 헤더에 `wave|live|settle` 배지 |
+| 감상 페이드 | 3.4초 무조작 후 `.chroma.faded` + `.chroma` 밖 크롬 0개 |
+| `?shot=1` | 뷰 시프트 0·`time=day`·흐름 비활성·canvas 자식 0(크롬은 DOM 오버레이라 canvas 픽셀 불변) |
+| 라우팅 | `app/src/App.svelte`·`components/**`·`styles/**`·`lib/{device,edit-schema,building-navigation,i18n,scene-guide}`가 `ui-shell` 게이트로 라우팅(`check:pr`) |
+
+`CHEOMA_UI_SHELL_BREAK=<css>` 로 위반 CSS를 주입하면 같은 게이트가 FAIL 한다(자기 검증용).
+산출 캡처는 `_wt-out/ui-shell/<viewport>-<state>.png`.
+
+---
+
+## 5. 구현 결과 (2026-07-25, B안)
+
+### 5.1 축별 구현
+
+| 축 | 슬롯 | 소유 컴포넌트 | 내용 |
+|---|---|---|---|
+| **보기** | 우상 | `EnvironmentDial.svelte`(카드로 확장) | 3링 다이얼(시간·계절·날씨) + `景/墨` 세그먼트 + 칩(하늘 굴리기·노을빛·시간 흐르기). 먹빛 글라스 카드 — 한지 슬래브를 놓지 않아 씬 톤 불침해. `.render-style` 셀렉터·`aria-pressed`·키보드 계약은 구 `RenderStyleToggle` 그대로 승계. |
+| **만들기** | 좌하 | `ContextPanel.svelte`(재작성) + `BottomSheet.svelte`(셸) | 명시적 2탭 `[村 둘러보기][家 집 보기]`(클릭=카메라 전환) + 규모/유형 상주 섹션 + **그룹 아코디언(동시 1개)** + 그룹별 커밋 대가 배지 + 푸터 한 줄(다시 짓기). |
+| **공유** | 우하 | `ActionBar.svelte`(재정의) | 사진·링크(공유)·모델(.glb)·소리 + 감상 진입(드론·거닐기, 구분선으로 위계 분리). 편집 중에도 상주(`hideActions` 폐기). |
+| 브레드크럼 | 좌상 | `Breadcrumb.svelte`(신규) | `마을 › 초가` — 루트 클릭 = focus-out, 전환 중 `aria-busy`+"이동 중". 좌상 단독 점유. |
+
+폐기: `ModeToggle.svelte`(브레드크럼+탭이 흡수) · `RenderStyleToggle.svelte`(보기 카드가 흡수) ·
+`ParamPanel.svelte`(정식 폐기 — 결정 절 ④). `BottomSheet`의 `variant='right'` 우측 드로어도 함께 사라졌다.
+
+### 5.2 셸 기하 (P1·P2·P3·P11)
+
+- 데스크톱: 좌하 카드 `max-height: min(62vh, 100vh - 108px)`, 낙관 위(`bottom = 낙관 + 58px`).
+- 가로 폰(`device.landscapePhone`): 좌측 `min(340px, 42vw)` 전高 오버레이 — 구 `100vh - 200px` 상수 클램프에서 이탈.
+- 세로 좁은 화면: 바텀 시트 **2 detent(peek 80px / half ≤58vh)**. detent 를 translateY 가 아니라
+  **가시 높이(`max-height`)** 로 정의하므로 스크롤 본문이 뷰포트 밖으로 밀려나지 않는다(P2 근인 제거).
+  `App`이 `detent`를 실제로 전달한다 — 부감=peek, 근접=half → focus-in 이 시트를 자동으로 펼친다(P3).
+- 세로 모바일 편집 중 공유 독은 `.actions.lifted`(= `58vh + 14px`)로 시트 위 씬 영역에 올라간다.
+- 전 축 노출을 유지하면서 그룹 아코디언이 한 번에 한 그룹만 펼치므로 폴드 초과가 구조적으로 사라진다(P11).
+
+### 5.3 P1~P12 해소
+
+| # | 해소 방식 | 증거 |
+|---|---|---|
+| P1 | 가로 폰 좌측 42% 패널 + 상시 공유 독 | `phone-landscape-focus-edit.png`, 가시 스크롤/히트테스트 단정 |
+| P2 | detent 2개 + 높이 기반 정의 + 58vh 상한 | `phone-portrait-focus-edit.png`, 씬 가시율 단정 |
+| P3 | `App`이 `detent`를 실제 전달 | `phone-portrait` focus-in 후 `data-snap === 'half'` 단정 |
+| P4 | 좌상 = 브레드크럼 단독, 렌더 스타일은 보기 카드로 이설 | `crumbsDial/crumbsPanel` 교차면적 0 + `crumbRoot` `hittable` |
+| P5 | 안내 카드를 자유 대역으로 클램프(데스크톱 상단 / 세로 모바일 하단 / 가로 폰 우측) | `guideDock/guidePanel/guideDial` 교차면적 0 |
+| P6 | 3축 크롬 전부 `.chroma` 그룹에 편입 | 페이드 후 `.chroma` 밖 크롬 0개 단정 |
+| P7 | 조작 안내에 문 열기/닫기 줄 추가(터치·데스크톱 공통) | `guide_touch_door`/`guide_desktop_door` |
+| P8 | `groupBuildingNavigationTargets` — 랜드마크/집 `optgroup` + 상한 20(선택 대상은 항상 포함) | 한양 297 옵션 → 그룹 2개·상한 |
+| P9 | 공유·내보내기·사진·소리 = 공유 독 단독. 패널 푸터는 다시 짓기만 | `[data-action]` 중복 0 |
+| P10 | 그룹 헤더 커밋 대가 배지(`wave/live/settle`) + 보기 컨트롤 우상 1곳 집결 | `costbadge` 단정 |
+| P11 | 그룹 아코디언(동시 1개) + 전 축 유지 | `openGroups ≤ 1` 단정 |
+| P12 | 브레드크럼 `aria-busy`, 탭 `role=tab`/`aria-selected`, 마을 슬라이더 `aria-label`/`aria-valuetext` | 게이트 히트테스트 + a11y 단정 |
+
+### 5.4 크롬 밖으로 새는 계약
+
+- **뷰포트 시프트(#124)**: `app/src/engine/view-shift.js` 의 `OCCLUSION_SELECTOR` 가 크롬 rect 를 실측해
+  피사체를 가시 영역으로 밀어 준다. 3축 재편으로 `.mode`(ModeToggle)가 사라지고 좌상 브레드크럼이
+  들어왔으므로 그 목록도 함께 갱신했다(`[data-breadcrumb]` 추가, 폐기된 `.panel` 제거).
+  셸 클래스(`.ctxcard`·`.sheet`·`.dial`·`.actions`)는 승계되어 그대로 매칭된다.
+- **탭 순서**: `.chroma` 안의 DOM 순서는 브레드크럼 → 만들기 패널(탭 → 건물 선택기 → 축 → 액션) →
+  보기 카드 → 공유 독 → 낙관이다. 3축을 읽는 순서와 같으므로 키보드 사용자가 컨텍스트를 먼저 만난다.
+- **`.chroma` 페이드**: 새 크롬은 전부 이 그룹 안에 있어야 한다. 그룹 밖에 크롬을 추가하면
+  `check:ui-shell` 의 "appreciation fade leaves the scene alone" 단정이 FAIL 한다.
+- **크롬 프레임 비용**: 큰 면적에 `backdrop-filter: blur()` 를 걸면 소프트웨어 렌더(ANGLE/SwiftShader)
+  하네스에서 프레임이 느려지고, 뷰 시프트 램프가 늦게 수렴해 `captureView()` 가 오래 null 로 남는다
+  (실측: 진입 정착이 즉시 → 약 20초). 보기 카드는 반투명 먹빛 필만 쓰고 blur 를 걸지 않는다.
+  작은 좌상 브레드크럼만 blur 를 유지한다.
+
+### 5.5 유의 (다음 라운드 후보)
+
+- 시네마틱 중 복귀 창구는 여전히 `CinematicOverlay`(+ESC)다. 브레드크럼은 `.chroma` 페이드 대상이라
+  시네마틱 동안 함께 물러난다 — "감상 우선" 정책을 유지한 선택이며, 시네마틱 전용 상태 표시는 별도 과제다.
+- 단일건물(레거시) 씬은 부팅·URL 복원·공유는 그대로지만 편집 UI가 없다(ParamPanel 폐기). 커밋된
+  `standaloneParams` 는 받은 URL 에서 복원·재공유만 된다.

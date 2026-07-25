@@ -146,12 +146,32 @@ try {
   invariant(!before.pavilionBlocks && before.pavilionDistance > before.pavilionClearance,
     `pavilion blocks the live focus ray (${before.pavilionDistance} <= ${before.pavilionClearance})`);
 
+  // #158: the make panel keeps every axis but expands one group at a time, so the
+  // harness opens the owning group first - the same click a user makes.
+  const openMakeGroup = async (groupId) => {
+    await page.evaluate((group) => {
+      const header = document.querySelector(`.ctx.house [data-group="${group}"]`);
+      if (header && header.getAttribute('aria-expanded') === 'false') header.click();
+    }, groupId);
+    await page.waitForFunction(
+      (group) => !!document.querySelector(`.ctx.house [data-group-body="${group}"]`),
+      groupId,
+      { timeout },
+    );
+  };
+
+  // #158 re-authored: the panel footer owns only the make action; share, photo and
+  // model export moved into the single share dock (P9).
   const actions = await page.locator('.foot.house:not([aria-hidden="true"]) button')
     .evaluateAll((buttons) => buttons.map((button) => button.textContent.replace(/\s+/g, ' ').trim()));
-  invariant(actions.length === 2, `house footer has ${actions.length} actions instead of 2`);
+  invariant(actions.length === 1, `house footer has ${actions.length} actions instead of 1`);
   invariant(actions.some((label) => label.includes('이 집 다시 짓기')), `missing rebuild label: ${actions.join(' | ')}`);
-  invariant(actions.some((label) => label.includes('내보내기')), `missing export label: ${actions.join(' | ')}`);
   invariant(!actions.some((label) => /다시 보기|GLB/i.test(label)), `legacy action remains: ${actions.join(' | ')}`);
+  const dockActions = await page.locator('.actions button')
+    .evaluateAll((buttons) => buttons.map((button) => button.textContent.replace(/\s+/g, ' ').trim()));
+  invariant(dockActions.some((label) => label.includes('내보내기')),
+    `share dock lost the model export action: ${dockActions.join(' | ')}`);
+  await openMakeGroup('openings');
 
   // #10: the real Korean editor exposes the planner's six axes with visible
   // units/ranges. Exercise width and height through the native keyboard path
@@ -273,6 +293,7 @@ try {
   // #3: exercise the actual range-input path before the full parcel reroll.
   // A synchronous burst must become one latest-value preview, keep the merged
   // flora identity stable, then perform exactly one flora commit on change.
+  await openMakeGroup('roof');
   const liveFixture = await page.evaluate((parcelId) => {
     const engine = window.__engine;
     const slider = document.querySelector('.ctx.house:not([aria-hidden="true"]) input[data-key="eaveOverhang"]');
@@ -341,7 +362,7 @@ try {
   await page.screenshot({
     path: livePreviewPath,
     animations: 'disabled',
-    style: '.ctxcard, .modewrap, .chroma { visibility: hidden !important; }',
+    style: '.chroma { visibility: hidden !important; }',
   });
   const livePreview = await page.evaluate((parcelId) => {
     const engine = window.__engine;
@@ -362,8 +383,8 @@ try {
       drawCalls: engine.renderer.info.render.calls,
       houseOpacity: Number(getComputedStyle(slider.closest('.ctx.house')).opacity),
       footerOpacity: Number(getComputedStyle(document.querySelector('.foot.house')).opacity),
-      modeText: document.querySelector('.mode')?.textContent?.replace(/\s+/g, ' ').trim(),
-      exportText: document.querySelector('.foot.house .hbtn.glb')?.textContent?.replace(/\s+/g, ' ').trim(),
+      modeText: document.querySelector('[data-breadcrumb]')?.textContent?.replace(/\s+/g, ' ').trim(),
+      exportText: document.querySelector('.actions [data-action="export"]')?.textContent?.replace(/\s+/g, ' ').trim(),
     };
   }, fixture.parcelId);
   invariant(livePreview.calls.length === 1,
@@ -572,6 +593,7 @@ try {
     const state = window.__engine.village.getState();
     return state.selected === parcelId && !state.transitioning;
   }, fixture.parcelId, { timeout });
+  await openMakeGroup('roof');
   const restoredValue = await page.locator(
     '.ctx.house:not([aria-hidden="true"]) input[data-key="eaveOverhang"]',
   ).inputValue();
@@ -839,7 +861,27 @@ try {
     'mobile grip missed pointerdown');
   await page.mouse.move(gripBox.x + gripBox.width / 2, 36, { steps: 8 });
   await page.mouse.up();
-  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'full', null, { timeout });
+  // #158 re-authored: the sheet has two detents (peek / half<=58vh). Dragging past
+  // the top no longer opens a third "full" detent that buried the scroll body and
+  // the edited house; it settles back at the capped expanded detent.
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
+  const mobileDetent = await page.evaluate(() => {
+    const sheet = document.querySelector('.sheet.context');
+    const rect = sheet.getBoundingClientRect();
+    const scroll = sheet.querySelector('[data-panel-scroll]');
+    return {
+      snap: sheet.dataset.snap,
+      sheetHeight: rect.height,
+      sceneRatio: 1 - rect.height / innerHeight,
+      scrollVisible: scroll ? Math.min(innerHeight, scroll.getBoundingClientRect().bottom)
+        - Math.max(0, scroll.getBoundingClientRect().top) : 0,
+    };
+  });
+  invariant(mobileDetent.sceneRatio >= 0.4,
+    `expanded sheet covered the edited house (scene ${(mobileDetent.sceneRatio * 100).toFixed(1)}%)`);
+  invariant(mobileDetent.scrollVisible >= 200,
+    `expanded sheet scroll window collapsed (${Math.round(mobileDetent.scrollVisible)}px)`);
+  await openMakeGroup('openings');
   const mobileControls = await page.evaluate(() => {
     const house = document.querySelector('.ctx.house:not([aria-hidden="true"])');
     const keys = [
@@ -850,7 +892,7 @@ try {
       house?.querySelector(`input[data-key="${key}"]`)
       || house?.querySelector(`.row[data-key="${key}"]`)
     ));
-    const card = house?.closest('.ctxcard') || house?.parentElement;
+    const card = house?.closest('[data-make-panel]') || house?.parentElement;
     return {
       allPresent: controls.every(Boolean),
       widths: controls.filter(Boolean).map((control) => control.getBoundingClientRect().width),

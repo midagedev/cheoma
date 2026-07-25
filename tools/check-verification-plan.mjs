@@ -188,7 +188,7 @@ assert.deepEqual(ids(['src/runtime/village/handle.js']), [
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
 assert.deepEqual(ids(['app/src/App.svelte']), [
-  'core', 'app', 'ink-app', 'parcel-rebuild-browser', 'build',
+  'core', 'app', 'ui-shell', 'ink-app', 'parcel-rebuild-browser', 'build',
 ]);
 assert.deepEqual(ids(['app/src/lib/scene-snapshot.js']), [
   'core', 'share', 'app', 'build',
@@ -197,13 +197,13 @@ assert.deepEqual(ids(['app/src/lib/standalone-param-spec.js']), [
   'core', 'share', 'app', 'build',
 ]);
 assert.deepEqual(ids(['app/src/lib/scene-guide.js']), [
-  'core', 'app', 'build',
+  'core', 'app', 'ui-shell', 'build',
 ]);
 assert.deepEqual(ids(['app/src/lib/building-navigation.js']), [
-  'core', 'app', 'build',
+  'core', 'app', 'ui-shell', 'build',
 ]);
 assert.deepEqual(ids(['app/src/components/SceneGuide.svelte']), [
-  'core', 'app', 'build',
+  'core', 'app', 'ui-shell', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/semantic-view-runtime.js']), [
   'core', 'share', 'app', 'dof-app', 'lod-app', 'build',
@@ -216,13 +216,13 @@ assert.deepEqual(ids(['app/src/engine/semantic-view-runtime.js'], {
 }), ['core', 'share', 'app', 'dof-app', 'lod-app', 'build']);
 assert.deepEqual(ids(['app/src/lib/scene-guide.js'], {
   newPaths: ['app/src/lib/scene-guide.js'],
-}), ['core', 'app', 'build']);
+}), ['core', 'app', 'ui-shell', 'build']);
 assert.deepEqual(ids(['app/src/lib/building-navigation.js'], {
   newPaths: ['app/src/lib/building-navigation.js'],
-}), ['core', 'app', 'build']);
+}), ['core', 'app', 'ui-shell', 'build']);
 assert.deepEqual(ids(['app/src/components/SceneGuide.svelte'], {
   newPaths: ['app/src/components/SceneGuide.svelte'],
-}), ['core', 'app', 'build']);
+}), ['core', 'app', 'ui-shell', 'build']);
 assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
   'core', 'app', 'parcel-rebuild-browser', 'build',
 ]);
@@ -238,8 +238,18 @@ assert.deepEqual(ids(['app/src/engine/post-runtime.js']), [
 assert.deepEqual(ids(['app/src/engine/directional-shadow-runtime.js']), [
   'core', 'app', 'rim', 'lod-focus', 'build',
 ]);
+// #158: the view card owns both the environment dial and the render-style control.
 assert.deepEqual(ids(['app/src/components/EnvironmentDial.svelte']), [
-  'core', 'app', 'winter-app', 'build',
+  'core', 'app', 'ui-shell', 'ink-app', 'winter-app', 'build',
+]);
+assert.deepEqual(ids(['app/src/components/Breadcrumb.svelte'], {
+  newPaths: ['app/src/components/Breadcrumb.svelte'],
+}), ['core', 'app', 'ui-shell', 'build']);
+assert.deepEqual(ids(['tools/check-ui-shell.mjs'], {
+  newPaths: ['tools/check-ui-shell.mjs'],
+}), ['core', 'ui-shell']);
+assert.deepEqual(ids(['app/src/lib/edit-schema.js']), [
+  'core', 'app', 'ui-shell', 'build',
 ]);
 assert.deepEqual(ids(['src/api/village.js']), [
   'core', 'app', 'worker', 'lod-app',
@@ -440,7 +450,7 @@ for (const path of API_REUSE_DEPENDENCIES) {
   );
 }
 assert.deepEqual(ALL_PROFILE, [
-  'docs', 'core-full', 'app', 'ink-app', 'petals', 'particle-geometry',
+  'docs', 'core-full', 'app', 'ui-shell', 'ink-app', 'petals', 'particle-geometry',
   'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio', 'temple-browser',
   'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);

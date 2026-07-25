@@ -317,8 +317,15 @@ const VILLAGE_SECTIONS = [
   ] },
 ];
 
+// 커밋 대가(#158 P10) — 같은 룩의 컨트롤이 서로 다른 값을 치른다는 사실을 그룹 헤더 배지로 노출한다.
+//   'wave'   : 값을 놓으면 전-마을 웨이브 재생성(마을 축)
+//   'live'   : 드래그 중 rAF 병합 라이브(정규 필지)
+//   'settle' : 놓는 순간 컴파운드 재생성(종가·관아·궁·절)
+export const COMMIT_COSTS = Object.freeze(['wave', 'live', 'settle']);
+const withCost = (sections, cost) => sections.map((section) => ({ ...section, cost }));
+
 // 마을 스키마(부감 패널이 렌더). spec 무관 — 마을 컨텍스트 전용.
-export function villageSchema() { return VILLAGE_SECTIONS; }
+export function villageSchema() { return withCost(VILLAGE_SECTIONS, 'wave'); }
 
 // App villageOpts 초기값(#91). 전부 코어 no-op 기본 → 무변경 시 현행 픽셀 불변(결정론). char01 은
 //   null(=규모 파생 auto), tri-state 는 'auto'. setOpts 에 이 값들이 그대로 실려도 코어가 기본으로 해석.
@@ -329,14 +336,24 @@ export function villageDefaults() {
 // spec → { family, tabs, sections }. family 로 라이브 전략(정규=드래그 라이브, 특수=놓을 때 정착)이 갈린다.
 export function schemaFor(spec) {
   if (!spec) return { family: 'regular', tabs: false, sections: [] };
-  if (spec.family === 'palace-compound') return { family: 'palace-compound', tabs: false, sections: PALACE_COMPOUND_SECTIONS };
-  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: templeSections(spec) };
+  if (spec.family === 'palace-compound') return { family: 'palace-compound', tabs: false, sections: withCost(PALACE_COMPOUND_SECTIONS, 'settle') };
+  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: withCost(templeSections(spec), 'settle') };
   if (spec.hero) {
     const hs = spec.heroStyle === 'hanok' ? 'hanok' : 'palace';
-    return { family: 'hero', heroStyle: hs, tabs: false, sections: hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS };
+    return {
+      family: 'hero',
+      heroStyle: hs,
+      tabs: false,
+      sections: withCost(hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS, 'settle'),
+    };
   }
   const kind = spec.kind === 'giwa' ? 'giwa' : 'choga';
-  return { family: 'regular', kind, tabs: true, sections: kind === 'giwa' ? giwaSections(spec) : chogaSections(spec) };
+  return {
+    family: 'regular',
+    kind,
+    tabs: true,
+    sections: withCost(kind === 'giwa' ? giwaSections(spec) : chogaSections(spec), 'live'),
+  };
 }
 
 // 모든 필드를 평탄화(스키마 순회 없이 라우팅에 필요). 유효값만(정의됨) 담아 undefined 오염을 막는다.

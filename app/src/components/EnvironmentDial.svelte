@@ -1,6 +1,8 @@
 <script>
-  // 우상 3링 환경 다이얼 — 시간(외)·계절(중)·날씨(내).
-  // 세그먼트 클릭 또는 링 드래그로 조작, 바늘이 스냅 회전(관성감). 라벨은 로케일화.
+  // 우상 "보기" 카드(#158 B안) — 씬을 보는 방식 전부를 한 곳이 소유한다:
+  //   3링 환경 다이얼(시간·계절·날씨) + 렌더 스타일(景/墨) + 액션 칩(하늘 굴리기·노을빛·시간 흐르기).
+  //   폐기된 RenderStyleToggle 이 여기로 흡수돼 좌상 좌표 충돌(P4)과 "보기" 컨트롤 3코너 분산(P10)이
+  //   함께 사라진다. 카드는 한지 슬래브가 아니라 먹빛 글라스 — 씬 톤을 깨지 않는다(look-grammar).
   import { onMount } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
@@ -9,7 +11,8 @@
     WEATHER_IDS,
     pickEnvironmentScene,
   } from '../../../src/api/environment.js';
-  let { time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear', shifted = false,
+  let { time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear',
+        renderStyle = 'pbr', onRenderStyle = null,
         flowing = false, onTime, onSunsetLook, onSeason, onWeather, onFlowToggle } = $props();
 
   const RINGS = [
@@ -101,7 +104,8 @@
   }
 </script>
 
-<div class="dial" class:shifted role="group" aria-label="environment dial">
+<div class="dial viewcard" role="group" aria-label={t('axis_view')}>
+  <span class="axislabel" aria-hidden="true">{t('axis_view')}</span>
   <svg bind:this={svgEl} viewBox="0 0 200 200" width="164" height="164">
     <!-- 링 트랙 + 밴드 히트영역 -->
     {#each RINGS as ring}
@@ -148,7 +152,31 @@
     <circle class="hub" cx={C} cy={C} r="7" />
   </svg>
 
-  <!-- 다이얼 하단 도킹 액션 — 석양일 때만 가운데 색구슬이 나타나 노을빛을 순환한다. -->
+  <!-- 렌더 스타일(景/墨) — 구 좌상 RenderStyleToggle 의 승계자(#158 P4). 셀렉터·상태 계약은 보존. -->
+  <div class="render-style" role="group" aria-label={t('render_style')}>
+    <button
+      class:on={renderStyle === 'pbr'}
+      type="button"
+      aria-pressed={renderStyle === 'pbr'}
+      title={t('render_pbr_tip')}
+      onclick={() => renderStyle !== 'pbr' && onRenderStyle?.('pbr')}
+    >
+      <span class="glyph" aria-hidden="true">景</span>
+      <span>{t('render_pbr')}</span>
+    </button>
+    <button
+      class:on={renderStyle === 'ink'}
+      type="button"
+      aria-pressed={renderStyle === 'ink'}
+      title={t('render_ink_tip')}
+      onclick={() => renderStyle !== 'ink' && onRenderStyle?.('ink')}
+    >
+      <span class="glyph" aria-hidden="true">墨</span>
+      <span>{t('render_ink')}</span>
+    </button>
+  </div>
+
+  <!-- 액션 칩 — 석양일 때만 가운데 색구슬이 나타나 노을빛을 순환한다. -->
   <div class="dial-actions">
     <button
       class="dial-btn env-roll"
@@ -185,18 +213,30 @@
 </div>
 
 <style>
+  /* 보기 카드 — 우상 단독 슬롯. 만들기 패널(좌하)·공유 독(우하)과 겹치지 않으므로 시프트가 필요 없다. */
   .dial {
     position: fixed;
     right: clamp(10px, 1.6vw, 22px);
     top: clamp(10px, 1.6vh, 22px);
-    z-index: 40; /* 패널(30) 위 — 이동해도 조작 가능 */
-    filter: drop-shadow(0 2px 8px rgba(30, 22, 14, 0.28));
+    z-index: 40; /* 패널(32) 위 — 편집 중에도 조작 가능 */
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 8px 10px 10px;
+    border-radius: 10px;
+    /* 반투명 먹빛 필만 쓰고 backdrop blur 는 걸지 않는다 — 카드 면적이 커서 소프트웨어 렌더에서
+       프레임당 비용이 실측으로 드러났고(진입 램프 지연), 룩 차이는 거의 없다. */
+    background-color: rgba(30, 24, 18, 0.24);
+    border: 1px solid rgba(244, 239, 228, 0.22);
+    box-shadow: 0 2px 12px rgba(30, 22, 14, 0.26);
     user-select: none;
     touch-action: none;
-    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* 한지 패널(width min(320px,84vw))이 열리면 다이얼을 패널 왼쪽으로 밀어 가려지지 않게 한다. */
-  .dial.shifted { transform: translateX(calc(-1 * min(320px, 84vw) - 14px)); }
+  .axislabel {
+    align-self: flex-start;
+    font-family: var(--serif); font-size: 9.5px; font-weight: 700;
+    letter-spacing: 0.26em; text-transform: uppercase;
+    color: rgba(244, 239, 228, 0.72);
+    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+  }
   svg { display: block; overflow: visible; }
   .track { fill: none; stroke: rgba(244, 239, 228, 0.5); stroke-width: 1.2; }
   /* stroke:transparent 라도 stroke 영역을 히트 대상으로(기본 visiblePainted 는 투명 stroke 제외). */
@@ -232,13 +272,35 @@
   }
   .hub { fill: rgba(244, 239, 228, 0.85); stroke: var(--ink-line); stroke-width: 1; }
 
-  /* 다이얼 하단 도킹 액션 행 — 다이얼 컨테이너(shrink-to-fit)의 중앙 기준으로 정렬.
-     .dial 이 fixed 이자 transition 대상이라 .shifted 슬라이드·반응형 축소를 함께 상속한다. */
+  /* 렌더 스타일 세그먼트 — 카드 안에서 다이얼 아래 한 행. 셀렉터(.render-style button)는
+     구 컴포넌트와 동일하게 유지된다(키보드·aria-pressed 계약 보존). */
+  .render-style {
+    display: flex; gap: 3px; align-self: stretch;
+    padding: 3px; border-radius: 7px;
+    border: 1px solid rgba(244, 239, 228, 0.24);
+    background: rgba(244, 239, 228, 0.12);
+  }
+  .render-style button {
+    -webkit-appearance: none; appearance: none; border: 0;
+    flex: 1; min-height: 34px; padding: 6px 8px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    background: transparent; color: rgba(244, 239, 228, 0.9);
+    font-family: var(--serif); font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.55);
+    transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+  }
+  .render-style button:hover { background: rgba(244, 239, 228, 0.12); }
+  .render-style button:active { transform: scale(0.97); }
+  .render-style button.on {
+    background: var(--paper); color: var(--ink); text-shadow: none;
+    box-shadow: inset 0 0 0 1px rgba(44, 38, 32, 0.13);
+  }
+  .render-style button:last-child.on { background: var(--ink); color: var(--paper); }
+  .render-style button:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  .render-style .glyph { font-size: 14px; }
+
+  /* 액션 칩 행 — 카드 안 마지막 행. */
   .dial-actions {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 4px);
-    transform: translateX(-50%);
     display: flex;
     gap: 10px;
   }
@@ -306,26 +368,31 @@
     .rk-glyph { font-size: 23px; }
     .tone-orb { width: 20px; height: 20px; }
     .flow-orb { width: 22px; height: 22px; }
+    .render-style button { min-height: 44px; padding: 8px 10px; font-size: 13px; }
+    .render-style .glyph { font-size: 15px; }
   }
 
-  /* 모바일 세로(시트 레이아웃): 우상 코너에 safe-area 존중, 살짝 축소.
-     패널이 바텀 시트라 우측으로 안 밀리므로 .shifted 이동을 무효화(좌측 이탈 방지). */
+  /* 모바일 세로(시트 레이아웃): 우상 코너에 safe-area 존중, 살짝 축소. */
   @media (max-width: 768px) and (orientation: portrait) {
     .dial {
       right: max(10px, env(safe-area-inset-right));
       top: max(10px, env(safe-area-inset-top));
+      padding: 6px 8px 8px;
     }
-    .dial svg { width: clamp(134px, 42vw, 158px); height: clamp(134px, 42vw, 158px); }
-    .dial.shifted { transform: none; }
+    .dial svg { width: clamp(126px, 38vw, 150px); height: clamp(126px, 38vw, 150px); }
     .lab { font-size: 11.5px; }
   }
-  /* 가로 폰: 세로 여유가 없어 더 축소. */
+  /* 가로 폰: 세로 여유가 없어 더 축소(칩 행까지 화면 안에 들어와야 한다). */
   @media (max-height: 520px) and (orientation: landscape) {
     .dial {
       right: max(8px, env(safe-area-inset-right));
       top: max(8px, env(safe-area-inset-top));
+      padding: 4px 8px 6px;
+      gap: 5px;
     }
-    .dial svg { width: 126px; height: 126px; }
+    .dial .axislabel { display: none; }
+    .dial svg { width: 116px; height: 116px; }
     .lab { font-size: 12px; }
+    /* 44px 타깃은 가로 폰에서도 유지한다(#158 모바일 요구) — 줄이는 것은 다이얼 svg 뿐. */
   }
 </style>

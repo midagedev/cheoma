@@ -60,6 +60,42 @@ export function resolveBuildingNavigationTarget(targets, id) {
   return targets.find((target) => target.id === id) || null;
 }
 
+// Landmark types read as places, ordinary houses only as a numbered series.
+// Grouping keeps that difference visible and lets the ordinary series stay
+// bounded (#158 P8: Hanyang produced 297 flat `기와집 N` options).
+export const BUILDING_NAVIGATION_LANDMARK_TYPES = Object.freeze([
+  'head-house', 'government', 'palace', 'temple',
+]);
+const LANDMARK_SET = new Set(BUILDING_NAVIGATION_LANDMARK_TYPES);
+export const BUILDING_NAVIGATION_GROUP_LIMIT = 20;
+
+// Pure, JSON-safe grouping for the native selector. Order inside each group
+// stays the incoming pick-proxy order so keyboard Home/End remain meaningful,
+// the currently selected target is always present even past the limit, and the
+// caller learns how many ordinary candidates exist behind the bound.
+export function groupBuildingNavigationTargets(targets, {
+  selectedId = null,
+  limit = BUILDING_NAVIGATION_GROUP_LIMIT,
+} = {}) {
+  const list = Array.isArray(targets) ? targets : [];
+  const landmarks = list.filter((target) => LANDMARK_SET.has(target.type));
+  const ordinary = list.filter((target) => !LANDMARK_SET.has(target.type));
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : ordinary.length;
+  let kept = ordinary.slice(0, cap);
+  const selected = ordinary.find((target) => target.id === selectedId);
+  // Past the bound the selected target replaces the last slot, so the visible
+  // list stays capped and still ascends in pick-proxy order.
+  if (selected && !kept.includes(selected)) kept = [...kept.slice(0, Math.max(0, cap - 1)), selected];
+  const groups = [];
+  if (landmarks.length) {
+    groups.push({ id: 'landmark', labelKey: 'nav_group_landmark', total: landmarks.length, targets: landmarks });
+  }
+  if (kept.length) {
+    groups.push({ id: 'houses', labelKey: 'nav_group_houses', total: ordinary.length, targets: kept });
+  }
+  return groups;
+}
+
 export function buildingNavigationStatus(targets, selectedId) {
   const selected = resolveBuildingNavigationTarget(targets, selectedId);
   if (selected) return { kind: 'focus', total: targets.length, selected };
