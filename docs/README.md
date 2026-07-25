@@ -26,14 +26,14 @@
 | [`agent-workflow.md`](agent-workflow.md) | 계약 | 독립 worktree·claim·인계·정리와 세 단계 검증의 빠른 표준 경로. |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
 | [`external-reuse.md`](external-reuse.md) | 계약 | 최소 외부 scene과 단독 건물·별채·시전·마당 생활상·표면 생성기의 좁은 API, 단일 Three, borrowed resource·dispose 소유권과 독립 smoke. |
-| [`ink-landscape.md`](ink-landscape.md) | 계약 + 리서치 | 조선 진경산수 근거, PBR↔수묵 렌더·색공간·성능·접근성 계약. |
+| [`ink-landscape.md`](ink-landscape.md) | 계약 + 리서치 | 조선 진경산수 근거, PBR↔수묵 렌더·색공간·성능·접근성 계약, 계화 이중 필법·조명 종속 선 굵기·농담 층위 판정 기준. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
 | [`dancheong.md`](dancheong.md) | 계약 + 리서치 | 궁 기본 모로·사찰 중심 불전 금단청 위계, 선명도/격식 축, 불변 source 캐시·수명·성능 계약과 공식 근거. |
 | [`house-diversity.md`](house-diversity.md) | 계약 | 일반 주택의 필지·살림 위계, ㅡ·ㄱ·ㄷ 레퍼토리, ㄷ 최소 4칸과 실제 처마 fit·성능 예산. |
 | [`mja-hanok.md`](mja-hanok.md) | 계약 + 리서치 | 안동문화권 ㅁ자 뜰집의 한계와 opt-in, 북측 一자 팔작 + 연속 ㄷ자 익사·중문채, 실제 fit·남측 접근·30° 일조 계약. |
 | [`architectural-authenticity.md`](architectural-authenticity.md) | 계약 + 리서치 | 지붕 장식·민가 창호·부엌/구들·담장/마당 감사, 사실→경량 구현 번역, 완료/잔여 체크리스트와 공식 근거. |
-| [`surface-materials.md`](surface-materials.md) | 계약 + 리서치 | 재사용 가능한 결정론 표면 source/Three adapter 경계, 흙길 월드 UV·색공간·LOD·수명·성능·A/B 채택 기준. |
+| [`surface-materials.md`](surface-materials.md) | 계약 + 리서치 | 재사용 가능한 결정론 표면 source/Three adapter 경계, 흙길 월드 UV·색공간·LOD·수명·성능·A/B 채택 기준, 표면 albedo 위계 실측과 기와를 더 낮추지 않는 근거. |
 | [`mud-wall.md`](mud-wall.md) | 계약 + 리서치 | 판담·짚·돌 굽·하부 습윤 근거와 순수 profile, footprint·정적 병합·거리 LOD·성능 경계. |
 | [`drainage.md`](drainage.md) | 계약 + 리서치 | 한양 길가 도랑·인사동 배수로·외암 수로의 근거와 일반화 한계, 순수 측구/대문 건넘 계획·물리 단면·성능 경계. |
 | [`sijeon.md`](sijeon.md) | 계약 + 리서치 | 한양 시전행랑의 연속 칸·열주·후퇴 점포 전면 근거, 경량 façade plan/renderer 경계와 사료가 정하지 않는 형식의 한계. |

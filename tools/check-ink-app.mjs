@@ -23,6 +23,8 @@ const pass = (condition, message, detail = '') => {
 function imageStats(buffer) {
   const png = PNG.sync.read(buffer);
   const values = [];
+  // bands5 = 먹(최농)→종이(최담) 5등분 점유율. 수묵 농담 층위의 판정 단위다.
+  const bands = [0, 0, 0, 0, 0];
   let luma = 0, chroma = 0, dark = 0, light = 0, upperLight = 0, upperCount = 0, count = 0;
   for (let y = 0; y < png.height; y += 3) for (let x = 0; x < png.width; x += 3) {
     const i = (y * png.width + x) * 4;
@@ -30,6 +32,7 @@ function imageStats(buffer) {
     const v = 0.299 * r + 0.587 * g + 0.114 * b;
     luma += v;
     chroma += Math.max(r, g, b) - Math.min(r, g, b);
+    bands[Math.min(4, Math.floor((v / 256) * 5))]++;
     dark += v < 82 ? 1 : 0;
     light += v > 175 ? 1 : 0;
     if (y < png.height * 0.25) {
@@ -48,6 +51,7 @@ function imageStats(buffer) {
     light: light / count,
     upperLight: upperLight / upperCount,
     tonalSpan: percentile(0.95) - percentile(0.05),
+    bands5: bands.map((b) => b / count),
   };
 }
 
@@ -291,9 +295,17 @@ try {
     });
     return { sample: !!sample, selected: engine.village.getState().selected, ink: engine.debugInk() };
   });
-  await captureScene(page, 'ink-focus.png');
+  const focusPng = await captureScene(page, 'ink-focus.png');
   pass(focusState.sample && !!focusState.selected && focusState.ink.amount >= 0.999,
     'telephoto house focus preserves fully covered ink policy');
+  // 근접 프레임은 거리 감쇠가 없어 여백을 대기 원근으로 벌 수 없다. 그래서 여기가
+  // docs/oriental-painting-research.md §3 이 말하는 "균질한 중간 회색 = 회색 필터"로
+  // 가장 먼저 무너지는 지점이고, 실측으로도 최담 밴드 점유가 0.3% 까지 내려가 있었다.
+  // 최농(적묵)과 최담(여백)이 한 화면에 동시에 있어야 한다는 요건을 여기서 잠근다.
+  const focusStats = imageStats(focusPng);
+  pass(focusStats.bands5[0] > 0.012 && focusStats.bands5[4] > 0.03 && focusStats.tonalSpan > 110,
+    'telephoto ink frame holds 최농 and 최담 at once instead of one flat midtone band',
+    `bands=${focusStats.bands5.map((b) => (b * 100).toFixed(1)).join('/')} span=${focusStats.tonalSpan.toFixed(1)}`);
   const coveredAdaptiveQuality = await page.evaluate(() => {
     const engine = window.__engine;
     const fov = engine.camera.fov;

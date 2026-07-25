@@ -6,6 +6,18 @@
 //   2. 농담  — 휘도 4~5단계 양자화 워시, 채도 거의 제거, 단계 사이 디더로 번짐.
 //   3. 한지  — 절차 생성 종이 텍스처(미색 + 섬유 노이즈 + 비네팅).
 //   4. 여백  — 밝은 영역·원경은 종이색으로 수렴(안개=여백).
+//   5. 계화  — 건축은 자로 긋고 자연은 붓으로 쓴다(아래 「이중 필법」).
+//   6. 조명  — 역광면 실루엣은 굵고 순광면은 얇다(태양 방향 1개 uniform).
+//
+// 이중 필법(界畫 / 남종화법)에 대하여:
+// 「동궐도」는 한 화면에서 건축·담장을 자로 그은 직선 선묘로, 배경 산수를 남종화법의
+// 부드러운 필치로 그린다(docs/oriental-painting-research.md §7.1). 이 pass 는 스크린
+// 스페이스라 per-object role 을 읽을 수 없으므로 — 그리고 role 채널은 프로그램 축을
+// 하나 더 부르므로 — 이미 있는 노멀 버퍼에서 그 구분을 근사한다. 판별식은
+// "이 화소를 지나는 화면 방향 중 노멀이 붙어 있는 축이 하나라도 있는가"다.
+// 목조 건축의 벽·지붕면·담장·기둥·기단은 전부 평면 또는 선직면(ruled surface)이므로
+// 자재를 따라가는 축 하나에서 노멀이 정지한다 — 그 축이 곧 화원이 자를 대는 방향이다.
+// 수관·암괴·초가 이엉은 어느 축으로도 노멀이 붙지 않아 붓질 쪽에 남는다.
 //
 // 사용:  const ink = setupInk(renderer, scene, camera);  ink.composer.render();
 //        리사이즈 시 ink.setSize(w, h). 노이즈 시드 고정 → 스크린샷 결정론.
@@ -114,6 +126,19 @@ const InkShader = {
     silhouetteBoost: { value: 1.0 },
     normalEdge: { value: 0.24 },   // 내부 윤곽선은 처마/기둥 암시만 — 저폴리 수목 면선 억제
     depthEdge: { value: 0.78 },    // 실루엣도 벡터 외곽선보다 붓 농담에 종속
+    washLow: { value: 0.05 },      // 농담 입력 하한 — 이 아래는 적묵(최농)
+    washHigh: { value: 0.71 },     // 농담 입력 상한 — 이 위는 여백(최담)
+    gyehwa: { value: 1.0 },        // 이중 필법 강도(0=단일 필법으로 회귀)
+    gyehwaRadius: { value: 12.0 }, // 평판 판별 반경(화면 px). 크면 근경 건축만 남는다
+    normalScale: { value: 0.75 },  // 노멀/깊이 타깃 축소율 — 반경을 화면 px 로 고정한다
+    gyehwaPlateLo: { value: 0.998 },  // 평판 판정 하한(dot) — 이 아래는 산수 붓질
+    gyehwaPlateHi: { value: 0.9995 }, // 평판 판정 상한(dot) — 이 위는 완전한 계화
+    gyehwaCrease: { value: 2.35 }, // 건축 내부 먹선(기와 골·처마·공포) 배율
+    sansuCrease: { value: 0.74 },  // 자연 내부선 감쇠 — 저폴리 면선을 톤 덩어리로
+    sunViewDir: { value: new THREE.Vector3(0, 0, 1) }, // 뷰공간 표면→태양
+    sunLight: { value: 0.0 },      // 태양 방향 유효(1) / 씬에 태양 없음(0)
+    litWidth: { value: 0.80 },     // 순광면 선 굵기 배율
+    unlitWidth: { value: 1.36 },   // 역광면 선 굵기 배율
     ditherAmt: { value: 0.55 },    // 단계 사이 디더(번짐)
     chromaKeep: { value: 0.07 },   // 잔여 채도 (5~10%)
     fogNear: { value: 38.0 },      // 여백 페이드 시작 (월드 거리, 씬 fog와 동기화)
@@ -140,6 +165,11 @@ const InkShader = {
     uniform float levels, silhouetteWidth, silhouetteBoost, normalEdge, depthEdge;
     uniform float ditherAmt, chromaKeep, fogNear, fogFar, aerial, seed;
     uniform float mixAmount, acesOutput, toneMappingExposure;
+    uniform float washLow, washHigh;
+    uniform float gyehwa, gyehwaRadius, gyehwaCrease, sansuCrease;
+    uniform float gyehwaPlateLo, gyehwaPlateHi, normalScale;
+    uniform vec3 sunViewDir;
+    uniform float sunLight, litWidth, unlitWidth;
 
     // 값 노이즈 (해시 기반, 스크린 좌표의 결정론적 함수 → 시드 고정).
     float hash(vec2 p){
@@ -170,6 +200,13 @@ const InkShader = {
     // Sobel용 정규 깊이 [0,1] (임계 튜닝 안정화).
     float linDepth(vec2 uv){
       return clamp((worldDepth(uv) - cameraNear) / (cameraFar - cameraNear), 0.0, 1.0);
+    }
+
+    // 계화 판별용 노멀 조회와 축 검사. 한 축의 양쪽 모두에서 노멀이 붙어 있어야
+    // "자를 댈 수 있는 평판"이다 — 한쪽만 보면 작은 패싯 하나에 속아 수관이 건축이 된다.
+    vec3 nAt(vec2 uv){ return texture2D(tNormal, uv).rgb * 2.0 - 1.0; }
+    float plateAxis(vec3 nc, vec2 uv, vec2 d){
+      return min(dot(nc, nAt(uv + d)), dot(nc, nAt(uv - d)));
     }
 
     // 앱의 OutputPass는 ACES+sRGB를 정확히 한 번, 마지막에 적용한다. 수묵 결과도
@@ -209,9 +246,62 @@ const InkShader = {
       float brush = fbm(vUv * resolution.xy * 0.06);
       float brushFine = fbm(vUv * resolution.xy * 0.25 + 7.0);
 
+      // ---- 노멀 버퍼 (내부 윤곽 + 계화 판별의 공용 입력) ----
+      vec3 n0 = texture2D(tNormal, vUv).rgb * 2.0 - 1.0;
+      vec3 nl = nAt(vUv + vec2(-px.x, 0.0));
+      vec3 nr = nAt(vUv + vec2( px.x, 0.0));
+      vec3 nu = nAt(vUv + vec2(0.0,  px.y));
+      vec3 nd = nAt(vUv + vec2(0.0, -px.y));
+      float ne = (1.0 - max(dot(n0, nl), 0.0)) + (1.0 - max(dot(n0, nr), 0.0))
+               + (1.0 - max(dot(n0, nu), 0.0)) + (1.0 - max(dot(n0, nd), 0.0));
+
+      // ---- 계화(界畫) 판별: 건축은 자로, 자연은 붓으로 ----
+      // (1) ruled — 반경 gyehwaRadius 의 여덟 화면 축(22.5° 간격) 중 하나에서 양쪽 노멀이
+      //     정지하면 큰 평판/선직면이다. 벽·지붕면·담장·기둥·기단이 여기 걸리고,
+      //     수관·암괴·이엉은 어느 축에서도 노멀이 회전해 걸리지 않는다. 반경이 화면 px 라
+      //     원경 건축은 자연히 탈락한다 — 근경 선묘/원경 붓질이라는 문법과 같은 방향이다.
+      //     축을 45° 간격 4개로 줄이면 비스듬히 흐르는 기와 골·처마선이 축과 최대 22.5°
+      //     어긋나 판정이 끊기고 먹선이 점선이 된다. 8축은 그 어긋남을 절반으로 줄인다.
+      // (2) hard — 자가 만드는 모서리는 각지다. 지형·수관의 완만한 패싯 경계(수 도)는
+      //     제외해 저폴리 면분할이 펜선으로 드러나지 않게 한다(ink-landscape 원칙 3).
+      // 반경은 화면 px 다. 노멀 타깃이 축소돼 있으므로 그 비율을 곱해 되돌린다 —
+      // 그러지 않으면 0.5 배 타깃(모바일)에서 판별 반경이 화면상 두 배가 되어
+      // 같은 프레임에서 계화가 더 적게 걸린다.
+      vec2 ar = px * gyehwaRadius * normalScale;
+      float plate = plateAxis(n0, vUv, vec2(ar.x, 0.0));
+      plate = max(plate, plateAxis(n0, vUv, vec2(ar.x *  0.9239, ar.y * 0.3827)));
+      plate = max(plate, plateAxis(n0, vUv, vec2(ar.x *  0.7071, ar.y * 0.7071)));
+      plate = max(plate, plateAxis(n0, vUv, vec2(ar.x *  0.3827, ar.y * 0.9239)));
+      plate = max(plate, plateAxis(n0, vUv, vec2(0.0, ar.y)));
+      plate = max(plate, plateAxis(n0, vUv, vec2(ar.x * -0.3827, ar.y * 0.9239)));
+      plate = max(plate, plateAxis(n0, vUv, vec2(ar.x * -0.7071, ar.y * 0.7071)));
+      plate = max(plate, plateAxis(n0, vUv, vec2(ar.x * -0.9239, ar.y * 0.3827)));
+      float ruled = smoothstep(gyehwaPlateLo, gyehwaPlateHi, plate);
+      float dmin = min(min(dot(n0, nl), dot(n0, nr)), min(dot(n0, nu), dot(n0, nd)));
+      float hard = 1.0 - smoothstep(0.01, 0.55, dmin);
+      // (3) nearSide — 불연속의 가까운 쪽만 자를 댄다. 이 게이트가 없으면 수관 실루엣
+      //     뒤의 평탄한 지형 화소가 "평판 + 각진 모서리"를 동시에 만족해 계화로 오인된다
+      //     (나무 테두리에 철사선이 도는 경로). 건축은 자기 실루엣의 가까운 쪽이므로 무해.
+      float wNear = min(min(worldDepth(vUv + vec2(-px.x, 0.0)), worldDepth(vUv + vec2(px.x, 0.0))),
+                        min(worldDepth(vUv + vec2(0.0, px.y)), worldDepth(vUv + vec2(0.0, -px.y))));
+      float nearSide = 1.0 - smoothstep(0.05, 0.6, wz - wNear);
+      float archi = gyehwa * ruled * hard * nearSide * (sky ? 0.0 : 1.0);
+
+      // ---- 조명 종속 선 굵기 (§6, TCD lit/unlit outline) ----
+      // 역광이 이 앱의 기본 프레이밍이므로 그 역광을 선으로 번역한다: 해를 등진 면은
+      // 굵고 짙게, 해를 받는 면은 얇게. 태양이 없는 씬에서는 sunLight=0 으로 항등이다.
+      float lambert = max(dot(normalize(n0), sunViewDir), 0.0);
+      float lightGate = sunLight * (sky ? 0.0 : 1.0);
+      float lightW = mix(1.0, mix(unlitWidth, litWidth, lambert), lightGate);
+      // 농도는 굵기와 같은 두 knob 에서 파생한다 — litWidth=unlitWidth=1 이면 이 항 전체가
+      // 항등이 되어 조명 종속을 한 쌍의 uniform 으로 완전히 끌 수 있다(격리 검증 경로).
+      float lightInk = mix(1.0, mix(1.0 + (unlitWidth - 1.0) * 0.4,
+                                    1.0 - (1.0 - litWidth) * 0.5, lambert), lightGate);
+
       // ---- 실루엣 먹선 (깊이 불연속, 굵은 선) ----
       // 붓 노이즈로 두께를 흔든 오프셋으로 3x3 깊이 소벨.
-      float w = silhouetteWidth * (0.7 + 0.7 * brush);
+      // 계화 대상은 그 흔들림을 걷어 자로 그은 직선에 가깝게 만든다.
+      float w = silhouetteWidth * mix(0.7 + 0.7 * brush, 1.0, archi * 0.85) * lightW;
       vec2 o = px * w;
       float d0 = dc;
       float dl = linDepth(vUv + vec2(-o.x, 0.0));
@@ -225,16 +315,15 @@ const InkShader = {
       // 근경일수록 임계 낮춰 확실히 잡고, 원경은 완만히.
       float thr = 0.0016 + dc * 0.02;
       float sil = smoothstep(thr, thr * 4.0, depthDiff) * depthEdge * silhouetteBoost;
+      // 실루엣은 산수(능선)도 함께 쓰는 채널이라 계화 가중을 절제한다 — 굵기 흔들림만
+      // 걷고 농도는 소폭. 능선 실루엣이 자로 그은 선이 되면 남종화법이 깨진다.
+      sil *= mix(1.0, 1.16, archi) * lightInk;
 
       // ---- 내부 윤곽선 (노멀 불연속, 가는 선) ----
-      vec3 n0 = texture2D(tNormal, vUv).rgb * 2.0 - 1.0;
-      vec3 nl = texture2D(tNormal, vUv + vec2(-px.x, 0.0)).rgb * 2.0 - 1.0;
-      vec3 nr = texture2D(tNormal, vUv + vec2( px.x, 0.0)).rgb * 2.0 - 1.0;
-      vec3 nu = texture2D(tNormal, vUv + vec2(0.0,  px.y)).rgb * 2.0 - 1.0;
-      vec3 nd = texture2D(tNormal, vUv + vec2(0.0, -px.y)).rgb * 2.0 - 1.0;
-      float ne = (1.0 - max(dot(n0, nl), 0.0)) + (1.0 - max(dot(n0, nr), 0.0))
-               + (1.0 - max(dot(n0, nu), 0.0)) + (1.0 - max(dot(n0, nd), 0.0));
-      float crease = smoothstep(0.28, 0.7, ne) * normalEdge;
+      // 이 채널이 이중 필법의 본체다: 건축의 처마·공포·기와 골·담장 상단은 짙은 선묘로,
+      // 자연의 저폴리 면선은 더 거두어 톤 덩어리로 남긴다.
+      float crease = smoothstep(0.28, 0.7, ne) * normalEdge
+                   * mix(sansuCrease, gyehwaCrease, archi);
       if (sky) crease = 0.0;               // 하늘엔 윤곽선 없음
 
       // 원경 먹선은 안개(여백)로 사라진다 → 바닥이 시선에 스치는 지평선·원반
@@ -249,10 +338,11 @@ const InkShader = {
       sil *= mix(1.0, 0.42, detailFar);
 
       // 붓 농도 변주 + 미세 끊김 → 순수한 벡터선이 아닌 필선.
+      // 계화 선은 그 변주 폭을 좁혀 균일한 농도로(자·붓의 차이가 여기서 보인다).
       float inkAmt = max(sil, crease);
-      inkAmt *= (0.55 + 0.7 * brushFine);
+      inkAmt *= mix(0.55 + 0.7 * brushFine, 0.94 + 0.12 * brushFine, archi);
       inkAmt *= smoothstep(0.02, 0.16, inkAmt + brush * 0.05); // 얇은 끝 자연 소멸
-      inkAmt = clamp(inkAmt, 0.0, 0.92);
+      inkAmt = clamp(inkAmt, 0.0, mix(0.92, 0.97, archi));
 
       // ---- 농담 워시 (휘도 양자화) ----
       vec3 lin = texture2D(tDiffuse, vUv).rgb;
@@ -266,7 +356,12 @@ const InkShader = {
       // 양자화 + 저주파 디더: 밴드 경계를 유기적으로 흔들어 먹 번짐/평붓 자국을 낸다.
       // (고주파가 아니라 큰 얼룩 → 픽셀 노이즈가 아닌 물감 고임 느낌)
       float dth = (fbm(vUv * resolution.xy * 0.014 + 3.0) - 0.5) * ditherAmt;
-      float lv = clamp(lum, 0.0, 1.0) * levels;
+      // 농담 입력 정규화: 씬 휘도가 실제로 점유하는 대역을 5단 전체로 펼친다. 실측
+      // (docs 없음 — 트랙 리포트) 결과 raw lum 은 근접 프레임에서 [0.18,0.53] 에 갇혀
+      // 5단 중 2~3단만 주소지정했다. 그 상태가 §3 이 말하는 "회색 필터"이고, 최농(적묵)과
+      // 최담(여백)이 한 화면에 공존하지 못하는 직접 원인이다.
+      float washT = clamp((lum - washLow) / max(washHigh - washLow, 1e-3), 0.0, 1.0);
+      float lv = washT * levels;
       float fl = floor(lv);
       float fr = fract(lv);
       float e = smoothstep(0.5 - 0.30, 0.5 + 0.30, fr + dth); // 부드러운 밴드 전이
@@ -425,6 +520,13 @@ export class InkPass extends Pass {
     this.instFadeNormalCount = 0;
     this.lodScreenDoorNormalCount = 0;
     this.normalDrawCalls = 0;
+    // 조명 종속 선 굵기용. 씬의 태양을 이 pass 가 직접 읽으므로 소비자 배선이 없다
+    // (앱·하네스 모두 같은 계약). 그림자 캐스터 DirectionalLight 를 태양으로 보고,
+    // 없으면 가장 센 DirectionalLight, 그것도 없으면 항등(sunLight=0).
+    this.sunSourceCount = 0;
+    this._sunWorld = new THREE.Vector3();
+    this._sunTargetWorld = new THREE.Vector3();
+    this._viewBasis = new THREE.Matrix3();
 
     const dt = new THREE.DepthTexture(1, 1);
     dt.type = THREE.UnsignedIntType;
@@ -439,6 +541,7 @@ export class InkPass extends Pass {
     this.uniforms.tPaper.value = paperTexture;
     this.uniforms.tBeauty.value = beautyTexture;
     this.useExternalBeauty = !!beautyTexture;
+    this.uniforms.normalScale.value = this.resolutionScale;
     this.uniforms.cameraNear.value = camera.near;
     this.uniforms.cameraFar.value = camera.far;
     this.material = new THREE.ShaderMaterial({
@@ -470,6 +573,8 @@ export class InkPass extends Pass {
     materials.length = 0;
     let instFadeNormalCount = 0;
     let lodScreenDoorNormalCount = 0;
+    let sunLight = null;
+    let sunSourceCount = 0;
     this.scene.traverseVisible((o) => {
       const renderable = o.isMesh || o.isPoints || o.isLine || o.isSprite;
       const contributes = renderable && contributesDofDepth(o);
@@ -481,7 +586,13 @@ export class InkPass extends Pass {
         materials.push(o, o.material, this.lodScreenDoorNormalMaterial);
         lodScreenDoorNormalCount++;
       }
+      if (!o.isDirectionalLight || o.intensity <= 0) return;
+      sunSourceCount++;
+      if (!sunLight
+        || (o.castShadow && !sunLight.castShadow)
+        || (o.castShadow === sunLight.castShadow && o.intensity > sunLight.intensity)) sunLight = o;
     });
+    this.sunSourceCount = sunSourceCount;
     for (const o of hidden) o.visible = false;
     for (let i = 0; i < materials.length; i += 3) materials[i].material = materials[i + 2];
     this.normalExcludedCount = hidden.length;
@@ -505,6 +616,22 @@ export class InkPass extends Pass {
       for (const o of hidden) o.visible = true;
       hidden.length = 0;
       materials.length = 0;
+    }
+
+    // 태양 방향은 위 renderer.render 가 월드 행렬과 camera.matrixWorldInverse 를 갱신한
+    // 뒤에 읽는다. 방향만 필요하므로 뷰 행렬의 회전(3x3)만 적용한다.
+    if (sunLight) {
+      const dir = sunLight.getWorldPosition(this._sunWorld)
+        .sub(sunLight.target.getWorldPosition(this._sunTargetWorld));
+      if (dir.lengthSq() > 1e-8) {
+        dir.normalize().applyMatrix3(this._viewBasis.setFromMatrix4(this.camera.matrixWorldInverse));
+        this.uniforms.sunViewDir.value.copy(dir).normalize();
+        this.uniforms.sunLight.value = 1;
+      } else {
+        this.uniforms.sunLight.value = 0;
+      }
+    } else {
+      this.uniforms.sunLight.value = 0;
     }
 
     // 2) 먹 합성.
