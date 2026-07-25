@@ -47,6 +47,11 @@
 | [`joseon-city.md`](joseon-city.md) | 리서치 | 도성·읍성·촌락·사찰 입지와 가람 원리. 사찰 작업은 특히 §5·§7G 참조. |
 | [`palace-layout.md`](palace-layout.md) | 리서치 | 궁궐 다일곽·축선·행각 공유 규칙과 구현 파라미터. |
 | [`village-walls-parcels.md`](village-walls-parcels.md) | 리서치 | 담장·필지·정원·보호수의 실증 근거와 알고리즘 번역. |
+| [`look-restoration-plan.md`](look-restoration-plan.md) | 활성 작업 | 2026-07-20~24 구간의 룩 회귀 복원 단계 계획과 운영 원칙. Phase별 착수·완료 상태를 여기서 갱신한다. |
+| [`look-audit-2026-07.md`](look-audit-2026-07.md) | 스냅샷 | 2026-07-25 A/B 전수 감사. 회귀 확정·개선 유지·상향 과제 목록과 원인 커밋·대상 파일. |
+| [`look-grammar.md`](look-grammar.md) | 리서치 | 목표 룩의 시각 문법(빛·구도·공기감) 정리. 복원 판정의 절대 축 근거. |
+| [`tree-look.md`](tree-look.md) | 리서치 | Phase 3.5-0 나무 룩의 동양화 조형 문법과 기법 후보. 프로토타입이 안을 확정하기 전까지 계약이 아니다. |
+| [`oriental-painting-research.md`](oriental-painting-research.md) | 리서치 | 동양화 원리 가운데 나무 밖 전체 룩(원경·구도·여백·대기·색·계화)에 적용 가능한 원천 자료. |
 | [`tooling.md`](tooling.md) | 스냅샷 | 후보 라이브러리 평가와 채택 판단. 현재 설치 목록으로 오해하지 않는다. |
 | [`perf-webgpu.md`](perf-webgpu.md) | 스냅샷 | 2026-07-17 기준 WebGPU·성능 조사. 버전·브라우저 수치는 재검증 필요. |
 | [`demo-analysis.md`](demo-analysis.md) | 스냅샷 | 바이럴 데모 사례와 제품 방향 분석. 구현 계약이 아니다. |

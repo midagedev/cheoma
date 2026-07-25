@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 cheoma (처마) — a procedural Joseon-era Korean architecture & village generator in three.js. Parametric hanok (칸 system, 공포, 팔작지붕 curvature), auto-composed villages (배산임수 terrain, 필지·담장·고샅, 다랑이 논·개울, 산사), a scale continuum from a lone house to a walled capital (한양) with multi-곽 palaces, plus time/season/weather, a focus zoom continuum, and an ink (수묵화) NPR mode. Live at cheoma.midagedev.com.
 
+## Project goals
+
+Four axes, restated by the user. They are the priority test for any task: work that does not advance one of them does not get picked up.
+
+1. **The house — detail, editing, and regeneration.** Not just something to look at: the quality of touching it and changing it. Close-up hanok fidelity, the edit panel, and rebuild/reroll all count as one axis.
+2. **A clip impressive enough to go viral in the three.js community.** That is why this repo exists; the reference deliverable is a single shot worth sharing.
+3. **Oriental visual language as the selling point.** 수묵, golden hour, the 처마 line — lean into that aesthetic rather than treating it as decoration.
+4. **Joseon authenticity at study-material quality.** Someone learning hanok should be able to use this as reference, so historical grounding is a quality bar, not trim.
+
+The visual genre is fixed and documented in `docs/look-grammar.md`: painterly stylization unified by light and atmosphere — not cartoon, not low-poly showcase, not realism. Every look-affecting change is judged against that grammar (silhouette-first geometry, saturation discipline, everything participates in the atmosphere).
+
 ## Two-layer boundary (read this first)
 
 - **`src/`** — the framework-agnostic ES-module core (pure three.js): all generation, rendering, environment, animation, export. Imports bare `three`. **Never import Svelte or anything from `app/` into `src/`.**
@@ -77,6 +88,8 @@ Roadside drainage follows `docs/drainage.md`. `src/village/drainage-plan.js` is 
 
 **Environment (`src/env/`)**: time/season/weather changes crossfade via internal tweens — API signatures stay stable, no hard cut. Snow = a roof white-tint shader (not an accumulation volume); rain = falling-curtain particles. `focus.js` drives the close-up ambience ring (chickens, chimney smoke, wind grass, lanterns) on the focused parcel. Camera tweens must call `camera.lookAt` every frame — freezing direction snaps the frame on tween end. A terrain-crossing focus camera normally retains its authored distant 10°/7° telephoto frame: `terrainMeshFocusCutaway()` traces the same nine camera-facing house samples used by focus visibility and raises the one shared camera near plane beyond the foreground ridge while leaving at least 1.2m before the nearest house face. This automatically clips color, physical particles, DoF/ink depth, and vegetation without a new pass or material. Only a cutaway that would reach the subject may move the real camera into its first terrain-safe interval. Gate the deterministic `capital/7/p31` case with `check:cinematic:app` and `shoot:focus-level`. `setupEnvironment()` and `setupAudio()` both own explicit `dispose()` contracts; audio teardown stops/disconnects owned nodes but never closes three's shared `AudioContext`.
 
+**Night light is three separate systems** — do not conflate them when a night frame looks wrong: (a) props stone lanterns (`src/props/`, village-only, driven by the village adapter), (b) 한지 window/door glow, (c) the single-building 처마 eave lanterns in `sky.js`. Hierarchy: an eave lantern must never outshine the window glow. Window glow is *tagged*, not patched — doors and 살창 are per-mesh material clones, so patching the shared `M.door` does nothing. `palette.js` tags `userData.hanjiGlow` on the base material (`Material.copy` deep-copies userData, so clones inherit it) and consumers `traverse` the tree to patch every tagged material. It is independent of `userData.role`, so per-part colour variety is unaffected.
+
 **Other core dirs**: `src/layout/` (hanok/compound assembly, `offsetPoly`), `src/anim/assembly.js` (the "tofu" drop-in assembly, shared by assembly/expansion/merge), `src/camera/`, `src/cinematic/` (drone + first-person walk), `src/export/` (glTF/GLB, `EXT_mesh_gpu_instancing`), `src/render/` (ink NPR), `src/props/`, `src/share/`.
 
 ## onBeforeCompile gotchas
@@ -84,14 +97,53 @@ Many stock materials are patched via `onBeforeCompile`. Rules learned the hard w
 - No dynamically-indexed custom uniform arrays. `Vector3.copy(Color)` yields NaN → black render.
 - Patch **chain order inverts**: an earlier-registered patch's `color` code runs *after* a later patch's (string-replacement ordering) — exploited deliberately for seasonal multiply overrides.
 - World-normal effects on an `InstancedMesh` must compose `mat3(instanceMatrix)` (instance orientation lives in `instanceMatrix`, not `modelMatrix`), or up-facing gates read zero.
+- GLSL reserved words (`sample`, `patch`, `input`, `output`, `filter`, `active`) cannot be used as local variable names.
+
+## Other recurring pitfalls
+
+- **Light counts recompile everything.** three's program cacheKey includes `numPointLights`, so adding or removing a PointLight recompiles every lit material in the scene — this was the root cause of transition shader storms. Keep a fixed pool resident in the scene and park unused lights at `intensity = 0`; `visible = false` drops them from the count and brings the churn back. Similarly, only `dispose()` frees a program (detaching does not), so disposing overlay materials forces a recompile on the next build — keep one anchor material per overlay kind alive.
+- **팔작지붕 normals**: `roof.js` parameterises the `+x` side and `-z` rear faces with a sign flip, so their vertex normals point *down* (materials are `DoubleSide`, so it renders fine). World-normal shader effects must use `abs()` and re-orient the lighting normal, or up-facing gates read zero on exactly those two faces.
+- **`L.plateY` is not the podium top** — it is the 평방 top (column-head height). The 기단 top surface is `L.podTopY`; placing objects at `plateY` floats them at eave height.
+- `populateVillage` reassigns `root.userData` from one whole object literal at the end, so a key assigned before that line is silently dropped. New exposed keys must go inside the literal.
+- Sky geometry (moon, halo) must sit inside the camera `far` plane *and* low just above the ridge: the camera rig tilts down, so the visible sky band is only a few degrees tall.
+- Village-mode `camera.near` is a distance-dependent ramp (distant aerial needs a large near to kill z-fighting). Never set a small constant there.
+- Draw-call measurement: with the composer active `renderer.info.calls` counts only the last fullscreen pass, so measure with a direct `renderer.render`, and give the harness a shadow-casting sun or the count comes out roughly 1.7× low.
+- Water glint is high-frequency and AA-nondeterministic. Never judge a no-op by pixel hash — compare a same-code diff against the change diff.
+- Vite dev does not HMR `new Worker(url)` module graphs. A worker-vs-sync determinism gate that fails with the worker on but passes with `?worker=0` is stale worker code: restart vite clean (kill the process, remove its `cacheDir`) before suspecting the source. If `?worker=0` fails too, it is a real determinism bug.
+- Playwright vs. the app chrome: the `.chroma` wrapper fades out after ~3s idle and the canvas then intercepts clicks. Wake it with a real `page.mouse.move`, and for screenshots force `.chroma { opacity: 1 !important; pointer-events: auto !important }` instead of waiting on the class.
+
+## Stable user decisions
+
+These are standing calls from the user; `docs/project-status.md` carries the fuller version. The project is in wrap-up, not expansion — a proposal has to serve one of the four goals above, plus the flagship look, a measured bottleneck, or the release.
+
+- **The look is about light.** Bloom haze plus a golden-hour rim is the signature, and the rim must be optically real: it appears only when the sun is genuinely behind the subject and vanishes at noon. The default framing is backlit for that reason.
+- Ground albedo stays darker than the buildings, but bounce light must lift the shadow side — no crushed-black silhouettes; shadow-side 단청 and 창호 still read. Warmth belongs to highlights and rim while shadows and midtones stay neutral, so 뇌록·주홍, foliage green, and the sky gradient stay distinct hues instead of one orange wash. Sun shadows must read parallel.
+- Nothing on screen is fully static (motes drift, lanterns sway) and every such motion is micro-scale — if you notice it, it is too strong.
+- Every environment change (time, season, weather) crossfades; a visible pop is a failure. Only shot/immediate paths snap.
+- The app default time is `sunset` backlit, while `?shot=1` keeps `day` so cross-domain comparison harnesses are not tinted orange. A shot tool that wants the flagship look must pass `time=sunset` explicitly.
+- Dense mountain forest is part of the Korean-mountain look: never thin trees for performance and never leave bald mountains. Terrain stays tight around the village and the world ends in `worldedge` mist; size that cut from the default aerial framing (the village fills roughly 65–75% of the frame).
+- Heavy generation happens during the title/loading window and is kept hidden; entering a mode or rerolling plays only the arrival motion. Smoothness is judged by rAF frame times, not by feel.
+- The UI is responsive from the start — tap selection, pinch zoom, bottom sheets on mobile, and a tap fallback for anything hover-driven. No desktop-only hardcoding in new components.
+- Do not build in-app clip recording. Tweet clips are manual OS screen recordings; if an audit flags "no record button", leave it.
+- BGM is generated outside the repo by the user (Suno prompts in `docs/suno-prompts.md`, audio in `assets/audio/`); ambience SFX come from separate CC0 sources. `hero.arm()` mutes BGM, so every landing path must restore the volume — a missing restore leaves music permanently silent while SFX still play.
+- The app is named cheoma and the seal stays the 한글 '처마' 전각 in every locale.
+
+## Git, assets & deploy
+
+- The lead commits and pushes at gate boundaries; subagents must not run git at all (no `restore`/`checkout`/`stash`/`commit`/`push`) — ask the lead to recover a file. Commit subjects are short English.
+- `shots/` and `refs/` stay untracked. `refs/` is third-party reference photography and must never be published. Gate evidence belongs in `shots/`, throwaway captures in a scratch dir.
+- Deploy is Cloudflare Pages (`wrangler pages deploy dist --project-name=cheoma --branch=main`), independent of `git push`. If `cheoma.pages.dev` serves the new build but the custom domain does not, that domain's DNS record is pinned to a per-deployment alias instead of the production one — a DNS fix, not a propagation wait.
 
 ## Verifying visual changes
 Headless ANGLE serializes shader linking, so absolute frame-ms from headless runs is unreliable — judge perf by **program-count deltas** and determinism hashes, not wall-clock. Keep gate screenshots minimal; put throwaway captures in a scratch dir, not `shots/`.
+
+Judging pixels is a separate job from writing code. Screenshot verdicts go to a vision-capable agent or the user, and the orchestrating session reads the text verdict rather than the PNGs — image reads bloat the transcript for the rest of the session. Spawn a fresh agent per review round instead of resuming an image-heavy one, and stop an agent once its round is done. Parallelise by file boundary, but keep concurrent browser-driving agents to about three: benchmarks especially need a quiet machine, and numbers taken while other harnesses run are worthless. A prototype passes the screenshot-vs-drawing/photograph comparison loop before it is shown to the user. When judging a restoration, score two axes — the regression axis (old vs new) and the absolute axis (real golden-hour references and the target mood). The golden build is a floor, not a ceiling.
 
 ## Documentation & current work
 
 - Start at `docs/README.md` for the document map and status labels. Not every file in `docs/` is a current implementation contract; research and dated snapshots are marked there.
 - `docs/project-status.md` holds the current wrap-up direction and stable user decisions migrated from Claude Code memory.
+- `docs/look-restoration-plan.md` drives the current look-restoration round. `5ca668e` is the reference golden build for A/B capture. Performance comparisons must use golden-worktree measurements taken with the *same* harness in the same run — historical baseline numbers (e.g. "village 475 / hanyang 1288") did not reproduce under any current tool and must not be used as targets.
 - `docs/architecture-refactor.md` records the completed first structure pass and the current reuse/boundary contract. Public consumer entrypoints live in `src/api/`; internal modules must not import that façade. Run `npm run check` before browser-heavy gates.
 - `docs/verification.md` is the canonical harness map. In particular, `tools/check-determinism.mjs` does not compare worker vs sync and does not hash temple data, while `tools/verify-forest.mjs` is obsolete.
 - `SANSA-HANDOFF.md` is the queued temple-relocation brief. Do not mix its behavior changes into mechanical structure moves. When implemented, its source changes must remain uncommitted for review unless the user changes that instruction.
