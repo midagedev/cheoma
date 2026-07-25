@@ -6,6 +6,8 @@ dist*/
 shots/
 refs/
 _wt-out/
+/.claude/
+/scratchpad/
 *.log
 .DS_Store
 .wrangler/
