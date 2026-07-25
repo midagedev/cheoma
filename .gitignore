@@ -5,6 +5,7 @@ app/dist*/
 dist*/
 shots/
 refs/
+_wt-out/
 *.log
 .DS_Store
 .wrangler/

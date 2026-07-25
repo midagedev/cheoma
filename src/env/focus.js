@@ -6,6 +6,7 @@ import { setupLanternSway } from './lantern-sway.js';
 import { makePresenceGate } from './present-gate.js';
 import { setupGrass } from './grass.js';
 import { attachOverlayLanterns, getLanternMaterials } from '../layout/props.js';
+import { aerialLifePresence } from '../core/lod.js';
 
 // 필지 스타일별 대문 개구부 폭(buildParcel STYLE_MAP 대응) — 풀이 대문 앞을 막지 않게 비운다.
 const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
@@ -395,7 +396,9 @@ const NEAR_ENTER = 26, NEAR_EXIT = 34;     // 근접 진입/이탈 반경(m) —
 const MID_ENTER = 62, MID_EXIT = 74;       // 중간 진입/이탈 반경(m) — 히스테리시스 12m
 const NEAR_CAP = 2, MID_CAP = 6;           // 계층별 동시 셀 상한
 const SPEED_GATE = 18, SPEED_RESUME = 11;  // 신규 점등 억제 속도(m/s) — 히스테리시스
-const SMOKE_ANCHORS = 4, SMOKE_PARTICLES = 6;   // 공유 연기 캡(≤24 스프라이트 = 드로우콜 상한)
+// 공유 연기 캡(스프라이트 = 개별 드로우콜). 부감에서 마을이 살아있음을 전하는 유일한 표현이므로
+//   골든의 24 드로우 예산을 컬럼 수 쪽으로 재배분한다(6기둥 × 5입자 = 30 — 부감 예산 +75~100 안).
+const SMOKE_ANCHORS = 6, SMOKE_PARTICLES = 5;
 const LOOKAHEAD_TTL = 3.0;                  // 프리워밍 지점 유효시간(초) — 갱신 없으면 소멸
 
 const nowSec = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
@@ -615,10 +618,37 @@ export function createAmbientField(scene, {
     if (speed > SPEED_GATE) speedHot = true; else if (speed < SPEED_RESUME) speedHot = false;
   }
 
-  function syncSmokeAnchors() {
+  // 부감 굴뚝 앵커(look-audit R4). 지면 디테일 밴드가 닫힌 원경에서는 활성 셀이 하나도 없어
+  //   앵커 집합이 비고 연기가 통째로 사라졌다. 셀(모트·등롱·지오)을 만들지 않고 필지 서술자에서
+  //   굴뚝 좌표만 직접 골라 같은 스프라이트 풀에 물린다 — 추가 비용은 스프라이트 드로우뿐이다.
+  //   부감에서는 "가장 가까운 N채"가 화면 한 점에 뭉치므로, 거리 정렬 위에서 등간격 표본을 뽑아
+  //   마을 전역에 연기 기둥이 퍼지게 한다(결정론 — 난수 없음).
+  function aerialSmokeCandidates(limit) {
+    const pool = [];
+    for (const d of parcels) {
+      if (!d.chimney || excluded(d.id) || cells.has(d.id)) continue;
+      pool.push({ id: d.id, ch: d.chimney, dist: Math.hypot(d.cx - anchorX, d.cz - anchorZ) });
+    }
+    if (pool.length <= limit) return pool;
+    pool.sort((a, b) => (a.dist - b.dist) || (a.id < b.id ? -1 : 1));
+    const picked = [];
+    for (let i = 0; i < limit; i++) {
+      const index = Math.min(pool.length - 1, Math.round((i + 0.5) / limit * pool.length));
+      picked.push(pool[index]);
+    }
+    return picked;
+  }
+
+  function syncSmokeAnchors(aerial) {
     const list = [];
     for (const [id, cell] of cells) { const d = descById.get(id); if (d && d.chimney) list.push({ id, ch: d.chimney, dist: cell._dist }); }
     list.sort((a, b) => a.dist - b.dist);
+    // 셀이 하나라도 살아 있으면 앵커는 셀이 단독 소유한다. 전환 중 셀이 한 프레임에 하나씩
+    //   올라오는 구간에서 부감 후보까지 섞으면 앵커 집합이 매 프레임 바뀌어(smokeKey → detect)
+    //   스프라이트가 명멸한다. 순수 부감(셀 0)에서만 필지에서 직접 고른다.
+    if (aerial && cells.size === 0) {
+      for (const candidate of aerialSmokeCandidates(SMOKE_ANCHORS)) list.push(candidate);
+    }
     const chosen = list.slice(0, SMOKE_ANCHORS);
     const key = chosen.map((c) => c.id).sort().join(',');
     if (key !== smokeKey) {
@@ -646,7 +676,15 @@ export function createAmbientField(scene, {
       * lastOwnerWeight;
     const detailWeights = { groundWeight, particleWeight, lensScale: lod?.lensScale ?? 1 };
     const groundActive = lod ? lod.groundActive === true : true;
-    const nearAllowed = !lod || lod.tier === 'near';
+    // 근경 모트 이미터(ambNear)는 이산 tier 하나에만 걸려 있어, 망원 근경이 tier=mid 로 읽히는
+    //   순간 마당 먼지 모트가 통째로 사라졌다(look-audit R4 — 골든 dustMotes 3, HEAD 1).
+    //   NEAR_ENTER(26m) 반경 자체가 이미 공간 상한이므로, 입자 밴드가 열려 있으면 tier 와
+    //   무관하게 근접 셀을 허용한다. 원경은 particleWeight=0 이 그대로 닫는다.
+    const nearAllowed = !lod || lod.tier === 'near' || particleWeight > 0.02;
+    // 부감 생명감(look-audit R4): 지면 밴드가 0이어도 굴뚝 연기는 남는다. 웨이브 소유권만 곱한다.
+    const life = aerialLifePresence(lod?.visualDistance);
+    const lifeWeight = life.weight * lastOwnerWeight;
+    smoke.setAerial(life.boost);
 
     // 희망 티어 산출(유효거리 = min(앵커, 룩어헤드)).
     const desired = new Map();
@@ -696,8 +734,8 @@ export function createAmbientField(scene, {
 
     lightPool?.assign(camera);   // #141 활성 필드만 고정 풀을 소유(웨이브 중 총 개수 불변)
 
-    syncSmokeAnchors();
-    const sTarget = anchorGroup.children.length > 0 ? particleWeight : 0;
+    syncSmokeAnchors(lifeWeight > 0.02);
+    const sTarget = anchorGroup.children.length > 0 ? Math.max(particleWeight, lifeWeight) : 0;
     smokeFade += (sTarget - smokeFade) * Math.min(1, dt * 1.4);
     smoke.setFade(smokeFade);
     smoke.update(dt);

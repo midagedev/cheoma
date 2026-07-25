@@ -9,7 +9,7 @@
 //   ① 발현 매트릭스: {spring,summer,autumn,winter} × {근경(camDist 30), 부감(camDist 210)}
 //   ② 팔랑거림: 무풍에서 입자 x 변위 비단조(플러터) + 낙하 y 단조 감소
 //   ③ 카메라 추종: 중심 ±80m 이동 후 입자 AABB 가 카메라 주변을 감쌈
-//   ④ 눈·비 회귀: 물리 geometry count·world scale·부감 CPU/draw 휴면, rain count
+//   ④ 눈·비 회귀: 물리 geometry count·world scale·부감 전용 밴드(발현 유지·볼륨 확대·밀도 절감), rain count
 //   ⑤ 조기노출: 원점 빈 터(building 숨김·중심 원점)에서 count 0, 건물 복귀 후 상승(게이트 미고착)
 //   ⑥ 광학 계약: 눈·꽃잎은 픽셀 크기 보상이 아니라 실제 월드 크기와 명시적 DoF depth를 유지
 //   ⑦ pageerror 0
@@ -57,9 +57,9 @@ window.__season = (n) => window.__W.setSeason(n);
 window.__weather = (n,o) => window.__W.setWeather(n,o);
 window.__ppos = () => { const p = window.__W._petals.object.position; return [p.x,p.y,p.z]; };
 window.__aabb = () => { const b = window.__W._petals.aabb(); return { min:[b.min.x,b.min.y,b.min.z], max:[b.max.x,b.max.y,b.max.z] }; };
-window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnowPhysical'); return { worldScale: s.material.uniforms.uWorldScale.value, vis: s.visible, n: s.geometry.instanceCount, depth: !!s.userData.dofDepthMaterial }; };
+window.__snow = () => { const s = window.__scene.getObjectByName('weatherSnowPhysical'); return { worldScale: s.material.uniforms.uWorldScale.value, screenFloor: s.material.uniforms.uScreenSize.value, boxScale: s.scale.x, vis: s.visible, n: s.geometry.instanceCount, depth: !!s.userData.dofDepthMaterial }; };
 window.__petalOptics = () => { const p = window.__W._petals.object; return { worldScale: p.material.uniforms.uWorldScale.value, level: window.__W._petals.level, depth: !!p.userData.dofDepthMaterial }; };
-window.__rain = () => { const r = window.__scene.getObjectByName('weatherRainPhysical'); return { vis: r.visible, n: r.geometry.instanceCount, depth: !!r.userData.dofDepthMaterial }; };
+window.__rain = () => { const r = window.__scene.getObjectByName('weatherRainPhysical'); return { radius: r.material.uniforms.uRadius.value, screenFloor: r.material.uniforms.uScreenWidth.value, boxScale: r.scale.x, vis: r.visible, n: r.geometry.instanceCount, depth: !!r.userData.dofDepthMaterial }; };
 window.__precipState = (kind) => {
   const name = kind === 'rain' ? 'weatherRainPhysical' : 'weatherSnowPhysical';
   const values = window.__scene.getObjectByName(name).geometry.attributes.aCenter.array;
@@ -166,10 +166,21 @@ const wx = await page.evaluate((dt) => {
 }, DT);
 check('④snow count', wx.snowNear.n === 3600 && wx.snowNear.vis, `n=${wx.snowNear.n} vis=${wx.snowNear.vis}`);
 check('④snow 실제 크기', approx(wx.snowNear.worldScale, 0.012, 1e-6), `worldScale=${wx.snowNear.worldScale}`);
-check('④snow 부감 휴면', !wx.snowAerial.vis, `vis=${wx.snowAerial.vis}`);
-check('④snow 부감 CPU state 휴면',
-  JSON.stringify(wx.snowStateBeforeSleep) === JSON.stringify(wx.snowStateAfterSleep),
-  `stable=${JSON.stringify(wx.snowStateBeforeSleep) === JSON.stringify(wx.snowStateAfterSleep)}`);
+// 강수는 하늘·대기 소속이므로 부감에서 잠들지 않는다(look-audit R3). 예전의 "부감 휴면" 단언은
+//   비 오는 날/눈 오는 날 부감에서 강수를 통째로 지우던 회귀를 계약으로 고정한 것이었다.
+//   지금 계약: 부감에서도 발현하고, 낙하 볼륨 커버리지가 넓어지며, 비용은 밀도로만 낸다.
+check('④snow 부감 발현(밴드 0 금지)', wx.snowAerial.vis, `vis=${wx.snowAerial.vis}`);
+check('④snow 부감 볼륨 확대·밀도 절감',
+  wx.snowAerial.boxScale > 1.2 && wx.snowAerial.n > 0 && wx.snowAerial.n < wx.snowNear.n,
+  `boxScale=${wx.snowAerial.boxScale.toFixed(2)} n=${wx.snowNear.n}->${wx.snowAerial.n}`);
+check('④snow 부감 치수 하한만 화면 참조(월드 크기 불변)',
+  approx(wx.snowAerial.worldScale, 0.012, 1e-6)
+    && wx.snowAerial.screenFloor > 0 && wx.snowAerial.screenFloor <= 0.006,
+  `worldScale=${wx.snowAerial.worldScale} screenFloor=${wx.snowAerial.screenFloor}`);
+// CPU state 는 계속 진행한다. 원경에서 얼려 두면 다시 근접할 때 얼어붙은 배치가 팟으로 드러난다.
+check('④snow 부감 CPU state 진행(정지→재등장 팟 금지)',
+  JSON.stringify(wx.snowStateBeforeSleep) !== JSON.stringify(wx.snowStateAfterSleep),
+  `advanced=${JSON.stringify(wx.snowStateBeforeSleep) !== JSON.stringify(wx.snowStateAfterSleep)}`);
 check('④snow 물리 depth', wx.snowNear.depth, `depth=${wx.snowNear.depth}`);
 check('④rain count·depth', wx.rain.n === 2600 && wx.rain.vis && wx.rain.depth, `n=${wx.rain.n} vis=${wx.rain.vis} depth=${wx.rain.depth}`);
 

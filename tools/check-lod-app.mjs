@@ -1373,9 +1373,12 @@ try {
     }
     let state = snapshot();
     while (performance.now() - started < timeoutMs) {
+      // 부감 복귀의 정지 조건은 "셀이 비었는가"다. 굴뚝 연기는 부감 전용 밴드를 따라 남는 것이
+      // 계약이므로(look-audit R4 — 마을이 살아있음을 전하는 표현) smokeFade 0 을 요구하지 않는다.
+      // 웨이브 소유권이 0으로 내려가는 경우의 연기 소거는 아래 wave 게이트가 따로 고정한다.
       const ambientQuiet = state.ambient?.near === 0 && state.ambient?.mid === 0
         && state.ambient?.retiring === 0 && state.ambient?.maxStrength <= 0.002
-        && state.ambient?.smokeFade <= 0.02;
+        && state.ambient?.smokeAnchors <= 6;
       if (state.rings === 0 && state.ringAnimals === 0 && ambientQuiet
         && !state.active && !state.visible) {
         return { finished: true, frames, state };

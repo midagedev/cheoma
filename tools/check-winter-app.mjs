@@ -143,7 +143,11 @@ try {
     'snow reaches tiled and thatched roofs, terrain, vegetation, and exterior props',
     `materials=${snow.patchedMaterials} profiles=${JSON.stringify(snow.profiles)} roles=${JSON.stringify(snow.roles)}`);
   pass(snow.calls - clear.calls <= 1, 'snow surface coverage adds no geometry-heavy draw path', `calls ${clear.calls}→${snow.calls}`);
-  pass(snow.programs - clear.programs <= 24, 'snow profiles keep shader program growth bounded', `programs ${clear.programs}→${snow.programs}`);
+  // 24 → 28: 이 프레임은 마을 부감이고, 예전에는 낙하 강수가 부감에서 통째로 소거돼(look-audit R3)
+  //   눈을 켜도 표면 틴트 프로그램만 늘었다(측정 172→172콜 = 눈발이 한 장도 그려지지 않았다는 뜻).
+  //   강수 전용 밴드 복원으로 낙하 눈이 실제로 렌더되면서 그 자신의 색·DoF depth 프로그램이 함께
+  //   잡히므로(콜은 여전히 +1 = 인스턴스 한 장) 표면 프로파일 예산에 그 몫을 더한다.
+  pass(snow.programs - clear.programs <= 28, 'snow profiles keep shader program growth bounded', `programs ${clear.programs}→${snow.programs}`);
   pass(snowLuma > clearLuma + 8, 'snow is visibly distinct from clear winter', `luma ${clearLuma.toFixed(1)}→${snowLuma.toFixed(1)}`);
   pass(snowLuma < 210, 'snow scene retains tonal detail instead of clipping to white', `luma=${snowLuma.toFixed(1)}`);
 

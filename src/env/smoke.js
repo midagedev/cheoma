@@ -24,6 +24,14 @@ const PARTICLES = 30;   // 굴뚝당 파티클 수 기본(연속 컬럼용 조�
 const MAX_ANCHORS = 3;  // 동시 굴뚝 상한 기본(giwa 1 · choga 1 + 여유)
 const PRESENT_EPSILON = 0.002;
 
+// 부감 임포스터 배율(look-audit R4). 근접 튜닝값(6.4m 상승·최대 3.25m 폭)은 도성 부감 480m 에서
+//   기둥 하나가 13px·7px 로, 지형 위에서 사실상 판별되지 않는다. 원경에서만 기둥을 높이고 넓히고
+//   진하게 해 "밥 짓는 마을"이 부감에서 읽히게 한다(실제 굴뚝 연기도 수십 m를 오르므로, 근접
+//   6m 기둥이야말로 근접 프레임용 축약이다). setAerial(0) = 근접 실제 스케일(기본, 무회귀).
+const AERIAL_RISE_MUL = 3.4;
+const AERIAL_SIZE_MUL = 3.2;
+const AERIAL_OPACITY_MUL = 1.55;
+
 // 시간대별 프로파일: amp=피어오름 세기, col=연기색, op=개별 파티클 불투명도(오버랩 누적),
 //   rise=상승 높이(m), ember=아궁이 불씨 emissive 강도, fire=아궁이 PointLight 강도.
 const TIME = {
@@ -67,6 +75,7 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
   let enabled = false;
   let t = 0;   // 연기·불씨 누적 시계(결정론)
   let fadeMul = 1;   // 근접 링 활성/해제 크로스페이드 배율(연기 불투명도·불씨). 1=무영향.
+  let aerial = 0;    // 부감 임포스터 전환도(0=근접 실제 스케일). 소비자가 거리에서 판정해 주입.
 
   // 시간대 크로스페이드: 프로파일(세기·색·불씨)을 목표로 지수 접근(즉시 스냅 opt-in).
   const dayProf = TIME.day;
@@ -189,6 +198,10 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
     curCol.lerp(tgtCol, kp);
     applyColor();
     const prof = curProf;
+    // 부감 임포스터 배율(연속 — 전환 중에도 팟 없이 근접 스케일로 수축).
+    const riseMul = 1 + aerial * (AERIAL_RISE_MUL - 1);
+    const sizeMul = 1 + aerial * (AERIAL_SIZE_MUL - 1);
+    const opMul = 1 + aerial * (AERIAL_OPACITY_MUL - 1);
     for (const e of emitters) {
       const a = e.anchor;
       e.sprites.forEach((sp, i) => {
@@ -197,12 +210,12 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
         const life = 6.0 + 1.2 * hash1(i * 1.7 + 3.1);  // 파티클 수명 6.0~7.2s(위상 균일 유지)
         const f = fract(t / life + ph);                 // 0→1 생애
 
-        const y = a.y + f * prof.rise;                  // 상승
+        const y = a.y + f * prof.rise * riseMul;        // 상승
 
         // 바람 드리프트: 방출 시각 te의 바람으로 → 거스트 눕힘이 컬럼을 타고 위로 전파.
         const te = t - f * life;
         const w = getWind(te);
-        const drift = f * life * 0.5;                   // 방출 후 경과에 비례한 수평 이동
+        const drift = f * life * 0.5 * riseMul;         // 방출 후 경과에 비례한 수평 이동
         const lean = 1 + w.gust * 0.6;
         let x = a.x + w.dirX * w.speed * drift * lean;
         let z = a.z + w.dirZ * w.speed * drift * lean;
@@ -214,12 +227,13 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
 
         sp.position.set(x, y, z);
 
-        const size = 0.5 + f * 2.5 + jit * 0.25;        // 상승하며 폭 확대(하단부터 오버랩)
+        const size = (0.5 + f * 2.5 + jit * 0.25) * sizeMul;  // 상승하며 폭 확대(하단부터 오버랩)
         sp.scale.set(size, size, 1);
 
         const fin = smoothstep(0, 0.05, f);             // 하단 즉시 페이드인(굴뚝 상단 연결)
         const fout = 1 - smoothstep(0.55, 1.0, f);      // 상단 소산
-        sp.material.opacity = prof.op * prof.amp * fin * fout * g * fadeMul;  // g=조기 노출 게이트(#61), fadeMul=근접 링 크로스페이드
+        // g=조기 노출 게이트(#61), fadeMul=근접 링 크로스페이드, opMul=부감 임포스터 가산
+        sp.material.opacity = Math.min(1, prof.op * prof.amp * fin * fout * g * fadeMul * opMul);
         sp.material.rotation = f * 1.2 + jit * 6.28;    // 완만 회전
       });
     }
@@ -247,5 +261,9 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
     applyEmber(t);
   }
 
-  return { group, setTime, setEnabled, update, onBuildingChanged, setFade };
+  // 부감 임포스터 전환도(0..1). 거리 판정은 소비자(마을 앰비언스 필드)가 소유한다.
+  function setAerial(v) {
+    aerial = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+  }
+  return { group, setTime, setEnabled, update, onBuildingChanged, setFade, setAerial };
 }

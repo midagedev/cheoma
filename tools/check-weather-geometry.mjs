@@ -261,6 +261,42 @@ try {
   assert.ok(attributeBytes['rain-physical'] < 2600,
     'rain geometry allocated per-instance transforms or viewport data');
 
+  // 강수 전용 밴드(look-audit R3). 밴드가 소유하는 것은 낙하 볼륨 커버리지·빗줄기 길이·밀도뿐이고,
+  // 입자 치수는 정점 셰이더의 투영 하한이 소유한다. 오브젝트 스케일이 입자 치수에 곱해지지 않아야
+  // 부감 확대가 흰 막대(#116 계열)로 번지지 않는다 — 그 분리를 여기서 고정한다.
+  for (const representation of [snowFull, rainFull]) {
+    const { uniforms, vertexShader } = representation.object.material;
+    assert.equal(typeof representation.setPresentation, 'function',
+      `${representation.kind} lost the precipitation band entry point`);
+    assert.ok(!/uSizeScale/.test(vertexShader),
+      `${representation.kind} scales particle size from one distance value again`);
+    assert.match(vertexShader, /projectionMatrix\[1\]\[1\]/,
+      `${representation.kind} lost the per-particle projective size floor`);
+    assert.ok(!/gl_PointSize|gl_PointCoord|cameraPosition/.test(vertexShader),
+      `${representation.kind} regressed to a point or camera billboard`);
+    // 오프셋이 modelMatrix 를 통과하면 볼륨 스케일이 입자를 함께 부풀린다.
+    assert.ok(/gl_Position = projectionMatrix \* viewMatrix \* vec4\(centerWorld \+ offset/
+      .test(vertexShader),
+      `${representation.kind} routes its particle offset through the volume scale again`);
+    const base = { size: uniforms.uWorldScale?.value, radius: uniforms.uRadius?.value };
+    representation.setPresentation({ boxScale: 6.2, lengthScale: 4.2, density: 0.5 });
+    assert.equal(representation.object.scale.x, 6.2,
+      `${representation.kind} volume coverage is not owned by the object scale`);
+    assert.equal(representation.object.geometry.instanceCount,
+      Math.round(representation.object.geometry.attributes.aCenter.count * 0.5),
+      `${representation.kind} pays its far cost with something other than density`);
+    assert.equal(uniforms.uWorldScale?.value, base.size,
+      'snow authored world size moved with the volume scale');
+    assert.equal(uniforms.uRadius?.value, base.radius,
+      'rain authored radius moved with the volume scale');
+    // 밴드는 어떤 거리에서도 0을 반환하지 않는다(부감에서도 강수가 발현해야 한다).
+    representation.setPresentation({ boxScale: 1, lengthScale: 1, density: 0 });
+    assert.ok(representation.object.geometry.instanceCount >= 1,
+      `${representation.kind} density floor lets the far view draw nothing`);
+    assert.equal(representation.object.scale.x, 1,
+      `${representation.kind} did not return to the authored near volume`);
+  }
+
   for (const representation of [snowFull, rainFull]) {
     const geometryDisposed = disposalCounter(representation.object.geometry);
     const materialDisposed = disposalCounter(representation.object.material);
