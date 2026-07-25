@@ -37,10 +37,12 @@ import { IMPOSTOR_VARIANT_COUNTS, impostorHouseSpec } from '../src/village/impos
 import {
   CHUNK_LOD_TRANSITION_STEPS,
   CHUNK_LOD_LEVEL,
+  VILLAGE_DETAIL_REACH,
   createChunkLodPresentation,
   nextChunkLodLevel,
   stepChunkLodPresentation,
   villageChunkLodPolicy,
+  villageDetailReach,
 } from '../src/village/lod-policy.js';
 import { planVillage } from '../src/village/plan.js';
 import { parcelLocalPoint } from '../src/village/parcel-contract.js';
@@ -63,10 +65,15 @@ function assertLevel(actual, expected, message) {
 // 광각/망원 변화는 화면 점유율을 유지하는 실제 dolly이고, 그 물리 거리는 LOD에서
 // 이전 렌즈의 등가 거리로 환산돼 소동물·낙엽이 조기 소거되지 않아야 한다.
 {
-  near(VILLAGE_FOCUS_ELEVATION, 24 * Math.PI / 180,
+  // 9°: docs/look-audit-2026-07.md R1 에서 24° 고각 망원이 역광 림·보케의 성립 조건(하늘을 등진
+  // 실루엣·깊이 스프레드)을 동시에 없앤다는 판정을 받아 눈높이 건축 구도로 되돌렸다.
+  // 히어로 착지는 VILLAGE_HERO_FOCUS_ELEVATION 으로 분리돼 24° 를 유지한다.
+  near(VILLAGE_FOCUS_ELEVATION, 9 * Math.PI / 180,
     'optics: reviewed residential focus elevation drift');
-  near(VILLAGE_LENS.parcel.fov, 10,
-    'optics: practical 10-degree parcel lens drift');
+  // 16°: 10° 에서는 보정 dolly 가 96m 로 물러나 상단 프레임 광선이 항상 음수였고(하늘 0줄, 림이
+  // 기댈 실루엣 없음) 2.33× 깊이 압축이 이웃 필지와 궁을 한 덩어리로 뭉갰다. 계획서 "1-0 잔여".
+  near(VILLAGE_LENS.parcel.fov, 16,
+    'optics: residential parcel lens drift');
   near(VILLAGE_LENS.hero.fov, 7,
     'optics: 200mm-like 7-degree hero lens drift');
   for (const profile of Object.values(VILLAGE_LENS)) {
@@ -479,6 +486,47 @@ function assertLevel(actual, expected, message) {
     'detail LOD: telephoto dolly changed particle detail weight');
   near(telephotoLod.lensScale, focusScale,
     'detail LOD: telephoto point-size compensation drifted from its dolly');
+
+  // 시선 피치 종속 상세 깊이(계획서 "1-0 충돌 1"). 부감/히어로 착지는 온전한 깊이를 유지하고,
+  // 눈높이 근접은 최소 깊이를 받아 도성 원경 필지가 FULL 로 승격되지 않는다. 순수 함수이므로
+  // plan/populate 와 무관하며 렌더 시점 가중치로만 쓰인다.
+  near(villageDetailReach(90), 1, 'detail reach: overhead survey lost full depth');
+  near(villageDetailReach(VILLAGE_DETAIL_REACH.surveyPitchDeg), 1,
+    'detail reach: survey boundary drift');
+  near(villageDetailReach(31), 1, 'detail reach: aerial village pitch was reduced');
+  near(villageDetailReach(24), 1, 'detail reach: hero landing pitch was reduced');
+  near(villageDetailReach(VILLAGE_DETAIL_REACH.eyeLevelPitchDeg),
+    VILLAGE_DETAIL_REACH.eyeLevelFactor, 'detail reach: eye-level boundary drift');
+  near(villageDetailReach(9), VILLAGE_DETAIL_REACH.eyeLevelFactor,
+    'detail reach: residential focus pitch drift');
+  near(villageDetailReach(0), VILLAGE_DETAIL_REACH.eyeLevelFactor,
+    'detail reach: first-person walk pitch drift');
+  invariant(villageDetailReach(16) > VILLAGE_DETAIL_REACH.eyeLevelFactor
+      && villageDetailReach(16) < 1,
+  'detail reach: intermediate pitch stopped interpolating');
+  invariant(villageDetailReach(20) > villageDetailReach(16)
+      && villageDetailReach(16) > villageDetailReach(13),
+  'detail reach: depth is not monotonic in view pitch');
+  near(villageDetailReach(Number.NaN), 1, 'detail reach: unknown pitch failed to survey depth');
+  // 눈높이 최소 깊이는 렌더 예산 조정용 손잡이가 아니다. FAR 임포스터 온셋이 중경으로 올라오면
+  // 지붕선·색이 프레임 안에서 끊기므로(look-grammar §3 지형·숲) 하한을 계약으로 고정한다.
+  invariant(VILLAGE_DETAIL_REACH.eyeLevelFactor >= 0.5
+      && VILLAGE_DETAIL_REACH.eyeLevelFactor <= 0.75,
+  'detail reach: eye-level depth left the authored band');
+
+  const eyeLevelState = createVillageDetailLodState(
+    { position: { x: 0, y: 12, z: 60 } }, { x: 0, z: 0 }, flat,
+  );
+  near(eyeLevelState.viewPitchDeg, Math.asin(12 / Math.hypot(12, 60)) * 180 / Math.PI,
+    'detail LOD: view pitch drifted from the camera→target ray');
+  near(eyeLevelState.chunkReach, villageDetailReach(eyeLevelState.viewPitchDeg),
+    'detail LOD: chunk depth diverged from the shared pitch policy');
+  const surveyState = createVillageDetailLodState(
+    { position: { x: 0, y: 300, z: 400 } }, { x: 0, z: 0 }, flat,
+  );
+  near(surveyState.chunkReach, 1, 'detail LOD: aerial survey depth was reduced');
+  near(createVillageDetailLodState(cameraAt(20, 3, 4), null, flat).chunkReach, 1,
+    'detail LOD: missing-target fallback reduced chunk depth');
 
   // Palace/temple FOVs overlap the ordinary continuum numerically, so their
   // authored reference lens must travel with the camera instead of being guessed.

@@ -86,7 +86,7 @@ try {
   }, null, { timeout });
 
   const edgeMistContract = runFocusScenario ? await page.evaluate(async (moduleUrl) => {
-    const { edgeMistViewWeight } = await import(moduleUrl);
+    const { EDGE_MIST_AERIAL_FLOOR, edgeMistViewWeight } = await import(moduleUrl);
     const engine = window.__engine;
     const root = engine.village.exportRoot();
     const ring = root.getObjectByName('edge-mist-ring');
@@ -137,7 +137,7 @@ try {
     const partialX = renderAt(14, 0);
     const partialZ = renderAt(14, Math.PI * 0.5);
     const repeated = renderAt(14, Math.PI * 0.5);
-    const aerial = renderAt(20, 0);
+    const aerial = renderAt(45, 0);
     const resourceAfter = {
       programs: engine.renderer.info.programs?.length || 0,
       textures: engine.renderer.info.memory.textures,
@@ -149,6 +149,7 @@ try {
     camera.updateMatrixWorld(true);
     return {
       available: true, identity, horizon, partialX, partialZ, repeated, aerial,
+      aerialFloor: EDGE_MIST_AERIAL_FLOOR,
       restoredWeight: ring.userData.viewWeight,
       resourceBefore, resourceAfter,
       identityStable: ring.geometry.uuid === identity.geometry
@@ -173,7 +174,8 @@ try {
       && Math.abs(edgeMistContract.partialX.viewWeight - edgeMistContract.partialZ.viewWeight) < 1e-7
       && Math.abs(edgeMistContract.partialZ.viewWeight - edgeMistContract.repeated.viewWeight) < 1e-7
       && edgeMistContract.partialZ.calls === edgeMistContract.repeated.calls
-      && edgeMistContract.aerial.viewWeight === 0
+      && edgeMistContract.aerialFloor > 0 && edgeMistContract.aerialFloor < 1
+      && edgeMistContract.aerial.viewWeight === edgeMistContract.aerialFloor
       && JSON.stringify(edgeMistContract.resourceBefore) === JSON.stringify(edgeMistContract.resourceAfter)),
   runFocusScenario
     ? `edge mist uses the real camera -Z axis, continuous non-compounding opacity, and stable resources `
@@ -207,8 +209,20 @@ try {
         level: chunkLensState.level,
         physicalDistance: chunkLensState.physicalDistance,
         distance: chunkLensState.distance,
+        detailReach: chunkLensState.detailReach,
       };
-      chunkLens = { lensScale, reference, compensated };
+      // 시선 피치 종속 상세 깊이는 같은 키에 곱으로만 들어간다: 부감(reach 1)에서는 이전과
+      // 완전히 동일한 키이고, 낮은 시선의 축소 깊이는 원경 청크를 밖으로 밀어낸다.
+      const shallowReach = 0.56;
+      root.userData.updateChunkLod(engine.camera, lensScale, shallowReach);
+      const shallow = {
+        level: chunkLensState.level,
+        physicalDistance: chunkLensState.physicalDistance,
+        distance: chunkLensState.distance,
+        detailReach: chunkLensState.detailReach,
+      };
+      root.userData.updateChunkLod(engine.camera, lensScale);
+      chunkLens = { lensScale, shallowReach, reference, compensated, shallow };
     }
     const fauna = root?.userData?.faunaLod;
     const ownerParcelIds = [...new Set(
@@ -336,8 +350,16 @@ try {
         && Math.abs(boot.chunkLens.compensated.physicalDistance
           - boot.chunkLens.reference.physicalDistance) < 1e-6
         && Math.abs(boot.chunkLens.compensated.distance * boot.chunkLens.lensScale
-          - boot.chunkLens.compensated.physicalDistance) < 1e-6,
-    `attached ${bootScale} chunk LOD consumes screen-equivalent lens distance without changing its stable tier`);
+          - boot.chunkLens.compensated.physicalDistance) < 1e-6
+        && boot.chunkLens.compensated.detailReach === 1
+        && boot.chunkLens.shallow.detailReach === boot.chunkLens.shallowReach
+        && boot.chunkLens.shallow.level === boot.chunkLens.reference.level
+        && Math.abs(boot.chunkLens.shallow.distance
+          * boot.chunkLens.lensScale * boot.chunkLens.shallowReach
+          - boot.chunkLens.shallow.physicalDistance) < 1e-6
+        && boot.chunkLens.shallow.distance > boot.chunkLens.compensated.distance,
+    `attached ${bootScale} chunk LOD composes screen-equivalent lens distance with pitch-keyed `
+      + `detail depth without changing its stable tier (${JSON.stringify(boot.chunkLens)})`);
   }
 
   async function sceneMetrics(label) {
@@ -1118,17 +1140,20 @@ try {
     };
     const before = engine.village.debugLod(parcelId);
     // 같은 청크의 이웃 필지가 선택 필지보다 카메라 쪽에 있을 수 있으므로 fullOut보다 충분히
-    // 물리되, midOut(= fullOut * 0.90/0.53) 안에는 남는 화면등가 거리로 잡는다. Focus는
-    // compensated telephoto라 실제 dolly 미터에는 reference/actual lensScale을 다시 곱해야 한다.
+    // 물리되, midOut(= fullOut * 0.90/0.53) 안에는 남는 화면등가 거리로 잡는다.
     const desiredVisual = Math.max(1, (before?.swapOut || 140) * 1.58);
-    const DEG = Math.PI / 180;
-    const referenceFov = camera.userData.villageReferenceFov ?? camera.fov;
-    const lensScale = Math.tan(referenceFov * DEG * 0.5) / Math.tan(camera.fov * DEG * 0.5);
-    const desiredPhysical = desiredVisual * lensScale;
     const direction = camera.position.clone().sub(controls.target);
     if (direction.lengthSq() < 1e-6) direction.set(0.2, 0.55, 1);
     direction.normalize();
-    controls.maxDistance = Math.max(saved.maxDistance, desiredPhysical * 1.2);
+    // 청크 LOD 키는 렌즈 보정 dolly와 시선 피치 종속 상세 깊이(lod-policy villageDetailReach)를
+    // 함께 소비하므로 하네스가 그 식을 복제하면 안 된다. 대신 런타임이 방금 보고한 물리↔키 환산비를
+    // 읽어 한 번에 물린다. 시선 방향을 유지한 채 광선 위로만 물러나므로 피치가 불변이고 이 비는
+    // 이동 중에도 유지된다. 밴드 밖으로 오버슈트하면 히스테리시스가 FAR에 갇히므로 한 번에 착지한다.
+    const keyPerMeter = before?.physicalDistance > 1e-6 && before?.distance > 0
+      ? before.distance / before.physicalDistance
+      : 1;
+    const desiredPhysical = desiredVisual / keyPerMeter;
+    controls.maxDistance = Math.max(saved.maxDistance, desiredPhysical * 1.3);
     camera.position.copy(controls.target).addScaledVector(direction, desiredPhysical);
     camera.lookAt(controls.target);
     controls.update();
@@ -1181,7 +1206,7 @@ try {
       if (restored?.level === 'full') break;
     }
     return {
-      desiredVisual, desiredPhysical, lensScale,
+      desiredVisual, desiredPhysical: +desiredPhysical.toFixed(2), keyPerMeter,
       levels, stableMidFrames, mid, restored, failures, metrics,
     };
   }, first);

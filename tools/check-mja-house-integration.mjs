@@ -73,7 +73,7 @@ for (const scale of ['hamlet', 'village']) {
   assert.ok(Math.abs(focus.depth - parcel.mjaHouse.bounds.outer.depth * 1.08) <= 1e-9);
   assert.ok(focus.height < 7,
     `${scale} camera still frames the obsolete full parcel/14m hero box`);
-  assert.ok(focus.referenceFov === 23 && focus.fov === 10,
+  assert.ok(focus.referenceFov === 23 && focus.fov === 16,
     `${scale} product telephoto lens contract changed`);
   accepted.push({
     scale,

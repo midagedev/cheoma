@@ -1,6 +1,27 @@
 // Product-path gate for GitHub #22: title arrival and focused-house reroll use
 // the same deterministic camera runtime, remain optically focused, and hand the
 // exact live frame to OrbitControls on pointer/wheel/key interruption.
+//
+// The close-frame section below was re-authored on 2026-07-25 (see
+// docs/look-restoration-plan.md "1-0 충돌 2"). Its previous form asserted one shared 24°
+// courtyard elevation, SKY_FRACTION == 0 for every close frame, and readability by
+// high-angle projection. docs/look-audit-2026-07.md R1 judged that survey frame to be the
+// reason the flagship backlit rim and bokeh cannot appear at all, so the following intent is
+// now the authored one:
+//
+//   1. The hero landing owns its own elevation (VILLAGE_HERO_FOCUS_ELEVATION) and its own
+//      centered projection. It arrives on a compound whose wings and courtyard only read from
+//      above, so it is asserted against that constant rather than against the residential pose.
+//   2. The residential close frame is eye-level (VILLAGE_FOCUS_ELEVATION, 7–12°) and is
+//      allowed — required — to shift the lens for sky (VILLAGE_FOCUS_SKY_FRACTION > 0). The
+//      assertion is that the frame's top ray actually clears the horizon, because a rim only
+//      exists where a silhouette edge stands against sky.
+//   3. Courtyard and yard-life readability remain a goal, but they are no longer bought with
+//      elevation. They are asserted as "reachable from this azimuth and distance": the samples
+//      that are in frame must be ray-clear over the wall/gate, and the yard must occupy a real
+//      share of the frame. A frame that simply crops the yard away still fails.
+//   4. The capital/7/p31 terrain cutaway and the mobile palace/temple viewport fits are
+//      unchanged; they are lens-agnostic and are read from VILLAGE_LENS.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -9,6 +30,8 @@ import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verificati
 import { countChangedPixels } from './lib/png-metrics.mjs';
 import {
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_FOCUS_SKY_FRACTION,
+  VILLAGE_HERO_FOCUS_ELEVATION,
   VILLAGE_LENS,
   dollyScaleForFov,
 } from '../src/camera/optics.js';
@@ -28,6 +51,11 @@ const monotonic = (values, direction, epsilon = 1e-7) => values.every((value, in
   index === 0 || direction * (value - values[index - 1]) >= -epsilon
 ));
 const FOCUS_ELEVATION_DEG = VILLAGE_FOCUS_ELEVATION * 180 / Math.PI;
+const HERO_ELEVATION_DEG = VILLAGE_HERO_FOCUS_ELEVATION * 180 / Math.PI;
+// The eye-level band the restored residential frame must stay inside. Narrower than the
+// authored constant's exact value on purpose: this is the look requirement (architectural
+// eye level, not a survey), and a future retune inside the band should not need a gate edit.
+const RESIDENTIAL_ELEVATION_BAND = Object.freeze({ min: 7, max: 12 });
 
 const server = await createServer({
   root: APP_ROOT,
@@ -342,8 +370,33 @@ async function captureSettledFocusFrame(page, prefix) {
     const focusPlan = engine.village.debugParcels()
       .find((parcel) => parcel.parcelId === id);
     const forwardY = engine.__controls.target.clone().sub(camera.position).normalize().y;
+    // Unproject the live frame edges instead of re-deriving elevation ± half-FOV ± shift.
+    // The view-shift runtime writes its composition into camera.setViewOffset, so the real
+    // projection matrix already carries it and these rays are exactly what the frame shows.
+    const frameRayY = (ndcY) => new THREE.Vector3(0, ndcY, 0.5)
+      .unproject(camera).sub(camera.position).normalize().y;
+    const topRayY = frameRayY(1);
+    const bottomRayY = frameRayY(-1);
+    // How much of the frame height the selected parcel's own yard plane occupies. Lets the
+    // readability assertion say "the yard is really in this picture" without requiring the
+    // high-angle projection that killed the rim.
+    let yardTop = Infinity, yardBottom = -Infinity;
+    if (courtyardBox) {
+      for (const cx of [courtyardBox.min.x, courtyardBox.max.x]) {
+        for (const cz of [courtyardBox.min.z, courtyardBox.max.z]) {
+          const projected = new THREE.Vector3(cx, courtyardBox.max.y + 0.035, cz).project(camera);
+          yardTop = Math.min(yardTop, (1 - projected.y) * 0.5);
+          yardBottom = Math.max(yardBottom, (1 - projected.y) * 0.5);
+        }
+      }
+    }
     return {
       parcelId: id,
+      topRayY,
+      bottomRayY,
+      topRayDeg: Math.asin(Math.max(-1, Math.min(1, topRayY))) * 180 / Math.PI,
+      yardFrameHeight: Number.isFinite(yardTop) && Number.isFinite(yardBottom)
+        ? yardBottom - yardTop : null,
       left: (minX + 1) * 0.5,
       right: (maxX + 1) * 0.5,
       top: (1 - maxY) * 0.5,
@@ -509,7 +562,10 @@ function assertUiSafeSemanticFrame(frame, label) {
   `${label} keeps representative architecture and its courtyard inside the live UI-safe viewport (${JSON.stringify(frame)})`);
 }
 
-function assertReadableHouseFrame(focusFrame, label, { minHeight = 0.19 } = {}) {
+// `pose` selects which authored close frame this label is: the hero compound landing, or the
+// shared residential eye-level pose. They are deliberately independent — see the file header.
+function assertReadableHouseFrame(focusFrame, label, { minHeight = 0.19, pose = 'residential' } = {}) {
+  const hero = pose === 'hero';
   invariant(focusFrame.bottom <= 0.84,
     `${label} keeps the selected roof/wall volume clear of the bottom crop (${(focusFrame.bottom * 100).toFixed(1)}%)`);
   invariant(focusFrame.top >= 0.12,
@@ -521,17 +577,51 @@ function assertReadableHouseFrame(focusFrame, label, { minHeight = 0.19 } = {}) 
   invariant(focusFrame.targetLift >= 1.65 && focusFrame.targetLift <= 2.5,
     `${label} aims at the restored door-height band (${focusFrame.targetLift}m)`);
   const elevation = Math.asin(-focusFrame.forwardY) * 180 / Math.PI;
-  invariant(Math.abs(elevation - FOCUS_ELEVATION_DEG) < 0.02,
-    `${label} keeps the shared ${FOCUS_ELEVATION_DEG.toFixed(0)}-degree courtyard elevation (${elevation.toFixed(2)}°)`);
-  invariant(Math.abs(focusFrame.composition) < 1e-6,
-    `${label} keeps a centered projection instead of cropping the courtyard for sky`);
+  if (hero) {
+    // The landing beat reads its own constant. Asserting the residential elevation here is what
+    // made the two intents mutually exclusive.
+    invariant(Math.abs(elevation - HERO_ELEVATION_DEG) < 0.02,
+      `${label} keeps its own authored ${HERO_ELEVATION_DEG.toFixed(0)}-degree landing elevation (${elevation.toFixed(2)}°)`);
+    invariant(Math.abs(focusFrame.composition) < 1e-6,
+      `${label} keeps the centered compound projection its courtyard framing depends on (${focusFrame.composition})`);
+  } else {
+    invariant(elevation >= RESIDENTIAL_ELEVATION_BAND.min
+        && elevation <= RESIDENTIAL_ELEVATION_BAND.max,
+    `${label} stays in the architectural eye-level band `
+      + `${RESIDENTIAL_ELEVATION_BAND.min}–${RESIDENTIAL_ELEVATION_BAND.max}° (${elevation.toFixed(2)}°)`);
+    invariant(VILLAGE_FOCUS_SKY_FRACTION > 0
+        && focusFrame.composition < 0
+        && Math.abs(focusFrame.composition) <= VILLAGE_FOCUS_SKY_FRACTION + 1e-6,
+    `${label} shifts the lens up to leave room above the eave instead of centering the plan `
+      + `(${focusFrame.composition} of ${-VILLAGE_FOCUS_SKY_FRACTION})`);
+    // The point of the eye-level restoration: the frame must actually contain sky direction, or
+    // the eave silhouette has nothing to stand against and the backlit rim cannot read.
+    invariant(focusFrame.topRayY > 0,
+      `${label} raises the top frame ray above the horizon (${focusFrame.topRayDeg.toFixed(2)}°)`);
+    invariant(focusFrame.bottomRayY < 0,
+      `${label} still looks down into the near yard at its bottom edge (${focusFrame.bottomRayY.toFixed(4)})`);
+  }
   invariant(focusFrame.facadeVisible === 5,
     `${label} leaves every door/facade landmark unobstructed by its own wall, gate, and corridors (${focusFrame.facadeVisible}/5)`);
-  invariant(focusFrame.courtyardInFrame === focusFrame.courtyardSamples
-      && focusFrame.courtyardVisible >= 4,
-  `${label} retains the sampled open courtyard in frame and across its wall/gate (${focusFrame.courtyardVisible}/${focusFrame.courtyardSamples} ray-visible)`);
-  invariant(focusFrame.animalsInFrame >= 5 && focusFrame.animalsVisible >= 2,
-    `${label} retains focus animals in frame (${focusFrame.animalsInFrame}; ${focusFrame.animalsVisible} currently clear the compound wall/corridor ray)`);
+  // Yard readability, re-authored: from an eye-level azimuth a wall legitimately hides part of a
+  // flat yard sample grid, so requiring all 20 samples in frame is a disguised elevation demand.
+  // What must hold is that the yard is genuinely in this picture (a real share of frame height,
+  // a substantial part of the grid framed) and that what is framed is ray-clear over wall/gate.
+  const courtyardFramedRatio = focusFrame.courtyardSamples > 0
+    ? focusFrame.courtyardInFrame / focusFrame.courtyardSamples : 0;
+  invariant(hero
+    ? (focusFrame.courtyardInFrame === focusFrame.courtyardSamples
+      && focusFrame.courtyardVisible >= 4)
+    : (courtyardFramedRatio >= 0.4 && focusFrame.courtyardVisible >= 3),
+  `${label} keeps the sampled open courtyard in frame and ray-clear across its wall/gate `
+    + `(${focusFrame.courtyardInFrame}/${focusFrame.courtyardSamples} framed, ${focusFrame.courtyardVisible} ray-visible)`);
+  invariant(focusFrame.yardFrameHeight == null || focusFrame.yardFrameHeight >= 0.08,
+    `${label} gives the yard plane a readable share of frame height `
+      + `(${((focusFrame.yardFrameHeight ?? 0) * 100).toFixed(1)}%)`);
+  invariant(hero
+    ? (focusFrame.animalsInFrame >= 5 && focusFrame.animalsVisible >= 2)
+    : (focusFrame.animalsInFrame >= 2 && focusFrame.animalsVisible >= 1),
+  `${label} retains focus animals in frame (${focusFrame.animalsInFrame}; ${focusFrame.animalsVisible} currently clear the compound wall/corridor ray)`);
   invariant(focusFrame.yardDetailsInFrame >= 3 && focusFrame.yardDetailsVisible >= 2,
     `${label} retains the gate and ray-visible lantern details (${focusFrame.yardDetailsVisible}/${focusFrame.yardDetailsInFrame})`);
 }
@@ -593,7 +683,7 @@ try {
     'camera-only arrival does not grow shader programs while seeking');
   const heroFrame = await captureSettledFocusFrame(arrivalPage, 'arrival');
   console.log(`HERO FRAME: ${JSON.stringify(heroFrame)}`);
-  assertReadableHouseFrame(heroFrame, 'default hero arrival', { minHeight: 0.24 });
+  assertReadableHouseFrame(heroFrame, 'default hero arrival', { minHeight: 0.24, pose: 'hero' });
   const physicalDetail = await capturePhysicalDetailStats(arrivalPage, 'arrival');
   console.log(`HERO PHYSICAL DETAIL: ${JSON.stringify(physicalDetail)}`);
   invariant(Math.abs(physicalDetail.fov - VILLAGE_LENS.hero.fov) < 1e-9
@@ -699,6 +789,62 @@ try {
   await rebuildPage.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
   await rebuildPage.waitForFunction(() => window.__engine.village.getState().transitioning === false, null, { timeout });
   const parcelId = await focusRegularHouse(rebuildPage);
+  // An ordinary house has no compound gate/corridor fixtures, so its close frame is asserted on
+  // the pose itself: eye level, an upward lens shift, and a top ray that really clears the
+  // horizon. This is the frame the flagship rim and bokeh are authored for (re-authored 2026-07-25,
+  // docs/look-restoration-plan.md "1-0 충돌 2" item 2).
+  const residentialPose = await rebuildPage.evaluate(async (id) => {
+    const engine = window.__engine;
+    engine.debugRenderDofFrame();
+    const camera = engine.camera;
+    const threeUrl = performance.getEntriesByType('resource').map((entry) => entry.name)
+      .find((name) => /\/deps\/three\.js/.test(name));
+    const THREE = await import(threeUrl);
+    const forward = engine.__controls.target.clone().sub(camera.position).normalize();
+    const rayY = (ndcY) => new THREE.Vector3(0, ndcY, 0.5)
+      .unproject(camera).sub(camera.position).normalize().y;
+    const bounds = engine.village.debugFocusVisibility(id)?.subjectBounds;
+    let top = Infinity, bottom = -Infinity;
+    if (bounds) {
+      for (const x of [bounds.min[0], bounds.max[0]]) {
+        for (const y of [bounds.min[1], bounds.max[1]]) {
+          for (const z of [bounds.min[2], bounds.max[2]]) {
+            const projected = new THREE.Vector3(x, y, z).project(camera);
+            top = Math.min(top, (1 - projected.y) * 0.5);
+            bottom = Math.max(bottom, (1 - projected.y) * 0.5);
+          }
+        }
+      }
+    }
+    return {
+      parcelId: id,
+      elevationDeg: Math.asin(-forward.y) * 180 / Math.PI,
+      composition: window.__viewshift?.compositionYFrac ?? null,
+      topRayY: rayY(1),
+      bottomRayY: rayY(-1),
+      fov: camera.fov,
+      referenceFov: camera.userData.villageReferenceFov,
+      subjectTop: top,
+      subjectBottom: bottom,
+    };
+  }, parcelId);
+  console.log(`RESIDENTIAL POSE: ${JSON.stringify(residentialPose)}`);
+  invariant(residentialPose.elevationDeg >= RESIDENTIAL_ELEVATION_BAND.min
+      && residentialPose.elevationDeg <= RESIDENTIAL_ELEVATION_BAND.max,
+  `ordinary house focus stays in the architectural eye-level band `
+    + `${RESIDENTIAL_ELEVATION_BAND.min}–${RESIDENTIAL_ELEVATION_BAND.max}° `
+    + `(${residentialPose.elevationDeg.toFixed(2)}°)`);
+  invariant(VILLAGE_FOCUS_SKY_FRACTION > 0
+      && residentialPose.composition < 0
+      && Math.abs(residentialPose.composition) <= VILLAGE_FOCUS_SKY_FRACTION + 1e-6,
+  `ordinary house focus shifts the lens up for sky above the eave (${residentialPose.composition})`);
+  invariant(residentialPose.topRayY > 0 && residentialPose.bottomRayY < 0,
+    `ordinary house focus frames sky above the eave and yard below it `
+      + `(top ${residentialPose.topRayY.toFixed(4)}, bottom ${residentialPose.bottomRayY.toFixed(4)})`);
+  invariant(residentialPose.referenceFov === VILLAGE_LENS.parcel.referenceFov
+      && residentialPose.subjectTop > 0 && residentialPose.subjectBottom < 1,
+  `ordinary house focus keeps the whole subject inside its authored residential lens `
+    + `(${residentialPose.fov.toFixed(2)}°/${residentialPose.referenceFov}°)`);
   await rebuildPage.evaluate(() => window.__engine.debugSetPaused(true));
   invariant(await rerollFocusedDeterministically(rebuildPage), 'deterministic fixture executes the real focused-house reroll command');
   const rebuild = await sampleSequence(rebuildPage, 'rebuild', [0, 0.25, 0.5, 0.75, 1]);
@@ -720,7 +866,11 @@ try {
     'safe reroll endpoint never reduces sampled selected-house visibility');
   invariant(rebuildVisibility.visibleRatio >= 1 / 3 - 1e-9,
     'safe reroll endpoint keeps the selected roof/eave band visible');
-  if (rebuildVisibility.baseOcclusionRatio > 1 / 9) {
+  // The guard means "more than one of the nine bounding samples is occluded". `1 - 8/9` is
+  // 0.11111111111111116 in binary floating point, i.e. strictly greater than `1/9`, so without an
+  // epsilon a single occluded sample opened a demand the selector can never satisfy when no
+  // candidate azimuth improves on 8/9. The hard floor below (visibleRatio >= 1/3) still applies.
+  if (rebuildVisibility.baseOcclusionRatio > 1 / 9 + 1e-9) {
     invariant(rebuildVisibility.visibleRatio >= rebuildVisibility.baseVisibleRatio + 1 / 9 - 1e-9,
       'occluded authored endpoint improves by at least one deterministic bounding sample');
   }
@@ -819,7 +969,7 @@ try {
   invariant(await rebuildPage.evaluate((id) => window.__engine.village.getState().selected === id, parcelId),
     'camera interruption does not lose focused parcel ownership');
 
-  // #136 merge gate: the deterministic capital parcel that used to put the 10°
+  // #136 merge gate: the deterministic capital parcel that used to put the residential
   // camera behind a hill must retain that authored telephoto frame and clip only
   // the foreground depth interval before the nearest sampled house face.
   await rebuildPage.addInitScript(() => { window.__noWarm = true; });
@@ -892,7 +1042,7 @@ try {
       && Math.hypot(...terrainSafe.position.map((value, index) => (
         value - terrainRegression.visibility.baseFraming.position[index]
       ))) < 1e-6
-      && Math.abs(terrainRegression.fov - 10) < 1e-9
+      && Math.abs(terrainRegression.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainRegression.referenceFov === VILLAGE_LENS.parcel.referenceFov,
   `capital/7/p31 product focus retains the authored distant telephoto frame (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
   const terrainInk = await rebuildPage.evaluate(() => {
@@ -968,7 +1118,7 @@ try {
   });
   invariant(terrainZoom.camera.selected === 'p31'
       && terrainZoom.camera.dist > terrainSettledDistance + 5
-      && Math.abs(terrainZoom.fov - 10) < 1e-9
+      && Math.abs(terrainZoom.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainZoom.referenceFov === VILLAGE_LENS.parcel.referenceFov,
   `capital/7/p31 focus zoom-out retains ownership and the telephoto lens (${terrainZoom.camera.dist.toFixed(1)}m, ${terrainZoom.fov.toFixed(2)}°)`);
   invariant(!terrainZoom.continuum.focusCutaway?.active

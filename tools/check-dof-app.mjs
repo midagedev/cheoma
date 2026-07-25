@@ -585,7 +585,7 @@ try {
   );
   pass(
     result.returnEnd.fov === 46 &&
-      result.focusEnd.fov === 10 &&
+      result.focusEnd.fov === VILLAGE_LENS.parcel.fov &&
       monotonic(
         result.focusOuter.map((sample) => sample.fov),
         -1,
@@ -594,7 +594,7 @@ try {
         result.returnOuter.map((sample) => sample.fov),
         1,
       ) &&
-      result.focusedOptics.lensScale > 2 &&
+      result.focusedOptics.lensScale > 1.3 &&
       Math.abs(
         result.focusedOptics.lensScale -
           dollyScaleForFov(

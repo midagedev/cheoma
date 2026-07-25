@@ -13,6 +13,7 @@ import { countChangedPixels } from './lib/png-metrics.mjs';
 import {
   VILLAGE_FOCUS_DOF_APERTURE,
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_LENS,
 } from '../src/camera/optics.js';
 import { CIRCULAR_BOKEH_SAMPLE_COUNT } from '../src/env/circular-bokeh-shader.js';
 
@@ -451,7 +452,7 @@ try {
       && Math.abs(terrainEvidence.continuum.focusCutaway.near - cutaway.near) < 1e-3,
     `p31 applies one shared live-camera cutaway (${terrainEvidence.camera.near.toFixed(3)}m)`);
     check(terrainEvidence.visibility.telephotoPreserved
-      && Math.abs(terrainEvidence.visibility.safeFraming.fov - 10) < 1e-9
+      && Math.abs(terrainEvidence.visibility.safeFraming.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainEvidence.visibility.safeFraming.position.every((value, index) => (
         Math.abs(value - terrainEvidence.visibility.baseFraming.position[index]) < 1e-9
       )),

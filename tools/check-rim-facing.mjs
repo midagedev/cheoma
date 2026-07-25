@@ -1,7 +1,10 @@
-// Regression gate for the material Fresnel rim: broad oblique building planes must stay dark
-// while the true tangent silhouette remains bright.  The controlled WebGL scene also proves
-// that the onBeforeCompile chain, role classification, instanceColor, and program plateau
-// survive the shader patch.
+// Regression gate for the material Fresnel rim: the true tangent silhouette must read as a bright
+// thread while a broad oblique building plane stays a surface rather than an emitter.  The three
+// physical conditions (solar facing, backlight, main-sun visibility) are asserted as *floored
+// attenuation*, not as an all-or-nothing switch — see docs/look-audit-2026-07.md R2, which found
+// that hard gates plus a 0.26 energy cap had closed the flagship rim entirely.  The controlled
+// WebGL scene also proves that the onBeforeCompile chain, role classification, instanceColor, and
+// program plateau survive the shader patch.
 //
 // Usage: node tools/check-rim-facing.mjs
 import { createServer } from 'node:http';
@@ -242,8 +245,8 @@ function facingProbe() {
     broad60: renderSample(60, 130),
     broad75: renderSample(75, 145),
     litEdge: renderSample(86, 156),
-    // Same visible edge, but the normal faces away from the behind-camera sun. wrap=1 proves
-    // that the legacy compatibility setter can no longer invent a dark-side glow.
+    // Same visible edge, but the normal faces away from the behind-camera sun. wrap=1 proves the
+    // anti-solar residual setter is a live look control again (product default is RIM_WRAP_FLOOR).
     unlitEdge: renderSample(86, 204, { wrap: 1 }),
     cameraSideSun: renderSample(86, 60),
     noDirect: renderSample(86, 156, { sunIntensity: 0 }),
@@ -294,10 +297,13 @@ function facingProbe() {
     mainSunCaptureInjected: patch.fragment.includes('_rimMainSunUnshadowed = directLight.color')
       && patch.fragment.includes('_rimMainSunShadowed = directLight.color')
       && patch.fragment.includes('_mainSunAfter / max(_mainSunBefore'),
-    receiveShadowGateInjected: patch.fragment.includes('(receiveShadow ? 1.0 : 0.0)'),
+    // 세 물리 조건은 남지만 곱하기 0 이 아니라 바닥값 있는 감쇠로 합성된다(look-audit R2).
+    flooredGatesInjected: patch.fragment.includes('mix(uRimWrap, 1.0,')
+      && patch.fragment.includes('mix(' + RIM_SOLAR_GATE.backlitFloor.toFixed(2) + ', 1.0,')
+      && patch.fragment.includes('mix(' + RIM_SOLAR_GATE.shadowFloor.toFixed(2) + ', 1.0,'),
     shadowFetchCount: (patch.fragment.match(/getShadow\\s*\\(/g) || []).length,
     stockShadowFetchCount: (THREE.ShaderChunk.lights_fragment_begin.match(/getShadow\\s*\\(/g) || []).length,
-    syntheticWrapAbsent: !patch.fragment.includes('uRimWrap'),
+    wrapComposed: patch.fragment.includes('uRimWrap'),
     buildingMul: patch.mul,
   };
 }
@@ -336,6 +342,28 @@ function instanceAndProgramProbe() {
   openingMaterial.userData.role = 'opening';
   const opening = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), openingMaterial);
   opening.position.set(24, 0, 0); scene.add(opening);
+  // 제품 마을의 실제 그룹/메시 이름. env 하네스 이름('trees')만 등재돼 있던 동안 마을 숲·스캐터
+  // 나무·개화 관목이 misc(건물급)로, 마을 지형·수면이 일반 표면으로 분류되던 결함을 고정한다.
+  const villageGroups = ['village-trees', 'forest-trees', 'village-bloom', 'village-flora'];
+  const villageOrganicMaterials = villageGroups.map((name, index) => {
+    const group = new THREE.Group();
+    group.name = name;
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), mat);
+    mesh.position.set(30 + index * 2, 0, 0);
+    group.add(mesh);
+    scene.add(group);
+    return mat;
+  });
+  const groundNames = ['village-terrain', 'village-stream'];
+  const groundMaterials = groundNames.map((name, index) => {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), mat);
+    mesh.name = name;
+    mesh.position.set(40 + index * 2, 0, 0);
+    scene.add(mesh);
+    return mat;
+  });
 
   const rim = createFresnelRim(scene);
   rim.apply(scene);
@@ -363,6 +391,10 @@ function instanceAndProgramProbe() {
     roleKept: material.userData.role,
     openingPatched: !!openingMaterial.userData.__rimPatched,
     organicMul: readPatch(renderer, organicMaterial).mul,
+    villageOrganicMuls: villageOrganicMaterials.map((m) => readPatch(renderer, m).mul),
+    // 지면은 패치를 유지해야 한다(프로그램 분기 방지) — 계수만 0.
+    groundPatched: groundMaterials.map((m) => !!m.userData.__rimPatched),
+    groundMuls: groundMaterials.map((m) => readPatch(renderer, m).mul),
     miscMul: readPatch(renderer, miscMaterial).mul,
   };
 }
@@ -487,50 +519,74 @@ try {
 
   console.log('\n=== physical solar rim energy ===');
   const sample = result.facing.samples;
+  const shadowFloor = result.facing.solarGate.shadowFloor;
   console.log('  additive luma:', Object.fromEntries(Object.entries(sample)
     .map(([name, value]) => [name, +value.delta.toFixed(4)])));
   check(sample.front.delta <= 0.005, `front-facing plane stays dark (${sample.front.delta.toFixed(4)})`);
   check(sample.broad60.offLuma > 0.01 && sample.broad60.delta <= 0.005,
     `sunlit broad 60° plane has no rim (base=${sample.broad60.offLuma.toFixed(4)}, delta=${sample.broad60.delta.toFixed(4)})`);
-  check(sample.broad75.offLuma > 0.01 && sample.broad75.delta <= 0.020,
-    `sunlit broad 75° plane is not emissive (base=${sample.broad75.offLuma.toFixed(4)}, delta=${sample.broad75.delta.toFixed(4)})`);
+  // 접선 밴드가 넓어져(cutoff 0.42) 75° 면도 약한 광택은 받는다. 지켜야 하는 것은
+  // "면이 발광체가 되지 않는다" — 자기 기저 밝기의 절반 이하이고 진짜 접선 에지보다 훨씬 어둡다.
+  check(sample.broad75.offLuma > 0.01
+      && sample.broad75.delta <= 0.05
+      && sample.broad75.delta <= sample.broad75.offLuma * 0.5
+      && sample.broad75.delta <= sample.litEdge.delta * 0.35,
+    `sunlit broad 75° plane stays a surface, not an emitter (base=${sample.broad75.offLuma.toFixed(4)}, delta=${sample.broad75.delta.toFixed(4)})`);
   check(sample.litEdge.ndl > 0 && sample.litEdge.viewSun < 0 && sample.litEdge.delta >= 0.05,
     `sun-facing backlit 86° edge remains legible (N·L=${sample.litEdge.ndl.toFixed(3)}, V·L=${sample.litEdge.viewSun.toFixed(3)}, delta=${sample.litEdge.delta.toFixed(4)})`);
-  check(sample.unlitEdge.ndl < 0 && sample.unlitEdge.delta <= 0.003,
-    `sun-opposite edge stays dark even with setWrap(1) (N·L=${sample.unlitEdge.ndl.toFixed(3)}, delta=${sample.unlitEdge.delta.toFixed(4)})`);
-  check(sample.cameraSideSun.ndl > 0 && sample.cameraSideSun.viewSun > 0 && sample.cameraSideSun.delta <= 0.003,
-    `camera-side sun cannot fake backlight (V·L=${sample.cameraSideSun.viewSun.toFixed(3)}, delta=${sample.cameraSideSun.delta.toFixed(4)})`);
-  check(sample.noDirect.offLuma <= 0.003 && sample.noDirect.delta <= 0.003,
-    `directDiffuse=0 produces no rim (base=${sample.noDirect.offLuma.toFixed(4)}, delta=${sample.noDirect.delta.toFixed(4)})`);
+  // setWrap 은 다시 살아 있는 룩 컨트롤이다(하네스가 1 로 올린다). wrap=1 이면 태양 반대편도
+  // 태양쪽과 같은 잔여를 받는 것이 정의 — 값이 반영되는지만 본다. 제품 기본값에서의 방향성은
+  // 아래 defaultWrapSeparation 이 검사한다.
+  check(sample.unlitEdge.ndl < 0 && sample.unlitEdge.delta > 0.02,
+    `setWrap(1) is honored on the sun-opposite edge (N·L=${sample.unlitEdge.ndl.toFixed(3)}, delta=${sample.unlitEdge.delta.toFixed(4)})`);
+  // 순광 뷰는 감쇠하되 소거되지 않는다(backlitFloor). 역광 에지보다 확실히 어두워야 한다.
+  check(sample.cameraSideSun.ndl > 0 && sample.cameraSideSun.viewSun > 0
+      && sample.cameraSideSun.delta <= sample.litEdge.delta * 0.45,
+    `camera-side sun is attenuated, not backlight (V·L=${sample.cameraSideSun.viewSun.toFixed(3)}, delta=${sample.cameraSideSun.delta.toFixed(4)})`);
+  // 직사광 0(그늘)에서도 실루엣 에지는 하늘 산란광으로 읽힌다 — 소거가 아니라 shadowFloor 감쇠.
+  check(sample.noDirect.offLuma <= 0.003
+      && sample.noDirect.delta > 0
+      && sample.noDirect.delta <= sample.litEdge.delta * 0.75,
+    `directDiffuse=0 keeps only the sky-scatter residual (base=${sample.noDirect.offLuma.toFixed(4)}, delta=${sample.noDirect.delta.toFixed(4)})`);
   check(sample.shadowedEdge.offLuma <= sample.litEdge.offLuma * 0.20
-      && sample.shadowedEdge.delta <= sample.litEdge.delta * 0.20,
-    `directional shadow rejects the same edge (base=${sample.shadowedEdge.offLuma.toFixed(4)}, delta=${sample.shadowedEdge.delta.toFixed(4)})`);
+      && sample.shadowedEdge.delta < sample.litEdge.delta,
+    `directional shadow still attenuates the same edge (base=${sample.shadowedEdge.offLuma.toFixed(4)}, delta=${sample.shadowedEdge.delta.toFixed(4)})`);
+  // 같은 지오메트리·같은 fill 을 쓰되 receiveShadow 로만 갈리는 shadowBypassedReceiver 가
+  // "가려지지 않은 경우"의 대조군이다. 비그림자 fill 은 주 태양 그림자 안의 림을 바닥값 위로
+  // 되살릴 수 없다(감쇠는 shadowFloor 까지만).
+  const fillShadowRatio = sample.productFillShadow.delta
+    / Math.max(sample.shadowBypassedReceiver.delta, 1e-6);
   check(sample.productFillShadow.ndl > 0 && sample.productFillShadow.fillNdl > 0
-      && sample.productFillShadow.delta <= 0.003,
-    `main-sun shadow stays rim-dark with product unshadowed fill (sun N·L=${sample.productFillShadow.ndl.toFixed(3)}, fill N·L=${sample.productFillShadow.fillNdl.toFixed(3)}, delta=${sample.productFillShadow.delta.toFixed(4)})`);
-  check(sample.shadowBypassedReceiver.offLuma > sample.productFillShadow.offLuma
-      && sample.shadowBypassedReceiver.delta <= 0.003,
-    `receiveShadow=false cannot bypass physical rim visibility (base=${sample.shadowBypassedReceiver.offLuma.toFixed(4)}, delta=${sample.shadowBypassedReceiver.delta.toFixed(4)})`);
+      && fillShadowRatio > 0 && fillShadowRatio <= shadowFloor + 0.15,
+    `unshadowed fill cannot restore full rim inside the main-sun shadow (sun N·L=${sample.productFillShadow.ndl.toFixed(3)}, fill N·L=${sample.productFillShadow.fillNdl.toFixed(3)}, ${fillShadowRatio.toFixed(3)}× of the unshadowed control)`);
+  check(sample.shadowBypassedReceiver.offLuma > sample.productFillShadow.offLuma,
+    `receiveShadow=false brightens the surface without owning rim visibility (base=${sample.shadowBypassedReceiver.offLuma.toFixed(4)}, delta=${sample.shadowBypassedReceiver.delta.toFixed(4)})`);
+  // 그림자 비율은 여전히 단조롭게 반영된다. 바닥값이 있으므로 0.5 가시율은
+  // mix(shadowFloor,1,0.5) = 0.725 로 나타난다(포화 아님).
   const halfVisibilityRatio = sample.ratioHalfShadow.delta / Math.max(sample.ratioLit.delta, 1e-6);
-  check(halfVisibilityRatio >= 0.40 && halfVisibilityRatio <= 0.60,
-    `50% stock penumbra remains proportional at sun intensity 2.3 (${halfVisibilityRatio.toFixed(3)}×, not saturated)`);
-  check(sample.litEdge.delta >= sample.unlitEdge.delta * 20,
-    `lit/unlit edge separation is at least 20× (${(sample.litEdge.delta / Math.max(sample.unlitEdge.delta, 1e-6)).toFixed(1)}×)`);
-  check(result.facing.gate.full === 0.08 && result.facing.gate.cutoff === 0.30,
+  const halfExpected = shadowFloor + (1 - shadowFloor) * 0.5;
+  check(halfVisibilityRatio > shadowFloor * 0.9
+      && halfVisibilityRatio <= halfExpected + 0.12,
+    `50% stock penumbra stays monotonic at sun intensity 2.3 (${halfVisibilityRatio.toFixed(3)}×, expected ≈${halfExpected.toFixed(2)}×)`);
+  check(result.facing.gate.full === 0.10 && result.facing.gate.cutoff === 0.42,
     `facing gate contract ${JSON.stringify(result.facing.gate)}`);
-  check(result.facing.solarGate.facingStart === 0.005
-      && result.facing.solarGate.backlitStart === 0.15
+  check(result.facing.solarGate.facingStart === -0.05
+      && result.facing.solarGate.backlitStart === 0.02
+      && result.facing.solarGate.backlitFloor === 0.20
+      && result.facing.solarGate.shadowFloor === 0.45
       && result.facing.solarGate.directStart === 0.002
       && result.facing.solarGate.directFull === 0.08,
     `solar gate contract ${JSON.stringify(result.facing.solarGate)}`);
   const peak = result.facing.sunsetPeak.deltaRgb;
   const peakLuma = result.facing.sunsetPeak.delta;
   console.log(`  sunset peak additive: rgb=(${peak.r.toFixed(4)}, ${peak.g.toFixed(4)}, ${peak.b.toFixed(4)}) luma=${peakLuma.toFixed(4)}`);
-  check(result.facing.energyCap === 0.26, `base HDR rim cap ${result.facing.energyCap}`);
-  check(Math.max(peak.r, peak.g, peak.b) <= 0.40 && peakLuma <= 0.25,
+  // 접선 실선은 클리핑해 bloom 을 먹이는 것이 룩이다(look-audit R2). 상한은 "면 전체가
+  // HDR 백색 발광체가 되지 않는" 지점에만 둔다. 골든 실측 대비로 재조정한 값.
+  check(result.facing.energyCap === 0.34, `base HDR rim cap ${result.facing.energyCap}`);
+  check(Math.max(peak.r, peak.g, peak.b) <= 0.55 && peakLuma <= 0.34,
     `sunset 2.05×1.6 building edge stays warm/bounded (max=${Math.max(peak.r, peak.g, peak.b).toFixed(4)}, luma=${peakLuma.toFixed(4)})`);
-  check(result.facing.energyCap * 0.7 < 0.19,
-    `organic peak remains below 0.19 additive energy (${(result.facing.energyCap * 0.7).toFixed(3)})`);
+  check(result.facing.energyCap * 0.7 < 0.25,
+    `organic peak remains below 0.25 additive energy (${(result.facing.energyCap * 0.7).toFixed(3)})`);
 
   console.log('\n=== shader and runtime contracts ===');
   check(result.facing.chainKept, 'pre-existing onBeforeCompile patch remains chained');
@@ -543,9 +599,9 @@ try {
     `rim→cloud callback/cache-key is composed (${result.facing.reverseComposedProgramKey})`);
   check(result.facing.silhouetteInjected, 'compiled rim source multiplies the silhouette gate');
   check(result.facing.physicalGatesInjected && result.facing.mainSunCaptureInjected
-      && result.facing.receiveShadowGateInjected,
-    'shader requires solar-facing, actual backlight, stock shadow ratio, and receiveShadow');
-  check(result.facing.syntheticWrapAbsent, 'synthetic dark-side wrap is absent from rim energy');
+      && result.facing.flooredGatesInjected,
+    'shader composes solar-facing, backlight, and stock shadow ratio as floored attenuation');
+  check(result.facing.wrapComposed, 'anti-solar wrap residual is part of rim energy again');
   check(result.facing.shadowFetchCount === result.facing.stockShadowFetchCount,
     `rim adds no duplicate shadow-map fetch (${result.facing.shadowFetchCount} stock calls)`);
   check(result.facing.buildingMul === 1.5, 'building role multiplier remains 1.5');
@@ -556,12 +612,24 @@ try {
     `instanceColor green survives (${JSON.stringify(contracts.green)})`);
   check(contracts.programs1 === contracts.programs0,
     `rescan program plateau ${contracts.programs0}→${contracts.programs1}`);
-  check(contracts.coverage.building === 1 && contracts.coverage.organic === 1 && contracts.coverage.misc === 1,
+  // building 1 + misc 1 + organic 5(env 'trees' 1 + 마을 식생 4) + ground 2. opening 은 제외되므로
+  // total 이 9 라는 것 자체가 "제외 대상은 세지 않는다"는 계약이다.
+  check(contracts.coverage.building === 1
+      && contracts.coverage.misc === 1
+      && contracts.coverage.organic === 5
+      && contracts.coverage.ground === 2
+      && contracts.coverage.total === 9,
     `role coverage ${JSON.stringify(contracts.coverage)}`);
   check(contracts.roleKept === 'roof' && !contracts.openingPatched,
     `role tag/opening exclusion preserved (${contracts.roleKept}, patched=${contracts.openingPatched})`);
   check(contracts.organicMul === 0.7 && contracts.miscMul === 1,
     `shared shader keeps per-material multipliers organic=${contracts.organicMul} misc=${contracts.miscMul}`);
+  // 마을 식생 그룹 이름이 organic 명단에 없으면 숲이 건물급 림을 받는다(docs/tree-look.md 0-3).
+  check(contracts.villageOrganicMuls.every((mul) => mul === 0.7),
+    `village vegetation groups classify as organic (${JSON.stringify(contracts.villageOrganicMuls)})`);
+  // 마을 지형·수면: 패치는 유지(프로그램 분기 방지)하고 계수만 0 — 광역 그레이징 워시 차단.
+  check(contracts.groundPatched.every(Boolean) && contracts.groundMuls.every((mul) => mul === 0),
+    `village ground/water stays patched at zero contribution (patched=${JSON.stringify(contracts.groundPatched)}, mul=${JSON.stringify(contracts.groundMuls)})`);
   const lodComposition = result.lodComposition;
   check(lodComposition.distinctPrograms
       && lodComposition.lodKey.includes('cheoma-lod-screen-door-v1')

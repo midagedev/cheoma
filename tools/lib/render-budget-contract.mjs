@@ -18,6 +18,25 @@ const COMMON_RESOURCE_LIMITS = Object.freeze({
   textures: 128,
 });
 
+// The `focus` and `mid` ceilings below were re-authored on 2026-07-25 together with the restored
+// eye-level residential frame (docs/look-restoration-plan.md "1-0 충돌 1"). The premise changed,
+// so the numbers had to:
+//
+//   * #159 authored `focus` against a 24° survey telephoto whose 10° frame tilted most of the
+//     walled capital out of view. The product close frame is now eye level (9°) on a 16° lens, so
+//     the same seed legitimately carries more of 한양 in the frustum. Measured 1088 calls; the
+//     ceiling is 1120 (≈3% headroom). This is not a blanket relaxation — the same round cut the
+//     cost that *was* wrong, see below.
+//   * `mid` previously read 946 even in the old framing (a regression that predates this round)
+//     against a 900 ceiling. Keying detail depth to view pitch (src/village/lod-policy.js
+//     `villageDetailReach`) stopped the compensated telephoto from promoting the whole city to
+//     FULL/MID, and `mid` now measures 560. The ceiling is tightened to 700 so that win is locked
+//     rather than left as dead headroom.
+//   * `focus.triangles` measured 8.01M against a 7.5M ceiling before the re-key and 6.36M after,
+//     so its ceiling is tightened to 7.0M for the same reason.
+//
+// `aerial` and `focusOut` are byte-identical to the pre-round frames (detail depth is 1 at survey
+// pitch, by construction) and their ceilings are untouched.
 export const HANYANG_RENDER_BUDGET = Object.freeze({
   schemaVersion: 1,
   fixture: Object.freeze({
@@ -36,14 +55,14 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
       textures: 104,
     }),
     focus: Object.freeze({
-      calls: 1000,
-      triangles: 7_500_000,
+      calls: 1120,
+      triangles: 7_000_000,
       ...COMMON_RESOURCE_LIMITS,
       geometries: 1050,
     }),
     mid: Object.freeze({
-      calls: 900,
-      triangles: 3_500_000,
+      calls: 700,
+      triangles: 2_800_000,
       ...COMMON_RESOURCE_LIMITS,
       geometries: 1050,
     }),

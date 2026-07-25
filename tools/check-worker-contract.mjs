@@ -92,10 +92,25 @@ const expectedSceneHashes = {
   // #153 removes the pick-box-derived fill/edge resources and keeps one reusable
   // roof-footprint corner marker. Planning and proxy bytes stay exact; only the
   // runtime scene resource topology changes.
-  village: 'b73b2604:1baba4b2:b8930cfa:e532cf36',
-  town: '3c1b27a4:a3b42e9e:0e857896:045386c0',
-  capital: '6e8322e0:1d1981e6:3194a001:9de9b602',
-  hanyang: '910da473:1b964cfb:ca3aa72f:37289a0d',
+  // 룩 복원 Phase 1: 저층 운해 링과 능선 물안개 뱅크의 대기 기하가 바뀌고(링은 방위·표고 종속
+  // 두께를 갖고 골에 두껍게 고이며 능선 어깨에서 얇아진다, 뱅크는 원경/중경 2단), 그 위에 주거
+  // 근접 렌즈가 10°→16° 로 광각화됐다. 렌즈는 보정 dolly 거리를 96m→≈60m 로 줄이므로
+  // `view-clearance.js` 의 focus 시야 corridor 가 짧아지고, 그 corridor 를 피해 배치되는
+  //   ① 정자·공공 소품(pavilion-plan / public-props-plan — plan 단계)
+  //   ② 식생 마스크(vegetation-spatial makeVegetationMask — populate 단계)
+  // 가 함께 움직인다. capital 처럼 plan 바이트가 그대로인 규모도 ②만으로 씬이 바뀐다.
+  // 재질·프로그램·필지·건물·도로·논·동물 소유권은 손대지 않았고, 세 경로(sync / 실제 module
+  // Worker / ?worker=0 폴백)는 이 재기준 시점에도 서로 바이트 동일했다 — 결정론 손상이 아니라
+  // 의도된 씬 변화다.
+  // 같은 라운드의 ③: 주거 focus 카메라 자리 숲 배제(`vegetation-spatial.js` FOCUS_EYE_CLEARANCE).
+  // 짧아진 dolly 는 사면 필지에서 카메라를 실제로 수관 안에 세울 수 있고(capital/4 p23 실측:
+  // 피사체 43m, 가림 나무 6.9m) 그러면 프레임 전체가 저폴리 캐노피 한 장이 된다. 시야 선택기는
+  // 지형·건축 blocker 만 보므로 수목은 배치 단계에서 비켜야 한다. 나무 수가 소폭 줄어 삼각형이
+  // 함께 줄어들고, 재질·프로그램·필지·건물 소유권은 불변이다.
+  village: 'd5c6e141:c6be9971:a22bc069:ca6ce3ed',
+  town: '51fe2dac:87e0c81c:1a333001:ef6d62ba',
+  capital: '8845fec6:d744d546:85c26dd8:86226f76',
+  hanyang: 'f407cc43:21c707e9:71a3af66:8388fbfd',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -126,10 +141,14 @@ const expectedProxyHashes = {
   // anchors, while palace/temple proxies expose representative hall + flat
   // courtyard bounds and frame those instead of the full reserved precinct.
   // Scene bytes remain exact; only the public proxy descriptor changes.
-  village: '8cbe0499',
-  town: '5ca9f35a',
-  capital: '666f336b',
-  hanyang: 'cdafe208',
+  // 룩 복원 Phase 1: 주거 근접 focus 고도가 24° 도면 구도에서 눈높이대(9°)로 되돌아가고, 렌즈가
+  // 10°→16° 로 광각화됐다. `planParcelFocus` 가 그 고도와 렌즈로 카메라 오프셋·거리·fov 를 모두
+  // 푸므로 네 규모의 프록시 카메라 바이트가 함께 움직인다. 프록시 개수·ID·피사체 경계·격리
+  // 계약은 그대로다.
+  village: '67c01713',
+  town: 'c969fbdc',
+  capital: '1eb20267',
+  hanyang: 'fc3be91f',
 };
 
 const server = await createServer({
