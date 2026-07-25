@@ -17,7 +17,7 @@ cheoma의 수묵 모드는 3D 장면을 단순한 흑백 외곽선으로 바꾸�
 ## 조사 근거
 
 - [국립중앙박물관, 인왕제색도 큐레이터 추천](https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?relicRecommendId=962060&schM=view): 실제 지형의 특징을 살리되 치마바위를 높이고 보이지 않는 계류를 추가한 의도적 재구성을 설명한다.
-- [국립중앙박물관, 인왕제색도 수어영상 해설](https://vcm.museum.go.kr/MUSEUM/contents/M0506000000.do?arcId=18702&catCustomType=post&catId=11804): 단순한 실경 복제가 아니라 특징과 정서를 강조하며, 먹이 짙은 바위·안개 여백·소나무 숲의 작은 집을 대비시킨다고 설명한다.
+- [국립중앙박물관, 인왕제색도 수어영상 해설](https://www.museum.go.kr/MUSEUM/contents/M0506000000.do?catCustomType=post&catId=11804&schM=view&arcId=18702): 단순한 실경 복제가 아니라 특징과 정서를 강조하며, 먹이 짙은 바위·안개 여백·소나무 숲의 작은 집을 대비시킨다고 설명한다. (2026-07-25 URL 정정 — 이전 `vcm.museum.go.kr` 링크는 HTTP 200이지만 수어 동영상 **목록** 페이지를 반환해 해설 본문이 없었다. `schM=view`가 붙은 상세 URL의 자막 전문에서 "그림 속 인왕산 봉우리는 짙은 먹물로 칠해져 있습니다"·"인왕산은 여백으로 남긴 물안개 위에 떠 있습니다. 안개에 싸인 솔숲에는 집 한 채가 서 있습니다"를 직접 확인했다. 페이지는 공공누리 출처표시 조건을 명시한다.)
 - [국립중앙박물관, 우리 강산을 그리다: 화가의 시선, 조선시대 실경산수화](https://www.museum.go.kr/MUSEUM/contents/M0202030000.do?act=past&exhiSpThemId=3803&listType=list&menuId=past&schM=view): 현장 사생, 창의적 화면 구성, 개성 있는 필묵을 진경산수의 핵심으로 제시한다.
 - [The Met, Mountain and Water: Korean Landscape Painting, 1400–1800](https://www.metmuseum.org/ko/essays/mountain-and-water-korean-landscape-painting-1400-1800): 실경의 지형뿐 아니라 심리적·미술사적 의미를 함께 담는 방식과 인왕제색도의 과감한 화면 절단, 안개에서 솟는 산을 설명한다.
 - [The Met, Diamond Mountains: Travel and Nostalgia in Korean Art](https://www.metmuseum.org/exhibitions/listings/2018/diamond-mountains/exhibition-gallery): 정선의 날카로운 수직선, 소나무·수목의 짧은 횡선과 점, 넓은 담묵을 구체적인 회화 어휘로 소개한다.

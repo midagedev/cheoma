@@ -33,7 +33,6 @@ const FOOTWEAR_REFERENCE_URLS = Object.freeze([
   'https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400100019700000&mode=V',
   'https://iksan.museum.go.kr/site/kor/html/sub04/0402.html?cate_code=&cate_gubun=&id=PS0100101400000297500000&mode=V',
   'https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?pageSize=10&relicRecommendCategory=&relicRecommendId=165924&sc=&schM=view&sv=',
-  'https://www.korea.net/koreanet/fileDownload?fileUrl=FILE%2FPDF%2Fgeneral%2F201209_liveinkorea_en.pdf',
 ]);
 const MJA_HANOK_REFERENCE_URLS = Object.freeze([
   'https://www.hanokdb.kr/theology/sub_02',
@@ -941,7 +940,10 @@ try {
       license: item.querySelector('.it-license')?.textContent?.replace(/\s+/g, ' ').trim() || '',
     })),
   }));
-  pass(reference.text.includes('국가한옥센터(AURI) 한옥DB — 한옥의 종류·한옥이론')
+  // 2026-07-25 인용 위생 정정: 항목 제목이 AURI 세 페이지의 실제 문서명을 그대로 쓴다
+  // (sub_02 한옥의 종류 / sub_03 한옥의 감상 / sub_04 한옥의 시공).
+  pass(reference.text.includes('국가한옥센터(AURI) 한옥DB — 「한옥의 종류」·「한옥의 감상」·「한옥의 시공」')
+      && reference.text.includes('제품 결정으로 재분류한다')
       && reference.text.includes('ㅡ·ㄱ·ㄷ·ㅁ')
       && reference.text.includes('앱의 칸·충돌 안전 범위')
       && reference.text.includes('역사적 빈도나 보편 비례가 아닌')
@@ -962,7 +964,10 @@ try {
       && auriNight.links.some((url) => url.includes('hanokdb.kr/theology/sub_03'))
       && auriNight.license.includes('All rights reserved'),
   'AURI hanji-plane evidence, limit, canonical link, and license stay in one Reference item');
-  pass(folkNight?.text.includes('작은 연소 광원')
+  // 2026-07-25 인용 위생 정정: 웹진 본문에 "석유등"·"작은 연소 점광원"이 없으므로 credits 는
+  // 양초·호롱·남포등이라는 출처 어휘만 근거로 두고, 물리적 범주화는 제품 해석으로 표기한다.
+  pass(folkNight?.text.includes('양초·호롱·남포등')
+      && folkNight.text.includes('물리적 범주화는 출처 문장이 아니라')
       && folkNight.text.includes('일부 거주 창호만 seed-stable하게 켜고 어두운 방')
       && folkNight.text.includes('정확한 색·밝기·flicker·점등 비율은 사료값이 아니라')
       && folkNight.text.includes('깊이 가림')
@@ -1025,7 +1030,7 @@ try {
       && mudWallEvidence.links.some((url) => url.includes('ctptNo=4413802600000'))
       && mudWallMoisture?.text.includes('생성 시점에 고정되는 희미하고 불규칙한 하부 darkening')
       && mudWallMoisture.text.includes('live rain tween은 후속 비대상이다')
-      && mudWallMoisture.links.some((url) => url.includes('terra_literature_review.html'))
+      && mudWallMoisture.links.some((url) => url.includes('publications-reports/item/2K7M41'))
       && [...mudWallEvidence.anchors, ...mudWallMoisture.anchors].every((anchor) => (
         anchor.target === '_blank'
           && anchor.rel.split(/\s+/).includes('noopener')
@@ -1042,7 +1047,7 @@ try {
       && drainageEvidence.text.includes('실시간 빗물 수위·유량·침수 시뮬레이션은 이번 범위에 넣지 않는다')
       && drainageEvidence.links.some((url) => url.includes('nh_024_0060_0010_0010'))
       && drainageEvidence.links.some((url) => url.includes('annex_insadosi_02.jsp'))
-      && drainageEvidence.links.some((url) => url.includes('Heritage_99_08.jsp'))
+      && drainageEvidence.links.some((url) => url.includes('VdkVgwKey=18%2C02360000%2C34'))
       && drainageEvidence.anchors.every((anchor) => (
         anchor.target === '_blank'
           && anchor.rel.split(/\s+/).includes('noopener')
@@ -3069,7 +3074,7 @@ try {
     hasText: '국가유산청 국가유산포털 — 경복궁 근정전 창호 철물 정밀실측도',
   });
   const footwearCredit = page.locator('.modal .cat li').filter({
-    hasText: '국립익산박물관 · 국립중앙박물관 · Korea.net — 조선 신발과 문간 탈화 생활',
+    hasText: '국립익산박물관 · 국립중앙박물관 — 조선 신발과 문간 탈화 생활',
   });
   await kitchenCredit.waitFor({ state: 'visible', timeout });
   await ornamentCredit.waitFor({ state: 'visible', timeout });
@@ -3098,7 +3103,7 @@ try {
     referenceContract.kitchenLinks === 3
       && referenceContract.ornamentLinks === 2
       && referenceContract.openingLinks === 1
-      && referenceContract.footwearLinks === 4
+      && referenceContract.footwearLinks === 3
       && referenceContract.kitchenUse?.includes('마당 높이 부엌 개구 안')
       && referenceContract.ornamentUse?.includes('palace 전용 경계')
       && referenceContract.openingUse?.includes('민가에 그대로 복제하지 않는다')

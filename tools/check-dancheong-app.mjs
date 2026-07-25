@@ -111,8 +111,10 @@ try {
     hasText: '국가유산청 · 국립문화유산연구원 — 단청 위계와 궁궐·사찰 안료 조사',
   });
   await credit.waitFor({ state: 'visible', timeout });
-  invariant(await credit.locator('a').count() === 4,
-    'Reference UI did not expose all four authoritative dancheong links');
+  // 2026-07-25: 폐기 도메인(m.cha.go.kr 단청장) 링크를 삭제해 살아 있는 3건만 남는다.
+  // 살아 있는 단청장 지정 페이지는 지정 메타데이터뿐이라 위계 서술을 지지하지 않아 대체하지 않았다.
+  invariant(await credit.locator('a').count() === 3,
+    'Reference UI did not expose all three live authoritative dancheong links');
   invariant((await credit.locator('.it-use').textContent())?.includes('궁 기본 모로'),
     'Reference UI lost the source-to-implementation mapping');
 

@@ -189,9 +189,12 @@ try {
       links: required.filter(Boolean).flatMap((item) => item.links),
     };
   });
+  // 2026-07-25: 대상별 선 계층은 아직 구현되지 않았으므로(ink.js 는 씬 전체 단일 silhouetteWidth)
+  // credits 활용 문장을 실제 구현으로 축소했다. 게이트도 구현된 축만 요구한다.
   pass(references.found === 3
-    && ['여백', '농묵', '선 계층'].every((term) => references.text.includes(term)),
-  'Reference modal exposes institutional ink sources and their applied visual rules');
+    && ['여백', '농묵', '대기 원근', '화면 절단'].every((term) => references.text.includes(term))
+    && references.text.includes('선 계층은 현재 구현되어 있지 않다'),
+  'Reference modal exposes institutional ink sources and only their implemented visual rules');
   pass(references.licensed && references.links.length === 6
     && references.links.some((link) => link.href.includes('museum.go.kr'))
     && references.links.some((link) => link.href.includes('metmuseum.org'))
