@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_HERO_FOCUS_ELEVATION,
   VILLAGE_LENS,
   dollyDistanceForFov,
   dollyScaleForFov,
@@ -150,7 +151,18 @@ near(arrivalEnd.target, close.target);
 assert.equal(arrivalEnd.fov, close.fov);
 assert.equal(arrivalEnd.referenceFov, close.referenceFov);
 assert.equal(arrivalEnd.composition, close.composition);
-assert.ok(distance(arrivalStart.position, arrivalStart.target) > distance(close.position, close.target) * 1.5);
+// "Establishing" is a screen-width claim, not a world-distance one. Asserting distance here is what
+// pushed the product's establishing camera past the entry veil's far plane against a lens-compensated
+// destination (docs/look-audit-2026-07.md R6, look-restoration-plan.md Phase 2-3), so the invariant is
+// now the subject's screen occupancy. This synthetic destination is a near-normal lens, so it only
+// has to widen; the product's telephoto landing is held to a real ratio at `opticalArrival` below.
+const occupancyOf = (sample) => 1 / (
+  distance(sample.position, sample.target) / dollyScaleForFov(sample.referenceFov, sample.fov)
+    * Math.tan(sample.referenceFov * Math.PI / 360)
+);
+assert.ok(occupancyOf(arrivalEnd) > occupancyOf(arrivalStart),
+  `arrival must establish a wider frame than it lands on (occupancy ${occupancyOf(arrivalStart).toFixed(5)}`
+  + ` -> ${occupancyOf(arrivalEnd).toFixed(5)})`);
 assert.ok(arrivalStart.fov >= 32 && arrivalEnd.fov === 18, 'arrival must settle wide-to-telephoto');
 
 let maxTurnRate = 0;
@@ -205,6 +217,47 @@ near(opticalSamples.at(-1).position, heroClose.position);
 near(opticalSamples.at(-1).target, heroClose.target);
 assert.ok(distance(opticalSamples.at(-1).position, opticalSamples.at(-2).position) < 0.01,
   '200mm-like arrival must settle without an endpoint position snap');
+// The product case: a 7° landing in a 21° reference frame. Establishing must be a real widening
+// (roughly the 3x the golden hero reveal delivered) and it must not buy that widening with world
+// distance, because the entry veil's dense band is keyed to the site radius, not to the lens dolly.
+assert.ok(occupancyOf(opticalSamples.at(-1)) > occupancyOf(opticalSamples[0]) * 2.5,
+  '200mm-like arrival must establish a frame at least 2.5x wider than the landing '
+  + `(occupancy ${occupancyOf(opticalSamples[0]).toFixed(5)} -> ${occupancyOf(opticalSamples.at(-1)).toFixed(5)})`);
+assert.ok(distance(opticalSamples[0].position, opticalSamples[0].target)
+  < distance(heroClose.position, heroClose.target),
+'200mm-like arrival must establish from inside the landing radius, not beyond it');
+const elevationOf = (sample) => Math.atan2(
+  sample.position.y - sample.target.y,
+  Math.hypot(sample.position.x - sample.target.x, sample.position.z - sample.target.z),
+) * DEG;
+// The establishing elevation is capped by the destination, never raised above it, so a landing that
+// is already low (this residential-elevation fixture) simply establishes at its own height.
+assert.ok(elevationOf(opticalSamples[0])
+  < VILLAGE_FOCUS_ELEVATION * DEG + 3,
+'200mm-like arrival must never establish above its own landing elevation');
+
+// The product hero landing pose: the same 7° lens but the compound's own 24° elevation. A low
+// establishing frame is what makes the reveal read as layered architecture (near eaves, receding
+// roof ranks, haze) instead of a plan view of a diorama, and the arc then cranes up to the landing.
+const heroLandingClose = frame({
+  x: Math.sin(heroAzimuth) * Math.cos(VILLAGE_HERO_FOCUS_ELEVATION) * heroPhysicalDistance,
+  y: heroTarget.y + Math.sin(VILLAGE_HERO_FOCUS_ELEVATION) * heroPhysicalDistance,
+  z: Math.cos(heroAzimuth) * Math.cos(VILLAGE_HERO_FOCUS_ELEVATION) * heroPhysicalDistance,
+}, heroTarget, VILLAGE_LENS.hero.fov, VILLAGE_LENS.hero.referenceFov, 0);
+const heroLandingArrival = createArchitecturalReveal({
+  kind: 'arrival', from, to: heroLandingClose, seed: 20260716, subjectSize: 30, motion: 'full',
+});
+const heroLandingStart = sampleArchitecturalReveal(heroLandingArrival, 0);
+const heroLandingEnd = sampleArchitecturalReveal(heroLandingArrival, 1);
+assert.ok(elevationOf(heroLandingStart) < elevationOf(heroLandingEnd) - 8,
+  'hero landing arrival must establish at least 8 degrees below its landing elevation '
+  + `(${elevationOf(heroLandingStart).toFixed(2)}° -> ${elevationOf(heroLandingEnd).toFixed(2)}°)`);
+assert.ok(occupancyOf(heroLandingEnd) > occupancyOf(heroLandingStart) * 2.5,
+  'hero landing arrival must establish a frame at least 2.5x wider than the landing '
+  + `(occupancy ${occupancyOf(heroLandingStart).toFixed(5)} -> ${occupancyOf(heroLandingEnd).toFixed(5)})`);
+assert.ok(distance(heroLandingStart.position, heroLandingStart.target)
+  < distance(heroLandingEnd.position, heroLandingEnd.target),
+'hero landing arrival must establish from inside the landing radius, not beyond it');
 
 const rebuilt = frame({ x: 2.8, y: 1.35, z: 32.5 }, { x: 0.6, y: 4.8, z: -0.4 }, 20, 23, 1);
 const rebuild = createArchitecturalReveal({

@@ -77,6 +77,10 @@ const HERO_ASSEMBLE_DELAY_MS = 1100;   // enter 후 착공까지(타이틀 페�
 const HERO_ASSEMBLE_DUR = 7.0;         // 조립 길이(완료 ≈8.1s) — 안개 걷힌 뒤 관람 구간 확보(4.8→7.0)
 const HERO_REVEAL_HOLD = 0.5;          // 먹 안개 무대 유지 배율(이 진행도까지 짙게 → 조립 후반에 마을 개방)
 const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주변 먹안개 far 시작 깊이 배율(1=기본), 히어로 근접은 불변
+// 완성 hold 무대: 카메라 선회를 조립 완주보다 이만큼 먼저 끝낸다. 마지막 부재가 내려앉는 순간을 고정된
+//   프레임에서 보게 되고(움직이는 카메라가 완성 비트를 흘려보내지 않는다), 이어서 근접 링(모트·연기·
+//   등롱)이 그 정지 프레임 위로 피어난다. 0 이면 카메라 도착과 완성이 겹쳐 완성 비트가 없다.
+const HERO_REVEAL_TAIL = 1.3;
 
 // focus 전환 타임라인 통일(#92, mode-integration §5.5 원칙 3) — focus-in 은 카메라 돌리 + DoF 페이드 +
 // 링 크로스페이드 + 패널 컨텍스트 모프를 "한 타임라인"으로 구동한다. 카메라 트윈이 그 클록의 권위 —
@@ -1041,8 +1045,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const e = easeOutCubic(hold < 1 ? clamp01((k - hold) / (1 - hold)) : 0);
       const R = village.handle.plan.site.R;
       const veil = village.reveal.veil || 1;  // #87② 랜딩 베일 강화(주변 far 만 깊게, near 불변)
-      scene.fog.near = R * (0.5 + 1.7 * e);            // 0.5R(짙음) → 2.2R(base) — 히어로 근접은 늘 맑게
-      scene.fog.far = R * (7.0 - 4.4 * veil * (1 - e)); // veil=1: 2.6R → 7.0R(base). veil>1: 시작 더 짙음
+      // 짙은 시작 밴드는 site 반경 단위로 authored 됐고 "피사체는 near fog 안이라 늘 맑다"를 전제한다.
+      // 히어로 랜딩 카메라는 R 과 무관한 렌즈 파생 망원 거리(7° 히어로 렌즈 ≈ 피사체폭 5.6배)에 서므로
+      // 작은 규모에서는 피사체가 그 전제를 벗어나고, 베일이 뒤가 아니라 피사체 자체를 덮는다(R6).
+      // clearMargin(히어로만 전달)은 매 프레임 실제 카메라→피사체 거리 대비 near 의 하한 비율이다.
+      // 목표는 피사체를 완전히 맑게 만드는 게 아니다 — 그러면 프레임 전체에서 대기 원근이 사라져
+      // 근경이 어둡고 납작해진다. 0.62 는 골든 히어로가 실제로 서 있던 비율(106m 카메라 / near 64m)이고
+      // 피사체에 옅은 웜 헤이즈(약 0.2~0.3)를 남기면서 배경 능선만 여백으로 지운다.
+      // R 파생값이 이미 더 멀면 그쪽이 이기므로 부감 진입 리빌(clearMargin 0)은 불변이다.
+      const clearMargin = village.reveal.clearMargin || 0;
+      const subjectDepth = clearMargin > 0 ? camera.position.distanceTo(controls.target) : 0;
+      const denseNear = Math.max(R * 0.5, subjectDepth * clearMargin);
+      const denseFar = Math.max(R * (7.0 - 4.4 * veil), denseNear + R * 1.6);
+      scene.fog.near = denseNear + (R * 2.2 - denseNear) * e;   // 짙음 → 2.2R(base)
+      scene.fog.far = denseFar + (R * 7.0 - denseFar) * e;      // veil=1: 2.6R → 7.0R(base)
       if (k >= 1) {
         village.reveal = null;
         // #140-D 부팅 리빌 정착 직후 오디오를 생성하고 현재 시간대 트랙을 프리페치(fetch+decode)해 둔다 →
@@ -1547,7 +1563,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   hold 로 조립 전반부 동안 주변 마을을 물려 히어로 단독 무대감을 만들고, 조립 후반에 마을을 연다(#98④).
   //   veil(#87②): 시작 시 주변 먹안개 깊이 배율(1=기본). 히어로 랜딩만 살짝 키워(>1) 등장감 강화 —
   //   far(주변 베일)만 깊게 하고 near(히어로 근접)는 불변이라 종가는 hold 중에도 늘 맑게 보인다.
-  function startVillageReveal(dur = 1.3, { hold = 0, veil = 1 } = {}) { if (village.handle) village.reveal = { e: 0, dur, hold, veil }; }
+  //   clearMargin: 짙은 시작 near 의 하한을 매 프레임 카메라→피사체 거리의 이 배수로 잡는다. 렌즈 파생
+  //   망원 거리에 서는 히어로 랜딩만 전달해 피사체가 자기 베일 안에 잠기는 것을 막는다(위 fog 갱신 절
+  //   참조). 부감 진입은 0=종전과 완전히 동일.
+  function startVillageReveal(dur = 1.3, { hold = 0, veil = 1, clearMargin = 0 } = {}) {
+    if (village.handle) village.reveal = { e: 0, dur, hold, veil, clearMargin };
+  }
 
   // #123: 엔진 비동기 빌드 게이트. 기본 ON(createVillageAsync = forest 워커 오프로드). window.__villageSync 로 강제 동기(A/B·비상 폴백).
   function villageAsyncBuild() { return !(typeof window !== 'undefined' && window.__villageSync); }
@@ -2075,7 +2096,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }, {
       seed: village.seed,
       subjectSize: maxDim,
-      duration: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR,
+      // 조립 완주보다 HERO_REVEAL_TAIL 만큼 먼저 도착 → 완성 비트를 고정 프레임에서 관람한다.
+      duration: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR - HERO_REVEAL_TAIL,
     });
     reapplyVillageFog();
     // 랜딩 먹 안개: 조립 완주까지 걸쳐 두되(hold 로 전반부 짙은 무대 유지) 조립 후반에 마을을 연다(#98④).
@@ -2083,7 +2105,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #87 빈 터 웜 글로우 귀속: 착공 전 빈 필지의 따뜻한 광채는 별도 진입 이펙트가 아니라 위 env.setTime
     //   ('sunset') 골든아워 조명 + 이 reveal fog(대기색=석양 하늘색으로 웜 틴트)의 합이다. 조립이 같은
     //   조명 위에서 자라나므로 빈 터→착공 전이는 이미 연속적(별도 연결 이펙트 불필요). veil 로 랜딩 베일만 강화.
-    startVillageReveal(HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR + 0.6, { hold: HERO_REVEAL_HOLD, veil: HERO_REVEAL_VEIL });
+    startVillageReveal(HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR + 0.6, {
+      hold: HERO_REVEAL_HOLD,
+      veil: HERO_REVEAL_VEIL,
+      // 골든 히어로가 서 있던 비율(카메라 106m / fog near 64m). 호 내내 종가는 옅은 웜 헤이즈만
+      // 받고, 배경 배산은 계속 여백으로 지워진다.
+      clearMargin: 0.62,
+    });
     emit('villageMode', true);
     emit('villageSelectStart', { parcelId: heroId, spec: pr.buildingSpec });   // 패널 집 컨텍스트(스펙 선전달)
     emit('villageFocusMorph', 1);                                              // 랜딩=집 컨텍스트로 안착
@@ -2242,12 +2270,20 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //      재호출은 새 토큰이 이전 빌드를 무효화(최신 커밋 승리) — 연타 커밋 스테일 스왑 방지.
   function applyVillageWavePresentation(wave) {
     const veil = clamp01(wave.anim.veil);
+    // scenery handoff 는 단 한 프레임(progress 0.50, veil=1)이고 그 프레임만 완전 불투명해야 한다.
+    // 그런데 fog 를 veil 에 선형으로 걸면 far 가 일찍 무너져(camDist 438m 에서 far 56m) 규모 커밋
+    // 웨이브가 0.751초 동안 단색 판이 된다 — 실측 c3-t3 은 std 1.1 / 고유색 39 의 완전 평면이었고,
+    // 골든의 같은 시점은 중앙 마을이 읽히는 짙은 헤이즈였다. 3승 리맵은 veil=1(=handoff 프레임)을
+    // 수학적으로 그대로 두고 불투명 고원만 0.751→0.427초로 좁혀(스왑 프레임 전후 각 0.28/0.15초 여유)
+    // 그 앞뒤를 관람 가능한 안개 전이로 되돌린다. 코어 wave.anim.veil(scenery 소유권·그림자·waveFade 계약)은
+    // 건드리지 않는다 — 이 리맵은 fog 표현 전용이다.
+    const fogVeil = veil * veil * veil;
     const ownerRadius = wave.anim.sceneryOwner === 'old' ? wave.oldRadius : wave.newRadius;
     if (scene.fog) {
       // 평상시 각 장면의 규모별 fog에서 시작/종료하고, peak만 더 큰 장면까지 감싸는 먹안개로 모인다.
       // handoff 순간에는 ownerRadius 항이 0이라 규모가 달라도 fog 거리가 튀지 않는다.
-      scene.fog.near = ownerRadius * 2.2 * (1 - veil);
-      scene.fog.far = ownerRadius * 7.0 * (1 - veil) + wave.coverRadius * 0.14 * veil;
+      scene.fog.near = ownerRadius * 2.2 * (1 - fogVeil);
+      scene.fog.far = ownerRadius * 7.0 * (1 - fogVeil) + wave.coverRadius * 0.14 * fogVeil;
     }
     if (sun.shadow) sun.shadow.intensity = wave.shadowIntensity * wave.anim.shadowWeight;
     const requiredFar = wave.coverRadius * 8;

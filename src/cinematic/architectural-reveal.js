@@ -74,11 +74,24 @@ function profileFor(kind, motion, subjectSize) {
   if (kind === 'arrival') {
     return {
       duration: compact ? 4.2 : 5.8,
-      sweep: (compact ? 22 : 70) * DEG,
+      sweep: (compact ? 30 : 84) * DEG,
       radialBreath: 0,
       verticalBreath: 0,
-      startScale: compact ? 1.28 : 1.62,
-      startRise: Math.min(compact ? 2.8 : 5.2, Math.max(compact ? 1.4 : 2.6, size * (compact ? 0.12 : 0.22))),
+      // The establishing frame is authored as a *screen* width, not a world distance. Scaling the
+      // destination radius up is wrong for a lens-compensated destination: the hero landing already
+      // stands ~5.6 subject widths out (7° in a 21° reference frame), so a 1.62× radius put the
+      // camera 262m from a 30m compound — past the entry veil's own far plane, which is keyed to the
+      // site radius instead. The subject rendered 100% fog for the first five seconds and the whole
+      // assembly played inside an opaque wash (docs/look-audit-2026-07.md R6). Establishing slightly
+      // inside the landing radius and low keeps the camera in the clear band while the 4.6× zoom
+      // still carries the reveal: the subject grows ~3× on screen across the arc, which is the claim
+      // the gates assert.
+      startScale: compact ? 0.82 : 0.70,
+      // Low, so the establishing frame reads as layered architecture (near eaves, receding roof
+      // ranks, haze) rather than a plan view of a diorama. Capped by the destination so a landing
+      // that is already lower than this never gets raised.
+      establishingElevation: (compact ? 13 : 10) * DEG,
+      startRise: Math.min(compact ? 2.8 : 4.2, Math.max(compact ? 1.4 : 2.6, size * (compact ? 0.12 : 0.14))),
     };
   }
   return {
@@ -122,6 +135,8 @@ export function createArchitecturalReveal({
   if (kind === 'arrival' && motion !== 'reduced') {
     const startAngle = endOffset.angle + profile.sweep * side;
     const startRadius = endOffset.radius * profile.startScale;
+    const endElevation = Math.atan2(endOffset.y, endOffset.radius);
+    const startElevation = Math.min(profile.establishingElevation, endElevation);
     const startTarget = {
       ...destination.target,
       y: destination.target.y + Math.min(2.4, Math.max(0.7, finite(subjectSize, 12) * 0.08)),
@@ -129,7 +144,7 @@ export function createArchitecturalReveal({
     start = frame({
       position: add(startTarget, {
         x: Math.sin(startAngle) * startRadius,
-        y: endOffset.y + profile.startRise,
+        y: startRadius * Math.tan(startElevation) + profile.startRise,
         z: Math.cos(startAngle) * startRadius,
       }),
       target: startTarget,

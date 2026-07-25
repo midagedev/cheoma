@@ -22,6 +22,17 @@
 //      share of the frame. A frame that simply crops the yard away still fails.
 //   4. The capital/7/p31 terrain cutaway and the mobile palace/temple viewport fits are
 //      unchanged; they are lens-agnostic and are read from VILLAGE_LENS.
+//
+// The arrival establishing assertion was re-authored on 2026-07-25 (docs/look-restoration-plan.md
+// Phase 2-3, docs/look-audit-2026-07.md R6). Its previous form demanded the establishing camera
+// stand at least 1.5× the landing's *world distance* from the subject. Against a lens-compensated
+// destination that is a look-breaking demand, not a cinematic one: the 7° hero landing already
+// stands ~5.6 subject widths out, so 1.5× more put the camera 262m from a 30m compound — beyond
+// the entry veil's own far plane, which is keyed to the site radius. The subject rendered as 100%
+// fog for the first five seconds of the product's signature clip and the entire assembly played
+// inside an opaque wash. What "establishing" actually claims is a *wider frame*, so the assertion
+// is now made on screen occupancy, which the reveal already reports and which is strictly harder to
+// satisfy by accident than a distance ratio.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -645,11 +656,6 @@ try {
   const arrival = await sampleSequence(arrivalPage, 'arrival', [0, 0.28, 0.56, 0.82, 1]);
   const arrivalStart = arrival[0], arrivalEnd = arrival.at(-1);
   invariant(arrivalStart.kind === 'arrival' && arrivalStart.motion === 'full', 'initial Hero action starts the desktop arrival profile');
-  invariant(
-    dist(arrivalStart.start.position, arrivalStart.start.target)
-      > dist(arrivalStart.end.position, arrivalStart.end.target) * 1.5,
-    'initial arrival travels from an establishing frame into the close architectural frame',
-  );
   invariant(arrivalStart.start.fov > arrivalStart.end.fov && arrivalEnd.fov === arrivalEnd.end.fov,
     'initial arrival lands wide-to-telephoto on the authored lens');
   const arrivalFovs = arrival.map((state) => state.fov);
@@ -658,6 +664,43 @@ try {
   const arrivalOccupancy = arrival.map((state) => 1 / (
     state.optics.visualDistance * Math.tan(state.referenceFov * Math.PI / 360)
   ));
+  // Establishing = a materially wider frame on the subject, measured the same way as the growth
+  // assertion below. See the header note: the previous world-distance form of this invariant is what
+  // pushed the establishing camera past the entry veil.
+  invariant(arrivalOccupancy.at(-1) > arrivalOccupancy[0] * 2.5,
+    'initial arrival establishes a frame at least 2.5x wider than the close architectural frame '
+    + `(occupancy ${arrivalOccupancy[0].toFixed(5)} -> ${arrivalOccupancy.at(-1).toFixed(5)})`);
+  // The arc must also sit in the readable part of the entry veil (R6). Two-sided on purpose: too
+  // much and the reveal plays behind an opaque wash (the regression), too little and the frame loses
+  // the warm aerial perspective that carries the golden hour and reads dark and flat instead. The arc
+  // retreats monotonically from a closer, lower establishing frame to the landing, so the landing
+  // depth is the worst case; the page is paused on the reveal's opening frame, so the fog read here
+  // is the veil at its densest.
+  const arrivalVeil = arrival.map((state) => Math.hypot(
+    state.position.x - state.target.x,
+    state.position.y - state.target.y,
+    state.position.z - state.target.z,
+  ));
+  const arrivalFog = await arrivalPage.evaluate(() => ({
+    near: window.__hero?.fogNear ?? null,
+    far: window.__hero?.fogFar ?? null,
+  }));
+  const veilAt = (depth) => (arrivalFog.near == null ? null : Math.max(0, Math.min(1,
+    (depth - arrivalFog.near) / (arrivalFog.far - arrivalFog.near))));
+  // The paused frame is the reveal's opening one, so the establishing depth and the densest fog do
+  // co-occur — this is the actual first second of the product's signature clip.
+  const openingVeil = veilAt(arrivalVeil[0]);
+  // The landing depth never meets the densest veil (the veil opens as the arc retreats), so this is a
+  // loose worst case. It exists only to fail the regression class, where the subject was fully washed.
+  const worstVeil = veilAt(Math.max(...arrivalVeil));
+  console.log(`ARRIVAL VEIL: depths ${arrivalVeil.map((d) => d.toFixed(1)).join(' -> ')} `
+    + `vs fog ${JSON.stringify(arrivalFog)} -> opening ${openingVeil?.toFixed(3)}, worst ${worstVeil?.toFixed(3)}`);
+  invariant(openingVeil != null && openingVeil > 0.05 && openingVeil < 0.35,
+    'densest entry veil hazes the establishing frame without washing it out '
+    + `(fog factor ${openingVeil?.toFixed(3)} at ${arrivalVeil[0].toFixed(1)}m)`);
+  invariant(worstVeil < 0.7,
+    'no arrival frame can be swallowed by the densest entry veil '
+    + `(fog factor ${worstVeil?.toFixed(3)} at ${Math.max(...arrivalVeil).toFixed(1)}m)`);
   console.log(`ARRIVAL OPTICS: ${JSON.stringify(arrival.map((state, index) => ({
     progress: [0, 0.28, 0.56, 0.82, 1][index],
     fov: +state.fov.toFixed(3),
