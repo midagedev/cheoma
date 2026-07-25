@@ -124,6 +124,11 @@ export function createVillageHandle(opts, seed, plan, group) {
   const withSeededBuild = withVillageRandomSeed;
   const handle = group.userData.houseHandle;   // { giwa, choga } InstancedMesh 그룹(또는 null)
   const treeOccluder = group.getObjectByName('village-trees')?.userData?.occluder || null;
+  // focus 컷어웨이 동반 은닉: near plane 이 전경 능선을 걷어내면 그 능선에 서 있던 산 나무만 남아
+  //   공중에 뜬다(지형면은 near 안쪽, 수관은 near 밖). 같은 instFade 어휘로 컷 구간 인스턴스를 통째로
+  //   걷으면 색·DoF depth·먹 노멀 패스가 이미 동일 픽셀을 discard 하므로 새 패스·재질·드로우콜이 없다.
+  //   숲은 화면중심 오클루전 페이드에는 참여하지 않는다(cutOnly) — 능선 숲은 원래 보여야 한다.
+  treeOccluder?.register(group.getObjectByName('village-forest'), { canopyY: 0, cutOnly: true });
   // Pointer input must not raycast Hanyang's tens of thousands of visible
   // instances. Build a renderer-free semantic grid once, then refresh only the
   // parcel/flora records whose authoritative plan data actually changes.
@@ -1045,6 +1050,13 @@ export function createVillageHandle(opts, seed, plan, group) {
       const proxy = proxyById.get(parcelId);
       if (!proxy || !position || !target) return null;
       return focusTerrainCutawayForProxy(proxy, plan, site, { position, target });
+    },
+
+    // 컷어웨이가 실제로 적용된 near plane 을 받아 그 앞 식생을 동반 은닉한다. 0/미적용이면 해제.
+    //   호출자는 카메라 near 하나만 알면 된다 — 어느 인스턴스가 그 평면에 걸치는지는 나무 기하를
+    //   소유한 코어(tree-occluder 의 인스턴스 바운딩 구)가 판정한다.
+    setFocusVegetationCut(nearPlane) {
+      treeOccluder?.setCut(Number.isFinite(nearPlane) && nearPlane > 0 ? nearPlane : 0);
     },
 
     // 레이캐스터(마우스→광선) 로 히트한 필지 디스크립터 반환(없으면 null).

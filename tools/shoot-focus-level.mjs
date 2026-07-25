@@ -13,13 +13,29 @@ import { countChangedPixels } from './lib/png-metrics.mjs';
 import {
   VILLAGE_FOCUS_DOF_APERTURE,
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_LENS,
 } from '../src/camera/optics.js';
 import { CIRCULAR_BOKEH_SAMPLE_COUNT } from '../src/env/circular-bokeh-shader.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
-const GIWA_YARD_DETAIL_FIXTURE = 'p13';
+// The yard-detail fixture must be a regular giwa whose planned details are hidden from the authored
+// base frame and exposed by a bounded candidate (base 0 → after ≥1); it is also the `giwa` capture
+// below, so a parcel with occlusion blockers or an auxiliary volume in the way confounds that shot.
+// `p13` stopped qualifying — under this exact query (the `seed=20260718` house seed matters) it is no
+// longer a regular giwa at all. Re-measured over all 13 regular giwa parcels, five qualify:
+// p11 and p15 and p31 (detail 0/2→1/2, no blockers), p16 (0/1→1/1, only one planned detail) and
+// p27 (0/2→1/2 but blocked by `auxiliary:p27:aux-0`). `p11` is the cleanest of them; `p31` is
+// deliberately avoided here because it used to be the terrain fixture and would read as the same
+// case. Re-scan for a base-0/after-≥1 regular giwa if this drifts again — never relax the assertions.
+const GIWA_YARD_DETAIL_FIXTURE = 'p11';
+// The terrain-occluded fixture must actually cross the rendered ridge. `p31` stopped doing so when
+// the #164 ridge gentling lowered the capital ridge anchor (its nine focus rays now clear terrain
+// by +0.95m); on this same query p8 stays armed with minClearance -5.34m and 9/9 blocked rays, the
+// widest margin of the three still-armed capital/7 parcels (p8, p9, p23). Re-scan for an armed
+// parcel if this ever goes missing — never relax the terrain assertions below.
+const TERRAIN_FIXTURE = 'p8';
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-cache-'));
 const outputDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-shots-'));
 const timeout = Number(process.env.CHEOMA_FOCUS_LEVEL_TIMEOUT_MS) || 90_000;
@@ -330,11 +346,21 @@ try {
     }, null, { timeout });
     const frame = await measureFocusedFrame(parcel.parcelId);
     console.log(`FOCUS FRAME ${name}: ${JSON.stringify(frame)}`);
-    if (name === 'giwa' || name === 'choga' || name === 'hero' || name === 'terrain-p31') {
+    if (name === 'giwa' || name === 'choga' || name === 'hero' || name === `terrain-${TERRAIN_FIXTURE}`) {
       check(Math.abs(frame.elevation - FOCUS_ELEVATION_DEG) < 0.02,
         `${name} runtime keeps the exact shared focus elevation (${frame.elevation.toFixed(2)}°)`);
-      check(Math.abs(frame.composition) < 1e-6,
-        `${name} keeps the centered projection instead of cropping the courtyard for sky`);
+      // #15 re-authoring (user: "뒷산의 높이를 좀 낮추면 림패스 만들어내기 훨씬 유리할 것 같아. 하늘도
+      //   보기 좋고"): a close residential frame now shifts the lens down by an authored fraction to
+      //   secure sky, so demanding a centered projection tested a value the product no longer holds.
+      //   The authored amount lives once in optics.js and engine.js#setFocusComposition applies it as
+      //   `-VILLAGE_FOCUS_SKY_FRACTION * focusComposition` with focusComposition = 1 for every
+      //   residential subject (palace/temple use 0 and are excluded from this block). Compare against
+      //   the imported constant rather than re-typing 0.13 — a drifted, doubled or dropped shift still
+      //   fails, and a null viewshift fails too.
+      const expectedComposition = -VILLAGE_FOCUS_SKY_FRACTION;
+      check(Math.abs(frame.composition - expectedComposition) < 1e-6,
+        `${name} keeps the authored sky-fraction lens shift for the courtyard (${
+          frame.composition?.toFixed?.(4) ?? frame.composition} = ${expectedComposition.toFixed(4)})`);
       check(frame.top >= 0.02 && frame.bottom <= 0.98
         && frame.left >= 0.02 && frame.right <= 0.98 && frame.height >= 0.12,
       `${name} house volume remains uncropped and readable (${(frame.top * 100).toFixed(1)}–${(frame.bottom * 100).toFixed(1)}%, height ${(frame.height * 100).toFixed(1)}%)`);
@@ -376,8 +402,9 @@ try {
     focusVisibility: window.__engine.village.debugFocusVisibility(parcel.parcelId),
   })));
   // Fixed before/after fixture: do not search the implementation's diagnostics
-  // for a passing house. In this seed p13 has one planned detail hidden from the
-  // authored base frame and exposed by a bounded south-opening candidate.
+  // for a passing house. In this seed p11 has two planned details, both hidden from
+  // the authored base frame by the house itself, one of which a bounded
+  // south-opening candidate exposes (see GIWA_YARD_DETAIL_FIXTURE above).
   const giwaDetailFixture = parcels.find((parcel) => (
     parcel.parcelId === GIWA_YARD_DETAIL_FIXTURE
   ));
@@ -425,10 +452,11 @@ try {
     check(edit.extended.box.x > edit.compact.box.x + 20 && edit.extended.box.z > edit.compact.box.z + 20,
       `temple editor rebuilds the reserved compound geometry (${JSON.stringify({ compact: edit.compact.box, extended: edit.extended.box })})`);
   }
-  const terrainRegression = parcels.find((parcel) => parcel.parcelId === 'p31');
-  check(!!terrainRegression, 'capital seed 7 terrain-occluded regression parcel p31 is available');
+  const terrainRegression = parcels.find((parcel) => parcel.parcelId === TERRAIN_FIXTURE);
+  check(!!terrainRegression,
+    `capital seed 7 terrain-occluded regression parcel ${TERRAIN_FIXTURE} is available`);
   if (terrainRegression) {
-    await focusAndCapture('terrain-p31', terrainRegression);
+    await focusAndCapture(`terrain-${TERRAIN_FIXTURE}`, terrainRegression);
     await page.waitForFunction(
       () => window.__engine.debugDof().postQualityMode === 'stable',
       null,
@@ -440,30 +468,30 @@ try {
       camera: window.__engine.village.debugCamera(),
       continuum: window.__engine.village.debugContinuum(),
     }), terrainRegression.parcelId);
-    console.log(`FOCUS TERRAIN p31: ${JSON.stringify(terrainEvidence)}`);
+    console.log(`FOCUS TERRAIN ${TERRAIN_FIXTURE}: ${JSON.stringify(terrainEvidence)}`);
     const cutaway = terrainEvidence.visibility.terrainCutaway;
     check(terrainEvidence.visibility.terrainLimited
       && cutaway?.active
       && cutaway.available
       && cutaway.minClearance < 0
       && cutaway.near <= cutaway.subjectNear - 1.2,
-    `p31 clips the proven terrain crossing before the house (${cutaway?.near.toFixed(3)}m/${cutaway?.subjectNear.toFixed(3)}m)`);
+    `${TERRAIN_FIXTURE} clips the proven terrain crossing before the house (${cutaway?.near.toFixed(3)}m/${cutaway?.subjectNear.toFixed(3)}m)`);
     check(Math.abs(terrainEvidence.camera.near - cutaway.near) < 1e-3
       && Math.abs(terrainEvidence.continuum.focusCutaway.near - cutaway.near) < 1e-3,
-    `p31 applies one shared live-camera cutaway (${terrainEvidence.camera.near.toFixed(3)}m)`);
+    `${TERRAIN_FIXTURE} applies one shared live-camera cutaway (${terrainEvidence.camera.near.toFixed(3)}m)`);
     check(terrainEvidence.visibility.telephotoPreserved
       && Math.abs(terrainEvidence.visibility.safeFraming.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainEvidence.visibility.safeFraming.position.every((value, index) => (
         Math.abs(value - terrainEvidence.visibility.baseFraming.position[index]) < 1e-9
       )),
-    `p31 retains the authored distant telephoto frame (${terrainEvidence.visibility.safeFraming.fov.toFixed(2)}°)`);
+    `${TERRAIN_FIXTURE} retains the authored distant telephoto frame (${terrainEvidence.visibility.safeFraming.fov.toFixed(2)}°)`);
     check(Math.abs(terrainEvidence.dof.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
       && Math.abs(terrainEvidence.dof.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
       && terrainEvidence.dof.postQuality === 1
       && terrainEvidence.dof.postQualityMode === 'stable'
       && terrainEvidence.dof.bokehSamples === CIRCULAR_BOKEH_SAMPLE_COUNT
       && terrainEvidence.dof.activeBokehTaps === CIRCULAR_BOKEH_SAMPLE_COUNT,
-    `p31 restores the settled adaptive physical DoF (${terrainEvidence.dof.aperture}, ${terrainEvidence.dof.bokehSamples} active taps)`);
+    `${TERRAIN_FIXTURE} restores the settled adaptive physical DoF (${terrainEvidence.dof.aperture}, ${terrainEvidence.dof.bokehSamples} active taps)`);
   }
   check(residentialEvidence.some((entry) => (
     entry.animalPixels.toggled && entry.animalPixels.changed >= 20

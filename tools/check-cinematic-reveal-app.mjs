@@ -20,7 +20,7 @@
 //      elevation. They are asserted as "reachable from this azimuth and distance": the samples
 //      that are in frame must be ray-clear over the wall/gate, and the yard must occupy a real
 //      share of the frame. A frame that simply crops the yard away still fails.
-//   4. The capital/7/p31 terrain cutaway and the mobile palace/temple viewport fits are
+//   4. The capital/7 terrain cutaway fixture (TERRAIN_FIXTURE) and the mobile palace/temple fits are
 //      unchanged; they are lens-agnostic and are read from VILLAGE_LENS.
 //
 // The arrival establishing assertion was re-authored on 2026-07-25 (docs/look-restoration-plan.md
@@ -1012,9 +1012,22 @@ try {
   invariant(await rebuildPage.evaluate((id) => window.__engine.village.getState().selected === id, parcelId),
     'camera interruption does not lose focused parcel ownership');
 
-  // #136 merge gate: the deterministic capital parcel that used to put the residential
-  // camera behind a hill must retain that authored telephoto frame and clip only
-  // the foreground depth interval before the nearest sampled house face.
+  // #136 merge gate: the deterministic capital parcel that puts the residential camera behind a
+  // hill must retain that authored telephoto frame and clip only the foreground depth interval
+  // before the nearest sampled house face.
+  //
+  // Choosing this fixture: the case must (a) actually cross the rendered ridge and (b) let the
+  // bounded south-opening search keep candidate 0, since a parcel whose planned yard details are
+  // hidden at the authored azimuth legitimately trades 16° for the compensated 0.8 dolly (19.93°)
+  // and would make the telephoto assertion below test the wrong thing. `p31` satisfied both until
+  // the #164 ridge gentling lowered the capital ridge anchor (124→84m): its nine focus rays then
+  // cleared terrain by +0.95m, so the cutaway had nothing to resolve. Re-measured on this exact
+  // query, capital/7 still has three armed parcels — p8 (minClearance −5.34m, 9/9 blocked rays,
+  // near 19.19m vs subject 43.03m), p9 (−5.30m) and p23 (−2.39m) — and all three keep fov 16° at
+  // scale 1. p8 carries the widest terrain margin, so it is the least brittle of the three.
+  // If this block ever fails with `active:false`, re-scan for an armed parcel instead of relaxing
+  // the assertions: the cutaway is a documented product contract (CLAUDE.md, Environment).
+  const TERRAIN_FIXTURE = 'p8';
   await rebuildPage.addInitScript(() => { window.__noWarm = true; });
   await rebuildPage.goto(
     `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,
@@ -1026,10 +1039,10 @@ try {
       && window.__engine.village.debugPlan()?.seed === 7
       && !window.__engine.village.debugCamera().transitioning
   ), null, { timeout });
-  const terrainRegression = await rebuildPage.evaluate(async () => {
+  const terrainRegression = await rebuildPage.evaluate(async (fixture) => {
     const engine = window.__engine;
-    const visibility = engine.village.debugFocusVisibility('p31');
-    engine.village.debugFocus('p31');
+    const visibility = engine.village.debugFocusVisibility(fixture);
+    engine.village.debugFocus(fixture);
     for (let index = 0; index < 6; index++) await Promise.resolve();
     const transition = [];
     let settled = null;
@@ -1051,7 +1064,7 @@ try {
       fov: engine.camera.fov,
       referenceFov: engine.camera.userData.villageReferenceFov,
     };
-  });
+  }, TERRAIN_FIXTURE);
   console.log(`FOCUS TERRAIN TRANSITION: ${JSON.stringify(terrainRegression.transition)}`);
   const terrainSettledDistance = Math.hypot(...terrainRegression.camera.map((
     value,
@@ -1064,9 +1077,9 @@ try {
       && terrainCutaway.available
       && terrainCutaway.minClearance < 0
       && terrainCutaway.near <= terrainCutaway.subjectNear - 1.2,
-  `capital/7/p31 proves the authored ray crosses terrain and resolves it before the house (${terrainCutaway.near.toFixed(3)}m near, ${terrainCutaway.subjectNear.toFixed(3)}m subject)`);
+  `capital/7/${TERRAIN_FIXTURE} proves the authored ray crosses terrain and resolves it before the house (${terrainCutaway.near.toFixed(3)}m near, ${terrainCutaway.subjectNear.toFixed(3)}m subject, ${terrainCutaway.minClearance.toFixed(3)}m clearance, ${terrainCutaway.blockedRays}/9 blocked rays)`);
   invariant(Math.abs(terrainRegression.near - terrainCutaway.near) < 1e-3,
-    `capital/7/p31 applies the shared projection cutaway to the live camera (${terrainRegression.near.toFixed(3)}m)`);
+    `capital/7/${TERRAIN_FIXTURE} applies the shared projection cutaway to the live camera (${terrainRegression.near.toFixed(3)}m)`);
   invariant(terrainRegression.transition.every(({ camera, continuum }) => (
     Number.isFinite(camera.near)
       && camera.near > 0
@@ -1074,7 +1087,7 @@ try {
         continuum.focusCutaway.available
           && camera.near <= continuum.focusCutaway.subjectNear - 0.5 + 1e-3
       ))
-  )), 'capital/7/p31 focus-in keeps every sampled near plane in front of the house');
+  )), `capital/7/${TERRAIN_FIXTURE} focus-in keeps every sampled near plane in front of the house`);
   invariant(Math.hypot(...terrainRegression.camera.map((value, index) => (
     value - terrainSafe.position[index]
   ))) < 1e-6
@@ -1087,7 +1100,7 @@ try {
       ))) < 1e-6
       && Math.abs(terrainRegression.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainRegression.referenceFov === VILLAGE_LENS.parcel.referenceFov,
-  `capital/7/p31 product focus retains the authored distant telephoto frame (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
+  `capital/7/${TERRAIN_FIXTURE} product focus retains the authored distant telephoto frame (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
   const terrainInk = await rebuildPage.evaluate(() => {
     const engine = window.__engine;
     engine.setRenderStyle('ink', { immediate: true });
@@ -1098,27 +1111,27 @@ try {
       selected: engine.village.getState().selected,
     };
   });
-  await rebuildPage.screenshot({ path: join(outputDir, 'terrain-p31-ink.png') });
-  invariant(terrainInk.selected === 'p31'
+  await rebuildPage.screenshot({ path: join(outputDir, `terrain-${TERRAIN_FIXTURE}-ink.png`) });
+  invariant(terrainInk.selected === TERRAIN_FIXTURE
       && terrainInk.ink.amount >= 0.999
       && Math.abs(terrainInk.near - terrainCutaway.near) < 1e-3,
-  `capital/7/p31 ink normal/depth keeps the same camera cutaway (${terrainInk.near.toFixed(3)}m)`);
+  `capital/7/${TERRAIN_FIXTURE} ink normal/depth keeps the same camera cutaway (${terrainInk.near.toFixed(3)}m)`);
   await rebuildPage.evaluate(() => {
     window.__engine.setRenderStyle('pbr', { immediate: true });
     window.__engine.debugRenderDofFrame();
   });
-  const terrainRebuild = await rebuildPage.evaluate(async () => {
+  const terrainRebuild = await rebuildPage.evaluate(async (fixture) => {
     const engine = window.__engine;
     const originalKind = engine.village.getState().spec.kind;
     const editedKind = originalKind === 'giwa' ? 'choga' : 'giwa';
     const before = engine.village.debugContinuum().focusCutaway;
-    engine.village.rebuild('p31', { kind: editedKind });
+    engine.village.rebuild(fixture, { kind: editedKind });
     await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
     const edited = {
       camera: engine.village.debugCamera(),
       cutaway: engine.village.debugContinuum().focusCutaway,
     };
-    engine.village.rebuild('p31', { kind: originalKind });
+    engine.village.rebuild(fixture, { kind: originalKind });
     await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
     return {
       before,
@@ -1129,8 +1142,8 @@ try {
       },
       selected: engine.village.getState().selected,
     };
-  });
-  invariant(terrainRebuild.selected === 'p31'
+  }, TERRAIN_FIXTURE);
+  invariant(terrainRebuild.selected === TERRAIN_FIXTURE
       && terrainRebuild.edited.cutaway.available
       && Math.abs(
         terrainRebuild.edited.cutaway.subjectNear - terrainRebuild.before.subjectNear
@@ -1145,7 +1158,7 @@ try {
       && Math.abs(
         terrainRebuild.restored.camera.near - terrainRebuild.restored.cutaway.near
       ) < 1e-3,
-  'capital/7/p31 kind rebuild invalidates cached subject bounds on both switches without stale cutaway depth');
+  `capital/7/${TERRAIN_FIXTURE} kind rebuild invalidates cached subject bounds on both switches without stale cutaway depth`);
   const terrainZoom = await rebuildPage.evaluate(async () => {
     const engine = window.__engine;
     const before = engine.village.debugContinuum();
@@ -1159,15 +1172,15 @@ try {
       referenceFov: engine.camera.userData.villageReferenceFov,
     };
   });
-  invariant(terrainZoom.camera.selected === 'p31'
+  invariant(terrainZoom.camera.selected === TERRAIN_FIXTURE
       && terrainZoom.camera.dist > terrainSettledDistance + 5
       && Math.abs(terrainZoom.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainZoom.referenceFov === VILLAGE_LENS.parcel.referenceFov,
-  `capital/7/p31 focus zoom-out retains ownership and the telephoto lens (${terrainZoom.camera.dist.toFixed(1)}m, ${terrainZoom.fov.toFixed(2)}°)`);
+  `capital/7/${TERRAIN_FIXTURE} focus zoom-out retains ownership and the telephoto lens (${terrainZoom.camera.dist.toFixed(1)}m, ${terrainZoom.fov.toFixed(2)}°)`);
   invariant(!terrainZoom.continuum.focusCutaway?.active
       && terrainZoom.continuum.focusCutaway?.boundaryRays > 0
       && terrainZoom.camera.near <= 2.5 + 1e-3,
-  `capital/7/p31 high focus zoom-out clears the proven terrain and preserves village context (${terrainZoom.camera.near.toFixed(3)}m near)`);
+  `capital/7/${TERRAIN_FIXTURE} high focus zoom-out clears the proven terrain and preserves village context (${terrainZoom.camera.near.toFixed(3)}m near)`);
   for (const [parcelId, lens] of [
     ['palace', VILLAGE_LENS.palace],
     ['temple', VILLAGE_LENS.temple],

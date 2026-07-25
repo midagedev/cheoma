@@ -30,6 +30,9 @@ export {
   fitFocusFraming,
   safeViewportRect,
 } from '../camera/focus-framing.js';
+// 지면 위 카메라 종점 여유고 — 궤도 입력 쿠션이 focus 해결기와 같은 값을 써야 저작된 근경 프레임을
+// 들어올리지 않는다.
+export { VILLAGE_FOCUS_CAMERA_CLEARANCE } from '../camera/focus-visibility.js';
 export {
   buildObstacles,
   createDronePaths,

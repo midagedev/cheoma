@@ -16,6 +16,7 @@ import {
   setupNightGlow, setupWeather,
 } from '../../../src/api/environment.js';
 import {
+  VILLAGE_FOCUS_CAMERA_CLEARANCE,
   VILLAGE_LENS,
   VILLAGE_FOCUS_SKY_FRACTION,
   dollyDistanceForFov,
@@ -35,6 +36,7 @@ import {
   VILLAGE_WALL_STYLE_IDS,
   isVillageMjaHouseProductContext,
 } from '../../../src/api/village-options.js';
+import { terrainMeshHeightAt } from '../../../src/api/village-plan.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
 import { buildingNavigationTargetFromProxy } from '../lib/building-navigation.js';
 import { normalizeStandaloneParamPatch } from '../lib/standalone-param-spec.js';
@@ -690,6 +692,52 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
   }
 
+  // 궤도 각도를 계속 내리면 카메라가 지형 아래로 들어가 화면이 지면 밑(배경 + 뒤집힌 지물)이 된다.
+  //   하드 벽이 아니라 점근 쿠션이다: 바닥고 위 BAND 구간으로 들어올수록 지수적으로 완만해져
+  //   바닥고에 수렴하고 통과하지 않는다. 궤도 반경은 보존한다(고도를 올리며 xz 를 당김) — 고도만
+  //   올리면 거리가 늘어 OrbitControls 의 maxDistance 클램프와 매 프레임 서로 되밀며 떨린다.
+  //   대상은 사용자 궤도 입력뿐이다: 트윈·리빌 연출·시네마틱(walk 는 자체 충돌)·데모는 저작된 경로다.
+  //   지형 높이는 렌더된 삼각 격자와 같은 계약(terrainMeshHeightAt)으로 읽어 해석 높이와 어긋나
+  //   실제 화면에서 여유고가 음수가 되는 일이 없게 한다.
+  //   바닥고는 focus 해결기가 이미 카메라 종점에 요구하는 값과 같게 둔다
+  //   (VILLAGE_FOCUS_CAMERA_CLEARANCE = 1.2m). 이보다 높이면 저작된 근경 프레임을 들어올려 쿠션이
+  //   구도를 침해한다 — 실측 capital/7/p8 종점 여유고가 2.39m 라 여유가 얇다.
+  //   BAND 는 바닥고 *위* 1m 구간이다. 매 프레임 반복 적용의 고정점이 바닥고 자체가 되도록
+  //   기준면을 (바닥고 − BAND) 로 두었다: slack = BAND 에서 값·도함수가 항등과 일치하므로 바닥고
+  //   이상인 프레임(= focus 계약을 이미 만족하는 저작 프레임 전부)은 손대지 않는다.
+  const GROUND_CUSHION_FLOOR = VILLAGE_FOCUS_CAMERA_CLEARANCE;
+  const GROUND_CUSHION_BAND = 1.0;
+  function cushionCameraAboveGround() {
+    if (!village.active || demo.active || tween
+      || cinematic.isActive() || revealCamera?.isActive()) return;
+    const site = village.handle?.plan?.site;
+    if (!site) return;
+    // terrainMeshHeightAt 는 격자 좌표를 클램프하므로 지형 사각 밖에서도 가장자리 높이를 돌려준다.
+    //   그 밖은 그려진 삼각형이 없고(worldedge 안개) 눈이 지면 밑으로 읽히는 일도 없으므로, 클램프
+    //   높이로 부감 궤도를 들어올리면 실측 근거 없이 저작된 원경 포즈만 제한한다(측정: 부감 최저
+    //   앙각 1.15°→2.3~2.6°). 실제 지형면이 있는 정의역 안에서만 쿠션을 적용한다.
+    const terrainR = site.terrainR || site.R;
+    if (!(Math.abs(camera.position.x) <= terrainR && Math.abs(camera.position.z) <= terrainR)) return;
+    const ground = terrainMeshHeightAt(site, camera.position.x, camera.position.z);
+    if (!Number.isFinite(ground)) return;
+    const base = ground + GROUND_CUSHION_FLOOR - GROUND_CUSHION_BAND;
+    const slack = camera.position.y - base;
+    if (slack >= GROUND_CUSHION_BAND) return;      // 이미 바닥고 이상 = 저작 프레임, 불변
+    const y = base + GROUND_CUSHION_BAND * Math.exp(slack / GROUND_CUSHION_BAND - 1);
+    const dx = camera.position.x - controls.target.x;
+    const dz = camera.position.z - controls.target.z;
+    const radius = Math.hypot(dx, camera.position.y - controls.target.y, dz);
+    const horizontal = Math.hypot(dx, dz);
+    const dy = y - controls.target.y;
+    if (radius > 1e-6 && horizontal > 1e-6 && Math.abs(dy) < radius) {
+      const scale = Math.sqrt(radius * radius - dy * dy) / horizontal;
+      camera.position.set(controls.target.x + dx * scale, y, controls.target.z + dz * scale);
+    } else {
+      camera.position.y = y;
+    }
+    camera.lookAt(controls.target);
+  }
+
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
   function ensureAudio() {
     if (audio) return audio;
@@ -992,6 +1040,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     const settledFocusAmount = village.active && village.selected && !village.transitioning && !tween
       ? villageCamera.updateFocusContext() : null;
+    // 궤도 입력이 카메라를 지면 아래로 내린 프레임만 고도를 되돌린다. focus 크레인 다음에 둬야
+    // 이 프레임의 최종 물리 포즈가 클램프를 통과하고, 다음 프레임 updateFocusContext 가 그 차이를
+    // 사용자 오프셋으로 흡수해 되밀지 않는다.
+    //   `window.__noGroundCushion` 은 A/B 검증용 해제 훅이다(제품 기본은 켜짐).
+    if (!window.__noGroundCushion) cushionCameraAboveGround();
     // Focus context may crane the camera after OrbitControls consumes its
     // damping. Persist only that final physical frame, never the pre-crane pose.
     updateSemanticViewSettlement();

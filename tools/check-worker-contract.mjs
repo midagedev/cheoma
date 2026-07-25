@@ -133,10 +133,17 @@ const expectedSceneHashes = {
   //   실루엣). 지형 반경·숲 밀도·필지 수 분포는 불변이며(시드 8개 평균 town 63.1→63.0), 재기준
   //   시점에 sync / 실제 module Worker / ?worker=0 폴백 세 경로가 서로 바이트 동일했다 — 결정론
   //   손상이 아니다.
-  village: '269f1fcb:d55df385:7ddf50cc:8f21a325',
-  town: '587fc2dc:5dec31f6:bf128c15:cd043658',
-  capital: 'e5cffeca:2a5e97f6:e0028615:b6a1a572',
-  hanyang: '7145ebad:25343185:7173cee3:5d0a1163',
+  // focus 컷어웨이 식생 동반 은닉(부유 수관 해소): 컷 평면에 걸치는 산 나무 인스턴스를 통째로 빼기
+  //   위해 `village-forest` 의 네 InstancedMesh(소나무·활엽·원경 블롭·암괴)에 기존 instFade 어휘의
+  //   InstancedBufferAttribute(전부 1.0 = 완전 불투명)를 하나 붙인다. hashThreeGroup 은 지오메트리
+  //   속성 이름과 배열 전체를 접으므로 씬 해시가 네 규모 모두 바뀌지만, 오브젝트 수·삼각형 수·
+  //   instanceMatrix·instanceColor·재질·pick proxy 바이트는 전부 불변이다(재기준 직전 실측: 이 등록만
+  //   끄면 네 규모가 구 골든과 정확히 일치, objects/triangles 동일). 재기준 시점에 sync / 실제 module
+  //   Worker / ?worker=0 폴백 세 경로가 서로 바이트 동일했다 — 결정론 손상이 아니라 의도된 씬 변화다.
+  village: '469c4bf3:4d33304f:99624b4c:bd50182f',
+  town: 'bcb5f66a:cb95cf16:63214d4d:6787f92c',
+  capital: '15b8b1b3:b737636d:e66d2c25:d2e479db',
+  hanyang: 'd7f151b3:0b885dbb:4babf193:21cbadfd',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

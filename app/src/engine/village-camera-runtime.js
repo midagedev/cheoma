@@ -126,6 +126,14 @@ export function createVillageCameraRuntime({
     controls.maxDistance = actualDistance(bounds.max);
   }
 
+  // 컷어웨이가 지형을 걷어낸 프레임만 그 전경 식생도 동반 은닉한다(부유 수관 해소). 코어가 컷 깊이
+  //   여유·인스턴스 은닉을 소유하므로 여기서는 실제로 적용한 near 하나만 넘긴다. 미적용 프레임의 0 은
+  //   해제 신호이며 코어가 이징으로 되돌린다(팝 없음).
+  function applyVegetationCut(nearPlane) {
+    village.handle?.setFocusVegetationCut?.(nearPlane);
+    return nearPlane || 0;
+  }
+
   function near() {
     let distance = camera.position.distanceTo(controls.target);
     const baseNear = () => Math.min(
@@ -133,7 +141,10 @@ export function createVillageCameraRuntime({
       Math.max(BASE_NEAR_MIN, distance * BASE_NEAR_FRAC),
     );
     let cutaway = readFocusCutaway();
-    if (!cutaway) return baseNear();
+    if (!cutaway) {
+      applyVegetationCut(0);
+      return baseNear();
+    }
     // A plane that reaches the nearest house surface is rejected. Only this
     // exceptional case moves the real camera into the first terrain-safe
     // interval, retaining the current narrow lens instead of widening it.
@@ -146,13 +157,16 @@ export function createVillageCameraRuntime({
       cutaway = readFocusCutaway();
     }
     focusCutawayState = cutaway;
-    if (!cutaway?.active || !cutaway.available) return baseNear();
+    if (!cutaway?.active || !cutaway.available) {
+      applyVegetationCut(0);
+      return baseNear();
+    }
     // Leave a finite interval before the sampled front face even when floating
     // point noise puts a plane exactly on its accepted limit.
-    return Math.min(
+    return applyVegetationCut(Math.min(
       cutaway.subjectNear - 0.5,
       Math.max(baseNear(), cutaway.near),
-    );
+    ));
   }
 
   function reapplyFog() {

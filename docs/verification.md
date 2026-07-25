@@ -667,13 +667,14 @@ PNG는 OS 임시 폴더에 남긴다. 하늘·구름·focus composition 변경�
 
 ### `npm run shoot:focus-level`
 
-`tools/shoot-focus-level.mjs`는 격리된 실제 Vite 앱에서 기와집·초가·종가·관아형 hero·궁·사찰과 `capital/seed 7/p31` 지형 회귀 필지를 차례로 선택한다. 제품과 같은 카메라 트윈 적용기를 결정적으로 끝내므로 각 1.9초 전환을 기다리지 않으며, 다음을 수치와 PNG로 함께 확인한다.
+`tools/shoot-focus-level.mjs`는 격리된 실제 Vite 앱에서 기와집·초가·종가·관아형 hero·궁·사찰과 `capital/seed 7`의 지형 회귀 필지(`TERRAIN_FIXTURE`, 현재 `p8`)를 차례로 선택한다. 제품과 같은 카메라 트윈 적용기를 결정적으로 끝내므로 각 1.9초 전환을 기다리지 않으며, 다음을 수치와 PNG로 함께 확인한다.
 
-- 일반 주택과 종가의 화면 중심은 지붕 높이가 아닌 1.65–2.5m 문 높이 범위를 조준하고, 안전 가시성 dolly 뒤에도 카메라는 그 target을 향한 정확한 24° 고도를 유지한다.
+- 일반 주택과 종가의 화면 중심은 지붕 높이가 아닌 1.65–2.5m 문 높이 범위를 조준하고, 안전 가시성 dolly 뒤에도 카메라는 그 target을 향한 정확한 9° 고도(`VILLAGE_FOCUS_ELEVATION`, 아이레벨 건축 밴드)를 유지한다. 24°는 hero *랜딩* 비트의 값(`VILLAGE_HERO_FOCUS_ELEVATION`)이며 `집 보기` focus 종점과 다르다.
+- 근경 주거 프레임은 처마선이 하늘을 자르도록 저작된 렌즈 시프트를 유지한다. 하네스는 `VILLAGE_FOCUS_SKY_FRACTION`을 import 해 `compositionYFrac`이 `-0.13`과 정확히 일치하는지 보므로, 시프트가 사라지거나 두 배가 되면 실패한다(#15 사용자 지시로 "중앙 투영 = 0" 단언에서 재저작).
 - 종가 landing과 직접 `집 보기`는 정면 표식, 열린 마당 표본, focus 닭 ray, 대문·등롱이 실제 프레임 안에 남는지 검사한다. focus ring은 실시간 1.8초를 기다리지 않고 `debugAdvanceFocusRing(3.2)`로 결정적으로 정착시키며, 닭 ON/OFF pure-canvas 비교가 100픽셀 이상 달라야 한다.
 - 일반 기와·초가의 semantic 마당 소품은 카메라 광선의 첫 메시로 실제 노출되는지, 적어도 한 대표 주거의 focus 동물이 pure-canvas 픽셀을 만드는지 검사한다. 관아형 hero는 같은 ring lifecycle을 쓰더라도 주거용 안마당 닭을 만들지 않아야 한다.
 - 일반 주택의 카메라 XZ 시선이 계획된 남측 `solarAccess` 개방부 안을 지나고, 정자가 집의 문·처마가 들어오는 화면 폭을 가리지 않는다.
-- `p31`의 기존 10° 시선은 렌더 지형을 두 번 통과한다. 이 음수 clearance를 먼저 증명한 뒤, 같은 3×3 집 앞면 표본에서 계산한 camera near plane이 가장 깊은 능선보다 뒤이고 가장 가까운 집 표면보다 1.2m 이상 앞인지 검사한다. 낮은 집 표본이 시작하는 지면 접촉은 일단 빠져나온 뒤 다시 지형에 들어갈 때만 능선으로 센다. 실제 카메라 near와 순수 cutaway 값이 일치하고, 62m authored 위치·10° actual FOV·23° reference FOV·24° 고도는 바뀌지 않아야 한다. focus-in 중간 표본도 near가 집 표면을 자르지 않으며, 정착 DoF는 `0.00020`/13표본 선택 합성을 유지한다.
+- 지형 회귀 필지의 authored 망원 시선은 렌더 지형을 통과한다(현재 fixture `p8`: 9/9 광선 차단, `minClearance` −5.34m). 이 음수 clearance를 먼저 증명한 뒤, 같은 3×3 집 앞면 표본에서 계산한 camera near plane이 가장 깊은 능선보다 뒤이고 가장 가까운 집 표면보다 1.2m 이상 앞인지 검사한다(p8: near 19.19m / 집 앞면 43.03m). 낮은 집 표본이 시작하는 지면 접촉은 일단 빠져나온 뒤 다시 지형에 들어갈 때만 능선으로 센다. 실제 카메라 near와 순수 cutaway 값이 일치하고, authored 위치·16° actual FOV·23° reference FOV·9° 고도는 바뀌지 않아야 한다. #164 능선 완만화 이후 `p31`은 더 이상 지형을 통과하지 않아 fixture가 `p8`로 교체됐다 — 무장된 필지가 없어지면 단언을 완화하는 대신 `capital/7`에서 `minClearance` 음수 필지를 다시 스캔한다. focus-in 중간 표본도 near가 집 표면을 자르지 않으며, 정착 DoF는 `0.00020`/13표본 선택 합성을 유지한다.
 - 근경 정착 뒤 제품 aperture가 `0.00020`, 일반 표면 합성이 최대 13표본인지 검사한다. 이 계수는 새 패스·프로그램·render target 없이 기존 에너지 보존 원형 광원 scatter를 사용한다.
 - 궁과 사찰은 각각 지면 위 3.2m, 3m를 조준한다.
 - 계획된 프레이밍과 실제 `OrbitControls.target`이 일치한다.
@@ -770,7 +771,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/verify-solo-app.mjs` | 외딴집·절 단독 populate와 browser error | 전체 앱·worker 검사가 아니다. |
 | `tools/check-cinematic-turns.mjs` | 브라우저 없이 ±π 최단각, 각속도·각가속도, 주도로 시작점, 합성 막다른 길 반복 왕복 | 실제 마을 지형과 앱 카메라 배선은 확인하지 않는다. |
 | `tools/check-cinematic-reveal.mjs` | Three 없이 arrival/rebuild의 seed 결정론, 정확한 양 끝점, 0 끝점 속도, 최대 시선 회전, compact/reduced-motion, solar-opening 안전 구도의 결정론·카메라 고도·망원 보상, fitted 처마/계획 공공 소품 blocker, 막힌 기존점의 hysteresis 배제, 정확한 terrain-grid 3×3 focus cutaway와 집 앞 안전 깊이 | 실제 OrbitControls·DoF·조립은 확인하지 않는다. |
-| `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, `capital/7/p31`의 authored 망원·live near-plane·focus-in 안전성, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
+| `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, `capital/7/p8`(TERRAIN_FIXTURE)의 authored 망원·live near-plane·focus-in 안전성, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
 | `tools/verify-cine.mjs` | 세 규모 drone path와 walker 100초 수학·결정론 | 앱 배선은 확인하지 않는다. |
 | `tools/verify-cinewire.mjs` | 앱 패스 경계 시선 상한·시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |
 | `tools/check-audio.mjs` | 합성음 RMS, 시간·날씨·BGM 배선, source/node teardown | 공유 `AudioContext` 자체는 닫지 않으며 시작/정지·연결/해제 identity를 비교한다. |
