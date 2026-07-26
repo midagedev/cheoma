@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { createAudioScope, makeWhiteNoise, playBuffer, poissonInterval } from './synth.js';
 
-// 개울 물소리 — 위치성(PositionalAudio). 징검다리 교차점(anchor)에 앉힌다.
-//   createStream(listener, { anchor, rand }) →
+// 개울 물소리 — 위치성(PositionalAudio). 징검다리/개울 중심선 앵커에 앉힌다.
+//   createStream(listener, { anchor, getAnchor, rand }) →
 //     { object, setEnabled(v), setVolume(v), setWeather(name), update(dt), start(), dispose() }
+//
+// anchor: 초기 월드 좌표(정적). getAnchor: 라이브 getter(마을 모드 — 카메라/포커스 근처 개울 점).
+// 개 짖음(dog.js)과 같이 getAnchor 가 있으면 update() 마다 panner 위치를 따라간다.
+// getAnchor 가 null 을 주면 앵커 없음 → 게인 0 (드라이 마을·개울 없는 씬).
 //
 // 합성: 밴드패스 노이즈 물바닥(600~2500Hz, 흐름 요동 LFO) + 드문 물방울 플럭(짧은 사인 핑).
 // refDistance 짧게(4) + 높은 rolloff → 개울 근처에서만 뚜렷, 멀어지면 빠르게 잦아든다.
@@ -59,7 +63,7 @@ export function buildStreamBed(ctx, dest, { rand = Math.random } = {}) {
   };
 }
 
-export function createStream(listener, { anchor, rand = Math.random } = {}) {
+export function createStream(listener, { anchor = null, getAnchor = null, rand = Math.random } = {}) {
   const ctx = listener.context;
   const scope = createAudioScope();
 
@@ -74,7 +78,13 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
   out.gain.value = 0;
   pa.setNodeSource(out);
   scope.track(out, pa.panner, pa.gain);
-  if (anchor) { pa.position.copy(anchor); pa.updateMatrixWorld(true); }
+  // Static seed position (solo-house path). Live path refreshes via getAnchor in update().
+  let anchored = false;
+  if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) && Number.isFinite(anchor.z)) {
+    pa.position.copy(anchor);
+    pa.updateMatrixWorld(true);
+    anchored = true;
+  }
 
   const bed = buildStreamBed(ctx, out, { rand });
 
@@ -85,7 +95,7 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
   let weatherMul = 1;    // 눈(결빙) 시 0.25
   const BASE = 0.5;      // 개울 기본 레벨
 
-  function target() { return enabled ? BASE * volume * weatherMul : 0; }
+  function target() { return (enabled && anchored) ? BASE * volume * weatherMul : 0; }
   function push() { if (!disposed) out.gain.setTargetAtTime(target(), ctx.currentTime, 0.3); }
 
   // 물방울 플럭 — 짧은 사인 핑, 드문드문
@@ -105,10 +115,24 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
     scope.trackVoice([osc], [g]);
   }
 
+  function syncAnchor() {
+    if (!getAnchor) return;
+    const a = getAnchor();
+    if (a && Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.z)) {
+      pa.position.set(a.x, a.y, a.z);
+      if (!anchored) { anchored = true; push(); }
+    } else if (anchored && !anchor) {
+      // Live-only path lost its water (wave swap / dry site) — silence until re-anchored.
+      anchored = false;
+      push();
+    }
+  }
+
   function update(dt) {
     if (!started || disposed) return;
+    syncAnchor();
     pa.updateMatrixWorld();
-    if (enabled && weatherMul > 0.01) {
+    if (enabled && anchored && weatherMul > 0.01) {
       nextPlink -= dt;
       if (nextPlink <= 0) { plink(); nextPlink = poissonInterval(1.1, 0.35, 3.0, rand); }
     }
@@ -118,16 +142,27 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
     object: pa,
     getState() {
       return {
-        started, disposed, enabled,
+        started, disposed, enabled, anchored,
         gain: +out.gain.value.toFixed(6), target: +target().toFixed(6),
         volume: +volume.toFixed(4), weatherMul,
+        position: {
+          x: +pa.position.x.toFixed(3),
+          y: +pa.position.y.toFixed(3),
+          z: +pa.position.z.toFixed(3),
+        },
       };
     },
     setEnabled(v) { if (disposed) return; enabled = !!v; push(); },
     setVolume(v) { if (disposed) return; volume = Math.max(0, v); push(); },
     setWeather(name) { if (disposed) return; weatherMul = name === 'snow' ? 0.25 : 1; push(); },
     update,
-    start() { if (started || disposed) return; started = true; bed.start(); push(); },
+    start() {
+      if (started || disposed) return;
+      started = true;
+      syncAnchor();
+      bed.start();
+      push();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

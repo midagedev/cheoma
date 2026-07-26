@@ -1,10 +1,12 @@
-// BGM 트랙 선택·진입 뮤트 복원·자산 도달성 순수 계약(브라우저·AudioContext 없음).
+// BGM 트랙 선택·진입 뮤트 복원·자산 도달성·위치성 앵커 순수 계약(브라우저·AudioContext 없음).
 //
 // 왜 순수인가: 실제로 시달렸던 두 결함은 모두 "계산으로 판정되는 사실" 이었다.
 //   1. assets/audio/genesis.mp3 는 첫 진입용으로 준비됐는데 **자동 선택 경로가 없어** 한 번도
 //      재생되지 않았다(getTracks() 선택지로만 노출). 라우팅 사실 → 브라우저 불필요.
 //   2. 타이틀 뮤트(hero.arm)의 복원이 엔진 곳곳에 흩어져, 복원 없는 경로 하나가 곧 영구 무음이었다.
 //      볼륨 종착은 상태기계 속성 → 브라우저 불필요.
+//   3. 마을 모드에서 stream/chime 이 원점 솔로 앵커에 묶여 들리지 않음 — 앵커 선택은 계획
+//      좌표 산술로 판정된다(getStreamAnchor/getChimeCorners getter 배선 포함).
 // 실제 AudioContext 가 필요한 것(ctx.state, resume, 게인 값, 보이스 수, decodeAudioData)만
 // tools/check-audio.mjs(브라우저 게이트)에 남긴다.
 //
@@ -20,6 +22,13 @@ import {
   INTRO_EVENTS, INTRO_FADE, INTRO_PHASES,
   introAdvance, introInitialState, introReduce,
 } from '../src/audio/intro-policy.js';
+import {
+  chimeLocalCorners,
+  chimeLayoutParams,
+  chimeWorldCorners,
+  nearestStreamAnchor,
+  pickChimeParcel,
+} from '../src/audio/anchors.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const AUDIO_DIR = join(ROOT, 'assets', 'audio');
@@ -229,6 +238,94 @@ const selectsEntry = wiringFiles
 pass(selectsEntry, 'some product source actually selects the entry track');
 pass(/prefetchEntryTrack\(/.test(engineSrc),
   'engine.js prefetches the entry track during the title window (heavy work stays hidden)');
+
+// 위치성 SFX 앵커: 값 캡처(streamAnchor: env.streamAnchor) 회귀를 막는다.
+// 개 짖음처럼 getter 로 라이브 좌표를 넘겨야 마을 모드에서 들린다.
+pass(/getStreamAnchor\s*:/.test(engineSrc),
+  'engine.js wires getStreamAnchor (live creek) — not a one-shot streamAnchor value capture');
+pass(/getChimeCorners\s*:/.test(engineSrc),
+  'engine.js wires getChimeCorners so 풍경 follow focused/nearest parcel eaves in village mode');
+pass(!/streamAnchor\s*:\s*env\.streamAnchor/.test(engineSrc),
+  'engine.js does not capture env.streamAnchor as a setup-time value (that pinned SFX to the origin)');
+const audioIndexSrc = stripComments(readFileSync(join(ROOT, 'src', 'audio', 'index.js'), 'utf8'));
+pass(/getStreamAnchor/.test(audioIndexSrc) && /getChimeCorners/.test(audioIndexSrc),
+  'setupAudio accepts getStreamAnchor and getChimeCorners (dog-style live anchors)');
+pass(/getAnchor/.test(stripComments(readFileSync(join(ROOT, 'src', 'audio', 'stream.js'), 'utf8'))),
+  'createStream follows a live getAnchor each update (same pattern as createDog)');
+
+// ---------- 5. 위치성 앵커 순수 산술 ----------
+console.log('\n-- positional anchors --');
+const streamSite = {
+  streamY: (x) => -0.4 + x * 0.001,
+  stream: {
+    pts: [
+      { x: -40, z: 12 }, { x: -10, z: 10 }, { x: 0, z: 8 }, { x: 20, z: 9 }, { x: 40, z: 11 },
+    ],
+    cross: { x: 0, z: 8 },
+  },
+};
+const nearCam = nearestStreamAnchor(streamSite, { x: 18, z: 40 });
+// Camera at (18,40) projects onto the (20,9)→(40,11) segment near the east bank, not the origin crossing.
+pass(!!nearCam && nearCam.x > 15 && nearCam.x < 30 && nearCam.z > 8 && nearCam.z < 12,
+  `nearestStreamAnchor projects onto the local centerline segment (got ${JSON.stringify(nearCam)})`);
+const farWest = nearestStreamAnchor(streamSite, { x: -100, z: 0 });
+pass(!!farWest && farWest.x < -30,
+  `nearestStreamAnchor at the west extreme stays on the west bank (got ${JSON.stringify(farWest)})`);
+pass(!!nearCam && Math.abs(nearCam.y - (streamSite.streamY(nearCam.x) + 0.25)) < 1e-9,
+  'nearestStreamAnchor sits 0.25m above the analytic bed (matches solo water.anchor)');
+const atCross = nearestStreamAnchor(streamSite, { x: 0, z: 0 });
+pass(!!atCross && Math.abs(atCross.x) < 1 && Math.abs(atCross.z - 8) < 1,
+  `nearestStreamAnchor near origin lands on the crossing sample (got ${JSON.stringify(atCross)})`);
+pass(nearestStreamAnchor({ stream: null }, { x: 0, z: 0 }) === null,
+  'nearestStreamAnchor returns null for a dry site (no solo-origin fallback)');
+pass(nearestStreamAnchor(null, { x: 0, z: 0 }) === null,
+  'nearestStreamAnchor returns null without a site');
+
+const layout = { xEave: 5, zEave: 4, eaveEdgeY: 3 };
+const locals = chimeLocalCorners(layout);
+pass(locals.length === 4 && locals.every((c) => c.length === 3),
+  'chimeLocalCorners yields four [x,y,z] eaves');
+pass(locals[0][0] === 5 && locals[0][2] === 4 && Math.abs(locals[0][1] - 2.75) < 1e-9,
+  'chimeLocalCorners hang 0.25m below eaveEdgeY');
+
+const parcel = {
+  id: 'p3', kind: 'giwa', hero: false,
+  center: { x: 100, z: -50 },
+  frontDir: { x: 0, z: 1 },
+  houseLocal: { x: 1, z: -2 },
+  baseY: 3,
+  sx: 1, sy: 1, sz: 1,
+  variant: 0,
+};
+const world = chimeWorldCorners(layout, parcel);
+pass(!!world && world.length === 4,
+  'chimeWorldCorners returns four world eaves for a residential parcel');
+pass(world.every((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]) && Number.isFinite(c[2])),
+  'chimeWorldCorners world coordinates are finite');
+// +z front, identity rot → world ≈ center + houseLocal + local
+pass(Math.abs(world[0][0] - (100 + 1 + 5)) < 1e-6 && Math.abs(world[0][2] - (-50 - 2 + 4)) < 1e-6,
+  `chimeWorldCorners applies houseLocal + center (got ${JSON.stringify(world[0])})`);
+pass(Math.abs(world[0][1] - (3 + 2.75)) < 1e-6,
+  'chimeWorldCorners y = baseY + scaled local eave height');
+
+const parcels = [
+  { id: 'hero', kind: 'giwa', hero: true, center: { x: 0, z: 0 } },
+  { id: 'p1', kind: 'choga', hero: false, center: { x: 10, z: 0 } },
+  { id: 'p2', kind: 'giwa', hero: false, center: { x: 100, z: 0 } },
+  { id: 'palace', kind: 'palace', hero: false, center: { x: 5, z: 0 } },
+];
+pass(pickChimeParcel(parcels, { focusedId: 'p2' })?.id === 'p2',
+  'pickChimeParcel prefers the focused residential parcel');
+pass(pickChimeParcel(parcels, { focusedId: 'hero' })?.id === 'p1',
+  'pickChimeParcel ignores a focused hero and falls back to nearest residential');
+pass(pickChimeParcel(parcels, { ref: { x: 95, z: 0 } })?.id === 'p2',
+  'pickChimeParcel picks the nearest giwa/choga to the camera when unfocused');
+pass(pickChimeParcel(parcels, { focusedId: 'palace' })?.id === 'p1',
+  'pickChimeParcel skips palace/temple hosts (multi-building eaves are not the product layout)');
+pass(chimeLayoutParams({ kind: 'giwa' }, { kind: 'giwa', params: { bays: 4 } })?.bays === 4,
+  'chimeLayoutParams prefers buildingSpec.params over an empty parcel');
+pass(chimeLayoutParams({ kind: 'palace' }) === null,
+  'chimeLayoutParams rejects non-residential hosts');
 
 console.log(`\n=== check-audio-policy: ${failures.length ? `${failures.length} FAILURE(S)` : 'ALL PASS'} ===\n`);
 if (failures.length) {

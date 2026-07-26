@@ -29,8 +29,10 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/api/environment-state.js',
   // 오디오 순수 정책 경계(#BGM): 트랙 선택·진입 뮤트 복원은 브라우저 없이 판정되고
   // tools/check-audio-policy.mjs 가 core 게이트에서, 실 컨텍스트 게인은 audio 게이트가 소유한다.
+  // 위치성 SFX 앵커(개울·풍경) 산술도 같은 pure 게이트가 소유한다.
   'src/audio/track-policy.js',
   'src/audio/intro-policy.js',
+  'src/audio/anchors.js',
   'tools/check-audio-policy.mjs',
   'src/api/auxiliary-building.js',
   'src/api/auxiliary-building-plan.js',

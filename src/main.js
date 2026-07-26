@@ -276,7 +276,8 @@ nightGlowRef.setTime(envState.time);
 if (!SHOT) {
   audio = setupAudio(camera, {
     layout: computeLayout(P),
-    streamAnchor: env.streamAnchor,
+    // Live getters (dog pattern) — never capture env.streamAnchor as a one-shot value.
+    getStreamAnchor: () => env.streamAnchor,
     getDogAnchor: () => env.dogAnchor, // 라이브 참조(개가 걸어다님)
     getDogState: () => env.dogState,   // 'walking' | 'sitting'
   });

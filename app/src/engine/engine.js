@@ -26,7 +26,13 @@ import {
   setupCinematic,
   villageScreenDistanceForCamera,
 } from '../../../src/api/cinematic.js';
-import { setupAudio } from '../../../src/api/audio.js';
+import {
+  setupAudio,
+  chimeLayoutParams,
+  chimeWorldCorners,
+  nearestStreamAnchor,
+  pickChimeParcel,
+} from '../../../src/api/audio.js';
 import { capturePostcard, exportGLB as exportCoreGLB } from '../../../src/api/export.js';
 import { compileSubtreeAsync } from '../../../src/api/rendering.js';
 import {
@@ -748,11 +754,66 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // ---------- 오디오 (첫 제스처에서 생성·재생) ----------
+  // Positional SFX anchors must be live getters (dog pattern). Capturing
+  // env.streamAnchor as a value pins the creek to the solo-house stepping stones,
+  // and setLayout(computeLayout(P)) pins 풍경 to the origin eaves — both are
+  // inaudible / wrong-direction in village mode. See src/audio/anchors.js.
+  const streamAnchorScratch = new THREE.Vector3();
+
+  function resolveStreamAnchor() {
+    if (village.active && village.handle) {
+      const site = village.handle.plan?.site;
+      // Prefer focus target (parcel yard) when zoomed in; else camera xz for aerial.
+      const ref = (village.selected && controls?.target)
+        ? { x: controls.target.x, z: controls.target.z }
+        : { x: camera.position.x, z: camera.position.z };
+      const pt = nearestStreamAnchor(site, ref);
+      if (pt) {
+        streamAnchorScratch.set(pt.x, pt.y, pt.z);
+        return streamAnchorScratch;
+      }
+      // Dry site / no stream in plan — silence stream SFX (do not fall back to
+      // the hidden solo-house creek under env, which sits at the origin).
+      return null;
+    }
+    return env.streamAnchor;
+  }
+
+  function resolveChimeCorners() {
+    if (!village.active || !village.handle) return null;
+    const plan = village.handle.plan;
+    const parcels = plan?.parcels;
+    if (!parcels?.length) return null;
+    const ref = (village.selected && controls?.target)
+      ? { x: controls.target.x, z: controls.target.z }
+      : { x: camera.position.x, z: camera.position.z };
+    const parcel = pickChimeParcel(parcels, {
+      focusedId: village.selected,
+      ref,
+    });
+    if (!parcel) return null;
+    const proxy = village.handle.getPickProxy?.(parcel.id);
+    const spec = proxy?.buildingSpec || null;
+    const layoutParams = chimeLayoutParams(parcel, spec);
+    if (!layoutParams) return null;
+    const kind = layoutParams.style === 'giwa' ? 'giwa' : 'choga';
+    const layout = computeLayout({ ...PRESETS[kind], ...layoutParams, style: kind });
+    const fs = Number.isFinite(spec?.params?.footprintScale) ? spec.params.footprintScale : 1;
+    return chimeWorldCorners(layout, parcel, {
+      sx: (Number.isFinite(parcel.sx) ? parcel.sx : 1) * fs,
+      sy: (Number.isFinite(parcel.sy) ? parcel.sy : 1) * fs,
+      sz: (Number.isFinite(parcel.sz) ? parcel.sz : 1) * fs,
+      baseY: Number.isFinite(parcel.baseY) ? parcel.baseY
+        : (Number.isFinite(parcel.padY) ? parcel.padY : undefined),
+    });
+  }
+
   function ensureAudio() {
     if (audio) return audio;
     audio = setupAudio(camera, {
       layout: computeLayout(P),
-      streamAnchor: env.streamAnchor,
+      getStreamAnchor: resolveStreamAnchor,
+      getChimeCorners: resolveChimeCorners,
       getDogAnchor: () => env.dogAnchor,
       getDogState: () => env.dogState,
     });
