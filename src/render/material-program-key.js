@@ -9,6 +9,7 @@ export const MATERIAL_PROGRAM_PATCH = Object.freeze({
   CLOUD_SHADOW: 'cloudshadow-v1',
   SNOW: 'snow-v2',
   PHYSICAL_RIM: 'cheoma-rim-physical-v1',
+  CRITTER_ARTICULATION: 'cheoma-critter-articulation-v1',
 });
 
 const PROGRAM_KEY_STATE = Symbol.for('cheoma.materialProgramKeyState');

@@ -218,6 +218,9 @@ export function createFresnelRim(scene) {
     MATERIAL_PROGRAM_PATCH.INST_FADE,
     MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW,
     MATERIAL_PROGRAM_PATCH.SNOW,
+    // 소동물 관절 패치는 vertex 의 begin_vertex 만 소비하고 물리 림은 fragment 만 소비한다.
+    // 두 앵커가 겹치지 않으므로 개·고양이·까치도 역광 림에 그대로 참여한다.
+    MATERIAL_PROGRAM_PATCH.CRITTER_ARTICULATION,
   ]);
   function hasIncompatibleCustomCacheKey(mat) {
     return !hasOnlyMaterialProgramKeys(mat, composableProgramKeys);

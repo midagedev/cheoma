@@ -160,10 +160,16 @@ const expectedSceneHashes = {
   //   capital 이 그대로인 것이 범위 증거다: capital 히어로는 관아(궁 계열)라 이 변경을 받지 않는다.
   //   재기준 직전 실측: 세 규모 모두 sync == worker == 폴백 바이트 동일, proxy 해시 네 규모 전부 불변
   //   (794d1a99 / c41c0e59 / b652961a / 0f53368a), snapshot·mja 3경로 교차 PASS.
-  village: '0d195267:dca08205:49204ed3:c70e4681',
-  town: 'c56af644:bc9271ba:eb0bb22e:a2078104',
-  capital: 'e6169a57:668b3bc3:72957c60:71f1d74f',
-  hanyang: '3c7d9e95:7f4c760d:924febdc:a8c34413',
+  // 소동물(개·고양이·까치·새 떼) 개체수가 밀도 기반으로 늘고, 관절 애니용 정점 속성(aPivot/aSwing)과
+  //   개체별 털색 instanceColor 가 붙어 네 규모의 씬 바이트가 의도적으로 변한다. hashThreeGroup 이
+  //   geometry attribute·instanceMatrix·instanceColor 를 접으므로 이 레이어는 해시에 포함된다.
+  //   결정론은 온전: proxy 바이트 네 규모 전부 불변, plan 골든 10개 불변, sync = Worker = `?worker=0`
+  //   폴백 동일(이 상수를 갱신한 뒤 두 모드 모두 PASS 로 확인). 이 레이어는 finishVillage 이후 붙고
+  //   전용 rng 만 소비하므로 seeded 스트림 자체는 건드리지 않는다.
+  village: '2ee1ae4c:0def15da:bbd81d87:eaed0712',
+  town: '5df6b43a:f3ab3712:bb1b1908:6770465a',
+  capital: 'e86a04e6:dd80d0e2:e0f8ef52:1f4e19da',
+  hanyang: '0c7619d3:842de1f9:f18f7de9:d6a2f4b5',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

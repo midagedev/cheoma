@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
-import { chromium } from 'playwright';
+import { launchVerificationBrowser } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = process.env.CHEOMA_CRITTER_OUT
@@ -25,7 +25,7 @@ const MIME = {
 
 const HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>html,body{margin:0;height:100%;overflow:hidden;background:#000}#app{width:100%;height:100%}</style>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"/app/node_modules/three/build/three.module.js","three/addons/":"/app/node_modules/three/examples/jsm/"}}</script>
 </head><body><div id="app"></div>
 <script type="module">
 import * as THREE from 'three';
@@ -41,6 +41,8 @@ const seed = seedRaw != null ? (isNaN(+seedRaw) ? seedRaw : +seedRaw) : 20260716
 const view = q.get('view') || 'aerial';
 const targetKind = q.get('target') || 'dog';
 const time = q.get('time') || 'day';
+const season = q.get('season') || 'summer';
+const warm = parseFloat(q.get('warm') || '0');
 const num = (k, d) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : d; };
 
 { let s = 0x2545f491 >>> 0; Math.random = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
@@ -82,6 +84,8 @@ env.setEnabled(true); env.setTime(time); post.setTime(time);
 const villageHandle = createVillage({ scale, seed });
 villageHandle.enterVillageMode({ scene, building: null, ground, env });
 villageHandle.setTime(time);
+env.setSeason(season, { immediate: true });
+villageHandle.setSeason(season, { immediate: true });
 
 const R = villageHandle.plan.site.R;
 if (scene.fog) { scene.fog.near = R * 2.2; scene.fog.far = R * 7.0; }
@@ -107,6 +111,44 @@ window.__CRIT = {
   meshes: Object.keys(meshByName),
   drawMeshes: critGroup ? critGroup.children.filter((c) => c.isMesh || c.isInstancedMesh).length : 0,
   counts: { dogs: (meshByName['v-dogs']?.count) || 0, cats: (meshByName['v-cats']?.count) || 0, magpies: (meshByName['v-magpies']?.count) || 0, birds: (meshByName['birds']?.count) || 0, cows: cowGroups.length },
+};
+window.__flock = () => (villageHandle.group.userData.faunaDebug?.flock?.() || null);
+// 실제 새 인스턴스 위치에서 편대성을 잰다(진행방향 기준 좌우 팔·최대 폭·선두 앞 개체 수).
+window.__formation = () => {
+  const mesh = meshByName['birds'];
+  const state = window.__flock();
+  if (!mesh || !state) return null;
+  const mat = new THREE.Matrix4(), p = new THREE.Vector3(), pts = [];
+  for (let i = 0; i < mesh.count; i++) { mesh.getMatrixAt(i, mat); p.setFromMatrixPosition(mat); pts.push(p.clone()); }
+  const fx = Math.cos(state.heading), fz = Math.sin(state.heading);
+  let lead = pts[0], leadAlong = -Infinity;
+  for (const q2 of pts) { const a = q2.x * fx + q2.z * fz; if (a > leadAlong) { leadAlong = a; lead = q2; } }
+  let left = 0, right = 0, width = 0, ahead = 0, depth = 0;
+  for (const q2 of pts) {
+    if (q2 === lead) continue;
+    const dx = q2.x - lead.x, dz = q2.z - lead.z;
+    const along = dx * fx + dz * fz, cross = dx * -fz + dz * fx;
+    if (along > 0.5) ahead++;
+    if (cross < 0) left++; else right++;
+    width = Math.max(width, Math.abs(cross));
+    depth = Math.max(depth, -along);
+  }
+  return { species: state.species, formation: state.formation, count: mesh.count, left, right, ahead, width: +width.toFixed(1), depth: +depth.toFixed(1), bank: +state.bank.toFixed(3), rotations: state.rotations };
+};
+window.__resources = () => {
+  renderer.render(scene, camera);   // 컴포저 밖 직접 렌더 — info.calls 가 전체 씬을 센다
+  const keys = renderer.info.programs.map((program) => program.cacheKey);
+  return {
+    calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+    programs: renderer.info.programs.length,
+    critterPrograms: keys.filter((key) => key.includes('cheoma-critter-articulation')).length,
+    geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+  };
+};
+window.__critterOnly = (on) => {
+  const group = villageHandle.group.getObjectByName('village-critters');
+  if (group) group.visible = !!on;
+  return window.__resources();
 };
 window.__advance = (secs) => { const n = Math.max(1, Math.round(secs / (1 / 60))); for (let i = 0; i < n; i++) { villageHandle.updateLod(camera); villageHandle.update(1 / 60); } };
 // LOD 램프 실측: 지상 소는 근경 1→원경 0으로 자연스럽게 잠들고, 하늘 새 떼만 부감 실루엣을 유지한다.
@@ -144,12 +186,19 @@ window.__flockCenter = () => { const ps = instPositions('birds'); if (!ps.length
 // 월드 → 캔버스 디바이스 픽셀(크롭 조준용).
 window.__project = (p) => { const v = new THREE.Vector3(p.x, p.y, p.z).project(camera); const W = renderer.domElement.width, H = renderer.domElement.height; return { x: (v.x * 0.5 + 0.5) * W, y: (-v.y * 0.5 + 0.5) * H, dpr: renderer.getPixelRatio() }; };
 
+// 지상 인스턴스 행렬은 update() 에서만 써지므로, 조준 전에 항상 한 번은 돌린다.
+{
+  const seconds = Math.max(view === 'skein' ? 0 : 1.5, warm);
+  for (let i = 0; i < Math.round(seconds * 60); i++) { villageHandle.update(1 / 60); villageHandle.updateLod(camera); }
+}
 if (view === 'near') {
+  // 개는 대문 안쪽, 고양이는 담장 위에 있다 → 담을 넘겨다보는 45° 내림각으로 조준한다.
   const ps = instPositions(nameFor[targetKind] || 'v-dogs');
-  const tgt = ps[0] || { x: 0, y: villageHandle.plan.site.heightAt(0, 0), z: 0 };
-  camera.fov = num('fov', 30);
-  camera.position.set(tgt.x + num('cx', 3), tgt.y + num('cy', 9), tgt.z + num('cz', 7));
-  camera.lookAt(tgt.x, tgt.y + 0.3, tgt.z);
+  const idx = Math.min(ps.length - 1, Math.max(0, parseInt(q.get('idx') || '0', 10) || 0));
+  const tgt = ps[idx] || { x: 0, y: villageHandle.plan.site.heightAt(0, 0), z: 0 };
+  camera.fov = num('fov', 26);
+  camera.position.set(tgt.x + num('cx', 3.5), tgt.y + num('cy', 7), tgt.z + num('cz', 7));
+  camera.lookAt(tgt.x, tgt.y + 0.4, tgt.z);
   window.__CRIT.aimAt = tgt;
 } else if (view === 'paddy') {
   // 논 소를 중거리로 조준 — fade band에서 크기/활동이 자연스럽게 줄어드는지 확인.
@@ -167,6 +216,16 @@ if (view === 'near') {
   camera.position.set(tgt.x + num('cx', 5), tgt.y + num('cy', 4), tgt.z + num('cz', 9));
   camera.lookAt(tgt.x, tgt.y + 0.8, tgt.z);
   window.__CRIT.aimAt = tgt;
+} else if (view === 'skein') {
+  // 편대 판독용: 무리 중심을 향해 능선 위 하늘 밴드를 담는다(부감보다 낮은 시선).
+  for (let i = 0; i < Math.round(warm * 60); i++) { villageHandle.update(1 / 60); villageHandle.updateLod(camera); }
+  const c = window.__flockCenter() || { x: 0, y: 60, z: 0 };
+  camera.fov = num('fov', 30);
+  const dist = num('dist', 95);
+  // 편대는 위·뒤에서 봐야 V가 읽힌다(옆에서 보면 한 줄로 겹친다). 부감 프레이밍과 같은 시선각.
+  camera.position.set(c.x - dist * 0.55, c.y + num('cy', 42), c.z + dist);
+  camera.lookAt(c.x, c.y, c.z);
+  window.__CRIT.aimAt = c;
 } else {
   // aerial: 기본 부감(마을 전체) — 지상 동물은 sleep, 새 떼만 하늘 실루엣으로 유지.
   camera.fov = num('fov', 42);
@@ -206,16 +265,24 @@ const shots = [
   // 원경(부감) — 지상 동물은 숨고 하늘 새 떼만 읽힘
   ['aerial-s12-sunset', '/__crit?scale=village&seed=12&view=aerial&time=sunset', 1280, 900],
   ['aerial-s12-day', '/__crit?scale=village&seed=12&view=aerial&time=day', 1280, 900],
+  // 가을·겨울 하늘의 기러기 V자 편대 vs 봄·여름 텃새 무리(같은 카메라·같은 seed).
+  ['skein-autumn-sunset', '/__crit?scale=village&seed=12&view=skein&season=autumn&time=sunset&warm=40', 1280, 900],
+  ['skein-winter-day', '/__crit?scale=village&seed=12&view=skein&season=winter&time=day&warm=70', 1280, 900],
+  ['flock-summer-sunset', '/__crit?scale=village&seed=12&view=skein&season=summer&time=sunset&warm=40', 1280, 900],
+  ['aerial-autumn-sunset', '/__crit?scale=village&seed=12&view=aerial&season=autumn&time=sunset&warm=40', 1280, 900],
   // 근접 — 소·개·고양이·까치가 실제 크기로 나타나고 애니메이션이 깨어나는지 확인.
   ['near-cow-s12', '/__crit?scale=village&seed=12&view=cownear&time=sunset', 1280, 900],
   ['near-dog', '/__crit?scale=village&seed=12&view=near&target=dog&time=day', 1280, 900],
+  ['near-dog-sunset', '/__crit?scale=village&seed=12&view=near&target=dog&time=sunset&season=autumn&warm=12', 1280, 900],
+  ['near-dog2-sunset', '/__crit?scale=village&seed=12&view=near&target=dog&idx=2&time=sunset&season=autumn&warm=26', 1280, 900],
   ['near-cat', '/__crit?scale=village&seed=12&view=near&target=cat&time=day', 1280, 900],
+  ['near-cat-sunset', '/__crit?scale=village&seed=12&view=near&target=cat&time=sunset&season=autumn&warm=12', 1280, 900],
+  ['near-cat2-sunset', '/__crit?scale=village&seed=12&view=near&target=cat&idx=3&time=sunset&season=autumn&warm=30&fov=20', 1280, 900],
+  ['near-cat3-day', '/__crit?scale=village&seed=12&view=near&target=cat&idx=6&time=day&season=summer&warm=8&fov=22', 1280, 900],
   ['near-magpie', '/__crit?scale=village&seed=12&view=near&target=magpie&time=day', 1280, 900],
 ].filter(([name]) => !filter || name.includes(filter));
 
-let browser;
-try { browser = await chromium.launch({ channel: 'chrome' }); }
-catch { browser = await chromium.launch(); }
+const browser = await launchVerificationBrowser();
 
 let pageErrs = 0, consoleErrs = 0, sweptOnce = false;
 for (const [name, qs, vw, vh] of shots) {
@@ -252,8 +319,17 @@ for (const [name, qs, vw, vh] of shots) {
     }
     console.log('LOD sweep (viewHeight→ground/cow/baseActive/birdSx):', JSON.stringify(sweep));
   }
+  const extra = await page.evaluate(() => ({
+    formation: window.__formation ? window.__formation() : null,
+    withCritters: window.__critterOnly ? window.__critterOnly(true) : null,
+    withoutCritters: window.__critterOnly ? window.__critterOnly(false) : null,
+  }));
+  await page.evaluate(() => window.__critterOnly && window.__critterOnly(true));
   const c = info.crit || {};
   console.log(`${name.padEnd(22)} R=${info.plan?.R} present=${c.present} drawMeshes=${c.drawMeshes} counts=${JSON.stringify(c.counts)} dogMotion=${JSON.stringify(motion)} calls=${info.plan?.perf?.calls}`);
+  console.log(`  formation=${JSON.stringify(extra.formation)}`);
+  console.log(`  resources on =${JSON.stringify(extra.withCritters)}`);
+  console.log(`  resources off=${JSON.stringify(extra.withoutCritters)}`);
   await page.close();
 }
 console.log(`\npageerror=${pageErrs} console-error=${consoleErrs}`);

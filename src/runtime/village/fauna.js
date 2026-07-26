@@ -1,9 +1,11 @@
 import { setupVillageCritters } from '../../env/critters.js';
 import { parcelRotY } from '../../generators/shared/parcel-transform.js';
+import { parcelCritterStation } from '../../village/critter-station-plan.js';
 import { villageDetailWeightAt } from './detail-lod.js';
 
 /** Coordinate aerial flock and view-cell LOD for every village-scale ground animal. */
 export function createVillageFaunaController({ group, plan, site, seed, time = 'day', season = 'summer' }) {
+  const char01 = typeof plan.opts?.char01 === 'number' ? plan.opts.char01 : 0.5;
   const parcels = [];
   for (const parcel of plan.parcels) {
     if (parcel.hero || !parcel.poly) continue;
@@ -15,6 +17,7 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
       D: parcel.plotD || 18,
       rotY: parcelRotY(parcel),
       kind: parcel.kind === 'giwa' ? 'giwa' : 'choga',
+      station: parcelCritterStation(parcel, site, char01),
     });
   }
 
@@ -70,6 +73,11 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
   // Keep one mutable snapshot on the village root so browser harnesses can assert sleep/wake
   // behavior without traversing meshes or adding a frame-time-dependent probe.
   group.userData.faunaLod = debugLod;
+  // Seasonal sky-flock species and skein state for harnesses. Numbers only, computed on call.
+  group.userData.faunaDebug = {
+    counts: rig.counts,
+    flock: () => rig.debugFlock(),
+  };
   const resolveWeight = (point) => (detailState ? villageDetailWeightAt(detailState, point) : 1);
 
   function syncBaseDebug() {
@@ -112,6 +120,7 @@ export function createVillageFaunaController({ group, plan, site, seed, time = '
     update(dt) { rig.update(dt); },
     updateLod,
     hasResidentialFlock(parcelId) { return residentialFlocks.has(parcelId); },
+    debugFlock() { return rig.debugFlock(); },
     debugLod,
   };
 }

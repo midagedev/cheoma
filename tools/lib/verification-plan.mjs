@@ -262,7 +262,7 @@ function routePath(path) {
     if (/^src\/env\/(?:weather|seasons)\.js$/.test(path)) {
       select('wave environment synchronization changed', 'lod-wave');
     }
-    if (/^src\/env\/(?:focus|animals|critters|grass|lantern-sway|motes|smoke|wind)\.js$/.test(path)) {
+    if (/^src\/env\/(?:focus|animals|critters|critter-plan|grass|lantern-sway|motes|smoke|wind)\.js$/.test(path)) {
       select('near-detail and wave-owned LOD changed', 'lod-focus', 'lod-wave');
     }
     if (/^src\/env\/(?:clouds|edge-mist-view)\.js$/.test(path)) {
@@ -300,6 +300,12 @@ function routePath(path) {
     }
     if (path === 'src/village/mud-wall-surface-plan.js') {
       select('renderer-free bounded mud-wall surface planning changed');
+      return { gates, reasons };
+    }
+    if (path === 'src/village/critter-station-plan.js') {
+      // 소동물 자리는 담·대문 계약에서 파생하는 순수 계획이고, 소비자는 wave/LOD 소유의
+      // post-gen 소동물 레이어 하나뿐이다(마을 생성 해시와 무관).
+      select('renderer-free critter station planning changed', 'app', 'lod-focus', 'lod-wave');
       return { gates, reasons };
     }
     if (path === 'src/village/mja-house-plan.js'

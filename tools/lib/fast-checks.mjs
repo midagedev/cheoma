@@ -44,6 +44,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-wave-contract.mjs',
   './check-yard-layout-contract.mjs',
   './check-yard-life-contract.mjs',
+  './check-critter-contract.mjs',
   './check-parcel-rebuild-contract.mjs',
   './check-live-edit-scheduler.mjs',
   './check-building-navigation.mjs',

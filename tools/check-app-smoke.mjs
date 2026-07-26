@@ -1054,6 +1054,33 @@ try {
           && anchor.rel.split(/\s+/).includes('noreferrer')
       )),
   'drainage evidence, bounded city scope, product crossing limits, canonical links, and safe attributes render in Product References');
+  // 소동물(개·고양이·기러기) 출처군 — 기관 등록명·계절 게이트 근거·기각한 인용이 함께 보여야 한다.
+  const critterBirdEvidence = reference.items.find((item) => (
+    item.title.includes('기러기 겨울철새와 편대(skein) 비행')
+  ));
+  const critterPaintingEvidence = reference.items.find((item) => (
+    item.title.includes('조선 회화의 개·고양이와 노안도')
+  ));
+  pass(critterBirdEvidence?.text.includes('10월 하순경에 우리 나라에 날아오기 시작')
+      && critterBirdEvidence.text.includes('11월부터 다음 해 3월까지')
+      && critterBirdEvidence.text.includes('가을·겨울에만 기러기 V자 편대가 뜨고')
+      && critterBirdEvidence.text.includes('야간 편대와 기러기 울음소리는 구현하지 않았다')
+      && critterBirdEvidence.links.some((url) => url.includes('encykorea.aks.ac.kr/Article/E0008175'))
+      && critterBirdEvidence.links.some((url) => url.includes('encykorea.aks.ac.kr/Article/E0011213'))
+      && critterBirdEvidence.links.some((url) => url.includes('journals.biologists.com/jeb/article/189/1/251'))
+      && critterBirdEvidence.license.includes('The Company of Biologists')
+      && critterPaintingEvidence?.text.includes('어미개와 강아지')
+      && critterPaintingEvidence.text.includes('참새와 고양이')
+      && critterPaintingEvidence.text.includes('노안도의 갈대밭 배경은 아직 구현하지 않았다')
+      && critterPaintingEvidence.links.some((url) => url.includes('museum.go.kr/site/main/relic/search/view?relicId=331'))
+      && critterPaintingEvidence.links.some((url) => url.includes('museum.go.kr/site/main/relic/search/view?relicId=1013'))
+      && critterPaintingEvidence.license.includes('공공누리 제1유형')
+      && [...critterBirdEvidence.anchors, ...critterPaintingEvidence.anchors].every((anchor) => (
+        anchor.target === '_blank'
+          && anchor.rel.split(/\s+/).includes('noopener')
+          && anchor.rel.split(/\s+/).includes('noreferrer')
+      )),
+  'critter bird/painting evidence, seasonal gate basis, unimplemented limits, canonical links, and safe attributes render in Product References');
   const mjaHanokEvidence = reference.items.find((item) => item.topic === 'mja-hanok');
   pass(mjaHanokEvidence?.title.includes('안동문화권 ㅁ자형 뜰집의 지역·기후·계층 한계')
       && mjaHanokEvidence.text.includes('일반 주택의 ㅁ자는 기본 off')

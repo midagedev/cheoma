@@ -47,6 +47,13 @@ const EXACT_IMPACT = new Map([
     './check-nightlight-geometry.mjs',
     './check-instance-upload.mjs',
   ]],
+  // 소동물 렌더러는 순수 계획(critter-plan/critter-station-plan)과 함께 하나의 계약이 소유한다.
+  ['src/env/critters.js', [
+    './check-critter-contract.mjs',
+  ]],
+  ['src/runtime/village/fauna.js', [
+    './check-critter-contract.mjs',
+  ]],
 ]);
 
 function resolveImport(from, specifier) {
