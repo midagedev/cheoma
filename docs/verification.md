@@ -238,6 +238,13 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - 판벽 봉창의 보이는 면이 벽보다 2cm 앞에 있고 맞배 박공벽이 지붕 아래로 16cm 물리는 공통 계약을 검사한다. 깊이 순서는 `polygonOffset`이나 카메라에 의존하지 않는다.
   - 기와집·초가의 부엌 장면이 마당 높이 개구·문짝·문지방·솥·불씨·화광 의미 부재를 공유하고, 외벽 밖 독립 화덕 매스로 되돌아가지 않는지 검사한다.
   - 초가 기본·최소·최대와 기와 ㅡ·ㄱ·ㄷ FULL fixture에서 순수 plan의 문·창 개수·폭·높이가 실제 패널에 그대로 적용되고, primary anchor·frame/hardware batch·부엌 service opening이 각각 하나인지 검사한다. 1.05m 문짝 경계 양쪽의 detail/texture 짝수 일치와 얕은 초가에서 최대폭 동측 창이 실제 부엌 frame span을 침범하지 않는 극한 fixture도 포함하며, 최대 fixture의 메시·재질 예산을 제한한다.
+- `check:ground-stone`
+  - 접지 석재(디딤돌·댓돌)와 기단 상면의 깊이 계약을 브라우저 없이 검사한다 — `architectural-authenticity.md` §2.6 / §7.7-6.
+  - `beddedStone` 산술: 보이는 상면은 그려지는 표면 기준 authored 높이, 밑동은 지면 아래 `FOUNDATION_SINK`, 매입 깊이는 `sunkPrism`과 공유.
+  - 필지 4종·건물 3종·소품 디딤돌 길을 포함한 10개 제품 fixture에서 모든 `stepping-stone` 메시가 표면 아래로 묻히고 최소 0.03m 솟는지 검사한다. 소품은 재질별 병합 메시 bounds로 같은 것을 본다.
+  - 서로 다른 메시의 **위를 향한** 석재면이 1mm 안에서 XZ로 겹치지 않는지 검사한다. 아래를 향한 면은 FrontSide 컬링으로 색상 패스에 없고, 표면 아래는 불투명한 마당면이 가리므로 제외한다. 소유 범위는 다듬은 석재 팔레트 키와 `podium-*`/`foundation-*`/`stepping-stone` 이름이며, 벽 클래딩(`fieldstone`)은 `walls.js` 계열 게이트의 소유다.
+  - 수정 전 좌표를 되심은 6개 회귀 fixture가 여전히 실패하는지 확인한다 — 게이트가 "지금 초록"이 아니라 "그 결함을 잡는다"를 보장한다.
+  - `--report`로 fixture별 매입/돌출 실측과 동일평면 짝을 출력한다. 실제로 깜빡이는지(깊이 버퍼 정밀도)는 이 게이트의 몫이 아니며 고정 근경 미세 팬 캡처가 맡는다.
 - `check:residential-openings`
   - 초가 3/5칸과 기와 ㅡ·ㄱ·ㄷ의 shape별 슬롯·개수/폭 capability·남향 primary·대청/부엌 제외·seed 결정론을 Three 없이 검사한다.
   - runtime 편집 spec과 Svelte schema가 같은 여섯 축·범위·단위·`building` route를 쓰고 shape/type 변경 뒤 canonical 값으로 정규화되는지 검사한다.
@@ -845,7 +852,8 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-choga-roof.mjs` | 초가 지붕/벽 접합, 변형·편집 극값, 지붕 vertex hash | 재질·조명 미감은 `shoot-thatch.mjs` 전후 이미지를 직접 본다. |
 | `tools/check-roof-seams.mjs` | 기와지붕 face 상단의 ridge knot 보존, UI 평면·칸수·높이 경계 | 마루장 아래의 실제 음영·미감은 `shoot-cg3.mjs` 근접 앵글로 본다. |
 | `tools/check-giwa-tile-course.mjs` | 기와 기왓골의 세계좌표 등간격(면 UV의 u = across/0.34, 물매 5개 v행에서 미터로 검증), 수키와 롤의 처마 수직성·추녀 절단·처마 포락 내부, ㄷ자 가운데 면(부채꼴 3.2배)·우진각 수렴 면이 fixture에 실재하는지 | 순수 node다. 팔레트 대신 stub 재질로 실제 `buildSkeletonRoof` 기하를 만들어 정점·UV만 읽는다. 드로우콜·재질·프로그램 수와 실제 픽셀 판정(추녀 이음새, 선자연 부채꼴)은 브라우저 라운드가 맡는다. |
-| `tools/check-building-clearance.mjs` | 기초 매입, 마당 lift, ㄱ자 기단 단일 depth owner, 판벽 봉창 face clearance, 맞배 벽 tuck, 기와/초가 공유 부엌 개구와 돌출 상한 | 실제 접지선·기단 줄눈·부엌 개구 미감은 기와/초가 격리 하네스와 `layout.html` 필지 4종을 직접 본다. |
+| `tools/check-building-clearance.mjs` | 기초 매입, 마당 lift, ㄱ자 기단 단일 depth owner, 단 몸통이 갑석 상면을 넘지 않음, 판벽 봉창 face clearance, 맞배 벽 tuck, 기와/초가 공유 부엌 개구와 돌출 상한 | 실제 접지선·기단 줄눈·부엌 개구 미감은 기와/초가 격리 하네스와 `layout.html` 필지 4종을 직접 본다. |
+| `tools/check-ground-stone-bedding.mjs` | 디딤돌·댓돌 매입/돌출, 기단 상면의 단일 depth owner, 위를 향한 석재면의 동일평면 0건, 6개 회귀 fixture 검출 | 원인(동일평면성)만 단정한다. 실제 깜빡임은 고정 근경 미세 팬 전후 캡처로 판정하고, 벽 클래딩(`fieldstone`) 동일평면은 `walls.js` 계열 게이트의 소유다. |
 | `tools/check-door-motion-contract.mjs` | primary 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠·중간 반전·dispose | renderer 없는 순수 운동 계약이며 실제 가림·입력·문짝 실루엣은 앱 게이트와 `shoot:door`가 맡는다. |
 | `tools/check-door-occlusion-contract.mjs` | 선택 문까지의 유한 semantic grid, ㄱ/ㄷ concavity, 일반/종가 담·문, 정자·소품, 사찰 전각·담·문, 궁장/광화문, 성벽/홍예, 시전, 계절 수관, 회전 commit bounds, 필지/flora refresh, 후보 상한 | forest/scatter 수목 fade, 성문 문루 상부·궁 내부 일곽·사찰 소품, 선택 root 내부 actual surface는 각각 기존 소유자가 담당한다. |
 | `tools/shoot-door-interaction.mjs` | 실제 앱의 보이는 주거 primary 문 닫힘/중간/열림을 정면·사선 6장으로 촬영 | `CHEOMA_DOOR_TARGET=giwa\|choga\|hero`로 대상을 고른다. 초가·hero에서는 문틀·고정 짝 유지, 경첩 sweep, 열린 뒤 벽 대신 고정 암부가 보이는지 직접 판정하며 PNG는 OS 임시 폴더에 쓴다. hero는 제품 카메라를 바꾸지 않고 debug opening world frame의 마당 안쪽 검증 시점을 쓴다. |

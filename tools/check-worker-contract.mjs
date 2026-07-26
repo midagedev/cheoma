@@ -151,10 +151,14 @@ const expectedSceneHashes = {
   //   ㄱ·ㄷ 평면 giwa 를 포함한 네 규모의 지붕 지오메트리 바이트가 의도적으로 변했다(ㅡ자 단독은
   //   불변). 재기준 직전 실측: 네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, proxy 해시
   //   전부 불변, snapshot·mja 3경로 교차 비교 PASS — 역시 결정론 손상이 아니다.
-  village: 'a712ba61:3ec4b55f:be5d490c:78e1f0b7',
-  town: 'c34053b9:17ecacc5:68ff1bd6:cfe18619',
-  capital: 'ade5c22b:edac5af1:a88e4341:13c869d9',
-  hanyang: 'f2f9f5aa:1543ae96:cc651c81:50c1e15c',
+  // 지면 석재 정합: 디딤돌·댓돌이 지면 아래로 매입되고 기단 상면의 depth owner 가 갑석 하나로
+  //   정리되면서(동일평면 5개소 제거) 네 규모의 석재 좌표 바이트가 의도적으로 변했다. 재기준 직전
+  //   실측: 네 규모 모두 sync == worker == `?worker=0` 폴백 바이트 동일, proxy 해시 전부 불변
+  //   (794d1a99 / c41c0e59 / b652961a / 0f53368a), snapshot·mja 3경로 교차 PASS — 결정론 손상 아님.
+  village: 'b3606766:be76c55a:b79b4851:d7481fc4',
+  town: 'd8703bb8:a833a800:65eff8b5:db264e40',
+  capital: 'e6169a57:668b3bc3:72957c60:71f1d74f',
+  hanyang: '0d257f8e:2c910b78:3139080d:a1d2cb7c',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

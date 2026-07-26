@@ -733,8 +733,13 @@ export function inspectBuildingClearance() {
   let matbaeGableTucks = [];
   for (const style of ['korea', 'temple', 'choga']) {
     const building = buildBuilding({ ...PRESETS[style], mats: testMaterials() });
+    // The visible podium top belongs to the 갑석 where there is one: the tier body now
+    // stops inside the cap so a single layer owns that plane (see check:ground-stone).
+    // Where no cap exists (초가) the tier body is still the top itself.
+    const cap = building.getObjectByName('podium-cap-0');
     foundations[style] = {
       bounds: bounds(building.getObjectByName('podium-tier-0')),
+      topBounds: bounds(cap || building.getObjectByName('podium-tier-0')),
       expectedTop: PRESETS[style].podiumTierH,
     };
     if (style === 'temple') {

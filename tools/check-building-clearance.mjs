@@ -129,9 +129,15 @@ for (const [style, foundation] of Object.entries(production.foundations)) {
     foundation.bounds.min.y <= -FOUNDATION_SINK + EPS,
     `${style} foundation stops at ${foundation.bounds.min.y}`,
   );
+  // The sink must not move the podium's visible top. That top is the 갑석 where one
+  // exists, and the tier body must stay strictly below it so one layer owns the plane.
   invariant(
-    Math.abs(foundation.bounds.max.y - foundation.expectedTop) < EPS,
-    `${style} foundation changed its visible top to ${foundation.bounds.max.y}`,
+    Math.abs(foundation.topBounds.max.y - foundation.expectedTop) < EPS,
+    `${style} foundation changed its visible top to ${foundation.topBounds.max.y}`,
+  );
+  invariant(
+    foundation.bounds.max.y <= foundation.topBounds.max.y + EPS,
+    `${style} tier body rises past its own cap (${foundation.bounds.max.y})`,
   );
 }
 invariant(

@@ -129,11 +129,15 @@ export function buildGiwa(P, M) {
   // 압출해 깊이 소유자를 하나로 만들고, 최하단은 성토면 아래로 묻어 접지선도 안정시킨다.
   const podiumFoot = G.ensureCCW(foot);
   const lowerFoot = G.offsetPoly(podiumFoot, 0.70);
-  const h0 = podH * 0.54, h1 = podH - h0 - 0.02;
+  const h0 = podH * 0.54;
   const foundation = sunkPrism(h0);
   addPodiumLayer(podium, lowerFoot, foundation.bottom, foundation.top, M.stone, 'podium-lower');
+  // 갑석(podium-cap)이 기단 상면의 단일 depth owner다. 몸통 켜를 podH 까지 올리면 두 켜의
+  //   상면이 정확히 같은 평면(y=podH)에 겹치는데, 갑석이 몸통을 XZ 로 완전히 덮으므로 그
+  //   면 전체가 픽셀을 주고받는다 — 근경에서 기단 위가 밝은 돌/어두운 갑석 얼룩으로 깨진다.
+  //   몸통 상면을 갑석 두께(0.1) 안으로 내려 면 소유자를 하나로 만든다.
   addPodiumLayer(
-    podium, G.offsetPoly(podiumFoot, 0.65), h0 + 0.02, h0 + 0.02 + h1,
+    podium, G.offsetPoly(podiumFoot, 0.65), h0 + 0.02, podH - OPENING_FACE_CLEARANCE,
     M.stone, 'podium-upper',
   );
   addPodiumLayer(

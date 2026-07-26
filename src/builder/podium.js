@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { sunkPrism } from '../core/surface-clearance.js';
+import {
+  COURTYARD_SURFACE_LIFT,
+  OPENING_FACE_CLEARANCE,
+  beddedStone,
+  sunkPrism,
+} from '../core/surface-clearance.js';
 
 // 기단(월대): 장대석 단 + 전면 계단 + 주춧돌
 export function buildPodium(P, L, M) {
@@ -12,7 +17,15 @@ export function buildPodium(P, L, M) {
     const halfDF = L.D / 2 + P.podiumMarginF + (P.podiumTiers - 1 - t) * 1.35; // 전면
     const halfDB = L.D / 2 + P.podiumMarginS + (P.podiumTiers - 1 - t) * 1.35; // 후면
     const h = P.podiumTierH;
-    const tier = t === 0 ? sunkPrism(h) : { height: h, center: t * h + h / 2 };
+    const isTemple = P.style === 'temple';
+    const isChoga = P.style === 'choga';
+    // 갑석이 있으면 단 윗면의 depth owner 는 갑석 하나다. 단 몸통을 (t+1)*h 까지 올리면 몸통
+    //   상면과 갑석 상면이 정확히 같은 평면에 놓이고, 갑석이 몸통보다 0.22 넓어 그 띠 전체가
+    //   픽셀을 다툰다(근경 기단 위 얼룩). 갑석 없는 초가는 몸통이 그대로 상면을 갖는다.
+    const tierTop = (t + 1) * h - (isChoga ? 0 : OPENING_FACE_CLEARANCE);
+    const tier = t === 0
+      ? sunkPrism(tierTop)
+      : { height: tierTop - t * h, center: (tierTop + t * h) / 2 };
     const box = new THREE.Mesh(
       new THREE.BoxGeometry(halfW * 2, tier.height, halfDF + halfDB),
       M.stone
@@ -23,8 +36,6 @@ export function buildPodium(P, L, M) {
     g.add(box);
 
     // 갑석: 단 윗면 마감돌. 절은 밝은 톤으로 상면/옆면 분리, 초가는 형식 갑석 생략(막돌 느낌).
-    const isTemple = P.style === 'temple';
-    const isChoga = P.style === 'choga';
     if (!isChoga) {
       const capMat = isTemple
         ? new THREE.MeshStandardMaterial({ color: 0xbfb6a3, roughness: 0.95 }) // 밝은 갑석
@@ -33,6 +44,7 @@ export function buildPodium(P, L, M) {
         new THREE.BoxGeometry(halfW * 2 + 0.22, isTemple ? 0.2 : 0.12, halfDF + halfDB + 0.22),
         capMat
       );
+      cap.name = `podium-cap-${t}`;
       cap.position.set(0, t * h + h - (isTemple ? 0.10 : 0.06), (halfDF - halfDB) / 2);
       cap.castShadow = cap.receiveShadow = true;
       g.add(cap);
@@ -70,12 +82,22 @@ export function buildPodium(P, L, M) {
   const stepH = totalH / steps;
   const stepD = 0.34;
   const frontEdge = L.D / 2 + P.podiumMarginF;
+  // 갑석은 단 몸통보다 0.11 내민다. 계단이 그 밑에서부터 시작하면 최상단 디딤판 상면이
+  //   갑석 상면과 같은 평면으로 겹쳐 그 띠가 픽셀을 다툰다. 계단은 갑석 바깥면에 맞대고
+  //   시작한다 — 실제 월대 계단도 갑석에 접해 붙는다.
+  const stairFront = frontEdge + 0.11 + OPENING_FACE_CLEARANCE;
 
   if (P.style === 'choga') {
-    // 초가: 형식 계단·소맷돌 대신 소박한 디딤돌 두 개(지면에 밀착).
-    const ddong = (w, d, h, z) => {
-      const s = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M.stone);
-      s.position.set(0, h / 2, z);
+    // 초가: 형식 계단·소맷돌 대신 소박한 디딤돌 두 개.
+    // 디딤돌은 마당에 얹힌 판이 아니라 땅에 박아 다져 앉힌 돌이므로, 높이는 마당 표면
+    //   위로 솟는 몫으로 재고 밑동은 지면 아래로 묻는다(beddedStone). 예전에는 h 를 y=0
+    //   기준으로 재서, 앞 디딤돌(h=0.06)의 상면이 마당면(COURTYARD_SURFACE_LIFT=0.06)과
+    //   정확히 같은 평면에 놓였다 — 돌이 사라지고 마당에 줄무늬만 남는 z-fighting.
+    const ddong = (w, d, standAbove, z) => {
+      const bed = beddedStone(COURTYARD_SURFACE_LIFT, standAbove);
+      const s = new THREE.Mesh(new THREE.BoxGeometry(w, bed.height, d), M.stone);
+      s.name = 'stepping-stone';
+      s.position.set(0, bed.center, z);
       s.castShadow = s.receiveShadow = true;
       g.add(s);
     };
@@ -86,7 +108,8 @@ export function buildPodium(P, L, M) {
     // 계단은 최상단 월대 전면에 접합 (하단 월대를 관통해 내려감)
     for (let i = 0; i < steps; i++) {
       const s = new THREE.Mesh(new THREE.BoxGeometry(stairW, stepH, stepD), M.stone);
-      s.position.set(0, i * stepH + stepH / 2, frontEdge + (steps - i) * stepD - stepD / 2);
+      s.name = `podium-stair-${i}`;
+      s.position.set(0, i * stepH + stepH / 2, stairFront + (steps - i) * stepD - stepD / 2);
       s.castShadow = s.receiveShadow = true;
       g.add(s);
     }
@@ -96,7 +119,7 @@ export function buildPodium(P, L, M) {
         new THREE.BoxGeometry(0.28, totalH * 0.55, steps * stepD * 1.05),
         M.stoneDark
       );
-      rail.position.set(side * (stairW / 2 + 0.14), totalH * 0.32, frontEdge + steps * stepD / 2);
+      rail.position.set(side * (stairW / 2 + 0.14), totalH * 0.32, stairFront + steps * stepD / 2);
       rail.rotation.x = -Math.atan2(totalH, steps * stepD) * 0.5;
       rail.castShadow = true;
       g.add(rail);
@@ -158,7 +181,7 @@ export function buildPodium(P, L, M) {
     addRail('z', halfW, -halfDB, halfDF, false);  // 오른쪽
 
     // 답도(踏道): 전면 중앙 계단 가운데 봉황을 새긴 경사 어도(御道) 판석 — 계단 소맷돌 사이.
-    const frontEdge2 = L.D / 2 + P.podiumMarginF;
+    const frontEdge2 = stairFront;
     const rampLen = steps * stepD * 1.05;
     const dapdo = new THREE.Mesh(
       new THREE.BoxGeometry(stairW * 0.5, 0.08, rampLen), M.stone);  // 계단 석재와 같은 밝은 화강암(구덩이처럼 안 죽게)

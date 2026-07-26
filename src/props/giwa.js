@@ -2,6 +2,7 @@ import { makeRng } from '../rng.js';
 import { Kit } from './kit.js';
 import { getPropMaterials } from './materials.js';
 import { onggiProfile, boulderGeometry } from './geom.js';
+import { sunkPrism } from '../core/surface-clearance.js';
 
 // 옹기 한 점(뚜껑 포함) — 어깨 넓고 입 좁은 실루엣. y=바닥 높이.
 function addOnggi(kit, x, y, z, h, maxR, rng, lidded = true) {
@@ -73,14 +74,18 @@ export function buildWell({ seed = 1, scale = 1 } = {}) {
 
 // ── 디딤돌 길 ───────────────────────────────────────────────────
 // 판석 열(자연석 디딤돌)이 살짝 어긋나며 이어짐. 인스턴싱 친화(단순 지오메트리).
+// 돌은 지면에 얹지 않고 박아 앉힌다(beddedStone): 보이는 상면 높이는 그대로 두고 밑동만
+//   지면 아래로 내린다. 예전에는 밑면이 배치면(site.heightAt)과 정확히 같은 평면에 놓여
+//   4.7m² 가 완전 동일 depth 였고, 삼각분할된 지형 위에서는 절반이 뜨거나 잠겼다.
 export function buildSteppingStones({ seed = 1, scale = 1, count = 7, spacing = 0.75 } = {}) {
   const rng = makeRng(seed);
   const kit = new Kit(getPropMaterials());
+  const bed = sunkPrism(0.1);
   for (let i = 0; i < count; i++) {
     const z = i * spacing;
     const x = (rng() - 0.5) * 0.18;
     const r = 0.3 + rng() * 0.12;
-    kit.cyl('granite', r, r * (0.9 + rng() * 0.2), 0.1, 6, [x, 0.05, z], [0, rng() * Math.PI, 0], [1, 1, 0.8 + rng() * 0.3]);
+    kit.cyl('granite', r, r * (0.9 + rng() * 0.2), bed.height, 6, [x, bed.center, z], [0, rng() * Math.PI, 0], [1, 1, 0.8 + rng() * 0.3]);
   }
   const g = kit.build('stepping-stones');
   g.scale.setScalar(scale);

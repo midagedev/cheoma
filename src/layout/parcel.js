@@ -9,7 +9,7 @@ import { buildGate } from './gate.js';
 import { buildHanok } from './hanok.js';
 import { buildCorridor } from './corridor.js';
 import { attachOverlayLanterns } from './props.js';
-import { COURTYARD_SURFACE_LIFT } from '../core/surface-clearance.js';
+import { COURTYARD_SURFACE_LIFT, beddedStone } from '../core/surface-clearance.js';
 import { parcelCompoundPlan } from './parcel-compound-plan.js';
 
 // 담장으로 둘린 대지 + 남측 대문 + 마당 + 북측 중앙 몸채 + 행각/행랑.
@@ -123,18 +123,52 @@ export function buildParcel({
   }
 
   // ── 디딤돌 길 (대문 → 몸채) ──
+  // 디딤돌은 서로 떨어져 놓인 개별 돌이고, 마당에 얹힌 판이 아니라 밟아 다져 박힌 돌이다.
+  //   ① 간격: 예전 `max(3, round(span / 1.4))` 은 짧은 마당(초가)에 세 개를 억지로 밀어넣어
+  //      간격 0.45m < 돌 길이 1.008m 가 됐다. 겹친 돌들의 상면이 전부 같은 높이라 그 겹침
+  //      전체가 depth 를 다퉜고, 근접에서 길이 통째로 깜빡였다. 이제 간격이 돌 길이보다
+  //      좁아질 수 없도록 개수를 span 에서 역산한다(부족하면 하나만).
+  //   ② 종점: 몸채 자신의 댓돌·디딤돌 앞에서 끊는다. 예전에는 마지막 돌이 댓돌 안으로 파고
+  //      들어 두 돌의 밑면이 정확히 같은 평면을 공유했다.
+  //   ③ 깊이: 마당면 위로 솟는 몫만 authored 높이로 두고 밑동은 지면 아래로 묻는다.
+  //      마당 아래 지형이 출렁여도 돌이 뜨거나 잠기지 않는다.
+  const stoneHalfDepth = 0.42 * 1.2;                    // z 스케일 반영 반길이
+  const stonePitch = Math.max(1.4, stoneHalfDepth * 2 + 0.14);
+  // 몸채가 스스로 놓은 디딤돌(종가 댓돌·초가 디딤돌)의 남단을 실제로 재서 그 앞에서 끊는다.
+  //   고정 오프셋으로 어림하면 좁은 초가 마당에서 길이 통째로 사라지거나 여전히 겹친다.
+  //   `Box3.setFromObject` 은 `updateWorldMatrix(false, false)` 만 하므로 조립 중인 트리에서는
+  //   부모 변환이 빠진 좌표를 준다 — 먼저 몸채 서브트리 행렬을 한 번 갱신해야 실제 z 를 읽는다.
+  building.updateMatrixWorld(true);
+  let houseStoneZ = -Infinity;
+  const stoneBox = new THREE.Box3();
+  building.traverse((o) => {
+    if (o.isMesh && o.name === 'stepping-stone') {
+      stoneBox.setFromObject(o);
+      if (stoneBox.max.z > houseStoneZ) houseStoneZ = stoneBox.max.z;
+    }
+  });
   const pathZ0 = hd - 1.2;
-  const pathZ1 = frontZ;
-  const steps = Math.max(3, Math.round((pathZ0 - pathZ1) / 1.4));
-  for (let i = 0; i < steps; i++) {
-    const z = pathZ0 - (pathZ0 - pathZ1) * (i / (steps - 1));
-    const st = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.42, 0.42, 0.12, 8),
-      mats.stone);
-    st.scale.set(1, 1, 1.2);
-    st.position.set((rng() - 0.5) * 0.2, 0.06, z);
-    st.receiveShadow = true; st.castShadow = true;
-    root.add(st);
+  const pathZ1 = Number.isFinite(houseStoneZ)
+    ? Math.max(frontZ, houseStoneZ + stoneHalfDepth + 0.12)
+    : frontZ;
+  const span = pathZ0 - pathZ1;
+  const steps = span >= stonePitch
+    ? Math.floor(span / stonePitch) + 1
+    : (span >= stoneHalfDepth * 2 ? 1 : 0);
+  // 마당 디딤돌은 몸채 댓돌보다 얕게 앉은 낮은 돌 — 상면 높이가 몸채 석재와 겹치지 않는다.
+  const stoneBed = beddedStone(COURTYARD_SURFACE_LIFT, 0.05);
+  if (steps > 0) {
+    for (let i = 0; i < steps; i++) {
+      const z = steps > 1 ? pathZ0 - span * (i / (steps - 1)) : pathZ0 - span * 0.5;
+      const st = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.42, stoneBed.height, 8),
+        mats.stone);
+      st.name = 'stepping-stone';
+      st.scale.set(1, 1, 1.2);
+      st.position.set((rng() - 0.5) * 0.2, stoneBed.center, z);
+      st.receiveShadow = true; st.castShadow = true;
+      root.add(st);
+    }
   }
 
   // ── 행랑 자리 마커 (행각 없는 넉넉한 대지: 절 등) ──

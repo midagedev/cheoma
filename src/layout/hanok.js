@@ -3,7 +3,12 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '../rng.js';
 import { computeSkeleton } from './skeleton.js';
 import { buildSkeletonRoof } from './roof-skeleton.js';
-import { sunkPrism } from '../core/surface-clearance.js';
+import {
+  COURTYARD_SURFACE_LIFT,
+  OPENING_FACE_CLEARANCE,
+  beddedStone,
+  sunkPrism,
+} from '../core/surface-clearance.js';
 import { mergeOwnedGeometries } from '../core/merge-owned-geometries.js';
 import { planOpeningDetail } from '../builder/opening-detail-plan.js';
 import { createOpeningDetailAssembler } from '../builder/opening-details.js';
@@ -57,26 +62,36 @@ export function buildHanok({
   zidae.name = 'foundation-base';
   zidae.position.y = zidaeBounds.bottom;
   zidae.receiveShadow = zidae.castShadow = true; g.add(zidae);
-  // 기단 몸통(장대석): 상면이 podiumH — 회벽·기둥이 그대로 앉는다
-  const pod = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH), M.stone);
+  // 기단 몸통(장대석): 갑석이 podiumH 까지 채우므로 회벽·기둥은 그대로 podiumH 에 앉는다.
+  //   몸통을 podiumH 까지 올리면 몸통 상면과 갑석 상면이 같은 평면에 겹치고, 갑석이 몸통보다
+  //   넓어 그 면 전체가 depth 를 다툰다 — 상면 소유자는 갑석 하나여야 한다.
+  const pod = new THREE.Mesh(
+    extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH - OPENING_FACE_CLEARANCE), M.stone);
+  pod.name = 'foundation-body';
   pod.receiveShadow = true; pod.castShadow = true;
   g.add(pod);
   // 갑석: 기단 상단을 덮는 넓은 마감석(몸통보다 내밀어 처마 그늘에도 밝은 돌 선)
   const gapseok = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.84)), 0.11), M.stone);
+  gapseok.name = 'foundation-gapseok';
   gapseok.position.y = podiumH - 0.11;
   gapseok.receiveShadow = gapseok.castShadow = true; g.add(gapseok);
   // 기단 상면(회벽 앉는 자리) 어두운 면 — 벽 밑동 그늘
   const cap = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.5)), 0.05), M.stoneDark);
+  cap.name = 'foundation-top';
   cap.position.y = podiumH; g.add(cap);
-  // 앞(남, +z) 댓돌: 대청 앞 계단돌 2벌(지면 위)
+  // 앞(남, +z) 댓돌: 대청 앞 계단돌 2벌. 마당 표면 위로 각 0.16m 씩 솟고 밑동은 지면 아래로
+  //   묻는다(beddedStone). 예전에는 아래 돌 밑면이 지면(y=0)에 정확히 닿고 위 돌은 그 위
+  //   0.16m 에 떠 있어, 밑면이 대문 디딤돌 밑면과 같은 평면을 공유했다.
   {
     let maxZ = -Infinity, sx = 0, cnt = 0;
     for (const p of poly) if (p.z > maxZ) maxZ = p.z;
     for (const p of poly) if (p.z > maxZ - 0.5) { sx += p.x; cnt++; }
     const fcx = cnt ? sx / cnt : 0;
     for (let i = 0; i < 2; i++) {
-      const step = new THREE.Mesh(new THREE.BoxGeometry(1.9 - i * 0.3, 0.16, 0.55), M.stone);
-      step.position.set(fcx, 0.08 + i * 0.16, maxZ + 1.35 - i * 0.5);
+      const bed = beddedStone(COURTYARD_SURFACE_LIFT, 0.1 + i * 0.16);
+      const step = new THREE.Mesh(new THREE.BoxGeometry(1.9 - i * 0.3, bed.height, 0.55), M.stone);
+      step.name = 'stepping-stone';
+      step.position.set(fcx, bed.center, maxZ + 1.35 - i * 0.5);
       step.castShadow = step.receiveShadow = true; g.add(step);
     }
   }

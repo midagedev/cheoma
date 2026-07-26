@@ -37,6 +37,7 @@
     "check:instance-upload:browser": "node tools/run-browser-locked.mjs -- node tools/check-instance-upload-browser.mjs",
     "check:building-lifecycle": "node tools/run-browser-locked.mjs -- node tools/check-building-texture-lifecycle.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",
+    "check:ground-stone": "node tools/check-ground-stone-bedding.mjs",
     "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:cinematic": "node tools/check-cinematic-turns.mjs && node tools/check-cinematic-reveal.mjs",
     "check:cinematic:app": "node tools/run-browser-locked.mjs -- node tools/check-cinematic-reveal-app.mjs",

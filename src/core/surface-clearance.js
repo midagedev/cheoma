@@ -20,6 +20,18 @@ export function sunkPrism(top, bottom = 0, sink = FOUNDATION_SINK) {
   };
 }
 
+// Bed a ground stone (디딤돌 · 댓돌) instead of resting it on grade.
+//
+// A trodden stone is set into the ground and settles: its underside is soil-borne,
+// never a slab face parked exactly on the surface plane. Modelling it flush is also
+// what breaks depth — a stone whose bottom sits at grade and whose top lands on the
+// lifted courtyard surface shares a plane with the ground it stands on, so the two
+// faces trade pixels. `standAbove` is therefore measured from the *visible surface*
+// the stone rises out of, not from y = 0, and the base runs below grade.
+export function beddedStone(surfaceY, standAbove, sink = FOUNDATION_SINK) {
+  return sunkPrism(surfaceY + standAbove, 0, sink);
+}
+
 // Put an overlay's visible face beyond its host without pulling the whole
 // overlay out of the wall. The rear may remain embedded; only the two visible
 // faces need a stable depth ordering.
