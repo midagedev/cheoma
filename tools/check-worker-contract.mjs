@@ -176,10 +176,13 @@ const expectedSceneHashes = {
   //   앞마당(멍석 2.1m 하한, L/H 대역)을 회복했다. 필지 배치·지붕 fit·마당 소품·식생·소동물 밀도가
   //   함께 움직이므로 네 규모 씬 바이트와 pick proxy 가 의도적으로 변한다. 재기준 직전 실측:
   //   네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
-  village: '577003ee:dceb9a5c:3878a997:a41ea53e',
-  town: '616d621c:6fc8fbe4:db670815:bd358640',
-  capital: '63c52173:8e321281:3ecb0083:29d278c9',
-  hanyang: 'a60bdd67:a206bd1f:96a75dca:39660915',
+  // 기와 켜 후속(암·수 across 피치 통일 0.34, 물매 UV 호길이, 회첨 튜브 eaveV): 수키와 롤 수·
+  //   회첨 튜브 길이·면 UV 가 바뀌어 네 규모 씬 바이트가 의도적으로 변한다. proxy 는 불변
+  //   (지붕 fit/필지 배치 무관). 재기준 직전 실측: worker == `?worker=0` 폴백 바이트 동일.
+  village: 'e8e19a4c:ef4c9a4a:d2f271f4:0b64a2a8',
+  town: '51e1d7a2:b7085fce:3b257d28:ff9bdabc',
+  capital: 'bc432a2c:d0c1f39c:60d6c491:deca3bd6',
+  hanyang: '5ba2724e:c6e9a7fc:57df407c:15de5a62',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

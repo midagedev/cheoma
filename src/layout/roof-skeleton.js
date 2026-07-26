@@ -4,6 +4,13 @@ import { tileSurfaceMaterial, sugiwaMaterial } from '../builder/palette.js';
 import { resampleChainPreservingKnots } from './chain-sampling.js';
 import { giwaRoofEnvelope } from './giwa-roof-envelope.js';
 
+// 기와 세계좌표 켜 간격(m). 실물은 한 켜에 암키와 1장 + 수키와 1장이므로
+// 면 UV across 와 수키와 롤 배치가 같은 피치를 써야 물매를 따라 위상이 어긋나지 않는다.
+// (authored 제품 상수 — AURI 해설이 이 수치를 주지는 않는다. docs/architectural-authenticity §2.3)
+export const GIWA_ACROSS_PITCH = 0.34;
+// 물매 방향 겹침 켜 간격(m). 면 UV v · 수키와 롤 텍스처 길이 방향에 공유.
+export const GIWA_ALONG_PITCH = 0.9;
+
 // 다각형 풋프린트 + straight skeleton → 곡면 기와지붕.
 // rect / ㄱ자(L) / ㄷ자(U) 지원. skeleton 의 ridge/valley/hip 라인을 마루로 얹고,
 // 각 face 를 처마(밑변)→마루로 로프트한 곡면으로 세운다.
@@ -89,25 +96,50 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     const width = dist(Ae, Be);
 
     // ── 기와 좌표계: across = "처마 방향 투영 거리"(파라미터가 아니라 세계좌표) ──
-    // 한식기와의 기왓골은 처마에 수직으로 곧게 오르고 골 간격(0.34m)은 물매 전체에서 일정하다.
+    // 한식기와의 기왓골은 처마에 수직으로 곧게 오르고 골 간격은 물매 전체에서 일정하다.
     // 그런데 skeleton face 는 회첨(반사 끝)에서 마루로 갈수록 넓어지고 추녀(볼록 끝)에서 좁아지므로,
     // 로프트의 iso-파라미터 열(iu/NU)은 물리적으로 평행하지 않다 — ㄷ자 가운데 면은 처마선이
     // 3.20m·상단 체인 투영이 9.00m 라, 등파라미터 열의 실제 간격이 처마로 갈수록 3.2배 수렴한다
     // (= 기와가 아래로 흐를수록 좁아지는 고증 오류). 반대로 우진각 앞면은 마루로 5.6배 수렴한다.
     // 그래서 across 를 파라미터에서 떼어내 처마 방향 투영으로 잡는다: face 가 어떻게 부채꼴이 되든
     // 세계좌표 간격이 상수로 유지되고, 골은 추녀·회첨에서 "잘려" 끝난다(실제 기와 잇기 규칙).
+    // 물매(v) 도 동일하게 세계좌표: 로프트 열마다 처마→마루 3D 호길이를 먼저 적분해 두고
+    // UV.v = 마루로부터의 호길이 / GIWA_ALONG_PITCH. slopeLen 을 iu 루프 안에서 running-max 로
+    // 소비하면 같은 면의 열마다 켜 간격이 ~30% 흔들린다.
     const eDir = width > 1e-6
       ? { x: (Be.x - Ae.x) / width, z: (Be.z - Ae.z) / width }
       : { x: 1, z: 0 };
     const acrossOf = (px, pz) => (px - Ae.x) * eDir.x + (pz - Ae.z) * eDir.z;
 
-    let slopeLen = 0;
+    // 1st pass: 열별 호길이(arc from eave) + face slope 최댓값.
+    const colArc = []; // colArc[iu][iv] = 처마→해당 v 의 3D 호길이
+    let faceSlopeLen = 0;
     for (let iu = 0; iu <= NU; iu++) {
       const e = eavePts[iu], u = upPts[iu];
       const eY = eaveY + eaveLifts[iu];
       const uY = yOf(u.h);
-      slopeLen = Math.max(slopeLen, Math.hypot(dist(e, u), uY - eY));
-      maxSlopeLen = Math.max(maxSlopeLen, slopeLen);
+      const arcs = new Float64Array(NV + 1);
+      let px = e.x, py = eY, pz = e.z;
+      for (let iv = 1; iv <= NV; iv++) {
+        const v = iv / NV;
+        const qx = e.x + (u.x - e.x) * v;
+        const qz = e.z + (u.z - e.z) * v;
+        const qy = eY + (uY - eY) * fprofile(v);
+        arcs[iv] = arcs[iv - 1] + Math.hypot(qx - px, qy - py, qz - pz);
+        px = qx; py = qy; pz = qz;
+      }
+      colArc[iu] = arcs;
+      faceSlopeLen = Math.max(faceSlopeLen, arcs[NV]);
+    }
+    maxSlopeLen = Math.max(maxSlopeLen, faceSlopeLen);
+
+    // 2nd pass: 정점 + UV (across·arc 모두 세계 미터 / 켜 간격).
+    for (let iu = 0; iu <= NU; iu++) {
+      const e = eavePts[iu], u = upPts[iu];
+      const eY = eaveY + eaveLifts[iu];
+      const uY = yOf(u.h);
+      const arcs = colArc[iu];
+      const colLen = arcs[NV];
       for (let iv = 0; iv <= NV; iv++) {
         const v = iv / NV;
         // 평면 위치: 처마→마루 선형, 단 앙곡/안허리곡은 낮은 v 에서만 살아있게 감쇠
@@ -115,9 +147,10 @@ export function buildSkeletonRoof(footprint, opts = {}) {
         const pz = e.z + (u.z - e.z) * v;
         const py = eY + (uY - eY) * fprofile(v);
         pos.push(px, py, pz);
-        // u: 세계좌표 across / 0.34 → 기왓골이 평행·등간격. 삼각형마다 across 가 아핀이라
-        //    정점 보간만으로 평면상 정확히 직선인 골이 나온다(추가 정점·재질 없음).
-        uv.push(acrossOf(px, pz) / 0.34, (1 - v) * (slopeLen / 0.9));
+        // u: 세계좌표 across / 피치 → 기왓골이 평행·등간격.
+        // v: 마루로부터의 호길이 / 피치 → 물매 켜 간격이 열마다 흔들리지 않음.
+        const arcFromRidge = colLen - arcs[iv];
+        uv.push(acrossOf(px, pz) / GIWA_ACROSS_PITCH, arcFromRidge / GIWA_ALONG_PITCH);
       }
     }
     for (let iu = 0; iu < NU; iu++) for (let iv = 0; iv < NV; iv++) {
@@ -129,8 +162,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    const mat = tileSurfaceMaterial(M, Math.max(2, width), Math.max(1.5, slopeLen), tileBump);
-    // 이 지붕면 UV는 이미 기와 반복수를 구워 넣음(u=width/0.34, v=slopeLen/0.9) — 재질 repeat까지
+    const mat = tileSurfaceMaterial(M, Math.max(2, width), Math.max(1.5, faceSlopeLen), tileBump);
+    // 이 지붕면 UV는 이미 기와 반복수를 구워 넣음(across/피치, arc/피치) — 재질 repeat까지
     // 곱하면 밀도 제곱으로 무늬가 서브픽셀로 뭉개져 민무늬로 보임(히어로 종가 기와 무늬 실종의 원인).
     mat.map.repeat.set(1, 1);
     mat.side = THREE.DoubleSide;
@@ -202,10 +235,11 @@ export function buildSkeletonRoof(footprint, opts = {}) {
           return 1;
         };
         // 골 격자는 처마선과 상단 체인 투영의 합집합을 덮는다(회첨 쪽은 처마보다 넓다).
+        // 암키와 UV across 피치와 동일 — 물매를 따라 골·롤 위상이 어긋나지 않는다.
         const p0a = projUp[0], p1a = projUp[NU];
         const aMin = Math.min(0, p0a), aMax = Math.max(width, p1a);
         const aSpan = Math.max(0.3, aMax - aMin);
-        const nRolls = Math.max(2, Math.round(aSpan / 0.30));
+        const nRolls = Math.max(2, Math.round(aSpan / GIWA_ACROSS_PITCH));
         const pitch = aSpan / nRolls;
         const rollR = 0.052, KV = 9, V0 = 0.02;
         const dR = p1a - width;
@@ -423,7 +457,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     }
   }
   // 오목 곡면을 따라 마루선을 휘게 하는 곡선 튜브
-  const curvedTube = (top, botPlan, botY, r, dy) => {
+  const curvedTube = (top, botPlan, botY, r, dy, name) => {
     const pts = [];
     const K = 10;
     for (let i = 0; i <= K; i++) {
@@ -436,6 +470,10 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     const mesh = new THREE.Mesh(
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), K, r, 8), M.tileRidge);
     mesh.castShadow = true;
+    if (name) mesh.name = name;
+    // 게이트·디버그용: 처마쪽 끝(계획 좌표). TubeGeometry 중심선 복원 대신 계약 끝점을 고정.
+    mesh.userData.botPlan = { x: botPlan.x, z: botPlan.z };
+    mesh.userData.topPlan = { x: top.x, z: top.z };
     return mesh;
   };
   // 내림·추녀마루(hip): 절점 → 처마 코너(앙곡 반영)로 오목하게 내려감
@@ -446,15 +484,18 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     const botPlan = ci >= 0 ? eaveV[ci] : lo;
     const botY = eaveY + (ci >= 0 ? eaveLift[ci] : 0);
     // heroDetail: 내림·추녀마루를 굵게(적새 톤) — 근접에서 마루선이 실하게 보이게
-    g.add(curvedTube(hi, botPlan, botY, heroDetail ? 0.13 : 0.1, heroDetail ? 0.085 : 0.07));
+    g.add(curvedTube(hi, botPlan, botY, heroDetail ? 0.13 : 0.1, heroDetail ? 0.085 : 0.07, 'hip-maru'));
   }
-  // 회첨(valley): 반사 코너 → 절점, 곡면보다 살짝 낮게(골)
+  // 회첨(valley): 반사 코너 → 처마 코너(eaveV, 추녀와 같은 계약). 벽 코너(poly)를 쓰면
+  // ㄷ자 오목 코너에서 처마 overhang 만큼(~2m) 짧아져 면 끝·수키와 절단선과 어긋난다.
+  // 회첨골 전용 골기와는 아직 없음 — 튜브 정렬만 바로잡는다.
   for (const s of sk.valleys) {
     const hi = s.a.h >= s.b.h ? s.a : s.b;
     const lo = s.a.h >= s.b.h ? s.b : s.a;
     const ci = poly.findIndex((v) => Math.abs(v.x - lo.x) < 1e-3 && Math.abs(v.z - lo.z) < 1e-3);
-    const botPlan = ci >= 0 ? poly[ci] : lo;
-    g.add(curvedTube(hi, botPlan, eaveY + 0.05, 0.085, -0.04));
+    const botPlan = ci >= 0 ? eaveV[ci] : lo;
+    const botY = eaveY + (ci >= 0 ? eaveLift[ci] : 0) + 0.05;
+    g.add(curvedTube(hi, botPlan, botY, 0.085, -0.04, 'valley-maru'));
   }
 
   // ── ㄱ/ㄷ자 마루 접합부 solid 캡 ──

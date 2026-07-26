@@ -852,13 +852,17 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
   return mat;
 }
 
-// 수키와 롤 전용: 튜브 길이 방향(V)으로 기와 겹침 반복수를 계산한 재질 생성.
+// 수키와 롤 전용: TubeGeometry UV 축에 맞춰 기와 겹침 반복수를 계산한 재질 생성.
+// three TubeGeometry: uv.x = 길이(0→1 along path), uv.y = 둘레(0→1 around).
+// 물매 겹침 켜 간격은 지붕면 UV v 와 같은 0.9m (across 0.34m 가 아님 — 예전 코드는
+// 축을 뒤집어 둘레에 length/0.34 를 걸어 밀도가 과도했고 길이 방향 무늬가 사라졌다).
 export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
   const tex = mats.tileTex.clone();
   tex.needsUpdate = true;
   tex.anisotropy = 8;
-  // U 방향(둘레)은 1회 반복, V 방향(길이)은 기와 한 장 크기(0.34m) 당 1회 반복
-  tex.repeat.set(1, Math.max(1, Math.round(lengthMeters / 0.34)));
+  const alongPitch = 0.9; // GIWA_ALONG_PITCH — roof-skeleton 면 UV v 와 공유
+  // U(길이): 물매 켜 반복, V(둘레): 한 바퀴 1회
+  tex.repeat.set(Math.max(1, Math.round(lengthMeters / alongPitch)), 1);
   const mat = new THREE.MeshStandardMaterial({
     color: 0x6a6d73, map: tex, roughness: 0.9, metalness: 0.0,
     bumpMap: tex, bumpScale,
