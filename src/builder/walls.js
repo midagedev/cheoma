@@ -7,6 +7,7 @@ import {
 } from './thatch-profile.js';
 import { planChogaKitchenOpening } from '../layout/kitchen-opening-spatial.js';
 import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
+import { planChogaChimney } from './chimney-plan.js';
 import { planOpeningDetail } from './opening-detail-plan.js';
 import { createOpeningDetailAssembler } from './opening-details.js';
 import { createResidentialOpeningDetails } from './residential-opening-details.js';
@@ -391,29 +392,46 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   }
 
   // ── 부엌 끝 뭉툭한 진흙 굴뚝 스택(둥근 유기 형태·금 간 표면, 매끈 관 아님) ──
-  // 후면 처마선 밖(-zEave 바깥)에 세워 연기가 지붕에 갇히지 않고 곧게 오르게 한다.
-  // 라스 프로파일 회전체 = 단일 M.mud 메시 → smoke.js 연기 anchor 1개 유지(둘로 쪼개면 anchor 중복).
-  const zEaveW = roofProfile.zEave;
-  const ccx = xR - 0.45, ccz = -zEaveW - 0.28;        // +x 부엌 코너·후면 처마 밖
-  const prof = [
-    [0.31, 0.00], [0.32, 0.25], [0.29, 0.60], [0.27, 1.05],
-    [0.255, 1.55], [0.25, 2.05], [0.25, 2.35], [0.21, 2.52],
-    [0.13, 2.63], [0.0, 2.68],                         // 둥글게 오므린 상단
-  ].map(([r, y]) => new THREE.Vector2(r, y));
+  // 순수 chimney-plan 이 부엌 동측 개구·처마 밖 방출점을 소유. name='chimney' 그룹으로
+  // smoke.js 가 식별하므로 재질 동일성 휴리스틱과 연도용 mud 클론이 필요 없다.
+  const kitchenOpening = planChogaKitchenOpening(xR);
+  const chimneyPlan = planChogaChimney({
+    eastWallX: xR,
+    zEave: roofProfile.zEave,
+    backWallZ: zB,
+    kitchen: kitchenOpening,
+  });
+  const chimney = new THREE.Group();
+  chimney.name = 'chimney';
+  chimney.userData.chimneyPlan = chimneyPlan;
+  chimney.userData.smokeEmission = chimneyPlan.emission;
+  const prof = chimneyPlan.stack.profile.map(
+    ([r, y]) => new THREE.Vector2(r, y),
+  );
   const stackGeo = new THREE.LatheGeometry(prof, 18);
-  const stack = new THREE.Mesh(stackGeo, M.mud);       // 재질 동일성으로 smoke.js가 굴뚝 식별
-  stack.position.set(ccx, 0, ccz);                     // 마당(지면) 레벨
-  stack.castShadow = stack.receiveShadow = true; g.add(stack);
+  const stack = new THREE.Mesh(stackGeo, M.mud);
+  stack.name = 'chimney-stack';
+  stack.position.set(chimneyPlan.stack.x, chimneyPlan.stack.y, chimneyPlan.stack.z);
+  stack.castShadow = stack.receiveShadow = true;
+  chimney.add(stack);
   // 벽↔굴뚝 낮은 연도(구들에서 나오는 흙 둔덕) — 굴뚝이 겉돌지 않게 뒷벽에 물림.
-  // ⚠ 재질을 M.mud 클론으로 분리 — smoke.js는 material===M.mud 로 굴뚝을 식별하므로
-  //    연도가 원본 M.mud면 두 번째 연기 anchor가 생긴다(굴뚝 스택만 원본 M.mud 유지).
-  const flue = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, Math.abs(ccz - zB) + 0.2), M.mud.clone());
-  flue.position.set(ccx, 0.25, (ccz + zB) / 2);
-  flue.castShadow = flue.receiveShadow = true; g.add(flue);
+  // 공유 M.mud (클론 없음): 연기 앵커는 name/plan 만 보고, 연도는 방출점이 아니다.
+  const flue = new THREE.Mesh(
+    new THREE.BoxGeometry(
+      chimneyPlan.flue.width,
+      chimneyPlan.flue.height,
+      chimneyPlan.flue.depth,
+    ),
+    M.mud,
+  );
+  flue.name = 'chimney-flue';
+  flue.position.set(chimneyPlan.flue.x, chimneyPlan.flue.y, chimneyPlan.flue.z);
+  flue.castShadow = flue.receiveShadow = true;
+  chimney.add(flue);
+  g.add(chimney);
 
   // 부엌 아궁이는 마당 높이의 끝방 개구 안으로 물린다. 독립 노천 화덕처럼 외벽 밖에
   // 부뚜막 매스를 붙이지 않으며, 불씨/화광 이름은 smoke.js 시간대 계약을 그대로 쓴다.
-  const kitchenOpening = planChogaKitchenOpening(xR);
   g.add(buildRecessedKitchenHearth({
     mats: M,
     wallX: kitchenOpening.wallX,
