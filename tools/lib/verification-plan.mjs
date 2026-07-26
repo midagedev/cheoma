@@ -84,6 +84,10 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-drainage-plan.mjs',
   'tools/check-surface-browser-suite.mjs',
   'tools/check-mud-wall-contract.mjs',
+  // #150 F: pure padY / skirt / wall-foot / gateLanding coherence. FAST_CHECKS
+  // owns the assertion; no browser gate required.
+  'src/village/pad-landing-plan.js',
+  'tools/check-pad-landing.mjs',
   'tools/check-mja-house-integration.mjs',
   'tools/check-mja-house-plan.mjs',
   'tools/check-scene-guide.mjs',
@@ -374,6 +378,12 @@ function routePath(path) {
     }
     if (path === 'src/village/mud-wall-surface-plan.js') {
       select('renderer-free bounded mud-wall surface planning changed');
+      return { gates, reasons };
+    }
+    if (path === 'src/village/pad-landing-plan.js') {
+      // #150 F: pure padY/skirt/wall-foot/gateLanding coherence. FAST_CHECKS
+      // (check-pad-landing) owns the assertion; no browser gate required.
+      select('renderer-free pad/skirt/gate-landing coherence contract changed');
       return { gates, reasons };
     }
     if (path === 'src/village/critter-station-plan.js') {

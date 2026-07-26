@@ -425,6 +425,8 @@ wall-face 중앙값은 약 1.4–2.2 m. 이후 배치 튜닝은 이 게이트가
    솔리드 담은 실제 렌더 지형 삼각형을 표본화한 하나의 순수 단차 plan을 렌더러와 문 차폐 semantic
    record가 함께 소비한다. 평탄 필지는 byte-equivalent legacy run이고, 경사 필지는 변당 최대 6개의
    수평 run·0.36m 단·대문 landing을 사용하므로 pitched wall이나 렌더/상호작용 높이 이중 계약이 없다.
+   R-P4c(#150 F)는 성토 `padY`·apron skirt·wall foot·gateLanding을 한 shelf 계약으로 묶고, 주거
+   downhill 축대는 공유 `pad-stone` 재질의 연속 skirt 한 course로 제한한다(`check:pad-landing`).
    마당나무는 뒤안→측면 후보에서 실제 처마·일조·focus 시선·이웃 수관을 통과한 자리만 채택한다.
    독립 별채의 위치·원래 크기·맞배지붕·처마 footprint는 Three 없는 `auxiliary-building-plan.js`가
    실제 본채 처마, 필지 경계, 집↔대문 접근축, 자기 집과 이웃집의 30° 겨울 일조, 기존 마당 hard object를
@@ -436,6 +438,23 @@ wall-face 중앙값은 약 1.4–2.2 m. 이후 배치 튜닝은 이 게이트가
    유지하며, focus/edit/export는 소유 필지의 source range만 접는다. 같은 oriented volume은 초기 및
    편집 갱신 focus camera 후보의 물리 blocker로도 사용한다.
 
+### R-P4c. 성토 패드·축대·대문 landing 정합 — 2026-07-26 (#150 F)
+
+경사지 필지는 하나의 평탄 성토 shelf(`padY`)에 집·마당·담을 앉힌다. 순수 계약은
+`src/village/pad-landing-plan.js`가 소유하고, 렌더러(`pads.js`)와 담 단차(`wall-contract.js`)가
+같은 수치를 소비한다. 게이트: `npm run check:pad-landing` (브라우저 없음).
+
+| 축 | 계약 |
+|---|---|
+| `padY` | footprint 지형 최고 + `COURTYARD_SURFACE_LIFT`(0.06m). populate `baseY`와 동일. |
+| apron / skirt | 폴리곤 밖 0.6m apron. 상승 ≥ 0.1m 인 변만 skirt를 내고, 상면=`padY`, 하면=지형−`FOUNDATION_SINK`. |
+| wall foot | 솔리드 담 하단은 `padY` 기준 `bottomOffset ∈ [−1.44, 0]`. 잔여 낙차는 skirt가 맡으며 담 run을 늘려 숨기지 않는다. |
+| gateLanding | 대문 양옆 ≥ 0.8m 는 `bottomOffset=topOffset=0` — 문주·상방·접근면이 성토 높이에서 비틀리지 않는다. |
+| 축대 course | 주거 필지는 **최대 1**개의  downhill 축대 course. 연속 skirt 한 면이 그 course이며 `pad-stone` 재질 role을 담 단차·기단과 공유한다. 사찰 다단 apron을 민가에 복제하지 않는다. |
+
+실측(seed=1, 5규모): padY 어긋남 0, 대문 landing 비평탄 0, wall foot이 `maxDrop`을 넘는 경우 0.
+max skirt ≈ 2.1m 는 wall `maxDrop` 1.44m 를 넘을 수 있다 — 의도된 분업이다.
+
 ### 남은 갭
 
 - 필지 사이의 근접 중복담 억제는 시각적 공유 처리다. 실제 지적 경계를 합쳐 하나의 공동 소유 담으로
@@ -443,6 +462,11 @@ wall-face 중앙값은 약 1.4–2.2 m. 이후 배치 튜닝은 이 게이트가
   (경계 간 거리·share 플래그 정합·1.0–3.4 m 중앙값/비율). 배치 재조정 없이 회귀만 잡는다.
 - 성토 패드의 0.6m apron과 외곽 skirt는 담 단차와 맞물리지만, pad 자체의 경계 분할·재료 변주는 별도
   계약이다. 담 run 수를 늘려 이 문제를 숨기지 않는다.
+
+만드는 topology는 아직 없다.
+- 성토 패드의 연속 skirt는 한 장의 축대 면이다. 켜쌓기 돌 줄눈·배부름 같은 근경 masonry 변주나
+  pad top 재료 분리는 이 계약 밖이다. 담 run 수를 늘려 접지 문제를 숨기지 않는다는 원칙은 유지한다.
+
 - 산림경제의 방위별 수종 가중과 반가 화계·괴석의 역사적 비례는 현재의 단순 팔레트보다 더 정교화할
   여지가 있다. 이 연구 수치를 현재 구현의 정량 고증으로 간주하지 않는다.
 

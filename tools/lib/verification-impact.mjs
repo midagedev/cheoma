@@ -53,6 +53,12 @@ const EXACT_IMPACT = new Map([
     './check-instance-upload.mjs',
     './check-wave-contract.mjs',
   ]],
+  // #150 F: pad geometry consumes the pure pad-landing plan; keep the coherence
+  // gate in the FAST impact set even though the renderer module itself is not
+  // imported by any pure check (it pulls three).
+  ['src/generators/village/pads.js', [
+    './check-pad-landing.mjs',
+  ]],
   ['src/village/nightlight-physical-geometry.js', [
     './check-nightlight-geometry.mjs',
     './check-instance-upload.mjs',

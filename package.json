@@ -94,6 +94,7 @@
     "shoot:mja-house": "node tools/run-browser-locked.mjs -- node tools/shoot-mja-house.mjs",
     "shoot:drainage": "node tools/run-browser-locked.mjs -- node tools/shoot-drainage.mjs",
     "check:wall-step": "node tools/check-wall-step-contract.mjs",
+    "check:pad-landing": "node tools/check-pad-landing.mjs",
     "check:wave": "node tools/check-wave-contract.mjs",
     "check:wave:app": "node tools/run-browser-locked.mjs -- node tools/check-lod-app.mjs --scenario=wave",
     "check:yard": "node tools/check-yard-layout-contract.mjs",

@@ -458,6 +458,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-gosat-topology.mjs',
   './check-wall-gate-contract.mjs',
   './check-wall-step-contract.mjs',
+  './check-pad-landing.mjs',
   './check-yard-layout-contract.mjs',
   './check-yard-polygon-contract.mjs',
   './check-yard-proportion-contract.mjs',
@@ -467,6 +468,24 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-lod.mjs',
   './check-citywall.mjs',
 ]);
+assert.deepEqual(impactedFastChecks(['src/village/pad-landing-plan.js']), [
+  './check-architecture.mjs',
+  './check-pad-landing.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['tools/check-pad-landing.mjs']), [
+  './check-architecture.mjs',
+  './check-pad-landing.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['src/generators/village/pads.js']), [
+  './check-architecture.mjs',
+  './check-pad-landing.mjs',
+]);
+assert.deepEqual(ids(['src/village/pad-landing-plan.js'], {
+  newPaths: ['src/village/pad-landing-plan.js'],
+}), ['core']);
+assert.deepEqual(ids(['tools/check-pad-landing.mjs'], {
+  newPaths: ['tools/check-pad-landing.mjs'],
+}), ['core']);
 
 assert.deepEqual(ids(['src/camera/optics.js']), [
   'core', 'app', 'dof-app', 'rim', 'api-reuse', 'worker', 'lod-app', 'cinematic-app',
