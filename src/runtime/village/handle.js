@@ -46,6 +46,7 @@ import {
   applyMaterialRoleTints,
   buildParcelSpec,
   clampBuildingDimensions,
+  isResidentialHouseOnlyEdit,
   isResidentialOpeningsOnlyEdit,
   isResidentialThatchOnlyEdit,
   parcelWallType,
@@ -1177,6 +1178,7 @@ export function createVillageHandle(opts, seed, plan, group) {
 
       const nextYardSig = residentialYardSignature(gk, edit.top);
       const openingsOnly = !!(prev && isResidentialOpeningsOnlyEdit(previousAcceptedSpec, edit));
+      const houseOnly = !!(prev && isResidentialHouseOnlyEdit(previousAcceptedSpec, edit));
       const bld = { ...edit.building };
       // 프리셋 ← 변주 ov(실제 렌더 기준) ← 편집 오버라이드. 격식 가드로 치수 클램프.
       // A cross-kind edit starts from that kind's base variant instead of interpreting a
@@ -1209,9 +1211,37 @@ export function createVillageHandle(opts, seed, plan, group) {
         return house;
       };
 
-      // ── Fast path: openings-only. Keep the overlay group, courtyard wall, and
-      // aux; only swap the house mesh. Avoids re-applyMatrix4 and wall rebuild.
-      if (openingsOnly
+      // Measure parcel-local AABB before parenting under an already-transformed
+      // overlay group (setFromObject would otherwise pick up world matrix).
+      const measureHouseLocalBounds = (house) => {
+        house.updateMatrixWorld(true);
+        const buildingBox = new THREE.Box3().setFromObject(house);
+        return {
+          editRoofBounds: {
+            minX: buildingBox.min.x, maxX: buildingBox.max.x,
+            minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+          },
+          editBuildingBounds: {
+            minX: buildingBox.min.x, maxX: buildingBox.max.x,
+            minY: buildingBox.min.y, maxY: buildingBox.max.y,
+            minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+          },
+        };
+      };
+
+      const orderOverlayChildren = (root, house, wall, aux) => {
+        if (house?.parent === root) root.remove(house);
+        if (wall?.parent === root) root.remove(wall);
+        if (aux?.parent === root) root.remove(aux);
+        if (house) root.add(house);
+        if (wall) root.add(wall);
+        if (aux) root.add(aux);
+      };
+
+      // ── Fast path: house-only (openings + roof shell). Keep the overlay group
+      // matrix; swap house mesh; keep wall when roof AABB still fits, otherwise
+      // rebuild courtyard in place without disposeTree of the whole override.
+      if (houseOnly
         && prev?.userData?.wallRoot
         && prev.userData.yardSignature === nextYardSig
         && prev.userData.houseRoot) {
@@ -1221,41 +1251,66 @@ export function createVillageHandle(opts, seed, plan, group) {
         prev.remove(oldHouse);
         disposeTree(oldHouse);
         const house = assembleHouse();
-        // Insert house before wall/aux so child order stays house → wall → aux.
-        prev.add(house);
-        if (house.parent === prev) {
-          const wall = prev.userData.wallRoot;
-          const aux = prev.userData.auxRoot;
-          // Re-order: house first (three doesn't have setIndex; re-add).
-          prev.remove(house);
-          if (wall) prev.remove(wall);
-          if (aux) prev.remove(aux);
-          prev.add(house);
-          if (wall) prev.add(wall);
-          if (aux) prev.add(aux);
+        const { editRoofBounds, editBuildingBounds } = measureHouseLocalBounds(house);
+        const prevRoofBounds = prev.userData.editRoofBounds || null;
+        // Openings never move the shell; pitch/eave may — only then rebuild wall.
+        let canReuseWall = openingsOnly
+          || residentialRoofBoundsMatch(prevRoofBounds, editRoofBounds);
+        let wall = prev.userData.wallRoot;
+        let aux = prev.userData.auxRoot || null;
+        let auxiliary = prev.userData.auxiliarySpec || null;
+        const { wallType, jangdok, yardStack, clothesline, vegBed } = edit.top;
+        const auxRequested = !!edit.top.aux;
+
+        if (!canReuseWall) {
+          if (wall) { wall.parent?.remove(wall); disposeTree(wall); wall = null; }
+          if (aux) { aux.parent?.remove(aux); disposeTree(aux); aux = null; }
+          auxiliary = null;
+          const auxiliaryParcel = {
+            ...parcel,
+            kind: gk,
+            wallType,
+            aux: edit.top.aux,
+            auxRequested,
+            jangdok,
+            yardStack,
+            clothesline,
+            vegBed,
+            editRoofBounds,
+            auxiliary: null,
+          };
+          auxiliary = planParcelAuxiliary(auxiliaryParcel, {
+            site,
+            peers: [
+              ...plan.parcels,
+              ...(plan.features?.palace?.center ? [plan.features.palace] : []),
+            ],
+            hardObstacles: yardHardObstacles(auxiliaryParcel),
+          });
+          const auxOk = !!auxiliary;
+          edit.top.aux = auxOk;
+          edit.spec.params.aux = auxOk;
+          wall = buildVillageWall(parcel.shape, editWallMats, {
+            style: wallType, kind: gk, seed: parcel.seed, char01, aux: auxOk, auxRequested,
+            plotW: parcel.plotW, plotD: parcel.plotD,
+            gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
+            parcel, site, baseY: parcel.baseY,
+            wallHeightK: parcel.wallHeightK, jangdok,
+            yardStack, clothesline, vegBed,
+          });
+          if (auxiliary) aux = buildAuxiliaryBuilding(auxiliary, editWallMats);
         }
+
         prev.userData.houseRoot = house;
+        prev.userData.wallRoot = wall;
+        prev.userData.auxRoot = aux || null;
+        prev.userData.auxiliarySpec = auxiliary;
         prev.userData.editSpec = edit.spec;
         prev.userData.snowRoofKind = gk;
-        house.updateWorldMatrix(true, true);
-        // Openings do not move the roof AABB, but recompute for exact door bounds.
-        const buildingBox = new THREE.Box3().setFromObject(house);
-        const editRoofBounds = {
-          minX: buildingBox.min.x, maxX: buildingBox.max.x,
-          minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
-        };
-        const editBuildingBounds = {
-          minX: buildingBox.min.x, maxX: buildingBox.max.x,
-          minY: buildingBox.min.y, maxY: buildingBox.max.y,
-          minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
-        };
-        // Box3.setFromObject includes the group's already-applied parcel matrix
-        // (world). Store parcel-local by inverse-transforming corners is heavy;
-        // openings-only reuses previous local bounds when the shell is identical.
-        const localRoof = prev.userData.editRoofBounds || editRoofBounds;
-        const localBuilding = prev.userData.editBuildingBounds || editBuildingBounds;
-        prev.userData.editRoofBounds = localRoof;
-        prev.userData.editBuildingBounds = localBuilding;
+        prev.userData.yardSignature = residentialYardSignature(gk, edit.top);
+        prev.userData.editRoofBounds = editRoofBounds;
+        prev.userData.editBuildingBounds = editBuildingBounds;
+        orderOverlayChildren(prev, house, wall, aux);
         activatePrimaryDoor(parcelId, prev);
         if (persist) {
           persistentOverrideIds.add(parcelId);
@@ -1267,11 +1322,13 @@ export function createVillageHandle(opts, seed, plan, group) {
           ))) {
             shareableResidentialIds.add(parcelId);
           }
-          parcel.editRoofBounds = localRoof;
-          parcel.editBuildingBounds = localBuilding;
-          // Keep pick-proxy buildingSpec in lockstep with committed openings so
-          // debug/panel/share state cannot drift from the overlay mesh. Occlusion
-          // + flora are commit-only (refreshFlora) — door motion uses the overlay.
+          for (const key of PERSISTENT_YARD_FIELDS) {
+            parcel[key] = edit.top[key];
+          }
+          parcel.auxiliary = auxiliary;
+          parcel.auxRequested = auxRequested;
+          parcel.editRoofBounds = editRoofBounds;
+          parcel.editBuildingBounds = editBuildingBounds;
           const proxy = proxyById.get(parcelId);
           if (proxy) refreshParcelPickProxy(proxy, parcel, site, edit.spec, proxies, plan);
           if (refreshFlora) {
@@ -1279,10 +1336,13 @@ export function createVillageHandle(opts, seed, plan, group) {
             refreshVillageFlora();
           }
         }
-        // Snow roof tint already on the previous house materials for this group;
-        // only re-inject when weather is active and materials are new.
         if (snow.isActive()) snow.inject(house);
         retainOverlayPrograms(house, gk + (snow.isActive() ? '|snow' : ''));
+        if (!canReuseWall && wall) {
+          if (snow.isActive()) snow.inject(wall);
+          if (aux) { if (snow.isActive()) snow.inject(aux); }
+          retainOverlayPrograms(prev, gk + (snow.isActive() ? '|snow' : ''));
+        }
         registerResidentialGlow(parcelId, prev);
         if (focusedResidentialIds.has(parcelId)) {
           if (retainedLife) thresholdLife.reattach(prev, retainedLife, thresholdLifeCondition());
@@ -1295,10 +1355,8 @@ export function createVillageHandle(opts, seed, plan, group) {
         return prev;
       }
 
-      // Yard mesh can survive a house-only rebuild when the courtyard signature
-      // and roof AABB still match — openings / roof pitch previews skip wall gen.
-      // Openings-only sliders (common path) never move the roof AABB, so the
-      // post-build bounds check is guaranteed once structure + yard match.
+      // Yard mesh can survive a full overlay rebuild when the courtyard signature
+      // and roof AABB still match (fallback when house-only prerequisites fail).
       const prevRoofBounds = prev?.userData?.editRoofBounds || null;
       let retainedWall = null;
       let retainedAux = null;

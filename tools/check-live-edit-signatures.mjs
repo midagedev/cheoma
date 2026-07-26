@@ -2,6 +2,7 @@
 // thatch-only detection. No Three, no browser.
 import assert from 'node:assert/strict';
 import {
+  isResidentialHouseOnlyEdit,
   isResidentialOpeningsOnlyEdit,
   isResidentialThatchOnlyEdit,
   residentialGeometrySignature,
@@ -68,6 +69,37 @@ assert.equal(
   isResidentialThatchOnlyEdit(base, doorEdit),
   false,
   'door width misclassified as thatch-only',
+);
+assert.equal(
+  isResidentialHouseOnlyEdit(base, doorEdit),
+  true,
+  'door width was not house-only',
+);
+
+const pitchEdit = resolveResidentialEdit(parcel, base, {
+  building: { roofPitch: 0.72 },
+});
+assert.equal(
+  isResidentialOpeningsOnlyEdit(base, pitchEdit),
+  false,
+  'roof pitch misclassified as openings-only',
+);
+assert.equal(
+  isResidentialHouseOnlyEdit(base, pitchEdit),
+  true,
+  'roof pitch was not house-only',
+);
+assert.notEqual(
+  residentialStructureSignature(pitchEdit.spec),
+  residentialStructureSignature(base),
+  'roof pitch kept structure signature',
+);
+
+const wallEdit = resolveResidentialEdit(parcel, base, { wallType: 'stone' });
+assert.equal(
+  isResidentialHouseOnlyEdit(base, wallEdit),
+  false,
+  'wallType change misclassified as house-only',
 );
 
 const yardA = residentialYardSignature('choga', thatchEdit.top);
