@@ -52,6 +52,9 @@ const ROAD_CURVE_SETBACK = 1.2; // 도로 ribbon 밖의 담·배수 여유(실�
 // 농촌 확대. 도성·한양은 폭을 더 눌러 호수를 지키되, 깊이는 멍석 하한(2.1m)을 깨지 않게 둔다.
 const LOT_W_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.90, hanyang: 0.80 };
 const LOT_D_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.96, hanyang: 0.90 };
+// 기와만 농촌 깊이 추가 부스트. 초가는 채 높이가 낮아 이미 L/H≳3 대; 기와 중형 채 높이
+// ~4.0 m 에서 앞마당 ~10 m → L/H≈2.55. capital/hanyang 는 1(도성 밀도·실측 최소 변경).
+const GIWA_LOT_D_BOOST = { hamlet: 1.14, village: 1.18, town: 1.12, capital: 1.0, hanyang: 1.0 };
 // 집 축척. 농촌은 1(온전한 크기), 도시만 가대 압축. fitHouseWithinParcel 축소와 별개다.
 const STRUCTURE_SCALE = { hamlet: 1, village: 1, town: 1, capital: 0.96, hanyang: 0.92 };
 
@@ -141,9 +144,9 @@ function dimsFor(rank, char01) {
   const kindRank = rank + (char01 - 0.5) * 0.62;      // 반촌 +0.31(기와↑) / 민촌 -0.31(초가↑)
   const sizeMul = 0.84 + char01 * 0.40;               // 민촌 0.84 / 여염 1.04 / 반촌 1.24
   let kind, w, d;
-  // 버킷 깊이: 기와 중형 F≈6.8·inset 5.2 → plotD≥14 가 멍석 하한, ≥21 이 L/H≈2.55.
-  // LOT_SCALE(농촌 >1)과 곱해 앞마당을 키운다. 폭은 옆 여백·별채용 소폭 확대.
-  // 한양은 LOT_SCALE 0.90 으로 눌려 실측(~131평) 대비 과도 확대를 피한다.
+  // 버킷 깊이: 기와 중형 F≈6.8·inset 5.2 → plotD≥14 가 멍석 하한.
+  // 기와 농촌 앞마당(L/H≈2.55)은 LOT_D_SCALE × GIWA_LOT_D_BOOST 로 키운다 — 버킷을 키우면
+  // capital/hanyang 도 같이 깊어져 도성 밀도를 건드린다. 폭은 옆 여백·별채용 소폭 확대.
   if (kindRank >= 0.58) { kind = 'giwa'; w = 17.5; d = 19.5; }
   else if (kindRank >= 0.40) { kind = 'giwa'; w = 14.5; d = 16.5; }
   else if (kindRank >= 0.26) { kind = 'choga'; w = 12; d = 12.5; }
@@ -247,11 +250,12 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const scale = opts.scale;
   const lotWScale = LOT_W_SCALE[scale] || 1;
   const lotDScale = LOT_D_SCALE[scale] || 1;
+  const giwaDBoost = GIWA_LOT_D_BOOST[scale] || 1;
   const structureScale = STRUCTURE_SCALE[scale] || 1;
   const compactLot = (dims) => ({
     ...dims,
     plotW: dims.plotW * lotWScale,
-    plotD: dims.plotD * lotDScale,
+    plotD: dims.plotD * lotDScale * (dims.kind === 'giwa' ? giwaDBoost : 1),
   });
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const roads = roadsResult.roads;
