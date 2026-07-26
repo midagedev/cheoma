@@ -10,6 +10,12 @@ import {
 // Korean masonry walls descend a slope as level courses rather than pitched
 // spans. These bounds keep that rhythm readable without turning one parcel edge
 // into an unbounded geometry multiplier.
+//
+// Vertical coherence with the parcel 성토 shelf is owned by pad-landing-plan.js
+// (#150 F): baseY/padY is the shared datum, gateLanding spans stay at that
+// height (bottomOffset = topOffset = 0), and the wall foot may drop at most
+// maxDrop so it overlaps the single downhill pad-stone 축대/skirt rather than
+// chasing residual fill the continuous skirt already retains.
 export const VILLAGE_WALL_STEP = Object.freeze({
   rise: 0.36,
   triggerRelief: 0.24,

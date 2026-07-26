@@ -368,6 +368,11 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
 - `check:wall-step`
   - 평탄 지형의 다섯 담 유형이 이전 layout과 정확히 같은지, 실제 terrain-grid를 읽는 `tile/stone/mud`만 경사면에서 수평 단을 만드는지 검사한다.
   - 단 높이 0.36m, 변당 run 6개 상한, 평평한 대문 landing, renderer와 문 occlusion semantic record의 y 범위 일치를 Three·DOM·전역 RNG 없이 고정한다.
+- `check:pad-landing`
+  - 성토 `padY`(= 지형 최고 + 0.06), apron skirt 상/하면, 솔리드 담 foot(`bottomOffset ∈ [−1.44, 0]`),
+    대문 landing(≥ 0.8m · offset 0)이 한 shelf를 공유하는지 Three·DOM 없이 검사한다.
+  - 주거 downhill 축대는 최대 1 course·`pad-stone` 재질 role 공유. multi-course·maxDrop 초과 foot은
+    음성 대조로 실패해야 한다. 5규모 실측 plan과 합성 경사 fixture를 함께 고정한다.
 - `check:wave`
   - 실제 `createRerollWave()`를 번들해 전 구간의 정적 scenery가 old/incoming 중 정확히 하나만 보이고, handoff peak에 veil=1·shadow=0인지 검사한다.
   - 공유 재질 identity·opacity·transparent·depthWrite·version이 불변이며, 궁 병합 root가 건물 tofu wave에 합류하고 cancel/dispose가 반복해도 소유권과 transform이 정상화되는지 확인한다.
@@ -963,6 +968,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-gosat-topology.mjs` | 이웃 필지 경계 간 고샅 폭 측정·share 플래그 정합·역사 1.0–3.4 m 중앙값/비율 (#150-G) | 배치 변경 없이 measure+assert. `src/village/gosat-topology.js` + `village-walls-parcels.md` R-P2. |
 | `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |
 | `tools/check-wall-step-contract.mjs` | 평탄 exactness, 수평 단·대문 landing·변당 6 run 상한, renderer/semantic y 공유 | 순수 계약이며 실제 마을 안의 율동·가림은 `npm run shoot:wall-steps` 좌·우 PNG를 직접 본다. |
+| `tools/check-pad-landing.mjs` | padY·skirt·wall foot·gateLanding 정합, 주거 축대 1 course·pad-stone 공유 | 순수 계약. 시각 접지·축대 실루엣은 `shoot:relief` / `shoot:wall-steps` 로 확인한다. |
 | `tools/shoot-wall-steps.mjs` | 실제 `village:1:p8`의 강한 돌담 단차를 양쪽 카메라에서 촬영하고 calls/triangles·WebGL renderer 기록 | 대표 필지 한 건의 시각 판정이며 모든 규모/seed의 수학은 `check:wall-step`과 layout/worker 게이트가 맡는다. |
 | `tools/check-auxiliary-building-plan.mjs` | 435개 요청의 불변 spec/거절, 실제 생성/commit 편집 처마·필지·대문·30° 일조·마당 이격, local/world/solar/hard footprint 동일성, 전역 RNG 불변 | Three 없는 배치 계약이며 물리 표면·LOD 소유권은 geometry/app/worker 게이트가 맡는다. |
 | `tools/check-auxiliary-building-geometry.mjs` | 공개 borrowed-material renderer의 기와/초가 역할, exact local envelope, 3 mesh·48 triangle, 결정론, idempotent geometry dispose | 필지 배치와 제품 병합·focus/export는 plan/app/worker/GLB 게이트가 맡는다. |

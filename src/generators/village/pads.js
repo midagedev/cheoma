@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import * as G from '../../core/math/geom2.js';
 import { markSharedResource } from '../../core/three-resources.js';
 import { parcelWorldPoint } from '../../village/parcel-contract.js';
-import { terrainRangeOnPolygon } from '../../village/placement-search.js';
+import {
+  VILLAGE_PAD,
+  computePadY,
+  planPadSkirtSegments,
+} from '../../village/pad-landing-plan.js';
 import {
   TEMPLE_PAD_LIFT,
   templeCompoundDepth,
@@ -10,26 +14,24 @@ import {
   templeFootprint,
 } from '../../village/temple-plan.js';
 
-const PAD_LIFT = 0.06;
-const PAD_MARGIN = 0.6;
-const PAD_STEP_MIN = 0.1;
-const PAD_SINK = 0.06;
+// Re-export the pure padY helper so existing consumers of this module keep
+// working without importing the Three-free plan directly.
+export { computePadY };
+
+const PAD_LIFT = VILLAGE_PAD.lift;
 
 // 필지·랜드마크 패드는 같은 두 재질을 공유해 draw call과 material 수를 고정한다.
+// skirt 와 선택 축대 course 는 동일 stone family (VILLAGE_PAD.materialRole).
 const padTopMaterial = markSharedResource(
   new THREE.MeshStandardMaterial({ color: 0x8a7f66, roughness: 1, metalness: 0 }),
 );
 const padStoneMaterial = markSharedResource(
   new THREE.MeshStandardMaterial({ color: 0x8d857a, roughness: 1, metalness: 0 }),
 );
+padStoneMaterial.userData.materialRole = VILLAGE_PAD.materialRole;
 
 export function featurePadMaterials() {
   return { top: padTopMaterial, stone: padStoneMaterial };
-}
-
-// footprint 전체가 지형에 파묻히지 않도록 코너·변중점·내부 grid의 최고점을 사용한다.
-export function computePadY(parcel, site) {
-  return terrainRangeOnPolygon(site, parcel.poly, 5).max + PAD_LIFT;
 }
 
 function makeBufferMesh(positions, indices, material, name) {
@@ -45,31 +47,23 @@ function makeBufferMesh(positions, indices, material, name) {
 }
 
 function emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, skirtIndices) {
-  const pad = G.offsetPoly(G.ensureCCW(polygon), PAD_MARGIN);
+  const pad = G.offsetPoly(G.ensureCCW(polygon), VILLAGE_PAD.margin);
   const topBase = topPositions.length / 3;
   for (const corner of pad) topPositions.push(corner.x, padY, corner.z);
   for (let i = 1; i < pad.length - 1; i++) topIndices.push(topBase, topBase + i + 1, topBase + i);
 
-  for (let i = 0; i < pad.length; i++) {
-    const a = pad[i], b = pad[(i + 1) % pad.length];
-    const segments = 4;
-    for (let segment = 0; segment < segments; segment++) {
-      const t0 = segment / segments, t1 = (segment + 1) / segments;
-      const p0 = { x: a.x + (b.x - a.x) * t0, z: a.z + (b.z - a.z) * t0 };
-      const p1 = { x: a.x + (b.x - a.x) * t1, z: a.z + (b.z - a.z) * t1 };
-      const ground0 = site.heightAt(p0.x, p0.z), ground1 = site.heightAt(p1.x, p1.z);
-      if (padY - ground0 < PAD_STEP_MIN && padY - ground1 < PAD_STEP_MIN) continue;
-      const bottom0 = Math.min(ground0, padY) - PAD_SINK;
-      const bottom1 = Math.min(ground1, padY) - PAD_SINK;
-      const base = skirtPositions.length / 3;
-      skirtPositions.push(
-        p0.x, padY, p0.z,
-        p0.x, bottom0, p0.z,
-        p1.x, padY, p1.z,
-        p1.x, bottom1, p1.z,
-      );
-      skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
-    }
+  // Pure skirt plan owns segment split / sink / stepMin so wall-foot coherence
+  // can be asserted without rebuilding geometry. Renderer only tessellates.
+  const segments = planPadSkirtSegments(polygon, padY, site);
+  for (const segment of segments) {
+    const base = skirtPositions.length / 3;
+    skirtPositions.push(
+      segment.a.x, segment.topY, segment.a.z,
+      segment.a.x, segment.bottom0, segment.a.z,
+      segment.b.x, segment.topY, segment.b.z,
+      segment.b.x, segment.bottom1, segment.b.z,
+    );
+    skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
   }
 }
 
@@ -90,6 +84,7 @@ export function buildParcelPads(parcels, site) {
     );
   }
   if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopMaterial, 'pad-top'));
+  // pad-skirt is the single downhill 축대 course face; same stone material role.
   if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'pad-skirt'));
   return group;
 }
