@@ -77,6 +77,7 @@ npm run check:aa              # 컴포저 경로 기하 AA(MSAA) 계약 + 경사
 npm run check:particle-geometry # 강수·꽃잎/모트·한지 불빛의 단일 물리 geometry 체크포인트
 npm run check:instance-upload # 필지 표현의 CPU 배열 부분 변경·복원·export 불변 계약
 npm run check:instance-upload:browser # 실제 WebGL bufferSubData 부분 전송 증거
+npm run check:instance-merge  # 인스턴싱/정적 병합 geometry digest·material order 불변 (scratch Matrix4)
 npm run check:api-reuse      # 공개 building·시전 API 재사용·dispose·제품 카메라 smoke
 npm run check:mud-wall      # Three 없는 토담 표면 plan·상한·envelope 데이터 계약
 npm run check:drainage      # Three 없는 도로 측구·대문 건넘 정책·경사·공간 계약
@@ -197,6 +198,15 @@ source position 범위, 야간 한지 불빛 owner의 고정 slot 범위만 표�
 range는 Three r185가 한 호출로 병합하고, 갱신 중 `bufferData` 재할당은 0이며 render 뒤 `updateRanges`가
 비워져야 한다. 이 작은 Chrome fixture는 `check:all`/`check:full`에 포함되고 관련 core·instancing·wave·nightlight
 변경에서 `check:pr`가 자동 선택한다.
+
+### `npm run check:instance-merge`
+
+`src/village/instancing.js`의 조립 hot path가 모듈 scratch `Matrix4`/`Color`를 재사용해도 geometry attribute
+digest와 material 순서가 같은 seed fixture에서 바이트 단위로 재현되는지를 검증한다. `decomposeByMaterial`
+(preMatrix·InstancedMesh bake·strict shadow partition), `mergeStatic`, `buildHouseInstances`를 두 번 독립
+빌드해 비교하고, hide→show 후 instance matrix 복원과 export snapshot 불변, 동일 root 반복 decomp의 scratch
+누수를 함께 봉인한다. browser-free이며 `check`/`check:pr` core 경로에 포함되고 `instancing.js` 변경 시
+`check:instance-upload`와 함께 선택된다.
 
 ### `npm run check:building-lifecycle`
 

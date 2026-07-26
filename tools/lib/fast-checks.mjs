@@ -17,6 +17,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-opening-glow-catalog.mjs',
   './check-nightlight-geometry.mjs',
   './check-instance-upload.mjs',
+  './check-instance-merge-immutability.mjs',
   './check-nightlights.mjs',
   './check-village-night-glow.mjs',
   './check-weather-geometry.mjs',

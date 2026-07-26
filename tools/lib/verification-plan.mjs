@@ -102,6 +102,9 @@ const REVIEWED_NEW_PATHS = new Set([
   // forest-crunch 가 소비하고 worker 해시에 반영된다. 브라우저는 불필요.
   'src/village/forest-canopy-atten.js',
   'tools/check-forest-canopy-atten.mjs',
+  // #150 N: instance/merge scratch Matrix4 재사용 후 geometry digest·material order 불변.
+  // browser-free FAST_CHECKS 게이트; 시각/export 의미 불변.
+  'tools/check-instance-merge-immutability.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',

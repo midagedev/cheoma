@@ -41,6 +41,7 @@
     "check:ink:app": "node tools/run-browser-locked.mjs -- node tools/check-ink-app.mjs",
     "check:instance-upload": "node tools/check-instance-upload.mjs",
     "check:instance-upload:browser": "node tools/run-browser-locked.mjs -- node tools/check-instance-upload-browser.mjs",
+    "check:instance-merge": "node tools/check-instance-merge-immutability.mjs",
     "check:building-lifecycle": "node tools/run-browser-locked.mjs -- node tools/check-building-texture-lifecycle.mjs",
     "check:building-clearance": "node tools/check-building-clearance.mjs",
     "check:ground-stone": "node tools/check-ground-stone-bedding.mjs",
