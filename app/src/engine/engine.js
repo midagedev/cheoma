@@ -608,9 +608,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     isBusy: () => !!(demo.active || villageWaveBusy() || village.heroAsm || heroActive),
   });
   const viewShift = viewShiftRuntime.state;
-  const focusFramingForViewport = (proxy, framing = proxy?.cameraFraming) => (
+  const focusFramingForViewport = (proxy, framing = proxy?.cameraFraming, options = undefined) => (
     proxy && framing
-      ? viewShiftRuntime.fitFraming(framing, proxy.focusSubject)
+      ? viewShiftRuntime.fitFraming(framing, proxy.focusSubject, options)
       : framing
   );
 
@@ -925,6 +925,55 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     active.onProgress?.(k);   // 패널 컨텍스트 모프 등 — 카메라와 동일 클록(#92 타임라인 통일)
     return k;
+  }
+
+  // (i) 크롬 모프 후 재해석 — ui-consolidation §6.15. focus-in 의 첫 solve 는 아직 모프 전 DOM 을
+  // 본다(실측 390×844: 동기 focus() 반환 시점에 보기 카드 상주 + 시트 peek, 칩과 half 는 ~60ms 뒤,
+  // 시트 박스는 420ms CSS 트랜지션). 정착을 기다리면 돌리인이 최대 ~450ms 늦으므로 트윈은 즉시
+  // 시작하고, 인셋이 멎은 프레임에서 한 번만 다시 풀어 **종점만** 교체한다.
+  //
+  // 종점만 바꾸면 안 된다: 위치는 lerp(p0, p1, ease(e)) 이라 p1 만 갈면 그 프레임에 ease(e)·Δp1
+  // 만큼 순간이동한다(e≈0.15, Δ≈74m → 11m 점프). 현재 포즈를 보존하도록 p0 를 역산한다:
+  //   lerp(p0', p1', k) = cur  →  p0' = (cur - k·p1') / (1 - k)
+  // 위치는 정확히 연속이고 속도만 남은 구간에 재분배된다. 렌즈(f0/f1)는 authored 계약이라 불변.
+  function retargetTweenEndpoint(position, target, { maxEase = 0.35 } = {}) {
+    if (!tween || tween.arc) return false;          // 종가 나선(arc)은 다른 파라미터화 — 제외
+    const k = easeInOutCubic(clamp01(tween.e / tween.dur));
+    if (!(k < maxEase)) return false;               // 늦게 정착하면 프레임보다 모션을 지킨다
+    const rebase = (from, to, current) => {
+      from.copy(current).addScaledVector(to, -k).multiplyScalar(1 / (1 - k));
+    };
+    tween.p1.copy(position);
+    tween.t1.copy(target);
+    rebase(tween.p0, tween.p1, camera.position);
+    rebase(tween.t0, tween.t1, controls.target);
+    return true;
+  }
+
+  // 인셋이 3프레임 연속 동일해지면(=모프 종료) 한 번만 재해석한다. 상한 700ms(트랜지션 420ms + 여유).
+  function retargetOnChromeSettled(parcelId, proxy, options) {
+    if (typeof requestAnimationFrame !== 'function') return;
+    let signature = viewShiftRuntime.layoutSignature();
+    let still = 0;
+    let expired = false;
+    const cap = tasks.after(() => { expired = true; }, 700);
+    const step = () => {
+      if (disposed || expired || !village.active || village.selected !== parcelId || !tween) {
+        tasks.clearAfter(cap);
+        return;
+      }
+      const next = viewShiftRuntime.layoutSignature();
+      still = next === signature ? still + 1 : 0;
+      signature = next;
+      if (still >= 3) {
+        const refit = focusFramingForViewport(proxy, undefined, options);
+        if (refit?.position && refit?.target) retargetTweenEndpoint(refit.position, refit.target);
+        tasks.clearAfter(cap);
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
 
   function finishCameraTween(active) {
@@ -1892,7 +1941,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // SelectStart removes the explore guide and morphs the product chrome.
       // Sample after Svelte's queued DOM flush, otherwise the physical endpoint
       // is fitted to UI that disappears before the camera arrives.
-      const f = focusFramingForViewport(pr);
+      // focus 는 컴포지션을 트윈하므로 solve 는 *목적지* 값을 알아야 한다(ui-consolidation §6.17).
+      const settledComposition = -VILLAGE_FOCUS_SKY_FRACTION * focusCompositionFor(parcelId);
+      const f = focusFramingForViewport(pr, undefined, { compositionY: settledComposition });
       const closeupDist = f.position.distanceTo(f.target);
       // 예열 중 live rebuild가 같은 필지 root를 교체할 수 있으므로 현재 overlay에서 늦게 해석한다.
       const openingFocus = resolveArchitecturalDofAnchor(parcelId, new THREE.Vector3());
@@ -1915,6 +1966,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           emitSettledView();
         },
       });
+      retargetOnChromeSettled(parcelId, pr, { compositionY: settledComposition });
     });
   }
 
@@ -1951,7 +2003,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #128 reveal 게이트: hop 돌리 시작을 B 오버레이 셰이더 링크 완료(cap 상한)에 묶어 첫 렌더 스톨 방지.
     afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
       if (!village.active || village.selected !== toId) return;
-      const f = focusFramingForViewport(pr);
+      const settledComposition = -VILLAGE_FOCUS_SKY_FRACTION * focusCompositionFor(toId);
+      const f = focusFramingForViewport(pr, undefined, { compositionY: settledComposition });
       const closeupDist = f.position.distanceTo(f.target);
       // 예열 중 교체된 목적지 root의 좌표만 커밋해 폐기된 Object3D 의미점이 되살아나지 않게 한다.
       const toOpeningFocus = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
@@ -1977,6 +2030,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           emitSettledView();
         },
       });
+      retargetOnChromeSettled(toId, pr, { compositionY: settledComposition });
     });
   }
 
@@ -2366,7 +2420,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageHover', null);
     startVillageReveal(dur + 0.4);                               // 재형성 무드 + 폴백 소품 은닉 마스킹
     if (pr) {
-      const framing = focusFramingForViewport(pr);
+      // 앵커 E: compositionY 만 넘긴다. 이 경로는 tween 이 아니라 revealCamera 를 구동하므로
+      // retargetTweenEndpoint 는 no-op 이다 — 조용히 "고치려" 하지 말 것(ui-consolidation §6.15).
+      const framing = focusFramingForViewport(pr, undefined, {
+        compositionY: -VILLAGE_FOCUS_SKY_FRACTION * focusCompositionFor(id),
+      });
       const rebuildState = village.handle.parcelRebuildState?.(id);
       revealCamera.reveal('rebuild', {
         position: framing.position,
