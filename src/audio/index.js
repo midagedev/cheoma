@@ -1,20 +1,31 @@
 import * as THREE from 'three';
 import { createChimes } from './chime.js';
 import { createAmbience } from './ambience.js';
-import { createBgm, TIME_TRACK } from './bgm.js';
+import { createBgm } from './bgm.js';
 import { createStream } from './stream.js';
 import { createDog } from './dog.js';
+import { handOffTrack, trackForEntry, trackForTime } from './track-policy.js';
+import { introAdvance, introInitialState, introReduce } from './intro-policy.js';
 
 // 사운드 레이어 오케스트레이터.
 //   setupAudio(listenerCarrier, { layout, streamAnchor, getDogAnchor, getDogState }) →
 //     { start(), setEnabled(v), setEnvActive(v), setTime(name), setWeather(name),
 //       update(dt), setBgmVolume(v), setAmbienceVolume(v), setLayout(l),
-//       strike(i?), barkDog(), getTracks(), playTrack(n), listener, dispose() }
+//       strike(i?), barkDog(), getTracks(), playTrack(n),
+//       introEvent(e), playEntryTrack(), prefetchEntryTrack(), handOffEntryTrack(),
+//       diagnostics(), listener, dispose() }
 //   streamAnchor: 개울 물소리를 앉힐 월드 좌표(THREE.Vector3) 또는 null.
 //   getDogAnchor/getDogState: 마당 개의 라이브 월드 위치·상태('walking'|'sitting') getter(없으면 개 없음).
 //
 // listenerCarrier(보통 camera)에 THREE.AudioListener 를 붙인다. 브라우저 autoplay 정책상
-// 소리는 첫 사용자 제스처에서 start() 로 AudioContext.resume() 한 뒤에야 난다.
+// 소리는 첫 사용자 제스처에서 start() 로 AudioContext.resume() 한 뒤에야 난다. start() 는
+// **제스처 핸들러 안에서 동기적으로** 불려야 한다(첫 문장이 ctx.resume() 이라 그 호출 자체는
+// 동기다). 이후엔 어떤 제스처·복귀에서든 resume 을 재시도한다(iOS 인터럽션 복구).
+//
+// 첫 진입 BGM(genesis)과 타이틀 뮤트 복원은 순수 모듈이 소유한다:
+//   · track-policy.js  — 어떤 상태가 어떤 트랙 이름으로 풀리는가.
+//   · intro-policy.js  — arm/enter/settle/skip 상태기계와 볼륨 종착 불변식.
+// 엔진은 introEvent() 로 사건만 알린다. **엔진이 직접 BGM 을 뮤트하면 안 된다**(복원 누락 = 영구 무음).
 //
 // 신호 흐름:
 //   ambience 레이어 -> ambienceGain --\
@@ -92,6 +103,8 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
   let time = 'day';
   let weather = 'clear';
   let ambienceVol = 1;
+  let intro = introInitialState();
+  let appliedIntroVol = intro.volume;
 
   // 시간대·날씨 → 바람 세기(0~1). 풍경 타종·바람음의 공통 구동값.
   function windiness() {
@@ -111,6 +124,63 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
     if (disposed) return;
     listener.setMasterVolume(enabled ? 1 : 0);
   }
+  // ---------- AudioContext 재개 그물(모바일 핵심) ----------
+  // iOS/Safari 는 백그라운드 전환·오디오 인터럽션(전화·타 앱 재생)에서 컨텍스트를 suspended 로
+  // 떨어뜨리고 **스스로 돌아오지 않는다**. start() 이후엔 어떤 사용자 제스처/포그라운드 복귀에서든
+  // resume 을 재시도한다. running 이면 비교 한 번으로 끝나 프레임 비용 0.
+  const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'keydown'];
+  let unlockBound = false;
+  function tryResume() {
+    if (disposed || !started || ctx.state === 'running') return;
+    try { const p = ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch {}
+  }
+  function onVisibility() { if (document.visibilityState === 'visible') tryResume(); }
+  function bindUnlock() {
+    if (unlockBound || typeof window === 'undefined') return;
+    unlockBound = true;
+    for (const type of UNLOCK_EVENTS) {
+      window.addEventListener(type, tryResume, { passive: true, capture: true });
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+  }
+  function unbindUnlock() {
+    if (!unlockBound) return;
+    unlockBound = false;
+    for (const type of UNLOCK_EVENTS) {
+      window.removeEventListener(type, tryResume, { capture: true });
+    }
+    document.removeEventListener('visibilitychange', onVisibility);
+  }
+
+  // 시간대 트랙 프리페치 시점. 진입 스웰 중(랜딩)에는 **인계 대상 한 곡만** 받는다 — 랜딩은
+  // 프레임 예산이 가장 빡빡한 구간이고, 4곡(≈17MB) fetch+decode 를 그 위에 얹을 이유가 없다.
+  // 나머지는 정착(settle/skip) 후 배경으로 받는다.
+  function kickTimeTrackPrefetch() {
+    if (disposed) return;
+    const preferred = trackForTime(time);
+    if (intro.phase === 'entering') bgm.prefetch(preferred);
+    else bgm.prefetchTimeTracks(preferred);
+  }
+
+  // ---------- 첫 진입 BGM 상태기계 적용 ----------
+  function pushIntroVolume() {
+    if (disposed || intro.volume === appliedIntroVol) return;
+    appliedIntroVol = intro.volume;
+    bgm.setVolume(intro.volume);
+  }
+  //   사건 전환 시에만 트랙을 건드린다(프레임마다 play 하면 보이스가 쌓인다).
+  function applyIntro(prev) {
+    if (intro === prev) return;
+    pushIntroVolume();
+    if (intro.track && intro.track !== prev.track) { bgm.play(intro.track); return; }
+    if (!intro.track && prev.track) {
+      // 진입 트랙 → 시간대 트랙 인계(4s 등파워 크로스페이드). 랜딩 중 사용자가 시간대를 직접
+      // 바꿨다면 현재 트랙이 진입 트랙이 아니므로 handOffTrack 이 null → 그 선택을 덮지 않는다.
+      const next = handOffTrack(bgm.currentTrack(), time);
+      if (next) bgm.play(next);
+    }
+  }
+
   // 개울 물소리·개 짖음(위치성 env 사운드)은 전체 사운드 ON && env 레이어 ON 일 때만.
   function pushEnvAudio() {
     if (disposed) return;
@@ -124,21 +194,27 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
     start() {
       if (disposed || started) return startPromise || Promise.resolve();
       if (startPromise) return startPromise;
+      // ctx.resume() 은 이 async 본문의 첫 문장이라 호출 자체가 동기다 → 제스처 핸들러에서
+      // start() 를 부르면 iOS 도 재개한다. await 뒤로 밀면 사용자 활성 창을 벗어나 영구 무음.
       startPromise = (async () => {
         if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
         if (disposed) return;
         started = true;
+        bindUnlock();
         chimes.start();
         ambience.start();
         stream?.start();
         dog?.start();
         await bgm.start();
         if (disposed) return;
+        kickTimeTrackPrefetch();
         applyMaster();
         pushEnvAudio();
       })().finally(() => { startPromise = null; });
       return startPromise;
     },
+    // 제스처마다 부를 수 있는 무비용 재개 시도(running 이면 즉시 반환).
+    resume() { tryResume(); },
     setEnabled(v) { if (disposed) return; enabled = !!v; applyMaster(); pushEnvAudio(); },
     // env 레이어(산수화 배경·지형·개울·개) ON/OFF — 위치성 env 사운드를 따라 정지/재개
     setEnvActive(v) { if (disposed) return; envActive = !!v; pushEnvAudio(); },
@@ -147,9 +223,8 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       time = name;
       ambience.setTime(name);
       pushWind();
-      // BGM 트랙 매핑 + 4s 크로스페이드
-      const track = { dawn: 'dawn', day: 'main-theme', sunset: 'sunset', night: 'night' }[name];
-      if (track) bgm.play(track);
+      // BGM 트랙 매핑 + 4s 크로스페이드(정책은 track-policy.js 소유)
+      bgm.play(trackForTime(name));
     },
     setWeather(name) {
       if (disposed) return;
@@ -170,7 +245,29 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       dog?.setVolume(ambienceVol);    // 개 짖음도 환경음 볼륨에 종속
     },
     // #140-D 현재 시간대 트랙 프리페치(제스처 전 유휴 호출용) — 첫 사운드 활성 즉시 재생.
-    prefetchCurrentTrack() { return disposed ? Promise.resolve(null) : bgm.prefetch(TIME_TRACK[time]); },
+    prefetchCurrentTrack() { return disposed ? Promise.resolve(null) : bgm.prefetch(trackForTime(time)); },
+    // 첫 진입 트랙 프리페치 — 타이틀이 화면을 덮는 동안(무거운 작업 창) 받아 둔다.
+    prefetchEntryTrack() { return disposed ? Promise.resolve(null) : bgm.prefetch(trackForEntry()); },
+    // 첫 진입 BGM 상태기계 사건. 'arm' | 'enter' | 'settle' | 'skip' (intro-policy.js).
+    //   엔진의 유일한 BGM 뮤트·복원 창구다. 어떤 사건 열이든 settle/skip 에서 볼륨 1 로 끝난다.
+    introEvent(event) {
+      if (disposed) return null;
+      const prev = intro;
+      intro = introReduce(prev, event);
+      applyIntro(prev);
+      // 정착 후에는 남은 시간대 트랙을 배경으로 받아 둔다(이후 시간대 전환이 즉시 크로스페이드).
+      if (started && intro.phase === 'settled' && prev.phase !== 'settled') kickTimeTrackPrefetch();
+      return intro.phase;
+    },
+    // 진입 트랙을 직접 지정(introEvent('enter') 가 이미 하지만, 진입 연출 없는 경로 테스트용).
+    playEntryTrack() { if (!disposed) bgm.play(trackForEntry()); },
+    // 진입 트랙 → 현재 시간대 트랙 인계. 이미 시간대 트랙이면 no-op.
+    handOffEntryTrack() {
+      if (disposed) return null;
+      const next = handOffTrack(bgm.currentTrack(), time);
+      if (next) bgm.play(next);
+      return next;
+    },
     // BGM 트랙 선택지(옵션 트랙 village/genesis 포함) 노출
     getTracks() { return bgm.getTracks(); },
     // 특정 트랙 강제 재생(옵션 트랙 테스트/노출용)
@@ -179,8 +276,37 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
     strike(i) { if (!disposed) chimes.strike(i); },
     // 테스트용 즉시 개 짖음
     barkDog() { if (!disposed) dog?.bark(); },
+    // 무음 진단 스냅샷 — 귀 없이 판정하는 계측점. 화면이 아니라 오디오 그래프를 본다.
+    //   ctx 상태 / 마스터 / BGM 트랙·보이스 게인 / 각 레이어 활성·게인 / mp3 로드 실패.
+    diagnostics() {
+      return {
+        disposed,
+        ctxState: disposed ? 'disposed' : ctx.state,
+        started,
+        enabled,
+        envActive,
+        time,
+        weather,
+        master: +listener.getMasterVolume().toFixed(6),
+        ambienceGain: +ambienceGain.gain.value.toFixed(6),
+        bgmBusGain: +bgmGain.gain.value.toFixed(6),
+        intro: { phase: intro.phase, volume: +intro.volume.toFixed(4), track: intro.track },
+        bgm: bgm.getState(),
+        ambience: ambience.getState(),
+        chimes: chimes.getState(),
+        stream: stream ? stream.getState() : null,
+        dog: dog ? dog.getState() : null,
+      };
+    },
     update(dt) {
-      if (!started || !enabled || disposed) return;
+      if (disposed) return;
+      // 진입 스웰은 사운드 OFF·미start 상태에서도 진행시킨다 — 그래야 어떤 순서로 켜도
+      // "볼륨이 중간에 갇히는" 상태가 남지 않는다(비용: 국면 비교 1회).
+      if (intro.phase === 'entering' && intro.volume < 1) {
+        intro = introAdvance(intro, dt);
+        pushIntroVolume();
+      }
+      if (!started || !enabled) return;
       chimes.update(dt);
       ambience.update(dt);
       stream?.update(dt);
@@ -193,6 +319,7 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       enabled = false;
       envActive = false;
       started = false;
+      unbindUnlock();
       try {
         input.gain.cancelScheduledValues(ctx.currentTime);
         input.gain.setValueAtTime(0, ctx.currentTime);
@@ -215,7 +342,7 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
   ambience.setWeather(weather);
   stream?.setWeather(weather);
   pushWind();
-  bgm.play({ dawn: 'dawn', day: 'main-theme', sunset: 'sunset', night: 'night' }[time]);
+  bgm.play(trackForTime(time));
 
   return api;
 }

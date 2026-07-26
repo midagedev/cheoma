@@ -120,6 +120,13 @@ export function createDog(listener, { getAnchor, getState, rand = Math.random } 
 
   return {
     object: pa,
+    getState() {
+      return {
+        started, disposed, enabled,
+        gain: +out.gain.value.toFixed(6), volume: +volume.toFixed(4),
+        pending: pending.length,
+      };
+    },
     setEnabled(v) { if (disposed) return; enabled = !!v; push(); },
     setVolume(v) { if (disposed) return; volume = Math.max(0, v); push(); },
     bark() { if (!disposed) barkPhrase(); }, // 테스트용 즉시 짖음

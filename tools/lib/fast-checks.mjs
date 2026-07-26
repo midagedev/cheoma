@@ -4,6 +4,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-architecture.mjs',
   './check-residential-openings.mjs',
   './check-atmosphere-contract.mjs',
+  './check-audio-policy.mjs',
   './check-auxiliary-building-plan.mjs',
   './check-auxiliary-building-geometry.mjs',
   './check-environment-state.mjs',

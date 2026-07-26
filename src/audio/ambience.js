@@ -250,7 +250,15 @@ export function createAmbience(listener, { layout, rand = Math.random, destinati
     drips.tgt = raining ? 1 : 0;
   }
 
+  // 무음 진단용 레이어 레벨 스냅샷(귀 없이 "환경음이 실제로 나고 있나"를 판정한다).
+  const namedLayers = { wind, birds, crickets, owl, rain, drips };
+
   return {
+    getState() {
+      const levels = {};
+      for (const [key, layer] of Object.entries(namedLayers)) levels[key] = +(layer.cur || 0).toFixed(5);
+      return { started, disposed, time, weather, windiness: +windiness.toFixed(4), levels };
+    },
     setTime(name) { if (disposed) return; time = name; applyTargets(); },
     setWeather(name) { if (disposed) return; weather = name; applyTargets(); },
     setWindiness(w) { if (disposed) return; windiness = Math.max(0, Math.min(1, w)); },

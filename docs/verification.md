@@ -748,6 +748,17 @@ wave 관련 반복 수정은 `check:wave`와 `check:wave:app`으로 빠르게 �
 
 `tools/check-audio.mjs`는 실제 Web Audio 노드의 `start/stop`, `connect/disconnect`를 계측한다. 종료 시 모든 시작 소스와 연결 노드가 짝을 이루어 정리되고, 이중 `dispose()`와 종료 후 public API 호출이 새 오디오 그래프를 만들지 않는지 확인한다. 오프라인 종·개울 합성의 RMS도 검사해 무음 회귀를 막는다.
 
+여기에 실제 `AudioContext` 가 있어야만 판정되는 것들을 `audio.diagnostics()` 스냅샷으로 단언한다: `ctx.state`, 마스터·BGM 버스 게인, BGM 트랙 이름과 보이스별 게인·보이스 수, 합성 환경음 레이어 레벨, 위치성(풍경·개울·개) 활성, `assets/audio/genesis.mp3` 의 실제 decode 성공, 진입 트랙 → 시간대 트랙 인계가 컷이 아니라 등파워 크로스페이드(보이스 2개 공존)인지, 그리고 삼켜진 mp3 로드 실패가 0인지. **Playwright Chromium 은 iOS Safari 의 autoplay 정책을 재현하지 않으며 iOS 하드웨어 무음 스위치는 코드로 우회할 수 없다** — 이 게이트의 PASS 는 "그래프가 소리를 낼 상태"까지만 보증한다. 실기 판정은 사용자 기기에서 `window.__engine.audioDiag()` 로 한다.
+
+### `node tools/check-audio-policy.mjs` (순수, `npm run check` 포함)
+
+브라우저·`AudioContext` 없이 판정되는 오디오 계약. 이 게이트가 없던 동안 `assets/audio/genesis.mp3`(첫 진입 전용 트랙)는 `getTracks()` 선택지로만 노출되고 **자동 선택 경로가 없어 한 번도 재생되지 않았다** — 라우팅 사실이라 계산으로 잡힌다.
+
+- **트랙 선택 라우팅**: `src/audio/track-policy.js` 의 시간대 매핑(dawn/day/sunset/night), 알 수 없는 시간대의 무음 아닌 폴백, 진입 트랙 이름, 진입 → 시간대 인계와 "사용자가 랜딩 중 바꾼 시간대는 덮지 않는다".
+- **진입 뮤트·복원 상태기계**: `src/audio/intro-policy.js` 의 `arm/enter/settle/skip` 전이 그래프를 완전 탐색해 (1) 볼륨 <1 인 국면은 타이틀·스웰뿐, (2) 어떤 상태에서든 `settle`·`skip` 이 볼륨 1 + 트랙 해제로 끝남, (3) 스웰이 `INTRO_FADE` 에서 완주, (4) 볼륨 <1 인 모든 상태에 탈출 사건이 존재함을 단언한다. 실제 랜딩 경로(폴백·스킵·페이드 중 중단·이중 타이틀)는 명시 경로표로도 검사한다.
+- **자산 도달성**: `assets/audio/*.mp3` 와 정책 이름의 양방향 일치. 자동 선택 경로가 없는 트랙은 `MANUAL_TRACKS` 에 **이유와 함께** 선언돼야 한다(이유 없는 고아 mp3 = 무음 파일 → FAIL).
+- **엔진 배선**: `app/src/engine/engine.js` 가 BGM 을 직접 뮤트하지 않고(뮤트는 정책 전용), `introEvent('arm')` 이 정확히 1회이며, 첫 진입 랜딩(`enterVillageHero`)이 무거운 마을 생성 **앞에서** `audio.start()` 를 불러 `ctx.resume()` 이 사용자 제스처 안에 있는지, 그리고 복원 사건을 함께 갖는지 검사한다. 주석은 계약을 통과시키지 못하도록 세기 전에 제거한다.
+
 Headless ANGLE은 shader link 중 render frame이 매우 느릴 수 있다. 따라서 이 빠른 smoke는 1.9초 tween이 wall clock 1.9초 안에 끝난다고 단언하지 않고, 동기 상태 설정과 유한한 계약값을 검사한다. 타임아웃 진단이 필요하면 `CHEOMA_APP_SMOKE_TIMEOUT_MS`를 임시로 낮출 수 있다.
 
 ### `npm run check:worker`
@@ -801,7 +812,8 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, `capital/7/p8`(TERRAIN_FIXTURE)의 authored 망원·live near-plane·focus-in 안전성, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
 | `tools/verify-cine.mjs` | 세 규모 drone path와 walker 100초 수학·결정론 | 앱 배선은 확인하지 않는다. |
 | `tools/verify-cinewire.mjs` | 앱 패스 경계 시선 상한·시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |
-| `tools/check-audio.mjs` | 합성음 RMS, 시간·날씨·BGM 배선, source/node teardown | 공유 `AudioContext` 자체는 닫지 않으며 시작/정지·연결/해제 identity를 비교한다. |
+| `tools/check-audio.mjs` | 합성음 RMS, 시간·날씨·BGM 배선, source/node teardown, 실 컨텍스트 그래프 계측(ctx.state·게인·보이스·트랙·genesis decode·인계 크로스페이드·로드 실패 0) | 공유 `AudioContext` 자체는 닫지 않으며 시작/정지·연결/해제 identity를 비교한다. iOS autoplay 정책·하드웨어 무음 스위치는 재현하지 않는다. |
+| `tools/check-audio-policy.mjs` | BGM 트랙 선택 라우팅, 진입 뮤트·복원 상태기계 완전 탐색, mp3 자산 양방향 도달성, 엔진 배선(직접 뮤트 금지·제스처 내 start) | 브라우저 없음. 실제 게인·`ctx.state`·decode는 `check:audio`가 맡는다. |
 | `tools/check-dof.mjs` | 축방향 초점, 단일 DoF controller, 깊이 기여 분류, 프레임레이트 독립 품질 상태·숫자 camera snapshot, 이동 1/정착 13표본 선택 표면 합성과 반해상도 prefilter·source scatter의 순수/자원 계약 | 실제 depth prepass와 전환 배선은 앱 게이트가 맡는다. |
 | `tools/check-dof-app.mjs` | 실제 광각↔망원 focus, 조준점→문·문→문·focus-out 의미 초점 수명, rebuild/reroll 갱신·복합체 fallback, 1/13 frame과 StableBokeh 깊이 제외·상태/자원 복원 | 대표 focus의 moving/stable frame만 렌더하며 미감 판정을 대신하지 않는다. |
 | `tools/check-edge-mist.mjs` | 수평 운해의 아이레벨 유지, 10°→18° 단조 감쇠, 20° 부감 억제, 비정상 카메라 입력 fail-closed | Three 없는 순수 가중치 계약이며 실제 matrix 배선·운해 미감은 `shoot:lod-transition`이 맡는다. |

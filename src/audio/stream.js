@@ -116,6 +116,13 @@ export function createStream(listener, { anchor, rand = Math.random } = {}) {
 
   return {
     object: pa,
+    getState() {
+      return {
+        started, disposed, enabled,
+        gain: +out.gain.value.toFixed(6), target: +target().toFixed(6),
+        volume: +volume.toFixed(4), weatherMul,
+      };
+    },
     setEnabled(v) { if (disposed) return; enabled = !!v; push(); },
     setVolume(v) { if (disposed) return; volume = Math.max(0, v); push(); },
     setWeather(name) { if (disposed) return; weatherMul = name === 'snow' ? 0.25 : 1; push(); },

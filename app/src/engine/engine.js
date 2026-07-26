@@ -2096,6 +2096,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   function enterVillageHero(opts = null, seed = null, { onDone } = {}) {
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
+    // 첫 진입 오디오는 **여기서, 무거운 마을 생성보다 먼저** 시작한다. 이 함수는 타이틀 클릭
+    //   핸들러에서 동기 호출되고 start() 의 첫 문장이 ctx.resume() 이므로 그 호출이 사용자 제스처
+    //   안에 있어야 한다(iOS 는 그렇지 않으면 컨텍스트를 suspended 로 남긴다 = 전면 무음).
+    //   introEvent('enter') 가 진입 트랙(genesis)을 걸고 2.5s 스웰을 코어에서 구동한다.
+    ensureAudio(); audio.introEvent('enter'); audio.start();
     cinematic.stop();
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
@@ -2120,7 +2125,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.userData.villageReferenceFov = f.referenceFov;
       camera.updateProjectionMatrix(); camera.lookAt(controls.target);
       village.transitioning = false; heroActive = false;
-      ensureAudio(); audio?.setBgmVolume(1);   // arm() 이 0 으로 뮤트한 BGM 복원(폴백 경로 — 랜딩 스킵)
+      audio?.introEvent('skip');   // arm() 이 뮤트한 BGM 복원 + 진입 트랙 인계(폴백 — 랜딩 스킵)
       emit('villageMode', true); onDone?.(); return;
     }
     village.selected = heroId;
@@ -2197,17 +2202,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageMode', true);
     emit('villageSelectStart', { parcelId: heroId, spec: pr.buildingSpec });   // 패널 집 컨텍스트(스펙 선전달)
     emit('villageFocusMorph', 1);                                              // 랜딩=집 컨텍스트로 안착
-    // BGM 페이드인(#BGM): hero.arm() 이 타이틀 동안 BGM 볼륨을 0 으로 뮤트했으므로, 마을 우선 랜딩에서
-    //   다시 0→1 로 스웰시킨다(레거시 hero.enter 의 stepFade 대응 — 이게 없어 마을 우선 경로에서 BGM 이
-    //   0 에 갇혀 효과음만 들리던 회귀 수정). setBgmVolume 은 볼륨 배수라 audio 미start 여도 안전.
-    ensureAudio();
-    { const t0 = performance.now(), durMs = 2500;
-      const stepFade = () => {
-        const k = Math.min(1, (performance.now() - t0) / durMs);
-        audio?.setBgmVolume(k);
-        if (k < 1) tasks.frame(stepFade);
-      };
-      tasks.frame(stepFade); }
+    // BGM 페이드인(#BGM): 위 introEvent('enter') 가 진입 트랙을 걸고 2.5s 스웰을 코어 update 에서
+    //   구동한다(엔진 프레임 콜백·취소 관리 불필요). 정착 시 아래 introEvent('settle') 이 볼륨 1 을
+    //   확정하고 시간대 트랙으로 4s 크로스페이드 인계한다.
     const closeupDist = finalPosition.distanceTo(finalTarget);
     // 조립 즉시 시작하되 착공 지연(delay)만큼 빈 터 유지 → 타이틀 페이드·먹안개가 착공 순간을 덮는다.
     // 완료 시 클로즈업 편집 상태로 안착(패널 슬라이드 인).
@@ -2218,6 +2215,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 원래 사용자 시간대 비주얼 복구
       env.setTime(state.time);
       post.setTime(state.time);
+      audio?.introEvent('settle');   // 진입 트랙 → 시간대 트랙 인계(4s 크로스페이드) + 볼륨 1 확정
       if (village.handle) { village.handle.setTime(state.time); reapplyVillageFog(); }
       attachFocusRing(village.handle.heroDetailGroup());   // 조립 정착 후 근접 앰비언스 점등(#79)
       setZoomRegime('focus', closeupDist);                 // 랜딩 착지 → 근접 줌
@@ -3108,6 +3106,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       return onWanted;
     },
 
+    // 무음 진단(사용자 기기에서 귀 없이 원인을 읽는 창구 — 실기 iOS 는 헤드리스로 재현 불가).
+    //   ctx 상태 / 마스터 / BGM 트랙·보이스 게인 / 레이어 게인 / mp3 로드 실패를 그대로 노출한다.
+    //   audio 가 아직 없으면 null(= 오디오 그래프가 생성조차 안 됐다는 뜻).
+    audioDiag: () => audio?.diagnostics?.() ?? null,
+
     // Engine lifetime owns every app export. A caller may add a narrower signal,
     // but cannot outlive engine disposal or resume against released scene resources.
     exportGLB(target, opts = {}) {
@@ -3163,16 +3166,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           duration: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR,
           prime: true,
         });
-        ensureAudio(); audio.setBgmVolume(0);
+        // 타이틀 구간은 조용하다. 뮤트·복원은 코어의 진입 상태기계(src/audio/intro-policy.js)가
+        //   소유한다 — 엔진이 BGM 볼륨을 직접 0 으로 내리면 복원 누락 경로가 곧 영구 무음이 된다.
+        //   진입 전용 트랙(genesis)은 타이틀이 화면을 덮는 지금 프리페치한다(무거운 작업 은닉).
+        ensureAudio(); audio.introEvent('arm'); audio.prefetchEntryTrack();
       },
       enter({ onDone } = {}) {
         cancelLegacyHeroEnter();
-        ensureAudio(); audio.start();
+        ensureAudio(); audio.introEvent('enter'); audio.start();
         const legacyTiming = typeof window !== 'undefined' && !!window.__heroLegacy;
         const assembleDelay = legacyTiming ? 6600 : HERO_ASSEMBLE_DELAY_MS;
         const assembleDur = legacyTiming ? 5 : HERO_ASSEMBLE_DUR;
-        // BGM 페이드인
-        const t0 = performance.now(), durMs = 2500;
+        // BGM 페이드인은 위 introEvent('enter') 가 코어에서 구동한다(엔진 프레임 콜백 없음).
+        const t0 = performance.now();
         if (typeof window !== 'undefined') {
           window.__heroEnterT = t0;
           window.__heroAssembleT = null;
@@ -3181,12 +3187,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           heroAssembleTimingOwned = true;
           heroAssembleTimingValue = null;
         }
-        const stepFade = () => {
-          const k = Math.min(1, (performance.now() - t0) / durMs);
-          audio?.setBgmVolume(k);
-          legacyHeroFadeFrame = k < 1 ? tasks.frame(stepFade) : null;
-        };
-        legacyHeroFadeFrame = tasks.frame(stepFade);
         revealCamera.playPrimed();
         // 착공(조립 시작)을 크게 앞당김 — 타이틀 페이드 직후 기단이 올라오기 시작(중단 시 취소).
         legacyHeroAssembleTimer = tasks.after(() => {
@@ -3211,7 +3211,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
             tasks.clearFrame(legacyHeroFadeFrame); legacyHeroFadeFrame = null;
             building.visible = true;
             for (const w of wings) w.group.visible = true;
-            audio?.setBgmVolume(1);
+            audio?.introEvent('settle');   // 타이틀 뮤트 복원 + 진입 트랙 → 시간대 트랙 인계
             heroActive = false;             // reveal 종료 → 유휴 시 자동 회전 재개 허용
             weatherRef?.setWeather(state.weather); // 오프닝 자연 완료 시 날씨 복원
             lastActivity = performance.now();
@@ -3229,7 +3229,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         for (const w of wings) { w.assembly?.skip?.(); w.assembly = null; }
         setAngle('three-quarter');
         ensureAudio(); audio.start();
-        audio.setBgmVolume(1);
+        audio.introEvent('skip');              // 오프닝 스킵 = 즉시 전체 볼륨 + 시간대 트랙
         weatherRef?.setWeather(state.weather); // 오프닝 스킵 시 날씨 복원
         onDone?.();
       },

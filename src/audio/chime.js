@@ -90,6 +90,13 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
 
   return {
     objects: chimes.map((c) => c.pa),
+    getState() {
+      return {
+        started, disposed, count: chimes.length,
+        windiness: +windiness.toFixed(4), volume: +volume.toFixed(4),
+        busGain: chimes.length ? +chimes[0].bus.gain.value.toFixed(6) : 0,
+      };
+    },
     setWindiness(w) { if (!disposed) windiness = Math.max(0, Math.min(1, w)); },
     setVolume(v) { if (!disposed) volume = Math.max(0, v); },
     setLayout,
