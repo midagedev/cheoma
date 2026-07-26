@@ -1,0 +1,70 @@
+name: deploy
+
+# main 에 머지되면 순수 계약 게이트를 돌리고, 통과할 때만 Cloudflare Pages 로 배포한다.
+#
+# 왜 `npm run check` 만인가: 이 저장소의 게이트는 두 층으로 갈린다 — 순수 node 계약(`check:X`)과
+# 브라우저 게이트(`check:X:browser` / `:app`). 순수 층은 브라우저·GPU 없이 돌고 60여 초면 끝나므로
+# CI 관문으로 적합하다. 브라우저 게이트는 저장소 전역 락과 실제 GPU 백엔드를 전제로 하고 헤드리스
+# 절대 시간은 판정 근거가 못 되므로(CLAUDE.md), CI 관문이 아니라 머지 전 로컬 실행으로 남긴다.
+#
+# 필요한 저장소 시크릿 2개:
+#   CLOUDFLARE_API_TOKEN   — Cloudflare Pages: Edit 권한 토큰
+#   CLOUDFLARE_ACCOUNT_ID  — 대상 계정 ID
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 배포는 겹치면 안 되고, 업로드 중간에 취소되면 부분 배포가 남을 수 있으므로 진행 중인 건 살린다.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    name: pure contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      # 루트는 검증 도구(playwright·pngjs)를, app 은 three·svelte·vite 를 담는다.
+      # 순수 게이트는 createRequire 로 app/node_modules 의 three 를 직접 집으므로 두 곳 다 필요하다.
+      # 브라우저 바이너리는 설치하지 않는다 — 순수 계약은 playwright 를 import 하지 않는다.
+      - run: npm ci
+      - run: npm ci
+        working-directory: app
+      - run: npm run check
+
+  deploy:
+    name: cloudflare pages
+    needs: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      # 클린 빌드: 같은 outDir 에 증분 빌드를 반복하면 산출물이 깨진 이력이 있다(CLAUDE.md).
+      - run: rm -rf dist && npm run build
+        working-directory: app
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: app
+          wranglerVersion: '4'
+          command: pages deploy dist --project-name=cheoma --branch=main
