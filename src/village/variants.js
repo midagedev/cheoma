@@ -80,8 +80,14 @@ const clamp01 = (v) => Math.min(1, Math.max(0, v));
 // 초가 이엉: 관리 좋은 집(부유)=따뜻한 금빛, 낡은 집=차분한 회갈(개체 햇빛바램·이끼 곱). 부감에서
 //   이웃 지붕색이 확연히 갈리도록 스프레드를 넉넉히(회갈↔금빛).
 const CHOGA_ROOF = { poor: [0.82, 0.83, 0.81], rich: [1.1, 1.02, 0.87] };
-// 기와: 청회(어두운 쿨) ~ 밝은 회. 신분 약상관 + 개체차 큼(청회~흑회 변주).
-const GIWA_ROOF = { lo: [0.82, 0.86, 0.96], hi: [1.05, 1.03, 0.98] };
+// 기와: 회흑 근처 좁은 곱틴트. 과거 lo≈0.82 쿨 청회 스프레드는 망원에서 일부 지붕을 거의 검게
+//   밀어 텍스처 홈과 함께 검은 선 뭉침을 키웠다(#150 item I). 이웃 차이는 유지하되 채널 끝은
+//   TILE_LOOK.roofToneChannel* 밴드 안. wealth 약상관은 유지.
+export const GIWA_ROOF = {
+  lo: [0.90, 0.93, 0.99],
+  hi: [1.03, 1.01, 0.99],
+  jitter: 0.025,
+};
 // 초가 토벽: 미색 황토(밝음) ~ 적갈(짙음). 개체 풍화차 커서 이웃이 확연히 다른 벽색.
 const CHOGA_WALL = { pale: [1.06, 1.03, 0.96], deep: [0.9, 0.78, 0.63] };
 // 기와 회벽: 백(밝음) ~ 미색(누런끼).
@@ -91,7 +97,11 @@ const GIWA_WALL = { white: [1.05, 1.04, 1.0], cream: [0.95, 0.92, 0.83] };
 //   dK(#91 다양성 강도): 개체 톤 지터(jit3 amt)만 배율 — rng 소비수·기저 색믹스 불변(dK=1=현행).
 function assignRoleTones(parcel, kind, wealth, rng, dK = 1) {
   if (kind === 'giwa') {
-    parcel.roofTone = jit3(mix3(GIWA_ROOF.lo, GIWA_ROOF.hi, clamp01(rng() * 0.85 + wealth * 0.15)), rng, 0.04 * dK);
+    parcel.roofTone = jit3(
+      mix3(GIWA_ROOF.lo, GIWA_ROOF.hi, clamp01(rng() * 0.85 + wealth * 0.15)),
+      rng,
+      GIWA_ROOF.jitter * dK,
+    );
     parcel.wallTone = jit3(mix3(GIWA_WALL.white, GIWA_WALL.cream, rng()), rng, 0.03 * dK);
   } else {
     parcel.roofTone = jit3(mix3(CHOGA_ROOF.poor, CHOGA_ROOF.rich, clamp01(wealth * 0.65 + (rng() * 2 - 1) * 0.34)), rng, 0.065 * dK);

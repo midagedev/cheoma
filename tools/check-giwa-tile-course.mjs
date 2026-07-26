@@ -470,7 +470,7 @@ for (const fixture of FIXTURES) {
   }
 }
 
-// 순수 재질 계약: TubeGeometry 축(U=길이) + 물매 켜 피치.
+// 순수 재질 계약: TubeGeometry 축(U=길이) + 물매 켜 피치 + matte roughness band (#150 item I).
 {
   const tex = new THREE.Texture();
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -479,6 +479,11 @@ for (const fixture of FIXTURES) {
     mat.map.repeat.x === Math.round(3.6 / ALONG_PITCH) && mat.map.repeat.y === 1,
     `sugiwaMaterial(3.6m) repeat=(${mat.map.repeat.x},${mat.map.repeat.y})`
     + ` want (${Math.round(3.6 / ALONG_PITCH)},1)`,
+  );
+  // tile path roughness lives in TILE_LOOK (0.92–0.96). Low roughness sparkles under telephoto.
+  check(
+    mat.roughness >= 0.92 && mat.roughness <= 0.96,
+    `sugiwaMaterial roughness ${mat.roughness} outside matte band [0.92, 0.96]`,
   );
 }
 

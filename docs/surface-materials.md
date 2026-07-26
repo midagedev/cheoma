@@ -74,8 +74,9 @@ glTF에는 표준 base-color에 대응하는 DataTexture albedo가 임베드된�
 | 표면 | 소스 | 휘도 |
 | --- | --- | --- |
 | 여름 수관 | `src/env/seasons.js` `0x2a4020` | **0.21** |
+| 기와 마루 `tileRidge` (`tileDark`) | `0x3f4249` | 0.26 |
 | 기와 평면재 `tileFlat` | `0x4a4d53` | 0.30 |
-| **기와 지붕면** | `tileSurfaceMaterial` = `0xffffff` × `makeTileTexture()` | **0.35** |
+| **기와 지붕면** | `tileSurfaceMaterial` = `0xffffff` × `makeTileTexture()` | **0.34–0.35** |
 | 기와 볼록열 `tileConvex` | `0x6a6d73` | 0.43 |
 | 담장 흙벽 `mud` | `0x9a7a54` | 0.50 |
 | 백골 목재 `giwaWood` | `0x9a8a6f` | 0.55 |
@@ -114,3 +115,34 @@ glTF에는 표준 base-color에 대응하는 DataTexture albedo가 임베드된�
 `mtnChance`/`infillChance`는 같은 목표 그루수를 외곽·빈터로 재배치한다. 순수 계약
 `npm run check:forest-canopy`. 운무 절단 쪽은 `buildEdgeMistRing`의 표고 제곱 pool +
 `yCap≈0.40 Hmax`와 능선 2단 뱅크 튜닝(`computeRidgeMistAnchors`)이 함께 담당한다.
+
+## 기와 telephoto alias 완화 (#150 item I) — 제품 한계
+
+망원 포커스(약 10°/7°)에서 기와 면이 서브픽셀로 줄어들 때 기왓골 텍스처 홈·과한
+`instanceColor` 암단·낮은 roughness sparkle 이 겹치면 검은 선 뭉침으로 읽힌다. 새 재질군·
+LOD 대체 mesh·스크린스페이스 필터 없이 기존 tile 경로만 재튜닝한다.
+
+### 채택 레버 (구현)
+
+| 레버 | 위치 | 내용 |
+| --- | --- | --- |
+| `tileDark` 분리 | `material-colors.js` | 마루 톤을 평면(`tile` Y≈0.30)보다 분명히 어둡게(Y≈0.26, 분리 ≈0.04). 과거 `tile`/`tileDark` 거의 동일 → 마루 위계 없음. 순흑 직전까지 내리지 않음. |
+| 텍스처 홈 대비 | `palette.js#makeTileTexture` | 홈을 `rgba(48,50,56,0.32)` 로 완화(구 `rgba(30,31,36,0.5)`). 근경 골 가독은 bump + 수키와 기하가 담당. |
+| roughness 밴드 | `TILE_LOOK` → `tileFlat`/`tileRidge`/`tileConvex`/`tileSurface`/`sugiwa` | 0.92–0.96 matte. 낮은 roughness 의 스펙큘러 하이라이트가 망원에서 깜빡이며 선처럼 읽힌다. |
+| 좁은 지붕 `instanceColor` | `variants.js#GIWA_ROOF` | 채널 끝 ≈[0.90,1.03], jitter 0.025. 초가 이엉 스프레드는 유지. wealth→톤 단조는 유지. |
+
+순수 계약: `npm run check:tile-look` (휘도·분리·roughness 상수 배선·GIWA_ROOF 밴드). 기하 등간격
+계약은 기존 `npm run check:giwa-tile-course` (수키와 roughness 밴드 포함).
+
+### 제품 한계 (이 항목이 하지 않는 것)
+
+1. **MSAA/해상도 한계를 제거하지 않는다.** 컴포저 경로 기하 AA(`check:aa`)와 DPR 캡은 별 축이다.
+   기와 골 피치(0.34m)가 망원 1px 아래로 내려가면 어떤 albedo 튜닝도 완전 소실을 보장하지 않는다.
+2. **albedo 위계를 뒤집지 않는다.** 판정 1 — 기와를 더 낮추지 않는다. 검은 선을 "더 검게" 가려
+   없애려는 시도는 역광 crushed-black·림 카툰화·적설 대비 붕괴를 부른다.
+3. **새 재질군·program family·draw call 을 추가하지 않는다.** FAR impostor 는 같은
+   `giwaRoofAverage`/`tileDark` 토큰을 곱틴트한다. 텍스처 mip 정책을 지붕 전용으로 분기하지 않는다.
+4. **근경 기왓골 디테일을 텍스처 대비로 복원하지 않는다.** 홈을 부드럽게 한 뒤 근경에서 골이
+   약해 보이면 기하 수키와·bumpScale 쪽을 본다. 텍스처 순흑 홈 회귀는 금지.
+5. **초가·궁 양성바름·처마 단면(`eaveBand`)은 이 계약 밖.** 초가 이엉 스프레드는 부감 다양성
+   신호로 유지한다.

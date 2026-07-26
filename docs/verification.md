@@ -466,6 +466,11 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
     제한한다(모서리 기와는 마루선을 따라 눕는 것이 옳다).
   - fixture는 ㅡ·ㄱ·ㄷ·ㄷ(heroDetail)이며, ㄷ자 가운데 본채 면이 마루로 3.2배 벌어지고 우진각
     앞면이 마루로 수렴하는 것을 함께 단언해 쉬운 면만 보고 통과하는 것을 막는다.
+  - `sugiwaMaterial` roughness 가 matte 밴드 [0.92, 0.96] 안인지도 고정한다(#150 item I).
+- `check:tile-look`
+  - 기와 `tile`/`tileDark` sRGB 상대휘도·분리, `giwaRoofAverage`, `TILE_LOOK` roughness 상수 배선,
+    `GIWA_ROOF` 좁은 instanceColor 끝·jitter 상한을 순수 검사한다. 새 재질군 없이 망원 검은 선
+    뭉침을 줄이는 팔레트 계약이며 픽셀·드로우콜은 보지 않는다.
 - `check:verification-plan`
   - docs-only, 정적 import 영향 순수 계약, DoF/weather/village/temple/interaction/audio/app 변경의 합집합을 검사한다.
   - focus+wave가 `lod-app` 한 번으로 합쳐지고 기존 browser harness 수정이 자기 gate로 가는지 검사한다.
@@ -978,7 +983,8 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-bokeh-fixture.mjs` | 실제 composer 위 제어 HDR 광원의 원형비·방사 균일도, 반지름 sweep의 선형 HDR 총에너지 보존·peak 면적 희석, 8단계 패닝 1표본→hold→13표본 정착 strip, source scatter ON/OFF, Chrome hardware GPU timer query를 계측·촬영 | `CHEOMA_BROWSER=chrome`과 비-software renderer를 강제한다. `npm run shoot:bokeh:proof`는 scatter의 +1 program/+1 draw/+0 target과 앞쪽 depth/가림·채워진 원판을 따로 증명하며 GPU 성능은 wall time으로 판정하지 않는다. |
 | `tools/check-choga-roof.mjs` | 초가 지붕/벽 접합, 변형·편집 극값, 지붕 vertex hash | 재질·조명 미감은 `shoot-thatch.mjs` 전후 이미지를 직접 본다. |
 | `tools/check-roof-seams.mjs` | 기와지붕 face 상단의 ridge knot 보존, UI 평면·칸수·높이 경계 | 마루장 아래의 실제 음영·미감은 `shoot-cg3.mjs` 근접 앵글로 본다. |
-| `tools/check-giwa-tile-course.mjs` | 기와 기왓골 세계좌표 등간격(u=across/0.34, v=arcFromRidge/0.9), 암·수 동일 across 피치, 수키와 롤 처마 수직·추녀 절단·포락 내부, 회첨 하단=처마 코너, sugiwaMaterial 축, ㄷ자 부채꼴·우진각 수렴 fixture | 순수 node다. stub 재질로 `buildSkeletonRoof` 정점·UV·롤 간격을 읽는다. 픽셀·드로우콜은 브라우저 라운드. |
+| `tools/check-giwa-tile-course.mjs` | 기와 기왓골 세계좌표 등간격(u=across/0.34, v=arcFromRidge/0.9), 암·수 동일 across 피치, 수키와 롤 처마 수직·추녀 절단·포락 내부, 회첨 하단=처마 코너, sugiwaMaterial 축·matte roughness, ㄷ자 부채꼴·우진각 수렴 fixture | 순수 node다. stub 재질로 `buildSkeletonRoof` 정점·UV·롤 간격을 읽는다. 픽셀·드로우콜은 브라우저 라운드. |
+| `tools/check-tile-look.mjs` | `tile`/`tileDark` 휘도·분리, `giwaRoofAverage`, `TILE_LOOK` roughness 배선, `GIWA_ROOF` 좁은 곱틴트 끝·jitter | 순수 node. 망원 기와 검은 선 뭉침 완화(#150 item I) 팔레트 계약. 미감 픽셀은 직접 캡처. |
 | `tools/check-building-clearance.mjs` | 기초 매입, 마당 lift, ㄱ자 기단 단일 depth owner, 단 몸통이 갑석 상면을 넘지 않음, 판벽 봉창 face clearance, 맞배 벽 tuck, 기와/초가 공유 부엌 개구와 돌출 상한 | 실제 접지선·기단 줄눈·부엌 개구 미감은 기와/초가 격리 하네스와 `layout.html` 필지 4종을 직접 본다. |
 | `tools/check-ground-stone-bedding.mjs` | 디딤돌·댓돌 매입/돌출, 기단 상면의 단일 depth owner, 위를 향한 석재면의 동일평면 0건, 6개 회귀 fixture 검출 | 원인(동일평면성)만 단정한다. 실제 깜빡임은 고정 근경 미세 팬 전후 캡처로 판정하고, 벽 클래딩(`fieldstone`) 동일평면은 `walls.js` 계열 게이트의 소유다. |
 | `tools/check-door-motion-contract.mjs` | primary 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠·중간 반전·dispose | renderer 없는 순수 운동 계약이며 실제 가림·입력·문짝 실루엣은 앱 게이트와 `shoot:door`가 맡는다. |

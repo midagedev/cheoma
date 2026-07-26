@@ -5,8 +5,11 @@ export { giwaRoofEnvelope } from '../layout/giwa-roof-envelope.js';
 export {
   KOREA_COLORS,
   VILLAGE_MATERIAL_COLORS,
+  TILE_LOOK,
   srgbChannelToLinear,
   srgbHexToLinear3,
+  srgbRelativeLuminance,
+  tileLookBandViolations,
 } from '../builder/material-colors.js';
 export { buildBuilding, disposeBuilding } from '../builder/index.js';
 export {
