@@ -4,6 +4,7 @@ import {
   MATERIAL_PROGRAM_PATCH,
   addMaterialProgramKey,
 } from '../render/material-program-key.js';
+import { patchLodScreenDoorMaterial } from '../render/lod-screen-door.js';
 import { VILLAGE_LENS, dollyScaleForFov } from '../camera/optics.js';
 
 // 재질 프레넬 골든아워 림 (태스크 #76 도입 · #101 전 오브젝트 확장) — RimPass(스크린스페이스) 대체.
@@ -255,6 +256,10 @@ export function createFresnelRim(scene) {
       counts.cloudShadow++;
       if (mat.userData.role === 'roof') counts.cloudRoof++;
     }
+    // R8 program diet: every rim-eligible stock material carries the LOD screen-door shader
+    // path (coverage default 1 → discard early-out). Matrix channel remains object-local on
+    // true LOD roots only — plain+rim and lod+rim must not fork WebGLProgram families.
+    patchLodScreenDoorMaterial(mat);
     const groupUniform = groupUniforms[group] || groupUniforms.misc;
     const facingFull = RIM_FACING_GATE.full.toFixed(2);
     const facingCutoff = RIM_FACING_GATE.cutoff.toFixed(2);

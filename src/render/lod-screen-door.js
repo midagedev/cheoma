@@ -8,6 +8,8 @@ const ORIGINAL_MATRIX_W = Symbol.for('cheoma.lodScreenDoorOriginalMatrixW');
 const patchedMaterials = new WeakSet();
 
 const VERTEX_DECLARATION = '#include <common>\nvarying float vLodScreenDoor;';
+// Affine modelMatrix[3][3] is 1 for ordinary objects. Only attachObjectChannel roots rewrite it
+// for the draw; coverage ≥ 0.999 early-outs discard so non-LOD draws stay a pure no-op.
 const VERTEX_ASSIGNMENT = '#include <begin_vertex>\nvLodScreenDoor = modelMatrix[3][3];';
 const VERTEX_WORLD_POSITION = `#include <worldpos_vertex>
 #if defined( USE_ENVMAP ) || defined( DISTANCE ) || defined ( USE_SHADOWMAP ) || defined ( USE_TRANSMISSION ) || NUM_SPOT_LIGHT_COORDS > 0
@@ -43,6 +45,11 @@ function restoreObjectMatrix(object) {
   delete object[ORIGINAL_MATRIX_W];
 }
 
+// Install the screen-door *shader path* on a stock material. R8 program diet: rim-eligible
+// materials always carry this path so plain+rim and lod+rim compile as one family. Coverage
+// defaults to affine 1 (no discard work). The matrix channel is a separate object-local setup
+// — never a per-chunk material uniform.
+//
 // Material callbacks run after Three has calculated modelView/normal matrices and immediately
 // before modelMatrix is uploaded for this draw. The otherwise constant affine [3][3] slot is a
 // draw-local scalar channel, so shared MID/FULL materials remain safe across chunks.
