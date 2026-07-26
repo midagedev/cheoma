@@ -60,3 +60,18 @@ export {
   createArchitecturalRevealTimeline,
   sampleArchitecturalReveal,
 } from '../cinematic/architectural-reveal.js';
+// #150-M: Three-free explore/focus/hop/focusOut/wave/exit transition table.
+// Engine dispatches only; zoom distance stays in optics (selection ≠ zoom).
+export {
+  VIEW_PHASES,
+  VIEW_EVENTS,
+  VIEW_TRACE_DEFAULT_CAPACITY,
+  viewInitialState,
+  viewReduce,
+  viewCan,
+  viewIsBusy,
+  viewSelectionRegime,
+  viewZoomRegime,
+  viewWaveExclusive,
+  createViewTrace,
+} from '../camera/view-lifecycle.js';

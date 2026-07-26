@@ -34,6 +34,10 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/audio/intro-policy.js',
   'src/audio/anchors.js',
   'tools/check-audio-policy.mjs',
+  // #150-M: Three-free explore/focus/hop/focusOut/wave/exit reducer + event trace
+  // before any large engine.js split. Zoom distance stays orthogonal (optics).
+  'src/camera/view-lifecycle.js',
+  'tools/check-view-lifecycle.mjs',
   'src/env/msaa-render-pass.js',
   'src/env/bokeh-coc-contract.js',
   'src/env/bokeh-coc-pass.js',
@@ -346,6 +350,11 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/camera/') || path.startsWith('src/cinematic/')) {
+    // #150-M pure transition table: Node contract only; engine dispatch hooks live in app/.
+    if (path === 'src/camera/view-lifecycle.js') {
+      select('view lifecycle transition table changed');
+      return { gates, reasons };
+    }
     select('camera/cinematic behavior changed', 'app');
     if (path.startsWith('src/cinematic/')) select('cinematic product path changed', 'cinematic-app');
     if (path === 'src/camera/optics.js') {
