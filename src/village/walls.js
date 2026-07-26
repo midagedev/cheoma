@@ -10,9 +10,7 @@ import { buildMudWallSurfaceGeometry } from './mud-wall-geometry.js';
 import { planMudWallSurface } from './mud-wall-surface-plan.js';
 import {
   yardClotheslineLayout,
-  yardGardenPatchLayout,
-  yardJangdokLayout,
-  yardStackLayout,
+  yardHardPlacements,
 } from './yard-layout.js';
 export { pickWallType } from './variants.js';   // 담 유형 선택은 순수 로직(variants.js)에 둔다
 
@@ -81,6 +79,21 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
   const layout = villageWallLayout(shape, opts, rng);
   const { pts, gateEdge, gateT } = layout;
   const n = pts.length;
+  // 마당 소품 배치는 담과 같은 폴리곤을 읽어야 한다. 편집 오버레이가 소품 유무·담 유형을
+  // 덮어쓸 수 있으므로 opts 값을 parcel 위에 올려 실제 렌더 의도대로 해석한다.
+  const yardPlacements = yardHardPlacements({
+    ...(opts.parcel || {}),
+    shape,
+    kind,
+    plotW,
+    plotD,
+    wallType: style,
+    jangdok: opts.jangdok,
+    yardStack: opts.yardStack,
+    clothesline: opts.clothesline,
+    vegBed: opts.vegBed,
+    aux: opts.aux,
+  });
 
   const g = new THREE.Group();
   g.name = `wall-${style}`;
@@ -318,9 +331,10 @@ function makeHedgeRun(L, H, rng) {
 }
 
 // 텃밭 힌트(개방 마당): 앞마당 한쪽 흙 이랑 몇 줄. 공유 재질.
-function makeGardenPatch(plotW, plotD, M, offsetX = 0, offsetZ = 0) {
+// layout 은 yard-layout.js#yardHardPlacements 가 실제 필지 폴리곤에 맞춰 결정한 배치다
+// (여기서 plotW×plotD 직사각형을 다시 추정하면 담 밖으로 나간다).
+function makeGardenPatch(layout, M) {
   const g = new THREE.Group(); g.name = 'garden';
-  const layout = yardGardenPatchLayout(plotW, plotD, offsetX, offsetZ);
   const w = layout.width, d = layout.depth, cx = layout.x, cz = layout.z;
   const soil = new THREE.Mesh(new THREE.BoxGeometry(w, 0.08, d), M.stoneDark);
   soil.position.set(cx, 0.04, cz); soil.receiveShadow = true; g.add(soil);
@@ -336,24 +350,32 @@ function makeGardenPatch(plotW, plotD, M, offsetX = 0, offsetZ = 0) {
 //   집집이 마당 살림이 다르게. 전부 공유 wallMats 재질만 써서 병합 후 드로우콜 불변(0 신규).
 //   구역 분할(로컬 +z=앞·도로, -z=뒤안): 장독대=뒤안 좌, 낟가리=뒤안 우(부속채와 배타),
 //   빨래줄=앞마당 좌, 텃밭=앞마당 우. 신분(부유도)·rng 로 규모·유무가 상관 샘플됨(variants.js).
-function makeYardProps(plotW, plotD, opts, M, rng) {
+// placements = yardHardPlacements(...) — 렌더와 예약(yardHardObstacles)이 반드시 같은
+//   좌표를 읽어야 하므로 이 함수는 배치를 계산하지 않고 소비만 한다. placed=false 인
+//   소품은 앉을 자리가 없다는 뜻이라 잘라 넣지 않고 생략한다.
+function makeYardProps(placements, opts, M, rng) {
   const g = new THREE.Group(); g.name = 'yard-props';
 
   // 장독대: 뒤안 좌측 낮은 돌단 + 옹기 열(규모 jangdok 0~3 → 열·항아리 수).
-  const jd = opts.jangdok || 0;
-  if (jd > 0) {
-    const layout = yardJangdokLayout(plotW, plotD, jd);
-    const rows = layout.rows, perRow = layout.perRow;
-    const platW = layout.width, platD = layout.depth;
-    const px = layout.x, pz = layout.z;
-    const plat = new THREE.Mesh(fieldstoneBox(platW, 0.14, platD), M.fieldstone);
-    plat.position.set(px, 0.07, pz); plat.receiveShadow = true; g.add(plat);
+  //   rng 소비량은 배치 성공 여부와 무관하게 유지한다 — 기하 판정이 뒤 소품의 표본을
+  //   흔들면 같은 필지가 배치 결과에 따라 다른 낟가리·빨래줄을 갖게 된다.
+  const jangdok = placements.jangdok;
+  if ((opts.jangdok || 0) > 0 && jangdok) {
+    const rows = jangdok.rows, perRow = jangdok.perRow;
+    const platW = jangdok.width, platD = jangdok.depth;
+    const px = jangdok.x, pz = jangdok.z;
+    if (jangdok.placed) {
+      const plat = new THREE.Mesh(fieldstoneBox(platW, 0.14, platD), M.fieldstone);
+      plat.position.set(px, 0.07, pz); plat.receiveShadow = true; g.add(plat);
+    }
     for (let r = 0; r < rows; r++) {
       const n = Math.max(1, perRow - r);            // 뒤열일수록 큰 독 적게
       for (let c = 0; c < n; c++) {
         const js = 0.62 + rng() * 0.7;
+        const jarScaleY = js * (1.05 + rng() * 0.35);
+        if (!jangdok.placed) continue;
         const jar = new THREE.Mesh(JAR_GEO, M.onggi);      // 옹기(어두운 유약) — 문틀과 분리된 전용 색
-        jar.scale.set(js, js * (1.05 + rng() * 0.35), js);
+        jar.scale.set(js, jarScaleY, js);
         const jx = px + (n === 1 ? 0 : (-platW / 2 + 0.3 + c * (platW - 0.6) / (n - 1)));
         jar.position.set(jx, 0.14 + 0.26 * js, pz - platD / 2 + 0.32 + r * 0.52);
         jar.castShadow = jar.receiveShadow = true; g.add(jar);
@@ -362,34 +384,42 @@ function makeYardProps(plotW, plotD, opts, M, rng) {
   }
 
   // 낟가리(볏가리): 뒤안 우측 뭉툭한 짚 원뿔 + 눌림 마루. 부속채(같은 구석)와 배타 배치.
-  if (opts.yardStack && !opts.aux) {
+  //   예약 봉투는 반경 상한(maxRadius)이라, 실제 원뿔은 그 봉투 안에서만 흔들린다.
+  const stack = placements.stack;
+  if (opts.yardStack && !opts.aux && stack) {
     const R = 0.7 + rng() * 0.35, H = 1.5 + rng() * 0.6;
-    const layout = yardStackLayout(plotW, plotD, R);
-    const cx = layout.x, cz = layout.z;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(R, H, 9), M.thatch);
-    cone.position.set(cx, H / 2, cz); cone.castShadow = cone.receiveShadow = true; g.add(cone);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(R * 0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.jipjul);
-    cap.position.set(cx, H, cz); cap.castShadow = true; g.add(cap);
+    const slack = stack.maxRadius - R;
+    const cx = stack.x + slack, cz = stack.z - slack;
+    if (stack.placed) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(R, H, 9), M.thatch);
+      cone.position.set(cx, H / 2, cz); cone.castShadow = cone.receiveShadow = true; g.add(cone);
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(R * 0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.jipjul);
+      cap.position.set(cx, H, cz); cap.castShadow = true; g.add(cap);
+    }
   }
 
   // 빨래줄: 앞마당 좌측 통나무 기둥 2 + 줄 + 널린 천 몇 폭(흰 회벽 재질 재사용).
-  if (opts.clothesline) {
+  const clothesline = placements.clothesline;
+  if (opts.clothesline && clothesline) {
     const ang = (rng() - 0.5) * 0.5;
-    const layout = yardClotheslineLayout(plotW, plotD, ang);
-    const span = layout.span, ph = layout.height;
-    const lx = layout.x, lz = layout.z;                 // 앞마당 좌
-    const dx = layout.dx, dz = layout.dz;
-    for (const s of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, ph, 6), M.wood);
-      post.position.set(lx + dx * s * span / 2, ph / 2, lz + dz * s * span / 2);
-      post.castShadow = true; g.add(post);
+    const heading = yardClotheslineLayout(opts.plotW, opts.plotD, ang);
+    const span = clothesline.span, ph = clothesline.height;
+    const lx = clothesline.x, lz = clothesline.z;        // 앞마당 좌(폴리곤 해석 결과)
+    const dx = heading.dx, dz = heading.dz;
+    if (clothesline.placed) {
+      for (const s of [-1, 1]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, ph, 6), M.wood);
+        post.position.set(lx + dx * s * span / 2, ph / 2, lz + dz * s * span / 2);
+        post.castShadow = true; g.add(post);
+      }
+      const line = new THREE.Mesh(new THREE.BoxGeometry(span, 0.02, 0.02), M.wood);
+      line.position.set(lx, ph - 0.05, lz); line.rotation.y = -ang; g.add(line);
     }
-    const line = new THREE.Mesh(new THREE.BoxGeometry(span, 0.02, 0.02), M.wood);
-    line.position.set(lx, ph - 0.05, lz); line.rotation.y = -ang; g.add(line);
     const nCloth = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < nCloth; i++) {
       const t = (i + 0.7) / (nCloth + 0.4) - 0.5;
       const ch = 0.5 + rng() * 0.4;
+      if (!clothesline.placed) continue;
       const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.42, ch, 0.03), M.plaster);
       cloth.position.set(lx + dx * t * span, ph - 0.08 - ch / 2, lz + dz * t * span);
       cloth.rotation.y = -ang; cloth.castShadow = cloth.receiveShadow = true; g.add(cloth);
@@ -397,8 +427,8 @@ function makeYardProps(plotW, plotD, opts, M, rng) {
   }
 
   // 텃밭: 앞마당 우측 흙 이랑 몇 줄(makeGardenPatch 재사용 배치).
-  if (opts.vegBed) {
-    g.add(makeGardenPatch(plotW, plotD, M, plotW * 0.3, plotD * 0.1));
+  if (opts.vegBed && placements.vegBed?.placed) {
+    g.add(makeGardenPatch(placements.vegBed, M));
   }
 
   return g;
