@@ -47,6 +47,7 @@ const EXACT_IMPACT = new Map([
   ]],
   ['src/village/instancing.js', [
     './check-instance-upload.mjs',
+    './check-instance-merge-immutability.mjs',
   ]],
   ['src/village/wave.js', [
     './check-instance-upload.mjs',

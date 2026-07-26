@@ -63,6 +63,9 @@ assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
 assert.deepEqual(ids(['tools/check-forest-canopy-atten.mjs'], {
   newPaths: ['tools/check-forest-canopy-atten.mjs'],
 }), ['core']);
+assert.deepEqual(ids(['tools/check-instance-merge-immutability.mjs'], {
+  newPaths: ['tools/check-instance-merge-immutability.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 for (const path of [
   'src/village/auxiliary-building-plan.js',
@@ -428,7 +431,9 @@ assert.deepEqual(impactedFastChecks(['src/village/nightlights.js']).includes(
   './check-nightlight-geometry.mjs',
 ), true);
 assert.deepEqual(impactedFastChecks(['src/village/instancing.js']), [
-  './check-architecture.mjs', './check-instance-upload.mjs',
+  './check-architecture.mjs',
+  './check-instance-upload.mjs',
+  './check-instance-merge-immutability.mjs',
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/wave.js']), [
   './check-architecture.mjs', './check-instance-upload.mjs', './check-wave-contract.mjs',

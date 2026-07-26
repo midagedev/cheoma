@@ -15,7 +15,15 @@ import {
 
 export { houseMatrix, parcelMatrix, parcelRotY } from '../generators/shared/parcel-transform.js';
 
-const M4 = () => new THREE.Matrix4();
+// Hot-path assembly reuses module scratches instead of `new Matrix4()` / `.clone()` per mesh
+// or per instance. All consumers are synchronous and finish reading the matrix before the next
+// overwrite (normalizeGeo.applyMatrix4 / InstancedMesh.setMatrixAt copy elements immediately).
+const _baseInv = new THREE.Matrix4();
+const _wm = new THREE.Matrix4();
+const _im = new THREE.Matrix4();
+const _full = new THREE.Matrix4();
+const _zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
+const _color = new THREE.Color();
 // Focus/edit presentation mutates the live render buffers (zero instance matrices and
 // degenerate merged-geometry ranges). Export needs the authored village, not that transient
 // presentation state. Symbol metadata stays outside userData, so Object3D cloning/extras JSON
@@ -295,7 +303,8 @@ export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
     e.list.push(geo); e.cast = e.cast || cast; e.recv = e.recv || recv;
     if (trackSrc) e.runs.push({ src, count: geo.attributes.position.count });
   };
-  const baseInv = preMatrix ? preMatrix.clone().invert() : null;
+  const useBaseInv = !!preMatrix;
+  if (useBaseInv) _baseInv.copy(preMatrix).invert();
   const srcOf = (o) => {   // o 또는 조상에서 최근접 __mergeSrc 태그
     let a = o;
     while (a && a !== root) { if (a.userData && a.userData.__mergeSrc !== undefined) return a.userData.__mergeSrc; a = a.parent; }
@@ -312,13 +321,14 @@ export function decomposeByMaterial(root, preMatrix = null, opts = {}) {
     if (!mat) return;
     const keepColor = !!mat.vertexColors;
     const src = trackSrc ? srcOf(o) : undefined;
-    // 월드행렬을 preMatrix 기준으로 환산(프로토면 baseInv=null → 프로토로컬 그대로)
-    const wm = baseInv ? baseInv.clone().multiply(o.matrixWorld) : o.matrixWorld;
+    // 월드행렬을 preMatrix 기준으로 환산(프로토면 baseInv 미사용 → 프로토로컬 그대로).
+    // Scratch `_wm` holds the preMatrix-relative transform; identity-pre paths keep the live
+    // matrixWorld reference (read-only via applyMatrix4).
+    const wm = useBaseInv ? _wm.copy(_baseInv).multiply(o.matrixWorld) : o.matrixWorld;
     if (o.isInstancedMesh) {
-      const im = new THREE.Matrix4();
       for (let i = 0; i < o.count; i++) {
-        o.getMatrixAt(i, im);
-        const full = wm.clone().multiply(im);
+        o.getMatrixAt(i, _im);
+        const full = _full.copy(wm).multiply(_im);
         push(mat, normalizeGeo(o.geometry, full, keepColor), o.castShadow, o.receiveShadow, src);
       }
     } else {
@@ -363,7 +373,6 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
   const include = typeof opts.filterMaterial === 'function' ? opts.filterMaterial : null;
   // 기존 FULL 이름은 scene/hash/외부 탐색 계약이므로 그대로 둔다. 새 suffix는 MID에만 붙인다.
   group.name = tier === 'full' ? `houses-${kind}` : `houses-${kind}-${tier}`;
-  const ZERO = M4().makeScale(0, 0, 0);               // 은닉용(축소 소거)
   const clampV = (v) => (decomps[v] ? v : 0);
   const byVariant = new Map();
   for (const p of parcels) {
@@ -371,11 +380,11 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     let e = byVariant.get(v); if (!e) { e = []; byVariant.set(v, e); } e.push(p);
   }
   const locate = new Map();   // id -> { meshes:[InstancedMesh], index, mat:Matrix4 }
-  const col = new THREE.Color();
   for (const [v, plist] of byVariant) {
     const source = decomps[v] || decomps[0];
     const decomp = include ? source.filter((entry) => include(entry.material, entry)) : source;
     const n = plist.length;
+    // houseMatrix results are owned by locate (setHidden restores them) — not scratches.
     const mats = plist.map(houseMatrix);
     const meshes = [];
     let exportMatrices = null;   // 같은 변주·필지 순서를 쓰는 role mesh들이 공유하는 불변 원본
@@ -395,7 +404,7 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
       for (let i = 0; i < n; i++) {
         inst.setMatrixAt(i, mats[i]);
         const t = roleTone(kind, plist[i], role);
-        col.setRGB(t[0], t[1], t[2]); inst.setColorAt(i, col);
+        _color.setRGB(t[0], t[1], t[2]); inst.setColorAt(i, _color);
       }
       if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       // setHidden mutates instanceMatrix in place. Keep one immutable authored snapshot for
@@ -413,7 +422,7 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     const rec = locate.get(id);
     if (!rec || (on ? hidden.has(id) : !hidden.has(id))) return false;
     if (on) hidden.add(id); else hidden.delete(id);
-    const m = on ? ZERO : rec.mat;
+    const m = on ? _zeroScale : rec.mat;
     for (const inst of rec.meshes) {
       inst.setMatrixAt(rec.index, m);
       markAttributeItems(inst.instanceMatrix, rec.index);
@@ -430,7 +439,7 @@ export function buildHouseInstances(kind, parcels, decomps, opts = {}) {
     const rec = locate.get(id);
     if (!rec) return;
     if (on) exportHidden.add(id); else exportHidden.delete(id);
-    const matrix = on ? ZERO : rec.mat;
+    const matrix = on ? _zeroScale : rec.mat;
     const seen = new Set();
     for (const inst of rec.meshes) {
       const snapshot = inst[EXPORT_INSTANCE_MATRIX];
