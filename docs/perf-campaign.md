@@ -66,10 +66,18 @@
 | **AABB-gated wall** | 새 지붕 AABB가 맞으면 담/부속채 유지, 어긋나면 제자리 wall rebuild (그룹 dispose 없음) | 동일 |
 | **isResidentialHouseOnlyEdit** | 순수 시그니처 게이트로 openings를 포함해 shell 축을 포괄 | — |
 
+## 6차 구현 (motion budget)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **motionBudget** | non-stable 모드에서 true (fillScale과 동일 경계) | 정착 시 false |
+| **Outline sleep** | 오빗/settle 중 OutlinePass.enabled=false | 정착 후 호버 아웃라인 복원 |
+| **Focus MSAA hold** | 모션 중 focus여도 MSAA 2× 유지, 정착 시 4× | 정착 프레임 동일 |
+
 ## 다음 라운드 (우선순위)
 
-1. product-path bench: roof-pitch med ms vs full rebuild baseline
-2. motion-time outline/flare sleep or grade half-res (정착 복원)
+1. product-path bench: roof-pitch med + motion msaa/outline flags
+2. flare depth sleep during motionBudget (focus only)
 3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트

@@ -50,6 +50,30 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   };
   applyBloomResolution(cssW, cssH);
 
+  // focusBudget tracks the last setFocusBudget so motion can hold MSAA at the
+  // aerial sample count without forgetting the product focus promotion.
+  let focusBudget = false;
+  let motionBudgetActive = false;
+  const applyMsaaBudget = () => {
+    if (compact || typeof post.renderPass?.setSamples !== 'function') return;
+    // Motion holds the cheap aerial MSAA even while focused; settle restores 4×.
+    const samples = (focusBudget && !motionBudgetActive)
+      ? MSAA_SAMPLES_DESKTOP
+      : MSAA_SAMPLES_AERIAL;
+    post.renderPass.setSamples(samples);
+  };
+
+  const outline = new OutlinePass(new THREE.Vector2(width, height), scene, camera);
+  outline.edgeStrength = 2.2;
+  outline.edgeGlow = 0;
+  outline.edgeThickness = 1;
+  outline.pulsePeriod = 0;
+  outline.visibleEdgeColor.set('#2c2620');
+  // OutlinePass always renders hidden edges; black makes the additive result invisible.
+  outline.hiddenEdgeColor.set('#000000');
+  outline.selectedObjects = [];
+  post.composer.insertPass(outline, post.composer.passes.length - 1);
+
   const qualityRuntime = createPostQualityRuntime({
     camera,
     bokehPass: post.bokehPass,
@@ -62,18 +86,14 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       post.setFillScale?.(scale);
       applyBloomResolution(cssW, cssH);
     },
+    // Secondary motion budget: sleep the hover outline (fullscreen mask + edge)
+    // and hold focus MSAA at aerial samples until the frame fully settles.
+    setMotionBudget: (active) => {
+      motionBudgetActive = !!active;
+      outline.enabled = !motionBudgetActive;
+      applyMsaaBudget();
+    },
   });
-
-  const outline = new OutlinePass(new THREE.Vector2(width, height), scene, camera);
-  outline.edgeStrength = 2.2;
-  outline.edgeGlow = 0;
-  outline.edgeThickness = 1;
-  outline.pulsePeriod = 0;
-  outline.visibleEdgeColor.set('#2c2620');
-  // OutlinePass always renders hidden edges; black makes the additive result invisible.
-  outline.hiddenEdgeColor.set('#000000');
-  outline.selectedObjects = [];
-  post.composer.insertPass(outline, post.composer.passes.length - 1);
 
   // constructor.name 은 three 배포 빌드에서 선행 '_'가 붙거나 minify될 수 있다. 소유한 패스
   // 참조로 이름을 고정해 브라우저/빌드 종류와 무관한 검증 계약을 제공한다.
@@ -100,16 +120,13 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
      */
     setFocusBudget(focused) {
       if (disposed) return;
+      focusBudget = !!focused;
       const nextHalf = compact || !focused;
       if (nextHalf !== bloomHalf) {
         bloomHalf = nextHalf;
         applyBloomResolution(cssW, cssH);
       }
-      if (!compact && typeof post.renderPass?.setSamples === 'function') {
-        post.renderPass.setSamples(
-          focused ? MSAA_SAMPLES_DESKTOP : MSAA_SAMPLES_AERIAL,
-        );
-      }
+      applyMsaaBudget();
     },
     updateQuality(dt, referenceDepth) {
       if (disposed) return null;
