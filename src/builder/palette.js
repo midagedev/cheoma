@@ -13,19 +13,62 @@ import {
   MATERIAL_PROGRAM_PATCH,
   addMaterialProgramKey,
 } from '../render/material-program-key.js';
+import { createPaletteContext } from './palette-context.js';
 
-// 캔버스 텍스처의 무작위 얼룩·짚결·막돌은 기본 Math.random 을 쓴다. 다만 마을 재현 렌더
-// (같은 seed → 픽셀 동일)를 위해 외부에서 시드 가능한 난수원으로 교체할 수 있다.
-// setTextureRandom(null) 또는 미교체 시 현행(Math.random) 동작 불변.
-let _texRand = Math.random;
-export function setTextureRandom(fn) { _texRand = (typeof fn === 'function') ? fn : Math.random; }
+export { createPaletteContext };
+
+// Module-active palette context. Product path keeps browser defaults
+// (document.createElement('canvas') + Math.random). Node gates inject both;
+// village seed windows only swap the RNG via setTextureRandom.
+// Per-call override: makeMaterials(..., { paletteContext }) temporarily installs
+// a context for that build, then restores the previous active context.
+let _activeContext = createPaletteContext();
+
+export function getPaletteContext() {
+  return _activeContext;
+}
+
+/** Install a context, or reset to browser defaults when given null/invalid. */
+export function setPaletteContext(ctx) {
+  _activeContext = (ctx
+    && typeof ctx.random === 'function'
+    && typeof ctx.createCanvas === 'function')
+    ? ctx
+    : createPaletteContext();
+}
+
+/** Resolve optional per-call context; null/undefined → module-active context. */
+export function resolvePaletteContext(ctx) {
+  return (ctx
+    && typeof ctx.random === 'function'
+    && typeof ctx.createCanvas === 'function')
+    ? ctx
+    : _activeContext;
+}
+
+// Thin back-compat wrapper: only swaps the active context's RNG while preserving
+// the installed createCanvas. setTextureRandom(null) restores Math.random.
+export function setTextureRandom(fn) {
+  _activeContext = createPaletteContext({
+    random: typeof fn === 'function' ? fn : Math.random,
+    createCanvas: _activeContext.createCanvas,
+  });
+}
+
+function _texRand() {
+  return _activeContext.random();
+}
+
+function _createCanvas() {
+  return _activeContext.createCanvas();
+}
 
 // 하위호환 공개 export. 실제 토큰은 THREE 비의존 모듈에 두어 원경 프록시와 공유한다.
 export { KOREA_COLORS };
 
 // 기와 지붕 텍스처: 기왓등·기왓골 세로 줄 + 가로 겹침 라인 (온기 있는 진회색)
 function makeTileTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 256, 0);
@@ -50,7 +93,7 @@ function makeTileTexture() {
 // 근정전 실물 창호는 밝은 창호지 위 초록 살이 대각으로 교차한 마름모 문양이라, 살 사이로 빛이
 // 투과하듯 밝게 읽혀야 한다(구 버전: 어두운 한지 + 촘촘한 직교 정자살 → 역광·그늘서 진흙빛으로 뭉갬).
 function makeDoorTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
   g.fillStyle = '#f2ecda';                       // 밝은 한지(살 사이 광명)
@@ -84,7 +127,7 @@ function makeDoorTexture() {
 // 정자살문(살림집): 궁궐 문살의 주칠·뇌록을 재사용하지 않고 백골 목재와 한지만 쓴다.
 // 패턴 이름은 격자 짜임을 뜻하며 건물의 장식 위계까지 뜻하지 않는다.
 function makeCivilianJeongjaTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
   g.fillStyle = '#e8dec5';
@@ -118,7 +161,7 @@ function dancheongSource(kind, config) {
     dancheongSourceCache.set(key, hit);
     return hit;
   }
-  const canvas = document.createElement('canvas');
+  const canvas = _createCanvas();
   canvas.width = kind === 'band' ? 512 : 64;
   canvas.height = 64;
   paintDancheongSource(canvas, kind, config);
@@ -143,7 +186,7 @@ export function dancheongSourceCacheStats() {
 
 // 합각/박공면. 'palace' = 붉은 세로 널, 'temple' = 노출 가구(가로 도리 + 황토 패널).
 function makeGableTexture(style = 'palace') {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 128;
   const g = c.getContext('2d');
   if (style === 'temple') {
@@ -172,7 +215,7 @@ function makeGableTexture(style = 'palace') {
 
 // 황토벽: 미장 질감의 흙벽(절). 은은한 얼룩으로 흙손 자국을 흉내.
 function makeHwangtoTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
   g.fillStyle = '#c9a06a';
@@ -193,7 +236,7 @@ function makeHwangtoTexture() {
 
 // 띠살문(절): 목재색 살 + 한지. 세로살 위주에 가로살은 성기게.
 function makeTtisalTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
   g.fillStyle = '#e7ddc4';                        // 한지
@@ -221,7 +264,7 @@ function makeTtisalTexture() {
 // 세살문(반가 상급): 촘촘한 세로살 + 상부에만 성근 가로살 + 하단 넓은 목재 청판. 정자살(격자)·
 // 띠살(굵은 띠)과 구별되는 "세로살 지배" 창호. 민가이므로 궁궐 주칠·뇌록은 쓰지 않는다.
 function makeSesalTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
   g.fillStyle = '#e9dfc8';                        // 한지
@@ -245,7 +288,7 @@ function makeSesalTexture() {
 
 // 초가 띠살문: 미색 한지 + 가늘고 성근 살 (감옥 격자 탈피, 세로 비례).
 function makeChogaDoorTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 128; c.height = 256;
   const g = c.getContext('2d');
   g.fillStyle = '#e0d5b8';                          // 미색 한지(톤 다운)
@@ -266,7 +309,7 @@ function makeChogaDoorTexture() {
 
 // 살창(절): 세로 나무 창살 사이로 어두운 실내가 비치는 붙박이 창.
 function makeSalchangTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#241d16';                         // 어두운 실내
@@ -282,7 +325,7 @@ function makeSalchangTexture() {
 
 // 풍판(절): 박공 아래 세로 널빤지 벽.
 function makePungpanTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#997048';                         // 목재(밝은 갈색)
@@ -310,7 +353,7 @@ function makePungpanTexture() {
 export function makeThatchTexture(age = 0.5) {
   const a = Math.max(0, Math.min(1, age));
   const mix = (u, v) => Math.round(u + (v - u) * a);
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
   // 바탕: 밝은 금빛(fresh) → 어두운 회갈(old). UV v=경사방향 → canvas y가 내리방향.
@@ -403,7 +446,7 @@ export const FIELDSTONE_TILE = Object.freeze({ w: 1.6, h: 0.8 });
 
 // 막돌 기단·화방벽(초가): 크기가 제각각인 각진 자연석을 흙 줄눈으로 물려 쌓은 거친 돌벽 질감.
 function makeFieldstoneTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 256; c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#786951';                          // 흙 줄눈(모르타르) 바탕 — 돌과 명도차를 벌린다
@@ -444,7 +487,7 @@ function makeFieldstoneTexture() {
 // 실린더 UV에서 u=둘레(canvas x), v=길이(canvas y). 둘레 전체를 감는 띠 = 가로 밴드(canvas x 전폭).
 // repeat.y를 롤 길이에 맞춰 여러 개로 타일링(호출부). 3D 돌기 없이 표면 밀착.
 function makeYongmaruTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 64; c.height = 64;
   const g = c.getContext('2d');
   g.fillStyle = '#83765c';                          // 묵은 이엉 회갈(용마름은 지붕보다 살짝 짙게)
@@ -473,7 +516,7 @@ function makeYongmaruTexture() {
 
 // 수막새 와당: 처마 끝 수키와 원형 드림새. 진회 기와 바탕 + 연꽃 문양(주연부 구슬).
 function makeWadangTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
   const cx = 64, cy = 64;
@@ -500,7 +543,7 @@ function makeWadangTexture() {
 
 // 적새: 용마루/마루 옆면에 겹쳐 쌓은 암키와 켜(가로 줄). 마루가 "쌓아 올린 것"으로 읽히게.
 function makeJeoksaeTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 32; c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#43464c'; g.fillRect(0, 0, 32, 128);
@@ -517,7 +560,7 @@ function makeJeoksaeTexture() {
 // 와구토: 막새 대신 기와골 끝 수키와에 회(灰)물림 한 흰 반달(반가 격식). 처마 끝에 한 골당 하나.
 // 처마 스트립(u=처마방향, v=상하)에 매핑. 한 반복 = 한 기왓등 끝의 흰 반달.
 function makeWagutoTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 48; c.height = 48;
   const g = c.getContext('2d');
   g.fillStyle = '#3a3d43';                          // 처마 끝 기와 그늘
@@ -536,7 +579,7 @@ function makeWagutoTexture() {
 
 // 전돌 굴뚝: 회흑 전돌을 켜쌓기(엇쌓기) 한 벽돌 질감 + 회줄눈.
 function makeJeondolTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#6a625a';                          // 회줄눈(모르타르) 바탕
@@ -565,7 +608,7 @@ function makeJeondolTexture() {
 
 // 우물마루: 손 탄 반질한 갈색 마루널 + 井자 장귀틀 격자.
 function makeMaruTexture() {
-  const c = document.createElement('canvas');
+  const c = _createCanvas();
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = '#7a5a38'; g.fillRect(0, 0, 128, 128);
@@ -619,7 +662,20 @@ export function makeDancheongVariant(base, input) {
 }
 
 // style: 'palace'(궁·다포) | 'temple'(절·주심포) | 'choga'(민가·볏짚) | 'giwa'(반가·기와). 벽·창호·재료 계열을 바꾼다.
+// options.paletteContext: optional per-build canvas/RNG provider. Null/absent keeps the
+// module-active context (product shared materials path unchanged).
 export function makeMaterials(style = 'palace', options = {}) {
+  const prevContext = _activeContext;
+  const injected = options.paletteContext;
+  if (injected) _activeContext = resolvePaletteContext(injected);
+  try {
+    return buildMaterials(style, options);
+  } finally {
+    if (injected) _activeContext = prevContext;
+  }
+}
+
+function buildMaterials(style, options) {
   const C = KOREA_COLORS;
   const temple = style === 'temple';
   const choga = style === 'choga';
