@@ -127,6 +127,10 @@ const REVIEWED_NEW_PATHS = new Set([
 // #150-J: first-person gate-aware walk solids (pure + FAST_CHECKS, no mesh-bvh).
   'src/cinematic/walk-solids.js',
   'tools/check-walk-solids.mjs',  'tools/check-building-navigation.mjs',
+// #150 E temple entry sequence: pure gate|stair-apron|pass-under|court records
+  // under src/temple/, owned by check:temple + temple-browser (same as plan/compound).
+  'src/temple/entry-sequence.js',
+  'tools/check-building-navigation.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',

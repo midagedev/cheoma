@@ -3,12 +3,18 @@
 // under a full visual run.
 import { readFileSync } from 'node:fs';
 import {
+  TEMPLE_ENTRY_PROFILES,
+  TEMPLE_ENTRY_SEQUENCE_SCHEMA_VERSION,
+  TEMPLE_ENTRY_STAGE_KINDS,
   TEMPLE_PLAN_SCHEMA_VERSION,
   TEMPLE_ROLE_HIERARCHY,
   TEMPLE_VARIANTS,
   TEMPLE_VARIANT_SPECS,
   normalizeTemplePlan,
   planTempleCompound,
+  planTempleEntrySequence,
+  templeEntrySequenceIssues,
+  templeEntrySequenceKinds,
   templeHallBuilderParams,
   templeHallEaveFootprint,
   templePlanIssues,
@@ -119,6 +125,39 @@ function assertLocalPlan(plan, label) {
     invariant(Math.abs(gate.position.z - southZ) < 1e-3, `${label}: inner gate misses its wall opening`);
     invariant(plan.courtyards.length >= 2, `${label}: extended compound needs two courts`);
   }
+
+  // #150 item E — processional entry sequence (gate | stair-apron | pass-under | court).
+  const sequence = plan.entrySequence;
+  invariant(sequence?.schemaVersion === TEMPLE_ENTRY_SEQUENCE_SCHEMA_VERSION,
+    `${label}: entry sequence schema missing`);
+  invariant(TEMPLE_ENTRY_PROFILES.includes(sequence.profile),
+    `${label}: entry profile ${sequence.profile} is not flat|mountain`);
+  const expectedKinds = templeEntrySequenceKinds(plan.variant, sequence.profile);
+  const actualKinds = sequence.stages.map((stage) => stage.kind);
+  invariant(stableJson(actualKinds) === stableJson([...expectedKinds]),
+    `${label}: entry order ${actualKinds.join('|')} != ${expectedKinds.join('|')}`);
+  for (let index = 0; index < sequence.stages.length; index++) {
+    const stage = sequence.stages[index];
+    invariant(stage.order === index, `${label}: entry stage order drifted at ${index}`);
+    invariant(TEMPLE_ENTRY_STAGE_KINDS.includes(stage.kind),
+      `${label}: unknown entry stage kind ${stage.kind}`);
+    if (index > 0) {
+      invariant(stage.position.z <= sequence.stages[index - 1].position.z + 0.05,
+        `${label}: entry stages are not south→north`);
+    }
+  }
+  if (plan.variant === 'courtyard' || plan.variant === 'extended') {
+    const passUnder = sequence.stages.find((stage) => stage.kind === 'pass-under');
+    invariant(passUnder?.passUnder?.openLower, `${label}: pass-under lost open lower corridor`);
+    const pavilion = plan.buildings.find((building) => (
+      building.id === passUnder.refId || building.passUnder?.openLower
+    ));
+    invariant(pavilion?.role === 'gate-pavilion' && pavilion.passUnder?.openLower,
+      `${label}: pass-under pavilion building missing`);
+    invariant(pavilion.architecturalRank < 4, `${label}: pass-under rivalled the main hall`);
+  }
+  const entryIssues = templeEntrySequenceIssues(plan);
+  invariant(!entryIssues.length, `${label}: entry sequence ${entryIssues.join('; ')}`);
 }
 
 let pureCases = 0;
@@ -266,6 +305,27 @@ for (const variant of TEMPLE_VARIANTS) {
     assertLocalPlan(edgePlan, label);
     pureCases++;
   }
+}
+
+// Mountain profile: same kind order for courtyard/extended, but stair-apron is
+// expressed as apron tiers rather than a free-standing single run.
+for (const variant of ['courtyard', 'extended']) {
+  const label = `${variant}:mountain-entry`;
+  const mountain = withoutGlobalRandom(() => planTempleCompound({
+    variant, seed: 150, entryProfile: 'mountain',
+    width: TEMPLE_VARIANT_SPECS[variant].width,
+    depth: TEMPLE_VARIANT_SPECS[variant].depth,
+  }), label);
+  assertLocalPlan(mountain, label);
+  invariant(mountain.entrySequence.profile === 'mountain', `${label}: profile not mountain`);
+  const stair = mountain.entrySequence.stages.find((stage) => stage.kind === 'stair-apron');
+  invariant(stair?.stairMode === 'apron-tiers' && stair.tiers.length >= 2,
+    `${label}: mountain stair did not use apron tiers`);
+  const derived = planTempleEntrySequence(mountain, { profile: 'mountain' });
+  invariant(stableJson(derived.stages.map((stage) => stage.kind))
+    === stableJson(mountain.entrySequence.stages.map((stage) => stage.kind)),
+  `${label}: pure entry derive drifted from plan-owned sequence`);
+  pureCases++;
 }
 
 // The solar gate must reject tall architecture, including a pavilion, in front of

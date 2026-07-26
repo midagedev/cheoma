@@ -77,6 +77,13 @@ function hallPreset(spec, seed, mats) {
     eaveGrammar: spec.eaveGrammar,
     massingGrammar: spec.massingGrammar,
   };
+  const passUnder = spec.passUnder?.openLower
+    ? {
+      openLowerCorridor: true,
+      passUnderWidth: spec.passUnder.corridorWidth,
+      passUnderHeight: spec.passUnder.corridorHeight,
+    }
+    : null;
   return {
     ...PRESETS.temple,
     ...templeHallBuilderParams(architecture),
@@ -84,13 +91,19 @@ function hallPreset(spec, seed, mats) {
     mats,
     frontBays: spec.frontBays,
     sideBays: spec.sideBays,
+    // 누하: raised hall with an open lower corridor — no palace ornaments, same
+    // temple palette, walls omitted so the processional axis walks through.
+    ...(passUnder || {}),
   };
 }
 
 function buildHall(spec, seed, mats) {
   const building = buildBuilding(hallPreset(spec, seed, mats));
   building.name = `temple-${spec.id}`;
-  building.position.set(spec.position.x, 0, spec.position.z);
+  // Mountain entry may lift a pass-under one apron step; flat stays on grade so
+  // the open lower corridor reads as a true walk-under volume.
+  const lift = Number.isFinite(spec.elevation) ? spec.elevation : 0;
+  building.position.set(spec.position.x, lift, spec.position.z);
   building.rotation.y = spec.yaw || 0;
   building.scale.setScalar(spec.scale || 1);
   building.userData.templeId = spec.id;
@@ -102,6 +115,13 @@ function buildHall(spec, seed, mats) {
     bracketGrammar: spec.bracketGrammar,
     eaveGrammar: spec.eaveGrammar,
   };
+  if (spec.passUnder?.openLower) {
+    building.userData.templePassUnder = {
+      openLower: true,
+      corridorWidth: spec.passUnder.corridorWidth,
+      corridorHeight: spec.passUnder.corridorHeight,
+    };
+  }
   return building;
 }
 
@@ -205,7 +225,12 @@ export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}
     return courtMaterials.get(role);
   };
   for (const court of plan.courtyards) {
-    root.add(polygonMesh(court.polygon, courtMaterial(court.role), 0.018 + (court.level || 0), court.id));
+    // Prefer plan-owned elevation (mountain apron tiers); fall back to level as
+    // a coarse step only when elevation was never authored.
+    const courtY = Number.isFinite(court.elevation)
+      ? 0.018 + court.elevation
+      : 0.018 + (court.level || 0) * 0.55;
+    root.add(polygonMesh(court.polygon, courtMaterial(court.role), courtY, court.id));
   }
 
   const pathMaterial = new THREE.MeshStandardMaterial({ color: 0xaaa08d, roughness: 1, metalness: 0 });

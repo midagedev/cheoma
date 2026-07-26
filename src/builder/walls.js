@@ -28,6 +28,13 @@ export function buildWalls(P, L, M) {
     buildChogaWalls(P, L, M, g, lastX, lastZ);
     return g;
   }
+  // ── 사찰 누하(pass-under): raised hall open lower corridor ──
+  // Columns + roof carry the volume; omitting walls keeps the processional
+  // axis open without a second material family or palace ornament.
+  if (P.openLowerCorridor) {
+    g.name = 'walls-open-lower';
+    return g;
+  }
 
   const openingDetails = createOpeningDetailAssembler(g, {
     frame: M.woodDark,

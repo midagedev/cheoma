@@ -1,5 +1,10 @@
 import { makeRng } from '../rng.js';
 import {
+  applyTempleEntrySequence,
+  templeBuildingIsOpenPassUnder,
+  templeEntrySequenceIssues,
+} from './entry-sequence.js';
+import {
   templeHallEaveFootprint,
   templeRoleArchitecture,
 } from './role-hierarchy.js';
@@ -203,6 +208,12 @@ export function normalizeTemplePlan(plan) {
     if (!hallEaveMatches(building)) {
       throw new TypeError(`TemplePlan v2 building ${building.id} has a stale eave footprint`);
     }
+  }
+  // Entry sequence is plan-owned. Recover it on the same object so v2 stays an
+  // identity pass when already complete, and older pure payloads still gain the
+  // gate | stair-apron | pass-under | court contract without a schema bump.
+  if (!plan.entrySequence) {
+    applyTempleEntrySequence(plan, { profile: plan.settings?.entryProfile });
   }
   return plan;
 }
@@ -436,6 +447,9 @@ export function planTempleCompound(options = {}) {
   const width = clamp(finite(options.width, spec.width), spec.min, spec.max);
   const depth = clamp(finite(options.depth, spec.depth), spec.min, spec.max);
   const rng = makeRng((seed ^ 0x7e6d1e) >>> 0);
+  const entryProfile = options.entryProfile === 'mountain' || options.profile === 'mountain'
+    ? 'mountain'
+    : 'flat';
   const settings = {
     hallCount: clamp(Math.round(finite(options.hallCount, spec.maxHalls)), spec.minHalls, spec.maxHalls),
     axisBend: round(clamp(finite(options.axisBend, rng.range(-0.55, 0.55)), -1, 1)),
@@ -445,6 +459,7 @@ export function planTempleCompound(options = {}) {
     stoneLanterns: clamp(Math.round(finite(options.stoneLanterns, variant === 'extended' ? 2 : 1)), 0, 2),
     includeDanggan: options.includeDanggan ?? (variant !== 'compact'),
     includeBudo: options.includeBudo ?? (variant === 'extended'),
+    entryProfile,
   };
   // The 22m solo precinct is a deliberate hermitage: its optional yosa only
   // appears once the wall has enough lateral breathing room.
@@ -453,6 +468,9 @@ export function planTempleCompound(options = {}) {
   if (variant === 'compact') planCompact(plan);
   else if (variant === 'courtyard') planCourtyard(plan);
   else planExtended(plan);
+  // Gate | stair-apron | pass-under | court is owned here so village adapters
+  // and editors cannot invent a second processional grammar.
+  applyTempleEntrySequence(plan, { profile: entryProfile });
   return plan;
 }
 
@@ -580,6 +598,8 @@ export function templePlanIssues(plan) {
       solar.southZ - solar.origin.z,
     );
     for (const { building, box, polygon } of buildings) {
+      // Open lower corridors (누하) keep the processional axis and winter sun.
+      if (templeBuildingIsOpenPassUnder(building)) continue;
       if (building.role !== solar.role && boxesOverlap(lane, box)
         && polygonsOverlap(lanePolygon, polygon)) {
         issues.push(`${building.id}: blocks main-hall south-light lane`);
@@ -594,5 +614,6 @@ export function templePlanIssues(plan) {
       if (boxesOverlap(lane, box)) issues.push(`${item.id}: blocks main-hall south-light lane`);
     }
   }
+  for (const issue of templeEntrySequenceIssues(plan)) issues.push(issue);
   return issues;
 }
