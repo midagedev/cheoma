@@ -65,6 +65,13 @@ assert.deepEqual(ids(['tools/check-forest-canopy-atten.mjs'], {
 }), ['core']);
 assert.deepEqual(ids(['tools/check-instance-merge-immutability.mjs'], {
   newPaths: ['tools/check-instance-merge-immutability.mjs'],
+// #150 C roof-rank pure policy — reviewed new path under the shared builder routing.
+// builder/* also sits on the public building reuse graph → api-reuse.
+assert.deepEqual(ids(['src/builder/roof-rank.js'], {
+  newPaths: ['src/builder/roof-rank.js'],
+}), ['core', 'app', 'building-lifecycle', 'api-reuse', 'worker']);
+assert.deepEqual(ids(['tools/check-roof-rank-contract.mjs'], {
+  newPaths: ['tools/check-roof-rank-contract.mjs'],
 }), ['core']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 for (const path of [
@@ -450,6 +457,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-door-occlusion-contract.mjs',
   './check-cinematic-reveal.mjs',
   './check-walk-solids.mjs',
+'./check-roof-rank-contract.mjs',
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',
   './check-road-contract.mjs',

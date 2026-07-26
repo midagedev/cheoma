@@ -488,7 +488,15 @@ export function createVillageHandle(opts, seed, plan, group) {
       };
       g.userData.mjaHouse = true;
     } else {
-      const opts = { seed: parcel.seed || 7, style: parcel.heroStyle || 'hanok', plotW: parcel.plotW, plotD: parcel.plotD };
+      const heroStyle = parcel.heroStyle || 'hanok';
+      const opts = {
+        seed: parcel.seed || 7,
+        style: heroStyle,
+        plotW: parcel.plotW,
+        plotD: parcel.plotD,
+        roofRank: parcel.roofRank
+          ?? (heroStyle === 'palace' ? 'magistracy' : null),
+      };
       if (editOpts.roofOpts) opts.roofOpts = editOpts.roofOpts;
       if (editOpts.presetOverrides) opts.presetOverrides = editOpts.presetOverrides;
       if (editOpts.wallH != null) opts.wallH = editOpts.wallH;

@@ -65,6 +65,9 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/generators/village/yard-life-product.js',
   'src/builder/choga-frame-plan.js',
   'src/builder/giwa-middle-gate.js',
+  // #150 C pure roof rank / palace-ornament policy for magistracy·city-gate·giwa.
+  'src/builder/roof-rank.js',
+  'tools/check-roof-rank-contract.mjs',
   'src/runtime/village/yard-life.js',
   'src/layout/giwa-roof-envelope.js',
   'src/layout/giwa-through-passage.js',

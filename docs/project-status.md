@@ -226,7 +226,9 @@ program 증가는 `0`이다. 즉 별채를 물리적으로 유지하면서도 �
 GitHub #11의 건축 고증 감사는 [`architectural-authenticity.md`](architectural-authenticity.md)에 출처의 사실,
 구현 해석, 한계와 완료/잔여 체크리스트를 함께 남긴다. 초가·기와집의 외벽 밖 독립 화덕은 공유 부엌 개구 안으로
 후퇴시키되 굴뚝과 근접 야간 불빛을 유지하고, 민가 정자살·세살은 궁궐 주칠·뇌록 대신 백골 목재·한지를 쓴다.
-잡상·취두는 지붕 형식만으로 생기지 않고 현 유형 체계의 `palace`에만 허용한다. 공식 자료를 제품 판단에 쓰면
+잡상·취두는 지붕 형식만으로 생기지 않는다. `src/builder/roof-rank.js`의
+`palace > magistracy/gaeksa > city-gate > giwa` 위계에서 rank `palace`에만 허용하며,
+관아·객사(`heroStyle: 'palace'`)와 성문 문루·기와·사찰은 거부한다. 공식 자료를 제품 판단에 쓰면
 같은 도메인 문서와 `credits.md`를 갱신하고 실제 Reference UI의 적용 문구와 링크까지 검증한다.
 
 GitHub #30의 첫 표면 파일럿은 [`surface-materials.md`](surface-materials.md)의 순수 source/Three adapter 경계를 따른다. 다져진 흙길은 사진 타일이나 비동기 로더 대신 seed 결정론 RGBA8 albedo·height를 만들고, 회전된 16m 월드 UV로 교차로까지 연속된다. 기존 vertex color가 도로 등급과 경사면 mute를 계속 소유하며 draw call·삼각형·재질 수는 늘지 않는다. 사용자에게 보이는 출처는 `credits.md` 한 곳에서 실제 Reference UI로 전달하고, 고정 OFF/ON 화면을 직접 열어 반복 띠·중원경 shimmer를 확인한다.

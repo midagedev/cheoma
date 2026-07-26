@@ -43,8 +43,11 @@ function pushTerrainPrism(P, I, corners, ground, bottomOffset, topOffset, {
 // 문루 우진각 지붕(#78 근경 격상) — 평슬래브 대신 지붕 어휘로 읽히게: 처마 반전(코너 들림)·
 //   처마 곡(중앙 처짐)·용마루(main ridge)·내림마루(hip ridges, 능선 끝→4코너). 저폴리 유지.
 //   반환 THREE.Group(면=tileMat, 마루=ridgeMat). 문 4기 한정이라 병합 후 드로우콜 소폭↑ 허용.
+//   roof-rank = city-gate (#150 C): 궁 잡상·취두 등 palace ornament를 절대 붙이지 않는다.
 function buildGateRoof(w, d, h, M) {
   const g = new THREE.Group();
+  g.name = 'city-gate-roof';
+  g.userData.roofRank = 'city-gate';
   const hw = w / 2, hd = d / 2;
   const tw = w * 0.15;               // 용마루 반길이(짧은 능선)
   const cl = h * 0.20;               // 처마 반전(코너 들림) — 한식 지붕 실루엣

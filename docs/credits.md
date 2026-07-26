@@ -255,7 +255,7 @@
 - scope: Palace-only boundary for japsang and chwidu roof ornaments
 - 국가유산포털 「궁궐 지붕 위 동물 조각상」 / 한국민족문화대백과사전 「잡상」
 - 국가유산포털 「궁궐 지붕 위 동물 조각상」은 **궁궐만** 다룬다(문루·관아까지 넓히는 근거로 쓸 수 없다). 잡상이 위계 높은 건축에 쓰였다는 범위와 **국내 사찰 지붕에 그 예가 없다**는 서술은 한국민족문화대백과사전 「잡상」 **단독** 근거다(2026-07-25 두 페이지 본문 재확인).
-- **활용 / Use:** 지붕 형식만 팔작으로 바뀐 사찰에 궁궐 잡상·취두가 누출되지 않도록 현 유형 체계에서 palace 전용 경계를 고정 / Basis for keeping japsang and chwidu palace-only in the current type system instead of adding them to any paljak roof (`src/builder/roof.js`).
+- **활용 / Use:** 지붕 형식만 팔작으로 바뀐 사찰에 궁궐 잡상·취두가 누출되지 않도록 하고, #150 C에서 `palace > magistracy/gaeksa > city-gate > giwa` roof-rank 사다리를 두되 잡상·취두는 rank `palace`에만 허용한다. 국가유산포털 항목은 궁궐 한정이며, 「잡상」이 문루·관아를 위계 건축에 넣는 서술보다 제품은 보수적으로 관아·성문·민가에 종물을 붙이지 않는다 / Basis for a pure roof-rank ladder with japsang and chwidu only on rank `palace`, denying them to magistracy/gaeksa, city gates, giwa, and any paljak temple (`src/builder/roof-rank.js`, `src/builder/roof.js`, `docs/architectural-authenticity.md` §2.3).
 - URL: https://www.heritage.go.kr/heri/html/HtmlPage.do?pageNo=1&pg=%2Fcul%2FcultureEasySub01_14.jsp · https://encykorea.aks.ac.kr/Article/E0048208
 - 라이선스: 기관 공개 웹 해설(2026-07-22 열람). 링크와 사실 요약만 수록하며 원문 이미지·도판은 재배포하지 않음. 재사용 전 각 페이지의 공공누리·저작권 조건 재확인.
 
