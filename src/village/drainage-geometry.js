@@ -27,11 +27,40 @@ const DITCH_COLORS = Object.freeze({
   bed: linearColor(0x706858),
 });
 
+// 건넘돌 색: 종전 top 0x918b7d 는 주변 흙보다 밝은 창백한 회백색이라 현대 프리캐스트
+//   콘크리트 판으로 읽혔다(docs/architectural-authenticity.md §7.4-9). 국립민속박물관
+//   「디딤돌」은 잘 다듬은 화강 장대석·판석을 **위상이 높은 건축**에 배정하고, 살림집에는
+//   "적당한 크기의 자연석을 약간만 다듬어" 쓴다고 서술한다. 그 위계에 맞춰 노면 흙보다
+//   어둡고 온기가 남은 화강 자연석 톤으로 내리되, 재질·텍스처는 그대로 둔다.
+//   실측 조정: 종전 top 은 렌더 휘도 143.8 로 같은 프레임의 노면 127.1 보다 **밝았다**(=판).
+//   단순히 어둡게만 내리면(0x726b5e, 휘도 94.3) 노면과 색온도가 같아져 젖은 흙으로 읽혔으므로,
+//   화강암 쪽으로 g≥r 인 냉중성 회색을 쓰고 휘도는 노면보다 한 단계만 낮춘다.
 const CROSSING_COLORS = Object.freeze({
-  top: linearColor(0x918b7d),
-  side: linearColor(0x716c62),
-  bottom: linearColor(0x56534c),
+  top: linearColor(0x716c60),
+  side: linearColor(0x5c574d),
+  bottom: linearColor(0x46423a),
 });
+
+// 돌 하나 안에서의 색 얼룩 폭과 돌끼리의 톤 차. 텍스처가 금지된 계약(docs/drainage.md §4)
+//   안에서 "균일한 격자"를 깨는 유일한 수단이 vertex color 이므로, 면 색을 꼭짓점 단위로
+//   흔든다. 두 값 모두 배수이고 1.0 을 중심으로 대칭이다.
+const CROSSING_VERTEX_MOTTLE = 0.05;
+const CROSSING_SLAB_SHADE_SPREAD = 0.3;
+// 자연석 윤곽: 꼭짓점을 **안쪽으로만** 당겨 계획이 준 span·width·thickness 봉투를 넘지
+//   않는다(대문 통과 폭과 도랑 바닥 관통 금지 계약 보존). 상면은 ±로 기울여 다듬돌의
+//   완전 평행 상면을 없앤다.
+const CROSSING_END_INSET = 0.02;
+const CROSSING_EDGE_INSET = 0.13;
+const CROSSING_TOP_TILT = 0.1;
+// 긴 두 축의 분할 수. 완전한 육면체는 변마다 직선이 하나뿐이라 꼭짓점만 흔들어도 장변이
+//   서로 평행한 다듬돌로 남는다(§7.4-9 재판정에서 실측 확인). 중간 꼭짓점이 있어야 윤곽이
+//   꺾인다. 판석 하나가 12 → 44 삼각형(quad = ±x 2·2 + ±y 6·2 + ±z 3·2 = 22)이 되고 crossing 당
+//   36 → 132 다. mesh·재질·텍스처·드로우콜·프로그램 델타는 0 이며 hanyang 최대 40 crossing 에서
+//   전체 삼각형 증가는 +3,840(씬 2,336만 대비 0.016%)이다.
+const CROSSING_SLAB_SEGMENTS = Object.freeze({ width: 3, span: 2 });
+// 돌 자기 중심 회전 상한(rad). 안쪽 inset 이 이미 폭의 19% 를 비워 두므로 이 각도에서
+//   회전한 모서리도 계획 봉투 안에 남는다.
+const CROSSING_SLAB_YAW = 0.045;
 
 function requireFinite(value, label) {
   if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite`);
@@ -225,19 +254,81 @@ function stableUnit(seed, channel) {
   return (hash >>> 0) / 0x100000000;
 }
 
-function applyCrossingColors(geometry, shade = 1) {
+function applyCrossingColors(geometry, shade = 1, seed = 'crossing') {
   const normals = geometry.getAttribute('normal');
+  const positions = geometry.getAttribute('position');
   const colors = new Float32Array(normals.count * 3);
   for (let index = 0; index < normals.count; index++) {
     const ny = normals.getY(index);
     const color = ny > 0.5
       ? CROSSING_COLORS.top
       : (ny < -0.5 ? CROSSING_COLORS.bottom : CROSSING_COLORS.side);
-    colors[index * 3] = Math.min(1, color[0] * shade);
-    colors[index * 3 + 1] = Math.min(1, color[1] * shade);
-    colors[index * 3 + 2] = Math.min(1, color[2] * shade);
+    // 얼룩은 꼭짓점 좌표에서 파생하므로 같은 꼭짓점을 공유하는 인접 면이 같은 값을 받고,
+    // 돌 하나 안에서 평면적인 단색이 사라진다. 텍스처·재질 델타 0.
+    const key = `${positions.getX(index).toFixed(4)}`
+      + `,${positions.getY(index).toFixed(4)}`
+      + `,${positions.getZ(index).toFixed(4)}`;
+    const mottle = 1 + (stableUnit(seed, `mottle-${key}`) * 2 - 1) * CROSSING_VERTEX_MOTTLE;
+    const scale = shade * mottle;
+    colors[index * 3] = Math.min(1, color[0] * scale);
+    colors[index * 3 + 1] = Math.min(1, color[1] * scale);
+    colors[index * 3 + 2] = Math.min(1, color[2] * scale);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
+}
+
+/**
+ * Pull a slab box toward an irregular natural-stone block.
+ *
+ * A perfect hexahedron has exactly one straight edge per side, so a corner-only
+ * jitter still reads as a machined slab: the long edges stay straight and
+ * mutually parallel, which is precisely the "다듬은 판석·장대석" hierarchy the
+ * source reserves for high-status architecture. Subdividing the long axes gives
+ * mid-edge vertices to break, at the cost of triangles alone (see the plan-level
+ * comment on CROSSING_SLAB_SEGMENTS).
+ *
+ * A BoxGeometry keeps one vertex per (position, face), so the same offset keyed
+ * by rounded position keeps the hull closed. Every horizontal offset is inward
+ * along the axis the vertex is extremal in, so the plan's span/width footprint
+ * and the gate clearance it was solved against stay exactly as authored.
+ */
+function shapeCrossingSlab(geometry, slab, seed) {
+  const positions = geometry.getAttribute('position');
+  const halfWidth = slab.width * 0.5;
+  const halfSpan = slab.span * 0.5;
+  // 짧은 두 끝(±x)은 조금만 당긴다 — 여기서 크게 당기면 돌이 뾰족한 쐐기·잎사귀 모양이
+  //   된다(실측 확인). 긴 변(±z)의 중간 꼭짓점을 넉넉히 당겨야 장변의 직선성이 깨진다.
+  const insetX = halfWidth * CROSSING_END_INSET;
+  const insetZ = halfSpan * CROSSING_EDGE_INSET;
+  const rim = 1e-6;
+  // 상면은 **평면으로** 기울인다. 꼭짓점마다 독립적으로 흔들면 세분된 면이 부드럽게 보간돼
+  //   돌이 아니라 휘어진 판으로 읽혔다. 한 쌍의 기울기만 주면 면이 평평하게 유지된다.
+  const tiltX = (stableUnit(seed, 'tilt-x') * 2 - 1) * slab.thickness * CROSSING_TOP_TILT;
+  const tiltZ = (stableUnit(seed, 'tilt-z') * 2 - 1) * slab.thickness * CROSSING_TOP_TILT;
+  const offsets = new Map();
+  for (let index = 0; index < positions.count; index++) {
+    const x = positions.getX(index);
+    const y = positions.getY(index);
+    const z = positions.getZ(index);
+    const up = y > 0;
+    const key = `${x.toFixed(5)},${z.toFixed(5)},${up ? 'u' : 'd'}`;
+    let offset = offsets.get(key);
+    if (!offset) {
+      const onXRim = Math.abs(Math.abs(x) - halfWidth) < rim;
+      const onZRim = Math.abs(Math.abs(z) - halfSpan) < rim;
+      offset = {
+        x: onXRim ? -Math.sign(x) * insetX * stableUnit(seed, `rim-x-${key}`) : 0,
+        z: onZRim ? -Math.sign(z) * insetZ * stableUnit(seed, `rim-z-${key}`) : 0,
+        // 하면을 올리면 얇은 돌이 지면 위로 떠 보이므로 상면만 기울인다.
+        y: up ? tiltX * (x / halfWidth) + tiltZ * (z / halfSpan) : 0,
+      };
+      offsets.set(key, offset);
+    }
+    positions.setXYZ(index, x + offset.x, y + offset.y, z + offset.z);
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -247,9 +338,11 @@ function crossingSlabLayout(crossing) {
   if (usableSpan <= EPSILON) {
     throw new RangeError('drainage crossing span is too short for three slabs');
   }
+  // 종전 0.94~1.06 은 세 돌의 폭 차가 6% 이내라 균일 격자로 읽혔다. 자연석을 주워 놓은
+  //   건넘이므로 한 장이 확실히 크고 나머지가 작아야 한다(§7.4-9).
   const weights = Array.from(
     { length: CROSSING_SLAB_COUNT },
-    (_unused, index) => 0.94 + stableUnit(crossing.id, `span-${index}`) * 0.12,
+    (_unused, index) => 0.62 + stableUnit(crossing.id, `span-${index}`) * 0.76,
   );
   const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
   const fullWidthSlab = Math.floor(
@@ -281,7 +374,9 @@ function crossingSlabLayout(crossing) {
       span,
       width,
       thickness,
-      shade: 0.965 + stableUnit(crossing.id, `shade-${index}`) * 0.07,
+      yaw: (stableUnit(crossing.id, `yaw-${index}`) * 2 - 1) * CROSSING_SLAB_YAW,
+      shade: 1 - CROSSING_SLAB_SHADE_SPREAD * 0.5
+        + stableUnit(crossing.id, `shade-${index}`) * CROSSING_SLAB_SHADE_SPREAD,
     };
     cursor += span + gap;
     return slab;
@@ -289,12 +384,23 @@ function crossingSlabLayout(crossing) {
 }
 
 function makeCrossingGeometries(crossing) {
-  return crossingSlabLayout(crossing).map((slab) => {
-    const geometry = applyCrossingColors(new THREE.BoxGeometry(
-      slab.width,
-      slab.thickness,
-      slab.span,
-    ), slab.shade);
+  return crossingSlabLayout(crossing).map((slab, index) => {
+    const slabSeed = `${crossing.id}:slab-${index}`;
+    const geometry = applyCrossingColors(
+      shapeCrossingSlab(
+        new THREE.BoxGeometry(
+          slab.width, slab.thickness, slab.span,
+          CROSSING_SLAB_SEGMENTS.width, 1, CROSSING_SLAB_SEGMENTS.span,
+        ),
+        slab,
+        slabSeed,
+      ),
+      slab.shade,
+      slabSeed,
+    );
+    // 자연석은 서로 평행하게 놓이지 않는다. 돌 자기 중심에서만 아주 작게 틀어
+    // 통과축·접지면·계획 봉투는 그대로 두고 기계 가공된 정렬만 없앤다.
+    geometry.rotateY(slab.yaw);
     // center.y is the authoritative nominal deck top. Three deterministic,
     // narrowly separated slabs remain within ±2.5 mm of that landing plane.
     geometry.translate(slab.x, slab.top - slab.thickness * 0.5, slab.z);

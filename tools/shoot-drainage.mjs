@@ -201,7 +201,7 @@ drainage.traverse((object) => {
 const expectedTriangles = drainagePlan.runs.reduce(
   (sum, run) => sum + Math.max(0, run.points.length - 1) * 10,
   0,
-) + drainagePlan.crossings.length * 36;
+) + drainagePlan.crossings.length * 132;
 const ownedTriangles = meshes.reduce(
   (sum, mesh) => sum + geometryTriangles(mesh.geometry),
   0,
@@ -241,6 +241,12 @@ window.__DRAINAGE_SET_VIEW = (view) => {
 };
 window.__DRAINAGE_SET_VISIBLE = (visible) => {
   drainage.visible = !!visible;
+  renderer.render(scene, camera);
+};
+// 근경 판독 축 전용: 도랑은 그대로 두고 건넘돌만 접는다. 이 프레임과의 차이가 곧 판석의
+//   실루엣 마스크이고, 그 마스크 안의 "판석 없을 때 픽셀"이 판석이 앉은 노면의 기준값이 된다.
+window.__DRAINAGE_SET_CROSSINGS_VISIBLE = (visible) => {
+  crossingMesh.visible = !!visible;
   renderer.render(scene, camera);
 };
 window.__DRAINAGE_MEASURE = (view) => measure(view);
@@ -323,6 +329,70 @@ function meanDifference(leftBuffer, rightBuffer) {
   return total / (left.width * left.height * 3);
 }
 
+// ── 근경 판독 축(docs/architectural-authenticity.md §7.4-9 / §7.7-2) ──────────────
+//
+// 종전 `check:drainage`·`shoot:drainage`는 record 수·mesh 수·재질 예산·해시·기여 픽셀량만
+// 봤으므로 "건넘돌이 현대 프리캐스트 콘크리트 판으로 읽힌다"는 회귀를 전부 통과시켰다.
+// 판석 실루엣 안에서 두 가지를 재서 그 축을 닫는다.
+//
+//   1. brightnessRatio — 판석 평균 휘도 ÷ **같은 픽셀의 노면 휘도**. 콘크리트로 읽힌 원인은
+//      형상이 아니라 "판석이 자기가 앉은 흙길보다 밝다"였다(실측 143.8 / 127.1 = 1.13).
+//      국립민속박물관 「디딤돌」은 잘 다듬은 화강 장대석·판석을 위상 높은 건축에 배정하므로,
+//      살림집 대문 앞에는 노면보다 밝은 백색 판이 서지 않아야 한다. 상한은 1.0 이 아니라
+//      실측 분리 지점으로 둔다(빛 방향·계절에 여유).
+//   2. toneSpread — 판석 실루엣 안 휘도의 중앙값 절대편차. 돌마다 톤이 같고 상면이 완전
+//      평행이면 0 에 가깝다. 텍스처가 금지된 계약 안에서 "돌이 개별로 읽히는가"의 최소 축이다.
+//
+// 버린 후보:
+//   - 판석 마스크 면적·기여 픽셀량: 기존 deltas.close 가 이미 보고 있고 재질감과 무관하다.
+//   - 엣지 검출로 "직선 격자" 판정: 카메라 각도·AA 에 지배돼 임계값이 유지되지 않았다.
+//   - 절대 휘도 상한: 노출·시간대 상수에 묶여 조명 변경마다 재기준이 필요했다. 노면 대비로
+//     정규화하면 같은 프레임 안의 상대 관계만 남아 훨씬 안정적이다.
+const MAX_CROSSING_BRIGHTNESS_RATIO = 0.95;
+const MIN_CROSSING_TONE_SPREAD = 2.5;
+
+function luma(data, index) {
+  return 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+}
+
+function robustSpread(values) {
+  if (values.length < 2) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const deviations = sorted.map((value) => Math.abs(value - median)).sort((a, b) => a - b);
+  return deviations[Math.floor(deviations.length / 2)] * 1.4826;
+}
+
+function crossingReadability(withoutBuffer, withBuffer) {
+  const without = PNG.sync.read(withoutBuffer);
+  const withCrossings = PNG.sync.read(withBuffer);
+  invariant(
+    without.width === withCrossings.width && without.height === withCrossings.height,
+    'drainage crossing frame dimensions drifted',
+  );
+  const stone = [];
+  const road = [];
+  for (let offset = 0; offset < without.data.length; offset += 4) {
+    const delta = Math.abs(without.data[offset] - withCrossings.data[offset])
+      + Math.abs(without.data[offset + 1] - withCrossings.data[offset + 1])
+      + Math.abs(without.data[offset + 2] - withCrossings.data[offset + 2]);
+    if (delta < 24) continue;
+    stone.push(luma(withCrossings.data, offset));
+    road.push(luma(without.data, offset));
+  }
+  if (stone.length < 200) return { pixels: stone.length };
+  const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const stoneMean = mean(stone);
+  const roadMean = mean(road);
+  return {
+    pixels: stone.length,
+    stoneMean,
+    roadMean,
+    brightnessRatio: roadMean > 0 ? stoneMean / roadMean : Infinity,
+    toneSpread: robustSpread(stone),
+  };
+}
+
 const output = process.env.CHEOMA_CAPTURE_DIR
   || await mkdtemp(join(tmpdir(), 'cheoma-drainage-'));
 const browser = await launchVerificationBrowser();
@@ -363,6 +433,21 @@ try {
     aerial: meanDifference(aerialOff.buffer, aerialOn.buffer),
   };
 
+  // 근경 판독 축: 같은 close 카메라에서 건넘돌만 접은 프레임을 하나 더 찍는다.
+  await page.evaluate(() => {
+    window.__DRAINAGE_SET_VIEW('close');
+    window.__DRAINAGE_SET_VISIBLE(true);
+    window.__DRAINAGE_SET_CROSSINGS_VISIBLE(false);
+  });
+  const crossingsHidden = await page.locator('canvas').screenshot({
+    path: join(output, 'drainage-close-no-crossings.png'),
+  });
+  await page.evaluate(() => window.__DRAINAGE_SET_CROSSINGS_VISIBLE(true));
+  const crossingsShown = await page.locator('canvas').screenshot({
+    path: join(output, 'drainage-close-crossings.png'),
+  });
+  const readability = crossingReadability(crossingsHidden, crossingsShown);
+
   invariant(errors.length === 0, errors.join(' | '));
   invariant(diag.runCount > 0 && diag.crossingCount > 0,
     `capital/11 drainage fixture drifted ${JSON.stringify(diag)}`);
@@ -393,6 +478,14 @@ try {
     `aerial drainage contribution vanished (${deltas.aerial.toFixed(4)})`);
   invariant(deltas.aerial < deltas.close,
     `drainage did not recede with distance (${deltas.close.toFixed(4)} -> ${deltas.aerial.toFixed(4)})`);
+  invariant(readability.pixels >= 200,
+    `drainage crossing silhouette is too small to judge (${readability.pixels}px)`);
+  invariant(readability.brightnessRatio <= MAX_CROSSING_BRIGHTNESS_RATIO,
+    `gate crossing reads as a precast slab brighter than its own road `
+    + `(${readability.brightnessRatio.toFixed(3)} > ${MAX_CROSSING_BRIGHTNESS_RATIO})`);
+  invariant(readability.toneSpread >= MIN_CROSSING_TONE_SPREAD,
+    `gate crossing stones share one flat machined tone `
+    + `(${readability.toneSpread.toFixed(2)} < ${MIN_CROSSING_TONE_SPREAD})`);
 
   await reportWebGLRenderer(page, 'drainage');
   console.log(
@@ -402,7 +495,10 @@ try {
     + `${closeMeasure.drawDelta}/${aerialMeasure.drawDelta}, triangles owned/submitted=`
     + `${diag.ownedTriangles}/${closeMeasure.triangleDelta}, programs +`
     + `${Math.max(closeMeasure.programDelta, aerialMeasure.programDelta)}, materials/textures=`
-    + `${diag.materialCount}/${diag.textureCount}, hash=${diag.geometryHash})`,
+    + `${diag.materialCount}/${diag.textureCount}, hash=${diag.geometryHash}, `
+    + `crossing stone/road luma=${readability.stoneMean.toFixed(1)}/`
+    + `${readability.roadMean.toFixed(1)} ratio=${readability.brightnessRatio.toFixed(3)} `
+    + `toneSpread=${readability.toneSpread.toFixed(2)} mask=${readability.pixels}px)`,
   );
   console.log(`captures=${output}`);
 } finally {

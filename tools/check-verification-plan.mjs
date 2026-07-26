@@ -168,6 +168,9 @@ assert.deepEqual(ids(['tools/shoot-thatch.mjs'], {
 assert.deepEqual(ids(['tools/shoot-drainage.mjs'], {
   newPaths: ['tools/shoot-drainage.mjs'],
 }), ['core', 'app', 'surface-browser']);
+assert.deepEqual(ids(['tools/shoot-brush-fence.mjs'], {
+  newPaths: ['tools/shoot-brush-fence.mjs'],
+}), ['core', 'surface-browser']);
 assert.deepEqual(ids(['src/surfaces/packed-earth.js']), [
   'core', 'app', 'worker', 'surface-browser',
 ]);

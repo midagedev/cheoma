@@ -83,6 +83,7 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/shoot-mud-wall.mjs',
   'tools/shoot-mja-house.mjs',
   'tools/shoot-drainage.mjs',
+  'tools/shoot-brush-fence.mjs',
   'tools/lib/render-budget-contract.mjs',
 ]);
 
@@ -165,6 +166,7 @@ function routePath(path) {
     'tools/mud-wall-surface-harness.html': ['surface-browser'],
     'tools/shoot-mud-wall.mjs': ['app', 'surface-browser'],
     'tools/shoot-drainage.mjs': ['app', 'surface-browser'],
+    'tools/shoot-brush-fence.mjs': ['surface-browser'],
     'tools/shoot-sijeon.mjs': ['app', 'api-reuse'],
     'tools/shoot-sijeon-app.mjs': ['app', 'api-reuse'],
     'tools/shoot-yard-life.mjs': ['yard-life'],

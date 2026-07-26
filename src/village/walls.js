@@ -162,7 +162,10 @@ function makeEdgeRun(style, coping, a, b, H, th, run, cx, cz, M, rng, mudSurface
   const bottomOffset = solid ? (run.bottomOffset || 0) : 0;
   const topOffset = solid ? (run.topOffset || 0) : 0;
   const runHeight = H + topOffset - bottomOffset;
-  const child = style === 'brush' ? makeBrushRun(L + grow, H, M.mud, M.jipjul, rng)
+  // 싸리울 살 변주는 run 고유 seed 로만 흔든다(공유 rng 스트림 불침해). mudSurface.seed 는
+  //   이미 run 기하에서 파생된 결정론 해시라 그대로 재사용한다.
+  const child = style === 'brush'
+    ? makeBrushRun(L + grow, H, M.mud, M.jipjul, rng, mudSurface?.seed || 0)
     : style === 'hedge' ? makeHedgeRun(L + grow, H, rng)
     : makeSolidRun(style, coping, L + grow, runHeight, th, M, rng, mudSurface);
   child.position.set(mx, bottomOffset, mz); child.rotation.y = rotY;
@@ -428,9 +431,38 @@ function makeTileCoping(L, eaveY, th, M) {
   return c;
 }
 
-// 싸리울 한 run: 통나무 기둥 + 가로 엮음(2줄) + 가는 수직 잔가지 열.
-function makeBrushRun(L, H, postMat, twigMat, rng) {
+// 싸리울(바자울) 한 run — 통나무 기둥 + 세로 싸리 가지 열 + 가로 엮음 3줄.
+//
+// 고증 수정(docs/architectural-authenticity.md §7.4-10, docs/village-walls-parcels.md):
+//   종전 구현은 어휘는 맞았으나 **모든 살이 같은 높이·같은 굵기·완전 직립**이고 가로재가
+//   run 전 길이를 관통하는 곧은 원기둥 2줄이었다. 그래서 서양식 정원 피켓 펜스로 읽혔다.
+//
+//   국립민속박물관 한국민속대백과사전 「싸리울」은 싸리울을 "싸리나무 혹은 그 가지 여러 개를
+//   일정한 간격으로 길게 엮어 만든 울타리", "세로로 나란히 세워 **발처럼 길게 엮어** 만든"
+//   것으로 서술하고, 「담」·「담장」은 재료를 "나뭇가지·풀대·싸리나무·수수깡"으로 든다.
+//   즉 출처가 확인하는 것은 (ㄱ) 세로살을 나란히 세운다 (ㄴ) 가로로 **엮어 발을 만든다**
+//   (ㄷ) 재료가 다듬은 각재가 아니라 자연 나뭇가지다 — 이 셋이다.
+//
+//   출처는 살 간격을 "일정한 간격"이라 하므로 간격 자체는 무작위화하지 않는다(감사가 제시한
+//   "등간격은 시대착오"라는 진술은 1차 자료가 지지하지 않는다). 대신 규격 피켓과 갈라지는
+//   축은 두 개다:
+//     1. 재료가 자연 가지이므로 **높이·굵기가 개체마다 다르고 위끝이 들쭉날쭉하다** —
+//        살 하나하나를 instanceMatrix 스케일로 변주한다(드로우콜 0 증가).
+//     2. 가로재는 곧은 레일이 아니라 **엮음**이므로 살의 앞뒤를 번갈아 지나야 한다 —
+//        3줄을 교대 오프셋 튜브로 만든다.
+//   살 간격·줄 수·굵기 수치는 어느 기관 자료에도 없으므로(명시적 증거 공백) 이 값들은
+//   제품 판독성 선택이며 실측 복원이 아니다.
+//
+// 결정론: 새 변주는 run 고유 seed 로 만든 지역 rng(brng)만 쓴다. 공유 `rng` 소비 횟수·순서는
+//   종전과 동일해서 뒤따르는 마당 소품(장독·낟가리·빨래줄) 스트림이 이동하지 않는다.
+const BRUSH_WEAVE_COURSES = 3;
+// 엮음 한 주기(앞→뒤→앞)가 세로살 몇 칸을 지나는가. 살 간격의 4배에서 사람이 "엮였다"로
+//   읽는다 — 더 길면 곧은 레일, 더 짧으면 지그재그 장식으로 읽혔다.
+const BRUSH_STICK_PITCH = 0.085;
+const BRUSH_WEAVE_PERIOD = BRUSH_STICK_PITCH * 4;
+function makeBrushRun(L, H, postMat, twigMat, rng, runSeed = 0) {
   const s = new THREE.Group();
+  const brng = makeRng((hashString(`brush-run-v1|${runSeed >>> 0}`) ^ 0x2c9a) >>> 0);
   const postR = 0.07;
   const nPosts = Math.max(2, Math.round(L / 2.2));
   for (let i = 0; i <= nPosts; i++) {
@@ -439,23 +471,63 @@ function makeBrushRun(L, H, postMat, twigMat, rng) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(postR, postR * 1.15, ph, 6), postMat);
     post.position.set(x, ph / 2, 0); post.castShadow = true; s.add(post);
   }
-  // 수직 잔가지 — 촘촘하되 부감/스틸에 충분한 밀도(과밀 회피)
-  const nStick = Math.max(6, Math.round(L / 0.22));
+  // 세로 싸리 가지 — 나란히·일정 간격(출처)이지만 길이·굵기·기울기는 개체차(자연 재료).
+  //   가지 밑동이 굵고 끝이 가늘도록 테이퍼 방향을 바로잡았다(종전은 위가 더 굵었다).
+  //   밀도: 종전 0.22m 간격은 살 굵기(≈0.04m)의 5배 간격이라 그 자체로 살대 울이 아니라
+  //   피켓 열로 읽혔다. 출처가 말하는 "발처럼" 엮인 면이 되도록 간격을 좁힌다(수치는 출처가
+  //   주지 않으므로 판독성 선택). 드로우콜은 InstancedMesh 1개라 불변.
+  const nStick = Math.max(6, Math.round(L / BRUSH_STICK_PITCH));
   const stickH = H - 0.1;
-  const geo = new THREE.CylinderGeometry(0.016, 0.014, stickH, 4);
+  const geo = new THREE.CylinderGeometry(0.011, 0.017, stickH, 5);
   const im = new THREE.InstancedMesh(geo, twigMat, nStick);
   const m = new THREE.Matrix4();
+  const scale = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const position = new THREE.Vector3();
+  const axis = new THREE.Vector3(0, 0, 1);
+  const tops = new Float32Array(nStick);
   for (let i = 0; i < nStick; i++) {
-    const x = -L / 2 + L * ((i + 0.5) / nStick) + (rng() - 0.5) * 0.02;
-    const lean = (rng() - 0.5) * 0.06;
-    m.makeRotationZ(lean); m.setPosition(x, stickH / 2 + 0.04, (rng() - 0.5) * 0.02);
+    // 공유 rng 소비는 종전과 같은 3회. 값의 진폭만 넓힌다.
+    const jitterX = (rng() - 0.5) * 0.03;
+    const lean = (rng() - 0.5) * 0.11;
+    const jitterZ = (rng() - 0.5) * 0.02;
+    const x = -L / 2 + L * ((i + 0.5) / nStick) + jitterX;
+    // 가지 다발은 낱개가 아니라 몇 개씩 같이 눕는다 — 저주파 성분을 더해 다발감을 만든다.
+    const bundle = Math.sin((i / nStick) * Math.PI * 2.7 + brng() * 6.283) * 0.04;
+    const heightK = 0.84 + brng() * 0.26;      // 위끝이 들쭉날쭉해지는 핵심 축
+    const girthK = 0.74 + brng() * 0.7;        // 굵기 개체차
+    scale.set(girthK, heightK, girthK);
+    quaternion.setFromAxisAngle(axis, lean + bundle);
+    position.set(x, stickH * heightK * 0.5 + 0.04, jitterZ);
+    m.compose(position, quaternion, scale);
     im.setMatrixAt(i, m);
+    tops[i] = stickH * heightK + 0.04;
   }
   im.instanceMatrix.needsUpdate = true; im.castShadow = true; s.add(im);
-  // 가로 엮음 2줄
-  for (const yy of [H * 0.4, H * 0.82]) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, L, 5), twigMat);
-    bar.rotation.z = Math.PI / 2; bar.position.set(0, yy, 0); bar.castShadow = true; s.add(bar);
+  im.userData.brushStickTops = tops;
+  // 가로 엮음 3줄 — 곧은 레일이 아니라 살의 앞뒤를 번갈아 지나는 "발" 엮음(출처: 「싸리울」
+  //   "발처럼 길게 엮어"). 반주기가 살 2칸이라 실루엣에서 앞뒤 교대가 실제로 읽힌다. 인접 줄은
+  //   위상을 반대로 둔다 — 같은 위상이면 세 줄이 함께 굽어 곡선 레일로 되돌아간다.
+  const weaveHalf = 0.038;
+  const halfPeriods = Math.max(4, Math.round(L / (BRUSH_WEAVE_PERIOD * 0.5)));
+  for (let course = 0; course < BRUSH_WEAVE_COURSES; course++) {
+    const yy = H * (0.26 + course * 0.28);
+    const phase = course % 2 === 0 ? 1 : -1;
+    const points = [];
+    for (let seg = 0; seg <= halfPeriods; seg++) {
+      const t = seg / halfPeriods;
+      points.push(new THREE.Vector3(
+        -L / 2 + L * t,
+        yy + (brng() - 0.5) * 0.014,
+        phase * (seg % 2 === 0 ? weaveHalf : -weaveHalf),
+      ));
+    }
+    const weave = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), halfPeriods * 2, 0.014, 5),
+      twigMat,
+    );
+    weave.castShadow = true;
+    s.add(weave);
   }
   return s;
 }

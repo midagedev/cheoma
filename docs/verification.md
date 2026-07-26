@@ -431,8 +431,8 @@ plan 기준값은 `tools/plan-contract.json`에 있다. 의도된 기능 변경�
 
 ### `npm run check:surface:browser`
 
-한 browser lock 안에서 흙길 texture, 토담 물리 geometry, 길가 배수의 세 좁은 하네스를 순서대로 실행한다.
-`tools/surface-materials-harness.html`의 같은 도로를 고정 카메라에서 OFF/ON으로 렌더하고 PNG를 OS 임시 폴더에 쓴다. draw call·triangle·material +0, texture +2, shader program family 최대 +1, 평균 명도 변화 3% 이내를 확인한다. half-tile 상관과 wrap 경계, 0.012m 카메라 평행 이동 전후 차이로 반복·seam·shimmer를 제한하고, 네 번 생성/해제 texture plateau와 실제 glTF JSON의 DataTexture albedo image도 검사한다. 이어서 아래 `shoot:mud-wall`의 고정 A/B와 실제 제품 근경·부감, `shoot:drainage`의 실제 도로·대문 근경·부감을 같은 게이트에서 실행한다. 세 하네스는 `check:all`에 포함하며 surface/road/wall/drainage 경로는 `check:pr`에서도 이를 선택한다.
+한 browser lock 안에서 흙길 texture, 토담 물리 geometry, 길가 배수, 싸리울의 네 좁은 하네스를 순서대로 실행한다.
+`tools/surface-materials-harness.html`의 같은 도로를 고정 카메라에서 OFF/ON으로 렌더하고 PNG를 OS 임시 폴더에 쓴다. draw call·triangle·material +0, texture +2, shader program family 최대 +1, 평균 명도 변화 3% 이내를 확인한다. half-tile 상관과 wrap 경계, 0.012m 카메라 평행 이동 전후 차이로 반복·seam·shimmer를 제한하고, 네 번 생성/해제 texture plateau와 실제 glTF JSON의 DataTexture albedo image도 검사한다. 이어서 아래 `shoot:mud-wall`의 고정 A/B와 실제 제품 근경·부감, `shoot:drainage`의 실제 도로·대문 근경·부감, `shoot:brush-fence`의 싸리울 근경 판독을 같은 게이트에서 실행한다. 네 하네스는 `check:all`에 포함하며 surface/road/wall/drainage 경로는 `check:pr`에서도 이를 선택한다.
 
 ### `npm run check:mud-wall` / `npm run shoot:mud-wall`
 
@@ -477,6 +477,23 @@ texture 0, shadow caster 0인지 확인한다. 두 번째 실제 마을의 plan 
 해제가 멱등인지 검사한다. 사람이 근경에서 도랑이 떠 있는 띠나 검은 선으로 보이지 않는지,
 판석 세 장이 대문 접근을 자연스럽게 이어 주는지 보고, 부감 기여가 근경보다 작아지는지 최종 판정한다.
 이 하네스는 `check:surface:browser`의 세 번째 단계이므로 별도 browser lock을 중첩하지 않는다.
+
+여기에 **건넘돌 근경 판독 축**(2026-07-26)이 붙는다. 같은 close 카메라에서 `__DRAINAGE_SET_CROSSINGS_VISIBLE(false)`
+프레임을 하나 더 찍고 그 차로 판석 실루엣 마스크를 만든 뒤, 마스크 안에서 판석 평균 휘도 ÷ 같은
+픽셀의 노면 휘도가 0.95 이하이고 판석 휘도의 중앙값 절대편차가 2.5 이상인지 검사한다. 절대 휘도
+상한이 아니라 같은 프레임 안의 노면 대비로 정규화하는 이유와 버린 후보는 도구 주석에 있다.
+
+### `npm run shoot:brush-fence`
+
+싸리울(바자울) 근경 판독 게이트다(`docs/architectural-authenticity.md` §7.4-10 / §7.7-2,
+계약은 `docs/village-walls-parcels.md` R-P4b). `buildVillageWall`을 `style:'brush'`로 직접
+호출하는 고정 fixture(정사각 초가 필지, seed 20260718)를 세우고 반대편 울은 접어 실루엣이 한
+겹만 남게 한 뒤, 앞담 바깥 7.0m·눈높이 1.62m의 고정 카메라에서 "울 없음 ↔ 울만" 프레임 차로
+마스크를 만든다. 두 축을 검사한다 — (1) 열별 최상단 실루엣 행의 중앙값 절대편차 ≥ 6px
+(규격 피켓은 위끝이 한 선에 모여 0이 된다) (2) 몸통 띠 가림률 ≥ 0.32(살 굵기의 다섯 배로 벌어진
+열은 출처가 말하는 "발처럼" 엮인 면이 아니다). 재질 2벌·텍스처 0 예산도 함께 본다.
+버린 후보(특히 분리력 0이었던 살 단면 run 폭 CV)와 두 축의 한계는 도구 주석에 남겼다.
+`check:surface:browser`의 네 번째 단계이므로 별도 browser lock을 중첩하지 않는다.
 
 ### `npm run check:scene-snapshot`
 
@@ -781,6 +798,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-road-contract.mjs` | stable ID·junction 양방향 참조, 자기교차·좁은 lens, 곡률, road spatial index | 지형·재질에서 길이 자연스럽게 읽히는지는 시각 하네스로 본다. |
 | `tools/check-drainage-plan.mjs` | 규모/도로 등급별 측구 정책, 실제 지형 하류 경사·lift 상한, 도로·수계·필지·생산지 이격, 저장된 대문 접근축 건넘, 불변 JSON·전역 RNG 비사용 | 물리 단면·판석 미감과 실제 GPU 자원은 `shoot:drainage`, 제품/Worker 직렬화는 app/worker 게이트가 맡는다. |
 | `tools/shoot-drainage.mjs` | 실제 capital 계획·renderer 통합, 같은 카메라 OFF/ON 근경·부감, plan/geometry hash 반복, mesh/draw/triangle/program/material/texture·dispose 예산 | 고정 seed 한 건넘의 시각 증거이며 전체 규모의 배치 수학은 `check:drainage`가 맡는다. |
+| `tools/shoot-brush-fence.mjs` | 고정 초가 필지 싸리울의 근경 실루엣 마스크 — 상단선 중앙값 절대편차, 몸통 가림률, 재질·텍스처 예산 | 규격 피켓과의 하한선만 판정하며 엮음 문양·살 굵기 분포의 사실성은 사람이 본다. |
 | `tools/check-sijeon-contract.mjs` | 기존 시전 위치 bytes, 순수 2칸 façade schema, 필지·도로 회랑 경계, 유한값·직렬화·결정론·무전역 RNG | Three 재질·병합 geometry와 실제 한양 화면은 `check:api-reuse`, app/worker 게이트가 맡는다. |
 | `tools/check-layout-contract.mjs` | 남향 군집·도로측 대문·실제 지붕 fit·단건 재굴림·도로/개울/논·집 사이 겨울 일조·정자 실면적/화면 폭·높이 있는 마을 소품·보호수·밀도 계약 | 대표 seed 순수 데이터 검사로, 실제 광학적 차폐 미감은 앱 캡처로 확인한다. |
 | `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |

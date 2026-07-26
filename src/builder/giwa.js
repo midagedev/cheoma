@@ -189,17 +189,31 @@ export function buildGiwa(P, M) {
     m.castShadow = true; columns.add(m);
   };
 
-  // 세로널 판벽(밝은 목재) 재질: 폭에 맞춰 널 반복 (그늘서도 검게 안 죽게 미량 emissive)
+  // 세로널 판벽 재질: 폭에 맞춰 널 반복 (그늘서도 검게 안 죽게 미량 emissive).
+  //
+  // 고증 수정(docs/architectural-authenticity.md §7.4-5): 공유 `M.pungpan` 캔버스 바탕은 절
+  //   풍판용 #997048(r/g 1.37)이고, 반가에서 이 재질은 처마 아래를 **run 전 길이로 관통하는
+  //   띠**가 된다. 실측 렌더 r/g 1.54 로 같은 프레임의 백골 기둥(1.21)·한지(1.16)보다 훨씬
+  //   적색 우세해, ㅁ자 뜰집 근접 컷에서 "붉은 처마띠"로 읽혔다. 단청 누출은 아니지만(giwa
+  //   팔레트는 단청 캔버스를 만들지 않는다) 이 문서 §5-4 의 "민가 창호는 백골 목재·한지 몸체와
+  //   어울려야 한다"를 어긴다. §7.7-1 이 세운 판별식(r/g ≥ 1.6)에 1.54 로 **간신히 걸리지 않아**
+  //   어떤 게이트도 보지 못했다.
+  //   처방: 공유 캔버스·재질·텍스처를 그대로 두고 클론의 color 로만 적색 성분을 눌러 백골
+  //   계열로 접는다. 절 풍판은 이 경로를 지나지 않으므로 불변이고 드로우콜 델타 0이다.
+  const PLANK_DERED = new THREE.Color(0.76, 0.98, 1);
   const plankMat = (len) => {
     const m = M.pungpan.clone();
     m.map = M.pungpan.map.clone();
     m.map.repeat.set(Math.max(1, Math.round(len / 1.2)), 1); m.map.needsUpdate = true;
-    m.emissive = new THREE.Color(0x231a0e);
+    m.color = PLANK_DERED.clone();
+    m.emissive = new THREE.Color(0x1e1a12);
     return m;
   };
-  // 문짝 하부 청판: 따뜻한 목재 + 미량 emissive
+  // 문짝 하부 청판: 목재 + 미량 emissive. 종전 0x6b4e30 + emissive 0x1a1207 은 렌더 r/g 1.68 로
+  //   §7.7-1 의 주칠 판별식(1.6)조차 넘었다 — 팔레트 항목이 아니라 빌더 로컬 클론이라
+  //   순수 팔레트 위계 계약이 볼 수 없었던 두 번째 지점이다. 같은 명도의 덜 붉은 갈색으로 옮긴다.
   const lowerPanelMat = M.woodBoard.clone();
-  lowerPanelMat.color = new THREE.Color(0x6b4e30); lowerPanelMat.emissive = new THREE.Color(0x1a1207);
+  lowerPanelMat.color = new THREE.Color(0x5f5136); lowerPanelMat.emissive = new THREE.Color(0x161510);
   // 살창(측벽 창): 실내가 완전 검게 죽지 않도록 미량 emissive
   const salMat = M.salchang.clone(); salMat.emissive = new THREE.Color(0x14100a);
   // 띠살 분합문 재질: detail plan이 정한 문짝 수를 texture에도 그대로 반복한다.

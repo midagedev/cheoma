@@ -77,6 +77,7 @@
     "check:wall-gate": "node tools/check-wall-gate-contract.mjs",
     "check:mud-wall": "node tools/check-mud-wall-contract.mjs && npm run shoot:mud-wall",
     "shoot:mud-wall": "node tools/run-browser-locked.mjs -- node tools/shoot-mud-wall.mjs",
+    "shoot:brush-fence": "node tools/run-browser-locked.mjs -- node tools/shoot-brush-fence.mjs",
     "shoot:mja-house": "node tools/run-browser-locked.mjs -- node tools/shoot-mja-house.mjs",
     "shoot:drainage": "node tools/run-browser-locked.mjs -- node tools/shoot-drainage.mjs",
     "check:wall-step": "node tools/check-wall-step-contract.mjs",

@@ -140,10 +140,17 @@ const expectedSceneHashes = {
   //   instanceMatrix·instanceColor·재질·pick proxy 바이트는 전부 불변이다(재기준 직전 실측: 이 등록만
   //   끄면 네 규모가 구 골든과 정확히 일치, objects/triangles 동일). 재기준 시점에 sync / 실제 module
   //   Worker / ?worker=0 폴백 세 경로가 서로 바이트 동일했다 — 결정론 손상이 아니라 의도된 씬 변화다.
-  village: '469c4bf3:4d33304f:99624b4c:bd50182f',
-  town: 'bcb5f66a:cb95cf16:63214d4d:6787f92c',
-  capital: '15b8b1b3:b737636d:e66d2c25:d2e479db',
-  hanyang: 'd7f151b3:0b885dbb:4babf193:21cbadfd',
+  //   재기준(2026-07-26, 고증 §7.4-9·-10): 싸리울 살이 자연 가지처럼 높이·굵기·기울기 변주를
+  //   받고 가로재가 곧은 레일에서 교대 엮음으로 바뀌었으며(`village/walls.js`), capital·hanyang
+  //   대문 건넘 판석이 직각 다듬돌에서 꼭짓점을 안쪽으로 당긴 자연석 윤곽이 됐다
+  //   (`village/drainage-geometry.js`) — 네 규모 모두 지오메트리 바이트가 의도적으로 바뀐다.
+  //   재기준 직전 실측: 네 규모의 sync 해시와 실제 module Worker 해시가 서로 동일했고
+  //   pick proxy 바이트(`expectedProxyHashes`)는 전부 불변이며, snapshot·mja optin fixture 의
+  //   sync / Worker / `?worker=0` 폴백 3경로 교차 비교도 PASS 였다 — 결정론 손상이 아니다.
+  village: 'f7330bd6:239a48e4:4c3e00ec:85880986',
+  town: '2207fb35:b60aa2cf:40c5f0cc:25b61d83',
+  capital: 'b2f3eccd:0d20dabb:6980abdb:9f818bbb',
+  hanyang: '31025ae5:d5ae0f85:d384307c:65980557',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
