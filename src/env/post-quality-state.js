@@ -7,7 +7,9 @@ const DEFAULTS = Object.freeze({
   // Continuous intermediate scales would reallocate every RT on every frame;
   // a two-level switch (stable=1 / else=movingFillScale) reallocates only on
   // mode boundaries and restores full pixel density once motion settles.
-  movingFillScale: 0.78,
+  // 0.72 ≈ half the fill cost vs full DPR when squared (0.72²≈0.52 of pixels).
+  // Settled frames restore 1.0 so the flagship look is unchanged at rest.
+  movingFillScale: 0.72,
 });
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));

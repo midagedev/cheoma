@@ -242,11 +242,12 @@ function assertLevel(actual, expected, message) {
     && scaled.transitionWidth < scaled.fullOut - scaled.fullIn
     && scaled.transitionWidth < scaled.midOut - scaled.midIn,
   'chunk LOD: screen-door band overlaps a hysteresis dead band');
-  // capital R≈280 is intentionally above the floor (see VILLAGE_CHUNK_LOD.minSiteR).
-  // Town R≈240 and below stay single-representation.
-  const disabled = villageChunkLodPolicy({ R: 259, bowlR: 200 });
+  // village R≈180 stays under the floor; town R≈240 and capital R≈280 enable.
+  const disabled = villageChunkLodPolicy({ R: 219, bowlR: 120 });
   invariant(!disabled.enabled && disabled.farDist === Infinity,
     'chunk LOD: small site unexpectedly enabled far representation');
+  const town = villageChunkLodPolicy({ R: 240, bowlR: 134 });
+  invariant(town.enabled, 'chunk LOD: town site must enable FAR/MID/FULL stack');
   const capital = villageChunkLodPolicy({ R: 280, bowlR: 157 });
   invariant(capital.enabled, 'chunk LOD: capital site must enable FAR/MID/FULL stack');
 }

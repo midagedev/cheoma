@@ -48,10 +48,19 @@
 | **Openings-only wall keep** | structure signature 동일 시 roof AABB 검사 생략·담 재사용 확정 | 동일 |
 | **Product path bench** | `npm run bench:product-path` — capital 오빗 fillScale + focus rebuild med | 구조 예산 계측 |
 
+## 4차 구현 (house-only swap + town LOD + tighter scheduler)
+
+| 항목 | 무엇 | 실측 |
+|---|---|---|
+| **Openings house-only swap** | 그룹/담 유지, house 메시만 교체 | preview med **~15ms** (was ~22) |
+| **town chunk LOD** | minSiteR 220 | town aerial **~1.1M tris** FAR stack |
+| **movingFillScale 0.72** | 오빗 fill 더 공격적 | settle 시 1.0 복원 |
+| **Scheduler 20/72/1.8** | 더 촘촘한 라이브 프리뷰 | browser cadence 동기화 |
+
 ## 다음 라운드 (우선순위)
 
-1. openings-only 시 house 서브트리만 교체 (dispose 범위 축소)
-2. town(R≈240) chunk LOD 검토 (룩 게이트 통과 시에만)
+1. roof-pitch/eave house+wall partial path (shell 변화 시)
+2. MSAA 부감 샘플 하향 A/B (룩 게이트)
 3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트

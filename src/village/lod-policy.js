@@ -12,11 +12,11 @@ export const CHUNK_LOD_LEVEL = Object.freeze({
 });
 
 export const VILLAGE_CHUNK_LOD = Object.freeze({
-  // capital R≈280 used to sit just under the old 340 floor, so every regular house
-  // stayed FULL while the camera orbit only needed nearby detail. 260 admits capital
-  // (and future mid-city tiers) into the same FAR/MID/FULL stack as Hanyang; village
-  // (R≈180) and town (R≈240) stay single-representation for look stability.
-  minSiteR: 260,
+  // capital R≈280 / town R≈240 used to sit under the old 340 floor, so every regular
+  // house stayed FULL while the camera orbit only needed nearby detail. 220 admits
+  // town + capital into the same FAR/MID/FULL stack as Hanyang; village (R≈180)
+  // stays single-representation for look stability at small scales.
+  minSiteR: 220,
   farDistanceFactor: 0.40,
   ringWidthFactor: 0.50,
   maxArcFactor: 0.30,

@@ -1164,10 +1164,11 @@
   const liveEdit = createLiveEditScheduler({
     preview: () => pushRebuild({ refreshFlora: false, warm: false }),
     commit: () => pushRebuild({ refreshFlora: true, warm: true }),
-    // Geometry previews should feel continuous. 24ms ≈ 40 Hz ceiling when the
-    // rebuild itself is cheap; adaptive headroom still backs off under cost.
-    minIntervalMs: 24,
-    maxIntervalMs: 80,
+    // Geometry previews should feel continuous. 20ms ≈ 50 Hz ceiling when the
+    // openings-only house swap is cheap; adaptive headroom still backs off.
+    minIntervalMs: 20,
+    maxIntervalMs: 72,
+    costHeadroom: 1.8,
   });
   function villageLive(k, v) {
     editParams[k] = v;
