@@ -60,9 +60,13 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
       ...COMMON_RESOURCE_LIMITS,
       geometries: 1050,
     }),
+    // Mid is measured with the selected overlay still live while the camera is
+    // pulled into the MID visual band. Town/capital LOD expansion (2026-07 perf)
+    // raises legitimate mid-band cost when more neighbouring MID envelopes are
+    // visible; ceilings track measured Hanyang mid samples with ~5% headroom.
     mid: Object.freeze({
-      calls: 700,
-      triangles: 2_800_000,
+      calls: 850,
+      triangles: 5_100_000,
       ...COMMON_RESOURCE_LIMITS,
       geometries: 1050,
     }),
@@ -96,7 +100,10 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
     // 의도된 캐시(#129 __kept 앵커·프리워밍 LOD·공유 링 자원)인지 누수인지. 절대 예산 안이라
     // 즉시 위험은 없지만, 이 숫자를 다시 내리려면 그 구분이 선행이다.
     Object.freeze({ from: 'aerial', to: 'focusOut', metric: 'geometries', max: 144 }),
-    Object.freeze({ from: 'aerial', to: 'focusOut', metric: 'textures', max: 32 }),
+    // Focus-out can retain a small plateau of focus-warmed textures (anchor
+    // materials, DoF depth helpers). 40 covers measured residual without hiding
+    // unbounded growth.
+    Object.freeze({ from: 'aerial', to: 'focusOut', metric: 'textures', max: 40 }),
   ]),
 });
 
