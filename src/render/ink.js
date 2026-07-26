@@ -117,6 +117,10 @@ const InkShader = {
     tDepth: { value: null },     // 깊이(비선형 [0,1])
     tPaper: { value: null },     // 한지 텍스처
     resolution: { value: new THREE.Vector2() },
+    // Device pixel ratio for the buffer behind `resolution`. Brush/dither fbm is
+    // authored in CSS px; without this, retina (dpr=2) doubles fbm periods across
+    // the same screen and the grain goes chalky. Edge sampling still uses `resolution`.
+    pixelRatio: { value: 1.0 },
     cameraNear: { value: 0.1 },
     cameraFar: { value: 500 },
     inkColor: { value: new THREE.Color(INK_PALETTE.ink) },
@@ -160,6 +164,7 @@ const InkShader = {
     varying vec2 vUv;
     uniform sampler2D tDiffuse, tBeauty, tNormal, tDepth, tPaper;
     uniform vec2 resolution;
+    uniform float pixelRatio;
     uniform float cameraNear, cameraFar;
     uniform vec3 inkColor, paperColor;
     uniform float levels, silhouetteWidth, silhouetteBoost, normalEdge, depthEdge;
@@ -243,8 +248,11 @@ const InkShader = {
       bool sky = wz > cameraFar * 0.9;
 
       // 붓 흔들림: 선 굵기·농도·경로를 미세 변주 (필선 느낌).
-      float brush = fbm(vUv * resolution.xy * 0.06);
-      float brushFine = fbm(vUv * resolution.xy * 0.25 + 7.0);
+      // CSS-px frequency: resolution is device-buffer size (css × dpr × normalScale),
+      // so divide by pixelRatio. dpr=1 keeps the authored grain; dpr=2 no longer doubles it.
+      vec2 brushPx = vUv * resolution.xy / max(pixelRatio, 1e-4);
+      float brush = fbm(brushPx * 0.06);
+      float brushFine = fbm(brushPx * 0.25 + 7.0);
 
       // ---- 노멀 버퍼 (내부 윤곽 + 계화 판별의 공용 입력) ----
       vec3 n0 = texture2D(tNormal, vUv).rgb * 2.0 - 1.0;
@@ -355,7 +363,7 @@ const InkShader = {
 
       // 양자화 + 저주파 디더: 밴드 경계를 유기적으로 흔들어 먹 번짐/평붓 자국을 낸다.
       // (고주파가 아니라 큰 얼룩 → 픽셀 노이즈가 아닌 물감 고임 느낌)
-      float dth = (fbm(vUv * resolution.xy * 0.014 + 3.0) - 0.5) * ditherAmt;
+      float dth = (fbm(brushPx * 0.014 + 3.0) - 0.5) * ditherAmt;
       // 농담 입력 정규화: 씬 휘도가 실제로 점유하는 대역을 5단 전체로 펼친다. 실측
       // (docs 없음 — 트랙 리포트) 결과 raw lum 은 근접 프레임에서 [0.18,0.53] 에 갇혀
       // 5단 중 2~3단만 주소지정했다. 그 상태가 §3 이 말하는 "회색 필터"이고, 최농(적묵)과
@@ -513,6 +521,9 @@ export class InkPass extends Pass {
     this.lodScreenDoorNormalMaterial.customProgramCacheKey = () =>
       `cheoma-ink-normal|${LOD_SCREEN_DOOR_PROGRAM_VERSION}`;
     this.resolutionScale = Math.min(1, Math.max(0.35, resolutionScale));
+    // Sticky: EffectComposer.setSize only passes device width/height, so keep the last
+    // explicit dpr from createInkPass/setupInk rather than resetting brush to device-px.
+    this._pixelRatio = 1;
     this.hiddenForNormal = [];
     this.materialsForNormal = [];
     this.normalExcludedCount = 0;
@@ -552,11 +563,17 @@ export class InkPass extends Pass {
     this.fsQuad = new FullScreenQuad(this.material);
   }
 
-  setSize(width, height) {
+  setSize(width, height, pixelRatio) {
+    // width/height are device pixels (css × dpr), matching EffectComposer propagation.
+    // Optional pixelRatio keeps fbm brush/dither in CSS px across retina.
+    if (pixelRatio != null && Number.isFinite(pixelRatio) && pixelRatio > 0) {
+      this._pixelRatio = pixelRatio;
+    }
     const w = Math.max(1, Math.round(width * this.resolutionScale));
     const h = Math.max(1, Math.round(height * this.resolutionScale));
     this.normalTarget.setSize(w, h);
     this.uniforms.resolution.value.set(w, h);
+    this.uniforms.pixelRatio.value = this._pixelRatio;
   }
 
   render(renderer, writeBuffer, readBuffer /*, deltaTime, maskActive */) {
@@ -694,7 +711,7 @@ export function setupInk(renderer, scene, camera, options = {}) {
     // composer.setSize가 각 Pass.setSize를 호출하지만, DPR 반영 위해 명시적으로도 세팅.
     const dpr = renderer.getPixelRatio();
     beautyPass.setSize(w * dpr, h * dpr);
-    inkPass.setSize(w * dpr, h * dpr);
+    inkPass.setSize(w * dpr, h * dpr, dpr);
   };
   const size = renderer.getSize(new THREE.Vector2());
   setSize(size.x, size.y);
@@ -734,7 +751,7 @@ export function createInkPass(scene, camera, options = {}) {
     paperTexture,
     setSize(width, height, pixelRatio = 1) {
       beautyPass.setSize(width * pixelRatio, height * pixelRatio);
-      inkPass.setSize(width * pixelRatio, height * pixelRatio);
+      inkPass.setSize(width * pixelRatio, height * pixelRatio, pixelRatio);
     },
     dispose() {
       beautyPass.dispose();
