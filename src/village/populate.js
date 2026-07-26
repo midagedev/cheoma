@@ -147,7 +147,9 @@ export function* populateVillageSteps(plan, opts = {}) {
         rIn: 0.78, rMid: 0.99, rOut: 1.17,
         yBase: Math.max(5, site.Hmax * 0.09), yAmp: Math.max(2.5, site.Hmax * 0.05),
         thickness: Math.max(4, site.Hmax * 0.16), outerDrop: site.Hmax * 0.05,
-        yCap: site.Hmax * 0.46, opacity: 0.5,
+        // #20: yCap 을 살짝 내려 능선 상부가 운해 위로 더 명확히 솟게(운무 절단). 분지·절단면은
+        //   여전히 잠긴다. strengthAt 의 제곱 pool 과 한 몸.
+        yCap: site.Hmax * 0.40, opacity: 0.5,
         seed: (plan.seed ^ 0x3117) >>> 0,
       })
     : null;

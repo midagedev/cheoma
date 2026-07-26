@@ -108,3 +108,9 @@ glTF에는 표준 base-color에 대응하는 DataTexture albedo가 임베드된�
 ### 부수 결론 — 부감 담장선 가독은 톤이 아니라 가림 문제다
 
 담장(0.50)·기단(0.63) 대 여름 수관(0.21)은 이미 2.4~3배 톤 대비를 갖는다. 따라서 부감에서 담장·고샅 구획이 안 읽히는 것은 톤 부족이 아니라 **수관이 덮는 면적** 문제다. 레버는 담장 톤 강화가 아니라 마을 인접 수관의 밀도·높이 감쇠이며, 숲 밀도 총량은 유지해야 한다(민둥산 금지 결정). 해당 팔레트·밀도는 `forest-crunch.js`가 소유하므로 worker/sync 해시 재기준이 따라온다.
+
+**#20 구현**: `villageCanopyAtten`(`src/village/forest-canopy-atten.js`, consumed by
+`forest-crunch.js`)이 분지 반경·구조물 클리어런스로 높이(≤40%)·폭(≤16%)을 감쇠하고,
+`mtnChance`/`infillChance`는 같은 목표 그루수를 외곽·빈터로 재배치한다. 순수 계약
+`npm run check:forest-canopy`. 운무 절단 쪽은 `buildEdgeMistRing`의 표고 제곱 pool +
+`yCap≈0.40 Hmax`와 능선 2단 뱅크 튜닝(`computeRidgeMistAnchors`)이 함께 담당한다.

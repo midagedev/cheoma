@@ -86,6 +86,10 @@ const REVIEWED_NEW_PATHS = new Set([
   // 함께 돌고, 브라우저를 쓰지 않으므로 새 경로 실패마감 예외로 검토됐다.
   'tools/check-yard-polygon-contract.mjs',
   'tools/check-yard-proportion-contract.mjs',
+  // #20 마을 인접 수관 감쇠(부감 담장선): Three-free 순수 수식 + FAST_CHECKS 게이트.
+  // forest-crunch 가 소비하고 worker 해시에 반영된다. 브라우저는 불필요.
+  'src/village/forest-canopy-atten.js',
+  'tools/check-forest-canopy-atten.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
@@ -327,6 +331,11 @@ function routePath(path) {
         'independent auxiliary placement, geometry, LOD, edit, and export ownership changed',
         'parcel-rebuild-browser', 'lod-focus', 'lod-wave',
       );
+    }
+    if (path === 'src/village/forest-canopy-atten.js') {
+      // #20 pure canopy atten: worker/scene hashes move with forest-crunch consumers; no browser gate.
+      select('village-adjacent canopy attenuation changed', 'app', 'worker');
+      return { gates, reasons };
     }
     if (path === 'src/village/mud-wall-surface-plan.js') {
       select('renderer-free bounded mud-wall surface planning changed');

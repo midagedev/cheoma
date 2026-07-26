@@ -385,13 +385,16 @@ export function buildEdgeMistRing(edge, {
   //   ×NORM: 두 항의 곱은 평균이 0.6 부근이라 그대로 쓰면 링의 총 헤이즈 예산이 4할 줄어든다
   //     (야간 부감 평균 휘도 −27% 실측). 상한 1 에서 포화시키되 평균을 예전 균일값 근처로 되돌려,
   //     "총량은 같고 분포만 굽는" 변경이 되게 한다.
+  // #20 운무 절단 강화: pool 을 제곱해 골(저표고)은 더 두껍고 능선 어깨는 더 얇게 — 산이 안개
+  //   위로 솟는 선택적 절단(oriental-painting-research §1·§4). NORM 은 평균 헤이즈 예산을 유지.
   const strengthAt = (th, hEdge) => {
     const swirl = 0.5 + 0.5 * (
       0.52 * Math.sin(2 * th + ph1) + 0.30 * Math.sin(3 * th + ph2) + 0.18 * Math.sin(5 * th + ph3)
     );
-    const pool = depthSpan > 0 ? Math.max(0, Math.min(1, (yCap - hEdge) / depthSpan)) : 1;
-    const NORM = 1.34;
-    return Math.max(0.14, Math.min(1, (0.30 + 0.70 * pool) * (0.52 + 0.62 * swirl) * NORM));
+    const poolLin = depthSpan > 0 ? Math.max(0, Math.min(1, (yCap - hEdge) / depthSpan)) : 1;
+    const pool = poolLin * poolLin;
+    const NORM = 1.48;
+    return Math.max(0.12, Math.min(1, (0.22 + 0.78 * pool) * (0.50 + 0.64 * swirl) * NORM));
   };
   for (let is = 0; is <= NS; is++) {
     const th = (is / NS) * Math.PI * 2;
