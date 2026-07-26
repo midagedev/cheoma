@@ -20,7 +20,7 @@
 - 그림자 캐시는 정적 부감/오빗에서 이미 꺼짐(카메라만 움직일 때 shadow 재렌더 0).
 - 보케 품질은 모션 시 0으로 내려감 — fill 해상도는 1차까지 고정이었다.
 
-## 1차 구현 (이 브랜치)
+## 1차 구현 (커밋 `50ad3e7`)
 
 | 항목 | 무엇 | 품질 영향 |
 |---|---|---|
@@ -29,12 +29,22 @@
 | **Wall reuse** | yard signature + roof AABB 동일하면 담/부속채 메시 재사용 | 동일 |
 | **Thatch-only fast path** | 초가 thatchAge만 바뀌면 텍스처 재적용, 지오 0 | 동일 |
 | **Scheduler cadence** | min 24ms / max 80ms (이전 32/96) | — |
+| **Screen-door compose** | LOD + instFade 로컬 변수 유일화·idempotent inject | 셰이더 재정의 버그 수정 |
+
+브라우저 실측 (`check:parcel-rebuild:browser`, M1 Pro Chrome):  
+`drag 21→8 previews`, threshold retained ~24ms, programs +0.
+
+## 2차 구현 (capital chunk LOD)
+
+| 항목 | 무엇 | 실측 (capital, post=0) |
+|---|---|---|
+| **minSiteR 340→260** | capital이 Hanyang과 같은 FAR/MID/FULL 스택 사용 | aerial **956→404 calls, 6.1M→1.0M tris** |
 
 ## 다음 라운드 (우선순위)
 
 1. 제품 경로 브라우저 하네스: focus orbit + rebuild med ms + `postFillScale` 판독
 2. openings-only / roof-pitch 전용 부분 리빌드 계측 후 더 쪼개기
-3. aerial 원경 LOD 예산 재검토 (capital은 chunk LOD 미활성 — siteR 임계)
+3. town(R≈240) chunk LOD 검토 (룩 게이트 통과 시에만)
 4. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
