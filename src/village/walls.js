@@ -9,6 +9,11 @@ import {
 import { buildMudWallSurfaceGeometry } from './mud-wall-geometry.js';
 import { planMudWallSurface } from './mud-wall-surface-plan.js';
 import {
+  JANGDOK_JAR_INSET,
+  JANGDOK_JAR_JS_MIN,
+  JANGDOK_JAR_JS_SPAN,
+  JANGDOK_JAR_PITCH,
+  JANGDOK_JAR_R,
   yardClotheslineLayout,
   yardHardPlacements,
 } from './yard-layout.js';
@@ -39,7 +44,8 @@ const HEDGE_MAT = markSharedResource(new THREE.MeshStandardMaterial({
 }));
 const HEDGE_GEO = markSharedResource(new THREE.IcosahedronGeometry(1, 0));
 // 옹기(장독) 공유 지오 — 둥근 항아리 근사(스케일로 개체차). 병합 대상이라 재질은 wallMats 재사용.
-const JAR_GEO = markSharedResource(new THREE.SphereGeometry(0.3, 10, 8));
+// 반경·군집 피치·단 인셋은 yard-layout.js 장독 계약(JANGDOK_JAR_*)과 동기.
+const JAR_GEO = markSharedResource(new THREE.SphereGeometry(JANGDOK_JAR_R, 10, 8));
 
 // 막돌 면 UV 를 실치수로 환산: 담 한 면이 텍스처 한 장으로 늘어나던 것을 고정 월드 스케일
 //   (FIELDSTONE_TILE)로 타일링해 돌 하나가 어느 담·기단에서나 20~35cm로 읽히게 한다.
@@ -372,13 +378,22 @@ function makeYardProps(placements, opts, M, rng) {
     for (let r = 0; r < rows; r++) {
       const n = Math.max(1, perRow - r);            // 뒤열일수록 큰 독 적게
       for (let c = 0; c < n; c++) {
-        const js = 0.62 + rng() * 0.7;
+        // RNG 소비량·순서는 placed 여부와 무관(아래 continue 앞). js 상한은
+        // yard-layout 피치/인셋 계약과 같다 — 최대 지름 기준으로 침투·돌출 0.
+        const js = JANGDOK_JAR_JS_MIN + rng() * JANGDOK_JAR_JS_SPAN;
         const jarScaleY = js * (1.05 + rng() * 0.35);
         if (!jangdok.placed) continue;
         const jar = new THREE.Mesh(JAR_GEO, M.onggi);      // 옹기(어두운 유약) — 문틀과 분리된 전용 색
         jar.scale.set(js, jarScaleY, js);
-        const jx = px + (n === 1 ? 0 : (-platW / 2 + 0.3 + c * (platW - 0.6) / (n - 1)));
-        jar.position.set(jx, 0.14 + 0.26 * js, pz - platD / 2 + 0.32 + r * 0.52);
+        const jx = px + (n === 1
+          ? 0
+          : (-platW / 2 + JANGDOK_JAR_INSET
+            + c * (platW - 2 * JANGDOK_JAR_INSET) / (n - 1)));
+        jar.position.set(
+          jx,
+          0.14 + 0.26 * js,
+          pz - platD / 2 + JANGDOK_JAR_INSET + r * JANGDOK_JAR_PITCH,
+        );
         jar.castShadow = jar.receiveShadow = true; g.add(jar);
       }
     }

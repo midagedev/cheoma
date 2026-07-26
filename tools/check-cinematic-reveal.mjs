@@ -750,7 +750,8 @@ assert.equal(plannedDetailAnchors.length, 1,
 assert.ok(Object.isFrozen(plannedDetailAnchors[0])
   && Object.isFrozen(plannedDetailAnchors[0].point),
   'planned detail anchor and its world point must be immutable');
-near(plannedDetailAnchors[0].point, { x: 1.94, y: 3.5, z: 12.21 });
+// World point of the planned jangdok platform centre (level 2 packing envelope).
+near(plannedDetailAnchors[0].point, { x: 2.174, y: 3.5, z: 12.322 });
 assert.deepEqual(parcelFocusDetailAnchors(plannedHousehold, site), plannedDetailAnchors,
   'planned household detail anchors must be stable without RNG');
 assert.deepEqual(parcelFocusDetailAnchors({

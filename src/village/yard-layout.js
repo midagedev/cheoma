@@ -16,6 +16,18 @@ import { auxiliaryHardObstacle } from './auxiliary-building-plan.js';
 export const YARD_HARD_GAP = 0.12;
 export const YARD_LIFE_MAX_HEIGHT = 1.2;
 
+// 장독 항아리 군집 계약 — walls.js#makeYardProps 의 JAR_GEO(SphereGeometry R) 와 동일.
+// js ∈ [JS_MIN, JS_MIN+JS_SPAN] 이라 최대 반경 = R·JS_MAX. 플랫폼·피치는 이 상한으로
+// 고정해 인접 항아리 침투와 단 밖 돌출을 결정론적으로 금지한다(실측 스케일과 무관).
+export const JANGDOK_JAR_R = 0.3;
+export const JANGDOK_JAR_JS_MIN = 0.62;
+export const JANGDOK_JAR_JS_SPAN = 0.7;
+export const JANGDOK_JAR_JS_MAX = JANGDOK_JAR_JS_MIN + JANGDOK_JAR_JS_SPAN;
+export const JANGDOK_JAR_GAP = 0.06;
+export const JANGDOK_JAR_MAX_R = JANGDOK_JAR_R * JANGDOK_JAR_JS_MAX;
+export const JANGDOK_JAR_PITCH = 2 * JANGDOK_JAR_MAX_R + JANGDOK_JAR_GAP;
+export const JANGDOK_JAR_INSET = JANGDOK_JAR_MAX_R;
+
 const JAR_OVERHANG = 0.12;
 const GARDEN_STONE_MARGIN = 0.08;
 const YARD_LIFE_WALL_GAP = 0.18;
@@ -272,11 +284,26 @@ export function yardHardPlacements(parcel) {
   return out;
 }
 
+// Platform size that fits `perRow` max-radius jars along X and `rows` along Z
+// with edge inset = max jar radius and centre pitch = JANGDOK_JAR_PITCH.
+export function jangdokPlatformWidth(perRow) {
+  const n = Math.max(1, perRow | 0);
+  return 2 * JANGDOK_JAR_INSET + Math.max(0, n - 1) * JANGDOK_JAR_PITCH;
+}
+
+export function jangdokPlatformDepth(rows) {
+  const r = Math.max(0, rows | 0);
+  if (r <= 0) return 0;
+  return 2 * JANGDOK_JAR_INSET + Math.max(0, r - 1) * JANGDOK_JAR_PITCH;
+}
+
 export function yardJangdokLayout(plotW, plotD, level) {
   const rows = Math.max(0, level | 0);
   const perRow = 2 + rows;
-  const width = Math.min(plotW * 0.4, perRow * 0.62 + 0.4);
-  const depth = rows * 0.56 + 0.3;
+  // 예약 봉투 = 실제 돌단. 예전 min(plotW·0.4, perRow·0.62+0.4) / rows·0.56+0.3 는
+  // 최대 항아리 지름(~0.79m)보다 좁은 피치·0.3m 가장자리 인셋을 낳아 침투·돌출이 났다.
+  const width = jangdokPlatformWidth(perRow);
+  const depth = jangdokPlatformDepth(rows);
   return {
     rows,
     perRow,
@@ -285,6 +312,28 @@ export function yardJangdokLayout(plotW, plotD, level) {
     x: -plotW / 2 + width / 2 + 0.5,
     z: -plotD / 2 + depth / 2 + 0.5,
   };
+}
+
+// Pure jar-centre plan for a platform (local origin at platform centre). Uses the
+// same front-row / tapering-back-row grammar as walls.js#makeYardProps; radii are
+// the conservative max so a gate can assert no overlap / no overhang without RNG.
+export function jangdokJarCentres(rows, perRow, width, depth) {
+  const rCount = Math.max(0, rows | 0);
+  const basePerRow = Math.max(1, perRow | 0);
+  const platW = width ?? jangdokPlatformWidth(basePerRow);
+  const platD = depth ?? jangdokPlatformDepth(rCount);
+  const out = [];
+  for (let r = 0; r < rCount; r++) {
+    const n = Math.max(1, basePerRow - r);
+    for (let c = 0; c < n; c++) {
+      const x = n === 1
+        ? 0
+        : (-platW / 2 + JANGDOK_JAR_INSET + c * (platW - 2 * JANGDOK_JAR_INSET) / (n - 1));
+      const z = -platD / 2 + JANGDOK_JAR_INSET + r * JANGDOK_JAR_PITCH;
+      out.push({ x, z, radius: JANGDOK_JAR_MAX_R });
+    }
+  }
+  return out;
 }
 
 export function yardClotheslineLayout(plotW, plotD, angle) {
