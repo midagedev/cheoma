@@ -166,10 +166,16 @@ const expectedSceneHashes = {
   //   결정론은 온전: proxy 바이트 네 규모 전부 불변, plan 골든 10개 불변, sync = Worker = `?worker=0`
   //   폴백 동일(이 상수를 갱신한 뒤 두 모드 모두 PASS 로 확인). 이 레이어는 finishVillage 이후 붙고
   //   전용 rng 만 소비하므로 seeded 스트림 자체는 건드리지 않는다.
-  village: '2ee1ae4c:0def15da:bbd81d87:eaed0712',
-  town: '5df6b43a:f3ab3712:bb1b1908:6770465a',
-  capital: 'e86a04e6:dd80d0e2:e0f8ef52:1f4e19da',
-  hanyang: '0c7619d3:842de1f9:f18f7de9:d6a2f4b5',
+  // 마당 하드 오브젝트가 직사각형 authored 슬롯 대신 실제 필지 폴리곤 ∩ 담 두께 안쪽으로 투영되면서
+  //   위치가 바뀌어 네 규모의 씬 바이트가 의도적으로 변했다(수정 전 6494개 중 1456개가 폴리곤 밖,
+  //   필지 65%에 걸쳐 최대 3.56m 돌출). **이번에는 proxy 해시도 함께 움직인다** — 통상과 다르며 원인은
+  //   확인됐다: `focus-blockers.js#parcelFocusDetailAnchors` 가 근접 카메라 구도 anchor 를
+  //   `yardHardObstacles` 위치에서 직접 파생하므로 장독대가 옮겨지면 anchor 와 카메라 해가 함께 옮겨진다.
+  //   재기준 직전 실측: 네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
+  village: '724c6659:3303d885:ebc9791f:495e1595',
+  town: '24ac4e8b:01e90e21:f7e608a5:317516ad',
+  capital: 'c75ab284:c466a368:278a71f5:ae04a4f0',
+  hanyang: '16ffc14b:03ac508b:2e89f20b:241cc869',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -206,10 +212,10 @@ const expectedProxyHashes = {
   // 계약은 그대로다.
   // 뒷산 완만화(위 씬 재기준과 같은 변경): 필지 지반고와 사면이 바뀌므로 focus 카메라가 푸는
   //   오프셋·거리·near 컷어웨이 바이트가 함께 움직인다. 프록시 개수·ID·피사체 경계·격리 계약은 그대로다.
-  village: '794d1a99',
-  town: 'c41c0e59',
-  capital: 'b652961a',
-  hanyang: '0f53368a',
+  village: '1564ce23',
+  town: 'ed7e597c',
+  capital: '0d2f1725',
+  hanyang: 'a84e13db',
 };
 
 const server = await createServer({

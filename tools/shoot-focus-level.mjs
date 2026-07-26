@@ -26,10 +26,16 @@ const APP_ROOT = join(ROOT, 'app');
 // `p13` stopped qualifying — under this exact query (the `seed=20260718` house seed matters) it is no
 // longer a regular giwa at all. Re-measured over all 13 regular giwa parcels, five qualify:
 // p11 and p15 and p31 (detail 0/2→1/2, no blockers), p16 (0/1→1/1, only one planned detail) and
-// p27 (0/2→1/2 but blocked by `auxiliary:p27:aux-0`). `p11` is the cleanest of them; `p31` is
-// deliberately avoided here because it used to be the terrain fixture and would read as the same
-// case. Re-scan for a base-0/after-≥1 regular giwa if this drifts again — never relax the assertions.
-const GIWA_YARD_DETAIL_FIXTURE = 'p11';
+// p27 (0/2→1/2 but blocked by `auxiliary:p27:aux-0`). `p31` is deliberately avoided here because it
+// used to be the terrain fixture and would read as the same case.
+// `p11` then stopped qualifying when 마당 소품 배치가 plotW×plotD 직사각형에서 실제 필지 폴리곤으로
+// 옮겨졌다(`village/yard-layout.js`). p11 의 두 디테일(장독대·빨래줄)은 여전히 계획되지만 장독대가
+// 담을 뚫고 나와 있던 자리에서 실제 뒤안(로컬 z=-4.81)으로 들어갔고, 뒤안은 본채가 정당하게 가린다
+// — 즉 이전의 "보인다"는 소품이 담 밖으로 삐져나와 있었기 때문이었다. 같은 query 재측정: 네 곳이
+// 여전히 자격을 갖는다(p15·p16·p27·p31, p24 는 base 1 이라 부적격). `p15`(0/2→1/2, 부속채·차폐물
+// 없음)가 가장 깨끗하다. 다시 드리프트하면 base-0/after-≥1 정규 giwa 를 재스캔할 것 — 어서션을
+// 완화하지 말 것.
+const GIWA_YARD_DETAIL_FIXTURE = 'p15';
 // The terrain-occluded fixture must actually cross the rendered ridge. `p31` stopped doing so when
 // the #164 ridge gentling lowered the capital ridge anchor (its nine focus rays now clear terrain
 // by +0.95m); on this same query p8 stays armed with minClearance -5.34m and 9/9 blocked rays, the
@@ -402,7 +408,7 @@ try {
     focusVisibility: window.__engine.village.debugFocusVisibility(parcel.parcelId),
   })));
   // Fixed before/after fixture: do not search the implementation's diagnostics
-  // for a passing house. In this seed p11 has two planned details, both hidden from
+  // for a passing house. In this seed p15 has two planned details, both hidden from
   // the authored base frame by the house itself, one of which a bounded
   // south-opening candidate exposes (see GIWA_YARD_DETAIL_FIXTURE above).
   const giwaDetailFixture = parcels.find((parcel) => (

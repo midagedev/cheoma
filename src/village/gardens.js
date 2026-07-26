@@ -406,17 +406,21 @@ export function buildVillageFlora(plan, site, seed, { yardLifeRecords = [] } = {
     const gl = p.gardenLevel || 0;
     if (gl >= 2) {
       const hw = p.plotW / 2, hd = p.plotD / 2, side = trng() < 0.5 ? -1 : 1;
+      // 좁은·부정형 필지에서는 점경물이 앉을 자리가 없을 수 있다(yard-layout 이 null 반환).
+      // 담 밖으로 밀려난 괴석 대신 아무것도 두지 않는다 — 마당 앵커도 함께 생략한다.
       const rock = yardGwaeseokPosition(p, side, false);
-      bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(rock.x, 0, rock.z)), trng);
+      if (rock) bakeGwaeseok(L, pm.clone().multiply(M4().makeTranslation(rock.x, 0, rock.z)), trng);
       if (gl >= 3) {
         const pond = yardSeokjiPosition(p, side, false);
         const hwagye = yardHwagyePosition(p, trng.range(-1, 1), false);
-        bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(pond.x, 0, pond.z)));
+        if (pond) bakeSeokji(L, pm.clone().multiply(M4().makeTranslation(pond.x, 0, pond.z)));
         bakeHwagye(L, pm.clone().multiply(M4().makeTranslation(hwagye.x, 0, hwagye.z)), trng);
       }
-      const gv = new THREE.Vector3(rock.x, 0, rock.z).applyMatrix4(pm);
-      const gc = new THREE.Vector3(side * (hw + 7), 3.2, -hd * 0.5 + 1.5).applyMatrix4(pm);   // 담 밖 측면 눈높이
-      gardenAnchors.push({ x: gv.x, y: gv.y + 1.0, z: gv.z, cx: gc.x, cy: gc.y, cz: gc.z, hero: false });
+      if (rock) {
+        const gv = new THREE.Vector3(rock.x, 0, rock.z).applyMatrix4(pm);
+        const gc = new THREE.Vector3(side * (hw + 7), 3.2, -hd * 0.5 + 1.5).applyMatrix4(pm); // 담 밖 측면 눈높이
+        gardenAnchors.push({ x: gv.x, y: gv.y + 1.0, z: gv.z, cx: gc.x, cy: gc.y, cz: gc.z, hero: false });
+      }
     }
   }
 

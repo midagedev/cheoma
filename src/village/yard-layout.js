@@ -5,7 +5,7 @@
 // or jar platform through an already accepted tree.
 
 import * as G from '../core/math/geom2.js';
-import { parcelEffectiveRoofBounds, parcelLocalRoofRectangles } from './house-footprint.js';
+import { parcelEffectiveRoofBounds } from './house-footprint.js';
 import {
   localCanopyBlocksSolarAccess,
   parcelHouseTranslation,
@@ -57,10 +57,13 @@ function circle(kind, mode, x, z, radius) {
 //   통과하는 첫 후보를 쓰고, 어느 후보도 못 앉으면 소품은 잘리지 않고 생략된다("잘 정돈"
 //   은 낀 소품보다 빈 자리를 뜻한다). 결정론: rng 미소비 — 순수 기하만 쓴다.
 const YARD_SLOT_EPS = 1e-6;
-const YARD_OBJECT_ROOF_GAP = YARD_LIFE_ROOF_GAP;
 // walls.js#makeYardProps 가 뽑는 낟가리 반경 상한. 저작 슬롯 x/z 가 반경 종속이라
 // 예약 봉투(stackObstacle)는 이 상한으로 고정되고, 렌더는 그 봉투 안에서만 흔들린다.
 const YARD_STACK_MAX_RADIUS = 1.05;
+// walls.js#makeYardProps: ang = (rng()-0.5)·0.5 → |ang| ≤ 0.25rad. 널린 천 폭 0.42.
+const CLOTHESLINE_MAX_SIN = Math.sin(0.25);
+const CLOTHESLINE_PAD = 0.28;
+const CLOTH_HALF_WIDTH = 0.21;
 
 // 볼록 필지의 각 변을 "소품 봉투가 안쪽으로 들어가야 하는" half-plane 으로 바꾼다.
 //   n·p ≥ n·a + support + clearance,  support = halfX·|n.x| + halfZ·|n.z|
@@ -134,25 +137,19 @@ const yardBoxesOverlap = (a, b, gap) =>
 // impostor 명세가 아닌 컴파운드다. 그래서 히어로는 저작 슬롯을 그대로 쓴다(측정 이탈 0건).
 function yardPlacementContext(parcel) {
   const points = parcel?.hero ? null : (parcel?.shape?.pts || null);
-  let roofs = null;
-  if (points && (parcel.kind === 'giwa' || parcel.kind === 'choga')) {
-    try {
-      roofs = parcelLocalRoofRectangles(parcel).map((roof) => ({
-        x: (roof.minX + roof.maxX) * 0.5,
-        z: (roof.minZ + roof.maxZ) * 0.5,
-        halfX: (roof.maxX - roof.minX) * 0.5,
-        halfZ: (roof.maxZ - roof.minZ) * 0.5,
-      }));
-    } catch { roofs = null; }
-  }
   return {
     points,
-    roofs,
     clearance: yardLifeWallInwardClearance(parcel?.wallType),
     taken: [],
   };
 }
 
+// 지붕·몸채는 이 판정에 들어오지 않는다. 측정 결과 소품 대부분(76~100%)이 실제 지붕 사각형과
+// 겹치지만, 그 겹침을 여기서 금지하면 소품이 열린 마당으로 밀려나 부속채(광)와 자리를 다툰다:
+// check-auxiliary-building-plan 의 유효 별채가 146/445 → 몸채 전면 배제 91/445 · 고형 소품만
+// 배제 99/445 로 떨어져 100 하한을 깬다. 마당 자체가 포화 상태라는 뜻이며, 처마 밑 겹침은
+// 필지·마당 확대 라운드에서 함께 풀어야 한다(그때 house-footprint 에 몸채 폴리곤을 다시 두면
+// 된다 — 처마 아래는 허용, 벽체 관통만 금지가 물리적으로 옳은 규칙이다).
 function placeYardObject(context, candidates, halfX, halfZ) {
   const authored = candidates[0];
   if (!context.points) return { x: authored.x, z: authored.z, placed: true };
@@ -160,12 +157,25 @@ function placeYardObject(context, candidates, halfX, halfZ) {
     const point = resolveYardSlot(context.points, candidate, halfX, halfZ, context.clearance);
     if (!point) continue;
     const box = { x: point.x, z: point.z, halfX, halfZ };
-    if (context.roofs?.some((roof) => yardBoxesOverlap(box, roof, YARD_OBJECT_ROOF_GAP))) continue;
     if (context.taken.some((other) => yardBoxesOverlap(box, other, YARD_HARD_GAP))) continue;
     context.taken.push(box);
     return { x: point.x, z: point.z, placed: true };
   }
   return { x: authored.x, z: authored.z, placed: false };
+}
+
+// 텃밭·빨래줄처럼 "치수가 저작값이 아니라 살림 규모의 표현"인 소품은 이동만으로는 좁은 마당에
+// 못 앉는다(측정: 개방 마당 텃밭 24%·빨래줄 69% 만 배치). 이랑 몇 줄짜리 텃밭이나 짧은 빨래줄은
+// 고증상 그대로 유효하므로, 전 크기로 모든 후보를 먼저 시도한 뒤 단계적으로 줄이고, 마지막
+// 단계에서도 못 앉으면 생략한다. 잘라 넣는(clip) 경로는 없다.
+const YARD_SHRINK_STEPS = Object.freeze([1, 0.82, 0.66, 0.52]);
+
+function placeSizedYardObject(context, candidates, halfX, halfZ, steps = YARD_SHRINK_STEPS) {
+  for (const scale of steps) {
+    const at = placeYardObject(context, candidates, halfX * scale, halfZ * scale);
+    if (at.placed) return { ...at, scale };
+  }
+  return { x: candidates[0].x, z: candidates[0].z, placed: false, scale: steps[steps.length - 1] };
 }
 
 // 마당 소품 최종 배치의 단일 진실원. 렌더(walls.js)와 예약(yardHardObstacles)이 같은 이
@@ -204,40 +214,59 @@ export function yardHardPlacements(parcel) {
     out.stack = { x: at.x, z: at.z, placed: at.placed, maxRadius: half };
   } else out.stack = null;
 
-  // 3) 빨래줄 — 앞마당 좌. 각도는 렌더 rng 소관이라 예약은 회전 무관 원(span/2 + 여유).
+  // 3) 빨래줄 — 앞마당 좌. 짧은 빨래줄도 살림으로 유효하므로 좁은 마당에서는 span 을 줄인다.
+  //    예약 봉투: walls.js 의 각도는 (rng()-0.5)·0.5 라 |ang| ≤ 0.25rad 로 유계다. 회전 무관 원
+  //    (반경 span/2+0.28)은 그 유계 각을 3.5배 과예약해(13.6㎡ vs 7.8㎡) 실제로 광(부속채)이
+  //    들어갈 자리를 빨래줄 한 줄이 삼켰다 — 측정에서 광 거절 원인 1위. 실제 유계 봉투로 바꾼다.
   if (parcel.clothesline) {
     const line = yardClotheslineLayout(plotW, plotD, 0);
-    const half = line.span / 2 + 0.28;
-    const at = placeYardObject(context, [
+    const halfX = line.span / 2 + CLOTHESLINE_PAD;
+    const halfZ = line.span / 2 * CLOTHESLINE_MAX_SIN + CLOTHESLINE_PAD + CLOTH_HALF_WIDTH;
+    const at = placeSizedYardObject(context, [
       { x: line.x, z: line.z },
       { x: -line.x, z: line.z },
       { x: line.x, z: plotD * 0.34 },
       { x: -line.x, z: plotD * 0.34 },
-    ], half, half);
-    out.clothesline = { span: line.span, height: line.height, x: at.x, z: at.z, placed: at.placed, radius: half };
+    ], halfX, halfZ);
+    out.clothesline = {
+      span: line.span * at.scale,
+      height: line.height,
+      x: at.x, z: at.z, placed: at.placed,
+      halfX: halfX * at.scale, halfZ: halfZ * at.scale,
+    };
   } else out.clothesline = null;
 
-  // 4) 텃밭(앞마당 우) / 개방 마당 텃밭(앞마당 좌).
-  if (parcel.vegBed) {
+  // 4) 텃밭(앞마당 우) / 개방 마당 텃밭(앞마당 좌). 이랑 몇 줄로 줄어도 텃밭이다.
+  const sizedPatch = (patch, candidates) => {
+    const at = placeSizedYardObject(context, candidates, patch.width / 2, patch.depth / 2);
+    return {
+      ...patch,
+      width: patch.width * at.scale,
+      depth: patch.depth * at.scale,
+      x: at.x, z: at.z, placed: at.placed,
+    };
+  };
+  // 개방 마당(open)은 walls.js 가 vegBed 를 렌더하지 않고 개방 마당 텃밭만 세운다. 예약도 같아야
+  // 한다 — 안 그러면 렌더되지 않는 텃밭이 실제로 세워지는 개방 마당 텃밭의 자리를 먼저 차지한다.
+  const openYard = (parcel.wallType || 'stone') === 'open';
+  if (parcel.vegBed && !openYard) {
     const patch = yardGardenPatchLayout(plotW, plotD, plotW * 0.3, plotD * 0.1);
-    const at = placeYardObject(context, [
+    out.vegBed = sizedPatch(patch, [
       { x: patch.x, z: patch.z },
       { x: -patch.x, z: patch.z },
       { x: patch.x, z: plotD * 0.38 },
       { x: -plotW * 0.2, z: plotD * 0.38 },
-    ], patch.width / 2, patch.depth / 2);
-    out.vegBed = { ...patch, x: at.x, z: at.z, placed: at.placed };
+    ]);
   } else out.vegBed = null;
 
-  if ((parcel.wallType || 'stone') === 'open') {
+  if (openYard) {
     const patch = yardGardenPatchLayout(plotW, plotD);
-    const at = placeYardObject(context, [
+    out.openGarden = sizedPatch(patch, [
       { x: patch.x, z: patch.z },
       { x: -patch.x, z: patch.z },
       { x: patch.x, z: plotD * 0.30 },
       { x: plotW * 0.2, z: plotD * 0.30 },
-    ], patch.width / 2, patch.depth / 2);
-    out.openGarden = { ...patch, x: at.x, z: at.z, placed: at.placed };
+    ]);
   } else out.openGarden = null;
 
   return out;
@@ -255,13 +284,6 @@ export function yardJangdokLayout(plotW, plotD, level) {
     depth,
     x: -plotW / 2 + width / 2 + 0.5,
     z: -plotD / 2 + depth / 2 + 0.5,
-  };
-}
-
-export function yardStackLayout(plotW, plotD, radius) {
-  return {
-    x: plotW / 2 - radius - 0.6,
-    z: -plotD / 2 + radius + 0.7,
   };
 }
 
@@ -297,11 +319,14 @@ export function yardHwagyePosition(parcel, x, hero = parcel.hero) {
 const GWAESEOK_ENVELOPE = 0.5 + GARDEN_STONE_MARGIN;
 const SEOKJI_ENVELOPE = 0.58 + GARDEN_STONE_MARGIN;
 
+// null = 어느 후보도 이 필지에 못 앉는다. 호출자(gardens.js·gardenHardObstacles)는 점경물을
+// 생략해야 하며, 저작 좌표로 폴백하면 안 된다 — 그 폴백이 남아 있는 동안 잔여 이탈 9건이
+// 전부 괴석이었다(town~hanyang 4시드, 0.03~0.28m).
 function placeGardenStone(parcel, candidates, envelope, reserved = []) {
   const context = yardPlacementContext(parcel);
   context.taken.push(...reserved);
   const at = placeYardObject(context, candidates, envelope, envelope);
-  return { x: at.x, z: at.z };
+  return at.placed ? { x: at.x, z: at.z } : null;
 }
 
 export function yardGwaeseokPosition(parcel, side, hero = parcel.hero) {
@@ -311,20 +336,27 @@ export function yardGwaeseokPosition(parcel, side, hero = parcel.hero) {
   };
   if (hero) return authored;
   return placeGardenStone(parcel, [
-    authored,
-    { x: authored.x, z: parcel.plotD * 0.30 },
-    { x: side * parcel.plotW * 0.33, z: -parcel.plotD * 0.42 },
+    authored,                                                            // 뒤안 측(저작)
+    { x: authored.x, z: parcel.plotD * 0.30 },                           // 사랑마당 측
+    { x: side * parcel.plotW * 0.33, z: -parcel.plotD * 0.42 },          // 뒤안 깊이
+    { x: side * parcel.plotW * 0.33, z: parcel.plotD * 0.38 },           // 앞담 안쪽 모서리
   ], GWAESEOK_ENVELOPE);
 }
 
 export function yardSeokjiPosition(parcel, side, hero = parcel.hero) {
   const rock = yardGwaeseokPosition(parcel, side, hero);
+  if (!rock) return null;
   if (hero) return { x: rock.x - side * 1.2, z: -parcel.plotD * 0.41 };
+  // 석지는 괴석과 한 짝이라 자리를 확정한 괴석 주위를 돈다. 저작 오프셋을 첫 후보로 두고,
+  // 남은 궤도(반대쪽 축·바깥쪽)를 순서대로 시도한다 — 궤도 후보 없이 저작 오프셋만 쓰면
+  // 좁은 필지에서 석지 유지율이 326→36 으로 떨어졌다(4시드 hanyang 측정).
   const authored = { x: rock.x - side * 1.1, z: rock.z + 1.0 };
   return placeGardenStone(parcel, [
     authored,
     { x: rock.x - side * 1.1, z: rock.z - 1.0 },
-    { x: rock.x, z: rock.z + 1.3 },
+    { x: rock.x, z: rock.z + 1.5 },
+    { x: rock.x, z: rock.z - 1.5 },
+    { x: rock.x + side * 1.5, z: rock.z },
   ], SEOKJI_ENVELOPE, [{ x: rock.x, z: rock.z, halfX: GWAESEOK_ENVELOPE, halfZ: GWAESEOK_ENVELOPE }]);
 }
 
@@ -346,11 +378,12 @@ function gardenHardObstacles(parcel, { exact = false, side = 1, hwagyeX = 0 } = 
     ));
   }
   for (const gardenSide of sides) {
+    // 못 앉는 점경물은 예약하지 않는다 — 렌더도 생략하므로 그 자리는 마당나무가 다시 쓸 수 있다.
     const rock = yardGwaeseokPosition(parcel, gardenSide, hero);
-    out.push(circle('gwaeseok', 'trunk', rock.x, rock.z, 0.5 + GARDEN_STONE_MARGIN));
+    if (rock) out.push(circle('gwaeseok', 'trunk', rock.x, rock.z, GWAESEOK_ENVELOPE));
     if (hero || level >= 3) {
       const pond = yardSeokjiPosition(parcel, gardenSide, hero);
-      out.push(circle('seokji', 'trunk', pond.x, pond.z, 0.58 + GARDEN_STONE_MARGIN));
+      if (pond) out.push(circle('seokji', 'trunk', pond.x, pond.z, SEOKJI_ENVELOPE));
     }
   }
   return out;
@@ -379,7 +412,7 @@ export function yardHardObstacles(parcel, gardenOptions) {
   }
 
   const line = placements.clothesline;
-  if (line?.placed) out.push(circle('clothesline', 'canopy', line.x, line.z, line.radius));
+  if (line?.placed) out.push(rectangle('clothesline', 'canopy', line.x, line.z, line.halfX, line.halfZ));
 
   const vegBed = placements.vegBed;
   if (vegBed?.placed) {

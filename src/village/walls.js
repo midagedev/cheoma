@@ -103,9 +103,10 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
   if (style === 'open') {
     placeGatePosts(g, pts[gateEdge], pts[(gateEdge + 1) % n], layout.gate.centerT,
       layout.gate.gap, layout.gate.height, M.mud, M.jipjul, 'brush');
-    g.add(makeGardenPatch(plotW, plotD, M));               // 개방 마당의 정체성(텃밭) — 항상
+    // 개방 마당의 정체성(텃밭) — 항상. 앉을 자리가 없으면(placed=false) 담 밖으로 밀어내지 않는다.
+    if (yardPlacements.openGarden?.placed) g.add(makeGardenPatch(yardPlacements.openGarden, M));
     if (opts.auxRequested ?? opts.aux) consumeLegacyAuxVariation(rng);
-    g.add(makeYardProps(plotW, plotD, { ...opts, vegBed: false }, M, rng));  // 장독대·낟가리·빨래줄
+    g.add(makeYardProps(yardPlacements, { ...opts, vegBed: false }, M, rng));  // 장독대·낟가리·빨래줄
     return g;
   }
 
@@ -154,7 +155,7 @@ export function buildVillageWall(shape, wallMats, opts = {}) {
   if (opts.auxRequested ?? opts.aux) consumeLegacyAuxVariation(rng);
 
   // 마당 부속 소품(장독대·낟가리·빨래줄·텃밭) — 공유 재질 병합(0 신규 드로우콜).
-  g.add(makeYardProps(plotW, plotD, opts, M, rng));
+  g.add(makeYardProps(yardPlacements, opts, M, rng));
 
   return g;
 }

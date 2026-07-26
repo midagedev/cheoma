@@ -356,6 +356,11 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - 공유 재질 identity·opacity·transparent·depthWrite·version이 불변이며, 궁 병합 root가 건물 tofu wave에 합류하고 cancel/dispose가 반복해도 소유권과 transform이 정상화되는지 확인한다.
 - `check:yard`
   - `yard-layout.js`의 순수 위치 계약을 실제 flora renderer와 함께 번들해 5개 규모 × 3개 seed의 최종 마당나무를 검사한다. 계획 별채의 회전된 정확한 처마 polygon·낟가리·빨래줄은 수관, 낮은 장독대·텃밭·정원석은 줄기 밑동 반경으로 피하며 자연스러운 수관 돌출은 허용한다.
+- `check:yard-polygon`
+  - 마당 소품이 `plotW × plotD` 직사각형이 아니라 실제 `parcel.shape` 폴리곤에 앉는다는 순수 계약. 5개 규모 × 4개 seed(전단·오므림이 seed 종속이라 한 seed는 결함을 숨긴다)에서 예약/렌더가 공유하는 모든 소품 footprint가 폴리곤 안이고 담 내측 여유 이상인지 검사한다.
+  - 수정 전 직사각형 공식을 **음성 대조**로 게이트 안에 재현해, 같은 fixture에서 그 공식이 여전히 이탈함을 확인한다. 이탈이 사라지면 게이트 자체가 실패하므로 어서션이 공허해질 수 없다.
+  - 예약(`yardHardObstacles`)과 배치(`yardHardPlacements`)의 집합 일치, 처마 밑은 허용하되 몸채 관통은 금지, 반복 호출·재생성 결정론, 그리고 종류별 **배치 유지 하한**을 함께 고정한다. 유지 하한이 "소품을 다 지워서 이탈 0"을 만드는 퇴행을 막는다.
+  - 히어로(종가·관아)는 `rectangularParcelShape`라 담과 직사각형이 정의상 일치해 저작 슬롯을 그대로 쓴다. 게이트는 그 면제의 전제(4점 직사각형)를 직접 검사하고, 궁·절·시전 지번이 마당 소품 계약을 공유하지 않음도 확인한다.
 - `check:yard-life`
   - 5개 규모 × 대표 seed에서 Three/DOM/전역 RNG 없는 생활상 plan의 byte 결정론, 규모별 희소 가구 선택, 문자열 ID fail-closed, 봄·가을·겨울 record와 날씨 eligibility, 좌표까지 포함한 모티프별 서비스/작업 slot, exact footprint와 지붕·실제 솔리드 담 두께·도로·대문 접근·일조·기존 hard object 경계를 검사한다. 세 잠재 계절 slot을 flora용 보수적 obstacle로 합치는 adapter도 이 계약이 소유한다.
   - Issue #17에서 확인된 `hamlet:7:p0` 장독대 관통점과 `hanyang:7`의 같은 부속채 local footprint를 고정 회귀로 둔다. 한양 fixture는 일조 배치로 필지 ID가 이동해도 그 footprint와 과실수를 함께 가진 집을 의미로 찾아, 안전한 다른 슬롯으로 이동한 뒤의 나무 수와 반복 결정론을 확인한다.
@@ -901,6 +906,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-auxiliary-building-plan.mjs` | 435개 요청의 불변 spec/거절, 실제 생성/commit 편집 처마·필지·대문·30° 일조·마당 이격, local/world/solar/hard footprint 동일성, 전역 RNG 불변 | Three 없는 배치 계약이며 물리 표면·LOD 소유권은 geometry/app/worker 게이트가 맡는다. |
 | `tools/check-auxiliary-building-geometry.mjs` | 공개 borrowed-material renderer의 기와/초가 역할, exact local envelope, 3 mesh·48 triangle, 결정론, idempotent geometry dispose | 필지 배치와 제품 병합·focus/export는 plan/app/worker/GLB 게이트가 맡는다. |
 | `tools/check-yard-layout-contract.mjs` | 마당나무와 계획 별채의 정확한 polygon·장독대·낟가리·빨래줄·텃밭·정원석의 의미별 footprint, 장독대/별채 충돌 재현, 수목 유지율 | 실제 수관/밑동의 XZ 계약이며 계절별 가지 실루엣의 미감은 focus 이미지로 본다. |
+| `tools/check-yard-polygon-contract.mjs` | 마당 소품의 실제 `parcel.shape` 폴리곤·담 내측 여유 준수(이탈 0), 예약==배치, 처마 허용·몸채 관통 금지, 종류별 배치 유지 하한, 반복·재생성 결정론, 히어로 직사각 면제 전제, 비주거 지번 제외 | 순수 산술 계약이다. 수정 전 직사각형 공식을 게이트 안 음성 대조로 두어 어서션이 공허해지면 게이트가 실패한다. 소품의 실제 재질·병합·그림자는 `check:yard`·app/worker 게이트가 맡는다. |
 | `tools/check-yard-life-contract.mjs` | 드문 농가 선택, 세 계절 JSON schema·날씨 허용, 좌표별 exact footprint, 실제 처마·솔리드 담·도로·대문 접근·일조·마당 hard object clearance, 전역 RNG 불변 | Three 없는 배치 계약이다. geometry·전환·GPU 자원과 제품 카메라는 `check:yard-life:browser`, app/worker 게이트가 맡는다. |
 | `tools/check-parcel-rebuild-contract.mjs` | 불변 필지 envelope, 재건축 결정론, 정자 일조/카메라, 실제 편집 처마와 마당 수목 재배치 | renderer/DOM 없이 실행하며 UI·부감 지속 소유권은 앱 게이트가 맡는다. |
 | `tools/check-live-edit-scheduler.mjs` | 50→1 최신값 병합, 재생성 비용 기반 cooldown, commit 우선권, focus epoch 취소·dispose | DOM/THREE 없는 순수 케이던스이며 실제 slider·지오 변화는 공유 앱 게이트가 맡는다. |
