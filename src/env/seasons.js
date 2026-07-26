@@ -43,6 +43,12 @@ const TREE_SWAY = 1.15;    // 나무 수관 흔들림 진폭(월드 단위 배�
 const LITTER_UP = 38;      // 낙엽 지면 누적 0→1 시간(초) — 은은히
 const LITTER_DOWN = 12;    // 낙엽 사라짐 시간(초)
 const TAU = Math.PI * 2;
+// 얇은 잎 투과 계수(역광 발색). 낙하 낙엽 재질 전용이며 값은 실측으로 정했다 —
+//   판정 기준은 "역광 프레임에서 잎 luma max ≤ 프레임 luma p99.9"(석양 하이라이트를 넘지 않는다).
+//   0.55는 잎 max 176 > p99.9 165로 **위반**(잎이 발광체로 읽힘), 0.42는 163으로 통과하면서 발색은
+//   충분하고(p90 100), 0.30은 약하다(p90 83). 실측은 `post=0` 생 렌더이므로 컴포저 ON에서 bloom이
+//   이 웜 픽셀을 집어 올린다 — 너무 뜨겁게 읽히면 후퇴선은 0.30~0.35다.
+const uLeafTransmit = { value: 0.42 };
 
 export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
   let disposed = false;
@@ -318,7 +324,7 @@ function patchTerrain(mat, uGroundMul, uGroundAmt) {
 // ---------- 낙엽/벚꽃 파티클 ----------
 
 // 잎 실루엣 절차 생성(#116) — "낙엽이 낙엽답게": 원형 점이 아니라 은행잎(부채꼴)·단풍잎(손바닥)
-// 형태를 흰 알파로 그린다(색은 instanceColor 로 곱함). 셀 중심 (32,32), 위=−y.
+// 형태를 흰 알파로 그린다(색은 per-instance `color` 속성으로 곱함). 셀 중심 (32,32), 위=−y.
 //   kind 0=벚꽃 꽃잎(둥근 타원+끝 파임), 1=은행(부채꼴+중앙 결각+잎자루), 2=단풍(5갈래+잎자루).
 function drawLeafShape(g, kind) {
   g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineJoin = 'round';
@@ -412,9 +418,20 @@ function buildLeaves(treeInsts) {
     metalness: 0,
     side: THREE.DoubleSide,
   });
+  // 낙하 낙엽은 적설 대상이 아니다. 두 가지 이유가 있고 **두 번째가 실제 버그였다**.
+  //   ① 공중에 떠 있는 잎에 눈이 쌓이는 것은 물리적으로 틀리고, 눈 프레임에서 `patchSnow`의 up-facing
+  //      커버리지가 저작 팔레트를 흰색으로 덮는다.
+  //   ② `uSnowAmount = 0`(맑음)에서도 이 패치가 **잎을 검게 만들고 있었다** — 실측 A/B: 적설 패치를
+  //      되돌리면 day 순검정 0.46 / 평균 [33,28,16] / 최명 [131,119,75](무채도 탠), 옵트아웃하면
+  //      순검정 **0**  / 평균 [144,83,40] / 최명 [225,188,71](은행 황금). sunset은 0.83 → 0.03.
+  //      diffuse mix·normal fixup은 `uSnowAmount = 0`에서 항등이므로, 적설 패치의 **vertex 노멀 주입이
+  //      이 재질의 `<beginnormal_vertex>` 치환과 충돌**한 것이다(CLAUDE.md "패치 치환 순서 역전" 함정).
+  //   `snowSurface === false`가 `patchSnowMaterial`의 정식 옵트아웃이다. **다시 켜지 말 것.**
+  mat.userData.snowSurface = false;
   const geo = createLeafSaddleGeometry();
   geo.setAttribute('aLeafSpecies', new THREE.InstancedBufferAttribute(new Float32Array(N), 1));
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uLeafTransmit = uLeafTransmit;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         attribute float aLeafSpecies;
@@ -423,11 +440,39 @@ function buildLeaves(treeInsts) {
         vec3 objectNormal = leafSpeciesNormal(aLeafSpecies);`)
       .replace('#include <begin_vertex>', `
         vec3 transformed = leafSpeciesShape(aLeafSpecies);`);
+    // 얇은 잎의 투과(backlight). 2026-07-26 실측이 드러낸 것: 색 사슬은 정상인데 낙하 잎의 약 46%가
+    //   순검정이었다. 원인은 버그가 아니라 **무한히 얇은 단일 판을 물리 BRDF로만 조명한 결과**다 —
+    //   카메라를 향한 면이 태양·하늘을 등진 개체는 직사광을 못 받아 검게 남는다. 실제 낙엽은 얇아서
+    //   역광에서 빛을 투과해 빛나며, 그게 이 앱의 플래그십 룩(골든아워 역광)과 정확히 같은 방향이다.
+    //   전방 산란이라 제곱으로 좁히고, 알베도(`diffuseColor` = 저작 팔레트)를 곱해 **은행 황금·단풍
+    //   주홍이 역광에서 발색**하게 한다. uniform 1개, 새 프로그램·드로우콜 0.
+    shader.fragmentShader = shader.fragmentShader
+      // `shader.uniforms`에 값을 넣는 것은 **선언을 만들지 않는다** — 선언 없이는
+      //   `'uLeafTransmit' : undeclared identifier`로 프래그먼트가 죽고 잎이 아예 안 그려진다.
+      .replace('#include <common>', `#include <common>
+        uniform float uLeafTransmit;`)
+      // `NUM_DIR_LIGHTS`는 three의 `replaceLightNums`가 `onBeforeCompile` **뒤에** 숫자로 치환하므로
+      //   이 `#if`는 최종 소스에서 `#if 1 > 0`이 된다(실측 확인).
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        #if NUM_DIR_LIGHTS > 0
+          float leafBack = max(0.0, dot(-normal, directionalLights[0].direction));
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * directionalLights[0].color
+            * (leafBack * leafBack) * uLeafTransmit;
+        #endif`);
   };
-  mat.customProgramCacheKey = () => 'cheoma-season-leaf-species-v1';
+  // 셰이더 본문이 바뀌었으므로 키를 올린다(상수 키 + 다른 본문은 프로그램 오재사용의 씨앗이다).
+  mat.customProgramCacheKey = () => 'cheoma-season-leaf-species-v2';
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   mesh.name = 'seasonLeaves';
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  // 2026-07-26: 색은 **지오메트리의 per-instance `color` 속성**으로 준다. `instanceColor`가 아니다.
+  //   이 재질은 `vertexColors: true`인데 지오메트리에 `color` 속성이 없었고, three는 플래그만 보고
+  //   `USE_COLOR`를 정의하므로 `color_vertex`의 `vColor.rgb *= color`가 **바인딩되지 않은 attribute**를
+  //   곱했다. 그 결과 `color_fragment`의 `diffuseColor *= vColor`에서 잎이 순검정이 되고(실측 46%),
+  //   `instanceColor`로 넣은 은행 황금·단풍 주홍이 화면에 **한 번도 도달하지 못했다**(밝은 잎 실측
+  //   [131,119,75] 무채도 탠 = 흰 알베도 조명). 반대로 `vertexColors`를 떼면 fragment가 `vColor`를
+  //   선언조차 하지 않아 `instanceColor`가 조용히 버려진다 — 그래서 처방은 "속성을 채우는" 쪽뿐이다.
+  //   `aLeafSpecies`와 같은 어휘(`InstancedBufferAttribute`)이고, 곱은 정확히 한 번만 일어난다.
+  geo.setAttribute('color', new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3));
   mesh.frustumCulled = false;
   mesh.renderOrder = 16;
   mesh.visible = false;
@@ -495,6 +540,7 @@ function buildLeaves(treeInsts) {
     const SP     = [0xf3c4d6, 0xf0b0c8, 0xe79bbf, 0xfad9e6];       // 봄 벚꽃
     const col = new THREE.Color();
     const species = geo.attributes.aLeafSpecies.array;
+    const leafColors = geo.attributes.color.array;
     for (let i = 0; i < N; i++) {
       const sp = st[i].e.sp;
       let pal;
@@ -507,9 +553,10 @@ function buildLeaves(treeInsts) {
       } else { pal = WARM; species[i] = 0; }
       col.copy(linCol(pal[(i * 5) % pal.length]));
       const j = 0.85 + ((i * 2654435761) % 1000) / 1000 * 0.3;  // 개체 밝기 편차
-      mesh.setColorAt(i, col.multiplyScalar(j));
+      col.multiplyScalar(j);
+      leafColors[i * 3] = col.r; leafColors[i * 3 + 1] = col.g; leafColors[i * 3 + 2] = col.b;
     }
-    mesh.instanceColor.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
     geo.attributes.aLeafSpecies.needsUpdate = true;
   }
 
@@ -605,6 +652,10 @@ function buildLitter(treeInsts, layout = {}) {
   if (!N) return null;
 
   const tex = makeLeafAtlas();
+  // 색은 `instanceColor`로 곱한다. 2026-07-26에 이 지점을 낙하 잎과 같은 방식(`vertexColors` + per-instance
+  //   `color` 속성)으로 바꿔 봤지만 **출력이 바이트 동일**했다(실측 A/B: 순검정 0, 황금 0.55·주홍 0.41,
+  //   평균 [200,128,59] 양쪽 일치). 즉 무광 재질의 `instanceColor` 경로는 원래 정상이며, 낙하 잎의 결함은
+  //   **조명 재질(MeshStandard) 쪽 문제**여서 여기까지 번지지 않는다. 되돌렸으니 다시 바꾸지 말 것.
   const mat = new THREE.MeshBasicMaterial({
     map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
     alphaTest: 0.06, fog: true,
