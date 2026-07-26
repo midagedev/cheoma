@@ -172,10 +172,14 @@ const expectedSceneHashes = {
   //   확인됐다: `focus-blockers.js#parcelFocusDetailAnchors` 가 근접 카메라 구도 anchor 를
   //   `yardHardObstacles` 위치에서 직접 파생하므로 장독대가 옮겨지면 anchor 와 카메라 해가 함께 옮겨진다.
   //   재기준 직전 실측: 네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
-  village: '724c6659:3303d885:ebc9791f:495e1595',
-  town: '24ac4e8b:01e90e21:f7e608a5:317516ad',
-  capital: 'c75ab284:c466a368:278a71f5:ae04a4f0',
-  hanyang: '16ffc14b:03ac508b:2e89f20b:241cc869',
+  // 필지·마당 규모(#165): LOT_*_SCALE 과 STRUCTURE_SCALE 을 분리하고 농촌 siteR·필지 깊이를 키워
+  //   앞마당(멍석 2.1m 하한, L/H 대역)을 회복했다. 필지 배치·지붕 fit·마당 소품·식생·소동물 밀도가
+  //   함께 움직이므로 네 규모 씬 바이트와 pick proxy 가 의도적으로 변한다. 재기준 직전 실측:
+  //   네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
+  village: '577003ee:dceb9a5c:3878a997:a41ea53e',
+  town: '616d621c:6fc8fbe4:db670815:bd358640',
+  capital: '63c52173:8e321281:3ecb0083:29d278c9',
+  hanyang: 'a60bdd67:a206bd1f:96a75dca:39660915',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -212,10 +216,12 @@ const expectedProxyHashes = {
   // 계약은 그대로다.
   // 뒷산 완만화(위 씬 재기준과 같은 변경): 필지 지반고와 사면이 바뀌므로 focus 카메라가 푸는
   //   오프셋·거리·near 컷어웨이 바이트가 함께 움직인다. 프록시 개수·ID·피사체 경계·격리 계약은 그대로다.
-  village: '1564ce23',
-  town: 'ed7e597c',
-  capital: '0d2f1725',
-  hanyang: 'a84e13db',
+  // 필지·마당 규모(#165): 필지 위치·크기·yardHardObstacles 가 바뀌고 focus detail anchor 가
+  //   그 위치에서 파생되므로 네 규모 proxy 바이트가 함께 움직인다. 프록시 개수·격리 계약은 유지.
+  village: '62888af7',
+  town: 'd1299d79',
+  capital: '13594453',
+  hanyang: '62089387',
 };
 
 const server = await createServer({
