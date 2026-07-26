@@ -18,15 +18,18 @@
 //   6. 히어로 면제의 근거 — 히어로는 직사각 필지라 담과 직사각형이 정의상 일치.
 //   7. 비주거 지번(궁·절·시전)은 마당 소품 계약을 공유하지 않는다.
 //
-// 지붕·몸채 겹침은 이 계약이 다루지 않는다. 측정으로는 소품 대부분(76~100%)이 실제 지붕
-// 사각형과 겹치지만, 그 겹침을 금지하면 소품이 열린 마당으로 밀려 부속채(광)와 자리를 다투고
-// check-auxiliary-building-plan 의 유효 별채가 146/445 → 91/445(몸채 전면 배제) ·
-// 99/445(고형 소품만 배제) 로 떨어져 100 하한을 깬다. 마당이 포화라는 뜻이며, 필지·마당 확대
-// 라운드에서 함께 풀어야 한다.
+// 물리 규칙: 소품은 처마(지붕) 아래를 허용하되 벽체 몸채를 관통하면 안 된다.
+// 몸채 전면(지붕까지) 배제는 소품을 열린 마당으로 밀어 별채를 굶긴다 — 몸채만 배제한다.
+// 별채 자체는 auxiliary-building-plan 이 전체 지붕 clearance 를 유지한다.
 
 import { planVillage } from '../src/api/village-plan.js';
 import * as G from '../src/core/math/geom2.js';
 import {
+  parcelLocalBodyPolygons,
+  parcelLocalRoofRectangles,
+} from '../src/village/house-footprint.js';
+import {
+  YARD_BODY_GAP,
   yardGwaeseokPosition,
   yardHardObstacles,
   yardHardPlacements,
@@ -71,6 +74,20 @@ const footprintCorners = (obstacle) => (obstacle.shape === 'circle'
       { x: obstacle.x - obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
     ]);
 
+const footprintPolygon = (obstacle) => (obstacle.shape === 'circle'
+  ? [
+      { x: obstacle.x - obstacle.radius, z: obstacle.z - obstacle.radius },
+      { x: obstacle.x + obstacle.radius, z: obstacle.z - obstacle.radius },
+      { x: obstacle.x + obstacle.radius, z: obstacle.z + obstacle.radius },
+      { x: obstacle.x - obstacle.radius, z: obstacle.z + obstacle.radius },
+    ]
+  : [
+      { x: obstacle.x - obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
+      { x: obstacle.x + obstacle.halfWidth, z: obstacle.z - obstacle.halfDepth },
+      { x: obstacle.x + obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
+      { x: obstacle.x - obstacle.halfWidth, z: obstacle.z + obstacle.halfDepth },
+    ]);
+
 // 폴리곤 경계까지의 부호 있는 거리(음수 = 밖).
 function signedClearance(point, polygon) {
   let nearest = Infinity;
@@ -82,6 +99,28 @@ function signedClearance(point, polygon) {
 
 const worstClearance = (obstacle, polygon) =>
   Math.min(...footprintCorners(obstacle).map((corner) => signedClearance(corner, polygon)));
+
+function polygonDistance(left, right) {
+  if (left.some((point) => G.pointInPoly(point, right))
+    || right.some((point) => G.pointInPoly(point, left))) return 0;
+  let distance = Infinity;
+  for (let i = 0; i < left.length; i++) {
+    distance = Math.min(
+      distance,
+      G.segmentPolygonDistance(left[i], left[(i + 1) % left.length], right),
+    );
+  }
+  return distance;
+}
+
+function roofRectPolygon(roof) {
+  return [
+    { x: roof.minX, z: roof.minZ },
+    { x: roof.maxX, z: roof.minZ },
+    { x: roof.maxX, z: roof.maxZ },
+    { x: roof.minX, z: roof.maxZ },
+  ];
+}
 
 // ── 1) 음성 대조: 수정 전 직사각형 공식 ────────────────────────────────────────
 // 이 게이트가 검사하는 결함을 그대로 재현한다. 같은 픽스처에서 이것이 이탈하지 않으면
@@ -127,6 +166,8 @@ let preFixEscapes = 0;
 const preFixTiers = new Set();
 let checkedObjects = 0, checkedParcels = 0, heroParcels = 0;
 let preFixWorstOverhang = 0;
+let bodyChecked = 0;
+let underRoofPlaced = 0;
 const retention = {};
 const bumpRetention = (kind, placed) => {
   const row = (retention[kind] ||= { requested: 0, placed: 0 });
@@ -185,6 +226,8 @@ for (const { scale, seed, plan } of fixtures) {
     }
 
     const clearance = yardLifeWallInwardClearance(parcel.wallType);
+    const bodies = parcel.hero ? [] : parcelLocalBodyPolygons(parcel);
+    const roofs = parcel.hero ? [] : parcelLocalRoofRectangles(parcel);
     const emitted = new Set();
     for (const obstacle of yardHardObstacles(parcel)) {
       // 부속채는 auxiliary-building-plan 이 자기 계약으로 검증한다.
@@ -200,6 +243,23 @@ for (const { scale, seed, plan } of fixtures) {
       if (!parcel.hero) {
         invariant(worst >= clearance - EPS,
           `${label}:${parcel.id} ${obstacle.kind} sits ${worst.toFixed(3)}m from the wall, inside the ${clearance.toFixed(2)}m inward clearance`);
+      }
+
+      // ── 몸채 관통 금지(처마 아래는 허용) ──
+      if (bodies.length) {
+        const propPoly = footprintPolygon(obstacle);
+        bodyChecked++;
+        for (let bi = 0; bi < bodies.length; bi++) {
+          const body = bodies[bi];
+          const dist = polygonDistance(propPoly, body);
+          invariant(dist > YARD_BODY_GAP - EPS,
+            `${label}:${parcel.id} ${obstacle.kind} penetrates house body #${bi}`
+            + ` (gap ${dist.toFixed(3)}m ≤ ${YARD_BODY_GAP}m)`);
+        }
+        // soft evidence that eaves-under-roof remains allowed
+        if (roofs.some((roof) => polygonDistance(propPoly, roofRectPolygon(roof)) <= EPS)) {
+          underRoofPlaced++;
+        }
       }
     }
 
@@ -235,6 +295,12 @@ for (const [kind, floor] of Object.entries(RETENTION_FLOOR)) {
     `${kind} placement retention ${(ratio * 100).toFixed(1)}% (${row.placed}/${row.requested}) fell below the ${(floor * 100).toFixed(0)}% floor — escapes must be fixed by relocating or resizing, not by deleting the yard`);
 }
 
+// Soft: 처마 밑 배치는 여전히 허용돼야 한다(몸채 배제가 지붕 전면 금지가 아님).
+if (bodyChecked > 50) {
+  invariant(underRoofPlaced > 0,
+    `body exclusion appears to ban eaves-under-roof placement entirely (${underRoofPlaced}/${bodyChecked})`);
+}
+
 // ── 4) 결정론: 재생성이 같은 배치를 내야 한다 ──
 {
   const repeat = planVillage({ scale: 'town', seed: 7 });
@@ -259,6 +325,7 @@ const retentionReport = Object.entries(retention).sort()
 console.log(
   `YARD POLYGON CONTRACT: PASS (${fixtures.length} plans, ${checkedParcels} parcels`
   + ` incl. ${heroParcels} hero, ${checkedObjects} objects, 0 outside the polygon;`
+  + ` body-clear ${bodyChecked}, under-roof ${underRoofPlaced};`
   + ` pre-fix control still escapes ${preFixEscapes}× across ${preFixTiers.size} tiers`
   + ` by up to ${preFixWorstOverhang.toFixed(2)}m;`
   + ` retention ${retentionReport})`,
