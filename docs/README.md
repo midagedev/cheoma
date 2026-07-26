@@ -49,7 +49,7 @@
 | [`joseon-city.md`](joseon-city.md) | 리서치 | 도성·읍성·촌락·사찰 입지와 가람 원리. 사찰 작업은 특히 §5·§7G 참조. |
 | [`palace-layout.md`](palace-layout.md) | 리서치 | 궁궐 다일곽·축선·행각 공유 규칙과 구현 파라미터. |
 | [`village-walls-parcels.md`](village-walls-parcels.md) | 리서치 | 담장·필지·정원·보호수의 실증 근거와 알고리즘 번역. |
-| [`look-restoration-plan.md`](look-restoration-plan.md) | 활성 작업 | 2026-07-20~24 구간의 룩 회귀 복원 단계 계획과 운영 원칙. Phase별 착수·완료 상태를 여기서 갱신한다. |
+| [`look-restoration-plan.md`](look-restoration-plan.md) | 활성 작업(부분 진행, 상태 미대조) | 2026-07-20~24 구간의 룩 회귀 복원 단계 계획과 운영 원칙. **2026-07-26 확인: 여러 단계가 이미 머지됐으나 체크리스트 개별 상태가 코드와 대조되지 않았다** — 항목을 근거로 삼기 전에 Git 이력을 확인한다. |
 | [`look-audit-2026-07.md`](look-audit-2026-07.md) | 스냅샷 | 2026-07-25 A/B 전수 감사. 회귀 확정·개선 유지·상향 과제 목록과 원인 커밋·대상 파일. |
 | [`look-grammar.md`](look-grammar.md) | 리서치 | 목표 룩의 시각 문법(빛·구도·공기감) 정리. 복원 판정의 절대 축 근거. |
 | [`dof-cinematic-research.md`](dof-cinematic-research.md) | 리서치 | 시네마틱 DoF 선례(three.js dof/dof2, pmndrs) 비교와 층 분리 복원 스펙. 현행 표면 반경 상한이 무엇을 누르는지, 권고 CoC 공식·초기 파라미터·검증 컷. 계획 1-3의 입력이며 아직 계약이 아니다. |
