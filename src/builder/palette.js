@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { KOREA_COLORS } from './material-colors.js';
+import { KOREA_COLORS, TILE_LOOK } from './material-colors.js';
 import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
   CLOUD_SHADOW_VERT_DECL, CLOUD_SHADOW_VERT_BODY,
@@ -66,23 +66,26 @@ function _createCanvas() {
 // 하위호환 공개 export. 실제 토큰은 THREE 비의존 모듈에 두어 원경 프록시와 공유한다.
 export { KOREA_COLORS };
 
-// 기와 지붕 텍스처: 기왓등·기왓골 세로 줄 + 가로 겹침 라인 (온기 있는 진회색)
+// 기와 지붕 텍스처: 기왓등·기왓골 세로 줄 + 가로 겹침 라인 (온기 있는 회흑).
+// #150 item I: 홈 seam 대비를 낮춰 망원에서 서브픽셀 검은 선으로 뭉치지 않게 한다.
+// 근경 기왓골 가독은 bump + 기하 수키와가 담당 — 텍스처 순흑 홈에 의존하지 않는다.
 function makeTileTexture() {
   const c = _createCanvas();
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 256, 0);
-  grad.addColorStop(0.0, '#41434a');
-  grad.addColorStop(0.18, '#585a61');
-  grad.addColorStop(0.5, '#6b6d74');   // 기왓등 하이라이트
-  grad.addColorStop(0.82, '#585a61');
-  grad.addColorStop(1.0, '#41434a');
+  grad.addColorStop(0.0, '#4a4d54');
+  grad.addColorStop(0.18, '#5a5d64');
+  grad.addColorStop(0.5, '#666970');   // 기왓등 하이라이트 (과대비 억제)
+  grad.addColorStop(0.82, '#5a5d64');
+  grad.addColorStop(1.0, '#4a4d54');
   g.fillStyle = grad;
   g.fillRect(0, 0, 256, 256);
-  g.fillStyle = 'rgba(30,31,36,0.5)';
-  for (let y = 0; y < 256; y += 64) g.fillRect(0, y, 256, 6);
-  g.fillStyle = 'rgba(255,255,255,0.07)';
-  for (let y = 9; y < 256; y += 64) g.fillRect(0, y, 256, 3);
+  // 겹침 홈: 낮은 alpha·높은 floor — 과거 순흑 50% 홈은 망원에서 검은 줄 뭉침.
+  g.fillStyle = 'rgba(48,50,56,0.32)';
+  for (let y = 0; y < 256; y += 64) g.fillRect(0, y, 256, 5);
+  g.fillStyle = 'rgba(255,255,255,0.05)';
+  for (let y = 8; y < 256; y += 64) g.fillRect(0, y, 256, 3);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -747,10 +750,11 @@ function buildMaterials(style, options) {
     rafterEnd: dancheong?.rafterEnd || std(choga ? 0x70543a : 0x9a8a6f, 0.8),
     accentBlue: dancheong?.accentBlue || std(giwa ? 0x8c7c64 : 0x5a4932, 0.85),
     tileTex: makeTileTexture(),
-    tileFlat: std(C.tile, 0.9),
-    tileRidge: std(C.tileDark, 0.85),            // 마루: 기와 적층 톤
+    // TILE_LOOK roughness band — matte 점토 기와. 낮은 roughness 는 망원 sparkle/alias 원인이 된다.
+    tileFlat: std(C.tile, TILE_LOOK.tileFlatRoughness),
+    tileRidge: std(C.tileDark, TILE_LOOK.tileRidgeRoughness), // 마루: tileDark 분리 톤
     ridgePlaster: std(0xe0d9c6, 0.94),           // 양성바름: 궁 마루(용마루·내림·추녀) 백색 회 도장
-    tileConvex: std(0x6a6d73, 0.9),              // 수키와 볼록 열 (밝은 기와 마루톤)
+    tileConvex: std(0x6a6d73, TILE_LOOK.tileConvexRoughness), // 수키와 볼록 열 (밝은 기와 마루톤)
     wadang: std(0xffffff, 0.85, { map: makeWadangTexture() }),  // 수막새 와당(처마 끝)
     waguto: std(0xffffff, 0.92, { map: makeWagutoTexture() }),  // 와구토(반가 처마 끝 흰 회물림 반달)
     jeoksae: std(0xffffff, 0.9, { map: makeJeoksaeTexture() }), // 적새(마루 옆면 켜)
@@ -898,7 +902,7 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
   tex.anisotropy = 8;
   tex.repeat.set(Math.max(4, Math.round(widthMeters / 0.34)), Math.max(2, Math.round(slopeMeters / 0.9)));
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, map: tex, roughness: 0.92, metalness: 0.0,
+    color: 0xffffff, map: tex, roughness: TILE_LOOK.tileSurfaceRoughness, metalness: 0.0,
     bumpMap: tex, bumpScale,
   });
   mat.userData.role = 'roof';   // 지붕면 신규 재질도 부위 태그(마을 기와 톤 변주, 태스크 #55)
@@ -920,7 +924,7 @@ export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
   // U(길이): 물매 켜 반복, V(둘레): 한 바퀴 1회
   tex.repeat.set(Math.max(1, Math.round(lengthMeters / alongPitch)), 1);
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x6a6d73, map: tex, roughness: 0.9, metalness: 0.0,
+    color: 0x6a6d73, map: tex, roughness: TILE_LOOK.sugiwaRoughness, metalness: 0.0,
     bumpMap: tex, bumpScale,
   });
   mat.userData.role = 'roof';
