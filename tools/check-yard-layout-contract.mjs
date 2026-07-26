@@ -7,7 +7,19 @@ import { fileURLToPath } from 'node:url';
 import { planVillage } from '../src/api/village-plan.js';
 import { parcelLocalPoint } from '../src/village/parcel-contract.js';
 import {
+  JANGDOK_JAR_GAP,
+  JANGDOK_JAR_INSET,
+  JANGDOK_JAR_JS_MAX,
+  JANGDOK_JAR_JS_MIN,
+  JANGDOK_JAR_JS_SPAN,
+  JANGDOK_JAR_MAX_R,
+  JANGDOK_JAR_PITCH,
+  JANGDOK_JAR_R,
+  jangdokJarCentres,
+  jangdokPlatformDepth,
+  jangdokPlatformWidth,
   yardHardObstacles,
+  yardJangdokLayout,
   yardTreeIntersectsHardObstacle,
 } from '../src/village/yard-layout.js';
 import { auxiliaryLocalFootprint } from '../src/village/auxiliary-building-plan.js';
@@ -36,6 +48,60 @@ const MIN_CASE_TREE_RETENTION = 0.80;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+// ── 장독 항아리 군집: 최대 스케일에서도 침투·단 밖 돌출 0 ─────────────────────
+// 수정 전: 행 피치 0.52 < 평균 지름 ~0.58, 가장자리 인셋 0.3 < maxR 0.396.
+const JAR_PACK_EPS = 1e-9;
+invariant(Math.abs(JANGDOK_JAR_JS_MAX - (JANGDOK_JAR_JS_MIN + JANGDOK_JAR_JS_SPAN)) < JAR_PACK_EPS,
+  'JANGDOK_JAR_JS_MAX drifted from MIN+SPAN');
+invariant(Math.abs(JANGDOK_JAR_MAX_R - JANGDOK_JAR_R * JANGDOK_JAR_JS_MAX) < JAR_PACK_EPS,
+  'JANGDOK_JAR_MAX_R drifted from R·JS_MAX');
+invariant(Math.abs(JANGDOK_JAR_PITCH - (2 * JANGDOK_JAR_MAX_R + JANGDOK_JAR_GAP)) < JAR_PACK_EPS,
+  'JANGDOK_JAR_PITCH drifted from 2·maxR+gap');
+invariant(Math.abs(JANGDOK_JAR_INSET - JANGDOK_JAR_MAX_R) < JAR_PACK_EPS,
+  'JANGDOK_JAR_INSET must equal max jar radius so full footprint stays on the platform');
+invariant(JANGDOK_JAR_PITCH + JAR_PACK_EPS >= 2 * JANGDOK_JAR_MAX_R,
+  `row/column pitch ${JANGDOK_JAR_PITCH} < max jar diameter ${2 * JANGDOK_JAR_MAX_R}`);
+// Pre-fix measurements (must stay worse than the fixed contract so the gate is not vacuous).
+invariant(0.52 < 2 * JANGDOK_JAR_MAX_R, 'pre-fix row pitch was already ≥ max diameter');
+invariant(0.3 < JANGDOK_JAR_MAX_R, 'pre-fix edge inset already covered max jar radius');
+
+for (let level = 1; level <= 3; level++) {
+  const layout = yardJangdokLayout(40, 40, level);
+  const { rows, perRow, width, depth } = layout;
+  invariant(rows === level, `level ${level} rows=${rows}`);
+  invariant(perRow === 2 + level, `level ${level} perRow=${perRow}`);
+  invariant(Math.abs(width - jangdokPlatformWidth(perRow)) < JAR_PACK_EPS,
+    `level ${level} width ${width} ≠ platform formula`);
+  invariant(Math.abs(depth - jangdokPlatformDepth(rows)) < JAR_PACK_EPS,
+    `level ${level} depth ${depth} ≠ platform formula`);
+  // Envelope grows with packing; must not shrink back to the old undersized formulas.
+  invariant(width + JAR_PACK_EPS >= 2 * JANGDOK_JAR_INSET + Math.max(0, perRow - 1) * JANGDOK_JAR_PITCH,
+    `level ${level} width too small for ${perRow} max-radius jars`);
+  invariant(depth + JAR_PACK_EPS >= 2 * JANGDOK_JAR_INSET + Math.max(0, rows - 1) * JANGDOK_JAR_PITCH,
+    `level ${level} depth too small for ${rows} max-radius rows`);
+
+  const jars = jangdokJarCentres(rows, perRow, width, depth);
+  invariant(jars.length > 0, `level ${level} produced no jar centres`);
+  for (const jar of jars) {
+    invariant(jar.x - jar.radius >= -width / 2 - JAR_PACK_EPS,
+      `level ${level} jar overhangs -x (x=${jar.x}, r=${jar.radius}, halfW=${width / 2})`);
+    invariant(jar.x + jar.radius <= width / 2 + JAR_PACK_EPS,
+      `level ${level} jar overhangs +x (x=${jar.x}, r=${jar.radius}, halfW=${width / 2})`);
+    invariant(jar.z - jar.radius >= -depth / 2 - JAR_PACK_EPS,
+      `level ${level} jar overhangs -z (z=${jar.z}, r=${jar.radius}, halfD=${depth / 2})`);
+    invariant(jar.z + jar.radius <= depth / 2 + JAR_PACK_EPS,
+      `level ${level} jar overhangs +z (z=${jar.z}, r=${jar.radius}, halfD=${depth / 2})`);
+  }
+  for (let i = 0; i < jars.length; i++) {
+    for (let k = i + 1; k < jars.length; k++) {
+      const dist = Math.hypot(jars[i].x - jars[k].x, jars[i].z - jars[k].z);
+      const minDist = jars[i].radius + jars[k].radius;
+      invariant(dist + JAR_PACK_EPS >= minDist,
+        `level ${level} jars ${i}/${k} interpenetrate (dist=${dist.toFixed(4)} < ${minDist.toFixed(4)})`);
+    }
+  }
 }
 
 const built = await esbuild.build({
