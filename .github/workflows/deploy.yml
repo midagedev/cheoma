@@ -2,6 +2,12 @@ name: deploy
 
 # main 에 머지되면 순수 계약 게이트를 돌리고, 통과할 때만 Cloudflare Pages 로 배포한다.
 #
+# 왜 macOS·고정 Node 인가: `check` 안의 plan/scene 골든은 **바이트 계약**이고, 그 바이트에는 플랫폼
+# 부동소수점 거동이 들어간다. ubuntu-x64 에서 돌리면 town/capital/hanyang/temple 계획이 1~38바이트
+# 차이로 어긋난다(코드 차이가 아니다 — 2026-07-26 실측). 같은 이유로 `check:worker` 는 이미 Playwright
+# 고정 Chromium 에 묶여 있다(CLAUDE.md). 그래서 러너는 개발 플랫폼(macOS arm64)에 맞추고 Node 는
+# 정확히 고정한다. 골든을 CI 플랫폼에 맞춰 재기준하면 로컬이 깨지므로 그 방향은 택하지 않는다.
+#
 # 왜 `npm run check` 만인가: 이 저장소의 게이트는 두 층으로 갈린다 — 순수 node 계약(`check:X`)과
 # 브라우저 게이트(`check:X:browser` / `:app`). 순수 층은 브라우저·GPU 없이 돌고 60여 초면 끝나므로
 # CI 관문으로 적합하다. 브라우저 게이트는 저장소 전역 락과 실제 GPU 백엔드를 전제로 하고 헤드리스
@@ -27,12 +33,12 @@ concurrency:
 jobs:
   contracts:
     name: pure contracts
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.18.0'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -48,12 +54,12 @@ jobs:
   deploy:
     name: cloudflare pages
     needs: contracts
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.18.0'
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
