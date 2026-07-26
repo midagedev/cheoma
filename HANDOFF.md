@@ -1,401 +1,253 @@
 # HANDOFF — 2026-07-26
 
-Written at the end of a long autonomous session so a fresh session can pick up cold.
-Read `CLAUDE.md` first (project contract), then this file, then `docs/project-status.md`.
+세션 인계 기록. 한 세션이 끝나는 시점의 상태이며 **계약 문서가 아니다** — 계약과 충돌하면 계약이 우선한다.
+읽는 순서: `CLAUDE.md`(프로젝트 계약) → 이 문서 → `docs/README.md`(문서 지도) → `docs/project-status.md`.
 
-`main` is at **`8a0e60a`**, pushed, and **deployed** — `cheoma.midagedev.com` serves
-`index-DRRImtEb.js`, verified against the local build.
-
----
-
-## 1. What landed this session
-
-| commit | what |
-|---|---|
-| `8a0e60a` | ground stones and podium caps stop sharing a plane |
-| `59304f7` | first-entry landing starts audio in the entry gesture and plays the entry track |
-| `24001ef` | giwa roof courses keep a constant world pitch instead of fanning |
-| `1f649de` | three authenticity defects — eave band, crossing stones, brush fence |
-| `9254483` | falling leaves keep their colour — snow patch was blacking them out |
-
-Three new **pure-node** gates were added and are registered inside `npm run check`
-(now 62 fast contracts): `check-giwa-tile-course.mjs`, `check-ground-stone-bedding.mjs`,
-`check-audio-policy.mjs`. Each was verified to **fail on the pre-fix source** before being
-accepted — that check is the point, not a formality.
-
-### 1.1 Roof tile courses (`24001ef`)
-
-`src/layout/roof-skeleton.js` assigned the cross-slope tile coordinate as a *normalized*
-parameter held constant along the slope (surface UV `u = iu/NU`, 수키와 rolls
-`s = (j+0.5)/nRolls`). Iso-parameter lines are **not** parallel on a straight-skeleton face:
-a face ending at reflex (회첨) vertices fans wider toward the ridge, one ending at convex
-(추녀) vertices narrows. Measured: the ㄷ자 middle range's courtyard face ran 0.34 m per tile
-at the eave against **1.12 m** at the ridge (3.3× — tiles narrowing as they flow down, the
-user's report), and the 우진각 rect front face ran 0.34 m against **0.10 m** (3.3× bunching).
-Rolls inherited the fan — worst was **45.0° off perpendicular** to its own eave, and no roll
-was ever cut at a hip (top-Y spread 0.031 m).
-
-Fixed by taking the cross-slope coordinate as **world projection onto the eave direction**
-(`acrossOf`): UV `u = across / 0.34`, rolls on a constant 0.30 m world grid, terminating
-before the ridge at a convex end and starting mid-slope in the 회첨골 at a reflex end.
-Draw calls, programs, materials, textures all unchanged; triangles +1.7% worst case at village
-scale. Worker goldens re-baselined (reason recorded in `tools/check-worker-contract.mjs`).
-
-**Known follow-ups deliberately not fixed** — see task list §3.
-
-### 1.2 Ground stones (`8a0e60a`)
-
-The reported "디딤돌 z-fighting" was **five** exactly-coplanar up-facing surface pairs, and the
-worst was not a stepping stone but the **기단 top itself** (`podium-upper` top ⟷ `podium-cap`
-top, dy = 0, whole platform). The 초가 front 디딤돌 was worse than z-fighting: its top face
-*was* the courtyard plane, so it rendered only as stripes in the ground and did not read as a
-stone at all. Confirmed as colour-pass depth conflict, not shadow acne (persisted with
-`shadow=0`). Multi-frame ROI flicker went from erratic 0.035–0.074 to flat 0.006 on the 기단.
-
-New shared vocabulary `beddedStone(surfaceY, standAbove)` in `src/core/surface-clearance.js`:
-authored height is measured from the **drawn surface** and the base sinks below grade — which is
-also the authentic form (a trodden 디딤돌 is set into the ground). The new gate carries **six
-regression fixtures** that re-inject the pre-fix coordinates, so the file guarantees "catches
-that defect" rather than "is green today".
-
-### 1.3 First-entry audio (`59304f7`)
-
-The first-entry landing was **completely silent**, not playing the wrong track.
-`enterVillageHero` called `ensureAudio()` but never `audio.start()` — and `start()` is the only
-thing that calls `ctx.resume()` *and* starts the ambience/chime/stream/dog/BGM sources. The
-title click was the one real user gesture in the flow and it was not used, so `ctx.state` stayed
-`suspended` with **zero voices** until the user later tapped the canvas.
-
-The mute/restore invariant was **not** the cause: every landing path did end at volume 1. The
-volume was being restored onto an empty graph, which is why it looked like the mute bug. A UI
-desync compounded it: `App.svelte` set `audioOn = true` without calling `engine.toggleAudio`, so
-the ♪ icon read ON while the engine had `started === false` — the user's first ♪ press actually
-*muted*.
-
-`assets/audio/genesis.mp3` had **no automatic selection path** at all (it sat in `OPTION_TRACKS`,
-which only feeds `getTracks()`). It is now the first-entry track and hands over to the
-time-mapped track at landing settle through the existing 4 s equal-power crossfade.
-
-Two new pure modules own what was implicit: `src/audio/track-policy.js` (state → track name,
-plus `MANUAL_TRACKS` where an orphan mp3 must declare a reason) and `src/audio/intro-policy.js`
-(the `arm/enter/settle/skip` state machine). The engine's **only** BGM channel is now
-`audio.introEvent(...)`; it must never set BGM volume directly.
-
-Mobile hardening: a self-removing resume net (`pointerdown`/`touchend`/`keydown` capture +
-`visibilitychange`) because iOS suspends the context on backgrounding and never returns on its
-own; prefetch reordered so the handover target is fetched first and reduced to one track on
-`saveData`/2g/3g; `bgm.load()` failures recorded in `failures` instead of only `console.warn`.
-Diagnostics: `window.__engine.audioDiag()`.
-
-**Why the existing `check:audio` gate did not catch any of this** (named because it matters more
-than the fix): it only drove `audio.html`, which has no title/landing path, so no engine wiring
-was under test; its BGM assertion was literally "bgm track buttons present (count>0)" — it clicked
-the genesis button and asserted nothing about the result; and it asserted teardown identity but
-never a single **gain value, voice count, or track name**, so a correctly-built and completely
-inaudible graph passed.
-
-**Ask the user to check on their phone:** (1) silent switch OFF, tap the title once — music should
-swell over ~2.5 s and change piece when the house finishes assembling; (2) if silent, read
-`window.__engine.audioDiag()` — `ctxState: suspended` = autoplay/interruption path, `master: 0` =
-toggled off in UI, non-empty `bgm.failures` = the mp3 did not load; (3) silent from the first tap,
-or silent only *after* switching apps / taking a call — the second is the interruption path the
-resume net handles.
-
-**iOS hardware silent switch mutes WebAudio and no code change fixes it.** Mitigations
-(a dismissible hint when `ctxState` is not `running`, or routing BGM through an
-`HTMLAudioElement` and losing the crossfade graph) were deliberately **not** implemented — open
-decision.
+`main` = **`ffc2013`**, 푸시 완료. `check` 64/64 · `check:cinematic:app` PASS — **이 세션에서 알고 있던
+빨간불은 모두 없다.** 배포됨(`cheoma.midagedev.com`).
 
 ---
 
-## 2. In-flight tracks (worktrees preserved, WIP-committed)
+## 1. 이 세션에 무엇이 들어갔나
 
-All four were killed by the session limit mid-round, then resumed and asked to converge without
-new scope. Each worktree has a WIP checkpoint commit so nothing is uncommitted.
+| 커밋 | 내용 |
+| --- | --- |
+| `ffc2013` | 3축 크롬 + focus 프레임이 출하하는 것에 정직해짐 |
+| `28dc591` | 필지·마당 비례 고증 조사(§9) |
+| `d75f081` | main 푸시가 순수 계약을 돌리고 배포 |
+| `a8756cd` | 기러기 V 편대, 개·고양이 판독 |
+| `4e2416a` | 히어로가 부재 순서로 지어지고 부재마다 푸딩처럼 안착 |
+| `8a0e60a` | 접지 석재와 기단 갑석이 같은 평면을 공유하지 않음 |
+| `59304f7` | 첫 진입 랜딩이 제스처 안에서 오디오를 켜고 진입 곡을 재생 |
+| `24001ef` | 기와 기왓골이 부채꼴이 아니라 세계좌표 등간격 |
 
-| track | worktree | WIP | base | state |
-|---|---|---|---|---|
-| Assembly part-order + pudding settle | `.claude/worktrees/agent-addfb80313bf43ede` | `63c9f03` | `1f649de` (stale) | 18 files. Needs rebase — `engine.js` and `hanok.js` both moved under it. |
-| Critters (기러기 V / dog / cat) | `.claude/worktrees/agent-a436fb9fdab37be3e` | `e463e0b` | `1f649de` (stale) | 17 files, reaches into `rim.js` and `material-program-key.js` — justify or drop. |
-| UI 3-axis + framing (i)/(ii) | `.claude/worktrees/agent-a67784a25ff426843` | `34fe7a5` | contains older main | **Most merge-ready.** One blocker: veil regression. |
-| Village yard polygon | `.claude/worktrees/agent-ab06f53fc2fcc87b0` | `ad0d9d4` | `8a0e60a` (current) | Narrowed to the polygon fix only. |
-| DoF tilt-shift + AA/high-DPI | `.claude/worktrees/dof-layers` | `c67aa52` | rebased onto main | 35 files. Tilt is structurally complete and compiles but is **behaviourally unverified**. |
+새 **순수 노드** 게이트 6개가 `npm run check`(64 계약) 안에 들어갔다: `check:giwa-tile-course`,
+`check:ground-stone`, `check:audio-policy`, `check:assembly`, `check:critters`, `check:ui-shell`.
+전부 **수정 전 소스에서 실패하는지 확인한 뒤** 채택했다.
 
-### 2.1 Assembly (user-driven, three revisions)
+### 왜 이런 구조가 되었나 — 결함 대부분이 "규칙 자체가 틀린" 것이었다
 
-The hero 종가 rose as one lump because `src/anim/assembly.js#playAssembly` finds parts by
-**name** (`podium`/`columns`/`walls`/`brackets`/`roof`) and `src/layout/hanok.js` creates none of
-them — the engine therefore falls back to `playCompoundAssembly` (`app/src/engine/engine.js`
-~2048), whose own comment admits it lifts the 몸채 whole.
+이 세션에서 고친 것들은 우연한 버그가 아니라 **한 층에서 정한 규칙을 다른 층이 지키지 않는** 형태였고,
+그래서 수정도 상수 조정이 아니라 규칙의 소유자를 옮기는 쪽이었다. 다음 라운드가 같은 실수를
+반복하지 않도록 기전을 남긴다.
 
-The user then revised a standing decision. **#126's "no rebound" is withdrawn.** What was
-rejected back then was a *decoupled* post-landing wobble ("일단 다 지어진 다음에 그 이후 영역만
-한번 덜렁거리고 말더라"); what is wanted is **the acceleration of rising off the ground carried
-straight through into a pudding-like settle**, everywhere, not just the hero. The mechanism note
-that matters: the rise uses `easeOutCubic`, so it arrives at `IMPACT` with velocity **exactly
-zero** — any elastic response added after a zero-velocity arrival *must* be an arbitrary
-independent wobble. The fix is to arrive with nonzero velocity and make the settle a damped
-spring whose **initial condition is that velocity**, with volume-preserving squash. Then a heavy
-roof reads heavy because of its approach velocity, not because someone typed a bigger amplitude.
+- **기와 기왓골**(`24001ef`): 지붕면은 처마선→상단 체인 **로프트**인데 기와 좌표를 그 로프트의
+  정규화 파라미터에 얹었다. 등파라미터 선은 물리적으로 평행하지 않다 — 회첨(오목) 끝을 가진 면은
+  마루로 갈수록 넓어지고 추녀(볼록) 끝을 가진 면은 좁아진다. 그래서 ㄷ자 가운데 채는 처마 0.34m 대
+  마루 1.12m(3.3배 확대), 우진각 앞면은 0.34m 대 0.10m(3.3배 뭉침)이었다. **좌표를 파라미터에서
+  떼어내 처마 방향 세계좌표 투영으로** 바꿨다. 예산은 삼각형만 +1.7%, 드로우콜·프로그램·재질 불변.
+- **접지 석재**(`8a0e60a`): 신고는 "디딤돌 z-fighting"이었지만 실제로는 **정확히 동일평면인 위를 향한
+  면이 다섯 쌍**이었고 최악은 디딤돌이 아니라 **기단 상면 자체**(`podium-upper` ⟷ `podium-cap`,
+  dy=0, 기단 전체)였다. 초가 앞 디딤돌은 상면이 마당 평면과 같은 평면이어서 돌이 아니라 땅의 줄무늬로만
+  존재했다. 규칙을 "상면의 depth owner 는 갑석 하나"로 세우고 돌은 `beddedStone` 으로 땅에 묻었다 —
+  고증(밟아 다져 박힌 돌)과 렌더링 정합이 같은 답을 준 드문 경우다.
+- **오디오**(`59304f7`): 뮤트/복원 불변식 위반이 아니었다. 모든 경로가 볼륨 1로 끝나고 있었고,
+  `enterVillageHero` 가 `ensureAudio()` 만 부르고 **`audio.start()` 를 부르지 않아** 타이틀 클릭이라는
+  유일한 제스처를 낭비해 컨텍스트가 `suspended` · 보이스 0 으로 남았다. 즉 **빈 그래프 위에 볼륨을
+  복원**하고 있었다. 규칙 소유권을 `src/audio/intro-policy.js` 로 옮기고 엔진의 유일한 채널을
+  `introEvent()` 로 좁혔다.
+- **조립**(`4e2416a`): `playAssembly` 는 파트를 **이름으로** 찾는데 `buildHanok` 이 그 이름 그룹을
+  하나도 만들지 않아 엔진이 몸채를 통덩어리로 들어올렸다. 그리고 탄성이 겉돈 이유도 구조였다 —
+  상승이 `easeOutCubic` 이라 접촉 속도가 정확히 0 이라 뒤에 붙는 반동은 물려받을 운동량이 없다.
+  접촉 속도를 초기조건으로 받는 스프링으로 바꿨다.
+- **focus 프레임**(`ffc2013`): 솔버가 **판정과 적용을 다른 좌표계에서** 했다. 판정은 카메라 축이
+  safe rect 중심에 있다고 가정하는데 적용은 하늘 컴포지션을 더한다 — 그래서 주거 근접이
+  `fitted: true` 를 보고하면서 집 하단 56.5px 가 시트 아래 있었다. 탐색과 판정을 같은 공간으로
+  합치고, 하늘 컴포지션을 **뷰포트 높이가 아니라 가용 밴드의 분수**로 재해석했다(데스크톱 0.2px 이동,
+  크롬 없는 프레임에서 커지지 않게 상한). 첫 solve 가 모프 전 DOM 을 보는 문제는 **트윈 종점 재타깃**
+  으로 풀었다(`p0' = (cur − k·p1')/(1 − k)` 로 위치를 정확히 보존, 불연속은 속도에만).
+- **소동물**(`a8756cd`): 없는 게 아니라 **마을 전체에 2마리씩**이었고(닭은 필지마다 배치되는 별개
+  레이어), 개는 마당 가장자리 경로가 **담 안쪽까지 걸쳐 자기 담을 통과해 걸어다녔다**(마을 필지 90%
+  이상에서 불법 지점). 배치를 실제 필지 폴리곤·담 두께·지붕 footprint 에 대해 검증하도록 바꿨다.
 
-Also requested: **slight** per-member offsets so multiple columns ripple ("다라라락"). The
-existing stagger is real but invisible — `columns` window `[0.18, 0.48]` gives `spread = 0.12` of
-total, so at ~2.6 s with ~12 columns the neighbour offset is **~26 ms, under two frames at
-60 fps**. Two things must change together and the second matters more: magnitude above the
-perceptual floor, and an **ordering that is spatially meaningful** (today it is `grp.children`
-array order, which reads as random popping no matter the magnitude).
+**공통 교훈 두 개.** ① 규칙을 정하는 층과 그 규칙을 소비하는 층이 다르면 반드시 어긋난다 — 담은
+부정형 폴리곤을 따르는데 마당 오브젝트는 직사각형 기준으로 놓이는 §4.1 이 아직 남은 같은 사례다.
+② **게이트가 있는데도 결함이 나갔다면 게이트를 의심해야 한다** — `check:audio` 는 존재하고 오디오
+변경마다 돌았지만 BGM 단정이 "트랙 버튼이 있다(count>0)"라서 **올바르게 조립됐지만 완전히 안 들리는
+그래프를 통과**시켰다.
 
-**Total duration may grow** — the user approved it ("이런게 나름 인상적인 클립이니까"). Guardrails:
-the empty-site dead time must **not** grow; the coupled hero choreography (polar arc camera,
-reveal hold, DoF `lockFocus` ramp, `heroAssembleTiming*`) must be re-timed as one unit; `skip()`
-must still land on exact restored state; and any gate encoding the **old** no-overshoot decision
-is stale and must be **re-authored**, not relaxed.
+---
 
-Invariants that still hold: only `position.y`/`scale`/`visible` may move and must restore exactly
-at completion / `skip()` / `seek()`; no finished-building flash (`applyAt(0)` immediately);
-`village.asmStarts === 1` for a hero landing; one shared easing language (`tofuScale`/`tofuBob`
-are reused by assembly, 칸 expansion, merge and the engine compound path — do not fork).
+## 2. 지금 진행 중인 것 — 하나뿐
 
-### 2.2 UI 3-axis + focus framing
+**마당 오브젝트 폴리곤 정합** — 워크트리 `.claude/worktrees/agent-ab06f53fc2fcc87b0`,
+WIP `ad0d9d4`(base `8a0e60a`, 리베이스 필요), `src/village/walls.js`·`yard-layout.js` 수정 중.
+이 세션에서 범위를 **폴리곤 수정만으로 좁혔다**(땅 확대는 §3.1 로 이월).
 
-Two items finished: the editing-mode view chip (`data-view-chip`, in `EnvironmentDial.svelte`,
-band 172×257 → **358×257 usable** on 390×844) and the ink-stroke progress animation moved to a
-compositor `transform` (main-thread paints 178/178 frames → **0/181**; Blink was refusing to
-composite `background-position-x`).
+기전과 실측은 §4.1 에 있다. 남은 일: 배치를 `parcel.shape` 에 대해 검증, 안 맞는 슬롯은 자르지 말고
+**결정론적으로 재배치 또는 제거**, 그리고 **여러 시드**로 "마당 오브젝트가 폴리곤 밖 0건"을 단정하는
+순수 게이트(시드 하나로는 lean 이 숨는다). 히어로·궁·절·시전 마당도 같은 직사각형 배치를 쓰는지 확인.
 
-Then a real defect chain in how the focus band is derived. Three faces, two fixed:
+---
 
-- **(ii) verdict/applied-shift coordinate mismatch — implemented.** `projectPoint` assumed the
-  camera axis sits at the safe-rect centre while the applied shift adds `compositionYFrac·h`
-  (`focusCompositionFor` is 0 only for palace/temple, **1 for every residential parcel**), so a
-  residential focus reported `fitted: true` while **56.5 px** of the house sat below the usable
-  band on a phone. Fixed by threading an optional `appliedShift` through
-  `src/camera/focus-framing.js#fitFocusFraming` so search **and** verdict happen in the shipped
-  space; default path is arithmetically identical and two assertions pin that. Zero fixtures moved.
-  Note `src/api/cinematic.js` is only a re-export façade — the implementation is
-  `src/camera/focus-framing.js`.
-- **(i) pre-morph first solve — designed, NOT applied.** On a phone the first solve runs while
-  the chrome is still pre-morph (at synchronous `focus()` return the card is resident and the
-  sheet is at `peek`; chip and `half` arrive ~60 ms later; the sheet box has a **420 ms** CSS
-  transition), and it never re-solves, clamping to `scale 4` instead of the correct `2.94`. A
-  plain wait-for-settle costs up to ~450 ms of dolly delay, so the mechanism is: start the tween
-  immediately, then re-solve once on the inset-settled frame and **retarget the endpoint**,
-  rebasing `p0` so position is exactly continuous — `p0' = (cur − k·p1')/(1 − k)` — letting only
-  velocity redistribute. The complete applyable diff is in the UI track's report; `layoutSignature()`
-  already exists in `app/src/engine/view-shift.js`. **Anchor E gets `compositionY` only** (that
-  path drives `revealCamera`, not `tween`), and the retarget must **exclude the 종가 `arc` spiral**
-  (different parameterisation). Do not retarget the lens — the authored 16°/7° frame is a look
-  contract. This is the last blocker on the mobile palace `check:cinematic:app` timeout.
-- **main's standing red assertion is the third face, and this branch fixes it.**
-  `ordinary house focus frames sky above the eave and yard below it (top -0.0336, bottom -0.3077)`
-  on main becomes `top +0.0243 / bottom -0.2517` on the branch. **Not** via (ii): `rayY(±1)`
-  unprojects frustum-edge rays and depends only on pitch, vertical half-angle and the applied
-  view offset, never on dolly distance. The cause is chrome geometry — the retired shell's
-  bottom-heavy chrome (right drawer + bottom action bar) pushed the safe rect up into a large
-  **positive** recentring shift (~+160 px) that cancelled and inverted the −110 px sky
-  composition; the three-axis shell's shift is small and opposite-signed (−19…−38 px).
+## 3. 다음에 할 일 — 내가 잡을 순서
 
-**Open look decision I made, not yet implemented:** the composition shift should be a fraction of
-the **usable band**, not of viewport height — calibrated so desktop reproduces its current 104 px
-exactly (`104/519 ≈ 0.20`, to be verified). Phone then gets ~51 px instead of 110 px: same
-compositional intent, honestly scaled, no device conditional, no desktop regression. Rejected the
-alternative of a phone-only clamp because it encodes "phones are special" into a look rule and
-the next in-between viewport breaks again. If that makes the phone fit honestly, **delete the
-`ideal-shift-fallback`** the agent added — a path that ships a frame the verdict did not authorise
-is the same class of bug we just spent the session removing. If some viewport still cannot fit,
-that must surface as a **gate failure**, not a silent substitution.
+### 3.1 필지·마당 규모 (사용자 직접 지시, 이월)
 
-**New regression owned by this branch:** `densest entry veil hazes the establishing frame without
-washing it out (fog factor 0.000 at 110.9m)`. The #16 entry reordering means generation is already
-complete at entry, so the ink-fog veil has nothing left to ramp. The veil was doing two jobs and
-only one was masking — it is also the app's opening look. Fix by binding it to the **arrival
-choreography** rather than a generation wait, with zero added pre-motion latency (entry press went
-3.2 s → 78 ms) and expressed against arrival *progress* rather than a hardcoded duration, because
-the assembly length is changing concurrently.
+사용자 지시 원문: *"마을 땅 크기 자체도 더 키우고 마당도 더 넓게 만드는게 맞지싶다. 집을 줄이는것은
+디테일이 줄어서 아쉽거든."* → **집 축소는 레버에서 제외**(근접 디테일 = 목표 1).
 
-### 2.3 Critters
+같은 라운드의 고증 조사(`docs/architectural-authenticity.md` §9, `credits.md` 50)가 **근거를 바꿨다**:
 
-Not missing — capped at two. `src/env/critters.js:659-665` `CAP` is a **village-total**
-(`village: { dog: 2, cat: 2, magpie: 3 }`), while chickens are a different layer placed **per
-parcel** by `populate`'s `buildVillageAnimals`. Compounding: `BIRD_BOOST = 4.2` gives distance
-readability to the sky flock only and ground animals explicitly get none, so a 0.5–0.9 m dog is a
-few pixels aerially; and the cat is "기단 위 웅크려 정지(대부분)". The flock is **boids**, a swarm by
-construction, not a formation.
+- 게이트로 단정할 수 있는 유일한 비례는 **L/H ≈ 2.55**(마당 길이 ÷ 채 높이, 구간 1–3). 채 높이
+  평균 3.80m → 마당 길이 약 **9.7m**. 현재 village 기와 앞마당은 **0.8m** 다.
+- 상류주택 **안마당 하나**가 평균 8.92 × 8.88m = **82.96㎡** 인데 이 프로젝트의 **필지 전체**가 173㎡ 다.
+- **멍석 짧은 변 2.1m** 가 마당 깊이의 하한. village·town 기와가 이조차 통과하지 못한다.
+- **그러나** 마당 크기는 작업 면적 요구가 아니라 **채 크기의 종속 변수**다(출처: "마당의 크기는 그리
+  중요하지 않았다", 실측 33.9–208.7㎡ 6배 산포). **필요 작업 면적에서 마당을 역산하지 말 것** —
+  출처가 기술하지 않는 것을 모델링하게 된다.
+- **반증된 전제 두 개**(§9.3): "이 시대는 땅을 빽빽하게 쓰지 않았다"는 근거가 없고(하회·양동은 정의상
+  집촌, 종택조차 33.9㎡ 마당이 있다), "한양이 후기로 갈수록 세분화됐다"도 인용 논문의 논지와 반대다.
+- 중심 공백: **농촌 마을의 가옥별 대지면적은 검증된 수치가 존재하지 않는다.** 마을 지정면적을 필지
+  수로 나누지 말 것(농지·산림·하천 포함).
 
-Freedom worth remembering: this layer is attached post-generation by the adapter (`finishVillage`)
-and consumes only its own rng, so **population changes need no determinism re-baseline**, and each
-species is a single `InstancedMesh` (≤4 draw calls regardless of count).
+레버: 사이트 반경 확대 · 필지 확대(농촌 우선, 한양은 최소 — 밀집이 고증상 맞고 가장 무거운 씬이다) ·
+마당을 파생 최소치로. **"지형은 좁게, 부감에서 마을이 화면 65–75%"는 비율 기준이라 확대와 충돌하지
+않는다** — 실제 비용은 숲 나무 수(면적당)·드로우콜·생성 시간이며, **숲 밀도를 줄여 비용을 숨기지 말 것**.
+씬 해시 재기준선이 필요하고 그건 리드 몫이다.
 
-Asked for: a real V skein with echelon offsets and whole-body banking, gated to autumn/winter
-(geese are winter migrants in Korea; 까치 is resident) — watch the known trap where a `setSeason`
-exists but the adapter never calls it. Dog legibility diagnosed numerically before changing.
-Cat presence earned by **placement and behaviour** (담장 top, 기단 edge, warm roof, beside the
-장독대, sunny 마당 patch; tail flick, stretch, grooming, occasional dash) rather than headcount.
+측정 스크립트: §6 참조.
 
-Authenticity hooks given **from memory and explicitly flagged as possibly wrong** — 이암 「모견도」,
-변상벽 「묘작도」, 노안도(蘆雁圖). The agent was told to verify each attribution against the holding
-institution and **drop what it cannot verify**. Check its report for which survived.
+### 3.2 DoF 2차(틸트시프트) + AA·high-DPI
 
-### 2.4 Village yard objects — measured, fix in progress
+브랜치 `dof-layers`(WIP `c67aa52`, main 위로 리베이스됨, 35 파일). 틸트는 **구조 완성·컴파일 통과이나
+거동 미검증**(`tiltStrength`/`tiltAnchorV` uniform, 원거리 점근 클램프 헤드룸 있는 `setTilt`, `dof.js` API).
+남은 것: 선명대 축소·램프 급화, 부감 DoF 스위치, 스페클 잔여(MSAA 리졸브가 실루엣 경계 텍셀에 발광체
+복사를 섞고 그 텍셀 깊이는 배경이라 배경 CoC 로 흩어진다), **등롱 코어 복원**(헤일로 +20~35% 인데
+코어 78→19 / 54→0), M6 초점 정확도, 부감 재캡처, 이동 중 3프레임 크롤 검사, 골든아워 역광 증거.
+`shoot:bokeh` 타원율 경계도 성문화(배경 ~1.05, 전경은 측정된 1.346 바로 위 — 수정 전 1.376 이 떨어지게).
 
-**The wall follows the irregular polygon; the yard objects are placed against a rectangle.**
-`src/village/yard-layout.js` places the 장독대 at `x: -plotW/2 + width/2 + 0.5`,
-`z: -plotD/2 + depth/2 + 0.5` — a flat **0.5 m** inset from the *rectangle* corner — while
-`localParcelShape` pulls the back edge inward by up to `bnCap = 0.105·plotW` per side (~1.44 m on
-a 13.7 m lot) plus `lean` up to `0.22·plotW`. Measured escape rate (seed 7, point-in-polygon
-against `parcel.shape.pts`):
+### 3.3 위치성 효과음 앵커
 
-| tier | jangdok outside | worst overhang | stack | clothesline | garden |
+"효과음이 잘 안 나온다"의 **아직 안 고친 절반**. `setupAudio` 가 `streamAnchor: env.streamAnchor` 를
+**값으로 한 번만** 캡처하고(개는 getter 를 쓴다) 풍경은 원점 건물 처마에 `computeLayout(P)` 로만
+갱신된다. 마을 모드에서 카메라가 둘 다에서 멀어 개울·풍경이 사실상 안 들리거나 엉뚱한 방향에서 온다.
+마을 쪽 앵커(마을 개울 교차점, 근접 필지 처마 레이아웃)가 필요하고 이건 배선이 아니라 **동작 변경**이다.
+계측 수단은 이미 있다(`audio.diagnostics()` / `window.__engine.audioDiag()`).
+
+### 3.4 기와 후속 4건 (전부 선행 결함, `24001ef` 가 공개)
+
+각각 자기 시각 라운드가 필요하다. ① 암키와 0.34m 와 수키와 0.30m 가 물리적으로 같아야 하는데 다른
+상수라 경사면에서 위상이 어긋난다(통일하면 모든 지붕의 막새 열이 이동) ② `sugiwaMaterial` 텍스처 축이
+뒤바뀌었다(TubeGeometry 는 `uv.x` 가 길이 방향, 코드 주석은 반대) + 의도 밀도가 4배 과다 ③ **경사(v)
+방향은 아직 월드 미터가 아니다** — `slopeLen` 이 자기를 계산하는 `iu` 루프 안에서 소비되는 러닝맥스라
+면마다 켜 간격이 ~33% 흔들린다 ④ 회첨 튜브가 처마 꼭지점(`eaveV[ci]`) 대신 벽 꼭지점(`poly[ci]`)을
+하단 끝점으로 써서 ㄷ자 오목 코너에서 ~1.98m 어긋나고 회첨골 기와가 없다.
+
+### 3.5 그 외 대기
+
+- **#20 운무 절단 + 부감 담장선 판독** — 방위·고도 종속 안개 두께, 그리고 담 톤이 아니라 **마을 근처
+  캐노피 밀도·높이 감쇠**로 판독 확보(담 0.50 / 기단 0.63 vs 잎 0.21 로 이미 2.4–3배 대비). `forest-crunch.js`
+  소유, 숲 총량 불변, 워커 해시 재기준선 예상.
+- **#21 대표 클립 비트 시트** — 삼원법 고원 → 심원 → 평원, 원테이크. 인앱 녹화 없음(수동 화면녹화).
+  조립이 이제 10초 주요 비트이므로 새 길이·안무를 반영해야 한다.
+- **#10 Phase 5 프로그램 다이어트(R8) + 전환 델타.**
+- **먹 fbm 이 device px 기준** — 레티나에서 붓 텍스처가 깨진다. CSS px 정규화 + DPR 2 재캡처. AA 결정 뒤.
+- **낙엽 투광 `uLeafTransmit = 0.42` 를 post ON 에서 재판정** — 블룸이 0.35/0.30 까지 밀 수 있다
+  (후퇴선은 이미 `seasons.js` 에 기록).
+- **떠 있는 한지 발광 사각형** — 히어로 랜딩 t=0~0.6 구간, 아무 지오메트리도 받치지 않는 위치에 창불 두 장.
+  마을 레벨 `nightlight-physical` 배치 행이 애니메이션 컴파운드 **밖**에 있다(`src/village/nightlights.js`
+  `refreshOwner`). `writeOwner(record, null)` 도 행을 발생시켜 **한 owner 만 억제할 방법이 지금 없다** —
+  핸들 API 추가가 필요하다. 선행 결함이지만 조립이 길어져 노출이 ~3.0초 → ~4.4초로 늘었다. 첫인상
+  구간이라 목표 2 에 영향.
+- **저장소 잔여물** — `tools/_tmp-probe-*.mjs` 13개가 main 에 추적돼 있다(이전 세션 유물, 어떤 브랜치
+  것도 아님). 참조 없음을 확인하고 한 커밋으로 정리. `app/package-lock.json` 의 `"name": "joseon-app"`
+  과 고아 `@fontsource` 항목도 미용상 낡았다 — **다만 `npm ci` 는 양쪽 모두 통과하므로 급하지 않다**
+  (에이전트 보고서의 "`npm ci` 가 실패한다"는 진술은 확인해 보니 사실이 아니었다).
+
+---
+
+## 4. 아직 열려 있는 것
+
+### 4.1 마당 오브젝트가 마당 밖으로 (진행 중, §2)
+
+**담은 부정형 폴리곤을 따르는데 오브젝트는 직사각형 기준으로 놓인다.** `yard-layout.js` 는 장독대를
+`x: -plotW/2 + width/2 + 0.5`, `z: -plotD/2 + depth/2 + 0.5` — 직사각형 모서리에서 **0.5m** — 에 놓는데,
+`localParcelShape` 는 뒷변을 변당 최대 `0.105·plotW`(13.7m 필지에서 ~1.44m) 오므리고 `lean` 을 최대
+`0.22·plotW` 더 얹는다. 상수 0.5m 로는 비례하는 lean 을 흡수할 수 없다.
+
+| 규모 | 장독대 밖 | 최대 돌출 | 볏단 | 빨래줄 | 텃밭 |
 |---|---|---|---|---|---|
-| village | **17/34 (50%)** | 2.35 m | 0/34 | 0/34 | 2/34 (0.04 m) |
-| town | **39/67 (58%)** | 2.21 m | 0/67 | 0/67 | 1/67 (0.05 m) |
-| capital | **29/51 (57%)** | 2.63 m | 0/51 | 0/51 | 0/51 |
+| village | **17/34 (50%)** | 2.35m | 0/34 | 0/34 | 2/34 (0.04m) |
+| town | **39/67 (58%)** | 2.21m | 0/67 | 0/67 | 1/67 (0.05m) |
+| capital | **29/51 (57%)** | 2.63m | 0/51 | 0/51 | 0/51 |
 
-The rule is uniformly wrong; the 장독대 merely occupies the **back-left** corner, which is exactly
-the one `bnL` pinches. Reproduction script:
-`scratchpad/jangdok-escape.mjs` (path in §5). Escape rate scales with `plotW`, so enlarging lots
-reduces but never removes it — the polygon fix is required independently of any scale change.
+장독대만 심한 이유는 그것이 **뒤-좌 코너**에 앉고 그 코너가 정확히 오므려지는 자리이기 때문이다.
+규칙 전체가 틀렸고 장독대가 최악의 자리를 차지했을 뿐이다. **돌출률이 `plotW` 에 비례하므로 필지를
+키워도 사라지지 않는다** — §3.1 과 독립으로 필요하다.
 
----
+### 4.2 결정은 됐지만 구현되지 않은 것
 
-## 3. Queued work, in the order I would take it
+- **iOS 무음 스위치 완화** — 하드웨어 스위치가 WebAudio 를 죽이는 것은 코드로 못 고친다. 두 선택지
+  (측정상 무음일 때만 뜨는 안내 / BGM 을 `HTMLAudioElement` 로 라우팅하고 크로스페이드 포기) 중
+  어느 것도 구현하지 않았다. 사용자 판단 대기.
+- **`village.mp3` 가 고아 트랙** — 자동 선택 경로가 없다. `TIME_TRACK` 과 어디서 겹쳐야 하는지는
+  제품 판단이라 몰래 배선하지 않고 `MANUAL_TRACKS` 에 사유와 함께 선언했다. 부감 마을에 쓸지 물어볼 것.
+- **`viewShiftHook.fit` 에 `framingSource`·`appliedSearchScale` 노출** — 브라우저 게이트가 "출하된
+  dolly vs 정직한 탐색"을 구분하려면 필요하다. 폴백을 삭제한 지금은 `framingSource` 가 항상
+  `applied-shift` 라 급하지 않다.
+- **데스크톱 인셋 과점유 비교** — 리드가 낸 가설이 이후 반증돼 착수하지 않았다. 하려면
+  `assignOcclusionInsets` 를 순수 함수로 추출해야 한다(추출 없는 비교는 규칙이 아니라 전사를 검증한다).
 
-1. **Land the UI branch.** Veil regression → then (i) applied by the lead once `engine.js` frees →
-   `check:cinematic:app` once. This also turns main's standing red green.
-2. **Village land scale and 마당 proportions** — the user's explicit direction, deferred from this
-   session. Measured baseline (seed 7, non-hero; `scratchpad/yard-ratio2.mjs`):
+### 4.3 검증되지 않은 채 남은 것
 
-   | tier | kind | lot | roof | built | front yard |
-   |---|---|---|---|---|---|
-   | hamlet | choga | 9.4×9.0 m (26평) | 7.4×5.1 = 37 m² | 45% | 2.6 m (min 1.2) |
-   | village | choga | 10.2×9.5 (29평) | 7.8×5.4 = 42 | 44% | 3.1 m |
-   | village | **giwa** | 13.7×12.6 (52평) | 10.4×9.8 = 101 | **59%** | **0.8 m (min 0.3)** |
-   | town | giwa | 14.0×13.3 (56평) | 10.6×9.7 = 104 | 56% | 1.8 m (min 0.3) |
-   | capital | giwa | 15.3×14.2 (67평) | 10.5×9.4 = 100 | 47% | 3.1 m |
-   | hanyang | giwa | 15.0×14.1 (65평) | 10.1×9.0 = 92 | 44% | 3.5 m |
-
-   Two findings: the 마당 falls out as a **remainder** rather than a designed space (hence 0.8 m),
-   and the tier relationship is **inverted** — rural lots are tighter than the capital's, whereas
-   the walled capital was dense and subdivided while a farmstead needed room for 마당 and 텃밭.
-   `src/village/parcels.js:131-139` sizes from rank and village character only
-   (`sizeMul = 0.84 + char01*0.40`) with **no urban/rural term**, while its own comment at line 39
-   claims 가대제한 as the basis — claim and implementation have diverged.
-
-   **User direction, verbatim:** "마을 땅 크기 자체도 더 키우고 마당도 더 넓게 만드는게 맞지싶다.
-   집을 줄이는것은 디테일이 줄어서 아쉽거든. 그리고 이당시가 그렇게 땅을 빽뺵하게 쓰지도 않았을꺼같아."
-   So **shrinking houses is off the table** (it costs close-up detail, which is goal 1 — this was my
-   proposal and the user overruled it). Levers: site radius up, lots up tier-aware (rural most,
-   Hanyang least — dense is historically right there *and* it is the heaviest scene), and above all
-   make the yard a **derived minimum** so a 0.3 m yard becomes structurally impossible.
-
-   The "terrain stays tight / village fills 65–75% of the frame" rule is about **proportion**, so it
-   survives scaling — the real cost is forest tree count (per-area), draw calls, and generation time.
-   Measure and report those; **never** thin the forest to hide them.
-
-   Research still owed: 가대(家垈) 지급 figures and their unit conversion, surveyed lots from the
-   국가민속문화유산 villages, and a 멍석/타작 working dimension that converts into a gateable minimum
-   yard depth. A research agent was mid-verification when the limit hit — see §4.
-3. **DoF round 2 (tilt-shift) + AA/high-DPI** — one branch, `dof-layers`, rebased. Tilt is
-   structurally complete (`tiltStrength`/`tiltAnchorV` uniforms, `setTilt` with far-asymptote clamp
-   headroom, `dof.js` API) and compiles, but **behaviourally unverified**. Remaining: narrower sharp
-   band + steeper ramp, aerial DoF switch, speckle residue (MSAA resolve mixes emitter radiance into
-   silhouette-edge texels carrying background depth), lantern **core** restoration (halo +20–35% but
-   core 78→19 / 54→0), M6 focus accuracy, aerial re-capture, moving 3-frame crawl check, golden-hour
-   backlit evidence. Also codify the `shoot:bokeh` ellipticity boundary (background ~1.05, foreground
-   just above the measured 1.346 so the pre-fix 1.376 fails).
-4. **Roof tile follow-ups** (all pre-existing, disclosed by `24001ef`, each needs its own visual
-   round): 암키와 0.34 m vs 수키와 0.30 m are different constants but physically one course = one of
-   each, so they drift out of phase; `sugiwaMaterial` has its texture axes swapped (TubeGeometry gives
-   `uv.x` = along, `uv.y` = around, opposite to the code comment) and its density is 4× too high;
-   the **v (course) direction is still parameter-based** — `slopeLen` is a running max consumed inside
-   the same `iu` loop that computes it, so course spacing varies ~33% between mid-face and hip; and
-   the 회첨 valley tube uses `poly[ci]` (wall corner) where hips use `eaveV[ci]`, differing by ~1.98 m
-   at a ㄷ자 reflex corner, so there is no 회첨골 gutter tile.
-5. **Positional SFX are anchored to the hidden single-building scene** — the real unfixed half of
-   "효과음이 잘 안 나온다". `setupAudio` captures `streamAnchor: env.streamAnchor` **once by value**
-   (unlike the dog, which uses a getter), and chimes sit at the origin building's eaves updated only
-   via `computeLayout(P)`. In village mode the camera is near neither, so 풍경/개울 are inaudible or
-   arrive from the wrong direction. Needs village-side anchors; a behaviour change, not wiring.
-6. **#20 운무 절단 + aerial wall-line legibility** — azimuth/altitude-dependent fog thickness, and
-   wall-line legibility via **canopy density/height falloff near the village** rather than wall tone
-   (mud wall 0.50 / stylobate 0.63 vs foliage 0.21 already gives 2.4–3× contrast). Owned by
-   `forest-crunch.js`; forest total preserved; expect a worker-hash re-baseline.
-7. **#21 signature clip beat sheet** — 삼원법 고원 → 심원 → 평원, one take. No in-app recording
-   (standing decision; clips are manual OS screen recordings). The reworked assembly is now a major
-   beat and the sheet must account for its new duration and choreography.
-8. **#10 Phase 5 program diet (R8) + transition delta.**
-9. **Queued behind AA:** ink's fbm cell size is in device px so retina breaks the brush texture
-   (normalize to CSS px, re-capture at DPR 2); re-judge `uLeafTransmit = 0.42` with `post` ON (bloom
-   may push it to 0.35/0.30 — retreat line already documented in `seasons.js`).
-10. **`app/package-lock.json` is out of sync with `app/package.json`** (it still says
-    `"name": "joseon-app"` and carries two orphan `@fontsource` entries). Any `npm install` rewrites
-    it, so every agent worktree keeps producing spurious diffs. Worth one deliberate commit; I did
-    not do it near a release.
+- **조립 A/B 지각 판정이 돌아오지 않았다.** 카메라를 고정한 짝 16장이
+  `scratchpad/asm-ab3` 에 있으나 판정 에이전트가 죽었다. 수치 경계는 있다: 지붕 스트레치 15.4%(발사)
+  → 9.24%(접촉) → 최대 스쿼시 3.2% → t=1 에 0, 위치 오버슈트 낙차의 6.8% = 12.2cm, 딥 3.6cm.
+  선행 라운드에서 확인된 것: "휘어진 처마 코너"는 탄성을 **꺼도** 나타나므로 기와 껍질 전에 잠깐
+  드러나는 **선자연 부채꼴**이며 고증상 맞다.
+- **`__asm.maxScaleDev()` 는 종가에서 구조적으로 무용하다** — `primary-opening-anchor` 가 설계상
+  `scale.x = -1` 이라 항상 정확히 `2` 를 보고한다. 정착 상태 게이트 신호로 쓰지 말 것.
 
 ---
 
-## 4. Open decisions the next session should not silently resolve
+## 5. 작업 방식에서 값이 나간 것들
 
-- **Composition as a band fraction** (§2.2) — decided by me, unimplemented. Verify the fraction
-  reproduces desktop's 104 px before shipping.
-- **iOS silent-switch mitigation** (§1.3) — a hint versus `HTMLAudioElement` routing. Neither
-  implemented; the trade is losing the crossfade graph.
-- **`village.mp3` is an orphan** with no automatic selection path. Declared in `MANUAL_TRACKS` with
-  that reason rather than silently wired, because where it should overlap `TIME_TRACK` is a product
-  decision. Ask the user whether they want it on village aerial.
-- **The audio track suggested a `CLAUDE.md` amendment** recording the intro-policy contract. I did
-  **not** make it — a peer asking me to edit `CLAUDE.md` is not the user asking, so it needs the
-  user's call. The rule itself is recorded in `docs/verification.md` and in the module headers.
-- **Research provenance for the 가대 figures** — a research agent (`gadae-research`) was verifying
-  가대 부수, 안마당 실측 and 멍석 dimensions and died before delivering. I asked it directly for its
-  findings; whatever it returns belongs in `docs/architectural-authenticity.md` with the document's
-  three-way split (source-stated fact / this project's interpretation / still unmodelled) and in
-  `docs/credits.md`. **Do not let unverified numbers into either file** — a wrong citation is worse
-  than none here.
+- **원인은 노드에서 수치로 단정, 브라우저는 효과 확인 1회.** 사용자 지적으로 확립됐고 `CLAUDE.md`
+  검증 절에 있다. 수치 게이트는 **모든 사례와 미래 사례**를 잡고 캡처는 **고른 프레이밍 한 컷**만 잡는다.
+- **수정 전 코드에서 실패하는지 먼저 증명.** 이 세션의 새 게이트 전부 그렇게 확인했고, 에이전트가
+  보고한 "12건 실패"·"9건 실패"도 머지 전 리드가 독립 재현했다.
+- **낡은 베이스가 회귀로 위장한다.** 두 번 겪었다 — p31 시네마틱 6건과 DoF 앱 3건이 모두 리베이스 후
+  사라졌고, DoF 쪽은 증명까지 됐다: 세 단정이 **바이트 동일한 측정값**으로 통과했으므로 움직인 것은
+  허용 봉투뿐이었다(`doorEnvelope` 가 `src/` 지오메트리에서 파생된다).
+- **"무엇이 바뀌었나"가 아니라 "무엇이 실행될 수 있나"에서 추론할 것.** 리드의 최악 오류: DoF 실패를
+  `view-shift.js` diff 에 귀속시켰는데 그 하네스는 `?shot=1` 과 명시적 `setViewShiftEnabled(false)` 로
+  view-shift 를 끄므로 그 코드는 한 번도 실행되지 않았다.
+- **워커 골든 재기준선은 리드 몫이고, 값은 리베이스한 트리에서 뽑아야 한다.** 이 세션에서 세 번
+  재기준선했고 에이전트가 보고한 값은 매번 낡아 있었다. 좋은 부수 효과: 조립 변경에서 **capital 만
+  해시가 안 변한 것**이 변경 범위가 종가에 한정된다는 독립 증거가 됐다(capital 히어로는 관아 계열).
+- **하네스 자체가 레이스를 갖는다.** "베일 회귀"는 제품 결함이 아니라 게이트가 fog 를 `debugSetPaused`
+  **뒤에** 읽어서, 머신 부하가 크면 이미 개방된 값을 읽던 부하 의존 레이스였다. 제품 코드는 한 줄도
+  안 바뀌었다.
+- **복원 함정.** 커밋이 없는 워크트리 브랜치에서 `git checkout -- <file>` 은 base 로 되돌려 선행
+  라운드를 지운다. 라운드 경계마다 리드가 WIP 커밋을 넣으면 함정 자체가 사라진다(이번 인계 전에 그렇게 했다).
+- **백그라운드 게이트를 `head`/`tail` 로 파이프하지 말 것.** 두 번 자기 로그를 잘라 실패 단정을 잃고
+  한 번은 브라우저 게이트를 통째로 재실행했다.
+- **브라우저 락은 저장소 전역**(`.git/cheoma-worktrees/browser.lock`, 600초). `lock timed out` 은 경합이지
+  실패가 아니다. 에이전트가 다섯을 넘으면 곧 처리량 병목이 된다 — 순수 우선 규칙이 실질적으로 값을 내는 이유.
 
 ---
 
-## 5. Working notes worth carrying
-
-- **Gate weight (user correction this session).** The gates were too heavy: things decidable by
-  pure computation were being proven in a headless browser. The repo already separates the layers —
-  of 101 `check`/`shoot` scripts, **47 take the browser lock and 54 do not**, with the convention
-  `check:X` pure and `check:X:browser`/`:app` rendered. The rule is now: **assert the cause in node,
-  use the browser once to confirm the effect.** Geometry invariants, timing/ordering math, plan-level
-  routing decisions, asset reachability and seeded reproducibility all belong in node — `three`
-  runs there for `Object3D`/`Vector3`/`BufferGeometry` reads with no GL context. The browser earns
-  its cost for `renderer.info` draw-call and **program** counts, shader compile/link, rendered depth
-  artifacts, real `Worker` byte-identity, `AudioContext`, and one perceptual verdict. A numeric gate
-  also catches *every* case, whereas a capture catches only the framing you happened to choose.
-- **A gate that passes on broken code is worthless.** Every new gate this session was verified to
-  fail on the pre-fix source first. Two agents' "12 failures" / "9 failures" claims were reproduced
-  independently before their work was merged.
-- **Prove the instrument is engaged before believing a negative result.** One agent's five negative
-  shader-probe rounds were void because the injection never applied.
-- **Attribution before re-baselining.** When a gate fails after an intended change, find the
-  mechanism first. Twice this session a "regression" was a **stale worktree base**: the p31
-  cinematic failures and the DoF app 3-FAIL both vanished on rebase, and the DoF case was provable —
-  the three assertions passed with **byte-identical** measurements, so only the tolerance envelope
-  had moved (`doorEnvelope` derives from `src/` geometry).
-- **Reason from what can execute, not from what changed.** My own worst error this session: I pinned
-  the DoF failures on a `view-shift.js` diff without checking that the harness disables view-shift
-  entirely (`?shot=1` plus an explicit `setViewShiftEnabled(false)`), so the changed code never ran.
-- **Worker golden re-baselining is the lead's job and the values must come from a run on the
-  rebased tree.** Both agents' reported hashes were stale because main moved between their run and
-  the merge. I re-baselined twice today with the reason recorded in the file.
-- **Restore trap.** On a worktree branch with no commits, `git checkout -- <file>` reverts to base
-  and destroys earlier rounds. Back up to `_wt-out/<name>.PRE-RESTORE.<ext>` first. Better: WIP-commit
-  at every round boundary, which is what I did before this handoff.
-- **Do not pipe a background gate through `head`/`tail`.** I truncated my own log twice and lost the
-  failing assertion, once wasting a full re-run of a browser gate.
-- **Browser lock is repo-global** (`.git/cheoma-worktrees/browser.lock`, 600 s). `lock timed out` is
-  contention, not failure. With five or more agents it becomes the throughput bottleneck — which is
-  the practical reason the pure-first rule pays.
-
-### Scratch artifacts (session-local, will not survive)
+## 6. 세션 로컬 산출물 (사라진다)
 
 `/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/`
-holds `yard-ratio2.mjs` (parcel/roof/yard measurement), `jangdok-escape.mjs` (yard-object escape
-measurement), and the full gate logs. **Copy anything worth keeping into `tools/` before the temp
-directory is cleaned** — the two measurement scripts are the baseline evidence for §3.2 and §2.4 and
-should probably become real gates.
+에 측정 스크립트와 게이트 로그가 있다. **임시 디렉터리가 정리되기 전에 남길 것을 `tools/` 로 옮길 것** —
+특히 두 개는 §3.1·§4.1 의 근거이고 게이트가 되어야 한다:
+
+두 측정 스크립트는 **이미 옮겼다** — `tools/measure-yard-proportion.mjs`(규모별 필지·지붕 footprint·
+덮음률·앞마당 깊이)와 `tools/measure-yard-object-escape.mjs`(마당 오브젝트 폴리곤 이탈률·최대 돌출).
+게이트가 아니라 측정 도구이며 `node tools/measure-*.mjs` 로 바로 돈다. §3.1·§4.1 의 표가 그 출력이다.
+
+조립 A/B 캡처는 `scratchpad/asm-ab3`(카메라 고정 짝 16장), 소동물 대표 컷은 그 워크트리의
+`scratchpad/shots2/`.
+
+---
+
+## 7. 살아 있는 워크트리
+
+| 워크트리 | 브랜치 | 상태 |
+| --- | --- | --- |
+| `agent-ab06f53fc2fcc87b0` | `worktree-agent-ab06f53fc2fcc87b0` | **진행 중** — 마당 폴리곤(§2) |
+| `dof-layers` | `dof-layers` | **대기** — DoF 틸트 + AA(§3.2) |
+| `agent-addfb80313bf43ede` · `agent-a436fb9fdab37be3e` · `agent-a67784a25ff426843` · `agent-a30e0c3596a560695` · `agent-a6c6df2e05f90b298` · `agent-a15ee74e3be908958` | — | 머지 완료, 정리 가능 |
+| `authenticity` · `camera-robust` · `ink-gyehwa` · `agent-a1d1728e0627987a0` · `agent-abbb4e7ef90ff51f2` | — | 이전 세션 유물, 머지 완료 |
