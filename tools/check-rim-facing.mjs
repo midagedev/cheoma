@@ -445,17 +445,22 @@ function lodProgramCompositionProbe() {
   const plainProgram = renderer.properties.get(plainMaterial).currentProgram;
   const lodProgram = renderer.properties.get(lodMaterial).currentProgram;
   const lateSnowLodProgram = renderer.properties.get(lateSnowLodMaterial).currentProgram;
+  const plainPatch = readPatch(renderer, plainMaterial);
   const lodPatch = readPatch(renderer, lodMaterial);
   const result = {
     plainKey: plainMaterial.customProgramCacheKey(),
     lodKey: lodMaterial.customProgramCacheKey(),
     lateSnowLodKey: lateSnowLodMaterial.customProgramCacheKey(),
-    distinctPrograms: !!plainProgram && !!lodProgram && plainProgram !== lodProgram,
+    // R8 program diet: rim always installs the LOD screen-door shader path, so plain cloud+
+    // snow+rim and true LOD roots share one WebGLProgram. Matrix channel stays object-local.
+    sharedPrograms: !!plainProgram && !!lodProgram && plainProgram === lodProgram,
     orderIndependentProgram: !!lodProgram && lodProgram === lateSnowLodProgram,
     plainProgramKey: plainProgram?.cacheKey || null,
     lodProgramKey: lodProgram?.cacheKey || null,
-    discardInjected: lodPatch.fragment.includes('_screenDoorIgn'),
-    worldPositionRepaired: lodPatch.vertex.includes('worldPosition.w = 1.0'),
+    discardInjected: lodPatch.fragment.includes('_screenDoorIgn')
+      && plainPatch.fragment.includes('_screenDoorIgn'),
+    worldPositionRepaired: lodPatch.vertex.includes('worldPosition.w = 1.0')
+      && plainPatch.vertex.includes('worldPosition.w = 1.0'),
   };
   rim.dispose();
   plainMaterial.dispose();
@@ -592,7 +597,10 @@ try {
   check(result.facing.chainKept, 'pre-existing onBeforeCompile patch remains chained');
   check(result.facing.cloudFragmentInjected && result.facing.rimFragmentInjected,
     `real cloud-shadow and physical rim shader bodies coexist on one roof material (cloud=${result.facing.cloudFragmentInjected}, rim=${result.facing.rimFragmentInjected})`);
-  check(result.facing.composedProgramKey === 'cheoma-rim-physical-v1|cloudshadow-v1',
+  // Sorted token chain: LOD screen-door is always installed with rim (R8 diet), then physical
+  // rim + cloud shadow. Order of installation must not change the key.
+  check(result.facing.composedProgramKey
+      === 'cheoma-lod-screen-door-v1|cheoma-rim-physical-v1|cloudshadow-v1',
     `cloud→rim customProgramCacheKey is composed (${result.facing.composedProgramKey})`);
   check(result.facing.reverseCloudChainKept
       && result.facing.reverseComposedProgramKey === result.facing.composedProgramKey,
@@ -631,13 +639,16 @@ try {
   check(contracts.groundPatched.every(Boolean) && contracts.groundMuls.every((mul) => mul === 0),
     `village ground/water stays patched at zero contribution (patched=${JSON.stringify(contracts.groundPatched)}, mul=${JSON.stringify(contracts.groundMuls)})`);
   const lodComposition = result.lodComposition;
-  check(lodComposition.distinctPrograms
+  // R8: collapsing plain vs LOD families — both keys must carry screen-door and compile as one
+  // program. Coverage defaults to 1 on non-channel objects so plain draws stay a discard no-op.
+  check(lodComposition.sharedPrograms
       && lodComposition.lodKey.includes('cheoma-lod-screen-door-v1')
-      && !lodComposition.plainKey.includes('cheoma-lod-screen-door-v1'),
-    `LOD and plain cloud+snow+rim materials compile as distinct programs `
-      + `(${lodComposition.plainKey} vs ${lodComposition.lodKey})`);
+      && lodComposition.plainKey.includes('cheoma-lod-screen-door-v1')
+      && lodComposition.plainKey === lodComposition.lodKey,
+    `LOD and plain cloud+snow+rim materials share one program family `
+      + `(${lodComposition.plainKey} / ${lodComposition.lodKey})`);
   check(lodComposition.discardInjected && lodComposition.worldPositionRepaired,
-    'compiled LOD color shader keeps screen-door discard and affine worldPosition');
+    'compiled plain and LOD color shaders keep screen-door discard and affine worldPosition');
   check(lodComposition.lodKey === lodComposition.lateSnowLodKey
       && lodComposition.orderIndependentProgram,
     `snow-before-rim and rim-before-snow reuse one canonical LOD program `
