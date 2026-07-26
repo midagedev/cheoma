@@ -18,10 +18,14 @@ const smoothstep = (value) => {
   return t * t * (3 - 2 * t);
 };
 
-function syncFillScale(state, config) {
-  // Bokeh quality may ramp continuously during settle; fill scale must not —
-  // EffectComposer.setPixelRatio reallocates every pass target.
-  state.fillScale = state.mode === 'stable' ? 1 : config.movingFillScale;
+function syncMotionBudget(state, config) {
+  // Bokeh quality may ramp continuously during settle; binary budgets must not —
+  // EffectComposer.setPixelRatio / MSAA setSamples reallocate render targets.
+  // Non-stable (moving + settling hold/ramp) stays on the cheap side; only a
+  // fully settled frame restores full fill, desktop MSAA, and the hover outline.
+  const reduced = state.mode !== 'stable';
+  state.fillScale = reduced ? config.movingFillScale : 1;
+  state.motionBudget = reduced;
   return state;
 }
 
@@ -36,6 +40,8 @@ function syncFillScale(state, config) {
  * `quality` (0..1) drives the Bokeh gather only. `fillScale` is a binary
  * composer pixel-ratio multiplier (1 when stable, `movingFillScale` otherwise)
  * so camera orbits cut fill-rate without thrashing render targets.
+ * `motionBudget` is true for any non-stable mode and drives secondary
+ * motion-only pass cuts (outline off, focus MSAA held at aerial samples).
  */
 export function createPostQualityState(options = {}) {
   const config = { ...DEFAULTS, ...options };
@@ -53,6 +59,7 @@ export function createPostQualityState(options = {}) {
     mode: 'stable',
     quality: 1,
     fillScale: 1,
+    motionBudget: false,
     speed: 0,
     quietTime: 0,
     settleTime: config.settleDuration,
@@ -66,7 +73,7 @@ export function createPostQualityState(options = {}) {
         state.quality = 0;
         state.quietTime = 0;
         state.settleTime = 0;
-        return syncFillScale(state, config);
+        return syncMotionBudget(state, config);
       }
 
       if (state.mode === 'stable') return state;
@@ -76,13 +83,13 @@ export function createPostQualityState(options = {}) {
         state.quality = 0;
         state.quietTime = 0;
         state.settleTime = 0;
-        return syncFillScale(state, config);
+        return syncMotionBudget(state, config);
       }
 
       if (state.mode === 'moving') {
         const beforeHold = state.quietTime;
         state.quietTime = Math.min(config.settleHold, beforeHold + dt);
-        if (state.quietTime + 1e-12 < config.settleHold) return syncFillScale(state, config);
+        if (state.quietTime + 1e-12 < config.settleHold) return syncMotionBudget(state, config);
         state.mode = 'settling';
         state.settleTime = Math.max(0, dt - (config.settleHold - beforeHold));
       } else {
@@ -93,16 +100,17 @@ export function createPostQualityState(options = {}) {
         state.mode = 'stable';
         state.quality = 1;
         state.settleTime = config.settleDuration;
-        return syncFillScale(state, config);
+        return syncMotionBudget(state, config);
       }
 
       state.quality = smoothstep(state.settleTime / config.settleDuration);
-      return syncFillScale(state, config);
+      return syncMotionBudget(state, config);
     },
     reset() {
       state.mode = 'stable';
       state.quality = 1;
       state.fillScale = 1;
+      state.motionBudget = false;
       state.speed = 0;
       state.quietTime = 0;
       state.settleTime = config.settleDuration;

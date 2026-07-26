@@ -83,6 +83,7 @@ export function createPostQualityRuntime({
   width,
   height,
   setFillScale = null,
+  setMotionBudget = null,
 }) {
   const quality = createPostQualityState();
   const motion = createCameraMotionTracker();
@@ -91,12 +92,20 @@ export function createPostQualityRuntime({
   // Applied fill tracks the last composer pixel-ratio multiplier so mode-boundary
   // changes reallocate once, not every settling frame.
   let appliedFillScale = 1;
+  let appliedMotionBudget = null;
 
   const applyFillScale = () => {
     if (typeof setFillScale !== 'function') return;
     if (Math.abs(quality.fillScale - appliedFillScale) < 1e-4) return;
     appliedFillScale = quality.fillScale;
     setFillScale(appliedFillScale);
+  };
+
+  const applyMotionBudget = () => {
+    if (typeof setMotionBudget !== 'function') return;
+    if (appliedMotionBudget === quality.motionBudget) return;
+    appliedMotionBudget = quality.motionBudget;
+    setMotionBudget(quality.motionBudget);
   };
 
   return {
@@ -111,6 +120,7 @@ export function createPostQualityRuntime({
       quality.update(dt, motionPx);
       bokehPass.setBokehQuality(quality.quality);
       applyFillScale();
+      applyMotionBudget();
       return quality;
     },
     resize(nextWidth, nextHeight) {
@@ -122,13 +132,16 @@ export function createPostQualityRuntime({
       // cinematic path or resize (check-app-smoke DPR contract, product snaps).
       quality.reset();
       appliedFillScale = NaN;
+      appliedMotionBudget = null;
       applyFillScale();
+      applyMotionBudget();
     },
     debug() {
       return {
         postQuality: quality.quality,
         postQualityMode: quality.mode,
         postFillScale: quality.fillScale,
+        postMotionBudget: quality.motionBudget,
         postMotionPx: motion.motionPx,
         postMotionSpeed: quality.speed,
         activeBokehTaps: bokehPass.enabled ? bokehPass.bokehSampleCount : 0,

@@ -371,3 +371,18 @@ export function isResidentialOpeningsOnlyEdit(previousSpec, nextEdit) {
   }
   return residentialGeometrySignature(previousSpec) !== residentialGeometrySignature(nextEdit.spec);
 }
+
+/**
+ * True when kind + courtyard identity stay put but house geometry changes.
+ * Covers openings and roof-shell axes (pitch / eave / curve / bays / heights).
+ * Runtime may swap the house mesh in-place and keep or rebuild the wall based
+ * on the post-build roof AABB, without recreating the overlay group matrix.
+ */
+export function isResidentialHouseOnlyEdit(previousSpec, nextEdit) {
+  if (!previousSpec || !nextEdit?.spec) return false;
+  if (previousSpec.kind !== nextEdit.kind) return false;
+  const prevYard = residentialYardSignature(previousSpec.kind, previousSpec.params || {});
+  const nextYard = residentialYardSignature(nextEdit.kind, nextEdit.top || {});
+  if (prevYard !== nextYard) return false;
+  return residentialGeometrySignature(previousSpec) !== residentialGeometrySignature(nextEdit.spec);
+}

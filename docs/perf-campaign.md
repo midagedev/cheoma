@@ -58,10 +58,26 @@
 | **Scheduler 20/72/1.8** | 더 촘촘한 라이브 프리뷰 | browser cadence 동기화 |
 | **Aerial MSAA 2×** | 부감 2× / focus 4× (desktop) | bench: aerial msaa 2, focus 4 |
 
+## 5차 구현 (house-only shell path)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **House-only overlay** | openings + roof pitch/eave/curve/bays 등 야드 불변 편집 시 오버레이 그룹·matrix 유지, house 메시만 교체 | 동일 |
+| **AABB-gated wall** | 새 지붕 AABB가 맞으면 담/부속채 유지, 어긋나면 제자리 wall rebuild (그룹 dispose 없음) | 동일 |
+| **isResidentialHouseOnlyEdit** | 순수 시그니처 게이트로 openings를 포함해 shell 축을 포괄 | — |
+
+## 6차 구현 (motion budget)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **motionBudget** | non-stable 모드에서 true (fillScale과 동일 경계) | 정착 시 false |
+| **Outline sleep** | 오빗/settle 중 OutlinePass.enabled=false | 정착 후 호버 아웃라인 복원 |
+| **Focus MSAA hold** | 모션 중 focus여도 MSAA 2× 유지, 정착 시 4× | 정착 프레임 동일 |
+
 ## 다음 라운드 (우선순위)
 
-1. roof-pitch/eave house+wall partial path (shell 변화 시)
-2. worker golden rebaseline if capital/town LOD hash drifts
+1. product-path bench: roof-pitch med + motion msaa/outline flags
+2. flare depth sleep during motionBudget (focus only)
 3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트

@@ -1251,8 +1251,8 @@ invariant(
   quality60.state.mode === "stable",
   "settling did not end in stable mode",
 );
-// Binary fill scale: low for any non-stable mode (no per-frame RT thrash),
-// full only when fully settled. Bokeh quality may still ramp during settle.
+// Binary fill scale + motionBudget: low for any non-stable mode (no per-frame
+// RT thrash), full only when fully settled. Bokeh quality may still ramp.
 {
   const fill = createPostQualityState();
   fill.update(0.05, 30 * 0.05);
@@ -1260,11 +1260,19 @@ invariant(
     fill.mode === "moving" && fill.fillScale < 1 && fill.fillScale >= 0.5,
     "moving mode did not drop composer fill scale",
   );
+  invariant(
+    fill.motionBudget === true,
+    "moving mode did not raise motionBudget",
+  );
   const movingScale = fill.fillScale;
   advanceQuality(fill, 0.15, 0, 0.05);
   invariant(
     fill.mode === "settling" && fill.fillScale === movingScale,
     "settling changed fill scale mid-ramp (would reallocate every RT)",
+  );
+  invariant(
+    fill.motionBudget === true,
+    "settling cleared motionBudget mid-ramp",
   );
   advanceQuality(fill, 0.3, 0, 0.05);
   invariant(
@@ -1272,8 +1280,12 @@ invariant(
     "stable mode did not restore full fill scale",
   );
   invariant(
-    fill.reset().fillScale === 1,
-    "reset did not restore full fill scale",
+    fill.motionBudget === false,
+    "stable mode left motionBudget raised",
+  );
+  invariant(
+    fill.reset().fillScale === 1 && fill.motionBudget === false,
+    "reset did not restore full fill scale / clear motionBudget",
   );
 }
 

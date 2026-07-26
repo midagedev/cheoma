@@ -135,6 +135,7 @@ try {
     const engine = window.__engine;
     const res = engine.debugPostResolution();
     const costs = [];
+    const pitchCosts = [];
     const base = engine.village.debugParcelRebuild(parcelId);
     for (let i = 0; i < 12; i++) {
       const doorWidthK = 0.35 + (i % 6) * 0.02;
@@ -145,18 +146,35 @@ try {
       costs.push(performance.now() - t0);
       await new Promise((r) => requestAnimationFrame(r));
     }
+    // Roof-shell path (pitch): should stay house-only without full group rebuild.
+    const basePitch = base.params.roofPitch ?? base.params.riseScale ?? 0.55;
+    for (let i = 0; i < 10; i++) {
+      const roofPitch = basePitch + ((i % 5) - 2) * 0.02;
+      const t0 = performance.now();
+      engine.village.rebuild(parcelId, {
+        building: { roofPitch },
+      }, { refreshFlora: false, warm: false });
+      pitchCosts.push(performance.now() - t0);
+      await new Promise((r) => requestAnimationFrame(r));
+    }
     // Final commit warm path
     const tCommit = performance.now();
     engine.village.rebuild(parcelId, {
-      building: { doorWidthK: base.params.doorWidthK },
+      building: {
+        doorWidthK: base.params.doorWidthK,
+        roofPitch: basePitch,
+      },
     }, { refreshFlora: true, warm: true });
     const commitMs = performance.now() - tCommit;
     costs.sort((a, b) => a - b);
+    pitchCosts.sort((a, b) => a - b);
     return {
       regime: 'focus-rebuild',
       parcelId,
       previewMed: costs[Math.floor(costs.length / 2)],
       previewP90: costs[Math.floor(costs.length * 0.9)],
+      pitchPreviewMed: pitchCosts[Math.floor(pitchCosts.length / 2)],
+      pitchPreviewP90: pitchCosts[Math.floor(pitchCosts.length * 0.9)],
       commitMs,
       bloomHalf: res.bloomHalf,
       fillScale: res.fillScale,
