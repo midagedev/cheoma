@@ -133,7 +133,7 @@ function makeRing({
   container.userData.hasAnimals = !!animals;
   container.userData.hasChickens = wantChickens;
 
-  // 2) 굴뚝 연기·아궁이 — 오버레이 내부 몸채 조회(교체 self-heal). choga=M.mud 재질, giwa/hanok=name='chimney'.
+  // 2) 굴뚝 연기·아궁이 — 오버레이 내부 몸채 조회(교체 self-heal). name='chimney'(plan emission) + agungi*.
   const getBuilding = () => group.getObjectByName('building') || group.getObjectByName('hanok') || null;
   const smoke = setupSmoke({ scene, getBuilding });
   container.add(smoke.group);

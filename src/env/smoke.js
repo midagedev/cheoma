@@ -7,16 +7,16 @@ import { makePresenceGate } from './present-gate.js';
 //   setupSmoke({ scene, getBuilding }) → { group, setTime, setEnabled, update(dt), onBuildingChanged }
 //
 // 구현 방침 (night-glow.js 패턴 — builder 무수정 traverse 접근, 결정론):
-//  - 굴뚝 anchor: 건물 그룹 traverse로 산출.
-//      · giwa : giwa.js가 붙인 name='chimney' 그룹의 월드 bbox 상단 (연가까지 포함).
-//      · choga: walls.js의 진흙 굴뚝(재질이 M.mud 하나뿐 → 재질 동일성으로 식별)의 bbox 상단.
-//    roof.js·walls.js 무수정을 위해 choga는 이름 없이 재질 휴리스틱으로 찾는다.
+//  - 굴뚝 anchor: 건물 그룹 traverse로 name='chimney' 를 찾는다.
+//      · userData.smokeEmission (chimney-plan 방출점, building-local) 이 있으면 월드로 변환.
+//      · 없으면 그룹 bbox 상단(+0.15) — 대표 종가 등 plan 미부착 경로.
+//    choga 진흙 스택도 같은 이름 계약(재질 동일성 휴리스틱 폐기).
 //  - 연기: 부드러운 radial 빌보드(Sprite, 가산 아님·반투명 회백). 굴뚝 위로 상승하며
 //    폭이 벌어지고 소산. 각 파티클 own material(개별 opacity/rotation).
 //  - wind.js getWind(t)를 read-only import — 방출 시각의 바람으로 드리프트를 계산해
 //    거스트가 만든 눕힘이 위로 전파(traveling kink). 무풍(window.__windScale=0)은 수직 상승.
 //  - 시간대: 새벽·해질녘 최대(밥짓기), 낮 미약, 밤 은은. 색도 시간대로 물든다.
-//  - 아궁이 불씨: giwa.js가 만든 name='agungiEmber'(emissive 면)·'agungiFire'(PointLight)를
+//  - 아궁이 불씨: name='agungiEmber'(emissive 면)·'agungiFire'(PointLight)를
 //    시간대로 변조(밤·밥짓는 시간 발광, 낮 소등). night-glow와 독립(창호는 night-glow 담당).
 //  - 결정론: Math.random 미사용. 위상/해시/시간 t 순수 함수 → shot 재현성.
 
@@ -122,31 +122,32 @@ export function setupSmoke({ scene, getBuilding, particles, maxAnchors, gateOnCh
   let bldChanged = false;  // 이번 프레임 건물 교체 여부(게이트 reset)
 
   // 건물 traverse로 굴뚝 anchor·아궁이 불씨를 탐지하고 스프라이트를 배정.
+  const _emissionLocal = new THREE.Vector3();
+  const _box = new THREE.Box3();
   function detect(b) {
     emitters = []; embers = []; fires = [];
     for (const sp of pool) { sp.visible = false; sp.material.opacity = 0; }
     if (!b) return;
     b.updateMatrixWorld(true);
-    const M = b.userData && b.userData.materials;
-    const box = new THREE.Box3();
     const anchors = [];
-    // giwa: name='chimney' 그룹 상단(연가까지 포함)
+    // name='chimney': plan emission 우선, 없으면 bbox 상단(종가 등).
     b.traverse((o) => {
-      if (o.name === 'chimney') {
-        box.setFromObject(o);
-        anchors.push({ x: (box.min.x + box.max.x) / 2, y: box.max.y + 0.15, z: (box.min.z + box.max.z) / 2 });
+      if (o.name !== 'chimney') return;
+      const local = o.userData && o.userData.smokeEmission;
+      if (local && Number.isFinite(local.x) && Number.isFinite(local.y) && Number.isFinite(local.z)) {
+        _emissionLocal.set(local.x, local.y, local.z);
+        o.localToWorld(_emissionLocal);
+        anchors.push({ x: _emissionLocal.x, y: _emissionLocal.y, z: _emissionLocal.z });
+        return;
       }
-    });
-    // choga: 진흙 굴뚝(M.mud 재질) — walls.js 무수정 → 재질 동일성으로 식별
-    if (M && M.mud) {
-      b.traverse((o) => {
-        if (o.isMesh && o.material === M.mud) {
-          box.setFromObject(o);
-          anchors.push({ x: (box.min.x + box.max.x) / 2, y: box.max.y + 0.35, z: (box.min.z + box.max.z) / 2 });
-        }
+      _box.setFromObject(o);
+      anchors.push({
+        x: (_box.min.x + _box.max.x) / 2,
+        y: _box.max.y + 0.15,
+        z: (_box.min.z + _box.max.z) / 2,
       });
-    }
-    // 아궁이 불씨(giwa 전용, 있을 때만)
+    });
+    // 아궁이 불씨(있을 때만) — 이름 계약 agungiEmber / agungiFire 유지.
     b.traverse((o) => {
       if (o.name === 'agungiEmber' && o.material) embers.push(o.material);
       else if (o.name === 'agungiFire' && o.isLight) fires.push(o);

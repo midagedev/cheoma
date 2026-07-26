@@ -455,6 +455,9 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
 - `check:choga-roof`
   - 지붕의 둥근사각 평면 좌표와 역변환이 같은 높이를 내는지 검사.
   - 기본형, 세 가지 마을 변형, 앱 편집 UI 32개 경계 행렬, standalone GUI 최대형과 96개 고정-seed 파라미터 조합을 검사.
+- `check:chimney-anchor`
+  - `chimney-plan`이 초가 `mud-stack` / 기와 `jeondol` / 그 외 `none`과 부엌 동측 끝·처마 밖 방출점을 Three·전역 RNG 없이 결정론으로 묶는지 검사.
+  - 실제 초가·기와 조립이 정확히 하나의 `name='chimney'`에 plan emission을 달고 `agungiEmber`/`agungiFire` 이름을 유지하는지, 초가 연도가 mud 클론 없이 공유 재질인지 검사.
   - 벽선과 실제 Float32 지붕 삼각 edge의 교차점 사이까지 조밀하게 확인해 정점 사이 관통도 차단.
   - 벽 상단은 이엉 표면 아래 안전 피복을 유지하며, 기본 지붕 vertex hash는 불변.
 - `check:roof-seams`
@@ -988,6 +991,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-door-dof.mjs` | 같은 Retina 주거 프레임의 카메라 조준 깊이/고정 주출입문 중심 깊이 A/B와 세계점·축깊이 기록 | primary 문양·철물의 선명도와 뒤쪽 원형 보케는 PNG를 직접 열어 판정한다. |
 | `tools/shoot-bokeh-fixture.mjs` | 실제 composer 위 제어 HDR 광원의 원형비·방사 균일도, 반지름 sweep의 선형 HDR 총에너지 보존·peak 면적 희석, 8단계 패닝 1표본→hold→13표본 정착 strip, source scatter ON/OFF, Chrome hardware GPU timer query를 계측·촬영 | `CHEOMA_BROWSER=chrome`과 비-software renderer를 강제한다. `npm run shoot:bokeh:proof`는 scatter의 +1 program/+1 draw/+0 target과 앞쪽 depth/가림·채워진 원판을 따로 증명하며 GPU 성능은 wall time으로 판정하지 않는다. |
 | `tools/check-choga-roof.mjs` | 초가 지붕/벽 접합, 변형·편집 극값, 지붕 vertex hash | 재질·조명 미감은 `shoot-thatch.mjs` 전후 이미지를 직접 본다. |
+| `tools/check-chimney-anchor.mjs` | 부엌 끝·굴뚝 종류·연기 방출 plan, 조립 `name='chimney'` 배선 | 밥 짓는 연기 미감은 `shoot-smoke.mjs` / focus 근접 프레임을 직접 본다. |
 | `tools/check-roof-seams.mjs` | 기와지붕 face 상단의 ridge knot 보존, UI 평면·칸수·높이 경계 | 마루장 아래의 실제 음영·미감은 `shoot-cg3.mjs` 근접 앵글로 본다. |
 | `tools/check-giwa-tile-course.mjs` | 기와 기왓골 세계좌표 등간격(u=across/0.34, v=arcFromRidge/0.9), 암·수 동일 across 피치, 수키와 롤 처마 수직·추녀 절단·포락 내부, 회첨 하단=처마 코너, sugiwaMaterial 축·matte roughness, ㄷ자 부채꼴·우진각 수렴 fixture | 순수 node다. stub 재질로 `buildSkeletonRoof` 정점·UV·롤 간격을 읽는다. 픽셀·드로우콜은 브라우저 라운드. |
 | `tools/check-tile-look.mjs` | `tile`/`tileDark` 휘도·분리, `giwaRoofAverage`, `TILE_LOOK` roughness 배선, `GIWA_ROOF` 좁은 곱틴트 끝·jitter | 순수 node. 망원 기와 검은 선 뭉침 완화(#150 item I) 팔레트 계약. 미감 픽셀은 직접 캡처. |

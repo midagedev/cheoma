@@ -16,6 +16,7 @@ import {
   sunkPrism,
 } from '../core/surface-clearance.js';
 import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
+import { planGiwaChimney } from './chimney-plan.js';
 import { createResidentialOpeningDetails } from './residential-opening-details.js';
 import { createPrimaryDoorPanelSegments } from './primary-door-panel.js';
 
@@ -592,54 +593,74 @@ export function buildGiwa(P, M) {
     strip.castShadow = true; roof.add(strip);
   }
 
-  // ── 우측 독립 전돌 굴뚝 (name='chimney' — smoke.js가 상단을 연기 anchor로 탐지) ──
+  // ── 우측 독립 전돌 굴뚝 (name='chimney' + plan emission — smoke.js 앵커) ──
   // 반가 전돌 굴뚝: 회흑 전돌 켜쌓기 몸통 + 기와 갓지붕 + 연가(오지 토관) 여러 개.
-  // 처마(xEave) 안쪽에 두면 연기가 지붕을 뚫으므로, 처마선 밖(x=a+1.55)에 독립식으로 세워
-  // 연가에서 연기가 하늘로 곧게 오르게 한다(반가 독립 굴뚝은 고증에도 맞음).
-  const cx0 = a + 1.55, cz0 = -b + 1.0, chimH = 2.7, cw = 0.46;
-  const chimney = new THREE.Group(); chimney.name = 'chimney';
+  // 순수 chimney-plan 이 부엌 동측 개구와 처마 밖 방출점을 소유한다.
+  const kitchenOpening = planGiwaKitchenOpening(a);
+  const chimneyPlan = planGiwaChimney({ halfWidthA: a, halfDepthB: b, kitchen: kitchenOpening });
+  const { base: cBase, body: cBody, cornice: cCornice, capRoof: cCap } = chimneyPlan;
+  const cx0 = cBody.x, cz0 = cBody.z, chimH = cBody.height, cw = cBody.width;
+  const chimney = new THREE.Group();
+  chimney.name = 'chimney';
+  chimney.userData.chimneyPlan = chimneyPlan;
+  chimney.userData.smokeEmission = chimneyPlan.emission;
   // 굴뚝 밑 돌 기초(독립식이라 자체 지대)
-  const cbase = new THREE.Mesh(new THREE.BoxGeometry(cw + 0.22, 0.22, cw + 0.22), M.stoneDark);
-  cbase.position.set(cx0, 0.11, cz0); cbase.castShadow = cbase.receiveShadow = true; chimney.add(cbase);
-  const baseTop = 0.22;
+  const cbase = new THREE.Mesh(
+    new THREE.BoxGeometry(cBase.width, cBase.height, cBase.width),
+    M.stoneDark,
+  );
+  cbase.position.set(cBase.x, cBase.y, cBase.z);
+  cbase.castShadow = cbase.receiveShadow = true;
+  chimney.add(cbase);
   // 전돌 몸통 (켜 수에 맞춰 텍스처 반복)
   const jm = M.jeondol.clone();
   jm.map = M.jeondol.map.clone();
   jm.map.repeat.set(2, Math.round(chimH / 0.36));  // 세로로 전돌 켜 반복
   jm.map.needsUpdate = true;
   const chim = new THREE.Mesh(new THREE.BoxGeometry(cw, chimH, cw), jm);
-  chim.position.set(cx0, baseTop + chimH / 2, cz0);
-  chim.castShadow = chim.receiveShadow = true; chimney.add(chim);
-  const cTop = baseTop + chimH;
+  chim.position.set(cBody.x, cBody.y, cBody.z);
+  chim.castShadow = chim.receiveShadow = true;
+  chimney.add(chim);
   // 상단 전돌 코니스(살짝 내밈)
-  const cornice = new THREE.Mesh(new THREE.BoxGeometry(cw + 0.12, 0.14, cw + 0.12), jm);
-  cornice.position.set(cx0, cTop + 0.05, cz0); cornice.castShadow = true; chimney.add(cornice);
+  const cornice = new THREE.Mesh(
+    new THREE.BoxGeometry(cCornice.width, cCornice.height, cCornice.width),
+    jm,
+  );
+  cornice.position.set(cCornice.x, cCornice.y, cCornice.z);
+  cornice.castShadow = true;
+  chimney.add(cornice);
   // 기와 갓지붕(작은 사모지붕): 4모 피라미드 + 기와 톤
-  const capRoof = new THREE.Mesh(new THREE.ConeGeometry(cw * 0.95, 0.30, 4), M.tileRidge);
+  const capRoof = new THREE.Mesh(
+    new THREE.ConeGeometry(cCap.radius, cCap.height, 4),
+    M.tileRidge,
+  );
   capRoof.rotation.y = Math.PI / 4;                 // 모서리를 축에 맞춤
-  capRoof.position.set(cx0, cTop + 0.28, cz0); capRoof.castShadow = true; chimney.add(capRoof);
-  // 연가(오지 토관 연통): 갓지붕 위 개별 토관 3개 — 원거리에서 개별 실루엣으로 읽히게
+  capRoof.position.set(cCap.x, cCap.y, cCap.z);
+  capRoof.castShadow = true;
+  chimney.add(capRoof);
+  // 연가(오지 토관 연통): plan 소유 좌표 — 원거리에서 개별 실루엣으로 읽히게
   // 슬렌더하게 세우고 간격 벌림 + 높이·굵기 미세 변주(결정론 고정값). 갓지붕에 하부를 묻어
   // 부양감 없이 위로 솟게 한다.
-  const yBase = cTop + 0.33;
-  const yeonga = [
-    { dx: -0.18, dz: -0.04, h: 0.48, r: 0.055 },
-    { dx:  0.03, dz:  0.11, h: 0.36, r: 0.062 },
-    { dx:  0.18, dz: -0.10, h: 0.44, r: 0.050 },
-  ];
-  for (const s of yeonga) {
+  const yBase = chimneyPlan.yeongaBaseY;
+  for (const s of chimneyPlan.yeonga) {
     const yg = new THREE.CylinderGeometry(s.r * 0.88, s.r, s.h, 10);
     const y = new THREE.Mesh(yg, M.tileRidge);
-    y.position.set(cx0 + s.dx, yBase + s.h / 2, cz0 + s.dz); y.castShadow = true; chimney.add(y);
+    y.position.set(cx0 + s.dx, yBase + s.h / 2, cz0 + s.dz);
+    y.castShadow = true;
+    chimney.add(y);
     // 연가 갓(작은 기와 반구 마감)
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(s.r + 0.012, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.tileRidge);
-    cap.position.set(cx0 + s.dx, yBase + s.h + 0.004, cz0 + s.dz); cap.castShadow = true; chimney.add(cap);
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(s.r + 0.012, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+      M.tileRidge,
+    );
+    cap.position.set(cx0 + s.dx, yBase + s.h + 0.004, cz0 + s.dz);
+    cap.castShadow = true;
+    chimney.add(cap);
   }
   root.add(chimney);
 
   // 부엌 화구는 굴뚝과 이어지는 살림채 끝방의 마당 높이 개구 안으로 물린다. 외부 기단에
   // 별도 부뚜막을 덧붙이던 중복 구현을 초가와 공유하는 생활 장면 조립기로 대체한다.
-  const kitchenOpening = planGiwaKitchenOpening(a);
   root.add(buildRecessedKitchenHearth({
     mats: M,
     wallX: kitchenOpening.wallX,
