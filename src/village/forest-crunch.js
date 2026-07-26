@@ -4,11 +4,15 @@ import { makeRng } from '../rng.js';
 import * as G from '../core/math/geom2.js';
 import { createValueNoise2D } from '../core/math/value-noise2.js';
 import { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked } from './citywall-contour.js';
+import { villageCanopyAtten } from './forest-canopy-atten.js';
 import { terrainGridSize } from './terrain-grid.js';
 import { terrainWarpInner } from './terrain-surface.js';
 import { makeVegetationMask } from './vegetation-spatial.js';
 import { templeFootprint } from './temple-plan.js';
 import { pavilionFootprint } from './pavilion-plan.js';
+
+// Re-export pure attenuator so existing forest-crunch consumers stay one-import.
+export { villageCanopyAtten } from './forest-canopy-atten.js';
 
 // 산 숲 "수치 크런치"(#123) — forest.js 의 배치 루프(buildForestTrees·buildGraniteMassifs)에서
 //   THREE 오브젝트 조립을 뺀 순수 수학만 추출한 모듈. 워커(populate.worker.js)와 메인(forest.js)이
@@ -221,14 +225,20 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
     const clumpAmt = smoothstep(0.55, 0.78, hill) * (1 - 0.6 * smoothstep(0.84, 0.97, hill));
     const gr = soft + (hard - soft) * clumpAmt;
     const far = 1 - 0.32 * smoothstep(TR * 0.72, TR * 1.0, Math.hypot(x, z));
-    return onset * gr * far;
+    // #20: 분지 쪽 산기슭 밀도를 살짝 낮춰 담장 실루엣 여유를 만들고, 같은 mtnTarget 은
+    //   외곽 사면에서 채운다(총 그루수 유지·민둥산 금지).
+    const rC = Math.hypot(x - C.x, z - C.z);
+    const settleSoft = 0.48 + 0.52 * smoothstep(bowlR * 0.50, bowlR * 0.92, rC);
+    return onset * gr * far * settleSoft;
   };
   const KEEP = Math.max(7, bowlR * 0.05);
   const RAMP = Math.max(28, bowlR * 0.30);
   const infillChance = (x, z, hill) => {
     if (!clearDist || hill > 0.5) return 0;
     const cd = clearDist(x, z);
-    const clear = smoothstep(KEEP, KEEP + RAMP, cd);
+    // #20: 구조물 클리어 램프를 약간 밖으로 밀어 담장 크라운 바로 옆 침투목을 줄인다.
+    //   목표 그루수는 그대로라 더 먼 빈터로 이동한다.
+    const clear = smoothstep(KEEP * 1.12, KEEP + RAMP * 1.12, cd);
     if (clear <= 0) return 0;
     const rC = Math.hypot(x - C.x, z - C.z);
     const radial = 0.16 + 0.84 * smoothstep(bowlR * 0.20, bowlR * 0.88, rC);
@@ -300,16 +310,25 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       const isPine = rng() < clamp(0.28 + pineBias, 0.18, 0.9);
       const s = rng.range(0.72, 1.35) * (isPine ? 1.1 : 1.0) * (1 - 0.18 * smoothstep(0.6, 0.95, hill));
       const y = p.y - (TREE_SINK + Math.min(2.4, slope * 1.9));
-      const m = M4().makeTranslation(p.x, y, p.z)
-        .multiply(M4().makeRotationY(rng() * Math.PI * 2))
-        .multiply(M4().makeScale(s, s * rng.range(0.9, 1.25), s));
+      // RNG 소비 순서는 감쇠 전·후로 바뀌면 안 된다(워커/동기 동치). 스케일·회전을 먼저 뽑고
+      //   #20 위치 기반 수관 감쇠만 곱한다.
+      const yaw = rng() * Math.PI * 2;
+      const yStretch = rng.range(0.9, 1.25);
       const t = rng();
       const mosaic = rng();
       const hillBias = smoothstep(0.3, 0.85, hill);
+      const rC = Math.hypot(p.x - C.x, p.z - C.z);
+      const cd = clearDist ? clearDist(p.x, p.z) : Infinity;
+      const { yMul, xzMul } = villageCanopyAtten(rC, bowlR, cd, KEEP, RAMP);
+      const sx = s * xzMul;
+      const sy = s * yStretch * yMul;
+      const m = M4().makeTranslation(p.x, y, p.z)
+        .multiply(M4().makeRotationY(yaw))
+        .multiply(M4().makeScale(sx, sy, sx));
       // 초기 mask는 점 anchor만 보므로 수관이 성벽·성문 시야 안으로 다시 들어올 수 있다.
       // 크기·회전·색에 필요한 RNG를 모두 소비한 뒤 실제 prototype 반경으로 재검사해 worker와
       // 동기 경로의 난수 순서는 같게 유지하면서 최종 footprint 계약을 닫는다.
-      const visualRadius = s * (isPine ? FOREST_VISUAL_RADIUS.pine : FOREST_VISUAL_RADIUS.broad);
+      const visualRadius = sx * (isPine ? FOREST_VISUAL_RADIUS.pine : FOREST_VISUAL_RADIUS.broad);
       if (mask && mask(p.x, p.z, visualRadius)) continue;
       if (cityWallVegetationBlocked(cityWall, p, {
         corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
@@ -317,7 +336,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
         gateApproachMargin: visualRadius,
       })) continue;
       { const k = gkey(p.x, p.z); let a = grid.get(k); if (!a) { a = []; grid.set(k, a); } a.push({ x: p.x, z: p.z }); }
-      const far = allowFar && Math.hypot(p.x - C.x, p.z - C.z) > nearR;
+      const far = allowFar && rC > nearR;
       if (!far) {
         if (isPine) {
           pineM.push(m);
@@ -329,10 +348,11 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
         }
       } else {
         // FAR: 클러스터 셀에 위치·스케일·계절색 누적(문자열 키 — 비트해시 충돌 회피, 결정론).
+        //   감쇠된 xz 스케일(sx)을 누적해 블롭 footprint 가 근경 감쇠와 맞는다.
         const ck = Math.floor(p.x / clusterCell) + '_' + Math.floor(p.z / clusterCell);
         let cl = clusters.get(ck);
         if (!cl) { cl = { sx: 0, sy: 0, sz: 0, ss: 0, n: 0, col: { spring: [0, 0, 0], summer: [0, 0, 0], autumn: [0, 0, 0], winter: [0, 0, 0] } }; clusters.set(ck, cl); }
-        cl.sx += p.x; cl.sy += y; cl.sz += p.z; cl.ss += s; cl.n++;
+        cl.sx += p.x; cl.sy += y; cl.sz += p.z; cl.ss += sx; cl.n++;
         for (const se of SEASONS) {
           if (isPine) pineColor(se, t, hillBias, _c); else broadColor(se, t, hillBias, mosaic, _c);
           const a = cl.col[se]; a[0] += _c.r; a[1] += _c.g; a[2] += _c.b;

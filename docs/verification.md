@@ -894,6 +894,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-dof.mjs` | 축방향 초점, 단일 DoF controller, 깊이 기여 분류, 프레임레이트 독립 품질 상태·숫자 camera snapshot, 이동 1/정착 13표본 선택 표면 합성과 반해상도 prefilter·source scatter의 순수/자원 계약 | 실제 depth prepass와 전환 배선은 앱 게이트가 맡는다. |
 | `tools/check-dof-app.mjs` | 실제 광각↔망원 focus, 조준점→문·문→문·focus-out 의미 초점 수명, rebuild/reroll 갱신·복합체 fallback, 1/13 frame과 StableBokeh 깊이 제외·상태/자원 복원 | 대표 focus의 moving/stable frame만 렌더하며 미감 판정을 대신하지 않는다. |
 | `tools/check-edge-mist.mjs` | 수평 운해의 아이레벨 유지, 10°→18° 단조 감쇠, 20° 부감 억제, 비정상 카메라 입력 fail-closed | Three 없는 순수 가중치 계약이며 실제 matrix 배선·운해 미감은 `shoot:lod-transition`이 맡는다. |
+| `tools/check-forest-canopy-atten.mjs` | #20 마을 인접 수관 감쇠: 분지 반경·구조물 근접 단조 감쇠, y≤0.60·xz≤0.84 바닥, 외곽 산 atten=0 | Three 없는 순수 수식. 배치·총 그루수·워커 동치는 `check:worker`; 부감 담장선 미감은 `shoot:parcels` / `shoot:forest` / `shoot:entry-aerial`. |
 | `tools/check-road-contract.mjs` | stable ID·junction 양방향 참조, 자기교차·좁은 lens, 곡률, road spatial index | 지형·재질에서 길이 자연스럽게 읽히는지는 시각 하네스로 본다. |
 | `tools/check-drainage-plan.mjs` | 규모/도로 등급별 측구 정책, 실제 지형 하류 경사·lift 상한, 도로·수계·필지·생산지 이격, 저장된 대문 접근축 건넘, 불변 JSON·전역 RNG 비사용 | 물리 단면·판석 미감과 실제 GPU 자원은 `shoot:drainage`, 제품/Worker 직렬화는 app/worker 게이트가 맡는다. |
 | `tools/shoot-drainage.mjs` | 실제 capital 계획·renderer 통합, 같은 카메라 OFF/ON 근경·부감, plan/geometry hash 반복, mesh/draw/triangle/program/material/texture·dispose 예산 | 고정 seed 한 건넘의 시각 증거이며 전체 규모의 배치 수학은 `check:drainage`가 맡는다. |

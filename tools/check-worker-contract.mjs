@@ -179,10 +179,14 @@ const expectedSceneHashes = {
   // 기와 켜 후속(암·수 across 피치 통일 0.34, 물매 UV 호길이, 회첨 튜브 eaveV): 수키와 롤 수·
   //   회첨 튜브 길이·면 UV 가 바뀌어 네 규모 씬 바이트가 의도적으로 변한다. proxy 는 불변
   //   (지붕 fit/필지 배치 무관). 재기준 직전 실측: worker == `?worker=0` 폴백 바이트 동일.
-  village: 'e8e19a4c:ef4c9a4a:d2f271f4:0b64a2a8',
-  town: '51e1d7a2:b7085fce:3b257d28:ff9bdabc',
-  capital: 'bc432a2c:d0c1f39c:60d6c491:deca3bd6',
-  hanyang: '5ba2724e:c6e9a7fc:57df407c:15de5a62',
+  // #20 운무 절단 + 부감 담장선: edge-mist 표고 제곱 pool·yCap, ridge-mist 2단 앵커 튜닝,
+  //   forest-crunch 마을 인접 수관 높이/폭 감쇠와 mtn/infill 밀도 재배치가 숲 인스턴스·운해
+  //   지오메트리를 바꾼다. 목표 그루수·plan 시드는 유지. 재기준 직전 실측: 네 규모 모두
+  //   sync == worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
+  village: '8c1fa39d:b0e7a873:cfb638b6:5ba694f1',
+  town: '30598e81:a529eb33:ecc6eaed:cde1180d',
+  capital: '397a10a3:24913d7b:099d81dc:8673626d',
+  hanyang: 'ef86dc28:0ee18dd4:5c224391:27df4712',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -221,10 +225,12 @@ const expectedProxyHashes = {
   //   오프셋·거리·near 컷어웨이 바이트가 함께 움직인다. 프록시 개수·ID·피사체 경계·격리 계약은 그대로다.
   // 필지·마당 규모(#165): 필지 위치·크기·yardHardObstacles 가 바뀌고 focus detail anchor 가
   //   그 위치에서 파생되므로 네 규모 proxy 바이트가 함께 움직인다. 프록시 개수·격리 계약은 유지.
-  village: '62888af7',
-  town: 'd1299d79',
-  capital: '13594453',
-  hanyang: '62089387',
+  // #20: 숲 배치 재배치가 focus 시야 corridor 식생 배제·카메라 해 바이트에 소폭 반영된다
+  //   (프록시 개수·ID·격리 계약 유지). 재기준 직전 실측: worker == 폴백 바이트 동일.
+  village: '0861e176',
+  town: '866516d0',
+  capital: 'd47d49ef',
+  hanyang: '84ddc254',
 };
 
 const server = await createServer({

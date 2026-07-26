@@ -46,6 +46,12 @@ assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
   'core', 'app', 'particle-geometry',
 ]);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
+assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
+  newPaths: ['src/village/forest-canopy-atten.js'],
+}), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['tools/check-forest-canopy-atten.mjs'], {
+  newPaths: ['tools/check-forest-canopy-atten.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['src/village/plan.js']), ['core', 'app', 'worker']);
 for (const path of [
   'src/village/auxiliary-building-plan.js',
