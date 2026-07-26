@@ -44,7 +44,7 @@ app/src/                       Svelte UI
 | --- | --- | --- |
 | 마을 어댑터 | `src/village/adapter.js` 1,523줄에 worker·handle·pick·edit·환경 결합 | 2줄 호환 façade + `src/runtime/village/`의 역할별 모듈, 최대 파일 `handle.js` 약 760줄 |
 | 마을 populate | `src/village/populate.js` 1,389줄에 모든 조립 구현 | 398줄 순서 orchestration + `src/generators/village/` 6개 생성기, 최대 302줄 |
-| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | integration façade + scene/post/view-shift/cinematic/architectural-reveal/village-camera runtime |
+| 앱 엔진 | `engine.js` 약 2,402줄에 scene/post/view shift/시네마틱/마을 카메라 포함 | integration façade + scene/post/view-shift/cinematic/architectural-reveal/village-camera runtime; #150-M은 대형 분할 전에 `src/camera/view-lifecycle.js`로 explore/focus/hop/focusOut/wave/exit 전이표·event trace를 Three-free로 고정(엔진은 dispatch만, 줌≠선택) |
 | 공용 수학 | geometry, world edge, value noise, smoothstep가 여러 도메인에 복제 | `src/core/math/{geom2,world-edge,value-noise2,scalar}.js`가 단일 구현 소유 |
 | 필지 변환 | layout이 village instancing 내부에 의존 | `src/generators/shared/parcel-transform.js`가 소유, 기존 경로는 re-export |
 | 공개 경계 | 앱과 외부 소비자가 코어 내부 파일을 직접 import | 앱의 코어 import는 `src/api/*`로 한정, 정적 게이트로 고정 |

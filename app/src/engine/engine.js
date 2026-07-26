@@ -19,12 +19,14 @@ import {
   VILLAGE_FOCUS_CAMERA_CLEARANCE,
   VILLAGE_LENS,
   VILLAGE_FOCUS_SKY_FRACTION,
+  createViewTrace,
   dollyDistanceForFov,
   lensScaleForCamera,
   referenceFovForCamera,
   referenceVillageFov,
   setupCinematic,
   villageScreenDistanceForCamera,
+  viewInitialState,
 } from '../../../src/api/cinematic.js';
 import {
   setupAudio,
@@ -245,6 +247,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // 워커가 새 핸들을 만드는 구간도 화면상 하나의 웨이브 수명이다. 애니메이션 여부(village.wave)와
   // 상호작용 busy 여부를 분리해, latest-wins 토큰 교체는 보존하면서 focus/줌 레이스만 닫는다.
   const villageWaveBusy = () => !!(village.wave || village.waveBuild);
+  // #150-M: pure view lifecycle reducer + ring-buffer trace. Engine dispatches
+  // only — existing side effects and guards stay here; selection ≠ zoom.
+  let viewLife = viewInitialState();
+  const viewTrace = createViewTrace(64);
+  const dispatchView = (event, payload = null) => {
+    viewLife = viewTrace.dispatch(viewLife, event, payload);
+    return viewLife;
+  };
   function forEachPresentedVillageHandle(fn) {
     if (!village.active) return 0;
     const current = village.handle;
@@ -1857,7 +1867,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (opts) Object.assign(village.opts, opts);
     if (seed != null) village.seed = seed >>> 0;
     // 재진입(활성): 비동기 빌드일 수 있어 프레이밍 트윈을 onReady 로(새 핸들 site.R 기준). 구 마을 유지 중 부감.
-    if (village.active) { setFocusComposition(0); setPostFocus(false); buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); }); emit('villageMode', true); return; }
+    if (village.active) {
+      dispatchView('enter');
+      setFocusComposition(0); setPostFocus(false);
+      buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.0, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); });
+      emit('villageMode', true); return;
+    }
     // 단일건물 선택·호버 상태 정리
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
@@ -1867,6 +1882,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //   사라져 날씨 자체가 소거된다(look-audit R3 — enterVillageHero 는 이미 같은 이유로 유지한다).
     weatherRef.setWeather(state.weather);
     village.active = true; village.selected = null; village.transitioning = false;
+    dispatchView('enter');
     clearSemanticDofAnchor();
     setFocusComposition(0);
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
@@ -1894,6 +1910,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (village.selected) village.handle.highlightParcel(village.selected, false);
     village.build = null; village.waveBuild = null;   // #123: 진행 중 비동기 빌드·웨이브빌드 취소(이탈 후 스테일 스왑 방지)
     village.active = false; village.selected = null; village.transitioning = false;
+    dispatchView('exit');
     setFocusComposition(0);
     controls.enableZoom = true; controls.minDistance = 0; controls.maxDistance = Infinity;
     renderer.domElement.style.cursor = '';
@@ -1998,6 +2015,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     hoverParcel = null;
     village.handle.highlightParcel(parcelId, true);   // 돌리인 동안 추적 하이라이트
     village.selected = parcelId; village.transitioning = true;
+    dispatchView('focus', { parcelId });
     setPostFocus(true, 0);                              // focus-in 시작은 선명, 카메라와 함께 DoF를 단조 점등
     setZoomRegime('lock');                              // 전환 중 줌 봉인
     // 풀디테일 오버레이 승격(모든 필지) — 편집·리플레이·근접 링 앵커.
@@ -2034,6 +2052,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         onProgress: (k) => emit('villageFocusMorph', k),         // 부감→집 패널 모프(0→1)
         onDone: () => {
           village.transitioning = false;
+          dispatchView('focusDone', { parcelId });
           village.handle.highlightParcel(parcelId, false);        // 도착: 근경엔 박스 숨김
           setZoomRegime('focus', closeupDist);                    // 집 보기 안의 근접·문맥 줌 범위
           emit('villageFocusMorph', 1);
@@ -2068,6 +2087,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!detail) return;
     const warmP = detail.group ? warmShaders(detail.group) : Promise.resolve();   // B 오버레이 프리컴파일(#117)
     village.selected = toId; village.transitioning = true;
+    dispatchView('hop', { parcelId: toId, fromId });
     setPostFocus(true);                                           // 두 상태 모두 focus(멱등) — rim/flare 유지
     setZoomRegime('lock');                                        // 전환 중 줌 봉인
     village.handle.highlightParcel(toId, true);                   // 돌리 동안 B 추적 하이라이트
@@ -2097,6 +2117,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
         onDone: () => {
           village.transitioning = false;
+          dispatchView('hopDone', { parcelId: toId });
           village.handle.highlightParcel(toId, false);              // 도착: 근경 박스 숨김
           if (fromId) village.handle.hideParcelDetail(fromId);      // A 오버레이 해제(A 인스턴스 복원) — 팝을 원거리로
           setZoomRegime('focus', closeupDist);
@@ -2125,6 +2146,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       ? village.handle?.getPickProxy(parcelId)?.cameraFraming?.target || controls.target
       : controls.target;
     village.selected = null; village.transitioning = true;
+    dispatchView('focusOut', { parcelId });
     setZoomRegime('lock');                            // 전환 중 줌 봉인
     if (parcelId) village.handle.highlightParcel(parcelId, true);  // "내 집이 저기" 앵커
     const f = villageAerial();
@@ -2137,6 +2159,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       onProgress: (k) => emit('villageFocusMorph', 1 - k),   // 집→부감 패널 모프(1→0)
       onDone: () => {
         village.transitioning = false;
+        dispatchView('focusOutDone', { parcelId });
         setPostFocus(false);              // 부감 도착 → rim/flare OFF(전환 중엔 유지해 팝 방지)
         if (parcelId) village.handle.hideParcelDetail(parcelId);   // 부감 거리에서 오버레이 해제(팝 은닉)
         settleVillageExplore();
@@ -2304,6 +2327,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     env.setTime('sunset');                              // 조립 중 비주얼 석양 강제 (오디오 반응성 보호를 위해 state.time 은 보존)
     post.setTime('sunset');
     village.active = true; village.selected = null; village.transitioning = true;
+    dispatchView('enter');
     setFocusComposition(0);
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
@@ -2322,6 +2346,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       emit('villageMode', true); onDone?.(); return;
     }
     village.selected = heroId;
+    dispatchView('focus', { parcelId: heroId });
     setPostFocus(true);                                 // 종가 클로즈업 랜딩 → rim/flare ON
     const g = village.handle.showHeroDetail(heroId);   // 풀디테일 오버레이(원본 종가 가림)
     refreshSemanticDofAnchor(heroId);                  // 조립 전 rest-pose의 고정 주출입문 월드점
@@ -2403,6 +2428,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 완료 시 클로즈업 편집 상태로 안착(패널 슬라이드 인).
     playHeroAssembly(g, HERO_ASSEMBLE_DUR, { delay: HERO_ASSEMBLE_DELAY_MS / 1000, onDone: () => {
       village.transitioning = false; heroActive = false; lastActivity = performance.now();
+      dispatchView('focusDone', { parcelId: heroId });
       settleControls();
       controls.update(); // 조립 종료 시점에서도 즉시 컨트롤 관성 리셋
       // 원래 사용자 시간대 비주얼 복구
@@ -2595,6 +2621,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.reveal = null;    // 진입 reveal과 웨이브 fog가 같은 scene.fog를 동시에 소유하지 않게 한다.
     setPostFocus(false);   // 부감 연출 — focus 잔재가 있어도 rim/flare OFF(성능·룩)
     setZoomRegime('lock');
+    dispatchView('wave');   // #150-M: exclusive scenery handoff owns the view phase
     const oldHandle = village.handle;
     const useSeed = (seed != null) ? (seed >>> 0) : village.seed;
     const useOpts = buildOpts || village.opts;
@@ -2670,7 +2697,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.waveBuild = null;
     const w = village.wave;
     if (!w) {
-      if (cancelledBuild) emit('villageWave', { phase: 'cancel' });
+      if (cancelledBuild) {
+        dispatchView('waveCancel');
+        emit('villageWave', { phase: 'cancel' });
+      }
       return cancelledBuild;
     }
     village.wave = null;
@@ -2684,6 +2714,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.handle = w.oldHandle;           // 방어: 웨이브 도중에는 원래 같지만 공개 API 레이스에도 명시
     restoreVillageWavePresentation(w);
     bumpShadow(1200);                       // partial-wave caster 행렬 복원을 즉시 shadow cache에 반영
+    dispatchView('waveCancel');
     emit('villageWave', { phase: 'cancel' });
     return true;
   }
@@ -2708,6 +2739,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     reapplyVillageFog();
     updateWeatherColliders();   // 새 seed/규모의 지붕·마당 AABB로 눈·비 충돌 대상을 즉시 교체
     bumpShadow(2000);   // #140-A 웨이브 완료 후 새 마을 정착 프레임 그림자 갱신
+    dispatchView('waveDone');
     settleVillageExplore();
     emit('villageSeed', village.seed);
     emit('villageWave', { phase: 'done' });
@@ -3033,6 +3065,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           } : null,
         };
       },
+      // #150-M: pure view lifecycle snapshot + ring-buffer event trace (diagnostics).
+      debugViewLifecycle: () => ({
+        phase: viewLife.phase,
+        selected: viewLife.selected,
+        from: viewLife.from,
+        events: viewTrace.toArray(),
+      }),
+
       // 결정론 시각 하네스: 실제 앱의 post/env/scene 수명을 유지한 채 지정 seed 웨이브를 시작하고
       // 한 progress에 정지한다. 일반 UI는 이 API를 쓰지 않으며, cancel까지 같은 공개 수명 경로를 탄다.
       debugStartWave: ({ seed, opts, reframe = false } = {}) => startVillageWave({
@@ -3690,6 +3730,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     'village.isWaving': () => false,
     'village.debugWave': () => ({
       building: false, active: false, old: null, incoming: null, presentation: null,
+    }),
+    'village.debugViewLifecycle': () => ({
+      phase: 'outside', selected: null, from: null, events: [],
     }),
     'village.debugStartWave': () => null,
     'village.debugSeekWave': () => null,
