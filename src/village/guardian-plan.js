@@ -19,11 +19,12 @@ const TAU = Math.PI * 2;
 const SEARCH_STEP = 2.4;
 const LINEAR_ATTEMPTS = 12;
 const RADIAL_RINGS = 18;
-// 보호수는 장식 후보가 아니라 scale별 필수 landmark다. 조밀한 도성에서는 기존 18-ring
-// 근방이 필지·일조 회랑으로 가득 찰 수 있으므로, 기존 후보 순서는 유지한 채 실패할 때만
-// 마을 반경에 비례해 탐색을 이어 간다. 0.4R이면 중앙 기준점(0.15R offset)의 의미를
-// 유지하면서도 한양의 실제 빈터까지 닿고, 이미 성공하던 seed의 위치/hash는 바뀌지 않는다.
-const REQUIRED_ROLE_SEARCH_RADIUS_RATIO = 0.4;
+// 보호수는 장식 후보가 아니라 scale별 필수 landmark다. 조밀한 도성·필지 확대 뒤에는
+// 기존 18-ring 근방이 필지·일조 회랑으로 가득 찰 수 있으므로, 기존 후보 순서는 유지한 채
+// 실패할 때만 마을 반경에 비례해 탐색을 이어 간다. 0.55R이면 중앙 기준점(0.15R offset)의
+// 의미를 유지하면서 town seed 1·9 와 한양의 실제 빈터까지 닿고, 이미 성공하던 seed의
+// 위치/hash는 바뀌지 않는다(탐색 확장만 실패 경로).
+const REQUIRED_ROLE_SEARCH_RADIUS_RATIO = 0.55;
 export const GUARDIAN_CANOPY_RADIUS_BY_KIND = Object.freeze({ zelkova: 14, ginkgo: 8.4 });
 export const GUARDIAN_CANOPY_RADIUS = GUARDIAN_CANOPY_RADIUS_BY_KIND.zelkova;
 export const GUARDIAN_BASE_CLEARANCE = 5;

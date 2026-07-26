@@ -90,6 +90,7 @@
     "check:wave:app": "node tools/run-browser-locked.mjs -- node tools/check-lod-app.mjs --scenario=wave",
     "check:yard": "node tools/check-yard-layout-contract.mjs",
     "check:yard-polygon": "node tools/check-yard-polygon-contract.mjs",
+    "check:yard-proportion": "node tools/check-yard-proportion-contract.mjs",
     "check:yard-life": "node tools/check-yard-life-contract.mjs",
     "check:audio-policy": "node tools/check-audio-policy.mjs",
     "check:critters": "node tools/check-critter-contract.mjs",

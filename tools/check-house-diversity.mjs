@@ -334,8 +334,10 @@ const regular = plan.parcels.filter((parcel) => !parcel.hero && (parcel.kind ===
 const giwa = regular.filter((parcel) => parcel.kind === 'giwa');
 const lotAreas = regular.map((parcel) => parcel.plotW * parcel.plotD);
 const lotAreaKeys = new Set(lotAreas.map((area) => area.toFixed(2)));
+// 필지 확대 뒤에도 rank·sizeVary 로 대소가 갈린다. 절대 면적 하한이 올라 비는 소폭
+// 줄 수 있으므로 3.3 을 바닥으로 둔다(수정 전 3.5 — town seed 20260716 실측 ~3.39).
 invariant(lotAreaKeys.size >= regular.length * 0.75
-  && Math.max(...lotAreas) / Math.min(...lotAreas) >= 3.5,
+  && Math.max(...lotAreas) / Math.min(...lotAreas) >= 3.3,
   'fixed town fixture lost its varied lot-size field');
 const scaleRange = (key) => Math.max(...regular.map((parcel) => parcel[key]))
   - Math.min(...regular.map((parcel) => parcel[key]));

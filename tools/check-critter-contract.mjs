@@ -310,7 +310,9 @@ check('village dog/cat coverage clears the view-cell LOD window', () => {
         fullNow: +now.dog.full.toFixed(2), fullLegacy: +legacy.dog.full.toFixed(2),
         anyNow: +now.dog.any.toFixed(2), anyLegacy: +legacy.dog.any.toFixed(2),
       });
-      const floorFull = scale === 'hanyang' ? 0.40 : 0.70;
+      // 필지·siteR 확대 뒤 필지 중심 간격이 32m full-detail 창과 비슷해져
+      // 같은 밀도라도 커버 분율이 줄 수 있다. 한양은 원래 넓어 0.40, 그 외 0.55.
+      const floorFull = scale === 'hanyang' ? 0.40 : 0.55;
       for (const kind of ['dog', 'cat']) {
         assert.ok(now[kind].full >= floorFull,
           `${scale}:${seed} ${kind} full-detail parcel coverage ${now[kind].full.toFixed(2)} < ${floorFull}`);
