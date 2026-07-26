@@ -20,6 +20,19 @@ const EXACT_IMPACT = new Map([
     './check-verification-plan.mjs',
     './check-worktree-contract.mjs',
   ]],
+  // Catalog metadata lives in docs/credits.md; the pure parser + gate stay in lockstep.
+  ['docs/credits.md', [
+    './check-credits-catalog.mjs',
+  ]],
+  ['app/src/lib/credits-parse.js', [
+    './check-credits-catalog.mjs',
+  ]],
+  ['app/src/lib/credits.js', [
+    './check-credits-catalog.mjs',
+  ]],
+  ['app/src/components/ReferenceModal.svelte', [
+    './check-credits-catalog.mjs',
+  ]],
   ['src/camera/optics.js', [
     './check-dof.mjs',
     './check-plan-contract.mjs',

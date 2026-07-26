@@ -68,6 +68,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-advisory-lock.mjs',
   './check-worktree-contract.mjs',
   './check-worktree-cli.mjs',
+  './check-credits-catalog.mjs',
 ]);
 
 export const FAST_CHECK_PATHS = Object.freeze(FAST_CHECKS.map((path) => `tools/${path.slice(2)}`));

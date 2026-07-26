@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,3 +43,16 @@ if (errors.length) {
 }
 
 console.log(`DOCS: PASS (${tracked.length} tracked Markdown files, local links and document map)`);
+
+// docs/credits.md catalog contract is cheap and must stay in lockstep when only
+// documentation is touched (check:pr routes pure docs → check:docs).
+const catalog = spawnSync(process.execPath, [join(ROOT, 'tools/check-credits-catalog.mjs')], {
+  cwd: ROOT,
+  encoding: 'utf8',
+});
+if (catalog.status !== 0) {
+  process.stderr.write(catalog.stdout || '');
+  process.stderr.write(catalog.stderr || '');
+  process.exit(catalog.status || 1);
+}
+if (catalog.stdout) process.stdout.write(catalog.stdout);

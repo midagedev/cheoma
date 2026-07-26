@@ -9,6 +9,7 @@
     "check:full": "node tools/check-suite.mjs --full",
     "check:pr": "node tools/check-pr.mjs",
     "check:docs": "node tools/check-docs.mjs",
+    "check:credits-catalog": "node tools/check-credits-catalog.mjs",
     "check:list": "node tools/check-list.mjs",
     "check:verification-plan": "node tools/check-verification-plan.mjs",
     "check:verification-browser": "node tools/check-verification-browser.mjs",
