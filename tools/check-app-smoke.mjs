@@ -3200,7 +3200,7 @@ try {
       && referenceContract.openingLinks === 1
       && referenceContract.footwearLinks === 3
       && referenceContract.kitchenUse?.includes('마당 높이 부엌 개구 안')
-      && referenceContract.ornamentUse?.includes('palace 전용 경계')
+      && referenceContract.ornamentUse?.includes('rank palace에만 허용')
       && referenceContract.openingUse?.includes('민가에 그대로 복제하지 않는다')
       && referenceContract.openingUse?.includes('경첩 띠 두 개와 고리 하나')
       && referenceContract.openingUse?.includes('선택 FULL 주거 근경')
@@ -3648,11 +3648,14 @@ try {
     };
   });
   const resumed = texturePlateau.resumedEnvironment;
+  // Night atmosphere is #150-H depth-legibility (src/env/atmosphere-profiles.js NIGHT):
+  // sunInt 1.08 / sunColor 0xa8bce6 / fog 70–420 / fog 0x1e2c46. Older smoke goldens
+  // (0.9 / 0x9fb4d9 / 60–400) predate that retune.
   pass(
     resumed.visible
-      && Math.abs(resumed.sunIntensity - 0.9) < 1e-6
-      && resumed.sunColor === 0x9fb4d9
-      && resumed.fogNear === 60 && resumed.fogFar === 400 && resumed.fogColor === 0x1a2740
+      && Math.abs(resumed.sunIntensity - 1.08) < 1e-6
+      && resumed.sunColor === 0xa8bce6
+      && resumed.fogNear === 70 && resumed.fogFar === 420 && resumed.fogColor === 0x1e2c46
       && Math.abs(resumed.moteIntensity - 0.5) < 1e-6
       && resumed.moteColor === 0xcdd8f0
       && (resumed.smokeColor == null || resumed.smokeColor === 0x969eae),

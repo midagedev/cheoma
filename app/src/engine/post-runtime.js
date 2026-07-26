@@ -85,6 +85,7 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     debugResolution() {
       return {
         pixelRatio: renderer.getPixelRatio(),
+        fillScale: post.fillScale ?? 1,
         // AA 회귀 게이트 판독축: samples=0 이면 컴포저 경로에 AA 가 전혀 없다.
         //   setSamples 로 런타임 교체될 수 있으므로 패스에서 라이브로 읽는다.
         msaaSamples: post.renderPass.samples,

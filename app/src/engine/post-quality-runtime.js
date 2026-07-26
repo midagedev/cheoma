@@ -117,8 +117,10 @@ export function createPostQualityRuntime({
       viewportWidth = Math.max(1, nextWidth);
       viewportHeight = Math.max(1, nextHeight);
       motion.reset();
-      // Resize already rebuilds targets at the renderer pixel ratio; re-assert the
-      // active fill scale so a mid-orbit resize cannot snap back to full density.
+      // A layout/DPR change rebuilds every composer target. Treat it as a new
+      // settled frame so adaptive fill cannot leave the chain at ×0.78 after a
+      // cinematic path or resize (check-app-smoke DPR contract, product snaps).
+      quality.reset();
       appliedFillScale = NaN;
       applyFillScale();
     },
