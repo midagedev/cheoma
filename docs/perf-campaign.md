@@ -52,15 +52,16 @@
 
 | 항목 | 무엇 | 실측 |
 |---|---|---|
-| **Openings house-only swap** | 그룹/담 유지, house 메시만 교체 | preview med **~15ms** (was ~22) |
+| **Openings house-only swap** | 그룹/담 유지, house 메시만 교체 | openings preview **~15–22ms** |
 | **town chunk LOD** | minSiteR 220 | town aerial **~1.1M tris** FAR stack |
 | **movingFillScale 0.72** | 오빗 fill 더 공격적 | settle 시 1.0 복원 |
 | **Scheduler 20/72/1.8** | 더 촘촘한 라이브 프리뷰 | browser cadence 동기화 |
+| **Aerial MSAA 2×** | 부감 2× / focus 4× (desktop) | bench: aerial msaa 2, focus 4 |
 
 ## 다음 라운드 (우선순위)
 
 1. roof-pitch/eave house+wall partial path (shell 변화 시)
-2. MSAA 부감 샘플 하향 A/B (룩 게이트)
+2. worker golden rebaseline if capital/town LOD hash drifts
 3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트

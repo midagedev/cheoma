@@ -4,16 +4,22 @@ import { setupPost, MSAA_SAMPLES_COMPACT, MSAA_SAMPLES_DESKTOP } from '../../../
 import { VILLAGE_FOCUS_DOF_APERTURE } from '../../../src/api/cinematic.js';
 import { createPostQualityRuntime } from './post-quality-runtime.js';
 
+// Aerial village frames: 2× MSAA is enough for soft distant edges and halves the
+// multisample color buffer vs desktop 4×. Focus restores full desktop samples so
+// eave/tile lines stay sharp on the flagship close frame. Compact phones stay 2×.
+const MSAA_SAMPLES_AERIAL = MSAA_SAMPLES_COMPACT;
+
 /** Wire the app's flagship post-processing pipeline and its hover outline. */
 export function createPostRuntime({ renderer, scene, camera, width, height, compact = false }) {
   // 기하 에지 MSAA. 컴포저가 켜진 순간 렌더러의 antialias 플래그는 무효이므로 이 값이 제품
   //   화면의 유일한 AA 소스다(src/env/msaa-render-pass.js). 폰이 2x 인 이유는 필레이트가 아니라
   //   멀티샘플 컬러 버퍼 메모리다 — SHADOW_SIZE 와 같은 iOS Safari 상한 제약.
+  // Boot aerial: start at aerial samples; setFocusBudget promotes to desktop 4×.
   const post = setupPost({
     renderer,
     scene,
     camera,
-    msaaSamples: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_DESKTOP,
+    msaaSamples: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_AERIAL,
   });
   post.setDofAperture(VILLAGE_FOCUS_DOF_APERTURE);
   // DoF·플레어는 전 디바이스에서 살아 있다. 둘은 focus 문맥이 소유하고(engine setPostFocus), 부감은
@@ -87,15 +93,23 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     post,
     outline,
     /**
-     * Focus context owns bloom resolution: aerial/half for village overview,
-     * full device resolution when a house is focused (compact phones stay half).
+     * Focus context owns bloom resolution and MSAA samples:
+     * - aerial: half bloom + 2× MSAA (soft distant haze)
+     * - focus: full bloom + desktop 4× MSAA (sharp eave/tile lines)
+     * Compact phones always stay half bloom / 2× MSAA.
      */
     setFocusBudget(focused) {
       if (disposed) return;
       const nextHalf = compact || !focused;
-      if (nextHalf === bloomHalf) return;
-      bloomHalf = nextHalf;
-      applyBloomResolution(cssW, cssH);
+      if (nextHalf !== bloomHalf) {
+        bloomHalf = nextHalf;
+        applyBloomResolution(cssW, cssH);
+      }
+      if (!compact && typeof post.renderPass?.setSamples === 'function') {
+        post.renderPass.setSamples(
+          focused ? MSAA_SAMPLES_DESKTOP : MSAA_SAMPLES_AERIAL,
+        );
+      }
     },
     updateQuality(dt, referenceDepth) {
       if (disposed) return null;
@@ -112,6 +126,8 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
         pixelRatio: renderer.getPixelRatio(),
         fillScale: post.fillScale ?? 1,
         bloomHalf: compact || bloomHalf,
+        msaaFocus: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_DESKTOP,
+        msaaAerial: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_AERIAL,
         // AA 회귀 게이트 판독축: samples=0 이면 컴포저 경로에 AA 가 전혀 없다.
         //   setSamples 로 런타임 교체될 수 있으므로 패스에서 라이브로 읽는다.
         msaaSamples: post.renderPass.samples,

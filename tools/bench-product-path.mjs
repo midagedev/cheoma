@@ -60,6 +60,7 @@ try {
       geometries: res.geometries,
       fillScale: res.fillScale,
       bloomHalf: res.bloomHalf,
+      msaaSamples: res.msaaSamples,
       composer: res.composer,
       bloom: res.bloom,
       postQualityMode: q.postQualityMode ?? null,
@@ -159,11 +160,17 @@ try {
       commitMs,
       bloomHalf: res.bloomHalf,
       fillScale: res.fillScale,
+      msaaSamples: res.msaaSamples,
       programs: res.programs,
       bloom: res.bloom,
       composer: res.composer,
     };
   }, focusId);
+
+  // Structural assertions for focus budget (MSAA + bloom).
+  if (focus.msaaSamples != null && focus.msaaSamples < 4 && !focus.bloomHalf) {
+    console.warn('[product-path] focus expected desktop MSAA 4, got', focus.msaaSamples);
+  }
 
   const row = (label, obj) => {
     console.log(`\n=== ${label} ===`);
