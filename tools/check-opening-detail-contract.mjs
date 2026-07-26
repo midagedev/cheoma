@@ -3,6 +3,10 @@
 import { OPENING_FACE_CLEARANCE } from '../src/core/surface-clearance.js';
 import {
   OPENING_DETAIL_STYLES,
+  OPENING_DETAIL_TYPES,
+  OPENING_MOTION_MODES,
+  OPENING_LEAF_SURFACES,
+  assertLawfulOpeningDetailSet,
   planOpeningDetail,
 } from '../src/api/opening-detail.js';
 
@@ -72,7 +76,15 @@ invariant(objectSeed.z === 19n && objectSeed.nested.tone === 'pine',
 invariant(nonJsonFootwear.surface === 17n, 'opening plan mutated caller-owned footwear data');
 
 invariant(first.primary && first.kind === 'door', 'primary entrance semantics were lost');
-invariant(first.version === 5, `opening schema version drifted to ${first.version}`);
+invariant(first.version === 6, `opening schema version drifted to ${first.version}`);
+// #150 B taxonomy defaults: residential primary door is salmun + interactive hinge.
+invariant(first.type === 'salmun', `primary door default type drifted to ${first.type}`);
+invariant(first.leafSurface === 'sal', 'salmun door lost sal leaf surface');
+invariant(OPENING_LEAF_SURFACES.includes(first.leafSurface), 'leaf surface outside vocabulary');
+invariant(first.motion.mode === 'hinge' && first.motion.interactive === true
+    && first.interactive === true,
+  'primary door lost interactive hinge motion policy');
+invariant(OPENING_MOTION_MODES.includes(first.motion.mode), 'motion mode outside vocabulary');
 invariant(first.hardware.length === 3, 'civilian primary door does not own the restrained 2 straps/ring set');
 invariant(first.hardware.filter((part) => part.kind === 'hinge-strap').length === 2,
   'primary door hinge straps drifted');
@@ -153,6 +165,9 @@ for (const part of [...first.frame.parts, ...first.hardware]) {
 const secondary = planOpeningDetail({ ...input, primary: false });
 invariant(!secondary.primary && secondary.hardware.length === 0,
   'secondary door acquired repeated ironwork');
+invariant(secondary.type === 'salmun' && secondary.motion.mode === 'fixed'
+    && secondary.interactive === false,
+  'secondary door lost fixed salmun motion policy');
 invariant(secondary.anchors.pivot === null && secondary.anchors.footwear === null
     && secondary.anchors.focus === null,
   'secondary door acquired interaction/life anchors');
@@ -160,6 +175,20 @@ invariant(secondary.anchors.glow
     && Math.abs(secondary.anchors.glow.y - secondary.height * 0.5) < EPS
     && Math.abs(secondary.anchors.glow.outward - secondary.reveal.face) < EPS,
   'secondary door lost its fixed glow anchor');
+
+// Panel (판문) leaf surface is solid wood, not sal lattice.
+const panelDoor = planOpeningDetail({ ...input, type: 'panel', primary: false });
+invariant(panelDoor.type === 'panel' && panelDoor.leafSurface === 'panel'
+    && panelDoor.motion.mode === 'fixed' && panelDoor.interactive === false,
+  'panel door taxonomy drifted');
+
+// Fixed primary keeps entrance focus/footwear but no hinge pivot or product interactive flag.
+const fixedPrimary = planOpeningDetail({ ...input, motion: 'fixed' });
+invariant(fixedPrimary.primary && fixedPrimary.motion.mode === 'fixed'
+    && fixedPrimary.interactive === false && fixedPrimary.anchors.pivot === null
+    && fixedPrimary.hardware.length === 0 && fixedPrimary.anchors.focus
+    && fixedPrimary.anchors.footwear,
+  'fixed primary door lost entrance anchors or kept hinge ironwork');
 
 for (const style of OPENING_DETAIL_STYLES) {
   const windowPlan = planOpeningDetail({
@@ -169,6 +198,11 @@ for (const style of OPENING_DETAIL_STYLES) {
     wallThickness: 0.1,
     ...(style === 'giwa' ? { meoreumHeight: 0.36 } : {}),
   });
+  invariant(windowPlan.type === 'fixed-window',
+    `${style} window default type drifted to ${windowPlan.type}`);
+  invariant(windowPlan.leafSurface === 'sal', `${style} window lost sal leaf surface`);
+  invariant(windowPlan.motion.mode === 'fixed' && windowPlan.interactive === false,
+    `${style} window is not product-fixed`);
   invariant(windowPlan.meoreum.height > 0, `${style} window lost its lower meoreum facility`);
   if (style === 'giwa') {
     invariant(Math.abs(windowPlan.meoreum.height - 0.36) < EPS,
@@ -189,23 +223,85 @@ for (const style of OPENING_DETAIL_STYLES) {
   `${style} window lost its immutable exterior glow anchor`);
 }
 
+// lift-window: lift is lawful vocabulary but product default is fixed/non-interactive.
+const liftDefault = planOpeningDetail({
+  kind: 'window', style: 'giwa', type: 'lift-window', seed: 'lift:default',
+  width: 0.8, height: 0.6,
+});
+invariant(liftDefault.type === 'lift-window' && liftDefault.motion.mode === 'fixed'
+    && liftDefault.interactive === false,
+  'lift-window default is not product-fixed');
+const liftExplicit = planOpeningDetail({
+  kind: 'window', style: 'giwa', type: 'lift-window', motion: 'lift', seed: 'lift:on',
+  width: 0.8, height: 0.6,
+});
+invariant(liftExplicit.motion.mode === 'lift' && liftExplicit.interactive === false,
+  'explicit lift motion became interactive');
+
 const palaceDoor = planOpeningDetail({ ...input, style: 'palace' });
 invariant(palaceDoor.hardware.length === 5
     && palaceDoor.hardware.filter((part) => part.kind === 'pivot-cap').length === 2,
   'palace door lost the restrained full measured-vocabulary interpretation');
+invariant(palaceDoor.type === 'salmun' && palaceDoor.leafSurface === 'sal',
+  'palace door taxonomy drifted');
 
+// Vocabulary / door-window exclusivity / unlawful type+motion.
 let rejected = 0;
 for (const bad of [
   { kind: 'hatch' },
   { style: 'generic' },
   { kind: 'door', meoreumHeight: 0.3 },
   { kind: 'window', lowerPanelHeight: 0.3 },
+  { kind: 'window', type: 'panel' },
+  { kind: 'door', type: 'fixed-window' },
+  { kind: 'window', motion: 'hinge' },
+  { kind: 'window', primary: true },
+  { kind: 'door', primary: false, motion: 'hinge' },
+  { kind: 'door', motion: 'lift' },
+  { kind: 'window', type: 'fixed-window', motion: 'lift' },
+  { type: 'unknown-leaf' },
+  { motion: 'slide' },
 ]) {
-  try { planOpeningDetail(bad); } catch { rejected++; }
+  try { planOpeningDetail({ kind: 'door', style: 'giwa', ...bad }); } catch { rejected++; }
 }
-invariant(rejected === 4, 'opening vocabulary or door/window lower-part semantics failed open');
+invariant(rejected === 13, `opening vocabulary or lawful motion policy failed open (${rejected}/13)`);
+
+// Multi-primary doors fail the set policy even when each plan alone is lawful.
+const multiPrimary = [
+  planOpeningDetail({ ...input, seed: 'a' }),
+  planOpeningDetail({ ...input, seed: 'b' }),
+];
+let multiRejected = false;
+try { assertLawfulOpeningDetailSet(multiPrimary); } catch { multiRejected = true; }
+invariant(multiRejected, 'multiple primary doors were accepted by the set policy');
+
+const singlePrimarySet = [
+  planOpeningDetail({ ...input, seed: 'primary' }),
+  planOpeningDetail({ ...input, seed: 'secondary', primary: false }),
+  planOpeningDetail({
+    kind: 'window', style: 'giwa', seed: 'win', width: 0.7, height: 0.55,
+  }),
+];
+assertLawfulOpeningDetailSet(singlePrimarySet);
+
+// Synthetic window-with-hinge plan (bypassing planner) must still fail the set policy.
+let windowHingeSetRejected = false;
+try {
+  assertLawfulOpeningDetailSet([{
+    kind: 'window', primary: false, interactive: false,
+    motion: { mode: 'hinge', interactive: false },
+  }]);
+} catch { windowHingeSetRejected = true; }
+invariant(windowHingeSetRejected, 'window hinge claim was accepted by the set policy');
+
+// Type vocabulary is complete and frozen.
+invariant(OPENING_DETAIL_TYPES.join('|') === 'panel|salmun|fixed-window|lift-window',
+  'opening type vocabulary drifted');
+invariant(Object.isFrozen(OPENING_DETAIL_TYPES) && Object.isFrozen(OPENING_MOTION_MODES),
+  'opening taxonomy constants are mutable');
 
 console.log(
   `OPENING DETAIL CONTRACT: PASS (frame=${first.frame.parts.length}, hardware=${first.hardware.length}, `
+  + `type=${first.type}, motion=${first.motion.mode}, `
   + `pivot=${first.anchors.pivot.hingeSide < 0 ? 'left' : 'right'})`,
 );

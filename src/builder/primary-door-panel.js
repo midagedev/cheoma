@@ -94,7 +94,10 @@ export function createPrimaryDoorRecessGeometry({
     back.push(front[index], front[index + 2], front[index + 1]);
   }
   geometry.setIndex([...front, ...back]);
-  geometry.translate(0, plan.height * 0.5, (plan.anchors.pivot.outward || 0) - recessDepth);
+  // Hinge primary doors own pivot.outward; fixed primary still needs a recess
+  // plane, so fall back to the wall face (0 in opening-local outward).
+  const leafOutward = plan.anchors?.pivot?.outward || 0;
+  geometry.translate(0, plan.height * 0.5, leafOutward - recessDepth);
   geometry.applyMatrix4(openingPlacementBasis(placement));
   return { geometry, recessDepth };
 }

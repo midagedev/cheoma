@@ -4,5 +4,12 @@
 export {
   OPENING_DETAIL_KINDS,
   OPENING_DETAIL_STYLES,
+  OPENING_DETAIL_TYPES,
+  OPENING_MOTION_MODES,
+  OPENING_LEAF_SURFACES,
+  resolveOpeningDetailType,
+  resolveOpeningDetailMotion,
+  leafSurfaceForOpeningType,
+  assertLawfulOpeningDetailSet,
   planOpeningDetail,
 } from '../builder/opening-detail-plan.js';
