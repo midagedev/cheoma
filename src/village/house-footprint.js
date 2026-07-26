@@ -339,3 +339,26 @@ export function parcelRoofPolygons(parcel) {
   ]);
   return localRoofs.map((roof) => roof.map((point) => parcelWorldPoint(parcel, point)));
 }
+
+// 마당 소품이 벽체 질량을 관통하지 않게 하는 필지 로컬 몸채 폴리곤.
+// 처마(지붕) 아래 배치는 허용하고, 별채는 별도로 전체 지붕 clearance를 유지한다.
+// mja-banga 는 날개 footprint, 일반 주거는 impostor body.polygon 을 sx/sz·houseLocal 로 옮긴다.
+// 궁·절·비주거 지번은 빈 배열.
+export function parcelLocalBodyPolygons(parcel) {
+  if (!parcel || (parcel.kind !== 'giwa' && parcel.kind !== 'choga')) return [];
+  const mja = parcel.mjaHouse;
+  if (mja?.kind === 'mja-banga' && Array.isArray(mja.wings)) {
+    return mja.wings
+      .map((wing) => wing?.footprint)
+      .filter((polygon) => Array.isArray(polygon) && polygon.length >= 3)
+      .map((polygon) => polygon.map((point) => ({ x: point.x, z: point.z })));
+  }
+  const spec = impostorHouseSpec(parcel);
+  const sx = finiteScale(parcel.sx), sz = finiteScale(parcel.sz);
+  const local = parcelHouseTranslation(parcel);
+  const polygon = (spec.body?.polygon || []).map((point) => ({
+    x: point.x * sx + local.x,
+    z: point.z * sz + local.z,
+  }));
+  return polygon.length >= 3 ? [polygon] : [];
+}

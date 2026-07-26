@@ -5,7 +5,10 @@
 // or jar platform through an already accepted tree.
 
 import * as G from '../core/math/geom2.js';
-import { parcelEffectiveRoofBounds } from './house-footprint.js';
+import {
+  parcelEffectiveRoofBounds,
+  parcelLocalBodyPolygons,
+} from './house-footprint.js';
 import {
   localCanopyBlocksSolarAccess,
   parcelHouseTranslation,
@@ -14,6 +17,8 @@ import { VILLAGE_SOLID_WALL_THICKNESS } from './wall-contract.js';
 import { auxiliaryHardObstacle } from './auxiliary-building-plan.js';
 
 export const YARD_HARD_GAP = 0.12;
+// 소품이 벽체 질량을 관통하지 않게 하는 몸채 이격. 처마(지붕) 아래 배치는 허용한다.
+export const YARD_BODY_GAP = YARD_HARD_GAP;
 export const YARD_LIFE_MAX_HEIGHT = 1.2;
 
 // 장독 항아리 군집 계약 — walls.js#makeYardProps 의 JAR_GEO(SphereGeometry R) 와 동일.
@@ -147,21 +152,42 @@ const yardBoxesOverlap = (a, b, gap) =>
 
 // 히어로(종가·관아)는 rectangularParcelShape 라 담과 직사각형이 정의상 일치하고, 실제 평면도
 // impostor 명세가 아닌 컴파운드다. 그래서 히어로는 저작 슬롯을 그대로 쓴다(측정 이탈 0건).
+// 일반 주거는 필지 폴리곤 안쪽에 앉히되, 지붕 아래(처마)는 허용하고 벽체 몸채만 배제한다.
+// 별채(광)는 auxiliary-building-plan 이 전체 지붕 clearance 를 유지한다 — 여기 몸채 규칙으로
+// 완화하지 않는다.
 function yardPlacementContext(parcel) {
-  const points = parcel?.hero ? null : (parcel?.shape?.pts || null);
+  const hero = !!parcel?.hero;
+  const points = hero ? null : (parcel?.shape?.pts || null);
   return {
     points,
     clearance: yardLifeWallInwardClearance(parcel?.wallType),
     taken: [],
+    bodies: hero ? [] : parcelLocalBodyPolygons(parcel),
   };
 }
 
-// 지붕·몸채는 이 판정에 들어오지 않는다. 측정 결과 소품 대부분(76~100%)이 실제 지붕 사각형과
-// 겹치지만, 그 겹침을 여기서 금지하면 소품이 열린 마당으로 밀려나 부속채(광)와 자리를 다툰다:
-// check-auxiliary-building-plan 의 유효 별채가 146/445 → 몸채 전면 배제 91/445 · 고형 소품만
-// 배제 99/445 로 떨어져 100 하한을 깬다. 마당 자체가 포화 상태라는 뜻이며, 처마 밑 겹침은
-// 필지·마당 확대 라운드에서 함께 풀어야 한다(그때 house-footprint 에 몸채 폴리곤을 다시 두면
-// 된다 — 처마 아래는 허용, 벽체 관통만 금지가 물리적으로 옳은 규칙이다).
+function yardBoxPolygon(box) {
+  return [
+    { x: box.x - box.halfX, z: box.z - box.halfZ },
+    { x: box.x + box.halfX, z: box.z - box.halfZ },
+    { x: box.x + box.halfX, z: box.z + box.halfZ },
+    { x: box.x - box.halfX, z: box.z + box.halfZ },
+  ];
+}
+
+function yardBoxClearsBodies(box, bodies, gap = YARD_BODY_GAP) {
+  if (!bodies?.length) return true;
+  const polygon = yardBoxPolygon(box);
+  for (const body of bodies) {
+    if (!body?.length) continue;
+    if (polygonDistance(polygon, body) <= gap) return false;
+  }
+  return true;
+}
+
+// 소품은 처마(지붕) 아래를 허용하되 벽체 질량을 관통하면 안 된다. 몸채 전면 배제(지붕까지
+// 금)는 소품을 열린 마당으로 밀어 별채를 굶겼다. 몸채만 배제하면 처마 밑 자리가 남고
+// 별채 하한(≥100)을 지킬 수 있다.
 function placeYardObject(context, candidates, halfX, halfZ) {
   const authored = candidates[0];
   if (!context.points) return { x: authored.x, z: authored.z, placed: true };
@@ -170,6 +196,7 @@ function placeYardObject(context, candidates, halfX, halfZ) {
     if (!point) continue;
     const box = { x: point.x, z: point.z, halfX, halfZ };
     if (context.taken.some((other) => yardBoxesOverlap(box, other, YARD_HARD_GAP))) continue;
+    if (!yardBoxClearsBodies(box, context.bodies, YARD_BODY_GAP)) continue;
     context.taken.push(box);
     return { x: point.x, z: point.z, placed: true };
   }
@@ -180,7 +207,8 @@ function placeYardObject(context, candidates, halfX, halfZ) {
 // 못 앉는다(측정: 개방 마당 텃밭 24%·빨래줄 69% 만 배치). 이랑 몇 줄짜리 텃밭이나 짧은 빨래줄은
 // 고증상 그대로 유효하므로, 전 크기로 모든 후보를 먼저 시도한 뒤 단계적으로 줄이고, 마지막
 // 단계에서도 못 앉으면 생략한다. 잘라 넣는(clip) 경로는 없다.
-const YARD_SHRINK_STEPS = Object.freeze([1, 0.82, 0.66, 0.52]);
+// 몸채 배제 후에도 처마 밑·앞마당 가장자리 후보가 남도록 0.40 단계까지 줄인다.
+const YARD_SHRINK_STEPS = Object.freeze([1, 0.82, 0.66, 0.52, 0.40]);
 
 function placeSizedYardObject(context, candidates, halfX, halfZ, steps = YARD_SHRINK_STEPS) {
   for (const scale of steps) {
@@ -234,11 +262,17 @@ export function yardHardPlacements(parcel) {
     const line = yardClotheslineLayout(plotW, plotD, 0);
     const halfX = line.span / 2 + CLOTHESLINE_PAD;
     const halfZ = line.span / 2 * CLOTHESLINE_MAX_SIN + CLOTHESLINE_PAD + CLOTH_HALF_WIDTH;
+    // 몸채 날개(ㄱ·ㄷ)가 앞마당 옆을 먹을 수 있어 대문 쪽·중앙 후보를 더 둔다.
     const at = placeSizedYardObject(context, [
       { x: line.x, z: line.z },
       { x: -line.x, z: line.z },
       { x: line.x, z: plotD * 0.34 },
       { x: -line.x, z: plotD * 0.34 },
+      { x: line.x, z: plotD * 0.42 },
+      { x: -line.x, z: plotD * 0.42 },
+      { x: 0, z: plotD * 0.36 },
+      { x: plotW * 0.22, z: plotD * 0.40 },
+      { x: -plotW * 0.22, z: plotD * 0.40 },
     ], halfX, halfZ);
     out.clothesline = {
       span: line.span * at.scale,
@@ -268,6 +302,10 @@ export function yardHardPlacements(parcel) {
       { x: -patch.x, z: patch.z },
       { x: patch.x, z: plotD * 0.38 },
       { x: -plotW * 0.2, z: plotD * 0.38 },
+      { x: plotW * 0.28, z: plotD * 0.42 },
+      { x: -plotW * 0.28, z: plotD * 0.42 },
+      { x: plotW * 0.15, z: plotD * 0.32 },
+      { x: 0, z: plotD * 0.40 },
     ]);
   } else out.vegBed = null;
 
@@ -278,6 +316,10 @@ export function yardHardPlacements(parcel) {
       { x: -patch.x, z: patch.z },
       { x: patch.x, z: plotD * 0.30 },
       { x: plotW * 0.2, z: plotD * 0.30 },
+      { x: -plotW * 0.2, z: plotD * 0.30 },
+      { x: plotW * 0.28, z: plotD * 0.40 },
+      { x: -plotW * 0.28, z: plotD * 0.40 },
+      { x: 0, z: plotD * 0.36 },
     ]);
   } else out.openGarden = null;
 
