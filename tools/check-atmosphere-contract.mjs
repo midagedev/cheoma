@@ -174,7 +174,80 @@ const moonFacade = await readFile(new URL('../src/api/moon-optics.js', import.me
 assert.doesNotMatch(moonFacade, /from\s+['"]three['"]|document\.|window\.|WebGL/i,
   'the public Moon façade stays renderer/browser independent');
 
+// #150-H: day / dawn / sunset must not drift when night depth is retuned.
+// Numeric floors freeze the flagship day and gold sunset light + post grades.
+const dayAtmo = resolveAtmosphereProfile('day');
+const dawnAtmo = resolveAtmosphereProfile('dawn');
+const sunsetAtmo = resolveAtmosphereProfile('sunset', 'gold');
+const dayPost = resolvePostProfile('day');
+const sunsetPost = resolvePostProfile('sunset', 'gold');
+assert.equal(dayAtmo.sunInt, 2.6, 'day sunInt frozen');
+assert.equal(dayAtmo.hemiInt, 0.9, 'day hemiInt frozen');
+assert.equal(dayAtmo.fogNear, 95, 'day fogNear frozen');
+assert.equal(dayAtmo.fogFar, 500, 'day fogFar frozen');
+assert.equal(dayAtmo.exposure, 1.05, 'day exposure frozen');
+assert.equal(dayAtmo.lantern, 0.0, 'day lantern off');
+assert.equal(dayPost.rim, 0.45, 'day rim frozen');
+assert.equal(dayPost.bloomThreshold, 0.92, 'day bloom threshold frozen');
+assert.equal(dayPost.sat, 1.0, 'day sat frozen');
+assert.equal(dawnAtmo.sunInt, 1.7, 'dawn sunInt frozen');
+assert.equal(dawnAtmo.hemiInt, 0.75, 'dawn hemiInt frozen');
+assert.equal(sunsetAtmo.sunInt, 2.38, 'gold sunset sunInt frozen');
+assert.equal(sunsetAtmo.hemiInt, 0.72, 'gold sunset hemiInt frozen');
+assert.equal(sunsetAtmo.fogNear, 70, 'gold sunset fogNear frozen');
+assert.equal(sunsetPost.rim, 2.05, 'gold sunset rim frozen');
+assert.equal(sunsetPost.bloomThreshold, 0.80, 'gold sunset bloom threshold frozen');
+
+// Night depth legibility: existing moon (sun slot) + hemi + fog + grade/rim only.
+const nightAtmo = resolveAtmosphereProfile('night');
+const nightPost = resolvePostProfile('night');
+assert.equal(nightAtmo.moon, true, 'night enables moon presentation');
+assert.equal(nightAtmo.lantern, 1.0, 'night lantern weight stays full');
+assert.deepEqual(nightAtmo.sunDir, [-7, 5, -32], 'night moon direction stable');
+assert.ok(nightAtmo.sunInt >= 1.0, 'night moon intensity models eave/roof form');
+assert.ok(nightAtmo.hemiInt >= 0.38, 'night hemi fill lifts soffits and wall faces');
+assert.ok(nightAtmo.sunInt > nightAtmo.hemiInt, 'directional moon remains stronger than hemi fill');
+assert.ok(nightAtmo.exposure >= 1.18, 'night exposure keeps midtones above crushed black');
+assert.ok(nightAtmo.fogNear >= 60 && nightAtmo.fogNear < nightAtmo.fogFar,
+  'night fog leaves near architecture readable while layering ridges');
+assert.ok(nightAtmo.mistOp >= 0.48, 'night mist contributes aerial depth cue');
+assert.equal(nightPost.bloomThreshold, 0.32, 'night bloom threshold anchors moon soft-knee');
+assert.equal(nightPost.sunGlow, 0, 'night has no sun glow disc');
+assert.equal(nightPost.flare, 0, 'night has no lens flare');
+assert.ok(nightPost.rim >= 0.45, 'night moon rim energy separates eave/column silhouettes');
+assert.ok(nightPost.rimPower <= 2.6, 'night rim is soft enough for architectural edges');
+assert.ok(nightPost.rimWrap >= 0.14, 'night rim wrap fills non-moon edges without a new light');
+assert.equal(nightPost.sat, 1.0, 'night grade keeps sat neutral (warmth from lanterns only)');
+// Profile registry itself never constructs lights — retune is intensity/colour only.
+assert.doesNotMatch(source, /new\s+(THREE\.)?(Point|Directional|Spot|Hemisphere|RectArea)Light/,
+  'atmosphere profiles add no light objects');
+
+// Village light rig (linked consumer): still exactly one hemi + one fill directional.
+// Values are night-only; day/sunset fill tables stay as authored.
+const villageLightSource = await readFile(
+  new URL('../src/runtime/village/lighting.js', import.meta.url),
+  'utf8',
+);
+const hemiLightCt = (villageLightSource.match(/new THREE\.HemisphereLight/g) || []).length;
+const dirLightCt = (villageLightSource.match(/new THREE\.DirectionalLight/g) || []).length;
+const pointLightCt = (villageLightSource.match(/new THREE\.PointLight/g) || []).length;
+assert.equal(hemiLightCt, 1, 'village light rig keeps one HemisphereLight');
+assert.equal(dirLightCt, 1, 'village light rig keeps one fill DirectionalLight');
+assert.equal(pointLightCt, 0, 'village light rig adds no PointLights');
+assert.match(villageLightSource, /night:\s*\{[\s\S]*?hemiInt:\s*0\.5[0-9]?/,
+  'village night hemi fill is raised for depth legibility');
+assert.match(villageLightSource, /night:\s*\{[\s\S]*?fillInt:\s*0\.3[5-9]/,
+  'village night anti-solar fill is raised for wall/column modeling');
+assert.match(villageLightSource, /glowBoost:\s*1\.5/,
+  'hanji glowBoost stays product 1.5 (no wood emissive path)');
+// Day/sunset village fill must not have been rewritten by the night retune.
+assert.match(villageLightSource, /day:\s*\{[\s\S]*?hemiInt:\s*0\.22/,
+  'day village hemi fill frozen');
+assert.match(villageLightSource, /sunset:\s*\{[\s\S]*?fillInt:\s*0\.62/,
+  'sunset village fill frozen');
+
 console.log(
   'ATMOSPHERE CONTRACT: PASS '
-  + '(3 synchronized sunset looks, stable sun direction, 0.52° Moon + split 5° corona)',
+  + '(3 synchronized sunset looks, stable sun direction, 0.52° Moon + split 5° corona, '
+  + 'night depth fill without new lights, day/sunset frozen)',
 );

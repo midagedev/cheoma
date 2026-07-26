@@ -42,18 +42,27 @@ const DAY = profile({
   flare: 0.24, flareColor: 0xfff2e2,
 });
 
+// #150-H night depth legibility: form-model eaves/columns/walls with the *existing*
+// moon (directional sun slot), hemisphere fill, fog layering, and post grade/rim.
+// No new lights, material families, or emissive paths. Day/dawn/sunset are untouched.
+// bloomThreshold stays 0.32 — moon-optics soft-knee is calibrated to that night floor.
 const NIGHT = profile({
-  sky: [[0.0, '#2b3a58'], [0.4, '#1c2a48'], [0.75, '#141d33'], [1.0, '#0c1220']],
-  sunDir: [-7, 5, -32], sunColor: 0x9fb4d9, sunInt: 0.9,
-  hemiSky: 0x33405e, hemiGround: 0x161c28, hemiInt: 0.3,
-  fog: 0x1a2740, fogNear: 60, fogFar: 400, exposure: 1.16,
-  ridgeNear: 0x222d48, ridgeFar: 0x445270, mist: 0x53628a, mistOp: 0.46,
+  // Slightly lifted mid-sky so the cool lunar band reads as haze rather than crushed navy.
+  sky: [[0.0, '#2f3f60'], [0.4, '#1f2e4e'], [0.75, '#16233a'], [1.0, '#0d1424']],
+  // Direction preserved (shadow / moon azimuth contract); colour + intensity model form.
+  sunDir: [-7, 5, -32], sunColor: 0xa8bce6, sunInt: 1.08,
+  // Hemi fill lifts soffits and wall faces the moon never reaches without erasing direction.
+  hemiSky: 0x3d4c6e, hemiGround: 0x1c2436, hemiInt: 0.42,
+  // Near architecture stays readable; far fog still layers ridges for aerial depth.
+  fog: 0x1e2c46, fogNear: 70, fogFar: 420, exposure: 1.22,
+  ridgeNear: 0x26324e, ridgeFar: 0x4a5a78, mist: 0x5a6a92, mistOp: 0.52,
   lantern: 1.0, moon: true,
 }, {
-  bloomStrength: 0.70, bloomRadius: 0.62, bloomThreshold: 0.32,
-  rim: 0.32, rimColor: 0xaec2e6, rimPower: 3.0, rimWrap: 0.12,
-  sunGlow: 0.0, sunGlowSize: 0, sunGlowColor: 0x9fb4d9, sat: 1.0,
-  flare: 0.0, flareColor: 0x9fb4d9,
+  bloomStrength: 0.72, bloomRadius: 0.62, bloomThreshold: 0.32,
+  // Softer, wider moon rim so eave silhouettes and column edges separate from walls.
+  rim: 0.55, rimColor: 0xb4c8ec, rimPower: 2.35, rimWrap: 0.16,
+  sunGlow: 0.0, sunGlowSize: 0, sunGlowColor: 0xa8bce6, sat: 1.0,
+  flare: 0.0, flareColor: 0xa8bce6,
 });
 
 export const SUNSET_LOOKS = deepFreeze({
