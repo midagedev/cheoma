@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_HERO_FOCUS_ELEVATION,
   VILLAGE_LENS,
   dollyDistanceForFov,
@@ -130,6 +131,70 @@ const unusableSemantic = fitFocusFraming({
 assert.ok(!unusableSemantic.fitted && unusableSemantic.overflow
   && unusableSemantic.scale === 1,
 'a nearly full sheet must fail closed instead of shrinking architecture into a thumbnail');
+
+// ── 판정 좌표계 ↔ 실제 적용되는 투영 (ui-consolidation §6.17) ─────────────────────
+// `fitFocusFraming` 은 카메라 축이 safe rect 중심에 놓인다고 가정하고 담김을 판정한다. 제품
+// 런타임(app/src/engine/view-shift.js)은 그 재중심 시프트에 **컴포지션 항**을 더해서 적용한다:
+//   apply(): camera.setViewOffset(w, h, -curX, curY + compositionYFrac·h, w, h)
+// three 의 뷰 오프셋은 화면을 (-offsetX, -offsetY) 만큼 옮기므로 적용 화면 시프트는
+// (+curX, -(curY + compositionYFrac·h)) 이고, 컴포지션은 패널 시프트가 꺼져 있어도 남는다.
+// 근접 focus 의 정착 컴포지션은 -VILLAGE_FOCUS_SKY_FRACTION(주거 필지 전부, 궁·절만 0)이므로
+// 판정이 그 항을 모르면 **판정과 출하 프레임이 다른 좌표계**가 된다. 그 불일치는 밴드가 넉넉한
+// 데스크톱에서는 조용히 숨고, 세로 폰(밴드 257px)에서는 피사체 하단을 시트 아래로 밀어 넣는다.
+const phoneEditLayout = {
+  // 390×844 에서 편집 중 실측값(§6.14 칩 접힘 상태): safe 16…374 × 81…338 → insets 역산.
+  width: 390,
+  height: 844,
+  insets: { left: 0, right: 0, top: 65, bottom: 490 },
+  gutter: 16,
+};
+const safePhoneEdit = safeViewportRect(phoneEditLayout);
+const settledCompositionY = -VILLAGE_FOCUS_SKY_FRACTION * phoneEditLayout.height;
+const appliedPhoneShift = {
+  x: safePhoneEdit.shiftX,
+  y: safePhoneEdit.shiftY + settledCompositionY,
+};
+const idealPhoneFit = fitFocusFraming({
+  framing: semanticFrame,
+  subject: semanticSubject,
+  viewport: phoneEditLayout,
+});
+// 1) 기본 경로는 불변이어야 한다 — 적용 시프트를 넘기지 않으면 판정은 이상적 재중심 시프트를 쓴다.
+assert.equal(idealPhoneFit.safeRect.appliedShiftX, safePhoneEdit.shiftX,
+  'default fitting must keep judging at the ideal recentring shift');
+assert.equal(idealPhoneFit.safeRect.appliedShiftY, safePhoneEdit.shiftY,
+  'default fitting must keep judging at the ideal recentring shift');
+const appliedPhoneFit = fitFocusFraming({
+  framing: semanticFrame,
+  subject: semanticSubject,
+  viewport: phoneEditLayout,
+  appliedShift: appliedPhoneShift,
+});
+// 2) 넘긴 적용 시프트가 그대로 판정 공간이 된다(이중 적용·무시 둘 다 금지).
+assert.equal(appliedPhoneFit.safeRect.appliedShiftY, appliedPhoneShift.y,
+  'an explicit applied shift must become the space the verdict is judged in');
+// 3) 본론: `fitted` 는 **실제 적용될 투영**에서 참이어야 한다. 컴포지션을 모른 채 판정하면
+//    여기서 fitted:true 를 돌려주지만 출하 프레임은 피사체 하단이 밴드 밖(시트 아래)이다.
+const appliedPhoneBounds = appliedPhoneFit.projectedBounds;
+assert.ok(!appliedPhoneFit.fitted || (appliedPhoneBounds
+  && appliedPhoneBounds.left >= safePhoneEdit.left - EPS
+  && appliedPhoneBounds.right <= safePhoneEdit.right + EPS
+  && appliedPhoneBounds.top >= safePhoneEdit.top - EPS
+  && appliedPhoneBounds.bottom <= safePhoneEdit.bottom + EPS),
+`a fitted verdict must hold in the projection the runtime applies (${JSON.stringify({
+  fitted: appliedPhoneFit.fitted,
+  scale: appliedPhoneFit.scale,
+  bounds: appliedPhoneBounds,
+  band: [safePhoneEdit.left, safePhoneEdit.right, safePhoneEdit.top, safePhoneEdit.bottom],
+})})`);
+// 4) 이상 시프트로 판정하면 통과하던 프레임이 적용 시프트에서는 더 물러나거나 overflow 여야 한다
+//    — 같은 픽스처에서 두 판정이 같은 값이면 컴포지션 항이 무시되고 있다는 뜻이다.
+assert.ok(appliedPhoneFit.scale > idealPhoneFit.scale + EPS || !appliedPhoneFit.fitted,
+  `the composition term must change the solve, not just the report (${JSON.stringify({
+    idealScale: idealPhoneFit.scale,
+    appliedScale: appliedPhoneFit.scale,
+    appliedFitted: appliedPhoneFit.fitted,
+  })})`);
 
 const from = frame({ x: -14, y: 9, z: 29 }, { x: 0, y: 4.2, z: 0 }, 28, 28, 0);
 const close = frame({ x: 1.5, y: 1.35, z: 34 }, { x: 0, y: 5.2, z: 0 }, 18, 21, 1);

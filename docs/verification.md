@@ -880,7 +880,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-determinism.mjs` | 일부 plan 반복성 보조 검사 | worker·forest·temple 전체 계약이 아니다. |
 | `tools/verify-solo-app.mjs` | 외딴집·절 단독 populate와 browser error | 전체 앱·worker 검사가 아니다. |
 | `tools/check-cinematic-turns.mjs` | 브라우저 없이 ±π 최단각, 각속도·각가속도, 주도로 시작점, 합성 막다른 길 반복 왕복 | 실제 마을 지형과 앱 카메라 배선은 확인하지 않는다. |
-| `tools/check-cinematic-reveal.mjs` | Three 없이 arrival/rebuild의 seed 결정론, 정확한 양 끝점, 0 끝점 속도, 최대 시선 회전, compact/reduced-motion, solar-opening 안전 구도의 결정론·카메라 고도·망원 보상, fitted 처마/계획 공공 소품 blocker, 막힌 기존점의 hysteresis 배제, 정확한 terrain-grid 3×3 focus cutaway와 집 앞 안전 깊이 | 실제 OrbitControls·DoF·조립은 확인하지 않는다. |
+| `tools/check-cinematic-reveal.mjs` | Three 없이 arrival/rebuild의 seed 결정론, 정확한 양 끝점, 0 끝점 속도, 최대 시선 회전, compact/reduced-motion, solar-opening 안전 구도의 결정론·카메라 고도·망원 보상, fitted 처마/계획 공공 소품 blocker, 막힌 기존점의 hysteresis 배제, 정확한 terrain-grid 3×3 focus cutaway와 집 앞 안전 깊이, **그리고 fit 판정이 실제 적용되는 투영과 같은 좌표계에서 내려지는지**(ui-consolidation §6.17: 기본 경로는 이상적 재중심 시프트로 불변, `appliedShift` 를 넘기면 탐색·판정이 그 공간으로 옮겨가고 컴포지션 항이 해를 바꾼다) | 실제 OrbitControls·DoF·조립은 확인하지 않는다. |
 | `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, `capital/7/p8`(TERRAIN_FIXTURE)의 authored 망원·live near-plane·focus-in 안전성, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
 | `tools/verify-cine.mjs` | 세 규모 drone path와 walker 100초 수학·결정론 | 앱 배선은 확인하지 않는다. |
 | `tools/verify-cinewire.mjs` | 앱 패스 경계 시선 상한·시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |

@@ -102,6 +102,16 @@ export function transformFocusSubject(subject, {
   };
 }
 
+/**
+ * Reduce physical viewport insets to one central safe rectangle.
+ *
+ * `shiftX` / `shiftY` are the *ideal* recentring: the projection offset that would
+ * put the camera axis exactly at this rectangle's centre. A product runtime may
+ * apply something else — it can clamp the shift, and it can compose an artistic
+ * offset on top of it — so a consumer that judges containment must tell
+ * `fitFocusFraming()` which shift it will really apply (`appliedShift`), or the
+ * verdict is computed in a different space than the frame that ships.
+ */
 export function safeViewportRect({
   width,
   height,
@@ -166,6 +176,9 @@ function cameraBasis(position, target) {
   };
 }
 
+// Screen position under the projection offset the runtime will actually apply.
+// `rect.appliedShiftX/Y` follow the product convention: a positive X shift moves the
+// subject right, a positive Y shift moves it up (see fitFocusFraming).
 function projectPoint(point, position, basis, fov, aspect, rect) {
   const dx = point.x - position.x;
   const dy = point.y - position.y;
@@ -176,8 +189,8 @@ function projectPoint(point, position, basis, fov, aspect, rect) {
   const ndcX = (dx * basis.right.x + dz * basis.right.z) / (depth * tanHalf * aspect);
   const ndcY = (dx * basis.up.x + dy * basis.up.y + dz * basis.up.z) / (depth * tanHalf);
   return {
-    x: (ndcX + 1) * rect.viewportWidth * 0.5 + rect.shiftX,
-    y: (1 - ndcY) * rect.viewportHeight * 0.5 - rect.shiftY,
+    x: (ndcX + 1) * rect.viewportWidth * 0.5 + rect.appliedShiftX,
+    y: (1 - ndcY) * rect.viewportHeight * 0.5 - rect.appliedShiftY,
   };
 }
 
@@ -217,13 +230,32 @@ function contains(rect, projected) {
     && projected.bounds.bottom <= rect.bottom + EPS;
 }
 
+/**
+ * Dolly the authored framing back along its own ray until the subject's fit points
+ * sit inside the viewport left by product chrome. Lens, target, axis and elevation
+ * are preserved; only distance changes.
+ *
+ * `appliedShift` is the projection offset the caller will really apply, in screen
+ * pixels, positive X moving the subject right and positive Y moving it up. Omit it
+ * and both the search and the verdict use the ideal recentring shift of the safe
+ * rectangle — the historical behaviour, byte-identical. Pass it when the runtime
+ * offset differs from that ideal (a clamp, or an artistic composition offset
+ * composed on top), because `fitted`/`overflow` are only meaningful in the space
+ * the frame is actually rendered in.
+ */
 export function fitFocusFraming({
   framing,
   subject,
   viewport,
+  appliedShift = null,
   maxDollyScale = DEFAULT_MAX_DOLLY_SCALE,
 } = {}) {
-  const rect = safeViewportRect(viewport);
+  const ideal = safeViewportRect(viewport);
+  const rect = {
+    ...ideal,
+    appliedShiftX: Number.isFinite(appliedShift?.x) ? appliedShift.x : ideal.shiftX,
+    appliedShiftY: Number.isFinite(appliedShift?.y) ? appliedShift.y : ideal.shiftY,
+  };
   const points = focusSubjectFitPoints(subject);
   const validFraming = finitePoint(framing?.position)
     && finitePoint(framing?.target)

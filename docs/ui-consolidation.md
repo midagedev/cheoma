@@ -832,3 +832,64 @@ cd <snapshot>/app && npx vite --config <전용 config: host 127.0.0.1, port 454x
 같이 멈추고, 스크린캐스트는 컴포지터 틱만으로 프레임을 밀지 않는다(맨 `opacity` 애니메이션조차 잔여
 `compositeFailed` 사유를 달고 0프레임 — chrome·chromium 두 백엔드 동일). 그래서 판정은 "프레임당 메인
 스레드 페인트가 0" 이라는 원인 지표로 세웠다.
+
+### 6.17 판정 좌표계 수정 — `fitFocusFraming` 이 실제 적용되는 투영에서 판정한다 (2026-07-26)
+
+§6.15 의 두 결함 중 **(ii)** 를 고쳤다. (i)(첫 solve 가 크롬 모프 전 인셋을 본다)은 카메라 안무
+소관으로 남아 있고, 설계·디프는 리드에게 텍스트로 넘겼다.
+
+#### 무엇이 어긋나 있었나 (순수 산술)
+
+| 주체 | 화면 시프트 |
+|---|---|
+| 판정 (`src/camera/focus-framing.js#projectPoint`) | `(+shiftX, -shiftY)` — 카메라 축이 safe rect **중심**에 놓인다고 가정 |
+| 런타임 (`app/src/engine/view-shift.js#apply`) | `setViewOffset(w, h, -curX, curY + compositionYFrac·h, w, h)` → three 는 화면을 `(-offsetX, -offsetY)` 옮기므로 실제 `(+curX, -(curY + compositionYFrac·h))` |
+
+차이는 두 항이다. **컴포지션** `compositionYFrac·h` — `setFocusComposition` 이
+`-VILLAGE_FOCUS_SKY_FRACTION(0.13) × focusCompositionFor(parcelId)` 를 넣고 `focusCompositionFor`
+는 궁·절만 0, **주거 필지는 전부 1** 이므로 근접 focus 마다 `-0.13·h` 가 적용된다. 그리고 **시프트 캡**
+`±0.42·{W,H}` 도 런타임에만 있다. 판정은 둘 다 몰랐다.
+
+증상(실측, 390×844 편집 중 밴드 `16…374 × 81…338`): 판정은 `fitted:true` 를 돌려주는데 적용 투영은
+피사체를 **109.7px 아래로** 밀어 하단 56.5px 가 밴드 밖(편집 시트 아래)으로 나간다. 데스크톱은 밴드가
+519px 높아 같은 불일치가 조용히 숨는다 — "판정은 맞고 프레임은 틀린" 상태가 폰에서만 드러난다.
+
+#### 수정
+
+- `fitFocusFraming({ … appliedShift })` — 선택 입력. 넘기면 **탐색과 판정 모두** 그 시프트로 수행하고,
+  결과의 `safeRect.appliedShiftX/Y` 로 어떤 공간에서 판정했는지 노출한다. 넘기지 않으면 이상적 재중심
+  시프트를 그대로 써서 **기존 소비자 경로는 바이트 동일**하다(순수 게이트가 두 단정으로 고정).
+  `safeViewportRect` 는 손대지 않았다 — `shiftX/shiftY` 는 여전히 "런타임이 목표로 삼아야 하는 이상값"
+  이고, 그 문서 주석만 보강했다.
+- `view-shift.js#fitFraming(framing, subject, { compositionY })` — 정착 시프트 `(tgtX, tgtY + comp·h)`
+  를 넘긴다. `compositionY` 는 **정착 목적지**를 받는 선택 인자다(focus 는 컴포지션을 트윈하므로
+  목적지를 아는 호출자가 넘겨야 첫 solve 까지 정확하다 — (i) 패치와 함께 배선된다).
+
+#### 프레임 영향 (실측 p1, 정착 밴드 기준)
+
+| 뷰포트 | 이상 시프트 해 | 적용 시프트 해 |
+|---|---|---|
+| desktop 1280×800 (밴드 717×519) | `scale 1.213 fitted` · 57.5m | `scale 1.493 fitted` · 70.8m — dolly **+23%** |
+| phone 390×844 (밴드 358×257) | `scale 2.433 fitted` · 115.4m | `scale 4(상한) overflow` · 189.7m |
+
+폰이 담기지 않는 것은 구조적이다: 컴포지션이 카메라 축을 밴드 하단 **18.8px** 위까지 내리고, dolly 는
+박스를 그 축 **주위로** 줄이므로 담기려면 피사체 하반부가 19px 미만이어야 한다 — dolly 로 풀 수 없다.
+그래서 `view-shift` 는 **정직한 판정은 유지하고 프레임은 종전(이상 시프트) 해를 쓴다**
+(`lastFit.framingSource === 'ideal-shift-fallback'`, `appliedSearchScale` 로 탐색 도달값 병기).
+담기지 못하는 제약에 dolly 를 계속 당기면 집만 4× 작아지고 담기지도 않기 때문이다. 이 폴백은
+**정책 선택**이며 한 줄로 되돌릴 수 있다.
+
+#### 남은 룩 결정 (리드/카메라 트랙)
+
+폰에서 `-0.13·h`(=110px)는 257px 밴드가 흡수할 수 없는 크기다. 선택지: ①컴포지션을 밴드 여유에 맞춰
+클램프(폰 하늘 여백이 줄지만 집이 프레임에 든다) ②솔버에 dolly 외 두 번째 레버로 컴포지션 축소를 준다
+③폰 편집 프레임에서는 집 하단이 시트 아래로 들어가는 것을 감수한다. 권고는 ①이다 — 다만 클램프 분수를
+잘못 잡으면 데스크톱 하늘 여백까지 깎으므로(104px < 밴드 절반 260px 이라 데스크톱은 지금도 여유가 있다)
+폰에서만 조여야 한다.
+
+#### (i) 과의 의존
+
+현재 출하되는 프레임은 위 두 해 어느 쪽도 아니다(실측 desktop `scale 1.305`, phone `4`) — 첫 solve 가
+모프 중 밴드를 보기 때문이다(§6.15). **(i) 이 들어오기 전에는 (ii) 의 프레임 효과가 예측 가능해지지
+않는다.** 반대로 (i) 만 고치면 판정이 다시 부정직해져 같은 결함이 조용히 돌아온다. 두 수정은 함께 판단해야
+한다.

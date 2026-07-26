@@ -37,6 +37,11 @@ function intersects(a, b) {
 // silently ignored; without the second, a mid-height dock still overlapping a
 // sliver of the safe rectangle could surrender the entire band above it.
 const EDGE_ANCHOR_TOLERANCE = 28;      // chrome insets are clamp(10px … 22px)
+const COMPOSITION_LIMIT = 0.3;         // normalized artistic shift, both directions
+const clampComposition = (fraction) => Math.max(
+  -COMPOSITION_LIMIT,
+  Math.min(COMPOSITION_LIMIT, Number(fraction) || 0),
+);
 
 function measureViewportInsets(container) {
   const width = container.clientWidth || 1;
@@ -209,7 +214,22 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     }
   }
 
-  function fitFraming(framing, subject) {
+  // The projection offset this runtime will really apply once the shift has settled.
+  // apply() writes setViewOffset(w, h, -x, y, w, h) with y = curY + compositionYFrac·h,
+  // and three's view offset moves the image by (-offsetX, -offsetY), so the settled
+  // screen shift is (+tgtX, -(tgtY + compositionYFrac·h)) — the panel term is already
+  // clamped inside sampleTarget(), and the composition term survives even when panel
+  // shifting is disabled. Handing this to the solver is what keeps `fitted`/`overflow`
+  // true of the frame that ships instead of of an uncomposed ideal (§6.17).
+  function appliedProjectionShift(compositionY) {
+    const height = container.clientHeight || 1;
+    return { x: state.tgtX, y: state.tgtY + compositionY * height };
+  }
+
+  // compositionY: the *settled* composition of the frame being solved for. A focus
+  // lifecycle tweens composition toward its destination, so a caller that knows the
+  // destination should pass it; otherwise the current value is the best available.
+  function fitFraming(framing, subject, { compositionY = null } = {}) {
     if (!framing?.position || !framing?.target) return framing;
     if (!state.enabled) {
       return {
@@ -219,26 +239,54 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
       };
     }
     sampleTarget();
+    const composition = Number.isFinite(compositionY)
+      ? clampComposition(compositionY)
+      : state.compositionYFrac;
     const result = fitFocusFraming({
       framing,
       subject,
       viewport: state.layout,
+      appliedShift: appliedProjectionShift(composition),
     });
-    state.lastFit = result;
+    // When the applied projection cannot contain the subject, dollying is the wrong lever
+    // and pulling on it makes the frame worse: the composed shift puts the camera axis near
+    // a band edge (measured 390×844 editing: axis 18.8px above the band bottom), and a dolly
+    // shrinks the box *around that axis*, so containment would need the subject's lower half
+    // to be under 19px. The honest solve therefore runs to the dolly clamp and still
+    // overflows — 4× further away, no better framed. Keep the honest verdict for consumers
+    // and gates, but let the frame stay at the previous (ideal-shift) solve rather than
+    // regress. The real remedy is a composition that respects the band; that is a look
+    // decision, recorded in ui-consolidation §6.17.
+    let framingResult = result;
+    if (!result.fitted) {
+      const idealFit = fitFocusFraming({ framing, subject, viewport: state.layout });
+      framingResult = idealFit;
+      // `scale` 은 항상 **출하된 프레임**의 dolly 를 가리킨다(소비자가 fit.scale 로 프레임 크기를
+      // 읽는다). 정직한 탐색이 도달한 값은 appliedSearchScale 로 따로 남긴다.
+      state.lastFit = {
+        ...result,
+        scale: idealFit.scale,
+        appliedSearchScale: result.scale,
+        framingSource: 'ideal-shift-fallback',
+        idealFitted: idealFit.fitted,
+      };
+    } else {
+      state.lastFit = { ...result, framingSource: 'applied-shift' };
+    }
     const fitted = {
       ...framing,
       position: framing.position.clone(),
       target: framing.target.clone(),
     };
-    if (result.framing?.position) fitted.position.set(
-      result.framing.position.x,
-      result.framing.position.y,
-      result.framing.position.z,
+    if (framingResult.framing?.position) fitted.position.set(
+      framingResult.framing.position.x,
+      framingResult.framing.position.y,
+      framingResult.framing.position.z,
     );
-    if (result.framing?.target) fitted.target.set(
-      result.framing.target.x,
-      result.framing.target.y,
-      result.framing.target.z,
+    if (framingResult.framing?.target) fitted.target.set(
+      framingResult.framing.target.x,
+      framingResult.framing.target.y,
+      framingResult.framing.target.z,
     );
     return fitted;
   }
@@ -247,11 +295,22 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
   // Negative values place the subject lower and reveal more sky. Keeping it normalized
   // makes resize invalidation sufficient; no camera pose or focus distance changes.
   function setCompositionY(fraction = 0) {
-    state.compositionYFrac = Math.max(-0.3, Math.min(0.3, Number(fraction) || 0));
+    state.compositionYFrac = clampComposition(fraction);
     invalidate();
   }
 
   function applyCompositionOnly() { apply({ panels: false }); }
+
+  // Rounded signature of the *current* chrome insets, with no state mutation. The chrome
+  // morph that follows a focus-in is a Svelte flush plus a 420ms CSS transition, so a
+  // choreography owner that wants to re-solve on the settled frame needs a cheap per-frame
+  // "has it stopped moving yet" probe. DOM measurement stays owned here (§6.15 / §6.18).
+  function layoutSignature() {
+    if (typeof document === 'undefined') return '';
+    const { insets } = measureViewportInsets(container);
+    return `${Math.round(insets.left)}|${Math.round(insets.right)}`
+      + `|${Math.round(insets.top)}|${Math.round(insets.bottom)}`;
+  }
 
   function invalidate() {
     state.appliedX = NaN;
@@ -264,6 +323,7 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     apply,
     applyCompositionOnly,
     fitFraming,
+    layoutSignature,
     setCompositionY,
     setEnabled,
     invalidate,
