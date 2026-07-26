@@ -46,7 +46,14 @@ import { terrainRangeOnPolygon } from './placement-search.js';
 
 const SCALE_TARGET = { hamlet: 10, village: 32, town: 70, capital: 104, hanyang: 340 };
 const ROAD_CURVE_SETBACK = 1.2; // 도로 ribbon 밖의 담·배수 여유(실제 poly↔capsule 검사와 동일 단위)
-const LOT_SCALE = { hamlet: 1, village: 0.96, town: 0.92, capital: 0.9, hanyang: 0.88 };
+// 필지 면적 스케일. 집 축척(STRUCTURE_SCALE)과 분리한다 — 둘이 같으면 필지를 키워도
+// 마당 길이/채 높이(L/H)가 불변이라 마당이 늘지 않는다(HANDOFF §3.1, authenticity §9).
+// 농촌(hamlet~town)을 키우고, 한양 실측(~131평) 근거로 capital/hanyang 는 최소 변경.
+// 농촌 확대. 도성·한양은 폭을 더 눌러 호수를 지키되, 깊이는 멍석 하한(2.1m)을 깨지 않게 둔다.
+const LOT_W_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.90, hanyang: 0.80 };
+const LOT_D_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.96, hanyang: 0.90 };
+// 집 축척. 농촌은 1(온전한 크기), 도시만 가대 압축. fitHouseWithinParcel 축소와 별개다.
+const STRUCTURE_SCALE = { hamlet: 1, village: 1, town: 1, capital: 0.96, hanyang: 0.92 };
 
 // 공간 해시 그리드 — 필지 겹침 판정을 O(배치수)에서 O(근접셀)로. 도성(수백 필지)에서 필수:
 //   기존 전수검사(모든 placed 폴리곤 대비 SAT)는 후보수×배치수 = O(n²)라 hanyang 에서 수초 소요.
@@ -128,14 +135,19 @@ const ARTERIAL_BONUS = { daero: 0.26, jungno: 0.18, soro: 0.06, golmok: 0.0 };
 // rank + character(char01) → 필지 치수·유형.
 //   char01: 민촌(0)일수록 기와 임계를 올려(초가↑) + 필지 축소, 반촌(1)일수록 기와↑ + 필지 확대.
 //   상위=대형 기와, 하위=초가. hero 는 상위 극소수(종가·반가).
+//   깊이(d)는 앞마당 하한(멍석 2.1m)과 L/H≈2.55 대역을 담기 위해 폭보다 여유 있게 둔다.
+//   집 원점이 뒤안 inset에 앉으므로 앞마당 ≈ plotD − inset − roofFrontExtent (HANDOFF §3.1).
 function dimsFor(rank, char01) {
   const kindRank = rank + (char01 - 0.5) * 0.62;      // 반촌 +0.31(기와↑) / 민촌 -0.31(초가↑)
   const sizeMul = 0.84 + char01 * 0.40;               // 민촌 0.84 / 여염 1.04 / 반촌 1.24
   let kind, w, d;
-  if (kindRank >= 0.58) { kind = 'giwa'; w = 17; d = 16; }
-  else if (kindRank >= 0.40) { kind = 'giwa'; w = 14; d = 13; }
-  else if (kindRank >= 0.26) { kind = 'choga'; w = 12; d = 11; }
-  else { kind = 'choga'; w = 10; d = 9.5; }
+  // 버킷 깊이: 기와 중형 F≈6.8·inset 5.2 → plotD≥14 가 멍석 하한, ≥21 이 L/H≈2.55.
+  // LOT_SCALE(농촌 >1)과 곱해 앞마당을 키운다. 폭은 옆 여백·별채용 소폭 확대.
+  // 한양은 LOT_SCALE 0.90 으로 눌려 실측(~131평) 대비 과도 확대를 피한다.
+  if (kindRank >= 0.58) { kind = 'giwa'; w = 17.5; d = 19.5; }
+  else if (kindRank >= 0.40) { kind = 'giwa'; w = 14.5; d = 16.5; }
+  else if (kindRank >= 0.26) { kind = 'choga'; w = 12; d = 12.5; }
+  else { kind = 'choga'; w = 10.5; d = 11.5; }
   return { kind, plotW: w * sizeMul, plotD: d * sizeMul };
 }
 
@@ -233,11 +245,13 @@ function polyDist(p, poly) {
 
 export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const scale = opts.scale;
-  const lotScale = LOT_SCALE[scale] || 1;
+  const lotWScale = LOT_W_SCALE[scale] || 1;
+  const lotDScale = LOT_D_SCALE[scale] || 1;
+  const structureScale = STRUCTURE_SCALE[scale] || 1;
   const compactLot = (dims) => ({
     ...dims,
-    plotW: dims.plotW * lotScale,
-    plotD: dims.plotD * lotScale,
+    plotW: dims.plotW * lotWScale,
+    plotD: dims.plotD * lotDScale,
   });
   const char01 = typeof opts.char01 === 'number' ? opts.char01 : 0.5;
   const roads = roadsResult.roads;
@@ -380,7 +394,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
         const parcel = attachParcelSpatialContract({
           shape, center, frontDir, rank, kind: dims.kind,
           plotW: dims.plotW, plotD: dims.plotD, hero, heroStyle, seed: pseed,
-          structureScale: hero ? 1 : lotScale,
+          structureScale: hero ? 1 : structureScale,
           placement: 'frontage',
         }, road.id, smp.pt);
         const poly = parcel.poly;
@@ -435,7 +449,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     const parcel = attachParcelSpatialContract({
       shape, center: p0, frontDir, rank, kind: dims.kind,
       plotW: dims.plotW, plotD: dims.plotD, hero: false, seed: pseed,
-      structureScale: lotScale,
+      structureScale,
       placement: 'infill',
     }, best.road?.id, best.pt);
     const poly = parcel.poly;

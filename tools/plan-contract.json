@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baselineCommit": "93f5a4e",
+  "baselineCommit": "yard-proportion-2026-07-26",
   "templeRevision": "issue-122-role-hierarchy-2026-07-23",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
@@ -12,47 +12,48 @@
   "drainageRevision": "issue-139-bounded-roadside-drainage-2026-07-24",
   "auxiliaryBuildingRevision": "issue-146-planned-cross-lod-auxiliaries-2026-07-25",
   "siteRidgeRevision": "look-restore-r2-gentle-back-mountain-2026-07-25",
+  "yardProportionRevision": "lot-structure-decouple-rural-siteR-2026-07-26",
   "seed": 20260716,
   "cases": {
     "hamlet:base": {
-      "hash": "c3340587f69af6942245a750522d3897ab68e7f6b6d9436be80a7fb8ea2d97c9",
-      "bytes": 37464
-    },
-    "village:base": {
-      "hash": "155cf7652853bcaf991543481a76d0634305c1a6199c4d26dbcadf2bef49f542",
-      "bytes": 93773
-    },
-    "town:base": {
-      "hash": "ab4ad363ee5985cfbfaffb4c4cb10d1c476e7961c3bd55a6d1f06ab6e5aa4a78",
-      "bytes": 192778
-    },
-    "capital:base": {
-      "hash": "ece46a4cbed1af81ea451d5461d069cdfbdb090e2c9324f94bb4b34f22deb588",
-      "bytes": 211686
-    },
-    "hanyang:base": {
-      "hash": "5aa7c10cd8b96badd976e8138de9b768d8419bbacf247ed986e02d1f4c1a021c",
-      "bytes": 1185713
+      "hash": "aceb532ac6c887a5e4eee1c1341a6b5734bafe15f6a6230f22d5e039710580df",
+      "bytes": 37840
     },
     "hamlet:temple": {
-      "hash": "64c31fed4ea0704b626af335bd4e2c2e6e702b864a57ec129b14773dd070408e",
-      "bytes": 35960
+      "hash": "9204ff65ed72e131aebbed7dc381fd9826bb657b2160f11a725d03d44bb1df45",
+      "bytes": 41956
+    },
+    "village:base": {
+      "hash": "302c844198489d32b91bcb3b87bf49920155b9464f099edec37f1e3e4449034d",
+      "bytes": 99801
     },
     "village:temple": {
-      "hash": "be3a52e499f2240ee27561c273656e1c488f71dce45a9889b936d3068105b820",
-      "bytes": 93169
+      "hash": "787177b761f5bd72581fbd17571300502b16e59d0f2cbb90dfd2b01f4ecde2ce",
+      "bytes": 106324
+    },
+    "town:base": {
+      "hash": "7c0e3bd8abe724feaf26edc7a90fc09bbab690f57b9dc96a25dc9814a0b71610",
+      "bytes": 197613
     },
     "town:temple": {
-      "hash": "eacbe4518ae5ce07d3cb151a43d67ba8eb59e719cc5dcebf68862072a4abe01f",
-      "bytes": 171104
+      "hash": "88b62e640197be105a6f905ffa98a9ab31943b5c29ef18ea1d4f5ddb2bd79f2e",
+      "bytes": 194509
+    },
+    "capital:base": {
+      "hash": "c0381d82129248c46c21f6d7284933f907029b3de657839009d9993d22f3834c",
+      "bytes": 203682
     },
     "capital:temple": {
-      "hash": "017330a7a5e8c80aaa34b71a591361a79aeac1bda1267925f02a06c17441d2f9",
-      "bytes": 207518
+      "hash": "9af4d8769277cc8199beaef7356abb813f1f19b1d786e71d3221d9950af4c956",
+      "bytes": 202781
+    },
+    "hanyang:base": {
+      "hash": "be88b3987bd84552fc50befc0c616caf6bd057d675cd252310eafd1de0a4d0cf",
+      "bytes": 1097997
     },
     "hanyang:temple": {
-      "hash": "83c4b0f2dfeb7cbf60abb2f2f74237d24c0c3245b580a3161c39097cbd8b41e4",
-      "bytes": 1188592
+      "hash": "28514f2f0e40ebcf71adc1ff82ba47cac095345b36ee1bc26243ce4e8bb9e9db",
+      "bytes": 1064889
     }
   }
 }

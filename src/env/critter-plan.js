@@ -247,18 +247,20 @@ export function skeinTargets(state, out = []) {
 // "지금 보고 있는 필지 근처에 한 마리가 있는가"가 체감 존재감이다. village 33필지에서
 // 개 2마리는 필지의 24%만 32m 안에 개를 갖는다는 뜻이었다. 밀도로 바꾸고 상한만 남긴다.
 // 전부 인스턴싱이라 드로우콜은 개체수와 무관하다(종별 1콜).
+// perParcel 은 필지 수 기준. 필지·siteR 확대 뒤 중심 간 거리가 32m full-detail
+// 창보다 커질 수 있어 밀도를 소폭 올려 근접 커버리지를 유지한다.
 export const GROUND_DENSITY = Object.freeze({
-  dog: Object.freeze({ perParcel: 0.24, min: 1 }),
-  cat: Object.freeze({ perParcel: 0.34, min: 1 }),
-  magpie: Object.freeze({ perParcel: 0.20, min: 2 }),
+  dog: Object.freeze({ perParcel: 0.34, min: 1 }),
+  cat: Object.freeze({ perParcel: 0.44, min: 1 }),
+  magpie: Object.freeze({ perParcel: 0.24, min: 2 }),
 });
 
 export const GROUND_CAP = Object.freeze({
-  hamlet: Object.freeze({ dog: 3, cat: 4, magpie: 3 }),
-  village: Object.freeze({ dog: 7, cat: 9, magpie: 6 }),
-  town: Object.freeze({ dog: 12, cat: 16, magpie: 10 }),
-  capital: Object.freeze({ dog: 14, cat: 18, magpie: 12 }),
-  hanyang: Object.freeze({ dog: 26, cat: 34, magpie: 20 }),
+  hamlet: Object.freeze({ dog: 4, cat: 5, magpie: 3 }),
+  village: Object.freeze({ dog: 12, cat: 15, magpie: 8 }),
+  town: Object.freeze({ dog: 16, cat: 20, magpie: 12 }),
+  capital: Object.freeze({ dog: 18, cat: 22, magpie: 14 }),
+  hanyang: Object.freeze({ dog: 34, cat: 42, magpie: 24 }),
 });
 
 export function groundPopulation(scale, parcelCount) {

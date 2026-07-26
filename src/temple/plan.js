@@ -32,9 +32,11 @@ const rect = (cx, cz, width, depth) => [
   point(cx - width / 2, cz - depth / 2),
 ];
 
+// siteR 임계는 SCALE_ANCHORS 명명 tier 중점과 동기(solo·hamlet=compact,
+// village·town=courtyard, capital·hanyang=extended).
 export function templeVariantForSite(siteR) {
-  if (siteR < 101) return 'compact';
-  if (siteR < 213) return 'courtyard';
+  if (siteR < 143) return 'compact';
+  if (siteR < 260) return 'courtyard';
   return 'extended';
 }
 

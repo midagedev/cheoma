@@ -72,12 +72,12 @@ const SEEDS = [7, 42, 20260716];
 const MAX_FACING = 65 * Math.PI / 180;
 // 개별 seed는 수변·성곽 형상에 따라 흔들린다. Hanyang은 산을 타던 개울을 실제 하곡으로
 // 예약하면서 세 seed 합계에서 두 필지만 줄지만, 개별 최소와 전체 밀도는 사실상 보존한다.
-const DENSITY_FLOOR = { hamlet: 10, village: 28, town: 60, capital: 42, hanyang: 305 };
-// #40 changes the former smooth bowl into real landform benches. The Hanyang
-// samples retain >99% of the previous 988 aggregate while rejecting frontage
-// lots that straddle a riser; keep a tight floor instead of pretending output is
-// pixel-stable across a deliberate terrain contract change.
-const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 140, hanyang: 980 };
+// 필지·마당 확대(2026-07-26) 뒤 호수는 면적 대비 줄었다. 바닥은 새 실측 최소에 맞추고
+// "전부 생략" 회귀만 막는다. 농촌 hamlet/village/town 은 목표 호수에 가깝게 유지.
+const DENSITY_FLOOR = { hamlet: 10, village: 28, town: 60, capital: 34, hanyang: 260 };
+// #40 changes the former smooth bowl into real landform benches. Aggregate floors
+// follow the same post-yard-expansion counts (3 seeds × per-seed floor + margin).
+const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 125, hanyang: 850 };
 const PADDY_TOTAL_FLOOR = { hamlet: 5, village: 3, town: 2, capital: 5, hanyang: 6 };
 const EXPECTED_GUARDIAN_ROLES = {
   hamlet: ['entrance'],
@@ -203,7 +203,8 @@ for (const scale of SCALES) {
     const repeat = buildWithoutGlobalRandom(options);
     invariant(plan.site.stream?.kind === 'creek', `${label} default watercourse is not a creek`);
     if (scale === 'hamlet') {
-      invariant(plan.site.relief.localWavelength <= 33,
+      // hamlet siteR 105 (was 74) 에서 미터 파장 상한을 살짝 연다. 도성 파장(~46)과 분리.
+      invariant(plan.site.relief.localWavelength <= 36,
         `${label} rural relief lost its metre-based wavelength`);
     }
     if (scale === 'capital' || scale === 'hanyang') {

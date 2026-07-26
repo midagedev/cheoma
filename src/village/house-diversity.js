@@ -49,10 +49,10 @@ export function householdDiversityProfile(parcel, char01 = 0.5, wealth = 0.5) {
   const area = Math.max(0, (parcel.plotW || 0) * (parcel.plotD || 0));
   const lot01 = clamp01((Math.sqrt(area) - 9) / 9);
   const rank01 = clamp01(parcel.rank ?? 0.5);
-  // Frontage/infill parcels already carry the density scale that shrinks both
-  // lot and structure by tier (hamlet 1.00 → hanyang 0.88).  Reuse it instead
-  // of duplicating tier metadata on every plan record; satellites retain the
-  // explicit continuous value because they intentionally have no density scale.
+  // Frontage/infill parcels may carry an urban structureScale (capital/hanyang
+  // only — rural stays 1 so lot expansion grows yards, not houses). Reuse it
+  // instead of duplicating tier metadata; satellites retain the explicit
+  // continuous value because they intentionally have no density scale.
   const structureTier01 = Number.isFinite(parcel.structureScale)
     ? clamp01((1 - parcel.structureScale) / 0.12)
     : undefined;

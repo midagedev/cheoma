@@ -83,6 +83,7 @@ const REVIEWED_NEW_PATHS = new Set([
   // 마당 소품이 실제 필지 폴리곤에 앉는다는 순수 계약. FAST_CHECKS 소속이라 어떤 라우팅에서도
   // 함께 돌고, 브라우저를 쓰지 않으므로 새 경로 실패마감 예외로 검토됐다.
   'tools/check-yard-polygon-contract.mjs',
+  'tools/check-yard-proportion-contract.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',

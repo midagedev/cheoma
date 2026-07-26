@@ -40,15 +40,18 @@ const lerpN = (a, b, t) => a + (b - a) * t;
 //       역광 림을 받아도 대비를 못 얻는다(docs/look-grammar.md §3 건물·지형 항).
 //   분지 서사는 유지한다: 산은 여전히 마을보다 높고 감싸며(앙각 25~33°), 스케일이 커질수록 앙각이
 //   완만해지는 기존 위계도 그대로다. 숲 밀도·지형 반경은 불침해(hillAt·bowlR 정규화가 Hmax 종속).
+// siteR 농촌 확대: 필지 깊이·LOT_SCALE 확대(parcels.js)에 맞춰 같은 호수가 앉을 분지 여유를
+// 확보한다. 숲 밀도는 면적당 불변 — 면적이 늘면 나무 수는 늘고, 밀도를 줄여 비용을 숨기지 않는다.
+// capital 은 소폭, hanyang siteR 은 유지(한양 실측 필지 근거, HANDOFF §3.1).
 export const SCALE_ANCHORS = [
-  { name: 'hamlet',  siteR: 74,  ridgeH: 26,  benchDrop: 2.6, undAmp: 0.50 },
-  { name: 'village', siteR: 128, ridgeH: 43,  benchDrop: 3.6, undAmp: 0.62 },
-  { name: 'town',    siteR: 176, ridgeH: 57,  benchDrop: 4.6, undAmp: 0.72 },
-  { name: 'capital', siteR: 250, ridgeH: 84,  benchDrop: 5.6, undAmp: 0.82 },
-  // 한양 도성급(#47): capital 대비 선형 2배 = 면적 4배. 내사산이 도성을 감싸는 큰 분지.
+  { name: 'hamlet',  siteR: 105, ridgeH: 30,  benchDrop: 2.9, undAmp: 0.53 },
+  { name: 'village', siteR: 180, ridgeH: 52,  benchDrop: 4.1, undAmp: 0.66 },
+  { name: 'town',    siteR: 240, ridgeH: 68,  benchDrop: 5.1, undAmp: 0.76 },
+  { name: 'capital', siteR: 280, ridgeH: 90,  benchDrop: 5.9, undAmp: 0.84 },
+  // 한양 도성급(#47): capital 대비 선형 ~1.8배 = 면적 ~3.2배. 내사산이 도성을 감싸는 큰 분지.
   { name: 'hanyang', siteR: 500, ridgeH: 112, benchDrop: 8.0, undAmp: 1.02 },
 ];
-// 외딴집 하한(#114): 슬라이더 매핑(scale01)·명명 tier 는 hamlet(74) 그대로 두고, 절대 siteR 로만
+// 외딴집 하한(#114): 슬라이더 매핑(scale01)·명명 tier 는 hamlet 앵커 그대로 두고, 절대 siteR 로만
 //   그 아래(집 한 채·절 하나 스케일)까지 내려간다. tier 는 'hamlet' 유지 → populate 문법 무수정 감쇠.
 const SOLO_FIELD = { siteR: 30, ridgeH: 18, benchDrop: 1.6, undAmp: 0.42 };
 export const VILLAGE_SITE_R_MIN = SOLO_FIELD.siteR;       // 외딴집(집 한 채) 분지 하한
@@ -150,13 +153,13 @@ export function rToScale01(R) {
 }
 
 // R → 이산 tier(토폴로지·성곽·궁 임계 분기용). 지형은 연속이되, 도로망·성곽·시전·궁 tier 처럼
-//   본질적으로 불연속인 문법은 임계에서 스냅한다(joseon-city 문법). 앵커 재현: 74·128·176·250·500 →
-//   hamlet·village·town·capital·hanyang. 경계는 앵커 산술중점(단, capital↔hanyang 은 성곽 등장을
-//   R400 으로 잡아 R370=성곽없는 대형 도성, R440=성곽 도성 — #89 연속성 게이트 전후 대비).
+//   본질적으로 불연속인 문법은 임계에서 스냅한다(joseon-city 문법). 앵커 재현: SCALE_ANCHORS
+//   siteR(105·180·240·280·500) → hamlet·village·town·capital·hanyang. 경계는 앵커 산술중점
+//   (단, capital↔hanyang 은 성곽 등장을 R400 으로 잡아 R370=성곽없는 대형 도성, R440=성곽 도성).
 export function tierForR(R) {
-  if (R < 101) return 'hamlet';
-  if (R < 152) return 'village';
-  if (R < 213) return 'town';
+  if (R < 143) return 'hamlet';
+  if (R < 210) return 'village';
+  if (R < 260) return 'town';
   if (R < 400) return 'capital';
   return 'hanyang';
 }
