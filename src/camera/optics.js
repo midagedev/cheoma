@@ -19,7 +19,25 @@ export const VILLAGE_FOCUS_ELEVATION = 9 * DEG;
 // always puts the ridge behind a south-facing house, so this shift alone cannot manufacture sky;
 // the ridge-mist bands (generators/village/terrain.js) dissolve that backdrop into 여백, and this
 // only buys room above the eave for it. Larger values crop the near yard out of frame.
-export const VILLAGE_FOCUS_SKY_FRACTION = 0.13;
+//
+// The fraction is of the **usable band** — the viewport left over after product chrome — not of raw
+// viewport height (ui-consolidation §6.19). Sky above the eave is a compositional proportion of what
+// the viewer can actually see, so a viewport-relative reading was only ever right while the chrome
+// was thin: once a phone shell claimed 43% of the height it pushed the subject's lower half under
+// the sheet (measured 56.5px out of a 257px band) while the fit verdict still reported the frame as
+// contained. 0.2 of the band reproduces the desktop reference frame this was authored against
+// (0.13 x 800px viewport = 104px; 0.2 x 519px band = 103.8px, a 0.2px difference), and the same
+// proportion honestly scales to 51px on a 390x844 phone.
+export const VILLAGE_FOCUS_SKY_FRACTION = 0.2;
+// ...but the proportion may only shrink. The band is also *larger* than the reference share wherever
+// chrome is absent — the hero landing and every ?shot=1 capture hide the whole shell — and reading
+// 0.2 of a nearly full viewport there pushed the subject's base out of frame (measured 1360x850
+// landing: 164px instead of 110px, subjectBottom 1.011 > 1, i.e. the yard cropped away). The authored
+// value was calibrated on a framed viewport, so the band feeding the proportion is capped at the share
+// it was authored against: 519 of 800. Consequence, and why this is safe: no frame that is correct
+// today moves by more than 0.2px, and the shift only shrinks, only where chrome really claims more
+// than the reference share (measured: phone editing 109.7px -> 51.4px, everything else unchanged).
+export const VILLAGE_FOCUS_SKY_REFERENCE_BAND = 519 / 800;
 // The hero landing keeps its own authored approach. It arrives on a compound courtyard whose
 // wings only read from above, and its frame is a settled cinematic beat rather than the shared
 // close-parcel pose, so lowering the residential elevation must not follow it.

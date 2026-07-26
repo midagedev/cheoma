@@ -649,6 +649,34 @@ try {
     waitUntil: 'domcontentloaded', timeout,
   });
   await arrivalPage.waitForSelector('button.hero', { timeout });
+  // The entry veil's fog is written by the animation loop and `debugSetPaused(true)` freezes that
+  // loop, so a fog value read after the pause depends on how many frames ran between the landing
+  // starting and Playwright's pause command arriving. Under machine load that gap exceeded the
+  // veil's whole 8.7s ramp, so the read landed on the *cleared* fog (measured: near 2.2R / far 7.0R
+  // with R=128, i.e. the camera inside `near`, factor clamped to 0.000) and the assertion reported a
+  // washed-out product state that never existed — the product veil is dense from its first frame
+  // (near = depth * clearMargin ≈ 68.8m, far ≈ 273.6m, factor 0.206). Record the first veiled frame
+  // in-page instead: it is the densest by construction, because `hold` keeps the ramp flat across
+  // its first half, and an in-page recorder cannot be outrun by harness round trips.
+  await arrivalPage.evaluate(() => {
+    window.__veilOpening = null;
+    const step = () => {
+      // `e > 0` matters: startVillageReveal() arms the state synchronously, and this recorder's rAF
+      // can run before the engine's own loop callback has written the veil's first fog values — that
+      // frame still reports the base fog reapplyVillageFog() left behind. Require that the veil has
+      // actually advanced once, which is still inside the flat `hold` half, so still the densest.
+      if (!window.__veilOpening && window.__hero?.reveal?.e > 0 && window.__hero.fogNear != null) {
+        window.__veilOpening = {
+          near: window.__hero.fogNear,
+          far: window.__hero.fogFar,
+          e: window.__hero.reveal.e,
+          dur: window.__hero.reveal.dur,
+        };
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
   await arrivalPage.click('button.hero');
   await arrivalPage.waitForFunction(() => window.__engine?.debugArchitecturalReveal?.().kind === 'arrival', null, { timeout });
   await arrivalPage.evaluate(() => window.__engine.debugSetPaused(true));
@@ -681,9 +709,14 @@ try {
     state.position.y - state.target.y,
     state.position.z - state.target.z,
   ));
-  const arrivalFog = await arrivalPage.evaluate(() => ({
+  // Densest veil = the recorded opening frame (see the recorder above). The live fog is kept as a
+  // fallback only for the case where no veiled frame was ever observed, which is itself a failure.
+  const arrivalFog = await arrivalPage.evaluate(() => (window.__veilOpening || {
     near: window.__hero?.fogNear ?? null,
     far: window.__hero?.fogFar ?? null,
+    e: null,
+    dur: null,
+    recorded: false,
   }));
   const veilAt = (depth) => (arrivalFog.near == null ? null : Math.max(0, Math.min(1,
     (depth - arrivalFog.near) / (arrivalFog.far - arrivalFog.near))));

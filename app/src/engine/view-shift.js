@@ -1,4 +1,5 @@
 import {
+  VILLAGE_FOCUS_SKY_REFERENCE_BAND,
   fitFocusFraming,
   safeViewportRect,
 } from '../../../src/api/cinematic.js';
@@ -161,15 +162,39 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     state.tgtY = Math.max(-capY, Math.min(capY, state.safeRect.shiftY));
   }
 
+  // Composition is a fraction of the **usable band**, not of raw viewport height (§6.19): sky above
+  // the eave is a proportion of what the viewer can actually see. The band comes from the live safe
+  // rectangle; when panel shifting is disabled the rectangle is not maintained, so measure it here at
+  // the same 90ms cadence sampleTarget() uses rather than on every frame.
+  //
+  // The band is capped at the share the value was authored against (VILLAGE_FOCUS_SKY_REFERENCE_BAND).
+  // Without that cap a chrome-free frame — the hero landing, every ?shot=1 capture — reads 0.2 of
+  // nearly the whole viewport and crops the yard out of the authored frame. With it, the proportion
+  // only ever shrinks, and only where chrome really claims more than the reference share.
+  let bandSampleAt = 0;
+  let bandSampleH = 0;
+  function compositionBandHeight() {
+    const viewportH = container.clientHeight || 1;
+    const cap = viewportH * VILLAGE_FOCUS_SKY_REFERENCE_BAND;
+    if (state.safeRect) return Math.min(state.safeRect.height || 1, cap);
+    if (typeof document === 'undefined') return Math.min(viewportH, cap);
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!bandSampleH || now - bandSampleAt > 90) {
+      bandSampleAt = now;
+      bandSampleH = safeViewportRect(measureViewportInsets(container)).height || 1;
+    }
+    return Math.min(bandSampleH, cap);
+  }
+
   function apply({ panels = true } = {}) {
-    const height = container.clientHeight || 1;
     const x = panels && state.enabled ? state.curX : 0;
     const y = (panels && state.enabled ? state.curY : 0)
-      + state.compositionYFrac * height;
+      + state.compositionYFrac * compositionBandHeight();
     if (Math.abs(x - state.appliedX) < 0.2 && Math.abs(y - state.appliedY) < 0.2) return;
     state.appliedX = x;
     state.appliedY = y;
     const width = container.clientWidth || 1;
+    const height = container.clientHeight || 1;
     if (Math.abs(x) > 0.4 || Math.abs(y) > 0.4) {
       camera.setViewOffset(width, height, -x, y, width, height);
     } else if (camera.view?.enabled) {
@@ -222,8 +247,7 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
   // shifting is disabled. Handing this to the solver is what keeps `fitted`/`overflow`
   // true of the frame that ships instead of of an uncomposed ideal (§6.17).
   function appliedProjectionShift(compositionY) {
-    const height = container.clientHeight || 1;
-    return { x: state.tgtX, y: state.tgtY + compositionY * height };
+    return { x: state.tgtX, y: state.tgtY + compositionY * compositionBandHeight() };
   }
 
   // compositionY: the *settled* composition of the frame being solved for. A focus
@@ -248,45 +272,28 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
       viewport: state.layout,
       appliedShift: appliedProjectionShift(composition),
     });
-    // When the applied projection cannot contain the subject, dollying is the wrong lever
-    // and pulling on it makes the frame worse: the composed shift puts the camera axis near
-    // a band edge (measured 390×844 editing: axis 18.8px above the band bottom), and a dolly
-    // shrinks the box *around that axis*, so containment would need the subject's lower half
-    // to be under 19px. The honest solve therefore runs to the dolly clamp and still
-    // overflows — 4× further away, no better framed. Keep the honest verdict for consumers
-    // and gates, but let the frame stay at the previous (ideal-shift) solve rather than
-    // regress. The real remedy is a composition that respects the band; that is a look
-    // decision, recorded in ui-consolidation §6.17.
-    let framingResult = result;
-    if (!result.fitted) {
-      const idealFit = fitFocusFraming({ framing, subject, viewport: state.layout });
-      framingResult = idealFit;
-      // `scale` 은 항상 **출하된 프레임**의 dolly 를 가리킨다(소비자가 fit.scale 로 프레임 크기를
-      // 읽는다). 정직한 탐색이 도달한 값은 appliedSearchScale 로 따로 남긴다.
-      state.lastFit = {
-        ...result,
-        scale: idealFit.scale,
-        appliedSearchScale: result.scale,
-        framingSource: 'ideal-shift-fallback',
-        idealFitted: idealFit.fitted,
-      };
-    } else {
-      state.lastFit = { ...result, framingSource: 'applied-shift' };
-    }
+    // There is deliberately no fallback here. An earlier round shipped one — when the applied
+    // projection could not contain the subject it quietly framed with the uncomposed solve — and
+    // that is the same class of defect this whole contract exists to remove: a frame the verdict
+    // never authorised. The composition is now band-relative (§6.19), which is what made the
+    // unsatisfiable case go away at its cause: the axis no longer lands 19px from the band edge,
+    // so the dolly search can actually reach containment. If some viewport still cannot fit, the
+    // honest `overflow` must surface as a gate failure rather than as a silent substitution.
+    state.lastFit = result;
     const fitted = {
       ...framing,
       position: framing.position.clone(),
       target: framing.target.clone(),
     };
-    if (framingResult.framing?.position) fitted.position.set(
-      framingResult.framing.position.x,
-      framingResult.framing.position.y,
-      framingResult.framing.position.z,
+    if (result.framing?.position) fitted.position.set(
+      result.framing.position.x,
+      result.framing.position.y,
+      result.framing.position.z,
     );
-    if (framingResult.framing?.target) fitted.target.set(
-      framingResult.framing.target.x,
-      framingResult.framing.target.y,
-      framingResult.framing.target.z,
+    if (result.framing?.target) fitted.target.set(
+      result.framing.target.x,
+      result.framing.target.y,
+      result.framing.target.z,
     );
     return fitted;
   }

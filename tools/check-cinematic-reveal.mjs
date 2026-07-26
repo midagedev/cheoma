@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   VILLAGE_FOCUS_ELEVATION,
   VILLAGE_FOCUS_SKY_FRACTION,
+  VILLAGE_FOCUS_SKY_REFERENCE_BAND,
   VILLAGE_HERO_FOCUS_ELEVATION,
   VILLAGE_LENS,
   dollyDistanceForFov,
@@ -149,7 +150,14 @@ const phoneEditLayout = {
   gutter: 16,
 };
 const safePhoneEdit = safeViewportRect(phoneEditLayout);
-const settledCompositionY = -VILLAGE_FOCUS_SKY_FRACTION * phoneEditLayout.height;
+// 컴포지션은 **가용 밴드** 높이의 분수이고(§6.19 — 뷰포트 높이가 아니다), 그 밴드는 값이 authored 된
+// 기준 점유율에서 상한이 걸린다(크롬이 없는 프레임에서 분수가 커지지 않도록). 이 폰 편집 밴드는
+// 상한보다 작으므로 상한은 무효지만, 규칙은 한 곳에서만 표현한다.
+const compositionBand = Math.min(
+  safePhoneEdit.height,
+  phoneEditLayout.height * VILLAGE_FOCUS_SKY_REFERENCE_BAND,
+);
+const settledCompositionY = -VILLAGE_FOCUS_SKY_FRACTION * compositionBand;
 const appliedPhoneShift = {
   x: safePhoneEdit.shiftX,
   y: safePhoneEdit.shiftY + settledCompositionY,
@@ -195,6 +203,61 @@ assert.ok(appliedPhoneFit.scale > idealPhoneFit.scale + EPS || !appliedPhoneFit.
     appliedScale: appliedPhoneFit.scale,
     appliedFitted: appliedPhoneFit.fitted,
   })})`);
+
+// ── 실제로 출하되는 경우: 세로 폰 편집 중 주거 근접 ──────────────────────────────
+// 궁·절 픽스처는 focusCompositionFor 가 0 이라 컴포지션 항이 사라지고, 그래서 이 결함을 오래 못 봤다.
+// 주거 필지는 전부 1 이므로 정착 컴포지션이 살아 있는 유일한 케이스이고, 이것이 사용자가 실제로 보는
+// 프레임이다. 치수는 제품 픽스처(vseed 20260716 · p1)의 실측 subject 를 그대로 옮겼다: 대표 지붕
+// 사각 footprint(가로 ~10.7m), 처마 아래 minY 1.47 / 지붕 maxY 6.94, 개구부 anchor 3 개, target y 3.81,
+// authored 근접 거리 47.4m · 9° 고도 · 16° 렌즈.
+const residentialSubject = transformFocusSubject({
+  id: 'fixture-residential',
+  representative: {
+    id: 'house',
+    role: 'house',
+    footprint: [
+      { x: -1.12, z: 8.23 }, { x: 8.03, z: 2.65 }, { x: 2.68, z: -6.12 }, { x: -6.47, z: -0.54 },
+    ],
+    minY: 1.47,
+    maxY: 6.94,
+  },
+  target: { x: 0, y: 3.81, z: 0 },
+}, { x: 0, y: 0, z: 0, rotationY: 0 });
+const residentialFrame = frame(
+  // 9° 고도 · 47.4m: authored 주거 근접 포즈(VILLAGE_FOCUS_ELEVATION, VILLAGE_LENS.parcel).
+  {
+    x: 0,
+    y: residentialSubject.target.y + Math.sin(VILLAGE_FOCUS_ELEVATION) * 47.42,
+    z: Math.cos(VILLAGE_FOCUS_ELEVATION) * 47.42,
+  },
+  residentialSubject.target,
+  VILLAGE_LENS.parcel.fov,
+  VILLAGE_LENS.parcel.referenceFov,
+);
+const residentialPhoneFit = fitFocusFraming({
+  framing: residentialFrame,
+  subject: residentialSubject,
+  viewport: phoneEditLayout,
+  appliedShift: { x: safePhoneEdit.shiftX, y: safePhoneEdit.shiftY + settledCompositionY },
+});
+const residentialMargins = residentialPhoneFit.projectedBounds ? {
+  top: residentialPhoneFit.projectedBounds.top - safePhoneEdit.top,
+  bottom: safePhoneEdit.bottom - residentialPhoneFit.projectedBounds.bottom,
+  left: residentialPhoneFit.projectedBounds.left - safePhoneEdit.left,
+  right: safePhoneEdit.right - residentialPhoneFit.projectedBounds.right,
+} : null;
+// 마진을 함께 싣는다 — 다음 라운드의 드리프트가 boolean 이 아니라 숫자로 보이게.
+assert.ok(residentialPhoneFit.fitted && !residentialPhoneFit.overflow
+  && residentialMargins
+  && residentialMargins.top >= -EPS && residentialMargins.bottom >= -EPS
+  && residentialMargins.left >= -EPS && residentialMargins.right >= -EPS,
+`an ordinary house must fit the portrait editing band under its settled composition (${JSON.stringify({
+  scale: residentialPhoneFit.scale,
+  fitted: residentialPhoneFit.fitted,
+  overflow: residentialPhoneFit.overflow,
+  compositionPx: settledCompositionY,
+  margins: residentialMargins,
+})})`);
 
 const from = frame({ x: -14, y: 9, z: 29 }, { x: 0, y: 4.2, z: 0 }, 28, 28, 0);
 const close = frame({ x: 1.5, y: 1.35, z: 34 }, { x: 0, y: 5.2, z: 0 }, 18, 21, 1);
