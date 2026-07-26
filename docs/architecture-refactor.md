@@ -329,13 +329,22 @@ program·geometry·texture·pass·render target·light는 늘리지 않는다.
 | 파일 | 다음 안전 조건 |
 | --- | --- |
 | `app/src/engine/engine.js` | village/focus lifecycle의 명확한 상태기계 계약과 전용 앱 하네스가 있을 때 추가 추출 |
-| `src/builder/palette.js` | canvas/texture provider 주입과 material/shader identity 검사 마련 후 분리 |
+| `src/builder/palette.js` | canvas/RNG provider 주입 1차 완료(`palette-context.js` + `check:palette-provider`); material/shader identity 검사 후 텍스처 메이커 분리 |
 | `src/env/post.js` | 실제 재사용 소비자가 pass 단위 소유권을 요구할 때만 추가 분리 |
 | `src/builder/roof.js` | 지붕 유형별 geometry hash와 근접 시각 게이트 마련 후 분리 |
 | `src/env/critters.js` | proto/배치/애니메이션별 수치·시각 계약 마련 후 분리 |
 | `app/src/App.svelte` | UI 상태 소유권을 먼저 명시한 뒤 화면 orchestration 분리 |
 
-가장 자연스러운 후속 순서는 palette의 browser 의존 주입, engine의 village/focus controller, façade를 사용하는 최소 외부 예제, 마지막으로 `@cheoma/core`·`@cheoma/three` 패키지 manifest다. 현재 검증보다 위험한 이동은 먼저 게이트를 추가한 뒤 수행한다.
+palette canvas/RNG 주입 1차(`src/builder/palette-context.js`): 모듈 활성 context 기본값은 browser
+`document.createElement('canvas')` + `Math.random`이고, `makeMaterials(..., { paletteContext })` 또는
+`setPaletteContext`로 per-build 주입한다. `setTextureRandom`은 createCanvas를 보존한 채 RNG만 교체하는
+thin wrapper로 남아 마을 seed 창(`random-window.js`)과 worker/sync 결정론을 깨지 않는다. 단청 source
+cache key는 기존 `dancheongSourceKey`를 유지한다. 제품 공유 `P.mats` 경로는 주입 없이 동작한다.
+게이트: `npm run check:palette-provider` (node stub canvas + fixed RNG → paint digest 결정론).
+
+가장 자연스러운 후속 순서는 palette material/shader identity 검사와 텍스처 메이커 분리, engine의
+village/focus controller, façade를 사용하는 최소 외부 예제, 마지막으로 `@cheoma/core`·`@cheoma/three`
+패키지 manifest다. 현재 검증보다 위험한 이동은 먼저 게이트를 추가한 뒤 수행한다.
 
 ## 완료 판정
 

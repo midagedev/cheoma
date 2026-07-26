@@ -109,6 +109,10 @@ const REVIEWED_NEW_PATHS = new Set([
   // #150 N: instance/merge scratch Matrix4 재사용 후 geometry digest·material order 불변.
   // browser-free FAST_CHECKS 게이트; 시각/export 의미 불변.
   'tools/check-instance-merge-immutability.mjs',
+  // #150 L palette canvas/RNG provider: Three-free context + FAST_CHECKS gate.
+  // Product path keeps browser defaults; node injects stub canvas + fixed RNG.
+  'src/builder/palette-context.js',
+  'tools/check-palette-provider.mjs',
   'tools/check-building-navigation.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
@@ -494,7 +498,8 @@ function routePath(path) {
     if (path === 'src/core/buffer-update-range.js') {
       select('BufferAttribute upload range ownership changed', 'instance-upload', 'lod-wave');
     }
-    if (path === 'src/builder/palette.js') {
+    if (path === 'src/builder/palette.js'
+      || path === 'src/builder/palette-context.js') {
       select('roof snow and rim material roles changed', 'winter-app', 'rim');
     }
     return { gates, reasons };
