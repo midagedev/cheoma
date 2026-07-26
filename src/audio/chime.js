@@ -1,28 +1,42 @@
 import * as THREE from 'three';
 import { createAudioScope, synthBell, poissonInterval } from './synth.js';
+import { chimeLocalCorners } from './anchors.js';
 
 // 처마 끝 풍경(風磬) — 4개 모서리에 THREE.PositionalAudio 로 배치.
 // 각 풍경은 자기 기음(base)과 독립 포아송 타이머를 가진다(바람이 각 모서리를 따로 때린다).
 // 바람 세기(windiness 0~1)에 따라 타종 빈도가 오른다:
 //   평온(0): 평균 ~34s, 최소 18s   /   강풍(1): 평균 ~5s, 최소 2.5s
 //
-//   createChimes(listener, { layout, rand }) →
-//     { objects[], setWindiness(w), setVolume(v), strike(i?), update(dt), start(), dispose() }
-//   objects 는 씬에 추가하지 않아도 된다 — 정적 위치라 update()에서 updateMatrixWorld 로
+//   createChimes(listener, { layout, getCorners, rand }) →
+//     { objects[], setWindiness(w), setVolume(v), setLayout(l), setCorners(c),
+//       strike(i?), update(dt), start(), dispose() }
+//   objects 는 씬에 추가하지 않아도 된다 — update()에서 updateMatrixWorld 로
 //   panner 위치만 갱신한다(listener 는 camera 를 따라 움직인다).
+//
+// getCorners: 라이브 월드 좌표 getter([[x,y,z]×4]). 마을 모드에서 포커스/최근접 집
+// 처마로 옮길 때 사용. 활성일 때 setLayout 은 원점 레이아웃 덮어쓰기를 하지 않는다
+// (solo 재생성은 getCorners 없이 setLayout 만 쓴다).
 
-export function createChimes(listener, { layout, rand = Math.random } = {}) {
+export function createChimes(listener, { layout, getCorners = null, rand = Math.random } = {}) {
   const ctx = listener.context;
   const scope = createAudioScope();
 
-  function cornersOf(L) {
-    const xE = (L && L.xEave) ?? 9;
-    const zE = (L && L.zEave) ?? 6;
-    const y = ((L && L.eaveEdgeY) ?? 6.5) - 0.25; // 추녀 끝에서 살짝 아래(풍경이 매달린 높이)
-    return [[xE, y, zE], [-xE, y, zE], [xE, y, -zE], [-xE, y, -zE]];
+  function applyCorners(corners) {
+    if (!corners || corners.length < chimes.length) return false;
+    for (let i = 0; i < chimes.length; i++) {
+      const c = corners[i];
+      if (!c) return false;
+      const x = Array.isArray(c) ? c[0] : c.x;
+      const y = Array.isArray(c) ? c[1] : c.y;
+      const z = Array.isArray(c) ? c[2] : c.z;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return false;
+      chimes[i].pa.position.set(x, y, z);
+      chimes[i].pa.updateMatrixWorld(true);
+    }
+    return true;
   }
 
-  const chimes = cornersOf(layout).map(([x, y, z]) => {
+  const chimes = chimeLocalCorners(layout).map(([x, y, z]) => {
     const pa = new THREE.PositionalAudio(listener);
     // 원경 카메라(건물 크기의 2배 거리)에서도 들리도록 완만한 거리 감쇠.
     pa.setDistanceModel('inverse');
@@ -45,12 +59,24 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
   let volume = 1;
   let started = false;
   let disposed = false;
+  // liveCorners is true only while getCorners() currently yields world positions.
+  // Merely passing a getter (product engine always does) must not block solo setLayout.
+  let liveCorners = false;
+  let lastLayout = layout;
 
-  // 건물 재생성으로 크기가 바뀌면 처마 모서리 좌표 갱신.
+  // 건물 재생성으로 크기가 바뀌면 처마 모서리 좌표 갱신(solo-house).
+  // 마을 live getter 가 코너를 내고 있을 때만 원점 레이아웃 덮어쓰기를 막는다.
   function setLayout(L) {
     if (disposed) return;
-    const c = cornersOf(L);
-    chimes.forEach((ch, i) => { ch.pa.position.set(c[i][0], c[i][1], c[i][2]); ch.pa.updateMatrixWorld(true); });
+    lastLayout = L;
+    if (liveCorners) return;
+    applyCorners(chimeLocalCorners(L));
+  }
+
+  // 명시 월드 좌표(엔진이 포커스 전환 때 호출해도 됨). getter 와 병행 가능.
+  function setCorners(corners) {
+    if (disposed) return;
+    if (applyCorners(corners)) liveCorners = true;
   }
 
   function rate() {
@@ -70,8 +96,23 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
     synthBell(ctx, c.bus, ctx.currentTime + 0.01, { base: c.base, gain: g, rand, scope });
   }
 
+  function syncCorners() {
+    if (!getCorners) return;
+    const c = getCorners();
+    if (c) {
+      if (applyCorners(c)) liveCorners = true;
+      return;
+    }
+    // Getter released (left village / no residential host) — restore solo layout eaves.
+    if (liveCorners) {
+      liveCorners = false;
+      applyCorners(chimeLocalCorners(lastLayout));
+    }
+  }
+
   function update(dt) {
     if (!started || disposed) return;
+    syncCorners();
     for (const c of chimes) {
       c.pa.updateMatrixWorld(); // 정적이지만 저렴 — panner 위치 확정
       c.next -= dt;
@@ -92,14 +133,20 @@ export function createChimes(listener, { layout, rand = Math.random } = {}) {
     objects: chimes.map((c) => c.pa),
     getState() {
       return {
-        started, disposed, count: chimes.length,
+        started, disposed, count: chimes.length, liveCorners,
         windiness: +windiness.toFixed(4), volume: +volume.toFixed(4),
         busGain: chimes.length ? +chimes[0].bus.gain.value.toFixed(6) : 0,
+        positions: chimes.map((c) => ({
+          x: +c.pa.position.x.toFixed(3),
+          y: +c.pa.position.y.toFixed(3),
+          z: +c.pa.position.z.toFixed(3),
+        })),
       };
     },
     setWindiness(w) { if (!disposed) windiness = Math.max(0, Math.min(1, w)); },
     setVolume(v) { if (!disposed) volume = Math.max(0, v); },
     setLayout,
+    setCorners,
     strike,
     update,
     start() { if (!disposed) started = true; },

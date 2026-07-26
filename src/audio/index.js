@@ -8,13 +8,21 @@ import { handOffTrack, trackForEntry, trackForTime } from './track-policy.js';
 import { introAdvance, introInitialState, introReduce } from './intro-policy.js';
 
 // 사운드 레이어 오케스트레이터.
-//   setupAudio(listenerCarrier, { layout, streamAnchor, getDogAnchor, getDogState }) →
+//   setupAudio(listenerCarrier, {
+//     layout, streamAnchor, getStreamAnchor, getChimeCorners,
+//     getDogAnchor, getDogState,
+//   }) →
 //     { start(), setEnabled(v), setEnvActive(v), setTime(name), setWeather(name),
-//       update(dt), setBgmVolume(v), setAmbienceVolume(v), setLayout(l),
+//       update(dt), setBgmVolume(v), setAmbienceVolume(v), setLayout(l), setChimeCorners(c),
 //       strike(i?), barkDog(), getTracks(), playTrack(n),
 //       introEvent(e), playEntryTrack(), prefetchEntryTrack(), handOffEntryTrack(),
 //       diagnostics(), listener, dispose() }
-//   streamAnchor: 개울 물소리를 앉힐 월드 좌표(THREE.Vector3) 또는 null.
+//   streamAnchor: 개울 물소리 초기 월드 좌표(THREE.Vector3) 또는 null — 값 캡처(레거시).
+//   getStreamAnchor: 라이브 개울 앵커 getter(권장). 개(getDogAnchor)와 같은 패턴.
+//     마을 모드에서는 카메라/포커스 근처 개울 중심선 점, 솔로 하우스는 env.streamAnchor.
+//     null 을 주면 개울 SFX 게인 0. streamAnchor 와 함께 주면 getter 가 우선 갱신.
+//   getChimeCorners: 풍경 4모서리 월드 좌표 getter([[x,y,z]×4]). 마을 포커스/최근접 집 처마.
+//     없으면 layout/setLayout 의 원점 처마(솔로 하우스 경로).
 //   getDogAnchor/getDogState: 마당 개의 라이브 월드 위치·상태('walking'|'sitting') getter(없으면 개 없음).
 //
 // listenerCarrier(보통 camera)에 THREE.AudioListener 를 붙인다. 브라우저 autoplay 정책상
@@ -33,7 +41,14 @@ import { introAdvance, introInitialState, introReduce } from './intro-policy.js'
 //   풍경(PositionalAudio) -------------/  (three 가 panner->gain->listener 로 연결)
 // 풍경 볼륨은 ambience 볼륨에 종속(환경음의 일부).
 
-export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDogAnchor = null, getDogState = null } = {}) {
+export function setupAudio(listenerCarrier, {
+  layout,
+  streamAnchor = null,
+  getStreamAnchor = null,
+  getChimeCorners = null,
+  getDogAnchor = null,
+  getDogState = null,
+} = {}) {
   const listener = new THREE.AudioListener();
   listenerCarrier.add(listener);
   const ctx = listener.context;
@@ -87,11 +102,14 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
   bgmGain.gain.value = 1;
   bgmGain.connect(input);
 
-  const chimes = createChimes(listener, { layout });
+  const chimes = createChimes(listener, { layout, getCorners: getChimeCorners });
   const ambience = createAmbience(listener, { layout, destination: ambienceGain });
   const bgm = createBgm(listener, { destination: bgmGain });
-  // 개울 물소리(위치성). 앵커 없으면(물 없는 씬) 생성하지 않는다.
-  const stream = streamAnchor ? createStream(listener, { anchor: streamAnchor }) : null;
+  // 개울 물소리(위치성). 정적 앵커 또는 라이브 getter 가 있을 때만 생성.
+  // 값으로 한 번 캡처하면 마을 모드에서 원점 개울에 묶이므로 getStreamAnchor 권장.
+  const stream = (getStreamAnchor || streamAnchor)
+    ? createStream(listener, { anchor: streamAnchor, getAnchor: getStreamAnchor })
+    : null;
   // 마당 개 짖음(위치성). 개 앵커 getter 없으면 생성하지 않는다.
   const dog = getDogAnchor ? createDog(listener, { getAnchor: getDogAnchor, getState: getDogState }) : null;
 
@@ -233,8 +251,10 @@ export function setupAudio(listenerCarrier, { layout, streamAnchor = null, getDo
       stream?.setWeather(name); // 눈(결빙) 시 물소리 0.25배
       pushWind();
     },
-    // 건물 재생성(크기 변경) 시 풍경 위치 갱신
+    // 건물 재생성(크기 변경) 시 풍경 위치 갱신(solo). 마을 getChimeCorners 활성 시 no-op.
     setLayout(layout) { if (!disposed) chimes.setLayout(layout); },
+    // 풍경 월드 좌표 명시 갱신(포커스 전환 등). getter 와 병행 가능.
+    setChimeCorners(corners) { if (!disposed) chimes.setCorners(corners); },
     setBgmVolume(v) { if (!disposed) bgm.setVolume(v); },
     setAmbienceVolume(v) {
       if (disposed) return;
