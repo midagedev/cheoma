@@ -614,6 +614,8 @@ export function* populateVillageSteps(plan, opts = {}) {
     // 창불 한지 면 점등 레벨 갱신(어댑터 stepNightGlow 가 vnight 를 넘겨줌, #60/#50 정합).
     updateNightLights: (dt, level, lensScale) => nightLights.update(dt, level, lensScale),
     refreshNightLights: (ownerId, overlayRoot = null) => nightLights.refreshOwner(ownerId, overlayRoot),
+    setNightLightOwnerSuppressed: (ownerId, suppressed = true) =>
+      nightLights.setOwnerSuppressed(ownerId, suppressed),
     debugNightLights: () => nightLights.debugState(),
     debugNightLightOwner: (ownerId) => nightLights.debugOwner(ownerId),
     debugYardLife: () => yardLife.debug(),
