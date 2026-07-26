@@ -17,9 +17,11 @@ export const VILLAGE_LIGHT_BY_TIME = {
     hemiSky: 0x9fb0d6, hemiGround: 0x2a241e, hemiInt: 0.54,
     fillColor: 0xecc09c, fillInt: 0.62, fillElev: 0.42, glowBoost: 1.0,
   },
+  // #150-H: retune only the existing village hemi + anti-solar fill (no new lights).
+  // Cooler moon fill models wall/column depth under eaves; glowBoost still scales hanji only.
   night: {
-    hemiSky: 0x3d4c6e, hemiGround: 0x1b2233, hemiInt: 0.42,
-    fillColor: 0xa9bde0, fillInt: 0.30, fillElev: 0.42, glowBoost: 1.5,
+    hemiSky: 0x42567a, hemiGround: 0x1e2838, hemiInt: 0.50,
+    fillColor: 0xb0c4e6, fillInt: 0.38, fillElev: 0.42, glowBoost: 1.5,
   },
 };
 
