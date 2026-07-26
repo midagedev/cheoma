@@ -98,6 +98,10 @@ const REVIEWED_NEW_PATHS = new Set([
   // 함께 돌고, 브라우저를 쓰지 않으므로 새 경로 실패마감 예외로 검토됐다.
   'tools/check-yard-polygon-contract.mjs',
   'tools/check-yard-proportion-contract.mjs',
+  // #150-G 고샅 topology: measure-only neighbour gap analysis + FAST_CHECKS 게이트.
+  // 배치를 바꾸지 않으므로 worker 골든 불필요. parcels.js 임계값 드리프트만 소스 가드.
+  'src/village/gosat-topology.js',
+  'tools/check-gosat-topology.mjs',
   // #20 마을 인접 수관 감쇠(부감 담장선): Three-free 순수 수식 + FAST_CHECKS 게이트.
   // forest-crunch 가 소비하고 worker 해시에 반영된다. 브라우저는 불필요.
   'src/village/forest-canopy-atten.js',

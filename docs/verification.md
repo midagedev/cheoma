@@ -350,6 +350,10 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
 - `check:auxiliary-building`
   - 5개 규모 × 4개 seed에서 기존 요청 435건을 전역 RNG 없이 다시 평가해 실제 처마·필지 경계·집↔대문 접근·자기/이웃 30° 겨울 일조·마당 hard object를 모두 통과한 원래 크기만 승인한다. 같은 입력의 불변 local/world footprint, 거절 시 `null`, 승인 UI 상태의 정직성도 검사한다.
   - 공개 renderer는 계획 local transform과 footprint를 그대로 쓰고 기와/초가 palette 역할 material을 빌린 3 mesh·48 triangle만 만든다. 새 material·texture·RNG가 없고 geometry만 정확히 한 번 해제되는지 검사한다.
+- `check:gosat`
+  - Three/DOM/전역 RNG 없는 `gosat-topology.js`로 완성 plan의 이웃 필지 경계 간 최단거리를 측정한다. 배치·worker 골든을 바꾸지 않는 measure+assert 게이트다.
+  - `parcels.js`의 `SHARE_DIST=1.15`·`ALLEY_DIST=3.8`·`gapWidth` 0.7–3.9 clamp가 분석 상수와 같은지 소스 가드한다.
+  - village 이상 규모에서 alley 중앙값이 역사 소로 1.0–3.4 m 안이고 alley 쌍의 ≥70%가 그 대역에 있으며, 대문/전면 변 `edge.share` 금지와 밀착 share 플래그 정합, 이중 솔리드 wall-face 중앙값 ≥0.4 m를 검사한다. 근거·실측 표는 `village-walls-parcels.md` R-P2.
 - `check:layout`
   - 종가·관아·궁역 남향, 일반 필지 최종 좌향 65° 상한과 seed마다 남축 ±60° 안 70% 이상인 군집, `frontDir` 하나로 poly·집·담·픽킹 회전이 일치하는지 검사한다.
   - frontage/infill 필지가 stable road ID·접점을 소유하고 최근 도로측 담 변의 `gateEdge/gateT`를 저장하는지 검사한다. 대문 직전의 1cm probe가 필지 밖이고 도로를 향하며, 대문→도로 선분이 자기 처마를 관통하지 않고 접근 거리가 상한 안인지 확인한다. 필지·실제 처마가 폭을 가진 도로와 개울 둑을 침범하지 않는지도 같이 검사한다.
@@ -950,6 +954,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-brush-fence.mjs` | 고정 초가 필지 싸리울의 근경 실루엣 마스크 — 상단선 중앙값 절대편차, 몸통 가림률, 재질·텍스처 예산 | 규격 피켓과의 하한선만 판정하며 엮음 문양·살 굵기 분포의 사실성은 사람이 본다. |
 | `tools/check-sijeon-contract.mjs` | 기존 시전 위치 bytes, 순수 2칸 façade schema, 필지·도로 회랑 경계, 유한값·직렬화·결정론·무전역 RNG | Three 재질·병합 geometry와 실제 한양 화면은 `check:api-reuse`, app/worker 게이트가 맡는다. |
 | `tools/check-layout-contract.mjs` | 남향 군집·도로측 대문·실제 지붕 fit·단건 재굴림·도로/개울/논·집 사이 겨울 일조·정자 실면적/화면 폭·높이 있는 마을 소품·보호수·밀도 계약 | 대표 seed 순수 데이터 검사로, 실제 광학적 차폐 미감은 앱 캡처로 확인한다. |
+| `tools/check-gosat-topology.mjs` | 이웃 필지 경계 간 고샅 폭 측정·share 플래그 정합·역사 1.0–3.4 m 중앙값/비율 (#150-G) | 배치 변경 없이 measure+assert. `src/village/gosat-topology.js` + `village-walls-parcels.md` R-P2. |
 | `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |
 | `tools/check-wall-step-contract.mjs` | 평탄 exactness, 수평 단·대문 landing·변당 6 run 상한, renderer/semantic y 공유 | 순수 계약이며 실제 마을 안의 율동·가림은 `npm run shoot:wall-steps` 좌·우 PNG를 직접 본다. |
 | `tools/shoot-wall-steps.mjs` | 실제 `village:1:p8`의 강한 돌담 단차를 양쪽 카메라에서 촬영하고 calls/triangles·WebGL renderer 기록 | 대표 필지 한 건의 시각 판정이며 모든 규모/seed의 수학은 `check:wall-step`과 layout/worker 게이트가 맡는다. |
