@@ -1574,6 +1574,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       flare: focused,
       dofAmount: focused ? dofAmount : 0,
     });
+    // Aerial bloom is half-res haze; focus restores full bloom (compact stays half).
+    postRuntime.setFocusBudget?.(!!focused);
   }
 
   // ---------- 시네마틱 데모 모드 — 독립 runtime으로 위임 ----------

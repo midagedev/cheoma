@@ -343,3 +343,31 @@ export function isResidentialThatchOnlyEdit(previousSpec, nextEdit) {
   if ((previousSpec.params?.roofTone ?? 0) !== (nextEdit.top.roofTone ?? 0)) return false;
   return previousSpec.params?.thatchAge !== nextEdit.top.thatchAge;
 }
+
+/**
+ * Kind + structural params only (openings + cosmetics stripped). Equal means the
+ * courtyard wall can stay even when doors/windows change — roof AABB may still
+ * need a post-build check for pitch/footprint edits.
+ */
+export function residentialStructureSignature(spec) {
+  if (!spec) return null;
+  const skip = new Set([
+    ...RESIDENTIAL_COSMETIC_PARAM_KEYS,
+    'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+    'doorHeightK', 'windowHeightK', 'doorPattern',
+  ]);
+  return JSON.stringify({
+    kind: spec.kind,
+    params: stableParamEntries(spec.params, skip),
+  });
+}
+
+/** True when only openings (and cosmetics) differ — house rebuild, wall keep. */
+export function isResidentialOpeningsOnlyEdit(previousSpec, nextEdit) {
+  if (!previousSpec || !nextEdit?.spec) return false;
+  if (previousSpec.kind !== nextEdit.kind) return false;
+  if (residentialStructureSignature(previousSpec) !== residentialStructureSignature(nextEdit.spec)) {
+    return false;
+  }
+  return residentialGeometrySignature(previousSpec) !== residentialGeometrySignature(nextEdit.spec);
+}

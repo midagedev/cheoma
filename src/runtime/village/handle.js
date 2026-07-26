@@ -46,6 +46,7 @@ import {
   applyMaterialRoleTints,
   buildParcelSpec,
   clampBuildingDimensions,
+  isResidentialOpeningsOnlyEdit,
   isResidentialThatchOnlyEdit,
   parcelWallType,
   palaceCompoundDefaults,
@@ -1176,8 +1177,11 @@ export function createVillageHandle(opts, seed, plan, group) {
 
       // Yard mesh can survive a house-only rebuild when the courtyard signature
       // and roof AABB still match — openings / roof pitch previews skip wall gen.
+      // Openings-only sliders (common path) never move the roof AABB, so the
+      // post-build bounds check is guaranteed once structure + yard match.
       const nextYardSig = residentialYardSignature(gk, edit.top);
       const prevRoofBounds = prev?.userData?.editRoofBounds || null;
+      const openingsOnly = !!(prev && isResidentialOpeningsOnlyEdit(previousAcceptedSpec, edit));
       let retainedWall = null;
       let retainedAux = null;
       let retainedAuxiliarySpec = null;
@@ -1265,9 +1269,10 @@ export function createVillageHandle(opts, seed, plan, group) {
       };
 
       // Confirm wall reuse against the *new* roof AABB. Staged extraction used
-      // the previous yard signature only; bounds must still fit.
+      // the previous yard signature only; bounds must still fit. Openings-only
+      // edits keep the shell AABB, so they always pass when yard signature matched.
       const canReuseWall = !!retainedWall
-        && residentialRoofBoundsMatch(prevRoofBounds, editRoofBounds);
+        && (openingsOnly || residentialRoofBoundsMatch(prevRoofBounds, editRoofBounds));
       if (retainedWall && !canReuseWall) {
         disposeTree(retainedWall);
         retainedWall = null;

@@ -2,9 +2,11 @@
 // thatch-only detection. No Three, no browser.
 import assert from 'node:assert/strict';
 import {
+  isResidentialOpeningsOnlyEdit,
   isResidentialThatchOnlyEdit,
   residentialGeometrySignature,
   residentialRoofBoundsMatch,
+  residentialStructureSignature,
   residentialYardSignature,
   resolveResidentialEdit,
   buildParcelSpec,
@@ -51,6 +53,16 @@ assert.notEqual(
   residentialGeometrySignature(doorEdit.spec),
   geoA,
   'door width kept the geometry signature',
+);
+assert.equal(
+  residentialStructureSignature(doorEdit.spec),
+  residentialStructureSignature(base),
+  'door width changed the structure signature',
+);
+assert.equal(
+  isResidentialOpeningsOnlyEdit(base, doorEdit),
+  true,
+  'door width was not openings-only',
 );
 assert.equal(
   isResidentialThatchOnlyEdit(base, doorEdit),

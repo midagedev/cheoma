@@ -139,6 +139,9 @@ const REVIEWED_NEW_PATHS = new Set([
   // Perf campaign: pure live-edit geometry/yard signatures + thatch-only path.
   // FAST_CHECKS; browser not required.
   'tools/check-live-edit-signatures.mjs',
+  // Perf campaign product-path measure (post ON orbit/rebuild budgets). Optional
+  // bench, not a merge gate — reviewed so it does not force check:full alone.
+  'tools/bench-product-path.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',

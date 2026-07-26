@@ -40,12 +40,19 @@
 |---|---|---|
 | **minSiteR 340→260** | capital이 Hanyang과 같은 FAR/MID/FULL 스택 사용 | aerial **956→404 calls, 6.1M→1.0M tris** |
 
+## 3차 구현 (부감 bloom + openings + 제품 벤치)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Aerial bloom half-res** | 부감/비focus는 bloom 반해상도, focus에서 풀 해상도 (compact는 항상 half) | 부감 헤이즈는 유지, 근경 bloom 풀 |
+| **Openings-only wall keep** | structure signature 동일 시 roof AABB 검사 생략·담 재사용 확정 | 동일 |
+| **Product path bench** | `npm run bench:product-path` — capital 오빗 fillScale + focus rebuild med | 구조 예산 계측 |
+
 ## 다음 라운드 (우선순위)
 
-1. 제품 경로 브라우저 하네스: focus orbit + rebuild med ms + `postFillScale` 판독
-2. openings-only / roof-pitch 전용 부분 리빌드 계측 후 더 쪼개기
-3. town(R≈240) chunk LOD 검토 (룩 게이트 통과 시에만)
-4. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
+1. openings-only 시 house 서브트리만 교체 (dispose 범위 축소)
+2. town(R≈240) chunk LOD 검토 (룩 게이트 통과 시에만)
+3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
 

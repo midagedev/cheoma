@@ -25,8 +25,22 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
 
   let cssW = Math.max(1, width);
   let cssH = Math.max(1, height);
+  // Aerial village frames read bloom as soft atmospheric haze; half-res is enough.
+  // Focus keeps full bloom (except compact phones, which always half-cap for memory).
+  // composer.setSize restores full device size, so every budget apply re-caps after.
+  let bloomHalf = true; // product boots in aerial / non-focus; focus promotes to full
   const applyBloomResolution = (w, h) => {
-    if (compact) post.bloomPass.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
+    // UnrealBloomPass.setSize already builds mips at half of the size it receives.
+    // Passing device-pixel size matches stock EffectComposer behaviour (beauty → ½ bloom).
+    // Aerial/compact pass half of that so the bright pass is ~¼ of beauty fill cost.
+    const pr = renderer.getPixelRatio() * (post.fillScale ?? 1);
+    const fullW = Math.max(1, Math.round(w * pr));
+    const fullH = Math.max(1, Math.round(h * pr));
+    if (compact || bloomHalf) {
+      post.bloomPass.setSize(Math.max(1, fullW >> 1), Math.max(1, fullH >> 1));
+    } else {
+      post.bloomPass.setSize(fullW, fullH);
+    }
   };
   applyBloomResolution(cssW, cssH);
 
@@ -72,6 +86,17 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   return {
     post,
     outline,
+    /**
+     * Focus context owns bloom resolution: aerial/half for village overview,
+     * full device resolution when a house is focused (compact phones stay half).
+     */
+    setFocusBudget(focused) {
+      if (disposed) return;
+      const nextHalf = compact || !focused;
+      if (nextHalf === bloomHalf) return;
+      bloomHalf = nextHalf;
+      applyBloomResolution(cssW, cssH);
+    },
     updateQuality(dt, referenceDepth) {
       if (disposed) return null;
       return qualityRuntime.update(dt, referenceDepth);
@@ -86,6 +111,7 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       return {
         pixelRatio: renderer.getPixelRatio(),
         fillScale: post.fillScale ?? 1,
+        bloomHalf: compact || bloomHalf,
         // AA 회귀 게이트 판독축: samples=0 이면 컴포저 경로에 AA 가 전혀 없다.
         //   setSamples 로 런타임 교체될 수 있으므로 패스에서 라이브로 읽는다.
         msaaSamples: post.renderPass.samples,
@@ -98,6 +124,11 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
         outline: {
           width: outline.renderTargetMaskBuffer.width,
           height: outline.renderTargetMaskBuffer.height,
+        },
+        bloom: {
+          // Bright-pass target is the first half-mip UnrealBloomPass allocates.
+          width: post.bloomPass.renderTargetBright?.width ?? null,
+          height: post.bloomPass.renderTargetBright?.height ?? null,
         },
         // 프로그램·텍스처 수는 해상도/AA 판정의 유일하게 신뢰 가능한 성능 축이다
         // (헤드리스 ANGLE 의 절대 프레임 ms 는 증거가 못 된다 — CLAUDE.md 검증 절).
