@@ -65,6 +65,7 @@ assert.deepEqual(ids(['tools/check-forest-canopy-atten.mjs'], {
 }), ['core']);
 assert.deepEqual(ids(['tools/check-instance-merge-immutability.mjs'], {
   newPaths: ['tools/check-instance-merge-immutability.mjs'],
+}), ['core']);
 // #150 C roof-rank pure policy — reviewed new path under the shared builder routing.
 // builder/* also sits on the public building reuse graph → api-reuse.
 assert.deepEqual(ids(['src/builder/roof-rank.js'], {
