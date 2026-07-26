@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baselineCommit": "yard-proportion-2026-07-26",
+  "baselineCommit": "dangsan-150-2026-07-26",
   "templeRevision": "issue-122-role-hierarchy-2026-07-23",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
@@ -58,4 +58,46 @@
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
   "roofRankRevision": "issue-150c-roof-rank-magistracy-city-gate-2026-07-26"
+"hash": "81e8525c58515d0cf667ff835fdfc2854528f66e1ef291ec6834a7e395c672a3",
+      "bytes": 37432
+    },
+    "village:base": {
+      "hash": "b487eff6736b2bad6661afde071f70d509d6f8d03d09b344a6811a6506bf6b9e",
+      "bytes": 99593
+    },
+    "town:base": {
+      "hash": "e3160916eccf2cad3fe137783f63242a9e1312148060cb4b796dc2ac553c4647",
+      "bytes": 196212
+    },
+    "capital:base": {
+      "hash": "8167f44654b619a270b68c902e5d14866e1a08455f2de6706e9ca9830fd74551",
+      "bytes": 203761
+    },
+    "hanyang:base": {
+      "hash": "bb703e4d59f7347bcf8b4a0b438e699f03ebe356cbf1e31fff0dd355081b81ab",
+      "bytes": 1091438
+    },
+    "hamlet:temple": {
+      "hash": "590872dd97ac9961aea18ed5164a22b6f3f9d8ddd855e5620f7a217fde6b6a19",
+      "bytes": 41546
+    },
+    "village:temple": {
+      "hash": "b7537cf13791fa732798ac2b560d09ce1d8f858defdc26ede1ecc10365f103a5",
+      "bytes": 106397
+    },
+    "town:temple": {
+      "hash": "a13a226b09e75acd689a82e52c2a33c9710beecfc3ab051cc1698ce7a72eae9c",
+      "bytes": 193930
+    },
+    "capital:temple": {
+      "hash": "7a74adbe75d05201be3a497f9c7aad6902bb4b360cbebebda2697d5c1534450c",
+      "bytes": 202860
+    },
+    "hanyang:temple": {
+      "hash": "83feca7e67106bbcc71e88d9be6e5069ff67901491e32d94aba3bdc2cf2ebc05",
+      "bytes": 1059759
+    }
+  },
+  "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
+  "dangsanRevision": "issue-150-dangsan-cultural-landscape-2026-07-26"
 }

@@ -392,6 +392,13 @@
 - URL: https://www.getty.edu/publications-reports/item/2K7M41
 - 라이선스: **2026-07-25 실측: 이 canonical 출판 항목 페이지는 HTTP 200이지만 JS 전용 SPA라 스크립트를 끈 상태에서는 "doesn't work properly without JavaScript enabled"만 표시된다**(제목은 응답의 `<title>`로 확인). 이전 판이 걸었던 `conservation/publications_resources/.../terra_literature_review.html` 경로와 PDF 직링크는 이 항목 페이지로 대체했다. 출판물은 © 2008 J. Paul Getty Trust이며 Getty의 publication terms와 수록된 제3자 권리가 적용된다. 앱은 원문·도판·PDF를 재배포하지 않고 링크와 사실 요약만 제공하며, 별도 인용·자산 재사용 전 최신 이용조건과 필요한 허락을 확인한다.
 
+### 51. 한국학중앙연구원·국립민속박물관 — 당산나무·마을신앙과 의례 공터 / Dangsan trees, village ritual clearings, and dangjip
+- 한국민족문화대백과사전 「마을신앙」·「금줄」 및 지역 항목(무주군·곡성군) · 국립민속박물관 한국민속대백과사전 「당산나무」.
+- 마을신앙은 한 마을 단위의 동제·당제·당산제·성황제로 서술되며, 지역 항목은 당산나무 주위에 황토를 깔고 금줄을 치거나 당산·당집·누석단·성황당 등이 **마을마다 한두 가지 조합**으로 나타난다고 설명한다. 금줄은 부정 차단을 위해 당산나무·당집에도 맨다. 민속대백과는 당산을 마을 수호신을 모신 성역으로 정의한다. **어느 자료도 전국 촌락의 당집 설치 비율이나 표준 평면 치수를 확정하지 않는다.**
+- **활용 / Use:** 이미 plan에 예약된 보호수 수관 아래에서만 hamlet/village 규모에 낮은 제품 auto-rate(또는 `opts.dangsan` 강제)로 의례 공터·낮은 돌제단·선택 소형 당집을 붙이는 근거다. 새 신목을 만들지 않고, town·capital·hanyang 기본값·전국 빈도·성황당 전 유형 분화·당산제 연출은 배제한다. 공터 반경·당집 치수·auto-rate는 충돌 안전과 화면 희소성을 위한 제품 해석이며 역사 평균이 아니다 / Grounds an optional ritual clearing, low stone altar, and small dangjip only under an already reserved guardian canopy at hamlet/village scale (low product auto-rate or forced `opts.dangsan`). No new sacred tree is invented; town/capital/Hanyang defaults, national frequency claims, full seonghwang-dang typology, and festival staging are excluded. Clearing radius, shed size, and auto-rate are product choices for collision safety and visual sparseness, not historical averages (`docs/dangsan.md`, `src/village/dangsan-plan.js`, `src/village/dangsan-geometry.js`).
+- URL: https://encykorea.aks.ac.kr/Article/E0017416 · https://encykorea.aks.ac.kr/Article/E0008002 · https://encykorea.aks.ac.kr/Article/E0019249 · https://encykorea.aks.ac.kr/Article/E0004117 · https://folkency.nfm.go.kr/topic/detail/1927
+- 라이선스: 2026-07-26 공개 백과·민속대백과 항목을 링크로 인용. 기관·항목별 이용조건이 적용된다. 앱은 원문 문장·사진·도판을 복제하지 않고 사실 요약과 독자 procedural geometry만 사용한다.
+
 ### 44. 국사편찬위원회·서울역사박물관·국가유산청 — 조선 길가 배수와 제한적 마을 수로 / Roadside drainage and exceptional village waterways
 - id: cred-roadside-drainage
 - topic: drainage

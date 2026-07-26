@@ -81,6 +81,7 @@ npm run check:instance-merge  # 인스턴싱/정적 병합 geometry digest·mate
 npm run check:api-reuse      # 공개 building·시전 API 재사용·dispose·제품 카메라 smoke
 npm run check:mud-wall      # Three 없는 토담 표면 plan·상한·envelope 데이터 계약
 npm run check:drainage      # Three 없는 도로 측구·대문 건넘 정책·경사·공간 계약
+npm run check:dangsan       # Three 없는 당산 의례 공터·당집 배치·수관·회피 계약
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
 npm run check:full            # 머지 직전 전체 profile + production build
@@ -536,6 +537,15 @@ program family 증분이 2 이하인지 검사한다. 각 기여도의 실제 �
 PNG는 OS 임시 폴더에 쓰며 사람이 다짐 이음이 목재 사이딩처럼 규칙적이지 않은지, 짚이 노란 표면층이
 되지 않는지, 하부 흔적이 검은 띠가 아닌지, 그리고 `base-*` 컷에서 막돌이 개별 자연석으로·이엉 coping이
 집줄 감긴 짚으로 읽히는지를 최종 판정한다.
+
+### `npm run check:dangsan`
+
+`check:dangsan`은 공개 `src/api/dangsan-plan.js`와 실제 `planVillage()` 통합 결과를 함께 검사한다.
+Three·DOM 없는 순수 plan이 기존 보호수 수관 안에서만 의례 공터·돌제단·선택 당집을 두고, 필지·도로·
+개울·일조를 침범하지 않는지, `opts.dangsan` 강제/off/auto와 hamlet·village 한정 정책을 지키는지,
+전용 seed stream이 전역 `Math.random`과 입력 village snapshot을 건드리지 않는지 고정한다.
+auto-rate는 제품 희소 대역(0 초과·45% 미만)만 검사하며 전국 빈도로 해석하지 않는다. 문서 계약은
+[`dangsan.md`](dangsan.md).
 
 ### `npm run check:drainage` / `npm run shoot:drainage`
 

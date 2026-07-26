@@ -6,6 +6,7 @@ export * from './sijeon-plan.js';
 export * from './yard-life-plan.js';
 export * from './mud-wall-plan.js';
 export * from './drainage-plan.js';
+export * from './dangsan-plan.js';
 export * from './mja-house-plan.js';
 export {
   SCALE_ANCHORS,
