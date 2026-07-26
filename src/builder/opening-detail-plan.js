@@ -10,6 +10,26 @@ import { hashString } from '../rng.js';
 export const OPENING_DETAIL_KINDS = Object.freeze(['door', 'window']);
 export const OPENING_DETAIL_STYLES = Object.freeze(['palace', 'temple', 'giwa', 'choga']);
 
+// Residential taxonomy (#150 B / AURI 판문·살문·고정창·들창). `kind` remains the
+// coarse door/window function; `type` names the leaf construction.
+export const OPENING_DETAIL_TYPES = Object.freeze([
+  'panel',         // 판문 — solid plank door leaf
+  'salmun',        // 살문 — lattice + hanji door leaf
+  'fixed-window',  // 고정창
+  'lift-window',   // 들창 (product default motion is still fixed)
+]);
+
+// Lawful motion modes. Product interaction is narrower than the vocabulary:
+// only a primary door with hinge motion is interactive; windows stay fixed.
+export const OPENING_MOTION_MODES = Object.freeze(['fixed', 'hinge', 'lift']);
+
+// Thin leaf surface hint for shared materials — no Three, no new program family.
+// panel → solid wood board; sal → lattice/hanji door or salchang texture.
+export const OPENING_LEAF_SURFACES = Object.freeze(['panel', 'sal']);
+
+const DOOR_TYPES = new Set(['panel', 'salmun']);
+const WINDOW_TYPES = new Set(['fixed-window', 'lift-window']);
+
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 const finite = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
@@ -22,6 +42,114 @@ function defaultLeafCount(kind, width) {
 
 function box(kind, u, y, width, height, depth, outward) {
   return { kind, shape: 'box', u, y, width, height, depth, outward };
+}
+
+function defaultOpeningType(kind) {
+  return kind === 'door' ? 'salmun' : 'fixed-window';
+}
+
+/**
+ * Resolve and validate the residential opening type against `kind`.
+ * Explicit input wins; defaults keep today's sal door / fixed window look.
+ */
+export function resolveOpeningDetailType(kind, input = {}) {
+  const raw = input.type ?? input.openingType;
+  const type = raw == null ? defaultOpeningType(kind) : raw;
+  if (!OPENING_DETAIL_TYPES.includes(type)) {
+    throw new Error(`Unknown opening type: ${type}`);
+  }
+  if (kind === 'door' && !DOOR_TYPES.has(type)) {
+    throw new Error(`opening type ${type} is not lawful for a door`);
+  }
+  if (kind === 'window' && !WINDOW_TYPES.has(type)) {
+    throw new Error(`opening type ${type} is not lawful for a window`);
+  }
+  return type;
+}
+
+/**
+ * Resolve lawful motion for one opening. Product rules:
+ * - only a primary door may claim hinge
+ * - windows never claim hinge; lift-window defaults to fixed (lift is explicit only)
+ * - interactive is true only for primary door + hinge
+ */
+export function resolveOpeningDetailMotion(kind, type, primary, input = {}) {
+  const requested = input.motion == null
+    ? null
+    : (typeof input.motion === 'string' ? input.motion : input.motion.mode);
+  if (requested != null && !OPENING_MOTION_MODES.includes(requested)) {
+    throw new Error(`Unknown opening motion: ${requested}`);
+  }
+
+  if (kind === 'window') {
+    if (requested === 'hinge') {
+      throw new Error('window may not claim hinge motion');
+    }
+    if (type === 'fixed-window') {
+      if (requested != null && requested !== 'fixed') {
+        throw new Error(`fixed-window may only use fixed motion, got ${requested}`);
+      }
+      return { mode: 'fixed', interactive: false };
+    }
+    // lift-window: lift is lawful vocabulary but product default is fixed and
+    // never interactive (no product window runtime).
+    if (requested != null && requested !== 'fixed' && requested !== 'lift') {
+      throw new Error(`lift-window may only use fixed or lift motion, got ${requested}`);
+    }
+    return {
+      mode: requested === 'lift' ? 'lift' : 'fixed',
+      interactive: false,
+    };
+  }
+
+  // door: panel | salmun
+  if (requested === 'lift') {
+    throw new Error('door may not claim lift motion');
+  }
+  if (primary) {
+    const mode = requested === 'fixed' ? 'fixed' : 'hinge';
+    return { mode, interactive: mode === 'hinge' };
+  }
+  if (requested === 'hinge') {
+    throw new Error('only a primary door may claim hinge motion');
+  }
+  return { mode: 'fixed', interactive: false };
+}
+
+export function leafSurfaceForOpeningType(type) {
+  return type === 'panel' ? 'panel' : 'sal';
+}
+
+/**
+ * Fail closed over a building's planned openings: at most one primary door,
+ * and no window may carry hinge motion (also enforced at plan time).
+ */
+export function assertLawfulOpeningDetailSet(plans = []) {
+  if (!Array.isArray(plans)) {
+    throw new Error('opening detail set must be an array');
+  }
+  let primaryDoors = 0;
+  for (const plan of plans) {
+    if (!plan || typeof plan !== 'object') {
+      throw new Error('opening detail set contains a non-plan entry');
+    }
+    if (plan.kind === 'window') {
+      const mode = plan.motion?.mode;
+      if (mode === 'hinge' || plan.interactive === true) {
+        throw new Error('window may not claim hinge motion or interactive product control');
+      }
+      if (plan.primary === true) {
+        throw new Error('window may not be a primary entrance');
+      }
+    }
+    if (plan.kind === 'door' && plan.primary === true) {
+      primaryDoors += 1;
+    }
+  }
+  if (primaryDoors > 1) {
+    throw new Error(`building may not have multiple primary doors (found ${primaryDoors})`);
+  }
+  return true;
 }
 
 /**
@@ -46,7 +174,13 @@ export function planOpeningDetail(input = {}) {
     1,
     kind === 'door' ? 4 : 2,
   );
+  if (kind === 'window' && input.primary === true) {
+    throw new Error('window may not be a primary entrance');
+  }
   const primary = kind === 'door' && input.primary === true;
+  const type = resolveOpeningDetailType(kind, input);
+  const motion = resolveOpeningDetailMotion(kind, type, primary, input);
+  const leafSurface = leafSurfaceForOpeningType(type);
   const seed = normalizeStableSeed(input.seed);
   if (kind === 'door' && input.meoreumHeight != null) {
     throw new Error('meoreumHeight belongs to a window; use lowerPanelHeight for a door leaf');
@@ -138,63 +272,68 @@ export function planOpeningDetail(input = {}) {
     y: height * 0.5,
     outward: face,
   };
+  // Primary entrance owns focus/footwear regardless of motion. Hinge pivot and
+  // ironwork attach only when the lawful motion is interactive hinge.
   if (primary) {
     const leafWidth = width / leafCount;
-    // The moving leaf ends exactly on its hinge axis. Keeping the pivot on the
-    // outer leaf edge prevents an inset sliver from sweeping through the jamb.
     const pivotU = hingeSide * width * 0.5;
     const leafCenterU = hingeSide * (width * 0.5 - leafWidth * 0.5);
     const leafOutward = clamp(finite(input.leafOutward, 0), -0.2, 0.2);
-    const strapLength = clamp(leafWidth * 0.27, 0.11, style === 'palace' ? 0.25 : 0.18);
-    const strapU = hingeSide * (width * 0.5 - frameWidth - strapLength * 0.5);
-    const hardwareDepth = 0.018;
-    const hardwareOutward = face + frameDepth + hardwareDepth * 0.5 + 0.004;
-    for (const ratio of [0.25, 0.76]) {
-      hardware.push(box(
-        'hinge-strap', strapU, leafBottom + leafHeight * ratio,
-        strapLength, 0.035, hardwareDepth, hardwareOutward,
-      ));
-    }
-    // The measured source is a palace door. Civilian and temple styles keep a
-    // quieter product-level subset (two small straps + one ring) rather than
-    // inheriting the visible palace pivot-cap vocabulary as if it were evidence.
-    if (style === 'palace') {
-      for (const ratio of [0.08, 0.92]) {
-        hardware.push({
-          kind: 'pivot-cap',
-          shape: 'cylinder',
-          u: pivotU,
-          y: leafBottom + leafHeight * ratio,
-          radius: 0.025,
-          depth: 0.036,
-          outward: hardwareOutward,
-        });
-      }
-    }
     const meetingU = hingeSide < 0
       ? -width * 0.5 + leafWidth
       : width * 0.5 - leafWidth;
-    hardware.push({
-      kind: 'ring-handle',
-      shape: 'torus',
-      u: meetingU + hingeSide * 0.08,
-      y: leafBottom + leafHeight * 0.54,
-      radius: clamp(leafWidth * 0.09, 0.045, 0.075),
-      tube: 0.009,
-      outward: hardwareOutward + 0.016,
-    });
-    pivot = {
-      u: pivotU,
-      y: leafBottom,
-      axis: { u: 0, y: 1, outward: 0 },
-      hingeSide,
-      outward: leafOutward,
-      leafWidth,
-      leafCenterU,
-      meetingU,
-      leafHeight,
-      maxAngle: Math.PI * 0.52,
-    };
+
+    if (motion.mode === 'hinge') {
+      // The moving leaf ends exactly on its hinge axis. Keeping the pivot on the
+      // outer leaf edge prevents an inset sliver from sweeping through the jamb.
+      const strapLength = clamp(leafWidth * 0.27, 0.11, style === 'palace' ? 0.25 : 0.18);
+      const strapU = hingeSide * (width * 0.5 - frameWidth - strapLength * 0.5);
+      const hardwareDepth = 0.018;
+      const hardwareOutward = face + frameDepth + hardwareDepth * 0.5 + 0.004;
+      for (const ratio of [0.25, 0.76]) {
+        hardware.push(box(
+          'hinge-strap', strapU, leafBottom + leafHeight * ratio,
+          strapLength, 0.035, hardwareDepth, hardwareOutward,
+        ));
+      }
+      // The measured source is a palace door. Civilian and temple styles keep a
+      // quieter product-level subset (two small straps + one ring) rather than
+      // inheriting the visible palace pivot-cap vocabulary as if it were evidence.
+      if (style === 'palace') {
+        for (const ratio of [0.08, 0.92]) {
+          hardware.push({
+            kind: 'pivot-cap',
+            shape: 'cylinder',
+            u: pivotU,
+            y: leafBottom + leafHeight * ratio,
+            radius: 0.025,
+            depth: 0.036,
+            outward: hardwareOutward,
+          });
+        }
+      }
+      hardware.push({
+        kind: 'ring-handle',
+        shape: 'torus',
+        u: meetingU + hingeSide * 0.08,
+        y: leafBottom + leafHeight * 0.54,
+        radius: clamp(leafWidth * 0.09, 0.045, 0.075),
+        tube: 0.009,
+        outward: hardwareOutward + 0.016,
+      });
+      pivot = {
+        u: pivotU,
+        y: leafBottom,
+        axis: { u: 0, y: 1, outward: 0 },
+        hingeSide,
+        outward: leafOutward,
+        leafWidth,
+        leafCenterU,
+        meetingU,
+        leafHeight,
+        maxAngle: Math.PI * 0.52,
+      };
+    }
     const footwear = input.footwear || {};
     footwearAnchor = {
       u: clamp(finite(footwear.u, 0), -width * 0.4, width * 0.4),
@@ -222,11 +361,18 @@ export function planOpeningDetail(input = {}) {
   }
 
   return deepFreeze({
-    version: 5,
+    version: 6,
     id: `opening-${hashString(`${seed}|${kind}|${style}`).toString(16)}`,
     seed,
     kind,
     style,
+    type,
+    leafSurface,
+    motion: {
+      mode: motion.mode,
+      interactive: motion.interactive,
+    },
+    interactive: motion.interactive,
     primary,
     width,
     height,

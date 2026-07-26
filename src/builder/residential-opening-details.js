@@ -1,5 +1,8 @@
 import { planResidentialOpenings } from '../layout/residential-openings.js';
-import { planOpeningDetail } from './opening-detail-plan.js';
+import {
+  assertLawfulOpeningDetailSet,
+  planOpeningDetail,
+} from './opening-detail-plan.js';
 import { createOpeningDetailAssembler } from './opening-details.js';
 
 // FULL residential builders share one bridge from the renderer-free opening
@@ -23,6 +26,7 @@ export function createResidentialOpeningDetails(kind, building, target, material
     [`${opening.edgeIndex}:${opening.bayIndex}`, opening]
   )));
   const added = new Set();
+  const details = [];
   target.userData.residentialOpeningPlan = plan;
 
   function openingAt(edgeIndex, bayIndex) {
@@ -94,6 +98,7 @@ export function createResidentialOpeningDetails(kind, building, target, material
     }
     assembler.add(detail, placement, owner);
     added.add(opening.id);
+    details.push(detail);
     return detail;
   }
 
@@ -116,6 +121,8 @@ export function createResidentialOpeningDetails(kind, building, target, material
     if (missing.length) {
       throw new Error(`Residential openings were not assembled: ${missing.map((opening) => opening.id).join(', ')}`);
     }
+    // #150 B: at most one primary door; windows never interactive/hinge.
+    assertLawfulOpeningDetailSet(details);
     assembler.finish();
   }
 

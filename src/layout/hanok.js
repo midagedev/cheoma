@@ -255,13 +255,16 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
   const VSILL = 96 / 512;            // 문 텍스처 하부 청판 경계(flipY 기본: 청판=v∈[0,0.1875])
   const sillTop = oy0 + 0.82;        // 방 창 하부 머름 상단
 
-  // 문·창 공용 창호 재질(단일 클론 → 병합 1콜, hanjiGlow 전파).
-  const doorMat = M.door.clone();
-  doorMat.map = M.door.map.clone();
-  doorMat.map.wrapS = doorMat.map.wrapT = THREE.RepeatWrapping;
-  doorMat.map.needsUpdate = true;
+  // 살문 공용 창호 재질(단일 클론 → 병합 1콜, hanjiGlow 전파). 판문은 solid board 별도.
+  // giwa 팔레트 door 맵은 민가 띠살/정자살이지 궁 주칠·뇌록이 아니다.
+  const salMat = M.door.clone();
+  salMat.map = M.door.map.clone();
+  salMat.map.wrapS = salMat.map.wrapT = THREE.RepeatWrapping;
+  salMat.map.needsUpdate = true;
+  const panelMat = (M.woodBoard || M.planwall || M.woodDark).clone();
 
-  const panels = [];   // secondary 창호 패널(빗꽃살) 병합 대상
+  const panels = [];   // secondary 살문 패널 병합 대상
+  const panelPanels = []; // secondary 판문 패널(재질 분리, 드로우콜 +0~1)
   let primaryPanel = null;
   let primaryFixedPanel = null;
   const details = [];
@@ -308,9 +311,10 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
       tangent: inf.e,
       outward: inf.N,
     };
-    if (primary) {
+    const leafMat = plan.leafSurface === 'panel' ? panelMat : salMat;
+    if (primary && plan.anchors.pivot) {
       ({ active: primaryPanel, fixed: primaryFixedPanel } = createPrimaryDoorPanelSegments({
-        target: g, plan, placement, material: doorMat,
+        target: g, plan, placement, material: leafMat,
         panelHeight: h, depth: T, uRepeats: leaves, vMin: vmin,
       }));
     } else {
@@ -323,7 +327,8 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
       uv.needsUpdate = true;
       geo.rotateY(inf.theta);
       geo.translate(opening.cx, (yb + yt) / 2, opening.cz);
-      panels.push(geo);
+      if (plan.leafSurface === 'panel') panelPanels.push(geo);
+      else panels.push(geo);
     }
     if (kind === 'door') {
       doorN++;
@@ -419,6 +424,11 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     addPanel(primary, bj, Math.max(0.7, bj.w * 0.86), 'win');
   }
 
+  const disposeLeafMats = () => {
+    salMat.map?.dispose();
+    salMat.dispose();
+    panelMat.dispose();
+  };
   if (panels.length) {
     let geometry;
     try {
@@ -426,12 +436,27 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
     } catch (error) {
       primaryPanel?.geometry?.dispose();
       primaryFixedPanel?.geometry?.dispose();
-      doorMat.map?.dispose();
-      doorMat.dispose();
+      for (const geo of panelPanels) geo.dispose();
+      disposeLeafMats();
       throw error;
     }
-    const m = new THREE.Mesh(geometry, doorMat);
+    const m = new THREE.Mesh(geometry, salMat);
     m.name = 'changho';
+    m.castShadow = true; m.receiveShadow = true;
+    g.add(m);
+  }
+  if (panelPanels.length) {
+    let geometry;
+    try {
+      geometry = mergeOwnedGeometries(panelPanels, 'Hanok panel-door openings');
+    } catch (error) {
+      primaryPanel?.geometry?.dispose();
+      primaryFixedPanel?.geometry?.dispose();
+      disposeLeafMats();
+      throw error;
+    }
+    const m = new THREE.Mesh(geometry, panelMat);
+    m.name = 'changho-panel';
     m.castShadow = true; m.receiveShadow = true;
     g.add(m);
   }

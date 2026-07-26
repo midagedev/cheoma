@@ -38,22 +38,32 @@ export function buildWalls(P, L, M) {
   const H = y1 - y0;
   const T = 0.14; // 벽 두께
 
-  // 문짝 패널 (텍스처 반복으로 분합문 표현)
+  // 문짝 패널. leafSurface=sal → 기존 살문 텍스처 반복; panel → 판문(solid wood board).
+  // 궁/사찰 기본 type은 salmun이라 기존 살 패턴을 유지한다.
+  const doorLeafMaterial = (plan, leaves) => {
+    if (plan.leafSurface === 'panel') {
+      return (M.woodBoard || M.planwall || M.woodDark).clone();
+    }
+    const mat = M.door.clone();
+    if (mat.map) {
+      mat.map = mat.map.clone();
+      mat.map.repeat.set(leaves, 1);
+      mat.map.wrapS = THREE.RepeatWrapping;
+      mat.map.needsUpdate = true;
+    }
+    return mat;
+  };
   const doorPanel = (cx, cz, w, placement, primary, seed) => {
     const leaves = w > 3.2 ? 4 : w > 1.9 ? 3 : 2;
-    const mat = M.door.clone();
-    mat.map = M.door.map.clone();
-    mat.map.repeat.set(leaves, 1);
-    mat.map.wrapS = THREE.RepeatWrapping;
-    mat.map.needsUpdate = true;
     const plan = planOpeningDetail({
       kind: 'door', style: temple ? 'temple' : 'palace', seed,
       width: w, height: H, wallThickness: T, leafCount: leaves,
       lowerPanelHeight: H * (temple ? 0.16 : 0.19), primary,
     });
+    const mat = doorLeafMaterial(plan, leaves);
     const detailPlacement = { ...placement, center: { x: cx, z: cz }, bottomY: y0 };
     let panel;
-    if (primary) {
+    if (primary && plan.anchors.pivot) {
       panel = createPrimaryDoorPanelSegments({
         target: g,
         plan,
@@ -261,17 +271,40 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
   midBeam('x', zB, xL - cr, xR + cr);
   midBeam('z', xL, zB - cr, zF + cr); midBeam('z', xR, zB - cr, zF + cr);
 
-  // 작은 살창: 파란 유리처럼 어둡게 죽지 않게 미색 한지 살창으로.
-  const winMat = M.door.clone();
-  winMat.map = M.door.map.clone(); winMat.map.repeat.set(1, 1); winMat.map.needsUpdate = true;
+  // 작은 살창: leafSurface=sal → 살 텍스처(문 살 패턴 또는 salchang). 판문은 초가 창에 쓰지 않는다.
+  const salWindowMat = (() => {
+    const src = M.salchang || M.door;
+    const mat = src.clone();
+    if (mat.map) {
+      mat.map = mat.map.clone();
+      mat.map.repeat.set(1, 1);
+      mat.map.needsUpdate = true;
+    }
+    return mat;
+  })();
   const panelRotation = (opening) => (
     Math.abs(opening.tangent.x) >= Math.abs(opening.tangent.z) ? 0 : Math.PI / 2
   );
+  const residentialDoorMat = (detail) => {
+    if (detail.leafSurface === 'panel') {
+      return (M.woodBoard || M.planwall || M.woodDark).clone();
+    }
+    const mat = M.door.clone();
+    if (mat.map) {
+      mat.map = mat.map.clone();
+      mat.map.repeat.set(detail.leafCount, 1);
+      mat.map.wrapS = THREE.RepeatWrapping;
+      mat.map.needsUpdate = true;
+    }
+    return mat;
+  };
   const smallWin = (opening) => {
     residentialDetails.add(opening, (detail, placement) => {
       const win = new THREE.Mesh(
         new THREE.BoxGeometry(opening.width, detail.height, 0.06),
-        winMat,
+        detail.leafSurface === 'panel'
+          ? (M.woodBoard || M.planwall || M.woodDark).clone()
+          : salWindowMat,
       );
       win.position.set(
         opening.center.x,
@@ -288,12 +321,8 @@ function buildChogaWalls(P, L, M, g, lastX, lastZ) {
       ? residentialDetails.addPrimaryDoor
       : residentialDetails.add;
     add(opening, (detail, placement) => {
-      const mat = M.door.clone();
-      mat.map = M.door.map.clone();
-      mat.map.repeat.set(detail.leafCount, 1);
-      mat.map.wrapS = THREE.RepeatWrapping;
-      mat.map.needsUpdate = true;
-      if (detail.primary) {
+      const mat = residentialDoorMat(detail);
+      if (detail.primary && detail.anchors.pivot) {
         return createPrimaryDoorPanelSegments({
           target: g,
           plan: detail,

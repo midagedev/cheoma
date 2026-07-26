@@ -46,12 +46,42 @@
   절제된 따뜻한 색·낮은 에너지·미세한 flicker는 아름다움과 화면 가독성을 위한 구현 선택이며 사료가 정한
   측광 복원이 아니다. 집 전체 벽이나 처마를 발광시키지 않고 실제 한지 면만 빛의 화면 위치를 소유한다.
 
-- `src/builder/opening-detail-plan.js`는 문/창, 크기, 창 하부 머름, 문짝 하부 `lowerPanel`, reveal, 프레임,
+- `src/builder/opening-detail-plan.js`는 문/창, **민가 창호 유형(`type`)·합법 운동(`motion`)**, 크기, 창 하부 머름,
+  문짝 하부 `lowerPanel`, reveal, 프레임,
   문지방, 철물, primary entrance,
   pivot·footwear anchor와 고정 개구면 중심의 `focus` anchor를 Three 없이 불변 순수 데이터로 만든다. `focus`는
   움직이는 문짝이나 문지방이 아니라 닫힌 개구 높이의 절반과 고정 reveal 면을 가리킨다. 같은 입력과 seed는 같은 JSON을 반환하고
   전역 `Math.random`을 쓰지 않는다. 공개 결과의 seed는 number/string으로 정규화되므로 BigInt·객체 seed를 받은
   경우에도 결과 전체를 `JSON.stringify`할 수 있고, 객체 키 순서는 stable seed identity에 영향을 주지 않는다.
+
+### 3.1 민가 창호 유형과 합법 여닫힘 (#150 B)
+
+AURI 「한옥의 시공 — 창호와 천장」이 구분하는 판문·살문·고정창·들창을 제품 schema `type`으로 옮긴다.
+`kind`(door/window)는 출입·채광 기능이고, `type`은 문짝 구성이다.
+
+| `type` | 한국어 | `kind` | 기본 `motion.mode` | 제품 `interactive` |
+| --- | --- | --- | --- | --- |
+| `panel` | 판문 | door | secondary `fixed` / primary `hinge` | primary + hinge 만 |
+| `salmun` | 살문 | door | secondary `fixed` / primary `hinge` | primary + hinge 만 |
+| `fixed-window` | 고정창 | window | `fixed` | 항상 false |
+| `lift-window` | 들창 | window | 기본 `fixed` (명시 시 `lift` 허용) | 항상 false |
+
+- 기본값: door → `salmun`, window → `fixed-window`. 오늘 살림집 문·창 룩(살 텍스처 / 살창)을 유지한다.
+- **합법 운동 정책**: 창은 hinge를 청구할 수 없다. 비-primary 문은 hinge를 청구할 수 없다. door는 lift를
+  청구할 수 없고, fixed-window는 fixed만, lift-window는 fixed|lift만 허용한다. 위 조합을 어기면
+  `planOpeningDetail`이 throw한다.
+- **제품 상호작용**: `motion.interactive`(및 동일 값의 top-level `interactive`)는 primary door + hinge 일 때만
+  true다. 창·secondary 문·fixed primary는 runtime이 열지 않는다. `planDoorMotion`도 interactive hinge가
+  아니면 거절한다. 철물·pivot geometry는 hinge primary에만 붙고, primary의 focus/footwear는 motion과 무관하게
+  출입 의미를 유지한다.
+- **집합 정책**: `assertLawfulOpeningDetailSet(plans)`는 한 건물 계획에서 primary door가 둘 이상이거나 창이
+  hinge/interactive를 가진 경우 fail closed한다. 주거 FULL 조립 `residential-opening-details` finish가 이를
+  소비한다.
+- **얇은 렌더 표면**: `leafSurface`는 `panel`(solid wood board / planwall) 또는 `sal`(살+한지 door 맵·salchang)이다.
+  새 재질군·program·궁 주칠 텍스처를 기와집에 넣지 않는다. giwa door 맵은 palette의 민가 띠살/정자살이며
+  `makeDoorTexture` 궁 빗꽃살(주칠·뇌록)을 재사용하지 않는다.
+- schema `version`은 6이다. 공개 façade는 `src/api/opening-detail.js`가 type/motion 상수와 assert helper를
+  함께 내보낸다.
 - 다른 프로젝트와 앱의 후속 interaction은 `src/api/opening-detail.js`의 최소 façade를 사용한다. 내부 builder는
   façade를 역참조하지 않고 구현 모듈을 직접 사용해 `src/`의 의존 방향을 보존한다.
 - `src/builder/opening-details.js`는 일반 기와집 벽체, 대표 종가 `buildHanok`, 궁·사찰·초가 공용 벽체가 같은
@@ -207,10 +237,11 @@
   focus/edit/probe 실패 뒤 창불·문 owner 복원을 맡는다. `check:app`은 항목별 References UI와 전체 앱 부팅을
   확인하고, 넓은 회귀 범위는 `check:full`로 마감한다.
 
-- `npm run check:opening-detail`: 순수 결정론, 불변 데이터, vocabulary, 창 머름과 문 lowerPanel의 배타성,
+- `npm run check:opening-detail`: 순수 결정론, 불변 데이터, vocabulary(판문·살문·고정창·들창 type과
+  fixed|hinge|lift motion), 창 머름과 문 lowerPanel의 배타성,
   frame·threshold·유형별 철물 범위,
   primary pivot/footwear/focus anchor와 전역 RNG 비의존을 검사한다. focus는 개구면의 고정 중심이며 door leaf 운동과
-  독립인지도 확인한다.
+  독립인지도 확인한다. 창의 hinge 청구·window primary·secondary hinge·다중 primary door 집합은 fail closed한다.
 - `npm run check:threshold-life`: dry/wet 종류, 실물 기반 크기 범위, 문지방·출입 폭·문설주 clearance, preview
   placement signature, JSON-safe deep freeze, 객체·BigInt seed 결정론, 전역 RNG 비의존을 검사한다.
 - `npm run check:door-motion`: 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠, 중간 반전 무스냅,

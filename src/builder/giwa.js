@@ -218,10 +218,18 @@ export function buildGiwa(P, M) {
   //   순수 팔레트 위계 계약이 볼 수 없었던 두 번째 지점이다. 같은 명도의 덜 붉은 갈색으로 옮긴다.
   const lowerPanelMat = M.woodBoard.clone();
   lowerPanelMat.color = new THREE.Color(0x5f5136); lowerPanelMat.emissive = new THREE.Color(0x161510);
-  // 살창(측벽 창): 실내가 완전 검게 죽지 않도록 미량 emissive
+  // 살창(측벽 창): 실내가 완전 검게 죽지 않도록 미량 emissive. leafSurface=sal 전용.
+  // 민가(giwa)는 궁 빗꽃살 주칠·뇌록 텍스처를 쓰지 않는다(palette applyDoorPattern / 띠살).
   const salMat = M.salchang.clone(); salMat.emissive = new THREE.Color(0x14100a);
   // 띠살 분합문 재질: detail plan이 정한 문짝 수를 texture에도 그대로 반복한다.
-  const doorMat = (leafCount) => {
+  // leafSurface=panel → 판문 solid board (궁 색 없음); sal → 기존 살문 맵.
+  const doorMat = (detail) => {
+    if (detail.leafSurface === 'panel') {
+      const m = (M.woodBoard || M.planwall || M.woodDark).clone();
+      m.emissive = new THREE.Color(0x161510);
+      return m;
+    }
+    const leafCount = detail.leafCount || 1;
     const m = M.door.clone();
     m.map = M.door.map.clone(); m.map.repeat.set(leafCount, 1);
     m.map.wrapS = THREE.RepeatWrapping; m.map.needsUpdate = true;
@@ -334,7 +342,8 @@ export function buildGiwa(P, M) {
         slab(opening.center.x, opening.center.z, opening.width,
           yLintel + 0.10, yTopWall, M.plaster, alongX);
         openingDetails.add(opening, (detail, placement) => {
-          if (detail.primary) {
+          const leafMat = doorMat(detail);
+          if (detail.primary && detail.anchors.pivot) {
             createPrimaryDoorPanelSegments({
               target: walls,
               plan: detail,
@@ -349,7 +358,7 @@ export function buildGiwa(P, M) {
               target: walls,
               plan: detail,
               placement,
-              material: doorMat(detail.leafCount),
+              material: leafMat,
               panelBottom: lowerPanelTop - y0,
               panelHeight: yLintel - lowerPanelTop,
               depth: 0.10,
@@ -363,12 +372,13 @@ export function buildGiwa(P, M) {
             opening.width,
             lowerPanelTop,
             yLintel,
-            doorMat(detail.leafCount),
+            leafMat,
             alongX,
             0.10,
           );
         });
       } else if (opening?.kind === 'window') {
+        // Windows are fixed-window by default (sal leaf). panel surface is not used.
         wallWithWindow(opening, bw, alongX,
           role === 'plank' ? plankMat(bw) : M.plaster);
       } else if (role === 'plank') {

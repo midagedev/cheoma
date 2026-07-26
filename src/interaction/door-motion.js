@@ -16,6 +16,13 @@ export function planDoorMotion(openingPlan, options = {}) {
   if (!openingPlan?.primary || openingPlan.kind !== 'door' || !pivot) {
     throw new Error('Door motion requires one primary door opening with a pivot anchor');
   }
+  // #150 B: only a primary door with lawful hinge motion is product-interactive.
+  // Windows and fixed/lift vocabulary never enter this contract.
+  if (openingPlan.interactive === false
+      || openingPlan.motion?.mode === 'fixed'
+      || openingPlan.motion?.mode === 'lift') {
+    throw new Error('Door motion requires an interactive primary door with hinge motion');
+  }
   const hingeSide = pivot.hingeSide < 0 ? -1 : 1;
   const maxAngle = clamp(Math.abs(finite(pivot.maxAngle, Math.PI * 0.5)), 0.2, Math.PI * 0.6);
   const openRatio = clamp(finite(options.openRatio, 0.84), 0.45, 1);

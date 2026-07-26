@@ -66,7 +66,10 @@ export function createOpeningDetailAssembler(target, materials) {
     const basis = openingPlacementBasis(placement);
     openingGlowAnchors.push(openingGlowMetadata(plan, basis));
     for (const part of plan.frame.parts) {
-      const pivot = plan.primary && plan.kind === 'door' ? plan.anchors.pivot : null;
+      // Active-leaf rail/seam split only when hinge motion owns a pivot.
+      const pivot = plan.primary && plan.kind === 'door' && plan.anchors.pivot
+        ? plan.anchors.pivot
+        : null;
       if (pivot && part.kind === 'lower-panel-rail') {
         primaryLeafGeometries.push(partGeometry({
           ...part, u: pivot.leafCenterU, width: pivot.leafWidth,
