@@ -73,6 +73,7 @@ npm run check:pr -- --dry-run # 현재 diff의 이유·순수 계약·browser ga
 npm run check:pr              # inner loop + issue checkpoint의 영향받은 자동 게이트
 npm run check:list            # gate id·tier·resource·npm script 전체 카탈로그
 npm run check                 # 모든 browser-free 계약; merge profile이 자동 호출
+npm run check:aa              # 컴포저 경로 기하 AA(MSAA) 계약 + 경사 에지 계단 정량 축
 npm run check:particle-geometry # 강수·꽃잎/모트·한지 불빛의 단일 물리 geometry 체크포인트
 npm run check:instance-upload # 필지 표현의 CPU 배열 부분 변경·복원·export 불변 계약
 npm run check:instance-upload:browser # 실제 WebGL bufferSubData 부분 전송 증거
@@ -84,6 +85,8 @@ npm run check:all             # core/app/particle/upload/Worker/audio/temple/par
 npm run check:full            # 머지 직전 전체 profile + production build
 npm run check:docs            # Markdown local link와 문서 지도
 
+npm run shoot:aa            # samples=0(회귀) vs 제품 기본값 A/B 3장면(부감·근경·야간)
+npm run shoot:dpr           # 폰 pixelRatio 1.5/2 × MSAA 0/2 의 2×2 통제 캡처와 메모리 수치
 npm run shoot:dof           # 고정 seed·정지 프레임 DoF 미감 비교(PNG는 OS 임시 폴더)
 npm run shoot:door-dof      # 같은 카메라의 조준점/주출입문 의미 초점 A/B
 CHEOMA_BROWSER=chrome npm run shoot:bokeh # 빠른 원형비·pan→settle·hardware GPU query fixture
@@ -730,6 +733,42 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 
 이 게이트는 headless shader link 비용 때문에 `check:all`에 포함하지 않고 DoF·카메라·post 변경에서 별도로 실행한다. 절대 소요 시간은 성능 수치로 사용하지 않는다.
 
+### `npm run check:aa`
+
+`tools/check-aa.mjs`는 컴포저 경로의 기하 안티에일리어싱을 고정한다. `WebGLRenderer({antialias:true})`는
+기본 프레임버퍼에만 적용되고 three 의 `EffectComposer`는 기본 타깃에 `samples`를 주지 않으므로, 컴포저가
+기본 ON인 제품 화면에는 AA 가 전혀 없었다. `src/env/msaa-render-pass.js`가 씬 렌더 전용 멀티샘플 타깃
+하나를 소유하고 해상 결과를 stock `RenderPass`와 같은 버퍼로 blit 한다 — 컴포저 핑퐁 타깃에 `samples`를
+주면 에지가 없는 풀스크린 쿼드까지 멀티샘플 write+resolve 를 치르므로 그 경로는 쓰지 않는다.
+
+- 계약: 앱 기본 경로의 `samples`가 `min(4, MAX_SAMPLES)`이고 멀티샘플 씬 타깃이 실제 할당·resolve 되며,
+  `?msaa=0`이 stock 경로로 완전히 되돌아가(타깃 미할당) 같은 빌드에서 회귀 상태를 만들 수 있는지.
+  패스 순서는 `RenderPass` 시작·`OutputPass` 끝을 유지해야 한다.
+- 픽셀: 같은 결정론 부감 프레임(1280×720, DPR 1, sunset)에서 인접 픽셀 휘도 스텝 분포를 비교한다.
+  하드 스텝(전대비 1픽셀 점프 = 계단)이 부분피복 소프트 스텝으로 쪼개졌는지를 본다. 실측
+  (Chrome ANGLE Metal, Apple M1 Pro, `MAX_SAMPLES=4`)은 `hardDensity` 0.0778→0.0450(−42%),
+  `softRatio` 1.31→3.69(+181%)였고, 요구 폭은 그 절반 아래인 −20%·+60%로 잡았다. 회귀 상태의 델타는
+  정의상 0%이므로 임계는 `samples=0`을 항상 잡는다. 버린 축: 픽셀 해시·변경 픽셀 수(무엇이 바뀌었는지만
+  말하고 물 글린트로 비결정), 총 그래디언트 크기(MSAA 가 대체로 보존해 축이 평평), FFT 고주파 비율
+  (bloom·DoF 가 스펙트럼을 지배해 시간대에 따라 움직인다).
+- 보조축은 수묵 트랙과 **정의를 공유**한다(`lineEdgeProfile`): 3×3 휘도 레인지 > 25 인 선 화소만
+  모아 4근방 최대 절대차를 재고, 절벽(>60)·램프(12–60) 비율을 **선 화소 수로 정규화**한다.
+  같은 크롭 실측은 `cliffRatio` 18.8% → 15.7%(상대 −16.7%), `lineMeanGradient` 41.8 → 38.7 이고
+  요구 폭은 −8%다. 주축보다 분리 폭이 좁아 주축을 대체하지는 않는다.
+- 부감 프레임을 쓰는 이유는 DoF `amount`가 0 이라 프레임 전체가 선명하기 때문이다. **근접 DoF
+  프레임에서는 두 축 모두 방향이 뒤집힌다** — `hardDensity` +27~30%, `cliffRatio` 39.8 → 42.0%.
+  MSAA 가 점표집이 통째로 놓치던 서브픽셀 기왓골 하이라이트를 부분피복으로 회복시켜 선 화소
+  자체가 늘어나기 때문이고(선 화소 비율 13.73 → 14.21%), 선 화소 정규화로도 상쇄되지 않는다.
+  세 장면에서 유일하게 부호를 지키는 것은 선 화소 조건부 `lineMeanGradient`
+  (49.7→47.3 / 63.0→60.5 / 67.3→62.0)다. 따라서 근접 프레임은 자동 판정에 쓰지 않고
+  `shoot:aa`로 직접 본다.
+
+`tools/shoot-aa.mjs`는 같은 시드·시간·카메라에서 `msaa0`/제품 기본값 짝을 부감 골든아워·근경 기와집·
+야간 3장면으로 남기고, DoF 라운드 1 판정문이 지목한 배경 지붕 스펙클 좌표를 같은 크롭으로 정량 재측정한다.
+`tools/shoot-dpr.mjs`는 390×844·DPR 3 에뮬레이션에서 `?pr=` 과 `?msaa=` 로 pixelRatio 상한과 샘플 수를
+독립 통제해(종전 `?fxcompact=0`은 저해상 bloom·수묵 타깃까지 함께 되돌려 단독 비교가 불가능했다)
+픽셀 수·풀스크린 렌더타깃 바이트·프로그램/텍스처 수를 기록한다. 두 도구 모두 절대 프레임 ms 를 쓰지 않는다.
+
 ### `npm run shoot:door-dof`
 
 `tools/shoot-door-dof.mjs`는 Retina 크기의 고정 주거 fixture를 같은 카메라·시간·계절·DoF 양으로 멈추고,
@@ -944,7 +983,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-sijeon.mjs` | 같은 순수 시전 plan을 낮·석양 PBR과 실제 수묵 composer에서 거리 아이레벨·사선·전체 부감으로 촬영하고 geometry hash·draw/material/texture·dispose 계약 기록 | 제품 한양의 지형·성곽·인접 건물 맥락은 별도 앱/한양 캡처로 확인하며, headless wall time을 성능 수치로 쓰지 않는다. |
 | `tools/shoot-sijeon-app.mjs` | 고정 seed 실제 Vite 한양을 데스크톱·모바일 제품 카메라, view shift, UI viewport, post, 부감 Fresnel 무기여 정책으로 부팅하고 시전 visible/hidden 픽셀 기여·정확한 복원·카메라 불변을 촬영 | `shot=1`이나 카메라 연출을 쓰지 않는 통합 증거이며 거리 형태·수묵·활성 림 미감은 격리 `shoot:sijeon`이 맡는다. 기본 PNG는 OS 임시 폴더에 쓴다. |
 | `tools/shoot-yard-life.mjs` | 공개 plan/borrowed-material renderer의 봄 볍씨 준비·가을 타작·겨울 땔감 근경과 빈 여름·부감 sleep을 촬영하고, 계절·날씨 screen-door 전환, 동일 rebuild 생략, 변경 rebuild 전환 보존, O(1) aerial sleep, depth/material/program 안정성, wave, dispose·resource plateau를 검사 | 절대 headless frame time은 사용하지 않는다. 문서의 실제 크기·고증 맥락, 집/문/동물 가림과 제품 post 결과는 같은 seed 실제 Vite 캡처로 함께 판정한다. |
-| `tools/shoot-yard-life-app.mjs` | 고정 capital seed의 실제 Vite 제품에서 열린 마당 slot이 있는 focus 가능 농가를 결정론적으로 고르고, 같은 정지 카메라 layer OFF/ON PNG의 실제 motif 픽셀 기여, 봄·가을·겨울 product post·계절 풀·집·동물 구도, program/geometry/texture plateau, 부감 복귀 0 draw를 촬영·검사 | 선택한 한 필지의 통합 증거다. 순수 schema·전체 seed 배치 수학과 renderer 단독 rebuild/dispose는 각각 `check:yard-life`, `shoot:yard-life`가 맡는다. 두 하네스는 `check:yard-life:browser`가 한 browser lane에서 함께 실행한다. |
+| `tools/shoot-yard-life-app.mjs` | 고정 capital seed의 실제 Vite 제품에서 세 계절 record를 가진 focus 가능 농가를 고르되, right-slot 선호는 soft ranking일 뿐이며 제품 focus 카메라에서 봄·가을·겨울 motif가 실제 OFF/ON 픽셀 기여를 내는 첫 후보만 채택한다(프러스텀 안이지만 담·이웃 질량에 가려진 service-edge slot은 기각). 같은 정지 카메라 layer OFF/ON PNG의 motif 픽셀 기여, product post·계절 풀·집·동물 구도, program/geometry/texture plateau, 부감 복귀 0 draw를 촬영·검사 | 선택한 한 필지의 통합 증거다. 순수 schema·전체 seed 배치 수학과 renderer 단독 rebuild/dispose는 각각 `check:yard-life`, `shoot:yard-life`가 맡는다. 두 하네스는 `check:yard-life:browser`가 한 browser lane에서 함께 실행한다. 픽셀 기여 0은 DoF/CoC가 아니라 fixture 가림·구도 실패로 취급한다. |
 | `tools/shoot-vcritters.mjs` | 근경 소동물 wake·원경 sleep과 새 떼 유지, 대표 컷 | 기본 출력은 OS 임시 디렉터리이며 `CHEOMA_CRITTER_OUT`으로 재지정할 수 있다. |
 | `tools/verify-gltf.mjs` | FULL/FAR 카메라 독립 export, scenery·transient focus 제외, commit된 일반집 overlay 포함과 대체 base LOD 제외, GLB 라운드트립·예산 | 기본 출력은 OS 임시 디렉터리이며 `CHEOMA_GLTF_OUT`으로 재지정할 수 있다. |
 | `tools/check-rim-facing.mjs` | 실제 WebGL에서 N·V 실루엣, 실제 태양 N·L, V·L 역광, directDiffuse=0·그림자·제품형 비그림자 fill·`receiveShadow=false` 반례, 50% penumbra 비율, 실제 cloud-shadow callback/cache-key 합성, LOD/일반 cloud+snow+rim 프로그램 분리와 동차 `worldPosition` 복원, 추가 shadow fetch 0, HDR 에너지 상한, instanceColor·program plateau; `--app`은 시간을 멈춘 최종 24° 석양 focus에서 실제 마을 cloud+rim 지붕과 OFF/ON A/B | 고정 fixture와 대표 실앱 한 장이 모든 seed·재질의 미학을 대신하지 않는다. |

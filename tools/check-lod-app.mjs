@@ -10,6 +10,7 @@ import {
   RENDER_BUDGET_STATES,
   evaluateRenderBudget,
 } from './lib/render-budget-contract.mjs';
+import { BOKEH_GATHER_TAP_COUNT } from '../src/env/bokeh-coc-contract.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -724,10 +725,14 @@ try {
   const adaptiveQualityValid = adaptiveQuality
     && adaptiveMidpointValid
     && adaptiveQuality.moving.postQuality === 0
-    && adaptiveQuality.moving.activeBokehTaps === 1
+    // Adaptive quality no longer buys motion smoothness with taps: the CoC gather's
+    // base rings always run and bokehQuality only weights its fill ring, so the tap
+    // budget is this one constant in both states
+    // (docs/dof-cinematic-research.md 5.3).
+    && adaptiveQuality.moving.activeBokehTaps === BOKEH_GATHER_TAP_COUNT
     && adaptiveQuality.stableBefore.postQuality === 1
     && adaptiveQuality.stableAfter.postQuality === 1
-    && adaptiveQuality.stableAfter.activeBokehTaps === 13
+    && adaptiveQuality.stableAfter.activeBokehTaps === BOKEH_GATHER_TAP_COUNT
     && adaptiveMidpointDepthMeshes > 0
     && adaptiveQuality.expectedDepthBefore >= adaptiveMidpointDepthMeshes
     && adaptiveQuality.stableBefore.lodScreenDoorDepth === adaptiveQuality.expectedDepthBefore

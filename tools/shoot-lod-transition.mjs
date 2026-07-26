@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from '../app/node_modules/vite/dist/node/index.js';
+import { BOKEH_GATHER_TAP_COUNT } from '../src/env/bokeh-coc-contract.js';
 import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verification-browser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -492,8 +493,12 @@ try {
     || Math.abs(edgeMistView.restored.viewWeight) > 1e-6
     || passParity.dofLodScreenDoor !== passParity.visibleLodMeshes
     || passParity.inkLodScreenDoor !== passParity.visibleLodMeshes
-    || adaptive.movingDof.postQuality !== 0 || adaptive.movingDof.activeBokehTaps !== 1
-    || adaptive.stableDof.postQuality !== 1 || adaptive.stableDof.activeBokehTaps !== 13
+    // Tap cost is constant across moving/stable now; bokehQuality only weights the
+    // gather's fill ring (docs/dof-cinematic-research.md 5.3).
+    || adaptive.movingDof.postQuality !== 0
+    || adaptive.movingDof.activeBokehTaps !== BOKEH_GATHER_TAP_COUNT
+    || adaptive.stableDof.postQuality !== 1
+    || adaptive.stableDof.activeBokehTaps !== BOKEH_GATHER_TAP_COUNT
     || adaptive.movingDof.lodScreenDoorDepth !== adaptive.stableDof.lodScreenDoorDepth
     || !adaptive.resourcesStable || !adaptiveLodParity
     || !passParity.dofRestored || !passParity.inkRestored

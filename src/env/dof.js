@@ -1,8 +1,21 @@
 // Depth-of-field contracts shared by the standalone core and the app wrapper.
 // Three's BokehPass `focus` is camera-space axial depth, not Euclidean distance.
+//
+// `aperture` is an aperture *diameter in metres*. StableBokehPass folds it into
+// the one CoC pixel scale together with the live viewport height and lens fov
+// (src/env/bokeh-coc-contract.js), so one constant gives the wide aerial lens a
+// deep depth of field and the telephoto house lens a shallow one. It is not an
+// f-stop: the look this project wants is a 1:22 architectural model shot at
+// 85mm f/2.8, which is f/0.13 at full scale and does not exist as a lens
+// (docs/dof-cinematic-research.md §1.2). The dofAmount ramp keeps multiplying
+// this value, so a transition still scales the CoC linearly and continuously.
 
 const EPSILON = 1e-6;
-export const DEFAULT_DOF_APERTURE = 0.00015;
+// Product base aperture diameter in metres (85mm f/2.8 on a 1:22 architectural
+// model). Must stay identical to BOKEH_COC_DEFAULTS.apertureMeters and
+// VILLAGE_FOCUS_DOF_APERTURE so the tilt ramp weight (aperture / apertureMeters)
+// reaches 1.0 at full focus amount.
+export const DEFAULT_DOF_APERTURE = 0.675;
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -43,6 +56,31 @@ export function dofDepthMaterialForObject(object) {
     || material.depthWrite === false
     || material.allowOverride !== false) return null;
   return material;
+}
+
+/**
+ * Return a world point's screen height in [0,1], v=0 at the bottom of the frame.
+ *
+ * The tilt-shift plane of focus is anchored here, so this has to be the *rendered*
+ * position: the focus continuum sets a camera view offset for the panel viewport
+ * shift, and that offset lives in the projection matrix. Reading the full clip-row
+ * rather than assuming a centred perspective matrix is what keeps the sharp band on
+ * the subject when a bottom sheet is open.
+ */
+export function focusScreenVForPoint(camera, point) {
+  if (!camera || !point || ![point.x, point.y, point.z].every(Number.isFinite)) return null;
+  if (camera.updateWorldMatrix) camera.updateWorldMatrix(true, false);
+  else camera.updateMatrixWorld?.();
+  const v = camera.matrixWorldInverse?.elements;
+  const p = camera.projectionMatrix?.elements;
+  if (!v || !p) return null;
+  const xv = v[0] * point.x + v[4] * point.y + v[8] * point.z + v[12];
+  const yv = v[1] * point.x + v[5] * point.y + v[9] * point.z + v[13];
+  const zv = v[2] * point.x + v[6] * point.y + v[10] * point.z + v[14];
+  const clipY = p[1] * xv + p[5] * yv + p[9] * zv + p[13];
+  const clipW = p[3] * xv + p[7] * yv + p[11] * zv + p[15];
+  if (!Number.isFinite(clipY) || !Number.isFinite(clipW) || Math.abs(clipW) < EPSILON) return null;
+  return clipY / clipW * 0.5 + 0.5;
 }
 
 /** Return a world point's positive depth along the camera forward axis. */
@@ -95,16 +133,32 @@ export function createDofController({ camera, pass, aperture = DEFAULT_DOF_APERT
 
   let baseAperture = Number.isFinite(aperture) ? Math.max(0, aperture) : 0;
   let amount = pass.enabled ? 1 : 0;
+  // Lower bound on the ramp. The aerial camera is the only state that requests
+  // amount 0, so a floor above zero is exactly "the aerial diorama gets depth of
+  // field too". It lives here rather than in the app because the aerial 0 is
+  // decided by the engine's mode wiring; a floor lets the look be evaluated and
+  // shipped without that wiring changing. `?doffloor=` is the A/B hook.
+  let amountFloor = 0;
+  if (typeof location !== 'undefined') {
+    const requested = Number(new URLSearchParams(location.search).get('doffloor'));
+    if (Number.isFinite(requested)) amountFloor = clamp01(requested);
+  }
 
   function applyAperture() {
     uniforms.aperture.value = baseAperture * amount;
   }
 
   function setAmount(value) {
-    amount = clamp01(value);
+    amount = Math.max(amountFloor, clamp01(value));
     applyAperture();
     pass.enabled = amount > EPSILON;
     return amount;
+  }
+
+  /** Raise the aerial floor. Returns the amount actually in force afterwards. */
+  function setAmountFloor(value) {
+    amountFloor = clamp01(value);
+    return setAmount(amount);
   }
 
   function setEnabled(on) {
@@ -113,6 +167,10 @@ export function createDofController({ camera, pass, aperture = DEFAULT_DOF_APERT
 
   function setAperture(value) {
     if (Number.isFinite(value)) baseAperture = Math.max(0, value);
+    // Keep the pass's optical base in lockstep so tiltStrength * (aperture /
+    // apertureMeters) still recovers the pure amount ramp after a product
+    // setDofAperture call (StableBokehPass._resolveCocScale).
+    if (pass && Number.isFinite(baseAperture)) pass.apertureMeters = baseAperture;
     applyAperture();
     return baseAperture;
   }
@@ -126,6 +184,11 @@ export function createDofController({ camera, pass, aperture = DEFAULT_DOF_APERT
 
   function focusAt(point) {
     const depth = focusDepthForPoint(camera, point);
+    // Anchor the tilt on the same subject the focus depth came from, so the plane
+    // of focus passes through it and the subject reads exactly as sharp as it would
+    // on an untilted lens. Only the frame around it releases harder.
+    const screenV = focusScreenVForPoint(camera, point);
+    if (screenV != null) pass.setTilt?.(null, screenV);
     return depth == null ? uniforms.focus.value : setFocus(depth);
   }
 
@@ -133,17 +196,29 @@ export function createDofController({ camera, pass, aperture = DEFAULT_DOF_APERT
     return focusDepthForPoint(camera, point);
   }
 
+  /** Tilt-shift dial, in fractions of 1/focus per unit frame height. */
+  function setTilt(strength) {
+    return pass.setTilt?.(strength, null) ?? null;
+  }
+
+  if (pass && Number.isFinite(baseAperture)) pass.apertureMeters = baseAperture;
   applyAperture();
+  setAmount(amount);
   return {
     setEnabled,
     setAmount,
+    setAmountFloor,
     setAperture,
     setFocus,
+    setTilt,
     focusAt,
     depthAt,
     get aperture() { return baseAperture; },
     get enabled() { return !!pass.enabled; },
     get focus() { return uniforms.focus.value; },
     get amount() { return amount; },
+    get amountFloor() { return amountFloor; },
+    get tilt() { return pass.tiltStrength ?? 0; },
+    get tiltAnchorV() { return pass.tiltAnchorV ?? 0.5; },
   };
 }

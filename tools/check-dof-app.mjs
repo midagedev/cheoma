@@ -13,6 +13,10 @@ import {
   VILLAGE_LENS,
   dollyScaleForFov,
 } from "../src/camera/optics.js";
+import {
+  BOKEH_GATHER_BASE_TAP_COUNT,
+  BOKEH_GATHER_TAP_COUNT,
+} from "../src/env/bokeh-coc-contract.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const APP_ROOT = join(ROOT, "app");
@@ -493,6 +497,9 @@ try {
       focusedWeatherPhysical,
       postQuality,
       depthFrame: { before: beforeDepthFrame, after: afterDepthFrame },
+      // Composer resolution, so the half-resolution gather target can be checked
+      // against the buffer it actually halves.
+      resolution: resolutionBefore.composer,
       rebuild: {
         rebuilt,
         previousDoorHeight,
@@ -555,7 +562,12 @@ try {
         sample.fov,
         sample.highlightThreshold,
         sample.bokehRadiusScale,
-        sample.surfaceRadiusPx,
+        // Physical CoC replaces the former surfaceRadiusPx cap. A NaN here would
+        // silently switch the whole aperture image off, so it is the value that
+        // now has to stay finite through every transition.
+        sample.cocScalePx,
+        sample.maxCocPx,
+        sample.farAsymptotePx,
       ].every(Number.isFinite),
     );
   const finiteAnchor = (sample) =>
@@ -655,24 +667,68 @@ try {
       result.focusedWeatherPhysical.screenFloorCap <= 1,
     "focused weather keeps authored world size with a capped per-particle projective size floor",
   );
+  // Re-authored for the layer-separation restoration. The old assertion here
+  // pinned the two suppressors: a 13-tap kernel and `surfaceRadiusPx <= 3.25`.
+  // That cap saturated every ordinary surface 2-4m off the focus plane, so the
+  // neighbouring parcel, the row behind it, and the background ridge all received
+  // the same 0.2%-of-frame blur — the whole reason the frame carried no depth
+  // layers (docs/dof-cinematic-research.md §3.1). What is pinned instead is the
+  // physical circle of confusion actually reaching the shader.
+  const focusedCoc = result.focusEnd;
   pass(
-    result.focusEnd.bokehSamples === 13 &&
-      result.focusEnd.highlightThreshold >= 1.2 &&
-      result.focusEnd.surfaceRadiusPx <= 3.25 &&
-      Math.abs(result.focusEnd.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12 &&
-      Math.abs(result.focusEnd.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12,
-    "large compact-source bokeh and bounded contrast-aware surface defocus own focused DoF",
+    focusedCoc.highlightThreshold >= 1.2 &&
+      Math.abs(focusedCoc.baseAperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12 &&
+      Math.abs(focusedCoc.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12 &&
+      Math.abs(focusedCoc.apertureMeters - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12 &&
+      // One CPU scalar carries aperture x viewport height / (4 tan(fov/2)).
+      focusedCoc.cocScalePx > 0 &&
+      focusedCoc.maxCocPx > 0 &&
+      // The clamp must stay foreground-only: if the background asymptote reached
+      // it, every distant layer would flatten into one blur again.
+      focusedCoc.farAsymptotePx < focusedCoc.maxCocPx &&
+      // A whole house has to sit inside the sharp band at the product framing.
+      focusedCoc.farAsymptotePx > 4 &&
+      focusedCoc.sourceRadiusScale > 1 &&
+      focusedCoc.surfaceRadiusPx === undefined,
+    `physical CoC owns focused DoF layers (scale ${focusedCoc.cocScalePx?.toFixed(1)}px, ` +
+      `clamp ${focusedCoc.maxCocPx?.toFixed(2)}px, far asymptote ${focusedCoc.farAsymptotePx?.toFixed(2)}px)`,
   );
+  pass(
+    focusedCoc.gatherAllocated === true &&
+      focusedCoc.taps === BOKEH_GATHER_TAP_COUNT &&
+      focusedCoc.baseTaps === BOKEH_GATHER_BASE_TAP_COUNT &&
+      // Radius is bought with resolution, so the gather target is half-res.
+      Math.abs(
+        focusedCoc.gatherWidth - Math.ceil(result.resolution.width * 0.5),
+      ) <= 1 &&
+      Math.abs(
+        focusedCoc.gatherHeight - Math.ceil(result.resolution.height * 0.5),
+      ) <= 1,
+    `half-resolution CoC gather owns the aperture image (${focusedCoc.gatherWidth}x${focusedCoc.gatherHeight}, ` +
+      `${focusedCoc.taps} taps)`,
+  );
+  // Criterion 4: the quality dial may not switch the effect off. It used to drop
+  // the surface reconstruction to a single tap during camera motion, which was
+  // invisible at a 3.25px radius but is a hard settling pop at physical radii.
+  // Now it only weights the gather's fill ring; the base rings never sleep.
   pass(
     result.postQuality.moving.postQuality === 0 &&
       result.postQuality.moving.postQualityMode === "moving" &&
-      result.postQuality.moving.bokehSamples === 1 &&
-      result.postQuality.moving.activeBokehTaps === 1 &&
+      result.postQuality.moving.bokehSamples === BOKEH_GATHER_TAP_COUNT &&
+      result.postQuality.moving.activeBokehTaps === BOKEH_GATHER_TAP_COUNT &&
+      result.postQuality.moving.fillWeight === 0 &&
+      result.postQuality.moving.cocScalePx > 0 &&
       result.postQuality.stable.postQuality === 1 &&
       result.postQuality.stable.postQualityMode === "stable" &&
-      result.postQuality.stable.bokehSamples === 13 &&
-      result.postQuality.stable.activeBokehTaps === 13,
-    "camera motion sleeps surface reconstruction and restores only the bounded 13-tap kernel",
+      result.postQuality.stable.bokehSamples === BOKEH_GATHER_TAP_COUNT &&
+      result.postQuality.stable.activeBokehTaps === BOKEH_GATHER_TAP_COUNT &&
+      result.postQuality.stable.fillWeight === 1 &&
+      // Same CoC in both states: only ring smoothness may change.
+      Math.abs(
+        result.postQuality.moving.cocScalePx -
+          result.postQuality.stable.cocScalePx,
+      ) < 1e-9,
+    "camera motion keeps the full CoC gather and only fades the fill ring",
   );
   pass(
     monotonic(result.postQuality.settle, 1) &&

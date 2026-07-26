@@ -113,6 +113,15 @@ const FOCUS_HOP_DUR = 1.5;             // 집(A)→집(B) 직접 전환(#95) —
 //   즉시 완료되므로 사실상 대기 없음(현행 타이밍 보존).
 const REVEAL_WARM_CAP_MS = 200;
 
+// `?pr=N` — pixelRatio 상한만 뒤집는 검증 훅(0.5~4). 부팅 시 한 번 읽는다.
+function readPixelRatioCapOverride() {
+  if (typeof location === 'undefined') return null;
+  const raw = new URLSearchParams(location.search).get('pr');
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0.5 && value <= 4 ? value : null;
+}
+
 export function createEngine({ container, perf = false, compact = false } = {}) {
   // 모바일 성능 프로파일(둘 다 진짜 폰만 — device.svelte.js 술어 참조).
   //   perf   : 그림자맵 하향 + 눈·비 지붕 충돌 생략(메인스레드 CPU).
@@ -122,7 +131,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // 7MB 뿐이고 처마 그림자 경계의 시각 차이는 뚜렷해, 폰도 2048²를 쓴다(감사 M2·R6).
   // PR_CAP 1.5 는 유일하게 전 프레임 필레이트를 곱하는 항목이라 실기기 A/B 전에는 올리지 않는다
   // (감사 M1·R9 — `?fxcompact=0` 훅으로 같은 URL에서 2로 비교할 수 있다).
-  const PR_CAP = compact ? 1.5 : 2;
+  //   `?pr=N` 은 그 축 **하나만** 뒤집는 검증 훅이다. `fxcompact=0` 은 pixelRatio 와 저해상
+  //   bloom·수묵 타깃을 함께 되돌리므로 "1.5 대 2" 를 단독으로 비교할 수 없었다 — R9 판정에
+  //   필요한 통제변수를 이 훅이 제공한다(docs/verification.md).
+  const PR_CAP = readPixelRatioCapOverride() ?? (compact ? 1.5 : 2);
   const SHADOW_SIZE = perf || compact ? 2048 : 4096;
   // ---------- 이벤트 버스 (Svelte 로 상태 변화 통지) ----------
   const listeners = {};
@@ -881,7 +893,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       bokehSamples: bokehPass.bokehSampleCount,
       highlightThreshold: bokehPass.uniforms.highlightThreshold.value,
       bokehRadiusScale: bokehPass.uniforms.bokehRadiusScale.value,
-      surfaceRadiusPx: bokehPass.uniforms.surfaceRadiusPx.value,
+      // Physical CoC readout. `surfaceRadiusPx` is gone: the 3.25px surface cap
+      // was the single cause of the missing depth layers (docs/dof-cinematic-research.md §3).
+      ...bokehPass.debugCoc(),
       fov: camera.fov,
       anchorDepth,
       anchorSource: activeDofSource(),
@@ -3534,9 +3548,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       for (let i = 0; i < count; i++) post.update(step);
       return bokehPass.uniforms.highlightThreshold.value;
     },
-    debugTuneDof({ amount, aperture, maxBlur } = {}) {
+    debugTuneDof({ amount, aperture, maxBlur, maxCocFraction } = {}) {
       if (Number.isFinite(aperture)) post.setDofAperture(aperture);
       if (Number.isFinite(maxBlur)) bokehPass.uniforms.maxblur.value = Math.max(0, maxBlur);
+      // Verification counterfactual only. Forcing the CoC clamp down to the former
+      // 3.25px surface radius reproduces the old suppressor inside the current
+      // binary, which is how tools/shoot-dof-layers.mjs proves that single clamp
+      // was what removed the depth layers (docs/dof-cinematic-research.md §3.1).
+      if (Number.isFinite(maxCocFraction)) bokehPass.maxCocFraction = Math.max(0, maxCocFraction);
       if (Number.isFinite(amount)) inkModeRuntime.setFocusPolicy({ dofAmount: amount });
       return debugDofState();
     },

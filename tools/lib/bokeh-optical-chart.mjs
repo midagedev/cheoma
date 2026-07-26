@@ -218,7 +218,8 @@ export async function installBokehOpticalChart(page, threeModuleUrl) {
       engine.__controls.target.set(0, 0, 0);
       camera.lookAt(engine.__controls.target);
       camera.updateMatrixWorld(true);
-      engine.debugTuneDof({ amount: 1, aperture: 0.00015, maxBlur: 0.01 });
+      // aperture is an aperture diameter in metres (src/env/dof.js).
+      engine.debugTuneDof({ amount: 1, aperture: 0.675, maxBlur: 0.01 });
       for (let i = 0; i < 30; i++) engine.debugAdvancePostQuality(1 / 60);
       engine.debugRenderDofFrame();
 
