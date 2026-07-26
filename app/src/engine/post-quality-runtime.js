@@ -76,12 +76,28 @@ export function createCameraMotionTracker() {
   return tracker;
 }
 
-/** App adapter joining the pure quality state to the existing Bokeh uniform. */
-export function createPostQualityRuntime({ camera, bokehPass, width, height }) {
+/** App adapter joining the pure quality state to Bokeh + composer fill scale. */
+export function createPostQualityRuntime({
+  camera,
+  bokehPass,
+  width,
+  height,
+  setFillScale = null,
+}) {
   const quality = createPostQualityState();
   const motion = createCameraMotionTracker();
   let viewportWidth = Math.max(1, width);
   let viewportHeight = Math.max(1, height);
+  // Applied fill tracks the last composer pixel-ratio multiplier so mode-boundary
+  // changes reallocate once, not every settling frame.
+  let appliedFillScale = 1;
+
+  const applyFillScale = () => {
+    if (typeof setFillScale !== 'function') return;
+    if (Math.abs(quality.fillScale - appliedFillScale) < 1e-4) return;
+    appliedFillScale = quality.fillScale;
+    setFillScale(appliedFillScale);
+  };
 
   return {
     update(dt, referenceDepth) {
@@ -94,17 +110,23 @@ export function createPostQualityRuntime({ camera, bokehPass, width, height }) {
       );
       quality.update(dt, motionPx);
       bokehPass.setBokehQuality(quality.quality);
+      applyFillScale();
       return quality;
     },
     resize(nextWidth, nextHeight) {
       viewportWidth = Math.max(1, nextWidth);
       viewportHeight = Math.max(1, nextHeight);
       motion.reset();
+      // Resize already rebuilds targets at the renderer pixel ratio; re-assert the
+      // active fill scale so a mid-orbit resize cannot snap back to full density.
+      appliedFillScale = NaN;
+      applyFillScale();
     },
     debug() {
       return {
         postQuality: quality.quality,
         postQualityMode: quality.mode,
+        postFillScale: quality.fillScale,
         postMotionPx: motion.motionPx,
         postMotionSpeed: quality.speed,
         activeBokehTaps: bokehPass.enabled ? bokehPass.bokehSampleCount : 0,

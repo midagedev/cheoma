@@ -22,17 +22,27 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   // docs/mobile-effects-audit.md M3·M4, docs/look-grammar.md §5.
   post.setDof(true);
   post.setFlareEnabled(true);
-  const qualityRuntime = createPostQualityRuntime({
-    camera,
-    bokehPass: post.bokehPass,
-    width,
-    height,
-  });
 
+  let cssW = Math.max(1, width);
+  let cssH = Math.max(1, height);
   const applyBloomResolution = (w, h) => {
     if (compact) post.bloomPass.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
   };
-  applyBloomResolution(width, height);
+  applyBloomResolution(cssW, cssH);
+
+  const qualityRuntime = createPostQualityRuntime({
+    camera,
+    bokehPass: post.bokehPass,
+    width: cssW,
+    height: cssH,
+    // Camera orbits cut fill-rate via a binary composer pixel-ratio scale while
+    // settled frames restore full density (src/env/post-quality-state.js).
+    // composer.setSize restores bloom to full CSS size, so compact re-caps after.
+    setFillScale: (scale) => {
+      post.setFillScale?.(scale);
+      applyBloomResolution(cssW, cssH);
+    },
+  });
 
   const outline = new OutlinePass(new THREE.Vector2(width, height), scene, camera);
   outline.edgeStrength = 2.2;
@@ -134,10 +144,12 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     },
     resize(w, h) {
       if (disposed) return;
-      post.setSize(w, h);
-      qualityRuntime.resize(w, h);
+      cssW = Math.max(1, w);
+      cssH = Math.max(1, h);
+      post.setSize(cssW, cssH);
+      qualityRuntime.resize(cssW, cssH);
       // composer.setSize restores bloom to full resolution, so compact mode reapplies its cap.
-      applyBloomResolution(w, h);
+      applyBloomResolution(cssW, cssH);
       // OutlinePass 크기는 composer가 현재 DPR을 반영한 device px로 이미 전파한다.
     },
     dispose() {

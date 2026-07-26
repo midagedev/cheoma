@@ -136,6 +136,9 @@ const REVIEWED_NEW_PATHS = new Set([
   // under src/temple/, owned by check:temple + temple-browser (same as plan/compound).
   'src/temple/entry-sequence.js',
   'tools/check-building-navigation.mjs',
+  // Perf campaign: pure live-edit geometry/yard signatures + thatch-only path.
+  // FAST_CHECKS; browser not required.
+  'tools/check-live-edit-signatures.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',

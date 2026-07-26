@@ -1142,12 +1142,14 @@
     editParams = { kind: nextSpec.kind, ...(nextSpec.params || {}) };
     return true;
   }
-  function pushRebuild({ refreshFlora = true } = {}) {
+  function pushRebuild({ refreshFlora = true, warm = true } = {}) {
     if (!villageEditing) return;
     const rebuilt = engine.village.rebuild(
       villageEditing.parcelId,
       buildRebuildPayload(villageEditing.spec, editParams),
-      { refreshFlora },
+      // Preview frames skip compileAsync (materials already warm from focus-in).
+      // Commit re-enables full warm so any rare new program still pre-links.
+      { refreshFlora, warm },
     );
     // Compound planners may change the valid controls and clamp ranges when a
     // variant changes. Refresh the declarative spec after the core accepts the
@@ -1160,8 +1162,12 @@
   // preview work latest-wins, adapts its cadence to measured rebuild cost, and
   // makes pointer release the only flora/pick-boundary commit (#3, #19).
   const liveEdit = createLiveEditScheduler({
-    preview: () => pushRebuild({ refreshFlora: false }),
-    commit: () => pushRebuild(),
+    preview: () => pushRebuild({ refreshFlora: false, warm: false }),
+    commit: () => pushRebuild({ refreshFlora: true, warm: true }),
+    // Geometry previews should feel continuous. 24ms ≈ 40 Hz ceiling when the
+    // rebuild itself is cheap; adaptive headroom still backs off under cost.
+    minIntervalMs: 24,
+    maxIntervalMs: 80,
   });
   function villageLive(k, v) {
     editParams[k] = v;

@@ -803,14 +803,40 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
     flarePass.uniforms.eyeDamp.value = THREE.MathUtils.smoothstep(fy, -0.09, -0.02);
   }
 
-  function setSize(w, h) {
-    const pixelRatio = renderer.getPixelRatio();
+  // CSS-pixel composer size last passed to setSize. fillScale multiplies only the
+  // device pixel ratio so orbit can drop fill-rate without changing the canvas.
+  let composerCssW = size.x;
+  let composerCssH = size.y;
+  let fillScale = 1;
+
+  function applyComposerResolution() {
+    const pixelRatio = renderer.getPixelRatio() * fillScale;
     if (pixelRatio !== composerPixelRatio) {
       composerPixelRatio = pixelRatio;
       composer.setPixelRatio(pixelRatio);
     }
-    composer.setSize(w, h);   // 각 패스(bloom·bokeh·rim)에 device px 전파
-    flarePass.uniforms.aspect.value = (h > 0 ? w / h : 1.0);  // 고스트·헤일로 화면상 원형 유지
+    composer.setSize(composerCssW, composerCssH);   // 각 패스(bloom·bokeh·rim)에 device px 전파
+    flarePass.uniforms.aspect.value = (composerCssH > 0 ? composerCssW / composerCssH : 1.0);
+  }
+
+  function setSize(w, h) {
+    composerCssW = Math.max(1, w);
+    composerCssH = Math.max(1, h);
+    applyComposerResolution();
+  }
+
+  /**
+   * Adaptive fill budget for camera motion. Multiplies the renderer's pixel
+   * ratio for the EffectComposer only (canvas CSS size stays fixed). Callers
+   * should switch this at mode boundaries (stable ↔ moving), not every frame —
+   * setPixelRatio reallocates every pass target.
+   */
+  function setFillScale(scale) {
+    const next = Number.isFinite(scale) ? Math.max(0.5, Math.min(1, scale)) : 1;
+    if (Math.abs(next - fillScale) < 1e-4) return fillScale;
+    fillScale = next;
+    applyComposerResolution();
+    return fillScale;
   }
 
   function setDof(on) { return dof.setEnabled(on); }
@@ -899,10 +925,11 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
   }
 
   return {
-    composer, setTime, setSunsetLook, setSize, update,
+    composer, setTime, setSunsetLook, setSize, setFillScale, update,
     // 기하 에지 MSAA 판독(게이트·하네스). 0 = stock RenderPass 회귀 상태.
     //   setSamples 로 런타임 교체될 수 있으므로 라이브 getter 다.
     get msaaSamples() { return renderPass.samples; },
+    get fillScale() { return fillScale; },
     setDof, setDofAmount, setDofAperture, setDofTilt, setDofAmountFloor,
     setFocus, setFocusPoint,
     setEnabled, setWeather, setFlareEnabled, setRimEnabled,
