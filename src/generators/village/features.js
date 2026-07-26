@@ -172,12 +172,16 @@ export function buildHeroParcel(parcel, site) {
       return disposed;
     };
   } else {
+    const heroStyle = parcel.heroStyle || 'hanok';
     group.add(buildParcel({
       seed: parcel.seed || 7,
-      style: parcel.heroStyle || 'hanok',
+      style: heroStyle,
       plotW: parcel.plotW,
       plotD: parcel.plotD,
       lanterns: false,
+      // Plan-authored roofRank wins; heroStyle palace is always magistracy/gaeksa.
+      roofRank: parcel.roofRank
+        ?? (heroStyle === 'palace' ? 'magistracy' : null),
     }));
   }
   group.rotation.y = G.facingY(parcel.frontDir);

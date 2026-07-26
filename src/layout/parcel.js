@@ -37,6 +37,7 @@ export function buildParcel({
   presetOverrides,
   lanterns = true,
   materials = null,
+  roofRank = null,
 } = {}) {
   const compound = parcelCompoundPlan({ style, plotW, plotD });
   const cfg = compound.config;
@@ -97,7 +98,13 @@ export function buildParcel({
     building.position.set(0, 0, buildingZ);
     frontZ = buildingZ + zExtent;
   } else {
-    const P = presetOverrides ? { ...PRESETS[cfg.preset], ...presetOverrides } : PRESETS[cfg.preset];
+    const base = PRESETS[cfg.preset];
+    const P = {
+      ...(presetOverrides ? { ...base, ...presetOverrides } : base),
+      // Magistracy/gaeksa cores borrow palace materials but must not inherit palace
+      // japsang/chwidu — roof-rank is the sole ornament gate (#150 C).
+      ...(roofRank != null ? { roofRank } : {}),
+    };
     building = buildBuilding(P);
     const L = building.userData.layout;
     const halfDepth = L.zEave + P.podiumMarginS + 1.0;

@@ -291,11 +291,12 @@ export function planVillage(opts = {}) {
     const pw = tier === 'hanyang' ? 96 : 60, pd = tier === 'hanyang' ? 150 : 90;
     const pc = { x: 0, z: C.z - pd * 0.16 };   // 깊어진 축선을 북으로 상재(진입부 여유)
     const palaceParcel = reservedParcel(pc, coreFrontDir, pw, pd, {
-      placement: 'landmark', kind: 'palace', seed: (seed ^ 0x9a11) >>> 0,
+      placement: 'landmark', kind: 'palace', roofRank: 'palace',
+      seed: (seed ^ 0x9a11) >>> 0,
     });
     // 궁역도 일반 필지와 같은 poly·남측 일조 회랑을 보존한다. 렌더용 축약 feature만
     // 남기면 보호수와 숲 worker가 궁궐을 빈 땅으로 오인한다.
-    features.palace = { ...palaceParcel, x: pc.x, z: pc.z, tier };
+    features.palace = { ...palaceParcel, x: pc.x, z: pc.z, tier, roofRank: 'palace' };
     blockers.push(palaceParcel);
   } else if (houseTarget <= 0 && (typeof opts.houses === 'number' || templeSolo)) {
     // 집 없는 구성(#114): houses:0 명시 시 예약 코어(종가·관아)도 생략 — "절 하나만"(includeTemple)
@@ -304,20 +305,25 @@ export function planVillage(opts = {}) {
     // 궁 없는 도성풍: 중심에 대형 관아(객사) 코어
     const coreCenter = coreCenterBehindGate(C, coreFrontDir, 34);
     const core = reservedParcel(coreCenter, coreFrontDir, 42, 34, {
-      hero: true, heroStyle: 'palace', kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
+      hero: true, heroStyle: 'palace', roofRank: 'magistracy',
+      kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
     });
-    features.govCore = { x: coreCenter.x, z: coreCenter.z, frontDir: coreFrontDir };
+    features.govCore = {
+      x: coreCenter.x, z: coreCenter.z, frontDir: coreFrontDir, roofRank: 'magistracy',
+    };
     blockers.push(core);
   } else if (scale === 'town') {
-    // 관아 코어(객사 남향) — 배산 아래 중앙
+    // 관아 코어(객사 남향) — 배산 아래 중앙. 궁 복제가 아니라 magistracy roof rank (#150 C).
     blockers.push(reservedParcel(coreCenterBehindGate(C, coreFrontDir, 32), coreFrontDir, 40, 32, {
-      hero: true, heroStyle: 'palace', kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
+      hero: true, heroStyle: 'palace', roofRank: 'magistracy',
+      kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
     }));
   } else {
     // 씨족촌 종가 — 명당(중심), 남향(동구쪽) -> 림 라이트 최적 방향
     const plotW = scale === 'village' ? 28 : 26, plotD = scale === 'village' ? 26 : 24;
     blockers.push(reservedParcel(coreCenterBehindGate(C, coreFrontDir, plotD), coreFrontDir, plotW, plotD, {
-      hero: true, heroStyle: 'hanok', kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
+      hero: true, heroStyle: 'hanok', roofRank: 'giwa',
+      kind: 'giwa', rank: 1, seed: (seed ^ 0x5a11) >>> 0,
     }));
   }
 

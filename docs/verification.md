@@ -315,6 +315,9 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - normalized highlight prefilter는 반해상도 target 하나에서 프레임당 한 번 실행한다. 실제 `tColor` 비용은 analytic RGB/compactness 37회 + exact 2×2 ownership 4회 + 인접 4×4 guard에서 재사용되지 않는 12회 = 총 53 fetch다. RGB에는 정규화 source energy를 저장하고 alpha에는 broad `0`, gather support `0.25`, exact ownership `1`을 인코딩한다. Gather cutoff `0.125`와 ownership cutoff `0.75`까지 renderer-free 계약과 일치하는지 검사한다. compact HDR source scatter는 viewport-sized grid buffer 없이 `gl_InstanceID`로 만든 disjoint 2×2 source ownership, 앞쪽 depth, 채워진 에너지 정규화 원판을 사용하고, point-size cap을 넘으면 같은 draw의 instanced triangle backend로 자동 전환해야 한다. 어느 backend든 프로그램·draw call +1, scatter render target +0을 지키며, 원판 반지름 증가는 총 광원 에너지를 늘리지 않고 peak·core 평균을 `1/r²`로 낮춰야 한다. reverse source probe나 fitted 밝기 상수는 허용하지 않는다.
   - 순수 품질 상태가 Three·DOM·wall clock 없이 같은 객체를 갱신하고, 60/120Hz와 큰 `dt`에서 1e-3 안으로 일치하며 hysteresis·hold·단조 복원·중간 반전을 지키는지 검사한다. position/quaternion/FOV/view-offset 숫자 snapshot과 resize reset도 함께 검사한다.
   - 셰이더가 동적 uniform 배열·program define 없이 기존 `BokehPass` uniform/API를 보존하는지 검사.
+- `check:roof-rank`
+  - `palace > magistracy/gaeksa > city-gate > giwa` 순수 위계와 alias, plan `heroStyle: 'palace'` → `roofRank: 'magistracy'` wiring을 검사한다.
+  - ornament policy가 rank palace에만 잡상·취두를 허용하고 magistracy·city-gate·giwa·paljak temple 맥락은 거부하는지, roof/plan/palace/citywall 소비 소스가 그 정책을 쓰는지 검사한다. 실제 mesh count는 `check:app` / `check:temple:browser`가 유지한다.
 - `check:dancheong`
   - 궁 기본 모로, 사찰 중심 불전 금·부속 금모로·요사 모로의 위계와 두 공개 축 clamp를 검사한다.
   - 기와집·초가에는 설정과 패널 축이 없고, 궁 `presetOverrides`·사찰 `templeOptions`로만 재생성되는지 검사한다.

@@ -65,23 +65,29 @@ function footprintHalf(obj) {
 }
 
 // 전각 프리셋 변주 — PRESETS.korea 를 격식별로 축소(신규 프리셋 아님, 스프레드 파생).
+// roofRank palace: multi-곽 궁 전각만 잡상·취두를 받는다 (관아 hero와 분리, #150 C).
 function hallPreset(role, seed) {
   const k = PRESETS.korea;
   if (role === 'jeongjeon') {
     // 정전(근정전): 정면 5칸·2중 월대·돌난간. 궁의 얼굴 — 기준 100%.
-    return { ...k, seed, podiumTiers: 2, podiumRailing: true, frontBays: 5, sideBays: 3 };
+    return {
+      ...k, seed, roofRank: 'palace',
+      podiumTiers: 2, podiumRailing: true, frontBays: 5, sideBays: 3,
+    };
   }
   if (role === 'pyeonjeon') {
     // 편전(사정전): 정면 3칸·단층 월대. 일상 집무.
     return {
-      ...k, seed, podiumTiers: 1, podiumTierH: 1.0, podiumRailing: false,
+      ...k, seed, roofRank: 'palace',
+      podiumTiers: 1, podiumTierH: 1.0, podiumRailing: false,
       frontBays: 3, sideBays: 3, columnHeight: 3.7,
       centerBayW: 3.5, middleBayW: 3.0, endBayW: 2.6,
     };
   }
   // 침전·중궁전(강녕전·교태전): 주거형 — 더 낮고 아담, 공포 절제.
   return {
-    ...k, seed, podiumTiers: 1, podiumTierH: 0.8, podiumRailing: false,
+    ...k, seed, roofRank: 'palace',
+    podiumTiers: 1, podiumTierH: 0.8, podiumRailing: false,
     frontBays: 3, sideBays: 3, columnHeight: 3.4, bracketTiers: 1, interBrackets: 1,
     centerBayW: 3.2, middleBayW: 2.8, endBayW: 2.4, ridgeH: 0.42,
   };
@@ -304,6 +310,8 @@ export function buildPalaceCompound({
   const applyOv = (p) => Object.assign(p, presetOverrides || {}, {
     dancheongClarity: requestedDancheong.dancheongClarity,
     dancheongSplendor: requestedDancheong.dancheongSplendor,
+    // Edits must not demote multi-곽 halls off the palace ornament rank.
+    roofRank: 'palace',
   });
   // 요청 궁역(w,d)이 있으면 존중하되, 스펙 축선이 들어갈 최소치로 클램프.
   const W = Math.max(w || spec.w, spec.w);

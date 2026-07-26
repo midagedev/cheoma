@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { tileSurfaceMaterial } from './palette.js';
 import { createThatchRoofProfile, THATCH_ROOF_SEGMENTS } from './thatch-profile.js';
 import { ROOF_WALL_TUCK } from '../core/surface-clearance.js';
+import { resolveRoofRank, roofOrnamentPolicy } from './roof-rank.js';
 
 // 팔작지붕.
 // 좌표계: x = 정면 방향(폭), z = 깊이(+z가 정면), y = 높이.
@@ -23,7 +24,10 @@ export function buildRoof(P, L, M) {
   // 궁 마루 양성바름: 용마루·내림마루·추녀마루를 백색 회(M.ridgePlaster)로 도장하고
   // 취두·토수·잡상 등 장식 종물만 어두운 기와로 남겨 대비를 준다(근정전 지붕의 최대 식별 특징).
   // 절(맞배)·초가는 종전대로 어두운 적새 마루 유지 — 양성바름은 궁 격식.
+  // 잡상·취두는 style이 아니라 roof-rank 정책(#150 C)이 소유: palace only.
+  // 관아·객사(heroStyle palace → rank magistracy)는 궁 재질을 빌려도 종물을 받지 않는다.
   const isPalace = P.style === 'palace';
+  const ornaments = roofOrnamentPolicy(resolveRoofRank(P));
   const maruMat = isPalace ? M.ridgePlaster : M.tileRidge;
   const xr = L.ridgeHalf;
   const yEaveTile = L.eaveEdgeY + tileLift; // 기와면 기준 처마 높이
@@ -244,9 +248,9 @@ export function buildRoof(P, L, M) {
   }
 
   if (!isMatbae) {
-    // 취두는 이 생성기의 궁궐 위계 표지다. 지붕 형식만 팔작으로 바꾼 사찰·민가에 장식이
-    // 누출되지 않도록 형태 분기와 건물 유형 분기를 분리한다.
-    if (isPalace) {
+    // 취두는 이 생성기의 궁궐 위계 표지다. 지붕 형식만 팔작으로 바꾼 사찰·민가·관아에
+    // 장식이 누출되지 않도록 형태 분기와 roof-rank 분기를 분리한다.
+    if (ornaments.chwidu) {
       for (const sign of [1, -1]) {
         const s = new THREE.Shape();
         s.moveTo(0, 0); s.lineTo(0.55, 0); s.lineTo(0.55, 0.35);
@@ -256,7 +260,7 @@ export function buildRoof(P, L, M) {
         const geo = new THREE.ExtrudeGeometry(s, { depth: 0.58, bevelEnabled: false });
         geo.translate(0, 0, -0.29); // z 방향 중심 정렬 (depth 반영)
         const chwidu = new THREE.Mesh(geo, M.tileRidge);
-        chwidu.name = 'palace-chwidu';
+        chwidu.name = ornaments.chwiduName;
         // 말린 끝(x+)이 용마루 중앙(x=0) 쪽을 향하게: 오른쪽 끝은 좌우 미러
         chwidu.scale.x = sign === 1 ? -1 : 1;
         chwidu.position.set(sign * (xr - 0.05), L.ridgeY + 0.20, 0);
@@ -264,7 +268,7 @@ export function buildRoof(P, L, M) {
         g.add(chwidu);
         // 십자 교차: 같은 shape을 Y축 90° 회전·축소해 겹쳐 어느 각도에서도 실루엣 유지
         const chwidu2 = new THREE.Mesh(geo, M.tileRidge);
-        chwidu2.name = 'palace-chwidu';
+        chwidu2.name = ornaments.chwiduName;
         chwidu2.rotation.y = Math.PI / 2;
         chwidu2.scale.setScalar(0.85);
         chwidu2.position.copy(chwidu.position);
@@ -310,8 +314,8 @@ export function buildRoof(P, L, M) {
       snout.castShadow = true; g.add(snout);
     }
 
-    if (isPalace) {
-      // 잡상(궁): 추녀마루 위 홀수 열. 처마쪽(앞)=삿갓 쓴 대당사부 → 위로 손오공·저팔계·사오정(유사 반복).
+    if (ornaments.japsang) {
+      // 잡상(궁 rank): 추녀마루 위 홀수 열. 처마쪽(앞)=삿갓 쓴 대당사부 → 위로 손오공·저팔계·사오정(유사 반복).
       // 개수는 추녀마루 길이에 비례(격식 높을수록 많이, 3~11 홀수) — 근정전급 ≈ 7.
       let nJab = Math.round(frontPoint(1, vStar, 1).distanceTo(frontPoint(1, 1, 1)) / 0.65);
       nJab = Math.max(3, Math.min(11, nJab));
@@ -325,16 +329,16 @@ export function buildRoof(P, L, M) {
           const lead = k === 0;
           const s = lead ? 0.20 : 0.15 - k * 0.008;
           const body = new THREE.Mesh(new THREE.BoxGeometry(s * 0.7, s, s * 0.7), M.tileRidge);
-          body.name = 'palace-japsang';
+          body.name = ornaments.japsangName;
           body.position.set(p.x, p.y + s / 2, p.z); body.castShadow = true;
           body.userData.asmGroup = 'finial'; g.add(body);       // 잡상: 지붕 직후 미니팝
           const head = new THREE.Mesh(new THREE.SphereGeometry(s * 0.42, 8, 6), M.tileRidge);
-          head.name = 'palace-japsang';
+          head.name = ornaments.japsangName;
           head.position.set(p.x, p.y + s + s * 0.35, p.z); head.castShadow = true;
           head.userData.asmGroup = 'finial'; g.add(head);
           if (lead) {
             const hat = new THREE.Mesh(new THREE.ConeGeometry(s * 0.62, s * 0.4, 8), M.tileRidge);
-            hat.name = 'palace-japsang';
+            hat.name = ornaments.japsangName;
             hat.position.set(p.x, p.y + s + s * 0.72, p.z); hat.castShadow = true;
             hat.userData.asmGroup = 'finial'; g.add(hat);
           }
