@@ -1,12 +1,20 @@
 import * as THREE from 'three';
 import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
-import { setupPost } from '../../../src/api/environment.js';
+import { setupPost, MSAA_SAMPLES_COMPACT, MSAA_SAMPLES_DESKTOP } from '../../../src/api/environment.js';
 import { VILLAGE_FOCUS_DOF_APERTURE } from '../../../src/api/cinematic.js';
 import { createPostQualityRuntime } from './post-quality-runtime.js';
 
 /** Wire the app's flagship post-processing pipeline and its hover outline. */
 export function createPostRuntime({ renderer, scene, camera, width, height, compact = false }) {
-  const post = setupPost({ renderer, scene, camera });
+  // 기하 에지 MSAA. 컴포저가 켜진 순간 렌더러의 antialias 플래그는 무효이므로 이 값이 제품
+  //   화면의 유일한 AA 소스다(src/env/msaa-render-pass.js). 폰이 2x 인 이유는 필레이트가 아니라
+  //   멀티샘플 컬러 버퍼 메모리다 — SHADOW_SIZE 와 같은 iOS Safari 상한 제약.
+  const post = setupPost({
+    renderer,
+    scene,
+    camera,
+    msaaSamples: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_DESKTOP,
+  });
   post.setDofAperture(VILLAGE_FOCUS_DOF_APERTURE);
   // DoF·플레어는 전 디바이스에서 살아 있다. 둘은 focus 문맥이 소유하고(engine setPostFocus), 부감은
   // amount=0·flare off 계약이라 근접 프레임에만 비용이 든다. 종전의 폰 하드 OFF 는 측정된 대가가
@@ -67,6 +75,11 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     debugResolution() {
       return {
         pixelRatio: renderer.getPixelRatio(),
+        // AA 회귀 게이트 판독축: samples=0 이면 컴포저 경로에 AA 가 전혀 없다.
+        //   setSamples 로 런타임 교체될 수 있으므로 패스에서 라이브로 읽는다.
+        msaaSamples: post.renderPass.samples,
+        msaaAllocated: post.renderPass.allocated,
+        msaaSampleBytes: post.renderPass.sampleBytes,
         composer: {
           width: post.composer.renderTarget1.width,
           height: post.composer.renderTarget1.height,
@@ -75,6 +88,11 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
           width: outline.renderTargetMaskBuffer.width,
           height: outline.renderTargetMaskBuffer.height,
         },
+        // 프로그램·텍스처 수는 해상도/AA 판정의 유일하게 신뢰 가능한 성능 축이다
+        // (헤드리스 ANGLE 의 절대 프레임 ms 는 증거가 못 된다 — CLAUDE.md 검증 절).
+        programs: renderer.info.programs?.length ?? null,
+        textures: renderer.info.memory.textures,
+        geometries: renderer.info.memory.geometries,
       };
     },
     debugResources() {
@@ -88,6 +106,7 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
         lodScreenDoorDepthMaterial: post.bokehPass._lodScreenDoorDepthMaterial,
         sunGlow: post.sunGlow,
         ...bokehResources,
+        msaaTarget: post.renderPass.target,
         composerTarget1: post.composer.renderTarget1,
         composerTarget2: post.composer.renderTarget2,
         composerReadBuffer: post.composer.readBuffer,

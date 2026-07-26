@@ -1,6 +1,12 @@
 // 환경·후처리 공개 API. browser/WebGL runtime용이다.
 export { setupEnvironment, createFocusRing, setupGrass } from '../env/index.js';
 export { setupPost } from '../env/post.js';
+// 기하 에지 MSAA 샘플 프로파일. 소비자(앱)가 디바이스 등급으로 골라 setupPost 에 넘긴다.
+export {
+  MSAA_SAMPLES_COMPACT,
+  MSAA_SAMPLES_DESKTOP,
+  resolveMsaaSamples,
+} from '../env/msaa-render-pass.js';
 export { createDofController, DEFAULT_DOF_APERTURE, focusDepthForPoint } from '../env/dof.js';
 export { setupWeather } from '../env/weather.js';
 export {

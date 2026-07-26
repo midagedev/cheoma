@@ -88,7 +88,7 @@ try {
     engine.setWeather('clear');
     engine.debugAdvanceFocusRing(3.2);
     engine.debugAdvancePost(2);
-    engine.debugTuneDof({ amount: 1, aperture: 0.00015 });
+    engine.debugTuneDof({ amount: 1, aperture: 0.675 });
     engine.debugSetPaused(true);
     engine.debugRenderDofFrame();
     const screen = engine.village.debugDoorScreen('p27');

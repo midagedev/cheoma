@@ -4,7 +4,7 @@ import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
   'core', 'app', 'ui-shell', 'entry', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
-  'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
+  'temple-browser', 'dof-app', 'aa', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'mja-house-browser', 'surface-browser', 'cinematic-app', 'build',
 ]);
 
@@ -34,6 +34,14 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/audio/intro-policy.js',
   'src/audio/anchors.js',
   'tools/check-audio-policy.mjs',
+  'src/env/msaa-render-pass.js',
+  'src/env/bokeh-coc-contract.js',
+  'src/env/bokeh-coc-pass.js',
+  'src/env/bokeh-coc-shaders.js',
+  'tools/check-aa.mjs',
+  'tools/shoot-aa.mjs',
+  'tools/shoot-dpr.mjs',
+  'tools/shoot-dof-layers.mjs',
   'src/api/auxiliary-building.js',
   'src/api/auxiliary-building-plan.js',
   'src/api/drainage.js',
@@ -172,6 +180,9 @@ function routePath(path) {
     'tools/check-parcel-rebuild-browser.mjs': ['parcel-rebuild-browser'],
     'tools/check-surface-materials-browser.mjs': ['surface-browser'],
     'tools/check-dof-app.mjs': ['dof-app'],
+    'tools/check-aa.mjs': ['aa'],
+    'tools/shoot-aa.mjs': ['aa'],
+    'tools/shoot-dpr.mjs': ['aa'],
     'tools/shoot-bokeh-fixture.mjs': ['bokeh-fixture'],
     'tools/shoot-bokeh-scatter-proof.mjs': ['bokeh-fixture'],
     'tools/lib/bokeh-gpu-diagnostic.mjs': ['bokeh-fixture'],
@@ -249,6 +260,10 @@ function routePath(path) {
     if (/^app\/src\/engine\/(?:post-runtime|post-quality-runtime|scene-runtime)\.js$/.test(path)) {
       select('post/scene runtime changed', 'dof-app');
     }
+    // pixelRatio 상한과 MSAA 샘플 프로파일이 여기서 정해진다 — AA 축을 함께 돌린다.
+    if (/^app\/src\/engine\/(?:engine|post-runtime|scene-runtime)\.js$/.test(path)) {
+      select('composer anti-aliasing or pixel-ratio profile changed', 'aa');
+    }
     if (/^app\/src\/engine\/post(?:-quality)?-runtime\.js$/.test(path)) {
       select('adaptive camera quality changed', 'ink-app', 'lod-focus');
     }
@@ -274,13 +289,16 @@ function routePath(path) {
     if (/^src\/env\/(?:index|mountains|paddies|seasons|sky|snow-material|terrain|trees|weather)\.js$/.test(path)) {
       select('winter surface or environment changed', 'winter-app');
     }
-    if (/^src\/env\/(?:dof|post|post-quality-state|stable-bokeh-pass|circular-bokeh-shader|tree-occluder|inst-fade-shader|rim|present-gate)\.js$/.test(path)) {
+    if (/^src\/env\/(?:dof|post|post-quality-state|msaa-render-pass|stable-bokeh-pass|circular-bokeh-shader|bokeh-coc-contract|bokeh-coc-pass|bokeh-coc-shaders|tree-occluder|inst-fade-shader|rim|present-gate)\.js$/.test(path)) {
       select('depth/post contract changed', 'dof-app');
     }
-    if (/^src\/env\/(?:post-quality-state|stable-bokeh-pass|circular-bokeh-shader)\.js$/.test(path)) {
+    if (/^src\/env\/(?:post|msaa-render-pass)\.js$/.test(path)) {
+      select('composer anti-aliasing changed', 'aa');
+    }
+    if (/^src\/env\/(?:post-quality-state|stable-bokeh-pass|circular-bokeh-shader|bokeh-coc-pass|bokeh-coc-shaders)\.js$/.test(path)) {
       select('adaptive post policy changed', 'ink-app', 'lod-focus');
     }
-    if (/^src\/env\/(?:stable-bokeh-pass|circular-bokeh-shader|bokeh-highlight-prefilter|bokeh-source-contract|bokeh-source-scatter)\.js$/.test(path)) {
+    if (/^src\/env\/(?:stable-bokeh-pass|circular-bokeh-shader|bokeh-highlight-prefilter|bokeh-source-contract|bokeh-source-scatter|bokeh-coc-contract|bokeh-coc-pass|bokeh-coc-shaders)\.js$/.test(path)) {
       select('compact-source bokeh changed', 'dof-app', 'ink-app', 'lod-focus', 'bokeh-fixture');
     }
     if (/^src\/env\/(?:rim|clouds|snow-material)\.js$/.test(path)) {
@@ -677,6 +695,7 @@ export function verificationCommands(plan) {
   if (has('entry')) commands.push(gateCommand('entry'));
   if (has('ink-app')) commands.push(gateCommand('ink-app'));
   if (has('dof-app')) commands.push(gateCommand('dof-app'));
+  if (has('aa')) commands.push(gateCommand('aa'));
   if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));
   if (has('rim')) commands.push(gateCommand('rim'));
   if (has('petals')) commands.push(gateCommand('petals'));

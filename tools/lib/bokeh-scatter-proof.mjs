@@ -13,6 +13,12 @@ export async function runBokehScatterProof({
   overlapName,
   roundnessLimit,
   angularUniformityLimit,
+  // The shipped compact-source multiplier and a crop that contains the disc it
+  // produces. Both come from the caller's contract-derived optics; the proof used
+  // to hardcode the historical 2.4 multiplier and a fixed 24px crop, which under a
+  // physical circle of confusion measured only the inside of the disc.
+  radiusScale,
+  linearCropRadius,
   enabled = true,
 }) {
   const ROUNDNESS_LIMIT = roundnessLimit;
@@ -20,17 +26,22 @@ export async function runBokehScatterProof({
   const scatterProofEnabled = enabled;
   let scatterProof = null;
   if (scatterProofEnabled) {
-    await page.evaluate(() => {
+    if (!(radiusScale > 0) || !(linearCropRadius > 0)) {
+      throw new Error(
+        `scatter proof needs a contract-derived radiusScale and crop: ${JSON.stringify({ radiusScale, linearCropRadius })}`,
+      );
+    }
+    await page.evaluate((scale) => {
       const engine = window.__engine;
       const pass = engine.debugPostResources().bokehPass;
       pass.setSourceScatterEnabled(false);
-      pass.uniforms.bokehRadiusScale.value = 2.4;
+      pass.uniforms.bokehRadiusScale.value = scale;
       engine.camera.position.set(0, 0, 100);
       engine.__controls.target.set(0, 0, 0);
       engine.camera.lookAt(engine.__controls.target);
       engine.camera.updateMatrixWorld(true);
       engine.debugRenderDofFrame();
-    });
+    }, radiusScale);
     const scatterCounterfactual = await page.locator("canvas").screenshot();
     const scatterCounterfactualPath = join(
       outputDir,
@@ -45,11 +56,13 @@ export async function runBokehScatterProof({
       const renderer = engine.renderer;
       const gl = renderer.getContext();
       const pointSizeRange = [...gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)];
+      // The largest disc a compact source can spend is the clamped physical CoC
+      // times the source-only multiplier (src/env/bokeh-coc-contract.js). This is
+      // an absolute pixel bound now, so it no longer grows with a wider window at
+      // a fixed height the way maxblur * viewportWidth did.
       const maxPhysicalCoCDiameter =
-        pass.uniforms.maxblur.value *
+        pass.uniforms.maxCocPx.value *
         pass.uniforms.bokehRadiusScale.value *
-        pass.uniforms.viewportWidth.value *
-        0.8660254 *
         2.08;
       const programsBefore = renderer.info.programs?.length || 0;
       pass.setSourceScatterEnabled(true);
@@ -235,7 +248,7 @@ export async function runBokehScatterProof({
               ...args
             ) {
               originalRender.call(this, rendererArg, writeBuffer, ...args);
-              const radius = 24;
+              const radius = input.cropRadius;
               const x = Math.round(input.sample.x) - radius;
               const y =
                 writeBuffer.height - 1 - (Math.round(input.sample.y) + radius);
@@ -338,6 +351,7 @@ export async function runBokehScatterProof({
           sample: fixture.projectedLights.find(
             (light) => light.name === "foreground-open-pair",
           ),
+          cropRadius: linearCropRadius,
           forceTriangle,
         },
       );

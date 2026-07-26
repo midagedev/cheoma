@@ -1,13 +1,19 @@
 import { PNG } from 'pngjs';
 
+// Floors, not sizes. Every crop below prefers the per-light window a caller
+// derived from the physical circle of confusion (light.shapeRadius /
+// light.energyRadius / light.annulus) and falls back to these only for lights
+// whose disc is smaller than the historical fixed window. A crop smaller than the
+// disc it measures makes an aspect or angular-uniformity limit unfalsifiable,
+// because the whole window then sits inside the flat interior of the disc.
 export const ROUNDNESS_RADIUS = 20;
 export const ENERGY_RADIUS = 40;
 export const STRIP_RADIUS = 28;
-// The default 2.4× source profile is intentionally darker than its sharp source
-// through the filled core. Its positive ON−OFF evidence lives in the thin outer
-// shoulder, not in the diluted centre.
-const SOURCE_ANNULUS_INNER = 14;
-const SOURCE_ANNULUS_OUTER = 22;
+// The source profile is intentionally darker than its sharp source through the
+// filled core. Its positive ON−OFF evidence lives in the thin outer shoulder, not
+// in the diluted centre, so the annulus tracks the disc edge.
+export const SOURCE_ANNULUS_INNER = 14;
+export const SOURCE_ANNULUS_OUTER = 22;
 
 function pixelLuminance(png, x, y) {
   const offset = (y * png.width + x) * 4;
@@ -112,8 +118,9 @@ export function measureLights(image, lights) {
   const png = PNG.sync.read(image);
   const background = estimateBackground(png);
   return lights.map((light) => ({
-    ...measureLight(png, light, background),
-    energy: measureLight(png, light, background, ENERGY_RADIUS).energy,
+    ...measureLight(png, light, background, light.shapeRadius ?? ROUNDNESS_RADIUS),
+    energy: measureLight(png, light, background, light.energyRadius ?? ENERGY_RADIUS)
+      .energy,
   }));
 }
 
@@ -174,6 +181,8 @@ export function measurePositiveDelta(
   }
   const cx = Math.round(light.x);
   const cy = Math.round(light.y);
+  const annulusInner = light.annulus?.inner ?? SOURCE_ANNULUS_INNER;
+  const annulusOuter = light.annulus?.outer ?? SOURCE_ANNULUS_OUTER;
   const samples = [];
   let energy = 0;
   let annulusEnergy = 0;
@@ -187,7 +196,7 @@ export function measurePositiveDelta(
         pixelLuminance(on, x, y) - pixelLuminance(off, x, y),
       );
       const distance = Math.hypot(x - cx, y - cy);
-      if (distance >= SOURCE_ANNULUS_INNER && distance <= SOURCE_ANNULUS_OUTER) {
+      if (distance >= annulusInner && distance <= annulusOuter) {
         annulusEnergy += weight;
         annulusPixels++;
       }

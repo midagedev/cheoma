@@ -17,6 +17,7 @@ export const VERIFICATION_GATES = Object.freeze({
   'temple-browser': Object.freeze({ script: 'check:temple:browser', resource: 'browser', tier: 'checkpoint', description: 'Temple WebGL assembly and disposal' }),
   'mja-house-browser': Object.freeze({ script: 'check:mja-house:browser', resource: 'browser', tier: 'checkpoint', description: 'Opt-in enclosed-house visual, resource, and lifecycle contract' }),
   'dof-app': Object.freeze({ script: 'check:dof:app', resource: 'browser', tier: 'checkpoint', description: 'Product depth-of-field flow' }),
+  aa: Object.freeze({ script: 'check:aa', resource: 'browser', tier: 'checkpoint', description: 'Composer-path geometric anti-aliasing and edge staircase axis' }),
   'bokeh-fixture': Object.freeze({ script: 'shoot:bokeh:proof', resource: 'exclusive', tier: 'checkpoint', description: 'Controlled bokeh image, source-scatter resource proof, and hardware GPU query' }),
   rim: Object.freeze({ script: 'check:rim', resource: 'browser', tier: 'checkpoint', description: 'Physical rim shader contract' }),
   'lod-focus': Object.freeze({ script: 'check:lod:focus', resource: 'browser', tier: 'checkpoint', description: 'Focused LOD lifecycle' }),
@@ -35,7 +36,7 @@ export const ALL_PROFILE = Object.freeze([
 ]);
 
 export const FULL_PROFILE = Object.freeze([
-  ...ALL_PROFILE, 'dof-app', 'rim', 'lod-app', 'cinematic-app', 'build',
+  ...ALL_PROFILE, 'dof-app', 'aa', 'rim', 'lod-app', 'cinematic-app', 'build',
 ]);
 
 export function gateCommand(id) {

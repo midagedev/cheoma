@@ -9,14 +9,44 @@ import {
   focusDepthForPoint,
 } from "../src/env/dof.js";
 import {
+  CIRCULAR_BOKEH_COMPOSITE_TAP_COUNT,
   CIRCULAR_BOKEH_DEFAULTS,
   CIRCULAR_BOKEH_FRAGMENT_SHADER,
-  CIRCULAR_BOKEH_KERNEL,
-  CIRCULAR_BOKEH_MOVING_KERNEL,
-  CIRCULAR_BOKEH_SAMPLE_COUNT,
-  MOVING_BOKEH_SAMPLE_COUNT,
   installCircularBokeh,
 } from "../src/env/circular-bokeh-shader.js";
+import {
+  BOKEH_COC_DEFAULTS,
+  BOKEH_GATHER_BASE_KERNEL,
+  BOKEH_GATHER_BASE_PER_RING,
+  BOKEH_GATHER_BASE_RINGS,
+  BOKEH_GATHER_BASE_TAP_COUNT,
+  BOKEH_GATHER_FILL_KERNEL,
+  BOKEH_GATHER_FILL_PER_RING,
+  BOKEH_GATHER_FILL_RINGS,
+  BOKEH_GATHER_FILL_TAP_COUNT,
+  BOKEH_GATHER_NEAR_DILATE_TAP_COUNT,
+  BOKEH_GATHER_TAP_COUNT,
+  bokehCocLadder,
+  bokehCocRadiusPx,
+  bokehCocScalePx,
+  bokehFarAsymptotePx,
+  bokehMaxCocPx,
+  bokehSignedCocPx,
+  bokehTiltFarAsymptoteHeadroom,
+  decodeBokehCoc,
+  encodeBokehCoc,
+} from "../src/env/bokeh-coc-contract.js";
+// bokeh-coc-shaders.js and bokeh-coc-contract.js are deliberately Three-free, so
+// the generated GLSL and the numeric optics are both asserted directly here with
+// no renderer. Only bokeh-coc-pass.js (render targets, materials, draws) imports
+// three, and it is asserted as text like the source scatter.
+import {
+  BOKEH_COC_GATHER_FRAGMENT_SHADER,
+  BOKEH_COC_GATHER_TEXTURE_TAP_COUNT,
+  BOKEH_COC_NEAR_DILATE_OFFSETS,
+  BOKEH_COC_PREFILTER_BLOCK_TAP_COUNT,
+  BOKEH_COC_PREFILTER_FRAGMENT_SHADER,
+} from "../src/env/bokeh-coc-shaders.js";
 import {
   BOKEH_HIGHLIGHT_PREFILTER_ANALYTIC_TAP_COUNT,
   BOKEH_HIGHLIGHT_PREFILTER_GUARD_EXTRA_TAP_COUNT,
@@ -282,102 +312,410 @@ invariant(
   "hidden source lost its declarative packed-depth ownership",
 );
 
+// ---------------------------------------------------------------------------
+// Physical circle of confusion.
+//
+// Re-authored for the layer-separation restoration. The old contract in this
+// place pinned the very thing that removed depth layers from the frame: a
+// 13-tap kernel, `surfaceRadiusPx <= 3.25`, a luminance contrast gate, and a
+// full stop of surface defocus during camera motion. Those were correct guards
+// for a sparse full-resolution kernel and are meaningless once radius is bought
+// with resolution (docs/dof-cinematic-research.md §3, §4).
+//
+// What is pinned now is the optics itself, executed with no renderer:
+// monotonicity, subject sharpness, distinguishable layers, near/far asymmetry,
+// an unclamped background asymptote, and fov dependence.
+// ---------------------------------------------------------------------------
+
+const VIEWPORT_HEIGHT = 1080;
+const PARCEL_FOV = 16;
+const SUBJECT_DEPTH = 60;
+const cocScale = bokehCocScalePx(
+  BOKEH_COC_DEFAULTS.apertureMeters,
+  VIEWPORT_HEIGHT,
+  PARCEL_FOV,
+);
+const maxCoc = bokehMaxCocPx(VIEWPORT_HEIGHT, BOKEH_COC_DEFAULTS.maxCocFraction);
+const radiusAt = (z) => bokehCocRadiusPx(cocScale, SUBJECT_DEPTH, z, maxCoc);
+
 invariant(
-  CIRCULAR_BOKEH_SAMPLE_COUNT === CIRCULAR_BOKEH_KERNEL.length,
-  "circular bokeh sample contract diverged from its generated kernel",
+  cocScale > 0 && maxCoc > 0,
+  "physical CoC scale collapsed for the product close-parcel lens",
+);
+
+// (1) Monotonicity in both directions. This is the whole acceptance criterion
+// "the further away, the blurrier" and it holds by construction because
+// signedCoc = scale * (1/focus - 1/z) is strictly increasing in z.
+const farSweep = [60, 64, 70, 75, 90, 120, 150, 220, 300, 600];
+const nearSweep = [59, 55, 50, 45, 40, 34, 28, 24];
+invariant(
+  farSweep.every(
+    (z, index) => index === 0 || radiusAt(z) > radiusAt(farSweep[index - 1]),
+  ),
+  "background CoC stopped increasing monotonically with depth",
 );
 invariant(
-  CIRCULAR_BOKEH_SAMPLE_COUNT === 13,
-  "selective surface bokeh lost its bounded 13-tap budget",
-);
-near(
-  CIRCULAR_BOKEH_DEFAULTS.radiusScale,
-  4.4,
-  "cinematic bokeh lost its expanded telephoto aperture radius",
+  nearSweep.every(
+    (z, index) => index === 0 || radiusAt(z) > radiusAt(nearSweep[index - 1]),
+  ),
+  "foreground CoC stopped increasing monotonically toward the camera",
 );
 invariant(
-  MOVING_BOKEH_SAMPLE_COUNT === 1 &&
-    MOVING_BOKEH_SAMPLE_COUNT === CIRCULAR_BOKEH_MOVING_KERNEL.length,
-  "moving bokeh stopped sleeping ordinary surface reconstruction",
+  nearSweep.every((z, index) => {
+    if (index === 0) return true;
+    const signed = bokehSignedCocPx(cocScale, SUBJECT_DEPTH, z);
+    return signed < 0;
+  }),
+  "foreground lost its negative signed CoC side",
 );
 invariant(
-  CIRCULAR_BOKEH_KERNEL.every(([x, y]) => Math.hypot(x, y) <= 1 + EPS),
-  "circular bokeh kernel escaped its unit aperture",
+  bokehSignedCocPx(cocScale, SUBJECT_DEPTH, 150) > 0,
+  "background lost its positive signed CoC side",
 );
-const radialCounts = new Map();
-for (const [x, y] of CIRCULAR_BOKEH_KERNEL) {
-  const radius = Math.hypot(x, y).toFixed(6);
-  radialCounts.set(radius, (radialCounts.get(radius) || 0) + 1);
+
+// (2) "Only that house is sharp": one whole 9m house straddling the focus plane
+// must stay under the perceptual limit, so focus can be a plane rather than a
+// point and still render the subject crisp front to back.
+for (const z of [55, 57, 60, 63, 64, 65]) {
+  invariant(
+    radiusAt(z) <= VIEWPORT_HEIGHT * 0.0025,
+    `subject depth ${z}m left the sharp band (${radiusAt(z).toFixed(2)}px)`,
+  );
+}
+
+// (3) Distinguishable layers. The former 3.25px cap gave every one of these the
+// same radius, which is exactly what "no depth separation" looked like.
+// A fixed per-step ratio is the wrong test: perspective compression flattens the
+// curve toward its asymptote on purpose, so the last step is always the smallest
+// (§4.4's own table goes 4.3 -> 7.2 -> 10.8 -> 13.0, a 1.20x final step). Assert
+// what the eye actually needs instead - every step separates by at least a pixel
+// and the whole ladder spreads several-fold end to end.
+const layers = [75, 90, 120, 150];
+for (let index = 1; index < layers.length; index++) {
+  const nearer = radiusAt(layers[index - 1]);
+  const further = radiusAt(layers[index]);
+  invariant(
+    further - nearer >= 1 && further >= nearer * 1.15,
+    `background layers ${layers[index - 1]}m and ${layers[index]}m collapsed ` +
+      `into one blur (${nearer.toFixed(2)}px vs ${further.toFixed(2)}px)`,
+  );
 }
 invariant(
-  JSON.stringify([...radialCounts.values()].sort((a, b) => a - b)) ===
-    "[1,4,4,4]",
-  "selective surface bokeh lost its center + three paired rings",
+  radiusAt(150) / radiusAt(75) >= 2.5,
+  `the background ladder lost its end-to-end spread ` +
+    `(${(radiusAt(150) / radiusAt(75)).toFixed(2)}x from 75m to 150m)`,
 );
-for (let i = 1; i < CIRCULAR_BOKEH_KERNEL.length; i += 2) {
-  const a = CIRCULAR_BOKEH_KERNEL[i];
-  const b = CIRCULAR_BOKEH_KERNEL[i + 1];
-  near(a[0], -b[0], `bokeh pair ${i} shifted the optical center`);
-  near(a[1], -b[1], `bokeh pair ${i} shifted the optical center`);
-}
-const movingRadialCounts = new Map();
-for (const [x, y] of CIRCULAR_BOKEH_MOVING_KERNEL) {
-  const radius = Math.hypot(x, y).toFixed(6);
-  movingRadialCounts.set(radius, (movingRadialCounts.get(radius) || 0) + 1);
-}
 invariant(
-  JSON.stringify([...movingRadialCounts.values()].sort((a, b) => a - b)) ===
-    "[1]",
-  "moving bokeh stopped using only the stable center sample",
+  radiusAt(75) > 2 && radiusAt(150) > 8,
+  "neighbouring parcel and background ridge stayed effectively sharp",
 );
+
+// (4) Near/far asymmetry at equal distance from the focus plane. A real lens
+// releases the foreground harder, which is what restores the out-of-focus eave
+// in the foreground without a separate dial.
+const asymmetry = radiusAt(SUBJECT_DEPTH - 20) / radiusAt(SUBJECT_DEPTH + 20);
+invariant(
+  asymmetry >= 2,
+  `near/far asymmetry disappeared (${asymmetry.toFixed(2)}x)`,
+);
+
+// (5) The background runs the pure physical curve: its asymptote must sit under
+// the clamp, so only the foreground is ever clamped.
+const asymptote = bokehFarAsymptotePx(cocScale, SUBJECT_DEPTH);
+invariant(
+  asymptote < maxCoc,
+  `background asymptote ${asymptote.toFixed(2)}px reached the ${maxCoc.toFixed(2)}px clamp`,
+);
+invariant(
+  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(20) >= maxCoc - 1e-6,
+  "the CoC clamp stopped being foreground-only",
+);
+// Product telephoto focus (~50 m, 16°) with the authored tilt dial must keep the
+// far asymptote under the clamp even at the worst-case anchor offset. A ratio > 1
+// means tilt re-clamped the background and the near/far asymmetry contract is
+// no longer guaranteed (bokeh-coc-contract.js tilt headroom).
+const productTiltHeadroom = bokehTiltFarAsymptoteHeadroom({
+  scalePx: cocScale,
+  focus: 50,
+  tiltStrength: BOKEH_COC_DEFAULTS.tiltStrength,
+  maxCocPx: maxCoc,
+});
+invariant(
+  productTiltHeadroom.ratio <= 1,
+  `product tilt ${BOKEH_COC_DEFAULTS.tiltStrength} saturates the far clamp at 50 m ` +
+    `(worst asymptote ${productTiltHeadroom.worstAsymptotePx.toFixed(2)}px / ` +
+    `max ${productTiltHeadroom.maxCocPx.toFixed(2)}px, ratio ${productTiltHeadroom.ratio.toFixed(3)})`,
+);
+invariant(
+  BOKEH_COC_DEFAULTS.tiltStrength >= 0.4,
+  "product tilt dial fell below the diorama floor that narrows the sharp band",
+);
+
+// (6) fov dependence. One aperture constant has to make the telephoto hero lens
+// shallow and the wide aerial lens deep, with no per-lens aperture.
+const heroScale = bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, VIEWPORT_HEIGHT, 7);
+const aerialScale = bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, VIEWPORT_HEIGHT, 46);
+invariant(
+  heroScale > cocScale && cocScale > aerialScale,
+  "CoC stopped following the lens continuum (hero > parcel > aerial)",
+);
+invariant(
+  bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, VIEWPORT_HEIGHT, 0) === 0 &&
+    bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, 0, PARCEL_FOV) === 0 &&
+    bokehCocScalePx(Number.NaN, VIEWPORT_HEIGHT, PARCEL_FOV) === 0,
+  "CoC scale accepted a degenerate lens, viewport, or aperture",
+);
+// Viewport-relative, not pixel-absolute: the same frame must look the same at a
+// different resolution.
 near(
-  CIRCULAR_BOKEH_MOVING_KERNEL[0][0],
-  0,
-  "moving bokeh lost its optical center",
+  bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, 2160, PARCEL_FOV),
+  cocScale * 2,
+  "CoC stopped scaling with viewport height",
+  1e-9,
 );
-near(
-  CIRCULAR_BOKEH_MOVING_KERNEL[0][1],
-  0,
-  "moving bokeh lost its optical center",
+
+// (7) The ladder helper the app gate and the docs share must agree with the
+// direct calls, so one table drives every consumer.
+const ladder = bokehCocLadder({
+  focus: SUBJECT_DEPTH,
+  viewportHeight: VIEWPORT_HEIGHT,
+  fovDegrees: PARCEL_FOV,
+  depths: [40, 60, 90, 150],
+});
+invariant(
+  ladder.length === 4 &&
+    ladder.every((entry) => Math.abs(entry.radiusPx - radiusAt(entry.z)) < 1e-9),
+  "the shared CoC ladder diverged from the direct CoC evaluation",
+);
+
+// (8) Signed CoC round-trips through one alpha channel, which is how near/far
+// split costs no second render target and no second program.
+for (const signed of [-maxCoc, -7.5, 0, 4.25, maxCoc]) {
+  near(
+    decodeBokehCoc(encodeBokehCoc(signed, maxCoc), maxCoc),
+    signed,
+    `signed CoC ${signed} did not survive the alpha round trip`,
+    1e-9,
+  );
+}
+near(encodeBokehCoc(0, maxCoc), 0.5, "zero CoC left the encoding midpoint");
+invariant(
+  encodeBokehCoc(maxCoc * 4, maxCoc) === 1 &&
+    encodeBokehCoc(-maxCoc * 4, maxCoc) === 0,
+  "CoC encoding stopped saturating at the clamp",
+);
+
+// ---------------------------------------------------------------------------
+// Gather kernel. Generated, deterministic, exact antipodal pairs.
+// ---------------------------------------------------------------------------
+
+invariant(
+  BOKEH_GATHER_BASE_TAP_COUNT === BOKEH_GATHER_BASE_KERNEL.length &&
+    BOKEH_GATHER_BASE_TAP_COUNT ===
+      1 + BOKEH_GATHER_BASE_RINGS * BOKEH_GATHER_BASE_PER_RING,
+  "gather base kernel diverged from its centre + rings contract",
 );
 invariant(
-  !/uniform\s+\w+\s+\w+\s*\[/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
-  "circular bokeh introduced a dynamically indexed custom uniform array",
+  BOKEH_GATHER_FILL_TAP_COUNT === BOKEH_GATHER_FILL_KERNEL.length &&
+    BOKEH_GATHER_TAP_COUNT ===
+      BOKEH_GATHER_BASE_TAP_COUNT + BOKEH_GATHER_FILL_TAP_COUNT,
+  "gather fill kernel diverged from the total tap budget",
+);
+// Half-resolution equivalence: the whole point is that a large radius costs less
+// than the former small one. 61 half-res taps ~ 15.25 full-res taps, against the
+// old 13 full-res gather plus 53 half-res prefilter taps (~26.25).
+invariant(
+  BOKEH_GATHER_TAP_COUNT * BOKEH_COC_DEFAULTS.gatherScale ** 2 < 20,
+  "gather tap budget left its half-resolution equivalence",
 );
 invariant(
-  !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("gl_FragCoord"),
-  "circular bokeh reintroduced screen-space stochastic tap crawl",
+  BOKEH_COC_DEFAULTS.gatherScale === 0.5,
+  "gather stopped buying radius with resolution",
 );
+for (const [name, kernel] of [
+  ["base", BOKEH_GATHER_BASE_KERNEL],
+  ["fill", BOKEH_GATHER_FILL_KERNEL],
+]) {
+  invariant(
+    kernel.every(([x, y]) => Math.hypot(x, y) <= 1 + EPS),
+    `gather ${name} kernel escaped its unit aperture`,
+  );
+  const offset = name === "base" ? 1 : 0;
+  if (offset) {
+    near(kernel[0][0], 0, "gather base kernel lost its optical centre");
+    near(kernel[0][1], 0, "gather base kernel lost its optical centre");
+  }
+  for (let i = offset; i < kernel.length; i += 2) {
+    near(kernel[i][0], -kernel[i + 1][0], `gather ${name} pair ${i} shifted the optical centre`);
+    near(kernel[i][1], -kernel[i + 1][1], `gather ${name} pair ${i} shifted the optical centre`);
+  }
+  const radii = new Map();
+  for (const [x, y] of kernel) {
+    const radius = Math.hypot(x, y).toFixed(6);
+    radii.set(radius, (radii.get(radius) || 0) + 1);
+  }
+  const rings = name === "base" ? BOKEH_GATHER_BASE_RINGS : BOKEH_GATHER_FILL_RINGS;
+  const perRing = name === "base" ? BOKEH_GATHER_BASE_PER_RING : BOKEH_GATHER_FILL_PER_RING;
+  const expected = [...Array(rings).fill(perRing), ...(offset ? [1] : [])].sort(
+    (a, b) => a - b,
+  );
+  invariant(
+    JSON.stringify([...radii.values()].sort((a, b) => a - b)) ===
+      JSON.stringify(expected),
+    `gather ${name} kernel lost its concentric ring structure`,
+  );
+}
+// Equal-area radii: the taps must spread over the disc rather than crowd its
+// centre, or a large disc bands.
+const baseRadii = [
+  ...new Set(
+    BOKEH_GATHER_BASE_KERNEL.slice(1).map(([x, y]) => Math.hypot(x, y).toFixed(9)),
+  ),
+]
+  .map(Number)
+  .sort((a, b) => a - b);
 invariant(
-  !/uniform\s+float\s+(?:u)?time\b/i.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
-  "circular bokeh became time-varying",
-);
-const surfaceCalls = (
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.match(
-    /\bvec3\s+surfaceSample\d+\s*=\s*texture2D\s*\(/g,
-  ) || []
-).length;
-invariant(
-  surfaceCalls + 1 === CIRCULAR_BOKEH_SAMPLE_COUNT &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec3 centerColor = texture2D(tColor, vUv).rgb;",
+  baseRadii.length === BOKEH_GATHER_BASE_RINGS &&
+    baseRadii.every(
+      (radius, index) =>
+        Math.abs(radius - Math.sqrt((index + 0.5) / BOKEH_GATHER_BASE_RINGS)) < 1e-9,
     ),
-  "selective surface fetches diverged from the 1/13 contract",
+  "gather base rings left their equal-area radii",
 );
-const surfaceHighlightCalls = (
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.match(
-    /\bvec4\s+surfaceHighlight\d+\s*=\s*texture2D\s*\(\s*tHighlight/g,
-  ) || []
-).length;
+// The fill ring must land in the base kernel's angular gaps or max() has nothing
+// to fill.
+const baseAngles = BOKEH_GATHER_BASE_KERNEL.slice(1).map(([x, y]) =>
+  ((Math.atan2(y, x) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2),
+);
 invariant(
-  surfaceHighlightCalls + 1 === CIRCULAR_BOKEH_SAMPLE_COUNT &&
+  BOKEH_GATHER_FILL_KERNEL.every(([x, y]) => {
+    const angle = ((Math.atan2(y, x) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    return baseAngles.every((baseAngle) => Math.abs(angle - baseAngle) > 1e-6);
+  }),
+  "gather fill ring stopped straddling the base kernel's angular gaps",
+);
+
+// ---------------------------------------------------------------------------
+// Shader discipline, shared by all three programs.
+// ---------------------------------------------------------------------------
+
+const cocShaderSource = await readFile(
+  new URL("../src/env/bokeh-coc-shaders.js", import.meta.url),
+  "utf8",
+);
+const cocPassSource = await readFile(
+  new URL("../src/env/bokeh-coc-pass.js", import.meta.url),
+  "utf8",
+);
+const prefilterFragment = BOKEH_COC_PREFILTER_FRAGMENT_SHADER;
+const gatherFragment = BOKEH_COC_GATHER_FRAGMENT_SHADER;
+
+for (const [name, body] of [
+  ["composite", CIRCULAR_BOKEH_FRAGMENT_SHADER],
+  ["CoC prefilter", prefilterFragment],
+  ["CoC gather", gatherFragment],
+]) {
+  invariant(
+    !/\b(?:for|while)\s*\(/.test(body),
+    `${name} replaced its fixed unrolled probes with a runtime loop`,
+  );
+  invariant(
+    !/uniform\s+\w+\s+\w+\s*\[/.test(body),
+    `${name} introduced a dynamically indexed custom uniform array`,
+  );
+  invariant(
+    !/uniform\s+float\s+(?:u)?time\b/i.test(body),
+    `${name} became time-varying`,
+  );
+}
+// Determinism: no screen-space stochastic taps anywhere in the aperture image.
+// dof2 trades ringing for temporal noise; this project has hash gates and an
+// explicit no-crawl policy, so the fill ring closes the gaps instead.
+invariant(
+  !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("gl_FragCoord") &&
+    !gatherFragment.includes("gl_FragCoord"),
+  "the aperture image reintroduced screen-space stochastic tap crawl",
+);
+invariant(
+  !/\b(?:noise|dither|hash|rand)\b/i.test(gatherFragment),
+  "gather traded deterministic rings for noise",
+);
+
+// ---------------------------------------------------------------------------
+// The suppressors are gone, and cannot come back silently.
+// ---------------------------------------------------------------------------
+invariant(
+  !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("surfaceRadiusPx") &&
+    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("cappedRadiusPx") &&
+    !("surfaceRadiusPx" in CIRCULAR_BOKEH_DEFAULTS),
+  "the 3.25px surface radius cap returned and flattened the depth layers again",
+);
+invariant(
+  !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("contrastGate") &&
+    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("lumaSpan") &&
+    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("surfaceContrast") &&
+    !("surfaceContrastLow" in CIRCULAR_BOKEH_DEFAULTS),
+  "the luminance contrast gate returned and re-sharpened uniform surfaces",
+);
+invariant(
+  !/bokehQuality\s*<=\s*0\.0/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER) &&
+    !/bokehQuality\s*<=\s*0\.0/.test(gatherFragment),
+  "adaptive quality resumed switching depth of field off entirely",
+);
+// bokehQuality may only weight the fill term. The base rings run in every state,
+// which is what removes the settling pop (§5.3, acceptance criterion 4).
+invariant(
+  gatherFragment.includes("mix(base, max(base, fill), clamp(bokehQuality, 0.0, 1.0))"),
+  "bokehQuality stopped being confined to the gather's fill ring",
+);
+invariant(
+  !/#define[^\n]*bokehQuality/.test(gatherFragment),
+  "adaptive bokeh quality created a shader-program variant",
+);
+
+// ---------------------------------------------------------------------------
+// Composite: one physical CoC, one upsampled gather, source transferred once.
+// ---------------------------------------------------------------------------
+const compositeSamplers = [
+  ...CIRCULAR_BOKEH_FRAGMENT_SHADER.matchAll(/uniform\s+sampler2D\s+(\w+)\s*;/g),
+]
+  .map((match) => match[1])
+  .sort();
+invariant(
+  JSON.stringify(compositeSamplers) ===
+    '["tColor","tDepth","tGather","tHighlight"]',
+  "composite lost original colour/depth, source ownership, or the CoC gather",
+);
+invariant(
+  compositeSamplers.length === CIRCULAR_BOKEH_COMPOSITE_TAP_COUNT,
+  "composite tap contract diverged from its sampler set",
+);
+invariant(
+  // Tilt ramps invFocus across frame height; tiltStrength = 0 recovers the
+  // ordinary thin-lens (★) curve exactly (docs/dof-cinematic-research.md §1, §4.7).
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+    "float invFocus = (1.0 / focus) * (1.0 + tiltStrength * (vUv.y - tiltAnchorV));",
+  ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "vec4 centerHighlight = texture2D(tHighlight, vUv);",
+      "float signedCoc = cocScalePx * (invFocus - 1.0 / max(axialDepth, nearClip));",
+    ) &&
+    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+      "float cocPx = min(abs(signedCoc), maxCocPx);",
     ),
-  "selective bokeh stopped consuming compact-source ownership",
+  "composite stopped evaluating the shared physical CoC curve",
+);
+// The gather's alpha is the radius it spent, including the near dilation. Reading
+// it is what lets a defocused foreground cross a sharp subject instead of being
+// clipped to its own silhouette.
+invariant(
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("float dilatedPx = gather.a * maxCocPx;") &&
+    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+      "float effectivePx = max(cocPx, dilatedPx);",
+    ),
+  "composite stopped honouring the gather's dilated foreground radius",
 );
 const sharpBranch = CIRCULAR_BOKEH_FRAGMENT_SHADER.slice(
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("if (blurRadiusPx < 0.45)"),
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("if (effectivePx < 0.45)"),
   CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("vec3 centerColor ="),
 );
 invariant(
@@ -386,71 +724,106 @@ invariant(
   "sharp focus stopped taking the direct one-fetch path",
 );
 invariant(
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-    "vec3 withoutTransferredSource",
-  ) &&
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 withoutTransferredSource") &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
       "step(highlightThreshold * 0.05, brightness)",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "step(0.5, bokehSourceScatter)",
-    ) &&
+    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("step(0.5, bokehSourceScatter)") &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
       `${BOKEH_SOURCE_CONTRACT.gatherSupportCutoff}`,
-    ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "colorSum += withoutTransferredSource",
     ) &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 centerBase ="),
   "compact source stopped transferring exactly once out of the surface image",
 );
-const samplerUniforms = [
-  ...CIRCULAR_BOKEH_FRAGMENT_SHADER.matchAll(
-    /uniform\s+sampler2D\s+(\w+)\s*;/g,
-  ),
-]
-  .map((match) => match[1])
-  .sort();
-invariant(
-  JSON.stringify(samplerUniforms) === '["tColor","tDepth","tHighlight"]',
-  "source-depth repair lost original color/depth or the separate source prefilter",
-);
-invariant(
-  !/\b(?:for|while)\s*\(/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
-  "source-depth repair replaced fixed probes with a runtime loop",
-);
-invariant(
-  /uniform\s+float\s+bokehQuality\s*;/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "if (bokehQuality <= 0.0 || cappedRadiusPx < 0.65)",
-    ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "contrastGate * radiusGate * cocGate",
-    ),
-  "selective bokeh lost its moving sleep or contrast-gated stable surface",
-);
-invariant(
-  !/#define[^\n]*bokehQuality/.test(CIRCULAR_BOKEH_FRAGMENT_SHADER),
-  "adaptive bokeh quality created a shader-program variant",
-);
 invariant(
   CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-    "float cappedRadiusPx = min(blurRadiusPx, surfaceRadiusPx);",
-  ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "float lumaSpan = lumaMax - lumaMin;",
+    "gl_FragColor = vec4(mix(centerBase, gather.rgb, mixWeight), 1.0);",
+  ),
+  "composite stopped blending the gather over the transferred-source base",
+);
+
+// ---------------------------------------------------------------------------
+// CoC prefilter: exactly the scatter's 2x2 ownership grid, conservative peak.
+// ---------------------------------------------------------------------------
+invariant(
+  cocShaderSource.includes("BOKEH_COC_PREFILTER_BLOCK_TAP_COUNT = BLOCK_OFFSETS.length") &&
+    (prefilterFragment.match(/texture2D\(tColor/g) || []).length ===
+      BOKEH_SOURCE_CONTRACT.blockSize ** 2 &&
+    (prefilterFragment.match(/texture2D\(tHighlight/g) || []).length === 1,
+  "CoC prefilter left the 2x2 colour block or refetched source ownership per tap",
+);
+invariant(
+  prefilterFragment.includes("vec2 blockCenterUv = min(") &&
+    prefilterFragment.includes("gl_FragCoord.xy *"),
+  "CoC prefilter lost the exact block-centre alignment the scatter grid needs",
+);
+invariant(
+  prefilterFragment.includes("if (abs(blockSigned0) > abs(peakSigned))") &&
+    prefilterFragment.includes("bokehEncodeCoc(peakSigned)"),
+  "CoC downsample stopped taking the conservative largest-magnitude CoC",
+);
+invariant(
+  prefilterFragment.includes("withoutTransferredSource(blockColor0, ownership)"),
+  "CoC prefilter stopped removing the transferred HDR source at downsample time",
+);
+invariant(
+  prefilterFragment.includes("bokehSignedCocAt(getAxialDepth(") &&
+    prefilterFragment.includes("float bokehSignedCocAt(float axialDepth, float screenV)") &&
+    prefilterFragment.includes(
+      "float bokehInvFocus(float screenV)",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "float relativeSpan = lumaSpan / max(lumaMax, 0.12);",
+    prefilterFragment.includes(
+      "cocScalePx * (bokehInvFocus(screenV) - 1.0 / max(axialDepth, nearClip))",
+    ),
+  "CoC prefilter stopped sharing the composite's CoC curve",
+);
+
+// ---------------------------------------------------------------------------
+// Gather: fixed rings, near dilation, background bleed rejection.
+// ---------------------------------------------------------------------------
+invariant(
+  (gatherFragment.match(/texture2D\(tCoc/g) || []).length ===
+    BOKEH_COC_GATHER_TEXTURE_TAP_COUNT &&
+    BOKEH_COC_GATHER_TEXTURE_TAP_COUNT ===
+      1 + BOKEH_GATHER_NEAR_DILATE_TAP_COUNT + BOKEH_GATHER_TAP_COUNT &&
+    BOKEH_COC_NEAR_DILATE_OFFSETS.length === BOKEH_GATHER_NEAR_DILATE_TAP_COUNT,
+  "gather fetch count diverged from centre + near dilate + base + fill",
+);
+invariant(
+  cocShaderSource.includes("BOKEH_COC_NEAR_DILATE_OFFSETS = Object.freeze") &&
+    cocShaderSource.includes("[-1, 0, 1].flatMap") &&
+    gatherFragment.includes("nearDilatedPx = max(nearDilatedPx, max(0.0, -dilateSigned0));") &&
+    gatherFragment.includes(
+      "float centerRadiusPx = max(abs(centerSigned), nearDilatedPx) * 0.5;",
+    ),
+  "gather lost the 3x3 near max-dilate that lets the foreground leave its silhouette",
+);
+// Background may not bleed onto a sharper centre; foreground keeps only its own
+// reach so it can spread inward. This is pmndrs' MaskMaterial without the pass.
+invariant(
+  gatherFragment.includes("float behind = step(centerSigned, tapSigned);") &&
+    gatherFragment.includes(
+      "float reachPx = mix(tapRadiusPx, min(centerRadiusPx, tapRadiusPx), behind);",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "smoothstep(surfaceContrastLow, surfaceContrastHigh, lumaSpan)",
-    ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "gl_FragColor = vec4(mix(centerBase, surfaceColor, surfaceMix), 1.0);",
-    ) &&
-    CIRCULAR_BOKEH_DEFAULTS.surfaceRadiusPx <= 3.25,
-  "ordinary surfaces stopped using the bounded contrast-aware reconstruction",
+    gatherFragment.includes("clamp(reachPx - offsetPx + 1.0, 0.0, 1.0)"),
+  "gather lost its scatter-as-gather acceptance and will halo sharp silhouettes",
+);
+invariant(
+  gatherFragment.includes("if (centerRadiusPx < 0.5)"),
+  "gather stopped short-circuiting the in-focus region",
+);
+
+// ---------------------------------------------------------------------------
+// Installation.
+// ---------------------------------------------------------------------------
+near(
+  CIRCULAR_BOKEH_DEFAULTS.sourceRadiusScale,
+  BOKEH_COC_DEFAULTS.sourceRadiusScale,
+  "composite and CoC contract disagree on the compact-source multiplier",
+);
+invariant(
+  CIRCULAR_BOKEH_DEFAULTS.sourceRadiusScale > 1,
+  "compact HDR sources lost their deliberately larger disc",
 );
 const fakeBokehMaterial = {
   uniforms: { focus: { value: 1 } },
@@ -460,15 +833,25 @@ const fakeBokehMaterial = {
 installCircularBokeh(fakeBokehMaterial);
 invariant(
   fakeBokehMaterial.uniforms.focus.value === 1 &&
+    fakeBokehMaterial.uniforms.cocScalePx.value === 0 &&
+    fakeBokehMaterial.uniforms.maxCocPx.value === 0 &&
     fakeBokehMaterial.uniforms.bokehRadiusScale.value ===
-      CIRCULAR_BOKEH_DEFAULTS.radiusScale &&
-    fakeBokehMaterial.uniforms.surfaceRadiusPx.value ===
-      CIRCULAR_BOKEH_DEFAULTS.surfaceRadiusPx &&
+      CIRCULAR_BOKEH_DEFAULTS.sourceRadiusScale &&
     fakeBokehMaterial.uniforms.bokehQuality.value === 1 &&
     fakeBokehMaterial.uniforms.tHighlight.value === null &&
+    fakeBokehMaterial.uniforms.tGather.value === null &&
     fakeBokehMaterial.fragmentShader === CIRCULAR_BOKEH_FRAGMENT_SHADER &&
     fakeBokehMaterial.needsUpdate,
   "circular bokeh installation broke BokehPass uniforms or shader ownership",
+);
+// cocScalePx must start at zero and be resolved from the live camera: baking it
+// would freeze the depth of field at one lens.
+invariant(
+  !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(`${cocScale}`) &&
+    !gatherFragment.includes(`${cocScale}`) &&
+    !prefilterFragment.includes(`${cocScale}`) &&
+    /uniform\s+float\s+cocScalePx\s*;/.test(prefilterFragment),
+  "the CoC pixel scale was baked into a shader instead of resolved per frame",
 );
 
 invariant(
@@ -575,7 +958,25 @@ invariant(
     !sourceScatterSource.includes("sharesSourceSurface(") &&
     sourceScatterSource.includes("vec3 ownedSource${index} = gatedRawSource") &&
     sourceScatterSource.includes(
-      "float ownedDepth${index} = viewDepth(ownedUv${index})",
+      "ownedDepth${index} = viewDepth(ownedUv${index})",
+    ) &&
+    // Depth stays a per-texel read, but the *radius* comes from the block's elected
+    // emitter depth. A partial-coverage silhouette texel holds the background's depth
+    // while carrying the emitter's radiance, so taking its own depth splatted the
+    // emitter's energy at the background's circle of confusion - measured as a 5.25px
+    // hot core inside a 35.97px disc once the scene render became multisampled.
+    // Hue alignment is the whole test on purpose: requiring the depths to agree first
+    // (sharesSourceComponent) can never repair a silhouette.
+    sourceScatterSource.includes("float blockSourceDepth${index} =") &&
+    sourceScatterSource.includes(
+      "hueAligned(ownedSource${index}, dominantSource)",
+    ) &&
+    sourceScatterSource.includes(
+      "sourceRadiusAtDepth(blockSourceDepth${index})",
+    ) &&
+    sourceScatterSource.includes(" = blockSourceDepth${index};") &&
+    !/sourceRadiusAtDepth\(ownedDepth\$\{index\}\)/.test(
+      sourceScatterSource,
     ) &&
     sourceScatterSource.includes(
       "sourceNormalizations.${VECTOR_COMPONENTS[index]}",
@@ -606,7 +1007,37 @@ invariant(
     sourceScatterSource.includes("selectBokehSourceBackend(") &&
     !sourceScatterSource.includes("setAttribute('cellUv'") &&
     !sourceScatterSource.includes("WebGLRenderTarget"),
-  "source scatter lost single acceptance, owned depth, procedural instancing, cap fallback, or +0 RT",
+  "source scatter lost single acceptance, block-elected emitter depth, procedural instancing, cap fallback, or +0 RT",
+);
+
+// The scatter now evaluates the same thin-lens curve the surface gather does,
+// with one deliberate source-only multiplier on top (docs/dof-cinematic-research.md
+// sections 4.3 and 8). The former linear `(focus - z) * aperture` had no
+// perspective falloff and no near/far asymmetry.
+invariant(
+  // Same Scheimpflug invFocus the surface gather uses, evaluated at the
+  // block's cellUv so a lantern and the wall behind it agree on radius.
+  sourceScatterSource.includes(
+    "gInvFocus = (1.0 / focus) * (1.0 + tiltStrength * (cellUv.y - tiltAnchorV));",
+  ) &&
+    sourceScatterSource.includes(
+      "cocScalePx * (gInvFocus - 1.0 / max(sourceDepth, nearClip))",
+    ) &&
+    sourceScatterSource.includes("min(abs(signedCoc), maxCocPx) * radiusScale") &&
+    sourceScatterSource.includes("uniform float cocScalePx;") &&
+    sourceScatterSource.includes("uniform float maxCocPx;") &&
+    sourceScatterSource.includes("uniform float tiltStrength;") &&
+    !/uniform float maxblur;/.test(sourceScatterSource) &&
+    !/\(focus - sourceDepth\) \* aperture/.test(sourceScatterSource),
+  "source scatter kept the old linear blur curve instead of the shared CoC",
+);
+// Its point-size cap fallback must be bounded by the absolute clamped disc, not
+// by a maxblur/viewport-width product that grows with a wider window.
+invariant(
+  sourceScatterSource.includes(
+    "(maxCocPx * radiusScale + 1.0) * BOKEH_SOURCE_CONTRACT.pointCoverage",
+  ),
+  "source scatter point-size promotion stopped following the clamped CoC",
 );
 
 const stableBokehSource = await readFile(
@@ -625,6 +1056,33 @@ invariant(
     ) &&
     stableBokehSource.includes("debugResources()"),
   "StableBokehPass lost the explicit source-depth material precedence or diagnostics",
+);
+
+// The one CPU resolver that folds aperture, viewport height, and live fov into
+// that uniform must stay in the pass, and must read fov every frame.
+invariant(
+  stableBokehSource.includes("_resolveCocScale()") &&
+    stableBokehSource.includes("this.camera.fov") &&
+    stableBokehSource.includes("bokehCocScalePx(") &&
+    stableBokehSource.includes("this.uniforms.aperture.value"),
+  "the live CoC resolver lost the aperture ramp or the live lens fov",
+);
+invariant(
+  stableBokehSource.includes("this._cocPass.render(renderer, {") &&
+    stableBokehSource.includes("this.uniforms.tGather.value =") &&
+    stableBokehSource.indexOf("this._cocPass.render(renderer, {") <
+      stableBokehSource.indexOf("this._fsQuad.render(renderer)") &&
+    stableBokehSource.indexOf("this._fsQuad.render(renderer)") <
+      stableBokehSource.indexOf("this._sourceScatter.render("),
+  "the DoF pass order left depth prepass -> CoC gather -> composite -> scatter",
+);
+// The source scatter must spend the same CoC curve, or a lantern and the wall
+// behind it disagree about how defocused they are.
+invariant(
+  stableBokehSource.includes("this.cocScalePx,") &&
+    stableBokehSource.includes("this.maxCocPx,") &&
+    !stableBokehSource.includes("this.uniforms.maxblur.value,"),
+  "the source scatter stopped sharing the physical CoC curve",
 );
 
 const highlightPrefilterSource = await readFile(

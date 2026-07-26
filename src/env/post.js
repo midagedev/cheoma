@@ -5,6 +5,9 @@
 //         setFocusPoint(worldPoint), setDofAmount(0..1), setEnabled(bool), bloomPass, rimPass }
 //
 // 이 앱의 메인 룩을 한 컴포저로 통합한다(기존 main.js DoF BokehPass 흡수):
+//   RenderPass 는 MsaaRenderPass(msaa-render-pass.js) — 렌더러의 antialias 플래그는 기본
+//   프레임버퍼 전용이라 컴포저 경로에서 무효이므로, 씬 렌더 전용 멀티샘플 타깃이 유일한
+//   기하 에지 AA 소스다. samples=0(`?msaa=0`)이면 stock RenderPass 거동으로 되돌아간다.
 //   fresnel(기본): RenderPass → GradePass(채도) → BokehPass(opt-in) → UnrealBloomPass
 //                  → FlarePass → OutputPass(ACES+sRGB 1회)  + 재질 프레넬 림(rim.js)
 //   pass(?rim=pass): RenderPass → RimPass(스크린스페이스 림+채도) → Bokeh → Bloom
@@ -26,7 +29,6 @@
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
@@ -41,6 +43,11 @@ import { resolveMoonBloomGate } from './moon-optics.js';
 import { createFresnelRim } from './rim.js';
 import { createDofController, DEFAULT_DOF_APERTURE } from './dof.js';
 import { StableBokehPass } from './stable-bokeh-pass.js';
+import {
+  MsaaRenderPass,
+  MSAA_SAMPLES_DESKTOP,
+  resolveMsaaSamples,
+} from './msaa-render-pass.js';
 
 // 태양 글로우 스프라이트를 놓을 반경(카메라 far=500·최원경 능선 r≈470 안쪽).
 const SUN_GLOW_DIST = 430;
@@ -511,7 +518,7 @@ class FlarePass extends Pass {
   }
 }
 
-export function setupPost({ renderer, scene, camera }) {
+export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_DESKTOP }) {
   const size = renderer.getSize(new THREE.Vector2());
 
   // ---- 태양 글로우 스프라이트 (bloom 시드 + 대기 헤이즈). scene 에 직접 추가. ----
@@ -537,7 +544,12 @@ export function setupPost({ renderer, scene, camera }) {
   // ---- 컴포저 ----
   const composer = new EffectComposer(renderer);   // 기본 HalfFloat → HDR bloom
   let composerPixelRatio = renderer.getPixelRatio();
-  const renderPass = new RenderPass(scene, camera);
+  // 기하 에지 MSAA(#AA). 렌더러의 antialias 플래그는 컴포저 경로에서 무효이므로 씬 렌더 전용
+  //   멀티샘플 타깃이 유일한 AA 소스다(msaa-render-pass.js 헤더 주석). `?msaa=N` 은 같은
+  //   빌드에서 회귀 상태(0)와 수정본을 A/B 하는 게이트 훅 — 소비자 인자보다 우선한다.
+  const msaaOverride = _q.get('msaa');
+  const samples = resolveMsaaSamples(renderer, msaaOverride !== null ? msaaOverride : msaaSamples);
+  const renderPass = new MsaaRenderPass(scene, camera, { samples });
   composer.addPass(renderPass);
 
   // fresnel: 재질 프레넬 림(rim.js, 패스 없음) + 채도 그레이드 패스. pass: 구 RimPass(림+채도 통합).
@@ -804,6 +816,11 @@ export function setupPost({ renderer, scene, camera }) {
   function setDof(on) { return dof.setEnabled(on); }
   function setDofAmount(weight) { return dof.setAmount(weight); }
   function setDofAperture(value) { return dof.setAperture(value); }
+  // 틸트시프트 초점면 다이얼(0 = 보통 렌즈). 선명 밴드를 좁히고 이탈 램프를 급하게 만든다 —
+  //   조리개를 건드리지 않고 디오라마 성격만 강화하는 축(docs/dof-cinematic-research.md §4.7).
+  function setDofTilt(value) { return dof.setTilt(value); }
+  // 부감 DoF 하한. 부감만 amount=0 을 요청하므로 이 하한이 곧 "부감도 심도를 갖는다"다.
+  function setDofAmountFloor(value) { return dof.setAmountFloor(value); }
   function setFocus(dist) { return dof.setFocus(dist); }
   function setFocusPoint(point) { return dof.focusAt(point); }
 
@@ -841,6 +858,7 @@ export function setupPost({ renderer, scene, camera }) {
   // 검증 하네스 훅(window.__wx 패턴과 동일). 결정론 캡처에서 날씨·강도를 직접 구동·판독.
   let flareDebug = null;
   let rimDebug = null;
+  let aaDebug = null;
   if (typeof window !== 'undefined') {
     flareDebug = {
       setWeather,
@@ -863,11 +881,30 @@ export function setupPost({ renderer, scene, camera }) {
       drawCalls() { return renderer.info.render.calls; },
     };
     window.__rim = rimDebug;
+    // AA 판독 훅: 게이트가 samples·타깃 할당·해상도를 같은 URL 에서 직접 읽는다(`?msaa=0` A/B).
+    aaDebug = {
+      get samples() { return renderPass.samples; },
+      get allocated() { return renderPass.allocated; },
+      get resolveCount() { return renderPass.resolveCount; },
+      get sampleBytes() { return renderPass.sampleBytes; },
+      get pixelRatio() { return renderer.getPixelRatio(); },
+      get width() { return renderPass.target?.width ?? composer.renderTarget1.width; },
+      get height() { return renderPass.target?.height ?? composer.renderTarget1.height; },
+      maxSamples: renderer.capabilities?.maxSamples ?? 0,
+      // 같은 페이지에서 회귀 상태를 뒤집는 A/B 훅 — 재로딩 짝은 도착 돌리·구름 표류가 달라져
+      //   AA 만의 차이를 분리하지 못한다(msaa-render-pass.js setSamples 주석).
+      setSamples: (n) => renderPass.setSamples(resolveMsaaSamples(renderer, n)),
+    };
+    window.__aa = aaDebug;
   }
 
   return {
     composer, setTime, setSunsetLook, setSize, update,
-    setDof, setDofAmount, setDofAperture, setFocus, setFocusPoint,
+    // 기하 에지 MSAA 판독(게이트·하네스). 0 = stock RenderPass 회귀 상태.
+    //   setSamples 로 런타임 교체될 수 있으므로 라이브 getter 다.
+    get msaaSamples() { return renderPass.samples; },
+    setDof, setDofAmount, setDofAperture, setDofTilt, setDofAmountFloor,
+    setFocus, setFocusPoint,
     setEnabled, setWeather, setFlareEnabled, setRimEnabled,
     renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass,
     sunGlow, fresnelRim,
@@ -879,6 +916,7 @@ export function setupPost({ renderer, scene, camera }) {
       if (disposed) return;
       disposed = true;
       scene.remove(sunGlow);
+      renderPass.dispose();
       if (rimPass) rimPass.dispose();
       if (gradePass) gradePass.dispose();
       if (fresnelRim) fresnelRim.dispose();
@@ -892,6 +930,7 @@ export function setupPost({ renderer, scene, camera }) {
       if (typeof window !== 'undefined') {
         if (window.__flare === flareDebug) delete window.__flare;
         if (window.__rim === rimDebug) delete window.__rim;
+        if (window.__aa === aaDebug) delete window.__aa;
       }
     },
   };

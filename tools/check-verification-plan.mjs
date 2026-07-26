@@ -19,8 +19,19 @@ function ids(files, options) {
 }
 
 assert.deepEqual(ids(['docs/verification.md']), ['docs']);
-assert.deepEqual(ids(['docs/verification.md', 'src/env/post.js']), ['docs', 'core', 'app', 'dof-app']);
-assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app']);
+assert.deepEqual(ids(['docs/verification.md', 'src/env/post.js']), ['docs', 'core', 'app', 'dof-app', 'aa']);
+assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app', 'aa']);
+// 컴포저 MSAA 는 post.js 와 같은 축이므로 신규 패스 모듈도 같은 게이트 묶음을 끈다.
+assert.deepEqual(ids(['src/env/msaa-render-pass.js']), ['core', 'app', 'dof-app', 'aa']);
+assert.deepEqual(ids(['src/env/bokeh-coc-contract.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+]);
+assert.deepEqual(ids(['src/env/bokeh-coc-pass.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+]);
+assert.deepEqual(ids(['src/env/bokeh-coc-shaders.js']), [
+  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+]);
 assert.deepEqual(ids(['src/env/post-quality-state.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
 ]);
@@ -239,7 +250,10 @@ assert.deepEqual(ids(['app/src/engine/post-quality-runtime.js']), [
   'core', 'app', 'ink-app', 'dof-app', 'lod-focus', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/post-runtime.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'lod-focus', 'build',
+  'core', 'app', 'ink-app', 'dof-app', 'aa', 'lod-focus', 'build',
+]);
+assert.deepEqual(ids(['app/src/engine/scene-runtime.js']), [
+  'core', 'app', 'dof-app', 'aa', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/directional-shadow-runtime.js']), [
   'core', 'app', 'rim', 'lod-focus', 'build',
@@ -463,7 +477,7 @@ assert.deepEqual(ALL_PROFILE, [
   'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [
-  ...ALL_PROFILE, 'dof-app', 'rim', 'lod-app', 'cinematic-app', 'build',
+  ...ALL_PROFILE, 'dof-app', 'aa', 'rim', 'lod-app', 'cinematic-app', 'build',
 ]);
 for (const id of new Set([...ALL_PROFILE, ...FULL_PROFILE])) {
   assert.equal(typeof VERIFICATION_GATES[id]?.script, 'string', `${id} must map to a script`);

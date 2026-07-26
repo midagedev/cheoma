@@ -1,75 +1,53 @@
-// Selective cinematic DoF composite for StableBokehPass.
+// Full-resolution cinematic DoF composite for StableBokehPass.
 //
-// Compact HDR sources are transferred to the source-driven filled-disc scatter,
-// which owns the large optical aperture image. Ordinary surfaces use a separate,
-// capped 13-tap reconstruction only where the sampled luminance contrast makes
-// defocus visible. During camera motion that surface reconstruction sleeps and
-// the stable source scatter remains active, avoiding sparse-kernel crawl.
+// Layer separation lives in the physical circle of confusion
+// (bokeh-coc-contract.js) and is reconstructed by the half-resolution CoC gather
+// (bokeh-coc-pass.js). This module is only the composite: it recomputes the same
+// CoC curve at full resolution, takes the direct one-fetch path where the frame
+// is sharp, and otherwise blends the bilinearly upsampled gather in.
+//
+// What used to be here, and why it is gone (docs/dof-cinematic-research.md §3):
+//   * `min(blurRadiusPx, surfaceRadiusPx)` with surfaceRadiusPx = 3.25 saturated
+//     every ordinary surface 2-4m off the focus plane, so a neighbouring parcel,
+//     the row of houses behind it, and the background ridge all received the same
+//     0.2%-of-frame blur. That single clamp was the whole reason the frame had no
+//     depth layers. It existed because a 13-tap full-resolution kernel cannot
+//     fill a large disc without ringing; buying radius with resolution removes
+//     its reason to exist.
+//   * `contrastGate` kept any low-contrast region perfectly sharp regardless of
+//     defocus, which is most of a village background (plaster, roof planes,
+//     terrain, paddy water). Uniform surfaces must defocus too.
+//   * the moving-camera full stop. bokehQuality now only weights the gather's
+//     fill ring, so depth of field exists throughout a dolly and settling no
+//     longer pops (§5.3).
+// Compact HDR sources still transfer exactly once to the source scatter, which
+// keeps ownership of the large energy-conserving disc.
+import { BOKEH_COC_DEFAULTS } from "./bokeh-coc-contract.js";
 import { BOKEH_SOURCE_CONTRACT } from "./bokeh-source-contract.js";
 
-export const CIRCULAR_BOKEH_SAMPLE_COUNT = 13;
-export const MOVING_BOKEH_SAMPLE_COUNT = 1;
+export {
+  BOKEH_GATHER_BASE_TAP_COUNT,
+  BOKEH_GATHER_FILL_TAP_COUNT,
+  BOKEH_GATHER_TAP_COUNT,
+} from "./bokeh-coc-contract.js";
+
+// color + packed depth + source ownership + upsampled gather.
+export const CIRCULAR_BOKEH_COMPOSITE_TAP_COUNT = 4;
+
 export const CIRCULAR_BOKEH_DEFAULTS = Object.freeze({
   highlightThreshold: 1.2,
   highlightKnee: 0.52,
-  // Source scatter spends the complete bounded maxblur disc. Its normalized
-  // profile conserves energy, so a larger circle is also dimmer at its core.
-  radiusScale: 4.4,
-  // Non-emissive surfaces never spend the huge source radius. A small physical
-  // defocus is enough at a real brightness edge and is materially more stable.
-  surfaceRadiusPx: 3.25,
-  surfaceContrastLow: 0.06,
-  surfaceContrastHigh: 0.24,
+  // A bright compact source keeps a deliberately larger disc than the surface
+  // behind it; the surface radius is now the pure optical value.
+  sourceRadiusScale: BOKEH_COC_DEFAULTS.sourceRadiusScale,
+  apertureMeters: BOKEH_COC_DEFAULTS.apertureMeters,
+  maxCocFraction: BOKEH_COC_DEFAULTS.maxCocFraction,
 });
 
 function glslFloat(value) {
-  const text = value.toFixed(7).replace(/0+$/, "").replace(/\.$/, "");
+  const text = Number(value).toFixed(7).replace(/0+$/, "").replace(/\.$/, "");
   return text.includes(".") ? text : `${text}.0`;
 }
-
-// Center plus three four-sample concentric rings. Every non-center sample has an
-// exact opposite, so the fixed kernel preserves the optical center without
-// screen-space noise or a dynamically indexed GLSL array.
-function makeSurfaceKernel() {
-  const points = [[0, 0]];
-  const rings = [
-    { radius: Math.sqrt(0.1), phase: 0 },
-    { radius: Math.sqrt(0.35), phase: Math.PI / 4 },
-    { radius: Math.sqrt(0.75), phase: (Math.PI * 39) / 400 },
-  ];
-  for (const ring of rings) {
-    for (let index = 0; index < 2; index++) {
-      const angle = ring.phase + (index * Math.PI) / 2;
-      const x = Math.cos(angle) * ring.radius;
-      const y = Math.sin(angle) * ring.radius;
-      points.push([x, y], [-x, -y]);
-    }
-  }
-  return points;
-}
-
-export const CIRCULAR_BOKEH_KERNEL = Object.freeze(
-  makeSurfaceKernel().map((point) => Object.freeze(point)),
-);
-export const CIRCULAR_BOKEH_MOVING_KERNEL = Object.freeze([
-  CIRCULAR_BOKEH_KERNEL[0],
-]);
-
-function sampleUv([x, y]) {
-  return `vUv + vec2(${glslFloat(x)}, ${glslFloat(y)}) * discRadius`;
-}
-
-const SURFACE_SAMPLE_LINES = CIRCULAR_BOKEH_KERNEL.slice(1)
-  .map(
-    (point, index) =>
-      `vec3 surfaceSample${index + 1}` +
-      ` = texture2D(tColor, ${sampleUv(point)}).rgb;\n` +
-      `    vec4 surfaceHighlight${index + 1}` +
-      ` = texture2D(tHighlight, ${sampleUv(point)});\n` +
-      `    accumulateSurface(surfaceSample${index + 1},` +
-      ` surfaceHighlight${index + 1}, colorSum, lumaMin, lumaMax);`,
-  )
-  .join("\n    ");
 
 export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
   #include <common>
@@ -79,20 +57,16 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
   uniform sampler2D tColor;
   uniform sampler2D tDepth;
   uniform sampler2D tHighlight;
-  uniform float maxblur;
-  uniform float aperture;
+  uniform sampler2D tGather;
   uniform float nearClip;
   uniform float farClip;
   uniform float focus;
-  uniform float aspect;
+  uniform float cocScalePx;
+  uniform float maxCocPx;
+  uniform float tiltStrength;
+  uniform float tiltAnchorV;
   uniform float highlightThreshold;
-  uniform float bokehRadiusScale;
-  uniform float viewportWidth;
-  uniform float bokehQuality;
   uniform float bokehSourceScatter;
-  uniform float surfaceRadiusPx;
-  uniform float surfaceContrastLow;
-  uniform float surfaceContrastHigh;
 
   #include <packing>
 
@@ -112,10 +86,6 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
     #endif
   }
 
-  float surfaceLuminance(vec3 color) {
-    return dot(color, vec3(0.2126, 0.7152, 0.0722));
-  }
-
   vec3 withoutTransferredSource(vec3 color, vec4 highlightSample) {
     float brightness = max(max(color.r, color.g), color.b);
     float compactSource =
@@ -130,27 +100,26 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
     return max(color - color * compactSource, vec3(0.0));
   }
 
-  void accumulateSurface(
-    vec3 sampleColor,
-    vec4 highlightSample,
-    inout vec3 colorSum,
-    inout float lumaMin,
-    inout float lumaMax
-  ) {
-    float sampleLuma = surfaceLuminance(sampleColor);
-    colorSum += withoutTransferredSource(sampleColor, highlightSample);
-    lumaMin = min(lumaMin, sampleLuma);
-    lumaMax = max(lumaMax, sampleLuma);
-  }
-
   void main() {
-    float viewZ = getViewZ(getDepth(vUv));
-    float signedBlur = clamp((focus + viewZ) * aperture, -maxblur, maxblur);
-    float coc = abs(signedBlur) / max(maxblur, 0.000001);
-    // The authored outer ring radius is sqrt(0.75).
-    float blurRadiusPx =
-      abs(signedBlur) * bokehRadiusScale * viewportWidth * 0.8660254;
-    if (blurRadiusPx < ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)}) {
+    // The identical curve the CoC prefilter and the source scatter evaluate.
+    // Sky pixels sit at BokehPass's deliberate far-depth clear, so background
+    // blur is a fixed optical quantity and cannot drift with time or weather.
+    // Tilt ramps inverse focus across the frame height, identically to the
+    // prefilter and the source scatter. All three must read the same screen v or a
+    // lantern, the wall behind it, and the composite disagree about the plane.
+    float axialDepth = -getViewZ(getDepth(vUv));
+    float invFocus = (1.0 / focus) * (1.0 + tiltStrength * (vUv.y - tiltAnchorV));
+    float signedCoc = cocScalePx * (invFocus - 1.0 / max(axialDepth, nearClip));
+    float cocPx = min(abs(signedCoc), maxCocPx);
+
+    // The gather's alpha carries the radius it actually spent, including the
+    // near 3x3 max-dilate. Reading it here is what lets a defocused foreground
+    // reach across a sharp subject instead of stopping at its own silhouette.
+    vec4 gather = texture2D(tGather, vUv);
+    float dilatedPx = gather.a * maxCocPx;
+    float effectivePx = max(cocPx, dilatedPx);
+
+    if (effectivePx < ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)}) {
       gl_FragColor = vec4(texture2D(tColor, vUv).rgb, 1.0);
       return;
     }
@@ -158,48 +127,18 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
     vec3 centerColor = texture2D(tColor, vUv).rgb;
     vec4 centerHighlight = texture2D(tHighlight, vUv);
     vec3 centerBase = withoutTransferredSource(centerColor, centerHighlight);
-
-    // Camera motion keeps the original surface sample while compact HDR discs
-    // remain fully optical in the following scatter pass. This is both cheaper
-    // and calmer than changing between two sparse surface kernels.
-    float cappedRadiusPx = min(blurRadiusPx, surfaceRadiusPx);
-    if (bokehQuality <= 0.0 || cappedRadiusPx < 0.65) {
-      gl_FragColor = vec4(centerBase, 1.0);
-      return;
-    }
-
-    float radiusFraction = cappedRadiusPx / max(blurRadiusPx, 0.0001);
-    vec2 discRadius =
-      vec2(1.0, aspect) * signedBlur * bokehRadiusScale * radiusFraction;
-    vec3 colorSum = vec3(0.0);
-    float centerLuma = surfaceLuminance(centerColor);
-    float lumaMin = centerLuma;
-    float lumaMax = centerLuma;
-    accumulateSurface(
-      centerColor,
-      centerHighlight,
-      colorSum,
-      lumaMin,
-      lumaMax
+    // One sub-pixel ramp off the sharp cut. The gather already removed the
+    // transferred source, so both sides of this mix are the same image.
+    float mixWeight = smoothstep(
+      ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)},
+      ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx + 1.5)},
+      effectivePx
     );
-    ${SURFACE_SAMPLE_LINES}
-
-    float lumaSpan = lumaMax - lumaMin;
-    float relativeSpan = lumaSpan / max(lumaMax, 0.12);
-    float contrastGate =
-      smoothstep(surfaceContrastLow, surfaceContrastHigh, lumaSpan)
-      * smoothstep(0.15, 0.55, relativeSpan);
-    float radiusGate = smoothstep(0.65, 2.0, cappedRadiusPx);
-    float cocGate = smoothstep(0.06, 0.35, coc);
-    float surfaceMix =
-      contrastGate * radiusGate * cocGate * clamp(bokehQuality, 0.0, 1.0);
-    vec3 surfaceColor =
-      colorSum / ${glslFloat(CIRCULAR_BOKEH_SAMPLE_COUNT)};
-    gl_FragColor = vec4(mix(centerBase, surfaceColor, surfaceMix), 1.0);
+    gl_FragColor = vec4(mix(centerBase, gather.rgb, mixWeight), 1.0);
   }
 `;
 
-/** Install the selective HDR composite without replacing BokehPass's public API. */
+/** Install the physical CoC composite without replacing BokehPass's public API. */
 export function installCircularBokeh(material, options = {}) {
   if (!material?.uniforms)
     throw new TypeError("installCircularBokeh requires a ShaderMaterial");
@@ -207,17 +146,23 @@ export function installCircularBokeh(material, options = {}) {
   material.uniforms.highlightThreshold = { value: tuning.highlightThreshold };
   material.uniforms.highlightKnee = { value: tuning.highlightKnee };
   material.uniforms.tHighlight = { value: null };
-  material.uniforms.bokehRadiusScale = { value: tuning.radiusScale };
+  material.uniforms.tGather = { value: null };
+  // CPU-resolved per frame: the lens fov changes across the focus continuum, so
+  // this scale must never be baked into the shader as a constant.
+  material.uniforms.cocScalePx = { value: 0 };
+  material.uniforms.maxCocPx = { value: 0 };
+  // Tilt-shift plane of focus. Resolved per frame from the dof amount ramp and the
+  // subject's own screen height, so it fades in with the aperture and never appears
+  // in a frame that has no depth of field (docs/dof-cinematic-research.md §4.7).
+  material.uniforms.tiltStrength = { value: 0 };
+  material.uniforms.tiltAnchorV = { value: 0.5 };
+  // Legacy uniform name retained: it is now strictly the compact-source disc
+  // multiplier on top of the physical CoC, never a surface radius.
+  material.uniforms.bokehRadiusScale = { value: tuning.sourceRadiusScale };
   material.uniforms.viewportWidth = { value: 1 };
+  material.uniforms.viewportHeight = { value: 1 };
   material.uniforms.bokehQuality = { value: 1 };
   material.uniforms.bokehSourceScatter = { value: 0 };
-  material.uniforms.surfaceRadiusPx = { value: tuning.surfaceRadiusPx };
-  material.uniforms.surfaceContrastLow = {
-    value: tuning.surfaceContrastLow,
-  };
-  material.uniforms.surfaceContrastHigh = {
-    value: tuning.surfaceContrastHigh,
-  };
   material.fragmentShader = CIRCULAR_BOKEH_FRAGMENT_SHADER;
   material.needsUpdate = true;
   return material.uniforms;

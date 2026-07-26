@@ -32,22 +32,40 @@ const OWNED_OFFSETS = Object.freeze(
   ).flat(),
 );
 const VECTOR_COMPONENTS = Object.freeze(["x", "y", "z", "w"]);
+// Colour, luminance, depth and peak of the four texels this primitive owns. Kept at
+// function scope, and separate from the radius decision below, because the radius now
+// depends on which of the four is the emitter - see DOMINANT_SOURCE_LINES.
 const OWNED_SAMPLE_LINES = OWNED_OFFSETS.map(
   ([x, y], index) =>
     `vec2 ownedUv${index} = cellUv` +
     ` + vec2(${x.toFixed(1)}, ${y.toFixed(1)}) * sourceTexel;\n` +
     `    vec3 ownedSource${index} = gatedRawSource(ownedUv${index});\n` +
     `    float ownedLuminance${index} = sourceLuminance(ownedSource${index});\n` +
+    `    float ownedDepth${index} = farClip;\n` +
+    `    float ownedPeak${index} = 0.0;\n` +
     `    if (ownedLuminance${index} > 0.0) {\n` +
-    `      float ownedDepth${index} = viewDepth(ownedUv${index});\n` +
-    `      float ownedRadius${index} = sourceRadiusAtDepth(ownedDepth${index});\n` +
-    `      float ownedPeak${index} = max(max(ownedSource${index}.r,` +
+    `      ownedDepth${index} = viewDepth(ownedUv${index});\n` +
+    `      ownedPeak${index} = max(max(ownedSource${index}.r,` +
     ` ownedSource${index}.g), ownedSource${index}.b);\n` +
+    "    }",
+).join("\n    ");
+const OWNED_RADIUS_LINES = OWNED_OFFSETS.map(
+  (_, index) =>
+    `if (ownedLuminance${index} > 0.0) {\n` +
+    `      float blockSourceDepth${index} =` +
+    ` hueAligned(ownedSource${index}, dominantSource)\n` +
+    "        ? dominantDepth\n" +
+    `        : ownedDepth${index};\n` +
+    `      float ownedRadius${index}` +
+    ` = sourceRadiusAtDepth(blockSourceDepth${index});\n` +
     `      if (ownedRadius${index}` +
     ` < ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)}) {\n` +
     `        ownedSource${index} = vec3(0.0);\n` +
     "      } else {\n" +
-    `        sourceDepths.${VECTOR_COMPONENTS[index]} = ownedDepth${index};\n` +
+    // The varying must carry the depth the radius came from, or the fragment's
+    // occlusion test and the disc size disagree about where the emitter is.
+    `        sourceDepths.${VECTOR_COMPONENTS[index]}` +
+    ` = blockSourceDepth${index};\n` +
     `        sourceRadii.${VECTOR_COMPONENTS[index]} = ownedRadius${index};\n` +
     `        sourceNormalizations.${VECTOR_COMPONENTS[index]}` +
     ` = kernelNormalization(ownedRadius${index});\n` +
@@ -62,6 +80,77 @@ const SOURCE_ENERGY_VARYINGS = OWNED_OFFSETS.map(
 ).join("\n  ");
 const SOURCE_ENERGY_ASSIGN_LINES = OWNED_OFFSETS.map(
   (_, index) => `vSourceEnergy${index} = ownedSource${index};`,
+).join("\n    ");
+// A partial-coverage silhouette texel is the emitter's light sitting on the
+// background's depth. Multisampling the scene render gave every compact emitter a
+// ring of them: the resolve blends the emitter's radiance into its edge texels, but
+// the depth buffer still holds whatever won the depth test there, which for a
+// foreground lantern against a distant hillside is the hillside. Those texels are
+// far above highlightThreshold, so they take the aperture path like any other source
+// texel - at the *background's* circle of confusion. Measured on the optical chart
+// that turned a 35.97px foreground disc into a 5.25px one carrying the same energy:
+// a ten-times-hot compact core buried inside the emitter's own aperture image, and
+// gone entirely under `?msaa=0`.
+//
+// So depth is elected per ownership block. The brightest owned texel is the emitter,
+// and any owned texel whose colour is hue-aligned with it belongs to the same emitter
+// and adopts its depth. Hue alignment alone is the right test precisely because depth
+// is the quantity that is wrong: sharesSourceComponent() below requires the depths to
+// agree first, so it can never repair a silhouette. Two genuinely different sources in
+// one block have different hues and stay independent, which is what the same-block
+// stress cases assert. No new texture, render target, uniform, varying, or program.
+const DOMINANT_SOURCE_LINES = OWNED_OFFSETS.map(
+  (_, index) =>
+    `if (ownedPeak${index} > dominantPeak) {\n` +
+    `      dominantPeak = ownedPeak${index};\n` +
+    `      dominantDepth = ownedDepth${index};\n` +
+    `      dominantSource = ownedSource${index};\n` +
+    "    }",
+).join("\n    ");
+// The election has to reach one ownership block outward as well. A block whose four
+// texels are *all* silhouette shoulder owns no emitter to elect, so a block-local
+// election elects the shoulder itself and adopts precisely the background depth that
+// is wrong. Measured: block-local election alone removed 28% of the hot core and left
+// the rest at the same 5.25px background radius, and that residual field's extent is
+// the wrong disc's own radius rather than the shoulder's spread - i.e. the emitter
+// core is one block away, not several.
+//
+// The full eight-neighbour ring is consulted. Measured on the ladder: the ring is what
+// closes the defect (peak residual against the profile predictor 1.163 block-local ->
+// 1.104 with the four orthogonal neighbours -> 1.080 with all eight; core residual
+// 0.899 -> 0.965 -> 1.000), so the diagonals are carrying real shoulder texels rather
+// than padding.
+//
+// Note that the shoulder cannot be recognised by being dim: a texel at half coverage of
+// an emitter twenty times over threshold is still ten times over it. So the ring is
+// gated on brightness ordering and hue only, and the guard against over-reach is the
+// short orthogonal radius rather than a luminance test. dominantSource stays the
+// block's own hue so the ring cannot walk the election along a chain of gradually
+// shifting colours. Colour is read for the four neighbours; depth only for one that
+// actually wins, and accepted blocks are the sparse compact-HDR ones.
+const NEIGHBOUR_BLOCK_OFFSETS = Object.freeze(
+  [-1, 0, 1]
+    .flatMap((y) => [-1, 0, 1].map((x) => [x, y]))
+    .filter(([x, y]) => x !== 0 || y !== 0)
+    .map(([x, y]) => [
+      x * BOKEH_SOURCE_CONTRACT.blockSize,
+      y * BOKEH_SOURCE_CONTRACT.blockSize,
+    ]),
+);
+const NEIGHBOUR_ELECTION_LINES = NEIGHBOUR_BLOCK_OFFSETS.map(
+  ([x, y], index) =>
+    "{\n" +
+    `      vec2 ringUv${index} = cellUv` +
+    ` + vec2(${x.toFixed(1)}, ${y.toFixed(1)}) * sourceTexel;\n` +
+    `      vec3 ringSource${index} = gatedRawSource(ringUv${index});\n` +
+    `      float ringPeak${index} = max(max(ringSource${index}.r,` +
+    ` ringSource${index}.g), ringSource${index}.b);\n` +
+    `      if (ringPeak${index} > dominantPeak\n` +
+    `        && hueAligned(ringSource${index}, dominantSource)) {\n` +
+    `        dominantPeak = ringPeak${index};\n` +
+    `        dominantDepth = viewDepth(ringUv${index});\n` +
+    "      }\n" +
+    "    }",
 ).join("\n    ");
 const SOURCE_COMPONENT_PEAK_LINES = OWNED_OFFSETS.map(
   (_, sourceIndex) =>
@@ -152,6 +241,11 @@ const SOURCE_PROFILE_LINES = OWNED_OFFSETS.map(
     "      }\n" +
     "    }",
 ).join("\n    ");
+// The sub-seven-pixel branch sums this lattice because the continuous integral is
+// wrong by more than a percent there, and summing it is what makes a sub-pixel disc
+// degenerate exactly to the source's own texel. bokehSourceKernelNormalization() in
+// bokeh-source-contract.js is the JS twin of this whole normalisation, so a gate can
+// predict the rendered profile without a renderer.
 const LATTICE_RADIUS = 7;
 const latticeDistanceCounts = new Map();
 for (let y = -LATTICE_RADIUS; y <= LATTICE_RADIUS; y++) {
@@ -182,8 +276,8 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
   uniform vec2 gridSize;
   uniform vec2 viewportSize;
   uniform float focus;
-  uniform float aperture;
-  uniform float maxblur;
+  uniform float cocScalePx;
+  uniform float maxCocPx;
   uniform float nearClip;
   uniform float farClip;
   uniform float radiusScale;
@@ -191,8 +285,18 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
   uniform float highlightThreshold;
   uniform float highlightKnee;
   uniform float triangleBackend;
+  uniform float tiltStrength;
+  uniform float tiltAnchorV;
+
+  // Inverse focus at this primitive's own screen height. Tilt makes the plane of
+  // focus a ramp across the frame (bokeh-coc-contract.js), so a source near the top
+  // of the frame and one near the bottom are on different sides of it. Held as an
+  // inverse and as a cell-local global: a strong tilt sends the plane through
+  // infinity, which the inverse form passes through and a focus distance cannot.
+  float gInvFocus = 0.0;
 
   ${SOURCE_ENERGY_VARYINGS}
+  varying float vInvFocus;
   varying vec4 vSourceDepths;
   varying vec4 vSourceRadii;
   varying vec4 vSourceNormalizations;
@@ -238,13 +342,21 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
     );
   }
 
+  // The same thin-lens CoC the surface gather and the composite evaluate
+  // (bokeh-coc-contract.js). Sharing the curve is what keeps a lantern and the
+  // wall behind it agreeing about how defocused they are; the former linear
+  // (focus - z) * aperture had no perspective falloff and no near/far
+  // asymmetry, so the two images drifted apart with distance.
+  //
+  // radiusScale is a deliberate source-only multiplier on top of the physical
+  // radius, not part of the optics: a bright compact emitter keeps the larger
+  // disc the eye expects of a point light, and it holds the existing lantern
+  // bokeh and the point-size-cap fallback in their current regime.
+  // docs/dof-cinematic-research.md sections 4.3 and 8.
   float sourceRadiusAtDepth(float sourceDepth) {
-    float signedBlur = clamp(
-      (focus - sourceDepth) * aperture,
-      -maxblur,
-      maxblur
-    );
-    return abs(signedBlur) * radiusScale * viewportWidth * 0.8660254;
+    float signedCoc =
+      cocScalePx * (gInvFocus - 1.0 / max(sourceDepth, nearClip));
+    return min(abs(signedCoc), maxCocPx) * radiusScale;
   }
 
   float viewDepth(vec2 uv) {
@@ -260,11 +372,26 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
   }
 
   bool sharesDepthLayer(float firstDepth, float secondDepth) {
-    float signedSide = (focus - firstDepth) * (focus - secondDepth);
+    // sign(focus - d) == sign(1/d - invFocus), so the optical-side test is the same
+    // one it always was, only evaluated against the tilted plane at this cell.
+    float signedSide =
+      (1.0 / max(firstDepth, nearClip) - gInvFocus)
+      * (1.0 / max(secondDepth, nearClip) - gInvFocus);
     float relativeDepthTolerance =
       max(0.02, min(firstDepth, secondDepth) * 0.005);
     return signedSide >= 0.0
       && abs(firstDepth - secondDepth) <= relativeDepthTolerance;
+  }
+
+  // Same test the fragment stage applies to a destination colour. Two texels of one
+  // emitter agree on hue even when a multisample resolve has scaled one of them down,
+  // which is what lets the depth election below recognise a silhouette texel.
+  bool hueAligned(vec3 firstSource, vec3 secondSource) {
+    float hueDot = dot(firstSource, secondSource);
+    return hueDot > 0.0
+      && hueDot * hueDot
+        >= 0.990025 * dot(firstSource, firstSource)
+          * dot(secondSource, secondSource);
   }
 
   bool sharesSourceComponent(
@@ -276,11 +403,7 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
     float firstPeak = max(max(firstSource.r, firstSource.g), firstSource.b);
     float secondPeak = max(max(secondSource.r, secondSource.g), secondSource.b);
     if (min(firstPeak, secondPeak) <= 0.0) return false;
-    float hueDot = dot(firstSource, secondSource);
-    return hueDot > 0.0
-      && hueDot * hueDot
-        >= 0.990025 * dot(firstSource, firstSource)
-          * dot(secondSource, secondSource)
+    return hueAligned(firstSource, secondSource)
       && sharesDepthLayer(firstDepth, secondDepth);
   }
 
@@ -309,6 +432,8 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
     vec2 cellPixel = min(cellIndex * ${glslFloat(BOKEH_SOURCE_CONTRACT.blockSize)}
       + ${glslFloat(BOKEH_SOURCE_CONTRACT.blockSize * 0.5)}, viewportSize);
     vec2 cellUv = cellPixel / viewportSize;
+    gInvFocus = (1.0 / focus) * (1.0 + tiltStrength * (cellUv.y - tiltAnchorV));
+    vInvFocus = gInvFocus;
     // One nearest-filtered half-resolution ownership texel maps exactly to this
     // 2x2 source block. Reject empty blocks before any full-resolution color or
     // depth reads; only sparse compact emitters pay the four-texel work.
@@ -323,6 +448,15 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
     float maxSourceRadius = 0.0;
     float activeSourceLuminance = 0.0;
     ${OWNED_SAMPLE_LINES}
+    float dominantPeak = 0.0;
+    float dominantDepth = farClip;
+    vec3 dominantSource = vec3(0.0);
+    ${DOMINANT_SOURCE_LINES}
+    ${NEIGHBOUR_ELECTION_LINES}
+    ${OWNED_RADIUS_LINES}
+    ${SOURCE_COMPONENT_PEAK_LINES}
+    ${SOURCE_COMPONENT_PAIR_LINES}
+    ${SOURCE_WEIGHT_LINES}
     if (activeSourceLuminance <= 0.0) {
       rejectVertex();
       return;
@@ -336,9 +470,6 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
     vSourceDepths = sourceDepths;
     vSourceRadii = sourceRadii;
     vSourceNormalizations = sourceNormalizations;
-    ${SOURCE_COMPONENT_PEAK_LINES}
-    ${SOURCE_COMPONENT_PAIR_LINES}
-    ${SOURCE_WEIGHT_LINES}
     vCellPixel = cellPixel;
     gl_PointSize = pointRadiusPx
       * ${glslFloat(BOKEH_SOURCE_CONTRACT.pointCoverage)};
@@ -360,9 +491,9 @@ export const BOKEH_SCATTER_FRAGMENT_SHADER = /* glsl */ `
   uniform vec2 gridSize;
   uniform float nearClip;
   uniform float farClip;
-  uniform float focus;
   uniform float highlightThreshold;
   ${SOURCE_ENERGY_VARYINGS}
+  varying float vInvFocus;
   varying vec4 vSourceDepths;
   varying vec4 vSourceRadii;
   varying vec4 vSourceNormalizations;
@@ -386,8 +517,12 @@ export const BOKEH_SCATTER_FRAGMENT_SHADER = /* glsl */ `
   }
 
   bool sharesDepthLayer(float sourceDepth, float destinationDepth) {
+    // Same identity as the vertex stage: sign(focus - d) == sign(1/d - invFocus).
+    // vInvFocus is the tilted plane at the primitive's cell, so a destination texel
+    // is judged against the plane the source itself was measured against.
     float signedSide =
-      (focus - sourceDepth) * (focus - destinationDepth);
+      (1.0 / max(sourceDepth, nearClip) - vInvFocus)
+      * (1.0 / max(destinationDepth, nearClip) - vInvFocus);
     float relativeDepthTolerance =
       max(0.02, min(sourceDepth, destinationDepth) * 0.005);
     return signedSide >= 0.0
@@ -452,8 +587,8 @@ export class BokehSourceScatter {
       gridSize: { value: new Vector2(1, 1) },
       viewportSize: { value: new Vector2(1, 1) },
       focus: { value: 100 },
-      aperture: { value: 0.00015 },
-      maxblur: { value: 0.01 },
+      cocScalePx: { value: 0 },
+      maxCocPx: { value: 0 },
       nearClip: { value: 0.1 },
       farClip: { value: 2000 },
       radiusScale: { value: 1.55 },
@@ -461,6 +596,8 @@ export class BokehSourceScatter {
       highlightThreshold: { value: 1.2 },
       highlightKnee: { value: 0.52 },
       triangleBackend: { value: 0 },
+      tiltStrength: { value: 0 },
+      tiltAnchorV: { value: 0.5 },
     };
     this.material = new ShaderMaterial({
       uniforms: this.uniforms,
@@ -531,20 +668,19 @@ export class BokehSourceScatter {
     this.uniforms.sourceTexel.value.set(1 / nextWidth, 1 / nextHeight);
   }
 
-  _selectBackend(renderer, maxblur, radiusScale) {
+  _selectBackend(renderer, maxCocPx, radiusScale) {
     if (!this.pointSizeRange) {
       const range = renderer
         .getContext()
         .getParameter(renderer.getContext().ALIASED_POINT_SIZE_RANGE);
       this.pointSizeRange = [range[0], range[1]];
     }
+    // The largest disc a source can ever spend is the clamped CoC times the
+    // source multiplier. This is now an absolute pixel bound rather than a
+    // product of maxblur and viewport width, so it no longer grows with a wider
+    // window at a fixed height.
     this.requiredPointDiameter =
-      (maxblur *
-        radiusScale *
-        this.uniforms.viewportWidth.value *
-        0.8660254 +
-        1.0) *
-      BOKEH_SOURCE_CONTRACT.pointCoverage;
+      (maxCocPx * radiusScale + 1.0) * BOKEH_SOURCE_CONTRACT.pointCoverage;
     const nextBackend = selectBokehSourceBackend(
       this.backend,
       this.requiredPointDiameter,
@@ -566,24 +702,30 @@ export class BokehSourceScatter {
     depthTexture,
     camera,
     focus,
-    aperture,
-    maxblur,
+    cocScalePx,
+    maxCocPx,
     radiusScale,
     highlightThreshold,
     highlightKnee,
+    // Trailing and defaulted: the scatter stays callable with the untilted
+    // signature that the source-stress harness and the pre-tilt gates use.
+    tiltStrength = 0,
+    tiltAnchorV = 0.5,
   ) {
     this.uniforms.tSource.value = sourceTexture;
     this.uniforms.tColor.value = colorTexture;
     this.uniforms.tDepth.value = depthTexture;
     this.uniforms.focus.value = focus;
-    this.uniforms.aperture.value = aperture;
-    this.uniforms.maxblur.value = maxblur;
+    this.uniforms.cocScalePx.value = cocScalePx;
+    this.uniforms.maxCocPx.value = maxCocPx;
     this.uniforms.nearClip.value = camera.near;
     this.uniforms.farClip.value = camera.far;
     this.uniforms.radiusScale.value = radiusScale;
     this.uniforms.highlightThreshold.value = highlightThreshold;
     this.uniforms.highlightKnee.value = highlightKnee;
-    this._selectBackend(renderer, maxblur, radiusScale);
+    this.uniforms.tiltStrength.value = tiltStrength;
+    this.uniforms.tiltAnchorV.value = tiltAnchorV;
+    this._selectBackend(renderer, maxCocPx, radiusScale);
     const previousTarget = renderer.getRenderTarget();
     const previousAutoClear = renderer.autoClear;
     try {
