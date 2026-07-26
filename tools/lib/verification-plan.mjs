@@ -113,7 +113,9 @@ const REVIEWED_NEW_PATHS = new Set([
   // Product path keeps browser defaults; node injects stub canvas + fixed RNG.
   'src/builder/palette-context.js',
   'tools/check-palette-provider.mjs',
-  'tools/check-building-navigation.mjs',
+// #150-J: first-person gate-aware walk solids (pure + FAST_CHECKS, no mesh-bvh).
+  'src/cinematic/walk-solids.js',
+  'tools/check-walk-solids.mjs',  'tools/check-building-navigation.mjs',
   'tools/check-render-budget-contract.mjs',
   'tools/check-share.mjs',
   'tools/shoot-sijeon.mjs',
