@@ -179,7 +179,10 @@
       left: 12px;
       right: 12px;
       top: auto;
-      bottom: max(170px, calc(env(safe-area-inset-bottom) + 164px));
+      /* The dock publishes --dock-h because it wraps to a second row on narrow
+         phones and long locales; a constant clearance read the one-row case and
+         let the card cover the drone button (#158 P5). */
+      bottom: calc(max(96px, env(safe-area-inset-bottom) + 90px) + var(--dock-h, 58px) + 14px);
       max-width: min(366px, calc(100vw - 24px));
     }
     .paper { padding: 14px 50px 15px 14px; }
@@ -200,7 +203,7 @@
       left: calc(min(340px, 42vw) + 16px);
       right: 200px;
       top: auto;
-      bottom: max(88px, calc(env(safe-area-inset-bottom) + 82px));
+      bottom: calc(max(16px, env(safe-area-inset-bottom) + 12px) + var(--dock-h, 58px) + 14px);
       max-width: none;
     }
     .paper { padding-block: 10px; }

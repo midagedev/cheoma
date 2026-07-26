@@ -188,7 +188,7 @@ assert.deepEqual(ids(['src/runtime/village/handle.js']), [
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
 assert.deepEqual(ids(['app/src/App.svelte']), [
-  'core', 'app', 'ui-shell', 'ink-app', 'parcel-rebuild-browser', 'build',
+  'core', 'app', 'ui-shell', 'entry', 'ink-app', 'parcel-rebuild-browser', 'build',
 ]);
 assert.deepEqual(ids(['app/src/lib/scene-snapshot.js']), [
   'core', 'share', 'app', 'build',
@@ -450,7 +450,7 @@ for (const path of API_REUSE_DEPENDENCIES) {
   );
 }
 assert.deepEqual(ALL_PROFILE, [
-  'docs', 'core-full', 'app', 'ui-shell', 'ink-app', 'petals', 'particle-geometry',
+  'docs', 'core-full', 'app', 'ui-shell', 'entry', 'ink-app', 'petals', 'particle-geometry',
   'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio', 'temple-browser',
   'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);

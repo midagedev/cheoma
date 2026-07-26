@@ -3,7 +3,7 @@ import { gateCommand } from './verification-gates.mjs';
 import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ui-shell', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ui-shell', 'entry', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'mja-house-browser', 'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -146,6 +146,7 @@ function routePath(path) {
   const browserToolGates = {
     'tools/check-app-smoke.mjs': ['app'],
     'tools/check-ui-shell.mjs': ['ui-shell'],
+    'tools/check-entry-responsiveness.mjs': ['entry'],
     'tools/check-detail-particle-geometry.mjs': ['particle-geometry'],
     'tools/check-instance-upload-browser.mjs': ['instance-upload'],
     'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
@@ -208,6 +209,14 @@ function routePath(path) {
       || path.startsWith('app/src/styles/')
       || /^app\/src\/lib\/(?:device\.svelte|edit-schema|building-navigation|i18n\.svelte|scene-guide)\.js$/.test(path)) {
       select('UI shell layout surface changed', 'ui-shell');
+    }
+    // #16: the hero title is the first interactive surface and had no coverage at all.
+    // Its owners are the title itself, the App action that starts the entry, and the
+    // engine call that used to build the village inside the click handler.
+    if (path === 'app/src/App.svelte'
+      || path === 'app/src/components/Hero.svelte'
+      || path === 'app/src/engine/engine.js') {
+      select('hero entry responsiveness surface changed', 'entry');
     }
     if (/^app\/src\/lib\/(?:scene-snapshot|share-scene|standalone-param-spec|url)\.js$/.test(path)
       || path === 'app/src/engine/semantic-view-runtime.js') {
@@ -650,6 +659,7 @@ export function verificationCommands(plan) {
   });
   if (has('app')) commands.push(gateCommand('app'));
   if (has('ui-shell')) commands.push(gateCommand('ui-shell'));
+  if (has('entry')) commands.push(gateCommand('entry'));
   if (has('ink-app')) commands.push(gateCommand('ink-app'));
   if (has('dof-app')) commands.push(gateCommand('dof-app'));
   if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));

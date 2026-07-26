@@ -50,6 +50,17 @@ dependency manifest/lockfile, public aggregate API, merge-base 해석 실패는 
 우회해 `node tools/shoot-*.mjs`를 직접 실행하면 이 계약 밖이므로 병렬 작업 중에는 사용하지 않는다. GPU query나 전후 성능 비교는
 `CHEOMA_GATE_JOBS=1 CHEOMA_BROWSER_JOBS=1`로 로컬 CPU 겹침도 끄고 공용 browser lock을 점유한다.
 
+**락 타임아웃은 게이트 실패가 아니다.** 이 lock 은 worktree 전역 공유이고 대기 상한은 600초다. 여러
+트랙이 동시에 돌면 게이트가 `direct browser command: … lock timed out` 으로 `EXIT=1` 을 내는데, 이때
+단정 실패는 0건이다 — **게이트가 실행조차 되지 못한 것**이다. 이 결과를 근거로 제품 코드·계약·기대값을
+바꾸면 안 된다. 재실행하거나 리드에게 알린다(실제 사례: `check:lod:app` 이 이렇게 튕겼고 같은 하네스를
+쓰는 `check:wave:app` 은 통과했다). 같은 이유로 **경합 중 측정한 wall time 은 성능 근거가 아니다** —
+대기 중인 게이트는 수 분간 무출력으로 멈춘 것처럼 보인다.
+
+경합이 심할 때 우선순위가 높은 **계측**(이벤트 순서·프레임 수 판정)은 전용 최소 하네스(자체 포트 vite
+dev + 단일 페이지)로 lock 을 우회해도 된다. 단 wall time 을 비교하는 A/B 는 lock 을 점유하고 단독으로
+돌려야 한다.
+
 PR을 머지하기 직전 최종 변경이 끝난 동일 HEAD에서 `npm run check:full` 성공 1회를 남긴다. 이후 diff가 바뀌면 다시 실행한다. 이는 전체 browser-free 계약과 app/particle geometry/부분 GPU upload/건물 API 재사용/Worker/audio/
 temple/parcel/surface에 실제 DoF, rim, Hanyang LOD의 연속-frame focus+wave, cinematic, production build를 더한다.
 빠른 게이트가 전체 게이트를 대체하는 것이 아니라 반복 횟수를 줄이는 구조다. worktree 흐름과 세 단계 판정은
@@ -232,6 +243,9 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - generator→runtime 금지, 기존 village→runtime은 adapter shim만 허용.
   - 상대 import 해석, `src/` cycle 0, core 방향 검사.
   - `village-plan` dependency closure의 THREE·DOM·browser 전역 금지.
+  - **로케일 키 짝맞춤**: `i18n.svelte.js` 의 두 사전이 같은 키 집합을 가져야 한다. `t()` 는 없는 키를
+    키 문자열 그대로 반환하므로 한쪽에만 있는 키는 식별자가 UI 문구로 노출된다(실제 사례:
+    `vil_reroll_tip` 누락으로 영어 툴팁이 `vil_reroll_tip` 으로 렌더).
 - `check:building-clearance`
   - 기본·최소·최대·clamp 경계 ㄱ자 기와집 기단의 아래켜·위켜·줄눈·갑석이 각각 하나의 오목 솔리드만 소유하고, 날개는 유지하면서 안마당 쪽 빈 영역을 메우지 않는지 실제 production geometry로 검사한다.
   - 궁·절·초가·기와·반가의 최하단 기초가 보이는 상단 높이를 바꾸지 않고 대지 아래로 6cm 묻히며, 필지 마당이 성토면에서 6cm 분리되는지 검사한다.
@@ -644,12 +658,21 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
   사진·공유·모델·다시 짓기·컨텍스트 탭·보기 카드·브레드크럼 루트의 `elementFromPoint` 히트테스트,
   편집 중 패널이 덮지 않는 프레임 비율 ≥40%, 크롬 박스의 뷰포트 포함, 안내 카드·독·패널·보기 카드의
   교차면적 0, coarse pointer 44px 타깃, 그룹 아코디언 동시 1개, 그룹별 커밋 대가 배지를 단언한다.
+- **편집 중 프레이밍 밴드**: `__viewshift.safeRect` 가 `usable` 이고 만들기 패널과 겹치는 비율 ≤2% —
+  "편집 중인 집이 실제로 화면에 있는가"의 지표다. 패널 기준 가시율만으로는 세로 폰에서 집이 화면에
+  없는데도 통과했다(`ui-consolidation.md` §6.2). 전 크롬 기준 가시율도 잠식 방지 하한으로 함께 단언한다.
+- 히트테스트는 `visibility:hidden` 을 먼저 탈락시킨다. 접힌 셸의 자식은 조상이 히트되는 것만으로
+  `hittable` 로 보고돼 허위 통과했다(§6.3).
+- 닫힌(`aria-hidden`/`inert`) 표면은 의도적으로 프레임 밖에 주차된 것이므로 크롬 목록에서 제외하고,
+  측정은 셸 전환(0.4~0.45s)이 멎은 뒤에 한다 — 미끄러지는 중에 재면 "크롬이 프레임 밖"으로 읽힌다.
 - 세로 모바일은 부감에서 시트가 `peek`으로 접혀 있고 focus-in 이 사용자의 조작 없이 `half`로 펼쳐지는지
-  (사문화됐던 `detent` 계약) 확인한다.
+  (사문화됐던 `detent` 계약) 확인한다. 접힌 시트에서는 손잡이만 도달 가능해야 하고, **손잡이 한 번에
+  두 탭이 드러나야** 한다 — 이 단정이 "부감에서 손잡이를 눌러도 펼쳐지지 않던" 결함을 잡았다.
 - 감상 페이드는 3.4초 무조작 뒤 `.chroma.faded` 와 `.chroma` 밖 크롬 0개로 "씬만 남기기"를 고정한다.
 - `?shot=1`은 뷰 시프트 오프셋 0·흐름 비활성·canvas 안 크롬 0으로 골든 캡처 픽셀 불변 레버를 확인한다.
 - 캡처는 `_wt-out/ui-shell/<viewport>-<state>.png`(또는 `CHEOMA_UI_SHELL_SHOT_DIR`).
   `CHEOMA_UI_SHELL_BREAK=<css>`로 위반 CSS를 주입하면 같은 게이트가 FAIL 한다(게이트 자기 검증).
+  `CHEOMA_UI_SHELL_VIEWPORTS=<id,…>`는 수정 반복용 뷰포트 한정 레버이고, 게이트는 항상 5종을 다 돈다.
 
 `check:pr`은 `app/src/App.svelte`·`app/src/components/**`·`app/src/styles/**`와
 `lib/{device.svelte,edit-schema,building-navigation,i18n.svelte,scene-guide}.js` 변경을 이 게이트로 라우팅한다.
@@ -665,7 +688,9 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 - 부감과 DoF·림·플레어가 있는 근경에서 같은 시뮬레이션 상태를 framebuffer로 두 번 읽어, PBR pass sleep 전후 평균 차이 0.05 이하·최대 채널 차이 1 이하인지 검사한다.
 - shader program 증가는 raw-copy shader를 포함해 6 이하, 축소 normal pass의 draw call은 원 장면 이하로 제한하고, 장식·대기 객체가 가짜 깊이를 만들지 않는지 확인한다. PBR 복귀 후 beauty capture count가 더 늘지 않아야 한다.
 - 수묵 화면이 충분히 탈색되면서 농묵·중간톤·밝은 한지 여백을 함께 보존하는지 픽셀 통계로 검사한다. 여백은 전 화면의 밝은 픽셀 면적이 아니라 원경이 놓이는 상단 1/4의 종이색 비율과 전 화면 5–95백분위 명암 폭으로 고정해, 반투명 대기 띠 하나가 계약을 대신 통과하지 못하게 한다.
-- 390×844 모바일에서 컨트롤이 화면 안의 44px target을 유지하고 shader/runtime 오류가 없는지 확인한다.
+- 390×844 모바일에서 집을 편집하는 동안 보기 축이 44px 칩으로 접혔는지(`[data-view-chip]`) 확인하고,
+  문서화된 한 번의 탭으로 펼친 뒤 컨트롤이 화면 안의 44px target을 유지하며 shader/runtime 오류가 없는지
+  확인한다(ui-consolidation §6.13 결정 A / §6.16).
 
 비교 PNG는 OS 임시 폴더에만 남긴다. 부감은 산세·안개 여백과 전경 수목의 선 밀도를, 근경은 처마·초가지붕의 선 계층과 건축 가독성을 직접 확인한다.
 
@@ -676,8 +701,9 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 - 집 푸터가 `이 집 다시 짓기` 하나만 제공하고(#158: 내보내기·공유는 공유 독 소유) “다시 보기”·“GLB”
   레거시 문구가 없는지, 독에 `내보내기`가 있는지 검사한다. 만들기 패널은 그룹 아코디언(동시 1개)이므로
   하네스는 축을 읽기 전에 그 그룹을 실제로 펼친다.
-- 세로 모바일 시트는 detent 2개(peek / half ≤58vh)다. 상단까지 끌어도 세 번째 `full` detent 로 가지 않고
-  capped 펼침으로 정착하며, 그 상태에서 씬 가시율 ≥40%·스크롤 창 ≥200px 를 함께 단언한다.
+- 세로 모바일 시트는 detent 2개(peek / 상한 있는 half)다. 상단까지 끌어도 세 번째 `full` detent 로 가지 않고
+  capped 펼침으로 정착하며, 그 상태에서 씬 가시율 ≥40%·스크롤 창 ≥200px 를 함께 단언한다. 편집 중이면
+  시트는 손짓 없이 이미 `half` 이므로(#158 P3) 하네스는 `peek` 일 때만 손잡이를 누른다.
 - 실제 처마 range에 48개 `input`을 한 task에서 보내 숫자와 처마 footprint가 change 전에 최신값으로 보이되 지오메트리 preview는 1회, flora identity는 그대로인지 검사한다. `change` 뒤에는 flora batch가 정확히 한 번 교체되고, 대기 input 직후 focus-out해도 stale rebuild가 없으며 재진입 값은 마지막 commit으로 복원돼야 한다.
 - 실제 버튼을 눌러 마을 seed를 바꾸지 않은 채 필지 경계·집·마당·수목이 새 seed로 커밋되는지 확인한다.
 - 편집 처마·마당 hard object·일조/시선에 대한 수목 충돌이 0이고 flora가 여전히 단일 병합 group/layer 예산을 지키는지 검사한다.
@@ -962,3 +988,22 @@ Headless ANGLE은 shader link를 직렬화하므로 절대 frame time을 실제 
 | 런타임 | 앱과 하네스 | pageerror 0, console-error 0 |
 
 before/after는 같은 코드 경로, seed, `mode=current`로 보관한다. `mode=old`는 과거 급사면 문제를 설명하는 비교 컷에만 쓴다. 산과 숲이 사찰을 둘러싸는지는 미감 보너스이며 통과 필수조건이 아니다.
+
+### `npm run check:entry`
+
+`tools/check-entry-responsiveness.mjs`는 타이틀 "들어가기" 누름의 **이벤트 순서**를 고정한다
+(`ui-design.md` §4.8). 절대 프레임 시간은 판정에 쓰지 않는다.
+
+- 데스크톱(1280×800)과 폰(390×844) 두 프로파일에서, 사전 생성이 아직 끝나지 않은 **"early"** 조건
+  (= 사용자가 타이틀이 뜨자마자 누르는 실제 최악 경로)으로 검사한다.
+- 동기 클릭 핸들러가 메인 스레드를 즉시 반납하는지(≤150ms) — 핸들러 안에서 마을을 짓는 구조가
+  되돌아오면 여기서 걸린다. 실측 회귀 시점 값은 731~820ms 였다.
+- 누른 직후 브라우저가 프레임을 그릴 수 있는지(첫 rAF ≤600ms). 회귀 시점에는 1.7~3.2초였고
+  6초 동안 프레임이 2개뿐이었다.
+- 그 **첫 프레임에** 타이틀이 아직 화면에 있고(빈 화면 금지), `aria-busy="true"` 이며
+  `[data-entry-progress]` 진행 표시가 있는지.
+- 대기가 실제로 끝나는지 — 마을이 active 가 되고 그 뒤 타이틀이 물러나는지.
+
+`check:pr`은 `app/src/App.svelte`·`app/src/components/Hero.svelte`·`app/src/engine/engine.js`
+변경을 이 게이트로 라우팅한다(진입을 시작하는 App 액션, 타이틀 자신, 그리고 클릭 태스크에서 마을을
+짓던 엔진 호출의 소유자).

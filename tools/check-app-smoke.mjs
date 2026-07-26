@@ -14,6 +14,7 @@ import {
   SCENE_GUIDE_DISMISSED_VALUE,
   SCENE_GUIDE_STORAGE_KEY,
 } from '../app/src/lib/scene-guide.js';
+import { groupBuildingNavigationTargets } from '../app/src/lib/building-navigation.js';
 import { planVillage } from '../src/api/village-plan.js';
 import {
   VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT,
@@ -299,8 +300,10 @@ try {
       && touchGuide.bounds[2] <= touchGuide.viewport[0]
       && touchGuide.bounds[3] <= touchGuide.viewport[1]
       && touchGuide.bounds[3] <= touchGuide.sheetTop
-      && touchGuide.dismiss?.[0] >= 44
-      && touchGuide.dismiss?.[1] >= 44,
+      // The CSS floor is 44px, but a fractional layout position makes the resolved
+      // box read 43.99997 — allow the subpixel slack the ui-shell gate already does.
+      && touchGuide.dismiss?.[0] >= 43.5
+      && touchGuide.dismiss?.[1] >= 43.5,
   `390x844 touch copy and 44px dismissal stay inside the first scene (${JSON.stringify(touchGuide)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'scene-guide-touch.png') });
@@ -1217,11 +1220,16 @@ try {
       first,
       second,
       options,
+      optgroups: [...document.querySelectorAll('[data-building-navigation] optgroup')]
+        .map((group) => group.label),
+      selected: document.querySelector('[data-building-navigation] select')?.value ?? null,
       parcelIds: window.__engine.village.debugParcels().map((parcel) => parcel.parcelId),
       json: JSON.parse(JSON.stringify(first)),
       keys: first.map((target) => Object.keys(target).sort()),
     };
   });
+  // The engine-side address space is still the whole, ordered, duplicate-free
+  // pick-proxy list — that part is unchanged and must stay JSON-only.
   pass(navigationContract.first.length > 1
       && navigationContract.first.length === new Set(navigationContract.first.map((target) => target.id)).size
       && navigationContract.first.every((target, index) => (
@@ -1229,13 +1237,30 @@ try {
         && navigationContract.keys[index].join() === 'id,type'
       ))
       && JSON.stringify(navigationContract.first) === JSON.stringify(navigationContract.second)
-      && JSON.stringify(navigationContract.first) === JSON.stringify(navigationContract.json)
-      && JSON.stringify(navigationContract.options) === JSON.stringify(
-        navigationContract.first.map((target) => target.id),
-      ),
+      && JSON.stringify(navigationContract.first) === JSON.stringify(navigationContract.json),
   `building navigation preserves pick-proxy order as duplicate-free JSON-only targets (${JSON.stringify({
     count: navigationContract.first.length,
     first: navigationContract.first.slice(0, 4),
+  })})`);
+  // #158 P8 re-authored: the selector is no longer a 1:1 copy of that list. A flat
+  // 297-option series was the audited defect, so the UI renders the bounded grouped
+  // projection instead — every landmark, then at most 20 ordinary houses in pick-proxy
+  // order. Assert the UI renders exactly what the pure grouping specifies (the wiring),
+  // and that the currently selected target is always among the options.
+  const expectedGroups = groupBuildingNavigationTargets(navigationContract.first, {
+    selectedId: navigationContract.selected,
+  });
+  const expectedOptions = expectedGroups.flatMap((group) => group.targets.map((target) => target.id));
+  pass(expectedGroups.length >= 1
+      && navigationContract.optgroups.length === expectedGroups.length
+      && JSON.stringify(navigationContract.options) === JSON.stringify(expectedOptions)
+      && navigationContract.options.length <= navigationContract.first.length
+      && navigationContract.options.includes(navigationContract.selected),
+  `building navigation renders the bounded grouped projection of those targets (${JSON.stringify({
+    targets: navigationContract.first.length,
+    options: navigationContract.options.length,
+    optgroups: navigationContract.optgroups,
+    selected: navigationContract.selected,
   })})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'building-navigation-desktop.png') });
@@ -1299,7 +1324,9 @@ try {
   // Playwright cannot drive Chrome/macOS's out-of-process native select popup
   // with synthetic Arrow keys. Commit the real select's change event through
   // selectOption, then keep the product transition and return keyboard-only.
-  await buildingSelect.selectOption(navigationContract.first.at(-1).id);
+  // The hop target must be the last *rendered* option: past P8's bound the last
+  // pick-proxy target is deliberately not in the list.
+  await buildingSelect.selectOption(navigationContract.options.at(-1));
   await buildingSelect.focus();
   const keyboardTargetB = await buildingSelect.inputValue();
   await page.keyboard.press('Tab');

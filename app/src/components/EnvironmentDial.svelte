@@ -11,9 +11,41 @@
     WEATHER_IDS,
     pickEnvironmentScene,
   } from '../../../src/api/environment.js';
+  // compact: 세로 폰에서 만들기 시트가 펼쳐진 동안. 그 프레임에서는 시트 + 보기 카드 + 올라온
+  //   공유 독이 동시에 상주할 수 없다 — 390×844 실측으로 "넓은 건축물이 들어가는 밴드"와
+  //   "가시 스크롤 ≥200px" 가 함께 성립하지 않는다(ui-consolidation §6.10). 결정 (A)(§6.13):
+  //   **편집 중 보기 축은 44px 칩 하나로 접히고**, 칩은 현재 환경을 계속 표시한다. 펼침은
+  //   편집 시트를 건드리지 않는 오버레이라 detent 는 그대로다.
   let { time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear',
-        renderStyle = 'pbr', onRenderStyle = null,
+        renderStyle = 'pbr', onRenderStyle = null, compact = false,
         flowing = false, onTime, onSunsetLook, onSeason, onWeather, onFlowToggle } = $props();
+
+  // 접힘은 compact 구간에서만 존재한다. 부감으로 돌아오거나 데스크톱/가로 폰 셸이면 카드가
+  // 그대로 상주하므로 상태를 남겨두지 않는다(다음 편집 진입도 접힌 상태에서 시작).
+  let expanded = $state(false);
+  const collapsed = $derived(compact && !expanded);
+  $effect(() => { if (!compact) expanded = false; });
+
+  // 접힌 칩의 상태 표시(§6.13 조건 1) — 접기가 정보 상실이 되면 안 된다. 앱이 이미 쓰는
+  // 한자 글리프 어휘(景/墨)를 그대로 이어 시간·계절을 한 자씩, 날씨와 수묵은 기본값을 벗어날
+  // 때만 옅은 부기호로 붙인다. 전체 문구는 aria-label·title 이 읽어준다.
+  const TIME_GLYPH = { dawn: '曉', day: '晝', sunset: '暮', night: '夜' };
+  const SEASON_GLYPH = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
+  const WEATHER_GLYPH = { clear: '', rain: '雨', snow: '雪' };
+  const marks = $derived([
+    WEATHER_GLYPH[weather] || '',
+    renderStyle === 'ink' ? '墨' : '',
+  ].filter(Boolean));
+  const stateText = $derived([
+    t('time_' + time),
+    t('season_' + season),
+    t('weather_' + weather),
+    ...(renderStyle === 'ink' ? [t('render_ink')] : []),
+  ].join(' · '));
+
+  function keydown(e) {
+    if (e.key === 'Escape' && expanded) { expanded = false; }
+  }
 
   const RINGS = [
     { key: 'time', lp: 'time_', r: 82, band: 26, get: () => time, set: (v) => onTime?.(v),
@@ -104,7 +136,44 @@
   }
 </script>
 
-<div class="dial viewcard" role="group" aria-label={t('axis_view')}>
+<svelte:window onkeydown={keydown} />
+
+{#if collapsed}
+  <!-- 접힌 보기 축(§6.13 A) — 카드가 있던 우상 슬롯에 44px 칩 하나. 칩 자체가 현재 환경이고,
+       한 번 누르면 같은 자리에서 카드가 펼쳐진다(편집 시트는 건드리지 않는다). -->
+  <button
+    class="dial viewchip"
+    data-view-chip
+    type="button"
+    aria-expanded="false"
+    aria-label={t('view_expand') + ': ' + stateText}
+    title={t('view_expand') + ' — ' + stateText}
+    onclick={() => { expanded = true; }}
+  >
+    <span class="chipglyphs" aria-hidden="true">
+      <span class="g">{TIME_GLYPH[time] || ''}</span><span class="g">{SEASON_GLYPH[season] || ''}</span>
+    </span>
+    {#if marks.length}
+      <span class="chipmarks" aria-hidden="true">{marks.join('')}</span>
+    {/if}
+  </button>
+{:else}
+<div class="dial viewcard" class:compact role="group" aria-label={t('axis_view')}>
+  {#if compact}
+    <!-- 펼친 동안의 머리 행이 곧 접기 창구다 — 축 이름 옆 갈고리 한 개, 44px 타깃. -->
+    <button
+      class="collapse"
+      data-view-collapse
+      type="button"
+      aria-expanded="true"
+      aria-label={t('view_collapse')}
+      title={t('view_collapse')}
+      onclick={() => { expanded = false; }}
+    >
+      <span class="headlabel">{t('axis_view')}</span>
+      <span class="fold" aria-hidden="true">▴</span>
+    </button>
+  {/if}
   <span class="axislabel" aria-hidden="true">{t('axis_view')}</span>
   <svg bind:this={svgEl} viewBox="0 0 200 200" width="164" height="164">
     <!-- 링 트랙 + 밴드 히트영역 -->
@@ -211,6 +280,7 @@
     </button>
   </div>
 </div>
+{/if}
 
 <style>
   /* 보기 카드 — 우상 단독 슬롯. 만들기 패널(좌하)·공유 독(우하)과 겹치지 않으므로 시프트가 필요 없다. */
@@ -236,6 +306,67 @@
     letter-spacing: 0.26em; text-transform: uppercase;
     color: rgba(244, 239, 228, 0.72);
     text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+  }
+
+  /* ── 접힌 보기 축(§6.13 A) ──────────────────────────────────────────────
+     카드와 같은 먹빛 글라스·같은 코너 슬롯을 쓰는 44px 칩. 낙관 옆 방서처럼 글리프만
+     세로 한 줄로 읽히고, 기본을 벗어난 축(비·눈·수묵)만 옅은 부기호로 덧붙는다. */
+  .dial.viewchip {
+    -webkit-appearance: none; appearance: none;
+    flex-direction: row; align-items: center; justify-content: center; gap: 5px;
+    min-width: 46px; min-height: 46px;
+    padding: 0 10px;
+    cursor: pointer;
+    color: rgba(247, 242, 232, 0.94);
+    /* 펼침/접힘은 미세 스케일로만 — 나타날 때 한 번 옅게 스미고 끝난다. */
+    animation: viewfold 0.22s ease-out;
+  }
+  .dial.viewchip:hover { border-color: rgba(244, 239, 228, 0.34); }
+  .dial.viewchip:active { transform: scale(0.97); }
+  .dial.viewchip:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  .chipglyphs {
+    display: inline-flex; gap: 3px;
+    font-family: var(--serif); font-size: 15px; line-height: 1; font-weight: 700;
+    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+  }
+  .chipmarks {
+    display: inline-flex;
+    padding-left: 5px;
+    border-left: 1px solid rgba(244, 239, 228, 0.26);
+    font-family: var(--serif); font-size: 11px; line-height: 1.36;
+    color: rgba(247, 242, 232, 0.72);
+    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+  }
+
+  /* 펼친 동안의 머리 행 = 접기 창구. 카드 폭 전체를 먹고 44px 타깃을 유지한다. */
+  .collapse {
+    -webkit-appearance: none; appearance: none; border: 0;
+    align-self: stretch;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    min-height: 44px; padding: 0 4px 0 2px;
+    background: transparent; cursor: pointer;
+    border-bottom: 1px solid rgba(244, 239, 228, 0.18);
+  }
+  .headlabel {
+    font-family: var(--serif); font-size: 9.5px; font-weight: 700;
+    letter-spacing: 0.26em; text-transform: uppercase;
+    color: rgba(244, 239, 228, 0.78);
+    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+  }
+  .collapse .fold {
+    font-size: 13px; line-height: 1;
+    color: rgba(244, 239, 228, 0.8);
+    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+  }
+  .collapse:hover .fold { color: #fff2e2; }
+  .collapse:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  .dial.viewcard.compact { animation: viewfold 0.22s ease-out; }
+  @keyframes viewfold {
+    from { opacity: 0.5; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dial.viewchip, .dial.viewcard.compact { animation: none; }
   }
   svg { display: block; overflow: visible; }
   .track { fill: none; stroke: rgba(244, 239, 228, 0.5); stroke-width: 1.2; }
@@ -381,6 +512,11 @@
     }
     .dial svg { width: clamp(126px, 38vw, 150px); height: clamp(126px, 38vw, 150px); }
     .lab { font-size: 11.5px; }
+    /* 시트가 펼쳐진 동안: 카드가 올라온 공유 독(= --sheet-half + 8px 위, 한 줄) 아래로 내려오지
+       않게 링만 줄인다. 칩·세그먼트는 그대로 남아 조작 경로가 사라지지 않는다. */
+    .dial.compact { gap: 5px; padding: 5px 8px 7px; }
+    .dial.compact .axislabel { display: none; }
+    .dial.compact svg { width: clamp(96px, 28vw, 116px); height: clamp(96px, 28vw, 116px); }
   }
   /* 가로 폰: 세로 여유가 없어 더 축소(칩 행까지 화면 안에 들어와야 한다). */
   @media (max-height: 520px) and (orientation: landscape) {

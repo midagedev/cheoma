@@ -4,11 +4,34 @@
   //   집으로 들어가는 창구는 씬의 집 클릭(또는 만들기 패널의 [집] 탭)이고, 나오는 창구는 여기 루트다.
   //   좌상 슬롯을 이 컴포넌트 하나만 쓰므로 P4(좌표 3중 점유)가 정의상 소멸한다.
   //   전환 중에는 aria-busy 로 "이동 중"을 표시한다(P12: 2-state 토글이 숨기던 상태).
+  import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
 
   let {
     houseLabel = '', houses = 0, houseActive = false, busy = false, onBack = null,
   } = $props();
+
+  // 컨텍스트가 바뀌면 이 nav 는 루트 요소를 버튼↔제목으로 **교체**한다. 그러면 나가는 요소가
+  // 언마운트되며 포커스가 body 로 떨어지므로, 그 인계는 요소를 소유한 이 컴포넌트가 해야 한다.
+  // (ContextPanel 도 같은 인계를 시도하지만 그쪽 `$effect.pre` 가 읽는 시점은 이 컴포넌트의 DOM
+  // 교체 뒤일 수 있어 — 실측: activeElement 가 이미 BODY — 헤더 케이스는 여기서 소유한다.
+  // 두 경로 모두 같은 목적지를 가리키므로 중복 실행돼도 결과는 같다.)
+  let previousHouseActive = null;
+  $effect.pre(() => {
+    const next = houseActive;
+    if (previousHouseActive == null) { previousHouseActive = next; return; }
+    if (previousHouseActive === next) return;
+    const outgoing = previousHouseActive ? 'house' : 'village';
+    previousHouseActive = next;
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    if (!active || active.dataset?.contextFocus !== outgoing) return;
+    void tick().then(() => {
+      const destination = document.querySelector(`[data-context-focus="${next ? 'house' : 'village'}"]`);
+      if (destination?.isConnected && !destination.closest('[inert]')) {
+        destination.focus({ preventScroll: true });
+      }
+    });
+  });
 </script>
 
 <nav

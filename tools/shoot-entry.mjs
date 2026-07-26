@@ -69,11 +69,12 @@ await page.waitForTimeout(1600); await shot('02-landing-early'); await maxGap('l
 await page.waitForTimeout(2400); await shot('03-landing-mid');
 await page.waitForTimeout(3200); await shot('04-landing-done'); await maxGap('landing-total');
 
-// 모드 토글: 집(클로즈업) → 마을(부감) 왕복. ModeToggle 세그 클릭(실제 UX 경로).
+// 컨텍스트 전환: 집(클로즈업) → 마을(부감) 왕복. #158 로 좌상 ModeToggle 은 폐기되고
+// 만들기 패널의 명시적 [村][家] 탭이 그 창구를 승계했다 — 데스크톱은 좌하 카드에 상주한다.
 await page.evaluate(() => { window.__frameGaps = []; });
-await page.click('.mode .seg:has(.glyph:text-is("村"))');   // 마을 둘러보기
+await page.click('#make-tab-village');   // 마을 둘러보기
 await page.waitForTimeout(1800); await shot('05-aerial'); await maxGap('to-aerial');
-await page.click('.mode .seg:has(.glyph:text-is("家"))');   // 종가 집 보기
+await page.click('#make-tab-house');     // 종가 집 보기
 await page.waitForTimeout(2600); await shot('06-closeup'); await maxGap('to-closeup');
 
 // 히어로 리플레이 엔진 계약(UI 버튼은 #19에서 제거, 내부 조립 회귀는 유지)

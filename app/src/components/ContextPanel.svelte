@@ -43,6 +43,11 @@
   // 크로스페이드 중에도 키보드·접근성 소유자는 하나다. inert 적용 전 포커스가 퇴장하는 본문/푸터 안에
   // 있을 때만 다음 컨텍스트의 브레드크럼(좌상, 이 컴포넌트 밖)으로 옮긴다. 캔버스·환경 UI·References 에
   // 있던 포커스는 건드리지 않는다.
+  //
+  // 포커스가 **브레드크럼 자체**에 있던 경우는 `Breadcrumb.svelte` 가 소유한다 — 그 컴포넌트가
+  // 나가는 요소를 언마운트하므로, 여기서 읽을 때는 이미 activeElement 가 body 인 순서 경쟁이 있었다.
+  // 아래 `outgoingHeader` 절은 이 effect 가 먼저 도는 경우를 위한 이중 안전망이고(같은 목적지),
+  // 본문·푸터 케이스는 여전히 이쪽 단독 책임이다.
   let stackRoot = $state(null);
   let footerRoot = $state(null);
   let previousHouseActive = null;
@@ -451,7 +456,7 @@
       {#if spec}
         <div class="house-actions">
           <button class="hbtn reroll wide" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
-            <span class="hk" aria-hidden="true">⚄</span>{t('vil_reroll_house')}
+            <span class="hk" aria-hidden="true">再</span>{t('vil_reroll_house')}
           </button>
         </div>
       {/if}

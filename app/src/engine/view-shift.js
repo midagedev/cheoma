@@ -28,12 +28,20 @@ function intersects(a, b) {
 // remaining area; controls already outside a previously claimed edge disappear
 // from consideration, so a top-left mode toggle does not also erase a full
 // horizontal strip after the larger context card claimed the left side.
+//
+// Two rules make that assignment survive a surface that is larger than a corner
+// control (#158): an overlay anchored flush against a viewport edge may always
+// claim that edge, and every overlay is judged after being clipped to the safe
+// rectangle that earlier overlays left. Without the first rule a bottom sheet
+// tall enough to cross the viewport centre produced no candidate at all and was
+// silently ignored; without the second, a mid-height dock still overlapping a
+// sliver of the safe rectangle could surrender the entire band above it.
+const EDGE_ANCHOR_TOLERANCE = 28;      // chrome insets are clamp(10px … 22px)
+
 function measureViewportInsets(container) {
   const width = container.clientWidth || 1;
   const height = container.clientHeight || 1;
   const host = container.getBoundingClientRect();
-  const centerX = width * 0.5;
-  const centerY = height * 0.5;
   const safe = { left: 0, right: width, top: 0, bottom: height };
   const overlays = [...document.querySelectorAll(OCCLUSION_SELECTOR)]
     .flatMap((element) => {
@@ -52,33 +60,47 @@ function measureViewportInsets(container) {
 
   for (const { local } of overlays) {
     if (!intersects(local, safe)) continue;
+    // Judge the overlay by the part that still competes with the scene, and
+    // against the centre of what is left rather than of the whole viewport.
+    const clipped = {
+      left: Math.max(local.left, safe.left),
+      right: Math.min(local.right, safe.right),
+      top: Math.max(local.top, safe.top),
+      bottom: Math.min(local.bottom, safe.bottom),
+    };
+    const safeCenterX = (safe.left + safe.right) * 0.5;
+    const safeCenterY = (safe.top + safe.bottom) * 0.5;
+    const anchoredLeft = local.left <= EDGE_ANCHOR_TOLERANCE;
+    const anchoredRight = local.right >= width - EDGE_ANCHOR_TOLERANCE;
+    const anchoredTop = local.top <= EDGE_ANCHOR_TOLERANCE;
+    const anchoredBottom = local.bottom >= height - EDGE_ANCHOR_TOLERANCE;
     const candidates = [];
-    if (local.right <= centerX) {
-      const edge = Math.max(safe.left, local.right);
+    if (anchoredLeft || clipped.right <= safeCenterX) {
+      const edge = Math.max(safe.left, clipped.right);
       candidates.push({
         side: 'left',
         edge,
         loss: Math.max(0, edge - safe.left) * (safe.bottom - safe.top),
       });
     }
-    if (local.left >= centerX) {
-      const edge = Math.min(safe.right, local.left);
+    if (anchoredRight || clipped.left >= safeCenterX) {
+      const edge = Math.min(safe.right, clipped.left);
       candidates.push({
         side: 'right',
         edge,
         loss: Math.max(0, safe.right - edge) * (safe.bottom - safe.top),
       });
     }
-    if (local.bottom <= centerY) {
-      const edge = Math.max(safe.top, local.bottom);
+    if (anchoredTop || clipped.bottom <= safeCenterY) {
+      const edge = Math.max(safe.top, clipped.bottom);
       candidates.push({
         side: 'top',
         edge,
         loss: Math.max(0, edge - safe.top) * (safe.right - safe.left),
       });
     }
-    if (local.top >= centerY) {
-      const edge = Math.min(safe.bottom, local.top);
+    if (anchoredBottom || clipped.top >= safeCenterY) {
+      const edge = Math.min(safe.bottom, clipped.top);
       candidates.push({
         side: 'bottom',
         edge,

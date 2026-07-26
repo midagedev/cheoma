@@ -35,9 +35,16 @@ await page.waitForTimeout(1200); await shot('01-title');
 await page.tap('.hero');
 await page.waitForTimeout(3000); await shot('02-landing');
 await page.waitForTimeout(3600); await shot('03-closeup');       // 랜딩 완료 → 클로즈업(시트 half)
-await page.tap('.mode .seg:has(.glyph:text-is("村"))');           // 부감
-await page.waitForTimeout(1900); await shot('04-aerial');         // VillagePanel peek 카드
-await page.tap('.mode .seg:has(.glyph:text-is("家"))');           // 종가 클로즈업
+// #158: 좌상 ModeToggle 폐기 → 만들기 패널의 [村][家] 탭이 컨텍스트 전환 창구다. 세로 폰은
+// 시트가 접힌(peek) 동안 손잡이만 보이므로, 실제 UX 경로대로 손잡이를 먼저 펼친 뒤 탭을 누른다.
+const tapTab = async (id) => {
+  const snap = await page.getAttribute('[data-make-panel]', 'data-snap');
+  if (snap !== 'half') { await page.tap('[data-make-panel] .grip'); await page.waitForTimeout(520); }
+  await page.tap(id);
+};
+await tapTab('#make-tab-village');                                // 부감
+await page.waitForTimeout(1900); await shot('04-aerial');          // 만들기 시트 peek
+await tapTab('#make-tab-house');                                  // 종가 클로즈업
 await page.waitForTimeout(2600); await shot('05-closeup2');
 
 console.log(`\npageErrors=${perr} consoleErrors=${cerr}`);

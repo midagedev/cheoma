@@ -273,6 +273,40 @@ checkPureClosure(residentialOpeningClosure, 'residential-opening');
 const renderStyleClosure = dependencyClosure(API_RENDER_STYLE);
 checkPureClosure(renderStyleClosure, 'render-style');
 
+// Locale parity. t() falls back to the raw key, so a key present in one locale and
+// missing in the other ships the identifier itself as user-visible text (found this
+// way: the village rebuild tooltip rendered as "vil_reroll_tip" in English).
+{
+  const file = join(APP, 'lib', 'i18n.svelte.js');
+  const source = sourceByFile.get(file) ?? readFileSync(file, 'utf8');
+  const locales = {};
+  for (const match of source.matchAll(/^ {2}(\w+):\s*\{$/gm)) {
+    const start = match.index + match[0].length;
+    let depth = 1;
+    let index = start;
+    while (depth > 0 && index < source.length) {
+      if (source[index] === '{') depth += 1;
+      else if (source[index] === '}') depth -= 1;
+      index += 1;
+    }
+    locales[match[1]] = new Set(
+      [...source.slice(start, index).matchAll(/(?:^|[\s{,])([A-Za-z_]\w*)\s*:/g)].map((m) => m[1]),
+    );
+  }
+  const names = Object.keys(locales);
+  if (names.length < 2) errors.push(`i18n: expected at least two locale dictionaries, found ${names.join(', ') || 'none'}`);
+  else {
+    for (const locale of names) {
+      for (const other of names) {
+        if (locale === other) continue;
+        for (const key of locales[other]) {
+          if (!locales[locale].has(key)) errors.push(`i18n: '${key}' is missing from the ${locale} dictionary`);
+        }
+      }
+    }
+  }
+}
+
 const hotspots = [...walk(SRC), ...walk(APP)]
   .map((file) => ({ file: relative(ROOT, file), lines: sourceByFile.get(file).split('\n').length }))
   .filter((item) => item.lines >= 750)

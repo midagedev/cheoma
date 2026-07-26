@@ -143,10 +143,25 @@ assert.match(
   'touch guide keeps the same five marks',
 );
 assert.doesNotMatch(componentSource, /class:word|\.mark\.word/, 'guide marks share one visual grammar');
-assert.match(
+// #158 re-authored: the clearance used to be the constant 88px / 170px, which assumed
+// a one-row dock. The dock legitimately wraps to a second row on narrow widths and long
+// locale labels, and the constant then let the card cover the drone button (P5). The dock
+// now publishes its measured height as --dock-h and both touch bands consume it, so the
+// contract is "derive the clearance from the dock", not any particular number.
+for (const [label, media] of [
+  ['portrait', '@media \\(max-width: 768px\\) and \\(orientation: portrait\\)'],
+  ['landscape', '@media \\(max-height: 520px\\) and \\(orientation: landscape\\)'],
+]) {
+  assert.match(
+    componentSource,
+    new RegExp(`${media}[\\s\\S]*?\\.scene-guide\\.touch\\s*\\{[^}]*bottom:\\s*calc\\([^;]*var\\(--dock-h`),
+    `${label} touch guide must clear the dock by its measured height, not a constant`,
+  );
+}
+assert.doesNotMatch(
   componentSource,
-  /@media \(max-height: 520px\) and \(orientation: landscape\)[\s\S]*?\.scene-guide\.touch\s*\{[^}]*bottom:\s*max\(88px,\s*calc\(env\(safe-area-inset-bottom\) \+ 82px\)\)/,
-  'landscape touch guide must clear the raised ActionBar input envelope',
+  /bottom:\s*max\(\s*(?:88px|170px)/,
+  'the retired constant dock clearances must not come back',
 );
 assert.equal((componentSource.match(/onclick=/g) || []).length, 1, 'only dismiss owns pointer input');
 for (const forbidden of ['autofocus', '<dialog', 'scrim', '.focus(', 'setTimeout']) {

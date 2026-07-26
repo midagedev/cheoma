@@ -7,6 +7,7 @@
 const DICT = {
   ko: {
     hero_enter: '눌러 들어가기',
+    hero_entering: '들어가는 중',
     guide_title: '마을 둘러보기',
     guide_desktop_orbit: '드래그해 마을 둘러보기',
     guide_desktop_zoom: '휠로 확대·축소',
@@ -131,6 +132,7 @@ const DICT = {
     sheet_expand: '편집 열기', sheet_collapse: '접기',
     // ── UI 3축 재구성(#158 B안): 보기 / 만들기 / 공유 ──
     axis_view: '보기', axis_make: '만들기', axis_share: '공유',
+    view_expand: '보기 펼치기', view_collapse: '보기 접기',
     crumb_back_tip: '마을로 돌아가기',
     crumb_busy: '이동 중',
     // 커밋 대가 배지 — 같은 룩의 슬라이더가 서로 다른 대가를 갖는다는 것을 그룹 헤더에 표시(P10).
@@ -142,6 +144,7 @@ const DICT = {
   },
   en: {
     hero_enter: 'Enter',
+    hero_entering: 'Entering',
     guide_title: 'Explore the village',
     guide_desktop_orbit: 'Drag to orbit',
     guide_desktop_zoom: 'Use the wheel to zoom',
@@ -249,7 +252,7 @@ const DICT = {
     s_char01: 'Tile ratio', s_diversityK: 'Diversity', s_mjaHouse: 'Enclosed courtyard house',
     vil_citywall_hint: 'hamlet+', vil_sijeon_hint: 'capital+', vil_river_hint: 'capital+',
     vil_mja_house_hint: 'hamlet and village only', vil_char_auto: 'auto by scale',
-    vil_reroll: 'Rebuild village',
+    vil_reroll: 'Rebuild village', vil_reroll_tip: 'Rebuild the whole village (dissolve → regenerate → assemble)', 
     vil_reroll_house: 'Rebuild this house', vil_reroll_house_tip: 'Recompose its lot, house, yard and trees',
     crumb_hanok: 'Head house', crumb_palace: 'Magistracy', crumb_palace_compound: 'Palace', crumb_temple: 'Temple',
     nav_building: 'Choose a building', nav_view: 'View', nav_move: 'Move', nav_current: 'Current',
@@ -265,6 +268,7 @@ const DICT = {
     sheet_expand: 'Edit', sheet_collapse: 'Collapse',
     // ── Three-axis UI (#158, option B): View / Make / Share ──
     axis_view: 'View', axis_make: 'Make', axis_share: 'Share',
+    view_expand: 'Show view controls', view_collapse: 'Collapse view controls',
     crumb_back_tip: 'Back to the village',
     crumb_busy: 'Moving',
     cost_wave: 'rebuilds village', cost_wave_tip: 'Releasing the control rebuilds the whole village',

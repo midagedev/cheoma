@@ -9,15 +9,31 @@
   // onReroll: 레거시 단일건물 씬에서만 전달(새 씨앗). 마을 씬은 만들기 패널이 소유.
   // onExport: 컨텍스트에 맞는 대상(부감=마을 / 근접=그 건물)을 App 이 골라 전달. null 이면 미노출.
   // lifted: 세로 모바일에서 만들기 시트가 펼쳐진 동안(편집·전환) 시트 위 씬 영역으로 올린다 —
-  //   구현상 시트 상한(58vh)과 같은 상수를 쓰므로 독이 시트를 덮거나 시트에 덮이지 않는다.
+  //   시트가 게시하는 --sheet-half 를 그대로 소비하므로 독이 시트를 덮거나 시트에 덮이지 않는다.
   let {
     onReroll = null, onPostcard = null, onShare = null, onExport = null, onToggleAudio = null,
     audioOn = false, busy = false, raised = false, lifted = false, exporting = false,
     onDrone = null, onWalk = null,
   } = $props();
+
+  // 독은 좁은 폭·긴 로케일 라벨에서 위로 한 줄 접힌다(의도된 동작). 그러면 높이가 58px 상수가
+  // 아니게 되므로, 그 위에 앉는 조작 안내(#158 P5)가 상수로 비켜설 수 없다 — 독이 자기 높이를
+  // --dock-h 로 게시하고 안내가 그것을 소비한다. 상수 가정이 깨지는 회귀를 원천 차단.
+  let dock = $state(null);
+  $effect(() => {
+    if (!dock || typeof ResizeObserver === 'undefined') return;
+    const publish = () => document.documentElement.style.setProperty('--dock-h', `${Math.round(dock.getBoundingClientRect().height)}px`);
+    const observer = new ResizeObserver(publish);
+    observer.observe(dock);
+    publish();
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty('--dock-h');
+    };
+  });
 </script>
 
-<div class="actions" class:raised class:lifted role="group" aria-label={t('axis_share')}>
+<div bind:this={dock} class="actions" class:raised class:lifted role="group" aria-label={t('axis_share')}>
   {#if onDrone || onWalk}
     <div class="watchgroup">
       {#if onDrone}
@@ -103,8 +119,9 @@
   /* 세로 모바일 부감 peek 시트(손잡이 ≈80px) 위로 올림. */
   @media (max-width: 768px) and (orientation: portrait) {
     .actions.raised { bottom: max(96px, calc(env(safe-area-inset-bottom) + 90px)); }
-    /* 펼쳐진 시트(58vh 상한) 위 — 편집 중에도 독이 시트와 겹치지 않고 씬 위에 남는다. */
-    .actions.lifted { bottom: calc(58vh + 14px); }
+    /* 펼쳐진 시트 위 — 편집 중에도 독이 시트와 겹치지 않고 씬 위에 남는다. 상한은 시트가
+       --sheet-half 로 게시하는 실제 픽셀값이므로 두 값이 어긋날 수 없다. */
+    .actions.lifted { bottom: calc(var(--sheet-half, 51vh) + 8px); }
   }
   .seal {
     -webkit-appearance: none;

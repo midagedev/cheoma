@@ -122,6 +122,8 @@
   let overrides = $state({ preset: false, time: false, sunsetLook: false, season: false, weather: false });
   let heroVisible = $state(false);
   let heroLeaving = $state(false);
+  // 누름 직후~실제 진입 사이의 준비 구간. 타이틀이 살아 있는 동안 진행 표시를 돌린다(#16).
+  let heroEntering = $state(false);
   let chromaFaded = $state(false);
   let refOpen = $state(false);                 // 참고 자료 모달
   let refOpener = $state(null);
@@ -372,7 +374,7 @@
   let cineButtons = $derived(villageAerial && !waving && !veil && !cine.active && !heroLanding);
   // #158 P9: 공유 독은 편집 중에도 상주한다(구 hideActions 폐기 — 종전엔 시트/가로폰 레이아웃
   //   술어로 전역 액션바를 숨기고 공유를 시트 푸터로 옮겼다). 만들기 패널은 세로 모바일에서
-  //   58vh 상한 시트, 가로 폰에서 좌측 42% 패널이라 독과 겹치지 않는 슬롯을 쓴다.
+  //   상한 있는 시트, 가로 폰에서 좌측 42% 패널이라 독과 겹치지 않는 슬롯을 쓴다.
   //   낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
   let hideSeal = $derived(sheetLayout && (editing || (sceneVillage && !villageEditing)));
   // 만들기 시트 detent 요청(#158 P3): 부감=peek, 근접(편집·전환)=half. 구현은 사문화됐던 detent prop 을
@@ -709,8 +711,41 @@
   }
 
   // ---------- 액션 ----------
+  // 진입 반응성(#16). 종전 구현은 클릭 핸들러 안에서 곧바로 engine.village.enterHero() 를 불렀고,
+  // 그 안의 buildVillage(sync) 는 사전 생성 캐시가 아직 앉지 않았으면 마을 전체를 **메인 스레드에서
+  // 동기로** 짓는다. 같은 태스크라 브라우저는 그동안 아무것도 칠하지 못한다 — 타이틀 자신의 페이드조차.
+  // 실측(chromium): 동기 핸들러 731~820ms, 클릭 후 첫 rAF 까지 1.7~3.2초, 6초 동안 프레임 2개.
+  // 사용자에게는 "눌렀는데 몇 초간 아무 반응 없음"으로 보였다.
+  //
+  // 순서를 바꾼다: ① 눌림·진행 상태를 먼저 칠하고(페인트 1회 양보) ② 사전 생성이 진행 중이면 그것을
+  // 기다린다(워커·rAF 청킹이라 동기 빌드보다 빠르다) ③ 그 다음 진입한다. 그러면 캐시 hit 경로만 남아
+  // 스왑이 즉시이고 타이틀 페이드도 정상 재생된다.
+  const ENTRY_PREGEN_WAIT_MS = 12_000;   // 사전 생성이 비정상적으로 길면 그대로 진입(무한 대기 금지)
+
   function enterHero() {
-    if (heroLeaving) return;
+    if (heroLeaving || heroEntering) return;
+    heroEntering = true;            // 이 프레임에 눌림 + 진행 표시(0프레임 피드백)
+    audioOn = true;
+    void beginEntry(lifecycleEpoch);
+  }
+
+  async function beginEntry(epoch) {
+    // 눌림 상태가 실제로 화면에 나올 기회를 준다. 이 양보가 없으면 아래 무거운 작업과 같은
+    // 태스크에 묶여 사용자는 페인트를 한 번도 보지 못한다.
+    if (!(await waitLifecycleFrames(2, epoch))) return;
+    // 사전 생성분을 소비할 수 있을 때까지 기다린다 — 기다리는 동안 타이틀이 살아 있어
+    // 진행 표시가 돌고, 도착하면 enterHero 의 buildVillage 가 캐시 hit 즉시 스왑이 된다.
+    if (villageHome && engine) {
+      const deadline = performance.now() + ENTRY_PREGEN_WAIT_MS;
+      while (!engine.village.isReady(villageOpts, villageSeed) && performance.now() < deadline) {
+        if (!(await waitLifecycleFrames(2, epoch))) return;
+      }
+    }
+    if (!lifecycleCurrent(epoch)) return;
+    runEntry();
+  }
+
+  function runEntry() {
     heroLeaving = true;
     audioOn = true;
     // 마을 우선 진입(#62): 마을 씬 안에서 종가 클로즈업 랜딩 + 조립. 기본 인터랙티브 부팅.
@@ -1188,7 +1223,7 @@
 ></div>
 
 {#if heroVisible}
-  <Hero onEnter={enterHero} leaving={heroLeaving} />
+  <Hero onEnter={enterHero} leaving={heroLeaving} entering={heroEntering} />
 {/if}
 
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
@@ -1242,6 +1277,7 @@
   <EnvironmentDial
     time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
     renderStyle={ui.renderStyle} onRenderStyle={setRenderStyle}
+    compact={sheetLayout && sceneVillage && !villageAerial}
     flowing={flowing}
     onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
     onFlowToggle={toggleFlow}

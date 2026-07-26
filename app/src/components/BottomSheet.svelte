@@ -7,9 +7,9 @@
   //   세로 좁은 화면      : 바텀 시트(.sheet.context) — detent 2개(peek / half)
   //
   // detent 는 translateY 가 아니라 **가시 높이**로 정의한다(P2 근인). 시트는 항상 뷰포트 안에
-  // 있고 max-height 만 바뀌므로 스크롤 본문이 화면 밖으로 밀려나지 않는다. 펼침 상한이 58vh 라서
-  // 편집 중에도 씬이 42% 이상 상시 보인다(§4 지표: 편집 중 씬 ≥40%).
-  import { tick } from 'svelte';
+  // 있고 max-height 만 바뀌므로 스크롤 본문이 화면 밖으로 밀려나지 않는다. 펼침 상한(HALF_VH)은
+  // 카메라가 피사체를 앉힐 밴드를 남기는 값으로 정한다 — 아래 상수 주석 참조.
+  import { tick, untrack } from 'svelte';
   import { device } from '../lib/device.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
 
@@ -20,7 +20,16 @@
   } = $props();
 
   // 시트 상태머신 — 2 detent(peek / half). 'hidden' 은 open=false(연출 중 숨김) 전용.
-  const HALF_VH = 0.58;                       // 펼침 상한(씬 ≥42% 상시 가시)
+  //
+  // 펼침 상한. 58vh 였으나 세로 폰에서 시트+보기 카드+올라온 독을 합치면 카메라가 피사체를
+  // 앉힐 밴드가 코어의 최소 가시분(뷰포트의 28%, focus-framing.js)에 못 미쳐 **편집 중인 집이
+  // 화면에 없었다** — P2 의 본질이 그대로 남아 있던 자리다. 이 값은 그 밴드를 확보하면서
+  // §4 의 "가시 스크롤 ≥200px" 도 두 폰 크기 모두에서 유지하는 값(실측).
+  //
+  // 360×780 에서는 두 요구가 서로를 밀어낸다: 밴드 높이 하한이 상한을 누르고 스크롤 하한이
+  // 상한을 올린다. 실측 창은 4px 도 안 됐으므로 컨트롤을 지우지 않는 두 곳에서 여유를 만들었다 —
+  // 올라온 독의 간격 14→8px, 시트 헤더·푸터 패딩 -4px 씩. 그 결과 두 폰 크기 모두 여유 ~7px.
+  const HALF_VH = 0.51;
   let viewportH = $state(0);
   let snap = $state('hidden');
   let dragH = $state(null);                   // 드래그 중 실시간 가시 높이(px), null=스냅
@@ -66,6 +75,14 @@
     }
   });
 
+  // 펼침 높이를 한 곳에서 게시한다 — 올라온 공유 독(.actions.lifted)과 보기 카드가 같은 값을
+  // 소비하므로 상한을 바꿀 때 세 파일의 상수가 어긋날 수 없다.
+  $effect(() => {
+    if (!device.sheet || !halfPx) return;
+    document.documentElement.style.setProperty('--sheet-half', `${halfPx}px`);
+    return () => document.documentElement.style.removeProperty('--sheet-half');
+  });
+
   // 외부 open 제어 → 진입(peek)/이탈(hidden).
   $effect(() => {
     if (!device.sheet) return;
@@ -74,9 +91,16 @@
   });
   // 외부 detent 요청(#158 P3): App 이 컨텍스트에 따라 실제로 값을 넘긴다 — 부감=peek, 근접=half.
   //   focus-in 이 시트를 자동으로 펼치므로 모바일 첫 사용자가 손잡이를 찾지 않아도 편집에 도달한다.
+  //
+  // 요청은 **컨텍스트가 바뀌는 순간의 1회성**이다. 매번 클램프하면 snap 이 이 effect 의 의존값이라
+  // 사용자가 손잡이로 펼친 즉시 요청값으로 되돌아가 — 부감(요청=peek)에서 시트를 손으로 펼치는
+  // 것이 아예 불가능했다(후속 라운드 실측). 그래서 요청이 실제로 달라졌을 때만 적용한다.
+  let appliedDetent = null;
   $effect(() => {
-    if (!device.sheet || !open || detent == null || dragging) return;
-    if ((detent === 'half' || detent === 'peek') && snap !== 'hidden') snap = detent;
+    if (!device.sheet || !open) { appliedDetent = null; return; }
+    if (detent == null || dragging || detent === appliedDetent) return;
+    appliedDetent = detent;
+    if ((detent === 'half' || detent === 'peek') && untrack(() => snap) !== 'hidden') snap = detent;
   });
 
   let startPY = 0, startH = 0, movedBy = 0;
@@ -257,7 +281,7 @@
     display: flex; flex-direction: column;
     padding: 0 clamp(16px, 5vw, 22px) 12px;
   }
-  .sheethead { flex: none; padding: 2px clamp(16px, 5vw, 22px) 8px; }
+  .sheethead { flex: none; padding: 2px clamp(16px, 5vw, 22px) 4px; }
   /* 접힘(peek)에서는 손잡이만 보인다 — 잘린 헤더 조각이 씬 위에 남지 않게. */
   .sheet[data-snap='peek'] .sheethead,
   .sheet[data-snap='peek'] .scroll,
@@ -265,7 +289,7 @@
   /* 푸터는 시트가 늘 뷰포트 안에 있으므로 실제 하단에 도킹된다(구 상단 도킹 우회 불필요). */
   .sheetfoot {
     flex: none;
-    padding: 9px clamp(16px, 5vw, 22px) calc(10px + env(safe-area-inset-bottom));
+    padding: 6px clamp(16px, 5vw, 22px) calc(9px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--ink-line);
   }
 </style>

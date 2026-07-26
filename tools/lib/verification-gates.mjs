@@ -3,6 +3,7 @@ export const VERIFICATION_GATES = Object.freeze({
   'core-full': Object.freeze({ script: 'check', resource: 'cpu', tier: 'merge', description: 'All browser-free contracts' }),
   app: Object.freeze({ script: 'check:app', resource: 'browser', tier: 'checkpoint', description: 'Full application smoke' }),
   'ui-shell': Object.freeze({ script: 'check:ui-shell', resource: 'browser', tier: 'checkpoint', description: 'Three-axis UI shell geometry, reachability, and scene visibility' }),
+  entry: Object.freeze({ script: 'check:entry', resource: 'browser', tier: 'checkpoint', description: 'Hero entry responsiveness: press acknowledged on the first frame, explicit progress, no blank window' }),
   'ink-app': Object.freeze({ script: 'check:ink:app', resource: 'browser', tier: 'checkpoint', description: 'Ink mode application contract' }),
   petals: Object.freeze({ script: 'check:petals', resource: 'browser', tier: 'checkpoint', description: 'Seasonal particle and weather contract' }),
   'particle-geometry': Object.freeze({ script: 'check:particle-geometry', resource: 'browser', tier: 'checkpoint', description: 'Physical precipitation, close-detail particle, and hanji-light geometry' }),
@@ -28,7 +29,7 @@ export const VERIFICATION_GATES = Object.freeze({
 });
 
 export const ALL_PROFILE = Object.freeze([
-  'docs', 'core-full', 'app', 'ui-shell', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse',
+  'docs', 'core-full', 'app', 'ui-shell', 'entry', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse',
   'yard-life', 'winter-app', 'worker', 'audio',
   'temple-browser', 'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);

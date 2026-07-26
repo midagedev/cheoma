@@ -384,6 +384,10 @@ try {
       houseOpacity: Number(getComputedStyle(slider.closest('.ctx.house')).opacity),
       footerOpacity: Number(getComputedStyle(document.querySelector('.foot.house')).opacity),
       modeText: document.querySelector('[data-breadcrumb]')?.textContent?.replace(/\s+/g, ' ').trim(),
+      // #158 B안: 두 의도(둘러보기 / 집 보기)는 폐기된 ModeToggle 이 아니라 만들기 패널의 2탭이
+      // 소유한다. 브레드크럼은 현재 컨텍스트만 이름 짓는다(예: "마을 › 초가").
+      tabsText: [...document.querySelectorAll('[data-make-panel] .axistab')]
+        .map((tab) => tab.textContent.replace(/\s+/g, ' ').trim()),
       exportText: document.querySelector('.actions [data-action="export"]')?.textContent?.replace(/\s+/g, ' ').trim(),
     };
   }, fixture.parcelId);
@@ -400,8 +404,9 @@ try {
   invariant(livePreview.floraSame, 'live preview rebuilt the merged flora batch');
   invariant(livePreview.houseOpacity > 0.99 && livePreview.footerOpacity > 0.99,
     `live input faded the editing context (${livePreview.houseOpacity}/${livePreview.footerOpacity})`);
-  invariant(/둘러보기.*집 보기/.test(livePreview.modeText || '') && /내보내기/.test(livePreview.exportText || ''),
-    `live input removed UI actions (${livePreview.modeText}/${livePreview.exportText})`);
+  invariant(/둘러보기/.test(livePreview.tabsText.join(' ')) && /집 보기/.test(livePreview.tabsText.join(' '))
+    && /›/.test(livePreview.modeText || '') && /내보내기/.test(livePreview.exportText || ''),
+  `live input removed UI actions (${JSON.stringify(livePreview.tabsText)}/${livePreview.modeText}/${livePreview.exportText})`);
   invariant(Math.abs(livePreview.box.x - liveFixture.startBox.x) > 0.1
     || Math.abs(livePreview.box.z - liveFixture.startBox.z) > 0.1,
   'eave slider did not visibly change the house footprint before pointer release');
@@ -837,8 +842,13 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(180);
   const mobileGrip = page.locator('.sheet.context .grip');
-  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
-  await mobileGrip.click();
+  // #158 P3: focus-in owns the detent, so a sheet that is already editing a house arrives at
+  // 'half' the moment the viewport becomes a phone — there is no 'peek' left to open. The grip
+  // tap stays for the collapsed (aerial) case, and the expanded detent is required either way.
+  await page.waitForFunction(() => !!document.querySelector('.sheet.context')?.dataset.snap, null, { timeout });
+  if (await page.evaluate(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek')) {
+    await mobileGrip.click();
+  }
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
   // data-snap changes before the 420ms transform finishes. Wait on the actual
   // sheet transition instead of relying on locator hover stability: in the full
@@ -861,7 +871,7 @@ try {
     'mobile grip missed pointerdown');
   await page.mouse.move(gripBox.x + gripBox.width / 2, 36, { steps: 8 });
   await page.mouse.up();
-  // #158 re-authored: the sheet has two detents (peek / half<=58vh). Dragging past
+  // #158 re-authored: the sheet has two detents (peek / a capped half). Dragging past
   // the top no longer opens a third "full" detent that buried the scroll body and
   // the edited house; it settles back at the capped expanded detent.
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });

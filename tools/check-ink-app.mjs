@@ -409,10 +409,22 @@ try {
     engine.setRenderStyle('ink', { immediate: true });
     await Promise.resolve();
     const restoredInk = engine.debugInk();
+    // ui-consolidation §6.13 decision A: while a house is being edited on the portrait sheet
+    // layout the whole view axis — the ink toggle with it — collapses to a 44px chip, because
+    // that frame cannot host the sheet, the full view card and the lifted dock and still leave
+    // the camera a band for the edited house. What this contract is about is unchanged (the ink
+    // toggle is on screen, 44px, and states the restored mode), so it performs the documented
+    // single tap first. `viewCollapsed` records that the collapse actually happened, so a silent
+    // revert to a resident card on the phone still shows up here.
+    const chip = document.querySelector('[data-view-chip]');
+    const viewCollapsed = !!chip;
+    chip?.click();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const group = document.querySelector('.render-style');
     const buttons = [...group.querySelectorAll('button')];
     const rect = group.getBoundingClientRect();
     return {
+      viewCollapsed,
       inside: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
       heights: buttons.map((button) => button.getBoundingClientRect().height),
       pressed: buttons.map((button) => button.getAttribute('aria-pressed')),
@@ -424,8 +436,9 @@ try {
       restoredInk,
     };
   });
-  pass(mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
-    'mobile control stays on-screen with 44px touch targets', JSON.stringify(mobileUi));
+  pass(mobileUi.viewCollapsed && mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
+    'editing collapses the mobile view axis to a chip and one tap restores an on-screen 44px ink toggle',
+    JSON.stringify(mobileUi));
   pass(mobileUi.pressed[1] === 'true', 'mobile shared URL exposes the restored ink state');
   // Re-authored 2026-07-25 (docs/mobile-effects-audit.md R7/M12). The paper source is broad,
   // low-frequency grain, and the phone-only 512 bought a visible tile repeat for 3 MB of texture
