@@ -1009,3 +1009,30 @@ town 기와 L/H **2.57**. 상류 목표 2.55에 village는 소폭 상회(배치 
 boost 단조 비례가 아니다). 관측 대역(1–3.6) 안. 멍석 하한 2.1 m·농촌 structureScale=1·
 hamlet houseFit≥0.90 유지. capital/hanyang plan 골든 해시 불변(도성 최소 변경).
 별채 유효 182/403(≥100), 마당 소품 폴리곤 이탈 0 유지.
+
+## 10. 1인칭 walk solids — 대문 틈·담·집 의미 solid (#150-J)
+
+### 10.1 제품 번역
+
+1인칭 보행 충돌은 **mesh-bvh 메시 충돌이 아니라** plan 의미 solid다.
+
+| solid | 소스 | 비고 |
+| --- | --- | --- |
+| 담 런 세그먼트 | `wall-contract` `villageWallProfile` + `splitVillageWallGate`, `access.gateEdge/gateT` | 대문 틈은 solid에서 **빠진다** |
+| 집 질량 | `parcelLocalBodyPolygons` 월드 폴리곤 | 처마 eaves·fat AABB가 아니라 벽체 footprint — ㄱ/ㄷ 마당을 통째로 막지 않음 |
+| 종가·궁·절 | 필지/랜드마크 풋프린트 OBB | multi-hall 복합을 free walk로 뚫지 않게 보수적으로 닫음 |
+
+`src/cinematic/walk-solids.js`가 Three-free 소유자이고, `walker.js`만 소비한다. 드론 경로의
+`buildObstacles`(필지 전체 지붕 볼륨)와 **역할을 섞지 않는다**. auto-stroll은 계속 도로
+폴리라인만 따른다 — 마당 진입은 free walk 입력 경로의 계약이다.
+
+### 10.2 한계 (제품 번역이 아닌 것)
+
+- **역사 보행·고샅 topology 복원이 아니다.** `parcel.access`의 road→gate 선분은 좌향·접근 거리의
+  검증 최소 사실이며, 이웃 필지 담·집을 우회하는 골목 경로를 보장하지 않는다
+  (`parcel-contract.js` 주석과 동일).
+- 별채·장독대·마당 소품·계단 성토·지형 단차는 walk solid에 넣지 않았다.
+- 문짝 개폐·문턱 높이는 별도 primary-door 계약이며 walk solid와 공유하지 않는다.
+- 몸 반경 0.45 m·축분리 슬라이드는 캐릭터 컨트롤러 편의값이다.
+
+게이트: `npm run check:walk-solids` (또는 `check:cinematic`).

@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { createHeadingController, shortestAngleDelta } from '../camera/heading.js';
-import { buildObstacles, mainRoad } from './dronepath.js';
+import { mainRoad } from './dronepath.js';
+import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 
-// 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103).
+// 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103, 대문 진입 #150-J).
 //   createWalker({ site, plan, heightAt }) → walker
 //     walker.update(dt, input) → { pos, dir }    input:{ fwd, strafe, yaw, pitch, run }
 //       fwd/strafe ∈ [-1,1] 이동 의도, yaw/pitch 는 이번 프레임 시선 회전 증분(rad, 호출부가 감도 적용),
@@ -12,8 +13,9 @@ import { buildObstacles, mainRoad } from './dronepath.js';
 //     walker.setPos(x,z) / walker.yaw / walker.pitch
 //
 // 접지: 시선고 = heightAt + 1.6m, 계단·성토 패드 단차를 지수 스무딩(단차에서 튀지 않게). 하한 클램프로
-//   지면 침하(발이 땅 아래) 0 보장. 충돌: 필지 풋프린트(담 포함)를 solid OBB 로 보고 축분리 슬라이드
-//   (뚫고 들어가기 금지). 대문 개구 통과는 미구현(간이) — 필지 전체를 solid 로 취급, 담을 따라 미끄러짐.
+//   지면 침하(발이 땅 아래) 0 보장. 충돌: walk-solids — 담 런 세그먼트 + 집 지붕 OBB(대문 틈 open).
+//   필지 전체를 solid 로 쓰지 않으므로 free walk 가 도로→대문→마당으로 들어갈 수 있다. 종가·궁·절은
+//   보수적 풋프린트 solid. auto-stroll 은 계속 도로 폴리라인만 따른다(마당 진입 없음). mesh-bvh 불필요.
 //   경계: 마을 분지(bowlR)·1.12 밖으로 나가지 않는 하드 캡.
 //   자동산책 종점: 먼저 멈춰 바라본 뒤 52°/s·120°/s² 제한으로 회전하고 다시 걷는다. 정확히 반대인
 //   ±π 목표도 회전면을 고정해 한 프레임 급회전이나 좌우 부호 진동을 만들지 않는다.
@@ -33,17 +35,11 @@ export function createWalker({ site, plan, heightAt } = {}) {
   const H = typeof heightAt === 'function' ? heightAt : (site && site.heightAt) || (() => 0);
   const C = site.center, bowlR = site.bowlR, R = site.R;
   const MAXR = bowlR * 1.12;                 // 경계 하드 캡
-  const obstacles = buildObstacles(plan, H); // 지붕 top 은 미사용, 풋프린트 OBB 만 사용
+  // Gate-aware semantic solids (walls + house OBB); drone still uses buildObstacles.
+  const obstacles = buildWalkSolids(plan, H);
 
-  // (x,z) 가 어떤 담(풋프린트+몸 반경) 안이면 true.
-  const collides = (nx, nz) => {
-    for (const o of obstacles) {
-      const dx = nx - o.cx, dz = nz - o.cz;
-      const lx = dx * o.cos - dz * o.sin, lz = dx * o.sin + dz * o.cos;
-      if (Math.abs(lx) <= o.hw + BODY && Math.abs(lz) <= o.hd + BODY) return true;
-    }
-    return false;
-  };
+  // (x,z) 가 어떤 solid(+몸 반경) 안이면 true.
+  const collides = (nx, nz) => pointHitsWalkSolids(obstacles, nx, nz, BODY);
   // 필지 안이면 남(+z)으로 밀어 열린 지점 확보(안전 스폰).
   const nudgeOut = (x, z) => {
     if (!collides(x, z)) return { x, z };

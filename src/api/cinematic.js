@@ -40,6 +40,20 @@ export {
   mainRoad,
   roofTopAt,
 } from '../cinematic/dronepath.js';
+export {
+  buildWalkSolids,
+  houseSolidProbePoint,
+  makeWalkPolySolid,
+  makeWalkSolid,
+  parcelHouseWalkSolid,
+  parcelHouseWalkSolids,
+  parcelWallWalkSolids,
+  pointHitsWalkSolid,
+  pointHitsWalkSolids,
+  sampleGateCourtyardPath,
+  sampleWallMidBlocked,
+  wallSegmentSolid,
+} from '../cinematic/walk-solids.js';
 export { createWalker } from '../cinematic/walker.js';
 export {
   createArchitecturalReveal,
