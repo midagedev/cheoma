@@ -1,8 +1,8 @@
 # 재사용 가능한 한국 사찰 생성기 설계
 
 > - **상태**: 현재 계약·구현 완료
-> - **관련 이슈**: GitHub #12 — 절 크기·구성·편집 다양화, GitHub #122 — 전각 역할별 건축 위계
-> - **기준일**: 2026-07-24
+> - **관련 이슈**: GitHub #12 — 절 크기·구성·편집 다양화, GitHub #122 — 전각 역할별 건축 위계, GitHub #150 E — 문·단·누하 진입 시퀀스
+> - **기준일**: 2026-07-26
 > - **선행 조건**: 사찰 터 재배치 #5, 남측 일조·focus 구도 #15
 > - **목표 경계**: `src/`의 framework-agnostic Three.js 모듈, `app/` 의존 금지
 
@@ -50,13 +50,14 @@
 
 ## 3. 모듈 경계
 
-생성기는 다음 세 층으로 구현한다.
+생성기는 다음 층으로 구현한다.
 
 1. `src/temple/plan.js#planTempleCompound(options)` — Three.js 없이 local-space 순수 데이터만 만든다.
-2. `src/temple/compound.js#buildTempleCompound(plan, resources?)` — 계획을 Three.js group으로 조립하고 `disposeTempleCompound()`로 소유 자원을 해제한다.
-3. `src/village/temple-plan.js`와 `src/generators/village/features.js` — site의 `baseY`, 회전 transform, terrain apron, approach, 식생 예약을 결합한다.
+2. `src/temple/entry-sequence.js` — 속→성 진입 시퀀스(문·단·누하·중정) 순수 기록과 산지 에이프런 단 계약.
+3. `src/temple/compound.js#buildTempleCompound(plan, resources?)` — 계획을 Three.js group으로 조립하고 `disposeTempleCompound()`로 소유 자원을 해제한다.
+4. `src/village/temple-plan.js`와 `src/generators/village/features.js` — site의 `baseY`, 회전 transform, terrain apron, approach, 식생 예약을 결합한다.
 
-외부 소비자는 Three 없는 `src/api/temple-plan.js` 또는 renderer까지 포함한 `src/api/temple.js`를 쓴다. 내부 계획기는 village나 Svelte를 import하지 않는다. 다른 프로젝트는 terrain/village 없이도 local-space 가람만 만들 수 있고, 렌더러는 건물·프롭 위치나 역할별 지붕·공포·처마를 새로 추론하지 않고 plan을 그대로 소비한다. 순수 `src/temple/role-hierarchy.js`가 역할 repertoire, builder parameter 변환, 실제 처마 polygon을 함께 소유한다.
+외부 소비자는 Three 없는 `src/api/temple-plan.js` 또는 renderer까지 포함한 `src/api/temple.js`를 쓴다. 내부 계획기는 village나 Svelte를 import하지 않는다. 다른 프로젝트는 terrain/village 없이도 local-space 가람만 만들 수 있고, 렌더러는 건물·프롭 위치나 역할별 지붕·공포·처마를 새로 추론하지 않고 plan을 그대로 소비한다. 순수 `src/temple/role-hierarchy.js`가 역할 repertoire, builder parameter 변환, 실제 처마 polygon을 함께 소유한다. 진입 순서는 `entry-sequence.js`가 소유하며 variant 이름만으로 두 번째 동선을 만들지 않는다.
 
 권장 계획 데이터:
 
@@ -67,16 +68,23 @@
   variant,          // compact | courtyard | extended
   width, depth,
   axis,
-  courtyards: [{ id, polygon, level }],
+  courtyards: [{ id, polygon, level, elevation }],
   buildings: [{
     id, role, style, position, yaw, frontBays, sideBays,
     architecturalRank, roofGrammar, bracketGrammar, eaveGrammar, massingGrammar,
     eaveFootprint, footprint,
+    // gate-pavilion pass-under only:
+    passUnder: { openLower: true, corridorWidth, corridorHeight },
   }],
   enclosures: [{ id, role, polygon, gateId }],
   gates: [{ id, role, position, yaw }],
   props: [{ id, role, kind, position, yaw, scale }],
-  paths: [{ id, role, points, width }]
+  paths: [{ id, role, points, width }],
+  entrySequence: {
+    schemaVersion: 1,
+    profile,          // flat | mountain
+    stages: [{ id, kind, order, role, position, level, elevation, refId, ... }],
+  },
 }
 ```
 
@@ -104,6 +112,22 @@
 - 부도는 핵심 중정에 장식처럼 놓지 않고 extended/별도 외곽 영역에서만 사용한다.
 - 프롭 개수보다 비움과 시선축이 우선이다. 큰 가람도 모든 슬롯을 채우지 않는다.
 
+### 4.1 진입 시퀀스 (문 · 단 · 누하 · 중정)
+
+`src/temple/entry-sequence.js`가 plan 소유 순수 기록으로 진입 동선을 고정한다. `+z`가 남쪽이므로 방문자는 남→북(큰 z → 작은 z)으로 걷는다.
+
+| profile | compact | courtyard / extended |
+| --- | --- | --- |
+| `flat` (기본) | `gate` → `court` | `gate` → `stair-apron` → `pass-under` → `court` |
+| `mountain` | `gate` → `stair-apron` → `court` | 같은 네 단계. `stair-apron.stairMode = 'apron-tiers'` |
+
+- **gate**: 남측 `south-gate` 기록. 기존 산문 메시를 재사용한다.
+- **stair-apron**: 평지는 `single-run` 얕은 단, 산지는 중정 `level`/`elevation` 에이프런 단이 곧 계단이다. 산지 extended는 외전 중정(낮음)과 예불 중정(높음)을 단으로 묶는다.
+- **pass-under (누하)**: courtyard/extended만. `gate-pavilion` 역할의 raised hall이 예불 중정 남연에 앉고 `passUnder.openLower`로 하층 회랑을 연다. 벽체를 생략한 기둥+지붕 볼륨으로 보행축을 관통시키며, 궁궐 잡상·취두를 추가하지 않는다. 개방 하층은 남측 일조 차폐로 세지 않는다.
+- **court**: 예불 중정(`role: 'worship'`).
+
+옵션 `entryProfile: 'mountain' | 'flat'`(또는 `profile`)은 `plan.settings.entryProfile`과 `entrySequence.profile`에 기록된다. 렌더러는 stage 순서를 재추론하지 않고 plan 기록을 소비한다. draw/program 예산은 기존 temple palette·병합 경로를 유지한다.
+
 ## 5. 편집 계약
 
 편집 패널은 렌더 오브젝트를 직접 조작하지 않고 `templeOptions`를 통해 계획 옵션을 갱신한다.
@@ -118,7 +142,7 @@
 
 ## 6. 품질과 검증 기준
 
-- 순수 계획: `npm run check:temple`이 30개 변형·크기·seed fixture와 6개 마을 adapter에서 겹침, 실제 처마 footprint 이탈, 역할 위계, 결정론, 남측 일조축, 접근로를 검사한다. 별도 v1 fixture는 새 architecture 필드를 모두 제거한 뒤 deterministic v2와 동일하게 승격되는지, 누락·미래 schema가 거절되는지도 고정한다.
+- 순수 계획: `npm run check:temple`이 30개 변형·크기·seed fixture와 6개 마을 adapter에서 겹침, 실제 처마 footprint 이탈, 역할 위계, 결정론, 남측 일조축, 접근로, 그리고 courtyard/extended의 `gate|stair-apron|pass-under|court` 진입 순서·남→북 진행·누하 openLower를 검사한다. mountain fixture는 에이프런 단 stairMode를 고정한다. 별도 v1 fixture는 새 architecture 필드를 모두 제거한 뒤 deterministic v2와 동일하게 승격되는지, 누락·미래 schema가 거절되는지도 고정한다.
 - 역사성: 역할별 배치 규칙을 자동 검사하되, 모든 사찰을 완전 대칭 한 템플릿으로 만들지 않는다.
 - 시각: `temple.html`에서 compact/courtyard/extended의 부감·남측 26° 망원 구도를 직접 보고, `npm run shoot:focus-level`로 실제 앱의 사찰 focus와 편집 전환을 확인한다.
 - 성능: `npm run check:temple:browser`가 raw/부감 merge 삼각형 동등성과 draw call을 기록한다. 2026-07-24 Chrome/Apple M1 Pro 기준 장면은 compact `845→97`, courtyard `1517→113`, extended `2685→139`이며, 병합본은 140콜·7 programs, 전체 재질은 72개 이하를 유지한다. 브라우저/드라이버가 다른 절대 시간은 비교하지 않는다.
@@ -136,5 +160,6 @@
 5. 부감에서는 재질별 정적 병합본만 보이고 focus에서는 편집 가능한 원본 계획을 재생성한다. 호출자 palette와 모듈 공유 프롭 자원의 소유권을 바꾸지 않는다.
 6. 사찰 카메라는 `frontDir`을 따라 남측 진입 공간에서 26° 망원으로 지면 위 3m를 조준한다. 일조축과 카메라축은 서로 다른 렌더 보정을 만들지 않는다.
 7. 모든 전각은 `architecturalRank`, `roofGrammar`, `bracketGrammar`, `eaveGrammar`, `massingGrammar`와 그 결과인 `eaveFootprint`를 v2 plan에 저장한다. 렌더러·충돌·경계는 같은 값을 소비하며 역할명으로 두 번째 문법이나 손으로 맞춘 plot box를 만들지 않는다. 역할 기반 복원은 오직 v1→v2 입력 upgrader 안에서만 허용한다.
+8. courtyard/extended는 plan-owned `entrySequence`로 `gate → stair-apron → pass-under → court` 순서를 유지한다. 누하는 개방 하층 `gate-pavilion`이며 궁궐 장식을 쓰지 않는다. 산지 profile은 별도 자유 계단 대신 에이프런 단으로 단차를 읽힌다.
 
 계획·renderer·village adapter·앱 schema·브라우저 게이트가 독립 파일을 가져 후속 병렬 작업이 같은 조립 파일을 불필요하게 공유하지 않게 한다.
