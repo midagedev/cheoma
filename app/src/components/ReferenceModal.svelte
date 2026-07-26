@@ -2,14 +2,17 @@
   // 신뢰도(참고 자료) 모달 — 씬 위 한지 오버레이. 별도 라우트 없이 열림/닫힘.
   // 콘텐츠는 docs/credits.md(단일 출처) → lib/credits.js 파싱본. 로케일(i18n)에 따라 ko/en 표시.
   // 데스크톱은 중앙 다이얼로그, 모바일(device.sheet)은 safe-area 존중 풀스크린 바텀 시트.
+  // 토픽 칩은 credits.md 의 topic 필드에서 동적으로 수집 — 하드코딩 목록 없음.
   import { tick } from 'svelte';
   import { i18n } from '../lib/i18n.svelte.js';
   import { device } from '../lib/device.svelte.js';
-  import { CREDITS } from '../lib/credits.js';
+  import { CREDITS, CREDIT_TOPICS } from '../lib/credits.js';
 
   let { open = false, onClose, returnFocus = null, fallbackFocus = null } = $props();
   let dialog = $state();
   let title = $state();
+  /** @type {string} '' = all topics */
+  let topicFilter = $state('');
   const lang = $derived(i18n.lang);
   const isKo = $derived(lang === 'ko');
   const titleId = 'reference-modal-title';
@@ -24,25 +27,53 @@
 
   // 정적 라벨(브랜드 요소가 아닌 UI 문구 — 여기서만 로케일화).
   const L = {
-    ko: { title: '참고 자료', sub: 'References & Credits', disclaimer: '면책', use: '활용', license: '라이선스', note: '제작 노트', close: '닫기' },
-    en: { title: 'References & Credits', sub: '참고 자료', disclaimer: 'Disclaimer', use: 'Applied to', license: 'License', note: 'Production note', close: 'Close' },
+    ko: {
+      title: '참고 자료',
+      sub: 'References & Credits',
+      disclaimer: '면책',
+      use: '활용',
+      license: '라이선스',
+      note: '제작 노트',
+      close: '닫기',
+      topics: '주제',
+      all: '전체',
+      scope: '범위',
+    },
+    en: {
+      title: 'References & Credits',
+      sub: '참고 자료',
+      disclaimer: 'Disclaimer',
+      use: 'Applied to',
+      license: 'License',
+      note: 'Production note',
+      close: 'Close',
+      topics: 'Topics',
+      all: 'All',
+      scope: 'Scope',
+    },
   };
   const lab = $derived(L[lang] || L.en);
   // 인트로는 원문(ko)만 존재 → en 등가 문장을 병기.
   const INTRO_EN = 'Each entry maps to what it shaped in the app, not the source alone. Licenses are as of the survey date (2026-07); re-verify before redistribution or commercial use.';
   const intro = $derived(isKo ? CREDITS.intro : INTRO_EN);
   const disclaimer = $derived(isKo ? CREDITS.disclaimer.ko : (CREDITS.disclaimer.en || CREDITS.disclaimer.ko));
-  const REFERENCE_TOPICS = new Map([
-    ['국사편찬위원회·서울역사박물관·국가유산청 — 조선 길가 배수와 제한적 마을 수로 / Roadside drainage and exceptional village waterways', 'drainage'],
-    ['국가한옥센터·한국건축역사학회·대한건축학회·한국주거학회 — 안동문화권 ㅁ자형 뜰집의 지역·기후·계층 한계 / Regional, climatic, and social limits of Andong-area enclosed houses', 'mja-hanok'],
-    ['NASA · WMO · Applied Optics — 달 각지름·달무리·구름 투과 / Lunar angular size, corona, and cloud transmission', 'moon-optics'],
-  ]);
 
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
   const localizedUse = (item) => (
     isKo ? item.use.ko : (item.use.en || item.use.ko)
   );
-  const referenceTopic = (item) => REFERENCE_TOPICS.get(item.title);
+  const topicLabel = (slug) => slug.replace(/-/g, ' ');
+
+  const visibleCategories = $derived(
+    CREDITS.categories
+      .map((cat) => ({
+        ...cat,
+        items: topicFilter
+          ? cat.items.filter((it) => it.topic === topicFilter)
+          : cat.items,
+      }))
+      .filter((cat) => cat.items.length > 0),
+  );
 
   // **볼드** 세그먼트 분해 — <strong> 로 렌더(먹 강조 유지). 일반 구간의 홑별표(*이탤릭*)는 제거.
   function segs(text) {
@@ -70,6 +101,10 @@
 
   function requestClose() {
     onClose?.();
+  }
+
+  function setTopicFilter(next) {
+    topicFilter = next;
   }
 
   function onKey(e) {
@@ -111,6 +146,8 @@
     const opener = returnFocus;
     const stableFallback = fallbackFocus;
     let active = true;
+    // Reset topic filter each open so a prior session does not hide entries.
+    topicFilter = '';
     const recoverFocus = (event) => {
       if (active && dialog && !dialog.contains(event.target)) {
         title?.focus({ preventScroll: true });
@@ -172,16 +209,51 @@
 
       {#if intro}<p class="intro">{intro}</p>{/if}
 
+      <!-- 토픽 필터 — catalog topic 필드에서 동적 수집 -->
+      {#if CREDIT_TOPICS.length}
+        <div class="topics" role="toolbar" aria-label={lab.topics}>
+          <button
+            type="button"
+            class="chip"
+            class:on={!topicFilter}
+            aria-pressed={!topicFilter}
+            onclick={() => setTopicFilter('')}
+          >{lab.all}</button>
+          {#each CREDIT_TOPICS as topic}
+            <button
+              type="button"
+              class="chip"
+              class:on={topicFilter === topic}
+              aria-pressed={topicFilter === topic}
+              data-reference-topic-chip={topic}
+              onclick={() => setTopicFilter(topic)}
+            >{topicLabel(topic)}</button>
+          {/each}
+        </div>
+      {/if}
+
       <!-- 카테고리 -->
-      {#each CREDITS.categories as cat}
+      {#each visibleCategories as cat}
         <section class="cat">
           <h3><span class="num">{cat.num}</span> {isKo ? cat.title.ko : (cat.title.en || cat.title.ko)}</h3>
           {#if cat.note}<p class="catnote">{cat.note}</p>{/if}
           <ul>
             {#each cat.items as it}
-              <li data-reference-item={it.title} data-reference-topic={referenceTopic(it)}>
-                <div class="it-title" data-reference-field="title">{it.title}</div>
-                {#each it.meta as m}<div class="it-meta" data-reference-field="scope">{m}</div>{/each}
+              <li
+                data-reference-item={it.title}
+                data-reference-id={it.id}
+                data-reference-topic={it.topic || undefined}
+              >
+                <div class="it-head">
+                  <div class="it-title" data-reference-field="title">{it.title}</div>
+                  {#if it.topic}
+                    <span class="it-topic" data-reference-field="topic">{topicLabel(it.topic)}</span>
+                  {/if}
+                </div>
+                {#if it.scope}
+                  <div class="it-scope" data-reference-field="scope"><span class="k">{lab.scope}</span>{it.scope}</div>
+                {/if}
+                {#each it.meta as m}<div class="it-meta">{m}</div>{/each}
                 {#if it.use}
                   <div class="it-use" data-reference-field="application"><span class="k">{lab.use}</span>{#each segs(localizedUse(it)) as s}{#if s.b}<strong>{s.t}</strong>{:else}{s.t}{/if}{/each}</div>
                 {/if}
@@ -283,7 +355,34 @@
   .disclaimer p { margin: 0; font-family: var(--serif); font-size: 13.5px; line-height: 1.7; color: var(--ink-soft); }
   .disclaimer strong { color: var(--ink); font-weight: 700; }
 
-  .intro { margin: 0 0 20px; font-family: var(--serif); font-size: 12px; line-height: 1.65; color: var(--ink-faint); }
+  .intro { margin: 0 0 14px; font-family: var(--serif); font-size: 12px; line-height: 1.65; color: var(--ink-faint); }
+
+  .topics {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 0 0 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--ink-hair);
+  }
+  .chip {
+    flex: none;
+    font-family: var(--serif);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    color: var(--ink-soft);
+    background: transparent;
+    border: 1px solid var(--ink-hair);
+    border-radius: 999px;
+    padding: 5px 10px;
+    text-transform: capitalize;
+    max-width: 100%;
+  }
+  .chip:hover { background: rgba(44, 38, 32, 0.05); }
+  .chip.on {
+    color: var(--paper);
+    background: var(--seal);
+    border-color: var(--seal);
+  }
 
   .cat { margin-bottom: 22px; }
   .cat h3 {
@@ -298,10 +397,26 @@
   .cat ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 15px; }
   .cat li { display: flex; flex-direction: column; gap: 3px; }
 
-  .it-title { font-family: var(--serif); font-weight: 700; font-size: 13.5px; color: var(--ink); line-height: 1.4; }
+  .it-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px;
+  }
+  .it-title { font-family: var(--serif); font-weight: 700; font-size: 13.5px; color: var(--ink); line-height: 1.4; flex: 1 1 12em; min-width: 0; }
+  .it-topic {
+    flex: none;
+    font-family: var(--serif);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: capitalize;
+    color: var(--seal);
+    border: 1px solid rgba(177, 54, 43, 0.28);
+    border-radius: 999px;
+    padding: 2px 7px;
+    line-height: 1.3;
+  }
+  .it-scope { font-family: var(--serif); font-size: 12px; color: var(--ink-faint); line-height: 1.5; }
   .it-meta { font-family: var(--serif); font-size: 12px; color: var(--ink-faint); line-height: 1.5; }
   .it-use { font-family: var(--serif); font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; margin-top: 2px; }
-  .it-use .k, .it-lic .k {
+  .it-use .k, .it-lic .k, .it-scope .k {
     display: inline-block; margin-right: 7px;
     font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--seal); vertical-align: 1px;
