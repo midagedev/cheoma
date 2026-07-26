@@ -4,16 +4,22 @@ import { setupPost, MSAA_SAMPLES_COMPACT, MSAA_SAMPLES_DESKTOP } from '../../../
 import { VILLAGE_FOCUS_DOF_APERTURE } from '../../../src/api/cinematic.js';
 import { createPostQualityRuntime } from './post-quality-runtime.js';
 
+// Aerial village frames: 2× MSAA is enough for soft distant edges and halves the
+// multisample color buffer vs desktop 4×. Focus restores full desktop samples so
+// eave/tile lines stay sharp on the flagship close frame. Compact phones stay 2×.
+const MSAA_SAMPLES_AERIAL = MSAA_SAMPLES_COMPACT;
+
 /** Wire the app's flagship post-processing pipeline and its hover outline. */
 export function createPostRuntime({ renderer, scene, camera, width, height, compact = false }) {
   // 기하 에지 MSAA. 컴포저가 켜진 순간 렌더러의 antialias 플래그는 무효이므로 이 값이 제품
   //   화면의 유일한 AA 소스다(src/env/msaa-render-pass.js). 폰이 2x 인 이유는 필레이트가 아니라
   //   멀티샘플 컬러 버퍼 메모리다 — SHADOW_SIZE 와 같은 iOS Safari 상한 제약.
+  // Boot aerial: start at aerial samples; setFocusBudget promotes to desktop 4×.
   const post = setupPost({
     renderer,
     scene,
     camera,
-    msaaSamples: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_DESKTOP,
+    msaaSamples: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_AERIAL,
   });
   post.setDofAperture(VILLAGE_FOCUS_DOF_APERTURE);
   // DoF·플레어는 전 디바이스에서 살아 있다. 둘은 focus 문맥이 소유하고(engine setPostFocus), 부감은
@@ -22,17 +28,41 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   // docs/mobile-effects-audit.md M3·M4, docs/look-grammar.md §5.
   post.setDof(true);
   post.setFlareEnabled(true);
+
+  let cssW = Math.max(1, width);
+  let cssH = Math.max(1, height);
+  // Aerial village frames read bloom as soft atmospheric haze; half-res is enough.
+  // Focus keeps full bloom (except compact phones, which always half-cap for memory).
+  // composer.setSize restores full device size, so every budget apply re-caps after.
+  let bloomHalf = true; // product boots in aerial / non-focus; focus promotes to full
+  const applyBloomResolution = (w, h) => {
+    // UnrealBloomPass.setSize already builds mips at half of the size it receives.
+    // Passing device-pixel size matches stock EffectComposer behaviour (beauty → ½ bloom).
+    // Aerial/compact pass half of that so the bright pass is ~¼ of beauty fill cost.
+    const pr = renderer.getPixelRatio() * (post.fillScale ?? 1);
+    const fullW = Math.max(1, Math.round(w * pr));
+    const fullH = Math.max(1, Math.round(h * pr));
+    if (compact || bloomHalf) {
+      post.bloomPass.setSize(Math.max(1, fullW >> 1), Math.max(1, fullH >> 1));
+    } else {
+      post.bloomPass.setSize(fullW, fullH);
+    }
+  };
+  applyBloomResolution(cssW, cssH);
+
   const qualityRuntime = createPostQualityRuntime({
     camera,
     bokehPass: post.bokehPass,
-    width,
-    height,
+    width: cssW,
+    height: cssH,
+    // Camera orbits cut fill-rate via a binary composer pixel-ratio scale while
+    // settled frames restore full density (src/env/post-quality-state.js).
+    // composer.setSize restores bloom to full CSS size, so compact re-caps after.
+    setFillScale: (scale) => {
+      post.setFillScale?.(scale);
+      applyBloomResolution(cssW, cssH);
+    },
   });
-
-  const applyBloomResolution = (w, h) => {
-    if (compact) post.bloomPass.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
-  };
-  applyBloomResolution(width, height);
 
   const outline = new OutlinePass(new THREE.Vector2(width, height), scene, camera);
   outline.edgeStrength = 2.2;
@@ -62,6 +92,25 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   return {
     post,
     outline,
+    /**
+     * Focus context owns bloom resolution and MSAA samples:
+     * - aerial: half bloom + 2× MSAA (soft distant haze)
+     * - focus: full bloom + desktop 4× MSAA (sharp eave/tile lines)
+     * Compact phones always stay half bloom / 2× MSAA.
+     */
+    setFocusBudget(focused) {
+      if (disposed) return;
+      const nextHalf = compact || !focused;
+      if (nextHalf !== bloomHalf) {
+        bloomHalf = nextHalf;
+        applyBloomResolution(cssW, cssH);
+      }
+      if (!compact && typeof post.renderPass?.setSamples === 'function') {
+        post.renderPass.setSamples(
+          focused ? MSAA_SAMPLES_DESKTOP : MSAA_SAMPLES_AERIAL,
+        );
+      }
+    },
     updateQuality(dt, referenceDepth) {
       if (disposed) return null;
       return qualityRuntime.update(dt, referenceDepth);
@@ -75,6 +124,10 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     debugResolution() {
       return {
         pixelRatio: renderer.getPixelRatio(),
+        fillScale: post.fillScale ?? 1,
+        bloomHalf: compact || bloomHalf,
+        msaaFocus: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_DESKTOP,
+        msaaAerial: compact ? MSAA_SAMPLES_COMPACT : MSAA_SAMPLES_AERIAL,
         // AA 회귀 게이트 판독축: samples=0 이면 컴포저 경로에 AA 가 전혀 없다.
         //   setSamples 로 런타임 교체될 수 있으므로 패스에서 라이브로 읽는다.
         msaaSamples: post.renderPass.samples,
@@ -87,6 +140,11 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
         outline: {
           width: outline.renderTargetMaskBuffer.width,
           height: outline.renderTargetMaskBuffer.height,
+        },
+        bloom: {
+          // Bright-pass target is the first half-mip UnrealBloomPass allocates.
+          width: post.bloomPass.renderTargetBright?.width ?? null,
+          height: post.bloomPass.renderTargetBright?.height ?? null,
         },
         // 프로그램·텍스처 수는 해상도/AA 판정의 유일하게 신뢰 가능한 성능 축이다
         // (헤드리스 ANGLE 의 절대 프레임 ms 는 증거가 못 된다 — CLAUDE.md 검증 절).
@@ -134,10 +192,12 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     },
     resize(w, h) {
       if (disposed) return;
-      post.setSize(w, h);
-      qualityRuntime.resize(w, h);
+      cssW = Math.max(1, w);
+      cssH = Math.max(1, h);
+      post.setSize(cssW, cssH);
+      qualityRuntime.resize(cssW, cssH);
       // composer.setSize restores bloom to full resolution, so compact mode reapplies its cap.
-      applyBloomResolution(w, h);
+      applyBloomResolution(cssW, cssH);
       // OutlinePass 크기는 composer가 현재 DPR을 반영한 device px로 이미 전파한다.
     },
     dispose() {

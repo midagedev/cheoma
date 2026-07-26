@@ -46,8 +46,12 @@ import {
   applyMaterialRoleTints,
   buildParcelSpec,
   clampBuildingDimensions,
+  isResidentialOpeningsOnlyEdit,
+  isResidentialThatchOnlyEdit,
   parcelWallType,
   palaceCompoundDefaults,
+  residentialRoofBoundsMatch,
+  residentialYardSignature,
   resolveResidentialEdit,
 } from './parcel-edit.js';
 import {
@@ -1128,19 +1132,22 @@ export function createVillageHandle(opts, seed, plan, group) {
         ? prev?.getObjectByName('threshold-life-detail') || null
         : null;
       retainedLife?.parent?.remove(retainedLife);
-      if (prev) {
-        releasePrimaryDoor(parcelId);
-        releaseResidentialGlow(parcelId);
-        disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId);
-      }
-      persistentOverrideIds.delete(parcelId);
 
       if (parcel.hero) {
+        if (prev) {
+          releasePrimaryDoor(parcelId);
+          releaseResidentialGlow(parcelId);
+          disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId);
+        }
+        persistentOverrideIds.delete(parcelId);
         // 특수 필지(종가·관아)는 풀디테일 오버레이로 편집 반영(#48·#62·#59). populate 언머지(heroHandle)
         // 전엔 근접 소품이 함께 가려지는 폴백을 피하려 편집 미지원(null) — 랜딩·리플레이는 showHeroDetail 경유.
         if (!heroHandle) return null;
         return showHeroDetail(parcelId, heroEditOpts(parcel, newParams));
       }
+      // Authoritative previous state is only the committed map. Overlay
+      // userData.editSpec is a debug/cache tag and must not outlive a reroll that
+      // deliberately clears committed edits (footprintScale etc. would stick).
       const previousEditSpec = committedResidentialSpecs.get(parcelId) || null;
       const previousAcceptedSpec = previousEditSpec || buildParcelSpec(parcel);
       const edit = resolveResidentialEdit(
@@ -1149,6 +1156,172 @@ export function createVillageHandle(opts, seed, plan, group) {
         newParams,
       );
       const gk = edit.kind;
+
+      // ── Fast path: thatchAge-only (choga). Re-tint the map without rebuild. ──
+      if (prev && isResidentialThatchOnlyEdit(previousAcceptedSpec, edit)) {
+        const house = prev.userData.houseRoot || prev.children[0];
+        if (house?.userData?.materials) {
+          applyThatchAge(house.userData.materials, edit.top.thatchAge);
+          prev.userData.editSpec = edit.spec;
+          if (persist) {
+            persistentOverrideIds.add(parcelId);
+            prev.userData.exportPersistentParcel = true;
+            committedResidentialSpecs.set(parcelId, edit.spec);
+            parcel.thatchAge = edit.top.thatchAge;
+            if (refreshFlora) refreshVillageFlora();
+          }
+          representationDirty = true;
+          return prev;
+        }
+      }
+
+      const nextYardSig = residentialYardSignature(gk, edit.top);
+      const openingsOnly = !!(prev && isResidentialOpeningsOnlyEdit(previousAcceptedSpec, edit));
+      const bld = { ...edit.building };
+      // 프리셋 ← 변주 ov(실제 렌더 기준) ← 편집 오버라이드. 격식 가드로 치수 클램프.
+      // A cross-kind edit starts from that kind's base variant instead of interpreting a
+      // choga variant index as a giwa mirror (or vice versa).
+      const variantParcel = gk === parcel.kind ? parcel : { ...parcel, kind: gk, variant: 0 };
+      const changedKind = gk !== parcel.kind;
+
+      const assembleHouse = () => {
+        const preset = { ...PRESETS[gk], ...variantOv(variantParcel), ...bld };
+        clampBuildingDimensions(preset, gk);
+        const house = buildBuilding(preset);
+        if (gk === 'choga') applyThatchAge(house.userData.materials, edit.top.thatchAge);
+        const preserveGeneratedRoofTone = !previousEditSpec
+          && newParams.roofTone === undefined && !changedKind;
+        const roofTint = preserveGeneratedRoofTone
+          ? (parcel.roofTone || toneOf(gk, parcel.toneIdx || 0))
+          : toneOf(gk, edit.top.roofTone);
+        applyMaterialRoleTints(house, {
+          roof: roofTint,
+          wall: changedKind ? null : parcel.wallTone,
+          wood: changedKind ? null : parcel.woodTone,
+          stone: changedKind ? null : parcel.stoneTone,
+        });
+        const local = parcelHouseTranslation(parcel);
+        house.position.set(local.x, 0, local.z);
+        const fs = edit.top.footprintScale;
+        const mirrorX = variantMirrorX(variantParcel);
+        house.scale.set(mirrorX * (parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
+        house.userData.variantMirrorX = mirrorX;
+        return house;
+      };
+
+      // ── Fast path: openings-only. Keep the overlay group, courtyard wall, and
+      // aux; only swap the house mesh. Avoids re-applyMatrix4 and wall rebuild.
+      if (openingsOnly
+        && prev?.userData?.wallRoot
+        && prev.userData.yardSignature === nextYardSig
+        && prev.userData.houseRoot) {
+        releasePrimaryDoor(parcelId);
+        releaseResidentialGlow(parcelId);
+        const oldHouse = prev.userData.houseRoot;
+        prev.remove(oldHouse);
+        disposeTree(oldHouse);
+        const house = assembleHouse();
+        // Insert house before wall/aux so child order stays house → wall → aux.
+        prev.add(house);
+        if (house.parent === prev) {
+          const wall = prev.userData.wallRoot;
+          const aux = prev.userData.auxRoot;
+          // Re-order: house first (three doesn't have setIndex; re-add).
+          prev.remove(house);
+          if (wall) prev.remove(wall);
+          if (aux) prev.remove(aux);
+          prev.add(house);
+          if (wall) prev.add(wall);
+          if (aux) prev.add(aux);
+        }
+        prev.userData.houseRoot = house;
+        prev.userData.editSpec = edit.spec;
+        prev.userData.snowRoofKind = gk;
+        house.updateWorldMatrix(true, true);
+        // Openings do not move the roof AABB, but recompute for exact door bounds.
+        const buildingBox = new THREE.Box3().setFromObject(house);
+        const editRoofBounds = {
+          minX: buildingBox.min.x, maxX: buildingBox.max.x,
+          minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+        };
+        const editBuildingBounds = {
+          minX: buildingBox.min.x, maxX: buildingBox.max.x,
+          minY: buildingBox.min.y, maxY: buildingBox.max.y,
+          minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+        };
+        // Box3.setFromObject includes the group's already-applied parcel matrix
+        // (world). Store parcel-local by inverse-transforming corners is heavy;
+        // openings-only reuses previous local bounds when the shell is identical.
+        const localRoof = prev.userData.editRoofBounds || editRoofBounds;
+        const localBuilding = prev.userData.editBuildingBounds || editBuildingBounds;
+        prev.userData.editRoofBounds = localRoof;
+        prev.userData.editBuildingBounds = localBuilding;
+        activatePrimaryDoor(parcelId, prev);
+        if (persist) {
+          persistentOverrideIds.add(parcelId);
+          prev.userData.exportPersistentParcel = true;
+          setResidentialBaseExportHidden(parcel, true);
+          committedResidentialSpecs.set(parcelId, edit.spec);
+          if (RESIDENTIAL_OPENING_PARAM_KEYS.some((key) => (
+            edit.spec.params[key] !== previousAcceptedSpec.params[key]
+          ))) {
+            shareableResidentialIds.add(parcelId);
+          }
+          parcel.editRoofBounds = localRoof;
+          parcel.editBuildingBounds = localBuilding;
+          // Keep pick-proxy buildingSpec in lockstep with committed openings so
+          // debug/panel/share state cannot drift from the overlay mesh. Occlusion
+          // + flora are commit-only (refreshFlora) — door motion uses the overlay.
+          const proxy = proxyById.get(parcelId);
+          if (proxy) refreshParcelPickProxy(proxy, parcel, site, edit.spec, proxies, plan);
+          if (refreshFlora) {
+            primaryDoorOcclusion.refreshParcel({ ...parcel, kind: gk });
+            refreshVillageFlora();
+          }
+        }
+        // Snow roof tint already on the previous house materials for this group;
+        // only re-inject when weather is active and materials are new.
+        if (snow.isActive()) snow.inject(house);
+        retainOverlayPrograms(house, gk + (snow.isActive() ? '|snow' : ''));
+        registerResidentialGlow(parcelId, prev);
+        if (focusedResidentialIds.has(parcelId)) {
+          if (retainedLife) thresholdLife.reattach(prev, retainedLife, thresholdLifeCondition());
+          else if (!prev.getObjectByName('threshold-life-detail')) {
+            thresholdLife.attach(prev, thresholdLifeCondition());
+          }
+        }
+        representationDirty = true;
+        setResidentialBaseHidden(parcel, true);
+        return prev;
+      }
+
+      // Yard mesh can survive a house-only rebuild when the courtyard signature
+      // and roof AABB still match — openings / roof pitch previews skip wall gen.
+      // Openings-only sliders (common path) never move the roof AABB, so the
+      // post-build bounds check is guaranteed once structure + yard match.
+      const prevRoofBounds = prev?.userData?.editRoofBounds || null;
+      let retainedWall = null;
+      let retainedAux = null;
+      let retainedAuxiliarySpec = null;
+      if (prev
+        && prev.userData?.yardSignature === nextYardSig
+        && prev.userData?.wallRoot) {
+        // Bounds check against the *new* house happens after build; stage here.
+        retainedWall = prev.userData.wallRoot;
+        retainedAux = prev.userData.auxRoot || null;
+        retainedAuxiliarySpec = prev.userData.auxiliarySpec || null;
+        retainedWall.parent?.remove(retainedWall);
+        retainedAux?.parent?.remove(retainedAux);
+      }
+
+      if (prev) {
+        releasePrimaryDoor(parcelId);
+        releaseResidentialGlow(parcelId);
+        // Detached wall/aux are not in the tree — dispose only the rest.
+        disposeTree(prev); overrides.remove(prev); overrideById.delete(parcelId);
+      }
+      persistentOverrideIds.delete(parcelId);
+
       const g = new THREE.Group();
       g.name = `override-${parcelId}`;
       g.userData.exportPersistentParcel = false;
@@ -1158,40 +1331,9 @@ export function createVillageHandle(opts, seed, plan, group) {
       g.userData.D = parcel.plotD || 18;
       g.userData.style = gk;
       g.userData.parcel = parcel;
-      const bld = { ...edit.building };
-      // 프리셋 ← 변주 ov(실제 렌더 기준) ← 편집 오버라이드. 격식 가드로 치수 클램프.
-      // A cross-kind edit starts from that kind's base variant instead of interpreting a
-      // choga variant index as a giwa mirror (or vice versa).
-      const variantParcel = gk === parcel.kind ? parcel : { ...parcel, kind: gk, variant: 0 };
-      const preset = { ...PRESETS[gk], ...variantOv(variantParcel), ...bld };
-      clampBuildingDimensions(preset, gk);
-      const house = buildBuilding(preset);
-      // 초가 이엉 상태(thatchAge) — 텍스처 후처리(빌더 코어 불침해).
-      if (gk === 'choga') {
-        const age = edit.top.thatchAge;
-        applyThatchAge(house.userData.materials, age);
-      }
-      // 부위별 곱틴트(#55): 인스턴스와 동일 팔레트를 풀디테일에 재질 색 곱연산(신규 재질이라 clone 불필요).
-      //   roofTone 은 편집 오버라이드(인덱스) 우선, 없으면 필지의 부위별 지붕톤. 벽·목·석은 필지 톤 유지.
-      const changedKind = gk !== parcel.kind;
-      const preserveGeneratedRoofTone = !previousEditSpec
-        && newParams.roofTone === undefined && !changedKind;
-      const roofTint = preserveGeneratedRoofTone
-        ? (parcel.roofTone || toneOf(gk, parcel.toneIdx || 0))
-        : toneOf(gk, edit.top.roofTone);
-      applyMaterialRoleTints(house, {
-        roof: roofTint,
-        wall: changedKind ? null : parcel.wallTone,
-        wood: changedKind ? null : parcel.woodTone,
-        stone: changedKind ? null : parcel.stoneTone,
-      });
-      const local = parcelHouseTranslation(parcel);
-      house.position.set(local.x, 0, local.z);
-      // 변주 스케일 × 풋프린트 스케일 편집.
-      const fs = edit.top.footprintScale;
-      const mirrorX = variantMirrorX(variantParcel);
-      house.scale.set(mirrorX * (parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
-      house.userData.variantMirrorX = mirrorX;
+      g.userData.editSpec = edit.spec;
+      const house = assembleHouse();
+      g.userData.houseRoot = house;
       g.add(house);
       // Before the parcel transform is applied, this is the exact edited eave
       // envelope in parcel-local coordinates. Runtime flora consumes it instead
@@ -1210,30 +1352,46 @@ export function createVillageHandle(opts, seed, plan, group) {
         minY: buildingBox.min.y, maxY: buildingBox.max.y,
         minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
       };
+
+      // Confirm wall reuse against the *new* roof AABB. Staged extraction used
+      // the previous yard signature only; bounds must still fit. Openings-only
+      // edits keep the shell AABB, so they always pass when yard signature matched.
+      const canReuseWall = !!retainedWall
+        && (openingsOnly || residentialRoofBoundsMatch(prevRoofBounds, editRoofBounds));
+      if (retainedWall && !canReuseWall) {
+        disposeTree(retainedWall);
+        retainedWall = null;
+        if (retainedAux) { disposeTree(retainedAux); retainedAux = null; }
+        retainedAuxiliarySpec = null;
+      }
+
       // 담·마당(개별) — 유형·부속채 어휘 + 마당 소품 편집(#96). newParams 오버라이드 우선, 없으면 필지 원본값.
       const { wallType, jangdok, yardStack, clothesline, vegBed } = edit.top;
       const auxRequested = !!edit.top.aux;
-      const auxiliaryParcel = {
-        ...parcel,
-        kind: gk,
-        wallType,
-        aux: edit.top.aux,
-        auxRequested,
-        jangdok,
-        yardStack,
-        clothesline,
-        vegBed,
-        editRoofBounds,
-        auxiliary: null,
-      };
-      const auxiliary = planParcelAuxiliary(auxiliaryParcel, {
-        site,
-        peers: [
-          ...plan.parcels,
-          ...(plan.features?.palace?.center ? [plan.features.palace] : []),
-        ],
-        hardObstacles: yardHardObstacles(auxiliaryParcel),
-      });
+      let auxiliary = retainedAuxiliarySpec;
+      if (!canReuseWall) {
+        const auxiliaryParcel = {
+          ...parcel,
+          kind: gk,
+          wallType,
+          aux: edit.top.aux,
+          auxRequested,
+          jangdok,
+          yardStack,
+          clothesline,
+          vegBed,
+          editRoofBounds,
+          auxiliary: null,
+        };
+        auxiliary = planParcelAuxiliary(auxiliaryParcel, {
+          site,
+          peers: [
+            ...plan.parcels,
+            ...(plan.features?.palace?.center ? [plan.features.palace] : []),
+          ],
+          hardObstacles: yardHardObstacles(auxiliaryParcel),
+        });
+      }
       // A toggle is a request for a safe independent building, not permission
       // to overlap the house or gate. Fail closed and keep the accepted editor
       // spec truthful when an unusually small edited lot has no valid slot.
@@ -1241,15 +1399,34 @@ export function createVillageHandle(opts, seed, plan, group) {
       edit.top.aux = aux;
       edit.spec.params.aux = aux;
       g.userData.auxiliarySpec = auxiliary;
-      g.add(buildVillageWall(parcel.shape, editWallMats, {
-        style: wallType, kind: gk, seed: parcel.seed, char01, aux, auxRequested,
-        plotW: parcel.plotW, plotD: parcel.plotD,
-        gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
-        parcel, site, baseY: parcel.baseY,
-        wallHeightK: parcel.wallHeightK, jangdok,
-        yardStack, clothesline, vegBed,
-      }));
-      if (auxiliary) g.add(buildAuxiliaryBuilding(auxiliary, editWallMats));
+      g.userData.yardSignature = residentialYardSignature(gk, edit.top);
+      g.userData.editRoofBounds = editRoofBounds;
+      g.userData.editBuildingBounds = editBuildingBounds;
+
+      if (canReuseWall) {
+        g.userData.wallRoot = retainedWall;
+        g.add(retainedWall);
+        if (retainedAux) {
+          g.userData.auxRoot = retainedAux;
+          g.add(retainedAux);
+        }
+      } else {
+        const wallRoot = buildVillageWall(parcel.shape, editWallMats, {
+          style: wallType, kind: gk, seed: parcel.seed, char01, aux, auxRequested,
+          plotW: parcel.plotW, plotD: parcel.plotD,
+          gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
+          parcel, site, baseY: parcel.baseY,
+          wallHeightK: parcel.wallHeightK, jangdok,
+          yardStack, clothesline, vegBed,
+        });
+        g.userData.wallRoot = wallRoot;
+        g.add(wallRoot);
+        if (auxiliary) {
+          const auxRoot = buildAuxiliaryBuilding(auxiliary, editWallMats);
+          g.userData.auxRoot = auxRoot;
+          g.add(auxRoot);
+        }
+      }
       g.applyMatrix4(parcelMatrix(parcel));
       overrides.add(g);
       overrideById.set(parcelId, g);

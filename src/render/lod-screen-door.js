@@ -20,6 +20,8 @@ const FRAGMENT_DISCARD = `#include <clipping_planes_fragment>
   ${screenDoorDiscard('vLodScreenDoor')}`;
 
 export function patchLodScreenDoorShader(shader) {
+  // Idempotent against clone+repatch chains (same as inst-fade).
+  if (shader.vertexShader.includes('varying float vLodScreenDoor')) return;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', VERTEX_DECLARATION)
     .replace('#include <begin_vertex>', VERTEX_ASSIGNMENT)

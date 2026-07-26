@@ -17,6 +17,9 @@ const FRAGMENT_DISCARD = `#include <clipping_planes_fragment>
   ${screenDoorDiscard('vInstFade')}`;
 
 export function patchInstFadeShader(shader) {
+  // Idempotent: material.clone() copies onBeforeCompile, and a later
+  // patchInstFadeMaterial on the clone would otherwise double-inject.
+  if (shader.vertexShader.includes('varying float vInstFade')) return;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', VERTEX_DECLARATION)
     .replace('#include <begin_vertex>', VERTEX_ASSIGNMENT);

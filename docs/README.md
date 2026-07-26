@@ -60,6 +60,7 @@
 | [`ui-consolidation.md`](ui-consolidation.md) | 활성 작업 | 2026-07-25 UI 전수 감사와 3축(보기/만들기/공유) 재구성 스펙. 사용자 결정 B안 — 구현 라운드가 §3-B와 결정 절을 따른다. |
 | [`tooling.md`](tooling.md) | 스냅샷 | 후보 라이브러리 평가와 채택 판단. 현재 설치 목록으로 오해하지 않는다. |
 | [`perf-webgpu.md`](perf-webgpu.md) | 스냅샷 | 2026-07-17 기준 WebGPU·성능 조사. 버전·브라우저 수치는 재검증 필요. |
+| [`perf-campaign.md`](perf-campaign.md) | 활성 작업 | 2026-07-26~ 카메라 난사·집 편집 실시간 성능 캠페인: 측정, fill scale, live-edit, capital chunk LOD, 다음 라운드. |
 | [`demo-analysis.md`](demo-analysis.md) | 스냅샷 | 바이럴 데모 사례와 제품 방향 분석. 구현 계약이 아니다. |
 | [`references.md`](references.md) | 리서치 | 동아시아 전통건축 도면·3D·비례 자료의 상세 조사 카탈로그. |
 | [`credits.md`](credits.md) | 완료 기록 | 공개 크레딧과 출처 표기용 선별 목록. `references.md`와 목적이 다르다. |

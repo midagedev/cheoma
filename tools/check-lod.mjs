@@ -242,9 +242,14 @@ function assertLevel(actual, expected, message) {
     && scaled.transitionWidth < scaled.fullOut - scaled.fullIn
     && scaled.transitionWidth < scaled.midOut - scaled.midIn,
   'chunk LOD: screen-door band overlaps a hysteresis dead band');
-  const disabled = villageChunkLodPolicy({ R: 339, bowlR: 200 });
+  // village R≈180 stays under the floor; town R≈240 and capital R≈280 enable.
+  const disabled = villageChunkLodPolicy({ R: 219, bowlR: 120 });
   invariant(!disabled.enabled && disabled.farDist === Infinity,
     'chunk LOD: small site unexpectedly enabled far representation');
+  const town = villageChunkLodPolicy({ R: 240, bowlR: 134 });
+  invariant(town.enabled, 'chunk LOD: town site must enable FAR/MID/FULL stack');
+  const capital = villageChunkLodPolicy({ R: 280, bowlR: 157 });
+  invariant(capital.enabled, 'chunk LOD: capital site must enable FAR/MID/FULL stack');
 }
 
 // 인접 LOD는 시간 이징이 아니라 실제 거리로만 짧게 이행한다. signed coverage 두 채널은

@@ -15,7 +15,10 @@ export function createLiveEditScheduler({
   now = () => performance.now(),
   minIntervalMs = 32,
   maxIntervalMs = 96,
-  costHeadroom = 2.2,
+  // Headroom multiplies measured rebuild cost to leave main-thread slack for
+  // rendering. 1.8 is tighter than 2.2 so a ~20ms house swap can refresh near
+  // 30–40 Hz without starving the frame when the GPU is busy.
+  costHeadroom = 1.8,
 } = {}) {
   if (typeof preview !== 'function' || typeof commit !== 'function') {
     throw new TypeError('live edit scheduler requires preview and commit callbacks');

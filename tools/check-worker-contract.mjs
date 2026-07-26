@@ -183,10 +183,15 @@ const expectedSceneHashes = {
   //   forest-crunch 마을 인접 수관 높이/폭 감쇠와 mtn/infill 밀도 재배치가 숲 인스턴스·운해
   //   지오메트리를 바꾼다. 목표 그루수·plan 시드는 유지. 재기준 직전 실측: 네 규모 모두
   //   sync == worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
-  village: '8c1fa39d:b0e7a873:cfb638b6:5ba694f1',
-  town: '30598e81:a529eb33:ecc6eaed:cde1180d',
-  capital: '397a10a3:24913d7b:099d81dc:8673626d',
-  hanyang: 'ef86dc28:0ee18dd4:5c224391:27df4712',
+  // Perf campaign (2026-07): chunk LOD minSiteR 340→220 so town+capital join the
+  //   FAR/MID/FULL stack (hidden MID/FULL roots + impostors change scene bytes).
+  //   Hanyang already enabled; village stays single-representation but pick/scene
+  //   cohort bytes moved with the same build. 재기준 직전 실측: 네 규모 모두
+  //   sync == worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
+  village: 'ae9d4d8a:8f3189ca:e144d13f:a6248da6',
+  town: 'f1e54ca7:d1938ab9:63e5eb48:1bd13855',
+  capital: '0d8c9a88:1befe6be:846da73c:31fd254e',
+  hanyang: 'fdfaa80e:fd1b2c70:5bbb4895:50d92c96',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -227,10 +232,12 @@ const expectedProxyHashes = {
   //   그 위치에서 파생되므로 네 규모 proxy 바이트가 함께 움직인다. 프록시 개수·격리 계약은 유지.
   // #20: 숲 배치 재배치가 focus 시야 corridor 식생 배제·카메라 해 바이트에 소폭 반영된다
   //   (프록시 개수·ID·격리 계약 유지). 재기준 직전 실측: worker == 폴백 바이트 동일.
-  village: '0861e176',
-  town: '866516d0',
-  capital: 'd47d49ef',
-  hanyang: '84ddc254',
+  // Perf campaign town/capital LOD: FAR/MID/FULL 청크가 focus 거리·corridor 식생
+  //   바이트에 반영된다 (프록시 개수·ID·격리 계약 유지).
+  village: 'fef7a386',
+  town: '3f7f776c',
+  capital: '7fb0819b',
+  hanyang: '89d42424',
 };
 
 const server = await createServer({

@@ -276,3 +276,98 @@ export function applyMaterialRoleTints(root, tints) {
     }
   });
 }
+
+// Live-edit path helpers. Geometry-slider previews may fire many times per
+// second; these signatures let the runtime keep yard walls or skip a full
+// rebuild when only roof tone / thatch age changed.
+
+/** Params that change roof tone or thatch without rebuilding house geometry. */
+export const RESIDENTIAL_COSMETIC_PARAM_KEYS = Object.freeze(['roofTone', 'thatchAge']);
+
+/** Yard/wall fields that force a courtyard rebuild when they change. */
+export const RESIDENTIAL_YARD_PARAM_KEYS = Object.freeze([
+  'wallType', 'aux', 'jangdok', 'yardStack', 'clothesline', 'vegBed', 'footprintScale',
+]);
+
+function stableParamEntries(params, skipKeys = null) {
+  const skip = skipKeys instanceof Set ? skipKeys : (skipKeys ? new Set(skipKeys) : null);
+  const keys = Object.keys(params || {}).filter((key) => !skip?.has(key)).sort();
+  return keys.map((key) => [key, params[key]]);
+}
+
+/** Kind + all non-cosmetic params — equal means the house mesh can be kept. */
+export function residentialGeometrySignature(spec) {
+  if (!spec) return null;
+  const skip = new Set(RESIDENTIAL_COSMETIC_PARAM_KEYS);
+  return JSON.stringify({
+    kind: spec.kind,
+    params: stableParamEntries(spec.params, skip),
+  });
+}
+
+/** Yard/wall identity for reusing courtyard geometry across house-only previews. */
+export function residentialYardSignature(kind, top = {}) {
+  return JSON.stringify({
+    kind,
+    wallType: top.wallType,
+    aux: !!top.aux,
+    jangdok: top.jangdok ?? 0,
+    yardStack: !!top.yardStack,
+    clothesline: !!top.clothesline,
+    vegBed: !!top.vegBed,
+    footprintScale: Number.isFinite(top.footprintScale) ? +top.footprintScale.toFixed(4) : 1,
+  });
+}
+
+/** Roof AABB equality for deciding whether yard props still fit the house. */
+export function residentialRoofBoundsMatch(a, b, epsilon = 1e-3) {
+  if (!a || !b) return false;
+  return Math.abs(a.minX - b.minX) <= epsilon
+    && Math.abs(a.maxX - b.maxX) <= epsilon
+    && Math.abs(a.minZ - b.minZ) <= epsilon
+    && Math.abs(a.maxZ - b.maxZ) <= epsilon;
+}
+
+/**
+ * True when only thatchAge differs (same kind + same geometry + same roofTone).
+ * The runtime can re-apply the thatch map without rebuildBuilding / walls.
+ * roofTone is excluded: role tints are burned into material.color once and
+ * cannot be rewound without a new mesh.
+ */
+export function isResidentialThatchOnlyEdit(previousSpec, nextEdit) {
+  if (!previousSpec || !nextEdit?.spec) return false;
+  if (previousSpec.kind !== 'choga' || nextEdit.kind !== 'choga') return false;
+  if (residentialGeometrySignature(previousSpec) !== residentialGeometrySignature(nextEdit.spec)) {
+    return false;
+  }
+  if ((previousSpec.params?.roofTone ?? 0) !== (nextEdit.top.roofTone ?? 0)) return false;
+  return previousSpec.params?.thatchAge !== nextEdit.top.thatchAge;
+}
+
+/**
+ * Kind + structural params only (openings + cosmetics stripped). Equal means the
+ * courtyard wall can stay even when doors/windows change — roof AABB may still
+ * need a post-build check for pitch/footprint edits.
+ */
+export function residentialStructureSignature(spec) {
+  if (!spec) return null;
+  const skip = new Set([
+    ...RESIDENTIAL_COSMETIC_PARAM_KEYS,
+    'doorCount', 'windowCount', 'doorWidthK', 'windowWidthK',
+    'doorHeightK', 'windowHeightK', 'doorPattern',
+  ]);
+  return JSON.stringify({
+    kind: spec.kind,
+    params: stableParamEntries(spec.params, skip),
+  });
+}
+
+/** True when only openings (and cosmetics) differ — house rebuild, wall keep. */
+export function isResidentialOpeningsOnlyEdit(previousSpec, nextEdit) {
+  if (!previousSpec || !nextEdit?.spec) return false;
+  if (previousSpec.kind !== nextEdit.kind) return false;
+  if (residentialStructureSignature(previousSpec) !== residentialStructureSignature(nextEdit.spec)) {
+    return false;
+  }
+  return residentialGeometrySignature(previousSpec) !== residentialGeometrySignature(nextEdit.spec);
+}

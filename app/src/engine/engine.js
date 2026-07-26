@@ -1574,6 +1574,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       flare: focused,
       dofAmount: focused ? dofAmount : 0,
     });
+    // Aerial bloom is half-res haze; focus restores full bloom (compact stays half).
+    postRuntime.setFocusBudget?.(!!focused);
   }
 
   // ---------- 시네마틱 데모 모드 — 독립 runtime으로 위임 ----------
@@ -3120,13 +3122,18 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           refreshFlora: opts.refreshFlora !== false,
         });
         if (g) {
-          // Rebuilds create fresh materials just like rerolls. Apply the final rim
-          // patch before their first visible frame and warm only this replacement
-          // subtree, otherwise an unpatched physical+depth pair links on demand.
-          warmShaders(g);
+          // Live-edit previews fire many times per second. Materials for the same
+          // residential kind are already program-cached after focus-in, so only
+          // rim-patch the new subtree on preview; full compileAsync waits for the
+          // pointer-up commit (or an explicit warm request). The focus ring is
+          // also commit-only: set() rebuilds chickens/smoke and would thrash the
+          // main thread under every geometry slider event.
+          const shouldWarm = opts.warm !== false;
+          if (shouldWarm) warmShaders(g);
+          else post.rimRescan?.(g);
           if (village.selected === id) {
             refreshSemanticDofAnchor(id);
-            attachFocusRing(g);
+            if (shouldWarm) attachFocusRing(g);
           }
         }
         return g;

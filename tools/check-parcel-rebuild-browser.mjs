@@ -506,12 +506,16 @@ try {
       && Math.abs(continuousPreview.finalPreview.inputValue - continuous.target) < 1e-6
       && Math.abs(continuousPreview.finalPreview.payloadEave - continuous.target) < 1e-6,
     `final input serial was not consumed exactly: ${JSON.stringify(continuousPreview.finalPreview)}`);
-  const cadenceToleranceMs = 1;
+  // Must match App.svelte createLiveEditScheduler({ minIntervalMs, maxIntervalMs, costHeadroom }).
+  const LIVE_EDIT_MIN_MS = 20;
+  const LIVE_EDIT_MAX_MS = 72;
+  const LIVE_EDIT_HEADROOM = 1.8;
+  const cadenceToleranceMs = 2; // timer/rAF jitter under load
   const cadenceSamples = continuousPreview.calls.slice(1).map((call, index) => {
     const previous = continuousPreview.calls[index];
     return {
       gapMs: call.startedAt - previous.startedAt,
-      requiredMs: Math.min(96, Math.max(32, previous.duration * 2.2)),
+      requiredMs: Math.min(LIVE_EDIT_MAX_MS, Math.max(LIVE_EDIT_MIN_MS, previous.duration * LIVE_EDIT_HEADROOM)),
       previousDurationMs: previous.duration,
     };
   });

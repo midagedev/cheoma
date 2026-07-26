@@ -257,7 +257,8 @@ export function* populateVillageSteps(plan, opts = {}) {
       //   중앙 청크를 항상 FULL로 남기면 부감에서도 수백 draw와 수백만 tri를 제출해, 외곽만 줄인
       //   성능 이득을 대부분 잃는다. 카메라-소유 필지 3D 거리가 현재 단계를 정하므로 중앙/외곽이
       //   같은 줌 문법을 쓰고, 접근한 청크만 자연스럽게 실제 외피와 전체 디테일로 승격한다.
-      //   정책은 대규모(#89 연속: R≥340)에서만 켜져 capital 이하 출력은 그대로 보존한다.
+      //   정책은 대규모(#89 연속 → 2026-07 perf: R≥220, town+capital+hanyang)에서 켜진다.
+      //   village 는 단일 풀디테일을 유지한다(lod-policy.minSiteR).
       const lodPolicy = villageChunkLodPolicy(site);
       const chunks = partitionParcels(regular, site.center, lodPolicy);
       const impostorMaterials = lodPolicy.enabled ? createImpostorMaterials() : null;
