@@ -155,10 +155,15 @@ const expectedSceneHashes = {
   //   정리되면서(동일평면 5개소 제거) 네 규모의 석재 좌표 바이트가 의도적으로 변했다. 재기준 직전
   //   실측: 네 규모 모두 sync == worker == `?worker=0` 폴백 바이트 동일, proxy 해시 전부 불변
   //   (794d1a99 / c41c0e59 / b652961a / 0f53368a), snapshot·mja 3경로 교차 PASS — 결정론 손상 아님.
-  village: 'b3606766:be76c55a:b79b4851:d7481fc4',
-  town: 'd8703bb8:a833a800:65eff8b5:db264e40',
+  // 종가(hanok) 본채가 podium/columns/walls/roof 이름 그룹으로 묶이면서(조립 애니가 부재 순서로
+  //   재생되도록) Group 노드 3개가 추가되고 hashThreeGroup 순회 순서가 바뀐다 — 지오메트리는 불변.
+  //   capital 이 그대로인 것이 범위 증거다: capital 히어로는 관아(궁 계열)라 이 변경을 받지 않는다.
+  //   재기준 직전 실측: 세 규모 모두 sync == worker == 폴백 바이트 동일, proxy 해시 네 규모 전부 불변
+  //   (794d1a99 / c41c0e59 / b652961a / 0f53368a), snapshot·mja 3경로 교차 PASS.
+  village: '0d195267:dca08205:49204ed3:c70e4681',
+  town: 'c56af644:bc9271ba:eb0bb22e:a2078104',
   capital: 'e6169a57:668b3bc3:72957c60:71f1d74f',
-  hanyang: '0d257f8e:2c910b78:3139080d:a1d2cb7c',
+  hanyang: '3c7d9e95:7f4c760d:924febdc:a8c34413',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
