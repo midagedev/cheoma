@@ -84,6 +84,7 @@
     "check:tile-look": "node tools/check-tile-look.mjs",
     "check:roads": "node tools/check-road-contract.mjs",
     "check:drainage": "node tools/check-drainage-plan.mjs",
+    "check:dangsan": "node tools/check-dangsan-plan.mjs",
     "check:rim": "node tools/run-browser-locked.mjs -- node tools/check-rim-facing.mjs",
     "check:surface": "node tools/check-surface-materials.mjs",
     "check:surface:browser": "node tools/run-browser-locked.mjs -- node tools/check-surface-browser-suite.mjs",

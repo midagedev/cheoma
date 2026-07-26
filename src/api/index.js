@@ -45,6 +45,16 @@ export {
   validateRoadsideDrainagePlan,
 } from './drainage.js';
 export {
+  buildDangsan,
+  disposeDangsan,
+  DANGSAN_MATERIAL_ROLES,
+  DANGSAN_PLAN_LIMITS,
+  DANGSAN_PLAN_SCHEMA_VERSION,
+  dangsanHardObstacles,
+  planDangsan,
+  validateDangsanPlan,
+} from './dangsan.js';
+export {
   buildMjaHouse,
   disposeMjaHouse,
 } from './mja-house.js';

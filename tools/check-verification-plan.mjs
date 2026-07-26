@@ -148,6 +148,18 @@ assert.deepEqual(ids(['src/api/drainage-plan.js'], {
 assert.deepEqual(ids(['src/api/drainage.js'], {
   newPaths: ['src/api/drainage.js'],
 }), ['core', 'app', 'worker', 'surface-browser']);
+assert.deepEqual(ids(['src/village/dangsan-plan.js'], {
+  newPaths: ['src/village/dangsan-plan.js'],
+}), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/village/dangsan-geometry.js'], {
+  newPaths: ['src/village/dangsan-geometry.js'],
+}), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/api/dangsan-plan.js'], {
+  newPaths: ['src/api/dangsan-plan.js'],
+}), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['src/api/dangsan.js'], {
+  newPaths: ['src/api/dangsan.js'],
+}), ['core', 'app', 'worker']);
 assert.deepEqual(ids(['src/village/mja-house-plan.js'], {
   newPaths: ['src/village/mja-house-plan.js'],
 }), ['core', 'app', 'worker', 'mja-house-browser']);
@@ -462,6 +474,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-temple-contract.mjs',
   './check-road-contract.mjs',
   './check-drainage-plan.mjs',
+  './check-dangsan-plan.mjs',
   './check-layout-contract.mjs',
   './check-gosat-topology.mjs',
   './check-wall-gate-contract.mjs',

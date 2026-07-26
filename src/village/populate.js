@@ -49,6 +49,7 @@ import {
 import { scatterTrees } from '../generators/village/trees.js';
 import { buildRoads } from '../generators/village/roads.js';
 import { buildDrainage } from './drainage-geometry.js';
+import { buildDangsan } from './dangsan-geometry.js';
 import {
   buildAuxiliaryBuilding,
   disposeAuxiliaryBuilding,
@@ -415,6 +416,21 @@ export function* populateVillageSteps(plan, opts = {}) {
   // 배수도 세계 좌표의 두 indexed mesh(도랑·건넘) 이하로 이미 정적 조립된다. 별도 병합은
   // vertex color와 독립 lifecycle만 흐리고 성능 이득이 없으므로 그대로 한 그룹으로 붙인다.
   if (drainageGroup?.children.length) root.add(drainageGroup);
+  // Optional dangsan under a guardian canopy: ≤2 borrowed-mat draws, no new material family.
+  // Built after the shared village palette exists so stone/wood are the same role-tagged mats
+  // used by walls and landmarks; empty plans allocate nothing.
+  let dangsanGroup = null;
+  if (plan.dangsan?.sites?.length) {
+    let palette = villagePalette;
+    if (!palette) {
+      palette = makeMaterials('choga');
+      matSets.push(palette);
+    }
+    dangsanGroup = buildDangsan(plan.dangsan, {
+      materials: { stone: palette.stone, wood: palette.wood },
+    });
+    if (dangsanGroup?.children.length) root.add(dangsanGroup);
+  }
   if (optimize) {
     if (paddyGroup) root.add(mergeStatic([paddyGroup], 'village-paddies'));
     if (landmarks.length) root.add(mergeStatic(landmarks, 'village-landmarks'));
@@ -581,7 +597,7 @@ export function* populateVillageSteps(plan, opts = {}) {
 
   root.userData = {
     plan, waterU, matSets, houseHandle, heroHandle, optimize,
-    flora, yardLife, yardLifeRecords, animals, nightLights, bloom, forest, drainageGroup,
+    flora, yardLife, yardLifeRecords, animals, nightLights, bloom, forest, drainageGroup, dangsanGroup,
     palaceCore,   // 궁 편집 핸들(#93) — 미병합 palace-core 그룹(궁 없으면 null), userData.palaceCompound 로 일곽 접근
     palaceMerged, // #140-B 부감 병합본(궁 없거나 비최적화면 null) — 어댑터가 focus-in 시 가리고 오버레이로 교체(히어로 #62 동형)
     templeCore, templeMerged, templeSiteMerged,

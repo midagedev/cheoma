@@ -50,6 +50,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/api/auxiliary-building-plan.js',
   'src/api/drainage.js',
   'src/api/drainage-plan.js',
+  'src/api/dangsan.js',
+  'src/api/dangsan-plan.js',
   'src/api/mud-wall.js',
   'src/api/mud-wall-plan.js',
   'src/api/mja-house.js',
@@ -76,6 +78,8 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/village/auxiliary-building-plan.js',
   'src/village/drainage-plan.js',
   'src/village/drainage-geometry.js',
+  'src/village/dangsan-plan.js',
+  'src/village/dangsan-geometry.js',
   'src/village/mud-wall-geometry.js',
   'src/village/mud-wall-surface-plan.js',
   'src/village/mja-house-geometry.js',
@@ -89,6 +93,7 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-auxiliary-building-geometry.mjs',
   'tools/check-auxiliary-building-plan.mjs',
   'tools/check-drainage-plan.mjs',
+  'tools/check-dangsan-plan.mjs',
   'tools/check-surface-browser-suite.mjs',
   'tools/check-mud-wall-contract.mjs',
   // #150 F: pure padY / skirt / wall-foot / gateLanding coherence. FAST_CHECKS
@@ -423,6 +428,10 @@ function routePath(path) {
       || path === 'src/village/drainage-geometry.js') {
       select('roadside drainage plan or physical surface changed', 'surface-browser');
     }
+    if (path === 'src/village/dangsan-plan.js'
+      || path === 'src/village/dangsan-geometry.js') {
+      select('optional dangsan cultural-landscape plan or thin render changed', 'app', 'worker');
+    }
     if (path === 'src/village/walls.js' || path === 'src/village/mud-wall-geometry.js') {
       select('physical packed-earth wall surface changed', 'surface-browser');
     }
@@ -563,6 +572,14 @@ function routePath(path) {
     if (path === 'src/api/drainage.js') {
       select('public physical roadside drainage renderer API changed',
         'app', 'worker', 'surface-browser');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/dangsan-plan.js') {
+      select('public renderer-free dangsan planning API changed', 'app', 'worker');
+      return { gates, reasons };
+    }
+    if (path === 'src/api/dangsan.js') {
+      select('public dangsan thin renderer API changed', 'app', 'worker');
       return { gates, reasons };
     }
     if (path === 'src/api/mud-wall-plan.js') {

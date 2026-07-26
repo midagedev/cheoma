@@ -31,6 +31,7 @@ import { attachRoadJunctions } from './road-topology.js';
 import { normalizeVillageTuningOptions } from './options.js';
 import { planSijeon } from './sijeon-plan.js';
 import { planRoadsideDrainage } from './drainage-plan.js';
+import { planDangsan } from './dangsan-plan.js';
 import { planMjaHouse } from './mja-house-plan.js';
 import { planParcelAuxiliary } from './auxiliary-building-plan.js';
 import { yardHardObstacles } from './yard-layout.js';
@@ -627,6 +628,23 @@ export function planVillage(opts = {}) {
     productionPolygons: paddies || [],
   });
 
+  // 보호수 수관 아래의 선택적 당산 문화경관(의례 공터·당집). 전용 seed stream을 쓰므로
+  // 기존 plan RNG·worker 해시를 흔들지 않고, hamlet/village 낮은 빈도 또는 opts.dangsan
+  // 강제 시에만 시도한다. 실패는 empty plan으로 fail-closed.
+  const dangsan = planDangsan({
+    scale,
+    seed,
+    site,
+    guardians: features.guardianTrees,
+    parcels,
+    roads: roadsResult.roads,
+    paddies: paddies || [],
+    pavilion: features.pavilion,
+    props: features.props,
+    cityWall: features.cityWall,
+    dangsan: opts.dangsan,
+  });
+
   const allPts = [...roadsResult.roads.flatMap((r) => r.pts), ...parcels.map((p) => p.center)];
   const bounds = G.boundsOfPts(allPts.length ? allPts : [site.center]);
 
@@ -638,6 +656,7 @@ export function planVillage(opts = {}) {
     parcels,
     paddies,
     drainage,
+    dangsan,
     features,
     bounds,
     stats: {
@@ -651,6 +670,7 @@ export function planVillage(opts = {}) {
       paddies: paddies ? paddies.length : 0,
       drainageRuns: drainage.runs.length,
       drainageCrossings: drainage.crossings.length,
+      dangsanSites: dangsan.sites.length,
       ...(mjaHouse ? { mjaHouses: 1 } : {}),
       parcelDebug: planParcels.lastDebug,
     },

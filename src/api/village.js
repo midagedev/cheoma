@@ -17,6 +17,11 @@ export {
   disposeDrainage,
   DRAINAGE_MATERIAL_ROLES,
 } from './drainage.js';
+export {
+  buildDangsan,
+  disposeDangsan,
+  DANGSAN_MATERIAL_ROLES,
+} from './dangsan.js';
 export { populateVillage, populateVillageSteps } from '../village/populate.js';
 export { createVillage, createVillageAsync } from '../village/adapter.js';
 export { createRerollWave } from '../village/wave.js';

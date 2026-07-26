@@ -255,6 +255,47 @@ disposeMudWallSurfaceGeometry(geometry);
 사용하며 프레임마다 분기하거나 geometry를 다시 만들지 않는다. 반환 geometry만 façade가 소유하고
 호출자가 주입한 material·texture·scene은 해제하지 않는다.
 
+## 당산 문화경관 계획과 renderer
+
+보호수 아래 의례 공터·당집은 마을 runtime 없이도 순수 계획과 얇은 geometry로 재사용할 수 있다.
+`src/api/dangsan-plan.js`는 Three·DOM 없이 기존 guardian 목록과 필지·도로·site를 받아 최대 한
+사이트의 JSON plan을 만든다. hamlet/village 외 규모와 `dangsan: false`는 빈 계획이다.
+
+```js
+import {
+  planDangsan,
+  validateDangsanPlan,
+} from './cheoma/src/api/dangsan-plan.js';
+
+const dangsan = planDangsan({
+  scale: villagePlan.scale,
+  seed: villagePlan.seed,
+  site: villagePlan.site,
+  guardians: villagePlan.features.guardianTrees,
+  parcels: villagePlan.parcels,
+  roads: villagePlan.roads,
+  dangsan: true, // force attempt; omit for product low auto-rate
+});
+validateDangsanPlan(dangsan);
+```
+
+```js
+import {
+  buildDangsan,
+  disposeDangsan,
+} from './cheoma/src/api/dangsan.js';
+
+const root = buildDangsan(dangsan, {
+  materials: { stone: palette.stone, wood: palette.wood },
+});
+scene.add(root);
+scene.remove(root);
+disposeDangsan(root); // geometries only; borrowed mats untouched
+```
+
+드로우 상한은 stone + wood 두 mesh(≤+2)다. 배치를 renderer에서 다시 고르거나 새 재질군을 만들지 않는다.
+자세한 근거·한계는 [`dangsan.md`](dangsan.md).
+
 ## 길가 배수 계획과 renderer
 
 도로 배수는 마을 전체 runtime 없이도 순수 계획과 정적 geometry를 따로 재사용할 수 있다.

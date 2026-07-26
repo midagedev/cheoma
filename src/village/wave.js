@@ -76,7 +76,7 @@ const veilAt = (t) => {
 const isChunk = (n) => n.startsWith('village-chunk-');
 const isWalls = (n) => n.startsWith('village-walls-');
 const GROUP_NAMES = new Set([
-  'village-landmarks', 'village-sijeon', 'city-wall', 'city-wall-work',
+  'village-landmarks', 'village-dangsan', 'village-sijeon', 'city-wall', 'city-wall-work',
   'palace-core', 'palace-merged',
 ]);
 // 어댑터가 populate 뒤 붙이는 헬퍼(편집 오버레이·하이라이트) — 웨이브 대상 아님.
