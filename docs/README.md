@@ -63,6 +63,7 @@
 | [`references.md`](references.md) | 리서치 | 동아시아 전통건축 도면·3D·비례 자료의 상세 조사 카탈로그. |
 | [`credits.md`](credits.md) | 완료 기록 | 공개 크레딧과 출처 표기용 선별 목록. `references.md`와 목적이 다르다. |
 | [`suno-prompts.md`](suno-prompts.md) | 완료 기록 | BGM 생성 프롬프트와 6/6 수령 기록. |
+| [`clip-beat-sheet.md`](clip-beat-sheet.md) | 완료 기록 | 대표 공유 클립 원테이크 비트 시트(삼원법·~10s 조립·OS 화면 녹화). 인앱 녹화 기능이 아니다. |
 
 ## Claude Code 메모리에서 승격한 내용
 
