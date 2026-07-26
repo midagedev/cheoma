@@ -344,6 +344,10 @@ export function createVillageHandle(opts, seed, plan, group) {
   const refreshNightLightOwner = (ownerId, overlayRoot = null) => {
     group.userData.refreshNightLights?.(ownerId, overlayRoot);
   };
+  // Transient suppress for one owner's physical nightlight rows (hero assembly /
+  // landing). Does not delete permanent ownership — only zeroes emitted slots.
+  const setNightLightOwnerSuppressed = (ownerId, suppressed = true) =>
+    group.userData.setNightLightOwnerSuppressed?.(ownerId, suppressed) || false;
   function registerResidentialGlow(parcelId, root) {
     const previous = residentialGlowById.get(parcelId);
     if (previous) nightGlow.remove(previous);
@@ -355,6 +359,9 @@ export function createVillageHandle(opts, seed, plan, group) {
     const owner = residentialGlowById.get(parcelId);
     if (owner) nightGlow.remove(owner);
     residentialGlowById.delete(parcelId);
+    // Always clear assembly suppress before restoring base anchors so a focus
+    // teardown cannot leave the permanent owner dark in aerial night.
+    setNightLightOwnerSuppressed(parcelId, false);
     if (restoreBase) refreshNightLightOwner(parcelId, null);
   }
 
@@ -529,6 +536,8 @@ export function createVillageHandle(opts, seed, plan, group) {
       if (!rec) continue;
       releasePrimaryDoor(id);
       nightGlow.remove(rec.glow);
+      // Clear assembly suppress first so base-anchor restore can emit again.
+      setNightLightOwnerSuppressed(id, false);
       refreshNightLightOwner(id, null);
       rec.group.userData.disposeCompound?.();
       disposeTree(rec.group); overrides.remove(rec.group); heroOverrides.delete(id);
@@ -912,6 +921,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     heroEditable: () => !!heroHandle,     // 편집 반영 가능(populate 언머지 필요). 아니면 오버레이 폴백은 근접 소품 은닉
     showHeroDetail, hideHeroDetail,
     heroDetailGroup: (parcelId = activeHeroId) => heroOverrides.get(parcelId)?.group || null,
+    setNightLightOwnerSuppressed,
 
     // 검증용(#48): 현재 편집 오버레이(정규 override 또는 특수 hero override)의 월드 바운딩 크기.
     //   편집 전후로 비교해 지오가 실제로 바뀌었는지 정량 확인(스크린샷 육안 검수와 병행).

@@ -225,6 +225,42 @@ assert.equal(beforeAnchorAttribute.needsUpdate, undefined);
 assert.equal(beforeAnchorAttribute.version, 1,
   'physical refresh did not mark the fixed instance buffer dirty exactly once');
 
+// Suppress zeros emitted rows for one owner without dropping ownership or capacity.
+const owner0 = pair.debugOwner('owner-0');
+const litAttr = physical.geometry.getAttribute('aLit');
+assert.equal(owner0.suppressed, false);
+assert(
+  Float32Array.from(litAttr.array.subarray(owner0.start, owner0.start + owner0.capacity))
+    .some((value) => value > 0.002),
+  'owner-0 has no lit slots before suppress',
+);
+assert.equal(pair.setOwnerSuppressed('owner-0', true), true);
+assert.equal(pair.debugOwner('owner-0').suppressed, true);
+assert.equal(pair.debugOwner('owner-0').selected.length > 0, true,
+  'suppress cleared permanent selected ownership');
+for (let slot = 0; slot < owner0.capacity; slot++) {
+  assert.equal(litAttr.array[owner0.start + slot], 0,
+    `suppressed owner-0 slot ${slot} still emits`);
+}
+// Other owners keep their rows.
+const owner1 = pair.debugOwner('owner-1');
+assert(
+  Float32Array.from(litAttr.array.subarray(owner1.start, owner1.start + owner1.capacity))
+    .some((value) => value > 0.002),
+  'suppress leaked to a peer owner',
+);
+assert.equal(pair.setOwnerSuppressed('owner-0', false), true);
+assert.equal(pair.debugOwner('owner-0').suppressed, false);
+assert(
+  Float32Array.from(litAttr.array.subarray(owner0.start, owner0.start + owner0.capacity))
+    .some((value) => value > 0.002),
+  'unsuppress did not restore owner-0 rows',
+);
+assert.equal(physical.geometry, beforeGeometry,
+  'suppress replaced the shared physical batch geometry');
+assert.equal(physical.material, beforeMaterial,
+  'suppress replaced the shared physical material');
+
 // The physical path becomes visible only when village night/wave contracts permit it.
 pair.setLevel(1);
 assert.equal(physical.visible, true);

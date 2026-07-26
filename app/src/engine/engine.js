@@ -2259,9 +2259,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     };
   }
   // 오버레이 g 에 조립 재생(delay=착공 지연). 완료 시 편집 불가(populate 언머지 전)면 병합본으로 되돌려 소품 복원.
+  // 조립 중 village-level nightlight-physical 은 컴파운드 밖 rest-pose 한지 면을 그리므로
+  // 해당 owner 행을 일시 suppress 해 빈 터 부유 사각형을 막는다(정착·skip 시 복원).
   function playHeroAssembly(g, dur, { onDone, delay = 0 } = {}) {
+    const ownerId = village.selected;
+    if (ownerId) village.handle?.setNightLightOwnerSuppressed?.(ownerId, true);
     village.heroAsm = playCompoundAssembly(g, dur, { delay, onDone: () => {
       village.heroAsm = null;
+      if (ownerId) village.handle?.setNightLightOwnerSuppressed?.(ownerId, false);
       if (village.handle && !village.handle.heroEditable()) village.handle.hideHeroDetail();
       onDone?.();
     } });
@@ -2411,9 +2416,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // focus 조립 재생(#92 리플레이 일반화) — 컴파운드(종가·궁)는 청크 단위, 정규 집은 부재 단위(playAssembly).
   //   descriptor { group, assembly, compound }. compound·비편집(populate 언머지 불가) 종가는 완료 후 병합본 복원.
+  //   조립 구간 owner physical nightlight 를 suppress 해 rest-pose 한지 쿼드 부유를 막는다.
   function playFocusAssembly(detail, dur, { onDone, delay = 0 } = {}) {
+    const ownerId = village.selected;
+    if (ownerId) village.handle?.setNightLightOwnerSuppressed?.(ownerId, true);
     const finish = () => {
       village.heroAsm = null;
+      if (ownerId) village.handle?.setNightLightOwnerSuppressed?.(ownerId, false);
       if (detail.compound && village.handle && !village.handle.heroEditable()) village.handle.hideHeroDetail();
       onDone?.();
     };

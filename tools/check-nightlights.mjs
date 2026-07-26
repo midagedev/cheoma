@@ -578,6 +578,83 @@ assert.equal(
   "cross-kind null restore did not recover the base parcel policy",
 );
 
+// Owner suppress: assembly/landing may need zero emitted rows without deleting
+// permanent ownership. refreshOwner(null) alone still falls back to baseAnchors.
+const heroDebug = first.debugOwner(hero.id);
+assert.equal(heroDebug.suppressed, false, "hero owner starts suppressed");
+const heroStart = heroDebug.start;
+const heroCap = heroDebug.capacity;
+const litAttr = mesh.geometry.getAttribute("aLit");
+const heroLitBefore = Float32Array.from(
+  litAttr.array.subarray(heroStart, heroStart + heroCap),
+);
+assert(
+  heroLitBefore.some((value) => value > 0.002),
+  "hero fixture has no lit slots to suppress",
+);
+assert.equal(
+  first.setOwnerSuppressed(hero.id, true),
+  true,
+  "suppress rejected a known hero owner",
+);
+assert.equal(first.debugOwner(hero.id).suppressed, true, "suppress flag not set");
+assert.deepEqual(
+  first.debugOwner(hero.id).selected.map((item) => item.openingId),
+  ["hero-authored-door"],
+  "suppress cleared permanent selected ownership",
+);
+for (let slot = 0; slot < heroCap; slot++) {
+  assert.equal(
+    litAttr.array[heroStart + slot],
+    0,
+    `suppressed hero slot ${slot} still emits aLit`,
+  );
+}
+// Suppress is orthogonal to refresh: overlay rewrite keeps ownership but still
+// emits zero rows while the flag is set.
+assert.equal(
+  first.refreshOwner(hero.id, overlay),
+  true,
+  "refresh while suppressed rejected known owner",
+);
+assert.equal(first.debugOwner(hero.id).suppressed, true);
+assert.deepEqual(
+  first.debugOwner(hero.id).selected.map((item) => item.openingId),
+  ["overlay-authored-window"],
+  "suppressed refresh did not update selected ownership",
+);
+for (let slot = 0; slot < heroCap; slot++) {
+  assert.equal(
+    litAttr.array[heroStart + slot],
+    0,
+    `suppressed+refreshed hero slot ${slot} still emits`,
+  );
+}
+assert.equal(
+  first.setOwnerSuppressed(hero.id, true),
+  false,
+  "idempotent suppress was not a no-op",
+);
+assert.equal(
+  first.setOwnerSuppressed(hero.id, false),
+  true,
+  "unsuppress rejected a known hero owner",
+);
+assert.equal(first.debugOwner(hero.id).suppressed, false);
+assert(
+  Float32Array.from(litAttr.array.subarray(heroStart, heroStart + heroCap))
+    .some((value) => value > 0.002),
+  "unsuppress did not restore emitted rows",
+);
+assert.equal(
+  first.setOwnerSuppressed("missing-owner", true),
+  false,
+  "unknown suppress owner was accepted",
+);
+// Restore base anchors so the dispose contract below sees the pre-suppress state family.
+assert.equal(first.refreshOwner(hero.id, null), true);
+assert.equal(first.debugOwner(hero.id).suppressed, false);
+
 assert.equal(mesh.visible, false, "nightlights start visible during day");
 first.setLevel(1);
 assert.equal(
@@ -665,6 +742,11 @@ assert.equal(
   first.refreshOwner(regular.id, overlay),
   false,
   "disposed owner accepted an overlay refresh",
+);
+assert.equal(
+  first.setOwnerSuppressed(hero.id, true),
+  false,
+  "disposed owner accepted suppress",
 );
 first.setLevel(1);
 first.setPixelRatio(3);

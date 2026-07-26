@@ -156,6 +156,9 @@ export function buildNightLights(plan, _site, sources = {}) {
       parcel,
       baseAnchors: baseAnchors || [],
       selected: [],
+      // Transient product suppress (hero assembly / landing). Ownership, seed
+      // policy, and last refresh source stay intact; only emitted rows go dark.
+      suppressed: false,
       refreshSource: null,
       refreshSeed: seed >>> 0,
       refreshKind: parcel ? (parcel.hero ? 'hero' : profile.kind) : 'feature',
@@ -200,6 +203,7 @@ export function buildNightLights(plan, _site, sources = {}) {
     const empty = {
       group,
       refreshOwner() { return false; },
+      setOwnerSuppressed() { return false; },
       setLevel() {},
       setPixelRatio() {},
       update() {},
@@ -247,6 +251,10 @@ export function buildNightLights(plan, _site, sources = {}) {
       outwardY: anchor.outward?.y || 0,
       outwardZ: anchor.outward?.z || 0,
     }));
+    // Suppressed owners keep permanent ownership / selected anchors but emit
+    // zero physical rows (aLit=0 → vertex cull). refreshOwner(null) alone still
+    // falls back to baseAnchors and would otherwise float during assembly.
+    const emit = !record.suppressed;
     for (let slot = 0; slot < record.profile.capacity; slot++) {
       const index = record.start + slot;
       const anchor = selected[slot];
@@ -263,7 +271,7 @@ export function buildNightLights(plan, _site, sources = {}) {
       openingSize[index * 2] = anchor ? anchor.width * 0.88 : 0;
       openingSize[index * 2 + 1] = anchor ? anchor.height * 0.82 : 0;
       aPhase[index] = values.phase;
-      aLit[index] = anchor ? values.lit : 0;
+      aLit[index] = (emit && anchor) ? values.lit : 0;
       aThreshold[index] = values.threshold;
       aWarm[index] = values.warm;
     }
@@ -324,6 +332,20 @@ export function buildNightLights(plan, _site, sources = {}) {
     parent.updateWorldMatrix(true, false);
     return transformAnchors(world, new THREE.Matrix4().copy(parent.matrixWorld).invert());
   }
+  function markOwnerAttributes(record) {
+    for (const name of batch.dynamicAttributes) {
+      markAttributeItems(
+        batch.geometry.attributes[name],
+        record.start,
+        record.profile.capacity,
+      );
+    }
+  }
+  function currentOwnerAnchors(record) {
+    return record.refreshSource
+      ? overlayAnchorsInVillageSpace(record.refreshSource)
+      : record.baseAnchors;
+  }
 
   const api = {
     group,
@@ -357,13 +379,22 @@ export function buildNightLights(plan, _site, sources = {}) {
       record.refreshSource = overlayRoot;
       record.refreshSeed = nextSeed;
       record.refreshKind = nextKind;
-      for (const name of batch.dynamicAttributes) {
-        markAttributeItems(
-          batch.geometry.attributes[name],
-          record.start,
-          record.profile.capacity,
-        );
-      }
+      markOwnerAttributes(record);
+      return true;
+    },
+    // Suppress (or restore) physical rows for one owner without dropping its
+    // permanent slot, seed policy, or last refresh source. Hero assembly uses
+    // this while compound geometry is still rising / hidden so rest-pose
+    // hanji quads do not float on an empty lot.
+    setOwnerSuppressed(ownerId, suppressed = true) {
+      if (disposed) return false;
+      const record = recordById.get(ownerId);
+      if (!record) return false;
+      const next = suppressed !== false;
+      if (!!record.suppressed === next) return false;
+      record.suppressed = next;
+      writeOwner(record, currentOwnerAnchors(record));
+      markOwnerAttributes(record);
       return true;
     },
     setLevel(value) {
@@ -395,6 +426,7 @@ export function buildNightLights(plan, _site, sources = {}) {
         capacity: record.profile.capacity,
         desired: record.profile.desired,
         kind: record.profile.kind || null,
+        suppressed: !!record.suppressed,
         selected: record.selected.map((anchor) => ({ ...anchor })),
       };
     },
