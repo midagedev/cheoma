@@ -990,16 +990,22 @@ flight of pink-footed geese*, Journal of Experimental Biology 189(1):251–261 �
 불변이다. 농촌 structureScale = 1, 도시만 가대 압축. 버킷 깊이를 키우고 농촌 `siteR`·`HOUSE_ANCHORS`·
 `tierForR` 중점을 동기화했다. 숲 밀도는 면적당 불변(면적↑ → 나무 수↑).
 
-**seed 7 비-히어로 (반영 후).**
+후속(같은 날): 기와만 농촌 `GIWA_LOT_D_BOOST`(hamlet 1.14 / village 1.18 / town 1.12,
+capital·hanyang 1.0)를 `LOT_D_SCALE`에 곱해 앞마당을 늘렸다. 초가는 채 높이가 낮아 이미
+L/H≳3 대라 깊이를 더 키우지 않았고, 도성·한양은 밀도·실측을 위해 boost=1.
+
+**seed 7 비-히어로 (반영 후, 기와 boost 포함).**
 
 | 규모 | 유형 | 필지 | 앞마당 | L/H | houseFit |
 |---|---|---|---|---|---|
 | hamlet | 초가 | 12.4 × 13.4 m | 6.9 m (min ≥ 2.1) | ~3.0 | 0.95 |
-| village | 기와 | 18.6 × 20.2 m | 7.2 m | ~1.8 | 0.98 |
-| town | 기와 | 18.4 × 21.0 m | 8.1 m | ~2.0 | 0.99 |
-| hanyang | 기와 | 15.9 × 18.0 m | 6.8 m | ~2.0 | 1.00 |
+| village | 기와 | 17.3 × 24.2 m | 11.4 m | ~2.7 | 0.98 |
+| town | 기와 | 17.9 × 23.0 m | 10.2 m | ~2.5 | 0.99 |
+| capital | 기와 | 16.1 × 19.0 m | 7.1 m | ~2.0 | 1.00 |
+| hanyang | 기와 | 14.1 × 18.0 m | 6.9 m | ~2.1 | 0.99 |
 
-멍석 하한 2.1 m는 전 규모·전 시드에서 통과한다(`check:yard-proportion`). village 기와 L/H는
-관측 대역(1–3) 안이며 수정 전 ~0.2에서 회복했다. 상류 평균 2.55에는 아직 못 미치며, 채 높이
-실측과 1:1로 맞추는 후속은 열려 있다. 별채 유효 배치는 146/445 → 241/375 로 늘었고(포화 완화),
-마당 소품 폴리곤 이탈 0은 유지한다.
+**3-seed 평균 (7·42·91, `check:yard-proportion`).** village 기와 front 10.2 m · L/H **2.72**;
+town 기와 L/H **2.57**. 상류 목표 2.55에 village는 소폭 상회(배치 생존·변형 혼합 때문에
+boost 단조 비례가 아니다). 관측 대역(1–3.6) 안. 멍석 하한 2.1 m·농촌 structureScale=1·
+hamlet houseFit≥0.90 유지. capital/hanyang plan 골든 해시 불변(도성 최소 변경).
+별채 유효 182/403(≥100), 마당 소품 폴리곤 이탈 0 유지.

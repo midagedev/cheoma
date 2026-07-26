@@ -120,7 +120,14 @@ export function planParcelRebuild(
       // framing. The village pavilion is a full-height building with broad eaves,
       // not a point prop: keep both the daylight opening and the camera frame clear
       // under the same contract used by initial village planning.
-      if (pavilion && (
+      // If the *reserved envelope* was already under the pavilion (pavilion is planned
+      // after parcels and can land in a residual solar gap), do not make rebuild
+      // impossible — only reject candidates that *newly* conflict.
+      const envelopePavilionBlocked = !!(pavilion && (
+        canopyBlocksSolarAccess(envelope, pavilion, pavilion.radius || PAVILION_ROOF_RADIUS)
+        || pavilionBlocksParcelFocus(envelope, pavilion)
+      ));
+      if (pavilion && !envelopePavilionBlocked && (
         canopyBlocksSolarAccess(candidate, pavilion, pavilion.radius || PAVILION_ROOF_RADIUS)
         || pavilionBlocksParcelFocus(candidate, pavilion)
       )) continue;

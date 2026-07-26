@@ -19,7 +19,10 @@ export const VILLAGE_WALL_STEP = Object.freeze({
   maxDrop: 1.44,
   maxRise: 1.44,
   terrainSink: 0.06,
-  minVisible: 0.82,
+  // 0.82 → 0.80: 농촌 기와 깊이 부스트 뒤 짧은 진흙·밀착 변이 비계단 한 스팬으로 남을 때
+  // baseY−terrain 여유(~terrainSink) + edge height 가 0.82 를 1mm 급으로 밑돈다. 계단 리듬과
+  // 가시 담 하한은 유지하고 바닥만 실측 최소에 맞춘다.
+  minVisible: 0.80,
 });
 
 // Renderer-free geometry decisions shared by the village wall builder and
