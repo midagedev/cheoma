@@ -2,6 +2,7 @@
 // impact resolver share this list so routing cannot drift from execution.
 export const FAST_CHECKS = Object.freeze([
   './check-architecture.mjs',
+  './check-assembly-contract.mjs',
   './check-residential-openings.mjs',
   './check-atmosphere-contract.mjs',
   './check-audio-policy.mjs',

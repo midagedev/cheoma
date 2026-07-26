@@ -27,6 +27,20 @@ export function buildHanok({
   const g = new THREE.Group();
   g.name = 'hanok';
 
+  // ── 조립(시공) 파트 그룹 ──
+  // src/anim/assembly.js 는 부재 이름(podium/columns/walls/brackets/roof)으로 파트를 찾아
+  //   시공 순서 스태거를 만든다. 마을 giwa(builder/giwa.js)는 이 그룹을 만들지만 히어로 종가는
+  //   만들지 않아, 엔진 컴파운드 경로가 몸채를 **통째로** 리프트했다("집이 통짜로 바닥에서
+  //   올라온다" 2026-07-26). 같은 이름 규약을 여기서도 세워 종가가 마을 집과 동일한 문법으로
+  //   지어지게 한다. 그룹은 THREE.Group 하나 = 드로우콜 0 증가.
+  // 담김 규칙(giwa.js 와 동일): 기단 켜·댓돌 → podium / 기둥·인방·창방(골조) → columns /
+  //   회벽·창호·굴뚝 → walls / 지붕 → roof. 반가(민도리집)는 공포가 없어 brackets 는 비어 있고,
+  //   playAssembly 는 없는 파트를 그냥 건너뛴다(고증: 궁·절만 공포).
+  const podium = new THREE.Group(); podium.name = 'podium';
+  const columns = new THREE.Group(); columns.name = 'columns';
+  const walls = new THREE.Group(); walls.name = 'walls';
+  g.add(podium); g.add(columns); g.add(walls);
+
   // 방향 판정용 CCW 보정
   const poly = footprint.map((p) => ({ x: p.x, z: p.z }));
   let area = 0;
@@ -61,7 +75,7 @@ export function buildHanok({
   );
   zidae.name = 'foundation-base';
   zidae.position.y = zidaeBounds.bottom;
-  zidae.receiveShadow = zidae.castShadow = true; g.add(zidae);
+  zidae.receiveShadow = zidae.castShadow = true; podium.add(zidae);
   // 기단 몸통(장대석): 갑석이 podiumH 까지 채우므로 회벽·기둥은 그대로 podiumH 에 앉는다.
   //   몸통을 podiumH 까지 올리면 몸통 상면과 갑석 상면이 같은 평면에 겹치고, 갑석이 몸통보다
   //   넓어 그 면 전체가 depth 를 다툰다 — 상면 소유자는 갑석 하나여야 한다.
@@ -69,16 +83,16 @@ export function buildHanok({
     extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH - OPENING_FACE_CLEARANCE), M.stone);
   pod.name = 'foundation-body';
   pod.receiveShadow = true; pod.castShadow = true;
-  g.add(pod);
+  podium.add(pod);
   // 갑석: 기단 상단을 덮는 넓은 마감석(몸통보다 내밀어 처마 그늘에도 밝은 돌 선)
   const gapseok = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.84)), 0.11), M.stone);
   gapseok.name = 'foundation-gapseok';
   gapseok.position.y = podiumH - 0.11;
-  gapseok.receiveShadow = gapseok.castShadow = true; g.add(gapseok);
+  gapseok.receiveShadow = gapseok.castShadow = true; podium.add(gapseok);
   // 기단 상면(회벽 앉는 자리) 어두운 면 — 벽 밑동 그늘
   const cap = new THREE.Mesh(extrudeY(shapeFrom(offsetPoly(poly, 0.5)), 0.05), M.stoneDark);
   cap.name = 'foundation-top';
-  cap.position.y = podiumH; g.add(cap);
+  cap.position.y = podiumH; podium.add(cap);
   // 앞(남, +z) 댓돌: 대청 앞 계단돌 2벌. 마당 표면 위로 각 0.16m 씩 솟고 밑동은 지면 아래로
   //   묻는다(beddedStone). 예전에는 아래 돌 밑면이 지면(y=0)에 정확히 닿고 위 돌은 그 위
   //   0.16m 에 떠 있어, 밑면이 대문 디딤돌 밑면과 같은 평면을 공유했다.
@@ -92,21 +106,21 @@ export function buildHanok({
       const step = new THREE.Mesh(new THREE.BoxGeometry(1.9 - i * 0.3, bed.height, 0.55), M.stone);
       step.name = 'stepping-stone';
       step.position.set(fcx, bed.center, maxZ + 1.35 - i * 0.5);
-      step.castShadow = step.receiveShadow = true; g.add(step);
+      step.castShadow = step.receiveShadow = true; podium.add(step);
     }
   }
 
   // ── 회벽 (풋프린트 압출) ──
   const wallGeo = extrudeY(shapeFrom(poly), wallH - podiumH);
-  const walls = new THREE.Mesh(wallGeo, M.plaster);
-  walls.position.y = podiumH;
-  walls.castShadow = walls.receiveShadow = true;
-  g.add(walls);
+  const plaster = new THREE.Mesh(wallGeo, M.plaster);
+  plaster.position.y = podiumH;
+  plaster.castShadow = plaster.receiveShadow = true;
+  walls.add(plaster);
   // 인방 띠(중방) + 하부 심벽 톤
   const midGeo = extrudeY(shapeFrom(offsetPoly(poly, 0.02)), 0.12);
   const mid = new THREE.Mesh(midGeo, M.woodDark);
   mid.position.y = podiumH + (wallH - podiumH) * 0.55;
-  g.add(mid);
+  columns.add(mid);                        // 중인방=골조 부재 → 기둥과 같은 파트 창(giwa.js 규약)
 
   // ── 기둥 (모서리 + 변 중간, 벽 앞면에 살짝 돌출) ──
   const colGeo = new THREE.CylinderGeometry(0.16, 0.17, wallH - podiumH, 12);
@@ -114,7 +128,7 @@ export function buildHanok({
   const colMat = M.wood;
   const placeCol = (x, z) => {
     const c = new THREE.Mesh(colGeo, colMat);
-    c.position.set(x, podiumH, z); c.castShadow = true; g.add(c);
+    c.position.set(x, podiumH, z); c.castShadow = true; columns.add(c);
   };
   for (let i = 0; i < n; i++) {
     const a = poly[i], b = poly[(i + 1) % n];
@@ -129,10 +143,10 @@ export function buildHanok({
   const beamGeo = extrudeY(shapeFrom(poly), 0.16);
   const beam = new THREE.Mesh(beamGeo, M.woodDark);
   beam.position.y = wallH - 0.16;
-  g.add(beam);
+  columns.add(beam);                       // 창방=기둥머리 결구 → columns 파트(공포 없는 민도리집)
 
   // ── 창호·문 (마당 향한 면 최소 개구 보장) ──
-  const openings = addHanokOpenings(g, poly, M, seed, wallH, podiumH);
+  const openings = addHanokOpenings(walls, poly, M, seed, wallH, podiumH);
 
   // ── 지붕 ──
   // 히어로 종가 전용 근접 격상(#139): 수키와 볼록 롤·겹처마 서까래·접합 캡 + heroDetail(막새 열·
@@ -146,10 +160,12 @@ export function buildHanok({
     sugiwaRolls: true, rafters: true, junctionCaps: true, heroDetail: true,
     ...roofOpts,
   });
+  roof.name = 'roof';                      // 조립 파트 이름(buildSkeletonRoof 기본명은 'skeleton-roof')
+  roof.userData.asmChunked = true;          // 서까래→기와 통덩어리→망와 청크 단위(giwa.js 와 동일)
   g.add(roof);
 
   // ── 부엌 날개채 굴뚝 (연기 발원) ──
-  addHanokChimney(g, poly, M, rng, eaveOverhang);
+  addHanokChimney(walls, poly, M, rng, eaveOverhang);   // 굴뚝=부엌 마감 → walls 파트
 
   g.userData = { skeleton: computeSkeleton(poly), footprint: poly };
   return g;

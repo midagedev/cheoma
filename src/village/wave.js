@@ -20,16 +20,17 @@
 //     크로스페이드하지 않고 먹안개 peak에서 정확히 한 쪽만 보이게 handoff한다. 이는 투명 셰이더
 //     변형·depth-write 해제·겹친 그림자를 만들지 않으며 공유 재질 identity를 그대로 보존한다.
 //
-// 이징 언어는 조립 애니(src/anim/assembly.js)의 두부 물리(tofuScale/tofuBob)를 그대로 재사용한다
-// — 수묵 정적 위에 통통 튀는 두부 대비가 이 앱의 시그니처(assembly-semantic-chunks). 낙하/착지
-// 문법(fallOffset·IMPACT)은 동일 상수로 로컬 재현(assembly.js 는 미export).
+// 이징 언어는 조립 애니(src/anim/assembly.js)의 두부 물리(tofuRise/tofuBob/tofuScale)를 그대로
+// 재사용한다 — 수묵 정적 위에 통통 튀는 두부 대비가 이 앱의 시그니처(assembly-semantic-chunks).
+// 상승·정착 문법은 로컬 재현이 아니라 **그 모듈에서 import** 한다(2026-07-26: 모멘텀 연속 정착이
+// 마을 리롤에도 그대로 적용되어야 한다는 사용자 지시 "전반적으로" — 방언 분기 금지).
 //
 // 결정론: 인스턴스·그룹별 미세 스태거 지터는 seed 기반 makeRng(Math.random 미사용).
 // 원상복구: dispose()·완료 시 newRoot 를 완전 정상 상태(트랜스폼 항등·scenery 단독 소유)로 되돌려
 // 픽킹·편집·env 전파가 곧바로 정상 동작한다.
 
 import * as THREE from 'three';
-import { tofuScale, tofuBob } from '../anim/assembly.js';
+import { tofuScale, tofuBob, tofuRise } from '../anim/assembly.js';
 import { markAttributeFull } from '../core/buffer-update-range.js';
 import { waveFadeController } from '../core/lod.js';
 import { makeRng } from '../rng.js';
@@ -37,10 +38,9 @@ import { makeRng } from '../rng.js';
 // ── 이징(assembly.js 와 동일 상수) ──
 const IMPACT = 0.5;
 const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
-const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 const smoothstep = (t) => { t = clamp01(t); return t * t * (3 - 2 * t); };
-// 낙하 오프셋 계수(1→0): 착지(IMPACT)까지 감속하며 내려앉고, 이후 0.
-const fallOffset = (u) => (u >= IMPACT ? 0 : 1 - easeOutCubic(u / IMPACT));
+// 상승 오프셋 계수(1→0)는 조립 모듈이 단일 출처(모멘텀 연속 모델). 로컬 재구현 금지.
+const fallOffset = tofuRise;
 
 // ── 타임라인 윈도(전체 progress 0..1 대비 구간) ──
 //   해체 → 먹안개 handoff → 조립. 구조물이 모두 접힌 짧은 틈에 scenery 소유권을 넘긴다.
@@ -192,7 +192,7 @@ function writeInst(dst, src, o, uu) {
   const grow = uu < IMPACT ? smoothstep(uu / IMPACT) : 1;   // 등장 스케일(0→1)
   const gs = GS_MIN + (1 - GS_MIN) * grow;
   const sxz = ts.sxz * gs, sy = ts.sy * gs;
-  const dy = -fallOffset(uu) * HOUSE_DROP + tofuBob(uu, HOUSE_TOFU) * HOUSE_DROP * 0.6;
+  const dy = -fallOffset(uu) * HOUSE_DROP + tofuBob(uu, HOUSE_TOFU) * HOUSE_DROP;
   dst[o] = src[o] * sxz;     dst[o + 1] = src[o + 1] * sy;   dst[o + 2] = src[o + 2] * sxz;   dst[o + 3] = src[o + 3];
   dst[o + 4] = src[o + 4] * sxz; dst[o + 5] = src[o + 5] * sy; dst[o + 6] = src[o + 6] * sxz; dst[o + 7] = src[o + 7];
   dst[o + 8] = src[o + 8] * sxz; dst[o + 9] = src[o + 9] * sy; dst[o + 10] = src[o + 10] * sxz; dst[o + 11] = src[o + 11];
@@ -243,7 +243,7 @@ function applyGroupUnit(u, uu) {
   const grow = uu < IMPACT ? smoothstep(uu / IMPACT) : 1;
   const gs = GS_MIN + (1 - GS_MIN) * grow;
   const sxz = ts.sxz * gs, sy = ts.sy * gs;
-  const dy = -fallOffset(uu) * GROUP_DROP + tofuBob(uu, GROUP_TOFU) * GROUP_DROP * 0.6;
+  const dy = -fallOffset(uu) * GROUP_DROP + tofuBob(uu, GROUP_TOFU) * GROUP_DROP;
   const P = u.pivot;
   g.scale.set(sxz, sy, sxz);
   g.position.set(P.x * (1 - sxz), P.y * (1 - sy) + dy, P.z * (1 - sxz));

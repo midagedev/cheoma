@@ -24,5 +24,6 @@ export {
   playAssembly,
   setTofuBounce,
   tofuBob,
+  tofuRise,
   tofuScale,
 } from '../anim/assembly.js';

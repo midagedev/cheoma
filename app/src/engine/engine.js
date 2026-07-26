@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import {
-  PRESETS, buildBuilding, computeLayout, disposeBuilding, playAssembly, tofuBob, tofuScale,
+  PRESETS, buildBuilding, computeLayout, disposeBuilding, playAssembly, tofuBob, tofuRise, tofuScale,
 } from '../../../src/api/building.js';
 import {
   setupEnvironment, createFocusRing, normalizeEnvironmentState, resolveEnvironmentChange,
@@ -76,14 +76,23 @@ const moveArrive = (u) => (u >= 0.5 ? 1 : (1 - Math.pow(1 - u / 0.5, 3)));
 // 구간 — 유휴 대기가 아니라 카메라·조립이 계속 움직이므로 첫 인터랙션 지연 체감이 낮다.
 // 카메라 경로 자체는 renderer-free architectural-reveal 모듈이 소유하고, 여기서는 조립과 한 clock으로 배선한다.
 // window.__heroLegacy는 기존 착공 지연 A/B 계측만 보존한다.
-const HERO_ASSEMBLE_DELAY_MS = 1100;   // enter 후 착공까지(타이틀 페이드 0.9s 직후 착공 동기)
-const HERO_ASSEMBLE_DUR = 7.0;         // 조립 길이(완료 ≈8.1s) — 안개 걷힌 뒤 관람 구간 확보(4.8→7.0)
+const HERO_ASSEMBLE_DELAY_MS = 1100;   // enter 후 착공까지(타이틀 페이드 0.9s 직후 착공 동기) — 유휴(빈 터) 구간, 늘리지 않는다
+// 조립 길이(완료 ≈11.1s). 4.8 → 7.0 → 10.0. 2026-07-26 사용자 지시("좀 더 오래걸려도 괜찮아 —
+//   이런게 나름 인상적인 클립이니까")로 상향. 늘어난 시간은 전부 **화면 위 시공**에 쓰인다:
+//   몸채가 통짜가 아니라 기단→기둥→벽·창호→지붕 부재 순서로 서고(playAssembly 위임), 반복 부재는
+//   이웃 간격 ~75ms 리플로 흐른다. 착공 지연(위 DELAY)은 그대로 — 빈 터를 더 오래 보게 하지 않는다.
+//   아래 reveal 카메라·먹안개 길이는 모두 이 상수에서 파생되므로 함께 늘어난다(연출 동기 유지).
+const HERO_ASSEMBLE_DUR = 10.0;
 const HERO_REVEAL_HOLD = 0.5;          // 먹 안개 무대 유지 배율(이 진행도까지 짙게 → 조립 후반에 마을 개방)
 const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주변 먹안개 far 시작 깊이 배율(1=기본), 히어로 근접은 불변
 // 완성 hold 무대: 카메라 선회를 조립 완주보다 이만큼 먼저 끝낸다. 마지막 부재가 내려앉는 순간을 고정된
 //   프레임에서 보게 되고(움직이는 카메라가 완성 비트를 흘려보내지 않는다), 이어서 근접 링(모트·연기·
 //   등롱)이 그 정지 프레임 위로 피어난다. 0 이면 카메라 도착과 완성이 겹쳐 완성 비트가 없다.
 const HERO_REVEAL_TAIL = 1.3;
+
+// 머지(칸 들이기 합체) 수직 탄성 폭(m). 두부 정착 계수는 drop 배수라, 수평 이동인 머지 경로에는
+//   이 값이 그 drop 역할을 한다(공유 이징 언어를 쓰되 진폭만 이 경로 규모로).
+const MERGE_HOP = 0.5;
 
 // focus 전환 타임라인 통일(#92, mode-integration §5.5 원칙 3) — focus-in 은 카메라 돌리 + DoF 페이드 +
 // 링 크로스페이드 + 패널 컨텍스트 모프를 "한 타임라인"으로 구동한다. 카메라 트윈이 그 클록의 권위 —
@@ -995,7 +1004,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         a.e += dt;
         const u = clamp01(a.e / a.dur);
         a.group.position.lerpVectors(a.p0, a.p1, moveArrive(u));
-        a.group.position.y += tofuBob(u, a.amp) * 0.5;
+        a.group.position.y += tofuBob(u, a.amp) * MERGE_HOP;
         const s = tofuScale(u, a.amp);
         a.group.scale.set(s.sxz, s.sy, s.sxz);
         if (u >= 1) { a.group.position.copy(a.p1); a.group.scale.set(1, 1, 1); a.onDone?.(); return false; }
@@ -2040,34 +2049,69 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     legacyHeroPoll = null;
     legacyHeroFadeFrame = null;
   }
-  // 종가 컴파운드 조립 — 핵심 assembly.js(playAssembly)는 podium/columns/roof 등 부재 이름으로 파트를
-  //   찾는데, 종가 오버레이(buildParcel 'hanok'/'palace' 컴파운드)는 그 이름 구조가 없어 아무것도 안
-  //   움직였다. 그래서 컴파운드의 상위 청크(담·문·몸채·행각 — 자식이 있는 그룹)를 시공 순서대로 아래에서
-  //   떠올려 두부 물리(tofuScale/Bob)로 안착시킨다. 몸채(hanok)를 마지막 클라이맥스로. 마당 평면·디딤돌
-  //   (리프 메시)은 지면 디테일이라 정적. 원상복구(position.y·scale·visible)는 skip/완료 시 보장.
+  // 종가 컴파운드 조립 — 컴파운드의 상위 청크(담·문·몸채·행각 — 자식이 있는 그룹)를 시공 순서대로
+  //   아래에서 떠올려 두부 물리(tofuRise/Bob/Scale)로 안착시킨다. 몸채를 마지막 클라이맥스로.
+  //   마당 평면·디딤돌(리프 메시)은 지면 디테일이라 정적. 원상복구(position.y·scale·visible)는
+  //   skip/완료 시 보장.
+  //
+  //   2026-07-26 사용자 보고("최초 진입 히어로 샷에서 집이 통째로 바닥에서 올라온다 — 다른 집들은
+  //   기둥부터 순서대로 올라오는데"): 원인은 이 함수가 몸채를 **단일 it.obj 로 통째 리프트**한 것.
+  //   부재 이름 파트 그룹(podium/columns/walls/brackets/roof)을 **직속 자식**으로 가진 청크는 이제
+  //   코어 playAssembly 에 위임한다 → 마을 giwa 와 정확히 같은 시공 순서·리플·정착 문법을 쓴다.
+  //   getObjectByName 은 재귀라 다전각 곽(팔레스 병합 루트)에서 남의 podium 을 잡을 수 있으므로
+  //   판정은 **직속 자식 이름**으로만 한다(곽 그룹은 위임 대상 아님 → 종전 청크 리프트 유지).
+  const COMPOUND_PART_NAMES = ['podium', 'columns', 'walls', 'brackets', 'roof'];
+  function partOrderedChunk(obj) {
+    let parts = 0, hasPodium = false, hasRoof = false;
+    for (const c of obj.children || []) {
+      if (!c.children?.length || !COMPOUND_PART_NAMES.includes(c.name)) continue;
+      parts++;
+      if (c.name === 'podium') hasPodium = true;
+      if (c.name === 'roof') hasRoof = true;
+    }
+    return parts >= 3 && hasPodium && hasRoof;
+  }
   function playCompoundAssembly(root, duration, { onDone, delay = 0 } = {}) {
     village.asmStarts = (village.asmStarts || 0) + 1;   // #126 재트리거 계측(히어로 랜딩=정확히 1회)
     const compound = root.children[0] || root;
-    const items = compound.children
-      .filter((c) => c.children && c.children.length > 0)     // 그룹만(마당 평면·디딤돌 리프는 정적)
-      .map((c, i) => ({ obj: c, y0: c.position.y, sx: c.scale.x, sy: c.scale.y, sz: c.scale.z, vis0: c.visible, i, body: c.name === 'hanok' }));
-    items.forEach((it) => { it.ord = it.body ? 1e6 : it.i; });
+    const chunks = compound.children.filter((c) => c.children && c.children.length > 0);
+    const nChunk = chunks.length || 1;
+    const items = chunks.map((c, i) => {
+      const parts = partOrderedChunk(c);
+      return {
+        obj: c, y0: c.position.y, sx: c.scale.x, sy: c.scale.y, sz: c.scale.z, vis0: c.visible, i,
+        body: parts || c.name === 'hanok',
+        // 위임 애니의 duration = 이 청크가 차지하는 실제 초 길이(리플 하한 계산 기준).
+        parts: parts ? playAssembly(c, { duration: duration * 0.5 }) : null,
+      };
+    });
+    // 몸채는 항상 마지막(클라이맥스). 몸채가 둘 이상인 컴파운드도 원래 인덱스 순서를 유지한다.
+    items.forEach((it) => { it.ord = it.body ? 1e6 + it.i : it.i; });
     items.sort((a, b) => a.ord - b.ord);
-    const n = items.length || 1;
+    const n = nChunk;
     let e = 0, done = false;
     const set = (it, uu) => {
+      if (it.parts) {                     // 부재 단위 위임(기단→기둥→벽·창호→공포→지붕)
+        it.obj.visible = uu <= 0 ? false : it.vis0;
+        it.obj.position.y = it.y0;
+        it.obj.scale.set(it.sx, it.sy, it.sz);
+        it.parts.seek(uu);
+        return;
+      }
       if (uu <= 0) { it.obj.visible = false; it.obj.position.y = it.y0; it.obj.scale.set(it.sx, it.sy, it.sz); return; }
       if (uu >= 1) { it.obj.visible = it.vis0; it.obj.position.y = it.y0; it.obj.scale.set(it.sx, it.sy, it.sz); return; }
       it.obj.visible = it.vis0;
-      const amp = it.body ? 0.3 : 0.2;
-      const drop = it.body ? 3.4 : 2.2;
-      const fall = uu < 0.5 ? (1 - easeOutCubic(uu / 0.5)) : 0;   // 아래(−drop)에서 제자리로 감속 착지
-      it.obj.position.y = it.y0 - fall * drop + tofuBob(uu, amp) * drop * 0.5;
+      const amp = 0.2;
+      const drop = 2.2;
+      it.obj.position.y = it.y0 - tofuRise(uu) * drop + tofuBob(uu, amp) * drop;
       const s = tofuScale(uu, amp);
       it.obj.scale.set(it.sx * s.sxz, it.sy * s.sy, it.sz * s.sxz);
     };
     const applyAt = (t) => items.forEach((it, i) => set(it, clamp01((t - (i / n) * 0.5) / 0.5)));
-    const restore = () => items.forEach((it) => { it.obj.position.y = it.y0; it.obj.scale.set(it.sx, it.sy, it.sz); it.obj.visible = it.vis0; });
+    const restore = () => items.forEach((it) => {
+      it.parts?.skip();
+      it.obj.position.y = it.y0; it.obj.scale.set(it.sx, it.sy, it.sz); it.obj.visible = it.vis0;
+    });
     applyAt(0);   // 즉시 빈 터(착공 전) — 완성본이 1프레임도 안 비치게
     return {
       update(dt) {
@@ -2082,6 +2126,21 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 검증용(#126): 정지 프레임 — 진행도 t(0..1) 를 자동진행 없이 그대로 적용(playAssembly.seek 대응).
       seek(t) { applyAt(clamp01(t)); },
       isDone() { return done; },
+      // 검증용: 청크 구성 + 위임된 몸채의 부재 타이밍(초). 게이트가 "몸채가 통짜가 아니다"와
+      //   이웃 리플 간격을 수치로 단언한다.
+      plan() {
+        return {
+          duration,
+          delay,
+          chunks: items.map((it, idx) => ({
+            name: it.obj.name || '(anon)',
+            body: !!it.body,
+            delegated: !!it.parts,
+            windowSec: [+((idx / n) * 0.5 * duration).toFixed(3), +(((idx / n) * 0.5 + 0.5) * duration).toFixed(3)],
+            parts: it.parts?.plan() || null,
+          })),
+        };
+      },
     };
   }
   // 오버레이 g 에 조립 재생(delay=착공 지연). 완료 시 편집 불가(populate 언머지 전)면 병합본으로 되돌려 소품 복원.
@@ -3601,6 +3660,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     freeze(b) { if (!disposed) village.asmFrozen = !!b; },
     seek(t) { if (!disposed && village.heroAsm?.seek) { village.heroAsm.seek(t); renderFrame(); } },
     finish() { if (!disposed && village.heroAsm) { village.heroAsm.skip(); renderFrame(); } },
+    // 조립 타이밍 계획(초) — 몸채 위임·부재 순서·리플 이웃 간격의 수치 단언용.
+    plan() { return !disposed && village.heroAsm?.plan ? village.heroAsm.plan() : null; },
     maxScaleDev() {
       if (disposed) return null;
       const g = village.handle?.heroDetailGroup?.();

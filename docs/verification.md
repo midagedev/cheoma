@@ -864,6 +864,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-shadow-framing.mjs` | 광선 직교 basis, texel-stable anchor, 광선축 보존, fallback과 byte 결정론 | Three/DOM 없는 순수 framing 계약이며 제품 focus 수명은 앱 게이트가 맡는다. |
 | `tools/check-directional-shadow-runtime.mjs` | 실제 태양 불변, proxy shadow camera 방향/중심, cache cell, dispose 복원 | 작은 Three fixture로 실제 대규모 장면의 음영 미감은 보지 않는다. |
 | `tools/shoot-focus-shadow.mjs` | 같은 원거리 집과 카메라의 원점 고정/필지 추종 석양 그림자 A/B | PNG는 OS 임시 폴더에 쓰며 처마·기단·마당의 실제 음영을 직접 판정한다. |
+| `tools/check-assembly-contract.mjs` | 두부 조립의 모멘텀 연속 정착(접촉 속도≠0, 접촉에서 위치·변형 C1, 스쿼시 존재, u=1 정확 수렴), 기하 유도 부재 리플(이웃 간격 ms 하한·켜↑/칸 훑기 순서·랭크 병합·파트 창 준수), 지붕 청크 내부 처마→용마루 켜 흐름, 완료·`skip()`·`seek(1)` 의 정확한 원상복구, t=0 무노출, `buildHanok` 파트 그룹·고아 부재 0, 타이밍 계획 결정론 | 순수 계약(브라우저 없음, canvas 스텁). 실제 렌더 프레임의 지각 판정·카메라/먹안개 동기·`village.asmStarts`·드로우콜은 앱 게이트와 `shoot:hero`가 맡는다. |
 | `tools/check-wave-contract.mjs` | scenery 배타 소유, 공유 재질 불변, 궁 tofu wave, cancel/dispose 멱등성 | 순수 계약으로 먹안개 미감과 실제 shader program 수는 보지 않는다. |
 | `tools/shoot-wave.mjs` | 실제 Vite 앱의 고정 progress 전환, 재질/version/cache key 불변, 그림자·program plateau | 기본은 대표 village 한 규모이며 `shoot:wave:full`이 전체 규모를 담당한다. old/new seed·환경·구간은 `CHEOMA_WAVE_*`로 고정한다. |
 | `tools/shoot-hanyang.mjs` | 한양 aerial/high/남·동·서·북문/eye/cull, 실제 plan의 중심 시전 거리 낮·석양과 draw-call·triangle 수 | 절대 frame time은 판단하지 않으며 임시 출력 디렉터리를 명시한다. 시전 근경은 성곽·도로·인접 필지 맥락을 확인하고, 격리 renderer/수묵 계약은 `shoot:sijeon`이 맡는다. |
