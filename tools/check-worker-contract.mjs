@@ -147,10 +147,14 @@ const expectedSceneHashes = {
   //   재기준 직전 실측: 네 규모의 sync 해시와 실제 module Worker 해시가 서로 동일했고
   //   pick proxy 바이트(`expectedProxyHashes`)는 전부 불변이며, snapshot·mja optin fixture 의
   //   sync / Worker / `?worker=0` 폴백 3경로 교차 비교도 PASS 였다 — 결정론 손상이 아니다.
-  village: 'f7330bd6:239a48e4:4c3e00ec:85880986',
-  town: '2207fb35:b60aa2cf:40c5f0cc:25b61d83',
-  capital: 'b2f3eccd:0d20dabb:6980abdb:9f818bbb',
-  hanyang: '31025ae5:d5ae0f85:d384307c:65980557',
+  // 기와집 지붕면 UV 와 수키와 롤이 등파라미터 부채꼴에서 세계좌표 등간격 기왓골로 바뀌어,
+  //   ㄱ·ㄷ 평면 giwa 를 포함한 네 규모의 지붕 지오메트리 바이트가 의도적으로 변했다(ㅡ자 단독은
+  //   불변). 재기준 직전 실측: 네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, proxy 해시
+  //   전부 불변, snapshot·mja 3경로 교차 비교 PASS — 역시 결정론 손상이 아니다.
+  village: 'a712ba61:3ec4b55f:be5d490c:78e1f0b7',
+  town: 'c34053b9:17ecacc5:68ff1bd6:cfe18619',
+  capital: 'ade5c22b:edac5af1:a88e4341:13c869d9',
+  hanyang: 'f2f9f5aa:1543ae96:cc651c81:50c1e15c',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

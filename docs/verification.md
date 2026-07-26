@@ -406,6 +406,16 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - 정규 기와집 편집 UI의 ㄱ 평면 치수·물매 243개 경계 조합, 일반 주택 ㅡ·4칸 ㄷ production fixture, 종가 ㅡ·ㄱ·ㄷ 평면(2~4칸)의 모든 face 상단 체인을 검사.
   - 기존 균등 sampler가 기본·경계 기와집에서 이음새 오차를 재현하는지 먼저 확인한 뒤, 원래 ridge junction·진행 순서 보존을 단언.
   - Vite로 앱의 단일 three를 불러 실제 production Float32 geometry 1,458개 face를 만들고, junction 오차와 face당 135정점·672 index 예산 불변을 함께 검사.
+- `check:giwa-tile-course`
+  - 기와 기왓골이 세계좌표에서 등간격인지를 미터로 고정한다. 지붕면 UV의 `u`가 정확히 `across/0.34`
+    (across = 처마 방향 투영 거리)인지 전 정점에서 확인하고, 물매를 따라 5개 v행에서 "기와 한 장당
+    미터"를 재서 0.34m인지 본다.
+  - 수키와 롤은 병합 버퍼에서 튜브별 중심선을 복원해, 자기 처마변에 수직으로 달리는지(등파라미터
+    부채꼴은 44° 어긋난다), 마루를 넘지 않는지, 처마 포락 밖으로 나가지 않는지, 추녀에서 실제로
+    잘려 끝 높이가 흩어지는지 검사한다. 추녀·회첨에 붙은 자투리 조각은 길이와 마루선 거리로만
+    제한한다(모서리 기와는 마루선을 따라 눕는 것이 옳다).
+  - fixture는 ㅡ·ㄱ·ㄷ·ㄷ(heroDetail)이며, ㄷ자 가운데 본채 면이 마루로 3.2배 벌어지고 우진각
+    앞면이 마루로 수렴하는 것을 함께 단언해 쉬운 면만 보고 통과하는 것을 막는다.
 - `check:verification-plan`
   - docs-only, 정적 import 영향 순수 계약, DoF/weather/village/temple/interaction/audio/app 변경의 합집합을 검사한다.
   - focus+wave가 `lod-app` 한 번으로 합쳐지고 기존 browser harness 수정이 자기 gate로 가는지 검사한다.
@@ -822,6 +832,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-bokeh-fixture.mjs` | 실제 composer 위 제어 HDR 광원의 원형비·방사 균일도, 반지름 sweep의 선형 HDR 총에너지 보존·peak 면적 희석, 8단계 패닝 1표본→hold→13표본 정착 strip, source scatter ON/OFF, Chrome hardware GPU timer query를 계측·촬영 | `CHEOMA_BROWSER=chrome`과 비-software renderer를 강제한다. `npm run shoot:bokeh:proof`는 scatter의 +1 program/+1 draw/+0 target과 앞쪽 depth/가림·채워진 원판을 따로 증명하며 GPU 성능은 wall time으로 판정하지 않는다. |
 | `tools/check-choga-roof.mjs` | 초가 지붕/벽 접합, 변형·편집 극값, 지붕 vertex hash | 재질·조명 미감은 `shoot-thatch.mjs` 전후 이미지를 직접 본다. |
 | `tools/check-roof-seams.mjs` | 기와지붕 face 상단의 ridge knot 보존, UI 평면·칸수·높이 경계 | 마루장 아래의 실제 음영·미감은 `shoot-cg3.mjs` 근접 앵글로 본다. |
+| `tools/check-giwa-tile-course.mjs` | 기와 기왓골의 세계좌표 등간격(면 UV의 u = across/0.34, 물매 5개 v행에서 미터로 검증), 수키와 롤의 처마 수직성·추녀 절단·처마 포락 내부, ㄷ자 가운데 면(부채꼴 3.2배)·우진각 수렴 면이 fixture에 실재하는지 | 순수 node다. 팔레트 대신 stub 재질로 실제 `buildSkeletonRoof` 기하를 만들어 정점·UV만 읽는다. 드로우콜·재질·프로그램 수와 실제 픽셀 판정(추녀 이음새, 선자연 부채꼴)은 브라우저 라운드가 맡는다. |
 | `tools/check-building-clearance.mjs` | 기초 매입, 마당 lift, ㄱ자 기단 단일 depth owner, 판벽 봉창 face clearance, 맞배 벽 tuck, 기와/초가 공유 부엌 개구와 돌출 상한 | 실제 접지선·기단 줄눈·부엌 개구 미감은 기와/초가 격리 하네스와 `layout.html` 필지 4종을 직접 본다. |
 | `tools/check-door-motion-contract.mjs` | primary 한 짝 폭·jamb-edge pivot·안쪽 signed angle, 결정적 임계감쇠·중간 반전·dispose | renderer 없는 순수 운동 계약이며 실제 가림·입력·문짝 실루엣은 앱 게이트와 `shoot:door`가 맡는다. |
 | `tools/check-door-occlusion-contract.mjs` | 선택 문까지의 유한 semantic grid, ㄱ/ㄷ concavity, 일반/종가 담·문, 정자·소품, 사찰 전각·담·문, 궁장/광화문, 성벽/홍예, 시전, 계절 수관, 회전 commit bounds, 필지/flora refresh, 후보 상한 | forest/scatter 수목 fade, 성문 문루 상부·궁 내부 일곽·사찰 소품, 선택 root 내부 actual surface는 각각 기존 소유자가 담당한다. |

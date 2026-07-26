@@ -87,6 +87,20 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 
     const pos = [], uv = [], idx = [];
     const width = dist(Ae, Be);
+
+    // ── 기와 좌표계: across = "처마 방향 투영 거리"(파라미터가 아니라 세계좌표) ──
+    // 한식기와의 기왓골은 처마에 수직으로 곧게 오르고 골 간격(0.34m)은 물매 전체에서 일정하다.
+    // 그런데 skeleton face 는 회첨(반사 끝)에서 마루로 갈수록 넓어지고 추녀(볼록 끝)에서 좁아지므로,
+    // 로프트의 iso-파라미터 열(iu/NU)은 물리적으로 평행하지 않다 — ㄷ자 가운데 면은 처마선이
+    // 3.20m·상단 체인 투영이 9.00m 라, 등파라미터 열의 실제 간격이 처마로 갈수록 3.2배 수렴한다
+    // (= 기와가 아래로 흐를수록 좁아지는 고증 오류). 반대로 우진각 앞면은 마루로 5.6배 수렴한다.
+    // 그래서 across 를 파라미터에서 떼어내 처마 방향 투영으로 잡는다: face 가 어떻게 부채꼴이 되든
+    // 세계좌표 간격이 상수로 유지되고, 골은 추녀·회첨에서 "잘려" 끝난다(실제 기와 잇기 규칙).
+    const eDir = width > 1e-6
+      ? { x: (Be.x - Ae.x) / width, z: (Be.z - Ae.z) / width }
+      : { x: 1, z: 0 };
+    const acrossOf = (px, pz) => (px - Ae.x) * eDir.x + (pz - Ae.z) * eDir.z;
+
     let slopeLen = 0;
     for (let iu = 0; iu <= NU; iu++) {
       const e = eavePts[iu], u = upPts[iu];
@@ -101,7 +115,9 @@ export function buildSkeletonRoof(footprint, opts = {}) {
         const pz = e.z + (u.z - e.z) * v;
         const py = eY + (uY - eY) * fprofile(v);
         pos.push(px, py, pz);
-        uv.push((iu / NU) * (width / 0.34), (1 - v) * (slopeLen / 0.9));
+        // u: 세계좌표 across / 0.34 → 기왓골이 평행·등간격. 삼각형마다 across 가 아핀이라
+        //    정점 보간만으로 평면상 정확히 직선인 골이 나온다(추가 정점·재질 없음).
+        uv.push(acrossOf(px, pz) / 0.34, (1 - v) * (slopeLen / 0.9));
       }
     }
     for (let iu = 0; iu < NU; iu++) for (let iv = 0; iv < NV; iv++) {
@@ -168,32 +184,75 @@ export function buildSkeletonRoof(footprint, opts = {}) {
       };
 
       if (sugiwaRolls) {
-        const nRolls = Math.max(2, Math.round(width / 0.30));
-        const rollR = 0.052, KV = 9;
+        // 상단 체인의 across 투영. upper 는 A→B 방향 t 로 정렬돼 있고 eDir ∥ dir 이므로
+        // projUp 은 단조 증가하며, across(k,v) = (1-v)·(k/NU)·width + v·projUp[k] 도 k 에 대해 단조다
+        // (단조 두 수열의 볼록결합) → 역함수를 구간 스캔으로 정확히 풀 수 있다.
+        const projUp = upPts.map((p) => acrossOf(p.x, p.z));
+        const acrossNode = (k, v) => (1 - v) * (k / NU) * width + v * projUp[k];
+        // across = a 인 파라미터 s. 면 밖이면 경계(s=0=추녀/회첨선, s=1)로 클램프된다.
+        const solveS = (a, v) => {
+          for (let k = 0; k < NU; k++) {
+            const lo = acrossNode(k, v), hi = acrossNode(k + 1, v);
+            if (a <= hi || k === NU - 1) {
+              const span = hi - lo;
+              const t = span > 1e-9 ? Math.min(1, Math.max(0, (a - lo) / span)) : 0;
+              return (k + t) / NU;
+            }
+          }
+          return 1;
+        };
+        // 골 격자는 처마선과 상단 체인 투영의 합집합을 덮는다(회첨 쪽은 처마보다 넓다).
+        const p0a = projUp[0], p1a = projUp[NU];
+        const aMin = Math.min(0, p0a), aMax = Math.max(width, p1a);
+        const aSpan = Math.max(0.3, aMax - aMin);
+        const nRolls = Math.max(2, Math.round(aSpan / 0.30));
+        const pitch = aSpan / nRolls;
+        const rollR = 0.052, KV = 9, V0 = 0.02;
+        const dR = p1a - width;
         for (let j = 0; j < nRolls; j++) {
-          const s = (j + 0.5) / nRolls;
+          const a = aMin + (j + 0.5) * pitch;
+          // 이 골이 면 안에 실재하는 v 구간. 좌·우 경계의 across 는 v 에 대해 선형이라 해석해가 있다.
+          //   볼록(추녀) 끝 → 위로 좁아져 마루 전에 잘린다.  반사(회첨) 끝 → 아래로 좁아져
+          //   처마가 아니라 회첨골 중간에서 시작한다. 둘 다 실제 기와 잇기의 절단 규칙이다.
+          let vLo = 0, vHi = 1;
+          if (p0a > 1e-6) vHi = Math.min(vHi, a / p0a);
+          else if (p0a < -1e-6 && a < 0) vLo = Math.max(vLo, a / p0a);
+          if (dR < -1e-6) vHi = Math.min(vHi, (width - a) / -dR);
+          else if (dR > 1e-6 && a > width) vLo = Math.max(vLo, (a - width) / dR);
+          const fromEave = vLo <= V0;
+          if (!fromEave && vHi <= vLo + 1e-3) continue;   // 추녀와 회첨 사이에 실체가 없는 골
+          const vA = Math.max(V0, vLo);
+          // 최소 구간: 추녀 바로 옆의 얇은 조각도 마루 튜브(r=0.1) 안에 묻히는 길이는 남긴다.
+          const vB = Math.max(vA + 0.012, Math.min(1, vHi));
           const pts = [];
           for (let iv = 0; iv <= KV; iv++) {
-            const v = 0.02 + (1 - 0.02) * (iv / KV); // 처마 살짝 안쪽→마루
+            const v = vA + (vB - vA) * (iv / KV);
+            const s = solveS(a, v);
             pts.push(pointAt(s, v).addScaledVector(normalAt(s, v), rollR * 0.72));
           }
-          // 처마 끝: v=0.02 접선 방향으로 처마 밖으로 살짝 내밀어 둥근 마구리 확보
-          const p0 = pointAt(s, 0.02), p1 = pointAt(s, 0.09);
-          const tipDir = p0.clone().sub(p1).normalize();
-          const n0 = normalAt(s, 0.02);
-          const tip = p0.clone().addScaledVector(tipDir, 0.12).addScaledVector(n0, rollR * 0.72);
-          pts.unshift(tip);
+          if (fromEave) {
+            // 처마 끝: v=V0 접선 방향으로 처마 밖으로 살짝 내밀어 둥근 마구리 확보.
+            const sE = solveS(a, V0), sI = solveS(a, 0.09);
+            const e0 = pointAt(sE, V0), e1 = pointAt(sI, 0.09);
+            const tipDir = e0.clone().sub(e1).normalize();
+            const n0 = normalAt(sE, V0);
+            const tip = e0.clone().addScaledVector(tipDir, 0.12).addScaledVector(n0, rollR * 0.72);
+            pts.unshift(tip);
+            capTips.push({ p: tip, dir: tipDir, n: n0 });
+          }
           const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), KV + 2, rollR, 6, false);
           rollGeoms.push(tube);
-          capTips.push({ p: tip, dir: tipDir, n: n0 });
         }
         // heroDetail: 롤 사이 기왓골(암키와) 끝에 암막새 자리 — 수막새와 교대로 처마 끝 리듬 완성.
+        //   처마선에 닿지 않는 골(회첨에서 시작)은 처마 끝이 없으므로 암막새도 없다.
         if (heroDetail) {
           for (let j = 1; j < nRolls; j++) {
-            const sv = j / nRolls;
-            const p0 = pointAt(sv, 0.02), p1 = pointAt(sv, 0.09);
-            const dv = p0.clone().sub(p1).normalize();
-            const t = p0.clone().addScaledVector(dv, 0.09); t.y -= 0.035;   // 골이라 살짝 낮게
+            const a = aMin + j * pitch;
+            if (a <= 0 || a >= width) continue;
+            const sE = solveS(a, V0), sI = solveS(a, 0.09);
+            const q0 = pointAt(sE, V0), q1 = pointAt(sI, 0.09);
+            const dv = q0.clone().sub(q1).normalize();
+            const t = q0.clone().addScaledVector(dv, 0.09); t.y -= 0.035;   // 골이라 살짝 낮게
             dripTips.push({ p: t, dir: dv });
           }
         }
