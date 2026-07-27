@@ -317,10 +317,10 @@ const VILLAGE_SECTIONS = [
   ] },
 ];
 
-// 커밋 대가(#158 P10) — 같은 룩의 컨트롤이 서로 다른 값을 치른다는 사실을 그룹 헤더 배지로 노출한다.
-//   'wave'   : 값을 놓으면 전-마을 웨이브 재생성(마을 축)
-//   'live'   : 드래그 중 rAF 병합 라이브(정규 필지)
-//   'settle' : 놓는 순간 컴파운드 재생성(종가·관아·궁·절)
+// 커밋 대가(#158 P10) — 그룹 헤더 배지. 집 편집은 전부 드래그 라이브(특수 컴파운드 포함);
+//   마을 축만 전-마을 웨이브를 치른다.
+//   'wave' : 값을 놓으면 전-마을 웨이브 재생성(마을 축)
+//   'live' : 드래그 중 rAF 병합 라이브(집 편집 — 정규·종가·궁·절)
 export const COMMIT_COSTS = Object.freeze(['wave', 'live', 'settle']);
 const withCost = (sections, cost) => sections.map((section) => ({ ...section, cost }));
 
@@ -333,18 +333,19 @@ export function villageDefaults() {
   return villageOptionDefaults();
 }
 
-// spec → { family, tabs, sections }. family 로 라이브 전략(정규=드래그 라이브, 특수=놓을 때 정착)이 갈린다.
+// spec → { family, tabs, sections }. House families all stream live previews;
+// only the village (aerial) schema still pays the full-settlement wave cost.
 export function schemaFor(spec) {
   if (!spec) return { family: 'regular', tabs: false, sections: [] };
-  if (spec.family === 'palace-compound') return { family: 'palace-compound', tabs: false, sections: withCost(PALACE_COMPOUND_SECTIONS, 'settle') };
-  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: withCost(templeSections(spec), 'settle') };
+  if (spec.family === 'palace-compound') return { family: 'palace-compound', tabs: false, sections: withCost(PALACE_COMPOUND_SECTIONS, 'live') };
+  if (spec.family === 'temple') return { family: 'temple', tabs: false, sections: withCost(templeSections(spec), 'live') };
   if (spec.hero) {
     const hs = spec.heroStyle === 'hanok' ? 'hanok' : 'palace';
     return {
       family: 'hero',
       heroStyle: hs,
       tabs: false,
-      sections: withCost(hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS, 'settle'),
+      sections: withCost(hs === 'hanok' ? HANOK_SECTIONS : PALACE_SECTIONS, 'live'),
     };
   }
   const kind = spec.kind === 'giwa' ? 'giwa' : 'choga';
