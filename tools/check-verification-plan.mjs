@@ -76,6 +76,12 @@ assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
 assert.deepEqual(ids(['tools/check-forest-canopy-atten.mjs'], {
   newPaths: ['tools/check-forest-canopy-atten.mjs'],
 }), ['core']);
+assert.deepEqual(ids(['src/village/foliage-value-stratify.js'], {
+  newPaths: ['src/village/foliage-value-stratify.js'],
+}), ['core', 'app', 'worker']);
+assert.deepEqual(ids(['tools/check-scatter-tree-color.mjs'], {
+  newPaths: ['tools/check-scatter-tree-color.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['tools/check-instance-merge-immutability.mjs'], {
   newPaths: ['tools/check-instance-merge-immutability.mjs'],
 }), ['core']);

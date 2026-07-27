@@ -1,8 +1,9 @@
 # 나무 룩 — 동양화 조형 문법과 기법 후보 (리서치)
 
-> - **상태**: §1~§8 은 리서치 산출물(Phase 3.5-0). **§9 는 구현 라운드(3.5-1)가 확정한 계약**이다 —
->   단계 0·1 의 어휘·수치·불변 계약은 §9 를 정본으로 보고, §4 후보 비교는 그 판단 근거로만 읽는다.
-> - **기준일**: 2026-07-25
+> - **상태**: §1~§8 은 리서치 산출물(Phase 3.5-0). **§9 는 구현 라운드(3.5-1)가 확정한 계약**,
+>   **§10 은 #222 Phase 2(scatter instanceColor 층화) 계약**이다 — 단계 0·1 어휘·수치와 Phase 2
+>   예산·잔여는 §9·§10 을 정본으로 보고, §4 후보 비교는 그 판단 근거로만 읽는다.
+> - **기준일**: 2026-07-25 (§10: 2026-07-27)
 > - **발단**: `docs/look-grammar.md` 확정 직후 사용자 지시 — "다각형 나무로는 이 룩을 채울 수 없다. 특히 수묵화 모드에서 잘 드러나도록 동양화적인 형태를 만들어야 한다."
 > - **자매 문서**: `docs/look-grammar.md`(장르 판정 기준), `docs/look-restoration-plan.md`(Phase 3.5), `docs/look-audit-2026-07.md`(U7·R7), `docs/ink-landscape.md`(수묵 렌더 계약)
 > - **범위 분업**: 이 문서는 **나무**만 다룬다. 같은 리서치에서 나온 원리 가운데 원경·구도·여백·대기·색처럼 **나무 밖 전체 룩에 적용되는 것은 `docs/oriental-painting-research.md`**가 소유한다(감사 U1·R5·R7·U7 매핑 포함).
@@ -532,15 +533,66 @@ sRGB 휘도로 환산하면 대략 0.16~0.28 구간에 전부 몰려 있다. `in
 게이트: `npm run check` 58/58 · `check:worker` PASS(재기준 후) · `check:lod:app` PASS ·
 `check:winter:app` PASS · `check:ink:app` PASS · `check:rim` PASS(마을 식생 organic ×0.7 확인).
 
-### 9.4 남은 것
+### 9.4 남은 것 (3.5-1 시점 — §10 이 일부를 닫음)
 
 - 단계 2(근경 한정 브러시 실루엣 알파 카드)는 다음 라운드. §3.6-1 수묵 노멀 오버라이드 함정이 전제 조건.
-- 외곽 산포 나무(`scatter-*`)와 마당 나무는 `instanceColor`가 없어 **그루별 값 층화를 받지 못한다.**
-  현재는 프로토 안에서 덩이별 색을 갈라 한 나무 안의 농담만 만들었다. 개체 간 층화를 주려면
-  `instanceColor` 도입이 필요하고 그건 셰이더 패밀리 축을 건드린다.
+- ~~외곽 산포 나무(`scatter-*`) … 그루별 값 층화~~ → **§10 에서 닫음** (`instanceColor` 곱틴트).
+  마당 나무(`gardens.js`)는 여전히 프로토 내부 덩이색만 있다(정적 병합, 인스턴스 소수 — 다음 후보).
 - 가을 far 블롭 밴드의 채도가 높다(값 층화가 저지대를 밝히면서 주황이 강해짐). 채도 규율 관점의 톤다운은
   팔레트 트랙에서 판단할 사안으로 남긴다.
 - `src/core/foliage-geometry.js`는 신규 경로라 `check:pr` 라우터가 `check:full`로 fail-closed 한다.
   라우팅 경계를 리뷰해 등재하는 일은 검증 도구 소유 트랙 소관이다.
+
+---
+
+## 10. 구현 라운드 (#222, 2026-07-27) — Phase 2: scatter instanceColor 층화
+
+### 10.1 경로 선택
+
+| 후보 | 채택 | 이유 |
+| --- | --- | --- |
+| 근경 브러시 실루엣 알파 카드 (단계 2 / 후보 A 부분집합) | **기각** | §3.6-1 ink 노멀 오버라이드 함정 → 전용 normal/DoF 재질 패밀리 **+2**, 필레이트·LOD 팝 리스크. 규모 L 리모델. |
+| scatter `instanceColor` 값 층화 | **채택** | §9.4 잔여 중 최소 측정 가능 윈. 드로우콜 0·밀도 불변·알파 0 → ink 함정 회피. forest 와 같은 농담 축. |
+
+수락 기준: 경로 1개 확정 · ink 함정 회피 · 숲 밀도 축소 금지 · program/draw 예산 문서화 · 시각 A/B 1라운드(게이트·순수 분산 단언 + `shoot:trees`/`shoot:forest` 관찰).
+
+### 10.2 구현
+
+- **공유 수식** `src/village/foliage-value-stratify.js` (Three/DOM-free):
+  `stratifyFoliageRgb` / `foliageInstanceTint` / `foliageHillBias`.
+  상수: `valueT=0.32`, `valueHill=0.40`, `coolHill=0.16`, `baseScale=0.84`, `hillBase=1.20`, `deepScale=0.92`.
+- **forest-crunch** 는 동일 모듈을 호출해 forest near 절대색 층화와 드리프트 0.
+- **scatter** (`src/generators/village/trees.js`):
+  - `vertexColors` = 덩이별 절대색(한 나무 안 농담, 기존).
+  - `instanceColor` = 흰색 베이스 곱틴트(그루별 t + hillBias + pine deep).
+  - t 는 배치 rng 와 분리된 `makeNoise(seed^0xc01a7e)` 위치 샘플 → **매트릭스·수용 집합 바이트 불변**.
+  - 알파 카드·텍스처·재질 복제 없음. `group.userData.instanceColorStratified = true`.
+
+### 10.3 예산 (program / draw)
+
+| 항목 | 델타 | 근거 |
+| --- | ---: | --- |
+| 드로우콜 | **0** | `scatter-pine` / `scatter-broad` InstancedMesh 구성 불변 |
+| 삼각형 | **0** | 프로토 지오메트리 불변 |
+| 텍스처 | **0** | 포토/절차 텍스처 없음 |
+| 숲 밀도 | **0** | target 식·mask·minD 불변 |
+| 프로그램 패밀리 | **0~+1** | `USE_INSTANCING_COLOR` on existing `vertexColors` material. three 가 instanceColor 유무로 define 을 가르나, forest/bloom 이 이미 instancing-color 경로를 쓰므로 제품 부감 프로그램 상한(144) 안에서 흡수. 신규 패치 축·cacheKey 문자열 없음. |
+| 메모리 | 인스턴스당 float×3 | 한양 scatter 상한 ~2050 → ~24 KB 색 버퍼 |
+
+ink / DoF 경로: 솔리드 불투명 지오메트리 유지 → §3.6-1 알파 카드 함정 **해당 없음**.
+
+### 10.4 게이트
+
+- 순수: `npm run check:scatter-tree-color` (수식 축 + 조립 후 instanceColor 분산·시드 결정론)
+- 라우팅: `src/village/foliage-value-stratify.js` → app+worker; FAST_CHECKS 등재
+- 제품: `npm run check:pr` (영향 게이트) · `check:worker` (scene 해시 재기준 — instanceColor 버퍼 포함, **proxy 해시 불변** 기대)
+- 시각 관찰: `tools/shoot-trees.mjs`, `tools/shoot-forest.mjs` (부감·중경에서 산포 그루 간 농담)
+
+### 10.5 잔여 리스크
+
+- 마당·보호수(`gardens.js`)는 정적 병합이라 instanceColor 축이 없음 — 근경 focus 에서 그루 간 층화 공백.
+- scatter 활엽은 여전히 여름 고정 vertex 팔레트(계절 스왑 없음). 가을 forest 주황과의 대비는 별 이슈로 남김.
+- 브러시 카드 단계 2는 의도적으로 미착수(§10.1).
+- worker scene 해시는 instanceColor 추가로 재기준 필요(결정론 손상 아님 — proxy/배치 불변).
 
 ---

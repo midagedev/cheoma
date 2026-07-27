@@ -27,6 +27,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-door-motion-contract.mjs',
   './check-edge-mist.mjs',
   './check-forest-canopy-atten.mjs',
+  './check-scatter-tree-color.mjs',
   './check-door-occlusion-contract.mjs',
   './check-building-clearance.mjs',
   './check-ground-stone-bedding.mjs',

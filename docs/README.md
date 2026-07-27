@@ -54,7 +54,7 @@
 | [`look-audit-2026-07.md`](look-audit-2026-07.md) | 스냅샷 | 2026-07-25 A/B 전수 감사. 회귀 확정·개선 유지·상향 과제 목록과 원인 커밋·대상 파일. |
 | [`look-grammar.md`](look-grammar.md) | 리서치 | 목표 룩의 시각 문법(빛·구도·공기감) 정리. 복원 판정의 절대 축 근거. |
 | [`dof-cinematic-research.md`](dof-cinematic-research.md) | 리서치 | 시네마틱 DoF 선례(three.js dof/dof2, pmndrs) 비교와 층 분리 복원 스펙. 현행 표면 반경 상한이 무엇을 누르는지, 권고 CoC 공식·초기 파라미터·검증 컷. 계획 1-3의 입력이며 아직 계약이 아니다. |
-| [`tree-look.md`](tree-look.md) | 리서치 | Phase 3.5-0 나무 룩의 동양화 조형 문법과 기법 후보. 프로토타입이 안을 확정하기 전까지 계약이 아니다. |
+| [`tree-look.md`](tree-look.md) | 계약(부분) | §1–§8 리서치. §9 = Phase 3.5-1 어휘·구형 노멀·값 층화 계약. §10 = #222 scatter instanceColor 층화(드로우 0·ink 함정 회피). 브러시 카드 단계 2는 미착수. |
 | [`oriental-painting-research.md`](oriental-painting-research.md) | 리서치 | 동양화 원리 가운데 나무 밖 전체 룩(원경·구도·여백·대기·색·계화)에 적용 가능한 원천 자료. |
 | [`mobile-effects-audit.md`](mobile-effects-audit.md) | 활성 작업(R9 동결) | 2026-07-25 모바일 효과 축소 전수 조사. R1~R8 구현, R9는 §10 헤드리스 프록시 후 **PR_CAP 1.5 동결**(실기기 사인오프 잔여). |
 | [`ui-consolidation.md`](ui-consolidation.md) | 활성 작업 | 2026-07-25 UI 전수 감사와 3축(보기/만들기/공유) 재구성 스펙. 사용자 결정 B안 — 구현 라운드가 §3-B와 결정 절을 따른다. |

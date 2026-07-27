@@ -36,6 +36,7 @@
     "check:door-motion": "node tools/check-door-motion-contract.mjs",
     "check:edge-mist": "node tools/check-edge-mist.mjs",
     "check:forest-canopy": "node tools/check-forest-canopy-atten.mjs",
+    "check:scatter-tree-color": "node tools/check-scatter-tree-color.mjs",
     "check:door-occlusion": "node tools/check-door-occlusion-contract.mjs",
     "check:winter:app": "node tools/run-browser-locked.mjs -- node tools/check-winter-app.mjs",
     "check:ink:app": "node tools/run-browser-locked.mjs -- node tools/check-ink-app.mjs",
