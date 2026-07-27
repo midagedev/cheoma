@@ -1171,7 +1171,8 @@ export function createVillageHandle(opts, seed, plan, group) {
             parcel.thatchAge = edit.top.thatchAge;
             if (refreshFlora) refreshVillageFlora();
           }
-          representationDirty = true;
+          // Map re-tint only — no caster/geometry ownership change, so do not
+          // thrash the directional shadow cache on every thatchAge drag tick.
           return prev;
         }
       }
@@ -1350,7 +1351,9 @@ export function createVillageHandle(opts, seed, plan, group) {
             thresholdLife.attach(prev, thresholdLifeCondition());
           }
         }
-        representationDirty = true;
+        // Live previews may leave the shadow map one mesh behind until pointer-up
+        // (same deferral spirit as flora/ring). Commit always invalidates casters.
+        if (persist) representationDirty = true;
         setResidentialBaseHidden(parcel, true);
         return prev;
       }
