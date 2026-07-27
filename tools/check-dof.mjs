@@ -408,8 +408,11 @@ invariant(
   `the background ladder lost its end-to-end spread ` +
     `(${(radiusAt(150) / radiusAt(75)).toFixed(2)}x from 75m to 150m)`,
 );
+// Floors scale with the product aperture (0.40 m). Background must still
+// separate as layers, but the absolute pixel budget is lower than the old
+// 0.52 m near-band so courtyard life can stay readable.
 invariant(
-  radiusAt(75) > 2 && radiusAt(150) > 8,
+  radiusAt(75) > 2 && radiusAt(150) > 7,
   "neighbouring parcel and background ridge stayed effectively sharp",
 );
 
@@ -429,11 +432,12 @@ invariant(
   asymptote < maxCoc,
   `background asymptote ${asymptote.toFixed(2)}px reached the ${maxCoc.toFixed(2)}px clamp`,
 );
-// Foreground clamp sample: with the product aperture (0.52 m) a 20 m plane no
-// longer saturates maxCoc — that is intentional (courtyard life stays readable).
-// Closer near planes still hit the cap so only the extreme foreground is clamped.
+// Foreground clamp sample: with the product aperture (0.40 m) mid-courtyard
+// planes no longer saturate maxCoc — that is intentional (yard life stays
+// readable). Closer near planes still hit the cap so only the extreme
+// foreground is clamped.
 invariant(
-  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(15) >= maxCoc - 1e-6,
+  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(12) >= maxCoc - 1e-6,
   "the CoC clamp stopped being foreground-only",
 );
 // Product telephoto focus (~50 m, 16°) with the authored tilt dial must keep the

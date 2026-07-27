@@ -102,14 +102,15 @@ export function bokehLongFocusApertureMeters(
 export const BOKEH_COC_DEFAULTS = Object.freeze({
   // Product close-focus aperture diameter in metres (thin-lens CoC). Originally
   // 0.675 m (~85mm f/2.8 on a 1:22 model, docs/dof-cinematic-research.md §1.2 / §4.3)
-  // so a 150 m ridge sat at ~1.2% of frame height. That left the south courtyard —
-  // chickens, dog, yard life between camera and the door focus plane — too soft at
-  // residential focus. 0.52 m keeps background separation and lantern discs while
-  // deepening the near band so 마당 life stays readable. Long hero settle focus
-  // multiplies this through bokehLongFocusApertureMeters (not a second product
-  // dial). Exposed in metres rather than an f-stop because no real full-scale
-  // lens reaches the required f-number.
-  apertureMeters: 0.52,
+  // so a 150 m ridge sat at ~1.2% of frame height; 0.52 m still left the south
+  // courtyard — chickens, dog, yard life between camera and the door focus plane —
+  // soft at residential focus. 0.40 m deepens the near band so one whole house and
+  // the 마당 stay readable while neighbouring parcels and the ridge still separate
+  // and lantern discs remain. Long hero settle focus multiplies this through
+  // bokehLongFocusApertureMeters (not a second product dial). Exposed in metres
+  // rather than an f-stop because no real full-scale lens reaches the required
+  // f-number.
+  apertureMeters: 0.40,
   // Fraction of viewport height. It binds the foreground only: the background
   // asymptote (cocScalePx / focus) stays below it at product focus distances, so
   // far blur runs the pure physical curve to infinity and the near/far asymmetry
