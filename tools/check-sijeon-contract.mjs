@@ -6,7 +6,10 @@ import * as G from '../src/core/math/geom2.js';
 import {
   SIJEON_FACADE_BAYS,
   SIJEON_FACADE_SCHEMA_VERSION,
+  SIJEON_KIND_BREAK,
+  SIJEON_KIND_SHOP,
   SIJEON_PLACEMENT,
+  isSijeonShop,
   planSijeon,
   planSijeonFacade,
 } from '../src/village/sijeon-plan.js';
@@ -150,7 +153,9 @@ invariant(Object.isFrozen(SIJEON_PLACEMENT), 'placement constants must be immuta
 invariant(SIJEON_PLACEMENT.pitch === 6.2
     && SIJEON_PLACEMENT.depth === 8.5
     && SIJEON_PLACEMENT.setback === 1.4
-    && SIJEON_PLACEMENT.runCap === 26,
+    && SIJEON_PLACEMENT.runCap === 26
+    && SIJEON_PLACEMENT.segmentShops === 5
+    && SIJEON_PLACEMENT.segmentGapPitches === 1,
 'legacy placement dimensions drifted');
 
 const horizontal = {
@@ -183,13 +188,17 @@ invariant(stableJson({ roadsResult, site }) === placementInputBefore,
 invariant(stableJson(first) === stableJson(repeated),
   'placement changed across repeated/char01 inputs');
 invariant(first.length === 24, `crossing arterial fixture produced ${first.length}, expected 24`);
-invariant(hash(first) === '8bdb4fb03f7ef77af68704c6d45ed658a8ad5091be56f3006c307d97913c6e85',
-  `legacy placement bytes drifted: ${hash(first)}`);
+invariant(first.every(isSijeonShop), 'short crossing fixture should not need product breaks');
+invariant(hash(first) === 'fcc014f185adb2a73f0cb97b3daedc8312ff55be639276ed69f4dae7ea3dca56',
+  `placement bytes drifted: ${hash(first)}`);
 
 for (const [index, shop] of first.entries()) {
   invariant(shop.id === `s${index}`, `${shop.id}: IDs are not stable and contiguous`);
+  invariant(shop.kind === SIJEON_KIND_SHOP, `${shop.id}: short-run records must be shops`);
   invariant(shop.w === 6.2 && shop.d === 8.5, `${shop.id}: placement dimensions drifted`);
   invariant(shop.poly.length === 4, `${shop.id}: footprint is not a quadrilateral`);
+  invariant(shop.segment?.id && Number.isInteger(shop.segment.index),
+    `${shop.id}: segment metadata missing`);
   const centroid = G.polyCentroid(shop.poly);
   invariant(Object.is(shop.center.x, centroid.x) && Object.is(shop.center.z, centroid.z),
     `${shop.id}: center no longer preserves the exact legacy centroid`);
@@ -212,16 +221,113 @@ invariant(planSijeon({ roads: [{ ...shortRoad, level: 'gil' }] }, site).length =
 invariant(planSijeon({ roads: [] }, site).length === 0,
   'empty road set should produce an empty plan');
 
+// #218a: a long single arterial must insert reserved breaks so continuous shop
+// runs never exceed segmentShops. Break polygons keep the market corridor clear
+// of residential parcels while owning no facade mass.
+const longRoad = {
+  id: 'long-daero',
+  level: 'daero',
+  width: 10,
+  pts: [{ x: -200, z: 0 }, { x: 200, z: 0 }],
+};
+const longSite = { center: { x: 0, z: 0 }, bowlR: 250 };
+const longPlan = withoutGlobalRandom(
+  () => planSijeon({ roads: [longRoad] }, longSite),
+  'placement:long',
+);
+const longShops = longPlan.filter(isSijeonShop);
+const longBreaks = longPlan.filter((record) => record.kind === SIJEON_KIND_BREAK);
+invariant(longBreaks.length > 0, 'long arterial produced no product row breaks');
+invariant(longShops.length + longBreaks.length === longPlan.length,
+  'long plan contains unknown footprint kinds');
+invariant(longBreaks.every((record) => record.poly?.length === 4 && !record.segment),
+  'break footprints must reserve poly and omit segment mass metadata');
+
+const roofWidth = SIJEON_PLACEMENT.pitch * 0.96 + 1.4;
+const bySide = new Map();
+for (const record of longPlan) {
+  const key = `${Math.sign(record.frontDir.x)}:${Math.sign(record.frontDir.z)}`;
+  if (!bySide.has(key)) bySide.set(key, []);
+  bySide.get(key).push(record);
+}
+for (const [side, row] of bySide) {
+  row.sort((a, b) => (a.x + a.z) - (b.x + b.z));
+  let consecutive = 0;
+  let maxConsecutive = 0;
+  for (let index = 0; index < row.length; index++) {
+    const record = row[index];
+    if (record.kind === SIJEON_KIND_BREAK) {
+      maxConsecutive = Math.max(maxConsecutive, consecutive);
+      consecutive = 0;
+      if (index > 0 && index < row.length - 1
+          && isSijeonShop(row[index - 1]) && isSijeonShop(row[index + 1])) {
+        const centerDist = Math.hypot(
+          row[index + 1].x - row[index - 1].x,
+          row[index + 1].z - row[index - 1].z,
+        );
+        // One empty pitch between shops ⇒ ~5 m clear between side eaves.
+        invariant(centerDist >= SIJEON_PLACEMENT.pitch * 2 - 1e-6,
+          `${side}: break did not open a full pitch between shop centres`);
+        invariant(centerDist - roofWidth > 4.5,
+          `${side}: roofs still bridge the product break (gap ${centerDist - roofWidth})`);
+      }
+      continue;
+    }
+    if (index > 0 && isSijeonShop(row[index - 1])) {
+      const step = Math.hypot(record.x - row[index - 1].x, record.z - row[index - 1].z);
+      if (step > SIJEON_PLACEMENT.pitch * 1.5) {
+        maxConsecutive = Math.max(maxConsecutive, consecutive);
+        consecutive = 0;
+      }
+    }
+    consecutive++;
+    invariant(record.segment?.length <= SIJEON_PLACEMENT.segmentShops,
+      `${record.id}: segment length exceeds product cap`);
+    invariant(
+      record.segment?.role === 'solo'
+        || record.segment?.role === 'start'
+        || record.segment?.role === 'mid'
+        || record.segment?.role === 'end',
+      `${record.id}: invalid segment role`,
+    );
+  }
+  maxConsecutive = Math.max(maxConsecutive, consecutive);
+  invariant(maxConsecutive <= SIJEON_PLACEMENT.segmentShops,
+    `${side}: continuous shop run ${maxConsecutive} exceeds segmentShops`);
+}
+
+// Segment annotation is deterministic and covers every real shop.
+const segmentIds = new Set(longShops.map((shop) => shop.segment.id));
+invariant(segmentIds.size >= longBreaks.length,
+  'segment count is lower than the break count on a long run');
+for (const segmentId of segmentIds) {
+  const members = longShops
+    .filter((shop) => shop.segment.id === segmentId)
+    .sort((a, b) => a.segment.index - b.segment.index);
+  invariant(members.length === members[0].segment.length,
+    `${segmentId}: segment length metadata drifted`);
+  for (const [index, member] of members.entries()) {
+    invariant(member.segment.index === index, `${member.id}: segment index gap`);
+  }
+  if (members.length === 1) {
+    invariant(members[0].segment.role === 'solo', `${segmentId}: solo role missing`);
+  } else {
+    invariant(members[0].segment.role === 'start'
+        && members[members.length - 1].segment.role === 'end',
+    `${segmentId}: start/end roles missing`);
+  }
+}
+
 let facadeCases = 0;
 for (const width of [4.4, 5.2, 6.2, 8, 12.5]) {
   for (const depth of [5.6, 6.4, 8.5, 11, 18]) {
     const label = `${width}x${depth}`;
     const facade = withoutGlobalRandom(
-      () => planSijeonFacade({ w: width, d: depth }),
+      () => planSijeonFacade({ w: width, d: depth, kind: SIJEON_KIND_SHOP }),
       `facade:${label}`,
     );
     const repeat = withoutGlobalRandom(
-      () => planSijeonFacade({ w: width, d: depth }),
+      () => planSijeonFacade({ w: width, d: depth, kind: SIJEON_KIND_SHOP }),
       `facade:${label}:repeat`,
     );
     invariant(stableJson(facade) === stableJson(repeat),
@@ -251,6 +357,18 @@ for (let index = 0; index < 256; index++) {
   facadeCases++;
 }
 
+// Placement-derived shops keep segment context on the facade; breaks never get one.
+const longFacade = planSijeonFacade(longShops[0]);
+invariant(longFacade.segment?.id === longShops[0].segment.id,
+  'facade lost placement segment context');
+let breakRejected = false;
+try {
+  planSijeonFacade(longBreaks[0]);
+} catch (error) {
+  breakRejected = error instanceof RangeError;
+}
+invariant(breakRejected, 'break footprint was accepted as a facade shop');
+
 for (const invalid of [
   null,
   {},
@@ -260,6 +378,7 @@ for (const invalid of [
   { w: 0, d: 8.5 },
   { w: 4.39, d: 8.5 },
   { w: 6.2, d: 5.59 },
+  { w: 6.2, d: 8.5, kind: SIJEON_KIND_BREAK },
 ]) {
   let rejected = false;
   try {
@@ -270,4 +389,7 @@ for (const invalid of [
   invariant(rejected, `invalid facade input was accepted: ${JSON.stringify(invalid)}`);
 }
 
-console.log(`check-sijeon-contract: PASS (${first.length} placement records, ${facadeCases} facade cases)`);
+console.log(
+  `check-sijeon-contract: PASS (${first.length} placement records, `
+  + `${longBreaks.length} long-run breaks, ${facadeCases} facade cases)`,
+);

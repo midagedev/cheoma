@@ -2,21 +2,33 @@ import * as G from '../core/math/geom2.js';
 
 // Renderer-free sijeon (licensed-market row) contract.
 //
-// Placement deliberately preserves the legacy village-plan number path. The
-// facade plan uses local coordinates centred on the planned shop:
+// Placement keeps the legacy pitch/depth/setback/runCap number path and inserts
+// product-owned row breaks so long arterial façades do not read as one infinite
+// copy-paste roof (GitHub #218, scope (a) 줄 분절). The facade plan uses local
+// coordinates centred on the planned shop:
 //   +x = along the row, +z = road/front, +y = up.
-// Renderers may merge these records, but must not infer a second footprint or
-// move solid storage/wall mass into the road-side corridor.
+// Renderers may merge shop records, but must not build solid mass for `kind:
+// 'break'` footprints, infer a second footprint, or move solid storage/wall mass
+// into the road-side corridor. Break polygons stay in the plan so residential
+// parcels cannot fill the reserved market corridor.
 
 export const SIJEON_PLACEMENT = Object.freeze({
   pitch: 6.2,
   depth: 8.5,
   setback: 1.4,
   runCap: 26,
+  // Product segmentation (#218a). Interval is not a measured historical bay
+  // count: sources confirm long arterial rows and kan-unit use, not a universal
+  // roof-break period. One pitch of empty reserved footprint separates blocks so
+  // eaves (body + 1.4 m) no longer bridge across the gap.
+  segmentShops: 5,
+  segmentGapPitches: 1,
 });
 
 export const SIJEON_FACADE_SCHEMA_VERSION = 1;
 export const SIJEON_FACADE_BAYS = 2;
+export const SIJEON_KIND_SHOP = 'shop';
+export const SIJEON_KIND_BREAK = 'break';
 
 const BODY_HEIGHT = 3;
 const MIN_WIDTH = 4.4;
@@ -37,12 +49,54 @@ function box(role, x, y, z, width, height, depth, extra = {}) {
   };
 }
 
+/** True when the record owns a rendered two-bay shop mass. */
+export function isSijeonShop(record) {
+  return !!record && record.kind !== SIJEON_KIND_BREAK;
+}
+
+function footprintRecord(base, tan, inward, pitch, depth, id, kind) {
+  const poly = G.frontageParcel(base, tan, inward, pitch * 0.5, depth, 0);
+  return {
+    id,
+    kind,
+    poly,
+    center: G.polyCentroid(poly),
+    frontDir: G.norm(G.mul(inward, -1)),
+    x: base.x,
+    z: base.z,
+    w: pitch,
+    d: depth,
+  };
+}
+
+function annotateSegment(members, segmentId) {
+  const length = members.length;
+  if (!length) return;
+  for (let index = 0; index < length; index++) {
+    const role = length === 1 ? 'solo'
+      : index === 0 ? 'start'
+        : index === length - 1 ? 'end'
+          : 'mid';
+    members[index].segment = Object.freeze({
+      id: segmentId,
+      index,
+      length,
+      role,
+    });
+  }
+}
+
 /**
- * Preserve the original Hanyang market-row placement exactly.
+ * Place market-row footprints along arterial (daero) façades.
+ *
+ * Continuous shop runs are capped into product blocks of `segmentShops` units,
+ * separated by `segmentGapPitches` reserved empty footprints (`kind: 'break'`).
+ * Breaks stay in the returned array so village planning can keep them as parcel
+ * blockers without drawing shop mass.
  *
  * `char01` remains in the signature because the village planner already passes
- * it, although the historical placement never consumed it. Keeping that no-op
- * input avoids changing callers or the downstream random stream.
+ * it, although placement never consumes it. Keeping that no-op input avoids
+ * changing callers or the downstream random stream.
  */
 export function planSijeon(roadsResult, site, _char01 = 0.5) {
   const shops = [];
@@ -52,10 +106,13 @@ export function planSijeon(roadsResult, site, _char01 = 0.5) {
     depth,
     setback,
     runCap,
+    segmentShops,
+    segmentGapPitches,
   } = SIJEON_PLACEMENT;
   const bowlR = site.bowlR;
   const others = (road) => arterials.filter((candidate) => candidate !== road);
   let sid = 0;
+  let segmentSerial = 0;
 
   for (const road of arterials) {
     const fine = G.resample(road.pts, pitch);
@@ -64,9 +121,25 @@ export function planSijeon(roadsResult, site, _char01 = 0.5) {
     const crossingArterials = others(road);
     for (let side = 1; side >= -1; side -= 2) {
       let run = 0;
+      let consecutiveShops = 0;
+      let openSegment = [];
+      let pendingBreakPitches = 0;
+
+      const flushSegment = () => {
+        if (!openSegment.length) return;
+        annotateSegment(openSegment, `seg${segmentSerial++}`);
+        openSegment = [];
+      };
+
       for (let i = 3; i < fine.length - 3 && run < runCap; i++) {
         const sample = fine[i];
-        if (G.dist(sample.pt, site.center) > bowlR * 0.9) continue;
+        if (G.dist(sample.pt, site.center) > bowlR * 0.9) {
+          // Natural hole in the bowl — close the current block without inventing a break.
+          flushSegment();
+          consecutiveShops = 0;
+          pendingBreakPitches = 0;
+          continue;
+        }
         const inward = G.mul(G.perpL(sample.tan), side);
         const base = G.add(sample.pt, G.mul(inward, halfRoadWidth + setback));
         let clashes = false;
@@ -76,21 +149,50 @@ export function planSijeon(roadsResult, site, _char01 = 0.5) {
             break;
           }
         }
-        if (clashes) continue;
+        if (clashes) {
+          // Crossing-arterial clearance already opens a large gap; start a new block after it.
+          flushSegment();
+          consecutiveShops = 0;
+          pendingBreakPitches = 0;
+          continue;
+        }
 
-        const poly = G.frontageParcel(base, sample.tan, inward, pitch * 0.5, depth, 0);
-        shops.push({
-          id: `s${sid++}`,
-          poly,
-          center: G.polyCentroid(poly),
-          frontDir: G.norm(G.mul(inward, -1)),
-          x: base.x,
-          z: base.z,
-          w: pitch,
-          d: depth,
-        });
+        if (pendingBreakPitches > 0) {
+          shops.push(footprintRecord(
+            base,
+            sample.tan,
+            inward,
+            pitch,
+            depth,
+            `s${sid++}`,
+            SIJEON_KIND_BREAK,
+          ));
+          run++;
+          pendingBreakPitches--;
+          continue;
+        }
+
+        const shop = footprintRecord(
+          base,
+          sample.tan,
+          inward,
+          pitch,
+          depth,
+          `s${sid++}`,
+          SIJEON_KIND_SHOP,
+        );
+        shops.push(shop);
+        openSegment.push(shop);
+        consecutiveShops++;
         run++;
+
+        if (consecutiveShops >= segmentShops) {
+          flushSegment();
+          consecutiveShops = 0;
+          pendingBreakPitches = segmentGapPitches;
+        }
       }
+      flushSegment();
     }
   }
   return shops;
@@ -102,8 +204,12 @@ export function planSijeon(roadsResult, site, _char01 = 0.5) {
  * The output is plain serializable data. It describes only physical members;
  * materials, textures, Three.js objects, merge strategy, and LOD remain renderer
  * concerns. Eaves are the sole planned solid allowed beyond `streetEdgeZ`.
+ * Break footprints have no facade — callers must filter with `isSijeonShop`.
  */
 export function planSijeonFacade(shop) {
+  if (shop?.kind === SIJEON_KIND_BREAK) {
+    throw new RangeError('sijeon break footprints have no facade mass');
+  }
   const lotWidth = finiteDimension(shop?.w, 'width');
   const lotDepth = finiteDimension(shop?.d, 'depth');
   if (lotWidth < MIN_WIDTH) {
@@ -272,5 +378,7 @@ export function planSijeonFacade(shop) {
     benches,
     storage,
     roof,
+    // Optional placement context — present when the shop came from planSijeon.
+    segment: shop?.segment ?? null,
   };
 }

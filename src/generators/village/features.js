@@ -54,12 +54,15 @@ function sijeonMaterial(color, roughness, role) {
 //     `sijeon.md` §4.1 의 "새 텍스처 0" 예산 안이다(§7.7-4: 공유 자원 재사용은 예산 소비가 아니다).
 //     시전 배치는 전 점포가 같은 6.2×8.5 라 지붕면 재질 한 벌로 열 전체를 덮는다 → 재질 수 불변.
 export function buildVillageSijeon(shops, site, palette = null) {
+  // Roof UV sample must come from a real shop façade, never a reserved break slot.
+  const roofSample = (Array.isArray(shops) ? shops : []).find((shop) => shop && shop.kind !== 'break')
+    || null;
   const materials = {
     frame: sijeonMaterial(0x6a5a44, 0.85, 'wood'),
     opening: sijeonMaterial(0x453527, 0.94, 'opening'),
     bench: sijeonMaterial(0x765031, 0.9, 'wood'),
     storage: sijeonMaterial(0xd4cbb5, 0.97, 'wall'),
-    roof: sijeonRoofMaterial(shops, palette),
+    roof: sijeonRoofMaterial(roofSample ? [roofSample] : shops, palette),
   };
   materials.roof.userData.snowSurface = true;
   // 깊은 처마 밑 후퇴 배면은 그림자 안이라 색만 올려선 검게 죽는다. 팔레트가 이미 같은 문제에 쓰는

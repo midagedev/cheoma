@@ -126,7 +126,7 @@ if (view === 'aerial') {
 } else if (view === 'sijeon') {
   // 실제 한양 plan의 도심 시전 중 중심에 가까운 한 칸을 기준으로, 대로 위에서
   // 연속 행랑을 사선으로 본다. 고립 fixture가 놓치는 성곽·도로·인접 필지 맥락을 확인한다.
-  const shops = plan.features.sijeon || [];
+  const shops = (plan.features.sijeon || []).filter((record) => record && record.kind !== 'break');
   if (!shops.length) throw new Error('sijeon view requires planned Hanyang market rows');
   const shop = shops.reduce((best, candidate) => {
     const distance = Math.hypot(candidate.center.x - cen.x, candidate.center.z - cen.z);
