@@ -69,11 +69,14 @@ export const VILLAGE_HERO_FOCUS_ELEVATION = 24 * DEG;
 // confusion (src/env/bokeh-coc-contract.js). Shared with BOKEH_COC_DEFAULTS /
 // DEFAULT_DOF_APERTURE. 0.52 m deepens the near band so courtyard life (chickens,
 // dog, yard props between camera and the door focus plane) stays readable while
-// the far ridge and lantern discs still separate. See bokeh-coc-contract.js.
+// the far ridge and lantern discs still separate at residential focus. Hero
+// settle (~170 m axial focus at 7°) multiplies this through
+// bokehLongFocusApertureMeters so the far asymptote does not collapse when the
+// focus plane sits near the ridge (#214). See bokeh-coc-contract.js.
 //
-// One value covers the entire lens continuum on purpose: fov sits in the CoC
-// denominator, so the 46 deg aerial frame is naturally deep and the 7 deg hero
-// frame naturally shallow. Do not add a per-lens aperture.
+// One base value covers the entire lens continuum on purpose: fov sits in the
+// CoC denominator, and long-focus compensation is focus-distance — not per-lens.
+// Do not add a per-lens aperture dial.
 export const VILLAGE_FOCUS_DOF_APERTURE = 0.52;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });

@@ -12,6 +12,7 @@ import {
   BOKEH_GATHER_TAP_COUNT,
   bokehCocScalePx,
   bokehFarAsymptotePx,
+  bokehLongFocusApertureMeters,
   bokehMaxCocPx,
   bokehTiltAnchorV,
   bokehTiltFarAsymptoteHeadroom,
@@ -73,6 +74,7 @@ export class StableBokehPass extends BokehPass {
       params?.bokeh?.apertureMeters ?? CIRCULAR_BOKEH_DEFAULTS.apertureMeters;
     this.maxCocFraction =
       params?.bokeh?.maxCocFraction ?? CIRCULAR_BOKEH_DEFAULTS.maxCocFraction;
+    this.effectiveApertureMeters = 0;
     this.cocScalePx = 0;
     this.maxCocPx = 0;
     // Tilt-shift plane of focus. `tiltStrength` is the authored dial; the value
@@ -257,12 +259,20 @@ export class StableBokehPass extends BokehPass {
    * existing dofAmount contract exactly while the value itself is now an
    * aperture diameter in metres. fov must be read live: the focus continuum
    * moves it from 46 deg aerial to 7 deg hero, and that alone is what makes the
-   * telephoto frame shallower with no second dial (§4.2, §5.1).
+   * telephoto frame shallower. Live focus then multiplies the effective aperture
+   * through bokehLongFocusApertureMeters so hero settle (~170 m axial focus)
+   * keeps far soft-separation without re-softening the residential near band
+   * (#207 / #214).
    */
   _resolveCocScale() {
     const fov = this.camera?.isPerspectiveCamera ? this.camera.fov : 0;
-    this.cocScalePx = bokehCocScalePx(
+    const focus = this.uniforms.focus.value;
+    this.effectiveApertureMeters = bokehLongFocusApertureMeters(
       this.uniforms.aperture.value,
+      focus,
+    );
+    this.cocScalePx = bokehCocScalePx(
+      this.effectiveApertureMeters,
       this._height,
       fov,
     );
@@ -271,7 +281,8 @@ export class StableBokehPass extends BokehPass {
     this.uniforms.maxCocPx.value = this.maxCocPx;
     // Ride the dofAmount ramp. `aperture` is base x amount, so this recovers the
     // ramp weight without a second piece of state and keeps tilt at exactly 0
-    // wherever the aperture is 0 (aerial, criterion 5).
+    // wherever the aperture is 0 (aerial, criterion 5). Long-focus boost is not
+    // part of the ramp — it scales only the CoC, never the Scheimpflug dial.
     const rampWeight = this.apertureMeters > 0
       ? Math.min(1, Math.max(0, this.uniforms.aperture.value / this.apertureMeters))
       : 0;
@@ -328,8 +339,11 @@ export class StableBokehPass extends BokehPass {
   /** Physical optics readout for the browser-free and app gates. */
   debugCoc() {
     return {
+      // Ramp carrier (base × amount) — product base aperture at full focus.
       apertureMeters: this.uniforms.aperture.value,
       baseApertureMeters: this.apertureMeters,
+      // After long-focus compensation; equals apertureMeters at residential focus.
+      effectiveApertureMeters: this.effectiveApertureMeters,
       maxCocFraction: this.maxCocFraction,
       cocScalePx: this.cocScalePx,
       maxCocPx: this.maxCocPx,

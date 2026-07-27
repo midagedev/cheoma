@@ -6,15 +6,19 @@
 // reduced for d >> f (always true at village scale):
 //
 //   r_px = cocScalePx * | 1/focus - 1/z |,
-//   cocScalePx = apertureMeters * viewportHeight / (4 * tan(fov / 2))
+//   cocScalePx = A_eff * viewportHeight / (4 * tan(fov / 2))
 //
 // Three properties fall out of it, and they are exactly the acceptance criteria:
 // blur is a monotone function of z on both sides of the focus plane, the
 // background flattens to a finite asymptote (cocScalePx / focus) without an
 // artificial clamp, and the foreground releases harder than the background at
-// equal distance. fov sits in the denominator, so one aperture constant gives the
-// 46 deg aerial lens a deep depth of field and the 7 deg hero lens a shallow one
-// with no second dial. Never hardcode cocScalePx: the lens profile changes it.
+// equal distance. fov sits in the denominator, so one base aperture constant
+// gives the 46 deg aerial lens a deep depth of field and the 7 deg hero lens a
+// shallow one. A second, focus-only dial (bokehLongFocusApertureMeters) keeps the
+// far asymptote from collapsing when compensated telephoto dolly parks the focus
+// plane near the ridge (hero settle ~170 m) — without touching the residential
+// near band that #207 deepened. Never hardcode cocScalePx: the lens profile and
+// live focus distance change it.
 
 const DEG2RAD_HALF = Math.PI / 360;
 
@@ -60,14 +64,51 @@ export const BOKEH_TILT_MAX_ANCHOR_OFFSET = Math.max(
   1 - BOKEH_TILT_ANCHOR_MIN,
 );
 
+// Reference axial focus (m) at which the authored base aperture is exact. Longer
+// product focus multiplies aperture up to BOKEH_LONG_FOCUS_BOOST_MAX so the far
+// asymptote (A / (4 tan(fov/2) focus)) cannot collapse under compensated dolly.
+// Residential door focus (~50–60 m) stays at boost 1 — the #207 near-band contract.
+export const BOKEH_LONG_FOCUS_REF_M = 60;
+// Hero settle parks a 7° lens at ~170 m of axial focus; without a boost the ridge
+// at 220–300 m sits only 1–3 px soft at 720p. Cap at 2× so the far asymptote under
+// product tilt still clears maxCocFraction (check:dof hero-headroom).
+export const BOKEH_LONG_FOCUS_BOOST_MAX = 2;
+
+/**
+ * Effective aperture diameter after long-focus compensation.
+ *
+ * Far asymptote as a fraction of frame height is A / (4·tan(fov/2)·focus). With
+ * compensated telephoto dolly the hero compound focus moves toward the ridge, so
+ * that fraction shrinks even though the 7° lens scales cocScale up. Scale A with
+ * focus above the residential reference so the miniature soft-separation look
+ * survives hero settle without re-softening the 마당 near band at short focus.
+ */
+export function bokehLongFocusApertureMeters(
+  apertureMeters,
+  focus,
+  {
+    refFocus = BOKEH_LONG_FOCUS_REF_M,
+    maxBoost = BOKEH_LONG_FOCUS_BOOST_MAX,
+  } = {},
+) {
+  if (!Number.isFinite(apertureMeters) || apertureMeters <= 0) return 0;
+  if (!Number.isFinite(focus) || focus <= 0) return apertureMeters;
+  const ref = Number.isFinite(refFocus) && refFocus > 0 ? refFocus : BOKEH_LONG_FOCUS_REF_M;
+  const cap = Number.isFinite(maxBoost) && maxBoost >= 1 ? maxBoost : 1;
+  const boost = Math.min(cap, Math.max(1, focus / ref));
+  return apertureMeters * boost;
+}
+
 export const BOKEH_COC_DEFAULTS = Object.freeze({
   // Product close-focus aperture diameter in metres (thin-lens CoC). Originally
   // 0.675 m (~85mm f/2.8 on a 1:22 model, docs/dof-cinematic-research.md §1.2 / §4.3)
   // so a 150 m ridge sat at ~1.2% of frame height. That left the south courtyard —
   // chickens, dog, yard life between camera and the door focus plane — too soft at
   // residential focus. 0.52 m keeps background separation and lantern discs while
-  // deepening the near band so 마당 life stays readable. Exposed in metres rather
-  // than an f-stop because no real full-scale lens reaches the required f-number.
+  // deepening the near band so 마당 life stays readable. Long hero settle focus
+  // multiplies this through bokehLongFocusApertureMeters (not a second product
+  // dial). Exposed in metres rather than an f-stop because no real full-scale
+  // lens reaches the required f-number.
   apertureMeters: 0.52,
   // Fraction of viewport height. It binds the foreground only: the background
   // asymptote (cocScalePx / focus) stays below it at product focus distances, so
@@ -298,8 +339,14 @@ export function bokehCocLadder({
   tiltStrength = 0,
   screenV = 0.5,
   anchorV = 0.5,
+  // Product path always applies long-focus compensation. Gates that pin the
+  // bare thin-lens ladder at residential focus pass either value (boost = 1).
+  longFocusCompensation = true,
 }) {
-  const scalePx = bokehCocScalePx(apertureMeters, viewportHeight, fovDegrees);
+  const effectiveAperture = longFocusCompensation
+    ? bokehLongFocusApertureMeters(apertureMeters, focus)
+    : apertureMeters;
+  const scalePx = bokehCocScalePx(effectiveAperture, viewportHeight, fovDegrees);
   const maxCocPx = bokehMaxCocPx(viewportHeight, maxCocFraction);
   const invFocus = bokehTiltedInvFocus(focus, tiltStrength, screenV, anchorV);
   return depths.map((z) => {
