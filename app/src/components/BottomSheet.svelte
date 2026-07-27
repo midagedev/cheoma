@@ -1,38 +1,28 @@
 <script>
-  // 만들기 패널 셸(#158 B안). 하나의 컨텍스트 패널만 남았으므로 셸도 하나의 성격 —
-  // "씬을 가리지 않는 만들기 표면" — 을 세 뷰포트 형태로 표현한다.
+  // Make-panel shell — professional inspector surface.
   //
-  //   데스크톱(넓은 창)   : 좌하 카드(.ctxcard) — 낙관 위, 다이얼(우상)·공유 독(우하)과 충돌 없음
-  //   가로 폰            : 좌측 42% 오버레이 패널(.ctxcard.landscape) — P1(가로폰 26px 스크롤) 해소
-  //   세로 좁은 화면      : 바텀 시트(.sheet.context) — detent 2개(peek / half)
+  //   Desktop / tablet     : full-height right dock (.ctxcard) — CAD viewport + properties
+  //   Landscape phone      : same right dock, thinner rail (usable editing + scene)
+  //   Portrait phone       : bottom sheet (.sheet) with 2 detents (peek / half)
   //
-  // detent 는 translateY 가 아니라 **가시 높이**로 정의한다(P2 근인). 시트는 항상 뷰포트 안에
-  // 있고 max-height 만 바뀌므로 스크롤 본문이 화면 밖으로 밀려나지 않는다. 펼침 상한(HALF_VH)은
-  // 카메라가 피사체를 앉힐 밴드를 남기는 값으로 정한다 — 아래 상수 주석 참조.
+  // Detents use **visible height** (not translateY) so scroll content cannot leave
+  // the viewport. HALF_VH leaves a framing band for the focused house.
+  // When the right dock is open it publishes --inspector-w so dial / share dock /
+  // scene guide clear the column without hard-coded corners.
   import { tick, untrack } from 'svelte';
   import { device } from '../lib/device.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
 
   let {
-    open = false, ariaLabel = 'panel', gap = 13, peekPx = 80, detent = null, children,
-    // sticky 헤더/푸터 — 상세만 내부 스크롤, 탭·주요 액션은 항상 가시.
+    open = false, ariaLabel = 'panel', gap = 10, peekPx = 52, detent = null, children,
     header = null, footer = null,
   } = $props();
 
-  // 시트 상태머신 — 2 detent(peek / half). 'hidden' 은 open=false(연출 중 숨김) 전용.
-  //
-  // 펼침 상한. 58vh 였으나 세로 폰에서 시트+보기 카드+올라온 독을 합치면 카메라가 피사체를
-  // 앉힐 밴드가 코어의 최소 가시분(뷰포트의 28%, focus-framing.js)에 못 미쳐 **편집 중인 집이
-  // 화면에 없었다** — P2 의 본질이 그대로 남아 있던 자리다. 이 값은 그 밴드를 확보하면서
-  // §4 의 "가시 스크롤 ≥200px" 도 두 폰 크기 모두에서 유지하는 값(실측).
-  //
-  // 360×780 에서는 두 요구가 서로를 밀어낸다: 밴드 높이 하한이 상한을 누르고 스크롤 하한이
-  // 상한을 올린다. 실측 창은 4px 도 안 됐으므로 컨트롤을 지우지 않는 두 곳에서 여유를 만들었다 —
-  // 올라온 독의 간격 14→8px, 시트 헤더·푸터 패딩 -4px 씩. 그 결과 두 폰 크기 모두 여유 ~7px.
-  const HALF_VH = 0.51;
+  // Visible sheet height. 0.50 balances framing band ≥28% vs scroll ≥200px.
+  const HALF_VH = 0.50;
   let viewportH = $state(0);
   let snap = $state('hidden');
-  let dragH = $state(null);                   // 드래그 중 실시간 가시 높이(px), null=스냅
+  let dragH = $state(null);
   let dragging = $state(false);
   let suppressClick = false;
   let surface = $state(null);
@@ -42,11 +32,32 @@
   const detentH = (name) => (name === 'half' ? halfPx : peekPx);
   const sheetMax = $derived(dragH != null ? dragH : detentH(snap));
   const expanded = $derived(snap === 'half');
-  // peek 에서는 손잡이만 실제로 보인다 → 그때만 본문이 키보드·접근성 소유권을 내놓는다.
   const contentInteractive = $derived(open && (!device.sheet || expanded));
 
-  // 닫힘/접힘이 현재 포커스를 inert 로 만들 때만 계속 보이는 소유자로 회수한다.
-  // References 가 앱 표면을 inert 로 만든 중첩 상태에서는 모달 포커스를 절대 빼앗지 않는다.
+  // Measure the right dock and publish --inspector-w so dial / share dock / guide
+  // clear the column without hard-coded corner constants.
+  $effect(() => {
+    const root = document.documentElement;
+    if (device.sheet || !open || !surface) {
+      root.style.setProperty('--inspector-w', '0px');
+      return () => root.style.removeProperty('--inspector-w');
+    }
+    const publish = () => {
+      const w = Math.round(surface.getBoundingClientRect().width);
+      root.style.setProperty('--inspector-w', `${Math.max(0, w)}px`);
+    };
+    publish();
+    if (typeof ResizeObserver === 'undefined') {
+      return () => root.style.removeProperty('--inspector-w');
+    }
+    const observer = new ResizeObserver(publish);
+    observer.observe(surface);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--inspector-w');
+    };
+  });
+
   let previousOpen = null;
   let previousContentInteractive = null;
   $effect.pre(() => {
@@ -75,26 +86,18 @@
     }
   });
 
-  // 펼침 높이를 한 곳에서 게시한다 — 올라온 공유 독(.actions.lifted)과 보기 카드가 같은 값을
-  // 소비하므로 상한을 바꿀 때 세 파일의 상수가 어긋날 수 없다.
   $effect(() => {
     if (!device.sheet || !halfPx) return;
     document.documentElement.style.setProperty('--sheet-half', `${halfPx}px`);
     return () => document.documentElement.style.removeProperty('--sheet-half');
   });
 
-  // 외부 open 제어 → 진입(peek)/이탈(hidden).
   $effect(() => {
     if (!device.sheet) return;
     if (open) { if (snap === 'hidden') snap = 'peek'; }
     else snap = 'hidden';
   });
-  // 외부 detent 요청(#158 P3): App 이 컨텍스트에 따라 실제로 값을 넘긴다 — 부감=peek, 근접=half.
-  //   focus-in 이 시트를 자동으로 펼치므로 모바일 첫 사용자가 손잡이를 찾지 않아도 편집에 도달한다.
-  //
-  // 요청은 **컨텍스트가 바뀌는 순간의 1회성**이다. 매번 클램프하면 snap 이 이 effect 의 의존값이라
-  // 사용자가 손잡이로 펼친 즉시 요청값으로 되돌아가 — 부감(요청=peek)에서 시트를 손으로 펼치는
-  // 것이 아예 불가능했다(후속 라운드 실측). 그래서 요청이 실제로 달라졌을 때만 적용한다.
+
   let appliedDetent = null;
   $effect(() => {
     if (!device.sheet || !open) { appliedDetent = null; return; }
@@ -112,7 +115,7 @@
   }
   function move(e) {
     if (!dragging) return;
-    const dy = e.clientY - startPY;                 // 아래로 끌면 +
+    const dy = e.clientY - startPY;
     movedBy = Math.max(movedBy, Math.abs(dy));
     dragH = Math.max(peekPx, Math.min(halfPx, startH - dy));
   }
@@ -123,7 +126,6 @@
     suppressClick = movedBy > 6;
     snap = Math.abs(h - halfPx) <= Math.abs(h - peekPx) ? 'half' : 'peek';
   }
-  // 손잡이 탭 = 접힘↔펼침 2-state 토글('만들기 열기' 버튼 은유).
   function tapGrip() {
     if (suppressClick) { suppressClick = false; return; }
     snap = expanded ? 'peek' : 'half';
@@ -135,7 +137,9 @@
 {#if device.sheet}
   <aside
     bind:this={surface}
-    class="sheet context hanji-surface" class:open class:dragging
+    class="sheet context inspector-surface"
+    class:open
+    class:dragging
     data-snap={snap}
     data-make-panel
     style="max-height: {sheetMax}px"
@@ -177,10 +181,10 @@
     {/if}
   </aside>
 {:else}
-  <!-- 데스크톱 좌하 카드 / 가로 폰 좌측 오버레이. 브레드크럼은 이 셸 밖(좌상)으로 나갔다(#158). -->
+  <!-- Right inspector dock: full-height properties column (desktop + landscape phone). -->
   <aside
     bind:this={surface}
-    class="ctxcard hanji-surface"
+    class="ctxcard inspector-surface"
     class:open
     class:landscape={device.landscapePhone}
     data-make-panel
@@ -195,58 +199,97 @@
 {/if}
 
 <style>
-  /* ---------- 데스크톱 좌하 "만들기" 카드 ----------
-     좌상은 브레드크럼 하나만 쓰므로 3중 점유(P4)가 정의상 사라진다. 카드는 낙관 위에 앉고
-     다이얼(우상)·공유 독(우하)과 겹치지 않는다. 상한은 62vh — 스크롤 가시 높이 ≥200px 확보. */
+  /* ---------- Right inspector dock (CAD column) ---------- */
   .ctxcard {
     position: fixed;
-    left: clamp(10px, 1.6vw, 22px);
-    bottom: calc(clamp(16px, 3vh, 34px) + 58px);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
     z-index: 32;
-    width: min(304px, 84vw);
-    max-height: min(62vh, calc(100vh - 108px));
+    width: min(var(--inspector-max, 320px), 34vw);
+    max-height: none;
     padding: 0;
-    border-radius: 9px;
-    display: flex; flex-direction: column;
-    overflow: hidden;                          /* 카드 자체는 스크롤 안 함 — 상세 영역만 */
-    transform: translateX(-118%);
+    border-radius: 0;
+    border-left: 1px solid var(--panel-border);
+    border-top: none;
+    border-bottom: none;
+    border-right: none;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* Instant open/close so --inspector-w and the stage canvas stay in lockstep;
+       a slide would leave a dead strip between a already-shrunk canvas and the panel. */
+    transform: translateX(0);
     opacity: 0;
-    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
+    transition: opacity 0.2s ease;
     pointer-events: none;
   }
-  .ctxcard.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
-  /* 가로 폰(P1): 데스크톱 카드의 200px 상수 클램프를 벗어나 좌측 42% 전高 오버레이로. */
+  .ctxcard.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .ctxcard:not(.open) {
+    visibility: hidden;
+  }
+  /* Landscape phone: same right rail — never a left floating card. */
   .ctxcard.landscape {
-    top: max(8px, env(safe-area-inset-top));
-    bottom: max(8px, env(safe-area-inset-bottom));
-    left: max(8px, calc(env(safe-area-inset-left) + 4px));
-    width: min(340px, 42vw);
+    top: 0;
+    bottom: 0;
+    right: 0;
+    left: auto;
+    width: min(248px, 30vw);
     max-height: none;
   }
-  .ctxhead { flex: none; padding: 12px 14px 0; }
-  .ctxscroll {
-    flex: 1 1 auto; min-height: 0; overflow-y: auto;
-    display: flex; flex-direction: column;
-    padding: 11px 14px 12px;
-    overscroll-behavior: contain;
+  .ctxhead {
+    flex: none;
+    padding: 10px 12px 0;
+    border-bottom: 1px solid var(--panel-line);
+    background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
   }
-  .ctxfoot { flex: none; padding: 10px 14px 12px; border-top: 1px solid var(--ink-line); }
-  .ctxcard.landscape .ctxhead { padding: 8px 12px 0; }
-  .ctxcard.landscape .ctxscroll { padding: 8px 12px 10px; }
-  .ctxcard.landscape .ctxfoot { padding: 8px 12px 10px; }
+  .ctxscroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px 12px;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  }
+  .ctxscroll::-webkit-scrollbar { width: 6px; }
+  .ctxscroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+  }
+  .ctxfoot {
+    flex: none;
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--panel-line);
+    background: var(--panel-2);
+  }
+  .ctxcard.landscape .ctxhead { padding: 8px 10px 0; }
+  .ctxcard.landscape .ctxscroll { padding: 8px 10px 10px; }
+  .ctxcard.landscape .ctxfoot { padding: 8px 10px 10px; }
 
-  /* ---------- 세로 모바일 바텀 시트: 2 detent, 가시 높이로 정의 ---------- */
+  /* ---------- Portrait mobile bottom sheet ---------- */
   .sheet {
     position: fixed;
-    left: 0; right: 0; bottom: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 46;
-    border-radius: 18px 18px 0 0;
-    display: flex; flex-direction: column;
+    border-radius: 14px 14px 0 0;
+    border: 1px solid var(--panel-border);
+    border-bottom: none;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     transition: max-height 0.42s cubic-bezier(0.22, 1, 0.36, 1), transform 0.32s ease;
     will-change: max-height;
     touch-action: none;
-    box-shadow: 0 -6px 26px rgba(30, 22, 14, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+    box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.45);
   }
   .sheet.dragging { transition: none; }
   .sheet[aria-hidden='true'] { transform: translateY(110%); pointer-events: none; }
@@ -254,42 +297,68 @@
   .grip {
     position: relative;
     flex: none;
-    height: 46px;
-    display: grid; place-items: center;
+    height: 44px;
+    display: grid;
+    place-items: center;
     cursor: pointer;
     touch-action: none;
+    border-bottom: 1px solid var(--panel-line);
+  }
+  .grip::before {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 32px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.18);
+    transform: translateX(-50%);
   }
   .peekbtn {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 18px; border-radius: 999px;
-    background: rgba(44, 38, 32, 0.06); border: 1px solid var(--ink-hair);
-    font-family: var(--serif); font-size: 14px; font-weight: 700; color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--panel-elevated);
+    border: 1px solid var(--panel-border);
+    font-family: var(--ui);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--panel-text);
   }
   .peekbtn .chev {
-    width: 9px; height: 9px; margin-top: 2px;
-    border-right: 2px solid var(--ink-soft); border-bottom: 2px solid var(--ink-soft);
-    transform: rotate(-135deg);                       /* 접힘=위(펼치기) */
+    width: 7px;
+    height: 7px;
+    margin-top: 2px;
+    border-right: 1.5px solid var(--panel-muted);
+    border-bottom: 1.5px solid var(--panel-muted);
+    transform: rotate(-135deg);
     transition: transform 0.22s ease, margin 0.22s ease;
   }
-  .peekbtn .chev.open { transform: rotate(45deg); margin-top: -2px; }   /* 펼침=아래(접기) */
+  .peekbtn .chev.open { transform: rotate(45deg); margin-top: -2px; }
   .scroll {
-    flex: 1 1 auto; min-height: 0;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
-    display: flex; flex-direction: column;
-    padding: 0 clamp(16px, 5vw, 22px) 12px;
+    display: flex;
+    flex-direction: column;
+    padding: 0 clamp(14px, 4vw, 18px) 10px;
   }
-  .sheethead { flex: none; padding: 2px clamp(16px, 5vw, 22px) 4px; }
-  /* 접힘(peek)에서는 손잡이만 보인다 — 잘린 헤더 조각이 씬 위에 남지 않게. */
+  .sheethead { flex: none; padding: 4px clamp(14px, 4vw, 18px) 2px; }
   .sheet[data-snap='peek'] .sheethead,
   .sheet[data-snap='peek'] .scroll,
   .sheet[data-snap='peek'] .sheetfoot { visibility: hidden; }
-  /* 푸터는 시트가 늘 뷰포트 안에 있으므로 실제 하단에 도킹된다(구 상단 도킹 우회 불필요). */
   .sheetfoot {
     flex: none;
-    padding: 6px clamp(16px, 5vw, 22px) calc(9px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--ink-line);
+    padding: 6px clamp(14px, 4vw, 18px) calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--panel-line);
+    background: var(--panel-2);
   }
 </style>

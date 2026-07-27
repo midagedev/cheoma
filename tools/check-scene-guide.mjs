@@ -53,6 +53,7 @@ for (const blocker of [
   'cinematic',
   'references',
   'toast',
+  'editing',
 ]) {
   assert.equal(
     sceneGuideIsVisible({ ...visibleState, [blocker]: true }),
@@ -143,21 +144,19 @@ assert.match(
   'touch guide keeps the same five marks',
 );
 assert.doesNotMatch(componentSource, /class:word|\.mark\.word/, 'guide marks share one visual grammar');
-// #158 re-authored: the clearance used to be the constant 88px / 170px, which assumed
-// a one-row dock. The dock legitimately wraps to a second row on narrow widths and long
-// locale labels, and the constant then let the card cover the drone button (P5). The dock
-// now publishes its measured height as --dock-h and both touch bands consume it, so the
-// contract is "derive the clearance from the dock", not any particular number.
-for (const [label, media] of [
-  ['portrait', '@media \\(max-width: 768px\\) and \\(orientation: portrait\\)'],
-  ['landscape', '@media \\(max-height: 520px\\) and \\(orientation: landscape\\)'],
-]) {
-  assert.match(
-    componentSource,
-    new RegExp(`${media}[\\s\\S]*?\\.scene-guide\\.touch\\s*\\{[^}]*bottom:\\s*calc\\([^;]*var\\(--dock-h`),
-    `${label} touch guide must clear the dock by its measured height, not a constant`,
-  );
-}
+// Portrait still clears the raised dock via measured --dock-h. Landscape phone
+// hides the guide entirely: the right inspector rail leaves no framing band for
+// a left-anchored onboarding card.
+assert.match(
+  componentSource,
+  /@media \(max-width: 768px\) and \(orientation: portrait\)[\s\S]*?\.scene-guide\.touch\s*\{[^}]*bottom:\s*calc\([^;]*var\(--dock-h/,
+  'portrait touch guide must clear the dock by its measured height, not a constant',
+);
+assert.match(
+  componentSource,
+  /@media \(max-height: 520px\) and \(orientation: landscape\)[\s\S]*?\.scene-guide\.touch\s*\{[^}]*display:\s*none/,
+  'landscape touch guide is hidden so the right inspector keeps a framing band',
+);
 assert.doesNotMatch(
   componentSource,
   /bottom:\s*max\(\s*(?:88px|170px)/,

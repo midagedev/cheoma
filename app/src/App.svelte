@@ -401,6 +401,7 @@
     cinematic: cine.active,
     references: refOpen,
     toast: !!toast,
+    editing,
   }));
 
   onMount(() => {
@@ -1164,11 +1165,11 @@
   const liveEdit = createLiveEditScheduler({
     preview: () => pushRebuild({ refreshFlora: false, warm: false }),
     commit: () => pushRebuild({ refreshFlora: true, warm: true }),
-    // Geometry previews should feel continuous. 20ms ≈ 50 Hz ceiling when the
-    // openings-only house swap is cheap; adaptive headroom still backs off.
-    minIntervalMs: 20,
-    maxIntervalMs: 72,
-    costHeadroom: 1.8,
+    // Continuous feel for the CAD inspector: target ~60 Hz when the house swap
+    // is cheap; adaptive headroom still backs off under heavier rebuilds.
+    minIntervalMs: 16,
+    maxIntervalMs: 48,
+    costHeadroom: 1.45,
   });
   function villageLive(k, v) {
     editParams[k] = v;
@@ -1236,9 +1237,8 @@
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
 <div class="veil" class:on={veil} aria-hidden="true"></div>
 
-<!-- 3축 크롬(#158 B안): 좌상 브레드크럼 · 우상 보기 카드 · 좌하 만들기 패널 · 우하 공유 독.
-     전부 .chroma 안에 있어 3초 감상 페이드가 실제로 "씬만 남기기"가 된다(P6 — 구 구현은 가장 큰
-     크롬인 패널과 좌상 토글이 남아 의도와 반대였다). 시네마틱·히어로 랜딩 중에도 같은 게이트로 은닉. -->
+<!-- Chrome: top-left path · top-right view card · right inspector dock · viewport share dock.
+     All live in .chroma so the 3s appreciation fade leaves only the scene. -->
 <div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
   {#if sceneVillage && !heroLanding && !cine.active}
     <Breadcrumb
@@ -1284,7 +1284,7 @@
   <EnvironmentDial
     time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
     renderStyle={ui.renderStyle} onRenderStyle={setRenderStyle}
-    compact={sheetLayout && sceneVillage && !villageAerial}
+    compact={device.landscapePhone || (sheetLayout && sceneVillage && !villageAerial)}
     flowing={flowing}
     onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
     onFlowToggle={toggleFlow}
@@ -1330,7 +1330,19 @@
 />
 
 <style>
-  .stage { position: fixed; inset: 0; z-index: 0; }
+  /* Viewport canvas — ends at the right inspector column when --inspector-w is
+     published. That is the real framing fix: the camera orbits the canvas centre,
+     not a fake setViewOffset past an overlay. Portrait sheets keep --inspector-w
+     at 0 so the canvas stays full-bleed and view-shift still clears the sheet. */
+  .stage {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: var(--inspector-w, 0px);
+    z-index: 0;
+    background: #0c0e12;
+  }
   /* 3축 크롬 전체가 이 그룹 안에 있다(#158 P6) — 감상 페이드 후 화면에 씬만 남는다. */
   .chroma { transition: opacity 0.9s ease; }
   .chroma.faded { opacity: 0; pointer-events: none; }
@@ -1345,15 +1357,14 @@
   }
   .veil.on { opacity: 1; pointer-events: auto; }
 
-  /* 안내 토스트(#112) — 하단 중앙 먹빛 캡슐(사진 캡처·glb 안내). */
   .toast {
     position: fixed; left: 50%; bottom: max(84px, calc(env(safe-area-inset-bottom) + 80px));
     transform: translateX(-50%); z-index: 300; max-width: min(88vw, 420px);
     padding: 11px 18px; border-radius: 8px; text-align: center;
-    background: rgba(24, 20, 16, 0.86); color: rgba(244, 239, 228, 0.96);
-    font-family: var(--serif); font-size: 13.5px; line-height: 1.4; font-weight: 600;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    background: var(--glass-strong); color: var(--glass-text);
+    border: 1px solid var(--glass-border);
+    font-family: var(--ui); font-size: 13px; line-height: 1.4; font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     animation: toastin 0.3s ease both;
   }
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }

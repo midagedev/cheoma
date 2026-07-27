@@ -1104,14 +1104,37 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   function resizeAll() {
     const w = container.clientWidth, h = container.clientHeight;
+    if (w < 1 || h < 1) return;
+    // Capture semantic zoom *before* aspect changes. Aerial/focus zoom bands are
+    // aspect-dependent (screen-fill). Without re-applying the settled view after
+    // the inspector column resizes the stage, share/restore drift by ~15%.
+    let preserveView = null;
+    try {
+      if (!tween && !revealCamera?.isActive?.() && !cinematic.isActive() && !demo.active) {
+        preserveView = captureSceneView();
+      }
+    } catch { /* fail closed — bare resize still runs */ }
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
     postRuntime.resize(w, h);
     inkModeRuntime.resize(w, h);
     viewShiftRuntime.invalidate();   // #124: 새 뷰포트 dims 로 setViewOffset 재적용 강제
+    if (preserveView) {
+      try {
+        if (village.active) restoreVillageView(preserveView);
+        else restoreSceneView(preserveView);
+      } catch { /* keep resized frame even if restore fails */ }
+    }
   }
   addEventListener('resize', resizeAll);
+  // Inspector column resizes the stage via --inspector-w without a window
+  // resize event. Observe the container so aspect / composer targets follow.
+  let containerResizeObserver = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    containerResizeObserver = new ResizeObserver(() => resizeAll());
+    containerResizeObserver.observe(container);
+  }
 
   let frames = 0;
   const clock = new THREE.Clock();
@@ -3660,6 +3683,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       revealCamera?.dispose();
       cinematic.dispose?.();
       removeEventListener('resize', resizeAll);
+      containerResizeObserver?.disconnect();
+      containerResizeObserver = null;
       for (const ev of activityEvents) removeEventListener(ev, markActivity);
       renderer.domElement.removeEventListener('pointermove', onCanvasPointerMove);
       renderer.domElement.removeEventListener('pointerdown', onCanvasPointerDown, true);

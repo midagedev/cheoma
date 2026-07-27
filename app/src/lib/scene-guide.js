@@ -37,6 +37,9 @@ export function sceneGuideIsVisible({
   cinematic = false,
   references = false,
   toast = false,
+  // Hide once a house is focused — the inspector + framing band need the
+  // viewport, and the guide is an aerial-mode onboarding card.
+  editing = false,
 } = {}) {
   return !dismissed
     && sceneVillage
@@ -47,5 +50,6 @@ export function sceneGuideIsVisible({
     && !veil
     && !cinematic
     && !references
-    && !toast;
+    && !toast
+    && !editing;
 }

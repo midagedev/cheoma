@@ -65,11 +65,11 @@
   .info {
     pointer-events: auto; cursor: pointer;
     -webkit-appearance: none; appearance: none; border: none; background: none; padding: 2px 3px;
-    font-family: var(--serif); font-size: 13px; line-height: 1; color: var(--ink-faint);
-    text-shadow: 0 1px 8px rgba(244, 239, 228, 0.7);
+    font-family: var(--ui); font-size: 13px; line-height: 1; color: var(--glass-muted);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
     transition: color 0.2s ease;
   }
-  .info:hover, .info:focus-visible { color: var(--seal); outline: none; }
+  .info:hover, .info:focus-visible { color: var(--accent); outline: none; }
   .stamp {
     writing-mode: vertical-rl;
     font-family: var(--serif);
@@ -92,26 +92,26 @@
     100% { transform: scale(1) rotate(0deg); opacity: 1; }
   }
   .seed {
-    font-family: var(--serif);
-    font-size: 13px;
-    letter-spacing: 0.14em;
-    color: var(--ink-soft);
-    text-shadow: 0 1px 8px rgba(244, 239, 228, 0.7);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--glass-muted);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
   }
   .lang {
-    pointer-events: auto; /* seal-label 은 none 이라 토글만 복구 */
+    pointer-events: auto;
     display: flex; align-items: center; gap: 5px;
-    font-family: var(--serif); font-size: 11px; letter-spacing: 0.08em;
-    text-shadow: 0 1px 8px rgba(244, 239, 228, 0.7);
+    font-family: var(--ui); font-size: 11px; letter-spacing: 0.04em;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
   }
   .lang button {
     -webkit-appearance: none; appearance: none; border: none; background: none;
-    padding: 2px 3px; font: inherit; color: var(--ink-faint); cursor: pointer;
+    padding: 2px 3px; font: inherit; color: var(--glass-muted); cursor: pointer;
     transition: color 0.2s ease;
   }
-  .lang button:hover { color: var(--ink-soft); }
-  .lang button.on { color: var(--seal); font-weight: 700; }
-  .lang .sep { color: var(--ink-faint); opacity: 0.6; }
+  .lang button:hover { color: var(--glass-text); }
+  .lang button.on { color: var(--accent); font-weight: 650; }
+  .lang .sep { color: var(--glass-muted); opacity: 0.55; }
 
   /* 모바일: safe-area 존중 + 축소(브랜드 낙관은 유지하되 작게). 언어 토글 탭 타깃 확대. */
   @media (pointer: coarse) {

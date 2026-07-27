@@ -4,13 +4,13 @@ import {
   safeViewportRect,
 } from '../../../src/api/cinematic.js';
 
-// #158: the three-axis chrome. The make-panel shells (.ctxcard / .sheet), the view
-// card (.dial) and the share dock (.actions) are the same classes as before; the
-// retired ModeToggle (.mode) and legacy right drawer (.panel) are replaced by the
-// top-left breadcrumb, which is small but must still be measured so a corner
-// control cannot claim a whole strip.
+// Product chrome that still floats *over the WebGL canvas*. The right inspector
+// dock (.ctxcard) is intentionally absent: the stage is laid out with
+// `right: var(--inspector-w)` so the canvas ends at the column edge and the
+// camera already centres on the free viewport. Portrait `.sheet` still overlays
+// the full-bleed canvas and must be measured here. Corner chips (dial, dock,
+// breadcrumb, guide) remain small occlusion sources.
 const OCCLUSION_SELECTOR = [
-  '.ctxcard',
   '.sheet',
   '.scene-guide',
   '.dial',
@@ -131,10 +131,11 @@ function measureViewportInsets(container) {
 }
 
 /**
- * Keep the subject inside the viewport left by product chrome. Projection
- * shifting recentres that safe rectangle continuously; a focus lifecycle may
- * additionally ask fitFraming() for the minimum same-ray physical dolly needed
- * to keep its semantic architecture and court inside the rectangle.
+ * Keep the subject inside the viewport left by *overlay* product chrome
+ * (sheet, chips). The permanent right inspector is not an overlay — the stage
+ * canvas is physically narrower — so this runtime no longer recentres past it.
+ * Projection shifting still recentres for remaining overlays; a focus lifecycle
+ * may additionally ask fitFraming() for a same-ray physical dolly.
  */
 export function createViewShift({ container, camera, isBusy = () => false }) {
   const state = {

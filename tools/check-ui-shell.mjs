@@ -505,6 +505,11 @@ try {
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       });
       await settleShell(page);
+    } else if (viewport.id === 'phone-landscape') {
+      // Landscape keeps the right inspector rail, so the view axis collapses to a
+      // chip (same density trade as the portrait sheet) and must stay reachable.
+      pass(focused.hits.viewChip === 'hittable',
+        `${viewport.id} the view axis collapses to a reachable chip while editing (${focused.hits.viewChip})`);
     } else {
       pass(focused.hits.renderInk === 'hittable',
         `${viewport.id} the view card stays reachable while editing (${focused.hits.renderInk})`);
@@ -569,8 +574,16 @@ try {
 
     // 수묵(墨): 렌더 스타일 전환은 보기 카드가 소유하고, 크롬 배치는 불변이어야 한다.
     // 시네마틱에서 돌아온 패널이 다시 미끄러져 들어오는 동안 재면 반쪽 프레임을 읽는다.
+    // Landscape phone (and the portrait sheet while editing) collapses the view axis
+    // to a chip — expand it before probing the render-style segment.
     await settleShell(page);
-    await page.evaluate(() => document.querySelector('.dial .render-style button:last-child')?.click());
+    await page.evaluate(async () => {
+      if (!document.querySelector('.dial .render-style button:last-child')) {
+        document.querySelector('[data-view-chip]')?.click();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      }
+      document.querySelector('.dial .render-style button:last-child')?.click();
+    });
     await page.waitForFunction(() => window.__engine.getState().renderStyle === 'ink', null, { timeout });
     await page.evaluate(() => window.__engine.setRenderStyle('ink', { immediate: true }));
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));

@@ -36,19 +36,24 @@
     z-index: 45;
     display: inline-flex; align-items: center; gap: 7px;
     padding: 5px 10px;
-    border-radius: 5px;
-    background-color: rgba(30, 22, 14, 0.82);
-    border: 1px solid rgba(244, 239, 228, 0.22);
-    color: var(--paper);
-    font-family: var(--serif);
+    border-radius: 6px;
+    background-color: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text);
+    font-family: var(--ui);
     white-space: nowrap;
     pointer-events: none;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   }
   .hlabel .seal {
-    display: grid; place-items: center; width: 17px; height: 17px; border-radius: 2px;
-    background: var(--seal); color: var(--paper); font-size: 11px; font-weight: 700;
+    display: grid; place-items: center; width: 16px; height: 16px; border-radius: 3px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid rgba(90, 168, 224, 0.35);
+    font-family: var(--mono); font-size: 10px; font-weight: 650;
   }
-  .hlabel .type { font-size: 13px; font-weight: 700; letter-spacing: 0.03em; }
-  .hlabel .bays { font-size: 11px; color: rgba(244, 239, 228, 0.66); font-variant-numeric: tabular-nums; }
+  .hlabel .type { font-size: 12.5px; font-weight: 650; letter-spacing: 0.01em; }
+  .hlabel .bays {
+    font-family: var(--mono); font-size: 11px; color: var(--glass-muted);
+    font-variant-numeric: tabular-nums;
+  }
 </style>

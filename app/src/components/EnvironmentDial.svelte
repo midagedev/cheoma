@@ -1,8 +1,7 @@
 <script>
-  // 우상 "보기" 카드(#158 B안) — 씬을 보는 방식 전부를 한 곳이 소유한다:
-  //   3링 환경 다이얼(시간·계절·날씨) + 렌더 스타일(景/墨) + 액션 칩(하늘 굴리기·노을빛·시간 흐르기).
-  //   폐기된 RenderStyleToggle 이 여기로 흡수돼 좌상 좌표 충돌(P4)과 "보기" 컨트롤 3코너 분산(P10)이
-  //   함께 사라진다. 카드는 한지 슬래브가 아니라 먹빛 글라스 — 씬 톤을 깨지 않는다(look-grammar).
+  // Viewport "View" card — environment rings + render style + flow chips.
+  // Anchored to the top-right of the *scene* (left of the inspector dock via
+  // --inspector-w), not the window corner, so the CAD column never covers it.
   import { onMount } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
@@ -174,7 +173,8 @@
       <span class="fold" aria-hidden="true">▴</span>
     </button>
   {/if}
-  <span class="axislabel" aria-hidden="true">{t('axis_view')}</span>
+  <!-- Axis label omitted on the card — the rings are self-explanatory and the
+       extra caption made the view tool look like a second header stack. -->
   <svg bind:this={svgEl} viewBox="0 0 200 200" width="164" height="164">
     <!-- 링 트랙 + 밴드 히트영역 -->
     {#each RINGS as ring}
@@ -283,29 +283,27 @@
 {/if}
 
 <style>
-  /* 보기 카드 — 우상 단독 슬롯. 만들기 패널(좌하)·공유 독(우하)과 겹치지 않으므로 시프트가 필요 없다. */
+  /* View card — top-right of the viewport (clears the right inspector via --inspector-w).
+     Kept compact so the CAD column owns density and the dial stays a scene tool. */
   .dial {
     position: fixed;
-    right: clamp(10px, 1.6vw, 22px);
+    right: calc(var(--inspector-w, 0px) + clamp(10px, 1.6vw, 22px));
     top: clamp(10px, 1.6vh, 22px);
-    z-index: 40; /* 패널(32) 위 — 편집 중에도 조작 가능 */
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 8px 10px 10px;
+    z-index: 40;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 7px 9px 9px;
     border-radius: 10px;
-    /* 반투명 먹빛 필만 쓰고 backdrop blur 는 걸지 않는다 — 카드 면적이 커서 소프트웨어 렌더에서
-       프레임당 비용이 실측으로 드러났고(진입 램프 지연), 룩 차이는 거의 없다. */
-    background-color: rgba(30, 24, 18, 0.24);
-    border: 1px solid rgba(244, 239, 228, 0.22);
-    box-shadow: 0 2px 12px rgba(30, 22, 14, 0.26);
+    background-color: var(--glass);
+    background-image: var(--grain);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
     user-select: none;
     touch-action: none;
+    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
+  .dial svg { width: 148px; height: 148px; }
   .axislabel {
-    align-self: flex-start;
-    font-family: var(--serif); font-size: 9.5px; font-weight: 700;
-    letter-spacing: 0.26em; text-transform: uppercase;
-    color: rgba(244, 239, 228, 0.72);
-    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+    display: none;
   }
 
   /* ── 접힌 보기 축(§6.13 A) ──────────────────────────────────────────────
@@ -323,19 +321,17 @@
   }
   .dial.viewchip:hover { border-color: rgba(244, 239, 228, 0.34); }
   .dial.viewchip:active { transform: scale(0.97); }
-  .dial.viewchip:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  .dial.viewchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .chipglyphs {
     display: inline-flex; gap: 3px;
-    font-family: var(--serif); font-size: 15px; line-height: 1; font-weight: 700;
-    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+    font-family: var(--ui); font-size: 14px; line-height: 1; font-weight: 650;
   }
   .chipmarks {
     display: inline-flex;
     padding-left: 5px;
-    border-left: 1px solid rgba(244, 239, 228, 0.26);
-    font-family: var(--serif); font-size: 11px; line-height: 1.36;
-    color: rgba(247, 242, 232, 0.72);
-    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+    border-left: 1px solid var(--glass-border);
+    font-family: var(--ui); font-size: 11px; line-height: 1.36;
+    color: var(--glass-muted);
   }
 
   /* 펼친 동안의 머리 행 = 접기 창구. 카드 폭 전체를 먹고 44px 타깃을 유지한다. */
@@ -348,18 +344,16 @@
     border-bottom: 1px solid rgba(244, 239, 228, 0.18);
   }
   .headlabel {
-    font-family: var(--serif); font-size: 9.5px; font-weight: 700;
-    letter-spacing: 0.26em; text-transform: uppercase;
-    color: rgba(244, 239, 228, 0.78);
-    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+    font-family: var(--ui); font-size: 9.5px; font-weight: 650;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--glass-muted);
   }
   .collapse .fold {
     font-size: 13px; line-height: 1;
-    color: rgba(244, 239, 228, 0.8);
-    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.6);
+    color: var(--glass-text);
   }
-  .collapse:hover .fold { color: #fff2e2; }
-  .collapse:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  .collapse:hover .fold { color: #fff; }
+  .collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .dial.viewcard.compact { animation: viewfold 0.22s ease-out; }
   @keyframes viewfold {
     from { opacity: 0.5; transform: translateY(-3px); }
@@ -374,93 +368,93 @@
   .band { fill: none; stroke: transparent; pointer-events: stroke; cursor: grab; touch-action: none; }
   .band:active { cursor: grabbing; }
   .knob {
-    fill: var(--seal);
-    stroke: rgba(244, 239, 228, 0.85);
+    fill: var(--accent);
+    stroke: rgba(255, 255, 255, 0.85);
     stroke-width: 1.4;
     pointer-events: none; /* 밴드 드래그를 가로채지 않도록(현재 세그먼트 위에서 시작해도 동작) */
     transition: cx 0.5s cubic-bezier(0.22, 1, 0.36, 1), cy 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .lab {
-    fill: rgba(244, 239, 228, 0.72);
-    font-family: var(--serif);
-    font-size: 10.5px;
-    font-weight: 400;
+    fill: rgba(245, 247, 250, 0.62);
+    font-family: var(--ui);
+    font-size: 10px;
+    font-weight: 500;
     text-anchor: middle;
     dominant-baseline: middle;
     pointer-events: none;
     paint-order: stroke;
-    stroke: rgba(30, 22, 14, 0.55);
-    stroke-width: 2.4px;
+    stroke: rgba(10, 12, 16, 0.55);
+    stroke-width: 2.2px;
     transition: fill 0.3s ease, font-weight 0.2s ease;
   }
-  .band:focus-visible { outline: none; stroke: var(--seal); }
-  .dial:focus-within .hub { stroke: var(--seal); }
+  .band:focus-visible { outline: none; stroke: var(--accent); }
+  .dial:focus-within .hub { stroke: var(--accent); }
   .lab.on {
-    fill: #fff2e2;
-    font-weight: 700;
-    stroke: rgba(120, 40, 30, 0.7);
-    stroke-width: 3px;
+    fill: #ffffff;
+    font-weight: 650;
+    stroke: rgba(10, 12, 16, 0.65);
+    stroke-width: 2.6px;
   }
-  .hub { fill: rgba(244, 239, 228, 0.85); stroke: var(--ink-line); stroke-width: 1; }
+  .hub { fill: rgba(245, 247, 250, 0.9); stroke: rgba(255, 255, 255, 0.2); stroke-width: 1; }
 
-  /* 렌더 스타일 세그먼트 — 카드 안에서 다이얼 아래 한 행. 셀렉터(.render-style button)는
-     구 컴포넌트와 동일하게 유지된다(키보드·aria-pressed 계약 보존). */
+  /* Render-style segment — selectors preserved for shell gate (.render-style button). */
   .render-style {
     display: flex; gap: 3px; align-self: stretch;
     padding: 3px; border-radius: 7px;
-    border: 1px solid rgba(244, 239, 228, 0.24);
-    background: rgba(244, 239, 228, 0.12);
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.06);
   }
   .render-style button {
     -webkit-appearance: none; appearance: none; border: 0;
     flex: 1; min-height: 34px; padding: 6px 8px; border-radius: 5px;
     display: flex; align-items: center; justify-content: center; gap: 5px;
-    background: transparent; color: rgba(244, 239, 228, 0.9);
-    font-family: var(--serif); font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
-    text-shadow: 0 1px 4px rgba(30, 22, 14, 0.55);
-    transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+    background: transparent; color: var(--glass-text);
+    font-family: var(--ui); font-size: 12px; font-weight: 650; letter-spacing: 0.02em;
+    transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
   }
-  .render-style button:hover { background: rgba(244, 239, 228, 0.12); }
+  .render-style button:hover { background: rgba(255, 255, 255, 0.08); }
   .render-style button:active { transform: scale(0.97); }
   .render-style button.on {
-    background: var(--paper); color: var(--ink); text-shadow: none;
-    box-shadow: inset 0 0 0 1px rgba(44, 38, 32, 0.13);
+    background: rgba(255, 255, 255, 0.92); color: #12151a;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
   }
-  .render-style button:last-child.on { background: var(--ink); color: var(--paper); }
-  .render-style button:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
-  .render-style .glyph { font-size: 14px; }
+  .render-style button:last-child.on {
+    background: #1a1e25; color: var(--glass-text);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  }
+  .render-style button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .render-style .glyph { font-size: 13px; }
 
-  /* 액션 칩 행 — 카드 안 마지막 행. */
-  .dial-actions {
-    display: flex;
-    gap: 10px;
-  }
+  .dial-actions { display: flex; gap: 8px; }
   .dial-btn {
     -webkit-appearance: none;
     appearance: none;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
     display: grid;
     place-items: center;
     cursor: pointer;
-    background-color: var(--seal);
-    background-image: var(--hanji), linear-gradient(160deg, #bb3e31 0%, #a5322a 60%, #8f2a23 100%);
-    border: 1px solid var(--seal-deep);
-    box-shadow: 0 3px 12px rgba(120, 40, 30, 0.32), inset 0 0 0 1px rgba(255, 220, 210, 0.22);
-    color: #fff2e2;
-    transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.2s ease;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+    color: var(--glass-text);
+    transition: transform 0.14s ease, background 0.14s ease, border-color 0.14s ease;
   }
   .rk-glyph {
     display: block;
-    font-size: 21px;
+    font-size: 18px;
     line-height: 1;
-    font-weight: 700;
+    font-weight: 650;
     transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .dial-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(120, 40, 30, 0.42); }
-  .dial-btn:active { transform: scale(0.94); }
-  .dial-btn:focus-visible { outline: 2px solid var(--seal); outline-offset: 3px; }
+  .dial-btn:hover {
+    transform: translateY(-1px);
+    background: var(--accent-soft);
+    border-color: rgba(90, 168, 224, 0.4);
+  }
+  .dial-btn:active { transform: scale(0.95); }
+  .dial-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
   .tone-orb {
     display: block;
@@ -503,7 +497,7 @@
     .render-style .glyph { font-size: 15px; }
   }
 
-  /* 모바일 세로(시트 레이아웃): 우상 코너에 safe-area 존중, 살짝 축소. */
+  /* Portrait phone: top-right of viewport (sheet has no --inspector-w). */
   @media (max-width: 768px) and (orientation: portrait) {
     .dial {
       right: max(10px, env(safe-area-inset-right));
@@ -512,23 +506,20 @@
     }
     .dial svg { width: clamp(126px, 38vw, 150px); height: clamp(126px, 38vw, 150px); }
     .lab { font-size: 11.5px; }
-    /* 시트가 펼쳐진 동안: 카드가 올라온 공유 독(= --sheet-half + 8px 위, 한 줄) 아래로 내려오지
-       않게 링만 줄인다. 칩·세그먼트는 그대로 남아 조작 경로가 사라지지 않는다. */
     .dial.compact { gap: 5px; padding: 5px 8px 7px; }
     .dial.compact .axislabel { display: none; }
     .dial.compact svg { width: clamp(96px, 28vw, 116px); height: clamp(96px, 28vw, 116px); }
   }
-  /* 가로 폰: 세로 여유가 없어 더 축소(칩 행까지 화면 안에 들어와야 한다). */
+  /* Landscape phone: clear the right rail via --inspector-w; shrink rings only. */
   @media (max-height: 520px) and (orientation: landscape) {
     .dial {
-      right: max(8px, env(safe-area-inset-right));
+      right: calc(var(--inspector-w, 0px) + max(8px, env(safe-area-inset-right)));
       top: max(8px, env(safe-area-inset-top));
       padding: 4px 8px 6px;
       gap: 5px;
     }
     .dial .axislabel { display: none; }
-    .dial svg { width: 116px; height: 116px; }
-    .lab { font-size: 12px; }
-    /* 44px 타깃은 가로 폰에서도 유지한다(#158 모바일 요구) — 줄이는 것은 다이얼 svg 뿐. */
+    .dial svg { width: 108px; height: 108px; }
+    .lab { font-size: 11.5px; }
   }
 </style>

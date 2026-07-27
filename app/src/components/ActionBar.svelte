@@ -1,9 +1,6 @@
 <script>
-  // 우하 "공유" 독(#158 B안) — 장면을 밖으로 내보내는 모든 창구를 단독으로 소유한다:
-  //   사진(PNG) · 링크(장면 URL) · 모델(.glb) · 소리, 그리고 감상 진입(드론·거닐기).
-  //   구 ActionBar 의 승계자이므로 셀렉터(.actions, [data-action], .seal)는 그대로 유지한다.
-  //   P9: 공유·내보내기가 패널·레거시 패널과 3중 구현이던 것을 여기 하나로 모았고,
-  //   편집 중 독을 숨기던 hideActions 규칙은 폐기됐다(패널이 독과 겹치지 않는 슬롯을 쓴다).
+  // Share / export dock — bottom of the *viewport* (left of the inspector via
+  // --inspector-w). Selectors (.actions, [data-action], .seal) stay stable for gates.
   import { t } from '../lib/i18n.svelte.js';
   // raised: 세로 모바일 부감에서 하단 peek 시트 위로 올려 겹침 방지.
   // onReroll: 레거시 단일건물 씬에서만 전달(새 씨앗). 마을 씬은 만들기 패널이 소유.
@@ -90,97 +87,109 @@
 <style>
   .actions {
     position: fixed;
-    right: clamp(14px, 2.4vw, 30px);
+    right: calc(var(--inspector-w, 0px) + clamp(14px, 2.4vw, 30px));
     bottom: clamp(16px, 3vh, 34px);
-    z-index: 34;              /* 만들기 패널(32) 위 — 편집 중에도 공유가 살아 있다 */
+    z-index: 34;
     display: flex;
     align-items: flex-end;
     justify-content: flex-end;
-    /* 좁은 폭에서는 화면 밖으로 넘치지 않고 위로 한 줄 접힌다(하단 고정이라 위로 자란다). */
     flex-wrap: wrap;
-    max-width: calc(100vw - 2 * clamp(14px, 2.4vw, 30px));
-    gap: 10px;
-    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+    max-width: calc(100vw - var(--inspector-w, 0px) - 2 * clamp(14px, 2.4vw, 30px));
+    gap: 8px;
+    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1), transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* 감상 진입(드론·거닐기)은 시각적으로 한 묶음 — 출력 액션과 위계를 구분한다. */
   .watchgroup {
-    display: flex; align-items: flex-end; gap: 8px;
-    padding-right: 10px; margin-right: 2px;
-    border-right: 1px solid rgba(244, 239, 228, 0.34);
+    display: flex; align-items: flex-end; gap: 6px;
+    padding-right: 8px; margin-right: 2px;
+    border-right: 1px solid var(--glass-border);
   }
-  /* 모바일: safe-area(노치·홈 인디케이터) 존중 + 엄지 도달. */
   @media (pointer: coarse) {
     .actions {
-      right: max(14px, env(safe-area-inset-right));
+      right: calc(var(--inspector-w, 0px) + max(12px, env(safe-area-inset-right)));
       bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
-      z-index: 47;   /* 만들기 시트(46) 위 — 편집 중에도 공유 독이 보인다 */
+      z-index: 47;
     }
   }
-  /* 세로 모바일 부감 peek 시트(손잡이 ≈80px) 위로 올림. */
   @media (max-width: 768px) and (orientation: portrait) {
+    .actions {
+      right: max(12px, env(safe-area-inset-right));
+      max-width: calc(100vw - 24px);
+    }
     .actions.raised { bottom: max(96px, calc(env(safe-area-inset-bottom) + 90px)); }
-    /* 펼쳐진 시트 위 — 편집 중에도 독이 시트와 겹치지 않고 씬 위에 남는다. 상한은 시트가
-       --sheet-half 로 게시하는 실제 픽셀값이므로 두 값이 어긋날 수 없다. */
-    .actions.lifted { bottom: calc(var(--sheet-half, 51vh) + 8px); }
+    /* One row only while editing — a wrapped dock collapses the focus framing band. */
+    .actions.lifted {
+      bottom: calc(var(--sheet-half, 51vh) + 8px);
+      flex-wrap: nowrap;
+      gap: 6px;
+      max-width: calc(100vw - 24px);
+    }
+    .actions.lifted .seal {
+      min-width: 44px;
+      height: 44px;
+      padding: 0 8px;
+    }
+    .actions.lifted .seal .face { font-size: 11.5px; }
+    .actions.lifted .seal.round { width: 44px; min-width: 44px; height: 44px; }
+    .actions.lifted .watchgroup { display: none; }
   }
   .seal {
     -webkit-appearance: none;
     appearance: none;
     border: none;
-    min-width: 58px;
+    min-width: 52px;
     width: auto;
-    height: 58px;
-    padding: 0 14px;
-    border-radius: 6px;
+    height: 48px;
+    padding: 0 12px;
+    border-radius: 8px;
     display: grid;
     place-items: center;
-    font-family: var(--serif);
-    background-color: var(--paper);
-    background-image:
-      var(--hanji),
-      linear-gradient(160deg, var(--paper) 0%, var(--paper-2) 60%, var(--paper-3) 100%);
-    border: 1px solid var(--ink-hair);
-    box-shadow: 0 2px 10px rgba(30, 22, 14, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-    color: var(--ink);
-    transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.2s ease;
+    font-family: var(--ui);
+    background: var(--glass-strong);
+    background-image: var(--grain);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    color: var(--glass-text);
+    transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, filter 0.2s ease;
   }
   .seal .face {
-    font-size: 15px;
-    line-height: 1.06;
-    letter-spacing: 0.04em;
-    font-weight: 700;
+    font-size: 12.5px;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+    font-weight: 650;
     text-align: center;
     white-space: nowrap;
   }
-  .seal.round { border-radius: 50%; width: 52px; min-width: 52px; height: 52px; padding: 0; }
-  .seal .note { font-size: 20px; color: var(--ink-faint); }
-  /* 시네마틱 진입(드론 ▷ / 거닐기 步) — 먹빛 전각 글리프. */
-  .seal .glyph { font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1; }
-  .seal.round.active { background: var(--seal); border-color: var(--seal-deep); }
-  .seal.round.active .note { color: var(--paper); }
-
-  /* 다시 짓기 = 전각 도장(주묵) 강조 — 레거시 단일건물 씬 전용 */
-  .seal.primary {
-    min-width: 64px;
-    height: 64px;
-    background: var(--seal);
-    background-image: var(--hanji), linear-gradient(160deg, #bb3e31 0%, #a5322a 60%, #8f2a23 100%);
-    border-color: var(--seal-deep);
-    box-shadow: 0 3px 14px rgba(120, 40, 30, 0.34), inset 0 0 0 1px rgba(255, 220, 210, 0.22);
+  .seal.round { border-radius: 50%; width: 46px; min-width: 46px; height: 46px; padding: 0; }
+  .seal .note { font-size: 18px; color: var(--glass-muted); }
+  .seal .glyph { font-size: 17px; font-weight: 650; color: var(--glass-text); line-height: 1; }
+  .seal.round.active {
+    background: var(--accent-soft);
+    border-color: rgba(90, 168, 224, 0.45);
   }
-  .seal.primary .face { color: var(--paper); }
+  .seal.round.active .note { color: var(--accent); }
 
-  .seal:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(30, 22, 14, 0.26); }
-  .seal:active { transform: translateY(0) scale(0.96); }
-  .seal:disabled { filter: saturate(0.6) opacity(0.6); cursor: default; }
-  .seal:focus-visible { outline: 2px solid var(--seal); outline-offset: 3px; }
+  .seal.primary {
+    min-width: 56px;
+    height: 52px;
+    background: var(--accent-soft);
+    border-color: rgba(90, 168, 224, 0.45);
+  }
+  .seal.primary .face { color: var(--glass-text); }
 
-  /* 좁은 폭: 독이 화면을 넘지 않게 줄바꿈 대신 축소(사진·링크·모델 라벨은 유지). */
+  .seal:hover {
+    transform: translateY(-1px);
+    background: rgba(20, 24, 30, 0.82);
+    border-color: rgba(90, 168, 224, 0.35);
+  }
+  .seal:active { transform: translateY(0) scale(0.97); }
+  .seal:disabled { filter: saturate(0.7) opacity(0.55); cursor: default; }
+  .seal:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
   @media (max-width: 430px) {
-    .actions { gap: 7px; left: auto; max-width: calc(100vw - 20px); }
-    .seal { min-width: 50px; height: 52px; padding: 0 9px; }
-    .seal .face { font-size: 13px; }
-    .seal.round { width: 46px; min-width: 46px; height: 46px; }
-    .watchgroup { gap: 6px; padding-right: 7px; }
+    .actions { gap: 6px; left: auto; max-width: calc(100vw - 20px); }
+    .seal { min-width: 46px; height: 46px; padding: 0 8px; }
+    .seal .face { font-size: 12px; }
+    .seal.round { width: 44px; min-width: 44px; height: 44px; }
+    .watchgroup { gap: 5px; padding-right: 6px; }
   }
 </style>
