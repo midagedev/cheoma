@@ -8,8 +8,8 @@
 
 import { makeRng } from '../rng.js';
 import {
-  householdCompositionPolicy,
   householdDiversityProfile,
+  pickChogaHouseVariant,
   pickGiwaHouseVariant,
 } from './house-diversity.js';
 
@@ -114,16 +114,6 @@ function assignRoleTones(parcel, kind, wealth, rng, dK = 1) {
 
 function variantsFor(kind) { return kind === 'giwa' ? GIWA_VARIANTS : CHOGA_VARIANTS; }
 const clampIdx = (list, i) => Math.min(list.length - 1, Math.max(0, i | 0));
-
-// 초가도 같은 household composition budget을 읽는다. 작은 살림은 삼간 민가,
-// 중간은 여염집, 큰 살림은 드문 오간 부농을 중심으로 하되 인접 단계의 seed 변주는
-// 남긴다. 실제 처마 fit이 맞지 않으면 house-footprint가 작은 variant로 내린다.
-function pickChogaVariant(profile, roll) {
-  const composition = householdCompositionPolicy(profile);
-  if (composition.level === 'small') return roll < 0.82 ? 0 : 1;
-  if (composition.level === 'medium') return roll < 0.12 ? 0 : roll < 0.9 ? 1 : 2;
-  return roll < 0.18 ? 1 : 2;
-}
 
 // parcel.variant 의 프리셋 오버라이드(ov). 미러 항목은 원본(mirrorOf)의 ov. 편집 기준·치수 표시에 사용.
 export function variantOv(parcel) {
@@ -247,7 +237,11 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   const kind = parcel.kind === 'giwa' ? 'giwa' : 'choga';
   // #91 다양성 강도(dK) + 담장 스타일 분포(wallWeights) — 무옵션(dK=1·weights 미지정) 시 현행 정확 재현.
   //   dK 는 개체 지터(yaw·규모 노이즈·톤·담높이·이엉상태)의 진폭만 배율 → wealth 기반 평균·rng 소비수 불변.
-  const dK = Math.min(2, Math.max(0, tuning.diversityK != null ? tuning.diversityK : 1));
+  // Focus "다시 짓기" may raise dK and flatten form bands via exploreForms without
+  // touching village placement (which never sets those flags).
+  const exploreForms = !!tuning.exploreForms;
+  const baseDk = tuning.diversityK != null ? tuning.diversityK : 1;
+  const dK = Math.min(2, Math.max(0, exploreForms ? Math.max(baseDk, 1.7) : baseDk));
   const wallWeights = tuning.wallWeights || null;
   if (parcel.hero) {
     parcel.variant = 0; parcel.yaw = 0; parcel.sx = parcel.sy = parcel.sz = 1;
@@ -267,7 +261,9 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   // 새 평면을 넣어도 같은 seed의 연속 변주 축이 불필요하게 전부 바뀌지 않는다.
   const variantRoll = rng();
   // 잠재변수: 신분(주) + 마을 성격(부) + 개체 노이즈. [0,1] 클램프.
-  const wealth = clamp01(rank * 0.72 + (char01 - 0.5) * 0.34 + (rng() * 2 - 1) * 0.12);
+  // Rerolls widen wealth noise so stature/scale/tone leave the rank pin more.
+  const wealthNoise = exploreForms ? 0.22 : 0.12;
+  const wealth = clamp01(rank * 0.72 + (char01 - 0.5) * 0.34 + (rng() * 2 - 1) * wealthNoise);
   parcel.wealth = wealth;
   const household = householdDiversityProfile(parcel, char01, wealth);
   // One correlated stature signal reaches continuous width/height and color;
@@ -275,8 +271,8 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   // tier matter without turning legal ceilings into literal dimensions.
   const stature = clamp01(wealth * 0.72 + household.household01 * 0.28);
   parcel.variant = kind === 'giwa'
-    ? pickGiwaHouseVariant(parcel, char01, wealth, variantRoll, household)
-    : pickChogaVariant(household, variantRoll);
+    ? pickGiwaHouseVariant(parcel, char01, wealth, variantRoll, household, { explore: exploreForms })
+    : pickChogaHouseVariant(household, variantRoll, { explore: exploreForms });
   // 좌향은 plan의 frontDir 하나가 필지 poly·패드·집·담·픽킹을 모두 결정한다. 예전의 별도
   // yaw는 검증 뒤 실제 렌더만 최대 ±6° 돌려 필지 경계와 집을 어긋나게 했다. RNG 한 칸은
   // 이후 색·살림 변주의 seed 계약을 보존하려고 소비하되 두 번째 공간 회전은 만들지 않는다.
@@ -286,9 +282,11 @@ export function assignVariation(parcel, char01 = 0.5, tuning = {}) {
   // 도로가 먼저 정한 도시 가구의 structureScale은 필지와 실제 집을 함께 줄인다. plot만
   // 압축해 처마가 담과 이웃집을 뚫는 보정은 허용하지 않는다.
   const structureScale = parcel.structureScale || 1;
-  parcel.sx = (0.9 + stature * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
-  parcel.sz = (0.9 + stature * 0.16 + (rng() * 2 - 1) * 0.06 * dK) * structureScale;
-  parcel.sy = (0.86 + stature * 0.22 + (rng() * 2 - 1) * 0.07 * dK) * structureScale;
+  const scaleJitter = exploreForms ? 0.10 : 0.06;
+  const heightJitter = exploreForms ? 0.11 : 0.07;
+  parcel.sx = (0.9 + stature * 0.16 + (rng() * 2 - 1) * scaleJitter * dK) * structureScale;
+  parcel.sz = (0.9 + stature * 0.16 + (rng() * 2 - 1) * scaleJitter * dK) * structureScale;
+  parcel.sy = (0.86 + stature * 0.22 + (rng() * 2 - 1) * heightJitter * dK) * structureScale;
   // 부위별 독립 톤(#55 핵심) + 레거시 단일 톤(하위호환).
   assignRoleTones(parcel, kind, clamp01(wealth * 0.8 + household.household01 * 0.2), rng, dK);
   parcel.toneIdx = Math.floor(rng() * TONE[kind].length);
