@@ -10,34 +10,29 @@
 4. 스킵: 클릭/스페이스/`?hero=0`
 5. (v4 이후) 마을 전체가 안쪽→바깥쪽 스태거로 파도치듯 조립 — 집당 딜레이 0.2~0.4s
 
-## 2. 레이아웃 (크로마) — [보기 / 만들기 / 공유] 3축
+## 2. 레이아웃 (크로마) — viewport + right inspector
 
-현재 계약은 `ui-consolidation.md` §3-B안·§5다. 크롬은 성격으로 세 그룹이며 각 그룹이 한 슬롯을 단독 점유한다
-(구 4슬롯 모델 + 좌상 3중 점유는 폐기).
+크롬은 성격으로 세 그룹(path / view / make+share)이며, 편집 표면은 **우측 CAD 인스펙터**가 소유한다.
+전통 한지·전각 미감은 브랜드 낙관(SealLabel)에만 남기고, 편집·도구 UI는 쿨 다크 인스펙터 톤이다.
 
 ```
-┌──────────────────────────────────────────────┐
-│ 마을 › 초가                        ┌─ 보기 ─┐ │  좌상: 브레드크럼(루트 클릭=focus-out, 전환 중 aria-busy)
-│                                    │ ◔ 다이얼│ │  우상: 보기 카드 — 시간·계절·날씨·노을·흐름 + 景/墨
-│           (씬 — 풀블리드)           │ 景 │ 墨 │ │
-│                                    └───────┘ │
-│ ┌─ 만들기 ────────┐                          │  좌하: 만들기 패널 — [村][家] 탭 + 그룹 아코디언 + 再
-│ │ [村][家]        │                          │
-│ │ 규모 ──●──      │                          │
-│ │ 지형 ▸ 구성 ▸   │  ← 그룹 하나만 펼침       │
-│ │ 再 다시 짓기     │                          │
-│ └────────────────┘                           │
-│ 처마 #4821          [사진][공유][모델][♪][▷步] │  우하: 공유 독(내보내기까지 단독 소유)
-└──────────────────────────────────────────────┘
+┌───────────────────────────────────┬────────────┐
+│ 마을 › 초가            ┌─ view ─┐ │ INSPECTOR  │  좌상 path · 우상(뷰포트) view card
+│                        │ ◔ dial │ │ [Explore]  │  우측 full-height dock (desktop / landscape)
+│        SCENE           │ PBR|Ink│ │ [Focus]    │  --inspector-w 로 dial·share 가 비킨다
+│                        └────────┘ │ props…     │
+│ 처마 #seed   [share dock]         │ ↻ rebuild  │  뷰포트 하단 공유 독
+└───────────────────────────────────┴────────────┘
 ```
 
-- 버튼·패널은 한지 텍스처 + 먹선 + 전각 도장 미감. 씬 위에 얹히는 좌상 브레드크럼과 우상 보기 카드는
-  한지 슬래브가 아니라 먹빛 글라스다(씬 톤 불침해 — `look-grammar.md`).
-- 마우스 없을 때 크로마 자동 페이드 (3s) — **3축 크롬 전체가 한 `.chroma` 그룹**이라 페이드 뒤에는 씬만 남는다.
-- 반응형: 데스크톱 좌하 카드 / 가로 폰 좌측 42% 오버레이 / 세로 좁은 화면 바텀 시트 2 detent(peek·상한 있는 half).
-  상한은 `BottomSheet.svelte` 의 `HALF_VH` 하나가 소유하고 `--sheet-half` 로 게시된다(공유 독·보기 카드가 소비).
-  detent 는 translateY 가 아니라 가시 높이로 정의하며, 편집 중에도 씬이 40% 이상 남는다.
-- 판정 지표와 게이트: `ui-consolidation.md` §4 + `npm run check:ui-shell`.
+- **데스크톱 / 태블릿 / 가로 폰**: 우측 full-height inspector column. WebGL stage is
+  physically `right: var(--inspector-w)` — the camera centres on the free canvas, not
+  a `setViewOffset` past an overlay. Overlay view-shift remains only for sheet/chips.
+- **세로 폰**: 하단 sheet 2 detent(peek / half). focus-in 시 half 자동. 상한 `HALF_VH` → `--sheet-half`.
+  Stage stays full-bleed; sheet still overlays and is measured by view-shift.
+- 브레드·다이얼·독은 씬(축소된 캔버스) 위 glass chip; 만들기 패널만 opaque inspector.
+- 마우스 idle 3s → `.chroma` 페이드로 씬만 남김.
+- 판정: `ui-consolidation.md` §4 + `npm run check:ui-shell`.
 
 ## 3. 핵심 인터랙션
 

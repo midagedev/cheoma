@@ -66,47 +66,49 @@
 </nav>
 
 <style>
-  /* 좌상 단독 슬롯. 씬 위에 얹히는 먹빛 글라스 — 한지 슬래브를 놓지 않아 씬 톤을 깨지 않는다. */
+  /* Top-left path bar — glass chip, not a paper slab. */
   .crumbs {
     position: fixed;
     left: clamp(10px, 1.6vw, 22px);
     top: clamp(10px, 1.6vh, 22px);
     z-index: 40;
     display: flex; align-items: baseline; gap: 7px;
-    max-width: min(52vw, 420px);
-    padding: 5px 12px 6px;
+    max-width: min(36vw, calc(100vw - var(--inspector-w, 0px) - 200px), 320px);
+    padding: 6px 12px 7px;
     border-radius: 8px;
-    background-color: rgba(30, 24, 18, 0.22);
-    border: 1px solid rgba(244, 239, 228, 0.26);
-    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-    box-shadow: 0 2px 10px rgba(30, 22, 14, 0.22);
+    background-color: var(--glass);
+    background-image: var(--grain);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
     user-select: none;
   }
   .crumb {
     background: none; border: none; padding: 0;
-    font-family: var(--brush); color: rgba(244, 239, 228, 0.94);
-    text-shadow: 0 1px 5px rgba(30, 22, 14, 0.6);
+    font-family: var(--ui); color: var(--glass-text);
   }
-  .crumb.root { margin: 0; font-size: 22px; line-height: 1.1; cursor: default; }
-  .crumb.root.link { cursor: pointer; color: rgba(244, 239, 228, 0.8); }
-  .crumb.root.link:hover { color: #fff2e2; }
-  .crumb.root.link:focus-visible { outline: 2px solid var(--seal); outline-offset: 3px; }
-  .sep { font-size: 17px; color: rgba(244, 239, 228, 0.6); transition: opacity 0.24s ease; }
+  .crumb.root {
+    margin: 0; font-size: 14px; font-weight: 650; line-height: 1.2; cursor: default;
+    min-width: 44px; min-height: 44px;
+    display: inline-flex; align-items: center;
+  }
+  .crumb.root.link { cursor: pointer; color: var(--glass-muted); }
+  .crumb.root.link:hover { color: #fff; }
+  .crumb.root.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .sep { font-size: 13px; color: var(--glass-muted); opacity: 0.7; transition: opacity 0.24s ease; }
   .crumb.leaf {
-    font-size: 22px; line-height: 1.1; color: #ffd9c8;
+    font-size: 14px; font-weight: 650; line-height: 1.2; color: var(--accent);
     transition: opacity 0.24s ease; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
   .count {
-    margin-left: 4px; font-family: var(--serif); font-size: 11px; font-weight: 700;
-    color: #ffd9c8; font-variant-numeric: tabular-nums;
-    text-shadow: 0 1px 5px rgba(30, 22, 14, 0.6);
+    margin-left: 4px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    color: var(--glass-muted); font-variant-numeric: tabular-nums;
   }
   .busylabel {
-    font-family: var(--serif); font-size: 10.5px; letter-spacing: 0.1em;
-    color: rgba(244, 239, 228, 0.78);
+    font-family: var(--ui); font-size: 10.5px; letter-spacing: 0.06em;
+    color: var(--glass-muted);
   }
-  .crumbs.busy { border-color: rgba(255, 214, 170, 0.5); }
+  .crumbs.busy { border-color: rgba(90, 168, 224, 0.45); }
 
   /* 터치: 루트 타깃 ≥44px. */
   @media (pointer: coarse) {
@@ -120,13 +122,14 @@
     .crumb.root.link { min-height: 44px; display: flex; align-items: center; padding: 0 2px; }
   }
 
-  /* 가로 폰: 만들기 패널이 좌측 42% 전高를 쓰므로 브레드크럼은 그 오른쪽 상단 대역으로 물러난다
-     (좌상 단독 점유 규약은 "패널과 겹치지 않는다"는 뜻이다 — #158 P4). */
+  /* Landscape phone: inspector is a RIGHT rail — path bar stays top-left of the
+     viewport (not offset past a retired left panel). */
   @media (max-height: 520px) and (orientation: landscape) {
     .crumbs {
-      left: calc(min(340px, 42vw) + 16px);
+      left: max(10px, calc(env(safe-area-inset-left) + 6px));
       top: max(8px, env(safe-area-inset-top));
-      max-width: min(38vw, 260px);
+      max-width: min(28vw, calc(100vw - var(--inspector-w, 0px) - 120px), 220px);
     }
+    .crumb.root, .crumb.leaf { font-size: 15px; }
   }
 </style>
