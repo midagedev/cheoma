@@ -190,14 +190,16 @@ const expectedSceneHashes = {
   //   sync == worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
   // Rafters under skeleton roofs sit a few cm deeper so the DoubleSide tile shell
   // does not share depth with the underside "ceiling" read (assembly z-fighting).
-  // #211 U1 부감 분지 가장자리: edge-mist thickness/outerDrop/opacity, ridge-mist
+// #211 U1 부감 분지 가장자리: edge-mist thickness/outerDrop/opacity, ridge-mist
   //   opacity, village terrain far vertex-color ramp. Proxy 불변(plan/pick 무관).
-  //   재기준 직전 실측: 네 규모 모두 sync == worker == `?worker=0` 폴백 바이트 동일,
-  //   snapshot·mja 3경로 교차 PASS.
+  // #217: plan-owned 2–3 gate-crossing slabs (seed-local size/thickness, lower deck).
+  //   Only Hanyang golden seed 20260716 emits crossings on the capital/hanyang pair
+  //   for this cohort (capital that seed has runs but zero gate crossings).
+  //   재기준 직전 실측: 네 규모 모두 sync == worker == `?worker=0` 폴백 바이트 동일.
   village: '79d91a63:7d20f661:6018d62e:a408bce9',
   town: 'eb856a0b:e43ddf4d:04a46152:67f4cb53',
   capital: '838d19e4:0514320a:57bcb85d:bfe0816e',
-  hanyang: '0c72aa68:0289d678:1b12ef2d:4e7a4932',
+  hanyang: '27e0310e:9342fe8e:b3cde138:86eaf2b8',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

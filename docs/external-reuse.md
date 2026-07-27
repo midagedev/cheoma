@@ -320,7 +320,9 @@ validateRoadsideDrainagePlan(drainage);
 일반 hamlet/village/town은 빈 계획을 반환한다. Hanyang 계획가로와 capital 간선도 실제 낮은
 유출구가 성립하는 구간만 남기므로, 외부 소비자도 renderer 단계에서 임의의 도랑을 추가하거나 카메라에
 맞춰 좌표를 바꾸지 않는다. `point.surfaceY`는 정확한 삼각 지형 높이, `point.y`는 보이는 도랑
-바닥의 절대 높이이고 `crossing.center.y`는 판석의 명목 상면이다.
+바닥의 절대 높이이고 `crossing.center.y`는 판석의 명목 상면이다. 대문 건넘은 `crossing.slabs[]`
+(2–3매, 개체 span/width/thickness/top)로 배치·크기를 계획 단계에서 고정하며, 렌더러는 그 record
+를 재해석하지 않는다. 매수·치수는 제품 판독성 값이며 사료 실측이 아니다.
 
 ```js
 import {

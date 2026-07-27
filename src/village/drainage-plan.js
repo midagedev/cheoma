@@ -1,4 +1,5 @@
 import { deepFreeze } from '../core/stable-seed.js';
+import { hashString, makeRng } from '../rng.js';
 import * as G from '../core/math/geom2.js';
 import { terrainMeshHeightAt } from './terrain-grid.js';
 import { createRoadSpatialIndex } from './road-spatial.js';
@@ -10,6 +11,10 @@ export const DRAINAGE_PLAN_SCHEMA_VERSION = 1;
 // terrain mesh: its visible bed sits just above the exact triangulated surface and
 // shallow physical banks form the readable groove. The bounded upstream lift is
 // only enough to bridge small grid undulations while keeping a downhill bed.
+//
+// Gate-crossing slab count, size, thickness, and deck height are plan-owned
+// product choices for absolute visual authenticity (issue #217 / W4-2 residual).
+// They are NOT historical measured dimensions — docs/drainage.md §2.4 / §3.4.
 export const DRAINAGE_PLAN_LIMITS = deepFreeze({
   sampleSpacing: 1.0,
   shoulder: 0.22,
@@ -29,8 +34,22 @@ export const DRAINAGE_PLAN_LIMITS = deepFreeze({
   maxCrossings: 400,
   crossingSpan: 0.82,
   crossingWidth: 1.35,
-  crossingThickness: 0.1,
-  crossingLift: 0.025,
+  // Blockier than the retired 0.10 m plate so stones read as sunk mass, not
+  // floating thin decks. Range is seed-local per slab; envelope thickness is max.
+  // Capped so the stone may hang into the open channel without sinking far below
+  // the visible bed into solid terrain (product bound, not a measured standard).
+  crossingThicknessMin: 0.12,
+  crossingThicknessMax: 0.17,
+  // Nominal deck top sits just above the channel lip. Per-slab top jitter is
+  // plan-owned so the renderer cannot invent a second landing plane.
+  crossingLift: 0.006,
+  crossingTopJitter: 0.008,
+  // Stepping stones may occupy the open ditch volume; refuse only bottoms that
+  // dig far under the bed plane into the shared terrain body.
+  crossingBedEmbedMax: 0.05,
+  crossingSlabCountMin: 2,
+  crossingSlabCountMax: 3,
+  crossingGapMax: 0.02,
 });
 
 const HANYANG_LEVELS = new Set(['daero', 'jungno', 'soro']);
@@ -286,6 +305,66 @@ function intersectionWithRun(gatePoint, roadPoint, run) {
   return best;
 }
 
+/**
+ * Plan 2–3 seed-local stepping stones inside the gate-crossing envelope.
+ *
+ * Count, individual span/width/thickness, lateral offset, and top seating are
+ * product-tuned for absolute visual authenticity (not historical measures).
+ * Uses a local mulberry stream from the crossing id — never Math.random — so
+ * worker/sync stay byte-stable. The renderer only shapes presentation
+ * (natural-stone silhouette, mottle).
+ */
+function planCrossingSlabs(crossingId, envelopeSpan, envelopeWidth) {
+  const rng = makeRng(hashString(`drainage-crossing|${crossingId}`));
+  // ~1/3 of crossings get two stones; the rest three. Product sparseness only.
+  const count = rng() < 0.34
+    ? DRAINAGE_PLAN_LIMITS.crossingSlabCountMin
+    : DRAINAGE_PLAN_LIMITS.crossingSlabCountMax;
+  const gap = Math.min(DRAINAGE_PLAN_LIMITS.crossingGapMax, envelopeSpan * 0.025);
+  const usableSpan = envelopeSpan - gap * (count - 1);
+  if (usableSpan <= EPSILON) {
+    throw new RangeError(`${crossingId} span is too short for planned slabs`);
+  }
+  // Uneven weights so one stone is clearly larger — equal thirds read as a
+  // modern precast deck (authenticity §7.5b W4-2 residual).
+  const weights = Array.from(
+    { length: count },
+    () => 0.45 + rng() * 1.15,
+  );
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const fullWidthIndex = Math.floor(rng() * count);
+  let cursor = -envelopeSpan * 0.5;
+  const slabs = [];
+  for (let index = 0; index < count; index++) {
+    const span = index === count - 1
+      ? envelopeSpan * 0.5 - cursor
+      : usableSpan * weights[index] / weightTotal;
+    // Dominant stone nearly fills the lateral envelope; companions are narrower.
+    const widthScale = index === fullWidthIndex
+      ? 0.92 + rng() * 0.08
+      : 0.62 + rng() * 0.32;
+    const width = envelopeWidth * widthScale;
+    const xFreedom = Math.max(0, (envelopeWidth - width) * 0.5);
+    const x = index === fullWidthIndex
+      ? (rng() * 2 - 1) * xFreedom * 0.4
+      : (rng() * 2 - 1) * xFreedom;
+    const thickness = DRAINAGE_PLAN_LIMITS.crossingThicknessMin
+      + rng() * (DRAINAGE_PLAN_LIMITS.crossingThicknessMax
+        - DRAINAGE_PLAN_LIMITS.crossingThicknessMin);
+    const top = (rng() * 2 - 1) * DRAINAGE_PLAN_LIMITS.crossingTopJitter;
+    slabs.push({
+      x,
+      z: cursor + span * 0.5,
+      span,
+      width,
+      thickness,
+      top,
+    });
+    cursor += span + gap;
+  }
+  return slabs;
+}
+
 function planCrossings(parcels, runs, site) {
   const runsByRoad = new Map();
   for (const run of runs) {
@@ -315,8 +394,18 @@ function planCrossings(parcels, runs, site) {
     const runB = selected.run.points[selected.hit.segment + 1];
     const bedY = runA.y + (runB.y - runA.y) * selected.hit.t;
     const deckY = bedY + DRAINAGE_PLAN_LIMITS.depth + DRAINAGE_PLAN_LIMITS.crossingLift;
+    const id = `crossing:${parcel.id}`;
+    const span = DRAINAGE_PLAN_LIMITS.crossingSpan;
+    const width = DRAINAGE_PLAN_LIMITS.crossingWidth;
+    const slabs = planCrossingSlabs(id, span, width);
+    // Envelope thickness is the tallest planned stone — collision/export consumers
+    // that only read the top-level field still get a safe outer bound.
+    const thickness = slabs.reduce(
+      (max, slab) => Math.max(max, slab.thickness),
+      DRAINAGE_PLAN_LIMITS.crossingThicknessMin,
+    );
     crossings.push({
-      id: `crossing:${parcel.id}`,
+      id,
       parcelId: parcel.id,
       roadId: access.roadId,
       runId: selected.run.id,
@@ -325,9 +414,10 @@ function planCrossings(parcels, runs, site) {
       roadPoint: { x: access.roadPoint.x, z: access.roadPoint.z },
       center: { x: center.x, y: deckY, z: center.z },
       yaw: Math.atan2(axis.x, axis.z),
-      span: DRAINAGE_PLAN_LIMITS.crossingSpan,
-      width: DRAINAGE_PLAN_LIMITS.crossingWidth,
-      thickness: DRAINAGE_PLAN_LIMITS.crossingThickness,
+      span,
+      width,
+      thickness,
+      slabs,
     });
   }
   return crossings;
@@ -513,9 +603,64 @@ export function validateRoadsideDrainagePlan(plan) {
       throw new RangeError(`${crossing.id} does not clear its referenced ditch`);
     }
     if (crossing.span !== DRAINAGE_PLAN_LIMITS.crossingSpan
-      || crossing.width !== DRAINAGE_PLAN_LIMITS.crossingWidth
-      || crossing.thickness !== DRAINAGE_PLAN_LIMITS.crossingThickness) {
-      throw new RangeError(`${crossing.id} has an unsupported slab section`);
+      || crossing.width !== DRAINAGE_PLAN_LIMITS.crossingWidth) {
+      throw new RangeError(`${crossing.id} has an unsupported crossing envelope`);
+    }
+    if (!Array.isArray(crossing.slabs)
+      || crossing.slabs.length < DRAINAGE_PLAN_LIMITS.crossingSlabCountMin
+      || crossing.slabs.length > DRAINAGE_PLAN_LIMITS.crossingSlabCountMax) {
+      throw new RangeError(`${crossing.id} must plan 2–3 stone slabs`);
+    }
+    let envelopeThickness = 0;
+    const halfSpan = crossing.span * 0.5;
+    for (let index = 0; index < crossing.slabs.length; index++) {
+      const slab = crossing.slabs[index];
+      const label = `${crossing.id}.slabs[${index}]`;
+      finite(slab.x, `${label}.x`);
+      finite(slab.z, `${label}.z`);
+      finite(slab.top, `${label}.top`);
+      if (!(slab.span > 0) || !(slab.width > 0) || !(slab.thickness > 0)) {
+        throw new RangeError(`${label} requires positive span/width/thickness`);
+      }
+      if (slab.width > crossing.width + 1e-9
+        || Math.abs(slab.x) + slab.width * 0.5 > crossing.width * 0.5 + 1e-7) {
+        throw new RangeError(`${label} exceeds the lateral envelope`);
+      }
+      if (Math.abs(slab.z) + slab.span * 0.5 > halfSpan + 1e-7) {
+        throw new RangeError(`${label} exceeds the travel-span envelope`);
+      }
+      if (slab.thickness + 1e-9 < DRAINAGE_PLAN_LIMITS.crossingThicknessMin
+        || slab.thickness > DRAINAGE_PLAN_LIMITS.crossingThicknessMax + 1e-9) {
+        throw new RangeError(`${label} thickness is outside the product range`);
+      }
+      if (Math.abs(slab.top) > DRAINAGE_PLAN_LIMITS.crossingTopJitter + 1e-9) {
+        throw new RangeError(`${label} top leaves the planned seating band`);
+      }
+      // Tops stay near the lip via the lowered deck + jitter. Bottoms may hang
+      // into the open channel; only far-below-bed embed is rejected.
+      const bottomY = crossing.center.y + slab.top - slab.thickness * 0.5;
+      const bedY = expectedDeckY - DRAINAGE_PLAN_LIMITS.depth
+        - DRAINAGE_PLAN_LIMITS.crossingLift;
+      if (bottomY < bedY - DRAINAGE_PLAN_LIMITS.crossingBedEmbedMax - 1e-7) {
+        throw new RangeError(`${label} sinks too far below the ditch bed`);
+      }
+      if (index > 0) {
+        const previous = crossing.slabs[index - 1];
+        const gap = (slab.z - slab.span * 0.5) - (previous.z + previous.span * 0.5);
+        if (gap < -1e-7 || gap > DRAINAGE_PLAN_LIMITS.crossingGapMax + 1e-7) {
+          throw new RangeError(`${label} gap from previous slab is unsupported`);
+        }
+      }
+      envelopeThickness = Math.max(envelopeThickness, slab.thickness);
+    }
+    const first = crossing.slabs[0];
+    const last = crossing.slabs.at(-1);
+    if (Math.abs((first.z - first.span * 0.5) + halfSpan) > 1e-7
+      || Math.abs((last.z + last.span * 0.5) - halfSpan) > 1e-7) {
+      throw new RangeError(`${crossing.id} slabs do not cover the travel span`);
+    }
+    if (Math.abs(crossing.thickness - envelopeThickness) > 1e-9) {
+      throw new RangeError(`${crossing.id}.thickness must equal max planned slab thickness`);
     }
   }
   return plan;

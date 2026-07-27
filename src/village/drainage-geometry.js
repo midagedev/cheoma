@@ -13,8 +13,8 @@ export const DRAINAGE_MATERIAL_ROLES = Object.freeze(['ground']);
 
 const lifecycleByRoot = new WeakMap();
 const EPSILON = 1e-8;
-const CROSSING_SLAB_COUNT = 3;
-const CROSSING_SLAB_TOP_VARIATION = 0.0025;
+// Triangles per planned slab after long-axis subdivision (BoxGeometry w:3 h:1 s:2).
+export const DRAINAGE_CROSSING_SLAB_TRIANGLES = 44;
 
 function linearColor(hex) {
   const color = new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
@@ -131,6 +131,22 @@ function validateCrossing(crossing, index) {
   requirePositive(crossing.span, `${label}.span`);
   requirePositive(crossing.width, `${label}.width`);
   requirePositive(crossing.thickness, `${label}.thickness`);
+  // Layout is plan-owned (count, size, embed seating). Geometry only presents.
+  if (!Array.isArray(crossing.slabs) || crossing.slabs.length < 2 || crossing.slabs.length > 3) {
+    throw new RangeError(`${label}.slabs must plan 2–3 stones`);
+  }
+  crossing.slabs.forEach((slab, slabIndex) => {
+    const slabLabel = `${label}.slabs[${slabIndex}]`;
+    if (!slab || typeof slab !== 'object') {
+      throw new TypeError(`${slabLabel} must be an object`);
+    }
+    requireFinite(slab.x, `${slabLabel}.x`);
+    requireFinite(slab.z, `${slabLabel}.z`);
+    requireFinite(slab.top, `${slabLabel}.top`);
+    requirePositive(slab.span, `${slabLabel}.span`);
+    requirePositive(slab.width, `${slabLabel}.width`);
+    requirePositive(slab.thickness, `${slabLabel}.thickness`);
+  });
 }
 
 function validateGeometryInput(plan) {
@@ -332,60 +348,15 @@ function shapeCrossingSlab(geometry, slab, seed) {
   return geometry;
 }
 
-function crossingSlabLayout(crossing) {
-  const gap = Math.min(0.018, crossing.span * 0.022);
-  const usableSpan = crossing.span - gap * (CROSSING_SLAB_COUNT - 1);
-  if (usableSpan <= EPSILON) {
-    throw new RangeError('drainage crossing span is too short for three slabs');
-  }
-  // 종전 0.94~1.06 은 세 돌의 폭 차가 6% 이내라 균일 격자로 읽혔다. 자연석을 주워 놓은
-  //   건넘이므로 한 장이 확실히 크고 나머지가 작아야 한다(§7.4-9).
-  const weights = Array.from(
-    { length: CROSSING_SLAB_COUNT },
-    (_unused, index) => 0.62 + stableUnit(crossing.id, `span-${index}`) * 0.76,
-  );
-  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
-  const fullWidthSlab = Math.floor(
-    stableUnit(crossing.id, 'full-width') * CROSSING_SLAB_COUNT,
-  );
-  let cursor = -crossing.span * 0.5;
-  return weights.map((weight, index) => {
-    const span = index === CROSSING_SLAB_COUNT - 1
-      ? crossing.span * 0.5 - cursor
-      : usableSpan * weight / weightTotal;
-    const widthScale = index === fullWidthSlab
-      ? 1
-      : 0.965 + stableUnit(crossing.id, `width-${index}`) * 0.02;
-    const width = crossing.width * widthScale;
-    const xFreedom = Math.max(0, (crossing.width - width) * 0.5);
-    const x = index === fullWidthSlab
-      ? 0
-      : (stableUnit(crossing.id, `x-${index}`) * 2 - 1) * xFreedom;
-    const top = (
-      stableUnit(crossing.id, `top-${index}`) * 2 - 1
-    ) * CROSSING_SLAB_TOP_VARIATION;
-    const thickness = crossing.thickness * (
-      0.95 + stableUnit(crossing.id, `thickness-${index}`) * 0.1
-    );
-    const slab = {
-      x,
-      z: cursor + span * 0.5,
-      top,
-      span,
-      width,
-      thickness,
-      yaw: (stableUnit(crossing.id, `yaw-${index}`) * 2 - 1) * CROSSING_SLAB_YAW,
-      shade: 1 - CROSSING_SLAB_SHADE_SPREAD * 0.5
-        + stableUnit(crossing.id, `shade-${index}`) * CROSSING_SLAB_SHADE_SPREAD,
-    };
-    cursor += span + gap;
-    return slab;
-  });
-}
-
 function makeCrossingGeometries(crossing) {
-  return crossingSlabLayout(crossing).map((slab, index) => {
+  // Count, size, thickness, and seating come from the pure plan (issue #217).
+  // This adapter only adds presentation: natural-stone silhouette, mottle shade,
+  // and a micro self-yaw that stays inside the planned envelope.
+  return crossing.slabs.map((slab, index) => {
     const slabSeed = `${crossing.id}:slab-${index}`;
+    const shade = 1 - CROSSING_SLAB_SHADE_SPREAD * 0.5
+      + stableUnit(crossing.id, `shade-${index}`) * CROSSING_SLAB_SHADE_SPREAD;
+    const yaw = (stableUnit(crossing.id, `yaw-${index}`) * 2 - 1) * CROSSING_SLAB_YAW;
     const geometry = applyCrossingColors(
       shapeCrossingSlab(
         new THREE.BoxGeometry(
@@ -395,14 +366,14 @@ function makeCrossingGeometries(crossing) {
         slab,
         slabSeed,
       ),
-      slab.shade,
+      shade,
       slabSeed,
     );
     // 자연석은 서로 평행하게 놓이지 않는다. 돌 자기 중심에서만 아주 작게 틀어
     // 통과축·접지면·계획 봉투는 그대로 두고 기계 가공된 정렬만 없앤다.
-    geometry.rotateY(slab.yaw);
-    // center.y is the authoritative nominal deck top. Three deterministic,
-    // narrowly separated slabs remain within ±2.5 mm of that landing plane.
+    geometry.rotateY(yaw);
+    // center.y is the plan's nominal deck top; slab.top is the planned seating
+    // offset so stones can sit unevenly without the renderer inventing height.
     geometry.translate(slab.x, slab.top - slab.thickness * 0.5, slab.z);
     geometry.rotateY(crossing.yaw);
     geometry.translate(
