@@ -80,8 +80,11 @@
 AURI 해설이 "기왓골 간격 0.34m" 같은 수치를 제시한 것은 아니다 — `GIWA_ACROSS_PITCH` /
 `GIWA_ALONG_PITCH` 는 이 앱의 authored 값이다. 암키와 UV 와 수키와 롤은 같은 across 피치를
 쓰므로 물매 위상은 맞는다(예전 0.34/0.30 이중 상수는 제거). 회첨 튜브 하단은 처마 코너
-(`eaveV`)에 정렬됐지만, 회첨골 전용 골기와는 아직 없어 ㄱ/ㄷ자 회첨은 양쪽 면의 수키와가
-잘려 맞물리는 것으로만 읽힌다.
+(`eaveV`)에 정렬된다(#171). giwa FULL(`sugiwaRolls`) 경로의 회첨골은 #223 에서 면 수키와와
+같은 `GIWA_ALONG_PITCH` 켜 UV 를 구워 넣은 기와 줄(`valley-maru` + sugiwa 계열 재질)로
+읽히며, 드로우 수는 골당 1(기존과 동일)·신규 shader program 가족은 없다. 면 롤 병합
+메시에는 넣지 않아 across 피치 계약이 회첨 방향으로 오염되지 않는다. 회첨 전용 단면
+형재(오목 골기와 프로파일)나 추녀와 다른 시공 디테일은 아직 요약 수준이다.
 
 **구현 해석 (#150 item C)**: `src/builder/roof-rank.js`가 지붕 위계를
 `palace > magistracy/gaeksa > city-gate > giwa`로 고정한다. **잡상·취두 mesh

@@ -196,10 +196,15 @@ const expectedSceneHashes = {
   //   Only Hanyang golden seed 20260716 emits crossings on the capital/hanyang pair
   //   for this cohort (capital that seed has runs but zero gate crossings).
   //   재기준 직전 실측: 네 규모 모두 sync == worker == `?worker=0` 폴백 바이트 동일.
-  village: '79d91a63:7d20f661:6018d62e:a408bce9',
-  town: 'eb856a0b:e43ddf4d:04a46152:67f4cb53',
-  capital: '838d19e4:0514320a:57bcb85d:bfe0816e',
-  hanyang: '27e0310e:9342fe8e:b3cde138:86eaf2b8',
+  // #223 회첨골 기와 줄: giwa FULL valley-maru 가 단색 tileRidge 에서 sugiwa 계열 map +
+  //   물매 켜 UV 베이크(pathLen/GIWA_ALONG_PITCH, map.repeat=1,1) 로 바뀌어 ㄱ·ㄷ 평면
+  //   기와를 포함한 네 규모 씬 바이트가 의도적으로 변한다. objects/triangles·proxy 불변
+  //   (드로우 1/골 유지, 필지 fit 무관). 재기준 직전 실측: 네 규모 모두 worker == `?worker=0`
+  //   폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
+  village: '4a6b510a:d6a3a752:cf8d76d3:afabeadc',
+  town: '12a957f8:289503e4:b6536590:e5dc8688',
+  capital: 'fb1764d1:229eee87:e8f3b248:2acd32f5',
+  hanyang: 'b1d22735:33397ed9:75d22771:f088496d',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
