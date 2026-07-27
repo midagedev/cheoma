@@ -116,6 +116,12 @@
 |---|---|---|
 | **movingFillScale 0.65** | 오빗 중 픽셀 ~0.42× full DPR (0.72²→0.65²) | 정착 1.0 동일 |
 
+## 12차 구현 (shell preview skip door/glow)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Shell preview light** | roof pitch/eave 등 non-openings house-only preview는 door/glow/threshold 재부착 생략 → commit 시 복원 | 슬라이더 중 문 상호작용 지연, commit 후 정상 |
+
 ## 다음 라운드 (우선순위)
 
 1. grade half-res during motionBudget (look risk — measure first)

@@ -1312,7 +1312,10 @@ export function createVillageHandle(opts, seed, plan, group) {
         prev.userData.editRoofBounds = editRoofBounds;
         prev.userData.editBuildingBounds = editBuildingBounds;
         orderOverlayChildren(prev, house, wall, aux);
-        activatePrimaryDoor(parcelId, prev);
+        // Openings previews need a live door runtime (leaf size changes). Roof-shell
+        // previews skip door/glow re-arm until commit — pure build cost only.
+        const armInteraction = persist || openingsOnly;
+        if (armInteraction) activatePrimaryDoor(parcelId, prev);
         if (persist) {
           persistentOverrideIds.add(parcelId);
           prev.userData.exportPersistentParcel = true;
@@ -1344,8 +1347,9 @@ export function createVillageHandle(opts, seed, plan, group) {
           if (aux) { if (snow.isActive()) snow.inject(aux); }
           retainOverlayPrograms(prev, gk + (snow.isActive() ? '|snow' : ''));
         }
+        // Glow must re-arm every house swap (night hanji anchors live on the mesh).
         registerResidentialGlow(parcelId, prev);
-        if (focusedResidentialIds.has(parcelId)) {
+        if (focusedResidentialIds.has(parcelId) && armInteraction) {
           if (retainedLife) thresholdLife.reattach(prev, retainedLife, thresholdLifeCondition());
           else if (!prev.getObjectByName('threshold-life-detail')) {
             thresholdLife.attach(prev, thresholdLifeCondition());
