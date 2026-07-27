@@ -20,6 +20,8 @@
 //   4) 어떤 골도 처마 포락 밖으로 나가지 않는다.
 //   5) 회첨 튜브 하단은 처마 코너(eaveV) — 벽 코너(poly)가 아니다.
 //   6) sugiwaMaterial: TubeGeometry 축에 맞게 map.repeat.x = length/ALONG, y ≈ 1.
+//   7) 회첨골 기와 줄(#223): sugiwaRolls 경로의 valley-maru 는 텍스처 기와 줄로 읽힌다.
+//      UV.x 에 pathLen/ALONG_PITCH 가 구워져 있고 map.repeat≈(1,1), userData.valleyTileCourse.
 // 부채꼴이 실제로 존재하는 fixture(ㄷ자 가운데 면)를 함께 검사해, 게이트가 쉬운 면만
 // 보고 통과하는 상황을 막는다.
 //
@@ -312,9 +314,72 @@ for (const fixture of FIXTURES) {
         `${fixture.id}: valley bottoms only ${worstWallPull.toFixed(3)}m from walls`
         + ' — fixture no longer exercises the overhang case',
       );
+      // #223: 회첨골이 기와 줄로 읽힘 — 면 수키와와 같은 물매 켜(ALONG_PITCH) UV 베이크.
+      let worstCourseDev = 0;
+      let sawValleyCourse = 0;
+      for (const mesh of valleyMeshes) {
+        check(
+          mesh.userData.valleyTileCourse === true,
+          `${fixture.id}: valley-maru missing userData.valleyTileCourse (#223 tile row)`,
+        );
+        const map = mesh.material?.map;
+        check(!!map, `${fixture.id}: valley-maru has no tile map (plain ridge tube still?)`);
+        if (map) {
+          check(
+            Math.abs(map.repeat.x - 1) < 1e-6 && Math.abs(map.repeat.y - 1) < 1e-6,
+            `${fixture.id}: valley course map.repeat=(${map.repeat.x},${map.repeat.y})`
+            + ' — baked UV wants (1,1)',
+          );
+        }
+        const pathLen = mesh.userData.pathLen;
+        const alongCourses = mesh.userData.alongCourses;
+        check(
+          typeof pathLen === 'number' && pathLen > 0.5,
+          `${fixture.id}: valley pathLen ${pathLen} too short to read as a tile course`,
+        );
+        const expectCourses = pathLen / ALONG_PITCH;
+        check(
+          typeof alongCourses === 'number'
+            && Math.abs(alongCourses - expectCourses) < 1e-6,
+          `${fixture.id}: alongCourses ${alongCourses} ≠ pathLen/ALONG ${expectCourses}`,
+        );
+        // UV.x 가 경로를 따라 0 → alongCourses 로 올라가야 켜 간격이 세계 미터다.
+        const uv = mesh.geometry?.getAttribute('uv');
+        check(!!uv, `${fixture.id}: valley-maru missing uv attribute`);
+        if (uv) {
+          let uMax = -Infinity, uMin = Infinity;
+          for (let i = 0; i < uv.count; i++) {
+            const u = uv.getX(i);
+            uMax = Math.max(uMax, u);
+            uMin = Math.min(uMin, u);
+          }
+          check(
+            uMin >= -1e-4,
+            `${fixture.id}: valley UV.x min ${uMin} (expected ≥ 0)`,
+          );
+          const courseDev = Math.abs(uMax - alongCourses);
+          worstCourseDev = Math.max(worstCourseDev, courseDev);
+          check(
+            courseDev <= 0.05,
+            `${fixture.id}: valley UV.x max ${uMax.toFixed(3)} vs alongCourses`
+            + ` ${alongCourses.toFixed(3)} (dev ${courseDev.toFixed(3)})`,
+          );
+        }
+        // 면 롤 병합 메시와 분리 — 회첨 방향이 across 피치 표본을 오염시키지 않는다.
+        check(
+          mesh.name === 'valley-maru' && mesh.parent?.name !== 'sugiwa-rolls',
+          `${fixture.id}: valley course must stay a named valley-maru mesh (not merged rolls)`,
+        );
+        sawValleyCourse++;
+      }
+      check(
+        sawValleyCourse === valleyMeshes.length && sawValleyCourse > 0,
+        `${fixture.id}: expected every valley-maru to be a tile course, got ${sawValleyCourse}`,
+      );
       notes.push(
         `${fixture.id}: ${valleyMeshes.length} valley-maru bottoms on eave`
-        + ` (wall pull ≥ ${worstWallPull.toFixed(2)}m)`,
+        + ` (wall pull ≥ ${worstWallPull.toFixed(2)}m),`
+        + ` tile courses UV-baked (worst course UV dev ${worstCourseDev.toFixed(3)})`,
       );
     }
 

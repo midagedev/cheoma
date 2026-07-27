@@ -318,19 +318,21 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   }
 
   // ── 기와집 격상: 수키와 롤 병합 + 처마 밑 서까래 인스턴싱 ──
+  // 회첨골 기와 줄(#223)이 같은 재질 계열을 재사용할 수 있게 호이스팅.
+  let roofSugiwaMat = null;
   if (rollGeoms.length) {
     const merged = mergeGeometries(rollGeoms, false);
     rollGeoms.forEach((geo) => geo.dispose());
     // 단색 재질 대신 튜브 경사 길이에 비례해 기와 무늬가 흘러내리는 전용 텍스처 재질 적용
-    const rollMat = sugiwaMaterial(M, maxSlopeLen, 0.45);
-    const rolls = new THREE.Mesh(merged, rollMat);
+    roofSugiwaMat = sugiwaMaterial(M, maxSlopeLen, 0.45);
+    const rolls = new THREE.Mesh(merged, roofSugiwaMat);
     rolls.castShadow = true; rolls.receiveShadow = false;
     rolls.name = 'sugiwa-rolls';
     g.add(rolls);
     // 수키와 롤 끝 둥근 마구리(처마 끝 원형 단면)
     if (capTips.length) {
       const capGeo = new THREE.SphereGeometry(0.052, 8, 6);
-      const caps = new THREE.InstancedMesh(capGeo, rollMat, capTips.length);
+      const caps = new THREE.InstancedMesh(capGeo, roofSugiwaMat, capTips.length);
       const m4 = new THREE.Matrix4();
       capTips.forEach((c, i) => { m4.makeTranslation(c.p.x, c.p.y, c.p.z); caps.setMatrixAt(i, m4); });
       caps.instanceMatrix.needsUpdate = true;
@@ -491,14 +493,26 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   }
   // 회첨(valley): 반사 코너 → 처마 코너(eaveV, 추녀와 같은 계약). 벽 코너(poly)를 쓰면
   // ㄷ자 오목 코너에서 처마 overhang 만큼(~2m) 짧아져 면 끝·수키와 절단선과 어긋난다.
-  // 회첨골 전용 골기와는 아직 없음 — 튜브 정렬만 바로잡는다.
+  // #223: sugiwaRolls(giwa FULL) 에서는 회첨골을 면 수키와와 같은 켜 간격의 기와 줄로 읽힌다.
+  //   경로·botPlan 은 #171 그대로. 드로우 1/골 유지, 재질 계열은 sugiwa(신규 프로그램 없음).
+  //   UV.x 에 호길이/GIWA_ALONG_PITCH 를 구워 넣어 builder/giwa.js 의 map.repeat=(1,1)
+  //   후처리 뒤에도 물매 켜가 0.9m 로 남는다(면 UV 와 같은 베이크 계약).
+  //   면 롤 병합 메시에는 넣지 않는다 — across 피치 게이트가 회첨 방향을 면 롤로 오인한다.
+  let valleyCourseMat = null;
   for (const s of sk.valleys) {
     const hi = s.a.h >= s.b.h ? s.a : s.b;
     const lo = s.a.h >= s.b.h ? s.b : s.a;
     const ci = poly.findIndex((v) => Math.abs(v.x - lo.x) < 1e-3 && Math.abs(v.z - lo.z) < 1e-3);
     const botPlan = ci >= 0 ? eaveV[ci] : lo;
     const botY = eaveY + (ci >= 0 ? eaveLift[ci] : 0) + 0.05;
-    g.add(curvedTube(hi, botPlan, botY, 0.085, -0.04, 'valley-maru'));
+    if (sugiwaRolls) {
+      if (!valleyCourseMat) {
+        valleyCourseMat = makeValleyCourseMaterial(M, roofSugiwaMat, maxSlopeLen);
+      }
+      g.add(buildValleyTileCourse(hi, botPlan, botY, yOf, fprofile, valleyCourseMat));
+    } else {
+      g.add(curvedTube(hi, botPlan, botY, 0.085, -0.04, 'valley-maru'));
+    }
   }
 
   // ── ㄱ/ㄷ자 마루 접합부 solid 캡 ──
@@ -548,6 +562,74 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 
   g.userData = { skeleton: sk };
   return g;
+}
+
+// 회첨골 기와 줄 (#223 / #171 residual).
+// 경로: 절점(top) → 처마 코너(botPlan) — curvedTube 와 동일한 #171 eave 정렬.
+// 형태: 골 안쪽에 앉는 한 줄 튜브. 면 수키와 롤(r=0.052)보다 조금 굵어 골 라인으로
+//   읽히고, 옛 단색 valley-maru(r=0.085)보다 얇아 마루 캡처럼 보이지 않게 한다.
+// 켜: TubeGeometry UV.x(경로 0→1) 에 pathLen/GIWA_ALONG_PITCH 를 곱해 구워 넣음.
+//   재질 map.repeat 는 (1,1) — 면 타일과 같이 제품 후처리에 안전.
+// 드로우: 골당 Mesh 1 (기존 valley-maru 와 동일). 프로그램: sugiwa 계열 재사용
+//   (지붕당 재질 인스턴스 1 — 모든 회첨이 공유, 베이크 UV 라 길이별 repeat 불필요).
+const VALLEY_COURSE_R = 0.072;
+const VALLEY_COURSE_DY = -0.04;
+const VALLEY_TUBE_SEGS = 10;
+const VALLEY_TUBE_RADIAL = 8;
+
+function makeValleyCourseMaterial(mats, sharedSugiwaMat, lengthHint) {
+  let mat;
+  if (sharedSugiwaMat) {
+    mat = sharedSugiwaMat.clone();
+    if (mat.map) {
+      mat.map = mat.map.clone();
+      mat.map.repeat.set(1, 1);
+      mat.map.needsUpdate = true;
+    }
+  } else {
+    mat = sugiwaMaterial(mats, lengthHint || 3.5, 0.45);
+    if (mat.map) {
+      mat.map.repeat.set(1, 1);
+      mat.map.needsUpdate = true;
+    }
+  }
+  mat.userData.paletteKey = 'sugiwa';
+  mat.userData.valleyTileCourse = true;
+  return mat;
+}
+
+function buildValleyTileCourse(top, botPlan, botY, yOf, fprofile, mat) {
+  const pts = [];
+  let pathLen = 0;
+  let prev = null;
+  for (let i = 0; i <= VALLEY_TUBE_SEGS; i++) {
+    const v = i / VALLEY_TUBE_SEGS; // 0=처마, 1=절점 (curvedTube 와 동일)
+    const x = botPlan.x + (top.x - botPlan.x) * v;
+    const z = botPlan.z + (top.z - botPlan.z) * v;
+    const y = botY + (yOf(top.h) - botY) * fprofile(v) + VALLEY_COURSE_DY;
+    const p = new THREE.Vector3(x, y, z);
+    if (prev) pathLen += p.distanceTo(prev);
+    prev = p;
+    pts.push(p);
+  }
+  const geo = new THREE.TubeGeometry(
+    new THREE.CatmullRomCurve3(pts), VALLEY_TUBE_SEGS, VALLEY_COURSE_R, VALLEY_TUBE_RADIAL, false,
+  );
+  // 물매 켜 UV 베이크 — 재질 repeat 에 의존하지 않는다.
+  const alongCourses = Math.max(1, pathLen / GIWA_ALONG_PITCH);
+  const uv = geo.getAttribute('uv');
+  for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * alongCourses);
+  uv.needsUpdate = true;
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.name = 'valley-maru';
+  mesh.userData.botPlan = { x: botPlan.x, z: botPlan.z };
+  mesh.userData.topPlan = { x: top.x, z: top.z };
+  mesh.userData.valleyTileCourse = true;
+  mesh.userData.pathLen = pathLen;
+  mesh.userData.alongCourses = alongCourses;
+  return mesh;
 }
 
 // ── 벡터 유틸 ──

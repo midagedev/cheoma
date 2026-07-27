@@ -486,6 +486,9 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
     부채꼴은 44° 어긋난다), 마루를 넘지 않는지, 처마 포락 밖으로 나가지 않는지, 추녀에서 실제로
     잘려 끝 높이가 흩어지는지 검사한다. 추녀·회첨에 붙은 자투리 조각은 길이와 마루선 거리로만
     제한한다(모서리 기와는 마루선을 따라 눕는 것이 옳다).
+  - 회첨골 기와 줄(#223): `sugiwaRolls` 경로의 `valley-maru` 는 `valleyTileCourse` 플래그·sugiwa
+    계열 map·UV.x=`pathLen/GIWA_ALONG_PITCH` 베이크·`map.repeat=(1,1)` 을 갖고, 면 롤 병합
+    메시와 분리된 드로우 1/골 로 남는다(#171 eave 정렬 회귀 없음).
   - fixture는 ㅡ·ㄱ·ㄷ·ㄷ(heroDetail)이며, ㄷ자 가운데 본채 면이 마루로 3.2배 벌어지고 우진각
     앞면이 마루로 수렴하는 것을 함께 단언해 쉬운 면만 보고 통과하는 것을 막는다.
   - `sugiwaMaterial` roughness 가 matte 밴드 [0.92, 0.96] 안인지도 고정한다(#150 item I).
@@ -1033,7 +1036,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-choga-roof.mjs` | 초가 지붕/벽 접합, 변형·편집 극값, 지붕 vertex hash | 재질·조명 미감은 `shoot-thatch.mjs` 전후 이미지를 직접 본다. |
 | `tools/check-chimney-anchor.mjs` | 부엌 끝·굴뚝 종류·연기 방출 plan, 조립 `name='chimney'` 배선 | 밥 짓는 연기 미감은 `shoot-smoke.mjs` / focus 근접 프레임을 직접 본다. |
 | `tools/check-roof-seams.mjs` | 기와지붕 face 상단의 ridge knot 보존, UI 평면·칸수·높이 경계 | 마루장 아래의 실제 음영·미감은 `shoot-cg3.mjs` 근접 앵글로 본다. |
-| `tools/check-giwa-tile-course.mjs` | 기와 기왓골 세계좌표 등간격(u=across/0.34, v=arcFromRidge/0.9), 암·수 동일 across 피치, 수키와 롤 처마 수직·추녀 절단·포락 내부, 회첨 하단=처마 코너, sugiwaMaterial 축·matte roughness, ㄷ자 부채꼴·우진각 수렴 fixture | 순수 node다. stub 재질로 `buildSkeletonRoof` 정점·UV·롤 간격을 읽는다. 픽셀·드로우콜은 브라우저 라운드. |
+| `tools/check-giwa-tile-course.mjs` | 기와 기왓골 세계좌표 등간격(u=across/0.34, v=arcFromRidge/0.9), 암·수 동일 across 피치, 수키와 롤 처마 수직·추녀 절단·포락 내부, 회첨 하단=처마 코너, 회첨골 기와 줄 UV 베이크(#223), sugiwaMaterial 축·matte roughness, ㄷ자 부채꼴·우진각 수렴 fixture | 순수 node다. stub 재질로 `buildSkeletonRoof` 정점·UV·롤 간격을 읽는다. 픽셀·드로우콜은 브라우저 라운드. |
 | `tools/check-tile-look.mjs` | `tile`/`tileDark` 휘도·분리, `giwaRoofAverage`, `TILE_LOOK` roughness 배선, `GIWA_ROOF` 좁은 곱틴트 끝·jitter | 순수 node. 망원 기와 검은 선 뭉침 완화(#150 item I) 팔레트 계약. 미감 픽셀은 직접 캡처. |
 | `tools/check-building-clearance.mjs` | 기초 매입, 마당 lift, ㄱ자 기단 단일 depth owner, 단 몸통이 갑석 상면을 넘지 않음, 판벽 봉창 face clearance, 맞배 벽 tuck, 기와/초가 공유 부엌 개구와 돌출 상한 | 실제 접지선·기단 줄눈·부엌 개구 미감은 기와/초가 격리 하네스와 `layout.html` 필지 4종을 직접 본다. |
 | `tools/check-ground-stone-bedding.mjs` | 디딤돌·댓돌 매입/돌출, 기단 상면의 단일 depth owner, 위를 향한 석재면의 동일평면 0건, 6개 회귀 fixture 검출 | 원인(동일평면성)만 단정한다. 실제 깜빡임은 고정 근경 미세 팬 전후 캡처로 판정하고, 벽 클래딩(`fieldstone`) 동일평면은 `walls.js` 계열 게이트의 소유다. |
