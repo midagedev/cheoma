@@ -21,6 +21,8 @@
     "check:audio": "node tools/run-browser-locked.mjs -- node tools/check-audio.mjs",
     "check:architecture": "node tools/check-architecture.mjs",
     "check:assembly": "node tools/check-assembly-contract.mjs",
+    "check:roof-shell": "node tools/check-roof-shell.mjs",
+    "check:ceiling": "node tools/check-ceiling-contract.mjs",
     "check:api-reuse": "node tools/run-browser-locked.mjs -- node tools/check-api-reuse-suite.mjs",
     "check:residential-openings": "node tools/check-residential-openings.mjs",
     "check:residential-edit-url": "node tools/check-residential-edit-url.mjs",

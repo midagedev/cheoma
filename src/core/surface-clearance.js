@@ -8,6 +8,9 @@ export const FOUNDATION_SINK = 0.06;
 export const COURTYARD_SURFACE_LIFT = 0.06;
 export const OPENING_FACE_CLEARANCE = 0.02;
 export const ROOF_WALL_TUCK = 0.16;
+// Tile outer vs structural 개판 underside (roof stack, not room 반자).
+// Zero-thickness DoubleSide put both faces on one plane (z-fight). See docs/ceiling.md.
+export const ROOF_SHELL_THICKNESS = 0.08;
 
 // Preserve the visible top while extending the lowest solid below grade.
 export function sunkPrism(top, bottom = 0, sink = FOUNDATION_SINK) {

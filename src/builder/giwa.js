@@ -12,6 +12,7 @@ import { planGiwaKitchenOpening } from '../layout/kitchen-opening-spatial.js';
 import * as G from '../core/math/geom2.js';
 import {
   OPENING_FACE_CLEARANCE,
+  ROOF_SHELL_THICKNESS,
   overlayCenterOffset,
   sunkPrism,
 } from '../core/surface-clearance.js';
@@ -19,6 +20,7 @@ import { buildRecessedKitchenHearth } from './kitchen-hearth.js';
 import { planGiwaChimney } from './chimney-plan.js';
 import { createResidentialOpeningDetails } from './residential-opening-details.js';
 import { createPrimaryDoorPanelSegments } from './primary-door-panel.js';
+import { planGiwaCeiling } from './ceiling-plan.js';
 
 // 기와집(ㅡ/ㄱ/ㄷ 반가 안채): 공유 풋프린트 위에 스켈레톤 기와지붕 + 백골 목재 심벽 몸체.
 // 몸체(기둥·심벽 회벽/판벽·띠살 분합문·대청·낮은 장대석 기단)를 이 경로에서 직접 만든다.
@@ -524,6 +526,54 @@ export function buildGiwa(P, M) {
   // 조립 애니: 지붕은 시맨틱 청크(서까래→기와 통덩어리) 단위로 오른다. 아래 망와·와구토
   // 트림도 roof 그룹에 담아(root 직속이 아니라) 지붕 통덩어리와 한 몸으로 뜨게 한다.
   roof.userData.asmChunked = true;
+
+  // Ceiling finish plan for the eventual interior pass (docs/ceiling.md).
+  // Daecheong = yeondeung structure; remaining main-front bays = planned banja.
+  {
+    const front = giwaFrontRange(P);
+    const hallW = Math.min(2.2, Math.max(1.4, (front.x1 - front.x0) * 0.34));
+    const hallCx = (front.x0 + front.x1) / 2;
+    const rooms = [];
+    const leftX1 = hallCx - hallW / 2;
+    const rightX0 = hallCx + hallW / 2;
+    if (leftX1 - front.x0 > 0.4) {
+      rooms.push({
+        spaceId: 'room-front-west',
+        bounds: { x0: front.x0, x1: leftX1, z0: -b, z1: front.z },
+      });
+    }
+    if (front.x1 - rightX0 > 0.4) {
+      rooms.push({
+        spaceId: 'room-front-east',
+        bounds: { x0: rightX0, x1: front.x1, z0: -b, z1: front.z },
+      });
+    }
+    // Side wings (ㄱ/ㄷ) get planned banja over their full local footprint strip.
+    if (P.planShape === 'l' || P.planShape === 'u') {
+      rooms.push({
+        spaceId: 'room-wing',
+        bounds: { x0: -a * 0.15, x1: a, z0: b * 0.2, z1: b + c * 0.55 },
+        notes: 'Wing range banja — bounds are planning hints until interior volumes exist',
+      });
+    }
+    root.userData.ceilingPlan = planGiwaCeiling({
+      podiumTopY: podTopY,
+      columnTopY: colTopY,
+      eaveY,
+      shellThickness: ROOF_SHELL_THICKNESS,
+      daecheong: throughPassage
+        ? null
+        : {
+          bounds: {
+            x0: hallCx - hallW / 2,
+            x1: hallCx + hallW / 2,
+            z0: -b + 0.15,
+            z1: front.z - 0.05,
+          },
+        },
+      rooms,
+    });
+  }
 
   // 용마루 끝 망와(둥근 끝막이 + 와당). 다른 마루와 안 만나는 용마루 끝점에만.
   const yOf = (h) => eaveY + h * P.riseScale;

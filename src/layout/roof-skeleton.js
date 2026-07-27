@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { tileSurfaceMaterial, sugiwaMaterial } from '../builder/palette.js';
+import { ROOF_SHELL_THICKNESS } from '../core/surface-clearance.js';
 import { resampleChainPreservingKnots } from './chain-sampling.js';
 import { giwaRoofEnvelope } from './giwa-roof-envelope.js';
+import { addRoofTileShell } from './roof-shell.js';
 
 // 기와 세계좌표 켜 간격(m). 실물은 한 켜에 암키와 1장 + 수키와 1장이므로
 // 면 UV across 와 수키와 롤 배치가 같은 피치를 써야 물매를 따라 위상이 어긋나지 않는다.
@@ -166,17 +168,19 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     // 이 지붕면 UV는 이미 기와 반복수를 구워 넣음(across/피치, arc/피치) — 재질 repeat까지
     // 곱하면 밀도 제곱으로 무늬가 서브픽셀로 뭉개져 민무늬로 보임(히어로 종가 기와 무늬 실종의 원인).
     mat.map.repeat.set(1, 1);
-    mat.side = THREE.DoubleSide;
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = mesh.receiveShadow = true;
-    g.add(mesh);
+    // Outer tile + structural 개판 underside (docs/ceiling.md). Not room 반자.
+    // Zero-thickness DoubleSide co-owned one plane and z-fought under the eave.
+    const underMat = M.eaveBand.clone();
+    underMat.side = THREE.FrontSide;
+    addRoofTileShell(g, geo, mat, underMat, ROOF_SHELL_THICKNESS);
 
-    // 처마 단면 띠(연함·기와 마구리 두께)
+    // 처마 단면 띠(연함·기와 마구리 두께) — 외피 상단에서 개판 하면까지 물리 두께.
     const bandPos = [], bandIdx = [];
+    const shellT = ROOF_SHELL_THICKNESS;
     for (let iu = 0; iu <= NU; iu++) {
       const e = eavePts[iu]; const eY = eaveY + eaveLifts[iu];
       // 처마 끝을 상단 반대 방향으로 약간 더(안허리곡 살린 실제 처마 끝)
-      bandPos.push(e.x, eY + 0.03, e.z, e.x, eY - 0.12, e.z);
+      bandPos.push(e.x, eY + 0.03, e.z, e.x, eY - shellT, e.z);
     }
     for (let iu = 0; iu < NU; iu++) {
       const a = iu * 2, b = a + 1, c = a + 2, d = a + 3;
@@ -187,7 +191,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     bgeo.setIndex(bandIdx);
     bgeo.computeVertexNormals();
     const band = new THREE.Mesh(bgeo, M.eaveBand.clone());
-    band.material.side = THREE.DoubleSide;
+    band.material.side = THREE.FrontSide;
     band.castShadow = true;
     g.add(band);
 
@@ -294,23 +298,22 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 
       if (rafters) {
         // 연목(아래 열)·부연(위 열): 처마 밑에서 밖으로 방사. 코너 근처는 선자연이 덮음.
-        // Clear the thin DoubleSide tile shell by a few centimetres so the underside
-        // (room/eave "ceiling" read) never co-owns depth with the tile plane —
-        // assembly motion used to crush that gap via per-mesh tofu scale.
+        // Sit below the structural gaepan (ROOF_SHELL_THICKNESS), not the outer tile.
+        const clear = ROOF_SHELL_THICKNESS + 0.04;
         const nR = Math.max(6, Math.round(width / 0.42));
         for (let j = 0; j <= nR; j++) {
           const s = j / nR;
           if (Math.abs(2 * s - 1) > 0.88) continue;
           // 연목: 처마 안쪽(v≈0.32) 밑 → 처마 밖으로 내민 끝
-          const inner = pointAt(s, 0.32); inner.y -= 0.24;
+          const inner = pointAt(s, 0.32); inner.y -= 0.20 + clear;
           const edge = pointAt(s, 0.02);
           const dir = edge.clone().sub(pointAt(s, 0.12)).normalize();
-          const tip = edge.clone().addScaledVector(dir, 0.14); tip.y -= 0.16;
+          const tip = edge.clone().addScaledVector(dir, 0.14); tip.y -= 0.12 + clear;
           inner.y -= 0.02;
           rafterRound.push({ from: inner, to: tip });
           // 부연(위 열, 겹처마): 연목보다 얕게·바깥으로 더
-          const bi = pointAt(s, 0.16); bi.y -= 0.13;
-          const bt = edge.clone().addScaledVector(dir, 0.30); bt.y -= 0.07;
+          const bi = pointAt(s, 0.16); bi.y -= 0.06 + clear;
+          const bt = edge.clone().addScaledVector(dir, 0.30); bt.y -= 0.02 + clear;
           rafterSquare.push({ from: bi, to: bt });
         }
       }
@@ -388,6 +391,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     im.instanceMatrix.needsUpdate = true;
     im.castShadow = true; im.receiveShadow = false;
     im.userData.asmGroup = 'rafters';   // 조립 애니: 서까래는 지붕 통덩어리 직전 청크(rafters 옵션=기와집 전용)
+    im.userData.roofLayer = 'rafter';
     g.add(im);
   };
   if (rafterRound.length || rafterSquare.length) {

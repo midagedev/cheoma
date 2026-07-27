@@ -205,10 +205,15 @@ const expectedSceneHashes = {
   //   instanceColor 를 접으므로 scene 해시만 의도적으로 변한다. forest 절대색 수식은
   //   foliage-value-stratify 로 이설했으나 수치 drift 0. 재기준 직전 실측: 네 규모 모두
   //   worker == `?worker=0` 폴백 바이트 동일, mja·snapshot 3경로 교차 PASS.
-  village: 'fd4e686f:5ec554e1:c406d7e7:6523eb19',
-  town: '2106aa38:bef86680:e00c8af5:392be7e4',
-  capital: 'b1d2a5de:55c7b5e8:0688af24:4dfb8356',
-  hanyang: '8bcbbd2c:c92c8300:7cbc9a72:44178d6a',
+  // Roof shell thickness: zero-thickness DoubleSide tile faces co-owned the room-
+  //   ceiling plane; each face now has outer FrontSide + offset underside, with
+  //   rafters cleared below the shell. Scene geometry/triangle counts change at
+  //   every scale; pick proxies stay byte-identical. Assembly moves the roof as
+  //   one rigid group (visibility-only chunk stagger).
+  village: '0120d0c5:c9c8ebfd:1fed1369:910c99bd',
+  town: 'f46d32cc:9dd11ce0:63812e10:0fb9bdd8',
+  capital: '2bca1aa1:eceb63b3:ce0ec281:302c50c5',
+  hanyang: '608619df:d3133c19:65d8eb86:9f58ee1d',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
