@@ -199,11 +199,16 @@ const expectedSceneHashes = {
 // #223 회첨골 기와 줄: giwa FULL valley-maru sugiwa course UV. objects/proxy 불변.
   // #218a: Hanyang sijeon plan-owned row breaks every segmentShops; only Hanyang
   //   scene hash moves (breaks are blockers without solid mass). Proxy unchanged.
-  // PLACEHOLDER — remeasure after conflict resolve.
-  village: '4a6b510a:d6a3a752:cf8d76d3:afabeadc',
-  town: '12a957f8:289503e4:b6536590:e5dc8688',
-  capital: 'fb1764d1:229eee87:e8f3b248:2acd32f5',
-  hanyang: 'bc532764:085b42e0:670637a3:ff1366b4',
+  // #222 scatter instanceColor 값 층화(docs/tree-look.md §10): 외곽 산포 나무에 forest 와
+  //   같은 그루별 곱틴트 버퍼를 붙인다. vertexColors(덩이) × instanceColor(그루). 배치 rng·
+  //   매트릭스·밀도·드로우콜 불변 → 네 규모 proxy 바이트 전부 불변. hashThreeGroup 이
+  //   instanceColor 를 접으므로 scene 해시만 의도적으로 변한다. forest 절대색 수식은
+  //   foliage-value-stratify 로 이설했으나 수치 drift 0. 재기준 직전 실측: 네 규모 모두
+  //   worker == `?worker=0` 폴백 바이트 동일, mja·snapshot 3경로 교차 PASS.
+  village: 'fd4e686f:5ec554e1:c406d7e7:6523eb19',
+  town: '2106aa38:bef86680:e00c8af5:392be7e4',
+  capital: 'b1d2a5de:55c7b5e8:0688af24:4dfb8356',
+  hanyang: '8bcbbd2c:c92c8300:7cbc9a72:44178d6a',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

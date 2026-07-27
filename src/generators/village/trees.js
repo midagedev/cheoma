@@ -6,7 +6,12 @@ import { bakeSphericalNormals, canopyCenter, FOLIAGE_PROFILE, foliageLeafMass } 
 import { createValueNoise2D } from '../../core/math/value-noise2.js';
 import { setupTreeOccluder } from '../../env/tree-occluder.js';
 import { makeEcotoneField } from '../../village/forest.js';
-import { makeEdgeWarp } from '../../village/forest-crunch.js';
+import {
+  foliageHillBias,
+  foliageInstanceTint,
+  makeEdgeWarp,
+  makeNoise,
+} from '../../village/forest-crunch.js';
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 export const SCATTER_TREE_VISUAL_RADIUS = Object.freeze({
@@ -17,14 +22,20 @@ export const SCATTER_TREE_VISUAL_RADIUS = Object.freeze({
 // ───────────────────────── 수목(숲·능선) ─────────────────────────
 // hillAt 로 능선·산에만 밀집. mask(x,z)=true 인 자리(마을·도로·논)는 제외.
 //
-// 룩 복원 Phase 3.5 단계 0·1(docs/tree-look.md §5) — 원뿔 3층(=크리스마스트리 픽토그램)과 등축구
-//   롤리팝을 동양화 잎덩이 어휘로 교체한다. 소나무는 굽은 줄기 + 층운형 잎덩이 3단(원리 ③),
-//   활엽은 비대칭 덩이 뭉치(원리 ①). 캐노피에는 수관 매스 중심 기준 구체 노멀을 구워
-//   수묵 모드의 내부 폴리곤 필선을 없앤다(§3.3) — 재질의 flatShading 해제가 전제.
+// 룩 복원 Phase 3.5 단계 0·1(docs/tree-look.md §5) + Phase 2 그루별 값 층화(#222).
+//   원뿔 3층(=크리스마스트리 픽토그램)과 등축구 롤리팝을 동양화 잎덩이 어휘로 교체한다.
+//   소나무는 굽은 줄기 + 층운형 잎덩이 3단(원리 ③), 활엽은 비대칭 덩이 뭉치(원리 ①).
+//   캐노피에는 수관 매스 중심 기준 구체 노멀을 구워 수묵 모드의 내부 폴리곤 필선을 없앤다(§3.3)
+//   — 재질의 flatShading 해제가 전제.
+//   Phase 2: vertexColors 는 덩이별 절대색(한 나무 안 농담), instanceColor 는 forest 와 같은
+//   그루별 곱틴트(고도·모자이크). 배치 rng 는 소비하지 않아 매트릭스 바이트·수용 집합 불변.
+//   알파 카드 없음 → ink 노멀 오버라이드 함정·프로그램 패밀리 +2 회피.
 // ★ 불변 계약: SCATTER_TREE_VISUAL_RADIUS(pine 2.1 / broad 2.64)를 넘지 않는다(배치 수용 판정 공유).
 //   활엽 캐노피 하단은 2.09m 를 유지한다 — 급사면 접지 sink 식(#142)이 이 값을 상수로 갖는다.
 //   삼각형: 소나무 62→72(굽은 줄기 2마디 비용), 활엽 100→60. 인스턴스 캡이 2050/3500 이라
 //   합계 델타는 한양 부감에서 +1만 삼각 수준이다(예산 2M).
+//   예산: 드로우콜 +0, 텍스처 +0, 삼각형 0. instanceColor 는 USE_INSTANCING_COLOR 정의만
+//   켠다(vertexColors 재질 위에서 곱틴트) — 프로그램 패밀리는 기존 forest/bloom 과 공유 가능.
 
 // 층운형 잎덩이 2덩이 — 층마다 값이 다른 녹(아래 짙고 위 밝게 = 위에서 오는 빛, 원리 ④·⑤).
 //   각 덩이는 20면체를 위도 프로파일로 조각한 것이라 근경에서도 마름모·결정으로 읽히지 않는다.
@@ -94,11 +105,15 @@ export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
   const group = new THREE.Group(); group.name = 'village-trees';
   const protos = makeTreeProtos();
   // flatShading 해제 — 프로토에 구운 구체 노멀을 살린다(docs/tree-look.md §3.6-3). 프로그램 수 불변.
+  // vertexColors(덩이) × instanceColor(그루) 곱틴트 — material.color 는 기본 백색 유지.
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: false });
   const rng = makeRng(seed ^ 0x77ee);
+  // 그루별 t 는 배치 rng 와 분리된 노이즈 — 배치 매트릭스·수용 집합 바이트 불변(#222).
+  const tintNoise = makeNoise((seed ^ 0xc01a7e) >>> 0);
   const R = site.R;
   const TR = site.terrainR || R;
   const C = site.center, bowlR = site.bowlR, Hmax = site.Hmax;
+  // 각 항목: { m: Matrix4, t, hillBias } — 색은 조립 시 instanceColor 로만 쓴다.
   const pine = [], broad = [];
   const M4 = () => new THREE.Matrix4();
 
@@ -246,20 +261,32 @@ export function scatterTrees(site, mask, seed, warpInner, treeDensityK = 1) {
     if (mask && mask(x, z, visualRadius)) continue;
     pts.push({ x, z });
     { const k = tkey(x, z); let arr = tgrid.get(k); if (!arr) { arr = []; tgrid.set(k, arr); } arr.push({ x, z }); }
-    (broadTree ? broad : pine).push(m);
+    // 위치 기반 t(배치 rng 불침해) + forest 와 같은 hillBias 축.
+    const t = tintNoise(x * 0.053 + 2.1, z * 0.053 - 4.7);
+    const hBias = foliageHillBias(hill);
+    (broadTree ? broad : pine).push({ m, t, hillBias: hBias });
   }
-  for (const [proto, mats, name] of [
-    [protos.pine, pine, 'scatter-pine'],
-    [protos.broad, broad, 'scatter-broad'],
+  for (const [proto, entries, name, deep] of [
+    [protos.pine, pine, 'scatter-pine', true],
+    [protos.broad, broad, 'scatter-broad', false],
   ]) {
-    if (!mats.length) continue;
-    const inst = new THREE.InstancedMesh(proto, mat, mats.length);
+    if (!entries.length) continue;
+    const inst = new THREE.InstancedMesh(proto, mat, entries.length);
     inst.name = name;
-    mats.forEach((m, i) => inst.setMatrixAt(i, m));
+    const col = new Float32Array(entries.length * 3);
+    for (let i = 0; i < entries.length; i++) {
+      inst.setMatrixAt(i, entries[i].m);
+      const tint = foliageInstanceTint(entries[i].t, entries[i].hillBias, deep);
+      col[i * 3] = tint.r; col[i * 3 + 1] = tint.g; col[i * 3 + 2] = tint.b;
+    }
     inst.instanceMatrix.needsUpdate = true;
+    inst.instanceColor = new THREE.InstancedBufferAttribute(col, 3);
+    inst.instanceColor.needsUpdate = true;
     inst.castShadow = true; inst.receiveShadow = false;
     group.add(inst);
   }
+  // pure-check / 문서용: 그루별 값 층화가 실제로 붙었음을 노출(런타임 소비 없음).
+  group.userData.instanceColorStratified = true;
   group.userData.count = pts.length;
   // 전경 나무 오클루더 페이드: 궤도 회전 중 카메라와 마을 중심 사이 근경 나무를 dithered 반투명화.
   // VillageHandle.updateLod(camera, target, dt)가 애니메이션 프레임당 정확히 한 번 구동한다. 후처리의

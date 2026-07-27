@@ -5,6 +5,7 @@ import * as G from '../core/math/geom2.js';
 import { createValueNoise2D } from '../core/math/value-noise2.js';
 import { CITY_WALL_DIMENSIONS, cityWallVegetationBlocked } from './citywall-contour.js';
 import { villageCanopyAtten } from './forest-canopy-atten.js';
+import { foliageHillBias, stratifyFoliageRgb } from './foliage-value-stratify.js';
 import { terrainGridSize } from './terrain-grid.js';
 import { terrainWarpInner } from './terrain-surface.js';
 import { makeVegetationMask } from './vegetation-spatial.js';
@@ -13,6 +14,8 @@ import { pavilionFootprint } from './pavilion-plan.js';
 
 // Re-export pure attenuator so existing forest-crunch consumers stay one-import.
 export { villageCanopyAtten } from './forest-canopy-atten.js';
+// 외곽 산포(scatter)가 forest 와 같은 농담 축을 쓰도록 공개.
+export { foliageHillBias, foliageInstanceTint, stratifyFoliageRgb } from './foliage-value-stratify.js';
 
 // 산 숲 "수치 크런치"(#123) — forest.js 의 배치 루프(buildForestTrees·buildGraniteMassifs)에서
 //   THREE 오브젝트 조립을 뺀 순수 수학만 추출한 모듈. 워커(populate.worker.js)와 메인(forest.js)이
@@ -158,25 +161,13 @@ const BROAD = {
 };
 const _c = new THREE.Color();
 
-// 농담(濃淡) 층화 — docs/tree-look.md §3.4 결손 2·원리 ⑤("농담이 곧 깊이다". 인왕제색도는 원산을
-//   오히려 짙게 덧칠해 화면을 세웠다). 구 팔레트는 그루별 배율이 0.9~1.1(±10%)뿐이어서 ink.js 의
-//   5단 양자화에서 수림 전체가 한두 밴드로 뭉쳤다 = "균질한 회색 수림"(감사 R7 의 나무측 실체).
-//   값 폭을 의도적으로 벌려 최소 두 밴드에 걸치게 한다. 축은 둘:
-//     · 그루별 t — 고주파 모자이크(±16%). 인접 그루의 농담이 갈려 수관에 결이 생긴다.
-//     · 고도 hillBias — 저주파 밴드(±20%). 능선 수림은 짙고 차갑게(먹), 산자락은 밝고 따뜻하게.
-//       원경 클러스터 블롭 색은 멤버 평균이므로 t 항은 상쇄되고 이 저주파 항만 살아남는다
-//       → 부감에서 능선·중사면·산자락이 서로 다른 농담 밴드로 읽힌다(원리 ②의 톤 덩어리).
-//   침엽은 한 단 더 짙게(deep) 눌러 수종 간 값 간격을 벌린다.
+// 농담(濃淡) 층화 — docs/tree-look.md §3.4 결손 2·원리 ⑤. 수식 본체는 foliage-value-stratify.js.
 //   ★ rng 를 새로 소비하지 않는다 — t·mosaic 은 호출부의 기존 자리 그대로이므로 배치·인스턴스
 //     매트릭스는 바이트 불변이고, 바뀌는 것은 instanceColor 4버퍼뿐이다. 워커와 동기 경로가
 //     이 함수를 공유하므로 두 경로는 계속 바이트 동일하다.
-const VALUE_T = 0.32, VALUE_HILL = 0.40, COOL_HILL = 0.16;
 function stratifyValue(out, t, hillBias, deep) {
-  out.multiplyScalar((0.84 + VALUE_T * t) * (1.20 - VALUE_HILL * hillBias) * (deep ? 0.92 : 1));
-  // 값 배분의 색 짝: 능선은 대기 산란 쪽으로 차갑게, 산자락은 잎 반사광 쪽으로 따뜻하게.
-  const cool = COOL_HILL * (hillBias - 0.35);
-  out.r *= 1 - cool * 0.9;
-  out.b *= 1 + cool * 1.4;
+  const c = stratifyFoliageRgb(out.r, out.g, out.b, t, hillBias, deep);
+  out.r = c.r; out.g = c.g; out.b = c.b;
   return out;
 }
 
@@ -316,7 +307,7 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       const yStretch = rng.range(0.9, 1.25);
       const t = rng();
       const mosaic = rng();
-      const hillBias = smoothstep(0.3, 0.85, hill);
+      const hillBias = foliageHillBias(hill);
       const rC = Math.hypot(p.x - C.x, p.z - C.z);
       const cd = clearDist ? clearDist(p.x, p.z) : Infinity;
       const { yMul, xzMul } = villageCanopyAtten(rC, bowlR, cd, KEEP, RAMP);

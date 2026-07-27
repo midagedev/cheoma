@@ -133,6 +133,10 @@ const REVIEWED_NEW_PATHS = new Set([
   // forest-crunch 가 소비하고 worker 해시에 반영된다. 브라우저는 불필요.
   'src/village/forest-canopy-atten.js',
   'tools/check-forest-canopy-atten.mjs',
+  // #222 scatter instanceColor 값 층화: forest 와 공유하는 Three-free 농담 축 + scatter 조립 계약.
+  // 드로우콜·밀도 불변. scene 해시는 instanceColor 버퍼만큼 움직이므로 worker 재기준 대상.
+  'src/village/foliage-value-stratify.js',
+  'tools/check-scatter-tree-color.mjs',
   // #150 N: instance/merge scratch Matrix4 재사용 후 geometry digest·material order 불변.
   // browser-free FAST_CHECKS 게이트; 시각/export 의미 불변.
   'tools/check-instance-merge-immutability.mjs',
@@ -413,6 +417,12 @@ function routePath(path) {
     if (path === 'src/village/forest-canopy-atten.js') {
       // #20 pure canopy atten: worker/scene hashes move with forest-crunch consumers; no browser gate.
       select('village-adjacent canopy attenuation changed', 'app', 'worker');
+      return { gates, reasons };
+    }
+    if (path === 'src/village/foliage-value-stratify.js') {
+      // #222 shared value-stratify axes: forest instanceColor + scatter multiply tint.
+      // Pure math; worker scene hashes move when consumers change colors.
+      select('foliage value stratification axes changed', 'app', 'worker');
       return { gates, reasons };
     }
     if (path === 'src/village/mud-wall-surface-plan.js') {
