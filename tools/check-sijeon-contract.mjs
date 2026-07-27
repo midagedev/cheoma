@@ -6,6 +6,7 @@ import * as G from '../src/core/math/geom2.js';
 import {
   SIJEON_FACADE_BAYS,
   SIJEON_FACADE_SCHEMA_VERSION,
+  SIJEON_SIGN_POLICY,
   SIJEON_KIND_BREAK,
   SIJEON_KIND_SHOP,
   SIJEON_PLACEMENT,
@@ -393,3 +394,20 @@ console.log(
   `check-sijeon-contract: PASS (${first.length} placement records, `
   + `${longBreaks.length} long-run breaks, ${facadeCases} facade cases)`,
 );
+
+
+// #227 schema v2 signs — decorative only, sparse, non-emissive.
+{
+  invariant(SIJEON_FACADE_SCHEMA_VERSION === 2, 'schema version must be 2');
+  invariant(SIJEON_SIGN_POLICY.emissive === false, 'sign policy must be non-emissive');
+  const withId = planSijeonFacade({ w: 6.2, d: 7.5, id: 'sijeon-test-1' });
+  invariant(Array.isArray(withId.signs), 'signs array required');
+  for (const s of withId.signs) {
+    invariant(s.role === 'marker-board', 'sign role');
+    invariant(s.emissive === false, 'sign non-emissive');
+    invariant(!('name' in s) && !('text' in s) && !('commodity' in s), 'no labels');
+  }
+  const noId = planSijeonFacade({ w: 6.2, d: 7.5 });
+  invariant(Array.isArray(noId.signs) && noId.signs.length === 0, 'no id → no signs');
+}
+

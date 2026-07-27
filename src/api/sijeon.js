@@ -6,6 +6,7 @@ export {
   SIJEON_KIND_SHOP,
   SIJEON_PLACEMENT,
   isSijeonShop,
+  SIJEON_SIGN_POLICY,
   planSijeon,
   planSijeonFacade,
 } from './sijeon-plan.js';

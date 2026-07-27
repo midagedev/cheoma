@@ -123,7 +123,7 @@ renderer가 shop ID나 역할 이름으로 두 번째 배치를 추론해서는 
 
 계획은 `planSijeon(roadsResult, site, char01)`로 기존 배치 record를 만들고,
 `planSijeonFacade(shop)`으로 각 점포의 로컬 façade를 파생한다. façade 좌표는 `+x`가 행랑
-진행 방향, `+z`가 도로를 향한 전면이다. 현재 schema v1은 한 점포를 제품상 2칸으로 나누며
+진행 방향, `+z`가 도로를 향한 전면이다. 현재 schema v2는 한 점포를 제품상 2칸으로 나누며
 다음 물리 의미를 소유한다.
 
 - placement의 안정적인 점포 ID와 façade 부재의 칸 index
@@ -132,22 +132,37 @@ renderer가 shop ID나 역할 이름으로 두 번째 배치를 추론해서는 
 - 후면 저장 매스
 - 맞배지붕과 전·후·측면 처마 내밀기
 - 일반 부재의 도로 쪽 한계와 처마만 허용하는 명시적 예외
+- (v2) 점포 ID 안정 hash로 소수 선택된 **장식용 표식 판** 0–1개 (`signs[]`)
 
-시명·물종 표식과 상품 실루엣을 구현할 때도 칸 ID에서 파생된 순수 의미를 먼저 계획에
-기록한다. renderer가 자체 난수나 배열 순서로 두 번째 변주를 만들지 않는다. 두 bench는 칸의
-깊이를 읽히게 하는 제품 수치·형식이며, 모든 역사적 시전에 같은 고정 판매대가 있었다는 주장이
-아니다.
+시명·물종 표식은 칸/점포 ID에서 파생된 순수 의미를 먼저 계획에 기록한다. renderer가 자체
+난수나 배열 순서로 두 번째 변주를 만들지 않는다. 두 bench는 칸의 깊이를 읽히게 하는 제품
+수치·형식이며, 모든 역사적 시전에 같은 고정 판매대가 있었다는 주장이 아니다.
 
-**schema v1 경계:** 현재 `SIJEON_FACADE_SCHEMA_VERSION=1`은 위 물리 façade만 소유하고 표식·
-상품 record는 의도적으로 넣지 않는다. 따라서 v1 renderer의 bench는 비어 있어도 유효하며,
-표식이나 상품을 임의로 채워서는 안 된다. #128 통합에서 이를 실제로 렌더하기로 결정하면 전역
-RNG 없이 순수 plan의 명시적 후속 schema 필드로 먼저 추가하고, 문서·검증·renderer를 함께
-갱신한다.
+**schema 경계**
 
-v1은 임의 변주 없이 기존 점포 record만 사용한다. 전역 RNG를 소비하지 않고, 같은 입력은 바이트
-단위로 같은 plan을 만든다. 후속 schema가 변주를 갖더라도 점포 ID에서 만든 독립적인 안정 hash를
-사용하고, 장식 때문에 기존 시전 위치·footprint, 도로, 성곽, 필지와 worker 계획 결과가
-달라져서는 안 된다.
+| 버전 | 소유 | 의도적 비소유 |
+| --- | --- | --- |
+| v1 | 열주·상인방·후퇴 개구·판문·bench·후면 저장·맞배 | 표식·상품 |
+| v2 (`SIJEON_FACADE_SCHEMA_VERSION=2`) | v1 + 소수 `marker-board` 장식 실루엣 | 읽을 수 있는 시명/물종 문자열, SKU, 상품 진열 카탈로그, 발광·네온 |
+
+v2 표식 plan 규칙 (`SIJEON_SIGN_POLICY`):
+
+- **한양 only 경로**: 제품 배치가 한양(또는 강제 `sijeon=true` 간선)에서만 점포를 내므로 표식도 그
+  범위에만 나타난다. 농촌 규모에 시전을 새로 퍼뜨리지 않는다.
+- **소수**: 점포당 최대 1개, 선택 확률 상한 `maxShare=0.28` (제품 성김 — 역사 빈도 주장 아님).
+- **비발광**: plan `emissive: false`. renderer는 frame/wood 재질만 빌려 쓰며 emissive·새 material
+  family·텍스처·글자 glyph를 만들지 않는다.
+- **장식 실루엣만**: `silhouette` ∈ {`tablet`, `plank`}. `name` / `label` / `commodity` / `text` /
+  `sku` 필드를 갖지 않는다. “표가 있었다”는 사실만 전달하고 특정 시명·물종을 단정하지 않는다.
+- **결정론**: `hashString('sijeon-sign|'+shop.id)`. 전역 `Math.random` 소비 0. `shop.id`가 없으면
+  `signs=[]` (순수 치수 fixture는 표식 없음).
+- **회랑**: 표식 판은 건물 전면(`frontZ`) 안쪽에 걸려 도로 회랑(`maxNonEaveZ`)을 넘지 않는다.
+
+상품(진열 실루엣) record는 v2에도 넣지 않는다. bench는 비어 있어도 유효하며, 상품을 임의로
+채워서는 안 된다. 후속 상품 schema가 필요하면 같은 방식으로 순수 plan 필드를 먼저 추가한다.
+
+구조 부재(기둥·개구·bench·저장·지붕)와 점포 위치·footprint는 id 유무와 표식 선택에 불변이다.
+장식 때문에 도로·성곽·필지·worker 배치 바이트가 달라져서는 안 된다.
 
 ### 3.3 행랑 줄 분절 (#218, 범위 a)
 
@@ -201,16 +216,23 @@ v1은 임의 변주 없이 기존 점포 record만 사용한다. 전역 RNG를 �
 4. 두 개구를 기둥선 뒤로 물리고 판문·목재 면과 깊은 음영을 절제해 빈 동굴이나 현대
    쇼윈도를 피한다.
 5. 낮은 display bench는 비운 채로도 칸의 전후 깊이를 설명한다.
+6. (v2) plan이 준 `signs[]`만 읽어 작은 목재 표식 판을 **기존 `frame` 재질**로 박스 병합한다.
+   새 material·텍스처·프로그램·드로우 패밀리를 만들지 않는다.
 
 현대 유리, 네온·emissive 상호, NPC 군중, 천막 숲, 모든 칸의 상품 과밀은 넣지 않는다. 가까운
-화면의 생활감은 우선 기둥 뒤의 깊이·그림자와 빈 bench로 만들고, 원경의 정보량은 긴 처마선과
-칸 리듬이 맡는다.
+화면의 생활감은 우선 기둥 뒤의 깊이·그림자와 빈 bench, 그리고 소수 표식 실루엣으로 만들고,
+원경의 정보량은 긴 처마선과 칸 리듬이 맡는다.
 
-표식·상품 어휘는 역사적 근거로 문서와 References UI에는 남기지만 **rendered v1에서는
-제외**한다. 공개 해설이 정확한 판·진열 형식을 확정하지 못하는 상황에서 임의 detail을 보태기보다
-열주·상인방·후퇴 개구·bench·후면 저장이라는 최소 요소로 형태 문제를 먼저 해결하는 선택이다.
-후속 schema가 생길 경우에도 표식은 작고 비발광이어야 하고, 상품은 표의 제품 물종 군을 소수
-실루엣으로만 사용해야 한다.
+**plan / render 경계 (v2 표식)**
+
+| 층 | 소유 | 금지 |
+| --- | --- | --- |
+| pure plan (`sijeon-plan.js`) | 존재 여부·bay·silhouette·center/size·`decorative`/`emissive:false` | Three, Math.random, 시명 문자열, 물종 enum 단정 |
+| renderer (`generators/village/sijeon.js`) | plan box → borrowed `materials.frame` mesh, 정적 병합 | 자체 난수로 표식 추가, emissive, 새 material family, 텍스처 글자 |
+| 제품 어댑터 (`features.js`) | 기존 5역할 palette (frame/opening/bench/storage/roof) | 표식 전용 재질 clone |
+
+상품 진열 어휘는 역사적 근거로 문서와 References UI에는 남기지만 **rendered v2에서도
+제외**한다. 표식만 장식 실루엣으로 허용한다.
 
 ## 4. 성능·표현 경계
 
@@ -218,8 +240,9 @@ v1은 임의 변주 없이 기존 점포 record만 사용한다. 전역 RNG를 �
 
 - 점포 수와 무관하게 역할별 geometry를 모아 하나의 `village-sijeon` 정적 병합 그룹으로
   유지한다. 목표는 새 텍스처 0, 약 5 draw call이며 칸마다 Mesh·Material을 만들지 않는다.
-- v1의 개구·bench는 공유 palette와 병합된 geometry로 표현한다. 후속 물종·표식도 새 material
-  variant를 만들지 않고 vertex color 또는 병합된 geometry 차이만 사용할 수 있다.
+- 개구·bench·v2 표식 판은 공유 palette와 병합된 geometry로 표현한다. 표식은 `frame` 역할에
+  합쳐지므로 점포 수와 무관하게 약 5 draw call 목표가 유지된다. 후속 물종도 새 material
+  variant를 만들지 않고 병합 geometry 차이만 사용할 수 있다.
 - 계획은 숫자·문자열·작은 배열만 반환하고 Three 객체나 dispose 책임을 갖지 않는다.
 - renderer가 만든 geometry와 palette clone은 그룹 수명에 맞춰 한 번 해제되며, 호출자 공유
   재질의 소유권을 빼앗지 않는다.
@@ -261,9 +284,9 @@ pivot으로 기존 tofu scale·drop을 적용하며 다음을 금지한다.
 
 ### 역사성과 해석
 
-- [ ] 긴 간선변 행랑, 칸 단위 사용, 시명·물종 표식, 발굴 유구의 범위를 구현 설명과 Reference
-      UI에서 확인할 수 있다.
-- [ ] 정확한 개방 전면·판매대·칸 치수·표식 모양은 제품 결정임을 명시한다.
+- [x] 긴 간선변 행랑, 칸 단위 사용, 시명·물종 표식(장식 실루엣만), 발굴 유구의 범위를 구현 설명과
+      Reference UI에서 확인할 수 있다.
+- [x] 정확한 개방 전면·판매대·칸 치수·표식 모양은 제품 결정임을 명시한다.
 - [ ] 도가를 모든 판매 칸의 후면으로 오해하지 않는다.
 - [ ] 특정 연도의 종로 또는 청진동 발굴지 실측 복원이라고 표시하지 않는다.
 

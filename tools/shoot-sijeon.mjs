@@ -376,6 +376,8 @@ renderer.setAnimationLoop(() => {
       time,
       mode,
       shops: shops.length,
+      signCount: sijeon.userData.sijeon?.signCount ?? 0,
+      schemaVersion: sijeon.userData.sijeon?.schemaVersion ?? null,
       geometryHash: firstHash,
       deterministic: firstHash === repeatHash,
       sijeon: {

@@ -3,6 +3,7 @@ import * as G from '../../core/math/geom2.js';
 import { mergeStatic } from '../../village/instancing.js';
 import {
   SIJEON_FACADE_SCHEMA_VERSION,
+  SIJEON_SIGN_POLICY,
   isSijeonShop,
   planSijeonFacade,
 } from '../../village/sijeon-plan.js';
@@ -121,6 +122,7 @@ function buildShopUnit(shop, materials, unitBox) {
   const facade = planSijeonFacade(shop);
   const unit = new THREE.Group();
   unit.name = `sijeon-${shop.id ?? 'shop'}`;
+  const signs = Array.isArray(facade.signs) ? facade.signs : [];
 
   for (const column of facade.columns) {
     addBox(unit, unitBox, column, materials.frame);
@@ -136,8 +138,14 @@ function buildShopUnit(shop, materials, unitBox) {
   for (const bench of facade.benches) {
     addDisplayBench(unit, unitBox, bench, materials.bench);
   }
+  const signMaterial = materials[SIJEON_SIGN_POLICY.materialRole] || materials.frame;
+  for (const sign of signs) {
+    if (sign.emissive) throw new Error('sijeon marker boards must be non-emissive');
+    addBox(unit, unitBox, sign, signMaterial, sign.role);
+  }
   addBox(unit, unitBox, facade.storage, materials.storage);
   addRoof(unit, unitBox, facade, materials);
+  unit.userData.sijeonSignCount = signs.length;
   return unit;
 }
 
@@ -169,6 +177,7 @@ export function buildSijeon(shops, { materials, heightAt } = {}) {
   try {
     const builtShops = [];
     let breakCount = 0;
+    let signCount = 0;
     for (const shop of shops) {
       // Reserved break footprints stay in the plan as parcel blockers but own no
       // solid mass — that is the #218 row-break product read (not a missing mesh).
@@ -199,6 +208,7 @@ export function buildSijeon(shops, { materials, heightAt } = {}) {
       }
       unit.position.set(x, y, z);
       unit.rotation.y = G.facingY(frontDir);
+      signCount += unit.userData.sijeonSignCount || 0;
       source.add(unit);
       builtShops.push(shop);
     }
@@ -208,6 +218,7 @@ export function buildSijeon(shops, { materials, heightAt } = {}) {
       schemaVersion: SIJEON_FACADE_SCHEMA_VERSION,
       shopIds: builtShops.map((shop) => shop.id).filter((id) => id != null),
       shopCount: builtShops.length,
+      signCount,
       breakCount,
       footprintCount: shops.length,
       materialOwnership: 'caller',
