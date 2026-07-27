@@ -42,25 +42,28 @@ const DAY = profile({
   flare: 0.24, flareColor: 0xfff2e2,
 });
 
-// #150-H night depth legibility: form-model eaves/columns/walls with the *existing*
-// moon (directional sun slot), hemisphere fill, fog layering, and post grade/rim.
-// No new lights, material families, or emissive paths. Day/dawn/sunset are untouched.
+// #150-H night depth legibility + #212 U2 night aerial moon-in-frame:
+// form-model eaves/columns/walls with the *existing* moon (directional sun slot),
+// hemisphere fill, fog layering, and post grade/rim. No new lights, material families,
+// or emissive paths. Day/dawn/sunset are untouched.
 // bloomThreshold stays 0.32 — moon-optics soft-knee is calibrated to that night floor.
+// sunDir y is a low positive elevation so the product night aerial (15°) admits disc
+// + corona in the upper sky band while light still arrives from above (raking moonlight).
 const NIGHT = profile({
   // Slightly lifted mid-sky so the cool lunar band reads as haze rather than crushed navy.
   sky: [[0.0, '#2f3f60'], [0.4, '#1f2e4e'], [0.75, '#16233a'], [1.0, '#0d1424']],
-  // Direction preserved (shadow / moon azimuth contract); colour + intensity model form.
-  sunDir: [-7, 5, -32], sunColor: 0xa8bce6, sunInt: 1.08,
+  // Azimuth unchanged (north-ridge moon); elevation lowered for aerial framing (was y=5).
+  sunDir: [-7, 3, -32], sunColor: 0xa8bce6, sunInt: 1.14,
   // Hemi fill lifts soffits and wall faces the moon never reaches without erasing direction.
-  hemiSky: 0x3d4c6e, hemiGround: 0x1c2436, hemiInt: 0.42,
+  hemiSky: 0x3d4c6e, hemiGround: 0x1c2436, hemiInt: 0.44,
   // Near architecture stays readable; far fog still layers ridges for aerial depth.
-  fog: 0x1e2c46, fogNear: 70, fogFar: 420, exposure: 1.22,
-  ridgeNear: 0x26324e, ridgeFar: 0x4a5a78, mist: 0x5a6a92, mistOp: 0.52,
+  fog: 0x1e2c46, fogNear: 70, fogFar: 420, exposure: 1.24,
+  ridgeNear: 0x26324e, ridgeFar: 0x4a5a78, mist: 0x5a6a92, mistOp: 0.55,
   lantern: 1.0, moon: true,
 }, {
   bloomStrength: 0.72, bloomRadius: 0.62, bloomThreshold: 0.32,
   // Softer, wider moon rim so eave silhouettes and column edges separate from walls.
-  rim: 0.55, rimColor: 0xb4c8ec, rimPower: 2.35, rimWrap: 0.16,
+  rim: 0.58, rimColor: 0xb4c8ec, rimPower: 2.30, rimWrap: 0.17,
   sunGlow: 0.0, sunGlowSize: 0, sunGlowColor: 0xa8bce6, sat: 1.0,
   flare: 0.0, flareColor: 0xa8bce6,
 });

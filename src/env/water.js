@@ -40,7 +40,7 @@ const WATER_GLINT = {
   dawn: new THREE.Vector3(0.44, 0.42, 0.36),
   day: new THREE.Vector3(0.85, 0.74, 0.48),
   sunset: new THREE.Vector3(0.60, 0.40, 0.22),   // 금빛(시안 아님)
-  night: new THREE.Vector3(0.16, 0.20, 0.30),    // 성긴 은빛 달빛
+  night: new THREE.Vector3(0.20, 0.25, 0.36),    // 성긴 은빛 달빛 (U2 weak ribbon)
 };
 // 시간대별 하늘반사 색(프레넬 emissive). 이 항이 시간대 무연동이면 밤·석양의 어두운 씬에서도
 // 낮 밝기(시안)로 남아 흰 띠가 된다 → 낮은 WATER_SKY 유지, 야간=어두운 달빛 청, 석양=따뜻한
@@ -49,7 +49,7 @@ const WATER_SKY_TIME = {
   dawn: 0x7a8496,
   day: WATER_SKY,
   sunset: 0x7a5f48,
-  night: 0x2a3a52,
+  night: 0x2c3c54,
 };
 
 // MeshStandard 셰이더에 물 표면감을 주입한다. wet 이 문자열이면 그 이름의 varying/uniform

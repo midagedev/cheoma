@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import {
-  VILLAGE_FOCUS_CONTEXT_ELEVATION,
   VILLAGE_LENS,
   dollyDistanceForFov,
   referenceFovForCamera,
+  villageAerialElevation,
   villageScreenDistance,
   villageScreenDistanceForCamera,
   villageFocusContextElevation,
@@ -31,6 +31,9 @@ export function createVillageCameraRuntime({
 } = {}) {
   const focusDirection = new THREE.Vector3();
   const semanticTarget = new THREE.Vector3();
+  // Time only affects the *default aerial pose* (U2 moon-in-frame). Focus continuum
+  // elevations stay on VILLAGE_FOCUS_CONTEXT_ELEVATION via villageFocusContextElevation.
+  let timeOfDay = 'day';
   function outerRadius(handle = village.handle) {
     if (handle === village.handle && village.__outerR != null) return village.__outerR;
     const plan = handle.plan;
@@ -41,6 +44,10 @@ export function createVillageCameraRuntime({
     radius *= 1.12;
     if (handle === village.handle) village.__outerR = radius;
     return radius;
+  }
+
+  function setTimeOfDay(name) {
+    timeOfDay = typeof name === 'string' && name ? name : 'day';
   }
 
   function aerial(handle = village.handle) {
@@ -55,17 +62,19 @@ export function createVillageCameraRuntime({
     );
     village.aerialReferenceDist = referenceDistance;
     village.aerialDist = distance;
+    const elev = villageAerialElevation(timeOfDay);
     const target = new THREE.Vector3(0, radius * 0.05, -radius * 0.10);
     const pos = new THREE.Vector3(
-      target.x + distance * Math.cos(VILLAGE_FOCUS_CONTEXT_ELEVATION) * Math.sin(AERIAL_AZIMUTH),
-      target.y + distance * Math.sin(VILLAGE_FOCUS_CONTEXT_ELEVATION),
-      target.z + distance * Math.cos(VILLAGE_FOCUS_CONTEXT_ELEVATION) * Math.cos(AERIAL_AZIMUTH),
+      target.x + distance * Math.cos(elev) * Math.sin(AERIAL_AZIMUTH),
+      target.y + distance * Math.sin(elev),
+      target.z + distance * Math.cos(elev) * Math.cos(AERIAL_AZIMUTH),
     );
     return {
       pos,
       target,
       fov: VILLAGE_LENS.aerial.fov,
       referenceFov: VILLAGE_LENS.aerial.referenceFov,
+      elevation: elev,
     };
   }
 
@@ -329,6 +338,7 @@ export function createVillageCameraRuntime({
 
   return {
     aerial,
+    setTimeOfDay,
     near,
     outerRadius,
     reapplyFog,
@@ -344,6 +354,8 @@ export function createVillageCameraRuntime({
       selected: village.selected,
       transitioning: village.transitioning,
       wave: !!village.wave,
+      timeOfDay,
+      aerialElevationDeg: +(villageAerialElevation(timeOfDay) / DEG).toFixed(2),
       aerialDist: +(village.aerialDist || 0).toFixed(1),
       aerialReferenceDist: +referenceAerialDistance().toFixed(1),
       dist: +camera.position.distanceTo(controls.target).toFixed(1),

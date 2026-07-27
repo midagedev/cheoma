@@ -324,13 +324,14 @@ const V_WATER_GLINT = {
   dawn:   [0.44, 0.42, 0.36],
   day:    [0.85, 0.74, 0.48],   // 기존 낮 룩 유지(회귀 없음)
   sunset: [0.58, 0.38, 0.20],   // 금빛 윤슬(시안 아님) — 흰 blowout 은 uRough 로 잡고 emissive 는 금빛 유지
-  night:  [0.10, 0.13, 0.19],   // 성긴 은빛 달빛 — 하향(bloom 임계 아래 유지, 은은)
+  // U2: slightly stronger cool moonlight ribbon under night aerial, still below bloom blowout.
+  night:  [0.14, 0.18, 0.28],
 };
 const V_WATER_SKY = {
   dawn:   0x7a8496,
   day:    0xaecbe0,             // WATER_SKY(기존 낮 하늘반사) 유지
   sunset: 0x6e5643,             // 따뜻한 저채도 → 금빛 반사 은은(살짝 더 눌러 흰띠 방지)
-  night:  0x232f42,             // 어두운 달빛 청 → 프레넬 반사가 어둠에 가라앉음
+  night:  0x28364c,             // 어두운 달빛 청 — slight lift so stream reads under moonlight
 };
 // 시간대별 거칠기 가산(env/water.js uRough, 0=기본). 야간·석양 부감에서 저각 광원(달빛·석양)이
 // 저거칠기 수면에 뾰족한 스펙큘러 리본을 만들어 bloom 을 타므로, 그 시간대만 수면을 거칠게 해
@@ -340,7 +341,7 @@ const V_WATER_ROUGH = {
   dawn:   0.0,
   day:    0.0,
   sunset: 0.30,                 // 금빛 윤슬은 남기되 흰 blowout 리본만 완화
-  night:  0.55,                 // 달빛 스펙큘러를 은은한 시트로(뾰족 리본 제거)
+  night:  0.45,                 // soft moonlight sheet (was 0.55 — keep weak specular readable)
 };
 export function setVillageWaterTime(waterU, name) {
   if (!waterU) return;

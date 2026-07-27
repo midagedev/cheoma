@@ -19,14 +19,22 @@ import {
   MOON_CORONA_PROFILE,
   MOON_DISTANCE,
   MOON_RENDER_ORDER,
+  NIGHT_AERIAL_MOON_FRAME,
   planeSpanForAngularDiameter,
+  projectCelestialDirectionNdc,
   projectedAngularDiameterPixels,
   resolveMoonBloomGate,
   resolveMoonCloudComposite,
   resolveMoonOptics,
+  resolveNightAerialMoonFrame,
   sampleMoonCoronaProfile,
   sphereRadiusForAngularDiameter,
 } from '../src/api/moon-optics.js';
+import {
+  VILLAGE_FOCUS_CONTEXT_ELEVATION,
+  VILLAGE_NIGHT_AERIAL_ELEVATION,
+  villageAerialElevation,
+} from '../src/camera/optics.js';
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 const rgb = (hex) => {
@@ -198,12 +206,13 @@ assert.equal(sunsetAtmo.fogNear, 70, 'gold sunset fogNear frozen');
 assert.equal(sunsetPost.rim, 2.05, 'gold sunset rim frozen');
 assert.equal(sunsetPost.bloomThreshold, 0.80, 'gold sunset bloom threshold frozen');
 
-// Night depth legibility: existing moon (sun slot) + hemi + fog + grade/rim only.
+// Night depth legibility + U2 aerial moon-in-frame: moon (sun slot) + hemi + fog + grade/rim only.
 const nightAtmo = resolveAtmosphereProfile('night');
 const nightPost = resolvePostProfile('night');
 assert.equal(nightAtmo.moon, true, 'night enables moon presentation');
 assert.equal(nightAtmo.lantern, 1.0, 'night lantern weight stays full');
-assert.deepEqual(nightAtmo.sunDir, [-7, 5, -32], 'night moon direction stable');
+assert.deepEqual(nightAtmo.sunDir, [-7, 3, -32], 'night moon direction stable (low positive elev for aerial)');
+assert.ok(nightAtmo.sunDir[1] > 0, 'night moon stays above the horizon for form lighting');
 assert.ok(nightAtmo.sunInt >= 1.0, 'night moon intensity models eave/roof form');
 assert.ok(nightAtmo.hemiInt >= 0.38, 'night hemi fill lifts soffits and wall faces');
 assert.ok(nightAtmo.sunInt > nightAtmo.hemiInt, 'directional moon remains stronger than hemi fill');
@@ -221,6 +230,28 @@ assert.equal(nightPost.sat, 1.0, 'night grade keeps sat neutral (warmth from lan
 // Profile registry itself never constructs lights — retune is intensity/colour only.
 assert.doesNotMatch(source, /new\s+(THREE\.)?(Point|Directional|Spot|Hemisphere|RectArea)Light/,
   'atmosphere profiles add no light objects');
+
+// U2: pure night-aerial moon framing — product 15° elev admits disc; 31° day survey does not.
+assert.ok(Math.abs(VILLAGE_NIGHT_AERIAL_ELEVATION / DEG - NIGHT_AERIAL_MOON_FRAME.cameraElevationDeg) < 1e-9,
+  'optics night aerial elevation matches moon-frame contract');
+assert.equal(villageAerialElevation('night'), VILLAGE_NIGHT_AERIAL_ELEVATION);
+assert.equal(villageAerialElevation('day'), VILLAGE_FOCUS_CONTEXT_ELEVATION);
+assert.equal(villageAerialElevation('sunset'), VILLAGE_FOCUS_CONTEXT_ELEVATION);
+const nightAerialMoon = resolveNightAerialMoonFrame(nightAtmo.sunDir);
+assert.ok(
+  nightAerialMoon.discInFrame,
+  `night product aerial frames the lunar disc (ndc=${nightAerialMoon.ndcX.toFixed(3)},${nightAerialMoon.ndcY.toFixed(3)})`,
+);
+assert.ok(nightAerialMoon.coronaInFrame, 'night product aerial keeps corona budget in frame');
+const daySurveyMoon = resolveNightAerialMoonFrame(nightAtmo.sunDir, {
+  cameraElevationDeg: VILLAGE_FOCUS_CONTEXT_ELEVATION / DEG,
+});
+assert.equal(daySurveyMoon.discInFrame, false,
+  '31° day survey aerial still excludes the moon (elevation change is night-only)');
+const steepProject = projectCelestialDirectionNdc(nightAtmo.sunDir, {
+  cameraElevationDeg: 31,
+});
+assert.ok(steepProject.ndcY > 1.0, 'steep aerial projects moon above the top edge');
 
 // Village light rig (linked consumer): still exactly one hemi + one fill directional.
 // Values are night-only; day/sunset fill tables stay as authored.
@@ -249,5 +280,5 @@ assert.match(villageLightSource, /sunset:\s*\{[\s\S]*?fillInt:\s*0\.62/,
 console.log(
   'ATMOSPHERE CONTRACT: PASS '
   + '(3 synchronized sunset looks, stable sun direction, 0.52° Moon + split 5° corona, '
-  + 'night depth fill without new lights, day/sunset frozen)',
+  + 'night depth fill without new lights, night aerial moon-in-frame, day/sunset frozen)',
 );

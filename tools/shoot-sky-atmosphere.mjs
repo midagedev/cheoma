@@ -427,6 +427,114 @@ try {
   pass(nightState.bankActive === false,
     'night keeps the same off-frame cloud-bank sleep contract in courtyard focus');
 
+  // U2 product night aerial: return to the authored aerial pose under night time so the
+  // lunar disc/corona share the village survey frame (not a look-at-moon judgment cut).
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.debugSetPaused(false);
+    engine.setTime('night', { immediate: true });
+    engine.village.return();
+  });
+  await page.waitForFunction(
+    () => window.__engine.debugDof().tweenProgress != null,
+    null,
+    { timeout: 10_000 },
+  ).catch(() => {});
+  await page.evaluate(() => window.__engine.debugDofSeek?.(1, { finish: true }));
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !state.selected && !state.transitioning;
+  }, null, { timeout: 10_000 });
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    // Ensure elevation settled at night aerial (immediate path may already be there).
+    engine.setTime('night', { immediate: true });
+    engine.debugSetPaused(true);
+    engine.debugRenderDofFrame?.();
+  });
+  await frames(4);
+  const nightAerialPath = join(outDir, 'night-aerial-moon.png');
+  await page.screenshot({ path: nightAerialPath });
+  const nightAerial = await page.evaluate(() => {
+    const engine = window.__engine;
+    const moon = engine.scene.getObjectByName('moon');
+    const continuum = engine.village.debugContinuum?.() || {};
+    // Force camera-relative moon placement before project (onBeforeRender may not
+    // have run while paused).
+    let sun = null;
+    engine.scene.traverse((object) => { if (!sun && object.isDirectionalLight) sun = object; });
+    if (moon && sun) {
+      const distance = moon.userData.optics?.distance || 460;
+      moon.position.copy(sun.position).normalize().multiplyScalar(distance).add(engine.camera.position);
+      moon.updateMatrixWorld(true);
+      moon.visible = true;
+    }
+    const point = moon?.position.clone().project(engine.camera);
+    const elev = (() => {
+      const offset = engine.camera.position.clone().sub(engine.__controls.target);
+      const dist = offset.length() || 1;
+      return Math.asin(Math.max(-1, Math.min(1, offset.y / dist))) * 180 / Math.PI;
+    })();
+    return {
+      moonVisible: !!moon?.visible,
+      moonNdc: point ? [point.x, point.y, point.z] : null,
+      aerialElevationDeg: continuum.aerialElevationDeg ?? elev,
+      timeOfDay: continuum.timeOfDay ?? engine.getState?.().time,
+      cameraElevDeg: elev,
+    };
+  });
+  pass(nightAerial.moonVisible, 'product night aerial keeps the moon presentation on');
+  pass(
+    !!nightAerial.moonNdc
+      && Math.abs(nightAerial.moonNdc[0]) < 0.92
+      && Math.abs(nightAerial.moonNdc[1]) < 0.92
+      && nightAerial.moonNdc[2] > -1
+      && nightAerial.moonNdc[2] < 1,
+    'product night aerial frames the lunar disc or corona in NDC',
+    `ndc=${nightAerial.moonNdc?.map((value) => value.toFixed(2))} elev=${nightAerial.cameraElevDeg?.toFixed?.(1)}`,
+  );
+  pass(
+    nightAerial.cameraElevDeg < 22 && nightAerial.cameraElevDeg > 8,
+    'product night aerial uses the softened elevation band (not the 31° day survey)',
+    `elev=${nightAerial.cameraElevDeg?.toFixed?.(1)}`,
+  );
+  // Village must not read as crushed-black silhouette-only: lower half mean luma.
+  const nightAerialPng = PNG.sync.read(await readFile(nightAerialPath));
+  let nightLumaSum = 0;
+  let nightLumaCount = 0;
+  const y0 = Math.floor(nightAerialPng.height * 0.45);
+  for (let y = y0; y < nightAerialPng.height; y += 2) {
+    for (let x = 0; x < nightAerialPng.width; x += 2) {
+      const index = (y * nightAerialPng.width + x) * 4;
+      nightLumaSum += 0.2126 * nightAerialPng.data[index]
+        + 0.7152 * nightAerialPng.data[index + 1]
+        + 0.0722 * nightAerialPng.data[index + 2];
+      nightLumaCount++;
+    }
+  }
+  const nightVillageLuma = nightLumaSum / Math.max(1, nightLumaCount);
+  pass(nightVillageLuma > 12,
+    'night aerial village midtones stay above crushed-black silhouette',
+    `meanLuma=${nightVillageLuma.toFixed(1)}`);
+
+  // Restore the courtyard focus endpoint so the existing moon-optics FOV / cloud
+  // attenuation suite still inherits parcel (10°) and planned hero (7°) frames.
+  await page.evaluate(() => {
+    const engine = window.__engine;
+    engine.debugSetPaused(false);
+    engine.village.debugFocus(window.__skyFocusId);
+  });
+  await page.waitForFunction(
+    () => window.__engine.debugDof().tweenProgress != null,
+    null,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => window.__engine.debugDofSeek(1, { finish: true }));
+  await page.waitForFunction(() => {
+    const state = window.__engine.village.getState();
+    return !!state.selected && !state.transitioning;
+  }, null, { timeout: 10_000 });
+
   // The architectural focus framing intentionally follows the south-facing house,
   // so the moon is not guaranteed to share that azimuth. Turn toward it once and
   // prove the camera-relative moon/cloud sky is an authored view, not merely live state.

@@ -136,3 +136,132 @@ export function resolveMoonOptics({
 }
 
 export const DEFAULT_MOON_OPTICS = resolveMoonOptics();
+
+// Product night aerial (U2): the 31° day survey looks so steep that the 46° lens's top
+// ray sits ~8° *below* the horizon, so a lunar disc above the ridge never enters the
+// frame. Night aerial softens camera elevation and keeps the moon on a low positive
+// elevation so disc + corona land in the upper sky band while the directional light
+// still models form from above. Values mirror `VILLAGE_NIGHT_AERIAL_ELEVATION` /
+// `AERIAL_AZIMUTH` / `VILLAGE_LENS.aerial` — freeze them here so pure gates do not
+// import the camera module.
+export const NIGHT_AERIAL_MOON_FRAME = Object.freeze({
+  cameraElevationDeg: 15,
+  cameraAzimuthDeg: 9,
+  verticalFovDeg: 46,
+  aspect: 16 / 9,
+  // Keep disc clear of chrome / letterbox; corona may graze the margin.
+  ndcMargin: 0.08,
+});
+
+/**
+ * Project a world-space celestial direction into NDC for a look-at aerial camera
+ * sitting on a sphere about the target (Three.js Y-up, look along −Z in camera space).
+ * Direction is camera-relative for the moon, so origin cancels and only the ray matters.
+ */
+export function projectCelestialDirectionNdc(
+  direction,
+  {
+    cameraElevationDeg = NIGHT_AERIAL_MOON_FRAME.cameraElevationDeg,
+    cameraAzimuthDeg = NIGHT_AERIAL_MOON_FRAME.cameraAzimuthDeg,
+    verticalFovDeg = NIGHT_AERIAL_MOON_FRAME.verticalFovDeg,
+    aspect = NIGHT_AERIAL_MOON_FRAME.aspect,
+  } = {},
+) {
+  const src = Array.isArray(direction) ? direction : [direction?.x, direction?.y, direction?.z];
+  const length = Math.hypot(
+    Number(src[0]) || 0,
+    Number(src[1]) || 0,
+    Number(src[2]) || 0,
+  );
+  if (!(length > 0)) {
+    return Object.freeze({
+      ndcX: 0, ndcY: 0, depth: 0, inFront: false,
+    });
+  }
+  const mx = src[0] / length;
+  const my = src[1] / length;
+  const mz = src[2] / length;
+
+  const camElev = (Number.isFinite(cameraElevationDeg) ? cameraElevationDeg : NIGHT_AERIAL_MOON_FRAME.cameraElevationDeg) * DEG;
+  const camAz = (Number.isFinite(cameraAzimuthDeg) ? cameraAzimuthDeg : NIGHT_AERIAL_MOON_FRAME.cameraAzimuthDeg) * DEG;
+  // Camera sits on a sphere about the target at (elev, az); Three.js lookAt uses
+  // z = normalize(eye − target), x = normalize(up × z), y = z × x (Y-up).
+  const zx = Math.cos(camElev) * Math.sin(camAz);
+  const zy = Math.sin(camElev);
+  const zz = Math.cos(camElev) * Math.cos(camAz);
+  // up × z with up = (0,1,0)
+  let xx = zz;
+  let xy = 0;
+  let xz = -zx;
+  const xLen = Math.hypot(xx, xy, xz) || 1;
+  xx /= xLen; xy /= xLen; xz /= xLen;
+  const yx = zy * xz - zz * xy;
+  const yy = zz * xx - zx * xz;
+  const yz = zx * xy - zy * xx;
+
+  const cx = mx * xx + my * xy + mz * xz;
+  const cy = mx * yx + my * yy + mz * yz;
+  const cz = mx * zx + my * zy + mz * zz;
+  const vfov = positive(verticalFovDeg, NIGHT_AERIAL_MOON_FRAME.verticalFovDeg) * DEG;
+  const asp = positive(aspect, NIGHT_AERIAL_MOON_FRAME.aspect);
+  const halfV = Math.tan(vfov * 0.5);
+  const halfH = halfV * asp;
+  const depth = -cz;
+  if (!(depth > 1e-8)) {
+    return Object.freeze({
+      ndcX: 0, ndcY: 0, depth: cz, inFront: false,
+    });
+  }
+  return Object.freeze({
+    ndcX: (cx / depth) / halfH,
+    ndcY: (cy / depth) / halfV,
+    depth: cz,
+    inFront: true,
+  });
+}
+
+/**
+ * Night aerial moon framing contract: disc (and soft corona budget) inside the product
+ * aerial frustum for the authored night moon direction. Used by pure gates and by
+ * product aerial elevation selection — no renderer.
+ */
+export function resolveNightAerialMoonFrame(
+  sunDir,
+  {
+    cameraElevationDeg = NIGHT_AERIAL_MOON_FRAME.cameraElevationDeg,
+    cameraAzimuthDeg = NIGHT_AERIAL_MOON_FRAME.cameraAzimuthDeg,
+    verticalFovDeg = NIGHT_AERIAL_MOON_FRAME.verticalFovDeg,
+    aspect = NIGHT_AERIAL_MOON_FRAME.aspect,
+    ndcMargin = NIGHT_AERIAL_MOON_FRAME.ndcMargin,
+    coronaAngularDiameterDeg = MOON_CORONA_DIAMETER_DEG,
+  } = {},
+) {
+  const projected = projectCelestialDirectionNdc(sunDir, {
+    cameraElevationDeg,
+    cameraAzimuthDeg,
+    verticalFovDeg,
+    aspect,
+  });
+  const margin = Number.isFinite(ndcMargin) ? Math.max(0, ndcMargin) : NIGHT_AERIAL_MOON_FRAME.ndcMargin;
+  const limit = 1 - margin;
+  const discInFrame = projected.inFront
+    && Math.abs(projected.ndcX) <= limit
+    && Math.abs(projected.ndcY) <= limit;
+  // Corona half-angle as a conservative vertical NDC radius at frame center depth.
+  const halfV = Math.tan(positive(verticalFovDeg, NIGHT_AERIAL_MOON_FRAME.verticalFovDeg) * DEG * 0.5);
+  const coronaHalfDeg = positive(coronaAngularDiameterDeg, MOON_CORONA_DIAMETER_DEG) * 0.5;
+  const coronaNdcRadius = Math.tan(coronaHalfDeg * DEG) / halfV;
+  const coronaInFrame = projected.inFront
+    && Math.abs(projected.ndcX) <= 1
+    && Math.abs(projected.ndcY) <= 1
+    && Math.abs(projected.ndcY) + coronaNdcRadius * 0.35 <= 1.05;
+  return Object.freeze({
+    ndcX: projected.ndcX,
+    ndcY: projected.ndcY,
+    inFront: projected.inFront,
+    discInFrame,
+    coronaInFrame,
+    cameraElevationDeg,
+    verticalFovDeg,
+  });
+}

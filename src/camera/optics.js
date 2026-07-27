@@ -7,6 +7,12 @@
 
 const DEG = Math.PI / 180;
 export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
+// Night aerial (U2 / look-audit): 31° survey puts the top 46° ray ~8° below the horizon, so
+// the lunar disc never shares the product frame. Soften only the *default aerial pose* at
+// night so moon disc/corona sit in the upper sky band; day/sunset survey and every focus
+// continuum stay on the 31° context elevation. Keep in lockstep with
+// `NIGHT_AERIAL_MOON_FRAME.cameraElevationDeg` in moon-optics.js.
+export const VILLAGE_NIGHT_AERIAL_ELEVATION = 15 * DEG;
 // Shared close-parcel pose. The flagship look is a backlit golden-hour rim, and a rim only
 // exists where a silhouette edge stands against the sky; bokeh only exists where the frame
 // carries depth spread. Both die at survey elevations, so the residential close view stays in
@@ -14,6 +20,11 @@ export const VILLAGE_FOCUS_CONTEXT_ELEVATION = 31 * DEG;
 // Courtyard readability is bought with azimuth, distance, and target lift instead — the yard
 // still reads over the wall from here.
 export const VILLAGE_FOCUS_ELEVATION = 9 * DEG;
+
+/** Default village aerial elevation for a time-of-day. Focus paths never call this. */
+export function villageAerialElevation(time) {
+  return time === 'night' ? VILLAGE_NIGHT_AERIAL_ELEVATION : VILLAGE_FOCUS_CONTEXT_ELEVATION;
+}
 // Compose the subject below center so the eave line cuts sky rather than sitting against the far
 // hillside. Normalized lens shift only — no camera pose or focus distance moves. A 배산임수 village
 // always puts the ridge behind a south-facing house, so this shift alone cannot manufacture sky;
