@@ -7,9 +7,12 @@ export * from './village.js';
 export {
   SIJEON_FACADE_BAYS,
   SIJEON_FACADE_SCHEMA_VERSION,
+  SIJEON_KIND_BREAK,
+  SIJEON_KIND_SHOP,
   SIJEON_PLACEMENT,
   buildSijeon,
   disposeSijeon,
+  isSijeonShop,
   planSijeon,
   planSijeonFacade,
 } from './sijeon.js';

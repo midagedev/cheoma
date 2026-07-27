@@ -3,6 +3,7 @@ import * as G from '../../core/math/geom2.js';
 import { mergeStatic } from '../../village/instancing.js';
 import {
   SIJEON_FACADE_SCHEMA_VERSION,
+  isSijeonShop,
   planSijeonFacade,
 } from '../../village/sijeon-plan.js';
 
@@ -166,7 +167,15 @@ export function buildSijeon(shops, { materials, heightAt } = {}) {
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
 
   try {
+    const builtShops = [];
+    let breakCount = 0;
     for (const shop of shops) {
+      // Reserved break footprints stay in the plan as parcel blockers but own no
+      // solid mass — that is the #218 row-break product read (not a missing mesh).
+      if (!isSijeonShop(shop)) {
+        breakCount++;
+        continue;
+      }
       const unit = buildShopUnit(
         shop,
         resolvedMaterials,
@@ -191,13 +200,16 @@ export function buildSijeon(shops, { materials, heightAt } = {}) {
       unit.position.set(x, y, z);
       unit.rotation.y = G.facingY(frontDir);
       source.add(unit);
+      builtShops.push(shop);
     }
 
     const root = mergeStatic([source], 'village-sijeon');
     root.userData.sijeon = {
       schemaVersion: SIJEON_FACADE_SCHEMA_VERSION,
-      shopIds: shops.map((shop) => shop.id).filter((id) => id != null),
-      shopCount: shops.length,
+      shopIds: builtShops.map((shop) => shop.id).filter((id) => id != null),
+      shopCount: builtShops.length,
+      breakCount,
+      footprintCount: shops.length,
       materialOwnership: 'caller',
       geometryOwnership: 'renderer',
     };

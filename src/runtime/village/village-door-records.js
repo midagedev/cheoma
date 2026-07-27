@@ -662,6 +662,8 @@ function templeRecords(temple, site) {
 }
 
 function sijeonRecord(shop, index, site) {
+  // Break footprints reserve the market corridor but have no building mass to occlude.
+  if (!shop || shop.kind === 'break') return null;
   if (!Array.isArray(shop?.poly) || shop.poly.length < 3) return null;
   const center = shop.center || { x: shop.x, z: shop.z };
   const baseY = Number.isFinite(shop.baseY) ? shop.baseY

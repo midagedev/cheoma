@@ -405,11 +405,15 @@ try {
     pass(prepared.plan.scale === 'hanyang' && prepared.plan.seed === SEED
         && prepared.plan.sijeon > 0,
     `${viewport.label}: deterministic Hanyang includes planned sijeon`,
-    `shops=${prepared.plan.sijeon} seed=${prepared.plan.seed}`);
-    pass(prepared.metadata?.shopCount === prepared.plan.sijeon
-        && prepared.metadata?.shopIds?.length === prepared.plan.sijeon,
-    `${viewport.label}: rendered sijeon owns every planned shop`,
-    `rendered=${prepared.metadata?.shopCount ?? 'missing'}`);
+    `footprints=${prepared.plan.sijeon} seed=${prepared.plan.seed}`);
+    // #218a: plan length counts reserved break slots; renderer shopCount is solid mass only.
+    const footprintCount = (prepared.metadata?.shopCount ?? 0) + (prepared.metadata?.breakCount ?? 0);
+    pass(prepared.metadata?.shopCount > 0
+        && prepared.metadata?.shopIds?.length === prepared.metadata?.shopCount
+        && (prepared.metadata?.footprintCount === prepared.plan.sijeon
+          || footprintCount === prepared.plan.sijeon),
+    `${viewport.label}: rendered sijeon owns every planned shop mass and accounts for breaks`,
+    `rendered=${prepared.metadata?.shopCount ?? 'missing'} breaks=${prepared.metadata?.breakCount ?? 0}`);
     pass(prepared.meshCount > 0 && prepared.triangleCount > 0,
       `${viewport.label}: sijeon contains drawable geometry`,
       `meshes=${prepared.meshCount} triangles=${prepared.triangleCount}`);

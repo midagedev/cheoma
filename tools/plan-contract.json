@@ -10,6 +10,7 @@
   "settlementReliefRevision": "issue-40-local-relief-river-port-2026-07-22",
   "houseDiversityRevision": "issue-144-3-4-5-bay-household-hierarchy-2026-07-24",
   "drainageRevision": "issue-217-gate-crossing-slab-plan-2026-07-27",
+  "sijeonRowBreakRevision": "issue-218a-segment-breaks-2026-07-27",
   "auxiliaryBuildingRevision": "issue-146-planned-cross-lod-auxiliaries-2026-07-25",
   "siteRidgeRevision": "look-restore-r2-gentle-back-mountain-2026-07-25",
   "yardProportionRevision": "giwa-rural-depth-boost-lh-2.55-2026-07-26",
@@ -32,8 +33,8 @@
       "bytes": 204290
     },
     "hanyang:base": {
-      "hash": "ff64beabaf8164bb471d3e83f1c3fcc3dc32a32b7e23104afdbc1aa79d43cbba",
-      "bytes": 1109542
+      "hash": "7965fed6a03a3816e2bc28bb3dac6d342164b5f485700c7482a70c926117cab8",
+      "bytes": 1114674
     },
     "hamlet:temple": {
       "hash": "d9ab1937cb8290b22ac5f7f0af52d8923fb0752c5adbcd9b803518e3b24cca8d",
@@ -52,8 +53,8 @@
       "bytes": 205213
     },
     "hanyang:temple": {
-      "hash": "541ff4c4a65bd668ab667cf72e18726dad15d269fd1769172630f324ae7a460a",
-      "bytes": 1079289
+      "hash": "af91e03f5acc5da6db4268b50512bbfc5a3b7ba73cac37ecd58e6b7f079c3c0a",
+      "bytes": 1084421
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
