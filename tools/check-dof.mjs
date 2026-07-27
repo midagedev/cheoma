@@ -26,10 +26,13 @@ import {
   BOKEH_GATHER_FILL_TAP_COUNT,
   BOKEH_GATHER_NEAR_DILATE_TAP_COUNT,
   BOKEH_GATHER_TAP_COUNT,
+  BOKEH_LONG_FOCUS_BOOST_MAX,
+  BOKEH_LONG_FOCUS_REF_M,
   bokehCocLadder,
   bokehCocRadiusPx,
   bokehCocScalePx,
   bokehFarAsymptotePx,
+  bokehLongFocusApertureMeters,
   bokehMaxCocPx,
   bokehSignedCocPx,
   bokehTiltFarAsymptoteHeadroom,
@@ -461,6 +464,108 @@ const aerialScale = bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, VIEWPORT_
 invariant(
   heroScale > cocScale && cocScale > aerialScale,
   "CoC stopped following the lens continuum (hero > parcel > aerial)",
+);
+
+// (6b) Long-focus aperture compensation (#214). Compensated hero dolly parks the
+// focus plane near the ridge (~170 m at 7°); without a focus-proportional boost
+// the far asymptote collapses and the settle frame has no soft separation.
+// Residential focus (≤ ref) must stay at boost 1 so #207's near band is intact.
+near(
+  bokehLongFocusApertureMeters(BOKEH_COC_DEFAULTS.apertureMeters, 40),
+  BOKEH_COC_DEFAULTS.apertureMeters,
+  "short-focus aperture was boosted and re-softened the residential near band",
+  1e-12,
+);
+near(
+  bokehLongFocusApertureMeters(BOKEH_COC_DEFAULTS.apertureMeters, BOKEH_LONG_FOCUS_REF_M),
+  BOKEH_COC_DEFAULTS.apertureMeters,
+  "reference-focus aperture left its authored base",
+  1e-12,
+);
+near(
+  bokehLongFocusApertureMeters(BOKEH_COC_DEFAULTS.apertureMeters, BOKEH_LONG_FOCUS_REF_M * 1.5),
+  BOKEH_COC_DEFAULTS.apertureMeters * 1.5,
+  "mid long-focus aperture did not scale with focus / ref",
+  1e-12,
+);
+near(
+  bokehLongFocusApertureMeters(BOKEH_COC_DEFAULTS.apertureMeters, 500),
+  BOKEH_COC_DEFAULTS.apertureMeters * BOKEH_LONG_FOCUS_BOOST_MAX,
+  "long-focus aperture boost escaped its cap",
+  1e-12,
+);
+invariant(
+  BOKEH_LONG_FOCUS_REF_M === 60 && BOKEH_LONG_FOCUS_BOOST_MAX === 2,
+  "long-focus compensation dials left the product values the hero ladder pins",
+);
+
+// Hero settle ladder: 7° · 170 m focus · product tilt, ridge band 220–300 m.
+// Untilted ridge must separate from the subject, and the tilted upper frame
+// (v=0.75, ridge) must clear a perceptible soft-separation floor while the
+// door/eave band (±12 m of focus) stays inside the sharp band.
+const HERO_FOCUS = 170;
+const HERO_FOV = 7;
+const heroEffectiveAperture = bokehLongFocusApertureMeters(
+  BOKEH_COC_DEFAULTS.apertureMeters,
+  HERO_FOCUS,
+);
+const heroCocScale = bokehCocScalePx(heroEffectiveAperture, VIEWPORT_HEIGHT, HERO_FOV);
+const heroRadiusAt = (z) => bokehCocRadiusPx(heroCocScale, HERO_FOCUS, z, maxCoc);
+const heroSettleLadder = bokehCocLadder({
+  focus: HERO_FOCUS,
+  viewportHeight: VIEWPORT_HEIGHT,
+  fovDegrees: HERO_FOV,
+  depths: [158, 170, 182, 220, 250, 300],
+  tiltStrength: BOKEH_COC_DEFAULTS.tiltStrength,
+  screenV: 0.75,
+  anchorV: 0.5,
+});
+invariant(
+  heroEffectiveAperture > BOKEH_COC_DEFAULTS.apertureMeters * 1.5,
+  "hero settle focus no longer multiplies the product aperture",
+);
+for (const z of [158, 170, 182]) {
+  invariant(
+    heroRadiusAt(z) <= VIEWPORT_HEIGHT * 0.0025,
+    `hero subject depth ${z}m left the sharp band (${heroRadiusAt(z).toFixed(2)}px)`,
+  );
+}
+invariant(
+  heroRadiusAt(220) > 4 && heroRadiusAt(300) > 8,
+  `hero settle ridge stayed sharp (220 m ${heroRadiusAt(220).toFixed(2)}px, ` +
+    `300 m ${heroRadiusAt(300).toFixed(2)}px)`,
+);
+invariant(
+  heroRadiusAt(300) / heroRadiusAt(220) >= 1.4,
+  "hero settle ridge layers collapsed into one blur",
+);
+const heroRidgeTilted = heroSettleLadder.find((entry) => entry.z === 250);
+invariant(
+  heroRidgeTilted && heroRidgeTilted.radiusPx > 8,
+  `hero settle tilted ridge lost soft separation (${heroRidgeTilted?.radiusPx?.toFixed(2)}px)`,
+);
+const heroTiltHeadroom = bokehTiltFarAsymptoteHeadroom({
+  scalePx: heroCocScale,
+  focus: HERO_FOCUS,
+  tiltStrength: BOKEH_COC_DEFAULTS.tiltStrength,
+  maxCocPx: maxCoc,
+});
+invariant(
+  heroTiltHeadroom.ratio <= 1,
+  `hero long-focus boost saturates the far clamp ` +
+    `(worst asymptote ${heroTiltHeadroom.worstAsymptotePx.toFixed(2)}px / ` +
+    `max ${heroTiltHeadroom.maxCocPx.toFixed(2)}px, ratio ${heroTiltHeadroom.ratio.toFixed(3)})`,
+);
+// Without compensation the same framing is the pre-#214 failure mode: a near
+// ridge (220 m) stays under a perceptual 4 px floor at 1080p.
+const heroBareScale = bokehCocScalePx(
+  BOKEH_COC_DEFAULTS.apertureMeters,
+  VIEWPORT_HEIGHT,
+  HERO_FOV,
+);
+invariant(
+  bokehCocRadiusPx(heroBareScale, HERO_FOCUS, 220, maxCoc) < 4,
+  "hero settle bare-aperture fixture no longer demonstrates the missing-separation failure",
 );
 invariant(
   bokehCocScalePx(BOKEH_COC_DEFAULTS.apertureMeters, VIEWPORT_HEIGHT, 0) === 0 &&
