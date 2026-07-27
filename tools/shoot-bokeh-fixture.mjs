@@ -36,6 +36,9 @@ import {
   bokehSourceAnnulusMeanWeight,
   bokehSourcePeakWeight,
 } from "../src/env/bokeh-source-contract.js";
+import { BOKEH_COC_DEFAULTS } from "../src/env/bokeh-coc-contract.js";
+
+const PRODUCT_APERTURE_METERS = BOKEH_COC_DEFAULTS.apertureMeters;
 import {
   BOKEH_OPTICAL_CHART_VIEWPORT,
   installBokehOpticalChart,
@@ -292,13 +295,19 @@ try {
   const fixture = await installBokehOpticalChart(page, threeModuleUrl);
 
   const capture = async (name, amount) => {
-    const state = await page.evaluate((value) => {
+    const state = await page.evaluate(({ value, apertureMeters }) => {
       const engine = window.__engine;
-      // aperture is an aperture diameter in metres (src/env/dof.js).
-      engine.debugTuneDof({ amount: value, aperture: 0.675, maxBlur: 0.01 });
+      // aperture is an aperture diameter in metres (src/env/dof.js /
+      // bokeh-coc-contract.js). Pass the product default so the isolated chart
+      // tracks residential focus retunes instead of a hard-coded legacy dial.
+      engine.debugTuneDof({
+        amount: value,
+        aperture: apertureMeters,
+        maxBlur: 0.01,
+      });
       engine.debugRenderDofFrame();
       return engine.debugDof();
-    }, amount);
+    }, { value: amount, apertureMeters: PRODUCT_APERTURE_METERS });
     const path = join(outputDir, `${name}.png`);
     await canvasLocator.screenshot({ path });
     console.log(`${path} ${JSON.stringify(state)}`);

@@ -43,15 +43,15 @@ export const VILLAGE_FOCUS_SKY_REFERENCE_BAND = 519 / 800;
 // close-parcel pose, so lowering the residential elevation must not follow it.
 export const VILLAGE_HERO_FOCUS_ELEVATION = 24 * DEG;
 // Product close-focus aperture diameter, in metres, for the physical circle of
-// confusion (src/env/bokeh-coc-contract.js). 0.675m is 85mm f/2.8 on a 1:22
-// architectural model, back-solved so a 150m background sits at 1.2% of frame
-// height while a whole 9m house stays inside 2px of the focus plane
-// (docs/dof-cinematic-research.md §4.3, §4.4).
+// confusion (src/env/bokeh-coc-contract.js). Shared with BOKEH_COC_DEFAULTS /
+// DEFAULT_DOF_APERTURE. 0.52 m deepens the near band so courtyard life (chickens,
+// dog, yard props between camera and the door focus plane) stays readable while
+// the far ridge and lantern discs still separate. See bokeh-coc-contract.js.
 //
 // One value covers the entire lens continuum on purpose: fov sits in the CoC
 // denominator, so the 46 deg aerial frame is naturally deep and the 7 deg hero
 // frame naturally shallow. Do not add a per-lens aperture.
-export const VILLAGE_FOCUS_DOF_APERTURE = 0.675;
+export const VILLAGE_FOCUS_DOF_APERTURE = 0.52;
 
 const lens = (fov, referenceFov) => Object.freeze({ fov, referenceFov });
 
