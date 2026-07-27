@@ -48,6 +48,7 @@ import {
   clampBuildingDimensions,
   isResidentialHouseOnlyEdit,
   isResidentialOpeningsOnlyEdit,
+  isResidentialRoofToneOnlyEdit,
   isResidentialThatchOnlyEdit,
   parcelWallType,
   palaceCompoundDefaults,
@@ -1173,6 +1174,30 @@ export function createVillageHandle(opts, seed, plan, group) {
           }
           // Map re-tint only — no caster/geometry ownership change, so do not
           // thrash the directional shadow cache on every thatchAge drag tick.
+          return prev;
+        }
+      }
+
+      // ── Fast path: roofTone-only. Re-apply role tints from stored base RGB. ──
+      if (prev && isResidentialRoofToneOnlyEdit(previousAcceptedSpec, edit)) {
+        const house = prev.userData.houseRoot || prev.children[0];
+        if (house) {
+          const roofTint = toneOf(gk, edit.top.roofTone);
+          applyMaterialRoleTints(house, {
+            roof: roofTint,
+            wall: gk !== parcel.kind ? null : parcel.wallTone,
+            wood: gk !== parcel.kind ? null : parcel.woodTone,
+            stone: gk !== parcel.kind ? null : parcel.stoneTone,
+          });
+          prev.userData.editSpec = edit.spec;
+          if (persist) {
+            persistentOverrideIds.add(parcelId);
+            prev.userData.exportPersistentParcel = true;
+            committedResidentialSpecs.set(parcelId, edit.spec);
+            parcel.toneIdx = edit.top.roofTone;
+            parcel.roofTone = roofTint;
+            if (refreshFlora) refreshVillageFlora();
+          }
           return prev;
         }
       }

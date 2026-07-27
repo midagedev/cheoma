@@ -122,11 +122,17 @@
 |---|---|---|
 | **Shell preview light** | roof pitch/eave 등 non-openings house-only preview는 door/glow/threshold 재부착 생략 → commit 시 복원 | 슬라이더 중 문 상호작용 지연, commit 후 정상 |
 
+## 13차 구현 (roofTone-only re-tint)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **_baseColor store** | applyMaterialRoleTints가 최초 RGB 보존 후 재곱 | 동일 |
+| **roofTone-only path** | geometry 불변 + roofTone만 변경 시 재틴트, rebuild 0 | 동일 |
+
 ## 다음 라운드 (우선순위)
 
 1. grade half-res during motionBudget (look risk — measure first)
-2. roofTone-only material re-tint without rebuild (giwa)
-3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
+2. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
 

@@ -258,15 +258,22 @@ export function clampBuildingDimensions(params, kind) {
 }
 
 // 풀디테일 overlay에도 instanced village와 같은 role별 색 변주를 적용한다.
+// Base RGB is stored on first touch so roofTone (and re-tints) can rewind without
+// a full rebuild — multiply is applied from the stored base, not the burned color.
 export function applyMaterialRoleTints(root, tints) {
   root.traverse((object) => {
     const materials = Array.isArray(object.material) ? object.material : (object.material ? [object.material] : []);
     for (const material of materials) {
-      if (!material?.color || material.userData._toned) continue;
+      if (!material?.color) continue;
       const role = material.userData.role;
       const tint = role === 'roof' ? tints.roof : role === 'wall' ? tints.wall
         : role === 'wood' ? tints.wood : role === 'stone' ? tints.stone : null;
       if (!tint) continue;
+      if (!material.userData._baseColor) {
+        material.userData._baseColor = material.color.clone();
+      } else {
+        material.color.copy(material.userData._baseColor);
+      }
       material.color.setRGB(
         material.color.r * tint[0],
         material.color.g * tint[1],
@@ -331,8 +338,6 @@ export function residentialRoofBoundsMatch(a, b, epsilon = 1e-3) {
 /**
  * True when only thatchAge differs (same kind + same geometry + same roofTone).
  * The runtime can re-apply the thatch map without rebuildBuilding / walls.
- * roofTone is excluded: role tints are burned into material.color once and
- * cannot be rewound without a new mesh.
  */
 export function isResidentialThatchOnlyEdit(previousSpec, nextEdit) {
   if (!previousSpec || !nextEdit?.spec) return false;
@@ -342,6 +347,20 @@ export function isResidentialThatchOnlyEdit(previousSpec, nextEdit) {
   }
   if ((previousSpec.params?.roofTone ?? 0) !== (nextEdit.top.roofTone ?? 0)) return false;
   return previousSpec.params?.thatchAge !== nextEdit.top.thatchAge;
+}
+
+/**
+ * True when only roofTone differs (geometry + thatchAge identical).
+ * applyMaterialRoleTints rewinds from stored _baseColor without a rebuild.
+ */
+export function isResidentialRoofToneOnlyEdit(previousSpec, nextEdit) {
+  if (!previousSpec || !nextEdit?.spec) return false;
+  if (previousSpec.kind !== nextEdit.kind) return false;
+  if (residentialGeometrySignature(previousSpec) !== residentialGeometrySignature(nextEdit.spec)) {
+    return false;
+  }
+  if ((previousSpec.params?.thatchAge ?? 0) !== (nextEdit.top.thatchAge ?? 0)) return false;
+  return (previousSpec.params?.roofTone ?? 0) !== (nextEdit.top.roofTone ?? 0);
 }
 
 /**
