@@ -590,6 +590,10 @@ function createImpostorMaterial(part) {
   mat.name = `impostor-${part}`;
   mat.userData.role = role;
   if (role === 'roof') mat.userData.snowSurface = true;
+  // R8 program diet (#220 residual): FAR impostors always live on LOD roots. Install the
+  // screen-door path at birth so the first compile already matches later rim/cloud/snow
+  // composition instead of briefly owning a plain impostor program family.
+  patchLodScreenDoorMaterial(mat);
   return mat;
 }
 

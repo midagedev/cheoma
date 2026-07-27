@@ -467,6 +467,7 @@ assert.deepEqual(impactedFastChecks(['src/village/instancing.js']), [
   './check-architecture.mjs',
   './check-instance-upload.mjs',
   './check-instance-merge-immutability.mjs',
+  './check-program-diet.mjs',
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/wave.js']), [
   './check-architecture.mjs', './check-instance-upload.mjs', './check-wave-contract.mjs',

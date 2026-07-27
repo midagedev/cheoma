@@ -163,11 +163,12 @@ plan golden, 렌더 결과는 sync/Worker/fallback scene hash로 닫는다.
   만들지 않는다. stock `worldPosition`이 그림자 좌표를 계산하기 전에는 동차좌표 `w=1`을 복원한다.
   색, 태양/point shadow custom depth/distance, StableBokeh depth, 수묵 normal은
   `src/render/screen-door.js`의 같은 IGN discard 문법을 쓴다. `material-program-key.js`가 LOD·구름·눈·물리
-  림의 명시 token을 설치 순서와 무관하게 보존한다. R8 프로그램 다이어트: 림 대상 stock 재질은
-  screen-door *shader path*를 항상 달고 coverage 기본값 1(≥0.999 early-out)로 두어 plain+rim과
-  lod+rim이 한 WebGLProgram 패밀리로 합쳐진다. matrix channel은 진짜 LOD root에만 붙이며 청크별
-  material uniform은 쓰지 않는다. 실제 렌더 뒤 matrix 복원과 plain/LOD cloud+snow+rim 프로그램
-  공유를 브라우저 계약으로 고정한다.
+  림의 명시 token을 설치 순서와 무관하게 보존한다. R8 프로그램 다이어트(#180/#220): 림 대상·구름그림자·
+  적설·FAR impostor stock 재질은 screen-door *shader path*를 항상 달고 coverage 기본값 1
+  (≥0.999 early-out)로 두어 plain×lod 조합이 한 WebGLProgram 패밀리로 합쳐진다. matrix channel은
+  진짜 LOD root에만 붙이며 청크별 material uniform은 쓰지 않는다. 제품 hanyang 상한은 aerial
+  programs ≤144, focus/mid/focusOut ≤192(`render-budget-contract`). 실제 렌더 뒤 matrix 복원과
+  plain/LOD cloud+snow+rim 프로그램 공유·cloud/snow 단독 install을 브라우저·순수 계약으로 고정한다.
 - focus overlay가 나타나는 순간 해당 필지의 FAR, MID, FULL, 병합 담을 함께 접는다. 카메라 전환이 끝나기
   전이나 focus hop 중에도 `base/overlay` 두 집이 겹치지 않으며, focus-out 때 현재 청크 단계 하나만 복원한다.
 - 사용자가 다시 지은 정규 필지는 예외적으로 focus-out 뒤에도 overlay가 부감 표현의 권위 있는 소유자다.

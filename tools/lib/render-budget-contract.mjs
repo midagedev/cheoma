@@ -13,6 +13,11 @@ export const RENDER_BUDGET_METRICS = Object.freeze([
   'textures',
 ]);
 
+// Program ceilings are the R8 (#220) product budget after the LOD screen-door × rim ×
+// cloud-shadow diet (#180 + residual always-on path for cloud/snow/impostor). Aerial is
+// tighter because it has no focus-overlay USE_INSTANCING fork; focus/mid/focusOut share the
+// 192 plateau. Measured post-#180 hanyang aerial ≈142 — aerial 144 leaves ~1% headroom.
+// Do not raise these to absorb a new cacheKey axis; collapse the axis instead.
 const COMMON_RESOURCE_LIMITS = Object.freeze({
   programs: 192,
   textures: 128,

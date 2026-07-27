@@ -58,6 +58,9 @@ const EXACT_IMPACT = new Map([
   ['src/village/instancing.js', [
     './check-instance-upload.mjs',
     './check-instance-merge-immutability.mjs',
+    // R8 (#220): FAR impostor birth always installs LOD screen-door (source-inspected;
+    // check-program-diet only readFileSyncs this module, so it is not in its import closure).
+    './check-program-diet.mjs',
   ]],
   ['src/village/wave.js', [
     './check-instance-upload.mjs',

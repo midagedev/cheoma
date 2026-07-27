@@ -13,6 +13,7 @@ import {
   MATERIAL_PROGRAM_PATCH,
   addMaterialProgramKey,
 } from '../render/material-program-key.js';
+import { patchLodScreenDoorMaterial } from '../render/lod-screen-door.js';
 import { createPaletteContext } from './palette-context.js';
 
 export { createPaletteContext };
@@ -950,12 +951,20 @@ export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
 // 반환: 실제로 패치했으면 true(검증 카운트용).
 export function injectCloudShadow(mat, cloudUniforms) {
   if (!mat || !mat.isMaterial || !cloudUniforms) return false;
-  if (mat.userData.__cloudShadowPatched) return false;
+  if (mat.userData.__cloudShadowPatched) {
+    // Re-entry still enforces the R8 always-on screen-door path (no second cloud inject).
+    patchLodScreenDoorMaterial(mat);
+    return false;
+  }
   mat.userData.__cloudShadowPatched = true;
   // Explicit composition contract for later material patches (notably env/rim.js).  The patch
   // only multiplies diffuseColor at color_fragment and preserves previous callbacks, so it is
   // safe to chain when each participant also composes customProgramCacheKey.
   mat.userData.__cloudShadowPatchVersion = MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW;
+  // R8 program diet (#220 residual): every cloud-shadow stock material carries the LOD
+  // screen-door shader path so cloud-only vs lod+cloud never forks a WebGLProgram family.
+  // Coverage defaults to affine 1 (discard early-out). Matrix channel stays LOD-root only.
+  patchLodScreenDoorMaterial(mat);
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     if (prev) prev(shader, renderer);
