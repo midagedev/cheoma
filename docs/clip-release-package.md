@@ -14,6 +14,12 @@
 배포 도메인 (권장, 공유·녹화 모두 이 URL):
 
 ```text
+https://cheoma.midagedev.com/?clip=assemble
+```
+
+(`clip=assemble` 은 seed=7 · sunset · 종가 자동 진입을 고정한다. 동등 수동 URL:)
+
+```text
 https://cheoma.midagedev.com/?seed=7&time=sunset
 ```
 
@@ -22,6 +28,8 @@ https://cheoma.midagedev.com/?seed=7&time=sunset
 ```text
 https://cheoma.midagedev.com/?seed=7&vseed=7&vscale=village&time=sunset&season=summer&weather=clear
 ```
+
+다른 스테이지: `?clip=yard` · `?clip=aerial` · `?clip=night` · `?clip=ink` — [`clip-stages.md`](clip-stages.md).
 
 로컬 검증 (dev server origin만 바꿈):
 

@@ -3,7 +3,7 @@
 // The core owns only numbers and time. A framework adapter applies each sampled
 // frame to its camera/controls, which keeps input handoff and lifecycle out of this
 // reusable path. Both profiles are endpoint exact with zero endpoint velocity:
-//   arrival — a broad establishing arc that settles into the authored close view.
+//   arrival — a two-beat establishing arc then telephoto push-in into the close view.
 //   rebuild — a restrained breathing arc from the live frame to the new framing.
 
 // No global RNG is consumed. `seed` only chooses the side of the orbit through a
@@ -15,6 +15,19 @@ const smootherstep = (value) => {
   const t = clamp01(value);
   return t * t * t * (t * (t * 6 - 15) + 10);
 };
+
+// Arrival two-beat sampling (#254):
+//   beat 1 — orbit + target (full-time smootherstep) hold the wide lens longer
+//   beat 2 — FOV / dolly radius accelerate after ARRIVAL_ZOOM_START so the
+//            telephoto climax lands with the roof assembly, not a long static hold.
+// Zoom weight is monotone and end-flat (smootherstep of a clamped ramp).
+export const ARRIVAL_ZOOM_START = 0.22;
+
+function arrivalZoomWeight(t) {
+  const u = clamp01(t);
+  if (u <= ARRIVAL_ZOOM_START) return 0;
+  return smootherstep((u - ARRIVAL_ZOOM_START) / (1 - ARRIVAL_ZOOM_START));
+}
 
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 const point = (value = {}) => ({
@@ -73,8 +86,11 @@ function profileFor(kind, motion, subjectSize) {
   const compact = motion === 'compact';
   if (kind === 'arrival') {
     return {
-      duration: compact ? 4.2 : 5.8,
-      sweep: (compact ? 30 : 84) * DEG,
+      // Default product path overrides duration from assembly timing; these are
+      // fallbacks for pure gates and non-hero callers.
+      duration: compact ? 4.6 : 6.4,
+      // Slightly wider establishing sweep on desktop; compact stays restrained.
+      sweep: (compact ? 32 : 90) * DEG,
       radialBreath: 0,
       verticalBreath: 0,
       // The establishing frame is authored as a *screen* width, not a world distance. Scaling the
@@ -86,12 +102,12 @@ function profileFor(kind, motion, subjectSize) {
       // inside the landing radius and low keeps the camera in the clear band while the 4.6× zoom
       // still carries the reveal: the subject grows ~3× on screen across the arc, which is the claim
       // the gates assert.
-      startScale: compact ? 0.82 : 0.70,
+      startScale: compact ? 0.80 : 0.68,
       // Low, so the establishing frame reads as layered architecture (near eaves, receding roof
       // ranks, haze) rather than a plan view of a diorama. Capped by the destination so a landing
       // that is already lower than this never gets raised.
-      establishingElevation: (compact ? 13 : 10) * DEG,
-      startRise: Math.min(compact ? 2.8 : 4.2, Math.max(compact ? 1.4 : 2.6, size * (compact ? 0.12 : 0.14))),
+      establishingElevation: (compact ? 12 : 9) * DEG,
+      startRise: Math.min(compact ? 2.8 : 4.4, Math.max(compact ? 1.4 : 2.6, size * (compact ? 0.12 : 0.15))),
     };
   }
   return {
@@ -148,12 +164,14 @@ export function createArchitecturalReveal({
         z: Math.cos(startAngle) * startRadius,
       }),
       target: startTarget,
-      fov: Math.max(destination.fov + (motion === 'compact' ? 8 : 14), motion === 'compact' ? 28 : 32),
+      // Wider establishing lens for beat-1 atmosphere; still inside the product
+      // clear band (startScale < 1). Compact stays modest for small screens.
+      fov: Math.max(destination.fov + (motion === 'compact' ? 10 : 18), motion === 'compact' ? 30 : 36),
       referenceFov: Math.max(
-        destination.referenceFov + (motion === 'compact' ? 8 : 14),
-        motion === 'compact' ? 28 : 32,
+        destination.referenceFov + (motion === 'compact' ? 10 : 18),
+        motion === 'compact' ? 30 : 36,
       ),
-      composition: Math.min(destination.composition, motion === 'compact' ? 0.35 : 0.15),
+      composition: Math.min(destination.composition, motion === 'compact' ? 0.35 : 0.12),
     });
   }
 
@@ -181,15 +199,21 @@ export function createArchitecturalReveal({
 export function sampleArchitecturalReveal(shot, progress) {
   if (!shot?.start || !shot?.end) throw new TypeError('Invalid architectural reveal descriptor');
   const t = clamp01(progress);
-  const k = smootherstep(t);
-  const target = lerpPoint(shot.start.target, shot.end.target, k);
+  const arrival = shot.kind === 'arrival';
+  // Orbit/target always use full-time smootherstep (turn-rate contract).
+  // Arrival FOV/dolly use a delayed zoom beat for the push-in climax.
+  const orbitK = smootherstep(t);
+  const zoomK = arrival ? arrivalZoomWeight(t) : orbitK;
+  const target = lerpPoint(shot.start.target, shot.end.target, orbitK);
   const start = polarOffset(sub(shot.start.position, shot.start.target));
   const end = polarOffset(sub(shot.end.position, shot.end.target));
-  const baseAngle = start.angle + shortestAngle(start.angle, end.angle) * k;
+  const baseAngle = start.angle + shortestAngle(start.angle, end.angle) * orbitK;
   const endpointBump = Math.sin(Math.PI * t) ** 2; // value and first derivative are 0 at both ends
   const angle = baseAngle + (shot.kind === 'rebuild' ? shot.sweep * endpointBump : 0);
-  const radius = lerp(start.radius, end.radius, k) + shot.radialBreath * endpointBump;
-  const relativeY = lerp(start.y, end.y, k) + shot.verticalBreath * endpointBump;
+  // Radius and height follow the zoom beat on arrival so beat-1 holds the wide
+  // layered frame while beat-2 pushes into the authored telephoto dolly.
+  const radius = lerp(start.radius, end.radius, zoomK) + shot.radialBreath * endpointBump;
+  const relativeY = lerp(start.y, end.y, zoomK) + shot.verticalBreath * endpointBump;
 
   return {
     progress: t,
@@ -199,9 +223,9 @@ export function sampleArchitecturalReveal(shot, progress) {
       z: Math.cos(angle) * radius,
     }),
     target,
-    fov: lerp(shot.start.fov, shot.end.fov, k),
-    referenceFov: lerp(shot.start.referenceFov, shot.end.referenceFov, k),
-    composition: lerp(shot.start.composition, shot.end.composition, k),
+    fov: lerp(shot.start.fov, shot.end.fov, zoomK),
+    referenceFov: lerp(shot.start.referenceFov, shot.end.referenceFov, zoomK),
+    composition: lerp(shot.start.composition, shot.end.composition, zoomK),
   };
 }
 
