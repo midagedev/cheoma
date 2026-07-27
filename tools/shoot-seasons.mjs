@@ -48,7 +48,14 @@ for (const season of seasons) {
     const url = `http://127.0.0.1:${port}/seasons.html?shot=1&season=${season}&angle=${angle}&time=${time}`;
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction('window.__SHOT_READY === true', null, { timeout: 30000 });
-    await page.waitForTimeout(300);
+    // #219: pin ground carpet accumulation for spring/autumn so shot frames read season density
+    // (LITTER_UP is ~38s live — shot mode must not wait on the soft ramp).
+    await page.evaluate((s) => {
+      if (window.__season && (s === 'spring' || s === 'autumn')) {
+        window.__season.setLitter(1);
+      }
+    }, season);
+    await page.waitForTimeout(200);
     const file = join(OUT, `season-${season}-${angle}.png`);
     await page.screenshot({ path: file });
     console.log('saved', file);

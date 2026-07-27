@@ -464,6 +464,9 @@ G2(클립 적합성)는 시퀀스 컷에서, G4(고증)는 근접 컷과 Phase 4
 - **개선 방향**: 부감용 계절 표현을 입자가 아닌 축으로(꽃잎 카펫·낙엽 litter 지면 밀도·논 색), 근경에서만
   입자 밀도를 올린다.
 - **담당**: Phase 3-2.
+- **상태 (2026-07-27 / #219)**: `season-ground-plan.js` + carpet renderer로 봄/가을 근경 지면 밀도,
+  지형 ground mul 강화, focus 링 스커트 카펫 추가. 부감은 입자 거대화·FAR Points 없이 색 축 유지.
+  게이트: `check:season-ground`, `shoot:seasons`, 기존 `check:petals`.
 
 ### U5. 지형 그림자가 딱딱한 줄무늬로 읽힌다
 

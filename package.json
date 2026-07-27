@@ -77,6 +77,8 @@
     "check:cloud-shadow": "node tools/check-cloud-shadow-profile.mjs",
     "check:live-edit:browser": "node tools/run-browser-locked.mjs -- node tools/check-parcel-rebuild-browser.mjs",
     "check:petals": "node tools/run-browser-locked.mjs -- node tools/verify-petals.mjs",
+    "check:season-ground": "node tools/check-season-ground-contract.mjs",
+    "shoot:seasons": "node tools/run-browser-locked.mjs -- node tools/shoot-seasons.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:sijeon": "node tools/check-sijeon-contract.mjs",
     "check:parcel-rebuild": "node tools/check-parcel-rebuild-contract.mjs",

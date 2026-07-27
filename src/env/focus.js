@@ -7,6 +7,11 @@ import { makePresenceGate } from './present-gate.js';
 import { setupGrass } from './grass.js';
 import { attachOverlayLanterns, getLanternMaterials } from '../layout/props.js';
 import { aerialLifePresence } from '../core/lod.js';
+import {
+  planFocusLitterSpots,
+  seasonGroundCarpetGoal,
+} from './season-ground-plan.js';
+import { buildSeasonGroundCarpet } from './season-ground-carpet.js';
 
 // 필지 스타일별 대문 개구부 폭(buildParcel STYLE_MAP 대응) — 풀이 대문 앞을 막지 않게 비운다.
 const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
@@ -21,7 +26,8 @@ const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
 //   ring.update(dt, timeName, detailLod);             // 매 프레임. 지상/입자 LOD와 같은 연속 강도
 //
 // 원칙:
-//  - 기존 env 시스템 재사용(신규 발명 금지): animals.js·smoke.js·motes.js(모트+등롱흔들림)·grass.js.
+//  - 기존 env 시스템 재사용(신규 발명 금지): animals.js·smoke.js·motes.js(모트+등롱흔들림)·grass.js
+//    + season-ground-carpet(#219 봄/가을 지면 카펫, 담 스커트·구석 스팟, +1 draw).
 //    (#131: 지붕 적설 쉘·빗물 리벌릿 물리는 제거 — 눈은 weather.js 지붕 흰틴트(uSnowAmount)가 대체.)
 //    (#215: 근경 처마 낙수·최소 스플래시는 weather.js eave-rain 이 소유 — 링에 붙이지 않는다.
 //     엔진이 focus 오버레이를 setEaveSubject 로 넘긴다.)
@@ -179,6 +185,33 @@ function makeRing({
     wallSkirt: 0.55,
   });
 
+  // 4.6) 계절 지면 카펫(#219 / U4) — 봄 벚꽃 패치·가을 낙엽. 담 스커트·마당 구석 스팟만
+  //    (전 필지 고밀도 카펫 금지). 단일 InstancedMesh(+1 draw), FAR Points 없음. 부감은 링 자체가
+  //    없으므로 자동 소거. ground strength 와 동기.
+  const gateW = GATE_W[style] || 2.4;
+  const carpetSpots = planFocusLitterSpots({
+    W, D, gateW, seed: (seed ^ 0x7c11) >>> 0,
+  });
+  const carpet = buildSeasonGroundCarpet({
+    spots: carpetSpots,
+    name: 'focusSeasonLitter',
+    season: seasonGroundCarpetGoal(season) ? season : 'autumn',
+  });
+  const carpetRoot = new THREE.Group();
+  carpetRoot.name = 'focusSeasonLitterRoot';
+  carpetRoot.position.set(worldX, groundY, worldZ);
+  carpetRoot.quaternion.copy(_quat);
+  if (carpet) {
+    carpetRoot.add(carpet.mesh);
+    container.add(carpetRoot);
+    if (seasonGroundCarpetGoal(season)) {
+      carpet.setSeason(season);
+      // strength 램프 전까지 숨김 — update 가 level 을 소유.
+      carpet.setLevel(0);
+    }
+  }
+  let carpetSeason = season || 'summer';
+
   // 5) 지붕 적설/빗물(#131): 눈 쌓임 볼륨 쉘·빗물 리벌릿 물리는 사용자 지시로 제거(roofcapture +
   //    2×mergeGeometries 성능 부담). 눈은 weather.js 지붕 흰틴트(uSnowAmount 공유 uniform)가 대체하고
   //    focus-in 지붕도 그 전역 셰이더 틴트로 자동 흰색화(별도 배선 불필요), 비는 낙하 커튼만 남긴다.
@@ -201,6 +234,8 @@ function makeRing({
   function setSeason(name, opts = {}) {
     grass.setSeason(name, opts);
     motes.setSeason(name, opts);
+    carpetSeason = name;
+    if (carpet && seasonGroundCarpetGoal(name)) carpet.setSeason(name);
   }
 
   function update(dt, detailLod = 1) {
@@ -223,6 +258,9 @@ function makeRing({
     motes.setLensScale(detailLod?.lensScale ?? 1);
     motes.setWeather(readWeather(getWeather));
     grass.setFade(strength);
+    if (carpet) {
+      carpet.setLevel(strength * seasonGroundCarpetGoal(carpetSeason));
+    }
 
     // 0에 가까운 링은 렌더뿐 아니라 시뮬레이션도 쉰다. gate 자체는 계속 흘러 다음 근접
     // 프레임에 자연스럽게 이어지고, 보이는 단계에서만 소동물·입자 행렬을 갱신한다.
@@ -247,6 +285,10 @@ function makeRing({
     smoke.setEnabled(false);    // 건물의 아궁이 불씨(그룹 밖 라이트)까지 소등 후 해제
     lantern.setEnabled(false);
     motes.dispose();
+    if (carpet) {
+      carpetRoot.remove(carpet.mesh);
+      carpet.dispose();
+    }
     scene.remove(container);
     disposeSubtree(container);
   }

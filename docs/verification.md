@@ -75,6 +75,8 @@ npm run check:list            # gate id·tier·resource·npm script 전체 카�
 npm run check                 # 모든 browser-free 계약; merge profile이 자동 호출
 npm run check:aa              # 컴포저 경로 기하 AA(MSAA) 계약 + 경사 에지 계단 정량 축
 npm run check:particle-geometry # 강수·꽃잎/모트·한지 불빛의 단일 물리 geometry 체크포인트
+npm run check:season-ground   # 봄/가을 지면 카펫·litter 배치·드로우 예산·물리 클럼프 크기 (#219)
+npm run check:petals          # 계절 낙하 입자 필드·물리 폭·부감 소거 (browser)
 npm run check:instance-upload # 필지 표현의 CPU 배열 부분 변경·복원·export 불변 계약
 npm run check:instance-upload:browser # 실제 WebGL bufferSubData 부분 전송 증거
 npm run check:instance-merge  # 인스턴싱/정적 병합 geometry digest·material order 불변 (scratch Matrix4)
@@ -107,6 +109,7 @@ npm run shoot:wave          # 대표 village 먹안개 handoff·그림자·progr
 npm run shoot:wave:full     # hamlet/village/capital/hanyang 전체 시각 행렬
 npm run shoot:threshold-life # dry/wet·scale·topology별 민가 문간 신발 근접 촬영
 npm run shoot:door          # 실제 앱 주거 primary 문 닫힘/중간/열림 정면·사선 6장
+npm run shoot:seasons       # seasons.html 봄/여름/가을/겨울 × 앵글 지면·수관 캡처 (#219)
 ```
 
 `shoot:lod-transition`은 고정 Hanyang `p13` 청크를 실제 제품의 24° focus ray에서 바라보며 두 경계의
@@ -388,6 +391,12 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - 수정 전 직사각형 공식을 **음성 대조**로 게이트 안에 재현해, 같은 fixture에서 그 공식이 여전히 이탈함을 확인한다. 이탈이 사라지면 게이트 자체가 실패하므로 어서션이 공허해질 수 없다.
   - 예약(`yardHardObstacles`)과 배치(`yardHardPlacements`)의 집합 일치, 처마 밑은 허용하되 몸채 관통은 금지, 반복 호출·재생성 결정론, 그리고 종류별 **배치 유지 하한**을 함께 고정한다. 유지 하한이 "소품을 다 지워서 이탈 0"을 만드는 퇴행을 막는다.
   - 히어로(종가·관아)는 `rectangularParcelShape`라 담과 직사각형이 정의상 일치해 저작 슬롯을 그대로 쓴다. 게이트는 그 면제의 전제(4점 직사각형)를 직접 검사하고, 궁·절·시전 지번이 마당 소품 계약을 공유하지 않음도 확인한다.
+- `check:season-ground`
+  - look-audit U4 / #219. Three 없는 `season-ground-plan.js` 계약: 봄·가을만 지면 카펫 활성, 여름·겨울 0.
+  - env litter(나무 밑 + 마당 구석)와 focus 스커트 스팟의 결정론·물리 클럼프 크기(0.45–1.35m)·인스턴스 상한
+    (env ≤420 / focus ≤180)·드로우 예산(+1 InstancedMesh, Points 0, FAR 복제 금지)·전 필지 격자 카펫
+    비범위(밀도 상한)를 검사한다. 부감 계절축(논·수관·지형 틴트)과 낙하 입자 물리 폭은 각각 paddies/
+    seasons 셰이더·`check:petals`가 소유한다. 시각 증거는 `shoot:seasons`.
 - `check:yard-life`
   - 5개 규모 × 대표 seed에서 Three/DOM/전역 RNG 없는 생활상 plan의 byte 결정론, 규모별 희소 가구 선택, 문자열 ID fail-closed, 봄·가을·겨울 record와 날씨 eligibility, 좌표까지 포함한 모티프별 서비스/작업 slot, exact footprint와 지붕·실제 솔리드 담 두께·도로·대문 접근·일조·기존 hard object 경계를 검사한다. 세 잠재 계절 slot을 flora용 보수적 obstacle로 합치는 adapter도 이 계약이 소유한다.
   - Issue #17에서 확인된 `hamlet:7:p0` 장독대 관통점과 `hanyang:7`의 같은 부속채 local footprint를 고정 회귀로 둔다. 한양 fixture는 일조 배치로 필지 ID가 이동해도 그 footprint와 과실수를 함께 가진 집을 의미로 찾아, 안전한 다른 슬롯으로 이동한 뒤의 나무 수와 반복 결정론을 확인한다.

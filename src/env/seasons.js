@@ -2,6 +2,8 @@ import { smoothstep } from '../core/math/scalar.js';
 import * as THREE from 'three';
 import { createLeafSaddleGeometry, LEAF_SHAPE_GLSL } from './detail-particle-geometry.js';
 import { getWind } from './wind.js';
+import { planEnvLitterSpots, seasonGroundCarpetGoal } from './season-ground-plan.js';
+import { buildSeasonGroundCarpet } from './season-ground-carpet.js';
 
 // 계절 시스템 — 가을 단풍·봄 벚꽃·여름 신록·겨울 휴면색.
 //   setupSeasons(envGroup, { layout }) → { setSeason(name, opts), update(dt), dispose() }
@@ -15,9 +17,12 @@ import { getWind } from './wind.js';
 //  - 개체별 phase: instanceMatrix 위치 해시로 잎 색 채도·명도와 물드는 시차를 흩뜨린다.
 //  - 계절 전환은 항상 여름(초록)을 경유해 보간 → 빨강↔분홍 직접 보간의 진흙색을 피한다.
 //  - 지면은 terrain 재질에 aGround 마스크 기반 곱연산 틴트(가을 마른 금빛/봄 신록)를
-//    주입 — 박석 마당은 유지, 풀·숲 원경만 은은하게.
-//  - 낙하 파티클: 나무 수관에서 흩날리는 낙엽/벚꽃잎(종별 저폴리 곡면).
-//    바람 사인 요동 + 회전 낙하 + 지면/수관 끝 페이드.
+//    주입 — 박석 마당은 유지, 풀·숲 원경만 은은하게. 부감 계절축(U4)은 이 틴트 + 논
+//    (paddies) + 수관 색이며, 낙하 입자를 거대화하거나 FAR Points 를 복제하지 않는다.
+//  - 낙하 파티클: 나무 수관에서 흩날리는 낙엽/벚꽃잎(종별 저폴리 곡면, 물리 폭 계약).
+//    바람 사인 요동 + 회전 낙하 + 지면/수관 끝 페이드. 근경 전용 체감 밀도.
+//  - 지면 카펫/litter(#219): spring 벚꽃 패치 + autumn 낙엽 무더기. 단일 InstancedMesh
+//    (+1 draw, 0 Points). 전 필지 고밀도 카펫 금지 — 나무 밑·마당 구석 스팟만.
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 
@@ -27,15 +32,15 @@ const SPRING = [0x000000, 0x9cc24a, 0x8fbf52, 0x93c256, 0xf2bcd0]; // 신록 연
 const WINTER = [0x000000, 0x776e4e, 0x6d5747, 0x665e4c, 0x745f57]; // 낙엽 진 뒤 남은 가지·마른 잎의 저채도
 const SEASON_AMT = { spring: 0.85, summer: 0, autumn: 0.92, winter: 0.96 };
 
-// 지면 곱연산 톤 (aGround 영역). 여름=중립. 가을은 마른 풀 금빛(#b99a55 계열)이
-// 분명히 읽히게, 봄은 여름과 구별되는 신록으로.
+// 지면 곱연산 톤 (aGround 영역). 여름=중립. 부감 계절축(U4): 가을은 마른 풀 금빛,
+// 봄은 신록이 여름과 분명히 갈라지도록 강도·채도를 살짝 올린다(입자 거대화 대신).
 const GROUND_MUL = {
-  spring: new THREE.Vector3(0.9, 1.1, 0.78),
+  spring: new THREE.Vector3(0.86, 1.14, 0.72),
   summer: new THREE.Vector3(1, 1, 1),
-  autumn: new THREE.Vector3(1.24, 1.06, 0.46),
+  autumn: new THREE.Vector3(1.28, 1.04, 0.42),
   winter: new THREE.Vector3(1.04, 0.98, 0.86),
 };
-const GROUND_AMT = { spring: 0.7, summer: 0, autumn: 1.0, winter: 0.82 };
+const GROUND_AMT = { spring: 0.82, summer: 0, autumn: 1.0, winter: 0.82 };
 
 const RATE = 2.6;          // 색/지면 보간 속도 (1/s) — 대략 1.5s 안에 여름 경유 전환
 const PART_RATE = 2.4;     // 파티클 페이드 속도
@@ -78,7 +83,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
   // ---------- 파티클(낙엽/벚꽃) ----------
   const leaves = buildLeaves(treeInsts);
   if (leaves) envGroup.add(leaves.mesh);
-  // 낙엽 지면 누적(가을): 나무 밑·마당 구석에 낙엽 데칼이 서서히 늘어난다.
+  // 지면 카펫/litter(#219): 봄 벚꽃 패치 + 가을 낙엽. 나무 밑·마당 구석 스팟, +1 draw.
   const litter = buildLitter(treeInsts, layout);
   if (litter) envGroup.add(litter.mesh);
 
@@ -110,6 +115,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
     }
     gMulGoal.copy(GROUND_MUL[name] || GROUND_MUL.summer);
     if (leaves) leaves.setSeason(name);
+    if (litter) litter.setSeason(name);
   }
 
   function setSeason(name, opts = {}) {
@@ -117,7 +123,8 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
     if (!['spring', 'summer', 'autumn', 'winter'].includes(name)) name = 'summer';
     pending = name;
     partGoal = name === 'spring' || name === 'autumn' ? 1 : 0;
-    litterGoal = name === 'autumn' ? 1 : 0;  // 낙엽 누적은 가을에만
+    // 지면 카펫: 봄(벚꽃 패치) + 가을(낙엽). 부감은 색 축, 근경 밀도는 이 레이어가 담당.
+    litterGoal = seasonGroundCarpetGoal(name);
     // 다랑이 논 계절 전파(자체 보간). shot 모드는 즉시 세팅.
     if (paddies) { if (opts.immediate) paddies.applyImmediate(name); else paddies.setSeason(name); }
 
@@ -131,7 +138,11 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
       gMulGoal.copy(gMul);
       partAmt = partGoal;
       litterLevel = opts.litter != null ? opts.litter : litterGoal;
-      if (litter) litter.setLevel(litterLevel);
+      if (litter) {
+        // applyPalette already setSeason for non-summer; summer keeps last palette while level→0.
+        if (name === 'spring' || name === 'autumn') litter.setSeason(name);
+        litter.setLevel(litterLevel);
+      }
       pushUniforms();
       if (leaves) { leaves.mesh.visible = partAmt > 0.01; leaves.prewarm(); }
       return;
@@ -221,9 +232,7 @@ export function setupSeasons(envGroup, { layout, paddies = null } = {}) {
     }
     if (litter) {
       envGroup.remove(litter.mesh);
-      litter.mesh.geometry.dispose();
-      litter.mesh.material.dispose();
-      if (litter.tex) litter.tex.dispose();
+      litter.dispose();
     }
     uTargetAmt.value = 0;
     uGroundAmt.value = 0;
@@ -322,62 +331,7 @@ function patchTerrain(mat, uGroundMul, uGroundAmt) {
 }
 
 // ---------- 낙엽/벚꽃 파티클 ----------
-
-// 잎 실루엣 절차 생성(#116) — "낙엽이 낙엽답게": 원형 점이 아니라 은행잎(부채꼴)·단풍잎(손바닥)
-// 형태를 흰 알파로 그린다(색은 per-instance `color` 속성으로 곱함). 셀 중심 (32,32), 위=−y.
-//   kind 0=벚꽃 꽃잎(둥근 타원+끝 파임), 1=은행(부채꼴+중앙 결각+잎자루), 2=단풍(5갈래+잎자루).
-function drawLeafShape(g, kind) {
-  g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineJoin = 'round';
-  if (kind === 0) {                       // 벚꽃 꽃잎
-    g.beginPath();
-    g.moveTo(0, 21);
-    g.bezierCurveTo(15, 13, 14, -13, 3, -19);
-    g.quadraticCurveTo(0, -15, -3, -19);  // 끝 살짝 파임
-    g.bezierCurveTo(-14, -13, -15, 13, 0, 21);
-    g.fill();
-  } else if (kind === 1) {                 // 은행잎(부채꼴)
-    g.beginPath();
-    g.moveTo(0, 20);                        // 잎자루 위쪽 기점
-    g.quadraticCurveTo(-17, 12, -22, -9);   // 왼쪽 옆선 위로
-    g.quadraticCurveTo(-13, -19, -4, -11);  // 왼쪽 상단 봉우리
-    g.quadraticCurveTo(0, -8, 4, -11);      // 중앙 결각(V 패임)
-    g.quadraticCurveTo(13, -19, 22, -9);    // 오른쪽 상단 봉우리
-    g.quadraticCurveTo(17, 12, 0, 20);      // 오른쪽 옆선 아래로
-    g.fill();
-    g.lineWidth = 2.6; g.beginPath(); g.moveTo(0, 18); g.lineTo(0, 29); g.stroke(); // 잎자루
-  } else {                                 // 단풍잎(5갈래 손바닥)
-    const tips = [0, 65, 135, 225, 295];   // 위·우상·우하·좌하·좌상 (deg, 위=0)
-    const R = 23;
-    g.beginPath();
-    for (let i = 0; i < tips.length; i++) {
-      const a = tips[i] * Math.PI / 180;
-      const x = Math.sin(a) * R, y = -Math.cos(a) * R;
-      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
-      const n = tips[(i + 1) % tips.length];
-      let mid = (tips[i] + (n > tips[i] ? n : n + 360)) / 2;
-      const bottom = Math.abs(((mid % 360) + 360) % 360 - 180) < 20; // 바닥(180°)=잎자루 골
-      const rv = bottom ? 5 : 10;
-      const av = mid * Math.PI / 180;
-      g.lineTo(Math.sin(av) * rv, -Math.cos(av) * rv);
-    }
-    g.closePath(); g.fill();
-    g.lineWidth = 2.6; g.beginPath(); g.moveTo(0, 6); g.lineTo(0, 30); g.stroke(); // 잎자루
-  }
-}
-
-// 3프레임 아틀라스(192×64: [벚꽃|은행|단풍]). InstancedMesh 는 per-instance aFrame UV 오프셋으로 프레임 선택.
-function makeLeafAtlas() {
-  const c = document.createElement('canvas');
-  c.width = 192; c.height = 64;
-  const g = c.getContext('2d');
-  g.clearRect(0, 0, 192, 64);
-  for (let f = 0; f < 3; f++) {
-    g.save(); g.translate(f * 64 + 32, 32); drawLeafShape(g, f); g.restore();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
+// 지면 데칼 실루엣 아틀라스는 season-ground-carpet.js 소유. 낙하 잎은 월드 곡면 geometry.
 
 function buildLeaves(treeInsts) {
   // 낙엽수(은행·단풍·잡목·벚)에서 이미터 수집. instanceMatrix 이동 = 지면 높이.
@@ -608,9 +562,9 @@ function buildLeaves(treeInsts) {
   return { mesh, depthMaterial, setSeason, update, prewarm };
 }
 
-// ---------- 낙엽 지면 누적 ----------
-// 가을에 나무 밑·마당 구석에 낙엽 데칼(바닥에 눕힌 쿼드)이 서서히 쌓인다. setLevel(0..1)로
-// 개체별 임계값을 넘긴 것만 드러내 "점점 쌓이는" 느낌을 준다. MeshBasic → 적설 traverse 대상 아님.
+// ---------- 지면 카펫 / litter (#219) ----------
+// 봄·가을 근경 지면 밀도. 스팟 계획은 season-ground-plan.js, 렌더는 season-ground-carpet.js
+// (단일 InstancedMesh, FAR Points 금지). setLevel(0..1)로 개체별 임계값을 넘어 "쌓이는" 느낌.
 function buildLitter(treeInsts, layout = {}) {
   const shed = new Set(['ginkgo', 'maple', 'misc', 'cherry']);
   const bases = [];
@@ -623,105 +577,8 @@ function buildLitter(treeInsts, layout = {}) {
       bases.push({ x: pos.x, y: pos.y, z: pos.z, r: 2.6 * s });
     }
   }
-  // 화면 안(원점 가까운) 나무만 낙엽을 뿌리게 가중 정렬 → 원경에 흩어져 안 보이는 문제 회피.
+  // 화면 안(원점 가까운) 나무 우선 — 원경 스팟이 예산만 먹고 근경이 비는 문제 회피.
   bases.sort((a, b) => (a.x * a.x + a.z * a.z) - (b.x * b.x + b.z * b.z));
-  const nearBases = bases.slice(0, 48);
-
-  let s = 0x1234abcd;
-  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-
-  // 낙엽 데칼 위치 수집: 나무 밑 원반 + 마당 네 구석.
-  const spots = [];
-  for (const b of nearBases) {
-    const k = 3 + Math.floor(rnd() * 3);   // #125 지면 낙엽 대폭 감축(낙하 낙엽과 같은 비율) — 성기게
-    for (let i = 0; i < k; i++) {
-      const rr = Math.sqrt(rnd()) * b.r * 1.5;
-      const th = rnd() * Math.PI * 2;
-      spots.push({ x: b.x + Math.cos(th) * rr, y: b.y + 0.04, z: b.z + Math.sin(th) * rr });
-    }
-  }
-  // 마당 구석(기단 바깥 모서리)에 바람에 몰린 낙엽 무더기(진입로·계단 앞 포함).
-  const xE = (layout.xEave ?? 9) + 3, zE = (layout.zEave ?? 6) + 3;
-  const corners = [[-xE, -zE], [xE, -zE], [-xE, zE], [xE, zE], [0, zE + 2], [-xE * 0.6, zE + 1]];
-  for (const [cx, cz] of corners) {
-    for (let i = 0; i < 9; i++) {   // #125 구석 무더기도 감축(14→9) — 지면이 낙엽으로 뒤덮이지 않고 드문드문
-      spots.push({ x: cx + (rnd() * 2 - 1) * 3.6, y: 0.05, z: cz + (rnd() * 2 - 1) * 3.6 });
-    }
-  }
-  const N = spots.length;
-  if (!N) return null;
-
-  const tex = makeLeafAtlas();
-  // 색은 `instanceColor`로 곱한다. 2026-07-26에 이 지점을 낙하 잎과 같은 방식(`vertexColors` + per-instance
-  //   `color` 속성)으로 바꿔 봤지만 **출력이 바이트 동일**했다(실측 A/B: 순검정 0, 황금 0.55·주홍 0.41,
-  //   평균 [200,128,59] 양쪽 일치). 즉 무광 재질의 `instanceColor` 경로는 원래 정상이며, 낙하 잎의 결함은
-  //   **조명 재질(MeshStandard) 쪽 문제**여서 여기까지 번지지 않는다. 되돌렸으니 다시 바꾸지 말 것.
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    alphaTest: 0.06, fog: true,
-  });
-  // per-instance aFrame UV 오프셋으로 은행·단풍·단순잎 실루엣 선택(지면 낙엽도 낙엽답게, #116).
-  mat.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aFrame;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = vec2((vMapUv.x + aFrame) / 3.0, vMapUv.y);\n#endif');
-  };
-  const geo = new THREE.PlaneGeometry(1, 1);
-  geo.setAttribute('aFrame', new THREE.InstancedBufferAttribute(new Float32Array(N), 1));
-  const mesh = new THREE.InstancedMesh(geo, mat, N);
-  mesh.name = 'seasonLitter';
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
-  mesh.frustumCulled = false;
-  mesh.renderOrder = 6; // 지면 위, 낙하 낙엽/눈보다 아래
-  mesh.visible = false;
-
-  // 지면 낙엽 종별 색·형태: 은행(황금)·단풍(주홍~주황)·단순잎(오렌지-브라운) 혼합.
-  const GINKGO = [0xf2c53d, 0xf0b429, 0xe8b21f];
-  const MAPLE = [0xc0392b, 0xd35400, 0xb83a1e, 0xd9622b];
-  const WARM = [0xc98a3a, 0x9a6b2e, 0xc0632f, 0xb5502a];
-  const frames = geo.attributes.aFrame.array;
-  const col = new THREE.Color();
-  const st = [];
-  for (let i = 0; i < N; i++) {
-    st.push({
-      sp: spots[i],
-      rev: rnd(),                       // 드러나는 임계값(누적 진행도가 이걸 넘으면 보임)
-      rot: rnd() * Math.PI * 2,         // 바닥면 내 회전
-      size: 0.6 + rnd() * 0.55,        // #125 지면 낙엽 클럼프 스케일(구 2.1~4.0m=거대) — 잎 무더기로 읽히되 사람 스케일 이하
-      tiltX: (rnd() * 2 - 1) * 0.12,    // 살짝 들뜬 각도
-      tiltZ: (rnd() * 2 - 1) * 0.12,
-    });
-    const r3 = i % 3;
-    const frame = r3 === 0 ? 1 : r3 === 1 ? 2 : 0;   // 은행·단풍·단순잎 순환
-    const pal = frame === 1 ? GINKGO : frame === 2 ? MAPLE : WARM;
-    frames[i] = frame;
-    col.copy(linCol(pal[(i * 5) % pal.length])).multiplyScalar(0.8 + rnd() * 0.35);
-    mesh.setColorAt(i, col);
-  }
-  geo.attributes.aFrame.needsUpdate = true;
-  mesh.instanceColor.needsUpdate = true;
-
-  const dummy = new THREE.Object3D();
-  let last = -1;
-  function setLevel(level) {
-    if (Math.abs(level - last) < 0.004) return;
-    last = level;
-    mesh.visible = level > 0.005;
-    if (!mesh.visible) return;
-    for (let i = 0; i < N; i++) {
-      const p = st[i];
-      // rev 를 넘긴 개체만 드러난다(0→full 부드럽게). 누적이 커질수록 데칼이 늘어난다.
-      const g = smoothstep(p.rev, p.rev + 0.18, level);
-      const sc = g * p.size;
-      dummy.position.set(p.sp.x, p.sp.y, p.sp.z);
-      dummy.rotation.set(-Math.PI / 2 + p.tiltX, p.rot, p.tiltZ);
-      dummy.scale.set(sc, sc, sc);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-    }
-    mesh.instanceMatrix.needsUpdate = true;
-  }
-  setLevel(0);
-
-  return { mesh, tex, setLevel };
+  const spots = planEnvLitterSpots({ bases, layout, seed: 0x1234abcd });
+  return buildSeasonGroundCarpet({ spots, name: 'seasonLitter', season: 'autumn' });
 }
