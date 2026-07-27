@@ -14,7 +14,7 @@ const EPSILON = 1e-6;
 // Product base aperture diameter in metres. Must stay identical to
 // BOKEH_COC_DEFAULTS.apertureMeters and VILLAGE_FOCUS_DOF_APERTURE so the tilt
 // ramp weight (aperture / apertureMeters) reaches 1.0 at full focus amount.
-export const DEFAULT_DOF_APERTURE = 0.52;
+export const DEFAULT_DOF_APERTURE = 0.40;
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
