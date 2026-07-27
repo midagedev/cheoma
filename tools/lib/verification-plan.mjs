@@ -19,6 +19,11 @@ const REVIEWED_NEW_PATHS = new Set([
   // #158 three-axis UI: the breadcrumb succeeds ModeToggle and the shell gate
   // owns the geometry contract that let P1–P5 survive to release.
   'app/src/components/Breadcrumb.svelte',
+  // #216 focus exterior glossary: pure layout anchors + DOM overlay (no WebGL draws).
+  'app/src/components/GlossaryOverlay.svelte',
+  'src/layout/glossary-plan.js',
+  'src/api/glossary-plan.js',
+  'tools/check-glossary-plan.mjs',
   'tools/check-ui-shell.mjs',
   'app/src/lib/scene-snapshot.js',
   'app/src/lib/scene-guide.js',
@@ -520,6 +525,13 @@ function routePath(path) {
     return { gates, reasons };
   }
 
+  // #216: pure focus glossary anchors — browser-free core + UI shell when the overlay surface moves.
+  if (path === 'src/layout/glossary-plan.js' || path === 'src/api/glossary-plan.js'
+    || path === 'tools/check-glossary-plan.mjs') {
+    select('focus exterior glossary plan contract changed');
+    return { gates, reasons };
+  }
+
   if (/^src\/(?:builder|layout|props|anim|core|export|share)\//.test(path)
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
@@ -554,6 +566,10 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    if (path === 'src/api/glossary-plan.js') {
+      select('public renderer-free focus glossary planning API changed');
+      return { gates, reasons };
+    }
     if (path === 'src/api/auxiliary-building-plan.js'
       || path === 'src/api/auxiliary-building.js') {
       select(
