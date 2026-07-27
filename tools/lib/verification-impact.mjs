@@ -41,6 +41,16 @@ const EXACT_IMPACT = new Map([
   ['src/env/weather-physical-geometry.js', [
     './check-weather-geometry.mjs',
   ]],
+  // #219 / U4: pure ground-carpet plan is not imported by browser harnesses that
+  // pull three; keep the placement/budget contract in the FAST impact set.
+  // seasons.js / focus.js stay on the normal import-closure router (they pull three
+  // and already select petals/lod browser gates via routePath).
+  ['src/env/season-ground-plan.js', [
+    './check-season-ground-contract.mjs',
+  ]],
+  ['src/env/season-ground-carpet.js', [
+    './check-season-ground-contract.mjs',
+  ]],
   ['src/core/buffer-update-range.js', [
     './check-instance-upload.mjs',
     './check-wave-contract.mjs',

@@ -56,6 +56,19 @@ assert.deepEqual(ids(['src/env/motes.js']), [
 assert.deepEqual(ids(['src/env/detail-particle-geometry.js']), [
   'core', 'app', 'particle-geometry',
 ]);
+// #219 / U4 seasonal ground carpet — reviewed pure plan + carpet renderer.
+assert.deepEqual(ids(['src/env/season-ground-plan.js'], {
+  newPaths: ['src/env/season-ground-plan.js'],
+}), ['core', 'app', 'petals', 'lod-app']);
+assert.deepEqual(ids(['src/env/season-ground-carpet.js'], {
+  newPaths: ['src/env/season-ground-carpet.js'],
+}), ['core', 'app', 'petals', 'particle-geometry', 'lod-app']);
+assert.deepEqual(ids(['tools/check-season-ground-contract.mjs'], {
+  newPaths: ['tools/check-season-ground-contract.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/shoot-seasons.mjs'], {
+  newPaths: ['tools/shoot-seasons.mjs'],
+}), ['core', 'petals']);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
   newPaths: ['src/village/forest-canopy-atten.js'],

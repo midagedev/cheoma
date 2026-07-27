@@ -42,6 +42,12 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/env/bokeh-coc-contract.js',
   'src/env/bokeh-coc-pass.js',
   'src/env/bokeh-coc-shaders.js',
+  // #219 / look-audit U4: pure seasonal ground carpet plan + InstancedMesh litter renderer.
+  // Core gate owns placement/budget; petals/particle-geometry own falling particles; shoot:seasons is visual.
+  'src/env/season-ground-plan.js',
+  'src/env/season-ground-carpet.js',
+  'tools/check-season-ground-contract.mjs',
+  'tools/shoot-seasons.mjs',
   'tools/check-aa.mjs',
   'tools/shoot-aa.mjs',
   'tools/shoot-dpr.mjs',
@@ -215,6 +221,7 @@ function routePath(path) {
     'tools/check-api-reuse-suite.mjs': ['api-reuse'],
     'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
+    'tools/shoot-seasons.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
     'tools/check-worker-contract.mjs': ['worker'],
     'tools/check-audio.mjs': ['audio'],
@@ -347,17 +354,17 @@ function routePath(path) {
     if (/^src\/env\/(?:rim|clouds|snow-material)\.js$/.test(path)) {
       select('physical rim inputs changed', 'rim');
     }
-    if (/^src\/env\/(?:petals|weather|seasons)\.js$/.test(path)) {
+    if (/^src\/env\/(?:petals|weather|seasons|season-ground-plan|season-ground-carpet)\.js$/.test(path)) {
       select('seasonal particle/weather contract changed', 'petals');
     }
-    if (/^src\/env\/(?:detail-particle-geometry|motes|petals|seasons|weather|weather-particle-state|weather-physical-geometry)\.js$/.test(path)) {
+    if (/^src\/env\/(?:detail-particle-geometry|motes|petals|seasons|season-ground-carpet|weather|weather-particle-state|weather-physical-geometry)\.js$/.test(path)) {
       select('physical particle representation changed', 'particle-geometry');
     }
     if (path === 'src/env/petals.js') select('focus particle LOD changed', 'lod-focus');
-    if (/^src\/env\/(?:weather|seasons)\.js$/.test(path)) {
+    if (/^src\/env\/(?:weather|seasons|season-ground-plan|season-ground-carpet)\.js$/.test(path)) {
       select('wave environment synchronization changed', 'lod-wave');
     }
-    if (/^src\/env\/(?:focus|animals|critters|critter-plan|grass|lantern-sway|motes|smoke|wind)\.js$/.test(path)) {
+    if (/^src\/env\/(?:focus|animals|critters|critter-plan|grass|lantern-sway|motes|smoke|wind|season-ground-plan|season-ground-carpet)\.js$/.test(path)) {
       select('near-detail and wave-owned LOD changed', 'lod-focus', 'lod-wave');
     }
     if (/^src\/env\/(?:clouds|edge-mist-view)\.js$/.test(path)) {
