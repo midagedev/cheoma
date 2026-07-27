@@ -158,12 +158,17 @@ try {
         && ring.material.map?.uuid === identity.map,
     };
   }, `/@fs${join(ROOT, 'src/env/edge-mist-view.js')}`) : { available: false };
+  // #211: authored ring opacity lives in populate (currently 0.58). Horizon weight is 1, so
+  // that sample is the base; every other pitch must be base * viewWeight (non-compounding).
+  const edgeMistBaseOpacity = edgeMistContract.horizon?.opacity;
   const validMistSample = (sample) => Number.isFinite(sample?.opacity)
     && Math.abs(sample.forwardY - sample.matrixForwardY) < 1e-7
     && Math.abs(sample.viewWeight - sample.expectedWeight) < 1e-7
-    && Math.abs(sample.opacity - 0.5 * sample.expectedWeight) < 1e-7;
+    && Math.abs(sample.opacity - edgeMistBaseOpacity * sample.expectedWeight) < 1e-7;
   pass(!runFocusScenario || (edgeMistContract.available
       && edgeMistContract.identityStable
+      && Number.isFinite(edgeMistBaseOpacity)
+      && edgeMistBaseOpacity > 0.4 && edgeMistBaseOpacity < 0.75
       && validMistSample(edgeMistContract.horizon)
       && validMistSample(edgeMistContract.partialX)
       && validMistSample(edgeMistContract.partialZ)
@@ -176,6 +181,7 @@ try {
       && Math.abs(edgeMistContract.partialZ.viewWeight - edgeMistContract.repeated.viewWeight) < 1e-7
       && edgeMistContract.partialZ.calls === edgeMistContract.repeated.calls
       && edgeMistContract.aerialFloor > 0 && edgeMistContract.aerialFloor < 1
+      && edgeMistContract.aerialFloor >= 0.8
       && edgeMistContract.aerial.viewWeight === edgeMistContract.aerialFloor
       && JSON.stringify(edgeMistContract.resourceBefore) === JSON.stringify(edgeMistContract.resourceAfter)),
   runFocusScenario

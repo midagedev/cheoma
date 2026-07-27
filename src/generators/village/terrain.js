@@ -15,7 +15,10 @@ import {
 } from '../../env/clouds.js';
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
-const V_EDGE_HAZE_AMT = 0.62;
+// #211 U1: capital/hanyang 부감에서 scene fog near=R*2.2 가 terrainR 밖이라 절단면이 fog 에
+//   안 걸린다. 외곽 밴드의 지형색→대기색 믹스를 높여 하드컷 원반을 로컬 셰이더로 녹인다.
+//   0.62 는 아이레벨에선 충분했으나 석양 돔 대비 부감에선 절단 실루엣이 남았다.
+const V_EDGE_HAZE_AMT = 0.92;
 
 // ───────────────────────── 지형 메시 ─────────────────────────
 // site.heightAt 를 격자로 샘플 → vertexColors(마당·풀·숲·물가·원경 대기). terrain.js 톤 계열.
@@ -116,8 +119,8 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
       outBase.lerp(cFloodplain, floodplain * (1 - bank) * 0.34);
     }
     if (bank > 0) outBase.lerp(cBank, bank * 0.7);
-    // 원경 대기(먼 능선일수록 옅게)
-    const far = smoothstep(TR * 0.6, TR, Math.hypot(x, z)) * 0.45;
+    // 원경 대기(먼 능선일수록 옅게). #211: 부감 절단면 대비를 낮추려 far 램프를 소폭 강화.
+    const far = smoothstep(TR * 0.55, TR, Math.hypot(x, z)) * 0.55;
     outBase.lerp(cFar, far);
     // 겨울 버퍼(#115 F): 기저색을 마른 갈회로 이동. 분지 초지·완사면 강, 깊은 숲(상록 잔존) 약, 물가 유지.
     //   지형 정점색은 정적이므로 forest.js 계절 버퍼 방식과 동형으로 겨울 전용 버퍼를 만들어 setSeason 스왑.
@@ -181,7 +184,8 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
         ${useCloud ? CLOUD_SHADOW_FRAG_BODY : ''}
         {
           // 엣지 소실: 외곽 밴드(vEdgeV)에서 지형색을 대기(fog)색으로 밀어 여백으로 녹임(mist).
-          float e = smoothstep(0.12, 1.0, vEdgeV);
+          // #211: 램프를 더 일찍·더 꽉 채워 부감 절단면이 하드 실루엣으로 남지 않게 한다.
+          float e = smoothstep(0.04, 0.88, vEdgeV);
           diffuseColor.rgb = mix(diffuseColor.rgb, uEdgeHazeV, ${V_EDGE_HAZE_AMT.toFixed(3)} * e);
         }`);
   };
