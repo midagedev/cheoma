@@ -59,10 +59,12 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   let productFlareWanted = !!post.flarePass?.enabled;
   const applyMsaaBudget = () => {
     if (compact || typeof post.renderPass?.setSamples !== 'function') return;
-    // Motion holds the cheap aerial MSAA even while focused; settle restores 4×.
-    const samples = (focusBudget && !motionBudgetActive)
-      ? MSAA_SAMPLES_DESKTOP
-      : MSAA_SAMPLES_AERIAL;
+    // Motion: samples=0 (stock non-MSAA path — no multisample color buffer).
+    // Settled aerial keeps 2×; settled focus restores desktop 4×. Compact stays 2×.
+    // Boundary-only setSamples reallocates with fillScale, not every settle frame.
+    let samples = MSAA_SAMPLES_AERIAL;
+    if (motionBudgetActive) samples = 0;
+    else if (focusBudget) samples = MSAA_SAMPLES_DESKTOP;
     post.renderPass.setSamples(samples);
   };
   const applyFlareBudget = () => {

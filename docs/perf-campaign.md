@@ -80,10 +80,27 @@
 |---|---|---|
 | **Flare motion sleep** | motionBudget 중 FlarePass.enabled=false (depth 뷰 스킵), product intent 보존 후 정착 복원 | 오빗 중 렌즈 플레어 일시 소실 → 정착 시 복원 |
 
+## 8차 구현 (motion MSAA 0)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Motion MSAA off** | motionBudget 중 `setSamples(0)` — 멀티샘플 컬러 버퍼 해제. 정착 부감 2× / focus 4× 복원 | 오빗 중 계단 허용, 정착 동일 |
+
+## Product-path bench (Chrome M1 Pro, post ON, capital/7)
+
+`npm run bench:product-path` after #196–#198 stack:
+
+| regime | med | notes |
+|---|---:|---|
+| aerial settle frame | 9.7 ms | fill 1, bloom ¼ beauty, msaa 2 |
+| openings preview | 21 ms | house-only swap |
+| roof-pitch preview | 24.4 ms | house-only + AABB-gated wall |
+| commit (flora) | 66.8 ms | warm path |
+
 ## 다음 라운드 (우선순위)
 
-1. product-path bench motion flags (outline/flare/msaa)
-2. grade half-res during motionBudget (look risk — measure first)
+1. grade half-res during motionBudget (look risk — measure first)
+2. roofTone-only material re-tint without rebuild (giwa)
 3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
