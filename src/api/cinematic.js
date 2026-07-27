@@ -4,6 +4,7 @@ export {
   VILLAGE_LENS,
   VILLAGE_FOCUS_DOF_APERTURE,
   VILLAGE_FOCUS_CONTEXT_ELEVATION,
+  VILLAGE_NIGHT_AERIAL_ELEVATION,
   VILLAGE_FOCUS_ELEVATION,
   VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_FOCUS_SKY_REFERENCE_BAND,
@@ -16,13 +17,13 @@ export {
   lensScaleForCamera,
   referenceFovForCamera,
   referenceVillageFov,
+  villageAerialElevation,
   villageScreenDistance,
   villageScreenDistanceForCamera,
   villageFocusContextElevation,
   villageFocusEffectWeight,
   villageZoomReferenceBounds,
-} from '../camera/optics.js';
-export {
+} from '../camera/optics.js';export {
   createDirectionController,
   createHeadingController,
   shortestAngleDelta,

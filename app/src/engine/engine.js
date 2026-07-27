@@ -859,6 +859,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     state.weather = coherentEnvironment.weather;
     state.canMerge = false;
     P = cfg.params;
+    villageCamera?.setTimeOfDay(state.time);
 
     clearGhost();
     groupAnims = [];
@@ -1358,6 +1359,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     scene,
     village,
   });
+  villageCamera.setTimeOfDay(state.time);
   let hovering = false;
   function pick(clientX, clientY) {
     const rect = renderer.domElement.getBoundingClientRect();
@@ -2950,7 +2952,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     maxExpansion: () => wingCount(state.preset) + 1,
 
     setTime(name, opts = {}) {
+      const prevTime = state.time;
       state.time = name;
+      // U2: default aerial pose softens only at night so the lunar disc enters the product frame.
+      villageCamera.setTimeOfDay(name);
       bumpShadow(2200);   // #140-A 시간대 크로스페이드: 태양 방향(고도·방위) 이동 동안 그림자 갱신
       env.setTime(name, opts);
       nightGlowRef.setTime(name);
@@ -2961,6 +2966,44 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 전역 sky/fog/post는 위에서 한 번만 갱신하고, 핸들별 물·조명·동물만 각각 동기화한다.
       if (forEachPresentedVillageHandle((handle) => handle.setTime(name, opts))) reapplyVillageFog();
       focusRing.setTime?.(name, opts.immediate); // 근접 링 앰비언스 시간대(연기·모트·닭)
+      // Crossing night↔day changes default aerial elevation; keep current distance/azimuth
+      // and only retarget elevation so explore keeps its framing scale without a full reset.
+      const nightCross = (prevTime === 'night') !== (name === 'night');
+      if (
+        nightCross
+        && village.active
+        && !village.selected
+        && !village.transitioning
+        && !villageWaveBusy()
+        && !demo.mode
+      ) {
+        const frame = villageAerial();
+        const elev = frame.elevation;
+        const target = controls.target.clone();
+        const dist = Math.max(1e-3, camera.position.distanceTo(controls.target));
+        const az = Math.atan2(
+          camera.position.x - target.x,
+          camera.position.z - target.z,
+        );
+        const pos = new THREE.Vector3(
+          target.x + dist * Math.cos(elev) * Math.sin(az),
+          target.y + dist * Math.sin(elev),
+          target.z + dist * Math.cos(elev) * Math.cos(az),
+        );
+        if (opts.immediate) {
+          camera.position.copy(pos);
+          controls.target.copy(target);
+          camera.near = villageNear();
+          camera.updateProjectionMatrix();
+          camera.lookAt(target);
+          controls.update(0);
+        } else {
+          tweenTo(pos, target, 0.85, {
+            fov: frame.fov,
+            referenceFov: frame.referenceFov,
+          });
+        }
+      }
       emit('state', { ...state });
     },
     setSunsetLook(name, opts = {}) {
