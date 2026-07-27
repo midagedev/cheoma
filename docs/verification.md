@@ -99,6 +99,7 @@ npm run shoot:lod-transition # 한양 FAR→MID·MID→FULL 전후/중간 6장
 npm run shoot:wall-steps    # 실제 경사지 필지의 좌·우 솔리드 담 단차 2장
 npm run shoot:mud-wall      # 토담 base/다짐/짚/하부 A/B + 실제 제품 근경·부감
 npm run shoot:drainage      # 실제 capital 측구·대문 판석 동일 카메라 ON/OFF 근경·부감
+npm run shoot:edit-experience # look-audit C1–C2: live-edit 중 3–5프레임 + 리롤 전후 (OS 임시 폴더)
 npm run shoot:sky           # 실제 앱의 낮/세 석양/밤·구름·달·광선·그림자 캡처
 npm run shoot:winter        # check:winter:app과 같은 겨울/설경 PNG 증거 생성
 npm run shoot:ink           # check:ink:app과 같은 부감 PBR/수묵·근경 PNG 증거 생성
@@ -742,6 +743,17 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 
 비교 PNG는 OS 임시 폴더에만 남긴다. 부감은 산세·안개 여백과 전경 수목의 선 밀도를, 근경은 처마·초가지붕의 선 계층과 건축 가독성을 직접 확인한다.
 
+### `npm run shoot:edit-experience`
+
+`tools/shoot-edit-experience.mjs`는 look-audit 감사 공백 **C1–C2**(편집 라이브 반영·집 리롤 연출)용 캡처 하네스다.
+`check:parcel-rebuild:browser`와 같은 격리 Vite 부트·`vseed=7` 과실수 필지 fixture를 재사용하고, 품질 게이트는 아니다.
+
+- **C1**: focus 후 처마(`eaveOverhang`) 슬라이더를 끝값까지 3–5단 고정 타이밍(~300ms)으로 보내고, 드래그 중 `input` 전용 mid 프레임 + 마지막 `change` commit 프레임을 PNG로 남긴다.
+- **C2**: 같은 focus에서 `이 집 다시 짓기` 전후 1쌍을 촬영한다(마을 seed 불변·persistent overlay·새 rebuildSeed).
+- 기본 출력은 OS 임시 폴더(`cheoma-edit-exp-shots-*`)이며 `MANIFEST.md`에 파일·수치 요약을 쓴다. `shots/`는 미커밋 규약 그대로 두고, 필요 시만 `CHEOMA_EDIT_EXPERIENCE_OUT`으로 절대 경로를 지정한다(그 경로의 PNG도 커밋하지 않는다).
+- 환경: `CHEOMA_EDIT_EXPERIENCE_FRAMES`(3–5), `CHEOMA_EDIT_EXPERIENCE_STEP_MS`, `CHEOMA_EDIT_EXPERIENCE_TIME`, `CHEOMA_EDIT_EXPERIENCE_TIMEOUT_MS`.
+- 비범위: 인앱 Record 버튼, 마을 규모 웨이브(C3 — `shoot:wave`). 계약 수치는 `check:live-edit` / `check:parcel-rebuild:browser`가 맡는다.
+
 ### `npm run check:parcel-rebuild:browser`
 
 `tools/check-parcel-rebuild-browser.mjs`는 실제 과실수가 있고 정자에 가까운 일반 필지를 격리 Vite 앱에서 선택한다.
@@ -995,6 +1007,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-live-edit-scheduler.mjs` | 50→1 최신값 병합, 재생성 비용 기반 cooldown, commit 우선권, focus epoch 취소·dispose | DOM/THREE 없는 순수 케이던스이며 실제 slider·지오 변화는 공유 앱 게이트가 맡는다. |
 | `tools/check-shader-warm.mjs` | GPU program polling 중 해제된 material 회수, 살아 있는 program 완료 대기, compile 실패 no-op | 실제 WebGL 경합은 `verify-panels.mjs`의 빠른 hero focus-out/리롤 pageerror 0으로 보완한다. |
 | `tools/check-parcel-rebuild-browser.mjs` | 실제 range preview/commit/취소, 여섯 개구부 축의 부분 patch·종류 변경·재굴림, 두 버튼, 재건축 commit, 남측 카메라, 정자 clearance, flora batch, focus-out 지속 LOD, program/draw-call delta | seed 7의 대표 과실수 필지 한 건이며 전체 규모/seed 수학은 순수 게이트가 맡는다. |
+| `tools/shoot-edit-experience.mjs` | look-audit C1–C2: 같은 parcel-rebuild fixture에서 처마 live-edit 고정 타이밍 3–5프레임 + 집 리롤 전후 1쌍, MANIFEST | 비전 판정용 캡처다. 기본 OS 임시 폴더, `CHEOMA_EDIT_EXPERIENCE_OUT` 재지정. 계약 수치·flora 케이던스는 위 browser 게이트가 맡으며 마을 웨이브(C3)는 `shoot:wave`. |
 | `tools/check-residential-edit-url.mjs` | stable sort된 compact `vedit` v1 왕복·기본 URL 생략·8필지/768자 상한·malformed fail-closed | renderer 없는 codec 계약이며 실제 commit/reload는 browser 게이트가 맡는다. |
 | `tools/check-scene-guide.mjs` | stable/unseen 표시 정책, blocker 전체, storage fail-open, Svelte/a11y/input ownership, 공통 semantic settle 경계 | 실제 desktop/touch 배치·stage 입력·재방문은 같은 `check:app` 부팅이 맡는다. |
 | `tools/check-scene-snapshot.mjs` | versioned canonical scene v1, 전체 advanced 마을 옵션, 단일건물 다섯 `hp` 축, stable focus, 두 모드 의미 카메라 양자화, 미래 필드, byte 왕복, URL 예산 | 실제 Web Share·focus/reload·한 프레임 카메라 수렴은 `check:app`, sync/Worker scene parity는 `check:worker`가 맡는다. |
