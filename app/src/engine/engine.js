@@ -374,6 +374,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 디바이스에서 제거해 무효가 됐다.
     lowPerf: perf,
   });
+
+  // focus ring + #215 eave-rain subject release (village focus-out / rebuild / mode exit).
+  function clearFocusRing() {
+    focusRing.clear();
+    weatherRef?.setEaveSubject?.(null);
+  }
   
   function updateWeatherColliders() {
     if (!weatherRef) return;
@@ -1844,7 +1850,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const swap = (h) => {
       if (disposed) { h?.dispose?.(); return; }
       village.__outerR = null;   // 마을 외곽 실반경 캐시 리셋(#80)
-      focusRing.clear();         // 마을 재구성 → 근접 링 해제(오버레이 폐기됨)
+      clearFocusRing();         // 마을 재구성 → 근접 링 해제(오버레이 폐기됨)
       clearSemanticDofAnchor();
       if (village.handle) { village.handle.exitVillageMode({ scene, building, ground, env }); village.handle.dispose(); }
       hoverParcel = null;
@@ -1908,9 +1914,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (state.selected) { clearGhost(); state.selected = false; state.canMerge = false; emit('select', false); emit('state', { ...state }); }
     outline.selectedObjects = []; hovering = false;
     // 마을 부감도 사용자/시드 날씨를 유지한다. 원점 억제 사유는 사라졌다: 낙하 필드는 매 프레임
-    //   카메라 타깃을 따라오고(setWeatherCenter, #98), 처마 낙수·스플래시 같은 건물 앵커 FX 는
-    //   #131 로 제거됐다. 여기서 'clear' 로 덮으면 weather=rain/snow 인 부감에서 강수가 통째로
-    //   사라져 날씨 자체가 소거된다(look-audit R3 — enterVillageHero 는 이미 같은 이유로 유지한다).
+    //   카메라 타깃을 따라오고(setWeatherCenter, #98). 처마 낙수(#215)는 근경 detail 밴드+subject
+    //   에서만 깨어 부감에선 sleep. 여기서 'clear' 로 덮으면 weather=rain/snow 인 부감에서 강수가
+    //   통째로 사라져 날씨 자체가 소거된다(look-audit R3 — enterVillageHero 는 이미 같은 이유로 유지).
     weatherRef.setWeather(state.weather);
     village.active = true; village.selected = null; village.transitioning = false;
     dispatchView('enter');
@@ -1933,7 +1939,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 뒤늦게 승격되어 단일집을 다시 숨기므로, 현재 핸들을 건드리기 전에 웨이브 소유물을 회수한다.
     cancelVillageWave();
     stopHeroAsm();                                   // 진행 중 종가 조립·타이머 정리
-    focusRing.clear();
+    clearFocusRing();
     clearSemanticDofAnchor();
     if (village.selected) village.handle.hideParcelDetail(village.selected);   // 오버레이(정규/특수) 해제
     else village.handle?.hideHeroDetail?.();
@@ -2013,17 +2019,29 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   // 앰비언스 근접 링(#79) — focus 오버레이 컴파운드에 붙인다(마당 닭·연기·모트·등롱). 미설정 시 no-op.
+  // #215: 같은 오버레이를 weather 처마 낙수 subject 로도 등록(원점 building 은 마을에서 숨김).
   function attachFocusRing(detailOrGroup) {
     const overlayGroup = detailOrGroup?.group || detailOrGroup;
     if (!overlayGroup) return;
     // 궁궐(#93): 다일곽 궁역은 기념비적 건축 — 농가 앰비언스(마당 닭·풀·굴뚝 연기)가 조정(박석) 위에
     //   깔리면 고증 붕괴. focus.js 는 그룹 바운드로 풀/모트를 깔아 궁역 60~96m 를 채우므로 도메스틱 링은 생략.
-    if (village.selected === 'palace') { focusRing.clear(); return; }
+    if (village.selected === 'palace') {
+      clearFocusRing();
+      weatherRef?.setEaveSubject?.(null);
+      return;
+    }
     const ambient = detailOrGroup?.ambient
       || village.handle?.focusAmbientDescriptor?.(village.selected, overlayGroup);
-    if (!ambient) { focusRing.clear(); return; }
+    if (!ambient) {
+      clearFocusRing();
+      weatherRef?.setEaveSubject?.(null);
+      return;
+    }
     focusRing.set({ ...ambient, season: state.season });
     focusRing.setTime?.(state.time, true);
+    // Prefer the assembly/house node (has layout) over the parcel wrapper.
+    const eaveRoot = detailOrGroup?.assembly || overlayGroup;
+    weatherRef?.setEaveSubject?.(eaveRoot);
     warmFocusRingShaders();   // #128: 방금 생성된 링 컨테이너(scene 직속) 프리컴파일 — 링 첫 렌더 링크 스톨 흡수
   }
 
@@ -2178,7 +2196,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!village.active) return;
     if (!village.selected && !village.transitioning) return;
     stopHeroAsm();                                   // 진행 중 조립 정리
-    focusRing.clear();                               // focus-out → 근접 앰비언스 페이드아웃(#79)
+    clearFocusRing();                               // focus-out → 근접 앰비언스 페이드아웃(#79)
     const parcelId = village.selected;
     const departingSemantic = !!(parcelId && semanticDofParcel === parcelId);
     const departingFocus = departingSemantic
@@ -2530,7 +2548,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setPostFocus(true);
     setZoomRegime('lock');
     stopHeroAsm();
-    focusRing.clear();                                        // 재조립 중 링 해제(정착 후 재부착)
+    clearFocusRing();                                        // 재조립 중 링 해제(정착 후 재부착)
     emit('villageSelectStart', { parcelId: id, spec: pr.buildingSpec });   // 패널 접힘(감상)
     emit('villageHover', null);
     startVillageReveal(dur + 0.4);                            // 재형성 무드 + 폴백 소품 은닉 마스킹
@@ -2566,7 +2584,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setPostFocus(true);
     setZoomRegime('lock');
     stopHeroAsm();
-    focusRing.clear();                                            // 재생성 중 링 해제(정착 후 재부착)
+    clearFocusRing();                                            // 재생성 중 링 해제(정착 후 재부착)
     emit('villageSelectStart', { parcelId: id, spec, reseed: true });   // 패널 접힘 + 새 기본값 강제 재시드
     emit('villageHover', null);
     startVillageReveal(dur + 0.4);                               // 재형성 무드 + 폴백 소품 은닉 마스킹
@@ -2655,7 +2673,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (demo.active) stopDemo();
     // 진행 중 focus/조립 흔적 정리(부감 상태에서 호출되지만 방어)
     stopHeroAsm();
-    if (village.selected) { focusRing.clear(); village.handle.hideParcelDetail(village.selected); village.selected = null; }
+    if (village.selected) { clearFocusRing(); village.handle.hideParcelDetail(village.selected); village.selected = null; }
     clearSemanticDofAnchor();
     setFocusComposition(0);
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }

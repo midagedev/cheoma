@@ -9,11 +9,18 @@ export {
   createRainPrecipitationState,
   createSnowPrecipitationState,
   setPrecipitationBounds,
+  EAVE_DRIP_ACTIVE_FRAC,
+  EAVE_DRIP_SPACING,
+  EAVE_RAIN_SEED,
+  eaveDripActive,
+  eaveDripCycle,
+  planEaveAnchors,
 } from './particle-state.js';
 export {
   createPhysicalRainRepresentation,
   createPhysicalSnowRepresentation,
 } from '../env/weather-physical-geometry.js';
+export { createEaveRain } from '../env/eave-rain.js';
 export {
   createLeafSaddleGeometry,
   createMoteWorldRepresentation,

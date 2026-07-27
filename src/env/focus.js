@@ -23,12 +23,14 @@ const GATE_W = { palace: 6.6, temple: 6.6, hanok: 5.2, choga: 1.8 };
 // 원칙:
 //  - 기존 env 시스템 재사용(신규 발명 금지): animals.js·smoke.js·motes.js(모트+등롱흔들림)·grass.js.
 //    (#131: 지붕 적설 쉘·빗물 리벌릿 물리는 제거 — 눈은 weather.js 지붕 흰틴트(uSnowAmount)가 대체.)
+//    (#215: 근경 처마 낙수·최소 스플래시는 weather.js eave-rain 이 소유 — 링에 붙이지 않는다.
+//     엔진이 focus 오버레이를 setEaveSubject 로 넘긴다.)
 //  - 활성/해제 모두 크로스페이드(팟 금지) — present-gate(조립 정착 후 상승)를 강도(strength)로 쓴다.
 //  - 동시 1개 링만. set 재호출 시 기존 링을 페이드아웃(retiring) 후 교체, ~0 도달 시 dispose.
 //  - dispose 철저: 지오/재질/텍스처 누수 금지(Sprite 공유 지오는 제외 — 전역 손상 방지).
 //
-// 날씨(#131): 지붕 눈/비 물리는 제거됨. 눈은 weather.js 지붕 흰틴트(uSnowAmount 공유 uniform)가 전역
-//   담당(focus-in 지붕도 자동 흰색화), 비는 낙하 커튼만. readWeather 는 잔존하나 현재 미사용(dormant).
+// 날씨: 눈=지붕 흰틴트(weather uSnowAmount), 비=낙하 커튼 + #215 근경 처마 낙수(eave-rain).
+//   readWeather 는 잔존하나 링 자체는 미사용(dormant) — eave-rain 은 engine setEaveSubject 경로.
 //
 // 좌표: buildParcel 컴파운드는 이미 필지 월드 위치에 놓여 있다(group.matrixWorld). 링 컨테이너는
 //   씬 루트(identity)에 두고 모든 배치를 월드 좌표로 계산한다(populate 소동물 배치 패턴과 동일).
