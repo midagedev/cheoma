@@ -73,6 +73,7 @@
     "check:share": "npm run check:scene-snapshot && node tools/check-share.mjs",
     "check:shader-warm": "node tools/check-shader-warm.mjs",
     "check:shadow": "node tools/check-shadow-framing.mjs && node tools/check-directional-shadow-runtime.mjs",
+    "check:cloud-shadow": "node tools/check-cloud-shadow-profile.mjs",
     "check:live-edit:browser": "node tools/run-browser-locked.mjs -- node tools/check-parcel-rebuild-browser.mjs",
     "check:petals": "node tools/run-browser-locked.mjs -- node tools/verify-petals.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",

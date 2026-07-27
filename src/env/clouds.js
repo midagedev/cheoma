@@ -45,6 +45,11 @@ export function createCloudUniforms() {
 }
 
 // ── 지형 재질 fragment 에 삽입할 구름 그림자 GLSL 조각 (terrain.js 가 import) ──
+// #221 / look-audit U5: 예전 하드 플레이트(반경 42%까지 평탄 암부 원반 + 가파른 rim)는
+//   샷 모드(t=0)에서 마을 레인 배치 블롭 4장이 겹치면 지면에 "기하 줄무늬 띠"로 읽혔다.
+//   원인은 shadow-map cascade/texel 이 아니라 이 구름 발자국 프로필. 중심 피크 + 제곱 감쇠로
+//   연속 그라디언트를 주고, 가장자리 fbm 은 숨만 쉬게 줄여 띠 윤곽을 깨지 않는다.
+//   태양 평행 그림자(DirectionalLight shadow map)는 건드리지 않는다.
 export const CLOUD_SHADOW_FRAG_DECL = `
 uniform float uCloudTime; uniform float uCloudStr;
 uniform vec4 uCloudBlobs[${MAX_CLOUD_BLOBS}];   // xy=지면중심 z=반경 w=세기
@@ -54,19 +59,22 @@ float csNoise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.0-2.0*f);
   float a=csHash(i),b=csHash(i+vec2(1.,0.)),c=csHash(i+vec2(0.,1.)),d=csHash(i+vec2(1.,1.));
   return mix(mix(a,b,u.x),mix(c,d,u.x),u.y); }
 float csFbm(vec2 p){ float v=0.,a=0.55; for(int i=0;i<4;i++){ v+=a*csNoise(p); p=p*2.03+7.1; a*=0.5;} return v; }
-// 한 구름 블롭의 그늘: 코어는 진하게(0..0.42 반경까지 꽉 참), 가장자리는 부드럽게 소실. wob 로 원형을 깬다.
+// Soft cumulus footprint: peak at centre, continuous gradient, no hard plateau disc.
 float cloudBlob(vec4 b, vec2 wp, float wob){
   if (b.z < 0.5) return 0.0;                     // 비활성 슬롯
-  float t = distance(wp, b.xy) / b.z + wob;      // 0=중심 .. 1=반경끝
-  return b.w * (1.0 - smoothstep(0.42, 1.02, t));
+  float r = max(0.0, distance(wp, b.xy) / b.z + wob);  // 0=중심 .. ~1=반경끝
+  float a = 1.0 - smoothstep(0.0, 1.12, r);
+  return b.w * a * a;                            // 제곱 감쇠 → 코어는 살아 있고 rim 은 부드럽게
 }
 `;
 // color_fragment '뒤'(최종 색)에 얹는 감산 — 계절·적설·들판 금빛이 다 적용된 색을 어둡게.
-//   블롭 5개를 상수 인덱스로 언롤(동적 인덱싱 금지). 가장자리 흔들림은 저주파 fbm 으로 공용.
+//   블롭 5개를 상수 인덱스로 언롤(동적 인덱싱 금지). 가장자리 숨결은 저주파 fbm 으로 공용.
 export const CLOUD_SHADOW_FRAG_BODY = `
 {
   vec2 wp = vCloudWorld.xz;
-  float wob = (csFbm(wp * 0.011 + uCloudTime * 0.004) - 0.5) * 0.42;   // ±0.21 가장자리 요철
+  // Mild edge breath only (±0.08). Stronger wobble + hard plateau used to carve concentric
+  // ring / stripe contours across the courtyard under frozen shot clocks.
+  float wob = (csFbm(wp * 0.007 + uCloudTime * 0.003) - 0.5) * 0.16;
   float shade = 0.0;
   shade += cloudBlob(uCloudBlobs[0], wp, wob);
   shade += cloudBlob(uCloudBlobs[1], wp, wob);
@@ -942,10 +950,10 @@ export function setupClouds(group, {
   //   바로 아래, 저고도(석양)면 태양 반대쪽으로 레이킹(장그림자). k 는 상한을 둬 그림자가 지형 밖으로
   //   날아가지 않게 한다. 반경은 구름 폭에 비례(지면 발자국), 세기는 구름 불투명도에 비례.
   const SHADOW_R = 0.50, RAKE = 0.9, RAKE_MAX = 78;
-  // 마을: 그림자 발자국을 프레임(COVER)에 비례시켜 몇 개가 유유히 지난다(반경 ≈ COVER·0.5 → 프레임에
-  //   2~3 개가 겹치지 않고 든다). 레이킹(석양 장그림자)도 COVER 로 상한을 조여 그림자가 프레임 밖으로
-  //   날아가지 않게 한다(진단: 기존 RAKE_MAX=78 이 저고도에서 그늘을 남쪽 가장자리로 밀어냈다).
-  const villRadius = Math.max(22, COVER * 0.36);   // 이산 그늘(프레임에 2~3 개 든다 — 상시 반그늘 방지)
+  // 마을: 그림자 발자국을 프레임(COVER)에 비례시켜 몇 개가 유유히 지난다. #221 은 반경을
+  //   약간 줄여(0.36→0.30) 레인 배치 블롭이 한 장의 평탄 암부 밴드로 붙는 일을 줄인다.
+  //   레이킹(석양 장그림자)도 COVER 로 상한을 조여 그림자가 프레임 밖으로 날아가지 않게 한다.
+  const villRadius = Math.max(20, COVER * 0.30);   // 이산 그늘(프레임에 2~3 개 — 상시 반그늘 방지)
   const villRakeMax = COVER * 0.28;   // 저고도 장그림자 상한(프레임 한쪽 굶주림 방지 — 진단 #108)
   function writeBlob(m) {
     const b = u.uCloudBlobs.value[m.userData.blob];
@@ -955,7 +963,10 @@ export function setupClouds(group, {
     const nx = _sunDir.x / hy, nz = _sunDir.z / hy;         // 태양 수평방향(정규화)
     const rakeMax = village ? villRakeMax : RAKE_MAX;
     const rake = Math.min(rakeMax, (1 - Math.min(1, _sunDir.y)) * p.y * RAKE);
-    const rad = village ? villRadius : m.userData.w * SHADOW_R;
+    // Per-blob radius stagger breaks the four-lane "parallel stripe" reading under shot clocks.
+    const blobI = m.userData.blob | 0;
+    const radScale = village ? (0.78 + 0.14 * ((blobI * 2 + 1) % 5) / 4) : 1;
+    const rad = village ? villRadius * radScale : m.userData.w * SHADOW_R;
     b.set(p.x - nx * rake, p.z - nz * rake, rad, Math.min(1, m.userData.op / 0.5));
   }
 
@@ -968,8 +979,9 @@ export function setupClouds(group, {
     _sunDir.copy(sun.position).normalize();
     const alt = Math.max(0, _sunDir.y);               // 태양 고도(0..1)
     const inten = sun.intensity;                       // day2.6 sunset2.3 dawn1.7 night0.9
-    // 그림자 전역 세기: 밝은 낮 강, 석양 중강, 새벽 약. #68 상향.
-    const daylight = 0.52 * smoothstep(1.2, 2.45, inten);
+    // 그림자 전역 세기: 밝은 낮·석양에서 읽히되 마당을 반으로 짓누르지 않게(#221: 0.52→0.40).
+    // env 단일건물 경로도 같은 곡선을 쓰므로 무회귀 기대치는 tools/verify-cloudshadow.mjs 가 갱신.
+    const daylight = 0.40 * smoothstep(1.2, 2.45, inten);
     if (village) {
       // ── 달빛 구름 그림자(#108) ──────────────────────────────────────────────
       // 야간(night) 조명은 sky.js 에서 sun(방향광)이 달빛으로 전용된다: 저강도(inten≈0.9)·청색

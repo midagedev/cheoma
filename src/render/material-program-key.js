@@ -6,7 +6,8 @@
 export const MATERIAL_PROGRAM_PATCH = Object.freeze({
   LOD_SCREEN_DOOR: 'cheoma-lod-screen-door-v1',
   INST_FADE: 'cheoma-inst-fade-v2',
-  CLOUD_SHADOW: 'cloudshadow-v1',
+  // v2: soft centre-peaked falloff (no hard 0.42 plateau) — look-audit U5 / #221
+  CLOUD_SHADOW: 'cloudshadow-v2',
   SNOW: 'snow-v2',
   PHYSICAL_RIM: 'cheoma-rim-physical-v1',
   CRITTER_ARTICULATION: 'cheoma-critter-articulation-v1',
