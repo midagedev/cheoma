@@ -2116,14 +2116,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // focus 중 필지→필지 직접 전환(#95) — A(현재 focus)에서 B 로 부감 미경유 이동. #92 타임라인 통일 규약:
   //   카메라 측면 돌리(A framing→B framing, tweenTo 가 매 프레임 lookAt + 종료 관성 리셋) + 패널 유형 모프
   //   (브레드크럼·편집 스키마가 B 로) + DoF(renderFrame 이 A→B 시선점을 추적) 한 타임라인. focusMorph 는 1 유지
-  //   (집→집, 부감 골짜기 없음). 오버레이 스왑 순서: B 선표시(도착 시 근경 완성) → 도착(onDone)에 A 해제
-  //   (근경 팝을 부감/원거리로 밀어냄). 앰비언스 링은 attachFocusRing(B) 이 focusRing.set → A 링 retiring
-  //   크로스페이드. 전환 내내 transitioning=true → 줌 감시자·재클릭 봉인.
+  //   (집→집, 부감 골짜기 없음). 오버레이 스왑 순서: 클릭 프레임에 카메라 선기동 → B 오버레이는 rAF
+  //   청크 빌드 후 원자 설치(도착 전 근경 완성) → 도착(onDone)에 A 해제. 앰비언스 링은 B 설치 직후
+  //   attachFocusRing(B) → A 링 retiring 크로스페이드. 전환 내내 transitioning=true → 줌·재클릭 봉인.
   //
-  // Hop freezes: do NOT gate the camera on afterWarm (focus-in still does). House→house
-  // already paid the B overlay build cost on the click frame; waiting up to REVEAL_WARM_CAP_MS
-  // for shader link before any camera motion felt like a hard freeze. Warm + focus ring run
-  // in parallel with the dolly so residual compile hitches land mid-motion (fill 0.65 / MSAA 0).
+  // Hop freezes (#205 + #224): do NOT gate the camera on afterWarm (focus-in still does), and do
+  // NOT pay B overlay build on the click frame. Camera starts immediately from pick-proxy framing;
+  // B stays on its exclusive base representation until the full overlay installs (no partial flash).
+  // Cold residential builds split house vs courtyard wall/aux across yields. Warm + focus ring run
+  // after install so residual compile hitches land mid-motion (fill 0.65 / MSAA 0).
+  let hopOverlayGen = 0;
   function villageSwitch(toId) {
     if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const fromId = village.selected;
@@ -2136,9 +2138,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     else fromOpeningFocus = resolveArchitecturalDofAnchor(fromId, new THREE.Vector3());
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     stopHeroAsm();                                                // 진행 중 조립(리플레이 등) 정리
-    // B 를 풀디테일 오버레이로 선표시(도착 시 근경엔 B 완성). A 오버레이는 도착까지 유지(팝 은닉).
-    const detail = village.handle.showParcelDetail(toId);
-    if (!detail) return;
+
+    // Click frame: selection + camera only. B base instances keep exclusive ownership until
+    // the chunked overlay install completes (A overlay remains until hopDone).
+    const gen = ++hopOverlayGen;
     village.selected = toId; village.transitioning = true;
     dispatchView('hop', { parcelId: toId, fromId });
     setPostFocus(true);                                           // 두 상태 모두 focus(멱등) — rim/flare 유지
@@ -2148,13 +2151,18 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     emit('villageSelectStart', { parcelId: toId, spec: pr.buildingSpec, reseed: true });   // 패널 유형·기본값 갱신
     emit('villageHover', null);
 
-    // Camera starts this frame — do not wait for shader link.
+    // Camera starts this frame — do not wait for overlay build or shader link.
     const settledComposition = -VILLAGE_FOCUS_SKY_FRACTION * focusCompositionFor(toId);
     const f = focusFramingForViewport(pr, undefined, { compositionY: settledComposition });
     const closeupDist = f.position.distanceTo(f.target);
+    // B door anchor is usually unavailable until the overlay installs; fall back to framing
+    // target and retarget when the chunked build finishes (see installHopOverlay).
     const toOpeningFocus = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
     if (toOpeningFocus) setSemanticDofAnchor(toId, toOpeningFocus);
-    else clearSemanticDofAnchor();
+    else if (fromOpeningFocus) {
+      // Hold A door until B installs so DoF does not snap to controls.target mid-hop.
+      setSemanticDofAnchor(fromId, fromOpeningFocus);
+    } else clearSemanticDofAnchor();
     const semanticTransition = !!(fromOpeningFocus || toOpeningFocus);
     tweenTo(f.position, f.target, FOCUS_HOP_DUR, {
       // 카메라·시선과 같은 진행도로 A의 고정 개구면→B의 고정 개구면을 보간한다. 의미 anchor가
@@ -2166,6 +2174,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dofSource: 'primary-opening-transition',
       onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
       onDone: () => {
+        // Chunked B promote normally finished mid-dolly. If the CPU lost the race
+        // with FOCUS_HOP_DUR, finish sync here so settle always owns FULL edit/door.
+        // A concurrent chunked finish that loses overrideById aborts its draft.
+        if (village.active && village.selected === toId
+            && !village.handle.focusAssembly?.(toId)) {
+          const fallback = village.handle.showParcelDetail(toId);
+          if (fallback?.group) {
+            const opening = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
+            if (opening) setSemanticDofAnchor(toId, opening);
+            warmShaders(fallback.group);
+            attachFocusRing(fallback);
+          }
+        }
         village.transitioning = false;
         dispatchView('hopDone', { parcelId: toId });
         village.handle.highlightParcel(toId, false);              // 도착: 근경 박스 숨김
@@ -2178,15 +2199,49 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     });
     retargetOnChromeSettled(toId, pr, { compositionY: settledComposition });
 
-    // Warm + ring after the click frame yields: house mesh already visible, camera moving.
-    // Ring set() still crossfades A→B; warm is fire-and-forget (no gate).
-    tasks.after(() => {
-      if (disposed || !village.active || village.selected !== toId) return;
-      if (detail.group) {
-        warmShaders(detail.group);
-        attachFocusRing(detail);
+    // Build stays live while B is the focus, or while a focus-out tween still owns the
+    // camera (selected cleared, transitioning). Settled aerial cancels leftovers.
+    const hopBuildLive = () => {
+      if (disposed || gen !== hopOverlayGen || !village.active) return false;
+      if (village.selected === toId) return true;
+      if (village.selected == null && village.transitioning) return true;
+      return false;
+    };
+    const hopFocusLive = () => (
+      !disposed && gen === hopOverlayGen && village.active && village.selected === toId
+    );
+    const yieldFrame = () => new Promise((resolve) => {
+      if (!hopBuildLive()) { resolve(); return; }
+      tasks.frame(() => resolve());
+    });
+
+    const installHopOverlay = (detail) => {
+      if (!detail?.group) return; // aborted draft or hopDone already owns B
+      if (!hopBuildLive()) {
+        // Dispose a just-installed overlay only if it is still the active B root.
+        const cur = village.handle.focusAssembly?.(toId);
+        if (cur?.group === detail.group) village.handle.hideParcelDetail(toId);
+        return;
       }
-    }, 0);
+      const opening = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
+      if (opening) {
+        setSemanticDofAnchor(toId, opening);
+        // Mid-hop: steer the live DoF path endpoint toward B's door once the overlay exists.
+        if (tween?.dofPath?.to && hopFocusLive()) tween.dofPath.to.copy(opening);
+      }
+      warmShaders(detail.group);
+      // Ring only while still focused on B; focus-out already cleared the ring.
+      if (hopFocusLive()) attachFocusRing(detail);
+    };
+
+    // rAF-chunked B overlay (handle owns house|wall split). Fire-and-forget: hopDone
+    // may land before install on very slow CPUs; base B remains exclusive until then.
+    Promise.resolve(village.handle.showParcelDetailChunked(toId, {
+      yieldFrame,
+      isCancelled: () => !hopBuildLive(),
+    })).then((detail) => {
+      installHopOverlay(detail);
+    }, () => { /* build abort / dispose — ignore */ });
   }
 
   // focus-out(ESC·닫기·줌아웃·토글 숏컷) — focus-in 의 역재생(#92 원칙 3). 링 페이드아웃·패널 모프 역행·

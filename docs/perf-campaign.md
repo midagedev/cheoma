@@ -1,6 +1,6 @@
 # 성능 캠페인 — 카메라 난사 + 집 편집 실시간
 
-- **상태**: main #196–#204 머지 · hop 프리즈 대응 진행 (2026-07-27)
+- **상태**: main #196–#204 머지 · #224 hop overlay rAF 청크 (2026-07-27)
 - **목표**: (1) 카메라를 거칠게 돌려도 프레임이 무너지지 않음 (2) 집 편집 슬라이더가 자연스럽게 실시간 (3) 정착 프레임 시각 품질 ≥ 현행
 - **비목표**: WebGPU 메인 전환 (후순위 실험)
 
@@ -137,11 +137,19 @@
 | **Hop camera ungated** | house→house는 afterWarm 대기 없이 같은 클릭 프레임에 돌리 시작 | 클릭→모션 즉시 |
 | **Hop ring deferred** | warmShaders + focusRing 을 다음 태스크로 미룸 (크로스페이드 유지) | 링 1프레임 지연 |
 
+## 15차 구현 (#224 hop B overlay rAF 청크)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Hop camera before B build** | `villageSwitch` 클릭 프레임은 카메라·선택만; B 베이스 인스턴스 유지 | 클릭→모션 즉시; 도착 전 B는 인스턴스 |
+| **showParcelDetailChunked** | 첫 yield 후 promote; cold residential는 house → yield → wall/aux 원자 설치 | 불완전 오버레이 flash 없음 |
+| **hopDone sync fallback** | 청크가 `FOCUS_HOP_DUR` 을 지면 정착 시 sync promote | 정착 FULL/편집/문 보장 |
+| **Live-edit path** | `rebuildParcel` / focus-in sync 경로 불변 | 편집 계약 유지 |
+
 ## 다음 라운드 (우선순위)
 
-1. hop 중 B overlay 빌드 자체 rAF 청크 (CPU) — 측정 후
-2. grade half-res during motionBudget (look risk)
-3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
+1. grade half-res during motionBudget (look risk)
+2. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
 
