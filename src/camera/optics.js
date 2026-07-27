@@ -25,6 +25,18 @@ export const VILLAGE_FOCUS_ELEVATION = 9 * DEG;
 export function villageAerialElevation(time) {
   return time === 'night' ? VILLAGE_NIGHT_AERIAL_ELEVATION : VILLAGE_FOCUS_CONTEXT_ELEVATION;
 }
+// Inner end of the residential focus zoom continuum (docs/look-audit-2026-07.md U6 residual,
+// GitHub #213). The authored closeup is the 9° yard/door pose above; pinching or scrolling
+// past that closeup eases the path elevation down toward this under-eave look so the cheoma
+// silhouette and rafter layers read as the main line under sunset rim. Stays inside the
+// reviewed 7–12° eye-level band — never a return to the retired 24° survey camera. Hero
+// landing keeps VILLAGE_HERO_FOCUS_ELEVATION; landmark palace/temple bases sit above the
+// band and are not pulled into this look.
+export const VILLAGE_EAVE_FOCUS_ELEVATION = 7 * DEG;
+// Residential bases at or below this still participate in the eave inner continuum. Anything
+// higher (palace 20°, temple 17°, hero 24°) is a survey/landmark pose and must keep its base
+// when the user dollies in.
+export const VILLAGE_EAVE_FOCUS_BAND_MAX = 12 * DEG;
 // Compose the subject below center so the eave line cuts sky rather than sitting against the far
 // hillside. Normalized lens shift only — no camera pose or focus distance moves. A 배산임수 village
 // always puts the ridge behind a south-facing house, so this shift alone cannot manufacture sky;
@@ -156,6 +168,24 @@ export function villageFocusEffectWeight(referenceDistance, aerialReference, clo
   return 1 - smoothstep(fullUntil, clearAt, referenceDistance);
 }
 
+// 0 at the authored closeup and beyond, 1 at the protected focus minimum. Only residential
+// eye-level bases participate — the weight is for composition/debug consumers of the same
+// continuum that villageFocusContextElevation already drives.
+export function villageFocusEaveWeight(referenceDistance, aerialReference, closeupReference) {
+  const bounds = villageZoomReferenceBounds('focus', aerialReference, closeupReference);
+  const closeup = Number.isFinite(closeupReference) && closeupReference > 0
+    ? closeupReference : bounds.min;
+  if (!(closeup > bounds.min)) return 0;
+  // smoothstep(min, closeup, d) is 0 at min and 1 at closeup; invert for eave fill.
+  return 1 - smoothstep(bounds.min, closeup, referenceDistance);
+}
+
+// Path elevation across the whole focus continuum:
+//   inner min  → VILLAGE_EAVE_FOCUS_ELEVATION (7°, residential only)
+//   closeup    → baseElevation (authored 9° yard/door pose)
+//   zoom-out   → crane toward VILLAGE_FOCUS_CONTEXT_ELEVATION (31°)
+// Default focus-in remains the closeup pose; the eave look is only reached by wheel/pinch
+// past that closeup. Landmark and hero bases above the 7–12° band keep their elevation.
 export function villageFocusContextElevation(
   referenceDistance,
   aerialReference,
@@ -163,10 +193,22 @@ export function villageFocusContextElevation(
   baseElevation,
 ) {
   const base = Number.isFinite(baseElevation) ? baseElevation : 0;
+  const bounds = villageZoomReferenceBounds('focus', aerialReference, closeupReference);
+  const closeup = Number.isFinite(closeupReference) && closeupReference > 0
+    ? closeupReference : bounds.min;
+  let pathBase = base;
+  const eaveEligible = base > VILLAGE_EAVE_FOCUS_ELEVATION + 1e-9
+    && base <= VILLAGE_EAVE_FOCUS_BAND_MAX + 1e-9;
+  if (eaveEligible && closeup > bounds.min) {
+    const eaveWeight = villageFocusEaveWeight(
+      referenceDistance, aerialReference, closeupReference,
+    );
+    pathBase = base + (VILLAGE_EAVE_FOCUS_ELEVATION - base) * eaveWeight;
+  }
   const context = 1 - villageFocusEffectWeight(
     referenceDistance, aerialReference, closeupReference,
   );
-  return base + (Math.max(base, VILLAGE_FOCUS_CONTEXT_ELEVATION) - base) * context;
+  return pathBase + (Math.max(pathBase, VILLAGE_FOCUS_CONTEXT_ELEVATION) - pathBase) * context;
 }
 
 function validFov(value) {

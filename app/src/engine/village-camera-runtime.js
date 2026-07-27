@@ -7,6 +7,7 @@ import {
   villageScreenDistance,
   villageScreenDistanceForCamera,
   villageFocusContextElevation,
+  villageFocusEaveWeight as focusEaveWeightForDistance,
   villageFocusEffectWeight as focusEffectWeightForDistance,
   villageZoomReferenceBounds,
 } from '../../../src/api/cinematic.js';
@@ -376,6 +377,15 @@ export function createVillageCameraRuntime({
         'focus', referenceAerialDistance(), focusCloseupReference,
       ).max).toFixed(1),
       focusEffectWeight: +focusEffectWeight().toFixed(3),
+      // 1 at the protected focus minimum (eave-appreciation pose), 0 at the authored
+      // closeup and beyond. Residential path elevation reads this same continuum.
+      focusEaveWeight: +focusEaveWeightForDistance(
+        villageScreenDistanceForCamera(
+          camera.position.distanceTo(controls.target), camera,
+        ),
+        referenceAerialDistance(),
+        focusCloseupReference,
+      ).toFixed(3),
       focusCutaway: focusCutawayState ? {
         active: focusCutawayState.active,
         available: focusCutawayState.available,
