@@ -309,6 +309,30 @@ assert.equal(roofPlan.courseFlow, true,
     'roof tile courses all appeared on the same frame (no course flow)');
 }
 
+// Roof children keep authored scale during flight. Per-mesh non-uniform squash
+// broke the tile/rafter/eave depth stack and read as z-fighting on the roof
+// underside ("room ceiling") while the house rose.
+{
+  const roof = house.getObjectByName('roof');
+  const restScales = roof.children.map((c) => [c.scale.x, c.scale.y, c.scale.z]);
+  anim.seek(0.88); // mid roof window (PART_WINDOWS.roof ≈ 0.74–1.0)
+  for (let i = 0; i < roof.children.length; i++) {
+    const c = roof.children[i];
+    assert.equal(c.scale.x, restScales[i][0], 'roof child scale.x changed mid-assembly');
+    assert.equal(c.scale.y, restScales[i][1], 'roof child scale.y changed mid-assembly');
+    assert.equal(c.scale.z, restScales[i][2], 'roof child scale.z changed mid-assembly');
+  }
+  // Columns still squash (contrast — roof is the exception).
+  anim.seek(0.33);
+  const col = house.getObjectByName('columns').children.find((c) => c.visible);
+  assert.ok(col, 'no visible column mid-assembly');
+  assert.ok(
+    Math.abs(col.scale.y - 1) > 1e-4 || Math.abs(col.scale.x - 1) > 1e-4,
+    'columns lost tofu squash — roof-only scale freeze leaked to other parts',
+  );
+  anim.seek(1);
+}
+
 // ── ⑤ 착공 전 무노출 ─────────────────────────────────────────────────────────────────
 anim.seek(0);
 const animated = [];

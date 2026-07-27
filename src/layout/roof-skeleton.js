@@ -294,20 +294,23 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 
       if (rafters) {
         // 연목(아래 열)·부연(위 열): 처마 밑에서 밖으로 방사. 코너 근처는 선자연이 덮음.
+        // Clear the thin DoubleSide tile shell by a few centimetres so the underside
+        // (room/eave "ceiling" read) never co-owns depth with the tile plane —
+        // assembly motion used to crush that gap via per-mesh tofu scale.
         const nR = Math.max(6, Math.round(width / 0.42));
         for (let j = 0; j <= nR; j++) {
           const s = j / nR;
           if (Math.abs(2 * s - 1) > 0.88) continue;
           // 연목: 처마 안쪽(v≈0.32) 밑 → 처마 밖으로 내민 끝
-          const inner = pointAt(s, 0.32); inner.y -= 0.20;
+          const inner = pointAt(s, 0.32); inner.y -= 0.24;
           const edge = pointAt(s, 0.02);
           const dir = edge.clone().sub(pointAt(s, 0.12)).normalize();
-          const tip = edge.clone().addScaledVector(dir, 0.14); tip.y -= 0.14;
+          const tip = edge.clone().addScaledVector(dir, 0.14); tip.y -= 0.16;
           inner.y -= 0.02;
           rafterRound.push({ from: inner, to: tip });
           // 부연(위 열, 겹처마): 연목보다 얕게·바깥으로 더
-          const bi = pointAt(s, 0.16); bi.y -= 0.10;
-          const bt = edge.clone().addScaledVector(dir, 0.30); bt.y -= 0.055;
+          const bi = pointAt(s, 0.16); bi.y -= 0.13;
+          const bt = edge.clone().addScaledVector(dir, 0.30); bt.y -= 0.07;
           rafterSquare.push({ from: bi, to: bt });
         }
       }
