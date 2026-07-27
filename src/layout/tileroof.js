@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TILE_LOOK } from '../builder/material-colors.js';
 import { tileSurfaceMaterial } from '../builder/palette.js';
 
 // 작은 맞배(gable) 기와 지붕 조각. 담장 지붕담·일각문·솟을대문 칸이 공유.
@@ -31,7 +32,7 @@ export function buildTileGableRoof(M, o) {
   // 오목 프로파일: v(0=용마루..1=처마)에서 y 낙차를 곡선화
   const yAt = (v) => ridgeY - rise * (curve ? (1 - Math.pow(1 - v, 1 + curve * 2)) : v);
 
-  const mat = tileSurfaceMaterial(M, 2 * xr, slope, 0.7);
+  const mat = tileSurfaceMaterial(M, 2 * xr, slope, TILE_LOOK.bumpSurface);
   mat.side = THREE.DoubleSide;
 
   const NX = 10, NZ = 5;

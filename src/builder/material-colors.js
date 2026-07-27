@@ -31,29 +31,34 @@ export const VILLAGE_MATERIAL_COLORS = {
   giwaStone: 0xa79f8f,
 };
 
-// #150 item I — 망원 기와 alias / 검은 선 뭉침 완화 계약 (새 재질군 없이).
-// sRGB 상대휘도(0.299R+0.587G+0.114B) 밴드와 matte roughness 밴드. 팔레트 tile 경로와
-// 순수 게이트가 같은 숫자를 읽는다. albedo를 더 깎아 "동양화의 검은 기와"를 흉내 내지 말 것
-// (docs/surface-materials.md §판정 1).
+// #150 item I — 기와 look contract (telephoto black-line + reverse-light gold stipple).
+// sRGB luminance band + matte roughness + restrained bump. Palette / roof-skeleton / pure
+// gate all read these numbers. Do not darken albedo further for an "ink black roof"
+// (docs/surface-materials.md §판정 1). Reverse-light gold threads on tile grooves are
+// mostly PBR specular on corrugation (not Fresnel rim alone) — keep roughness high and bump low.
 export const TILE_LOOK = Object.freeze({
   tileLumMin: 0.28,
   tileLumMax: 0.34,
   tileDarkLumMin: 0.24,
   tileDarkLumMax: 0.30,
-  // tile − tileDark: 마루 위계는 읽히되 순흑 단차는 금지
+  // tile − tileDark: ridge hierarchy without near-black steps
   tileDarkSeparationMin: 0.025,
   tileDarkSeparationMax: 0.08,
   roofAverageLumMin: 0.30,
   roofAverageLumMax: 0.40,
-  // 점토 기와 matte — 낮은 roughness 의 스펙큘러 sparkle 이 망원에서 깜빡인다
-  roughnessMin: 0.92,
-  roughnessMax: 0.96,
-  tileFlatRoughness: 0.94,
-  tileRidgeRoughness: 0.93,
-  tileConvexRoughness: 0.94,
-  tileSurfaceRoughness: 0.94,
-  sugiwaRoughness: 0.94,
-  // 지붕 role instanceColor 곱틴트 채널 끝 — 넓은 변주는 일부 지붕을 거의 검게 밀어 선 뭉침을 키운다
+  // Clay matte — low roughness specularises grooves under telephoto / sunset
+  roughnessMin: 0.97,
+  roughnessMax: 0.995,
+  tileFlatRoughness: 0.985,
+  tileRidgeRoughness: 0.98,
+  tileConvexRoughness: 0.985,
+  tileSurfaceRoughness: 0.985,
+  sugiwaRoughness: 0.985,
+  // Bump defaults (roof-skeleton / palette / tileroof share these)
+  bumpSurface: 0.32,
+  bumpSugiwa: 0.22,
+  bumpMatbae: 0.45, // slightly stronger than paljak; still below the old 0.9
+  // Roof instanceColor channel ends — wide jitter blackens roofs and clumps lines
   roofToneChannelMin: 0.88,
   roofToneChannelMax: 1.06,
   roofToneJitterMax: 0.03,

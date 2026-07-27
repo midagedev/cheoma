@@ -39,6 +39,15 @@
 불변식:
 
 1. **제로 두께 DoubleSide 기와면 금지** — 외피·하면이 같은 평면을 공유하면 z-fighting.
+   `makeRoofUndersideGeometry`는 모든 정점을 **단위 외향 노멀**로 `ROOF_SHELL_THICKNESS` 만큼
+   내리고, 영길이 노멀(메시 극점)은 +Y 폴백으로 오프셋이 0이 되지 않게 한다. same-index
+   최소 거리는 두께의 0.85× 이상(`check:roof-shell`). 조립 중 outer/gaepan visibility는
+   같은 비트로 잠근다(`assembly.js` `lockRoofShellVisibility`) — 켜 흐름 lag가 한쪽만
+   드러내며 깊이 스택을 깨지 않게.
+1b. **마루 튜브·용마루 솔리드** — 내림/추녀/회첨 마루 중심선과 용마루 하면은 외피에서
+   `r + ROOF_MARU_SURFACE_CLEAR`(기본 2cm) 이상 떨어져야 한다. 반경만큼 묻히면 조립·처마
+   근접에서 기와 면과 동일 평면 충돌이 난다. 회첨은 골 **안(공기 쪽)** 에 앉히고 지붕
+   솔리드 쪽으로 파묻지 않는다.
 2. **개판 하면 ≠ 방 반자** — `userData.roofLayer = 'gaepan'`, plan `undersideIsRoomBanja: false`.
 3. **공간별 finish** — `yeondeung` | `banja` | `well` (`CEILING_FINISH`).
 4. **조립** — 지붕 그룹 강체 1유닛; 자식 local Y/scale 고정으로 구조 스택 보존.

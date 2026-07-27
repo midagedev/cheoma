@@ -896,8 +896,8 @@ export function canonicalizeSharedMaterials(root, canon = new Map()) {
 }
 
 // 지붕면 전용: 표면 크기에 맞춰 기와 골 반복수를 계산한 재질 생성.
-// bumpScale은 호출부에서 지정(궁=0.6 유지, 절 맞배=0.9 강조).
-export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 0.6) {
+// Bump defaults to TILE_LOOK.bumpSurface (callers may pass TILE_LOOK.bumpMatbae etc.).
+export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = TILE_LOOK.bumpSurface) {
   const tex = mats.tileTex.clone();
   tex.needsUpdate = true;
   tex.anisotropy = 8;
@@ -917,7 +917,7 @@ export function tileSurfaceMaterial(mats, widthMeters, slopeMeters, bumpScale = 
 // three TubeGeometry: uv.x = 길이(0→1 along path), uv.y = 둘레(0→1 around).
 // 물매 겹침 켜 간격은 지붕면 UV v 와 같은 0.9m (across 0.34m 가 아님 — 예전 코드는
 // 축을 뒤집어 둘레에 length/0.34 를 걸어 밀도가 과도했고 길이 방향 무늬가 사라졌다).
-export function sugiwaMaterial(mats, lengthMeters, bumpScale = 0.45) {
+export function sugiwaMaterial(mats, lengthMeters, bumpScale = TILE_LOOK.bumpSugiwa) {
   const tex = mats.tileTex.clone();
   tex.needsUpdate = true;
   tex.anisotropy = 8;

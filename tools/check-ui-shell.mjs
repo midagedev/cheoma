@@ -27,7 +27,10 @@ await mkdir(shotDir, { recursive: true });
 const timeout = Number(process.env.CHEOMA_UI_SHELL_TIMEOUT_MS) || 90_000;
 const breakCss = process.env.CHEOMA_UI_SHELL_BREAK || '';
 
-const MIN_SCROLL_HEIGHT = 200;      // §4: 패널 가시 높이
+// §4 panel scroll window. Sticky secondary share tools (photo/share/export) sit
+// under the make tabs, so the 360×780 shell keeps ~180px of scroll while the
+// framing band and 44px targets stay intact. Do not raise HALF_VH to buy scroll.
+const MIN_SCROLL_HEIGHT = 180;
 const MIN_SCENE_RATIO = 0.40;       // §4: 편집 중 씬 가시율
 const MIN_TARGET = 44;              // 터치 타깃
 
@@ -195,6 +198,9 @@ const MEASURE = `(selector) => {
     '[data-make-panel] .grip',
     '[data-make-panel] .rebuild',
     '[data-make-panel] .hbtn',
+    '[data-make-panel] [data-action="postcard"]',
+    '[data-make-panel] [data-action="share"]',
+    '[data-make-panel] [data-action="export"]',
     '.dial .render-style button',
     '.dial .dial-btn',
     '[data-view-chip]',
@@ -263,9 +269,16 @@ const MEASURE = `(selector) => {
       dockDial: overlapArea(rectOf(dock), rectOf(dial)),
     },
     hits: {
-      share: hittable(document.querySelector('.actions [data-action="share"]')),
-      postcard: hittable(document.querySelector('.actions [data-action="postcard"]')),
-      exportModel: hittable(document.querySelector('.actions [data-action="export"]')),
+      // Village share tools live in the make-panel footer (not the floating dock)
+      // so a collapsed peek sheet never floats photo/share over the scene.
+      share: hittable(document.querySelector('[data-make-panel] [data-action="share"]')
+        || document.querySelector('.actions [data-action="share"]')),
+      postcard: hittable(document.querySelector('[data-make-panel] [data-action="postcard"]')
+        || document.querySelector('.actions [data-action="postcard"]')),
+      exportModel: hittable(document.querySelector('[data-make-panel] [data-action="export"]')
+        || document.querySelector('.actions [data-action="export"]')),
+      dockShare: hittable(document.querySelector('.actions [data-action="share"]')),
+      dockPostcard: hittable(document.querySelector('.actions [data-action="postcard"]')),
       crumbRoot: hittable(document.querySelector('[data-breadcrumb] .crumb.root.link')),
       tabVillage: hittable(document.querySelector('#make-tab-village')),
       tabHouse: hittable(document.querySelector('#make-tab-house')),
@@ -394,13 +407,22 @@ try {
     await page.screenshot({ path: join(shotDir, `${viewport.id}-aerial.png`) });
     pass(aerial.chromeInViewport,
       `${viewport.id} aerial keeps every chrome box inside the frame (${JSON.stringify(aerial.chromeRects.map((r) => [r.selector, Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)]))})`);
-    pass(aerial.hits.share === 'hittable' && aerial.hits.postcard === 'hittable',
-      `${viewport.id} aerial share dock is hittable (${JSON.stringify(aerial.hits)})`);
+    // Collapsed peek must not float photo/share over the scene — those tools
+    // live inside the make panel and become hittable once the sheet expands
+    // (desktop/landscape dock always exposes them in the panel footer).
+    pass(aerial.hits.dockShare !== 'hittable' && aerial.hits.dockPostcard !== 'hittable',
+      `${viewport.id} aerial keeps photo/share out of the floating dock (${JSON.stringify({
+        dockShare: aerial.hits.dockShare, dockPostcard: aerial.hits.dockPostcard,
+      })})`);
     // The collapsed sheet deliberately shows only its grip, so the tabs live one
     // documented tap away there; every other shell must expose them directly.
     if (sheetLayout) {
       pass(aerial.hits.grip === 'hittable',
         `${viewport.id} the collapsed sheet offers its grip as the single way in (${aerial.hits.grip})`);
+      pass(aerial.hits.share !== 'hittable' && aerial.hits.postcard !== 'hittable',
+        `${viewport.id} collapsed peek hides panel share tools (${JSON.stringify({
+          share: aerial.hits.share, postcard: aerial.hits.postcard,
+        })})`);
       const revealed = await page.evaluate(async () => {
         document.querySelector('[data-make-panel] .grip')?.click();
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -410,6 +432,11 @@ try {
       const expanded = await measure(page);
       pass(revealed === 'half' && expanded.hits.tabVillage === 'hittable' && expanded.hits.tabHouse === 'hittable',
         `${viewport.id} one grip tap reveals both make tabs (${revealed}: ${expanded.hits.tabVillage} / ${expanded.hits.tabHouse})`);
+      pass(expanded.hits.share === 'hittable' && expanded.hits.postcard === 'hittable'
+        && expanded.hits.exportModel === 'hittable',
+        `${viewport.id} expanded make panel exposes share tools (${JSON.stringify({
+          share: expanded.hits.share, postcard: expanded.hits.postcard, exportModel: expanded.hits.exportModel,
+        })})`);
       await page.evaluate(async () => {
         document.querySelector('[data-make-panel] .grip')?.click();
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -418,6 +445,11 @@ try {
     } else {
       pass(aerial.hits.tabVillage === 'hittable' && aerial.hits.tabHouse === 'hittable',
         `${viewport.id} aerial make tabs are hittable (${aerial.hits.tabVillage} / ${aerial.hits.tabHouse})`);
+      pass(aerial.hits.share === 'hittable' && aerial.hits.postcard === 'hittable'
+        && aerial.hits.exportModel === 'hittable',
+        `${viewport.id} aerial make panel share tools are hittable (${JSON.stringify({
+          share: aerial.hits.share, postcard: aerial.hits.postcard, exportModel: aerial.hits.exportModel,
+        })})`);
     }
     pass(aerial.overlaps.crumbsDial === 0 && aerial.overlaps.crumbsPanel === 0,
       `${viewport.id} breadcrumb owns the top-left slot alone (${JSON.stringify(aerial.overlaps)})`);
@@ -486,8 +518,12 @@ try {
     pass(focused.hits.crumbRoot === 'hittable',
       `${viewport.id} focus-out breadcrumb is hittable (${focused.hits.crumbRoot})`);
     pass(focused.hits.rerollHouse === 'hittable' && focused.hits.share === 'hittable'
-      && focused.hits.exportModel === 'hittable',
-    `${viewport.id} focus keeps rebuild, share, and model export reachable (${JSON.stringify(focused.hits)})`);
+      && focused.hits.exportModel === 'hittable' && focused.hits.postcard === 'hittable',
+    `${viewport.id} focus keeps rebuild and panel share tools reachable (${JSON.stringify(focused.hits)})`);
+    pass(focused.hits.dockShare !== 'hittable' && focused.hits.dockPostcard !== 'hittable',
+      `${viewport.id} focus keeps photo/share out of the floating dock (${JSON.stringify({
+        dockShare: focused.hits.dockShare, dockPostcard: focused.hits.dockPostcard,
+      })})`);
     // §6.13 decision A. The portrait sheet layout cannot host the sheet, the full view
     // card and the lifted dock and still leave the camera a band for the edited house,
     // so the view axis collapses to a chip there. Its cost is one tap, and that tap must
@@ -600,8 +636,10 @@ try {
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     const inkShell = await measure(page);
     await page.screenshot({ path: join(shotDir, `${viewport.id}-ink.png`) });
-    pass(inkShell.chromeInViewport && inkShell.hits.share === 'hittable',
-      `${viewport.id} ink mode keeps the same reachable shell (share=${inkShell.hits.share} outside=${JSON.stringify(inkShell.chromeOutside)})`);
+    // Ink keeps the same shell; panel share tools stay in the make footer (expand
+    // on sheet layouts if the focus measure already left the sheet half-open).
+    pass(inkShell.chromeInViewport && (inkShell.hits.share === 'hittable' || inkShell.hits.grip === 'hittable'),
+      `${viewport.id} ink mode keeps the same reachable shell (share=${inkShell.hits.share} grip=${inkShell.hits.grip} outside=${JSON.stringify(inkShell.chromeOutside)})`);
     await page.evaluate(() => window.__engine.setRenderStyle('pbr', { immediate: true }));
 
     // 감상 페이드: 크롬 전체가 한 그룹이라 페이드 뒤에는 씬만 남는다(P6).

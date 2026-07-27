@@ -27,6 +27,18 @@
 
 const PART_ORDER = ['podium', 'columns', 'walls', 'brackets', 'roof'];
 
+/** Keep each roof-tile-outer / roof-gaepan pair on the same visible bit. */
+function lockRoofShellVisibility(roofGroup) {
+  if (!roofGroup?.children?.length) return;
+  for (let i = 0; i < roofGroup.children.length - 1; i++) {
+    const a = roofGroup.children[i];
+    const b = roofGroup.children[i + 1];
+    if (a?.name === 'roof-tile-outer' && b?.name === 'roof-gaepan') {
+      b.visible = a.visible;
+    }
+  }
+}
+
 // 파트별 타임라인 윈도(전체 duration 대비 비율). 시공 순서 스태거, 살짝 겹쳐 흐름을 만든다.
 const PART_WINDOWS = {
   podium:   [0.00, 0.26],
@@ -438,6 +450,9 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
             it.child.scale.set(it.sx0, it.sy0, it.sz0);
           }
         }
+        // Tile outer + gaepan are one physical shell. Course-flow lag by height can
+        // desync them for a few frames and flash coplanar depth; lock visibility.
+        lockRoofShellVisibility(u0.items[0].child);
         continue;
       }
       const intra = g.hasLag ? g.itemDur * INTRA_SHARE : 0;

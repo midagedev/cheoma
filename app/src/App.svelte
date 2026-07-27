@@ -379,7 +379,9 @@
   let villageAerial = $derived(sceneVillage && !villageEditing && !villageZooming);
   // 시네마틱 진입 버튼(드론/거닐기)은 마을 부감에서만 — focus·전환·웨이브·먹안개·데모 중엔 미노출.
   let cineButtons = $derived(villageAerial && !waving && !veil && !cine.active && !heroLanding);
-  // #158 P9: 공유 독은 편집 중에도 상주한다(구 hideActions 폐기 — 종전엔 시트/가로폰 레이아웃
+  // #158 P9 개정: 마을 장면의 사진·공유·내보내기는 만들기 패널 푸터 소유(접힌 peek 에
+  // 떠 있지 않음). 뷰포트 독은 사운드·시네마틱·용어집(+ 솔로 집 씬의 공유)만 유지.
+  // 구 hideActions 폐기 — 종전엔 시트/가로폰 레이아웃
   //   술어로 전역 액션바를 숨기고 공유를 시트 푸터로 옮겼다). 만들기 패널은 세로 모바일에서
   //   상한 있는 시트, 가로 폰에서 좌측 42% 패널이라 독과 겹치지 않는 슬롯을 쓴다.
   //   낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
@@ -1511,6 +1513,13 @@
       onLive={villageLive}
       onCommit={villageCommit}
       onRerollHouse={rerollHouse}
+      onPostcard={postcard}
+      onShare={shareScene}
+      onExport={villageAerial
+        ? exportVillage
+        : (villageEditing && !villageZooming ? exportHouse : null)}
+      exporting={exporting}
+      busy={rerollCooldown || waving}
     />
   {/if}
   <EnvironmentDial
@@ -1521,13 +1530,16 @@
     onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
     onFlowToggle={toggleFlow}
   />
+  <!-- Village scenes own photo/share/export inside the make panel so a collapsed
+       peek sheet never floats secondary tools over the frame. Solo-house keeps
+       those actions on this dock (no make panel). -->
   <ActionBar
-    onReroll={sceneVillage ? null : reroll} onPostcard={postcard} onToggleAudio={toggleAudio}
-    onShare={shareScene}
-    onExport={sceneVillage
-      ? (villageAerial ? exportVillage : (villageEditing && !villageZooming ? exportHouse : null))
-      : null}
+    onReroll={sceneVillage ? null : reroll}
+    onPostcard={sceneVillage ? null : postcard}
+    onShare={sceneVillage ? null : shareScene}
+    onExport={null}
     exporting={exporting}
+    onToggleAudio={toggleAudio}
     audioOn={audioOn} busy={rerollCooldown || waving}
     raised={sheetLayout && villageAerial}
     lifted={sheetLayout && sceneVillage && !villageAerial}

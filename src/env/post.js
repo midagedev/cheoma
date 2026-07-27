@@ -755,6 +755,11 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       //   FRES_STR_MUL: 지수 상향(에지 집중)에 따른 총 에너지 감소를 보정하는 배율(처마 킥 인상 유지).
       fresnelRim.setSunViewDir(_v);
       fresnelRim.setStrength(enabled ? rimBase * 1.6 : 0);
+      // Neighbour rim under DoF → bokeh sparkle. Axial depth = BokehPass focus; amount 0 inert.
+      fresnelRim.setDofGate({
+        focusDepth: dof.focus,
+        amount: (enabled && bokehPass.enabled) ? dof.amount : 0,
+      });
       // 새 재질(마을 리롤·focus-in 오버레이·단일건물 rebuild) self-heal 패치. 대략 0.4s 주기.
       if ((++scanTick % 24) === 0) fresnelRim.apply(scene);
     } else {

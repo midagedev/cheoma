@@ -11,6 +11,10 @@ export const ROOF_WALL_TUCK = 0.16;
 // Tile outer vs structural 개판 underside (roof stack, not room 반자).
 // Zero-thickness DoubleSide put both faces on one plane (z-fight). See docs/ceiling.md.
 export const ROOF_SHELL_THICKNESS = 0.08;
+// How far a hip/valley maru tube centreline sits clear of the outer tile so the
+// tube body does not pierce the shell (radius embed → coplanar z-fight under
+// assembly motion and close eave cameras). Positive = above the surface path.
+export const ROOF_MARU_SURFACE_CLEAR = 0.02;
 
 // Preserve the visible top while extending the lowest solid below grade.
 export function sunkPrism(top, bottom = 0, sink = FOUNDATION_SINK) {

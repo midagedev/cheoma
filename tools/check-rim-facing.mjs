@@ -30,7 +30,9 @@ import * as THREE from 'three';
 import {
   createFresnelRim,
   RIM_BASE_ENERGY_CAP,
+  RIM_DOF_GATE,
   RIM_FACING_GATE,
+  RIM_FRESNEL_AA,
   RIM_SOLAR_GATE,
 } from '/src/env/rim.js';
 import { injectCloudShadow } from '/src/builder/palette.js';
@@ -283,6 +285,8 @@ function facingProbe() {
     samples: result,
     gate: RIM_FACING_GATE,
     solarGate: RIM_SOLAR_GATE,
+    fresnelAa: RIM_FRESNEL_AA,
+    dofGate: RIM_DOF_GATE,
     energyCap: RIM_BASE_ENERGY_CAP,
     sunsetPeak,
     chainKept: patch.fragment.includes('CHEOMA_RIM_CHAIN_MARKER'),
@@ -293,6 +297,13 @@ function facingProbe() {
       && reversePatch.fragment.includes('_mainSunVisibility'),
     reverseComposedProgramKey: reversePatch.key,
     silhouetteInjected: patch.fragment.includes('_fres * _silhouette'),
+    fresnelAaInjected: patch.fragment.includes('fwidth(_ndv)')
+      && patch.fragment.includes('fwidth(_rn)')
+      && patch.fragment.includes('fwidth(_fres)')
+      && patch.fragment.includes('_fres * _silhouette * _aa'),
+    dofDampInjected: patch.fragment.includes('uRimDofAmount')
+      && patch.fragment.includes('-vViewPosition.z')
+      && patch.fragment.includes('_dofDamp'),
     physicalGatesInjected: patch.fragment.includes('_sunFacing * _backlit * _directGate'),
     mainSunCaptureInjected: patch.fragment.includes('_rimMainSunUnshadowed = directLight.color')
       && patch.fragment.includes('_rimMainSunShadowed = directLight.color')
@@ -572,9 +583,10 @@ try {
       && sample.cameraSideSun.delta <= sample.litEdge.delta * 0.45,
     `camera-side sun is attenuated, not backlight (V·L=${sample.cameraSideSun.viewSun.toFixed(3)}, delta=${sample.cameraSideSun.delta.toFixed(4)})`);
   // 직사광 0(그늘)에서도 실루엣 에지는 하늘 산란광으로 읽힌다 — 소거가 아니라 shadowFloor 감쇠.
+  // Floor residual ratio drifts a little with Fresnel AA (same edge, both sides damp).
   check(sample.noDirect.offLuma <= 0.003
       && sample.noDirect.delta > 0
-      && sample.noDirect.delta <= sample.litEdge.delta * 0.75,
+      && sample.noDirect.delta <= sample.litEdge.delta * 0.80,
     `directDiffuse=0 keeps only the sky-scatter residual (base=${sample.noDirect.offLuma.toFixed(4)}, delta=${sample.noDirect.delta.toFixed(4)})`);
   check(sample.shadowedEdge.offLuma <= sample.litEdge.offLuma * 0.20
       && sample.shadowedEdge.delta < sample.litEdge.delta,
@@ -629,6 +641,23 @@ try {
       && result.facing.reverseComposedProgramKey === result.facing.composedProgramKey,
     `rim→cloud callback/cache-key is composed (${result.facing.reverseComposedProgramKey})`);
   check(result.facing.silhouetteInjected, 'compiled rim source multiplies the silhouette gate');
+  check(result.facing.fresnelAa.ndvFull === 0.012
+      && result.facing.fresnelAa.ndvCutoff === 0.09
+      && result.facing.fresnelAa.normalFull === 0.025
+      && result.facing.fresnelAa.normalCutoff === 0.16
+      && result.facing.fresnelAa.fresnelW === 3.5,
+    `fresnel AA contract ${JSON.stringify(result.facing.fresnelAa)}`);
+  check(result.facing.fresnelAaInjected,
+    'compiled rim damps high-frequency Fresnel with fwidth(N·V)/fwidth(N) (giwa stipple)');
+  check(result.facing.dofGate.near === 5
+      && result.facing.dofGate.far === 28
+      && result.facing.dofGate.floor === 0.12,
+    `dof defocus gate contract ${JSON.stringify(result.facing.dofGate)}`);
+  check(result.facing.dofDampInjected,
+    'compiled rim damps energy by axial defocus vs BokehPass focus (neighbour bokeh dots)');
+  check(result.facing.rimFragmentInjected
+      && result.facing.composedProgramKey.includes('cheoma-rim-physical-v1'),
+    'physical rim program key still installed after tile-surface mul');
   check(result.facing.physicalGatesInjected && result.facing.mainSunCaptureInjected
       && result.facing.flooredGatesInjected,
     'shader composes solar-facing, backlight, and stock shadow ratio as floored attenuation');

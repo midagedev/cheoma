@@ -1,10 +1,12 @@
 <script>
-  // Share / export dock — bottom of the *viewport* (left of the inspector via
-  // --inspector-w). Selectors (.actions, [data-action], .seal) stay stable for gates.
+  // Viewport dock — audio / cinematic / glossary (and solo-house rebuild + share).
+  // Village scenes put photo/share/export inside the make panel so a collapsed
+  // peek sheet never floats secondary tools over the frame. Selectors
+  // (.actions, [data-action], .seal) stay stable for gates that still hit the dock.
   import { t } from '../lib/i18n.svelte.js';
   // raised: 세로 모바일 부감에서 하단 peek 시트 위로 올려 겹침 방지.
   // onReroll: 레거시 단일건물 씬에서만 전달(새 씨앗). 마을 씬은 만들기 패널이 소유.
-  // onExport: 컨텍스트에 맞는 대상(부감=마을 / 근접=그 건물)을 App 이 골라 전달. null 이면 미노출.
+  // onPostcard/onShare/onExport: 마을 씬은 null(패널 소유). 솔로 집 씬만 독에 노출.
   // lifted: 세로 모바일에서 만들기 시트가 펼쳐진 동안(편집·전환) 시트 위 씬 영역으로 올린다 —
   //   시트가 게시하는 --sheet-half 를 그대로 소비하므로 독이 시트를 덮거나 시트에 덮이지 않는다.
   let {

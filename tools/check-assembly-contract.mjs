@@ -314,8 +314,29 @@ assert.equal(roofPlan.courseFlow, true,
 {
   const roof = house.getObjectByName('roof');
   assert.equal(roofPlan.rigid, true, 'roof assembly is not marked rigid');
+  // Capture rest pose first (course-flow loop ended at t≈1).
   const restChild = roof.children.map((c) => [c.position.y, c.scale.x, c.scale.y, c.scale.z]);
   const restGroupY = roof.position.y;
+
+  // Frame walk of the roof window: shell halves stay visibility-locked and no
+  // child local transform drifts (z-fight root cause during assembly).
+  for (let i = 0; i <= 40; i++) {
+    const t = 0.74 + (i / 40) * 0.26;
+    anim.seek(t);
+    for (let c = 0; c < roof.children.length - 1; c++) {
+      const a = roof.children[c];
+      const b = roof.children[c + 1];
+      if (a?.name === 'roof-tile-outer' && b?.name === 'roof-gaepan') {
+        assert.equal(a.visible, b.visible,
+          `t=${t.toFixed(3)} shell halves desynced (outer=${a.visible} gaepan=${b.visible})`);
+        assert.equal(a.position.y, restChild[c][0], `t=${t.toFixed(3)} outer local Y drifted`);
+        assert.equal(b.position.y, restChild[c + 1][0], `t=${t.toFixed(3)} gaepan local Y drifted`);
+        assert.equal(a.scale.y, restChild[c][2], `t=${t.toFixed(3)} outer scale.y drifted`);
+        assert.equal(b.scale.y, restChild[c + 1][2], `t=${t.toFixed(3)} gaepan scale.y drifted`);
+      }
+    }
+  }
+
   anim.seek(0.88); // mid roof window (PART_WINDOWS.roof ≈ 0.74–1.0)
   // Group has left rest (rise/bob in flight).
   assert.ok(Math.abs(roof.position.y - restGroupY) > 1e-4,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TILE_LOOK } from './material-colors.js';
 import { makeMaterials, tileSurfaceMaterial } from './palette.js';
 import { PAVILION_DEFAULTS } from './pavilion-spec.js';
 
@@ -230,7 +231,7 @@ export function buildPavilion(opts = {}) {
   rgeo.setIndex(idx);
   rgeo.computeVertexNormals();
   // tileSurfaceMaterial(width=0.34, slope=0.9) → repeat(1,1): 반복수는 위 UV 가 이미 보유.
-  const rmat = tileSurfaceMaterial(M, 0.34, 0.9, 0.6);
+  const rmat = tileSurfaceMaterial(M, 0.34, 0.9, TILE_LOOK.bumpSurface);
   rmat.side = THREE.DoubleSide;
   const rmesh = new THREE.Mesh(rgeo, rmat);
   rmesh.castShadow = rmesh.receiveShadow = true;

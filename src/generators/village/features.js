@@ -26,6 +26,7 @@ import {
 } from './pads.js';
 import { buildSijeon as renderSijeon } from './sijeon.js';
 import { planSijeonFacade } from '../../village/sijeon-plan.js';
+import { TILE_LOOK } from '../../builder/material-colors.js';
 import { tileSurfaceMaterial } from '../../builder/palette.js';
 import {
   buildMjaHouse,
@@ -82,7 +83,7 @@ function sijeonRoofMaterial(shops, palette) {
   const sample = Array.isArray(shops) && shops.length ? shops[0] : null;
   if (!palette?.tileTex || !sample) return sijeonMaterial(0x45494e, 0.9, 'roof');
   const { roof } = planSijeonFacade(sample);
-  return tileSurfaceMaterial(palette, roof.width, Math.hypot(roof.depth / 2, roof.rise), 0.6);
+  return tileSurfaceMaterial(palette, roof.width, Math.hypot(roof.depth / 2, roof.rise), TILE_LOOK.bumpSurface);
 }
 
 // 컴파운드 내부의 실제 door/hanji material set을 야간 패치 대상으로 모은다.

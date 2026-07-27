@@ -160,17 +160,25 @@ try {
     );
   };
 
-  // #158 re-authored: the panel footer owns only the make action; share, photo and
-  // model export moved into the single share dock (P9).
+  // Panel footer: shared toolrow (photo/share/export) + house-primary rebuild.
+  // Floating dock no longer owns village secondary tools.
   const actions = await page.locator('.foot.house:not([aria-hidden="true"]) button')
     .evaluateAll((buttons) => buttons.map((button) => button.textContent.replace(/\s+/g, ' ').trim()));
   invariant(actions.length === 1, `house footer has ${actions.length} actions instead of 1`);
   invariant(actions.some((label) => label.includes('이 집 다시 짓기')), `missing rebuild label: ${actions.join(' | ')}`);
   invariant(!actions.some((label) => /다시 보기|GLB/i.test(label)), `legacy action remains: ${actions.join(' | ')}`);
-  const dockActions = await page.locator('.actions button')
-    .evaluateAll((buttons) => buttons.map((button) => button.textContent.replace(/\s+/g, ' ').trim()));
-  invariant(dockActions.some((label) => label.includes('내보내기')),
-    `share dock lost the model export action: ${dockActions.join(' | ')}`);
+  const panelTools = await page.locator('[data-make-panel] [data-action]')
+    .evaluateAll((buttons) => buttons.map((button) => ({
+      action: button.getAttribute('data-action'),
+      label: button.textContent.replace(/\s+/g, ' ').trim(),
+    })));
+  invariant(panelTools.some((tool) => tool.action === 'export' && /내보내기/.test(tool.label)),
+    `make panel lost the model export action: ${JSON.stringify(panelTools)}`);
+  invariant(panelTools.some((tool) => tool.action === 'postcard')
+    && panelTools.some((tool) => tool.action === 'share'),
+  `make panel lost photo/share tools: ${JSON.stringify(panelTools)}`);
+  const dockExport = await page.locator('.actions [data-action="export"]').count();
+  invariant(dockExport === 0, `floating dock still owns model export (${dockExport})`);
   await openMakeGroup('openings');
 
   // #10: the real Korean editor exposes the planner's six axes with visible
@@ -388,7 +396,7 @@ try {
       // 소유한다. 브레드크럼은 현재 컨텍스트만 이름 짓는다(예: "마을 › 초가").
       tabsText: [...document.querySelectorAll('[data-make-panel] .axistab')]
         .map((tab) => tab.textContent.replace(/\s+/g, ' ').trim()),
-      exportText: document.querySelector('.actions [data-action="export"]')?.textContent?.replace(/\s+/g, ' ').trim(),
+      exportText: document.querySelector('[data-make-panel] [data-action="export"]')?.textContent?.replace(/\s+/g, ' ').trim(),
     };
   }, fixture.parcelId);
   invariant(livePreview.calls.length === 1,

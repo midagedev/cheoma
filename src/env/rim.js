@@ -63,13 +63,29 @@ const RIM_ROLES = new Set(['roof', 'wall', 'wood', 'stone']);
 // ground=0: 넓은 지면·수면은 패치는 유지하되(프로그램 분기 방지) 기여를 0 으로 눌러 제외한다.
 export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.7, ground: 0.0 };
 
-// A local Fresnel term cannot tell a broad grazing plane from a true silhouette, so a gate is
-// still wanted — but only against surfaces that face the camera nearly head-on. The Fresnel
-// exponent (post drives it to ~4.9 at sunset) already concentrates energy at the tangent; a
-// narrow hard gate on top of it erased the eave line itself. Full strength holds out to ~6° of
-// the tangent and the band closes by ~25°, which is wide enough for every tile row and eave to
-// read as a lit thread while a broad plaster or roof plane stays a surface, not a wash.
+// Silhouette gate: full strength to ~6° of the tangent, closed by ~25° so a continuous eave /
+// wall edge reads while a broad plaster plane stays a surface (not a wash).
 export const RIM_FACING_GATE = Object.freeze({ full: 0.10, cutoff: 0.42 });
+
+// Anti-stipple layers for reverse-light gold dots (docs/surface-materials.md):
+//   1) RIM_FRESNEL_AA — fwidth damp of high-frequency Fresnel (MSAA does not fix shading alias).
+//   2) RIM_TILE_SURFACE_MUL — tile *fields* carry no material rim; eaveBand / wood keep the kick.
+//   3) RIM_DOF_GATE — neighbours outside the DoF plane lose rim so eave threads do not seed bokeh dots.
+// Separate product axis: TILE_LOOK roughness/bump (PBR specular on corrugation, not this shader).
+export const RIM_FRESNEL_AA = Object.freeze({
+  ndvFull: 0.012,
+  ndvCutoff: 0.09,
+  normalFull: 0.025,
+  normalCutoff: 0.16,
+  fresnelW: 3.5, // Toksvig-style peak soften vs fwidth(Fresnel)
+});
+
+// paletteKey for corrugated tile fields (not eaveBand / wadang / jeoksae ornaments).
+const TILE_SURFACE_KEYS = new Set([
+  'tileSurface', 'sugiwa', 'tileFlat', 'tileConvex', 'tileRidge',
+]);
+// Zero: field ridges must not light as gold threads; eave kick lives on eaveBand + timber.
+export const RIM_TILE_SURFACE_MUL = 0.0;
 
 // The tangent edge is meant to clip and seed bloom — that overexposed thread along the eave is
 // the look. Cap only far enough to stop a whole pale plaster face or grass clump from becoming a
@@ -108,6 +124,13 @@ const RIM_LENS_DOLLY = dollyScaleForFov(
 export const RIM_DISTANCE_GATE = Object.freeze({
   near: 24 * RIM_LENS_DOLLY,
   far: 175 * RIM_LENS_DOLLY,
+});
+
+// Axial defocus damp (same units as BokehPass focus = -viewZ metres). amount=0 leaves inert.
+export const RIM_DOF_GATE = Object.freeze({
+  near: 5,     // start past ~one parcel of axial defocus
+  far: 28,     // full damp by mid-village depth
+  floor: 0.12, // soft residual, not a hard cutout
 });
 
 // Anti-solar silhouette residual (the former `uRimWrap`). post.js authors this for the legacy
@@ -185,6 +208,12 @@ export function createFresnelRim(scene) {
     uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
     uRimNear: { value: RIM_DISTANCE_GATE.near }, // 근경 거리 게이트 시작(뷰공간 깊이·렌즈 보정)
     uRimFar: { value: RIM_DISTANCE_GATE.far },   // 원경 능선·far 건물 제외(#119 비율 유지·렌즈 보정)
+    // DoF defocus gate (axial metres; matches BokehPass focus). amount 0 → no damp.
+    uRimFocusDepth: { value: 40 },
+    uRimDofAmount: { value: 0 },
+    uRimDofNear: { value: RIM_DOF_GATE.near },
+    uRimDofFar: { value: RIM_DOF_GATE.far },
+    uRimDofFloor: { value: RIM_DOF_GATE.floor },
   };
 
   // 그룹 계수는 셰이더 리터럴이 아니라 재질별 uniform으로 전달한다. onBeforeCompile 클로저의
@@ -196,6 +225,9 @@ export function createFresnelRim(scene) {
     organic: { value: RIM_GROUP_MUL.organic },
     ground: { value: RIM_GROUP_MUL.ground },
   };
+  // Shared across all non-tile materials (1) vs tile fields (RIM_TILE_SURFACE_MUL). Same program.
+  const tileSurfaceMulFull = { value: 1.0 };
+  const tileSurfaceMulDamp = { value: RIM_TILE_SURFACE_MUL };
 
   // 커버리지 카운트(검증 로그): 재질군별 패치 수 — 나무·풀·소품 포함 증명·제외 준수 확인.
   const counts = {
@@ -261,6 +293,9 @@ export function createFresnelRim(scene) {
     // true LOD roots only — plain+rim and lod+rim must not fork WebGLProgram families.
     patchLodScreenDoorMaterial(mat);
     const groupUniform = groupUniforms[group] || groupUniforms.misc;
+    const tileSurfaceUniform = TILE_SURFACE_KEYS.has(mat.userData.paletteKey)
+      ? tileSurfaceMulDamp
+      : tileSurfaceMulFull;
     const facingFull = RIM_FACING_GATE.full.toFixed(2);
     const facingCutoff = RIM_FACING_GATE.cutoff.toFixed(2);
     const energyCap = RIM_BASE_ENERGY_CAP.toFixed(2);
@@ -272,6 +307,11 @@ export function createFresnelRim(scene) {
     const directStart = RIM_SOLAR_GATE.directStart.toFixed(3);
     const directFull = RIM_SOLAR_GATE.directFull.toFixed(2);
     const shadowFloor = RIM_SOLAR_GATE.shadowFloor.toFixed(2);
+    const aaNdvFull = RIM_FRESNEL_AA.ndvFull.toFixed(3);
+    const aaNdvCutoff = RIM_FRESNEL_AA.ndvCutoff.toFixed(2);
+    const aaNormalFull = RIM_FRESNEL_AA.normalFull.toFixed(3);
+    const aaNormalCutoff = RIM_FRESNEL_AA.normalCutoff.toFixed(2);
+    const aaFresnelW = RIM_FRESNEL_AA.fresnelW.toFixed(2);
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
@@ -283,7 +323,13 @@ export function createFresnelRim(scene) {
       shader.uniforms.uRimScale = u.uRimScale;
       shader.uniforms.uRimNear = u.uRimNear;
       shader.uniforms.uRimFar = u.uRimFar;
+      shader.uniforms.uRimFocusDepth = u.uRimFocusDepth;
+      shader.uniforms.uRimDofAmount = u.uRimDofAmount;
+      shader.uniforms.uRimDofNear = u.uRimDofNear;
+      shader.uniforms.uRimDofFar = u.uRimDofFar;
+      shader.uniforms.uRimDofFloor = u.uRimDofFloor;
       shader.uniforms.uRimGroupMul = groupUniform;
+      shader.uniforms.uRimTileMul = tileSurfaceUniform;
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
           uniform vec3 uRimColor;
@@ -294,7 +340,13 @@ export function createFresnelRim(scene) {
           uniform float uRimScale;
           uniform float uRimNear;
           uniform float uRimFar;
-          uniform float uRimGroupMul;`)
+          uniform float uRimFocusDepth;
+          uniform float uRimDofAmount;
+          uniform float uRimDofNear;
+          uniform float uRimDofFar;
+          uniform float uRimDofFloor;
+          uniform float uRimGroupMul;
+          uniform float uRimTileMul;`)
         .replace('#include <lights_fragment_begin>', `
           vec3 _rimMainSunUnshadowed = vec3(0.0);
           vec3 _rimMainSunShadowed = vec3(0.0);
@@ -309,14 +361,17 @@ export function createFresnelRim(scene) {
             vec3 _rv = normalize(vViewPosition);              // 표면→카메라(뷰공간)
             float _ndv = clamp(dot(_rn, _rv), 0.0, 1.0);
             float _fres = pow(1.0 - _ndv, uRimPower);
-            // 카메라를 정면으로 마주보는 면만 제외한다(넓은 벽면이 통째로 자체발광처럼 뜨는 회귀).
-            // 접선~${facingCutoff} 구간은 프레넬 지수가 이미 에지에 집중시키므로 그대로 통과시킨다.
+            // (1) Fresnel AA — high-frequency grazing damp (fwidth). Continuous eaves pass more.
+            float _ndvW = fwidth(_ndv);
+            float _nW = length(fwidth(_rn));
+            float _fresW = fwidth(_fres);
+            float _fresAa = 1.0 - smoothstep(${aaNdvFull}, ${aaNdvCutoff}, _ndvW);
+            float _normAa = 1.0 - smoothstep(${aaNormalFull}, ${aaNormalCutoff}, _nW);
+            float _peakAa = _fres / max(_fres + _fresW * ${aaFresnelW}, 1e-4);
+            float _aa = min(_fresAa, _normAa) * clamp(_peakAa, 0.0, 1.0);
+            // Front-facing wash gate (broad wall must not become an HDR emitter).
             float _silhouette = 1.0 - smoothstep(${facingFull}, ${facingCutoff}, _ndv);
-            // 실제 주 태양은 그림자를 캐스트하는 첫 번째 방향광이다. 세 물리 조건(N·L, V·L,
-            // 주 태양 visibility)은 유지하되 곱하기 0 이 아니라 바닥값 있는 감쇠로 쓴다 —
-            // 골든아워엔 하늘 전체가 광원이라 그늘·측광 실루엣도 산란광으로 빛난다.
-            // stock shadow 전후의 색 비율을 써서 태양 intensity와 무관한 실제 가시율을 얻는다.
-            // 뒤따르는 비그림자 fill·점광원은 그늘 림을 '전강도로' 되살릴 수 없다.
+            // Solar: floored attenuation (facing · backlight · main-sun shadow ratio).
             vec3 _sunDir = normalize(uSunViewDir);
             #if ( NUM_DIR_LIGHTS > 0 )
               _sunDir = normalize(directionalLights[0].direction);
@@ -333,12 +388,16 @@ export function createFresnelRim(scene) {
             float _directLuma = dot(reflectedLight.directDiffuse, _rimLuma);
             float _directGate = mix(${shadowFloor}, 1.0,
               smoothstep(${directStart}, ${directFull}, _directLuma) * _mainSunVisibility);
-            // 근경 거리 게이트(원경·far 건물 제외). vViewPosition 길이 = 뷰공간 깊이.
+            // Distance fade (far ridges) + (3) axial defocus damp (neighbour DoF sparkle).
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
-            float _rim = _fres * _silhouette * _sunFacing * _backlit * _directGate
-              * _df * uRimStrength * uRimScale;
-            // 톤매핑 전(선형 HDR)에 outgoingLight 로 가산 → bloom 이 밝은 처마 킥을 흡수,
-            // OutputPass ACES 가 한 번만 롤오프. 재질군 uniform으로 유기물/소품 강도를 절제.
+            float _axial = max(-vViewPosition.z, 0.0);
+            float _defocus = abs(_axial - uRimFocusDepth);
+            float _dofInFocus = 1.0 - smoothstep(uRimDofNear, uRimDofFar, _defocus);
+            float _dofDamp = mix(1.0, mix(uRimDofFloor, 1.0, _dofInFocus), clamp(uRimDofAmount, 0.0, 1.0));
+            // (2) uRimTileMul: tile fields 0, eaveBand/wood 1.
+            float _rim = _fres * _silhouette * _aa * _sunFacing * _backlit * _directGate
+              * _df * _dofDamp * uRimStrength * uRimScale * uRimTileMul;
+            // Linear HDR add before bloom / ACES. Group mul keeps building > misc > organic.
             outgoingLight += uRimColor * min(max(_rim, 0.0), ${energyCap}) * uRimGroupMul;
           }
           #include <opaque_fragment>`);
@@ -379,6 +438,13 @@ export function createFresnelRim(scene) {
     setScale(s) { u.uRimScale.value = s; },
     setNearFar(n, f) { u.uRimNear.value = n; u.uRimFar.value = f; },
     setSunViewDir(v) { u.uSunViewDir.value.copy(v); },
+    // Product DoF plane. focusDepth = BokehPass axial focus (metres); amount 0 disables damp.
+    setDofGate({ focusDepth, amount } = {}) {
+      if (Number.isFinite(focusDepth) && focusDepth > 0) u.uRimFocusDepth.value = focusDepth;
+      if (Number.isFinite(amount)) {
+        u.uRimDofAmount.value = Math.min(1, Math.max(0, amount));
+      }
+    },
     get patchedCount() { return counts.total; },
     get coverage() { return { ...counts }; },
     get groupMultipliers() {

@@ -3,7 +3,8 @@
   //   ① Two tabs [Explore / Focus] sync camera (tab = focus-in/out). Morph crossfade kept.
   //   ② Group accordion (one body open) — every axis remains listed; only one expands.
   //   ③ Cost badges (live / settle / wave) state rebuild cost honestly.
-  //   Share/export live in ActionBar; footer owns regenerate only.
+  //   ④ Secondary share tools (photo / share / export) live under the make tabs
+  //      so a collapsed peek sheet never floats them over the scene.
   import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
@@ -28,6 +29,9 @@
     // 키보드 건물 탐색(#114·#158 P8): 랜드마크/집 그룹 + 상한 20(선택 대상은 항상 포함).
     navigationTargets = [], navigationSelectedId = null, navigationBusy = false,
     onNavigateTarget = null,
+    // Secondary tools — sticky under tabs (not the floating dock / not peek-only grip).
+    onPostcard = null, onShare = null, onExport = null,
+    exporting = false, busy = false,
   } = $props();
 
   // ── 모프 크로스페이드(원칙 2) — 마을은 먼저 빠지고 집은 뒤이어 든다. ──
@@ -35,6 +39,11 @@
   const villageOpacity = $derived(1 - smoothstep(0.28, 0.72, morph));
   const houseOpacity = $derived(smoothstep(0.28, 0.72, morph));
   const houseActive = $derived(morph >= 0.5);   // 포인터·손잡이 컨텍스트
+  const hasShareTools = $derived(!!(onPostcard || onShare || onExport));
+  const exportLabel = $derived(exporting
+    ? t('glb_exporting')
+    : (houseActive ? t('act_glb') : t('glb_village')));
+  const exportTip = $derived(houseActive ? t('glb_house_tip') : t('glb_village_tip'));
 
   // 크로스페이드 중에도 키보드·접근성 소유자는 하나다. inert 적용 전 포커스가 퇴장하는 본문/푸터 안에
   // 있을 때만 다음 컨텍스트의 브레드크럼(좌상, 이 컴포넌트 밖)으로 옮긴다. 캔버스·환경 UI·References 에
@@ -400,7 +409,9 @@
   </div>
 </BottomSheet>
 
-<!-- Sticky header: context tabs only — dual "만들기/INSPECTOR" labels were chrome noise. -->
+<!-- Sticky header: context tabs + secondary share tools.
+     Tools stay outside the scroll body so reachability is independent of scroll
+     position; peek still hides the whole header (inert + clipped). -->
 {#snippet header()}
   <div class="makehead">
     <div class="axistabs" role="tablist" aria-label={t('axis_make')}>
@@ -429,10 +440,50 @@
         <span class="lab">{t('mode_house')}</span>
       </button>
     </div>
+    {#if hasShareTools}
+      <div class="toolrow" role="group" aria-label={t('axis_share')}>
+        {#if onPostcard}
+          <button
+            class="tbtn"
+            type="button"
+            data-action="postcard"
+            onclick={() => onPostcard?.()}
+            disabled={busy}
+            title={t('act_postcard_tip')}
+          >
+            <span class="tface">{t('act_postcard')}</span>
+          </button>
+        {/if}
+        {#if onShare}
+          <button
+            class="tbtn"
+            type="button"
+            data-action="share"
+            onclick={() => onShare?.()}
+            disabled={busy}
+            title={t('act_share_tip')}
+          >
+            <span class="tface">{t('act_share')}</span>
+          </button>
+        {/if}
+        {#if onExport}
+          <button
+            class="tbtn"
+            type="button"
+            data-action="export"
+            onclick={() => onExport?.()}
+            disabled={exporting || busy}
+            title={exportTip}
+          >
+            <span class="tface">{exportLabel}</span>
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 {/snippet}
 
-<!-- Footer: regenerate only (share/export owned by ActionBar) -->
+<!-- Footer: regenerate only. Share tools sit under the header tabs. -->
 {#snippet footer()}
   <div bind:this={footerRoot} class="footstack">
     <div
@@ -563,7 +614,7 @@
 
 <style>
   /* ── Inspector header ── */
-  .makehead { display: flex; flex-direction: column; gap: 0; padding-bottom: 10px; }
+  .makehead { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; }
   .axistabs {
     display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
     padding: 3px; border-radius: 8px;
@@ -827,7 +878,39 @@
     background: var(--accent); border: none; cursor: pointer;
   }
 
-  /* ── Footer actions ── */
+  /* ── Share tools (scroll body) + footer regenerate ── */
+  .toolrow {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .tbtn {
+    min-height: 44px;
+    min-width: 0;
+    padding: 8px 6px;
+    border-radius: 7px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-elevated);
+    color: var(--panel-text);
+    font-family: var(--ui);
+    transition: background 0.12s ease, border-color 0.12s ease, filter 0.2s ease;
+  }
+  .tbtn .tface {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 650;
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tbtn:hover:not(:disabled) {
+    background: var(--panel-hover);
+    border-color: rgba(90, 168, 224, 0.35);
+  }
+  .tbtn:disabled { opacity: 0.45; cursor: default; }
+  .tbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .footstack { display: grid; }
   .footstack > .foot {
     grid-column: 1; grid-row: 1;
@@ -875,8 +958,10 @@
     .scaleval { font-size: 13px; }
     .toggle { padding: 9px 5px; font-size: 12px; min-height: 40px; }
     .rebuild, .hbtn { min-height: 44px; padding: 10px; font-size: 13px; }
+    .tbtn { min-height: 44px; padding: 8px 4px; }
+    .tbtn .tface { font-size: 12px; }
     .advtoggle { min-height: 40px; font-size: 11.5px; padding: 6px 2px; }
-    .makehead { padding-bottom: 4px; }
+    .makehead { padding-bottom: 4px; gap: 6px; }
     .buildingnav { padding-bottom: 4px; gap: 3px; margin-bottom: 0; }
     .stack > .ctx { gap: 4px; }
     section { gap: 4px; }

@@ -5,7 +5,10 @@ import { Buffer } from 'node:buffer';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOF_SHELL_THICKNESS } from '../src/core/surface-clearance.js';
+import {
+  ROOF_MARU_SURFACE_CLEAR,
+  ROOF_SHELL_THICKNESS,
+} from '../src/core/surface-clearance.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const requireApp = createRequire(join(ROOT, 'app', 'package.json'));
@@ -72,6 +75,24 @@ function centroid(mesh) {
   return { x: sx / n, y: sy / n, z: sz / n };
 }
 
+/** Same-index min distance — collapses to 0 when underside offset hit a zero normal. */
+function minSameIndexSeparation(outer, under) {
+  outer.updateWorldMatrix(true, false);
+  under.updateWorldMatrix(true, false);
+  const pa = outer.geometry.attributes.position;
+  const pb = under.geometry.attributes.position;
+  assert.equal(pa.count, pb.count, 'outer/gaepan vertex counts differ');
+  const va = new THREE.Vector3();
+  const vb = new THREE.Vector3();
+  let min = Infinity;
+  for (let i = 0; i < pa.count; i++) {
+    va.fromBufferAttribute(pa, i).applyMatrix4(outer.matrixWorld);
+    vb.fromBufferAttribute(pb, i).applyMatrix4(under.matrixWorld);
+    min = Math.min(min, va.distanceTo(vb));
+  }
+  return min;
+}
+
 function checkHouse(label, house) {
   const roof = house.getObjectByName('roof');
   assert.ok(roof, `${label}: no roof group`);
@@ -113,10 +134,17 @@ function checkHouse(label, house) {
     const u = centroid(under);
     const sep = Math.hypot(o.x - u.x, o.y - u.y, o.z - u.z);
     assert.ok(sep >= ROOF_SHELL_THICKNESS * 0.85,
-      `${label}: outer/gaepan separation ${sep.toFixed(3)}m < shell thickness `
+      `${label}: outer/gaepan centroid separation ${sep.toFixed(3)}m < shell thickness `
       + `(${ROOF_SHELL_THICKNESS}m) — coplanar faces would z-fight`);
     assert.ok(o.y > u.y,
       `${label}: gaepan centroid is not below outer (oy=${o.y.toFixed(3)} uy=${u.y.toFixed(3)})`);
+    // Same-index vertex distance must never collapse to 0 (degenerate normals).
+    const minVert = minSameIndexSeparation(outer, under);
+    assert.ok(minVert >= ROOF_SHELL_THICKNESS * 0.85,
+      `${label}: outer/gaepan min same-index separation ${minVert.toFixed(4)}m `
+      + `< ${ROOF_SHELL_THICKNESS}m — zero-normal offset left coplanar verts`);
+    assert.equal(outer.userData.asmGroup, under.userData.asmGroup,
+      `${label}: outer/gaepan asmGroup mismatch (${outer.userData.asmGroup}/${under.userData.asmGroup})`);
   }
   roof.traverse((o) => {
     if (!o.isMesh || !o.material) return;
@@ -125,6 +153,51 @@ function checkHouse(label, house) {
         `${label}: tileSurface still DoubleSide on ${o.name || o.type}`);
     }
   });
+
+  // Hip / valley maru tubes must clear the outer tile — a radius embed pierces the
+  // shell and z-fights under assembly / close eave cameras (docs/ceiling.md §1b).
+  const maru = [];
+  roof.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.name === 'hip-maru' || o.name === 'valley-maru') maru.push(o);
+  });
+  if (maru.length && outers.length) {
+    const sample = (mesh, maxN = 48) => {
+      mesh.updateWorldMatrix(true, false);
+      const pos = mesh.geometry.attributes.position;
+      const step = Math.max(1, Math.floor(pos.count / maxN));
+      const v = new THREE.Vector3();
+      const out = [];
+      for (let i = 0; i < pos.count; i += step) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+        out.push(v.clone());
+      }
+      return out;
+    };
+    const outerPts = outers.flatMap((m) => sample(m, 36));
+    let worst = Infinity;
+    let worstName = '';
+    for (const m of maru) {
+      const pts = sample(m, 40);
+      for (const a of pts) {
+        for (const b of outerPts) {
+          const d = a.distanceTo(b);
+          if (d < worst) {
+            worst = d;
+            worstName = m.name;
+          }
+        }
+      }
+    }
+    // Allow half the authored clear as the sample floor (tube radial verts sit at
+    // clear from the surface path; sampling both meshes undershoots slightly).
+    const floor = ROOF_MARU_SURFACE_CLEAR * 0.45;
+    assert.ok(worst >= floor,
+      `${label}: ${worstName} sits only ${worst.toFixed(4)}m from outer tile `
+      + `(need ≥ ${floor.toFixed(3)}m — maru piercing shell)`);
+    console.log(`  ${label}: maru↔outer min≈${worst.toFixed(3)}m (clear≥${floor.toFixed(3)})`);
+  }
+
   console.log(`  ${label}: ${pairs.length} shell pair(s), min-sep ok`);
 }
 

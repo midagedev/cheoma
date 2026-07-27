@@ -1,7 +1,12 @@
 import * as THREE from 'three';
+import { TILE_LOOK } from './material-colors.js';
 import { tileSurfaceMaterial } from './palette.js';
 import { createThatchRoofProfile, THATCH_ROOF_SEGMENTS } from './thatch-profile.js';
-import { ROOF_SHELL_THICKNESS, ROOF_WALL_TUCK } from '../core/surface-clearance.js';
+import {
+  ROOF_MARU_SURFACE_CLEAR,
+  ROOF_SHELL_THICKNESS,
+  ROOF_WALL_TUCK,
+} from '../core/surface-clearance.js';
 import { addRoofTileShell } from '../layout/roof-shell.js';
 import { resolveRoofRank, roofOrnamentPolicy } from './roof-rank.js';
 
@@ -110,7 +115,7 @@ export function buildRoof(P, L, M) {
   }
 
   const slopeLen = Math.hypot(L.zEave, L.ridgeY - yEaveTile);
-  const bump = isMatbae ? 0.9 : 0.6; // 맞배는 기와 요철 강조(수키와 볼록 열과 함께)
+  const bump = isMatbae ? TILE_LOOK.bumpMatbae : TILE_LOOK.bumpSurface;
   const matFront = tileSurfaceMaterial(M, L.W + P.eaveOverhang * 2, slopeLen, bump);
   const matSide = tileSurfaceMaterial(M, L.D + P.eaveOverhang * 2, slopeLen * (1 - vStar), bump);
   const underMat = M.eaveBand.clone();
@@ -242,21 +247,25 @@ export function buildRoof(P, L, M) {
   jeoksaeMat.map = M.jeoksae.map.clone();
   jeoksaeMat.map.repeat.set(Math.max(2, Math.round((xr * 2) / 0.5)), 1);
   jeoksaeMat.map.needsUpdate = true;
+  // Seat the ridge stack just above the outer tile — a −0.10 sink put the box
+  // bottom coplanar with the shell and z-fought under assembly cameras.
+  const ridgeSeat = ROOF_MARU_SURFACE_CLEAR;
   const ridge = new THREE.Mesh(
     new THREE.BoxGeometry(xr * 2 + 0.1, P.ridgeH, ridgeDepth),
     isPalace ? M.ridgePlaster : jeoksaeMat);        // 궁: 양성바름 백색 회 / 그 외: 적새 켜
-  ridge.position.set(0, L.ridgeY + P.ridgeH / 2 - 0.10, 0);
+  ridge.position.set(0, L.ridgeY + P.ridgeH / 2 + ridgeSeat, 0);
   ridge.castShadow = true;
   g.add(ridge);
   if (isPalace) {
     // 양성바름 마루의 상·하 마감: 윗면 어두운 기와 관(수키와 마루장) + 밑 착고/부고 어두운 켜.
     const cap = new THREE.Mesh(
       new THREE.BoxGeometry(xr * 2 + 0.2, 0.14, ridgeDepth + 0.1), M.tileRidge);
-    cap.position.set(0, L.ridgeY + P.ridgeH - 0.10, 0);
+    cap.position.set(0, L.ridgeY + P.ridgeH + ridgeSeat, 0);
     cap.castShadow = true; g.add(cap);
+    // Gogo sits under the ridge body but still above the outer tile.
     const gogo = new THREE.Mesh(
       new THREE.BoxGeometry(xr * 2 + 0.14, 0.09, ridgeDepth + 0.06), jeoksaeMat);
-    gogo.position.set(0, L.ridgeY - 0.055, 0);
+    gogo.position.set(0, L.ridgeY + ridgeSeat + 0.045, 0);
     gogo.castShadow = true; g.add(gogo);
   }
 
@@ -291,20 +300,25 @@ export function buildRoof(P, L, M) {
     }
 
     // 내림마루: 용마루 끝 → 합각 밑변 모서리 (합각 경사변을 따르는 직선). 궁=양성바름.
+    // Centreline clears outer tile by r + ROOF_MARU_SURFACE_CLEAR (no shell pierce).
+    const naerimR = 0.16;
+    const naerimLift = naerimR + ROOF_MARU_SURFACE_CLEAR;
     for (const sx of [1, -1]) for (const sz of [1, -1]) {
       g.add(tube([
-        new THREE.Vector3(sx * xr, L.ridgeY - 0.02, 0),
-        new THREE.Vector3(sx * xr, yGable + 0.06, sz * zGable),
-      ], 0.16, maruMat));
+        new THREE.Vector3(sx * xr, L.ridgeY + naerimLift, 0),
+        new THREE.Vector3(sx * xr, yGable + naerimLift, sz * zGable),
+      ], naerimR, maruMat));
     }
 
     // 추녀마루: 합각 밑변 모서리 → 처마 모서리 (전면 곡면의 u=±1 가장자리)
+    const chunyeoR = 0.13;
+    const chunyeoLift = chunyeoR + ROOF_MARU_SURFACE_CLEAR;
     for (const sx of [1, -1]) for (const sz of [1, -1]) {
       const pts = [];
       for (let i = 0; i <= 8; i++) {
         const v = vStar + (1 - vStar) * (i / 8);
         const p = frontPoint(sx, v, sz);
-        p.y += 0.09;
+        p.y += chunyeoLift;
         pts.push(p);
       }
       const last = pts[pts.length - 1].clone();
@@ -312,7 +326,7 @@ export function buildRoof(P, L, M) {
       const hipDir = last.clone().sub(prev).normalize();
       last.add(hipDir.clone().multiplyScalar(0.22));
       pts.push(last);
-      g.add(tube(pts, 0.13, maruMat));    // 추녀마루: 궁=양성바름
+      g.add(tube(pts, chunyeoR, maruMat));    // 추녀마루: 궁=양성바름
 
       // 토수: 추녀·사래 끝 마구리에 끼우는 용머리형 장식 캡(추녀 방향으로 뻗음).
       const tosuLen = 0.34;

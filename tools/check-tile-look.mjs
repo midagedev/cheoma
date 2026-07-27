@@ -44,13 +44,21 @@ const loSum = GIWA_ROOF.lo.reduce((a, b) => a + b, 0);
 const hiSum = GIWA_ROOF.hi.reduce((a, b) => a + b, 0);
 assert.ok(hiSum > loSum, 'GIWA_ROOF hi must sum above lo for household wealth signal');
 
-// palette.js must wire TILE_LOOK roughness constants (no hard-coded low-roughness tile path).
+// palette.js must wire TILE_LOOK roughness + bump defaults (no scattered magic numbers).
 const paletteSrc = readFileSync(resolve(ROOT, 'src/builder/palette.js'), 'utf8');
 assert.match(paletteSrc, /TILE_LOOK\.tileFlatRoughness/);
 assert.match(paletteSrc, /TILE_LOOK\.tileRidgeRoughness/);
 assert.match(paletteSrc, /TILE_LOOK\.tileConvexRoughness/);
 assert.match(paletteSrc, /TILE_LOOK\.tileSurfaceRoughness/);
 assert.match(paletteSrc, /TILE_LOOK\.sugiwaRoughness/);
+assert.match(paletteSrc, /TILE_LOOK\.bumpSurface/);
+assert.match(paletteSrc, /TILE_LOOK\.bumpSugiwa/);
+assert.ok(TILE_LOOK.bumpSurface > 0 && TILE_LOOK.bumpSurface < 0.5);
+assert.ok(TILE_LOOK.bumpSugiwa > 0 && TILE_LOOK.bumpSugiwa <= TILE_LOOK.bumpSurface);
+assert.ok(TILE_LOOK.bumpMatbae >= TILE_LOOK.bumpSurface && TILE_LOOK.bumpMatbae < 0.6);
+const skeletonSrc = readFileSync(resolve(ROOT, 'src/layout/roof-skeleton.js'), 'utf8');
+assert.match(skeletonSrc, /TILE_LOOK\.bumpSurface/);
+assert.match(skeletonSrc, /TILE_LOOK\.bumpSugiwa/);
 // Softened groove fillStyle (not near-black high-contrast seam) — telephoto black-line clump fix.
 assert.match(paletteSrc, /g\.fillStyle\s*=\s*['"]rgba\(48,\s*50,\s*56,\s*0\.32\)['"]/);
 assert.doesNotMatch(paletteSrc, /g\.fillStyle\s*=\s*['"]rgba\(30,\s*31,\s*36,\s*0\.5\)['"]/);
@@ -64,5 +72,6 @@ assert.equal(VILLAGE_MATERIAL_COLORS.giwaRoofAverage, 0x56585f);
 console.log(
   `TILE LOOK: PASS (tile Y=${tileLum.toFixed(3)}, tileDark Y=${darkLum.toFixed(3)}, `
   + `sep=${(tileLum - darkLum).toFixed(3)}, GIWA_ROOF sum ${loSum.toFixed(2)}→${hiSum.toFixed(2)}, `
-  + `jitter=${GIWA_ROOF.jitter})`,
+  + `jitter=${GIWA_ROOF.jitter}, bump ${TILE_LOOK.bumpSurface}/${TILE_LOOK.bumpSugiwa}/${TILE_LOOK.bumpMatbae}, `
+  + `rough ${TILE_LOOK.tileSurfaceRoughness})`,
 );

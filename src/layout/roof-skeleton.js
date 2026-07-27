@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { TILE_LOOK } from '../builder/material-colors.js';
 import { tileSurfaceMaterial, sugiwaMaterial } from '../builder/palette.js';
-import { ROOF_SHELL_THICKNESS } from '../core/surface-clearance.js';
+import {
+  ROOF_MARU_SURFACE_CLEAR,
+  ROOF_SHELL_THICKNESS,
+} from '../core/surface-clearance.js';
 import { resampleChainPreservingKnots } from './chain-sampling.js';
 import { giwaRoofEnvelope } from './giwa-roof-envelope.js';
 import { addRoofTileShell } from './roof-shell.js';
@@ -28,7 +32,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
   const {
     eaveY = 0, eaveOverhang = 1.4, riseScale = 0.8,
     profileCurve = 0.5, cornerLift = 0.5, planCurve = 0.35,
-    ridgeH = 0.4, mats, tileBump = 0.6,
+    ridgeH = 0.4, mats, tileBump = TILE_LOOK.bumpSurface,
     // 기와집 격상 옵션(기본 off → 정자·기타 스켈레톤 지붕은 영향 없음).
     // sugiwaRolls: 수키와 볼록 롤 3D 지오메트리, rafters: 처마 밑 연목·부연,
     // junctionCaps: ㄱ/ㄷ자 마루 접합부 solid 회첨 캡.
@@ -266,7 +270,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
           for (let iv = 0; iv <= KV; iv++) {
             const v = vA + (vB - vA) * (iv / KV);
             const s = solveS(a, v);
-            pts.push(pointAt(s, v).addScaledVector(normalAt(s, v), rollR * 0.72));
+            // Ride fully outside the outer tile (was 0.72r → 28% radius embed → z-fight).
+            pts.push(pointAt(s, v).addScaledVector(normalAt(s, v), rollR + ROOF_MARU_SURFACE_CLEAR));
           }
           if (fromEave) {
             // 처마 끝: v=V0 접선 방향으로 처마 밖으로 살짝 내밀어 둥근 마구리 확보.
@@ -274,7 +279,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
             const e0 = pointAt(sE, V0), e1 = pointAt(sI, 0.09);
             const tipDir = e0.clone().sub(e1).normalize();
             const n0 = normalAt(sE, V0);
-            const tip = e0.clone().addScaledVector(tipDir, 0.12).addScaledVector(n0, rollR * 0.72);
+            const tip = e0.clone().addScaledVector(tipDir, 0.12)
+              .addScaledVector(n0, rollR + ROOF_MARU_SURFACE_CLEAR);
             pts.unshift(tip);
             capTips.push({ p: tip, dir: tipDir, n: n0 });
           }
@@ -327,7 +333,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     const merged = mergeGeometries(rollGeoms, false);
     rollGeoms.forEach((geo) => geo.dispose());
     // 단색 재질 대신 튜브 경사 길이에 비례해 기와 무늬가 흘러내리는 전용 텍스처 재질 적용
-    roofSugiwaMat = sugiwaMaterial(M, maxSlopeLen, 0.45);
+    roofSugiwaMat = sugiwaMaterial(M, maxSlopeLen, TILE_LOOK.bumpSugiwa);
     const rolls = new THREE.Mesh(merged, roofSugiwaMat);
     rolls.castShadow = true; rolls.receiveShadow = false;
     rolls.name = 'sugiwa-rolls';
@@ -435,13 +441,14 @@ export function buildSkeletonRoof(footprint, opts = {}) {
       jmat.map.repeat.set(Math.max(1, Math.round(len / 0.9)), Math.max(3, Math.round(bodyH / 0.11)));
       jmat.map.needsUpdate = true;
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.44, bodyH, len), jmat);
-      body.position.copy(mid); body.position.y = surfMid + bodyH * 0.5;
+      // Seat above the outer tile — coplanar bottom face on the shell z-fights.
+      body.position.copy(mid); body.position.y = surfMid + bodyH * 0.5 + ROOF_MARU_SURFACE_CLEAR;
       body.quaternion.setFromUnitVectors(ZAX, axis);
       body.castShadow = body.receiveShadow = true; body.userData.asmGroup = 'finial';
       g.add(body);
       // 숫마루장: 마루 위 둥근 수키와 마루(반원통 상단 캡)
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, len, 12), M.tileRidge);
-      cap.position.copy(mid); cap.position.y = surfMid + bodyH;
+      cap.position.copy(mid); cap.position.y = surfMid + bodyH + ROOF_MARU_SURFACE_CLEAR;
       cap.quaternion.setFromUnitVectors(YAX, axis);
       cap.castShadow = true; cap.userData.asmGroup = 'finial';
       g.add(cap);
@@ -450,31 +457,62 @@ export function buildSkeletonRoof(footprint, opts = {}) {
         const outw = (end === va ? va : vb).clone().sub(mid).normalize();
         const mw = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.14, 0.07, 14), M.wadang);
         mw.position.copy(end).addScaledVector(outw, 0.03);
-        mw.position.y = surfMid + bodyH * 0.7;
+        mw.position.y = surfMid + bodyH * 0.7 + ROOF_MARU_SURFACE_CLEAR;
         mw.quaternion.setFromUnitVectors(YAX, outw);
         mw.rotateX(-0.35);   // 끝을 살짝 위로 세운 바래기(망와) 느낌
         mw.castShadow = true; mw.userData.asmGroup = 'finial';
         g.add(mw);
       }
     } else {
-      // 각진 용마루(BoxGeometry 로 단면 두껍게) — 마을 giwa 기존 경로(콜 불변)
+      // 각진 용마루(BoxGeometry 로 단면 두껍게) — 마을 giwa 기존 경로(콜 불변).
+      // Bottom face must clear the outer tile (mid is surface + ridgeH/2).
       const box = new THREE.Mesh(new THREE.BoxGeometry(0.34, ridgeH, len), M.tileRidge);
       box.position.copy(mid);
+      box.position.y += ROOF_MARU_SURFACE_CLEAR;
       box.quaternion.setFromUnitVectors(ZAX, axis);
       box.castShadow = true;
       g.add(box);
     }
   }
-  // 오목 곡면을 따라 마루선을 휘게 하는 곡선 튜브
-  const curvedTube = (top, botPlan, botY, r, dy, name) => {
+  // Surface point on the hip/valley path (no ornament offset).
+  const pathSurf = (top, botPlan, botY, v) => {
+    const x = botPlan.x + (top.x - botPlan.x) * v;
+    const z = botPlan.z + (top.z - botPlan.z) * v;
+    const y = botY + (yOf(top.h) - botY) * fprofile(v);
+    return new THREE.Vector3(x, y, z);
+  };
+  // Unit exterior normal ≈ ∂p/∂v × horizontal cross-slope, forced up-facing.
+  // Pure +Y lift under-offsets on steep tiles and still pierces the shell.
+  const pathNormal = (top, botPlan, botY, v) => {
+    const eps = 0.03;
+    const a = pathSurf(top, botPlan, botY, Math.max(0, v - eps));
+    const b = pathSurf(top, botPlan, botY, Math.min(1, v + eps));
+    const along = b.clone().sub(a);
+    if (along.lengthSq() < 1e-12) return new THREE.Vector3(0, 1, 0);
+    along.normalize();
+    // Prefer a plan-horizontal cross direction from the path's xz run.
+    const runX = top.x - botPlan.x;
+    const runZ = top.z - botPlan.z;
+    let cross = new THREE.Vector3(-runZ, 0, runX);
+    if (cross.lengthSq() < 1e-12) cross.set(1, 0, 0);
+    cross.normalize();
+    const n = new THREE.Vector3().crossVectors(along, cross);
+    if (n.lengthSq() < 1e-12) return new THREE.Vector3(0, 1, 0);
+    n.normalize();
+    if (n.y < 0) n.negate();
+    return n;
+  };
+  // 오목 곡면을 따라 마루선을 휘게 하는 곡선 튜브.
+  // Centreline = surface + n̂ · (r + clear) so the whole tube clears the outer tile.
+  const curvedTube = (top, botPlan, botY, r, name) => {
+    const clear = r + ROOF_MARU_SURFACE_CLEAR;
     const pts = [];
     const K = 10;
     for (let i = 0; i <= K; i++) {
       const v = i / K; // 0=처마, 1=절점
-      const x = botPlan.x + (top.x - botPlan.x) * v;
-      const z = botPlan.z + (top.z - botPlan.z) * v;
-      const y = botY + (yOf(top.h) - botY) * fprofile(v) + dy;
-      pts.push(new THREE.Vector3(x, y, z));
+      const p = pathSurf(top, botPlan, botY, v);
+      p.addScaledVector(pathNormal(top, botPlan, botY, v), clear);
+      pts.push(p);
     }
     const mesh = new THREE.Mesh(
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), K, r, 8), M.tileRidge);
@@ -483,9 +521,10 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     // 게이트·디버그용: 처마쪽 끝(계획 좌표). TubeGeometry 중심선 복원 대신 계약 끝점을 고정.
     mesh.userData.botPlan = { x: botPlan.x, z: botPlan.z };
     mesh.userData.topPlan = { x: top.x, z: top.z };
+    mesh.userData.maruClear = clear;
     return mesh;
   };
-  // 내림·추녀마루(hip): 절점 → 처마 코너(앙곡 반영)로 오목하게 내려감
+  // 내림·추녀마루(hip): 절점 → 처마 코너(앙곡 반영)로 오목하게 내려감.
   for (const s of sk.hips) {
     const hi = s.a.h >= s.b.h ? s.a : s.b;
     const lo = s.a.h >= s.b.h ? s.b : s.a;
@@ -493,7 +532,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     const botPlan = ci >= 0 ? eaveV[ci] : lo;
     const botY = eaveY + (ci >= 0 ? eaveLift[ci] : 0);
     // heroDetail: 내림·추녀마루를 굵게(적새 톤) — 근접에서 마루선이 실하게 보이게
-    g.add(curvedTube(hi, botPlan, botY, heroDetail ? 0.13 : 0.1, heroDetail ? 0.085 : 0.07, 'hip-maru'));
+    const hipR = heroDetail ? 0.13 : 0.1;
+    g.add(curvedTube(hi, botPlan, botY, hipR, 'hip-maru'));
   }
   // 회첨(valley): 반사 코너 → 처마 코너(eaveV, 추녀와 같은 계약). 벽 코너(poly)를 쓰면
   // ㄷ자 오목 코너에서 처마 overhang 만큼(~2m) 짧아져 면 끝·수키와 절단선과 어긋난다.
@@ -515,7 +555,7 @@ export function buildSkeletonRoof(footprint, opts = {}) {
       }
       g.add(buildValleyTileCourse(hi, botPlan, botY, yOf, fprofile, valleyCourseMat));
     } else {
-      g.add(curvedTube(hi, botPlan, botY, 0.085, -0.04, 'valley-maru'));
+      g.add(curvedTube(hi, botPlan, botY, 0.085, 'valley-maru'));
     }
   }
 
@@ -577,7 +617,6 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 // 드로우: 골당 Mesh 1 (기존 valley-maru 와 동일). 프로그램: sugiwa 계열 재사용
 //   (지붕당 재질 인스턴스 1 — 모든 회첨이 공유, 베이크 UV 라 길이별 repeat 불필요).
 const VALLEY_COURSE_R = 0.072;
-const VALLEY_COURSE_DY = -0.04;
 const VALLEY_TUBE_SEGS = 10;
 const VALLEY_TUBE_RADIAL = 8;
 
@@ -591,7 +630,7 @@ function makeValleyCourseMaterial(mats, sharedSugiwaMat, lengthHint) {
       mat.map.needsUpdate = true;
     }
   } else {
-    mat = sugiwaMaterial(mats, lengthHint || 3.5, 0.45);
+    mat = sugiwaMaterial(mats, lengthHint || 3.5, TILE_LOOK.bumpSugiwa);
     if (mat.map) {
       mat.map.repeat.set(1, 1);
       mat.map.needsUpdate = true;
@@ -606,12 +645,44 @@ function buildValleyTileCourse(top, botPlan, botY, yOf, fprofile, mat) {
   const pts = [];
   let pathLen = 0;
   let prev = null;
+  const clear = VALLEY_COURSE_R + ROOF_MARU_SURFACE_CLEAR;
   for (let i = 0; i <= VALLEY_TUBE_SEGS; i++) {
     const v = i / VALLEY_TUBE_SEGS; // 0=처마, 1=절점 (curvedTube 와 동일)
     const x = botPlan.x + (top.x - botPlan.x) * v;
     const z = botPlan.z + (top.z - botPlan.z) * v;
-    const y = botY + (yOf(top.h) - botY) * fprofile(v) + VALLEY_COURSE_DY;
-    const p = new THREE.Vector3(x, y, z);
+    const y = botY + (yOf(top.h) - botY) * fprofile(v);
+    // Normal-offset into the open trough (same contract as curvedTube).
+    const eps = 0.03;
+    const v0 = Math.max(0, v - eps), v1 = Math.min(1, v + eps);
+    const a = new THREE.Vector3(
+      botPlan.x + (top.x - botPlan.x) * v0,
+      botY + (yOf(top.h) - botY) * fprofile(v0),
+      botPlan.z + (top.z - botPlan.z) * v0,
+    );
+    const b = new THREE.Vector3(
+      botPlan.x + (top.x - botPlan.x) * v1,
+      botY + (yOf(top.h) - botY) * fprofile(v1),
+      botPlan.z + (top.z - botPlan.z) * v1,
+    );
+    const along = b.sub(a);
+    let n = new THREE.Vector3(0, 1, 0);
+    if (along.lengthSq() > 1e-12) {
+      along.normalize();
+      const runX = top.x - botPlan.x;
+      const runZ = top.z - botPlan.z;
+      const cross = new THREE.Vector3(-runZ, 0, runX);
+      if (cross.lengthSq() > 1e-12) {
+        cross.normalize();
+        n.crossVectors(along, cross);
+        if (n.lengthSq() > 1e-12) {
+          n.normalize();
+          if (n.y < 0) n.negate();
+        } else {
+          n.set(0, 1, 0);
+        }
+      }
+    }
+    const p = new THREE.Vector3(x, y, z).addScaledVector(n, clear);
     if (prev) pathLen += p.distanceTo(prev);
     prev = p;
     pts.push(p);

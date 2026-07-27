@@ -128,11 +128,29 @@ LOD 대체 mesh·스크린스페이스 필터 없이 기존 tile 경로만 재�
 | --- | --- | --- |
 | `tileDark` 분리 | `material-colors.js` | 마루 톤을 평면(`tile` Y≈0.30)보다 분명히 어둡게(Y≈0.26, 분리 ≈0.04). 과거 `tile`/`tileDark` 거의 동일 → 마루 위계 없음. 순흑 직전까지 내리지 않음. |
 | 텍스처 홈 대비 | `palette.js#makeTileTexture` | 홈을 `rgba(48,50,56,0.32)` 로 완화(구 `rgba(30,31,36,0.5)`). 근경 골 가독은 bump + 수키와 기하가 담당. |
-| roughness 밴드 | `TILE_LOOK` → `tileFlat`/`tileRidge`/`tileConvex`/`tileSurface`/`sugiwa` | 0.92–0.96 matte. 낮은 roughness 의 스펙큘러 하이라이트가 망원에서 깜빡이며 선처럼 읽힌다. |
+| roughness 밴드 | `TILE_LOOK` | ~0.985 matte (`roughnessMin` 0.97–0.995). 낮은 roughness 스펙큘러가 역광·망원에서 골을 금 점선으로 읽히게 한다. |
+| bump 기본값 | `TILE_LOOK.bumpSurface` / `bumpSugiwa` / `bumpMatbae` | 0.32 / 0.22 / 0.45. `roof-skeleton`·`palette`·`tileroof`·`roof.js` 공유. |
 | 좁은 지붕 `instanceColor` | `variants.js#GIWA_ROOF` | 채널 끝 ≈[0.90,1.03], jitter 0.025. 초가 이엉 스프레드는 유지. wealth→톤 단조는 유지. |
 
-순수 계약: `npm run check:tile-look` (휘도·분리·roughness 상수 배선·GIWA_ROOF 밴드). 기하 등간격
-계약은 기존 `npm run check:giwa-tile-course` (수키와 roughness 밴드 포함).
+순수 계약: `npm run check:tile-look` (휘도·분리·roughness·bump 상수 배선·GIWA_ROOF 밴드).
+기하 등간격은 `npm run check:giwa-tile-course`.
+
+### 역광 금 점선 (PBR 골 + 림 스택)
+
+제품 sunset에서 기와 골·배경 집에 금 점선이 잦다. 시각 A/B로 원인이 둘로 갈린다:
+
+| 원인 | 증거 | 레버 |
+| --- | --- | --- |
+| **PBR 스펙큘러 on 골 기하** | `post=0` / 림 OFF 에도 점선 유지 | `TILE_LOOK` roughness↑, bump↓ (위 표) |
+| **재질 Fresnel 림** | 타일 field·고주파 실·DoF 밖 이웃 | 아래 림 스택 |
+
+림 스택 (`src/env/rim.js`, 게이트 `npm run check:rim`):
+
+1. **`RIM_FRESNEL_AA`** — `fwidth` 로 고주파 그레이징 감쇠 (MSAA는 셰이딩 앨리어스를 못 막음)
+2. **`RIM_TILE_SURFACE_MUL = 0`** — `tileSurface`/`sugiwa`/`tileRidge`… field 림 끔. 처마 킥은 `eaveBand`·목재
+3. **`RIM_DOF_GATE`** — DoF 축방향 focus 대비 디포커스 거리에서 이웃 림 감쇠 (`amount=0`이면 비활성)
+
+근경 골 가독은 기하 수키와가 담당한다. 수키와 튜브 반경 자체는 이 계약 밖.
 
 ### 제품 한계 (이 항목이 하지 않는 것)
 

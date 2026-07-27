@@ -355,35 +355,36 @@ try {
   })})`);
 
   // The guide layout checks intentionally outlast the 3s appreciation fade.
-  // Wake the existing ActionBar before exercising its trusted keyboard share.
+  // Village share lives in the make-panel footer (not the floating dock).
   await page.mouse.move(32, 32);
   await page.waitForFunction(() => !document.querySelector('.chroma')?.classList.contains('faded'), null, { timeout });
-  const shareButton = page.locator('.actions [data-action="share"]');
+  const shareButton = page.locator('[data-make-panel] [data-action="share"]');
   await shareButton.waitFor({ state: 'visible', timeout });
   const desktopShareLayout = await shareButton.evaluate((button) => {
     const rect = button.getBoundingClientRect();
-    const panel = document.querySelector('.ctxcard')?.getBoundingClientRect();
-    const overlap = panel
-      ? Math.max(0, Math.min(rect.right, panel.right) - Math.max(rect.left, panel.left))
-        * Math.max(0, Math.min(rect.bottom, panel.bottom) - Math.max(rect.top, panel.top))
-      : 0;
+    const panel = document.querySelector('[data-make-panel]')?.getBoundingClientRect();
+    const insidePanel = !!button.closest('[data-make-panel]');
+    const dockOwners = document.querySelectorAll('.actions [data-action="share"]').length;
     return {
       count: document.querySelectorAll('[data-action="share"]').length,
+      insidePanel,
+      dockOwners,
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
       width: rect.width, height: rect.height,
       viewport: [innerWidth, innerHeight],
-      panelOverlap: overlap,
+      panel: panel ? [panel.left, panel.top, panel.right, panel.bottom] : null,
     };
   });
   pass(desktopShareLayout.count === 1
+      && desktopShareLayout.insidePanel
+      && desktopShareLayout.dockOwners === 0
       && desktopShareLayout.width >= 44
       && desktopShareLayout.height >= 44
       && desktopShareLayout.left >= 0
       && desktopShareLayout.top >= 0
       && desktopShareLayout.right <= 1280
-      && desktopShareLayout.bottom <= 800
-      && desktopShareLayout.panelOverlap === 0,
-  `1280x800 aerial share action is unique, bounded, and clear of ContextPanel (${JSON.stringify(desktopShareLayout)})`);
+      && desktopShareLayout.bottom <= 800,
+  `1280x800 aerial share action is unique, 44px, and owned by the make panel (${JSON.stringify(desktopShareLayout)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-desktop-aerial.png') });
   }
@@ -407,7 +408,8 @@ try {
     { timeout: Math.min(timeout, 5000) },
   ).catch(() => {});
   const abortShareDispatch = await page.evaluate(() => {
-    const button = document.querySelector('.actions [data-action="share"]');
+    const button = document.querySelector('[data-make-panel] [data-action="share"]')
+      || document.querySelector('.actions [data-action="share"]');
     return {
       payloads: window.__shareProbe.nativePayloads.length,
       active: document.activeElement === button,
@@ -1576,33 +1578,25 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   const contextSheet = page.locator('.sheet.context');
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
-  const mobileAerialShare = page.locator('.actions [data-action="share"]');
-  await mobileAerialShare.waitFor({ state: 'visible', timeout });
-  const mobileAerialShareLayout = await mobileAerialShare.evaluate((button) => {
-    const rect = button.getBoundingClientRect();
-    const sheet = document.querySelector('.sheet.context')?.getBoundingClientRect();
-    const overlap = sheet
-      ? Math.max(0, Math.min(rect.right, sheet.right) - Math.max(rect.left, sheet.left))
-        * Math.max(0, Math.min(rect.bottom, Math.min(sheet.bottom, innerHeight)) - Math.max(rect.top, sheet.top))
-      : 0;
+  // Collapsed peek must not float share over the scene — tools live inside the sheet.
+  const mobileAerialSharePeek = await page.evaluate(() => {
+    const dock = document.querySelector('.actions [data-action="share"]');
+    const panel = document.querySelector('[data-make-panel] [data-action="share"]');
+    const sheet = document.querySelector('.sheet.context');
     return {
-      count: document.querySelectorAll('[data-action="share"]').length,
-      left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
-      width: rect.width, height: rect.height,
-      sheetTop: sheet?.top ?? null,
-      viewport: [innerWidth, innerHeight],
-      sheetOverlap: overlap,
+      dockOwners: document.querySelectorAll('.actions [data-action="share"]').length,
+      panelOwners: document.querySelectorAll('[data-make-panel] [data-action="share"]').length,
+      snap: sheet?.dataset.snap || null,
+      panelInert: !!panel?.closest('[inert]'),
+      dockVisible: !!dock && getComputedStyle(dock).visibility !== 'hidden',
     };
   });
-  pass(mobileAerialShareLayout.count === 1
-      && mobileAerialShareLayout.width >= 44
-      && mobileAerialShareLayout.height >= 44
-      && mobileAerialShareLayout.left >= 0
-      && mobileAerialShareLayout.top >= 0
-      && mobileAerialShareLayout.right <= 390
-      && mobileAerialShareLayout.bottom <= 844
-      && mobileAerialShareLayout.sheetOverlap === 0,
-  `390x844 aerial share action is unique, bounded, and clear of the peek sheet (${JSON.stringify(mobileAerialShareLayout)})`);
+  pass(mobileAerialSharePeek.dockOwners === 0
+      && mobileAerialSharePeek.panelOwners === 1
+      && mobileAerialSharePeek.snap === 'peek'
+      && mobileAerialSharePeek.panelInert
+      && !mobileAerialSharePeek.dockVisible,
+  `390x844 aerial peek keeps share inside the inert panel, not the dock (${JSON.stringify(mobileAerialSharePeek)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-mobile-aerial.png') });
   }
@@ -1688,18 +1682,20 @@ try {
   const mobileReducedTransition = await contextSheet.evaluate((sheet) => (
     Number.parseFloat(getComputedStyle(sheet).transitionDuration) || 0
   ));
-  // #158 re-authored (P9): share, photo, and model export are owned by the single
-  // share dock, which now stays mounted while editing (hideActions retired) and is
-  // lifted above the expanded sheet instead of hidden behind it.
-  const mobileFocusShare = page.locator('.actions [data-action="share"]');
+  // Share/photo/export live in the expanded make-panel footer (not the floating
+  // dock) so a collapsed peek never floats secondary tools over the scene.
+  // Focus-in keeps peek by default; expand once to reach the tools.
+  const mobileFocusSnap = await page.evaluate(() => document.querySelector('.sheet.context')?.dataset.snap || null);
+  if (mobileFocusSnap === 'peek') {
+    await contextGrip.press('Enter');
+    await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
+  }
+  const mobileFocusShare = page.locator('[data-make-panel] [data-action="share"]');
   await mobileFocusShare.waitFor({ state: 'visible', timeout });
   const mobileFocusShareLayout = await mobileFocusShare.evaluate((button) => {
     const rect = button.getBoundingClientRect();
     const sheet = document.querySelector('.sheet.context')?.getBoundingClientRect();
-    const sheetOverlap = sheet
-      ? Math.max(0, Math.min(rect.right, sheet.right) - Math.max(rect.left, sheet.left))
-        * Math.max(0, Math.min(rect.bottom, Math.min(sheet.bottom, innerHeight)) - Math.max(rect.top, sheet.top))
-      : 0;
+    const insideSheet = !!button.closest('.sheet.context');
     const reroll = document.querySelector('.foot.house .hbtn.reroll')?.getBoundingClientRect();
     const rerollOverlap = reroll
       ? Math.max(0, Math.min(rect.right, reroll.right) - Math.max(rect.left, reroll.left))
@@ -1708,12 +1704,15 @@ try {
     return {
       count: document.querySelectorAll('[data-action="share"]').length,
       inDock: !!button.closest('.actions'),
+      inPanel: !!button.closest('[data-make-panel]'),
       panelShareOwners: document.querySelectorAll('[data-make-panel] [data-action="share"]').length,
+      dockShareOwners: document.querySelectorAll('.actions [data-action="share"]').length,
       globalActionBar: document.querySelectorAll('.actions').length,
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
       width: rect.width, height: rect.height,
       viewport: [innerWidth, innerHeight],
-      sheetOverlap,
+      sheet: sheet ? [sheet.left, sheet.top, sheet.right, Math.min(sheet.bottom, innerHeight)] : null,
+      insideSheet,
       rerollOverlap,
     };
   });
@@ -1726,8 +1725,10 @@ try {
     transition: mobileReducedTransition,
   })})`);
   pass(mobileFocusShareLayout.count === 1
-      && mobileFocusShareLayout.inDock
-      && mobileFocusShareLayout.panelShareOwners === 0
+      && !mobileFocusShareLayout.inDock
+      && mobileFocusShareLayout.inPanel
+      && mobileFocusShareLayout.panelShareOwners === 1
+      && mobileFocusShareLayout.dockShareOwners === 0
       && mobileFocusShareLayout.globalActionBar === 1
       && mobileFocusShareLayout.width >= 44
       && mobileFocusShareLayout.height >= 44
@@ -1735,9 +1736,9 @@ try {
       && mobileFocusShareLayout.right <= 390
       && mobileFocusShareLayout.top >= 0
       && mobileFocusShareLayout.bottom <= 844
-      && mobileFocusShareLayout.sheetOverlap === 0
+      && mobileFocusShareLayout.insideSheet
       && mobileFocusShareLayout.rerollOverlap === 0,
-  `390x844 focus keeps one share action in the dock, clear of the expanded sheet (${JSON.stringify(mobileFocusShareLayout)})`);
+  `390x844 focus keeps one share action in the make panel footer (${JSON.stringify(mobileFocusShareLayout)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-mobile-focus.png') });
   }
