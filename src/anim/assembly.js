@@ -327,7 +327,10 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
   let done = false;
 
   // 한 부재에 진행도 uu 를 적용(공중 낙하 → 두부 출렁 복원). 원 transform 기준 상대.
-  function applyItem(it, uu, drop, tofu) {
+  // allowScale=false: 지붕 청크(기와면·서까래·처마띠)는 비등방 스케일을 자식마다 따로 걸면
+  // authored 깊이 간격이 깨져 지붕 상면/하면(방 천장으로 읽히는 서까래 층) 사이 z-fighting 이
+  // 조립 중에 생긴다. 위치(두부 출렁)만 두고 스케일은 항등으로 유지한다.
+  function applyItem(it, uu, drop, tofu, allowScale = true) {
     if (uu <= 0) {
       // 아직 순서 전 → 숨김(공중에 어색하게 떠 있지 않게).
       it.child.visible = false;
@@ -340,8 +343,12 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     } else {
       it.child.visible = it.vis0;
       it.child.position.y = it.y0 - fallOffset(uu) * drop + tofuBob(uu, tofu) * drop;
-      const s = tofuScale(uu, tofu);
-      it.child.scale.set(it.sx0 * s.sxz, it.sy0 * s.sy, it.sz0 * s.sxz);
+      if (allowScale) {
+        const s = tofuScale(uu, tofu);
+        it.child.scale.set(it.sx0 * s.sxz, it.sy0 * s.sy, it.sz0 * s.sxz);
+      } else {
+        it.child.scale.set(it.sx0, it.sy0, it.sz0);
+      }
     }
   }
 
@@ -350,10 +357,12 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     for (const g of groups) {
       const intra = g.hasLag ? g.itemDur * INTRA_SHARE : 0;
       const body = g.itemDur - intra;   // 켜 흐름을 뺀 실제 부재 애니 길이
+      // Roof keeps authored layer clearances (tile shell vs rafters vs eave band).
+      const allowScale = g.name !== 'roof';
       for (const u of g.units) {
         for (const it of u.items) {
           const uu = clamp01((t - u.start - it.lag * intra) / body);
-          applyItem(it, uu, g.drop, g.tofu);
+          applyItem(it, uu, g.drop, g.tofu, allowScale);
         }
       }
     }

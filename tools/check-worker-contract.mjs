@@ -188,10 +188,12 @@ const expectedSceneHashes = {
   //   Hanyang already enabled; village stays single-representation but pick/scene
   //   cohort bytes moved with the same build. 재기준 직전 실측: 네 규모 모두
   //   sync == worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
-  village: 'ae9d4d8a:8f3189ca:e144d13f:a6248da6',
-  town: 'f1e54ca7:d1938ab9:63e5eb48:1bd13855',
-  capital: '0d8c9a88:1befe6be:846da73c:31fd254e',
-  hanyang: 'fdfaa80e:fd1b2c70:5bbb4895:50d92c96',
+  // Rafters under skeleton roofs sit a few cm deeper so the DoubleSide tile shell
+  // does not share depth with the underside "ceiling" read (assembly z-fighting).
+  village: '99a36486:f6bca08c:5f426751:938d9062',
+  town: '289ded31:9ded58bd:0fd6bd1f:4f091cef',
+  capital: '2a16456a:36a28758:01c58a6c:ed20f94a',
+  hanyang: 'ea67ef5c:0c90a000:6020df7b:dbed4286',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
