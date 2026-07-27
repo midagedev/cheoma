@@ -177,11 +177,12 @@ export function buildRoof(P, L, M) {
     const pos = [], idx = [];
     const N = 40;
     const shellT = ROOF_SHELL_THICKNESS;
+    const bandPast = 0.01;
     for (let i = 0; i <= N; i++) {
       const u = (i / N) * 2 - 1;
       const p = pointFn(u, 1, sign);
-      // Span outer tile lip → structural gaepan (shell thickness).
-      pos.push(p.x, p.y + 0.02, p.z, p.x, p.y - shellT, p.z);
+      // Span outer tile lip → past structural gaepan (avoid coplanar underside edge).
+      pos.push(p.x, p.y + 0.02, p.z, p.x, p.y - shellT - bandPast, p.z);
     }
     for (let i = 0; i < N; i++) {
       const a = i * 2, b = a + 1, c = a + 2, d = a + 3;

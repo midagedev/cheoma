@@ -10,7 +10,9 @@ export const OPENING_FACE_CLEARANCE = 0.02;
 export const ROOF_WALL_TUCK = 0.16;
 // Tile outer vs structural 개판 underside (roof stack, not room 반자).
 // Zero-thickness DoubleSide put both faces on one plane (z-fight). See docs/ceiling.md.
-export const ROOF_SHELL_THICKNESS = 0.08;
+// 0.10m: 0.08 still read as under-eave static with reverse light + assembly motion on
+// steep 팔작 faces (depth precision at the eave lip); 10cm stays within eave-board band.
+export const ROOF_SHELL_THICKNESS = 0.10;
 // How far a hip/valley maru tube centreline sits clear of the outer tile so the
 // tube body does not pierce the shell (radius embed → coplanar z-fight under
 // assembly motion and close eave cameras). Positive = above the surface path.

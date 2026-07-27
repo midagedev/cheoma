@@ -179,12 +179,15 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     addRoofTileShell(g, geo, mat, underMat, ROOF_SHELL_THICKNESS);
 
     // 처마 단면 띠(연함·기와 마구리 두께) — 외피 상단에서 개판 하면까지 물리 두께.
+    // Bottom sits 1cm past the gaepan plane so the lip edge is not coplanar with the
+    // underside (shared eaveBand material made that read as ceiling static).
     const bandPos = [], bandIdx = [];
     const shellT = ROOF_SHELL_THICKNESS;
+    const bandPast = 0.01;
     for (let iu = 0; iu <= NU; iu++) {
       const e = eavePts[iu]; const eY = eaveY + eaveLifts[iu];
       // 처마 끝을 상단 반대 방향으로 약간 더(안허리곡 살린 실제 처마 끝)
-      bandPos.push(e.x, eY + 0.03, e.z, e.x, eY - shellT, e.z);
+      bandPos.push(e.x, eY + 0.03, e.z, e.x, eY - shellT - bandPast, e.z);
     }
     for (let iu = 0; iu < NU; iu++) {
       const a = iu * 2, b = a + 1, c = a + 2, d = a + 3;
@@ -304,22 +307,25 @@ export function buildSkeletonRoof(footprint, opts = {}) {
 
       if (rafters) {
         // 연목(아래 열)·부연(위 열): 처마 밑에서 밖으로 방사. 코너 근처는 선자연이 덮음.
-        // Sit below the structural gaepan (ROOF_SHELL_THICKNESS), not the outer tile.
-        const clear = ROOF_SHELL_THICKNESS + 0.04;
+        // Sit below the structural gaepan along the surface normal (pure −Y was too
+        // shallow on steep tiles and z-fought the under-eave ceiling read).
+        const clear = ROOF_SHELL_THICKNESS + 0.10;
         const nR = Math.max(6, Math.round(width / 0.42));
         for (let j = 0; j <= nR; j++) {
           const s = j / nR;
           if (Math.abs(2 * s - 1) > 0.88) continue;
           // 연목: 처마 안쪽(v≈0.32) 밑 → 처마 밖으로 내민 끝
-          const inner = pointAt(s, 0.32); inner.y -= 0.20 + clear;
+          const nIn = normalAt(s, 0.32);
+          const inner = pointAt(s, 0.32).addScaledVector(nIn, -(0.22 + clear));
           const edge = pointAt(s, 0.02);
           const dir = edge.clone().sub(pointAt(s, 0.12)).normalize();
-          const tip = edge.clone().addScaledVector(dir, 0.14); tip.y -= 0.12 + clear;
-          inner.y -= 0.02;
+          const nEd = normalAt(s, 0.02);
+          const tip = edge.clone().addScaledVector(dir, 0.14).addScaledVector(nEd, -(0.14 + clear));
           rafterRound.push({ from: inner, to: tip });
-          // 부연(위 열, 겹처마): 연목보다 얕게·바깥으로 더
-          const bi = pointAt(s, 0.16); bi.y -= 0.06 + clear;
-          const bt = edge.clone().addScaledVector(dir, 0.30); bt.y -= 0.02 + clear;
+          // 부연(위 열, 겹처마): 연목보다 얕게·바깥으로 더 — still under gaepan
+          const nBi = normalAt(s, 0.16);
+          const bi = pointAt(s, 0.16).addScaledVector(nBi, -(0.08 + clear));
+          const bt = edge.clone().addScaledVector(dir, 0.30).addScaledVector(nEd, -(0.06 + clear));
           rafterSquare.push({ from: bi, to: bt });
         }
       }

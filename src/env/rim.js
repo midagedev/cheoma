@@ -265,6 +265,8 @@ export function createFresnelRim(scene) {
     if (mat.transparent) return false;
     if (mat.userData.role === 'opening') return false;
     if (mat.userData.hanjiGlow) return false;
+    // Structural 개판 underside: broad under-eave plane — rim here is static sparkle, not silhouette.
+    if (mat.userData.isRoofGaepan || mat.userData.paletteKey === 'gaepan') return false;
     if (emissiveDominant(mat)) return false;
     if (hasIncompatibleCustomCacheKey(mat)) return false;
     return true;

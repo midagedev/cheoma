@@ -128,6 +128,10 @@ function checkHouse(label, house) {
     assert.equal(m.userData.roofLayer, 'gaepan');
     assert.equal(m.userData.isRoomBanja, false,
       `${label}: gaepan must not claim to be room banja (docs/ceiling.md)`);
+    assert.equal(m.material.userData?.paletteKey, 'gaepan',
+      `${label}: gaepan material must use paletteKey=gaepan (not eaveBand — rim sparkle)`);
+    assert.equal(m.material.userData?.isRoofGaepan, true,
+      `${label}: gaepan material must set isRoofGaepan for rim exclusion`);
   }
   for (const [outer, under] of pairs) {
     const o = centroid(outer);

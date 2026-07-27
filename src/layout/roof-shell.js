@@ -134,6 +134,12 @@ export function addRoofTileShell(group, geometry, outerMat, underMat, thickness 
   group.add(outer);
 
   const underGeo = makeRoofUndersideGeometry(geometry, thickness);
+  // Gaepan is the under-eave "ceiling" read. It must not inherit eaveBand's roof-rim
+  // kick: Fresnel on the broad underside reads as gold static/z-fight sparkle under
+  // reverse light and during assembly (docs/ceiling.md, surface-materials).
+  underMat.userData.paletteKey = 'gaepan';
+  underMat.userData.isRoofGaepan = true;
+  underMat.userData.role = underMat.userData.role || 'roof';
   const under = new THREE.Mesh(underGeo, underMat);
   under.castShadow = false;
   under.receiveShadow = true;

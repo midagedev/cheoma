@@ -48,6 +48,11 @@
    `r + ROOF_MARU_SURFACE_CLEAR`(기본 2cm) 이상 떨어져야 한다. 반경만큼 묻히면 조립·처마
    근접에서 기와 면과 동일 평면 충돌이 난다. 회첨은 골 **안(공기 쪽)** 에 앉히고 지붕
    솔리드 쪽으로 파묻지 않는다.
+1c. **개판 하면 림 금지** — `paletteKey: 'gaepan'` / `isRoofGaepan` 재질은 Fresnel rim 패치
+   대상이 아니다. eaveBand 클론을 그대로 쓰면 role=roof 림이 넓은 처마 하면에 금점 지직으로
+   읽힌다. 처마 단면 띠(eaveBand)만 림 유지.
+1d. **서까래** — 개판 아래로 표면 노멀 방향 `ROOF_SHELL_THICKNESS + 0.10` 이상. 순수 −Y 오프셋은
+   급경사에서 하면과 붙는다.
 2. **개판 하면 ≠ 방 반자** — `userData.roofLayer = 'gaepan'`, plan `undersideIsRoomBanja: false`.
 3. **공간별 finish** — `yeondeung` | `banja` | `well` (`CEILING_FINISH`).
 4. **조립** — 지붕 그룹 강체 1유닛; 자식 local Y/scale 고정으로 구조 스택 보존.
