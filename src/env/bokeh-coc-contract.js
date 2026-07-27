@@ -61,17 +61,21 @@ export const BOKEH_TILT_MAX_ANCHOR_OFFSET = Math.max(
 );
 
 export const BOKEH_COC_DEFAULTS = Object.freeze({
-  // 85mm f/2.8 on a 1:22 architectural model, which is what this look physically
-  // is (docs/dof-cinematic-research.md §1.2). Exposed in metres rather than as an
-  // f-stop because no real lens reaches the required f/0.13 at full scale.
-  apertureMeters: 0.675,
+  // Product close-focus aperture diameter in metres (thin-lens CoC). Originally
+  // 0.675 m (~85mm f/2.8 on a 1:22 model, docs/dof-cinematic-research.md §1.2 / §4.3)
+  // so a 150 m ridge sat at ~1.2% of frame height. That left the south courtyard —
+  // chickens, dog, yard life between camera and the door focus plane — too soft at
+  // residential focus. 0.52 m keeps background separation and lantern discs while
+  // deepening the near band so 마당 life stays readable. Exposed in metres rather
+  // than an f-stop because no real full-scale lens reaches the required f-number.
+  apertureMeters: 0.52,
   // Fraction of viewport height. It binds the foreground only: the background
   // asymptote (cocScalePx / focus) stays below it at product focus distances, so
   // far blur runs the pure physical curve to infinity and the near/far asymmetry
   // is a guaranteed contract rather than a tuning accident.
   //
-  // 0.04 (not 0.03): a product telephoto focus at ~50 m already spends ~2.4% of
-  // frame height on the untilted far asymptote (aperture 0.675 m, 16°, 720p). The
+  // 0.04 (not 0.03): a product telephoto focus at ~50 m already spends a few
+  // percent of frame height on the untilted far asymptote (16°, 720p). The
   // Scheimpflug tilt multiplies that asymptote by (1 + tilt * maxAnchorOffset), so
   // a 3% clamp was already saturated before tilt could add the diorama exit ramp.
   // 4% restores headroom for the product tilt below without re-clamping the far
@@ -92,8 +96,8 @@ export const BOKEH_COC_DEFAULTS = Object.freeze({
   // ordinary lens. 0.55 is the product diorama dial: strong enough to narrow the
   // sharp band and steepen the exit ramp without a second aperture, and still
   // under the far-asymptote headroom at product telephoto focus (50 m / 16° /
-  // 720p) with maxCocFraction 0.04:
-  //   asymptote 2.40% * (1 + 0.55 * 0.65) = 3.26% < 4.00%
+  // 720p) with maxCocFraction 0.04 (and the deeper product aperture above):
+  //   asymptote * (1 + 0.55 * 0.65) < 4.00%
   // Raising tilt requires raising maxCocFraction in the same edit;
   // bokehTiltFarAsymptoteHeadroom() fails the gate if it is not.
   tiltStrength: 0.55,

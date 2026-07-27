@@ -426,8 +426,11 @@ invariant(
   asymptote < maxCoc,
   `background asymptote ${asymptote.toFixed(2)}px reached the ${maxCoc.toFixed(2)}px clamp`,
 );
+// Foreground clamp sample: with the product aperture (0.52 m) a 20 m plane no
+// longer saturates maxCoc — that is intentional (courtyard life stays readable).
+// Closer near planes still hit the cap so only the extreme foreground is clamped.
 invariant(
-  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(20) >= maxCoc - 1e-6,
+  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(15) >= maxCoc - 1e-6,
   "the CoC clamp stopped being foreground-only",
 );
 // Product telephoto focus (~50 m, 16°) with the authored tilt dial must keep the

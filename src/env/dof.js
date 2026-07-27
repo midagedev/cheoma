@@ -11,11 +11,10 @@
 // this value, so a transition still scales the CoC linearly and continuously.
 
 const EPSILON = 1e-6;
-// Product base aperture diameter in metres (85mm f/2.8 on a 1:22 architectural
-// model). Must stay identical to BOKEH_COC_DEFAULTS.apertureMeters and
-// VILLAGE_FOCUS_DOF_APERTURE so the tilt ramp weight (aperture / apertureMeters)
-// reaches 1.0 at full focus amount.
-export const DEFAULT_DOF_APERTURE = 0.675;
+// Product base aperture diameter in metres. Must stay identical to
+// BOKEH_COC_DEFAULTS.apertureMeters and VILLAGE_FOCUS_DOF_APERTURE so the tilt
+// ramp weight (aperture / apertureMeters) reaches 1.0 at full focus amount.
+export const DEFAULT_DOF_APERTURE = 0.52;
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
