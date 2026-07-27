@@ -97,6 +97,12 @@
 | roof-pitch preview | 24.4 ms | house-only + AABB-gated wall |
 | commit (flora) | 66.8 ms | warm path |
 
+## 9차 구현 (motion focus bloom half)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Motion bloom half** | focus여도 motionBudget 중 bloom을 aerial과 같이 beauty ¼ 해상도로 유지 | 오빗 중 헤이즈 약간 부드러움, 정착 시 full bloom |
+
 ## 다음 라운드 (우선순위)
 
 1. grade half-res during motionBudget (look risk — measure first)

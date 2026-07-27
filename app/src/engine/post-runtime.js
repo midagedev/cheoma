@@ -35,25 +35,25 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   // Focus keeps full bloom (except compact phones, which always half-cap for memory).
   // composer.setSize restores full device size, so every budget apply re-caps after.
   let bloomHalf = true; // product boots in aerial / non-focus; focus promotes to full
+  // focusBudget tracks the last setFocusBudget so motion can hold MSAA at the
+  // aerial sample count without forgetting the product focus promotion.
+  let focusBudget = false;
+  let motionBudgetActive = false;
   const applyBloomResolution = (w, h) => {
     // UnrealBloomPass.setSize already builds mips at half of the size it receives.
     // Passing device-pixel size matches stock EffectComposer behaviour (beauty → ½ bloom).
     // Aerial/compact pass half of that so the bright pass is ~¼ of beauty fill cost.
+    // Motion also forces that quarter budget even while focused — settle restores full.
     const pr = renderer.getPixelRatio() * (post.fillScale ?? 1);
     const fullW = Math.max(1, Math.round(w * pr));
     const fullH = Math.max(1, Math.round(h * pr));
-    if (compact || bloomHalf) {
+    if (compact || bloomHalf || motionBudgetActive) {
       post.bloomPass.setSize(Math.max(1, fullW >> 1), Math.max(1, fullH >> 1));
     } else {
       post.bloomPass.setSize(fullW, fullH);
     }
   };
   applyBloomResolution(cssW, cssH);
-
-  // focusBudget tracks the last setFocusBudget so motion can hold MSAA at the
-  // aerial sample count without forgetting the product focus promotion.
-  let focusBudget = false;
-  let motionBudgetActive = false;
   // Product focus/ink owns whether flare *should* run; motionBudget may sleep the
   // pass without forgetting that intent (restore on settle).
   let productFlareWanted = !!post.flarePass?.enabled;
@@ -109,13 +109,21 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       post.setFillScale?.(scale);
       applyBloomResolution(cssW, cssH);
     },
-    // Secondary motion budget: sleep outline + flare depth, hold focus MSAA at
-    // aerial samples until the frame fully settles.
+    // Secondary motion budget: sleep outline + flare depth, MSAA 0, and hold
+    // focus bloom at aerial quarter-beauty until the frame fully settles.
     setMotionBudget: (active) => {
-      motionBudgetActive = !!active;
+      const next = !!active;
+      if (next === motionBudgetActive) {
+        outline.enabled = !motionBudgetActive;
+        applyMsaaBudget();
+        applyFlareBudget();
+        return;
+      }
+      motionBudgetActive = next;
       outline.enabled = !motionBudgetActive;
       applyMsaaBudget();
       applyFlareBudget();
+      applyBloomResolution(cssW, cssH);
     },
   });
 
