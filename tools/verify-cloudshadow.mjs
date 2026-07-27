@@ -31,7 +31,7 @@ import { setupClouds, createCloudUniforms, MAX_CLOUD_BLOBS } from '${resolve(ROO
 import { makeSite } from '${resolve(ROOT, 'src/village/site.js')}';
 import { TIME_PRESETS } from '${resolve(ROOT, 'src/env/sky.js')}';
 
-// ── 지형 재질 그림자 GLSL(cloudBlob/csFbm)의 JS 미러 — 재질이 쓰는 것과 동일 공식 ──
+// ── 지형 재질 그림자 GLSL(cloudBlob/csFbm)의 JS 미러 — 재질이 쓰는 것과 동일 공식 (#221 soft) ──
 const clampf = (x,a,b)=>Math.min(b,Math.max(a,x));
 const smoothstep = (a,b,x)=>{ const t=clampf((x-a)/(b-a),0,1); return t*t*(3-2*t); };
 const frac = (x)=>x-Math.floor(x);
@@ -48,12 +48,13 @@ function csNoise(px,py){
 }
 function csFbm(px,py){ let v=0,amp=0.55; for(let i=0;i<4;i++){ v+=amp*csNoise(px,py); px=px*2.03+7.1; py=py*2.03+7.1; amp*=0.5; } return v; }
 function shadeAt(wx,wz,blobs,tt){
-  const wob=(csFbm(wx*0.011+tt*0.004, wz*0.011+tt*0.004)-0.5)*0.42;
+  const wob=(csFbm(wx*0.007+tt*0.003, wz*0.007+tt*0.003)-0.5)*0.16;
   let shade=0;
   for(const b of blobs){
     if(b.z<0.5) continue;
-    const t=Math.hypot(wx-b.x, wz-b.y)/b.z + wob;
-    shade += b.w*(1-smoothstep(0.42,1.02,t));
+    const r=Math.max(0, Math.hypot(wx-b.x, wz-b.y)/b.z + wob);
+    const a=1-smoothstep(0.0,1.12,r);
+    shade += b.w*a*a;
   }
   return clampf(shade,0,1);
 }
@@ -178,9 +179,9 @@ for (const t of ['day', 'sunset', 'dawn', 'night']) {
 console.log('\n[② 최대 국소 그늘 깊이 = uCloudStr·1.0 (블롭 중심)]');
 for (const t of ['day', 'sunset', 'dawn', 'night']) console.log(`   ${t.padEnd(7)} 최저밝기≈${f(1 - strTable[t])}`);
 
-// ── ③ 단일건물 env 경로 무회귀(mistBillboards=true) ──
-console.log('\n[③ env 단일건물 경로 강도(기존식 0.52·smoothstep(1.2,2.45) 이어야)]');
-const envSmooth = (inten) => { const t = Math.min(1, Math.max(0, (inten - 1.2) / (2.45 - 1.2))); return 0.52 * (t * t * (3 - 2 * t)); };
+// ── ③ 단일건물 env 경로 강도 곡선(#221: 0.40·smoothstep(1.2,2.45)) ──
+console.log('\n[③ env 단일건물 경로 강도(0.40·smoothstep(1.2,2.45) 이어야)]');
+const envSmooth = (inten) => { const t = Math.min(1, Math.max(0, (inten - 1.2) / (2.45 - 1.2))); return 0.40 * (t * t * (3 - 2 * t)); };
 const envInten = { day: 2.6, sunset: 2.3, dawn: 1.7, night: 0.9 };
 let envOk = true;
 for (const t of ['day', 'sunset', 'dawn', 'night']) {
