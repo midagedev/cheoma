@@ -80,8 +80,12 @@ export function inspectProductionRoofSeams() {
     const footprint = giwaFootprintPolygon(P);
     const chains = upperChains(footprint);
     const roof = buildSkeletonRoof(footprint, { eaveY, riseScale: P.riseScale, mats });
+    // Outer tile faces only. After the structural shell (#249) each slope also
+    // owns a roof-gaepan underside with the same vertex budget; seam samples
+    // must stay on the authored outer surface, not the inward offset.
     const surfaceMeshes = roof.children.filter((object) => (
       object.isMesh
+      && object.name === 'roof-tile-outer'
       && object.geometry?.getAttribute('position')?.count === FACE_VERTEX_COUNT
       && object.geometry?.index?.count === FACE_INDEX_COUNT
     ));
