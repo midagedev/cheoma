@@ -11,6 +11,7 @@ import {
   captureParcelRebuildEnvelope,
   parcelRebuildIssues,
   planParcelRebuild,
+  residentialVariationDistance,
 } from '../src/village/parcel-rebuild.js';
 import {
   canopyBlocksSolarAccess,
@@ -220,4 +221,58 @@ if (varied === 0) fail('rebuild seeds produced no variation');
 if (rebuiltAuxiliaries === 0) fail('rebuild matrix produced no planned auxiliary');
 if (floraCases < 4) fail(`only ${floraCases} rebuild fixtures contained a real yard tree`);
 if (floraChanges === 0) fail('flora commits never changed a rebuilt tree owner');
+
+// Focus "다시 짓기" must explore a broader form repertoire than placement, stay
+// deterministic for a fixed seed+previous, and prefer a non-near-duplicate of
+// the currently focused house. Village placement never sets exploreReroll.
+{
+  const plan = planVillage({ scale: 'village', seed: 7 });
+  const samples = plan.parcels.filter((parcel) => !parcel.hero).slice(0, 4);
+  let formFlips = 0;
+  let strongSteps = 0;
+  let steps = 0;
+  for (const parcel of samples) {
+    const envelope = captureParcelRebuildEnvelope(parcel);
+    const opts = {
+      char01: plan.opts.char01,
+      tuning: plan.opts.tuning,
+      pavilion: plan.features.pavilion,
+      site: plan.site,
+      solarPeers: [
+        ...plan.parcels,
+        ...(plan.features.palace?.center ? [plan.features.palace] : []),
+      ],
+    };
+    let previous = planParcelRebuild(envelope, 3, opts);
+    if (!previous) fail(`${parcel.id} explore baseline rebuild failed`);
+    const a = planParcelRebuild(envelope, 91, {
+      ...opts, exploreReroll: true, previous,
+    });
+    const b = planParcelRebuild(envelope, 91, {
+      ...opts, exploreReroll: true, previous,
+    });
+    if (!a || !b) fail(`${parcel.id} explore reroll failed`);
+    if (stable(a) !== stable(b)) fail(`${parcel.id} explore reroll nondeterministic`);
+    for (const rebuildSeed of [5, 17, 29, 41, 53, 67, 79, 101]) {
+      const next = planParcelRebuild(envelope, rebuildSeed, {
+        ...opts, exploreReroll: true, previous,
+      });
+      if (!next) fail(`${parcel.id} explore chain failed`);
+      const distance = residentialVariationDistance(previous, next);
+      if (distance < 1) fail(`${parcel.id} explore reroll stayed a near-duplicate`);
+      if (distance >= 2) strongSteps += 1;
+      if ((next.variant | 0) !== (previous.variant | 0)) formFlips += 1;
+      previous = next;
+      steps += 1;
+    }
+  }
+  if (steps < 16) fail(`explore chain too short (${steps})`);
+  if (strongSteps < steps * 0.7) {
+    fail(`explore rerolls rarely change the house strongly (${strongSteps}/${steps})`);
+  }
+  if (formFlips < steps * 0.35) {
+    fail(`explore rerolls rarely change plan form (${formFlips}/${steps})`);
+  }
+}
+
 console.log(`PARCEL REBUILD CONTRACT: PASS (${rebuilt} deterministic rebuilds, ${rebuiltAuxiliaries} auxiliaries, ${varied} varied envelopes, ${floraCases} flora commits, ${floraChanges} changed owners)`);

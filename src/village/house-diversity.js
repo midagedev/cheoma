@@ -70,27 +70,52 @@ export function householdDiversityProfile(parcel, char01 = 0.5, wealth = 0.5) {
 // Four active prototype groups are retained: ㅡ one, ㄱ mirrored pair, ㄷ one.
 // A U is only eligible on a genuinely broad/deep lot; the exact roof-in-polygon
 // solver remains the final authority and may still fall back to L or ㅡ.
-export function pickGiwaHouseVariant(parcel, char01, wealth, roll, resolvedProfile = null) {
+//
+// `explore` is product focus "다시 짓기" only: village placement keeps the
+// rank/lot-centred bands, while a house reroll flattens the eligible form
+// repertoire so consecutive rolls change the silhouette instead of re-tinting
+// the same composition centre. Fit still owns the final accept/fallback chain.
+export function pickGiwaHouseVariant(
+  parcel,
+  char01,
+  wealth,
+  roll,
+  resolvedProfile = null,
+  { explore = false } = {},
+) {
   const profile = resolvedProfile || householdDiversityProfile(parcel, char01, wealth);
   const composition = householdCompositionPolicy(profile);
   const uEligible = profile.area >= 175
     && (parcel.plotW || 0) >= 13
     && (parcel.plotD || 0) >= 12
     && composition.targetConnectedWings >= 2;
-  const uChance = uEligible
-    ? Math.min(0.68, clamp01(0.48
-      + (profile.household01 - HOUSEHOLD_COMPOSITION_LARGE) * 0.75
-      + (profile.lot01 - 0.45) * 0.18))
-    : 0;
-  const singleChance = composition.targetConnectedWings === 0
-    ? Math.max(0.58, Math.min(0.82,
-      0.68 + (0.28 - profile.household01) * 0.45 + (0.36 - profile.lot01) * 0.18,
-    ))
-    : composition.targetConnectedWings === 1
-      ? Math.max(0.08, Math.min(0.22,
-        0.14 + (0.4 - profile.household01) * 0.25,
+  let uChance;
+  let singleChance;
+  if (explore) {
+    // Eligible forms share probability more evenly. U still needs a broad lot
+    // and large composition centre; small lots stay ㅡ/ㄱ only.
+    uChance = uEligible ? 0.28 : 0;
+    singleChance = composition.targetConnectedWings === 0
+      ? 0.34
+      : composition.targetConnectedWings === 1
+        ? 0.30
+        : 0.24;
+  } else {
+    uChance = uEligible
+      ? Math.min(0.68, clamp01(0.48
+        + (profile.household01 - HOUSEHOLD_COMPOSITION_LARGE) * 0.75
+        + (profile.lot01 - 0.45) * 0.18))
+      : 0;
+    singleChance = composition.targetConnectedWings === 0
+      ? Math.max(0.58, Math.min(0.82,
+        0.68 + (0.28 - profile.household01) * 0.45 + (0.36 - profile.lot01) * 0.18,
       ))
-      : 0.04;
+      : composition.targetConnectedWings === 1
+        ? Math.max(0.08, Math.min(0.22,
+          0.14 + (0.4 - profile.household01) * 0.25,
+        ))
+        : 0.04;
+  }
   const r = clamp01(roll);
   // One seeded quantile keeps the ordering intelligible: low draw=modest ㅡ,
   // middle=ㄱ, high draw=eligible ㄷ.  Household inputs move the cut points.
@@ -99,6 +124,32 @@ export function pickGiwaHouseVariant(parcel, char01, wealth, roll, resolvedProfi
   const lSpan = Math.max(1e-9, 1 - uChance - singleChance);
   return ((r - singleChance) / lSpan) < 0.5
     ? GIWA_VARIANT.L_RIGHT : GIWA_VARIANT.L_LEFT;
+}
+
+/** Choga 3/4/5-bay ladder pick. Explore flattens the composition centre for rerolls. */
+export function pickChogaHouseVariant(profileOrScore, roll, { explore = false } = {}) {
+  const composition = householdCompositionPolicy(profileOrScore);
+  const r = clamp01(roll);
+  if (explore) {
+    // Prefer a different bay ladder step than placement's composition pin, while
+    // still allowing the centre form. Fit will step an oversized pick down.
+    if (composition.level === 'small') {
+      if (r < 0.34) return 0;
+      if (r < 0.78) return 1;
+      return 2;
+    }
+    if (composition.level === 'medium') {
+      if (r < 0.24) return 0;
+      if (r < 0.62) return 1;
+      return 2;
+    }
+    if (r < 0.16) return 0;
+    if (r < 0.42) return 1;
+    return 2;
+  }
+  if (composition.level === 'small') return r < 0.82 ? 0 : 1;
+  if (composition.level === 'medium') return r < 0.12 ? 0 : r < 0.9 ? 1 : 2;
+  return r < 0.18 ? 1 : 2;
 }
 
 export function giwaVariantFallbacks(variant, seed = 0) {

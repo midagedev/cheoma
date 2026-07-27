@@ -1963,6 +1963,19 @@ export function createVillageHandle(opts, seed, plan, group) {
       const envelope = committedKind && committedKind !== baseEnvelope?.kind
         ? { ...baseEnvelope, kind: committedKind }
         : baseEnvelope;
+      // Explore a broader form repertoire than first placement and prefer a
+      // candidate that is not a near-duplicate of the house currently focused.
+      // Kind stays fixed; rank/lot still gate ㄷ eligibility and fit fallbacks.
+      const previousHouse = {
+        kind: parcel.kind,
+        variant: parcel.variant,
+        wallType: parcel.wallType,
+        aux: parcel.aux,
+        sx: parcel.sx,
+        sy: parcel.sy,
+        sz: parcel.sz,
+        thatchAge: parcel.thatchAge,
+      };
       const candidate = planParcelRebuild(envelope, rerollSeed, {
         char01,
         tuning: plan.opts.tuning || {},
@@ -1972,6 +1985,8 @@ export function createVillageHandle(opts, seed, plan, group) {
           ...plan.parcels,
           ...(plan.features?.palace?.center ? [plan.features.palace] : []),
         ],
+        exploreReroll: true,
+        previous: previousHouse,
       });
       if (!candidate) return null;
       // Keep the object identity consumed by plan, focus ambience, and LOD maps,
