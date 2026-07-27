@@ -103,6 +103,13 @@
 |---|---|---|
 | **Motion bloom half** | focus여도 motionBudget 중 bloom을 aerial과 같이 beauty ¼ 해상도로 유지 | 오빗 중 헤이즈 약간 부드러움, 정착 시 full bloom |
 
+## 10차 구현 (preview shadow defer)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Thatch no dirty** | thatchAge 틴트는 caster 불변 → representationDirty 생략 | 동일 |
+| **House-only preview** | 슬라이더 preview는 그림자 캐시 무효화 지연, commit(persist) 시 갱신 | preview 중 그림자 1메시 지연 가능, commit 정확 |
+
 ## 다음 라운드 (우선순위)
 
 1. grade half-res during motionBudget (look risk — measure first)
