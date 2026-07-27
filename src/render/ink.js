@@ -130,8 +130,13 @@ const InkShader = {
     silhouetteBoost: { value: 1.0 },
     normalEdge: { value: 0.24 },   // 내부 윤곽선은 처마/기둥 암시만 — 저폴리 수목 면선 억제
     depthEdge: { value: 0.78 },    // 실루엣도 벡터 외곽선보다 붓 농담에 종속
-    washLow: { value: 0.05 },      // 농담 입력 하한 — 이 아래는 적묵(최농)
-    washHigh: { value: 0.71 },     // 농담 입력 상한 — 이 위는 여백(최담)
+    // 농담 입력은 선형 HDR 뷰티를 Reinhard key 로 접은 뒤 [washLow, washHigh] 로
+    // 5단을 주소지정한다. 고정 sRGB 구간은 앱 day focus 에서 band3≈60% 중회 평탄
+    // (연필 스케치)을 만들었다. key + unlitWash 가 day 소핏 농묵·여백을 복원한다.
+    washKey: { value: 0.16 },      // Reinhard key (linear lum); 작을수록 여백 쪽
+    washLow: { value: 0.02 },      // keyed 하한 — 이 아래는 적묵(최농)
+    washHigh: { value: 0.62 },     // keyed 상한 — 이 위는 여백(최담)
+    unlitWash: { value: 0.36 },    // 역광·그늘 면의 소핏 농묵 하한 (0=항등)
     gyehwa: { value: 1.0 },        // 이중 필법 강도(0=단일 필법으로 회귀)
     gyehwaRadius: { value: 12.0 }, // 평판 판별 반경(화면 px). 크면 근경 건축만 남는다
     normalScale: { value: 0.75 },  // 노멀/깊이 타깃 축소율 — 반경을 화면 px 로 고정한다
@@ -170,7 +175,7 @@ const InkShader = {
     uniform float levels, silhouetteWidth, silhouetteBoost, normalEdge, depthEdge;
     uniform float ditherAmt, chromaKeep, fogNear, fogFar, aerial, seed;
     uniform float mixAmount, acesOutput, toneMappingExposure;
-    uniform float washLow, washHigh;
+    uniform float washKey, washLow, washHigh, unlitWash;
     uniform float gyehwa, gyehwaRadius, gyehwaCrease, sansuCrease;
     uniform float gyehwaPlateLo, gyehwaPlateHi, normalScale;
     uniform vec3 sunViewDir;
@@ -357,26 +362,34 @@ const InkShader = {
       // PBR fullscreen pass가 sleep해도 농담 원본은 RenderPass 직후 texture로 고정된다.
       // mixAmount=1에서 tDiffuse는 최종 수묵색에 관여하지 않아 sleep 경계의 색/농담 pop이 없다.
       vec3 beautyLin = texture2D(tBeauty, vUv).rgb;
-      vec3 srgb = pow(max(beautyLin, 0.0), vec3(1.0 / 2.2)); // 지각 톤
-      float lum = dot(srgb, vec3(0.299, 0.587, 0.114));
-      vec3 chroma = srgb - lum;
+      // 잔여 채도는 display-referred 추정에서만 뽑는다(워시 본체와 분리).
+      vec3 srgb = pow(max(beautyLin, 0.0), vec3(1.0 / 2.2));
+      float srgbLum = dot(srgb, vec3(0.299, 0.587, 0.114));
+      vec3 chroma = srgb - srgbLum;
+
+      // 선형 HDR 휘도 → Reinhard key (ink-landscape 원칙 8, #225).
+      float linLum = max(dot(max(beautyLin, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722)), 0.0);
+      float keyed = linLum / (linLum + max(washKey, 1e-3));
+
+      // 소핏·그늘 농묵 하한. 제품 hemi/fill 이 처마 밑 beauty 를 들어 올려 순수 휘도만
+      // 으로는 적묵에 닿지 않는다. 선 굵기와 같은 sun gate 의 역광 면을 keyed 아래로
+      // 끌어 골든 컷의 "처마 밑 먹 덩어리"를 복원한다. unlitWash=0 이면 항등.
+      float unlit = (1.0 - lambert) * lightGate * (sky ? 0.0 : 1.0);
+      keyed = max(keyed * (1.0 - unlitWash * unlit) - unlitWash * 0.08 * unlit, 0.0);
 
       // 양자화 + 저주파 디더: 밴드 경계를 유기적으로 흔들어 먹 번짐/평붓 자국을 낸다.
       // (고주파가 아니라 큰 얼룩 → 픽셀 노이즈가 아닌 물감 고임 느낌)
       float dth = (fbm(brushPx * 0.014 + 3.0) - 0.5) * ditherAmt;
-      // 농담 입력 정규화: 씬 휘도가 실제로 점유하는 대역을 5단 전체로 펼친다. 실측
-      // (docs 없음 — 트랙 리포트) 결과 raw lum 은 근접 프레임에서 [0.18,0.53] 에 갇혀
-      // 5단 중 2~3단만 주소지정했다. 그 상태가 §3 이 말하는 "회색 필터"이고, 최농(적묵)과
-      // 최담(여백)이 한 화면에 공존하지 못하는 직접 원인이다.
-      float washT = clamp((lum - washLow) / max(washHigh - washLow, 1e-3), 0.0, 1.0);
+      float washT = clamp((keyed - washLow) / max(washHigh - washLow, 1e-3), 0.0, 1.0);
       float lv = washT * levels;
       float fl = floor(lv);
       float fr = fract(lv);
       float e = smoothstep(0.5 - 0.30, 0.5 + 0.30, fr + dth); // 부드러운 밴드 전이
       float band = (fl + e) / levels;
-      // 톤 곡선: 어두운 쪽을 더 눌러 농묵(적묵)을, 밝은 쪽은 여백으로 밀어올린다.
-      float tone = pow(clamp(band, 0.0, 1.0), 0.9);
-      tone = smoothstep(0.04, 0.96, tone);
+      // 톤 곡선: 중회 평탄을 피하고 상단을 여백으로 연다. (pow 0.9 는 day 연필 스케치.)
+      float tone = clamp(band, 0.0, 1.0);
+      tone = clamp((tone - 0.42) * 1.28 + 0.42, 0.0, 1.0);
+      tone = smoothstep(0.02, 0.97, tone);
 
       // 워시 = 먹색↔종이색 사이 톤 + 잔여 채도.
       vec3 wash = mix(inkColor, paperColor, tone);

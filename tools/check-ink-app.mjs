@@ -312,8 +312,11 @@ try {
   // Composer-path MSAA softens pure silhouette blacks into the adjacent dark band, so
   // the purest 최농 quintile runs thinner than the pre-MSAA 1.2% floor while span and
   // 최담 still prove the hierarchy (broken flat-midtone frames sat at 0.3% 최담).
+  // #225: 앱 경로 day focus 가 band3≈60% 중회 평탄 + 소핏 농묵 부재로 연필 스케치가 되던
+  // 회귀를 잠근다. 최농·최담 하한과 함께 band3 상한을 둬 "한 밴드 독식"을 거절한다.
   const focusStats = imageStats(focusPng);
-  pass(focusStats.bands5[0] > 0.006 && focusStats.bands5[4] > 0.03 && focusStats.tonalSpan > 110,
+  pass(focusStats.bands5[0] > 0.012 && focusStats.bands5[4] > 0.04
+    && focusStats.bands5[3] < 0.52 && focusStats.tonalSpan > 115,
     'telephoto ink frame holds 최농 and 최담 at once instead of one flat midtone band',
     `bands=${focusStats.bands5.map((b) => (b * 100).toFixed(1)).join('/')} span=${focusStats.tonalSpan.toFixed(1)}`);
   const coveredAdaptiveQuality = await page.evaluate(() => {
