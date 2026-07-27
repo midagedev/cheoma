@@ -11,6 +11,8 @@
     onReroll = null, onPostcard = null, onShare = null, onExport = null, onToggleAudio = null,
     audioOn = false, busy = false, raised = false, lifted = false, exporting = false,
     onDrone = null, onWalk = null,
+    // #216 focus exterior glossary — only when eligible settled focus.
+    onToggleGlossary = null, glossaryOn = false,
   } = $props();
 
   // 독은 좁은 폭·긴 로케일 라벨에서 위로 한 줄 접힌다(의도된 동작). 그러면 높이가 58px 상수가
@@ -69,6 +71,20 @@
       title={t('glb_house_tip')}
     >
       <span class="face">{exporting ? t('glb_exporting') : t('act_glb')}</span>
+    </button>
+  {/if}
+  {#if onToggleGlossary}
+    <button
+      class="seal round"
+      class:active={glossaryOn}
+      data-action="glossary"
+      onclick={onToggleGlossary}
+      title={glossaryOn ? t('act_glossary_on_tip') : t('act_glossary_off_tip')}
+      aria-label={glossaryOn ? t('act_glossary_on_tip') : t('act_glossary_off_tip')}
+      aria-pressed={glossaryOn}
+      disabled={busy}
+    >
+      <span class="face glyph">名</span>
     </button>
   {/if}
   {#if onToggleAudio}

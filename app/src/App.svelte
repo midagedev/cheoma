@@ -22,6 +22,7 @@
   import Breadcrumb from './components/Breadcrumb.svelte';
   import ContextPanel from './components/ContextPanel.svelte';
   import HoverLabel from './components/HoverLabel.svelte';
+  import GlossaryOverlay from './components/GlossaryOverlay.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
   import CinematicOverlay from './components/CinematicOverlay.svelte';
   import { analyzeExport, filenameFor, triggerDownload } from '../../src/api/export.js';
@@ -191,6 +192,12 @@
   let villageZooming = $state(false);          // focus 전환(돌리) 진행 중 — 크롬 숨김 판단
   let focusMorph = $state(0);                  // 0=마을(부감)·1=집(근접) 패널 컨텍스트 모프
   let heroLanding = $state(false);             // 부팅 종가 랜딩 중(패널 숨김 — 히어로 연출)
+  // #216 focus 부재 용어 오버레이 — 세션 토글, 기본 OFF. URL/share/ink 기본 프레임을 오염하지 않는다.
+  let glossaryOn = $state(false);
+  let glossaryEligible = $state(false);
+  let glossaryLabels = $state([]);
+  let glossaryDisclaimer = $state('');
+  let glossaryRaf = null;
   // 전환 완료 감시(#155): focusMorph 는 카메라 focus 트윈이 흘려주는 값이고, 부감 복귀(0)·근접 안착(1)의
   //   확정은 그 트윈의 onDone(=villageReturnDone / villageSelect) 이벤트에만 달려 있다. 트윈이 다른 트윈으로
   //   교체(supersede)되거나 유실되면 그 이벤트가 안 와 focusMorph 가 부감에서 1 에 갇히고, 그러면 ContextPanel
@@ -463,6 +470,7 @@
         buildingTargets = []; settledBuildingId = null;
         pendingSceneView = null;
         clearFocusWatchdog(); focusMorphLatched = false;
+        resetGlossary();
       }   // #151 이탈 시 큐 비움(스테일 재커밋 방지)
       else pullVillage();
       syncUrl();
@@ -488,6 +496,7 @@
       pullVillage();                            // 리롤/종류 변경 뒤의 의미 라벨도 현재 proxy에서 갱신
       chromaFaded = false;
       clearFocusWatchdog(); focusMorphLatched = false;   // #155 근접 안착 → 감시 해제
+      syncGlossaryEligibility();
       if (pendingSceneView?.parcelId === p.parcelId) {
         if (pendingSceneView.view) engine.village.restoreView(pendingSceneView.view);
         pendingSceneView = null;
@@ -516,6 +525,7 @@
       villageEditing = null; villageZooming = false; focusMorph = 0; heroLanding = false;
       settledBuildingId = null;
       clearFocusWatchdog(); focusMorphLatched = false;
+      resetGlossary();
       if (!canonicalSceneAddress) syncUrl();
     });
     // 리롤 웨이브(#56): 진행 중 입력·버튼 잠금, 완료 시 호수·URL 갱신.
@@ -815,6 +825,129 @@
     });
   }
   function postcard() { engine.postcard({ download: true }); }
+
+  // ── #216 focus 부재 용어 오버레이 ─────────────────────────────────────────
+  // 기본 OFF. 정착 focus + eligible 주거/hero 에서만 토글. rAF 로 화면 좌표만 갱신(드로우 0).
+  // 감상 페이드·시네마틱·shot·전환 중에는 화면에서 내려 수묵/공유 프레임을 더럽히지 않는다.
+  function stopGlossaryLoop() {
+    if (glossaryRaf != null) {
+      cancelLifecycleFrame(glossaryRaf);
+      glossaryRaf = null;
+    }
+  }
+  function clearGlossaryLabels() {
+    glossaryLabels = [];
+    glossaryDisclaimer = '';
+  }
+  function resetGlossary() {
+    glossaryOn = false;
+    glossaryEligible = false;
+    stopGlossaryLoop();
+    clearGlossaryLabels();
+  }
+  function syncGlossaryEligibility() {
+    if (!engine?.village) {
+      glossaryEligible = false;
+      if (glossaryOn) resetGlossary();
+      return;
+    }
+    const eligible = !!engine.village.glossaryEligible?.();
+    glossaryEligible = eligible;
+    if (!eligible && glossaryOn) {
+      glossaryOn = false;
+      stopGlossaryLoop();
+      clearGlossaryLabels();
+    } else if (glossaryOn && eligible) {
+      startGlossaryLoop();
+    }
+  }
+  function sampleGlossaryScreen() {
+    if (!engine?.village || !glossaryOn) {
+      clearGlossaryLabels();
+      return;
+    }
+    const screen = engine.village.glossaryScreen?.();
+    if (!screen?.labels?.length) {
+      clearGlossaryLabels();
+      return;
+    }
+    glossaryLabels = screen.labels;
+    // Prefer locale string; product Korean matches GLOSSARY_DISCLAIMER_KO.
+    glossaryDisclaimer = t('glossary_disclaimer');
+  }
+  function startGlossaryLoop() {
+    stopGlossaryLoop();
+    if (!glossaryOn || !glossaryEligible || !engine) return;
+    const tick = () => {
+      glossaryRaf = null;
+      if (!lifecycleCurrent() || !glossaryOn || !glossaryEligible) {
+        clearGlossaryLabels();
+        return;
+      }
+      // Hide during chrome-off appreciation / cinematic / transition — off-state is already clean.
+      if (chromaFaded || cine.active || heroLanding || villageZooming || waving || veil || shot) {
+        clearGlossaryLabels();
+      } else {
+        sampleGlossaryScreen();
+      }
+      glossaryRaf = requestLifecycleFrame(tick);
+    };
+    sampleGlossaryScreen();
+    glossaryRaf = requestLifecycleFrame(tick);
+  }
+  function toggleGlossary() {
+    if (!glossaryEligible || villageZooming || waving || cine.active) return;
+    glossaryOn = !glossaryOn;
+    if (glossaryOn) startGlossaryLoop();
+    else {
+      stopGlossaryLoop();
+      clearGlossaryLabels();
+    }
+  }
+  // Focus eligibility can change after live rebuild/type switch without a select event.
+  $effect(() => {
+    // Track the current focus parcel / morph so eligibility re-checks after edit.
+    void villageEditing?.parcelId;
+    void villageEditing?.spec?.kind;
+    void villageEditing?.spec?.heroStyle;
+    void focusMorph;
+    void villageZooming;
+    if (!engine || !sceneVillage) return;
+    if (focusMorph < 0.5 || villageZooming) {
+      if (!villageEditing) resetGlossary();
+      else {
+        glossaryEligible = false;
+        stopGlossaryLoop();
+        clearGlossaryLabels();
+      }
+      return;
+    }
+    syncGlossaryEligibility();
+  });
+
+  // Derived: actually paint labels only when the toggle is on and the frame is study-safe.
+  let glossaryVisible = $derived(
+    glossaryOn
+      && glossaryEligible
+      && !chromaFaded
+      && !cine.active
+      && !heroLanding
+      && !villageZooming
+      && !waving
+      && !veil
+      && !shot
+      && focusMorph >= 0.5
+      && glossaryLabels.length > 0,
+  );
+  let glossaryToggleVisible = $derived(
+    sceneVillage
+      && glossaryEligible
+      && !heroLanding
+      && !cine.active
+      && !shot
+      && focusMorph >= 0.5
+      && !villageZooming,
+  );
   async function shareScene() {
     const epoch = lifecycleEpoch;
     const residentialState = currentResidentialState();
@@ -1334,6 +1467,8 @@
     lifted={sheetLayout && sceneVillage && !villageAerial}
     onDrone={cineButtons ? startDrone : null}
     onWalk={cineButtons ? startWalk : null}
+    onToggleGlossary={glossaryToggleVisible ? toggleGlossary : null}
+    glossaryOn={glossaryOn}
   />
 
   <!-- 낙관은 탭 순서 마지막(브랜드·언어·참고자료) — 3축 크롬 뒤에 읽힌다. -->
@@ -1343,6 +1478,13 @@
 {#if sceneVillage}
   <HoverLabel info={hoverInfo} />
 {/if}
+
+<!-- #216 부재 용어: 기본 OFF DOM 오버레이. 수묵/공유 canvas 와 분리(WebGL 미포함). -->
+<GlossaryOverlay
+  active={glossaryVisible}
+  labels={glossaryLabels}
+  disclaimer={glossaryDisclaimer || t('glossary_disclaimer')}
+/>
 
 <!-- 시네마틱 데모 오버레이(#112): 종료 창구 + 현재 장면 라벨. -->
 <CinematicOverlay active={cine.active} mode={cine.mode} pass={cine.pass} onExit={stopCine} />

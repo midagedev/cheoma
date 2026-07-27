@@ -30,6 +30,12 @@ const DICT = {
     share_copied: '장면 링크를 복사했습니다',
     share_failed: '장면 링크를 공유하지 못했습니다',
     act_sound_on_tip: '소리 끄기', act_sound_off_tip: '소리 켜기',
+    // #216 focus 부재 용어 오버레이
+    act_glossary_off_tip: '부재 이름 보기', act_glossary_on_tip: '부재 이름 숨기기',
+    glossary_eave: '처마', glossary_ridge: '용마루', glossary_podium: '기단',
+    glossary_changbang: '창방', glossary_rafter: '서까래', glossary_bracket: '공포',
+    glossary_changho: '창호', glossary_giwa: '기와', glossary_ieung: '이엉',
+    glossary_disclaimer: '제품 해석 · 실측 복원 아님',
     // 시네마틱 데모 모드(#112)
     act_drone: '드론', act_drone_tip: '드론 시네마틱 — 자동 항공 투어',
     act_walk: '거닐기', act_walk_tip: '1인칭 골목 산책',
@@ -166,6 +172,13 @@ const DICT = {
     share_copied: 'Scene link copied',
     share_failed: 'Could not share the scene link',
     act_sound_on_tip: 'Mute', act_sound_off_tip: 'Sound on',
+    // #216 focus exterior glossary
+    act_glossary_off_tip: 'Show part names', act_glossary_on_tip: 'Hide part names',
+    glossary_eave: '처마 eave', glossary_ridge: '용마루 ridge', glossary_podium: '기단 podium',
+    glossary_changbang: '창방 changbang', glossary_rafter: '서까래 rafter',
+    glossary_bracket: '공포 gongpo', glossary_changho: '창호 changho',
+    glossary_giwa: '기와 giwa', glossary_ieung: '이엉 thatch',
+    glossary_disclaimer: 'Product reading · not a measured reconstruction',
     // Cinematic demo mode (#112)
     act_drone: 'Drone', act_drone_tip: 'Drone cinematic — automatic aerial tour',
     act_walk: 'Walk', act_walk_tip: 'First-person stroll through the lanes',

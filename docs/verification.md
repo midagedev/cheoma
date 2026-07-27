@@ -602,6 +602,11 @@ min/max/default 모델로 갈라지지 않는다.
 
 ### `npm run check:scene-guide`
 
+`tools/check-glossary-plan.mjs` / `npm run check:glossary`는 focus 부재 용어 오버레이(#216)의 순수 앵커 계약을
+검사한다 — 주거 FULL·hero eligibility, 3–8개 라벨, 민도리 창방 vs 궁 공포·서까래, 기와/이엉 커버,
+「제품 해석 · 실측 복원 아님」 disclaimer, JSON-safe freeze, 순수 world 변환. DOM 오버레이·엔진 투영은
+`check:ui-shell`/`check:app` 표면과 함께 회귀한다.
+
 `tools/check-scene-guide.mjs`는 DOM·Three 없이 최초 장면 안내의 표시 정책과 versioned localStorage
 fail-open을 검사한다. stable 마을만 허용하고 Hero/landing/wave/veil/cinematic/References/toast를 모두
 차단하며, 로케일은 방문 기록을 바꾸지 않는다. Svelte 컴파일 경고 0, root `pointer-events:none`,

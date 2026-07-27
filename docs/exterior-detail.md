@@ -222,8 +222,23 @@ AURI 「한옥의 시공 — 창호와 천장」이 구분하는 판문·살문�
   허용한 선택 FULL 주거 runtime은 `primary-door-pivot` 하나를 추가하지만 새 재질/program 계열은 만들지 않는다.
   Svelte는 Three 상태를 소유하지 않고 canvas pointer 결과만 표시한다.
 
+## 5.5 focus 부재 용어 오버레이 (#216)
+
+외관 학습용 **DOM 라벨**이다. 주거 FULL(giwa/choga) 또는 hero focus에서만 토글되며 **기본 OFF**다.
+순수 plan은 `src/layout/glossary-plan.js` / `src/api/glossary-plan.js`가 `computeLayout` 치수로
+처마·용마루·기단·창방|서까래·공포(궁·관아 hero)·창호·기와|이엉 앵커를 3–8개 만들고,
+엔진은 라이브 house `matrixWorld`로 투영한다. 새 mesh·material·program·draw call은 없다.
+
+- 한 줄 고지: **「제품 해석 · 실측 복원 아님」**
+- 궁궐/사찰 compound·ㅁ자 뜰집은 fail closed(단일 주거 외관 학습 범위 밖)
+- OFF·감상 페이드·시네마틱·shot에서는 라벨이 없어 수묵/공유 WebGL 프레임을 오염하지 않는다
+  (사진 PNG는 canvas 캡처라 DOM 라벨이 원래 포함되지 않음)
+- 게이트: `npm run check:glossary` (순수). UI 셸 변경은 `check:ui-shell` / `check:pr` 라우팅
+
 ## 6. 검증
 
+- `npm run check:glossary`: 대상 eligibility, 기와/초가/궁 layout 앵커 3–8개, 민도리=창방·궁=공포+서까래,
+  기와/이엉 지붕 커버, disclaimer, JSON-safe deep freeze, 순수 world 변환.
 - `npm run check:nightlights`는 실제 초가·기와 ㅡ·ㄱ·ㄷ prototype에서 수집한 38개 opening anchor의 id/한지 면/
   외향 법선, mirror, JSON-safe deep freeze와 반복 결정론을 검사한다. 이어 실제 `planVillage` 필지 변환과 합성
   hero·궁 소유자, 저작 anchor가 없는 사찰·정자의 fail-closed, 고정 owner slot, focus overlay 교체·원복,

@@ -38,6 +38,12 @@ import {
 import { capturePostcard, exportGLB as exportCoreGLB } from '../../../src/api/export.js';
 import { compileSubtreeAsync } from '../../../src/api/rendering.js';
 import {
+  glossaryHasBrackets,
+  glossaryRoofCover,
+  isGlossarySubject,
+  planGlossaryAnchors,
+} from '../../../src/api/glossary-plan.js';
+import {
   createRerollWave, createVillage, createVillageAsync,
 } from '../../../src/api/village.js';
 import {
@@ -2298,6 +2304,89 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     return village.handle.getPickProxy(parcelId)?.buildingSpec || null;
   }
 
+  // Focus exterior glossary (#216): pure layout anchors → live house matrix → screen.
+  // Default UI is OFF; this path only projects when the app asks. DOM overlay only —
+  // no extra scene mesh, material, program, or draw call.
+  function glossaryLayoutParams(spec) {
+    if (!isGlossarySubject(spec)) return null;
+    const params = spec.params || {};
+    if (spec.hero === true) {
+      const heroStyle = spec.heroStyle === 'palace' ? 'palace' : 'hanok';
+      if (heroStyle === 'palace') {
+        return { ...PRESETS.korea, ...params, style: 'palace' };
+      }
+      // 종가 민도리 히어로: wallH/eave roof opts map onto a giwa-shaped layout frame.
+      const wallH = Number.isFinite(params.wallH) ? params.wallH : 2.7;
+      const podiumTierH = 0.5;
+      return {
+        ...PRESETS.giwa,
+        ...params,
+        style: 'giwa',
+        podiumTierH,
+        columnHeight: Math.max(1.4, wallH - podiumTierH),
+        eaveOverhang: params.eaveOverhang ?? 1.15,
+        riseScale: params.riseScale ?? 1.18,
+        profileCurve: params.profileCurve ?? 0.45,
+        cornerLift: params.cornerLift ?? 0.45,
+        ridgeH: params.ridgeH ?? 0.44,
+      };
+    }
+    const kind = spec.kind === 'giwa' ? 'giwa' : 'choga';
+    return { ...PRESETS[kind], ...params, style: kind };
+  }
+
+  function glossaryHouseRoot(parcelId) {
+    if (!village.handle || !parcelId) return null;
+    const detail = village.handle.focusAssembly?.(parcelId);
+    const group = detail?.group;
+    if (!group) return null;
+    if (group.userData?.houseRoot) return group.userData.houseRoot;
+    // Residential assembly is the house node; compounds use the overlay root.
+    return detail?.assembly || group;
+  }
+
+  function projectGlossaryScreen(parcelId = village.selected) {
+    if (!village.active || !parcelId || village.transitioning) return null;
+    const spec = villageSpec(parcelId);
+    if (!isGlossarySubject(spec)) return null;
+    const layoutParams = glossaryLayoutParams(spec);
+    if (!layoutParams) return null;
+    const plan = planGlossaryAnchors({
+      layout: computeLayout(layoutParams),
+      hasBrackets: glossaryHasBrackets(spec),
+      roofCover: glossaryRoofCover(spec),
+    });
+    if (!plan?.labels?.length) return null;
+
+    const house = glossaryHouseRoot(parcelId);
+    if (house) house.updateMatrixWorld(true);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const world = new THREE.Vector3();
+    const labels = [];
+    for (const label of plan.labels) {
+      world.set(label.local.x, label.local.y, label.local.z);
+      if (house) world.applyMatrix4(house.matrixWorld);
+      const ndc = world.clone().project(camera);
+      const x = rect.left + (ndc.x * 0.5 + 0.5) * rect.width;
+      const y = rect.top + (-ndc.y * 0.5 + 0.5) * rect.height;
+      const onScreen = ndc.z <= 1
+        && x >= rect.left && x <= rect.right
+        && y >= rect.top && y <= rect.bottom;
+      labels.push({
+        id: label.id,
+        x,
+        y,
+        visible: onScreen,
+        world: { x: world.x, y: world.y, z: world.z },
+      });
+    }
+    return {
+      parcelId,
+      disclaimer: plan.disclaimer,
+      labels,
+    };
+  }
+
   // ---------- 종가 랜딩·포커스·리플레이 (마을 우선 진입 #62 · 모드 일원화·리플레이 #59) ----------
   // 마을 우선 진입: 마을을 짓고 종가(hero) 필지에 카메라를 근접 프레이밍한 뒤 그 집을 조립 애니로
   //   지어 올린다(주변 마을은 먹 안개에서 드러남). 조립이 끝나면 그 집이 "내 집"(집 모드 클로즈업).
@@ -3147,6 +3236,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       heroId: () => village.handle?.heroParcelId?.() ?? null,
       // focus 중 여부(App 이 再 버튼 노출·모드 판단) — selected 이면서 전환 완료 상태.
       focused: () => !!(village.active && village.selected),
+      // 부재 용어 오버레이(#216): 주거 FULL·hero focus 에서만 true. 기본 UI OFF, DOM 전용.
+      glossaryEligible: () => {
+        if (!village.active || !village.selected || village.transitioning) return false;
+        return isGlossarySubject(villageSpec(village.selected));
+      },
+      glossaryScreen: (id) => projectGlossaryScreen(id),
       exit: exitVillage,
       escape: villageEscape,
       return: villageReturn,
@@ -3885,6 +3980,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     debugAdvanceFocusRing: () => 0,
     'village.heroId': () => null,
     'village.focused': () => false,
+    'village.glossaryEligible': () => false,
+    'village.glossaryScreen': () => null,
     'village.preload': () => null,
     'village.isReady': () => false,
     'village.reroll': () => village.seed,

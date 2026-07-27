@@ -76,3 +76,4 @@ export * from './export.js';
 export * from './rendering.js';
 export * from './surface-materials.js';
 export * from './threshold-life.js';
+export * from './glossary-plan.js';

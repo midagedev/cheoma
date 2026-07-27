@@ -48,6 +48,7 @@
     "check:choga-roof": "node tools/check-choga-roof.mjs",
     "check:cinematic": "node tools/check-cinematic-turns.mjs && node tools/check-cinematic-reveal.mjs && node tools/check-walk-solids.mjs",
     "check:chimney-anchor": "node tools/check-chimney-anchor.mjs",
+    "check:glossary": "node tools/check-glossary-plan.mjs",
     "check:cinematic:app": "node tools/run-browser-locked.mjs -- node tools/check-cinematic-reveal-app.mjs",
     "check:walk-solids": "node tools/check-walk-solids.mjs",
     "check:citywall": "node tools/check-citywall.mjs",
