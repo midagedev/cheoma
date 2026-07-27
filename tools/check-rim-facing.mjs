@@ -410,28 +410,45 @@ function lodProgramCompositionProbe() {
   const plainMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
   const lodMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
   const lateSnowLodMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
+  // Cloud-only residual (#220): injectCloudShadow must install screen-door *before* rim,
+  // so a roof that compiles between cloud inject and rim rescan never owns a plain-cloud family.
+  const cloudOnlyMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
+  // Snow-only residual (#220): same for weather inject without a prior LOD root.
+  const snowOnlyMaterial = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1 });
+  snowOnlyMaterial.userData.snowSurface = true;
   plainMaterial.userData.role = 'roof';
   lodMaterial.userData.role = 'roof';
   lateSnowLodMaterial.userData.role = 'roof';
+  cloudOnlyMaterial.userData.role = 'roof';
   const plain = new THREE.Mesh(geometry, plainMaterial);
   const lod = new THREE.Mesh(geometry, lodMaterial);
   const lateSnowLod = new THREE.Mesh(geometry, lateSnowLodMaterial);
+  const cloudOnly = new THREE.Mesh(geometry, cloudOnlyMaterial);
+  const snowOnly = new THREE.Mesh(geometry, snowOnlyMaterial);
   plain.position.x = -0.5;
   lod.position.x = 0.5;
   lateSnowLod.position.y = 0.8;
+  cloudOnly.position.x = -1.2;
+  snowOnly.position.x = 1.2;
   plain.frustumCulled = false;
   lod.frustumCulled = false;
   lateSnowLod.frustumCulled = false;
+  cloudOnly.frustumCulled = false;
+  snowOnly.frustumCulled = false;
   attachLodScreenDoorRoot(lod);
   attachLodScreenDoorRoot(lateSnowLod);
   const cloudUniforms = createCloudUniforms();
   injectCloudShadow(plainMaterial, cloudUniforms);
   injectCloudShadow(lodMaterial, cloudUniforms);
   injectCloudShadow(lateSnowLodMaterial, cloudUniforms);
+  injectCloudShadow(cloudOnlyMaterial, cloudUniforms);
+  const cloudOnlyKeyBeforeRim = cloudOnlyMaterial.customProgramCacheKey?.() || '';
   const snowAmount = { value: 0.7 };
   patchSnowMaterial(plainMaterial, snowAmount, { profile: 'tile' });
   patchSnowMaterial(lodMaterial, snowAmount, { profile: 'tile' });
-  scene.add(plain, lod, lateSnowLod);
+  patchSnowMaterial(snowOnlyMaterial, snowAmount, { profile: 'surface' });
+  const snowOnlyKeyBeforeRim = snowOnlyMaterial.customProgramCacheKey?.() || '';
+  scene.add(plain, lod, lateSnowLod, cloudOnly, snowOnly);
   const rim = createFresnelRim(scene);
   rim.apply(scene);
   // Real lifecycle counterpart: clear weather warms/rim-patches first, then snow arrives.
@@ -451,8 +468,12 @@ function lodProgramCompositionProbe() {
     plainKey: plainMaterial.customProgramCacheKey(),
     lodKey: lodMaterial.customProgramCacheKey(),
     lateSnowLodKey: lateSnowLodMaterial.customProgramCacheKey(),
-    // R8 program diet: rim always installs the LOD screen-door shader path, so plain cloud+
-    // snow+rim and true LOD roots share one WebGLProgram. Matrix channel stays object-local.
+    cloudOnlyKeyBeforeRim,
+    snowOnlyKeyBeforeRim,
+    cloudOnlyHasLodBeforeRim: cloudOnlyKeyBeforeRim.split('|').includes('cheoma-lod-screen-door-v1'),
+    snowOnlyHasLodBeforeRim: snowOnlyKeyBeforeRim.split('|').includes('cheoma-lod-screen-door-v1'),
+    // R8 program diet: rim/cloud/snow always install the LOD screen-door shader path, so plain
+    // cloud+snow+rim and true LOD roots share one WebGLProgram. Matrix channel stays object-local.
     sharedPrograms: !!plainProgram && !!lodProgram && plainProgram === lodProgram,
     orderIndependentProgram: !!lodProgram && lodProgram === lateSnowLodProgram,
     plainProgramKey: plainProgram?.cacheKey || null,
@@ -466,6 +487,8 @@ function lodProgramCompositionProbe() {
   plainMaterial.dispose();
   lodMaterial.dispose();
   lateSnowLodMaterial.dispose();
+  cloudOnlyMaterial.dispose();
+  snowOnlyMaterial.dispose();
   geometry.dispose();
   return result;
 }
@@ -653,6 +676,12 @@ try {
       && lodComposition.orderIndependentProgram,
     `snow-before-rim and rim-before-snow reuse one canonical LOD program `
       + `(${lodComposition.lodKey} / ${lodComposition.lateSnowLodKey})`);
+  // #220 residual: cloud inject and snow patch install screen-door even before rim, so the
+  // product window between populate cloud inject and post rimRescan cannot mint plain families.
+  check(lodComposition.cloudOnlyHasLodBeforeRim,
+    `cloud inject alone installs screen-door (${lodComposition.cloudOnlyKeyBeforeRim})`);
+  check(lodComposition.snowOnlyHasLodBeforeRim,
+    `snow patch alone installs screen-door (${lodComposition.snowOnlyKeyBeforeRim})`);
   check(errors.length === 0, `browser and shader errors: ${errors.length}`);
   if (errors.length) console.log(errors.slice(0, 8));
 } finally {

@@ -3,6 +3,7 @@ import {
   MATERIAL_PROGRAM_PATCH,
   addMaterialProgramKey,
 } from '../render/material-program-key.js';
+import { patchLodScreenDoorMaterial } from '../render/lod-screen-door.js';
 
 // One accumulation shader shared by the standalone environment and village runtime.
 // Profiles only change coverage/colour constants, so materials with the same native
@@ -65,6 +66,10 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
   material.userData.__snowPatched = true;
   material.userData.__snowProfile = profile;
   material.userData.__snowPatchVersion = MATERIAL_PROGRAM_PATCH.SNOW;
+  // R8 program diet (#220 residual): snow-patched stock materials always carry the LOD
+  // screen-door path so clear→snow and plain→LOD never fork independent snow families.
+  // Coverage defaults to affine 1; true LOD roots alone rewrite matrix[3][3].
+  patchLodScreenDoorMaterial(material);
 
   const previousCompile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {

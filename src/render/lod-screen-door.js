@@ -47,10 +47,11 @@ function restoreObjectMatrix(object) {
   delete object[ORIGINAL_MATRIX_W];
 }
 
-// Install the screen-door *shader path* on a stock material. R8 program diet: rim-eligible
-// materials always carry this path so plain+rim and lod+rim compile as one family. Coverage
-// defaults to affine 1 (no discard work). The matrix channel is a separate object-local setup
-// — never a per-chunk material uniform.
+// Install the screen-door *shader path* on a stock material. R8 program diet (#180 / #220):
+// every rim-eligible, cloud-shadow, snow, and FAR-impostor stock material always carries this
+// path so plain×lod combinations compile as one WebGLProgram family. Coverage defaults to
+// affine 1 (discard early-out, no extra work). The matrix channel is a separate object-local
+// setup on true LOD roots only — never a per-chunk material uniform.
 //
 // Material callbacks run after Three has calculated modelView/normal matrices and immediately
 // before modelMatrix is uploaded for this draw. The otherwise constant affine [3][3] slot is a

@@ -392,14 +392,30 @@ G2(클립 적합성)는 시퀀스 컷에서, G4(고증)는 근접 컷과 Phase 4
 
 ### R8. 셰이더 프로그램 +40~57 (증상 ⑥의 유일한 실체)
 
-- **현상**: hanyang 부감 programs HEAD 153~169 vs 골든 112~114. 부팅 125 vs 100, 정착 200~212 vs 179~190.
+- **현상**(감사 당시): hanyang 부감 programs HEAD 153~169 vs 골든 112~114. 부팅 125 vs 100, 정착 200~212 vs 179~190.
 - **원인**(cacheKey 실측 분류): 신규 태그 `cheoma-lod-screen-door-v1`(62개 프로그램에 관여, 골든 0)이
   `cheoma-rim-physical-v1` × `cloudshadow-v1`과 곱해져 패밀리가 쪼개졌다. 반대로 골든의 `snowtint`
   패밀리 30개는 HEAD에서 사라졌다(순이득).
 - **원인 커밋**: `a165acc` feat(lod): add screen-door tier transitions.
-- **대상 파일**: `src/render/lod-screen-door.js`, `src/render/material-program-key.js`, `src/env/rim.js`.
-- **복원 전략**: 태그 축 축소(screen-door를 uniform 분기로) 또는 조합 사전 예열.
-- **담당**: Phase 5-4.
+- **대상 파일**: `src/render/lod-screen-door.js`, `src/render/material-program-key.js`, `src/env/rim.js`,
+  `src/builder/palette.js` (cloud inject), `src/env/snow-material.js`, `src/village/instancing.js` (FAR impostor).
+- **복원 전략 (실행됨)**:
+  1. **#180** — 림 대상 stock 재질에 LOD screen-door *shader path* 상시 설치 → plain+rim / lod+rim 한 패밀리.
+     실측 hanyang aerial **≈142** (`rimWithoutLod=0`).
+  2. **#220 residual** — 같은 always-on 경로를 cloud inject · snow patch · FAR impostor 생성에도 적용해
+     rim 이전 창(populate cloud → post rimRescan)과 clear→snow 순서에서도 plain×lod 중간 패밀리가
+     생기지 않게 한다. matrix channel 은 진짜 LOD root 전용, coverage 기본 1 early-out.
+- **제품 상한** (`tools/lib/render-budget-contract.mjs`, `check:lod:app` 소비):
+  | 상태 | programs 상한 | 근거 |
+  | --- | ---: | --- |
+  | aerial | **144** | post-#180 실측 ≈142 + ~1% headroom |
+  | focus / mid / focusOut | **192** | overlay `USE_INSTANCING` 분기 + #129 앵커 잔여 |
+  | aerial→focusOut Δ programs | **≤64** | 전환 잔여 상한 |
+- **게이트**: `npm run check:program-diet` (순수 install-site·token·ceiling), `npm run check:rim`
+  (shared program + cloud/snow before-rim), `check:lod:app` (실측 budget).
+- **잔여(의도적 비범위)**: focus 오버레이 비인스턴스 vs base `USE_INSTANCING` 패밀리 분기(#129 앵커로
+  재컴파일만 방지), Three 네이티브 define 축(map/bump/vertexColors/flatShading). 숲 간벌·WebGPU·림 삭제 금지.
+- **담당**: Phase 5-4 · issue #220.
 
 ---
 
