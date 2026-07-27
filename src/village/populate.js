@@ -141,16 +141,19 @@ export function* populateVillageSteps(plan, opts = {}) {
   const mist = site.edge
     ? buildEdgeMistRing(site.edge, {
         groundY: site.heightAt,
-        // R5/U1: 불투명 정점(rMid)을 지형 테두리에 맞춘다. 안쪽 시작을 0.58→0.78 로 물려 분지
+        // R5/U1 #211: 불투명 정점(rMid)을 지형 테두리에 맞춘다. 안쪽 시작을 0.58→0.78 로 물려 분지
         //   내부·산 매스를 흐리게 덮던 탁한 룩(골든의 대가)으로 돌아가지 않으면서, 부감에서
         //   절단면·외곽 수관 실루엣만 대기로 지운다. rOut 을 더 늘리면 밖으로 뻗은 밴드가 시선에
         //   거의 나란해져 프레임을 가로지르는 하드한 웨지로 읽히므로 1.17 이 상한이다.
         rIn: 0.78, rMid: 0.99, rOut: 1.17,
         yBase: Math.max(5, site.Hmax * 0.09), yAmp: Math.max(2.5, site.Hmax * 0.05),
-        thickness: Math.max(4, site.Hmax * 0.16), outerDrop: site.Hmax * 0.05,
+        // #211: 부감에서 절단면을 덮을 수직 두께·외곽 처짐을 상향(수관 실루엣까지). 링 반경 폭은 유지.
+        thickness: Math.max(6, site.Hmax * 0.24), outerDrop: site.Hmax * 0.10,
         // #20: yCap 을 살짝 내려 능선 상부가 운해 위로 더 명확히 솟게(운무 절단). 분지·절단면은
         //   여전히 잠긴다. strengthAt 의 제곱 pool 과 한 몸.
-        yCap: site.Hmax * 0.40, opacity: 0.5,
+        // #211: 링 불투명도 상향 — scene fog 가 절단면까지 미치지 않는 capital/hanyang 부감을
+        //   링·지형 edge haze 가 대신 녹인다(지형 radius 확장 금지).
+        yCap: site.Hmax * 0.40, opacity: 0.64,
         seed: (plan.seed ^ 0x3117) >>> 0,
       })
     : null;
@@ -160,7 +163,7 @@ export function* populateVillageSteps(plan, opts = {}) {
   //   찾아 그 지형면 살짝 위에 얹는다 → 진입 시점에서 능선에 걸친 원경 물안개로 읽힌다.
   const ridgeMistAnchors = site.edge ? computeRidgeMistAnchors(site) : [];
   const ridgeMist = ridgeMistAnchors.length
-    ? buildRidgeMist(ridgeMistAnchors, { opacity: 0.34, seed: (plan.seed ^ 0x5a3d) >>> 0 })
+    ? buildRidgeMist(ridgeMistAnchors, { opacity: 0.40, seed: (plan.seed ^ 0x5a3d) >>> 0 })
     : null;
   if (ridgeMist) root.add(ridgeMist.group);
   const water = buildWaterRibbon(site, waterU);

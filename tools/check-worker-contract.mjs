@@ -190,10 +190,14 @@ const expectedSceneHashes = {
   //   sync == worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 3경로 교차 PASS.
   // Rafters under skeleton roofs sit a few cm deeper so the DoubleSide tile shell
   // does not share depth with the underside "ceiling" read (assembly z-fighting).
-  village: '99a36486:f6bca08c:5f426751:938d9062',
-  town: '289ded31:9ded58bd:0fd6bd1f:4f091cef',
-  capital: '2a16456a:36a28758:01c58a6c:ed20f94a',
-  hanyang: 'ea67ef5c:0c90a000:6020df7b:dbed4286',
+  // #211 U1 부감 분지 가장자리: edge-mist thickness/outerDrop/opacity, ridge-mist
+  //   opacity, village terrain far vertex-color ramp. Proxy 불변(plan/pick 무관).
+  //   재기준 직전 실측: 네 규모 모두 sync == worker == `?worker=0` 폴백 바이트 동일,
+  //   snapshot·mja 3경로 교차 PASS.
+  village: '79d91a63:7d20f661:6018d62e:a408bce9',
+  town: 'eb856a0b:e43ddf4d:04a46152:67f4cb53',
+  capital: '838d19e4:0514320a:57bcb85d:bfe0816e',
+  hanyang: '0c72aa68:0289d678:1b12ef2d:4e7a4932',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

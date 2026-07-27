@@ -15,7 +15,8 @@ const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 //   ink    : 외곽으로 갈수록 지형색을 대기(fog)색으로 크게 밀어 여백(하늘)으로 녹임(순수 수묵 소실).
 //   mist   : 중간 헤이즈 + 저층 안개 링(별도 메시)이 능선 밑단을 감아 소실.
 //   diorama: 헤이즈 최소 — 절단면(절벽 스커트) 지층이 엣지를 맡는다.
-const EDGE_HAZE_AMT = { ink: 0.95, mist: 0.62, diorama: 0.22 };
+// mist 는 마을 지형 V_EDGE_HAZE_AMT(0.92) 와 같은 U1 목표 — 단일 씬 부감 절단면 동일 정책.
+const EDGE_HAZE_AMT = { ink: 0.95, mist: 0.92, diorama: 0.22 };
 
 // 지형: 건물 주변 평탄한 마당(박석) → 바깥으로 완만히 솟는 언덕(시드 노이즈).
 //   + 남서(-x)로 파인 얕은 계곡(개울·다랑이 논의 토대).
@@ -231,7 +232,8 @@ export function buildTerrain({
         ${useCloud ? CLOUD_SHADOW_FRAG_BODY : ''}
         {
           // 엣지 소실: 외곽 밴드(vEdge)에서 지형색을 대기(fog)색으로 밀어 여백으로 녹임.
-          float e = smoothstep(0.12, 1.0, vEdge);
+          // #211: 마을 지형과 동일 램프 — 부감 절단면 하드 실루엣 완화.
+          float e = smoothstep(0.04, 0.88, vEdge);
           diffuseColor.rgb = mix(diffuseColor.rgb, uEdgeHaze, ${hazeAmt.toFixed(3)} * e);
         }`);
   };
