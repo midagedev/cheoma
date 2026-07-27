@@ -18,6 +18,7 @@ import {
   VILLAGE_SCALE_IDS,
   buildSceneShareUrl,
 } from './share-scene.js';
+import { clipStageFor } from '../../../src/api/clip-stage.js';
 
 const KEYS = ['seed', 'preset', 'time', 'sunset', 'season', 'weather', 'exp'];
 
@@ -57,40 +58,62 @@ function urlStateFromSnapshot(snapshot) {
 export function readUrl() {
   const q = new URLSearchParams(location.search);
   const snapshot = decodeSceneSnapshot(q.get(SCENE_SNAPSHOT_QUERY_KEY));
-  if (snapshot) return urlStateFromSnapshot(snapshot);
+  // Canonical scene snapshots win over clip presets (portable exact state).
+  if (snapshot) return { ...urlStateFromSnapshot(snapshot), clipStage: null };
+  const clipStage = clipStageFor(q.get('clip'));
   const out = {};
   for (const k of KEYS) { if (q.has(k)) out[k] = q.get(k); }
-  const seed = out.seed != null ? (parseInt(out.seed, 10) >>> 0) : newSeed();
-  const vseedRaw = q.get('vseed');
+  // Clip stages force the shareable fixture unless the query already pins a key.
+  // Seed defaults to the stage fixture so bare `?clip=assemble` is recordable.
+  const seedRaw = out.seed != null
+    ? out.seed
+    : (clipStage ? String(clipStage.seed) : null);
+  const seed = seedRaw != null ? (parseInt(seedRaw, 10) >>> 0) : newSeed();
+  const vseedRaw = q.get('vseed') ?? (clipStage ? String(clipStage.vseed) : null);
   const residentialEdits = decodeResidentialEditState(q.get(RESIDENTIAL_EDIT_QUERY_KEY));
+  const time = out.time || clipStage?.time || null;
+  const season = out.season || clipStage?.season || null;
+  const weather = out.weather || clipStage?.weather || null;
+  const renderStyle = normalizeRenderStyle(
+    q.get('mode') || (clipStage?.renderStyle === 'ink' ? 'ink' : null),
+  );
+  const villageFromClip = clipStage
+    && (clipStage.boot === 'village-aerial' || clipStage.boot === 'village-focus');
+  const vscale = VILLAGE_SCALE_IDS.includes(q.get('vscale'))
+    ? q.get('vscale')
+    : (clipStage?.vscale || null);
   return {
     seed,
-    hasSeed: out.seed != null,
+    hasSeed: out.seed != null || !!clipStage,
     preset: out.preset || null,
-    time: out.time || null,
+    time,
     sunsetLook: out.sunset != null ? normalizeSunsetLook(out.sunset) : null,
-    season: out.season || null,
-    weather: out.weather || null,
-    renderStyle: normalizeRenderStyle(q.get('mode')),
+    season,
+    weather,
+    renderStyle,
     exp: out.exp != null ? Math.max(1, parseInt(out.exp, 10) || 1) : null,
-    hero: q.get('hero') !== '0',
+    // Clip stages that land in a village scene skip the hero title by default.
+    hero: villageFromClip ? false : q.get('hero') !== '0',
     shot: q.get('shot') === '1',
     // 오토로테이션("시간 흐르기" #64): flow=1 활성 복원, flowsec=N 은 스텝 간격(초) 검증용 오버라이드.
     flow: q.get('flow') === '1',
     flowsec: (() => { const v = parseFloat(q.get('flowsec')); return Number.isFinite(v) && v > 0 ? v : null; })(),
     // 마을 모드
-    village: q.get('village') === '1',
+    village: q.get('village') === '1' || !!villageFromClip,
     vseed: vseedRaw != null ? (parseInt(vseedRaw, 10) >>> 0) : null,
-    vscale: VILLAGE_SCALE_IDS.includes(q.get('vscale')) ? q.get('vscale') : null,
+    vscale,
     vchar: CHARS.includes(q.get('vchar')) ? q.get('vchar') : null,
     vpalace: q.get('vpalace') === '1',
     vtemple: q.get('vtemple') === '1',
     residentialEdits: residentialEdits?.records || [],
-    focusedParcelId: residentialEdits?.focusedParcelId || null,
+    focusedParcelId: residentialEdits?.focusedParcelId
+      || (clipStage?.boot === 'village-focus' ? clipStage.parcelId : null)
+      || null,
     villageOptions: null,
     sceneView: null,
     standaloneParams: {},
     sceneSnapshot: false,
+    clipStage: clipStage || null,
   };
 }
 

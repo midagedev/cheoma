@@ -658,6 +658,12 @@
     // 타이틀 없는 진입(hero off·shot·직행)은 첫 토글에서 먹 안개 마스킹 → 여기서 앞당기지 않음.
     if (heroVisible) scheduleVillagePreload();
 
+    // Viral clip stages (#255–#260): pin fixture + auto-drive product path for OS
+    // recording. No in-app recorder. Shot mode stays deterministic and never auto-enters.
+    if (url.clipStage && !url.shot) {
+      scheduleClipStageBoot(url.clipStage, lifecycleEpoch);
+    }
+
     // 활동 감지 → 크로마 페이드.
     for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
       addEventListener(ev, wake, { passive: true });
@@ -824,6 +830,64 @@
       if (ready && lifecycleCurrent(epoch)) engine?.village.preload(opts, seed);
     });
   }
+
+  // Clip-stage auto boot for OS recording (#255). Waits for village readiness
+  // then runs the product path (hero assemble / aerial / yard focus).
+  function scheduleClipStageBoot(stage, epoch = lifecycleEpoch) {
+    if (!stage?.autoEnter || !engine) return;
+    // Recording frames should not start under the first-run scene guide.
+    sceneGuideDismissed = true;
+    try { persistSceneGuideDismissal(sceneGuideStorage); } catch { /* ignore */ }
+    chromaFaded = true;
+    void (async () => {
+      // Let the first paint + worker preload settle.
+      if (!(await waitLifecycleFrames(4, epoch))) return;
+      if (!lifecycleCurrent(epoch) || !engine) return;
+
+      if (stage.boot === 'hero') {
+        // Title → assemble. Wait for preload so enter is cache-hit smooth.
+        const deadline = performance.now() + ENTRY_PREGEN_WAIT_MS;
+        while (
+          villageHome
+          && engine
+          && !engine.village.isReady(villageOpts, villageSeed)
+          && performance.now() < deadline
+        ) {
+          if (!(await waitLifecycleFrames(2, epoch))) return;
+        }
+        if (!lifecycleCurrent(epoch) || !engine || heroLeaving || heroEntering) return;
+        // Skip the idle title hold for clip recording — enter as soon as ready.
+        enterHero();
+        return;
+      }
+
+      // Village already entered for aerial/focus stages. Wait until pick proxies
+      // are available (handle is not on the public façade).
+      const deadline = performance.now() + ENTRY_PREGEN_WAIT_MS;
+      while (engine && performance.now() < deadline) {
+        const targets = engine.village.navigationTargets?.() || [];
+        if (targets.length > 0) break;
+        if (!(await waitLifecycleFrames(2, epoch))) return;
+      }
+      // settle a few frames after enter fog
+      if (!(await waitLifecycleFrames(12, epoch))) return;
+      if (!lifecycleCurrent(epoch) || !engine) return;
+
+      if (stage.boot === 'village-focus') {
+        const proxies = engine.village.navigationTargets?.() || [];
+        const wanted = stage.parcelId;
+        let id = wanted && proxies.some((p) => p.id === wanted) ? wanted : null;
+        if (!id) {
+          const heroId = engine.village.heroId?.() || null;
+          const residential = proxies.find((p) => p.id && p.id !== heroId);
+          id = residential?.id || proxies[0]?.id || null;
+        }
+        if (id && !engine.village.focused()) engine.village.focus(id);
+      }
+      // aerial / night / ink: stay in explore framing; time/mode already applied.
+    })();
+  }
+
   function postcard() { engine.postcard({ download: true }); }
 
   // ── #216 focus 부재 용어 오버레이 ─────────────────────────────────────────

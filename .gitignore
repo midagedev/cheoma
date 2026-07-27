@@ -11,3 +11,4 @@ _wt-out/
 *.log
 .DS_Store
 .wrangler/
+scratch/

@@ -102,7 +102,9 @@ const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주�
 // 완성 hold 무대: 카메라 선회를 조립 완주보다 이만큼 먼저 끝낸다. 마지막 부재가 내려앉는 순간을 고정된
 //   프레임에서 보게 되고(움직이는 카메라가 완성 비트를 흘려보내지 않는다), 이어서 근접 링(모트·연기·
 //   등롱)이 그 정지 프레임 위로 피어난다. 0 이면 카메라 도착과 완성이 겹쳐 완성 비트가 없다.
-const HERO_REVEAL_TAIL = 1.3;
+// Camera arrives just before assembly ends so the roof land is still a live
+// push-in climax (#254). Was 1.3s — that left a long static hold after the arc.
+const HERO_REVEAL_TAIL = 0.45;
 
 // 머지(칸 들이기 합체) 수직 탄성 폭(m). 두부 정착 계수는 drop 배수라, 수평 이동인 머지 경로에는
 //   이 값이 그 drop 역할을 한다(공유 이징 언어를 쓰되 진폭만 이 경로 규모로).

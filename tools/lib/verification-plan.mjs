@@ -170,6 +170,12 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/shoot-drainage.mjs',
   'tools/shoot-brush-fence.mjs',
   'tools/lib/render-budget-contract.mjs',
+  // #253–#261 viral clip stages: pure preset contract + OS-recording capture.
+  'src/share/clip-stage.js',
+  'src/api/clip-stage.js',
+  'tools/check-clip-stage.mjs',
+  'tools/shoot-clip-stages.mjs',
+  'docs/clip-stages.md',
 ]);
 
 function add(gates, ...items) {
@@ -546,6 +552,17 @@ function routePath(path) {
   if (path === 'src/layout/glossary-plan.js' || path === 'src/api/glossary-plan.js'
     || path === 'tools/check-glossary-plan.mjs') {
     select('focus exterior glossary plan contract changed');
+    return { gates, reasons };
+  }
+
+  // #253–#261: viral clip stage presets (pure + app boot; OS recording only).
+  if (path === 'src/share/clip-stage.js' || path === 'src/api/clip-stage.js'
+    || path === 'tools/check-clip-stage.mjs') {
+    select('viral clip stage contract changed', 'app', 'cinematic-app');
+    return { gates, reasons };
+  }
+  if (path === 'tools/shoot-clip-stages.mjs') {
+    select('clip stage visual capture harness changed');
     return { gates, reasons };
   }
 

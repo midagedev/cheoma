@@ -67,6 +67,7 @@
 | [`credits.md`](credits.md) | 완료 기록 | 공개 크레딧과 출처 표기용 선별 목록. `references.md`와 목적이 다르다. |
 | [`suno-prompts.md`](suno-prompts.md) | 완료 기록 | BGM 생성 프롬프트와 6/6 수령 기록. |
 | [`clip-beat-sheet.md`](clip-beat-sheet.md) | 완료 기록 | 대표 공유 클립 원테이크 비트 시트(삼원법·~10s 조립·OS 화면 녹화). 인앱 녹화 기능이 아니다. |
+| [`clip-stages.md`](clip-stages.md) | 계약 | `?clip=` 스테이지(assemble/yard/aerial/night/ink) 고정 부팅·공유 URL. #253–#261. |
 | [`clip-release-package.md`](clip-release-package.md) | 완료 기록 | #210 게시 패키지: exact URL, macOS 녹화, 트윗 초안, seed7 정지 프레임 경로. 사람 녹화·게시 잔여. |
 
 ## Claude Code 메모리에서 승격한 내용
