@@ -201,8 +201,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   shadowMap 을 재렌더하면 focus 박스 캐스터(≈240콜/프레임)를 헛제출한다. 그래서 부팅
   //   예열 후 shadowMap.autoUpdate=false 로 두고, 아래 조건에서만 needsUpdate 를 1프레임 세운다:
   //     · shadowHot 창(setTime/재생성 등 태양방향·지오 변동 후 일정 시간)
-  //     · 조립·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈 등 지오/무대가 움직이는 프레임
+  //     · 조립·리롤 웨이브·머지 두부·데모(walk/drone)·문 스윙 등 *캐스터/무대*가 움직이는 프레임
   //     · focus 중(선택 필지): 링 동물·연기 그림자 저빈도(≈10Hz) 갱신
+  //     · 그림자 앵커 스냅 셀 변경(directionalShadow.setAnchor) — 카메라 트윈/hop 포함
+  //   카메라 전용 tween(focus-in/hop/out)은 캐스터를 움직이지 않으므로 매 프레임 그림자 재렌더를
+  //   걸지 않는다. 예전 `!!tween` 조건은 hop 1.5s 동안 dual FULL 오버레이 + 그림자 맵을 매
+  //   프레임 제출해 집→집 프리즈의 주원인이었다.
   //   그 외 정적 프레임엔 그림자 패스 제출 0. (three 는 shadow 렌더 후 needsUpdate 를 자동 false 로.)
   let shadowCacheOn = false;              // 부팅 예열 후 true → autoUpdate=false 캐시 모드 개시
   let shadowHot = 0;                      // performance.now() 이 값 미만이면 매 프레임 그림자 갱신
@@ -1304,14 +1308,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     updatePostQuality(dt);
     // #140-A 그림자 재렌더 게이트 — autoUpdate=false 캐시 모드에서만 관여(그 전엔 매 프레임 자동).
     if (shadowCacheOn) {
-      // 무대/지오가 움직이는 프레임: 조립 낙하·리롤 웨이브·머지 두부·데모(walk/drone)·카메라 트윈.
-      //   (heroAsm·assembly·groupAnims 은 위에서 이미 처리된 뒤라 이 시점 truthy = 진행 중.)
-      const moving = !!tween || revealCamera?.isActive() || demo.active || village.wave
+      // 캐스터/무대가 움직이는 프레임만. 카메라 전용 tween은 제외 — 앵커 스냅·LOD ownership
+      // ·shadowHot 이 hop/focus-in 중 필요한 재렌더를 이미 담당한다.
+      const castersMoving = revealCamera?.isActive() || demo.active || village.wave
         || !!village.heroAsm || !!assembly || groupAnims.length > 0 || doorMoved;
-      if (moving || performance.now() < shadowHot) {
+      if (castersMoving || performance.now() < shadowHot) {
         renderer.shadowMap.needsUpdate = true;
       } else if (village.active && village.selected && (frames % 6) === 0) {
-        // 정적 focus: 링 동물·연기 캐스터 그림자를 ≈10Hz 로 갱신(동결 방지). 정적 부감은 갱신 0.
+        // focus(정적·hop 중 포함): 링 동물·연기 캐스터 그림자를 ≈10Hz 로 갱신. 부감은 0.
         renderer.shadowMap.needsUpdate = true;
       }
     }
@@ -2072,6 +2076,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   (집→집, 부감 골짜기 없음). 오버레이 스왑 순서: B 선표시(도착 시 근경 완성) → 도착(onDone)에 A 해제
   //   (근경 팝을 부감/원거리로 밀어냄). 앰비언스 링은 attachFocusRing(B) 이 focusRing.set → A 링 retiring
   //   크로스페이드. 전환 내내 transitioning=true → 줌 감시자·재클릭 봉인.
+  //
+  // Hop freezes: do NOT gate the camera on afterWarm (focus-in still does). House→house
+  // already paid the B overlay build cost on the click frame; waiting up to REVEAL_WARM_CAP_MS
+  // for shader link before any camera motion felt like a hard freeze. Warm + focus ring run
+  // in parallel with the dolly so residual compile hitches land mid-motion (fill 0.65 / MSAA 0).
   function villageSwitch(toId) {
     if (!village.active || !village.handle || village.transitioning || villageWaveBusy()) return;
     const fromId = village.selected;
@@ -2087,49 +2096,54 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // B 를 풀디테일 오버레이로 선표시(도착 시 근경엔 B 완성). A 오버레이는 도착까지 유지(팝 은닉).
     const detail = village.handle.showParcelDetail(toId);
     if (!detail) return;
-    const warmP = detail.group ? warmShaders(detail.group) : Promise.resolve();   // B 오버레이 프리컴파일(#117)
     village.selected = toId; village.transitioning = true;
     dispatchView('hop', { parcelId: toId, fromId });
     setPostFocus(true);                                           // 두 상태 모두 focus(멱등) — rim/flare 유지
     setZoomRegime('lock');                                        // 전환 중 줌 봉인
     village.handle.highlightParcel(toId, true);                   // 돌리 동안 B 추적 하이라이트
-    if (detail.group) attachFocusRing(detail);                   // 앰비언스 링 A→B 크로스페이드(set 이 A 링 retiring)
     renderer.domElement.style.cursor = '';
     emit('villageSelectStart', { parcelId: toId, spec: pr.buildingSpec, reseed: true });   // 패널 유형·기본값 갱신
     emit('villageHover', null);
-    // #128 reveal 게이트: hop 돌리 시작을 B 오버레이 셰이더 링크 완료(cap 상한)에 묶어 첫 렌더 스톨 방지.
-    afterWarm(warmP, REVEAL_WARM_CAP_MS, () => {
-      if (!village.active || village.selected !== toId) return;
-      const settledComposition = -VILLAGE_FOCUS_SKY_FRACTION * focusCompositionFor(toId);
-      const f = focusFramingForViewport(pr, undefined, { compositionY: settledComposition });
-      const closeupDist = f.position.distanceTo(f.target);
-      // 예열 중 교체된 목적지 root의 좌표만 커밋해 폐기된 Object3D 의미점이 되살아나지 않게 한다.
-      const toOpeningFocus = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
-      if (toOpeningFocus) setSemanticDofAnchor(toId, toOpeningFocus);
-      else clearSemanticDofAnchor();
-      const semanticTransition = !!(fromOpeningFocus || toOpeningFocus);
-      tweenTo(f.position, f.target, FOCUS_HOP_DUR, {
-        // 카메라·시선과 같은 진행도로 A의 고정 개구면→B의 고정 개구면을 보간한다. 의미 anchor가
-        // 없는 복합체 쪽 끝만 해당 controls.target으로 폴백해 near-plane 초점 점프를 막는다.
-        fov: f.fov, referenceFov: f.referenceFov,
-        focusComposition: focusCompositionFor(toId),
-        dofAnchorFrom: semanticTransition ? (fromOpeningFocus || controls.target) : null,
-        dofAnchorTo: semanticTransition ? (toOpeningFocus || f.target) : null,
-        dofSource: 'primary-opening-transition',
-        onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
-        onDone: () => {
-          village.transitioning = false;
-          dispatchView('hopDone', { parcelId: toId });
-          village.handle.highlightParcel(toId, false);              // 도착: 근경 박스 숨김
-          if (fromId) village.handle.hideParcelDetail(fromId);      // A 오버레이 해제(A 인스턴스 복원) — 팝을 원거리로
-          setZoomRegime('focus', closeupDist);
-          emit('villageFocusMorph', 1);
-          emit('villageSelect', { parcelId: toId, spec: pr.buildingSpec });
-          emitSettledView();
-        },
-      });
-      retargetOnChromeSettled(toId, pr, { compositionY: settledComposition });
+
+    // Camera starts this frame — do not wait for shader link.
+    const settledComposition = -VILLAGE_FOCUS_SKY_FRACTION * focusCompositionFor(toId);
+    const f = focusFramingForViewport(pr, undefined, { compositionY: settledComposition });
+    const closeupDist = f.position.distanceTo(f.target);
+    const toOpeningFocus = resolveArchitecturalDofAnchor(toId, new THREE.Vector3());
+    if (toOpeningFocus) setSemanticDofAnchor(toId, toOpeningFocus);
+    else clearSemanticDofAnchor();
+    const semanticTransition = !!(fromOpeningFocus || toOpeningFocus);
+    tweenTo(f.position, f.target, FOCUS_HOP_DUR, {
+      // 카메라·시선과 같은 진행도로 A의 고정 개구면→B의 고정 개구면을 보간한다. 의미 anchor가
+      // 없는 복합체 쪽 끝만 해당 controls.target으로 폴백해 near-plane 초점 점프를 막는다.
+      fov: f.fov, referenceFov: f.referenceFov,
+      focusComposition: focusCompositionFor(toId),
+      dofAnchorFrom: semanticTransition ? (fromOpeningFocus || controls.target) : null,
+      dofAnchorTo: semanticTransition ? (toOpeningFocus || f.target) : null,
+      dofSource: 'primary-opening-transition',
+      onProgress: () => emit('villageFocusMorph', 1),             // 집→집: 모프 1 유지(부감 미경유)
+      onDone: () => {
+        village.transitioning = false;
+        dispatchView('hopDone', { parcelId: toId });
+        village.handle.highlightParcel(toId, false);              // 도착: 근경 박스 숨김
+        if (fromId) village.handle.hideParcelDetail(fromId);      // A 오버레이 해제(A 인스턴스 복원) — 팝을 원거리로
+        setZoomRegime('focus', closeupDist);
+        emit('villageFocusMorph', 1);
+        emit('villageSelect', { parcelId: toId, spec: pr.buildingSpec });
+        emitSettledView();
+      },
     });
+    retargetOnChromeSettled(toId, pr, { compositionY: settledComposition });
+
+    // Warm + ring after the click frame yields: house mesh already visible, camera moving.
+    // Ring set() still crossfades A→B; warm is fire-and-forget (no gate).
+    tasks.after(() => {
+      if (disposed || !village.active || village.selected !== toId) return;
+      if (detail.group) {
+        warmShaders(detail.group);
+        attachFocusRing(detail);
+      }
+    }, 0);
   }
 
   // focus-out(ESC·닫기·줌아웃·토글 숏컷) — focus-in 의 역재생(#92 원칙 3). 링 페이드아웃·패널 모프 역행·

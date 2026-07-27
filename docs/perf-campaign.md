@@ -1,6 +1,6 @@
 # 성능 캠페인 — 카메라 난사 + 집 편집 실시간
 
-- **상태**: main #196–#201 머지 완료 · 추가 라운드 진행 (2026-07-27)
+- **상태**: main #196–#204 머지 · hop 프리즈 대응 진행 (2026-07-27)
 - **목표**: (1) 카메라를 거칠게 돌려도 프레임이 무너지지 않음 (2) 집 편집 슬라이더가 자연스럽게 실시간 (3) 정착 프레임 시각 품질 ≥ 현행
 - **비목표**: WebGPU 메인 전환 (후순위 실험)
 
@@ -129,10 +129,19 @@
 | **_baseColor store** | applyMaterialRoleTints가 최초 RGB 보존 후 재곱 | 동일 |
 | **roofTone-only path** | geometry 불변 + roofTone만 변경 시 재틴트, rebuild 0 | 동일 |
 
+## 14차 구현 (집→집 hop 프리즈)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Shadow: no per-frame on camera tween** | `!!tween` 제거 — hop/focus 카메라 트윈만으로 그림자 맵 매프레임 재렌더 금지. 앵커 스냅·LOD ownership·shadowHot·focus 10Hz만 갱신 | 정착 동일; hop 중 그림자 스냅 단위 |
+| **Hop camera ungated** | house→house는 afterWarm 대기 없이 같은 클릭 프레임에 돌리 시작 | 클릭→모션 즉시 |
+| **Hop ring deferred** | warmShaders + focusRing 을 다음 태스크로 미룸 (크로스페이드 유지) | 링 1프레임 지연 |
+
 ## 다음 라운드 (우선순위)
 
-1. grade half-res during motionBudget (look risk — measure first)
-2. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
+1. hop 중 B overlay 빌드 자체 rAF 청크 (CPU) — 측정 후
+2. grade half-res during motionBudget (look risk)
+3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
 
