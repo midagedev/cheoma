@@ -215,11 +215,13 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
 
     if (!isBusy()) {
       const now = performance.now();
-      if (now - state.lastSample > 90) {
+      // Sample often enough to track a 0.5s sheet expand without a stepped jump.
+      if (now - state.lastSample > 48) {
         state.lastSample = now;
         sampleTarget();
       }
-      const alpha = 1 - Math.exp(-dt / 0.18);
+      // Longer settle (~0.28s) so hero-land → panel open does not yank the frame.
+      const alpha = 1 - Math.exp(-dt / 0.28);
       state.curX += (state.tgtX - state.curX) * alpha;
       state.curY += (state.tgtY - state.curY) * alpha;
     }

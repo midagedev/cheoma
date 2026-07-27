@@ -136,6 +136,20 @@ export function createPostQualityRuntime({
       applyFillScale();
       applyMotionBudget();
     },
+    /**
+     * Force a settled flagship frame after a long motion path (hero assembly
+     * orbit, architectural reveal). Without this, adaptive fill 0.65 + MSAA 0
+     * can linger into the first quiet frames and the settled eave/tile read dies.
+     */
+    forceStable() {
+      motion.reset();
+      quality.reset();
+      appliedFillScale = NaN;
+      appliedMotionBudget = null;
+      applyFillScale();
+      applyMotionBudget();
+      return quality;
+    },
     debug() {
       return {
         postQuality: quality.quality,

@@ -384,9 +384,11 @@
   //   상한 있는 시트, 가로 폰에서 좌측 42% 패널이라 독과 겹치지 않는 슬롯을 쓴다.
   //   낙관은 세로 시트에서만 하단 겹침이 생기므로 그때만 숨김.
   let hideSeal = $derived(sheetLayout && (editing || (sceneVillage && !villageEditing)));
-  // 만들기 시트 detent 요청(#158 P3): 부감=peek, 근접(편집·전환)=half. 구현은 사문화됐던 detent prop 을
-  //   실제로 전달하는 것 — focus-in 이 모바일에서 패널을 자동으로 펼친다.
-  let makeDetent = $derived((villageEditing || villageZooming) ? 'half' : 'peek');
+  // 만들기 시트 detent:
+  //   · 부감 → peek 강제(접힘)
+  //   · focus → null (강제 없음). 직후 half 강제는 view-shift 로 카메라가 덜컥해서
+  //     기본 접힘 유지; 사용자가 grip 으로 half 열 때만 펼침.
+  let makeDetent = $derived((villageEditing || villageZooming) ? null : 'peek');
   // 브레드크럼 leaf 라벨(구 ContextPanel 헤더에서 이설). 좌상 단독 슬롯이 소유한다.
   let crumbLabel = $derived.by(() => {
     const spec = villageEditing?.spec;
