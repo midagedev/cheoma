@@ -165,9 +165,9 @@ clean snapshot이 필요하면 사용자 dev server와 기존 산출물을 건�
 
 용도는 두 가지다. ① 헤드리스 A/B — 같은 결정론 프레임(`?hero=0&village=1&worker=0&shot=1&vscale=capital&vseed=7`)
 에 폰 에뮬레이션을 걸고 `fxcompact`만 뒤집어 픽셀 수·프로그램 수 델타를 구조적으로 비교한다.
-② 실기기 A/B — 폰에서 두 URL을 번갈아 열어 체감을 본다. `docs/mobile-effects-audit.md` §7의 체크리스트가
-그 절차이며, **`compact` 기본값(pixelRatio 1.5)은 그 실기기 확인 전에는 올리지 않는다** — 감사에서 유일하게
-전 프레임 필레이트를 곱하는 항목이다.
+② 실기기 A/B — 폰에서 두 URL을 번갈아 열어 체감을 본다. `docs/mobile-effects-audit.md` §7·§10의 체크리스트가
+그 절차이며, **`compact` 기본값(pixelRatio 1.5)은 제품 결정으로 동결**한다(2026-07-27 #228: `shoot:dpr` 로
++78% 풀스크린 타깃을 확인, 실기기 사인오프 전에는 올리지 않음). 단독 축 비교는 `?pr=1.5|2`.
 
 ## #81 영구 게이트 — 실제 창호 야간 불빛
 

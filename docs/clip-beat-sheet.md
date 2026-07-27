@@ -108,3 +108,9 @@ https://cheoma.midagedev.com/?seed=7&time=sunset
 | tofu / ripple | `src/anim/assembly.js` | 단일 이징·기하 유도 리플; `npm run check:assembly` |
 
 조립을 더 길게 쓰고 싶으면 **duration만** 늘리고 착공 지연은 고정한다. 게이트와 엔진 주석이 그 불변식을 전제로 한다.
+
+## 9. 릴리스 패키지
+
+게시용 exact URL·macOS 녹화 순서·트윗 초안·seed 7 정지 프레임 경로는
+[`clip-release-package.md`](clip-release-package.md) (#210)에 모은다. 이 비트 시트는 안무·타이밍 정본이고,
+릴리스 패키지는 사람이 한 테이크를 찍어 올리기 위한 실행 체크리스트다.

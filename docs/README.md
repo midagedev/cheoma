@@ -56,7 +56,7 @@
 | [`dof-cinematic-research.md`](dof-cinematic-research.md) | 리서치 | 시네마틱 DoF 선례(three.js dof/dof2, pmndrs) 비교와 층 분리 복원 스펙. 현행 표면 반경 상한이 무엇을 누르는지, 권고 CoC 공식·초기 파라미터·검증 컷. 계획 1-3의 입력이며 아직 계약이 아니다. |
 | [`tree-look.md`](tree-look.md) | 리서치 | Phase 3.5-0 나무 룩의 동양화 조형 문법과 기법 후보. 프로토타입이 안을 확정하기 전까지 계약이 아니다. |
 | [`oriental-painting-research.md`](oriental-painting-research.md) | 리서치 | 동양화 원리 가운데 나무 밖 전체 룩(원경·구도·여백·대기·색·계화)에 적용 가능한 원천 자료. |
-| [`mobile-effects-audit.md`](mobile-effects-audit.md) | 활성 작업 | 2026-07-25 모바일 효과 축소 게이트 전수 조사 — 분류(필수/복원 후보/실기기 확인), 복원 계획, §9 구현 결과. R1~R8 구현됨(커밋 전), R9(pixelRatio)는 §7 실기기 확인 대기. |
+| [`mobile-effects-audit.md`](mobile-effects-audit.md) | 활성 작업(R9 동결) | 2026-07-25 모바일 효과 축소 전수 조사. R1~R8 구현, R9는 §10 헤드리스 프록시 후 **PR_CAP 1.5 동결**(실기기 사인오프 잔여). |
 | [`ui-consolidation.md`](ui-consolidation.md) | 활성 작업 | 2026-07-25 UI 전수 감사와 3축(보기/만들기/공유) 재구성 스펙. 사용자 결정 B안 — 구현 라운드가 §3-B와 결정 절을 따른다. |
 | [`tooling.md`](tooling.md) | 스냅샷 | 후보 라이브러리 평가와 채택 판단. 현재 설치 목록으로 오해하지 않는다. |
 | [`perf-webgpu.md`](perf-webgpu.md) | 스냅샷 | 2026-07-17 기준 WebGPU·성능 조사. 버전·브라우저 수치는 재검증 필요. |
@@ -66,6 +66,7 @@
 | [`credits.md`](credits.md) | 완료 기록 | 공개 크레딧과 출처 표기용 선별 목록. `references.md`와 목적이 다르다. |
 | [`suno-prompts.md`](suno-prompts.md) | 완료 기록 | BGM 생성 프롬프트와 6/6 수령 기록. |
 | [`clip-beat-sheet.md`](clip-beat-sheet.md) | 완료 기록 | 대표 공유 클립 원테이크 비트 시트(삼원법·~10s 조립·OS 화면 녹화). 인앱 녹화 기능이 아니다. |
+| [`clip-release-package.md`](clip-release-package.md) | 완료 기록 | #210 게시 패키지: exact URL, macOS 녹화, 트윗 초안, seed7 정지 프레임 경로. 사람 녹화·게시 잔여. |
 
 ## Claude Code 메모리에서 승격한 내용
 
