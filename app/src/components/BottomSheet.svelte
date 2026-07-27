@@ -18,7 +18,8 @@
     header = null, footer = null,
   } = $props();
 
-  // Visible sheet height. 0.50 balances framing band ≥28% vs scroll ≥200px.
+  // Expanded sheet height. 0.50 keeps ≥28% framing band (focus-framing
+  // minSafeFraction). Density comes from tighter rows, not a taller sheet.
   const HALF_VH = 0.50;
   let viewportH = $state(0);
   let snap = $state('hidden');
@@ -228,6 +229,7 @@
   .ctxcard.open {
     opacity: 1;
     pointer-events: auto;
+    transition: opacity 0.36s ease;
   }
   .ctxcard:not(.open) {
     visibility: hidden;
@@ -238,7 +240,7 @@
     bottom: 0;
     right: 0;
     left: auto;
-    width: min(248px, 30vw);
+    width: min(268px, 34vw);
     max-height: none;
   }
   .ctxhead {
@@ -286,7 +288,8 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: max-height 0.42s cubic-bezier(0.22, 1, 0.36, 1), transform 0.32s ease;
+    /* Slightly longer ease so view-shift can track the rising sheet without a pop. */
+    transition: max-height 0.52s cubic-bezier(0.22, 1, 0.36, 1), transform 0.36s ease;
     will-change: max-height;
     touch-action: none;
     box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.45);
@@ -349,15 +352,16 @@
     touch-action: pan-y;
     display: flex;
     flex-direction: column;
-    padding: 0 clamp(14px, 4vw, 18px) 10px;
+    padding: 0 clamp(10px, 3vw, 14px) 6px;
+    gap: 2px;
   }
-  .sheethead { flex: none; padding: 4px clamp(14px, 4vw, 18px) 2px; }
+  .sheethead { flex: none; padding: 2px clamp(10px, 3vw, 14px) 0; }
   .sheet[data-snap='peek'] .sheethead,
   .sheet[data-snap='peek'] .scroll,
   .sheet[data-snap='peek'] .sheetfoot { visibility: hidden; }
   .sheetfoot {
     flex: none;
-    padding: 6px clamp(14px, 4vw, 18px) calc(8px + env(safe-area-inset-bottom));
+    padding: 4px clamp(10px, 3vw, 14px) calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--panel-line);
     background: var(--panel-2);
   }

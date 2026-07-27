@@ -164,6 +164,11 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       if (disposed) return null;
       return qualityRuntime.update(dt, referenceDepth);
     },
+    /** Immediately restore full fill + focus MSAA after a long hero/cinematic path. */
+    forceStableQuality() {
+      if (disposed) return null;
+      return qualityRuntime.forceStable();
+    },
     debugQuality() {
       return qualityRuntime.debug();
     },

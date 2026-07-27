@@ -2636,15 +2636,35 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dispatchView('focusDone', { parcelId: heroId });
       settleControls();
       controls.update(); // 조립 종료 시점에서도 즉시 컨트롤 관성 리셋
-      // 원래 사용자 시간대 비주얼 복구
-      env.setTime(state.time);
-      post.setTime(state.time);
+      // 조립 10s 동안 카메라 선회가 motionBudget(MSAA 0 · fill 0.65)을 붙잡고 있어,
+      // 정착 직후에도 적응 품질이 풀리지 않으면 림·기와 에지가 한꺼번에 죽어 보인다.
+      // 플래그십 근접 프레임으로 즉시 복원한다.
+      postRuntime.forceStableQuality?.();
+      setPostFocus(true);
+      const settledRoot = village.handle.heroDetailGroup?.() || g;
+      if (settledRoot) {
+        post.rimRescan?.(settledRoot);
+        warmShaders(settledRoot);
+      }
+      // 원래 사용자 시간대 비주얼 복구. 이미 석양이면 즉시 스냅 — 불필요한 크로스페이드가
+      // rimBase/altGate 를 한동안 낮추지 않게 한다.
+      const timeOpts = state.time === 'sunset' ? { immediate: true } : undefined;
+      env.setTime(state.time, timeOpts);
+      post.setTime(state.time, timeOpts);
       audio?.introEvent('settle');   // 진입 트랙 → 시간대 트랙 인계(4s 크로스페이드) + 볼륨 1 확정
       if (village.handle) { village.handle.setTime(state.time); reapplyVillageFog(); }
       attachFocusRing(village.handle.heroDetailGroup());   // 조립 정착 후 근접 앰비언스 점등(#79)
       setZoomRegime('focus', closeupDist);                 // 랜딩 착지 → 근접 줌
       weatherRef?.setWeather(state.weather);               // 랜딩 조립 정착 후 날씨 복원
       updateWeatherColliders();
+      // 정착 한 프레임 뒤 품질·림을 한 번 더 확정(패널 chrome / view-shift 샘플 이후).
+      requestAnimationFrame?.(() => {
+        if (!village.active || village.selected !== heroId) return;
+        postRuntime.forceStableQuality?.();
+        setPostFocus(true);
+        const root = village.handle?.heroDetailGroup?.();
+        if (root) post.rimRescan?.(root);
+      });
       emit('villageSelect', { parcelId: heroId, spec: pr.buildingSpec });
       emitSettledView();
       onDone?.();

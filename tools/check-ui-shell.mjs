@@ -444,11 +444,21 @@ try {
 
     // ── 집 focus 편집 ──
     await focusParcel(page);
-    // P3: focus-in must open the panel by itself on the sheet layout.
+    // Focus keeps the sheet collapsed (peek). Auto-half yanked the camera via
+    // view-shift when the hero/focus path settled; the user expands via grip.
     if (sheetLayout) {
       const snap = await page.evaluate(() => document.querySelector('[data-make-panel]')?.dataset.snap || null);
-      pass(snap === 'half',
-        `${viewport.id} focus-in expands the make sheet without a user gesture (${snap})`);
+      pass(snap === 'peek',
+        `${viewport.id} focus-in keeps the make sheet collapsed (${snap})`);
+      // Expand once so scroll/control/framing metrics measure the editable shell.
+      await page.evaluate(async () => {
+        document.querySelector('[data-make-panel] .grip')?.click();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      });
+      await settleShell(page);
+      const expandedSnap = await page.evaluate(() => document.querySelector('[data-make-panel]')?.dataset.snap || null);
+      pass(expandedSnap === 'half',
+        `${viewport.id} one grip tap expands the make sheet for editing (${expandedSnap})`);
     }
     await settleShell(page);
     const focused = await measure(page);
@@ -499,7 +509,8 @@ try {
       pass(expand.snapBefore === 'half' && expand.snapAfter === 'half'
         && expanded.hits.renderInk === 'hittable',
       `${viewport.id} expanding the view chip reveals the axis without collapsing the edit sheet (${JSON.stringify({ ...expand, renderInk: expanded.hits.renderInk })})`);
-      // Return to the collapsed state so the later ink/fade steps see the authored shell.
+      // Collapse view chip; leave the edit sheet at half for later ink steps that
+      // assume an open inspector, then peek-collapse at end of focus block.
       await page.evaluate(async () => {
         document.querySelector('[data-view-collapse]')?.click();
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));

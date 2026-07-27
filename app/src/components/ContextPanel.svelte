@@ -259,7 +259,7 @@
     : '') + o);
 </script>
 
-<BottomSheet {open} gap={11} {detent} ariaLabel="make panel" {header} {footer}>
+<BottomSheet {open} gap={7} {detent} ariaLabel="make panel" {header} {footer}>
   <!-- 건물 선택기는 sticky 헤더가 아니라 스크롤 본문 최상단에 둔다(#158 P8·P1): 헤더에서 44~90px 를
        상시 점유해 가로 폰의 스크롤 창을 절반으로 깎던 원인이었다. 모프 owner 밖(컨텍스트 공통)에 남는다. -->
   {#if navigationGroups.length}
@@ -863,33 +863,50 @@
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
 
+  /* Portrait / touch: denser *content* (gaps, type, row chrome) while keeping
+     44px primary targets for grip/tabs/nav/rebuild (check:ui-shell). */
   @media (max-width: 600px), (pointer: coarse) {
-    .axistab { min-height: 44px; }
-    .axistab .lab { font-size: 14px; }
-    .navcontrols select, .navaction { min-height: 44px; font-size: 14px; }
-    .navaction { min-width: 74px; }
-    .scaleval { font-size: 15px; }
-    .toggle { padding: 12px 6px; font-size: 13.5px; }
-    .rebuild, .hbtn { min-height: 44px; padding: 12px; font-size: 14px; }
-    .advtoggle { min-height: 44px; font-size: 12px; }
-    .makehead { padding-bottom: 6px; }
-    .buildingnav { padding-bottom: 6px; gap: 4px; }
-    input[type='range'].scale { height: 4px; }
-    input[type='range'].scale::-webkit-slider-thumb { width: 22px; height: 22px; border-radius: 3px; }
-    input[type='range'].scale::-moz-range-thumb { width: 22px; height: 22px; border-radius: 3px; }
-    .tab { padding: 12px 2px; }
-    .tab .tl { font-size: 14px; }
-    .stepper { gap: 14px; }
-    .stepper button { width: 40px; height: 40px; font-size: 18px; border-radius: 8px; }
-    .stepper .num { min-width: 24px; font-size: 16px; }
-    .row { min-height: 40px; }
-    .segbtn { padding: 9px 11px; font-size: 12.5px; }
-    .tgl { width: 52px; height: 30px; border-radius: 15px; }
-    .tgl .knob { width: 24px; height: 24px; }
-    .tgl.on .knob { transform: translateX(22px); }
-    input[type='range'] { height: 4px; }
-    input[type='range']::-webkit-slider-thumb { width: 22px; height: 22px; border-radius: 3px; }
-    input[type='range']::-moz-range-thumb { width: 22px; height: 22px; border-radius: 3px; }
+    .axistab { min-height: 44px; padding: 6px 6px; }
+    .axistab .lab { font-size: 13px; }
+    .navcontrols select, .navaction { min-height: 44px; font-size: 13px; }
+    .navaction { min-width: 72px; padding: 6px 10px; }
+    .navstatus { font-size: 10px; min-height: 1.1em; }
+    .navlabel { font-size: 9px; letter-spacing: 0.12em; }
+    .scaleval { font-size: 13px; }
+    .toggle { padding: 9px 5px; font-size: 12px; min-height: 40px; }
+    .rebuild, .hbtn { min-height: 44px; padding: 10px; font-size: 13px; }
+    .advtoggle { min-height: 40px; font-size: 11.5px; padding: 6px 2px; }
+    .makehead { padding-bottom: 4px; }
+    .buildingnav { padding-bottom: 4px; gap: 3px; margin-bottom: 0; }
+    .stack > .ctx { gap: 4px; }
+    section { gap: 4px; }
+    section.pinned { padding: 7px 8px 8px; }
+    .vdetail { gap: 3px; }
+    input[type='range'].scale { height: 3px; }
+    input[type='range'].scale::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
+    input[type='range'].scale::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
+    .tab { padding: 9px 2px; min-height: 44px; }
+    .tab .tl { font-size: 13px; }
+    .tab .ts { font-size: 10px; }
+    .stepper { gap: 8px; }
+    .stepper button { width: 40px; height: 40px; font-size: 16px; border-radius: 7px; }
+    .stepper .num { min-width: 22px; font-size: 14px; }
+    .row {
+      min-height: 34px; gap: 5px;
+      grid-template-columns: 70px minmax(0, 1fr) 38px;
+    }
+    .row.bays, .row.seg { grid-template-columns: 70px minmax(0, 1fr); }
+    .rl { font-size: 11px; }
+    .rv { font-size: 10px; }
+    .segbtn { padding: 7px 8px; font-size: 11px; min-height: 36px; }
+    .tgl { width: 48px; height: 28px; border-radius: 14px; }
+    .tgl .knob { width: 22px; height: 22px; }
+    .tgl.on .knob { transform: translateX(20px); }
+    input[type='range'] { height: 3px; }
+    input[type='range']::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
+    input[type='range']::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
+    .editnote { font-size: 10px; margin: -1px 0 2px; }
+    .note { font-size: 10px; }
   }
   @media (max-height: 520px) and (orientation: landscape) {
     .navlabel { font-size: 9px; }
