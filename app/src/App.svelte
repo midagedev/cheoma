@@ -1127,23 +1127,28 @@
     villageEditing = { parcelId: p.parcelId, spec: p.spec };
     if (changed) editParams = { kind: p.spec.kind, ...(p.spec.params || {}) };
   }
-  // 특수 컴파운드(종가·관아 hero + 궁 palace-compound)는 buildParcel/buildPalaceCompound 통짜라 무거워
-  //   드래그 라이브 재생성 금지 — 값 라벨만 라이브, 놓을 때(commit) 재생성.
+  // Kind switches and some discrete schema changes still treat multi-hall
+  // compounds as non-residential. Continuous geometry sliders, however, always
+  // stream through the live-edit scheduler — waiting for pointer-up felt broken
+  // in the CAD inspector (hero landing included).
   const isSpecialCompound = (spec) => !!spec
     && (spec.hero || spec.family === 'palace-compound' || spec.family === 'temple');
-  function acceptVillageSpec(rebuilt) {
+  function acceptVillageSpec(rebuilt, { syncParams = true } = {}) {
     if (!rebuilt || !villageEditing) return false;
     const state = engine.village.getState();
     const nextSpec = state.selected === villageEditing.parcelId ? state.spec : null;
     if (!nextSpec) return false;
+    // Preview frames must not replace editParams or villageEditing.spec: a new
+    // object identity re-renders the active range input mid-drag and the browser
+    // stops firing continuous input until pointer-up — which is exactly the
+    // "only updates when I release" bug. Geometry still tracks editParams.
+    // Commit reconciles core clamps, kind defaults, and the declarative schema.
+    if (!syncParams) return true;
     villageEditing = { ...villageEditing, spec: nextSpec };
-    // The core owns target-kind defaults and clamps. Reflect its accepted spec
-    // into the panel so hidden source-kind fields and out-of-range labels cannot
-    // survive a rebuild.
     editParams = { kind: nextSpec.kind, ...(nextSpec.params || {}) };
     return true;
   }
-  function pushRebuild({ refreshFlora = true, warm = true } = {}) {
+  function pushRebuild({ refreshFlora = true, warm = true, syncParams = refreshFlora } = {}) {
     if (!villageEditing) return;
     const rebuilt = engine.village.rebuild(
       villageEditing.parcelId,
@@ -1152,10 +1157,7 @@
       // Commit re-enables full warm so any rare new program still pre-links.
       { refreshFlora, warm },
     );
-    // Compound planners may change the valid controls and clamp ranges when a
-    // variant changes. Refresh the declarative spec after the core accepts the
-    // rebuild; Svelte still owns no THREE state.
-    const accepted = acceptVillageSpec(rebuilt);
+    const accepted = acceptVillageSpec(rebuilt, { syncParams });
     if (accepted && refreshFlora) syncUrl();
   }
   // Geometry-backed range controls receive many more input events than useful
@@ -1163,8 +1165,8 @@
   // preview work latest-wins, adapts its cadence to measured rebuild cost, and
   // makes pointer release the only flora/pick-boundary commit (#3, #19).
   const liveEdit = createLiveEditScheduler({
-    preview: () => pushRebuild({ refreshFlora: false, warm: false }),
-    commit: () => pushRebuild({ refreshFlora: true, warm: true }),
+    preview: () => pushRebuild({ refreshFlora: false, warm: false, syncParams: false }),
+    commit: () => pushRebuild({ refreshFlora: true, warm: true, syncParams: true }),
     // Continuous feel for the CAD inspector: target ~60 Hz when the house swap
     // is cheap; adaptive headroom still backs off under heavier rebuilds.
     minIntervalMs: 16,
@@ -1173,7 +1175,8 @@
   });
   function villageLive(k, v) {
     editParams[k] = v;
-    if (isSpecialCompound(villageEditing?.spec)) return;   // 특수 컴파운드(종가·관아·궁): 값 라벨만 라이브, 놓을 때 재생성
+    // Stream every geometry-backed axis, including hero/palace/temple. Heavy
+    // compounds rely on the adaptive interval instead of a hard commit-only gate.
     liveEdit.request();
   }
   function villageCommit(k, v) {

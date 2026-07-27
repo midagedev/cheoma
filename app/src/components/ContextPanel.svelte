@@ -232,9 +232,9 @@
       ? `${Number(value) | 0}${t(f.unitKey)}`
       : Number(value).toFixed(2);
   const fieldLabel = (f) => t('s_' + f.key);
-  // Geometry-backed ranges stream through onLive (scheduler). Discrete controls
-  // still rebuild immediately on each change so the house never waits for pointer-up
-  // of a non-drag control. Special compounds are gated inside onLive/onCommit.
+  // Geometry-backed ranges stream through onLive (scheduler → live preview).
+  // Discrete controls fire live+commit so the house never waits for pointer-up
+  // of a non-drag control. Pointer release is flora/pick/clamp reconciliation.
   function range(f, value) { params[f.key] = value; onLive?.(f.key, value); }
   function rangeCommit(f, value) { params[f.key] = value; onCommit?.(f.key, value); }
   function stepField(f, dir) {
