@@ -11,6 +11,7 @@ const ROOT = resolve(import.meta.dirname, '..');
 const scratch = await mkdtemp(join(tmpdir(), 'cheoma-weather-geometry-check-'));
 const bundle = join(scratch, 'weather-physical-geometry.mjs');
 const stateBundle = join(scratch, 'weather-particle-state.mjs');
+const eavePlanBundle = join(scratch, 'eave-rain-plan.mjs');
 const esbuild = join(ROOT, 'app/node_modules/.bin/esbuild');
 const three = join(ROOT, 'app/node_modules/three/build/three.module.js');
 
@@ -82,9 +83,18 @@ try {
     `--outfile=${stateBundle}`,
     '--log-level=error',
   ]);
+  await run(esbuild, [
+    'src/env/eave-rain-plan.js',
+    '--bundle',
+    '--format=esm',
+    '--platform=node',
+    `--outfile=${eavePlanBundle}`,
+    '--log-level=error',
+  ]);
   const rendering = await import(bundle);
   const state = await import(stateBundle);
-  const weather = { ...rendering, ...state };
+  const eavePlan = await import(eavePlanBundle);
+  const weather = { ...rendering, ...state, ...eavePlan };
 
   const snowA = weather.createSnowPrecipitationState({ count: 96, top: 18 });
   const snowB = weather.createSnowPrecipitationState({ count: 96, top: 18 });
@@ -318,9 +328,35 @@ try {
     full.dispose();
   }
 
+  // #215 eave drip plan — pure anchors, byte-deterministic, no Math.random.
+  const layoutA = { xEave: 8.5, zEave: 5.5, eaveEdgeY: 6.2 };
+  const eaveA = weather.planEaveAnchors(layoutA);
+  const eaveB = weather.planEaveAnchors(layoutA);
+  assert.equal(eaveA.count, eaveB.count, 'eave plan count is not deterministic');
+  assert.ok(eaveA.count > 8 && eaveA.count < 80, `eave anchor count out of budget: ${eaveA.count}`);
+  assert.deepEqual(
+    eaveA.anchors.map((a) => [a.ax, a.az, a.period, a.phase, a.speed, a.length]),
+    eaveB.anchors.map((a) => [a.ax, a.az, a.period, a.phase, a.speed, a.length]),
+    'eave anchors are not byte-deterministic',
+  );
+  // Anchors stay on the eave footprint (with small seed jitter).
+  for (const a of eaveA.anchors) {
+    assert.ok(Math.abs(a.ax) <= layoutA.xEave + 0.2, 'eave anchor x escapes footprint');
+    assert.ok(Math.abs(a.az) <= layoutA.zEave + 0.2, 'eave anchor z escapes footprint');
+    assert.equal(a.topY, layoutA.eaveEdgeY);
+  }
+  // Intermittent drip duty cycle: active fraction of the cycle only.
+  let active = 0;
+  const samples = 200;
+  for (let i = 0; i < samples; i++) {
+    if (weather.eaveDripActive(i * 0.05, eaveA.anchors[0].period, eaveA.anchors[0].phase)) active++;
+  }
+  const duty = active / samples;
+  assert.ok(duty > 0.35 && duty < 0.75, `eave drip duty cycle drifted: ${duty}`);
+
   console.log('weather physical geometry contracts: PASS');
   console.log(JSON.stringify({
-    counts: { snow: snowA.count, rain: rainA.count },
+    counts: { snow: snowA.count, rain: rainA.count, eave: eaveA.count },
     respawns: {
       snow: snowA.generations.reduce((sum, value) => sum + value, 0),
       rain: rainA.generations.reduce((sum, value) => sum + value, 0),
@@ -328,6 +364,7 @@ try {
     stateBytes,
     attributeBytes,
     triangles: { snow: snowFull.triangles, rain: rainFull.triangles },
+    eaveDuty: +duty.toFixed(3),
   }, null, 2));
 } finally {
   await rm(scratch, { recursive: true, force: true });

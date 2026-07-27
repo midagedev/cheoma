@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getWind } from './wind.js';
 import { makePresenceGate } from './present-gate.js';
 import { createPetalField } from './petals.js';
+import { createEaveRain } from './eave-rain.js';
 import {
   patchSnowMaterial,
   snowProfileForObject,
@@ -13,7 +14,10 @@ import {
   createPhysicalRainRepresentation,
   createPhysicalSnowRepresentation,
 } from './weather-physical-geometry.js';
-import { precipitationPresence } from '../core/lod.js';
+import {
+  fadeBeyond,
+  precipitationPresence,
+} from '../core/lod.js';
 import {
   advanceRainPrecipitation,
   advanceSnowPrecipitation,
@@ -27,9 +31,7 @@ import {
 //     → { setWeather(name, opts), update(dt), applyAtmosphere({mode}), onBuildingChanged(), dispose(), get weather() }
 //   name: 'clear' | 'rain' | 'snow'
 //
-// 구현 방침 (#131, #96): 눈·비 자체는 실제 월드 크기와 깊이를 가진 낙하 geometry로 표현하되,
-//  적설 볼륨 쉘·빗물 지붕 리벌릿·처마 낙수·착지 스플래시 같은 비싼 표면 상호작용은 만들지 않는다
-//  ("비는 지붕 별도 처리 불필요, 눈은 지붕 희게 칠하는 것으로 충분").
+// 구현 방침 (#131, #96, #215):
 //  - 강설/강우는 scene 에 직접 붙는 인스턴스 geometry(건물 재생성과 무관하게 유지).
 //  - 눈 룩 = 지붕 흰틴트: 건물 재질을 traverse 해 onBeforeCompile 로 "월드 노멀 상향" 기반 흰색
 //    블렌딩을 주입 — 위를 향한 면(지붕·기단 윗면·난간 위)에만 눈이 걸린다(볼륨 지오 없음, 값싼 셰이더).
@@ -37,6 +39,9 @@ import {
 //    (accumLevel 램프). clear 전환 시 0 으로 복귀(원본 외형 회복).
 //  - 젖은 재질은 roughness 를 원본*(1-0.45) 로 낮춘다(비 젖은 광택 룩, 물리 아님 — 원복 관리).
 //  - 지면은 눈이면 흰색, 비면 암부 톤다운으로 색만 lerp(값싼, 볼륨 아님).
+//  - #131 이 제거한 고비용 표면 시뮬(적설 볼륨 쉘·지붕 리벌릿·마당 전면 스플래시)은 복구하지 않는다.
+//  - #215 근경 전용 처마 낙수+처마선 최소 스플래시만 eave-rain.js 로 재도입(+2 Mesh draw, stock
+//    MeshBasicMaterial, FAR Points 금지). 강수 낙하 커튼과 precipitationPresence 밴드는 분리 유지.
 
 const SNOW_TAU = 1.4;    // 눈 파티클 등장/소멸 페이드 시상수(초) — 수 초에 걸쳐 나타남
 const RAIN_TAU = 0.9;    // 강우/젖음 페이드 시상수(초)
@@ -46,6 +51,10 @@ const WET_FACTOR = 0.45; // 젖음 시 roughness 감쇠(원본*(1-0.45))
 // 희어지는 건 30~60초에 걸쳐 서서히 진행돼야 무드가 산다(team-lead 지시). accumLevel(0..1)이
 // 그 진행도이며, 선형 램프로 오른다(이징은 앞이 급해 "즉시 하얘짐"으로 읽힘).
 const WET_DOWN = 3.0;    // 마당 젖음 회복 시간(초)
+
+// #215 처마 낙수 near 밴드(화면 등가 거리). 낙하 강수 precipitationPresence 와 분리 —
+//   부감(수백 m)에서 0, 단일집 three-quarter·focus 근경에서 1. 마을 focus 는 particleWeight 우선.
+const EAVE_NEAR_BAND = Object.freeze({ full: 48, hidden: 110 });
 
 // 폰 프로파일에서 지붕 충돌 판정을 유지하는 활성 콜라이더 상한. 판정은 입자수 × 콜라이더수의
 // 선형 주사이므로 12개면 프레임당 눈 43,200 + 비 31,200회로, 점-AABB 한 번이 최대 6번의 부동소수
@@ -87,10 +96,11 @@ export function setupWeather(scene, {
   // 이징 레벨(0..1). snowLevel → 눈발 파티클 가시성, rainLevel → 젖음/비 파티클.
   let snowLevel = 0, rainLevel = 0;
   let snowTarget = 0, rainTarget = 0;
-  // #131 물리 제거로 건물 종속 FX(처마 낙수·스플래시·적설 쉘·리벌릿)가 모두 사라져 bldGate 도 폐기.
-  //   눈 지붕 흰틴트는 공유 uniform(uSnowAmount) 이라 조기노출 게이트가 불필요(빈 터엔 눈 걸릴 위 향한
-  //   면 자체가 없음). lastBld 는 계절 입자(꽃잎/낙엽) petalGate 의 건물 교체 reset 판정에만 남긴다.
-  let lastBld = null;          // 건물 교체(리롤/유형변경) 감지 → petalGate reset
+  // #215 처마 낙수·최소 스플래시만 건물 종속 → bldGate 로 조기노출 차단(#61). 눈 지붕 흰틴트는
+  //   공유 uniform 이라 게이트 불필요. lastBld 는 petalGate·eave rebuild 판정에도 쓴다.
+  const bldGate = makePresenceGate({ delay: 1.4, up: 1.6, down: 0.35 });
+  let bldFx = 1;
+  let lastBld = null;          // 건물 교체(리롤/유형변경) 감지 → petalGate / bldGate reset
   // accumLevel(0..1): 지붕·기단·지면에 눈이 "쌓인" 진행도. 눈발(snowLevel)과 분리돼 천천히 오른다.
   let accumLevel = 0;
   // pinnedAccum: shot 하네스(window.__wx.setAccum)로 특정 쌓임 단계를 고정할 때의 값(null=자유 진행).
@@ -100,11 +110,13 @@ export function setupWeather(scene, {
 
   // 하늘 입자 필드 중심(#98). 눈·비 낙하 박스는 원점 기준 ±boxHalf 로 좁게(밀도 유지) 두되, 이 중심을
   //   매 프레임 카메라 타깃으로 옮겨(setWeatherCenter) "보는 곳에 눈/비가 온다"를 보장한다. 단일건물은
-  //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 파티클
-  //   낙하 geometry와 계절 입자만 이설(#131 제거로 건물 앵커 FX 없음).
+  //   타깃≈원점이라 무변, 마을 부감/종가 클로즈업은 필지·마을 중심으로 따라간다. 낙하 geometry와
+  //   계절 입자만 이설 — 처마 낙수(#215)는 건물/포커스 subject 월드행렬 앵커라 필드 이설과 무관.
   let fieldCX = 0, fieldCZ = 0;
   let disposed = false;
   let fogModifierRegistered = false;
+  // #215: explicit focus overlay subject (village parcel). Null → fall back to getBuilding().
+  let eaveSubject = null;
 
   // 계절 입자 필드(#111): 봄 벚꽃·가을 낙엽의 카메라 추종 볼륨. 눈·비와 동일하게 scene 루트에 붙여
   //   env.group 은닉(마을 모드)을 우회하고, setWeatherCenter 로 카메라 타깃을 따라온다. season 은
@@ -125,15 +137,15 @@ export function setupWeather(scene, {
   let petalPresent = 1;
 
   // ---------- 파티클 시스템 ----------
-  // #131: 낙하 눈·비만 유지. 처마 낙수(drips)·착지 스플래시·지붕 볼륨(snowvol/rainflow)은
-  //   제거 — 비는 지붕/지면 별도 처리 없이 그냥 내리고, 눈은 아래 patchSnow 흰틴트로 지붕이 희어진다.
+  // 낙하 눈·비 커튼(하늘 소속) + #215 근경 처마 낙수/최소 스플래시(건물 앵커, detail 밴드 sleep).
   // 눈·비 위치/속도/크기/위상은 renderer가 아니라 이 CPU state가 단독 소유한다. 인스턴스
   // geometry는 이 배열을 직접 참조하므로 별도의 renderer 상태나 복사본이 없다. 두 입자는
-  // 실제 월드 크기·가림·광학 깊이를 가지며, 부감에서는 기존 visibility sleep 계약으로 쉰다.
+  // 실제 월드 크기·가림·광학 깊이를 가지며, 부감에서는 precipitationPresence 밀도로만 비용을 낸다.
   const snowState = createSnowPrecipitationState({ top: yTop() });
   const rainState = createRainPrecipitationState({ top: yTop() });
   const snow = createPhysicalSnowRepresentation(snowState);
   const rain = createPhysicalRainRepresentation(rainState);
+  const eaveRain = createEaveRain(scene);
   const petals = createPetalField({
     getWind,
     getLightDirection: sun ? () => sun.position : null,
@@ -141,6 +153,28 @@ export function setupWeather(scene, {
   scene.add(snow.object);
   scene.add(rain.object);
   scene.add(petals.object);
+
+  // Resolve layout + Object3D subject for eave anchors. Prefer an explicit focus
+  // overlay (village), else the origin building when it is present/visible.
+  function findLayoutNode(root) {
+    if (!root) return null;
+    if (root.userData?.layout) return root;
+    let found = null;
+    root.traverse?.((o) => {
+      if (!found && o.userData?.layout) found = o;
+    });
+    return found;
+  }
+  function rebuildEaveRain() {
+    if (disposed) return;
+    const explicit = eaveSubject;
+    const b = getBuilding && getBuilding();
+    const node = findLayoutNode(explicit) || (b && b.visible ? findLayoutNode(b) : null);
+    const layout = node?.userData?.layout || (b?.userData?.layout) || L;
+    if (node?.userData?.layout) L = node.userData.layout;
+    else if (b?.userData?.layout) L = b.userData.layout;
+    eaveRain.rebuild(layout, node || explicit || null);
+  }
 
   // 낙하 박스와 겹치는 콜라이더만 activeColliders 로 추린다. 입자는 필드 중심 ±half 안에서
   // wrap 되고 흔들림·거스트만 그 밖으로 조금 나가므로, 마진을 더한 박스와 겹치지 않는 콜라이더는
@@ -268,6 +302,7 @@ export function setupWeather(scene, {
     setPrecipitationBounds(rainState, { top });
     snowUniform.value = accumLevel * SNOW_AMOUNT_MAX; // 새 재질에 현재 적설 흰틴트 즉시 반영
     applyWetness();
+    rebuildEaveRain(); // #215: 새 처마선·레이아웃으로 낙수 앵커 재배치
   }
 
   function update(dt) {
@@ -281,10 +316,13 @@ export function setupWeather(scene, {
     snowLevel += (effSnowTarget - snowLevel) * Math.min(1, dt / SNOW_TAU);
     rainLevel += (effRainTarget - rainLevel) * Math.min(1, dt / RAIN_TAU);
 
-    // 건물 교체(리롤/유형변경) 감지 — 계절 입자 petalGate reset 판정용(#131 로 건물 종속 FX 게이트 폐기).
+    // 건물 교체 감지 — petalGate·bldGate reset. 처마 낙수(#215)는 bldFx 로 조기노출 차단.
     const bObj = getBuilding && getBuilding();
     const bldReset = bObj !== lastBld; lastBld = bObj;
+    // present(petal): 단일 건물 visible. eavePresent: 포커스 오버레이 또는 원점 건물.
     const present = !!(bObj && bObj.visible);
+    const eavePresent = !!(eaveSubject || present);
+    bldFx = bldGate.update(dt, { present: eavePresent, reset: bldReset && !eaveSubject });
 
     // 적설 흰틴트 강도는 선형 램프로 천천히(올라갈 땐 ~46s, 녹을 땐 ~16s). shot 하네스가 고정하면 그 값 유지.
     if (pinnedAccum != null) {
@@ -304,8 +342,8 @@ export function setupWeather(scene, {
     applyWetness();
     applyGround();
 
-    // 파티클 가시성/갱신 — 낙하 눈·비 커튼만(값싼 입자, 하늘 소속). 처마 낙수·스플래시·볼륨은 #131 로 제거.
-    //   가시성은 강수 레벨 하나로 판정한다: 거리 밴드는 표현(볼륨·치수·밀도)만 바꾸고 절대 끄지 않는다.
+    // 파티클 가시성/갱신 — 낙하 눈·비 커튼(하늘 소속, precipitationPresence 밀도만 조절).
+    //   #215 처마 낙수·최소 스플래시는 근경 detail 밴드 × bldFx 로 sleep (부감 0).
     const snowVis = snowLevel > 0.003;
     const rainVis = rainLevel > 0.003;
     snow.object.visible = snowVis;
@@ -350,6 +388,22 @@ export function setupWeather(scene, {
         top: yTop(),
       });
       rain.sync({ level: rainLevel, time: t });
+    }
+
+    // #215 근경 처마 낙수 + 처마선 스플래시. precipitationPresence(하늘 밴드)와 분리 —
+    //   마을 focus 는 particleWeight, 단일집/하네스는 EAVE_NEAR_BAND(부감 0).
+    const nearFromDetail = petalDetail !== null
+      ? petalDetail
+      : fadeBeyond(
+        Number.isFinite(precipViewDistance) ? precipViewDistance : 0,
+        EAVE_NEAR_BAND.full,
+        EAVE_NEAR_BAND.hidden,
+      );
+    const eaveNear = Math.max(0, Math.min(1, nearFromDetail)) * bldFx;
+    if (rainVis && eaveNear > 0.02) {
+      eaveRain.update(dt, { time: t, level: rainLevel, nearWeight: eaveNear });
+    } else {
+      eaveRain.update(dt, { time: t, level: 0, nearWeight: 0 });
     }
 
     // 계절 입자(봄 꽃잎·가을 낙엽): 조기노출 게이트(원점 빈 터 억제) + 카메라 추종 볼륨. 눈·비처럼
@@ -402,6 +456,14 @@ export function setupWeather(scene, {
           snowInstances: snow.object.geometry.instanceCount,
         };
       },
+      // #215 near-focus eave rain diagnostics (draw sleep / anchor count).
+      get eaveRain() {
+        return {
+          active: eaveRain.active,
+          count: eaveRain.count,
+          bldFx: +bldFx.toFixed(3),
+        };
+      },
       // 계절 입자 필드(#111): env.setSeason 이 이 브릿지로 season 을 전달(engine 은 weather 에 season 미전달).
       //   'spring'|'autumn' 만 꽃잎/낙엽 발현. 읽기 전용 petalLevel 로 검증/외부 소비.
       setSeason: (name) => { season = name; petals.setSeason(name); },
@@ -427,12 +489,14 @@ export function setupWeather(scene, {
       scene.remove(system.object);
       system.dispose();
     }
+    eaveRain.dispose();
     petals.dispose();   // 계절 입자 필드(#111)
     if (typeof window !== 'undefined' && window.__wx === weatherDebug) delete window.__wx;
   }
 
   // 초기 재질 수집(눈 흰틴트 patchSnow 를 씬 전체 재질에 주입)
   collectMaterials();
+  rebuildEaveRain();
 
   // env fog 모디파이어 자동 등록(태스크 #50): 넘겨받았으면 대기 틴트를 매 틱 base fog 위에 레벨
   // 스케일로 합성한다. dispose 에서 같은 함수 참조를 제거해 재마운트 시 모디파이어가 누적되지 않게 한다.
@@ -455,9 +519,15 @@ export function setupWeather(scene, {
       roofColliders = boxes || [];
       colliderVersion++;   // 활성 집합 추림 캐시 무효화
     },
+    // #215: village focus overlay (or any non-origin house) as eave-rain subject.
+    //   Pass null on focus-out so origin getBuilding() / empty-site gate takes over.
+    setEaveSubject(root) {
+      eaveSubject = root || null;
+      rebuildEaveRain();
+    },
     // 하늘 입자 낙하 필드 중심 이설(#98). 마을 부감·종가 클로즈업처럼 시선이 원점을 벗어난 뷰에서
     //   눈·비가 화면 밖(원점)에만 쌓여 안 보이던 문제를 해소한다. 낙하 파티클 오브젝트만 이동(처마
-    //   낙수·스플래시는 건물 앵커라 불변). 값 변화가 없으면 no-op.
+    //   낙수·스플래시는 건물/포커스 subject 앵커라 불변). 값 변화가 없으면 no-op.
     setWeatherCenter(
       x,
       z,
