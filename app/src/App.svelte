@@ -1135,18 +1135,48 @@
     && (spec.hero || spec.family === 'palace-compound' || spec.family === 'temple');
   function acceptVillageSpec(rebuilt, { syncParams = true } = {}) {
     if (!rebuilt || !villageEditing) return false;
-    const state = engine.village.getState();
-    const nextSpec = state.selected === villageEditing.parcelId ? state.spec : null;
-    if (!nextSpec) return false;
-    // Preview frames must not replace editParams or villageEditing.spec: a new
-    // object identity re-renders the active range input mid-drag and the browser
-    // stops firing continuous input until pointer-up — which is exactly the
-    // "only updates when I release" bug. Geometry still tracks editParams.
-    // Commit reconciles core clamps, kind defaults, and the declarative schema.
+    // Preview frames leave the panel alone so the active range input keeps
+    // identity and the continuous input stream. Geometry already tracks
+    // editParams via the rebuild payload.
     if (!syncParams) return true;
-    villageEditing = { ...villageEditing, spec: nextSpec };
-    editParams = { kind: nextSpec.kind, ...(nextSpec.params || {}) };
-    return true;
+    // Residential rebuilds stamp the accepted, clamped spec on the overlay.
+    // Hero/palace/temple pick proxies often still hold the pre-edit defaults, so
+    // replacing editParams from getState().spec alone snaps every slider back
+    // on pointer-up even though the mesh already shows the live values.
+    const overlaySpec = rebuilt.userData?.editSpec || null;
+    const state = engine.village.getState();
+    const proxySpec = state.selected === villageEditing.parcelId ? state.spec : null;
+    if (overlaySpec) {
+      villageEditing = { ...villageEditing, spec: overlaySpec };
+      // Core clamps win for keys it returned; keep any panel-only live keys.
+      editParams = {
+        ...editParams,
+        kind: overlaySpec.kind,
+        ...(overlaySpec.params || {}),
+      };
+      return true;
+    }
+    if (proxySpec) {
+      // Keep the live panel as the rebuild source of truth and only fill gaps
+      // from the proxy (kind, compound flags, missing defaults).
+      const mergedParams = {
+        ...(proxySpec.params || {}),
+        ...editParams,
+      };
+      if (proxySpec.kind != null) mergedParams.kind = proxySpec.kind;
+      else if (editParams.kind != null) mergedParams.kind = editParams.kind;
+      villageEditing = {
+        ...villageEditing,
+        spec: { ...proxySpec, params: { ...mergedParams } },
+      };
+      // Mutate in place so controlled range inputs are not remounted.
+      for (const key of Object.keys(editParams)) {
+        if (!(key in mergedParams)) delete editParams[key];
+      }
+      Object.assign(editParams, mergedParams);
+      return true;
+    }
+    return !!rebuilt;
   }
   function pushRebuild({ refreshFlora = true, warm = true, syncParams = refreshFlora } = {}) {
     if (!villageEditing) return;

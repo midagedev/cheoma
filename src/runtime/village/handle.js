@@ -519,7 +519,8 @@ export function createVillageHandle(opts, seed, plan, group) {
     if (!parcel) return null;
     // 같은 hero의 편집/리롤만 교체한다. 다른 hero A는 hop 도착까지 유지하고 엔진이 A id로 해제한다.
     hideHeroDetail(parcelId);
-    const g = buildHeroCompound(parcel, editOpts || {});
+    const opts = editOpts || {};
+    const g = buildHeroCompound(parcel, opts);
     if (!parcel.mjaHouse) thresholdLife.attach(g, thresholdLifeCondition());
     overrides.add(g);
     if (snow.isActive()) snow.inject(g);
@@ -540,6 +541,18 @@ export function createVillageHandle(opts, seed, plan, group) {
       );
     }
     activatePrimaryDoor(parcelId, g);
+    // Stamp a panel-facing editSpec and refresh the pick proxy so commit / re-focus
+    // cannot reseat the inspector from pre-edit hero defaults (live-edit pointer-up).
+    const proxy = proxyById.get(parcelId);
+    if (proxy?.buildingSpec) {
+      const params = { ...(proxy.buildingSpec.params || {}) };
+      if (opts.roofOpts) Object.assign(params, opts.roofOpts);
+      if (opts.presetOverrides) Object.assign(params, opts.presetOverrides);
+      if (opts.wallH != null) params.wallH = opts.wallH;
+      const editSpec = { ...proxy.buildingSpec, params };
+      g.userData.editSpec = editSpec;
+      proxy.buildingSpec = editSpec;
+    }
     return g;
   }
   function hideHeroDetail(parcelId = null) {
@@ -629,6 +642,9 @@ export function createVillageHandle(opts, seed, plan, group) {
     refreshNightLightOwner('palace', g);
     if (palaceVisNode) palaceVisNode.visible = false; palaceHidden = true;   // #140-B 부감 병합본(또는 미병합 폴백) 은닉
     representationDirty = true;
+    // Panel commit path reads userData.editSpec first so pointer-up cannot reseat
+    // sliders from a stale pick-proxy snapshot.
+    g.userData.editSpec = palaceSpec();
     return g;
   }
   function hidePalaceDetail() {
@@ -734,6 +750,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     templeOverride.glow = nightGlow.add(built.wrapper, 'temple');
     refreshNightLightOwner('temple', built.wrapper);
     representationDirty = true;
+    built.wrapper.userData.editSpec = templeSpec();
     return built.wrapper;
   }
 
