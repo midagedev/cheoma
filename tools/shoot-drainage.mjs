@@ -198,10 +198,15 @@ drainage.traverse((object) => {
     for (const texture of materialTextures(material)) textures.add(texture);
   }
 });
+// Ditch: 5 quads × 2 tris per sample step. Each planned slab is a subdivided
+// box (3×1×2 segments → 44 tris). Count is plan-owned 2–3 per crossing (#217).
 const expectedTriangles = drainagePlan.runs.reduce(
   (sum, run) => sum + Math.max(0, run.points.length - 1) * 10,
   0,
-) + drainagePlan.crossings.length * 132;
+) + drainagePlan.crossings.reduce(
+  (sum, crossing) => sum + (crossing.slabs?.length ?? 0) * 44,
+  0,
+);
 const ownedTriangles = meshes.reduce(
   (sum, mesh) => sum + geometryTriangles(mesh.geometry),
   0,

@@ -118,6 +118,9 @@ function assertPlanContract(village, drainage) {
   }
 
   const runById = new Map(drainage.runs.map((run) => [run.id, run]));
+  let twoSlabCrossings = 0;
+  let threeSlabCrossings = 0;
+  const spanRatios = [];
   for (const crossing of drainage.crossings) {
     const parcel = parcels.get(crossing.parcelId);
     const run = runById.get(crossing.runId);
@@ -134,10 +137,51 @@ function assertPlanContract(village, drainage) {
       `${crossing.id} does not cross its ditch`);
     const runHit = G.distToPolyline(crossing.center, run.points);
     const runA = run.points[runHit.seg], runB = run.points[runHit.seg + 1];
-    const expectedDeckY = runA.y + (runB.y - runA.y) * runHit.t
+    const bedY = runA.y + (runB.y - runA.y) * runHit.t;
+    const expectedDeckY = bedY
       + DRAINAGE_PLAN_LIMITS.depth + DRAINAGE_PLAN_LIMITS.crossingLift;
     invariant(Math.abs(crossing.center.y - expectedDeckY) <= 1e-7,
       `${crossing.id} deck does not clear its lifted channel lip`);
+    // #217: plan owns 2–3 seed-local stones, blocky thickness, and seating —
+    // not three equal floating plates invented in the renderer.
+    invariant(Array.isArray(crossing.slabs)
+      && crossing.slabs.length >= DRAINAGE_PLAN_LIMITS.crossingSlabCountMin
+      && crossing.slabs.length <= DRAINAGE_PLAN_LIMITS.crossingSlabCountMax,
+    `${crossing.id} must plan 2–3 slabs`);
+    if (crossing.slabs.length === 2) twoSlabCrossings += 1;
+    else threeSlabCrossings += 1;
+    const spans = crossing.slabs.map((slab) => slab.span);
+    const minSpan = Math.min(...spans);
+    const maxSpan = Math.max(...spans);
+    spanRatios.push(maxSpan / minSpan);
+    for (const slab of crossing.slabs) {
+      invariant(
+        slab.thickness >= DRAINAGE_PLAN_LIMITS.crossingThicknessMin - 1e-9
+        && slab.thickness <= DRAINAGE_PLAN_LIMITS.crossingThicknessMax + 1e-9,
+        `${crossing.id} slab thickness outside product range`,
+      );
+      invariant(Math.abs(slab.top) <= DRAINAGE_PLAN_LIMITS.crossingTopJitter + 1e-9,
+        `${crossing.id} slab top left the seating band`);
+      const bottomY = crossing.center.y + slab.top - slab.thickness * 0.5;
+      invariant(
+        bottomY >= bedY - DRAINAGE_PLAN_LIMITS.crossingBedEmbedMax - 1e-7,
+        `${crossing.id} slab sinks too far below the ditch bed`,
+      );
+      // Sides partially sit below the nominal deck so stones do not read as
+      // three boxes resting on the road surface.
+      invariant(bottomY < crossing.center.y - 0.04,
+        `${crossing.id} slab is too thin/high to embed below the deck top`);
+    }
+    invariant(
+      Math.abs(crossing.thickness - Math.max(...crossing.slabs.map((s) => s.thickness))) <= 1e-9,
+      `${crossing.id} envelope thickness is not max slab thickness`,
+    );
+  }
+  if (drainage.crossings.length >= 6) {
+    invariant(twoSlabCrossings > 0 && threeSlabCrossings > 0,
+      `${village.scale} did not exercise both 2-slab and 3-slab crossings`);
+    invariant(spanRatios.some((ratio) => ratio >= 1.25),
+      `${village.scale} crossing slabs lack seed-local size variation`);
   }
 }
 
