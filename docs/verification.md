@@ -1009,7 +1009,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-drainage-plan.mjs` | 규모/도로 등급별 측구 정책, 실제 지형 하류 경사·lift 상한, 도로·수계·필지·생산지 이격, 저장된 대문 접근축 건넘, 불변 JSON·전역 RNG 비사용 | 물리 단면·판석 미감과 실제 GPU 자원은 `shoot:drainage`, 제품/Worker 직렬화는 app/worker 게이트가 맡는다. |
 | `tools/shoot-drainage.mjs` | 실제 capital 계획·renderer 통합, 같은 카메라 OFF/ON 근경·부감, plan/geometry hash 반복, mesh/draw/triangle/program/material/texture·dispose 예산 | 고정 seed 한 건넘의 시각 증거이며 전체 규모의 배치 수학은 `check:drainage`가 맡는다. |
 | `tools/shoot-brush-fence.mjs` | 고정 초가 필지 싸리울의 근경 실루엣 마스크 — 상단선 중앙값 절대편차, 몸통 가림률, 재질·텍스처 예산 | 규격 피켓과의 하한선만 판정하며 엮음 문양·살 굵기 분포의 사실성은 사람이 본다. |
-| `tools/check-sijeon-contract.mjs` | 기존 시전 위치 bytes, 순수 2칸 façade schema, 필지·도로 회랑 경계, 유한값·직렬화·결정론·무전역 RNG | Three 재질·병합 geometry와 실제 한양 화면은 `check:api-reuse`, app/worker 게이트가 맡는다. |
+| `tools/check-sijeon-contract.mjs` | 기존 시전 위치 bytes, 순수 2칸 façade schema v2(소수 비발광 `signs[]` 포함), 시명/물종 필드 금지, 필지·도로 회랑 경계, 유한값·직렬화·결정론·무전역 RNG | Three 재질·병합 geometry와 실제 한양 화면은 `check:api-reuse`, app/worker 게이트가 맡는다. `shoot:sijeon`이 5 mesh/5 material·texture 0·signCount를 기록한다. |
 | `tools/check-layout-contract.mjs` | 남향 군집·도로측 대문·실제 지붕 fit·단건 재굴림·도로/개울/논·집 사이 겨울 일조·정자 실면적/화면 폭·높이 있는 마을 소품·보호수·밀도 계약 | 대표 seed 순수 데이터 검사로, 실제 광학적 차폐 미감은 앱 캡처로 확인한다. |
 | `tools/check-gosat-topology.mjs` | 이웃 필지 경계 간 고샅 폭 측정·share 플래그 정합·역사 1.0–3.4 m 중앙값/비율 (#150-G) | 배치 변경 없이 measure+assert. `src/village/gosat-topology.js` + `village-walls-parcels.md` R-P2. |
 | `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |

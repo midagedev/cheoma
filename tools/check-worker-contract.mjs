@@ -203,7 +203,7 @@ const expectedSceneHashes = {
   village: '4a6b510a:d6a3a752:cf8d76d3:afabeadc',
   town: '12a957f8:289503e4:b6536590:e5dc8688',
   capital: 'fb1764d1:229eee87:e8f3b248:2acd32f5',
-  hanyang: 'dbcf37fa:9df083b4:71b0c874:ba064f20',
+  hanyang: 'bc532764:085b42e0:670637a3:ff1366b4',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

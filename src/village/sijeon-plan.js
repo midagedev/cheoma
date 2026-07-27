@@ -1,4 +1,5 @@
 import * as G from '../core/math/geom2.js';
+import { hashString } from '../rng.js';
 
 // Renderer-free sijeon (licensed-market row) contract.
 //
@@ -25,14 +26,25 @@ export const SIJEON_PLACEMENT = Object.freeze({
   segmentGapPitches: 1,
 });
 
-export const SIJEON_FACADE_SCHEMA_VERSION = 1;
+export const SIJEON_FACADE_SCHEMA_VERSION = 2;
 export const SIJEON_FACADE_BAYS = 2;
+
+// Product sparseness for decorative marker boards — not a historical frequency.
+export const SIJEON_SIGN_POLICY = Object.freeze({
+  maxShare: 0.28,
+  maxPerShop: 1,
+  emissive: false,
+  materialRole: 'frame',
+  silhouettes: Object.freeze(['tablet', 'plank']),
+});
 export const SIJEON_KIND_SHOP = 'shop';
 export const SIJEON_KIND_BREAK = 'break';
 
 const BODY_HEIGHT = 3;
 const MIN_WIDTH = 4.4;
 const MIN_DEPTH = 5.6;
+const SIGN_HANG_GAP = 0.05;
+const SIGN_THICKNESS = 0.05;
 
 function finiteDimension(value, name) {
   if (!Number.isFinite(value)) throw new TypeError(`sijeon ${name} must be finite`);
@@ -206,6 +218,36 @@ export function planSijeon(roadsResult, site, _char01 = 0.5) {
  * concerns. Eaves are the sole planned solid allowed beyond `streetEdgeZ`.
  * Break footprints have no facade — callers must filter with `isSijeonShop`.
  */
+
+function planSparseSigns(shop, { bayWidth, lintels, frontZ }) {
+  const id = shop?.id;
+  if (id == null || id === '') return [];
+  const h = hashString(`sijeon-sign|${String(id)}`);
+  const unit = ((h >>> 8) & 0xffffff) / 0x1000000;
+  if (unit >= SIJEON_SIGN_POLICY.maxShare) return [];
+  const bay = h & 1;
+  const silhouette = SIJEON_SIGN_POLICY.silhouettes[(h >>> 1) & 1];
+  const lintel = lintels[bay];
+  if (!lintel) return [];
+  const lintelBottom = lintel.center.y - lintel.size.height / 2;
+  const centerZ = frontZ - SIGN_THICKNESS / 2;
+  const centerX = lintel.center.x;
+  if (silhouette === 'plank') {
+    const width = Math.min(bayWidth * 0.42, lintel.size.width * 0.55);
+    const height = 0.16;
+    const centerY = lintelBottom - SIGN_HANG_GAP - height / 2;
+    return [box('marker-board', centerX, centerY, centerZ, width, height, SIGN_THICKNESS, {
+      bay, silhouette: 'plank', mount: 'lintel-hang', decorative: true, emissive: false,
+    })];
+  }
+  const width = 0.3;
+  const height = 0.58;
+  const centerY = lintelBottom - SIGN_HANG_GAP - height / 2;
+  return [box('marker-board', centerX, centerY, centerZ, width, height, SIGN_THICKNESS, {
+    bay, silhouette: 'tablet', mount: 'lintel-hang', decorative: true, emissive: false,
+  })];
+}
+
 export function planSijeonFacade(shop) {
   if (shop?.kind === SIJEON_KIND_BREAK) {
     throw new RangeError('sijeon break footprints have no facade mass');
@@ -342,6 +384,8 @@ export function planSijeonFacade(shop) {
     },
   };
 
+  const signs = planSparseSigns(shop, { bayWidth, lintels, frontZ });
+
   return {
     schemaVersion: SIJEON_FACADE_SCHEMA_VERSION,
     bayCount: SIJEON_FACADE_BAYS,
@@ -378,6 +422,7 @@ export function planSijeonFacade(shop) {
     benches,
     storage,
     roof,
+    signs,
     // Optional placement context — present when the shop came from planSijeon.
     segment: shop?.segment ?? null,
   };

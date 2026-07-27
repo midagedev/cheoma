@@ -10,6 +10,7 @@ export {
   SIJEON_KIND_BREAK,
   SIJEON_KIND_SHOP,
   SIJEON_PLACEMENT,
+  SIJEON_SIGN_POLICY,
   buildSijeon,
   disposeSijeon,
   isSijeonShop,
