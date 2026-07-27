@@ -7,6 +7,8 @@ import {
 } from '../src/core/lod.js';
 import {
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_EAVE_FOCUS_ELEVATION,
+  VILLAGE_EAVE_FOCUS_BAND_MAX,
   VILLAGE_LENS,
   VILLAGE_LENS_SCALE_MAX,
   VILLAGE_LENS_SCALE_MIN,
@@ -18,7 +20,9 @@ import {
   referenceVillageFov,
   villageScreenDistance,
   VILLAGE_FOCUS_CONTEXT_ELEVATION,
+  VILLAGE_HERO_FOCUS_ELEVATION,
   villageFocusContextElevation,
+  villageFocusEaveWeight,
   villageFocusEffectWeight,
   villageZoomReferenceBounds,
 } from '../src/camera/optics.js';
@@ -147,16 +151,54 @@ function assertLevel(actual, expected, message) {
   invariant(focusWeights.every((weight, index) => index === 0 || weight <= focusWeights[index - 1]),
     'optics: focused bokeh weight is not monotonic across zoom-out');
   const baseElevation = 9 * Math.PI / 180;
+  const DEG = Math.PI / 180;
+  near(VILLAGE_EAVE_FOCUS_ELEVATION, 7 * DEG,
+    'optics: residential eave-appreciation elevation drift');
+  near(VILLAGE_EAVE_FOCUS_BAND_MAX, 12 * DEG,
+    'optics: eave continuum band ceiling drift');
+  invariant(
+    VILLAGE_EAVE_FOCUS_ELEVATION < VILLAGE_FOCUS_ELEVATION
+      && VILLAGE_FOCUS_ELEVATION <= VILLAGE_EAVE_FOCUS_BAND_MAX
+      && VILLAGE_HERO_FOCUS_ELEVATION > VILLAGE_EAVE_FOCUS_BAND_MAX,
+    'optics: eave continuum no longer sits under the default yard pose inside the 7–12° band',
+  );
   near(villageFocusContextElevation(18, 1000, 18, baseElevation), baseElevation,
     'optics: close house camera lost its authored elevation');
+  near(villageFocusEaveWeight(18, 1000, 18), 0,
+    'optics: authored closeup must not already be the eave fill');
+  near(villageFocusEaveWeight(focusLarge.min, 1000, 18), 1,
+    'optics: focus minimum no longer reaches full eave weight');
+  near(villageFocusContextElevation(focusLarge.min, 1000, 18, baseElevation),
+    VILLAGE_EAVE_FOCUS_ELEVATION,
+    'optics: focus continuum inner end lost the eave-appreciation pose');
+  // Mid-band between min and closeup is a strict blend, not a snap to either end.
+  const midClose = (focusLarge.min + 18) * 0.5;
+  const midElev = villageFocusContextElevation(midClose, 1000, 18, baseElevation);
+  invariant(
+    midElev > VILLAGE_EAVE_FOCUS_ELEVATION + 1e-6
+      && midElev < baseElevation - 1e-6,
+    'optics: eave continuum is not a continuous blend between 7° and 9°',
+  );
   near(villageFocusContextElevation(focusLarge.max, 1000, 18, baseElevation),
     VILLAGE_FOCUS_CONTEXT_ELEVATION,
     'optics: wide house context did not crane above foreground architecture');
-  const contextElevations = [18, 100, 300, 600, focusLarge.max]
+  const contextElevations = [focusLarge.min, 18, 100, 300, 600, focusLarge.max]
     .map((distance) => villageFocusContextElevation(distance, 1000, 18, baseElevation));
   invariant(contextElevations.every((elevation, index) => (
-    index === 0 || elevation >= contextElevations[index - 1]
-  )), 'optics: focus context crane is not monotonic across zoom-out');
+    index === 0 || elevation >= contextElevations[index - 1] - 1e-12
+  )), 'optics: focus path elevation is not monotonic from eave through context crane');
+  // Landmark / hero survey bases must not be dragged into the under-eave look when the
+  // user dollies past the closeup — only the residential 7–12° band participates.
+  for (const [label, elev] of [
+    ['palace', 20 * DEG],
+    ['temple', 17 * DEG],
+    ['hero', VILLAGE_HERO_FOCUS_ELEVATION],
+  ]) {
+    near(villageFocusContextElevation(focusLarge.min, 1000, 18, elev), elev,
+      `optics: ${label} focus base was pulled into the residential eave continuum`);
+    near(villageFocusEaveWeight(focusLarge.min, 1000, 18), 1,
+      `optics: eave weight helper broke while checking ${label} exclusion`);
+  }
   let invalidModeRejected = false;
   try { villageZoomReferenceBounds('automatic', 100); } catch { invalidModeRejected = true; }
   invariant(invalidModeRejected, 'optics: unknown zoom mode silently acquired camera bounds');

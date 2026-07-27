@@ -6,6 +6,8 @@ export {
   VILLAGE_FOCUS_CONTEXT_ELEVATION,
   VILLAGE_NIGHT_AERIAL_ELEVATION,
   VILLAGE_FOCUS_ELEVATION,
+  VILLAGE_EAVE_FOCUS_ELEVATION,
+  VILLAGE_EAVE_FOCUS_BAND_MAX,
   VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_FOCUS_SKY_REFERENCE_BAND,
   VILLAGE_HERO_FOCUS_ELEVATION,
@@ -21,6 +23,7 @@ export {
   villageScreenDistance,
   villageScreenDistanceForCamera,
   villageFocusContextElevation,
+  villageFocusEaveWeight,
   villageFocusEffectWeight,
   villageZoomReferenceBounds,
 } from '../camera/optics.js';export {
