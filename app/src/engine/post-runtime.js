@@ -54,6 +54,9 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
   // aerial sample count without forgetting the product focus promotion.
   let focusBudget = false;
   let motionBudgetActive = false;
+  // Product focus/ink owns whether flare *should* run; motionBudget may sleep the
+  // pass without forgetting that intent (restore on settle).
+  let productFlareWanted = !!post.flarePass?.enabled;
   const applyMsaaBudget = () => {
     if (compact || typeof post.renderPass?.setSamples !== 'function') return;
     // Motion holds the cheap aerial MSAA even while focused; settle restores 4×.
@@ -62,6 +65,24 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       : MSAA_SAMPLES_AERIAL;
     post.renderPass.setSamples(samples);
   };
+  const applyFlareBudget = () => {
+    if (!post.flarePass) return;
+    // FlarePass renders an extra depth view when amt>0 — skip that during orbits.
+    post.flarePass.enabled = productFlareWanted && !motionBudgetActive;
+  };
+  const rawSetFlareEnabled = post.setFlareEnabled?.bind(post);
+  if (typeof rawSetFlareEnabled === 'function') {
+    post.setFlareEnabled = (value) => {
+      productFlareWanted = !!value;
+      // Keep the public API: callers still declare product intent. Motion gate
+      // only decides whether the pass is live this frame.
+      if (motionBudgetActive) {
+        post.flarePass.enabled = false;
+        return;
+      }
+      rawSetFlareEnabled(productFlareWanted);
+    };
+  }
 
   const outline = new OutlinePass(new THREE.Vector2(width, height), scene, camera);
   outline.edgeStrength = 2.2;
@@ -86,12 +107,13 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       post.setFillScale?.(scale);
       applyBloomResolution(cssW, cssH);
     },
-    // Secondary motion budget: sleep the hover outline (fullscreen mask + edge)
-    // and hold focus MSAA at aerial samples until the frame fully settles.
+    // Secondary motion budget: sleep outline + flare depth, hold focus MSAA at
+    // aerial samples until the frame fully settles.
     setMotionBudget: (active) => {
       motionBudgetActive = !!active;
       outline.enabled = !motionBudgetActive;
       applyMsaaBudget();
+      applyFlareBudget();
     },
   });
 

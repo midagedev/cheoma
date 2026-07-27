@@ -74,10 +74,16 @@
 | **Outline sleep** | 오빗/settle 중 OutlinePass.enabled=false | 정착 후 호버 아웃라인 복원 |
 | **Focus MSAA hold** | 모션 중 focus여도 MSAA 2× 유지, 정착 시 4× | 정착 프레임 동일 |
 
+## 7차 구현 (flare motion sleep)
+
+| 항목 | 무엇 | 품질 영향 |
+|---|---|---|
+| **Flare motion sleep** | motionBudget 중 FlarePass.enabled=false (depth 뷰 스킵), product intent 보존 후 정착 복원 | 오빗 중 렌즈 플레어 일시 소실 → 정착 시 복원 |
+
 ## 다음 라운드 (우선순위)
 
-1. product-path bench: roof-pitch med + motion msaa/outline flags
-2. flare depth sleep during motionBudget (focus only)
+1. product-path bench motion flags (outline/flare/msaa)
+2. grade half-res during motionBudget (look risk — measure first)
 3. WebGPU/TSL 후처리 실험 브랜치 (메인 동결)
 
 ## 게이트
