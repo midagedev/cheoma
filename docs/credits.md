@@ -199,6 +199,26 @@
 - URL: https://www.hanokdb.kr/theology/sub_02 · https://www.hanokdb.kr/theology/sub_03 · https://www.hanokdb.kr/theology/sub_04
 - 라이선스: 건축공간연구원 공개 웹 해설(2026-07-23 재확인). 페이지는 All rights reserved로 표시되며 앱에는 원문 이미지·도해를 재배포하지 않고 사실과 구현 해석만 요약. 재사용 전 최신 이용조건 재확인.
 
+### 17b. 한국민족문화대백과 — 「연등천장」·「우물천장」
+- id: cred-aks-ceiling
+- topic: ceiling
+- scope: Room banja vs daecheong yeondeung vs palace/temple well ceiling
+- 한국학중앙연구원 한국민족문화대백과사전 (김왕직 집필)
+- 연등: 별도 반자 없이 서까래 노출, 사이 개판/산자·앙토; **방은 대개 천장(반자), 대청은 천장 없음**. 우물천장: 정자 반자틀, 살림집에서 드묾·궁·사찰 중심.
+- **활용 / Use:** 실내 로드맵의 공간별 천장 finish (`banja`/`yeondeung`/`well`)와 지붕 구조 개판 층의 분리 (`docs/ceiling.md`, `src/builder/ceiling-plan.js`). 개판 하면을 방 반자로 대체하지 않는다.
+- URL: https://encykorea.aks.ac.kr/Article/E0071895 · https://encykorea.aks.ac.kr/Article/E0071894
+- 라이선스: 공공누리(항목별 표시). 앱에는 원문 이미지 재배포 없이 사실 요약만.
+
+### 17c. 국사편찬위원회 우리역사넷 — 「한옥의 미학」
+- id: cred-nikh-hanok-aesthetics
+- topic: ceiling
+- scope: Ondol room banja vs open maru/earth-floor without banja
+- 국사편찬위원회 / 한필원
+- 온돌방에는 반자, 대청·흙바닥 공간에는 반자가 없다는 기능–형태 대응을 서술.
+- **활용 / Use:** 기와 대청 `yeondeung` vs 방 `banja` planned 구역 분리의 교차 근거 (`docs/ceiling.md`).
+- URL: https://contents.history.go.kr/mobile/km/view.do?levelId=km_039_0040_0020_0040_0010
+- 라이선스: 국사편찬위원회 공개 웹(이용 시 출처 표기). 원문 이미지 미재배포.
+
 ### 18. 국가유산 디지털 서비스 — 3D 에셋 서비스
 - id: cred-khs-3d-assets
 - topic: measured-drawing

@@ -10,6 +10,8 @@ import { buildGiwa } from './giwa.js';
 import { disposeBuilding, registerBuildingResources } from './lifecycle.js';
 import { normalizeChogaShape } from '../layout/choga-shape.js';
 import { attachShadowDepthTextureLifecycle } from '../render/shadow-depth-texture-lifecycle.js';
+import { planRankedHallCeiling } from './ceiling-plan.js';
+import { ROOF_SHELL_THICKNESS } from '../core/surface-clearance.js';
 
 export { disposeBuilding };
 
@@ -54,6 +56,14 @@ export function buildBuilding(P) {
 
   root.userData.layout = L;
   root.userData.materials = M;
+  // Interior roadmap: space finish plan (방 반자 / 대청·처마 연등). See docs/ceiling.md.
+  root.userData.ceilingPlan = planRankedHallCeiling({
+    style: params.style || 'palace',
+    podiumTopY: L.podTopY ?? 0,
+    columnTopY: L.colTopY ?? L.plateY ?? 3,
+    eaveY: L.eaveEdgeY ?? L.eaveInnerY ?? 3.5,
+    shellThickness: ROOF_SHELL_THICKNESS,
+  });
   attachShadowDepthTextureLifecycle(root);
   return registerBuildingResources(root, M, !params.mats);
 }

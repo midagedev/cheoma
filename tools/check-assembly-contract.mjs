@@ -309,19 +309,28 @@ assert.equal(roofPlan.courseFlow, true,
     'roof tile courses all appeared on the same frame (no course flow)');
 }
 
-// Roof children keep authored scale during flight. Per-mesh non-uniform squash
-// broke the tile/rafter/eave depth stack and read as z-fighting on the roof
-// underside ("room ceiling") while the house rose.
+// Roof is a rigid body: group owns rise/bob; children keep rest local Y/scale so
+// outer tile / underside / rafters never lose their authored depth stack.
 {
   const roof = house.getObjectByName('roof');
-  const restScales = roof.children.map((c) => [c.scale.x, c.scale.y, c.scale.z]);
+  assert.equal(roofPlan.rigid, true, 'roof assembly is not marked rigid');
+  const restChild = roof.children.map((c) => [c.position.y, c.scale.x, c.scale.y, c.scale.z]);
+  const restGroupY = roof.position.y;
   anim.seek(0.88); // mid roof window (PART_WINDOWS.roof ≈ 0.74–1.0)
+  // Group has left rest (rise/bob in flight).
+  assert.ok(Math.abs(roof.position.y - restGroupY) > 1e-4,
+    'rigid roof group did not move mid-assembly');
   for (let i = 0; i < roof.children.length; i++) {
     const c = roof.children[i];
-    assert.equal(c.scale.x, restScales[i][0], 'roof child scale.x changed mid-assembly');
-    assert.equal(c.scale.y, restScales[i][1], 'roof child scale.y changed mid-assembly');
-    assert.equal(c.scale.z, restScales[i][2], 'roof child scale.z changed mid-assembly');
+    assert.equal(c.position.y, restChild[i][0], 'roof child local Y drifted — not rigid');
+    assert.equal(c.scale.x, restChild[i][1], 'roof child scale.x changed mid-assembly');
+    assert.equal(c.scale.y, restChild[i][2], 'roof child scale.y changed mid-assembly');
+    assert.equal(c.scale.z, restChild[i][3], 'roof child scale.z changed mid-assembly');
   }
+  // Group itself does not squash either (depth stack).
+  assert.equal(roof.scale.x, 1, 'roof group scale.x changed');
+  assert.equal(roof.scale.y, 1, 'roof group scale.y changed');
+  assert.equal(roof.scale.z, 1, 'roof group scale.z changed');
   // Columns still squash (contrast — roof is the exception).
   anim.seek(0.33);
   const col = house.getObjectByName('columns').children.find((c) => c.visible);

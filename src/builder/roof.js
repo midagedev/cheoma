@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { tileSurfaceMaterial } from './palette.js';
 import { createThatchRoofProfile, THATCH_ROOF_SEGMENTS } from './thatch-profile.js';
-import { ROOF_WALL_TUCK } from '../core/surface-clearance.js';
+import { ROOF_SHELL_THICKNESS, ROOF_WALL_TUCK } from '../core/surface-clearance.js';
+import { addRoofTileShell } from '../layout/roof-shell.js';
 import { resolveRoofRank, roofOrnamentPolicy } from './roof-rank.js';
 
 // 팔작지붕.
@@ -111,22 +112,32 @@ export function buildRoof(P, L, M) {
   const slopeLen = Math.hypot(L.zEave, L.ridgeY - yEaveTile);
   const bump = isMatbae ? 0.9 : 0.6; // 맞배는 기와 요철 강조(수키와 볼록 열과 함께)
   const matFront = tileSurfaceMaterial(M, L.W + P.eaveOverhang * 2, slopeLen, bump);
-  matFront.side = THREE.DoubleSide;
   const matSide = tileSurfaceMaterial(M, L.D + P.eaveOverhang * 2, slopeLen * (1 - vStar), bump);
-  matSide.side = THREE.DoubleSide;
+  const underMat = M.eaveBand.clone();
+  underMat.side = THREE.FrontSide;
 
   // 기와골 UV: u는 지면 기준 수평 위치(수직 흐름), v는 지붕면 경사 방향
   const frontUV = (p, u, v) => [(p.x + L.xEave) / (2 * L.xEave), 1 - v];
   const sideUV = (p, u, v) => [(p.z + L.zEave) / (2 * L.zEave), 1 - v];
 
+  // Outer tile + structural 개판 underside (docs/ceiling.md). Avoid zero-thickness
+  // DoubleSide coplanar faces that z-fight under the eave during assembly.
   for (const sign of [1, -1]) {
-    const front = new THREE.Mesh(surfaceGeometry((u, v) => frontPoint(u, v, sign), frontUV), matFront);
-    front.castShadow = front.receiveShadow = true;
-    g.add(front);
+    addRoofTileShell(
+      g,
+      surfaceGeometry((u, v) => frontPoint(u, v, sign), frontUV),
+      matFront.clone(),
+      underMat.clone(),
+      ROOF_SHELL_THICKNESS,
+    );
     if (!isMatbae) {
-      const side = new THREE.Mesh(surfaceGeometry((u, v) => sidePoint(u, v, sign), sideUV), matSide);
-      side.castShadow = side.receiveShadow = true;
-      g.add(side);
+      addRoofTileShell(
+        g,
+        surfaceGeometry((u, v) => sidePoint(u, v, sign), sideUV),
+        matSide.clone(),
+        underMat.clone(),
+        ROOF_SHELL_THICKNESS,
+      );
     }
   }
 
@@ -160,10 +171,12 @@ export function buildRoof(P, L, M) {
   function eaveBand(pointFn, sign) {
     const pos = [], idx = [];
     const N = 40;
+    const shellT = ROOF_SHELL_THICKNESS;
     for (let i = 0; i <= N; i++) {
       const u = (i / N) * 2 - 1;
       const p = pointFn(u, 1, sign);
-      pos.push(p.x, p.y + 0.02, p.z, p.x, p.y - 0.09, p.z);
+      // Span outer tile lip → structural gaepan (shell thickness).
+      pos.push(p.x, p.y + 0.02, p.z, p.x, p.y - shellT, p.z);
     }
     for (let i = 0; i < N; i++) {
       const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
@@ -174,7 +187,7 @@ export function buildRoof(P, L, M) {
     geo.setIndex(idx);
     geo.computeVertexNormals();
     const mat = M.eaveBand.clone();
-    mat.side = THREE.DoubleSide;
+    mat.side = THREE.FrontSide;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     return mesh;
@@ -458,6 +471,7 @@ function buildRafters(P, L, M, g, frontPoint, sidePoint, includeSides = true) {
     im.castShadow = true;
     im.instanceMatrix.needsUpdate = true;
     im.userData.asmGroup = 'rafters';   // 서까래: 지붕 통덩어리 직전 청크
+    im.userData.roofLayer = 'rafter';
     g.add(im);
   };
 

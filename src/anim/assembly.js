@@ -8,13 +8,12 @@
 // 시그니처 감성. 이 이징 언어는 조립·칸 확장·머지·마을 리롤 웨이브가 공유한다
 // (아래 tofuRise/tofuBob/tofuScale export 가 단일 출처 — 방언을 새로 만들지 말 것).
 //
-// 시맨틱 조립 그룹: 지붕처럼 소부속(초가 집줄 그물·용마름, 기와 마루·잡상 등)이 많은
-// 파트는 부재를 개별로 띄우면 "혼자 둥실" 떠 애매하다. 빌더가 지붕 그룹에
-// userData.asmChunked=true 를 달면, 이 모듈은 그 그룹의 자식을 userData.asmGroup 태그로
-// 묶어 **덩어리(청크) 단위**로 재생한다(청크 간 짧은 스태거). 태그 없는 자식은 'body'
-// 청크로 합류 → 지붕 통덩어리. 지붕 청크 순서: 서까래→통덩어리→잡상 미니팝(ROOF_SEQ).
-// 청크 **내부**는 켜(course) 순서로 아주 짧게 흐른다 — 실제 기와는 처마에서 용마루로
-// 올려 이므로 낮은 면이 먼저 앉는다(아래 ORDER 규칙 참조).
+// 시맨틱 조립 그룹: 지붕은 **강체 한 덩어리**로 오른다(그룹 transform 하나만).
+// 자식별 독립 Y/스케일은 기와 외피·방 천장 하면·서까래의 authored 깊이 스택을 깨
+// z-fighting 을 만든다. 등장 순서만 시맨틱 청크(서까래→통덩어리→잡상)와 켜 흐름으로
+// visible 스태거한다. 빌더가 지붕 그룹에 userData.asmChunked=true 를 달면 자식을
+// userData.asmGroup 태그로 묶어 청크 등장 순서를 정하고, 태그 없는 자식은 'body' 청크.
+// 청크 **내부** 켜 흐름: 처마(낮은 면)→용마루(높은 면) 순으로 드러난다.
 //
 // 부재 리플("다라라락", 사용자 지시 2026-07-26): 반복 부재(기둥열·기단 켜·횡부재 켜)는
 // 한꺼번에 올라오지 않고 **아주 약간의 시간차**로 흐른다. 종전에도 자식별 스태거는
@@ -235,7 +234,7 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
   const dropBase = Math.min(2.2, Math.max(1.2, totalH * 0.13));
 
   // 애니메이션 대상 수집: 각 파트 그룹을 조립 유닛 목록으로 분해.
-  //   - asmChunked 그룹(지붕): 자식을 asmGroup 태그로 묶어 청크 단위 유닛(청크 내부는 켜 흐름).
+  //   - 지붕(name==='roof'): 그룹 자체 1유닛 강체 모션 + 자식 visible 청크/켜 스태거.
   //   - 일반 그룹: (켜, 칸) 랭크 하나 = 유닛 하나 — 같은 칸의 앞뒤 기둥처럼 한 랭크에 든 부재는
   //     동시에 서고, 랭크 간에 리플 스태거가 걸린다(순서는 ORDER 규칙, 배열 인덱스 아님).
   const groups = [];
@@ -245,6 +244,7 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     const [ws, we] = PART_WINDOWS[name];
     const drop = dropBase * (PART_DROP[name] ?? 1);
     const tofu = (PART_TOFU[name] ?? 0.16) * amp;
+    const rigid = name === 'roof';
 
     const mkItem = (child, i) => ({
       child,
@@ -258,26 +258,44 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     const entries = grp.children.map(mkItem);
     const axis = sweepAxisOf(entries);
 
-    let units, nR;
-    if (grp.userData?.asmChunked) {
-      // 태그 기준 청크 클러스터링. 청크 등장 순서는 ROOF_SEQ, 동순위는 첫 등장 순.
-      const byKey = new Map();
-      entries.forEach((it) => {
-        const key = it.child.userData?.asmGroup || DEFAULT_CHUNK;
-        let c = byKey.get(key);
-        if (!c) { c = { key, seq: ROOF_SEQ[key] ?? ROOF_SEQ[DEFAULT_CHUNK], first: it.first, items: [] }; byKey.set(key, c); }
-        c.items.push(it);
-      });
-      units = [...byKey.values()].sort((a, b) => a.seq - b.seq || a.first - b.first);
-      // 청크 **내부**는 켜 순서로 아주 짧게 흐른다(기와=처마→용마루). 청크 자체는 한 덩어리로
-      //   유지하므로 "혼자 둥실" 문제는 재발하지 않는다(#semantic chunks 계약 보존).
-      for (const u of units) {
-        const nI = rankOrdered(u.items, axis);
-        for (const it of u.items) it.lag = nI > 1 ? it.rank / (nI - 1) : 0;
-        u.first = u.items[0].first;
+    let units, nR, visUnits = null;
+    if (rigid) {
+      // Roof moves as one rigid body (group transform). Child-local Y/scale stay at rest
+      // so outer tile / underside / rafters keep their authored depth stack.
+      units = [{
+        rank: 0,
+        first: 0,
+        items: [mkItem(grp, 0)],
+      }];
+      nR = 1;
+      // Visibility-only stagger: semantic chunks (rafters→body→finial) + course flow.
+      if (grp.userData?.asmChunked) {
+        const byKey = new Map();
+        entries.forEach((it) => {
+          const key = it.child.userData?.asmGroup || DEFAULT_CHUNK;
+          let c = byKey.get(key);
+          if (!c) {
+            c = {
+              key,
+              seq: ROOF_SEQ[key] ?? ROOF_SEQ[DEFAULT_CHUNK],
+              first: it.first,
+              items: [],
+            };
+            byKey.set(key, c);
+          }
+          c.items.push(it);
+        });
+        visUnits = [...byKey.values()].sort((a, b) => a.seq - b.seq || a.first - b.first);
+        for (const u of visUnits) {
+          const nI = rankOrdered(u.items, axis);
+          for (const it of u.items) it.lag = nI > 1 ? it.rank / (nI - 1) : 0;
+          u.first = u.items[0].first;
+        }
+        visUnits.forEach((u, i) => { u.rank = i; });
+      } else {
+        visUnits = [{ rank: 0, first: 0, items: entries, lag: 0 }];
+        for (const it of entries) it.lag = 0;
       }
-      units.forEach((u, i) => { u.rank = i; });
-      nR = units.length;
     } else {
       // 일반 그룹: 켜·칸 랭크 하나 = 유닛 하나. 같은 랭크 부재(앞뒤 기둥 짝 등)는 동시에 선다.
       nR = rankOrdered(entries, axis);
@@ -296,6 +314,7 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     //   그 간격이 지각 하한(MIN_RIPPLE_SEC)보다 좁으면 — 부재가 아주 많은 경우(마을 giwa 기둥 34본
     //   → 24 랭크) — **창을 넓히지 않고 랭크를 슬롯으로 병합**한다. 인접 칸이 두세 개씩 함께 서지만
     //   이웃 간격은 눈에 보이고, 기단→기둥→벽→지붕 순서의 가독성은 그대로다.
+    //   지붕 강체: 모션 유닛은 1개. visible 청크 스태거는 별도 visUnits 창에서 깐다.
     const winDur = we - ws;
     const minItem = winDur * 0.35;
     const maxSpread = winDur - minItem;
@@ -319,29 +338,72 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
       const j = offset > 0 ? (hash01(`${name}:${u.slot}`) * 2 - 1) * JITTER_SHARE * offset : 0;
       u.start = Math.max(0, ws + u.slot * offset + j);
     }
-    const hasLag = units.some((u) => u.items.some((it) => it.lag > 0));
-    groups.push({ name, ws, we, drop, tofu, units, itemDur, offset, hasLag, slots });
+
+    // Roof visibility stagger: spread chunk reveals across the same part window.
+    let visItemDur = itemDur;
+    let visOffset = 0;
+    let visSlots = 1;
+    let visHasLag = false;
+    if (rigid && visUnits) {
+      const vN = visUnits.length;
+      visSlots = vN;
+      visOffset = vN > 1 ? (winDur * SPREAD_SHARE) / (vN - 1) : 0;
+      if (vN > 1 && visOffset < minOffset) {
+        const maxSlots = Math.max(2, 1 + Math.floor(maxSpread / Math.max(minOffset, 1e-9)));
+        visSlots = Math.min(vN, maxSlots);
+        visOffset = visSlots > 1 ? Math.min(minOffset, maxSpread / (visSlots - 1)) : 0;
+      }
+      visItemDur = Math.max(minItem, winDur - visOffset * (visSlots - 1));
+      if (ws + visOffset * (visSlots - 1) + visItemDur > 1) {
+        visItemDur = Math.max(winDur * 0.3, 1 - (ws + visOffset * (visSlots - 1)));
+        if (visSlots > 1 && ws + visOffset * (visSlots - 1) + visItemDur > 1) {
+          visOffset = Math.max(0, (1 - ws - visItemDur) / (visSlots - 1));
+        }
+      }
+      for (const u of visUnits) {
+        u.slot = (vN > 1 && visSlots < vN)
+          ? Math.round((u.rank * (visSlots - 1)) / (vN - 1))
+          : u.rank;
+        const j = visOffset > 0
+          ? (hash01(`${name}:vis:${u.slot}`) * 2 - 1) * JITTER_SHARE * visOffset
+          : 0;
+        u.start = Math.max(0, ws + u.slot * visOffset + j);
+      }
+      visHasLag = visUnits.some((u) => u.items.some((it) => it.lag > 0));
+    }
+
+    const hasLag = rigid
+      ? visHasLag
+      : units.some((u) => u.items.some((it) => it.lag > 0));
+    groups.push({
+      name, ws, we, drop, tofu, units, itemDur, offset, hasLag,
+      slots: rigid ? visSlots : slots,
+      rigid,
+      visUnits,
+      visItemDur,
+      visOffset,
+      rawVisRanks: visUnits ? visUnits.length : units.length,
+    });
   }
 
   let elapsed = 0;
   let done = false;
 
   // 한 부재에 진행도 uu 를 적용(공중 낙하 → 두부 출렁 복원). 원 transform 기준 상대.
-  // allowScale=false: 지붕 청크(기와면·서까래·처마띠)는 비등방 스케일을 자식마다 따로 걸면
-  // authored 깊이 간격이 깨져 지붕 상면/하면(방 천장으로 읽히는 서까래 층) 사이 z-fighting 이
-  // 조립 중에 생긴다. 위치(두부 출렁)만 두고 스케일은 항등으로 유지한다.
-  function applyItem(it, uu, drop, tofu, allowScale = true) {
+  // allowScale=false: 지붕 강체는 스케일 항등(비등방 스쿼시가 깊이 스택을 찌그러뜨림).
+  // setVisible=false: 강체 지붕 그룹은 항상 보이되, 자식 visible 은 별도 스태거가 소유.
+  function applyItem(it, uu, drop, tofu, allowScale = true, setVisible = true) {
     if (uu <= 0) {
       // 아직 순서 전 → 숨김(공중에 어색하게 떠 있지 않게).
-      it.child.visible = false;
+      if (setVisible) it.child.visible = false;
       it.child.position.y = it.y0 - drop;
       it.child.scale.set(it.sx0, it.sy0, it.sz0);
     } else if (uu >= 1) {
-      it.child.visible = it.vis0;
+      if (setVisible) it.child.visible = it.vis0;
       it.child.position.y = it.y0;
       it.child.scale.set(it.sx0, it.sy0, it.sz0);
     } else {
-      it.child.visible = it.vis0;
+      if (setVisible) it.child.visible = it.vis0;
       it.child.position.y = it.y0 - fallOffset(uu) * drop + tofuBob(uu, tofu) * drop;
       if (allowScale) {
         const s = tofuScale(uu, tofu);
@@ -355,24 +417,54 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
   // 진행도 t(0..1) 상태를 계산·적용. 유닛 간은 리플 스태거(u.start), 유닛 내부는 켜 흐름(it.lag).
   function applyAt(t) {
     for (const g of groups) {
+      if (g.rigid) {
+        // One shared rise/bob on the roof group; children keep rest local transforms.
+        const u0 = g.units[0];
+        const uu = clamp01((t - u0.start) / g.itemDur);
+        applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false);
+        u0.items[0].child.visible = true;
+        // Child reveal only (no per-child Y/scale).
+        const intra = g.hasLag ? g.visItemDur * INTRA_SHARE : 0;
+        const body = Math.max(1e-9, g.visItemDur - intra);
+        for (const u of g.visUnits) {
+          for (const it of u.items) {
+            const uuV = clamp01((t - u.start - it.lag * intra) / body);
+            if (uuV <= 0) {
+              it.child.visible = false;
+            } else {
+              it.child.visible = it.vis0;
+            }
+            it.child.position.y = it.y0;
+            it.child.scale.set(it.sx0, it.sy0, it.sz0);
+          }
+        }
+        continue;
+      }
       const intra = g.hasLag ? g.itemDur * INTRA_SHARE : 0;
       const body = g.itemDur - intra;   // 켜 흐름을 뺀 실제 부재 애니 길이
-      // Roof keeps authored layer clearances (tile shell vs rafters vs eave band).
-      const allowScale = g.name !== 'roof';
       for (const u of g.units) {
         for (const it of u.items) {
           const uu = clamp01((t - u.start - it.lag * intra) / body);
-          applyItem(it, uu, g.drop, g.tofu, allowScale);
+          applyItem(it, uu, g.drop, g.tofu, true, true);
         }
       }
     }
   }
 
   function restore() {
-    for (const g of groups) for (const u of g.units) for (const it of u.items) {
-      it.child.position.y = it.y0;
-      it.child.scale.set(it.sx0, it.sy0, it.sz0);
-      it.child.visible = it.vis0;
+    for (const g of groups) {
+      for (const u of g.units) for (const it of u.items) {
+        it.child.position.y = it.y0;
+        it.child.scale.set(it.sx0, it.sy0, it.sz0);
+        it.child.visible = it.vis0;
+      }
+      if (g.visUnits) {
+        for (const u of g.visUnits) for (const it of u.items) {
+          it.child.position.y = it.y0;
+          it.child.scale.set(it.sx0, it.sy0, it.sz0);
+          it.child.visible = it.vis0;
+        }
+      }
     }
   }
 
@@ -399,18 +491,27 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     isDone() { return done; },
     // 검증용 타이밍 계획(초 단위). 리플 이웃 간격·랭크 수·켜 흐름을 게이트가 수치로 단언한다.
     plan() {
-      return groups.map((g) => ({
-        part: g.name,
-        window: [g.ws, g.we],
-        ranks: g.slots,                     // 실제 리플 단계 수(랭크 병합 후)
-        rawRanks: g.units.length,           // 기하에서 유도된 켜·칸 랭크 수
-        members: g.units.reduce((n, u) => n + u.items.length, 0),
-        rippleSec: +(g.offset * duration).toFixed(4),
-        itemSec: +(g.itemDur * duration).toFixed(4),
-        endSec: +((g.ws + g.offset * (g.slots - 1) + g.itemDur) * duration).toFixed(4),
-        courseFlow: g.hasLag,
-        starts: [...new Set(g.units.map((u) => +(u.start * duration).toFixed(4)))].sort((a, b) => a - b),
-      }));
+      return groups.map((g) => {
+        const motionUnits = g.units;
+        const reveal = g.visUnits || g.units;
+        const off = g.rigid ? g.visOffset : g.offset;
+        const iDur = g.rigid ? g.visItemDur : g.itemDur;
+        return {
+          part: g.name,
+          window: [g.ws, g.we],
+          ranks: g.slots,                     // 실제 리플/등장 단계 수(랭크 병합 후)
+          rawRanks: g.rigid ? g.rawVisRanks : motionUnits.length,
+          members: g.rigid
+            ? reveal.reduce((n, u) => n + u.items.length, 0)
+            : motionUnits.reduce((n, u) => n + u.items.length, 0),
+          rippleSec: +(off * duration).toFixed(4),
+          itemSec: +(iDur * duration).toFixed(4),
+          endSec: +((g.ws + off * (g.slots - 1) + iDur) * duration).toFixed(4),
+          courseFlow: g.hasLag,
+          rigid: !!g.rigid,
+          starts: [...new Set(reveal.map((u) => +(u.start * duration).toFixed(4)))].sort((a, b) => a - b),
+        };
+      });
     },
   };
 }

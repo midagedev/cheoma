@@ -30,3 +30,14 @@ export {
   tofuRise,
   tofuScale,
 } from '../anim/assembly.js';
+// Ceiling finish plan (방 반자 / 대청 연등) — pure; interior mesh deferred.
+export {
+  CEILING_FINISH,
+  CEILING_PLAN_SCHEMA_VERSION,
+  CEILING_ZONE_STATUS,
+  ROOF_STRUCTURE_LAYER,
+  assertCeilingPlan,
+  planCeiling,
+  planGiwaCeiling,
+  planRankedHallCeiling,
+} from './ceiling-plan.js';
