@@ -1347,9 +1347,15 @@ try {
     `focus hop completes under rAF sampling (${hop.frames} frames)`);
   pass(hop.failures.length === 0,
     `focus hop keeps every regular parcel exclusive (${JSON.stringify(hop.failures[0] || null)})`);
-  pass(hop.immediateById[first]?.overlay && hop.immediateById[second]?.overlay
-      && hop.immediateById[first]?.valid && hop.immediateById[second]?.valid,
-  'hop synchronously owns both retiring and arriving overlays without base duplicates');
+  // #224: hop starts the camera on the click frame without blocking on B overlay CPU.
+  // A keeps its retiring FULL overlay; B may still own exclusive base until the rAF-chunked
+  // promote installs (never a partial overlay). hopDone fail-closed sync-promotes if needed.
+  const hopImmA = hop.immediateById[first];
+  const hopImmB = hop.immediateById[second];
+  pass(!!hopImmA?.overlay && hopImmA?.valid
+      && hopImmB?.valid
+      && (hopImmB?.overlay || hopImmB?.baseHidden === false),
+  'hop keeps A overlay and exclusive B base (or B overlay) on the click frame without duplicates');
   pass([first, second].every((id) => stableOwner(hop.immediateFauna, id)
       && stableOwner(hop.finalFauna, id))
       && hop.finalFauna?.ownerAnimals?.[second]?.activeCount === 1

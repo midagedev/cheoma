@@ -941,6 +941,175 @@ export function createVillageHandle(opts, seed, plan, group) {
     return target.copy(architecturalFocusScratch);
   }
 
+  // ── #224 hop overlay CPU chunks (cold residential only) ────────────────────
+  // Detached house mesh first; courtyard wall/aux + scene install only after a
+  // yield. Base instances stay visible until finish — never parent a partial tree.
+  function beginResidentialHopOverlay(parcelId) {
+    const parcel = plan.parcels.find((p) => p.id === parcelId);
+    if (!parcel || parcel.hero) return null;
+    if (overrideById.has(parcelId)) return null;
+
+    const previousEditSpec = committedResidentialSpecs.get(parcelId) || null;
+    const previousAcceptedSpec = previousEditSpec || buildParcelSpec(parcel);
+    const edit = resolveResidentialEdit(parcel, previousEditSpec, {});
+    const gk = edit.kind;
+    const bld = { ...edit.building };
+    const variantParcel = gk === parcel.kind ? parcel : { ...parcel, kind: gk, variant: 0 };
+    const changedKind = gk !== parcel.kind;
+
+    const preset = { ...PRESETS[gk], ...variantOv(variantParcel), ...bld };
+    clampBuildingDimensions(preset, gk);
+    const house = buildBuilding(preset);
+    if (gk === 'choga') applyThatchAge(house.userData.materials, edit.top.thatchAge);
+    // Match rebuildParcel({}, {}) roof-tone policy for an unedited hop promote.
+    const preserveGeneratedRoofTone = !previousEditSpec && !changedKind;
+    const roofTint = preserveGeneratedRoofTone
+      ? (parcel.roofTone || toneOf(gk, parcel.toneIdx || 0))
+      : toneOf(gk, edit.top.roofTone);
+    applyMaterialRoleTints(house, {
+      roof: roofTint,
+      wall: changedKind ? null : parcel.wallTone,
+      wood: changedKind ? null : parcel.woodTone,
+      stone: changedKind ? null : parcel.stoneTone,
+    });
+    const local = parcelHouseTranslation(parcel);
+    house.position.set(local.x, 0, local.z);
+    const fs = edit.top.footprintScale;
+    const mirrorX = variantMirrorX(variantParcel);
+    house.scale.set(mirrorX * (parcel.sx || 1) * fs, (parcel.sy || 1) * fs, (parcel.sz || 1) * fs);
+    house.userData.variantMirrorX = mirrorX;
+
+    const g = new THREE.Group();
+    g.name = `override-${parcelId}`;
+    g.userData.exportPersistentParcel = false;
+    g.userData.parcelId = parcelId;
+    g.userData.snowRoofKind = gk;
+    g.userData.W = parcel.plotW || 20;
+    g.userData.D = parcel.plotD || 18;
+    g.userData.style = gk;
+    g.userData.parcel = parcel;
+    g.userData.editSpec = edit.spec;
+    g.userData.houseRoot = house;
+    g.add(house);
+
+    house.updateWorldMatrix(true, true);
+    const buildingBox = new THREE.Box3().setFromObject(house);
+    const editRoofBounds = {
+      minX: buildingBox.min.x, maxX: buildingBox.max.x,
+      minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+    };
+    const editBuildingBounds = {
+      minX: buildingBox.min.x, maxX: buildingBox.max.x,
+      minY: buildingBox.min.y, maxY: buildingBox.max.y,
+      minZ: buildingBox.min.z, maxZ: buildingBox.max.z,
+    };
+    g.userData.editRoofBounds = editRoofBounds;
+    g.userData.editBuildingBounds = editBuildingBounds;
+
+    return {
+      parcelId,
+      parcel,
+      edit,
+      gk,
+      previousEditSpec,
+      previousAcceptedSpec,
+      g,
+      house,
+      editRoofBounds,
+      editBuildingBounds,
+    };
+  }
+
+  function abortResidentialHopOverlay(draft) {
+    if (!draft?.g) return;
+    // Never installed — dispose detached geometry/materials only.
+    disposeTree(draft.g);
+    draft.g = null;
+  }
+
+  function finishResidentialHopOverlay(draft) {
+    if (!draft?.g || !draft.parcel) return null;
+    const {
+      parcelId, parcel, edit, gk, previousEditSpec, previousAcceptedSpec,
+      g, editRoofBounds, editBuildingBounds,
+    } = draft;
+    // Another path may have claimed this parcel while we yielded.
+    if (overrideById.has(parcelId)) {
+      abortResidentialHopOverlay(draft);
+      return null;
+    }
+
+    const { wallType, jangdok, yardStack, clothesline, vegBed } = edit.top;
+    const auxRequested = !!edit.top.aux;
+    const auxiliaryParcel = {
+      ...parcel,
+      kind: gk,
+      wallType,
+      aux: edit.top.aux,
+      auxRequested,
+      jangdok,
+      yardStack,
+      clothesline,
+      vegBed,
+      editRoofBounds,
+      auxiliary: null,
+    };
+    const auxiliary = planParcelAuxiliary(auxiliaryParcel, {
+      site,
+      peers: [
+        ...plan.parcels,
+        ...(plan.features?.palace?.center ? [plan.features.palace] : []),
+      ],
+      hardObstacles: yardHardObstacles(auxiliaryParcel),
+    });
+    const aux = !!auxiliary;
+    edit.top.aux = aux;
+    edit.spec.params.aux = aux;
+    g.userData.auxiliarySpec = auxiliary;
+    g.userData.yardSignature = residentialYardSignature(gk, edit.top);
+    g.userData.editRoofBounds = editRoofBounds;
+    g.userData.editBuildingBounds = editBuildingBounds;
+
+    const wallRoot = buildVillageWall(parcel.shape, editWallMats, {
+      style: wallType, kind: gk, seed: parcel.seed, char01, aux, auxRequested,
+      plotW: parcel.plotW, plotD: parcel.plotD,
+      gateEdge: parcel.access?.gateEdge, gateT: parcel.access?.gateT,
+      parcel, site, baseY: parcel.baseY,
+      wallHeightK: parcel.wallHeightK, jangdok,
+      yardStack, clothesline, vegBed,
+    });
+    g.userData.wallRoot = wallRoot;
+    g.add(wallRoot);
+    if (auxiliary) {
+      const auxRoot = buildAuxiliaryBuilding(auxiliary, editWallMats);
+      g.userData.auxRoot = auxRoot;
+      g.add(auxRoot);
+    }
+
+    g.applyMatrix4(parcelMatrix(parcel));
+    overrides.add(g);
+    overrideById.set(parcelId, g);
+    activatePrimaryDoor(parcelId, g);
+    // Focus-only hop promote — same as rebuildParcel(parcelId, {}) without persist.
+    void previousEditSpec;
+    void previousAcceptedSpec;
+
+    if (snow.isActive()) snow.inject(g);
+    retainOverlayPrograms(g, gk + (snow.isActive() ? '|snow' : ''));
+    registerResidentialGlow(parcelId, g);
+    focusedResidentialIds.add(parcelId);
+    thresholdLife.attach(g, thresholdLifeCondition());
+    representationDirty = true;
+    setResidentialBaseHidden(parcel, true);
+
+    return {
+      group: g,
+      compound: false,
+      assembly: g.children[0] || g,
+      ambient: focusAmbientDescriptor(parcelId, g),
+    };
+  }
+
   const api = {
     group,
     plan,
@@ -1626,6 +1795,72 @@ export function createVillageHandle(opts, seed, plan, group) {
       thresholdLife.attach(g, thresholdLifeCondition());
       return { group: g, compound: false, assembly: g.children[0] || g, ambient: focusAmbientDescriptor(parcelId, g) };
     },
+
+    // House→house hop (#224): promote B without blocking the click frame.
+    //   · First yieldFrame lets the engine paint the hop camera tween.
+    //   · Cheap paths (persistent / hero / palace / temple) then promote sync.
+    //   · Cold residential splits house mesh vs courtyard wall/aux so one long
+    //     rebuild does not freeze the main thread for a full frame budget.
+    //   · Base instancing stays visible until the final install — no incomplete
+    //     overlay is ever parented into the scene (no wrong-parcel flash).
+    // Live-edit / focus-in / rebuild keep the synchronous showParcelDetail path.
+    async showParcelDetailChunked(parcelId, { yieldFrame, isCancelled } = {}) {
+      const cancelled = () => !!isCancelled?.();
+      const pause = async () => {
+        if (typeof yieldFrame === 'function') await yieldFrame();
+      };
+
+      if (parcelId === 'palace' || parcelId === 'temple') {
+        await pause();
+        if (cancelled()) return null;
+        return this.showParcelDetail(parcelId);
+      }
+
+      const parcel = plan.parcels.find((p) => p.id === parcelId);
+      if (!parcel) return null;
+
+      if (parcel.hero) {
+        await pause();
+        if (cancelled()) return null;
+        return this.showParcelDetail(parcelId);
+      }
+
+      const persistent = overrideById.get(parcelId);
+      if (persistent && persistentOverrideIds.has(parcelId)) {
+        await pause();
+        if (cancelled()) return null;
+        return this.showParcelDetail(parcelId);
+      }
+
+      // Cold residential: house CPU chunk → yield → wall/aux + atomic scene install.
+      await pause();
+      if (cancelled()) return null;
+
+      // Any residual overlay (non-persistent) falls back to the full sync rebuild
+      // after the first yield — hop normally arrives with no prior B override.
+      if (overrideById.has(parcelId)) {
+        return this.showParcelDetail(parcelId);
+      }
+
+      let draft = null;
+      try {
+        draft = beginResidentialHopOverlay(parcelId);
+        if (!draft) return null;
+
+        await pause();
+        if (cancelled()) {
+          abortResidentialHopOverlay(draft);
+          return null;
+        }
+        const detail = finishResidentialHopOverlay(draft);
+        draft = null; // ownership moved into overrides (or aborted inside finish)
+        return detail;
+      } catch (err) {
+        if (draft) abortResidentialHopOverlay(draft);
+        throw err;
+      }
+    },
+
     focusAmbientDescriptor,
     // focus-out: 오버레이 해제 + 원본 복원. 정규=인스턴스 재노출, 특수(종가)=병합본 복원.
     hideParcelDetail(parcelId) {
@@ -2063,7 +2298,7 @@ export function createVillageHandle(opts, seed, plan, group) {
   const nullAfterDispose = new Set([
     'heroParcelId', 'heroDetailGroup', 'overlayBox', 'openingDetailState', 'architecturalFocusPoint',
     'getPickProxy', 'focusTerrainCutaway', 'raycast',
-    'rebuildParcel', 'refreshCommittedFlora', 'showParcelDetail', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
+    'rebuildParcel', 'refreshCommittedFlora', 'showParcelDetail', 'showParcelDetailChunked', 'focusAssembly', 'rerollParcel', 'parcelRebuildState', 'parcelBuildStats',
     'primaryDoorState', 'raycastPrimaryDoor', 'togglePrimaryDoor', 'seekPrimaryDoor',
     'primaryDoorWorldPoints', 'primaryDoorWorldFrame',
   ]);
