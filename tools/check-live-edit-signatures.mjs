@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   isResidentialHouseOnlyEdit,
   isResidentialOpeningsOnlyEdit,
+  isResidentialRoofToneOnlyEdit,
   isResidentialThatchOnlyEdit,
   residentialGeometrySignature,
   residentialRoofBoundsMatch,
@@ -147,6 +148,16 @@ assert.equal(
   isResidentialThatchOnlyEdit(giwaBase, toneEdit),
   false,
   'giwa roofTone misclassified as thatch-only',
+);
+assert.equal(
+  isResidentialRoofToneOnlyEdit(giwaBase, toneEdit),
+  true,
+  'giwa roofTone was not roofTone-only',
+);
+assert.equal(
+  isResidentialHouseOnlyEdit(giwaBase, toneEdit),
+  false,
+  'roofTone-only misclassified as house-only',
 );
 
 console.log('LIVE EDIT SIGNATURES: PASS');
