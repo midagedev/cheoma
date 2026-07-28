@@ -188,10 +188,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   retireShaderErrorCheck() 가 1회 false 로 플립해 이후 런타임 전환의 첫 렌더를 논블록으로 만든다.
   // 감상 자동 회전(느린 궤도). 유휴일 때만 ease-in 으로 켜고, 조작·전환 중엔 정지.
   // autoRotate 기본값은 scene-runtime 이 켜고, 속도는 매 프레임 아래 램프로 제어한다.
+  // 조립 선회(asmOrbitGain): 리빌이 카메라를 소유하는 동안 0, 리빌이 끝나면 ease-in 으로
+  // 목표 속도까지 붙고, 조립이 끝나면 ease-out 으로 0 — 하드 컷 5.2× 스핀/정지의 "덜컥" 방지.
   const ORBIT_SPEED = 0.33;                 // ≈ 3분/바퀴 (autoRotateSpeed 2.0=30초 기준)
   const ORBIT_IDLE_MS = 9000;               // 유휴 후 재개까지(8~12초 범위)
-  const ORBIT_RAMP_SEC = 2.6;               // ease-in 램프 시간
-  let orbitGain = 0;                        // 0..1 회전 강도(램프)
+  const ORBIT_RAMP_SEC = 2.6;               // 유휴 선회 ease-in 램프 시간
+  const ASM_ORBIT_MULT = 5.2;               // 조립 선회 목표 배수(종전 체감 유지)
+  const ASM_ORBIT_RAMP_IN_SEC = 1.35;       // 리빌 종료 → 선회 가속
+  const ASM_ORBIT_RAMP_OUT_SEC = 0.9;       // 조립 종료 → 선회 감속
+  let orbitGain = 0;                        // 0..1 유휴 회전 강도
+  let asmOrbitGain = 0;                     // 0..1 조립 선회 강도(리빌 이후 스무스)
   let lastActivity = performance.now();     // 마지막 사용자 조작 시각
   let heroActive = false;                   // 히어로 시퀀스 진행 중 플래그
   let legacyHeroAssembleTimer = null;
@@ -635,17 +641,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // spherical 을 다시 읽는다. three 0.185 인스턴스 필드 직접 리셋(공개 stop() 없음).
   //
   // 중요: `controls.update()` 무인자 호출은 autoRotate 에 **1/60초 한 스텝**을 먹인다
-  // (OrbitControls 가 deltaTime 없을 때 60fps 한 프레임을 가정). 히어로 조립 중 선회 속도는
-  // ORBIT_SPEED×5.2 ≈ 1.7 이라 그 한 스텝이 ≈10° — 조립 카메라 워크 직후 "덜컥" 이동의
-  // 원인. 반드시 autoRotateSpeed 를 0 으로 내리고 update(0) 만 쓴다. 속도는 렌더 루프가
-  // 매 프레임 orbitGain/heroAsm 에서 다시 쓴다.
+  // (OrbitControls 가 deltaTime 없을 때 60fps 한 프레임을 가정). 조립 선회 피크 속도
+  // (ORBIT_SPEED×ASM_ORBIT_MULT) 에서 그 한 스텝이 ≈10° — "덜컥" 의 원인이므로 반드시
+  // autoRotateSpeed 를 0 으로 내리고 update(0) 만 쓴다. 속도는 렌더 루프가 매 프레임
+  // orbitGain/asmOrbitGain 에서 다시 쓴다(게인 자체는 건드리지 않아 스무스 램프가 이어진다).
   function settleControls() {
     controls._sphericalDelta?.set(0, 0, 0);
     controls._panOffset?.set(0, 0, 0);
     controls._scale = 1;
-    // Park autoRotate for the sync read. Leave it at 0 — the animation loop
-    // re-authors autoRotateSpeed every frame from orbitGain / heroAsm. Restoring
-    // a previous high speed would re-arm a one-frame spin before that re-author.
     controls.autoRotateSpeed = 0;
     controls.update(0);
   }
@@ -1205,28 +1208,44 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 감상 자동 회전 게이트 + ease-in 램프. 히어로·조립/확장/머지·시네마틱·트윈·선택 중엔 정지,
     // 유휴(ORBIT_IDLE_MS) 지나면 부드럽게 재개. 조작(markActivity) 시 즉시 정지.
     //
-    // 조립 중 고속 auto-orbit 는 제거했다(2026-07-28). architectural reveal 이 카메라를 소유하고
-    // 끝나면 HERO_REVEAL_TAIL 동안 **고정 프레임**으로 완성 비트를 보게 되어 있다. 리빌이 끝나는
-    // 순간 ORBIT_SPEED×5.2 선회가 갑자기 붙으면 엔드포인트에서 "덜컥" 스핀으로 읽힌다.
-    // 조립(heroAsm) 전 구간은 orbitBusy — 리빌 경로만 카메라를 움직인다.
-    const orbitBusy = (heroActive && !village.heroAsm) || assembly || groupAnims.length > 0 ||
-      wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealCamera?.isActive()
-      || state.selected || demo.active
-      || (village.active && village.selected) || !!village.heroAsm || villageWaveBusy();
-
-    const curRotateSpeed = ORBIT_SPEED;
-
-    if (!orbitBusy && performance.now() - lastActivity > ORBIT_IDLE_MS) {
-      orbitGain = Math.min(1, orbitGain + dt / ORBIT_RAMP_SEC);
-    } else {
-      orbitGain = 0; // 조작·전환 시 즉시 일시정지
+    // 조립 선회: architectural reveal 이 재생 중에는 카메라 소유권이 리빌에 있어 orbit 을 끈다.
+    // 리빌이 끝나면(HERO_REVEAL_TAIL 포함 구간) asmOrbitGain 을 ease-in 으로 올려 조립 선회를
+    // 붙이고, 조립이 끝나면 ease-out 으로 0 — 종전 하드 5.2× on/off 의 엔드포인트 "덜컥" 방지.
+    const revealActive = !!revealCamera?.isActive();
+    const revealInterrupted = revealCamera?.getState().reason === 'input';
+    const revealAutoOrbit = !reducedCameraMotion && !revealInterrupted;
+    const assembling = !!village.heroAsm;
+    const wantAsmOrbit = assembling && !revealActive && revealAutoOrbit;
+    if (wantAsmOrbit) {
+      asmOrbitGain = Math.min(1, asmOrbitGain + dt / ASM_ORBIT_RAMP_IN_SEC);
+    } else if (asmOrbitGain > 0) {
+      asmOrbitGain = Math.max(0, asmOrbitGain - dt / ASM_ORBIT_RAMP_OUT_SEC);
     }
-    const g = orbitGain * orbitGain * (3 - 2 * orbitGain); // smoothstep ease-in
-    controls.autoRotateSpeed = curRotateSpeed * g;
+
+    // orbitBusy: 조립 선회가 원할 때는 busy 가 아니어야 한다(리빌 종료 후 heroAsm 구간).
+    // 조립 중 입력이 끊은 경우(revealInterrupted)만 조립 선회를 막는다.
+    const orbitBusy = (heroActive && !assembling) || assembly || groupAnims.length > 0 ||
+      wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealActive
+      || state.selected || demo.active
+      || (village.active && village.selected && !assembling && asmOrbitGain <= 1e-4)
+      || (assembling && !revealAutoOrbit)
+      || villageWaveBusy();
+
+    if (!orbitBusy && !wantAsmOrbit && asmOrbitGain <= 1e-4
+        && performance.now() - lastActivity > ORBIT_IDLE_MS) {
+      orbitGain = Math.min(1, orbitGain + dt / ORBIT_RAMP_SEC);
+    } else if (!wantAsmOrbit) {
+      // 유휴 게인만 즉시 정지. 조립 선회 감속(asmOrbitGain)은 위 ease-out 이 소유.
+      orbitGain = 0;
+    }
+    const idleG = orbitGain * orbitGain * (3 - 2 * orbitGain); // smoothstep
+    const asmG = asmOrbitGain * asmOrbitGain * (3 - 2 * asmOrbitGain);
+    controls.autoRotateSpeed = ORBIT_SPEED * idleG + ORBIT_SPEED * ASM_ORBIT_MULT * asmG;
     // dt 를 넘겨 autoRotate 를 프레임레이트 독립으로 — 무인자 update() 는 60fps 를 가정한
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
-    if (!cinematic.isActive() && !tween && !demo.active && !revealCamera?.isActive()) {
+    // 조립 선회 감속 중(asmOrbitGain>0)에도 update 를 돌려 감속이 프레임에 반영되게 한다.
+    if (!cinematic.isActive() && !tween && !demo.active && !revealActive) {
       updateOrbitControls(dt, elapsed);
     }
     const settledFocusAmount = village.active && village.selected && !village.transitioning && !tween
@@ -2544,7 +2563,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
       ? camera.userData.villageReferenceFov : camera.fov;
     heroActive = true;                          // 랜딩 중 자동 회전 억제
-    lastActivity = performance.now() - ORBIT_IDLE_MS - 1000; // 조립 시작 즉시 카메라 선회
+    // 조립 선회 게인은 리빌 종료 후 ease-in. 시작 시 0 으로 리셋(이전 조립 잔여 감속 차단).
+    asmOrbitGain = 0;
+    orbitGain = 0;
+    lastActivity = performance.now();
     buildVillage(null, true);                    // 히어로 랜딩은 동기(직후 village.handle 사용) — 사전 생성분 소비(무프리징) + 먹 안개 reveal
     const heroId = village.handle.heroParcelId();
     if (!heroId) {                               // 종가 없음(예외) → 부감 랜딩 폴백
@@ -2641,8 +2663,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       village.transitioning = false; heroActive = false; lastActivity = performance.now();
       dispatchView('focusDone', { parcelId: heroId });
       // Zero inertia + re-read spherical at the live pose. Do NOT call
-      // controls.update() bare — that applies one 1/60s autoRotate step at the
-      // assemble-orbit speed and reads as a camera "덜컥" after the reveal.
+      // controls.update() bare — that applies one 1/60s autoRotate step.
+      // asmOrbitGain 은 유지: 루프의 ease-out 이 조립 선회를 부드럽게 줄인다.
       settleControls();
       orbitGain = 0;
       // 조립 10s 동안 카메라 선회가 motionBudget(MSAA 0 · fill 0.65)을 붙잡고 있어,
@@ -2721,7 +2743,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     refreshSemanticDofAnchor(id);                            // replay가 새 root를 만든 경우에도 원자 갱신
     const dur = detail.compound ? HERO_ASSEMBLE_DUR : 3.0;   // 정규 집은 짧게
     village.transitioning = true;
-    lastActivity = performance.now() - ORBIT_IDLE_MS - 1000; // 조립 시작 즉시 카메라 선회
+    asmOrbitGain = 0;
+    orbitGain = 0;
+    lastActivity = performance.now();
     setPostFocus(true);
     setZoomRegime('lock');
     stopHeroAsm();
@@ -2734,6 +2758,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       lastActivity = performance.now();
       attachFocusRing(detail.group);
       // Live pose after assemble auto-orbit — never bare controls.update() (1/60s spin).
+      // asmOrbitGain ease-out continues in the render loop.
       settleControls();
       orbitGain = 0;
       // Use the camera's actual distance after the assemble orbit, not the pre-orbit
@@ -2762,7 +2787,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const spec = detail.spec || pr?.buildingSpec;
     const dur = detail.compound ? HERO_ASSEMBLE_DUR : 3.0;
     village.transitioning = true;
-    lastActivity = performance.now() - ORBIT_IDLE_MS - 1000; // 조립 시작 즉시 카메라 선회
+    asmOrbitGain = 0;
+    orbitGain = 0;
+    lastActivity = performance.now();
     setPostFocus(true);
     setZoomRegime('lock');
     stopHeroAsm();
@@ -2802,6 +2829,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       attachFocusRing(detail.group);
       settleControls();
       orbitGain = 0;
+      // asmOrbitGain ease-out continues in the render loop.
       setZoomRegime('focus', camera.position.distanceTo(controls.target));
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
