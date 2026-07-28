@@ -199,6 +199,22 @@ function makeHouse() {
   }
   // 기와면: 처마(낮은 y) → 용마루(높은 y) 순으로 흘러야 한다.
   for (let i = 0; i < 4; i++) roof.add(box(15, 0.3, 2, 0, 3.4 + i * 0.5, 0));
+  // Physical shell pair (real builders name these). Must stay visibility-locked and
+  // must not appear before the rigid roof reaches contact (column-band z-fight).
+  {
+    const outer = box(15, 0.05, 4, 0, 3.55, 0);
+    outer.name = 'roof-tile-outer';
+    outer.userData.asmGroup = 'body';
+    roof.add(outer);
+    const gaepan = box(15, 0.05, 4, 0, 3.45, 0);
+    gaepan.name = 'roof-gaepan';
+    gaepan.userData.asmGroup = 'body';
+    roof.add(gaepan);
+    const band = box(15, 0.08, 0.12, 0, 3.5, 2.1);
+    band.name = 'roof-eave-band';
+    band.userData.asmGroup = 'body';
+    roof.add(band);
+  }
   for (const x of [-7, 7]) {
     const f = box(0.4, 0.4, 0.4, x, 5.4, 0);
     f.userData.asmGroup = 'finial';
@@ -335,6 +351,45 @@ assert.equal(roofPlan.courseFlow, true,
         assert.equal(b.scale.y, restChild[c + 1][2], `t=${t.toFixed(3)} gaepan scale.y drifted`);
       }
     }
+  }
+
+  // Shell (outer/gaepan/band) must stay dark until the rigid roof has reached
+  // contact — otherwise the rising underside z-fights the column/plate band.
+  {
+    const outer = roof.getObjectByName('roof-tile-outer');
+    const gaepan = roof.getObjectByName('roof-gaepan');
+    const band = roof.getObjectByName('roof-eave-band');
+    assert.ok(outer && gaepan && band, 'synthetic roof is missing named shell pieces');
+    let firstShellT = null;
+    for (let i = 0; i <= 200; i++) {
+      const t = 0.70 + (i / 200) * 0.30;
+      anim.seek(t);
+      assert.equal(outer.visible, gaepan.visible,
+        `t=${t.toFixed(3)} outer/gaepan visibility desynced during shell gate`);
+      if (band.visible) {
+        assert.equal(band.visible, outer.visible,
+          `t=${t.toFixed(3)} eave band desynced from outer shell`);
+      }
+      if (firstShellT === null && outer.visible) firstShellT = t;
+    }
+    assert.ok(firstShellT !== null, 'shell never became visible');
+    // Shell waits until settle is mostly damped (SHELL_REVEAL_UU ≈ 0.775 of roof u),
+    // not merely IMPACT — so bob cannot scrape the plate/창방 band.
+    const shellFloor = 0.74 + (1 - 0.74) * (IMPACT + (1 - IMPACT) * 0.55) * 0.92;
+    assert.ok(firstShellT >= shellFloor,
+      `shell appeared at t=${firstShellT.toFixed(3)} — still in the bob window `
+      + '(column-band z-fight)');
+    // Early / mid-rise and early-settle samples must be dark.
+    for (const t of [0.78, 0.84, 0.90]) {
+      anim.seek(t);
+      assert.equal(outer.visible, false, `shell visible too early (t=${t})`);
+      assert.equal(gaepan.visible, false, `gaepan visible too early (t=${t})`);
+    }
+    // Near settle the shell is on and locked.
+    anim.seek(0.98);
+    assert.equal(outer.visible, true, 'shell missing near settle');
+    assert.equal(gaepan.visible, true, 'gaepan missing near settle');
+    assert.equal(band.visible, true, 'eave band missing near settle');
   }
 
   anim.seek(0.88); // mid roof window (PART_WINDOWS.roof ≈ 0.74–1.0)

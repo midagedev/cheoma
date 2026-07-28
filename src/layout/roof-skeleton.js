@@ -198,6 +198,8 @@ export function buildSkeletonRoof(footprint, opts = {}) {
     bgeo.setIndex(bandIdx);
     bgeo.computeVertexNormals();
     const band = new THREE.Mesh(bgeo, M.eaveBand.clone());
+    band.name = 'roof-eave-band';
+    band.userData.asmGroup = 'body';
     band.material.side = THREE.FrontSide;
     band.castShadow = true;
     g.add(band);

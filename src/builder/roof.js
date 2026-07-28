@@ -195,6 +195,8 @@ export function buildRoof(P, L, M) {
     const mat = M.eaveBand.clone();
     mat.side = THREE.FrontSide;
     const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'roof-eave-band';
+    mesh.userData.asmGroup = 'body';
     mesh.castShadow = true;
     return mesh;
   }

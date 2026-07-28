@@ -27,6 +27,20 @@
 
 const PART_ORDER = ['podium', 'columns', 'walls', 'brackets', 'roof'];
 
+// Depth-critical roof shell: outer tile + structural 개판 (+ eave band lip).
+// These are the under-eave "ceiling" read. Room 반자 is deferred (docs/ceiling.md).
+const ROOF_SHELL_NAMES = new Set(['roof-tile-outer', 'roof-gaepan', 'roof-eave-band']);
+
+function isRoofShellPiece(obj) {
+  if (!obj) return false;
+  if (ROOF_SHELL_NAMES.has(obj.name)) return true;
+  // Builders may omit names on intermediate clones; still tag gaepan materials.
+  if (obj.userData?.roofLayer === 'gaepan') return true;
+  if (obj.material?.userData?.isRoofGaepan) return true;
+  if (obj.material?.userData?.paletteKey === 'gaepan') return true;
+  return false;
+}
+
 /** Keep each roof-tile-outer / roof-gaepan pair on the same visible bit. */
 function lockRoofShellVisibility(roofGroup) {
   if (!roofGroup?.children?.length) return;
@@ -36,6 +50,21 @@ function lockRoofShellVisibility(roofGroup) {
     if (a?.name === 'roof-tile-outer' && b?.name === 'roof-gaepan') {
       b.visible = a.visible;
     }
+  }
+  // Eave band sits on the same physical shell stack; if the outer is hidden the
+  // band alone reads as a coplanar lip on the rising gaepan.
+  for (let i = 0; i < roofGroup.children.length; i++) {
+    const band = roofGroup.children[i];
+    if (band?.name !== 'roof-eave-band') continue;
+    // Prefer the preceding outer on this face (add order: outer, gaepan, band).
+    let outer = null;
+    for (let j = i - 1; j >= 0; j--) {
+      if (roofGroup.children[j]?.name === 'roof-tile-outer') {
+        outer = roofGroup.children[j];
+        break;
+      }
+    }
+    if (outer) band.visible = outer.visible;
   }
 }
 
@@ -68,6 +97,11 @@ const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
 // 접촉 시점(자식 로컬 진행도 u 기준). u<IMPACT 는 제자리로 떠오르는 구간, 이후는 두부 정착.
 const IMPACT = 0.5;
+// Shell reveal progress on the roof motion (u). IMPACT alone is too early:
+// contact lands at rest Y for one sample, then tofu bob overshoots and the
+// gaepan scrapes the plate/창방 band ("기둥 위에 반자"). Wait until the settle
+// spring has mostly damped (≈55% of the post-contact window).
+const SHELL_REVEAL_UU = IMPACT + (1 - IMPACT) * 0.55;
 
 // ── 두부 물리: 모멘텀 연속 정착(2026-07-26 사용자 지시 3차) ─────────────────────────────
 // 이력과 사용자 판정을 그대로 남긴다(다음 사람이 코드에서 옛 규칙을 재유도하지 않게).
@@ -301,6 +335,13 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
         for (const u of visUnits) {
           const nI = rankOrdered(u.items, axis);
           for (const it of u.items) it.lag = nI > 1 ? it.rank / (nI - 1) : 0;
+          // Shell halves must not course-lag independently: eave→ridge lag on
+          // gaepan alone opens sky holes then flashes coplanar strips against
+          // neighbours while the rigid roof is still rising past the columns.
+          // Ornaments (마루·잡상) keep the eave→ridge flow.
+          for (const it of u.items) {
+            if (isRoofShellPiece(it.child)) it.lag = 0;
+          }
           u.first = u.items[0].first;
         }
         visUnits.forEach((u, i) => { u.rank = i; });
@@ -435,17 +476,20 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
         const uu = clamp01((t - u0.start) / g.itemDur);
         applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false);
         u0.items[0].child.visible = true;
+        // The roof rises from below the plate/창방. Showing the flat gaepan while
+        // it still occupies the column-top band z-fights ("기둥 위에 반자"). Hold
+        // the depth-critical shell until settle is mostly damped (SHELL_REVEAL_UU).
+        // Rafters may still lead as a silhouette.
+        const shellLanded = uu >= SHELL_REVEAL_UU;
         // Child reveal only (no per-child Y/scale).
         const intra = g.hasLag ? g.visItemDur * INTRA_SHARE : 0;
         const body = Math.max(1e-9, g.visItemDur - intra);
         for (const u of g.visUnits) {
           for (const it of u.items) {
             const uuV = clamp01((t - u.start - it.lag * intra) / body);
-            if (uuV <= 0) {
-              it.child.visible = false;
-            } else {
-              it.child.visible = it.vis0;
-            }
+            let show = uuV > 0;
+            if (show && isRoofShellPiece(it.child) && !shellLanded) show = false;
+            it.child.visible = show ? it.vis0 : false;
             it.child.position.y = it.y0;
             it.child.scale.set(it.sx0, it.sy0, it.sz0);
           }

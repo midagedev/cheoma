@@ -41,9 +41,11 @@
 1. **제로 두께 DoubleSide 기와면 금지** — 외피·하면이 같은 평면을 공유하면 z-fighting.
    `makeRoofUndersideGeometry`는 모든 정점을 **단위 외향 노멀**로 `ROOF_SHELL_THICKNESS` 만큼
    내리고, 영길이 노멀(메시 극점)은 +Y 폴백으로 오프셋이 0이 되지 않게 한다. same-index
-   최소 거리는 두께의 0.85× 이상(`check:roof-shell`). 조립 중 outer/gaepan visibility는
-   같은 비트로 잠근다(`assembly.js` `lockRoofShellVisibility`) — 켜 흐름 lag가 한쪽만
-   드러내며 깊이 스택을 깨지 않게.
+   최소 거리는 두께의 0.85× 이상(`check:roof-shell`). 조립 중 outer/gaepan/eave-band
+   visibility는 같은 비트로 잠그고(`assembly.js` `lockRoofShellVisibility`), 셸 부재는
+   켜 흐름 lag=0 이며 **지붕 강체 진행이 `SHELL_REVEAL_UU`(정착창의 ~55% 지점) 이전에는
+   개판 셸을 숨긴다** — 아래에서 올라오는 반자 평면이 기둥·창방 높이를 통과·두부 출렁이며
+   z-fight 하는 “기둥 위에 반자” 구간을 막는다. 서까래 실루엣은 그 전에 나와도 된다.
 1b. **마루 튜브·용마루 솔리드** — 내림/추녀/회첨 마루 중심선과 용마루 하면은 외피에서
    `r + ROOF_MARU_SURFACE_CLEAR`(기본 2cm) 이상 떨어져야 한다. 반경만큼 묻히면 조립·처마
    근접에서 기와 면과 동일 평면 충돌이 난다. 회첨은 골 **안(공기 쪽)** 에 앉히고 지붕
