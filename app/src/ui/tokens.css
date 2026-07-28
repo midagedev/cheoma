@@ -5,7 +5,7 @@
 :root {
   /* Published by the make-panel shell when the right dock is open */
   --inspector-w: 0px;
-  --inspector-max: 320px;
+  --inspector-max: 360px;
 
   /* Glass over WebGL (path / view tray / docks) — intentional non-Spectrum */
   --cheoma-glass: rgba(14, 16, 20, 0.58);

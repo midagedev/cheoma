@@ -1,7 +1,7 @@
 <script>
-  // Inspector — Spectrum tool column (right dock / mobile sheet).
-  //   docs/design-system.md: Explore/Focus tabs, PropertyField rows, cost accordion,
-  //   sticky rebuild. Morph crossfade + gate hooks preserved.
+  // CAD-style properties column (right dock / mobile sheet).
+  // All parameter groups stay expanded; environment lives in this column (not a
+  // floating dial). docs/design-system.md.
   import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
@@ -11,6 +11,12 @@
     resolveBuildingNavigationTarget,
   } from '../lib/building-navigation.js';
   import { schemaFor, villageSchema } from '../lib/edit-schema.js';
+  import {
+    SEASON_IDS,
+    SUNSET_LOOK_IDS,
+    WEATHER_IDS,
+    pickEnvironmentScene,
+  } from '../../../src/api/environment.js';
   import BottomSheet from './BottomSheet.svelte';
   import PropertyField from '../ui/PropertyField.svelte';
 
@@ -30,7 +36,27 @@
     // Secondary tools — sticky under tabs (not the floating dock / not peek-only grip).
     onPostcard = null, onShare = null, onExport = null,
     exporting = false, busy = false,
+    // Environment (was floating dial — now dense CAD rows in this column)
+    time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear',
+    renderStyle = 'pbr', flowing = false,
+    onTime = null, onSunsetLook = null, onSeason = null, onWeather = null,
+    onRenderStyle = null, onFlowToggle = null,
   } = $props();
+
+  const TIMES = ['dawn', 'day', 'sunset', 'night'];
+  let envSpins = $state(0);
+  function rollEnv() {
+    const c = pickEnvironmentScene(Math.random, { ti: time, su: sunsetLook, se: season, we: weather });
+    if (c.su && c.su !== sunsetLook) onSunsetLook?.(c.su);
+    if (c.ti !== time) onTime?.(c.ti);
+    if (c.se !== season) onSeason?.(c.se);
+    if (c.we !== weather) onWeather?.(c.we);
+    envSpins += 1;
+  }
+  function cycleSunsetLook() {
+    const i = SUNSET_LOOK_IDS.indexOf(sunsetLook);
+    onSunsetLook?.(SUNSET_LOOK_IDS[(i + 1) % SUNSET_LOOK_IDS.length]);
+  }
 
   // ── 모프 크로스페이드(원칙 2) — 마을은 먼저 빠지고 집은 뒤이어 든다. ──
   const smoothstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -178,24 +204,11 @@
   function slideInput(v) { dragVal = v; }
   function slideCommit(v) { dragVal = null; const a = SCALES[Math.round(v)]; if (a !== scale) onScale?.(a); }
 
-  // ── 그룹 아코디언(동시 1개 펼침) ──
+  // CAD density: every group body stays open so the full lever set is scannable.
+  // Headers keep gate hooks (.advtoggle, data-group, costbadge) but do not fold.
   const vSections = villageSchema();
   const schema = $derived(schemaFor(spec));
   const editable = $derived(!!spec && spec.editable === true);
-  // 기본 펼침 = 각 컨텍스트의 첫 그룹. 사용자 지시("고급설정 숨기지 말 것")는 *전 축 노출* 요구이므로
-  // 축은 모두 남아 있고, 한 번에 한 그룹만 펼쳐 폴드 초과만 없앤다.
-  let openVillageGroup = $state(vSections[0]?.id || null);
-  let openHouseGroup = $state(null);
-  // 스키마 정체성(유형·컴파운드 가족)이 바뀌면 첫 그룹으로 되돌린다 — 사라진 그룹이 열린 채로 남지 않게.
-  let observedSchemaKey = null;
-  $effect(() => {
-    const key = `${schema.family}:${schema.kind || schema.heroStyle || ''}:${schema.sections.map((s) => s.id).join(',')}`;
-    if (observedSchemaKey === key) return;
-    observedSchemaKey = key;
-    openHouseGroup = schema.sections[0]?.id || null;
-  });
-  const toggleVillageGroup = (id) => { openVillageGroup = openVillageGroup === id ? null : id; };
-  const toggleHouseGroup = (id) => { openHouseGroup = openHouseGroup === id ? null : id; };
 
   const TYPES = [
     { key: 'giwa', l: 'type_giwa_l', s: 'type_giwa_s' },
@@ -307,6 +320,82 @@
     </div>
   {/if}
 
+  <!-- Environment — dense CAD rows in the inspector (class .dial keeps gate hooks). -->
+  <section class="dial envblock" aria-label={t('axis_view')}>
+    <div class="envhead">
+      <span class="envtitle">{t('axis_view')}</span>
+      <div class="envactions">
+        <button type="button" class="dial-btn env-roll" title={t('env_reroll_tip')} aria-label={t('env_reroll')} onclick={rollEnv}>
+          <span class="rk-glyph" style="transform: rotate({envSpins * 360}deg)">⟳</span>
+        </button>
+        {#if time === 'sunset'}
+          <button
+            type="button"
+            class="dial-btn sunset-tone {sunsetLook}"
+            title={t('sunset_look_tip') + ' — ' + t('sunset_look_' + sunsetLook)}
+            aria-label={t('sunset_look_tip') + ': ' + t('sunset_look_' + sunsetLook)}
+            onclick={cycleSunsetLook}
+          ><span class="tone-orb" aria-hidden="true"></span></button>
+        {/if}
+        <button
+          type="button"
+          class="dial-btn env-flow"
+          class:on={flowing}
+          title={t(flowing ? 'env_flow_on_tip' : 'env_flow_tip')}
+          aria-label={t('env_flow')}
+          aria-pressed={flowing}
+          onclick={() => onFlowToggle?.()}
+        ><span class="flow-orb" aria-hidden="true"></span></button>
+      </div>
+    </div>
+    <div class="envrow">
+      <span class="envlab">{t('dial_time')}</span>
+      <div class="seg" role="group" aria-label={t('dial_time')}>
+        {#each TIMES as id}
+          <button type="button" class:on={time === id} aria-pressed={time === id} onclick={() => onTime?.(id)}>{t('time_' + id)}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="envrow">
+      <span class="envlab">{t('dial_season')}</span>
+      <div class="seg" role="group" aria-label={t('dial_season')}>
+        {#each SEASON_IDS as id}
+          <button type="button" class:on={season === id} aria-pressed={season === id} onclick={() => onSeason?.(id)}>{t('season_' + id)}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="envrow">
+      <span class="envlab">{t('dial_weather')}</span>
+      <div class="seg" role="group" aria-label={t('dial_weather')}>
+        {#each WEATHER_IDS as id}
+          <button type="button" class:on={weather === id} aria-pressed={weather === id} onclick={() => onWeather?.(id)}>{t('weather_' + id)}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="render-style" role="group" aria-label={t('render_style')}>
+      <button
+        type="button"
+        class:on={renderStyle === 'pbr'}
+        aria-pressed={renderStyle === 'pbr'}
+        title={t('render_pbr_tip')}
+        onclick={() => renderStyle !== 'pbr' && onRenderStyle?.('pbr')}
+      >
+        <span class="glyph" aria-hidden="true">景</span>
+        <span>{t('render_pbr')}</span>
+      </button>
+      <button
+        type="button"
+        class:on={renderStyle === 'ink'}
+        aria-pressed={renderStyle === 'ink'}
+        title={t('render_ink_tip')}
+        onclick={() => renderStyle !== 'ink' && onRenderStyle?.('ink')}
+      >
+        <span class="glyph" aria-hidden="true">墨</span>
+        <span>{t('render_ink')}</span>
+      </button>
+    </div>
+  </section>
+
   <div bind:this={stackRoot} class="stack">
     <div
       class="ctx village"
@@ -376,8 +465,8 @@
 
       {#if onVillageOpt}
         {#each vSections as vsec (vsec.id)}
-          {@render groupHeader(vsec, openVillageGroup === vsec.id, () => toggleVillageGroup(vsec.id))}
-          {#if openVillageGroup === vsec.id}{@render villageSection(vsec)}{/if}
+          {@render groupHeader(vsec)}
+          {@render villageSection(vsec)}
         {/each}
       {/if}
     </div>
@@ -421,8 +510,8 @@
         {/if}
 
         {#each schema.sections as sec (sec.id)}
-          {@render groupHeader(sec, openHouseGroup === sec.id, () => toggleHouseGroup(sec.id))}
-          {#if openHouseGroup === sec.id}{@render editSection(sec)}{/if}
+          {@render groupHeader(sec)}
+          {@render editSection(sec)}
         {/each}
       {:else if spec}
         <div class="hero-note">
@@ -530,16 +619,16 @@
   </div>
 {/snippet}
 
-{#snippet groupHeader(sec, isOpen, toggle)}
-  <button
-    class="advtoggle group"
-    class:open={isOpen}
-    type="button"
+{#snippet groupHeader(sec)}
+  <!-- Always-open CAD section title (hooks preserved for gates / shoot tools). -->
+  <div
+    class="advtoggle group open"
     data-group={sec.id}
-    aria-expanded={isOpen}
-    onclick={toggle}
+    aria-expanded="true"
+    role="heading"
+    aria-level="3"
   >
-    <span class="chev" aria-hidden="true">{isOpen ? '−' : '+'}</span>
+    <span class="chev" aria-hidden="true">·</span>
     <span class="gname">{t(sec.titleKey)}</span>
     <sp-badge
       class="costbadge {sec.cost}"
@@ -548,7 +637,7 @@
       variant="neutral"
       title={t('cost_' + sec.cost + '_tip')}
     >{t('cost_' + sec.cost)}</sp-badge>
-  </button>
+  </div>
 {/snippet}
 
 {#snippet villageSection(vsec)}
@@ -752,19 +841,177 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Environment block — dense CAD segments (gate: .dial / .render-style / .dial-btn).
+     Must NOT use fixed positioning — this is in-panel, not the old floating tray. */
+  .envblock.dial {
+    position: sticky;
+    top: 0;
+    right: auto;
+    left: auto;
+    bottom: auto;
+    z-index: 3;
+    transform: none;
+    width: auto;
+    max-width: none;
+    inset: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 6px 0 8px;
+    margin: 0 0 2px;
+    border-bottom: 1px solid var(--panel-line);
+    /* Opaque so scrolled params do not bleed through sticky env */
+    background: var(--panel);
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .envhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .envtitle {
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--panel-faint);
+  }
+  .envactions { display: flex; gap: 3px; }
+  .dial-btn {
+    min-width: 36px;
+    min-height: 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-elevated);
+    color: var(--panel-text);
+    cursor: pointer;
+  }
+  .dial-btn:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .dial-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .rk-glyph {
+    display: block;
+    font-size: 14px;
+    line-height: 1;
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .tone-orb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 244, 229, 0.85);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--tone) 65%, transparent);
+    background: radial-gradient(circle at 34% 32%, #fff1d7 0 8%, var(--tone) 35%, var(--tone-deep) 100%);
+  }
+  .sunset-tone.gold { --tone: #e8a074; --tone-deep: #6f628e; }
+  .sunset-tone.crimson { --tone: #d96862; --tone-deep: #704c7d; }
+  .sunset-tone.violet { --tone: #c37c99; --tone-deep: #4e5485; }
+  .flow-orb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(90deg, #ffe0a8 0 50%, #2a1d16 50% 100%);
+    box-shadow: inset 0 0 0 1px rgba(255, 236, 214, 0.62), inset -2px 0 4px rgba(0, 0, 0, 0.32);
+  }
+  .env-flow.on {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  .env-flow.on .flow-orb { animation: orbcycle 22s linear infinite; }
+  @keyframes orbcycle { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .env-flow.on .flow-orb { animation: none; }
+  }
+  .envrow {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+  }
+  .envlab {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--panel-faint);
+  }
+  .seg {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--panel-border);
+  }
+  .seg button {
+    min-height: 32px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--panel-muted);
+    font-size: 11px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .seg button:hover { color: var(--panel-text); background: var(--panel-hover); }
+  .seg button.on {
+    color: #fff;
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .render-style {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+    background: rgba(0, 0, 0, 0.22);
+  }
+  .render-style button {
+    min-height: 36px;
+    border: 0;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: transparent;
+    color: var(--panel-muted);
+    font-size: 11px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .render-style button:hover { background: var(--panel-hover); }
+  .render-style button.on {
+    background: var(--accent-soft);
+    color: #fff;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .render-style button:last-child.on {
+    background: rgba(28, 34, 43, 0.95);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  }
+  .render-style button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .render-style .glyph { font-size: 13px; }
+
   .stack { display: grid; }
   .stack > .ctx {
     grid-column: 1;
     grid-row: 1;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
     transition: opacity 0.12s linear;
   }
 
-  section { display: flex; flex-direction: column; gap: 6px; }
+  section { display: flex; flex-direction: column; gap: 4px; }
   section.pinned {
-    padding: 10px;
+    padding: 7px 8px 8px;
     border-radius: var(--spectrum-corner-radius-100, 4px);
     background: var(--panel-2);
     border: 1px solid var(--panel-line);
@@ -841,32 +1088,32 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
-    min-height: 36px;
-    padding: 6px 2px;
+    min-height: 28px;
+    padding: 4px 2px 2px;
+    margin-top: 2px;
     background: transparent;
     border: none;
     border-top: 1px solid var(--panel-line);
     color: var(--panel-text);
-    font-size: var(--spectrum-font-size-75, 12px);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    cursor: pointer;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
     text-align: left;
+    cursor: default;
+    user-select: none;
   }
-  .advtoggle:hover { color: var(--accent); }
-  .advtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .advtoggle .chev {
     flex: none;
-    width: 1.1em;
+    width: 0.7em;
     font-family: var(--mono);
     font-size: 14px;
     line-height: 1;
-    color: var(--panel-muted);
+    color: var(--accent);
   }
-  .advtoggle .gname { flex: 1 1 auto; min-width: 0; }
-  .advtoggle.open .gname { color: var(--accent); }
+  .advtoggle .gname { flex: 1 1 auto; min-width: 0; color: var(--accent); }
 
   /* Cost language: live is gate-visible but visually quiet (sr-only) */
   .advtoggle :global(sp-badge.costbadge) {
@@ -934,7 +1181,8 @@
   }
   .note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--panel-faint); }
   .editnote { margin: -2px 0 4px; font-size: 12px; line-height: 1.4; color: var(--panel-faint); }
-  .vdetail { gap: 6px; display: flex; flex-direction: column; }
+  .vdetail { gap: 3px; display: flex; flex-direction: column; }
+  section[data-group-body] { gap: 3px; display: flex; flex-direction: column; }
   .tierhint { font-size: 10px; color: var(--panel-faint); font-weight: 500; }
   .hero-note {
     display: flex;
@@ -998,6 +1246,9 @@
     .vdetail { gap: 4px; }
     input[type='range'].scale::-webkit-slider-thumb { width: 20px; height: 20px; }
     input[type='range'].scale::-moz-range-thumb { width: 20px; height: 20px; }
-    .row { min-height: 40px; grid-template-columns: 70px minmax(0, 1fr) 38px; }
+    .row { min-height: 36px; grid-template-columns: 70px minmax(0, 1fr) 38px; }
+    .dial-btn { min-width: 44px; min-height: 44px; }
+    .seg button { min-height: 40px; }
+    .render-style button { min-height: 44px; }
   }
 </style>

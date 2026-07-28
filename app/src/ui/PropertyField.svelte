@@ -118,10 +118,10 @@
   /* Layout only — colors/type come from Spectrum theme tokens */
   .row {
     display: grid;
-    grid-template-columns: minmax(64px, 76px) minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(56px, 70px) minmax(0, 1fr) 36px;
     align-items: center;
-    gap: var(--spectrum-spacing-75, 6px);
-    min-height: 32px;
+    gap: 4px;
+    min-height: 26px;
   }
   .row.bays, .row.seg { grid-template-columns: minmax(64px, 76px) minmax(0, 1fr); }
   .row.disabled { opacity: 0.45; pointer-events: none; }
@@ -220,9 +220,9 @@
 
   @media (max-width: 600px), (pointer: coarse) {
     .row {
-      min-height: 40px;
-      gap: 6px;
-      grid-template-columns: 70px minmax(0, 1fr) 38px;
+      min-height: 36px;
+      gap: 5px;
+      grid-template-columns: 68px minmax(0, 1fr) 36px;
     }
     .row.bays, .row.seg { grid-template-columns: 70px minmax(0, 1fr); }
     .stepper button { width: 40px; height: 40px; font-size: 16px; }

@@ -8,7 +8,7 @@
 |------|--------------------|
 | Scene is the product (eave / rim / golden hour) | Floating chips stay glass and quiet; idle fade remains; chrome never competes with the frame. |
 | House = touch + edit + regenerate | Inspector is a real properties column: dense rows, honest rebuild cost, sticky primary action. |
-| Clip-worthy three.js demo | View tray (time / season / weather / PBR·Ink) stays one-tap demo material. |
+| Clip-worthy three.js demo | Environment lives in the CAD inspector column — dense segments, not a floating dial. |
 | Joseon authenticity | Brand seal (처마 낙관) and paper References only; tools stay cool tool UI, not faux-hanji panels. |
 
 ## Non-negotiable contracts
@@ -35,27 +35,29 @@
 | **Continuous params** | Geometry live-edit ranges | Native `input[type=range]` + Spectrum tokens + `PropertyField` | High-frequency `input`/`change`, Playwright focus/arrow, `check:parcel-rebuild` — SWC shadow range is the wrong tool. |
 | **Discrete params** | Stepper / segment / toggle | `sp-number-field`, `sp-action-group`, `sp-switch` | Spectrum wins on affordance and density. |
 | **Primary rebuild** | Village / house reroll | `sp-button` accent fill, classes `.rebuild` / `.hbtn.reroll` | One sticky primary per context. |
-| **Group accordion** | One open section | Custom header (`.advtoggle` + cost badge) | Cost semantics (live / settle / wave) are product language Spectrum badge alone does not own. |
+| **Group headers** | Always-open CAD sections | Static labels (`.advtoggle` + cost badge) | Full lever set scannable; cost badges stay for commit honesty. |
+| **Environment** | Time / season / weather / ink | Dense segments inside inspector (`.dial`) | Not a floating tray on village; solo scenes keep the dial. |
 | **Path / status / dock** | Breadcrumb, seal, action bar | Glass chip + Spectrum-aligned type | Over WebGL; glass is intentional, not a second design system. |
 | **Brand only** | 처마 stamp, References paper | Seal red + light paper surface | Oriental brand signal; never paint the inspector 한지. |
 
 ## Information architecture
 
 ```
-┌ path (glass) ──────────────┬ view tray (glass) ┬ INSPECTOR (opaque Spectrum) ┐
-│ Village › House            │ dial · PBR|Ink    │ [Explore | Focus]            │
-│                            │                   │ photo · share · export       │
-│           SCENE            │                   │ building picker → Go         │
-│                            │                   │ ── scale / type (pinned) ──  │
-│ 처마 #seed  [dock]         │                   │ accordion groups…            │
-│                            │                   │ [ ↻ rebuild ]                │
-└────────────────────────────┴───────────────────┴──────────────────────────────┘
+┌ path (glass) ──────────────────────────┬ INSPECTOR CAD column (opaque Spectrum) ┐
+│ Village › House                        │ [Explore | Focus]                        │
+│                                        │ photo · share · export                   │
+│                 SCENE                  │ building picker → Go                     │
+│                                        │ ── environment (time/season/wx/ink) ──   │
+│ 처마 #seed  [dock]                     │ ── scale / type (pinned) ──              │
+│                                        │ all param groups OPEN (dense rows)       │
+│                                        │ [ ↻ rebuild ]                            │
+└────────────────────────────────────────┴──────────────────────────────────────────┘
 ```
 
 ### Mode map
 
-- **Explore:** scale slider, palace/temple toggles, terrain/composition/vocab groups, rebuild village.
-- **Focus (residential):** type (giwa/choga), schema groups (plan → yard…), rebuild house.
+- **Explore:** environment + scale + palace/temple + all terrain/composition/vocab rows + rebuild village.
+- **Focus (residential):** environment + type + all schema groups (plan → yard…) expanded + rebuild house.
 - **Special compounds:** shorter schemas from `edit-schema.js` — same chrome, different sections.
 
 ## Visual rules
@@ -63,7 +65,7 @@
 - **One tool system:** dark Spectrum for inspector, dialogs, sheets. No dual “한지 panel + CAD panel.”
 - **Glass only over the scene:** path, dial, action dock, status chip.
 - **Brand accent:** seal red (`--cheoma-seal`) only on the 낙관; tool accent follows Spectrum accent (cool).
-- **Density:** property rows are compact; primary targets ≥ 44px on coarse pointers.
+- **Density:** CAD-tight property rows; all groups open; primary targets ≥ 44px on coarse pointers.
 - **Cost honesty:** show settle/wave badges; keep live cost in DOM for gates but visually quiet (default path).
 
 ## Code layout
@@ -99,7 +101,7 @@ Components own product behaviour; they do not re-invent control chrome.
 
 ## Verification
 
-- Visual: desktop Explore, house Focus (full accordion), mobile peek/half, landscape rail.
+- Visual: desktop Explore, house Focus (all groups open), mobile peek/half, landscape rail.
 - Contract: `npm run check:ui-shell`.
 - Edit path: `npm run check:parcel-rebuild:browser` when param chrome changes.
 - Smoke: enter village, rebuild, focus house, drag range, toggle switch, open references.

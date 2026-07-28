@@ -55,7 +55,9 @@ const pass = (condition, message) => {
 
 // Chrome the scene has to share the frame with. Keep this list in sync with the
 // three axes plus the seal and the onboarding guide.
-const CHROME_SELECTOR = '[data-make-panel], .actions, .dial, [data-breadcrumb], .seal-label, [data-scene-guide]';
+// Floating dial only (`.dial.viewcard` / `.viewchip`). In-panel `.dial.envblock`
+// is part of the make panel and must not double-count chrome geometry.
+const CHROME_SELECTOR = '[data-make-panel], .actions, .dial.viewcard, .dial.viewchip, [data-breadcrumb], .seal-label, [data-scene-guide]';
 
 const server = await createServer({
   root: APP_ROOT,
@@ -130,7 +132,15 @@ const MEASURE = `(selector) => {
   const panel = document.querySelector('[data-make-panel]');
   const scroll = document.querySelector('[data-panel-scroll]');
   const dock = document.querySelector('.actions');
-  const dial = document.querySelector('.dial');
+  // Prefer floating tray; fall back to in-panel CAD env when that block is shown
+  // (peek sheets hide scroll content with visibility:hidden — skip those rects).
+  const dialCandidate = document.querySelector('.dial.viewcard, .dial.viewchip')
+    || document.querySelector('[data-make-panel] .dial');
+  const dial = dialCandidate
+    && getComputedStyle(dialCandidate).visibility !== 'hidden'
+    && dialCandidate.getClientRects().length > 0
+    ? dialCandidate
+    : null;
   const crumbs = document.querySelector('[data-breadcrumb]');
   const guide = document.querySelector('[data-scene-guide]');
 
@@ -140,7 +150,8 @@ const MEASURE = `(selector) => {
   const scrollVisibleHeight = scrollClip ? Math.max(0, scrollClip.bottom - scrollClip.top) : 0;
 
   // Last control after scrolling to the bottom: reachable means fully on screen
-  // and inside the scroll viewport.
+  // and inside the scroll viewport. Restore scrollTop so subsequent hit tests
+  // see the environment block at the top of the CAD column.
   let lastControl = null;
   if (scroll) {
     scroll.scrollTop = scroll.scrollHeight;
@@ -159,6 +170,13 @@ const MEASURE = `(selector) => {
         scrollHeight: scroll.scrollHeight,
         clientHeight: scroll.clientHeight,
       };
+    }
+    scroll.scrollTop = 0;
+    // Keep sticky env / ink toggles hittable after last-control probe —
+    // only when the scroll surface is actually shown (not peek-hidden).
+    if (getComputedStyle(scroll).visibility !== 'hidden') {
+      document.querySelector('[data-make-panel] .dial .render-style')
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   }
 
@@ -203,8 +221,10 @@ const MEASURE = `(selector) => {
     '[data-make-panel] [data-action="postcard"]',
     '[data-make-panel] [data-action="share"]',
     '[data-make-panel] [data-action="export"]',
-    '.dial .render-style button',
-    '.dial .dial-btn',
+    // Floating dial targets only for 44px (in-panel CAD rows may be denser).
+    '.dial.viewcard .render-style button',
+    '.dial.viewchip',
+    '.dial.viewcard .dial-btn',
     '[data-view-chip]',
     '[data-view-collapse]',
     '[data-breadcrumb] .crumb.root.link',
@@ -460,8 +480,10 @@ try {
     pass(!aerial.guidePresent
       || (aerial.overlaps.guideDock === 0 && aerial.overlaps.guidePanel === 0 && aerial.overlaps.guideDial === 0),
     `${viewport.id} onboarding guide is clamped clear of every action (${JSON.stringify(aerial.overlaps)} guide=${JSON.stringify(aerial.boxes.guide)} dock=${JSON.stringify(aerial.boxes.dock)})`);
-    pass(aerial.openGroups.village <= 1 && aerial.groupHeaders.village >= 3,
-      `${viewport.id} village groups expose every axis with one body open (${aerial.openGroups.village}/${aerial.groupHeaders.village})`);
+    pass(aerial.openGroups.village >= 3
+      && aerial.groupHeaders.village >= 3
+      && aerial.openGroups.village === aerial.groupHeaders.village,
+      `${viewport.id} village groups keep every body open for CAD density (${aerial.openGroups.village}/${aerial.groupHeaders.village})`);
     pass(aerial.costBadges.length >= 3 && aerial.costBadges.every((cost) => ['wave', 'live', 'settle'].includes(cost)),
       `${viewport.id} every village group states its commit cost (${JSON.stringify(aerial.costBadges)})`);
     if (sheetLayout) {
@@ -526,45 +548,14 @@ try {
       `${viewport.id} focus keeps photo/share out of the floating dock (${JSON.stringify({
         dockShare: focused.hits.dockShare, dockPostcard: focused.hits.dockPostcard,
       })})`);
-    // §6.13 decision A. The portrait sheet layout cannot host the sheet, the full view
-    // card and the lifted dock and still leave the camera a band for the edited house,
-    // so the view axis collapses to a chip there. Its cost is one tap, and that tap must
-    // not disturb the edit context — assert both, or the decision quietly reverts.
-    if (sheetLayout) {
-      pass(focused.hits.viewChip === 'hittable',
-        `${viewport.id} the view axis collapses to a reachable chip while editing (${focused.hits.viewChip})`);
-      const chipState = await page.evaluate(() => document.querySelector('[data-view-chip]')?.textContent?.replace(/\s+/g, ' ').trim() || '');
-      pass(chipState.length > 0,
-        `${viewport.id} the collapsed view chip still states the current environment ("${chipState}")`);
-      const expand = await page.evaluate(async () => {
-        const snapBefore = document.querySelector('[data-make-panel]')?.dataset.snap || null;
-        document.querySelector('[data-view-chip]')?.click();
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        return { snapBefore, snapAfter: document.querySelector('[data-make-panel]')?.dataset.snap || null };
-      });
-      await settleShell(page);
-      const expanded = await measure(page);
-      pass(expand.snapBefore === 'half' && expand.snapAfter === 'half'
-        && expanded.hits.renderInk === 'hittable',
-      `${viewport.id} expanding the view chip reveals the axis without collapsing the edit sheet (${JSON.stringify({ ...expand, renderInk: expanded.hits.renderInk })})`);
-      // Collapse view chip; leave the edit sheet at half for later ink steps that
-      // assume an open inspector, then peek-collapse at end of focus block.
-      await page.evaluate(async () => {
-        document.querySelector('[data-view-collapse]')?.click();
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      });
-      await settleShell(page);
-    } else if (viewport.id === 'phone-landscape') {
-      // Landscape keeps the right inspector rail, so the view axis collapses to a
-      // chip (same density trade as the portrait sheet) and must stay reachable.
-      pass(focused.hits.viewChip === 'hittable',
-        `${viewport.id} the view axis collapses to a reachable chip while editing (${focused.hits.viewChip})`);
-    } else {
-      pass(focused.hits.renderInk === 'hittable',
-        `${viewport.id} the view card stays reachable while editing (${focused.hits.renderInk})`);
-    }
-    pass(focused.openGroups.house <= 1 && focused.groupHeaders.house >= 3,
-      `${viewport.id} house groups keep one body open while exposing every axis (${focused.openGroups.house}/${focused.groupHeaders.house})`);
+    // Environment lives in the make panel (CAD column) — no floating view chip.
+    // Ink / time / season stay reachable as long as the make shell is expanded.
+    pass(focused.hits.renderInk === 'hittable',
+      `${viewport.id} inspector environment keeps ink reachable while editing (${focused.hits.renderInk})`);
+    pass(focused.openGroups.house >= 3
+      && focused.groupHeaders.house >= 3
+      && focused.openGroups.house === focused.groupHeaders.house,
+      `${viewport.id} house groups keep every body open for CAD density (${focused.openGroups.house}/${focused.groupHeaders.house})`);
     pass(focused.chromeInViewport,
       `${viewport.id} editing chrome stays inside the frame`);
     if (viewport.touch) {
@@ -572,26 +563,19 @@ try {
         `${viewport.id} editing keeps 44px targets (${JSON.stringify(focused.smallTargets)})`);
     }
 
-    // 그룹 아코디언: 다른 그룹을 펼치면 앞 그룹이 접힌다(스크롤 초과 구조적 제거).
-    // Svelte updates the DOM asynchronously, so read the collapse one frame later.
-    const accordionTarget = await page.evaluate(() => {
+    // All groups stay open — headers are labels, not exclusive accordion.
+    const allOpen = await page.evaluate(() => {
       const headers = [...document.querySelectorAll('[data-make-panel] .ctx.house [data-group]')];
-      if (headers.length < 2) return null;
-      const before = [...document.querySelectorAll('[data-make-panel] .ctx.house [data-group-body]')]
+      const bodies = [...document.querySelectorAll('[data-make-panel] .ctx.house [data-group-body]')]
         .map((body) => body.dataset.groupBody);
-      const target = headers.find((header) => header.getAttribute('aria-expanded') === 'false');
-      target?.click();
-      return { before, opened: target?.dataset.group || null };
+      return {
+        headers: headers.length,
+        bodies: bodies.length,
+        expanded: headers.every((h) => h.getAttribute('aria-expanded') === 'true'),
+      };
     });
-    let accordion = null;
-    if (accordionTarget) {
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-      const after = await page.evaluate(() => [...document.querySelectorAll('[data-make-panel] .ctx.house [data-group-body]')]
-        .map((body) => body.dataset.groupBody));
-      accordion = { ...accordionTarget, after };
-    }
-    pass(!accordion || (accordion.after.length === 1 && accordion.after[0] === accordion.opened),
-      `${viewport.id} opening a group collapses the previous one (${JSON.stringify(accordion)})`);
+    pass(allOpen.headers >= 3 && allOpen.bodies === allOpen.headers && allOpen.expanded,
+      `${viewport.id} CAD section labels stay fully expanded (${JSON.stringify(allOpen)})`);
 
     // 시네마틱: 크롬은 전부 물러난다(감상 우선).
     await page.evaluate(() => window.__engine.village.return());
@@ -621,14 +605,13 @@ try {
       await page.waitForFunction(() => !window.__engine.cine.getState().active, null, { timeout });
     }
 
-    // 수묵(墨): 렌더 스타일 전환은 보기 카드가 소유하고, 크롬 배치는 불변이어야 한다.
+    // 수묵(墨): 환경·잉크 토글은 만들기 패널 CAD 컬럼이 소유한다.
     // 시네마틱에서 돌아온 패널이 다시 미끄러져 들어오는 동안 재면 반쪽 프레임을 읽는다.
-    // Landscape phone (and the portrait sheet while editing) collapses the view axis
-    // to a chip — expand it before probing the render-style segment.
     await settleShell(page);
     await page.evaluate(async () => {
-      if (!document.querySelector('.dial .render-style button:last-child')) {
-        document.querySelector('[data-view-chip]')?.click();
+      const sheet = document.querySelector('[data-make-panel]');
+      if (sheet?.dataset.snap === 'peek') {
+        document.querySelector('[data-make-panel] .grip')?.click();
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       }
       document.querySelector('.dial .render-style button:last-child')?.click();

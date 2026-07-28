@@ -206,7 +206,7 @@
     bottom: 0;
     left: auto;
     z-index: 32;
-    width: min(var(--inspector-max, 320px), 34vw);
+    width: min(var(--inspector-max, 360px), 36vw);
     max-height: none;
     padding: 0;
     border-radius: 0;
@@ -243,7 +243,8 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    padding: 10px 12px 12px;
+    padding: 8px 10px 10px;
+    gap: 2px;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--panel-border) transparent;
@@ -285,6 +286,7 @@
 
   .grip {
     position: relative;
+    z-index: 5;
     flex: none;
     height: 44px;
     display: grid;
@@ -292,6 +294,7 @@
     cursor: pointer;
     touch-action: none;
     border-bottom: 1px solid var(--panel-line);
+    background: var(--panel);
   }
   .grip::before {
     content: '';

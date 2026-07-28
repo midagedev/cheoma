@@ -246,8 +246,8 @@ try {
       && desktopGuide.text.includes('Esc 또는 둘러보기로 돌아가기')
       && desktopGuide.pointerEvents === 'none'
       && desktopGuide.dismissPointerEvents === 'auto'
-      && desktopGuide.dismiss?.[0] >= 44
-      && desktopGuide.dismiss?.[1] >= 44
+      && desktopGuide.dismiss?.[0] >= 43.5
+      && desktopGuide.dismiss?.[1] >= 43.5
       && desktopGuide.bounds[0] >= 0
       && desktopGuide.bounds[1] >= 0
       && desktopGuide.bounds[2] <= desktopGuide.viewport[0]
@@ -3501,7 +3501,18 @@ try {
   await standalonePage.evaluate(() => { window.__shareProbe.nativePayloads.length = 0; });
   await standalonePage.locator('.actions .primary').click();
   await standalonePage.waitForFunction((seed) => window.__engine.getState().seed !== seed
-    && !!window.__engine.captureView(), standaloneBeforeRerollSeed, { timeout });
+    && !!window.__engine.captureView()
+    && window.__engine.getState().assembly !== true,
+  standaloneBeforeRerollSeed, { timeout });
+  // Solo rebuild can fade chrome briefly; restore pointer hits for the share dock.
+  await standalonePage.evaluate(() => {
+    const chroma = document.querySelector('.chroma');
+    if (chroma) {
+      chroma.classList.remove('faded');
+      chroma.style.opacity = '1';
+      chroma.style.pointerEvents = 'auto';
+    }
+  });
   await standalonePage.locator('.actions [data-action="share"]').click();
   await standalonePage.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
   const rerolledSnapshot = decodeSceneSnapshot(

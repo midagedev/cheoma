@@ -118,6 +118,9 @@
     position: absolute;
     top: 2px;
     right: 2px;
+    box-sizing: border-box;
+    width: 44px;
+    height: 44px;
     min-width: 44px;
     min-height: 44px;
     display: grid;

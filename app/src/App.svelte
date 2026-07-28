@@ -1519,16 +1519,32 @@
         : (villageEditing && !villageZooming ? exportHouse : null)}
       exporting={exporting}
       busy={rerollCooldown || waving}
+      time={ui.time}
+      sunsetLook={ui.sunsetLook}
+      season={ui.season}
+      weather={ui.weather}
+      renderStyle={ui.renderStyle}
+      flowing={flowing}
+      onTime={setTime}
+      onSunsetLook={setSunsetLook}
+      onSeason={setSeason}
+      onWeather={setWeather}
+      onRenderStyle={setRenderStyle}
+      onFlowToggle={toggleFlow}
     />
   {/if}
-  <EnvironmentDial
-    time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
-    renderStyle={ui.renderStyle} onRenderStyle={setRenderStyle}
-    compact={device.landscapePhone || (sheetLayout && sceneVillage && !villageAerial)}
-    flowing={flowing}
-    onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
-    onFlowToggle={toggleFlow}
-  />
+  <!-- Environment lives in the make panel for village CAD density. Solo scenes
+       keep the floating dial (no make panel). -->
+  {#if !sceneVillage}
+    <EnvironmentDial
+      time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
+      renderStyle={ui.renderStyle} onRenderStyle={setRenderStyle}
+      compact={false}
+      flowing={flowing}
+      onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
+      onFlowToggle={toggleFlow}
+    />
+  {/if}
   <!-- Village scenes own photo/share/export inside the make panel so a collapsed
        peek sheet never floats secondary tools over the frame. Solo-house keeps
        those actions on this dock (no make panel). -->

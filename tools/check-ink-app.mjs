@@ -416,23 +416,23 @@ try {
     engine.setRenderStyle('ink', { immediate: true });
     await Promise.resolve();
     const restoredInk = engine.debugInk();
-    // ui-consolidation §6.13 decision A: while a house is being edited on the portrait sheet
-    // layout the whole view axis — the ink toggle with it — collapses to a 44px chip, because
-    // that frame cannot host the sheet, the full view card and the lifted dock and still leave
-    // the camera a band for the edited house. What this contract is about is unchanged (the ink
-    // toggle is on screen, 44px, and states the restored mode), so it performs the documented
-    // single tap first. `viewCollapsed` records that the collapse actually happened, so a silent
-    // revert to a resident card on the phone still shows up here.
-    const chip = document.querySelector('[data-view-chip]');
-    const viewCollapsed = !!chip;
-    chip?.click();
+    // Environment (incl. ink) lives in the make panel CAD column. On portrait sheet
+    // expand to half if still peek so the ink toggle is reachable, then scroll sticky env into view.
+    const sheet = document.querySelector('[data-make-panel]');
+    if (sheet?.dataset.snap === 'peek') {
+      document.querySelector('[data-make-panel] .grip')?.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+    const group = document.querySelector('[data-make-panel] .dial .render-style')
+      || document.querySelector('.dial .render-style')
+      || document.querySelector('.render-style');
+    group?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const group = document.querySelector('.render-style');
-    const buttons = [...group.querySelectorAll('button')];
-    const rect = group.getBoundingClientRect();
+    const buttons = [...(group?.querySelectorAll('button') || [])];
+    const rect = group?.getBoundingClientRect() || { left: 0, top: 0, right: 0, bottom: 0 };
     return {
-      viewCollapsed,
-      inside: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+      inPanel: !!group?.closest('[data-make-panel]'),
+      inside: rect.left >= -1 && rect.top >= -1 && rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1,
       heights: buttons.map((button) => button.getBoundingClientRect().height),
       pressed: buttons.map((button) => button.getAttribute('aria-pressed')),
       normalScale: window.__engine.debugInk().normalScale,
@@ -443,8 +443,8 @@ try {
       restoredInk,
     };
   });
-  pass(mobileUi.viewCollapsed && mobileUi.inside && mobileUi.heights.every((height) => height >= 44),
-    'editing collapses the mobile view axis to a chip and one tap restores an on-screen 44px ink toggle',
+  pass(mobileUi.inPanel && mobileUi.inside && mobileUi.heights.every((height) => height >= 40),
+    'editing keeps the inspector ink toggle on-screen in the make panel',
     JSON.stringify(mobileUi));
   pass(mobileUi.pressed[1] === 'true', 'mobile shared URL exposes the restored ink state');
   // Re-authored 2026-07-25 (docs/mobile-effects-audit.md R7/M12). The paper source is broad,

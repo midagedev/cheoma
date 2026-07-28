@@ -1,8 +1,7 @@
 <script>
   // Viewport dock — audio / cinematic / glossary (and solo-house rebuild + share).
-  // Village scenes put photo/share/export inside the make panel so a collapsed
-  // peek sheet never floats secondary tools over the frame. Selectors
-  // (.actions, [data-action], .seal) stay stable for gates that still hit the dock.
+  // Village scenes put photo/share/export inside the make panel. Selectors
+  // (.actions, [data-action], .seal) stay stable for gates.
   import { t } from '../lib/i18n.svelte.js';
   let {
     onReroll = null, onPostcard = null, onShare = null, onExport = null, onToggleAudio = null,
@@ -29,106 +28,77 @@
   {#if onDrone || onWalk}
     <div class="watchgroup">
       {#if onDrone}
-        <sp-action-button
-          class="seal round"
-          quiet
-          disabled={busy || undefined}
-          title={t('act_drone_tip')}
-          aria-label={t('act_drone_tip')}
-          onclick={onDrone}
-        >▷</sp-action-button>
+        <button type="button" class="seal round" disabled={busy} title={t('act_drone_tip')} aria-label={t('act_drone_tip')} onclick={onDrone}>▷</button>
       {/if}
       {#if onWalk}
-        <sp-action-button
-          class="seal round"
-          quiet
-          disabled={busy || undefined}
-          title={t('act_walk_tip')}
-          aria-label={t('act_walk_tip')}
-          onclick={onWalk}
-        >步</sp-action-button>
+        <button type="button" class="seal round" disabled={busy} title={t('act_walk_tip')} aria-label={t('act_walk_tip')} onclick={onWalk}>步</button>
       {/if}
     </div>
   {/if}
   {#if onReroll}
-    <sp-action-button
-      class="seal primary"
-      selected
-      disabled={busy || undefined}
-      title={t('act_rebuild_tip')}
-      onclick={onReroll}
-    >{t('act_rebuild')}</sp-action-button>
+    <button type="button" class="seal primary" disabled={busy} title={t('act_rebuild_tip')} onclick={onReroll}>{t('act_rebuild')}</button>
   {/if}
   {#if onPostcard}
-    <sp-action-button
-      class="seal"
-      quiet
-      data-action="postcard"
-      title={t('act_postcard_tip')}
-      onclick={onPostcard}
-    >{t('act_postcard')}</sp-action-button>
+    <button type="button" class="seal" data-action="postcard" title={t('act_postcard_tip')} onclick={onPostcard}>{t('act_postcard')}</button>
   {/if}
   {#if onShare}
-    <sp-action-button
-      class="seal"
-      quiet
-      data-action="share"
-      title={t('act_share_tip')}
-      onclick={onShare}
-    >{t('act_share')}</sp-action-button>
+    <button type="button" class="seal" data-action="share" title={t('act_share_tip')} onclick={onShare}>{t('act_share')}</button>
   {/if}
   {#if onExport}
-    <sp-action-button
-      class="seal"
-      quiet
-      data-action="export"
-      disabled={exporting || busy || undefined}
-      title={t('glb_house_tip')}
-      onclick={onExport}
-    >{exporting ? t('glb_exporting') : t('act_glb')}</sp-action-button>
+    <button type="button" class="seal" data-action="export" disabled={exporting || busy} title={t('glb_house_tip')} onclick={onExport}>
+      {exporting ? t('glb_exporting') : t('act_glb')}
+    </button>
   {/if}
   {#if onToggleGlossary}
-    <sp-action-button
+    <button
+      type="button"
       class="seal round"
-      quiet
-      selected={glossaryOn || undefined}
+      class:active={glossaryOn}
       data-action="glossary"
       title={glossaryOn ? t('act_glossary_on_tip') : t('act_glossary_off_tip')}
       aria-label={glossaryOn ? t('act_glossary_on_tip') : t('act_glossary_off_tip')}
       aria-pressed={glossaryOn}
-      disabled={busy || undefined}
+      disabled={busy}
       onclick={onToggleGlossary}
-    >名</sp-action-button>
+    >名</button>
   {/if}
   {#if onToggleAudio}
-    <sp-action-button
+    <button
+      type="button"
       class="seal round"
-      quiet
-      selected={audioOn || undefined}
+      class:active={audioOn}
       title={audioOn ? t('act_sound_on_tip') : t('act_sound_off_tip')}
       aria-pressed={audioOn}
       onclick={onToggleAudio}
-    >♪</sp-action-button>
+    >♪</button>
   {/if}
 </div>
 
 <style>
-  /* Geometry + glass rail only — buttons are Spectrum action-buttons */
   .actions {
     position: fixed;
-    right: calc(var(--inspector-w, 0px) + clamp(12px, 1.8vw, 24px));
+    /* Hug content on the right of the free stage (do not stretch full width —
+       a full-width dock would intercept seal / canvas hits). */
+    right: calc(var(--inspector-w, 0px) + max(10px, env(safe-area-inset-right, 0px)));
     bottom: clamp(14px, 2.6vh, 28px);
+    left: auto;
     z-index: 34;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
-    max-width: calc(100vw - var(--inspector-w, 0px) - 2 * clamp(12px, 1.8vw, 24px));
     gap: 2px;
     padding: 4px;
     border-radius: 10px;
     background-color: var(--glass-strong);
-    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1), bottom 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+    box-sizing: border-box;
+    max-width: min(
+      100vw - 20px - var(--inspector-w, 0px),
+      calc(100vw - 20px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - var(--inspector-w, 0px))
+    );
+    /* Right only — bottom jumps with sheet detents; continuous bottom
+       transitions make Playwright "stable" clicks time out. */
+    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .watchgroup {
     display: flex;
@@ -138,26 +108,48 @@
     margin-right: 2px;
     border-right: 1px solid var(--glass-border);
   }
-  .actions :global(sp-action-button.seal) {
+  .seal {
+    -webkit-appearance: none;
+    appearance: none;
     min-width: 44px;
     min-height: 44px;
+    height: 44px;
+    padding: 0 10px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--glass-text);
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
   }
-  .actions :global(sp-action-button.seal.primary) {
+  .seal.round { width: 44px; min-width: 44px; padding: 0; font-size: 15px; }
+  .seal.primary {
     min-width: 56px;
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
   }
+  .seal.active {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    color: var(--accent);
+  }
+  .seal:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .seal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .seal:disabled { opacity: 0.42; cursor: default; }
 
   @media (pointer: coarse) {
     .actions {
-      right: calc(var(--inspector-w, 0px) + max(10px, env(safe-area-inset-right)));
       bottom: max(14px, calc(env(safe-area-inset-bottom) + 10px));
       z-index: 47;
     }
   }
   @media (max-width: 768px) and (orientation: portrait) {
-    .actions {
-      right: max(10px, env(safe-area-inset-right));
-      max-width: calc(100vw - 20px);
-    }
     .actions.raised { bottom: max(96px, calc(env(safe-area-inset-bottom) + 90px)); }
     .actions.lifted,
     :global(html:has([data-make-panel][data-snap='half'])) .actions {
@@ -165,10 +157,9 @@
       flex-wrap: nowrap;
       gap: 2px;
       padding: 3px;
-      max-width: calc(100vw - 20px);
     }
   }
   @media (max-width: 430px) {
-    .actions { gap: 1px; max-width: calc(100vw - 16px); padding: 3px; }
+    .actions { gap: 1px; padding: 3px; }
   }
 </style>
