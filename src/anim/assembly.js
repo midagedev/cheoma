@@ -488,20 +488,33 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
         const uu = clamp01((t - u0.start) / g.itemDur);
         applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false);
         u0.items[0].child.visible = true;
-        // The roof rises from below the plate/창방. Under-eave faces (gaepan +
-        // rafters) that occupy the column-top band z-fight ("기둥 위에 반자").
-        // Hold that stack until settle is mostly damped (SHELL_REVEAL_UU).
-        // Top-side tiles/finials keep eave→ridge course flow for silhouette —
-        // a global pre-IMPACT hide collapsed that flow onto one frame.
+        // The roof rises from below the plate/창방. ANY roof child that appears
+        // mid-rise scrapes the column band or coplanar shell halves and reads as
+        // ceiling sparkle (product frames at t≈0.90 showed body 수키와/마루 alone
+        // as white z-fight dots while shell was still gated). Hold the whole roof
+        // dark until settle is mostly damped, then re-base eave→ridge course flow
+        // in the remaining post-reveal window of the rigid roof motion (uu space).
         const shellLanded = uu >= SHELL_REVEAL_UU;
+        const postSpan = Math.max(1e-9, 1 - SHELL_REVEAL_UU);
+        const postUu = shellLanded ? (uu - SHELL_REVEAL_UU) / postSpan : 0;
         // Child reveal only (no per-child Y/scale).
-        const intra = g.hasLag ? g.visItemDur * INTRA_SHARE : 0;
-        const body = Math.max(1e-9, g.visItemDur - intra);
+        const postIntra = g.hasLag ? INTRA_SHARE : 0;
+        const postBody = Math.max(1e-9, 1 - postIntra);
         for (const u of g.visUnits) {
           for (const it of u.items) {
-            const uuV = clamp01((t - u.start - it.lag * intra) / body);
-            let show = uuV > 0;
-            if (show && isUnderEaveCritical(it.child) && !shellLanded) show = false;
+            let show = false;
+            if (uu >= 1) {
+              show = true; // rest pose — every member on
+            } else if (shellLanded) {
+              if (isUnderEaveCritical(it.child)) {
+                // Shell + rafters land together (lag forced 0 above).
+                show = true;
+              } else {
+                // Ornaments cascade eave→ridge across the post-reveal window.
+                const local = (postUu - it.lag * postIntra) / postBody;
+                show = local > 0;
+              }
+            }
             it.child.visible = show ? it.vis0 : false;
             it.child.position.y = it.y0;
             it.child.scale.set(it.sx0, it.sy0, it.sz0);

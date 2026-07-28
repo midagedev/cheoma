@@ -1204,20 +1204,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     // 감상 자동 회전 게이트 + ease-in 램프. 히어로·조립/확장/머지·시네마틱·트윈·선택 중엔 정지,
     // 유휴(ORBIT_IDLE_MS) 지나면 부드럽게 재개. 조작(markActivity) 시 즉시 정지.
-    // 단, 마을 모드에서 조립 중(village.heroAsm)일 때는 자동 선회 연출을 허용합니다.
-    const revealInterrupted = revealCamera?.getState().reason === 'input';
-    const revealAutoOrbit = !reducedCameraMotion && !revealInterrupted;
+    //
+    // 조립 중 고속 auto-orbit 는 제거했다(2026-07-28). architectural reveal 이 카메라를 소유하고
+    // 끝나면 HERO_REVEAL_TAIL 동안 **고정 프레임**으로 완성 비트를 보게 되어 있다. 리빌이 끝나는
+    // 순간 ORBIT_SPEED×5.2 선회가 갑자기 붙으면 엔드포인트에서 "덜컥" 스핀으로 읽힌다.
+    // 조립(heroAsm) 전 구간은 orbitBusy — 리빌 경로만 카메라를 움직인다.
     const orbitBusy = (heroActive && !village.heroAsm) || assembly || groupAnims.length > 0 ||
-      wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealCamera?.isActive() || state.selected || demo.active ||
-      (village.active && village.selected && !village.heroAsm) || (village.heroAsm && !revealAutoOrbit) || villageWaveBusy();
+      wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealCamera?.isActive()
+      || state.selected || demo.active
+      || (village.active && village.selected) || !!village.heroAsm || villageWaveBusy();
 
-    let curRotateSpeed = ORBIT_SPEED;
-    if (village.active && village.heroAsm && revealAutoOrbit) {
-      // 조립 중 회전 (회전각 체감을 높이기 위해 약간 더 빠르게 선회). 폰도 돈다 — 종전의 perf?0 은
-      // M14 와 합쳐 폰의 히어로 랜딩을 사실상 무동작으로 만들었고, 선회의 한계 비용은 0이다
-      // (조립 구간은 지오메트리가 이미 움직여 그림자가 hot).
-      curRotateSpeed = ORBIT_SPEED * 5.2;
-    }
+    const curRotateSpeed = ORBIT_SPEED;
 
     if (!orbitBusy && performance.now() - lastActivity > ORBIT_IDLE_MS) {
       orbitGain = Math.min(1, orbitGain + dt / ORBIT_RAMP_SEC);
@@ -1225,8 +1222,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       orbitGain = 0; // 조작·전환 시 즉시 일시정지
     }
     const g = orbitGain * orbitGain * (3 - 2 * orbitGain); // smoothstep ease-in
-    // 조립 중에는 유휴 타이머(orbitGain)에 구애받지 않고 무조건 웅장한 선회를 관철함
-    controls.autoRotateSpeed = village.heroAsm && revealAutoOrbit ? curRotateSpeed : (curRotateSpeed * g);
+    controls.autoRotateSpeed = curRotateSpeed * g;
     // dt 를 넘겨 autoRotate 를 프레임레이트 독립으로 — 무인자 update() 는 60fps 를 가정한
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.

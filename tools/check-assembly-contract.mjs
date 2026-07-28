@@ -395,14 +395,19 @@ assert.equal(roofPlan.courseFlow, true,
       + '(column-band z-fight)');
     assert.ok(firstRafterT >= shellFloor,
       `rafters appeared at t=${firstRafterT.toFixed(3)} — still scraping plate/창방`);
-    // Mid-rise and early-settle samples must keep the under-eave dark.
-    // t=0.90 is still pre-reveal (uu≈0.615); top-side ornaments may already show.
+    // Mid-rise and early-settle samples keep the whole roof dark (shell + rafters
+    // + body ornaments). Body-only reveal mid-rise produced white tile z-fight dots.
+    const bodyTiles = roof.children.filter((c) => !c.userData?.asmGroup
+      && c.name !== 'roof-tile-outer' && c.name !== 'roof-gaepan' && c.name !== 'roof-eave-band');
     for (const t of [0.78, 0.84, 0.90]) {
       anim.seek(t);
       assert.equal(outer.visible, false, `shell visible too early (t=${t})`);
       assert.equal(gaepan.visible, false, `gaepan visible too early (t=${t})`);
       for (const r of rafters) {
         assert.equal(r.visible, false, `rafter visible too early (t=${t})`);
+      }
+      for (const b of bodyTiles) {
+        assert.equal(b.visible, false, `body roof visible too early (t=${t}) — mid-rise z-fight`);
       }
     }
     // Near settle the under-eave stack is on and locked.
