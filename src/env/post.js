@@ -40,7 +40,7 @@ import {
   resolvePostProfile,
 } from './atmosphere-profiles.js';
 import { resolveMoonBloomGate } from './moon-optics.js';
-import { createFresnelRim } from './rim.js';
+import { createFresnelRim, rimDistanceGateForFov } from './rim.js';
 import { createDofController, DEFAULT_DOF_APERTURE } from './dof.js';
 import { StableBokehPass } from './stable-bokeh-pass.js';
 import {
@@ -752,9 +752,15 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
     const passBacklit = THREE.MathUtils.smoothstep(-_v.z, 0.06, 0.5);
     if (useFresnel) {
       // 재질 프레넬: 뷰공간 태양 방향 + 시간대 기본 강도만 공유 uniform 에.
-      //   FRES_STR_MUL: 지수 상향(에지 집중)에 따른 총 에너지 감소를 보정하는 배율(처마 킥 인상 유지).
+      //   FRES_STR_MUL: 지수 상향(에지 집중)에 따른 총 에너지 감소를 보정하는 배율.
+      //   1.85 — hero settle(~7°/170 m) 처마 실선이 에너지 캡에 더 잘 붙도록 인상. 피크는
+      //   RIM_BASE_ENERGY_CAP×groupMul 이 여전히 상한을 잡는다(check:rim sunset peak 계약).
       fresnelRim.setSunViewDir(_v);
-      fresnelRim.setStrength(enabled ? rimBase * 1.6 : 0);
+      fresnelRim.setStrength(enabled ? rimBase * 1.85 : 0);
+      // Live FOV distance gate: hero 7° dolly (~170 m) must keep the subject inside the
+      // full-strength band. Parcel-only scaling left settle at ~33% rim (dead eave kick).
+      const gate = rimDistanceGateForFov(camera.fov);
+      fresnelRim.setNearFar(gate.near, gate.far);
       // Neighbour rim under DoF → bokeh sparkle. Axial depth = BokehPass focus; amount 0 inert.
       fresnelRim.setDofGate({
         focusDepth: dof.focus,
@@ -907,6 +913,8 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       get groupMultipliers() { return fresnelRim ? fresnelRim.groupMultipliers : null; },
       get strength() { return useFresnel ? fresnelRim.uniforms.uRimStrength.value : (rimPass ? rimPass.uniforms.rimStrength.value : 0); },
       get scale() { return useFresnel ? fresnelRim.uniforms.uRimScale.value : (rimPass && rimPass.enabled ? 1 : 0); },
+      get near() { return useFresnel ? fresnelRim.uniforms.uRimNear.value : null; },
+      get far() { return useFresnel ? fresnelRim.uniforms.uRimFar.value : null; },
       setEnabled: setRimEnabled,
       rescan() { if (fresnelRim) fresnelRim.apply(scene); },
       drawCalls() { return renderer.info.render.calls; },

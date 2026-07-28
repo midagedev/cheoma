@@ -93,6 +93,12 @@ export function createPostQualityRuntime({
   // changes reallocate once, not every settling frame.
   let appliedFillScale = 1;
   let appliedMotionBudget = null;
+  // After a long hero/cinematic path, keep the flagship frame at full quality for a
+  // short hold even if a residual assemble-orbit still moves a few px/s — otherwise
+  // forceStable is immediately undone and the settle rim/bloom never peak.
+  // Wall-clock end time (not sim-dt): pause/unpause and frame-clock spike clamps must
+  // not burn the hold in one long frame.
+  let holdStableUntilMs = 0;
 
   const applyFillScale = () => {
     if (typeof setFillScale !== 'function') return;
@@ -117,6 +123,21 @@ export function createPostQualityRuntime({
         viewportHeight,
         referenceDepth,
       );
+      const now = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (holdStableUntilMs > 0 && now < holdStableUntilMs) {
+        // Keep the tracker warm so ending the hold does not fake a huge first step,
+        // but do not let residual orbit re-enter the cheap motion budget.
+        if (quality.mode !== 'stable' || quality.quality < 1 || quality.motionBudget) {
+          quality.reset();
+          appliedFillScale = NaN;
+          appliedMotionBudget = null;
+        }
+        bokehPass.setBokehQuality(1);
+        applyFillScale();
+        applyMotionBudget();
+        return quality;
+      }
+      if (holdStableUntilMs > 0 && now >= holdStableUntilMs) holdStableUntilMs = 0;
       quality.update(dt, motionPx);
       bokehPass.setBokehQuality(quality.quality);
       applyFillScale();
@@ -127,6 +148,7 @@ export function createPostQualityRuntime({
       viewportWidth = Math.max(1, nextWidth);
       viewportHeight = Math.max(1, nextHeight);
       motion.reset();
+      holdStableUntilMs = 0;
       // A layout/DPR change rebuilds every composer target. Treat it as a new
       // settled frame so adaptive fill cannot leave the chain at ×0.78 after a
       // cinematic path or resize (check-app-smoke DPR contract, product snaps).
@@ -140,10 +162,16 @@ export function createPostQualityRuntime({
      * Force a settled flagship frame after a long motion path (hero assembly
      * orbit, architectural reveal). Without this, adaptive fill 0.65 + MSAA 0
      * can linger into the first quiet frames and the settled eave/tile read dies.
+     * @param {number} [holdSeconds] keep full quality for this wall-clock duration
+     *   even if residual assemble-orbit still moves a few px/s (hero settle rim beat).
      */
-    forceStable() {
+    forceStable(holdSeconds = 0) {
       motion.reset();
       quality.reset();
+      const hold = Math.max(0, Number(holdSeconds) || 0);
+      holdStableUntilMs = hold > 0 && typeof performance !== 'undefined'
+        ? performance.now() + hold * 1000
+        : 0;
       appliedFillScale = NaN;
       appliedMotionBudget = null;
       applyFillScale();
@@ -151,6 +179,8 @@ export function createPostQualityRuntime({
       return quality;
     },
     debug() {
+      const now = typeof performance !== 'undefined' ? performance.now() : 0;
+      const holdLeft = holdStableUntilMs > now ? (holdStableUntilMs - now) / 1000 : 0;
       return {
         postQuality: quality.quality,
         postQualityMode: quality.mode,
@@ -158,6 +188,7 @@ export function createPostQualityRuntime({
         postMotionBudget: quality.motionBudget,
         postMotionPx: motion.motionPx,
         postMotionSpeed: quality.speed,
+        postHoldStableSec: holdLeft,
         activeBokehTaps: bokehPass.enabled ? bokehPass.bokehSampleCount : 0,
       };
     },

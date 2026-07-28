@@ -2669,8 +2669,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       orbitGain = 0;
       // 조립 10s 동안 카메라 선회가 motionBudget(MSAA 0 · fill 0.65)을 붙잡고 있어,
       // 정착 직후에도 적응 품질이 풀리지 않으면 림·기와 에지가 한꺼번에 죽어 보인다.
-      // 플래그십 근접 프레임으로 즉시 복원한다.
-      postRuntime.forceStableQuality?.();
+      // 플래그십 근접 프레임으로 즉시 복원 + ~1.8s hold — 잔여 조립 선회가 다시 moving 으로
+      // 끌어내려 정착 비트의 림/블룸을 죽이지 못하게 한다(히어로 안무 끝 기준 룩).
+      postRuntime.forceStableQuality?.(1.8);
       setPostFocus(true);
       const settledRoot = village.handle.heroDetailGroup?.() || g;
       if (settledRoot) {
@@ -2693,7 +2694,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 정착 한 프레임 뒤 품질·림을 한 번 더 확정(패널 chrome / view-shift 샘플 이후).
       requestAnimationFrame?.(() => {
         if (!village.active || village.selected !== heroId) return;
-        postRuntime.forceStableQuality?.();
+        postRuntime.forceStableQuality?.(1.6);
         setPostFocus(true);
         const root = village.handle?.heroDetailGroup?.();
         if (root) post.rimRescan?.(root);

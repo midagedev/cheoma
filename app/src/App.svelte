@@ -1471,9 +1471,9 @@
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
 <div class="veil" class:on={veil} aria-hidden="true"></div>
 
-<!-- Chrome: top-left path · top-right view card · right inspector dock · viewport share dock.
-     All live in .chroma so the 3s appreciation fade leaves only the scene. -->
+<!-- Chrome: Spectrum theme root (docs/design-system.md). Canvas stays outside theme. -->
 <div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
+  <sp-theme class="cheoma-theme" system="spectrum-two" color="dark" scale="medium" dir="ltr">
   {#if sceneVillage && !heroLanding && !cine.active}
     <Breadcrumb
       houseLabel={crumbLabel}
@@ -1484,8 +1484,7 @@
     />
   {/if}
   {#if sceneVillage}
-    <!-- 만들기 패널(#92→#158): 마을(부감)·집(근접) 컨텍스트가 명시적 2탭 + 모프로 전환된다.
-         히어로 랜딩·시네마틱 중엔 숨김(연출). 탭은 카메라 전환을 실행한다. -->
+    <!-- 만들기 패널: Spectrum inspector (Explore / Focus). -->
     <ContextPanel
       open={!heroLanding && !cine.active}
       morph={focusMorph}
@@ -1551,6 +1550,7 @@
 
   <!-- 낙관은 탭 순서 마지막(브랜드·언어·참고자료) — 3축 크롬 뒤에 읽힌다. -->
   {#if !hideSeal}<SealLabel seed={ui.seed} onInfo={openReferences} />{/if}
+  </sp-theme>
 </div>
 
 {#if sceneVillage}

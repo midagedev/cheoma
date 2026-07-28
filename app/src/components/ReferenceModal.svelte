@@ -276,8 +276,8 @@
 <style>
   .scrim {
     position: fixed; inset: 0; z-index: 120;
-    background: rgba(24, 18, 12, 0.42);
-    backdrop-filter: blur(2px);
+    background: rgba(12, 14, 18, 0.55);
+    backdrop-filter: blur(3px);
     animation: fade 0.28s ease both;
   }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }

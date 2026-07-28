@@ -277,9 +277,9 @@ function facingProbe() {
       albedo: 0xffffff,
     }),
   };
-  // The real sunset maximum is 2.05 (profile) × 1.6 (runtime compensation).  At that
+  // The real sunset maximum is 2.05 (profile) × 1.85 (runtime FRES_STR_MUL).  At that
   // strength the tangent stays warm and bounded rather than clipping to white before bloom.
-  const sunsetPeak = renderSample(86, 156, { strength: 2.05 * 1.6, color: 0xffc070 });
+  const sunsetPeak = renderSample(86, 156, { strength: 2.05 * 1.85, color: 0xffc070 });
   renderer.setRenderTarget(null);
   return {
     samples: result,

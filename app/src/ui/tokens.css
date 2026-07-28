@@ -1,0 +1,166 @@
+/* cheoma shell + Spectrum bridge.
+   Visual language comes from <sp-theme>; this file owns layout contracts,
+   glass-over-WebGL chips, and aliases so existing component CSS can speak Spectrum. */
+
+:root {
+  /* Published by the make-panel shell when the right dock is open */
+  --inspector-w: 0px;
+  --inspector-max: 320px;
+
+  /* Glass over WebGL (path / view tray / docks) */
+  --cheoma-glass: rgba(14, 16, 20, 0.62);
+  --cheoma-glass-strong: rgba(14, 16, 20, 0.78);
+  --cheoma-glass-border: rgba(255, 255, 255, 0.12);
+  --cheoma-glass-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
+  --cheoma-seal: #b1362b;
+
+  /* Inspector surface (opaque tool panel — Spectrum gray scale fallbacks) */
+  --cheoma-inspector: var(--spectrum-gray-100, #1d1d1d);
+  --cheoma-inspector-2: var(--spectrum-gray-75, #262626);
+  --cheoma-inspector-elevated: var(--spectrum-gray-200, #2c2c2c);
+  --cheoma-inspector-border: var(--spectrum-gray-300, #393939);
+  --cheoma-inspector-line: rgba(255, 255, 255, 0.08);
+  --cheoma-inspector-text: var(--spectrum-neutral-content-color-default, #e8e8e8);
+  --cheoma-inspector-muted: var(--spectrum-neutral-content-color-secondary-default, #b3b3b3);
+  --cheoma-inspector-faint: var(--spectrum-neutral-content-color-tertiary-default, #909090);
+  --cheoma-inspector-hover: rgba(255, 255, 255, 0.045);
+  --cheoma-inspector-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), -12px 0 40px rgba(0, 0, 0, 0.28);
+
+  /* Tool accent — Spectrum blue; seal red stays brand-only */
+  --cheoma-accent: var(--spectrum-accent-color-900, #5aa8e0);
+  --cheoma-accent-strong: var(--spectrum-accent-color-1000, #3d87c4);
+  --cheoma-accent-soft: rgba(90, 168, 224, 0.16);
+  --cheoma-live: #6fcf97;
+  --cheoma-settle: #d4b06a;
+  --cheoma-wave: #e07a6a;
+
+  /* Bridge aliases used by existing component styles */
+  --panel: var(--cheoma-inspector);
+  --panel-2: var(--cheoma-inspector-2);
+  --panel-elevated: var(--cheoma-inspector-elevated);
+  --panel-hover: var(--cheoma-inspector-hover);
+  --panel-border: var(--cheoma-inspector-border);
+  --panel-line: var(--cheoma-inspector-line);
+  --panel-text: var(--cheoma-inspector-text);
+  --panel-muted: var(--cheoma-inspector-muted);
+  --panel-faint: var(--cheoma-inspector-faint);
+  --panel-shadow: var(--cheoma-inspector-shadow);
+
+  --glass: var(--cheoma-glass);
+  --glass-strong: var(--cheoma-glass-strong);
+  --glass-border: var(--cheoma-glass-border);
+  --glass-text: rgba(245, 247, 250, 0.94);
+  --glass-muted: rgba(245, 247, 250, 0.62);
+
+  --accent: var(--cheoma-accent);
+  --accent-strong: var(--cheoma-accent-strong);
+  --accent-soft: var(--cheoma-accent-soft);
+  --accent-glow: rgba(90, 168, 224, 0.35);
+  --live: var(--cheoma-live);
+  --settle: var(--cheoma-settle);
+  --wave: var(--cheoma-wave);
+  --seal: var(--cheoma-seal);
+  --seal-deep: #8a281f;
+
+  /* Brand paper (Hero / References only) */
+  --paper: #f4efe4;
+  --paper-2: #efe6d6;
+  --paper-3: #e6dccb;
+  --paper-edge: #d8ccb4;
+  --ink: #2c2620;
+  --ink-soft: #5a5148;
+  --ink-faint: #9a8f80;
+  --ink-line: rgba(44, 38, 32, 0.5);
+  --ink-hair: rgba(44, 38, 32, 0.18);
+
+  --ui: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans KR", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
+  --serif: "AppleMyungjo", "Apple SD Gothic Neo", "Malgun Gothic", Batang, Georgia, serif;
+  --brush: var(--serif);
+
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  --hanji: var(--grain);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0c0e12;
+  font-family: var(--ui);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app { width: 100%; height: 100%; }
+
+/* Spectrum theme root fills the viewport so chrome inherits tokens */
+sp-theme.cheoma-theme {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  color: var(--cheoma-inspector-text);
+  background: transparent;
+  --spectrum-font-family: var(--ui);
+}
+
+canvas { display: block; touch-action: none; }
+
+button {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: var(--ui);
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Opaque inspector dock / sheet — Spectrum gray, not glass */
+.cheoma-inspector,
+.inspector-surface {
+  background-color: var(--cheoma-inspector);
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 48%),
+    var(--grain);
+  border-color: var(--cheoma-inspector-border);
+  color: var(--cheoma-inspector-text);
+  box-shadow: var(--cheoma-inspector-shadow);
+}
+
+/* Glass chip for floating chrome over the 3D scene */
+.cheoma-glass,
+.glass-surface {
+  background-color: var(--cheoma-glass);
+  background-image: var(--grain);
+  border: 1px solid var(--cheoma-glass-border);
+  color: var(--glass-text);
+  box-shadow: var(--cheoma-glass-shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Brand paper — ReferenceModal / hero only */
+.hanji-surface {
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, transparent 42%),
+    var(--grain);
+  border: 1px solid var(--paper-edge);
+  box-shadow:
+    0 0 0 1px rgba(44, 38, 32, 0.06),
+    0 18px 48px rgba(30, 22, 14, 0.28);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+}

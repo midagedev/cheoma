@@ -1,10 +1,7 @@
 <script>
-  // Inspector panel — professional CAD properties column (right dock / mobile sheet).
-  //   ① Two tabs [Explore / Focus] sync camera (tab = focus-in/out). Morph crossfade kept.
-  //   ② Group accordion (one body open) — every axis remains listed; only one expands.
-  //   ③ Cost badges (live / settle / wave) state rebuild cost honestly.
-  //   ④ Secondary share tools (photo / share / export) live under the make tabs
-  //      so a collapsed peek sheet never floats them over the scene.
+  // Inspector — Spectrum tool column (right dock / mobile sheet).
+  //   docs/design-system.md: Explore/Focus tabs, PropertyField rows, cost accordion,
+  //   sticky rebuild. Morph crossfade + gate hooks preserved.
   import { tick } from 'svelte';
   import { t } from '../lib/i18n.svelte.js';
   import {
@@ -15,6 +12,7 @@
   } from '../lib/building-navigation.js';
   import { schemaFor, villageSchema } from '../lib/edit-schema.js';
   import BottomSheet from './BottomSheet.svelte';
+  import PropertyField from '../ui/PropertyField.svelte';
 
   let {
     open = false, morph = 0, detent = null,
@@ -269,48 +267,41 @@
 </script>
 
 <BottomSheet {open} gap={7} {detent} ariaLabel="make panel" {header} {footer}>
-  <!-- 건물 선택기는 sticky 헤더가 아니라 스크롤 본문 최상단에 둔다(#158 P8·P1): 헤더에서 44~90px 를
-       상시 점유해 가로 폰의 스크롤 창을 절반으로 깎던 원인이었다. 모프 owner 밖(컨텍스트 공통)에 남는다. -->
   {#if navigationGroups.length}
     <div class="buildingnav" data-building-navigation>
-      <label class="navlabel" for="building-navigation">{t('nav_building')}</label>
+      <sp-field-label class="navlabel" for="building-navigation" size="s">{t('nav_building')}</sp-field-label>
       <div class="navcontrols">
-        <select
+        <sp-picker
           id="building-navigation"
           value={navigationDraftId}
-          aria-describedby="building-navigation-status"
-          onchange={(event) => (navigationDraftId = event.currentTarget.value)}
+          label={t('nav_building')}
+          quiet
+          size="m"
+          onchange={(e) => { navigationDraftId = e.currentTarget.value; }}
         >
           {#each navigationGroups as group (group.id)}
-            <optgroup label={navigationGroupLabel(group)}>
+            <sp-menu-group label={navigationGroupLabel(group)}>
               {#each group.targets as target (target.id)}
-                <option value={target.id}>{navigationTargetLabel(target)}</option>
+                <sp-menu-item value={target.id}>{navigationTargetLabel(target)}</sp-menu-item>
               {/each}
-            </optgroup>
+            </sp-menu-group>
           {/each}
-        </select>
-        <button
+        </sp-picker>
+        <sp-button
           class="navaction"
-          type="button"
-          aria-disabled={navigationActionUnavailable}
-          aria-busy={navigationBusy || undefined}
+          variant={navigationActionUnavailable ? 'secondary' : 'accent'}
+          treatment={navigationActionUnavailable ? 'outline' : 'fill'}
+          size="m"
+          disabled={navigationActionUnavailable || undefined}
           aria-label={navigationActionAccessibleLabel}
           onclick={activateNavigationTarget}
-        >{navigationActionLabel}</button>
+        >{navigationActionLabel}</sp-button>
       </div>
-      <p
-        id="building-navigation-status"
-        class="navstatus"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >{navigationStatusText}</p>
+      <sp-help-text id="building-navigation-status" size="s">{navigationStatusText}</sp-help-text>
     </div>
   {/if}
 
-  <!-- 모프 스택: 마을·집 섹션이 같은 그리드 셀에 겹쳐 crossfade. -->
   <div bind:this={stackRoot} class="stack">
-    <!-- 마을 컨텍스트(부감) -->
     <div
       class="ctx village"
       style="opacity:{villageOpacity}; transform: translateY({-8 * morph}px);"
@@ -363,7 +354,6 @@
       {/if}
     </div>
 
-    <!-- 집 컨텍스트(근접) -->
     <div
       class="ctx house"
       style="opacity:{houseOpacity}; transform: translateY({12 * (1 - morph)}px);"
@@ -384,14 +374,19 @@
         {:else}
           <section class="pinned">
             <h4>{t('sec_type')}</h4>
-            <div class="tabs">
+            <sp-action-group class="typetabs" selects="single" compact>
               {#each TYPES as ty}
-                <button class="tab" class:on={(params.kind || spec?.kind) === ty.key} onclick={() => onType?.(ty.key)}>
+                <sp-action-button
+                  class="tab"
+                  value={ty.key}
+                  selected={(params.kind || spec?.kind) === ty.key || undefined}
+                  onclick={() => onType?.(ty.key)}
+                >
                   <span class="tl">{t(ty.l)}</span>
                   <span class="ts">{t(ty.s)}</span>
-                </button>
+                </sp-action-button>
               {/each}
-            </div>
+            </sp-action-group>
           </section>
         {/if}
 
@@ -409,9 +404,6 @@
   </div>
 </BottomSheet>
 
-<!-- Sticky header: context tabs + secondary share tools.
-     Tools stay outside the scroll body so reachability is independent of scroll
-     position; peek still hides the whole header (inert + clipped). -->
 {#snippet header()}
   <div class="makehead">
     <div class="axistabs" role="tablist" aria-label={t('axis_make')}>
@@ -443,47 +435,40 @@
     {#if hasShareTools}
       <div class="toolrow" role="group" aria-label={t('axis_share')}>
         {#if onPostcard}
-          <button
+          <sp-action-button
             class="tbtn"
-            type="button"
+            quiet
             data-action="postcard"
-            onclick={() => onPostcard?.()}
-            disabled={busy}
+            disabled={busy || undefined}
             title={t('act_postcard_tip')}
-          >
-            <span class="tface">{t('act_postcard')}</span>
-          </button>
+            onclick={() => onPostcard?.()}
+          >{t('act_postcard')}</sp-action-button>
         {/if}
         {#if onShare}
-          <button
+          <sp-action-button
             class="tbtn"
-            type="button"
+            quiet
             data-action="share"
-            onclick={() => onShare?.()}
-            disabled={busy}
+            disabled={busy || undefined}
             title={t('act_share_tip')}
-          >
-            <span class="tface">{t('act_share')}</span>
-          </button>
+            onclick={() => onShare?.()}
+          >{t('act_share')}</sp-action-button>
         {/if}
         {#if onExport}
-          <button
+          <sp-action-button
             class="tbtn"
-            type="button"
+            quiet
             data-action="export"
-            onclick={() => onExport?.()}
-            disabled={exporting || busy}
+            disabled={exporting || busy || undefined}
             title={exportTip}
-          >
-            <span class="tface">{exportLabel}</span>
-          </button>
+            onclick={() => onExport?.()}
+          >{exportLabel}</sp-action-button>
         {/if}
       </div>
     {/if}
   </div>
 {/snippet}
 
-<!-- Footer: regenerate only. Share tools sit under the header tabs. -->
 {#snippet footer()}
   <div bind:this={footerRoot} class="footstack">
     <div
@@ -494,11 +479,10 @@
       inert={houseActive}
       data-context-owner="village"
     >
-      <button class="rebuild" onclick={() => onReroll?.()} disabled={waving} title={t('vil_reroll_tip')}>
-        <span class="rk" aria-hidden="true">↻</span>{t('vil_reroll')}
-      </button>
+      <sp-button class="rebuild" variant="accent" treatment="fill" size="l" disabled={waving || undefined} onclick={() => onReroll?.()}>
+        {t('vil_reroll')}
+      </sp-button>
     </div>
-
     <div
       class="foot house"
       style="opacity:{houseOpacity}"
@@ -509,16 +493,15 @@
     >
       {#if spec}
         <div class="house-actions">
-          <button class="hbtn reroll wide" onclick={() => onRerollHouse?.()} disabled={houseBusy} title={t('vil_reroll_house_tip')}>
-            <span class="hk" aria-hidden="true">↻</span>{t('vil_reroll_house')}
-          </button>
+          <sp-button class="hbtn reroll wide" variant="accent" treatment="fill" size="l" disabled={houseBusy || undefined} onclick={() => onRerollHouse?.()}>
+            {t('vil_reroll_house')}
+          </sp-button>
         </div>
       {/if}
     </div>
   </div>
 {/snippet}
 
-<!-- 그룹 헤더(아코디언 + 커밋 대가 배지). 동시에 하나만 펼쳐진다. -->
 {#snippet groupHeader(sec, isOpen, toggle)}
   <button
     class="advtoggle group"
@@ -538,28 +521,25 @@
   <section class="vdetail" data-group-body={vsec.id}>
     {#each vsec.fields as f (f.key)}
       {#if f.ctrl === 'range'}
-        <label class="row">
-          <span class="rl">{t('s_' + f.key)}</span>
-          <input type="range" data-vkey={f.key} min={f.min} max={f.max} step={f.step}
-            value={vShow(f)}
-            aria-label={t('s_' + f.key)} aria-valuetext={vDisplay(f)}
-            onchange={(e) => vRange(f, parseFloat(e.currentTarget.value))} />
-          <span class="rv">{vDisplay(f)}</span>
-        </label>
+        <PropertyField
+          field={f}
+          label={t('s_' + f.key)}
+          value={vShow(f)}
+          display={vDisplay(f)}
+          dataAttr="data-vkey"
+          onCommit={(v) => vRange(f, v)}
+        />
       {:else if f.ctrl === 'toggle'}
-        <div class="row">
+        <div class="row" class:disabled={vDisabled(f)} data-vkey={f.key}>
           <span class="rl">{t('s_' + f.key)}{#if vDisabled(f) && f.tierHint}<span class="tierhint"> · {t(f.tierHint)}</span>{/if}</span>
-          {#if f.tri}
-            <button class="tgl" data-vkey={f.key} class:on={vTriOn(f)} disabled={vDisabled(f)}
-              onclick={() => vToggleTri(f)} role="switch" aria-checked={vTriOn(f)} aria-label={t('s_' + f.key)}>
-              <span class="knob" aria-hidden="true"></span>
-            </button>
-          {:else}
-            <button class="tgl" data-vkey={f.key} class:on={vPlainOn(f)} disabled={vDisabled(f)}
-              onclick={() => vTogglePlain(f)} role="switch" aria-checked={vPlainOn(f)} aria-label={t('s_' + f.key)}>
-              <span class="knob" aria-hidden="true"></span>
-            </button>
-          {/if}
+          <sp-switch
+            class="tgl"
+            emphasized
+            data-vkey={f.key}
+            checked={(f.tri ? vTriOn(f) : vPlainOn(f)) || undefined}
+            disabled={vDisabled(f) || undefined}
+            onchange={() => f.tri ? vToggleTri(f) : vTogglePlain(f)}
+          ></sp-switch>
           <span class="rv"></span>
         </div>
       {/if}
@@ -572,102 +552,91 @@
     {#if sec.noteKey}<p class="editnote">{t(sec.noteKey)}</p>{/if}
     {#each sec.fields as f (f.key)}
       {#if f.ctrl === 'range'}
-        <label class="row">
-          <span class="rl">{fieldLabel(f)}{#if f.showBounds}<small class="bounds">{displayValue(f, f.min)}–{displayValue(f, f.max)}</small>{/if}</span>
-          <input type="range" data-key={f.key} min={f.min} max={f.max} step={f.step}
-            value={showVal(f)}
-            aria-label={fieldLabel(f)} aria-valuetext={displayValue(f)}
-            oninput={(e) => range(f, parseFloat(e.currentTarget.value))}
-            onchange={(e) => rangeCommit(f, parseFloat(e.currentTarget.value))} />
-          <span class="rv">{displayValue(f)}</span>
-        </label>
+        <PropertyField
+          field={f}
+          label={fieldLabel(f)}
+          value={showVal(f)}
+          display={displayValue(f)}
+          bounds={f.showBounds ? `${displayValue(f, f.min)}–${displayValue(f, f.max)}` : ''}
+          onInput={(v) => range(f, v)}
+          onCommit={(v) => rangeCommit(f, v)}
+        />
       {:else if f.ctrl === 'stepper'}
-        <div class="row bays" data-key={f.key}>
-          <span class="rl">{fieldLabel(f)}{#if f.showBounds}<small class="bounds">{displayValue(f, f.min)}–{displayValue(f, f.max)}</small>{/if}</span>
-          <div class="stepper">
-            <button onclick={() => stepField(f, -1)} disabled={(showVal(f) | 0) <= f.min} aria-label={`${fieldLabel(f)} ${t('edit_less')}`}>−</button>
-            <span class="num" aria-live="polite">{displayValue(f)}</span>
-            <button onclick={() => stepField(f, 1)} disabled={(showVal(f) | 0) >= f.max} aria-label={`${fieldLabel(f)} ${t('edit_more')}`}>+</button>
-          </div>
-        </div>
+        <PropertyField
+          field={f}
+          label={fieldLabel(f)}
+          value={showVal(f)}
+          display={displayValue(f)}
+          bounds={f.showBounds ? `${displayValue(f, f.min)}–${displayValue(f, f.max)}` : ''}
+          onInput={(v) => { params[f.key] = v; onLive?.(f.key, v); }}
+          onCommit={(v) => {
+            params[f.key] = v;
+            onLive?.(f.key, v);
+            rangeCommit(f, v);
+          }}
+        />
       {:else if f.ctrl === 'segment'}
-        <div class="row seg">
-          <span class="rl">{t('s_' + f.key)}</span>
-          <div class="segs">
-            {#each f.options as o}
-              <button class="segbtn" class:on={(params[f.key] ?? f.def) === o} onclick={() => pick(f, o)}>{optLabel(f.key, o)}</button>
-            {/each}
-          </div>
-        </div>
+        <PropertyField
+          field={f}
+          label={t('s_' + f.key)}
+          value={params[f.key] ?? f.def}
+          optionLabel={(o) => optLabel(f.key, o)}
+          onPick={(o) => pick(f, o)}
+        />
       {:else if f.ctrl === 'toggle'}
-        <div class="row">
-          <span class="rl">{t('s_' + f.key)}</span>
-          <button class="tgl" data-key={f.key} class:on={!!params[f.key]} onclick={() => toggleField(f)} role="switch" aria-checked={!!params[f.key]} aria-label={t('s_' + f.key)}>
-            <span class="knob" aria-hidden="true"></span>
-          </button>
-          <span class="rv"></span>
-        </div>
+        <PropertyField
+          field={f}
+          label={t('s_' + f.key)}
+          value={!!params[f.key]}
+          onToggle={() => toggleField(f)}
+        />
       {/if}
     {/each}
   </section>
 {/snippet}
 
 <style>
-  /* ── Inspector header ── */
-  .makehead { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; }
+  .makehead { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
   .axistabs {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
-    padding: 3px; border-radius: 8px;
-    background: var(--panel-elevated); border: 1px solid var(--panel-border);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+    padding: 2px; border-radius: 7px;
+    background: rgba(0, 0, 0, 0.28); border: 1px solid var(--panel-border);
   }
   .axistab {
     display: flex; align-items: center; justify-content: center;
-    min-height: 36px; padding: 7px 8px; border: none; border-radius: 6px;
+    min-height: 34px; padding: 6px; border: none; border-radius: 5px;
     background: transparent; color: var(--panel-muted);
     font-family: var(--ui); letter-spacing: 0.01em;
-    transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+    transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
   }
-  .axistab .lab { font-size: 12.5px; font-weight: 600; }
+  .axistab .lab { font-size: 12px; font-weight: 650; }
   .axistab:hover { background: var(--panel-hover); color: var(--panel-text); }
   .axistab.on {
-    background: rgba(90, 168, 224, 0.22);
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
     color: #fff;
-    box-shadow: inset 0 0 0 1px rgba(90, 168, 224, 0.5);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 48%, transparent);
   }
   .axistab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* ── Building navigator ── */
   .buildingnav {
-    display: flex; flex-direction: column; gap: 5px;
-    padding-bottom: 10px; margin-bottom: 2px;
+    display: flex; flex-direction: column; gap: 4px;
+    padding-bottom: 8px; margin-bottom: 2px;
     border-bottom: 1px solid var(--panel-line);
   }
   .navlabel {
-    font-size: 10px; font-weight: 650; letter-spacing: 0.14em;
+    font-size: 9.5px; font-weight: 650; letter-spacing: 0.12em;
     color: var(--panel-faint); text-transform: uppercase;
   }
-  .navcontrols { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
-  .navcontrols select, .navaction {
-    min-height: 40px; border-radius: 6px; border: 1px solid var(--panel-border);
-    background: var(--panel-elevated); color: var(--panel-text);
-    font: 600 12px/1.2 var(--ui);
+  .navcontrols {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: center;
   }
-  .navcontrols select { min-width: 0; width: 100%; padding: 7px 26px 7px 10px; color-scheme: dark; }
-  .navaction {
-    min-width: 64px; padding: 7px 12px;
-    background: var(--accent-strong); border-color: transparent; color: #fff;
-  }
-  .navaction:hover[aria-disabled='false'] { filter: brightness(1.08); }
-  .navaction[aria-disabled='true'] { opacity: 0.42; cursor: default; }
-  .navcontrols select:focus-visible, .navaction:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px;
-  }
-  .navstatus {
+  .navcontrols :global(sp-picker) { min-width: 0; width: 100%; }
+  .navcontrols :global(sp-button.navaction) { min-width: 58px; min-height: 36px; }
+  .navstatus, .buildingnav :global(sp-help-text) {
     min-height: 1.2em; margin: 0; font-size: 11px; line-height: 1.25;
     color: var(--panel-faint); font-variant-numeric: tabular-nums;
   }
 
-  /* ── Morph stack ── */
   .stack { display: grid; }
   .stack > .ctx {
     grid-column: 1; grid-row: 1;
@@ -675,19 +644,16 @@
     transition: opacity 0.12s linear;
   }
 
-  section { display: flex; flex-direction: column; gap: 8px; }
+  section { display: flex; flex-direction: column; gap: 6px; }
   section.pinned {
-    padding: 10px 10px 12px;
-    border-radius: 8px;
-    background: var(--panel-2);
-    border: 1px solid var(--panel-line);
+    padding: 8px 9px 10px; border-radius: 7px;
+    background: var(--panel-2); border: 1px solid var(--panel-line);
   }
   h4 {
-    margin: 0; font-size: 10px; font-weight: 650; letter-spacing: 0.14em;
+    margin: 0; font-size: 9.5px; font-weight: 650; letter-spacing: 0.12em;
     color: var(--panel-faint); text-transform: uppercase;
   }
 
-  /* ── Village scale ── */
   .scalehead { display: flex; align-items: baseline; justify-content: space-between; }
   .scaleval {
     font-size: 13px; font-weight: 650; color: var(--panel-text);
@@ -703,43 +669,40 @@
   }
   input[type='range'].scale::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
-    width: 14px; height: 14px; border-radius: 2px;
+    width: 12px; height: 16px; border-radius: 2px;
     background: var(--accent); border: none;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.35);
     cursor: pointer;
   }
   input[type='range'].scale::-moz-range-thumb {
-    width: 14px; height: 14px; border-radius: 2px;
+    width: 12px; height: 16px; border-radius: 2px;
     background: var(--accent); border: none; cursor: pointer;
   }
-  .toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+  .toggles { display: flex; gap: 4px; flex-wrap: wrap; }
   .toggle {
     flex: 1; min-width: 0;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 8px 6px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 7px 5px; border-radius: 5px; font-size: 11.5px; font-weight: 600;
     background: transparent; border: 1px solid var(--panel-border); color: var(--panel-muted);
-    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
   }
   .toggle .dot {
     width: 7px; height: 7px; border-radius: 1px;
     border: 1px solid var(--panel-faint); background: transparent;
-    transition: all 0.14s ease;
   }
   .toggle:hover:not(:disabled) { background: var(--panel-hover); color: var(--panel-text); }
   .toggle.on {
-    border-color: rgba(90, 168, 224, 0.45); color: var(--panel-text);
-    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--panel-text); background: var(--accent-soft);
   }
   .toggle.on .dot { background: var(--accent); border-color: var(--accent); }
   .toggle:disabled { opacity: 0.38; cursor: default; }
 
-  /* ── Group accordion + cost badges ── */
   .advtoggle {
     position: relative;
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 8px 2px; background: transparent; border: none;
+    display: flex; align-items: center; gap: 7px; width: 100%;
+    padding: 7px 2px; background: transparent; border: none;
     border-top: 1px solid var(--panel-line);
-    color: var(--panel-text); font-size: 11px; font-weight: 650; letter-spacing: 0.08em;
+    color: var(--panel-text); font-size: 10.5px; font-weight: 650; letter-spacing: 0.07em;
     text-transform: uppercase; cursor: pointer; text-align: left;
   }
   .advtoggle:hover { color: var(--accent); }
@@ -752,8 +715,6 @@
   }
   .advtoggle .gname { flex: 1 1 auto; min-width: 0; }
   .advtoggle.open .gname { color: var(--accent); }
-  /* Cost: only non-live rebuild cost is stamped. Live is the default for house
-     groups — painting every row green was noisy and un-CAD. Gate still reads .costbadge. */
   .costbadge {
     flex: none; padding: 2px 6px; border-radius: 3px;
     font-family: var(--mono); font-size: 9px; font-weight: 600;
@@ -767,7 +728,6 @@
     background: rgba(224, 140, 120, 0.08);
   }
   .costbadge.live {
-    /* Keep in DOM for contracts; visually silent so the inspector reads as defaults. */
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
@@ -778,76 +738,27 @@
     border-style: dashed;
   }
 
-  /* ── Property rows ── */
-  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .tab {
+  :global(.typetabs) { width: 100%; display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px; }
+  :global(.typetabs sp-action-button.tab) {
     display: flex; flex-direction: column; align-items: center; gap: 2px;
-    padding: 9px 4px; border-radius: 6px;
-    background: transparent; border: 1px solid var(--panel-border); color: var(--panel-muted);
-    transition: all 0.14s ease;
+    min-height: 44px; height: auto; padding: 9px 4px;
   }
-  .tab .tl { font-size: 13px; font-weight: 650; }
-  .tab .ts { font-size: 9.5px; color: var(--panel-faint); letter-spacing: 0.04em; }
-  .tab:hover { background: var(--panel-hover); color: var(--panel-text); }
-  .tab.on {
-    background: rgba(90, 168, 224, 0.18);
-    border-color: rgba(90, 168, 224, 0.55);
-    color: #fff;
-  }
-  .tab.on .ts { color: rgba(255, 255, 255, 0.72); }
+  .tl { font-size: 13px; font-weight: 650; display: block; }
+  .ts { font-size: 9.5px; opacity: 0.7; letter-spacing: 0.04em; display: block; }
+
   .row {
-    display: grid; grid-template-columns: 76px minmax(0, 1fr) 42px;
-    align-items: center; gap: 8px; min-height: 28px;
+    display: grid; grid-template-columns: 72px minmax(0, 1fr) 40px;
+    align-items: center; gap: 7px; min-height: 26px;
   }
-  .row.bays, .row.seg { grid-template-columns: 76px minmax(0, 1fr); }
-  .rl { font-size: 12px; color: var(--panel-text); font-weight: 500; }
-  .bounds {
-    display: block; margin-top: 1px; color: var(--panel-faint);
-    font-family: var(--mono); font-size: 9px; font-weight: 500;
-  }
+  .row.disabled { opacity: 0.45; pointer-events: none; }
+  .rl { font-size: 11.5px; color: var(--panel-text); font-weight: 500; }
   .rv {
     font-family: var(--mono); font-size: 11px; color: var(--panel-muted);
     text-align: right; font-variant-numeric: tabular-nums;
   }
-  .stepper { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-  .stepper button {
-    width: 28px; height: 28px; border-radius: 5px;
-    border: 1px solid var(--panel-border); background: var(--panel-elevated);
-    color: var(--panel-text); font-size: 15px; line-height: 1;
-    display: grid; place-items: center; transition: background 0.12s ease;
-  }
-  .stepper button:hover:not(:disabled) { background: var(--panel-hover); border-color: rgba(90, 168, 224, 0.35); }
-  .stepper button:disabled { opacity: 0.28; cursor: default; }
-  .stepper .num {
-    min-width: 22px; text-align: center;
-    font-family: var(--mono); font-size: 14px; font-weight: 600;
-    font-variant-numeric: tabular-nums; color: var(--panel-text);
-  }
-  .segs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-  .segbtn {
-    padding: 5px 9px; border-radius: 5px; font-size: 11px; font-weight: 600;
-    background: transparent; border: 1px solid var(--panel-border); color: var(--panel-muted);
-    transition: all 0.12s ease; white-space: nowrap;
-  }
-  .segbtn:hover { background: var(--panel-hover); color: var(--panel-text); }
-  .segbtn.on {
-    background: var(--accent-soft); border-color: rgba(90, 168, 224, 0.4); color: var(--panel-text);
-  }
-  .tgl {
-    justify-self: start; width: 40px; height: 22px; border-radius: 11px; padding: 0;
-    border: 1px solid var(--panel-border); background: rgba(255, 255, 255, 0.06);
-    position: relative; transition: all 0.14s ease;
-  }
-  .tgl .knob {
-    position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
-    background: var(--panel-text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-    transition: transform 0.14s ease;
-  }
-  .tgl.on { background: var(--accent); border-color: var(--accent-strong); }
-  .tgl.on .knob { transform: translateX(18px); background: #fff; }
   .note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--panel-faint); }
   .editnote { margin: -2px 0 4px; font-size: 11px; line-height: 1.4; color: var(--panel-faint); }
-  .vdetail { gap: 7px; }
+  .vdetail { gap: 7px; display: flex; flex-direction: column; }
   .tierhint { font-size: 9.5px; color: var(--panel-faint); font-weight: 500; }
   .hero-note {
     display: flex; gap: 10px; align-items: flex-start; padding: 12px;
@@ -857,146 +768,60 @@
     flex: none; display: grid; place-items: center;
     width: 22px; height: 22px; border-radius: 50%;
     background: var(--accent-soft); color: var(--accent);
-    border: 1px solid rgba(90, 168, 224, 0.35);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     font-family: var(--mono); font-size: 12px; font-weight: 700;
   }
   .hero-note p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--panel-muted); }
 
-  input[type='range'] {
-    -webkit-appearance: none; appearance: none;
-    height: 3px; border-radius: 1px; background: rgba(255, 255, 255, 0.12); outline: none;
-  }
-  input[type='range']::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 13px; height: 13px; border-radius: 2px;
-    background: var(--accent); border: none;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
-    cursor: pointer;
-  }
-  input[type='range']::-moz-range-thumb {
-    width: 13px; height: 13px; border-radius: 2px;
-    background: var(--accent); border: none; cursor: pointer;
-  }
-
-  /* ── Share tools (scroll body) + footer regenerate ── */
   .toolrow {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-    gap: 6px;
+    gap: 0;
+    border-bottom: 1px solid var(--panel-line);
+    margin: 0 0 2px;
   }
-  .tbtn {
-    min-height: 44px;
-    min-width: 0;
-    padding: 8px 6px;
-    border-radius: 7px;
-    border: 1px solid var(--panel-border);
-    background: var(--panel-elevated);
-    color: var(--panel-text);
-    font-family: var(--ui);
-    transition: background 0.12s ease, border-color 0.12s ease, filter 0.2s ease;
+  .toolrow :global(sp-action-button.tbtn) {
+    min-height: 32px; width: 100%; border-radius: 0;
+    border-right: 1px solid var(--panel-line);
+    --mod-actionbutton-border-radius: 0;
   }
-  .tbtn .tface {
-    display: block;
-    font-size: 11.5px;
-    font-weight: 650;
-    line-height: 1.15;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .tbtn:hover:not(:disabled) {
-    background: var(--panel-hover);
-    border-color: rgba(90, 168, 224, 0.35);
-  }
-  .tbtn:disabled { opacity: 0.45; cursor: default; }
-  .tbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toolrow :global(sp-action-button.tbtn:last-child) { border-right: none; }
+
   .footstack { display: grid; }
   .footstack > .foot {
     grid-column: 1; grid-row: 1;
     display: flex; flex-direction: column; gap: 8px;
     transition: opacity 0.12s linear;
   }
-  .rebuild, .hbtn.reroll {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    min-height: 44px;
-    padding: 11px; border-radius: 7px; font-size: 12.5px; font-weight: 650;
-    background: linear-gradient(180deg, rgba(90, 168, 224, 0.28) 0%, rgba(61, 135, 196, 0.22) 100%);
-    border: 1px solid rgba(90, 168, 224, 0.45);
-    color: var(--panel-text);
-    transition: background 0.12s ease, border-color 0.12s ease, filter 0.2s ease, box-shadow 0.12s ease;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  .foot :global(sp-button.rebuild),
+  .foot :global(sp-button.hbtn) {
+    width: 100%; min-height: 44px;
   }
-  .rebuild:hover:not(:disabled), .hbtn.reroll:hover:not(:disabled) {
-    background: linear-gradient(180deg, rgba(90, 168, 224, 0.4) 0%, rgba(61, 135, 196, 0.32) 100%);
-    border-color: rgba(90, 168, 224, 0.65);
-    box-shadow: 0 0 0 1px rgba(90, 168, 224, 0.15);
-  }
-  .rebuild:disabled, .hbtn:disabled { opacity: 0.45; cursor: default; filter: none; box-shadow: none; }
-  .rebuild .rk, .hbtn .hk {
-    font-family: var(--mono); font-size: 14px; color: #9fd0f0;
-  }
-  .house-actions { display: flex; flex-direction: row; gap: 8px; }
-  .hbtn {
-    flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px;
-    min-height: 44px;
-    padding: 11px; border-radius: 7px; font-size: 12.5px; font-weight: 650;
-  }
-  .hbtn:focus-visible, .rebuild:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px;
-  }
+  .house-actions { display: flex; flex-direction: row; gap: 8px; width: 100%; }
+  .house-actions :global(sp-button) { flex: 1; }
 
-  /* Portrait / touch: denser *content* (gaps, type, row chrome) while keeping
-     44px primary targets for grip/tabs/nav/rebuild (check:ui-shell). */
   @media (max-width: 600px), (pointer: coarse) {
-    .axistab { min-height: 44px; padding: 6px 6px; }
+    .axistab { min-height: 44px; }
     .axistab .lab { font-size: 13px; }
-    .navcontrols select, .navaction { min-height: 44px; font-size: 13px; }
-    .navaction { min-width: 72px; padding: 6px 10px; }
-    .navstatus { font-size: 10px; min-height: 1.1em; }
-    .navlabel { font-size: 9px; letter-spacing: 0.12em; }
-    .scaleval { font-size: 13px; }
+    .navcontrols :global(sp-picker),
+    .navcontrols :global(sp-button.navaction) { min-height: 44px; }
+    .navcontrols :global(sp-button.navaction) { min-width: 72px; }
     .toggle { padding: 9px 5px; font-size: 12px; min-height: 40px; }
-    .rebuild, .hbtn { min-height: 44px; padding: 10px; font-size: 13px; }
-    .tbtn { min-height: 44px; padding: 8px 4px; }
-    .tbtn .tface { font-size: 12px; }
-    .advtoggle { min-height: 40px; font-size: 11.5px; padding: 6px 2px; }
+    .toolrow :global(sp-action-button.tbtn) { min-height: 44px; }
+    .advtoggle { min-height: 40px; font-size: 11.5px; }
     .makehead { padding-bottom: 4px; gap: 6px; }
     .buildingnav { padding-bottom: 4px; gap: 3px; margin-bottom: 0; }
     .stack > .ctx { gap: 4px; }
     section { gap: 4px; }
     section.pinned { padding: 7px 8px 8px; }
     .vdetail { gap: 3px; }
-    input[type='range'].scale { height: 3px; }
     input[type='range'].scale::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
     input[type='range'].scale::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
-    .tab { padding: 9px 2px; min-height: 44px; }
-    .tab .tl { font-size: 13px; }
-    .tab .ts { font-size: 10px; }
-    .stepper { gap: 8px; }
-    .stepper button { width: 40px; height: 40px; font-size: 16px; border-radius: 7px; }
-    .stepper .num { min-width: 22px; font-size: 14px; }
-    .row {
-      min-height: 34px; gap: 5px;
-      grid-template-columns: 70px minmax(0, 1fr) 38px;
-    }
-    .row.bays, .row.seg { grid-template-columns: 70px minmax(0, 1fr); }
-    .rl { font-size: 11px; }
-    .rv { font-size: 10px; }
-    .segbtn { padding: 7px 8px; font-size: 11px; min-height: 36px; }
-    .tgl { width: 48px; height: 28px; border-radius: 14px; }
-    .tgl .knob { width: 22px; height: 22px; }
-    .tgl.on .knob { transform: translateX(20px); }
-    input[type='range'] { height: 3px; }
-    input[type='range']::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
-    input[type='range']::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
-    .editnote { font-size: 10px; margin: -1px 0 2px; }
-    .note { font-size: 10px; }
+    .row { min-height: 34px; grid-template-columns: 70px minmax(0, 1fr) 38px; }
+    .editnote, .note { font-size: 10px; }
   }
   @media (max-height: 520px) and (orientation: landscape) {
-    .navlabel { font-size: 9px; }
-    .row { min-height: 34px; }
-    section.pinned { padding: 8px; }
     .makehead { padding-bottom: 6px; }
+    section.pinned { padding: 8px; }
   }
 </style>

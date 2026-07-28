@@ -1,0 +1,229 @@
+<script>
+  // Schema field → optimal control material (docs/design-system.md).
+  // Continuous ranges stay native range inputs (live-edit + browser gates).
+  // Discrete controls use Spectrum Web Components or Spectrum-token chrome.
+  let {
+    field,
+    label = '',
+    value = undefined,
+    display = '',
+    disabled = false,
+    bounds = '',
+    dataAttr = 'data-key',
+    options = [],
+    optionLabel = (o) => String(o),
+    onInput = null,
+    onCommit = null,
+    onPick = null,
+    onToggle = null,
+  } = $props();
+
+  function num(v) {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const intVal = $derived(Math.trunc(num(value)));
+  const keyProps = $derived(dataAttr === 'data-vkey' ? { 'data-vkey': field.key } : { 'data-key': field.key });
+</script>
+
+{#if field.ctrl === 'range'}
+  <label class="row" class:disabled {...keyProps}>
+    <span class="rl">
+      {label}
+      {#if bounds}<small class="bounds">{bounds}</small>{/if}
+    </span>
+    <input
+      type="range"
+      {...keyProps}
+      min={field.min}
+      max={field.max}
+      step={field.step ?? 0.01}
+      value={num(value)}
+      disabled={disabled || undefined}
+      aria-label={label}
+      aria-valuetext={display || String(num(value))}
+      oninput={(e) => onInput?.(num(e.currentTarget.value))}
+      onchange={(e) => onCommit?.(num(e.currentTarget.value))}
+    />
+    <span class="rv">{display || num(value).toFixed(2)}</span>
+  </label>
+{:else if field.ctrl === 'stepper'}
+  <!-- Visible stepper buttons: parcel-rebuild gate clicks .row[data-key] button -->
+  <div class="row bays" class:disabled {...keyProps}>
+    <span class="rl">
+      {label}
+      {#if bounds}<small class="bounds">{bounds}</small>{/if}
+    </span>
+    <div class="stepper">
+      <button
+        type="button"
+        disabled={disabled || intVal <= field.min}
+        aria-label={`${label} −`}
+        onclick={() => {
+          const v = Math.max(field.min, intVal - 1);
+          onInput?.(v);
+          onCommit?.(v);
+        }}
+      >−</button>
+      <span class="num" aria-live="polite">{display || String(intVal)}</span>
+      <button
+        type="button"
+        disabled={disabled || intVal >= field.max}
+        aria-label={`${label} +`}
+        onclick={() => {
+          const v = Math.min(field.max, intVal + 1);
+          onInput?.(v);
+          onCommit?.(v);
+        }}
+      >+</button>
+    </div>
+  </div>
+{:else if field.ctrl === 'segment'}
+  <div class="row seg" class:disabled {...keyProps}>
+    <span class="rl">{label}</span>
+    <sp-action-group selects="single" quiet compact>
+      {#each (field.options || options) as o (o)}
+        <sp-action-button
+          value={String(o)}
+          selected={(value ?? field.def) === o || undefined}
+          disabled={disabled || undefined}
+          onclick={() => onPick?.(o)}
+        >{optionLabel(o)}</sp-action-button>
+      {/each}
+    </sp-action-group>
+  </div>
+{:else if field.ctrl === 'toggle'}
+  <div class="row" class:disabled {...keyProps}>
+    <span class="rl">{label}</span>
+    <sp-switch
+      class="tgl"
+      emphasized
+      checked={!!value || undefined}
+      disabled={disabled || undefined}
+      {...keyProps}
+      onchange={(e) => onToggle?.(!!e.currentTarget.checked)}
+    ></sp-switch>
+    <span class="rv"></span>
+  </div>
+{:else}
+  <div class="row" {...keyProps}>
+    <span class="rl">{label}</span>
+    <span class="rv">{display}</span>
+  </div>
+{/if}
+
+<style>
+  .row {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 7px;
+    min-height: 28px;
+  }
+  .row.bays, .row.seg { grid-template-columns: 72px minmax(0, 1fr); }
+  .row.disabled { opacity: 0.45; pointer-events: none; }
+  .rl {
+    font-size: 11.5px;
+    color: var(--panel-text);
+    font-weight: 500;
+    min-width: 0;
+  }
+  .bounds {
+    display: block;
+    margin-top: 1px;
+    color: var(--panel-faint);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+  }
+  .rv {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--panel-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    min-width: 0;
+    height: 3px;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    outline: none;
+  }
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 2px;
+    background: var(--accent);
+    border: none;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+  }
+  input[type='range']::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 2px;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+  }
+
+  .stepper {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .stepper button {
+    width: 28px;
+    height: 28px;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-elevated);
+    color: var(--panel-text);
+    font-size: 15px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+  }
+  .stepper button:hover:not(:disabled) {
+    background: var(--panel-hover);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  .stepper button:disabled { opacity: 0.28; cursor: default; }
+  .stepper .num {
+    min-width: 22px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--panel-text);
+  }
+
+  .row.seg :global(sp-action-group) {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .row :global(sp-switch.tgl) { justify-self: start; }
+
+  @media (max-width: 600px), (pointer: coarse) {
+    .row {
+      min-height: 34px;
+      gap: 5px;
+      grid-template-columns: 70px minmax(0, 1fr) 38px;
+    }
+    .row.bays, .row.seg { grid-template-columns: 70px minmax(0, 1fr); }
+    .rl { font-size: 11px; }
+    .rv { font-size: 10px; }
+    .stepper button { width: 40px; height: 40px; font-size: 16px; border-radius: 7px; }
+    input[type='range']::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
+    input[type='range']::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
+  }
+</style>

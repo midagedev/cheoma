@@ -1,4 +1,6 @@
-// SPA 엔트리. 웹폰트 미사용(#132) — 시스템 기본 폰트만 사용해 로딩 부담 제거.
+// SPA 엔트리. Spectrum design system + shell tokens (docs/design-system.md).
+import './ui/spectrum-register.js';
+import './ui/tokens.css';
 import './styles/global.css';
 
 import { mount, unmount } from 'svelte';

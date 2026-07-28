@@ -193,6 +193,8 @@ const MEASURE = `(selector) => {
   const targets = [...document.querySelectorAll([
     '.actions button',
     '[data-make-panel] .axistab',
+    // Building picker is Spectrum sp-picker (not a native <select>).
+    '[data-make-panel] .navcontrols sp-picker',
     '[data-make-panel] .navcontrols select',
     '[data-make-panel] .navaction',
     '[data-make-panel] .grip',

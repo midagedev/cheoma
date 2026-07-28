@@ -290,8 +290,8 @@
     right: calc(var(--inspector-w, 0px) + clamp(10px, 1.6vw, 22px));
     top: clamp(10px, 1.6vh, 22px);
     z-index: 40;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    padding: 7px 9px 9px;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    padding: 6px 8px 8px;
     border-radius: 10px;
     background-color: var(--glass);
     background-image: var(--grain);
@@ -301,7 +301,7 @@
     touch-action: none;
     transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .dial svg { width: 148px; height: 148px; }
+  .dial svg { width: 132px; height: 132px; }
   .axislabel {
     display: none;
   }
@@ -375,16 +375,16 @@
     transition: cx 0.5s cubic-bezier(0.22, 1, 0.36, 1), cy 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .lab {
-    fill: rgba(245, 247, 250, 0.62);
+    fill: rgba(245, 247, 250, 0.7);
     font-family: var(--ui);
-    font-size: 10px;
-    font-weight: 500;
+    font-size: 9.5px;
+    font-weight: 550;
     text-anchor: middle;
     dominant-baseline: middle;
     pointer-events: none;
     paint-order: stroke;
-    stroke: rgba(10, 12, 16, 0.55);
-    stroke-width: 2.2px;
+    stroke: rgba(10, 12, 16, 0.72);
+    stroke-width: 2.6px;
     transition: fill 0.3s ease, font-weight 0.2s ease;
   }
   .band:focus-visible { outline: none; stroke: var(--accent); }
@@ -399,47 +399,50 @@
 
   /* Render-style segment — selectors preserved for shell gate (.render-style button). */
   .render-style {
-    display: flex; gap: 3px; align-self: stretch;
-    padding: 3px; border-radius: 7px;
+    display: flex; gap: 2px; align-self: stretch;
+    padding: 2px; border-radius: 6px;
     border: 1px solid var(--glass-border);
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.22);
   }
   .render-style button {
     -webkit-appearance: none; appearance: none; border: 0;
-    flex: 1; min-height: 34px; padding: 6px 8px; border-radius: 5px;
-    display: flex; align-items: center; justify-content: center; gap: 5px;
-    background: transparent; color: var(--glass-text);
-    font-family: var(--ui); font-size: 12px; font-weight: 650; letter-spacing: 0.02em;
-    transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
+    flex: 1; min-height: 32px; padding: 5px 6px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    background: transparent; color: var(--glass-muted);
+    font-family: var(--ui); font-size: 11px; font-weight: 650; letter-spacing: 0.01em;
+    transition: background 0.14s ease, color 0.14s ease;
   }
   .render-style button:hover { background: rgba(255, 255, 255, 0.08); }
   .render-style button:active { transform: scale(0.97); }
   .render-style button.on {
-    background: rgba(255, 255, 255, 0.92); color: #12151a;
+    background: rgba(255, 255, 255, 0.94); color: #12151a;
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
   }
   .render-style button:last-child.on {
-    background: #1a1e25; color: var(--glass-text);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    background: #1c222b; color: var(--glass-text);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   }
+  .render-style button:not(.on) { color: var(--glass-muted); }
   .render-style button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .render-style .glyph { font-size: 13px; }
 
-  .dial-actions { display: flex; gap: 8px; }
+  .dial-actions { display: flex; gap: 4px; width: 100%; }
   .dial-btn {
     -webkit-appearance: none;
     appearance: none;
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    height: 34px;
+    border-radius: 6px;
     display: grid;
     place-items: center;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid var(--glass-border);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: none;
     color: var(--glass-text);
-    transition: transform 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+    transition: background 0.12s ease, border-color 0.12s ease;
   }
   .rk-glyph {
     display: block;
@@ -449,12 +452,11 @@
     transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .dial-btn:hover {
-    transform: translateY(-1px);
     background: var(--accent-soft);
-    border-color: rgba(90, 168, 224, 0.4);
+    border-color: rgba(90, 168, 224, 0.35);
   }
-  .dial-btn:active { transform: scale(0.95); }
-  .dial-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .dial-btn:active { background: rgba(255, 255, 255, 0.1); }
+  .dial-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .tone-orb {
     display: block;
@@ -487,28 +489,29 @@
   @keyframes orbcycle { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .env-flow.on .flow-orb { animation: none; } }
 
-  /* 터치: 타깃 ≥44px. */
+  /* 터치: 타깃 ≥44px (check:ui-shell smallTargets). */
   @media (pointer: coarse) {
-    .dial-btn { width: 46px; height: 46px; }
-    .rk-glyph { font-size: 23px; }
-    .tone-orb { width: 20px; height: 20px; }
-    .flow-orb { width: 22px; height: 22px; }
-    .render-style button { min-height: 44px; padding: 8px 10px; font-size: 13px; }
-    .render-style .glyph { font-size: 15px; }
+    .dial-btn { height: 44px; min-width: 44px; flex: 1 1 44px; }
+    .rk-glyph { font-size: 18px; }
+    .tone-orb { width: 18px; height: 18px; }
+    .flow-orb { width: 20px; height: 20px; }
+    .render-style button { min-height: 44px; padding: 7px 8px; font-size: 12px; }
+    .render-style .glyph { font-size: 14px; }
   }
 
   /* Portrait phone: top-right of viewport (sheet has no --inspector-w). */
   @media (max-width: 768px) and (orientation: portrait) {
     .dial {
-      right: max(10px, env(safe-area-inset-right));
-      top: max(10px, env(safe-area-inset-top));
-      padding: 6px 8px 8px;
+      right: max(8px, env(safe-area-inset-right));
+      top: max(8px, env(safe-area-inset-top));
+      padding: 5px 7px 7px;
+      gap: 4px;
     }
-    .dial svg { width: clamp(126px, 38vw, 150px); height: clamp(126px, 38vw, 150px); }
-    .lab { font-size: 11.5px; }
-    .dial.compact { gap: 5px; padding: 5px 8px 7px; }
+    .dial svg { width: clamp(112px, 32vw, 128px); height: clamp(112px, 32vw, 128px); }
+    .lab { font-size: 10px; }
+    .dial.compact { gap: 4px; padding: 4px 7px 6px; }
     .dial.compact .axislabel { display: none; }
-    .dial.compact svg { width: clamp(96px, 28vw, 116px); height: clamp(96px, 28vw, 116px); }
+    .dial.compact svg { width: clamp(88px, 24vw, 104px); height: clamp(88px, 24vw, 104px); }
   }
   /* Landscape phone: clear the right rail via --inspector-w; shrink rings only. */
   @media (max-height: 520px) and (orientation: landscape) {

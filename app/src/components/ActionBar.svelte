@@ -34,7 +34,7 @@
   });
 </script>
 
-<div bind:this={dock} class="actions" class:raised class:lifted role="group" aria-label={t('axis_share')}>
+<div bind:this={dock} class="actions cheoma-glass" class:raised class:lifted role="group" aria-label={t('axis_share')}>
   {#if onDrone || onWalk}
     <div class="watchgroup">
       {#if onDrone}
@@ -103,111 +103,142 @@
 </div>
 
 <style>
+  /* Scene dock — glass rail over WebGL (Spectrum theme tokens via cheoma-glass). */
   .actions {
     position: fixed;
-    right: calc(var(--inspector-w, 0px) + clamp(14px, 2.4vw, 30px));
-    bottom: clamp(16px, 3vh, 34px);
+    right: calc(var(--inspector-w, 0px) + clamp(12px, 1.8vw, 24px));
+    bottom: clamp(14px, 2.6vh, 28px);
     z-index: 34;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
-    max-width: calc(100vw - var(--inspector-w, 0px) - 2 * clamp(14px, 2.4vw, 30px));
-    gap: 8px;
+    max-width: calc(100vw - var(--inspector-w, 0px) - 2 * clamp(12px, 1.8vw, 24px));
+    gap: 4px;
+    padding: 5px;
+    border-radius: 12px;
+    /* cheoma-glass provides fill; strengthen slightly for dock legibility */
+    background-color: var(--glass-strong);
     transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1), transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .watchgroup {
-    display: flex; align-items: flex-end; gap: 6px;
-    padding-right: 8px; margin-right: 2px;
-    border-right: 1px solid var(--glass-border);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding-right: 6px;
+    margin-right: 2px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
   }
   @media (pointer: coarse) {
     .actions {
-      right: calc(var(--inspector-w, 0px) + max(12px, env(safe-area-inset-right)));
-      bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
+      right: calc(var(--inspector-w, 0px) + max(10px, env(safe-area-inset-right)));
+      bottom: max(14px, calc(env(safe-area-inset-bottom) + 10px));
       z-index: 47;
     }
   }
   @media (max-width: 768px) and (orientation: portrait) {
     .actions {
-      right: max(12px, env(safe-area-inset-right));
-      max-width: calc(100vw - 24px);
+      right: max(10px, env(safe-area-inset-right));
+      max-width: calc(100vw - 20px);
     }
+    /* Peek sheet: clear the grip only. */
     .actions.raised { bottom: max(96px, calc(env(safe-area-inset-bottom) + 90px)); }
-    /* One row only while editing — a wrapped dock collapses the focus framing band. */
-    .actions.lifted {
-      bottom: calc(var(--sheet-half, 51vh) + 8px);
+    /* Half sheet (focus edit OR aerial panel expanded): ride above --sheet-half.
+       CSS :has() covers aerial expand where lifted prop is still false. */
+    .actions.lifted,
+    :global(html:has([data-make-panel][data-snap='half'])) .actions {
+      bottom: calc(var(--sheet-half, 50vh) + 10px);
       flex-wrap: nowrap;
-      gap: 6px;
-      max-width: calc(100vw - 24px);
+      gap: 3px;
+      padding: 4px;
+      max-width: calc(100vw - 20px);
     }
-    .actions.lifted .seal {
+    .actions.lifted .seal,
+    :global(html:has([data-make-panel][data-snap='half'])) .actions .seal {
       min-width: 44px;
       height: 44px;
       padding: 0 8px;
     }
-    .actions.lifted .seal .face { font-size: 11.5px; }
-    .actions.lifted .seal.round { width: 44px; min-width: 44px; height: 44px; }
-    .actions.lifted .watchgroup { display: none; }
+    .actions.lifted .seal .face,
+    :global(html:has([data-make-panel][data-snap='half'])) .actions .seal .face { font-size: 11px; }
+    .actions.lifted .seal.round,
+    :global(html:has([data-make-panel][data-snap='half'])) .actions .seal.round {
+      width: 44px; min-width: 44px; height: 44px;
+    }
   }
   .seal {
     -webkit-appearance: none;
     appearance: none;
-    border: none;
-    min-width: 52px;
+    min-width: 48px;
     width: auto;
-    height: 48px;
-    padding: 0 12px;
+    height: 40px;
+    padding: 0 11px;
     border-radius: 8px;
     display: grid;
     place-items: center;
     font-family: var(--ui);
-    background: var(--glass-strong);
-    background-image: var(--grain);
-    border: 1px solid var(--glass-border);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    background: transparent;
+    border: 1px solid transparent;
     color: var(--glass-text);
-    transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, filter 0.2s ease;
+    box-shadow: none;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
   .seal .face {
-    font-size: 12.5px;
+    font-size: 12px;
     line-height: 1.1;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
     font-weight: 650;
     text-align: center;
     white-space: nowrap;
   }
-  .seal.round { border-radius: 50%; width: 46px; min-width: 46px; height: 46px; padding: 0; }
-  .seal .note { font-size: 18px; color: var(--glass-muted); }
-  .seal .glyph { font-size: 17px; font-weight: 650; color: var(--glass-text); line-height: 1; }
+  .seal.round {
+    border-radius: 8px;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+  }
+  .seal .note { font-size: 16px; color: var(--glass-muted); }
+  .seal .glyph { font-size: 15px; font-weight: 650; color: var(--glass-text); line-height: 1; }
   .seal.round.active {
     background: var(--accent-soft);
-    border-color: rgba(90, 168, 224, 0.45);
+    border-color: rgba(90, 168, 224, 0.4);
   }
-  .seal.round.active .note { color: var(--accent); }
+  .seal.round.active .note,
+  .seal.round.active .glyph { color: var(--accent); }
 
   .seal.primary {
     min-width: 56px;
-    height: 52px;
-    background: var(--accent-soft);
-    border-color: rgba(90, 168, 224, 0.45);
+    height: 40px;
+    background: linear-gradient(180deg, rgba(90, 168, 224, 0.42) 0%, rgba(61, 135, 196, 0.34) 100%);
+    border-color: rgba(90, 168, 224, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
-  .seal.primary .face { color: var(--glass-text); }
+  .seal.primary .face { color: #fff; font-weight: 700; }
 
-  .seal:hover {
-    transform: translateY(-1px);
-    background: rgba(20, 24, 30, 0.82);
-    border-color: rgba(90, 168, 224, 0.35);
+  .seal:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.1);
   }
-  .seal:active { transform: translateY(0) scale(0.97); }
-  .seal:disabled { filter: saturate(0.7) opacity(0.55); cursor: default; }
-  .seal:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .seal.primary:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba(90, 168, 224, 0.55) 0%, rgba(61, 135, 196, 0.42) 100%);
+    border-color: rgba(120, 190, 240, 0.7);
+  }
+  .seal:active:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+  .seal:disabled { opacity: 0.42; cursor: default; }
+  .seal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (pointer: coarse) {
+    .seal { min-width: 48px; height: 44px; }
+    .seal.round { width: 44px; min-width: 44px; height: 44px; }
+    .seal.primary { height: 44px; }
+  }
 
   @media (max-width: 430px) {
-    .actions { gap: 6px; left: auto; max-width: calc(100vw - 20px); }
-    .seal { min-width: 46px; height: 46px; padding: 0 8px; }
-    .seal .face { font-size: 12px; }
+    .actions { gap: 2px; left: auto; max-width: calc(100vw - 16px); padding: 4px; }
+    .seal { min-width: 44px; height: 44px; padding: 0 8px; }
+    .seal .face { font-size: 11px; }
     .seal.round { width: 44px; min-width: 44px; height: 44px; }
-    .watchgroup { gap: 5px; padding-right: 6px; }
+    .watchgroup { gap: 2px; padding-right: 4px; }
   }
 </style>

@@ -164,10 +164,13 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
       if (disposed) return null;
       return qualityRuntime.update(dt, referenceDepth);
     },
-    /** Immediately restore full fill + focus MSAA after a long hero/cinematic path. */
-    forceStableQuality() {
+    /**
+     * Immediately restore full fill + focus MSAA after a long hero/cinematic path.
+     * @param {number} [holdSeconds] keep full quality even if residual orbit still moves.
+     */
+    forceStableQuality(holdSeconds = 0) {
       if (disposed) return null;
-      return qualityRuntime.forceStable();
+      return qualityRuntime.forceStable(holdSeconds);
     },
     debugQuality() {
       return qualityRuntime.debug();

@@ -101,7 +101,7 @@ export const SUNSET_LOOKS = deepFreeze({
       ridgeNear: 0x574863, ridgeFar: 0xcc9678, mist: 0xdeb69c, mistOp: 0.6,
       lantern: 0.15,
     }, {
-      // rim 2.05 는 그대로 둔다 — tools/check-rim-facing.mjs 의 HDR 에너지 상한(2.05×1.6)이
+      // rim 2.05 는 그대로 둔다 — tools/check-rim-facing.mjs 의 HDR 에너지 상한(2.05×1.85)이
       //   이 숫자를 기준으로 캘리브레이션돼 있고, 붉힘은 rimColor 로만 가져간다(휘도는 오히려 감소).
       bloomStrength: 0.66, bloomRadius: 0.38, bloomThreshold: 0.80,
       rim: 2.05, rimColor: 0xffa757, rimPower: 1.7, rimWrap: 0.13,

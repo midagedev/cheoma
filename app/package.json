@@ -9,6 +9,28 @@
     "preview": "vite preview --port 4319"
   },
   "dependencies": {
+    "@spectrum-web-components/accordion": "^1.12.2",
+    "@spectrum-web-components/action-button": "^1.12.2",
+    "@spectrum-web-components/action-group": "^1.12.2",
+    "@spectrum-web-components/badge": "^1.12.2",
+    "@spectrum-web-components/button": "^1.12.2",
+    "@spectrum-web-components/dialog": "^1.12.2",
+    "@spectrum-web-components/divider": "^1.12.2",
+    "@spectrum-web-components/field-label": "^1.12.2",
+    "@spectrum-web-components/help-text": "^1.12.2",
+    "@spectrum-web-components/icon": "^1.12.2",
+    "@spectrum-web-components/icons-workflow": "^1.12.2",
+    "@spectrum-web-components/menu": "^1.12.2",
+    "@spectrum-web-components/number-field": "^1.12.2",
+    "@spectrum-web-components/overlay": "^1.12.2",
+    "@spectrum-web-components/picker": "^1.12.2",
+    "@spectrum-web-components/progress-circle": "^1.12.2",
+    "@spectrum-web-components/slider": "^1.12.2",
+    "@spectrum-web-components/styles": "^1.12.2",
+    "@spectrum-web-components/switch": "^1.12.2",
+    "@spectrum-web-components/tabs": "^1.12.2",
+    "@spectrum-web-components/theme": "^1.12.2",
+    "@spectrum-web-components/underlay": "^1.12.2",
     "three": "0.185.1"
   },
   "devDependencies": {

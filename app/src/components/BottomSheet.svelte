@@ -1,14 +1,12 @@
 <script>
-  // Make-panel shell — professional inspector surface.
+  // Make-panel shell geometry (Spectrum surface tokens via .inspector-surface).
   //
-  //   Desktop / tablet     : full-height right dock (.ctxcard) — CAD viewport + properties
-  //   Landscape phone      : same right dock, thinner rail (usable editing + scene)
-  //   Portrait phone       : bottom sheet (.sheet) with 2 detents (peek / half)
+  //   Desktop / tablet     : full-height right dock (.ctxcard)
+  //   Landscape phone      : same right dock, thinner rail
+  //   Portrait phone       : bottom sheet (.sheet) peek / half
   //
-  // Detents use **visible height** (not translateY) so scroll content cannot leave
-  // the viewport. HALF_VH leaves a framing band for the focused house.
-  // When the right dock is open it publishes --inspector-w so dial / share dock /
-  // scene guide clear the column without hard-coded corners.
+  // Detents use **visible height** so scroll content cannot leave the viewport.
+  // Dock open → --inspector-w so dial / share dock / guide clear the column.
   import { tick, untrack } from 'svelte';
   import { device } from '../lib/device.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
@@ -245,7 +243,7 @@
   }
   .ctxhead {
     flex: none;
-    padding: 10px 12px 0;
+    padding: 9px 11px 0;
     border-bottom: 1px solid var(--panel-line);
     background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
   }
@@ -255,19 +253,19 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    padding: 10px 12px 12px;
+    padding: 9px 11px 11px;
     overscroll-behavior: contain;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
   }
-  .ctxscroll::-webkit-scrollbar { width: 6px; }
+  .ctxscroll::-webkit-scrollbar { width: 5px; }
   .ctxscroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 3px;
   }
   .ctxfoot {
     flex: none;
-    padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding: 9px 11px calc(11px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--panel-line);
     background: var(--panel-2);
   }
@@ -352,16 +350,17 @@
     touch-action: pan-y;
     display: flex;
     flex-direction: column;
-    padding: 0 clamp(10px, 3vw, 14px) 6px;
+    /* Extra bottom pad so the last property row is not hidden under the sticky rebuild footer. */
+    padding: 0 clamp(10px, 3vw, 14px) 56px;
     gap: 2px;
   }
-  .sheethead { flex: none; padding: 2px clamp(10px, 3vw, 14px) 0; }
+  .sheethead { flex: none; padding: 0 clamp(10px, 3vw, 14px); }
   .sheet[data-snap='peek'] .sheethead,
   .sheet[data-snap='peek'] .scroll,
   .sheet[data-snap='peek'] .sheetfoot { visibility: hidden; }
   .sheetfoot {
     flex: none;
-    padding: 4px clamp(10px, 3vw, 14px) calc(6px + env(safe-area-inset-bottom));
+    padding: 3px clamp(10px, 3vw, 14px) calc(5px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--panel-line);
     background: var(--panel-2);
   }

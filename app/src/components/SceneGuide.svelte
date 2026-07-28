@@ -70,30 +70,29 @@
 
   .paper {
     position: relative;
-    padding: 14px 50px 15px 16px;
+    padding: 10px 42px 11px 12px;
     border: 1px solid var(--glass-border);
-    border-left: 2px solid var(--accent);
-    border-radius: 10px;
+    border-radius: 8px;
     color: var(--glass-text);
     background-color: var(--glass-strong);
     background-image: var(--grain);
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
   }
 
   .title {
-    margin: 0 0 10px;
+    margin: 0 0 7px;
     color: var(--glass-muted);
     font-family: var(--ui);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 650;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
   ul {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 18px;
+    gap: 5px 14px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -102,44 +101,44 @@
   li {
     min-width: 0;
     display: grid;
-    grid-template-columns: 25px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     color: var(--glass-text);
     font-family: var(--ui);
-    font-size: 12.5px;
-    line-height: 1.35;
+    font-size: 11.5px;
+    line-height: 1.3;
   }
 
   .mark {
-    width: 25px;
-    height: 25px;
+    width: 22px;
+    height: 22px;
     display: grid;
     place-items: center;
     border: 1px solid var(--glass-border);
-    border-radius: 50%;
+    border-radius: 4px;
     color: var(--accent);
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.05);
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 650;
     line-height: 1;
   }
 
   .dismiss {
     position: absolute;
-    top: 4px;
-    right: 4px;
+    top: 2px;
+    right: 2px;
     min-width: 44px;
     min-height: 44px;
     display: grid;
     place-items: center;
     padding: 0;
     border: 0;
-    border-radius: 50%;
+    border-radius: 6px;
     color: var(--glass-muted);
     background: transparent;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 300;
     line-height: 1;
     pointer-events: auto;
@@ -164,20 +163,21 @@
      the guide sits between them and the peek sheet, clear of the raised dock. */
   @media (max-width: 768px) and (orientation: portrait) {
     .scene-guide.touch {
-      left: 12px;
-      right: 12px;
+      left: 10px;
+      right: 10px;
       top: auto;
       width: auto;
       max-width: none;
       /* The dock publishes --dock-h because it wraps to a second row on narrow
          phones and long locales; a constant clearance read the one-row case and
          let the card cover the drone button (#158 P5). */
-      bottom: calc(max(96px, env(safe-area-inset-bottom) + 90px) + var(--dock-h, 58px) + 14px);
+      bottom: calc(max(96px, env(safe-area-inset-bottom) + 90px) + var(--dock-h, 58px) + 10px);
     }
-    .paper { padding: 14px 50px 15px 14px; }
-    ul { gap: 8px 11px; }
-    li { grid-template-columns: 23px minmax(0, 1fr); gap: 7px; font-size: 12px; line-height: 1.4; }
-    .mark { width: 23px; height: 23px; font-size: 12px; }
+    .paper { padding: 9px 40px 10px 10px; }
+    .title { margin: 0 0 5px; font-size: 9.5px; }
+    ul { gap: 4px 8px; grid-template-columns: 1fr 1fr; }
+    li { grid-template-columns: 20px minmax(0, 1fr); gap: 5px; font-size: 11px; line-height: 1.3; }
+    .mark { width: 20px; height: 20px; font-size: 10px; border-radius: 3px; }
   }
 
   @media (max-width: 360px) {

@@ -1,6 +1,6 @@
 <script>
-  // 좌하 낙관(도장) + 씨앗번호 + en/ko 미니 토글. 브랜딩 다이어트(#72): 세로 붓글씨 '처마'는
-  // 제거하고 낙관 하나만 브랜드 마크로 남긴다('처마' 노출은 이 낙관 1회뿐). 낙관은 로케일 불변.
+  // Bottom-left brand + seed + locale — CAD status chip (glass), not loose floating type.
+  // Brand stamp is the only traditional seal accent in chrome.
   import { i18n, setLang } from '../lib/i18n.svelte.js';
   let { seed = 0, onInfo } = $props();
   const seedStr = $derived('#' + String(seed >>> 0).slice(-4).padStart(4, '0'));
@@ -11,7 +11,7 @@
   }
 </script>
 
-<div class="seal-label">
+<div class="seal-label glass-surface" data-status-chip>
   <button
     class="brand"
     data-reference-trigger="brand"
@@ -21,108 +21,162 @@
   >
     <span class="stamp" aria-hidden="true">처마</span>
   </button>
-  <div class="meta">
-    <span class="seed" title={'seed ' + (seed >>> 0)}>{seedStr}</span>
-    <button
-      class="info"
-      data-reference-trigger="info"
-      onclick={openInfo}
-      aria-label={infoLabel}
-      title={infoLabel}
-    >ⓘ</button>
-  </div>
-  <div class="lang">
-    <button class:on={i18n.lang === 'en'} onclick={() => setLang('en')}>EN</button>
-    <span class="sep">·</span>
-    <button class:on={i18n.lang === 'ko'} onclick={() => setLang('ko')}>한</button>
+  <div class="rail">
+    <div class="meta">
+      <span class="seed" title={'seed ' + (seed >>> 0)}>{seedStr}</span>
+      <button
+        class="info"
+        data-reference-trigger="info"
+        onclick={openInfo}
+        aria-label={infoLabel}
+        title={infoLabel}
+      >ⓘ</button>
+    </div>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" class:on={i18n.lang === 'en'} onclick={() => setLang('en')}>EN</button>
+      <button type="button" class:on={i18n.lang === 'ko'} onclick={() => setLang('ko')}>한</button>
+    </div>
   </div>
 </div>
 
 <style>
   .seal-label {
     position: fixed;
-    left: clamp(14px, 2.4vw, 30px);
-    bottom: clamp(16px, 3vh, 34px);
+    left: clamp(12px, 1.8vw, 24px);
+    bottom: clamp(14px, 2.6vh, 28px);
     z-index: 20;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 0.55rem;
+    gap: 10px;
+    padding: 7px 10px 7px 8px;
+    border-radius: 10px;
     user-select: none;
     pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
   }
-  /* 낙관(브랜드 마크)을 클릭 → 참고 자료 모달. 컨테이너는 none 이라 여기만 auto 복구. */
   .brand {
-    pointer-events: auto; cursor: pointer;
-    -webkit-appearance: none; appearance: none; border: none; background: none; padding: 0;
-    display: flex; align-items: center;
+    pointer-events: auto;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    background: none;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    flex: none;
   }
   .brand:focus-visible { outline: none; }
-  .brand:focus-visible .stamp { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--seal); }
-  /* seed·ⓘ 를 한 줄로 묶어 밀도를 낮춘다(#72). */
-  .meta { display: flex; align-items: center; gap: 6px; }
-  /* ⓘ — 작은 참고 자료 트리거. */
-  .info {
-    pointer-events: auto; cursor: pointer;
-    -webkit-appearance: none; appearance: none; border: none; background: none; padding: 2px 3px;
-    font-family: var(--ui); font-size: 13px; line-height: 1; color: var(--glass-muted);
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
-    transition: color 0.2s ease;
+  .brand:focus-visible .stamp {
+    box-shadow: 0 0 0 2px rgba(18, 21, 26, 0.9), 0 0 0 3.5px var(--accent);
   }
-  .info:hover, .info:focus-visible { color: var(--accent); outline: none; }
   .stamp {
     writing-mode: vertical-rl;
     font-family: var(--serif);
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.05;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     color: var(--paper);
     background: var(--seal);
-    padding: 6px 3px;
+    padding: 7px 3px;
     border-radius: 2px;
-    box-shadow: 0 0 0 1px rgba(120, 40, 30, 0.28), 0 2px 6px rgba(60, 30, 20, 0.28);
+    box-shadow: 0 0 0 1px rgba(120, 40, 30, 0.35), 0 2px 6px rgba(0, 0, 0, 0.28);
     transform-origin: center;
     animation: stamp 0.52s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   }
-  /* 낙관 "쾅" — 크게 내려찍혀 살짝 눌렸다 자리잡는 두부 탄성. */
   @keyframes stamp {
-    0% { transform: scale(1.55) rotate(-7deg); opacity: 0; }
-    55% { transform: scale(0.9) rotate(1.5deg); opacity: 1; }
+    0% { transform: scale(1.45) rotate(-6deg); opacity: 0; }
+    55% { transform: scale(0.92) rotate(1deg); opacity: 1; }
     100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  }
+  .rail {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
   .seed {
     font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: 0.08em;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
     color: var(--glass-muted);
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+    font-variant-numeric: tabular-nums;
+  }
+  .info {
+    pointer-events: auto;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-family: var(--ui);
+    font-size: 12px;
+    line-height: 1;
+    color: var(--glass-muted);
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .info:hover, .info:focus-visible {
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.06);
+    outline: none;
   }
   .lang {
     pointer-events: auto;
-    display: flex; align-items: center; gap: 5px;
-    font-family: var(--ui); font-size: 11px; letter-spacing: 0.04em;
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
   .lang button {
-    -webkit-appearance: none; appearance: none; border: none; background: none;
-    padding: 2px 3px; font: inherit; color: var(--glass-muted); cursor: pointer;
-    transition: color 0.2s ease;
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    background: transparent;
+    min-width: 28px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 3px;
+    font-family: var(--ui);
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    color: var(--glass-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
   }
   .lang button:hover { color: var(--glass-text); }
-  .lang button.on { color: var(--accent); font-weight: 650; }
-  .lang .sep { color: var(--glass-muted); opacity: 0.55; }
+  .lang button.on {
+    color: #fff;
+    background: rgba(90, 168, 224, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(90, 168, 224, 0.4);
+  }
+  .lang button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
 
-  /* 모바일: safe-area 존중 + 축소(브랜드 낙관은 유지하되 작게). 언어 토글 탭 타깃 확대. */
   @media (pointer: coarse) {
     .seal-label {
-      left: max(12px, calc(env(safe-area-inset-left) + 4px));
-      bottom: max(14px, calc(env(safe-area-inset-bottom) + 8px));
-      gap: 0.4rem;
+      left: max(10px, calc(env(safe-area-inset-left) + 4px));
+      bottom: max(12px, calc(env(safe-area-inset-bottom) + 8px));
+      padding: 8px 10px 8px 8px;
+      gap: 10px;
     }
-    .stamp { font-size: 11px; }
-    .info { font-size: 17px; padding: 6px 8px; }
-    .lang { font-size: 13px; gap: 8px; }
-    .lang button { padding: 4px 6px; }
+    .stamp { font-size: 11px; padding: 8px 3px; }
+    .info { font-size: 15px; padding: 6px 8px; min-width: 36px; min-height: 36px; }
+    .lang button { min-width: 36px; height: 32px; font-size: 12px; }
   }
 </style>

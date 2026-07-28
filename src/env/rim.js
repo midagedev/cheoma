@@ -115,16 +115,24 @@ export const RIM_SOLAR_GATE = Object.freeze({
 // The distance fade exists to drop rim off *apparent* background — distant ridges and far
 // buildings — but it reads raw view-space depth. A compensated telephoto dolly holds the
 // subject's projected size while moving the camera 2.3× (close parcel) to 3.0× (hero) farther,
-// so the authored 24/175m band lands in front of the subject and fades the rim off the thing
-// the frame is about. Scale the band by the same dolly the close lens applies.
-const RIM_LENS_DOLLY = dollyScaleForFov(
-  VILLAGE_LENS.parcel.referenceFov,
-  VILLAGE_LENS.parcel.fov,
+// so the authored 24/175m band must scale with the *live* lens, not a fixed parcel dolly.
+// post.js updates uRimNear/Far each frame via rimDistanceGateForFov(camera.fov).
+// Hero settle (~170 m at 7°) was at ~33% strength with parcel-only scaling — the flagship
+// eave rim at choreography end never peaked.
+export const RIM_DISTANCE_BASE = Object.freeze({ near: 24, far: 175 });
+export function rimDistanceGateForFov(fovDegrees, referenceFov = VILLAGE_LENS.parcel.referenceFov) {
+  const live = Number.isFinite(fovDegrees) && fovDegrees > 0
+    ? dollyScaleForFov(referenceFov, fovDegrees)
+    : dollyScaleForFov(referenceFov, VILLAGE_LENS.parcel.fov);
+  return {
+    near: RIM_DISTANCE_BASE.near * live,
+    far: RIM_DISTANCE_BASE.far * live,
+  };
+}
+// Parcel-lens defaults for init / pure gates that do not have a live camera.
+export const RIM_DISTANCE_GATE = Object.freeze(
+  rimDistanceGateForFov(VILLAGE_LENS.parcel.fov),
 );
-export const RIM_DISTANCE_GATE = Object.freeze({
-  near: 24 * RIM_LENS_DOLLY,
-  far: 175 * RIM_LENS_DOLLY,
-});
 
 // Axial defocus damp (same units as BokehPass focus = -viewZ metres). amount=0 leaves inert.
 export const RIM_DOF_GATE = Object.freeze({
