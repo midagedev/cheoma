@@ -397,8 +397,10 @@ const layers = [75, 90, 120, 150];
 for (let index = 1; index < layers.length; index++) {
   const nearer = radiusAt(layers[index - 1]);
   const further = radiusAt(layers[index]);
+  // Product aperture 0.30 m (subject-readable band) yields ~0.96 px on the
+  // last step at 1080p; require a clear separation, not the old 0.40 m budget.
   invariant(
-    further - nearer >= 1 && further >= nearer * 1.15,
+    further - nearer >= 0.9 && further >= nearer * 1.15,
     `background layers ${layers[index - 1]}m and ${layers[index]}m collapsed ` +
       `into one blur (${nearer.toFixed(2)}px vs ${further.toFixed(2)}px)`,
   );
@@ -408,11 +410,11 @@ invariant(
   `the background ladder lost its end-to-end spread ` +
     `(${(radiusAt(150) / radiusAt(75)).toFixed(2)}x from 75m to 150m)`,
 );
-// Floors scale with the product aperture (0.40 m). Background must still
-// separate as layers, but the absolute pixel budget is lower than the old
-// 0.52 m near-band so courtyard life can stay readable.
+// Floors scale with the product aperture (0.30 m). Neighbours must still leave
+// the sharp band and the ridge must stay several px soft, without the old
+// 0.40/0.55 budget that crushed thatch and 마당 grain.
 invariant(
-  radiusAt(75) > 2 && radiusAt(150) > 7,
+  radiusAt(75) > 1.5 && radiusAt(150) > 5,
   "neighbouring parcel and background ridge stayed effectively sharp",
 );
 
@@ -432,12 +434,12 @@ invariant(
   asymptote < maxCoc,
   `background asymptote ${asymptote.toFixed(2)}px reached the ${maxCoc.toFixed(2)}px clamp`,
 );
-// Foreground clamp sample: with the product aperture (0.40 m) mid-courtyard
+// Foreground clamp sample: with the product aperture (0.30 m) mid-courtyard
 // planes no longer saturate maxCoc — that is intentional (yard life stays
-// readable). Closer near planes still hit the cap so only the extreme
-// foreground is clamped.
+// readable). Extreme near planes still hit the cap so only the very front
+// of the frame is clamped (12 m no longer reaches the cap at 0.30 m).
 invariant(
-  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(12) >= maxCoc - 1e-6,
+  radiusAt(1e9) < maxCoc - 1e-6 && radiusAt(6) >= maxCoc - 1e-6,
   "the CoC clamp stopped being foreground-only",
 );
 // Product telephoto focus (~50 m, 16°) with the authored tilt dial must keep the
@@ -457,8 +459,16 @@ invariant(
     `max ${productTiltHeadroom.maxCocPx.toFixed(2)}px, ratio ${productTiltHeadroom.ratio.toFixed(3)})`,
 );
 invariant(
-  BOKEH_COC_DEFAULTS.tiltStrength >= 0.4,
+  BOKEH_COC_DEFAULTS.tiltStrength >= 0.28,
   "product tilt dial fell below the diorama floor that narrows the sharp band",
+);
+invariant(
+  BOKEH_COC_DEFAULTS.tiltStrength <= 0.45,
+  "product tilt dial rose back into the subject-crushing range (roof/yard unreadable)",
+);
+invariant(
+  BOKEH_COC_DEFAULTS.apertureMeters >= 0.25 && BOKEH_COC_DEFAULTS.apertureMeters <= 0.36,
+  "product aperture left the residential readability band (0.25–0.36 m)",
 );
 
 // (6) fov dependence. One aperture constant has to make the telephoto hero lens
@@ -534,8 +544,10 @@ for (const z of [158, 170, 182]) {
     `hero subject depth ${z}m left the sharp band (${heroRadiusAt(z).toFixed(2)}px)`,
   );
 }
+// Floors follow product aperture 0.30 m (effective 0.60 m at hero settle boost).
+// Absolute px are lower than the 0.40 m dial; separation ratio is the real claim.
 invariant(
-  heroRadiusAt(220) > 4 && heroRadiusAt(300) > 8,
+  heroRadiusAt(220) > 3 && heroRadiusAt(300) > 6,
   `hero settle ridge stayed sharp (220 m ${heroRadiusAt(220).toFixed(2)}px, ` +
     `300 m ${heroRadiusAt(300).toFixed(2)}px)`,
 );
@@ -545,7 +557,7 @@ invariant(
 );
 const heroRidgeTilted = heroSettleLadder.find((entry) => entry.z === 250);
 invariant(
-  heroRidgeTilted && heroRidgeTilted.radiusPx > 8,
+  heroRidgeTilted && heroRidgeTilted.radiusPx > 5,
   `hero settle tilted ridge lost soft separation (${heroRidgeTilted?.radiusPx?.toFixed(2)}px)`,
 );
 const heroTiltHeadroom = bokehTiltFarAsymptoteHeadroom({

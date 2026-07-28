@@ -3914,7 +3914,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       for (let i = 0; i < count; i++) post.update(step);
       return bokehPass.uniforms.highlightThreshold.value;
     },
-    debugTuneDof({ amount, aperture, maxBlur, maxCocFraction } = {}) {
+    debugTuneDof({ amount, aperture, maxBlur, maxCocFraction, tilt } = {}) {
       if (Number.isFinite(aperture)) post.setDofAperture(aperture);
       if (Number.isFinite(maxBlur)) bokehPass.uniforms.maxblur.value = Math.max(0, maxBlur);
       // Verification counterfactual only. Forcing the CoC clamp down to the former
@@ -3922,6 +3922,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // binary, which is how tools/shoot-dof-layers.mjs proves that single clamp
       // was what removed the depth layers (docs/dof-cinematic-research.md §3.1).
       if (Number.isFinite(maxCocFraction)) bokehPass.maxCocFraction = Math.max(0, maxCocFraction);
+      if (Number.isFinite(tilt)) post.setDofTilt?.(tilt);
       if (Number.isFinite(amount)) inkModeRuntime.setFocusPolicy({ dofAmount: amount });
       return debugDofState();
     },

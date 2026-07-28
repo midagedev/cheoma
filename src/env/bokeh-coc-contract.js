@@ -102,15 +102,14 @@ export function bokehLongFocusApertureMeters(
 export const BOKEH_COC_DEFAULTS = Object.freeze({
   // Product close-focus aperture diameter in metres (thin-lens CoC). Originally
   // 0.675 m (~85mm f/2.8 on a 1:22 model, docs/dof-cinematic-research.md §1.2 / §4.3)
-  // so a 150 m ridge sat at ~1.2% of frame height; 0.52 m still left the south
-  // courtyard — chickens, dog, yard life between camera and the door focus plane —
-  // soft at residential focus. 0.40 m deepens the near band so one whole house and
-  // the 마당 stay readable while neighbouring parcels and the ridge still separate
-  // and lantern discs remain. Long hero settle focus multiplies this through
+  // so a 150 m ridge sat at ~1.2% of frame height. 0.40 m + tilt 0.55 still soft-
+  // crushed thatch/giwa grain and 마당 props at residential focus (2026-07-28 A/B
+  // on p27). 0.30 m keeps neighbour/ridge separation and lantern discs while the
+  // subject house and yard stay readable. Long hero settle multiplies this through
   // bokehLongFocusApertureMeters (not a second product dial). Exposed in metres
   // rather than an f-stop because no real full-scale lens reaches the required
   // f-number.
-  apertureMeters: 0.40,
+  apertureMeters: 0.30,
   // Fraction of viewport height. It binds the foreground only: the background
   // asymptote (cocScalePx / focus) stays below it at product focus distances, so
   // far blur runs the pure physical curve to infinity and the near/far asymmetry
@@ -135,14 +134,13 @@ export const BOKEH_COC_DEFAULTS = Object.freeze({
   // Below this the composite takes the direct one-fetch path.
   sharpRadiusPx: 0.45,
   // Scheimpflug tilt as a fraction of 1/focus per unit screen height. 0 is the
-  // ordinary lens. 0.55 is the product diorama dial: strong enough to narrow the
-  // sharp band and steepen the exit ramp without a second aperture, and still
-  // under the far-asymptote headroom at product telephoto focus (50 m / 16° /
-  // 720p) with maxCocFraction 0.04 (and the deeper product aperture above):
-  //   asymptote * (1 + 0.55 * 0.65) < 4.00%
-  // Raising tilt requires raising maxCocFraction in the same edit;
-  // bokehTiltFarAsymptoteHeadroom() fails the gate if it is not.
-  tiltStrength: 0.55,
+  // ordinary lens. 0.32 is the product diorama dial after the 2026-07-28 A/B:
+  // enough to keep a miniature exit ramp and soft neighbours, not so much that
+  // the subject roof/yard band collapses (0.55 did). Far-asymptote headroom at
+  // product telephoto focus (50 m / 16° / 720p) with maxCocFraction 0.04:
+  //   asymptote * (1 + 0.32 * 0.65) < 4.00%
+  // Raising tilt requires checking bokehTiltFarAsymptoteHeadroom() in the same edit.
+  tiltStrength: 0.32,
 });
 
 export const BOKEH_GATHER_BASE_RINGS = 4;
