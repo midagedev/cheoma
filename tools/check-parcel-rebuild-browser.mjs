@@ -162,7 +162,8 @@ try {
 
   // Panel footer: shared toolrow (photo/share/export) + house-primary rebuild.
   // Floating dock no longer owns village secondary tools.
-  const actions = await page.locator('.foot.house:not([aria-hidden="true"]) button')
+  // Footer primary may be native <button> or Spectrum <sp-button>.
+  const actions = await page.locator('.foot.house:not([aria-hidden="true"]) button, .foot.house:not([aria-hidden="true"]) sp-button')
     .evaluateAll((buttons) => buttons.map((button) => button.textContent.replace(/\s+/g, ' ').trim()));
   invariant(actions.length === 1, `house footer has ${actions.length} actions instead of 1`);
   invariant(actions.some((label) => label.includes('이 집 다시 짓기')), `missing rebuild label: ${actions.join(' | ')}`);
@@ -834,7 +835,7 @@ try {
   }, fixture.parcelId);
   invariant(switched.kind === targetKind && switched.params.footprintScale === 1.41,
     `type switch did not establish a target-kind edit frame: ${JSON.stringify(switched)}`);
-  await page.locator('.foot.house:not([aria-hidden="true"]) button.reroll').click();
+  await page.locator('.foot.house:not([aria-hidden="true"]) button.reroll, .foot.house:not([aria-hidden="true"]) sp-button.reroll').click();
   await page.waitForFunction(({ parcelId, targetKind }) => {
     const state = window.__engine.village.getState();
     const rebuilt = window.__engine.village.debugParcelRebuild(parcelId);

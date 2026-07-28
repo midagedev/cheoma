@@ -1,5 +1,5 @@
 <script>
-  // Bottom-left brand + seed + locale — CAD status chip (glass), not loose floating type.
+  // Bottom-left brand + seed + locale — glass status chip over the scene.
   // Brand stamp is the only traditional seal accent in chrome.
   import { i18n, setLang } from '../lib/i18n.svelte.js';
   let { seed = 0, onInfo } = $props();
@@ -24,7 +24,9 @@
   <div class="rail">
     <div class="meta">
       <span class="seed" title={'seed ' + (seed >>> 0)}>{seedStr}</span>
+      <!-- Native button: app-smoke focuses `button.info[aria-label=…]` then Enter. -->
       <button
+        type="button"
         class="info"
         data-reference-trigger="info"
         onclick={openInfo}
@@ -48,12 +50,11 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
-    padding: 7px 10px 7px 8px;
+    gap: 8px;
+    padding: 6px 8px 6px 7px;
     border-radius: 10px;
     user-select: none;
     pointer-events: none;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
   }
   .brand {
     pointer-events: auto;
@@ -71,6 +72,7 @@
   .brand:focus-visible .stamp {
     box-shadow: 0 0 0 2px rgba(18, 21, 26, 0.9), 0 0 0 3.5px var(--accent);
   }
+  /* Brand only — intentional non-Spectrum seal stamp */
   .stamp {
     writing-mode: vertical-rl;
     font-family: var(--serif);
@@ -95,13 +97,14 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
+    pointer-events: auto;
   }
   .meta {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
   }
   .seed {
     font-family: var(--mono);
@@ -110,35 +113,36 @@
     letter-spacing: 0.06em;
     color: var(--glass-muted);
     font-variant-numeric: tabular-nums;
+    padding: 0 4px;
   }
   .info {
-    pointer-events: auto;
-    cursor: pointer;
     -webkit-appearance: none;
     appearance: none;
     border: none;
     background: transparent;
     padding: 2px 4px;
     border-radius: 4px;
-    font-family: var(--ui);
     font-size: 12px;
     line-height: 1;
     color: var(--glass-muted);
-    transition: color 0.15s ease, background 0.15s ease;
+    cursor: pointer;
   }
   .info:hover, .info:focus-visible {
     color: var(--accent);
     background: rgba(255, 255, 255, 0.06);
     outline: none;
   }
+  .info:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
   .lang {
-    pointer-events: auto;
     display: inline-flex;
     align-items: center;
     padding: 2px;
     border-radius: 5px;
     background: rgba(0, 0, 0, 0.28);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
   }
   .lang button {
     -webkit-appearance: none;
@@ -149,19 +153,17 @@
     height: 22px;
     padding: 0 7px;
     border-radius: 3px;
-    font-family: var(--ui);
     font-size: 10.5px;
     font-weight: 650;
     letter-spacing: 0.04em;
     color: var(--glass-muted);
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
   }
   .lang button:hover { color: var(--glass-text); }
   .lang button.on {
     color: #fff;
-    background: rgba(90, 168, 224, 0.28);
-    box-shadow: inset 0 0 0 1px rgba(90, 168, 224, 0.4);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
   }
   .lang button:focus-visible {
     outline: 2px solid var(--accent);
@@ -172,8 +174,7 @@
     .seal-label {
       left: max(10px, calc(env(safe-area-inset-left) + 4px));
       bottom: max(12px, calc(env(safe-area-inset-bottom) + 8px));
-      padding: 8px 10px 8px 8px;
-      gap: 10px;
+      padding: 7px 8px 7px 7px;
     }
     .stamp { font-size: 11px; padding: 8px 3px; }
     .info { font-size: 15px; padding: 6px 8px; min-width: 36px; min-height: 36px; }

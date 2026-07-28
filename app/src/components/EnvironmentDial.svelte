@@ -221,7 +221,7 @@
     <circle class="hub" cx={C} cy={C} r="7" />
   </svg>
 
-  <!-- 렌더 스타일(景/墨) — 구 좌상 RenderStyleToggle 의 승계자(#158 P4). 셀렉터·상태 계약은 보존. -->
+  <!-- 렌더 스타일(景/墨) — gate keeps `.dial .render-style button` selectors. -->
   <div class="render-style" role="group" aria-label={t('render_style')}>
     <button
       class:on={renderStyle === 'pbr'}
@@ -245,39 +245,39 @@
     </button>
   </div>
 
-  <!-- 액션 칩 — 석양일 때만 가운데 색구슬이 나타나 노을빛을 순환한다. -->
+  <!-- Spectrum action row — sunset tone orb stays custom (product color language). -->
   <div class="dial-actions">
-    <button
+    <sp-action-button
       class="dial-btn env-roll"
-      type="button"
+      quiet
       onclick={rollEnv}
       title={t('env_reroll_tip')}
       aria-label={t('env_reroll')}
     >
       <span class="rk-glyph" style="transform: rotate({spins * 360}deg)">⟳</span>
-    </button>
+    </sp-action-button>
     {#if time === 'sunset'}
-      <button
+      <sp-action-button
         class="dial-btn sunset-tone {sunsetLook}"
-        type="button"
+        quiet
         onclick={cycleSunsetLook}
         title={t('sunset_look_tip') + ' — ' + t('sunset_look_' + sunsetLook)}
         aria-label={t('sunset_look_tip') + ': ' + t('sunset_look_' + sunsetLook)}
       >
         <span class="tone-orb" aria-hidden="true"></span>
-      </button>
+      </sp-action-button>
     {/if}
-    <button
+    <sp-action-button
       class="dial-btn env-flow"
-      class:on={flowing}
-      type="button"
+      quiet
+      selected={flowing || undefined}
       onclick={() => onFlowToggle?.()}
       title={t(flowing ? 'env_flow_on_tip' : 'env_flow_tip')}
       aria-label={t('env_flow')}
       aria-pressed={flowing}
     >
       <span class="flow-orb" aria-hidden="true"></span>
-    </button>
+    </sp-action-button>
   </div>
 </div>
 {/if}
@@ -294,9 +294,10 @@
     padding: 6px 8px 8px;
     border-radius: 10px;
     background-color: var(--glass);
-    background-image: var(--grain);
     border: 1px solid var(--glass-border);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(12px) saturate(1.1);
+    -webkit-backdrop-filter: blur(12px) saturate(1.1);
     user-select: none;
     touch-action: none;
     transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
@@ -402,7 +403,7 @@
     display: flex; gap: 2px; align-self: stretch;
     padding: 2px; border-radius: 6px;
     border: 1px solid var(--glass-border);
-    background: rgba(0, 0, 0, 0.22);
+    background: rgba(0, 0, 0, 0.28);
   }
   .render-style button {
     -webkit-appearance: none; appearance: none; border: 0;
@@ -413,88 +414,68 @@
     transition: background 0.14s ease, color 0.14s ease;
   }
   .render-style button:hover { background: rgba(255, 255, 255, 0.08); }
-  .render-style button:active { transform: scale(0.97); }
   .render-style button.on {
-    background: rgba(255, 255, 255, 0.94); color: #12151a;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    background: var(--accent-soft); color: #fff;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .render-style button:last-child.on {
-    background: #1c222b; color: var(--glass-text);
+    background: rgba(28, 34, 43, 0.95); color: var(--glass-text);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   }
-  .render-style button:not(.on) { color: var(--glass-muted); }
   .render-style button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .render-style .glyph { font-size: 13px; }
 
-  .dial-actions { display: flex; gap: 4px; width: 100%; }
-  .dial-btn {
-    -webkit-appearance: none;
-    appearance: none;
+  .dial-actions {
+    display: flex;
+    gap: 2px;
+    width: 100%;
+  }
+  .dial-actions :global(sp-action-button.dial-btn) {
     flex: 1;
-    width: auto;
     min-width: 0;
-    height: 34px;
-    border-radius: 6px;
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: none;
-    color: var(--glass-text);
-    transition: background 0.12s ease, border-color 0.12s ease;
+    min-height: 34px;
   }
   .rk-glyph {
     display: block;
-    font-size: 18px;
+    font-size: 16px;
     line-height: 1;
     font-weight: 650;
     transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .dial-btn:hover {
-    background: var(--accent-soft);
-    border-color: rgba(90, 168, 224, 0.35);
-  }
-  .dial-btn:active { background: rgba(255, 255, 255, 0.1); }
-  .dial-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .tone-orb {
     display: block;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     border: 1px solid rgba(255, 244, 229, 0.85);
-    box-shadow: 0 0 9px color-mix(in srgb, var(--tone) 65%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--tone) 65%, transparent);
     background: radial-gradient(circle at 34% 32%, #fff1d7 0 8%, var(--tone) 35%, var(--tone-deep) 100%);
   }
-  .sunset-tone.gold { --tone: #e8a074; --tone-deep: #6f628e; }
-  .sunset-tone.crimson { --tone: #d96862; --tone-deep: #704c7d; }
-  .sunset-tone.violet { --tone: #c37c99; --tone-deep: #4e5485; }
+  .dial-actions :global(sp-action-button.sunset-tone.gold) { --tone: #e8a074; --tone-deep: #6f628e; }
+  .dial-actions :global(sp-action-button.sunset-tone.crimson) { --tone: #d96862; --tone-deep: #704c7d; }
+  .dial-actions :global(sp-action-button.sunset-tone.violet) { --tone: #c37c99; --tone-deep: #4e5485; }
 
-  /* 시간 흐르기 토글 — 해↔달 오브(주간 금빛 / 야간 먹). 활성 시 아주 느리게(22s) 회전해
-     "때가 흐른다"를 미세한 움직임으로 드러낸다(앱의 "모든 움직임은 미세하게"). 활성 상태는
-     금빛 링으로도 또렷이 읽힌다. reduced-motion 에서는 회전을 멈추고 링만으로 표시. */
   .flow-orb {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: linear-gradient(90deg, #ffe0a8 0 50%, #2a1d16 50% 100%);
     box-shadow: inset 0 0 0 1px rgba(255, 236, 214, 0.62), inset -3px 0 5px rgba(0, 0, 0, 0.32);
   }
-  .env-flow.on {
-    box-shadow: 0 3px 12px rgba(120, 40, 30, 0.32), inset 0 0 0 1px rgba(255, 220, 210, 0.22),
-      0 0 0 2px rgba(255, 206, 138, 0.92), 0 0 15px rgba(255, 196, 120, 0.55);
+  :global(.dial-actions sp-action-button.env-flow[selected] .flow-orb) {
+    animation: orbcycle 22s linear infinite;
   }
-  .env-flow.on .flow-orb { animation: orbcycle 22s linear infinite; }
   @keyframes orbcycle { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .env-flow.on .flow-orb { animation: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.dial-actions sp-action-button.env-flow[selected] .flow-orb) { animation: none; }
+  }
 
-  /* 터치: 타깃 ≥44px (check:ui-shell smallTargets). */
   @media (pointer: coarse) {
-    .dial-btn { height: 44px; min-width: 44px; flex: 1 1 44px; }
-    .rk-glyph { font-size: 18px; }
-    .tone-orb { width: 18px; height: 18px; }
-    .flow-orb { width: 20px; height: 20px; }
+    .dial-actions :global(sp-action-button.dial-btn) {
+      min-height: 44px;
+      min-width: 44px;
+    }
     .render-style button { min-height: 44px; padding: 7px 8px; font-size: 12px; }
     .render-style .glyph { font-size: 14px; }
   }

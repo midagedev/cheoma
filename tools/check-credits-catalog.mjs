@@ -50,7 +50,8 @@ for (const topic of requiredTopics) {
 }
 
 // Raw markdown headers must not leave orphan catalog rows outside ①–⑥.
-const headerCount = [...md.matchAll(/^###\s+\d+\.\s+/gm)].length;
+// Allow lettered sub-ids (### 17b.) so ceiling/follow-on entries stay catalog items.
+const headerCount = [...md.matchAll(/^###\s+\d+[a-z]?\.\s+/gim)].length;
 if (headerCount !== entries.length) {
   errors.push(
     `header/parser mismatch: ${headerCount} ### N. headers vs ${entries.length} parsed category items`

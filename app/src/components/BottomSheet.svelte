@@ -198,7 +198,7 @@
 {/if}
 
 <style>
-  /* ---------- Right inspector dock (CAD column) ---------- */
+  /* Shell geometry only — surface color from .inspector-surface (Spectrum tokens). */
   .ctxcard {
     position: fixed;
     top: 0;
@@ -217,8 +217,6 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    /* Instant open/close so --inspector-w and the stage canvas stay in lockstep;
-       a slide would leave a dead strip between a already-shrunk canvas and the panel. */
     transform: translateX(0);
     opacity: 0;
     transition: opacity 0.2s ease;
@@ -229,23 +227,15 @@
     pointer-events: auto;
     transition: opacity 0.36s ease;
   }
-  .ctxcard:not(.open) {
-    visibility: hidden;
-  }
-  /* Landscape phone: same right rail — never a left floating card. */
+  .ctxcard:not(.open) { visibility: hidden; }
   .ctxcard.landscape {
-    top: 0;
-    bottom: 0;
-    right: 0;
-    left: auto;
     width: min(268px, 34vw);
-    max-height: none;
   }
   .ctxhead {
     flex: none;
-    padding: 9px 11px 0;
+    padding: 10px 12px 0;
     border-bottom: 1px solid var(--panel-line);
-    background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
+    background: var(--panel-2);
   }
   .ctxscroll {
     flex: 1 1 auto;
@@ -253,19 +243,19 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    padding: 9px 11px 11px;
+    padding: 10px 12px 12px;
     overscroll-behavior: contain;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    scrollbar-color: var(--panel-border) transparent;
   }
-  .ctxscroll::-webkit-scrollbar { width: 5px; }
+  .ctxscroll::-webkit-scrollbar { width: 6px; }
   .ctxscroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--panel-border);
     border-radius: 3px;
   }
   .ctxfoot {
     flex: none;
-    padding: 9px 11px calc(11px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--panel-line);
     background: var(--panel-2);
   }
@@ -273,24 +263,22 @@
   .ctxcard.landscape .ctxscroll { padding: 8px 10px 10px; }
   .ctxcard.landscape .ctxfoot { padding: 8px 10px 10px; }
 
-  /* ---------- Portrait mobile bottom sheet ---------- */
   .sheet {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
     z-index: 46;
-    border-radius: 14px 14px 0 0;
+    border-radius: 12px 12px 0 0;
     border: 1px solid var(--panel-border);
     border-bottom: none;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    /* Slightly longer ease so view-shift can track the rising sheet without a pop. */
     transition: max-height 0.52s cubic-bezier(0.22, 1, 0.36, 1), transform 0.36s ease;
     will-change: max-height;
     touch-action: none;
-    box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
   }
   .sheet.dragging { transition: none; }
   .sheet[aria-hidden='true'] { transform: translateY(110%); pointer-events: none; }
@@ -308,27 +296,25 @@
   .grip::before {
     content: '';
     position: absolute;
-    top: 7px;
+    top: 8px;
     left: 50%;
-    width: 32px;
-    height: 3px;
+    width: 36px;
+    height: 4px;
     border-radius: 2px;
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--panel-border);
     transform: translateX(-50%);
   }
   .peekbtn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    margin-top: 4px;
-    padding: 5px 12px;
+    margin-top: 6px;
+    padding: 4px 12px;
     border-radius: 999px;
     background: var(--panel-elevated);
     border: 1px solid var(--panel-border);
-    font-family: var(--ui);
-    font-size: 12px;
+    font-size: var(--spectrum-font-size-75, 12px);
     font-weight: 600;
-    letter-spacing: 0.02em;
     color: var(--panel-text);
   }
   .peekbtn .chev {
@@ -350,7 +336,6 @@
     touch-action: pan-y;
     display: flex;
     flex-direction: column;
-    /* Extra bottom pad so the last property row is not hidden under the sticky rebuild footer. */
     padding: 0 clamp(10px, 3vw, 14px) 56px;
     gap: 2px;
   }
@@ -360,7 +345,7 @@
   .sheet[data-snap='peek'] .sheetfoot { visibility: hidden; }
   .sheetfoot {
     flex: none;
-    padding: 3px clamp(10px, 3vw, 14px) calc(5px + env(safe-area-inset-bottom));
+    padding: 4px clamp(10px, 3vw, 14px) calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--panel-line);
     background: var(--panel-2);
   }

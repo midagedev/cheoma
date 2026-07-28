@@ -1,7 +1,7 @@
 <script>
-  // Schema field → optimal control material (docs/design-system.md).
+  // Schema field → Spectrum-aligned control material (docs/design-system.md).
   // Continuous ranges stay native range inputs (live-edit + browser gates).
-  // Discrete controls use Spectrum Web Components or Spectrum-token chrome.
+  // Discrete controls use Spectrum Web Components.
   let {
     field,
     label = '',
@@ -48,7 +48,7 @@
     <span class="rv">{display || num(value).toFixed(2)}</span>
   </label>
 {:else if field.ctrl === 'stepper'}
-  <!-- Visible stepper buttons: parcel-rebuild gate clicks .row[data-key] button -->
+  <!-- Native buttons: parcel-rebuild gate clicks .row[data-key] button -->
   <div class="row bays" class:disabled {...keyProps}>
     <span class="rl">
       {label}
@@ -93,13 +93,15 @@
     </sp-action-group>
   </div>
 {:else if field.ctrl === 'toggle'}
-  <div class="row" class:disabled {...keyProps}>
+  <div class="row" class:disabled>
     <span class="rl">{label}</span>
     <sp-switch
       class="tgl"
       emphasized
       checked={!!value || undefined}
       disabled={disabled || undefined}
+      aria-label={label}
+      aria-checked={value ? 'true' : 'false'}
       {...keyProps}
       onchange={(e) => onToggle?.(!!e.currentTarget.checked)}
     ></sp-switch>
@@ -113,20 +115,22 @@
 {/if}
 
 <style>
+  /* Layout only — colors/type come from Spectrum theme tokens */
   .row {
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(64px, 76px) minmax(0, 1fr) 40px;
     align-items: center;
-    gap: 7px;
-    min-height: 28px;
+    gap: var(--spectrum-spacing-75, 6px);
+    min-height: 32px;
   }
-  .row.bays, .row.seg { grid-template-columns: 72px minmax(0, 1fr); }
+  .row.bays, .row.seg { grid-template-columns: minmax(64px, 76px) minmax(0, 1fr); }
   .row.disabled { opacity: 0.45; pointer-events: none; }
   .rl {
-    font-size: 11.5px;
+    font-size: var(--spectrum-font-size-75, 12px);
     color: var(--panel-text);
     font-weight: 500;
     min-width: 0;
+    line-height: 1.25;
   }
   .bounds {
     display: block;
@@ -138,39 +142,40 @@
   }
   .rv {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: var(--spectrum-font-size-75, 12px);
     color: var(--panel-muted);
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
 
+  /* Spectrum-like range: track + circular thumb from accent token */
   input[type='range'] {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
     min-width: 0;
-    height: 3px;
-    border-radius: 1px;
-    background: rgba(255, 255, 255, 0.12);
+    height: 4px;
+    border-radius: 2px;
+    background: var(--spectrum-gray-300, rgba(255, 255, 255, 0.14));
     outline: none;
   }
   input[type='range']::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 13px;
-    height: 13px;
-    border-radius: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
     background: var(--accent);
-    border: none;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
+    border: 2px solid var(--spectrum-gray-50, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     cursor: pointer;
   }
   input[type='range']::-moz-range-thumb {
-    width: 13px;
-    height: 13px;
-    border-radius: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
     background: var(--accent);
-    border: none;
+    border: 2px solid var(--spectrum-gray-50, #fff);
     cursor: pointer;
   }
 
@@ -178,12 +183,12 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 4px;
   }
   .stepper button {
     width: 28px;
     height: 28px;
-    border-radius: 5px;
+    border-radius: var(--spectrum-corner-radius-100, 4px);
     border: 1px solid var(--panel-border);
     background: var(--panel-elevated);
     color: var(--panel-text);
@@ -198,10 +203,10 @@
   }
   .stepper button:disabled { opacity: 0.28; cursor: default; }
   .stepper .num {
-    min-width: 22px;
+    min-width: 28px;
     text-align: center;
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: var(--spectrum-font-size-100, 14px);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     color: var(--panel-text);
@@ -215,15 +220,13 @@
 
   @media (max-width: 600px), (pointer: coarse) {
     .row {
-      min-height: 34px;
-      gap: 5px;
+      min-height: 40px;
+      gap: 6px;
       grid-template-columns: 70px minmax(0, 1fr) 38px;
     }
     .row.bays, .row.seg { grid-template-columns: 70px minmax(0, 1fr); }
-    .rl { font-size: 11px; }
-    .rv { font-size: 10px; }
-    .stepper button { width: 40px; height: 40px; font-size: 16px; border-radius: 7px; }
-    input[type='range']::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
-    input[type='range']::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
+    .stepper button { width: 40px; height: 40px; font-size: 16px; }
+    input[type='range']::-webkit-slider-thumb { width: 20px; height: 20px; }
+    input[type='range']::-moz-range-thumb { width: 20px; height: 20px; }
   }
 </style>

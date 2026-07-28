@@ -30,34 +30,66 @@
 
 <style>
   .cine-overlay { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
-  /* 장면 라벨 — 상단 중앙, 반투명 먹빛 캡슐. */
   .scene-label {
-    position: absolute; top: max(18px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 8px;
-    padding: 7px 15px; border-radius: 20px;
-    background: rgba(24, 20, 16, 0.42); color: rgba(244, 239, 228, 0.94);
-    font-family: var(--serif); font-size: 13px; font-weight: 700; letter-spacing: 0.06em;
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    position: absolute;
+    top: max(18px, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 15px;
+    border-radius: 999px;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text);
+    font-size: var(--spectrum-font-size-100, 14px);
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     animation: fadein 0.6s ease both;
   }
-  .scene-label .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--seal); box-shadow: 0 0 6px rgba(187, 62, 49, 0.8); animation: pulse 1.8s ease-in-out infinite; }
-  /* 종료 버튼 — 우상단, 포인터 이벤트 활성. */
+  .scene-label .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
   .exit {
-    position: absolute; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
-    pointer-events: auto; display: flex; align-items: center; gap: 7px;
-    padding: 9px 14px; border-radius: 22px; border: 1px solid rgba(244, 239, 228, 0.28);
-    background: rgba(24, 20, 16, 0.42); color: rgba(244, 239, 228, 0.94);
-    font-family: var(--serif); font-size: 13px; font-weight: 700; cursor: pointer;
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-    transition: background 0.15s ease, transform 0.12s ease;
+    position: absolute;
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 9px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-strong);
+    color: var(--glass-text);
+    font-size: var(--spectrum-font-size-100, 14px);
+    font-weight: 650;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: background 0.15s ease;
   }
   .exit .x { font-size: 13px; line-height: 1; }
-  .exit:hover { background: rgba(40, 32, 24, 0.6); transform: translateY(-1px); }
-  .exit:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
-  /* 종료 힌트 — 하단 중앙, 은은하게 페이드(감상 방해 최소화). */
+  .exit:hover { background: rgba(255, 255, 255, 0.1); }
+  .exit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hint {
-    position: absolute; bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px)); left: 50%; transform: translateX(-50%);
-    color: rgba(244, 239, 228, 0.72); font-family: var(--serif); font-size: 12px; letter-spacing: 0.05em;
+    position: absolute;
+    bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--glass-muted);
+    font-size: var(--spectrum-font-size-75, 12px);
+    letter-spacing: 0.04em;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
     animation: fadehint 5s ease forwards;
   }
@@ -65,7 +97,7 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   @keyframes fadehint { 0% { opacity: 0; } 12% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0.25; } }
   @media (pointer: coarse) {
-    .exit { padding: 12px 16px; font-size: 14px; }
+    .exit { min-height: 44px; padding: 12px 16px; font-size: 14px; }
     .scene-label { font-size: 14px; padding: 9px 17px; }
   }
 </style>

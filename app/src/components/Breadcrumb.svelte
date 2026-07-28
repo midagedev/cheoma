@@ -66,49 +66,76 @@
 </nav>
 
 <style>
-  /* Top-left path — glass location chip over the scene. */
+  /* Path chip geometry — glass surface, Spectrum type scale. */
   .crumbs {
     position: fixed;
     left: clamp(10px, 1.6vw, 22px);
     top: clamp(10px, 1.6vh, 22px);
     z-index: 40;
-    display: flex; align-items: center; gap: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     max-width: min(36vw, calc(100vw - var(--inspector-w, 0px) - 200px), 300px);
-    padding: 5px 11px;
+    padding: 4px 10px;
     border-radius: 8px;
     user-select: none;
   }
   .crumb {
-    background: none; border: none; padding: 0;
-    font-family: var(--ui); color: var(--glass-text);
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--ui);
+    color: var(--glass-text);
   }
   .crumb.root {
-    margin: 0; font-size: 13px; font-weight: 650; line-height: 1.15; cursor: default;
-    min-width: 44px; min-height: 36px;
-    display: inline-flex; align-items: center;
+    margin: 0;
+    font-size: var(--spectrum-font-size-100, 14px);
+    font-weight: 650;
+    line-height: 1.15;
+    cursor: default;
+    min-width: 44px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
   }
   .crumb.root.link { cursor: pointer; color: var(--glass-muted); }
   .crumb.root.link:hover { color: #fff; }
   .crumb.root.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .sep { font-size: 12px; color: var(--glass-muted); opacity: 0.65; transition: opacity 0.24s ease; }
+  .sep {
+    font-size: 12px;
+    color: var(--glass-muted);
+    opacity: 0.65;
+    transition: opacity 0.24s ease;
+  }
   .crumb.leaf {
-    font-size: 13px; font-weight: 650; line-height: 1.15; color: var(--accent);
-    transition: opacity 0.24s ease; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis;
+    font-size: var(--spectrum-font-size-100, 14px);
+    font-weight: 650;
+    line-height: 1.15;
+    color: var(--accent);
+    transition: opacity 0.24s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .count {
-    margin-left: 2px; font-family: var(--mono); font-size: 10.5px; font-weight: 600;
-    color: var(--glass-muted); font-variant-numeric: tabular-nums;
-    padding: 1px 5px; border-radius: 3px;
-    background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(255, 255, 255, 0.06);
+    margin-left: 2px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--glass-muted);
+    font-variant-numeric: tabular-nums;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--glass-border);
   }
   .busylabel {
-    font-family: var(--ui); font-size: 10px; letter-spacing: 0.05em;
+    font-size: 10px;
+    letter-spacing: 0.04em;
     color: var(--glass-muted);
   }
-  .crumbs.busy { border-color: rgba(90, 168, 224, 0.45); }
+  .crumbs.busy { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 
-  /* 터치: 루트 타깃 ≥44px. */
   @media (pointer: coarse) {
     .crumbs {
       left: max(10px, calc(env(safe-area-inset-left) + 6px));
@@ -121,9 +148,6 @@
     .crumb.root.link { min-height: 44px; display: flex; align-items: center; padding: 0 2px; }
     .count { font-size: 12px; }
   }
-
-  /* Landscape phone: inspector is a RIGHT rail — path bar stays top-left of the
-     viewport (not offset past a retired left panel). */
   @media (max-height: 520px) and (orientation: landscape) {
     .crumbs {
       left: max(10px, calc(env(safe-area-inset-left) + 6px));

@@ -1,68 +1,26 @@
-/* cheoma shell + Spectrum bridge.
-   Visual language comes from <sp-theme>; this file owns layout contracts,
-   glass-over-WebGL chips, and aliases so existing component CSS can speak Spectrum. */
+/* cheoma shell tokens — Spectrum owns visual language; this file owns
+   layout contracts, glass-over-WebGL, and brand paper only.
+   See docs/design-system.md. */
 
 :root {
   /* Published by the make-panel shell when the right dock is open */
   --inspector-w: 0px;
   --inspector-max: 320px;
 
-  /* Glass over WebGL (path / view tray / docks) */
-  --cheoma-glass: rgba(14, 16, 20, 0.62);
-  --cheoma-glass-strong: rgba(14, 16, 20, 0.78);
+  /* Glass over WebGL (path / view tray / docks) — intentional non-Spectrum */
+  --cheoma-glass: rgba(14, 16, 20, 0.58);
+  --cheoma-glass-strong: rgba(14, 16, 20, 0.76);
   --cheoma-glass-border: rgba(255, 255, 255, 0.12);
   --cheoma-glass-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
   --cheoma-seal: #b1362b;
+  --cheoma-seal-deep: #8a281f;
 
-  /* Inspector surface (opaque tool panel — Spectrum gray scale fallbacks) */
-  --cheoma-inspector: var(--spectrum-gray-100, #1d1d1d);
-  --cheoma-inspector-2: var(--spectrum-gray-75, #262626);
-  --cheoma-inspector-elevated: var(--spectrum-gray-200, #2c2c2c);
-  --cheoma-inspector-border: var(--spectrum-gray-300, #393939);
-  --cheoma-inspector-line: rgba(255, 255, 255, 0.08);
-  --cheoma-inspector-text: var(--spectrum-neutral-content-color-default, #e8e8e8);
-  --cheoma-inspector-muted: var(--spectrum-neutral-content-color-secondary-default, #b3b3b3);
-  --cheoma-inspector-faint: var(--spectrum-neutral-content-color-tertiary-default, #909090);
-  --cheoma-inspector-hover: rgba(255, 255, 255, 0.045);
-  --cheoma-inspector-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), -12px 0 40px rgba(0, 0, 0, 0.28);
-
-  /* Tool accent — Spectrum blue; seal red stays brand-only */
-  --cheoma-accent: var(--spectrum-accent-color-900, #5aa8e0);
-  --cheoma-accent-strong: var(--spectrum-accent-color-1000, #3d87c4);
-  --cheoma-accent-soft: rgba(90, 168, 224, 0.16);
+  /* Product cost language (not Spectrum badge semantics) */
   --cheoma-live: #6fcf97;
   --cheoma-settle: #d4b06a;
   --cheoma-wave: #e07a6a;
 
-  /* Bridge aliases used by existing component styles */
-  --panel: var(--cheoma-inspector);
-  --panel-2: var(--cheoma-inspector-2);
-  --panel-elevated: var(--cheoma-inspector-elevated);
-  --panel-hover: var(--cheoma-inspector-hover);
-  --panel-border: var(--cheoma-inspector-border);
-  --panel-line: var(--cheoma-inspector-line);
-  --panel-text: var(--cheoma-inspector-text);
-  --panel-muted: var(--cheoma-inspector-muted);
-  --panel-faint: var(--cheoma-inspector-faint);
-  --panel-shadow: var(--cheoma-inspector-shadow);
-
-  --glass: var(--cheoma-glass);
-  --glass-strong: var(--cheoma-glass-strong);
-  --glass-border: var(--cheoma-glass-border);
-  --glass-text: rgba(245, 247, 250, 0.94);
-  --glass-muted: rgba(245, 247, 250, 0.62);
-
-  --accent: var(--cheoma-accent);
-  --accent-strong: var(--cheoma-accent-strong);
-  --accent-soft: var(--cheoma-accent-soft);
-  --accent-glow: rgba(90, 168, 224, 0.35);
-  --live: var(--cheoma-live);
-  --settle: var(--cheoma-settle);
-  --wave: var(--cheoma-wave);
-  --seal: var(--cheoma-seal);
-  --seal-deep: #8a281f;
-
-  /* Brand paper (Hero / References only) */
+  /* Brand paper — Hero / References only */
   --paper: #f4efe4;
   --paper-2: #efe6d6;
   --paper-3: #e6dccb;
@@ -78,9 +36,84 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
   --serif: "AppleMyungjo", "Apple SD Gothic Neo", "Malgun Gothic", Batang, Georgia, serif;
   --brush: var(--serif);
-
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
   --hanji: var(--grain);
+}
+
+/* Inside <sp-theme>, bridge legacy component aliases to Spectrum tokens.
+   Outside theme (stage, hero, veil) these fall back to dark neutrals. */
+sp-theme.cheoma-theme {
+  --cheoma-inspector: var(--spectrum-gray-100, #1d1d1d);
+  --cheoma-inspector-2: var(--spectrum-gray-75, #262626);
+  --cheoma-inspector-elevated: var(--spectrum-gray-200, #2c2c2c);
+  --cheoma-inspector-border: var(--spectrum-gray-300, #393939);
+  --cheoma-inspector-line: var(--spectrum-gray-200, rgba(255, 255, 255, 0.08));
+  --cheoma-inspector-text: var(--spectrum-neutral-content-color-default, #e8e8e8);
+  --cheoma-inspector-muted: var(--spectrum-neutral-content-color-secondary-default, #b3b3b3);
+  --cheoma-inspector-faint: var(--spectrum-neutral-content-color-tertiary-default, #909090);
+  --cheoma-inspector-hover: var(--spectrum-gray-200, rgba(255, 255, 255, 0.05));
+  --cheoma-inspector-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
+
+  --cheoma-accent: var(--spectrum-accent-color-900, #5aa8e0);
+  --cheoma-accent-strong: var(--spectrum-accent-color-1000, #3d87c4);
+  --cheoma-accent-soft: color-mix(in srgb, var(--cheoma-accent) 18%, transparent);
+
+  --panel: var(--cheoma-inspector);
+  --panel-2: var(--cheoma-inspector-2);
+  --panel-elevated: var(--cheoma-inspector-elevated);
+  --panel-hover: var(--cheoma-inspector-hover);
+  --panel-border: var(--cheoma-inspector-border);
+  --panel-line: var(--cheoma-inspector-line);
+  --panel-text: var(--cheoma-inspector-text);
+  --panel-muted: var(--cheoma-inspector-muted);
+  --panel-faint: var(--cheoma-inspector-faint);
+  --panel-shadow: var(--cheoma-inspector-shadow);
+
+  --glass: var(--cheoma-glass);
+  --glass-strong: var(--cheoma-glass-strong);
+  --glass-border: var(--cheoma-glass-border);
+  --glass-text: var(--spectrum-neutral-content-color-default, rgba(245, 247, 250, 0.94));
+  --glass-muted: var(--spectrum-neutral-content-color-secondary-default, rgba(245, 247, 250, 0.62));
+
+  --accent: var(--cheoma-accent);
+  --accent-strong: var(--cheoma-accent-strong);
+  --accent-soft: var(--cheoma-accent-soft);
+  --accent-glow: color-mix(in srgb, var(--cheoma-accent) 35%, transparent);
+  --live: var(--cheoma-live);
+  --settle: var(--cheoma-settle);
+  --wave: var(--cheoma-wave);
+  --seal: var(--cheoma-seal);
+  --seal-deep: var(--cheoma-seal-deep);
+
+  --spectrum-font-family: var(--ui);
+}
+
+/* Fallbacks when aliases are read outside sp-theme (stage toast, etc.) */
+:root {
+  --panel: #1d1d1d;
+  --panel-2: #262626;
+  --panel-elevated: #2c2c2c;
+  --panel-hover: rgba(255, 255, 255, 0.05);
+  --panel-border: #393939;
+  --panel-line: #2c2c2c;
+  --panel-text: #e8e8e8;
+  --panel-muted: #b3b3b3;
+  --panel-faint: #909090;
+  --panel-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
+  --glass: var(--cheoma-glass);
+  --glass-strong: var(--cheoma-glass-strong);
+  --glass-border: var(--cheoma-glass-border);
+  --glass-text: rgba(245, 247, 250, 0.94);
+  --glass-muted: rgba(245, 247, 250, 0.62);
+  --accent: #5aa8e0;
+  --accent-strong: #3d87c4;
+  --accent-soft: rgba(90, 168, 224, 0.16);
+  --accent-glow: rgba(90, 168, 224, 0.35);
+  --live: var(--cheoma-live);
+  --settle: var(--cheoma-settle);
+  --wave: var(--cheoma-wave);
+  --seal: var(--cheoma-seal);
+  --seal-deep: var(--cheoma-seal-deep);
 }
 
 * { box-sizing: border-box; }
@@ -110,7 +143,6 @@ sp-theme.cheoma-theme {
   position: relative;
   color: var(--cheoma-inspector-text);
   background: transparent;
-  --spectrum-font-family: var(--ui);
 }
 
 canvas { display: block; touch-action: none; }
@@ -124,28 +156,24 @@ button {
   cursor: pointer;
 }
 
-/* Opaque inspector dock / sheet — Spectrum gray, not glass */
+/* Opaque inspector dock / sheet — Spectrum gray surface, no faux paper grain */
 .cheoma-inspector,
 .inspector-surface {
-  background-color: var(--cheoma-inspector);
-  background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 48%),
-    var(--grain);
-  border-color: var(--cheoma-inspector-border);
-  color: var(--cheoma-inspector-text);
-  box-shadow: var(--cheoma-inspector-shadow);
+  background: var(--cheoma-inspector, var(--panel));
+  border-color: var(--cheoma-inspector-border, var(--panel-border));
+  color: var(--cheoma-inspector-text, var(--panel-text));
+  box-shadow: var(--cheoma-inspector-shadow, var(--panel-shadow));
 }
 
 /* Glass chip for floating chrome over the 3D scene */
 .cheoma-glass,
 .glass-surface {
   background-color: var(--cheoma-glass);
-  background-image: var(--grain);
   border: 1px solid var(--cheoma-glass-border);
   color: var(--glass-text);
   box-shadow: var(--cheoma-glass-shadow);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
 }
 
 /* Brand paper — ReferenceModal / hero only */

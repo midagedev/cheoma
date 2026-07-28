@@ -197,7 +197,7 @@
         <h2 bind:this={title} id={titleId} tabindex="-1">{lab.title}</h2>
         <span class="sub">{lab.sub}</span>
       </div>
-      <button class="x" onclick={requestClose} aria-label={lab.close}>×</button>
+      <button type="button" class="x" onclick={requestClose} aria-label={lab.close}>×</button>
     </header>
 
     <div class="scroll">
@@ -326,12 +326,25 @@
   .head h2 { margin: 0; font-family: var(--serif); font-weight: 700; font-size: clamp(17px, 2.4vw, 20px); color: var(--ink); letter-spacing: 0.02em; }
   .head .sub { font-family: var(--serif); font-size: 11.5px; color: var(--ink-faint); letter-spacing: 0.06em; }
   .head .x {
-    flex: none; width: 34px; height: 34px; border-radius: 50%;
-    border: 1px solid var(--ink-hair); background: transparent;
-    font-size: 21px; line-height: 1; color: var(--ink-soft);
-    display: grid; place-items: center;
+    flex: none;
+    min-width: 40px;
+    min-height: 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--ink-hair);
+    background: transparent;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--ink-soft);
+    display: grid;
+    place-items: center;
   }
   .head .x:hover { background: rgba(44, 38, 32, 0.06); }
+  .head .x:focus-visible {
+    outline: 2px solid var(--seal);
+    outline-offset: 2px;
+  }
 
   .scroll {
     overflow-y: auto;
@@ -365,6 +378,7 @@
   }
   .chip {
     flex: none;
+    min-height: 32px;
     font-family: var(--serif);
     font-size: 11px;
     letter-spacing: 0.02em;
@@ -373,15 +387,23 @@
     background: transparent;
     border: 1px solid var(--ink-hair);
     border-radius: 999px;
-    padding: 5px 10px;
+    padding: 6px 12px;
     text-transform: capitalize;
     max-width: 100%;
   }
   .chip:hover { background: rgba(44, 38, 32, 0.05); }
+  .chip:focus-visible {
+    outline: 2px solid var(--seal);
+    outline-offset: 2px;
+  }
   .chip.on {
     color: var(--paper);
     background: var(--seal);
     border-color: var(--seal);
+  }
+  @media (pointer: coarse) {
+    .chip { min-height: 40px; padding: 8px 14px; }
+    .head .x { min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
   }
 
   .cat { margin-bottom: 22px; }

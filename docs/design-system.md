@@ -31,7 +31,7 @@
 | **Inspector shell** | Dock / sheet geometry | Custom layout + Spectrum surface tokens | Detents, `--inspector-w`, grip are product geometry, not Spectrum components. |
 | **Mode axis** | Explore ↔ Focus | Segmented control (Spectrum tokens) with `.axistab` | Tab = camera morph; must stay 44px-touch and gate-stable. |
 | **Share tools** | Photo / share / export | Quiet `sp-action-button` row under tabs | Secondary utilities, not floating over peek. |
-| **Building nav** | Keyboard reach to parcels | `sp-picker` + `sp-button.navaction` | Grouped landmarks/houses; native `<select>` is not Spectrum. |
+| **Building nav** | Keyboard reach to parcels | Native `<select>` + `.navaction` button (Spectrum tokens) | Grouped landmarks/houses; product keyboard + app-smoke require a real select. |
 | **Continuous params** | Geometry live-edit ranges | Native `input[type=range]` + Spectrum tokens + `PropertyField` | High-frequency `input`/`change`, Playwright focus/arrow, `check:parcel-rebuild` — SWC shadow range is the wrong tool. |
 | **Discrete params** | Stepper / segment / toggle | `sp-number-field`, `sp-action-group`, `sp-switch` | Spectrum wins on affordance and density. |
 | **Primary rebuild** | Village / house reroll | `sp-button` accent fill, classes `.rebuild` / `.hbtn.reroll` | One sticky primary per context. |
@@ -82,12 +82,12 @@ Components own product behaviour; they do not re-invent control chrome.
 
 ## Rebuild order (done when each step is true)
 
-1. Foundation: packages, `sp-theme`, register, tokens, this contract.
-2. Inspector: ContextPanel + BottomSheet surface + PropertyField wired for every schema field.
-3. Status + Action bar + Breadcrumb glass chips (Spectrum type scale / action buttons where useful).
-4. Environment dial tray chrome (rings may stay custom).
-5. Reference / guide overlays on Spectrum tone (paper only where brand needs it).
-6. Prune dead control CSS; keep shell geometry CSS required by gates.
+1. Foundation: packages, `sp-theme`, register, tokens, this contract. **done**
+2. Inspector: ContextPanel + BottomSheet surface + PropertyField wired for every schema field. **done**
+3. Status + Action bar + Breadcrumb glass chips (Spectrum type scale / action buttons where useful). **done**
+4. Environment dial tray chrome (rings may stay custom). **done** (actions = `sp-action-button`; rings custom)
+5. Reference / guide overlays on Spectrum tone (paper only where brand needs it). **done** (References = brand paper; SceneGuide / cine / glossary = glass + tokens)
+6. Prune dead control CSS; keep shell geometry CSS required by gates. **done** (inspector grain removed; component CSS is layout-only)
 
 ## Anti-goals
 

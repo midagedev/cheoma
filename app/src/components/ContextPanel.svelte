@@ -269,35 +269,41 @@
 <BottomSheet {open} gap={7} {detent} ariaLabel="make panel" {header} {footer}>
   {#if navigationGroups.length}
     <div class="buildingnav" data-building-navigation>
-      <sp-field-label class="navlabel" for="building-navigation" size="s">{t('nav_building')}</sp-field-label>
+      <label class="navlabel" for="building-navigation">{t('nav_building')}</label>
       <div class="navcontrols">
-        <sp-picker
+        <!-- Native select: app-smoke / keyboard nav contract (#114, #158 P8). -->
+        <select
           id="building-navigation"
-          value={navigationDraftId}
-          label={t('nav_building')}
-          quiet
-          size="m"
-          onchange={(e) => { navigationDraftId = e.currentTarget.value; }}
+          bind:value={navigationDraftId}
+          aria-label={t('nav_building')}
+          aria-describedby="building-navigation-status"
         >
           {#each navigationGroups as group (group.id)}
-            <sp-menu-group label={navigationGroupLabel(group)}>
+            <optgroup label={navigationGroupLabel(group)}>
               {#each group.targets as target (target.id)}
-                <sp-menu-item value={target.id}>{navigationTargetLabel(target)}</sp-menu-item>
+                <option value={target.id}>{navigationTargetLabel(target)}</option>
               {/each}
-            </sp-menu-group>
+            </optgroup>
           {/each}
-        </sp-picker>
-        <sp-button
+        </select>
+        <button
+          type="button"
           class="navaction"
-          variant={navigationActionUnavailable ? 'secondary' : 'accent'}
-          treatment={navigationActionUnavailable ? 'outline' : 'fill'}
-          size="m"
-          disabled={navigationActionUnavailable || undefined}
+          class:unavailable={navigationActionUnavailable}
+          aria-disabled={navigationActionUnavailable ? 'true' : 'false'}
           aria-label={navigationActionAccessibleLabel}
-          onclick={activateNavigationTarget}
-        >{navigationActionLabel}</sp-button>
+          onclick={(e) => {
+            // Keep the control focusable when unavailable (disabled would steal
+            // focus after activation). Keyboard/app-smoke still read aria-disabled.
+            if (navigationActionUnavailable) {
+              e.preventDefault();
+              return;
+            }
+            activateNavigationTarget();
+          }}
+        >{navigationActionLabel}</button>
       </div>
-      <sp-help-text id="building-navigation-status" size="s">{navigationStatusText}</sp-help-text>
+      <p id="building-navigation-status" class="navstatus" role="status" aria-live="polite">{navigationStatusText}</p>
     </div>
   {/if}
 
@@ -314,7 +320,7 @@
     >
       <section class="pinned">
         <div class="scalehead">
-          <h4>{t('vil_scale')}</h4>
+          <sp-field-label size="s">{t('vil_scale')}</sp-field-label>
           <span class="scaleval">{t('scale_' + shownAnchor)}</span>
         </div>
         <input
@@ -327,21 +333,43 @@
         />
         <div class="ends"><span>{t('scale_solo')}</span><span>{t('scale_hanyang')}</span></div>
         <div class="toggles">
-          <button class="toggle" class:on={includePalace} disabled={!palaceScale}
-            onclick={() => onPalace?.()} title={!palaceScale ? t('vil_palace_hint') : ''}
-            aria-pressed={includePalace}>
-            <span class="dot" aria-hidden="true"></span>{t('vil_palace')}
-          </button>
-          <button class="toggle" class:on={includeTemple} onclick={() => onTemple?.()}
-            aria-pressed={includeTemple}>
-            <span class="dot" aria-hidden="true"></span>{t('vil_temple')}
-          </button>
+          <div
+            class="toggle"
+            class:on={includePalace}
+            class:disabled={!palaceScale}
+            title={!palaceScale ? t('vil_palace_hint') : ''}
+          >
+            <span class="tgl-lab">{t('vil_palace')}</span>
+            <sp-switch
+              emphasized
+              size="s"
+              checked={includePalace || undefined}
+              disabled={!palaceScale || undefined}
+              aria-label={t('vil_palace')}
+              onchange={() => onPalace?.()}
+            ></sp-switch>
+          </div>
+          <div class="toggle" class:on={includeTemple}>
+            <span class="tgl-lab">{t('vil_temple')}</span>
+            <sp-switch
+              emphasized
+              size="s"
+              checked={includeTemple || undefined}
+              aria-label={t('vil_temple')}
+              onchange={() => onTemple?.()}
+            ></sp-switch>
+          </div>
           {#if shownAnchor === 'solo' && onVillageOpt}
-            <button class="toggle" class:on={villageParams.houses === 0}
-              aria-pressed={villageParams.houses === 0}
-              onclick={() => onVillageOpt('houses', villageParams.houses === 0 ? null : 0)}>
-              <span class="dot" aria-hidden="true"></span>{t('vil_nohouse')}
-            </button>
+            <div class="toggle" class:on={villageParams.houses === 0}>
+              <span class="tgl-lab">{t('vil_nohouse')}</span>
+              <sp-switch
+                emphasized
+                size="s"
+                checked={villageParams.houses === 0 || undefined}
+                aria-label={t('vil_nohouse')}
+                onchange={() => onVillageOpt('houses', villageParams.houses === 0 ? null : 0)}
+              ></sp-switch>
+            </div>
           {/if}
         </div>
       </section>
@@ -373,11 +401,13 @@
           <p class="note">{t(schema.heroStyle === 'hanok' ? 'vil_hero_edit_note' : 'vil_palace_edit_note')}</p>
         {:else}
           <section class="pinned">
-            <h4>{t('sec_type')}</h4>
-            <sp-action-group class="typetabs" selects="single" compact>
+            <sp-field-label size="s">{t('sec_type')}</sp-field-label>
+            <!-- Class `tabs` kept for app-smoke (`.tabs .tab` type switch). -->
+            <sp-action-group class="tabs typetabs" selects="single" compact>
               {#each TYPES as ty}
                 <sp-action-button
                   class="tab"
+                  class:on={(params.kind || spec?.kind) === ty.key}
                   value={ty.key}
                   selected={(params.kind || spec?.kind) === ty.key || undefined}
                   onclick={() => onType?.(ty.key)}
@@ -406,63 +436,61 @@
 
 {#snippet header()}
   <div class="makehead">
-    <div class="axistabs" role="tablist" aria-label={t('axis_make')}>
-      <button
+    <sp-action-group
+      class="axistabs"
+      selects="single"
+      compact
+      aria-label={t('axis_make')}
+    >
+      <sp-action-button
         id="make-tab-village"
-        class="axistab" class:on={!houseActive}
-        type="button"
-        role="tab"
-        aria-selected={!houseActive}
+        class="axistab"
+        selected={!houseActive || undefined}
         aria-busy={tabBusy || undefined}
         title={t('mode_to_village')}
         onclick={() => onTab?.('village')}
-      >
-        <span class="lab">{t('mode_village')}</span>
-      </button>
-      <button
+      >{t('mode_village')}</sp-action-button>
+      <sp-action-button
         id="make-tab-house"
-        class="axistab" class:on={houseActive}
-        type="button"
-        role="tab"
-        aria-selected={houseActive}
+        class="axistab"
+        selected={houseActive || undefined}
         aria-busy={tabBusy || undefined}
         title={t('mode_to_house')}
         onclick={() => onTab?.('house')}
-      >
-        <span class="lab">{t('mode_house')}</span>
-      </button>
-    </div>
+      >{t('mode_house')}</sp-action-button>
+    </sp-action-group>
     {#if hasShareTools}
+      <!-- Native buttons: app-smoke uses focus+Enter and transient activation for share(). -->
       <div class="toolrow" role="group" aria-label={t('axis_share')}>
         {#if onPostcard}
-          <sp-action-button
+          <button
+            type="button"
             class="tbtn"
-            quiet
             data-action="postcard"
-            disabled={busy || undefined}
+            disabled={busy}
             title={t('act_postcard_tip')}
             onclick={() => onPostcard?.()}
-          >{t('act_postcard')}</sp-action-button>
+          >{t('act_postcard')}</button>
         {/if}
         {#if onShare}
-          <sp-action-button
+          <button
+            type="button"
             class="tbtn"
-            quiet
             data-action="share"
-            disabled={busy || undefined}
+            disabled={busy}
             title={t('act_share_tip')}
             onclick={() => onShare?.()}
-          >{t('act_share')}</sp-action-button>
+          >{t('act_share')}</button>
         {/if}
         {#if onExport}
-          <sp-action-button
+          <button
+            type="button"
             class="tbtn"
-            quiet
             data-action="export"
-            disabled={exporting || busy || undefined}
+            disabled={exporting || busy}
             title={exportTip}
             onclick={() => onExport?.()}
-          >{exportLabel}</sp-action-button>
+          >{exportLabel}</button>
         {/if}
       </div>
     {/if}
@@ -513,7 +541,13 @@
   >
     <span class="chev" aria-hidden="true">{isOpen ? '−' : '+'}</span>
     <span class="gname">{t(sec.titleKey)}</span>
-    <span class="costbadge {sec.cost}" data-cost={sec.cost} title={t('cost_' + sec.cost + '_tip')}>{t('cost_' + sec.cost)}</span>
+    <sp-badge
+      class="costbadge {sec.cost}"
+      data-cost={sec.cost}
+      size="s"
+      variant="neutral"
+      title={t('cost_' + sec.cost + '_tip')}
+    >{t('cost_' + sec.cost)}</sp-badge>
   </button>
 {/snippet}
 
@@ -530,13 +564,16 @@
           onCommit={(v) => vRange(f, v)}
         />
       {:else if f.ctrl === 'toggle'}
-        <div class="row" class:disabled={vDisabled(f)} data-vkey={f.key}>
+        {@const on = f.tri ? vTriOn(f) : vPlainOn(f)}
+        <div class="row" class:disabled={vDisabled(f)}>
           <span class="rl">{t('s_' + f.key)}{#if vDisabled(f) && f.tierHint}<span class="tierhint"> · {t(f.tierHint)}</span>{/if}</span>
           <sp-switch
             class="tgl"
             emphasized
             data-vkey={f.key}
-            checked={(f.tri ? vTriOn(f) : vPlainOn(f)) || undefined}
+            aria-label={t('s_' + f.key)}
+            aria-checked={on ? 'true' : 'false'}
+            checked={on || undefined}
             disabled={vDisabled(f) || undefined}
             onchange={() => f.tri ? vToggleTri(f) : vTogglePlain(f)}
           ></sp-switch>
@@ -596,232 +633,371 @@
 {/snippet}
 
 <style>
-  .makehead { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
-  .axistabs {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
-    padding: 2px; border-radius: 7px;
-    background: rgba(0, 0, 0, 0.28); border: 1px solid var(--panel-border);
+  /* Layout + product structure only. Control chrome is Spectrum. */
+  .makehead {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spectrum-spacing-75, 6px);
+    padding-bottom: var(--spectrum-spacing-75, 6px);
   }
-  .axistab {
-    display: flex; align-items: center; justify-content: center;
-    min-height: 34px; padding: 6px; border: none; border-radius: 5px;
-    background: transparent; color: var(--panel-muted);
-    font-family: var(--ui); letter-spacing: 0.01em;
-    transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  .makehead :global(sp-action-group.axistabs) {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    gap: 2px;
   }
-  .axistab .lab { font-size: 12px; font-weight: 650; }
-  .axistab:hover { background: var(--panel-hover); color: var(--panel-text); }
-  .axistab.on {
-    background: color-mix(in srgb, var(--accent) 24%, transparent);
-    color: #fff;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 48%, transparent);
+  .makehead :global(sp-action-button.axistab) {
+    width: 100%;
+    min-height: 36px;
+    justify-content: center;
   }
-  .axistab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toolrow {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    width: 100%;
+    border-bottom: 1px solid var(--panel-line);
+  }
+  .toolrow .tbtn {
+    width: 100%;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-right: 1px solid var(--panel-line);
+    border-radius: 0;
+    background: transparent;
+    color: var(--panel-muted);
+    font-size: var(--spectrum-font-size-75, 12px);
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .toolrow .tbtn:last-child { border-right: none; }
+  .toolrow .tbtn:hover:not(:disabled) {
+    color: var(--panel-text);
+    background: var(--panel-hover);
+  }
+  .toolrow .tbtn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    z-index: 1;
+  }
+  .toolrow .tbtn:disabled { opacity: 0.42; cursor: default; }
 
   .buildingnav {
-    display: flex; flex-direction: column; gap: 4px;
-    padding-bottom: 8px; margin-bottom: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+    margin-bottom: 2px;
     border-bottom: 1px solid var(--panel-line);
   }
   .navlabel {
-    font-size: 9.5px; font-weight: 650; letter-spacing: 0.12em;
-    color: var(--panel-faint); text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    color: var(--panel-faint);
+    text-transform: uppercase;
   }
   .navcontrols {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: center;
   }
-  .navcontrols :global(sp-picker) { min-width: 0; width: 100%; }
-  .navcontrols :global(sp-button.navaction) { min-width: 58px; min-height: 36px; }
-  .navstatus, .buildingnav :global(sp-help-text) {
-    min-height: 1.2em; margin: 0; font-size: 11px; line-height: 1.25;
-    color: var(--panel-faint); font-variant-numeric: tabular-nums;
+  .navcontrols select {
+    min-width: 0;
+    width: 100%;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: var(--spectrum-corner-radius-100, 4px);
+    border: 1px solid var(--panel-border);
+    background: var(--panel-elevated);
+    color: var(--panel-text);
+    font-size: var(--spectrum-font-size-75, 12px);
+  }
+  .navcontrols select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .navcontrols .navaction {
+    min-width: 58px;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: var(--spectrum-corner-radius-100, 4px);
+    border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    background: var(--accent-soft);
+    color: var(--panel-text);
+    font-size: var(--spectrum-font-size-75, 12px);
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .navcontrols .navaction:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  .navcontrols .navaction.unavailable,
+  .navcontrols .navaction[aria-disabled='true'] {
+    opacity: 0.42;
+    cursor: default;
+  }
+  .navcontrols .navaction:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .navstatus {
+    min-height: 1.2em;
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.25;
+    color: var(--panel-faint);
+    font-variant-numeric: tabular-nums;
   }
 
   .stack { display: grid; }
   .stack > .ctx {
-    grid-column: 1; grid-row: 1;
-    display: flex; flex-direction: column; gap: 8px;
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     transition: opacity 0.12s linear;
   }
 
   section { display: flex; flex-direction: column; gap: 6px; }
   section.pinned {
-    padding: 8px 9px 10px; border-radius: 7px;
-    background: var(--panel-2); border: 1px solid var(--panel-line);
-  }
-  h4 {
-    margin: 0; font-size: 9.5px; font-weight: 650; letter-spacing: 0.12em;
-    color: var(--panel-faint); text-transform: uppercase;
+    padding: 10px;
+    border-radius: var(--spectrum-corner-radius-100, 4px);
+    background: var(--panel-2);
+    border: 1px solid var(--panel-line);
   }
 
-  .scalehead { display: flex; align-items: baseline; justify-content: space-between; }
+  .scalehead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .scaleval {
-    font-size: 13px; font-weight: 650; color: var(--panel-text);
+    font-size: var(--spectrum-font-size-100, 14px);
+    font-weight: 600;
+    color: var(--panel-text);
     font-variant-numeric: tabular-nums;
   }
   .ends {
-    display: flex; justify-content: space-between;
-    font-size: 10px; color: var(--panel-faint); letter-spacing: 0.02em;
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--spectrum-font-size-50, 11px);
+    color: var(--panel-faint);
   }
   input[type='range'].scale {
-    -webkit-appearance: none; appearance: none; width: 100%;
-    height: 3px; border-radius: 1px; background: rgba(255, 255, 255, 0.12); outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--spectrum-gray-300, rgba(255, 255, 255, 0.14));
+    outline: none;
   }
   input[type='range'].scale::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 12px; height: 16px; border-radius: 2px;
-    background: var(--accent); border: none;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.35);
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--spectrum-gray-50, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     cursor: pointer;
   }
   input[type='range'].scale::-moz-range-thumb {
-    width: 12px; height: 16px; border-radius: 2px;
-    background: var(--accent); border: none; cursor: pointer;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--spectrum-gray-50, #fff);
+    cursor: pointer;
   }
-  .toggles { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  .toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   .toggle {
-    flex: 1; min-width: 0;
-    display: flex; align-items: center; justify-content: center; gap: 5px;
-    padding: 7px 5px; border-radius: 5px; font-size: 11.5px; font-weight: 600;
-    background: transparent; border: 1px solid var(--panel-border); color: var(--panel-muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 32px;
+    padding: 2px 0;
+    color: var(--panel-text);
+    font-size: var(--spectrum-font-size-75, 12px);
+    font-weight: 500;
+    cursor: pointer;
   }
-  .toggle .dot {
-    width: 7px; height: 7px; border-radius: 1px;
-    border: 1px solid var(--panel-faint); background: transparent;
-  }
-  .toggle:hover:not(:disabled) { background: var(--panel-hover); color: var(--panel-text); }
-  .toggle.on {
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    color: var(--panel-text); background: var(--accent-soft);
-  }
-  .toggle.on .dot { background: var(--accent); border-color: var(--accent); }
-  .toggle:disabled { opacity: 0.38; cursor: default; }
+  .toggle.disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+  .tgl-lab { min-width: 0; }
 
   .advtoggle {
     position: relative;
-    display: flex; align-items: center; gap: 7px; width: 100%;
-    padding: 7px 2px; background: transparent; border: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 2px;
+    background: transparent;
+    border: none;
     border-top: 1px solid var(--panel-line);
-    color: var(--panel-text); font-size: 10.5px; font-weight: 650; letter-spacing: 0.07em;
-    text-transform: uppercase; cursor: pointer; text-align: left;
+    color: var(--panel-text);
+    font-size: var(--spectrum-font-size-75, 12px);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    text-align: left;
   }
   .advtoggle:hover { color: var(--accent); }
   .advtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .advtoggle .chev {
-    flex: none; display: grid; place-items: center;
-    width: 16px; height: 16px; border-radius: 3px;
-    border: 1px solid var(--panel-border); font-size: 12px; line-height: 1;
-    color: var(--panel-muted); background: var(--panel-elevated);
+    flex: none;
+    width: 1.1em;
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1;
+    color: var(--panel-muted);
   }
   .advtoggle .gname { flex: 1 1 auto; min-width: 0; }
   .advtoggle.open .gname { color: var(--accent); }
-  .costbadge {
-    flex: none; padding: 2px 6px; border-radius: 3px;
-    font-family: var(--mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.04em; text-transform: none;
-    border: 1px solid var(--panel-border); color: var(--panel-faint);
-    background: rgba(255, 255, 255, 0.03);
+
+  /* Cost language: live is gate-visible but visually quiet (sr-only) */
+  .advtoggle :global(sp-badge.costbadge) {
+    flex: none;
+    --mod-badge-font-size: 10px;
   }
-  .costbadge.wave {
-    color: #e0a090;
-    border-color: rgba(224, 160, 144, 0.28);
-    background: rgba(224, 140, 120, 0.08);
+  .advtoggle :global(sp-badge.costbadge.live) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
-  .costbadge.live {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  .advtoggle :global(sp-badge.costbadge.wave) {
+    --mod-badge-background-color: color-mix(in srgb, var(--wave) 18%, transparent);
+    --mod-badge-label-icon-color: #e0a090;
   }
-  .costbadge.settle {
-    color: var(--settle);
-    border-color: rgba(212, 176, 106, 0.3);
-    background: rgba(212, 176, 106, 0.08);
-    border-style: dashed;
+  .advtoggle :global(sp-badge.costbadge.settle) {
+    --mod-badge-background-color: color-mix(in srgb, var(--settle) 16%, transparent);
+    --mod-badge-label-icon-color: var(--settle);
   }
 
-  :global(.typetabs) { width: 100%; display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px; }
+  :global(.typetabs) {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
   :global(.typetabs sp-action-button.tab) {
-    display: flex; flex-direction: column; align-items: center; gap: 2px;
-    min-height: 44px; height: auto; padding: 9px 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-height: 44px;
+    height: auto;
+    padding: 8px 4px;
   }
   .tl { font-size: 13px; font-weight: 650; display: block; }
-  .ts { font-size: 9.5px; opacity: 0.7; letter-spacing: 0.04em; display: block; }
+  .ts {
+    font-size: 10px;
+    opacity: 0.7;
+    letter-spacing: 0.04em;
+    display: block;
+  }
 
   .row {
-    display: grid; grid-template-columns: 72px minmax(0, 1fr) 40px;
-    align-items: center; gap: 7px; min-height: 26px;
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 7px;
+    min-height: 32px;
   }
   .row.disabled { opacity: 0.45; pointer-events: none; }
-  .rl { font-size: 11.5px; color: var(--panel-text); font-weight: 500; }
+  .rl { font-size: 12px; color: var(--panel-text); font-weight: 500; }
   .rv {
-    font-family: var(--mono); font-size: 11px; color: var(--panel-muted);
-    text-align: right; font-variant-numeric: tabular-nums;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--panel-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
-  .note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--panel-faint); }
-  .editnote { margin: -2px 0 4px; font-size: 11px; line-height: 1.4; color: var(--panel-faint); }
-  .vdetail { gap: 7px; display: flex; flex-direction: column; }
-  .tierhint { font-size: 9.5px; color: var(--panel-faint); font-weight: 500; }
+  .note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--panel-faint); }
+  .editnote { margin: -2px 0 4px; font-size: 12px; line-height: 1.4; color: var(--panel-faint); }
+  .vdetail { gap: 6px; display: flex; flex-direction: column; }
+  .tierhint { font-size: 10px; color: var(--panel-faint); font-weight: 500; }
   .hero-note {
-    display: flex; gap: 10px; align-items: flex-start; padding: 12px;
-    border-radius: 8px; background: var(--panel-2); border: 1px solid var(--panel-border);
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px;
+    border-radius: var(--spectrum-corner-radius-100, 4px);
+    background: var(--panel-2);
+    border: 1px solid var(--panel-border);
   }
   .hero-note .mark {
-    flex: none; display: grid; place-items: center;
-    width: 22px; height: 22px; border-radius: 50%;
-    background: var(--accent-soft); color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    font-family: var(--mono); font-size: 12px; font-weight: 700;
-  }
-  .hero-note p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--panel-muted); }
-
-  .toolrow {
+    flex: none;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-    gap: 0;
-    border-bottom: 1px solid var(--panel-line);
-    margin: 0 0 2px;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
   }
-  .toolrow :global(sp-action-button.tbtn) {
-    min-height: 32px; width: 100%; border-radius: 0;
-    border-right: 1px solid var(--panel-line);
-    --mod-actionbutton-border-radius: 0;
+  .hero-note p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--panel-muted);
   }
-  .toolrow :global(sp-action-button.tbtn:last-child) { border-right: none; }
 
   .footstack { display: grid; }
   .footstack > .foot {
-    grid-column: 1; grid-row: 1;
-    display: flex; flex-direction: column; gap: 8px;
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     transition: opacity 0.12s linear;
   }
   .foot :global(sp-button.rebuild),
   .foot :global(sp-button.hbtn) {
-    width: 100%; min-height: 44px;
+    width: 100%;
+    min-height: 44px;
   }
   .house-actions { display: flex; flex-direction: row; gap: 8px; width: 100%; }
   .house-actions :global(sp-button) { flex: 1; }
 
   @media (max-width: 600px), (pointer: coarse) {
-    .axistab { min-height: 44px; }
-    .axistab .lab { font-size: 13px; }
-    .navcontrols :global(sp-picker),
-    .navcontrols :global(sp-button.navaction) { min-height: 44px; }
-    .navcontrols :global(sp-button.navaction) { min-width: 72px; }
-    .toggle { padding: 9px 5px; font-size: 12px; min-height: 40px; }
-    .toolrow :global(sp-action-button.tbtn) { min-height: 44px; }
-    .advtoggle { min-height: 40px; font-size: 11.5px; }
-    .makehead { padding-bottom: 4px; gap: 6px; }
-    .buildingnav { padding-bottom: 4px; gap: 3px; margin-bottom: 0; }
+    .makehead :global(sp-action-button.axistab) { min-height: 44px; }
+    .toolrow .tbtn { min-height: 44px; }
+    .navcontrols select,
+    .navcontrols .navaction { min-height: 44px; }
+    .navcontrols .navaction { min-width: 72px; }
+    .toggle { min-height: 40px; }
+    .advtoggle { min-height: 44px; }
+    .makehead { padding-bottom: 4px; }
+    .buildingnav { padding-bottom: 4px; margin-bottom: 0; }
     .stack > .ctx { gap: 4px; }
     section { gap: 4px; }
-    section.pinned { padding: 7px 8px 8px; }
-    .vdetail { gap: 3px; }
-    input[type='range'].scale::-webkit-slider-thumb { width: 20px; height: 20px; border-radius: 3px; }
-    input[type='range'].scale::-moz-range-thumb { width: 20px; height: 20px; border-radius: 3px; }
-    .row { min-height: 34px; grid-template-columns: 70px minmax(0, 1fr) 38px; }
-    .editnote, .note { font-size: 10px; }
-  }
-  @media (max-height: 520px) and (orientation: landscape) {
-    .makehead { padding-bottom: 6px; }
     section.pinned { padding: 8px; }
+    .vdetail { gap: 4px; }
+    input[type='range'].scale::-webkit-slider-thumb { width: 20px; height: 20px; }
+    input[type='range'].scale::-moz-range-thumb { width: 20px; height: 20px; }
+    .row { min-height: 40px; grid-template-columns: 70px minmax(0, 1fr) 38px; }
   }
 </style>

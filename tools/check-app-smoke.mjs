@@ -1006,8 +1006,9 @@ try {
     item.title.includes('한양 시전행랑의 칸·표식·발굴 유구')
   ));
   pass(sijeonEvidence?.text.includes('기존 위치·footprint를 보존한 순수 2칸 계획')
-      && sijeonEvidence.text.includes('bench·개방 비율·후면 저장·모든 수치는 제품 결정')
-      && sijeonEvidence.text.includes('정확한 형식이 불확실하므로 rendered v1에서는 제외')
+      && sijeonEvidence.text.includes('bench·개방 비율·후면 저장·표식 sparseness·모든 수치는 제품 결정')
+      && sijeonEvidence.text.includes('소수·비발광')
+      && sijeonEvidence.text.includes('시명·물종 문자열·SKU')
       && sijeonEvidence.links.some((url) => url.includes('km_003_0040_0020_0010'))
       && sijeonEvidence.links.some((url) => url.includes('arcvGroupNo=2177'))
       && sijeonEvidence.anchors.every((anchor) => (
@@ -1446,15 +1447,16 @@ try {
   };
 
   // #158 re-authored: the breadcrumb is its own top-left slot and the make panel
-  // follows it in DOM order, so the first Tab enters the explicit context tabs and
-  // the persistent navigator is the next stop inside the same panel. The invariant
-  // being protected is unchanged - exactly one context owner is not inert and no
-  // focus lands inside an inert subtree.
+  // follows it in DOM order. First Tab enters the Explore/Focus tabs; after the
+  // secondary share toolrow (photo/share/export) the persistent building navigator
+  // is the next stop inside the same panel. The invariant being protected is
+  // unchanged — exactly one context owner is not inert and no focus lands inside
+  // an inert subtree.
   await page.locator('[data-context-focus="village"]').focus();
   await page.keyboard.press('Tab');
   const desktopAerialOwner = await contextA11y('village');
-  await page.keyboard.press('Tab');
-  await page.keyboard.press('Tab');
+  // From first axistab: sibling tab → postcard → share → export → building select.
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press('Tab');
   const desktopAerialNavigator = await contextA11y('village');
   pass(desktopAerialOwner.directOwners.join() === 'village'
       && desktopAerialOwner.inactiveInert

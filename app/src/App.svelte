@@ -1611,12 +1611,23 @@
   .veil.on { opacity: 1; pointer-events: auto; }
 
   .toast {
-    position: fixed; left: 50%; bottom: max(84px, calc(env(safe-area-inset-bottom) + 80px));
-    transform: translateX(-50%); z-index: 300; max-width: min(88vw, 420px);
-    padding: 11px 18px; border-radius: 8px; text-align: center;
-    background: var(--glass-strong); color: var(--glass-text);
+    position: fixed;
+    left: 50%;
+    bottom: max(84px, calc(env(safe-area-inset-bottom) + 80px));
+    transform: translateX(-50%);
+    z-index: 300;
+    max-width: min(88vw, 420px);
+    padding: 11px 18px;
+    border-radius: 8px;
+    text-align: center;
+    background: var(--glass-strong);
+    color: var(--glass-text);
     border: 1px solid var(--glass-border);
-    font-family: var(--ui); font-size: 13px; line-height: 1.4; font-weight: 600;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    font-size: var(--spectrum-font-size-100, 14px);
+    line-height: 1.4;
+    font-weight: 600;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     animation: toastin 0.3s ease both;
   }

@@ -34,13 +34,16 @@
   .hlabel {
     position: fixed;
     z-index: 45;
-    display: inline-flex; align-items: center; gap: 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     padding: 5px 10px;
     border-radius: 6px;
     background-color: var(--glass-strong);
     border: 1px solid var(--glass-border);
     color: var(--glass-text);
-    font-family: var(--ui);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     white-space: nowrap;
     pointer-events: none;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);

@@ -87,7 +87,8 @@ export function parseCreditsMarkdown(md) {
       continue;
     }
 
-    m = t.match(/^###\s+\d+\.\s+(.+)$/);
+    // Numbered entries may use lettered sub-ids (### 17b. Title) after a parent.
+    m = t.match(/^###\s+\d+[a-z]?\.\s+(.+)$/i);
     if (m) {
       flush();
       item = {

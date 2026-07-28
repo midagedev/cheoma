@@ -54,13 +54,14 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 8px 3px 6px;
+    padding: 4px 9px 4px 7px;
     border-radius: 999px;
     background: var(--glass-strong);
     border: 1px solid var(--glass-border);
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
     color: var(--glass-text);
-    font-family: var(--ui);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     white-space: nowrap;
   }
   .tag .dot {
