@@ -353,14 +353,18 @@ assert.equal(roofPlan.courseFlow, true,
     }
   }
 
-  // Shell (outer/gaepan/band) must stay dark until the rigid roof has reached
-  // contact — otherwise the rising underside z-fights the column/plate band.
+  // Under-eave stack (outer/gaepan/band + rafters) must stay dark until the rigid
+  // roof settle is mostly damped — otherwise the rising underside/rafters z-fight
+  // the column/plate band ("기둥 위에 반자").
   {
     const outer = roof.getObjectByName('roof-tile-outer');
     const gaepan = roof.getObjectByName('roof-gaepan');
     const band = roof.getObjectByName('roof-eave-band');
+    const rafters = roof.children.filter((c) => c.userData?.asmGroup === 'rafters');
     assert.ok(outer && gaepan && band, 'synthetic roof is missing named shell pieces');
+    assert.ok(rafters.length > 0, 'synthetic roof is missing rafter pieces');
     let firstShellT = null;
+    let firstRafterT = null;
     for (let i = 0; i <= 200; i++) {
       const t = 0.70 + (i / 200) * 0.30;
       anim.seek(t);
@@ -370,26 +374,43 @@ assert.equal(roofPlan.courseFlow, true,
         assert.equal(band.visible, outer.visible,
           `t=${t.toFixed(3)} eave band desynced from outer shell`);
       }
+      // Rafters share the under-eave gate with the shell — never lead alone
+      // through the plate band (prior residual sparkle).
+      for (const r of rafters) {
+        if (r.visible) {
+          assert.equal(outer.visible, true,
+            `t=${t.toFixed(3)} rafter visible while shell still dark`);
+        }
+      }
       if (firstShellT === null && outer.visible) firstShellT = t;
+      if (firstRafterT === null && rafters.some((r) => r.visible)) firstRafterT = t;
     }
     assert.ok(firstShellT !== null, 'shell never became visible');
-    // Shell waits until settle is mostly damped (SHELL_REVEAL_UU ≈ 0.775 of roof u),
+    assert.ok(firstRafterT !== null, 'rafters never became visible');
+    // Under-eave waits until settle is mostly damped (SHELL_REVEAL_UU ≈ 0.85 of roof u),
     // not merely IMPACT — so bob cannot scrape the plate/창방 band.
-    const shellFloor = 0.74 + (1 - 0.74) * (IMPACT + (1 - IMPACT) * 0.55) * 0.92;
+    const shellFloor = 0.74 + (1 - 0.74) * (IMPACT + (1 - IMPACT) * 0.70) * 0.92;
     assert.ok(firstShellT >= shellFloor,
       `shell appeared at t=${firstShellT.toFixed(3)} — still in the bob window `
       + '(column-band z-fight)');
-    // Early / mid-rise and early-settle samples must be dark.
+    assert.ok(firstRafterT >= shellFloor,
+      `rafters appeared at t=${firstRafterT.toFixed(3)} — still scraping plate/창방`);
+    // Mid-rise and early-settle samples must keep the under-eave dark.
+    // t=0.90 is still pre-reveal (uu≈0.615); top-side ornaments may already show.
     for (const t of [0.78, 0.84, 0.90]) {
       anim.seek(t);
       assert.equal(outer.visible, false, `shell visible too early (t=${t})`);
       assert.equal(gaepan.visible, false, `gaepan visible too early (t=${t})`);
+      for (const r of rafters) {
+        assert.equal(r.visible, false, `rafter visible too early (t=${t})`);
+      }
     }
-    // Near settle the shell is on and locked.
+    // Near settle the under-eave stack is on and locked.
     anim.seek(0.98);
     assert.equal(outer.visible, true, 'shell missing near settle');
     assert.equal(gaepan.visible, true, 'gaepan missing near settle');
     assert.equal(band.visible, true, 'eave band missing near settle');
+    assert.ok(rafters.every((r) => r.visible), 'rafters missing near settle');
   }
 
   anim.seek(0.88); // mid roof window (PART_WINDOWS.roof ≈ 0.74–1.0)
