@@ -57,6 +57,9 @@ export function createArchitecturalRevealRuntime({
   }
 
   function handoff() {
+    // Engine settleControls parks autoRotateSpeed and calls update(0) so OrbitControls
+    // re-reads spherical from the live camera without swallowing a residual 1/60s
+    // autoRotate step (that was the post-assembly "덜컥" jump).
     settleControls();
     controls.enabled = previousControlsEnabled;
     // Keep controls and the camera on exactly the same final/current sightline.

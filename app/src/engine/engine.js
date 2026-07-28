@@ -452,7 +452,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const { pos, target } = buildingSpot(name, computeLayout(P));
     camera.position.copy(pos);
     controls.target.copy(target);
-    controls.update();
+    settleControls();
   }
 
   // 선택/확장 포커스 프레이밍 — 마당(날개 포함) 전체가 들어오도록 확장 단계에 따라 넓힌다.
@@ -631,13 +631,23 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     return setSemanticDofAnchor(parcelId, point);
   }
 
-  // 트윈 핸드오프용 — OrbitControls 관성(회전 _sphericalDelta·팬 _panOffset·줌 _scale)을 0 으로.
-  // three 0.185 인스턴스 필드 직접 리셋(공개 stop() 이 없어 이게 표준 패턴): 전환 중 사용자
-  // 드래그/휠이 남긴 momentum 이 트윈 종료 직후 첫 update() 에 한꺼번에 적용되며 튀는 것 방지.
+  // 트윈·리빌·조립 핸드오프용 — OrbitControls 관성을 0 으로 비우고, 현재 camera/target 에서
+  // spherical 을 다시 읽는다. three 0.185 인스턴스 필드 직접 리셋(공개 stop() 없음).
+  //
+  // 중요: `controls.update()` 무인자 호출은 autoRotate 에 **1/60초 한 스텝**을 먹인다
+  // (OrbitControls 가 deltaTime 없을 때 60fps 한 프레임을 가정). 히어로 조립 중 선회 속도는
+  // ORBIT_SPEED×5.2 ≈ 1.7 이라 그 한 스텝이 ≈10° — 조립 카메라 워크 직후 "덜컥" 이동의
+  // 원인. 반드시 autoRotateSpeed 를 0 으로 내리고 update(0) 만 쓴다. 속도는 렌더 루프가
+  // 매 프레임 orbitGain/heroAsm 에서 다시 쓴다.
   function settleControls() {
     controls._sphericalDelta?.set(0, 0, 0);
     controls._panOffset?.set(0, 0, 0);
     controls._scale = 1;
+    // Park autoRotate for the sync read. Leave it at 0 — the animation loop
+    // re-authors autoRotateSpeed every frame from orbitGain / heroAsm. Restoring
+    // a previous high speed would re-arm a one-frame spin before that re-author.
+    controls.autoRotateSpeed = 0;
+    controls.update(0);
   }
 
   // ---------- UI-safe 포커스 프레이밍(#124·#155) ----------
@@ -2628,14 +2638,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // BGM 페이드인(#BGM): 위 introEvent('enter') 가 진입 트랙을 걸고 2.5s 스웰을 코어 update 에서
     //   구동한다(엔진 프레임 콜백·취소 관리 불필요). 정착 시 아래 introEvent('settle') 이 볼륨 1 을
     //   확정하고 시간대 트랙으로 4s 크로스페이드 인계한다.
-    const closeupDist = finalPosition.distanceTo(finalTarget);
     // 조립 즉시 시작하되 착공 지연(delay)만큼 빈 터 유지 → 타이틀 페이드·먹안개가 착공 순간을 덮는다.
-    // 완료 시 클로즈업 편집 상태로 안착(패널 슬라이드 인).
+    // 완료 시 클로즈업 편집 상태로 안착. 줌 범위는 정착 시 카메라 실거리로 잡는다
+    // (조립 중 선회 뒤 pre-orbit closeupDist 로 min/max 를 잡으면 clamp 스냅이 난다).
     playHeroAssembly(g, HERO_ASSEMBLE_DUR, { delay: HERO_ASSEMBLE_DELAY_MS / 1000, onDone: () => {
       village.transitioning = false; heroActive = false; lastActivity = performance.now();
       dispatchView('focusDone', { parcelId: heroId });
+      // Zero inertia + re-read spherical at the live pose. Do NOT call
+      // controls.update() bare — that applies one 1/60s autoRotate step at the
+      // assemble-orbit speed and reads as a camera "덜컥" after the reveal.
       settleControls();
-      controls.update(); // 조립 종료 시점에서도 즉시 컨트롤 관성 리셋
+      orbitGain = 0;
       // 조립 10s 동안 카메라 선회가 motionBudget(MSAA 0 · fill 0.65)을 붙잡고 있어,
       // 정착 직후에도 적응 품질이 풀리지 않으면 림·기와 에지가 한꺼번에 죽어 보인다.
       // 플래그십 근접 프레임으로 즉시 복원한다.
@@ -2654,7 +2667,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       audio?.introEvent('settle');   // 진입 트랙 → 시간대 트랙 인계(4s 크로스페이드) + 볼륨 1 확정
       if (village.handle) { village.handle.setTime(state.time); reapplyVillageFog(); }
       attachFocusRing(village.handle.heroDetailGroup());   // 조립 정착 후 근접 앰비언스 점등(#79)
-      setZoomRegime('focus', closeupDist);                 // 랜딩 착지 → 근접 줌
+      // Live distance after the assemble-orbit, not the pre-orbit closeupDist —
+      // a bounds clamp against the old radius snaps the camera ("덜컥").
+      setZoomRegime('focus', camera.position.distanceTo(controls.target));
       weatherRef?.setWeather(state.weather);               // 랜딩 조립 정착 후 날씨 복원
       updateWeatherColliders();
       // 정착 한 프레임 뒤 품질·림을 한 번 더 확정(패널 chrome / view-shift 샘플 이후).
@@ -2720,9 +2735,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     startVillageReveal(dur + 0.4);                            // 재형성 무드 + 폴백 소품 은닉 마스킹
     playFocusAssembly(detail, dur, { onDone: () => {
       village.transitioning = false;
+      lastActivity = performance.now();
       attachFocusRing(detail.group);
-      const cp = pr.cameraFraming;
-      setZoomRegime('focus', cp.position.distanceTo(cp.target));
+      // Live pose after assemble auto-orbit — never bare controls.update() (1/60s spin).
+      settleControls();
+      orbitGain = 0;
+      // Use the camera's actual distance after the assemble orbit, not the pre-orbit
+      // framing distance, so min/max zoom bounds do not clamp-snap the frame.
+      setZoomRegime('focus', camera.position.distanceTo(controls.target));
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
       emit('villageSelect', { parcelId: id, spec: pr.buildingSpec });      // 패널 재슬라이드인
@@ -2782,8 +2802,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     playFocusAssembly(detail, dur, { onDone: () => {
       village.transitioning = false;
+      lastActivity = performance.now();
       attachFocusRing(detail.group);
-      if (pr) setZoomRegime('focus', pr.cameraFraming.position.distanceTo(pr.cameraFraming.target));
+      settleControls();
+      orbitGain = 0;
+      setZoomRegime('focus', camera.position.distanceTo(controls.target));
       updateWeatherColliders();
       emit('villageFocusMorph', 1);
       emit('villageSelect', { parcelId: id, spec });             // 패널 재슬라이드인(새 시드 기본값)
@@ -3603,7 +3626,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         if (dir.lengthSq() < 1e-6) dir.set(0.2, 1, 1.9);
         dir.normalize();
         camera.position.copy(controls.target).addScaledVector(dir, d);
-        camera.lookAt(controls.target); controls.update();
+        camera.lookAt(controls.target);
+        controls.autoRotateSpeed = 0;
+        controls.update(0);
         return +camera.position.distanceTo(controls.target).toFixed(1);
       },
       debugContinuum: () => villageCamera.debugContinuum(),
