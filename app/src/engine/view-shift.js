@@ -24,6 +24,23 @@ function intersects(a, b) {
     && a.bottom > b.top && a.top < b.bottom;
 }
 
+// 보이지 않는 크롬은 화면을 가리지 않는다. `hidden`/`inert`/`aria-hidden` 만 걸러내던 종전 규칙은
+//   **투명한** 표면을 놓쳤다: 인스펙터 컬럼은 닫힐 때 inert 지만, 열린 상태로 `.chroma.faded`
+//   (opacity 0) 안에 있으면 inert 가 풀린 채 눈에 보이지 않는다. ?clip= 녹화 부팅이 정확히 그
+//   상태이고, 그래서 히어로 정착 1.2초 뒤 프레임이 **보이지 않는 패널을 위해 좌측으로 172px 팬**
+//   했다(2026-07-30 판정: dy 0, 스케일 변화 0 의 순수 횡이동 = 렌즈 시프트). 조상까지 올라가며
+//   실효 가시성을 보는 이유는 페이드가 컨테이너(.chroma)에 걸리기 때문이다.
+const OCCLUSION_OPACITY_FLOOR = 0.05;
+function effectivelyVisible(element, container) {
+  for (let node = element; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.visibility === 'hidden' || style.display === 'none') return false;
+    if ((Number(style.opacity) || 0) < OCCLUSION_OPACITY_FLOOR) return false;
+    if (node === container) break;
+  }
+  return true;
+}
+
 // Collapse irregular product chrome into the largest conservative central
 // rectangle. A corner control is assigned to the edge that discards the least
 // remaining area; controls already outside a previously claimed edge disappear
@@ -52,6 +69,7 @@ function measureViewportInsets(container) {
   const overlays = [...document.querySelectorAll(OCCLUSION_SELECTOR)]
     .flatMap((element) => {
       if (element.hidden || element.inert || element.getAttribute('aria-hidden') === 'true') return [];
+      if (!effectivelyVisible(element, container)) return [];
       const rect = element.getBoundingClientRect();
       const local = {
         left: Math.max(0, rect.left - host.left),

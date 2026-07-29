@@ -105,9 +105,12 @@ const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주�
 // Camera arrives before assembly ends so the roof land is punctuated by a held frame. 1.3 → 0.45
 // (#254) removed that punctuation: the measured arrival put camera arrival 0.7s before the last
 // member and the whole roof beat played under a moving camera, so the completion never landed.
-// Back to 1.3s — long enough that the 지붕 descent and its settle spring are read from a fixed
-// frame, short enough that the arc still overlaps the assembly.
-const HERO_REVEAL_TAIL = 1.3;
+// 1.3 → 2.0 (2026-07-30): 1.3s still had the arrival *decelerating* across the airborne roof
+// (measured 181 px/s of residual screen motion) plus motion blur on exactly the frames that carry
+// the beat. The roof window now opens at t=0.92 of the assembly, so the tail must cover it: the
+// camera is parked and quiet before the 지붕 leaves its hover, and the only thing moving in the
+// climax is the roof. This is not the long static hold #254 removed — the hold *is* the beat now.
+const HERO_REVEAL_TAIL = 2.0;
 // 정착 후 미세 표류(#26x): focus 가 선택된 프레임에서 유휴 선회를 완전히 0 으로 잠그면 정착 컷이
 //   문자 그대로 정지 화면이 된다(측정: az 13.66° 가 7.5s 동안 소수점까지 동일). "화면에 완전 정지는
 //   없다" 계약은 근접 링 입자만으로는 지켜지지 않는다 — 카메라가 죽으면 프레임이 죽는다.
@@ -119,6 +122,7 @@ const HERO_REVEAL_TAIL = 1.3;
 //   강하다"의 수치 정의가 된다.
 const HERO_SETTLE_DRIFT_PX_S = 10;
 const HERO_SETTLE_DRIFT_DELAY_MS = 900;   // 정착 → 표류 개시(완성 비트를 정지 프레임으로 먼저 보여준다)
+const HERO_SETTLE_CHROME_DELAY_MS = 1200; // 정착 → 크롬(우측 인스펙터) 도착. 완성 비트를 가리지 않게.
 
 // 머지(칸 들이기 합체) 수직 탄성 폭(m). 두부 정착 계수는 drop 배수라, 수평 이동인 머지 경로에는
 //   이 값이 그 drop 역할을 한다(공유 이징 언어를 쓰되 진폭만 이 경로 규모로).
@@ -219,6 +223,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let heroActive = false;                   // 히어로 시퀀스 진행 중 플래그
   let heroSettleDriftAt = null;             // 히어로 정착 미세 표류 개시 시각(null=미무장)
   let heroLandingFog = false;               // 히어로 랜딩 대기 밴드를 렌더 루프가 매 프레임 덮어쓸지
+  let heroQualityArmed = false;             // 리빌 후반 stable 품질 선고정(클라이맥스 초점 팝 제거) 1회 게이트
   let legacyHeroAssembleTimer = null;
   let legacyHeroPoll = null;
   let legacyHeroFadeFrame = null;
@@ -1234,10 +1239,27 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 리빌이 끝나면(HERO_REVEAL_TAIL 포함 구간) asmOrbitGain 을 ease-in 으로 올려 조립 선회를
     // 붙이고, 조립이 끝나면 ease-out 으로 0 — 종전 하드 5.2× on/off 의 엔드포인트 "덜컥" 방지.
     const revealActive = !!revealCamera?.isActive();
+    // 적응 품질이 moving → stable 로 넘어가는 프레임에서 보케 게더가 저품질(under-sampled, 더 선명)
+    //   에서 정품질(제대로 흐려짐)로 바뀐다. 카메라가 클라이맥스 직전에 파킹되면서 그 전환이 정확히
+    //   지붕 등장 직전 프레임에 떨어져 "배경이 갑자기 흐려지는" 초점 팝으로 읽혔다(2026-07-30 판정).
+    //   리빌 후반(진행도 0.82)부터 미리 stable 을 고정해, 그 전환을 카메라가 아직 눈에 보이게
+    //   움직이는 구간에서 소진한다 — 도착 후에는 바뀔 것이 남아 있지 않다.
+    if (revealActive && heroActive && !heroQualityArmed) {
+      const p = revealCamera?.getState().progress;
+      if (Number.isFinite(p) && p >= 0.82) {
+        heroQualityArmed = true;
+        postRuntime.forceStableQuality?.(6.0);
+      }
+    }
     const revealInterrupted = revealCamera?.getState().reason === 'input';
     const revealAutoOrbit = !reducedCameraMotion && !revealInterrupted;
     const assembling = !!village.heroAsm;
-    const wantAsmOrbit = assembling && !revealActive && revealAutoOrbit;
+    // 조립 선회는 "리빌이 조립보다 훨씬 먼저 끝나 카메라가 죽어 있는" 구간을 살리기 위한 것이다.
+    //   HERO_REVEAL_TAIL 이 2.0s 로 늘어난 지금 그 잔여 구간은 곧 **클라이맥스(지붕 하강)** 이고,
+    //   여기에 새 선회를 ease-in 하면 정숙해야 할 프레임에 카메라 모션을 얹는다(2026-07-30 판정:
+    //   낙하 순간 카메라 감속 + 모션블러 + 패널 오픈이 동시에 밟힘). 히어로 랜딩에서는 리빌 종료 후
+    //   선회를 켜지 않는다 — 대신 정착 후 미세 표류(HERO_SETTLE_DRIFT_PX_S)가 프레임을 살린다.
+    const wantAsmOrbit = assembling && !revealActive && revealAutoOrbit && !heroActive;
     if (wantAsmOrbit) {
       asmOrbitGain = Math.min(1, asmOrbitGain + dt / ASM_ORBIT_RAMP_IN_SEC);
     } else if (asmOrbitGain > 0) {
@@ -1249,7 +1271,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 히어로 랜딩 정착 컷은 예외적으로 focus 상태에서도 유휴 선회를 허용한다(HERO_SETTLE_DRIFT).
     //   사용자가 화면을 만지면(markActivity) 즉시 해제되고, 다른 필지 선택·부감 복귀도 해제한다.
     const settleDrift = heroSettleDriftAt != null && performance.now() >= heroSettleDriftAt;
-    const orbitBusy = (heroActive && !assembling) || assembly || groupAnims.length > 0 ||
+    // heroActive: 히어로 랜딩 전 구간(타이틀~정착)은 카메라를 안무가 독점한다. 종전엔 `&& !assembling`
+    //   으로 약화돼 있었는데, 그건 조립 선회를 허용하기 위한 예외였다. 그 선회를 위에서 껐으므로 예외도
+    //   사라진다 — 남겨 두면 유휴 타이머(9s)가 조립 후반, 즉 클라이맥스에서 유휴 선회를 켠다.
+    const orbitBusy = heroActive || assembly || groupAnims.length > 0 ||
       wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealActive
       || state.selected || demo.active
       || (village.active && village.selected && !assembling && asmOrbitGain <= 1e-4 && !settleDrift)
@@ -1653,7 +1678,16 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // 히어로 랜딩 대기 바닥. nearScale/spanScale 은 카메라→피사체 거리 배수다. 169.5m 히어로 정착에서
   //   near 127m / far 669m — 피사체(155m)는 약 5% 헤이즈로 선명하고 바로 뒤 배산 사면(232m)은 19% 를
   //   받아 여백으로 물러난다. 부감 밴드(near 396m)에서는 그 사면이 안개 밴드 앞이라 대기 원근이 0 이었다.
-  const HERO_LANDING_FOG = Object.freeze({ nearScale: 0.75, spanScale: 3.2 });
+  //   2026-07-30: 상단 여백을 만드는 것은 카메라 232m 의 배산 사면이고, 그 깊이가 밴드의 어디에
+  //   놓이느냐가 "능선이 여백으로 물러나는가"를 결정한다. 밴드를 조이는 것(span 3.2 → 2.3)만으로
+  //   하면 배경 헤이즈가 26% → 36% 로 오르지만 피사체도 8% → 11% 로 따라 올라 밴드 대비가
+  //   52 → 31 로 무너졌다(측정) — 근접 부재가 디테일 투자처라는 계약 위반. 올바른 축은 **near 를
+  //   피사체 바로 앞까지 밀어 올리는 것**이다: near 0.92×dist(135m) + span 2.3 이면 피사체는 3%
+  //   (종전보다 더 선명)인데 배경은 29% 로, 분리 폭이 가장 크다. 밴드를 조이는 대신 피사체를 밴드
+  //   시작점에 세우는 셈이다.
+  //   7° 렌즈로 능선 스카이라인 자체를 프레임에 넣는 것은 기하적으로 불가능하다(스카이라인 고도
+  //   ≈+26°, 프레임 반각 3.5°) — 여백은 대기로만 만든다.
+  const HERO_LANDING_FOG = Object.freeze({ nearScale: 0.92, spanScale: 2.3 });
   function armHeroLandingAtmosphere() {
     heroLandingFog = true;
     villageCamera.setFogBandFloor(HERO_LANDING_FOG);
@@ -2524,20 +2558,29 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     village.asmStarts = (village.asmStarts || 0) + 1;   // #126 재트리거 계측(히어로 랜딩=정확히 1회)
     const compound = root.children[0] || root;
     const chunks = compound.children.filter((c) => c.children && c.children.length > 0);
-    const nChunk = chunks.length || 1;
+    // 청크 창 배분. 종전엔 모든 청크가 timeline 의 0.5 를 균등하게 썼고 몸채가 마지막이라
+    //   몸채 착공이 55% 지점이었다. 그 결과 조립 전반부가 담·문·행각·등롱틀 — 얇고 주변적인 부재 —
+    //   로만 채워져 "빈 담장 필지를 카메라가 지나가는" 6초 공백이 됐다(2026-07-29 판정: t≈3–9.5,
+    //   조립의 40%). 몸채에 더 긴 창을 주면 두 문제가 함께 풀린다: 착공이 26% 로 앞당겨져 그 공백이
+    //   기단→기둥열→벽 부재 낙하로 채워지고, 몸채 창에 비례하는 지붕 창(0.26)도 같이 늘어나
+    //   공중 지붕 구간이 0.65s → 0.96s 가 된다. 빈 대지 데드타임(delay)은 그대로다 — 늘린 것은
+    //   화면 위 시공 시간뿐이다.
+    const BODY_WINDOW = 0.74;
+    const AUX_WINDOW = 0.40;
+    const AUX_SPREAD = 0.45;   // 주변 청크 착공 스프레드(마지막 주변 청크는 0.85 에 정착)
+    const windowOf = (it) => (it.body ? BODY_WINDOW : AUX_WINDOW);
     const items = chunks.map((c, i) => {
       const parts = partOrderedChunk(c);
       return {
         obj: c, y0: c.position.y, sx: c.scale.x, sy: c.scale.y, sz: c.scale.z, vis0: c.visible, i,
         body: parts || c.name === 'hanok',
         // 위임 애니의 duration = 이 청크가 차지하는 실제 초 길이(리플 하한 계산 기준).
-        parts: parts ? playAssembly(c, { duration: duration * 0.5 }) : null,
+        parts: parts ? playAssembly(c, { duration: duration * BODY_WINDOW }) : null,
       };
     });
     // 몸채는 항상 마지막(클라이맥스). 몸채가 둘 이상인 컴파운드도 원래 인덱스 순서를 유지한다.
     items.forEach((it) => { it.ord = it.body ? 1e6 + it.i : it.i; });
     items.sort((a, b) => a.ord - b.ord);
-    const n = nChunk;
     let e = 0, done = false;
     const set = (it, uu) => {
       if (it.parts) {                     // 부재 단위 위임(기단→기둥→벽·창호→공포→지붕)
@@ -2556,14 +2599,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const s = tofuScale(uu, amp);
       it.obj.scale.set(it.sx * s.sxz, it.sy * s.sy, it.sz * s.sxz);
     };
-    // 청크 스태거. 구 식 (i/n)*0.5 은 마지막 청크(몸채=클라이맥스)를 t=(n-1)/n*0.5+0.5 에서 끝냈다 —
-    //   n=6 이면 0.917, 즉 조립 길이의 8.3%(10s 중 0.83s)가 아무것도 움직이지 않는 죽은 꼬리였고
-    //   카메라가 도착해 기다리는 구간이 그 죽은 꼬리와 겹쳤다. (i/(n-1)) 로 펴서 마지막 청크가 정확히
-    //   t=1 에 정착하게 한다 → 카메라 hold(HERO_REVEAL_TAIL) 가 실제 착지 순간을 담는다.
-    const CHUNK_WINDOW = 0.5;
-    const chunkStart = (i) => (n > 1 ? (i / (n - 1)) * (1 - CHUNK_WINDOW) : 0);
-    const applyAt = (t) => items.forEach((it, i) => (
-      set(it, clamp01((t - chunkStart(i)) / CHUNK_WINDOW))
+    // 몸채는 항상 t=1 에 정착한다(카메라 hold 가 실제 착지 순간을 담는다). 주변 청크는 [0, AUX_SPREAD]
+    //   에 스태거되어 몸채의 마지막 비트 전에 모두 끝난다 — 마지막 몇 초의 화면은 몸채가 독점한다.
+    const auxItems = items.filter((it) => !it.body);
+    const auxIndex = new Map(auxItems.map((it, k) => [it, k]));
+    const chunkStart = (it) => {
+      if (it.body) return 1 - BODY_WINDOW;
+      const k = auxIndex.get(it) ?? 0;
+      return auxItems.length > 1 ? (k / (auxItems.length - 1)) * AUX_SPREAD : 0;
+    };
+    const applyAt = (t) => items.forEach((it) => (
+      set(it, clamp01((t - chunkStart(it)) / windowOf(it)))
     ));
     const restore = () => items.forEach((it) => {
       it.parts?.skip();
@@ -2589,13 +2635,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         return {
           duration,
           delay,
-          chunks: items.map((it, idx) => ({
+          chunks: items.map((it) => ({
             name: it.obj.name || '(anon)',
             body: !!it.body,
             delegated: !!it.parts,
             windowSec: [
-              +(chunkStart(idx) * duration).toFixed(3),
-              +((chunkStart(idx) + CHUNK_WINDOW) * duration).toFixed(3),
+              +(chunkStart(it) * duration).toFixed(3),
+              +((chunkStart(it) + windowOf(it)) * duration).toFixed(3),
             ],
             parts: it.parts?.plan() || null,
           })),
@@ -2641,6 +2687,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
       ? camera.userData.villageReferenceFov : camera.fov;
     heroActive = true;                          // 랜딩 중 자동 회전 억제
+    heroQualityArmed = false;
     // 조립 선회 게인은 리빌 종료 후 ease-in. 시작 시 0 으로 리셋(이전 조립 잔여 감속 차단).
     asmOrbitGain = 0;
     orbitGain = 0;
@@ -2787,9 +2834,19 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         const root = village.handle?.heroDetailGroup?.();
         if (root) post.rimRescan?.(root);
       });
-      emit('villageSelect', { parcelId: heroId, spec: pr.buildingSpec });
-      emitSettledView();
-      onDone?.();
+      // 크롬 도착을 완성 비트 뒤로 밀어낸다. villageSelect / onDone 은 App 에서 heroLanding 을 해제해
+      //   우측 인스펙터(캔버스 폭 28%)를 여는 신호이고, 종전엔 마지막 부재가 내려앉는 프레임과 사실상
+      //   같은 프레임에 발화했다 — 낙하·감속·패널 오픈이 클라이맥스에 동시에 밟혔다(2026-07-30 판정).
+      //   정착 자체(품질·림·근접 링·줌 범위·날씨·대기)는 즉시 확정하고, **화면을 가리는 신호만** 늦춘다.
+      //   순서: 정지 프레임 → 미세 표류(HERO_SETTLE_DRIFT_DELAY_MS) → 크롬.
+      const announceSettled = () => {
+        if (disposed || !village.active || village.selected !== heroId) return;
+        emit('villageSelect', { parcelId: heroId, spec: pr.buildingSpec });
+        emitSettledView();
+        onDone?.();
+      };
+      if (HERO_SETTLE_CHROME_DELAY_MS > 0) tasks.after(announceSettled, HERO_SETTLE_CHROME_DELAY_MS);
+      else announceSettled();
     } });
   }
 

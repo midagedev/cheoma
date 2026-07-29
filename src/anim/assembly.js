@@ -83,12 +83,16 @@ function lockRoofShellVisibility(roofGroup) {
 }
 
 // 파트별 타임라인 윈도(전체 duration 대비 비율). 시공 순서 스태거, 살짝 겹쳐 흐름을 만든다.
+//   지붕 창 0.74 → 0.70: 지붕은 어느 건물에서나 클라이맥스 부재이고, 그 창의 절반이 공중 구간
+//   (u<IMPACT)이다. 0.26 창에서는 히어로 조립(몸채 창 7.4s)에서도 공중 시간이 0.96s 뿐이라
+//   0.25s 간격 캡처에 1~3장만 남았다(2026-07-30 판정: "공중 프레임 1장, 0.25초 미만 팝").
+//   0.30 창이면 2.22s 모션 / 1.11s 공중 — 라이브 프레임에 4장 이상 남는다.
 const PART_WINDOWS = {
   podium:   [0.00, 0.26],
   columns:  [0.18, 0.48],
   walls:    [0.42, 0.64],
   brackets: [0.58, 0.82],
-  roof:     [0.74, 1.00],
+  roof:     [0.70, 1.00],
 };
 
 // 파트별 낙하 거리 배수(묵직함 차등 — 기단은 작게, 지붕은 크게 움직인다).
@@ -97,9 +101,14 @@ const PART_WINDOWS = {
 //   지붕이 공중에 있는 프레임이 정확히 0 이었다(2026-07-29 21프레임 판정: 기와 껍질이 애니메이션 없이
 //   팝인). 위에서 내려오는 강체는 통과할 것이 없고 — 브래킷은 아래에서, 지붕은 위에서 서로를 향해
 //   접근하므로 관통이 원리적으로 불가능하다 — 첫 프레임부터 보인다. 실제 시공 순서(상량)와도 맞는다.
-//   크기 1.9: 히어로 정착 프레임(169.5m·7° 렌즈, 세로 20.7m) 기준 지붕 여행 거리가 프레임 높이의
-//   ≈11% 로 읽힌다. 1.15 는 6% 로 캡처 간격 안에서 사라졌다.
-const PART_DROP = { podium: 0.7, columns: 1.0, walls: 0.9, brackets: 0.85, roof: -1.9 };
+//   크기 3.4: 히어로 정착 프레임(146.6m·7° 렌즈, 세로 17.9m) 기준 지붕 여행 거리가 프레임 높이의
+//   ≈23%(164px @720p)로 읽힌다. tofuRise 는 앞부분에서 거리를 대부분 소진하므로(u=0.75·IMPACT 에서
+//   남은 오프셋이 21%뿐) 캡처가 후반을 잡으면 리프트가 30px 로만 보인다 — 그래서 저작 거리는
+//   "보이는 최대 리프트"가 아니라 그 3~4배로 잡아야 한다. 1.15 는 6% 로 캡처 간격 안에서 사라졌고, 1.9 는 읽히긴 했으나
+//   지붕 창이 늘어난 뒤(몸채 창 0.74) 같은 거리를 더 긴 시간에 나눠 쓰게 되어 **접촉 속도가 떨어졌다** —
+//   두부 계약은 무게감이 진폭이 아니라 접근 속도에서 나온다고 못박고 있으므로, 창을 늘렸으면 거리도
+//   같이 늘려 접촉 속도(≈4.2 m/s)를 보존해야 한다. 그러지 않으면 무거운 지붕이 가벼워진다.
+const PART_DROP = { podium: 0.7, columns: 1.0, walls: 0.9, brackets: 0.85, roof: -3.4 };
 
 // 파트별 두부 탄성 진폭(스쿼시&스트레치 강도). 기둥은 스프링처럼 튀고, 지붕은 절제한다.
 //   지붕 0.32 → 0.22: 구 모델은 접촉에서 변형이 정확히 0 이라 스트레치가 **상승 중에만**(대부분
@@ -504,12 +513,16 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
         applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false);
         u0.items[0].child.visible = true;
         // 상량: 지붕은 위에서 내려앉으므로(PART_DROP.roof < 0) 통과할 구조가 없다. 서까래·개판·기와
-        //   외피는 강체와 **함께 공중에 보이고**, 마감 부재(잡상·용마루·수키와, asmGroup='finial')만
-        //   착지 후 처마→용마루 순으로 얹힌다. 구 모델은 상승 중 스크레이프를 피하려 지붕 전체를
-        //   uu<0.85 동안 숨겼고, 그것이 "지붕이 애니메이션 없이 팝인"의 원인이었다.
-        const landed = uu >= IMPACT;
-        const postSpan = Math.max(1e-9, 1 - IMPACT);
-        const postUu = landed ? (uu - IMPACT) / postSpan : 0;
+        //   외피는 강체와 **함께 공중에 보이고**, 마감 부재(잡상·용마루·수키와, asmGroup='finial')는
+        //   그 하강 구간에 처마→용마루 순으로 얹혀 접촉 전에 모두 자리를 잡는다. 구 모델은 상승 중
+        //   스크레이프를 피하려 지붕 전체를 uu<0.85 동안 숨겼고, 그것이 "지붕이 애니메이션 없이
+        //   팝인"의 원인이었다.
+        //   마감 부재를 **착지 후**로 미뤘던 중간 버전도 기각됐다: 기와 외피는 tile field 라
+        //   uRimTileMul=0 으로 림을 받지 않으므로(env/rim.js), 웜 림을 그리는 것은 용마루·추녀 같은
+        //   마감 부재뿐이다. 그것들이 착지 후에 켜지면 클립의 히어로 순간인 **공중 지붕이 평면 검정
+        //   실루엣**이 되고 플래그십 룩이 착지 뒤에 도착한다(2026-07-30 측정: 용마루 웜 최대값이
+        //   공중 103 → 착지 197). 그래서 켜 흐름을 하강 구간으로 옮긴다 — 흐름도 남고 림도 남는다.
+        const riseK = clamp01(uu / IMPACT);
         // Child reveal only (no per-child Y/scale).
         const postIntra = g.hasLag ? INTRA_SHARE : 0;
         const postBody = Math.max(1e-9, 1 - postIntra);
@@ -520,8 +533,7 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
             if (uu >= 1) show = true;              // rest pose — every member on
             else if (uu <= 0) show = false;        // 착공 전 — 완성본 1프레임 노출 0
             else if (!finish) show = true;         // rigid body in flight
-            else if (!landed) show = false;
-            else show = (postUu - it.lag * postIntra) / postBody > 0;
+            else show = (riseK - it.lag * postIntra) / postBody > 0;
             it.child.visible = show ? it.vis0 : false;
             it.child.position.y = it.y0;
             it.child.scale.set(it.sx0, it.sy0, it.sz0);

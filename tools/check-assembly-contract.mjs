@@ -375,8 +375,9 @@ assert.equal(roofPlan.courseFlow, true,
     let peakLift = 0;
     let minLift = Infinity;
     let minLiftT = 0;
+    const [roofWs, roofWe] = roofPlan.window;
     for (let i = 0; i <= 400; i++) {
-      const t = 0.74 + (i / 400) * 0.26;
+      const t = roofWs + (i / 400) * (roofWe - roofWs);
       anim.seek(t);
       const lift = roof.position.y - restGroupY;
       peakLift = Math.max(peakLift, lift);
@@ -384,13 +385,22 @@ assert.equal(roofPlan.courseFlow, true,
     }
     assert.ok(peakLift > 0.5,
       `roof travel peaked at only ${peakLift.toFixed(3)}m — the descent is not readable on screen`);
+    // 창의 절반이 공중 구간(u<IMPACT)이라는 계약. 창이 좁아지면 라이브 캡처에 공중 프레임이 남지
+    //   않는다(2026-07-30: 0.26 창 → 라이브 0.25s 샘플에서 1장). 히어로 몸채 창(7.4s) 기준으로
+    //   공중 시간이 1초를 넘어야 한다.
+    const roofWindowSec = (roofWe - roofWs) * 7.4;
+    assert.ok(roofWindowSec * 0.5 > 1.0,
+      `roof airborne window is only ${(roofWindowSec * 0.5).toFixed(2)}s on the hero body timeline `
+      + '— a 0.25s capture cadence cannot hold the beat');
     assert.ok(minLift >= -1e-9,
       `t=${minLiftT.toFixed(3)} roof group sank ${(-minLift).toFixed(4)}m below rest `
       + `(${(-minLift / peakLift * 100).toFixed(1)}% of travel) — the rigid roof must approach from `
       + 'above (상량) and the settle is rectified at the rigid seat, so it can never cross the '
       + 'plate band');
     // (b) 공중 가시성 — 낙하 구간(접촉 전) 샘플에서 외피·개판·서까래가 실제로 보인다.
-    for (const t of [0.76, 0.80, 0.85]) {
+    //   창 대비 상대 위치로 샘플한다(창이 바뀌어도 "접촉 전"의 뜻이 유지되게).
+    const airborneAt = (share) => roofWs + (roofWe - roofWs) * share;
+    for (const t of [0.08, 0.20, 0.34].map(airborneAt)) {
       anim.seek(t);
       assert.ok(roof.position.y - restGroupY > 0.05,
         `t=${t} expected the roof to still be airborne`);
@@ -400,9 +410,23 @@ assert.equal(roofPlan.courseFlow, true,
         assert.equal(r.visible, true, `rafter hidden in flight (t=${t})`);
       }
     }
+    // 마감 부재(용마루·추녀)는 **접촉 전에** 모두 얹혀 있어야 한다. 기와 외피는 tile field 라
+    //   림을 받지 않으므로(uRimTileMul=0), 마감 부재가 늦게 켜지면 공중 지붕이 평면 검정 실루엣이
+    //   되고 플래그십 웜 림이 착지 후에야 도착한다(2026-07-30 측정: 웜 최대 103 → 197).
+    {
+      const finials = roof.children.filter((c) => c.userData?.asmGroup === 'finial');
+      assert.ok(finials.length > 0, 'synthetic roof has no finial members');
+      const at = (share) => roofWs + (roofWe - roofWs) * share;
+      anim.seek(at(IMPACT * 0.55));
+      assert.ok(finials.some((f) => f.visible),
+        'no finial is on mid-descent — the airborne roof has no rim-bearing member');
+      anim.seek(at(IMPACT));
+      assert.ok(finials.every((f) => f.visible),
+        'finials are still arriving at contact — the flagship rim lands after the beat');
+    }
     // 외피 두 겹은 여전히 가시성 동기(같은 물리 껍질).
     for (let i = 0; i <= 200; i++) {
-      const t = 0.70 + (i / 200) * 0.30;
+      const t = roofWs - 0.04 + (i / 200) * (roofWe - roofWs + 0.04);
       anim.seek(t);
       assert.equal(outer.visible, gaepan.visible,
         `t=${t.toFixed(3)} outer/gaepan visibility desynced`);
@@ -412,7 +436,7 @@ assert.equal(roofPlan.courseFlow, true,
       }
     }
     // 착공 전에는 지붕 자식이 하나도 보이지 않는다(완성본 조기 노출 0).
-    anim.seek(0.70);
+    anim.seek(roofWs - 0.02);
     assert.equal(outer.visible, false, 'shell visible before the roof window opens');
     assert.ok(rafters.every((r) => !r.visible), 'rafters visible before the roof window opens');
     // Near settle the under-eave stack is on and locked.
