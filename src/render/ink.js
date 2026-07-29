@@ -149,6 +149,13 @@ const InkShader = {
     litWidth: { value: 0.80 },     // 순광면 선 굵기 배율
     unlitWidth: { value: 1.36 },   // 역광면 선 굵기 배율
     ditherAmt: { value: 0.55 },    // 단계 사이 디더(번짐)
+    // 씬 내부 워시의 최담 상한. 여백(순수 종이)은 하늘 경로와 원경 aerial 페이드가 전담하고,
+    // 씬 안의 밝은 것은 이 값까지만 간다 — 원칙 4 의 "여백"과 원칙 2 의 "농담"을 분리하는 상한이다.
+    // 이것이 없으면 washHigh 를 넘는 화소가 전부 tone=1(순수 종이)로 클립되고, 특히 깊이·노멀
+    // 불연속이 없는 소프트 빌보드(굴뚝 연기 스프라이트)가 먹선 없는 흰 원반 = 종이 구멍으로
+    // 읽힌다(감사 A4). 실측: clip=yard ink 근접에서 원반 중심 luma 136~140, 스프라이트를 숨기면
+    // 같은 화소가 58~61 — 즉 배경 대비 +80 의 발광 원반이었다.
+    sceneToneCeil: { value: 0.90 },
     chromaKeep: { value: 0.07 },   // 잔여 채도 (5~10%)
     fogNear: { value: 38.0 },      // 여백 페이드 시작 (월드 거리, 씬 fog와 동기화)
     fogFar: { value: 150.0 },      // 여백 페이드 끝 (월드 거리)
@@ -174,6 +181,7 @@ const InkShader = {
     uniform vec3 inkColor, paperColor;
     uniform float levels, silhouetteWidth, silhouetteBoost, normalEdge, depthEdge;
     uniform float ditherAmt, chromaKeep, fogNear, fogFar, aerial, seed;
+    uniform float sceneToneCeil;
     uniform float mixAmount, acesOutput, toneMappingExposure;
     uniform float washKey, washLow, washHigh, unlitWash;
     uniform float gyehwa, gyehwaRadius, gyehwaCrease, sansuCrease;
@@ -390,6 +398,8 @@ const InkShader = {
       float tone = clamp(band, 0.0, 1.0);
       tone = clamp((tone - 0.42) * 1.28 + 0.42, 0.0, 1.0);
       tone = smoothstep(0.02, 0.97, tone);
+      // 씬 워시는 최담묵에서 멈춘다 — 순수 종이는 하늘·원경 여백 경로만 쓴다(아래 sky / aer).
+      tone = min(tone, sceneToneCeil);
 
       // 워시 = 먹색↔종이색 사이 톤 + 잔여 채도.
       vec3 wash = mix(inkColor, paperColor, tone);

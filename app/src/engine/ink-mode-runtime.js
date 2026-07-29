@@ -64,9 +64,12 @@ export function createInkModeRuntime({
   function setPbrAwake(awake) {
     if (pbrAwake === awake) return;
     pbrAwake = awake;
+    // GradePass now carries an airlight toe lift as well as saturation, so asking the pass
+    // itself whether it is an identity is the only correct gate — recomputing it from `sat`
+    // alone would sleep a pass that is still lifting crushed shadows.
     if (post.gradePass) {
-      const saturation = post.gradePass.uniforms?.sat?.value ?? 1;
-      post.gradePass.enabled = awake && Math.abs(saturation - 1) > EPSILON;
+      if (!awake) post.gradePass.enabled = false;
+      else post.gradePass.refreshEnabled();
     }
     post.bloomPass.enabled = awake;
     // Fresnel rim/sun glow belong to the raw scene beauty and cost no duplicate scene pass.
@@ -75,8 +78,37 @@ export function createInkModeRuntime({
     post.setDofAmount?.(awake ? policy.dofAmount : 0);
   }
 
+  // Ink is a screen-space pass, so the scene it reads is still full-colour. That is fine for
+  // everything here except the stream: the ink wash keeps a deliberate 7% residual chroma
+  // (INK_PALETTE / chromaKeep), and water is the one surface whose chroma is extreme enough
+  // that 7% of it still reads as a blue brush stroke across a monochrome painting (audit A7).
+  // So the water is desaturated at the source, keyed to the same amount as the paper fade —
+  // no separate tween, no pass-order change, and PBR is byte-identical at amount 0.
+  // The village root is a direct child of the scene and owns the uniform, so this is a
+  // children scan rather than a traverse.
+  // `?mode=ink` settles the amount during boot, before the village root exists, and a settled
+  // transition never calls applyAmount again — so a one-shot write silently misses. Track what
+  // was actually delivered and let update() retry until a hook accepts it.
+  let waterInkApplied = null;
+  function applyWaterInk(value) {
+    let delivered = false;
+    for (const child of scene.children) {
+      if (!child.userData?.setWaterInk) continue;
+      child.userData.setWaterInk(value);
+      delivered = true;
+    }
+    waterInkApplied = delivered ? value : null;
+  }
+
+  // While ink is up, write every frame: a village reroll installs a fresh hook whose own state
+  // starts at 0, and the receiver early-outs on an unchanged value, so the repeat costs nothing.
+  function syncWaterInk() {
+    if (amount > EPSILON || waterInkApplied !== amount) applyWaterInk(amount);
+  }
+
   function applyAmount(next) {
     amount = Math.min(1, Math.max(0, next));
+    applyWaterInk(amount);
     const entry = amount > EPSILON || target > EPSILON ? ensureInk() : ink;
     if (entry) {
       entry.sourcePass.enabled = amount > EPSILON || target > EPSILON;
@@ -108,7 +140,12 @@ export function createInkModeRuntime({
   }
 
   function update(dt) {
-    if (disposed || Math.abs(target - amount) <= EPSILON) return false;
+    if (disposed) return false;
+    // Runs even when settled: a village rebuild installs a fresh hook that has never been told
+    // the current ink amount. The scan is over scene.children (a handful of roots), and it
+    // no-ops once delivered.
+    syncWaterInk();
+    if (Math.abs(target - amount) <= EPSILON) return false;
     const step = Math.max(0, Math.min(0.1, dt || 0)) / FADE_SECONDS;
     applyAmount(target > amount ? Math.min(target, amount + step) : Math.max(target, amount - step));
     return true;
