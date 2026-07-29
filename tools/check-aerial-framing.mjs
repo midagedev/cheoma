@@ -111,6 +111,18 @@ for (const aspect of [1, 1.25, 1.6, 16 / 9, 1.78, 2]) {
   );
 }
 
+// --- Absolute pins: share-URL zoom snapshots normalise against this distance, so a
+// fill/tanHalf drift that stays inside the band still breaks stored views. A change
+// here must be deliberate (it invalidates every shared scene URL's zoom). ---
+{
+  const desktop = villageAerialReferenceDistance(120, 1.6);
+  assert.ok(Math.abs(desktop - 312.5) < 1e-9,
+    `desktop reference distance drifted: expected 312.5 (R=120, aspect 1.6), got ${desktop}`);
+  const portrait = villageAerialReferenceDistance(120, 0.46);
+  assert.ok(Math.abs(portrait - 3000 / 7) < 1e-9,
+    `portrait reference distance drifted: expected ${(3000 / 7).toFixed(4)} (R=120, aspect 0.46), got ${portrait}`);
+}
+
 // --- Invalid inputs fail soft (finite non-negative distance, zero radius) ---
 assert.equal(villageAerialReferenceDistance(0, 1.6), 0);
 assert.equal(villageAerialReferenceDistance(-10, 1.6), 0);
