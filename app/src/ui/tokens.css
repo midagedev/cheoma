@@ -192,7 +192,7 @@ sp-theme.cheoma-theme {
   min-width: 0;
   min-height: 22px;
   height: var(--cad-row);
-  padding: 0 4px;
+  padding: 0 2px;
   border: 0;
   border-left: 1px solid var(--panel-border);
   border-radius: 0;

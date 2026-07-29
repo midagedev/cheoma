@@ -79,6 +79,7 @@ const DICT = {
     sec_props: '마당 소품', sec_openings: '창호',
     sec_plan: '평면', sec_plandims: '칸 치수', sec_roof: '지붕', sec_skin: '외피', sec_proportion: '비례',
     sec_bracket: '공포', sec_podium: '기단', sec_yard: '마당', sec_structure: '구조', sec_dancheong: '단청',
+    sec_roofadv: '지붕 — 고급',
     wall_tile: '기와담', wall_stone: '돌담', wall_mud: '토담', wall_brush: '싸리울', wall_hedge: '생울', wall_open: '열림',
     door_ttisal: '띠살', door_jeongja: '정자살',
     edit_advanced: '고급', unit_count: '개', edit_less: '줄이기', edit_more: '늘리기',
@@ -228,6 +229,7 @@ const DICT = {
     sec_props: 'Yard props', sec_openings: 'Openings',
     sec_plan: 'Plan', sec_plandims: 'Bay sizes', sec_roof: 'Roof', sec_skin: 'Skin', sec_proportion: 'Proportion',
     sec_bracket: 'Brackets', sec_podium: 'Podium', sec_yard: 'Yard', sec_structure: 'Structure', sec_dancheong: 'Dancheong',
+    sec_roofadv: 'Roof — advanced',
     wall_tile: 'Tiled', wall_stone: 'Stone', wall_mud: 'Mud', wall_brush: 'Brush', wall_hedge: 'Hedge', wall_open: 'Open',
     door_ttisal: 'Ttisal', door_jeongja: 'Jeongja',
     edit_advanced: 'Advanced', unit_count: '', edit_less: 'decrease', edit_more: 'increase',
@@ -251,7 +253,7 @@ const DICT = {
     time_dawn: 'Dawn', time_day: 'Day', time_sunset: 'Sunset', time_night: 'Night',
     season_spring: 'Spring', season_summer: 'Summer', season_autumn: 'Autumn', season_winter: 'Winter',
     weather_clear: 'Clear', weather_rain: 'Rain', weather_snow: 'Snow',
-    render_style: 'Rendering style', render_pbr: 'Scenery', render_ink: 'Ink',
+    render_style: 'Style', render_pbr: 'Scenery', render_ink: 'Ink',
     render_pbr_tip: 'View with light and color', render_ink_tip: 'View as a true-view ink landscape',
     // ── Village mode ──
     mode_house: 'House', mode_village: 'Explore',
@@ -314,11 +316,21 @@ function detect() {
   return nav.startsWith('ko') ? 'ko' : 'en'; // 글로벌 기본 = 영어
 }
 
+// `index.html` can only ship one static lang, so the runtime locale — not the
+// markup — is the authority. Screen readers, hyphenation and CJK font selection
+// all read documentElement.lang, so it has to follow every switch.
+function applyDocumentLang(l) {
+  if (typeof document === 'undefined') return;
+  try { document.documentElement.lang = l; } catch { /* non-DOM host */ }
+}
+
 export const i18n = $state({ lang: detect() });
+applyDocumentLang(i18n.lang);
 
 export function setLang(l) {
   if (l !== 'ko' && l !== 'en') return;
   i18n.lang = l;
+  applyDocumentLang(l);
   try {
     localStorage.setItem('cheoma-lang', l);
     const u = new URL(location.href);

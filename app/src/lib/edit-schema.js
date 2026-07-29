@@ -169,12 +169,14 @@ const HANOK_SECTIONS = [
     { key: 'eaveOverhang', ctrl: 'range', min: 0.8, max: 1.8, step: 0.05, route: 'roofOpts' },
     { key: 'profileCurve', ctrl: 'range', min: 0, max: 0.8, step: 0.01, route: 'roofOpts' },
   ] },
-  { id: 'structure', titleKey: 'sec_structure', fields: [
-    { key: 'wallH', ctrl: 'range', min: 2.2, max: 3.4, step: 0.05, route: 'wallH' },
-  ] },
-  { id: 'roofadv', titleKey: 'sec_roof', adv: true, fields: [
+  // 고급 지붕 축은 기본 지붕 그룹 바로 뒤에 온다 — 사이에 다른 그룹이 끼면 인스펙터에
+  //   "지붕 … 구조 … 지붕"으로 읽힌다(감사 C2). 필드셋은 그대로다.
+  { id: 'roofadv', titleKey: 'sec_roofadv', adv: true, fields: [
     { key: 'cornerLift', ctrl: 'range', min: 0, max: 0.9, step: 0.02, route: 'roofOpts' },
     { key: 'ridgeH', ctrl: 'range', min: 0.3, max: 0.6, step: 0.01, route: 'roofOpts' },
+  ] },
+  { id: 'structure', titleKey: 'sec_structure', fields: [
+    { key: 'wallH', ctrl: 'range', min: 2.2, max: 3.4, step: 0.05, route: 'wallH' },
   ] },
 ];
 
@@ -193,6 +195,11 @@ const PALACE_SECTIONS = [
     { key: 'eaveOverhang', ctrl: 'range', min: 1.2, max: 2.2, step: 0.05, route: 'preset' },
     { key: 'profileCurve', ctrl: 'range', min: 0, max: 0.9, step: 0.01, route: 'preset' },
   ] },
+  { id: 'roofadv', titleKey: 'sec_roofadv', adv: true, fields: [
+    { key: 'cornerLift', ctrl: 'range', min: 0.2, max: 1.2, step: 0.02, route: 'preset' },
+    { key: 'ridgeH', ctrl: 'range', min: 0.4, max: 0.8, step: 0.02, route: 'preset' },
+    { key: 'interBrackets', ctrl: 'stepper', min: 0, max: 3, route: 'preset' },
+  ] },
   { id: 'bracket', titleKey: 'sec_bracket', fields: [
     { key: 'bracketTiers', ctrl: 'stepper', min: 1, max: 3, route: 'preset' },
     { key: 'bracketScale', ctrl: 'range', min: 0.8, max: 1.4, step: 0.02, route: 'preset' },
@@ -207,11 +214,6 @@ const PALACE_SECTIONS = [
     { key: 'podiumTierH', ctrl: 'range', min: 0.5, max: 1.2, step: 0.02, route: 'preset' },
     { key: 'podiumRailing', ctrl: 'toggle', route: 'preset' },
   ] },
-  { id: 'roofadv', titleKey: 'sec_roof', adv: true, fields: [
-    { key: 'cornerLift', ctrl: 'range', min: 0.2, max: 1.2, step: 0.02, route: 'preset' },
-    { key: 'ridgeH', ctrl: 'range', min: 0.4, max: 0.8, step: 0.02, route: 'preset' },
-    { key: 'interBrackets', ctrl: 'stepper', min: 0, max: 3, route: 'preset' },
-  ] },
 ];
 
 // ── 특수: 궁궐 다일곽 컴파운드(#93, features.palace) — presetOverrides 로 전 전각 일괄 적용 ──────
@@ -225,13 +227,13 @@ const PALACE_COMPOUND_SECTIONS = [
     { key: 'eaveOverhang', ctrl: 'range', min: 1.2, max: 2.2, step: 0.05, route: 'preset' },
     { key: 'profileCurve', ctrl: 'range', min: 0, max: 0.9, step: 0.01, route: 'preset' },
   ] },
+  { id: 'roofadv', titleKey: 'sec_roofadv', adv: true, fields: [
+    { key: 'cornerLift', ctrl: 'range', min: 0.2, max: 1.2, step: 0.02, route: 'preset' },
+    { key: 'interBrackets', ctrl: 'stepper', min: 0, max: 3, route: 'preset' },
+  ] },
   { id: 'bracket', titleKey: 'sec_bracket', fields: [
     { key: 'bracketTiers', ctrl: 'stepper', min: 1, max: 3, route: 'preset' },
     { key: 'bracketScale', ctrl: 'range', min: 0.8, max: 1.4, step: 0.02, route: 'preset' },
-  ] },
-  { id: 'roofadv', titleKey: 'sec_roof', adv: true, fields: [
-    { key: 'cornerLift', ctrl: 'range', min: 0.2, max: 1.2, step: 0.02, route: 'preset' },
-    { key: 'interBrackets', ctrl: 'stepper', min: 0, max: 3, route: 'preset' },
   ] },
 ];
 

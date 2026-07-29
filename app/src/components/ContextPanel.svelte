@@ -1214,6 +1214,10 @@
   @media (prefers-reduced-motion: reduce) {
     .env-flow.on :global(svg) { animation: none; }
   }
+  /* Environment rows hold the widest segment labels in the column — EN
+     Summer/Autumn were being ellipsised at the shared 38% label width — so this
+     block trades label width for cell width. Property rows keep the 38% grid. */
+  .envblock { --cad-label: 30%; }
   .row.envrow { grid-template-columns: minmax(0, var(--cad-label)) minmax(0, 1fr); }
   .row.envrow .cad-seg { justify-self: stretch; }
 
