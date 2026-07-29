@@ -271,9 +271,21 @@ try {
   assert.ok(attributeBytes['rain-physical'] < 2600,
     'rain geometry allocated per-instance transforms or viewport data');
 
-  // 강수 전용 밴드(look-audit R3). 밴드가 소유하는 것은 낙하 볼륨 커버리지·빗줄기 길이·밀도뿐이고,
-  // 입자 치수는 정점 셰이더의 투영 하한이 소유한다. 오브젝트 스케일이 입자 치수에 곱해지지 않아야
-  // 부감 확대가 흰 막대(#116 계열)로 번지지 않는다 — 그 분리를 여기서 고정한다.
+  // 강수 전용 밴드(look-audit R3 / release audit A6). 밴드가 소유하는 것은 낙하 볼륨
+  // 커버리지·빗줄기 길이·밀도뿐이고, 입자 치수는 정점 셰이더가 소유한다. 오브젝트 스케일이
+  // 입자 치수에 곱해지지 않아야 부감 확대가 흰 막대(#116)로 번지지 않는다.
+  // 비는 추가로 (a) 투영 폭 하한 0, (b) 볼륨 Y 스케일 1 고정 — 부감 분필선 금지.
+  {
+    const rainUniforms = rainFull.object.material.uniforms;
+    assert.ok(rainUniforms.uScreenWidth.value <= 1e-6,
+      `rain projective width floor must be 0 (got ${rainUniforms.uScreenWidth.value}) — aerial chalk`);
+    assert.ok(rainUniforms.uScreenWidthCap.value <= 0.05,
+      `rain width cap ${rainUniforms.uScreenWidthCap.value} allows thick aerial strokes`);
+    assert.ok(rainUniforms.uRadius.value > 0 && rainUniforms.uRadius.value <= 0.01,
+      `rain authored radius ${rainUniforms.uRadius.value} out of ~mm band`);
+    assert.ok(rainUniforms.uAlphaScale.value <= 0.2,
+      `rain alpha ${rainUniforms.uAlphaScale.value} too opaque for veil`);
+  }
   for (const representation of [snowFull, rainFull]) {
     const { uniforms, vertexShader } = representation.object.material;
     assert.equal(typeof representation.setPresentation, 'function',
@@ -281,7 +293,7 @@ try {
     assert.ok(!/uSizeScale/.test(vertexShader),
       `${representation.kind} scales particle size from one distance value again`);
     assert.match(vertexShader, /projectionMatrix\[1\]\[1\]/,
-      `${representation.kind} lost the per-particle projective size floor`);
+      `${representation.kind} lost the per-particle projective size floor helper`);
     assert.ok(!/gl_PointSize|gl_PointCoord|cameraPosition/.test(vertexShader),
       `${representation.kind} regressed to a point or camera billboard`);
     // 오프셋이 modelMatrix 를 통과하면 볼륨 스케일이 입자를 함께 부풀린다.
@@ -292,6 +304,15 @@ try {
     representation.setPresentation({ boxScale: 6.2, lengthScale: 4.2, density: 0.5 });
     assert.equal(representation.object.scale.x, 6.2,
       `${representation.kind} volume coverage is not owned by the object scale`);
+    if (representation.kind === 'rain-physical') {
+      assert.equal(representation.object.scale.y, 1,
+        'rain volume must not scale Y with aerial boxScale (sky chalk lines)');
+      assert.equal(representation.object.scale.z, 6.2,
+        'rain volume XZ coverage is not owned by object scale');
+    } else {
+      assert.equal(representation.object.scale.y, 6.2,
+        'snow volume still scales uniformly');
+    }
     assert.equal(representation.object.geometry.instanceCount,
       Math.round(representation.object.geometry.attributes.aCenter.count * 0.5),
       `${representation.kind} pays its far cost with something other than density`);
@@ -305,6 +326,19 @@ try {
       `${representation.kind} density floor lets the far view draw nothing`);
     assert.equal(representation.object.scale.x, 1,
       `${representation.kind} did not return to the authored near volume`);
+  }
+
+  // Product aerial band defaults: rain keeps physical streak length, low density.
+  {
+    const lod = await import(new URL('../src/core/lod.js', import.meta.url).href);
+    assert.ok(lod.PRECIPITATION_BAND.rainLengthScale <= 1.01,
+      `aerial rainLengthScale ${lod.PRECIPITATION_BAND.rainLengthScale} lengthens chalk strokes`);
+    assert.ok(lod.PRECIPITATION_BAND.density <= 0.35,
+      `aerial rain density ${lod.PRECIPITATION_BAND.density} too high for fog-only far weather`);
+    const far = lod.precipitationPresence(400);
+    assert.ok(far.rainLength <= 1.01, `far rainLength ${far.rainLength} must stay near 1`);
+    assert.ok(far.density <= 0.35, `far density ${far.density} too high`);
+    assert.ok(far.boxScale > 1, 'far volume still expands on XZ');
   }
 
   for (const representation of [snowFull, rainFull]) {

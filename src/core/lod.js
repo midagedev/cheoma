@@ -22,11 +22,14 @@ export const PRECIPITATION_BAND = Object.freeze({
   nearView: 56,
   farView: 380,
   // 낙하 볼륨(±46m 박스)의 최대 배율. 부감 프레임이 담는 지면 폭을 덮는 값.
+  // Rain applies this on XZ only (weather-physical-geometry) so streaks do not rise
+  // into the sky as chalk lines (release audit A6).
   boxScale: 6.2,
-  // 원경 빗줄기 길이 배율. 폭은 화면 하한이 잡으므로 길이만 올려 원경에서도 "줄기"로 읽히게 한다.
-  rainLengthScale: 4.2,
-  // 최소 밀도(그리는 인스턴스 비율). 부감 비용은 밴드 0이 아니라 이 값으로만 낸다.
-  density: 0.8,
+  // 원경 빗줄기 길이 배율. 부감에서 줄기를 키우면 분필선이 된다 — 물리 길이(1.4–2.6m)를
+  // 유지하고 원경 존재감은 fog 무드 + 낮은 밀도로만 낸다.
+  rainLengthScale: 1.0,
+  // 최소 밀도(그리는 인스턴스 비율). 부감 줄기는 사실상 비가시여야 하므로 낮게 둔다.
+  density: 0.22,
 });
 
 // 부감 생명감 밴드(look-audit R4). 지면 생활 디테일(동물·풀·모트)은 원경에서 서브픽셀이므로

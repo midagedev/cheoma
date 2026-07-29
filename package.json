@@ -68,6 +68,8 @@
     "check:nightlights": "node tools/check-env-night-glow.mjs && node tools/check-village-night-glow.mjs && node tools/check-opening-glow-catalog.mjs && node tools/check-nightlights.mjs",
     "check:particle-geometry": "node tools/run-browser-locked.mjs -- npm run check:particle-geometry:unlocked",
     "check:particle-geometry:unlocked": "node tools/check-weather-geometry.mjs && node tools/check-nightlight-geometry.mjs && node tools/check-detail-particle-geometry.mjs",
+    "check:snow-overlay": "node tools/check-snow-overlay.mjs",
+    "check:season-particle-size": "node tools/check-season-particle-size.mjs",
     "check:layout": "node tools/check-layout-contract.mjs",
     "check:gosat": "node tools/check-gosat-topology.mjs",
     "check:live-edit": "node tools/check-live-edit-scheduler.mjs && node tools/check-live-edit-signatures.mjs",

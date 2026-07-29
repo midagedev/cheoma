@@ -66,6 +66,13 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
   material.userData.__snowPatched = true;
   material.userData.__snowProfile = profile;
   material.userData.__snowPatchVersion = MATERIAL_PROGRAM_PATCH.SNOW;
+  // DoubleSide materials and roof tile/thatch always take abs(ny) for coverage.
+  // Skeleton/paljak outer tile shells are FrontSide but often wind with ny < 0 on the
+  // visible skin (see roof-shell exteriorUnitNormal); without abs, focus FULL giwa
+  // roofs stay black while walls/gate roofs accumulate (release audit A2).
+  const absUp = (profile === 'tile' || profile === 'thatch'
+    || material.side === THREE.DoubleSide) ? '1.0' : '0.0';
+  material.userData.__snowAbsUp = absUp === '1.0';
   // R8 program diet (#220 residual): snow-patched stock materials always carry the LOD
   // screen-door path so clear→snow and plain→LOD never fork independent snow families.
   // Coverage defaults to affine 1; true LOD roots alone rewrite matrix[3][3].
@@ -80,7 +87,6 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
       value: new THREE.Vector4(P.thickFill, P.steepMinimum, P.floorMin, P.coverage),
     };
     shader.uniforms.uSnowExtra = { value: new THREE.Vector2(P.ceiling, P.backfaceBoost) };
-    const twoSided = material.side === THREE.DoubleSide ? '1.0' : '0.0';
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSnowWN;\nvarying vec3 vSnowWP;')
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
@@ -115,7 +121,7 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         {
           vec3 swn = normalize(vSnowWN);
-          float fixup = ${twoSided} * step(swn.y, -0.05)
+          float fixup = ${absUp} * step(swn.y, -0.05)
                       * smoothstep(0.30, 0.55, abs(swn.y))
                       * smoothstep(0.0, 0.20, uSnowAmount);
           vec3 vUp = normalize((viewMatrix * vec4(-swn, 0.0)).xyz);
@@ -125,7 +131,7 @@ export function patchSnowMaterial(material, amountUniform, { profile = 'surface'
       .replace('#include <color_fragment>', `#include <color_fragment>
         {
           vec3 wn = normalize(vSnowWN);
-          float ny = mix(wn.y, abs(wn.y), ${twoSided});
+          float ny = mix(wn.y, abs(wn.y), ${absUp});
           float thresh = mix(0.72, 0.20, uSnowAmount);
           float up = smoothstep(thresh - 0.10, thresh + 0.18, ny);
           float ridge = 0.5 + 0.5 * sin(vSnowWP.x * 3.0 + vSnowWP.z * 0.6);

@@ -157,13 +157,21 @@ function createPhysicalDepthMaterial(uniforms, vertexShader, name) {
 // 강수 표현의 거리 종속 조정기. 오브젝트 스케일은 낙하 볼륨(±46m 박스)의 커버리지만 키우고
 // 입자 치수에는 관여하지 않는다(정점 셰이더가 중심만 modelMatrix 로 옮기고 오프셋은 월드 공간에서
 // 만든다). 그래서 부감에서 볼륨이 프레임을 덮어도 입자가 함께 부풀지 않는다.
+//
+// scaleY=false (rain): 수평만 키운다. 균일 scale 은 상단 입자까지 지평선 위 하늘로 올려
+// 부감 흰 분필선이 된다(release audit A6). 눈은 입체 볼륨이 필요해 균일 scale 을 유지한다.
 function applyPresentation(object, uniforms, geometry, count, {
-  boxScale = 1, lengthScale = null, density = 1,
+  boxScale = 1, lengthScale = null, density = 1, scaleY = true,
 } = {}) {
   const box = Number.isFinite(boxScale) && boxScale > 0 ? boxScale : 1;
-  if (object.scale.x !== box) object.scale.setScalar(box);
+  const nextY = scaleY ? box : 1;
+  if (object.scale.x !== box || object.scale.y !== nextY || object.scale.z !== box) {
+    object.scale.set(box, nextY, box);
+  }
   if (lengthScale != null && Number.isFinite(lengthScale) && uniforms.uLengthScale) {
-    uniforms.uLengthScale.value = Math.max(1, lengthScale);
+    // Allow sub-1 length scales so aerial can keep physical streak length without
+    // forced lengthening into chalk strokes.
+    uniforms.uLengthScale.value = Math.max(0.25, lengthScale);
   }
   // 밀도는 그리는 인스턴스 비율로만 낸다. CPU state 는 전량 진행시켜(정지→재등장 팟 방지)
   // 원경 비용은 정점·프래그먼트에서만 줄인다.
@@ -248,14 +256,16 @@ function physicalRainMaterial() {
       uLean: { value: new THREE.Vector2() },
       // An 8mm triangular volume is already a generous visual upper bound for rain.
       uRadius: { value: 0.004 },
-      // 화면 높이 대비 빗줄기 폭 하한(≈0.8px @900px) — 실사진의 빗줄기와 같은 규약. 이보다 굵으면
-      // 흰 막대로 읽히고, 낮은 알파와 함께 bloom 문턱을 넘어 번져 "흰 물감 자국"이 된다.
-      uScreenWidth: { value: 0.0017 },
-      uScreenWidthCap: { value: 0.5 },
-      // 거리 종속 길이 배율(강수 전용 밴드가 소유). 폭은 위 화면 하한이 소유한다.
+      // Rain must NOT keep a projective screen-width floor. At aerial depths the old
+      // ~0.0017 floor forced ~3px opaque chalk strokes of equal length against the sky
+      // (release audit A6). Physical 4mm radius stays visible only in the near band;
+      // far weather is fog mood, not streak geometry. Cap is a hard fail-safe only.
+      uScreenWidth: { value: 0 },
+      uScreenWidthCap: { value: 0.02 },
+      // 거리 종속 길이 배율(강수 전용 밴드가 소유). 폭은 물리 radius 가 소유한다.
       uLengthScale: { value: 1 },
       // 비는 대기에 녹아드는 결(veil)로 읽혀야 한다 — 역광 하이라이트를 넘기지 않도록 낮게 둔다.
-      uAlphaScale: { value: 0.15 },
+      uAlphaScale: { value: 0.12 },
     },
     transparent: true,
     depthTest: true,
@@ -306,7 +316,11 @@ export function createPhysicalRainRepresentation(state) {
       material.uniforms.uLean.value.set(state.leanX, state.leanZ);
     },
     setPresentation(presentation) {
-      applyPresentation(object, material.uniforms, geometry, state.count, presentation);
+      // Rain volume widens on XZ only — uniform boxScale pushed streaks into the sky.
+      applyPresentation(object, material.uniforms, geometry, state.count, {
+        ...presentation,
+        scaleY: false,
+      });
     },
     dispose: disposeRepresentation(object, geometry, material, depthMaterial),
   };

@@ -25,6 +25,8 @@ export const FAST_CHECKS = Object.freeze([
   './check-nightlights.mjs',
   './check-village-night-glow.mjs',
   './check-weather-geometry.mjs',
+  './check-snow-overlay.mjs',
+  './check-season-particle-size.mjs',
   './check-threshold-life-contract.mjs',
   './check-door-motion-contract.mjs',
   './check-edge-mist.mjs',
