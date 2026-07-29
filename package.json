@@ -77,6 +77,7 @@
     "check:scene-snapshot": "node tools/check-scene-snapshot.mjs",
     "check:share": "npm run check:scene-snapshot && node tools/check-share.mjs",
     "check:shader-warm": "node tools/check-shader-warm.mjs",
+    "check:hop-warm": "node tools/check-hop-warm.mjs",
     "check:program-diet": "node tools/check-program-diet.mjs",
     "check:shadow": "node tools/check-shadow-framing.mjs && node tools/check-directional-shadow-runtime.mjs",
     "check:cloud-shadow": "node tools/check-cloud-shadow-profile.mjs",

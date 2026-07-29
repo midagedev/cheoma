@@ -2269,9 +2269,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     // rAF-chunked B overlay (handle owns house|wall split). Fire-and-forget: hopDone
     // may land before install on very slow CPUs; base B remains exclusive until then.
+    // warm runs while the draft is still off-scene (handle awaits it before finish).
     Promise.resolve(village.handle.showParcelDetailChunked(toId, {
       yieldFrame,
       isCancelled: () => !hopBuildLive(),
+      warm: (g) => warmShaders(g),
     })).then((detail) => {
       installHopOverlay(detail);
     }, () => { /* build abort / dispose — ignore */ });

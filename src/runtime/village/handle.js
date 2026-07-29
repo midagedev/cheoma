@@ -1804,7 +1804,7 @@ export function createVillageHandle(opts, seed, plan, group) {
     //   · Base instancing stays visible until the final install — no incomplete
     //     overlay is ever parented into the scene (no wrong-parcel flash).
     // Live-edit / focus-in / rebuild keep the synchronous showParcelDetail path.
-    async showParcelDetailChunked(parcelId, { yieldFrame, isCancelled } = {}) {
+    async showParcelDetailChunked(parcelId, { yieldFrame, isCancelled, warm } = {}) {
       const cancelled = () => !!isCancelled?.();
       const pause = async () => {
         if (typeof yieldFrame === 'function') await yieldFrame();
@@ -1851,6 +1851,15 @@ export function createVillageHandle(opts, seed, plan, group) {
         if (cancelled()) {
           abortResidentialHopOverlay(draft);
           return null;
+        }
+        // Precompile overlay materials while the draft is still off-scene so the
+        // first visible frame never blocks on synchronous program link.
+        if (draft.g && typeof warm === 'function') {
+          try { await warm(draft.g); } catch { /* warm failure must not block install */ }
+          if (cancelled()) {
+            abortResidentialHopOverlay(draft);
+            return null;
+          }
         }
         const detail = finishResidentialHopOverlay(draft);
         draft = null; // ownership moved into overrides (or aborted inside finish)

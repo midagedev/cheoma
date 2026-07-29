@@ -67,6 +67,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-building-navigation.mjs',
   './check-scene-guide.mjs',
   './check-shader-warm.mjs',
+  './check-hop-warm.mjs',
   './check-program-diet.mjs',
   './check-shadow-framing.mjs',
   './check-directional-shadow-runtime.mjs',
