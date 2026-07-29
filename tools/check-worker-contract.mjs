@@ -210,10 +210,15 @@ const expectedSceneHashes = {
   //   rafters cleared below the shell. Scene geometry/triangle counts change at
   //   every scale; pick proxies stay byte-identical. Assembly moves the roof as
   //   one rigid group (visibility-only chunk stagger).
-  village: '0120d0c5:c9c8ebfd:1fed1369:910c99bd',
-  town: 'f46d32cc:9dd11ce0:63812e10:0fb9bdd8',
-  capital: '2bca1aa1:eceb63b3:ce0ec281:302c50c5',
-  hanyang: '608619df:d3133c19:65d8eb86:9f58ee1d',
+  // Roof z-fight series (fde574e..2fe0266, release polish): outer tile shells gain
+  //   real thickness with FrontSide skins + offset undersides, gaepan rim/shell depth
+  //   moves, and rafters clear below the shell — intended geometry at every scale.
+  //   The series shipped without re-baselining; parity sync == worker == `?worker=0`
+  //   fallback re-verified byte-identical at this re-baseline (proxy bytes unchanged).
+  village: '746dcfc1:e434bbfb:045043dc:597f60f1',
+  town: '99771137:ee92fa61:cc7ace0a:9426d3f9',
+  capital: 'b8da814b:c5869d91:261255d9:59f448a1',
+  hanyang: '8fdb6d0d:315269eb:d90f582d:9eab30cd',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
