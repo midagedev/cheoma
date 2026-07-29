@@ -351,3 +351,45 @@ export function setVillageWaterTime(waterU, name) {
   waterU.uSky.value.setHex(skyHex, THREE.SRGBColorSpace);
   waterU.uRough.value = (name in V_WATER_ROUGH) ? V_WATER_ROUGH[name] : 0.0;
 }
+
+// ───────────────────────── 개울 알베도 대기 참여 (감사 A7) ─────────────────────────
+// 위 세 표(글린트·하늘반사·거칠기)는 전부 *가산 반사층*만 다룬다. 그래서 base 알베도
+// (buildWaterRibbon 의 vertexColors deep 0x376f82)가 시간·계절과 무관하게 남아, 설경에서도
+// 한여름 코발트로 읽혔다. 아래 두 표가 그 알베도를 대기 계통에 넣는다(곱연산 틴트 + 탈채도).
+//   레인 그라디언트(deep↔bank)는 곱연산이므로 보존된다 — 계열만 옮긴다.
+// 값 규약: 낮은 (1,1,1)·0 = 기존 룩 완전 보존(회귀 없음). 그 외 시간대만 대기 쪽으로 당긴다.
+const V_WATER_TINT = {
+  dawn:   [0.82, 0.80, 0.86],
+  day:    [1.00, 1.00, 1.00],   // 기준 — 낮 개울 룩 불변
+  sunset: [1.02, 0.86, 0.74],   // 노을 대기와 같은 주홍 쪽으로(하늘반사도 같은 함수를 탄다)
+  night:  [0.52, 0.58, 0.72],   // 달빛 청, 어둠에 가라앉되 존재
+};
+// 시간대별 탈채도. 저광량 시간대의 물은 실제로 채도가 낮게 읽힌다(반사가 하늘을 닮아간다).
+const V_WATER_DESAT_TIME = { dawn: 0.34, day: 0.0, sunset: 0.30, night: 0.42 };
+// 계절 축. 겨울 개울은 결빙·잔설로 채도가 거의 사라지고 창백해진다 — 감사 A7 의 설경 순청색
+// 지적이 정확히 이 축의 부재였다. 여름을 기준(무연산)으로 두고 겨울만 강하게 뺀다.
+const V_WATER_DESAT_SEASON = { spring: 0.10, summer: 0.0, autumn: 0.14, winter: 0.72 };
+const V_WATER_TINT_SEASON = {
+  spring: [1.00, 1.00, 1.00],
+  summer: [1.00, 1.00, 1.00],
+  autumn: [1.02, 0.98, 0.92],
+  winter: [1.14, 1.18, 1.24],   // 창백한 얼음 쪽으로 살짝 밝게
+};
+
+// 시간·계절·수묵을 하나의 목표로 합성한다. 수묵(ink)은 채도를 끝까지 뺀다: ink pass 는
+//   chromaKeep 0.07 로 잔여 채도를 의도적으로 남기는데, 물만 채도가 극단적이라 그 7%가
+//   모노크롬 화면에 파란 획으로 남았다(감사 A7 두 번째 절).
+export function villageWaterLookTarget({ time = 'day', season = 'summer', ink = 0 } = {}) {
+  const t = V_WATER_TINT[time] || V_WATER_TINT.day;
+  const s = V_WATER_TINT_SEASON[season] || V_WATER_TINT_SEASON.summer;
+  const desat = Math.max(
+    (time in V_WATER_DESAT_TIME) ? V_WATER_DESAT_TIME[time] : 0,
+    (season in V_WATER_DESAT_SEASON) ? V_WATER_DESAT_SEASON[season] : 0,
+  );
+  const k = Math.min(1, Math.max(0, ink));
+  return {
+    tint: [t[0] * s[0], t[1] * s[1], t[2] * s[2]],
+    // 수묵은 시간·계절 위에 덧씌운다(전환 중 amount 0..1 로 연속).
+    desat: desat + (1 - desat) * k,
+  };
+}

@@ -2163,7 +2163,9 @@ export function createVillageHandle(opts, seed, plan, group) {
       nightGlow.setBoost(V.glowBoost ?? 1.0);
       nightGlow.setTime(name, { immediate });
       vlights.apply(name, { immediate });      // 마을 전용 헤미 리프트 + 안티솔라 웜 필
-      group.userData.setWaterTime?.(name);   // 개울 물 글린트·하늘반사 시간대 하향(야간 흰 띠 방지)
+      // 개울 물 글린트·하늘반사 시간대 하향(야간 흰 띠 방지) + 알베도 대기 참여(감사 A7).
+      //   immediate 를 넘겨야 shot·초기 로드가 스냅하고 사용자 전환은 크로스페이드한다.
+      group.userData.setWaterTime?.(name, { immediate });
       group.userData.setAnimalsTime?.(name); // 마당 닭 야간 홰 자세(소동물 #41)
       fauna.setTime(name);                   // 개·고양이·까치·새 떼(밤엔 새 떼 숨김·활동 저하)
       ambientField.setTime(name, immediate);  // 카메라 앵커 필드 앰비언스 시간대(연기·모트, #105)

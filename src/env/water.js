@@ -30,7 +30,23 @@ export function createWaterUniforms() {
     // 라우팅(setVillageWaterTime)에서만 이 값을 올려 그 하이라이트를 넓고 은은한 시트로
     // 퍼뜨린다(peak 를 bloom 임계 아래로). 단일 씬 env 물은 setTime 이 건드리지 않아 0 유지.
     uRough: { value: 0 },
+    // 대기 참여용 알베도 틴트(곱연산). 물의 base 알베도는 시간·계절 어느 계통에도 연결돼
+    // 있지 않아서, 설경에서도 한여름 코발트로 남았다(감사 A7). uSky·uGlint 는 *가산* 반사층이라
+    // 이 문제를 못 고친다 — 부감에서 화면을 지배하는 항은 알베도다. (1,1,1)=완전 무연산.
+    uWaterTint: { value: new THREE.Color(1, 1, 1) },
+    // 0=원색, 1=완전 무채. 겨울 결빙감과 수묵 커버리지가 같은 축을 쓴다.
+    uWaterDesat: { value: 0 },
   };
+}
+
+// 물 룩 목표값(틴트·탈채도)을 지수 접근으로 따라간다. 시간·계절 전환은 크로스페이드 계약이라
+// 목표만 세팅하고 매 프레임 이 함수가 좁힌다. immediate=true(shot·초기 로드)면 즉시 스냅.
+export const WATER_LOOK_RATE = 2.4;   // ≈1.6s — sky/글린트 크로스페이드와 같은 결
+export function stepWaterLook(u, target, dt, rate = WATER_LOOK_RATE) {
+  if (!u || !target) return;
+  const k = Math.min(1, dt * rate);
+  u.uWaterTint.value.lerp(target.tint, k);
+  u.uWaterDesat.value += (target.desat - u.uWaterDesat.value) * k;
 }
 
 // 시간대별 물 글린트(색×강도, 선형). 낮=따뜻한 햇살, 석양=저각 금빛, 밤=성긴 은빛 달빛.
@@ -65,6 +81,8 @@ export function injectWaterLook(shader, u, {
   shader.uniforms.uFlow = u.uFlow;
   shader.uniforms.uGlint = u.uGlint;
   shader.uniforms.uRough = u.uRough;
+  shader.uniforms.uWaterTint = u.uWaterTint;
+  shader.uniforms.uWaterDesat = u.uWaterDesat;
   shader.uniforms.uWaterReflection = { value: reflection };
   shader.uniforms.uWaterRippleScale = { value: ripple };
 
@@ -81,9 +99,19 @@ export function injectWaterLook(shader, u, {
       uniform vec2 uFlow;
       uniform vec3 uGlint;
       uniform float uRough;
+      uniform vec3 uWaterTint;
+      uniform float uWaterDesat;
       uniform float uWaterReflection;
       uniform float uWaterRippleScale;
-      varying vec3 vWaterWP;`)
+      varying vec3 vWaterWP;
+      vec3 waterAtmos(vec3 c) {
+        c *= uWaterTint;
+        return mix(c, vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), uWaterDesat);
+      }`)
+    // 알베도를 대기 계통에 참여시킨다. color_fragment 뒤라 vertexColors(개울 깊이/물가 레인
+    // 그라디언트)가 이미 적용된 상태 — 레인 대비는 보존하고 계열만 옮긴다.
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      diffuseColor.rgb = waterAtmos(diffuseColor.rgb);`)
     // 시간대 거칠기 가산: 저각 광원 스펙큘러의 뾰족한 peak 를 낮춰 bloom 임계 아래로.
     // wetK 로 게이트(논: 봄에만 물). uRough=0 이면 완전 무연산(기본 룩 불변).
     // 상한만 min 으로(하한 clamp 없음) → uRough=0 이면 roughnessFactor 그대로(항상 ≤1)라
@@ -109,14 +137,16 @@ export function injectWaterLook(shader, u, {
         float wetK = clamp(${wetExpr}, 0.0, 1.0);
         vec3 V = normalize(vViewPosition);
         float fres = pow(clamp(1.0 - abs(dot(normalize(normal), V)), 0.0, 1.0), 2.4);
-        totalEmissiveRadiance += uSky * (0.10 + 0.85 * fres) * uWaterReflection * wetK;
+        // 가산 반사층도 같은 대기 함수를 통과해야 한다 — 알베도만 중성화하면 수묵에서 하늘반사가
+        // 혼자 남아 파란 획이 그대로 보인다.
+        totalEmissiveRadiance += waterAtmos(uSky) * (0.10 + 0.85 * fres) * uWaterReflection * wetK;
         // 글린트: 흐름 따라 흐르는 교차 고주파 → 성기고 뾰족한 하이라이트만(수묵 감성).
         // grazing(fres)으로 게이트해 은은하게 얹는다.
         vec2 gp = vWaterWP.xz;
         float g1 = sin(dot(gp, vec2(1.9, -1.3)) + uTime * 1.7);
         float g2 = sin(dot(gp, vec2(-1.1, 2.3)) - uTime * 1.05);
         float spark = pow(clamp(g1 * g2, 0.0, 1.0), 8.0);
-        totalEmissiveRadiance += uGlint * spark * (0.35 + 0.65 * fres)
+        totalEmissiveRadiance += waterAtmos(uGlint) * spark * (0.35 + 0.65 * fres)
           * uWaterReflection * wetK;
       }`);
 }

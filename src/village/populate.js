@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { makeRng } from '../rng.js';
 import { makeMaterials, injectVillageCloudShadow } from '../builder/palette.js';
 import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
-import { createWaterUniforms } from '../env/water.js';
+import { createWaterUniforms, stepWaterLook } from '../env/water.js';
 import {
   createCloudUniforms, buildEdgeMistRing, buildRidgeMist,
 } from '../env/clouds.js';
@@ -45,6 +45,7 @@ import {
   buildWaterRibbon,
   computeRidgeMistAnchors,
   setVillageWaterTime,
+  villageWaterLookTarget,
 } from '../generators/village/terrain.js';
 import { scatterTrees } from '../generators/village/trees.js';
 import { buildRoads } from '../generators/village/roads.js';
@@ -120,6 +121,19 @@ export function* populateVillageSteps(plan, opts = {}) {
 
   // 물 uniform(개울 공유)
   const waterU = createWaterUniforms();
+  // 개울 알베도의 대기 참여 상태(감사 A7). 시간·계절·수묵을 하나의 목표로 합성해 두고
+  //   update(dt) 가 지수 접근으로 좁힌다 — 환경 전환 크로스페이드 계약(팝 금지) 준수.
+  const waterLook = { time: 'day', season: 'summer', ink: 0 };
+  const waterLookTarget = { tint: new THREE.Color(1, 1, 1), desat: 0 };
+  function refreshWaterLook({ immediate = false } = {}) {
+    const t = villageWaterLookTarget(waterLook);
+    waterLookTarget.tint.setRGB(t.tint[0], t.tint[1], t.tint[2]);
+    waterLookTarget.desat = t.desat;
+    if (immediate) {
+      waterU.uWaterTint.value.copy(waterLookTarget.tint);
+      waterU.uWaterDesat.value = waterLookTarget.desat;
+    }
+  }
   // 흐르는 구름 그림자 uniform(지형 재질 ↔ clouds 빌보드 공유). 빌보드 자체는 sun 이 필요해
   //   어댑터가 마을 진입 시 붙인다(populate 는 uniform·그림자 패치·운해 링까지만 — sun 무관 결정론).
   const cloudU = createCloudUniforms();
@@ -608,10 +622,27 @@ export function* populateVillageSteps(plan, opts = {}) {
 
     // 흐르는 구름 그림자 공유 uniform(어댑터가 진입 시 setupClouds 에 넘겨 빌보드가 갱신) + 외곽선.
     cloudUniforms: cloudU, edge: site.edge, terrainMax: site.terrainR,
-    setWaterTime: (name) => setVillageWaterTime(waterU, name),   // 개울 물 시간대 톤(어댑터 setTime 이 호출)
+    setWaterTime: (name, opts = {}) => {                         // 개울 물 시간대 톤(어댑터 setTime 이 호출)
+      setVillageWaterTime(waterU, name);
+      waterLook.time = name;
+      refreshWaterLook(opts);
+    },
+    // 수묵 커버리지(0..1 연속). ink pass 는 chromaKeep 으로 잔여 채도를 남기는데 물만 채도가
+    //   극단적이라 모노크롬 화면에 파란 획으로 남았다 → 물 자체를 무채로 보낸다.
+    //   호출자(ink 런타임)가 이미 amount 를 페이드 곡선으로 넘기므로 탈채도는 스냅한다 —
+    //   여기서 또 지수 접근을 걸면 종이 페이드보다 물이 뒤처진다. 틴트는 시간·계절
+    //   크로스페이드를 방해하지 않게 목표만 갱신하고 lerp 에 맡긴다.
+    setWaterInk: (amount) => {
+      if (waterLook.ink === amount) return;      // 매 프레임 호출을 무료로 만든다(ink 런타임 계약)
+      waterLook.ink = amount;
+      refreshWaterLook();
+      waterU.uWaterDesat.value = waterLookTarget.desat;
+    },
     setAnimalsTime: (name) => { for (const a of animals.handles) a.setTime(name); },
     setSeason: (name, opts = {}) => {
       yardLifeSeason = name;
+      waterLook.season = name;
+      refreshWaterLook(opts);
       terrain.setSeason(name);
       flora.setSeason(name);
       yardLife.setSeason(name, opts);
@@ -643,6 +674,7 @@ export function* populateVillageSteps(plan, opts = {}) {
     debugYardLife: () => yardLife.debug(),
     update: (dt) => {
       waterU.uTime.value += dt;
+      stepWaterLook(waterU, waterLookTarget, dt);
       const yardLifeChanged = yardLife.update(dt);
       for (const a of animals.handles) a.update(dt);
       return yardLifeChanged;
