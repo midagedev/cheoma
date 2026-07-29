@@ -192,6 +192,10 @@
   let villageZooming = $state(false);          // focus 전환(돌리) 진행 중 — 크롬 숨김 판단
   let focusMorph = $state(0);                  // 0=마을(부감)·1=집(근접) 패널 컨텍스트 모프
   let heroLanding = $state(false);             // 부팅 종가 랜딩 중(패널 숨김 — 히어로 연출)
+  // 클립 촬영 스테이지(#255–#260): 인스펙터 도크가 프레임의 ~28%를 먹으므로 테이크 동안 3축 크롬을
+  //   물린다. 인앱 녹화기는 없고(그 결정 유지) 이건 OS 녹화용 무대 세팅일 뿐이다. 첫 의도적 입력에서
+  //   해제되므로 테이크가 끝난 뒤 앱은 그대로 쓸 수 있다.
+  let clipRecording = $state(false);
   // #216 focus 부재 용어 오버레이 — 세션 토글, 기본 OFF. URL/share/ink 기본 프레임을 오염하지 않는다.
   let glossaryOn = $state(false);
   let glossaryEligible = $state(false);
@@ -236,6 +240,7 @@
   }
   let waving = $state(false);                  // 리롤 웨이브 진행 중(#56 — 입력·버튼 잠금)
   let editParams = $state({});                 // { kind, frontBays, sideBays, roofPitch, eaveOverhang }
+  let editEpoch = $state(0);                   // bumps only on reseed — panel baseline for "changed" markers
   let hoverInfo = $state(null);                // 호버 미니라벨 { spec, x, y }
   let veil = $state(false);                    // 먹 안개 트랜지션 오버레이(#46) — 마을 생성 프리징 마스킹
   let veilPending = 0;                          // withVeil 재진입 카운터(#133) — 파라미터 연타(#69 라이브 반영) 시 마지막 호출만 베일 해제
@@ -374,7 +379,7 @@
   // 히어로 랜딩 크롬 은닉(#118 U4): 타이틀 표시(heroVisible)~종가 랜딩(heroLanding) 동안 3축 크롬
   //   전체를 숨긴다. 랜딩 종료 시 chroma 페이드로
   //   복원(전환은 opacity 트랜지션 1회 — chroma 감상 페이드와 이중 적용 없이 부드럽게).
-  let heroChrome = $derived(heroVisible || heroLanding);
+  let heroChrome = $derived(heroVisible || heroLanding || clipRecording);
   // 마을 부감: 하단 peek 옵션 시트 위로 액션바를 올림.
   let villageAerial = $derived(sceneVillage && !villageEditing && !villageZooming);
   // 시네마틱 진입 버튼(드론/거닐기)은 마을 부감에서만 — focus·전환·웨이브·먹안개·데모 중엔 미노출.
@@ -665,6 +670,7 @@
     // Viral clip stages (#255–#260): pin fixture + auto-drive product path for OS
     // recording. No in-app recorder. Shot mode stays deterministic and never auto-enters.
     if (url.clipStage && !url.shot) {
+      clipRecording = true;
       scheduleClipStageBoot(url.clipStage, lifecycleEpoch);
     }
 
@@ -673,6 +679,9 @@
       addEventListener(ev, wake, { passive: true });
     }
     addEventListener('keydown', onKey);
+    // 클립 무대 해제는 **의도적** 입력에서만 — pointermove 로 풀면 커서가 프레임을 스치는 순간
+    //   도크가 되돌아와 애초의 문제가 재발한다.
+    addEventListener('pointerdown', releaseClipStage, { passive: true });
     wake();
 
     // 오토로테이션 흐름 클록 시작 — rAF 루프는 항상 돌며 매 프레임 게이트를 자체 검사한다(흐름 활성 +
@@ -688,6 +697,7 @@
       endLifecycle(epoch);
       for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) removeEventListener(ev, wake);
       removeEventListener('keydown', onKey);
+      removeEventListener('pointerdown', releaseClipStage);
       cancelLifecycleFrame(flowRaf); flowRaf = null;
       stopWalkFeed();
       clearLifecycleTimeout(idleTimer); idleTimer = null;
@@ -708,8 +718,13 @@
     };
   });
 
+  function releaseClipStage() {
+    if (clipRecording) clipRecording = false;
+  }
+
   function onKey(e) {
     if (e.key !== 'Escape' || refOpen || e.defaultPrevented) return;
+    releaseClipStage();   // 테이크 종료 신호 — 이후 기존 Escape 동작을 그대로 이어 간다.
     if (cine.active) { engine.cine.stop(); return; }  // 시네마틱 데모 중이면 먼저 종료
     if (sceneVillage) { engine.village.escape(); }   // 클로즈업이면 부감 복귀(escape 가 selected 판정)
     else if (ui.selected) { engine.clearSelection(); }
@@ -1326,7 +1341,13 @@
     const changed = p.reseed || !villageEditing || villageEditing.parcelId !== p.parcelId;
     if (changed) liveEdit.cancel();
     villageEditing = { parcelId: p.parcelId, spec: p.spec };
-    if (changed) editParams = { kind: p.spec.kind, ...(p.spec.params || {}) };
+    if (changed) {
+      editParams = { kind: p.spec.kind, ...(p.spec.params || {}) };
+      // A reseed is the only moment the panel may re-baseline its
+      // default-departure markers: after that, every commit stamps the accepted
+      // spec back onto editParams, so spec.params can no longer act as "default".
+      editEpoch += 1;
+    }
   }
   // Kind switches and some discrete schema changes still treat multi-hall
   // compounds as non-residential. Continuous geometry sliders, however, always
@@ -1474,7 +1495,7 @@
 <!-- Chrome: Spectrum theme root (docs/design-system.md). Canvas stays outside theme. -->
 <div class="chroma" class:faded={chromaFaded || cine.active || heroChrome}>
   <sp-theme class="cheoma-theme" system="spectrum-two" color="dark" scale="medium" dir="ltr">
-  {#if sceneVillage && !heroLanding && !cine.active}
+  {#if sceneVillage && !heroLanding && !cine.active && !clipRecording}
     <Breadcrumb
       houseLabel={crumbLabel}
       houses={villageHouses}
@@ -1486,7 +1507,7 @@
   {#if sceneVillage}
     <!-- 만들기 패널: Spectrum inspector (Explore / Focus). -->
     <ContextPanel
-      open={!heroLanding && !cine.active}
+      open={!heroLanding && !cine.active && !clipRecording}
       morph={focusMorph}
       detent={makeDetent}
       onTab={toggleMode}
@@ -1500,6 +1521,9 @@
       onReroll={rerollVillage}
       villageParams={villageOpts}
       onVillageOpt={setVillageOpt}
+      selectionLabel={crumbLabel}
+      houses={villageHouses}
+      seed={villageSeed}
       waving={waving}
       houseBusy={villageZooming || waving}
       navigationTargets={buildingTargets}
@@ -1508,6 +1532,7 @@
       onNavigateTarget={navigateBuilding}
       spec={villageEditing?.spec}
       params={editParams}
+      editEpoch={editEpoch}
       onType={villageSetType}
       onLive={villageLive}
       onCommit={villageCommit}

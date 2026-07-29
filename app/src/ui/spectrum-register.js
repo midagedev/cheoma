@@ -1,25 +1,18 @@
 // Side-effect registration of Spectrum Web Components used by cheoma chrome.
 // Import once from main.js. Keep the set explicit — do not use the full bundle.
+//
+// The CAD inspector owns its own controls (ui/tokens.css `.cad-*` + native
+// elements) because Spectrum's consumer affordances — the iOS switch, the pill
+// segment, the 46px accent button — are the vocabulary that column must not
+// speak, and its gray ramp is too compressed to read as tool depth. What is left
+// here is the theme root plus the one component still used over the scene: the
+// floating environment dial on solo (non-village) scenes.
+//
+// A tag that appears in no template needs no registration, so anything added
+// back here must come with a real `<sp-…>` usage.
 
 import '@spectrum-web-components/theme/sp-theme.js';
 import '@spectrum-web-components/theme/spectrum-two/theme-dark.js';
 import '@spectrum-web-components/theme/spectrum-two/scale-medium.js';
 
-import '@spectrum-web-components/button/sp-button.js';
 import '@spectrum-web-components/action-button/sp-action-button.js';
-import '@spectrum-web-components/action-group/sp-action-group.js';
-import '@spectrum-web-components/slider/sp-slider.js';
-import '@spectrum-web-components/switch/sp-switch.js';
-import '@spectrum-web-components/tabs/sp-tabs.js';
-import '@spectrum-web-components/tabs/sp-tab.js';
-import '@spectrum-web-components/accordion/sp-accordion.js';
-import '@spectrum-web-components/accordion/sp-accordion-item.js';
-import '@spectrum-web-components/picker/sp-picker.js';
-import '@spectrum-web-components/menu/sp-menu-item.js';
-import '@spectrum-web-components/menu/sp-menu-group.js';
-import '@spectrum-web-components/field-label/sp-field-label.js';
-import '@spectrum-web-components/divider/sp-divider.js';
-import '@spectrum-web-components/badge/sp-badge.js';
-import '@spectrum-web-components/number-field/sp-number-field.js';
-import '@spectrum-web-components/help-text/sp-help-text.js';
-import '@spectrum-web-components/progress-circle/sp-progress-circle.js';

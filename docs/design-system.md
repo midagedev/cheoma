@@ -30,12 +30,13 @@
 | **Theme root** | Token inheritance | `<sp-theme system="spectrum-two" color="dark" scale="medium">` | One dark Spectrum language for all tool chrome. |
 | **Inspector shell** | Dock / sheet geometry | Custom layout + Spectrum surface tokens | Detents, `--inspector-w`, grip are product geometry, not Spectrum components. |
 | **Mode axis** | Explore ↔ Focus | Segmented control (Spectrum tokens) with `.axistab` | Tab = camera morph; must stay 44px-touch and gate-stable. |
-| **Share tools** | Photo / share / export | Quiet `sp-action-button` row under tabs | Secondary utilities, not floating over peek. |
-| **Building nav** | Keyboard reach to parcels | Native `<select>` + `.navaction` button (Spectrum tokens) | Grouped landmarks/houses; product keyboard + app-smoke require a real select. |
-| **Continuous params** | Geometry live-edit ranges | Native `input[type=range]` + Spectrum tokens + `PropertyField` | High-frequency `input`/`change`, Playwright focus/arrow, `check:parcel-rebuild` — SWC shadow range is the wrong tool. |
-| **Discrete params** | Stepper / segment / toggle | `sp-number-field`, `sp-action-group`, `sp-switch` | Spectrum wins on affordance and density. |
-| **Primary rebuild** | Village / house reroll | `sp-button` accent fill, classes `.rebuild` / `.hbtn.reroll` | One sticky primary per context. |
-| **Group headers** | Always-open CAD sections | Static labels (`.advtoggle` + cost badge) | Full lever set scannable; cost badges stay for commit honesty. |
+| **Selection header** | What the panel edits | 28px badge + name + path row atop the dock | CAD panels name their subject; `선택 없음 — 마을 속성` when nothing is focused. |
+| **Share tools** | Photo / share / export | 28px icon toolbar (inline SVG + sr-only labels) | Commands, not views — never drawn as tabs. |
+| **Building nav** | Keyboard reach to parcels | Native `<select>` + `.navaction` button | Grouped landmarks/houses; product keyboard + app-smoke require a real select. |
+| **Continuous params** | Geometry live-edit ranges | Native `input[type=range]` + `PropertyField` value cell (52px editable field: drag-scrub, type-to-commit, unit suffix, hover ↺) | High-frequency `input`/`change`, Playwright focus/arrow, `check:parcel-rebuild` — SWC shadow range is the wrong tool. |
+| **Discrete params** | Stepper / segment / checkbox | Native controls styled by `--cad-*` tokens (`.cad-seg`, `.cad-check`, `.cad-btn`) | 2026-07-29 rebuild: SWC field atoms retired (only `sp-theme` + solo-dial `sp-action-button` remain); flat 24px segments, 13px checkboxes in the value column. |
+| **Primary rebuild** | Village / house reroll | 28px flat accent button, classes `.rebuild` / `.hbtn.reroll` | One sticky primary per context; full-round pills retired. |
+| **Group headers** | Foldable CAD sections | 20px sticky rows, neutral 12px/600 + chevron + `N 변경` counter | Default all-open (`check:ui-shell` contract); fold state persists in localStorage, Alt-click isolates. |
 | **Environment** | Time / season / weather / ink | Dense segments inside inspector (`.dial`) | Not a floating tray on village; solo scenes keep the dial. |
 | **Path / status / dock** | Breadcrumb, seal, action bar | Glass chip + Spectrum-aligned type | Over WebGL; glass is intentional, not a second design system. |
 | **Brand only** | 처마 stamp, References paper | Seal red + light paper surface | Oriental brand signal; never paint the inspector 한지. |

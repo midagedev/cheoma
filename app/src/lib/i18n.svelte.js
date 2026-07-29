@@ -147,6 +147,12 @@ const DICT = {
     cost_settle: '놓을 때', cost_settle_tip: '손을 놓는 순간 다시 짓습니다',
     nav_group_landmark: '랜드마크', nav_group_houses: '집',
     nav_group_more: '외',
+    // CAD 인스펙터 — 선택 헤더 · 파라미터 검색 · 기본값 이탈 표시
+    sel_none_village: '선택 없음 — 마을 속성',
+    sel_kind_village: '마을', sel_kind_building: '건물',
+    param_search: '파라미터 검색',
+    changed_tip: '기본값과 다른 항목 수',
+    vil_char_auto_short: '자동',
   },
   en: {
     hero_enter: 'Enter',
@@ -289,6 +295,11 @@ const DICT = {
     cost_settle: 'on release', cost_settle_tip: 'Rebuilds when you release',
     nav_group_landmark: 'Landmarks', nav_group_houses: 'Houses',
     nav_group_more: 'of',
+    sel_none_village: 'No selection — village properties',
+    sel_kind_village: 'Village', sel_kind_building: 'Building',
+    param_search: 'Filter parameters',
+    changed_tip: 'Values changed from default',
+    vil_char_auto_short: 'auto',
   },
 };
 

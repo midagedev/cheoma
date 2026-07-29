@@ -375,16 +375,19 @@ try {
       panel: panel ? [panel.left, panel.top, panel.right, panel.bottom] : null,
     };
   });
+  // 44px is a touch contract, asserted for coarse pointers in check:ui-shell. On a
+  // fine pointer the CAD tool row is a 28px icon strip, so the desktop floor here is
+  // the 24px pointer-target minimum, not the touch one.
   pass(desktopShareLayout.count === 1
       && desktopShareLayout.insidePanel
       && desktopShareLayout.dockOwners === 0
-      && desktopShareLayout.width >= 44
-      && desktopShareLayout.height >= 44
+      && desktopShareLayout.width >= 24
+      && desktopShareLayout.height >= 24
       && desktopShareLayout.left >= 0
       && desktopShareLayout.top >= 0
       && desktopShareLayout.right <= 1280
       && desktopShareLayout.bottom <= 800,
-  `1280x800 aerial share action is unique, 44px, and owned by the make panel (${JSON.stringify(desktopShareLayout)})`);
+  `1280x800 aerial share action is unique, a pointer target, and owned by the make panel (${JSON.stringify(desktopShareLayout)})`);
   if (captureDir) {
     await page.screenshot({ path: join(captureDir, 'share-desktop-aerial.png') });
   }

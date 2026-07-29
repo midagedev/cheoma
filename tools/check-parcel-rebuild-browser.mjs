@@ -406,7 +406,9 @@ try {
     `live preview crossed parcel/flora ownership: ${JSON.stringify(livePreview.calls)}`);
   invariant(Math.abs(livePreview.value - liveFixture.finalValue) < 1e-6,
     `slider did not retain the latest input (${livePreview.value} != ${liveFixture.finalValue})`);
-  invariant(livePreview.label === liveFixture.finalValue.toFixed(2),
+  // The value cell prints a unit suffix ("1.42m") for measured axes, so the
+  // lag assertion is on the numeric prefix, not the whole string.
+  invariant(livePreview.label?.startsWith(liveFixture.finalValue.toFixed(2)),
     `live value label lagged behind geometry (${livePreview.label})`);
   invariant(Math.abs(livePreview.state.params.eaveOverhang - liveFixture.finalValue) < 1e-6,
     'preview geometry did not consume the latest slider value');

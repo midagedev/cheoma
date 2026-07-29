@@ -40,27 +40,36 @@
   --hanji: var(--grain);
 }
 
-/* Inside <sp-theme>, bridge legacy component aliases to Spectrum tokens.
-   Outside theme (stage, hero, veil) these fall back to dark neutrals. */
+/* Inside <sp-theme>, bridge component aliases to the tool surface ramp.
+   Outside theme (stage, hero, veil) these fall back to the same dark neutrals.
+
+   Four-step neutral ramp — the inspector is an achromatic tool stage that must
+   not fight the golden-hour frame, so the steps are separated enough to read as
+   depth (base → raised → control → selected) and the accent is reserved for
+   state alone (see the accent contract below). */
 sp-theme.cheoma-theme {
-  --cheoma-inspector: var(--spectrum-gray-100, #1d1d1d);
-  --cheoma-inspector-2: var(--spectrum-gray-75, #262626);
-  --cheoma-inspector-elevated: var(--spectrum-gray-200, #2c2c2c);
-  --cheoma-inspector-border: var(--spectrum-gray-300, #393939);
-  --cheoma-inspector-line: var(--spectrum-gray-200, rgba(255, 255, 255, 0.08));
-  --cheoma-inspector-text: var(--spectrum-neutral-content-color-default, #e8e8e8);
-  --cheoma-inspector-muted: var(--spectrum-neutral-content-color-secondary-default, #b3b3b3);
-  --cheoma-inspector-faint: var(--spectrum-neutral-content-color-tertiary-default, #909090);
-  --cheoma-inspector-hover: var(--spectrum-gray-200, rgba(255, 255, 255, 0.05));
+  --cheoma-inspector: #1a1a1a;          /* dock / sheet base */
+  --cheoma-inspector-2: #202020;        /* header · footer · pinned card */
+  --cheoma-inspector-elevated: #2a2a2a; /* raised control (button, select, segment) */
+  --cheoma-inspector-inset: #141414;    /* recessed well (slider track, segment bed, value field) */
+  --cheoma-inspector-selected: #2e2e2e; /* selected segment / active tab — the accent rail plus white text carries the state, so the surface stays quiet */
+  --cheoma-inspector-border: #383838;
+  --cheoma-inspector-line: #2a2a2a;
+  --cheoma-inspector-text: #e6e6e6;
+  --cheoma-inspector-muted: #a6a6a6;
+  --cheoma-inspector-faint: #7c7c7c;
+  --cheoma-inspector-hover: rgba(255, 255, 255, 0.06);  /* +6% */
   --cheoma-inspector-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
 
-  --cheoma-accent: var(--spectrum-accent-color-900, #5aa8e0);
-  --cheoma-accent-strong: var(--spectrum-accent-color-1000, #3d87c4);
+  --cheoma-accent: #5aa8e0;
+  --cheoma-accent-strong: #3d87c4;
   --cheoma-accent-soft: color-mix(in srgb, var(--cheoma-accent) 18%, transparent);
 
   --panel: var(--cheoma-inspector);
   --panel-2: var(--cheoma-inspector-2);
   --panel-elevated: var(--cheoma-inspector-elevated);
+  --panel-inset: var(--cheoma-inspector-inset);
+  --panel-selected: var(--cheoma-inspector-selected);
   --panel-hover: var(--cheoma-inspector-hover);
   --panel-border: var(--cheoma-inspector-border);
   --panel-line: var(--cheoma-inspector-line);
@@ -79,6 +88,15 @@ sp-theme.cheoma-theme {
   --accent-strong: var(--cheoma-accent-strong);
   --accent-soft: var(--cheoma-accent-soft);
   --accent-glow: color-mix(in srgb, var(--cheoma-accent) 35%, transparent);
+  /* Two accent weights, and only two. `--accent-fill` (#3f7093) is every value
+     surface — slider fill, checked box — so no in-row control ever outranks the
+     one CTA. `--accent-cta` is reserved for the primary button and sits ~11%
+     less saturated than the old #3d87c4 so it stops being the loudest pixel. */
+  --accent-fill: color-mix(in srgb, var(--cheoma-accent) 62%, var(--cheoma-inspector-inset));
+  --accent-cta: #3f7fb2;
+  --accent-cta-hover: #4f93c6;
+  /* Unfilled slider track — the well was too dark to read as a track at all. */
+  --track-off: #242424;
   --live: var(--cheoma-live);
   --settle: var(--cheoma-settle);
   --wave: var(--cheoma-wave);
@@ -90,15 +108,17 @@ sp-theme.cheoma-theme {
 
 /* Fallbacks when aliases are read outside sp-theme (stage toast, etc.) */
 :root {
-  --panel: #1d1d1d;
-  --panel-2: #262626;
-  --panel-elevated: #2c2c2c;
-  --panel-hover: rgba(255, 255, 255, 0.05);
-  --panel-border: #393939;
-  --panel-line: #2c2c2c;
-  --panel-text: #e8e8e8;
-  --panel-muted: #b3b3b3;
-  --panel-faint: #909090;
+  --panel: #1a1a1a;
+  --panel-2: #202020;
+  --panel-elevated: #2a2a2a;
+  --panel-inset: #141414;
+  --panel-selected: #2e2e2e;
+  --panel-hover: rgba(255, 255, 255, 0.06);
+  --panel-border: #383838;
+  --panel-line: #2a2a2a;
+  --panel-text: #e6e6e6;
+  --panel-muted: #a6a6a6;
+  --panel-faint: #7c7c7c;
   --panel-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
   --glass: var(--cheoma-glass);
   --glass-strong: var(--cheoma-glass-strong);
@@ -109,11 +129,199 @@ sp-theme.cheoma-theme {
   --accent-strong: #3d87c4;
   --accent-soft: rgba(90, 168, 224, 0.16);
   --accent-glow: rgba(90, 168, 224, 0.35);
+  --accent-fill: color-mix(in srgb, #5aa8e0 62%, #141414);
+  --accent-cta: #3f7fb2;
+  --accent-cta-hover: #4f93c6;
+  --track-off: #242424;
   --live: var(--cheoma-live);
   --settle: var(--cheoma-settle);
   --wave: var(--cheoma-wave);
   --seal: var(--cheoma-seal);
   --seal-deep: var(--cheoma-seal-deep);
+}
+
+/* ── CAD property grid (4px module) ───────────────────────────────────────────
+   One geometry contract for every inspector row so label / control / value line
+   up across blocks. `--cad-row` is the only pitch; blocks never invent their own.
+   Coarse pointers keep 40px because the opening steppers are contractually
+   40px hit targets (tools/check-parcel-rebuild-browser.mjs). */
+:root {
+  --cad-row: 24px;
+  --cad-gap: 8px;
+  --cad-label: 38%;
+  --cad-value: 52px;
+  --cad-group-gap: 12px;
+  --cad-pad: 12px;
+  --cad-r: 3px;        /* inputs, segments, buttons */
+  --cad-r-card: 4px;   /* cards / wells */
+}
+
+@media (max-width: 600px), (pointer: coarse) {
+  :root {
+    --cad-row: 40px;
+    --cad-value: 60px;
+  }
+}
+
+/* Field label — one type ramp for every row label. */
+.cad-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--panel-text);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Flat segmented control — no pill, no accent fill. Selection is surface +18L
+   plus a 1px accent rail on top, which is the only accent a segment may use. */
+.cad-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  min-width: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--cad-r);
+  background: var(--panel-inset);
+  overflow: hidden;
+}
+.cad-seg > button {
+  position: relative;
+  min-width: 0;
+  min-height: 22px;
+  height: var(--cad-row);
+  padding: 0 4px;
+  border: 0;
+  border-left: 1px solid var(--panel-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--panel-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.cad-seg > button:first-child { border-left: 0; }
+.cad-seg > button:hover:not(:disabled) { background: var(--panel-hover); color: var(--panel-text); }
+.cad-seg > button[aria-pressed='true'],
+.cad-seg > button.on {
+  background: var(--panel-selected);
+  color: #fff;
+  font-weight: 650;
+}
+.cad-seg > button[aria-pressed='true']::after,
+.cad-seg > button.on::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: var(--cad-seg-rail, 1px);
+  background: var(--accent);
+}
+.cad-seg > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.cad-seg > button:disabled { opacity: 0.34; cursor: default; }
+
+/* Quiet raised button (icon tools, steppers, env actions). */
+.cad-btn {
+  display: grid;
+  place-items: center;
+  min-height: var(--cad-row);
+  padding: 0 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--cad-r);
+  background: var(--panel-elevated);
+  color: var(--panel-text);
+  font-family: var(--ui);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+.cad-btn:hover:not(:disabled) { background: var(--panel-selected); }
+.cad-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cad-btn:disabled { opacity: 0.34; cursor: default; }
+
+/* Primary — the one sanctioned accent fill per context, flat and rectangular. */
+.cad-primary {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-cta);
+  border-radius: var(--cad-r);
+  background: var(--accent-cta);
+  color: #fff;
+  font-family: var(--ui);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+.cad-primary:hover:not(:disabled) { background: var(--accent-cta-hover); border-color: var(--accent-cta-hover); }
+.cad-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cad-primary:disabled { opacity: 0.4; cursor: default; }
+
+/* Boolean — a 13px check box, right-aligned in the value column like every
+   other value. No iOS switch, no polarity ambiguity. */
+.cad-check {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  /* Raised, not recessed: an unchecked box on the inset well disappears at 13px,
+     which is what made the disabled 궁 row read as "no control at all". */
+  border: 1px solid #4d4d4d;
+  border-radius: 2px;
+  background: var(--panel-elevated);
+  cursor: pointer;
+  position: relative;
+}
+.cad-check:hover:not(:disabled) { border-color: var(--panel-muted); }
+/* A checked box is a value, so it takes the value fill — the CTA blue is the
+   primary button's alone. */
+.cad-check:checked {
+  background: var(--accent-fill);
+  border-color: color-mix(in srgb, var(--accent-fill) 70%, #ffffff 30%);
+}
+.cad-check:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 5px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(40deg);
+}
+.cad-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Locked, not erased: a 13px box at 0.34 opacity disappears against the base
+   surface, which read as "this row has no control" on the tier-gated levers. */
+.cad-check:disabled {
+  opacity: 1;
+  border-color: #3a3a3a;
+  background: #1f1f1f;
+  cursor: default;
+}
+.cad-check:checked:disabled { background: #3a4d5c; border-color: #3a4d5c; }
+
+/* Screen-reader-only text kept in the DOM for gates / assistive tech. */
+.cad-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 * { box-sizing: border-box; }

@@ -14,6 +14,10 @@
   let {
     open = false, ariaLabel = 'panel', gap = 10, peekPx = 52, detent = null, children,
     header = null, footer = null,
+    // Sheet layouts have no room for a selection header or a footer status line, so
+    // the docking bar carries both: the selection identity is its protagonist and
+    // the collapse state is the chevron. Desktop keeps the header + status bar.
+    status = '', identityBadge = '', identityName = '',
   } = $props();
 
   // Expanded sheet height. 0.50 keeps ≥28% framing band (focus-framing
@@ -157,8 +161,14 @@
     >
       <span class="peekbtn">
         <span class="chev" class:open={expanded} aria-hidden="true"></span>
-        <span class="lbl">{expanded ? t('sheet_collapse') : `${t('axis_make')} · ${t('sheet_expand')}`}</span>
+        {#if identityName}
+          {#if identityBadge}<span class="gidbadge">{identityBadge}</span>{/if}
+          <span class="lbl gidname">{identityName}</span>
+        {:else}
+          <span class="lbl">{expanded ? t('sheet_collapse') : `${t('axis_make')} · ${t('sheet_expand')}`}</span>
+        {/if}
       </span>
+      {#if status}<span class="gripstatus" data-status-bar>{status}</span>{/if}
     </div>
     {#if header}
       <div data-sheet-content class="sheethead" inert={!contentInteractive} aria-hidden={!contentInteractive}>
@@ -173,6 +183,7 @@
       inert={!contentInteractive}
       aria-hidden={!contentInteractive}
     >{@render children?.()}</div>
+    <div class="scrollfade" aria-hidden="true"></div>
     {#if footer}
       <div data-sheet-content class="sheetfoot" inert={!contentInteractive} aria-hidden={!contentInteractive}>
         {@render footer()}
@@ -193,6 +204,7 @@
   >
     {#if header}<div class="ctxhead">{@render header()}</div>{/if}
     <div class="ctxscroll" data-panel-scroll style="gap:{gap}px">{@render children?.()}</div>
+    <div class="scrollfade" aria-hidden="true"></div>
     {#if footer}<div class="ctxfoot">{@render footer()}</div>{/if}
   </aside>
 {/if}
@@ -231,38 +243,67 @@
   .ctxcard.landscape {
     width: min(268px, 34vw);
   }
+  /* 4px module: 12px block padding, 8px scroll gutter. `--cad-scroll-pad` lets
+     sticky group headers bleed to the full column width. */
   .ctxhead {
     flex: none;
-    padding: 10px 12px 0;
-    border-bottom: 1px solid var(--panel-line);
+    padding: 12px 12px 0;
+    border-bottom: 1px solid var(--panel-border);
     background: var(--panel-2);
   }
+  /* Flush top: an 8px gutter above the first sticky header let content leak into
+     the strip that the header is supposed to own, which is what produced the
+     half-cut first row. Bottom padding is a footer's worth so the last row can
+     clear the fold instead of being sliced mid-glyph. */
   .ctxscroll {
+    --cad-scroll-pad: 12px;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    padding: 8px 10px 10px;
-    gap: 2px;
+    padding: 0 var(--cad-scroll-pad) 56px;
+    gap: 0;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--panel-border) transparent;
   }
-  .ctxscroll::-webkit-scrollbar { width: 6px; }
+  .ctxscroll::-webkit-scrollbar { width: 8px; }
+  .ctxscroll::-webkit-scrollbar-track { background: var(--panel-inset); }
   .ctxscroll::-webkit-scrollbar-thumb {
     background: var(--panel-border);
-    border-radius: 3px;
+    border-radius: 0;
+    border: 2px solid var(--panel-inset);
+  }
+  /* Short fade at the scroll's bottom edge so a row clipped by the fold reads as
+     "more below" rather than as a broken row. Sits above the footer, below chrome. */
+  .scrollfade {
+    position: relative;
+    flex: none;
+    height: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .scrollfade::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 18px;
+    /* Opaque for the first 5px: a 1px segment rail clipped by the fold survived a
+       pure gradient and read as a stray coloured line above the primary. */
+    background: linear-gradient(to top, var(--panel) 0, var(--panel) 5px, transparent 100%);
   }
   .ctxfoot {
     flex: none;
-    padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-    border-top: 1px solid var(--panel-line);
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--panel-border);
     background: var(--panel-2);
   }
-  .ctxcard.landscape .ctxhead { padding: 8px 10px 0; }
-  .ctxcard.landscape .ctxscroll { padding: 8px 10px 10px; }
-  .ctxcard.landscape .ctxfoot { padding: 8px 10px 10px; }
+  .ctxcard.landscape .ctxhead { padding: 8px 8px 0; }
+  .ctxcard.landscape .ctxscroll { --cad-scroll-pad: 8px; padding: 0 var(--cad-scroll-pad) 44px; }
+  .ctxcard.landscape .ctxfoot { padding: 8px; }
 
   .sheet {
     position: fixed;
@@ -270,7 +311,7 @@
     right: 0;
     bottom: 0;
     z-index: 46;
-    border-radius: 12px 12px 0 0;
+    border-radius: 4px 4px 0 0;
     border: 1px solid var(--panel-border);
     border-bottom: none;
     display: flex;
@@ -284,53 +325,77 @@
   .sheet.dragging { transition: none; }
   .sheet[aria-hidden='true'] { transform: translateY(110%); pointer-events: none; }
 
+  /* Docking toolbar, not a hand-holding pill: one 44px bar with a drag handle on
+     the left, the state label next, and the live status readout on the right. */
   .grip {
     position: relative;
     z-index: 5;
     flex: none;
     height: 44px;
     display: grid;
-    place-items: center;
+    grid-template-columns: auto minmax(0, auto) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 8px;
+    padding: 0 clamp(8px, 3vw, 12px);
     cursor: pointer;
     touch-action: none;
-    border-bottom: 1px solid var(--panel-line);
-    background: var(--panel);
+    border-bottom: 1px solid var(--panel-border);
+    background: var(--panel-2);
   }
   .grip::before {
     content: '';
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    width: 36px;
-    height: 4px;
+    width: 26px;
+    height: 3px;
     border-radius: 2px;
     background: var(--panel-border);
-    transform: translateX(-50%);
+    margin-right: 4px;
   }
   .peekbtn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 6px;
-    padding: 4px 12px;
-    border-radius: 999px;
-    background: var(--panel-elevated);
-    border: 1px solid var(--panel-border);
-    font-size: var(--spectrum-font-size-75, 12px);
+    gap: 6px;
+    min-width: 0;
+    font-size: 13px;
     font-weight: 600;
     color: var(--panel-text);
+    white-space: nowrap;
   }
+  .peekbtn .lbl { overflow: hidden; text-overflow: ellipsis; }
+  .gidbadge {
+    flex: none;
+    padding: 2px 5px;
+    border: 1px solid var(--panel-border);
+    border-radius: 2px;
+    background: var(--panel-inset);
+    color: var(--panel-muted);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+  }
+  .gidname { font-size: 14px; font-weight: 650; color: var(--panel-text); }
   .peekbtn .chev {
+    flex: none;
     width: 7px;
     height: 7px;
-    margin-top: 2px;
     border-right: 1.5px solid var(--panel-muted);
     border-bottom: 1.5px solid var(--panel-muted);
     transform: rotate(-135deg);
-    transition: transform 0.22s ease, margin 0.22s ease;
+    transition: transform 0.22s ease;
   }
-  .peekbtn .chev.open { transform: rotate(45deg); margin-top: -2px; }
+  .peekbtn .chev.open { transform: rotate(45deg); }
+  .gripstatus {
+    justify-self: end;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--panel-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .scroll {
+    --cad-scroll-pad: clamp(10px, 3vw, 14px);
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -339,17 +404,20 @@
     touch-action: pan-y;
     display: flex;
     flex-direction: column;
-    padding: 0 clamp(10px, 3vw, 14px) 56px;
-    gap: 2px;
+    padding: 0 var(--cad-scroll-pad) 72px;
+    gap: 0;
   }
-  .sheethead { flex: none; padding: 0 clamp(10px, 3vw, 14px); }
+  .sheethead { flex: none; padding: 4px clamp(10px, 3vw, 14px) 0; }
   .sheet[data-snap='peek'] .sheethead,
   .sheet[data-snap='peek'] .scroll,
+  .sheet[data-snap='peek'] .scrollfade,
   .sheet[data-snap='peek'] .sheetfoot { visibility: hidden; }
+  /* Sheet detents are the tightest budget in the product: the footer keeps the
+     4px module but nothing more, so §4's scroll window survives on 360×780. */
   .sheetfoot {
     flex: none;
-    padding: 4px clamp(10px, 3vw, 14px) calc(6px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--panel-line);
+    padding: 4px clamp(10px, 3vw, 14px) calc(4px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--panel-border);
     background: var(--panel-2);
   }
 </style>
