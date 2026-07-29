@@ -94,8 +94,14 @@ export const SUNSET_LOOKS = deepFreeze({
       //   아닌 주홍 쪽(hue≈20°)으로만 올려 원경 대기는 노을빛으로 물들이되, 마을 바닥 미드톤은
       //   불변으로 유지한다(town 부감 A/B 실측: 하늘 밴드 r−b 45→96·원경 능선 밴드 32→63 =
       //   노을은 대기가 받고, 마을 바닥은 r−b 30.5→31.8·luma 43.8→42.3 = 미드톤 워시 없음).
+      // sunColor 는 붉힘 축이 아니다 — 프레임의 모든 수광면을 곱하는 유일한 값이라, 적기를 올리면
+      //   회색 화강암은 hue 0~5°(순적색), 수목 녹은 hue 32°(갈색)로 끌려가 프레임 전체가 한 계열의
+      //   갈색 워시가 된다. 실측(부감 A/B, 객체 패밀리별 렌더 색): 0xff9448 에서 forest-pine hue 32 ·
+      //   forest-far hue 41 · forest-rocks hue 2 로 27개 패밀리 중 25개가 hue 17~44 밴드에 뭉쳤다.
+      //   0xffa85c 로 되돌린 뒤 녹·암·흙이 다시 갈라진다. 붉은 노을 정체성은 하늘 스톱·rimColor·
+      //   sunGlowColor·flareColor 가 갖는다(전부 불변) — 그쪽이 하이라이트·발광·역광 축이다.
       sky: [[0.0, '#ff9d52'], [0.26, '#f26334'], [0.55, '#c2495c'], [1.0, '#3c4a86']],
-      sunDir: [-16, 8, -45], sunColor: 0xff9448, sunInt: 2.38,
+      sunDir: [-16, 8, -45], sunColor: 0xffa85c, sunInt: 2.38,
       hemiSky: 0x8593bd, hemiGround: 0x9c7856, hemiInt: 0.72,
       fog: 0xcc9376, fogNear: 70, fogFar: 470, exposure: 1.13,
       ridgeNear: 0x574863, ridgeFar: 0xcc9678, mist: 0xdeb69c, mistOp: 0.6,
@@ -103,7 +109,13 @@ export const SUNSET_LOOKS = deepFreeze({
     }, {
       // rim 2.05 는 그대로 둔다 — tools/check-rim-facing.mjs 의 HDR 에너지 상한(2.05×1.85)이
       //   이 숫자를 기준으로 캘리브레이션돼 있고, 붉힘은 rimColor 로만 가져간다(휘도는 오히려 감소).
+      // lift / liftColor: 에어라이트 토 리프트(GradePass, 선형 HDR·ACES 전). 역광 노을에서 대면적
+      //   기와·수관·처마밑이 sRGB 3~8 로 뭉개져 실루엣이 아니라 구멍으로 읽히는 것을 막는다
+      //   (계약: "bounce light must lift the shadow side — no crushed-black silhouettes").
+      //   가중이 (1-col) 이라 하이라이트·림·플레어는 수치상 불침해다. 색은 쿨 중성 슬레이트 —
+      //   웜으로 들어올리면 그림자·미드톤이 다시 주황 워시가 된다(§2-3 채도 규율).
       bloomStrength: 0.66, bloomRadius: 0.38, bloomThreshold: 0.80,
+      lift: 0.022, liftColor: 0x9aa6bd,
       rim: 2.05, rimColor: 0xffa757, rimPower: 1.7, rimWrap: 0.13,
       sunGlow: 0.98, sunGlowSize: 42, sunGlowColor: 0xff8f45, sat: 1.20,
       flare: 1.0, flareColor: 0xffa155,
@@ -121,14 +133,17 @@ export const SUNSET_LOOKS = deepFreeze({
       //   gold 대비 프레임 평균 채도는 같은데 밝기 −16%, 흰 재질의 색조가 마젠타로 이동),
       //   결과가 "붉은 노을"이 아니라 단일 장미색 워시였다. 마젠타 성분만 덜어 흙빛으로 옮긴다
       //   — 하늘 스톱·태양색·플레어는 불변이므로 룩 정체성은 유지된다.
+      // sunColor: gold 와 같은 이유로 적기를 덜어냈다(위 gold 주석의 실측이 이 프로필 캡처였다).
+      //   붉음은 하늘 스톱·rim·glow·flare 가 유지하므로 crimson 의 정체성은 그대로다.
       sky: [[0.0, '#f6a266'], [0.26, '#d96862'], [0.57, '#8d587e'], [1.0, '#3d4d80']],
-      sunDir: [-16, 8, -45], sunColor: 0xff9168, sunInt: 2.25,
+      sunDir: [-16, 8, -45], sunColor: 0xffa672, sunInt: 2.25,
       hemiSky: 0x8a90b6, hemiGround: 0x8e6a54, hemiInt: 0.70,
       fog: 0xc09a8b, fogNear: 70, fogFar: 462, exposure: 1.11,
       ridgeNear: 0x54465b, ridgeFar: 0xbc9184, mist: 0xd3b0a4, mistOp: 0.61,
       lantern: 0.15,
     }, {
       bloomStrength: 0.61, bloomRadius: 0.37, bloomThreshold: 0.80,
+      lift: 0.022, liftColor: 0x9aa6bd,       // gold 와 동일 근거(위 주석)
       rim: 1.98, rimColor: 0xffad7d, rimPower: 1.75, rimWrap: 0.13,
       sunGlow: 0.90, sunGlowSize: 39, sunGlowColor: 0xff9974, sat: 1.14,
       flare: 0.96, flareColor: 0xffad86,
@@ -147,6 +162,7 @@ export const SUNSET_LOOKS = deepFreeze({
       lantern: 0.18,
     }, {
       bloomStrength: 0.60, bloomRadius: 0.39, bloomThreshold: 0.79,
+      lift: 0.022, liftColor: 0x9aa6bd,       // gold 와 동일 근거(위 주석)
       rim: 1.90, rimColor: 0xe9bec5, rimPower: 1.82, rimWrap: 0.13,
       sunGlow: 0.86, sunGlowSize: 38, sunGlowColor: 0xf2ad9f, sat: 1.20,
       flare: 0.88, flareColor: 0xe5b4c5,

@@ -274,8 +274,14 @@ assert.match(villageLightSource, /glowBoost:\s*1\.5/,
 // Day/sunset village fill must not have been rewritten by the night retune.
 assert.match(villageLightSource, /day:\s*\{[\s\S]*?hemiInt:\s*0\.22/,
   'day village hemi fill frozen');
-assert.match(villageLightSource, /sunset:\s*\{[\s\S]*?fillInt:\s*0\.62/,
-  'sunset village fill frozen');
+// The sunset fill was re-authored deliberately (not by a night retune): 0xecc09c at 0.62 was a
+// *warm* anti-solar fill, and since that rig lights the camera-facing shadow side by definition,
+// it was the dominant reason the sunset aerial collapsed into one brown wash — measured per
+// object family, 25 of 27 families sat in hue 17~44 with granite at hue 2 and giwa at hue 6.
+// look-grammar §2-3 requires shadows and midtones to stay neutral, so the guard now pins the
+// neutral value. What it still guards is unchanged: no cross-contamination from other times.
+assert.match(villageLightSource, /sunset:\s*\{[\s\S]*?fillColor:\s*0xb6b9c4,\s*fillInt:\s*0\.72/,
+  'sunset village fill stays the authored neutral anti-solar fill');
 
 console.log(
   'ATMOSPHERE CONTRACT: PASS '

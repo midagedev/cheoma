@@ -268,11 +268,16 @@ const GradeShader = {
     varying vec2 vUv;
     uniform sampler2D tDiffuse;
     uniform float sat;
+    uniform float lift;
+    uniform vec3 liftColor;
     void main() {
       vec4 base = texture2D(tDiffuse, vUv);
       vec3 col = base.rgb;
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(l), col, sat);
+      // 에어라이트 토 리프트: 암부만 대기색으로 들어올린다. 1-col 가중이라 밝은 화소는 불침해고
+      //   결과가 클립되지 않으므로 하이라이트·림·플레어 에너지는 그대로다.
+      col += liftColor * lift * max(vec3(0.0), 1.0 - col);
       gl_FragColor = vec4(col, base.a);
     }
   `,
@@ -281,7 +286,10 @@ const GradeShader = {
 class GradePass extends Pass {
   constructor() {
     super();
-    this.uniforms = { tDiffuse: { value: null }, sat: { value: 1.0 } };
+    this.uniforms = {
+      tDiffuse: { value: null }, sat: { value: 1.0 },
+      lift: { value: 0.0 }, liftColor: { value: new THREE.Color(1, 1, 1) },
+    };
     this.material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
       vertexShader: GradeShader.vertexShader,
@@ -293,7 +301,16 @@ class GradePass extends Pass {
   }
   setSaturation(value) {
     this.uniforms.sat.value = value;
-    this.enabled = Math.abs(value - 1) > 1e-4;
+    this.refreshEnabled();
+  }
+  setLift(amount, color) {
+    this.uniforms.lift.value = amount;
+    if (color) this.uniforms.liftColor.value.copy(color);
+    this.refreshEnabled();
+  }
+  refreshEnabled() {
+    this.enabled = Math.abs(this.uniforms.sat.value - 1) > 1e-4
+      || this.uniforms.lift.value > 1e-4;
   }
   render(renderer, writeBuffer, readBuffer) {
     this.uniforms.tDiffuse.value = readBuffer.texture;
@@ -609,6 +626,7 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
   const makePS = () => ({
     bloomStrength: 0, bloomRadius: 0, bloomThreshold: 0,
     rim: 0, rimPower: 0, rimWrap: 0, rimColor: new THREE.Color(), sat: 1,
+    lift: 0, liftColor: new THREE.Color(1, 1, 1),
     sunGlow: 0, sunGlowSize: 0, sunGlowColor: new THREE.Color(), dir: new THREE.Vector3(0.6, 0.5, 0.5).normalize(),
     flare: 0, flareColor: new THREE.Color(),
   });
@@ -620,6 +638,8 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
     // r185의 숫자형 색 입력은 이미 sRGB→working-linear 변환된다. 명시적 색공간만 남겨 이중 디코드 방지.
     out.rimColor.setHex(T.rimColor, THREE.SRGBColorSpace);
     out.sat = T.sat ?? 1.0;
+    out.lift = T.lift ?? 0;
+    out.liftColor.setHex(T.liftColor ?? 0xffffff, THREE.SRGBColorSpace);
     out.sunGlow = T.sunGlow; out.sunGlowSize = T.sunGlowSize; out.sunGlowColor.set(T.sunGlowColor);
     out.flare = T.flare ?? 0; out.flareColor.setHex(T.flareColor ?? 0xffffff, THREE.SRGBColorSpace);
     const d = resolveAtmosphereProfile(name, sunsetLook).sunDir;
@@ -629,6 +649,7 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
   function copyPS(dst, src) {
     dst.bloomStrength = src.bloomStrength; dst.bloomRadius = src.bloomRadius; dst.bloomThreshold = src.bloomThreshold;
     dst.rim = src.rim; dst.rimPower = src.rimPower; dst.rimWrap = src.rimWrap; dst.rimColor.copy(src.rimColor); dst.sat = src.sat;
+    dst.lift = src.lift; dst.liftColor.copy(src.liftColor);
     dst.flare = src.flare; dst.flareColor.copy(src.flareColor);
     dst.sunGlow = src.sunGlow; dst.sunGlowSize = src.sunGlowSize; dst.sunGlowColor.copy(src.sunGlowColor); dst.dir.copy(src.dir);
   }
@@ -638,6 +659,7 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
     out.bloomThreshold = L(a.bloomThreshold, b.bloomThreshold); out.rim = L(a.rim, b.rim);
     out.rimPower = L(a.rimPower, b.rimPower); out.rimWrap = L(a.rimWrap, b.rimWrap);
     out.rimColor.copy(a.rimColor).lerp(b.rimColor, k); out.sat = L(a.sat, b.sat);
+    out.lift = L(a.lift, b.lift); out.liftColor.copy(a.liftColor).lerp(b.liftColor, k);
     out.sunGlow = L(a.sunGlow, b.sunGlow); out.sunGlowSize = L(a.sunGlowSize, b.sunGlowSize);
     out.sunGlowColor.copy(a.sunGlowColor).lerp(b.sunGlowColor, k); out.dir.copy(a.dir).lerp(b.dir, k).normalize();
     out.flare = L(a.flare, b.flare); out.flareColor.copy(a.flareColor).lerp(b.flareColor, k);
@@ -684,7 +706,8 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       //   전반을 잡으므로, 기단 윗면 같은 태양 수직 평면이 광역으로 물드는 것을 억제(태양 대면
       //   실루엣 킥은 side≈1 이라 불변). 구 RimPass 는 깊이-엣지 게이트로 평면을 뺐지만 프레넬엔 없음.
       fresnelRim.setWrap(cur.rimWrap * 0.4);
-      gradePass.setSaturation(cur.sat);   // sat≈1이면 항등 fullscreen 패스를 자동 생략.
+      gradePass.setSaturation(cur.sat);   // sat≈1·lift 0 이면 항등 fullscreen 패스를 자동 생략.
+      gradePass.setLift(cur.lift, cur.liftColor);
     } else {
       rimPass.uniforms.rimStrength.value = rimBase;
       rimPass.uniforms.rimPower.value = cur.rimPower;

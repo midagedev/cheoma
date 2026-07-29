@@ -256,7 +256,7 @@ function facingProbe() {
     productFillShadow: renderSample(86, 156, {
       blocked: true,
       sunElevation: 0.18,
-      fillIntensity: 0.62,
+      fillIntensity: 0.72, // product sunset fill (lighting.js, 2026-07-30 neutral-fill retune)
       upwardNormal: 0.85,
       albedo: 0xaaa29c,
     }),
@@ -265,7 +265,7 @@ function facingProbe() {
     shadowBypassedReceiver: renderSample(86, 156, {
       blocked: true,
       receiveShadow: false,
-      fillIntensity: 0.62,
+      fillIntensity: 0.72, // product sunset fill (lighting.js, 2026-07-30 neutral-fill retune)
       upwardNormal: 0.85,
       albedo: 0xaaa29c,
     }),

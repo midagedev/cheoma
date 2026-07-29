@@ -59,5 +59,17 @@ export function createSceneRuntime({ container, pixelRatioCap = 2, shadowSize = 
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0;
 
+  // The shadow span has to follow how much world the frame shows: a 44m ortho box is right
+  // for an eye-level house but leaves the aerial village almost shadowless (measured: the
+  // box covered 15% of the frame width at the settled aerial pose, so only the few central
+  // buildings cast anything and the frame read as flat). createDirectionalShadowRuntime
+  // resolves the span from this camera. Both objects are owned here, which is why the
+  // reference is handed over on the light rather than through engine.js.
+  // `window.__noShadowSpan` is the A/B hook for the before/after measurement (same role as
+  // __noGroundCushion / __noWarm): with it set the box stays at the authored ±22 rung.
+  if (typeof window === 'undefined' || !window.__noShadowSpan) {
+    sun.userData.shadowViewCamera = camera;
+  }
+
   return { renderer, scene, sun, hemi, ground, camera, controls };
 }
