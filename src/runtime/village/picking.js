@@ -117,12 +117,36 @@ function parcelFocusSubject({
   };
 }
 
+// The shared close-parcel target sits at gate/door height, which is the right aim for an
+// eye-level residential frame. The hero landing is a long-lens frame of a whole compound, and
+// aiming at the gate leaves the subject in the upper third with the parcel *in front of* it
+// filling the bottom of frame — measured on village/7: the neighbour p10 roof (139 m, well inside
+// the 173 m focus plane) projected at screen y 0.78, so the bottom quarter of the money shot was a
+// dark out-of-focus roof (bottom-band luminance median 14/255 against 43 for the courtyard).
+// Aiming a fraction of the subject height higher rotates that neighbour out of frame (y 0.95) and
+// brings the compound's own ridge from y 0.29 to y 0.43, i.e. toward the frame centre, while the
+// near courtyard edge still stays inside frame (y 0.75). Elevation, distance and lens are
+// untouched, so every band derived from the hero dolly is unchanged.
+const HERO_TARGET_LIFT_SHARE = 0.22;
+const HERO_TARGET_LIFT_MAX = 3.4;
+
 function heroCameraFraming(proxy) {
-  const target = proxy.baseCameraFraming.target;
-  const direction = proxy.baseCameraFraming.position.clone().sub(target).normalize();
+  const lift = Math.min(HERO_TARGET_LIFT_MAX, Math.max(0, proxy.dims.y * HERO_TARGET_LIFT_SHARE));
+  const base = proxy.baseCameraFraming.target;
+  const target = { x: base.x, y: base.y + lift, z: base.z };
+  const direction = proxy.baseCameraFraming.position.clone().sub(base).normalize();
   const maxDim = Math.max(proxy.dims.x, proxy.dims.y, proxy.dims.z);
+  // Standoff in subject widths (reference-lens units; the compensated dolly turns it into metres).
+  // 1.85 → 1.60 closes the last composition hole of the landing cut. Measured on village/7 with the
+  // 7° lens at 1280x720: the compound only claimed 37% of the frame width, so the frame read loose
+  // while the neighbour p10 roof — 30 m in front of the compound and far outside the focus plane —
+  // still hung in the bottom corner as the darkest, most defocused mass in the shot (screen y 0.95).
+  // Pulling *back* is the wrong lever: it drags more foreground in (y 0.95 → 0.85 at 2.15). Coming
+  // in to 1.60 puts p10 fully below the frame (y 1.04) and grows the subject to 42% x 47% while
+  // headroom above the ridge only moves 37% → 35%. Lens (7°) and elevation are unchanged, so the
+  // depth compression that makes this a 200mm-like frame is unchanged — only the standoff is.
   const distance = dollyDistanceForFov(
-    1.85,
+    1.60,
     VILLAGE_LENS.hero.referenceFov,
     VILLAGE_LENS.hero.fov,
   ) * maxDim;
@@ -136,7 +160,7 @@ function heroCameraFraming(proxy) {
       y: target.y + Math.sin(VILLAGE_HERO_FOCUS_ELEVATION) * distance,
       z: target.z + horizontalDirection.z * horizontal,
     },
-    target: { x: target.x, y: target.y, z: target.z },
+    target,
     fov: VILLAGE_LENS.hero.fov,
     referenceFov: VILLAGE_LENS.hero.referenceFov,
   };

@@ -179,12 +179,34 @@ export function createVillageCameraRuntime({
     ));
   }
 
+  // 대기 밴드는 기본적으로 분지 반경(site.R) 파생이다. 그 밴드는 부감을 기준으로 저작됐고, 부감에서는
+  //   프레임 상단이 지형 반경 밖(worldedge 미스트·스카이돔)까지 닿아 여백이 스스로 생긴다. 망원 근접
+  //   프레임은 그 전제가 깨진다: 측정(village/7 히어로) — 피사체 155m, 그 뒤 배산 사면 232m, fog near
+  //   396m. 배경이 안개 밴드 **앞**에 있으므로 대기 원근이 0 이고, 리빌이 열리는 동안(near 90→396m)
+  //   프레임이 점점 어두워진다(상단 밴드 중값 165 → 36). 그래서 근접 정착 프레임만 카메라 거리 파생
+  //   밴드를 바닥으로 갖는다 — 이것이 "부감에서 근접까지 무드가 끊기지 않는다"의 수치 조건이다.
+  let fogBandFloor = null;   // { nearScale, spanScale } — 카메라→피사체 거리 배수. null=기본(R 파생)
+  function setFogBandFloor(floor) {
+    fogBandFloor = floor && Number.isFinite(floor.nearScale) && Number.isFinite(floor.spanScale)
+      ? { nearScale: floor.nearScale, spanScale: floor.spanScale } : null;
+  }
+  function fogBand() {
+    const radius = village.handle?.plan?.site?.R || 180;
+    const base = { near: radius * 2.2, far: radius * 7.0 };
+    if (!fogBandFloor) return base;
+    const distance = camera.position.distanceTo(controls.target);
+    if (!(distance > 1e-3)) return base;
+    const near = Math.min(base.near, distance * fogBandFloor.nearScale);
+    return { near, far: Math.min(base.far, near + distance * fogBandFloor.spanScale) };
+  }
+
   function reapplyFog() {
     if (!village.active || !village.handle) return;
     const radius = village.handle.plan.site.R;
     if (scene.fog) {
-      scene.fog.near = radius * 2.2;
-      scene.fog.far = radius * 7.0;
+      const band = fogBand();
+      scene.fog.near = band.near;
+      scene.fog.far = band.far;
     }
     camera.far = radius * 8;
     camera.near = near();
@@ -343,6 +365,8 @@ export function createVillageCameraRuntime({
     near,
     outerRadius,
     reapplyFog,
+    fogBand,
+    setFogBandFloor,
     setRegime,
     distanceAtFraction,
     focusEffectWeight,

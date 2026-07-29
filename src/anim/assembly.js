@@ -8,7 +8,10 @@
 // 시그니처 감성. 이 이징 언어는 조립·칸 확장·머지·마을 리롤 웨이브가 공유한다
 // (아래 tofuRise/tofuBob/tofuScale export 가 단일 출처 — 방언을 새로 만들지 말 것).
 //
-// 시맨틱 조립 그룹: 지붕은 **강체 한 덩어리**로 오른다(그룹 transform 하나만).
+// 방향 계약: 기단·기둥·벽·공포는 제자리 **아래에서** 떠오르고, 지붕만 **위에서** 내려앉는다(상량).
+// PART_DROP 의 부호가 그 방향이고, 정착 반동은 두 경우 모두 위쪽이다(접촉면에서 멀어지는 방향).
+//
+// 시맨틱 조립 그룹: 지붕은 **강체 한 덩어리**로 움직인다(그룹 transform 하나만).
 // 자식별 독립 Y/스케일은 기와 외피·방 천장 하면·서까래의 authored 깊이 스택을 깨
 // z-fighting 을 만든다. 등장 순서만 시맨틱 청크(서까래→통덩어리→잡상)와 켜 흐름으로
 // visible 스태거한다. 빌더가 지붕 그룹에 userData.asmChunked=true 를 달면 자식을
@@ -88,8 +91,15 @@ const PART_WINDOWS = {
   roof:     [0.74, 1.00],
 };
 
-// 파트별 낙하 거리 배수(묵직함 차등 — 기단은 작게, 지붕은 크게 떠오른다).
-const PART_DROP = { podium: 0.7, columns: 1.0, walls: 0.9, brackets: 0.85, roof: 1.15 };
+// 파트별 낙하 거리 배수(묵직함 차등 — 기단은 작게, 지붕은 크게 움직인다).
+//   **음수 = 위에서 내려앉는다(상량).** 지붕만 음수다. 아래에서 밀어 올리던 구 모델은 개판·서까래가
+//   평방/창방 띠를 통과해야 해서 "정착 직전까지 지붕 전체를 숨기는" 게이트가 필요했고, 그 결과 클립에서
+//   지붕이 공중에 있는 프레임이 정확히 0 이었다(2026-07-29 21프레임 판정: 기와 껍질이 애니메이션 없이
+//   팝인). 위에서 내려오는 강체는 통과할 것이 없고 — 브래킷은 아래에서, 지붕은 위에서 서로를 향해
+//   접근하므로 관통이 원리적으로 불가능하다 — 첫 프레임부터 보인다. 실제 시공 순서(상량)와도 맞는다.
+//   크기 1.9: 히어로 정착 프레임(169.5m·7° 렌즈, 세로 20.7m) 기준 지붕 여행 거리가 프레임 높이의
+//   ≈11% 로 읽힌다. 1.15 는 6% 로 캡처 간격 안에서 사라졌다.
+const PART_DROP = { podium: 0.7, columns: 1.0, walls: 0.9, brackets: 0.85, roof: -1.9 };
 
 // 파트별 두부 탄성 진폭(스쿼시&스트레치 강도). 기둥은 스프링처럼 튀고, 지붕은 절제한다.
 //   지붕 0.32 → 0.22: 구 모델은 접촉에서 변형이 정확히 0 이라 스트레치가 **상승 중에만**(대부분
@@ -106,14 +116,10 @@ const DEFAULT_CHUNK = 'body';
 const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
-// 접촉 시점(자식 로컬 진행도 u 기준). u<IMPACT 는 제자리로 떠오르는 구간, 이후는 두부 정착.
+// 접촉 시점(자식 로컬 진행도 u 기준). u<IMPACT 는 제자리로 접근하는 구간, 이후는 두부 정착.
+//   (구 SHELL_REVEAL_UU=0.85 게이트는 폐기됐다 — 지붕이 위에서 내려앉게 되면서 스크레이프 자체가
+//    사라졌고, 그 게이트가 지붕 낙하 비트를 프레임 밖으로 밀어내던 원인이었다. PART_DROP 주석 참조.)
 const IMPACT = 0.5;
-// Under-eave reveal progress on the roof motion (u). IMPACT alone is too early:
-// contact lands at rest Y for one sample, then tofu bob overshoots and the
-// gaepan/rafters scrape the plate/창방 band ("기둥 위에 반자"). Wait until the
-// settle spring has mostly damped (≈70% of the post-contact window).
-// Shell-only gate left rafters free mid-rise; both now share this threshold.
-const SHELL_REVEAL_UU = IMPACT + (1 - IMPACT) * 0.70;
 
 // ── 두부 물리: 모멘텀 연속 정착(2026-07-26 사용자 지시 3차) ─────────────────────────────
 // 이력과 사용자 판정을 그대로 남긴다(다음 사람이 코드에서 옛 규칙을 재유도하지 않게).
@@ -469,7 +475,16 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
       it.child.scale.set(it.sx0, it.sy0, it.sz0);
     } else {
       if (setVisible) it.child.visible = it.vis0;
-      it.child.position.y = it.y0 - fallOffset(uu) * drop + tofuBob(uu, tofu) * drop;
+      // 정착 반동은 **접촉면에서 멀어지는 방향**이므로 접근 방향과 무관하게 항상 위다. drop 의 부호는
+      //   접근 방향(양수=아래에서, 음수=위에서)만 결정하고, 반동 진폭은 그 크기만 쓴다.
+      //   내려앉는 부재(지붕)에는 강체 좌대 제약이 하나 더 붙는다: 좌대(평방·창방 띠) **아래로는 갈 수
+      //   없다**. 부호 있는 스프링의 두 번째 로브는 여행거리의 ≈2% 만큼 rest 아래로 내려가는데, 그건
+      //   개판이 창방을 파고드는 프레임이고 옛 스크레이프의 축소판이다. 그래서 정류(|·|)한다 — 결과는
+      //   좌대에 두 번 닿는 감쇠 바운스이고, 모멘텀에서 유도되는 성질(진폭이 접근 속도에서 나온다)은
+      //   그대로다. 아래에서 올라오는 부재는 좌대가 없으므로 부호 있는 스프링을 유지한다(계약 불변).
+      const bob = tofuBob(uu, tofu);
+      it.child.position.y = it.y0 - fallOffset(uu) * drop
+        + (drop < 0 ? Math.abs(bob) : bob) * Math.abs(drop);
       if (allowScale) {
         const s = tofuScale(uu, tofu);
         it.child.scale.set(it.sx0 * s.sxz, it.sy0 * s.sy, it.sz0 * s.sxz);
@@ -488,33 +503,25 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
         const uu = clamp01((t - u0.start) / g.itemDur);
         applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false);
         u0.items[0].child.visible = true;
-        // The roof rises from below the plate/창방. ANY roof child that appears
-        // mid-rise scrapes the column band or coplanar shell halves and reads as
-        // ceiling sparkle (product frames at t≈0.90 showed body 수키와/마루 alone
-        // as white z-fight dots while shell was still gated). Hold the whole roof
-        // dark until settle is mostly damped, then re-base eave→ridge course flow
-        // in the remaining post-reveal window of the rigid roof motion (uu space).
-        const shellLanded = uu >= SHELL_REVEAL_UU;
-        const postSpan = Math.max(1e-9, 1 - SHELL_REVEAL_UU);
-        const postUu = shellLanded ? (uu - SHELL_REVEAL_UU) / postSpan : 0;
+        // 상량: 지붕은 위에서 내려앉으므로(PART_DROP.roof < 0) 통과할 구조가 없다. 서까래·개판·기와
+        //   외피는 강체와 **함께 공중에 보이고**, 마감 부재(잡상·용마루·수키와, asmGroup='finial')만
+        //   착지 후 처마→용마루 순으로 얹힌다. 구 모델은 상승 중 스크레이프를 피하려 지붕 전체를
+        //   uu<0.85 동안 숨겼고, 그것이 "지붕이 애니메이션 없이 팝인"의 원인이었다.
+        const landed = uu >= IMPACT;
+        const postSpan = Math.max(1e-9, 1 - IMPACT);
+        const postUu = landed ? (uu - IMPACT) / postSpan : 0;
         // Child reveal only (no per-child Y/scale).
         const postIntra = g.hasLag ? INTRA_SHARE : 0;
         const postBody = Math.max(1e-9, 1 - postIntra);
         for (const u of g.visUnits) {
+          const finish = u.key === 'finial';
           for (const it of u.items) {
-            let show = false;
-            if (uu >= 1) {
-              show = true; // rest pose — every member on
-            } else if (shellLanded) {
-              if (isUnderEaveCritical(it.child)) {
-                // Shell + rafters land together (lag forced 0 above).
-                show = true;
-              } else {
-                // Ornaments cascade eave→ridge across the post-reveal window.
-                const local = (postUu - it.lag * postIntra) / postBody;
-                show = local > 0;
-              }
-            }
+            let show;
+            if (uu >= 1) show = true;              // rest pose — every member on
+            else if (uu <= 0) show = false;        // 착공 전 — 완성본 1프레임 노출 0
+            else if (!finish) show = true;         // rigid body in flight
+            else if (!landed) show = false;
+            else show = (postUu - it.lag * postIntra) / postBody > 0;
             it.child.visible = show ? it.vis0 : false;
             it.child.position.y = it.y0;
             it.child.scale.set(it.sx0, it.sy0, it.sz0);

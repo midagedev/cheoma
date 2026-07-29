@@ -309,20 +309,25 @@ assert.equal(roofPlan.ranks, 3, 'roof semantic chunks (rafters/body/finial) coll
 assert.equal(roofPlan.courseFlow, true,
   'roof chunks do not carry a course flow — tiles are not running from the eave up to the ridge');
 {
-  const tiles = house.getObjectByName('roof').children.filter((o) => !o.userData.asmGroup);
-  const seen = new Map(tiles.map((m) => [m, null]));
+  // 켜 흐름은 **마감 부재**(잡상·마루 캡, asmGroup='finial')가 소유한다. 지붕 본체는 상량 이후
+  //   강체 한 덩어리로 내려앉으므로 공중에서 이미 통째로 보인다(아래 ④ 참조) — 본체를 켜별로
+  //   숨겼다 드러내던 구 모델이 낙하 비트를 프레임 밖으로 밀어낸 원인이었다.
+  const finials = house.getObjectByName('roof').children
+    .filter((o) => o.userData.asmGroup === 'finial');
+  assert.ok(finials.length > 1, 'synthetic roof has no finial course to flow');
+  const seen = new Map(finials.map((m) => [m, null]));
   for (let i = 0; i <= 900; i++) {
     const t = i / 900;
     anim.seek(t);
-    for (const m of tiles) if (seen.get(m) === null && m.visible) seen.set(m, t);
+    for (const m of finials) if (seen.get(m) === null && m.visible) seen.set(m, t);
   }
-  const ordered = [...tiles].sort((a, b) => a.position.y - b.position.y);
+  const ordered = [...finials].sort((a, b) => a.position.y - b.position.y);
   for (let i = 1; i < ordered.length; i++) {
     assert.ok(seen.get(ordered[i]) >= seen.get(ordered[i - 1]),
-      'roof tile courses did not appear from the eave upward toward the ridge');
+      'roof finial courses did not appear from the eave upward toward the ridge');
   }
   assert.ok(seen.get(ordered.at(-1)) > seen.get(ordered[0]),
-    'roof tile courses all appeared on the same frame (no course flow)');
+    'roof finial courses all appeared on the same frame (no course flow)');
 }
 
 // Roof is a rigid body: group owns rise/bob; children keep rest local Y/scale so
@@ -353,9 +358,10 @@ assert.equal(roofPlan.courseFlow, true,
     }
   }
 
-  // Under-eave stack (outer/gaepan/band + rafters) must stay dark until the rigid
-  // roof settle is mostly damped — otherwise the rising underside/rafters z-fight
-  // the column/plate band ("기둥 위에 반자").
+  // ④ 상량 방향 계약: 지붕은 **위에서** 내려앉는다. 그래서 (a) 지붕 그룹 Y 가 창 전체에서 rest 이상을
+  //   유지하고(평방/창방 띠를 통과하는 프레임이 원리적으로 없다), (b) 개판·서까래·기와 외피를 숨길
+  //   이유가 없으므로 공중에서 보인다. 구 모델은 반대였다 — 아래에서 밀어 올리느라 uu<0.85 까지
+  //   지붕 전체를 숨겨야 했고, 그 게이트가 "기와가 애니메이션 없이 팝인"의 원인이었다.
   {
     const outer = roof.getObjectByName('roof-tile-outer');
     const gaepan = roof.getObjectByName('roof-gaepan');
@@ -363,53 +369,52 @@ assert.equal(roofPlan.courseFlow, true,
     const rafters = roof.children.filter((c) => c.userData?.asmGroup === 'rafters');
     assert.ok(outer && gaepan && band, 'synthetic roof is missing named shell pieces');
     assert.ok(rafters.length > 0, 'synthetic roof is missing rafter pieces');
-    let firstShellT = null;
-    let firstRafterT = null;
+    // (a) 접근 방향 — 지붕은 창 전체에서 rest 위에 머문다. 정착 스프링의 두 번째 로브만 rest 아래로
+    //   내려갈 뻔한 것을 좌대 정류가 막는다(assembly.js applyItem 참조). 구 모델은 여행거리 **전체**를
+    //   아래에서 올라오며 창방 띠를 통과했다(= -100%).
+    let peakLift = 0;
+    let minLift = Infinity;
+    let minLiftT = 0;
+    for (let i = 0; i <= 400; i++) {
+      const t = 0.74 + (i / 400) * 0.26;
+      anim.seek(t);
+      const lift = roof.position.y - restGroupY;
+      peakLift = Math.max(peakLift, lift);
+      if (lift < minLift) { minLift = lift; minLiftT = t; }
+    }
+    assert.ok(peakLift > 0.5,
+      `roof travel peaked at only ${peakLift.toFixed(3)}m — the descent is not readable on screen`);
+    assert.ok(minLift >= -1e-9,
+      `t=${minLiftT.toFixed(3)} roof group sank ${(-minLift).toFixed(4)}m below rest `
+      + `(${(-minLift / peakLift * 100).toFixed(1)}% of travel) — the rigid roof must approach from `
+      + 'above (상량) and the settle is rectified at the rigid seat, so it can never cross the '
+      + 'plate band');
+    // (b) 공중 가시성 — 낙하 구간(접촉 전) 샘플에서 외피·개판·서까래가 실제로 보인다.
+    for (const t of [0.76, 0.80, 0.85]) {
+      anim.seek(t);
+      assert.ok(roof.position.y - restGroupY > 0.05,
+        `t=${t} expected the roof to still be airborne`);
+      assert.equal(outer.visible, true, `shell hidden in flight (t=${t}) — no visible drop beat`);
+      assert.equal(gaepan.visible, true, `gaepan hidden in flight (t=${t})`);
+      for (const r of rafters) {
+        assert.equal(r.visible, true, `rafter hidden in flight (t=${t})`);
+      }
+    }
+    // 외피 두 겹은 여전히 가시성 동기(같은 물리 껍질).
     for (let i = 0; i <= 200; i++) {
       const t = 0.70 + (i / 200) * 0.30;
       anim.seek(t);
       assert.equal(outer.visible, gaepan.visible,
-        `t=${t.toFixed(3)} outer/gaepan visibility desynced during shell gate`);
+        `t=${t.toFixed(3)} outer/gaepan visibility desynced`);
       if (band.visible) {
         assert.equal(band.visible, outer.visible,
           `t=${t.toFixed(3)} eave band desynced from outer shell`);
       }
-      // Rafters share the under-eave gate with the shell — never lead alone
-      // through the plate band (prior residual sparkle).
-      for (const r of rafters) {
-        if (r.visible) {
-          assert.equal(outer.visible, true,
-            `t=${t.toFixed(3)} rafter visible while shell still dark`);
-        }
-      }
-      if (firstShellT === null && outer.visible) firstShellT = t;
-      if (firstRafterT === null && rafters.some((r) => r.visible)) firstRafterT = t;
     }
-    assert.ok(firstShellT !== null, 'shell never became visible');
-    assert.ok(firstRafterT !== null, 'rafters never became visible');
-    // Under-eave waits until settle is mostly damped (SHELL_REVEAL_UU ≈ 0.85 of roof u),
-    // not merely IMPACT — so bob cannot scrape the plate/창방 band.
-    const shellFloor = 0.74 + (1 - 0.74) * (IMPACT + (1 - IMPACT) * 0.70) * 0.92;
-    assert.ok(firstShellT >= shellFloor,
-      `shell appeared at t=${firstShellT.toFixed(3)} — still in the bob window `
-      + '(column-band z-fight)');
-    assert.ok(firstRafterT >= shellFloor,
-      `rafters appeared at t=${firstRafterT.toFixed(3)} — still scraping plate/창방`);
-    // Mid-rise and early-settle samples keep the whole roof dark (shell + rafters
-    // + body ornaments). Body-only reveal mid-rise produced white tile z-fight dots.
-    const bodyTiles = roof.children.filter((c) => !c.userData?.asmGroup
-      && c.name !== 'roof-tile-outer' && c.name !== 'roof-gaepan' && c.name !== 'roof-eave-band');
-    for (const t of [0.78, 0.84, 0.90]) {
-      anim.seek(t);
-      assert.equal(outer.visible, false, `shell visible too early (t=${t})`);
-      assert.equal(gaepan.visible, false, `gaepan visible too early (t=${t})`);
-      for (const r of rafters) {
-        assert.equal(r.visible, false, `rafter visible too early (t=${t})`);
-      }
-      for (const b of bodyTiles) {
-        assert.equal(b.visible, false, `body roof visible too early (t=${t}) — mid-rise z-fight`);
-      }
-    }
+    // 착공 전에는 지붕 자식이 하나도 보이지 않는다(완성본 조기 노출 0).
+    anim.seek(0.70);
+    assert.equal(outer.visible, false, 'shell visible before the roof window opens');
+    assert.ok(rafters.every((r) => !r.visible), 'rafters visible before the roof window opens');
     // Near settle the under-eave stack is on and locked.
     anim.seek(0.98);
     assert.equal(outer.visible, true, 'shell missing near settle');

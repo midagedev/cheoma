@@ -89,8 +89,12 @@ function profileFor(kind, motion, subjectSize) {
       // Default product path overrides duration from assembly timing; these are
       // fallbacks for pure gates and non-hero callers.
       duration: compact ? 4.6 : 6.4,
-      // Slightly wider establishing sweep on desktop; compact stays restrained.
-      sweep: (compact ? 32 : 90) * DEG,
+      // Establishing sweep. 90° on desktop was "과속 스윙" in the 2026-07-29 clip review: the arrival
+      // owns the camera for the whole 10s assembly, so 90° is a sustained 9°/s of parallax at a 170m
+      // telephoto radius — faster than the member drops it is supposed to let us read. 58° puts the
+      // rate at ≈5.7°/s while keeping the arc long enough that the compound turns as it is built.
+      // The reveal's job is scale (the 4.6× push-in), not angular speed.
+      sweep: (compact ? 26 : 58) * DEG,
       radialBreath: 0,
       verticalBreath: 0,
       // The establishing frame is authored as a *screen* width, not a world distance. Scaling the
@@ -102,7 +106,14 @@ function profileFor(kind, motion, subjectSize) {
       // inside the landing radius and low keeps the camera in the clear band while the 4.6× zoom
       // still carries the reveal: the subject grows ~3× on screen across the arc, which is the claim
       // the gates assert.
-      startScale: compact ? 0.80 : 0.68,
+      // The establishing radius must also stand outside the entry veil's dense near band, or the
+      // opening frame of the clip loses its 수묵 haze entirely. That band is site-radius derived
+      // (R*0.5 = 90 m on village/7) while this scale is subject-derived, so the two only stay
+      // compatible if the establishing frame lands well past it: at 0.68 of the 146.6 m hero
+      // standoff the opening depth is 99 m and the measured fog factor collapses to 0.032, below
+      // the 0.05 floor the veil contract asserts. 0.78 puts it at 114 m / 0.084 while the push-in
+      // still grows the subject 4.2x (the contract floor is 2.5x).
+      startScale: compact ? 0.86 : 0.78,
       // Low, so the establishing frame reads as layered architecture (near eaves, receding roof
       // ranks, haze) rather than a plan view of a diorama. Capped by the destination so a landing
       // that is already lower than this never gets raised.

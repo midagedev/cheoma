@@ -620,9 +620,16 @@ function assertReadableHouseFrame(focusFrame, label, { minHeight = 0.19, pose = 
   // a substantial part of the grid framed) and that what is framed is ray-clear over wall/gate.
   const courtyardFramedRatio = focusFrame.courtyardSamples > 0
     ? focusFrame.courtyardInFrame / focusFrame.courtyardSamples : 0;
+  // The hero used to demand all 20 samples framed. That was the courtyard-first landing pose, and
+  // the 2026-07-29 clip review retired it: at 24° the frame had no sky above the eave, no backlit
+  // rim and a crushed subject, so the landing came down into the architectural band and aims a
+  // little above the gate. Two far corner samples of the flat grid leave frame as a result. The
+  // floor that still matters — and what this now asserts — is that the yard is genuinely in the
+  // picture and ray-clear: a large majority of the grid framed and more of it visible over the
+  // wall/gate than the residential contract asks. It is deliberately stricter than the residential
+  // branch, so cropping the courtyard away still fails.
   invariant(hero
-    ? (focusFrame.courtyardInFrame === focusFrame.courtyardSamples
-      && focusFrame.courtyardVisible >= 4)
+    ? (courtyardFramedRatio >= 0.85 && focusFrame.courtyardVisible >= 5)
     : (courtyardFramedRatio >= 0.4 && focusFrame.courtyardVisible >= 3),
   `${label} keeps the sampled open courtyard in frame and ray-clear across its wall/gate `
     + `(${focusFrame.courtyardInFrame}/${focusFrame.courtyardSamples} framed, ${focusFrame.courtyardVisible} ray-visible)`);

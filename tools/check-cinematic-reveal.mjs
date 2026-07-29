@@ -364,9 +364,12 @@ assert.ok(elevationOf(opticalSamples[0])
   < VILLAGE_FOCUS_ELEVATION * DEG + 3,
 '200mm-like arrival must never establish above its own landing elevation');
 
-// The product hero landing pose: the same 7° lens but the compound's own 24° elevation. A low
-// establishing frame is what makes the reveal read as layered architecture (near eaves, receding
-// roof ranks, haze) instead of a plan view of a diorama, and the arc then cranes up to the landing.
+// The product hero landing pose: the same 7° lens, the compound's own slightly-raised elevation.
+// A low establishing frame is what makes the reveal read as layered architecture (near eaves,
+// receding roof ranks, haze) instead of a plan view of a diorama — and the landing must **stay** in
+// that band. The 24° landing made the arc crane up out of its own establishing frame across the
+// whole assembly, so the choreography ended on the flattest frame of the sequence (2026-07-29 clip
+// review: settle top band median 36 vs establishing 165). The reveal is a push-in, not a crane-up.
 const heroLandingClose = frame({
   x: Math.sin(heroAzimuth) * Math.cos(VILLAGE_HERO_FOCUS_ELEVATION) * heroPhysicalDistance,
   y: heroTarget.y + Math.sin(VILLAGE_HERO_FOCUS_ELEVATION) * heroPhysicalDistance,
@@ -377,9 +380,13 @@ const heroLandingArrival = createArchitecturalReveal({
 });
 const heroLandingStart = sampleArchitecturalReveal(heroLandingArrival, 0);
 const heroLandingEnd = sampleArchitecturalReveal(heroLandingArrival, 1);
-assert.ok(elevationOf(heroLandingStart) < elevationOf(heroLandingEnd) - 8,
-  'hero landing arrival must establish at least 8 degrees below its landing elevation '
+assert.ok(Math.abs(elevationOf(heroLandingEnd) - elevationOf(heroLandingStart)) <= 3,
+  'hero landing arrival must land in the same architectural band it establishes in — a crane-up '
+  + 'ends the choreography on a survey frame with no sky above the eave '
   + `(${elevationOf(heroLandingStart).toFixed(2)}° -> ${elevationOf(heroLandingEnd).toFixed(2)}°)`);
+assert.ok(elevationOf(heroLandingEnd) <= 16,
+  `hero landing elevation ${elevationOf(heroLandingEnd).toFixed(2)}° left the architectural band — `
+  + 'the backlit eave silhouette (flagship look) does not exist at survey elevations');
 assert.ok(occupancyOf(heroLandingEnd) > occupancyOf(heroLandingStart) * 2.5,
   'hero landing arrival must establish a frame at least 2.5x wider than the landing '
   + `(occupancy ${occupancyOf(heroLandingStart).toFixed(5)} -> ${occupancyOf(heroLandingEnd).toFixed(5)})`);

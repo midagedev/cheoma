@@ -102,9 +102,23 @@ const HERO_REVEAL_VEIL = 1.14;         // 랜딩 베일 강화(#87②) — 주�
 // 완성 hold 무대: 카메라 선회를 조립 완주보다 이만큼 먼저 끝낸다. 마지막 부재가 내려앉는 순간을 고정된
 //   프레임에서 보게 되고(움직이는 카메라가 완성 비트를 흘려보내지 않는다), 이어서 근접 링(모트·연기·
 //   등롱)이 그 정지 프레임 위로 피어난다. 0 이면 카메라 도착과 완성이 겹쳐 완성 비트가 없다.
-// Camera arrives just before assembly ends so the roof land is still a live
-// push-in climax (#254). Was 1.3s — that left a long static hold after the arc.
-const HERO_REVEAL_TAIL = 0.45;
+// Camera arrives before assembly ends so the roof land is punctuated by a held frame. 1.3 → 0.45
+// (#254) removed that punctuation: the measured arrival put camera arrival 0.7s before the last
+// member and the whole roof beat played under a moving camera, so the completion never landed.
+// Back to 1.3s — long enough that the 지붕 descent and its settle spring are read from a fixed
+// frame, short enough that the arc still overlaps the assembly.
+const HERO_REVEAL_TAIL = 1.3;
+// 정착 후 미세 표류(#26x): focus 가 선택된 프레임에서 유휴 선회를 완전히 0 으로 잠그면 정착 컷이
+//   문자 그대로 정지 화면이 된다(측정: az 13.66° 가 7.5s 동안 소수점까지 동일). "화면에 완전 정지는
+//   없다" 계약은 근접 링 입자만으로는 지켜지지 않는다 — 카메라가 죽으면 프레임이 죽는다.
+//   속도는 **화면 이동률(px/s)로 저작한다**, 각속도가 아니라. 포스트 적응 품질(post-quality-state.js)
+//   은 화면 변위 18px/s 를 넘으면 카메라를 'moving' 으로 보고 moving 예산(fill 0.65 · MSAA 0 ·
+//   outline/flare off · half bloom)으로 내려간다. 7° 히어로 렌즈의 focal 은 5886px 이라 1.1°/s 짜리
+//   "미세" 표류만으로도 118px/s = 문턱의 6.6배이고, 그러면 정착 컷이 영구히 저품질에 갇혀 림·블룸이
+//   죽는다. 그 문턱 아래를 목표로 잡으면 렌즈와 무관하게 계약이 유지되고, 이 값이 곧 "알아채면 너무
+//   강하다"의 수치 정의가 된다.
+const HERO_SETTLE_DRIFT_PX_S = 10;
+const HERO_SETTLE_DRIFT_DELAY_MS = 900;   // 정착 → 표류 개시(완성 비트를 정지 프레임으로 먼저 보여준다)
 
 // 머지(칸 들이기 합체) 수직 탄성 폭(m). 두부 정착 계수는 drop 배수라, 수평 이동인 머지 경로에는
 //   이 값이 그 drop 역할을 한다(공유 이징 언어를 쓰되 진폭만 이 경로 규모로).
@@ -193,13 +207,18 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const ORBIT_SPEED = 0.33;                 // ≈ 3분/바퀴 (autoRotateSpeed 2.0=30초 기준)
   const ORBIT_IDLE_MS = 9000;               // 유휴 후 재개까지(8~12초 범위)
   const ORBIT_RAMP_SEC = 2.6;               // 유휴 선회 ease-in 램프 시간
-  const ASM_ORBIT_MULT = 5.2;               // 조립 선회 목표 배수(종전 체감 유지)
+  // 조립 선회 목표 배수. 5.2 는 "과속 스윙"으로 판정됐다(2026-07-29 클립 리뷰) — 리빌 호(90°)가
+  //   조립 10s 안에 다 소진되면 부재 낙하 속도보다 카메라가 빨라 낙하가 읽히지 않는다. 낙하 한 사이클
+  //   (≈1.3s)에 카메라가 도는 각을 눈이 따라올 수 있는 범위로 낮춘다.
+  const ASM_ORBIT_MULT = 2.4;
   const ASM_ORBIT_RAMP_IN_SEC = 1.35;       // 리빌 종료 → 선회 가속
   const ASM_ORBIT_RAMP_OUT_SEC = 0.9;       // 조립 종료 → 선회 감속
   let orbitGain = 0;                        // 0..1 유휴 회전 강도
   let asmOrbitGain = 0;                     // 0..1 조립 선회 강도(리빌 이후 스무스)
   let lastActivity = performance.now();     // 마지막 사용자 조작 시각
   let heroActive = false;                   // 히어로 시퀀스 진행 중 플래그
+  let heroSettleDriftAt = null;             // 히어로 정착 미세 표류 개시 시각(null=미무장)
+  let heroLandingFog = false;               // 히어로 랜딩 대기 밴드를 렌더 루프가 매 프레임 덮어쓸지
   let legacyHeroAssembleTimer = null;
   let legacyHeroPoll = null;
   let legacyHeroFadeFrame = null;
@@ -227,7 +246,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const bumpShadow = (ms = 1800) => { shadowHot = Math.max(shadowHot, performance.now() + ms); };
 
   const activityEvents = ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'];
-  const markActivity = () => { lastActivity = performance.now(); };
+  const markActivity = () => {
+    lastActivity = performance.now();
+    heroSettleDriftAt = null;   // 사용자가 화면을 만지면 랜딩 표류는 끝난다(그 뒤는 일반 유휴 규칙)
+  };
   for (const ev of activityEvents) {
     addEventListener(ev, markActivity, { passive: true });
   }
@@ -1224,15 +1246,18 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     // orbitBusy: 조립 선회가 원할 때는 busy 가 아니어야 한다(리빌 종료 후 heroAsm 구간).
     // 조립 중 입력이 끊은 경우(revealInterrupted)만 조립 선회를 막는다.
+    // 히어로 랜딩 정착 컷은 예외적으로 focus 상태에서도 유휴 선회를 허용한다(HERO_SETTLE_DRIFT).
+    //   사용자가 화면을 만지면(markActivity) 즉시 해제되고, 다른 필지 선택·부감 복귀도 해제한다.
+    const settleDrift = heroSettleDriftAt != null && performance.now() >= heroSettleDriftAt;
     const orbitBusy = (heroActive && !assembling) || assembly || groupAnims.length > 0 ||
       wings.some((w) => w.assembly) || cinematic.isActive() || tween || revealActive
       || state.selected || demo.active
-      || (village.active && village.selected && !assembling && asmOrbitGain <= 1e-4)
+      || (village.active && village.selected && !assembling && asmOrbitGain <= 1e-4 && !settleDrift)
       || (assembling && !revealAutoOrbit)
       || villageWaveBusy();
 
     if (!orbitBusy && !wantAsmOrbit && asmOrbitGain <= 1e-4
-        && performance.now() - lastActivity > ORBIT_IDLE_MS) {
+        && (settleDrift || performance.now() - lastActivity > ORBIT_IDLE_MS)) {
       orbitGain = Math.min(1, orbitGain + dt / ORBIT_RAMP_SEC);
     } else if (!wantAsmOrbit) {
       // 유휴 게인만 즉시 정지. 조립 선회 감속(asmOrbitGain)은 위 ease-out 이 소유.
@@ -1240,7 +1265,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     }
     const idleG = orbitGain * orbitGain * (3 - 2 * orbitGain); // smoothstep
     const asmG = asmOrbitGain * asmOrbitGain * (3 - 2 * asmOrbitGain);
-    controls.autoRotateSpeed = ORBIT_SPEED * idleG + ORBIT_SPEED * ASM_ORBIT_MULT * asmG;
+    controls.autoRotateSpeed = idleOrbitSpeed(settleDrift) * idleG
+      + ORBIT_SPEED * ASM_ORBIT_MULT * asmG;
     // dt 를 넘겨 autoRotate 를 프레임레이트 독립으로 — 무인자 update() 는 60fps 를 가정한
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
@@ -1344,8 +1370,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const subjectDepth = clearMargin > 0 ? camera.position.distanceTo(controls.target) : 0;
       const denseNear = Math.max(R * 0.5, subjectDepth * clearMargin);
       const denseFar = Math.max(R * (7.0 - 4.4 * veil), denseNear + R * 1.6);
-      scene.fog.near = denseNear + (R * 2.2 - denseNear) * e;   // 짙음 → 2.2R(base)
-      scene.fog.far = denseFar + (R * 7.0 - denseFar) * e;      // veil=1: 2.6R → 7.0R(base)
+      // 릴리스 목표는 R 파생 상수가 아니라 **정착 후 실제로 적용될 밴드**다(villageCamera.fogBand).
+      //   두 값이 다르면 리빌이 끝나는 프레임에서 대기가 한 번 점프하고, 히어로 랜딩에서는 그 점프가
+      //   정확히 클라이맥스와 겹쳐 배경 능선이 갑자기 맑아졌다(측정: near 90 → 396m).
+      const rest = villageCamera.fogBand();
+      scene.fog.near = denseNear + (rest.near - denseNear) * e;
+      scene.fog.far = denseFar + (rest.far - denseFar) * e;
       if (k >= 1) {
         village.reveal = null;
         // #140-D 부팅 리빌 정착 직후 오디오를 생성하고 현재 시간대 트랙을 프리페치(fetch+decode)해 둔다 →
@@ -1357,6 +1387,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
           tasks.idle(warm, { timeout: 3000 });
         }
       }
+    } else if (village.active && scene.fog && village.handle && heroLandingFog) {
+      // 리빌이 끝난 뒤에도 랜딩 대기 밴드를 유지한다. fog 거리의 실제 권위는 핸들이 env 에 등록한
+      //   매 틱 모디파이어(R*2.2/R*7.0, handle.js villageFog)이므로 여기서 매 프레임 덮어써야 한다 —
+      //   reapplyVillageFog 1회 호출은 다음 틱에 그 모디파이어가 되돌린다(측정: 정착 프레임에서
+      //   near 127 → 396m 로 복귀 = 배경 능선의 대기 원근이 클라이맥스에서 0).
+      const band = villageCamera.fogBand();
+      scene.fog.near = band.near;
+      scene.fog.far = band.far;
     }
     audio?.update(dt);
     // #145 부감 z-fight + #136 focus 지형 절단: 기본은 거리 종속 near 램프(부감=큰 near로
@@ -1603,6 +1641,29 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const villageAerial = (handle = village.handle) => villageCamera.aerial(handle);
   const setZoomRegime = (mode, closeupDist = 0) => villageCamera.setRegime(mode, closeupDist);
   const villageNear = () => villageCamera.near();
+  // autoRotateSpeed 2.0 = 30초/바퀴 라는 OrbitControls 규약에서 역산한다. 히어로 정착 표류는 화면
+  //   이동률 예산(HERO_SETTLE_DRIFT_PX_S)이 권위이므로 현재 렌즈의 focal 로 각속도를 되풀어낸다.
+  function idleOrbitSpeed(settleDrift) {
+    if (!settleDrift) return ORBIT_SPEED;
+    const heightPx = renderer.domElement?.clientHeight || container?.clientHeight || 720;
+    const focalPx = heightPx / (2 * Math.tan(camera.fov * DEG * 0.5));
+    const perSecond = (HERO_SETTLE_DRIFT_PX_S / Math.max(1, focalPx)) * 60 / (2 * Math.PI);
+    return Math.min(ORBIT_SPEED, perSecond);
+  }
+  // 히어로 랜딩 대기 바닥. nearScale/spanScale 은 카메라→피사체 거리 배수다. 169.5m 히어로 정착에서
+  //   near 127m / far 669m — 피사체(155m)는 약 5% 헤이즈로 선명하고 바로 뒤 배산 사면(232m)은 19% 를
+  //   받아 여백으로 물러난다. 부감 밴드(near 396m)에서는 그 사면이 안개 밴드 앞이라 대기 원근이 0 이었다.
+  const HERO_LANDING_FOG = Object.freeze({ nearScale: 0.75, spanScale: 3.2 });
+  function armHeroLandingAtmosphere() {
+    heroLandingFog = true;
+    villageCamera.setFogBandFloor(HERO_LANDING_FOG);
+  }
+  function clearHeroLandingAtmosphere() {
+    if (!heroLandingFog) return;
+    heroLandingFog = false;
+    villageCamera.setFogBandFloor(null);
+    if (village.active && village.handle && !village.reveal) reapplyVillageFog();
+  }
   function syncVillageNear() {
     if (!village.active || demo.active) return camera.near;
     const next = villageNear();
@@ -2093,6 +2154,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const pr = village.handle.getPickProxy(parcelId);
     if (!pr) return;
     retireSemanticViewSettlement();
+    clearHeroLandingAtmosphere();   // 히어로 랜딩 전용 대기 바닥은 그 랜딩 컷에만 속한다
+    heroSettleDriftAt = null;
     if (hoverParcel && hoverParcel !== parcelId) village.handle.highlightParcel(hoverParcel, false);
     hoverParcel = null;
     village.handle.highlightParcel(parcelId, true);   // 돌리인 동안 추적 하이라이트
@@ -2286,6 +2349,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     if (!village.active) return;
     if (!village.selected && !village.transitioning) return;
     stopHeroAsm();                                   // 진행 중 조립 정리
+    clearHeroLandingAtmosphere();
+    heroSettleDriftAt = null;
     clearFocusRing();                               // focus-out → 근접 앰비언스 페이드아웃(#79)
     const parcelId = village.selected;
     const departingSemantic = !!(parcelId && semanticDofParcel === parcelId);
@@ -2491,7 +2556,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       const s = tofuScale(uu, amp);
       it.obj.scale.set(it.sx * s.sxz, it.sy * s.sy, it.sz * s.sxz);
     };
-    const applyAt = (t) => items.forEach((it, i) => set(it, clamp01((t - (i / n) * 0.5) / 0.5)));
+    // 청크 스태거. 구 식 (i/n)*0.5 은 마지막 청크(몸채=클라이맥스)를 t=(n-1)/n*0.5+0.5 에서 끝냈다 —
+    //   n=6 이면 0.917, 즉 조립 길이의 8.3%(10s 중 0.83s)가 아무것도 움직이지 않는 죽은 꼬리였고
+    //   카메라가 도착해 기다리는 구간이 그 죽은 꼬리와 겹쳤다. (i/(n-1)) 로 펴서 마지막 청크가 정확히
+    //   t=1 에 정착하게 한다 → 카메라 hold(HERO_REVEAL_TAIL) 가 실제 착지 순간을 담는다.
+    const CHUNK_WINDOW = 0.5;
+    const chunkStart = (i) => (n > 1 ? (i / (n - 1)) * (1 - CHUNK_WINDOW) : 0);
+    const applyAt = (t) => items.forEach((it, i) => (
+      set(it, clamp01((t - chunkStart(i)) / CHUNK_WINDOW))
+    ));
     const restore = () => items.forEach((it) => {
       it.parts?.skip();
       it.obj.position.y = it.y0; it.obj.scale.set(it.sx, it.sy, it.sz); it.obj.visible = it.vis0;
@@ -2520,7 +2593,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
             name: it.obj.name || '(anon)',
             body: !!it.body,
             delegated: !!it.parts,
-            windowSec: [+((idx / n) * 0.5 * duration).toFixed(3), +(((idx / n) * 0.5 + 0.5) * duration).toFixed(3)],
+            windowSec: [
+              +(chunkStart(idx) * duration).toFixed(3),
+              +((chunkStart(idx) + CHUNK_WINDOW) * duration).toFixed(3),
+            ],
             parts: it.parts?.plan() || null,
           })),
         };
@@ -2596,7 +2672,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const maxDim = Number.isFinite(pr.maxDim) ? pr.maxDim : (bbSpan ? Math.max(bbSpan.x, bbSpan.y, bbSpan.z) : 14);
     // 역광 무대(#98): 태양을 종가 배면(frontDir≈rotY, +180°+25° 사선)에 고정한다.
     // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
-    heroSunAz = rotY + Math.PI + 25 * DEG;   // 배면 +25° 사선 역광(정배면보다 처마·측면 실루엣 림이 예쁨)
+    // 배면 사선 역광. +25° 는 태양이 시선축에서 11° 밖에 안 벗어나 정배면과 다름없었다(측정:
+    //   sunAz -155° vs 카메라 시선 -166°). 그러면 카메라를 향한 모든 면 — 남측 지붕면·벽·배산 사면 —
+    //   이 전부 음영측이 되어 프레임이 실루엣 하나로 붕괴한다(정착 프레임 피사체 밴드 중값 14/255,
+    //   룩 계약 "크러시드 블랙 실루엣 금지" 위반). +55° 는 3/4 역광이다: 림 게이트의 backlit 항
+    //   (-dot(표면→카메라, 표면→태양) ≥ 0.45)은 0.63~0.70 으로 여전히 만점이고, 서측 지붕면과
+    //   배산 사면이 골든 그레이징을 받아 처마선이 기댈 밝은 면이 생긴다.
+    heroSunAz = rotY + Math.PI + 55 * DEG;
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
     const heroFraming = pr.heroCameraFraming;
     let finalPosition;
@@ -2639,6 +2721,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 조립 완주보다 HERO_REVEAL_TAIL 만큼 먼저 도착 → 완성 비트를 고정 프레임에서 관람한다.
       duration: HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR - HERO_REVEAL_TAIL,
     });
+    armHeroLandingAtmosphere();   // 리빌 릴리스 목표와 정착 밴드를 같은 값으로(클라이맥스 대기 점프 제거)
     reapplyVillageFog();
     // 랜딩 먹 안개: 조립 완주까지 걸쳐 두되(hold 로 전반부 짙은 무대 유지) 조립 후반에 마을을 연다(#98④).
     //   히어로는 근접(near fog 안)이라 hold 중에도 늘 맑게 보이고, 무대(주변 마을)만 물렸다 열린다.
@@ -2669,6 +2752,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // asmOrbitGain 은 유지: 루프의 ease-out 이 조립 선회를 부드럽게 줄인다.
       settleControls();
       orbitGain = 0;
+      // 완성 비트를 먼저 정지 프레임으로 보여주고(HERO_SETTLE_DRIFT_DELAY_MS) 그 다음 미세 표류로
+      //   넘긴다 — 정지도, 급정거도 아닌 하나의 감속.
+      heroSettleDriftAt = performance.now() + HERO_SETTLE_DRIFT_DELAY_MS;
       // 조립 10s 동안 카메라 선회가 motionBudget(MSAA 0 · fill 0.65)을 붙잡고 있어,
       // 정착 직후에도 적응 품질이 풀리지 않으면 림·기와 에지가 한꺼번에 죽어 보인다.
       // 플래그십 근접 프레임으로 즉시 복원 + ~1.8s hold — 잔여 조립 선회가 다시 moving 으로
@@ -4193,6 +4279,44 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       let m = 0;
       g.traverse((o) => { if (o.scale) m = Math.max(m, Math.abs(o.scale.x - 1), Math.abs(o.scale.y - 1), Math.abs(o.scale.z - 1)); });
       return +m.toFixed(4);
+    },
+    // 조립 중 실제로 서로를 통과하는 면쌍(진짜 z-fight)의 근거. 오버레이 안에서 **동시에 보이는**
+    //   메쉬들의 월드 AABB 를 교차 검사해 겹침 부피가 있는 쌍만 돌려준다. 깊이 정밀도 문제와
+    //   기하 관통을 구분하려면 재질 트릭이 아니라 이 수치를 봐야 한다(사용자 판정 #4 대응).
+    overlaps(limit = 12) {
+      if (disposed) return null;
+      const root = village.handle?.heroDetailGroup?.();
+      if (!root) return null;
+      root.updateWorldMatrix(true, true);
+      const boxes = [];
+      root.traverse((o) => {
+        if (!o.isMesh || !o.geometry) return;
+        for (let p = o; p; p = p.parent) if (!p.visible) return;
+        const box = new THREE.Box3().setFromObject(o);
+        if (box.isEmpty()) return;
+        const chain = [];
+        for (let p = o, i = 0; p && i < 5; p = p.parent, i++) chain.push(p.name || p.type);
+        boxes.push({
+          chain: chain.join('<'),
+          mat: (Array.isArray(o.material) ? o.material[0] : o.material)?.name
+            || (Array.isArray(o.material) ? o.material[0] : o.material)?.userData?.paletteKey || '',
+          box,
+        });
+      });
+      const pairs = [];
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i].box, b = boxes[j].box;
+          const ox = Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x);
+          const oy = Math.min(a.max.y, b.max.y) - Math.max(a.min.y, b.min.y);
+          const oz = Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z);
+          if (ox <= 0.02 || oy <= 0.02 || oz <= 0.02) continue;
+          pairs.push({ a: boxes[i].chain, am: boxes[i].mat, b: boxes[j].chain, bm: boxes[j].mat,
+            vol: +(ox * oy * oz).toFixed(3), oy: +oy.toFixed(3) });
+        }
+      }
+      pairs.sort((p, q) => q.vol - p.vol);
+      return { meshes: boxes.length, pairs: pairs.slice(0, limit) };
     },
   };
   window.__asm = assemblyHook;

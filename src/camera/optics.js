@@ -61,10 +61,20 @@ export const VILLAGE_FOCUS_SKY_FRACTION = 0.2;
 // today moves by more than 0.2px, and the shift only shrinks, only where chrome really claims more
 // than the reference share (measured: phone editing 109.7px -> 51.4px, everything else unchanged).
 export const VILLAGE_FOCUS_SKY_REFERENCE_BAND = 519 / 800;
-// The hero landing keeps its own authored approach. It arrives on a compound courtyard whose
-// wings only read from above, and its frame is a settled cinematic beat rather than the shared
-// close-parcel pose, so lowering the residential elevation must not follow it.
-export const VILLAGE_HERO_FOCUS_ELEVATION = 24 * DEG;
+// The hero landing keeps its own authored approach: a compound courtyard reads better from a
+// little above the shared close-parcel pose, and its frame is a settled cinematic beat. But it
+// stays inside the architectural band for the same reason residential focus does — 24° was a
+// survey elevation, and the measured arrival made that concrete: the reveal *craned up* from its
+// own 11.3° establishing frame to 24° across the whole assembly, so the choreography ended on the
+// flattest frame of the sequence. At 24° with the 7° hero lens the top frame ray sits 20.5° below
+// the horizon, the eave line has nothing above it but ground ~35 m behind the compound, and the
+// climax cut lost the backlit silhouette the whole look is built on (2026-07-29 clip review).
+// 13° halves that down-pitch — the push-in now holds the establishing elevation instead of
+// fighting it — while staying above VILLAGE_EAVE_FOCUS_BAND_MAX so the hero keeps its own base
+// through the zoom continuum. The authored 169.5 m telephoto dolly is unchanged: the terrain
+// solver still returns scale 1 with visibleRatio 1 at this elevation, so rim/DoF/LOD bands that
+// derive from the hero distance are untouched.
+export const VILLAGE_HERO_FOCUS_ELEVATION = 13 * DEG;
 // Product close-focus aperture diameter, in metres, for the physical circle of
 // confusion (src/env/bokeh-coc-contract.js). Shared with BOKEH_COC_DEFAULTS /
 // DEFAULT_DOF_APERTURE. 0.30 m (with tilt 0.32) is the 2026-07-28 residential
