@@ -161,6 +161,56 @@ export function villageZoomReferenceBounds(mode, aerialReference, closeupReferen
   throw new Error(`Unknown village zoom mode: ${mode}`);
 }
 
+// Default village aerial framing (product explore pose).
+//
+// three.js PerspectiveCamera.fov is vertical. At reference distance D the village
+// diameter 2R projects to:
+//   horizontal fill = R / (D * tanHalf * aspect)
+//   vertical fill   = R / (D * tanHalf)
+// Product keeps tanHalf = 0.40 (≈ tan(42°/2) of VILLAGE_LENS.aerial.referenceFov).
+//
+// Landscape fits the diameter to LANDSCAPE_FILL of the *width* (the long axis is
+// horizontal). Portrait must not multiply by aspect < 1: that over-distances to
+// fit the narrow width and leaves the village a fog-bleached speck (~32% of
+// height on 390×844). Clamp fitAspect to ≥1 so portrait fills the long (vertical)
+// axis instead. Desktop aspect ≥ 1 is bitwise-identical to the historical solve.
+export const VILLAGE_AERIAL_FRAME_TAN_HALF = 0.40;
+export const VILLAGE_AERIAL_LANDSCAPE_FILL = 0.60;
+export const VILLAGE_AERIAL_PORTRAIT_FILL = 0.70;
+
+export function villageAerialReferenceDistance(radius, aspect = 1.6) {
+  const r = Number.isFinite(radius) && radius > 0 ? radius : 0;
+  const a = Number.isFinite(aspect) && aspect > 0 ? aspect : 1.6;
+  const fill = a >= 1 ? VILLAGE_AERIAL_LANDSCAPE_FILL : VILLAGE_AERIAL_PORTRAIT_FILL;
+  const fitAspect = Math.max(a, 1);
+  return r / (VILLAGE_AERIAL_FRAME_TAN_HALF * fill * fitAspect);
+}
+
+/** Screen-space diameter fills for a village of plan radius R at a reference distance. */
+export function villageAerialDiameterFills(radius, aspect, referenceDistance) {
+  const r = Number.isFinite(radius) && radius > 0 ? radius : 0;
+  const a = Number.isFinite(aspect) && aspect > 0 ? aspect : 1.6;
+  const d = Number.isFinite(referenceDistance) && referenceDistance > 0
+    ? referenceDistance
+    : Number.POSITIVE_INFINITY;
+  const tan = VILLAGE_AERIAL_FRAME_TAN_HALF;
+  const horizontal = r / (d * tan * a);
+  const vertical = r / (d * tan);
+  // Long axis of the *viewport*: width on landscape, height on portrait.
+  const longAxis = a >= 1 ? horizontal : vertical;
+  const shortAxis = a >= 1 ? vertical : horizontal;
+  return { horizontal, vertical, longAxis, shortAxis };
+}
+
+/** Compensated product aerial camera distance (46° FOV) for a plan radius. */
+export function villageAerialDistance(radius, aspect = 1.6) {
+  return dollyDistanceForFov(
+    villageAerialReferenceDistance(radius, aspect),
+    VILLAGE_LENS.aerial.referenceFov,
+    VILLAGE_LENS.aerial.fov,
+  );
+}
+
 const smoothstep = (edge0, edge1, value) => {
   if (edge1 <= edge0) return value < edge0 ? 0 : 1;
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));

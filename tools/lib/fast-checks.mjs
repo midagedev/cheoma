@@ -37,6 +37,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-ground-stone-bedding.mjs',
   './check-cinematic-turns.mjs',
   './check-cinematic-reveal.mjs',
+  './check-aerial-framing.mjs',
   './check-clip-stage.mjs',
   './check-walk-solids.mjs',
   './check-frame-clock.mjs',

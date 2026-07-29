@@ -4,6 +4,7 @@ import {
   dollyDistanceForFov,
   referenceFovForCamera,
   villageAerialElevation,
+  villageAerialReferenceDistance,
   villageScreenDistance,
   villageScreenDistanceForCamera,
   villageFocusContextElevation,
@@ -54,8 +55,9 @@ export function createVillageCameraRuntime({
   function aerial(handle = village.handle) {
     const radius = outerRadius(handle);
     const aspect = camera.aspect || (container.clientWidth / container.clientHeight) || 1.6;
-    const fill = aspect >= 1 ? 0.60 : 0.70;
-    const referenceDistance = radius / (0.40 * fill * aspect);
+    // Portrait must not fit width via aspect < 1 — that over-distances and fog-bleaches
+    // the village. Pure solve lives in src/camera/optics.js (desktop aspect ≥ 1 identical).
+    const referenceDistance = villageAerialReferenceDistance(radius, aspect);
     const distance = dollyDistanceForFov(
       referenceDistance,
       VILLAGE_LENS.aerial.referenceFov,
