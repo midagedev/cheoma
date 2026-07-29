@@ -81,10 +81,12 @@ try {
     console.log(`${label} center hits: ${JSON.stringify(hits)}`);
   };
 
+  // Aperture is diameter in metres (product base 0.30). The retired BokehPass
+  // legacy unit (~1e-4) made every aperture step CoC≈0 and byte-identical.
   const capture = async (name, aperture) => {
     const state = await page.evaluate(({ aperture }) => {
       const engine = window.__engine;
-      engine.debugTuneDof({ amount: aperture == null ? 0 : 1, aperture: aperture ?? 0.00012 });
+      engine.debugTuneDof({ amount: aperture == null ? 0 : 1, aperture: aperture ?? 0.30 });
       engine.debugRenderDofFrame();
       let firefly = null;
       engine.scene.traverse((object) => {
@@ -113,9 +115,9 @@ try {
     console.log(`giwa focus ring strength: ${giwaStrength}`);
     await logCenterHits('giwa');
     await capture('giwa-autumn-sunset-off', null);
-    await capture('giwa-autumn-sunset-012', 0.00012);
-    await capture('giwa-autumn-sunset-015', 0.00015);
-    await capture('giwa-autumn-sunset-018', 0.00018);
+    await capture('giwa-autumn-sunset-020', 0.20);
+    await capture('giwa-autumn-sunset-030', 0.30);
+    await capture('giwa-autumn-sunset-040', 0.40);
   }
 
   if (sceneFilter !== 'giwa') {
@@ -139,7 +141,7 @@ try {
     console.log(`choga focus ring strength: ${chogaStrength}`);
     await logCenterHits('choga');
     await capture('choga-summer-night-off', null);
-    await capture('choga-summer-night-015', 0.00015);
+    await capture('choga-summer-night-030', 0.30);
   }
 
   console.log(`DOF SHOTS: ${outputDir}`);

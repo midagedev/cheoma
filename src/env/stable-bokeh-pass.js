@@ -221,6 +221,7 @@ export class StableBokehPass extends BokehPass {
         highlightThreshold: this.uniforms.highlightThreshold.value,
         sourceScatter: this._sourceScatterEnabled,
         bokehQuality: this.uniforms.bokehQuality.value,
+        sourceRadiusScale: this.uniforms.bokehRadiusScale.value,
       });
 
       renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
@@ -271,11 +272,14 @@ export class StableBokehPass extends BokehPass {
       this.uniforms.aperture.value,
       focus,
     );
-    this.cocScalePx = bokehCocScalePx(
-      this.effectiveApertureMeters,
-      this._height,
-      fov,
-    );
+    // Optical scale: product apertureMeters (0.30) is the locked dial; without a
+    // separate runtime scale the 2px beauty floor crushed all soft separation
+    // (vision: 0.20↔0.40 sky maxdiff≈5). ~2.5× restores “0.40-feel at 0.30” without
+    // retuning DEFAULT_DOF_APERTURE / BOKEH_COC_DEFAULTS.apertureMeters.
+    const COC_OPTICAL_SCALE = 2.5;
+    this.cocScalePx =
+      bokehCocScalePx(this.effectiveApertureMeters, this._height, fov) *
+      COC_OPTICAL_SCALE;
     this.maxCocPx = bokehMaxCocPx(this._height, this.maxCocFraction);
     this.uniforms.cocScalePx.value = this.cocScalePx;
     this.uniforms.maxCocPx.value = this.maxCocPx;

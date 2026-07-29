@@ -86,20 +86,6 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
     #endif
   }
 
-  vec3 withoutTransferredSource(vec3 color, vec4 highlightSample) {
-    float brightness = max(max(color.r, color.g), color.b);
-    float compactSource =
-      step(
-        ${glslFloat(BOKEH_SOURCE_CONTRACT.gatherSupportCutoff)},
-        highlightSample.a
-      )
-      // Once an exact 2x2 block owns an HDR source, transfer its antialiased
-      // shoulder with the core so the source remains one energy-conserving unit.
-      * step(highlightThreshold * 0.05, brightness)
-      * step(0.5, bokehSourceScatter);
-    return max(color - color * compactSource, vec3(0.0));
-  }
-
   void main() {
     // The identical curve the CoC prefilter and the source scatter evaluate.
     // Sky pixels sit at BokehPass's deliberate far-depth clear, so background
@@ -119,22 +105,21 @@ export const CIRCULAR_BOKEH_FRAGMENT_SHADER = /* glsl */ `
     float dilatedPx = gather.a * maxCocPx;
     float effectivePx = max(cocPx, dilatedPx);
 
-    if (effectivePx < ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)}) {
-      gl_FragColor = vec4(texture2D(tColor, vUv).rgb, 1.0);
+    // Full-res tColor is never stripped here (prefilter strip is CoC-gated to
+    // match scatter). Soft beauty ramp 3.0→8.0 px: subject house / upper walls
+    // stay on full beauty (vision in-focus bright |Δ| ≤ 2) while optical-scaled
+    // far CoC still separates sky/ridge and near foreground.
+    vec3 centerColor = texture2D(tColor, vUv).rgb;
+    float mixWeight = smoothstep(3.0, 8.0, cocPx);
+    // Limited near bleed so a defocused eave can still wash onto the subject.
+    float nearBleed =
+      smoothstep(3.0, 8.0, dilatedPx) * 0.25 * step(cocPx + 1.0, dilatedPx);
+    mixWeight = min(1.0, max(mixWeight, nearBleed));
+    if (mixWeight < 0.001) {
+      gl_FragColor = vec4(centerColor, 1.0);
       return;
     }
-
-    vec3 centerColor = texture2D(tColor, vUv).rgb;
-    vec4 centerHighlight = texture2D(tHighlight, vUv);
-    vec3 centerBase = withoutTransferredSource(centerColor, centerHighlight);
-    // One sub-pixel ramp off the sharp cut. The gather already removed the
-    // transferred source, so both sides of this mix are the same image.
-    float mixWeight = smoothstep(
-      ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)},
-      ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx + 1.5)},
-      effectivePx
-    );
-    gl_FragColor = vec4(mix(centerBase, gather.rgb, mixWeight), 1.0);
+    gl_FragColor = vec4(mix(centerColor, gather.rgb, mixWeight), 1.0);
   }
 `;
 

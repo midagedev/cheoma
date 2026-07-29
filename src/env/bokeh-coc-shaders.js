@@ -85,9 +85,10 @@ const PREFILTER_BLOCK_LINES = BLOCK_OFFSETS.map(([x, y], index) => {
   return (
     `vec2 blockUv${index} = ${uv};\n` +
     `    vec3 blockColor${index} = texture2D(tColor, blockUv${index}).rgb;\n` +
-    `    colorSum += withoutTransferredSource(blockColor${index}, ownership);\n` +
     `    float blockSigned${index} = ` +
     `bokehSignedCocAt(getAxialDepth(blockUv${index}), blockUv${index}.y);\n` +
+    `    colorSum += withoutTransferredSource(` +
+    `blockColor${index}, ownership, abs(blockSigned${index}));\n` +
     `    if (abs(blockSigned${index}) > abs(peakSigned)) ` +
     `peakSigned = blockSigned${index};`
   );
@@ -112,23 +113,37 @@ export const BOKEH_COC_PREFILTER_FRAGMENT_SHADER = /* glsl */ `
   uniform float tiltAnchorV;
   uniform float highlightThreshold;
   uniform float bokehSourceScatter;
+  uniform float sourceRadiusScale;
 
   ${BOKEH_COC_GLSL}
   ${DEPTH_GLSL}
 
   // The gather must not spread an HDR source that the scatter already renders as
-  // an energy-conserving filled disc, or a lantern is drawn twice. This is the
-  // existing full-resolution rule moved down to the downsample step (§4.5).
-  vec3 withoutTransferredSource(vec3 color, vec4 highlightSample) {
+  // an energy-conserving filled disc, or a lantern is drawn twice (§4.5).
+  // CRITICAL: strip only when scatter will actually draw a disc. Scatter zeros
+  // sources with radius < sharpRadiusPx; stripping those was a CoC-independent
+  // fixed tax (vision: subject byte-identical across 0.20/0.30/0.40 yet −18..−31
+  // vs off; frame ratio ~0.89). cocAbsPx is the sample's thin-lens |signedCoc|.
+  vec3 withoutTransferredSource(
+    vec3 color,
+    vec4 highlightSample,
+    float cocAbsPx
+  ) {
     float brightness = max(max(color.r, color.g), color.b);
+    float sourceRadiusPx = min(cocAbsPx, maxCocPx) * sourceRadiusScale;
+    float willScatter = step(
+      ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)},
+      sourceRadiusPx
+    );
     float compactSource =
       step(
-        ${glslFloat(BOKEH_SOURCE_CONTRACT.gatherSupportCutoff)},
+        ${glslFloat(BOKEH_SOURCE_CONTRACT.exactOwnershipCutoff)},
         highlightSample.a
       )
-      * step(highlightThreshold * 0.05, brightness)
-      * step(0.5, bokehSourceScatter);
-    return max(color - color * compactSource, vec3(0.0));
+      * step(highlightThreshold, brightness)
+      * step(0.5, bokehSourceScatter)
+      * willScatter;
+    return max(color - highlightSample.rgb * compactSource, vec3(0.0));
   }
 
   void main() {

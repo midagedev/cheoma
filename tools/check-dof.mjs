@@ -830,7 +830,8 @@ invariant(
 );
 // The gather's alpha is the radius it spent, including the near dilation. Reading
 // it is what lets a defocused foreground cross a sharp subject instead of being
-// clipped to its own silhouette.
+// clipped to its own silhouette. Beauty cut uses own cocPx; dilation only
+// widens the gather disc / limited near bleed, never demotes sharp beauty.
 invariant(
   CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("float dilatedPx = gather.a * maxCocPx;") &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
@@ -838,33 +839,41 @@ invariant(
     ),
   "composite stopped honouring the gather's dilated foreground radius",
 );
-const sharpBranch = CIRCULAR_BOKEH_FRAGMENT_SHADER.slice(
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("if (effectivePx < 0.45)"),
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.indexOf("vec3 centerColor ="),
+// Round-2 energy contracts (shader text). Browser gate under lock is authoritative
+// for rendered energy; these pins keep strip/CoC-gate/soft-ramp from regressing.
+const energyContractFailures = [];
+const energyInvariant = (condition, message) => {
+  if (!condition) energyContractFailures.push(message);
+};
+// Soft beauty ramp on own cocPx (not a hard effectivePx cut).
+const mixRampMatch = CIRCULAR_BOKEH_FRAGMENT_SHADER.match(
+  /mixWeight\s*=\s*smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*cocPx\s*\)/,
 );
-invariant(
-  (sharpBranch.match(/texture2D\s*\(\s*tColor\b/g) || []).length === 1 &&
-    !sharpBranch.includes("tHighlight"),
-  "sharp focus stopped taking the direct one-fetch path",
+energyInvariant(
+  mixRampMatch &&
+    Number(mixRampMatch[1]) <= 3.0 + 1e-9 &&
+    Number(mixRampMatch[2]) >= 8.0 - 1e-9,
+  "composite beauty ramp must be softstep on cocPx covering ~3.0→8.0 px " +
+    `(got ${mixRampMatch?.[1] ?? "?"}→${mixRampMatch?.[2] ?? "?"})`,
 );
-invariant(
-  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 withoutTransferredSource") &&
+energyInvariant(
+  CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 centerColor =") &&
     CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      "step(highlightThreshold * 0.05, brightness)",
+      "mix(centerColor, gather.rgb, mixWeight)",
     ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("step(0.5, bokehSourceScatter)") &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-      `${BOKEH_SOURCE_CONTRACT.gatherSupportCutoff}`,
-    ) &&
-    CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 centerBase ="),
-  "compact source stopped transferring exactly once out of the surface image",
+    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes("vec3 centerBase =") &&
+    !CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
+      "color - color * compactSource",
+    ),
+  "composite centre must stay full-res beauty (no whole-texel transfer strip)",
 );
 invariant(
   CIRCULAR_BOKEH_FRAGMENT_SHADER.includes(
-    "gl_FragColor = vec4(mix(centerBase, gather.rgb, mixWeight), 1.0);",
+    "gl_FragColor = vec4(mix(centerColor, gather.rgb, mixWeight), 1.0);",
   ),
-  "composite stopped blending the gather over the transferred-source base",
+  "composite stopped blending the gather over full-res beauty",
 );
+
 
 // ---------------------------------------------------------------------------
 // CoC prefilter: exactly the scatter's 2x2 ownership grid, conservative peak.
@@ -887,8 +896,39 @@ invariant(
   "CoC downsample stopped taking the conservative largest-magnitude CoC",
 );
 invariant(
-  prefilterFragment.includes("withoutTransferredSource(blockColor0, ownership)"),
+  /withoutTransferredSource\(\s*blockColor0,\s*ownership,\s*abs\(blockSigned0\)/.test(
+    prefilterFragment,
+  ),
   "CoC prefilter stopped removing the transferred HDR source at downsample time",
+);
+// Strip only when scatter will draw (sourceRadius ≥ sharpRadiusPx). CoC-free
+// strip was the fixed energy tax (vision round 2).
+energyInvariant(
+  prefilterFragment.includes("willScatter") &&
+    prefilterFragment.includes("sourceRadiusPx") &&
+    prefilterFragment.includes("sourceRadiusScale") &&
+    prefilterFragment.includes(
+      `${BOKEH_SOURCE_CONTRACT.sharpRadiusPx}`,
+    ) &&
+    prefilterFragment.includes("step(highlightThreshold, brightness)") &&
+    prefilterFragment.includes("color - highlightSample.rgb * compactSource") &&
+    !prefilterFragment.includes("color - color * compactSource") &&
+    prefilterFragment.includes(
+      `${BOKEH_SOURCE_CONTRACT.exactOwnershipCutoff}`,
+    ),
+  "CoC prefilter must CoC-gate strip to scatter's sharpRadius floor",
+);
+energyInvariant(
+  prefilterFragment.includes(
+    "withoutTransferredSource(blockColor0, ownership, abs(blockSigned0))",
+  ) ||
+    prefilterFragment.includes(
+      "withoutTransferredSource(\n      blockColor0, ownership, abs(blockSigned0))",
+    ) ||
+    /withoutTransferredSource\(\s*blockColor0,\s*ownership,\s*abs\(blockSigned0\)/.test(
+      prefilterFragment,
+    ),
+  "CoC prefilter strip must receive per-sample |signedCoc|",
 );
 invariant(
   prefilterFragment.includes("bokehSignedCocAt(getAxialDepth(") &&
@@ -1167,6 +1207,12 @@ invariant(
 const stableBokehSource = await readFile(
   new URL("../src/env/stable-bokeh-pass.js", import.meta.url),
   "utf8",
+);
+// CoC optical scale lives in StableBokehPass (product aperture dial unchanged).
+energyInvariant(
+  stableBokehSource.includes("COC_OPTICAL_SCALE") &&
+    /COC_OPTICAL_SCALE\s*=\s*2\.5/.test(stableBokehSource),
+  "runtime CoC optical scale (≈2.5×) missing — background soft separation crushed",
 );
 invariant(
   stableBokehSource.includes("dofDepthMaterialForObject(object)") &&
@@ -1501,4 +1547,330 @@ near(
   "resize/reset snapshot created synthetic camera motion",
 );
 
-console.log("DOF CONTRACT: PASS");
+if (energyContractFailures.length) {
+  console.log("DOF ENERGY CONTRACT: FAIL");
+  for (const message of energyContractFailures) {
+    console.log(`FAIL  ${message}`);
+  }
+} else {
+  console.log("DOF ENERGY CONTRACT: PASS");
+}
+
+console.log(
+  energyContractFailures.length
+    ? "DOF CONTRACT: FAIL (energy preservation)"
+    : "DOF CONTRACT: PASS",
+);
+
+// ---------------------------------------------------------------------------
+// Browser brightness-preservation + aperture reach (only under the lock runner).
+// Pure fast-checks keep this file browser-free; the lock wrapper sets
+// CHEOMA_BROWSER_LOCK_HELD=1 so `node tools/run-browser-locked.mjs -- node
+// tools/check-dof.mjs` also measures rendered sRGB energy.
+// ---------------------------------------------------------------------------
+const runBrowser =
+  process.env.CHEOMA_BROWSER_LOCK_HELD === "1" ||
+  process.env.CHEOMA_DOF_BROWSER === "1" ||
+  process.argv.includes("--browser");
+
+if (!runBrowser) {
+  if (energyContractFailures.length) process.exit(1);
+} else {
+  const { createHash } = await import("node:crypto");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const { PNG } = await import("pngjs");
+  const { createServer } = await import(
+    "../app/node_modules/vite/dist/node/index.js"
+  );
+  const { launchVerificationBrowser, reportWebGLRenderer } = await import(
+    "./lib/verification-browser.mjs"
+  );
+  const { VILLAGE_FOCUS_DOF_APERTURE } = await import(
+    "../src/camera/optics.js"
+  );
+
+  const ROOT = resolve(import.meta.dirname, "..");
+  const APP_ROOT = join(ROOT, "app");
+  const cacheDir = await mkdtemp(join(tmpdir(), "cheoma-dof-bright-"));
+  const timeout = Number(process.env.CHEOMA_DOF_TIMEOUT_MS) || 180_000;
+  const failures = [];
+  const pass = (condition, message) => {
+    console.log(`${condition ? "PASS" : "FAIL"}  ${message}`);
+    if (!condition) failures.push(message);
+  };
+
+  const lumaAt = (data, i) =>
+    0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+
+  // Full-frame linear-ish sRGB luma sum ratio (on / off). Vision measured ~0.89–0.92
+  // with the fixed strip; product must stay ≥ 0.99.
+  const frameLumaRatio = (offBuf, onBuf) => {
+    const offPng = PNG.sync.read(offBuf);
+    const onPng = PNG.sync.read(onBuf);
+    if (offPng.width !== onPng.width || offPng.height !== onPng.height) {
+      return { error: "size mismatch", ratio: 0, sumOff: 0, sumOn: 0 };
+    }
+    const { width, height, data: offData } = offPng;
+    const onData = onPng.data;
+    let sumOff = 0;
+    let sumOn = 0;
+    for (let i = 0; i < offData.length; i += 4) {
+      sumOff += lumaAt(offData, i);
+      sumOn += lumaAt(onData, i);
+    }
+    return {
+      width,
+      height,
+      sumOff,
+      sumOn,
+      ratio: sumOff > 0 ? sumOn / sumOff : 0,
+      pixels: width * height,
+    };
+  };
+
+  // Bright pixels (L>0.5 in 0..1) mean |Δ| in one vertical band, keyed off frame.
+  const brightRegionDelta = (offBuf, onBuf, y0Frac, y1Frac) => {
+    const offPng = PNG.sync.read(offBuf);
+    const onPng = PNG.sync.read(onBuf);
+    const { width, height, data: offData } = offPng;
+    const onData = onPng.data;
+    const y0 = Math.max(0, Math.floor(height * y0Frac));
+    const y1 = Math.min(height - 1, Math.floor(height * y1Frac));
+    let sumAbs = 0;
+    let sumOff = 0;
+    let sumOn = 0;
+    let count = 0;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const lo = lumaAt(offData, i);
+        if (lo < 127.5) continue; // L>0.5 in 0..255
+        const ln = lumaAt(onData, i);
+        sumAbs += Math.abs(ln - lo);
+        sumOff += lo;
+        sumOn += ln;
+        count++;
+      }
+    }
+    return {
+      y0,
+      y1,
+      count,
+      meanAbsDelta: count ? sumAbs / count : 0,
+      meanOff: count ? sumOff / count : 0,
+      meanOn: count ? sumOn / count : 0,
+      region: `y=${y0}..${y1}/${height} (frac ${y0Frac.toFixed(2)}..${y1Frac.toFixed(2)}), L>0.5`,
+    };
+  };
+
+  // Mean absolute delta over all pixels in a band (for background blur existence).
+  const bandMeanAbsDelta = (aBuf, bBuf, y0Frac, y1Frac) => {
+    const aPng = PNG.sync.read(aBuf);
+    const bPng = PNG.sync.read(bBuf);
+    const { width, height, data: aData } = aPng;
+    const bData = bPng.data;
+    const y0 = Math.max(0, Math.floor(height * y0Frac));
+    const y1 = Math.min(height - 1, Math.floor(height * y1Frac));
+    let sum = 0;
+    let count = 0;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        sum += Math.abs(lumaAt(aData, i) - lumaAt(bData, i));
+        count++;
+      }
+    }
+    return {
+      y0,
+      y1,
+      count,
+      meanAbsDelta: count ? sum / count : 0,
+      region: `y=${y0}..${y1}/${height} (frac ${y0Frac}..${y1Frac})`,
+    };
+  };
+
+  const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
+
+  const server = await createServer({
+    root: APP_ROOT,
+    configFile: join(APP_ROOT, "vite.config.js"),
+    cacheDir,
+    logLevel: "error",
+    server: { host: "127.0.0.1", port: 0, strictPort: false, hmr: false },
+  });
+
+  let browser;
+  const runtimeErrors = [];
+  try {
+    await server.listen();
+    const port = server.httpServer.address().port;
+    browser = await launchVerificationBrowser();
+    const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
+    page.setDefaultTimeout(timeout);
+    await page.addInitScript(() => {
+      window.__noWarm = true;
+    });
+    page.on("pageerror", (error) => runtimeErrors.push(`page: ${error.message}`));
+    page.on("console", (message) => {
+      if (message.type() === "error" && !/favicon|404/i.test(message.text())) {
+        runtimeErrors.push(`console: ${message.text()}`);
+      }
+    });
+
+    const url =
+      `http://127.0.0.1:${port}/?hero=0&village=1&worker=0&shot=1` +
+      "&seed=42&vseed=20260716&time=sunset&season=autumn&weather=clear";
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+    await page.waitForFunction(
+      () => window.__SHOT_READY === true && !!window.__engine,
+      null,
+      { timeout },
+    );
+    await page.waitForFunction(
+      () => window.__engine?.village?.debugPlan?.()?.seed === 20260716,
+      null,
+      { timeout },
+    );
+    await reportWebGLRenderer(page, "dof-bright");
+
+    const parcelId = await page.evaluate(() => {
+      const parcels = window.__engine.village.debugParcels();
+      const regular = parcels.filter((p) => !p.hero && p.editable);
+      return (
+        regular.find((p) => p.kind === "giwa")?.parcelId ||
+        regular[0]?.parcelId ||
+        null
+      );
+    });
+    if (!parcelId) throw new Error("no giwa/regular parcel for brightness gate");
+
+    await page.evaluate(async (parcelId) => {
+      const engine = window.__engine;
+      engine.village.focus(parcelId);
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      const sampled = engine.debugDofSeek(1, { finish: true });
+      if (!sampled) throw new Error("focus transition did not start");
+      engine.debugTuneDof({ amount: 0 });
+      engine.setWeather("clear");
+      engine.setSeason("autumn", { immediate: true });
+      engine.setTime("sunset", { immediate: true });
+      engine.debugAdvanceFocusRing(3.2);
+      engine.debugAdvancePost(2.0);
+      engine.debugSetPaused(true);
+    }, parcelId);
+
+    const capture = async (amount, aperture) => {
+      await page.evaluate(
+        ({ amount, aperture }) => {
+          const engine = window.__engine;
+          engine.debugTuneDof({
+            amount,
+            aperture: Number.isFinite(aperture) ? aperture : undefined,
+          });
+          engine.debugRenderDofFrame();
+        },
+        { amount, aperture },
+      );
+      return page.locator("canvas").screenshot({ type: "png" });
+    };
+
+    // Round-2 energy gate (vision re-judge). Off = amount 0; on = amount 1.
+    // Fixed strip was CoC-independent (subject byte-identical across 0.20/0.30/0.40
+    // yet −18..−31 vs off). Require full-frame energy, per-band bright preservation,
+    // and real background blur between aperture steps.
+    const productAperture = VILLAGE_FOCUS_DOF_APERTURE; // 0.30 m
+    const apertureLo = 0.20;
+    const apertureHi = 0.40;
+    const apertureMin = 0.12;
+    const apertureMax = 0.45;
+
+    const offBuf = await capture(0, productAperture);
+    const onBuf = await capture(1, productAperture);
+    const ap20Buf = await capture(1, apertureLo);
+    const ap40Buf = await capture(1, apertureHi);
+    const minBuf = await capture(1, apertureMin);
+    const maxBuf = await capture(1, apertureMax);
+
+    // (1) Full-frame luma sum ratio on/off ≥ 0.99
+    const frame = frameLumaRatio(offBuf, onBuf);
+    console.log(
+      `frame-luma sumOff=${frame.sumOff.toFixed(0)} sumOn=${frame.sumOn.toFixed(0)} ` +
+        `ratio=${frame.ratio.toFixed(4)} (${frame.width}x${frame.height})`,
+    );
+    pass(
+      frame.ratio >= 0.99,
+      `frame luma sum ratio amount1@${productAperture}m / off ≥ 0.99 ` +
+        `(got ${frame.ratio.toFixed(4)})`,
+    );
+
+    // (2) Bright L>0.5 mean |Δ| per vertical band.
+    // Focus-plane bands (upper/lower subject): ≤2 — fixed strip death was −50..−70.
+    // Sky/foreground are *supposed* to soft-separate; allow optical peak dilution
+    // but not the pre-fix fixed-tax floor (foreground was −52, sky −14 with tax).
+    const vBands = [
+      [0, 0.25, "sky/ridge", 16],
+      [0.25, 0.5, "upper-subject", 2],
+      [0.5, 0.75, "lower-subject/yard", 2],
+      [0.75, 1, "foreground", 16],
+    ];
+    for (const [y0, y1, label, limit] of vBands) {
+      const reg = brightRegionDelta(offBuf, onBuf, y0, y1);
+      console.log(
+        `bright-band ${label}: ${reg.region}; count=${reg.count}; ` +
+          `mean|Δ|=${reg.meanAbsDelta.toFixed(2)}; meanOff=${reg.meanOff.toFixed(2)}; ` +
+          `meanOn=${reg.meanOn.toFixed(2)}; limit=${limit}`,
+      );
+      if (reg.count < 50) {
+        console.log(
+          `  (skip assert: too few L>0.5 samples in ${label})`,
+        );
+        continue;
+      }
+      pass(
+        reg.meanAbsDelta <= limit,
+        `bright L>0.5 mean |Δ| ≤ ${limit} in ${label} ` +
+          `(got ${reg.meanAbsDelta.toFixed(2)}; ${reg.region})`,
+      );
+    }
+
+    // (3) Background blur must exist: aperture 0.20 vs 0.40 differ in far band
+    const BG_BLUR_MIN = 1.5; // mean |Δ| in sRGB luma units
+    const bg = bandMeanAbsDelta(ap20Buf, ap40Buf, 0, 0.28);
+    console.log(
+      `background blur 0.20 vs 0.40: ${bg.region}; mean|Δ|=${bg.meanAbsDelta.toFixed(2)}`,
+    );
+    pass(
+      bg.meanAbsDelta >= BG_BLUR_MIN,
+      `background band changes with aperture 0.20→0.40 ` +
+        `(mean|Δ|=${bg.meanAbsDelta.toFixed(2)}, need ≥${BG_BLUR_MIN})`,
+    );
+
+    // (4) Aperture min/max hashes differ (pixel reach, product-scale metres)
+    const minHash = sha256(minBuf);
+    const maxHash = sha256(maxBuf);
+    console.log(`aperture min(${apertureMin}m) sha256=${minHash.slice(0, 16)}…`);
+    console.log(`aperture max(${apertureMax}m) sha256=${maxHash.slice(0, 16)}…`);
+    pass(
+      minHash !== maxHash,
+      `aperture min/max (${apertureMin}m vs ${apertureMax}m) change rendered pixels`,
+    );
+
+    pass(runtimeErrors.length === 0, `runtime errors: ${runtimeErrors.length}`);
+    for (const error of runtimeErrors) console.log(`  ${error}`);
+
+    if (failures.length) {
+      console.error(`DOF ENERGY GATE: FAIL (${failures.length})`);
+      for (const f of failures) console.error(`  - ${f}`);
+      process.exitCode = 1;
+    } else {
+      console.log("DOF ENERGY GATE: PASS");
+    }
+  } finally {
+    await browser?.close();
+    await server.close();
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+  if (energyContractFailures.length) process.exitCode = 1;
+}

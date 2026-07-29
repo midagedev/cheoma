@@ -28,6 +28,7 @@ import { FullScreenQuad } from "three/addons/postprocessing/Pass.js";
 import {
   BOKEH_COC_DEFAULTS,
 } from "./bokeh-coc-contract.js";
+import { CIRCULAR_BOKEH_DEFAULTS } from "./circular-bokeh-shader.js";
 import {
   BOKEH_COC_GATHER_FRAGMENT_SHADER,
   BOKEH_COC_GATHER_TEXTURE_TAP_COUNT,
@@ -60,6 +61,9 @@ export class BokehCocPass {
       tiltAnchorV: { value: 0.5 },
       highlightThreshold: { value: 1.2 },
       bokehSourceScatter: { value: 0 },
+      // Compact-source disc multiplier — same dial scatter uses so strip and
+      // re-emit agree on whether a source is defocused enough to leave the surface.
+      sourceRadiusScale: { value: CIRCULAR_BOKEH_DEFAULTS.sourceRadiusScale },
     };
     this.cocMaterial = new ShaderMaterial({
       defines: {
@@ -155,6 +159,7 @@ export class BokehCocPass {
       highlightThreshold,
       sourceScatter,
       bokehQuality,
+      sourceRadiusScale,
     },
   ) {
     this._allocate();
@@ -171,6 +176,9 @@ export class BokehCocPass {
       Number.isFinite(tiltAnchorV) ? tiltAnchorV : 0.5;
     this.cocUniforms.highlightThreshold.value = highlightThreshold;
     this.cocUniforms.bokehSourceScatter.value = sourceScatter ? 1 : 0;
+    this.cocUniforms.sourceRadiusScale.value = Number.isFinite(sourceRadiusScale)
+      ? sourceRadiusScale
+      : CIRCULAR_BOKEH_DEFAULTS.sourceRadiusScale;
     this.gatherUniforms.tCoc.value = this.cocTarget.texture;
     this.gatherUniforms.maxCocPx.value = maxCocPx;
     this.gatherUniforms.bokehQuality.value = bokehQuality;

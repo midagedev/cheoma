@@ -761,10 +761,14 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       // full-strength band. Parcel-only scaling left settle at ~33% rim (dead eave kick).
       const gate = rimDistanceGateForFov(camera.fov);
       fresnelRim.setNearFar(gate.near, gate.far);
-      // Neighbour rim under DoF → bokeh sparkle. Axial depth = BokehPass focus; amount 0 inert.
+      // Neighbour-rim DoF damp retired for energy: amount=1 was a CoC-independent
+      // −8–11% frame tax and −50..−70 bright-band death (vision round 2) even when
+      // the composite returned full-res beauty. Compact HDR transfer is CoC-gated
+      // in the bokeh stack (strip only if scatter draws); that is enough to stop
+      // false sparkle without a second fixed damp on the PBR rim.
       fresnelRim.setDofGate({
         focusDepth: dof.focus,
-        amount: (enabled && bokehPass.enabled) ? dof.amount : 0,
+        amount: 0,
       });
       // 새 재질(마을 리롤·focus-in 오버레이·단일건물 rebuild) self-heal 패치. 대략 0.4s 주기.
       if ((++scanTick % 24) === 0) fresnelRim.apply(scene);
