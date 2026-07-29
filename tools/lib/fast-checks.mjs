@@ -70,6 +70,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-program-diet.mjs',
   './check-shadow-framing.mjs',
   './check-directional-shadow-runtime.mjs',
+  './check-rim-gate.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
   './check-choga-roof.mjs',

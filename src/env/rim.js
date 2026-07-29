@@ -119,11 +119,14 @@ export const RIM_SOLAR_GATE = Object.freeze({
 // post.js updates uRimNear/Far each frame via rimDistanceGateForFov(camera.fov).
 // Hero settle (~170 m at 7°) was at ~33% strength with parcel-only scaling — the flagship
 // eave rim at choreography end never peaked.
+// Wide-angle (aerial 46° etc.) must not shrink below the parcel-lens band: without that floor
+// the village sit-down camera sits hundreds of metres past far and rim intensity collapses to 0.
 export const RIM_DISTANCE_BASE = Object.freeze({ near: 24, far: 175 });
 export function rimDistanceGateForFov(fovDegrees, referenceFov = VILLAGE_LENS.parcel.referenceFov) {
+  const floor = dollyScaleForFov(referenceFov, VILLAGE_LENS.parcel.fov);
   const live = Number.isFinite(fovDegrees) && fovDegrees > 0
-    ? dollyScaleForFov(referenceFov, fovDegrees)
-    : dollyScaleForFov(referenceFov, VILLAGE_LENS.parcel.fov);
+    ? Math.max(floor, dollyScaleForFov(referenceFov, fovDegrees))
+    : floor;
   return {
     near: RIM_DISTANCE_BASE.near * live,
     far: RIM_DISTANCE_BASE.far * live,
