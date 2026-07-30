@@ -361,11 +361,19 @@ export function setVillageWaterTime(waterU, name) {
 const V_WATER_TINT = {
   dawn:   [0.82, 0.80, 0.86],
   day:    [1.00, 1.00, 1.00],   // 기준 — 낮 개울 룩 불변
-  sunset: [1.02, 0.86, 0.74],   // 노을 대기와 같은 주홍 쪽으로(하늘반사도 같은 함수를 탄다)
+  // sunset 은 앱 기본 시각이라 가장 많이 보이는 프레임이고, 개울은 그 프레임의 유일한 청색
+  //   요소였다. 물 알베도(deep 0x376f82)가 청색인데 이 시간대 앰비언트(hemiSky 0x9fb0d6 ·
+  //   마을 리그 0x8593bd)가 쿨이라 "청 알베도 × 쿨 앰비언트"로 코발트 리본이 됐다 —
+  //   실측 개울 밴드 (15,39,61), 청/적 4배. desat 0.30 은 알베도 청색의 70% 를 남겨 부족했다.
+  //   desat 를 크게 올려 물 자체 색조를 지운 뒤(직교 순서, water.js waterAtmos 주석) 노을
+  //   대기색을 얹는다. 물이 죽지 않는 것은 가산 uSky·uGlint(금빛)가 담당한다.
+  //   틴트는 노을 대기 쪽으로 웜하게 둔다. 알베도만 담당하므로 grazing 구간의 금빛 반사와
+  //   충돌하지 않는다(반사층은 waterReflect 가 시간대 색을 보존한다).
+  sunset: [1.22, 0.98, 0.78],
   night:  [0.52, 0.58, 0.72],   // 달빛 청, 어둠에 가라앉되 존재
 };
 // 시간대별 탈채도. 저광량 시간대의 물은 실제로 채도가 낮게 읽힌다(반사가 하늘을 닮아간다).
-const V_WATER_DESAT_TIME = { dawn: 0.34, day: 0.0, sunset: 0.30, night: 0.42 };
+const V_WATER_DESAT_TIME = { dawn: 0.34, day: 0.0, sunset: 0.72, night: 0.42 };
 // 계절 축. 겨울 개울은 결빙·잔설로 채도가 거의 사라지고 창백해진다 — 감사 A7 의 설경 순청색
 // 지적이 정확히 이 축의 부재였다. 여름을 기준(무연산)으로 두고 겨울만 강하게 뺀다.
 const V_WATER_DESAT_SEASON = { spring: 0.10, summer: 0.0, autumn: 0.14, winter: 0.72 };
@@ -389,7 +397,9 @@ export function villageWaterLookTarget({ time = 'day', season = 'summer', ink = 
   const k = Math.min(1, Math.max(0, ink));
   return {
     tint: [t[0] * s[0], t[1] * s[1], t[2] * s[2]],
-    // 수묵은 시간·계절 위에 덧씌운다(전환 중 amount 0..1 로 연속).
+    // 알베도 탈채도: 수묵은 시간·계절 위에 덧씌운다(전환 중 amount 0..1 로 연속).
     desat: desat + (1 - desat) * k,
+    // 가산 반사층 탈채도: 수묵 전용. PBR 에서 0 이라 시간대 반사색이 온전히 남는다.
+    ink: k,
   };
 }

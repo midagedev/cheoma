@@ -34,8 +34,11 @@ export function createWaterUniforms() {
     // 있지 않아서, 설경에서도 한여름 코발트로 남았다(감사 A7). uSky·uGlint 는 *가산* 반사층이라
     // 이 문제를 못 고친다 — 부감에서 화면을 지배하는 항은 알베도다. (1,1,1)=완전 무연산.
     uWaterTint: { value: new THREE.Color(1, 1, 1) },
-    // 0=원색, 1=완전 무채. 겨울 결빙감과 수묵 커버리지가 같은 축을 쓴다.
+    // 0=원색, 1=완전 무채. 알베도 전용 — 겨울 결빙감과 시간대 채도 하향이 이 축을 쓴다.
     uWaterDesat: { value: 0 },
+    // 수묵 커버리지(0..1). 알베도는 uWaterDesat 에 이미 합성돼 들어오고, 이 값은 가산 반사층
+    //   (시간대 authored 대기색)을 무채로 보내는 유일한 경로다. PBR 에서는 항상 0.
+    uWaterInk: { value: 0 },
   };
 }
 
@@ -83,6 +86,7 @@ export function injectWaterLook(shader, u, {
   shader.uniforms.uRough = u.uRough;
   shader.uniforms.uWaterTint = u.uWaterTint;
   shader.uniforms.uWaterDesat = u.uWaterDesat;
+  shader.uniforms.uWaterInk = u.uWaterInk;
   shader.uniforms.uWaterReflection = { value: reflection };
   shader.uniforms.uWaterRippleScale = { value: ripple };
 
@@ -101,17 +105,33 @@ export function injectWaterLook(shader, u, {
       uniform float uRough;
       uniform vec3 uWaterTint;
       uniform float uWaterDesat;
+      uniform float uWaterInk;
       uniform float uWaterReflection;
       uniform float uWaterRippleScale;
       varying vec3 vWaterWP;
-      vec3 waterAtmos(vec3 c) {
-        c *= uWaterTint;
-        return mix(c, vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), uWaterDesat);
+      // 알베도와 가산 반사층은 서로 다른 처리를 받는다.
+      //   알베도: 물 자체의 청색을 uWaterDesat 로 지운 뒤 uWaterTint 로 대기 색조를 얹는다.
+      //     (탈채도를 먼저 하는 이유: 순서를 뒤집으면 높은 desat 이 틴트까지 회색으로 되돌린다.)
+      //   가산 반사층(uSky·uGlint): 이 값들은 이미 시간대별로 authored 된 *대기색*이다. 여기에
+      //     시간대 탈채도를 걸면 노을의 금빛 반사가 중성이 되고, grazing(프레넬 높은) 구간에서
+      //     반사가 지배적이라 개울이 오히려 더 파랗게 읽혔다 — 실측: 반사 지배 화소가
+      //     (74,52,36) 웜에서 (30,40,62) 청색으로 역전. 그래서 반사층은 수묵(uWaterInk)에서만
+      //     무채로 보낸다.
+      vec3 waterAlbedo(vec3 c) {
+        c = mix(c, vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), uWaterDesat);
+        return c * uWaterTint;
+      }
+      //     틴트는 반사층에도 계속 곱한다: 틴트는 색조만이 아니라 *밝기*도 싣고 있어서
+      //     (야간 0.52/0.58/0.72 가 반사를 어둡게 눌러 준다) 빼면 야간 개울이 luma 56→156 으로
+      //     떠오른다. 즉 반사층에서 빼야 하는 것은 탈채도뿐이다.
+      vec3 waterReflect(vec3 c) {
+        c = mix(c, vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), uWaterInk);
+        return c * uWaterTint;
       }`)
     // 알베도를 대기 계통에 참여시킨다. color_fragment 뒤라 vertexColors(개울 깊이/물가 레인
     // 그라디언트)가 이미 적용된 상태 — 레인 대비는 보존하고 계열만 옮긴다.
     .replace('#include <color_fragment>', `#include <color_fragment>
-      diffuseColor.rgb = waterAtmos(diffuseColor.rgb);`)
+      diffuseColor.rgb = waterAlbedo(diffuseColor.rgb);`)
     // 시간대 거칠기 가산: 저각 광원 스펙큘러의 뾰족한 peak 를 낮춰 bloom 임계 아래로.
     // wetK 로 게이트(논: 봄에만 물). uRough=0 이면 완전 무연산(기본 룩 불변).
     // 상한만 min 으로(하한 clamp 없음) → uRough=0 이면 roughnessFactor 그대로(항상 ≤1)라
@@ -137,16 +157,15 @@ export function injectWaterLook(shader, u, {
         float wetK = clamp(${wetExpr}, 0.0, 1.0);
         vec3 V = normalize(vViewPosition);
         float fres = pow(clamp(1.0 - abs(dot(normalize(normal), V)), 0.0, 1.0), 2.4);
-        // 가산 반사층도 같은 대기 함수를 통과해야 한다 — 알베도만 중성화하면 수묵에서 하늘반사가
-        // 혼자 남아 파란 획이 그대로 보인다.
-        totalEmissiveRadiance += waterAtmos(uSky) * (0.10 + 0.85 * fres) * uWaterReflection * wetK;
+        // 반사층은 수묵에서만 무채로 간다(waterReflect) — 시간대 반사색 자체가 대기색이다.
+        totalEmissiveRadiance += waterReflect(uSky) * (0.10 + 0.85 * fres) * uWaterReflection * wetK;
         // 글린트: 흐름 따라 흐르는 교차 고주파 → 성기고 뾰족한 하이라이트만(수묵 감성).
         // grazing(fres)으로 게이트해 은은하게 얹는다.
         vec2 gp = vWaterWP.xz;
         float g1 = sin(dot(gp, vec2(1.9, -1.3)) + uTime * 1.7);
         float g2 = sin(dot(gp, vec2(-1.1, 2.3)) - uTime * 1.05);
         float spark = pow(clamp(g1 * g2, 0.0, 1.0), 8.0);
-        totalEmissiveRadiance += waterAtmos(uGlint) * spark * (0.35 + 0.65 * fres)
+        totalEmissiveRadiance += waterReflect(uGlint) * spark * (0.35 + 0.65 * fres)
           * uWaterReflection * wetK;
       }`);
 }

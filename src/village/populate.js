@@ -129,6 +129,8 @@ export function* populateVillageSteps(plan, opts = {}) {
     const t = villageWaterLookTarget(waterLook);
     waterLookTarget.tint.setRGB(t.tint[0], t.tint[1], t.tint[2]);
     waterLookTarget.desat = t.desat;
+    // 반사층 탈채도는 수묵 전용 축이라 ink 런타임의 페이드 곡선을 그대로 따른다(트윈 없음).
+    waterU.uWaterInk.value = t.ink;
     if (immediate) {
       waterU.uWaterTint.value.copy(waterLookTarget.tint);
       waterU.uWaterDesat.value = waterLookTarget.desat;
