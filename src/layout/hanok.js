@@ -167,7 +167,12 @@ export function buildHanok({
   // ── 부엌 날개채 굴뚝 (연기 발원) ──
   addHanokChimney(walls, poly, M, rng, eaveOverhang);   // 굴뚝=부엌 마감 → walls 파트
 
-  g.userData = { skeleton: computeSkeleton(poly), footprint: poly };
+  // layout.totalH: 완성된 몸채의 로컬 bbox 상단(용마루 최상단). buildHanok 은 builder/index.js 의
+  //   computeLayout 경로를 타지 않으므로 실측으로 단다 — 안 달면 playAssembly 가 폴백 12m 로
+  //   dropBase(=clamp(totalH*0.13, 1.2, 2.2))를 만들어, 실제 ~5.98m 짜리 종가의 기단·기둥·벽이
+  //   두 배 거리에서 떨어진다(#28). g 는 이 시점 원점 기준 무부모이므로 로컬=월드.
+  const totalH = new THREE.Box3().setFromObject(g).max.y;
+  g.userData = { skeleton: computeSkeleton(poly), footprint: poly, layout: { totalH } };
   return g;
 }
 

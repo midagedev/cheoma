@@ -21,7 +21,7 @@
 //   ① contact velocity(=0) · settle squash 없음 · 접촉 스케일 정확히 1
 //   ② rippleSec ≈ 0.026s · 순서가 배열 인덱스
 //   ③ courseFlow=false
-//   ⑥ buildHanok 파트 그룹 부재
+//   ⑥ buildHanok 파트 그룹 부재 · buildHanok 이 userData.layout.totalH 를 달지 않아 폴백 12m 사용
 //   ⑧ 하강이 감속(엘리베이터) · 호버 44% · 정착 오버슈트 36cm 3연속 호핑 · 롤 정렬 없음
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
@@ -694,6 +694,19 @@ for (const mode of ['update', 'skip', 'seek1']) {
     { x: -5, z: -3 }, { x: 5, z: -3 }, { x: 5, z: 3 }, { x: 1, z: 3 }, { x: 1, z: 0 }, { x: -5, z: 0 },
   ];
   const hanok = buildHanok({ footprint, seed: 11, mats });
+  // 낙하 기준 정합(#28): playAssembly 는 `userData.layout.totalH` 로 dropBase 를 만들고, 없으면
+  //   폴백 12m 를 쓴다. 종가 실측은 ~5.98m 이므로 폴백은 기단·기둥·벽 낙하거리를 두 배로 부풀린다
+  //   (지붕만 ROOF_LIFT_OF_MASS 기하 상한으로 우연히 방어된다). buildHanok 은 computeLayout 경로가
+  //   아니라 자기 기하로 totalH 를 달아야 한다.
+  {
+    const totalH = hanok.userData?.layout?.totalH;
+    assert.ok(Number.isFinite(totalH),
+      'buildHanok does not attach userData.layout.totalH — playAssembly then falls back to 12m, '
+      + 'twice the real hero body height, and every non-roof part drops from too far');
+    assert.ok(totalH >= 4 && totalH <= 8,
+      `hero body totalH ${totalH} left the measured band (4..8m, actual ~5.98) — either the geometry `
+      + 'changed or the value is the playAssembly fallback 12 leaking through');
+  }
   const partNames = ['podium', 'columns', 'walls', 'roof'];
   for (const name of partNames) {
     const grp = hanok.children.find((c) => c.name === name);
