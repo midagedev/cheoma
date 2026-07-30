@@ -25,7 +25,16 @@ import { YARD_HARD_GAP } from '../src/village/yard-layout.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
-const SEED = 4;
+// Capital yard-life sparsity selects roughly one household per capital plan, so a
+// seed whose single owner happens to stand behind its own solid courtyard wall has
+// no visible three-season candidate at all. Measured with the settled product focus
+// camera (OFF/ON pixels, spring/autumn/winter): seed 4 p83 = 0/58/0 and seed 7 p13 =
+// 0/0/0 — the parcel's own stone wall owns the first surface ~5m in front of the
+// service-edge slots. Seed 42 is the same capital seed the pure placement contract
+// already fixes and plans four owners, three of which paint thousands of pixels in
+// every season (p42 = 2300/5264/3200), so the candidate loop keeps a real fallback
+// instead of depending on one household's wall.
+const SEED = 42;
 const TIMEOUT = Number(process.env.CHEOMA_YARD_LIFE_APP_TIMEOUT_MS) || 180_000;
 const SEASONS = Object.freeze(['spring', 'autumn', 'winter']);
 // Same acceptance floor as the measured season capture. Used only to reject
@@ -422,11 +431,12 @@ try {
   }, SEED, { timeout: TIMEOUT });
   await reportWebGLRenderer(page, 'yard-life-app');
 
-  // Prefer right-side open-yard slots as a soft ranking only. Capital seed 4's
-  // densest right-slot household (p23) projects spring/winter service-edge motifs
-  // on-screen but a solid courtyard wall owns the first surface, so the product
-  // OFF/ON delta is zero even with DoF/MSAA disabled. Select the first three-
-  // season focusable owner that actually paints under the settled product frame.
+  // Prefer right-side open-yard slots as a soft ranking only. The densest
+  // right-slot household is not necessarily the visible one: this seed's first
+  // ranked owner (p0) projects all three motifs on-screen, yet a solid courtyard
+  // wall owns the first surface, so the product OFF/ON delta is zero even with
+  // DoF/MSAA disabled. Select the first three-season focusable owner that actually
+  // paints under the settled product frame.
   const candidates = await page.evaluate((requiredSeasons) => {
     const engine = window.__engine;
     const yardLife = engine.village.debugYardLife();
