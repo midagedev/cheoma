@@ -20,6 +20,7 @@ export const CLIP_STAGES = Object.freeze({
     vseed: 7,
     vscale: 'village',
     time: 'sunset',
+    sunsetLook: 'gold',
     season: 'summer',
     weather: 'clear',
     renderStyle: 'pbr',
@@ -34,6 +35,7 @@ export const CLIP_STAGES = Object.freeze({
     vseed: 7,
     vscale: 'village',
     time: 'sunset',
+    sunsetLook: 'gold',
     season: 'summer',
     weather: 'clear',
     renderStyle: 'pbr',
@@ -50,6 +52,7 @@ export const CLIP_STAGES = Object.freeze({
     vseed: 7,
     vscale: 'village',
     time: 'sunset',
+    sunsetLook: 'gold',
     season: 'summer',
     weather: 'clear',
     renderStyle: 'pbr',
@@ -113,6 +116,7 @@ export function clipStageQuery(stageOrId) {
     season: stageSpec.season,
     weather: stageSpec.weather,
   };
+  if (stageSpec.sunsetLook) q.sunset = stageSpec.sunsetLook;
   if (stageSpec.vscale && stageSpec.vscale !== 'village') q.vscale = stageSpec.vscale;
   if (stageSpec.renderStyle === 'ink') q.mode = 'ink';
   if (stageSpec.boot !== 'hero') q.village = '1';

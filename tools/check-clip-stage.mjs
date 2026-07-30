@@ -42,6 +42,18 @@ assert.equal(clipStageFor(null), null);
 assert.equal(clipStageQuery('nope'), null);
 assert.equal(buildClipStageUrl('https://example.com/', 'nope'), null);
 
+// Sunset clips pin the flagship golden-hour look — sunsetLook otherwise rolls
+// from the seed (seed 7 rolls crimson), and clips sell the gold signature.
+for (const id of CLIP_STAGE_IDS) {
+  const stage = CLIP_STAGES[id];
+  if (stage.time === 'sunset') {
+    assert.equal(stage.sunsetLook, 'gold', `${id} sunset clip must pin gold`);
+    assert.equal(clipStageQuery(id).sunset, 'gold', `${id} query must carry sunset=gold`);
+  } else {
+    assert.ok(!stage.sunsetLook, `${id} non-sunset clip must not pin a sunset look`);
+  }
+}
+
 // Assemble is the flagship high-원 path.
 assert.equal(CLIP_STAGES.assemble.boot, 'hero');
 assert.equal(CLIP_STAGES.assemble.time, 'sunset');

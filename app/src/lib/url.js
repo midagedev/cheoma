@@ -87,7 +87,11 @@ export function readUrl() {
     hasSeed: out.seed != null || !!clipStage,
     preset: out.preset || null,
     time,
-    sunsetLook: out.sunset != null ? normalizeSunsetLook(out.sunset) : null,
+    // Clip fixtures pin the flagship golden-hour look — sunsetLook otherwise rolls
+    // from the seed (seed 7 rolls crimson), and clips sell the gold signature.
+    sunsetLook: out.sunset != null
+      ? normalizeSunsetLook(out.sunset)
+      : (clipStage?.sunsetLook ? normalizeSunsetLook(clipStage.sunsetLook) : null),
     season,
     weather,
     renderStyle,
