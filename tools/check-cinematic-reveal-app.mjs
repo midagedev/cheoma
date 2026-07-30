@@ -1089,13 +1089,19 @@ try {
   // hidden at the authored azimuth legitimately trades 16° for the compensated 0.8 dolly (19.93°)
   // and would make the telephoto assertion below test the wrong thing. `p31` satisfied both until
   // the #164 ridge gentling lowered the capital ridge anchor (124→84m): its nine focus rays then
-  // cleared terrain by +0.95m, so the cutaway had nothing to resolve. Re-measured on this exact
-  // query, capital/7 still has three armed parcels — p8 (minClearance −5.34m, 9/9 blocked rays,
-  // near 19.19m vs subject 43.03m), p9 (−5.30m) and p23 (−2.39m) — and all three keep fov 16° at
-  // scale 1. p8 carries the widest terrain margin, so it is the least brittle of the three.
+  // cleared terrain by +0.95m, so the cutaway had nothing to resolve. `p8` then stopped satisfying
+  // (a) when the R2 roof-sea round re-laid the capital parcels: its rays now clear terrain by
+  // +0.768m with 0/9 blocked rays. Re-scanned over all 54 capital/7 parcels on this exact query,
+  // three stay armed — p48 (minClearance −3.007m, 9/9 blocked rays), p47 (−2.733m, near 13.296m
+  // vs subject 46.577m) and p36 (−1.132m). p36 fails (b): the bounded search moves it off
+  // candidate 0 (scale 0.9, fov 17.75°). p48 has the deeper margin on the settle solve but is
+  // armed only there — every *refreshed* solve (the ink restyle a few frames later, and both kind
+  // rebuilds below) reports `clear` at +0.54m/+0.74m, so it cannot carry the rebuild and restyle
+  // assertions. p47 stays armed across all three refreshed solves (−2.26m edited, −1.95m
+  // restored), which is what this block actually needs.
   // If this block ever fails with `active:false`, re-scan for an armed parcel instead of relaxing
   // the assertions: the cutaway is a documented product contract (CLAUDE.md, Environment).
-  const TERRAIN_FIXTURE = 'p8';
+  const TERRAIN_FIXTURE = 'p47';
   await rebuildPage.addInitScript(() => { window.__noWarm = true; });
   await rebuildPage.goto(
     `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,
@@ -1169,11 +1175,20 @@ try {
       && Math.abs(terrainRegression.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainRegression.referenceFov === VILLAGE_LENS.parcel.referenceFov,
   `capital/7/${TERRAIN_FIXTURE} product focus retains the authored distant telephoto frame (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
+  // The reference near is read in the same evaluate, immediately before the restyle: p47's focus
+  // camera keeps easing for a few frames after the settle read, and the cutaway near is recomputed
+  // per frame as it moves, so comparing against the settle-time value would assert camera stillness
+  // between two evaluates rather than the actual contract — that the ink restyle itself does not
+  // move the shared near plane.
   const terrainInk = await rebuildPage.evaluate(() => {
     const engine = window.__engine;
+    const nearBefore = engine.camera.near;
+    const cutawayBefore = engine.village.debugContinuum().focusCutaway;
     engine.setRenderStyle('ink', { immediate: true });
     engine.debugRenderDofFrame();
     return {
+      nearBefore,
+      cutawayBefore,
       near: engine.camera.near,
       ink: engine.debugInk(),
       selected: engine.village.getState().selected,
@@ -1182,8 +1197,9 @@ try {
   await rebuildPage.screenshot({ path: join(outputDir, `terrain-${TERRAIN_FIXTURE}-ink.png`) });
   invariant(terrainInk.selected === TERRAIN_FIXTURE
       && terrainInk.ink.amount >= 0.999
-      && Math.abs(terrainInk.near - terrainCutaway.near) < 1e-3,
-  `capital/7/${TERRAIN_FIXTURE} ink normal/depth keeps the same camera cutaway (${terrainInk.near.toFixed(3)}m)`);
+      && terrainInk.cutawayBefore?.active
+      && Math.abs(terrainInk.near - terrainInk.nearBefore) < 1e-3,
+  `capital/7/${TERRAIN_FIXTURE} ink normal/depth keeps the live camera cutaway (${terrainInk.near.toFixed(3)}m vs ${terrainInk.nearBefore.toFixed(3)}m pre-restyle)`);
   await rebuildPage.evaluate(() => {
     window.__engine.setRenderStyle('pbr', { immediate: true });
     window.__engine.debugRenderDofFrame();

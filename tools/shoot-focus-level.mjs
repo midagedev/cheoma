@@ -16,7 +16,7 @@ import {
   VILLAGE_FOCUS_SKY_FRACTION,
   VILLAGE_LENS,
 } from '../src/camera/optics.js';
-import { CIRCULAR_BOKEH_SAMPLE_COUNT } from '../src/env/circular-bokeh-shader.js';
+import { BOKEH_GATHER_TAP_COUNT } from '../src/env/bokeh-coc-contract.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
@@ -38,10 +38,15 @@ const APP_ROOT = join(ROOT, 'app');
 const GIWA_YARD_DETAIL_FIXTURE = 'p15';
 // The terrain-occluded fixture must actually cross the rendered ridge. `p31` stopped doing so when
 // the #164 ridge gentling lowered the capital ridge anchor (its nine focus rays now clear terrain
-// by +0.95m); on this same query p8 stays armed with minClearance -5.34m and 9/9 blocked rays, the
-// widest margin of the three still-armed capital/7 parcels (p8, p9, p23). Re-scan for an armed
-// parcel if this ever goes missing — never relax the terrain assertions below.
-const TERRAIN_FIXTURE = 'p8';
+// by +0.95m), and `p8` stopped doing so when the R2 roof-sea round re-laid the capital parcels: its
+// rays now clear terrain by +0.768m with 0/9 blocked. Re-scanned over all 54 capital/7 parcels on
+// this exact query, three stay armed — p48 (minClearance −3.007m), p47 (−2.733m, near 13.296m vs
+// subject 46.577m) and p36 (−1.132m). p36 is disqualified because the bounded south-opening search
+// moves it off candidate 0 (scale 0.9, fov 17.75°), which would make the telephoto assertion test
+// the wrong thing. p48 is armed only on the settle solve — every refreshed solve reports `clear` at
+// +0.5m — so `p47`, which stays armed across refreshed solves, is the stable fixture.
+// Re-scan for an armed parcel if this ever goes missing — never relax the terrain assertions below.
+const TERRAIN_FIXTURE = 'p47';
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-cache-'));
 const outputDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-shots-'));
 const timeout = Number(process.env.CHEOMA_FOCUS_LEVEL_TIMEOUT_MS) || 90_000;
@@ -495,8 +500,8 @@ try {
       && Math.abs(terrainEvidence.dof.aperture - VILLAGE_FOCUS_DOF_APERTURE) < 1e-12
       && terrainEvidence.dof.postQuality === 1
       && terrainEvidence.dof.postQualityMode === 'stable'
-      && terrainEvidence.dof.bokehSamples === CIRCULAR_BOKEH_SAMPLE_COUNT
-      && terrainEvidence.dof.activeBokehTaps === CIRCULAR_BOKEH_SAMPLE_COUNT,
+      && terrainEvidence.dof.bokehSamples === BOKEH_GATHER_TAP_COUNT
+      && terrainEvidence.dof.activeBokehTaps === BOKEH_GATHER_TAP_COUNT,
     `${TERRAIN_FIXTURE} restores the settled adaptive physical DoF (${terrainEvidence.dof.aperture}, ${terrainEvidence.dof.bokehSamples} active taps)`);
   }
   check(residentialEvidence.some((entry) => (
