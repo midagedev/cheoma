@@ -762,8 +762,15 @@ try {
   invariant(arrival.every((state) => state.dof.error == null || state.dof.error < 0.04), 'arrival keeps DoF on the moving architectural target');
   invariant(dist(arrivalEnd.position, arrivalEnd.end.position) < 1e-6 && dist(arrivalEnd.target, arrivalEnd.end.target) < 1e-6,
     'arrival finishes on the exact target and camera endpoint');
-  invariant(Math.max(...arrival.map((state) => state.programs)) - Math.min(...arrival.map((state) => state.programs)) <= 8,
-    'camera-only arrival does not grow shader programs while seeking');
+  // b6388c9 (hop prewarm) deliberately moves the focus overlay's shader compiles
+  // into the camera flight (compileAsync on the hidden draft before install), so
+  // the arrival window now legitimately grows by the first-visit FULL overlay
+  // family (~60 programs measured). The bound still catches #125-class transition
+  // storms (hundreds of programs); the warm-before-install ordering itself is
+  // gated by check:hop-warm. FAIL-first history: 8 failed from b6388c9 onward
+  // (worktree A/B: PASS at 855b5f5, FAIL at 20c39b9/d6de9b1/HEAD).
+  invariant(Math.max(...arrival.map((state) => state.programs)) - Math.min(...arrival.map((state) => state.programs)) <= 96,
+    'arrival program growth stays within one prewarmed overlay family (no compile storm)');
   const heroFrame = await captureSettledFocusFrame(arrivalPage, 'arrival');
   console.log(`HERO FRAME: ${JSON.stringify(heroFrame)}`);
   assertReadableHouseFrame(heroFrame, 'default hero arrival', { minHeight: 0.24, pose: 'hero' });
