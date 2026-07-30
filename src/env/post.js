@@ -890,10 +890,10 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
 
   function setEnabled(v) {
     enabled = !!v;
-    // 태양 글로우는 scene 자식 → ink 컴포저 렌더에도 잡히므로 pbr·post 일 때만 노출.
+    // 태양 글로우는 scene 자식 → post 일 때만 노출.
     sunGlow.visible = enabled && glowIntensity > 0.001;
     if (!enabled) flarePass.uniforms.flareAmt.value = 0;
-    // fresnel 림은 재질 셰이딩이라(ink 컴포저 렌더에도 잡힘) post OFF 시 강도·마스터를 즉시 0 으로.
+    // fresnel 림은 재질 셰이딩이라 post OFF 시 강도·마스터를 즉시 0 으로.
     if (useFresnel) { if (!enabled) fresnelRim.setStrength(0); updateRimScale(); }
   }
 

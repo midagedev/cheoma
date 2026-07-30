@@ -49,9 +49,9 @@
     exporting = false, busy = false,
     // Environment (was floating dial — now dense CAD rows in this column)
     time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear',
-    renderStyle = 'pbr', flowing = false,
+    flowing = false,
     onTime = null, onSunsetLook = null, onSeason = null, onWeather = null,
-    onRenderStyle = null, onFlowToggle = null,
+    onFlowToggle = null,
   } = $props();
 
   const TIMES = ['dawn', 'day', 'sunset', 'night'];
@@ -553,25 +553,6 @@
           {#each WEATHER_IDS as id}
             <button type="button" class:on={weather === id} aria-pressed={weather === id} title={t('weather_' + id)} onclick={() => onWeather?.(id)}>{t('weather_' + id)}</button>
           {/each}
-        </div>
-      </div>
-      <div class="row envrow">
-        <span class="rl cad-label">{t('render_style')}</span>
-        <div class="cad-seg render-style" role="group" aria-label={t('render_style')}>
-          <button
-            type="button"
-            class:on={renderStyle === 'pbr'}
-            aria-pressed={renderStyle === 'pbr'}
-            title={t('render_pbr_tip')}
-            onclick={() => renderStyle !== 'pbr' && onRenderStyle?.('pbr')}
-          >{t('render_pbr')}</button>
-          <button
-            type="button"
-            class:on={renderStyle === 'ink'}
-            aria-pressed={renderStyle === 'ink'}
-            title={t('render_ink_tip')}
-            onclick={() => renderStyle !== 'ink' && onRenderStyle?.('ink')}
-          >{t('render_ink')}</button>
         </div>
       </div>
     </div>

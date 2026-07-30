@@ -54,7 +54,7 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
     }
   };
   applyBloomResolution(cssW, cssH);
-  // Product focus/ink owns whether flare *should* run; motionBudget may sleep the
+  // The product focus policy owns whether flare *should* run; motionBudget may sleep the
   // pass without forgetting that intent (restore on settle).
   let productFlareWanted = !!post.flarePass?.enabled;
   const applyMsaaBudget = () => {
@@ -228,24 +228,6 @@ export function createPostRuntime({ renderer, scene, camera, width, height, comp
         composerWriteBuffer: post.composer.writeBuffer,
         passCount: post.composer.passes.length,
       };
-    },
-    addPassBeforeOutput(pass, name = 'Pass') {
-      if (disposed || !pass || post.composer.passes.includes(pass)) return pass;
-      post.composer.insertPass(pass, post.composer.passes.indexOf(post.outputPass));
-      debugNames.set(pass, name);
-      return pass;
-    },
-    addPassAfterRender(pass, name = 'Pass') {
-      if (disposed || !pass || post.composer.passes.includes(pass)) return pass;
-      const renderIndex = post.composer.passes.indexOf(post.renderPass);
-      post.composer.insertPass(pass, Math.max(0, renderIndex) + 1);
-      debugNames.set(pass, name);
-      return pass;
-    },
-    removePass(pass) {
-      if (!pass) return;
-      post.composer.removePass(pass);
-      debugNames.delete(pass);
     },
     resize(w, h) {
       if (disposed) return;

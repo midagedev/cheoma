@@ -388,22 +388,16 @@ const V_WATER_TINT_SEASON = {
   winter: [1.14, 1.18, 1.24],   // 창백한 얼음 쪽으로 살짝 밝게
 };
 
-// 시간·계절·수묵을 하나의 목표로 합성한다. 수묵(ink)은 채도를 끝까지 뺀다: ink pass 는
-//   chromaKeep 0.07 로 잔여 채도를 의도적으로 남기는데, 물만 채도가 극단적이라 그 7%가
-//   모노크롬 화면에 파란 획으로 남았다(감사 A7 두 번째 절).
-export function villageWaterLookTarget({ time = 'day', season = 'summer', ink = 0 } = {}) {
+// 시간·계절을 하나의 목표로 합성한다.
+export function villageWaterLookTarget({ time = 'day', season = 'summer' } = {}) {
   const t = V_WATER_TINT[time] || V_WATER_TINT.day;
   const s = V_WATER_TINT_SEASON[season] || V_WATER_TINT_SEASON.summer;
   const desat = Math.max(
     (time in V_WATER_DESAT_TIME) ? V_WATER_DESAT_TIME[time] : 0,
     (season in V_WATER_DESAT_SEASON) ? V_WATER_DESAT_SEASON[season] : 0,
   );
-  const k = Math.min(1, Math.max(0, ink));
   return {
     tint: [t[0] * s[0], t[1] * s[1], t[2] * s[2]],
-    // 알베도 탈채도: 수묵은 시간·계절 위에 덧씌운다(전환 중 amount 0..1 로 연속).
-    desat: desat + (1 - desat) * k,
-    // 가산 반사층 탈채도: 수묵 전용. PBR 에서 0 이라 시간대 반사색이 온전히 남는다.
-    ink: k,
+    desat,
   };
 }

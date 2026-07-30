@@ -25,7 +25,7 @@ try {
   const canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 600;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
   renderer.setPixelRatio(1);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 앱과 동일(기본 NoToneMapping 은 motes.js 가 ink 로 오인해 모트 은닉)
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 앱과 동일
   const scene = new THREE.Scene();
   const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(30, 60, 20); sun.castShadow = false; scene.add(sun);
   scene.add(new THREE.HemisphereLight(0xbcd4ec, 0x8a7a63, 0.6));

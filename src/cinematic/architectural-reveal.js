@@ -107,7 +107,7 @@ function profileFor(kind, motion, subjectSize) {
       // still carries the reveal: the subject grows ~3× on screen across the arc, which is the claim
       // the gates assert.
       // The establishing radius must also stand outside the entry veil's dense near band, or the
-      // opening frame of the clip loses its 수묵 haze entirely. That band is site-radius derived
+      // opening frame of the clip loses its entry haze entirely. That band is site-radius derived
       // (R*0.5 = 90 m on village/7) while this scale is subject-derived, so the two only stay
       // compatible if the establishing frame lands well past it: at 0.68 of the 146.6 m hero
       // standoff the opening depth is 99 m and the measured fog factor collapses to 0.032, below

@@ -1,9 +1,8 @@
 // Deterministic #128 sijeon renderer proof.
 //
 // Renders the pure placement/facade plan through the dedicated low-draw Three
-// renderer at street, oblique, and row-overview scales. PBR day/sunset and the real
-// ink composer share the same geometry. Captures always default to an OS scratch
-// directory; set CHEOMA_SIJEON_OUT to retain them elsewhere.
+// renderer at street, oblique, and row-overview scales. Captures always default to
+// an OS scratch directory; set CHEOMA_SIJEON_OUT to retain them elsewhere.
 //
 // Usage:
 //   node tools/run-browser-locked.mjs -- node tools/shoot-sijeon.mjs [filter]
@@ -54,7 +53,6 @@ const HTML = `<!doctype html>
 <div id="app"></div>
 <script type="module">
 import * as THREE from 'three';
-import { setupInk } from '/src/render/ink.js';
 import { createFresnelRim } from '/src/env/rim.js';
 import { createVillageSnowController } from '/src/runtime/village/snow.js';
 import { planSijeon } from '/src/api/sijeon-plan.js';
@@ -319,16 +317,6 @@ rim.setColor(new THREE.Color(0xffbd76));
 rim.setStrength(time === 'sunset' ? 1.55 : 0.22);
 rim.setNearFar(0, 190);
 
-const ink = mode === 'ink'
-  ? setupInk(renderer, scene, camera, {
-      uniforms: {
-        edgeStrength: 1.05,
-        inkDensity: 0.94,
-        washStrength: 0.72,
-      },
-    })
-  : null;
-
 const sijeonMeshes = [];
 const sijeonMaterials = new Set();
 const sijeonGeometries = new Set();
@@ -367,8 +355,7 @@ renderer.setAnimationLoop(() => {
   const sunViewDirection = sun.position.clone().normalize()
     .transformDirection(camera.matrixWorldInverse);
   rim.setSunViewDir(sunViewDirection);
-  if (ink) ink.composer.render();
-  else renderer.render(scene, camera);
+  renderer.render(scene, camera);
   frames++;
   if (frames === 12) {
     window.__SIJEON_AUDIT = {
@@ -449,8 +436,6 @@ const shots = [
   ['street-sunset', 'view=street&time=sunset&mode=pbr'],
   ['oblique-day', 'view=oblique&time=day&mode=pbr'],
   ['row-overview-day', 'view=overview&time=day&mode=pbr'],
-  ['street-ink', 'view=street&time=day&mode=ink'],
-  ['oblique-ink', 'view=oblique&time=day&mode=ink'],
 ].filter(([name]) => !filter || name.includes(filter));
 
 let browser;

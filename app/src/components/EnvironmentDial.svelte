@@ -1,5 +1,5 @@
 <script>
-  // Viewport "View" card — environment rings + render style + flow chips.
+  // Viewport "View" card — environment rings + flow chips.
   // Anchored to the top-right of the *scene* (left of the inspector dock via
   // --inspector-w), not the window corner, so the CAD column never covers it.
   import { onMount } from 'svelte';
@@ -16,7 +16,7 @@
   //   **편집 중 보기 축은 44px 칩 하나로 접히고**, 칩은 현재 환경을 계속 표시한다. 펼침은
   //   편집 시트를 건드리지 않는 오버레이라 detent 는 그대로다.
   let { time = 'day', sunsetLook = 'gold', season = 'summer', weather = 'clear',
-        renderStyle = 'pbr', onRenderStyle = null, compact = false,
+        compact = false,
         flowing = false, onTime, onSunsetLook, onSeason, onWeather, onFlowToggle } = $props();
 
   // 접힘은 compact 구간에서만 존재한다. 부감으로 돌아오거나 데스크톱/가로 폰 셸이면 카드가
@@ -26,20 +26,18 @@
   $effect(() => { if (!compact) expanded = false; });
 
   // 접힌 칩의 상태 표시(§6.13 조건 1) — 접기가 정보 상실이 되면 안 된다. 앱이 이미 쓰는
-  // 한자 글리프 어휘(景/墨)를 그대로 이어 시간·계절을 한 자씩, 날씨와 수묵은 기본값을 벗어날
-  // 때만 옅은 부기호로 붙인다. 전체 문구는 aria-label·title 이 읽어준다.
+  // 한자 글리프 어휘를 그대로 이어 시간·계절을 한 자씩, 날씨는 기본값을 벗어날 때만 옅은
+  // 부기호로 붙인다. 전체 문구는 aria-label·title 이 읽어준다.
   const TIME_GLYPH = { dawn: '曉', day: '晝', sunset: '暮', night: '夜' };
   const SEASON_GLYPH = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
   const WEATHER_GLYPH = { clear: '', rain: '雨', snow: '雪' };
   const marks = $derived([
     WEATHER_GLYPH[weather] || '',
-    renderStyle === 'ink' ? '墨' : '',
   ].filter(Boolean));
   const stateText = $derived([
     t('time_' + time),
     t('season_' + season),
     t('weather_' + weather),
-    ...(renderStyle === 'ink' ? [t('render_ink')] : []),
   ].join(' · '));
 
   function keydown(e) {
@@ -221,29 +219,6 @@
     <circle class="hub" cx={C} cy={C} r="7" />
   </svg>
 
-  <!-- 렌더 스타일(景/墨) — gate keeps `.dial .render-style button` selectors. -->
-  <div class="render-style" role="group" aria-label={t('render_style')}>
-    <button
-      class:on={renderStyle === 'pbr'}
-      type="button"
-      aria-pressed={renderStyle === 'pbr'}
-      title={t('render_pbr_tip')}
-      onclick={() => renderStyle !== 'pbr' && onRenderStyle?.('pbr')}
-    >
-      <span class="glyph" aria-hidden="true">景</span>
-      <span>{t('render_pbr')}</span>
-    </button>
-    <button
-      class:on={renderStyle === 'ink'}
-      type="button"
-      aria-pressed={renderStyle === 'ink'}
-      title={t('render_ink_tip')}
-      onclick={() => renderStyle !== 'ink' && onRenderStyle?.('ink')}
-    >
-      <span class="glyph" aria-hidden="true">墨</span>
-      <span>{t('render_ink')}</span>
-    </button>
-  </div>
 
   <!-- Spectrum action row — sunset tone orb stays custom (product color language). -->
   <div class="dial-actions">
@@ -309,7 +284,7 @@
 
   /* ── 접힌 보기 축(§6.13 A) ──────────────────────────────────────────────
      카드와 같은 먹빛 글라스·같은 코너 슬롯을 쓰는 44px 칩. 낙관 옆 방서처럼 글리프만
-     세로 한 줄로 읽히고, 기본을 벗어난 축(비·눈·수묵)만 옅은 부기호로 덧붙는다. */
+     세로 한 줄로 읽히고, 기본을 벗어난 축(비·눈)만 옅은 부기호로 덧붙는다. */
   .dial.viewchip {
     -webkit-appearance: none; appearance: none;
     flex-direction: row; align-items: center; justify-content: center; gap: 5px;
@@ -398,32 +373,6 @@
   }
   .hub { fill: rgba(245, 247, 250, 0.9); stroke: rgba(255, 255, 255, 0.2); stroke-width: 1; }
 
-  /* Render-style segment — selectors preserved for shell gate (.render-style button). */
-  .render-style {
-    display: flex; gap: 2px; align-self: stretch;
-    padding: 2px; border-radius: 6px;
-    border: 1px solid var(--glass-border);
-    background: rgba(0, 0, 0, 0.28);
-  }
-  .render-style button {
-    -webkit-appearance: none; appearance: none; border: 0;
-    flex: 1; min-height: 32px; padding: 5px 6px; border-radius: 4px;
-    display: flex; align-items: center; justify-content: center; gap: 4px;
-    background: transparent; color: var(--glass-muted);
-    font-family: var(--ui); font-size: 11px; font-weight: 650; letter-spacing: 0.01em;
-    transition: background 0.14s ease, color 0.14s ease;
-  }
-  .render-style button:hover { background: rgba(255, 255, 255, 0.08); }
-  .render-style button.on {
-    background: var(--accent-soft); color: #fff;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .render-style button:last-child.on {
-    background: rgba(28, 34, 43, 0.95); color: var(--glass-text);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
-  }
-  .render-style button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .render-style .glyph { font-size: 13px; }
 
   .dial-actions {
     display: flex;
@@ -476,8 +425,6 @@
       min-height: 44px;
       min-width: 44px;
     }
-    .render-style button { min-height: 44px; padding: 7px 8px; font-size: 12px; }
-    .render-style .glyph { font-size: 14px; }
   }
 
   /* Portrait phone: top-right of viewport (sheet has no --inspector-w). */

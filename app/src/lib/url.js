@@ -1,9 +1,8 @@
-// URL 쿼리 ↔ 상태 양방향 동기화. seed 는 항상, 나머지(preset/time/sunset/season/weather/mode/exp)는
+// URL 쿼리 ↔ 상태 양방향 동기화. seed 는 항상, 나머지(preset/time/sunset/season/weather/exp)는
 // 사용자가 명시적으로 바꿨을 때만 URL 에 실어 공유 시 정확히 재현되게 한다.
 import { newSeed } from './seed.js';
 
 import { normalizeSunsetLook } from '../../../src/api/environment.js';
-import { normalizeRenderStyle } from '../../../src/api/render-style.js';
 import {
   RESIDENTIAL_EDIT_QUERY_KEY,
   decodeResidentialEditState,
@@ -34,7 +33,6 @@ function urlStateFromSnapshot(snapshot) {
     sunsetLook: snapshot.sunsetLook,
     season: snapshot.season,
     weather: snapshot.weather,
-    renderStyle: snapshot.renderStyle,
     exp: snapshot.expansion > 1 ? snapshot.expansion : null,
     hero: false,
     shot: false,
@@ -74,9 +72,6 @@ export function readUrl() {
   const time = out.time || clipStage?.time || null;
   const season = out.season || clipStage?.season || null;
   const weather = out.weather || clipStage?.weather || null;
-  const renderStyle = normalizeRenderStyle(
-    q.get('mode') || (clipStage?.renderStyle === 'ink' ? 'ink' : null),
-  );
   const villageFromClip = clipStage
     && (clipStage.boot === 'village-aerial' || clipStage.boot === 'village-focus');
   const vscale = VILLAGE_SCALE_IDS.includes(q.get('vscale'))
@@ -94,7 +89,6 @@ export function readUrl() {
       : (clipStage?.sunsetLook ? normalizeSunsetLook(clipStage.sunsetLook) : null),
     season,
     weather,
-    renderStyle,
     exp: out.exp != null ? Math.max(1, parseInt(out.exp, 10) || 1) : null,
     // Clip stages that land in a village scene skip the hero title by default.
     hero: villageFromClip ? false : q.get('hero') !== '0',
@@ -156,7 +150,6 @@ export function writeUrl(state, {
   put('sunset', state.sunsetLook, overrides.sunsetLook);
   put('season', state.season, overrides.season);
   put('weather', state.weather, overrides.weather);
-  put('mode', state.renderStyle, state.renderStyle === 'ink');
   put('exp', state.expansion, state.expansion > 1);
   put('flow', 1, !!flow); // 오토로테이션 활성 상태 공유(#64)
   // 마을 모드 파라미터

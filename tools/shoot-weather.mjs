@@ -35,8 +35,6 @@ const shots = [
   { name: 'korea-weather-snow-night', q: 'time=night&weather=snow' },
   { name: 'korea-weather-rain-sunset', q: 'time=sunset&weather=rain' },
   { name: 'korea-weather-rain-day',   q: 'time=day&weather=rain' },
-  // 보너스: 수묵 + 눈
-  { name: 'korea-inksnow',            q: 'time=day&weather=snow&mode=ink' },
 ];
 
 let browser;

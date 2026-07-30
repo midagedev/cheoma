@@ -33,7 +33,7 @@ export const VILLAGE_MATERIAL_COLORS = {
 
 // #150 item I — 기와 look contract (telephoto black-line + reverse-light gold stipple).
 // sRGB luminance band + matte roughness + restrained bump. Palette / roof-skeleton / pure
-// gate all read these numbers. Do not darken albedo further for an "ink black roof"
+// gate all read these numbers. Do not darken albedo further for a near-black roof
 // (docs/surface-materials.md §판정 1). Reverse-light gold threads on tile grooves are
 // mostly PBR specular on corrugation (not Fresnel rim alone) — keep roughness high and bump low.
 export const TILE_LOOK = Object.freeze({

@@ -372,22 +372,13 @@ try {
         && resourcesBefore.passCount === resourcesAfter.passCount,
     };
 
-    engine.setRenderStyle('ink', { immediate: true });
-    engine.debugRenderDofFrame();
-    const ink = engine.debugInk();
-    const inkRestored = restored();
-
-    engine.setRenderStyle('pbr', { immediate: true });
     engine.debugTuneDof({ amount: 0 });
     engine.debugRenderDofFrame();
     return {
       visibleLodMeshes: renderables.length,
       dofDithered: dof.depthDithered,
       dofLodScreenDoor: dof.lodScreenDoorDepth,
-      inkDithered: ink.normalDithered,
-      inkLodScreenDoor: ink.lodScreenDoorNormal,
       dofRestored,
-      inkRestored,
       adaptiveQuality,
     };
   }, prepared.parcelId);
@@ -492,7 +483,6 @@ try {
     || Math.abs(edgeMistView.restored.opacity) > 1e-6
     || Math.abs(edgeMistView.restored.viewWeight) > 1e-6
     || passParity.dofLodScreenDoor !== passParity.visibleLodMeshes
-    || passParity.inkLodScreenDoor !== passParity.visibleLodMeshes
     // Tap cost is constant across moving/stable now; bokehQuality only weights the
     // gather's fill ring (docs/dof-cinematic-research.md 5.3).
     || adaptive.movingDof.postQuality !== 0
@@ -501,7 +491,7 @@ try {
     || adaptive.stableDof.activeBokehTaps !== BOKEH_GATHER_TAP_COUNT
     || adaptive.movingDof.lodScreenDoorDepth !== adaptive.stableDof.lodScreenDoorDepth
     || !adaptive.resourcesStable || !adaptiveLodParity
-    || !passParity.dofRestored || !passParity.inkRestored
+    || !passParity.dofRestored
     || focusCapture.selected !== prepared.parcelId || focusCapture.transitioning
     || !focusCapture.overlay || !focusCapture.baseAuxiliaryHidden
     || focusCapture.baseAuxiliaryVisible || focusCapture.auxiliaryMeshes !== 3

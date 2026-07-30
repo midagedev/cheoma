@@ -1,6 +1,6 @@
 // 헤드리스 스크린샷: 지형·다랑이 논·개울 검증 → shots/terrain-*.png
 // 사용법: node tools/shoot-terrain.mjs
-//   env=1 계절 3종 × three-quarter/front + 가을 ink 1 + 계곡(개울·논) 클로즈(orbit t)
+//   env=1 계절 3종 × three-quarter/front + 계곡(개울·논) 클로즈(orbit t)
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
@@ -28,16 +28,14 @@ import * as THREE from 'three';
 import { PRESETS, computeLayout } from '/src/params.js';
 import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment } from '/src/env/index.js';
-import { setupInk } from '/src/render/ink.js';
 const q = new URLSearchParams(location.search);
 const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
 const timeOfDay = q.get('time')||'day';
-const ink = q.get('mode')==='ink';
 const num=(k,d)=>{const v=parseFloat(q.get(k));return Number.isFinite(v)?v:d;};
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.toneMapping=ink?THREE.NoToneMapping:THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
 document.getElementById('app').appendChild(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0xcfd8e0);scene.fog=new THREE.Fog(0xcfd8e0,60,300);
 const sun=new THREE.DirectionalLight(0xfff0dd,2.6);sun.position.set(30,42,26);sun.castShadow=true;
@@ -52,13 +50,9 @@ const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,0.1,600);
 camera.position.set(num('cx',-16),num('cy',11),num('cz',26));
 const target=new THREE.Vector3(num('tx',-72),num('ty',-0.5),num('tz',-3));
 camera.lookAt(target);
-let inkPipe=null;
-if(ink){inkPipe=setupInk(renderer,scene,camera);inkPipe.setSize(innerWidth,innerHeight);
-  if(scene.fog){inkPipe.inkPass.uniforms.fogNear.value=scene.fog.near;inkPipe.inkPass.uniforms.fogFar.value=scene.fog.far;
-  scene.fog.color.copy(new THREE.Color(0xf3efe6));}scene.background=new THREE.Color(0xf3efe6);}
 let frames=0;const clock=new THREE.Clock();
 renderer.setAnimationLoop(()=>{const dt=Math.min(clock.getDelta(),0.05);env.update(dt);
-  if(ink)inkPipe.composer.render();else renderer.render(scene,camera);
+  renderer.render(scene,camera);
   frames++;if(frames===40)window.__SHOT_READY=true;});
 </script></body></html>`;
 
@@ -93,7 +87,6 @@ const valley = [];
 for (const season of ['spring', 'summer', 'autumn', 'winter']) {
   valley.push([`valley-${season}`, `/__valley?season=${season}&time=day`]);
 }
-valley.push(['valley-ink-autumn', `/__valley?season=autumn&time=day&mode=ink`]);
 // 논 계단 클로즈업(봄 물댄 논) + 개울 클로즈업
 valley.push(['paddy-close', `/__valley?season=spring&time=day&cx=-50&cy=6&cz=13&tx=-82&ty=-1&tz=-8`]);
 valley.push(['stream-close', `/__valley?season=summer&time=day&cx=-40&cy=5&cz=6&tx=-88&ty=-2&tz=-14`]);

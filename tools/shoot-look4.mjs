@@ -43,10 +43,9 @@ const shots = [
   ['sunset-closeup', 'env=1&preset=korea&angle=closeup&time=sunset'],
   // ③ dawn — 같은 처방(쿨 앰비언트+채도 그레이드)이 새벽에도 적용되는지
   ['dawn-tq', 'env=1&preset=korea&angle=three-quarter&time=dawn'],
-  // ④ day/night/ink 회귀 — sat=1.0, 무드 보존
+  // ④ day/night 회귀 — sat=1.0, 무드 보존
   ['day-tq', 'env=1&preset=korea&angle=three-quarter&time=day'],
   ['night-tq', 'env=1&preset=korea&angle=three-quarter&time=night'],
-  ['ink-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&mode=ink'],
   ['post0-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&post=0'],
   // ⑤ 4 프리셋 각 1컷(pageerror 0, 석양 역광 3/4)
   ['preset-korea', 'env=1&preset=korea&angle=three-quarter&time=sunset'],

@@ -33,16 +33,14 @@ import * as THREE from 'three';
 import { PRESETS, computeLayout } from '/src/params.js';
 import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment } from '/src/env/index.js';
-import { setupInk } from '/src/render/ink.js';
 const q = new URLSearchParams(location.search);
 const season = ['spring','summer','autumn','winter'].includes(q.get('season'))?q.get('season'):'summer';
 const timeOfDay = q.get('time')||'day';
-const ink = q.get('mode')==='ink';
 const num=(k,d)=>{const v=parseFloat(q.get(k));return Number.isFinite(v)?v:d;};
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.toneMapping=ink?THREE.NoToneMapping:THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
 document.getElementById('app').appendChild(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0xcfd8e0);scene.fog=new THREE.Fog(0xcfd8e0,60,300);
 const sun=new THREE.DirectionalLight(0xfff0dd,2.6);sun.position.set(30,42,26);sun.castShadow=true;
@@ -72,14 +70,10 @@ if(bldg){
 }
 camera.lookAt(target);
 window.__aim=(cx,cy,cz,tx,ty,tz)=>{camera.position.set(cx,cy,cz);target.set(tx,ty,tz);camera.lookAt(target);};
-let inkPipe=null;
-if(ink){inkPipe=setupInk(renderer,scene,camera);inkPipe.setSize(innerWidth,innerHeight);
-  if(scene.fog){inkPipe.inkPass.uniforms.fogNear.value=scene.fog.near;inkPipe.inkPass.uniforms.fogFar.value=scene.fog.far;
-  scene.fog.color.copy(new THREE.Color(0xf3efe6));}scene.background=new THREE.Color(0xf3efe6);}
 window.__advance=(secs)=>{const n=Math.max(1,Math.round(secs/0.05));for(let i=0;i<n;i++)env.update(0.05);};
 let frames=0;
 renderer.setAnimationLoop(()=>{
-  if(ink)inkPipe.composer.render();else renderer.render(scene,camera);
+  renderer.render(scene,camera);
   frames++;if(frames===3){window.__advance(0.6);window.__SHOT_READY=true;}
 });
 </script></body></html>`;
@@ -202,14 +196,13 @@ if (want('critters')) {
   }
 }
 
-// ---------------- 회귀: 봄/여름 낮·밤·ink (harness — weather.js 의존 없음) ----------------
+// ---------------- 회귀: 봄/여름 낮·밤 (harness — weather.js 의존 없음) ----------------
 if (want('regress')) {
   const shots = [
     ['reg-spring-day', 'frame=tq&season=spring&time=day'],
     ['reg-summer-day', 'frame=tq&season=summer&time=day'],
     ['reg-night', 'frame=tq&season=summer&time=night'],
     ['reg-autumn-night', 'frame=tq&season=autumn&time=night'],
-    ['reg-ink', 'frame=tq&season=autumn&time=day&mode=ink'],
   ];
   for (const [name, qs] of shots) {
     await open(`${base}/__amb?${qs}`);

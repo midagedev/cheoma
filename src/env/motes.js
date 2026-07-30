@@ -5,7 +5,7 @@ import { createMoteWorldRepresentation } from './detail-particle-geometry.js';
 export { setupLanternSway } from './lantern-sway.js';
 
 // 앰비언트 생명감 — 무엇도 완전히 정지해 있지 않되, 모든 움직임은 미세하게.
-//   setupMotes({ sun, isInk })                → 공기 중 먼지·반딧불 물리 geometry(단일 드로우)
+//   setupMotes({ sun })                       → 공기 중 먼지·반딧불 물리 geometry(단일 드로우)
 //   setupLanternSway({ scene })               → 처마 등롱 진자 미세 요동(traverse 참조)
 //
 // 구현 방침:
@@ -14,7 +14,6 @@ export { setupLanternSway } from './lantern-sway.js';
 //  - 바람 연동: wind.js getWind(t) 를 read-only import — 거스트 때 살짝 더 쓸리고 잦아들면 감쇠.
 //  - 카메라는 setupEnvironment 로 넘어오지 않지만, three.js ShaderMaterial 은 world 카메라
 //    위치를 built-in uniform `cameraPosition` 으로 자동 주입한다 → 역광 게이트에 이것만 쓴다.
-//  - ink 게이트: 제품 상태 추론 대신 명시적 isInk callback을 받아 외부 composer와 결합하지 않는다.
 
 // 정수 → [0,1) 결정론 해시(wind.js 와 동일 계열, sin 기반 순수 함수).
 function hash1(n) { const x = Math.sin(n * 127.13 + 11.7) * 43758.5453; return x - Math.floor(x); }
@@ -41,7 +40,7 @@ const MOTE_CENTER_Y = 6.0;   // 볼륨 중심 높이(지면~처마 위 공기층
 //   기본값 = 기존 상수(집 단독 모드 호출자 무회귀). fade(setFade)=활성/해제 크로스페이드 배율.
 //   ySpan: 수직 눌림 계수(작을수록 납작한 공기층). 근접 링은 낮춰 "대기 헤이즈"가 아닌 "마당 먼지"로.
 export function setupMotes({
-  sun, radius, centerY, count, ySpan, fireflies = false, isInk = () => false,
+  sun, radius, centerY, count, ySpan, fireflies = false,
 } = {}) {
   let time = 'sunset';
   let season = 'summer';
@@ -96,7 +95,6 @@ export function setupMotes({
   group.visible = false;
 
   const _sunDir = new THREE.Vector3();
-  const inkActive = () => !!isInk();
 
   // 시간대 크로스페이드 목표(강도·색). setTime 이 목표만, update 가 지수 접근.
   // curInt 는 시간대 애니 상태(순수), 셰이더 uIntensity = curInt*fade(외부 크로스페이드 분리).
@@ -117,9 +115,6 @@ export function setupMotes({
 
   function update(dt) {
     if (disposed || !enabled || fade <= 0.002) return;
-    // ink 모드에선 비표시(반투명 글린트가 먹 뷰티 패스에 이물감).
-    object.visible = !inkActive();
-    if (!object.visible) return;
     t += dt;
     const u = uniforms;
     u.uTime.value = t;

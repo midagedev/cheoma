@@ -7,7 +7,7 @@ import { acquireAdvisoryLockSync } from './lib/advisory-lock.mjs';
 import { runCommandSuite } from './lib/verification-runner.mjs';
 
 for (const id of [
-  'app', 'ink-app', 'petals', 'winter-app', 'worker', 'audio', 'temple-browser',
+  'app', 'petals', 'winter-app', 'worker', 'audio', 'temple-browser',
   'dof-app', 'rim', 'lod-focus', 'lod-wave', 'lod-app', 'parcel-rebuild-browser',
   'surface-browser', 'cinematic-app',
 ]) {

@@ -118,7 +118,7 @@
 
   let ui = $state({
     seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
-    expansion: 1, selected: false, canMerge: false, params: {}, maxExpansion: 3, renderStyle: 'pbr',
+    expansion: 1, selected: false, canMerge: false, params: {}, maxExpansion: 3,
   });
   let overrides = $state({ preset: false, time: false, sunsetLook: false, season: false, weather: false });
   let heroVisible = $state(false);
@@ -196,7 +196,7 @@
   //   물린다. 인앱 녹화기는 없고(그 결정 유지) 이건 OS 녹화용 무대 세팅일 뿐이다. 첫 의도적 입력에서
   //   해제되므로 테이크가 끝난 뒤 앱은 그대로 쓸 수 있다.
   let clipRecording = $state(false);
-  // #216 focus 부재 용어 오버레이 — 세션 토글, 기본 OFF. URL/share/ink 기본 프레임을 오염하지 않는다.
+  // #216 focus 부재 용어 오버레이 — 세션 토글, 기본 OFF. URL/share 기본 프레임을 오염하지 않는다.
   let glossaryOn = $state(false);
   let glossaryEligible = $state(false);
   let glossaryLabels = $state([]);
@@ -348,7 +348,6 @@
     const s = engine.getState();
     ui.preset = s.preset; ui.time = s.time; ui.sunsetLook = s.sunsetLook; ui.season = s.season;
     ui.weather = s.weather; ui.expansion = s.expansion; ui.selected = s.selected;
-    ui.renderStyle = s.renderStyle;
     ui.canMerge = s.canMerge;
     ui.params = engine.getParams();
     ui.maxExpansion = engine.maxExpansion();
@@ -623,7 +622,6 @@
         && !engine.setParams(standaloneParamOverrides, { immediate: true, animate: false })) {
       standaloneParamOverrides = {};
     }
-    engine.setRenderStyle(url.renderStyle, { immediate: true });
     pullState();
     if (url.exp && url.exp > 1) engine.setExpansion(url.exp);
 
@@ -903,7 +901,7 @@
         }
         if (id && !engine.village.focused()) engine.village.focus(id);
       }
-      // aerial / night / ink: stay in explore framing; time/mode already applied.
+      // aerial / night: stay in explore framing; time already applied.
     })();
   }
 
@@ -911,7 +909,7 @@
 
   // ── #216 focus 부재 용어 오버레이 ─────────────────────────────────────────
   // 기본 OFF. 정착 focus + eligible 주거/hero 에서만 토글. rAF 로 화면 좌표만 갱신(드로우 0).
-  // 감상 페이드·시네마틱·shot·전환 중에는 화면에서 내려 수묵/공유 프레임을 더럽히지 않는다.
+  // 감상 페이드·시네마틱·shot·전환 중에는 화면에서 내려 공유 프레임을 더럽히지 않는다.
   function stopGlossaryLoop() {
     if (glossaryRaf != null) {
       cancelLifecycleFrame(glossaryRaf);
@@ -1182,7 +1180,6 @@
     applyWeather(v);
     syncUrl(); scheduleFlowTick();
   }
-  function setRenderStyle(v) { engine.setRenderStyle(v); syncUrl(); wake(); }
 
   // 흐름 클록(rAF 기반) — "실제 표시된" 프레임 간격만 적산해 interval 마다 정확히 한 칸 전진한다.
   // setTimeout 은 소프트웨어GL 초기 셰이더 컴파일이 메인스레드를 수 초 블록하는 동안에도 wall-clock
@@ -1548,13 +1545,11 @@
       sunsetLook={ui.sunsetLook}
       season={ui.season}
       weather={ui.weather}
-      renderStyle={ui.renderStyle}
       flowing={flowing}
       onTime={setTime}
       onSunsetLook={setSunsetLook}
       onSeason={setSeason}
       onWeather={setWeather}
-      onRenderStyle={setRenderStyle}
       onFlowToggle={toggleFlow}
     />
   {/if}
@@ -1563,7 +1558,6 @@
   {#if !sceneVillage}
     <EnvironmentDial
       time={ui.time} sunsetLook={ui.sunsetLook} season={ui.season} weather={ui.weather}
-      renderStyle={ui.renderStyle} onRenderStyle={setRenderStyle}
       compact={false}
       flowing={flowing}
       onTime={setTime} onSunsetLook={setSunsetLook} onSeason={setSeason} onWeather={setWeather}
@@ -1598,7 +1592,7 @@
   <HoverLabel info={hoverInfo} />
 {/if}
 
-<!-- #216 부재 용어: 기본 OFF DOM 오버레이. 수묵/공유 canvas 와 분리(WebGL 미포함). -->
+<!-- #216 부재 용어: 기본 OFF DOM 오버레이. 공유 canvas 와 분리(WebGL 미포함). -->
 <GlossaryOverlay
   active={glossaryVisible}
   labels={glossaryLabels}

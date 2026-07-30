@@ -18,7 +18,6 @@ const state = {
   sunsetLook: 'crimson',
   season: 'autumn',
   weather: 'clear',
-  renderStyle: 'ink',
   expansion: 2,
 };
 const overrides = {
@@ -103,7 +102,7 @@ for (const key of ['hero', 'worker', 'shot', 'lang', 'flowsec']) {
 // implicit sunset when the recipient opens the link.
 const terse = new URL(buildSceneShareUrl({
   baseUrl: 'https://cheoma.midagedev.com/?shot=1&post=0',
-  state: { ...state, time: 'day', renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, time: 'day', expansion: 1 },
 }));
 assert.deepEqual([...terse.searchParams.keys()], [SCENE_SNAPSHOT_QUERY_KEY]);
 assert.deepEqual(decodeSceneSnapshot(terse.searchParams.get(SCENE_SNAPSHOT_QUERY_KEY)), {
@@ -114,7 +113,6 @@ assert.deepEqual(decodeSceneSnapshot(terse.searchParams.get(SCENE_SNAPSHOT_QUERY
   sunsetLook: null,
   season: null,
   weather: null,
-  renderStyle: 'pbr',
   expansion: 1,
   flow: false,
   village: null,

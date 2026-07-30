@@ -18,7 +18,7 @@
 // 계약 보존: three 의 `RenderPass` 는 `needsSwap = false` 이고 씬을 **readBuffer** 에 그린다
 //   (three 0.185.1 `RenderPass.render`: `renderer.setRenderTarget(this.renderToScreen ? null : readBuffer)`).
 //   이 패스도 최종적으로 readBuffer 에 해상된 씬을 남기고 스왑하지 않으므로, 뒤에 어떤 패스가
-//   어디에 삽입되어도(수묵 sourcePass·OutlinePass·DoF CoC) 종전과 동일하게 동작한다.
+//   어디에 삽입되어도(OutlinePass·DoF CoC) 종전과 동일하게 동작한다.
 //   추가 비용은 풀해상도 blit 1회뿐이다.
 //
 // samples=0 이면 stock 경로로 완전히 되돌아간다(회귀 상태 A/B·게이트 기준선).

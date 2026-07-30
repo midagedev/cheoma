@@ -172,10 +172,10 @@ const MEASURE = `(selector) => {
       };
     }
     scroll.scrollTop = 0;
-    // Keep sticky env / ink toggles hittable after last-control probe —
+    // Keep the sticky environment header hittable after last-control probe —
     // only when the scroll surface is actually shown (not peek-hidden).
     if (getComputedStyle(scroll).visibility !== 'hidden') {
-      document.querySelector('[data-make-panel] .dial .render-style')
+      document.querySelector('[data-make-panel] .dial .envactions')
         ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   }
@@ -222,7 +222,6 @@ const MEASURE = `(selector) => {
     '[data-make-panel] [data-action="share"]',
     '[data-make-panel] [data-action="export"]',
     // Floating dial targets only for 44px (in-panel CAD rows may be denser).
-    '.dial.viewcard .render-style button',
     '.dial.viewchip',
     '.dial.viewcard .dial-btn',
     '[data-view-chip]',
@@ -306,7 +305,7 @@ const MEASURE = `(selector) => {
       tabHouse: hittable(document.querySelector('#make-tab-house')),
       rebuild: hittable(document.querySelector('[data-make-panel] .foot.village .rebuild')),
       rerollHouse: hittable(document.querySelector('[data-make-panel] .foot.house .hbtn.reroll')),
-      renderInk: hittable(document.querySelector('.dial .render-style button:last-child')),
+      envRoll: hittable(document.querySelector('.dial .dial-btn.env-roll')),
       // §6.13 decision A: on the portrait sheet layout the view axis collapses to a
       // 44px chip while editing so the camera keeps a band for the edited house.
       viewChip: hittable(document.querySelector('[data-view-chip]')),
@@ -549,9 +548,11 @@ try {
         dockShare: focused.hits.dockShare, dockPostcard: focused.hits.dockPostcard,
       })})`);
     // Environment lives in the make panel (CAD column) — no floating view chip.
-    // Ink / time / season stay reachable as long as the make shell is expanded.
-    pass(focused.hits.renderInk === 'hittable',
-      `${viewport.id} inspector environment keeps ink reachable while editing (${focused.hits.renderInk})`);
+    // Its header actions / time / season stay reachable as long as the make shell
+    // is expanded, and the environment reroll is the one control that is always
+    // present there (the sunset tone button only exists at sunset).
+    pass(focused.hits.envRoll === 'hittable',
+      `${viewport.id} inspector environment stays reachable while editing (${focused.hits.envRoll})`);
     pass(focused.openGroups.house >= 3
       && focused.groupHeaders.house >= 3
       && focused.openGroups.house === focused.groupHeaders.house,
@@ -605,29 +606,58 @@ try {
       await page.waitForFunction(() => !window.__engine.cine.getState().active, null, { timeout });
     }
 
-    // 수묵(墨): 환경·잉크 토글은 만들기 패널 CAD 컬럼이 소유한다.
-    // 시네마틱에서 돌아온 패널이 다시 미끄러져 들어오는 동안 재면 반쪽 프레임을 읽는다.
-    await settleShell(page);
-    await page.evaluate(async () => {
-      const sheet = document.querySelector('[data-make-panel]');
-      if (sheet?.dataset.snap === 'peek') {
-        document.querySelector('[data-make-panel] .grip')?.click();
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      }
-      document.querySelector('.dial .render-style button:last-child')?.click();
-    });
-    await page.waitForFunction(() => window.__engine.getState().renderStyle === 'ink', null, { timeout });
-    await page.evaluate(() => window.__engine.setRenderStyle('ink', { immediate: true }));
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    const inkShell = await measure(page);
-    await page.screenshot({ path: join(shotDir, `${viewport.id}-ink.png`) });
-    // Ink keeps the same shell; panel share tools stay in the make footer (expand
-    // on sheet layouts if the focus measure already left the sheet half-open).
-    pass(inkShell.chromeInViewport && (inkShell.hits.share === 'hittable' || inkShell.hits.grip === 'hittable'),
-      `${viewport.id} ink mode keeps the same reachable shell (share=${inkShell.hits.share} grip=${inkShell.hits.grip} outside=${JSON.stringify(inkShell.chromeOutside)})`);
-    await page.evaluate(() => window.__engine.setRenderStyle('pbr', { immediate: true }));
+    // 레퍼런스 모달(낙관 → credits): 아트디렉션 출처는 제품의 실제 References 경로로
+    // 보여야 한다 — 방문자가 찾을 수 없는 구현 노트에 갇혀 있으면 안 된다. CLAUDE.md 의
+    // "새 source group 은 실제 Reference UI 를 열어 게이트한다" 계약이 여기에 걸려 있다.
+    // 데스크톱 1회만 연다(모달 내용은 뷰포트에 의존하지 않는다).
+    if (viewport.id === 'desktop-1280') {
+      await settleShell(page);
+      await page.locator('.seal-label .info').click();
+      await page.waitForSelector('.modal[role="dialog"]', { timeout });
+      const references = await page.evaluate(() => {
+        const items = [...document.querySelectorAll('.modal .cat li')].map((item) => ({
+          title: item.querySelector('.it-title')?.textContent?.trim() || '',
+          use: item.querySelector('.it-use')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+          license: item.querySelector('.it-lic')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+          links: [...item.querySelectorAll('.it-links a')].map((link) => ({
+            href: link.href,
+            target: link.target,
+            rel: link.rel,
+          })),
+        }));
+        const required = [
+          items.find((item) => item.title.startsWith('국립중앙박물관 —')),
+          items.find((item) => item.title.startsWith('The Metropolitan Museum of Art —')),
+          items.find((item) => item.title.startsWith('국가유산포털 — 정선 필 금강전도')),
+        ];
+        return {
+          found: required.filter(Boolean).length,
+          text: required.filter(Boolean).map((item) => item.use).join(' '),
+          licensed: required.filter(Boolean).every((item) => item.license.length > 8),
+          links: required.filter(Boolean).flatMap((item) => item.links),
+        };
+      });
+      await page.screenshot({ path: join(shotDir, `${viewport.id}-references.png`) });
+      pass(references.found === 3,
+        `${viewport.id} Reference modal renders the three art-direction source groups (${references.found}/3)`);
+      pass(references.licensed && references.links.length === 6
+        && references.links.some((link) => link.href.includes('museum.go.kr'))
+        && references.links.some((link) => link.href.includes('metmuseum.org'))
+        && references.links.some((link) => link.href.includes('heritage.go.kr'))
+        && references.links.every((link) => link.target === '_blank'
+          && link.rel.includes('noopener') && link.rel.includes('noreferrer')),
+      `${viewport.id} Reference modal renders source licenses and six safe authoritative links`);
+      await page.locator('.modal .x').click();
+      await page.waitForSelector('.modal[role="dialog"]', { state: 'detached', timeout });
+    }
 
     // 감상 페이드: 크롬 전체가 한 그룹이라 페이드 뒤에는 씬만 남는다(P6).
+    // 페이드의 idle 타이머는 실입력(wake)이 무장한다 — 시네마틱 진입/이탈은 chromaFaded 를
+    // 직접 끌 뿐 타이머를 재무장하지 않는다. 종전에는 직전의 墨 토글 클릭이 이 무장을 우연히
+    // 해주고 있었고(수묵 제거로 소멸), 데스크톱은 Reference 모달 클릭이 대신한다. 제품과 같은
+    // 트리거를 명시적으로 재현한다: 실 마우스 이동 → 3s 무입력.
+    await page.mouse.move(320, 240);
+    await page.mouse.move(340, 250);
     await page.evaluate(() => {
       for (const style of [...document.querySelectorAll('style')]) {
         if (style.textContent.includes('.chroma { opacity: 1')) style.remove();

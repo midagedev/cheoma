@@ -48,10 +48,9 @@ const shots = [
   { name: 'autumn-litter-t0',   q: `${BASE}&angle=three-quarter&time=day&season=autumn`, eval: 'window.__season.setLitter(0)', wait: 700 },
   { name: 'autumn-litter-full', q: `${BASE}&angle=three-quarter&time=day&season=autumn`, eval: 'window.__season.setLitter(1)', wait: 700 },
   { name: 'autumn-wind',        q: `${BASE}&angle=three-quarter&time=day&season=autumn`, wind: 2.4, eval: 'window.__season.setLitter(0.7)', wait: 1400 },
-  // 회귀: 야간+눈 / 수묵+눈 / 맑은 낮
+  // 회귀: 야간+눈 / 맑은 낮
   { name: 'night-snow-front', q: `${BASE}&angle=front&time=night&weather=snow`, wait: 700 },
   { name: 'night-snow-3q',    q: `${BASE}&angle=three-quarter&time=night&weather=snow`, wait: 700 },
-  { name: 'ink-snow',         q: `${BASE}&angle=three-quarter&time=day&weather=snow&mode=ink`, wait: 700 },
   { name: 'day-clear',        q: `${BASE}&angle=three-quarter&time=day&weather=clear`, wait: 500 },
 ];
 

@@ -24,22 +24,22 @@ assert.deepEqual(ids(['src/env/post.js']), ['core', 'app', 'dof-app', 'aa']);
 // 컴포저 MSAA 는 post.js 와 같은 축이므로 신규 패스 모듈도 같은 게이트 묶음을 끈다.
 assert.deepEqual(ids(['src/env/msaa-render-pass.js']), ['core', 'app', 'dof-app', 'aa']);
 assert.deepEqual(ids(['src/env/bokeh-coc-contract.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+  'core', 'app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/bokeh-coc-pass.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+  'core', 'app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/bokeh-coc-shaders.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+  'core', 'app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/post-quality-state.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
+  'core', 'app', 'dof-app', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/circular-bokeh-shader.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+  'core', 'app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/bokeh-source-scatter.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'bokeh-fixture', 'lod-focus',
+  'core', 'app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
 assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'api-reuse', 'lod-app']);
@@ -247,7 +247,7 @@ assert.deepEqual(ids(['src/runtime/village/handle.js']), [
 ]);
 assert.deepEqual(ids(['src/audio/index.js']), ['core', 'app', 'audio']);
 assert.deepEqual(ids(['app/src/App.svelte']), [
-  'core', 'app', 'ui-shell', 'entry', 'ink-app', 'parcel-rebuild-browser', 'build',
+  'core', 'app', 'ui-shell', 'entry', 'parcel-rebuild-browser', 'build',
 ]);
 assert.deepEqual(ids(['app/src/lib/scene-snapshot.js']), [
   'core', 'share', 'app', 'build',
@@ -289,10 +289,10 @@ assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-app', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/post-quality-runtime.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'lod-focus', 'build',
+  'core', 'app', 'dof-app', 'lod-focus', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/post-runtime.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'aa', 'lod-focus', 'build',
+  'core', 'app', 'dof-app', 'aa', 'lod-focus', 'build',
 ]);
 assert.deepEqual(ids(['app/src/engine/scene-runtime.js']), [
   'core', 'app', 'dof-app', 'aa', 'build',
@@ -300,9 +300,9 @@ assert.deepEqual(ids(['app/src/engine/scene-runtime.js']), [
 assert.deepEqual(ids(['app/src/engine/directional-shadow-runtime.js']), [
   'core', 'app', 'rim', 'lod-focus', 'build',
 ]);
-// #158: the view card owns both the environment dial and the render-style control.
+// #158: the view card owns the environment dial.
 assert.deepEqual(ids(['app/src/components/EnvironmentDial.svelte']), [
-  'core', 'app', 'ui-shell', 'ink-app', 'winter-app', 'build',
+  'core', 'app', 'ui-shell', 'winter-app', 'build',
 ]);
 assert.deepEqual(ids(['app/src/components/Breadcrumb.svelte'], {
   newPaths: ['app/src/components/Breadcrumb.svelte'],
@@ -321,13 +321,12 @@ assert.deepEqual(ids(['src/api/village-options.js']), ['core', 'share', 'app', '
 assert.deepEqual(ids(['src/api/environment-state.js']), ['core', 'share']);
 assert.deepEqual(ids(['src/api/shadow-framing.js']), ['core', 'app', 'rim', 'lod-focus']);
 assert.deepEqual(ids(['src/api/post-quality.js']), [
-  'core', 'app', 'ink-app', 'dof-app', 'lod-focus',
+  'core', 'app', 'dof-app', 'lod-focus',
 ]);
-assert.deepEqual(ids(['src/render/ink.js']), ['core', 'app', 'ink-app']);
-assert.deepEqual(ids(['app/src/engine/ink-mode-runtime.js']), ['core', 'app', 'ink-app', 'build']);
 assert.deepEqual(ids(['src/api/rendering.js']), ['core', 'app']);
-assert.deepEqual(ids(['src/api/ink.js']), ['core', 'app', 'ink-app']);
-assert.deepEqual(ids(['src/api/render-style.js']), ['core', 'app', 'ink-app']);
+// The app's focus policy runtime is an ordinary engine runtime: it carries the
+// application smoke and build gates, and no render-mode gate of its own.
+assert.deepEqual(ids(['app/src/engine/focus-policy-runtime.js']), ['core', 'app', 'build']);
 assert.deepEqual(ids(['src/builder/palette.js']), [
   'core', 'app', 'rim', 'building-lifecycle', 'api-reuse', 'winter-app', 'worker',
 ]);
@@ -551,7 +550,7 @@ for (const path of API_REUSE_DEPENDENCIES) {
   );
 }
 assert.deepEqual(ALL_PROFILE, [
-  'docs', 'core-full', 'app', 'ui-shell', 'entry', 'ink-app', 'petals', 'particle-geometry',
+  'docs', 'core-full', 'app', 'ui-shell', 'entry', 'petals', 'particle-geometry',
   'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio', 'temple-browser',
   'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);

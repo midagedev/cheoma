@@ -28,7 +28,7 @@ import {
 
 // 날씨 시뮬레이터 (눈·비).
 //   setupWeather(scene, { layout, getBuilding, getGround })
-//     → { setWeather(name, opts), update(dt), applyAtmosphere({mode}), onBuildingChanged(), dispose(), get weather() }
+//     → { setWeather(name, opts), update(dt), applyAtmosphere(), onBuildingChanged(), dispose(), get weather() }
 //   name: 'clear' | 'rain' | 'snow'
 //
 // 구현 방침 (#131, #96, #215):
@@ -241,10 +241,9 @@ export function setupWeather(scene, {
 
   // ---------- 대기 오버레이 ----------
   // reapplyEnvBase → refreshAppearance 뒤에 호출되어 신선한 base fog/bg 위에 한 번 물든다(멱등).
-  // env-OFF(폴백 fog)·ink 폴백 경로용 즉시 적용(전강도). env-ON pbr 에서는 env.addFogModifier 로
+  // env-OFF(폴백 fog) 경로용 즉시 적용(전강도). env-ON 에서는 env.addFogModifier 로
   // 등록한 applyAtmosphereScaled 가 매 틱 rainLevel/snowLevel 로 스케일해 크로스페이드한다(태스크 #50).
-  function applyAtmosphere({ mode } = {}) {
-    if (mode === 'ink') return;           // 수묵은 종이색 fog 유지
+  function applyAtmosphere() {
     if (name === 'clear' || !scene.fog) return;
     const fog = scene.fog;
     if (name === 'rain') {

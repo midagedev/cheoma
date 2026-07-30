@@ -78,8 +78,8 @@ export function edgeStepProfile(buffer, {
   };
 }
 
-// 선 화소 조건부 계단성 — 수묵 트랙(ink-gyehwa)이 먹선 판정용으로 세운 축을 그대로 공유한다.
-// 정의를 한 곳에 두어 두 트랙의 수치가 직접 비교 가능하게 한다.
+// 선 화소 조건부 계단성 — 기하 에지 판정용 축. 정의를 한 곳에 두어 여러 하네스의 수치가
+// 직접 비교 가능하게 한다.
 //
 //   lineMask : 3x3 휘도 레인지 > lineThreshold (선 또는 강한 톤 경계)
 //   grad     : 4근방 최대 절대차 — AA 된 선은 2~3px 램프(작은 grad), 계단 선은 1px 절벽(큰 grad)
@@ -103,7 +103,7 @@ export function lineEdgeProfile(buffer, {
   const top = Math.max(2, Math.floor(y0));
   const right = Math.min(width - 3, Math.floor(x1));
   const bottom = Math.min(height - 3, Math.floor(y1));
-  // 수묵 트랙과 같은 Rec.601 휘도를 쓴다(축 정의 일치가 목적).
+  // Rec.601 휘도(축 정의 일치가 목적).
   const lum = (x, y) => {
     const i = (y * width + x) * 4;
     return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];

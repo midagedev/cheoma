@@ -41,7 +41,6 @@ const shots = [
   ['night-tq', 'env=1&preset=korea&angle=three-quarter&time=night'],
   ['night-snow', 'env=1&preset=korea&angle=three-quarter&time=night&weather=snow'],
   // 회귀·폴백·조합
-  ['ink-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&mode=ink'],
   ['dof-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&dof=1'],
   ['post0-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&post=0'],
   // 4 프리셋 각 1컷 (pageerror 0 확인, 석양 3/4)

@@ -79,7 +79,7 @@ const MAX_FLAT_SKY_DRIFT = 3.0;
 // 실측 델타의 약 절반 — 회귀/수정본 분리는 보장하고 씬 튜닝 드리프트에는 견딘다.
 const MIN_HARD_DROP = 0.20;
 const MIN_SOFT_RATIO_GAIN = 0.40;
-// 보조축(수묵 트랙과 공유하는 정의 — png-metrics.mjs lineEdgeProfile).
+// 보조축(png-metrics.mjs lineEdgeProfile 정의).
 //   이 크롭 실측: cliffRatio 18.8% → 15.7% (상대 −16.7%), lineMeanGradient 41.8 → 38.7 (−7.4%).
 //   요구 폭은 그 절반(−8%). 프레임 전체로 재면 분리 폭이 −8.0% 로 좁아지는데(UI·하늘 여백이
 //   선 화소 분모를 부풀린다) 게이트는 크롭으로만 판정한다.

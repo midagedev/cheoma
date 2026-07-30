@@ -50,9 +50,8 @@ const shots = [
   ['dawn-tq', 'env=1&preset=korea&angle=three-quarter&time=dawn'],
   ['sunset-autumn', 'env=1&preset=korea&angle=three-quarter&time=sunset&season=autumn'],
   ['day-autumn', 'env=1&preset=korea&angle=three-quarter&time=day&season=autumn'],
-  // ⑤ 회귀: night · ink · post0
+  // ⑤ 회귀: night · post0
   ['night-tq', 'env=1&preset=korea&angle=three-quarter&time=night'],
-  ['ink-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&mode=ink'],
   ['post0-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&post=0'],
   // ⑥ 4 프리셋 각 1컷 (pageerror 0 확인, 석양 역광 3/4)
   ['preset-korea', 'env=1&preset=korea&angle=three-quarter&time=sunset'],

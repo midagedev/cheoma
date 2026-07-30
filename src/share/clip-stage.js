@@ -7,7 +7,6 @@ export const CLIP_STAGE_IDS = Object.freeze([
   'yard',
   'aerial',
   'night',
-  'ink',
 ]);
 
 const stage = (id, fields) => Object.freeze({ id, ...fields });
@@ -23,7 +22,6 @@ export const CLIP_STAGES = Object.freeze({
     sunsetLook: 'gold',
     season: 'summer',
     weather: 'clear',
-    renderStyle: 'pbr',
     boot: 'hero',
     autoEnter: true,
     parcelId: null,
@@ -38,7 +36,6 @@ export const CLIP_STAGES = Object.freeze({
     sunsetLook: 'gold',
     season: 'summer',
     weather: 'clear',
-    renderStyle: 'pbr',
     boot: 'village-focus',
     autoEnter: true,
     // capital/7/p8 is a cinematic fixture; village/7 uses p8 as a regular house
@@ -55,7 +52,6 @@ export const CLIP_STAGES = Object.freeze({
     sunsetLook: 'gold',
     season: 'summer',
     weather: 'clear',
-    renderStyle: 'pbr',
     boot: 'village-aerial',
     autoEnter: true,
     parcelId: null,
@@ -69,25 +65,10 @@ export const CLIP_STAGES = Object.freeze({
     time: 'night',
     season: 'summer',
     weather: 'clear',
-    renderStyle: 'pbr',
     boot: 'village-aerial',
     autoEnter: true,
     parcelId: null,
     label: '야간 달·창호',
-  }),
-  // Ink landscape accent — separate clip, never mixed into PBR assemble.
-  ink: stage('ink', {
-    seed: 7,
-    vseed: 7,
-    vscale: 'village',
-    time: 'day',
-    season: 'summer',
-    weather: 'clear',
-    renderStyle: 'ink',
-    boot: 'village-aerial',
-    autoEnter: true,
-    parcelId: null,
-    label: '수묵 산수',
   }),
 });
 
@@ -118,7 +99,6 @@ export function clipStageQuery(stageOrId) {
   };
   if (stageSpec.sunsetLook) q.sunset = stageSpec.sunsetLook;
   if (stageSpec.vscale && stageSpec.vscale !== 'village') q.vscale = stageSpec.vscale;
-  if (stageSpec.renderStyle === 'ink') q.mode = 'ink';
   if (stageSpec.boot !== 'hero') q.village = '1';
   return Object.freeze(q);
 }

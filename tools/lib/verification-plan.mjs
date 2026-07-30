@@ -3,7 +3,7 @@ import { gateCommand } from './verification-gates.mjs';
 import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
-  'core', 'app', 'ui-shell', 'entry', 'ink-app', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
+  'core', 'app', 'ui-shell', 'entry', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
   'temple-browser', 'dof-app', 'aa', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
   'mja-house-browser', 'surface-browser', 'cinematic-app', 'build',
 ]);
@@ -237,7 +237,6 @@ function routePath(path) {
     'tools/check-building-texture-lifecycle.mjs': ['building-lifecycle'],
     'tools/check-api-reuse-example.mjs': ['api-reuse'],
     'tools/check-api-reuse-suite.mjs': ['api-reuse'],
-    'tools/check-ink-app.mjs': ['ink-app'],
     'tools/verify-petals.mjs': ['petals'],
     'tools/shoot-seasons.mjs': ['petals'],
     'tools/check-winter-app.mjs': ['winter-app'],
@@ -311,11 +310,6 @@ function routePath(path) {
       || path === 'app/src/engine/semantic-view-runtime.js') {
       select('scene-share canonical URL or platform adapter changed', 'share');
     }
-    // #158: the render-style control now lives inside the view card (EnvironmentDial),
-    // so that component owns the product ink-mode integration surface.
-    if (/^app\/src\/(?:App\.svelte|components\/EnvironmentDial\.svelte|engine\/(?:engine|ink-mode-runtime|post-runtime|post-quality-runtime)\.js|lib\/(?:i18n\.svelte|url)\.js)$/.test(path)) {
-      select('product ink mode integration changed', 'ink-app');
-    }
     if (/^app\/src\/(?:components\/EnvironmentDial\.svelte|engine\/engine\.js|lib\/seed\.js)$/.test(path)) {
       select('winter environment integration changed', 'winter-app');
     }
@@ -333,7 +327,7 @@ function routePath(path) {
       select('composer anti-aliasing or pixel-ratio profile changed', 'aa');
     }
     if (/^app\/src\/engine\/post(?:-quality)?-runtime\.js$/.test(path)) {
-      select('adaptive camera quality changed', 'ink-app', 'lod-focus');
+      select('adaptive camera quality changed', 'lod-focus');
     }
     if (path === 'app/src/engine/directional-shadow-runtime.js') {
       select('focused directional shadow framing changed', 'rim', 'lod-focus');
@@ -346,10 +340,9 @@ function routePath(path) {
 
   if (path.startsWith('src/env/') || path.startsWith('src/render/')) {
     select('environment/rendering changed', 'app');
-    if (/^src\/render\/(?:ink|ink-state)\.js$/.test(path)) select('ink rendering changed', 'ink-app');
     if (/^src\/render\/(?:material-program-key|screen-door|lod-screen-door)\.js$/.test(path)) {
       select('shared screen-door shader contract changed',
-        'ink-app', 'dof-app', 'lod-focus', 'winter-app', 'rim', 'building-lifecycle');
+        'dof-app', 'lod-focus', 'winter-app', 'rim', 'building-lifecycle');
     }
     if (path === 'src/render/shadow-depth-texture-lifecycle.js') {
       select('building shadow texture lifecycle changed', 'building-lifecycle');
@@ -364,10 +357,10 @@ function routePath(path) {
       select('composer anti-aliasing changed', 'aa');
     }
     if (/^src\/env\/(?:post-quality-state|stable-bokeh-pass|circular-bokeh-shader|bokeh-coc-pass|bokeh-coc-shaders)\.js$/.test(path)) {
-      select('adaptive post policy changed', 'ink-app', 'lod-focus');
+      select('adaptive post policy changed', 'lod-focus');
     }
     if (/^src\/env\/(?:stable-bokeh-pass|circular-bokeh-shader|bokeh-highlight-prefilter|bokeh-source-contract|bokeh-source-scatter|bokeh-coc-contract|bokeh-coc-pass|bokeh-coc-shaders)\.js$/.test(path)) {
-      select('compact-source bokeh changed', 'dof-app', 'ink-app', 'lod-focus', 'bokeh-fixture');
+      select('compact-source bokeh changed', 'dof-app', 'lod-focus', 'bokeh-fixture');
     }
     if (/^src\/env\/(?:rim|clouds|snow-material)\.js$/.test(path)) {
       select('physical rim inputs changed', 'rim');
@@ -680,10 +673,6 @@ function routePath(path) {
       select('portable village option boundary changed', 'share', 'app', 'worker');
       return { gates, reasons };
     }
-    if (path === 'src/api/ink.js' || path === 'src/api/render-style.js') {
-      select('public ink rendering API changed', 'app', 'ink-app');
-      return { gates, reasons };
-    }
     if (path === 'src/api/environment.js') {
       select('environment API changed', 'app', 'dof-app', 'petals', 'winter-app', 'lod-wave');
       return { gates, reasons };
@@ -701,7 +690,7 @@ function routePath(path) {
       return { gates, reasons };
     }
     if (path === 'src/api/post-quality.js') {
-      select('pure adaptive post API changed', 'app', 'ink-app', 'dof-app', 'lod-focus');
+      select('pure adaptive post API changed', 'app', 'dof-app', 'lod-focus');
       return { gates, reasons };
     }
     if (path === 'src/api/village.js') {
@@ -813,7 +802,6 @@ export function verificationCommands(plan) {
   if (has('app')) commands.push(gateCommand('app'));
   if (has('ui-shell')) commands.push(gateCommand('ui-shell'));
   if (has('entry')) commands.push(gateCommand('entry'));
-  if (has('ink-app')) commands.push(gateCommand('ink-app'));
   if (has('dof-app')) commands.push(gateCommand('dof-app'));
   if (has('aa')) commands.push(gateCommand('aa'));
   if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));

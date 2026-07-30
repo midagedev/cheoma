@@ -153,7 +153,6 @@ function makeRing({
   const moteR = Math.min(radius, Math.max(5.5, Math.max(W, D) * 0.5));
   const motes = setupMotes({
     scene, sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 90,
-    isInk: () => renderer?.toneMapping === THREE.NoToneMapping,
     fireflies: true, // 인스턴스 중 ~8% — 여름·맑은 밤에만 희박한 물리 보케 씨앗
   });
   motes.group.position.set(worldX, groundY, worldZ);
@@ -622,7 +621,6 @@ export function createAmbientField(scene, {
     const moteR = Math.max(5.5, Math.max(desc.W, desc.D) * 0.5);
     const motes = setupMotes({
       scene, sun: _sun, renderer, radius: moteR, centerY: 2.8, ySpan: 0.22, count: 70,
-      isInk: () => renderer?.toneMapping === THREE.NoToneMapping,
       fireflies: true,
     });
     motes.group.position.set(desc.cx, desc.baseY, desc.cz);

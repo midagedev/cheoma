@@ -123,15 +123,11 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   group.add(smoke.group);
 
   // 앰비언트 생명감(태스크 #32): 공기 중 먼지 모트 + 처마 등롱 미세 흔들림.
-  //  - 모트: 역광 게이트로 골든아워에 빛을 받는 단일 물리 인스턴스 draw. renderer 는
-  //    ink 모드 감지(NoToneMapping)용 read-only. sun.position(=태양·달 방향)으로 forward-scatter.
+  //  - 모트: 역광 게이트로 골든아워에 빛을 받는 단일 물리 인스턴스 draw.
+  //    sun.position(=태양·달 방향)으로 forward-scatter.
   //  - 등롱: sky.js 가 만든 등롱 bulb/light 를 env 그룹 traverse 로 찾아 진자 요동(위치만).
   //    둘 다 env group 자식/게이트에 함께 묶인다.
-  const motes = setupMotes({
-    sun,
-    renderer,
-    isInk: () => renderer.toneMapping === THREE.NoToneMapping,
-  });
+  const motes = setupMotes({ sun });
   group.add(motes.group);
   const lanternSway = setupLanternSway({ scene, getBuilding: () => scene.getObjectByName('building') });
 
@@ -141,7 +137,6 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   let currentSunsetLook = sky.sunsetLook;
   let currentSeason = 'summer';
   let everApplied = false;   // 첫 적용은 항상 즉시(로드 시 트윈-인 방지). 이후 다이얼만 크로스페이드.
-  let immediateMode = false; // ink 모드 등: 트윈·fog 합성을 끄고 즉시 스냅(setImmediate 로 토글).
 
   // ── fog 합성 훅 ────────────────────────────────────────────────────────────
   // 시간대 크로스페이드가 매 틱 base fog 를 다시 쓰므로, 마을 fog·날씨 대기 틴트가 씻긴다.
@@ -159,11 +154,9 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
     //   지형 외곽이 배경과 같은 색으로 소실된다. 변화 없으면 sky 쪽에서 no-op.
     sky.syncHaze(scene.fog.color);
   }
-  function composeFogNow() { if (enabled && !immediateMode) applyFogBaseAndMods(); }
+  function composeFogNow() { if (enabled) applyFogBaseAndMods(); }
   function addFogModifier(fn) { if (!disposed && fn && !fogMods.includes(fn)) { fogMods.push(fn); composeFogNow(); } }
   function removeFogModifier(fn) { if (disposed) return; const i = fogMods.indexOf(fn); if (i >= 0) { fogMods.splice(i, 1); composeFogNow(); } }
-  // ink 모드 등에서 트윈·fog 합성을 끈다(즉시 스냅으로 종이색 fog 를 침해하지 않게).
-  function setImmediate(v) { if (!disposed) immediateMode = !!v; }
 
   function restoreFallback() {
     restoreEnvironmentFallback(scene, { sun, hemi, renderer }, fb);
@@ -172,7 +165,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   // 시그니처 유지(opts 신설): opts.immediate=true(shot·초기 로드) 면 즉시 스냅, 그 외엔 크로스페이드.
   function setTime(name, opts = {}) {
     if (disposed) return;
-    const immediate = !!opts.immediate || immediateMode || !enabled || !everApplied;
+    const immediate = !!opts.immediate || !enabled || !everApplied;
     currentTime = name;
     critters.setTime(name);   // 밤엔 새 떼 숨김·이동 자제(이산 — 트윈 불필요)
     animals.setTime(name);    // 밤엔 닭 홰 자세(웅크림), 소는 계속 풀 뜯기
@@ -187,7 +180,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
   function setSunsetLook(name, opts = {}) {
     if (disposed) return currentSunsetLook;
     currentSunsetLook = sky.setSunsetLook(name, {
-      immediate: !!opts.immediate || immediateMode || !enabled || !everApplied,
+      immediate: !!opts.immediate || !enabled || !everApplied,
     });
     return currentSunsetLook;
   }
@@ -230,12 +223,12 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
       animals.update(dt);   // 마당 닭 무리(쪼기·종종·홰치기)·논 소(풀 뜯기·꼬리·귀)
       sky.updateFlicker(dt); // 처마 등롱 촛불 일렁임(등불 켜졌을 때)
       smoke.update(dt);      // 굴뚝 연기 상승·소산·바람 드리프트 + 아궁이 불씨 일렁임
-      motes.update(dt);      // 먼지 모트 드리프트·바람 쓸림·역광 반짝(ink 모드 자동 비표시)
+      motes.update(dt);      // 먼지 모트 드리프트·바람 쓸림·역광 반짝
       lanternSway.update(dt);// 처마 등롱 진자 미세 요동(바람 거스트 연동, 위치만)
       clouds.update(dt);   // 산 구름·물안개 표류 + 흐르는 구름 그림자 세기(태양 상태 판독)
     }
     // fog 재합성: 시간대 트윈 중이거나 모디파이어(마을 거리·날씨 대기)가 등록돼 있으면 base+모디파이어로.
-    if (enabled && !immediateMode && (sky.isTweening() || fogMods.length)) applyFogBaseAndMods();
+    if (enabled && (sky.isTweening() || fogMods.length)) applyFogBaseAndMods();
   }
   function setEnabled(v) {
     if (disposed) return;
@@ -272,7 +265,7 @@ export function setupEnvironment(scene, { sun, hemi, renderer, layout }) {
 
   return {
     group, setTime, setSunsetLook, setSeason, setLensScale, setSnowAccumulation, update, setEnabled, dispose,
-    addFogModifier, removeFogModifier, setImmediate,
+    addFogModifier, removeFogModifier,
     get time() { return currentTime; },
     get sunsetLook() { return currentSunsetLook; },
     get season() { return currentSeason; },

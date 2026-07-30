@@ -1175,35 +1175,6 @@ try {
       && Math.abs(terrainRegression.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainRegression.referenceFov === VILLAGE_LENS.parcel.referenceFov,
   `capital/7/${TERRAIN_FIXTURE} product focus retains the authored distant telephoto frame (${terrainRegression.fov.toFixed(2)}°/${terrainRegression.referenceFov.toFixed(2)}°)`);
-  // The reference near is read in the same evaluate, immediately before the restyle: p47's focus
-  // camera keeps easing for a few frames after the settle read, and the cutaway near is recomputed
-  // per frame as it moves, so comparing against the settle-time value would assert camera stillness
-  // between two evaluates rather than the actual contract — that the ink restyle itself does not
-  // move the shared near plane.
-  const terrainInk = await rebuildPage.evaluate(() => {
-    const engine = window.__engine;
-    const nearBefore = engine.camera.near;
-    const cutawayBefore = engine.village.debugContinuum().focusCutaway;
-    engine.setRenderStyle('ink', { immediate: true });
-    engine.debugRenderDofFrame();
-    return {
-      nearBefore,
-      cutawayBefore,
-      near: engine.camera.near,
-      ink: engine.debugInk(),
-      selected: engine.village.getState().selected,
-    };
-  });
-  await rebuildPage.screenshot({ path: join(outputDir, `terrain-${TERRAIN_FIXTURE}-ink.png`) });
-  invariant(terrainInk.selected === TERRAIN_FIXTURE
-      && terrainInk.ink.amount >= 0.999
-      && terrainInk.cutawayBefore?.active
-      && Math.abs(terrainInk.near - terrainInk.nearBefore) < 1e-3,
-  `capital/7/${TERRAIN_FIXTURE} ink normal/depth keeps the live camera cutaway (${terrainInk.near.toFixed(3)}m vs ${terrainInk.nearBefore.toFixed(3)}m pre-restyle)`);
-  await rebuildPage.evaluate(() => {
-    window.__engine.setRenderStyle('pbr', { immediate: true });
-    window.__engine.debugRenderDofFrame();
-  });
   const terrainRebuild = await rebuildPage.evaluate(async (fixture) => {
     const engine = window.__engine;
     const originalKind = engine.village.getState().spec.kind;

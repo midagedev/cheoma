@@ -38,7 +38,6 @@ const PRESETS = ['korea', 'temple', 'giwa', 'choga'];
 const SUNSETS = ['gold', 'crimson', 'violet'];
 const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 const WEATHERS = ['clear', 'rain', 'snow'];
-const STYLES = ['pbr', 'ink'];
 const SCALES = ['solo', 'hamlet', 'village', 'town', 'capital', 'hanyang'];
 const CHARACTERS = ['minchon', 'yeoyeom', 'banchon'];
 const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
@@ -52,7 +51,7 @@ const VILLAGE_DEPENDENT_FIELDS = Object.freeze([
   'f', 'ed',
 ]);
 const KNOWN_FIELDS = new Set([
-  's', 't', 'p', 'su', 'se', 'we', 'm', 'x', 'fl',
+  's', 't', 'p', 'su', 'se', 'we', 'x', 'fl',
   'vs', ...VILLAGE_DEPENDENT_FIELDS,
   'vw', 'hp',
 ]);
@@ -65,7 +64,6 @@ const PRESET_CODES = makeCodes(PRESETS);
 const SUNSET_CODES = makeCodes(SUNSETS);
 const SEASON_CODES = makeCodes(SEASONS);
 const WEATHER_CODES = makeCodes(WEATHERS);
-const STYLE_CODES = makeCodes(STYLES);
 const SCALE_CODES = makeCodes(SCALES);
 const CHARACTER_CODES = makeCodes(CHARACTERS);
 
@@ -375,7 +373,6 @@ export function encodeSceneSnapshot({
   }
   if (!PRESETS.includes(state.preset) || !SUNSETS.includes(state.sunsetLook)
       || !SEASONS.includes(state.season) || !WEATHERS.includes(state.weather)
-      || !STYLES.includes(state.renderStyle)
       || !weatherOkForSeason(state.weather, state.season)) return null;
   if (!Number.isInteger(state.expansion) || state.expansion < 1
       || state.expansion > standaloneMaxExpansion(state.preset)) return null;
@@ -400,7 +397,6 @@ export function encodeSceneSnapshot({
   pushField(fields, 'su', encodeEnum(state.sunsetLook, SUNSET_CODES), !!overrides.sunsetLook);
   pushField(fields, 'se', encodeEnum(state.season, SEASON_CODES), !!overrides.season);
   pushField(fields, 'we', encodeEnum(state.weather, WEATHER_CODES), !!overrides.weather);
-  pushField(fields, 'm', encodeEnum(state.renderStyle, STYLE_CODES), state.renderStyle === 'ink');
   pushField(fields, 'x', Number(state.expansion).toString(36),
     state.expansion > 1);
   pushField(fields, 'fl', '1', flow === true);
@@ -484,10 +480,8 @@ export function decodeSceneSnapshot(payload) {
   const sunsetLook = readOptionalEnum(fields, 'su', SUNSET_CODES, null);
   const season = readOptionalEnum(fields, 'se', SEASON_CODES, null);
   const weather = readOptionalEnum(fields, 'we', WEATHER_CODES, null);
-  const renderStyle = readOptionalEnum(fields, 'm', STYLE_CODES, 'pbr');
   if ((fields.has('p') && !preset) || (fields.has('su') && !sunsetLook)
-      || (fields.has('se') && !season) || (fields.has('we') && !weather)
-      || !renderStyle) return null;
+      || (fields.has('se') && !season) || (fields.has('we') && !weather)) return null;
   if (fields.has('se') && fields.has('we') && !weatherOkForSeason(weather, season)) return null;
   let expansion = 1;
   if (fields.has('x')) {
@@ -585,7 +579,6 @@ export function decodeSceneSnapshot(payload) {
     sunsetLook,
     season,
     weather,
-    renderStyle,
     expansion,
     flow: fields.has('fl'),
     village,

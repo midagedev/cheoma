@@ -1,14 +1,12 @@
 // 헤드리스 스크린샷: 먼지 모트 + 등롱 흔들림 검증 → shots/motes-*.png
 // 사용법: node tools/shoot-motes.mjs [group]
-//   group = backlight | drift | timecurve | ink | lantern | regress | all(기본)
+//   group = backlight | drift | timecurve | lantern | regress | all(기본)
 //
 // env 직접 import 하네스(/__motes): index.html 앱 경로(다른 에이전트가 자주 깨뜨림) 회피.
 //   window.__advance(secs)       : env.update 를 0.05s 씩 밀어 모트 드리프트·등롱 요동 전진
 //   window.__setWind(scale)      : getWind 전역 배율(무풍 0 · 강풍 비교)
 //   window.__setTime(name)       : 시간대 전환(모트 강도·색·태양 방향)
-//   window.__setInk(on)          : renderer.toneMapping 토글(ink 모드 감지 신호)
 //   window.__aim(cx,cy,cz,tx,ty,tz) : 카메라 재조준
-//   window.__motesVisible()      : dustMotes.visible (ink 게이트 확인)
 //   window.__lanternPos()        : 등롱 bulb 월드 좌표 배열(요동 델타 측정)
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -69,9 +67,7 @@ place();
 window.__aim=(cx,cy,cz,tx,ty,tz)=>{camera.position.set(cx,cy,cz);target.set(tx,ty,tz);camera.lookAt(target);};
 window.__setWind=(s)=>{window.__windScale=s;};
 window.__setTime=(name)=>{env.setTime(name);};
-window.__setInk=(on)=>{renderer.toneMapping=on?THREE.NoToneMapping:THREE.ACESFilmicToneMapping;};
 window.__advance=(secs)=>{const n=Math.max(1,Math.round(secs/0.05));for(let i=0;i<n;i++)env.update(0.05);};
-window.__motesVisible=()=>{const m=scene.getObjectByName('dustMotes');return m?m.visible:null;};
 window.__boost=(k,szk)=>{const m=scene.getObjectByName('dustMotes');if(!m)return;m.material.uniforms.uIntensity.value*=k;if(szk){m.material.uniforms.uDustRadius.value*=szk;m.material.uniforms.uFireflyRadius.value*=szk;}};
 window.__motesCount=()=>{const m=scene.getObjectByName('dustMotes');return m?m.geometry.instanceCount:null;};
 window.__lanternPos=()=>{
@@ -119,9 +115,7 @@ async function open(url) {
 async function advance(s) { await page.evaluate((x) => window.__advance(x), s); }
 async function setWind(s) { await page.evaluate((x) => window.__setWind(x), s); }
 async function setTime(n) { await page.evaluate((x) => window.__setTime(x), n); }
-async function setInk(on) { await page.evaluate((x) => window.__setInk(x), on); }
 async function aim(a) { await page.evaluate((v) => window.__aim(...v), a); }
-async function motesVisible() { return page.evaluate(() => window.__motesVisible()); }
 async function lanternPos() { return page.evaluate(() => window.__lanternPos()); }
 async function save(name, clip) {
   const file = join(OUT, `motes-${name}.png`);
@@ -161,20 +155,7 @@ if (want('timecurve')) {
   }
 }
 
-// ---------------- 4) ink 모드: 모트 비표시 ----------------
-if (want('ink')) {
-  await open(`${base}/__motes?preset=giwa&time=sunset&frame=tq`);
-  await advance(0.5);
-  const vBefore = await motesVisible();
-  await setInk(true); await advance(0.2);
-  const vInk = await motesVisible();
-  await save('ink-hidden', CROP);
-  await setInk(false); await advance(0.2);
-  const vAfter = await motesVisible();
-  console.log('[ink] motesVisible pbr=', vBefore, ' ink=', vInk, ' pbr-again=', vAfter);
-}
-
-// ---------------- 5) 등롱 흔들림: 근접 컷 + 위치 델타 수치 ----------------
+// ---------------- 4) 등롱 흔들림: 근접 컷 + 위치 델타 수치 ----------------
 if (want('lantern')) {
   // 밤(등롱 밝음)에 corner 등롱 근접. 먼저 좌표 읽어 카메라를 맞춘다.
   await open(`${base}/__motes?preset=giwa&time=night&frame=tq`);
@@ -222,7 +203,7 @@ if (want('diag')) {
   await save('diag-boost-frontlit', { x: 100, y: 60, width: 900, height: 500 });
 }
 
-// ---------------- 6) 회귀: 눈/비 씬 이물감·pageerror 0 ----------------
+// ---------------- 5) 회귀: 눈/비 씬 이물감·pageerror 0 ----------------
 if (want('regress')) {
   for (const [name, qs] of [
     ['reg-sunset', 'preset=giwa&time=sunset&frame=tq'],

@@ -45,8 +45,6 @@ const shots = [
   ['day-tq', 'env=1&preset=korea&angle=three-quarter&time=day'],
   // ⑤ night — 달빛 무드 유지(밤 그늘까지 들리면 안 됨)
   ['night-tq', 'env=1&preset=korea&angle=three-quarter&time=night'],
-  // ⑥ ink 회귀
-  ['ink-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&mode=ink'],
   // dawn 회귀(골든아워 프론트라이트 — 바운스 과하지 않은지)
   ['dawn-tq', 'env=1&preset=korea&angle=three-quarter&time=dawn'],
   ['post0-sunset', 'env=1&preset=korea&angle=three-quarter&time=sunset&post=0'],

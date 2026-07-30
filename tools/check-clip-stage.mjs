@@ -11,7 +11,7 @@ import {
 
 assert.deepEqual(
   CLIP_STAGE_IDS.slice().sort(),
-  ['aerial', 'assemble', 'ink', 'night', 'yard'],
+  ['aerial', 'assemble', 'night', 'yard'],
   'clip stage id set drifted',
 );
 assert.ok(Object.isFrozen(CLIP_STAGES) && CLIP_STAGE_IDS.every((id) => Object.isFrozen(CLIP_STAGES[id])));
@@ -31,7 +31,11 @@ for (const id of CLIP_STAGE_IDS) {
   assert.equal(q.seed, '7');
   assert.equal(q.time, stage.time);
   if (stage.boot !== 'hero') assert.equal(q.village, '1');
-  if (stage.renderStyle === 'ink') assert.equal(q.mode, 'ink');
+  // No stage carries a render style any more: the ink mode was removed, so a stage
+  // must never reintroduce a `mode` boot query (an old `?clip=ink` link falls back
+  // to the default entry through normalizeClipStageId returning null).
+  assert.ok(!('renderStyle' in stage), `${id} must not pin a render style`);
+  assert.equal(q.mode, undefined, `${id} query must not carry a render mode`);
   const url = buildClipStageUrl('https://cheoma.midagedev.com/', id);
   assert.ok(url.includes(`clip=${id}`), `${id} url missing clip key`);
   assert.ok(url.includes('seed=7'), `${id} url missing seed`);
@@ -57,13 +61,12 @@ for (const id of CLIP_STAGE_IDS) {
 // Assemble is the flagship high-원 path.
 assert.equal(CLIP_STAGES.assemble.boot, 'hero');
 assert.equal(CLIP_STAGES.assemble.time, 'sunset');
-assert.equal(CLIP_STAGES.assemble.renderStyle, 'pbr');
 // Yard focuses a residential parcel under sunset DoF.
 assert.equal(CLIP_STAGES.yard.boot, 'village-focus');
 assert.ok(CLIP_STAGES.yard.parcelId);
-// Night is a separate time; ink is a separate render style (never mixed into assemble).
+// Night is a separate time (never mixed into assemble).
 assert.equal(CLIP_STAGES.night.time, 'night');
-assert.equal(CLIP_STAGES.ink.renderStyle, 'ink');
-assert.notEqual(CLIP_STAGES.ink.time, CLIP_STAGES.assemble.time);
+assert.notEqual(CLIP_STAGES.night.time, CLIP_STAGES.assemble.time);
+assert.equal(normalizeClipStageId('ink'), null, 'the removed ink stage must not resolve');
 
 console.log(`CLIP STAGE: PASS (${CLIP_STAGE_IDS.length} stages, seed-7 fixtures, query builders)`);

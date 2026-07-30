@@ -4,7 +4,6 @@ import GUI from 'lil-gui';
 import { PRESETS, computeLayout } from './params.js';
 import { buildBuilding } from './builder/index.js';
 import { setupEnvironment } from './env/index.js';
-import { setupInk, INK_PALETTE } from './render/ink.js';
 import { setupWeather } from './env/weather.js';
 import { setupNightGlow } from './env/night-glow.js';
 import { setupCinematic } from './camera/cinematic.js';
@@ -52,12 +51,8 @@ const initialEnvironment = normalizeEnvironmentState({ season: requestedSeason, 
 const seasonName = initialEnvironment.season;
 const weatherName = initialEnvironment.weather;
 
-// 렌더 모드: pbr(기본) | ink(수묵 NPR). ?mode=ink 또는 GUI에서 전환.
-const modeState = { mode: q.get('mode') === 'ink' ? 'ink' : 'pbr' };
-const PAPER = new THREE.Color(INK_PALETTE.paper);
-
 // 피사계 심도(DoF): 일반 뷰 기본 ON, shot 모드 기본 OFF(비교 스크린샷은 선명해야 함).
-// ?dof=1 강제 ON, ?dof=0 강제 OFF. pbr 경로에만 적용(ink 모드는 미적용).
+// ?dof=1 강제 ON, ?dof=0 강제 OFF.
 const dofParam = q.get('dof');
 const dofState = {
   enabled: dofParam === null ? !SHOT : dofParam === '1',
@@ -65,7 +60,7 @@ const dofState = {
 };
 
 // 플래그십 룩(bloom 헤이즈 + 골든아워 림 + 태양 글로우): 기본 ON(shot 포함).
-// ?post=0 으로만 끈다. pbr 경로 전용(ink 모드는 자체 무드 유지 → bloom 미적용).
+// ?post=0 으로만 끈다.
 const postEnabled = q.get('post') !== '0';
 
 // ---------- 렌더러/씬 ----------
@@ -287,18 +282,7 @@ if (!SHOT) {
   addEventListener('pointerdown', () => audio.start(), { once: true });
 }
 
-// ---------- 수묵(ink) 렌더 파이프라인 ----------
-// 컴포저는 처음 ink 모드로 들어갈 때 지연 생성(pbr 전용 스크린샷 경로에 부담 없음).
-let ink = null;
-function ensureInk() {
-  if (!ink) {
-    ink = setupInk(renderer, scene, camera);
-    ink.setSize(innerWidth, innerHeight);
-  }
-  return ink;
-}
-
-// ---------- 피사계 심도(DoF) 컴포저 (pbr 전용, 지연 생성) ----------
+// ---------- 피사계 심도(DoF) 컴포저 (지연 생성) ----------
 // RenderPass → BokehPass → OutputPass. BokehPass 내부의 반해상도 광원 prefilter와
 // source scatter까지 오프스크린(선형)에서 처리되고 마지막 OutputPass 가 캔버스에
 // 렌더될 때만 ACES 톤매핑+sRGB 를 한 번 적용한다
@@ -335,7 +319,7 @@ function ensurePost() {
     post.setSize(innerWidth, innerHeight);
     post.setTime(envState.time);          // 초기 시간대 튜닝·태양 글로우 배치
     // 태양 글로우는 하늘(env)이 있을 때만 노출. bloom·rim 은 env 무관하게 항상 동작.
-    post.setEnabled(modeState.mode === 'pbr' && envState.enabled);
+    post.setEnabled(envState.enabled);
   }
   return post;
 }
@@ -361,7 +345,7 @@ const FILL_LERP = 3.0;   // ≈1.6s 이즈(sky 크로스페이드와 결이 맞�
 // 목표 갱신(refreshAppearance 에서 호출). 첫 호출은 스냅.
 function applyFill() {
   const cfg = FILL_BY_TIME[envState.time] || FILL_BY_TIME.day;
-  const on = envState.enabled && modeState.mode === 'pbr' && cfg.int > 0;
+  const on = envState.enabled && cfg.int > 0;
   _fillTargetInt = on ? cfg.int : 0;
   _fillTargetCol.setHex(on ? cfg.color : 0xffffff);
   if (!_fillStarted) { fill.intensity = _fillTargetInt; fill.color.copy(_fillTargetCol); }
@@ -380,50 +364,26 @@ function stepFill(dt) {
   fill.target.updateMatrixWorld();
 }
 
-// env(또는 폴백)가 scene.fog/background/exposure/조명에 반영한 "베이스 외형"을
-// 다시 적용한다. ink 모드가 in-place로 바꿔 놓은 fog 색·배경을 pbr로 복귀시킬 때 쓴다.
+// env(또는 폴백)가 scene.fog/background/exposure/조명에 반영한 "베이스 외형"을 다시 적용한다.
 function reapplyEnvBase() {
   if (envState.enabled) env.setTime(envState.time); // sky.apply → fog/bg/exposure/조명
   else env.setEnabled(false);                        // restoreFallback → 기본값
 }
 
-// 현재 모드에 맞는 외형 오버레이. reapplyEnvBase 직후에 호출한다.
-//  - ink: 톤매핑 off, 씬 fog는 종이색으로 물들이되 거리(near/far)는 유지하고
-//         그 거리를 먹 셰이더 fog uniform에 동기화(좌표계 일치 → 지평선 헛 먹선 방지).
-//         하늘/배경은 종이색으로 수렴.
-//  - pbr: ACES 톤매핑 복원. fog/bg/exposure는 reapplyEnvBase가 이미 정상화.
+// 외형 오버레이. reapplyEnvBase 직후에 호출한다.
 function refreshAppearance() {
-  if (modeState.mode === 'ink') {
-    renderer.toneMapping = THREE.NoToneMapping;
-    ensureInk();
-    if (scene.fog) {
-      ink.inkPass.uniforms.fogNear.value = scene.fog.near;
-      ink.inkPass.uniforms.fogFar.value = scene.fog.far;
-      scene.fog.color.copy(PAPER);
-    }
-    scene.background = PAPER;
-    post?.setEnabled(false); // 태양 글로우 스프라이트를 ink 렌더에서 숨김
-  } else {
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    // 플래그십 룩: 현재 시간대 튜닝·태양 글로우 재적용(멱등). 태양 글로우는 env 켜짐일
-    // 때만. 아직 미생성이면 ensurePost 가 최초 pbr 프레임에서 동일 초기화를 수행한다.
-    if (postEnabled && post) { post.setTime(envState.time); post.setEnabled(envState.enabled); }
-  }
-  // 안티솔라 웜 필: 현재 시간대·모드·env 상태로 그늘면 바운스 재적용(ink/day/night/off 는 0).
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  // 플래그십 룩: 현재 시간대 튜닝·태양 글로우 재적용(멱등). 태양 글로우는 env 켜짐일
+  // 때만. 아직 미생성이면 ensurePost 가 최초 pbr 프레임에서 동일 초기화를 수행한다.
+  if (postEnabled && post) { post.setTime(envState.time); post.setEnabled(envState.enabled); }
+  // 안티솔라 웜 필: 현재 시간대·env 상태로 그늘면 바운스 재적용.
   applyFill();
-  // 날씨 대기 오버레이: env/ink 가 방금 세팅한 신선한 base fog/bg 위에 한 번 물든다(멱등).
-  weatherRef?.applyAtmosphere({ mode: modeState.mode });
+  // 날씨 대기 오버레이: env 가 방금 세팅한 신선한 base fog/bg 위에 한 번 물든다(멱등).
+  weatherRef?.applyAtmosphere();
 }
 
-function applyMode(mode) {
-  modeState.mode = mode;
-  // ink 모드: env 트윈·fog 합성을 끈다(즉시 스냅으로 종이색 fog 를 침해하지 않게). pbr 복귀 시 재개.
-  env.setImmediate(mode === 'ink');
-  reapplyEnvBase();     // 베이스 fog/bg/exposure/조명 정상화 (ink가 mutate한 것 복구)
-  refreshAppearance();  // 모드별 오버레이
-}
-
-applyMode(modeState.mode);
+reapplyEnvBase();
+refreshAppearance();
 
 // ---------- URL 로 드라이브 지정 ----------
 // ?drive=orbit          → 로드 즉시 재생
@@ -489,8 +449,6 @@ if (!SHOT) {
     },
   }, 'rec').name('Record clip');
   const fRender = gui.addFolder('Render');
-  fRender.add(modeState, 'mode', ['pbr', 'ink']).name('render mode')
-    .onChange((v) => applyMode(v));
   fRender.add(dofState, 'enabled').name('depth of field');
   fRender.add(dofState, 'aperture', 0, 0.0004, 0.00001).name('aperture')
     .onChange((v) => {
@@ -503,7 +461,7 @@ if (!SHOT) {
     envState.enabled = v;
     env.setEnabled(v); ground.visible = !v;
     nightGlowRef?.setEnabled(v); // env OFF면 창호 실내광도 원복
-    refreshAppearance();   // ink 모드면 새 fog 거리/종이색을 다시 물린다
+    refreshAppearance();
     audio?.setEnvActive(v); // env OFF면 개울 물소리 정지
   });
   fEnv.add(envState, 'time', ['dawn', 'day', 'sunset', 'night']).name('time of day')
@@ -533,13 +491,8 @@ if (!SHOT) {
   fSound.add(soundState, 'ambience', 0, 2, 0.01).name('ambience volume').onChange((v) => audio?.setAmbienceVolume(v));
 }
 
-// ---------- 렌더 한 프레임 (현재 모드) ----------
+// ---------- 렌더 한 프레임 ----------
 function renderFrame() {
-  if (modeState.mode === 'ink') {
-    ensureInk();
-    ink.composer.render();
-    return;
-  }
   // 플래그십 룩(기본): bloom·rim·태양 글로우. DoF 는 이 컴포저의 bokeh 로 흡수.
   if (postEnabled) {
     const p = ensurePost();
@@ -563,7 +516,6 @@ function resizeAll() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  if (ink) ink.setSize(innerWidth, innerHeight);
   if (dof) dof.composer.setSize(innerWidth, innerHeight);
   if (post) post.setSize(innerWidth, innerHeight);
 }
@@ -575,7 +527,7 @@ function makePostcard({ download = true } = {}) {
   const prev = renderer.getPixelRatio();
   const bump = prev < 2;
   if (bump) { renderer.setPixelRatio(2); resizeAll(); }
-  const filename = `joseon-${currentPreset}-${modeState.mode}.png`;
+  const filename = `joseon-${currentPreset}.png`;
   const url = capturePostcard(renderer, renderFrame, { title: 'joseon', filename, download });
   if (bump) { renderer.setPixelRatio(prev); resizeAll(); }
   renderFrame(); // 정상 비율로 화면 복구
@@ -736,7 +688,7 @@ renderer.setAnimationLoop(() => {
   treeOcc?.update(camera, dt);                   // 전경 나무 오클루더 페이드(shot 모드는 null)
   weather.update(dt);
   if (envState.enabled) env.update(dt);          // 계절 색 보간·낙엽 파티클(시네마틱 중에도 흩날림)
-  if (modeState.mode === 'pbr') stepFill(dt);    // 안티솔라 웜 필 시간대 크로스페이드(태양 트윈 추종)
+  stepFill(dt);    // 안티솔라 웜 필 시간대 크로스페이드(태양 트윈 추종)
   nightGlowRef?.update(dt);                       // 야간 창호·실내 등불 촛불 일렁임(내부에서 night 게이트)
   audio?.update(dt);                             // 시네마틱 드라이브 중에도 무조건(환경음·BGM·풍경)
   renderFrame();

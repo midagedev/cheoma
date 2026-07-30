@@ -2,7 +2,6 @@
 // 사용법: node tools/shoot-critters.mjs
 //  - flock-0/1/2: 같은 페이지를 열어둔 채 시간 간격을 두고 3장(무리 위치가 변하는지)
 //  - dog / cat / magpie: 앵글별 지상·건물 생물
-//  - ink: 수묵 모드에서 새 떼가 먹점으로 읽히는지
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
@@ -79,12 +78,7 @@ await open(`${base}&angle=roof&time=day`);
 await page.waitForTimeout(600);
 await shot('magpie');
 
-// 5) 수묵 모드 새 떼(먹점 확인)
-await open(`${base}&angle=three-quarter&time=day&mode=ink`);
-await page.waitForTimeout(800);
-await shot('ink');
-
-// 6) 밤: 새 떼 없음 확인
+// 5) 밤: 새 떼 없음 확인
 await open(`${base}&angle=three-quarter&time=night`);
 await page.waitForTimeout(600);
 await shot('night');

@@ -5,7 +5,7 @@
 //   touch          : 거친 포인터(폰·태블릿) — 터치 타깃 확대·다이얼 밴드 확대.
 //   landscapePhone : 가로 폰(짧은 높이) — 시트 대신 축소된 우측 패널.
 //   phone          : 진짜 폰(거친 포인터 + 최소변 ≤ 520) — 아래 두 성능 술어의 유일한 축.
-//   compact        : 픽셀 예산 하향(pixelRatio 1.5·저해상 bloom·수묵 내부 타깃).
+//   compact        : 픽셀 예산 하향(pixelRatio 1.5·저해상 bloom).
 //   perf           : 성능 하향 프로파일(그림자맵 하향·눈비 지붕 충돌 생략).
 //
 // perf/compact 는 2026-07-25 감사(docs/mobile-effects-audit.md P1·P2)에서 **진짜 폰**으로 좁혔다.

@@ -972,7 +972,6 @@ try {
           sunsetLook: 'gold',
           season: 'summer',
           weather: 'clear',
-          renderStyle: 'pbr',
           expansion: 1,
         },
         overrides: {
@@ -1021,7 +1020,6 @@ try {
           sunsetLook: advancedDecoded.sunsetLook,
           season: advancedDecoded.season,
           weather: advancedDecoded.weather,
-          renderStyle: advancedDecoded.renderStyle,
           expansion: advancedDecoded.expansion,
         },
         overrides: advancedDecoded.overrides,

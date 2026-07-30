@@ -64,8 +64,8 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: join(OUT, 'exp-hero.png') });
 console.log('saved', 'exp-hero.png');
 
-// 3) 포스트카드 — 페이지에서 capture 함수 직접 호출해 dataURL 저장 (pbr+DoF, ink).
-for (const [tag, extra] of [['pbr', 'env=1&dof=1'], ['ink', 'env=1&mode=ink']]) {
+// 3) 포스트카드 — 페이지에서 capture 함수 직접 호출해 dataURL 저장 (pbr+DoF).
+for (const [tag, extra] of [['pbr', 'env=1&dof=1']]) {
   await page.goto(`${base}?shot=1&${extra}&time=day&preset=korea&angle=three-quarter`, { waitUntil: 'load' });
   await ready();
   await page.waitForTimeout(200);

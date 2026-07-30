@@ -180,7 +180,7 @@ function terrainMeshSegmentObstruction(site, start, end, threshold, maxT) {
 /**
  * Resolve one camera near plane that removes terrain in front of a focus subject.
  *
- * A perspective near plane clips color, packed DoF depth, ink normal/depth and
+ * A perspective near plane clips color, packed DoF depth and
  * vegetation with the same projection, so it is a much smaller ownership
  * boundary than teaching every material and override pass a camera tunnel.
  * `samples` are the nine camera-facing points owned by focus visibility. The

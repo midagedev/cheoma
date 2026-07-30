@@ -11,7 +11,6 @@ const API_BUILDING_EXAMPLE_HTML = join(API_BUILDING_EXAMPLE, 'index.html');
 const API_BUILDING = join(SRC, 'api', 'building.js');
 const API_PLAN = join(SRC, 'api', 'village-plan.js');
 const API_PARTICLE_STATE = join(SRC, 'api', 'particle-state.js');
-const API_RENDER_STYLE = join(SRC, 'api', 'render-style.js');
 const API_RESIDENTIAL_OPENINGS = join(SRC, 'api', 'residential-openings.js');
 const APP_COMPONENT = join(APP, 'App.svelte');
 const APP_MAIN = join(APP, 'main.js');
@@ -269,10 +268,6 @@ checkPureClosure(particleStateClosure, 'particle-state');
 const residentialOpeningClosure = dependencyClosure(API_RESIDENTIAL_OPENINGS);
 checkPureClosure(residentialOpeningClosure, 'residential-opening');
 
-// URL/state consumers must not pull the WebGL ink renderer (and therefore THREE/DOM) at app boot.
-const renderStyleClosure = dependencyClosure(API_RENDER_STYLE);
-checkPureClosure(renderStyleClosure, 'render-style');
-
 // Locale parity. t() falls back to the raw key, so a key present in one locale and
 // missing in the other ships the identifier itself as user-visible text (found this
 // way: the village rebuild tooltip rendered as "vil_reroll_tip" in English).
@@ -318,7 +313,7 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${particleStateClosure.size} particle-state modules, ${residentialOpeningClosure.size} residential-opening modules, ${renderStyleClosure.size} pure render-style modules, 0 cycles)`);
+console.log(`ARCHITECTURE: PASS (${walk(SRC).length} src modules, ${planClosure.size} pure-plan modules, ${particleStateClosure.size} particle-state modules, ${residentialOpeningClosure.size} residential-opening modules, 0 cycles)`);
 if (hotspots.length) {
   console.log('Refactor hotspots (warning only):');
   for (const item of hotspots) console.log(`  ${String(item.lines).padStart(4)}  ${item.file}`);

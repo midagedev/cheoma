@@ -158,7 +158,7 @@ console.log(`  최대 인접 eff 점프 = ${maxJump.toFixed(3)} (샘플 간 국�
 check(maxJump <= 0.45, `궤도 스윕 최대 인접 점프 ${maxJump.toFixed(3)} ≤ 0.45`);
 for (const az of [3, 30, 55]) gate(`sweep-az${az}`);
 
-// ── 게이트 3: 시간대·날씨·모드 스윕 (정오미세/석양최대/밤소멸, 비·눈 소멸, ink·post0 무영향) ─
+// ── 게이트 3: 시간대·날씨 스윕 (정오미세/석양최대/밤소멸, 비·눈 소멸, post0 무영향) ─
 console.log('\n=== GATE 3: 시간대·날씨·모드 소멸 게이트 ===');
 async function amtOnly(nm, qs, setW) {
   const errd = await load(qs);
@@ -174,10 +174,7 @@ const aSun = await amtOnly('time-sunset', 'env=1&preset=korea&time=sunset&az=30&
 const aNight = await amtOnly('time-night', 'env=1&preset=korea&time=night&az=30&el=-6');
 const aRain = await amtOnly('wx-rain', 'env=1&preset=korea&time=sunset&az=30&el=-6', 'rain');
 const aSnow = await amtOnly('wx-snow', 'env=1&preset=korea&time=sunset&az=30&el=-6', 'snow');
-// ink: 별도 컴포저(post 미사용) → 플레어 무. post=0: post 컴포저 자체 미사용.
-const errdInk = await load('env=1&preset=korea&angle=three-quarter&time=sunset&mode=ink');
-await shot('mode-ink'); gate('mode-ink');
-console.log(`  mode-ink: (별도 컴포저, 플레어 패스 미실행)${errdInk ? ` ERR:${errdInk}` : ''}`);
+// post=0: post 컴포저 자체 미사용.
 const errdP0 = await load('env=1&preset=korea&angle=three-quarter&time=sunset&post=0');
 await shot('post0'); gate('post0');
 console.log(`  post0: (post 컴포저 미사용)${errdP0 ? ` ERR:${errdP0}` : ''}`);
@@ -187,7 +184,7 @@ check([aDay, aSun, aNight, aRain, aSnow].every(Number.isFinite), '시간대·날
 check(aDay < aSun, `정오(${aDay}) < 석양(${aSun})`);
 check(aNight < 0.02, `밤 플레어 소멸(${aNight})`);
 check(aRain < aSun * 0.25 && aSnow < aSun * 0.25, `비·눈 플레어가 석양의 25% 미만(${aRain}, ${aSnow})`);
-check(errdInk === 0 && errdP0 === 0, 'ink·post=0 경로 런타임 에러 0');
+check(errdP0 === 0, 'post=0 경로 런타임 에러 0');
 
 // ── 게이트 4: shot 결정론 (같은 URL 2회 픽셀 동일) ────────────────────────────────
 // 플레어는 시간항이 없어 카메라·시간 고정 시 결정론이다. 잔차가 있다면 베이스 씬(모트·새 등

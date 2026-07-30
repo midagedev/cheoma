@@ -21,7 +21,7 @@ mkdirSync(SHOTS, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json' };
 
 // 하네스 HTML: scene + 건물 배치(scene='single'|'pair'|'grid') + env + post 를 직접 배선.
-//   URL: /__fres?rim=fresnel&scene=pair&preset=giwa&time=sunset&az=34&el=-4&r=3.0&tx=..&fov=30&ink=0
+//   URL: /__fres?rim=fresnel&scene=pair&preset=giwa&time=sunset&az=34&el=-4&r=3.0&tx=..&fov=30
 const HARNESS = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>html,body{margin:0;height:100%;overflow:hidden;background:#cfd8e0}#app{width:100%;height:100%}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"}}</script>
@@ -32,20 +32,18 @@ import { PRESETS, computeLayout } from '/src/params.js';
 import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment } from '/src/env/index.js';
 import { setupPost } from '/src/env/post.js';
-import { setupInk } from '/src/render/ink.js';
 const q = new URLSearchParams(location.search);
 const num = (k, d) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : d; };
 const presetName = ['korea','temple','choga','giwa'].includes(q.get('preset')) ? q.get('preset') : 'giwa';
 const time = q.get('time') || 'sunset';
 const sceneKind = q.get('scene') || 'single';   // single | pair | grid
-const ink = q.get('ink') === '1';
 const post0 = q.get('post') === '0';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = ink ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 document.getElementById('app').appendChild(renderer.domElement);
 
@@ -109,15 +107,8 @@ aim(num('az', 34), num('el', sceneKind === 'grid' ? 34 : -4), num('r', defR) * m
 window.__aim = (az, el, r) => aim(az, el, r * maxDim);
 window.__aimT = (tx, ty, tz) => { target.set(tx, ty, tz); camera.lookAt(target); };
 
-let post = null, inkPipe = null;
-if (ink) {
-  inkPipe = setupInk(renderer, scene, camera); inkPipe.setSize(innerWidth, innerHeight);
-  if (scene.fog) { inkPipe.inkPass.uniforms.fogNear.value = scene.fog.near; inkPipe.inkPass.uniforms.fogFar.value = scene.fog.far; scene.fog.color.copy(new THREE.Color(0xf3efe6)); }
-  scene.background = new THREE.Color(0xf3efe6);
-  // 실제 앱 ink 경로: post 는 만들되 setEnabled(false) — 재질 프레넬 강도/마스터가 0 으로 눌리는지 검증.
-  post = setupPost({ renderer, scene, camera });
-  post.setTime(time); post.setEnabled(false);
-} else if (!post0) {
+let post = null;
+if (!post0) {
   post = setupPost({ renderer, scene, camera });
   post.setSize(innerWidth, innerHeight);
   post.setTime(time);
@@ -138,8 +129,7 @@ renderer.setAnimationLoop(() => {
   renderer.info.reset();
   env.update(0.016);
   if (post) post.update(0.016);
-  if (ink) inkPipe.composer.render();
-  else if (post0) renderer.render(scene, camera);
+  if (post0) renderer.render(scene, camera);
   else post.composer.render();
   window.__lastCalls = renderer.info.render.calls;
   window.__lastTris = renderer.info.render.triangles;
@@ -272,11 +262,8 @@ for (const [nm, qs] of [
 }
 gate('flare-eave-off');
 
-console.log('\n=== GATE 5: ink · post=0 무회귀 (골든 림 누출 없어야) ===');
+console.log('\n=== GATE 5: post=0 무회귀 (골든 림 누출 없어야) ===');
 {
-  const ei = await open('rim=fresnel&scene=single&preset=korea&time=sunset&az=34&el=2&r=3.0&ink=1');
-  const ri = await rimInfo(); await shot('mode-ink'); gate('mode-ink');
-  console.log(`  ink: rim=${JSON.stringify(ri)} (strength/scale 0 이어야)${ei ? ' ERR:' + ei : ''}`);
   const ep = await open('scene=single&preset=korea&time=sunset&az=34&el=2&r=3.0&post=0');
   await shot('post0'); gate('post0');
   console.log(`  post0: (post 컴포저 미사용, 재질 미패치)${ep ? ' ERR:' + ep : ''}`);

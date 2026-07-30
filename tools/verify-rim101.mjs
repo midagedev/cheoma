@@ -4,7 +4,7 @@
 //        — 나무·풀·소품 포함 증명 + 제외 목록(지형·물·개구부·발광·먹) 준수 확인
 //     ② 셰이더 컴파일 에러·pageerror 0 (sunset·night·autumn 각 로드; renderer.compile 로 전 재질 강제 컴파일)
 //     ③ seasons 활성 + 반복 rescan 에서 프로그램 재컴파일 폭주 없음(programs 카운트 안정)
-//     ④ ink / ?post=0 / ?rim=pass 각 로드 클린(강도·마스터 0 / 미패치 / 폴백)
+//     ④ ?post=0 / ?rim=pass 각 로드 클린(미패치 / 폴백)
 // 사용: node tools/verify-rim101.mjs
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -26,20 +26,18 @@ import { PRESETS, computeLayout } from '/src/params.js';
 import { buildBuilding } from '/src/builder/index.js';
 import { setupEnvironment, setupGrass } from '/src/env/index.js';
 import { setupPost } from '/src/env/post.js';
-import { setupInk } from '/src/render/ink.js';
 import { buildProp } from '/src/props/index.js';
 
 const q = new URLSearchParams(location.search);
 const time = q.get('time') || 'sunset';
 const season = q.get('season') || 'summer';
-const ink = q.get('ink') === '1';
 const post0 = q.get('post') === '0';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(1);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = ink ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 document.getElementById('app').appendChild(renderer.domElement);
 
@@ -89,11 +87,8 @@ env.setEnabled(true);
 const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 900);
 camera.position.set(30, 14, 40); camera.lookAt(0, 4, 0);
 
-let post = null, inkPipe = null;
-if (ink) {
-  inkPipe = setupInk(renderer, scene, camera); inkPipe.setSize(innerWidth, innerHeight);
-  post = setupPost({ renderer, scene, camera }); post.setTime(time); post.setEnabled(false);
-} else if (!post0) {
+let post = null;
+if (!post0) {
   post = setupPost({ renderer, scene, camera }); post.setSize(innerWidth, innerHeight); post.setTime(time); post.setEnabled(true);
 }
 window.__post = post;
@@ -157,8 +152,7 @@ let frames = 0;
 renderer.setAnimationLoop(() => {
   env.update(0.016);
   if (post) post.update(0.016);
-  if (ink) inkPipe.composer.render();
-  else if (post0) renderer.render(scene, camera);
+  if (post0) renderer.render(scene, camera);
   else post.composer.render();
   frames++;
   if (frames === 5) window.__READY = true;
@@ -340,13 +334,8 @@ await open('rim=fresnel&time=sunset&season=summer');
   ok(compileErrs().length === 0, `seasons 활성 컴파일 에러 0`);
 }
 
-console.log('\\n=== GATE 4: ink · post=0 · rim=pass 무회귀 ===');
+console.log('\\n=== GATE 4: post=0 · rim=pass 무회귀 ===');
 {
-  await open('rim=fresnel&time=sunset&ink=1');
-  const ri = await rimInfo();
-  ok(ri && ri.strength === 0 && ri.scale === 0, `ink: 림 강도·마스터 0 (${JSON.stringify({ s: ri && ri.strength, sc: ri && ri.scale })})`);
-  ok(errors.length === 0, `ink: 콘솔에러 0`);
-
   await open('time=sunset&post=0');
   const rows = await audit();
   const anyPatched = rows.some((r) => r.patched);

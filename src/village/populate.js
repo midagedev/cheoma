@@ -121,16 +121,14 @@ export function* populateVillageSteps(plan, opts = {}) {
 
   // 물 uniform(개울 공유)
   const waterU = createWaterUniforms();
-  // 개울 알베도의 대기 참여 상태(감사 A7). 시간·계절·수묵을 하나의 목표로 합성해 두고
+  // 개울 알베도의 대기 참여 상태(감사 A7). 시간·계절을 하나의 목표로 합성해 두고
   //   update(dt) 가 지수 접근으로 좁힌다 — 환경 전환 크로스페이드 계약(팝 금지) 준수.
-  const waterLook = { time: 'day', season: 'summer', ink: 0 };
+  const waterLook = { time: 'day', season: 'summer' };
   const waterLookTarget = { tint: new THREE.Color(1, 1, 1), desat: 0 };
   function refreshWaterLook({ immediate = false } = {}) {
     const t = villageWaterLookTarget(waterLook);
     waterLookTarget.tint.setRGB(t.tint[0], t.tint[1], t.tint[2]);
     waterLookTarget.desat = t.desat;
-    // 반사층 탈채도는 수묵 전용 축이라 ink 런타임의 페이드 곡선을 그대로 따른다(트윈 없음).
-    waterU.uWaterInk.value = t.ink;
     if (immediate) {
       waterU.uWaterTint.value.copy(waterLookTarget.tint);
       waterU.uWaterDesat.value = waterLookTarget.desat;
@@ -629,17 +627,6 @@ export function* populateVillageSteps(plan, opts = {}) {
       setVillageWaterTime(waterU, name);
       waterLook.time = name;
       refreshWaterLook(opts);
-    },
-    // 수묵 커버리지(0..1 연속). ink pass 는 chromaKeep 으로 잔여 채도를 남기는데 물만 채도가
-    //   극단적이라 모노크롬 화면에 파란 획으로 남았다 → 물 자체를 무채로 보낸다.
-    //   호출자(ink 런타임)가 이미 amount 를 페이드 곡선으로 넘기므로 탈채도는 스냅한다 —
-    //   여기서 또 지수 접근을 걸면 종이 페이드보다 물이 뒤처진다. 틴트는 시간·계절
-    //   크로스페이드를 방해하지 않게 목표만 갱신하고 lerp 에 맡긴다.
-    setWaterInk: (amount) => {
-      if (waterLook.ink === amount) return;      // 매 프레임 호출을 무료로 만든다(ink 런타임 계약)
-      waterLook.ink = amount;
-      refreshWaterLook();
-      waterU.uWaterDesat.value = waterLookTarget.desat;
     },
     setAnimalsTime: (name) => { for (const a of animals.handles) a.setTime(name); },
     setSeason: (name, opts = {}) => {

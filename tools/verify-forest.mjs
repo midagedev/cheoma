@@ -15,7 +15,6 @@
 //   ⑦ setSeason 4계절 쉘 색 변화
 //   ⑧ determinism(같은 seed → 같은 forest) ALL PASS
 //   ⑨ pageerror 0(계절·헤이즈 프레임)
-//   ⑩ ink 모드 부팅 무에러
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
@@ -33,7 +32,6 @@ const HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 import * as THREE from 'three';
 import { planVillage } from '/src/village/plan.js';
 import { populateVillage } from '/src/village/populate.js';
-import { setupInk } from '/src/render/ink.js';
 
 // 결정론: 하네스 Math.random 오버라이드(village 알고리즘 규약).
 function seedRandom(){ let s = 0x2545f491 >>> 0; Math.random = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
@@ -198,7 +196,7 @@ function forestHash(fr){
 }
 
 async function run(){
-  const R = { metrics:{}, coverage:{}, granite:{}, rocks:{}, determinism:{}, season:null, ink:null };
+  const R = { metrics:{}, coverage:{}, granite:{}, rocks:{}, determinism:{}, season:null };
   // 메트릭 + 드로우콜 + 정점(규모별)
   for (const scale of ['village','town','capital','hanyang']){
     const { plan, group } = build(scale);
@@ -222,15 +220,6 @@ async function run(){
     const b = build(scale).group.userData.forest;
     R.determinism[scale] = { equal: forestHash(a) === forestHash(b) };
   }
-  // ink 부팅
-  try {
-    const { group } = build('village');
-    const scene = sceneWrap(group); const camera = cam();
-    const ink = setupInk(renderer, scene, camera);
-    ink.composer.render();
-    ink.dispose();
-    R.ink = { ok:true };
-  } catch(e){ R.ink = { ok:false, err: String(e && e.message || e) }; }
   return R;
 }
 window.__run = run;
@@ -285,7 +274,6 @@ pass('[town] 총 드로우콜 <1000', R.metrics.town.totalDrawCalls < 1000, `tot
 pass('계절 4색 구분(정점색)', R.season && R.season.distinctPairs === 6, `distinctPairs=${R.season && R.season.distinctPairs}/6`);
 pass('가을 붉음(R>G) & 여름 녹(G>R)', R.season && R.season.autumnRed && R.season.summerGreen, `autumnRed=${R.season && R.season.autumnRed} summerGreen=${R.season && R.season.summerGreen}`);
 for (const sc of Object.keys(R.determinism)) pass(`[${sc}] determinism`, R.determinism[sc].equal, '');
-pass('ink 부팅 무에러', R.ink && R.ink.ok, R.ink && R.ink.err || '');
 pass('pageerror 0', R.pageErrors === 0, `errs=${R.pageErrors}`);
 
 console.log('\\n===== #113 FOREST VERIFY =====\\n');

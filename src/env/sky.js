@@ -414,7 +414,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   }
 
   // 시간대 적용. opts.immediate=true(shot·초기 로드) 면 즉시 스냅, 아니면 크로스페이드.
-  //   같은 상태로의 재적용(reapplyEnvBase 등)은 스냅(멱등 복구) — ink/날씨가 만진 fog 를 되돌린다.
+  //   같은 상태로의 재적용(reapplyEnvBase 등)은 스냅(멱등 복구) — 날씨가 만진 fog 를 되돌린다.
   function apply(name, opts = {}) {
     if (!(name in TIME_PRESETS)) name = 'day';
     const key = atmosphereProfileKey(name, sunsetLook);

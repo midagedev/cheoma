@@ -35,7 +35,6 @@ const shots = [
   ['three-quarter', 'env=1&preset=korea&angle=three-quarter&time=night'],
   ['snow-front', 'env=1&preset=korea&angle=front&time=night&weather=snow'],
   ['snow-three-quarter', 'env=1&preset=korea&angle=three-quarter&time=night&weather=snow'],
-  ['ink', 'env=1&preset=korea&angle=three-quarter&time=night&mode=ink'],
   // 창호 클로즈업(실내광 편차 확인)
   ['closeup', 'env=1&preset=korea&angle=closeup&time=night'],
 ];

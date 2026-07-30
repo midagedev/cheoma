@@ -61,9 +61,8 @@ let shots = [
   { name: 'puddle-early', q: `${B}&preset=korea&angle=three-quarter&time=day&weather=rain`, wind: 0.8, wait: 900 },
   { name: 'puddle-grown', q: `${B}&preset=korea&angle=three-quarter&time=day&weather=rain`, wind: 0.8, wait: 5000 },
   { name: 'rain-sunset', q: `${B}&preset=korea&angle=three-quarter&time=sunset&weather=rain`, wind: 1.4, wait: 1600 },
-  // ── 회귀: 야간+눈 / 수묵+눈 / 맑음(accum=0) / 겨울+눈 콤보 ──
+  // ── 회귀: 야간+눈 / 맑음(accum=0) / 겨울+눈 콤보 ──
   { name: 'reg-night-snow', q: `${B}&preset=korea&angle=three-quarter&time=night&weather=snow`, eval: 'window.__wx.setAccum(1.0)', wait: 700 },
-  { name: 'reg-ink-snow', q: `${B}&preset=korea&angle=three-quarter&time=day&weather=snow&mode=ink`, eval: 'window.__wx.setAccum(1.0)', wait: 700 },
   { name: 'reg-clear', q: `${B}&preset=korea&angle=three-quarter&time=day&weather=clear`, wait: 500 },
   { name: 'reg-winter-snow', q: `${B}&preset=korea&angle=three-quarter&time=day&weather=snow&season=winter`, eval: 'window.__wx.setAccum(1.0)', wait: 700 },
 ];

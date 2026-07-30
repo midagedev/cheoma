@@ -63,7 +63,7 @@ import { createDirectionalShadowRuntime } from './directional-shadow-runtime.js'
 import {
   combineAbortSignals, createAbortError, createTaskOwner, guardApiMethods,
 } from './engine-lifetime.js';
-import { createInkModeRuntime } from './ink-mode-runtime.js';
+import { createFocusPolicyRuntime } from './focus-policy-runtime.js';
 import { createPostRuntime } from './post-runtime.js';
 import { createSceneRuntime } from './scene-runtime.js';
 import { createViewShift } from './view-shift.js';
@@ -153,14 +153,14 @@ function readPixelRatioCapOverride() {
 export function createEngine({ container, perf = false, compact = false } = {}) {
   // 모바일 성능 프로파일(둘 다 진짜 폰만 — device.svelte.js 술어 참조).
   //   perf   : 그림자맵 하향 + 눈·비 지붕 충돌 생략(메인스레드 CPU).
-  //   compact: pixelRatio 1.5 + 저해상 bloom + 수묵 내부 타깃(필레이트·텍스처 메모리).
+  //   compact: pixelRatio 1.5 + 저해상 bloom(필레이트·텍스처 메모리).
   // 그림자맵은 필레이트가 아니라 메모리 문제다: 4096²=64MB 는 iOS Safari 의 문서화되지 않은 WebGL
   // 메모리 상한에서 컨텍스트 소실 위험이라 폰에 쓰지 않는다. 다만 1536²(9MB)와 2048²(16MB)의 차이는
   // 7MB 뿐이고 처마 그림자 경계의 시각 차이는 뚜렷해, 폰도 2048²를 쓴다(감사 M2·R6).
   // PR_CAP 1.5 는 유일하게 전 프레임 필레이트를 곱하는 항목이라 실기기 A/B 전에는 올리지 않는다
   // (감사 M1·R9 — `?fxcompact=0` 훅으로 같은 URL에서 2로 비교할 수 있다).
   //   `?pr=N` 은 그 축 **하나만** 뒤집는 검증 훅이다. `fxcompact=0` 은 pixelRatio 와 저해상
-  //   bloom·수묵 타깃을 함께 되돌리므로 "1.5 대 2" 를 단독으로 비교할 수 없었다 — R9 판정에
+  //   bloom 타깃을 함께 되돌리므로 "1.5 대 2" 를 단독으로 비교할 수 없었다 — R9 판정에
   //   필요한 통제변수를 이 훅이 제공한다(docs/verification.md).
   const PR_CAP = readPixelRatioCapOverride() ?? (compact ? 1.5 : 2);
   const SHADOW_SIZE = perf || compact ? 2048 : 4096;
@@ -175,7 +175,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // ---------- 상태 ----------
   const state = {
     seed: 0, preset: 'korea', time: 'day', sunsetLook: 'gold', season: 'summer', weather: 'clear',
-    renderStyle: 'pbr',
     expansion: 1, selected: false, canMerge: false,
   };
   let disposed = false;
@@ -464,20 +463,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     compact,
   });
   const { post, outline } = postRuntime;
-  const inkModeRuntime = createInkModeRuntime({
-    renderer,
-    scene,
-    camera,
-    postRuntime,
-    compact,
-    reducedMotion: reducedCameraMotion,
-  });
+  const focusPolicyRuntime = createFocusPolicyRuntime({ post });
 
   function reapplyEnvBase(opts = {}) {
     env.setTime(state.time, opts); // sky.apply → fog/bg/exposure/조명
   }
   function refreshAtmosphere() {
-    weatherRef?.applyAtmosphere({ mode: 'pbr' });
+    weatherRef?.applyAtmosphere();
   }
 
   // ---------- 카메라 프레이밍 ----------
@@ -1005,7 +997,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       dofTargetDepth = post.setFocusPoint(activeDofAnchor());
     }
     post.update(postDt);
-    inkModeRuntime.syncAfterPostUpdate();
     post.composer.render();
   }
 
@@ -1069,7 +1060,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.userData.villageReferenceFov = active.r0 + (active.r1 - active.r0) * k;
     }
     if (active.dof1 != null) {
-      inkModeRuntime.setFocusPolicy({ dofAmount: active.dof0 + (active.dof1 - active.dof0) * k });
+      focusPolicyRuntime.setFocusPolicy({ dofAmount: active.dof0 + (active.dof1 - active.dof0) * k });
     }
     if (active.composition1 != null) {
       setFocusComposition(active.composition0 + (active.composition1 - active.composition0) * k);
@@ -1178,8 +1169,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // A same-aspect resize (the ResizeObserver's initial callback, DPR-only changes)
     // must not touch camera state at all: the boot-time callback fires while the
     // intro dolly-in tween is in flight, and retargeting it to the raw aerial solve
-    // replaced the authored dolled-in default framing (ink-app chroma gate caught
-    // the village shrinking to 0.72x screen size).
+    // replaced the authored dolled-in default framing (a chroma gate caught the
+    // village shrinking to 0.72x screen size).
     const aspectChanged = Math.abs((w / h) - (camera.aspect || 0)) > 1e-6;
     let preserveView = null;
     let retargetAerialTween = false;
@@ -1204,7 +1195,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
     postRuntime.resize(w, h);
-    inkModeRuntime.resize(w, h);
     viewShiftRuntime.invalidate();   // #124: 새 뷰포트 dims 로 setViewOffset 재적용 강제
     if (preserveView) {
       try {
@@ -1363,7 +1353,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // #14: 집 선택은 줌아웃으로 풀리지 않지만 근경 보케까지 넓은 마을 문맥에 남아서는 안 된다.
     // 화면 등가 거리를 따라 1→0으로 줄여 가까운 집의 원형 보케는 보존하고, 넓은 집 보기에서는
     // Bokeh pass를 완전히 쉬게 한다. focus-in/out/hop 중에는 카메라 tween이 amount를 단독 소유한다.
-    if (settledFocusAmount != null) inkModeRuntime.setFocusPolicy({ dofAmount: settledFocusAmount });
+    if (settledFocusAmount != null) focusPolicyRuntime.setFocusPolicy({ dofAmount: settledFocusAmount });
     // 카메라/시선 셀 LOD는 이 프레임에 한 번만 계산한다. weather·focus·동물·필지 필드가
     // 같은 ground/particle weight를 소비해 서로 다른 거리에서 팝하지 않게 한다.
     let frameDetailLod = null;
@@ -1496,7 +1486,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         renderer.shadowMap.needsUpdate = true;
       }
     }
-    inkModeRuntime.update(dt);
     renderFrame(dt);
     frames++;
     if (frames === 3) { window.__SHOT_READY = true; shotReadyOwned = true; }
@@ -1781,9 +1770,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   역광 플레어(이 앱의 서명 광학)를 통째로 지웠다(감사 M4·M8, look-grammar §5).
   function setPostFocus(focused, dofAmount = focused ? 1 : 0) {
     // 부감(focus=null)은 DoF off — 마을 전체가 얕은 심도로 뭉개지지 않게(#80 완성도, hanyang 특히).
-    // 수묵 상태기계가 이 PBR 정책을 기억하므로, 먹 화면 아래에서는 비싼 패스가 잠들어도 PBR 복귀 시
-    // 현재 focus 문맥으로 정확히 깨어난다.
-    inkModeRuntime.setFocusPolicy({
+    focusPolicyRuntime.setFocusPolicy({
       focused,
       flare: focused,
       dofAmount: focused ? dofAmount : 0,
@@ -3251,12 +3238,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     start(cfg, seed = 0) { state.seed = seed >>> 0; applyConfig(cfg, { animate: false }); },
 
-    setRenderStyle(value, opts = {}) {
-      state.renderStyle = inkModeRuntime.setMode(value, opts);
-      emit('state', { ...state });
-      return state.renderStyle;
-    },
-
     // 리롤(다시 짓기): 새 seed → 결정적 설정 → 조립 연출. 새 seed 반환.
     reroll() {
       const from = revealCamera.capture();
@@ -4046,8 +4027,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (sun.shadow) renderer.shadowMap.needsUpdate = true;
       return directionalShadow.debugState();
     },
-    debugInk: () => inkModeRuntime.debugState(),
-    debugInkPbrAwake: (awake) => inkModeRuntime.debugSetPbrAwake(awake),
     debugDof: debugDofState,
     debugSetDofAnchor: (value) => {
       debugDofAnchor = value == null ? null : Array.isArray(value)
@@ -4120,7 +4099,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // was what removed the depth layers (docs/dof-cinematic-research.md §3.1).
       if (Number.isFinite(maxCocFraction)) bokehPass.maxCocFraction = Math.max(0, maxCocFraction);
       if (Number.isFinite(tilt)) post.setDofTilt?.(tilt);
-      if (Number.isFinite(amount)) inkModeRuntime.setFocusPolicy({ dofAmount: amount });
+      if (Number.isFinite(amount)) focusPolicyRuntime.setFocusPolicy({ dofAmount: amount });
       return debugDofState();
     },
     debugAdvanceFocusRing(seconds = 3) {
@@ -4186,7 +4165,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (village.handle) { village.handle.exitVillageMode({ scene, building, ground, env }); village.handle.dispose(); village.handle = null; }
       if (village.cache.handle) { village.cache.handle.dispose(); village.cache = { key: null, handle: null }; }
       weatherRef?.dispose?.();
-      inkModeRuntime.dispose();
       postRuntime.dispose();
       directionalShadow.dispose();
       env?.dispose?.();
@@ -4235,7 +4213,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     getParams: () => ({ ...P }),
     getLayout: () => computeLayout(P),
     maxExpansion: () => wingCount(state.preset) + 1,
-    setRenderStyle: () => state.renderStyle,
     reroll: () => state.seed,
     applySeed: () => state.seed,
     setSunsetLook: () => state.sunsetLook,

@@ -30,7 +30,6 @@ const state = {
   sunsetLook: 'crimson',
   season: 'autumn',
   weather: 'clear',
-  renderStyle: 'ink',
   expansion: 2,
 };
 const overrides = {
@@ -130,7 +129,6 @@ assert.deepEqual(decoded, {
   sunsetLook: 'crimson',
   season: 'autumn',
   weather: 'clear',
-  renderStyle: 'ink',
   expansion: 2,
   flow: true,
   village: advancedVillage,
@@ -148,7 +146,6 @@ assert.equal(encodeSceneSnapshot({
     sunsetLook: decoded.sunsetLook,
     season: decoded.season,
     weather: decoded.weather,
-    renderStyle: decoded.renderStyle,
     expansion: decoded.expansion,
   },
   overrides: decoded.overrides,
@@ -161,7 +158,7 @@ assert.equal(encodeSceneSnapshot({
 }), encoded, 'encode → decode → encode changed canonical bytes');
 
 const defaults = encodeSceneSnapshot({
-  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, preset: 'korea', time: 'day', expansion: 1 },
   village: {
     seed: 7,
     scale: 'village',
@@ -211,7 +208,7 @@ assert.deepEqual(decodeSceneSnapshot(defaults).village, {
 assert.equal(Object.hasOwn(decodeSceneSnapshot(defaults).village, 'mjaHouse'), false,
   'default-off decode shape gained an mjaHouse field');
 assert.equal(encodeSceneSnapshot({
-  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, preset: 'korea', time: 'day', expansion: 1 },
   village: { ...decodeSceneSnapshot(defaults).village, mjaHouse: null },
   view: { azimuth: 9, elevation: 31, zoom: 0.5 },
 }), defaults, 'explicit null mjaHouse changed default-off snapshot bytes');
@@ -229,7 +226,7 @@ assert.equal(mjaField.isOn({ ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT, region: 'futu
   'object toggle accepted a non-product context');
 
 const mjaEnabled = encodeSceneSnapshot({
-  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, preset: 'korea', time: 'day', expansion: 1 },
   village: {
     ...decodeSceneSnapshot(defaults).village,
     mjaHouse: { ...VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT },
@@ -241,13 +238,13 @@ const decodedMja = decodeSceneSnapshot(mjaEnabled);
 assert.equal(isVillageMjaHouseProductContext(decodedMja.village.mjaHouse), true);
 assert.deepEqual(decodedMja.village.mjaHouse, VILLAGE_MJA_HOUSE_PRODUCT_CONTEXT);
 assert.equal(encodeSceneSnapshot({
-  state: { ...state, preset: 'korea', time: 'day', renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, preset: 'korea', time: 'day', expansion: 1 },
   village: decodedMja.village,
   view: decodedMja.view,
 }), mjaEnabled, 'mjaHouse changed bytes after canonical round trip');
 
 const wrappedView = encodeSceneSnapshot({
-  state: { ...state, renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, expansion: 1 },
   village: { ...advancedVillage, siteR: null, wallWeights: null },
   view: { azimuth: 359.96, elevation: 24, zoom: 0.5 },
 });
@@ -256,7 +253,6 @@ assert.equal(wrappedDecoded.view.azimuth, 0);
 assert.equal(encodeSceneSnapshot({
   state: {
     ...state,
-    renderStyle: 'pbr',
     expansion: 1,
   },
   village: wrappedDecoded.village,
@@ -271,7 +267,7 @@ const standaloneParams = {
   cornerLift: 0.72,
 };
 const standalone = encodeSceneSnapshot({
-  state: { ...state, renderStyle: 'pbr', expansion: 1 },
+  state: { ...state, expansion: 1 },
   overrides: { ...overrides, sunsetLook: false, season: false, weather: false },
   standaloneParams,
   view: sourceView,
@@ -290,7 +286,6 @@ assert.deepEqual(standaloneDecoded.view, canonicalView);
 assert.equal(encodeSceneSnapshot({
   state: {
     ...state,
-    renderStyle: 'pbr',
     expansion: 1,
   },
   overrides: standaloneDecoded.overrides,

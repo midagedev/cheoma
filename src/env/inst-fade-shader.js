@@ -1,4 +1,4 @@
-// Shared screen-door vocabulary for tree color+DoF and building-LOD color+shadow+DoF+ink.
+// Shared screen-door vocabulary for tree color+DoF and building-LOD color+shadow+DoF.
 // Each participating pass must discard the same pixels or a faded object remains as an invisible
 // depth blob. Tree shadow fading is intentionally outside this module. Positive coverage keeps
 // the low IGN subset; negative coverage keeps its high, complementary subset.
