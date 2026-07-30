@@ -16,6 +16,8 @@
 //   ⑧ 상량 인양 물리: 내려앉는 부재는 중력처럼 가속하고, 호버 높이는 건물 높이의 30% 이하이며,
 //      그래도 접촉 속도는 승인 밴드(3.3~4.4 m/s)를 지키고, 강체 좌대가 그 모멘텀을 여행거리 6% 이하
 //      한 번의 안착으로 흡수하고, 롤 정렬이 접촉에서 정확히 0 이 된다. 올라오는 부재는 불변.
+//      접촉 속도 밴드는 합성 fixture 와 **실제 종가** 양쪽에서 본다(⑧-real b) — 합성 fixture 의
+//      totalH=12 는 폴백 값이라 dropBase 파생 회귀를 못 잡는다.
 //
 // 변경 전 코드에서 실패하는 단언(의도된 회귀 게이트):
 //   ① contact velocity(=0) · settle squash 없음 · 접촉 스케일 정확히 1
@@ -23,6 +25,7 @@
 //   ③ courseFlow=false
 //   ⑥ buildHanok 파트 그룹 부재 · buildHanok 이 userData.layout.totalH 를 달지 않아 폴백 12m 사용
 //   ⑧ 하강이 감속(엘리베이터) · 호버 44% · 정착 오버슈트 36cm 3연속 호핑 · 롤 정렬 없음
+//   ⑧-real(b) 실제 종가 접촉 속도 2.95 m/s (공중 창을 dropBase 파생 비율로 좁혀 속도가 흔들림)
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { createRequire } from 'node:module';
@@ -766,6 +769,32 @@ for (const mode of ['update', 'skip', 'seek1']) {
       `airborne eave peak ${peakEave.toFixed(2)}m eats `
       + `${((peakEave - restEave) / (ridgeY - restEave) * 100).toFixed(0)}% of the roof's own height — `
       + 'the lift should read as clearing the columns, not as a second storey of air');
+  }
+
+  // ⑧-real (b): 접촉 속도도 **실제 종가**에서 본다. 위 합성 fixture 단언(makeHouse, totalH=12)은
+  //   폴백 높이를 쓰므로 제품 수치를 대변하지 못한다: #28 에서 실측 totalH(5.92m)가 붙자 dropBase 가
+  //   1.56 → 1.20 으로 내려가 지붕 접촉 속도가 3.83 → 2.95 m/s 로 떨어졌는데, 여행거리는
+  //   ROOF_LIFT_OF_MASS 상한 탓에 1.71m 로 전후 동일했다 — 즉 이 회귀는 거리·기하 단언 어디에도
+  //   걸리지 않고 통과했다. 무게는 진폭이 아니라 **접근 속도**에서 온다는 계약(①)이므로, 공중 시간
+  //   창은 여행거리와 목표 속도에서 파생돼야 하고 dropBase 에 딸려 흔들려선 안 된다.
+  {
+    const ha3 = playAssembly(hanok, { duration: 7.4 });   // 히어로 몸채 타임라인(위 HERO_DUR 과 동일)
+    const rp = ha3.plan().find((p) => p.part === 'roof');
+    ha3.skip();
+    assert.ok(rp.contactMps >= 3.3 && rp.contactMps <= 4.4,
+      `real hero roof contact speed ${rp.contactMps.toFixed(2)} m/s is outside the approved heavy band `
+      + `(3.3..4.4) that the synthetic fixture asserts — travel ${rp.travelM.toFixed(2)}m over an `
+      + `airborne ${rp.airborneSec.toFixed(2)}s window ${JSON.stringify(rp.window.map((v) => +v.toFixed(4)))}. `
+      + 'Contact speed must be derived from travel and the target speed, not inherited from dropBase');
+    // 창이 속도에서 파생되더라도 지각 밴드(위 roofWindowSec 과 동일)를 벗어나선 안 된다.
+    assert.ok(rp.airborneSec >= 0.45 && rp.airborneSec <= 1.3,
+      `real hero roof airborne time ${rp.airborneSec.toFixed(2)}s `
+      + `(${Math.round(rp.airborneSec * 60)} frames @60fps) left the readable band (0.45..1.3s)`);
+    // 창은 저작 창(PART_WINDOWS.roof) 안에 들어야 한다 — 앞으로 넓히면 벽 파트를 잡아먹고
+    //   전체 duration·빈 터 dead time 이 늘어난다.
+    assert.ok(rp.window[0] >= 0.70 - 1e-9 && rp.window[1] <= 1 + 1e-9,
+      `roof window ${JSON.stringify(rp.window)} escaped the authored PART_WINDOWS.roof [0.70, 1.00] — `
+      + 'widening the roof window forward steals the walls window and grows the empty-site dead time');
   }
 }
 
