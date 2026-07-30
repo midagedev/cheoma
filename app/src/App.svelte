@@ -5,7 +5,8 @@
   import { configFromSeed, paramsFor, newSeed, FLAGSHIP_TIME } from './lib/seed.js';
   import { readUrl, shareUrl, writeUrl } from './lib/url.js';
   import { shareSceneLink } from './lib/share-scene.js';
-  import { buildRebuildPayload, villageDefaults } from './lib/edit-schema.js';
+  import { buildRebuildPayload, schemaFor, villageDefaults } from './lib/edit-schema.js';
+  import { planRebuildMorph, advanceRebuildMorph } from './lib/rebuild-morph.js';
   import { pickStandaloneParams } from './lib/standalone-param-spec.js';
   import { createLiveEditScheduler } from './lib/live-edit-scheduler.js';
   import {
@@ -797,15 +798,58 @@
     else engine.hero.enter({ onDone });
     setLifecycleTimeout(() => { heroVisible = false; }, 900);
   }
-  // 이 집 다시 짓기(#19): 예약된 이웃·도로는 보존하되 필지 내부 경계부터 집 변주, 마당 소품,
-  //   과실수까지 하나의 결정론적 transaction으로 재생성한다. 마을 전체 리롤과는 분리한다.
+  // 고쳐짓기(#26, 구 "이 집 다시 짓기" #19): 새 집 재기획(rerollParcel)이 아니라 같은 집의
+  //   파라미터 개조 몰핑. 마을·필지 시드 불변(focus-hop-reroll-split 무접촉, planParcelRebuild
+  //   미호출) — rebuild-morph 순수 plan 을 rAF 로 평가해 기존 liveEdit 프리뷰 경로에 값만 흘리고
+  //   완료 시 커밋 1회. 편집 불가 필지(비병합 궁·절, ㅁ자집 등 라이브 rebuild 경로가 없는 spec)만
+  //   기존 필지 리롤을 유지한다. engine.village.rerollParcel API 자체는 존치.
+  const REBUILD_MORPH_MS = 2800;
+  // temple variant 는 커밋 전용 의미축(villageCommit 이 variantDefaults 를 함께 시드) — 몰핑 제외.
+  const REBUILD_MORPH_EXCLUDE = ['variant'];
+  let morphRun = null;   // { plan, start, frame } — 진행 중 몰핑 (재클릭=재시작, 사용자 개입=취소)
+  function stopRebuildMorph() {
+    if (!morphRun) return;
+    cancelLifecycleFrame(morphRun.frame);
+    morphRun = null;
+  }
   function rerollHouse() {
-    if (sceneVillage && villageEditing && !villageZooming && !waving) {
+    if (!(sceneVillage && villageEditing && !villageZooming && !waving)) return;
+    chromaFaded = false;
+    scheduleFlowTick();
+    if (villageEditing.spec?.editable !== true) {
       engine.village.rerollParcel();
       syncUrl();
-      chromaFaded = false;
-      scheduleFlowTick();
+      return;
     }
+    // 재클릭: editParams 에는 직전 프레임의 보간값이 이미 반영돼 있으므로 그 값에서 새 plan —
+    //   값 연속(스냅 없음)은 rebuild-morph 의 t=0 == from 계약이 보장한다.
+    stopRebuildMorph();
+    const plan = planRebuildMorph({
+      schema: schemaFor(villageEditing.spec),
+      current: { ...editParams },
+      seed: Math.floor(Math.random() * 0x7fffffff) + 1,   // plan 에 1회 고정(이후 결정론)
+      duration: REBUILD_MORPH_MS,
+      excludeKeys: REBUILD_MORPH_EXCLUDE,
+    });
+    if (!plan.fields.length) return;
+    const run = { plan, start: null, frame: null };
+    morphRun = run;
+    const step = (now) => {
+      if (morphRun !== run) return;
+      // focus 전환·웨이브·focus-out 이 시작되면 몰핑은 즉시 물러난다(liveEdit 는 그 경로가 정리).
+      if (!sceneVillage || !villageEditing || villageZooming || waving) { stopRebuildMorph(); return; }
+      if (run.start == null) run.start = now;
+      const { values, done } = advanceRebuildMorph(run.plan, now - run.start);
+      Object.assign(editParams, values);
+      if (done) {
+        morphRun = null;
+        liveEdit.commit();          // 커밋 1회 — flora/pick 경계·syncUrl 은 커밋 경로가 소유
+        return;
+      }
+      liveEdit.request();
+      run.frame = requestLifecycleFrame(step, () => { if (morphRun === run) morphRun = null; });
+    };
+    run.frame = requestLifecycleFrame(step, () => { if (morphRun === run) morphRun = null; });
   }
   // 단일건물 씬(?hero=0·?village=1 레거시) 액션바 도장 = 새 씨앗 재생성. 마을 씬에선 도장 미노출(리롤은 패널 소유).
   function reroll() {
@@ -1336,7 +1380,7 @@
     // 필지가 바뀔 때만 기본값으로 재시드(같은 필지 재-emit 에선 편집 보존). 단 리롤(#100)은 같은
     //   parcelId 라도 시드가 굴러 새 기본값이므로 p.reseed 로 강제 재시드(desync 방지).
     const changed = p.reseed || !villageEditing || villageEditing.parcelId !== p.parcelId;
-    if (changed) liveEdit.cancel();
+    if (changed) { stopRebuildMorph(); liveEdit.cancel(); }
     villageEditing = { parcelId: p.parcelId, spec: p.spec };
     if (changed) {
       editParams = { kind: p.spec.kind, ...(p.spec.params || {}) };
@@ -1423,12 +1467,14 @@
     costHeadroom: 1.45,
   });
   function villageLive(k, v) {
+    stopRebuildMorph();             // 사용자가 슬라이더를 잡으면 몰핑 즉시 취소, 현재 보간값에서 인수
     editParams[k] = v;
     // Stream every geometry-backed axis, including hero/palace/temple. Heavy
     // compounds rely on the adaptive interval instead of a hard commit-only gate.
     liveEdit.request();
   }
   function villageCommit(k, v) {
+    stopRebuildMorph();             // 사용자 커밋이 몰핑을 인수한다(값은 이미 editParams 에 연속)
     // Switching a temple grammar is a semantic layout change, not a cosmetic
     // label swap. Seed the new variant's hall/monument defaults so the panel and
     // the planner's clamped result cannot drift (for example 7 halls displayed
@@ -1446,6 +1492,7 @@
     // A type switch changes the schema itself. Do not route old-kind sliders
     // through the target builder: rebuild from only the requested kind, then
     // seed every visible value from the core's accepted target-kind spec.
+    stopRebuildMorph();
     liveEdit.cancel();
     const rebuilt = engine.village.rebuild(villageEditing.parcelId, { kind });
     if (!acceptVillageSpec(rebuilt)) editParams = { kind };
@@ -1456,7 +1503,7 @@
       syncUrl();
     }
   }
-  function closeVillageEdit() { liveEdit.cancel(); engine.village.return(); }
+  function closeVillageEdit() { stopRebuildMorph(); liveEdit.cancel(); engine.village.return(); }
   function navigateBuilding(id) {
     if (!sceneVillage || villageZooming || waving || veil || cine.active) return;
     if (!buildingTargets.some((target) => target.id === id)) return;

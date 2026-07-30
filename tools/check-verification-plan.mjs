@@ -285,6 +285,14 @@ assert.deepEqual(ids(['app/src/components/SceneGuide.svelte'], {
 assert.deepEqual(ids(['app/src/lib/live-edit-scheduler.js']), [
   'core', 'app', 'parcel-rebuild-browser', 'build',
 ]);
+// #26 고쳐짓기: the pure morph plan feeds the live-edit rebuild path, so it owns the
+// same focused-rebuild browser gate; its contract gate is FAST_CHECKS-pure.
+assert.deepEqual(ids(['app/src/lib/rebuild-morph.js'], {
+  newPaths: ['app/src/lib/rebuild-morph.js'],
+}), ['core', 'app', 'parcel-rebuild-browser', 'build']);
+assert.deepEqual(ids(['tools/check-rebuild-morph.mjs'], {
+  newPaths: ['tools/check-rebuild-morph.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-app', 'build',
 ]);

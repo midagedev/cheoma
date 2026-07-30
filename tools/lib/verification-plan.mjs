@@ -154,6 +154,11 @@ const REVIEWED_NEW_PATHS = new Set([
   // Perf campaign: pure live-edit geometry/yard signatures + thatch-only path.
   // FAST_CHECKS; browser not required.
   'tools/check-live-edit-signatures.mjs',
+  // #26 고쳐짓기: pure seeded morph plan/evaluator over the edit schema. The plan
+  // module drives the existing live-edit rebuild path, so its browser owner is the
+  // parcel-rebuild gate (routed below); the contract itself is FAST_CHECKS-pure.
+  'app/src/lib/rebuild-morph.js',
+  'tools/check-rebuild-morph.mjs',
   // Perf campaign product-path measure (post ON orbit/rebuild budgets). Optional
   // bench, not a merge gate — reviewed so it does not force check:full alone.
   'tools/bench-product-path.mjs',
@@ -313,7 +318,7 @@ function routePath(path) {
     if (/^app\/src\/(?:components\/EnvironmentDial\.svelte|engine\/engine\.js|lib\/seed\.js)$/.test(path)) {
       select('winter environment integration changed', 'winter-app');
     }
-    if (/^app\/src\/(?:App\.svelte|components\/ContextPanel\.svelte|engine\/engine\.js|lib\/live-edit-scheduler\.js)$/.test(path)) {
+    if (/^app\/src\/(?:App\.svelte|components\/ContextPanel\.svelte|engine\/engine\.js|lib\/(?:live-edit-scheduler|rebuild-morph)\.js)$/.test(path)) {
       select('focused rebuild surface changed', 'parcel-rebuild-browser');
     }
     if (path === 'app/src/engine/engine.js') {
