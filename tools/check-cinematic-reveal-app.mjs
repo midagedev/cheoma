@@ -701,6 +701,12 @@ try {
   });
   await arrivalPage.click('button.hero');
   await arrivalPage.waitForFunction(() => window.__engine?.debugArchitecturalReveal?.().kind === 'arrival', null, { timeout });
+  // Pausing before the engine has run a single live frame with the veil's fog written
+  // leaves the recorder empty forever (seek frames do not rewrite __hero.fogNear), and
+  // the fallback then reads mid-animation fog — the exact flake this recorder exists to
+  // prevent. The veil ramp is flat across its whole `hold` half, so waiting for the
+  // recorded frame here still measures the densest opening state.
+  await arrivalPage.waitForFunction(() => !!window.__veilOpening, null, { timeout });
   await arrivalPage.evaluate(() => window.__engine.debugSetPaused(true));
   await reportWebGLRenderer(arrivalPage, 'cinematic-arrival');
   const arrival = await sampleSequence(arrivalPage, 'arrival', [0, 0.28, 0.56, 0.82, 1]);
