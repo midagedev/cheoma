@@ -321,6 +321,15 @@ try {
           cssHeight: rect.height,
           drawingWidth: engine.renderer.domElement.width,
           drawingHeight: engine.renderer.domElement.height,
+          // Desktop stage is inset by the docked inspector (design-system.md
+          // layout contract #1: `right: var(--inspector-w)`); portrait uses the
+          // bottom sheet and keeps the full width.
+          inspectorInset: (() => {
+            const raw = getComputedStyle(document.documentElement)
+              .getPropertyValue('--inspector-w').trim();
+            const px = Number.parseFloat(raw);
+            return Number.isFinite(px) ? px : 0;
+          })(),
         },
         postPasses: engine.debugPostPassOrder(),
         rim: window.__rim ? {
@@ -447,10 +456,19 @@ try {
       `${viewport.label}: visibility bracket restores the exact product frame`,
       `threshold=${visibleVsRestored.changedPixels} exact=${visibleVsRestored.exactChangedPixels}`);
     pass(cameraStable, `${viewport.label}: verification never mutates the product camera`);
-    pass(prepared.canvas.cssWidth === viewport.page.viewport.width
+    // Desktop stage = viewport minus the docked inspector column (Spectrum
+    // rebuild, design-system.md layout contract #1); portrait keeps full width
+    // (bottom sheet overlays instead of insetting). Either exact stage width is
+    // accepted so the gate holds whether the dock is mounted or hidden.
+    const expectedWidths = [
+      viewport.page.viewport.width,
+      viewport.page.viewport.width - (prepared.canvas.inspectorInset || 0),
+    ];
+    pass(expectedWidths.includes(prepared.canvas.cssWidth)
         && prepared.canvas.cssHeight === viewport.page.viewport.height,
-    `${viewport.label}: canvas uses the requested UI viewport`,
-    `${prepared.canvas.cssWidth}x${prepared.canvas.cssHeight} CSS px`);
+    `${viewport.label}: canvas fills the product stage (viewport minus any docked inspector)`,
+    `${prepared.canvas.cssWidth}x${prepared.canvas.cssHeight} CSS px `
+      + `(viewport ${viewport.page.viewport.width}, inspector ${prepared.canvas.inspectorInset || 0})`);
 
     console.log(`METRICS ${viewport.label} ${JSON.stringify({
       viewport: prepared.canvas,
