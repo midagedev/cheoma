@@ -36,12 +36,23 @@ const M4 = () => new THREE.Matrix4();
 
 // ───────────────────────── 튜닝 상수(forest.js v2 와 동일값) ─────────────────────────
 const TREE_HILL_MIN = 0.05;
-const TREE_MIN_D_K  = 1 / 61;
+// R1: 1/61 → 1/66 — 크레스트·암반·성곽 회랑이 뺏은 유효 면적만큼 남은 골·중사면의 팩킹을 조여
+//   총 그루수를 보존한다(사진의 골 군락 뭉침과 같은 방향, 벌목 아님).
+const TREE_MIN_D_K  = 1 / 69;
 const TREE_AREA_N   = 9000;
 const TREE_SINK     = 0.5;
-const CRAG_HILL_MIN = 0.74;   // #137 암릉 온셋 상향(마루 최상부만) — 벌거벗은 암벽 인상 완화
-const CRAG_TARGET_K = 12;      // #137 크래그 밀도 톤다운(22→12): 능선 마루 소량만
-export const GRANITE = 0xa5a29a;
+const CRAG_HILL_MIN = 0.66;   // R1.2: 0.72 는 밴드가 너무 좁아 암반 소멸(village 0개) — 0.66 으로 재개방
+const CRAG_TARGET_K = 20;      // R1: 크래그 밀도 상향(12→20)
+// R1: 곡률 종속 캐노피 — 양수 lap(오목/골)에 뭉치고 볼록 능선은 감쇠. mtnChance 승수 전용.
+const CURV_GAIN = 22;
+// R1: 곡률·크레스트 승수(평균<1)로 깎이는 수락률 보상 — 총 그루수 보존(사용자 결정: 벌목 금지).
+//   R1.1: 크레스트 완화(0.88→0.70)가 면적을 돌려줘 +12~18% 과잉 — 1.42→1.22 로 기준선 회귀.
+const CHANCE_RENORM = 1.22;
+// R1: 성곽 시선 회랑(나무·암괴 전용) — 사진의 "능선 위 밝은 성벽 리본"을 살리는 캐노피 배제 폭.
+//   플랜층(장승·당산)이 공유하는 CITY_WALL_DIMENSIONS 는 10 유지 — 플랜 해시 불침해.
+const TREE_WALL_CORRIDOR = 16;
+const TREE_GATE_MARGIN = 14;
+export const GRANITE = 0x827f76;   // R1.1: 알베도 ~-25% — 대기 헤이즈에 참여, 사면 톤에서 분리되지 않게
 const GRANITE_COL = linCol(GRANITE);
 // 나무 프로토 삼각수(triCount 회계용) — forest.js 프로토와 일치.
 const PINE_TRIS = 20, BROAD_TRIS = 20, FAR_TRIS = 40;
@@ -77,12 +88,12 @@ export function makeRockExposure(site) {
   const nFine   = makeNoise((seed ^ 0x37) >>> 0);   // 패치 안 결(균일 회색 방지)
   const CFs = 1 / 30, CFw = 1 / 130, CFf = 1 / 11;
   return (x, z, slope, hill) => {
-    // 상부 급경사 게이트: 구 smoothstep(0.58,1.25,slope)·(0.44,0.74,hill) → 온셋 상향으로 하부 사면 순수 숲.
-    const base = smoothstep(0.74, 1.5, slope) * smoothstep(0.60, 0.86, hill);
+    // R1: 사면 화강암 노두 격상 — 온셋 하향·임계 완화로 밝은 노출 면적 확대(지형색·나무 회피 공유).
+    const base = smoothstep(0.55, 1.35, slope) * smoothstep(0.50, 0.84, hill);
     if (base <= 0) return 0;
     // 줄무늬 게이트: 방랑 노이즈로 국소 임계를 상하시켜 노출을 특정 지릉에 몰고, streak 노이즈 마루만 통과.
     const wander = 0.5 + 0.5 * nWander(x * CFw, z * CFw);
-    const thr = 0.60 - 0.12 * wander;
+    const thr = 0.52 - 0.14 * wander;
     const streak = smoothstep(thr, thr + 0.16, nStreak(x * CFs, z * CFs));
     if (streak <= 0) return 0;
     const fine = 0.70 + 0.30 * nFine(x * CFf, z * CFf);
@@ -145,6 +156,25 @@ export function makeSlopeAt(site) {
     return Math.hypot(hx, hz);
   };
 }
+// R1: 라플라시안 곡률 — 양수 = 오목(골), 음수 = 볼록(능선). heightAt 샘플만 쓰므로 rng 불침해.
+//   곡률은 저주파 필드라 d(6m) 셀 중심값으로 양자화·메모한다 — 시도당 heightAt 5회가 crunch 시간을
+//   3배로 불리던 것을 셀당 1회로 줄인다(결정론: 위치만의 함수, rng 무관).
+export function makeCurvatureAt(heightAt, d = 6) {
+  const invD2 = 1 / (d * d);
+  const cache = new Map();
+  return (x, z) => {
+    const ci = Math.round(x / d), cj = Math.round(z / d);
+    const key = ci * 131071 + cj;
+    let lap = cache.get(key);
+    if (lap === undefined) {
+      const cx = ci * d, cz = cj * d;
+      lap = (heightAt(cx + d, cz) + heightAt(cx - d, cz) + heightAt(cx, cz + d) + heightAt(cx, cz - d)
+        - 4 * heightAt(cx, cz)) * invD2;
+      cache.set(key, lap);
+    }
+    return lap;
+  };
+}
 
 // ───────────────────────── 계절 그루별 수관색 ─────────────────────────
 const PINE = {
@@ -202,6 +232,9 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
   const mixN = makeNoise((seed ^ 0x2a11) >>> 0);
   const interiorN = makeNoise((seed ^ 0x1f77e5) >>> 0);
   const rockExp = makeRockExposure(site);   // #137 지형 회색 페인트와 공유(나무 걷힘=회색 정합)
+  const curvatureAt = makeCurvatureAt(site.heightAt); // R1: 위치 결정론 곡률(rng 아님)
+  // R1: 에코톤 원형 하드엣지 완화 — 방위각 저주파 노이즈(전용 시드, 배치 rng 불침해).
+  const edgeNoise = makeNoise(((seed ^ 0xec0d9e) >>> 0));
   const CFG = 1 / 44;
   const CFI = 1 / Math.max(30, bowlR * 0.17);
 
@@ -220,16 +253,29 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
     //   외곽 사면에서 채운다(총 그루수 유지·민둥산 금지).
     const rC = Math.hypot(x - C.x, z - C.z);
     const settleSoft = 0.48 + 0.52 * smoothstep(bowlR * 0.50, bowlR * 0.92, rC);
-    return onset * gr * far * settleSoft;
+    // R1: 곡률 승수(골↑ 능선↓) + 크레스트 밴드 캐노피 억제(화강암·관목이 이어받음).
+    //   배치 루프는 목표 도달형이 아니라 수락률 제한형이라 평균<1 승수가 그대로 총량을 깎는다 —
+    //   CHANCE_RENORM 으로 평균 수락률을 복원해 총 그루수를 보존한다(분포만 이동).
+    const lap = curvatureAt(x, z);
+    const curveW = clamp(1 + lap * CURV_GAIN, 0.35, 1.6);
+    const crestW = 1 - 0.70 * smoothstep(0.82, 0.94, hill);   // R1.1: 능선을 완전 비우지 않고 노송 실루엣 몫을 남김
+    return onset * gr * far * settleSoft * curveW * crestW * CHANCE_RENORM;
   };
   const KEEP = Math.max(7, bowlR * 0.05);
   const RAMP = Math.max(28, bowlR * 0.30);
+  // R1: KEEP/RAMP 방위각 변조 — clearDist 램프의 원형 하드엣지를 저주파로 흔든다.
+  const keepRampAt = (x, z) => {
+    const th = Math.atan2(z - C.z, x - C.x);
+    const edgeN = edgeNoise(Math.cos(th) * 2.3, Math.sin(th) * 2.3);
+    return { keep: KEEP * (0.55 + 0.9 * edgeN), ramp: RAMP * (0.62 + 0.75 * edgeN) };   // R1.1: 진폭 1.5배
+  };
   const infillChance = (x, z, hill) => {
     if (!clearDist || hill > 0.5) return 0;
     const cd = clearDist(x, z);
     // #20: 구조물 클리어 램프를 약간 밖으로 밀어 담장 크라운 바로 옆 침투목을 줄인다.
-    //   목표 그루수는 그대로라 더 먼 빈터로 이동한다.
-    const clear = smoothstep(KEEP * 1.12, KEEP + RAMP * 1.12, cd);
+    //   목표 그루수는 그대로라 더 먼 빈터로 이동한다. R1: 방위각 변조로 원형 엣지 완화.
+    const { keep, ramp } = keepRampAt(x, z);
+    const clear = smoothstep(keep * 1.12, keep + ramp * 1.12, cd);
     if (clear <= 0) return 0;
     const rC = Math.hypot(x - C.x, z - C.z);
     const radial = 0.16 + 0.84 * smoothstep(bowlR * 0.20, bowlR * 0.88, rC);
@@ -299,18 +345,30 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       }
       const pineBias = smoothstep(0.42, 0.74, mixN(p.x / 60 + 3, p.z / 60 - 5)) * 0.4 + smoothstep(0.50, 0.90, hill) * 0.6;
       const isPine = rng() < clamp(0.28 + pineBias, 0.18, 0.9);
-      const s = rng.range(0.72, 1.35) * (isPine ? 1.1 : 1.0) * (1 - 0.18 * smoothstep(0.6, 0.95, hill));
+      // R1: s0·yStretch0 원값을 먼저 뽑아 노송 재해석(rng 소비 순서·횟수 불변).
+      const s0 = rng.range(0.72, 1.35);
+      const u = (s0 - 0.72) / (1.35 - 0.72);
       const y = p.y - (TREE_SINK + Math.min(2.4, slope * 1.9));
       // RNG 소비 순서는 감쇠 전·후로 바뀌면 안 된다(워커/동기 동치). 스케일·회전을 먼저 뽑고
       //   #20 위치 기반 수관 감쇠만 곱한다.
       const yaw = rng() * Math.PI * 2;
-      const yStretch = rng.range(0.9, 1.25);
+      const yStretch0 = rng.range(0.9, 1.25);
       const t = rng();
       const mosaic = rng();
+      // R1 노송 개체: 고지대 소나무의 상위 ~4%(u>0.96)만 대형·낮은 수관으로 승격. 그 외 기존 식.
+      let s, yStretch;
+      if (hill > 0.55 && isPine && u > 0.98) {   // R1.1: 4%→2%, 크기·수관비 강화(개체 실루엣이 읽히게)
+        s = s0 * 3.0;
+        yStretch = 0.60 + 0.22 * (yStretch0 - 0.9) / 0.35;
+      } else {
+        s = s0 * (isPine ? 1.1 : 1.0) * (1 - 0.18 * smoothstep(0.6, 0.95, hill));
+        yStretch = yStretch0;
+      }
       const hillBias = foliageHillBias(hill);
       const rC = Math.hypot(p.x - C.x, p.z - C.z);
       const cd = clearDist ? clearDist(p.x, p.z) : Infinity;
-      const { yMul, xzMul } = villageCanopyAtten(rC, bowlR, cd, KEEP, RAMP);
+      const { keep: attenKeep, ramp: attenRamp } = keepRampAt(p.x, p.z);
+      const { yMul, xzMul } = villageCanopyAtten(rC, bowlR, cd, attenKeep, attenRamp);
       const sx = s * xzMul;
       const sy = s * yStretch * yMul;
       const m = M4().makeTranslation(p.x, y, p.z)
@@ -322,8 +380,8 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       const visualRadius = sx * (isPine ? FOREST_VISUAL_RADIUS.pine : FOREST_VISUAL_RADIUS.broad);
       if (mask && mask(p.x, p.z, visualRadius)) continue;
       if (cityWallVegetationBlocked(cityWall, p, {
-        corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
-        gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+        corridor: visualRadius + TREE_WALL_CORRIDOR,
+        gateMargin: visualRadius + TREE_GATE_MARGIN,
         gateApproachMargin: visualRadius,
       })) continue;
       { const k = gkey(p.x, p.z); let a = grid.get(k); if (!a) { a = []; grid.set(k, a); } a.push({ x: p.x, z: p.z }); }
@@ -352,7 +410,9 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
       placed++;
     }
   };
-  place(mtnChance, mtnTarget, false, undefined, true, true);
+  // R1: 곡률·크레스트·암반 회피가 유효 면적을 줄여 기본 상한(target×20)에서 총량이 ~20-30% 깎인다.
+  //   시도 상한을 올려 같은 총량을 남은 유효 면적(골·중사면)에서 채운다 — 분포만 이동, 벌목 아님.
+  place(mtnChance, mtnTarget, false, mtnTarget * 22, true, true);
   place(infillChance, infillTarget, true, Math.min(infillTarget * 14, 58000), false, false);
 
   // #137 FAR 클러스터 → 저폴리 캐노피 블롭 인스턴스(계절색 4버퍼 = 클러스터 평균색 → 모자이크 보존).
@@ -371,8 +431,8 @@ export function crunchForestTrees(site, sampler, slopeAt, mask, seed, densityK, 
     const visualRadius = spread * FOREST_VISUAL_RADIUS.far;
     if (mask && mask(cx, cz, visualRadius)) continue;
     if (cityWallVegetationBlocked(cityWall, { x: cx, z: cz }, {
-      corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
-      gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+      corridor: visualRadius + TREE_WALL_CORRIDOR,
+      gateMargin: visualRadius + TREE_GATE_MARGIN,
       gateApproachMargin: visualRadius,
     })) continue;
     farTreeN += cl.n;
@@ -404,14 +464,16 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
   const CF = 1 / Math.max(30, bowlR * 0.5);
 
   const crestChance = (x, z, hill, slope) => {
-    if (hill < CRAG_HILL_MIN) return 0;
-    const cl = smoothstep(0.55, 0.86, chainN(x * CF, z * CF));
-    const hi = smoothstep(CRAG_HILL_MIN, 0.92, hill);
-    const st = smoothstep(0.35, 0.95, slope);
-    return hi * Math.max(0.5, st) * (0.04 + 0.96 * cl);
+    // R1.2: 유효 밴드 0.66~0.86(상단 소프트 페이드) — 무목·안개 최상단의 "접시 위 돌" 배제(비전 판정).
+    if (hill < CRAG_HILL_MIN || hill > 0.86) return 0;
+    const cl = smoothstep(0.50, 0.82, chainN(x * CF, z * CF));
+    const hi = smoothstep(CRAG_HILL_MIN, 0.76, hill) * (1 - smoothstep(0.80, 0.86, hill));
+    // R1.2: 밴드가 좁아진 만큼 밴드 안 수락 게이트(경사·체인)를 완화해 개수를 회복.
+    const st = smoothstep(0.22, 0.85, slope);
+    return hi * Math.max(0.6, st) * (0.14 + 0.86 * cl);
   };
-  // #137 크래그 커버리지 톤다운: 능선 마루 최상부 위주 소량(캡 90/64 → 48/34).
-  const target = Math.min(TR > 480 ? 48 : 34, Math.round((TR / 200) ** 2 * CRAG_TARGET_K * densityK));
+  // R1: 화강암 노두 격상 — 개수 상한 72/52, CRAG_TARGET_K 20.
+  const target = Math.min(TR > 480 ? 72 : 52, Math.round((TR / 200) ** 2 * CRAG_TARGET_K * densityK));
   const minD = Math.max(5.5, TR / 64);
   const grid = new Map();
   const gkey = (x, z) => Math.floor(x / minD) * 92821 ^ Math.floor(z / minD);
@@ -426,7 +488,7 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
 
   const mats = [], colors = [], anchors = [];
   let attempts = 0, ridgeCount = 0;
-  while (mats.length < target && attempts < target * 40) {
+  while (mats.length < target && attempts < target * 120   /* R1.2: 좁아진 밴드에서 개수 회복 — 루프 자체가 작아 비용 무시 */) {
     attempts++;
     const gu = rng() * N, gv = rng() * N;
     const p = onMesh(gu, gv);
@@ -435,7 +497,7 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
     if (rng() > crestChance(p.x, p.z, hill, slope)) continue;
     if (mask && mask(p.x, p.z)) continue;
     if (tooClose(p.x, p.z)) continue;
-    const w = rng.range(3.5, 6.5) * (0.85 + 0.4 * smoothstep(0.66, 0.95, hill));
+    const w = rng.range(3.2, 6.0) * (0.85 + 0.4 * smoothstep(0.66, 0.95, hill));   // R1.1: 수관 3~4배 이물감 → 수관급으로
     const h = w * rng.range(0.7, 1.05);
     const rotation = rng() * Math.PI * 2;
     const l = 0.6 + rng() * 0.2;
@@ -445,13 +507,13 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
     // 배치를 재시드하지 않게 한다(나무 placement와 같은 국소 변경 계약).
     if (mask && mask(p.x, p.z, visualRadius)) continue;
     if (cityWallVegetationBlocked(cityWall, p, {
-      corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
-      gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+      corridor: visualRadius + TREE_WALL_CORRIDOR,
+      gateMargin: visualRadius + TREE_GATE_MARGIN,
       gateApproachMargin: visualRadius,
     })) continue;
     // #137 급사면 다운슬로프 float 방지 — 폭·경사 비례로 밑동을 지형에 깊이 박는다(넓은 강체가 경사에서
     //   내리막 가장자리가 뜨는 착시). w·slope 곱으로 내리막 낙차(~w·slope)를 흡수.
-    const sink = w * 0.42 + slope * w * 0.6;
+    const sink = w * 0.75 + slope * w * 0.6;   // R1.2: 매립 +45% — 하부 캡·분리 접지그림자 제거(비전 판정)
     const y = p.y - sink;
     mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rotation)).multiply(M4().makeScale(w, h, w)));
     const c = GRANITE_COL.clone().multiplyScalar(l);
@@ -461,30 +523,30 @@ export function crunchGranite(site, sampler, slopeAt, mask, seed, densityK, city
     if (hill > 0.72) ridgeCount++;
     { const k = gkey(p.x, p.z); let a = grid.get(k); if (!a) { a = []; grid.set(k, a); } a.push({ x: p.x, z: p.z }); }
   }
-  // #137 대형 암괴는 최대 1개로 절제(구 1~2). rng() 1회 소비 유지(0 또는 1).
-  const nLandC = (rng() * 2) | 0;
+  // R1: 대형 암괴 최대 3개. granite 전용 rng 스트림 말미 유지(나무 스트림 불침해). rng() 1회(0..3).
+  const nLandC = (rng() * 3) | 0;   // R1.1: 최대 2개
   let placedLand = 0, landAtt = 0;
   while (placedLand < nLandC && landAtt < 400) {
     landAtt++;
     const gu = rng() * N, gv = rng() * N;
     const p = onMesh(gu, gv);
     const hill = site.hillAt(p.x, p.z);
-    if (hill < 0.82) continue;
+    if (hill < 0.68 || hill > 0.82) continue;   // R1.2: 대형 암괴 밴드 0.68~0.82
     const lslope = slopeAt(p.x, p.z);
     if (lslope > 0.45) continue;   // #137 대형 암괴는 완만한 마루 어깨에만(급사면 float 방지)
     if (mask && mask(p.x, p.z)) continue;
-    const w = rng.range(7, 11);    // #137 크기 절제(9~14 → 7~11)
+    const w = rng.range(7, 10);    // R1.1: 대형 암괴 크기 절제
     const h = w * rng.range(0.85, 1.15);
     const rotation = rng() * Math.PI * 2;
     const l = 0.64 + rng() * 0.18;
     const visualRadius = w * FOREST_VISUAL_RADIUS.rock;
     if (mask && mask(p.x, p.z, visualRadius)) continue;
     if (cityWallVegetationBlocked(cityWall, p, {
-      corridor: visualRadius + CITY_WALL_DIMENSIONS.vegetationClearance,
-      gateMargin: visualRadius + CITY_WALL_DIMENSIONS.gateVegetationMargin,
+      corridor: visualRadius + TREE_WALL_CORRIDOR,
+      gateMargin: visualRadius + TREE_GATE_MARGIN,
       gateApproachMargin: visualRadius,
     })) continue;
-    const sink = w * 0.5 + lslope * w * 0.8;   // 완만해도 폭 비례 깊이 매립
+    const sink = w * 0.68 + lslope * w * 0.8;   // R1.2: 매립 증대 — 하부 캡 노출 방지
     const y = p.y - sink;
     mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rotation)).multiply(M4().makeScale(w, h, w)));
     colors.push(GRANITE_COL.clone().multiplyScalar(l));

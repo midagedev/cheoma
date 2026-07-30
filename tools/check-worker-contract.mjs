@@ -215,10 +215,22 @@ const expectedSceneHashes = {
   //   moves, and rafters clear below the shell — intended geometry at every scale.
   //   The series shipped without re-baselining; parity sync == worker == `?worker=0`
   //   fallback re-verified byte-identical at this re-baseline (proxy bytes unchanged).
-  village: '746dcfc1:e434bbfb:045043dc:597f60f1',
-  town: '99771137:ee92fa61:cc7ace0a:9426d3f9',
-  capital: 'b8da814b:c5869d91:261255d9:59f448a1',
-  hanyang: '8fdb6d0d:315269eb:d90f582d:9eab30cd',
+  // R1 산 식생 구조화(구한말 사진 고증, 2026-07-30): 곡률 종속 캐노피(골 뭉침·볼록 등날 억제),
+  //   크레스트 밴드 억제, 화강암 노두 격상(개수·크기·노출장), 노송 개체 티어, 사철 관목층(bloom-scrub
+  //   +1 오브젝트), 성곽 회랑 확폭(TREE_WALL_CORRIDOR, forest 전용 — 플랜 해시 불변), TREE_MIN_D_K
+  //   1/61→1/69(뺏긴 유효면적 보상 팩킹). 총 그루수 village −3%/capital·hanyang +10%. 재기준 직전
+  //   실측: 네 규모 모두 worker == `?worker=0` 폴백 바이트 동일(hanyang 732d7d09 양 경로 일치),
+  //   proxy 해시 4종 전부 불변, mja·snapshot 3경로 교차 PASS.
+  //   (동 라운드 3차 재기준 = R1.1 비전 보정: 곡률 샘플러 6m 양자화 메모(crunch ×3.2→×1.16),
+  //    암반 크기·알베도·저지 배제 보정, 크레스트 0.88→0.70 + 노송 2%·3.0배, 관목 스케일 재조정,
+  //    renorm 1.22·시도 상한 22 — 총 그루수 village +3%/capital +13%/hanyang +10%.)
+  //   (동 라운드 4차 = R1.2: 암반 유효 밴드 0.66~0.86 소프트 페이드 — 최상단 무목·안개 밴드의
+  //    "접시 위 돌" 배제 — + 매립 0.75w, 밴드 내 수락 게이트 완화·시도 상한 ×120 으로 개수 회복
+  //    14/28/52. 나무 버퍼는 rock 회피 면적 변화로만 미세 이동.)
+  village: 'dcc8ff1e:cea4d352:718f9f09:61616958',
+  town: 'b00edd8b:150a8ee9:b99d3b07:6e7ce29d',
+  capital: '3324db9a:17a05bc0:46f3634e:7e054494',
+  hanyang: 'f4d8bdf7:467c5493:e1d44a6d:7f5e559f',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

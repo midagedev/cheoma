@@ -6,16 +6,17 @@ import { bakeSphericalNormals, FOLIAGE_PROFILE, foliageLeafMass } from '../core/
 import { parcelMatrix } from '../generators/shared/parcel-transform.js';
 import * as G from '../core/math/geom2.js';
 
-// 봄 개화 관목(#107) — 진달래(산비탈 군집)·개나리(담장가·길가 띠). 봄을 가을 단풍만큼의 백미로.
-//   buildSpringBloom(plan, site, warp, mask) → { group, setSeason, drawCalls, azalea, forsythia }
+// 봄 개화 관목(#107) + R1 사철 관목층 — 진달래(산비탈 군집)·개나리(담장가·길가 띠)·scrub(사철 잡목).
+//   buildSpringBloom(plan, site, warp, mask) → { group, setSeason, drawCalls, azalea, forsythia, scrub }
 //
 // 설계 요지:
 //   · 진달래: 마을 뒷산 사면에 연분홍~자주 군락. scatterTrees 와 "동일한" 지형 규약 —
 //       공유 warp(makeEdgeWarp, populate 가 넘김) + 격자 이중선형(onMesh)으로 지형 메시면에 정확히
 //       앉힌다(#86 부유 차단). 마을 인접 근사면에 확 피고, 먼 능선은 헤이즈라 약하게(band).
 //   · 개나리: 길가(도로 양 가장자리)와 필지 담장 밖(대문 옆)에 노랑 띠. 마당 안 금지.
-//   · 계절: 봄에만 가시(setSeason). blossom(gardens.js #41) 과 동일 취지 — 봄만 visible, 그 외 숨김.
-//   · 성능: 종별 단일 InstancedMesh + instanceColor(개체 색 변주) → 신규 +2 드로우콜, 신규 재질 1개.
+//   · scrub(R1): 사철 올리브 잡목 — 중사면·골·크레스트 대역. 계절 게이트 제외(항상 가시).
+//   · 계절: 진달래·개나리만 봄 가시(setSeason). scrub 은 항상 visible.
+//   · 성능: 종별 단일 InstancedMesh + instanceColor(개체 색 변주) → 공유 재질 1 + 드로우콜 +1(scrub).
 //   · 결정론: 전용 rng(seed^0x51009 파생). 기존 rng 소비 순서 불침해(플랜·나무·플로라 앵커 불변).
 
 const TAU = Math.PI * 2;
@@ -25,6 +26,8 @@ const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 // 진달래 연분홍~자주 / 개나리 노랑 팔레트(instanceColor 곱, SRGB→linear). 스타일라이즈드 산수화 무드.
 const AZALEA_COLORS = [0xe77fb3, 0xd9679e, 0xee95c4, 0xcf5b93, 0xe070a8].map((h) => linCol(h));
 const FORSYTHIA_COLORS = [0xffd54f, 0xffc107, 0xffcc33, 0xf7c948, 0xffd966].map((h) => linCol(h));
+// R1 사철 관목 — 채도 낮은 올리브 회록(화색 금지).
+const SCRUB_COLORS = [0x5c663e, 0x545f3b, 0x656b43].map((h) => linCol(h));   // R1.1: 지형색 근접(명도 대비 축소)
 
 // 관목 프로토(로우폴리 ico 덩어리 병합). 단색(재질 흰색×instanceColor) → 개체마다 색을 달리한다.
 //   진달래=낮고 둥근 무덤(꽃 무리), 개나리=성글고 높은 분수형(휘어진 가지 인상).
@@ -59,6 +62,15 @@ function makeForsythiaProto() {
     [0.26, 0.30, 0.36, 0.06, 1.00],
     [0.25, -0.28, 0.34, -0.07, 1.00],
     [0.20, 0.05, 0.20, 0.26, 0.90],
+  ]);
+}
+// R1 사철 관목 — FOLIAGE_PROFILE.shrub 재사용, 캐노피 대비 낮은 무릎~사람 키 매스.
+function makeScrubProto() {
+  return mergeBlobs([
+    [0.38, 0, 0.28, 0, 0.72],
+    [0.28, 0.24, 0.18, 0.12, 0.76],
+    [0.26, -0.20, 0.22, -0.10, 0.74],
+    [0.22, 0.06, 0.14, -0.22, 0.70],
   ]);
 }
 
@@ -185,6 +197,74 @@ function scatterAzalea(site, warp, mask, seed) {
   return { mats, colors, positions };
 }
 
+// ───────────────────────── R1 사철 관목층(중사면·골·크레스트) ─────────────────────────
+//   캐노피가 비우는 크레스트·골 편중 패치를 올리브 잡목으로 메운다. 봄 화색 금지·사철 가시.
+function scatterScrub(site, warp, mask, seed) {
+  const R = site.R, TR = site.terrainR || R;
+  const C = site.center;
+  const { N, onMesh } = makeTerrainSampler(site, warp);
+  const rng = makeRng(seed);
+  const clump = makeClump((seed ^ 0x5c7b) >>> 0);
+  const CF = 1 / 28;   // 골 편중 패치 파장 ~28m
+
+  // 대역 hill 0.10~0.80 × 패치 노이즈 × 크레스트 근접 가중(캐노피 억제 대역을 관목이 이어받음).
+  const density = (x, z, hill) => {
+    if (hill < 0.10 || hill > 0.80) return 0;
+    const patch = smoothstep(0.36, 0.70, clump(x * CF, z * CF));
+    const crestW = 1 + 0.8 * smoothstep(0.80, 0.92, hill);
+    return (0.34 + 0.66 * patch) * crestW;
+  };
+  const hidden = (x, z, yHere) => {
+    const dx = x - C.x, dz = z - C.z;
+    let mx = -Infinity;
+    for (let t = 1; t <= 4; t++) { const s = t / 5, h = site.heightAt(C.x + dx * s, C.z + dz * s); if (h > mx) mx = h; }
+    return mx > yHere + 1.5;
+  };
+
+  const target = Math.min(TR > 480 ? 3200 : 2200, Math.round((TR / 145) ** 2 * 260));   // R1.1: 개수 0.6배
+  const minD = 2.4;
+  const grid = new Map();
+  const key = (x, z) => Math.floor(x / minD) * 92821 ^ Math.floor(z / minD);
+  const tooClose = (x, z) => {
+    const cx = Math.floor(x / minD), cz = Math.floor(z / minD);
+    for (let ix = cx - 1; ix <= cx + 1; ix++) for (let iz = cz - 1; iz <= cz + 1; iz++) {
+      const arr = grid.get(ix * 92821 ^ iz); if (!arr) continue;
+      for (const p of arr) if ((p.x - x) ** 2 + (p.z - z) ** 2 < minD * minD) return true;
+    }
+    return false;
+  };
+
+  const mats = [], colors = [], positions = [];
+  let attempts = 0;
+  while (mats.length < target && attempts < target * 32) {
+    attempts++;
+    const gu = rng() * N, gv = rng() * N;
+    const p = onMesh(gu, gv);
+    const hill = site.hillAt(p.x, p.z);
+    if (rng() > density(p.x, p.z, hill)) continue;
+    if (mask && mask(p.x, p.z)) continue;
+    if (tooClose(p.x, p.z)) continue;
+    if (hill > 0.4 && hidden(p.x, p.z, p.y)) continue;
+    const hA = site.heightAt(p.x, p.z);
+    if (Math.abs(p.y - hA) > 0.28) continue;
+    const e = 0.7;
+    const su = onMesh(Math.min(N, gu + e), gv), sd = onMesh(Math.max(0, gu - e), gv);
+    const sr = onMesh(gu, Math.min(N, gv + e)), sl = onMesh(gu, Math.max(0, gv - e));
+    const runU = Math.hypot(su.x - sd.x, su.z - sd.z) || 1, runV = Math.hypot(sr.x - sl.x, sr.z - sl.z) || 1;
+    const slopeR = Math.hypot((su.y - sd.y) / runU, (sr.y - sl.y) / runV);
+    const sink = Math.min(0.14, 0.06 + 0.4 * slopeR);
+    const s = rng.range(1.5, 2.6);   // R1.1: 근경 점박이 → 관목 덤불 스케일
+    const y = p.y - sink;
+    mats.push(M4().makeTranslation(p.x, y, p.z).multiply(M4().makeRotationY(rng() * TAU)).multiply(M4().makeScale(s, s * rng.range(0.80, 1.10), s)));
+    const c = SCRUB_COLORS[(rng() * SCRUB_COLORS.length) | 0].clone();
+    c.multiplyScalar(0.92 + rng() * 0.16);
+    colors.push(c);
+    positions.push({ x: p.x, y, z: p.z });
+    { const k = key(p.x, p.z); let arr = grid.get(k); if (!arr) { arr = []; grid.set(k, arr); } arr.push({ x: p.x, z: p.z }); }
+  }
+  return { mats, colors, positions };
+}
+
 // ───────────────────────── 개나리(담장가·길가 띠) ─────────────────────────
 function scatterForsythia(plan, site, seed) {
   const rng = makeRng(seed);
@@ -255,35 +335,45 @@ export function buildSpringBloom(plan, site, warp, mask) {
 
   const az = scatterAzalea(site, warp, mask, (seed ^ 0xa2) >>> 0);
   const fo = scatterForsythia(plan, site, (seed ^ 0xf0) >>> 0);
+  // R1: 사철 관목 — 진달래·개나리와 독립 시드(기존 봄 개화 배치 불변).
+  const sc = scatterScrub(site, warp, mask, (seed ^ 0x5c7b) >>> 0);
 
   // 공유 재질 1개(흰색 × instanceColor). flatShading 해제 — 구운 구체 노멀로 관목이 하나의 둥근
   //   덩이로 셰이딩된다(패싯 소멸, 역광 림 연속화). 프로그램 수 불변.
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, flatShading: false });
 
-  const meshes = [];
-  const mk = (proto, data, name) => {
-    if (!data.mats.length) return;
+  const springMeshes = [];
+  const evergreenMeshes = [];
+  const mk = (proto, data, name, seasonal) => {
+    if (!data.mats.length) return null;
     const inst = new THREE.InstancedMesh(proto, mat, data.mats.length);
     for (let i = 0; i < data.mats.length; i++) { inst.setMatrixAt(i, data.mats[i]); inst.setColorAt(i, data.colors[i]); }
     inst.instanceMatrix.needsUpdate = true;
     if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     inst.name = name; inst.castShadow = false; inst.receiveShadow = false;
     inst.frustumCulled = false;   // 산개 배치라 인스턴스 바운딩이 전 지형을 덮음 — 통째 컬링 오판 방지
-    group.add(inst); meshes.push(inst);
+    group.add(inst);
+    if (seasonal) springMeshes.push(inst);
+    else evergreenMeshes.push(inst);
+    return inst;
   };
-  mk(makeAzaleaProto(), az, 'bloom-azalea');
-  mk(makeForsythiaProto(), fo, 'bloom-forsythia');
+  mk(makeAzaleaProto(), az, 'bloom-azalea', true);
+  mk(makeForsythiaProto(), fo, 'bloom-forsythia', true);
+  mk(makeScrubProto(), sc, 'bloom-scrub', false);
 
   function setSeason(name) {
-    const vis = name === 'spring';
-    for (const m of meshes) m.visible = vis;
+    // 진달래·개나리만 봄 가시. scrub(R1) 은 사철 — 겨울 스왑에서도 visible 유지.
+    const spring = name === 'spring';
+    for (const m of springMeshes) m.visible = spring;
+    for (const m of evergreenMeshes) m.visible = true;
   }
-  setSeason('summer');   // 기본 숨김 — 어댑터가 진입 시 실제 계절로 setSeason 호출.
+  setSeason('summer');   // 봄 개화만 기본 숨김 — scrub 은 남김. 어댑터가 실제 계절로 setSeason 호출.
 
   return {
     group, setSeason,
-    drawCalls: meshes.length,
+    drawCalls: springMeshes.length + evergreenMeshes.length,
     azalea: { count: az.mats.length, positions: az.positions },
     forsythia: { count: fo.mats.length, positions: fo.positions },
+    scrub: { count: sc.mats.length, positions: sc.positions },
   };
 }

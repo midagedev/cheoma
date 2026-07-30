@@ -603,9 +603,10 @@ export function* populateVillageSteps(plan, opts = {}) {
   const nightLights = buildNightLights(plan, site, nightLightSources);
   root.add(nightLights.group);
 
-  // 11) 봄 개화 관목(진달래·개나리, #107) — 봄을 가을만큼의 백미로. 진달래는 나무와 동일 신축면(warp)
-  //     위 뒷산 사면 군락, 개나리는 담장 밖·길가(고샅 가장자리) 노랑 띠. 봄에만 가시(setSeason).
-  //     종별 단일 InstancedMesh + instanceColor → +2 드로우콜. 나무 마스크 재사용(도로·필지 회피).
+  // 11) 봄 개화 + R1 사철 관목 — 진달래·개나리(#107, 봄만 가시) + scrub(사철 올리브 잡목, 겨울에도 가시).
+  //     진달래는 나무와 동일 신축면(warp) 위 뒷산 사면, 개나리는 담장 밖·길가, scrub 은 중사면·골·크레스트.
+  //     공유 재질 1 + instanceColor, scrub 로 드로우콜 +1. 나무 마스크 재사용(도로·필지 회피).
+  //     setSeason 은 봄 개화만 토글 — scrub 누락 시 겨울에 사면 잡목이 사라지므로 bloom.setSeason 경로 유지.
   const bloom = buildSpringBloom(plan, site, makeEdgeWarp(site, warpInner), mask);
   root.add(bloom.group);
 

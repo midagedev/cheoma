@@ -33,8 +33,8 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const cCourt = linCol(0x8a7f66);   // 마을 바닥(밟힌 흙)
   const cGrass = linCol(0x676f45);   // 초지
   const cGrassDry = linCol(0x7a7c4c);   // 볕 좋은 마른 초지(#115 모틀링) — 균일 초록 원반(어두운 타원) 깨기
-  const cForest = linCol(0x435a2a);  // 숲(능선) — 산 덩어리가 읽히되 사면이 검게 안 죽게
-  const cScrub = linCol(0x566a38);   // 초지↔숲 사이 관목 올리브(#115 재작업) — 접합부 3단 페더로 경계 완화
+  const cForest = linCol(0x435a2a);  // R1.1: 원복 — 산은 하늘·성벽보다 어둡게(성벽 리본 분리는 회랑이 담당)
+  const cScrub = linCol(0x606b3f);   // R1.1: 비전 판정 — 창백 워시 회수, 원값(0x566a38)보다 반 단계만 밝게
   const cFar = linCol(0x6a7c70);     // 원경 대기 감쇠
   const cBank = linCol(0x6d6249);    // 물가 축축한 흙
   const cFloodplain = linCol(0x788164); // 큰 물길의 충적 완사면(초지보다 옅고 습함)
@@ -102,7 +102,8 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
     // #115 재작업: 초지→관목(scrub)→숲 3단 페더 — 접합부가 좁은 선으로 읽히지 않게 전이 폭 확대.
     //   두 겹침 램프(0~0.55, 0.30~1.0)로 넓고 완만한 그라데이션. 깊은 숲(forestT→1)은 최종 cForest.
     outBase.lerp(cScrub, smoothstep(0.0, 0.55, forestT));
-    outBase.lerp(cForest, smoothstep(0.30, 1.0, forestT));
+    // R1.1: 짙은 숲색 지연을 절반만 유지(0.30 → 0.38) — 구조는 남기고 명도 위계는 원래대로.
+    outBase.lerp(cForest, smoothstep(0.38, 1.0, forestT));
     // 화강암 노출(#137 재균형): 구 연속 회색 띠(smoothstep(0.58,1.25,slope)·(0.44,0.74,hill))가 상부
     //   사면을 넓게 회색으로 칠해 "민짜 암벽"으로 읽혔다 → rockExp 로 노이즈 게이트된 불규칙 줄무늬 패치
     //   (상부 지릉·골, 표면 ~10–20%)로 교체하고 이끼 낀 회록으로 섞는다. 나무 rockAvoid 와 동일 필드라
