@@ -52,8 +52,14 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
     post: false,
   }),
   limits: Object.freeze({
+    // 2026-07-30 re-baseline: #211 measured aerial 529 under the 540 ceiling; authored
+    // features landed since then without touching this ceiling — sijeon sign silhouettes
+    // v2 (#227), plan-owned sijeon façade breaks (#218), gate-crossing slabs (#217),
+    // roadside drainage rails, and the night moon set (#212) — measuring 557 (focusOut
+    // 560) across three commits (bc07eb2, d6de9b1, HEAD; Chrome Metal). 575 keeps the
+    // same ~3% creep alarm above the authored floor.
     aerial: Object.freeze({
-      calls: 540,
+      calls: 575,
       triangles: 2_000_000,
       programs: 144,
       geometries: 920,
@@ -76,7 +82,7 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
       geometries: 1050,
     }),
     focusOut: Object.freeze({
-      calls: 540,
+      calls: 575,
       triangles: 2_000_000,
       ...COMMON_RESOURCE_LIMITS,
       geometries: 1024,

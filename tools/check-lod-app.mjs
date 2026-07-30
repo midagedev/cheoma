@@ -1880,8 +1880,9 @@ try {
       const seasonLeaves = env?.getObjectByName?.('seasonLeaves');
       const seasonLitter = env?.getObjectByName?.('seasonLitter');
       const dir = sun?.position?.clone?.().normalize?.();
-      const targetLength = Math.hypot(-7, 5, -32);
-      const targetDir = [-7 / targetLength, 5 / targetLength, -32 / targetLength];
+      // bee2b98 (#212 night moon): elevation lowered y 5 -> 3 for aerial framing.
+      const targetLength = Math.hypot(-7, 3, -32);
+      const targetDir = [-7 / targetLength, 3 / targetLength, -32 / targetLength];
       const smokeColors = smokeSprites.map((sprite) => sprite.material?.color?.getHex?.());
       const profile = {
         visible: env?.visible === true,
@@ -1898,15 +1899,16 @@ try {
         seasonLeaves: seasonLeaves?.visible === true,
         seasonLitter: seasonLitter?.visible === true,
       };
-      // Night atmosphere is #150-H (src/env/atmosphere-profiles.js NIGHT):
-      // sunInt 1.08 / sunColor 0xa8bce6 / fogNear 70 / fogFar 420.
+      // Night atmosphere is #150-H as re-authored by bee2b98 (#212 night moon,
+      // src/env/atmosphere-profiles.js NIGHT): sunInt 1.14 / sunColor 0xa8bce6 /
+      // sunDir y 3 / fogNear 70 / fogFar 420.
       profile.matched = profile.visible
         && Math.abs(profile.motesIntensity - 0.5) < 1e-6
         && profile.motesColor === 0xcdd8f0
         // The smoke presence gate deliberately keeps a just-revealed house clear for 1.4s;
         // an immediate emitter here would be the visual pop this lifecycle is meant to avoid.
         && profile.smokeSprites === 0 && profile.smokeColors.length === 0
-        && Math.abs(profile.sunIntensity - 1.08) < 1e-6
+        && Math.abs(profile.sunIntensity - 1.14) < 1e-6
         && profile.sunColor === 0xa8bce6
         && profile.sunDirection?.every((value, index) => Math.abs(value - targetDir[index]) < 1e-6)
         // Weather remains scene-level and visible in village mode. A snow→clear change keeps
