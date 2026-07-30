@@ -122,6 +122,7 @@
     "check:yard-life": "node tools/check-yard-life-contract.mjs",
     "check:audio-policy": "node tools/check-audio-policy.mjs",
     "check:view-lifecycle": "node tools/check-view-lifecycle.mjs",
+    "check:camera-continuity": "node tools/check-camera-continuity.mjs",
     "check:critters": "node tools/check-critter-contract.mjs",
     "check:yard-life:browser": "node tools/run-browser-locked.mjs -- node tools/check-yard-life-browser.mjs",
     "check:worker": "node tools/run-browser-locked.mjs -- node tools/check-worker-contract.mjs",

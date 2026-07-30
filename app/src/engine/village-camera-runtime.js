@@ -158,12 +158,73 @@ export function createVillageCameraRuntime({
     );
     return focusCutawayState;
   }
-  function setRegime(mode, closeupDistance = 0) {
-    regime = mode;
-    if (mode === 'lock') {
-      controls.enableZoom = false;
+  // OrbitControls.update() 는 enableZoom 과 무관하게 매 프레임 궤도 반경을 [minDistance, maxDistance]
+  //   로 자른다. 그래서 옛 장면의 클램프가 남아 있으면 **저작된 트윈 종점이 핸드오프 프레임에서 잘려**
+  //   한 프레임에 줌인된다: 실측(규모 커밋 village→town) 리프레임 트윈이 656m 에 도착한 다음 프레임에
+  //   구 마을 max(536.9m)로 119.4m 스냅되고, 그 뒤로도 저작된 부감 거리로 돌아오지 못했다.
+  //   그러므로 전환(lock) 구간에는 거리 클램프도 함께 놓고, 정착 시 다시 세운다.
+  const LOCK_MIN_DISTANCE = 0.05;
+  const LOCK_MAX_DISTANCE = Infinity;
+  // 정착 시 현재 거리가 새 범위 밖이면 클램프를 즉시 조이지 않고 이 시간 동안 목표 범위로 좁힌다.
+  //   OrbitControls 가 매 프레임 그 움직이는 경계로 자르므로, 카메라는 별도 writer 없이 같은 이징을
+  //   따라 들어온다(리롤로 마을 반경이 줄어든 경우가 이 경로다).
+  const BOUNDS_EASE_DUR = 0.7;
+  let boundsEase = null;
+  const smoothstep01 = (t) => t * t * (3 - 2 * t);
+
+  function writeDistanceBounds(min, max) {
+    controls.minDistance = min;
+    controls.maxDistance = max;
+  }
+
+  // 새 범위가 현재 포즈를 자르지 않는다면 그대로 쓰고, 자른다면 현재 거리에서 시작해 좁혀 들어간다.
+  function applyDistanceBounds(min, max) {
+    const distance = camera.position.distanceTo(controls.target);
+    const needsEase = Number.isFinite(distance)
+      && distance > 1e-6
+      && (distance > max + 1e-3 || distance < min - 1e-3);
+    if (!needsEase) {
+      boundsEase = null;
+      writeDistanceBounds(min, max);
       return;
     }
+    boundsEase = {
+      fromMin: Math.min(min, distance),
+      fromMax: Math.max(max, distance),
+      toMin: min,
+      toMax: max,
+      e: 0,
+      dur: BOUNDS_EASE_DUR,
+    };
+    writeDistanceBounds(boundsEase.fromMin, boundsEase.fromMax);
+  }
+
+  // 렌더 루프가 OrbitControls.update 전에 호출한다.
+  function updateZoomBounds(dt) {
+    if (!boundsEase) return false;
+    boundsEase.e += Math.max(0, dt);
+    const k = smoothstep01(Math.min(1, boundsEase.e / boundsEase.dur));
+    const min = boundsEase.fromMin + (boundsEase.toMin - boundsEase.fromMin) * k;
+    const max = boundsEase.fromMax + (boundsEase.toMax - boundsEase.fromMax) * k;
+    writeDistanceBounds(min, max);
+    if (k >= 1) boundsEase = null;
+    return true;
+  }
+
+  function setRegime(mode, closeupDistance = 0) {
+    regime = mode;
+    const legacyFlow = typeof window !== 'undefined' && window.__camFlowLegacy === true;
+    if (mode === 'lock') {
+      controls.enableZoom = false;
+      if (!legacyFlow) {
+        boundsEase = null;
+        writeDistanceBounds(LOCK_MIN_DISTANCE, LOCK_MAX_DISTANCE);
+      }
+      return;
+    }
+    // 리롤·규모 커밋 뒤 부감 단위는 새 핸들·현재 aspect 에서 다시 읽어야 한다. 종전에는 웨이브 완료
+    //   시점의 setRegime('explore') 이 **옛 마을** aerialReferenceDist 로 범위를 세웠다.
+    if (mode === 'explore' && !legacyFlow) syncAerialReference();
     const aerialReference = referenceAerialDistance();
     if (mode === 'focus' && closeupDistance > 0) {
       focusCloseupReference = villageScreenDistanceForCamera(closeupDistance, camera);
@@ -176,8 +237,12 @@ export function createVillageCameraRuntime({
     }
     const bounds = villageZoomReferenceBounds(mode, aerialReference, focusCloseupReference);
     controls.enableZoom = true;
-    controls.minDistance = actualDistance(bounds.min);
-    controls.maxDistance = actualDistance(bounds.max);
+    if (legacyFlow) {
+      boundsEase = null;
+      writeDistanceBounds(actualDistance(bounds.min), actualDistance(bounds.max));
+      return;
+    }
+    applyDistanceBounds(actualDistance(bounds.min), actualDistance(bounds.max));
   }
 
   // 컷어웨이가 지형을 걷어낸 프레임만 그 전경 식생도 동반 은닉한다(부유 수관 해소). 코어가 컷 깊이
@@ -431,6 +496,7 @@ export function createVillageCameraRuntime({
     fogBand,
     setFogBandFloor,
     setRegime,
+    updateZoomBounds,
     distanceAtFraction,
     focusEffectWeight,
     updateFocusContext,
@@ -447,6 +513,9 @@ export function createVillageCameraRuntime({
       aerialDist: +(village.aerialDist || 0).toFixed(1),
       aerialReferenceDist: +referenceAerialDistance().toFixed(1),
       dist: +camera.position.distanceTo(controls.target).toFixed(1),
+      minDistance: +controls.minDistance.toFixed(1),
+      maxDistance: Number.isFinite(controls.maxDistance) ? +controls.maxDistance.toFixed(1) : null,
+      boundsEasing: !!boundsEase,
       visualDist: +villageScreenDistanceForCamera(
         camera.position.distanceTo(controls.target), camera,
       ).toFixed(1),

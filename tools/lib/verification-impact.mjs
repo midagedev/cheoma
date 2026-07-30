@@ -37,6 +37,17 @@ const EXACT_IMPACT = new Map([
     './check-dof.mjs',
     './check-plan-contract.mjs',
     './check-lod.mjs',
+    './check-camera-continuity.mjs',
+  ]],
+  // #22 전환 연속성: 두 앱 런타임은 esbuild 로 번들되어 정적 import 폐쇄에 잡히지 않으므로
+  // 소유 계약을 명시한다(브라우저 게이트 라우팅은 verification-plan 의 'camera runtime changed').
+  ['app/src/engine/view-shift.js', [
+    './check-camera-continuity.mjs',
+    './check-architecture.mjs',
+  ]],
+  ['app/src/engine/village-camera-runtime.js', [
+    './check-camera-continuity.mjs',
+    './check-architecture.mjs',
   ]],
   ['src/env/weather-physical-geometry.js', [
     './check-weather-geometry.mjs',

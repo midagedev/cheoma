@@ -56,6 +56,34 @@ function effectivelyVisible(element, container) {
 // sliver of the safe rectangle could surrender the entire band above it.
 const EDGE_ANCHOR_TOLERANCE = 28;      // chrome insets are clamp(10px … 22px)
 const COMPOSITION_LIMIT = 0.3;         // normalized artistic shift, both directions
+// 시프트 추종은 임계감쇠 2차 스프링이다. 종전 1차 지연(alpha = 1 - exp(-dt/0.28))은 목표가 계단으로
+//   바뀌는 프레임에 **최대 속도**를 낸다 — 정지 상태에서 Δ/0.28 px/s 로 즉시 출발하므로 히어로 정착
+//   직후 인스펙터가 열리는 프레임에 렌즈가 튀었다(실측 1024×640 데스크톱 4.24px/frame ≈ 170px/s 를
+//   정지에서 한 프레임에, 폰 시트 Δ≈140px 에서는 500px/s 급). 게다가 1차 지연은 프레임이 길면 남은
+//   거리의 큰 몫을 한 번에 먹는다(실측: 149ms 히치 프레임에서 25.3px 단일 프레임 점프).
+//   2차 스프링은 속도 상태를 갖고 v=0 에서 출발하므로 시작 가속만 있고 속도 불연속이 없으며,
+//   서브스텝이 히치 프레임의 단일 점프를 막는다. omega 는 종전과 비슷한 정착 시간(≈0.6s 내 5%)으로.
+const SHIFT_OMEGA = 7.0;
+const SHIFT_SUBSTEP = 1 / 120;
+// 크롬이 나타나거나 사라지면 구도 밴드(가용 높이)가 계단으로 바뀐다. 구도 **분수**는 focus 트윈이
+//   매 프레임 저작한 값이므로 지연시키면 안 되고(도착이 늦어진다), 밴드만 같은 스프링으로 따라간다.
+const BAND_OMEGA = 7.0;
+
+// 임계감쇠 스프링 한 스텝(semi-implicit). dt 가 길면 서브스텝으로 나눠 적분해 안정성과
+// "한 프레임에 큰 몫" 문제를 함께 없앤다.
+function springTo(cur, vel, target, omega, dt) {
+  let x = cur;
+  let v = vel;
+  let remaining = Math.min(Math.max(dt, 0), 0.5);
+  while (remaining > 1e-6) {
+    const h = Math.min(SHIFT_SUBSTEP, remaining);
+    remaining -= h;
+    v += (-2 * omega * v - omega * omega * (x - target)) * h;
+    x += v * h;
+  }
+  if (Math.abs(x - target) < 0.01 && Math.abs(v) < 0.05) return { value: target, velocity: 0 };
+  return { value: x, velocity: v };
+}
 const clampComposition = (fraction) => Math.max(
   -COMPOSITION_LIMIT,
   Math.min(COMPOSITION_LIMIT, Number(fraction) || 0),
@@ -159,8 +187,12 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
   const state = {
     curX: 0,
     curY: 0,
+    velX: 0,
+    velY: 0,
     tgtX: 0,
     tgtY: 0,
+    bandCur: 0,
+    bandVel: 0,
     compositionYFrac: 0,
     enabled: true,
     lastSample: 0,
@@ -173,6 +205,8 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
 
   function sampleTarget() {
     if (typeof document === 'undefined') return;
+    // 검증 A/B 토글은 이 샘플 주기(≤48ms)에서만 읽는다 — 프레임 핫 루프에 window 조회를 넣지 않는다.
+    state.legacyFlow = typeof window !== 'undefined' && window.__camFlowLegacy === true;
     state.layout = measureViewportInsets(container);
     state.safeRect = safeViewportRect(state.layout);
     const capX = state.layout.width * 0.42;
@@ -205,10 +239,20 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     return Math.min(bandSampleH, cap);
   }
 
+  // 적용에 쓰는 밴드는 위 측정값을 스프링으로 따라간다. 첫 호출은 측정값에서 시작한다(부팅 램프 없음).
+  function appliedBandHeight() {
+    const target = compositionBandHeight();
+    if (!(state.bandCur > 0)) {
+      state.bandCur = target;
+      state.bandVel = 0;
+    }
+    return state.bandCur;
+  }
+
   function apply({ panels = true } = {}) {
     const x = panels && state.enabled ? state.curX : 0;
     const y = (panels && state.enabled ? state.curY : 0)
-      + state.compositionYFrac * compositionBandHeight();
+      + state.compositionYFrac * appliedBandHeight();
     if (Math.abs(x - state.appliedX) < 0.2 && Math.abs(y - state.appliedY) < 0.2) return;
     state.appliedX = x;
     state.appliedY = y;
@@ -225,6 +269,8 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     if (!state.enabled) {
       state.curX = 0;
       state.curY = 0;
+      state.velX = 0;
+      state.velY = 0;
       state.tgtX = 0;
       state.tgtY = 0;
       apply();
@@ -238,10 +284,29 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
         state.lastSample = now;
         sampleTarget();
       }
-      // Longer settle (~0.28s) so hero-land → panel open does not yank the frame.
-      const alpha = 1 - Math.exp(-dt / 0.28);
-      state.curX += (state.tgtX - state.curX) * alpha;
-      state.curY += (state.tgtY - state.curY) * alpha;
+      if (state.legacyFlow) {
+        // 검증 전용(window.__camFlowLegacy) — 종전 1차 지연 재현. 제품 기본 경로가 아니다.
+        const alpha = 1 - Math.exp(-dt / 0.28);
+        state.curX += (state.tgtX - state.curX) * alpha;
+        state.curY += (state.tgtY - state.curY) * alpha;
+        state.velX = 0;
+        state.velY = 0;
+      } else {
+        const nx = springTo(state.curX, state.velX, state.tgtX, SHIFT_OMEGA, dt);
+        const ny = springTo(state.curY, state.velY, state.tgtY, SHIFT_OMEGA, dt);
+        state.curX = nx.value; state.velX = nx.velocity;
+        state.curY = ny.value; state.velY = ny.velocity;
+      }
+    }
+    // 밴드는 busy 구간에도 따라간다(그 구간의 크롬 변화가 정착 프레임에 계단으로 쌓이지 않게).
+    const bandTarget = compositionBandHeight();
+    if (!(state.bandCur > 0) || state.legacyFlow) {
+      state.bandCur = bandTarget;
+      state.bandVel = 0;
+    } else {
+      const nb = springTo(state.bandCur, state.bandVel, bandTarget, BAND_OMEGA, dt);
+      state.bandCur = nb.value;
+      state.bandVel = nb.velocity;
     }
     apply();
   }
@@ -251,6 +316,8 @@ export function createViewShift({ container, camera, isBusy = () => false }) {
     if (!state.enabled) {
       state.curX = 0;
       state.curY = 0;
+      state.velX = 0;
+      state.velY = 0;
       state.tgtX = 0;
       state.tgtY = 0;
       state.layout = null;

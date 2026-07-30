@@ -176,6 +176,9 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-clip-stage.mjs',
   'tools/shoot-clip-stages.mjs',
   'docs/clip-stages.md',
+  // #22 카메라 전환 연속성: 뷰 시프트 스프링·줌 범위 핸드오프의 순수 계약. 대상 런타임
+  // (view-shift / village-camera-runtime)은 이미 'camera runtime changed' 로 라우팅된다.
+  'tools/check-camera-continuity.mjs',
 ]);
 
 function add(gates, ...items) {

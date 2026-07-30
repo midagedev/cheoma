@@ -457,8 +457,19 @@ assert.deepEqual(impactedFastChecks(['.gitignore']), [
 assert.deepEqual(impactedFastChecks(['src/env/circular-bokeh-shader.js']), [
   './check-architecture.mjs', './check-dof.mjs',
 ]);
+// #22 카메라 전환 연속성 게이트 추가: optics 의 렌즈·줌 범위 정책이 뷰 시프트 스프링과 줌 범위
+// 핸드오프 계약의 입력이므로 check-camera-continuity 가 같은 impact 집합에 들어온다.
 assert.deepEqual(impactedFastChecks(['src/camera/optics.js']), [
-  './check-architecture.mjs', './check-dof.mjs', './check-plan-contract.mjs', './check-lod.mjs',
+  './check-architecture.mjs', './check-camera-continuity.mjs',
+  './check-dof.mjs', './check-plan-contract.mjs', './check-lod.mjs',
+]);
+// 편집 대상 런타임(뷰 시프트·마을 카메라)은 esbuild 번들이라 정적 폐쇄에 잡히지 않으므로
+// EXACT_IMPACT 로 소유 계약을 고정한다. 브라우저 게이트는 'camera runtime changed' 가 맡는다.
+assert.deepEqual(impactedFastChecks(['app/src/engine/view-shift.js']), [
+  './check-architecture.mjs', './check-camera-continuity.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['app/src/engine/village-camera-runtime.js']), [
+  './check-architecture.mjs', './check-camera-continuity.mjs',
 ]);
 assert.deepEqual(impactedFastChecks(['src/env/weather-physical-geometry.js']), [
   './check-architecture.mjs', './check-weather-geometry.mjs',

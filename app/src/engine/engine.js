@@ -791,7 +791,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //   하드 벽이 아니라 점근 쿠션이다: 바닥고 위 BAND 구간으로 들어올수록 지수적으로 완만해져
   //   바닥고에 수렴하고 통과하지 않는다. 궤도 반경은 보존한다(고도를 올리며 xz 를 당김) — 고도만
   //   올리면 거리가 늘어 OrbitControls 의 maxDistance 클램프와 매 프레임 서로 되밀며 떨린다.
-  //   대상은 사용자 궤도 입력뿐이다: 트윈·리빌 연출·시네마틱(walk 는 자체 충돌)·데모는 저작된 경로다.
+  //   저작된 카메라 경로(트윈·리빌 연출)도 **같은 프레임에 함께** 통과시킨다. 종전에는 그 두 경로를
+  //   제외했는데, 저작 종점 자체가 바닥고 아래인 필지에서는 도착 프레임에 쿠션이 한꺼번에 걸려
+  //   한 프레임 스냅이 됐다(실측 hop p23→p33: 트윈 종료 프레임에 +5.29m·화면 73px, 앞뒤 프레임은
+  //   0.099m). 경로를 매 프레임 쿠션과 합성하면 위반이 0 에서 연속으로 자라 도착에 계단이 없다.
+  //   쿠션은 lerp 결과의 순수 함수이므로 다음 프레임 트윈 값에 누적되지 않는다.
+  //   시네마틱(walk 는 자체 충돌)·데모는 여전히 제외한다.
   //   지형 높이는 렌더된 삼각 격자와 같은 계약(terrainMeshHeightAt)으로 읽어 해석 높이와 어긋나
   //   실제 화면에서 여유고가 음수가 되는 일이 없게 한다.
   //   바닥고는 focus 해결기가 이미 카메라 종점에 요구하는 값과 같게 둔다
@@ -803,8 +808,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   const GROUND_CUSHION_FLOOR = VILLAGE_FOCUS_CAMERA_CLEARANCE;
   const GROUND_CUSHION_BAND = 1.0;
   function cushionCameraAboveGround() {
-    if (!village.active || demo.active || tween
-      || cinematic.isActive() || revealCamera?.isActive()) return;
+    if (!village.active || demo.active || cinematic.isActive()) return;
+    // 검증 A/B 토글(window.__camFlowLegacy): 저작 경로 제외를 되살려 도착 스냅을 재현한다.
+    if ((tween || revealCamera?.isActive())
+      && typeof window !== 'undefined' && window.__camFlowLegacy === true) return;
     const site = village.handle?.plan?.site;
     if (!site) return;
     // terrainMeshHeightAt 는 격자 좌표를 클램프하므로 지형 사각 밖에서도 가장자리 높이를 돌려준다.
@@ -1337,6 +1344,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 프레임당 고정 회전이라 120Hz 디스플레이에서 2배 빨라진다(주기 스펙 이탈). dt 경로는
     // 초당 회전량이 (2π/60·speed) 로 고정되어 주기 60/speed 초가 주사율과 무관하게 유지된다.
     // 조립 선회 감속 중(asmOrbitGain>0)에도 update 를 돌려 감속이 프레임에 반영되게 한다.
+    // 줌 범위 이징은 OrbitControls 가 그 경계로 반경을 자르기 전에 진행시킨다(#22 규모 커밋·리롤
+    // 뒤 클램프 스냅 제거). 이징이 없으면 no-op.
+    villageCamera.updateZoomBounds(dt);
     if (!cinematic.isActive() && !tween && !demo.active && !revealActive) {
       updateOrbitControls(dt, elapsed);
     }
