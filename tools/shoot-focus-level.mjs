@@ -17,25 +17,32 @@ import {
   VILLAGE_LENS,
 } from '../src/camera/optics.js';
 import { BOKEH_GATHER_TAP_COUNT } from '../src/env/bokeh-coc-contract.js';
+import { VILLAGE_FOCUS_CAMERA_CLEARANCE } from '../src/camera/focus-visibility.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
-// The yard-detail fixture must be a regular giwa whose planned details are hidden from the authored
-// base frame and exposed by a bounded candidate (base 0 → after ≥1); it is also the `giwa` capture
-// below, so a parcel with occlusion blockers or an auxiliary volume in the way confounds that shot.
-// `p13` stopped qualifying — under this exact query (the `seed=20260718` house seed matters) it is no
-// longer a regular giwa at all. Re-measured over all 13 regular giwa parcels, five qualify:
-// p11 and p15 and p31 (detail 0/2→1/2, no blockers), p16 (0/1→1/1, only one planned detail) and
-// p27 (0/2→1/2 but blocked by `auxiliary:p27:aux-0`). `p31` is deliberately avoided here because it
-// used to be the terrain fixture and would read as the same case.
-// `p11` then stopped qualifying when 마당 소품 배치가 plotW×plotD 직사각형에서 실제 필지 폴리곤으로
-// 옮겨졌다(`village/yard-layout.js`). p11 의 두 디테일(장독대·빨래줄)은 여전히 계획되지만 장독대가
-// 담을 뚫고 나와 있던 자리에서 실제 뒤안(로컬 z=-4.81)으로 들어갔고, 뒤안은 본채가 정당하게 가린다
-// — 즉 이전의 "보인다"는 소품이 담 밖으로 삐져나와 있었기 때문이었다. 같은 query 재측정: 네 곳이
-// 여전히 자격을 갖는다(p15·p16·p27·p31, p24 는 base 1 이라 부적격). `p15`(0/2→1/2, 부속채·차폐물
-// 없음)가 가장 깨끗하다. 다시 드리프트하면 base-0/after-≥1 정규 giwa 를 재스캔할 것 — 어서션을
-// 완화하지 말 것.
-const GIWA_YARD_DETAIL_FIXTURE = 'p15';
+// 두 계약은 종전에 **한 필지**에 겹쳐 있었다: `giwa` 캡처 대상(정규 기와집)과 "경계 탐색이 저작
+// 프레임이 가리는 계획 마당 디테일을 드러낸다"(base 0 → after ≥1). R2 지붕바다 라운드가 capital
+// 필지를 재배열하면서 그 겹침이 **동시 충족 불가능**해졌다. 같은 query(집 시드 `seed=20260718` 가
+// 중요) 재스캔 결과:
+//   · `p15` 는 더 이상 기와집이 아니다(regular/choga, 디테일 3/3 이 base 에서 이미 보인다 → 개선 0).
+//   · 정규 기와집은 7곳뿐이고(p10·p11·p19·p21·p22·p37·p40) **어느 곳도 개선하지 않는다**
+//     (p10 0→0/1, p11 0→0/2, p19 0→0/2, p21 0→0/1, p22 0→0/2, p37 0→0/2, p40 은 base 1 로 부적격).
+//   · 반대로 개선 사례는 제품에 살아 있다 — 다섯 곳(p4·p17·p20·p42·p46, 모두 초가).
+// 그래서 어서션을 완화하는 대신 **두 역할을 분리**했다. 각 어서션의 의미는 그대로다: 기와집 캡처는
+// 여전히 정규 기와집을 찍고, 개선 계약은 실제로 그 일이 일어나는 필지에서 측정된다.
+//
+// 캡처용 기와집: 건축 차폐물이 없고 경계 탐색이 candidate 0(scale 1 / fov 16°)에 머무는 필지여야
+// 한다(그렇지 않으면 망원 프레임 어서션이 다른 것을 시험한다). p10·p11·p21 이 그 조건을 만족하고,
+// p37 은 `p21` 에 가리고 p22·p40 은 scale 0.8 로 밀려난다. 셋 중 `p21` 만 근접 링 동물이 실제로
+// 화면에 기여한다(측정 animalPixels: p10 0, p11 0, p21 634) — 아래 동물 기여 어서션은 `.some()`
+// 이라 초가만으로도 통과하지만, 기와집 쪽 증거가 0 인 픽스처는 커버리지를 스스로 지운다.
+const GIWA_CAPTURE_FIXTURE = 'p21';
+// 개선 계약 픽스처: base 0 → 경계 candidate ≥1. 다섯 후보 중 p46 은 candidate 하나(scale 0.8)에서만
+// 개선되어 가장 취약하고, p20·p42 는 담이 함께 가린다. `p4`(0→1/2, scale 0.9·0.8 두 candidate 에서
+// 개선, 차폐는 본채 자신 = 문서화된 "본채가 가리고 경계 탐색이 드러낸다" 사례)가 가장 깨끗하다.
+// 다시 드리프트하면 base-0/after-≥1 정규 주거 필지를 재스캔할 것 — 어서션을 완화하지 말 것.
+const YARD_DETAIL_FIXTURE = 'p4';
 // The terrain-occluded fixture must actually cross the rendered ridge. `p31` stopped doing so when
 // the #164 ridge gentling lowered the capital ridge anchor (its nine focus rays now clear terrain
 // by +0.95m), and `p8` stopped doing so when the R2 roof-sea round re-laid the capital parcels: its
@@ -267,8 +274,46 @@ try {
       const ring = engine.scene.children.find((child) => (
         child.name === 'focusRing' && child.userData?.parcelId === id && child.visible
       ));
+      // Project the semantic box into the *stage/canvas* pixel space that owns both the
+      // camera projection (aspect + setViewOffset fullWidth/fullHeight) and
+      // __viewshift.safeRect. The 1440×900 page viewport still includes the docked
+      // inspector column outside .stage, so scaling by it stretched every semantic box by
+      // viewport/stage (measured 4/3: stage 1080 vs window 1440) and falsely reported
+      // UI-safe overflow while the fit scale was already applied on the live camera.
+      // check-cinematic-reveal-app.mjs was corrected the same way and passes.
+      const canvas = engine.renderer.domElement;
+      const view = camera.view;
+      const stageWidth = (view?.enabled && view.fullWidth > 0)
+        ? view.fullWidth
+        : (canvas.clientWidth || window.innerWidth);
+      const stageHeight = (view?.enabled && view.fullHeight > 0)
+        ? view.fullHeight
+        : (canvas.clientHeight || window.innerHeight);
+      // Authored framing vs the live pose, read in this same frame. The settled focus
+      // camera is not always the authored endpoint: engine.js#cushionCameraAboveGround
+      // lifts an endpoint that sits under the rendered terrain, preserving orbit radius.
+      // Landmark subjects (palace/temple) return no bounded solve, so this stays optional
+      // and a missing value fails its assertion instead of throwing here.
+      const planned = visibility?.safeFraming?.position && visibility.safeFraming.target
+        ? visibility.safeFraming : null;
+      const plannedDistance = planned ? Math.hypot(
+        planned.position[0] - planned.target[0],
+        planned.position[1] - planned.target[1],
+        planned.position[2] - planned.target[2],
+      ) : null;
+      const plannedElevation = plannedDistance > 0 ? Math.asin(
+        (planned.position[1] - planned.target[1]) / plannedDistance,
+      ) * 180 / Math.PI : null;
+      const liveCutaway = engine.village.debugContinuum()?.focusCutaway ?? null;
       return {
         elevation: Math.asin(-forward.y) * 180 / Math.PI,
+        plannedElevation,
+        plannedDistance,
+        liveDistance: camera.position.distanceTo(target),
+        endpointClearance: visibility.terrainEndpointClearance ?? null,
+        groundClearance: liveCutaway?.cameraClearance ?? null,
+        stageWidth,
+        stageHeight,
         composition: window.__viewshift?.compositionYFrac ?? null,
         left: (minX + 1) * 0.5,
         right: (maxX + 1) * 0.5,
@@ -358,7 +403,32 @@ try {
     const frame = await measureFocusedFrame(parcel.parcelId);
     console.log(`FOCUS FRAME ${name}: ${JSON.stringify(frame)}`);
     if (name === 'giwa' || name === 'choga' || name === 'hero' || name === `terrain-${TERRAIN_FIXTURE}`) {
-      check(Math.abs(frame.elevation - FOCUS_ELEVATION_DEG) < 0.02,
+      if (name === `terrain-${TERRAIN_FIXTURE}`) {
+        // The terrain fixture is the one subject whose authored camera endpoint sits *under*
+        // the rendered terrain (endpointClearance −0.174m), so the runtime frame cannot hold
+        // the shared 9° elevation: engine.js#cushionCameraAboveGround (asymptotic cushion,
+        // floor = VILLAGE_FOCUS_CAMERA_CLEARANCE, fixed point exactly ground+1.2m) lifts it
+        // every frame and updateFocusContext absorbs that lift as a user elevation offset.
+        // Measured settle → +2.3s: 9.76° → 10.91° at a constant 48.135m radius, creeping
+        // toward the cushion floor (the map's derivative is 1 at its fixed point, so it never
+        // stops converging — "wait for the camera to settle" is not available here).
+        // Asserting a settle-time constant tested a pose the product deliberately does not
+        // hold, so this pins the same thing more tightly instead: the *authored* solve keeps
+        // the exact shared elevation, and the live pose differs from it only by that cushion —
+        // same target, same orbit radius, lifted upward, never under the terrain and never
+        // above the cushion floor. Same-frame read (measureFocusedFrame).
+        check(Math.abs(frame.plannedElevation - FOCUS_ELEVATION_DEG) < 0.02
+          && frame.endpointClearance < 0
+          && Math.abs(frame.liveDistance - frame.plannedDistance) < 0.05
+          && frame.elevation >= FOCUS_ELEVATION_DEG - 0.02
+          && frame.groundClearance > 0
+          && frame.groundClearance <= VILLAGE_FOCUS_CAMERA_CLEARANCE + 1e-3,
+        `${name} keeps the authored shared focus elevation and only the ground cushion lifts it (${
+          frame.plannedElevation.toFixed(2)}° authored → ${frame.elevation.toFixed(2)}° live, radius ${
+          frame.liveDistance.toFixed(3)}/${frame.plannedDistance.toFixed(3)}m, clearance ${
+          frame.endpointClearance?.toFixed(3)}→${frame.groundClearance}m of ${
+          VILLAGE_FOCUS_CAMERA_CLEARANCE}m)`);
+      } else check(Math.abs(frame.elevation - FOCUS_ELEVATION_DEG) < 0.02,
         `${name} runtime keeps the exact shared focus elevation (${frame.elevation.toFixed(2)}°)`);
       // #15 re-authoring (user: "뒷산의 높이를 좀 낮추면 림패스 만들어내기 훨씬 유리할 것 같아. 하늘도
       //   보기 좋고"): a close residential frame now shifts the lens down by an authored fraction to
@@ -377,11 +447,12 @@ try {
       `${name} house volume remains uncropped and readable (${(frame.top * 100).toFixed(1)}–${(frame.bottom * 100).toFixed(1)}%, height ${(frame.height * 100).toFixed(1)}%)`);
     }
     const safe = frame.safeRect;
+    // Stage pixels, not page-viewport pixels — see measureFocusedFrame's stageWidth note.
     const px = {
-      left: frame.left * 1440,
-      right: frame.right * 1440,
-      top: frame.top * 900,
-      bottom: frame.bottom * 900,
+      left: frame.left * frame.stageWidth,
+      right: frame.right * frame.stageWidth,
+      top: frame.top * frame.stageHeight,
+      bottom: frame.bottom * frame.stageHeight,
     };
     check(safe?.usable
       && px.left >= safe.left - 1
@@ -412,22 +483,24 @@ try {
     ...parcel,
     focusVisibility: window.__engine.village.debugFocusVisibility(parcel.parcelId),
   })));
-  // Fixed before/after fixture: do not search the implementation's diagnostics
-  // for a passing house. In this seed p15 has two planned details, both hidden from
-  // the authored base frame by the house itself, one of which a bounded
-  // south-opening candidate exposes (see GIWA_YARD_DETAIL_FIXTURE above).
-  const giwaDetailFixture = parcels.find((parcel) => (
-    parcel.parcelId === GIWA_YARD_DETAIL_FIXTURE
-  ));
-  check(giwaDetailFixture?.family === 'regular' && giwaDetailFixture?.kind === 'giwa',
-    `capital fixed yard-detail fixture remains a regular giwa (${giwaDetailFixture?.parcelId || 'missing'})`);
-  check(giwaDetailFixture?.focusVisibility?.baseDetailVisibleCount === 0
-      && giwaDetailFixture?.focusVisibility?.detailVisibleCount >= 1,
-    `fixed ${GIWA_YARD_DETAIL_FIXTURE} bounded focus improves planned detail visibility (${
-      giwaDetailFixture?.focusVisibility?.baseDetailVisibleCount
-    }→${giwaDetailFixture?.focusVisibility?.detailVisibleCount})`);
+  // Fixed fixtures: do not search the implementation's diagnostics for a passing
+  // house. p11 is the regular giwa this run captures; p4 owns the before/after
+  // contract — two planned details, both hidden from the authored base frame by the
+  // house itself, one of which a bounded south-opening candidate exposes
+  // (see GIWA_CAPTURE_FIXTURE / YARD_DETAIL_FIXTURE above).
+  const giwaCapture = parcels.find((parcel) => parcel.parcelId === GIWA_CAPTURE_FIXTURE);
+  const yardDetailFixture = parcels.find((parcel) => parcel.parcelId === YARD_DETAIL_FIXTURE);
+  check(giwaCapture?.family === 'regular' && giwaCapture?.kind === 'giwa',
+    `capital fixed giwa capture fixture remains a regular giwa (${giwaCapture?.parcelId || 'missing'})`);
+  check(yardDetailFixture?.family === 'regular'
+      && yardDetailFixture?.focusVisibility?.baseDetailVisibleCount === 0
+      && yardDetailFixture?.focusVisibility?.detailVisibleCount >= 1,
+    `fixed ${YARD_DETAIL_FIXTURE} bounded focus improves planned detail visibility (${
+      yardDetailFixture?.focusVisibility?.baseDetailVisibleCount
+    }→${yardDetailFixture?.focusVisibility?.detailVisibleCount}/${
+      yardDetailFixture?.focusVisibility?.detailCount})`);
   const picks = [
-    ['giwa', giwaDetailFixture],
+    ['giwa', giwaCapture],
     ['choga', parcels.find((parcel) => parcel.family === 'regular' && parcel.kind !== 'giwa')],
     ['palace', parcels.find((parcel) => parcel.parcelId === 'palace')],
     ['temple', parcels.find((parcel) => parcel.parcelId === 'temple')],
@@ -487,9 +560,27 @@ try {
       && cutaway.minClearance < 0
       && cutaway.near <= cutaway.subjectNear - 1.2,
     `${TERRAIN_FIXTURE} clips the proven terrain crossing before the house (${cutaway?.near.toFixed(3)}m/${cutaway?.subjectNear.toFixed(3)}m)`);
-    check(Math.abs(terrainEvidence.camera.near - cutaway.near) < 1e-3
-      && Math.abs(terrainEvidence.continuum.focusCutaway.near - cutaway.near) < 1e-3,
-    `${TERRAIN_FIXTURE} applies one shared live-camera cutaway (${terrainEvidence.camera.near.toFixed(3)}m)`);
+    // "One shared cutaway" means the live camera's near plane and the runtime's own report
+    // are the same number, not that they equal a solve taken at the authored endpoint.
+    // `visibility.terrainCutaway` re-solves from that authored pose (13.296m), while the
+    // live camera has been lifted onto the ground cushion (see the elevation check above),
+    // so the live solve legitimately differs (11.09m and still creeping). Compare the two
+    // live readers against each other in the same frame — the same-frame realignment
+    // f202204 applied to check-cinematic-reveal-app.mjs's cutaway assertion — and require the
+    // live cutaway to be the same *decision* the planner made, still clipping ahead of the
+    // house. The authored promise itself stays asserted by the preceding check.
+    const live = terrainEvidence.continuum.focusCutaway;
+    check(Math.abs(terrainEvidence.camera.near - live.near) < 1e-3
+      && live.active
+      && live.available
+      && live.reason === 'cutaway'
+      && cutaway.reason === 'cutaway'
+      && live.blockedRays >= 1
+      && live.minClearance < 0
+      && live.near <= live.subjectNear - 1.2,
+    `${TERRAIN_FIXTURE} applies one shared live-camera cutaway (${
+      terrainEvidence.camera.near.toFixed(3)}m/${live.subjectNear.toFixed(3)}m, ${
+      live.blockedRays} blocked rays)`);
     check(terrainEvidence.visibility.telephotoPreserved
       && Math.abs(terrainEvidence.visibility.safeFraming.fov - VILLAGE_LENS.parcel.fov) < 1e-9
       && terrainEvidence.visibility.safeFraming.position.every((value, index) => (
@@ -560,8 +651,19 @@ try {
   );
   await mobile.evaluate(() => window.__viewshift?.setEnabled(true));
 
+  // The focus-in itself runs on the *real* product timeline here. Portrait is the one
+  // viewport where the context sheet is an overlay, so selecting morphs the chrome — and
+  // therefore the safe rectangle — while the dolly is still in flight. The product re-solves
+  // the UI-safe framing when that chrome settles (engine.js#retargetOnChromeSettled), and
+  // that path only exists while the tween is alive: seeking it to the end in one call raced
+  // the 420ms sheet morph and left the live camera on a fit solved against pre-morph chrome
+  // (measured on the palace landing: 30.9px left and 6.0px up of fit.projectedBounds, the
+  // semantic box 31px outside the safe rectangle, and fit.scale 2.94 where the settled
+  // chrome needs 3.54). Running the real timeline reproduces sub-pixel agreement with
+  // fit.projectedBounds and a fully settled shift (x == tx) for both landmarks. The
+  // intermediate focus-out is not under test and keeps the deterministic seek.
   async function mobileFocus(parcelId) {
-    return mobile.evaluate(async (id) => {
+    await mobile.evaluate(async (id) => {
       const engine = window.__engine;
       if (engine.village.getState().selected) {
         engine.village.return();
@@ -569,9 +671,11 @@ try {
         engine.debugDofSeek(1, { finish: true });
       }
       engine.village.debugFocus(id);
-      for (let index = 0; index < 6; index++) await Promise.resolve();
-      engine.debugDofSeek(1, { finish: true });
     }, parcelId);
+    await mobile.waitForFunction((id) => {
+      const state = window.__engine.village.getState();
+      return state.selected === id && !state.transitioning;
+    }, parcelId, { timeout });
   }
 
   async function mobileSemanticFrame(parcelId) {
@@ -596,11 +700,19 @@ try {
       add(subject.representative.footprint, subject.representative.maxY);
       if (subject.courtyard) add(subject.courtyard.footprint, subject.courtyard.y);
       for (const anchor of subject.anchors || []) if (anchor.point) points.push(anchor.point);
+      // Same stage/canvas pixel space the desktop capture uses. Portrait is full-bleed, so
+      // this equals the page viewport there, but the space must not depend on that.
+      const canvas = engine.renderer.domElement;
+      const view = engine.camera.view;
+      const width = (view?.enabled && view.fullWidth > 0)
+        ? view.fullWidth : (canvas.clientWidth || innerWidth);
+      const height = (view?.enabled && view.fullHeight > 0)
+        ? view.fullHeight : (canvas.clientHeight || innerHeight);
       const box = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
       for (const point of points) {
         const projected = engine.camera.position.clone().set(point.x, point.y, point.z).project(engine.camera);
-        const x = (projected.x + 1) * innerWidth * 0.5;
-        const y = (1 - projected.y) * innerHeight * 0.5;
+        const x = (projected.x + 1) * width * 0.5;
+        const y = (1 - projected.y) * height * 0.5;
         box.left = Math.min(box.left, x);
         box.right = Math.max(box.right, x);
         box.top = Math.min(box.top, y);
