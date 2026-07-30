@@ -2,9 +2,9 @@
 
 > **면책 / Disclaimer**
 >
-> **(ko)** cheoma(처마)는 아래 실측도면·고전 문헌·학술 논문·현장 사진을 근거로 조선 전통건축의 비례와 구조를 절차적으로 재현하되, 골든아워 빛·안개·수묵 같은 무드를 우선한 **스타일라이즈된 예술적 재해석**입니다. 특정 문화재를 치수까지 재현한 학술적 복원이 아니며, 세부는 표현을 위해 단순화·과장되었습니다.
+> **(ko)** cheoma(처마)는 아래 실측도면·고전 문헌·학술 논문·현장 사진을 근거로 조선 전통건축의 비례와 구조를 절차적으로 재현하되, 골든아워 빛과 안개 같은 무드를 우선한 **스타일라이즈된 예술적 재해석**입니다. 특정 문화재를 치수까지 재현한 학술적 복원이 아니며, 세부는 표현을 위해 단순화·과장되었습니다.
 >
-> **(en)** cheoma reconstructs the proportions and structure of Joseon-era architecture procedurally, grounded in the measured drawings, classical treatises, academic papers, and field photographs listed below — but it is a **stylized artistic reinterpretation** that prioritizes mood (golden-hour light, haze, ink wash) over metric accuracy. It is not a scholarly restoration of any specific monument; details are simplified and exaggerated for expressive effect.
+> **(en)** cheoma reconstructs the proportions and structure of Joseon-era architecture procedurally, grounded in the measured drawings, classical treatises, academic papers, and field photographs listed below — but it is a **stylized artistic reinterpretation** that prioritizes mood (golden-hour light and haze) over metric accuracy. It is not a scholarly restoration of any specific monument; details are simplified and exaggerated for expressive effect.
 
 각 항목은 자료 자체보다 **"이 자료로 앱의 무엇을 구현했는가"** 의 매핑에 중점을 둡니다. 라이선스는 조사 시점(2026-07) 기준이며 재배포·상업 이용 시 개별 재확인이 필요합니다. 아래 모든 URL은 2026-07-25에 실제 HTTP 요청을 보내 상태 코드·최종 URL·본문 키워드를 대조했고, 그때 정상 응답하지 않은 링크는 감추지 않고 해당 항목의 라이선스 줄에 상태를 그대로 적었습니다.
 
@@ -324,7 +324,7 @@
 - scope: Hanyang sijeon two-bay plan, continuous eave, recessed openings, low benches
 - 국사편찬위원회 우리역사넷 「조선 전기 신도의 시전 상업」·「도가와 시전 행랑」·「유분각전과 무분각전」·**「육의전」**·한국사 연대기 「금난전권」 / 서울역사박물관 「청진동 발굴 유물」·「종로 시전행랑 유구 이전복원 야외 전시」·**「도시유적보존」** / 국가유산청 월간 국가유산사랑 **「종로 시전행랑 및 피맛길 유적」**.
 - 종로 간선에 일렬로 이어진 시전행랑, 한 칸마다 부과된 공랑세와 칸 수·상인 기록, 시명·판매 물종을 알린 표, 직물·종이·곡물·어물·유기·신발 등의 물종, 청진동에서 확인된 시전 점포 터와 불탄 기둥·마룻장·문짝을 교차 확인한다. **물종 중 비단·무명·종이·모시는 「유분각전과 무분각전」이 아니라 「육의전」 본문에 있다**(2026-07-25 확인: 공단·대단·궁초 비단, 강진목·해남목 무명, 지전의 종이, 한산·임천 모시). **유구의 연도와 위치도 2009년 보도자료가 아니라 서울역사박물관 「도시유적보존」과 국가유산청 월간지에 있다** — 전자는 "2004년 종로구 청진동 피맛골 일대 재개발과정에서 발굴", 후자는 "종로구 청진동 166번지 및 종로1가 25번지 일원", "2004년부터 명지대학교부설 한국건축문화연구소에서 문화재 조사"를 적는다. 공개 자료는 모든 점포의 정확한 개방 전면, 판매대 형식·치수, 표의 형태·서체나 한 시점의 완전한 입면을 확정하지 않는다.
-- **활용 / Use:** 기존 위치·footprint를 보존한 순수 2칸 계획, 연속 처마선 아래의 열주·상인방, 후퇴 개구, 낮은 bench와 후면 저장 매스로 번역한다. schema v2(#227)는 점포 ID 안정 hash로 **소수·비발광** 목재 표식 판 실루엣(`tablet`/`plank`)만 추가하며, 읽을 수 있는 시명·물종 문자열·SKU·상품 진열 카탈로그·네온은 넣지 않는다. bench·개방 비율·후면 저장·표식 sparseness·모든 수치는 제품 결정이며 특정 연도나 청진동 유구의 실측 복원이 아니다. 표식 판은 기존 frame 재질에 병합해 새 material family·텍스처 0을 유지하고, 수묵·적설·물리 림·배타 wave 계약을 공유한다 / Translates the evidence into a pure two-bay plan preserving location and footprint, with columns and lintels under a continuous eave, recessed openings, low benches, and a rear storage mass. Schema v2 (#227) adds only sparse, non-emissive wooden marker-board silhouettes (`tablet`/`plank`) from a stable shop-id hash; it does not invent readable shop names, commodity labels, SKUs, stocked-display catalogues, or neon. Bench form, opening ratio, rear storage, sign sparseness, and every dimension remain product choices, not a measured reconstruction. Marker boards merge into the existing frame material so the texture-free static group and ink/snow/rim/wave contracts are unchanged (`docs/sijeon.md`, `src/village/sijeon-plan.js`).
+- **활용 / Use:** 기존 위치·footprint를 보존한 순수 2칸 계획, 연속 처마선 아래의 열주·상인방, 후퇴 개구, 낮은 bench와 후면 저장 매스로 번역한다. schema v2(#227)는 점포 ID 안정 hash로 **소수·비발광** 목재 표식 판 실루엣(`tablet`/`plank`)만 추가하며, 읽을 수 있는 시명·물종 문자열·SKU·상품 진열 카탈로그·네온은 넣지 않는다. bench·개방 비율·후면 저장·표식 sparseness·모든 수치는 제품 결정이며 특정 연도나 청진동 유구의 실측 복원이 아니다. 표식 판은 기존 frame 재질에 병합해 새 material family·텍스처 0을 유지하고, 적설·물리 림·배타 wave 계약을 공유한다 / Translates the evidence into a pure two-bay plan preserving location and footprint, with columns and lintels under a continuous eave, recessed openings, low benches, and a rear storage mass. Schema v2 (#227) adds only sparse, non-emissive wooden marker-board silhouettes (`tablet`/`plank`) from a stable shop-id hash; it does not invent readable shop names, commodity labels, SKUs, stocked-display catalogues, or neon. Bench form, opening ratio, rear storage, sign sparseness, and every dimension remain product choices, not a measured reconstruction. Marker boards merge into the existing frame material so the texture-free static group and snow/rim/wave contracts are unchanged (`docs/sijeon.md`, `src/village/sijeon-plan.js`).
 - URL: https://contents.history.go.kr/mobile/km/view.do?levelId=km_003_0040_0020_0010 · https://contents.history.go.kr/front/km/view.do?levelId=km_003_0040_0040_0050_0010 · https://contents.history.go.kr/front/km/view.do?levelId=km_003_0040_0030_0020 · https://contents.history.go.kr/mobile/km/view.do?levelId=km_003_0040_0030_0010 · https://contents.history.go.kr/mobile/kc/view.do?code=kc_age_30&levelId=kc_i301500 · https://museum.seoul.go.kr/www/exh/NR_exhibitInfoView.do?arcvGroupNo=2177&arcvMetaSeq=20513&arcvNo=63625&langGubun=01&sso=ok · https://museum.seoul.go.kr/www/board/NR_boardView.do?bbsCd=1015&seq=00000000000000017&sso=ok · https://museum.seoul.go.kr/www/relic/cons/dataConssumculture/dataConssumcity.jsp?sso=ok · https://www.khs.go.kr/cop/bbs/selectBoardArticle.do?bbsId=BBSMSTR_1008&nttId=5910
 - 라이선스: 2026-07-24 canonical 본문을 로그인 없이 확인하고 **2026-07-25 전수 재요청으로 HTTP 200·본문 키워드를 다시 대조**했다(추가한 「육의전」·「도시유적보존」·월간지 세 링크 포함). 국사편찬위원회 자료는 위원회가 저작권 전부를 보유하지 않은 항목도 있어 출처·저자·URL을 표시한 사실 요약과 링크만 사용한다. 서울역사박물관 상세 페이지는 항목별 공공누리 유형을 표시하지 않고 사이트에 **All rights reserved**를 표시한다. 국가유산청 월간지 링크는 폐기된 `cha.go.kr` 대신 현행 `khs.go.kr` 호스트를 쓴다. 앱은 원문 문장·사진·도판·이전복원 형상을 복제하지 않으며, 별도 자산 재사용 전 각 기관의 최신 이용조건과 권리자의 허락 범위를 다시 확인한다.
 
@@ -518,10 +518,10 @@
 
 ### 32. 조선 산수화 · 고지도 (퍼블릭 도메인)
 - id: cred-landscape-paintings-maps
-- topic: ink
-- scope: Ink ridgeline/haze art direction and palace/city layout grammar
+- topic: scenery
+- scope: Stylized ridgeline/haze art direction and palace/city layout grammar
 - 정선 인왕제색도(1751)·금강전도(1734), 안견 몽유도원도(1447); 동궐도(궁궐 배치도)·김정호 수선전도(한양 지도).
-- **활용 / Use:** 산수화 배경의 능선 양식화·먹 농담·안개 처리 아트디렉션, 그리고 궁궐/도성 배치 문법(축·위계·행각) 참고 / Art direction for stylized ridgelines, ink gradation, and haze, plus palace/city layout grammar (src/env/mountains.js, sky.js, render/ink.js, src/village/*).
+- **활용 / Use:** 산수화 배경의 능선 양식화·명암 위계·안개 처리 아트디렉션, 그리고 궁궐/도성 배치 문법(축·위계·행각) 참고 / Art direction for stylized ridgelines, value hierarchy, and haze, plus palace/city layout grammar (src/env/mountains.js, sky.js, src/village/*).
 - URL: `refs/scenery/INDEX.md` (§5 산수화, §6 고지도)
 - 라이선스: 전부 **퍼블릭 도메인** (저작권 만료).
 
@@ -536,31 +536,31 @@
 
 ### 34. 국립중앙박물관 — 인왕제색도 · 조선시대 실경산수화 해설
 - id: cred-inwangjesaekdo-ncm
-- topic: ink
-- scope: Bright mist negative space and selective true-view simplification in ink
+- topic: scenery
+- scope: Bright mist negative space and selective true-view simplification
 - 국립중앙박물관 / 인왕제색도 큐레이터 추천·수어영상, 《우리 강산을 그리다: 화가의 시선, 조선시대 실경산수화》 전시 해설.
 - 실제 지형의 특징을 선택적으로 강조한 화면 구성, 짙은 바위와 비·안개의 여백, 작은 집과 소나무 숲의 대비를 설명.
-- **활용 / Use:** 수묵 모드의 밝은 안개 여백·농묵 지형 덩어리·실경을 존중하는 선택적 단순화 기준 / Basis for bright mist negative space, concentrated dark terrain masses, and selective simplification that preserves the real landscape character in ink mode.
+- **활용 / Use:** 능선 사이 밝은 안개 여백·어두운 지형 덩어리·실경을 존중하는 선택적 단순화 기준 / Basis for the bright mist negative space between ridges, concentrated dark terrain masses, and selective simplification that preserves the real landscape character (src/env/mountains.js 능선 안개 띠, `docs/look-grammar.md` 농담·여백 판정축).
 - URL: https://www.museum.go.kr/MUSEUM/contents/M0501000000.do?relicRecommendId=962060&schM=view · https://www.museum.go.kr/MUSEUM/contents/M0506000000.do?catCustomType=post&catId=11804&schM=view&arcId=18702 · https://www.museum.go.kr/MUSEUM/contents/M0202030000.do?act=past&exhiSpThemId=3803&listType=list&menuId=past&schM=view
 - 라이선스: 웹 열람 자료. 해설문·영상의 권리는 국립중앙박물관에 있으며, 앱에는 원문·영상·소장품 이미지를 재배포하지 않고 링크와 사실 확인에 기반한 요약만 수록. **2026-07-25 정정: 이전 판의 수어영상 링크(`vcm.museum.go.kr/...M0506000000.do?arcId=…`)는 HTTP 200이지만 수어 동영상 목록 페이지를 반환해 해설 본문이 없었다. `schM=view`가 붙은 상세 URL로 교체하고 자막 전문을 직접 확인했다** — "그림 속 인왕산 봉우리는 짙은 먹물로 칠해져 있습니다", "인왕산은 여백으로 남긴 물안개 위에 떠 있습니다. 안개에 싸인 솔숲에는 집 한 채가 서 있습니다". 이 수어영상 페이지는 공공누리 **출처표시** 조건을 명시한다.
 
 ### 35. The Metropolitan Museum of Art — Korean Landscape Painting · Diamond Mountains
 - id: cred-met-korean-landscape
-- topic: ink
-- scope: Ink tonal steps, negative space, and architecture/landscape line hierarchy
+- topic: scenery
+- scope: Tonal steps, negative space, and atmospheric depth of distant landscape
 - The Met / *Mountain and Water: Korean Landscape Painting, 1400–1800*, *Diamond Mountains: Travel and Nostalgia in Korean Art*.
 - 정선 산수화의 날카로운 수직선, 수목을 이루는 짧은 횡선과 점, 넓은 담묵 및 안개 속에서 솟는 산의 화면 구성을 해설.
-- **활용 / Use:** 넓은 담묵 워시, 과감한 화면 절단, 안개에서 솟는 산의 대기 원근을 수묵 모드의 농담 단계·여백 수렴·원경 감쇠 기준으로 삼는다. **선 계층은 2026-07-26에 건축/자연 두 계열로 구현됐다** — `src/render/ink.js`가 노멀 버퍼의 평판성·직교성·화면 크기로 계화(자로 그은 건축)와 남종화법(붓으로 쓴 산수)을 갈라 선 굵기·먹 농도를 분기하고, 선 굵기는 태양 방향에 종속된다(역광 실루엣이 순광의 약 2배). **다만 바위와 수목을 서로 구분하지는 않는다** — 둘 다 붓질 계열로 떨어지며, 그 구분에는 per-object role 채널(프로그램 축 +1)이 필요해 채택하지 않았다 / Broad pale washes, assertive cropping, and the atmospheric depth of mountains rising from mist inform the ink mode's tonal steps, negative-space convergence, and distance falloff. The line hierarchy was implemented on 2026-07-26 for two families: `src/render/ink.js` reads planarity, orthogonality, and screen extent from the normal buffer to separate ruled architecture from brushed landscape, and line weight follows the sun (backlit silhouettes roughly twice the front-lit weight). It does **not** separate rock from foliage — both fall on the brushed side, and distinguishing them would require a per-object role channel (one more program axis), which was declined.
+- **활용 / Use:** 넓은 담묵 워시, 과감한 화면 절단, 안개에서 솟는 산의 대기 원근을 원경 명암 단계·여백 수렴·거리 감쇠의 기준으로 삼는다(`src/env/mountains.js` 능선 안개 층, `src/env/worldedge.js` 미스트 마감, 하늘·지형의 fog 수렴). 필법 계층(계화 vs 남종화법)의 선 굵기 분기는 화면 공간 선 렌더가 있을 때만 성립하므로 현재 구현 범위가 아니다 / Broad pale washes, assertive cropping, and the atmospheric depth of mountains rising from mist inform the value steps, negative-space convergence, and distance falloff of the distant landscape (`src/env/mountains.js` ridge mist layers, `src/env/worldedge.js` mist finish, sky/terrain fog convergence). The brush-family line hierarchy (ruled architecture versus brushed landscape) requires a screen-space line render and is not in the current scope.
 - URL: https://www.metmuseum.org/ko/essays/mountain-and-water-korean-landscape-painting-1400-1800 · https://www.metmuseum.org/exhibitions/listings/2018/diamond-mountains/exhibition-gallery
-- 라이선스: Met 웹 해설의 이용조건 적용. 앱에는 원문·전시 이미지를 복제하지 않고 링크와 미술사적 해석을 요약해 수묵 합성 기준으로만 사용. **2026-07-25 실측: 두 URL 모두 자동 요청에 HTTP 429(봇 차단 화면)를 반환해 이 라운드에서는 본문을 재확인하지 못했다** — 사람 브라우저로는 열리며, 인용 내용은 2026-07 이전 열람에 근거한다.
+- 라이선스: Met 웹 해설의 이용조건 적용. 앱에는 원문·전시 이미지를 복제하지 않고 링크와 미술사적 해석을 요약해 원경 대기·명암 기준으로만 사용. **2026-07-31 정정: 이 항목이 근거로 인용했던 `src/render/ink.js` 선 계층 구현(2026-07-26)은 제품 수묵 모드가 제거되면서 함께 삭제됐다** — 활용 문장에서 그 구현 주장을 내렸고, 남은 적용처는 PBR 원경 대기다. **2026-07-25 실측: 두 URL 모두 자동 요청에 HTTP 429(봇 차단 화면)를 반환해 이 라운드에서는 본문을 재확인하지 못했다** — 사람 브라우저로는 열리며, 인용 내용은 2026-07 이전 열람에 근거한다.
 
 ### 36. 국가유산포털 — 정선 필 금강전도
 - id: cred-geumgangjeondo-portal
-- topic: ink
+- topic: scenery
 - scope: Primary identity/period cross-check for the true-view landscape reference
 - 국가유산청 국가유산포털 / 국보 「정선 필 금강전도」 공식 지정 정보.
 - 작품의 공식 명칭·제작자·시대·지정 정보를 확인하는 1차 기관 메타데이터.
-- **활용 / Use:** 진경산수 근거 작품의 식별·시대 고증과 수묵 농담 아트디렉션의 출처 교차 확인. 항목 35와 같이 선 계층은 건축/자연 두 계열까지 구현됐고, 이 항목이 근거하는 암산·토산의 필법 차등(수직준 vs 피마준·미점)은 **아직 구현 범위가 아니다** / Primary-source cross-check for the identity and period of the true-view landscape reference used to direct ink gradation. As in item 35 the line hierarchy reaches two families, architecture and landscape; the rock-versus-earth brush distinction this source documents is not yet implemented.
+- **활용 / Use:** 항목 32가 능선 양식화·안개 아트디렉션의 근거로 쓰는 진경산수 작품의 식별·시대를 1차 기관 자료로 교차 확인한다. 이 항목이 근거하는 암산·토산의 필법 차등(수직준 vs 피마준·미점)은 **구현 범위가 아니다** / Primary-source cross-check for the identity and period of the true-view landscape work that item 32 uses to direct ridgeline stylization and haze. The rock-versus-earth brush distinction this source documents is not implemented.
 - URL: https://www.heritage.go.kr/heri/cul/culSelectDetail.do?VdkVgwKey=11%2C02170000%2C11&pageNo=1_1_1_1
 - 라이선스: 국가유산포털 콘텐츠별 이용조건 적용. 앱에는 링크와 공개 지정 메타데이터를 인용한 요약만 수록하고 원문·이미지는 재배포하지 않음.
 

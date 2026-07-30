@@ -231,7 +231,7 @@ AURI 「한옥의 시공 — 창호와 천장」이 구분하는 판문·살문�
 
 - 한 줄 고지: **「제품 해석 · 실측 복원 아님」**
 - 궁궐/사찰 compound·ㅁ자 뜰집은 fail closed(단일 주거 외관 학습 범위 밖)
-- OFF·감상 페이드·시네마틱·shot에서는 라벨이 없어 수묵/공유 WebGL 프레임을 오염하지 않는다
+- OFF·감상 페이드·시네마틱·shot에서는 라벨이 없어 공유 WebGL 프레임을 오염하지 않는다
   (사진 PNG는 canvas 캡처라 DOM 라벨이 원래 포함되지 않음)
 - 게이트: `npm run check:glossary` (순수). UI 셸 변경은 `check:ui-shell` / `check:pr` 라우팅
 

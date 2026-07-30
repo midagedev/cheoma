@@ -16,10 +16,9 @@
 | `yard` | 마당 근경 DoF·생활 | village → 주거 focus | `?clip=yard` |
 | `aerial` | 배산임수 부감 | village 부감 | `?clip=aerial` |
 | `night` | 달·창호 | village 부감 · night | `?clip=night` |
-| `ink` | 수묵 산수 | village 부감 · ink | `?clip=ink` |
 
 공통 고정: **seed=7 · vseed=7 · village 규모 · clear 날씨**.  
-assemble/yard/aerial 는 **sunset**; night 는 **night**; ink 는 **day + mode=ink** (본편 PBR과 섞지 않음).
+assemble/yard/aerial 는 **sunset**; night 는 **night**.
 
 ## 제품 경로
 
@@ -33,7 +32,7 @@ assemble/yard/aerial 는 **sunset**; night 는 **night**; ink 는 **day + mode=i
 1. 위 URL 로드 → (assemble) 타이틀 후 자동 진입 또는 한 번 클릭
 2. OS 녹화 (⌘⇧5 등)
 3. 빈 터 유휴를 늘리지 말 것
-4. 스테이지마다 **별 테이크** — 한 테이크에 assemble+ink+night 혼합 금지
+4. 스테이지마다 **별 테이크** — 한 테이크에 assemble+aerial+night 혼합 금지
 
 ## 게이트
 

@@ -322,7 +322,7 @@ float cocPx = clamp(abs(signedCoc), 0.0, maxCocPx);
 효과: 돌리인 내내 심도가 존재하고, 정착 시 링 품질만 미세하게 개선되므로 **정착 팝이 사라진다**(기준 ④).
 `post-quality-state.js`는 수정 불필요 — 소비 지점만 바꾼다.
 
-**5.4 잉크 모드**: `inkModeRuntime.setFocusPolicy({ dofAmount })`(`engine.js:863,996,3285`)는 별도 경로다.
+**5.4 focus 정책 경로**: `focusPolicyRuntime.setFocusPolicy({ dofAmount })`는 별도 경로다(2026-07-31 수묵 모드 제거 시 `ink-mode-runtime.js`에서 `app/src/engine/focus-policy-runtime.js`로 이관됐다).
 CoC 텍스처는 잉크가 이미 쓰는 깊이와 같은 소스이므로 회귀 요건은 없다. 무수정 통과를 확인만 한다.
 
 ---

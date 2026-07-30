@@ -117,7 +117,7 @@ entrypoint는 JSON 직렬화 가능한 불변 결과만 반환하고 `THREE.Mate
   이번 범위의 비대상이다.
 - 후속 weather 표현을 추가한다면 같은 불변 profile의 weight만 연속적으로 바꾸고 hard cut이나
   별도 젖은 mesh를 만들지 않아야 한다.
-- PBR color와 shadow/depth/DoF가 서로 다른 표면 위치·coverage를 쓰지 않는다. 수묵 모드에서는
+- PBR color와 shadow/depth/DoF가 서로 다른 표면 위치·coverage를 쓰지 않는다. 근경 디테일 LOD에서는
   섬유 선을 과장하지 않고 큰 면·돌 굽·수평 리듬만 보존한다.
 - exclusive wave 중에는 기존 벽 subtree의 소유권과 가시성 전환을 따르며 별도 crossfade material을
   만들지 않는다.
@@ -141,7 +141,7 @@ entrypoint는 JSON 직렬화 가능한 불변 결과만 반환하고 `THREE.Mate
 4. `damp` off / on: 하부가 검은 균일 띠가 아니며 돌 굽과 지면 접촉이 읽히는지.
 5. clear / rain: 현재 static profile과 자원 수가 날씨 전환으로 다시 생성되거나 달라지지 않는지.
 6. FULL → MID → FAR: 기존 LOD 소유권이 유지되고 새 별도 simulation·draw가 생기지 않는지.
-7. PBR / ink / DoF / snow / wave: coverage·depth·그림자·소유권이 서로 어긋나지 않는지.
+7. PBR / DoF / snow / wave: coverage·depth·그림자·소유권이 서로 어긋나지 않는지.
 
 정량 기록은 sync/Worker/fallback plan hash, program·draw·triangle·texture delta, 최대 profile
 record 수를 포함한다. headless 절대 frame-ms는 채택 근거로 쓰지 않는다. 최종 시각 검수에서는

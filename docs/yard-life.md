@@ -271,7 +271,7 @@ schema version, motif별 정확한 계절·날씨 집합, variant별 중복 없�
 - 원경·부감에서는 GPU 제출과 CPU update를 함께 잠재움
 - 근경·망원에서는 같은 실제 world geometry가 카메라 광학으로 커져야 하며 screen-space
   billboard를 따로 유지하지 않음
-- 수묵·적설·물리 림은 같은 geometry와 기존 재질 역할을 소비하고 전용 복제 mesh를 만들지 않음
+- 적설·물리 림은 같은 geometry와 기존 재질 역할을 소비하고 전용 복제 mesh를 만들지 않음
 - 근경 풀은 기존 후보 RNG를 끝까지 동일하게 소비한 뒤 세 계절 slot 합집합과 겹치는 후보만
   안정적으로 제거함. 재추첨·밀도 보충·두 번째 grass mesh는 만들지 않음
 - 부감 진입은 coverage 0을 한 번만 반영하고 전환을 보이지 않는 목표 상태로 정착시킨 뒤,

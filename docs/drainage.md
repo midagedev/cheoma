@@ -149,7 +149,7 @@ fail-closed한다.
   명시적인 12mm 위에 있어 첫 표면이 되고, 양쪽 4cm 입술과 얕은 bed plane으로 되붙는 바깥 사면
   사이가 얕은 홈으로 읽힌다. 노면 위 검은 선
   texture나 카메라 의존 `polygonOffset`은 쓰지 않는다. 실제 terrain boolean 절삭을 생략하는 이유는
-  0.48m 측구 때문에 수백 m 공용 지형 격자를 국소 재분할·직렬화하지 않고도 동일한 색상·DoF·수묵
+  0.48m 측구 때문에 수백 m 공용 지형 격자를 국소 재분할·직렬화하지 않고도 동일한 색상·DoF
   depth를 한 물리 단면으로 보존하기 위해서다.
 - 같은 단일 재질과 vertex color를 사용하는 모든 segment와 판석을 각각 정적 병합한다.
   도랑·집 수에 비례한 material/program/texture를 만들지 않는다.
@@ -171,7 +171,7 @@ fail-closed한다.
   바꾸지 않는다.
 - focus와 aerial은 같은 record를 본다. 원경에서는 별도 impostor를 만들지 않고 작은 내부 면이
   자연스럽게 사라지며, 물리적 지형 실루엣과 대문 접근만 유지한다.
-- 수묵·DoF·shadow depth는 일반 불투명 지형 규칙을 따른다. 별도 투명 depth owner를 추가하지 않는다.
+- DoF·shadow depth는 일반 불투명 지형 규칙을 따른다. 별도 투명 depth owner를 추가하지 않는다.
 
 ## 5. 검증 기준
 

@@ -37,7 +37,7 @@
 | **Discrete params** | Stepper / segment / checkbox | Native controls styled by `--cad-*` tokens (`.cad-seg`, `.cad-check`, `.cad-btn`) | 2026-07-29 rebuild: SWC field atoms retired (only `sp-theme` + solo-dial `sp-action-button` remain); flat 24px segments, 13px checkboxes in the value column. |
 | **Primary rebuild** | Village / house reroll | 28px flat accent button, classes `.rebuild` / `.hbtn.reroll` | One sticky primary per context; full-round pills retired. |
 | **Group headers** | Foldable CAD sections | 20px sticky rows, neutral 12px/600 + chevron + `N 변경` counter | Default all-open (`check:ui-shell` contract); fold state persists in localStorage, Alt-click isolates. |
-| **Environment** | Time / season / weather / ink | Dense segments inside inspector (`.dial`) | Not a floating tray on village; solo scenes keep the dial. |
+| **Environment** | Time / season / weather | Dense segments inside inspector (`.dial`) | Not a floating tray on village; solo scenes keep the dial. The 景/墨 render-style segment was removed with the ink mode on 2026-07-31. |
 | **Path / status / dock** | Breadcrumb, seal, action bar | Glass chip + Spectrum-aligned type | Over WebGL; glass is intentional, not a second design system. |
 | **Brand only** | 처마 stamp, References paper | Seal red + light paper surface | Oriental brand signal; never paint the inspector 한지. |
 
@@ -48,7 +48,7 @@
 │ Village › House                        │ [Explore | Focus]                        │
 │                                        │ photo · share · export                   │
 │                 SCENE                  │ building picker → Go                     │
-│                                        │ ── environment (time/season/wx/ink) ──   │
+│                                        │ ── environment (time/season/wx) ──       │
 │ 처마 #seed  [dock]                     │ ── scale / type (pinned) ──              │
 │                                        │ all param groups OPEN (dense rows)       │
 │                                        │ [ ↻ rebuild ]                            │

@@ -4,6 +4,7 @@
 >   **§10 은 #222 Phase 2(scatter instanceColor 층화) 계약**이다 — 단계 0·1 어휘·수치와 Phase 2
 >   예산·잔여는 §9·§10 을 정본으로 보고, §4 후보 비교는 그 판단 근거로만 읽는다.
 > - **기준일**: 2026-07-25 (§10: 2026-07-27)
+> - **2026-07-31 상태 정정**: 이 문서 곳곳의 판정 축이었던 **제품 수묵(ink NPR) 모드는 사용자 결정으로 제거**되었다. `ink.js` 동등물 보유/미보유 비교(§2·§3.3·§4)와 "수묵 모드에서 잘 드러나야 한다"는 발단 지시는 **당시의 판단 근거로 보존한 역사 기록**이며, 지금의 채택 기준은 PBR 경로에서 §9·§10 계약이 성립하는지 하나뿐이다. `docs/ink-landscape.md`도 archive 상태다.
 > - **발단**: `docs/look-grammar.md` 확정 직후 사용자 지시 — "다각형 나무로는 이 룩을 채울 수 없다. 특히 수묵화 모드에서 잘 드러나도록 동양화적인 형태를 만들어야 한다."
 > - **자매 문서**: `docs/look-grammar.md`(장르 판정 기준), `docs/look-restoration-plan.md`(Phase 3.5), `docs/look-audit-2026-07.md`(U7·R7), `docs/ink-landscape.md`(수묵 렌더 계약)
 > - **범위 분업**: 이 문서는 **나무**만 다룬다. 같은 리서치에서 나온 원리 가운데 원경·구도·여백·대기·색처럼 **나무 밖 전체 룩에 적용되는 것은 `docs/oriental-painting-research.md`**가 소유한다(감사 U1·R5·R7·U7 매핑 포함).
@@ -393,13 +394,17 @@ sRGB 휘도로 환산하면 대략 0.16~0.28 구간에 전부 몰려 있다. `in
 자기 손으로 만들 위험이 있다.
 
 **프로토 라운드 판정 조건 (3.5-1에 제안)**
-- 조건: 석양 역광 + fog, 부감(한양·마을)과 근접(focus) 양쪽, 계절 4종, **수묵 모드 필수 포함**.
-- 판정: (i) 수묵에서 캐노피 내부 폴리곤선이 사라졌는가, (ii) 수묵 수림에 농담 층위가 2단 이상 생겼는가,
+
+> **2026-07-31 갱신**: 아래 조건은 수묵 모드를 필수 판정 화면으로 삼았다. 그 모드가 제거됐으므로
+> 수묵 축 두 개는 PBR 축으로 대체하고, 소멸한 `check:ink:app`·`shoot-ink.mjs`는 게이트 목록에서 뺀다.
+
+- 조건: 석양 역광 + fog, 부감(한양·마을)과 근접(focus) 양쪽, 계절 4종.
+- 판정: (i) 역광에서 캐노피 내부 폴리곤선이 실루엣을 깨지 않는가, (ii) 수림에 명암 층위가 2단 이상 생겼는가,
   (iii) 기본 모드에서 나무가 건물·지형과 디테일 밀도 계약을 맞추는가, (iv) `calls`/`triangles`/`programs` 델타,
   (v) `?worker=0` vs 워커 해시.
 - 게이트: `npm run check:pr`, `check:worker`(`vegetationContract`), `check:lod:app`(예산 계약),
-  `check:winter:app`(눈 profile), `check:ink:app`, `check:rim`.
-  직접 관찰: `tools/shoot-forest.mjs`, `shoot-trees.mjs`, `shoot-ecotone.mjs`, `shoot-ink.mjs`.
+  `check:winter:app`(눈 profile), `check:rim`.
+  직접 관찰: `tools/shoot-forest.mjs`, `shoot-trees.mjs`, `shoot-ecotone.mjs`.
   (`tools/verify-forest.mjs`는 폐기 — 구 캐노피 쉘 전제.)
 
 ---
@@ -531,11 +536,11 @@ sRGB 휘도로 환산하면 대략 0.16~0.28 구간에 전부 몰려 있다. `in
   식생 지오메트리·instanceColor 변경분만큼 재기준했다(`tools/check-worker-contract.mjs` 주석에 근거 기록).
 
 게이트: `npm run check` 58/58 · `check:worker` PASS(재기준 후) · `check:lod:app` PASS ·
-`check:winter:app` PASS · `check:ink:app` PASS · `check:rim` PASS(마을 식생 organic ×0.7 확인).
+`check:winter:app` PASS · `check:ink:app` PASS(당시 게이트, 2026-07-31 소멸) · `check:rim` PASS(마을 식생 organic ×0.7 확인).
 
 ### 9.4 남은 것 (3.5-1 시점 — §10 이 일부를 닫음)
 
-- 단계 2(근경 한정 브러시 실루엣 알파 카드)는 다음 라운드. §3.6-1 수묵 노멀 오버라이드 함정이 전제 조건.
+- 단계 2(근경 한정 브러시 실루엣 알파 카드)는 다음 라운드. (§3.6-1 수묵 노멀 오버라이드 함정은 2026-07-31 모드 제거로 전제에서 빠졌다.)
 - ~~외곽 산포 나무(`scatter-*`) … 그루별 값 층화~~ → **§10 에서 닫음** (`instanceColor` 곱틴트).
   마당 나무(`gardens.js`)는 여전히 프로토 내부 덩이색만 있다(정적 병합, 인스턴스 소수 — 다음 후보).
 - 가을 far 블롭 밴드의 채도가 높다(값 층화가 저지대를 밝히면서 주황이 강해짐). 채도 규율 관점의 톤다운은

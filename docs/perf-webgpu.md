@@ -10,7 +10,7 @@
 ## 경영 요약 (권고안 5줄)
 
 1. **버전 갭 없음 — 업그레이드 불필요.** `0.185.1`은 r185(2026-07-01 릴리스)로 **현시점 최신 릴리스 라인**이다. "최신 버전 적극 활용"은 이미 충족돼 있으며, 지금 할 일은 버전 올리기가 아니라 **최신 버전이 제공하는 기법(BatchedMesh 등)을 도성 스케일에 쓰는 것**이다.
-2. **WebGPU는 지금 메인 전환 보류, 병행 브랜치 실험만 권고.** three.js 공식 문서가 **r185 기준 WebGPURenderer를 여전히 "experimental, 프로덕션 비권장"**으로 명시한다. 게다가 우리 스택은 WebGPU 이행 비용이 최악군 — `onBeforeCompile` GLSL 체인 4종(계절·날씨·단청·바람) + 커스텀 `RimPass` + `EffectComposer`(bloom/DoF) + `ShaderMaterial` 파티클 + ink 패스 전부가 **TSL 전면 재작성 대상**이다.
+2. **WebGPU는 지금 메인 전환 보류, 병행 브랜치 실험만 권고.** three.js 공식 문서가 **r185 기준 WebGPURenderer를 여전히 "experimental, 프로덕션 비권장"**으로 명시한다. 게다가 우리 스택은 WebGPU 이행 비용이 최악군 — `onBeforeCompile` GLSL 체인 4종(계절·날씨·단청·바람) + 커스텀 `RimPass` + `EffectComposer`(bloom/DoF) + `ShaderMaterial` 파티클 전부가 **TSL 전면 재작성 대상**이다.
 3. **성능 병목은 draw call(CPU)이 아니라 fill-rate(GPU)일 가능성이 높다.** 마을 인스턴싱이 이미 draw call을 8,700+ → 수십 규모로 붕괴시켜 놓았다. 반면 `RimPass`가 **매 프레임 씬을 노멀 오버라이드로 한 번 더 통째로 렌더**하고, bloom·DoF·4096 그림자가 GPU를 먹는다. WebGPU의 render bundle 이점은 **CPU-bound일 때만** 발현 — 우리가 GPU-bound라면 WebGPU로 바꿔도 "마법 같은 개선"은 없다.
 4. **톱3 최적화(렌더러 불문, 지금 착수 가치 순):** ① **청크 단위 static merge + frustum culling**(현재 `mergeStatic`이 마을 전체를 1개 거대 병합 메시로 만들어 컬링이 절대 안 됨 — 도성에서 치명적) ② **원거리 건물 LOD/임포스터** ③ **그림자 전략 개편**(현재 ±22m 단일 4096 맵은 건물 1채용 — 도성 커버 불가; CSM/캐스케이드 + static shadow cache 필요).
 5. **먼저 측정하라.** #47 착수 전 `renderer.info` + stats-gl 프로파일 하네스로 **CPU-bound인지 GPU-bound인지부터 판정**해야 최적화 우선순위(그리고 WebGPU 타당성)가 결정된다. 지금은 추정뿐이다.
@@ -28,7 +28,7 @@
 ### 후처리 — `src/env/post.js` (핵심 GPU 비용)
 - `EffectComposer`(HalfFloat HDR) 제품 파이프라인: `RenderPass → Grade/Rim → StableBokehPass(opt-in DoF) → UnrealBloomPass → Flare → Outline → OutputPass(ACES+sRGB 1회)`. 광학적 DoF를 sensor bloom보다 먼저 계산한다. 일반 표면은 이동 중 중심 color/highlight 1쌍만 읽고, 정착 뒤에도 3.25 device pixel 이내의 높은 절대·상대 휘도 대비에만 중심+세 대칭 고리 13쌍을 섞는다. 종전 정착 41 color+41 highlight gather와 비교하면 주 full-resolution gather fetch가 82→26으로 68.3% 줄며, 이동 중에는 82→2로 97.6% 줄어든다. Bokeh의 normalized highlight prefilter는 반해상도 target 하나에서 프레임당 한 번 실행되며, analytic 37 + ownership 4 + guard 12 = 실제 `tColor` 53 fetch를 쓴다. RGB에는 정규화 source energy를 저장하고 alpha에는 broad `0`, gather support `0.25`, exact ownership `1`을 인코딩한다. Gather/ownership 소비 임계값은 각각 `0.125`/`0.75`이며 제품 compact-source peak threshold는 `1.2` 이상이다. Compact HDR scatter는 viewport 크기의 grid buffer 없이 `gl_InstanceID`로 2×2 source 셀을 절차 생성하며, 빈 셀 정점은 clip 후 varying을 쓰지 않고 반경 7px 이상은 연속 정규화로 바로 반환한다. 하드웨어 `ALIASED_POINT_SIZE_RANGE`가 CoC를 담지 못하면 같은 material·uniform의 외접 instanced triangle 경로로 자동 전환한다. 어느 경로든 현재 composer destination에 직접 가산하므로 프로그램·draw call 각 +1, scatter render target +0이다. 원판 반지름이 커지면 보존된 광원 에너지를 면적으로 나눠 peak와 core 평균이 `1/r²`로 낮아진다. 961×601 edge/phase와 같은-block 근접 차폐가 정확성을, DPR 2 pass-only timer가 최대 해상도 상대 비용을 고정한다. 일반 Points/Sprite는 계속 깊이 prepass에서 빠지며, 실제 광원 깊이가 필요한 원경 창불만 객체별 packed-depth material로 기존 target에 그린다. 창불은 color 1 draw/program에 DoF가 켜진 프레임의 depth 1 draw/program을 더하고, 새 target/pass/texture는 만들지 않는다. 넓은 태양 글로우는 compact source가 아니라 배경/원경 gather로 남겨, 투명한 대기 꼬리가 불투명 깊이 가림막이 되지 않게 한다.
 - **`RimPass`(post.js:158–253)가 최대 관전 포인트:** `render()`마다 씬 전체를 `overrideMaterial = MeshNormalMaterial`로 **반해상도 오프스크린에 통째로 재렌더**(투명 오브젝트 숨김 traverse 포함)해서 뷰공간 노멀·깊이를 얻은 뒤 프레넬 림 합성. 건물 1채면 무해하나 **도성 300호에선 지오메트리 제출이 사실상 2배 + 별도 fill 패스**가 된다.
-- 제품 ink 모드는 통합 컴포저 안에서 `RenderPass → 축소 raw-beauty capture → PBR passes → InkPass → OutputPass`를 사용한다. 종이·normal/beauty target은 최초 진입 때만 만들며, 절차 한지 소스는 데스크톱 1024·compact 512로 제한해 첫 입력에서의 canvas 픽셀 순회와 메모리를 줄인다. 완전 수묵에서는 가려진 PBR fullscreen pass를 쉬게 하고 PBR 복귀 뒤 beauty copy도 중단한다.
+- ~~제품 ink 모드의 컴포저 삽입·한지 소스 상한·PBR pass 휴면~~ — **2026-07-31 수묵 모드 제거로 항목 소멸**. 컴포저는 `OutputPass`가 유일한 마지막 pass인 PBR 경로 하나만 유지한다.
 
 ### `onBeforeCompile` GLSL 패치 체인 (TSL 이행의 최대 난관)
 - `src/env/seasons.js` — `patchTrees`(vertex: 수종별 잎색 이동 + instanceMatrix 기반 바람 sway), `patchTerrain`(vertex+fragment 지면 곱연산 틴트). `prev()` 체이닝.
@@ -96,7 +96,7 @@ three.js **공식 매뉴얼(`threejs.org/manual/en/webgpurenderer.html`)이 명�
 ### (c) 우리 스택 이행 난이도 — **최악군(High)**
 공식 매뉴얼이 열거하는 WebGPU 제약이 **정확히 우리가 가진 것들**:
 - **`ShaderMaterial`·`RawShaderMaterial`·`onBeforeCompile()` 미지원** → node material + **TSL로 전면 이식**. 우리: 계절(2패치)·날씨(적설, 씬 전체 traverse)·단청·바람 + 파티클 ShaderMaterial 다수. **가장 큰 공수.**
-- **`EffectComposer` 미지원** → TSL `PostProcessing` 노드 합성으로 재작성. bloom/DoF는 노드 대응물 존재(`bloom()`, DoF 노드 — 오히려 더 성능 좋다고 함, SSGI/SSS 등 신규 효과도), **하지만 우리 커스텀 `RimPass`(씬 노멀 재렌더 + 프레넬)는 대응물 없음 → TSL로 직접 재구현**해야 함. ink NPR 패스도 동일.
+- **`EffectComposer` 미지원** → TSL `PostProcessing` 노드 합성으로 재작성. bloom/DoF는 노드 대응물 존재(`bloom()`, DoF 노드 — 오히려 더 성능 좋다고 함, SSGI/SSS 등 신규 효과도), **하지만 우리 커스텀 `RimPass`(씬 노멀 재렌더 + 프레넬)는 대응물 없음 → TSL로 직접 재구현**해야 함.
 - **비동기 초기화**: `await renderer.init()` 필요(setAnimationLoop 아니면).
 
 ### (d) 실측 성능 이득의 현실적 추정

@@ -8,7 +8,7 @@
 - [x] 중국 (조사 완료)
 
 도구·라이브러리 스택 조사는 `docs/tooling.md` 참고.
-조선 진경산수의 미학 원칙과 제품 수묵 렌더로의 번역은 [`ink-landscape.md`](ink-landscape.md)를 기준으로 한다.
+조선 진경산수의 미학 원칙은 [`ink-landscape.md`](ink-landscape.md)에 정리되어 있다 — 그 문서가 서술하는 제품 수묵 렌더 모드는 2026-07-31 제거됐고 문서는 리서치 archive로만 남는다. 능선·안개·여백의 현행 판정 기준은 [`look-grammar.md`](look-grammar.md)다.
 
 ---
 

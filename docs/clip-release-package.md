@@ -29,7 +29,7 @@ https://cheoma.midagedev.com/?seed=7&time=sunset
 https://cheoma.midagedev.com/?seed=7&vseed=7&vscale=village&time=sunset&season=summer&weather=clear
 ```
 
-다른 스테이지: `?clip=yard` · `?clip=aerial` · `?clip=night` · `?clip=ink` — [`clip-stages.md`](clip-stages.md).
+다른 스테이지: `?clip=yard` · `?clip=aerial` · `?clip=night` — [`clip-stages.md`](clip-stages.md).
 
 로컬 검증 (dev server origin만 바꿈):
 
@@ -44,7 +44,6 @@ http://127.0.0.1:5173/?seed=7&vseed=7&vscale=village&time=sunset&season=summer&w
 | `vscale` | village (또는 hamlet) | 조립 가독 + 직후 부감이 과밀하지 않음. |
 | `season` | summer (또는 autumn) | 채도 규율 안에서 림·수목이 분리. |
 | `weather` | clear | 비·눈은 본편 조립을 가리기 쉬움. |
-| 수묵 | off (기본 PBR) | 수묵은 별 클립. |
 
 UI만 맞출 때: seed **7** · 석양 · village → 새로고침 → 로드 완료 → 녹화 시작 → Enter.
 
@@ -72,7 +71,7 @@ Windows 대안: Xbox Game Bar / PowerToys 등. 비트 타이밍은 동일.
 - 인앱 클립 녹화 UI 추가
 - 조립 중 휠·드래그로 카메라 뺏기
 - 정오·`?shot=1` day 조명으로 본편 촬영
-- 한 테이크에 편집·리롤·수묵·규모 슬라이더를 전부 넣기
+- 한 테이크에 편집·리롤·규모 슬라이더를 전부 넣기
 
 ## 4. 정지 프레임 증거 (자동 캡처)
 

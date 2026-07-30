@@ -26,7 +26,7 @@
 | [`agent-workflow.md`](agent-workflow.md) | 계약 | 독립 worktree·claim·인계·정리와 세 단계 검증의 빠른 표준 경로. |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
 | [`external-reuse.md`](external-reuse.md) | 계약 | 최소 외부 scene과 단독 건물·별채·시전·마당 생활상·표면 생성기의 좁은 API, 단일 Three, borrowed resource·dispose 소유권과 독립 smoke. |
-| [`ink-landscape.md`](ink-landscape.md) | 계약 + 리서치 | 조선 진경산수 근거, PBR↔수묵 렌더·색공간·성능·접근성 계약, 계화 이중 필법·조명 종속 선 굵기·농담 층위 판정 기준. |
+| [`ink-landscape.md`](ink-landscape.md) | archive(기록) | **2026-07-31 제품 수묵 모드 제거로 계약 폐기.** 조선 진경산수 근거와 미학 원칙만 역사 기록으로 보존한다. 서술된 pass·API·게이트는 코드에 없다. |
 | [`../HANDOFF.md`](../HANDOFF.md) | 활성 작업 | 세션 인계 상태: 무엇이 왜 이렇게 되어 있고 다음에 무엇을 할지. 남은 작업의 단일 출발점이며, 계약이 아니라 **그 시점의 인계 기록**이므로 계약 문서와 충돌하면 계약이 우선한다. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
@@ -56,8 +56,8 @@
 | [`look-audit-2026-07.md`](look-audit-2026-07.md) | 스냅샷 | 2026-07-25 A/B 전수 감사. 회귀 확정·개선 유지·상향 과제 목록과 원인 커밋·대상 파일. |
 | [`look-grammar.md`](look-grammar.md) | 리서치 | 목표 룩의 시각 문법(빛·구도·공기감) 정리. 복원 판정의 절대 축 근거. |
 | [`dof-cinematic-research.md`](dof-cinematic-research.md) | 리서치 | 시네마틱 DoF 선례(three.js dof/dof2, pmndrs) 비교와 층 분리 복원 스펙. 현행 표면 반경 상한이 무엇을 누르는지, 권고 CoC 공식·초기 파라미터·검증 컷. 계획 1-3의 입력이며 아직 계약이 아니다. |
-| [`tree-look.md`](tree-look.md) | 계약(부분) | §1–§8 리서치. §9 = Phase 3.5-1 어휘·구형 노멀·값 층화 계약. §10 = #222 scatter instanceColor 층화(드로우 0·ink 함정 회피). 브러시 카드 단계 2는 미착수. |
-| [`oriental-painting-research.md`](oriental-painting-research.md) | 리서치 | 동양화 원리 가운데 나무 밖 전체 룩(원경·구도·여백·대기·색·계화)에 적용 가능한 원천 자료. |
+| [`tree-look.md`](tree-look.md) | 계약(부분) | §1–§8 리서치(수묵 모드 기준 비교는 2026-07-31 제거로 역사 기록). §9 = Phase 3.5-1 어휘·구형 노멀·값 층화 계약. §10 = #222 scatter instanceColor 층화(드로우 0). 브러시 카드 단계 2는 미착수. |
+| [`oriental-painting-research.md`](oriental-painting-research.md) | 리서치 | 동양화 원리 가운데 나무 밖 전체 룩(원경·구도·여백·대기·색·계화)에 적용 가능한 원천 자료. 수묵 렌더 번역을 전제한 항목은 2026-07-31 제거로 폐기. |
 | [`mobile-effects-audit.md`](mobile-effects-audit.md) | 활성 작업(R9 동결) | 2026-07-25 모바일 효과 축소 전수 조사. R1~R8 구현, R9는 §10 헤드리스 프록시 후 **PR_CAP 1.5 동결**(실기기 사인오프 잔여). |
 | [`ui-consolidation.md`](ui-consolidation.md) | 활성 작업 | 2026-07-25 UI 전수 감사와 3축(보기/만들기/공유) 재구성 스펙. 사용자 결정 B안 — 구현 라운드가 §3-B와 결정 절을 따른다. |
 | [`tooling.md`](tooling.md) | 스냅샷 | 후보 라이브러리 평가와 채택 판단. 현재 설치 목록으로 오해하지 않는다. |
@@ -68,7 +68,7 @@
 | [`credits.md`](credits.md) | 완료 기록 | 공개 크레딧과 출처 표기용 선별 목록. `references.md`와 목적이 다르다. |
 | [`suno-prompts.md`](suno-prompts.md) | 완료 기록 | BGM 생성 프롬프트와 6/6 수령 기록. |
 | [`clip-beat-sheet.md`](clip-beat-sheet.md) | 완료 기록 | 대표 공유 클립 원테이크 비트 시트(삼원법·~10s 조립·OS 화면 녹화). 인앱 녹화 기능이 아니다. |
-| [`clip-stages.md`](clip-stages.md) | 계약 | `?clip=` 스테이지(assemble/yard/aerial/night/ink) 고정 부팅·공유 URL. #253–#261. |
+| [`clip-stages.md`](clip-stages.md) | 계약 | `?clip=` 스테이지(assemble/yard/aerial/night) 고정 부팅·공유 URL. #253–#261. |
 | [`clip-release-package.md`](clip-release-package.md) | 완료 기록 | #210 게시 패키지: exact URL, macOS 녹화, 트윗 초안, seed7 정지 프레임 경로. 사람 녹화·게시 잔여. |
 
 ## Claude Code 메모리에서 승격한 내용

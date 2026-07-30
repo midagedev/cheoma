@@ -104,7 +104,6 @@ npm run shoot:drainage      # 실제 capital 측구·대문 판석 동일 카메
 npm run shoot:edit-experience # look-audit C1–C2: live-edit 중 3–5프레임 + 리롤 전후 (OS 임시 폴더)
 npm run shoot:sky           # 실제 앱의 낮/세 석양/밤·구름·달·광선·그림자 캡처
 npm run shoot:winter        # check:winter:app과 같은 겨울/설경 PNG 증거 생성
-npm run shoot:ink           # check:ink:app과 같은 부감 PBR/수묵·근경 PNG 증거 생성
 npm run shoot:wave          # 대표 village 먹안개 handoff·그림자·program plateau 촬영
 npm run shoot:wave:full     # hamlet/village/capital/hanyang 전체 시각 행렬
 npm run shoot:threshold-life # dry/wet·scale·topology별 민가 문간 신발 근접 촬영
@@ -119,7 +118,7 @@ npm run shoot:seasons       # seasons.html 봄/여름/가을/겨울 × 앵글 �
 복원되는지, geometry/material/map identity와 program 수가 바뀌지 않는지도 검사한다. 에이전트는 중간
 프레임에 빈 지붕 픽셀·이중 실루엣·색상 교체·담/소품 pop이 없는지 직접 본다. PNG와 report는 로그에 나온
 OS 임시 디렉터리에 저장한다. 두 번째 동일 경로에서 program 증가 0, 각 shot의 예상 owner/진행 방향,
-중간 frame calls/triangles 예산, DoF/수묵의 LOD 전용 보조-pass 수가 실제 visible LOD mesh 수와 정확히
+중간 frame calls/triangles 예산, DoF의 LOD 전용 보조-pass 수가 실제 visible LOD mesh 수와 정확히
 같은지도 자동 검사한다.
 
 영향 범위가 넓은 구조 변경은 반복 중 `check:pr`, 머지 전 `check:full`을 사용한다. `check:all`은 core/app/petals/particle-geometry/instance-upload/api-reuse/worker/audio에 독립 사찰 WebGL과 단건 재건축 앱 계약을 더한다.
@@ -152,8 +151,8 @@ clean snapshot이 필요하면 사용자 dev server와 기존 산출물을 건�
 ## 모바일 프로파일 오버라이드 훅 (`?fxperf` / `?fxcompact`)
 
 앱은 진짜 폰(거친 포인터 + 최소변 ≤ 520)에만 두 개의 성능 프로파일을 적용한다 —
-`perf`(그림자맵 2048² + 눈·비 지붕 충돌의 콜라이더 상한)와 `compact`(pixelRatio 1.5 + 반해상도 bloom +
-수묵 내부 타깃 0.5). 두 술어를 URL로 직접 뒤집어 **같은 씬·같은 뷰포트에서 축 하나만** 비교할 수 있다.
+`perf`(그림자맵 2048² + 눈·비 지붕 충돌의 콜라이더 상한)와 `compact`(pixelRatio 1.5 + 반해상도 bloom).
+두 술어를 URL로 직접 뒤집어 **같은 씬·같은 뷰포트에서 축 하나만** 비교할 수 있다.
 
 ```
 ?fxperf=0     perf 프로파일 강제 해제       ?fxperf=1     비-폰에도 강제 적용
@@ -719,7 +718,7 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 의도적으로 레이아웃 전용이다 — WebGL 이미지 판정도, 프레임 시간도 쓰지 않는다.
 
 - 뷰포트 5종(1280×800 / 1024×640 fine pointer, 844×390 / 390×844 / 360×780 coarse pointer)에서
-  부감 · 집 편집 · 시네마틱 · 수묵 · 감상 페이드를 돌며 측정한다.
+  부감 · 집 편집 · 시네마틱 · 감상 페이드를 돌며 측정한다.
 - 만들기 패널의 스크롤 가시 높이 ≥200px, 스크롤 최하단 마지막 컨트롤의 `inViewport`,
   사진·공유·모델·다시 짓기·컨텍스트 탭·보기 카드·브레드크럼 루트의 `elementFromPoint` 히트테스트,
   편집 중 패널이 덮지 않는 프레임 비율 ≥40%, 크롬 박스의 뷰포트 포함, 안내 카드·독·패널·보기 카드의
@@ -734,6 +733,10 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 - 세로 모바일은 부감에서 시트가 `peek`으로 접혀 있고 focus-in 이 사용자의 조작 없이 `half`로 펼쳐지는지
   (사문화됐던 `detent` 계약) 확인한다. 접힌 시트에서는 손잡이만 도달 가능해야 하고, **손잡이 한 번에
   두 탭이 드러나야** 한다 — 이 단정이 "부감에서 손잡이를 눌러도 펼쳐지지 않던" 결함을 잡았다.
+- 데스크톱 1280에서 낙관(`.seal-label .info`)을 눌러 Reference 모달을 열고, 아트디렉션 3개 source group
+  (국립중앙박물관·Met·국가유산포털)의 자료명·라이선스·안전한 원문 링크 6개(`target=_blank` + `noopener`
+  + `noreferrer`)가 렌더되는지 단언한다. **이 단정은 소멸한 `check:ink:app`에서 2026-07-31 이관됐다** —
+  "새 source group 은 실제 Reference UI 를 열어 게이트한다"는 계약의 유일한 게이트다.
 - 감상 페이드는 3.4초 무조작 뒤 `.chroma.faded` 와 `.chroma` 밖 크롬 0개로 "씬만 남기기"를 고정한다.
 - `?shot=1`은 뷰 시프트 오프셋 0·흐름 비활성·canvas 안 크롬 0으로 골든 캡처 픽셀 불변 레버를 확인한다.
 - 캡처는 `_wt-out/ui-shell/<viewport>-<state>.png`(또는 `CHEOMA_UI_SHELL_SHOT_DIR`).
@@ -742,24 +745,6 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 
 `check:pr`은 `app/src/App.svelte`·`app/src/components/**`·`app/src/styles/**`와
 `lib/{device.svelte,edit-schema,building-navigation,i18n.svelte,scene-guide}.js` 변경을 이 게이트로 라우팅한다.
-
-### `npm run check:ink:app`
-
-`tools/check-ink-app.mjs`는 같은 실제 앱 부팅에서 PBR 부감, 완전 수묵 부감, 일반 한옥의 10° 망원 수묵 근경을 비교한다.
-
-- 기본 PBR에서는 종이 texture와 normal target을 만들지 않고 `mode` URL 토큰도 쓰지 않는지 확인한다.
-- 실제 낙관을 눌러 Reference 모달을 열고 국립중앙박물관·Met·국가유산포털의 자료명, 수묵 활용 기준, 라이선스, 안전한 원문 링크가 렌더되는지 확인한다.
-- native Enter/Space 조작, 두 버튼의 `aria-pressed`, 엔진 상태, `?mode=ink` 공유 URL과 새로고침 복원이 하나의 상태를 가리키는지 검사한다.
-- 전환 mix가 단조롭고 축소 raw-beauty copy가 Render 바로 뒤, Ink가 단일 `OutputPass` 바로 앞에 있으며, 완전 수묵에서 grade·Bokeh(내부 prefilter/scatter 포함)·bloom·flare가 모두 휴면하는지 검사한다.
-- 부감과 DoF·림·플레어가 있는 근경에서 같은 시뮬레이션 상태를 framebuffer로 두 번 읽어, PBR pass sleep 전후 평균 차이 0.05 이하·최대 채널 차이 1 이하인지 검사한다.
-- shader program 증가는 raw-copy shader를 포함해 6 이하, 축소 normal pass의 draw call은 원 장면 이하로 제한하고, 장식·대기 객체가 가짜 깊이를 만들지 않는지 확인한다. PBR 복귀 후 beauty capture count가 더 늘지 않아야 한다.
-- 수묵 화면이 충분히 탈색되면서 농묵·중간톤·밝은 한지 여백을 함께 보존하는지 픽셀 통계로 검사한다. 여백은 전 화면의 밝은 픽셀 면적이 아니라 원경이 놓이는 상단 1/4의 종이색 비율과 전 화면 5–95백분위 명암 폭으로 고정해, 반투명 대기 띠 하나가 계약을 대신 통과하지 못하게 한다.
-- 망원 focus 캡처는 먹→종이 5등분 점유율로 최농·최담 동시 점유와 중회 밴드 독식 거절을 잠근다(#225: `bands5[0]>1.2%`, `bands5[4]>4%`, `bands5[3]<52%`, span>115). 부감 통계만으로는 하늘 여백이 최담 예산을 채워 통과할 수 있다.
-- 390×844 모바일에서 집을 편집하는 동안 보기 축이 44px 칩으로 접혔는지(`[data-view-chip]`) 확인하고,
-  문서화된 한 번의 탭으로 펼친 뒤 컨트롤이 화면 안의 44px target을 유지하며 shader/runtime 오류가 없는지
-  확인한다(ui-consolidation §6.13 결정 A / §6.16).
-
-비교 PNG는 OS 임시 폴더에만 남긴다. 부감은 산세·안개 여백과 전경 수목의 선 밀도를, 근경은 처마·초가지붕의 선 계층과 건축 가독성을 직접 확인한다.
 
 ### `npm run shoot:edit-experience`
 
@@ -821,7 +806,7 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
   정의상 0%이므로 임계는 `samples=0`을 항상 잡는다. 버린 축: 픽셀 해시·변경 픽셀 수(무엇이 바뀌었는지만
   말하고 물 글린트로 비결정), 총 그래디언트 크기(MSAA 가 대체로 보존해 축이 평평), FFT 고주파 비율
   (bloom·DoF 가 스펙트럼을 지배해 시간대에 따라 움직인다).
-- 보조축은 수묵 트랙과 **정의를 공유**한다(`lineEdgeProfile`): 3×3 휘도 레인지 > 25 인 선 화소만
+- 보조축은 `lineEdgeProfile`로 정의한다: 3×3 휘도 레인지 > 25 인 선 화소만
   모아 4근방 최대 절대차를 재고, 절벽(>60)·램프(12–60) 비율을 **선 화소 수로 정규화**한다.
   같은 크롭 실측은 `cliffRatio` 18.8% → 15.7%(상대 −16.7%), `lineMeanGradient` 41.8 → 38.7 이고
   요구 폭은 −8%다. 주축보다 분리 폭이 좁아 주축을 대체하지는 않는다.
@@ -836,7 +821,7 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 `tools/shoot-aa.mjs`는 같은 시드·시간·카메라에서 `msaa0`/제품 기본값 짝을 부감 골든아워·근경 기와집·
 야간 3장면으로 남기고, DoF 라운드 1 판정문이 지목한 배경 지붕 스펙클 좌표를 같은 크롭으로 정량 재측정한다.
 `tools/shoot-dpr.mjs`는 390×844·DPR 3 에뮬레이션에서 `?pr=` 과 `?msaa=` 로 pixelRatio 상한과 샘플 수를
-독립 통제해(종전 `?fxcompact=0`은 저해상 bloom·수묵 타깃까지 함께 되돌려 단독 비교가 불가능했다)
+독립 통제해(종전 `?fxcompact=0`은 저해상 bloom까지 함께 되돌려 단독 비교가 불가능했다)
 픽셀 수·풀스크린 렌더타깃 바이트·프로그램/텍스처 수를 기록한다. 두 도구 모두 절대 프레임 ms 를 쓰지 않는다.
 
 ### `npm run shoot:door-dof`
@@ -996,7 +981,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-cinematic-turns.mjs` | 브라우저 없이 ±π 최단각, 각속도·각가속도, 주도로 시작점, 합성 막다른 길 반복 왕복 | 실제 마을 지형과 앱 카메라 배선은 확인하지 않는다. |
 | `tools/check-walk-solids.mjs` | 1인칭 walk solid: 담 런·집 지붕 OBB·대문 틈 open, 합성 필지와 village seed의 도로→대문→마당 통과, 비대문 변 중앙 block, free-step 마당 진입, auto-stroll 도로 유지, hero 보수적 풋프린트 | mesh-bvh·이웃 필지 고샅 topology·별채/소품 solid는 다루지 않는다. 제품 번역 한계는 `docs/architectural-authenticity.md` § walk solids. |
 | `tools/check-cinematic-reveal.mjs` | Three 없이 arrival/rebuild의 seed 결정론, 정확한 양 끝점, 0 끝점 속도, 최대 시선 회전, compact/reduced-motion, solar-opening 안전 구도의 결정론·카메라 고도·망원 보상, fitted 처마/계획 공공 소품 blocker, 막힌 기존점의 hysteresis 배제, 정확한 terrain-grid 3×3 focus cutaway와 집 앞 안전 깊이, **그리고 fit 판정이 실제 적용되는 투영과 같은 좌표계에서 내려지는지**(ui-consolidation §6.17: 기본 경로는 이상적 재중심 시프트로 불변, `appliedShift` 를 넘기면 탐색·판정이 그 공간으로 옮겨가고 컴포지션 항이 해를 바꾼다) | 실제 OrbitControls·DoF·조립은 확인하지 않는다. |
-| `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, `capital/7/p8`(TERRAIN_FIXTURE)의 authored 망원·live near-plane·focus-in 안전성, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
+| `tools/check-cinematic-reveal-app.mjs` | 실제 Hero 버튼과 focus 집 재생성에서 연속/전후 PNG, 실제 fitted 지붕·계획 feature 가시성 개선, 일반 focus와 final 동일성, target/lookAt, DoF, program plateau, camera-inside-blocker 거부, pointer/key exact handoff와 같은 wheel 이벤트의 실제 dolly, `capital/7/p47`(TERRAIN_FIXTURE)의 authored 망원·live near-plane·focus-in 안전성, 모바일·reduced-motion | 모든 seed의 미학을 대신하지 않으며 고정 제품 fixture를 검사한다. |
 | `tools/check-camera-continuity.mjs` | 전환 연속성 순수 계약(#22): 뷰 시프트 추종이 임계감쇠 스프링으로 속도 연속(첫 프레임 이동 ≤ 목표 1.5%, 가속 ≤ Δω²)이고 구도 밴드 계단 변화도 연속이며, 전환(lock) 구간에 OrbitControls 거리 클램프가 열려 저작 트윈 종점이 잘리지 않고, 정착 시 부감 단위 재동기 + 범위 이징으로 들어온다. 같은 소스의 `window.__camFlowLegacy` 경로로 종전 결함(계단 출발·핸드오프 절단·옛 단위 잔류)을 반례로 함께 고정한다 | 실제 렌더·DOM 레이아웃·OrbitControls 감쇠는 다루지 않는다. 히어로 정착→패널, focus hop 도착, 리롤/규모 커밋의 실측 트레이스는 앱 게이트(`check:dof:app`·`check:lod:app`·`check:cinematic:app`)와 스크래치 트레이스 하네스가 맡는다. |
 | `tools/verify-cine.mjs` | 세 규모 drone path와 walker 100초 수학·결정론 | 앱 배선은 확인하지 않는다. |
 | `tools/verify-cinewire.mjs` | 앱 패스 경계 시선 상한·시네마틱·GLB·focus 장시간 배선 | 전용 production outDir를 먼저 만들어야 하고 headless에서 오래 걸린다. |
@@ -1056,9 +1041,9 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/check-critter-contract.mjs` | 하늘 새 떼의 계절별 종 정책(가을·겨울 기러기 V 편대 / 그 외 텃새 군집), 편대 기하(echelon 오프셋·간격·정후방 금지·전체 뱅킹), 밀도 기반 개체수와 규모별 상한, 개·고양이 배치가 실제 필지 폴리곤·담 두께·지붕 footprint 안에서만 유효한지, 드로우 4·재질 2·텍스처 0 유지, 적대적 RNG 아래 인스턴스 행렬 바이트 동일 | 순수 계약(브라우저 없음). 실제 픽셀 판독(개·고양이를 찾을 수 있는지, V가 V로 읽히는지)과 림·프로그램 수는 `shoot:vcritters`·`check:rim`·앱 게이트가 맡는다. |
 | `tools/check-wave-contract.mjs` | scenery 배타 소유, 공유 재질 불변, 궁 tofu wave, cancel/dispose 멱등성 | 순수 계약으로 먹안개 미감과 실제 shader program 수는 보지 않는다. |
 | `tools/shoot-wave.mjs` | 실제 Vite 앱의 고정 progress 전환, 재질/version/cache key 불변, 그림자·program plateau | 기본은 대표 village 한 규모이며 `shoot:wave:full`이 전체 규모를 담당한다. old/new seed·환경·구간은 `CHEOMA_WAVE_*`로 고정한다. |
-| `tools/shoot-hanyang.mjs` | 한양 aerial/high/남·동·서·북문/eye/cull, 실제 plan의 중심 시전 거리 낮·석양과 draw-call·triangle 수 | 절대 frame time은 판단하지 않으며 임시 출력 디렉터리를 명시한다. 시전 근경은 성곽·도로·인접 필지 맥락을 확인하고, 격리 renderer/수묵 계약은 `shoot:sijeon`이 맡는다. |
-| `tools/shoot-sijeon.mjs` | 같은 순수 시전 plan을 낮·석양 PBR과 실제 수묵 composer에서 거리 아이레벨·사선·전체 부감으로 촬영하고 geometry hash·draw/material/texture·dispose 계약 기록 | 제품 한양의 지형·성곽·인접 건물 맥락은 별도 앱/한양 캡처로 확인하며, headless wall time을 성능 수치로 쓰지 않는다. |
-| `tools/shoot-sijeon-app.mjs` | 고정 seed 실제 Vite 한양을 데스크톱·모바일 제품 카메라, view shift, UI viewport, post, 부감 Fresnel 무기여 정책으로 부팅하고 시전 visible/hidden 픽셀 기여·정확한 복원·카메라 불변을 촬영 | `shot=1`이나 카메라 연출을 쓰지 않는 통합 증거이며 거리 형태·수묵·활성 림 미감은 격리 `shoot:sijeon`이 맡는다. 기본 PNG는 OS 임시 폴더에 쓴다. |
+| `tools/shoot-hanyang.mjs` | 한양 aerial/high/남·동·서·북문/eye/cull, 실제 plan의 중심 시전 거리 낮·석양과 draw-call·triangle 수 | 절대 frame time은 판단하지 않으며 임시 출력 디렉터리를 명시한다. 시전 근경은 성곽·도로·인접 필지 맥락을 확인하고, 격리 renderer 계약은 `shoot:sijeon`이 맡는다. |
+| `tools/shoot-sijeon.mjs` | 같은 순수 시전 plan을 낮·석양 PBR composer에서 거리 아이레벨·사선·전체 부감으로 촬영하고 geometry hash·draw/material/texture·dispose 계약 기록 | 제품 한양의 지형·성곽·인접 건물 맥락은 별도 앱/한양 캡처로 확인하며, headless wall time을 성능 수치로 쓰지 않는다. |
+| `tools/shoot-sijeon-app.mjs` | 고정 seed 실제 Vite 한양을 데스크톱·모바일 제품 카메라, view shift, UI viewport, post, 부감 Fresnel 무기여 정책으로 부팅하고 시전 visible/hidden 픽셀 기여·정확한 복원·카메라 불변을 촬영 | `shot=1`이나 카메라 연출을 쓰지 않는 통합 증거이며 거리 형태·활성 림 미감은 격리 `shoot:sijeon`이 맡는다. 기본 PNG는 OS 임시 폴더에 쓴다. |
 | `tools/shoot-yard-life.mjs` | 공개 plan/borrowed-material renderer의 봄 볍씨 준비·가을 타작·겨울 땔감 근경과 빈 여름·부감 sleep을 촬영하고, 계절·날씨 screen-door 전환, 동일 rebuild 생략, 변경 rebuild 전환 보존, O(1) aerial sleep, depth/material/program 안정성, wave, dispose·resource plateau를 검사 | 절대 headless frame time은 사용하지 않는다. 문서의 실제 크기·고증 맥락, 집/문/동물 가림과 제품 post 결과는 같은 seed 실제 Vite 캡처로 함께 판정한다. |
 | `tools/shoot-yard-life-app.mjs` | 고정 capital seed의 실제 Vite 제품에서 세 계절 record를 가진 focus 가능 농가를 고르되, right-slot 선호는 soft ranking일 뿐이며 제품 focus 카메라에서 봄·가을·겨울 motif가 실제 OFF/ON 픽셀 기여를 내는 첫 후보만 채택한다(프러스텀 안이지만 담·이웃 질량에 가려진 service-edge slot은 기각). 같은 정지 카메라 layer OFF/ON PNG의 motif 픽셀 기여, product post·계절 풀·집·동물 구도, program/geometry/texture plateau, 부감 복귀 0 draw를 촬영·검사 | 선택한 한 필지의 통합 증거다. 순수 schema·전체 seed 배치 수학과 renderer 단독 rebuild/dispose는 각각 `check:yard-life`, `shoot:yard-life`가 맡는다. 두 하네스는 `check:yard-life:browser`가 한 browser lane에서 함께 실행한다. 픽셀 기여 0은 DoF/CoC가 아니라 fixture 가림·구도 실패로 취급한다. |
 | `tools/shoot-vcritters.mjs` | 근경 소동물 wake·원경 sleep과 새 떼 유지, 대표 컷 | 기본 출력은 OS 임시 디렉터리이며 `CHEOMA_CRITTER_OUT`으로 재지정할 수 있다. |
@@ -1091,7 +1076,7 @@ Headless ANGLE은 shader link를 직렬화하므로 절대 frame time을 실제 
 | 근경 DoF 의미 초점 | `check:opening-detail` + `check:dof:app` + 같은 카메라 `shoot:door-dof` PNG 직접 판정 |
 | shader/material/post/roof | 라우터 게이트 + program count와 고정 시드 이미지 직접 판정 |
 | 건축 고증·공식 자료 반영 | [`architectural-authenticity.md`](architectural-authenticity.md) 체크리스트 + `check:building-clearance` + `check:app` Reference UI + 같은 카메라 전후 PNG |
-| 한양 시전행랑 | [`sijeon.md`](sijeon.md) + `check:sijeon` + app/worker + `shoot:sijeon`의 거리·사선·전체 PBR/수묵 PNG와 draw/program/texture 비교 |
+| 한양 시전행랑 | [`sijeon.md`](sijeon.md) + `check:sijeon` + app/worker + `shoot:sijeon`의 거리·사선·전체 PBR PNG와 draw/program/texture 비교 |
 | 계절 농가 마당 생활상 | [`yard-life.md`](yard-life.md) + `check:yard-life` + app/worker + `check:yard-life:browser`의 격리 geometry·전환/LOD/wave/rebuild/dispose와 실제 제품 동일 카메라 OFF/ON 근경·부감 PNG·자원 비교 |
 | 창호 외관·철물·주거 primary 문 상호작용 | [`exterior-detail.md`](exterior-detail.md) + `check:opening-detail` + `check:door-motion` + `check:door-occlusion` + `check:building-clearance` + `check:app`의 실제 visible/layer ray·semantic grid 가림·궁/사찰 제외·hop/rebuild 수명·Reference UI + `CHEOMA_DOOR_TARGET=choga\|hero npm run shoot:door` 정면/사선 PNG·calls/programs/textures |
 | 물리 강수·꽃잎/모트·실제 창호 야간 불빛 (#81/#96) | [`architecture-refactor.md`](architecture-refactor.md)의 particle-state/particles/lighting 경계 + [`exterior-detail.md`](exterior-detail.md) §4.2 + `check:particle-geometry`의 world geometry·종별 normal·결정론·가림·명시적 DoF depth + `check:nightlights`의 실제 anchor·owner 수명 + `check:worker` scene bytes + `check:parcel-rebuild:browser` owner 복원 + `check:app` 항목별 References UI |
