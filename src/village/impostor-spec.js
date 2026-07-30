@@ -1,6 +1,7 @@
 import { PRESETS, computeLayout, giwaFootprint, giwaFootprintPolygon } from '../params.js';
 import {
   CHOGA_VARIANTS,
+  CHOGA_URBAN_OV,
   GIWA_VARIANTS,
   variantOv,
   variantThatchAge,
@@ -32,9 +33,14 @@ function roofRect(x0, x1, z0, z1, axis, eaveY, ridgeY, ridgeHalf) {
 
 // 실제 house variant와 같은 치수·평면·재료색에서 원경용 저폴리 명세만 파생한다.
 // THREE 비의존이라 빌더를 만들지 않고도 모든 variant의 mirror/지붕/색 계약을 검사할 수 있다.
+// 도성 초가 처마: plan/fit 이 찍은 parcel.urbanEave 스탬프(CHOGA_URBAN_OV) — 모든 소비자가 동일 치수.
 export function impostorHouseSpec(parcel) {
   const kind = parcel.kind === 'giwa' ? 'giwa' : 'choga';
-  const params = { ...PRESETS[kind], ...variantOv(parcel) };
+  const params = {
+    ...PRESETS[kind],
+    ...variantOv(parcel),
+    ...(kind === 'choga' && parcel.urbanEave ? CHOGA_URBAN_OV : null),
+  };
   const layout = computeLayout(params);
   const roofTone = toneOrNeutral(parcel.roofTone);
   const wallTone = toneOrNeutral(parcel.wallTone);

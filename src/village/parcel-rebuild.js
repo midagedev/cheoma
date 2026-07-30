@@ -172,9 +172,12 @@ export function planParcelRebuild(
         candidate.rebuildSeed = seed;
         delete candidate.editRoofBounds;
         delete candidate.editBuildingBounds;
+        // R2.3: 도성 rebuild 후보도 필지 생성 시점에 urbanEave(roofTone 리프트·처마 치수).
+        if (site?.scale === 'capital' || site?.scale === 'hanyang') candidate.urbanEave = true;
         if (!assignFittedVariationSequence(candidate, char01, exploreTuning, {
           baseSeed: variationSeed,
           attempts,
+          scaleTier: site?.scale,
         })) continue;
         candidate.auxRequested = !!candidate.aux;
         // Runtime rebuilds may adjust the wall envelope and therefore the pure focus

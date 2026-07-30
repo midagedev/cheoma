@@ -122,7 +122,7 @@ export const PRESETS = {
     cornerEasePow: 1.7,
     gableOverhang: 0, hipInsetBays: 1.0, hipBreak: 0.5,
     ridgeH: 0.3, doubleEave: false,
-    thatchThick: 0.38,     // 볏짚 두께(처마 롤·스커트)
+    thatchThick: 0.52,     // 볏짚 두께(처마 롤·스커트) — 벽 높이급 두툼 볼륨
 
     style: 'choga',
   },

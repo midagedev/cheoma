@@ -78,7 +78,10 @@ const DENSITY_FLOOR = { hamlet: 10, village: 28, town: 60, capital: 34, hanyang:
 // #40 changes the former smooth bowl into real landform benches. Aggregate floors
 // follow the same post-yard-expansion counts (3 seeds × per-seed floor + margin).
 const DENSITY_TOTAL_FLOOR = { hamlet: 32, village: 90, town: 180, capital: 125, hanyang: 850 };
-const PADDY_TOTAL_FLOOR = { hamlet: 5, village: 3, town: 2, capital: 5, hanyang: 6 };
+// R2.3b(2026-07-31): 논배미 부유(>8m)·도로 리본 겹침 게이트가 물리 결함 배미를 제거 —
+//   hamlet 표본 중 1장이 도로 위 배미(여유 0.4m에서도 겹침)로 정당 탈락해 하한 5→4.
+//   다랑이 존재 자체는 전 규모·전 표본에서 유지된다.
+const PADDY_TOTAL_FLOOR = { hamlet: 4, village: 3, town: 2, capital: 5, hanyang: 6 };
 const EXPECTED_GUARDIAN_ROLES = {
   hamlet: ['entrance'],
   village: ['entrance'],

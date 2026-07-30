@@ -30,7 +30,10 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const TR = site.terrainR || R;               // 지형 메시 범위(마을보다 넓게)
   const edge = site.edge;
   const N = terrainGridSize(site);
-  const cCourt = linCol(0x8a7f66);   // 마을 바닥(밟힌 흙)
+  // R2.2: urban 지면을 어둡게 해 초가 지붕(볏짚색)과 명도 분리(농촌 톤 불변).
+  const urbanGround = site.scale === 'capital' || site.scale === 'hanyang';
+  // R2.3: 도성 지면 절반 환원 — 0x746b56 은 내부 평균 L≈0.454 균질 올리브. 분리는 지붕 리프트로.
+  const cCourt = linCol(urbanGround ? 0x807560 : 0x8a7f66);   // 마을 바닥(밟힌 흙)
   const cGrass = linCol(0x676f45);   // 초지
   const cGrassDry = linCol(0x7a7c4c);   // 볕 좋은 마른 초지(#115 모틀링) — 균일 초록 원반(어두운 타원) 깨기
   const cForest = linCol(0x435a2a);  // R1.1: 원복 — 산은 하늘·성벽보다 어둡게(성벽 리본 분리는 회랑이 담당)

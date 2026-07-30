@@ -234,8 +234,8 @@ export function* populateVillageSteps(plan, opts = {}) {
       //   짓는다(청크별 InstancedMesh + 청크별 병합 담) → 바운딩이 좁아져 frustum culling 이 살아난다.
       //   재질셋(변주 decomp)은 kind당 1벌 재사용(청크 간 공유) — 텍스처·재질 수는 불변, 드로우콜만
       //   청크 수만큼 분할된다. 소규모(≤70호)는 단일 청크라 기존 룩·드로우콜 회귀 없음(chunks.sectorsFor).
-      const giwaPool = regGiwa.length ? buildKindDecomps('giwa') : null;
-      const chogaPool = regChoga.length ? buildKindDecomps('choga') : null;
+      const giwaPool = regGiwa.length ? buildKindDecomps('giwa', site.scale) : null;
+      const chogaPool = regChoga.length ? buildKindDecomps('choga', site.scale) : null;
       if (giwaPool) nightLightSources.regular.giwa = {
         variants: giwaPool.glowAnchors,
         variantAware: true,

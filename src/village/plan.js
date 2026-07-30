@@ -28,6 +28,7 @@ import { planPavilion } from './pavilion-plan.js';
 import { planPublicProps } from './public-props-plan.js';
 import { planRiverPort } from './river-port-plan.js';
 import { attachRoadJunctions } from './road-topology.js';
+import { createRoadSpatialIndex } from './road-spatial.js';
 import { normalizeVillageTuningOptions } from './options.js';
 import { planSijeon } from './sijeon-plan.js';
 import { planRoadsideDrainage } from './drainage-plan.js';
@@ -85,6 +86,7 @@ function attachOptInMjaHouse({
   // reserved clan core is always p0; assign that stable ID before frontage
   // planning so the deep-frozen record never needs a later mutation.
   core.id = 'p0';
+  // mja opt-in is hamlet/village only (rural) — eave stays preset 1.0 (no urban ov).
   if (!assignFittedVariation(core, char01, tuning)) return null;
   const gateLocal = parcelLocalPoint(core, coreRoadAnchor);
   // Several lateral clan lanes share the exact gate endpoint. Select the one
@@ -177,7 +179,7 @@ const CHAR01_ANCHORS = [[105, 0.18], [180, 0.34], [240, 0.48], [280, 0.60], [500
 //   값은 "프론티지(추가 필지)" 목표수 — 종가·관아 예약 코어는 별도 +1. [30,0] = 외딴집 하한(#114):
 //   R30 에서 프론티지 0 + 예약 종가 = 딱 한 채. 30~hamlet 은 0~10 연속(두세 채 촌락도 성립).
 //   siteR 앵커는 SCALE_ANCHORS 와 동기 — 필지 확대 뒤에도 명명 tier 호수가 유지되게 한다.
-const HOUSE_ANCHORS = [[30, 0], [105, 10], [180, 32], [240, 70], [280, 104], [500, 340]];
+const HOUSE_ANCHORS = [[30, 0], [105, 10], [180, 32], [240, 70], [280, 112], [500, 392]];
 const WALLED_BOWL_K_MIN = 0.8;
 
 function pieceLerp(R, anchors) {
@@ -456,7 +458,7 @@ export function planVillage(opts = {}) {
   //   #91 어휘 옵션(다양성 강도·담장 분포)을 tuning 으로 전달(무옵션 시 현행 정확 재현, parcel-seed rng 격리).
   parcels.forEach((p) => {
     if (p.sx == null) {
-      assignFittedVariation(p, char01, tuning);
+      assignFittedVariation(p, char01, tuning, scale);
     }
   });
   // The variation roll retains the historical boolean probability, but a real
@@ -563,7 +565,9 @@ export function planVillage(opts = {}) {
   // 소품/절 seed 흐름이 달라지지 않으면서 담·처마 아래 논 표면이 비치는 오류를 막는다.
   let paddies = null;
   if (site.paddyRegion) {
-    const candidates = planPaddies(site, rng, char01, tuning.paddyDensityK);
+    // roadsResult 회랑 탈락은 planPaddies 내부 셀 게이트(hillAt 단계)에서 처리한다.
+    // 호출 시그니처만 도로 배열을 넘기며, 후보 RNG 소비 규율은 planPaddies가 유지한다.
+    const candidates = planPaddies(site, rng, char01, tuning.paddyDensityK, roadsResult.roads);
     paddies = [];
     // 후보·tone RNG를 전부 소비한 뒤 stable first-wins로 공간 계약만 적용한다. 인접 셀 지터가
     // 논둑을 포개도 뒤 소품 seed는 불변이고, 화면에는 한 겹의 온전한 배미만 남는다.
@@ -678,7 +682,35 @@ export function planVillage(opts = {}) {
 }
 
 // 다랑이 논: 개울 남쪽 저지를 완만한 계단식 필드로 분할(등고 순응 지터).
-function planPaddies(site, rng, char01 = 0.5, paddyK = 1) {
+// 수평 슬래브 배미의 결함은 내부 낙차(매몰·다랑이 계단)가 아니라 지형 위 부유뿐이다.
+//   maxFloat = slabY − min(꼭짓점·변중점 heightAt). 매몰(음수 float)은 정상 계단 읽힘.
+// roads 인자는 회랑 검사용이며 rng 를 소비하지 않는다.
+// PADDY_MAX_FLOAT: 정상 다랑이(매몰+완만한 하향 부유) 보존, 병적 부유만 절단.
+//   seed 20260716 · 도로 게이트 ON · 부유 게이트 OFF 분포(최종 배미):
+//     hamlet n=1 maxFloat≈4.99 · village n=2 ≈4.54–5.23 · town n=3 ≈3.86–4.09
+//     capital n=6 ≈3.01–6.70 · hanyang n=5 ≈5.44–9.31
+//   병적 셀(hanyang x0–35/z200–224, 지터 전 full cell) maxFloat≈9.35 (inset≈8.88; 조사 9.78과 동일 축).
+//   2.5–3.5m 은 전 배미를 지워 기각. 농촌·capital 상한(≤6.70) 위 · 병적(≥8.2) 아래 → 8.0m.
+const PADDY_MAX_FLOAT = 8.0;           // 슬래브 부유 상한(m); 내부 낙차 게이트는 사용하지 않음
+// 도로 여유 2.0m 은 도로에 "인접"한 정상 배미(고증상 길이 논둑을 따라 붙는 게 자연스러움)까지 잘라
+// 논 하한 계약(PADDY_TOTAL_FLOOR)을 깼다. 결함의 본질은 리본 면 위의 논이므로 지붕-도로 계약(0.2m)과
+// 같은 자릿수의 최소 여유만 둔다.
+const PADDY_ROAD_CORRIDOR_M = 0.4;     // 도로 회랑 반폭 = road.width/2 + 이 값(m)
+
+function paddyMaxFloat(site, poly, slabY) {
+  let minH = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const ha = site.heightAt(a.x, a.z);
+    const hm = site.heightAt((a.x + b.x) * 0.5, (a.z + b.z) * 0.5);
+    if (ha < minH) minH = ha;
+    if (hm < minH) minH = hm;
+  }
+  return slabY - minH;
+}
+
+function planPaddies(site, rng, char01 = 0.5, paddyK = 1, roads = []) {
   const pr = site.paddyRegion;
   const fields = [];
   // 작은 다랑이 계단(≈18×13m)으로 잘게 나눈다 — 큰 잔디밭이 아니라 논배미로.
@@ -702,15 +734,20 @@ function planPaddies(site, rng, char01 = 0.5, paddyK = 1) {
   const dropP = Math.min(1, Math.max(0, 1 - (1 - dropBase) * paddyK));
   const cw = (xMax - xMin) / cols;
   const rd = (pr.zFar - pr.zNear) / rows;
+  // 도로 회랑 인덱스 — 셀 게이트마다 전 선분을 훑지 않도록. 빈 roads 는 회랑 게이트 스킵.
+  const roadSpatial = roads?.length ? createRoadSpatialIndex(roads) : null;
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows; r++) {
       const x0 = xMin + c * cw, z0 = pr.zNear + r * rd;
       const cx = x0 + cw / 2, cz = z0 + rd / 2;
       if (site.hillAt(cx, cz) > hillMax) continue;           // 안산 기슭 급경사 제외(완사면은 허용)
+      // 신규 부유·도로 게이트는 여기(pre-rng)가 아니라 아래 post-rng 재검사에만 둔다.
+      // pre-rng 배치는 셀별 추첨(dropP·지터) 스트림을 밀어 멀쩡한 배미까지 복권으로 갈아치운다 —
+      // 기존 hillAt 게이트는 히스토리 스트림의 일부지만 신규 게이트는 아니므로 소비 후에만 판정한다.
+      const inset = 0.9;
       if (Math.abs(cz - site.streamZat(cx)) < site.streamHalf + 2) continue;
       if (rng() < dropP) continue;                          // 반촌: 논 일부 생략
       const j = (dx, dz) => ({ x: dx + rng.range(-cw * 0.06, cw * 0.06), z: dz + rng.range(-rd * 0.06, rd * 0.06) });
-      const inset = 0.9;
       const poly = [
         j(x0 + inset, z0 + inset), j(x0 + cw - inset, z0 + inset),
         j(x0 + cw - inset, z0 + rd - inset), j(x0 + inset, z0 + rd - inset),
@@ -722,8 +759,13 @@ function planPaddies(site, rng, char01 = 0.5, paddyK = 1) {
       // tone까지 먼저 뽑아 기존 RNG 창을 끝낸 뒤 trim하므로 탈락 여부가 뒤 소품 seed를 흔들지 않는다.
       const safePoly = trimPaddyToStreamBank(site, poly, STREAM_PADDY_BANK_CLEARANCE);
       if (!safePoly) continue;
+      // 지터·trim 후 실제 폴리곤 재검사. 이 셀의 rng 는 이미 전부 소비됐으므로 탈락해도
+      // 이후 셀·후속 plan 단계의 rng 스트림은 변하지 않는다. 검증 계약은 최종 배미 기준.
       const safeCenter = G.polyCentroid(safePoly);
-      fields.push({ poly: safePoly, y: site.heightAt(safeCenter.x, safeCenter.z) + 0.06, tone });
+      const slabY = site.heightAt(safeCenter.x, safeCenter.z) + 0.06;
+      if (paddyMaxFloat(site, safePoly, slabY) > PADDY_MAX_FLOAT) continue;
+      if (roadSpatial && roadSpatial.intersectsRoadCorridor(safePoly, PADDY_ROAD_CORRIDOR_M)) continue;
+      fields.push({ poly: safePoly, y: slabY, tone });
     }
   }
   return fields;

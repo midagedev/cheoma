@@ -303,8 +303,11 @@ invariant(planParcelAuxiliary(first.parcel, {
 // Runtime footprint editing owns the committed eave envelope. This exact
 // village/seed/parcel fixture used to approve the old storehouse position even
 // though a supported 1.6× house edit expanded the main roof through it.
+// R2(지붕 바다, 2026-07-30)에서 초가 eaveOverhang 1.0→1.15 확대가 p24 의 별채를 정당하게
+// 탈락시켰다(지붕 외피 확장). 같은 시드에서 두 조건(별채 존재 + 1.6× 편집 지붕이 그 별채를
+// 침범)을 계속 만족하는 p2 로 재핀 — p2/p8/p12/p19 모두 유효함을 스캔으로 확인.
 const editedPlan = planVillage({ scale: 'village', seed: 91 });
-const editedSource = editedPlan.parcels.find((parcel) => parcel.id === 'p24');
+const editedSource = editedPlan.parcels.find((parcel) => parcel.id === 'p2');
 invariant(editedSource?.auxiliary,
   'edited-roof regression fixture lost its planned auxiliary');
 const generatedRoofBounds = G.boundsOfPts(

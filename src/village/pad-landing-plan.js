@@ -16,6 +16,7 @@ import * as G from '../core/math/geom2.js';
 import { COURTYARD_SURFACE_LIFT, FOUNDATION_SINK } from '../core/surface-clearance.js';
 import { terrainRangeOnPolygon } from './placement-search.js';
 import { VILLAGE_WALL_STEP } from './wall-contract.js';
+import { terrainMeshSegmentRange } from './terrain-grid.js';
 
 export const PAD_LANDING_SCHEMA_VERSION = 1;
 
@@ -104,18 +105,23 @@ function terrainOnParcel(parcel, site) {
 // multi-tier aprons: when the continuous skirt already retains the face, the
 // plan records a single course over the full skirt span with the shared stone
 // material role. Absent when the pad is essentially flush with terrain.
-function planChukdaeCourse(padY, skirt, terrain) {
+function planChukdaeCourse(padY, skirt, terrain, fineDrop = 0, predictedFootDrop = 0) {
   const maxSkirtHeight = skirt.reduce((max, segment) => Math.max(max, segment.height), 0);
   const fill = padY - terrain.min;
-  const retaining = Math.max(maxSkirtHeight, fill);
+  // 트리거도 담 발치 예측을 본다 — 성긴 표본이 못 본 함몰로 발치만 0.4m 넘게 내려가는 필지에
+  // 축대 없이 담이 뜨는 것을 막는다(pad-landing 계약의 else 분기와 동일 조건).
+  const retaining = Math.max(maxSkirtHeight, fill, predictedFootDrop);
   if (retaining < VILLAGE_PAD.chukdaeTrigger - EPSILON) return null;
-  const bottomY = padY - maxSkirtHeight;
+  // 담 발치 런은 필지 링을 스커트(5분할)보다 촘촘히 샘플하고 maxDrop 으로 클램프된다 — 성긴 스커트
+  // 표본이 놓친 국소 함몰만큼 코스 높이를 올려(지면 아래로만 깊어짐) 발치 커버리지를 보장한다.
+  const coverage = Math.max(maxSkirtHeight, Math.min(fineDrop, VILLAGE_WALL_STEP.maxDrop));
+  const bottomY = padY - coverage;
   return deepFreeze({
     materialRole: VILLAGE_PAD.materialRole,
     courseCount: 1,
     topY: padY,
     bottomY,
-    maxHeight: maxSkirtHeight,
+    maxHeight: coverage,
   });
 }
 
@@ -128,7 +134,21 @@ export function planParcelPadLanding(parcel, site) {
   const terrain = terrainOnParcel(parcel, site);
   const apron = padApronPolygon(parcel.poly).map((point) => ({ x: point.x, z: point.z }));
   const skirt = planPadSkirtSegments(parcel.poly, padY, site);
-  const chukdae = planChukdaeCourse(padY, skirt, terrain);
+  // 담 발치가 실제로 보는 값과 동일한 수식으로 최심 발치를 예측한다: 삼각분할 지형 메시 범위
+  //   (terrainMeshSegmentRange) + terrainSink + rise 양자화-다운 + maxDrop 클램프. raw heightAt 로
+  //   근사하면 quantizeDown 절벽(1cm 차 → 0.36m 한 스텝) 때문에 커버리지가 한 스텝 모자랄 수 있다.
+  let ringMeshMin = Infinity;
+  {
+    const ring = parcel.poly;
+    for (let i = 0; i < ring.length; i++) {
+      const r = terrainMeshSegmentRange(site, ring[i], ring[(i + 1) % ring.length]);
+      if (r.min < ringMeshMin) ringMeshMin = r.min;
+    }
+  }
+  const { rise, maxDrop, terrainSink } = VILLAGE_WALL_STEP;
+  const deepestFoot = Math.max(-maxDrop,
+    Math.min(0, Math.floor((ringMeshMin - padY - terrainSink) / rise) * rise));
+  const chukdae = planChukdaeCourse(padY, skirt, terrain, Math.max(0, -deepestFoot - rise), -deepestFoot);
   return deepFreeze({
     schema: PAD_LANDING_SCHEMA_VERSION,
     padY,

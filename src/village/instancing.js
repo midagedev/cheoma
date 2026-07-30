@@ -553,7 +553,8 @@ function pushImpostorHouse(parts, parcel) {
     }
 
     // 얇은 처마 단면을 목재 역할로 분리해 원경에서도 지붕과 벽이 한 덩어리로 붙지 않는다.
-    const eaveDrop = spec.kind === 'choga' ? 0.16 : 0.12;
+    // R2.2: 초가 FAR는 창백 지붕↔지면 명도차가 작아 평판으로 읽히므로 처마 단면 띠를 두껍게.
+    const eaveDrop = spec.kind === 'choga' ? 0.30 : 0.12;
     const c0 = roofPoint(roof, long0, roof.eaveY, short0);
     const c1 = roofPoint(roof, long1, roof.eaveY, short0);
     const c2 = roofPoint(roof, long1, roof.eaveY, short1);

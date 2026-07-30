@@ -368,10 +368,13 @@ export function planRoads(site, opts, rng) {
   const push = (level, pts) => {
     if (!pts || pts.length < 2) return null;
     const ordinal = roadOrdinals[level]++;
+    // R2.2: 도성 소로·골목만 폭 축소(부감 밝은 노면 그물 완화). ROAD_WIDTH 상수·클리어런스 인자는 불변.
+    const urbanNarrow = (scale === 'capital' || scale === 'hanyang')
+      && (level === 'soro' || level === 'golmok');
     const road = {
       id: `${level}-${String(ordinal).padStart(3, '0')}`,
       level,
-      width: ROAD_WIDTH[level],
+      width: urbanNarrow ? ROAD_WIDTH[level] * 0.65 : ROAD_WIDTH[level],
       pts,
       junctionIds: [],
     };

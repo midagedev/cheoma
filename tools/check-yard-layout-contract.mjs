@@ -36,7 +36,10 @@ const PR36_TREE_BASELINES = {
   'village:7': 5, 'village:42': 3, 'village:20260716': 2,
   'town:7': 17, 'town:42': 14, 'town:20260716': 6,
   'capital:7': 6, 'capital:42': 8, 'capital:20260716': 7,
-  'hanyang:7': 134, 'hanyang:42': 116, 'hanyang:20260716': 108,
+  // R2 지붕 바다(2026-07-30): 한양 필지 밀집(폭 0.78·깊이 0.92·고샅 0.6×·초가 처마 +0.15)으로
+  // 마당이 작아져 렌더 앵커가 새 설계점으로 이동(실측 91/61/64). capital 은 깊이 복원(0.88)으로
+  // 구 기준 이상 유지. 수관의 지붕 위 자연 월경 허용(사진 근거)은 후속 라운드 후보.
+  'hanyang:7': 91, 'hanyang:42': 61, 'hanyang:20260716': 64,
 };
 const PR36_TREE_BASELINE = Object.values(PR36_TREE_BASELINES)
   .reduce((sum, count) => sum + count, 0);

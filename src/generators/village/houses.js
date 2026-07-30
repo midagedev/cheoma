@@ -10,7 +10,7 @@ import { parcelMatrix, decomposeByMaterial, mirrorDecomp, shareMaterials } from 
 import { parcelRotY } from '../shared/parcel-transform.js';
 import { buildVillageWall } from '../../village/walls.js';
 import { buildAuxiliaryBuilding } from '../../village/auxiliary-building-geometry.js';
-import { CHOGA_VARIANTS, GIWA_VARIANTS } from '../../village/variants.js';
+import { CHOGA_VARIANTS, GIWA_VARIANTS, chogaUrbanOv } from '../../village/variants.js';
 import { chunkLodDistance } from '../../village/chunks.js';
 import {
   CHUNK_LOD_LEVEL,
@@ -31,16 +31,18 @@ export function makeHouseProtos() {
 // 평면 변주 풀 → 변주 인덱스별 decompose 결과 배열(미러 포함). 서로 다른 토폴로지라도 같은
 //   팔레트 의미·시각 상태의 재질은 공유하고, 파생 UV 반복과 창호 패턴은 고유하게 보존한다.
 //   드로우콜은 변주×재질 규모. matset(=canon 프로토 재질)은 야간 창호광용.
-export function buildKindDecomps(kind) {
+// scaleTier: 한 마을 = 한 scale → 초가 프로토 처마를 도성(1.15) / 농촌(preset 1.0)으로 분기(R2.2).
+export function buildKindDecomps(kind, scaleTier) {
   const VAR = kind === 'giwa' ? GIWA_VARIANTS : CHOGA_VARIANTS;
   const base = PRESETS[kind];
   const isChoga = kind !== 'giwa';
+  const urbanOv = isChoga ? chogaUrbanOv(scaleTier) : null;
   const decomps = new Array(VAR.length);
   const glowAnchors = new Array(VAR.length);
   let canon = null, matset = null;
   for (let i = 0; i < VAR.length; i++) {
     if (VAR[i].mirrorOf != null) continue;                 // 미러 항목은 2패스에서
-    const proto = buildBuilding({ ...base, ...(VAR[i].ov || {}) });
+    const proto = buildBuilding({ ...base, ...(VAR[i].ov || {}), ...urbanOv });
     const M = proto.userData.materials;
     glowAnchors[i] = collectOpeningGlowAnchors(proto, { space: 'local' });
     // 재질 공유 제외(변주별 고유 유지): (1) choga 이엉 상태 채(thatch/yongmaru/jipjul, 민가=낡음↔부농=신선),

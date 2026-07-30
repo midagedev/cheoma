@@ -22,16 +22,29 @@ const PAD_LIFT = VILLAGE_PAD.lift;
 
 // 필지·랜드마크 패드는 같은 두 재질을 공유해 draw call과 material 수를 고정한다.
 // skirt 와 선택 축대 course 는 동일 stone family (VILLAGE_PAD.materialRole).
+// R2.2: urban 전용 top 재질(동일 MeshStandardMaterial 계열) — 공유 rural 재질은 mutate 금지.
 const padTopMaterial = markSharedResource(
   new THREE.MeshStandardMaterial({ color: 0x8a7f66, roughness: 1, metalness: 0 }),
+);
+const padTopMaterialUrban = markSharedResource(
+  // R2.3: 도성 지면 절반 환원(terrain urban cCourt 와 동일).
+  new THREE.MeshStandardMaterial({ color: 0x807560, roughness: 1, metalness: 0 }),
 );
 const padStoneMaterial = markSharedResource(
   new THREE.MeshStandardMaterial({ color: 0x8d857a, roughness: 1, metalness: 0 }),
 );
 padStoneMaterial.userData.materialRole = VILLAGE_PAD.materialRole;
 
-export function featurePadMaterials() {
-  return { top: padTopMaterial, stone: padStoneMaterial };
+function isUrbanScale(site) {
+  return site?.scale === 'capital' || site?.scale === 'hanyang';
+}
+
+function padTopForSite(site) {
+  return isUrbanScale(site) ? padTopMaterialUrban : padTopMaterial;
+}
+
+export function featurePadMaterials(site) {
+  return { top: padTopForSite(site), stone: padStoneMaterial };
 }
 
 function makeBufferMesh(positions, indices, material, name) {
@@ -83,7 +96,7 @@ export function buildParcelPads(parcels, site) {
       skirtIndices,
     );
   }
-  if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopMaterial, 'pad-top'));
+  if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'pad-top'));
   // pad-skirt is the single downhill 축대 course face; same stone material role.
   if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'pad-skirt'));
   return group;
@@ -113,7 +126,7 @@ export function buildFeaturePad(site, centerX, centerZ, width, depth, rotationY 
   group.name = 'feature-pad';
   const topPositions = [], topIndices = [], skirtPositions = [], skirtIndices = [];
   emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, skirtIndices);
-  if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopMaterial, 'feat-pad-top'));
+  if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'feat-pad-top'));
   if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'feat-pad-skirt'));
   return { group, padY };
 }
@@ -199,7 +212,7 @@ export function buildTempleFeaturePad(site, temple) {
       skirtIndices,
     );
   }
-  if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopMaterial, 'feat-pad-top'));
+  if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'feat-pad-top'));
   if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'feat-pad-skirt'));
   group.userData.terraceCount = tierCount;
   return { group, padY, surfaces, relief, reliefCap, tierCount };

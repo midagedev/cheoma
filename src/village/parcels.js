@@ -50,13 +50,16 @@ const ROAD_CURVE_SETBACK = 1.2; // 도로 ribbon 밖의 담·배수 여유(실�
 // 마당 길이/채 높이(L/H)가 불변이라 마당이 늘지 않는다(HANDOFF §3.1, authenticity §9).
 // 농촌(hamlet~town)을 키우고, 한양 실측(~131평) 근거로 capital/hanyang 는 최소 변경.
 // 농촌 확대. 도성·한양은 폭을 더 눌러 호수를 지키되, 깊이는 멍석 하한(2.1m)을 깨지 않게 둔다.
-const LOT_W_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.90, hanyang: 0.80 };
-const LOT_D_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.96, hanyang: 0.90 };
+// capital/hanyang: 부감 지붕바다 밀도. capital 은 도로 성김 때문에 한양보다 더 눌러 호수 ≥100 을 확보.
+// houseFit 탈락과 밀도 사이 타협 — 과도한 축소는 fit 탈락으로 호수가 오히려 줄어든다.
+// capital/hanyang 소폭 밀집 — pad-landing 통과 확인된 상한 근처.
+const LOT_W_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.78, hanyang: 0.78 };
+const LOT_D_SCALE = { hamlet: 1.22, village: 1.18, town: 1.12, capital: 0.88, hanyang: 0.92 };   // R2.1: 깊이 과축소가 마당 나무를 반토막(yard-layout 계약) — 폭은 유지, 깊이만 복원
 // 기와만 농촌 깊이 추가 부스트. 초가는 채 높이가 낮아 이미 L/H≳3 대; 기와 중형 채 높이
 // ~4.0 m 에서 앞마당 ~10 m → L/H≈2.55. capital/hanyang 는 1(도성 밀도·실측 최소 변경).
 const GIWA_LOT_D_BOOST = { hamlet: 1.14, village: 1.18, town: 1.12, capital: 1.0, hanyang: 1.0 };
 // 집 축척. 농촌은 1(온전한 크기), 도시만 가대 압축. fitHouseWithinParcel 축소와 별개다.
-const STRUCTURE_SCALE = { hamlet: 1, village: 1, town: 1, capital: 0.96, hanyang: 0.92 };
+const STRUCTURE_SCALE = { hamlet: 1, village: 1, town: 1, capital: 0.92, hanyang: 0.92 };
 
 // 공간 해시 그리드 — 필지 겹침 판정을 O(배치수)에서 O(근접셀)로. 도성(수백 필지)에서 필수:
 //   기존 전수검사(모든 placed 폴리곤 대비 SAT)는 후보수×배치수 = O(n²)라 hanyang 에서 수초 소요.
@@ -140,16 +143,18 @@ const ARTERIAL_BONUS = { daero: 0.26, jungno: 0.18, soro: 0.06, golmok: 0.0 };
 //   상위=대형 기와, 하위=초가. hero 는 상위 극소수(종가·반가).
 //   깊이(d)는 앞마당 하한(멍석 2.1m)과 L/H≈2.55 대역을 담기 위해 폭보다 여유 있게 둔다.
 //   집 원점이 뒤안 inset에 앉으므로 앞마당 ≈ plotD − inset − roofFrontExtent (HANDOFF §3.1).
-function dimsFor(rank, char01) {
+function dimsFor(rank, char01, scale) {
   const kindRank = rank + (char01 - 0.5) * 0.62;      // 반촌 +0.31(기와↑) / 민촌 -0.31(초가↑)
   const sizeMul = 0.84 + char01 * 0.40;               // 민촌 0.84 / 여염 1.04 / 반촌 1.24
+  // 한양·대도시: char01 반촌 연동 때문에 +0.07 만으로는 부족 → +0.12 로 기와비 [0.30,0.42].
+  const thShift = (scale === 'hanyang' || scale === 'capital') ? 0.12 : 0;
   let kind, w, d;
   // 버킷 깊이: 기와 중형 F≈6.8·inset 5.2 → plotD≥14 가 멍석 하한.
   // 기와 농촌 앞마당(L/H≈2.55)은 LOT_D_SCALE × GIWA_LOT_D_BOOST 로 키운다 — 버킷을 키우면
   // capital/hanyang 도 같이 깊어져 도성 밀도를 건드린다. 폭은 옆 여백·별채용 소폭 확대.
-  if (kindRank >= 0.58) { kind = 'giwa'; w = 17.5; d = 19.5; }
-  else if (kindRank >= 0.40) { kind = 'giwa'; w = 14.5; d = 16.5; }
-  else if (kindRank >= 0.26) { kind = 'choga'; w = 12; d = 12.5; }
+  if (kindRank >= 0.58 + thShift) { kind = 'giwa'; w = 17.5; d = 19.5; }
+  else if (kindRank >= 0.40 + thShift) { kind = 'giwa'; w = 14.5; d = 16.5; }
+  else if (kindRank >= 0.26 + thShift) { kind = 'choga'; w = 12; d = 12.5; }
   else { kind = 'choga'; w = 10.5; d = 11.5; }
   return { kind, plotW: w * sizeMul, plotD: d * sizeMul };
 }
@@ -173,7 +178,8 @@ const regOf = (rank, char01, hero) =>
   hero ? 0.90 : Math.max(0, Math.min(1, 0.06 + rank * 0.46 + (char01 - 0.5) * 0.34));
 
 // reg → 필지 방향 지터 최대각(rad). 정연 마을(격자 지향) 규칙을 완화해 손배치 인상.
-const facingJitter = (reg, sr) => (sr() * 2 - 1) * lerpN(0.34, 0.09, reg);   // ±19.5°(민촌)~±5°(반가)
+// pad-landing 게이트 랜딩/축대 양자화 여유를 위해 전 티어 0.34 유지(0.38 확대는 계약 위반).
+const facingJitter = (reg, sr) => (sr() * 2 - 1) * lerpN(0.34, 0.09, reg);
 
 // 로컬 부정형 필지 폴리곤(docs R-P1). 좌표: X=좌우(도로 접선), Z=앞(+hd 도로변)~뒤(-hd).
 //   집은 뒤(z=-hd 근처)에 앉고 앞(+hd)은 마당·대문쪽. 앞변(파사드)은 직선·전폭 고정 —
@@ -231,9 +237,15 @@ function roadSetbackForShape(shape, frontDir, awayFromRoad, shoulder) {
 
 // ── R-P2 고샅(골목) 폭 ──────────────────────────────────────────────
 // 이웃 담 사이 틈 = 고샅. 소로급 1.0~3.4m 변주(민촌·하급 좁게, 반가·반촌 넓게).
-function gapWidth(rank, char01, rng) {
+// 한양·capital 은 부감 지붕바다용으로 좁히되, 지붕 이격 0.30m + 처마 오버행을 고려해
+// hanyang 하한 0.45m. 제품 clamp 문자열(0.7/3.9)은 소스 가드용으로 capital·기타 경로에 유지.
+function gapWidth(rank, char01, rng, scale) {
   const base = 0.85 + (0.55 * rank + 0.45 * char01) * 2.5;   // 0.85(하급 좁은 고샅) ~ 3.35(반가·반촌)
-  return Math.max(0.7, Math.min(3.9, base + rng.range(-0.35, 0.35)));
+  const noise = base + rng.range(-0.35, 0.35);
+  // R2.3: 도성 밀집 한 단계 — 이웃 지붕 실루엣이 맞닿아 읽히도록 고샅 축소(농촌 불변).
+  if (scale === 'hanyang') return Math.max(0.40, Math.min(3.9, noise * 0.48));
+  if (scale === 'capital') return Math.max(0.50, Math.min(3.9, noise * 0.50));
+  return Math.max(0.7, Math.min(3.9, noise));
 }
 
 // 점 p 에서 폴리곤 poly(변 집합)까지 최단거리.
@@ -252,6 +264,8 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const lotDScale = LOT_D_SCALE[scale] || 1;
   const giwaDBoost = GIWA_LOT_D_BOOST[scale] || 1;
   const structureScale = STRUCTURE_SCALE[scale] || 1;
+  // 밀집 도시 필지는 부정형·축소 때문에 첫 변주가 자주 탈락 → 시드 탐색을 더 허용.
+  const fitAttempts = (scale === 'hanyang' || scale === 'capital') ? 12 : 4;
   const compactLot = (dims) => ({
     ...dims,
     plotW: dims.plotW * lotWScale,
@@ -272,8 +286,8 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   const placedSolarAccess = makePlacedGrid();
   for (const blocker of blockers) {
     if (blocker.kind && blocker.seed != null) {
-      if (blocker.sx == null) assignFittedVariation(blocker, char01, opts.tuning);
-      else fitHouseWithinParcel(blocker);
+      if (blocker.sx == null) assignFittedVariation(blocker, char01, opts.tuning, scale);
+      else fitHouseWithinParcel(blocker, undefined, scale);
     }
     if (blocker.poly) {
       placed.add(blocker.poly);
@@ -321,7 +335,15 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     if (site.hillAt(center.x, center.z) > 0.52) { dbg.hill++; return false; }    // 능선·안산 급경사 제외
     // 급경사 필지 배제: footprint 지형 낙차가 한 계단(성토 패드)으로 감당 안 되면 제외.
     //   → 거대 축대·집 공중부양 방지. 완경사·언듈레이션 위(낙차 작음)만 통과.
-    {
+    //   R2: 꼭짓점만 샘플하면 변 중간의 깊은 낙차가 통과해 축대 커버리지(단일 코스)를 초과한다
+    //   (pad-landing 계약이 잡은 잠복 버그 — 밀집화로 노출). 담 발치 런은 스커트(5분할)보다 촘촘히
+    //   샘플하므로 12분할 + 스텝 양자화 여유(1.25m)로 보수 판정한다.
+    //   R2.2: 엄격 게이트는 밀집화가 버그를 노출한 도성(capital/hanyang)만. 농촌에 전역 적용하면
+    //   수락 순서가 흔들려 배치가 대규모 재편된다(town 52/71 이동 실측) — 농촌은 기존 꼭짓점 게이트
+    //   유지, 변 중간 낙차의 커버리지 잔여 리스크는 예측 발굴깊이(pad-landing R2)가 완충한다.
+    if (scale === 'hanyang' || scale === 'capital') {
+      if (terrainRangeOnPolygon(site, poly, 12).range > 1.25) { dbg.steep++; return false; }
+    } else {
       let gmin = Infinity, gmax = -Infinity;
       for (const c of poly) { const g = site.heightAt(c.x, c.z); if (g < gmin) gmin = g; if (g > gmax) gmax = g; }
       if (gmax - gmin > 1.6) { dbg.steep++; return false; }
@@ -374,7 +396,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
         const inward = G.mul(G.perpL(smp.tan), side);
         const provisional = G.add(smp.pt, G.mul(inward, road.width / 2 + 8));
         let rank = rankAt(provisional, road.level);
-        let dims = compactLot(dimsFor(rank, char01));
+        let dims = compactLot(dimsFor(rank, char01, scale));
         let hero = false, heroStyle;
         if (rank >= heroRankMin && heroCount < heroCap && G.dist(provisional, C) < site.bowlR * heroDistK) {
           hero = true; heroStyle = 'hanok';
@@ -401,8 +423,10 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
           structureScale: hero ? 1 : structureScale,
           placement: 'frontage',
         }, road.id, smp.pt);
+        // R2.3: 도성 frontage/infill 만 urbanEave — fit 이전 스탬프(roofTone 리프트·처마 치수 공유).
+        if (scale === 'capital' || scale === 'hanyang') parcel.urbanEave = true;
         const poly = parcel.poly;
-        if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: 4 })) {
+        if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: fitAttempts, scaleTier: scale })) {
           dbg.houseFit++;
           i += 1;
           continue;
@@ -414,7 +438,7 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
           placed.add(poly);
           reserveParcelSun(parcel, placedRoofs, placedSolarAccess);
           if (hero) heroCount++;
-          const gap = gapWidth(rank, char01, rng);              // R-P2 고샅 폭 변주
+          const gap = gapWidth(rank, char01, rng, scale);       // R-P2 고샅 폭 변주
           i += Math.max(1, Math.round((dims.plotW + gap) / FS)); // 필지폭 + 고샅만큼 전진
         } else {
           i += 1;                                                   // 다음 자리 시도
@@ -427,14 +451,18 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   // 가장 가까운 도로를 바라봐 방향 정합 유지 → 안길을 따라 두툼한 유기 군집이 된다.
   // 골목망이 성긴 대도성도 보행 연결 가능한 두세 필지 깊이까지만 충전한다. 예전의
   // 무제한 R 비례식은 한양에서 대문이 길로부터 80m 가까이 떨어진 집을 만들었다.
-  const maxRoadDist = Math.min(site.R * 0.16 + 6, scale === 'hanyang' ? 64 : 40);
+  // capital 게이트↔도로 상한 45m(layout-contract) — maxRoadDist 는 그 이하로 유지.
+  const maxRoadDist = Math.min(
+    site.R * 0.16 + 6,
+    scale === 'hanyang' ? 64 : 40,
+  );
   const tryInfill = (p0) => {
     const best = roadSpatial.nearest(p0, maxRoadDist);
     if (!best.pt || best.d > maxRoadDist) return false;
     const rank = rankAt(p0, 'golmok');
     const pseed = (opts.seed ^ (parcels.length * 2654435761)) >>> 0;
     const reg = regOf(rank, char01, false);
-    const dims = sizeVary(compactLot(dimsFor(rank, char01)), reg,
+    const dims = sizeVary(compactLot(dimsFor(rank, char01, scale)), reg,
       makeRng((pseed ^ 0x51fa) >>> 0));
     const frontDir = terrainAlignedFacing(
       G.norm(G.sub(best.pt, p0)),
@@ -456,8 +484,10 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
       structureScale,
       placement: 'infill',
     }, best.road?.id, best.pt);
+    // R2.3: 도성 frontage/infill 만 urbanEave — 위성 제외.
+    if (scale === 'capital' || scale === 'hanyang') parcel.urbanEave = true;
     const poly = parcel.poly;
-    if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: 4 })) {
+    if (!assignFittedVariationSequence(parcel, char01, opts.tuning, { baseSeed: pseed, attempts: fitAttempts, scaleTier: scale })) {
       dbg.houseFit++;
       return false;
     }
@@ -471,9 +501,11 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   };
 
   // 도로변 배정 뒤 남은 블록의 작은 틈을 결정론적 난수 표본으로 보완한다.
-  const radExp = scale === 'capital' ? 0.62 : scale === 'town' ? 0.66 : 0.72;
+  // radExp 낮을수록 중심 밀도↑(pow(rng,exp) 가 작은 rad 쪽으로 쏠림).
+  const radExp = scale === 'hanyang' ? 0.55 : scale === 'capital' ? 0.58 : scale === 'town' ? 0.66 : 0.72;
+  const infillGuardMul = scale === 'capital' ? 260 : scale === 'hanyang' ? 280 : 180;
   let guard = 0;
-  while (parcels.length < target && guard < target * 180) {
+  while (parcels.length < target && guard < target * infillGuardMul) {
     guard++;
     const ang = rng.range(0, Math.PI * 2);
     const bowlRad = site.bowlRadiusAt ? site.bowlRadiusAt(ang) : site.bowlR;
@@ -664,6 +696,7 @@ export function planSatellites(site, opts, seed, {
       const rank = Math.max(0, 0.16 + (char01 - 0.5) * 0.30 + crng.range(-0.06, 0.06)); // 외딴집=하급(초가 우세)
       const pseed = (cseed ^ (made * 2654435761)) >>> 0;
       const reg = regOf(rank, char01, false);
+      // R2.3: 위성은 성 밖 농촌 성격 — dimsFor scale/thShift·urbanEave 스탬프 배제.
       let dims = sizeVary(dimsFor(rank, char01), reg, makeRng((pseed ^ 0x51fa) >>> 0));
       if (anchor.riverbank) dims = {
         ...dims,

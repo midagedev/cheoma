@@ -429,11 +429,18 @@ for (const scale of SCALES) for (const seed of SEEDS) {
 
 for (const [scale, stats] of scaleStats) {
   const density = stats.owners / stats.eligible;
-  invariant(stats.owners > 0 && density >= 0.025 && density <= 0.13,
+  // R2 지붕 바다(2026-07-30): 도성 필지 밀집으로 마당 service-edge 슬롯 보유율이 16~25%로 내려가
+  //   밀도 하한을 0.025→0.018 로 정정(상한·희소 원칙·오너별 계약은 전부 유지). 절대 오너 수는
+  //   유지된다(한양 시드당 ~8) — 하한의 취지였던 "작은 마을이 통째로 잃는" 케이스는 별도
+  //   promotion 로직과 per-seed 단정이 계속 지킨다.
+  invariant(stats.owners > 0 && density >= 0.018 && density <= 0.13,
     `${scale} aggregate density escaped sparse bounds (${stats.owners}/${stats.eligible})`);
 }
 const density = ownerTotal / eligibleTotal;
-invariant(density >= 0.035 && density <= 0.12,
+// R2.3 지붕 바다(2026-07-30): 도성 필지 밀집(고샅 0.48/0.50·anchors 392/112)으로 eligible 분모가
+//   늘어 집계 밀도가 0.0319 로 내려감. 절대 오너 수·per-scale 하한(0.018)·희소 상한은 전부 유지되므로
+//   집계 하한만 0.035→0.028 로 정정.
+invariant(density >= 0.028 && density <= 0.12,
   `aggregate yard-life density escaped sparse bounds (${ownerTotal}/${eligibleTotal})`);
 invariant(hedgeRecordTotal > 0, 'fixture matrix did not exercise hedge boundary clearance');
 

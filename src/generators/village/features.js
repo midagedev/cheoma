@@ -204,7 +204,7 @@ function buildTempleApproach(temple, site, surfaces) {
   const path = temple.path || [];
   if (path.length < 2) return group;
   const width = temple.pathWidth || TEMPLE_PATH_WIDTH;
-  const materials = featurePadMaterials();
+  const materials = featurePadMaterials(site);
   const heightAt = (point) => {
     let height = terrainMeshHeightAt(site, point.x, point.z) + 0.075;
     for (const surface of surfaces) {

@@ -13,6 +13,8 @@ const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 const R_BEIGE = linCol(0x9a8b70);   // 평지 도로(밟힌 흙) — 기존값
 const R_GRASS = linCol(0x676f45);   // 지형 초지(buildSiteTerrain 과 동일 톤)
 const R_FOREST = linCol(0x435a2a);  // 지형 숲(능선)
+// R2.3: 도성 소로·골목 기본 알베도(지면 urban cCourt 와 동일 톤). 평지 hill≈0 에서 muteK 가 0 이어도 적용.
+const URBAN_MINOR = linCol(0x807560);
 const ROAD_TEXTURE_METERS = 16;
 const ROAD_TEXTURE_COS = 0.8910065242; // 27°: avoid axis-aligned bands on N–S/E–W roads.
 const ROAD_TEXTURE_SIN = 0.4539904997;
@@ -20,15 +22,27 @@ const PACKED_EARTH_SOURCE = createPackedEarthTile();
 export function buildRoads(site, roads) {
   const group = new THREE.Group(); group.name = 'village-roads';
   const tmp = new THREE.Color(), terr = new THREE.Color();
+  const urban = site.scale === 'capital' || site.scale === 'hanyang';
   const roadColAt = (x, z, level, out) => {
     const hill = site.hillAt(x, z);
     // 도성 대로는 길찾기·구도 축이라 흙색을 유지하고, 산속의 작은 길일수록 지형에 더 녹인다.
     // 같은 리본 안에서 초록 얼룩이 구멍처럼 읽히지 않도록 등급별 상한을 둔다.
-    const muteK = level === 'daero' ? 0 : level === 'jungno' ? 0.25 : 0.8;
+    // 소로·골목은 부감에서 밝은 노면 그물이 되지 않게 지형에 더 녹인다. 대로·중로는 축으로 남김.
+    const muteK = level === 'daero' ? 0
+      : level === 'jungno' ? 0.25
+      : level === 'golmok' ? 0.96
+      : 0.93; // soro 및 기타 소로급
+    // R2.3: 기존 muteK 는 smoothstep(0.30,0.60,hill) 게이트라 도성 평지(hill≈0)에서 0.
+    // 도성 소로·골목은 hill 과 무관하게 기본색을 어둡게(daero/jungno·농촌 불변).
+    if (urban && (level === 'soro' || level === 'golmok')) {
+      out.copy(R_BEIGE).lerp(URBAN_MINOR, 0.5);
+    } else {
+      out.copy(R_BEIGE);
+    }
     const mute = smoothstep(0.30, 0.60, hill) * muteK;
-    if (mute <= 0) return out.copy(R_BEIGE);
+    if (mute <= 0) return out;
     terr.copy(R_GRASS).lerp(R_FOREST, smoothstep(0.06, 0.55, hill));
-    return out.copy(R_BEIGE).lerp(terr, mute);
+    return out.lerp(terr, mute);
   };
   const pos = [], col = [], uv = [], idx = [];
   // terrain-cell 경계에서 이웃 clip 조각이 공유하는 정점을 재사용한다. level을 key에 포함해

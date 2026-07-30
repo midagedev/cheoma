@@ -227,10 +227,26 @@ const expectedSceneHashes = {
   //   (동 라운드 4차 = R1.2: 암반 유효 밴드 0.66~0.86 소프트 페이드 — 최상단 무목·안개 밴드의
   //    "접시 위 돌" 배제 — + 매립 0.75w, 밴드 내 수락 게이트 완화·시도 상한 ×120 으로 개수 회복
   //    14/28/52. 나무 버퍼는 rock 회피 면적 변화로만 미세 이동.)
-  village: 'dcc8ff1e:cea4d352:718f9f09:61616958',
-  town: 'b00edd8b:150a8ee9:b99d3b07:6e7ce29d',
-  capital: '3324db9a:17a05bc0:46f3634e:7e054494',
-  hanyang: 'f4d8bdf7:467c5493:e1d44a6d:7f5e559f',
+  // R2 지붕 바다(2026-07-30, 구한말 사진 고증): 한양·capital 필지 밀집(LOT 0.78/0.92·0.88,
+  //   고샅 0.6×·0.58×, 앵커 392/112), dimsFor 티어 임계 +0.12(초가↑), 초가 볼륨(thatchThick
+  //   0.52·eaveOverhang 1.15 — 전 규모 초가 지오메트리 변동), 소로 muteK 0.93/0.96, 배치 급경사
+  //   게이트 변 12분할·1.25m, 축대 커버리지=담 발치 동일 수식, 대문 랜딩 35% 캡 제거. 필지·지붕
+  //   OBB 가 움직여 proxy 4종도 함께 재기준. 재기준 직전 실측: 네 규모 모두 worker == `?worker=0`
+  //   폴백 바이트 동일, snapshot·mja 3경로 교차 PASS — 결정론 손상 아님.
+  // R2.2 비전 후속(2026-07-30): 초가 처마 tier 스코프(농촌 preset 1.0 환원, 도성만 1.15 —
+  //   parcel.urbanEave 스탬프), 급경사 12분할 게이트 도성 스코프(농촌 배치 R1 완전 복원 —
+  //   village/town proxy 가 R1 골든값 fef7a386/3f7f776c 으로 복귀한 것이 그 증거), 도성 소로·골목
+  //   폭 0.65×, 도성 court/패드 0x746b56, FAR 초가 처마 띠 0.30. 농촌 씬은 thatchThick 변주만
+  //   잔존. 재기준 직전 실측: 네 규모 모두 worker == 폴백 바이트 동일.
+  // R2.3(2026-07-31): 비전 재판정 반영 — 도성 지면 절반 환원(0x807560)·초가 roofTone 리프트(urbanEave
+  //   스탬프 생성 시점 이동)·소로 알베도 평지 블렌드·위성 dimsFor/스탬프 원복·고샅 0.48/0.50 +
+  //   논배미 부유(>8m)·도로 리본 겹침 게이트(post-rng 재검사만 — 추첨 스트림 보존).
+  //   농촌 배치는 R1 동일 유지(proxy fef7a386/3f7f776c 불변이 증거), 농촌 풀씬은 배미 게이트 파생만.
+  //   재기준 직전 실측: 네 규모 모두 worker == 폴백 바이트 동일(각 2회), snapshot·mja 교차 PASS.
+  village: '1b82856c:9cea9f80:be909434:630c326c',
+  town: 'abbe8eab:9263cef9:2dee9dc9:cf4be6cb',
+  capital: '7934a04c:178ac706:fe64716d:b604f9ba',
+  hanyang: '33c87162:b653132a:f6500dac:e0aa19f4',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -273,10 +289,14 @@ const expectedProxyHashes = {
   //   (프록시 개수·ID·격리 계약 유지). 재기준 직전 실측: worker == 폴백 바이트 동일.
   // Perf campaign town/capital LOD: FAR/MID/FULL 청크가 focus 거리·corridor 식생
   //   바이트에 반영된다 (프록시 개수·ID·격리 계약 유지).
+  // R2 지붕 바다: 필지 위치·크기·지붕 OBB 변동 → proxy 재기준(개수·ID·격리 계약 유지).
+  // R2.2: 농촌 배치 R1 복원으로 village/town 은 R1 골든값 그대로 복귀, 도성 2종만 신규
+  //   (urbanEave 스탬프·소로 폭·급경사 게이트가 도성 필지·지붕 OBB 를 움직임).
+  // R2.3: 도성 2종만 갱신(고샅·roofTone 스탬프가 도성 필지·지붕 OBB 를 움직임), 농촌은 R1 값 유지.
   village: 'fef7a386',
   town: '3f7f776c',
-  capital: '7fb0819b',
-  hanyang: '89d42424',
+  capital: '046ecd22',
+  hanyang: '0ee8aaee',
 };
 
 const server = await createServer({

@@ -17,6 +17,11 @@ const NA = THATCH_ROOF_SEGMENTS.a;
 const NB = THATCH_ROOF_SEGMENTS.b;
 const EPS = 1e-9;
 const WALL_DENSE_STEPS = 32;
+// R2 지붕 바다(2026-07-30): 구한말 사진 근거 초가 볼륨 상향(thatchThick 0.38→0.52,
+//   eaveOverhang 1.0→1.15) — 두툼한 둥근 덩어리 실루엣. 선행 fuzz 이격 단정 전부 통과 확인.
+// R2.2(2026-07-30): eaveOverhang preset 1.0 환원(비전 판정 — 1.15 전역 적용이 농촌 배치를
+//   흔듦). 도성 1.15 는 parcel.urbanEave 스탬프로만 적용되고 preset(단독 하우스·농촌)은 1.0.
+//   thatchThick 0.52 는 유지 — 해시는 처마 환원분만 반영.
 const PRESET_ROOF_HASH = '442a4c11ab5fba1d';
 
 function invariant(condition, message) {

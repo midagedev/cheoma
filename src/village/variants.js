@@ -23,20 +23,20 @@ import {
 export const CHOGA_VARIANTS = [
   // 민가: 좁고 균등한 칸(어칸≈협칸), 낮은 벽, 얕은 툇마루, 창 최소(정면 살창만).
   { name: 'choga-min', st: 0.15, thatchAge: 0.85,
-    ov: { frontBays: 3, centerBayW: 2.5, middleBayW: 2.35, endBayW: 2.3, sideBays: 2, columnHeight: 1.95, podiumTierH: 0.2, ridgeH: 0.28, roofPitch: 0.66, thatchThick: 0.34, cornerLift: 0.03,
+    ov: { frontBays: 3, centerBayW: 2.5, middleBayW: 2.35, endBayW: 2.3, sideBays: 2, columnHeight: 1.95, podiumTierH: 0.2, ridgeH: 0.28, roofPitch: 0.66, thatchThick: 0.46, cornerLift: 0.03,
           doorCount: 1, windowCount: 2, doorWidthK: 0.36, windowWidthK: 0.2,
           doorHeightK: 0.94, windowHeightK: 0.86,
           plankBase: false, maruStyle: 'short' } },
   // 여염: 중간 규모, 어칸이 협칸보다 확연히 넓음, 후면 창 1, 하방 판벽, 온전한 툇마루.
   { name: 'choga-mid', st: 0.5, thatchAge: 0.45,
-    ov: { frontBays: 4, centerBayW: 2.7, middleBayW: 2.4, endBayW: 2.2, columnHeight: 2.25, podiumTierH: 0.32, ridgeH: 0.31,
+    ov: { frontBays: 4, centerBayW: 2.7, middleBayW: 2.4, endBayW: 2.2, columnHeight: 2.25, podiumTierH: 0.32, ridgeH: 0.31, thatchThick: 0.52,
           doorCount: 1, windowCount: 3, doorWidthK: 0.4, windowWidthK: 0.24,
           doorHeightK: 1, windowHeightK: 1,
           plankBase: true, maruStyle: 'full' } },
   // 부농: 정면 5칸 대형. 칸 수로 길이를 늘리되 한 칸 자체를 궁궐처럼 키우지 않아
   // 넓은 일반 필지에서 축소 fallback 없이 살아남고 인간 척도를 보존한다.
   { name: 'choga-bunong', st: 0.9, thatchAge: 0.12,
-    ov: { frontBays: 5, centerBayW: 3.0, middleBayW: 2.4, endBayW: 2.1, columnHeight: 2.55, podiumTierH: 0.46, ridgeH: 0.37, roofPitch: 0.57, thatchThick: 0.42,
+    ov: { frontBays: 5, centerBayW: 3.0, middleBayW: 2.4, endBayW: 2.1, columnHeight: 2.55, podiumTierH: 0.46, ridgeH: 0.37, roofPitch: 0.57, thatchThick: 0.60,
           doorCount: 1, windowCount: 7, doorWidthK: 0.48, windowWidthK: 0.3,
           doorHeightK: 1.06, windowHeightK: 1.15,
           plankBase: true, maruStyle: 'full' } },
@@ -105,6 +105,8 @@ function assignRoleTones(parcel, kind, wealth, rng, dK = 1) {
     parcel.wallTone = jit3(mix3(GIWA_WALL.white, GIWA_WALL.cream, rng()), rng, 0.03 * dK);
   } else {
     parcel.roofTone = jit3(mix3(CHOGA_ROOF.poor, CHOGA_ROOF.rich, clamp01(wealth * 0.65 + (rng() * 2 - 1) * 0.34)), rng, 0.065 * dK);
+    // R2.3: 도성 초가 지붕 명도 리프트 — 기저 배정식 직후 1회만(재호출 복리 금지). 계수 1.18 은 비전 재판정 가능.
+    if (parcel.urbanEave) parcel.roofTone = parcel.roofTone.map((c) => Math.min(1.5, c * 1.18));
     parcel.wallTone = jit3(mix3(CHOGA_WALL.pale, CHOGA_WALL.deep, clamp01(0.45 - (wealth - 0.5) * 0.5 + (rng() * 2 - 1) * 0.3)), rng, 0.03 * dK);
   }
   // 목부재·석재는 은은하게(백골·장대석의 개체차) — 부유할수록 석재 살짝 정연(밝은 다듬돌).
@@ -121,6 +123,14 @@ export function variantOv(parcel) {
   const v = list[clampIdx(list, parcel.variant)] || list[0];
   if (v.mirrorOf != null) return list[v.mirrorOf].ov || {};
   return v.ov || {};
+}
+
+// R2.2: 도성(capital/hanyang) 초가만 처마를 더 내밀어 부감 지붕 바다의 덩어리감을 유지한다.
+// 농촌 fit/배치는 preset 1.0 그대로(비전 판정: 1.15 전역 적용이 농촌 배치를 바꿨음).
+// 값의 단일 진실원 — 프로토타입(chogaUrbanOv)·필지 스탬프(parcel.urbanEave) 소비처가 공유.
+export const CHOGA_URBAN_OV = Object.freeze({ eaveOverhang: 1.15 });
+export function chogaUrbanOv(scaleTier) {
+  return (scaleTier === 'capital' || scaleTier === 'hanyang') ? CHOGA_URBAN_OV : null;
 }
 
 // FULL/MID/FAR와 focus/edit 오버레이가 같은 좌우 평면을 읽는 단일 계약.

@@ -180,8 +180,10 @@ function planSteppedSpan(context, a, b, height, grow, budget, pinnedSide = null)
       ? [{ a, b, grow, bottomOffset: 0, topOffset: 0 }]
       : [{ a, b, grow }];
   }
+  // R2: length ≥ gateLanding+minRun 이면 계약이 "완전한 랜딩(0.8m)"을 요구한다 — 35% 캡은
+  //   그 문턱 직후 구간(2.0~2.29m)에서 0.8 미만을 만들어 계약과 어긋났다(작은 필지에서 노출).
   const landing = pinnedSide && length >= gateLanding + minRun
-    ? Math.min(gateLanding, length * 0.35)
+    ? gateLanding
     : 0;
   const freeLength = length - landing;
   const freeBudget = Math.max(1, budget - (landing > 0 ? 1 : 0));

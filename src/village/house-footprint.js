@@ -181,10 +181,17 @@ function sourceScales(parcel) {
 // clearance만큼 안쪽으로 넣되 기존 뒤안의 ±0.5m 띠에서 최대 uniform scale과 최소 이동을
 // 계산해 parcel에 고정한다. 최대 scale이 같으면 원래 뒤안 위치를 그대로 선택한다.
 // 같은 parcel에 재호출해도 원래 변주 scale에서 다시 계산하므로 누적 축소되지 않는다.
-export function fitHouseWithinParcel(parcel, clearance = HOUSE_ROOF_CLEARANCE) {
+export function fitHouseWithinParcel(parcel, clearance = HOUSE_ROOF_CLEARANCE, scaleTier) {
+  // R2.2b: 도성 필지에 urbanEave 스탬프 — impostor/solar/aux 등 모든 소비자가 인자 없이 동일 처마를 본다.
+  // 농촌에는 키를 만들지 않는다(false 대입 금지 → plan JSON 바이트 불변).
+  // (R2.3: 필지 생성 시점이 주 스탬프; 여기는 안전망 — 불리언 재대입은 무해.)
+  if (scaleTier === 'capital' || scaleTier === 'hanyang') parcel.urbanEave = true;
   const points = parcel.shape?.pts;
   const sourceScale = sourceScales(parcel);
   const preferred = preferredParcelHouseTranslation(parcel);
+  // R2.3 철회: urban 클리어런스 반감(0.15)은 담 반두께(0.25)보다 작아 처마가 담 몸체 위로
+  // 들어가고, fit 축소된 초가는 처마 높이가 담 상단을 밑돌 수 있어 관통 위험(layout 계약이 검출).
+  // 지붕 맞닿음은 "처마 높이 > 담 상단 + 여유"를 검증하는 처마 높이 인지 fit 으로 별도 설계(백로그).
   const safeClearance = Math.max(0, Number.isFinite(clearance) ? clearance : HOUSE_ROOF_CLEARANCE);
   if (!points || points.length < 3 || (parcel.kind !== 'choga' && parcel.kind !== 'giwa')) {
     parcel.houseLocal = { ...preferred };
@@ -226,10 +233,10 @@ function houseFitAcceptable(parcel) {
 
 // plan 배치와 runtime 단건 reroll이 공유하는 완결된 변주 계약. 큰 평면이 작은 필지에서
 // 장난감처럼 축소되면 같은 살림 축의 작은 variant로 내리고, 그래도 안 맞을 때만 false를 반환한다.
-export function assignFittedVariation(parcel, char01 = 0.5, tuning = {}) {
+export function assignFittedVariation(parcel, char01 = 0.5, tuning = {}, scaleTier) {
   assignVariation(parcel, char01, tuning);
   const sourceScale = { x: parcel.sx, y: parcel.sy, z: parcel.sz };
-  fitHouseWithinParcel(parcel);
+  fitHouseWithinParcel(parcel, HOUSE_ROOF_CLEARANCE, scaleTier);
   if (houseFitAcceptable(parcel)) return true;
 
   const originalVariant = parcel.variant | 0;
@@ -244,7 +251,7 @@ export function assignFittedVariation(parcel, char01 = 0.5, tuning = {}) {
     parcel.sx = sourceScale.x;
     parcel.sy = sourceScale.y;
     parcel.sz = sourceScale.z;
-    fitHouseWithinParcel(parcel);
+    fitHouseWithinParcel(parcel, HOUSE_ROOF_CLEARANCE, scaleTier);
     if (!houseFitAcceptable(parcel)) continue;
     if (parcel.kind === 'choga') {
       parcel.thatchAge = Math.max(0, Math.min(1, variantThatchAge(parcel) + thatchDelta));
@@ -261,13 +268,13 @@ export function assignFittedVariationSequence(
   parcel,
   char01 = 0.5,
   tuning = {},
-  { baseSeed = parcel.seed, attempts = 16 } = {},
+  { baseSeed = parcel.seed, attempts = 16, scaleTier } = {},
 ) {
   const firstSeed = Number.isFinite(baseSeed) ? baseSeed >>> 0 : 0;
   const limit = Math.max(1, Math.floor(Number.isFinite(attempts) ? attempts : 16));
   for (let attempt = 0; attempt < limit; attempt++) {
     parcel.seed = (firstSeed + Math.imul(attempt, VARIATION_SEED_STEP)) >>> 0;
-    if (assignFittedVariation(parcel, char01, tuning)) return true;
+    if (assignFittedVariation(parcel, char01, tuning, scaleTier)) return true;
   }
   return false;
 }
