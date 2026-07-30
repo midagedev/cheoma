@@ -10,6 +10,9 @@
 //
 // 방향 계약: 기단·기둥·벽·공포는 제자리 **아래에서** 떠오르고, 지붕만 **위에서** 내려앉는다(상량).
 // PART_DROP 의 부호가 그 방향이고, 정착 반동은 두 경우 모두 위쪽이다(접촉면에서 멀어지는 방향).
+// 방향은 속도 프로파일도 뒤집는다: 올라오는 부재는 감속(던져 올린 것), 내려앉는 부재는 가속(중력).
+// 내려앉는 강체는 여기에 두 가지가 더 붙는다 — 단단한 좌대(SETTLE_SEAT_RIGID)와 접촉에서 0 이 되는
+// 롤 정렬(ROOF_ROLL_DEG). 셋 다 "떨어진다"를 "인양해 얹는다"로 바꾸기 위한 것이다(2026-07-30).
 //
 // 시맨틱 조립 그룹: 지붕은 **강체 한 덩어리**로 움직인다(그룹 transform 하나만).
 // 자식별 독립 Y/스케일은 기와 외피·방 천장 하면·서까래의 authored 깊이 스택을 깨
@@ -24,7 +27,7 @@
 // 프레임)라 수학적으로 비가시였다. 지금은 순서를 **기하에서 유도**하고(아래 ORDER)
 // 이웃 간격에 하한(MIN_RIPPLE_SEC)을 둔다.
 //
-// 원상복구 보장: position.y·scale·visible 만 건드리고, 종료·중단·seek 시 원값으로 정확히
+// 원상복구 보장: position.y·scale·rotation·visible 만 건드리고, 종료·중단·seek 시 원값으로 정확히
 // 복원한다. 시작 시 각 자식의 원 transform 을 저장하므로 regenerate 와 경합해도 skip()으로
 // 안전히 되돌린다. (기존 ?assemble=1 데모 셸 seek/skip 경로 호환 유지.)
 
@@ -87,6 +90,9 @@ function lockRoofShellVisibility(roofGroup) {
 //   (u<IMPACT)이다. 0.26 창에서는 히어로 조립(몸채 창 7.4s)에서도 공중 시간이 0.96s 뿐이라
 //   0.25s 간격 캡처에 1~3장만 남았다(2026-07-30 판정: "공중 프레임 1장, 0.25초 미만 팝").
 //   0.30 창이면 2.22s 모션 / 1.11s 공중 — 라이브 프레임에 4장 이상 남는다.
+//   단, 지붕 창은 여기 적힌 값이 **상한**이다: ROOF_LIFT_OF_MASS 가 여행거리를 깎으면 창도 같은
+//   비율로 좁아진다(끝은 고정, 시작만 늦어짐). 실제 종가는 [0.836, 1.00] 로 좁혀져 공중 0.61s 다.
+//   그래서 이 표의 숫자로 지붕 타이밍을 단정하지 말고 plan() 의 window/airborneSec 을 볼 것.
 const PART_WINDOWS = {
   podium:   [0.00, 0.26],
   columns:  [0.18, 0.48],
@@ -101,21 +107,51 @@ const PART_WINDOWS = {
 //   지붕이 공중에 있는 프레임이 정확히 0 이었다(2026-07-29 21프레임 판정: 기와 껍질이 애니메이션 없이
 //   팝인). 위에서 내려오는 강체는 통과할 것이 없고 — 브래킷은 아래에서, 지붕은 위에서 서로를 향해
 //   접근하므로 관통이 원리적으로 불가능하다 — 첫 프레임부터 보인다. 실제 시공 순서(상량)와도 맞는다.
-//   크기 3.4: 히어로 정착 프레임(146.6m·7° 렌즈, 세로 17.9m) 기준 지붕 여행 거리가 프레임 높이의
-//   ≈23%(164px @720p)로 읽힌다. tofuRise 는 앞부분에서 거리를 대부분 소진하므로(u=0.75·IMPACT 에서
-//   남은 오프셋이 21%뿐) 캡처가 후반을 잡으면 리프트가 30px 로만 보인다 — 그래서 저작 거리는
-//   "보이는 최대 리프트"가 아니라 그 3~4배로 잡아야 한다. 1.15 는 6% 로 캡처 간격 안에서 사라졌고, 1.9 는 읽히긴 했으나
-//   지붕 창이 늘어난 뒤(몸채 창 0.74) 같은 거리를 더 긴 시간에 나눠 쓰게 되어 **접촉 속도가 떨어졌다** —
-//   두부 계약은 무게감이 진폭이 아니라 접근 속도에서 나온다고 못박고 있으므로, 창을 늘렸으면 거리도
-//   같이 늘려 접촉 속도(≈4.2 m/s)를 보존해야 한다. 그러지 않으면 무거운 지붕이 가벼워진다.
-const PART_DROP = { podium: 0.7, columns: 1.0, walls: 0.9, brackets: 0.85, roof: -3.4 };
+//   지붕 3.4 → 2.0 (2026-07-30 사용자 판정: "위에서 뚝 떨어지는 인상이 부자연스럽다"). 3.4 는 실제
+//   종가에서 여행거리 5.30m 이고, 그때 공중 처마선이 7.58m 까지 올라가 **자기 용마루(5.92m)보다
+//   1.66m 높았다**(2026-07-31 실측) — 다 지어진 집 위 허공에 지붕이 통째로 떠 있는 프레임이다.
+//   이 배수만으로는 부족하다: dropBase 는 layout.totalH 에 비례하는데 buildHanok 은 layout 을 달지
+//   않아 폴백 12m(실제의 2배)가 쓰이기 때문이다. 그래서 최종 여행거리는 ROOF_LIFT_OF_MASS 상한이
+//   기하에서 정한다(종가 1.71m, 처마 피크 3.98m < 용마루 5.92m). 이 배수는 상한에 닿지 않는
+//   큰 건물(궁 등)에서만 실제 값이 된다.
+//   거리를 줄이면서도 **접촉 속도는 보존한다**(3.91 → 3.85 m/s): 하강 프로파일을 중력형(가속)으로
+//   뒤집어 접촉 속도가 1.67배로 오르고(riseVelDown 참조), 상한이 걸린 만큼 접근 시간도 같은 비율로
+//   줄이므로 속도가 유지된다 — 두부 계약(무게=진폭 아님, 접근 속도)이 그대로다.
+const PART_DROP = { podium: 0.7, columns: 1.0, walls: 0.9, brackets: 0.85, roof: -2.0 };
 
 // 파트별 두부 탄성 진폭(스쿼시&스트레치 강도). 기둥은 스프링처럼 튀고, 지붕은 절제한다.
 //   지붕 0.32 → 0.22: 구 모델은 접촉에서 변형이 정확히 0 이라 스트레치가 **상승 중에만**(대부분
 //   시야 밖) 보였다. 모멘텀 연속 모델은 접촉 순간에도 변형이 남으므로, 같은 게인이면 팔작 지붕의
 //   들린 처마 끝이 낫처럼 과장돼 보인다(캡처 판정 cont-34). 처마 선은 이 프로젝트의 서명이므로
 //   (look-grammar: 실루엣 우선) 지붕만 게인을 낮춘다 — 정착 스쿼시는 여전히 읽힌다(≈3%).
+//   주의: 지붕 값은 **강체 경로에서 효력이 없다**. 강체 지붕은 allowScale=false 라 스쿼시가 없고,
+//   모멘텀 모델의 tofuBob 은 amp 를 쓰지 않는다(진폭이 접촉 속도에서 유도되므로). 지붕 정착의
+//   절제는 좌대 강성 SETTLE_SEAT_RIGID 가 소유한다 — 여기 0.22 는 legacy A/B 경로 전용이다.
 const PART_TOFU = { podium: 0.13, columns: 0.28, walls: 0.17, brackets: 0.20, roof: 0.22 };
+
+// 강체 지붕이 좌대에 앉을 때의 롤 정렬(도). 인양된 지붕이 살짝 기울어 접근해 접촉 직전 수평으로
+//   맞춰지는 인상 — "떨어진다"와 "얹힌다"를 가르는 가장 값싼 단서다(2026-07-30). 축은 용마루 축
+//   (지배축)이라 용마루 선은 수평을 유지하고 한쪽 처마만 내려간다(팔작 실루엣 보존, look-grammar).
+//   2.2°는 히어로 프레임에서 양단 차 31cm(12px @720p) — 보이지만 기울어짐이 실수로 읽히지 않는 폭.
+//   포락은 tofuRise 그대로라 **접촉에서 정확히 0**(정착 이후 회전 흔들림 없음 — 후행 wobble 기각 계약).
+const ROOF_ROLL_DEG = 2.2;
+
+// 지붕 여행거리 상한 = 지붕 덩어리가 앉는 높이(그룹 localCenter.y)의 45%.
+//   PART_DROP 만으로는 부족했다(2026-07-31 실측): dropBase 는 `userData.layout.totalH` 에 비례하지만
+//   **buildHanok(히어로 종가)은 layout 을 달지 않아** 폴백 12m 가 쓰인다. 실제 종가 높이는 5.98m 이므로
+//   구 여행거리 5.30m 는 건물 전체 높이의 89% 였고, 처마단(2.27m)에서 출발점이 7.57m —
+//   **자기 용마루(5.92m)보다 높은 곳**이었다. 그것이 "하늘에서 떨어진다"의 정체다.
+//   판정 기준은 그래서 프레임 비율이 아니라 기하다: **공중의 처마선이 자기 용마루선을 넘지 않는다.**
+//   0.45 는 네 프리셋 실측에서 그 조건을 여유 있게 만족한다(종가 1.71m·처마피크 3.98 < 용마루 5.92,
+//   기와집 2.03m·5.46 < 6.27, 날개 1.80m·4.69 < 5.73, 궁은 상한에 닿지 않아 3.17m 유지).
+//   상한이 걸리면 **접근 시간도 같은 비율로 줄여** 접촉 속도를 보존한다(무게=접근 속도 계약).
+//   그래서 이 상한은 "느리게 둥실 내려오는" 쪽으로 새지 않는다 — 짧고 낮은 인양이 된다.
+const ROOF_LIFT_OF_MASS = 0.45;
+// window.__asmRoofRoll: 캡처 A/B 용 런타임 오버라이드(0 = 롤 없음). __tofuStretch 와 같은 관례.
+function rollDeg() {
+  if (typeof window !== 'undefined' && typeof window.__asmRoofRoll === 'number') return window.__asmRoofRoll;
+  return ROOF_ROLL_DEG;
+}
 
 // 지붕 시맨틱 청크 순서(작을수록 먼저). 태그 없는 부재의 기본 청크는 'body'.
 //  rafters(서까래) → body(기와/이엉 통덩어리) → finial(잡상 등 미니팝).
@@ -143,21 +179,45 @@ const IMPACT = 0.5;
 //      적는 게 아니라 **접촉 속도에서 유도**되므로, 무거운 부재(지붕)는 접근 속도·drop 이 커서
 //      자연히 더 묵직하게 읽힌다.
 // 계약:
-//   · 상승(u<IMPACT): 정규 속도가 1 → VEND 로 감속하지만 0 이 되지 않는다(모멘텀 보존).
+//   · 접근(u<IMPACT): 정규 속도가 0 이 되지 않는다(모멘텀 보존). 방향에 따라 형상이 **시간 역전**된다:
+//     아래에서 밀어 올리는 부재는 1 → VEND 로 감속(던져 올린 것), 위에서 내려앉는 부재는 VEND → 1 로
+//     가속(중력에 놓인 것). 같은 상수·같은 적분값의 한 프로파일을 뒤집을 뿐이라 방언이 늘지 않는다.
 //   · 정착(u≥IMPACT): 위치는 접촉 속도를 초기속도로 갖는 감쇠 스프링(작은 오버슈트→복귀),
 //     변형은 그 수직 속도에 비례(올라갈 때 stretch sy>1, 되돌아올 때 squash sy<1·sxz>1).
 //   · u=1 에서 위치·스케일이 **정확히** 원상 — 포락 (1-w²) 이 w=1 에서 0 이므로 잔여 오프셋 0.
 //   · 접촉에서 값·도함수 모두 연속(C1) → "이제부터 흔들림" 하는 단절이 없다.
+//
+// 하강 프로파일 뒤집기(2026-07-30): 종전에는 두 방향이 같은 감속 프로파일을 썼다. 감속은 위로
+//   던져 올린 부재에는 맞지만(중력이 감속시킨다), **위에서 내려오는 지붕에는 물리적으로 반대**다 —
+//   낙하체는 가속한다. 그래서 지붕은 등속 엘리베이터처럼 떠내려오는 인상이었고, "위에서 뚝 떨어진다"는
+//   판정의 절반이 여기서 왔다(나머지 절반은 호버 높이 — PART_DROP 참조). 뒤집으면 (a) 물리적으로 맞고,
+//   (b) 시작이 느려 상량 인양처럼 잠깐 걸려 있다가 내려오고, (c) 접촉 속도가 1/VEND=1.67배로 올라
+//   같은 무게감을 더 짧은 거리로 살 수 있다. 적분 ∫₀¹v dk 는 두 형상이 동일(k² 와 (1-k)² 가 같은 1/3)
+//   하므로 RISE_N 은 그대로다 — 정규화 상수를 방향별로 갈라야 한다면 그건 다른 프로파일이라는 뜻이다.
 const VEND = 0.6;                                  // 접촉 순간 남는 정규 상승 속도(0=구 무반동 모델)
-const RISE_N = VEND + (1 - VEND) / 3;              // 상승 속도 프로파일의 적분(위치 정규화 상수)
+const RISE_N = VEND + (1 - VEND) / 3;              // 접근 속도 프로파일의 적분(위치 정규화 상수, 방향 공통)
 const SETTLE_W = 2 * Math.PI * 1.25;               // 정착 스프링 각속도(정착창 1.25 사이클)
 const SETTLE_Z = 2.2;                              // 정착 감쇠(클수록 한 번에 잦아든다)
-const CONTACT_V = VEND / (RISE_N * IMPACT);        // 접촉 속도 [drop/u]
-const BOB_V0 = CONTACT_V * (1 - IMPACT);           // 정착창 로컬(w) 초기속도
+const CONTACT_V = VEND / (RISE_N * IMPACT);        // 상승 접촉 속도 [drop/u]
+const CONTACT_V_DOWN = 1 / (RISE_N * IMPACT);      // 하강 접촉 속도 [drop/u] — 가속 프로파일의 v(1)=1
 
-// 정규 상승 속도(k=u/IMPACT): 1 → VEND. 이 형상의 적분이 상승 위치를 만들고, 이 값 자체가
-//   스쿼시&스트레치를 구동한다(속도 결합 — 단일 출처).
+// 정착 좌대: 스프링 강성·감쇠. 진폭은 여전히 **접촉 속도에서** 나오고(∝ v0/w) 좌대는 그 운동량을
+//   어떻게 흡수하는지만 정한다 — 그래서 부재별로 좌대를 갈아도 "무게=접근 속도" 계약이 유지되고,
+//   초기속도가 v0 그대로이므로 접촉 C1 도 (w, z) 와 무관하게 정확히 성립한다.
+//   · SETTLE_SEAT       — 부재 기본. 두부처럼 한 번 크게 출렁이고 잦아든다.
+//   · SETTLE_SEAT_RIGID — 강체 지붕. 무거운 부재가 굵은 평방·창방 위에 앉는 좌대는 훨씬 단단하고
+//     소산이 크다. 기본 좌대로는 접촉 속도 3.8m/s 가 36cm 짜리 3연속 호핑이 되어(2026-07-30 수치)
+//     5톤 지붕이 공처럼 튄다. 강성을 2배(2.5 사이클), 감쇠를 6.0 으로 올리면 같은 모멘텀이 16cm
+//     한 번의 짧은 안착으로 흡수된다 — 스쿼시가 없는 강체에서 무게를 읽히게 하는 유일한 채널이다.
+const SETTLE_SEAT = { w: SETTLE_W, z: SETTLE_Z };
+const SETTLE_SEAT_RIGID = { w: 2 * Math.PI * 2.5, z: 6.0 };
+// 아래에서 올라오는 부재의 기본 물리(방향·좌대) — export 된 이징의 기본 인자와 동일한 조합.
+const SHARED_PHYS = { descending: false, seat: SETTLE_SEAT };
+
+// 정규 접근 속도(k=u/IMPACT). 상승: 1 → VEND(감속). 하강: VEND → 1(중력 가속).
+//   이 형상의 적분이 접근 위치를 만들고, 이 값 자체가 스쿼시&스트레치를 구동한다(속도 결합 — 단일 출처).
 const riseVel = (k) => VEND + (1 - VEND) * (1 - k) * (1 - k);
+const riseVelDown = (k) => VEND + (1 - VEND) * k * k;
 // 정착 포락: w=1 에서 정확히 0(잔여 오프셋 0), w=0 에서 값 1·도함수 0(접촉 C1 보존).
 const settleEnv = (w) => 1 - w * w;
 
@@ -174,26 +234,42 @@ function stretchK() {
 }
 function tofuLegacy() { return typeof window !== 'undefined' && !!window.__tofuLegacy; }
 
-// 상승 오프셋 계수(1→0, drop 배수). caller: position.y = y0 - tofuRise(u) * drop + tofuBob(...) * drop.
-//   IMPACT 에서 0 이지만 **속도는 CONTACT_V** — 그 운동량이 곧 정착의 초기조건이다.
-export function tofuRise(u) {
+// 접근 오프셋 계수(1→0, drop 배수). caller: position.y = y0 - tofuRise(u) * drop + tofuBob(...) * drop.
+//   IMPACT 에서 0 이지만 **속도는 CONTACT_V(하강은 CONTACT_V_DOWN)** — 그 운동량이 곧 정착의 초기조건이다.
+//   opts.descending: 위에서 내려앉는 부재(drop<0). 같은 프로파일의 시간 역전 — 위 주석 참조.
+export function tofuRise(u, { descending = false } = {}) {
   if (u <= 0) return 1;
   if (u >= IMPACT) return 0;
   const k = u / IMPACT;
   if (tofuLegacy()) return 1 - easeOutCubic(k);
-  const area = VEND * k + (1 - VEND) * (1 - (1 - k) ** 3) / 3;
+  const area = descending
+    ? VEND * k + (1 - VEND) * (k ** 3) / 3
+    : VEND * k + (1 - VEND) * (1 - (1 - k) ** 3) / 3;
   return 1 - area / RISE_N;
 }
 
 // 정착 오버슈트 계수(drop 배수, 0 → 작은 양수 → 작은 음수 → 정확히 0).
-//   접촉 속도를 초기속도로 갖는 감쇠 스프링. 진폭은 상수가 아니라 모멘텀에서 나온다(≈drop 의 7%).
+//   접촉 속도를 초기속도로 갖는 감쇠 스프링. 진폭은 상수가 아니라 모멘텀에서 나온다(기본 좌대 ≈drop 의 7%,
+//   강체 좌대 ≈5%). 초기속도가 v0 라는 성질은 좌대 (w,z) 와 무관하므로 접촉 C1 은 어떤 좌대에서도 성립한다.
 //   stretchK()==0 이면 탄성 없음(순수 상승 A/B). amp 는 legacy 경로 호환용으로만 쓰인다.
-export function tofuBob(u, amp = 0.2) {
+export function tofuBob(u, amp = 0.2, { descending = false, seat = SETTLE_SEAT } = {}) {
   if (u < IMPACT || u >= 1) return 0;
   const w = (u - IMPACT) / (1 - IMPACT);
   if (tofuLegacy()) return amp * Math.exp(-w * 4.5) * Math.sin(w * Math.PI * 2 * 1.6) * 0.6;
   if (stretchK() <= 0) return 0;
-  return (BOB_V0 / SETTLE_W) * Math.exp(-SETTLE_Z * w) * Math.sin(SETTLE_W * w) * settleEnv(w);
+  const v0 = (descending ? CONTACT_V_DOWN : CONTACT_V) * (1 - IMPACT);
+  return (v0 / seat.w) * Math.exp(-seat.z * w) * Math.sin(seat.w * w) * settleEnv(w);
+}
+
+// 정착 오버슈트 최대값(drop 배수) — 좌대·방향 조합의 성질이므로 검증용으로 수치화해 둔다.
+//   해석해가 지저분하므로(감쇠·포락·정류가 겹친다) 정착창을 촘촘히 훑는다. 게이트 전용 경로다.
+function settlePeak(phys = SHARED_PHYS) {
+  let peak = 0;
+  for (let i = 1; i < 2000; i++) {
+    const u = IMPACT + (1 - IMPACT) * (i / 2000);
+    peak = Math.max(peak, Math.abs(tofuBob(u, 0.2, phys)));
+  }
+  return peak;
 }
 
 // 정규 변형량(발사 시 1 기준). 상승 구간은 상승 속도 그대로(빠를수록 늘어난다).
@@ -201,18 +277,23 @@ export function tofuBob(u, amp = 0.2) {
 //   접촉으로 밑동이 멈추면서 저장된 변형을 놓아주는 형태다. 초기 도함수가 0 이라 상승 구간과
 //   값·도함수 모두 연속(C1)이고, 진폭은 authored 상수가 아니라 접촉 속도 VEND 에서 나온다.
 //   포락이 w=1 에서 0 이므로 잔여 변형 없이 정확히 항등으로 수렴한다.
-function tofuDeform(u) {
+//   하강 변형(descending)은 접근 중 **가속하며 늘어나고**(낙하하는 두부), 접촉 변형은 그 최대값
+//   riseVelDown(1)=1 에서 풀려난다. 값은 연속이지만 도함수는 접촉에서 꺾인다(가속 프로파일의 기울기를
+//   초기속도 항으로 물려받지 않으므로) — 현재 이 채널의 소비자는 없다(강체 지붕은 allowScale=false).
+//   하강 부재에 스쿼시를 켜는 소비자가 생기면 여기 초기속도 항을 넣어 C1 을 복원할 것.
+function tofuDeform(u, descending = false, seat = SETTLE_SEAT) {
   if (u <= 0 || u >= 1) return 0;
-  if (u < IMPACT) return riseVel(u / IMPACT);
+  const vel = descending ? riseVelDown : riseVel;
+  if (u < IMPACT) return vel(u / IMPACT);
   const w = (u - IMPACT) / (1 - IMPACT);
-  const osc = Math.cos(SETTLE_W * w) + (SETTLE_Z / SETTLE_W) * Math.sin(SETTLE_W * w);
-  return VEND * Math.exp(-SETTLE_Z * w) * osc * settleEnv(w);
+  const osc = Math.cos(seat.w * w) + (seat.z / seat.w) * Math.sin(seat.w * w);
+  return vel(1) * Math.exp(-seat.z * w) * osc * settleEnv(w);
 }
 
 // 두부 스쿼시&스트레치 배율. u(자식 진행 0..1), amp(진폭) → { sy, sxz }. 부피보존 1차 근사.
 //   상승 중엔 진행방향(수직)으로 늘어나고(sy>1, sxz<1), 정착에서 되돌아오는 동안 눌린다
 //   (sy<1, sxz>1) — 하나의 속도 함수가 양쪽을 다 만들므로 "이제부터 흔들림" 단절이 없다.
-export function tofuScale(u, amp = 0.2) {
+export function tofuScale(u, amp = 0.2, { descending = false, seat = SETTLE_SEAT } = {}) {
   if (u <= 0 || u >= 1) return { sy: 1, sxz: 1 };
   if (tofuLegacy()) {
     if (u < IMPACT) {
@@ -225,7 +306,7 @@ export function tofuScale(u, amp = 0.2) {
     const osc = Math.cos(w * Math.PI * 2 * 1.6);
     return { sy: 1 - amp * decay * osc, sxz: 1 + amp * 0.55 * decay * osc };
   }
-  const s = amp * stretchK() * tofuDeform(u);
+  const s = amp * stretchK() * tofuDeform(u, descending, seat);
   return { sy: 1 + s, sxz: 1 - s * 0.5 };
 }
 
@@ -314,10 +395,24 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
   for (const name of PART_ORDER) {
     const grp = building.getObjectByName(name);
     if (!grp || grp.children.length === 0) continue;
-    const [ws, we] = PART_WINDOWS[name];
-    const drop = dropBase * (PART_DROP[name] ?? 1);
+    const [ws0, we] = PART_WINDOWS[name];
+    let ws = ws0;
+    let drop = dropBase * (PART_DROP[name] ?? 1);
     const tofu = (PART_TOFU[name] ?? 0.16) * amp;
     const rigid = name === 'roof';
+    // 내려앉는 강체: 여행거리를 지붕 덩어리 높이에 비례하도록 깎고(ROOF_LIFT_OF_MASS), 깎인 비율만큼
+    //   접근 시간도 줄인다. 창 **끝**은 고정이라 정착 시점(=클라이맥스)은 그대로고, 줄어드는 것은
+    //   공중 구간뿐이다. 비율이 같으므로 접촉 속도는 상한 적용 전과 정확히 동일하다.
+    let massY = 0;
+    if (rigid && drop < 0) {
+      massY = localCenter(grp).y;
+      const cap = ROOF_LIFT_OF_MASS * massY;
+      if (massY > 0 && Math.abs(drop) > cap) {
+        const k = cap / Math.abs(drop);
+        drop = -cap;
+        ws = we - (we - ws0) * k;
+      }
+    }
 
     const mkItem = (child, i) => ({
       child,
@@ -326,6 +421,8 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
       lag: 0,
       y0: child.position.y,
       sx0: child.scale.x, sy0: child.scale.y, sz0: child.scale.z,
+      // 강체 지붕만 회전(롤 정렬)을 쓰지만, 원상복구 계약은 건드릴 수 있는 모든 채널을 저장한다.
+      rx0: child.rotation.x, ry0: child.rotation.y, rz0: child.rotation.z,
       vis0: child.visible,
     });
     const entries = grp.children.map(mkItem);
@@ -455,8 +552,17 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
     const hasLag = rigid
       ? visHasLag
       : units.some((u) => u.items.some((it) => it.lag > 0));
+    // 하강 부재(지붕)는 중력형 가속 프로파일 + 강체 좌대를 쓴다. 롤 축은 용마루 축(=지배축)이고
+    //   기울어지는 쪽은 결정론 해시로 정한다(rng 미사용 → 시드 스트림·worker 해시 불침해).
+    const descending = drop < 0;
+    const phys = descending || rigid
+      ? { descending, seat: rigid ? SETTLE_SEAT_RIGID : SETTLE_SEAT }
+      : SHARED_PHYS;
+    const rollAxis = rigid && descending ? axis : null;
+    const rollSign = hash01(`${name}:roll:${entries.length}`) < 0.5 ? -1 : 1;
     groups.push({
       name, ws, we, drop, tofu, units, itemDur, offset, hasLag,
+      phys, rollAxis, rollSign, massY,
       slots: rigid ? visSlots : slots,
       rigid,
       visUnits,
@@ -472,7 +578,7 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
   // 한 부재에 진행도 uu 를 적용(공중 낙하 → 두부 출렁 복원). 원 transform 기준 상대.
   // allowScale=false: 지붕 강체는 스케일 항등(비등방 스쿼시가 깊이 스택을 찌그러뜨림).
   // setVisible=false: 강체 지붕 그룹은 항상 보이되, 자식 visible 은 별도 스태거가 소유.
-  function applyItem(it, uu, drop, tofu, allowScale = true, setVisible = true) {
+  function applyItem(it, uu, drop, tofu, allowScale = true, setVisible = true, phys = SHARED_PHYS) {
     if (uu <= 0) {
       // 아직 순서 전 → 숨김(공중에 어색하게 떠 있지 않게).
       if (setVisible) it.child.visible = false;
@@ -491,16 +597,28 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
       //   개판이 창방을 파고드는 프레임이고 옛 스크레이프의 축소판이다. 그래서 정류(|·|)한다 — 결과는
       //   좌대에 두 번 닿는 감쇠 바운스이고, 모멘텀에서 유도되는 성질(진폭이 접근 속도에서 나온다)은
       //   그대로다. 아래에서 올라오는 부재는 좌대가 없으므로 부호 있는 스프링을 유지한다(계약 불변).
-      const bob = tofuBob(uu, tofu);
-      it.child.position.y = it.y0 - fallOffset(uu) * drop
+      const bob = tofuBob(uu, tofu, phys);
+      it.child.position.y = it.y0 - fallOffset(uu, phys) * drop
         + (drop < 0 ? Math.abs(bob) : bob) * Math.abs(drop);
       if (allowScale) {
-        const s = tofuScale(uu, tofu);
+        const s = tofuScale(uu, tofu, phys);
         it.child.scale.set(it.sx0 * s.sxz, it.sy0 * s.sy, it.sz0 * s.sxz);
       } else {
         it.child.scale.set(it.sx0, it.sy0, it.sz0);
       }
     }
+  }
+
+  // 인양 롤 정렬: 내려앉는 강체가 살짝 기울어 접근해 **접촉에서 정확히 수평**이 된다.
+  //   포락을 tofuRise 로 쓰므로 (a) 접근 구간에만 존재하고, (b) 낙하와 같은 가속 프로파일로 펴지며,
+  //   (c) u≥IMPACT 에서 정확히 0 이라 정착 이후 회전 잔여·후행 흔들림이 원리적으로 없다.
+  //   회전축은 용마루 축이라 용마루 선은 수평을 유지한다(한쪽 처마만 내려간 채 접근).
+  function applyRoll(g, it, uu) {
+    if (!g.rollAxis) return;
+    const k = uu <= 0 || uu >= 1 ? 0 : fallOffset(uu, g.phys);
+    const rad = k * g.rollSign * rollDeg() * Math.PI / 180;
+    if (g.rollAxis === 'x') it.child.rotation.x = it.rx0 + rad;
+    else it.child.rotation.z = it.rz0 + rad;
   }
 
   // 진행도 t(0..1) 상태를 계산·적용. 유닛 간은 리플 스태거(u.start), 유닛 내부는 켜 흐름(it.lag).
@@ -510,8 +628,9 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
         // One shared rise/bob on the roof group; children keep rest local transforms.
         const u0 = g.units[0];
         const uu = clamp01((t - u0.start) / g.itemDur);
-        applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false);
+        applyItem(u0.items[0], uu, g.drop, g.tofu, /*allowScale*/ false, /*setVisible*/ false, g.phys);
         u0.items[0].child.visible = true;
+        applyRoll(g, u0.items[0], uu);
         // 상량: 지붕은 위에서 내려앉으므로(PART_DROP.roof < 0) 통과할 구조가 없다. 서까래·개판·기와
         //   외피는 강체와 **함께 공중에 보이고**, 마감 부재(잡상·용마루·수키와, asmGroup='finial')는
         //   그 하강 구간에 처마→용마루 순으로 얹혀 접촉 전에 모두 자리를 잡는다. 구 모델은 상승 중
@@ -549,26 +668,22 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
       for (const u of g.units) {
         for (const it of u.items) {
           const uu = clamp01((t - u.start - it.lag * intra) / body);
-          applyItem(it, uu, g.drop, g.tofu, true, true);
+          applyItem(it, uu, g.drop, g.tofu, true, true, g.phys);
         }
       }
     }
   }
 
   function restore() {
+    const put = (it) => {
+      it.child.position.y = it.y0;
+      it.child.scale.set(it.sx0, it.sy0, it.sz0);
+      it.child.rotation.set(it.rx0, it.ry0, it.rz0);
+      it.child.visible = it.vis0;
+    };
     for (const g of groups) {
-      for (const u of g.units) for (const it of u.items) {
-        it.child.position.y = it.y0;
-        it.child.scale.set(it.sx0, it.sy0, it.sz0);
-        it.child.visible = it.vis0;
-      }
-      if (g.visUnits) {
-        for (const u of g.visUnits) for (const it of u.items) {
-          it.child.position.y = it.y0;
-          it.child.scale.set(it.sx0, it.sy0, it.sz0);
-          it.child.visible = it.vis0;
-        }
-      }
+      for (const u of g.units) for (const it of u.items) put(it);
+      if (g.visUnits) for (const u of g.visUnits) for (const it of u.items) put(it);
     }
   }
 
@@ -613,6 +728,21 @@ export function playAssembly(building, { duration = 5, onDone, amp = 1 } = {}) {
           endSec: +((g.ws + off * (g.slots - 1) + iDur) * duration).toFixed(4),
           courseFlow: g.hasLag,
           rigid: !!g.rigid,
+          // 접근 물리(게이트용). travelM 은 저작 여행 거리, contactMps 는 접촉 순간의 실제 속도이고
+          //   settleM 은 모멘텀에서 유도된 정착 오버슈트 최대값 — "무게=진폭 아님, 접근 속도" 계약을
+          //   순수 노드에서 수치로 단정할 수 있게 셋을 함께 낸다.
+          descending: !!g.phys.descending,
+          travelM: +Math.abs(g.drop).toFixed(4),
+          // 지붕 덩어리가 앉는 높이(그룹 localCenter.y). 여행거리 상한·하한의 기준이자, 게이트가
+          //   "공중 처마선이 자기 용마루를 넘지 않는다"를 실제 기하로 판정할 때 쓰는 참조값이다.
+          massY: +g.massY.toFixed(4),
+          liftOfMass: g.massY > 0 ? +(Math.abs(g.drop) / g.massY).toFixed(4) : 0,
+          airborneSec: +(g.itemDur * IMPACT * duration).toFixed(4),
+          contactMps: +((g.phys.descending ? CONTACT_V_DOWN : CONTACT_V)
+            * Math.abs(g.drop) / (g.itemDur * duration)).toFixed(4),
+          settleM: +(settlePeak(g.phys) * Math.abs(g.drop)).toFixed(4),
+          rollDeg: g.rollAxis ? +rollDeg().toFixed(3) : 0,
+          rollAxis: g.rollAxis,
           starts: [...new Set(reveal.map((u) => +(u.start * duration).toFixed(4)))].sort((a, b) => a - b),
         };
       });

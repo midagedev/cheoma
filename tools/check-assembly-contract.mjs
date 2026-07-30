@@ -13,12 +13,16 @@
 //   ⑥ 종가(buildHanok) 파트 그룹 계약: 몸채가 통짜가 아니라 부재 이름 그룹을 갖고, 그 그룹 밖에
 //      렌더 가능한 직속 자식이 남지 않는다(남으면 그 부재만 t=0 에 완성 상태로 보인다).
 //   ⑦ 결정론: 타이밍 계획이 rng 를 소비하지 않아 두 번 만들면 바이트 동일(worker/sync 해시 불침해).
+//   ⑧ 상량 인양 물리: 내려앉는 부재는 중력처럼 가속하고, 호버 높이는 건물 높이의 30% 이하이며,
+//      그래도 접촉 속도는 승인 밴드(3.3~4.4 m/s)를 지키고, 강체 좌대가 그 모멘텀을 여행거리 6% 이하
+//      한 번의 안착으로 흡수하고, 롤 정렬이 접촉에서 정확히 0 이 된다. 올라오는 부재는 불변.
 //
 // 변경 전 코드에서 실패하는 단언(의도된 회귀 게이트):
 //   ① contact velocity(=0) · settle squash 없음 · 접촉 스케일 정확히 1
 //   ② rippleSec ≈ 0.026s · 순서가 배열 인덱스
 //   ③ courseFlow=false
 //   ⑥ buildHanok 파트 그룹 부재
+//   ⑧ 하강이 감속(엘리베이터) · 호버 44% · 정착 오버슈트 36cm 3연속 호핑 · 롤 정렬 없음
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { createRequire } from 'node:module';
@@ -341,8 +345,9 @@ assert.equal(roofPlan.courseFlow, true,
 
   // Frame walk of the roof window: shell halves stay visibility-locked and no
   // child local transform drifts (z-fight root cause during assembly).
+  //   창을 상수로 적지 않는다 — 지붕 창은 ROOF_LIFT_OF_MASS 상한에 따라 기하별로 좁아진다.
   for (let i = 0; i <= 40; i++) {
-    const t = 0.74 + (i / 40) * 0.26;
+    const t = roofPlan.window[0] + (i / 40) * (roofPlan.window[1] - roofPlan.window[0]);
     anim.seek(t);
     for (let c = 0; c < roof.children.length - 1; c++) {
       const a = roof.children[c];
@@ -385,13 +390,23 @@ assert.equal(roofPlan.courseFlow, true,
     }
     assert.ok(peakLift > 0.5,
       `roof travel peaked at only ${peakLift.toFixed(3)}m — the descent is not readable on screen`);
-    // 창의 절반이 공중 구간(u<IMPACT)이라는 계약. 창이 좁아지면 라이브 캡처에 공중 프레임이 남지
-    //   않는다(2026-07-30: 0.26 창 → 라이브 0.25s 샘플에서 1장). 히어로 몸채 창(7.4s) 기준으로
-    //   공중 시간이 1초를 넘어야 한다.
+    // 공중 구간은 창의 절반(u<IMPACT)이고, 보는 사람에게 낙하로 읽힐 만큼 길어야 한다.
+    //   하한 개정(2026-07-31): 종전 기준은 "1.0s 초과"였고 근거는 **캡처 케이던스**였다(0.25s 간격
+    //   라이브 샘플에 공중 프레임이 1장만 남았다 → 팝으로 보였다). 그건 도구 문제였고, 이제 지붕 창을
+    //   비율로 훑는 결정론 seek 캡처로 대체됐다. 실제 팝은 "공중 프레임 0장"이었지(구 shell 은닉 게이트)
+    //   0.6s 짜리 하강이 아니다. 여행거리를 지붕 덩어리 높이에 묶으면(ROOF_LIFT_OF_MASS) 접촉 속도를
+    //   보존하는 대가로 공중 시간이 짧아지는데, 셋 중 하나는 내줘야 한다:
+    //     travel = contactMps × airborne × 0.734  (이 모델의 항등식)
+    //   내준 것은 공중 시간이다. 사용자 판정은 "높고 느리게 떨어진다"였으므로 접근 속도(무게)와
+    //   낮은 호버를 지키고 시간을 줄이는 것이 판정 방향과 같다. 하한은 지각 기준으로 다시 잡는다:
+    //   60fps 에서 27프레임(0.45s) — 팝(수 프레임)과는 자릿수가 다르다.
     const roofWindowSec = (roofWe - roofWs) * 7.4;
-    assert.ok(roofWindowSec * 0.5 > 1.0,
+    assert.ok(roofWindowSec * 0.5 >= 0.45,
       `roof airborne window is only ${(roofWindowSec * 0.5).toFixed(2)}s on the hero body timeline `
-      + '— a 0.25s capture cadence cannot hold the beat');
+      + `(${Math.round(roofWindowSec * 0.5 * 60)} frames @60fps) — under 27 frames it starts to read as a pop`);
+    assert.ok(roofWindowSec * 0.5 <= 1.3,
+      `roof airborne window ${(roofWindowSec * 0.5).toFixed(2)}s is a slow float — a heavy roof that hangs `
+      + 'that long reads as weightless');
     assert.ok(minLift >= -1e-9,
       `t=${minLiftT.toFixed(3)} roof group sank ${(-minLift).toFixed(4)}m below rest `
       + `(${(-minLift / peakLift * 100).toFixed(1)}% of travel) — the rigid roof must approach from `
@@ -447,10 +462,26 @@ assert.equal(roofPlan.courseFlow, true,
     assert.ok(rafters.every((r) => r.visible), 'rafters missing near settle');
   }
 
-  anim.seek(0.88); // mid roof window (PART_WINDOWS.roof ≈ 0.74–1.0)
-  // Group has left rest (rise/bob in flight).
-  assert.ok(Math.abs(roof.position.y - restGroupY) > 1e-4,
-    'rigid roof group did not move mid-assembly');
+  // Group leaves rest across the window. 단일 샘플로 판정하면 안 된다: 강체 좌대는 정착창에서
+  //   2.5 사이클을 돌아 노드(변위 0)가 여러 번 지나간다 — 종전의 t=0.88 고정 샘플이 정확히 그
+  //   노드였다. 창 전체의 최대 변위와, 접촉 이후 구간의 최대 변위를 따로 본다.
+  {
+    const [rws, rwe] = roofPlan.window;
+    let peakAll = 0, peakSettle = 0;
+    for (let i = 0; i <= 800; i++) {
+      const t = rws + (i / 800) * (rwe - rws);
+      anim.seek(t);
+      const d = Math.abs(roof.position.y - restGroupY);
+      peakAll = Math.max(peakAll, d);
+      if ((t - rws) / (rwe - rws) > IMPACT) peakSettle = Math.max(peakSettle, d);
+    }
+    assert.ok(peakAll > 1e-4, 'rigid roof group did not move mid-assembly');
+    assert.ok(peakSettle > 0.01,
+      `roof settle overshoot is only ${(peakSettle * 1000).toFixed(1)}mm — the seat absorbed everything `
+      + 'and the landing has no thud');
+  }
+  // 하강 중간(창 상대 35%) — 창이 기하별로 움직이므로 상수 t 를 쓰지 않는다.
+  anim.seek(roofPlan.window[0] + (roofPlan.window[1] - roofPlan.window[0]) * IMPACT * 0.7);
   for (let i = 0; i < roof.children.length; i++) {
     const c = roof.children[i];
     assert.equal(c.position.y, restChild[i][0], 'roof child local Y drifted — not rigid');
@@ -473,6 +504,123 @@ assert.equal(roofPlan.courseFlow, true,
   anim.seek(1);
 }
 
+// ── ⑧ 상량 인양 물리(2026-07-30 "위에서 뚝 떨어지는 인상" 판정) ──────────────────────
+// 판정하는 것: 내려앉는 부재는 (a) 중력처럼 **가속**하며 접근하고, (b) 호버 높이가 건물 높이에 비해
+//   절제돼 있고, (c) 그럼에도 접촉 속도(=무게감의 유일한 출처)는 종전 값을 유지하고, (d) 강체 좌대가
+//   그 모멘텀을 짧고 작은 안착으로 흡수하며(공처럼 튀지 않음), (e) 접촉에서 정확히 수평이 되는
+//   롤 정렬로 "얹힌다"를 읽히게 한다. 올라오는 부재의 물리는 (f) 종전 그대로다.
+{
+  const dn = { descending: true };
+  const vel = (u, opts) => (tofuRise(u + 1e-6, opts) - tofuRise(u - 1e-6, opts)) / -2e-6;
+  // (a) 가속: 접근 초반보다 접촉 직전이 빠르다. 감속 프로파일(구 코드)에서는 반대다.
+  const vEarly = vel(IMPACT * 0.12, dn);
+  const vLate = vel(IMPACT * 0.94, dn);
+  assert.ok(vLate > vEarly * 1.4,
+    `descending approach is not accelerating (early ${vEarly.toFixed(3)} → late ${vLate.toFixed(3)} drop/u) `
+    + '— a decelerating descent reads as an elevator, not as a member let down under gravity');
+  // 하강 접촉 속도는 상승보다 1/VEND=1.67배. 이것이 거리를 줄이면서 무게를 지키는 유일한 여유다.
+  const cvUp = vel(IMPACT * (1 - 1e-4));
+  const cvDown = vel(IMPACT * (1 - 1e-4), dn);
+  near(cvDown / cvUp, 1 / 0.6, 0.02, 'descending/ascending contact-speed ratio is not the profile mirror');
+  // 접촉 C1: 하강 위치도 접촉을 통과할 때 속도가 이어진다(정착 스프링 초기속도 = 접촉 속도).
+  const posDn = (u) => -tofuRise(u, dn) + tofuBob(u, AMP, dn);
+  const dnBefore = (posDn(IMPACT - h) - posDn(IMPACT - 3 * h)) / (2 * h);
+  const dnAfter = (posDn(IMPACT + 3 * h) - posDn(IMPACT + h)) / (2 * h);
+  near(dnAfter, dnBefore, Math.abs(dnBefore) * 0.02,
+    'descending position velocity is not continuous through contact');
+  // 두 방향 모두 u=1 에서 정확히 원상.
+  assert.equal(tofuRise(1, dn), 0, 'descending rise offset is nonzero at t=1');
+  assert.equal(tofuBob(1, AMP, dn), 0, 'descending settle offset is nonzero at t=1');
+  assert.equal(tofuRise(0, dn), 1, 'descending rise does not start a full travel above rest');
+
+  // (f) 올라오는 부재의 물리는 불변 — 사용자가 승인한 값이므로 상수로 못박는다.
+  near(cvUp, 1.6364, 0.002, 'ascending contact speed drifted (approved momentum model changed)');
+  {
+    let peak = 0;
+    for (let i = 1; i < 4000; i++) peak = Math.max(peak, Math.abs(tofuBob(IMPACT + (1 - IMPACT) * i / 4000, AMP)));
+    near(peak, 0.0679, 0.0015, 'ascending settle overshoot drifted from the approved 6.8% of drop');
+  }
+
+  // 히어로 몸채 타임라인(7.4s)에서 지붕 접근 물리를 수치로 본다.
+  const HERO_DUR = 7.4;
+  const TOTAL_H = 12;                       // makeHouse 의 userData.layout.totalH
+  const heroRoof = playAssembly(makeHouse(), { duration: HERO_DUR }).plan()
+    .find((p) => p.part === 'roof');
+  assert.equal(heroRoof.descending, true, 'roof no longer approaches from above (상량)');
+  // (b) 호버 높이는 **지붕 덩어리가 앉는 높이**에 묶인다. 종전 기준으로 쓰던 `layout.totalH` 는
+  //   신뢰할 수 없다: buildHanok 은 layout 을 달지 않아 폴백 12m 가 쓰이는데 실제 종가는 5.98m 다
+  //   (2026-07-31 실측). 그래서 기준을 기하에서 직접 얻은 massY(지붕 그룹 localCenter.y)로 바꾼다.
+  assert.ok(heroRoof.massY > 0, 'roof mass height was not derived from geometry');
+  assert.ok(heroRoof.liftOfMass <= 0.45 + 1e-6,
+    `roof lifts ${(heroRoof.liftOfMass * 100).toFixed(0)}% of its own mass height `
+    + `(${heroRoof.travelM.toFixed(2)}m of ${heroRoof.massY.toFixed(2)}m) — above that the airborne eave `
+    + 'clears its own ridge and the roof reads as falling out of the sky');
+  assert.ok(heroRoof.liftOfMass >= 0.20,
+    `roof lifts only ${(heroRoof.liftOfMass * 100).toFixed(0)}% of its mass height — too little to read`);
+  void TOTAL_H;
+  // (c) 접촉 속도 — 거리를 줄이면서도 종전(3.91 m/s)과 같은 무게로 도착한다.
+  assert.ok(heroRoof.contactMps >= 3.3 && heroRoof.contactMps <= 4.4,
+    `roof contact speed ${heroRoof.contactMps.toFixed(2)} m/s left the approved heavy band (3.3..4.4) — `
+    + 'weight comes from approach speed, so shortening the travel must be paid for by the profile');
+  // 공중 시간 하한은 지각 기준(60fps 27프레임)이다 — 종전 1.0s 기준의 근거였던 캡처 케이던스는
+  //   결정론 seek 캡처로 대체됐다. 위 roofWindowSec 단언과 같은 밴드를 쓴다.
+  assert.ok(heroRoof.airborneSec >= 0.45 && heroRoof.airborneSec <= 1.3,
+    `roof airborne time ${heroRoof.airborneSec.toFixed(2)}s `
+    + `(${Math.round(heroRoof.airborneSec * 60)} frames @60fps) left the readable band (0.45..1.3s)`);
+  // (d) 강체 좌대 — 모멘텀을 여행거리의 6% 이하 한 번의 안착으로 흡수한다(구 기본 좌대는 6.8%,
+  //   절대값 36cm 짜리 3연속 호핑이었다: 5톤 지붕이 공처럼 튀는 인상).
+  assert.ok(heroRoof.settleM <= heroRoof.travelM * 0.06,
+    `roof settle overshoot ${(heroRoof.settleM * 100).toFixed(1)}cm is `
+    + `${(heroRoof.settleM / heroRoof.travelM * 100).toFixed(1)}% of travel — a rigid roof with no squash `
+    + 'channel reads as a bouncing ball at that amplitude');
+  assert.ok(heroRoof.settleM >= 0.05,
+    `roof settle overshoot ${(heroRoof.settleM * 100).toFixed(1)}cm is too small to read as a thud`);
+
+  // (e) 롤 정렬 — 용마루 축(긴 축) 기준, 접근 중에만 존재하고 접촉에서 정확히 0.
+  assert.equal(heroRoof.rollAxis, 'x', 'roof roll is not about the ridge (dominant) axis');
+  assert.ok(heroRoof.rollDeg > 0.5 && heroRoof.rollDeg <= 3.0,
+    `roof roll ${heroRoof.rollDeg}° is outside the readable band (0.5..3.0) — below it nothing reads, `
+    + 'above it the tilt looks like an error rather than a lift');
+  {
+    const roof = house.getObjectByName('roof');
+    anim.seek(1);
+    const restRot = [roof.rotation.x, roof.rotation.y, roof.rotation.z];
+    const [rws, rwe] = roofPlan.window;
+    const at = (share) => rws + (rwe - rws) * share;
+    let peakRoll = 0;
+    for (let i = 0; i <= 400; i++) {
+      anim.seek(at(i / 400));
+      peakRoll = Math.max(peakRoll, Math.abs(roof.rotation.x - restRot[0]));
+    }
+    near(peakRoll * 180 / Math.PI, heroRoof.rollDeg, 0.02, 'roll never reaches its authored angle');
+    // 접촉 이후 회전 잔여 0 — 후행 회전 흔들림은 기각된 "분리된 wobble" 이다.
+    for (let i = 0; i <= 200; i++) {
+      anim.seek(at(IMPACT + (1 - IMPACT) * (i / 200)));
+      assert.equal(roof.rotation.x, restRot[0],
+        `roof is still rotating after contact (${((roof.rotation.x - restRot[0]) * 180 / Math.PI).toFixed(3)}°)`);
+      assert.equal(roof.rotation.z, restRot[2], 'roof rolled about the wrong axis after contact');
+      assert.equal(roof.rotation.y, restRot[1], 'roof yawed during assembly');
+    }
+    // 롤은 여행거리에 비해 작아야 한다. 리프트와 롤이 같은 포락(tofuRise)을 쓰므로 "기울어진 끝의
+    //   하강량 / 그 순간의 리프트" 는 u 와 무관한 상수 = |z|max·sinθ / travel 이다. 그 비율이 1 에
+    //   가까워지면 아직 공중인데도 한쪽 처마가 좌대를 파고들기 시작한다 — 각도를 눈에 보이게 키우려는
+    //   유혹이 정확히 이 한계에 부딪힌다(히어로 fixture 에서 9.6° 부터 위반).
+    {
+      let zMax = 0;
+      for (const c of roof.children) zMax = Math.max(zMax, Math.abs(c.position.z));
+      const dip = zMax * Math.sin(heroRoof.rollDeg * Math.PI / 180);
+      assert.ok(dip < heroRoof.travelM * 0.25,
+        `the rolled eave eats ${(dip / heroRoof.travelM * 100).toFixed(0)}% of the roof's travel `
+        + `(${dip.toFixed(2)}m of ${heroRoof.travelM.toFixed(2)}m) — at that ratio the low corner reaches `
+        + 'the plate band while the roof is still descending');
+    }
+    anim.seek(1);
+    for (const [i, k] of ['x', 'y', 'z'].entries()) {
+      assert.equal(roof.rotation[k], restRot[i], `roof rotation.${k} not exactly restored at t=1`);
+    }
+  }
+}
+
 // ── ⑤ 착공 전 무노출 ─────────────────────────────────────────────────────────────────
 anim.seek(0);
 const animated = [];
@@ -484,18 +632,23 @@ for (const c of animated) {
 }
 
 // ── ④ 원상복구(정확히 원값) ──────────────────────────────────────────────────────────
+// 회전도 포함한다 — 강체 지붕의 롤 정렬이 rotation 을 쓰므로, 복구 계약이 이 채널까지 덮어야 한다.
 function snapshot(root) {
   const out = [];
-  root.traverse((o) => out.push([o, o.position.y, o.scale.x, o.scale.y, o.scale.z, o.visible]));
+  root.traverse((o) => out.push([o, o.position.y, o.scale.x, o.scale.y, o.scale.z, o.visible,
+    o.rotation.x, o.rotation.y, o.rotation.z]));
   return out;
 }
 function assertExact(shot, label) {
-  for (const [o, y, sx, sy, sz, vis] of shot) {
+  for (const [o, y, sx, sy, sz, vis, rx, ry, rz] of shot) {
     assert.equal(o.position.y, y, `${label}: position.y not exactly restored on ${o.name || o.type}`);
     assert.equal(o.scale.x, sx, `${label}: scale.x not exactly restored`);
     assert.equal(o.scale.y, sy, `${label}: scale.y not exactly restored`);
     assert.equal(o.scale.z, sz, `${label}: scale.z not exactly restored`);
     assert.equal(o.visible, vis, `${label}: visible not exactly restored`);
+    assert.equal(o.rotation.x, rx, `${label}: rotation.x not exactly restored on ${o.name || o.type}`);
+    assert.equal(o.rotation.y, ry, `${label}: rotation.y not exactly restored`);
+    assert.equal(o.rotation.z, rz, `${label}: rotation.z not exactly restored`);
   }
 }
 for (const mode of ['update', 'skip', 'seek1']) {
@@ -568,7 +721,41 @@ for (const mode of ['update', 'skip', 'seek1']) {
   ha.skip();
   assert.ok(hp.find((p) => p.part === 'columns').ranks >= 4,
     'hero column ripple collapsed into too few ranks to read');
+
+  // ⑧-real: "하늘에서 떨어진다"를 **실제 종가 기하**로 판정한다. 합성 fixture 의 totalH=12 는
+  //   실제 높이(5.98m)의 두 배라, 이 단언만이 제품에서 실제로 보이는 것을 본다.
+  //   기준: 공중에서 가장 높이 든 순간의 **처마선(지붕 bbox 하단)이 자기 용마루선을 넘지 않는다.**
+  //   구 소스에서는 처마 출발점이 7.57m 로 용마루 5.92m 보다 1.65m 높았다 — 지붕이 건물 위 허공에
+  //   통째로 떠 있는 프레임이고, 그것이 사용자 판정의 정체다.
+  {
+    const roof = hanok.children.find((c) => c.name === 'roof');
+    const ha2 = playAssembly(hanok, { duration: 10 });
+    const rp = ha2.plan().find((p) => p.part === 'roof');
+    const box = new THREE.Box3();
+    ha2.seek(1);
+    box.setFromObject(roof);
+    const restEave = box.min.y;
+    const ridgeY = box.max.y;
+    let peakEave = -Infinity;
+    for (let i = 0; i <= 200; i++) {
+      ha2.seek(rp.window[0] + (i / 200) * (rp.window[1] - rp.window[0]));
+      roof.updateWorldMatrix(true, true);
+      box.setFromObject(roof);
+      peakEave = Math.max(peakEave, box.min.y);
+    }
+    ha2.skip();
+    assert.ok(peakEave < ridgeY,
+      `the airborne hero roof lifts its eave line to ${peakEave.toFixed(2)}m, above its own ridge at `
+      + `${ridgeY.toFixed(2)}m (rest eave ${restEave.toFixed(2)}m) — the whole roof floats clear of the `
+      + 'house and reads as dropping out of the sky');
+    // 여유도 함께 기록한다: 처마 피크가 용마루의 80% 를 넘으면 이미 "건물 위에 뜬" 인상이다.
+    assert.ok(peakEave < restEave + (ridgeY - restEave) * 0.80,
+      `airborne eave peak ${peakEave.toFixed(2)}m eats `
+      + `${((peakEave - restEave) / (ridgeY - restEave) * 100).toFixed(0)}% of the roof's own height — `
+      + 'the lift should read as clearing the columns, not as a second storey of air');
+  }
 }
 
 console.log('ASSEMBLY CONTRACT: PASS (momentum-continuous settle, geometry-derived member ripple, '
-  + 'eave→ridge course flow, exact restoration, no finished flash, hero part groups)');
+  + 'eave→ridge course flow, exact restoration, no finished flash, hero part groups, '
+  + 'gravity-accelerated 상량 descent on a rigid seat with contact-zero roll)');
