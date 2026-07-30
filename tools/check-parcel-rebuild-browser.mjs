@@ -166,7 +166,8 @@ try {
   const actions = await page.locator('.foot.house:not([aria-hidden="true"]) button, .foot.house:not([aria-hidden="true"]) sp-button')
     .evaluateAll((buttons) => buttons.map((button) => button.textContent.replace(/\s+/g, ' ').trim()));
   invariant(actions.length === 1, `house footer has ${actions.length} actions instead of 1`);
-  invariant(actions.some((label) => label.includes('이 집 다시 짓기')), `missing rebuild label: ${actions.join(' | ')}`);
+  // #26 renamed the house-primary action to 고쳐짓기 (parameter live-morph).
+  invariant(actions.some((label) => label.includes('고쳐짓기')), `missing rebuild label: ${actions.join(' | ')}`);
   invariant(!actions.some((label) => /다시 보기|GLB/i.test(label)), `legacy action remains: ${actions.join(' | ')}`);
   const panelTools = await page.locator('[data-make-panel] [data-action]')
     .evaluateAll((buttons) => buttons.map((button) => ({
@@ -620,7 +621,56 @@ try {
   invariant(Math.abs(Number(restoredValue) - continuous.target) < 1e-6,
     `refocus restored an uncommitted value (${restoredValue})`);
 
+  // #26 고쳐짓기: the footer primary on an editable parcel no longer re-plans the
+  // parcel. It live-morphs several schema axes through the same live-edit
+  // scheduler — streamed refreshFlora:false previews, then exactly one
+  // refreshFlora:true commit — with the village seed, the parcel plan, and the
+  // focus state untouched (no wave/transition). The morph plan seed is drawn at
+  // click time, so assertions cover contract shape, not specific values.
+  const morphBefore = await page.evaluate((parcelId) => {
+    const liveState = window.__liveEditFixture;
+    liveState.phase = 'renovate';
+    const state = window.__engine.village.debugParcelRebuild(parcelId);
+    return {
+      calls: liveState.calls.length,
+      commits: liveState.calls.filter((call) => call.refreshFlora).length,
+      params: JSON.parse(JSON.stringify(state.params)),
+      rebuildSeed: state.rebuildSeed,
+      villageSeed: window.__engine.village.getState().seed,
+    };
+  }, fixture.parcelId);
   await page.locator('.foot.house:not([aria-hidden="true"]) .hbtn.reroll').click();
+  await page.waitForFunction((baseline) => window.__liveEditFixture.calls
+    .filter((call) => call.refreshFlora).length === baseline.commits + 1, morphBefore, { timeout });
+  const morph = await page.evaluate((parcelId) => {
+    const engine = window.__engine;
+    const state = engine.village.debugParcelRebuild(parcelId);
+    return {
+      calls: window.__liveEditFixture.calls.slice().map((call) => ({ ...call })),
+      params: JSON.parse(JSON.stringify(state.params)),
+      rebuildSeed: state.rebuildSeed,
+      villageSeed: engine.village.getState().seed,
+      focus: engine.village.getState(),
+    };
+  }, fixture.parcelId);
+  const renovate = morph.calls.filter((call) => call.phase === 'renovate');
+  invariant(renovate.length >= 2 && !renovate.slice(0, -1).some((call) => call.refreshFlora)
+    && renovate[renovate.length - 1].refreshFlora,
+  `renovate must stream previews then commit once (${renovate.map((call) => call.refreshFlora).join(',')})`);
+  invariant(morph.villageSeed === morphBefore.villageSeed, 'renovate morph changed the village seed');
+  invariant(morph.rebuildSeed === morphBefore.rebuildSeed,
+    'renovate morph re-planned the parcel instead of morphing its parameters');
+  invariant(morph.focus.selected === fixture.parcelId && !morph.focus.transitioning,
+    'renovate morph must not leave focus or start a wave transition');
+  const morphChanged = Object.keys({ ...morph.params, ...morphBefore.params })
+    .filter((key) => JSON.stringify(morph.params[key]) !== JSON.stringify(morphBefore.params[key]));
+  invariant(morphChanged.length >= 3,
+    `renovate morph committed only ${morphChanged.length} changed axes (${morphChanged.join(', ')})`);
+
+  // The reroll transaction below stays product behavior: it is the footer
+  // fallback for non-editable parcels and remains the direct API. Since #26 the
+  // button no longer owns it for this editable fixture, so drive the engine.
+  await page.evaluate(() => window.__engine.village.rerollParcel());
   await page.waitForFunction(() => window.__engine.village.getState().transitioning, null, { timeout });
   await page.waitForFunction((parcelId) => {
     const state = window.__engine.village.getState();
@@ -821,9 +871,12 @@ try {
       }) && partialEdits.json.length > 2,
   `residential opening handoff drifted: ${partialEdits.json}`);
 
-  // Type changes start from target defaults, but the selected type itself is a
-  // durable decision across "rebuild this house". Every other committed edit is
-  // reset to the newly sampled variant.
+  // Type changes start from target defaults, and the selected type itself is a
+  // durable decision across 고쳐짓기. Since #26 the footer button morphs from the
+  // panel's authoritative editParams instead of re-planning, so the old
+  // "renovate resets every other edit" contract is gone for editable parcels —
+  // what must hold instead is that an engine-level patch which never entered
+  // the panel cannot survive the renovate commit.
   const targetKind = partialEdits.state.kind === 'giwa' ? 'choga' : 'giwa';
   await page.locator('.ctx.house:not([aria-hidden="true"]) .tabs .tab')
     .nth(targetKind === 'giwa' ? 0 : 1).click();
@@ -837,22 +890,26 @@ try {
   }, fixture.parcelId);
   invariant(switched.kind === targetKind && switched.params.footprintScale === 1.41,
     `type switch did not establish a target-kind edit frame: ${JSON.stringify(switched)}`);
+  const typeMorphBefore = await page.evaluate(() => (
+    window.__liveEditFixture.calls.filter((call) => call.refreshFlora).length
+  ));
   await page.locator('.foot.house:not([aria-hidden="true"]) button.reroll, .foot.house:not([aria-hidden="true"]) sp-button.reroll').click();
-  await page.waitForFunction(({ parcelId, targetKind }) => {
-    const state = window.__engine.village.getState();
-    const rebuilt = window.__engine.village.debugParcelRebuild(parcelId);
-    return state.selected === parcelId && !state.transitioning
-      && rebuilt?.kind === targetKind && rebuilt?.params?.footprintScale === 1;
-  }, { parcelId: fixture.parcelId, targetKind }, { timeout });
-  const typeRerolled = await page.evaluate((parcelId) => ({
+  await page.waitForFunction((baseline) => window.__liveEditFixture.calls
+    .filter((call) => call.refreshFlora).length === baseline + 1, typeMorphBefore, { timeout });
+  const typeRenovated = await page.evaluate((parcelId) => ({
     state: window.__engine.village.debugParcelRebuild(parcelId),
+    focus: window.__engine.village.getState(),
     edits: window.__engine.village.residentialOpeningEdits(),
   }), fixture.parcelId);
-  const rerolledEdit = typeRerolled.edits.find((edit) => edit.parcelId === fixture.parcelId);
-  invariant(typeRerolled.state.kind === targetKind
-      && typeRerolled.state.params.footprintScale === 1
-      && !rerolledEdit,
-    `house reroll lost current kind or retained stale edits: ${JSON.stringify(typeRerolled)}`);
+  invariant(typeRenovated.focus.selected === fixture.parcelId && !typeRenovated.focus.transitioning,
+    'renovate after a type switch left focus or started a transition');
+  invariant(typeRenovated.state.kind === targetKind,
+    `renovate did not keep the durable selected type: ${JSON.stringify(typeRenovated.state.kind)}`);
+  invariant(typeRenovated.state.params.footprintScale !== 1.41,
+    'an engine-side patch that never entered the panel leaked through the renovate commit');
+  const renovatedEdit = typeRenovated.edits.find((edit) => edit.parcelId === fixture.parcelId);
+  invariant(!renovatedEdit || renovatedEdit.params.doorCount === typeRenovated.state.params.doorCount,
+    `renovate desynced the serialized opening edit: ${JSON.stringify(typeRenovated.edits)}`);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(180);

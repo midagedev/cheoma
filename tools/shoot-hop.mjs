@@ -180,7 +180,7 @@ const houseBtns = await ev(desk, () => Array.from(document.querySelectorAll('.fo
 console.log('HOUSE BTN LABELS', JSON.stringify(houseBtns));
 await shot(desk, '100-8-house-labels');
 ok(houseBtns.length === 2 && !houseBtns.some((s) => s.includes('다시 보기'))
-  && houseBtns.some((s) => s.includes('이 집 다시 짓기'))
+  && houseBtns.some((s) => s.includes('고쳐짓기'))
   && houseBtns.some((s) => s.includes('내보내기')),
   `#19⑧ 집 패널 액션 정리 (${JSON.stringify(houseBtns)})`);
 

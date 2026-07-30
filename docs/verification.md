@@ -752,7 +752,7 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 `check:parcel-rebuild:browser`와 같은 격리 Vite 부트·`vseed=7` 과실수 필지 fixture를 재사용하고, 품질 게이트는 아니다.
 
 - **C1**: focus 후 처마(`eaveOverhang`) 슬라이더를 끝값까지 3–5단 고정 타이밍(~300ms)으로 보내고, 드래그 중 `input` 전용 mid 프레임 + 마지막 `change` commit 프레임을 PNG로 남긴다.
-- **C2**: 같은 focus에서 `이 집 다시 짓기` 전후 1쌍을 촬영한다(마을 seed 불변·persistent overlay·새 rebuildSeed).
+- **C2**: 같은 focus에서 필지 리롤(`engine.village.rerollParcel`, 구 `이 집 다시 짓기` — #26부터 푸터 버튼은 `고쳐짓기` 파라미터 몰핑이고 이 리롤은 비편집 필지 폴백) 전후 1쌍을 촬영한다(마을 seed 불변·persistent overlay·새 rebuildSeed).
 - 기본 출력은 OS 임시 폴더(`cheoma-edit-exp-shots-*`)이며 `MANIFEST.md`에 파일·수치 요약을 쓴다. `shots/`는 미커밋 규약 그대로 두고, 필요 시만 `CHEOMA_EDIT_EXPERIENCE_OUT`으로 절대 경로를 지정한다(그 경로의 PNG도 커밋하지 않는다).
 - 환경: `CHEOMA_EDIT_EXPERIENCE_FRAMES`(3–5), `CHEOMA_EDIT_EXPERIENCE_STEP_MS`, `CHEOMA_EDIT_EXPERIENCE_TIME`, `CHEOMA_EDIT_EXPERIENCE_TIMEOUT_MS`.
 - 비범위: 인앱 Record 버튼, 마을 규모 웨이브(C3 — `shoot:wave`). 계약 수치는 `check:live-edit` / `check:parcel-rebuild:browser`가 맡는다.
@@ -761,7 +761,8 @@ duration 누적과 reduced-motion 첫 렌더 advance 완료를 함께 검사한�
 
 `tools/check-parcel-rebuild-browser.mjs`는 실제 과실수가 있고 정자에 가까운 일반 필지를 격리 Vite 앱에서 선택한다.
 
-- 집 푸터가 `이 집 다시 짓기` 하나만 제공하고(#158: 내보내기·공유는 공유 독 소유) “다시 보기”·“GLB”
+- 집 푸터가 `고쳐짓기`(#26 재작명 — 편집 가능 필지는 파라미터 몰핑, 비편집 필지는 리롤 폴백) 하나만
+  제공하고(#158: 내보내기·공유는 공유 독 소유) “다시 보기”·“GLB”
   레거시 문구가 없는지, 독에 `내보내기`가 있는지 검사한다. 만들기 패널은 그룹 아코디언(동시 1개)이므로
   하네스는 축을 읽기 전에 그 그룹을 실제로 펼친다.
 - 세로 모바일 시트는 detent 2개(peek / 상한 있는 half)다. 상단까지 끌어도 세 번째 `full` detent 로 가지 않고
