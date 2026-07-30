@@ -1163,10 +1163,26 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // Capture semantic zoom *before* aspect changes. Aerial/focus zoom bands are
     // aspect-dependent (screen-fill). Without re-applying the settled view after
     // the inspector column resizes the stage, share/restore drift by ~15%.
+    //
+    // When an explore aerial tween is in flight (entry / scale reframe / focus-out),
+    // preserve is fail-closed — retarget that tween's endpoint to the new aspect's
+    // aerial solve instead of landing a pre-layout pose and leaving aerialReferenceDist
+    // out of sync (mobile viewport round-trip then re-encoded a different zoom).
     let preserveView = null;
+    let retargetAerialTween = false;
     try {
       if (!tween && !revealCamera?.isActive?.() && !cinematic.isActive() && !demo.active) {
         preserveView = captureSceneView();
+      } else if (
+        tween
+        && !tween.arc
+        && village.active
+        && !village.selected
+        && !revealCamera?.isActive?.()
+        && !cinematic.isActive()
+        && !demo.active
+      ) {
+        retargetAerialTween = true;
       }
     } catch { /* fail closed — bare resize still runs */ }
     camera.aspect = w / h;
@@ -1180,6 +1196,23 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         if (village.active) restoreVillageView(preserveView);
         else restoreSceneView(preserveView);
       } catch { /* keep resized frame even if restore fails */ }
+    } else if (retargetAerialTween && tween) {
+      try {
+        const frame = villageAerial();
+        // Keep lens endpoints on the aerial contract while the path rebases.
+        tween.f1 = frame.fov;
+        tween.r1 = frame.referenceFov;
+        retargetTweenEndpoint(frame.pos, frame.target, { maxEase: 1 });
+      } catch { /* keep in-flight path if retarget fails */ }
+    } else if (village.active && !village.selected && !village.transitioning && !villageWaveBusy()) {
+      // Continuum unit tracks aspect even when the pose cannot be rewritten (e.g.
+      // cinematic). Next captureView/setRegime then agrees with the live frame.
+      try {
+        villageCamera.syncAerialReference();
+        if (!tween && !revealCamera?.isActive?.() && !cinematic.isActive() && !demo.active) {
+          setZoomRegime('explore');
+        }
+      } catch { /* non-fatal */ }
     }
   }
   addEventListener('resize', resizeAll);

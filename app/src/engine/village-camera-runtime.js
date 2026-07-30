@@ -52,9 +52,38 @@ export function createVillageCameraRuntime({
     timeOfDay = typeof name === 'string' && name ? name : 'day';
   }
 
-  function aerial(handle = village.handle) {
+  // Continuum math follows camera.aspect. resizeAll captures *before* writing the
+  // new aspect so preserve measures against the outgoing frame; aerial()/restore
+  // then match the container when the live box has moved without a camera write.
+  function framingAspect() {
+    if (Number.isFinite(camera.aspect) && camera.aspect > 0) return camera.aspect;
+    const cw = container?.clientWidth;
+    const ch = container?.clientHeight;
+    if (cw > 0 && ch > 0) return cw / ch;
+    return 1.6;
+  }
+
+  function matchCameraAspectToContainer() {
+    const cw = container?.clientWidth;
+    const ch = container?.clientHeight;
+    if (!(cw > 1 && ch > 1)) return false;
+    const next = cw / ch;
+    if (!(next > 0) || !Number.isFinite(next)) return false;
+    if (Math.abs(next - (camera.aspect || 0)) <= 1e-6) return false;
+    camera.aspect = next;
+    camera.updateProjectionMatrix();
+    return true;
+  }
+
+  // Refresh the explore zoom continuum unit for the current camera.aspect without
+  // moving the camera. Capture/restore/resize must share this unit so a zoom
+  // fraction is measured and reapplied against the same aerialReferenceDist.
+  function syncAerialReference(handle = village.handle) {
+    if (!handle) {
+      return { radius: 0, aspect: framingAspect(), referenceDistance: 0, distance: 0 };
+    }
     const radius = outerRadius(handle);
-    const aspect = camera.aspect || (container.clientWidth / container.clientHeight) || 1.6;
+    const aspect = framingAspect();
     // Portrait must not fit width via aspect < 1 — that over-distances and fog-bleaches
     // the village. Pure solve lives in src/camera/optics.js (desktop aspect ≥ 1 identical).
     const referenceDistance = villageAerialReferenceDistance(radius, aspect);
@@ -65,8 +94,21 @@ export function createVillageCameraRuntime({
     );
     village.aerialReferenceDist = referenceDistance;
     village.aerialDist = distance;
+    return { radius, aspect, referenceDistance, distance };
+  }
+
+  function exploreTarget(radius) {
+    return semanticTarget.set(0, radius * 0.05, -radius * 0.10);
+  }
+
+  function aerial(handle = village.handle) {
+    // Pose solves follow the live stage box (entry can run before the first
+    // resizeAll after chrome layout). Capture preserve must NOT call this — it
+    // uses syncAerialReference against the still-outgoing camera.aspect.
+    matchCameraAspectToContainer();
+    const { radius, distance } = syncAerialReference(handle);
     const elev = villageAerialElevation(timeOfDay);
-    const target = new THREE.Vector3(0, radius * 0.05, -radius * 0.10);
+    const target = exploreTarget(radius).clone();
     const pos = new THREE.Vector3(
       target.x + distance * Math.cos(elev) * Math.sin(AERIAL_AZIMUTH),
       target.y + distance * Math.sin(elev),
@@ -237,10 +279,14 @@ export function createVillageCameraRuntime({
 
   function semanticTargetContract(mode) {
     if (mode === 'explore') {
-      const frame = aerial();
+      // Target only — never call aerial() here. Capture used to measure zoom
+      // against pre-aerial bounds then mutate aerialReferenceDist as a side
+      // effect; restore called setRegime before that mutation and OrbitControls
+      // maxDistance clamped the restored dolly (share zoom round-trip break).
+      const radius = outerRadius();
       return {
-        target: semanticTarget.copy(frame.target),
-        scale: Math.max(1, outerRadius()),
+        target: exploreTarget(radius),
+        scale: Math.max(1, radius),
       };
     }
     const framing = village.handle?.getPickProxy?.(village.selected)?.cameraFraming;
@@ -261,6 +307,11 @@ export function createVillageCameraRuntime({
     const direction = focusDirection.subVectors(camera.position, controls.target);
     const distance = direction.length();
     if (!(distance > 1e-6)) return null;
+    // Explore zoom is a fraction of the aspect-dependent aerial unit. Sync the
+    // unit to the live container aspect before measuring so share/restore and
+    // resize preserve agree (stale aerialReferenceDist from a portrait solve
+    // would otherwise re-encode the same pose as a different zoom).
+    if (mode === 'explore') syncAerialReference();
     const referenceDistance = villageScreenDistanceForCamera(distance, camera);
     const bounds = semanticBounds(mode);
     const span = bounds.max - bounds.min;
@@ -285,6 +336,12 @@ export function createVillageCameraRuntime({
       camera.fov = VILLAGE_LENS.aerial.fov;
       camera.userData.villageReferenceFov = VILLAGE_LENS.aerial.referenceFov;
       camera.updateProjectionMatrix();
+      // Live stage box first, then continuum + OrbitControls min/max *before*
+      // placing the camera. setRegime-after-stale-aerialReferenceDist left
+      // maxDistance short of the restored dolly; controls.update(0) then clamped
+      // share restores (e.g. zoom 0.882 → visual 1.06×stale unit).
+      matchCameraAspectToContainer();
+      syncAerialReference();
       setRegime('explore');
     } else if (regime !== 'focus' || !(focusCloseupReference > 0)) {
       return false;
@@ -302,6 +359,9 @@ export function createVillageCameraRuntime({
     if (!orbit) return false;
     controls.target.set(orbit.target.x, orbit.target.y, orbit.target.z);
     camera.position.set(orbit.position.x, orbit.position.y, orbit.position.z);
+    // Re-assert regime bounds after the pose write so a prior shorter maxDistance
+    // cannot survive into the next OrbitControls frame.
+    if (mode === 'explore') setRegime('explore');
     camera.near = near();
     camera.updateProjectionMatrix();
     camera.lookAt(controls.target);
@@ -363,6 +423,7 @@ export function createVillageCameraRuntime({
 
   return {
     aerial,
+    syncAerialReference,
     setTimeOfDay,
     near,
     outerRadius,
