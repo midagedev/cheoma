@@ -31,9 +31,14 @@ const PRODUCT_HTML = `<!doctype html>
 import * as THREE from 'three';
 import { createVillage } from '/src/village/adapter.js';
 
+// Fixture repin 2026-07-31: the R2 parcel re-lay left capital/11 (and 14, 18)
+// with zero stored stone crossings, so the close-view framing had no target and
+// the page threw before __DRAINAGE_READY. Rescan of capital seeds 1-24 under
+// this exact option set: seed 2 keeps 12 runs / 3 crossings — the original
+// conditions (runs > 0, gate crossing present), not relaxed ones.
 const OPTIONS = Object.freeze({
   scale: 'capital',
-  seed: 11,
+  seed: 2,
   character: 'yeoyeom',
 });
 const renderer = new THREE.WebGLRenderer({
@@ -55,9 +60,9 @@ const handle = createVillage(OPTIONS);
 scene.add(handle.group);
 
 const drainagePlan = handle.plan?.drainage;
-if (!drainagePlan?.runs?.length) throw new Error('capital/11 drainage plan has no runs');
+if (!drainagePlan?.runs?.length) throw new Error('capital/2 drainage plan has no runs');
 if (!drainagePlan.crossings?.length) {
-  throw new Error('capital/11 drainage fixture has no gate crossing');
+  throw new Error('capital/2 drainage fixture has no gate crossing');
 }
 const drainage = handle.group.getObjectByName('roadside-drainage-ground');
 if (!drainage) throw new Error('populated village is missing roadside-drainage-ground');
@@ -455,7 +460,7 @@ try {
 
   invariant(errors.length === 0, errors.join(' | '));
   invariant(diag.runCount > 0 && diag.crossingCount > 0,
-    `capital/11 drainage fixture drifted ${JSON.stringify(diag)}`);
+    `capital/2 drainage fixture drifted ${JSON.stringify(diag)}`);
   invariant(diag.groupName === 'roadside-drainage-ground',
     `drainage group name drifted (${diag.groupName})`);
   invariant(diag.meshCount === 2
