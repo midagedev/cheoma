@@ -540,11 +540,26 @@ async function captureUiSafeSemanticFrame(page, parcelId, prefix) {
     add(subject.representative.footprint, subject.representative.maxY);
     if (subject.courtyard) add(subject.courtyard.footprint, subject.courtyard.y);
     for (const anchor of subject.anchors || []) if (anchor.point) points.push(anchor.point);
+    // Project into the *stage/canvas* pixel space that owns both the camera
+    // projection (aspect + setViewOffset fullWidth/fullHeight) and
+    // __viewshift.safeRect. window.innerWidth still includes the docked
+    // inspector column outside .stage, so using it stretched palace/temple
+    // footprints by ~viewport/stage and falsely reported UI-safe overflow
+    // while fit.scale was already applied on the live camera (canvas coords
+    // matched fit.projectedBounds to sub-pixel).
+    const canvas = engine.renderer.domElement;
+    const view = engine.camera.view;
+    const width = (view?.enabled && view.fullWidth > 0)
+      ? view.fullWidth
+      : (canvas.clientWidth || innerWidth);
+    const height = (view?.enabled && view.fullHeight > 0)
+      ? view.fullHeight
+      : (canvas.clientHeight || innerHeight);
     const box = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
     for (const point of points) {
       const projected = engine.camera.position.clone().set(point.x, point.y, point.z).project(engine.camera);
-      const x = (projected.x + 1) * innerWidth * 0.5;
-      const y = (1 - projected.y) * innerHeight * 0.5;
+      const x = (projected.x + 1) * width * 0.5;
+      const y = (1 - projected.y) * height * 0.5;
       box.left = Math.min(box.left, x);
       box.right = Math.max(box.right, x);
       box.top = Math.min(box.top, y);
