@@ -1168,10 +1168,18 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // preserve is fail-closed — retarget that tween's endpoint to the new aspect's
     // aerial solve instead of landing a pre-layout pose and leaving aerialReferenceDist
     // out of sync (mobile viewport round-trip then re-encoded a different zoom).
+    // A same-aspect resize (the ResizeObserver's initial callback, DPR-only changes)
+    // must not touch camera state at all: the boot-time callback fires while the
+    // intro dolly-in tween is in flight, and retargeting it to the raw aerial solve
+    // replaced the authored dolled-in default framing (ink-app chroma gate caught
+    // the village shrinking to 0.72x screen size).
+    const aspectChanged = Math.abs((w / h) - (camera.aspect || 0)) > 1e-6;
     let preserveView = null;
     let retargetAerialTween = false;
     try {
-      if (!tween && !revealCamera?.isActive?.() && !cinematic.isActive() && !demo.active) {
+      if (!aspectChanged) {
+        // fall through — resize targets/composer only
+      } else if (!tween && !revealCamera?.isActive?.() && !cinematic.isActive() && !demo.active) {
         preserveView = captureSceneView();
       } else if (
         tween
@@ -1204,7 +1212,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         tween.r1 = frame.referenceFov;
         retargetTweenEndpoint(frame.pos, frame.target, { maxEase: 1 });
       } catch { /* keep in-flight path if retarget fails */ }
-    } else if (village.active && !village.selected && !village.transitioning && !villageWaveBusy()) {
+    } else if (aspectChanged && village.active && !village.selected && !village.transitioning && !villageWaveBusy()) {
       // Continuum unit tracks aspect even when the pose cannot be rewritten (e.g.
       // cinematic). Next captureView/setRegime then agrees with the live frame.
       try {
