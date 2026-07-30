@@ -20,7 +20,10 @@ export const RENDER_BUDGET_METRICS = Object.freeze([
 // Do not raise these to absorb a new cacheKey axis; collapse the axis instead.
 const COMMON_RESOURCE_LIMITS = Object.freeze({
   programs: 192,
-  textures: 128,
+  // 2026-07-31 re-baseline (with the state limits below): focus/mid measured 132, focusOut 135
+  // against the old 128. The aerial→focusOut delta (+33 ≤ 40) still bounds focus-warm residue,
+  // which is what this ceiling exists to alarm on.
+  textures: 140,
 });
 
 // The `focus` and `mid` ceilings below were re-authored on 2026-07-25 together with the restored
@@ -58,18 +61,33 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
     // roadside drainage rails, and the night moon set (#212) — measuring 557 (focusOut
     // 560) across three commits (bc07eb2, d6de9b1, HEAD; Chrome Metal). 575 keeps the
     // same ~3% creep alarm above the authored floor.
+    //
+    // 2026-07-31 re-baseline after the R2 roof-sea round (43b93bd): aerial measures 704
+    // calls / 2,342,901 triangles / 1,011 geometries (focusOut 707 / 2,342,905 / 1,126;
+    // Chrome Metal, leave-one-out decomposition matches traverseVisible exactly). The R2
+    // re-lay moved this seed onto the heroCap(6) worst case — hero 반가 6채 alone are 438
+    // calls / 868k triangles and palace-merged is 64 / 904k, together 71% of calls and 76%
+    // of triangles, while R2's own additions (paddies, drainage, sijeon, wall) total <20
+    // calls. That is authored content, not creep, so the ceilings track it — but the known
+    // reduction levers are deliberately NOT spent here: per-hero material sets (438 → ~73
+    // calls via a shared set + one global merge, same floor as the deferred palace P.mats
+    // consolidation #149), the hanyang heroCap policy, and an aerial palace representation.
+    // Do not raise these again for hero/palace growth without deciding one of those levers.
     aerial: Object.freeze({
-      calls: 575,
-      triangles: 2_000_000,
+      calls: 725,
+      triangles: 2_450_000,
       programs: 144,
-      geometries: 920,
-      textures: 104,
+      geometries: 1040,
+      textures: 112,
     }),
     focus: Object.freeze({
       calls: 1120,
       triangles: 7_000_000,
       ...COMMON_RESOURCE_LIMITS,
-      geometries: 1050,
+      // 2026-07-31: measured 1172 (mid identical) — same authored-content derivation as
+      // aerial above. The cache-vs-leak question on resident geometries (see the
+      // aerial→focusOut geometries delta note) stays open; 1210 keeps a ~3% alarm.
+      geometries: 1210,
     }),
     // Mid is measured with the selected overlay still live while the camera is
     // pulled into the MID visual band. Town/capital LOD expansion (2026-07 perf)
@@ -79,13 +97,16 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
       calls: 850,
       triangles: 5_100_000,
       ...COMMON_RESOURCE_LIMITS,
-      geometries: 1050,
+      // 2026-07-31: measured 1172, same derivation as focus.
+      geometries: 1210,
     }),
     focusOut: Object.freeze({
-      calls: 575,
-      triangles: 2_000_000,
+      // 2026-07-31: see the aerial note — focusOut mirrors aerial (707 / 2,342,905 measured,
+      // scene content identical by construction; geometries measured 1,126).
+      calls: 725,
+      triangles: 2_450_000,
       ...COMMON_RESOURCE_LIMITS,
-      geometries: 1024,
+      geometries: 1165,
     }),
   }),
   deltas: Object.freeze([
