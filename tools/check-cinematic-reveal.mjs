@@ -394,6 +394,82 @@ assert.ok(distance(heroLandingStart.position, heroLandingStart.target)
   < distance(heroLandingEnd.position, heroLandingEnd.target),
 'hero landing arrival must establish from inside the landing radius, not beyond it');
 
+// #34 — the entry orbit must actually be an orbit. The regression this pins was not a missing
+// feature but a *shape*: the azimuth rode the same full-time smootherstep as the zoom, so the whole
+// sweep was spent as one bell curve. Measured on the real product landing (2026-07-31, 613 recorded
+// frames): 0.6°/s for the first 2.2s, an 11.9°/s peak at t≈4.5s, and exactly 0.00°/s from t=9.2s
+// onward — the compound stood still for the opening and again from before the climax to the settle,
+// which is what users report as the entry orbit around the 종가 having disappeared.
+//
+// These invariants are asserted on the product hero-landing fixture at the product duration
+// (HERO_ASSEMBLE_DELAY_MS/1000 + HERO_ASSEMBLE_DUR - HERO_REVEAL_TAIL), because the perceptual
+// claims are rate claims and rate depends on that duration. The bell curve fails 3 of the 5.
+const HERO_PRODUCT_REVEAL_DURATION = 1.1 + 10.0 - 2.0;
+const productArrival = createArchitecturalReveal({
+  kind: 'arrival', from, to: heroLandingClose, seed: 20260716, subjectSize: 30, motion: 'full',
+  duration: HERO_PRODUCT_REVEAL_DURATION,
+});
+const TURN_SAMPLES = 600;
+const azimuthOf = (sample) => Math.atan2(
+  sample.position.x - sample.target.x,
+  sample.position.z - sample.target.z,
+) * DEG;
+const turnSamples = Array.from({ length: TURN_SAMPLES + 1 }, (_, index) => (
+  sampleArchitecturalReveal(productArrival, index / TURN_SAMPLES)
+));
+const turnStep = productArrival.duration / TURN_SAMPLES;
+let turnSweep = 0;
+const turnRates = [];
+for (let index = 1; index <= TURN_SAMPLES; index++) {
+  let delta = azimuthOf(turnSamples[index]) - azimuthOf(turnSamples[index - 1]);
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  turnSweep += delta;
+  turnRates.push({
+    at: index / TURN_SAMPLES,
+    rate: Math.abs(delta) / turnStep,
+    // Screen-space rate up to a constant viewport height: angular rate × focal length, and
+    // focal ∝ 1 / tan(fov / 2). This is what the eye actually judges, and it is what makes a
+    // uniform angular rate wrong here — the same °/s is ≈5× more screen motion once the lens
+    // has compressed from 36° to 7°.
+    screen: Math.abs(delta) / turnStep / Math.tan(turnSamples[index].fov * Math.PI / 360),
+  });
+}
+const turnPeak = Math.max(...turnRates.map((entry) => entry.rate));
+const screenRates = turnRates.map((entry) => entry.screen).sort((a, b) => a - b);
+const screenPeak = screenRates.at(-1);
+const screenMedian = screenRates[Math.floor(screenRates.length / 2)];
+const sustainedFraction = turnRates.filter((entry) => entry.rate >= turnPeak * 0.45).length
+  / turnRates.length;
+const openingRate = turnRates.find((entry) => entry.at >= 0.12).rate;
+console.log(`ARRIVAL TURN: sweep ${Math.abs(turnSweep).toFixed(1)}° over ${productArrival.duration}s, `
+  + `peak ${turnPeak.toFixed(2)}°/s, sustained ${(sustainedFraction * 100).toFixed(0)}%, `
+  + `screen peak/median ${(screenPeak / screenMedian).toFixed(2)}`);
+// 1. Arc length floor. The compound has to turn enough that the build reads in the round.
+assert.ok(Math.abs(turnSweep) >= 64,
+  `arrival sweeps only ${Math.abs(turnSweep).toFixed(1)}° — the entry choreography is a dolly, not an orbit`);
+// 2. Calmness ceiling, in the same units the 2026-07-29 "과속 스윙" verdict used. The arc may grow
+//    only by flattening its rate, never by swinging faster than the profile it replaced (11.95°/s).
+assert.ok(turnPeak <= 11.95,
+  `arrival peak turn rate ${turnPeak.toFixed(2)}°/s exceeds the 과속 스윙 ceiling`);
+// 3. Sustained motion — the actual regression. A full-time smootherstep scores 0.57 here.
+assert.ok(sustainedFraction >= 0.68,
+  `arrival turns at speed for only ${(sustainedFraction * 100).toFixed(0)}% of the shot: the sweep is `
+  + 'spent as one mid-shot swing with a dead opening and a dead tail, not as an orbit');
+// 4. No dead opening. 착공 happens ~1.1s in; the camera must already be moving by then.
+assert.ok(openingRate >= turnPeak * 0.4,
+  `arrival is still nearly static (${openingRate.toFixed(2)}°/s of a ${turnPeak.toFixed(2)}°/s peak) `
+  + 'one eighth into the shot — the empty-site opening reads as a frozen frame');
+// 5. Both ends quiet: the establishing frame does not lurch into motion, and the landing arrives
+//    without residual screen motion so HERO_REVEAL_TAIL is a genuinely held frame for the roof beat.
+assert.ok(turnRates[0].rate < 0.35 && turnRates.at(-1).rate < 0.35,
+  `arrival must start and stop at rest (${turnRates[0].rate.toFixed(3)} / ${turnRates.at(-1).rate.toFixed(3)} °/s)`);
+// 6. Even perceived speed: the screen-space rate must not spike relative to its own median, or a
+//    longer arc buys itself an acceleration into the telephoto landing (smootherstep 58° = 1.84).
+assert.ok(screenPeak / screenMedian < 1.75,
+  `arrival screen-space turn rate spikes ${(screenPeak / screenMedian).toFixed(2)}× above its median — `
+  + 'the turn accelerates as the lens compresses instead of holding an even perceived speed');
+
 const rebuilt = frame({ x: 2.8, y: 1.35, z: 32.5 }, { x: 0.6, y: 4.8, z: -0.4 }, 20, 23, 1);
 const rebuild = createArchitecturalReveal({
   kind: 'rebuild', from: close, to: rebuilt, seed: 9172, subjectSize: 18, motion: 'full',

@@ -17,7 +17,7 @@ const smootherstep = (value) => {
 };
 
 // Arrival two-beat sampling (#254):
-//   beat 1 — orbit + target (full-time smootherstep) hold the wide lens longer
+//   beat 1 — orbit + target hold the wide lens longer
 //   beat 2 — FOV / dolly radius accelerate after ARRIVAL_ZOOM_START so the
 //            telephoto climax lands with the roof assembly, not a long static hold.
 // Zoom weight is monotone and end-flat (smootherstep of a clamped ramp).
@@ -27,6 +27,49 @@ function arrivalZoomWeight(t) {
   const u = clamp01(t);
   if (u <= ARRIVAL_ZOOM_START) return 0;
   return smootherstep((u - ARRIVAL_ZOOM_START) / (1 - ARRIVAL_ZOOM_START));
+}
+
+// Arrival turn shaping (#34). The azimuth used to ride the same full-time smootherstep as the
+// zoom, which spends the whole sweep as one bell curve. Measured on the product landing
+// (2026-07-31, 613 frames): 0.6°/s for the first 2.2s, an 11.9°/s peak at t≈4.5s, then back to
+// exactly 0.00°/s at t=9.2s — 2.3s before the assembly ends. The camera was therefore dead for
+// the opening and dead again from well before the climax onward, which is what reads as "the
+// entry orbit around the 종가 is gone": one swing, not a circling.
+//
+// The rate is now a trapezoid: a short ease-in, a sustained plateau across the build, and a long
+// ease-out that lands the camera quiet before the roof's airborne beat (the tail hold stays a
+// held frame — that punctuation is authored by HERO_REVEAL_TAIL and is not touched here). Because
+// the plateau peak is the mean rather than 1.875× it, the sweep can grow while the *peak* rate
+// still drops — the 2026-07-29 "과속 스윙" verdict was about peak rate, not arc length.
+//
+// The ease-out spans half the shot while the ease-in takes a tenth, and that asymmetry is the
+// whole trick: screen-space turn rate is angular rate × focal length, and this profile narrows
+// from 36° to 7° FOV, so an unchanged °/s is ≈5× more screen motion at the telephoto end. Bleeding
+// the angular rate off as the lens compresses is what keeps the *perceived* turn even instead of
+// accelerating into the landing. Measured against the real product fov(t) track, this profile is
+// strictly calmer than the bell curve it replaces while turning far longer:
+//
+//                     peak °/s   peak px/s   median px/s   frames ≥45% of peak
+//   smootherstep 58°     11.95        464           252          57%
+//   this profile 70°     10.99        392           257          81%
+export const ARRIVAL_TURN_EASE_IN = 0.10;
+export const ARRIVAL_TURN_EASE_OUT = 0.50;
+
+// ∫₀ˣ smoothstep = x³ − x⁴/2, so the trapezoid's cumulative turn is closed-form: no table, no
+// per-sample integration, and t=0 / t=1 stay exactly 0 / 1 (endpoint-exact reveal contract).
+const rampIntegral = (x) => (x ** 3) - (x ** 4) / 2;
+const TURN_PLATEAU = 1 - (ARRIVAL_TURN_EASE_IN + ARRIVAL_TURN_EASE_OUT) / 2;
+
+function arrivalTurnWeight(t) {
+  const u = clamp01(t);
+  if (u <= ARRIVAL_TURN_EASE_IN) {
+    return ARRIVAL_TURN_EASE_IN * rampIntegral(u / ARRIVAL_TURN_EASE_IN) / TURN_PLATEAU;
+  }
+  if (u >= 1 - ARRIVAL_TURN_EASE_OUT) {
+    const remaining = ARRIVAL_TURN_EASE_OUT * rampIntegral((1 - u) / ARRIVAL_TURN_EASE_OUT);
+    return (TURN_PLATEAU - remaining) / TURN_PLATEAU;
+  }
+  return (ARRIVAL_TURN_EASE_IN / 2 + (u - ARRIVAL_TURN_EASE_IN)) / TURN_PLATEAU;
 }
 
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
@@ -91,10 +134,15 @@ function profileFor(kind, motion, subjectSize) {
       duration: compact ? 4.6 : 6.4,
       // Establishing sweep. 90° on desktop was "과속 스윙" in the 2026-07-29 clip review: the arrival
       // owns the camera for the whole 10s assembly, so 90° is a sustained 9°/s of parallax at a 170m
-      // telephoto radius — faster than the member drops it is supposed to let us read. 58° puts the
-      // rate at ≈5.7°/s while keeping the arc long enough that the compound turns as it is built.
-      // The reveal's job is scale (the 4.6× push-in), not angular speed.
-      sweep: (compact ? 26 : 58) * DEG,
+      // telephoto radius — faster than the member drops it is supposed to let us read. That review
+      // reasoned in *mean* rate, but the azimuth then rode a full-time smootherstep whose peak is
+      // 1.875× the mean, so 90° actually swung at 16.5°/s and the 58° replacement still peaked at
+      // 11.9°/s (measured on the product path). The trapezoidal turn weight makes peak == mean, so
+      // 70° now peaks at ≈9.5°/s — a slower swing than the arc it replaces, sustained across the
+      // whole build instead of concentrated mid-shot (#34: the entry orbit around the 종가).
+      // The reveal's job is scale (the 4.6× push-in) *and* keeping the compound turning while it
+      // is built; neither is angular speed for its own sake.
+      sweep: (compact ? 32 : 70) * DEG,
       radialBreath: 0,
       verticalBreath: 0,
       // The establishing frame is authored as a *screen* width, not a world distance. Scaling the
@@ -211,9 +259,10 @@ export function sampleArchitecturalReveal(shot, progress) {
   if (!shot?.start || !shot?.end) throw new TypeError('Invalid architectural reveal descriptor');
   const t = clamp01(progress);
   const arrival = shot.kind === 'arrival';
-  // Orbit/target always use full-time smootherstep (turn-rate contract).
-  // Arrival FOV/dolly use a delayed zoom beat for the push-in climax.
-  const orbitK = smootherstep(t);
+  // Orbit/target ride one shared turn weight (turn-rate contract). Rebuild keeps the full-time
+  // smootherstep bell; arrival uses the sustained trapezoid so the compound turns across the whole
+  // build instead of in one mid-shot swing. Arrival FOV/dolly stay on the delayed zoom beat.
+  const orbitK = arrival ? arrivalTurnWeight(t) : smootherstep(t);
   const zoomK = arrival ? arrivalZoomWeight(t) : orbitK;
   const target = lerpPoint(shot.start.target, shot.end.target, orbitK);
   const start = polarOffset(sub(shot.start.position, shot.start.target));
