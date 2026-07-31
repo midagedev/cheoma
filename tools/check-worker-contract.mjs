@@ -289,8 +289,16 @@ const expectedSceneHashes = {
   //   그 "먹점" 관습은 배경이 중간값이던 시절 저작됐다. 새 떼 재질이 씬 해시에 포함되므로 네 규모
   //   해시가 이동한다(배치·기하 불변 — proxy 4종·objects·triangles 전부 불변이 증거).
   //   재기준 직전 실측: 네 규모 모두 worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 교차 PASS.
-  village: '4f7df434:e8ac0d74:de155085:f6a3fc70',
-  town: '228fe371:48ff04ed:b95066a0:9e4274b5',
+  // 천장 z-fight(2026-08-01, 커밋 61c0a45): buildHanok 의 회벽이 창방과 같은 높이에서 끝나 상면 캡
+  //   두 장이 동일평면(y=2.700, 둘 다 up, 겹침 ~60m²)이었다. 회벽을 창방 밑(wallH − 0.16)까지만
+  //   올리고 창방을 그 위에 1cm 파고들게 얹어 캡을 삼키므로 벽·창방 정점이 함께 이동한다.
+  //   **귀속은 단독 측정이다**: 61c0a45(개천 이전) 워크트리에서 village/town 해시가 아래 새 값과
+  //   완전히 같고 proxy(fef7a386/3f7f776c)·objects·triangles 도 불변이었다 — 즉 이 이동은 개천이
+  //   아니라 천장 수정 단독이며, 기하 변경이 아닌 정점 좌표 변경이다. capital 은 이 경로의 히어로
+  //   반가를 쓰지 않아 골든이 불변이다(같은 측정에서 PASS 유지가 증거).
+  //   재기준 직전 실측: worker == `?worker=0` 폴백 바이트 동일, snapshot·mja 교차 PASS.
+  village: 'f88ca538:67a3b450:3726a4ad:7b3da640',
+  town: 'bd6ba713:2c07047d:4407aa60:df5c793b',
   capital: 'd187e903:6889cef9:6baab490:d0ca0d4b',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
@@ -306,7 +314,17 @@ const expectedSceneHashes = {
   //   **proxy 는 이번에 이동한다**(0ee8aaee → 8266fb35): 문전 마당 blocker 가 필지 배치를 바꾸므로
   //   픽 프록시가 따라 움직이는 것이 정상이며, 프록시 개수·축·안정 ID 규약은 그대로다(프록시 계약
   //   게이트 통과가 증거). 재기준 직전 실측: worker == 폴백 바이트 동일, async 불일치 0줄.
-  hanyang: 'beb50f9c:aff3337c:69171fec:2354035c',
+  // 천장 z-fight + R4-A 합산(2026-08-01). 이 한 줄만 두 변인이 겹치므로 **각각 단독으로 측정**했다:
+  //   ① 61c0a45(천장 수정, 개천 이전) 워크트리 = 52967784:4dabdf0e:9a3ff6f4:9ca9e24e ·
+  //      proxy 8266fb35(불변) · objects 4818 · tri 23,639,144 → 천장 수정분.
+  //   ② 현재(f3323f5, 개천 포함) = 아래 값 · proxy bba4f24a · objects 4723 · tri 23,624,240 → 개천분.
+  //   proxy 가 이번에 이동하는 것은 R4-A 가 필지·논 계획을 바꾸기 때문이다(성 밖 논 계약, 거주 한선
+  //   = 성벽, 수문 개구부). 프록시 개수·축·안정 ID 규약은 그대로이며 프록시 계약 게이트 통과가 증거.
+  // R4-A(2026-07-31~08-01): 개천 도성 관류(streamZ 0.30R → 0.16R, 사행 ×0.5, 도성 구간 골짜기 어깨
+  //   10m), 건천 하상 정점색, 오간수문(성벽 통과부마다 홍예 5개 수문 — 성벽 재질 공유로 드로우콜 +0),
+  //   논 성저십리 계약·거주 한선 성벽·한양 개 상한 38. 전부 한양 전용이라 village/town/capital/mja/
+  //   snapshot 골든이 불변인 것이 증거다. 재기준 직전 실측: worker == 폴백 바이트 동일.
+  hanyang: '34be4dd8:b2e7fb7e:8f0dbd85:837315d0',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -356,7 +374,10 @@ const expectedProxyHashes = {
   village: 'fef7a386',
   town: '3f7f776c',
   capital: '046ecd22',
-  hanyang: '8266fb35',
+  // R4-A(2026-08-01): 한양만 이동. 개천이 논을 성 밖으로 밀고 거주 한선을 성벽으로 옮기므로 필지·
+  //   지붕 OBB 가 따라 움직인다. 같은 라운드의 천장 z-fight 수정은 이 프록시를 움직이지 않았다
+  //   (61c0a45 단독 측정에서 8266fb35 불변). 개수·안정 ID·격리 계약은 유지.
+  hanyang: 'bba4f24a',
 };
 
 const server = await createServer({
