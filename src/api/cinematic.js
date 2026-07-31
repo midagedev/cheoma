@@ -51,8 +51,6 @@ export {
   createDronePaths,
   coneRoofHits,
   denseRoadSpan,
-  flythroughRoad,
-  frameAim,
   mainRoad,
   roofDensityAt,
   roofTopAt,

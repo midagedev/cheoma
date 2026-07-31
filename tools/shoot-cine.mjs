@@ -1,4 +1,9 @@
-// #30 마을 감상 모드(드론·도보) 현행 품질 캡처 하네스.
+// 마을 감상 모드(드론·도보) 품질 캡처 하네스.
+//
+// 2026-08-01 (#32): 드론뷰가 연속 투어로 재설계되면서 캡처 대상이 "패스 4종의 대표 프레임"에서
+// "하나의 투어를 구간별로 몇 지점씩 훑은 진행 기록"으로 바뀌었다. 구간(leg)은 여전히 이름으로
+// 단독 재생할 수 있으므로(runtime 계약 유지) 도구 구조는 그대로 두고 규모(hanyang 추가)와 t 지점만
+// 조정했다. 투어가 길어졌으므로(115~200s) 구간당 t 지점은 2개다.
 //
 // 판정 게이트가 아니라 **증거 수집기**다. 실제 제품 경로(Svelte SPA, post 컴포저 ON, sunset 역광)를
 // 격리 vite dev 서버에서 부팅하고 `engine.cine` 을 실시간 rAF 재생시켜 프레임과 수치 로그를 남긴다.
@@ -34,12 +39,14 @@ const filters = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
 const SCALES = {
   village: { vseed: 20260716, query: 'vscale=village&vpalace=0&vtemple=0' },
   capital: { vseed: 7, query: 'vscale=capital&vpalace=1&vtemple=1' },
+  hanyang: { vseed: 2026, query: 'vscale=hanyang&vpalace=1&vtemple=1' },
 };
 // 드론 패스 시나리오. 캡처 t 지점은 진입·중반·이탈 직전.
-const T_POINTS = [0.2, 0.5, 0.8];
+const T_POINTS = [0.3, 0.75];
 const SCENARIOS = [
   { id: 'drone-village', mode: 'drone', scale: 'village', passes: ['crane-in', 'street-flythrough', 'landmark-orbit', 'pullback-reveal'] },
   { id: 'drone-capital', mode: 'drone', scale: 'capital', passes: ['landmark-orbit', 'street-flythrough'] },
+  { id: 'drone-hanyang', mode: 'drone', scale: 'hanyang', passes: ['crane-in', 'landmark-orbit', 'street-flythrough', 'pullback-reveal'] },
   // 도보는 벽시계 오프셋 캡처(자동산책에 진행률 개념이 없다). 마지막 지점은 골목 진입 이후를 노린다.
   { id: 'walk-village', mode: 'walk', scale: 'village', marks: [2, 10, 20, 30] },
   { id: 'walk-capital', mode: 'walk', scale: 'capital', marks: [3, 14, 25] },

@@ -1,67 +1,77 @@
 import * as THREE from 'three';
 
-// 시네마틱 데모 — 드론샷 패스 제너레이터 (태스크 #103, 화면 품질 라운드 #30).
-//   createDronePaths({ site, plan, heightAt, seed, sunAzimuth }) → [ pass, ... ]  (명명된 패스 목록, 4종)
-//     pass = { name, kind, duration, sample(t01) → { pos:Vector3, lookAt:Vector3, fov } }
-//     sunAzimuth: 라디안, atan2(sunDir.x, sunDir.z) 규약(engine debugEnv.sunAz 와 동일). 주면
-//       crane-in·pullback·orbit 의 방위를 태양 기준으로 재배치한다(피사체가 카메라와 태양 사이 =
-//       역광). 안 주면 남향 고정이던 종전 방위를 그대로 쓴다(하위 호환).
+// 시네마틱 감상 — 드론 **연속 비행 투어** (태스크 #32, 2026-08-01 재설계).
 //
-// 좌표 규약(site.js): +z=남(앞·진입·개울), -z=북(뒤·주산·고지). center≈(0,-0.24R), mountainZ≈-1.0R,
-//   streamZ≈0.30R, bowlR=0.56R. 모든 거리·고도는 site.R·Hmax 로 파생 → 규모 연속 대응(village↔hanyang).
+// 종전(#103·#30)은 "특정 샷 4종을 각각 재현하는 독립 패스" 였다. 패스마다 시작·끝 속도가 0 이고
+// 패스 사이는 위치 컷이라, 관광 소개 영상이 아니라 정지 컷 4장을 이어 붙인 슬라이드였다. 사용자
+// 판정에 따라 **하나의 닫힌 연속 경로**로 다시 세운다.
 //
-// 경로는 CatmullRomCurve3(centripetal, C¹)·해석적 원(orbit)으로 구성하고 시간축을 easeInOutCubic 로
-//   매핑해 시작/끝 속도 0(속도 급변 없음). lookAt 은 고정점·타깃곡선·전방접선(flythrough) 중 하나.
+//   createDronePaths({ site, plan, heightAt, seed, sunAzimuth, canopies }) → [ leg, ... ] (4구간)
+//     leg = { name, kind, duration, sample(t01) → { pos, lookAt, fov },
+//             t0, t1, tourDuration, sampleTour(tau01), tour }
 //
-// 수치 안전(하네스 verify-cine.mjs 가 단언):
-//   (a) 지형 클리어런스: 매 샘플 pos.y - heightAt(pos) > 1.5m  — safeFloor 하한으로 보장.
-//   (b) 건물 관통 0: plan.parcels(+궁·절) 지붕 추정 볼륨 침범 없음. flythrough 는 지붕 위 ≥2m.
-//   (c) lookAt 각속도 상한: 타깃을 부드럽게(고정/곡선/접선) 두고 easeInOut 로 등가속 → 상한 이내.
-// (a)·(b) 의 하한은 **샘플별 클램프가 아니라 u 그리드에서 미리 푼 뒤 smootherstep 으로 확산시킨
-//   리프트**로 적용된다(pass 팩토리 floorLift). 클램프로 걸면 필지 경계를 넘는 한 프레임에 고도가
-//   계단으로 튀어 시선 각속도가 69~152°/s 로 폭발한다(저작된 각속도는 3~25°/s 다). 화면 품질 계약은
-//   tools/check-cine-quality.mjs 가 지킨다.
+// ── 왜 여전히 "4개 배열" 인가 ──
+//   구간(leg)은 독립 패스가 아니라 **하나의 투어 곡선 위 시간 창**이다. leg k 의 t01=1 과 leg k+1 의
+//   t01=0 은 같은 투어 시각을 가리키므로 위치·속도·시선이 정확히 일치한다(컷 0). 마지막 구간의
+//   끝은 첫 구간의 시작(닫힌 곡선의 이음매)이라 체인을 무한 순환해도 컷이 생기지 않는다.
+//   배열 형태·이름·kind·duration 계약을 유지하는 이유는 소비면(app/src/engine/cinematic-runtime.js
+//   체인, CinematicOverlay 라벨, verify-cinewire 배선 계약, shoot-cine 단독 재생)을 건드리지 않고
+//   경로 문법만 교체하기 위해서다. 카메라 전용 변경이므로 재질·포스트·드로우콜 델타는 0 이다.
+//
+// ── 경로 문법(전 규모 공통, 소재는 규모별로 다름) ──
+//   ① crane-in       역광측 상공 → 하강 접근(진입). 마지막에 오빗 접선 위로 활강해 들어간다.
+//   ② landmark-orbit 주 랜드마크(궁/절/종가/관아/정자/당산나무) 부분 선회 215~270°.
+//   ③ street-flythrough 오빗 접선 이탈 → 지붕 바다 저공 스윕 → 골목/개울 저공 패스(연속 2구간).
+//   ④ pullback-reveal 저공에서 능선 위로 상승하며 전경 공개 → 이음매(=①의 시작점)로 복귀.
+//
+// ── 연속성이 성립하는 근거 ──
+//   위치·시선 모두 닫힌 centripetal CatmullRom(C¹) 이고, 두 곡선은 **제어점 인덱스**로 정렬된다
+//   (같은 곡선 파라미터 t 에서 샘플). 시간축은 호길이 균일화 + 주기 부드러운 속도 가중 w(t) 로
+//   만들어 |dP/dτ| ∝ w(t) 이므로 속도가 연속이고 어디서도 0 이 되지 않는다(구간별 ease 금지 —
+//   ease 를 걸면 구간 경계마다 정지·재출발이 생긴다).
+//
+// ── 안전(관통 금지) ──
+//   지형·지붕 하한과 수관 시선 관통은 **샘플별 클램프가 아니라 t 그리드에서 미리 푼 리프트**를
+//   주기 smootherstep 으로 확산시켜 적용한다. 클램프로 걸면 필지 경계 한 프레임에 고도가 계단으로
+//   튀어 시선 각속도가 폭발한다(종전 라운드의 실측 69~152°/s). 하드 안전망은 그리드 사이 잔차에만
+//   개입한다. 계약은 tools/check-cine-quality.mjs(T1~T12) 가 지킨다.
+//
+// 좌표 규약(site.js): +z=남(앞·진입·개울), -z=북(뒤·주산). 모든 거리·고도는 site.R·Hmax 파생이라
+//   siteR 30(외딴집)~520(한양) 연속 규모에서 같은 문법이 성립한다.
 
 const DEG = Math.PI / 180;
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
-// smootherstep(C²): 시작/끝 속도 0 + 중간 최대 기울기 1.875(easeInOutCubic 의 3보다 완만) → 각속도 상한 여유.
+// smootherstep(C²): 리프트 확산·가중 램프 공용.
 const smootherstep = (t) => t * t * t * (t * (t * 6 - 15) + 10);
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
-// 지형 위 최소 클리어런스(>1.5m 요구, 여유 포함)와 필지 지붕 위 최소 클리어런스(관통 방지 + flythrough 스침).
+// 지형 위 최소 클리어런스(>1.5m 요구, 여유 포함)와 건물 지붕 위 최소 클리어런스.
 const GROUND_CLEAR = 2.0;
 const ROOF_CLEAR = 2.0;
-// 프록시(adapter buildProxies)와 동일한 필지 여유(8%보다 살짝 넉넉히) — 관통 판정 보수화.
+// 프록시(adapter buildProxies)와 동일한 필지 여유 — 관통 판정 보수화.
 const FOOT_PAD = 1.12;
 
-// ── 시가지 밀도 스캔(#30) ── 도로 폴리라인의 어느 구간이 "시가지"인지 지붕 히트로 판정한다.
+// ── 시가지 밀도 스캔 ── 도로 폴리라인의 어느 구간이 "시가지"인지 지붕 히트로 판정한다.
 // 최장 도로를 그대로 쓰면 capital 처럼 대로가 도성 밖까지 뻗은 규모에서 경로 후반이 빈 들판이 된다.
 export const DENSITY_DISC_RATIO = 0.12;   // 원판 반경 = R * 0.12
 const DENSITY_MIN_ROAD_LEN = 60;          // 이보다 짧은 도로는 트리밍할 구조가 없다(합성 픽스처 포함)
 const DENSITY_MIN_SPAN_RATIO = 0.22;      // 목표 스팬 길이(도로 길이 비율)
-const DENSITY_MIN_SPAN_ABS = 90;          // 목표 스팬 길이(절대, m) — 12s 패스가 기어가지 않게
+const DENSITY_MIN_SPAN_ABS = 90;          // 목표 스팬 길이(절대, m)
 const DENSITY_THRESHOLD_RATIO = 0.3;      // 시가지 판정 문턱 = max(1, 0.3 × 최대 히트)
 
-// flythrough 스침 고도 — 경로 국소 지붕 상단 이동평균 위 이 높이(브리프 3.0~4.0m).
+// 저공 스윕 고도 — 경로 국소 지붕 상단 이동평균 위 이 높이.
 const FLY_ROOF_CLEAR = 3.5;
+const FLY_LANE_CLEAR = 2.8;         // 골목 패스는 한 단계 더 낮게(스침)
 const FLY_FALLBACK_ROOF = 8;        // 지붕이 드문 구간의 기준 지붕고(초가 6.5 ~ 기와 9 사이)
 const FLY_ROOF_TRUST_HITS = 3;      // 원판 히트가 이 수 이상일 때만 지붕 추정을 온전히 신뢰
-// flythrough 하향각 — look.y = -ratio/sqrt(1+ratio²) 로 -0.175(-10.1°). 골목 통과 패스는 부감 패스와
-//   조건이 다르다: vFOV 40 반각 20° 이므로 하향 26.6° 면 프레임 피치가 -6.6°~-46.6° 가 되어 지평선·
-//   능선·역광·헤이즈가 전부 프레임 밖으로 나가고 RTS 평면도가 된다. -10.1° 면 지평선이 상단 25%
-//   지점에 들어온다. (1차 비전의 24~29° 는 부감 패스 조건의 오적용, 최종 비전 2026-07-31 정정.)
-const FLY_DROP_RATIO = 0.1777;
-// 밀집측 조준 — 노측 비행에서 비행축 시선은 프레임 절반을 노면으로 채운다. 좌우 밀도를 스캔해
-//   밀집면이 실제로 놓인 측방 거리를 찾고 그 거리를 겨누는 각을 이 밴드로 클램프한다. 종점 구간에서는
-//   축으로 복귀시켜 랜드마크가 정면 지평선에 걸리게 한다.
-const FLY_AIM_MIN = 20 * DEG;
-const FLY_AIM_MAX = 30 * DEG;
-const FLY_AIM_SEARCH_RATIO = 0.16;        // 측방 탐색 범위 = R * 0.16
-const FLY_AIM_RESOLVE_FROM = 0.6;         // u 이 지점부터 오프액시스를 0 으로 되감는다
-// 축 복귀는 **랜드마크 정렬 규모 전용**이다. 랜드마크가 없는 규모에서 축으로 복귀하면 시선이
-//   "마을 밖으로 나가는 도로 진행방향"을 겨눠 패스 종반이 빈 산기슭이 된다(village t0.8 프레임
-//   건축 0채). 정렬이 아니면 밀집측 조준을 끝까지 유지한다.
-const FLY_AIM_NO_RESOLVE = 1;
+// 저공 고도 기준선의 원판 반경(m) — **고정값**이다. 밀도 원판(R*0.12)을 쓰면 한양에서 60m 반경이
+//   서로 무관한 지붕을 평균해 카메라가 국소 지붕 위 8~10m 로 떠오르고(저공 표본 32%→22%),
+//   품질 계약이 쓰는 판정 원판(18m = 필지 한 겹)과도 정의가 어긋난다.
+const FLY_BASELINE_DISC = 18;
+// 저공 패스 하향각 — 2026-08-01 비전 FIX: 10° 는 지평선이 프레임 30~48% 에 걸리고 상단 35~55% 가
+//   빈 하늘이 됐다(fov 42 에서 하늘 27%). 15° 면 하늘 15%, 프레임 하단이 근경 지붕·담으로 채워져
+//   리딩라인이 생긴다. 26° 이상은 RTS 평면도가 되므로(#30) 이 값이 상·하한 사이의 기준이다.
+const FLY_DROP_DEG = 17;
 // 시선 원뿔 내 지붕 히트 — 카메라 위치의 밀도만 보면 "옆에는 집이 있는데 프레임은 비어 있는" 구간을
 //   놓친다. 수평 반각 안 5방향 × 4단 거리 = 20 표본.
 const FLY_CONE_SAMPLES = 5;
@@ -69,53 +79,128 @@ const FLY_CONE_RINGS = 4;
 const FLY_CONE_FAR_RATIO = 1.6;           // 원뿔 사거리 = aheadDist * 1.6
 const FLY_CONE_MIN_HITS = 3;              // 20 표본 중 이만큼은 건축이어야 프레임이 비지 않는다
 const FLY_TRIM_MIN_SPAN = 40;             // 원뿔 트리밍이 스팬을 이 아래로 줄이지는 않는다
-// 랜드마크 정렬 도로 선택 — 궁이 있는 규모(capital·hanyang)만. 궁·관아는 축선 위에 놓인 기념 건축이라
-//   그 축을 타는 대로(육조거리)가 존재하지만, 마을의 종가는 가로 축선 끝이 아니라 블록 안에 있다.
-const FLY_LANDMARK_BEARING = 25 * DEG;    // 종점 진행방향 대비 랜드마크 방위 허용
 const FRAME_ASPECT = 16 / 9;              // 수평 화각 파생용(프레임에 담기는 범위는 수평이 정한다)
-const FLY_LANDMARK_MIN_SPAN = 50;
-const FLY_TARGET_SPAN = 60;               // 길이 보너스 포화 — 프레임 내용이 길이를 이기게         // 랜드마크 정렬이어도 이보다 짧은 스팬은 쓰지 않는다
-//   (2m 프로브가 스팬을 쪼개므로 60 은 궁 축선 대로를 탈락시킨다. duration 하한 12s 가 있어 57m 도
-//   4.8m/s 접근 비트로 읽힌다.)
 
-// 안전 하한(지형·지붕) 램프 — 모든 패스가 공유하는 단일 방식. 그리드는 한 번만(패스 생성 시) 돈다.
-const FLOOR_GRID = 384;
-const FLOOR_RAMP_U = 0.06;   // 패스 길이의 6% (16s 패스에서 ~1s) 로 확산
+// ── 투어 시간축 ──
+// 호길이·시간 매핑 그리드. **프레임 간격보다 촘촘해야** 한다: 셀 안에서는 t 가 τ 에 선형이므로
+//   셀 평균 속도만 w 에 맞고, 셀이 프레임보다 크면 제어점 knot 에서 원곡선의 매개속도 불연속
+//   (centripetal CR 은 세그먼트별로 [0,1] 로 재매개되므로 인접 세그먼트 길이비만큼 |dP/dt| 가
+//   튄다)이 그대로 프레임 속도에 나타난다(실측 프레임당 ±12m/s).
+// 2026-08-01: 49152 로 올렸다. 한양처럼 투어가 길면(224s) 프레임당 τ 스텝이 셀 1.2개에 불과해
+//   제어점 knot 에서의 매개속도 불연속이 프레임 속도로 새어 나왔다(실측 프레임당 6.65m/s).
+//   셀을 프레임의 1/3 이하로 두면 knot 이 프레임 안에서 평균된다.
+const TOUR_GRID = 49152;
+// 리프트 이전 예비 매핑(방향 평활 커널 폭의 시간 기준 + 방향장 인덱싱). 방향장을 이 표로 읽으므로
+//   표가 거칠면 조각선형 kink 가 각속도의 프레임간 변화로 나타난다(실측 15.4°/s).
+const TOUR_GRID_A = 16384;
+const TOUR_SPEED_MIN = 8.0;         // 평균 대지속도 하한(m/s) — 소규모에서 기어가지 않게
+const TOUR_SPEED_MAX = 19;          // 상한 — 한양에서 항공기처럼 날지 않게(전이 피크 ×1.3)
+const TOUR_SPEED_K = 0.06;         // 평균 대지속도 = clamp(R * K)
+const TOUR_SEC_MIN = 62;
+const TOUR_SEC_MAX = 225;
 
-// landmark-orbit 수관 회피 — 브리프의 "캐노피 top + 2.5m" 는 하한이고, 실제 시선이 수관을 벗어나는
-// 정확 고도를 함께 푼다(수관이 랜드마크에 가까우면 top+2.5 만으로는 시선이 여전히 잎을 지난다).
-const ORBIT_CANOPY_CLEAR = 2.5;
-const ORBIT_CANOPY_MARGIN = 1.0;          // 정확 해에 얹는 여유(그리드 사이 보간 오차 흡수)
-const ORBIT_CANOPY_RAMP = 20 * DEG;       // 히트 구간 진입·이탈 램프 폭
-const ORBIT_GRID = 360;                   // 리프트 프로파일 그리드(결정론적)
-const ORBIT_LIFT_SCAN = 48;               // 정확 해 선형 스캔 단계
+// ── 시선(짐벌) ──
+// 시선은 목표**점** 곡선이 아니라 **방향장 + 프레이밍 거리**로 저작한다. 목표점을 보간하면 전이
+//   구간에서 보간된 목표점이 카메라에 접근하고(실측 6~16m) 그 특이점에서 각속도가 150°/s 로
+//   폭발한다. 방향으로 저작하면 그 특이점이 원리적으로 존재하지 않는다.
+const DIR_GRID = 4096;
+const DIR_SMOOTH_SEC = 0.85;        // 짐벌 관성 — 이 폭의 Hann 창으로 방향장을 시간축에서 평활
+// 스테이션 간 방향 변화 상한. 이를 넘으면 보간 스테이션을 끼워 넣는다(위치는 직선 보간, 방향은 slerp).
+//   단위벡터를 Catmull-Rom 으로 보간하면 인접 방향이 크게 벌어진 구간에서 곡선이 원점 근처를 지나
+//   정규화 후 엉뚱한 방향(실측: 거의 수직 하향 dy=-0.97)으로 튄다. 그 특이점을 원천에서 없앤다.
+const MAX_STATION_TURN = 50 * DEG;
+// 저작 단계 요 팬 상한(°/s)과 완화 반복. 전이 구간(골목 이탈 → 상승 리빌)의 요 스윙 총량은
+//   시드·규모마다 크게 달라 고정 배분 램프로는 잡히지 않는다(실측 34~133°/s). 상한을 넘는 구간의
+//   초과분만 이웃으로 넘겨 재분배한다 — 등속 선회·조준은 건드리지 않는다.
+const AUTHOR_YAW_RATE = 22 * DEG;
+const YAW_RELAX_PASSES = 120;
 
-// 역광 방위 — 카메라가 태양 반대편에 서면 피사체가 카메라와 태양 사이에 놓인다(rim 성립).
-const CRANE_AZ_OFFSETS = [14 * DEG, 8 * DEG, 0, -10 * DEG];
-const CRANE_DIST_RATIOS = [0.95, 0.78, 0.62, 0.48];
-// t∈[0.2,0.5] 이 22~26° 밴드에 들어오도록 제어점별 시선 하향각을 직접 authoring 한다(고도가 파생).
-const CRANE_PITCHES = [25.5 * DEG, 24 * DEG, 22.5 * DEG, 19 * DEG];
-// 후퇴 4점(시작 마당점 + 3 단계)의 방위 오프셋 — 순수 방사 후퇴가 아니라 살짝 흐르게.
-const PULLBACK_AZ_OFFSETS = [0, 6 * DEG, 2 * DEG, 0];
-const PULLBACK_DIST_RATIOS = [0.32, 0.58, 0.85];
-// 엔딩 컷 상단 하늘 비율 목표 → 최종 하향각. skyFrac = (1 - tan(p)/tan(fovV/2)) / 2.
-const PULLBACK_END_SKY = 0.375;
-const PULLBACK_MID_PITCH = 9 * DEG;
-// 완전 역광각이 스윕의 이 시간 지점(eased)에 오도록 orbit 시작 위상을 역산.
-const ORBIT_BACKLIT_AT = 0.4;
+// ── 안전 리프트 ──
+// 그리드는 **호길이 균일**로 깐다(t 균일은 세그먼트 길이차 때문에 간격이 0.2~7m 로 벌어져 집 한 채가
+//   격자 사이로 빠지고, 그 t 에서만 하드 안전망이 9m 를 들어올려 수직 텔레포트가 된다 — 실측).
+const LIFT_SPACING = 0.8;           // 목표 간격(m)
+const LIFT_GRID_MIN = 1024;
+const LIFT_GRID_MAX = 4096;
+const LIFT_RAMP_T = 0.02;           // 투어 길이의 2% 로 확산(100s 투어에서 2s)
+const CANOPY_CLEAR = 2.5;           // 수관 상단 위 기본 여유
+const CANOPY_MARGIN = 1.0;          // 정확 해에 얹는 여유(그리드 보간 오차 흡수)
+const CANOPY_SCAN = 48;             // 정확 해 선형 스캔 단계
+
+// ── 오빗 ──
+const ORBIT_ARC_MIN = 215 * DEG;
+const ORBIT_ARC_SPAN = 55 * DEG;    // 시드 변주 폭
+const ORBIT_BACKLIT_AT = 0.45;      // 완전 역광각이 오는 오빗 진행률
+const ORBIT_ENTRY_ARC = 46 * DEG;   // 접선 진입점 위상 여유
+const ORBIT_EXIT_ARC = 26 * DEG;
+// 제어점 간격. 시선을 방향장으로 저작하므로 오빗 중 랜드마크 추적 오차 ≈ step²/8 이다 —
+//   13° 면 0.4° 로 프레임 안에서 흔들림이 보이지 않는다(26° 는 1.5° = 30° 화각의 5%).
+const ORBIT_STEP = 13 * DEG;
+// 상승 리빌 최소 방위 이동 — 결말이 방사 직선(짧은 꼬리)이 되지 않게.
+// 2026-08-01: 100° 로 늘렸다. 상승 리빌은 "골목 진행 방향 → 마을을 돌아보는 방향" 으로 요를 180°
+//   가까이 돌려야 하는데, 짧은 방사 상승에 그 회전을 담으면 40~115°/s 가 된다(실측). 호를 늘려
+//   회전에 거리를 준다.
+const CLIMB_MIN_SWEEP = 100 * DEG;
+
+// ── 프레임 기하(2026-08-01 비전 FIX) ──
+// 부감 계열의 시선은 "어떤 점을 본다"가 아니라 **피사체를 화면 어디에 놓는가**로 저작한다.
+//   깊이 δ(피사체 하강각)에 있는 대상은 NDC y = -tan(δ - p)/tan(fv/2) 에 맺힌다. 그래서
+//     p = δ + atan(yTarget·tan(fv/2))  … 피사체를 yTarget 에 놓는 프레임 피치
+//     δ = p - atan(yTarget·tan(fv/2))  … 그 피치를 만드는 고도/거리 비
+//   위치는 (고도, 저작된 피치) → 거리로 파생한다. 거리를 고정하고 피치를 저작하면 피사체가 프레임
+//   밖으로 나가고(정점 -38° 에서 NDC +1.3), 고도를 파생시키면 한양에서 428m 까지 뜬다.
+const AERIAL_Y_TARGET = -0.08;      // 피사체 중심의 화면 세로 위치(NDC, 음수 = 중앙보다 아래)
+const CRANE_PITCH_TOP = 38 * DEG;   // 진입 정점(도성 위 부감) — 비전 지정
+const CRANE_WIDE_AT = 0.42;         // 이 진행률까지 정점 피치가 와이드 대역으로 눕는다
+const ORBIT_PITCH = 18 * DEG;       // 선회 — 피사체가 "얇은 수평 띠"로 읽히지 않는 대역
+const ORBIT_FOV = 34;               // 비전 지정(종전 30 → 랜드마크가 프레임을 덜 채웠다)
+// 선회 고도 하한 — 링 위 국소 민가 지붕 평균에서 이만큼은 띄운다. 낮고 가까운 위상 구간에서
+//   프레임 하단 30% 가 지붕 덩어리가 되던 결함(landmark-orbit-village)의 수치 계약.
+const ORBIT_ROOF_HEADROOM = 8;
+// 주 피사체 프레임 배치 — 하단 여백 하한과 세로 점유 하한(프레임 비율). 선회 반경이 이 조건에서
+//   파생된다. 품질 계약 T14 가 같은 수치를 독립적으로 다시 잰다.
+const SUBJECT_BOTTOM_MARGIN_MIN = 0.05;
+const SUBJECT_HEIGHT_MIN_FRAC = 0.12;
+const REVEAL_PITCH = 20 * DEG;      // 와이드 계열 -20°±3 (비전 지정)
+// 선회 피사체 유효 질량비 — 필지(plot)에는 곽담·문전 마당이 포함되어 실제로 눈에 읽히는 건축 덩어리는
+//   그보다 작다. 적합 조건을 plot 으로 풀면 반경이 과대해져 궁이 화면 폭 1/4 로 작아진다(2차 비전).
+const ORBIT_SUBJECT_MASS = 0.72;
+// 주 피사체가 프레임 폭에서 차지할 목표 비율(품질 계약 T14 하한 0.30 위로 여유). 이 값에 닿을 때까지
+//   렌즈를 좁힌다(반경은 하단 여백 적합 조건이 잠그고 있어 더 줄일 수 없다).
+const ORBIT_WIDTH_TARGET = 0.36;
+// 와이드 프레임에서 능선(=안개 지평선)이 놓일 화면 세로 위치(NDC). 0.84 → 상단 8% 가 하늘·헤이즈.
+//   능선이 카메라보다 **위**에 오면 프레임 상단을 채워 top-down 지도 인상이 된다(마을 과교정).
+//   그래서 와이드 구간 고도에 "능선을 이 위치로 내려보내는" 하한을 건다.
+const WIDE_RIDGE_NDC = 0.84;
+// 저공 패스 화각 — 42° 는 근경 담·기와 덩어리의 접지선이 하단 밖으로 잘렸다(2차 비전: 마을 8장 중 6장).
+//   화각을 넓히면 같은 피치·고도에서 최전경 접지선이 프레임 안으로 들어오고 전경 와이프도 살아난다.
+const FLY_FOV = 56;
+// 저공 코스가 "필지 띠 안쪽"이어야 한다 — 스팬 표본에서 건물 볼륨이 이 거리 안에 있는 비율(전경 와이프).
+const HUG_R = 15;
+
+// ── 축(스윕·골목) 선택 ──
+const AXIS_CANDIDATES = 12;         // 프로파일링할 도로 후보 상한(비용 상한, 결정론적 정렬)
+const AXIS_MIN_LEN = 44;
+const AXIS_TARGET_LEN = 170;        // 길이 보너스 포화 — 프레임 내용이 길이를 이기게
+const AXIS_SIDE_OFFSETS = [0, 14 * DEG, -14 * DEG, 24 * DEG, -24 * DEG];
+// 프레임 안 무특징 지면 — 지면 표본이 건축에서 이 거리보다 멀면 "특징 없음"으로 본다. 저공 코스
+//   채점에 이 비율을 넣는다(2026-08-01 비전: 프레임 60% 가 특징 없는 지면이던 구간이 있었다).
+const BARE_R = 12;
+// 하드 컷은 두지 않는다 — 후보를 걸러내면 한양에서 365m 소로(밀집·저공 유지)가 탈락하고 99m 중로가
+//   뽑혀 저공 표본이 32%→21% 로 떨어졌다. 곱셈 감점만으로 선택을 기울인다.
+const BARE_PENALTY_POW = 1.5;
 
 // 필지 유형별 지붕 상단 높이 추정(m). adapter buildProxies 의 H 와 동일 축척.
 const parcelRoofH = (p) => (p.hero ? 14 : (p.kind === 'giwa' ? 9 : 6.5));
 const facingY = (dir) => (dir ? Math.atan2(dir.x, dir.z) : 0);
 
-// ── 장애물(건물 볼륨) 모델 ── 필지·궁·절을 회전 바운딩박스(OBB) + 지붕 상단 y 로. 드론 패스 생성과
+// ── 장애물(건물 볼륨) ── 필지·궁·절을 회전 바운딩박스(OBB) + 지붕 상단 y 로. 드론 경로 생성과
 //    검증이 이 단일 정의를 공유(계약면). world 매핑은 parcelMatrix/buildProxies 규약과 정합:
 //    (wx-cx, wz-cz) = (lx·cos + lz·sin, -lx·sin + lz·cos).
 export function buildObstacles(plan, heightAt) {
   const H = typeof heightAt === 'function' ? heightAt
     : (plan && plan.site && plan.site.heightAt) || (() => 0);
   const obs = [];
-  // tag: 'parcel' | 'palace' | 'temple' — flythrough 고도 기준선은 기념 건축(궁·절)을 제외한다.
+  // tag: 'parcel' | 'palace' | 'temple' — 저공 고도 기준선은 기념 건축(궁·절)을 제외한다.
   //   포함하면 궁 접근 구간에서 이동평균이 +18m 지붕을 물어 카메라가 민가 위 8m 로 떠오른다.
   const add = (cx, cz, bw, bd, rotY, top, tag) => {
     obs.push({
@@ -144,6 +229,20 @@ export function buildObstacles(plan, heightAt) {
   return obs;
 }
 
+// (x,z) 에서 가장 가까운 건물 볼륨까지의 수평 거리(안이면 0). 프레임 안 "무특징 지면" 판정의 단일
+//   정의다 — 원판 히트 수로 대신하면 집에서 8m 떨어진 노면이 전부 무특징으로 잡힌다.
+export function obstacleDistance(obs, x, z) {
+  let best = Infinity;
+  for (const o of obs) {
+    const dx = x - o.cx, dz = z - o.cz;
+    const lx = Math.abs(dx * o.cos - dz * o.sin) - o.hw;
+    const lz = Math.abs(dx * o.sin + dz * o.cos) - o.hd;
+    const d = (lx <= 0 && lz <= 0) ? 0 : Math.hypot(Math.max(0, lx), Math.max(0, lz));
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 // (x,z) 위에 있는 건물의 최고 지붕 상단 y(없으면 null).
 export function roofTopAt(obs, x, z) {
   let top = -Infinity;
@@ -158,8 +257,8 @@ export function roofTopAt(obs, x, z) {
 // ── 수관(보호수) 볼륨 ── plan.features.guardianTrees 만이 계획 단계에 존재하는 유일한 수목 소스다.
 //   마당 과실수(gardens.js yardTreeAnchors)는 렌더 시점에 tree-rng 로 결정되므로 plan 에 없다 —
 //   외부에서 그 앵커를 얻은 호출자는 createDronePaths({ canopies }) 로 같은 형식으로 덧붙일 수 있다.
-//   형상은 gardens.js 의 우산형 수관과 정합: 전고 h = 14*scale(guardianAnchors.h), 중심 h*0.72,
-//   수평 반경 gp.radius, 수직 반경 h*0.26 인 편평 타원체(느티나무 수관은 y 로 0.6 눌려 있다).
+//   형상은 gardens.js 의 우산형 수관과 정합: 전고 h = 14*scale, 중심 h*0.72, 수평 반경 radius,
+//   수직 반경 h*0.26 인 편평 타원체.
 export function buildCanopies(plan, heightAt) {
   const H = typeof heightAt === 'function' ? heightAt
     : (plan && plan.site && plan.site.heightAt) || (() => 0);
@@ -207,7 +306,7 @@ function polyLen(pts) {
   for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
   return L;
 }
-// 주 도로 선택(대로 우선, 길이 가중). flythrough·초기 스폰 공용.
+// 주 도로 선택(대로 우선, 길이 가중). 도보 자동산책과 공유하는 폴백 규칙.
 export function mainRoad(plan) {
   const roads = plan.roads || [];
   let best = null, bestScore = -1;
@@ -236,9 +335,24 @@ function polyAt(pts, cum, s) {
   const f = (t - cum[i - 1]) / seg;
   return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
 }
+// 스팬 밖으로도 접선 방향으로 외삽하는 지점(전방 조준점 산출용).
+function polyAtExt(pts, cum, s) {
+  const total = cum[cum.length - 1] || 1;
+  if (s >= 0 && s <= total) return polyAt(pts, cum, s);
+  if (s > total) {
+    const a = polyAt(pts, cum, Math.max(0, total - 4)), b = pts[pts.length - 1];
+    const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const k = s - total;
+    return { x: b.x + (b.x - a.x) / l * k, z: b.z + (b.z - a.z) / l * k };
+  }
+  const a = pts[0], b = polyAt(pts, cum, Math.min(total, 4));
+  const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const k = -s;
+  return { x: a.x + (a.x - b.x) / l * k, z: a.z + (a.z - b.z) / l * k };
+}
 
-// ── 시가지 밀도 스팬(#30) ── 폴리라인을 따라 밀도를 스캔하고 문턱을 넘는 **연속 최장 구간**만 남긴다.
-//   드론 flythrough 와 도보 자동산책이 이 단일 정의를 공유한다(둘 다 밀도 0 구간을 지나지 않는다).
+// ── 시가지 밀도 스팬 ── 폴리라인을 따라 밀도를 스캔하고 문턱을 넘는 **연속 최장 구간**만 남긴다.
+//   드론 저공 패스와 도보 자동산책이 이 단일 정의를 공유한다(둘 다 밀도 0 구간을 지나지 않는다).
 //   짧은 도로(합성 픽스처·좁은 골목)는 트리밍할 구조가 없으므로 원본을 그대로 돌려준다.
 export function denseRoadSpan(pts, obs, R) {
   const empty = { pts, trimmed: false, total: pts.length > 1 ? polyLen(pts) : 0, span: null };
@@ -247,9 +361,9 @@ export function denseRoadSpan(pts, obs, R) {
   if (total < DENSITY_MIN_ROAD_LEN) return empty;
   const cum = polyCum(pts);
   const radius = R * DENSITY_DISC_RATIO;
-  // 프로브 간격이 넓으면(R*0.02 = capital 5.6m) 시가지 사이의 짧은 빈 구멍이 프로브 사이로 빠져
-  //   "연속 밀집 구간" 안에 들어온다. 1m 간격으로 스캔한다.
-  const n = Math.min(600, Math.max(16, Math.round(total)));   // ~1m 간격
+  // 프로브 간격이 넓으면 시가지 사이의 짧은 빈 구멍이 프로브 사이로 빠져 "연속 밀집 구간" 안에
+  //   들어온다. 1m 간격으로 스캔한다.
+  const n = Math.min(600, Math.max(16, Math.round(total)));
   const hits = new Array(n + 1);
   let maxHits = 0;
   for (let i = 0; i <= n; i++) {
@@ -267,8 +381,8 @@ export function denseRoadSpan(pts, obs, R) {
     } else runA = -1;
   }
   if (bestA < 0) return empty;
-  // 코어(문턱 이상)만 남기면 조밀한 시드에서 스팬이 40m 로 짧아져 패스가 기어간다(duration 하한 12s).
-  // 목표 길이까지 **밀도가 0 이 아닌 동안만** 바깥으로 넓힌다 — 빈 들판은 어떤 경우에도 들이지 않는다.
+  // 코어(문턱 이상)만 남기면 조밀한 시드에서 스팬이 40m 로 짧아진다. 목표 길이까지 **밀도가 0 이
+  // 아닌 동안만** 바깥으로 넓힌다 — 빈 들판은 어떤 경우에도 들이지 않는다.
   const targetSpan = Math.min(total, Math.max(total * DENSITY_MIN_SPAN_RATIO, DENSITY_MIN_SPAN_ABS));
   const probeStep = total / n;
   let a = bestA, b = bestB;
@@ -276,16 +390,14 @@ export function denseRoadSpan(pts, obs, R) {
     const canA = a > 0 && hits[a - 1] > 0;
     const canB = b < n && hits[b + 1] > 0;
     if (!canA && !canB) break;
-    // 더 조밀한 쪽으로 먼저 넓힌다.
     if (canB && (!canA || hits[b + 1] >= hits[a - 1])) b++;
     else a--;
   }
   // 끝점은 **자격을 통과한 프로브 위치 그대로** 둔다. 반 스텝 밖으로 늘리면 그 반 스텝이 밀도 0
-  //   주머니에 떨어져 패스 꼬리가 빈 들판을 지난다(village/2026 에서 마지막 11% 가 그랬다).
+  //   주머니에 떨어져 경로 꼬리가 빈 들판을 지난다.
   const s0 = Math.max(0, (a / n) * total);
   const s1 = Math.min(total, (b / n) * total);
   if (s1 - s0 >= total - 1e-6) return empty;
-  // 부분 폴리라인 추출 — 원래 정점을 보존하고 양 끝만 보간(형상 왜곡 없음).
   const out = [polyAt(pts, cum, s0)];
   for (let i = 0; i < pts.length; i++) {
     if (cum[i] > s0 + 1e-6 && cum[i] < s1 - 1e-6) out.push({ x: pts[i].x, z: pts[i].z });
@@ -293,100 +405,6 @@ export function denseRoadSpan(pts, obs, R) {
   out.push(polyAt(pts, cum, s1));
   if (out.length < 2) return empty;
   return { pts: out, trimmed: true, total, span: [s0, s1] };
-}
-
-// 폴리라인의 어느 끝점을 종점으로 두면 랜드마크가 진행방향 앞쪽에 오는가.
-//   → { pts (종점이 마지막이 되도록 정렬), bearing (진행방향 대비 랜드마크 방위, rad), dist }
-function orientTowardLandmark(pts, L) {
-  const A = pts[0], B = pts[pts.length - 1];
-  const rel = (P, other) => {
-    const travel = Math.atan2(P.x - other.x, P.z - other.z);
-    const toL = Math.atan2(L.x - P.x, L.z - P.z);
-    const d = toL - travel;
-    return Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
-  };
-  const rA = rel(A, B), rB = rel(B, A);
-  // A 가 더 잘 겨누면 A 를 마지막으로 — 즉 뒤집는다.
-  const useA = rA < rB;
-  const end = useA ? A : B;
-  return {
-    pts: useA ? pts.slice().reverse() : pts.slice(),
-    bearing: useA ? rA : rB,
-    dist: Math.hypot(L.x - end.x, L.z - end.z),
-  };
-}
-
-// ── flythrough 도로 선택 ── mainRoad(길이×등급)는 "가장 긴 길"을 주지만 종점이 랜드마크를 겨누는지는
-//   보지 않는다. capital/7 의 최장 대로는 궁을 진행방향 77° 밖에 두어(hFOV 반각 33°) 어떤 스팬 연장으로도
-//   문루·궁 지붕이 프레임에 들어오지 않는다. 그래서 궁이 있는 규모에서는 **밀도 스팬 종점이 랜드마크를
-//   겨누는 도로**를 먼저 찾고, 없으면 mainRoad 로 폴백한다(작은 규모는 항상 폴백).
-//   반환: { pts, road, landmarkAligned, bearing, dist } — pts 는 종점이 마지막인 밀도 스팬.
-export function flythroughRoad(plan, obs, R, landmark, coneOpts) {
-  const scoreOf = (pts) => {
-    const len = polyLen(pts);
-    if (len < FLY_LANDMARK_MIN_SPAN) return null;
-    const prof = spanConeProfile(pts, obs, coneOpts);
-    // 스팬 어딘가에서 프레임이 비는 도로는 탈락(패스 종반이 빈 산기슭이 되는 결함의 원인).
-    if (prof.min < FLY_CONE_MIN_HITS) return null;
-    // 길이 보너스는 일찍 포화시킨다 — 긴 도로가 프레임 내용을 이기지 못하게.
-    return { score: prof.mean * Math.min(1, len / FLY_TARGET_SPAN), len, prof };
-  };
-  const candidates = [];
-  for (const r of (plan.roads || [])) {
-    if (!r.pts || r.pts.length < 2) continue;
-    const span = denseRoadSpan(r.pts, obs, R).pts;
-    const aligned = landmark && plan.features && plan.features.palace
-      ? orientTowardLandmark(span, landmark) : null;
-    const pts = aligned && aligned.bearing <= FLY_LANDMARK_BEARING ? aligned.pts : span;
-    const scored = scoreOf(pts);
-    if (!scored) continue;
-    candidates.push({
-      ...scored, pts, road: r,
-      landmarkAligned: !!(aligned && aligned.bearing <= FLY_LANDMARK_BEARING),
-      bearing: aligned ? aligned.bearing : null,
-      dist: aligned ? aligned.dist : null,
-    });
-  }
-  // 궁 축선 정렬 후보가 있으면 그 안에서 고른다(문루→정전 축선이 이 패스의 결말이다).
-  const aligned = candidates.filter((c) => c.landmarkAligned);
-  const pool = aligned.length ? aligned : candidates;
-  let best = null;
-  for (const c of pool) if (!best || c.score > best.score) best = c;
-  if (best) return best;
-  // 원뿔 문턱을 넘는 후보가 없으면 종전 규칙(길이×등급)으로 폴백한다.
-  const road = mainRoad(plan);
-  if (!road) return null;
-  return {
-    pts: denseRoadSpan(road.pts, obs, R).pts, road, landmarkAligned: false,
-    bearing: null, dist: null, prof: null,
-  };
-}
-
-// ── 프레임 조준 ── 후보 조준각을 **시선 원뿔 안의 지붕 히트**로 평가한다. 한 점의 밀도가 아니라
-//   프레임에 실제로 담기는 건축량이 구도를 정하므로, 척도와 목적이 일치한다. 0(비행축)도 후보다:
-//   좌우가 고른 가로(궁 축선)에서는 오프액시스가 오히려 밀집면을 프레임 중앙에서 밀어낸다.
-export function frameAim({ posAt, lead, obs, hHalf, far, resolveFrom }) {
-  const candidates = [0];
-  for (const mag of [FLY_AIM_MIN, (FLY_AIM_MIN + FLY_AIM_MAX) / 2, FLY_AIM_MAX]) candidates.push(mag, -mag);
-  const scores = candidates.map(() => 0);
-  const N = 40;
-  for (let k = 0; k < N; k++) {
-    const u = k / (N - 1);
-    // 오프액시스가 되감기는 구간은 가중을 낮춘다(적용되지 않는 구간을 평가하지 않는다).
-    const w = resolveFrom >= 1
-      ? 1
-      : 1 - smootherstep(clamp01((u - resolveFrom) / (1 - resolveFrom)));
-    if (w <= 1e-3) continue;
-    const p = posAt(u);
-    const a = posAt(Math.max(0, u - lead)), b = posAt(Math.min(1, u + lead));
-    const base = Math.atan2(b.x - a.x, b.z - a.z);
-    for (let i = 0; i < candidates.length; i++) {
-      scores[i] += w * coneRoofHits(obs, p.x, p.z, base + candidates[i], hHalf, far).hits;
-    }
-  }
-  let bi = 0;
-  for (let i = 1; i < scores.length; i++) if (scores[i] > scores[bi]) bi = i;
-  return { signed: candidates[bi], angle: Math.abs(candidates[bi]), score: scores[bi], scores };
 }
 
 // ── 시선 원뿔 내 지붕 히트 ── 프레임에 건축이 담기는지의 척도. 카메라 위치 밀도(denseRoadSpan)와
@@ -405,7 +423,7 @@ export function coneRoofHits(obs, px, pz, az, hHalf, far) {
   return { hits, total };
 }
 
-// 스팬 폴리라인의 원뿔 프로파일 — 최선 조준각에서의 평균·최소 히트. 도로 선택의 척도다.
+// 스팬 폴리라인의 원뿔 프로파일 — 최선 조준각에서의 평균·최소 히트. 축 선택의 척도다.
 export function spanConeProfile(pts, obs, { hHalf, far }) {
   const cum = polyCum(pts);
   const total = cum[cum.length - 1] || 1;
@@ -415,9 +433,7 @@ export function spanConeProfile(pts, obs, { hHalf, far }) {
     return Math.atan2(b.x - a.x, b.z - a.z);
   };
   let best = null;
-  const candidates = [0];
-  for (const mag of [FLY_AIM_MIN, (FLY_AIM_MIN + FLY_AIM_MAX) / 2, FLY_AIM_MAX]) candidates.push(mag, -mag);
-  for (const aim of candidates) {
+  for (const aim of AXIS_SIDE_OFFSETS) {
     let sum = 0, min = Infinity;
     for (let k = 0; k <= n; k++) {
       const s = (k / n) * total;
@@ -459,18 +475,110 @@ export function trimSpanByCone(pts, obs, { aimSigned, hHalf, far, minSpan }) {
 
 // 폴리라인을 호길이 등간격 n점으로 재샘플(제어점 등속화).
 function resample(pts, n) {
-  const cum = [0];
-  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+  const cum = polyCum(pts);
   const total = cum[cum.length - 1] || 1;
   const out = [];
-  for (let k = 0; k < n; k++) {
-    const s = (k / (n - 1)) * total;
-    let i = 1; while (i < cum.length && cum[i] < s) i++;
-    const a = pts[i - 1], b = pts[Math.min(i, pts.length - 1)];
-    const seg = (cum[Math.min(i, cum.length - 1)] - cum[i - 1]) || 1;
-    const f = (s - cum[i - 1]) / seg;
-    out.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f });
+  for (let k = 0; k < n; k++) out.push(polyAt(pts, cum, (k / (n - 1)) * total));
+  return out;
+}
+
+// ── 결정론 로컬 rng ── 전역 Math.random 을 건드리지 않는다(마을 시드창 규약: 생성 파이프라인이
+//   Math.random 을 시드 스트림으로 바꿔 끼운 창 안에서 이 함수가 호출될 수 있다).
+function tourRng(seed) {
+  let s = ((seed >>> 0) ^ 0x9e3779b9) >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// 닫힌 균일 Catmull-Rom 스칼라 보간(C¹) — fov·속도 가중을 제어점에 authoring 하고 곡선 파라미터
+//   t 로 읽는다. 위치·시선 곡선과 **같은 인덱스 규약**(t*N = 제어점 인덱스)이라 정렬이 어긋나지 않는다.
+function closedScalarAt(values, t) {
+  const n = values.length;
+  const p = (((t % 1) + 1) % 1) * n;
+  const i = Math.floor(p), w = p - i;
+  const at = (k) => values[((k % n) + n) % n];
+  const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+  const a = 2 * p1;
+  const b = p2 - p0;
+  const c = 2 * p0 - 5 * p1 + 4 * p2 - p3;
+  const d = -p0 + 3 * p1 - 3 * p2 + p3;
+  return 0.5 * (a + b * w + c * w * w + d * w * w * w);
+}
+
+// 주기 그리드 확산 — raw 요구량(≥0)을 smootherstep 창으로 퍼뜨린다. 클램프 계단을 만들지 않으면서
+//   피크에서는 요구량 전부가 적용된다(항상 하한 이상).
+function spreadPeriodic(raw, halfWidth) {
+  const n = raw.length;
+  const out = new Float64Array(n);
+  const w = Math.max(1, Math.round(halfWidth));
+  for (let i = 0; i < n; i++) {
+    let best = 0;
+    for (let j = i - w; j <= i + w; j++) {
+      const k = ((j % n) + n) % n;
+      if (raw[k] <= 0) continue;
+      const v = raw[k] * smootherstep(1 - Math.abs(j - i) / (w + 1));
+      if (v > best) best = v;
+    }
+    out[i] = best;
   }
+  return out;
+}
+const gridAt = (grid, t) => {
+  const n = grid.length;
+  const p = (((t % 1) + 1) % 1) * n;
+  const i0 = Math.floor(p), i1 = (i0 + 1) % n;
+  return grid[i0] + (grid[i1] - grid[i0]) * (p - i0);
+};
+
+// ── 랜드마크 목록 ── 계획이 실제로 아는 좌표만 쓴다(렌더에서 되추론 금지). rank 는 "관광 소개
+//   영상이 무엇을 주인공으로 두는가"의 고정 순서이고, 동순위는 없다(결정론).
+function collectLandmarks(plan, site, H) {
+  const f = plan.features || {};
+  const C = site.center, R = site.R;
+  const out = [];
+  const push = (rank, kind, x, z, ext, h, baseY, foot) => {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+    out.push({
+      rank, kind, x, z, ext: Math.max(12, ext), h,
+      baseY: baseY != null ? baseY : H(x, z),
+      // 실제 바닥 치수(없으면 ext 정사각) — 프레임 배치 계약이 얇은 띠/하단 절단을 판정할 때 쓴다.
+      footW: foot ? foot[0] : Math.max(12, ext),
+      footD: foot ? foot[1] : Math.max(12, ext),
+    });
+  };
+  if (f.palace) {
+    push(9, 'palace', f.palace.x, f.palace.z,
+      Math.max(f.palace.plotW || 60, f.palace.plotD || 90), 18, null,
+      [f.palace.plotW || 60, f.palace.plotD || 90]);
+  }
+  if (f.temple) {
+    push(7, 'temple', f.temple.x, f.temple.z,
+      Math.max(f.temple.compoundWidth || 40, f.temple.compoundDepth || 40), 13, f.temple.baseY,
+      [f.temple.compoundWidth || 40, f.temple.compoundDepth || 40]);
+  }
+  const hero = (plan.parcels || []).find((p) => p.hero);
+  // 궁이 있으면 종가는 주인공이 아니지만(도성은 궁이 주인공) 부주제로는 유효하다.
+  if (hero) {
+    push(f.palace ? 6 : 8, 'hero', hero.center.x, hero.center.z,
+      Math.max(hero.plotW, hero.plotD) * 1.2, 14, hero.baseY, [hero.plotW, hero.plotD]);
+  }
+  if (f.govCore) push(5, 'gov', f.govCore.x, f.govCore.z, 42, 13);
+  const gates = (f.cityWall && f.cityWall.gates) || [];
+  for (const g of gates) {
+    // 성문은 문루 자체가 소재다. 남문(도시 주축)을 우선하도록 name 순서가 아니라 각도로 고정한다.
+    if (g.name && /south|남/.test(String(g.name))) push(4.5, 'gate', g.x, g.z, Math.max(24, g.width * 1.6), 16);
+  }
+  if (f.pavilion) push(3, 'pavilion', f.pavilion.x, f.pavilion.z, (f.pavilion.radius || 6) * 2.6, 7);
+  const tree = (f.guardianTrees || [])[0];
+  if (tree) push(2, 'tree', tree.x, tree.z, (tree.radius || 8) * 2, 14 * (tree.scale || 1));
+  // 마지막 폴백 — 집이 없는 구성(houses:0)에서도 투어는 성립해야 한다.
+  push(0, 'core', C.x, C.z, Math.max(40, R * 0.12), 12);
+  out.sort((a, b) => b.rank - a.rank);
   return out;
 }
 
@@ -478,319 +586,1021 @@ export function createDronePaths({
   site, plan, heightAt, seed = 0, sunAzimuth = null, canopies: extraCanopies = null,
 } = {}) {
   const H = typeof heightAt === 'function' ? heightAt : (site && site.heightAt) || (() => 0);
-  const R = site.R, C = site.center, Hmax = site.Hmax;
+  const R = site.R, C = site.center, Hmax = site.Hmax || R * 0.3;
   const obstacles = buildObstacles(plan, H);
-  const roofTop = (x, z) => roofTopAt(obstacles, x, z);
+  const parcelObstacles = obstacles.filter((o) => o.tag === 'parcel');
   const canopies = buildCanopies(plan, H).concat(extraCanopies || []);
-  // 역광 카메라 방위 — 태양 반대편에 서면 피사체가 카메라와 태양 사이에 놓인다. 태양 방위를 받지
-  // 못하면 종전의 남향(+z) 고정을 그대로 쓴다.
-  //   태양 방위를 모르면 backAz=0 → +z(남) 이며, 이는 종전 crane-in 착지 방위·pullback 후퇴 방위와
-  //   같은 축이다(경로 형상만 바뀌고 방위 규약은 유지).
+  const rng = tourRng((seed >>> 0) ^ 0x7a0d51);
+  const groundC = H(C.x, C.z);
+
+  // 역광 방위 — 카메라가 태양 반대편에 서면 피사체가 카메라와 태양 사이에 놓인다(rim 성립).
+  //   태양 방위를 모르면 backAz=0 → +z(남) 이라 종전 규약(남향 진입)과 같다.
   const sunKnown = Number.isFinite(sunAzimuth);
   const backAz = sunKnown ? Math.atan2(-Math.sin(sunAzimuth), -Math.cos(sunAzimuth)) : 0;
-  // 중심 기준 극좌표(방위 az, 수평거리 d) — az=0 이 +z(남)이라 종전 배치와 규약이 같다.
   const polar = (o, az, d) => ({ x: o.x + Math.sin(az) * d, z: o.z + Math.cos(az) * d });
+  const jitter = (deg) => (rng() * 2 - 1) * deg * DEG;
 
-  // 지형·지붕 위 안전 하한 — pos.y 는 항상 이 값 이상(클리어런스·관통 보장).
   const safeFloor = (x, z, clear) => {
     const g = H(x, z) + GROUND_CLEAR;
-    const rt = roofTop(x, z);
+    const rt = roofTopAt(obstacles, x, z);
     return rt != null ? Math.max(g, rt + (clear != null ? clear : ROOF_CLEAR)) : g;
   };
-  // 필지 안이면 지정 방향으로 밀어 열린 지점(마당·도로) 찾기. 저고도 시작점 안전 스폰.
-  const openPointNear = (x, z, dir) => {
-    if (roofTop(x, z) == null) return { x, z };
-    const d = dir || { x: 0, z: 1 };
-    const step = Math.max(2.5, R * 0.02);
-    let px = x, pz = z;
-    for (let i = 0; i < 48; i++) { px += d.x * step; pz += d.z * step; if (roofTop(px, pz) == null) break; }
-    return { x: px, z: pz };
+
+  // ── 소재 선택 ──
+  const marks = collectLandmarks(plan, site, H);
+  const primary = marks[0];
+  const secondary = marks.find((m) => m !== primary
+    && Math.hypot(m.x - primary.x, m.z - primary.z) > R * 0.12) || primary;
+  const aimOf = (m) => V(m.x, m.baseY + m.h * 0.5, m.z);
+
+  // 부감 피사체 — 시가지 매스 그 자체다. 종전에는 조준점을 중심 **너머**(0.30R)로 밀고 능선 어깨
+  //   높이까지 들어올렸는데, 그 두 가지가 하강각을 8° 로 눌러 상단 35~55% 를 빈 하늘로 만들었다
+  //   (2026-08-01 비전). 이제 조준점은 시가지 중심의 지면 근처이고, 하늘 비율은 프레임 피치가 정한다.
+  const fabricCentre = () => {
+    const ps = plan.parcels || [];
+    if (!ps.length) return { x: C.x, z: C.z };
+    let x = 0, z = 0;
+    for (const q of ps) { x += q.center.x; z += q.center.z; }
+    return { x: x / ps.length, z: z / ps.length };
+  };
+  const fabC = fabricCentre();
+  const coreSubject = V(fabC.x, H(fabC.x, fabC.z) + Math.max(6, Hmax * 0.07), fabC.z);
+
+  // ── 프레임 기하 파생 ──
+  const tanHalfV = (fov) => Math.tan(fov * 0.5 * DEG);
+  //   피사체를 yTarget 에 놓기 위해 필요한 하강각(고도/거리 비의 각).
+  const depressionFor = (pitch, fov) => Math.max(3 * DEG,
+    pitch - Math.atan(AERIAL_Y_TARGET * tanHalfV(fov)));
+  //   실제 기하(하강각)에서 피사체를 yTarget 에 놓는 프레임 피치.
+  const pitchForSubject = (dep, fov) => dep + Math.atan(AERIAL_Y_TARGET * tanHalfV(fov));
+  // 와이드 프레임 고도 하한 — 주산 능선이 프레임 상단을 채우지 않게 카메라를 능선 위로 올린다.
+  //   능선이 NDC 0.84 에 오려면 그 하강각이 (pitch - atan(0.84·tanHalf)) 여야 한다. 마을 규모는
+  //   능선(52m)이 카메라(54m)와 거의 같은 높이라 이 하한이 실제로 개입하고, 한양은 이미 능선보다
+  //   46m 높아 개입하지 않는다(2차 비전: "한양은 적정, 마을만 과교정").
+  const ridgeY = groundC + Hmax;
+  const ridgeDist = Math.max(R * 0.9, Math.abs(site.mountainZ || -R) + R * 0.4);
+  const wideYFloor = (pitch, fov) => {
+    const drop = pitch - Math.atan(WIDE_RIDGE_NDC * tanHalfV(fov));
+    return drop <= 0 ? -Infinity : ridgeY + ridgeDist * Math.tan(drop);
+  };
+  //   수평 방위 az(카메라 → 피사체) + 프레임 피치 → 단위 시선.
+  const dirFromPitch = (az, pitch) => V(
+    Math.sin(az) * Math.cos(pitch), -Math.sin(pitch), Math.cos(az) * Math.cos(pitch));
+  //   부감 스테이션: 피사체 주위 방위 az(피사체에서 카메라를 보는 방위)·고도 y·프레임 피치를 저작하고
+  //   **거리**를 파생한다. 시선은 항상 "피사체가 yTarget" 이라는 불변식으로 만든다.
+  //   고도는 **안전 하한 위로 미리 올려** 둔다: 나중에 리프트가 카메라를 들어올리면 저작된 프레임
+  //   피치가 무너지고(실측 정점 -38° → -49.6°), 피사체 배치 불변식을 지키려면 시선이 더 눕는다.
+  //   거리는 클램프된 고도에서 다시 파생하므로 3회 반복으로 수렴한다.
+  const aerialAt = (subject, az, yWanted, pitch, fov, radOverride) => {
+    let y = yWanted, d = radOverride || 12, p = polar(subject, az, d);
+    for (let it = 0; it < 3; it++) {
+      d = radOverride != null ? radOverride
+        : Math.max(12, (y - subject.y) / Math.tan(depressionFor(pitch, fov)));
+      p = polar(subject, az, d);
+      y = Math.max(yWanted, safeFloor(p.x, p.z) + 2);
+    }
+    return { pos: V(p.x, y, p.z), d };
+  };
+  const aimAtSubject = (pos, subject, fov) => {
+    const dx = subject.x - pos.x, dz = subject.z - pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const dep = Math.atan((pos.y - subject.y) / d);
+    return {
+      dir: dirFromPitch(Math.atan2(dx, dz), pitchForSubject(dep, fov)),
+      dist: Math.hypot(d, pos.y - subject.y),
+    };
+  };
+  const addAerial = (leg, subject, az, y, pitch, fov, w) => {
+    const st = aerialAt(subject, az, y, pitch, fov);
+    const look = aimAtSubject(st.pos, subject, fov);
+    addDir(leg, st.pos, look.dir, look.dist, fov, w, subject);
+    return st;
   };
 
-  // ── 랜드마크(궁 우선, 없으면 종가 hero 필지, 없으면 마을 중심) ──
-  const f = plan.features || {};
-  let L, lext, lH;
-  if (f.palace) { L = { x: f.palace.x, z: f.palace.z }; lext = Math.max(f.palace.plotW || 60, f.palace.plotD || 90); lH = 18; }
-  else {
-    const hp = (plan.parcels || []).find((p) => p.hero);
-    if (hp) { L = { x: hp.center.x, z: hp.center.z }; lext = Math.max(hp.plotW, hp.plotD) * 1.2; lH = 14; }
-    else { L = { x: C.x, z: C.z }; lext = 40; lH = 12; }
-  }
-  const lbaseY = H(L.x, L.z);
+  // 화각 파생 — 프레임에 무엇이 담기는지는 수평 화각이 정한다.
+  const hHalfOf = (fov) => Math.atan(Math.tan(fov * 0.5 * DEG) * FRAME_ASPECT);
+  const aheadDist = Math.max(16, R * 0.12);
+  const coneFar = aheadDist * FLY_CONE_FAR_RATIO;
+  const laneHHalf = hHalfOf(FLY_FOV);
+  const discR = R * DENSITY_DISC_RATIO;
 
-  // ── 공통 패스 팩토리 ──
-  function pass(name, kind, duration, cfg) {
-    const posCurve = cfg.pos ? new THREE.CatmullRomCurve3(cfg.pos, false, 'centripetal') : null;
-    const tgtCurve = Array.isArray(cfg.target) ? new THREE.CatmullRomCurve3(cfg.target, false, 'centripetal') : null;
-    const fixed = (cfg.target && cfg.target.isVector3) ? cfg.target : null;
-    const ease = cfg.ease || smootherstep;
-    const roofClear = cfg.roofClear != null ? cfg.roofClear : ROOF_CLEAR;
-    const lead = cfg.lead != null ? cfg.lead : 0.05;
-    const drop = cfg.drop != null ? cfg.drop : 4;
-    const aheadDist = cfg.aheadDist != null ? cfg.aheadDist : Math.max(16, R * 0.12);
-    const getPos = cfg.custom ? cfg.custom : (u) => posCurve.getPoint(u);
-    // 안전 하한(지형·지붕)을 샘플별 클램프로 걸면 필지 경계를 넘는 한 프레임에 고도가 계단으로 튀고
-    // 시선 각속도가 수십~150°/s 로 폭발한다(저작된 각속도는 3~25°/s 다). 그래서 "저작 곡선 위로
-    // 얼마나 들어올려야 하는가"를 u 그리드에서 미리 풀고 smootherstep 으로 확산시킨다. 델타를
-    // 확산시키므로 피크에서는 필요량 전부가, 주변에서는 그 일부만 적용된다 — 항상 하한 이상이다.
-    const floorLift = new Float64Array(FLOOR_GRID + 1);
-    {
-      const raw = new Float64Array(FLOOR_GRID + 1);
-      for (let i = 0; i <= FLOOR_GRID; i++) {
-        const p = getPos(i / FLOOR_GRID);
-        raw[i] = Math.max(0, safeFloor(p.x, p.z, roofClear) - p.y);
-      }
-      const w = Math.max(1, Math.round(FLOOR_RAMP_U * FLOOR_GRID));
-      for (let i = 0; i <= FLOOR_GRID; i++) {
-        let best = 0;
-        for (let j = Math.max(0, i - w); j <= Math.min(FLOOR_GRID, i + w); j++) {
-          if (raw[j] <= 0) continue;
-          const v = raw[j] * smootherstep(1 - Math.abs(i - j) / (w + 1));
-          if (v > best) best = v;
+  // ── 저공 축(스윕·골목) ──
+  // 후보를 길이×등급으로 12개까지 좁힌 뒤(비용 상한) 밀도 스팬 + 원뿔 프로파일로 채점한다.
+  // 저공 고도 기준선 — 기념 건축 제외(궁 접근 구간에서 카메라가 민가 위 8m 부감으로 떠오르지
+  //   않게). 관통 방지(safeFloor)는 여전히 전체 obstacles 를 쓴다.
+  const spanBaseline = (p) => {
+    const d = roofDensityAt(parcelObstacles, p.x, p.z, FLY_BASELINE_DISC);
+    const terrain = H(p.x, p.z) + FLY_FALLBACK_ROOF;
+    if (!d.hits) return terrain;
+    const w = Math.min(1, d.hits / FLY_ROOF_TRUST_HITS);
+    return d.meanTop * w + terrain * (1 - w);
+  };
+  // 저공 프레임의 지면 표본 — 평지 근사(hit 거리 = 고도/tan δ)로 충분하다. 채점용이라 정확한
+  //   레이캐스트(게이트가 하는 일)까지 갈 필요가 없다.
+  const spanBareFraction = (pts, clear) => {
+    const cum = polyCum(pts);
+    const total = cum[cum.length - 1] || 1;
+    const tv = tanHalfV(FLY_FOV), th = tv * FRAME_ASPECT;
+    let bare = 0, n = 0;
+    for (let k = 0; k <= 11; k++) {
+      const sArc = (k / 11) * total;
+      const p = polyAt(pts, cum, sArc);
+      const a = polyAt(pts, cum, Math.max(0, sArc - 4));
+      const b = polyAt(pts, cum, Math.min(total, sArc + 4));
+      const az = Math.atan2(b.x - a.x, b.z - a.z);
+      const ground = H(p.x, p.z);
+      const camY = spanBaseline(p) + clear;
+      const alt = Math.max(2, camY - ground);
+      // 프레임 **하단 절반**만 본다(2차 비전: 하단 45% 가 맨 지면이던 결함의 척도).
+      for (const ndcY of [-0.9, -0.65, -0.4, -0.15]) {
+        const dep = FLY_DROP_DEG * DEG - Math.atan(ndcY * tv);
+        if (dep <= 2 * DEG) continue;
+        const d = alt / Math.tan(dep);
+        if (!Number.isFinite(d) || d > R * 2) continue;
+        for (const ndcX of [-0.7, 0, 0.7]) {
+          const lat = d * ndcX * th;
+          const gx = p.x + Math.sin(az) * d + Math.cos(az) * lat;
+          const gz = p.z + Math.cos(az) * d - Math.sin(az) * lat;
+          n++;
+          if (obstacleDistance(obstacles, gx, gz) > BARE_R) bare++;
         }
-        floorLift[i] = best;
       }
     }
-    const liftAt = (u) => {
-      const g = clamp01(u) * FLOOR_GRID;
-      const i0 = Math.floor(g), i1 = Math.min(FLOOR_GRID, i0 + 1);
-      return floorLift[i0] + (floorLift[i1] - floorLift[i0]) * (g - i0);
+    return n ? bare / n : 1;
+  };
+  // 전경 와이프 — 스팬을 따라 건물 볼륨이 HUG_R 안에 상주하는 표본 비율. 필지 띠 밖(개천·수림 경계)을
+  //   타는 코스는 이 값이 낮다.
+  const spanHugFraction = (pts) => {
+    const cum = polyCum(pts);
+    const total = cum[cum.length - 1] || 1;
+    let hug = 0;
+    for (let k = 0; k <= 23; k++) {
+      const p = polyAt(pts, cum, (k / 23) * total);
+      if (obstacleDistance(obstacles, p.x, p.z) <= HUG_R) hug++;
+    }
+    return hug / 24;
+  };
+
+  const roadCandidates = () => {
+    const pool = (plan.roads || [])
+      .filter((r) => r.pts && r.pts.length >= 2)
+      .map((r) => ({
+        road: r,
+        raw: polyLen(r.pts),
+        w: r.level === 'daero' ? 3 : r.level === 'jungno' ? 2 : r.level === 'soro' ? 1.2 : 1,
+      }))
+      .sort((a, b) => (b.raw * b.w) - (a.raw * a.w))
+      .slice(0, AXIS_CANDIDATES);
+    const out = [];
+    for (const cand of pool) {
+      const span = denseRoadSpan(cand.road.pts, obstacles, R).pts;
+      const len = polyLen(span);
+      if (len < AXIS_MIN_LEN) continue;
+      const prof = spanConeProfile(span, obstacles, { hHalf: laneHHalf, far: coneFar });
+      const bare = spanBareFraction(span, FLY_ROOF_CLEAR);
+      const hug = spanHugFraction(span);
+      out.push({ pts: span, road: cand.road, level: cand.road.level || null, len, prof, bare, hug });
+    }
+    return out;
+  };
+  // 합성 축 — 도로가 없거나(외딴집·houses:0) 전부 짧은 구성에서도 저공 패스는 성립해야 한다.
+  const syntheticAxis = (az) => {
+    const m = fabC;
+    const half = Math.max(38, Math.min(R * 0.5, 200));
+    return [
+      { x: m.x - Math.sin(az) * half, z: m.z - Math.cos(az) * half },
+      { x: m.x, z: m.z },
+      { x: m.x + Math.sin(az) * half, z: m.z + Math.cos(az) * half },
+    ];
+  };
+  const axisAz = Math.atan2(C.x - site.entrance.x, C.z - site.entrance.z);
+  const candidates = roadCandidates();
+  // 채점에 무특징 지면 비율을 곱한다 — 프레임 절반 이상이 빈 지면인 코스는 "지붕 바다"가 아니다.
+  const barePenalty = (c) => Math.pow(1 - Math.min(0.95, c.bare), BARE_PENALTY_POW)
+    // 전경 밀착이 없는 코스(정착지 밖 개천·수림 경계)는 강하게 감점한다.
+    * Math.pow(Math.max(0.05, c.hug), 1.6);
+  // 연결성 — 스팬 시작이 들어오는 지점에서 멀면 그 전이가 저공 구간의 **시간**을 잡아먹는다(실측:
+  //   한양 저공 표본이 leg 의 20% 까지 떨어졌다). 내용이 주도권을 갖도록 약한 항으로 둔다.
+  const nearness = (c, from) => {
+    if (!from) return 1;
+    let best = Infinity;
+    for (const e of [c.pts[0], c.pts[c.pts.length - 1]]) {
+      best = Math.min(best, Math.hypot(e.x - from.x, e.z - from.z));
+    }
+    return 0.55 + 0.45 / (1 + best / (R * 0.5));
+  };
+  const sweepScore = (c, from) => c.prof.mean * Math.min(1, c.len / AXIS_TARGET_LEN)
+    * barePenalty(c) * nearness(c, from);
+  const trimAxis = (c) => trimSpanByCone(c.pts, obstacles, {
+    aimSigned: c.prof.aim, hHalf: laneHHalf, far: coneFar, minSpan: FLY_TRIM_MIN_SPAN,
+  });
+  // 스윕 축은 오빗 이탈점이 정해진 뒤 고른다(연결성 항이 그 점을 필요로 한다).
+  let sweepPick = null;
+  const pickSweep = (from) => {
+    for (const c of candidates) {
+      if (!sweepPick || sweepScore(c, from) > sweepScore(sweepPick, from)) sweepPick = c;
+    }
+    return sweepPick ? trimAxis(sweepPick) : syntheticAxis(axisAz);
+  };
+  // 골목 축은 스윕이 확정된 뒤에 고른다 — 프레임 내용·등급만 보면 스윕 종점 **뒤쪽**의 골목이
+  //   뽑혀 연결부가 헤어핀이 되고(실측 41°/s), 저공에서 카메라가 제자리 선회를 한다.
+  const pickLane = (from, exitHeading) => {
+    const turn = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    const score = (c) => {
+      const ends = [c.pts[0], c.pts[c.pts.length - 1]];
+      let best = 0;
+      for (const e of ends) {
+        const gap = Math.hypot(e.x - from.x, e.z - from.z) || 1;
+        const bearing = Math.atan2(e.x - from.x, e.z - from.z);
+        // 진행 방향 앞쪽에 있고 너무 멀지 않은 끝점을 가진 축을 선호한다.
+        const ahead = 1 - turn(bearing, exitHeading) / Math.PI;
+        const near = 1 / (1 + gap / (R * 0.45));
+        best = Math.max(best, 0.25 + 0.75 * ahead * (0.45 + 0.55 * near));
+      }
+      return c.prof.mean * Math.min(1, c.len / (AXIS_TARGET_LEN * 0.55))
+        * (c.level === 'soro' ? 1.25 : c.level === 'jungno' ? 1.1 : 0.8) * best * barePenalty(c);
     };
+    let pick = null;
+    for (const c of candidates) {
+      if (sweepPick && c.road === sweepPick.road) continue;
+      if (!pick || score(c) > score(pick)) pick = c;
+    }
+    return pick;
+  };
+
+  // 밀집측 조준 — 비행축 정면 시선은 프레임 절반을 노면으로 채운다. 실측 원뿔 히트로 부호·크기를 정한다.
+  // 저공 조준의 오프액시스 후보는 좁게 둔다 — 24° 로 틀면 노변 담·기와가 프레임 **중앙**으로 들어와
+  //   근거리에서 하단이 잘린다(2차 비전 2항). 담은 프레임 가장자리를 스치는 와이프여야 한다.
+  const AIM_OFFSETS = [0, 10 * DEG, -10 * DEG, 16 * DEG, -16 * DEG];
+  const bestSideOffset = (pts) => {
+    const cum = polyCum(pts);
+    const total = cum[cum.length - 1] || 1;
+    let best = 0, bestHits = -1;
+    for (const off of AIM_OFFSETS) {
+      let sum = 0;
+      for (let k = 0; k <= 24; k++) {
+        const s = (k / 24) * total;
+        const p = polyAt(pts, cum, s);
+        const a = polyAt(pts, cum, Math.max(0, s - 3));
+        const b = polyAt(pts, cum, Math.min(total, s + 3));
+        sum += coneRoofHits(obstacles, p.x, p.z, Math.atan2(b.x - a.x, b.z - a.z) + off,
+          laneHHalf, coneFar).hits;
+      }
+      if (sum > bestHits) { bestHits = sum; best = off; }
+    }
+    return best;
+  };
+  // 진행 방향 정렬 — 들어오는 쪽에 가까운 끝이 시작이 되게 뒤집는다(스플라인이 되돌아가는 훅 방지).
+  const orientFrom = (pts, from) => {
+    const a = pts[0], b = pts[pts.length - 1];
+    const da = Math.hypot(a.x - from.x, a.z - from.z);
+    const db = Math.hypot(b.x - from.x, b.z - from.z);
+    return db < da ? pts.slice().reverse() : pts.slice();
+  };
+
+  // ── 오빗 기하 ──
+  const orbitTarget = aimOf(primary);
+  const orbitDir = rng() < 0.5 ? 1 : -1;
+  const orbitArc = ORBIT_ARC_MIN + rng() * ORBIT_ARC_SPAN;
+  // 완전 역광각(카메라가 태양 반대편)이 오빗 진행 45% 지점에 오도록 시작 위상을 역산.
+  const orbitTh0 = (sunKnown ? backAz : 0) - orbitDir * orbitArc * ORBIT_BACKLIT_AT;
+  const orbitPt = (th, r) => ({
+    x: primary.x + (r != null ? r : orbitR) * Math.sin(th),
+    z: primary.z + (r != null ? r : orbitR) * Math.cos(th),
+  });
+  // ── 선회 반경·고도는 **프레임 적합 조건**에서 함께 푼다 ──
+  //   저작하는 것은 프레임 피치(-18°)와 피사체 배치이고, 고도는 반경에서 파생된다. 반경까지 크기
+  //   휴리스틱(footprint×1.5)으로 두면 궁처럼 깊은 곽(150m)이 147m 거리에서 프레임 세로를 다 먹고
+  //   **근단이 하단 밖으로 잘린다**(실측 하단여백 -38%). 그래서 근단 하강각이 프레임 하단에서 5%
+  //   안쪽에 들어올 때까지 반경을 키운다. 링 위 국소 지붕 헤드룸도 같은 루프에서 반영한다
+  //   (고도가 오르면 근단 하강각이 다시 커진다).
+  //   링을 따라 (a) 국소 민가 지붕 헤드룸 (b) **안전 하한**(지형·지붕 클리어런스, 나중에 floorLift 가
+  //   반드시 적용한다)을 함께 본다. (b)를 빼면 능선을 스치는 위상에서 리프트가 고도를 올려 근단
+  //   하강각이 커지고 프레임 하단이 다시 잘린다(실측 town/capital/hanyang 충족 64~83%).
+  const ringFloorAt = (r) => {
+    let need = -Infinity;
+    for (let i = 0; i < 24; i++) {
+      const p = orbitPt((i / 24) * Math.PI * 2, r);
+      const d = roofDensityAt(parcelObstacles, p.x, p.z, 14);
+      if (d.hits) need = Math.max(need, d.meanTop + ORBIT_ROOF_HEADROOM);
+      need = Math.max(need, safeFloor(p.x, p.z));
+    }
+    return need;
+  };
+  //   화각도 함께 푼다: 작은 랜드마크(초락 종가)는 34° 프레임에서 가로 26% 밖에 차지하지 못한다.
+  //   적합 조건(하단 여백)을 지키는 한에서 렌즈를 좁혀 피사체를 키운다.
+  const orbitSolveAt = (fovDeg) => {
+    const dep = depressionFor(ORBIT_PITCH, fovDeg);
+    const tv = tanHalfV(fovDeg);
+    // 최악은 대각 정점이다 — max(footW, footD)/2 로 잡으면 모델은 "들어온다"고 하고 실제 대각
+    //   근단은 프레임 밖으로 나간다(실측 하단여백 -31%). 다만 기준은 **건축 덩어리**(plot × 질량비)다:
+    //   plot 전체로 풀면 궁 반경이 229m 까지 커져 화면 폭 1/4 로 작아졌다(2차 비전 4항).
+    const halfSpan = Math.hypot(primary.footW, primary.footD) * 0.5 * ORBIT_SUBJECT_MASS * 1.02;
+    // 프레임 하단에서 5% 안쪽 / 상단에서 5% 안쪽에 해당하는 하강각.
+    const bottomLimit = ORBIT_PITCH + Math.atan(tv * (1 - 2 * SUBJECT_BOTTOM_MARGIN_MIN));
+    const r0 = 0.5 * primary.ext * 1.5 + Math.max(R * 0.07, 10);
+    let r = r0, y = 0;
+    for (let it = 0; it < 48; it++) {
+      const floor = ringFloorAt(r);
+      y = orbitTarget.y + r * Math.tan(dep);
+      if (Number.isFinite(floor)) y = Math.max(y, floor);
+      const near = Math.atan((y - primary.baseY) / Math.max(4, r - halfSpan));
+      const far = Math.atan((y - (primary.baseY + primary.h)) / (r + halfSpan));
+      // 세로 점유가 너무 작아지면(멀어지면) 더 키우지 않는다 — 얇은 띠는 반대쪽 결함이다.
+      if (near <= bottomLimit || (near - far) <= SUBJECT_HEIGHT_MIN_FRAC * fovDeg * DEG) break;
+      if (r > r0 * 3.2) break;
+      r *= 1.05;
+    }
+    // 가로 점유 = 피사체 덩어리 폭의 시각각 / 프레임 수평 화각.
+    // **좁은 면**을 기준으로 잡는다 — 품질 계약은 전 위상의 최소 가로 점유를 보고, 그 최소는
+    //   피사체가 짧은 변을 보이는 위상에서 나온다(대각으로 잡으면 계약과 다른 양을 최적화한다).
+    const massW = Math.min(primary.footW, primary.footD) * 0.5 * ORBIT_SUBJECT_MASS;
+    const widthFrac = Math.atan(massW / Math.max(8, r)) / Math.atan(tv * FRAME_ASPECT);
+    return { r, y, fov: fovDeg, widthFrac };
+  };
+  const orbitFrame = (() => {
+    let best = null;
+    for (const fovDeg of [ORBIT_FOV, 32, 30, 28, 26, 24, 22]) {
+      const cand = orbitSolveAt(fovDeg);
+      if (!best || cand.widthFrac > best.widthFrac) best = cand;
+      if (cand.widthFrac >= ORBIT_WIDTH_TARGET) return cand;
+    }
+    return best;
+  })();
+  const orbitR = orbitFrame.r;
+  const orbitY = orbitFrame.y;
+  const orbitFov = orbitFrame.fov;
+
+  // ── 제어점(스테이션) 저작 ── 각 점은 { pos, dir, dist, fov, w(속도가중), leg }.
+  //   dir 은 단위 시선 방향, dist 는 프레이밍 거리(lookAt = pos + dir*dist). 목표점을 직접 보간하지
+  //   않는 이유는 위 DIR_GRID 주석 참조.
+  const stations = [];
+  // 최소 프레이밍 거리 — 시선 거리가 짧으면 같은 속도에서 시차 회전(v/d)만으로 각속도가 커진다
+  //   (외딴집 R=30 에서 18m·9m/s = 29°/s). 방향만 의미가 있는 값이라 하한을 올려도 프레임은 같다.
+  const AIM_MIN = Math.max(24, R * 0.06);
+  const unit = (dx, dy, dz) => {
+    const m = Math.hypot(dx, dy, dz) || 1;
+    return V(dx / m, dy / m, dz / m);
+  };
+  const dirTo = (pos, target) => unit(target.x - pos.x, target.y - pos.y, target.z - pos.z);
+  const aimOfDir = (d) => ({ az: Math.atan2(d.x, d.z), pitch: Math.asin(Math.min(1, Math.max(-1, -d.y))) });
+  const aimTo = (pos, target) => aimOfDir(dirTo(pos, target));
+  //   시선의 1차 표현은 **(yaw, pitch)** 다. 단위벡터를 보간하면 요가 뒤집히는 전이(골목 이탈 →
+  //   상승)에서 두 방향의 대원이 천정·천저를 지나 카메라가 수직으로 고꾸라진다(실측 pitch 76°).
+  //   짐벌은 그런 회전을 하지 않는다: 요는 짧은 쪽으로 팬하고 피치는 따로 눕는다.
+  const addDir = (leg, pos, dir, dist, fov, w, subject) => {
+    stations.push({
+      leg, pos, dist: Math.max(AIM_MIN, dist), fov, w,
+      az: Math.atan2(dir.x, dir.z),
+      pitch: Math.asin(Math.min(1, Math.max(-1, -dir.y))),
+      // 프레이밍 피사체가 있는 스테이션은 안전 리프트가 확정된 뒤 시선을 다시 푼다(아래 refresh).
+      subject: subject || null,
+    });
+  };
+  const add = (leg, pos, target, fov, w) => {
+    const m = Math.hypot(target.x - pos.x, target.y - pos.y, target.z - pos.z) || 1;
+    addDir(leg, pos, dirTo(pos, target), m, fov, w);
+  };
+  // 짐벌 혼합 — 요는 짧은 쪽으로, 피치는 선형. 구면 보간(단위벡터 slerp)은 요가 뒤집힐 때
+  //   대원이 천저를 지나므로 카메라 회전 모델로 쓸 수 없다.
+  const shortest = (d) => Math.atan2(Math.sin(d), Math.cos(d));
+  const blendAim = (a, b, k) => ({
+    az: a.az + shortest(b.az - a.az) * k,
+    pitch: a.pitch + (b.pitch - a.pitch) * k,
+  });
+  const dirOfAim = (aim) => dirFromPitch(aim.az, aim.pitch);
+  const blend = (a, b, k) => V(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k);
+
+  // ① crane-in — 역광측 상공에서 시작해 사이트를 **감아 돌며 하강**하는 진입 나선. 오빗 접선
+  //   진입점에서 끝난다.
+  //   왜 방사 직선이 아닌가: 오빗 시작 위상은 역광 순간을 오빗 중반에 두려고 정해지므로 진입점은
+  //   접근 방위에서 100~155° 떨어진다. 두 점을 직선으로 이으면 카메라가 도성을 가로질러 북쪽 산
+  //   밖까지 날아가고, 시선은 그 사이에 180° 를 뒤집어야 해서 "거의 수직 하향" 구간이 생겼다(실측
+  //   dy=-0.96). 나선은 같은 방위 변화를 긴 호에 나눠 담아 회전을 3~8°/s 로 눕힌다.
+  //   고도·프레임 피치를 저작하고 **거리**를 파생한다. 접선 진입 두 점의 고도도 같은 규칙으로
+  //   ORBIT_PITCH 에서 파생해 진입 활강 전체가 한 피치 대역 안에서 눕는다.
+  const az0 = backAz + jitter(13);
+  const entryTh = orbitTh0 - orbitDir * ORBIT_ENTRY_ARC;
+  const entryFarR = orbitR * 1.55, entryNearR = orbitR * 1.18;
+  const entryFar = orbitPt(entryTh, entryFarR);
+  const entryNear = orbitPt(entryTh, entryNearR);
+  const entryFarY = Math.max(orbitY,
+    orbitTarget.y + entryFarR * Math.tan(depressionFor(ORBIT_PITCH, 33)));
+  const entryNearY = Math.max(orbitY,
+    orbitTarget.y + entryNearR * Math.tan(depressionFor(ORBIT_PITCH, orbitFov)));
+  {
+    const fovOf = (f) => 34 + 2 * Math.sin(Math.PI * f);
+    // 정점 반경은 저작 피치(-38°)에서 파생 — 이것이 "도성 위 부감" 진입 구도를 만든다.
+    // 진입 정점은 의도된 top-down 이라 능선을 프레임에 넣지 않는다. 다만 하강하며 와이드 대역으로
+    //   눕는 구간이 능선을 상단에 두려면 정점 고도부터 그 하한 위에 있어야 한다.
+    const wideFloor = wideYFloor(REVEAL_PITCH, 34);
+    const apex = aerialAt(coreSubject, az0,
+      Math.max(groundC + Math.max(Hmax * 0.95, R * 0.30), wideFloor), CRANE_PITCH_TOP, fovOf(0));
+    const yTop = apex.pos.y;
+    const radApex = apex.d;
+    const entryAzC = Math.atan2(entryFar.x - coreSubject.x, entryFar.z - coreSubject.z);
+    const sweep = Math.atan2(Math.sin(entryAzC - az0), Math.cos(entryAzC - az0));
+    const steps = Math.max(4, Math.round(Math.abs(sweep) / (30 * DEG)));
+    // 피치 프로파일: 정점(-38°) → f=0.3 에서 와이드(-20°) → 진입점에서 선회 피치(-18°).
+    //   **반경은 고도와 이 피치에서 파생**한다(반경을 따로 블렌딩하면 능선 하한이 고도를 올릴 때
+    //   피치가 -35° 까지 다시 서 버린다 — 실측 crane median 30.8°).
+    const cranePitchAt = (f) => CRANE_PITCH_TOP
+      + (REVEAL_PITCH - CRANE_PITCH_TOP) * smootherstep(Math.min(1, f / 0.28))
+      + (ORBIT_PITCH - REVEAL_PITCH) * smootherstep(Math.max(0, (f - 0.28) / 0.72));
+    // 파생 반경 상한 — 피치가 눕는 동안 반경이 진입 반경을 크게 넘어 부풀면 나선이 밖으로 나갔다가
+    //   되돌아오며 곡률이 조여져 요가 몰아친다(실측 132°/s).
+    const radCap = Math.max(radApex, entryFarR * 1.2 + Math.hypot(entryFar.x - coreSubject.x, entryFar.z - coreSubject.z) * 0.2);
+    for (let i = 0; i < steps; i++) {
+      const f = i / steps;
+      const e = smootherstep(f);
+      const fov = fovOf(f);
+      const pitch = cranePitchAt(f);
+      // 능선 하한은 와이드 구간에만 걸고 진입점 근처에서 놓아 준다(진입 활강은 선회 피치로 수렴한다).
+      const floorF = f < 0.6 ? wideFloor
+        : wideFloor + (entryFarY - wideFloor) * smootherstep((f - 0.6) / 0.4);
+      const yWant = Math.max(yTop + (entryFarY - yTop) * e, Math.min(yTop, floorF));
+      const derived = (yWant - coreSubject.y) / Math.tan(depressionFor(pitch, fov));
+      const st = aerialAt(coreSubject, az0 + sweep * f, yWant, pitch, fov,
+        derived > radCap ? radCap : null);
+      const pos = st.pos;
+      // 시선 피사체는 시가지 매스에서 랜드마크로 옮겨 가되, 배치 불변식(yTarget)은 유지된다.
+      const subject = blend(coreSubject, orbitTarget, e * 0.85);
+      const look = aimAtSubject(pos, subject, fov);
+      addDir(0, pos, look.dir, look.dist, fov, 1.32 - 0.26 * f, subject);
+    }
+    {
+      const pos = V(entryFar.x, Math.max(entryFarY, safeFloor(entryFar.x, entryFar.z) + 2), entryFar.z);
+      const framed = blend(coreSubject, orbitTarget, 0.92);
+      const look = aimAtSubject(pos, framed, 33);
+      addDir(0, pos, look.dir, look.dist, 33, 1.06, framed);
+    }
+    {
+      const pos = V(entryNear.x, Math.max(entryNearY, safeFloor(entryNear.x, entryNear.z) + 2), entryNear.z);
+      const look = aimAtSubject(pos, orbitTarget, orbitFov);
+      addDir(0, pos, look.dir, look.dist, orbitFov, 0.86, orbitTarget);
+    }
+  }
+
+  // ② landmark-orbit — 부분 선회. 시선은 고정 랜드마크, 반경 불변.
+  const orbitSteps = Math.max(7, Math.round(orbitArc / ORBIT_STEP));
+  for (let i = 0; i <= orbitSteps; i++) {
+    const th = orbitTh0 + orbitDir * orbitArc * (i / orbitSteps);
+    const p = orbitPt(th);
+    const pos = V(p.x, orbitY, p.z);
+    const look = aimAtSubject(pos, orbitTarget, orbitFov);
+    addDir(1, pos, look.dir, look.dist, orbitFov, 0.74, orbitTarget);
+  }
+  // 선회 **본체**의 양 끝 제어점을 참조로 잡아 둔다. 아래 세분 패스가 스테이션을 끼워 넣으면 인덱스가
+  //   밀리고, 끼워 넣어진 전이 스테이션은 앞 스테이션의 leg 태그(=1)를 물려받으므로 "leg===1 의 마지막"
+  //   으로는 선회 본체의 끝을 찾을 수 없다(실측: capital 선회 반경 판정이 이탈 접선까지 포함해 86~108m).
+  const orbitStFirst = stations[stations.length - orbitSteps - 1];
+  const orbitStLast = stations[stations.length - 1];
+
+
+  // ③ street-flythrough — 접선 이탈 → 지붕 바다 저공 스윕 → 골목/개울 저공 패스.
+  const exitTh = orbitTh0 + orbitDir * (orbitArc + ORBIT_EXIT_ARC);
+  const exitPt = orbitPt(exitTh, orbitR * 1.55);
+  const sweepOriented = orientFrom(pickSweep(exitPt), exitPt);
+  // 스팬 → 제어점 서술자. 국소 지붕 상단 이동평균 + 스침 여유, 전방 조준(밀집측 오프액시스 + 10° 하향).
+  const spanStations = (base, { leg, clear, fov, w, n }) => {
+    const pts = resample(base, n);
+    const cum = polyCum(pts);
+    const raw = pts.map(spanBaseline);
+    const offset = bestSideOffset(pts);
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      let sum = 0, cnt = 0;
+      for (let k = i - 1; k <= i + 1; k++) {
+        if (k < 0 || k >= raw.length) continue;
+        sum += raw[k]; cnt++;
+      }
+      const y = sum / cnt + clear;
+      // 전방 조준점은 한 점이 아니라 세 지점의 평균이다. 국소 접선을 그대로 겨누면 굽은 골목에서
+      //   시선이 노선 곡률을 그대로 따라가 요 각속도가 60°/s 를 넘는다(실측). 리드 구간을 길게
+      //   평균하면 같은 "가로를 따라가는" 인상이면서 회전이 완만해진다.
+      let ax = 0, az0s = 0;
+      for (const f of [0.75, 1.0, 1.5]) {
+        const q = polyAtExt(pts, cum, cum[i] + aheadDist * f);
+        ax += q.x / 3; az0s += q.z / 3;
+      }
+      const az = Math.atan2(ax - pts[i].x, az0s - pts[i].z) + offset;
+      out.push({
+        leg, fov, w,
+        pos: V(pts[i].x, y, pts[i].z),
+        target: V(pts[i].x + Math.sin(az) * aheadDist,
+          y - aheadDist * Math.tan(FLY_DROP_DEG * DEG),
+          pts[i].z + Math.cos(az) * aheadDist),
+      });
+    }
+    return out;
+  };
+  const pushDesc = (d) => add(d.leg, d.pos, d.target, d.fov, d.w);
+  const descDir = (d) => dirTo(d.pos, d.target);
+  const descDist = (d) => Math.hypot(d.target.x - d.pos.x, d.target.y - d.pos.y, d.target.z - d.pos.z);
+  const sweepSt = spanStations(sweepOriented, { leg: 2, clear: FLY_ROOF_CLEAR, fov: FLY_FOV, w: 0.66, n: 9 });
+  // 오빗 이탈 — 다음 소재(스윕 시작부)를 향해 접선으로 빠져나간다. 시선은 랜드마크에서 "지금 향해
+  //   가는 곳"으로 **구면 보간**한다(두 목표점의 중간점은 카메라 근처에 떨어질 수 있다 — 그 특이점이
+  //   45° 급하강 시선과 55°/s 회전의 원인이었다).
+  {
+    const pos = V(exitPt.x, orbitY + Math.max(Hmax * 0.10, R * 0.03), exitPt.z);
+    const aim = blendAim(aimTo(pos, orbitTarget), aimTo(pos, sweepSt[0].pos), 0.55);
+    addDir(2, pos, dirOfAim(aim),
+      Math.hypot(sweepSt[0].pos.x - pos.x, sweepSt[0].pos.z - pos.z), 34, 1.35);
+  }
+  // 스윕 진입 — 스팬 시작점 뒤 상공에서 내려앉는다(접선 정렬).
+  {
+    const s0 = sweepSt[0].pos, s1 = sweepSt[1].pos;
+    const l = Math.hypot(s1.x - s0.x, s1.z - s0.z) || 1;
+    const back = Math.max(24, aheadDist * 1.4);
+    add(2, V(s0.x - (s1.x - s0.x) / l * back, s0.y + Math.max(10, Hmax * 0.14), s0.z - (s1.z - s0.z) / l * back),
+      sweepSt[0].target, 38, 1.32);
+  }
+  for (const d of sweepSt) pushDesc(d);
+  const sweepExitHeading = (() => {
+    const a = sweepSt[sweepSt.length - 2].pos, b = sweepSt[sweepSt.length - 1].pos;
+    return Math.atan2(b.x - a.x, b.z - a.z);
+  })();
+  const lanePick = pickLane(sweepSt[sweepSt.length - 1].pos, sweepExitHeading);
+  const laneBase = lanePick ? trimAxis(lanePick) : syntheticAxis(axisAz + Math.PI / 2);
+  // 골목 축 방향 선택 — 진입(스윕 종점에서 오는 선회량)과 **이탈**(상승 리빌로 나가는 선회량)의
+  //   합이 작은 쪽으로 놓는다. 이탈만 무시하면 골목 끝에서 카메라가 뒤를 돌아보는 180° 요 플립이
+  //   생긴다(실측 172°/s). 상승 리빌은 역광측으로 나가므로 그 방위를 이탈 기준으로 쓴다.
+  const laneOriented = (() => {
+    const from = sweepSt[sweepSt.length - 1].pos;
+    const exitRef = polar(C, backAz, R * 0.5);
+    const turn = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    const score = (pts) => {
+      const a = pts[0], b = pts[1], y = pts[pts.length - 2], z = pts[pts.length - 1];
+      const entryHeading = Math.atan2(b.x - a.x, b.z - a.z);
+      const approach = Math.atan2(a.x - from.x, a.z - from.z);
+      const exitHeading = Math.atan2(z.x - y.x, z.z - y.z);
+      const onward = Math.atan2(exitRef.x - z.x, exitRef.z - z.z);
+      return turn(entryHeading, approach) + turn(exitHeading, onward);
+    };
+    const fwd = laneBase.slice(), rev = laneBase.slice().reverse();
+    return score(rev) < score(fwd) ? rev : fwd;
+  })();
+  const laneSt = spanStations(laneOriented, { leg: 2, clear: FLY_LANE_CLEAR, fov: FLY_FOV, w: 0.56, n: 8 });
+  // 스윕 → 골목 연결 — 한 번 살짝 들어올려 방향을 바꾼다(저공에서 급선회 대신 완만한 호).
+  //   두 점으로 나눠 방향 전환을 분산한다(한 점이면 그 인덱스 구간에서 시선이 몰아친다).
+  //   두 점을 직선 중점에 두면 스윕과 골목이 마주 볼 때 그 자리가 헤어핀이 된다. 대신 **진행
+  //   방향으로 한 번 지나갔다가 골목 뒤에서 되돌아 들어오는** 뱅크 선회로 놓고 속도도 낮춘다.
+  {
+    const a = sweepSt[sweepSt.length - 1], b = laneSt[0];
+    // 연결부 상승은 낮게 — 이 구간이 높으면 프레임이 특징 없는 지면으로 채워진다(2026-08-01 비전).
+    const rise = Math.max(4, Hmax * 0.055);
+    const da = aimOfDir(descDir(a)), db = aimOfDir(descDir(b));
+    const la = descDist(a), lb = descDist(b);
+    const gap = Math.max(20, Math.hypot(b.pos.x - a.pos.x, b.pos.z - a.pos.z));
+    const laneHeading = (() => {
+      const p = laneSt[0].pos, q = laneSt[1].pos;
+      return Math.atan2(q.x - p.x, q.z - p.z);
+    })();
+    const lead = Math.min(gap * 0.45, Math.max(24, R * 0.10));
+    const p1 = V(a.pos.x + Math.sin(sweepExitHeading) * lead, a.pos.y + rise * 0.75,
+      a.pos.z + Math.cos(sweepExitHeading) * lead);
+    const p2 = V(b.pos.x - Math.sin(laneHeading) * lead, b.pos.y + rise * 0.55,
+      b.pos.z - Math.cos(laneHeading) * lead);
+    addDir(2, p1, dirOfAim(blendAim(da, db, 0.3)), la + (lb - la) * 0.3, 40, 1.1);
+    addDir(2, p2, dirOfAim(blendAim(da, db, 0.75)), la + (lb - la) * 0.75, 41, 1.1);
+  }
+  // 상승호 방위를 먼저 확정한다(골목 꼬리 선회의 대상이 필요하다).
+  const laneEndPre = laneSt[laneSt.length - 1].pos;
+  const laneEndAzPre = Math.atan2(laneEndPre.x - coreSubject.x, laneEndPre.z - coreSubject.z);
+  const climbRawPre = Math.atan2(Math.sin(az0 - laneEndAzPre), Math.cos(az0 - laneEndAzPre));
+  const climbSweepPre = Math.abs(climbRawPre) >= CLIMB_MIN_SWEEP
+    ? climbRawPre : (climbRawPre >= 0 ? 1 : -1) * CLIMB_MIN_SWEEP;
+  // 선회 대상은 시가지 중심이 아니라 **상승호 중간점**이다. 저공 코스가 시가지 중심을 스치면(capital
+  //   에서 5~20m) 중심 방위가 몇 미터 사이에 180° 돌아 각속도가 133°/s 로 터진다(실측). 상승호 위의
+  //   점은 항상 0.35R 이상 떨어져 있어 방위가 잘 정의된다.
+  const preTurnTarget = (() => {
+    const rad = Math.max(R * 0.35, orbitR);
+    const p = polar(coreSubject, laneEndAzPre + climbSweepPre * 0.5, rad);
+    return V(p.x, groundC + Math.max(Hmax * 0.35, R * 0.10), p.z);
+  })();
+  // 골목 꼬리 네 점이 시선을 미리 마을 쪽으로 돌리기 시작한다. 상승 리빌에서 한꺼번에 돌리면 짧은
+  //   경로에 180° 가 몰려 각속도가 폭발하고(실측 115°/s), 두 점에만 담아도 7m 간격에 70° 가 들어가
+  //   39°/s 가 된다. 네 점에 가속하듯 배분한다.
+  const LANE_TAIL_TURN = [0.55, 0.36, 0.20, 0.08];
+  for (let i = 0; i < laneSt.length; i++) {
+    const d = laneSt[i];
+    const back = laneSt.length - 1 - i;
+    if (back >= LANE_TAIL_TURN.length) { pushDesc(d); continue; }
+    // **요만** 돌린다. 피치까지 섞으면 저공에서 마을 중심을 겨누는 각(≈2~9°)이 프레임을 눕혀
+    //   상단 하늘이 30% 로 열린다(실측). 저공의 프레임 피치는 -15° 그대로 유지한다.
+    const forward = aimOfDir(descDir(d));
+    const aim = {
+      az: blendAim(forward, aimTo(d.pos, preTurnTarget), LANE_TAIL_TURN[back]).az,
+      pitch: forward.pitch,
+    };
+    addDir(d.leg, d.pos, dirOfAim(aim), descDist(d), d.fov, d.w);
+  }
+
+  // ④ pullback-reveal — 저공에서 능선 위로 상승하며 전경 공개, 이음매(=①의 시작점)로 복귀.
+  //   방사 직선 상승이 아니라 마을을 감아 도는 상승호 — 올라가는 동안 앵글이 계속 바뀐다.
+  // 상승은 방사 직선이 아니라 마을을 감아 도는 호다(방위·최소 스윕은 위에서 확정).
+  const laneEnd = laneEndPre;
+  const laneEndAz = laneEndAzPre;
+  const climbSweep = climbSweepPre;
+  // 상승 스테이션도 부감 규칙을 따른다: 저작하는 것은 고도와 **와이드 프레임 피치**(-20°±3)이고
+  //   거리는 파생된다. 마지막 두 점만 이음매(정점 -38°) 쪽으로 피치를 섞어 방향 전환을 분산한다.
+  // 고도 프로파일을 앞쪽에서 더 올린다 — 피치를 눕히지 않고(반경은 피치에서 파생) 경로를 길게 만들어
+  //   요 회전에 시간을 준다. aim 램프는 골목 꼬리에서 이미 시작된 회전을 이어받는다.
+  const CLIMB = [
+    { k: 0.18, y: [0.45, 0.14], fov: 41, w: 0.98, pitch: 0.0, aim: 0.68 },
+    { k: 0.42, y: [0.60, 0.185], fov: 39, w: 1.05, pitch: 0.0, aim: 0.82 },
+    { k: 0.68, y: [0.74, 0.23], fov: 37, w: 1.12, pitch: 0.0, aim: 0.92 },
+    { k: 0.88, y: [0.86, 0.27], fov: 35, w: 1.16, pitch: 0.2, aim: 1.0 },
+    { k: 1.0, y: [0.95, 0.30], fov: 34, w: 1.2, pitch: 0.5, aim: 1.0 },
+  ];
+  // 시선은 골목 이탈 방향에서 부감 배치로 **구면 보간**한다(점 보간이 아니라 방향 보간이라 중간
+  //   조준점이 카메라 근처에 떨어지는 특이점이 없다).
+  const laneExitAim = { az: stations[stations.length - 1].az, pitch: stations[stations.length - 1].pitch };
+  for (const c of CLIMB) {
+    const pitch = REVEAL_PITCH + (CRANE_PITCH_TOP - REVEAL_PITCH) * c.pitch;
+    const yBase = groundC + Math.max(Hmax * c.y[0], R * c.y[1]);
+    // 상승 후반(와이드 프레임)은 능선 하한을 받는다. 전반은 아직 저공에서 올라오는 구간이라 제외.
+    // 상승 후반(와이드 프레임)은 **그 스테이션의 실제 피치**로 능선 하한을 받는다 — 대표 피치로 한 번만
+    //   잡으면 피치가 22~24° 인 표본에서 능선이 다시 프레임 상단에 붙는다(실측 밴드 2% → 9%).
+    //   진입 나선에는 같은 처방을 쓰지 않는다: 진입 후반은 선회 진입 활강이라 고도가 낮아야 하고,
+    //   거기에 하한을 걸면 투어 전체가 부풀어 저공 구간의 시간·코스 채점이 무너졌다(실측 커버리지 56%).
+    const y = c.k >= 0.5 ? Math.max(yBase, Math.min(yBase * 2.4, wideYFloor(pitch, c.fov))) : yBase;
+    // 반경은 선회 반경 아래로 내려가지 않는다(외딴집처럼 orbitR > R 인 규모에서 상승 시작점이 선회
+    //   원 안쪽에 놓이면 결말이 3초짜리 꼬리가 된다).
+    const radFloor = orbitR * (0.55 + 0.45 * c.k);
+    const derived = (y - coreSubject.y) / Math.tan(depressionFor(pitch, c.fov));
+    const st = aerialAt(coreSubject, laneEndAz + climbSweep * c.k, y, pitch, c.fov,
+      derived >= radFloor ? null : radFloor);
+    const pos = st.pos;
+    const look = aimAtSubject(pos, coreSubject, c.fov);
+    addDir(3, pos, dirOfAim(blendAim(laneExitAim, aimOfDir(look.dir), c.aim)), look.dist, c.fov, c.w,
+      c.aim >= 0.9 ? coreSubject : null);
+  }
+  // 마지막 제어점 다음은 닫힌 곡선이므로 ①의 첫 점으로 이어진다 — 그 구간이 이 leg 의 꼬리다.
+
+  // ── 방향 변화 상한 세분 ── 스테이션 간 방향차가 상한을 넘으면 그 사이를 나눈다. 위치는 직선 보간
+  //   (전이 구간에만 발동하므로 경로 형상은 사실상 그대로), 방향은 slerp, leg 태그는 앞 스테이션을
+  //   물려받아 구간 경계 인덱스를 흔들지 않는다.
+  {
+    const out = [];
+    for (let i = 0; i < stations.length; i++) {
+      const a = stations[i], b = stations[(i + 1) % stations.length];
+      out.push(a);
+      const turn = Math.max(Math.abs(shortest(b.az - a.az)), Math.abs(b.pitch - a.pitch));
+      const parts = Math.ceil(turn / MAX_STATION_TURN);
+      for (let k = 1; k < parts; k++) {
+        const f = k / parts;
+        const aim = blendAim(a, b, f);
+        out.push({
+          leg: a.leg,
+          subject: null,
+          pos: V(a.pos.x + (b.pos.x - a.pos.x) * f, a.pos.y + (b.pos.y - a.pos.y) * f,
+            a.pos.z + (b.pos.z - a.pos.z) * f),
+          az: aim.az,
+          pitch: aim.pitch,
+          dist: a.dist + (b.dist - a.dist) * f,
+          fov: a.fov + (b.fov - a.fov) * f,
+          w: a.w + (b.w - a.w) * f,
+        });
+      }
+    }
+    stations.length = 0;
+    for (const s of out) stations.push(s);
+  }
+
+  // ── 곡선 ──
+  const N = stations.length;
+  const posCurve = new THREE.CatmullRomCurve3(stations.map((s) => s.pos), true, 'centripetal');
+  // ── 시간축 A(예비) ── 리프트 이전 원곡선의 호길이·속도가중 매핑. 방향 평활 커널 폭을 **초 단위**로
+  //   잡기 위한 기준이며, 최종 시간축(B)은 리프트·안전망까지 반영해 다시 만든다.
+  const buildTimeAxis = (grid, posOf) => {
+    const arc = new Float64Array(grid + 1);
+    const tau = new Float64Array(grid + 1);
+    let prev = posOf(0);
+    for (let j = 1; j <= grid; j++) {
+      const p = posOf(j / grid);
+      const d = Math.hypot(p.x - prev.x, p.y - prev.y, p.z - prev.z);
+      arc[j] = arc[j - 1] + d;
+      tau[j] = tau[j - 1] + d / Math.max(0.25, closedScalarAt(weights, (j - 0.5) / grid));
+      prev = p;
+    }
+    const total = tau[grid] || 1;
+    for (let j = 0; j <= grid; j++) tau[j] /= total;
     return {
-      name, kind, duration,
-      sample(t01) {
-        const u = ease(clamp01(t01));
-        const pos = getPos(u);
-        pos.y += liftAt(u);
-        // 그리드 사이(호길이 ≲1m)에 대한 하드 안전망. 램프가 이미 거의 다 올라와 있어 계단이 아니다.
-        const fl = safeFloor(pos.x, pos.z, roofClear);
-        if (pos.y < fl) pos.y = fl;
-        let lookAt;
-        if (cfg.target === 'lookAhead') {
-          const a = getPos(Math.max(0, u - lead));
-          const b = getPos(Math.min(1, u + lead));
-          let dx = b.x - a.x, dz = b.z - a.z;
-          const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
-          // 진행방향 대비 요 오프액시스 — 정면 접선이면 기와골·용마루가 선으로만 보이고, 노측 비행에서는
-          // 프레임 절반이 노면이 된다. 부호·크기는 실측 밀집측(denseSideAim)이 정하고, 종점 구간에서는
-          // 0 으로 되감아 랜드마크가 정면 지평선에 오게 한다.
-          if (cfg.yawOffAt) {
-            const az = Math.atan2(dx, dz) + cfg.yawOffAt(u);
-            dx = Math.sin(az); dz = Math.cos(az);
-          }
-          lookAt = V(pos.x + dx * aheadDist, pos.y - drop, pos.z + dz * aheadDist);
-        } else if (fixed) lookAt = fixed.clone();
-        else lookAt = tgtCurve.getPoint(u);
-        const fov = cfg.fov1 != null ? cfg.fov + (cfg.fov1 - cfg.fov) * u : cfg.fov;
-        return { pos, lookAt, fov };
+      arcLength: arc[grid],
+      // τ → t (단조 증가 표의 역보간).
+      tOf: (u) => {
+        const x = clamp01(u);
+        let lo = 0, hi = grid;
+        while (hi - lo > 1) {
+          const mid = (lo + hi) >> 1;
+          if (tau[mid] <= x) lo = mid; else hi = mid;
+        }
+        const seg = (tau[hi] - tau[lo]) || 1;
+        return (lo + (x - tau[lo]) / seg) / grid;
+      },
+      // t → τ (구간 경계 시각·방향장 인덱싱).
+      tauOf: (t) => {
+        const g = clamp01(t) * grid;
+        const i0 = Math.floor(g), i1 = Math.min(grid, i0 + 1);
+        return tau[i0] + (tau[i1] - tau[i0]) * (g - i0);
       },
     };
+  };
+  // 속도 가중·화각은 리프트와 무관하므로 시간축보다 먼저 잡는다. 시선(요·피치·거리)만 리프트 확정
+  //   뒤에 다시 푼다(아래 재해결 블록).
+  const weights = stations.map((s) => s.w);
+  const fovs = stations.map((s) => s.fov);
+  const speed = Math.min(TOUR_SPEED_MAX, Math.max(TOUR_SPEED_MIN, R * TOUR_SPEED_K));
+  const axisA = buildTimeAxis(TOUR_GRID_A, (t) => posCurve.getPoint(t));
+  const durA = Math.min(TOUR_SEC_MAX, Math.max(TOUR_SEC_MIN, axisA.arcLength / speed));
+
+  // ── 안전 리프트(지형·지붕 → 수관 시선) ── **호길이 균일** 격자(τ_A)에서 요구량을 풀고 주기 확산.
+  const LIFT_GRID = Math.min(LIFT_GRID_MAX,
+    Math.max(LIFT_GRID_MIN, Math.round(axisA.arcLength / LIFT_SPACING)));
+  const liftT = new Float64Array(LIFT_GRID);      // 격자 셀 → 곡선 파라미터 t
+  const basePos = new Array(LIFT_GRID);
+  for (let i = 0; i < LIFT_GRID; i++) {
+    liftT[i] = axisA.tOf(i / LIFT_GRID);
+    basePos[i] = posCurve.getPoint(liftT[i]);
   }
-
-  // ① crane-in — 마을 밖 높은 곳에서 내려앉는 진입 크레인(히어로/타이틀).
-  //   방위: 태양을 알면 태양 반대편(피사체가 카메라와 태양 사이 = 역광)에서 반경만 좁히며 하강한다.
-  //     종전처럼 마을 위를 넘어가면 후반이 순광이 되고 통과 순간 시선각이 -68° 로 튄다.
-  //   고도: 절대 고도가 아니라 **제어점별 시선 하향각**을 authoring 하고 고도를 파생시킨다(규모 무관).
-  //   타깃: 지면 중심이 아니라 능선 어깨 높이 — 하향각이 줄어 프레임에 대기·하늘 밴드가 들어온다.
-  const craneTgtY = H(C.x, C.z) + Math.max(R * 0.06, Hmax * 0.46);
-  const cranePos = CRANE_DIST_RATIOS.map((ratio, i) => {
-    const d = R * ratio;
-    const p = polar(C, backAz + CRANE_AZ_OFFSETS[i], d);
-    return V(p.x, craneTgtY + d * Math.tan(CRANE_PITCHES[i]), p.z);
-  });
-  const craneIn = pass('crane-in', 'establish', 14, {
-    pos: cranePos,
-    target: V(C.x, craneTgtY, C.z),
-    fov: 34, fov1: 42,
-  });
-
-  // ② street-flythrough — 시가지 대로를 따라 지붕 위를 스치는 비행(지붕 바다).
-  //   경로: 최장 도로 전체가 아니라 밀도 스팬(연속 최장 시가지 구간)만 12점 리샘플 — capital 처럼
-  //     대로가 도성 밖까지 뻗는 규모에서 경로 후반이 빈 들판이 되는 것을 막는다.
-  //   고도: 지형 추종(+12 고정)이 아니라 **경로 국소 지붕 상단의 이동평균 + 3.5m** — 초가 구간에서
-  //     7~8m 부감으로 떠오르지 않고, 기와 구간에서도 스침이 유지된다.
-  // 수평 반각 — vFOV 40 과 16:9. 프레임에 무엇이 담기는지는 수평 화각이 정한다.
-  const flyAhead0 = Math.max(16, R * 0.12);
-  const flyHHalf = Math.atan(Math.tan(40 * 0.5 * DEG) * FRAME_ASPECT);
-  const flyFar = flyAhead0 * FLY_CONE_FAR_RATIO;
-  const flyPick = flythroughRoad(plan, obstacles, R, L, { hHalf: flyHHalf, far: flyFar });
-  const flyBase0 = flyPick ? flyPick.pts : [
-    { x: C.x, z: C.z + 0.5 * R }, { x: C.x, z: C.z }, { x: C.x, z: C.z - 0.4 * R },
-  ];
-  const discR = R * DENSITY_DISC_RATIO;
-  const flyAhead = flyAhead0;
-  // 고도 기준선은 민가 지붕만 — 궁 접근 구간에서 카메라가 궁 지붕 높이로 떠오르면 민가 위 8m 부감이
-  //   되고 궁이 눈높이로 내려온다. 궁은 진행 앞쪽에서 솟아오르는 편이 옳다. 관통 방지(safeFloor)는
-  //   여전히 전체 obstacles 를 쓴다.
-  const streetObstacles = obstacles.filter((o) => o.tag === 'parcel');
-  // 스팬 폴리라인 → 제어점·고도·곡선. 원뿔 트리밍 전후로 두 번 돈다.
-  const buildFly = (base) => {
-    const pts = resample(base, 12);
-    // 제어점별 기준 지붕고. 원판 히트가 적은 구간(가로 사이 빈 자리)에서는 한두 채의 원경 지붕이
-    // 추정을 지배해 카메라가 민가 위 8m 로 떠오른다. 히트 수로 지형 기준선과 연속 블렌딩한다.
-    const localBase = pts.map((p) => {
-      const d = roofDensityAt(streetObstacles, p.x, p.z, discR);
-      const terrain = H(p.x, p.z) + FLY_FALLBACK_ROOF;
-      if (!d.hits) return terrain;
-      const w = Math.min(1, d.hits / FLY_ROOF_TRUST_HITS);
-      return d.meanTop * w + terrain * (1 - w);
-    });
-    const pos = pts.map((p, i) => {
-      let sum = 0, n = 0;
-      for (let k = i - 1; k <= i + 1; k++) {
-        if (k < 0 || k >= localBase.length) continue;
-        sum += localBase[k]; n++;
-      }
-      return V(p.x, sum / n + FLY_ROOF_CLEAR, p.z);
-    });
-    return { pos, curve: new THREE.CatmullRomCurve3(pos, false, 'centripetal') };
-  };
-  // 랜드마크 정렬 규모만 종점에서 축으로 복귀한다(문루→정전 축선 정렬). 그 밖에서는 축 복귀가
-  //   시선을 마을 밖 도로 진행방향으로 돌려 패스 종반을 빈 산기슭으로 만든다.
-  const flyResolveFrom = flyPick && flyPick.landmarkAligned
-    ? FLY_AIM_RESOLVE_FROM : FLY_AIM_NO_RESOLVE;
-  const solveAim = (built) => frameAim({
-    posAt: (u) => built.curve.getPoint(u),
-    lead: 0.06, obs: obstacles, hHalf: flyHHalf, far: flyFar, resolveFrom: flyResolveFrom,
-  });
-  // 1차 조준으로 원뿔이 비는 양 끝을 잘라내고, 잘린 스팬에서 조준을 다시 푼다(1회 반복, 결정론적).
-  const flyBase = trimSpanByCone(flyBase0, obstacles, {
-    aimSigned: solveAim(buildFly(flyBase0)).signed,
-    hHalf: flyHHalf, far: flyFar, minSpan: FLY_TRIM_MIN_SPAN,
-  });
-  const flyBuilt = buildFly(flyBase);
-  const flyPos = flyBuilt.pos;
-  const flyAim = solveAim(flyBuilt);
-  const flyDur = Math.max(12, Math.min(40, polyLen(flyBase) / 22));
-  const flyYawOffAt = (u) => {
-    const back = flyResolveFrom >= 1
-      ? 0
-      : smootherstep(clamp01((u - flyResolveFrom) / (1 - flyResolveFrom)));
-    return flyAim.signed * (1 - back);
-  };
-  const flythrough = pass('street-flythrough', 'flythrough', flyDur, {
-    pos: flyPos, target: 'lookAhead', roofClear: 2.0, lead: 0.06,
-    aheadDist: flyAhead, drop: flyAhead * FLY_DROP_RATIO,
-    yawOffAt: flyYawOffAt,
-    fov: 40,
-  });
-
-  // ③ landmark-orbit — 궁/종가 저속 선회(역광 실루엣). 해석적 원(정확 외접) + 고정 타깃.
-  //   위상: 태양을 알면 완전 역광각이 스윕의 40% 시간 지점에 오도록 시작 위상을 역산.
-  //   고도: 보호수 수관이 시선을 가리는 구간에서만 들어올린다. **선회 반경은 건드리지 않는다**
-  //     (반경을 늘리면 랜드마크가 작아진다 — 그게 이 패스의 유일한 피사체다).
-  const orbitR = 0.5 * lext * 1.5 + Math.max(R * 0.07, 10);
-  const orbitY0 = lbaseY + Math.max(lH * 0.85, 12);
-  const sweep = 300 * DEG;
-  // th=0 → +z(남/정면). 태양 방위를 받으면 backAz 가 ORBIT_BACKLIT_AT 시점에 오도록 뒤로 민다.
-  const th0 = sunKnown ? backAz - sweep * smootherstep(ORBIT_BACKLIT_AT) : 0;
-  const orbitTarget = V(L.x, lbaseY + lH * 0.5, L.z);
-  const orbitXZ = (th) => ({ x: L.x + orbitR * Math.sin(th), z: L.z + orbitR * Math.cos(th) });
-  const orbitClears = (x, y, z) => {
-    for (const c of canopies) {
-      if (segmentCanopyGap({ x, y, z }, orbitTarget, c) < ORBIT_CANOPY_MARGIN) return false;
+  const rampCells = LIFT_RAMP_T * LIFT_GRID;
+  const floorRaw = new Float64Array(LIFT_GRID);
+  for (let i = 0; i < LIFT_GRID; i++) {
+    const p = basePos[i];
+    floorRaw[i] = Math.max(0, safeFloor(p.x, p.z) - p.y);
+  }
+  const floorLift = spreadPeriodic(floorRaw, rampCells);
+  // ── 시선 해결(2패스) ── 리프트가 확정된 고도에서 프레이밍 시선을 다시 풀고, 요·피치 장을 다시
+  //   만든다. 수관 리프트는 시선을 알아야 풀리므로(닭-달걀) 바닥 리프트로 1차 해결 → 수관 리프트 →
+  //   전체 리프트로 2차 해결한다. 스테이션 위치는 불변이라 두 번 호출해도 같은 입력에서 같은 결과다.
+  const buildLook = (liftOf) => {
+    // ── 프레이밍 시선 재해결 ── 안전 리프트가 확정된 뒤, 피사체를 프레이밍하는 스테이션의 시선을
+    //   **리프트된 고도**에서 다시 푼다. 리프트는 카메라를 들어올리지만 저작 시점의 시선은 그대로여서
+    //   피사체가 프레임 아래로 밀려 내려가고, 깊은 곽(궁 150m)은 근단이 하단 밖으로 잘렸다(실측 -27%).
+    //   위치 곡선은 t=i/N 에서 정확히 그 스테이션을 지나므로 그 지점의 리프트가 곧 최종 수직 오프셋이다.
+    for (let i = 0; i < N; i++) {
+      const st = stations[i];
+      if (!st.subject) continue;
+      const lifted = V(st.pos.x, st.pos.y + liftOf(i / N), st.pos.z);
+      const look = aimAtSubject(lifted, st.subject, st.fov);
+      st.az = Math.atan2(look.dir.x, look.dir.z);
+      st.pitch = Math.asin(Math.min(1, Math.max(-1, -look.dir.y)));
+      st.dist = Math.max(AIM_MIN, look.dist);
     }
-    return true;
+
+      // ── 요 팬 완화 ── **프레이밍 재해결 직후**에 돈다. 재해결은 리프트된 고도에서 조준을 다시 풀며
+    //   요를 저작값으로 되돌리므로, 완화를 그 앞에서 하면 무효화된다(실측: 완화 후에도 31°/s 잔존). 스테이션 요를 **시간 가중 라플라시안**으로 확산시킨다. 하드 캡은
+    //   루프 총 감김을 만족시킬 수 없을 때 잔차를 한 이음매에 몰아 오히려 그 자리에서 터진다. 확산은
+    //   총 감김을 보존하면서(선형 램프의 라플라시안은 0 — 등속 선회는 그대로다) **곡률만** 깎으므로
+    //   전이 구간의 급팬만 눕는다. 실측 34~133°/s → 23~29°/s.
+    {
+      const n = stations.length;
+      const speedEst = Math.min(TOUR_SPEED_MAX, Math.max(TOUR_SPEED_MIN, R * TOUR_SPEED_K));
+      const dt = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        const a = stations[i], b = stations[(i + 1) % n];
+        const gap = Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y, b.pos.z - a.pos.z);
+        dt[i] = Math.max(0.05, gap / Math.max(1, speedEst * 0.5 * (a.w + b.w)));
+      }
+      // 언랩 + 이음매 고정(감김 보존).
+      const yaw = new Float64Array(n + 1);
+      yaw[0] = stations[0].az;
+      for (let i = 1; i < n; i++) yaw[i] = yaw[i - 1] + shortest(stations[i].az - yaw[i - 1]);
+      yaw[n] = yaw[n - 1] + shortest(stations[0].az - yaw[n - 1]);
+      // 상한을 **넘는 구간만** 완화한다(전역 라플라시안 확산은 순응 구간의 조준까지 흐트러뜨려
+      //   피사체가 프레임에서 빠졌다 — 실측 커버리지 100%→62%).
+      for (let pass = 0; pass < YAW_RELAX_PASSES; pass++) {
+        let worst = 0;
+        for (let i = 0; i < n; i++) {
+          const d = yaw[i + 1] - yaw[i];
+          const cap = AUTHOR_YAW_RATE * dt[i];
+          const over = Math.abs(d) - cap;
+          if (over <= 0) continue;
+          worst = Math.max(worst, over);
+          const shift = Math.sign(d) * over * 0.5;
+          if (i > 0) yaw[i] += shift;
+          if (i + 1 < n) yaw[i + 1] -= shift;
+        }
+        if (worst < 1e-4) break;
+      }
+      for (let i = 0; i < n; i++) stations[i].az = yaw[i];
+    }
+
+  // 요·피치 장(단위벡터 보간은 요 반전 구간에서 천저를 지난다).
+    // 시선은 **요·피치 장**으로 보간한다.
+    //   요는 루프를 돌며 언랩하고, 총 감김 W 를 선형항으로 빼 잔차를 주기함수로 만든다:
+    //     yaw(t) = closedSpline(residual, t) + W·t,  residual[i] = yaw[i] - W·i/N
+    //   이렇게 하면 이음매에서도 요가 연속이고(잔차가 주기), 총 회전은 보존된다.
+    const yawUnwrapped = new Float64Array(N);
+    yawUnwrapped[0] = stations[0].az;
+    for (let i = 1; i < N; i++) {
+      yawUnwrapped[i] = yawUnwrapped[i - 1] + shortest(stations[i].az - yawUnwrapped[i - 1]);
+    }
+    const yawWinding = (yawUnwrapped[N - 1]
+      + shortest(stations[0].az - yawUnwrapped[N - 1])) - yawUnwrapped[0];
+    const yawResidual = new Float64Array(N);
+    for (let i = 0; i < N; i++) yawResidual[i] = yawUnwrapped[i] - yawWinding * (i / N);
+    const pitches = stations.map((s) => s.pitch);
+    const dists = stations.map((s) => s.dist);
+
+    // ── 짐벌 관성 ── 방향장을 **시간축(τ_A)** 위에서 Hann 창으로 평활한다. 저작된 전이(오빗 이탈,
+    //   골목 진입, 상승 시작)는 제어점 하나 폭의 좁은 스파이크를 남기는데, 실제 드론 짐벌도 그런
+    //   순간 회전을 하지 못한다. 창은 주기적이므로 이음매에서도 연속이다.
+    const yawGrid = new Float64Array(DIR_GRID);
+    const pitchGrid = new Float64Array(DIR_GRID);
+    {
+      const rawYaw = new Float64Array(DIR_GRID);
+      const rawPitch = new Float64Array(DIR_GRID);
+      for (let i = 0; i < DIR_GRID; i++) {
+        const u = i / DIR_GRID;
+        const t = axisA.tOf(u);
+        // 스테이션 인덱스 영역의 요를 시간 영역 잔차로 옮긴다(u=1 에서 다시 u=0 값이 되도록).
+        rawYaw[i] = closedScalarAt(yawResidual, t) + yawWinding * (t - u);
+        rawPitch[i] = closedScalarAt(pitches, t);
+      }
+      const hw = Math.max(1, Math.round((DIR_SMOOTH_SEC / durA) * DIR_GRID));
+      for (let i = 0; i < DIR_GRID; i++) {
+        let sy = 0, sp = 0, sw = 0;
+        for (let j = -hw; j <= hw; j++) {
+          const k = ((i + j) % DIR_GRID + DIR_GRID) % DIR_GRID;
+          const w = 0.5 * (1 + Math.cos((Math.PI * j) / (hw + 1)));
+          sy += rawYaw[k] * w; sp += rawPitch[k] * w; sw += w;
+        }
+        yawGrid[i] = sy / sw;
+        pitchGrid[i] = sp / sw;
+      }
+    }
+    // 격자 사이는 닫힌 Catmull-Rom(C¹)로 읽는다 — 선형 보간은 셀마다 각속도 계단을 만든다.
+    const dirAt = (t) => {
+      const u = axisA.tauOf(t);
+      const yaw = closedScalarAt(yawGrid, u) + yawWinding * u;
+      const pitch = closedScalarAt(pitchGrid, u);
+      return dirFromPitch(yaw, pitch);
+    };
+    const distAt = (t) => Math.max(AIM_MIN, closedScalarAt(dists, t));
+
+    return { dirAt, distAt };
   };
-  // 수관 회피 고도 프로파일. 브리프의 top+2.5 를 하한으로 두고, 그것으로도 시선이 잎을 지나면
-  // 스캔 + 이분으로 실제로 벗어나는 최소 고도를 찾는다(랜드마크에 붙은 당산나무가 그렇다).
-  // 히트 구간 진입·이탈은 20° smootherstep 램프로 확산 — 지형·지붕 하한은 패스 팩토리가 따로 맡는다.
-  // 선회 반경은 어느 경우에도 건드리지 않는다.
-  const orbitLift = new Float64Array(ORBIT_GRID + 1);
-  {
-    const raw = new Float64Array(ORBIT_GRID + 1);
-    const cap = orbitY0 + Math.max(40, Hmax * 0.6);
-    for (let i = 0; i <= ORBIT_GRID; i++) {
-      const p = orbitXZ(th0 + sweep * (i / ORBIT_GRID));
-      let need = orbitY0;
-      if (canopies.length && !orbitClears(p.x, need, p.z)) {
+  let look = buildLook((t) => gridAt(floorLift, axisA.tauOf(t)));
+  const dirAt = (t) => look.dirAt(t);
+  const distAt = (t) => look.distAt(t);
+
+  // 수관 리프트는 시선을 알아야 풀리고, 시선은 리프트를 알아야 확정된다 — 해결→리프트→재해결을
+  //   한 번 더 돌려 마지막 시선에서도 시선이 잎을 지나지 않게 한다(실측 solo -5.7m).
+  const solveCanopy = (dirOf, distOf) => {
+    const raw = new Float64Array(LIFT_GRID);
+    if (canopies.length) {
+      // 요구량은 **단조**여야 한다: 시선을 수관 **위로** 넘기는 해만 쓴다. "여유가 확보되는 최소 고도"를
+      //   스캔으로 찾으면 시선이 수관 아래로 지나가는 해가 뽑힐 수 있고, 그 해집합은 y 에 대해 위로
+      //   닫혀 있지 않아서 리프트를 확산시킨 중간 고도가 다시 잎을 지난다(실측 -1.31m).
+      //   광선 방향은 고정이므로 카메라를 올리면 수관 수평 최근접점에서의 광선 높이도 같은 만큼 오른다.
+      for (let i = 0; i < LIFT_GRID; i++) {
+        const t = liftT[i];
+        const p = basePos[i];
+        const y0 = p.y + floorLift[i];
+        const d = dirOf(t), dist = distOf(t);
+        const hLen = Math.hypot(d.x, d.z) || 1e-6;
+        const aim = { x: p.x + d.x * dist, y: y0 + d.y * dist, z: p.z + d.z * dist };
+        let need = 0;
         for (const c of canopies) {
-          if (segmentCanopyGap({ x: p.x, y: need, z: p.z }, orbitTarget, c) < ORBIT_CANOPY_MARGIN) {
-            need = Math.max(need, c.top + ORBIT_CANOPY_CLEAR);
-          }
+          // 판정은 실제 선분(카메라→조준점) 여유로 한다 — 품질 계약 T6 이 재는 것과 같은 양이다.
+          if (segmentCanopyGap({ x: p.x, y: y0, z: p.z }, aim, c) >= CANOPY_MARGIN) continue;
+          // 광선의 수평 최근접 파라미터(호길이)와 그 지점의 수평 이격.
+          const sHit = ((c.x - p.x) * d.x + (c.z - p.z) * d.z) / (hLen * hLen);
+          // 카메라와 **조준점 사이**만 본다. 1.5배로 늘려 두면 조준점 훨씬 뒤(광선이 이미 지하로 내려간
+          //   구간)의 나무가 잡혀 카메라를 47m 들어올린다(실측 capital 진입 정점 -38°→-51°). 조준점보다
+          //   먼 수관은 건물처럼 원경 가림이며 이 계약의 대상이 아니다.
+          // 필요량은 "수관 위로 넘기기"로 계산한다(단조). 최근접 파라미터는 선분 안으로 클램프한다.
+          if (sHit <= 0) continue;
+          const sc = Math.min(sHit, dist);
+          const rayY = y0 + d.y * sc;
+          need = Math.max(need, (c.top + CANOPY_CLEAR) - rayY);
         }
-        if (!orbitClears(p.x, need, p.z)) {
-          let lo = need, hi = cap, found = false;
-          for (let k = 1; k <= ORBIT_LIFT_SCAN; k++) {
-            const y = need + (cap - need) * (k / ORBIT_LIFT_SCAN);
-            if (orbitClears(p.x, y, p.z)) {
-              lo = need + (cap - need) * ((k - 1) / ORBIT_LIFT_SCAN); hi = y; found = true; break;
-            }
-          }
-          if (found) {
-            for (let k = 0; k < 10; k++) {
-              const mid = (lo + hi) / 2;
-              if (orbitClears(p.x, mid, p.z)) hi = mid; else lo = mid;
-            }
-          }
-          need = hi;
-        }
+        // 상한 — 어떤 경우에도 수관 회피가 투어 고도 체계를 뒤집지 않는다.
+        raw[i] = Math.min(Math.max(0, need), Math.max(20, Hmax * 0.35));
       }
-      raw[i] = need;
     }
-    const w = Math.max(1, Math.round(ORBIT_CANOPY_RAMP / (sweep / ORBIT_GRID)));
-    for (let i = 0; i <= ORBIT_GRID; i++) {
-      let best = orbitY0;
-      for (let j = Math.max(0, i - w); j <= Math.min(ORBIT_GRID, i + w); j++) {
-        if (raw[j] <= orbitY0) continue;
-        const s = smootherstep(1 - Math.abs(i - j) / (w + 1));
-        const y = orbitY0 + (raw[j] - orbitY0) * s;
-        if (y > best) best = y;
-      }
-      orbitLift[i] = best;
+    return raw;
+  };
+  let canopyRaw = solveCanopy((t) => look.dirAt(t), (t) => look.distAt(t));
+  const canopyLift = spreadPeriodic(canopyRaw, rampCells);
+  const liftGrid = new Float64Array(LIFT_GRID);
+  for (let i = 0; i < LIFT_GRID; i++) liftGrid[i] = floorLift[i] + canopyLift[i];
+  // 격자는 τ_A 균일이므로 리프트도 τ_A 로 읽는다.
+  const liftAt = (t) => gridAt(liftGrid, axisA.tauOf(t));
+  // 2차 해결 — 수관 리프트까지 반영한 최종 고도에서 프레이밍 시선을 다시 푼다(궁 근단이 프레임
+  //   하단 밖으로 잘리던 잔차의 원인은 수관 리프트가 카메라를 41m 올린 뒤에도 시선이 그대로였던 것).
+  look = buildLook(liftAt);
+  // 재해결로 시선이 바뀌었으니 수관 요구량을 다시 풀어 커진 만큼만 합산한다(단조 → 수렴).
+  {
+    const again = solveCanopy((t) => look.dirAt(t), (t) => look.distAt(t));
+    let grew = false;
+    for (let i = 0; i < LIFT_GRID; i++) {
+      if (again[i] > canopyRaw[i]) { canopyRaw[i] = again[i]; grew = true; }
+    }
+    if (grew) {
+      const lift2 = spreadPeriodic(canopyRaw, rampCells);
+      for (let i = 0; i < LIFT_GRID; i++) liftGrid[i] = floorLift[i] + lift2[i];
+      look = buildLook(liftAt);
     }
   }
-  const orbitCustom = (u) => {
-    const th = th0 + sweep * u;
-    const { x, z } = orbitXZ(th);
-    const g = clamp01(u) * ORBIT_GRID;
-    const i0 = Math.floor(g), i1 = Math.min(ORBIT_GRID, i0 + 1);
-    const y = orbitLift[i0] + (orbitLift[i1] - orbitLift[i0]) * (g - i0);
-    return V(x, y, z);
-  };
-  const landmarkOrbit = pass('landmark-orbit', 'orbit', 22, {
-    custom: orbitCustom,
-    target: orbitTarget,
-    fov: 30,
-  });
 
-  // ④ pullback-reveal — 마당 근접(저고도) → 마을 전경 당김(엔딩). 타깃곡선으로 근경 디테일→전경.
-  //   후퇴 방향은 태양 반대편(역광 유지). 마지막 두 타깃점은 능선 위로 올려 최종 컷 상단이
-  //   하늘·역광으로 열리게 한다 — 종전에는 -21° 하향으로 갈색 지형이 화면을 닫았다.
-  const startDir = { x: Math.sin(backAz), z: Math.cos(backAz) };
-  const s0 = openPointNear(
-    L.x + startDir.x * lext * 0.5, L.z + startDir.z * lext * 0.5, startDir,
-  );
-  const pbXZ = PULLBACK_DIST_RATIOS.map((ratio, i) => polar(C, backAz + PULLBACK_AZ_OFFSETS[i + 1], R * ratio));
-  const pbY = [Hmax * 0.30 + R * 0.06, Hmax * 0.55 + R * 0.12, Hmax * 0.72 + R * 0.18];
-  // 타깃 xz — 3·4번째는 카메라 반대편(중심 너머)으로 조금 더 밀어 원경이 열리게.
-  const pbTgtXZ = [
-    { x: (L.x + C.x) / 2, z: (L.z + C.z) / 2 },
-    { x: C.x, z: C.z },
-    polar(C, backAz + Math.PI, R * 0.05),
+  // 리프트까지 반영한 경로(하드 안전망 제외) — 시간축 B 의 기준. 안전망은 (x,z) 의 계단함수이므로
+  //   어떤 격자로도 완전히 연속화되지 않는다. 그것을 시간축에 넣으면 그 셀에서 카메라가 정지했다가
+  //   수직으로 튀는 병리(실측 549m/s)가 되므로, 시간축은 계단 없는 이 경로로 만들고 안전망은
+  //   샘플 시점에만 마지막 방어로 둔다(잔차는 아래 T2·T4 계약이 감시한다).
+  const posLifted = (t) => {
+    const p = posCurve.getPoint((((t % 1) + 1) % 1));
+    p.y += liftAt(t);
+    return p;
+  };
+  const posAtT = (t) => {
+    const p = posLifted(t);
+    const fl = safeFloor(p.x, p.z);
+    if (p.y < fl) p.y = fl;
+    return p;
+  };
+
+  // ── 시간축 B(최종) ──
+  const axis = buildTimeAxis(TOUR_GRID, posLifted);
+  const arcLength = axis.arcLength;
+  const tourDuration = Math.min(TOUR_SEC_MAX, Math.max(TOUR_SEC_MIN, arcLength / speed));
+
+  const sampleTour = (u) => {
+    const t = axis.tOf(u);
+    const pos = posAtT(t);
+    const d = dirAt(t), dist = distAt(t);
+    return {
+      pos,
+      lookAt: V(pos.x + d.x * dist, pos.y + d.y * dist, pos.z + d.z * dist),
+      fov: closedScalarAt(fovs, t),
+    };
+  };
+
+  // ── 구간(leg) = 투어 곡선 위 시간 창 ──
+  const LEGS = [
+    { name: 'crane-in', kind: 'establish' },
+    { name: 'landmark-orbit', kind: 'orbit' },
+    { name: 'street-flythrough', kind: 'flythrough' },
+    { name: 'pullback-reveal', kind: 'reveal' },
   ];
-  // 최종 하향각은 목표 하늘 비율에서 역산: skyFrac = (1 - tan(p)/tan(fovV/2)) / 2.
-  const endFov = 32;
-  const endPitch = Math.atan((1 - 2 * PULLBACK_END_SKY) * Math.tan(endFov * 0.5 * DEG));
-  const tgtYFor = (ci, ti, pitch) => {
-    const hd = Math.hypot(pbXZ[ci].x - pbTgtXZ[ti].x, pbXZ[ci].z - pbTgtXZ[ti].z);
-    return pbY[ci] - hd * Math.tan(pitch);
+  const bounds = LEGS.map((_, k) => axis.tauOf(stations.findIndex((s) => s.leg === k) / N));
+  const info = {
+    stations: N,
+    // 진단용 제어점 덤프(순수 JSON) — 게이트·프로브가 저작 의도와 샘플을 대조할 수 있다.
+    controlPoints: stations.map((s, i) => ({
+      i, leg: s.leg, w: +s.w.toFixed(3), fov: +s.fov.toFixed(1),
+      x: +s.pos.x.toFixed(2), y: +s.pos.y.toFixed(2), z: +s.pos.z.toFixed(2),
+      dy: +(-Math.sin(s.pitch)).toFixed(3), pitchDeg: +(s.pitch / DEG).toFixed(1),
+      azDeg: +(s.az / DEG).toFixed(1), dist: +s.dist.toFixed(1),
+    })),
+    arcLength: +arcLength.toFixed(2),
+    duration: +tourDuration.toFixed(2),
+    meanSpeed: +(arcLength / tourDuration).toFixed(2),
+    primary: {
+      kind: primary.kind, x: +primary.x.toFixed(2), z: +primary.z.toFixed(2),
+      h: primary.h, baseY: +primary.baseY.toFixed(2),
+      footW: +primary.footW.toFixed(1), footD: +primary.footD.toFixed(1),
+    },
+    secondary: { kind: secondary.kind, x: +secondary.x.toFixed(2), z: +secondary.z.toFixed(2) },
+    orbit: {
+      radius: +orbitR.toFixed(2), y: +orbitY.toFixed(2), fov: orbitFov,
+      arcDeg: +(orbitArc / DEG).toFixed(1), dir: orbitDir,
+      target: { x: +orbitTarget.x.toFixed(2), y: +orbitTarget.y.toFixed(2), z: +orbitTarget.z.toFixed(2) },
+      // 선회 **본체**의 투어 시각 창(τ). leg 'landmark-orbit' 의 t1 은 이탈 접선 구간까지 포함하므로
+      //   "반경 상수·랜드마크 프레임" 같은 선회 계약은 이 창에서만 판정해야 한다.
+      t0: +axis.tauOf(stations.indexOf(orbitStFirst) / N).toFixed(6),
+      t1: +axis.tauOf(stations.indexOf(orbitStLast) / N).toFixed(6),
+    },
+    sweep: {
+      len: +polyLen(sweepOriented).toFixed(1),
+      road: sweepPick ? (sweepPick.level || 'road') : 'synthetic',
+    },
+    lane: {
+      len: +polyLen(laneOriented).toFixed(1),
+      road: lanePick ? (lanePick.level || 'road') : 'synthetic',
+    },
+    legs: LEGS.map((l, k) => ({
+      name: l.name,
+      t0: +bounds[k].toFixed(6),
+      t1: +(k + 1 < LEGS.length ? bounds[k + 1] : 1).toFixed(6),
+    })),
   };
-  const pullback = pass('pullback-reveal', 'reveal', 16, {
-    pos: [
-      V(s0.x, H(s0.x, s0.z) + 4.5, s0.z),
-      V(pbXZ[0].x, pbY[0], pbXZ[0].z),
-      V(pbXZ[1].x, pbY[1], pbXZ[1].z),
-      V(pbXZ[2].x, pbY[2], pbXZ[2].z),
-    ],
-    target: [
-      V(L.x, H(L.x, L.z) + 3, L.z),
-      V(pbTgtXZ[0].x, H(C.x, C.z) + R * 0.03, pbTgtXZ[0].z),
-      V(pbTgtXZ[1].x, tgtYFor(1, 1, PULLBACK_MID_PITCH), pbTgtXZ[1].z),
-      V(pbTgtXZ[2].x, tgtYFor(2, 2, endPitch), pbTgtXZ[2].z),
-    ],
-    fov: 40, fov1: endFov,
+  return LEGS.map((leg, k) => {
+    const t0 = bounds[k];
+    const t1 = k + 1 < LEGS.length ? bounds[k + 1] : 1;
+    return {
+      name: leg.name,
+      kind: leg.kind,
+      duration: Math.max(1, tourDuration * (t1 - t0)),
+      // 구간 경계에서 위치·속도·시선이 이어진다: leg k 의 t01=1 과 leg k+1 의 t01=0 이 같은 τ 다.
+      sample(t01) { return sampleTour(t0 + (t1 - t0) * clamp01(t01)); },
+      t0,
+      t1,
+      tourDuration,
+      sampleTour,
+      tour: info,
+    };
   });
-
-  return [craneIn, flythrough, landmarkOrbit, pullback];
 }

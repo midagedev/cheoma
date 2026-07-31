@@ -175,9 +175,13 @@ export function createCinematicRuntime({
           stop();
           return;
         }
-        state.t = 0;
+        // 드론 구간은 하나의 연속 투어를 잘라 놓은 시간 창이다(dronepath.js). 경계에서 t=0 으로
+        // 리셋하면 넘친 시간이 버려져 그 프레임만 이동거리가 짧아진다(실측: 프레임 속도가 한 프레임
+        // 1.6m/s 로 떨어졌다가 복귀). 남은 시간을 다음 구간 길이로 환산해 넘긴다.
+        const overflow = (state.t - 1) * state.pass.duration;
         state.chainIdx = (state.chainIdx + 1) % state.chain.length;
         state.pass = state.chain[state.chainIdx];
+        state.t = Math.min(0.999, Math.max(0, overflow / state.pass.duration));
         emit('cinematic', {
           active: true,
           mode: 'drone',
