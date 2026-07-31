@@ -21,6 +21,15 @@ import {
   parcelWorldPolygon,
 } from '../src/village/parcel-contract.js';
 import { villageWallProfile, splitVillageWallGate } from '../src/village/wall-contract.js';
+import {
+  CITY_GATE_MASONRY,
+  CITY_WALL_DIMENSIONS,
+  cityGateLocalPoint,
+  cityGateMasonryProfile,
+  cityWallAngleInGate,
+  cityWallRadiusAt,
+  pointOnCityWall,
+} from '../src/village/citywall-contour.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const requireApp = createRequire(join(ROOT, 'app', 'package.json'));
@@ -231,6 +240,81 @@ for (let frame = 0; frame < 600; frame++) {
 invariant(maxCourtyardFrames === 0,
   `auto-stroll entered courtyard (${maxCourtyardFrames} frames)`);
 
+// ── 도성 성곽 (R3 Phase B) ── 1인칭이 성벽·육축을 통과하지 못하고, 홍예 통로는 통행 가능해야 한다.
+//   이 절 이전에는 성곽이 walk solids 에 **전혀** 없어 자유 이동이 여장·홍예·육축을 그대로 지나갔다.
+const cityStats = (() => {
+  const cityPlan = planVillage({ scale: 'hanyang', seed: 2026, includePalace: true, includeTemple: true });
+  const wall = cityPlan.features?.cityWall;
+  invariant(wall && wall.gates?.length >= 4,
+    'hanyang fixture lost its city wall — the城郭 contract needs a walled capital');
+  const citySolids = buildWalkSolids(cityPlan, cityPlan.site.heightAt);
+  const solid = (x, z) => pointHitsWalkSolids(citySolids, x, z, BODY);
+
+  // (a) 성벽 몸통: 문 각도 구간을 뺀 contour 표본 전체가 solid.
+  let bodySamples = 0, bodyLeaks = 0;
+  for (let k = 0; k < 360; k++) {
+    const angle = (k / 360) * Math.PI * 2;
+    if (cityWallAngleInGate(wall, angle)) continue;
+    bodySamples++;
+    const p = pointOnCityWall(wall, angle);
+    if (!solid(p.x, p.z)) bodyLeaks++;
+  }
+  invariant(bodyLeaks === 0,
+    `first person walks through the city wall body at ${bodyLeaks}/${bodySamples} contour samples`);
+
+  // (b) 성벽이 과도하게 두껍지 않다: 중심선 ±6m 는 양쪽 모두 통행 가능(회랑·가로가 살아 있어야 한다).
+  let clearBoth = 0, clearTotal = 0;
+  for (let k = 0; k < 360; k += 3) {
+    const angle = (k / 360) * Math.PI * 2;
+    if (cityWallAngleInGate(wall, angle)) continue;
+    clearTotal++;
+    const r = cityWallRadiusAt(wall, angle);
+    const dx = Math.sin(angle), dz = Math.cos(angle);
+    const inside = { x: wall.cx + dx * (r - 6), z: wall.cz + dz * (r - 6) };
+    const outside = { x: wall.cx + dx * (r + 6), z: wall.cz + dz * (r + 6) };
+    if (!solid(inside.x, inside.z) && !solid(outside.x, outside.z)) clearBoth++;
+  }
+  invariant(clearBoth === clearTotal,
+    `city wall solid is too thick — only ${clearBoth}/${clearTotal} samples keep both faces walkable`);
+
+  // (c) 홍예 통로: 문 축을 따라 ±12m 를 끊김 없이 통과할 수 있다(성문의 존재 이유).
+  // (d) 육축: 홍예 밖 석축 내부는 solid.
+  let archBlocked = 0, pierOpen = 0;
+  for (const gate of wall.gates) {
+    for (let t = -12; t <= 12; t += 0.25) {
+      if (solid(gate.x + gate.dirX * t, gate.z + gate.dirZ * t)) archBlocked++;
+    }
+    const masonry = cityGateMasonryProfile(gate, cityPlan.site);
+    for (const zone of masonry.zones) {
+      const rect = zone.courses[0].bottom;
+      for (const fx of [0.25, 0.5, 0.75]) {
+        for (const fz of [0.3, 0.5, 0.7]) {
+          const p = cityGateLocalPoint(gate,
+            rect.x0 + (rect.x1 - rect.x0) * fx, rect.z0 + (rect.z1 - rect.z0) * fz);
+          if (!solid(p.x, p.z)) pierOpen++;
+        }
+      }
+    }
+  }
+  invariant(archBlocked === 0,
+    `city gate arch passage is blocked at ${archBlocked} samples — the gate must be walkable`);
+  invariant(pierOpen === 0,
+    `first person walks into city gate masonry at ${pierOpen} pier interior samples`);
+
+  // (e) 진실 소유: 계획 예약 여유폭은 육축 두 덩이와 정확히 같다(따로 저작하면 한쪽만 바뀐다).
+  invariant(CITY_WALL_DIMENSIONS.gateExtraWidth === CITY_GATE_MASONRY.pierWidth * 2,
+    `gateExtraWidth (${CITY_WALL_DIMENSIONS.gateExtraWidth}) must stay pierWidth * 2 `
+      + `(${CITY_GATE_MASONRY.pierWidth * 2}) — one place owns the truth`);
+
+  return {
+    solids: citySolids.length,
+    cityWallSolids: citySolids.filter((x) => x.kind === 'citywall').length,
+    cityGateSolids: citySolids.filter((x) => x.kind === 'citygate').length,
+    bodySamples,
+    archSamples: wall.gates.length * 97,
+  };
+})();
+
 console.log('walk-solids contract: PASS', JSON.stringify({
   fixtureGap: +profile.gap.toFixed(2),
   regulars: regulars.length,
@@ -238,4 +322,5 @@ console.log('walk-solids contract: PASS', JSON.stringify({
   wallMidsBlocked: midBlocked,
   walkerEntered: entered,
   autoStrollYardFrames: maxCourtyardFrames,
+  ...cityStats,
 }));

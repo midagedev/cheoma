@@ -6,6 +6,14 @@ import {
   villageWallProfile,
   VILLAGE_SOLID_WALL_THICKNESS,
 } from '../village/wall-contract.js';
+import {
+  CITY_WALL_DIMENSIONS,
+  cityGateLocalPoint,
+  cityGateMasonryProfile,
+  cityWallAngleInGate,
+  cityWallClearance,
+  normalOnCityWall,
+} from '../village/citywall-contour.js';
 
 // First-person walk collision solids (#150 item J).
 //   buildWalkSolids(plan) → oriented xz solids the walker treats as solid.
@@ -17,8 +25,17 @@ import {
 // walk cannot slip through multi-hall complexes that lack a walker gate contract.
 // Auto-stroll still follows road polylines only — these solids only affect free
 // walk / collision queries. No mesh-bvh; pure plan geometry.
+//
+// 도성 성곽(hanyang) — R3 Phase B. 성벽 몸통과 성문 육축은 여기 들어오기 전까지 **아무 solid 도
+//   없었다**: 1인칭 자유 이동이 여장·홍예·육축을 그대로 통과했다. 몸통은 3m 지형 세그먼트가 한양에서
+//   800개를 넘으므로 OBB 로 펼치지 않고 극좌표 contour 의 해석적 환대(annulus) 한 개로 표현한다
+//   (점 질의 O(1)). 문 각도 구간은 몸통에서 빼고 육축 두 덩이가 대신 solid 가 되므로, 홍예 통로는
+//   통행 가능하게 남는다 — 성문의 존재 이유다. 육축 footprint 는 citywall-contour 의 masonry spec
+//   최저 켜(배터 인셋 0 = 가장 넓은 단면)를 그대로 쓴다(계획-충돌 이중 진실 금지).
 
 const FOOT_PAD = 1.12;
+// 방사→수직 두께 환산의 하한(contour 기울기가 극단적인 지점에서 band 폭발 방지).
+const CITY_WALL_RADIAL_MIN_COS = 0.35;
 const MIN_SEG = 0.08;
 
 const facingY = (dir) => (dir ? Math.atan2(dir.x, dir.z) : 0);
@@ -56,10 +73,48 @@ export function pointHitsWalkSolid(solid, x, z, bodyRadius = 0) {
     }
     return false;
   }
+  if (solid.type === 'citywall') {
+    const spec = solid.spec;
+    const dx = x - spec.cx, dz = z - spec.cz;
+    const angle = Math.atan2(dx, dz);
+    // 문 각도 구간은 육축 solid 가 맡는다(홍예는 통행 가능해야 한다).
+    if (cityWallAngleInGate(spec, angle)) return false;
+    const clearance = Math.abs(cityWallClearance(spec, { x, z }));
+    // 대부분의 질의는 성벽에서 멀다 — 최대 밴드로 먼저 걸러 법선 계산을 피한다(핫 패스).
+    const maxBand = (solid.half + r) / CITY_WALL_RADIAL_MIN_COS;
+    if (clearance > maxBand) return false;
+    // cityWallClearance 는 **방사** 여유다. 비원형 contour 에서는 방사 방향이 벽면 법선과 어긋나므로
+    //   수직 두께를 방사 두께로 환산해야 얇은 띠로 새어나가지 않는다.
+    const normal = normalOnCityWall(spec, angle);
+    const cosT = Math.abs(normal.x * Math.sin(angle) + normal.z * Math.cos(angle));
+    return clearance <= (solid.half + r) / Math.max(CITY_WALL_RADIAL_MIN_COS, cosT);
+  }
   const dx = x - solid.cx, dz = z - solid.cz;
   const lx = dx * solid.cos - dz * solid.sin;
   const lz = dx * solid.sin + dz * solid.cos;
   return Math.abs(lx) <= solid.hw + r && Math.abs(lz) <= solid.hd + r;
+}
+
+/** 성벽 몸통 — 극좌표 contour 의 해석적 환대. 문 각도 구간은 제외된다. */
+export function cityWallBodySolid(spec, thickness = CITY_WALL_DIMENSIONS.thickness) {
+  return { type: 'citywall', spec, half: thickness * 0.5, kind: 'citywall' };
+}
+
+/** 성문 육축 두 덩이 — masonry spec 최저 켜(가장 넓은 단면) footprint 를 월드 폴리곤으로. */
+export function cityGateMasonrySolids(gate, site) {
+  const masonry = cityGateMasonryProfile(gate, site);
+  const out = [];
+  for (const zone of masonry.zones) {
+    const rect = zone.courses[0].bottom;
+    const pts = [
+      cityGateLocalPoint(gate, rect.x0, rect.z0),
+      cityGateLocalPoint(gate, rect.x1, rect.z0),
+      cityGateLocalPoint(gate, rect.x1, rect.z1),
+      cityGateLocalPoint(gate, rect.x0, rect.z1),
+    ];
+    out.push(makeWalkPolySolid(pts, { kind: 'citygate', gate: gate.name, side: zone.side }));
+  }
+  return out;
 }
 
 export function pointHitsWalkSolids(solids, x, z, bodyRadius = 0) {
@@ -313,6 +368,15 @@ export function buildWalkSolids(plan, heightAt) {
   }
 
   for (const solid of featureSolids(plan, H)) solids.push(solid);
+
+  // 도성 성곽(hanyang 전용) — 몸통 해석적 환대 1개 + 성문마다 육축 2덩이.
+  const cityWall = plan?.features?.cityWall;
+  if (cityWall) {
+    solids.push(cityWallBodySolid(cityWall));
+    for (const gate of (cityWall.gates || [])) {
+      for (const solid of cityGateMasonrySolids(gate, plan.site)) solids.push(solid);
+    }
+  }
   return solids;
 }
 

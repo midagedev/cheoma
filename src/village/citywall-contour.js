@@ -20,6 +20,10 @@ const TERRAIN_WARP_INSET = 6;
 export const CITY_WALL_MIN_SITE_R = 74;
 
 // 계획·렌더·검증이 함께 쓰는 물리 치수. bodyHeight-foundationSink=지상 노출 높이(5.4m)는 유지한다.
+// 육축 한 덩이 폭. 계획이 예약하는 문 여유폭(gateExtraWidth)은 좌우 육축 두 덩이이므로 정확히
+// 이 값의 2배다. 두 곳에 따로 저작하면 한쪽만 바뀌었을 때 석축이 예약 범위를 넘거나 덜 채운다.
+const GATE_PIER_WIDTH = 5.5;
+
 export const CITY_WALL_DIMENSIONS = Object.freeze({
   thickness: 2.6,
   foundationSink: 2.5,
@@ -29,7 +33,7 @@ export const CITY_WALL_DIMENSIONS = Object.freeze({
   maxTerrainError: 0.4,
   maxSubdivisionDepth: 5,
   gateDepth: 8.5,
-  gateExtraWidth: 11,
+  gateExtraWidth: GATE_PIER_WIDTH * 2,
   gateFoundationSink: 0.6,
   gateArchClearance: 4.4,
   gateLintelHeight: 1.2,
@@ -115,7 +119,7 @@ export const CITY_GATE_MASONRY = Object.freeze({
   batterMaxInsetK: 0.14,   // 폭·깊이 대비 상단 인셋 상한
   corniceHeight: 0.42,
   jambMin: 0.6,
-  pierWidth: 5.5,          // 옛 육축 한 덩이 폭 — 예약 footprint(gateExtraWidth) 의 절반씩
+  pierWidth: GATE_PIER_WIDTH,   // 진실 소유는 GATE_PIER_WIDTH — gateExtraWidth 가 이 값의 2배다
 });
 
 // 중층 문루: 하층은 기둥열+벽체, 상층은 폭·깊이를 체감한 기둥열+난간, 지붕 2단.
