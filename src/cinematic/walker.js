@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { createHeadingController, shortestAngleDelta } from '../camera/heading.js';
-import { buildObstacles, denseRoadSpan, mainRoad } from './dronepath.js';
+import {
+  DENSITY_DISC_RATIO, buildObstacles, denseRoadSpan, mainRoad, roofDensityAt,
+} from './dronepath.js';
 import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 
 // 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103, 대문 진입 #150-J).
@@ -22,8 +24,10 @@ import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 //
 // 자동산책 화면 품질(#30) — 아래 셋은 auto 경로에만 적용된다(자유 이동·폰 조작은 종전 그대로):
 //   (a) 시선을 살짝 내려본다(-7.5°). pitch 0 은 화면 하단 절반 이상이 빈 노면이 된다.
-//   (b) 경로·스폰을 시가지 밀도 스팬으로 제한한다. 최장 도로 끝은 capital 에서 건축이 0 이다.
+//   (b) 경로를 시가지 밀도 스팬으로 제한한다. 최장 도로 끝은 capital 에서 건축이 0 이다.
 //   (c) 회전 상한을 24°/s 로 낮춘다(52°/s 는 1인칭에서 급회전으로 읽힌다).
+//   (d) 스폰을 스팬 끝점이 아니라 스팬 내 밀도 최대 지점에 둔다(끝점은 시가지 경계 = 공터다).
+//   (e) 노면 중앙이 아니라 담장선 안쪽 1.5~2m 로 붙여 화면 하단을 담·기단이 먹게 한다.
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const EYE = 1.6;
@@ -37,6 +41,21 @@ const AUTO_MOVE_CONE = 62 * DEG;
 const AUTO_TURN_PAUSE = 0.35;
 const AUTO_PITCH = -7.5 * DEG;  // 골목 노면이 화면을 채우지 않을 만큼만 내려본다
 const AUTO_PITCH_RATE = 4;      // 지수 스무딩(1초에 ~98% 수렴) — 수동 전환 시점의 값을 사용자가 인수
+// 담장선 접근(#30 R3): 노면 중앙 대신 담 쪽으로 붙여 화면 하단을 담·기단·풀언저리가 먹게 한다.
+const WALL_KEEP_MIN = 1.5, WALL_KEEP_MAX = 2.0;   // 최근접 solid 까지 목표 거리 밴드
+const WALL_OFFSET_STEP = 0.25, WALL_OFFSET_MAX = 4.0;
+const WALL_HUG_SPACING = 3;     // 담 붙이기 전 중앙선 리샘플 간격(m)
+const WALL_SIDE_PROBE = 1.0;    // 좌우 어느 쪽에 담이 가까운지 볼 때의 시험 오프셋
+const WALL_SAFE_MIN = 1.1;      // 경로 점·중간점이 지켜야 할 최소 여유(BODY 0.45 + 슬랙)
+const WALL_PROBE_MAX = 8;       // 이 거리 안에 담이 없으면 붙일 담이 없는 것으로 본다
+// 산책 가로 선택(#30 R3): 담이 늘어선 조밀한 골목을 고른다. mainRoad 는 가장 넓은 대로를 준다.
+const STROLL_MIN_SPAN = 40;         // 이보다 짧은 스팬은 산책로로 쓰지 않는다
+const STROLL_TARGET_SPAN = 100;     // 길이 보너스 포화 지점
+const STROLL_WALL_NEAR = 4;         // 담이 이 거리 안에 있으면 '담이 늘어선' 지점
+const STROLL_WALKABLE_MIN = 0.98;   // 중앙선이 solid 안에 들어가는 후보는 탈락
+const ROUTE_END_MARGIN = 0.6;       // 이 안에 들면 종점 도달로 보고 되돌아선다
+const ROUTE_PROJECT_WINDOW = 8;     // 투영 탐색 창(m) — 자기 근처로 되돌아오는 골목 오검출 방지
+const AUTO_LOOK_MIN_DIST = 1.2;     // 전방점이 이보다 가까우면 접선으로 대체(자기 위치 붕괴 방지)
 
 export function createWalker({ site, plan, heightAt } = {}) {
   const H = typeof heightAt === 'function' ? heightAt : (site && site.heightAt) || (() => 0);
@@ -60,12 +79,133 @@ export function createWalker({ site, plan, heightAt } = {}) {
   //   드론과 동일한 buildObstacles/roofTopAt 계약면이며(담 solid 가 아니라 지붕), 짧은 도로는
   //   트리밍 없이 원본을 돌려받는다.
   const entrance = site.entrance || { x: C.x, z: C.z + bowlR * 0.3 };
-  const road = mainRoad(plan);
-  const routePts = road
-    ? denseRoadSpan(road.pts, buildObstacles(plan, H), R).pts.slice()
-    : [{ x: C.x, z: C.z + bowlR * 0.4 }, { x: C.x, z: C.z - bowlR * 0.4 }];
+  const roofObstacles = buildObstacles(plan, H);
+
+  // 최근접 solid 까지의 거리 — pointHitsWalkSolids 의 팽창 반경을 이분해 구한다(담·집 OBB 공용).
+  const solidClearance = (px, pz) => {
+    let lo = 0, hi = WALL_PROBE_MAX;
+    if (!pointHitsWalkSolids(obstacles, px, pz, hi)) return hi;
+    for (let k = 0; k < 20; k++) {
+      const mid = (lo + hi) / 2;
+      if (pointHitsWalkSolids(obstacles, px, pz, mid)) hi = mid; else lo = mid;
+    }
+    return hi;
+  };
+
+  // ── 산책 가로 선택(#30 R3) ── 이 모드는 문서대로 "1인칭 골목 탐색"이다. mainRoad(길이×등급)는
+  //   가장 넓은 대로를 주는데, capital 의 그 대로는 담이 8m 안에 하나도 없는 빈 회랑이라 화면 하단이
+  //   전부 흙바닥이 된다. 그래서 담이 가까이 늘어선 조밀한 가로를 고른다: 중앙선이 실제로 걸을 수
+  //   있어야 하고(도로 리본이 담 런과 겹치는 후보는 탈락), 담 근접률 × 지붕 밀도 × 길이로 점수를 낸다.
+  //   후보가 없으면 mainRoad 로 폴백한다(단일 도로 픽스처는 그 도로가 그대로 선택된다).
+  const roadSpanOf = (r) => denseRoadSpan(r.pts, roofObstacles, R).pts;
+  const spanLenOf = (pts) => {
+    let l = 0;
+    for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    return l;
+  };
+  const scoreStrollSpan = (pts) => {
+    const len = spanLenOf(pts);
+    if (len < STROLL_MIN_SPAN) return null;
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+    const total = cum[cum.length - 1] || 1;
+    const at = (s) => {
+      let i = 1; while (i < cum.length && cum[i] < s) i++;
+      const a = pts[i - 1], b = pts[Math.min(i, pts.length - 1)];
+      const seg = (cum[Math.min(i, cum.length - 1)] - cum[i - 1]) || 1;
+      const f = (s - cum[i - 1]) / seg;
+      return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
+    };
+    const disc = R * DENSITY_DISC_RATIO;
+    let walkable = 0, wallNear = 0, dens = 0;
+    const n = 20;
+    for (let k = 0; k <= n; k++) {
+      const p = at((k / n) * total);
+      const clr = solidClearance(p.x, p.z);
+      if (clr > BODY) walkable++;
+      if (clr < STROLL_WALL_NEAR) wallNear++;
+      dens += roofDensityAt(roofObstacles, p.x, p.z, disc).hits;
+    }
+    if (walkable / (n + 1) < STROLL_WALKABLE_MIN) return null;
+    const score = (wallNear / (n + 1)) * (dens / (n + 1)) * Math.min(1, len / STROLL_TARGET_SPAN);
+    return { score, len };
+  };
+  let centreline = null;
+  {
+    let best = null;
+    for (const r of (plan.roads || [])) {
+      if (!r.pts || r.pts.length < 2) continue;
+      const pts = roadSpanOf(r);
+      const scored = scoreStrollSpan(pts);
+      if (!scored) continue;
+      if (!best || scored.score > best.score || (scored.score === best.score && scored.len > best.len)) {
+        best = { ...scored, pts };
+      }
+    }
+    if (best) centreline = best.pts.slice();
+  }
+  if (!centreline) {
+    const road = mainRoad(plan);
+    centreline = road
+      ? roadSpanOf(road).slice()
+      : [{ x: C.x, z: C.z + bowlR * 0.4 }, { x: C.x, z: C.z - bowlR * 0.4 }];
+  }
   const endpointDistance = (point) => Math.hypot(point.x - entrance.x, point.z - entrance.z);
-  if (endpointDistance(routePts[routePts.length - 1]) < endpointDistance(routePts[0])) routePts.reverse();
+  if (endpointDistance(centreline[centreline.length - 1]) < endpointDistance(centreline[0])) centreline.reverse();
+  // ── 담장선 접근(#30 R3) ── 노면 중앙을 걷으면 화면 하단 1/3 이 빈 흙바닥이다. 각 정점을 밀집측
+  //   법선으로 밀어 최근접 solid 가 WALL_KEEP 밴드에 들어오는 가장 큰 오프셋을 고른다. 담이 탐색
+  //   범위 안에 없으면(넓은 대로) 중앙을 그대로 쓴다 — 없는 담에 붙일 수는 없다. BODY(0.45)보다
+  //   한참 여유가 있는 밴드라 충돌 슬라이드가 상시 발생하지 않는다.
+  // 정점만 밀면 정점 사이 긴 직선 구간은 여전히 노면 중앙이다. 먼저 ~3m 간격으로 리샘플한 뒤 민다.
+  const hugSource = (() => {
+    const cum = [0];
+    for (let i = 1; i < centreline.length; i++) {
+      cum.push(cum[i - 1] + Math.hypot(centreline[i].x - centreline[i - 1].x, centreline[i].z - centreline[i - 1].z));
+    }
+    const total = cum[cum.length - 1] || 1;
+    const steps = Math.max(2, Math.min(200, Math.round(total / WALL_HUG_SPACING)));
+    const out = [];
+    for (let k = 0; k <= steps; k++) {
+      const s = (k / steps) * total;
+      let i = 1; while (i < cum.length && cum[i] < s) i++;
+      const a = centreline[i - 1], b = centreline[Math.min(i, centreline.length - 1)];
+      const seg = (cum[Math.min(i, cum.length - 1)] - cum[i - 1]) || 1;
+      const f = (s - cum[i - 1]) / seg;
+      out.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f });
+    }
+    return out;
+  })();
+  const hugCandidate = hugSource.map((p, i) => {
+    const a = hugSource[Math.max(0, i - 1)], b = hugSource[Math.min(hugSource.length - 1, i + 1)];
+    const tx = b.x - a.x, tz = b.z - a.z;
+    const tl = Math.hypot(tx, tz);
+    if (tl < 1e-6) return { x: p.x, z: p.z };
+    const nx = -tz / tl, nz = tx / tl;
+    // 담이 어느 쪽에 더 가까운지로 정한다(지붕 밀도가 아니라 실제 담 거리 — 붙을 대상이 담이다).
+    const probe = (sgn) => solidClearance(p.x + nx * sgn * WALL_SIDE_PROBE, p.z + nz * sgn * WALL_SIDE_PROBE);
+    const side = probe(1) <= probe(-1) ? 1 : -1;
+    if (solidClearance(p.x, p.z) <= WALL_KEEP_MAX) return { x: p.x, z: p.z };  // 이미 붙어 있다
+    let picked = null;
+    for (let d = WALL_OFFSET_STEP; d <= WALL_OFFSET_MAX + 1e-6; d += WALL_OFFSET_STEP) {
+      const qx = p.x + nx * side * d, qz = p.z + nz * side * d;
+      const clr = solidClearance(qx, qz);
+      if (clr < WALL_KEEP_MIN) break;       // 더 밀면 담을 침범한다
+      if (clr <= WALL_KEEP_MAX) picked = { x: qx, z: qz };
+    }
+    return picked || { x: p.x, z: p.z };
+  });
+  // 점만 밴드에 넣으면 점 사이 직선이 튀어나온 담 코너를 스쳐 보행자가 끼인다(village golmok 에서
+  //   중앙값 이격이 0.45m = BODY 로 눌려 200s 동안 62m 만 이동했다). 이웃과의 중간점까지 안전
+  //   여유를 확인하고, 실패하면 그 점만 중앙선으로 되돌린다.
+  const routePts = hugCandidate.map((q) => ({ x: q.x, z: q.z }));
+  for (let i = 0; i < routePts.length; i++) {
+    const mids = [];
+    if (i > 0) mids.push({ x: (routePts[i - 1].x + routePts[i].x) / 2, z: (routePts[i - 1].z + routePts[i].z) / 2 });
+    if (i < routePts.length - 1) mids.push({ x: (routePts[i].x + hugCandidate[i + 1].x) / 2, z: (routePts[i].z + hugCandidate[i + 1].z) / 2 });
+    const unsafe = solidClearance(routePts[i].x, routePts[i].z) < WALL_SAFE_MIN
+      || mids.some((m) => solidClearance(m.x, m.z) < WALL_SAFE_MIN);
+    if (unsafe) routePts[i] = { x: hugSource[i].x, z: hugSource[i].z };
+  }
   const routeCum = [0];
   for (let i = 1; i < routePts.length; i++) {
     routeCum.push(routeCum[i - 1] + Math.hypot(
@@ -83,10 +223,48 @@ export function createWalker({ site, plan, heightAt } = {}) {
     return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
   };
 
-  // ── 상태 ── 시작 위치와 routeS=0은 같은 도로 끝점을 가리킨다.
-  const spawn = nudgeOut(routePts[0].x, routePts[0].z);
+  // 실제 위치를 경로에 투영해 호길이를 얻는다. 이동량 적분(routeS += moved)은 코너를 자르거나
+  //   담에 막혀 미끄러지는 순간부터 실제 위치와 어긋나고, 한번 어긋나면 종점 판정이 영원히 오지
+  //   않는다 — 그러면 전방점이 자기 위치로 붕괴해 선호 회전측 힌트가 제자리 무한 회전을 만든다.
+  //   이전 값 주변 창만 탐색해 자기 근처로 되돌아오는 골목에서 엉뚱한 구간으로 튀지 않게 한다.
+  const projectRoute = (px, pz, aroundS) => {
+    const lo = aroundS - ROUTE_PROJECT_WINDOW, hi = aroundS + ROUTE_PROJECT_WINDOW;
+    let bestS = aroundS, bestD = Infinity;
+    for (let i = 1; i < routePts.length; i++) {
+      const s0 = routeCum[i - 1], s1 = routeCum[i];
+      if (s1 < lo || s0 > hi) continue;
+      const a = routePts[i - 1], b = routePts[i];
+      const vx = b.x - a.x, vz = b.z - a.z;
+      const vv = vx * vx + vz * vz || 1;
+      const t = clamp(((px - a.x) * vx + (pz - a.z) * vz) / vv, 0, 1);
+      const qx = a.x + vx * t, qz = a.z + vz * t;
+      const d = (px - qx) * (px - qx) + (pz - qz) * (pz - qz);
+      if (d < bestD) { bestD = d; bestS = s0 + (s1 - s0) * t; }
+    }
+    return clamp(bestS, 0, routeLen);
+  };
+
+  // ── 스폰 ── 스팬 끝점은 시가지 경계라 capital 에서는 시전 밖 공터로 떨어진다. 스팬 안에서 밀도가
+  //   가장 높은 지점(= 가로가 가장 조밀한 곳)에서 시작하고, 남은 거리가 더 긴 쪽으로 먼저 걷는다.
+  //   지붕이 하나도 없는 합성 픽스처에서는 종전대로 첫 끝점에서 시작한다.
+  let spawnS = 0;
+  {
+    const disc = R * DENSITY_DISC_RATIO;
+    let bestHits = 0;
+    const probes = Math.max(16, Math.min(600, Math.round(routeLen)));   // ~1m 간격
+    for (let i = 0; i <= probes; i++) {
+      const s = (i / probes) * routeLen;
+      const p = sampleRoute(s);
+      const hits = roofDensityAt(roofObstacles, p.x, p.z, disc).hits;
+      if (hits > bestHits) { bestHits = hits; spawnS = s; }
+    }
+  }
+  const spawnPoint = sampleRoute(spawnS);
+  const spawn = nudgeOut(spawnPoint.x, spawnPoint.z);
   let x = spawn.x, z = spawn.z;
-  const initialLook = sampleRoute(AUTO_LOOK_AHEAD);
+  const routeS0 = spawnS;
+  const routeDir0 = routeLen - spawnS >= spawnS ? 1 : -1;
+  const initialLook = sampleRoute(spawnS + routeDir0 * AUTO_LOOK_AHEAD);
   let yaw = Math.atan2(initialLook.x - x, initialLook.z - z);
   let pitch = 0;
   let eyeY = H(x, z) + EYE;
@@ -99,7 +277,8 @@ export function createWalker({ site, plan, heightAt } = {}) {
   const pos = new THREE.Vector3(x, eyeY, z);
   const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
 
-  let auto = false, routeS = 0, routeDir = 1, turnPause = 0, turnarounds = 0;
+  let auto = false, routeS = routeS0, routeDir = routeDir0, turnPause = 0, turnarounds = 0;
+  let turnArmed = true;
 
   // 축분리 이동+슬라이드: 각 축을 독립 시도, 충돌하면 그 축만 취소(담을 따라 미끄러짐).
   function tryStep(dx, dz) {
@@ -121,7 +300,19 @@ export function createWalker({ site, plan, heightAt } = {}) {
   function strollStep(dt) {
     // 시선을 밴드로 스무스하게 끌어내린다. 수동 전환 시 이 값이 그대로 사용자 입력의 시작점이 된다.
     pitch += (AUTO_PITCH - pitch) * (1 - Math.exp(-dt * AUTO_PITCH_RATE));
-    const look = sampleRoute(routeS + routeDir * AUTO_LOOK_AHEAD);
+
+    // 경로 위 위치는 실제 좌표의 투영으로 재동기한다(적분 누적 오차 없음).
+    routeS = projectRoute(x, z, routeS);
+
+    let look = sampleRoute(routeS + routeDir * AUTO_LOOK_AHEAD);
+    if (Math.hypot(look.x - x, look.z - z) < AUTO_LOOK_MIN_DIST) {
+      // 종점에 붙어 전방점이 자기 위치로 붕괴한 경우 — 경로 접선으로 시선을 유지한다.
+      const f = sampleRoute(clamp(routeS + routeDir * 1.0, 0, routeLen));
+      const b = sampleRoute(clamp(routeS - routeDir * 1.0, 0, routeLen));
+      const tx = f.x - b.x, tz = f.z - b.z;
+      const tl = Math.hypot(tx, tz) || 1;
+      look = { x: x + (tx / tl) * AUTO_LOOK_AHEAD, z: z + (tz / tl) * AUTO_LOOK_AHEAD };
+    }
     const ty = Math.atan2(look.x - x, look.z - z);
     yaw = heading.step(ty, dt, -routeDir);
     const turnError = Math.abs(shortestAngleDelta(yaw, ty, -routeDir));
@@ -133,19 +324,19 @@ export function createWalker({ site, plan, heightAt } = {}) {
       ? 0
       : clamp((Math.cos(turnError) - Math.cos(AUTO_MOVE_CONE)) / (1 - Math.cos(AUTO_MOVE_CONE)), 0, 1);
     const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
-    const moved = tryStep(fdx * WALK * dt * alignment, fdz * WALK * dt * alignment);
-    routeS += moved * routeDir;
+    tryStep(fdx * WALK * dt * alignment, fdz * WALK * dt * alignment);
 
-    if (routeDir > 0 && routeS >= routeLen) {
-      routeS = routeLen;
-      routeDir = -1;
+    // 종점 판정은 **투영된 호길이**로 한다. 한 번 뒤집으면 밴드를 벗어날 때까지 재무장하지 않아
+    //   경계에서 좌우로 떠는 일이 없다.
+    const atEnd = routeDir > 0 ? routeS >= routeLen - ROUTE_END_MARGIN : routeS <= ROUTE_END_MARGIN;
+    if (turnArmed && atEnd) {
+      routeDir = -routeDir;
       turnPause = AUTO_TURN_PAUSE;
       turnarounds++;
-    } else if (routeDir < 0 && routeS <= 0) {
-      routeS = 0;
-      routeDir = 1;
-      turnPause = AUTO_TURN_PAUSE;
-      turnarounds++;
+      turnArmed = false;
+    } else if (!turnArmed
+      && routeS > ROUTE_END_MARGIN * 3 && routeS < routeLen - ROUTE_END_MARGIN * 3) {
+      turnArmed = true;
     }
   }
 

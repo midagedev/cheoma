@@ -49,11 +49,16 @@ export {
   buildCanopies,
   buildObstacles,
   createDronePaths,
+  coneRoofHits,
   denseRoadSpan,
+  flythroughRoad,
+  frameAim,
   mainRoad,
   roofDensityAt,
   roofTopAt,
   segmentCanopyGap,
+  spanConeProfile,
+  trimSpanByCone,
 } from '../cinematic/dronepath.js';
 export {
   buildWalkSolids,
