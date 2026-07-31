@@ -35,6 +35,8 @@
 //   D6 F sunAzimuth 제공 시 crane-in·pullback 전 구간 카메라→피사체 방위가 태양 방위와 ≤25°
 //        (피사체가 카메라와 태양 사이 = 역광), landmark-orbit 완전 역광각이 스윕 35~45% 지점.
 //   D7   sunAzimuth 미제공 시 결정론 유지(하위 호환, 회귀 방지).
+//   D12 F 궁 규모의 street-flythrough 전 구간이 역광 대역(태양-시선 이각 ≤63° = 림 완전 강도)에
+//        머문다. 이 패스만 역광 계약이 없어 노출 지적이 두 라운드를 살아남았다(#23 진단).
 //   W1 F 자동산책 시선 pitch 가 -6~-9° 밴드로 수렴하고 벗어나지 않는다.
 //   W2 F 자동산책 회전 속도 상한 ≤26°/s.
 //   W3 F 자동산책 경로가 밀도 0 구간에 놓이지 않고, 스폰이 스팬 내 밀도 최대 지점이다.
@@ -162,6 +164,9 @@ const COMPOSE_MEDIAN_MAX = 15;  // 밀집면 중심의 시선축 이탈 median �
 const COMPOSE_P90_MAX = 45;
 const BODY_RADIUS = 0.45;      // walker BODY — 담을 스치는 하한(그 이상이면 침범 아님)
 const PASS_ANG_CEIL = 60;
+// D12 flythrough 역광 상한 — src/env/rim.js RIM_SOLAR_GATE.backlitFull(0.45) 의 각도 환산.
+//   acos(0.45) = 63.26°. 이 안이 프레넬 림 완전 강도 구간이다.
+const FLY_BACKLIT_MAX = Math.acos(0.45);
 const N = 200;
 const report = [];
 const failures = [];
@@ -478,6 +483,37 @@ for (const c of CASES) {
       `D6 ${row.scale}: orbit 완전 역광 지점 t=${bestU.toFixed(3)} (이각 ${(bestAng / DEG).toFixed(1)}°) 가 0.35~0.45 밖`);
   }
 
+  // ── D12 flythrough 역광 방위 (궁 규모) ──
+  // 이 패스만 역광 계약이 없었다. 그래서 "capital street-flythrough 가 세트 최암 패스"라는 지적이
+  //   두 라운드를 살아남았고, 3라운드 진단에서 원인이 **정면 역광 기하**로 밝혀졌다(#23):
+  //   카메라가 태양을 정면으로 보므로 카메라를 향한 면이 전부 태양을 등진다 → 순광면 비중이
+  //   capital street 16~33% vs village street 82%. 어둠 자체는 광학적으로 옳고 무드로 수용됐다.
+  //   따라서 이 단언의 목적은 "밝게 만들라"가 아니라 **그 역광 성격이 우연이 아님을 고정**하는 것이다.
+  //   항로가 순광으로 뒤집히면 이 패스의 시그니처(실루엣·처마 역광)가 사라지므로 회귀로 잡는다.
+  // 대역 근거: src/env/rim.js RIM_SOLAR_GATE.backlitFull = 0.45 → acos(0.45) = 63.3° 안이 림 완전
+  //   강도 구간이고, backlitStart = 0.02 → 88.9° 밖은 림이 바닥(0.20)이다. 63° 를 상한으로 잡으면
+  //   "전 구간 림 완전 강도 가용"이 계약이 된다. 실측 기준선: capital 0.4~19.2°, hanyang 18.7~52.8°.
+  // 스코프: 궁이 있는 규모만(D10 과 같은 조건). 궁이 없는 규모는 flythrough 가 축 복귀를 하지 않고
+  //   밀집측 조준을 끝까지 유지하므로(dronepath FLY_AIM_NO_RESOLVE) 항로가 태양과 무관하다 —
+  //   실측 village 95.4~124.7°(순광), village/2026 29.8~54.7°. 여기에 역광을 요구하면 오검출이다.
+  {
+    const p = byName['street-flythrough'];
+    let lo = Infinity, hi = 0;
+    for (let i = 0; i < N; i++) {
+      const s = p.sample(i / (N - 1));
+      const look = Math.atan2(s.lookAt.x - s.pos.x, s.lookAt.z - s.pos.z);
+      const a = angDiff(look, SUN_AZ);
+      if (a < lo) lo = a;
+      if (a > hi) hi = a;
+    }
+    row.flyBacklit = [+(lo / DEG).toFixed(1), +(hi / DEG).toFixed(1)];
+    if (plan.features?.palace) {
+      check(hi <= FLY_BACKLIT_MAX,
+        `D12 ${row.scale}: flythrough 최대 태양-시선 이각 ${(hi / DEG).toFixed(1)}° > ${(FLY_BACKLIT_MAX / DEG).toFixed(0)}°`
+        + ' (역광 대역 이탈 — 림 완전 강도 구간 밖으로 항로가 돌았다)');
+    }
+  }
+
   // ── D8 시선 각속도 ──
   {
     const dirOf = (a, b) => {
@@ -645,6 +681,7 @@ for (const r of report) {
   console.log(`               프레임 피치 ${r.flyFramePitch.join('°~')}° (지평선 포함)  종점 랜드마크 ${r.endLandmark}`);
   console.log(`               구도: ${r.compose}  종반 원뿔 ${r.tailCone}`);
   console.log(`               고도 추종 편차: ${r.trackSd} (민가 표본 ${r.roofSeaN})`);
+  console.log(`               역광: 태양-시선 이각 ${r.flyBacklit.join('~')}°`);
   console.log(`  orbit      : 수관관통 ${r.orbitIntersect} (종전위상 ${r.orbitLegacyIntersect})  최소여유 ${r.orbitCanopyGap}m  리프트 ${r.orbitLift}m  반경 ${r.orbitR.join('~')}m  역광 t=${r.orbitBacklitAt} (이각 ${r.orbitBacklitAng}°)`);
   console.log(`  crane-in   : t0.2~0.5 시선하향 ${r.cranePitch.join('~')}°`);
   console.log(`  pullback   : 최종 하향 ${r.endPitch}°  하늘 ${(r.endSky * 100).toFixed(1)}%`);
