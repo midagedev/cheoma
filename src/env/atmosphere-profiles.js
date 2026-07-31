@@ -103,7 +103,8 @@ export const SUNSET_LOOKS = deepFreeze({
       sky: [[0.0, '#ff9d52'], [0.26, '#f26334'], [0.55, '#c2495c'], [1.0, '#3c4a86']],
       sunDir: [-16, 8, -45], sunColor: 0xffa85c, sunInt: 2.38,
       hemiSky: 0x8593bd, hemiGround: 0x9c7856, hemiInt: 0.72,
-      fog: 0xcc9376, fogNear: 70, fogFar: 470, exposure: 1.13,
+      // #31-2 대기색 정합(아래 crimson 주석에 세 프로필 공통 유도). ΔH 26° → 0°, S 0.46 → 0.39.
+      fog: 0xbe6c74, fogNear: 70, fogFar: 470, exposure: 1.13,
       ridgeNear: 0x574863, ridgeFar: 0xcc9678, mist: 0xdeb69c, mistOp: 0.6,
       lantern: 0.15,
     }, {
@@ -138,7 +139,21 @@ export const SUNSET_LOOKS = deepFreeze({
       sky: [[0.0, '#f6a266'], [0.26, '#d96862'], [0.57, '#8d587e'], [1.0, '#3d4d80']],
       sunDir: [-16, 8, -45], sunColor: 0xffa672, sunInt: 2.25,
       hemiSky: 0x8a90b6, hemiGround: 0x8e6a54, hemiInt: 0.70,
-      fog: 0xc09a8b, fogNear: 70, fogFar: 462, exposure: 1.11,
+      // #31-2 대기색 정합(세 노을 프로필 공통 유도 — 여기 한 번만 적는다).
+      //   문제: 돔은 지평 밴드를 fog 색으로 수렴시키는데(sky.js DOME_HAZE, pos 0.44~0.62 에서 α
+      //   0.74~0.96), fog 의 색상이 그 밴드의 하늘색과 전혀 다른 계열이었다. 실측 색상차(지평
+      //   pos 0.52 대비): gold +26° · crimson +46° · violet +13°. crimson 은 지평 하늘이 장미-자두
+      //   (H331)인데 fog 가 따뜻한 황갈(H17)이라, 수렴이 아니라 **색상 이음매**로 읽혔다
+      //   (docs/look-grammar.md §3 "지평 밴드는 fog색으로 수렴" 위반, 비전 2라운드 지적).
+      //   또 fog 가 수렴 대상 하늘 밴드보다 **밝았다**(crimson relL 0.362 vs 하늘 0.478→L기준 더 밝음)
+      //   — 원경이 뒤 하늘보다 밝은 색으로 씻기니 대기 원근이 아니라 유백색 판이 됐다.
+      //   해법: 색상은 지평 밴드(pos 0.52)에 맞추고, 채도는 오히려 **낮추고**, 명도는 fog 와 그
+      //   하늘 밴드의 중간으로 내린다. 채도가 세 프로필 모두 내려가므로(§2-3 채도 규율) "이전
+      //   fog 0xbd8d89 장미빛이 미드톤을 물들였다"는 그 실측 근거는 약화되지 않는다 — 색조 방향만
+      //   돔과 일치시키고 색의 양은 줄이는 변경이다. 노을 정체성은 여전히 하늘 스톱·rim·glow·
+      //   flare 가 갖는다(전부 불변).
+      //   crimson: ΔH 46° → 0°, S 0.30 → 0.22, relL 0.362 → 0.237.
+      fog: 0xa8788f, fogNear: 70, fogFar: 462, exposure: 1.11,
       ridgeNear: 0x54465b, ridgeFar: 0xbc9184, mist: 0xd3b0a4, mistOp: 0.61,
       lantern: 0.15,
     }, {
@@ -157,7 +172,9 @@ export const SUNSET_LOOKS = deepFreeze({
       sky: [[0.0, '#e9aa82'], [0.27, '#c37c99'], [0.58, '#756a9c'], [1.0, '#354777']],
       sunDir: [-16, 8, -45], sunColor: 0xffbea0, sunInt: 2.14,
       hemiSky: 0x7d83b8, hemiGround: 0x806078, hemiInt: 0.72,
-      fog: 0xa291a9, fogNear: 68, fogFar: 455, exposure: 1.12,
+      // #31-2 대기색 정합(위 crimson 주석 유도). ΔH 13° → 1°, S 0.12 → 0.10 — 이미 거의 정합이라
+      //   변화가 가장 작다. dawn(ΔH 46°)은 이번 지시 범위(sunset) 밖이라 그대로 둔다.
+      fog: 0x91859c, fogNear: 68, fogFar: 455, exposure: 1.12,
       ridgeNear: 0x4b4c68, ridgeFar: 0x978ca8, mist: 0xbdb1c0, mistOp: 0.62,
       lantern: 0.18,
     }, {

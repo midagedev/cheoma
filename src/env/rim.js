@@ -186,11 +186,15 @@ const RIM_LIGHTS_FRAGMENT_BEGIN = rimLightsFragmentBegin();
 // 유기물 그룹 판정용 조상 그룹 이름(나무 스캐터·마당 초목·봄 개화 관목·focus 풀).
 //   'trees'/'focusGrass' 는 단일건물·focus 링 경로, 'village-*' 는 마을 경로다. 마을 이름이
 //   빠져 있던 동안 숲·스캐터 나무·개화 관목이 misc(×1.0)로 분류돼 건물급 림을 받았다.
-//   숲은 'village-forest' 가 아니라 'forest-trees' 로 지정한다 — 같은 부모 아래의 화강암
-//   노두(forest-rocks)는 유기물이 아니고 절제 대상도 아니므로 misc 로 남아야 한다.
+//   숲은 'village-forest' 가 아니라 'forest-trees' 로 지정해 같은 부모 아래 항목을 따로 다룬다.
+//   #31: 화강암 노두(forest-rocks)도 organic(×0.7)으로 내린다. "노두는 유기물이 아니므로 misc"
+//     라는 분류 논리는 맞지만 이 그룹 계수의 실제 축은 재료 분류가 아니라 **절제 위계**(건물 >
+//     기타 > 자연물)다. 노두는 GRANITE 0x827f76 창백한 알베도 + flatShading 각면이라 misc(×1.0)
+//     에서 원경 능선에 밝은 각진 판으로 떠올랐고(실측 나무보다 단위면적당 대비가 컸다), 같은
+//     산에 선 나무가 ×0.7 인데 그 사이 암괴만 건물급 림을 받을 근거가 없다.
 const ORGANIC_NAMES = new Set([
   'trees', 'focusGrass',
-  'village-flora', 'village-trees', 'forest-trees', 'village-bloom',
+  'village-flora', 'village-trees', 'forest-trees', 'forest-rocks', 'village-bloom',
 ]);
 
 // 그레이징 오탐(넓은 완사면·도로 광역 금빛)·수면은 프레넬로 실루엣 분리가 불가 → 이름으로 명시 제외.
@@ -403,6 +407,28 @@ export function createFresnelRim(scene) {
               smoothstep(${directStart}, ${directFull}, _directLuma) * _mainSunVisibility);
             // Distance fade (far ridges) + (3) axial defocus damp (neighbour DoF sparkle).
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
+            // (4) #31-4 — the rim participates in the atmosphere.
+            // uRimNear/Far is a **scale-blind** band: rimDistanceGateForFov clamps to the parcel-lens
+            // floor (1.448) at every fov, so the ramp is a fixed 35–253 m in every framing and at
+            // every settlement tier. scene.fog is not: the village band spans terrainR * 3.4
+            // (village 551 m, capital 803 m, hanyang 1292 m). So the larger the tier, the longer the
+            // rim highlight outlives the fog that is supposed to wash the surface under it.
+            // Measured rim-residual ÷ fog-wash at 150 m view depth: village 1.78x, capital 2.60x,
+            // hanyang 4.18x — which is exactly the reported "village fixed, capital still shows hard
+            // orange outlines on far canopy blobs" split (vision round 4, street-flythrough-capital).
+            // Multiplying by (1 - fogFactor) hands the far end of the fade to the same scale-aware
+            // curve the surface uses, so a fragment the fog has dissolved cannot keep a rim thread
+            // (docs/look-grammar.md: the sky and everything in it participates in the atmosphere).
+            // Uses three's own fog uniforms/varying from <fog_pars_fragment>, which is declared
+            // earlier in this shader — no new uniform and no new program family.
+            #ifdef USE_FOG
+              #ifdef FOG_EXP2
+                float _rimFog = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+              #else
+                float _rimFog = smoothstep(fogNear, fogFar, vFogDepth);
+              #endif
+              _df *= 1.0 - clamp(_rimFog, 0.0, 1.0);
+            #endif
             float _axial = max(-vViewPosition.z, 0.0);
             float _defocus = abs(_axial - uRimFocusDepth);
             float _dofInFocus = 1.0 - smoothstep(uRimDofNear, uRimDofFar, _defocus);

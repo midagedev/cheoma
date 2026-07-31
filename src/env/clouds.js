@@ -544,7 +544,14 @@ export function buildRidgeMist(anchors = [], { w = 120, h = 42, opacity = 0.34, 
   let active = true;
   let resourcesDisposed = false;
   function update(fogColor) {
-    if (active && fogColor) { _c.copy(fogColor).lerp(_white, 0.14); for (const m of mats) m.color.copy(_c); }
+    // #31-4: 백색 리프트 0.14 → 0.04. 이 뱅크는 대기색보다 **밝게** 칠해져 있었고, #31-2 에서 노을
+    //   대기색 명도를 35% 내리자(relL 0.362 → 0.237) 그 +14% 리프트가 상대적으로 훨씬 두드러졌다.
+    //   결과가 능선 사면에 얹힌 창백한 분홍빛 얼룩이다 — 비전 4라운드가 두 번 지목했고(“화강암 돔이
+    //   밝고 분홍”, 능선 위 슬리버), 픽셀 귀속 프로브가 두 bbox 모두 이 뱅크 소유로 확정했다
+    //   (76.4% / 85.2%, 암반 지분 0%). 즉 화강암 문제가 아니라 이 뱅크의 리프트 문제였다.
+    //   물안개는 대기보다 아주 약간만 밝아야 한다 — 0.04 는 뱅크가 사면과 분리돼 보이지 않으면서
+    //   물안개 특유의 유백감만 남기는 값이다.
+    if (active && fogColor) { _c.copy(fogColor).lerp(_white, 0.04); for (const m of mats) m.color.copy(_c); }
   }
   function deactivate() {
     if (!active) return;
@@ -716,7 +723,13 @@ export function setupClouds(group, {
   const horizonTexture = makeHorizonCumulusTexture(97);
   const horizonMaterial = new THREE.MeshBasicMaterial({
     map: horizonTexture, transparent: true, opacity: HORIZON_CLOUD_OPACITY,
-    depthWrite: false, depthTest: true, fog: false, blending: THREE.NormalBlending,
+    // #31-3: fog:false → true. 이 파일의 다른 구름 재질 넷(산허리 뱅크·능선 물안개·뭉게구름·
+    //   상공 층)은 모두 fog:true 이고 이 수평 구름대만 빠져 있었다 — 예외 근거가 주석에도 없다.
+    //   결과: 카메라 84m 앞 고도 9~12°에 뜬 창백한 **비조명(MeshBasic) + 대기 미참여** 쿼드 16장이
+    //   fog·조명에 물든 능선 위에서 종이 컷아웃으로 읽혔다(비전 3라운드 "능선 위 공중의 창백한
+    //   수직 슬랩", orbit-village-t020). patchCloudRim 은 <common>·<map_fragment> 에 주입되므로
+    //   전부 <fog_fragment> 앞이고, fog 는 그 뒤에 정상 합성된다. 재질 1개라 프로그램 수 불변.
+    depthWrite: false, depthTest: true, fog: true, blending: THREE.NormalBlending,
     // Every instance turns its +Z plane normal toward the camera in placeHorizonBank;
     // DoubleSide would submit transparent backfaces as a redundant second draw.
     side: THREE.FrontSide,

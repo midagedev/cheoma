@@ -70,6 +70,14 @@ assert.deepEqual(ids(['tools/shoot-seasons.mjs'], {
   newPaths: ['tools/shoot-seasons.mjs'],
 }), ['core', 'petals']);
 assert.deepEqual(ids(['src/env/edge-mist-view.js']), ['core', 'app', 'api-reuse', 'lod-app']);
+// #31 마을 대기 밴드(카메라 거리 파생). 부감·근접·웨이브 프레이밍이 전부 이 식을 읽으므로
+//   focus/wave LOD 와 깊이 대비(dof-app)까지 라우팅된다.
+assert.deepEqual(ids(['src/env/village-fog-band.js'], {
+  newPaths: ['src/env/village-fog-band.js'],
+}), ['core', 'app', 'dof-app', 'lod-app']);
+assert.deepEqual(ids(['tools/check-village-fog-band.mjs'], {
+  newPaths: ['tools/check-village-fog-band.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
   newPaths: ['src/village/forest-canopy-atten.js'],
 }), ['core', 'app', 'worker']);

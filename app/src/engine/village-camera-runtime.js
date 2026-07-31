@@ -288,20 +288,25 @@ export function createVillageCameraRuntime({
     ));
   }
 
-  // 대기 밴드는 기본적으로 분지 반경(site.R) 파생이다. 그 밴드는 부감을 기준으로 저작됐고, 부감에서는
-  //   프레임 상단이 지형 반경 밖(worldedge 미스트·스카이돔)까지 닿아 여백이 스스로 생긴다. 망원 근접
-  //   프레임은 그 전제가 깨진다: 측정(village/7 히어로) — 피사체 155m, 그 뒤 배산 사면 232m, fog near
-  //   396m. 배경이 안개 밴드 **앞**에 있으므로 대기 원근이 0 이고, 리빌이 열리는 동안(near 90→396m)
-  //   프레임이 점점 어두워진다(상단 밴드 중값 165 → 36). 그래서 근접 정착 프레임만 카메라 거리 파생
-  //   밴드를 바닥으로 갖는다 — 이것이 "부감에서 근접까지 무드가 끊기지 않는다"의 수치 조건이다.
-  let fogBandFloor = null;   // { nearScale, spanScale } — 카메라→피사체 거리 배수. null=기본(R 파생)
+  // 대기 밴드의 권위는 코어 핸들(env/village-fog-band.js)이 갖는다. 밴드는 카메라→분지 중심 거리
+  //   파생이므로 부감·드론·아이레벨·망원 근접이 모두 같은 식에서 나온다(#31).
+  //   구 규약은 분지 반경 파생(near=R*2.2)이었고 근접 프레임만 예외적으로 카메라 거리 바닥을
+  //   덧댔다: 측정(village/7 히어로) — 피사체 155m, 그 뒤 배산 사면 232m, fog near 396m. 배경이
+  //   안개 밴드 **앞**에 있어 대기 원근이 0 이었고, 리빌이 열리는 동안(near 90→396m) 프레임이
+  //   점점 어두워졌다(상단 밴드 중값 165 → 36). #31 진단에서 그 결함이 근접 전용이 아니라 **전
+  //   프레이밍**이었음이 확인됐다(부감 capital near 616m vs 최원 지오메트리 279m → fogFactor 0).
+  //   그래서 카메라 거리 파생이 예외가 아니라 기본이 됐고, fogBandFloor 는 그보다 더 당겨야 하는
+  //   프레임(망원 근접 정착)만 추가로 조이는 상한으로 남는다.
+  let fogBandFloor = null;   // { nearScale, spanScale } — 카메라→피사체 거리 배수. null=코어 밴드 그대로
   function setFogBandFloor(floor) {
     fogBandFloor = floor && Number.isFinite(floor.nearScale) && Number.isFinite(floor.spanScale)
       ? { nearScale: floor.nearScale, spanScale: floor.spanScale } : null;
   }
-  function fogBand() {
-    const radius = village.handle?.plan?.site?.R || 180;
-    const base = { near: radius * 2.2, far: radius * 7.0 };
+  function fogBand({ snap = false } = {}) {
+    const handle = village.handle;
+    const radius = handle?.plan?.site?.R || 180;
+    const base = (snap ? handle?.snapFogBand?.(camera) : handle?.fogBand?.())
+      || { near: radius * 2.2, far: radius * 7.0 };
     if (!fogBandFloor) return base;
     const distance = camera.position.distanceTo(controls.target);
     if (!(distance > 1e-3)) return base;
@@ -313,7 +318,9 @@ export function createVillageCameraRuntime({
     if (!village.active || !village.handle) return;
     const radius = village.handle.plan.site.R;
     if (scene.fog) {
-      const band = fogBand();
+      // 즉시 경로(마을 진입·시네마틱 시작/종료·규모 커밋 직후)라 추종을 기다리지 않고 스냅한다.
+      //   여기서 추종을 쓰면 진입 첫 프레임이 폴백 거리(부감 기준)의 밴드로 한 번 그려진다.
+      const band = fogBand({ snap: true });
       scene.fog.near = band.near;
       scene.fog.far = band.far;
     }

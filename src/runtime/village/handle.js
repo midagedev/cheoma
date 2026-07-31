@@ -36,6 +36,7 @@ import {
   planParcelRebuild,
 } from '../../village/parcel-rebuild.js';
 import { setupClouds } from '../../env/clouds.js';
+import { followFogDistance, villageFogBand } from '../../env/village-fog-band.js';
 import * as G from '../../core/math/geom2.js';
 import { withVillageRandomSeed } from './random-window.js';
 import {
@@ -374,18 +375,42 @@ export function createVillageHandle(opts, seed, plan, group) {
   // ── 마을 전용 조명 리그(태스크 #44). scene 에 add/remove 로 마을 활성 동안만 유효. ──
   const vlights = createVillageLightRig();
 
-  // ── 마을 fog 거리 모디파이어(태스크 #50). env 가 시간대 크로스페이드 중 매 틱 base fog 를
-  //    다시 쓰므로(near/far=시간대 값), 마을 부감에 맞는 넓은 거리로 다시 늘린다. 색은 env 소유
-  //    (시간대 크로스페이드)로 두고 near/far 만 오버라이드 — engine.reapplyVillageFog 와 동일 값
-  //    (R*2.2/R*7.0)이라 멱등. enterVillageMode 에서 env.addFogModifier 로 등록. ──
+  // ── 마을 fog 거리 모디파이어(태스크 #50, #31 개정). env 가 시간대 크로스페이드 중 매 틱 base
+  //    fog 를 다시 쓰므로(near/far=시간대 값), 마을 씬 깊이에 맞는 거리로 다시 쓴다. 색은 env 소유
+  //    (시간대 크로스페이드)로 두고 near/far 만 오버라이드. enterVillageMode 에서 addFogModifier. ──
+  //    #31: 구 규약 `R*2.2 / R*7.0` 은 지형 지름보다 먼 near 를 만들어 fog 가 한 번도 발화하지
+  //    않았다(실측 capital near 616m vs 최원 인스턴스 279m → fogFactor 0). 이제 밴드는 카메라→
+  //    분지 중심 거리 파생이고 유도·상수 근거는 env/village-fog-band.js 가 소유한다.
   const villageFogR = (site && typeof site.R === 'number' && site.R > 0) ? site.R : 150;
+  const villageFogTerrainR = (site && typeof site.terrainR === 'number' && site.terrainR > 0)
+    ? site.terrainR : villageFogR;
   vlights.setSiteRadius(villageFogR);   // 규모 인지 골든아워 감쇠(#119) — 큰 규모 능선 화염 억제
+  // 추종된 카메라→중심 거리. updateLod(camera, …) 이 매 프레임 갱신하고 villageFog 가 소비한다.
+  //   null = 아직 카메라를 읽지 않음(진입 첫 틱) → villageFogBand 의 부감 폴백 거리를 쓴다.
+  let fogCamDistance = null;
   const villageFog = (scn) => {
     if (scn.fog) {
-      scn.fog.near = villageFogR * 2.2; scn.fog.far = villageFogR * 7.0;
+      const band = villageFogBand(fogCamDistance, villageFogTerrainR);
+      scn.fog.near = band.near; scn.fog.far = band.far;
       // 지형 엣지 소실 헤이즈·운해 링 색을 대기(fog)색과 동기화(#50 시간대 크로스페이드 자동 정합).
       group.userData.setEnvHaze?.(scn.fog.color);
     }
+  };
+  // 카메라→분지 중심 거리. 추종 갱신은 프레임당 정확히 한 번(updateLod)만 일어나야 한다 —
+  //   리빌 보간·reapply·프리워밍이 밴드를 여러 번 **읽으므로**, 읽기에 추종을 얹으면 실효 시정수가
+  //   읽는 횟수만큼 빨라져 스무딩이 사라진다. 그래서 조회(fogBand)는 순수 읽기고 갱신은 아래 둘뿐.
+  const fogCameraDistance = (camera) => Math.hypot(
+    camera.position.x - site.center.x,
+    camera.position.y,
+    camera.position.z - site.center.z,
+  );
+  const villageFogFollow = (camera, dt) => {
+    if (!camera || !camera.position) return;
+    fogCamDistance = followFogDistance(fogCamDistance, fogCameraDistance(camera), dt);
+  };
+  const villageFogSnap = (camera) => {
+    if (!camera || !camera.position) return;
+    fogCamDistance = fogCameraDistance(camera);
   };
 
   // ── 흐르는 구름 그림자 빌보드(태스크 #57) ──────────────────────────────────
@@ -2184,6 +2209,19 @@ export function createVillageHandle(opts, seed, plan, group) {
     },
     get time() { return time; }, get season() { return season; }, get weather() { return weather; },
 
+    // #31 대기 밴드 조회(순수 읽기). 소비자(앱 프리워밍·리빌 보간·웨이브 베일·근접 정착)가 규모
+    //   상수를 다시 쓰지 않고 같은 식을 공유하게 하는 단일 창구다. 부작용이 없으므로 한 프레임에
+    //   몇 번 읽어도 추종 시정수가 변하지 않는다.
+    fogBand() {
+      return villageFogBand(fogCamDistance, villageFogTerrainR);
+    },
+    // 진입·프리워밍·shot 처럼 추종 없이 목표 밴드로 바로 앉히는 즉시 경로(환경 크로스페이드
+    //   계약이 스냅을 허용하는 경로들). 이후 프레임부터 updateLod 의 추종이 이어받는다.
+    snapFogBand(camera) {
+      villageFogSnap(camera);
+      return villageFogBand(fogCamDistance, villageFogTerrainR);
+    },
+
     update(dt) {
       let doorMoved = false;
       for (const runtime of primaryDoorById.values()) {
@@ -2201,6 +2239,10 @@ export function createVillageHandle(opts, seed, plan, group) {
     // 대규모 주택 청크 LOD(매 프레임, 카메라 필요) — FAR↔MID↔FULL 거리 전환.
     //   engine.js 가 camera 를 넘겨 호출. LOD 정책이 꺼진 규모(R<340)는 no-op.
     updateLod(camera, target = null, dt = 1 / 60) {
+      // #31 대기 밴드는 카메라 거리 파생이다. LOD 갱신이 이미 매 프레임 카메라를 받는 유일한
+      //   훅이라 여기서 추종만 하고, 실제 scene.fog 기입은 env fog 합성 훅(villageFog)이 한다
+      //   — 시간대 크로스페이드가 매 틱 base fog 를 덮으므로 기입 권위는 모디파이어에 있어야 한다.
+      villageFogFollow(camera, dt);
       cloudsHandle?.updateView?.(camera);              // 화면 밖 원경 뱅크·빛줄기는 렌더 제출 전에 sleep
       detailLod = createVillageDetailLodState(camera, target, site, detailLod);
       const swaps = group.userData.updateChunkLod?.(

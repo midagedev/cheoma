@@ -43,6 +43,10 @@ const REVIEWED_NEW_PATHS = new Set([
   // before any large engine.js split. Zoom distance stays orthogonal (optics).
   'src/camera/view-lifecycle.js',
   'tools/check-view-lifecycle.mjs',
+  // #31 마을 대기(fog) 거리 밴드. 카메라 거리 파생 순수 산술이라 브라우저 없이 판정되고
+  //   tools/check-village-fog-band.mjs 가 core 게이트에서 소유한다(REACH 회귀 픽스처 포함).
+  'src/env/village-fog-band.js',
+  'tools/check-village-fog-band.mjs',
   'src/env/msaa-render-pass.js',
   'src/env/bokeh-coc-contract.js',
   'src/env/bokeh-coc-pass.js',
@@ -391,6 +395,10 @@ function routePath(path) {
     }
     if (/^src\/env\/(?:clouds|edge-mist-view)\.js$/.test(path)) {
       select('village atmospheric view ownership changed', 'lod-focus', 'lod-wave');
+    }
+    // #31 마을 fog 밴드는 카메라 거리 파생이라 부감·근접·웨이브 프레이밍이 모두 이 식을 읽는다.
+    if (path === 'src/env/village-fog-band.js') {
+      select('village atmospheric depth band changed', 'lod-focus', 'lod-wave', 'dof-app');
     }
     if (path === 'src/env/night-glow.js') select('wave-owned lighting changed', 'lod-wave');
     return { gates, reasons };

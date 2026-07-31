@@ -17,7 +17,8 @@ import {
 // 파티클·본 없이 트랜스폼 애니메이션만. 시드 결정론. 추가 부하 < 1ms/frame 목표.
 //
 // 좌표 규약: 모든 모델은 로컬 +X 를 정면(진행 방향)으로 만든다. 지면 부착은 heightAt.
-// 새는 하늘 실루엣(unlit, fog 무시)이라 원경에서 먹점 무리로 읽힌다. 밤엔 새 떼 없음.
+// 새는 하늘 실루엣(unlit)이라 원경에서 먹점 무리로 읽힌다. 밤엔 새 떼 없음.
+//   #31-4 부터 대기(scene.fog)에 참여한다 — 아래 makeSkyFlock 재질 주석 참조.
 
 const lin = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
 const M4 = () => new THREE.Matrix4();
@@ -247,7 +248,19 @@ function buildBirdGeo() {
 function makeSkyFlock(group, rng, {
   cx = 2, cz = 12, alt = 17, ax = 4, az = 3,
   bandLo = 14, bandHi = 21, awayR = 122, exCx = 0, exCz = 0,
-  sizeLo = 0.5, sizeHi = 0.8, color = 0x2b2e28, radius = null,
+  // #31-5 룩 수치(비전 재판정 대상): 무리 알베도 0x2b2e28 → 0x3a3e36.
+  //   왜 fog 가 아니라 알베도인가 — 프로브 실측(crane-in-village t050)에서 fog 는 **정상 적용**
+  //   중이다: 개체 깊이 74.3m→화소 (37,41,38) / 107.5m→(46,45,44) / 127.6m→(54,48,49) 로
+  //   기대 fogFactor(0.038 / 0.099 / 0.135)를 단조 추종한다. 무리가 안 씻긴 것처럼 보인 이유는
+  //   무리가 카메라에서 74~128m 에 있어 그 깊이의 대기가 정말 4~14% 뿐인데, 배후 능선은 400m+ 라
+  //   80% 를 받기 때문이다. 즉 깊이 차이가 만든 정상적인 대기 원근이고 fog 로는 더 좁힐 수 없다.
+  //   남은 실제 원인은 알베도다: 0x2b2e28 은 상대휘도 0.027 의 거의 순검정이고, 이 "원경 먹점"
+  //   관습은 **배경이 중간값이던 시절** 저작됐다. fog 가 능선을 창백하게 씻는 지금은 같은 알베도가
+  //   프레임 최암부가 되어 창백한 사면 위 딱딱한 사선 대시로 읽힌다(비전 5라운드 지적).
+  //   0x3a3e36 은 렌더 휘도를 약 1.35배 올려(≈0.18 → 0.24) 배경 대비를 0.42 → 0.57 쯤으로 옮긴다.
+  //   ★ 사용자 룩 결정("먹점 무리")과 긴장 관계이므로 두 값을 함께 남긴다 — 실루엣이 약해졌다면
+  //     0x2b2e28 방향으로, 여전히 검게 뜬다면 더 밝게 재판정. 크기(BIRD_BOOST 2.7)는 동결.
+  sizeLo = 0.5, sizeHi = 0.8, color = 0x3a3e36, radius = null,
 } = {}) {
   const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3();
   const M = new THREE.Matrix4();
@@ -258,7 +271,13 @@ function makeSkyFlock(group, rng, {
   const MAXN = Math.max(residentN, gooseN);
   const geo = buildBirdGeo();
   const mat = new THREE.MeshBasicMaterial({
-    color, side: THREE.DoubleSide, fog: false,
+    // #31-4: fog:false → true. 무리는 원경 먹점 실루엣(color 0x2b2e28)이라 대기에 참여하지 않으면
+    //   안개로 씻긴 사면 위에서 **화면에서 가장 어두운 요소**가 되어 딱딱한 윤곽의 종이 다트로 읽힌다
+    //   (비전 4라운드가 세트 최대 위반으로 지목: crane-in-village t020/t050). scene.fog 가 마을에서
+    //   발화하게 된 뒤로는(#31) 이 플래그만 켜면 무리도 거리에 따라 대기색으로 수렴한다.
+    //   MeshBasic + alphaHash 조합에 fog 는 정상 합성된다. USE_FOG define 이 붙어 fog 없는 변종과
+    //   프로그램이 갈리므로 실측 프로그램 +1(169→170), 드로우콜은 불변.
+    color, side: THREE.DoubleSide, fog: true,
     // The flock crosses focus, LOD, and reroll ownership boundaries often. Compile
     // the hashed-opacity path once instead of toggling transparent shader variants.
     alphaHash: true,
@@ -811,7 +830,12 @@ export function setupVillageCritters(parent, {
   const LOD_EPSILON = 0.002;
   // 새 떼는 부감에서도 마을 실루엣의 일부로 유지한다. 지상 개체인 까치는
   // 개·고양이·닭·소와 같은 시선-셀 LOD를 따르며 크기 부스트하지 않는다.
-  const BIRD_BOOST = 4.2;
+  // #31-4 룩 수치(비전 재판정 대상): 부감 배율 4.2 → 2.7 (×0.64). 4.2 는 새가 대기에 참여하지
+  //   않던 시절 "부감에서 안 보인다"를 크기로 해결한 값이고, 그 결과 crane-in 부감에서 개체가
+  //   base 0.6~1.05 × 4.2 = 2.5~4.4 유닛까지 커져 "종이 다트" 인상의 절반을 만들었다.
+  //   무리가 fog 에 참여하게 됐으므로(위 재질 주석) 가시성은 크기가 아니라 대기 대비가 갖는다.
+  //   ★ 두 값을 함께 남긴다 — 2.7 이 과소면 4.2 방향으로, 여전히 과대면 더 아래로 재판정.
+  const BIRD_BOOST = 2.7;
   const lod = {
     birdScale: 1,
     waveWeight: 1,

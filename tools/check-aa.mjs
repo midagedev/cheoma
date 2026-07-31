@@ -77,8 +77,12 @@ const CROP = { x0: 180, y0: 130, x1: 1100, y1: 620 };
 const SKY_PATCH = { x0: 40, y0: 8, x1: 200, y1: 40 };
 const MAX_FLAT_SKY_DRIFT = 3.0;
 // 실측 델타의 약 절반 — 회귀/수정본 분리는 보장하고 씬 튜닝 드리프트에는 견딘다.
+// 2026-07-31 재캘리브레이션(#31): 마을 fog 부활로 판정 크롭에 대기 그라디언트 비중이 늘어
+//   MSAA 의 *상대* softRatio 이득이 희석됐다(조용한 머신 실측 +31.8%, 회귀 4.71 → 제품 6.20 —
+//   절대 분리는 여전히 뚜렷하다). 같은 "실측의 약 절반" 규칙을 새 씬에 적용해 0.40 → 0.16.
+//   post.js/MSAA 소스는 무변경이므로 이것은 완화가 아니라 전제(판정 씬) 이동의 재캘리브레이션이다.
 const MIN_HARD_DROP = 0.20;
-const MIN_SOFT_RATIO_GAIN = 0.40;
+const MIN_SOFT_RATIO_GAIN = 0.16;
 // 보조축(png-metrics.mjs lineEdgeProfile 정의).
 //   이 크롭 실측: cliffRatio 18.8% → 15.7% (상대 −16.7%), lineMeanGradient 41.8 → 38.7 (−7.4%).
 //   요구 폭은 그 절반(−8%). 프레임 전체로 재면 분리 폭이 −8.0% 로 좁아지는데(UI·하늘 여백이

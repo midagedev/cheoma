@@ -165,8 +165,18 @@ export function* populateVillageSteps(plan, opts = {}) {
         thickness: Math.max(6, site.Hmax * 0.24), outerDrop: site.Hmax * 0.10,
         // #20: yCap 을 살짝 내려 능선 상부가 운해 위로 더 명확히 솟게(운무 절단). 분지·절단면은
         //   여전히 잠긴다. strengthAt 의 제곱 pool 과 한 몸.
-        // #211: 링 불투명도 상향 — scene fog 가 절단면까지 미치지 않는 capital/hanyang 부감을
-        //   링·지형 edge haze 가 대신 녹인다(지형 radius 확장 금지).
+        // #211 은 링 불투명도를 0.64 로 올렸다("scene fog 가 절단면까지 미치지 않는 capital/
+        //   hanyang 부감을 링·지형 edge haze 가 대신 녹인다"). #31 에서 그 전제가 버그로 확정돼
+        //   fog 가 복구됐으므로 0.46 으로 내렸다 — 부감 실효값은 opacity×고도바닥이라
+        //   0.64×0.9375=0.600 → 0.46×0.5=0.230 (2.6배 감소).
+        // #31-4 아이레벨만 0.64 로 환원: 그 감축은 **부감** 근거였는데(원경 깊이는 fog 가 공급),
+        //   아이레벨·저고도 flythrough 는 절단면이 카메라에서 100~160m 밖에 안 되는 구간이라 fog 가
+        //   ≈0.22 밖에 안 걸린다. 구 조합(edge haze 0.34 + fog)이 주던 ≈0.48 세척이 절반으로
+        //   줄어 절단면 실루엣 대비가 두 배가 됐고, 그것이 능선 뒤 계단형 톱니 슬래브로 드러났다
+        //   (비전 4라운드; 픽셀 귀속 지형 33.0% vs 하늘 33.6%, 이 링 지분은 14.5% 뿐).
+        //   지형 셰이더에 보상항을 다시 넣지 않고, 절단면 소실을 담당하도록 저작된 이 링을 원래
+        //   세기로 되돌린다. 고도 감쇠(EDGE_MIST_AERIAL_FLOOR 0.5)는 유지되므로 부감 실효값은
+        //   0.64×0.5=0.320 — 구 0.600 의 절반으로 fog 가 메우는 몫은 그대로 남는다.
         yCap: site.Hmax * 0.40, opacity: 0.64,
         seed: (plan.seed ^ 0x3117) >>> 0,
       })
@@ -646,8 +656,10 @@ export function* populateVillageSteps(plan, opts = {}) {
     },
     replaceFlora,
     deactivateMist: () => { mist?.deactivate(); ridgeMist?.deactivate(); },
-    // 엣지 헤이즈·운해 링·능선 물안개 색을 대기(fog)색과 동기화 — 어댑터 fog 모디파이어가 매 틱 호출(#50 정합).
-    setEnvHaze: (fogColor) => { terrain.setHaze(fogColor); forest.setHaze(fogColor); mist?.update(fogColor); ridgeMist?.update(fogColor); },
+    // 운해 링·능선 물안개 색을 대기(fog)색과 동기화 — 어댑터 fog 모디파이어가 매 틱 호출(#50 정합).
+    //   #31-3: 지형 엣지 헤이즈가 제거돼 terrain.setHaze 호출도 함께 사라졌다(대기는 scene.fog 소유).
+    //   forest.setHaze 는 v2 부터 이미 no-op 이라 함께 정리한다 — 남은 소비자는 두 미스트뿐이다.
+    setEnvHaze: (fogColor) => { mist?.update(fogColor); ridgeMist?.update(fogColor); },
     // 검증 앵커(하네스 프레이밍용)
     guardianAnchors: flora.guardianAnchors, yardTreeAnchors: flora.yardTreeAnchors,
     gardenAnchors: flora.gardenAnchors,

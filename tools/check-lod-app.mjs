@@ -158,8 +158,9 @@ try {
         && ring.material.map?.uuid === identity.map,
     };
   }, `/@fs${join(ROOT, 'src/env/edge-mist-view.js')}`) : { available: false };
-  // #211: authored ring opacity lives in populate (currently 0.58). Horizon weight is 1, so
-  // that sample is the base; every other pitch must be base * viewWeight (non-compounding).
+  // Authored ring opacity lives in populate (#31-4: 0.64, eye-level; aerial is scaled by the
+  // floor below). Horizon weight is 1, so that sample is the base; every other pitch must be
+  // base * viewWeight (non-compounding). The assertion reads the sampled base, not the constant.
   const edgeMistBaseOpacity = edgeMistContract.horizon?.opacity;
   const validMistSample = (sample) => Number.isFinite(sample?.opacity)
     && Math.abs(sample.forwardY - sample.matrixForwardY) < 1e-7
@@ -181,7 +182,13 @@ try {
       && Math.abs(edgeMistContract.partialZ.viewWeight - edgeMistContract.repeated.viewWeight) < 1e-7
       && edgeMistContract.partialZ.calls === edgeMistContract.repeated.calls
       && edgeMistContract.aerialFloor > 0 && edgeMistContract.aerialFloor < 1
-      && edgeMistContract.aerialFloor >= 0.8
+      // #31 재저작: 구 단언은 `>= 0.8` 이었고 그 근거는 "scene fog 가 절단면까지 못 미치므로 이
+      //   링이 부감의 유일한 소실 레버"였다 — fog 부재 보상값을 앱 게이트가 한 번 더 고정한 것이다.
+      //   fog 미발화가 #31 에서 버그로 확정·복구됐으므로 부감에서 링은 보조 레이어로 내려가야 하고
+      //   (이중 계상 = 유백색), 대역의 권위는 순수 게이트(tools/check-village-fog-band.mjs 와
+      //   check-edge-mist.mjs)가 갖는다. 여기서는 앱 관측값이 그 상한 안에 있고 내보낸 상수와
+      //   정확히 일치하는지만 본다.
+      && edgeMistContract.aerialFloor <= 0.6
       && edgeMistContract.aerial.viewWeight === edgeMistContract.aerialFloor
       && JSON.stringify(edgeMistContract.resourceBefore) === JSON.stringify(edgeMistContract.resourceAfter)),
   runFocusScenario

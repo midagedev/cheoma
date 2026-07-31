@@ -1885,7 +1885,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.userData.villageReferenceFov = VILLAGE_LENS.aerial.referenceFov;
       camera.far = R * 8; camera.near = 0.5; camera.updateProjectionMatrix();
       camera.lookAt(controls.target);
-      if (scene.fog) { scene.fog.near = R * 2.2; scene.fog.far = R * 7.0; }
+      // #31 프리워밍도 진입 후 실제로 적용될 밴드를 쓴다(코어 카메라 거리 파생). 여기서 구
+      //   R 파생 상수를 남기면 워밍 프레임과 첫 표시 프레임의 대기가 달라진다.
+      if (scene.fog) {
+        const band = h.snapFogBand?.(camera) || { near: R * 2.2, far: R * 7.0 };
+        scene.fog.near = band.near; scene.fog.far = band.far;
+      }
       post.rimRescan?.(h.group);          // patch first, then compile that final shader variant
       renderer.compile(scene, camera);   // 셰이더 컴파일(그림자 depth 포함)
       renderFrame();                     // 버퍼·instanceMatrix 업로드(draw 강제)
@@ -3044,12 +3049,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     // 그 앞뒤를 관람 가능한 안개 전이로 되돌린다. 코어 wave.anim.veil(scenery 소유권·그림자·waveFade 계약)은
     // 건드리지 않는다 — 이 리맵은 fog 표현 전용이다.
     const fogVeil = veil * veil * veil;
-    const ownerRadius = wave.anim.sceneryOwner === 'old' ? wave.oldRadius : wave.newRadius;
     if (scene.fog) {
-      // 평상시 각 장면의 규모별 fog에서 시작/종료하고, peak만 더 큰 장면까지 감싸는 먹안개로 모인다.
-      // handoff 순간에는 ownerRadius 항이 0이라 규모가 달라도 fog 거리가 튀지 않는다.
-      scene.fog.near = ownerRadius * 2.2 * (1 - fogVeil);
-      scene.fog.far = ownerRadius * 7.0 * (1 - fogVeil) + wave.coverRadius * 0.14 * fogVeil;
+      // 평상시 밴드에서 시작/종료하고, peak만 더 큰 장면까지 감싸는 먹안개로 모인다.
+      // #31: 베일의 양 끝점(fogVeil=0)은 **정착 후 실제로 적용될 밴드**여야 한다. 구 코드는
+      //   규모 파생 상수(ownerRadius*2.2 / *7.0)를 끝점으로 썼는데, 정착 밴드가 카메라 거리
+      //   파생으로 바뀐 뒤 그대로 두면 웨이브가 끝나는 프레임에서 대기가 한 번 점프한다
+      //   (capital 기준 near 616 → 33m). 밴드는 규모가 아니라 카메라 거리에서 나오므로
+      //   "handoff 에서 규모가 달라도 튀지 않는다"는 원 불변은 그대로 유지된다(veil=1 에서
+      //   (1-fogVeil)=0 이라 밴드 항이 사라지는 구조가 동일).
+      const rest = village.handle?.fogBand?.() || { near: wave.coverRadius * 2.2, far: wave.coverRadius * 7.0 };
+      scene.fog.near = rest.near * (1 - fogVeil);
+      scene.fog.far = rest.far * (1 - fogVeil) + wave.coverRadius * 0.14 * fogVeil;
     }
     if (sun.shadow) sun.shadow.intensity = wave.shadowIntensity * wave.anim.shadowWeight;
     const requiredFar = wave.coverRadius * 8;
