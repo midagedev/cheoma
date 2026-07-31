@@ -260,7 +260,12 @@ export const GROUND_CAP = Object.freeze({
   village: Object.freeze({ dog: 12, cat: 15, magpie: 8 }),
   town: Object.freeze({ dog: 16, cat: 20, magpie: 12 }),
   capital: Object.freeze({ dog: 18, cat: 22, magpie: 14 }),
-  hanyang: Object.freeze({ dog: 34, cat: 42, magpie: 24 }),
+  // #20 R4(2026-08-01): 개천을 도성 안으로 들이면서 필지 남한선이 개천→성벽으로 바뀌어 도성
+  //   필지가 남촌까지 넓어졌다(hanyang seed42 391필지, 필지 z 최대 +232). 34 상한은 그 넓어진
+  //   필지장에서 view-cell 창(hidden 72m)을 못 덮어 any 커버리지가 0.847 로 하한 0.85 를 깼다.
+  //   실측: 36마리 0.951 · 38마리 0.951(seed99 0.882→0.939) → 무릎 바로 위 38 로 올린다.
+  //   전 종이 인스턴싱이라 드로우콜은 불변이고 추가되는 것은 인스턴스·삼각형뿐이다.
+  hanyang: Object.freeze({ dog: 38, cat: 42, magpie: 24 }),
 });
 
 export function groundPopulation(scale, parcelCount) {

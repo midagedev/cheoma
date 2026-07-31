@@ -33,6 +33,7 @@ import {
   cityGateStructureProfile,
   cityGateStreamClearance,
   cityGateTerrainProfile,
+  cityWallAngleInAperture,
   cityWallAngleInGate,
   cityWallClearance,
   cityWallContainsPolygon,
@@ -641,7 +642,9 @@ function assertSegments(spec, site, label) {
     const segment = segments[i];
     invariant(segment.length <= CITY_WALL_DIMENSIONS.maxSegmentLength + EPS, `${label}: segment too long`);
     invariant(segment.terrainError <= CITY_WALL_DIMENSIONS.maxTerrainError + EPS, `${label}: terrain chord error`);
-    invariant(!cityWallAngleInGate(spec, (segment.angle0 + segment.angle1) * 0.5), `${label}: wall crosses gate`);
+    // 개구부 = 사대문 + 수문(#20 R4). 수문 석축이 그 구멍을 채우므로 리본은 여기서도 끊긴다.
+    invariant(!cityWallAngleInAperture(spec, (segment.angle0 + segment.angle1) * 0.5),
+      `${label}: wall crosses an opening`);
     invariant(cityWallVegetationBlocked(spec, G.lerp(segment.p0, segment.p1, 0.5)), `${label}: vegetation reaches wall`);
     assertWallCourses(segment, label);
     const cap = cityWallSegmentCapProfile(segment, CITY_WALL_DIMENSIONS.thickness * 0.7);
@@ -688,13 +691,13 @@ function assertSegments(spec, site, label) {
       invariant(segment.joinedEnd && next.joinedStart, `${label}: continuous run lost join metadata`);
       invariant(pointNear(segment.corners[2], next.corners[1], 1e-9), `${label}: outer miter split`);
       invariant(pointNear(segment.corners[3], next.corners[0], 1e-9), `${label}: inner miter split`);
-    } else if (!(i === segments.length - 1 && !cityWallAngleInGate(spec, 0))) {
-      invariant(!segment.joinedEnd, `${label}: gate opening lost end-cap`);
+    } else if (!(i === segments.length - 1 && !cityWallAngleInAperture(spec, 0))) {
+      invariant(!segment.joinedEnd, `${label}: opening lost end-cap`);
     }
   }
   assertMerlonBlocks(segments, label, spec.seed);
   const first = segments[0], last = segments.at(-1);
-  if (!cityWallAngleInGate(spec, 0)) {
+  if (!cityWallAngleInAperture(spec, 0)) {
     invariant(last.joinedEnd && first.joinedStart, `${label}: cyclic seam lost join metadata`);
     invariant(pointNear(last.corners[2], first.corners[1], 1e-9), `${label}: cyclic outer miter split`);
     invariant(pointNear(last.corners[3], first.corners[0], 1e-9), `${label}: cyclic inner miter split`);

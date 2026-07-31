@@ -539,6 +539,8 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-parcel-rebuild-contract.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
+  // #20 R4 (2026-07-31): 개천 계약이 planVillage 폐쇄를 공유하므로 마을 계획 경로 변경에 함께 붙는다.
+  './check-creek.mjs',
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/pad-landing-plan.js']), [
   './check-architecture.mjs',

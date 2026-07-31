@@ -45,3 +45,42 @@ export function createStreamSpatialIndex(site) {
     stats: spatial.stats,
   });
 }
+
+// ── 개울·개천 다리 접지(단일 진실원) ────────────────────────────────────────
+// 판석교(평석교) 데크 표고는 렌더러가 즉석에서 계산하면 계약이 검사할 수 없다. 배치 산술을
+//   여기 한 곳에 두고 generators/village/features.js 가 그대로 소비한다(계획-렌더 이중 진실 금지).
+// 옛 식은 둑 표본을 `streamHalf + 3` 고정 오프셋에서 떴는데, 데크 **양 끝**은 span/2 에 있어
+//   둑이 그보다 높은 시드에서 널돌이 둑을 파고들었다(실측 2026-08-01: village 20260716 −0.08m,
+//   town 5 −0.26m, hanyang −0.18m). 실제 접지면인 데크 양 끝 지반을 표본에 포함해 접지를 정한다.
+export const BRIDGE_SLAB_DECK_LIFT = 0.55;   // 판석 상면 = 배치 y + 이 값(builder/bridge.js 규약)
+export const BRIDGE_BANK_INSET = 0.35;       // 데크를 둑 상면보다 이만큼 낮춰 문턱 단차를 줄인다
+
+export function bridgeDeckPlacement(site, spec, { surfaceY } = {}) {
+  const span = spec.span || 5;
+  const rot = spec.rot || 0;
+  const centerZ = site.streamZat(spec.x);
+  const across = { x: Math.cos(rot), z: -Math.sin(rot) };
+  const ends = [-1, 1].map((side) => ({
+    x: spec.x + across.x * side * span * 0.5,
+    z: spec.z + across.z * side * span * 0.5,
+  }));
+  const endGround = ends.map((point) => site.heightAt(point.x, point.z));
+  const bankOffset = Math.max(0, site.streamHalf || 0) + 3;
+  const bankGround = [-1, 1].map((side) => site.heightAt(spec.x, centerZ + side * bankOffset));
+  const contactY = Math.max(...bankGround, ...endGround);
+  const waterY = typeof surfaceY === 'number'
+    ? surfaceY
+    : (site.streamY ? site.streamY(spec.x) : 0);
+  const deckY = spec.type === 'arch'
+    ? waterY
+    : Math.max(waterY, contactY - BRIDGE_BANK_INSET);
+  return {
+    deckY,
+    deckTopY: deckY + BRIDGE_SLAB_DECK_LIFT,
+    ends,
+    endGround,
+    bankGround,
+    contactY,
+    waterY,
+  };
+}

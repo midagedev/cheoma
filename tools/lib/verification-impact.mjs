@@ -49,6 +49,18 @@ const EXACT_IMPACT = new Map([
     './check-camera-continuity.mjs',
     './check-architecture.mjs',
   ]],
+  // #20 R4: 성곽 렌더러와 지형 정점색은 어떤 fast check 도 import 하지 않으므로(three 의존)
+  // 정적 폐쇄로는 잡히지 않는다. 개천 계약이 두 파일의 소비 문자열(수문 spec 소비·건천 하상 항)을
+  // 검사하므로 소유를 명시한다.
+  ['src/village/citywall.js', [
+    './check-architecture.mjs',
+    './check-citywall.mjs',
+    './check-creek.mjs',
+  ]],
+  ['src/generators/village/terrain.js', [
+    './check-architecture.mjs',
+    './check-creek.mjs',
+  ]],
   ['src/env/weather-physical-geometry.js', [
     './check-weather-geometry.mjs',
   ]],

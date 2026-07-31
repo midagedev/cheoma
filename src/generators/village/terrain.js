@@ -52,6 +52,11 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const cForest = linCol(0x435a2a);  // R1.1: 원복 — 산은 하늘·성벽보다 어둡게(성벽 리본 분리는 회랑이 담당)
   const cScrub = linCol(0x606b3f);   // R1.1: 비전 판정 — 창백 워시 회수, 원값(0x566a38)보다 반 단계만 밝게
   const cBank = linCol(0x6d6249);    // 물가 축축한 흙
+  // 개천 건천 하상(#20 R4) — 구한말 도성 사진 판독(refs/hanyang-old §6): 개천 폭의 대부분이 물이
+  //   없는 마른 모래·자갈 바닥이고 물은 한쪽으로 몰린 얇은 줄기다. 저수로(streamWaterHalf) 밖 하도
+  //   (streamHalf)를 마른 자갈면으로 읽히게 한다. 새 재질·텍스처·드로우콜 0 — 지형 정점색 한 항이다.
+  //   화강암(cGranite)보다 어둡고 누런 강자갈 톤이라 하상이 흰 리본으로 뜨지 않는다.
+  const cDryBed = linCol(0x968d7c);
   const cFloodplain = linCol(0x788164); // 큰 물길의 충적 완사면(초지보다 옅고 습함)
   const cGranite = linCol(GRANITE);  // 화강암 밝은 회백(급경사·상부 노출, #113) — forest.js 와 공유 톤
   // #137 이끼 낀 회록 화강암 — 순수 화강암 100%가 아니라 숲색 쪽으로 살짝 섞어(레퍼런스: 바위에 낀 이끼)
@@ -82,6 +87,8 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   const pos = [], col = [];
   const idx = [];
   const stream = site.stream;
+  // 건천 하상은 도성 개천(성곽 도성 규모의 관류 하천)만 갖는다. 농촌 개울은 현행 색 그대로.
+  const urbanCreek = !!stream && stream.kind !== 'river' && site.scale === 'hanyang';
   const streamDistK = (x, z) => {
     if (!stream) return 0;
     const cz = site.streamZat(x);
@@ -135,6 +142,14 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
       outBase.lerp(cFloodplain, floodplain * (1 - bank) * 0.34);
     }
     if (bank > 0) outBase.lerp(cBank, bank * 0.7);
+    // 건천 하상: 물가(damp) 위에 덧칠하는 순서가 중요하다 — 물줄기 바로 옆은 축축한 흙으로 남고,
+    //   그 밖 하도만 마른 자갈로 넘어간다(사진의 4단 단면 중 ①자갈 위 얕은 물 대역).
+    if (urbanCreek) {
+      const d = Math.abs(z - site.streamZat(x));
+      const bed = smoothstep(site.streamWaterHalf * 0.8, site.streamWaterHalf * 1.3, d)
+        * smoothstep(site.streamHalf + 2.5, site.streamHalf - 1, d);
+      if (bed > 0) outBase.lerp(cDryBed, bed * 0.72);
+    }
     // #31-3: 원경 대기 감쇠 정점색(cFar)을 제거했다(파일 머리 주석의 유도). 대기는 scene.fog 소유.
     // 겨울 버퍼(#115 F): 기저색을 마른 갈회로 이동. 분지 초지·완사면 강, 깊은 숲(상록 잔존) 약, 물가 유지.
     //   지형 정점색은 정적이므로 forest.js 계절 버퍼 방식과 동형으로 겨울 전용 버퍼를 만들어 setSeason 스왑.

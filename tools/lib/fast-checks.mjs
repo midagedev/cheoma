@@ -81,6 +81,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-rim-gate.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
+  './check-creek.mjs',
   './check-choga-roof.mjs',
   './check-chimney-anchor.mjs',
   './check-glossary-plan.mjs',

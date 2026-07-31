@@ -1,5 +1,5 @@
 import * as G from '../core/math/geom2.js';
-import { terrainMeshHeightAt } from './terrain-grid.js';
+import { streamSurfaceHeightAt, terrainMeshHeightAt } from './terrain-grid.js';
 
 // 한양 성곽의 순수 평면 계약. 좌표는 village 공통 규약(+z=남)을 따른다.
 // plan·roads·parcels·forest·renderer가 같은 contour와 치수를 소비하므로 성문, 길, 식생,
@@ -142,6 +142,46 @@ export const CITY_GATE_PAVILION = Object.freeze({
   upperRoofPitch: 0.42,
   minSpan: 2.2,
   maxColumns: 15,
+});
+
+// 수문(水門) — 개천이 성벽을 지나는 통과부. 고증: 오간수문은 처음 홍예 3개였고 1421년 범람 뒤
+//   1422년 2개를 더해 **홍예 5개**가 되었다(docs/joseon-city.md §개천). 사대문과는 별개 시설이며
+//   흥인지문·광희문 사이에 있었으므로, 이 계약은 수문 개구부가 사대문 개구부와 겹치는 것을 금지한다.
+//   치수는 새로 저작하지 않고 성벽·성문 어휘를 그대로 재사용한다: 통과부 두께는 성벽 두께,
+//   상면 높이는 인접 성벽 상면(지반+bodyHeight-foundationSink), 켜·줄눈·여장은 성벽과 같은 값.
+//   홍예 폭은 실측이 아니라 **수로 폭 파생**이다 — 개천 저수로(streamWaterHalf)가 성벽 중심선을
+//   지나는 실제 사교(斜交) 현(弦)을 덮어야 물이 벽 아래로 잠기지 않는다. 개수 5는 고증 고정값이라
+//   폭이 넓어지면 홍예가 굵어지고, 좁아지면 얇아진다(개수를 늘려 고증값을 흩지 않는다).
+export const CITY_WATER_GATE = Object.freeze({
+  arches: 5,             // 1422년 이후 오간수문 홍예 수(고증 고정)
+  abutment: 2.4,         // 홍예 열 양 끝 벽체(수문 어깨) — 성벽 두께와 같은 급의 석축
+  pierWidth: 1.1,        // 홍예 사이 돌기둥
+  minSpan: 22,           // 홍예 5개 × 최소폭 + 돌기둥 4 + 어깨 2 의 하한
+  maxSpan: 36,           // 하도 전폭 추종 상한 — 이 이상 넓히면 홍예가 아니라 교량 아치가 된다
+  hardMaxSpan: 80,       // 저수로 보장(아래)조차 넘길 수 없는 절대 상한(퇴화 접선 방어)
+  archSegments: 8,       // 짝수라 정점(이맛돌)에 vertex 가 놓인다
+  sillDrop: 0.3,         // 하상보다 낮은 석축 문턱(물은 문턱 위를 흐른다)
+  springLift: 0.55,      // 문턱 위 기석(springing) 켜 — 홍예는 저수위보다 살짝 높은 데서 시작한다.
+                         //   기석을 하상에 붙이면 반원의 아래 절반이 흙·물에 잠겨 홍예가 얕은
+                         //   스캘럽으로 읽힌다(비전 판정 2026-08-01). 그 아래는 수직 문협(jamb)이다.
+  crownHeadroom: 0.9,    // 이맛돌 위 최소 스팬드럴(여장 발치까지)
+  minArchWidth: 2.2,
+  apertureOverlap: 0.8,  // 성벽 리본 끝을 수문 석축 안으로 물려 곡선-현 오차 틈을 없앤다
+  // 홍예 열 양 끝 지반은 **기석선(springLift) 아래**여야 한다. 그 아래는 수직 문협이므로 둑이
+  //   기석보다 높으면 바깥 홍예의 발이 흙에 묻힌다 — 그때 열을 좁힌다. 구 고정값 0.35m 는 넓은
+  //   골짜기(어깨 60m)의 거의 평평한 둑에서 맞춘 수였고, 개착 하도(어깨 10m)에서는 둑이 더 빨리
+  //   올라와 물리적 기준(기석선)과 어긋났다(2026-08-01).
+  archBankMargin: 0.1,   // 격자 표본 사이 보간 여유
+  spanShrinkStep: 1,
+  minCosNormal: 0.12,    // 성벽에 거의 접선인 통과부의 폭 폭주 방지
+  gateClearance: 3,      // 사대문 개구부와 수문 개구부 사이 최소 여유(별개 시설)
+  mergeDistance: 24,     // 이 거리 안의 두 교차는 한 통과부(짧은 접선 출입)
+  // 통과부는 성벽 둘레의 이 몫을 넘을 수 없다. 넘으면 수문을 **세우지 않는다** — 최소 성곽
+  //   (R=74, 성벽 반경 46m)에서 개울이 성벽에 거의 접선(cosN 0.13)으로 만나면 필요 폭이 36m,
+  //   즉 둘레의 1/4 이 되어 성곽이 아니라 교량이 된다(2026-08-01 실측). 그 규모의 개울은 성벽
+  //   아래를 지나가는 것이 이 라운드 이전과 같은 거동이고, 도성(반경 282~293m)에서는 상한이
+  //   85m 라 실제 폭 22~40m 에 전혀 걸리지 않는다.
+  spanPerimeterK: 0.30,
 });
 
 const wrapAngle = (angle) => {
@@ -628,6 +668,255 @@ function validateGateSpacing(spec) {
   }
 }
 
+// ── 수문 배치(개천의 성벽 통과부) ─────────────────────────────────────────────
+// 개천 중심선이 성벽 contour 안↔밖을 바꾸는 지점을 실제로 찾아(해석 근사 아님) 통과부를 만든다.
+// 렌더러는 이 절대 좌표만 소비하고 스스로 교차를 다시 풀지 않는다(계획-렌더 이중 진실 금지).
+function creekWallCrossings(spec, site) {
+  const pts = site.stream?.pts;
+  if (!pts?.length) return [];
+  const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
+  const insideAt = (x) => cityWallClearance(spec, { x, z: site.streamZat(x) }) > 0;
+  const steps = 720;
+  const crossings = [];
+  let prevX = x0, prevIn = insideAt(x0);
+  for (let i = 1; i <= steps; i++) {
+    const x = x0 + (x1 - x0) * i / steps;
+    const inside = insideAt(x);
+    if (inside !== prevIn) {
+      let lo = prevX, hi = x;
+      for (let k = 0; k < 42; k++) {
+        const mid = (lo + hi) * 0.5;
+        if (insideAt(mid) === prevIn) lo = mid; else hi = mid;
+      }
+      crossings.push({ x: (lo + hi) * 0.5, entering: inside });
+    }
+    prevIn = inside; prevX = x;
+  }
+  return crossings;
+}
+
+// 통과부 하나의 사교(斜交) 계수. 1 = 성벽에 직교, 0 = 접선. 저수로가 성벽 중심선을 지나는
+// 실제 현(弦) 길이가 2·waterHalf/cos 이므로 이 값이 수문 폭을 정한다.
+function creekCrossingCosNormal(site, x, normal) {
+  const d = Math.max(0.25, site.R * 0.001);
+  const dz = (site.streamZat(x + d) - site.streamZat(x - d)) / (2 * d);
+  const len = Math.hypot(1, dz);
+  return Math.abs((normal.x + normal.z * dz) / len);
+}
+
+export function planCityWaterGates(spec, site, {
+  widthSamples = 13,
+  depthSamples = 5,
+} = {}) {
+  if (!spec || !site.stream) return [];
+  const W = CITY_WATER_GATE;
+  const thickness = CITY_WALL_DIMENSIONS.thickness;
+  // 수문도 사대문과 같은 규모 계수를 쓴다. 최소 성곽(R=74, 성벽 반경 ≈46m)에서 22m 짜리 통과부는
+  //   성벽 둘레의 큰 몫을 먹어 사대문 사이에 0.6m 자투리 리본을 남겼다(check:citywall wall-only
+  //   sweep seed=14/R=74, 2026-08-01). 폭 치수만 계수를 태우고 높이(문턱·기석·스팬드럴)는 물 깊이
+  //   기준이라 절대값으로 둔다.
+  const gs = Math.min(1, Math.max(0.4, spec.gateScale || 1));
+  const minSpan = W.minSpan * gs;
+  const abutment = W.abutment * gs;
+  const pierWidth = W.pierWidth * gs;
+  // 통과부 폭은 저수로(streamWaterHalf)가 아니라 **하도 전폭**(streamHalf, 홍수 단면)에서 나온다.
+  //   고증 근거: 1421년 범람 뒤 1422년에 홍예를 2개 **증설**했다 — 즉 수문은 평시 물줄기가 아니라
+  //   출수 단면에 맞춰 커졌다. 건천의 마른 자갈 하상까지가 개천의 실제 폭이다.
+  const floodHalf = Math.max(1, site.streamHalf || site.streamWaterHalf || 1);
+  const waterHalf = Math.max(0.5, site.streamWaterHalf || floodHalf);
+  const out = [];
+  for (const crossing of creekWallCrossings(spec, site)) {
+    const creek = { x: crossing.x, z: site.streamZat(crossing.x) };
+    let angle = wrapAngle(Math.atan2(creek.x - spec.cx, creek.z - spec.cz));
+    const eps = TAU / spec.radii.length * 0.125;
+    const speed = G.dist(pointOnCityWall(spec, angle - eps), pointOnCityWall(spec, angle + eps))
+      / (eps * 2);
+    const normal0 = normalOnCityWall(spec, angle);
+    const cosNormal = Math.max(W.minCosNormal, creekCrossingCosNormal(site, creek.x, normal0));
+    const floodChord = 2 * floodHalf / cosNormal;
+    const waterChord = 2 * waterHalf / cosNormal;
+    // 폭 결정 순서: (1) 하도 전폭을 덮으려 하되 교량 규모(maxSpan)에서 멈춘다. (2) 그래도
+    //   **저수로 현은 반드시 홍예 열 안에 든다** — 물이 석축 밑으로 사라지는 것은 허용하지 않는다.
+    //   마른 자갈 하상 일부가 석축 아래로 물리는 것은 허용(그림에 물이 끊기지 않는다).
+    const waterFloor = waterChord + pierWidth * (W.arches - 1) + abutment * 2;
+    let span = Math.min(W.hardMaxSpan, Math.max(
+      Math.min(W.maxSpan, Math.max(minSpan, floodChord + abutment * 2)),
+      waterFloor,
+    ));
+    // 성벽에 비해 과대한 통과부는 세우지 않는다(위 spanPerimeterK 주석).
+    if (span > Math.max(minSpan, spec.meanRadius * W.spanPerimeterK)) continue;
+    // 사대문과 별개 시설: 수문 개구부가 성문 개구부에 닿으면 성벽을 따라 밀어낸다(고증 — 오간수문은
+    //   흥인지문·광희문 **사이**의 독립 시설). 실측 시드에서는 발동하지 않으며(중심 간 55~102m),
+    //   발동해도 drift 로 기록되어 계약이 그 크기를 검사한다.
+    let drift = 0;
+    for (let pass = 0; pass < 4; pass++) {
+      let moved = false;
+      for (const gate of spec.gates) {
+        const need = gate.halfAngle + span * 0.5 / Math.max(1, speed)
+          + W.gateClearance / Math.max(1, speed);
+        if (angularDistance(angle, gate.angle) >= need) continue;
+        const before = wrapAngle(gate.angle - need), after = wrapAngle(gate.angle + need);
+        angle = angularDistance(angle, before) <= angularDistance(angle, after) ? before : after;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    // 석축은 성벽의 **현(弦)** 위에 앉는다 — 접선 위에 앉히면 양 끝이 성벽 바깥으로 0.5m 남짓
+    //   튀어나와 "벽면에 덧댄 별개 판"으로 읽힌다(비전 판정 2026-08-01). 현으로 놓으면 양 끝이
+    //   성벽 선에 정확히 물리고 가운데만 새그만큼 안으로 물러난다(실제 수문 석축도 성벽면보다
+    //   살짝 물러나 있다). 덕분에 두께를 키워 호(弧)를 삼킬 필요도 없어진다.
+    //   폭이 확정된 **뒤** 다시 앉혀야 양 끝이 성벽 선에 정확히 물린다(아래 하상 축소 루프가 폭을
+    //   줄이므로, 앉히기를 한 번만 하면 줄어든 폭의 양 끝이 성벽에서 새그만큼 어긋난다).
+    const seatOnChord = (width) => {
+      const half = width * 0.5 / Math.max(1, speed);
+      const endA = pointOnCityWall(spec, angle - half);
+      const endB = pointOnCityWall(spec, angle + half);
+      const chord = Math.max(1e-6, G.dist(endA, endB));
+      const center = { x: (endA.x + endB.x) * 0.5, z: (endA.z + endB.z) * 0.5 };
+      const tan = { x: (endB.x - endA.x) / chord, z: (endB.z - endA.z) / chord };
+      let nrm = { x: -tan.z, z: tan.x };
+      if (nrm.x * (center.x - spec.cx) + nrm.z * (center.z - spec.cz) < 0) {
+        nrm = { x: -nrm.x, z: -nrm.z };
+      }
+      return { chord, center, tan, nrm };
+    };
+    let seat = seatOnChord(span);
+    span = seat.chord;
+    let point = seat.center;
+    let tangent = seat.tan;
+    let normal = seat.nrm;
+    const at = (localX, localZ) => terrainMeshHeightAt(site,
+      point.x + tangent.x * localX + normal.x * localZ,
+      point.z + tangent.z * localX + normal.z * localZ);
+    const reseat = () => {
+      seat = seatOnChord(span);
+      span = seat.chord; point = seat.center; tangent = seat.tan; normal = seat.nrm;
+    };
+    // 홍예 열은 **하상 평탄면 안**에 든다. 하도 전폭을 그대로 쓰면 사교 통과부에서 열의 양 끝이
+    //   둑을 파고들어 바깥 홍예가 흙에 박힌다(비전 판정 2026-07-31). 문턱 기준으로 양 끝 지반이
+    //   기석선(springLift)보다 높으면 폭을 줄인다 — 다만 저수로 현 보장(waterFloor)은 침해하지 않는다.
+    const bedY = at(0, 0) - W.sillDrop;
+    for (let step = 0; step < 40; step++) {
+      const edge = span * 0.5 - abutment;
+      if (Math.max(at(-edge, 0), at(edge, 0)) - bedY <= W.springLift) break;
+      const next = span - W.spanShrinkStep;
+      if (next < Math.max(minSpan, waterFloor)) break;
+      span = next;
+      reseat();
+    }
+    // drift = 통과점에서 **성벽을 따라** 밀려난 거리(사대문 회피가 만드는 유일한 이동). 현 중심이
+    //   호보다 새그만큼 안으로 물러난 반경 성분은 inset 으로 따로 기록한다 — 두 값을 합쳐 재면
+    //   정상적인 현 배치가 "밀려남"으로 오판된다.
+    const toCreek = { x: point.x - creek.x, z: point.z - creek.z };
+    drift = Math.abs(toCreek.x * tangent.x + toCreek.z * tangent.z);
+    const inset = Math.abs(toCreek.x * normal.x + toCreek.z * normal.z);
+    // 현 배치 덕분에 두께는 성벽과 같다(새그는 기록만 하고 두께를 늘리지 않는다 — 늘리면 다시
+    //   벽면 앞으로 튀어나온 판이 된다). 개구부는 석축보다 조금 좁아 리본 끝이 석축 안으로 물린다.
+    const radiusHere = cityWallRadiusAt(spec, angle);
+    const sagitta = span * span / (8 * Math.max(1, radiusHere));
+    const depth = thickness;
+    // 개구부는 석축보다 조금 좁다 — 리본 끝을 석축 안으로 물려 양 끝 이음에 틈이 생기지 않게 한다
+    //   (겹침은 돌 속이라 보이지 않는다).
+    const halfAngle = Math.max(0, span * 0.5 - W.apertureOverlap) / Math.max(1, speed);
+    let min = Infinity, max = -Infinity;
+    for (let ix = 0; ix < widthSamples; ix++) {
+      const localX = -span * 0.5 + span * (widthSamples === 1 ? 0.5 : ix / (widthSamples - 1));
+      for (let iz = 0; iz < depthSamples; iz++) {
+        const localZ = -depth * 0.5
+          + depth * (depthSamples === 1 ? 0.5 : iz / (depthSamples - 1));
+        const y = at(localX, localZ);
+        min = Math.min(min, y); max = Math.max(max, y);
+      }
+    }
+    out.push({
+      index: out.length,
+      name: `water-${out.length}`,
+      angle, halfAngle, span, depth, sagitta, scale: gs,
+      x: point.x, z: point.z, dirX: normal.x, dirZ: normal.z,
+      cosNormal, drift, inset, entering: crossing.entering,
+      floodChord, waterChord,
+      creek: { x: creek.x, z: creek.z },
+      terrain: { min, max, drop: max - min },
+      waterY: streamSurfaceHeightAt(site, creek.x, creek.z),
+      arches: W.arches,
+    });
+  }
+  // 짧은 접선 출입(들어왔다 곧 나가는 굽이)은 하나의 통과부로 합친다 — 두 수문이 겹쳐 서지 않게.
+  const merged = [];
+  for (const record of out) {
+    const near = merged.find((kept) => G.dist(kept, record) < W.mergeDistance);
+    if (near) { near.mergedCount = (near.mergedCount || 1) + 1; continue; }
+    merged.push(record);
+  }
+  return merged.map((record, index) => ({ ...record, index, name: `water-${index}` }));
+}
+
+// 수문 석축의 완전한 물리 spec. 로컬 x = 성벽 접선, 로컬 z = 성 바깥 법선(성문과 같은 규약),
+// y 는 절대 표고. 순수 함수라 렌더러·검증이 같은 값을 본다.
+export function cityWaterGateProfile(waterGate) {
+  const W = CITY_WATER_GATE;
+  const { span, terrain } = waterGate;
+  const gs = Math.min(1, Math.max(0.4, waterGate.scale || 1));
+  const pierWidth = W.pierWidth * gs;
+  const minAbutment = W.abutment * gs;
+  const bottomY = terrain.min - CITY_WALL_DIMENSIONS.foundationSink;
+  const sillY = terrain.min - W.sillDrop;
+  // 상면은 인접 성벽 상면과 같은 규칙(지반 + 지상 노출 높이)이되, 통과부 안에서는 수평이다.
+  // 실제 수문은 물 위를 수평으로 건너므로 지형을 따라 내려가는 리본과 달리 한 높이를 갖는다.
+  const topY = terrain.max + (CITY_WALL_DIMENSIONS.bodyHeight - CITY_WALL_DIMENSIONS.foundationSink);
+  const usable = span - minAbutment * 2 - pierWidth * (W.arches - 1);
+  // 반원 홍예이므로 반지름 = 폭/2. 이맛돌 위 스팬드럴이 모자라면 홍예를 좁혀 반원을 유지한다
+  // (납작한 타원 홍예로 바꾸지 않는다 — 홍예는 반원이 어휘다).
+  const springY = sillY + W.springLift;
+  const archWidth = Math.max(W.minArchWidth * gs, Math.min(
+    usable / W.arches,
+    2 * (topY - springY - W.crownHeadroom),
+  ));
+  const radius = archWidth * 0.5;
+  const openingTotal = archWidth * W.arches + pierWidth * (W.arches - 1);
+  const abutment = Math.max(minAbutment, (span - openingTotal) * 0.5);
+  const crownY = springY + radius;
+  const openings = [], piers = [];
+  let cursor = -span * 0.5 + abutment;
+  for (let i = 0; i < W.arches; i++) {
+    const centerX = cursor + radius;
+    const intrados = [];
+    for (let s = 0; s <= W.archSegments; s++) {
+      const a = Math.PI * (1 - s / W.archSegments);
+      intrados.push({ x: centerX + Math.cos(a) * radius, y: springY + Math.sin(a) * radius });
+    }
+    openings.push({ index: i, x0: cursor, x1: cursor + archWidth, centerX, intrados });
+    cursor += archWidth;
+    if (i < W.arches - 1) {
+      piers.push({ index: i, x0: cursor, x1: cursor + pierWidth });
+      cursor += pierWidth;
+    }
+  }
+  const shoulders = [
+    { index: 0, x0: -span * 0.5, x1: -span * 0.5 + abutment },
+    { index: 1, x0: span * 0.5 - abutment, x1: span * 0.5 },
+  ];
+  return {
+    span, depth: waterGate.depth, halfDepth: waterGate.depth * 0.5,
+    bottomY, sillY, springY, crownY, topY,
+    // 문협: 문턱과 기석 사이 수직 벽면(홍예 아래 통로 몸통).
+    jamb: { y0: sillY, y1: springY, height: springY - sillY },
+    courseSplitY: sillY + (topY - sillY) * CITY_WALL_COURSES.baseFraction,
+    archWidth, radius, pierWidth, abutment, scale: gs,
+    openings, piers, shoulders,
+    // 홍예 열이 실제로 덮는 폭. 저수로 현(waterChord)보다 넓어야 물이 석축 밑으로 잠기지 않는다.
+    openingTotal,
+    // 여장은 성벽·육축과 같은 두께·높이·톱니 규칙을 쓴다(성가퀴가 수문 위로 이어진다).
+    parapet: {
+      y: topY, height: CITY_WALL_DIMENSIONS.capHeight,
+      thickness: CITY_WALL_DIMENSIONS.thickness * 0.7, length: span,
+    },
+    // 물이 문턱 위를 흐르고 이맛돌 아래로 지나가는지(계약이 검사하는 두 여유).
+    submergence: waterGate.waterY - sillY,
+    waterClearance: crownY - waterGate.waterY,
+  };
+}
+
 export function planCityWall(site, seed, corePolys = []) {
   const n = sampleCountFor(site);
   const C = site.center;
@@ -678,6 +967,9 @@ export function planCityWall(site, seed, corePolys = []) {
   spec.axes.jongnoZ = jongno.z;
   spec.gates = [south, jongno.east, north, jongno.west];
   validateGateSpacing(spec);
+  // 수문은 사대문이 확정된 뒤에 놓인다 — 사대문 배치는 개천 여유(gateStreamClearance)만 보고,
+  //   수문은 그 결과 성벽 위에 남은 실제 통과부를 채운다. 순서를 뒤집으면 두 시설이 서로를 밀어낸다.
+  spec.waterGates = planCityWaterGates(spec, site);
 
   for (const poly of corePolys) {
     if (!cityWallContainsPolygon(spec, poly, CORE_MARGIN * 0.5)) {
@@ -692,12 +984,23 @@ export function cityWallAngleInGate(spec, angle) {
   return spec.gates.some((gate) => angularDistance(a, gate.angle) < gate.halfAngle - 1e-10);
 }
 
+export function cityWallAngleInWaterGate(spec, angle) {
+  const a = wrapAngle(angle);
+  return (spec.waterGates || []).some((wg) => angularDistance(a, wg.angle) < wg.halfAngle - 1e-10);
+}
+
+// 성벽 리본이 비는 개구부 = 사대문 + 수문. 두 시설 모두 자기 석축이 그 구멍을 채우므로
+// 리본은 여기서 끊긴다. 사대문 전용 계약(간격·접근·식생)은 cityWallAngleInGate 를 계속 쓴다.
+export function cityWallAngleInAperture(spec, angle) {
+  return cityWallAngleInGate(spec, angle) || cityWallAngleInWaterGate(spec, angle);
+}
+
 function wallBreakAngles(spec) {
   const n = spec.radii.length;
   const angles = Array.from({ length: n }, (_, i) => i / n * TAU);
-  for (const gate of spec.gates) {
-    angles.push(wrapAngle(gate.angle - gate.halfAngle));
-    angles.push(wrapAngle(gate.angle + gate.halfAngle));
+  for (const aperture of [...spec.gates, ...(spec.waterGates || [])]) {
+    angles.push(wrapAngle(aperture.angle - aperture.halfAngle));
+    angles.push(wrapAngle(aperture.angle + aperture.halfAngle));
   }
   angles.sort((a, b) => a - b);
   const unique = angles.filter((a, i) => i === 0 || Math.abs(a - angles[i - 1]) > 1e-9);
@@ -734,7 +1037,7 @@ export function sampleCityWallSegments(spec, site, {
 
   const append = (a0, a1, depth) => {
     const midAngle = (a0 + a1) * 0.5;
-    if (cityWallAngleInGate(spec, midAngle)) return;
+    if (cityWallAngleInAperture(spec, midAngle)) return;
     const p0 = pointOnCityWall(spec, a0), p1 = pointOnCityWall(spec, a1);
     const pm = pointOnCityWall(spec, midAngle);
     const length = G.dist(p0, p1);
@@ -774,7 +1077,7 @@ export function sampleCityWallSegments(spec, site, {
   }
   // angle 0이 성문 구멍이 아니면 TAU→0도 같은 폐곡선 run이다. 선형 배열 끝이라고 end-cap을 두면
   // 남문이 정남에서 비켜난 씨앗에만 미세한 V 틈이 생긴다.
-  if (segments.length > 1 && !cityWallAngleInGate(spec, 0)) {
+  if (segments.length > 1 && !cityWallAngleInAperture(spec, 0)) {
     const last = segments[segments.length - 1], first = segments[0];
     if (Math.abs(last.angle1 - TAU) <= 1e-9 && Math.abs(first.angle0) <= 1e-9) {
       const miter = sharedMiter(last.normal, first.normal);
@@ -963,8 +1266,12 @@ export function cityWallMerlonSpans(runLength, {
   };
   if (!(runLength > 0)) return build(0, 0, gap, true);
   const minLength = length - lengthBand, maxLength = length + lengthBand;
-  // 성문에 붙은 아주 짧은 자투리 run 은 타 하나로 덮는다(톱니 한 칸도 못 넣는 길이).
-  if (runLength <= maxLength) return build(1, runLength, 0, runLength < minLength - 1e-9);
+  // 성문·수문에 붙은 아주 짧은 자투리 run 은 타 하나로 덮는다(톱니 한 칸도 못 넣는 길이).
+  //   타 하나 + 타구 0 은 길이가 얼마든 **톱니 리듬이 없는 자투리**다. 구 코드는 길이가 우연히
+  //   타 밴드(2.8~3.2m)에 들면 degenerate=false 로 보고해, 회귀 계약의 "긴 run 타구 0.3~0.4m"
+  //   밴드에 걸렸다(#20 R4 에서 수문 개구부가 성문 개구부 옆에 3.06m 자투리를 남기며 표면화).
+  //   렌더 형상은 그대로이고 라벨만 바로잡는다(degenerate 는 계약 라벨 전용).
+  if (runLength <= maxLength) return build(1, runLength, 0, true);
   // 타 길이는 밴드 안에 두고 run 에 정확히 맞춘다. 한 타의 정수배가 밴드로 떨어지지 않는 짧은
   // 자투리에서만 타구가 밴드를 벗어나며(긴 run 은 항상 두 밴드를 함께 만족한다), 어느 쪽 이탈이
   // 작은지 후보를 훑어 고른다. 마지막 타를 잘라 남기는 방식은 톱니 리듬을 깨서 쓰지 않는다.

@@ -108,6 +108,9 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-auxiliary-building-geometry.mjs',
   'tools/check-auxiliary-building-plan.mjs',
   'tools/check-drainage-plan.mjs',
+  // #20 R4: 개천 관류·종로 불침범·수문(오간수문) 순수 계약. FAST_CHECKS 소속이라 어떤
+  // 라우팅에서도 함께 돌고, 브라우저를 쓰지 않는다(성곽 형상 캡처는 shoot:hanyang 이 소유).
+  'tools/check-creek.mjs',
   'tools/check-dangsan-plan.mjs',
   'tools/check-surface-browser-suite.mjs',
   'tools/check-mud-wall-contract.mjs',

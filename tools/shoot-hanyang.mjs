@@ -101,6 +101,27 @@ if (view === 'aerial') {
   const gateY = plan.site.heightAt(gate.x, gate.z);
   campos = new THREE.Vector3(camX, camY, camZ);
   target = new THREE.Vector3(gate.x, gateY + 7, gate.z);
+} else if (view === 'sugumun' || view === 'sugumun2') {
+  // 수문(오간수문) 근경 — 개천이 성벽을 지나는 통과부. 성 밖 하류쪽 사선에서 홍예 열·여장·
+  //   마른 하상을 함께 본다(#20 R4). 수문이 없으면 남문으로 폴백해 캡처 자체는 실패하지 않는다.
+  fov = 46;
+  const wgIndex = view === 'sugumun2' ? 1 : 0;
+  const wg = (plan.features.cityWall && plan.features.cityWall.waterGates
+    && plan.features.cityWall.waterGates[wgIndex])
+    || (plan.features.cityWall && plan.features.cityWall.gates.find((g) => g.name === 'south'))
+    || { x: 0, z: cen.z + R * 0.65, dirX: 0, dirZ: 1 };
+  let dx = Number.isFinite(wg.dirX) ? wg.dirX : 0;
+  let dz = Number.isFinite(wg.dirZ) ? wg.dirZ : 1;
+  const dLen = Math.hypot(dx, dz) || 1;
+  dx /= dLen; dz /= dLen;
+  const tx = -dz, tz = dx;
+  // 개천 축(하류)에서 홍예 열을 정면으로 본다 — 구한말 오간수문 사진의 시점. 성벽 법선 방향으로
+  //   비스듬히 서면 근경 둑이 홍예 아래를 가려 아치가 얕은 스캘럽으로 읽힌다(비전 판정 2026-08-01).
+  const camX = wg.x + dx * 34 + tx * 8;
+  const camZ = wg.z + dz * 34 + tz * 8;
+  const wy = plan.site.heightAt(wg.x, wg.z);
+  campos = new THREE.Vector3(camX, wy + 7.5, camZ);
+  target = new THREE.Vector3(wg.x, wy + 2.2, wg.z);
 } else if (view === 'north') {
   // 숙정문(북문) 산길 근경 — 도성 안에서 북악 급사면·성벽·문루를 올려다봄.
   fov = 48;
@@ -220,6 +241,8 @@ const shots = [
   ['hanyang-east-gate', 'scale=hanyang&view=east&time=day'],
   ['hanyang-west-gate', 'scale=hanyang&view=west&time=day'],
   ['hanyang-north', 'scale=hanyang&view=north&time=day'],
+  ['hanyang-sugumun', 'scale=hanyang&view=sugumun&time=day'],
+  ['hanyang-sugumun-2', 'scale=hanyang&view=sugumun2&time=day'],
   ['hanyang-sunset', 'scale=hanyang&view=aerial&time=sunset'],
   ['hanyang-sijeon-day', 'scale=hanyang&view=sijeon&time=day'],
   ['hanyang-sijeon-sunset', 'scale=hanyang&view=sijeon&time=sunset'],

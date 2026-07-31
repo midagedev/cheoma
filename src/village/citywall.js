@@ -15,6 +15,7 @@ import {
   cityWallMerlonLoophole,
   cityWallMerlonPlan,
   cityWallMerlonSpans,
+  cityWaterGateProfile,
   sampleCityWallSegments,
 } from './citywall-contour.js';
 
@@ -316,13 +317,123 @@ export function buildCityWall(spec, site) {
     dancheongBracket: dancheong?.bracket || woodMat,
   };
   for (const gate of gates) group.add(buildGate(gate, site, M, seed));
+  // 수문(오간수문): 개천이 성벽을 지나는 통과부. 석재·그늘 재질을 성벽과 그대로 공유하므로
+  //   병합 후 드로우콜 증가는 0이다.
+  for (const waterGate of (spec.waterGates || [])) group.add(buildWaterGate(waterGate, M, seed));
 
   // 벽·문의 다수 메시(문루 기둥·석축 등)를 재질별 병합 → 소수 드로우콜(정적이라 손실 없음).
   const merged = mergeStatic([group], 'city-wall');
   merged.userData.isCityWall = true;
   merged.userData.segmentCount = segments.length;
   merged.userData.merlonCount = merlons.runs.reduce((sum, run) => sum + run.count, 0);
+  merged.userData.waterGateCount = (spec.waterGates || []).length;
   return merged;
+}
+
+// 수문 한 기: 하상 석축 문턱 + 홍예 5개(실제로 뚫린 통로) + 돌기둥·어깨 + 수평 상면 + 여장 링.
+//   성벽 리본은 이 자리에서 끊겨 있고(cityWallAngleInAperture), 이 석축이 그 구멍을 채운다.
+//   좌표는 순수 profile 이 준 것(로컬 x=성벽 접선, 로컬 z=성 바깥, y=절대)을 그대로 쓴다.
+function buildWaterGate(waterGate, M, wallSeed) {
+  const g = new THREE.Group(); g.name = `water-gate-${waterGate.index}`;
+  const p = cityWaterGateProfile(waterGate);
+  g.position.set(waterGate.x, 0, waterGate.z);
+  g.rotation.y = Math.atan2(waterGate.dirX, waterGate.dirZ);
+  const seed = ((wallSeed >>> 0) ^ Math.round(waterGate.angle * 1000) ^ 0x5eed) >>> 0;
+
+  const stoneP = [], stoneI = [], stoneC = [];
+  const darkP = [], darkI = [], darkC = [];
+  const hd = p.halfDepth;
+  const mouth = V.shadeMouth, deep = V.shadeDeep;
+
+  // 하상 문턱 슬래브: 홍예 밑을 지나는 석축 바닥. 물은 이 위를 흐르고 돌기둥은 여기서 선다.
+  const sillRect = { x0: -p.span * 0.5, x1: p.span * 0.5, z0: -hd, z1: hd };
+  // 기초 저면을 닫는다. 지형 절단 에지 근처 저각에서 밑면이 열려 두께 없는 셸로 읽혔다
+  //   (비전 판정 2026-08-01). 삼각형 +2 로 끝나는 마감이다.
+  pushRectPrism(stoneP, stoneI, stoneC, sillRect, sillRect, p.bottomY, p.sillY, {
+    value: V.base, seed, stream: 3, bond: true, withBottom: true,
+  });
+
+  // 어깨·돌기둥: 성벽과 같은 2켜(대석/몸통) 위계.
+  for (const [zoneIndex, zone] of [...p.shoulders, ...p.piers].entries()) {
+    const rect = { x0: zone.x0, x1: zone.x1, z0: -hd, z1: hd };
+    for (const [courseIndex, band] of [
+      [CITY_WALL_COURSES.keys[0], p.sillY, p.courseSplitY],
+      [CITY_WALL_COURSES.keys[1], p.courseSplitY, p.topY],
+    ].entries()) {
+      const [key, y0, y1] = band;
+      if (y1 - y0 <= 1e-4) continue;
+      pushRectPrism(stoneP, stoneI, stoneC, rect, rect, y0, y1, {
+        value: key === CITY_WALL_COURSES.keys[0] ? V.base : V.body,
+        seed, stream: (zoneIndex * 2 + courseIndex) * 37, bond: true,
+      });
+    }
+  }
+
+  // 홍예: 안쪽 곡면(그늘)은 실제로 뚫린 통로의 배럴이고, 그 위 스팬드럴 석면이 상면까지 채운다.
+  //   기석 아래는 수직 문협(jamb)이라 통로가 문턱까지 온전히 뚫린다.
+  for (const opening of p.openings) {
+    if (p.jamb.height > 1e-4) {
+      for (const [side, x] of [[-1, opening.x0], [1, opening.x1]]) {
+        pushQuad(darkP, darkI, darkC, [
+          [x, p.jamb.y0, -hd], [x, p.jamb.y0, hd],
+          [x, p.jamb.y1, hd], [x, p.jamb.y1, -hd],
+        ], [-side, 0, 0], [mouth, mouth, deep, deep]);
+      }
+    }
+  }
+  for (const opening of p.openings) {
+    for (let i = 0; i < opening.intrados.length - 1; i++) {
+      const a = opening.intrados[i], b = opening.intrados[i + 1];
+      const mx = (a.x + b.x) * 0.5, my = (a.y + b.y) * 0.5;
+      const inward = [-(mx - opening.centerX), -(my - p.springY), 0];
+      pushQuad(darkP, darkI, darkC, [
+        [a.x, a.y, -hd], [b.x, b.y, -hd], [b.x, b.y, 0], [a.x, a.y, 0],
+      ], inward, [mouth, mouth, deep, deep]);
+      pushQuad(darkP, darkI, darkC, [
+        [a.x, a.y, 0], [b.x, b.y, 0], [b.x, b.y, hd], [a.x, a.y, hd],
+      ], inward, [deep, deep, mouth, mouth]);
+      const tone = V.body * cityStoneTone(seed, opening.index * 17 + i, 5);
+      for (const sz of [-1, 1]) {
+        pushQuad(stoneP, stoneI, stoneC, [
+          [a.x, a.y, sz * hd], [b.x, b.y, sz * hd],
+          [b.x, p.topY, sz * hd], [a.x, p.topY, sz * hd],
+        ], [0, 0, sz], [tone * (1 - B.jointShade), tone * (1 - B.jointShade),
+          tone * (1 + B.crownLift), tone * (1 + B.crownLift)]);
+      }
+    }
+  }
+
+  // 여장 링: 성벽과 같은 톱니·총안 규칙으로 성가퀴가 수문 위로 이어진다.
+  const par = p.parapet;
+  const half = par.thickness * 0.5;
+  for (const [merlonIndex, span] of cityWallMerlonSpans(par.length).spans.entries()) {
+    const x0 = -par.length * 0.5 + span.start, x1 = -par.length * 0.5 + span.end;
+    const rect = { x0, x1, z0: -half, z1: half };
+    pushRectPrism(stoneP, stoneI, stoneC, rect, rect, par.y, par.y + par.height, {
+      value: V.parapet, seed, stream: 211 + merlonIndex,
+    });
+    const slit = cityWallMerlonLoophole(seed, 24, merlonIndex);
+    if (!slit) continue;
+    const hx = -par.length * 0.5 + span.loophole.start, gx = -par.length * 0.5 + span.loophole.end;
+    pushLoophole(darkP, darkI, darkC, {
+      a: { x: hx, z: half }, b: { x: gx, z: half },
+      baseA: par.y, baseB: par.y,
+      bottom: slit.bottom, height: slit.height, relief: slit.relief,
+    }, { x: 0, z: 1 });
+  }
+
+  const mk = (P, I, C, mat, name, cast) => {
+    if (!I.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    geo.setIndex(I); geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat); mesh.name = name;
+    mesh.castShadow = cast; mesh.receiveShadow = cast; g.add(mesh);
+  };
+  mk(stoneP, stoneI, stoneC, M.masonryMat, 'water-gate-stone', true);
+  mk(darkP, darkI, darkC, M.shadeMat, 'water-gate-arch-shade', SHADE_CASTS_SHADOW);
+  return g;
 }
 
 // 문루 한 층: 기둥열 + (하층)판벽 / (상층)난간·편액 + 공포 힌트 밴드. 실루엣 우선 — 창살·단청 없음.

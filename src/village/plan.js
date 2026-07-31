@@ -7,6 +7,7 @@ import {
   cityGateForecourtPolygon,
   cityWallClearance,
   cityWallContainsPolygon,
+  cityWallOutsidePolygon,
   planCityWall,
   worldEdgeContainsPolygon,
 } from './citywall-contour.js';
@@ -202,6 +203,8 @@ const charLabel = (c) => (c < 0.34 ? 'minchon' : c < 0.66 ? 'yeoyeom' : 'banchon
 
 // 행랑이 성벽 몸통·여장에 붙지 않도록 두는 안쪽 여유(성벽 두께 + 순라 통로 몫).
 const SIJEON_WALL_INSET = 8;
+// 논배미와 성벽 바깥면 사이 여유(성저 들이 성벽 발치에 붙지 않게) — 필지 성벽 여유와 같은 급.
+const PADDY_WALL_CLEARANCE = 6;
 
 export function planVillage(opts = {}) {
   const warnings = [];
@@ -599,12 +602,18 @@ export function planVillage(opts = {}) {
   if (site.paddyRegion) {
     // roadsResult 회랑 탈락은 planPaddies 내부 셀 게이트(hillAt 단계)에서 처리한다.
     // 호출 시그니처만 도로 배열을 넘기며, 후보 RNG 소비 규율은 planPaddies가 유지한다.
-    const candidates = planPaddies(site, rng, char01, tuning.paddyDensityK, roadsResult.roads);
+    const candidates = planPaddies(site, rng, char01, tuning.paddyDensityK, roadsResult.roads,
+      { walled: !!cityWall });
     paddies = [];
     // 후보·tone RNG를 전부 소비한 뒤 stable first-wins로 공간 계약만 적용한다. 인접 셀 지터가
     // 논둑을 포개도 뒤 소품 seed는 불변이고, 화면에는 한 겹의 온전한 배미만 남는다.
     for (const field of candidates) {
       if (streamIntersectsPolygon(site, field.poly, STREAM_PADDY_BANK_CLEARANCE)) continue;
+      // 성곽 도성(#20 R4): 개천이 도성 안을 관류하게 되면서 "물 남쪽 = 논"이라는 농촌 규칙이
+      //   성 안까지 밀려 들어왔다(실측 2026-07-31: hanyang/2026 배미 8장이 성벽 안에 앉음).
+      //   논은 성저십리 — 성 밖 들이다. 후보 rng 를 전부 소비한 뒤의 공간 계약이므로 추첨 순서는
+      //   불변이고, 성곽이 없는 규모(cityWall === null)는 이 줄을 지나가지 않는다.
+      if (cityWall && !cityWallOutsidePolygon(cityWall, field.poly, PADDY_WALL_CLEARANCE)) continue;
       if (paddyObstacles.some((poly) => G.polysOverlap(field.poly, poly))) continue;
       if (paddies.some((accepted) => G.polysOverlap(field.poly, accepted.poly))) continue;
       paddies.push(field);
@@ -742,7 +751,7 @@ function paddyMaxFloat(site, poly, slabY) {
   return slabY - minH;
 }
 
-function planPaddies(site, rng, char01 = 0.5, paddyK = 1, roads = []) {
+function planPaddies(site, rng, char01 = 0.5, paddyK = 1, roads = [], { walled = false } = {}) {
   const pr = site.paddyRegion;
   const fields = [];
   // 작은 다랑이 계단(≈18×13m)으로 잘게 나눈다 — 큰 잔디밭이 아니라 논배미로.
@@ -754,7 +763,15 @@ function planPaddies(site, rng, char01 = 0.5, paddyK = 1, roads = []) {
   const cell = big ? 34 : 20, cellD = big ? 24 : 15;
   const xInset = big ? 0.10 * (pr.xMax - pr.xMin) : 0;      // 성저십리 좌우 능선 여백
   const xMin = pr.xMin + xInset, xMax = pr.xMax - xInset;
-  const hillMax = big ? 0.40 : 0.28;                        // 완사면 다랑이 허용(도성만; 타 규모 불변)
+  // 완사면 다랑이 허용(도성만; 타 규모 불변). 성곽 도성(#20 R4)은 한 단 더 푼다: 개천이 도성 안으로
+  //   들어가면서 성저 들이 더는 **개울 골짜기의 평탄면**에 앉지 않게 됐고(구 개울 z=150 의
+  //   streamValleyWeight 가 이 대역의 hillAt 를 0 으로 눌러 주고 있었다), 그 결과 hillAt 표고 프록시가
+  //   belt 를 통째로 기각해 한양 논이 0장이 됐다(실측 2026-07-31, 계약 하한 6장 위반). 이 대역의 실제
+  //   경사는 안산 하부 완사면 3~18% 이고, 병적 부유는 아래 post-rng 부유 게이트(PADDY_MAX_FLOAT)와
+  //   성벽 밖 계약이 잡는다 — 즉 표고 프록시는 여기서 안전장치가 아니라 오탐이다.
+  //   0.70 은 실측으로 고른 값이다: 0.70 → 성저 배미 22~27장(부유 ≤6.1m), 0.80 → 30~39장(≤7.6m),
+  //   0.95 → 43~56장. 구 belt 밀도(30장급)와 부유 여유를 함께 만족하는 것이 0.70 이다.
+  const hillMax = walled ? 0.70 : big ? 0.40 : 0.28;
   const cols = Math.max(4, Math.round((xMax - xMin) / cell));
   const rows = Math.max(2, Math.round((pr.zFar - pr.zNear) / cellD));
   // 반촌일수록 논배미 성글게(농경 비중↓). #89: char01 이 규모 파생이 되며 도성(char01↑)의 논이

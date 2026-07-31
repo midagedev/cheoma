@@ -82,6 +82,39 @@ const RIDGE_NEAR_INSET = 14;  // 능선 크레스트를 near 밴드 안쪽으로
 //   terrainR 438→~380(절단 ~58m, capital 절단폭과 대등)·ridgeR 402→~354(배산 더 가파르고 가까이, 실루엣 보존).
 const NEAR_FAR_CAP = 46;      // nearR 원경항 상한(m) — 대규모 전용 발동, 배산 매스 압축(능선 실루엣 게이트 검증)
 
+// ── 개천(開川) = 도성을 관류하는 명당수 (#20 R4) ──────────────────────────────
+// 규칙 위반 시정: docs/joseon-city.md 는 "명당수를 사이트 중앙을 동서로 관류시킴"을 규칙으로
+//   적어 두었는데, 기본 비율 0.30 은 한양(R=500)에서 streamZ=150 을 주어 개천이 **성벽 밖**을
+//   성벽과 평행하게 흘렀다(실측 2026-07-31, 성 안 z 범위 대략 −354~213):
+//     seed 2026 = 중심선 27/73 표본만 성 안(내부 런 287m), seed 7 = 20/73(212m),
+//     seed 99 = 9/73(94m). 즉 도성이 관류되지 않고 개천이 성저를 스쳐 지나갔다.
+// 후보 표(seed 10개 스윕, 성 안 중심선 런 / 최대 내부 여유 / 종로 리본 여유의 각 최솟값):
+//     0.12 (z=60)  — 종로 여유 **−7m**(개천이 종로를 침범). 청계천은 역사적으로 종로 남쪽이므로 배제.
+//     0.14 (z=70)  — 런 384m / 내부 45m / 종로 +3m. 종로 여유가 너무 얇다.
+//     0.16 (z=80)  — 런 349m / 내부 33m / 종로 +13m.  ← 채택
+//     0.18 (z=90)  — 런 318m / 내부 **22m** — 개천이 성벽을 따라 흐르는 결함이 다시 시작된다.
+//     0.20 (z=100) — 런 164m / 내부 10m (seed 777 붕괴).
+//     0.22 (z=110) — seed 777 은 성 안 런 **0m**(개천이 도성을 아예 비껴간다).
+//     0.30 (z=150) — 현행. 성벽 남단(seed별 147~213) 밖으로 새어 나간다.
+//   0.22 는 직전 설계 라운드가 "종로 남쪽 + 성벽 안쪽" 두 조건만으로 고른 값이고, 관류를 계약으로
+//   걸 수 있는 값이 아니다(위 실측). 종로 침범은 절대 금지, 관류 깊이는 등급 — 그래서 종로 여유가
+//   넉넉한 쪽에서 관류가 가장 깊은 0.16 을 택한다. 비례 검증: 실제 한양 남북 폭 ≈2.3km 에 종로↔
+//   청계천 ≈200m(8.7%)인데, 이 씬의 도성 남북 폭 567m 에서 0.16 은 종로에서 40~110m(7~19%)다.
+//   한양(R≥400=성곽 도성 임계, tierForR 과 동일 경계) 전용이라 hamlet·village·town·capital 은
+//   0.30 그대로다(다른 규모 골든 불변이 그 증거).
+const CREEK_HANYANG_Z_RATIO = 0.16;
+// 도성 개천은 농촌 개울과 같은 사행(蛇行)을 갖지 않는다. '개천(開川)'이라는 이름 자체가
+//   1412년(태종 12) 하천을 정비해 물길을 잡고 석축을 쌓은 **개착 공사**에서 온 것이고, 1760년
+//   (영조 36) 준설이 다시 하도를 정리했다(docs/joseon-city.md §개천). 즉 도시 하천은 사람이 편 물길이다.
+//   기하 근거(실측 2026-07-31): 사행 진폭이 0.08R(=40m)이면 개천이 x≈115 에서 z≈119 로 부풀어
+//   성벽 남단을 접선으로 스친다 → 통과부 사교계수 cosN 0.20~0.35, 수문 폭이 44m(교량 규모)로 폭주하고
+//   시드에 따라 관류 자체가 무너졌다. 진폭 절반(±20m)이면 같은 시드가 동서 성벽을 거의 직교로
+//   지나(cosN 0.7~0.9) 수문이 26~32m 로 앉는다. 사용자 옵션 streamMeanderK 는 이 값에 곱해져 유지된다.
+const CREEK_HANYANG_MEANDER_K = 0.5;
+// 도성 개천 골짜기 어깨 반폭 가산(m). 농촌 개울의 0.10R(=R500 에서 50m) 대신 고정 소폭을 쓴다 —
+//   근거는 streamValleyHalf 선언부 주석의 실측·고증. 저수 평탄면은 불변이라 물은 여전히 평탄면 위에 있다.
+const CREEK_HANYANG_VALLEY_SHOULDER = 10;
+
 // 앵커 필드(ridgeH·benchDrop·undAmp)의 R-구간 선형보간. 밖은 끝 앵커로 클램프.
 //   hamlet 아래(#114)는 가상 solo 앵커로 보간 — 지형·능선이 집 한 채 스케일로 아늑하게 줄어든다.
 function anchorField(R, key) {
@@ -187,7 +220,16 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   // A generic capital can straddle a river inside its basin. Hanyang keeps the
   // historical city north of a Han-scale river, while the whole generated
   // settlement extends to both banks outside the wall.
-  const streamZ = (riverMode ? (R >= 400 ? 0.47 : 0.18) : 0.30) * R;
+  // 개천(開川) = 성곽 도성(R≥400, tierForR 의 hanyang 임계와 같은 경계)을 관류하는 도시 하천.
+  const urbanCreek = !riverMode && R >= 400;
+  const streamZ = (riverMode
+    ? (R >= 400 ? 0.47 : 0.18)
+    : (urbanCreek ? CREEK_HANYANG_Z_RATIO : 0.30)) * R;
+  // 안산(案山)·성저 들의 기준선. 농촌에서는 명당수가 곧 마을 앞 경계선이라 두 값이 같다.
+  //   도성에서는 갈린다 — 남산(안산)은 성 **밖** 남쪽 산이고 개천은 성 **안** 도시 하천이다.
+  //   이 선을 개천에 묶어 두면 개천을 안으로 들이는 순간 안산 매스와 논 대역이 함께 성 안으로
+  //   따라 올라온다(실측 2026-07-31: 논배미 19→1 장, 성 안 남측이 안산 기슭으로 판정됨).
+  const frontWaterZ = urbanCreek ? 0.30 * R : streamZ;
   const bowlR = 0.56 * R * bK;                // 분지(마을) 평균 반경 — footprint 계수(bK) 반영(#120)
   const Hmax = cfg.ridgeH * rHK;
 
@@ -248,8 +290,12 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   // 평균 반경은 지형 범위(terrainR)에 맞춰, 내부(마을·논·개울·필지)는 신축 밴드 밖이라 불변.
   const edge = makeWorldEdge({ cx: 0, cz: 0, radius: terrainR, seed: (seed ^ 0x9e37) >>> 0, amp: 0.14, band: 0.24 });
 
-  // ── 명당수 중심선(사행) ── 동서로 가로지르며 완만히 굽는다.
-  const streamMeander = (x) => streamZ + R * 0.05 * meK * Math.sin(x / R * 3.0 + 1.1) + R * 0.03 * meK * Math.sin(x / R * 6.7);
+  // ── 명당수 중심선(사행) ── 동서로 가로지르며 완만히 굽는다. 도성 개천은 개착·준설된 물길이라
+  //   같은 식에 절반 진폭을 쓴다(CREEK_HANYANG_MEANDER_K 주석의 고증·기하 근거).
+  const meanderK = meK * (urbanCreek ? CREEK_HANYANG_MEANDER_K : 1);
+  const streamMeander = (x) => streamZ
+    + R * 0.05 * meanderK * Math.sin(x / R * 3.0 + 1.1)
+    + R * 0.03 * meanderK * Math.sin(x / R * 6.7);
   const streamZat = (x) => streamMeander(x);
   const creekHalf = 0.018 * R + 0.9;
   // A creek caps before becoming a river. Large settlements can opt into a
@@ -264,14 +310,36 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   // A stream cannot climb the enclosing ridge. Reserve a broad, scale-relative
   // valley whose center bed descends monotonically toward -x (the shader flow).
   // The broad shoulder avoids replacing the old buried ribbon with a slot canyon.
-  const streamValleyHalf = streamHalf + Math.max(
+  // 도성 개천은 이 넓은 어깨를 갖지 않는다(#20 R4). 농촌 개울의 0.10R 어깨는 R=500 에서 반폭 60m =
+  //   폭 120m 짜리 완만한 골짜기이고, 개천을 성 안으로 들이는 순간 그 골짜기가 **지붕 바다 한가운데를
+  //   가로지른다**(실측 2026-08-01: 개천 중심 −3.0m vs 60m 밖 +0.5m = 폭 100m·깊이 3.5m 스웨일).
+  //   결과: 도성 필지가 그 사면에 3.5m 낮게 앉아 드론 저공 어휘가 무너졌다(T7 flythrough 저공 표본
+  //   45%→36%, 최대 고도 158→218m). 고증도 좁은 쪽이다 — 개천은 석축 호안으로 잡은 개착 하천이고
+  //   (Phase B 호안), 도성 시가지는 그 옆까지 평탄했다. 저수 평탄면(streamValleyFlatHalf)은 그대로라
+  //   물이 슬롯에 묻히지 않고, 어깨만 빠르게 올라와 도성 벤치를 평평하게 되돌린다.
+  const ruralValleyHalf = streamHalf + Math.max(
     riverMode && R >= 400 ? 50 : 8,
     R * (riverMode && R >= 400 ? 0.22 : 0.10),
   );
+  const urbanValleyHalf = streamHalf + CREEK_HANYANG_VALLEY_SHOULDER;
+  const streamValleyHalf = urbanCreek ? urbanValleyHalf : ruralValleyHalf;
   // Keep the wet channel and one coarse terrain-cell margin level. Otherwise the
   // triangulated terrain can interpolate a high shoulder across a ribbon edge even
   // though the analytic centerline itself is clear.
   const streamValleyFlatHalf = streamWaterHalf + 3;
+  // 개천은 **도성 안에서만** 개착 하천이다. 좁은 어깨를 전 구간에 쓰면 성 밖에서 산 매스가 물가
+  //   20m 까지 붙어 협곡이 된다(실측 2026-08-01: x=200 에서 ±20m 지반 +22m). 그래서 분지(도성) 안은
+  //   좁은 어깨, 분지 밖은 기존 자연 골짜기 어깨를 쓰고 그 사이를 반경으로 부드럽게 전이한다 —
+  //   구 주석이 경계한 "묻힌 리본 대신 슬롯 캐니언"을 성 밖에서 그대로 피한다.
+  const valleyHalfAt = urbanCreek
+    ? (x) => {
+      const cz = streamZat(x);
+      const r = Math.hypot(x - center.x, cz - center.z);
+      // 전이 시작을 성곽 반경(≈bowlR·1.12)에 맞춘다 — 도성 안 전 구간이 개착 하천이어야 한다.
+      const t = smoothstep(bowlR * 1.10, bowlR * 1.50, r);
+      return lerpN(urbanValleyHalf, ruralValleyHalf, t);
+    }
+    : () => ruralValleyHalf;
   const streamPts = [];
   // 물길 중심선이 비정형 world edge에 닿는 지점을 양쪽에서 따로 찾는다. 과거의
   // ±(terrainR-4) 사각 클램프는 한강급 폭에서 수면이 지형 밖으로 큰 직사각형으로 삐져
@@ -382,8 +450,8 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
 
   // 안산(앞산): 개울 남쪽의 낮고 부드러운 언덕(앞 프레임). 중앙은 트여 원경이 보이게.
   function ansanMass(x, z) {
-    if (z < streamZ + 0.06 * R) return 0;
-    const rise = smoothstep(streamZ + 0.10 * R, ansanZ + 0.15 * R, z);
+    if (z < frontWaterZ + 0.06 * R) return 0;
+    const rise = smoothstep(frontWaterZ + 0.10 * R, ansanZ + 0.15 * R, z);
     const openMid = 0.5 + 0.5 * smoothstep(0.10 * R, 0.42 * R, Math.abs(x)); // 중앙 낮게(원경 열림)
     return Hmax * 0.42 * rise * openMid;
   }
@@ -405,7 +473,7 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     if (dry) return 0;
     const cz = streamZat(x);
     const d = Math.abs(z - cz);
-    const weight = smoothstep(streamValleyHalf, streamValleyFlatHalf, d);
+    const weight = smoothstep(valleyHalfAt(x), streamValleyFlatHalf, d);
     // A large river forms a broad alluvial floor instead of a creek-like notch
     // cut into the front hill. The eased shoulder leaves dry bank elevation yet
     // removes the abrupt ansan slope where ferry wards and fields must settle.
@@ -485,7 +553,7 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     // 다랑이 논 후보역: 개울 남쪽 ~ 안산 기슭 사이 저지.
     paddyRegion: dry ? null : {
       xMin: -0.7 * R, xMax: 0.7 * R,
-      zNear: riverMode ? streamZ + streamHalf + 8 : streamZ + 0.05 * R,
+      zNear: riverMode ? streamZ + streamHalf + 8 : frontWaterZ + 0.05 * R,
       zFar: riverMode ? Math.min(ansanZ - 0.05 * R, terrainR - 20) : ansanZ - 0.05 * R,
     },
     bounds: { minX: -R, maxX: R, minZ: -R, maxZ: R },

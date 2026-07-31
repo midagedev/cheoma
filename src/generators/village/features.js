@@ -32,6 +32,7 @@ import {
   buildMjaHouse,
   disposeMjaHouse,
 } from '../../village/mja-house-geometry.js';
+import { bridgeDeckPlacement } from '../../village/stream-spatial.js';
 
 function sijeonMaterial(color, roughness, role) {
   const material = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
@@ -362,16 +363,12 @@ export function buildFeatureObjects(plan, site) {
       span: bridgeSpec.span || 5,
       width: bridgeSpec.width || 1.8,
     });
+    // 접지 산술은 순수 계약(stream-spatial#bridgeDeckPlacement)이 소유한다 — 렌더러가 다시 풀지 않는다.
     const streamZ = site.streamZat(bridgeSpec.x);
-    const bankHeight = Math.max(
-      site.heightAt(bridgeSpec.x, streamZ - (site.streamHalf + 3)),
-      site.heightAt(bridgeSpec.x, streamZ + (site.streamHalf + 3)),
-    );
-    const waterY = streamSurfaceHeightAt(site, bridgeSpec.x, streamZ);
-    const y = bridgeSpec.type === 'arch'
-      ? waterY
-      : Math.max(waterY, bankHeight - 0.35);
-    bridge.position.set(bridgeSpec.x, y, bridgeSpec.z);
+    const placement = bridgeDeckPlacement(site, bridgeSpec, {
+      surfaceY: streamSurfaceHeightAt(site, bridgeSpec.x, streamZ),
+    });
+    bridge.position.set(bridgeSpec.x, placement.deckY, bridgeSpec.z);
     bridge.rotation.y = bridgeSpec.rot || 0;
     objects.push(bridge);
   }

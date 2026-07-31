@@ -83,6 +83,7 @@ npm run check:instance-merge  # 인스턴싱/정적 병합 geometry digest·mate
 npm run check:api-reuse      # 공개 building·시전 API 재사용·dispose·제품 카메라 smoke
 npm run check:mud-wall      # Three 없는 토담 표면 plan·상한·envelope 데이터 계약
 npm run check:drainage      # Three 없는 도로 측구·대문 건넘 정책·경사·공간 계약
+npm run check:creek         # Three 없는 개천 도성 관류·종로 불침범·수문(오간수문) 계약
 npm run check:dangsan       # Three 없는 당산 의례 공터·당집 배치·수관·회피 계약
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
@@ -456,6 +457,22 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
 
     상한은 Chrome/Chromium 고정 fixture의 작은 변동 여유만 포함한다. 자동 갱신하지 않으며, 기능상 필요한
     증가는 PR의 상태별 전후 수치와 이유를 리뷰하고 최적화로 내려간 값은 함께 ratchet한다.
+- `check:creek` (#20 R4)
+  - 한양 7 seed(2026·7·99 정본 + 777·55·4242·1 회귀 픽스처)에서 개천 중심선이 성벽 안을 **연속 관류**하는지
+    검사한다: 성벽 교차 정확히 2회, 최장 내부 런 ≥300m, 최대 내부 깊이 ≥25m. 구 규칙(streamZ=0.30R)은
+    내부 런 94~287m 라 실패한다.
+  - 개천 하도가 종로(성곽 spec 의 `axes.jongnoZ` 축 ±30m 대역의 동서 대로) 리본을 침범하지 않는지 검사한다.
+    이 절의 이(teeth)는 비율이 아니라 `bestJongnoGates` 의 개천 회피 항에 걸려 있다(그 항을 지우면 실패).
+  - 성벽 통과부마다 수문이 있고 그 개구부가 사대문 개구부와 겹치지 않는지, 홍예 5개·돌기둥 4·어깨 2 구성,
+    반원 여부(반지름=폭/2)·기석이 문턱 위·문협 구간·이맛돌 정점·홍예 열이 저수로 현을 덮는지·문턱은 수면 아래
+    이맛돌은 수면 위·홍예 열이 하상 평탄면 안·석축 두께가 성벽 호의 새그를 덮는지 검사한다.
+  - 성벽 리본이 수문 개구부를 실제로 비웠고(세그먼트 0개) 개구부 밖 실체 구간이 82% 이상 남았는지,
+    다른 규모(hamlet~capital)는 개울 위치가 0.30R 그대로이고 수문이 0기인지 검사한다.
+  - **다리 접지**(전 규모): 판석교·홍예교 데크 상면이 데크 **양 끝** 지반보다 0.05~1.0m 위여야 한다
+    (묻힘·부유 양방향). 접지 산술은 `stream-spatial#bridgeDeckPlacement` 단일 진실원이고 features.js
+    가 옛 즉석 산술로 되돌아가면 소비 단언이 잡는다. 실측 envelope 0.29~0.61m.
+  - 렌더러 소비(`cityWaterGateProfile`·`spec.waterGates`·`buildWaterGate`·`p.jamb`)와 재질 예산(수문이
+    자기 재질을 만들지 않음 = 병합 후 드로우콜 +0), 건천 하상이 지형 정점색 한 항인지도 함께 검사한다.
 - `check:citywall`
   - 79개 contour(R=74/128/176/250/400/440/500, 64-seed 순환 + 실제 실패 seed)에서 `+z=남`, 폐합, 자기교차 없음, world-edge 내부를 검사.
   - 사대문 위치·외향 normal·성문 구멍이 같은 contour sampler와 일치하며, 육축은 고밀도 지형 표본에 묻히되 18.5m 물리 상한을 넘지 않는지 검사.

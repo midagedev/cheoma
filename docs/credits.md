@@ -498,6 +498,16 @@
 - URL: https://contents.history.go.kr/front/tg/view.do?treeId=0201&levelId=tg_003_2210 · https://www.culturecontent.com/content/contentView.do?search_div=CP_THE&search_div_id=CP_THE001&cp_code=cp0301&index_id=cp03010561&content_id=cp030105610001 · https://dh.aks.ac.kr/sillokwiki/index.php/%EC%84%B1%EB%AC%B8(%E5%9F%8E%E9%96%80)
 - 라이선스: 2026-07-31 세 기관 공개 페이지에서 본문을 확인했다. 각 기관 저작권 정책이 적용되며 원문·도판 재배포 권리를 일괄 부여하지 않는다. 앱은 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용한다.
 
+### 53. 한국학중앙연구원 — 개천(청계천)의 도성 관류와 오간수문 / The Gaecheon through Hanyang and its five-arch sluice
+- id: cred-gaecheon-sugumun
+- topic: joseon-city
+- scope: Hanyang urban creek course, channelized plan form, and wall water-gate only
+- 한국민족문화대백과사전 「청계천」 · 한국학중앙연구원 sillokwiki 「오간수문(五間水門)」.
+- 청계천은 북악산·인왕산 부근에서 발원해 **시가지 중심부를 동쪽으로 흘러 중랑천으로 흘러들며**, 종로 네거리로 이어지는 광교 등 24개의 다리가 그 위에 놓였다. 조선시대 이름은 **개천(開川)**이고 1411년(태종 11) **개거도감**을 두어 개거 공사를 시작했으며, 영조 때 준설과 양안 석축으로 지금 흐름의 큰 틀이 잡혔다. 성 동쪽 수문은 **처음 3칸만 열었다가** 장마 범람 대비 증축으로 **북쪽 5칸(오간수문, 흥인문 남쪽)·남쪽 2칸(이간수문, 광희문 북쪽)** 으로 정형화되었다(2026-07-31 확인).
+- **활용 / Use:** 한양 규모에서만 명당수를 성벽 안으로 들여 관류시키고(다른 규모는 불변), 개착·준설된 도시 하천이라는 근거로 도성 개천의 사행 진폭을 절반으로 줄이며, 성벽 통과부에 홍예 5개 수문을 사대문과 **별개 시설**로 세운다. 증축 계기가 범람이라는 사실은 수문 폭을 평시 물줄기가 아니라 출수 단면에서 파생하는 근거로만 쓴다. **미검증**: 호안 석축의 전 구간 연속 여부, 구간별 개천 폭 실측값, 도성 안 지류 개수·위치, 3칸→5칸 증축 연도(1421~1422 서술과 1481년까지 3칸이었다는 서술이 상충) / Only the Hanyang tier routes the creek inside the wall, the channelized-stream record justifies halving its meander, and the wall crossing gets a five-arch sluice that is a separate structure from the four great gates. Revetment continuity, per-reach widths, tributary counts, and the exact expansion year stay unverified.
+- URL: https://encykorea.aks.ac.kr/Article/E0056257 · https://dh.aks.ac.kr/sillokwiki/index.php/%EC%98%A4%EA%B0%84%EC%88%98%EB%AC%B8(%E4%BA%94%E9%96%93%E6%B0%B4%E9%96%80)
+- 라이선스: 2026-07-31 두 공개 페이지에서 본문을 확인했다. 한국학중앙연구원 저작권 정책이 적용되며 원문·도판 재배포 권리를 일괄 부여하지 않는다. 앱은 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용한다. 구한말 도성 사진(개천 하상·호안 판독)은 `refs/`의 제3자 사진군이라 **공개하지 않으며**, 판독 결과만 문서에 서술한다.
+
 미검증으로 남겨 **의도적으로 제외한 것**: 1397년 한성부立案(신문 보도만 확보, 서울역사박물관 소장
 기록 미도달), 1444년 이전 3등전제 환산 수치, 「혼례」·「초례」 본문, 농촌 마을의 가옥별 대지면적
 (§9.5의 중심 공백 — 검증된 수치가 존재하지 않는다).

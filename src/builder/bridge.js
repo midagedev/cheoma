@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getPropMaterials } from '../props/materials.js';
 import { boulderGeometry } from '../props/geom.js';
 import { makeRng } from '../rng.js';
+import { BRIDGE_SLAB_DECK_LIFT } from '../village/stream-spatial.js';
 
 // 돌다리 — 개울을 가로지르는 화강석 다리. 두 형식을 파라미터로 선택.
 //   type:'slab' 판석교(널돌+교각, 소박)  |  type:'arch' 홍예교(무지개 아치, 격식)
@@ -20,7 +21,8 @@ export function buildBridge(opts = {}) {
 // ── 판석교 ─────────────────────────────────────────────────────────
 // 낮은 화강석 교각 위에 긴 널돌(판석)을 걸친 소박한 다리. 널돌 2열.
 export function buildSlabBridge(opts = {}) {
-  const { seed = 7, span = 4.5, width = 1.5, deckY = 0.55, piers = 2 } = opts;
+  // 데크 리프트 기본값은 순수 접지 계약과 같은 상수를 쓴다(두 곳에 적으면 접지 단언이 무의미해진다).
+  const { seed = 7, span = 4.5, width = 1.5, deckY = BRIDGE_SLAB_DECK_LIFT, piers = 2 } = opts;
   const rng = makeRng(seed);
   const P = getPropMaterials();
   const g = new THREE.Group();

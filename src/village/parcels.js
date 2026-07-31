@@ -323,14 +323,20 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
     const bowlLim = site.bowlRAt ? site.bowlRAt(center.x, center.z) : site.bowlR;
     if (G.dist(center, C) > bowlLim * 1.06) { dbg.bowl++; return false; }
     if (streamSpatial.intersectsPolygon(poly, STREAM_PARCEL_BANK_CLEARANCE)) { dbg.stream++; return false; }
-    if (site.paddyRegion) {
+    // 성곽 도성(#20 R4): 개천이 도성 **안**을 관류하므로 "물 남쪽 = 논·비거주"라는 농촌 규칙이
+    //   성 안까지 밀려 들어와 남촌을 통째로 비웠다(실측 2026-07-31: 논 대역 하한이 z=175→105 로
+    //   올라와 성 안 남측 70m 띠에서 필지가 사라졌다). 도성에서 거주역의 경계는 개천이 아니라
+    //   성벽이고(위의 cityWallContainsPolygon 이 이미 강제한다), 논은 성 밖으로 물러난다(plan.js).
+    //   남촌(남산 기슭)은 실제 한양의 거주 구역이므로 이쪽이 고증에도 맞는다.
+    const walled = !!opts.cityWall;
+    if (!walled && site.paddyRegion) {
       const pr = site.paddyRegion;
       if (center.x > pr.xMin - 2 && center.x < pr.xMax + 2 && center.z > pr.zNear - 2 && center.z < pr.zFar + 2) { dbg.paddy++; return false; }
     }
-    // 남한선: 씨족촌은 개울 북쪽만, 도성/읍치는 남촌 일부 허용
+    // 남한선: 씨족촌은 개울 북쪽만, 읍치는 남촌 일부 허용, 성곽 도성은 성벽이 한선이다.
     const southLimit = (scale === 'hamlet' || scale === 'village')
       ? site.streamZ - 5
-      : site.streamZ + site.bowlR * 0.26;
+      : walled ? Infinity : site.streamZ + site.bowlR * 0.26;
     if (center.z > southLimit) { dbg.south++; return false; }
     if (site.hillAt(center.x, center.z) > 0.52) { dbg.hill++; return false; }    // 능선·안산 급경사 제외
     // 급경사 필지 배제: footprint 지형 낙차가 한 계단(성토 패드)으로 감당 안 되면 제외.
