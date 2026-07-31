@@ -310,6 +310,34 @@ export function cityGateLocalPoint(gate, localX, localZ) {
   };
 }
 
+// ── 문전 마당(성문 안쪽 빈 마당) ──
+// 왜 여기가 비어 있는가: 홍예는 구조상 대로 폭이 될 수 없어(archRatio 0.20) 18~26m 대로가 5~7m
+//   통로 하나로 수렴한다. 그 병목 앞은 인마가 고이는 공간이고, 문루 수비·통제 동선도 문 안쪽 마당을
+//   요구한다. 이 마당의 치수는 새로 저작하지 않는다 — 계획이 이미 검증해 둔 성문 접근 예약
+//   (gateApproachLength × gateApproachClearance)을 그대로 쓰고, 폭은 육축 블록 총폭
+//   (gate.width + gateExtraWidth = 홍예+좌우 육축)에 도로 가장자리 여유를 더한 값이다. 즉 "석축에
+//   필지가 붙지 않는다"는 물리 요구가 마당의 크기를 정한다.
+// 고증 주의: 조선 도성 성문 안쪽에 **의례적 광장**이 있었다는 근거는 확인하지 못했다. 상업 집적은
+//   문 **밖**이 실증된다(칠패: 숭례문~서소문 밖, 17세기 문외미전·문외상전·외어물전 — docs/joseon-city.md
+//   §시전행랑 출처군). 그래서 이 마당은 "역사적 광장"이 아니라 **접근·통제 예약의 가시화**로만
+//   정당화한다. 행랑은 별개로 docs/joseon-city.md §시전행랑("종루~남대문·종묘~동대문 구간 연속 행랑")
+//   이 직접 뒷받침하는 선형 배치다.
+export function cityGateForecourtPolygon(gate, {
+  length = CITY_WALL_DIMENSIONS.gateApproachLength * Math.max(0.6, gate.scale || 1)
+    + CITY_WALL_DIMENSIONS.gateApproachClearance,
+  halfWidth = (gate.width + CITY_WALL_DIMENSIONS.gateExtraWidth * (gate.scale || 1)) * 0.5
+    + CITY_WALL_DIMENSIONS.roadEdgeMargin,
+} = {}) {
+  // gate.dir 은 성 바깥을 향한다 → 안쪽은 -dir. 마당은 육축 안쪽 면에서 시작해 도성 안으로 뻗는다.
+  const inner = -CITY_WALL_DIMENSIONS.gateDepth * (gate.scale || 1) * 0.5;
+  return [
+    cityGateLocalPoint(gate, -halfWidth, inner - length),
+    cityGateLocalPoint(gate, halfWidth, inner - length),
+    cityGateLocalPoint(gate, halfWidth, inner),
+    cityGateLocalPoint(gate, -halfWidth, inner),
+  ];
+}
+
 export function cityGateApproachFootprint(gate, {
   length = CITY_WALL_DIMENSIONS.gateApproachLength * Math.max(0.6, gate.scale || 1)
     + CITY_WALL_DIMENSIONS.gateApproachClearance,

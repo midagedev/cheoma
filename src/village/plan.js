@@ -4,6 +4,7 @@ import { planRoads } from './roads.js';
 import { planParcels, planSatellites } from './parcels.js';
 import {
   CITY_WALL_MIN_SITE_R,
+  cityGateForecourtPolygon,
   cityWallClearance,
   cityWallContainsPolygon,
   planCityWall,
@@ -198,6 +199,9 @@ function char01ForR(R, seed) {
   return Math.min(1, Math.max(0, base + jit));
 }
 const charLabel = (c) => (c < 0.34 ? 'minchon' : c < 0.66 ? 'yeoyeom' : 'banchon');
+
+// 행랑이 성벽 몸통·여장에 붙지 않도록 두는 안쪽 여유(성벽 두께 + 순라 통로 몫).
+const SIJEON_WALL_INSET = 8;
 
 export function planVillage(opts = {}) {
   const warnings = [];
@@ -423,11 +427,39 @@ export function planVillage(opts = {}) {
   //   footprint 는 blocker 라 강제 ON 시 일반 필지 배치가 그만큼 달라진다(의도된 구성 변화, 결정론).
   const wantSijeon = tuning.sijeon === true ? true : tuning.sijeon === false ? false : (scale === 'hanyang');
   if (wantSijeon) {
-    features.sijeon = planSijeon(roadsResult, site, char01).filter((shop) =>
+    // 도성은 행랑을 성문까지 이어 붙인다(docs/joseon-city.md §시전행랑: 종루~남대문·종묘~동대문 구간).
+    //   분지 0.9R 컷은 그 구간을 성문 100~300m 앞에서 끊었다. 단 문전 마당은 비워 두어야 하므로
+    //   마당 안쪽은 reach 에서 제외한다 — 넓은 가로가 좁은 홍예로 수렴하는 압축이 마당에서 완성된다.
+    const gateForecourts = cityWall
+      ? cityWall.gates.map((gate) => cityGateForecourtPolygon(gate))
+      : [];
+    const sijeonReach = cityWall
+      ? (pt) => cityWallClearance(cityWall, pt) >= SIJEON_WALL_INSET
+        && !gateForecourts.some((poly) => G.pointInPoly(pt, poly))
+      : undefined;
+    features.sijeon = planSijeon(roadsResult, site, char01, { reach: sijeonReach }).filter((shop) =>
       worldEdgeContainsPolygon(site.edge, shop.poly, 6)
       && (!cityWall || cityWallContainsPolygon(cityWall, shop.poly, 4))
+      && !gateForecourts.some((poly) => G.polysOverlap(shop.poly, poly))
       && !templeReservations.some((poly) => G.polysOverlap(shop.poly, poly)));
     for (const s of features.sijeon) blockers.push({ poly: s.poly });
+  }
+
+  // ── 3.6) 문전 마당 (한양, R3-B 2026-07-31) ── 성문 안쪽 접근 예약을 **필지 배치에도** 적용한다. 이 예약은 지금까지
+  //   식생(cityWallVegetationBlocked)에만 걸려 있어서, 일반 필지가 육축 13m 앞까지 붙었다
+  //   (hanyang/7 남문 최근접 필지정점 13.8m·접근구역 내 정점 20개). 시전 점포와 같은 blocker 단계에
+  //   넣어 시드 스트림 순서를 보존한다(추첨 순서를 바꾸지 않고 후보 수락 여부만 바꾼다).
+  //   마당의 근거·치수는 citywall-contour.js#cityGateForecourtPolygon 주석 참조(고증: 문 안쪽
+  //   의례 광장은 미검증 — docs/joseon-city.md §성문 주변, docs/credits.md #52).
+  //   실측(2026-07-31): hanyang 계획 해시만 이동, 다른 규모 골든 불변. aerial 드로우콜 1205→1205·
+  //   tris 4.28M 불변(shoot-cityperf 동일 하네스 연속 측정), eye 차이는 LOD 상태(MID 2→0)다.
+  if (cityWall) {
+    for (const gate of cityWall.gates) {
+      // 빈 마당이므로 그림자를 드리우지 않는다(solarObstruction:false) — 필지 겹침만 막는다.
+      //   `kind` 는 쓰지 않는다: planParcels 가 kind 를 "집이 있는 예약"으로 읽어 일조 예약 경로로
+      //   보내고 거기서 center 를 요구한다(절 예약도 같은 이유로 kind 를 쓰지 않는다).
+      blockers.push({ poly: cityGateForecourtPolygon(gate), gateForecourt: true, solarObstruction: false });
+    }
   }
 
   // ── 4) 필지 (도로변 분할 + 위계 그라디언트) ──

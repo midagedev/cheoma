@@ -300,7 +300,13 @@ const expectedSceneHashes = {
   //   슬릿·접합 배터) + 문루 단청(city-gate rank, 사용자 승인). 동일 근거: hanyang 해시만 이동,
   //   proxy 0ee8aaee 불변, worker == 폴백 바이트 동일·async 불일치 0줄.
   // #31-5 동일 라운드: 한양도 새 떼 알베도로 이동(proxy 0ee8aaee 불변).
-  hanyang: 'fa3f5cdb:fa99e0c1:e43a482a:d940aecb',
+  // R3-B(2026-07-31): 문전 마당(#19 Phase B) — 성문 안쪽 접근 예약을 필지 배치에도 적용하고
+  //   시전 행랑 도달 한계를 분지 0.9R 에서 성벽 안쪽으로 옮겼다. 계획 변경이므로 hanyang 해시가
+  //   이동한다(village/town/capital/mja/snapshot 골든 불변이 한양 전용 변경의 증거).
+  //   **proxy 는 이번에 이동한다**(0ee8aaee → 8266fb35): 문전 마당 blocker 가 필지 배치를 바꾸므로
+  //   픽 프록시가 따라 움직이는 것이 정상이며, 프록시 개수·축·안정 ID 규약은 그대로다(프록시 계약
+  //   게이트 통과가 증거). 재기준 직전 실측: worker == 폴백 바이트 동일, async 불일치 0줄.
+  hanyang: 'beb50f9c:aff3337c:69171fec:2354035c',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -350,7 +356,7 @@ const expectedProxyHashes = {
   village: 'fef7a386',
   town: '3f7f776c',
   capital: '046ecd22',
-  hanyang: '0ee8aaee',
+  hanyang: '8266fb35',
 };
 
 const server = await createServer({

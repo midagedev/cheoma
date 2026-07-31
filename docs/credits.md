@@ -488,6 +488,16 @@
   적용: §9.5 — 마을 지정면적을 필지 수로 나눈 값이 대지면적이 아니라는 경고의 근거.
   <https://heritage.go.kr/heri/cul/culSelectDetail.do?ccbaCpno=1483402360000>
 
+### 52. 국사편찬위원회·문화콘텐츠닷컴·한국학중앙연구원 — 성문 주변 상업 집적과 성문 병목 / Gate-side commerce and the city-gate bottleneck
+- id: cred-city-gate-forecourt
+- topic: joseon-city
+- scope: Hanyang city-gate forecourt reservation and haengrang reach only
+- 우리역사넷 교과서 용어해설 「칠패」 · 문화콘텐츠닷컴 「종루(鐘樓)·칠패(七牌)·이현(梨峴)의 삼대시(三大市)장의 형성」 · 한국학중앙연구원 sillokwiki 「성문(城門)」.
+- 칠패는 숭례문~서소문 **밖** 일대에 17세기부터 성장해 18세기에 종루·이현과 함께 삼대시로 불렸고, 1660~1670년 사이 문외미전·문외상전·외어물전·생선난전이 연이어 설치되었다("문외" = 문 밖). 즉 조선 후기 성문 주변 상업 집적은 성문 **밖**이 실증되는 현상이다. 반면 **성문 안쪽에 의례적 광장이 있었다는 근거는 확인하지 못했고 미검증으로 남긴다**(2026-07-31 조사).
+- **활용 / Use:** 성문 안쪽을 비우는 근거는 "역사적 광장"이 아니라 계획이 이미 검증해 둔 성문 접근·통제 예약(`gateApproachLength`)의 가시화로만 쓴다 — 치수를 새로 저작하지 않는다. 행랑을 성문까지 잇는 근거는 이 항목이 아니라 §시전행랑이 명시하는 구간(종루~남대문·종묘~동대문)이며, 문 **밖** 시장(칠패·이현)은 이번 범위에 넣지 않았다 / The empty gate forecourt is justified only as the visualization of the existing gate access reservation, not as a documented plaza; its size reuses `gateApproachLength`. Extending haengrang to the gate rests on the sijeon sections (Jongru–Namdaemun, Jongmyo–Dongdaemun), and the outside-the-gate markets are deliberately out of scope.
+- URL: https://contents.history.go.kr/front/tg/view.do?treeId=0201&levelId=tg_003_2210 · https://www.culturecontent.com/content/contentView.do?search_div=CP_THE&search_div_id=CP_THE001&cp_code=cp0301&index_id=cp03010561&content_id=cp030105610001 · https://dh.aks.ac.kr/sillokwiki/index.php/%EC%84%B1%EB%AC%B8(%E5%9F%8E%E9%96%80)
+- 라이선스: 2026-07-31 세 기관 공개 페이지에서 본문을 확인했다. 각 기관 저작권 정책이 적용되며 원문·도판 재배포 권리를 일괄 부여하지 않는다. 앱은 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용한다.
+
 미검증으로 남겨 **의도적으로 제외한 것**: 1397년 한성부立案(신문 보도만 확보, 서울역사박물관 소장
 기록 미도달), 1444년 이전 3등전제 환산 수치, 「혼례」·「초례」 본문, 농촌 마을의 가옥별 대지면적
 (§9.5의 중심 공백 — 검증된 수치가 존재하지 않는다).

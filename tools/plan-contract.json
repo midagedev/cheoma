@@ -33,8 +33,8 @@
       "bytes": 262652
     },
     "hanyang:base": {
-      "hash": "18b662705bb1da48fa97b7b9d1f0d777a3e0f7c3d6575558d7d3fb57d9ec2e5a",
-      "bytes": 1303925
+      "hash": "8deb10ff8e6baaa5fd4fe0293ed6d6f4940a4b05f5665df8cd80ced92a2814e0",
+      "bytes": 1306133
     },
     "hamlet:temple": {
       "hash": "84066937c2e99508308723c761a6699464c49dc1be38068d26834da4edcb868e",
@@ -53,11 +53,12 @@
       "bytes": 277037
     },
     "hanyang:temple": {
-      "hash": "25b3af148080567d1bb5a978c648967ccebe8223e025132ea1b1864cd6715d47",
-      "bytes": 1281816
+      "hash": "291b725ad9f46f938136c9d2684cee9fd0ec49a9010ac683e103be4fe05948be",
+      "bytes": 1281637
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
   "roofRankRevision": "issue-150c-roof-rank-magistracy-city-gate-2026-07-26",
-  "issue150PolishRevision": "issue-150-polish-wave-2026-07-26"
+  "issue150PolishRevision": "issue-150-polish-wave-2026-07-26",
+  "cityGateForecourtRevision": "issue-19-r3b-gate-forecourt-parcel-reservation-2026-07-31"
 }

@@ -110,7 +110,11 @@ function annotateSegment(members, segmentId) {
  * it, although placement never consumes it. Keeping that no-op input avoids
  * changing callers or the downstream random stream.
  */
-export function planSijeon(roadsResult, site, _char01 = 0.5) {
+// reach(pt) → 그 지점에 행랑을 이어붙일 수 있는가. 기본은 분지 반경 컷(종전 동작 정확 재현)이고,
+//   성곽이 있는 도성은 호출부가 "성벽 안쪽 + 문전 마당 밖"을 넘긴다: docs/joseon-city.md §시전행랑 은
+//   행랑 구간을 "종루~남대문, 종묘~동대문"으로 명시하므로 행랑은 성문까지 이어져야 한다. 분지 0.9R
+//   컷은 그 구간을 성문에서 100~300m 앞에서 끊고 있었다.
+export function planSijeon(roadsResult, site, _char01 = 0.5, { reach } = {}) {
   const shops = [];
   const arterials = (roadsResult?.roads || []).filter((road) => road.level === 'daero');
   const {
@@ -145,7 +149,10 @@ export function planSijeon(roadsResult, site, _char01 = 0.5) {
 
       for (let i = 3; i < fine.length - 3 && run < runCap; i++) {
         const sample = fine[i];
-        if (G.dist(sample.pt, site.center) > bowlR * 0.9) {
+        const withinReach = reach
+          ? reach(sample.pt)
+          : G.dist(sample.pt, site.center) <= bowlR * 0.9;
+        if (!withinReach) {
           // Natural hole in the bowl — close the current block without inventing a break.
           flushSegment();
           consecutiveShops = 0;

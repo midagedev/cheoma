@@ -14,6 +14,7 @@ import {
 } from '../src/village/road-surface.js';
 import {
   CITY_GATE_MASONRY,
+  cityGateForecourtPolygon,
   CITY_GATE_PAVILION,
   CITY_STONE_BOND,
   CITY_STONE_VALUES,
@@ -1156,4 +1157,35 @@ invariant(/SHADE_CASTS_SHADOW\s*=\s*false/.test(citywallSource)
 invariant((citywallSource.match(/new THREE\.MeshStandardMaterial/g) || []).length <= 6,
   'citywall.js material count grew — 병합 후 드로우콜 예산');
 
-console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri)`);
+// ── 문전 마당 (R3 Phase B) ── 성문 안쪽 접근 예약이 **필지 배치에도** 걸려야 한다. 이전에는 식생에만
+//   걸려 있어 일반 필지가 육축 12~14m 앞까지 붙었다(hanyang/7 남문 13.8m·/99 12.0m). 마당은 빈
+//   공간이므로 그림자를 만들지 않고(solarObstruction:false), 행랑도 마당은 비워 둔다 — 넓은 가로가
+//   좁은 홍예로 수렴하는 압축이 이 마당에서 완성된다.
+const forecourtRows = [];
+for (const forecourtSeed of [2026, 7, 99]) {
+  const fp = planVillage({
+    scale: 'hanyang', seed: forecourtSeed, includePalace: true, includeTemple: true,
+  });
+  const fwall = fp.features?.cityWall;
+  invariant(fwall?.gates?.length >= 4, `hanyang/${forecourtSeed} lost its city wall`);
+  for (const fgate of fwall.gates) {
+    const poly = cityGateForecourtPolygon(fgate);
+    const intruders = fp.parcels.filter((parcel) => G.polysOverlap(parcel.poly, poly)).length;
+    invariant(intruders === 0,
+      `hanyang/${forecourtSeed} ${fgate.name}: ${intruders} parcels intrude into the gate forecourt`);
+    const shops = (fp.features.sijeon || []).filter((shop) => G.polysOverlap(shop.poly, poly)).length;
+    invariant(shops === 0,
+      `hanyang/${forecourtSeed} ${fgate.name}: ${shops} sijeon shops intrude into the gate forecourt`);
+    let area = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      area += a.x * b.z - b.x * a.z;
+    }
+    forecourtRows.push({ gate: fgate.name, area: Math.abs(area) / 2 });
+  }
+}
+const forecourtAreas = forecourtRows.map((r) => r.area);
+const forecourtSummary = `${forecourtRows.length} forecourts `
+  + `${Math.round(Math.min(...forecourtAreas))}~${Math.round(Math.max(...forecourtAreas))} m2`;
+
+console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary})`);
