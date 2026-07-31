@@ -796,6 +796,70 @@ for (const mode of ['update', 'skip', 'seek1']) {
       `roof window ${JSON.stringify(rp.window)} escaped the authored PART_WINDOWS.roof [0.70, 1.00] — `
       + 'widening the roof window forward steals the walls window and grows the empty-site dead time');
   }
+
+  // ── ⑨ 벽머리 동일평면 금지 ────────────────────────────────────────────────────────────
+  // 조립은 지붕을 정착창 70% 지점까지 숨기므로(docs/ceiling.md 불변식 1) 그 사이 카메라는 **지붕 없는
+  //   몸채를 위에서** 본다. 그때 벽머리 평면이 화면의 "방 천장"이 된다. 회벽과 창방은 같은 풋프린트를
+  //   각각 솔리드로 압출하는데, 둘의 상면 캡이 같은 높이에서 끝나면 **위를 보는 면 두 장이 같은 평면에
+  //   놓여** z-fighting 합판 두 장으로 읽힌다(사용자 지적 2026-07-31). 완성본에서는 지붕이 덮어 보이지
+  //   않으므로 이 결함은 조립 구간에서만 드러난다 — 그래서 이 게이트가 여기 있다.
+  // 판정: **위를 보는** 수평 면끼리, 서로 다른 메시에서 나온 것이, 같은 평면(≤2mm)에서 xz 로 겹치면
+  //   실패. 아래를 보는 면끼리(기단 밑면 등)는 시야에서 제외되고, 위/아래 반대 노멀 쌍은 FrontSide
+  //   컬링으로 한 쪽만 그려지므로 다투지 않는다.
+  {
+    const facets = [];
+    const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), nrm = new THREE.Vector3();
+    hanok.updateMatrixWorld(true);
+    hanok.traverse((o) => {
+      if (!o.isMesh || !o.geometry?.attributes?.position) return;
+      const pos = o.geometry.attributes.position;
+      const index = o.geometry.index;
+      const count = index ? index.count : pos.count;
+      for (let i = 0; i < count; i += 3) {
+        const i0 = index ? index.getX(i) : i;
+        const i1 = index ? index.getX(i + 1) : i + 1;
+        const i2 = index ? index.getX(i + 2) : i + 2;
+        va.fromBufferAttribute(pos, i0).applyMatrix4(o.matrixWorld);
+        vb.fromBufferAttribute(pos, i1).applyMatrix4(o.matrixWorld);
+        vc.fromBufferAttribute(pos, i2).applyMatrix4(o.matrixWorld);
+        e1.subVectors(vb, va); e2.subVectors(vc, va); nrm.crossVectors(e1, e2);
+        const len = nrm.length();
+        if (len < 1e-9) continue;
+        if (nrm.y / len < 0.9) continue;                    // 위를 보는 수평 면만
+        if (len * 0.5 < 0.05) continue;                     // 미세 면은 제외(장식 모서리)
+        const y = (va.y + vb.y + vc.y) / 3;
+        if (y <= 0.6) continue;                             // 기단 상면 층위는 별도 계약(석재 켜)
+        facets.push({
+          mesh: `${o.name || '(unnamed)'}|${o.parent?.name || '-'}`,
+          y,
+          x0: Math.min(va.x, vb.x, vc.x), x1: Math.max(va.x, vb.x, vc.x),
+          z0: Math.min(va.z, vb.z, vc.z), z1: Math.max(va.z, vb.z, vc.z),
+        });
+      }
+    });
+    const clashes = new Map();
+    for (let i = 0; i < facets.length; i++) {
+      for (let j = i + 1; j < facets.length; j++) {
+        const A = facets[i], B = facets[j];
+        if (A.mesh === B.mesh) continue;
+        if (Math.abs(A.y - B.y) > 0.002) continue;
+        const ox = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0);
+        const oz = Math.min(A.z1, B.z1) - Math.max(A.z0, B.z0);
+        if (ox <= 0.02 || oz <= 0.02) continue;
+        const key = [A.mesh, B.mesh].sort().join(' vs ');
+        const cur = clashes.get(key) || { area: 0, y: A.y };
+        cur.area += ox * oz;
+        clashes.set(key, cur);
+      }
+    }
+    const worst = [...clashes.entries()].filter(([, v]) => v.area > 0.25);
+    assert.deepEqual(worst.map(([k, v]) => `${k} @y=${v.y.toFixed(3)} (${v.area.toFixed(2)}m²)`), [],
+      'two upward-facing faces from different meshes share a plane above the podium — with the roof '
+      + 'hidden during assembly this is the visible "room ceiling", so it reads as two z-fighting '
+      + 'plywood sheets. Stack the members (wall head stops at the 창방 underside) instead of ending '
+      + 'both solid extrusions at the same height');
+  }
 }
 
 console.log('ASSEMBLY CONTRACT: PASS (momentum-continuous settle, geometry-derived member ripple, '

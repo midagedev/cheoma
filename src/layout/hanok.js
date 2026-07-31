@@ -14,6 +14,12 @@ import { planOpeningDetail } from '../builder/opening-detail-plan.js';
 import { createOpeningDetailAssembler } from '../builder/opening-details.js';
 import { createPrimaryDoorPanelSegments } from '../builder/primary-door-panel.js';
 
+// 창방(기둥머리 가로 부재) 높이와, 그 부재가 회벽 상면을 삼키는 깊이. 회벽은 wallHeadY(=wallH -
+//   CHANGBANG_H)까지만 서고 창방이 그 위를 덮는다 — 두 솔리드가 같은 높이에서 끝나면 벽머리에
+//   동일평면 캡 두 장이 생겨 z-fighting 한다(아래 회벽 주석, check:assembly ⑨).
+const CHANGBANG_H = 0.16;
+const CHANGBANG_EMBED = 0.01;
+
 // 다각형 풋프린트(rect/ㄱ자/ㄷ자) 기와집 몸채: 기단 + 기둥 + 회벽 + straight-skeleton 곡면 지붕.
 // 백골(무단청) 반가 톤. buildBuilding(궁·절·초가)과 별개로, 꺾인 평면 살림집을 만든다.
 //
@@ -111,7 +117,14 @@ export function buildHanok({
   }
 
   // ── 회벽 (풋프린트 압출) ──
-  const wallGeo = extrudeY(shapeFrom(poly), wallH - podiumH);
+  // 회벽은 **창방 밑까지만** 세운다. 종전에는 회벽과 창방이 같은 풋프린트를 각각 솔리드로 압출하고
+  //   둘 다 wallH 에서 끝나서, 벽머리에 **위를 보는 면 두 장이 같은 평면**에 놓였다(y=wallH, 겹침
+  //   60m²). 완성본은 지붕이 덮어 안 보이지만 조립은 지붕을 정착창 70% 지점까지 숨기므로
+  //   (docs/ceiling.md 불변식 1) 그 구간에서 벽머리가 화면의 "방 천장"이 되고, z-fighting 합판
+  //   두 장으로 읽혔다(사용자 지적 2026-07-31). 부재를 겹치지 말고 **쌓는다** — 창방이 그 위를 덮고,
+  //   회벽 상면은 창방 몸통 안으로 들어가 어느 면도 같은 평면을 공유하지 않는다. 게이트: check:assembly ⑨.
+  const wallHeadY = wallH - CHANGBANG_H;         // 회벽 상단 = 창방 하단
+  const wallGeo = extrudeY(shapeFrom(poly), wallHeadY - podiumH);
   const plaster = new THREE.Mesh(wallGeo, M.plaster);
   plaster.position.y = podiumH;
   plaster.castShadow = plaster.receiveShadow = true;
@@ -140,9 +153,12 @@ export function buildHanok({
     }
   }
   // 창방 (기둥머리 가로 부재) — 풋프린트 상단 테
-  const beamGeo = extrudeY(shapeFrom(poly), 0.16);
+  // 회벽보다 2cm 앞으로(중인방과 같은 규약: 벽면과 수직면을 공유하지 않는다) + 회벽 상면보다 1cm
+  //   내려 시작해 그 캡을 몸통 안에 삼킨다. 두 부재가 살짝 겹쳐 어느 면도 동일평면이 아니고, 벽머리에
+  //   틈도 생기지 않는다. 노출 높이는 창방 저작값(CHANGBANG_H) 그대로다.
+  const beamGeo = extrudeY(shapeFrom(offsetPoly(poly, 0.02)), CHANGBANG_H + CHANGBANG_EMBED);
   const beam = new THREE.Mesh(beamGeo, M.woodDark);
-  beam.position.y = wallH - 0.16;
+  beam.position.y = wallHeadY - CHANGBANG_EMBED;
   columns.add(beam);                       // 창방=기둥머리 결구 → columns 파트(공포 없는 민도리집)
 
   // ── 창호·문 (마당 향한 면 최소 개구 보장) ──
@@ -252,9 +268,9 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
   // 개구 전용 rng(굴뚝 rng 불침해) — 방 창 폭 등 시드 파생 변주.
   const rng = makeRng((seed || 1) * 131 + 7);
 
-  // 개구 수직 구간: 기단 위 ~ 창방(wallH-0.16) 밑.
+  // 개구 수직 구간: 기단 위 ~ 창방 밑. 회벽 상단도 같은 높이(wallHeadY)라 개구가 벽을 넘지 않는다.
   const oy0 = podiumH + 0.10;
-  const oy1 = (wallH - 0.16) - 0.03;
+  const oy1 = (wallH - CHANGBANG_H) - 0.03;
   const T = 0.10, faceOff = 0.075;   // 벽면 바깥으로 살짝 돌출한 응용 창호
   const colClear = 0.30;             // 칸 폭에서 기둥 회피 여유
   const VSILL = 96 / 512;            // 문 텍스처 하부 청판 경계(flipY 기본: 청판=v∈[0,0.1875])
