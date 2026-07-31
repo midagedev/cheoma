@@ -602,6 +602,59 @@ try {
       await page.screenshot({ path: join(shotDir, `${viewport.id}-cinematic.png`) });
       pass(cinematic.faded && cinematic.panelInert && cinematic.exitPresent,
         `${viewport.id} cinematic retires the chrome and keeps one exit (${JSON.stringify(cinematic)})`);
+
+      // 감상 크롬 자동 후퇴(#30 항목 9): 클립은 OS 화면녹화로 뜨므로 패스 라벨·하단 안내·종료
+      //   버튼이 프레임에 구워지면 안 된다. 입력 없이 2.5s + 트랜지션이 지나면 오버레이 크롬은
+      //   투명해지고, 그래도 종료 버튼은 히트테스트로 살아 있어야 한다(exitPresent 계약 유지).
+      await page.waitForTimeout(3500);
+      const retired = await page.evaluate(() => {
+        const chrome = document.querySelector('.cine-overlay [data-cine-chrome]');
+        const exit = document.querySelector('.cine-overlay [data-cine-exit], .cine-overlay button');
+        const rect = exit?.getBoundingClientRect();
+        const hit = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+        return {
+          opacity: chrome ? Number(getComputedStyle(chrome).opacity) : null,
+          exitPresent: !!exit,
+          exitHittable: !!(exit && hit && (exit === hit || exit.contains(hit))),
+        };
+      });
+      pass(retired.opacity != null && retired.opacity < 0.1 && retired.exitPresent && retired.exitHittable,
+        `${viewport.id} cinematic chrome retires from the recorded frame while the exit stays tappable (${JSON.stringify(retired)})`);
+      // 실입력 하나로 되돌아와야 한다 — 영구히 사라지면 종료 창구와 현재 패스 표시를 잃는다.
+      await page.mouse.move(Math.round(viewport.width / 2), Math.round(viewport.height / 2));
+      const restored = await page.waitForFunction(() => {
+        const chrome = document.querySelector('.cine-overlay [data-cine-chrome]');
+        return !!chrome && Number(getComputedStyle(chrome).opacity) > 0.9;
+      }, null, { timeout: 4000 }).then(() => true, () => false);
+      pass(restored, `${viewport.id} cinematic chrome returns on real input`);
+
+      // 모바일 탭의 두 의미가 겹치지 않아야 한다: 드론 데모는 캔버스 탭 = 종료(engine.js
+      //   onCanvasPointerDown)이므로, 크롬이 물러난 상태의 첫 탭이 그대로 종료로 흐르면 라벨을
+      //   다시 보려던 사용자가 감상을 끝내 버린다. 첫 탭은 재등장만, 두 번째 탭이 종료다.
+      if (viewport.touch) {
+        const cx = Math.round(viewport.width / 2);
+        const cy = Math.round(viewport.height / 2);
+        const dimmedAgain = await page.waitForFunction(() => {
+          const chrome = document.querySelector('.cine-overlay [data-cine-chrome]');
+          return !!chrome && Number(getComputedStyle(chrome).opacity) < 0.1;
+        }, null, { timeout: 8000 }).then(() => true, () => false);
+        await page.touchscreen.tap(cx, cy);
+        const firstTap = await page.evaluate(async () => {
+          await new Promise((r) => setTimeout(r, 800));
+          const chrome = document.querySelector('.cine-overlay [data-cine-chrome]');
+          return {
+            stillActive: !!window.__engine.cine.getState().active,
+            opacity: chrome ? Number(getComputedStyle(chrome).opacity) : null,
+          };
+        });
+        pass(dimmedAgain && firstTap.stillActive && firstTap.opacity > 0.9,
+          `${viewport.id} first tap on retired cinematic chrome only wakes it (${JSON.stringify(firstTap)})`);
+        await page.touchscreen.tap(cx, cy);
+        const secondTap = await page.waitForFunction(() => !window.__engine.cine.getState().active,
+          null, { timeout: 4000 }).then(() => true, () => false);
+        pass(secondTap, `${viewport.id} the next tap still exits the cinematic demo`);
+      }
+
       await page.evaluate(() => window.__engine.cine.stop());
       await page.waitForFunction(() => !window.__engine.cine.getState().active, null, { timeout });
     }
