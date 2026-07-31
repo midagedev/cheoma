@@ -45,10 +45,15 @@ export {
 // 들어올리지 않는다.
 export { VILLAGE_FOCUS_CAMERA_CLEARANCE } from '../camera/focus-visibility.js';
 export {
+  DENSITY_DISC_RATIO,
+  buildCanopies,
   buildObstacles,
   createDronePaths,
+  denseRoadSpan,
   mainRoad,
+  roofDensityAt,
   roofTopAt,
+  segmentCanopyGap,
 } from '../cinematic/dronepath.js';
 export {
   buildWalkSolids,

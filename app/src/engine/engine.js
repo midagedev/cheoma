@@ -326,6 +326,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     },
     emit,
     getAerial: () => villageAerial(),
+    // 드론 패스 방위를 실측 태양 방위에 맞춘다(#30). sun.position 은 태양 방향 벡터이고 heroSunAz
+    // 고정도 여기 이미 반영되어 있으므로, debugEnv.sunAz 와 같은 단일 규약을 공유한다.
+    getSunAzimuth: () => Math.atan2(sun.position.x, sun.position.z),
     markActivity,
     reapplyVillageFog: () => reapplyVillageFog(),
     returnFromFocus: () => villageReturn(),

@@ -19,6 +19,7 @@ export function createCinematicRuntime({
   clearHover,
   emit,
   getAerial,
+  getSunAzimuth,
   markActivity,
   reapplyVillageFog,
   returnFromFocus,
@@ -85,11 +86,15 @@ export function createCinematicRuntime({
   function paths() {
     const plan = village.handle.plan;
     const { site } = plan;
+    // 실측 태양 방위(라디안, atan2(sunDir.x, sunDir.z))를 넘겨 crane-in·orbit·pullback 방위를 역광으로
+    // 정렬한다. 히어로 랜딩이 방위를 고정한 상태(heroSunAz)도 그대로 반영된다. 값이 없으면 남향 고정.
+    const sunAzimuth = typeof getSunAzimuth === 'function' ? getSunAzimuth() : null;
     return createDronePaths({
       site,
       plan,
       heightAt: (x, z) => site.heightAt(x, z),
       seed: village.seed,
+      sunAzimuth: Number.isFinite(sunAzimuth) ? sunAzimuth : null,
     });
   }
 
