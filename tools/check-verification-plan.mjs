@@ -293,6 +293,10 @@ assert.deepEqual(ids(['app/src/lib/rebuild-morph.js'], {
 assert.deepEqual(ids(['tools/check-rebuild-morph.mjs'], {
   newPaths: ['tools/check-rebuild-morph.mjs'],
 }), ['core']);
+// #30 감상 모드 캡처 하네스: 판정 없는 캡처-온리 도구라 소유 브라우저 게이트가 없다(core 기본만).
+assert.deepEqual(ids(['tools/shoot-cine.mjs'], {
+  newPaths: ['tools/shoot-cine.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['app/src/engine/village-camera-runtime.js']), [
   'core', 'app', 'dof-app', 'lod-app', 'build',
 ]);

@@ -184,6 +184,9 @@ const REVIEWED_NEW_PATHS = new Set([
   // #22 카메라 전환 연속성: 뷰 시프트 스프링·줌 범위 핸드오프의 순수 계약. 대상 런타임
   // (view-shift / village-camera-runtime)은 이미 'camera runtime changed' 로 라우팅된다.
   'tools/check-camera-continuity.mjs',
+  // #30 감상 모드(드론·도보) 캡처 하네스 — 판정 없는 프레임·수치 수집 전용, 게이트 아님
+  // (shoot-clip-stages 와 같은 캡처-온리 라우팅).
+  'tools/shoot-cine.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -280,6 +283,9 @@ function routePath(path) {
     'tools/lib/render-budget-contract.mjs': ['lod-focus'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
+    // #30 감상 모드 캡처 하네스 — 판정 없는 프레임·수치 수집 전용이라 소유 게이트가 없다
+    // (빈 배열이라도 이 맵에 있어야 아래 tools/ 폐쇄 낙하를 타지 않는다).
+    'tools/shoot-cine.mjs': [],
   };
   if (browserToolGates[path]) {
     select('existing browser contract changed; run its owning gate', ...browserToolGates[path]);
