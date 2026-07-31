@@ -13,13 +13,17 @@ export const DANCHEONG_DEFAULTS = Object.freeze({
   // A temple preset represents the central worship hall; compound renderers step
   // subsidiary and domestic halls down independently.
   temple: Object.freeze({ dancheongClarity: 0.62, dancheongSplendor: 0.82 }),
+  // 사대문 문루(#19 R3, 2026-07-31 사용자 승인). 성문은 궁 정전 아래 위계이고 사방이 풍우에
+  // 노출되므로, 같은 모로 축에서 격식과 도막 선명도를 한 단 낮춘다. style 이 source key 에
+  // 들어가므로 이 이름만으로 궁·사찰과 다른 캐시 bucket 이 되어 서로의 픽셀을 건드리지 않는다.
+  'city-gate': Object.freeze({ dancheongClarity: 0.58, dancheongSplendor: 0.22 }),
 });
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 
 function supportedStyle(style) {
-  return style === 'palace' || style === 'temple';
+  return style === 'palace' || style === 'temple' || style === 'city-gate';
 }
 
 function bucket(value) {
@@ -40,7 +44,8 @@ export function dancheongGrade(splendor) {
 /**
  * Normalize either public parameter names or the compact reusable-API aliases.
  * Ordinary giwa/choga styles deliberately return null: dancheong is not a generic
- * surface effect and must not leak into vernacular houses.
+ * surface effect and must not leak into vernacular houses. 'city-gate' is the only
+ * addition to that scope (사대문 문루, 2026-07-31 approved) and stays moro by default.
  */
 export function resolveDancheong(style, input = {}) {
   if (!supportedStyle(style)) return null;

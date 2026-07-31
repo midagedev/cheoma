@@ -1,50 +1,208 @@
 import * as THREE from 'three';
+import { makeCityGateDancheong } from '../builder/palette.js';
 import { mergeStatic } from './instancing.js';
 import {
+  CITY_STONE_BOND,
+  CITY_STONE_VALUES,
+  CITY_WALL_COURSES,
   CITY_WALL_DIMENSIONS,
+  cityGateMasonryProfile,
+  cityGatePavilionProfile,
   cityGateStructureProfile,
-  cityWallSegmentCapProfile,
+  cityStoneBondPlan,
+  cityStoneTone,
+  cityWallCourseProfile,
+  cityWallMerlonLoophole,
+  cityWallMerlonPlan,
+  cityWallMerlonSpans,
   sampleCityWallSegments,
 } from './citywall-contour.js';
 
 // 성곽(도성 성벽) + 사대문(숭례·흥인·숙정·돈의) 렌더 — 한양 전용(#47).
-//   스펙(순수 데이터)은 citywall-contour.planCityWall 이 만든다. 여기서는 그 단일 contour를 따라
-//   화면 terrain-grid 삼각면에 밀착한 석성 리본을 두르고, 게이트 자리엔 문루(석축 홍예 +
-//   기와 문루)를 세운다. 재질을 소수(석축·여장·기와·목·홍예그늘)로 통일해 병합 후 드로우콜을 억제.
+//   스펙(순수 데이터)은 citywall-contour.js 가 만든다. 여기서는 그 단일 contour를 따라 화면
+//   terrain-grid 삼각면에 밀착한 석성 리본을 두르고, 게이트 자리엔 문루(석축 홍예 + 중층 문루)를
+//   세운다. 배치·치수·줄눈·총안은 전부 순수 profile 에서 내려오고 이 파일은 좌표를 다시 만들지 않는다.
+//
+//   #19 R3-A: 여장 타·타구 톱니 + 총안, 성벽 몸통 2켜, 반원 홍예, 배터 육축, 중층 문루.
+//   #19 R3-B(근경 표면): 석재 재질은 **화강암 하나**뿐이고 켜 위계·줄눈·홍예 그늘은 전부 정점색이다.
+//     육축이 성벽과 다른 자산처럼 보였던 원인은 색이 아니라 노멀이었다 — 정점을 공유하는 프리즘에
+//     computeVertexNormals 를 걸면 수직면 노멀이 윗면 쪽으로 기울어(측정: 성벽 평균 21°, 여장 30°,
+//     수직면의 51~65%가 위로 기움) 성벽만 하늘빛을 받아 밝게 뜨고 여장 톱니는 중·원경에서 둥근
+//     혹덩어리로 뭉갠다. flatShading 이 그 둘을 함께 없앤다(성곽은 원경 전용 모듈 없이 전 거리
+//     같은 병합 메시라, 원경 어휘가 달라질 다른 경로가 없다).
 //
 //   buildCityWall(spec, site) → THREE.Group (스스로 큰 바운딩이라 컬링 이득은 적으나 드로우콜 소수).
 
 const linCol = (hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
+const V = CITY_STONE_VALUES;
+const B = CITY_STONE_BOND;
+// 홍예 그늘·총안은 석면에 밀착한 두께 0 판이다. 그림자를 던지면 바로 뒤 석면에 자기 그림자를 찍어
+// 통로가 앞으로 튀어나온 원통처럼 보이므로 캐스터에서 뺀다(기하 돌출은 없다 — 측정으로 확인).
+const SHADE_CASTS_SHADOW = false;
 
-// 지형을 따르는 사각 프리즘을 버퍼에 누적. 네 모서리마다 ground가 달라 경사면에서도 하단·상단이
-// 일정한 노출 높이를 유지한다. 바닥은 땅속이라 생략하고, 기존 중복 top 삼각형도 만들지 않는다.
-function pushTerrainPrism(P, I, corners, ground, bottomOffset, topOffset, {
-  capStart = true,
-  capEnd = true,
-} = {}) {
+// 사변형(bl, br, tr, tl) 안의 (u, v) 점. 배터로 기운 면에도 같은 블록 격자를 씌운다.
+function bilinear(quad, u, v) {
+  const [bl, br, tr, tl] = quad;
+  const out = [0, 0, 0];
+  for (let k = 0; k < 3; k++) {
+    const low = bl[k] + (br[k] - bl[k]) * u;
+    const high = tl[k] + (tr[k] - tl[k]) * u;
+    out[k] = low + (high - low) * v;
+  }
+  return out;
+}
+
+// 임의 4점 면을 바깥 방향에 맞춰 와인딩해 누적. 손으로 감은 스윕에서 컬링 구멍이 생기지 않게
+// 정점 순서를 코드가 정한다. values 는 정점별 화강암 값(그레이스케일 정점색 곱).
+function pushQuad(P, I, C, points, outward, values) {
   const base = P.length / 3;
-  for (let i = 0; i < corners.length; i++) {
-    const p = corners[i], y = ground[i];
-    P.push(p.x, y + bottomOffset, p.z);
-    P.push(p.x, y + topOffset, p.z);
+  for (let k = 0; k < 4; k++) {
+    const p = points[k];
+    P.push(p[0], p[1], p[2]);
+    const value = values ? values[k] : 1;
+    C.push(value, value, value);
   }
-  // 8 정점: 각 코너 (bottom, top) 쌍. index: corner i → base+i*2 (bot), +1 (top)
-  const q = (a, b, cc, d) => I.push(a, b, cc, a, cc, d);
-  // 옆면 4
-  for (let i = 0; i < 4; i++) {
-    if ((i === 0 && !capStart) || (i === 2 && !capEnd)) continue;
-    const a = base + i * 2, b = base + ((i + 1) % 4) * 2;
-    q(a, b, b + 1, a + 1);
+  const [a, b, c] = points;
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+  const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  if (nx * outward[0] + ny * outward[1] + nz * outward[2] < 0) {
+    I.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  } else {
+    I.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
-  // 윗면
-  q(base + 1, base + 3, base + 5, base + 7);
+}
+
+// 한 석면을 대형 방형 블록 격자로 쪼개고 블록별 값 변주 + 블록 밑변 줄눈 그림자를 정점색에 싣는다.
+// 텍스처 없이 1m급 화강암 분절을 만드는 유일한 수단이며, 블록마다 정점을 따로 써 값이 번지지 않는다.
+function pushBondFace(P, I, C, quad, outward, {
+  value = 1, seed = 0, stream = 0, width, height, rows = 0,
+}) {
+  const plan = cityStoneBondPlan(width, height, { rows });
+  for (const course of plan.courses) {
+    for (let s = 0; s < course.spans.length; s++) {
+      const span = course.spans[s];
+      const tone = value * cityStoneTone(seed, stream + s, course.index);
+      pushQuad(P, I, C, [
+        bilinear(quad, span.u0, course.v0), bilinear(quad, span.u1, course.v0),
+        bilinear(quad, span.u1, course.v1), bilinear(quad, span.u0, course.v1),
+      ], outward, [
+        tone * (1 - B.jointShade), tone * (1 - B.jointShade),
+        tone * (1 + B.crownLift), tone * (1 + B.crownLift),
+      ]);
+    }
+  }
+  return plan;
+}
+
+// 지형을 따르는 켜 하나. 아래·위 footprint 가 달라(배터) 옆면이 사다리꼴이 되고, 바깥 면만 줄눈
+// 격자를 쓴다(안쪽 면은 도성 안에서 원경으로만 보인다 — 삼각형 예산 절제). 바닥은 땅속이라 생략.
+function pushWallCourse(P, I, C, course, caps, { value, seed, index, bondRows }) {
+  const b = course.corners, t = course.topCorners;
+  const by = course.groundY.map((ground) => ground + course.bottomOffset);
+  const ty = course.topGroundY.map((ground) => ground + course.topOffset);
+  const low = (i) => [b[i].x, by[i], b[i].z];
+  const high = (i) => [t[i].x, ty[i], t[i].z];
+  let cx = 0, cz = 0;
+  for (let i = 0; i < 4; i++) { cx += b[i].x * 0.25; cz += b[i].z * 0.25; }
+  const tone = value * cityStoneTone(seed, index, 7);
+  const flat = [tone * (1 - B.jointShade), tone * (1 - B.jointShade),
+    tone * (1 + B.crownLift), tone * (1 + B.crownLift)];
+  for (const i of [0, 1, 2, 3]) {
+    if ((i === 0 && !caps.capStart) || (i === 2 && !caps.capEnd)) continue;
+    const j = (i + 1) % 4;
+    const quad = [low(i), low(j), high(j), high(i)];
+    const outward = [(b[i].x + b[j].x) * 0.5 - cx, 0, (b[i].z + b[j].z) * 0.5 - cz];
+    if (i === 1) {                                  // 바깥 면(성 밖): 줄눈 격자
+      pushBondFace(P, I, C, quad, outward, {
+        value, seed, stream: index * 3, rows: bondRows,
+        width: Math.hypot(b[j].x - b[i].x, b[j].z - b[i].z),
+        height: (ty[i] - by[i] + ty[j] - by[j]) * 0.5,
+      });
+      continue;
+    }
+    pushQuad(P, I, C, quad, outward, flat);
+  }
+  pushQuad(P, I, C, [high(0), high(1), high(2), high(3)], [0, 1, 0], [tone, tone, tone, tone]);
+}
+
+// 여장 타 한 조각(지형 추종 프리즘). 타마다 값이 조금씩 달라 원경에서도 개별 블록으로 읽힌다.
+function pushMerlonBlock(P, I, C, block, value, seed) {
+  const c = block.corners, base = block.baseY;
+  const low = (i) => [c[i].x, base[i], c[i].z];
+  const high = (i) => [c[i].x, base[i] + block.height, c[i].z];
+  let cx = 0, cz = 0;
+  for (let i = 0; i < 4; i++) { cx += c[i].x * 0.25; cz += c[i].z * 0.25; }
+  const tone = value * cityStoneTone(seed, block.merlonIndex, block.runIndex);
+  const shade = [tone * (1 - B.jointShade), tone * (1 - B.jointShade),
+    tone * (1 + B.crownLift), tone * (1 + B.crownLift)];
+  const crown = tone * (1 + B.crownLift);
+  for (const i of [0, 1, 2, 3]) {
+    if ((i === 0 && !block.startCap) || (i === 2 && !block.endCap)) continue;
+    const j = (i + 1) % 4;
+    pushQuad(P, I, C, [low(i), low(j), high(j), high(i)],
+      [(c[i].x + c[j].x) * 0.5 - cx, 0, (c[i].z + c[j].z) * 0.5 - cz], shade);
+  }
+  pushQuad(P, I, C, [high(0), high(1), high(2), high(3)], [0, 1, 0], [crown, crown, crown, crown]);
+}
+
+// 총안: 타 전면에 살짝 띄운 어두운 가로 슬릿(실제 구멍은 삼각형만 늘리고 원경에서 구분되지 않는다).
+function pushLoophole(P, I, C, hole, normal) {
+  const ox = normal.x * hole.relief, oz = normal.z * hole.relief;
+  const y0a = hole.baseA + hole.bottom, y0b = hole.baseB + hole.bottom;
+  const deep = V.loophole * 0.84;
+  pushQuad(P, I, C, [
+    [hole.a.x + ox, y0a, hole.a.z + oz],
+    [hole.b.x + ox, y0b, hole.b.z + oz],
+    [hole.b.x + ox, y0b + hole.height, hole.b.z + oz],
+    [hole.a.x + ox, y0a + hole.height, hole.a.z + oz],
+  ], [normal.x, 0, normal.z], [deep, deep, V.loophole, V.loophole]);
+}
+
+// 아래·위 사각 단면이 다른 프리즘(육축 배터, 여장 타). skip 은 이웃 덩이에 가려 보이지 않는 한 면.
+function pushRectPrism(P, I, C, bottom, top, y0, y1, {
+  skip = null, withTop = true, withBottom = false,
+  value = 1, seed = 0, stream = 0, bond = false,
+} = {}) {
+  const b = [
+    [bottom.x0, y0, bottom.z0], [bottom.x1, y0, bottom.z0],
+    [bottom.x1, y0, bottom.z1], [bottom.x0, y0, bottom.z1],
+  ];
+  const t = [
+    [top.x0, y1, top.z0], [top.x1, y1, top.z0],
+    [top.x1, y1, top.z1], [top.x0, y1, top.z1],
+  ];
+  const tone = value * cityStoneTone(seed, stream, 11);
+  const flat = [tone * (1 - B.jointShade), tone * (1 - B.jointShade),
+    tone * (1 + B.crownLift), tone * (1 + B.crownLift)];
+  const faces = [
+    ['zMin', [b[0], b[1], t[1], t[0]], [0, 0, -1], Math.abs(bottom.x1 - bottom.x0)],
+    ['xMax', [b[1], b[2], t[2], t[1]], [1, 0, 0], Math.abs(bottom.z1 - bottom.z0)],
+    ['zMax', [b[2], b[3], t[3], t[2]], [0, 0, 1], Math.abs(bottom.x1 - bottom.x0)],
+    ['xMin', [b[3], b[0], t[0], t[3]], [-1, 0, 0], Math.abs(bottom.z1 - bottom.z0)],
+  ];
+  for (let f = 0; f < faces.length; f++) {
+    const [key, quad, outward, width] = faces[f];
+    if (skip === key) continue;
+    if (bond) {
+      pushBondFace(P, I, C, quad, outward, {
+        value, seed, stream: stream + f * 13, width, height: y1 - y0,
+      });
+      continue;
+    }
+    pushQuad(P, I, C, quad, outward, flat);
+  }
+  if (withTop) pushQuad(P, I, C, [t[0], t[1], t[2], t[3]], [0, 1, 0], flat);
+  if (withBottom) pushQuad(P, I, C, [b[0], b[1], b[2], b[3]], [0, -1, 0], flat);
 }
 
 // 문루 우진각 지붕(#78 근경 격상) — 평슬래브 대신 지붕 어휘로 읽히게: 처마 반전(코너 들림)·
 //   처마 곡(중앙 처짐)·용마루(main ridge)·내림마루(hip ridges, 능선 끝→4코너). 저폴리 유지.
 //   반환 THREE.Group(면=tileMat, 마루=ridgeMat). 문 4기 한정이라 병합 후 드로우콜 소폭↑ 허용.
 //   roof-rank = city-gate (#150 C): 궁 잡상·취두 등 palace ornament를 절대 붙이지 않는다.
-function buildGateRoof(w, d, h, M) {
+//   중층의 하층 차양은 상층 벽에 붙는 스커트라 실제로는 용마루가 없다(ridge=false). 코너 내림마루는
+//   바깥에서 보이므로 두 단 모두 남긴다.
+function buildGateRoof(w, d, h, M, { ridge = true } = {}) {
   const g = new THREE.Group();
   g.name = 'city-gate-roof';
   g.userData.roofRank = 'city-gate';
@@ -70,8 +228,10 @@ function buildGateRoof(w, d, h, M) {
   const surf = new THREE.Mesh(geo, M.tileMat);
   surf.castShadow = surf.receiveShadow = true; g.add(surf);
   // 용마루: 능선 위 두툼한 어두운 기와마루.
-  const ridge = new THREE.Mesh(new THREE.BoxGeometry(tw * 2 + w * 0.05, h * 0.16, d * 0.11), M.ridgeMat);
-  ridge.position.set(0, h + h * 0.04, 0); ridge.castShadow = true; g.add(ridge);
+  if (ridge) {
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(tw * 2 + w * 0.05, h * 0.16, d * 0.11), M.ridgeMat);
+    beam.position.set(0, h + h * 0.04, 0); beam.castShadow = true; g.add(beam);
+  }
   const xAxis = new THREE.Vector3(1, 0, 0);
   for (const [ex, ez] of [[hw, hd], [hw, -hd], [-hw, hd], [-hw, -hd]]) {
     const rx = Math.sign(ex) * tw;                            // 능선 끝
@@ -89,102 +249,318 @@ export function buildCityWall(spec, site) {
   const group = new THREE.Group(); group.name = 'city-wall-work';
   if (!spec) { group.name = 'city-wall'; return group; }
   const { gates } = spec;
-  const {
-    bodyHeight: wallH,
-    thickness: thk,
-    foundationSink: sink,
-    capHeight,
-  } = CITY_WALL_DIMENSIONS;
+  const { thickness: thk } = CITY_WALL_DIMENSIONS;
+  const seed = spec.seed >>> 0;
 
-  const stoneP = [], stoneI = [];      // 석축 몸통
-  const capP = [], capI = [];          // 여장(윗단) — 약간 안쪽·짙게
+  const stoneP = [], stoneI = [], stoneC = [];   // 화강암 전체(켜 위계·줄눈은 정점색)
+  const darkP = [], darkI = [], darkC = [];      // 총안·홍예 그늘(그림자를 던지지 않는 면)
 
   const segments = sampleCityWallSegments(spec, site, { thickness: thk });
-  for (const segment of segments) {
+  for (const [index, segment] of segments.entries()) {
     const caps = { capStart: !segment.joinedStart, capEnd: !segment.joinedEnd };
-    pushTerrainPrism(stoneP, stoneI, segment.corners, segment.ground, -sink, wallH - sink, caps);
-    // 여장(윗단): 살짝 얇게 벽 위에 얹어 성가퀴 느낌 + 그림자선.
-    const cap = cityWallSegmentCapProfile(segment, thk * 0.7);
-    pushTerrainPrism(capP, capI, cap.corners, cap.baseY, 0, capHeight, caps);
+    // 석재 위계: 아래 대석 켜는 검증된 두께 그대로, 위 몸통은 배터로 좁아지며 얕은 수평 단차를 만든다.
+    // 대석 켜는 절반이 땅속이라 가로 줄눈 없이 큰 돌 한 켜(rows=1)로 두고, 가로 리듬은 켜 경계와
+    // 몸통의 자동 분할이 만든다(성벽 줄눈은 절제 — 예산은 근경 주역인 육축에 쓴다).
+    for (const course of cityWallCourseProfile(segment).courses) {
+      const isBase = course.key === CITY_WALL_COURSES.keys[0];
+      pushWallCourse(stoneP, stoneI, stoneC, course, caps, {
+        value: isBase ? V.base : V.body,
+        seed, index, bondRows: isBase ? 1 : 0,
+      });
+    }
+  }
+  // 여장: 연속 프리즘이 아니라 타/타구 반복. run 단위 arc-length 분배와 miter 승계는 순수 plan 이 한다.
+  const merlons = cityWallMerlonPlan(segments, { thickness: thk * 0.7, seed });
+  for (const block of merlons.blocks) {
+    pushMerlonBlock(stoneP, stoneI, stoneC, block, V.parapet, seed);
+    if (block.loophole) pushLoophole(darkP, darkI, darkC, block.loophole, block.normal);
   }
 
+  // 석재는 재질 하나뿐이다 — 성벽과 육축이 톤으로 갈릴 수 없고, 켜 위계는 정점색 값(5~8%)만으로 준다.
+  // flatShading: 정점 공유 프리즘의 스무딩이 수직면을 하늘 쪽으로 기울여 밝게 띄우던 것을 끊는다.
   // DoubleSide: 수작업 스윕 벽면의 와인딩 불일치로 인한 컬링 구멍 방지(벽 두께라 비용 미미).
-  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8f887d, roughness: 1, metalness: 0, side: THREE.DoubleSide });
-  const capMat = new THREE.MeshStandardMaterial({ color: 0x746c62, roughness: 1, metalness: 0, side: THREE.DoubleSide });
-  const mk = (P, I, mat, name) => {
+  const masonryMat = new THREE.MeshStandardMaterial({
+    color: 0x8e887c, roughness: 1, metalness: 0, side: THREE.DoubleSide,
+    vertexColors: true, flatShading: true,
+  });
+  // 그늘 판은 같은 화강암을 짙게 쓴 면이라 색이 겉돌지 않는다. 그림자를 던지면 밀착한 석면에 자기
+  // 그림자를 찍어 홍예가 앞으로 튀어나온 원통처럼 보이므로 캐스터에서 뺀다(진단: archMat 과
+  // 육축 전면은 y 밴드마다 최대 |z| 가 소수점 3자리까지 동일 — 실제 돌출은 없었다).
+  const shadeMat = new THREE.MeshStandardMaterial({
+    color: 0x8e887c, roughness: 1, metalness: 0, side: THREE.DoubleSide,
+    vertexColors: true, flatShading: true,
+  });
+  const mk = (P, I, C, mat, name, cast) => {
     if (!I.length) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
     g.setIndex(I); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat); m.name = name;
-    m.castShadow = true; m.receiveShadow = true; group.add(m);
+    m.castShadow = cast; m.receiveShadow = cast; group.add(m);
   };
-  mk(stoneP, stoneI, stoneMat, 'wall-stone');
-  mk(capP, capI, capMat, 'wall-cap');
+  mk(stoneP, stoneI, stoneC, masonryMat, 'wall-stone', true);
+  mk(darkP, darkI, darkC, shadeMat, 'wall-shade', SHADE_CASTS_SHADOW);
 
-  // ── 사대문(석축 홍예 + 기와 문루) ── 소수 재질(석·홍예그늘·기와·목) 공유.
-  const gateStoneMat = new THREE.MeshStandardMaterial({ color: 0x968d80, roughness: 1, metalness: 0 });
-  const archMat = new THREE.MeshStandardMaterial({ color: 0x241f1b, roughness: 1, metalness: 0 });
+  // ── 사대문(홍예 석축 + 중층 문루) ── 석재는 위와 같은 재질을 공유한다.
   const tileMat = new THREE.MeshStandardMaterial({ color: linCol(0x3b4048), roughness: 0.82, metalness: 0, side: THREE.DoubleSide });
   const ridgeMat = new THREE.MeshStandardMaterial({ color: linCol(0x262b32), roughness: 0.85, metalness: 0 }); // 용마루·내림마루(짙은 기와마루)
   const woodMat = new THREE.MeshStandardMaterial({ color: linCol(0x8a4a3a), roughness: 0.9, metalness: 0 });
-  for (const g of gates) {
-    group.add(buildGate(g, site, { gateStoneMat, archMat, tileMat, ridgeMat, woodMat }));
-  }
-  // 벽·문의 다수 메시(문루 기둥·석축 등)를 재질별 병합 → ~7 드로우콜(정적이라 손실 없음).
+  const plaqueMat = new THREE.MeshStandardMaterial({ color: linCol(0xd8d1c2), roughness: 0.85, metalness: 0 });
+  // 문루 단청(2026-07-31 사용자 승인): 색을 여기서 정하지 않고 dancheong rank 정책의 'city-gate'
+  // 격식을 그대로 받아온다. 성문 4기가 이 두 재질을 공유하므로 병합 후 +2 콜이다.
+  const dancheong = makeCityGateDancheong();
+  const M = {
+    masonryMat, shadeMat, tileMat, ridgeMat, woodMat, plaqueMat,
+    dancheongBeam: dancheong?.beam || woodMat,
+    dancheongBracket: dancheong?.bracket || woodMat,
+  };
+  for (const gate of gates) group.add(buildGate(gate, site, M, seed));
+
+  // 벽·문의 다수 메시(문루 기둥·석축 등)를 재질별 병합 → 소수 드로우콜(정적이라 손실 없음).
   const merged = mergeStatic([group], 'city-wall');
   merged.userData.isCityWall = true;
   merged.userData.segmentCount = segments.length;
+  merged.userData.merlonCount = merlons.runs.reduce((sum, run) => sum + run.count, 0);
   return merged;
 }
 
-// 한 성문: 지형에 앉힌 석축 대(臺) + 홍예(아치 그늘) + 문루(기와 우진각 + 기둥).
-function buildGate(gate, site, M) {
-  const g = new THREE.Group(); g.name = `gate-${gate.name}`;
-  const scale = gate.scale || 1;
-  const w = gate.width, depth = CITY_WALL_DIMENSIONS.gateDepth * scale;
-  // 문이 성벽 링에 직교하도록 회전 — dir(반경 방향)을 문루 정면(로컬 +z)으로.
-  const rotY = Math.atan2(gate.dirX, gate.dirZ);
-  // 기존 산길 높이는 유지하고 좌우 육축만 각자의 지반까지 내린다. 공통 상인방은 도로 유효고와
-  // 높은 쪽 지반의 최소 노출을 만족하는 낮은 값이라, 평탄 축대·인공 램프·절벽 타워가 생기지 않는다.
-  const structure = cityGateStructureProfile(gate, site);
-  g.position.set(gate.x, 0, gate.z);
-  g.rotation.y = rotY;
-
-  // 석축 대: 통로 양옆 pierW 폭의 육축 두 덩이. 각 육축은 자기 footprint의 최저 지반까지
-  // 독립적으로 내려 경사지에서도 떠 있지 않고, 공통 baseTopY에서 홍예 상인방과 만난다.
-  const pierW = 5.5 * scale;
-  const half = w / 2 + pierW / 2;
-  for (const [index, sx] of [-1, 1].entries()) {
-    const bottom = structure.piers[index].min
-      - CITY_WALL_DIMENSIONS.gateFoundationSink * scale;
-    const height = structure.baseTopY - bottom;
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(pierW, height, depth), M.gateStoneMat);
-    pier.position.set(sx * half, bottom + height / 2, 0);
-    pier.castShadow = pier.receiveShadow = true; g.add(pier);
+// 문루 한 층: 기둥열 + (하층)판벽 / (상층)난간·편액 + 공포 힌트 밴드. 실루엣 우선 — 창살·단청 없음.
+function addPavilionStorey(g, storey, M) {
+  const hw = storey.width * 0.5, hd = storey.depth * 0.5;
+  const radius = Math.min(0.3, storey.height * 0.075);
+  const colH = storey.height;
+  const columns = [];
+  for (let i = 0; i < storey.columns; i++) {
+    columns.push(storey.columns === 1 ? 0 : -hw + (hw * 2) * i / (storey.columns - 1));
   }
-  // 홍예 상인방(문 위 석재) + 천장 그늘. 예전의 세로 검정 cuboid는 통로를 실제로 막았으므로,
-  // 얕은 수평 soffit만 두어 문 너머 지형과 길은 보이면서 안쪽 깊이만 어둡게 읽히게 한다.
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(w + pierW, structure.lintelHeight, depth), M.gateStoneMat);
-  lintel.position.set(0, structure.baseTopY - structure.lintelHeight / 2, 0); lintel.castShadow = true; g.add(lintel);
-  const soffitH = 0.12 * scale;
-  const soffit = new THREE.Mesh(new THREE.BoxGeometry(w * 0.78, soffitH, depth * 0.72), M.archMat);
-  soffit.position.set(0, structure.archTopY - soffitH / 2, 0); g.add(soffit);
-
-  // 문루 마루(대 위 목조 단): 낮은 난간 + 기둥 열.
-  const deckY = structure.baseTopY + 0.2 * scale;
-  const deckW = w + pierW * 2 + 1.5 * scale, deckD = depth + 2.0 * scale;
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(deckW, 0.5, deckD), M.gateStoneMat);
-  deck.position.set(0, deckY, 0); deck.castShadow = deck.receiveShadow = true; g.add(deck);
-  const colH = 3.4 * scale;
-  for (const sx of [-1, -0.34, 0.34, 1]) for (const sz of [-1, 1]) {
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.3, colH, 6), M.woodMat);
-    col.position.set(sx * deckW * 0.4, deckY + 0.25 + colH / 2, sz * deckD * 0.38);
+  for (const x of columns) for (const sz of [-1, 1]) {
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.88, radius, colH, 6), M.woodMat);
+    col.position.set(x, storey.y0 + colH / 2, sz * hd);
     col.castShadow = true; g.add(col);
   }
-  // 문루 지붕(기와 우진각) — 처마가 마루 밖으로. #78: 슬래브→지붕 어휘(용마루·내림마루·처마곡).
-  const roofY = deckY + 0.25 + colH;
-  const roof = buildGateRoof(deckW + 3.4 * scale, deckD + 3.4 * scale, (deckD + 3.4 * scale) * 0.42, M);
-  roof.position.set(0, roofY, 0); g.add(roof);
+  // 기둥 머리초: 기둥 상부를 감는 짧은 채색 띠. 원통 uv 라 머리초 색선이 둘레로 돈다.
+  const headBandH = Math.min(colH * 0.22, radius * 4);
+  for (const x of columns) for (const sz of [-1, 1]) {
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 1.04, radius * 1.04, headBandH, 8, 1, true),
+      M.dancheongBeam);
+    band.position.set(x, storey.y0 + colH - headBandH * 0.5 - radius * 2.2, sz * hd);
+    band.castShadow = true; g.add(band);
+  }
+  // 공포 힌트: 창방·평방 두 켜 + 기둥 머리 소로 블록. 기둥과 지붕이 직결로 붙어 보이던 이음을 끊는다.
+  // 궁의 다포 어휘를 기하로 축약하고 채색은 dancheong 정책('city-gate' 모로)에서 받는다.
+  const architraveY = storey.y0 + colH - radius * 1.4;
+  for (const sz of [-1, 1]) {
+    const chang = new THREE.Mesh(
+      new THREE.BoxGeometry(storey.width + radius * 2, radius * 1.1, radius * 0.9), M.dancheongBeam);
+    chang.position.set(0, architraveY, sz * hd);
+    chang.castShadow = true; g.add(chang);
+    // 평방: 창방 위 한 켜(다포계 어휘). 얇게 얹어 수평 밴드가 두 줄로 읽힌다.
+    const pyeong = new THREE.Mesh(
+      new THREE.BoxGeometry(storey.width + radius * 3, radius * 0.62, radius * 1.15), M.dancheongBeam);
+    pyeong.position.set(0, architraveY + radius * 0.9, sz * hd);
+    pyeong.castShadow = true; g.add(pyeong);
+  }
+  for (const x of columns) for (const sz of [-1, 1]) {
+    const soro = new THREE.Mesh(new THREE.BoxGeometry(radius * 2.6, radius * 1.5, radius * 2.6), M.dancheongBracket);
+    soro.position.set(x, architraveY + radius * 1.9, sz * hd);
+    soro.castShadow = true; g.add(soro);
+  }
+  if (storey.rail > 0) {
+    // 난간: 상층 둘레 낮은 띠(원경에서는 상층 바닥선을 만드는 실루엣 요소).
+    for (const [w, d, x, z] of [
+      [storey.width, 0.14, 0, hd], [storey.width, 0.14, 0, -hd],
+      [0.14, storey.depth, hw, 0], [0.14, storey.depth, -hw, 0],
+    ]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(w, storey.rail, d), M.woodMat);
+      rail.position.set(x, storey.y0 + storey.rail * 0.5, z);
+      rail.castShadow = true; g.add(rail);
+    }
+    // 편액: 상층 정면 흰 판 하나(글씨·단청 없음 — 기하만).
+    const plaqueW = Math.min(storey.width * 0.34, 3.2);
+    const plaque = new THREE.Mesh(new THREE.BoxGeometry(plaqueW, plaqueW * 0.42, 0.14), M.plaqueMat);
+    plaque.position.set(0, storey.y0 + colH * 0.6, hd + 0.1);
+    plaque.castShadow = true; g.add(plaque);
+    return;
+  }
+  // 하층 벽체: 기둥 사이 판벽(판문·회벽으로 읽히는 면). 기둥 뒤로 물러나 기둥열이 살아난다.
+  const panelH = colH * 0.86;
+  const panelY = storey.y0 + panelH * 0.5;
+  for (let i = 0; i < columns.length - 1; i++) {
+    const span = columns[i + 1] - columns[i] - radius * 2;
+    if (span <= 0.1) continue;
+    for (const sz of [-1, 1]) {
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(span, panelH, 0.2), M.woodMat);
+      panel.position.set((columns[i] + columns[i + 1]) * 0.5, panelY, sz * (hd - radius * 0.6));
+      panel.castShadow = panel.receiveShadow = true; g.add(panel);
+    }
+  }
+  for (const sx of [-1, 1]) {
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.2, panelH, storey.depth - radius * 2), M.woodMat);
+    panel.position.set(sx * (hw - radius * 0.6), panelY, 0);
+    panel.castShadow = panel.receiveShadow = true; g.add(panel);
+  }
+}
+
+// 한 성문: 지형에 앉힌 배터 석축 육축(2켜 + 코니스) + 반원 홍예 통로 + 중층 문루 + 육축 둘레 여장.
+function buildGate(gate, site, M, wallSeed) {
+  const g = new THREE.Group(); g.name = `gate-${gate.name}`;
+  const structure = cityGateStructureProfile(gate, site);
+  const masonry = cityGateMasonryProfile(gate, site, structure);
+  const pavilion = cityGatePavilionProfile(gate, structure, masonry);
+  // 문이 성벽 링에 직교하도록 회전 — dir(반경 방향)을 문루 정면(로컬 +z)으로.
+  g.position.set(gate.x, 0, gate.z);
+  g.rotation.y = Math.atan2(gate.dirX, gate.dirZ);
+  const seed = ((wallSeed >>> 0) ^ Math.round(gate.angle * 1000)) >>> 0;
+
+  const stoneP = [], stoneI = [], stoneC = [];   // 육축·코니스·마루·홍예 스팬드럴·여장 링
+  const darkP = [], darkI = [], darkC = [];      // 홍예 그늘(문협·홍예 안쪽면)·총안
+
+  const arch = masonry.arch;
+  const batter = masonry.batter;
+  // 배터 램프: profile 이 공개한 (bottomY, topY, inset) 을 그대로 평가한다. 육축 전체가 한 램프를
+  // 쓰므로 좌우 지반이 달라도 상단 폭이 어긋나지 않고, 홍예 면도 같은 램프를 써 전면과 정확히 같은
+  // 평면에 놓인다(통로 원통이 앞으로 튀어나오지 않는다).
+  const insetAt = (y) => batter.inset
+    * Math.max(0, Math.min(1, (y - batter.bottomY) / Math.max(1e-6, batter.topY - batter.bottomY)));
+  const mouth = V.shadeMouth, deep = V.shadeDeep;
+
+  // 육축 두 덩이: 홍예 개구 밖 전체 폭이 석면이 된다(옛 열린 도로 폭도 석축으로 덮인다).
+  for (const zone of masonry.zones) {
+    const skip = zone.side > 0 ? 'xMin' : 'xMax';   // 안쪽 면은 통로 그늘이 맡는다
+    for (const [courseIndex, course] of zone.courses.entries()) {
+      const isBase = course.key === CITY_WALL_COURSES.keys[0];
+      pushRectPrism(stoneP, stoneI, stoneC, course.bottom, course.top, course.y0, course.y1, {
+        skip, value: isBase ? V.base : V.body, seed,
+        stream: (zone.index * 2 + courseIndex) * 29, bond: true,
+      });
+      // 문협(통로 벽): 어두운 면으로 홍예 안쪽 깊이를 만든다 — 통로 자체는 뚫려 있다. 입구 쪽이
+      // 밝고(shadeMouth) 안으로 갈수록 떨어져(shadeDeep), 통과 시야가 실틈처럼 새까맣지 않다.
+      const x = zone.side > 0 ? course.bottom.x0 : course.bottom.x1;
+      const outward = [-zone.side, 0, 0];
+      pushQuad(darkP, darkI, darkC, [
+        [x, course.y0, course.bottom.z0], [x, course.y0, 0],
+        [x, course.y1, 0], [x, course.y1, course.top.z0],
+      ], outward, [mouth, deep, deep, mouth]);
+      pushQuad(darkP, darkI, darkC, [
+        [x, course.y0, 0], [x, course.y0, course.bottom.z1],
+        [x, course.y1, course.top.z1], [x, course.y1, 0],
+      ], outward, [deep, mouth, mouth, deep]);
+    }
+  }
+
+  // 반원 홍예: 안쪽 곡면(그늘) + 그 위 스팬드럴 석면. 통로는 실제로 뚫려 있어 문 너머 지형·길이 보인다.
+  for (let i = 0; i < arch.intrados.length - 1; i++) {
+    const p = arch.intrados[i], q = arch.intrados[i + 1];
+    const pd = arch.halfDepth - insetAt(p.y), qd = arch.halfDepth - insetAt(q.y);
+    const mx = (p.x + q.x) * 0.5, my = (p.y + q.y) * 0.5;
+    const inward = [-mx, -(my - arch.springY), 0];   // 홍예 중심을 향한 안쪽 면
+    pushQuad(darkP, darkI, darkC, [
+      [p.x, p.y, -pd], [q.x, q.y, -qd], [q.x, q.y, 0], [p.x, p.y, 0],
+    ], inward, [mouth, mouth, deep, deep]);
+    pushQuad(darkP, darkI, darkC, [
+      [p.x, p.y, 0], [q.x, q.y, 0], [q.x, q.y, qd], [p.x, p.y, pd],
+    ], inward, [deep, deep, mouth, mouth]);
+    const topInset = arch.halfDepth - insetAt(arch.spandrelTopY);
+    const tone = V.body * cityStoneTone(seed, i, 3);
+    for (const sz of [-1, 1]) {
+      pushQuad(stoneP, stoneI, stoneC, [
+        [p.x, p.y, sz * pd], [q.x, q.y, sz * qd],
+        [q.x, arch.spandrelTopY, sz * topInset], [p.x, arch.spandrelTopY, sz * topInset],
+      ], [0, 0, sz], [tone * (1 - B.jointShade), tone * (1 - B.jointShade),
+        tone * (1 + B.crownLift), tone * (1 + B.crownLift)]);
+    }
+  }
+
+  // 상단 코니스 켜: 배터로 좁아진 면에서 다시 예약 폭까지 내밀어 수평 그림자선을 만든다.
+  const cornice = masonry.cornice;
+  const corniceRect = {
+    x0: -cornice.halfWidth, x1: cornice.halfWidth,
+    z0: -cornice.halfDepth, z1: cornice.halfDepth,
+  };
+  pushRectPrism(stoneP, stoneI, stoneC, corniceRect, corniceRect, cornice.y0, cornice.y1, {
+    withBottom: true, value: V.cornice, seed, stream: 71, bond: true,
+  });
+  // 문루 마루(육축 상면): 여장 링과 문루가 함께 앉는 낮은 대.
+  const deck = pavilion.deck;
+  const deckRect = {
+    x0: -deck.halfWidth, x1: deck.halfWidth, z0: -deck.halfDepth, z1: deck.halfDepth,
+  };
+  pushRectPrism(stoneP, stoneI, stoneC, deckRect, deckRect, deck.y0, deck.y1, {
+    value: V.deck, seed, stream: 97,
+  });
+
+  // 육축 둘레 여장: 성벽과 같은 톱니 패턴·높이·총안 규칙을 써서 성가퀴가 문으로 이어지는 것처럼 읽힌다.
+  const parapet = pavilion.parapet;
+  const half = parapet.thickness * 0.5;
+  for (const [sideIndex, side] of parapet.sides.entries()) {
+    if (side.length <= 0) continue;
+    const dirX = (side.to.x - side.from.x) / side.length;
+    const dirZ = (side.to.z - side.from.z) / side.length;
+    const outward = side.axis === 'x' ? { x: 0, z: side.sign } : { x: side.sign, z: 0 };
+    for (const [merlonIndex, span] of cityWallMerlonSpans(side.length).spans.entries()) {
+      const ax = side.from.x + dirX * span.start, az = side.from.z + dirZ * span.start;
+      const bx = side.from.x + dirX * span.end, bz = side.from.z + dirZ * span.end;
+      const rect = {
+        x0: Math.min(ax, bx) - (side.axis === 'z' ? half : 0),
+        x1: Math.max(ax, bx) + (side.axis === 'z' ? half : 0),
+        z0: Math.min(az, bz) - (side.axis === 'x' ? half : 0),
+        z1: Math.max(az, bz) + (side.axis === 'x' ? half : 0),
+      };
+      pushRectPrism(stoneP, stoneI, stoneC, rect, rect, parapet.y, parapet.y + parapet.height, {
+        value: V.parapet, seed, stream: 131 + sideIndex * 17 + merlonIndex,
+      });
+      const slit = cityWallMerlonLoophole(seed, 8 + sideIndex, merlonIndex);
+      if (!slit) continue;
+      const hx = side.from.x + dirX * span.loophole.start, hz = side.from.z + dirZ * span.loophole.start;
+      const gx = side.from.x + dirX * span.loophole.end, gz = side.from.z + dirZ * span.loophole.end;
+      pushLoophole(darkP, darkI, darkC, {
+        a: { x: hx + outward.x * half, z: hz + outward.z * half },
+        b: { x: gx + outward.x * half, z: gz + outward.z * half },
+        baseA: parapet.y, baseB: parapet.y,
+        bottom: slit.bottom, height: slit.height, relief: slit.relief,
+      }, outward);
+    }
+  }
+
+  const mk = (P, I, C, mat, name, cast) => {
+    if (!I.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    geo.setIndex(I); geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat); mesh.name = name;
+    mesh.castShadow = cast; mesh.receiveShadow = cast; g.add(mesh);
+  };
+  mk(stoneP, stoneI, stoneC, M.masonryMat, 'gate-stone', true);
+  mk(darkP, darkI, darkC, M.shadeMat, 'gate-arch-shade', SHADE_CASTS_SHADOW);
+
+  // 중층 문루: 하층 기둥열+판벽, 상층은 폭·깊이를 체감한 기둥열+난간. 지붕 2단(하층 차양 + 상층 본지붕).
+  for (const storey of pavilion.storeys) addPavilionStorey(g, storey, M);
+  for (const roof of pavilion.roofs) {
+    const built = buildGateRoof(roof.width, roof.depth, roof.height, M, { ridge: roof.tier === 'upper' });
+    built.position.set(0, roof.y, 0);
+    g.add(built);
+    addEaveDancheongBand(g, roof, M);
+  }
   return g;
+}
+
+// 처마 밑 채색 띠: 처마선 바로 안쪽을 도리·부연 채색 밴드로 두른다. 지붕면 자체는 손으로 감은
+// uv 없는 지오메트리라 단청 map 을 붙일 수 없으므로, uv 가 있는 박스 네 개로 처마 밑면을 대신한다.
+function addEaveDancheongBand(g, roof, M) {
+  const lift = roof.height * 0.20;              // buildGateRoof 의 처마 반전 높이
+  const inset = 0.55, thickness = 0.3, height = 0.24;
+  const hw = roof.width * 0.5 - inset, hd = roof.depth * 0.5 - inset;
+  if (hw <= thickness || hd <= thickness) return;
+  const y = roof.y + lift - height * 0.45;
+  for (const [w, d, x, z] of [
+    [hw * 2, thickness, 0, hd], [hw * 2, thickness, 0, -hd],
+    [thickness, hd * 2, hw, 0], [thickness, hd * 2, -hw, 0],
+  ]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(w, height, d), M.dancheongBeam);
+    band.position.set(x, y, z);
+    band.castShadow = true; g.add(band);
+  }
 }

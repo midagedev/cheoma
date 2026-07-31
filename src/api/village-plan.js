@@ -88,4 +88,21 @@ export {
   sampleCityWallSegments,
   cityWallSegmentCapProfile,
   cityWallSegmentFootprint,
+  // 성곽 형태 계약(#19 R3): 홍예·배터 육축·석재 켜·여장 톱니·중층 문루.
+  CITY_GATE_MASONRY,
+  CITY_GATE_PAVILION,
+  CITY_WALL_COURSES,
+  CITY_WALL_MERLON,
+  cityGateMasonryProfile,
+  cityGatePavilionProfile,
+  cityWallCourseProfile,
+  cityWallMerlonPlan,
+  cityWallMerlonSpans,
+  cityWallSegmentGroundProfile,
+  // 근경 표면 계약: 화강암 값 위계·방형 블록 줄눈·총안 슬릿(정점색으로만 소비된다).
+  CITY_STONE_BOND,
+  CITY_STONE_VALUES,
+  cityStoneBondPlan,
+  cityStoneTone,
+  cityWallMerlonLoophole,
 } from '../village/citywall-contour.js';

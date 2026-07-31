@@ -47,6 +47,99 @@ export const CITY_WALL_DIMENSIONS = Object.freeze({
   roadEdgeMargin: 3,
 });
 
+// 성벽 몸통 석재 위계(#19 R3). 구한말 사진의 도성 석성은 큰 대석을 쌓은 아래 켜와 그 위 몸통이
+// 얕은 수평 단차로 갈린다. 위 켜는 검증된 두께 envelope **안으로만** 물러나므로(바깥으로 자라지
+// 않음) world edge·지형 밀착·여장 이음 계약이 그대로 유지된다.
+//   몸통 배터는 육축과 같은 어휘(≈8%)를 쓰되 여장 두께(thickness*0.7)보다 얇아지지 않는다.
+export const CITY_WALL_COURSES = Object.freeze({
+  baseFraction: 0.40,   // 지상 노출 높이 중 대석 기단부 비율
+  bodyInset: 0.18,      // 위 몸통이 뒤로 물러나는 두께 차(양면 합)
+  baseBatter: 0.014,    // 대석 기단은 거의 수직
+  bodyBatter: 0.075,    // 몸통 배터(성벽·육축 공통 어휘)
+  keys: Object.freeze(['wall-base', 'wall-body']),
+});
+
+// 여장(성가퀴) 톱니. 연속 프리즘이 아니라 타(merlon)·타구(gap) 반복이며, 타 전면에는 총안이
+// 어두운 인셋 면으로 붙는다(실제 구멍은 삼각형 비용만 늘리고 원경에서 구분되지 않는다).
+//   총안은 타마다 등간격으로 찍으면 아이콘 리듬이 되므로 시드 파생으로 띄어 뚫고 높이를 흔든다.
+export const CITY_WALL_MERLON = Object.freeze({
+  length: 3,            // 타 길이(목표) — run 길이에 맞춰 ±lengthBand 안에서 균등 분배
+  lengthBand: 0.2,
+  gap: 0.36,            // 타구
+  loopholeWidth: 0.66,  // 총안 폭(가로 슬릿)
+  loopholeHeight: 0.19,
+  loopholeBottom: 0.32, // 여장 밑에서 총안 하단까지
+  loopholeJitter: 0.07, // 시드 파생 높이 흔들림
+  loopholeKeep: 0.58,   // 총안이 뚫린 타의 비율
+  loopholeRelief: 0.03, // 면에서 살짝 띄운 인셋(구멍 아님)
+});
+
+// 석재 위계는 재질이 아니라 **하나의 화강암 값 테이블**로만 표현한다. 성벽과 육축이 같은 키를
+// 쓰므로 두 자산의 톤이 구성상 갈릴 수 없다(비전 판정 #1: 육축이 다른 자산으로 보였던 원인은
+// 색이 아니라 정점 공유 프리즘의 노멀 스무딩이었고, 그건 flat shading 으로 잡는다).
+export const CITY_STONE_VALUES = Object.freeze({
+  base: 0.95,        // 대석 기단 켜(성벽·육축 공통)
+  body: 1,           // 몸통(성벽·육축 공통)
+  parapet: 0.94,     // 여장
+  cornice: 1.02,     // 코니스·마루 윗켜
+  deck: 0.97,
+  shadeDeep: 0.3,    // 홍예 안쪽 깊은 곳
+  shadeMouth: 0.58,  // 홍예 입구 — 반대편 지면이 읽히게 밝힌다
+  loophole: 0.32,
+  stoneKeys: Object.freeze(['base', 'body', 'parapet', 'cornice', 'deck']),
+});
+
+// 대형 방형 화강암 줄눈. 텍스처 없이 블록 단위 정점색(값 변주 + 블록 밑변 그림자)으로만 표현하고,
+// 켜마다 반 블록 어긋난 막힌줄눈을 쓴다(통줄눈 금지).
+export const CITY_STONE_BOND = Object.freeze({
+  block: 1.05,                  // 블록 한 변(목표)
+  blockBand: Object.freeze([0.8, 1.4]),
+  toneSpread: 0.055,            // 블록별 값 변주
+  jointShade: 0.06,             // 블록 밑변 줄눈 그림자
+  crownLift: 0.03,              // 블록 윗변 하이라이트
+  bondOffset: 0.5,
+  wallRows: 2,                  // 성벽 몸통 켜당 가로 줄눈 밴드(절제)
+  maxCols: 48,
+  maxRows: 24,
+});
+
+// 성문 육축(석축 대). 홍예 개구 폭 / 육축 총폭은 숭례문·흥인지문 실측 밴드(≈0.18~0.22)를 따르고,
+// 육축은 위로 갈수록 좁아지는 배터와 상단 코니스 켜를 가진다. 배터는 **상단을 좁히는** 방향이라
+// 하단 footprint 가 계획이 검증한 예약 범위를 절대 넘지 않는다.
+export const CITY_GATE_MASONRY = Object.freeze({
+  archRatio: 0.20,
+  archRatioBand: 0.02,
+  archSegments: 10,   // 짝수라 정점(이맛돌)에 정확히 vertex 가 놓인다
+  batterSlope: 0.08,
+  batterMinInset: 0.2,
+  batterMaxInsetK: 0.14,   // 폭·깊이 대비 상단 인셋 상한
+  corniceHeight: 0.42,
+  jambMin: 0.6,
+  pierWidth: 5.5,          // 옛 육축 한 덩이 폭 — 예약 footprint(gateExtraWidth) 의 절반씩
+});
+
+// 중층 문루: 하층은 기둥열+벽체, 상층은 폭·깊이를 체감한 기둥열+난간, 지붕 2단.
+//   widthRatio 는 숭례문 실측 비례(육축 폭보다 좁은 문루)를 따른다. 문루가 육축 상면을 다 덮으면
+//   처마가 여장 링을 가려 성가퀴 연속이 사라지므로, 좌우에 여장이 보이는 날개를 남긴다.
+//   lowerRoofPitch 는 하층 차양이 상층 벽을 삼키지 않는 완만한 값이다.
+export const CITY_GATE_PAVILION = Object.freeze({
+  walkway: 0.8,          // 여장 안쪽 통로
+  deckHeight: 0.4,
+  widthRatio: 0.6,
+  bayWidth: 3.2,         // 기둥 사이 한 칸
+  lowerHeight: 3.6,
+  lowerEave: 1.9,
+  upperRatio: 0.8,
+  upperFloor: 0.4,
+  upperHeight: 2.9,
+  upperEave: 1.7,
+  railHeight: 0.55,
+  lowerRoofPitch: 0.2,
+  upperRoofPitch: 0.42,
+  minSpan: 2.2,
+  maxColumns: 15,
+});
+
 const wrapAngle = (angle) => {
   const a = angle % TAU;
   return a < 0 ? a + TAU : a;
@@ -281,12 +374,12 @@ export function cityGateTerrainProfile(gate, site, {
 // 한쪽 육축 footprint의 내부 최저점을 촘촘히 찾는다. 모서리 4점만 보면 비선형 산세의 내부 골을 놓쳐
 // 긴 pier가 공중에 뜰 수 있으므로 renderer가 이 순수 profile을 직접 소비한다.
 export function cityGatePierTerrainProfile(gate, site, side, {
-  pierWidth = 5.5 * (gate.scale || 1),
+  pierWidth = CITY_GATE_MASONRY.pierWidth * (gate.scale || 1),
   depth = CITY_WALL_DIMENSIONS.gateDepth * (gate.scale || 1),
   widthSamples = 17,
   depthSamples = 13,
+  centerX = side * (gate.width * 0.5 + pierWidth * 0.5),
 } = {}) {
-  const centerX = side * (gate.width * 0.5 + pierWidth * 0.5);
   let min = Infinity, max = -Infinity;
   const samples = [];
   for (let ix = 0; ix < widthSamples; ix++) {
@@ -672,25 +765,444 @@ export function cityWallSegmentFootprint(segment, thickness) {
   return { corners };
 }
 
-// 좁은 여장 리본의 밑변을 넓은 몸체 윗면의 양쪽 edge에서 선형보간한다. 여장 footprint에서
-// 지형을 다시 샘플하면 폭 차이만큼 높이가 달라져 몸체와 여장 사이에 수평 틈이 생긴다.
-export function cityWallSegmentCapProfile(
+// 좁은 리본(여장·위 켜)의 지반을 넓은 몸체 footprint 양쪽 edge에서 선형보간한다. 좁은
+// footprint에서 지형을 다시 샘플하면 폭 차이만큼 높이가 달라져 켜 사이에 수평 틈이 생긴다.
+export function cityWallSegmentGroundProfile(
   segment,
   thickness = (segment.thickness || CITY_WALL_DIMENSIONS.thickness) * 0.7,
 ) {
   const bodyThickness = segment.thickness || CITY_WALL_DIMENSIONS.thickness;
   const ratio = Math.max(0, Math.min(1, thickness / bodyThickness));
   const innerMix = (1 - ratio) * 0.5;
-  const topOffset = CITY_WALL_DIMENSIONS.bodyHeight - CITY_WALL_DIMENSIONS.foundationSink;
-  const startY = (t) => segment.ground[0] + (segment.ground[1] - segment.ground[0]) * t + topOffset;
-  const endY = (t) => segment.ground[3] + (segment.ground[2] - segment.ground[3]) * t + topOffset;
+  const startY = (t) => segment.ground[0] + (segment.ground[1] - segment.ground[0]) * t;
+  const endY = (t) => segment.ground[3] + (segment.ground[2] - segment.ground[3]) * t;
   return {
     corners: footprint(segment, thickness * 0.5),
-    baseY: [
+    groundY: [
       startY(innerMix),
       startY(1 - innerMix),
       endY(1 - innerMix),
       endY(innerMix),
     ],
+  };
+}
+
+export function cityWallSegmentCapProfile(
+  segment,
+  thickness = (segment.thickness || CITY_WALL_DIMENSIONS.thickness) * 0.7,
+) {
+  const profile = cityWallSegmentGroundProfile(segment, thickness);
+  const topOffset = CITY_WALL_DIMENSIONS.bodyHeight - CITY_WALL_DIMENSIONS.foundationSink;
+  return {
+    corners: profile.corners,
+    baseY: profile.groundY.map((ground) => ground + topOffset),
+  };
+}
+
+// 몸통 석재 2켜. 아래 대석 켜는 세그먼트 footprint 그대로(=계획이 검증한 두께)이고 위 몸통만
+// bodyInset 만큼 물러나 얕은 수평 단차를 만든다. 위 켜 지반은 같은 보간을 써서 켜 사이 틈이 없다.
+export function cityWallCourseProfile(segment, {
+  thickness = segment.thickness || CITY_WALL_DIMENSIONS.thickness,
+  baseFraction = CITY_WALL_COURSES.baseFraction,
+  bodyInset = CITY_WALL_COURSES.bodyInset,
+  baseBatter = CITY_WALL_COURSES.baseBatter,
+  bodyBatter = CITY_WALL_COURSES.bodyBatter,
+} = {}) {
+  const exposed = CITY_WALL_DIMENSIONS.bodyHeight - CITY_WALL_DIMENSIONS.foundationSink;
+  const splitOffset = exposed * baseFraction;
+  const capThickness = CITY_WALL_DIMENSIONS.thickness * 0.7;
+  const baseHeight = splitOffset + CITY_WALL_DIMENSIONS.foundationSink;
+  const bodyHeight = exposed - splitOffset;
+  // 배터는 상단만 좁힌다 — 하단 footprint 는 계획이 검증한 두께 그대로라 지형 밀착·world edge
+  // 계약이 유지되고, 어느 켜도 여장 두께(thickness*0.7)보다 얇아지지 않는다.
+  const baseTopThickness = Math.max(capThickness, thickness - baseBatter * 2 * baseHeight);
+  const bodyThickness = Math.max(capThickness, baseTopThickness - bodyInset);
+  const bodyTopThickness = Math.max(capThickness, bodyThickness - bodyBatter * 2 * bodyHeight);
+  const course = (key, bottomThickness, topThickness, bottomOffset, topOffset) => {
+    const bottom = cityWallSegmentGroundProfile(segment, bottomThickness);
+    const top = cityWallSegmentGroundProfile(segment, topThickness);
+    return {
+      key,
+      thickness: bottomThickness,
+      topThickness,
+      corners: bottom.corners,
+      groundY: bottom.groundY,
+      topCorners: top.corners,
+      topGroundY: top.groundY,
+      bottomOffset,
+      topOffset,
+    };
+  };
+  return {
+    splitOffset,
+    courses: [
+      course(CITY_WALL_COURSES.keys[0], thickness, baseTopThickness,
+        -CITY_WALL_DIMENSIONS.foundationSink, splitOffset),
+      course(CITY_WALL_COURSES.keys[1], bodyThickness, bodyTopThickness,
+        splitOffset, exposed),
+    ],
+  };
+}
+
+// 블록별 값 변주(줄눈 읽힘). 정수 해시라 시드만 같으면 어디서든 같은 값이 나온다(Math.random 금지).
+export function cityStoneTone(seed, i, j, { spread = CITY_STONE_BOND.toneSpread } = {}) {
+  let h = Math.imul(((seed | 0) ^ 0x9e3779b9) >>> 0, 0x85ebca6b);
+  h = Math.imul((h ^ ((i | 0) + 0x165667b1)) >>> 0, 0xc2b2ae35);
+  h = Math.imul((h ^ ((j | 0) + 0x27d4eb2f)) >>> 0, 0x9e3779b1);
+  h = (h ^ (h >>> 15)) >>> 0;
+  const u = (h % 2048) / 2047;
+  return 1 + (u * 2 - 1) * spread;
+}
+
+// 한 석면(사변형)의 방형 블록 배치. u·v 는 면 로컬 0~1 이라 렌더러가 어떤 사변형에도 매핑한다.
+// 켜마다 반 블록 어긋나 통줄눈이 생기지 않는다.
+export function cityStoneBondPlan(width, height, {
+  block = CITY_STONE_BOND.block,
+  band = CITY_STONE_BOND.blockBand,
+  rows: forcedRows = 0,
+  bondOffset = CITY_STONE_BOND.bondOffset,
+  maxCols = CITY_STONE_BOND.maxCols,
+  maxRows = CITY_STONE_BOND.maxRows,
+} = {}) {
+  const w = Math.max(1e-6, width), h = Math.max(1e-6, height);
+  let cols = Math.max(1, Math.min(maxCols, Math.round(w / block)));
+  while (cols > 1 && w / cols < band[0]) cols--;
+  while (cols < maxCols && w / cols > band[1]) cols++;
+  let rows = forcedRows > 0 ? Math.max(1, Math.min(maxRows, Math.round(forcedRows)))
+    : Math.max(1, Math.min(maxRows, Math.round(h / block)));
+  if (!(forcedRows > 0)) {
+    while (rows > 1 && h / rows < band[0] * 0.55) rows--;
+    while (rows < maxRows && h / rows > band[1]) rows++;
+  }
+  const courses = [];
+  for (let r = 0; r < rows; r++) {
+    const offset = (r % 2 === 1 && cols > 1) ? bondOffset / cols : 0;
+    const spans = [];
+    if (offset > 0) spans.push({ u0: 0, u1: offset });
+    for (let c = 0; c < cols; c++) {
+      const u0 = offset + c / cols;
+      if (u0 >= 1 - 1e-12) break;
+      spans.push({ u0, u1: Math.min(1, u0 + 1 / cols) });
+    }
+    const last = spans[spans.length - 1];
+    if (last.u1 < 1 - 1e-12) spans.push({ u0: last.u1, u1: 1 });
+    courses.push({ index: r, v0: r / rows, v1: (r + 1) / rows, offset: offset > 0, spans });
+  }
+  return { width: w, height: h, cols, rows, blockWidth: w / cols, blockHeight: h / rows, courses };
+}
+
+// 이 타에 총안이 뚫리는가(그리고 그 슬릿 치수). 등간격 아이콘 리듬을 피해 시드 파생으로 띄어 뚫고
+// 높이를 흔든다. null = 이 타는 민무늬.
+export function cityWallMerlonLoophole(seed, runIndex, merlonIndex) {
+  const M = CITY_WALL_MERLON;
+  let h = Math.imul((((seed | 0) ^ 0x7f4a7c15) + Math.imul(runIndex | 0, 0x9e3779b1)) >>> 0, 0x85ebca6b);
+  h = Math.imul((h ^ (Math.imul(merlonIndex | 0, 0xc2b2ae35) >>> 0)) >>> 0, 0x27d4eb2f);
+  h = (h ^ (h >>> 16)) >>> 0;
+  if ((h % 4096) / 4095 > M.loopholeKeep) return null;
+  let g = Math.imul((h ^ 0x165667b1) >>> 0, 0x9e3779b1);
+  g = (g ^ (g >>> 13)) >>> 0;
+  return {
+    width: M.loopholeWidth,
+    height: M.loopholeHeight,
+    bottom: M.loopholeBottom + ((g % 1024) / 1023 * 2 - 1) * M.loopholeJitter,
+    relief: M.loopholeRelief,
+  };
+}
+
+// 한 연속 run(성문 사이 성벽 한 줄)의 여장 톱니 분배. 타 길이는 밴드 안에서 run 길이에 맞춰
+// 균등 분배되므로 마지막 타가 잘리지 않고, run 끝은 타구로 끝나 성문 육축과 만난다.
+export function cityWallMerlonSpans(runLength, {
+  length = CITY_WALL_MERLON.length,
+  lengthBand = CITY_WALL_MERLON.lengthBand,
+  gap = CITY_WALL_MERLON.gap,
+  loopholeWidth = CITY_WALL_MERLON.loopholeWidth,
+} = {}) {
+  const build = (count, merlonLength, cellGap, degenerate) => {
+    const period = merlonLength + cellGap;
+    const spans = [];
+    const half = Math.min(loopholeWidth, merlonLength * 0.4) * 0.5;
+    for (let i = 0; i < count; i++) {
+      const start = i * period;
+      const end = start + merlonLength;
+      const mid = (start + end) * 0.5;
+      spans.push({ start, end, loophole: { start: mid - half, end: mid + half } });
+    }
+    return { runLength, count, merlonLength, gap: cellGap, period, degenerate, spans };
+  };
+  if (!(runLength > 0)) return build(0, 0, gap, true);
+  const minLength = length - lengthBand, maxLength = length + lengthBand;
+  // 성문에 붙은 아주 짧은 자투리 run 은 타 하나로 덮는다(톱니 한 칸도 못 넣는 길이).
+  if (runLength <= maxLength) return build(1, runLength, 0, runLength < minLength - 1e-9);
+  // 타 길이는 밴드 안에 두고 run 에 정확히 맞춘다. 한 타의 정수배가 밴드로 떨어지지 않는 짧은
+  // 자투리에서만 타구가 밴드를 벗어나며(긴 run 은 항상 두 밴드를 함께 만족한다), 어느 쪽 이탈이
+  // 작은지 후보를 훑어 고른다. 마지막 타를 잘라 남기는 방식은 톱니 리듬을 깨서 쓰지 않는다.
+  const miss = (value, low, high) => Math.max(0, low - value) + Math.max(0, value - high);
+  const maxCount = Math.max(1, Math.ceil(runLength / 2) + 1);
+  let best = null;
+  for (let count = 1; count <= maxCount; count++) {
+    const cell = runLength / count;
+    if (cell <= 0.5) break;
+    const floor = Math.min(minLength, cell * 0.75);
+    const merlonLength = Math.min(maxLength, Math.max(floor, cell - gap));
+    const cellGap = cell - merlonLength;
+    if (cellGap <= 0) continue;
+    const penalty = miss(merlonLength, minLength, maxLength) + miss(cellGap, 0.3, 0.4);
+    if (!best || penalty < best.penalty - 1e-12) best = { count, merlonLength, cellGap, penalty };
+  }
+  if (!best) return build(1, runLength, 0, true);
+  return build(best.count, best.merlonLength, best.cellGap, best.penalty > 1e-9);
+}
+
+function lerpXZ(a, b, t) {
+  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
+}
+
+// 지형 추종 세그먼트를 arc-length 로 이어붙여 타를 자른다. 타가 세그먼트 경계를 넘으면 조각으로
+// 쪼개되 실제 타 끝에서만 end-cap 을 남겨, 몸체 miter 를 그대로 물려받은 채 틈이 생기지 않는다.
+export function cityWallMerlonPlan(segments, {
+  thickness = CITY_WALL_DIMENSIONS.thickness * 0.7,
+  merlon = undefined,
+  seed = 0,
+} = {}) {
+  const runs = [], blocks = [];
+  if (!segments || !segments.length) return { runs, blocks, triangles: 0 };
+  const groups = [];
+  let current = [0];
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (segments[i].joinedEnd && segments[i + 1].joinedStart) current.push(i + 1);
+    else { groups.push(current); current = [i + 1]; }
+  }
+  groups.push(current);
+  // 배열 끝↔처음이 같은 폐곡선 run 이면 하나로 합친다(선형 배열 끝은 성문 구멍이 아니다).
+  if (groups.length > 1 && segments[segments.length - 1].joinedEnd && segments[0].joinedStart) {
+    const tail = groups.pop();
+    groups[0] = tail.concat(groups[0]);
+  }
+
+  for (const [runIndex, indices] of groups.entries()) {
+    const caps = indices.map((i) => cityWallSegmentCapProfile(segments[i], thickness));
+    const lengths = indices.map((i) => segments[i].length);
+    const starts = [];
+    let runLength = 0;
+    for (const length of lengths) { starts.push(runLength); runLength += length; }
+    const plan = cityWallMerlonSpans(runLength, merlon);
+    runs.push({
+      index: runIndex,
+      segmentIndices: indices,
+      runLength,
+      count: plan.count,
+      merlonLength: plan.merlonLength,
+      gap: plan.gap,
+      period: plan.period,
+      degenerate: plan.degenerate,
+      spans: plan.spans,
+    });
+    for (const [merlonIndex, span] of plan.spans.entries()) {
+      // 이 타가 총안을 갖는지는 시드 파생 — 등간격으로 전부 뚫으면 아이콘 리듬이 된다.
+      const slit = cityWallMerlonLoophole(seed, runIndex, merlonIndex);
+      for (let k = 0; k < indices.length; k++) {
+        if (lengths[k] <= 1e-9) continue;
+        const s0 = starts[k], s1 = s0 + lengths[k];
+        const from = Math.max(span.start, s0), to = Math.min(span.end, s1);
+        if (to - from <= 1e-6) continue;
+        const cap = caps[k];
+        const t0 = (from - s0) / lengths[k], t1 = (to - s0) / lengths[k];
+        const inner = (t) => lerpXZ(cap.corners[0], cap.corners[3], t);
+        const outer = (t) => lerpXZ(cap.corners[1], cap.corners[2], t);
+        const innerY = (t) => cap.baseY[0] + (cap.baseY[3] - cap.baseY[0]) * t;
+        const outerY = (t) => cap.baseY[1] + (cap.baseY[2] - cap.baseY[1]) * t;
+        const hole = slit ? {
+          from: Math.max(span.loophole.start, from),
+          to: Math.min(span.loophole.end, to),
+        } : null;
+        let loophole = null;
+        if (hole && hole.to - hole.from > 1e-6) {
+          const h0 = (hole.from - s0) / lengths[k], h1 = (hole.to - s0) / lengths[k];
+          loophole = {
+            a: outer(h0), b: outer(h1),
+            baseA: outerY(h0), baseB: outerY(h1),
+            bottom: slit.bottom,
+            height: slit.height,
+            relief: slit.relief,
+          };
+        }
+        blocks.push({
+          runIndex,
+          merlonIndex,
+          segmentIndex: indices[k],
+          // pushTerrainPrism 규약과 같은 코너 순서: 내부-시작, 외부-시작, 외부-끝, 내부-끝.
+          corners: [inner(t0), outer(t0), outer(t1), inner(t1)],
+          baseY: [innerY(t0), outerY(t0), outerY(t1), innerY(t1)],
+          normal: segments[indices[k]].normal,
+          height: CITY_WALL_DIMENSIONS.capHeight,
+          startCap: Math.abs(from - span.start) <= 1e-6,
+          endCap: Math.abs(to - span.end) <= 1e-6,
+          loophole,
+        });
+      }
+    }
+  }
+  // 렌더러가 실제로 내보내는 삼각형 수(옆면 2 + 윗면 1 + 실제 타 끝 캡) — 예산 게이트가 이 값을 본다.
+  const triangles = blocks.reduce((sum, block) => sum
+    + 2 * (3 + (block.startCap ? 1 : 0) + (block.endCap ? 1 : 0))
+    + (block.loophole ? 2 : 0), 0);
+  return { runs, blocks, triangles };
+}
+
+// 성문 육축(홍예 + 배터 + 2켜 + 코니스)의 완전한 물리 spec. 렌더러는 여기서 나온 절대 좌표만
+// 소비하고 스스로 위치를 다시 만들지 않는다(계획-렌더 이중 진실 금지).
+export function cityGateMasonryProfile(gate, site, structure = cityGateStructureProfile(gate, site)) {
+  const scale = gate.scale || 1;
+  const pierWidth = CITY_GATE_MASONRY.pierWidth * scale;
+  const depth = CITY_WALL_DIMENSIONS.gateDepth * scale;
+  const totalWidth = gate.width + pierWidth * 2;
+  const openingWidth = totalWidth * CITY_GATE_MASONRY.archRatio;
+  const radius = openingWidth * 0.5;
+  const crownY = structure.archTopY;
+  const springY = crownY - radius;
+  const sillY = structure.archBottomY;
+  const sink = CITY_WALL_DIMENSIONS.gateFoundationSink * scale;
+  const zoneWidth = (totalWidth - openingWidth) * 0.5;
+  const innerX = openingWidth * 0.5;
+  const outerX = totalWidth * 0.5;
+
+  // 홍예가 옛 통행 폭보다 좁으므로 그 차이만큼 도로 위도 석면이 된다. 새 footprint 의 최저 지반을
+  // 직접 훑고, 겹치는 도로·옛 육축 표본까지 함께 낮은 쪽으로 물려 어떤 표본 격자에서도 뜨지 않게 한다.
+  const zones = [-1, 1].map((side, index) => {
+    const centerX = side * (innerX + zoneWidth * 0.5);
+    const terrain = cityGatePierTerrainProfile(gate, site, side, {
+      pierWidth: zoneWidth, depth, centerX,
+    });
+    const ground = Math.min(terrain.min, structure.roadTerrain.min, structure.piers[index].min);
+    return { side, index, centerX, width: zoneWidth, ground, bottomY: ground - sink, terrain };
+  });
+  const groundY = Math.min(...zones.map((zone) => zone.ground));
+  const masonryBottomY = Math.min(...zones.map((zone) => zone.bottomY));
+  const corniceHeight = CITY_GATE_MASONRY.corniceHeight * scale;
+  const corniceBottomY = structure.baseTopY - corniceHeight;
+  const batterHeight = corniceBottomY - masonryBottomY;
+  const inset = Math.min(
+    Math.max(CITY_GATE_MASONRY.batterSlope * batterHeight, CITY_GATE_MASONRY.batterMinInset * scale),
+    CITY_GATE_MASONRY.batterMaxInsetK * Math.min(zoneWidth, depth),
+  );
+  // 배터 램프는 육축 전체가 공유한다(zone 마다 지반이 달라도 상단 폭이 어긋나지 않는다).
+  const insetAt = (y) => inset * Math.max(0, Math.min(1, (y - masonryBottomY) / Math.max(1e-6, batterHeight)));
+  const courseSplitY = groundY + (structure.baseTopY - groundY) * CITY_WALL_COURSES.baseFraction;
+
+  const rectAt = (zone, y) => {
+    const back = insetAt(y);
+    return zone.side > 0
+      ? { x0: innerX, x1: outerX - back, z0: -depth * 0.5 + back, z1: depth * 0.5 - back }
+      : { x0: -outerX + back, x1: -innerX, z0: -depth * 0.5 + back, z1: depth * 0.5 - back };
+  };
+  for (const zone of zones) {
+    const split = Math.max(zone.bottomY, Math.min(courseSplitY, corniceBottomY));
+    zone.courses = [
+      {
+        key: CITY_WALL_COURSES.keys[0],
+        y0: zone.bottomY, y1: split,
+        bottom: rectAt(zone, zone.bottomY), top: rectAt(zone, split),
+      },
+      {
+        key: CITY_WALL_COURSES.keys[1],
+        y0: split, y1: corniceBottomY,
+        bottom: rectAt(zone, split), top: rectAt(zone, corniceBottomY),
+      },
+    ];
+  }
+
+  const segments = CITY_GATE_MASONRY.archSegments;
+  const intrados = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = Math.PI * (1 - i / segments);   // π→0: 좌 spring → 정점 → 우 spring
+    intrados.push({ x: Math.cos(angle) * radius, y: springY + Math.sin(angle) * radius });
+  }
+  return {
+    scale, pierWidth, depth, totalWidth,
+    topWidth: totalWidth - inset * 2,
+    topDepth: depth - inset * 2,
+    groundY, masonryBottomY, courseSplitY, zones,
+    batter: { slope: CITY_GATE_MASONRY.batterSlope, inset, bottomY: masonryBottomY, topY: corniceBottomY },
+    // 코니스는 배터로 좁아진 면에서 예약 폭까지 되내밀므로 내민 길이가 정확히 배터 인셋이다.
+    cornice: {
+      y0: corniceBottomY, y1: structure.baseTopY,
+      overhang: inset,
+      halfWidth: outerX, halfDepth: depth * 0.5,
+    },
+    arch: {
+      openingWidth, radius, ratio: openingWidth / totalWidth,
+      crownY, springY, sillY,
+      spandrelTopY: corniceBottomY,
+      halfDepth: depth * 0.5,
+      segments, intrados,
+    },
+  };
+}
+
+// 중층 문루 + 육축 상면 여장 링. 문루는 링 안쪽에 앉고, 상층은 하층을 upperRatio 로 체감한다.
+export function cityGatePavilionProfile(gate, structure, masonry) {
+  const scale = gate.scale || 1;
+  const P = CITY_GATE_PAVILION;
+  const halfWidth = masonry.cornice.halfWidth;
+  const halfDepth = masonry.cornice.halfDepth;
+  const deckY0 = masonry.cornice.y1;
+  const deckY1 = deckY0 + P.deckHeight * scale;
+  // 성벽 여장과 같은 두께·높이를 써서 성벽 톱니가 육축 둘레로 이어지는 것처럼 읽히게 한다.
+  const parapetThickness = CITY_WALL_DIMENSIONS.thickness * 0.7 * scale;
+  const parapetHeight = CITY_WALL_DIMENSIONS.capHeight;
+  const walkway = P.walkway * scale;
+  const insideWidth = halfWidth * 2 - (parapetThickness + walkway) * 2;
+  const insideDepth = halfDepth * 2 - (parapetThickness + walkway) * 2;
+  // 좌우 날개에 여장이 드러나도록 문루는 육축보다 좁다. 깊이는 예약 footprint 가 얕아 링 안쪽을 다 쓴다.
+  const lowerWidth = Math.max(P.minSpan * scale, Math.min(insideWidth, halfWidth * 2 * P.widthRatio));
+  const lowerDepth = Math.max(P.minSpan * scale, insideDepth);
+  const lowerHeight = P.lowerHeight * scale;
+  const bays = (span) => Math.max(3, Math.min(P.maxColumns, Math.round(span / (P.bayWidth * scale)) + 1));
+  const lower = {
+    tier: 'lower',
+    y0: deckY1, y1: deckY1 + lowerHeight, height: lowerHeight,
+    width: lowerWidth, depth: lowerDepth,
+    columns: bays(lowerWidth),
+    panels: 0, rail: 0,
+  };
+  lower.panels = lower.columns - 1;
+  const upperY0 = lower.y1 + P.upperFloor * scale;
+  const upperHeight = P.upperHeight * scale;
+  const upper = {
+    tier: 'upper',
+    y0: upperY0, y1: upperY0 + upperHeight, height: upperHeight,
+    width: lowerWidth * P.upperRatio, depth: lowerDepth * P.upperRatio,
+    columns: bays(lowerWidth * P.upperRatio),
+    panels: 0, rail: P.railHeight * scale,
+  };
+  const lowerRoof = {
+    tier: 'lower',
+    y: lower.y1,
+    width: lower.width + P.lowerEave * 2 * scale,
+    depth: lower.depth + P.lowerEave * 2 * scale,
+    height: 0,
+  };
+  lowerRoof.height = lowerRoof.depth * P.lowerRoofPitch;
+  const upperRoof = {
+    tier: 'upper',
+    y: upper.y1,
+    width: upper.width + P.upperEave * 2 * scale,
+    depth: upper.depth + P.upperEave * 2 * scale,
+    height: 0,
+  };
+  upperRoof.height = upperRoof.depth * P.upperRoofPitch;
+  // 앞뒤(x축) 여장이 모서리까지 덮고, 좌우(z축) 여장은 그 안쪽만 채워 코너에 틈이 없다.
+  const sides = [
+    { axis: 'x', sign: -1, length: halfWidth * 2, from: { x: -halfWidth, z: -halfDepth + parapetThickness * 0.5 }, to: { x: halfWidth, z: -halfDepth + parapetThickness * 0.5 } },
+    { axis: 'x', sign: 1, length: halfWidth * 2, from: { x: -halfWidth, z: halfDepth - parapetThickness * 0.5 }, to: { x: halfWidth, z: halfDepth - parapetThickness * 0.5 } },
+    { axis: 'z', sign: -1, length: Math.max(0, halfDepth * 2 - parapetThickness * 2), from: { x: -halfWidth + parapetThickness * 0.5, z: -halfDepth + parapetThickness }, to: { x: -halfWidth + parapetThickness * 0.5, z: halfDepth - parapetThickness } },
+    { axis: 'z', sign: 1, length: Math.max(0, halfDepth * 2 - parapetThickness * 2), from: { x: halfWidth - parapetThickness * 0.5, z: -halfDepth + parapetThickness }, to: { x: halfWidth - parapetThickness * 0.5, z: halfDepth - parapetThickness } },
+  ];
+  return {
+    scale,
+    deck: { y0: deckY0, y1: deckY1, halfWidth, halfDepth },
+    storeys: [lower, upper],
+    roofs: [lowerRoof, upperRoof],
+    parapet: { halfWidth, halfDepth, thickness: parapetThickness, height: parapetHeight, y: deckY1, sides },
   };
 }

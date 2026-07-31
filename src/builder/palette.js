@@ -655,6 +655,23 @@ function dancheongMaterials(style, input) {
   };
 }
 
+// 성문 문루 전용 최소 단청 세트(#19 R3, 2026-07-31 승인). 성곽 렌더러는 궁 팔레트를 통째로
+// 만들지 않고 필요한 두 재질만 소유한다. Canvas source 는 'city-gate' bucket 으로 캐시되므로
+// 궁·사찰 bucket 을 오염시키지 않고, Texture/Material 소유권도 호출자(성곽 한 벌)에 있다.
+//   주의: map 을 쓰는 재질이므로 **uv 가 있는 부재에만** 붙여야 한다. 손으로 감은 석축·지붕
+//   지오메트리는 uv 가 없어(병합 시 0으로 채워짐) texel(0,0) 한 점만 샘플한다.
+export function makeCityGateDancheong(input = {}) {
+  const config = resolveDancheong('city-gate', input);
+  if (!config) return null;
+  return {
+    dancheong: config,
+    // 창방·평방 밴드와 기둥 머리초: 부재 양끝 머리초 + 빈 계풍(모로)이 한 부재에 한 번 매핑된다.
+    beam: standard(0xffffff, 0.86, { map: makeDancheongTexture('band', config) }),
+    // 공포 힌트 소로 블록: 부재면 채색(동심 방형).
+    bracket: standard(0xffffff, 0.85, { map: makeDancheongTexture('square', config) }),
+  };
+}
+
 // 한 컴파운드 안의 격식 위계용 얕은 팔레트. 비단청 리소스는 base를 그대로 빌리고,
 // 단청 9재질/4텍스처만 이 변형이 소유한다. 프로그램 종류는 MeshStandard 하나로 불변이다.
 export function makeDancheongVariant(base, input) {

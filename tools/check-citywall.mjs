@@ -1,5 +1,7 @@
 // 한양 성곽의 단일-contour 계약: 좌표계·사대문·world edge·도로 폭·식생 여유·지형 밀착을
 // DOM/THREE 없이 검증한다. 넓은 wall-only seed sweep과 회귀 이력이 있는 production seed를 함께 둔다.
+import { readFileSync } from 'node:fs';
+
 import * as G from '../src/core/math/geom2.js';
 import { makeSite } from '../src/village/site.js';
 import { planVillage } from '../src/village/plan.js';
@@ -11,11 +13,21 @@ import {
   sampleRoadSurface,
 } from '../src/village/road-surface.js';
 import {
+  CITY_GATE_MASONRY,
+  CITY_GATE_PAVILION,
+  CITY_STONE_BOND,
+  CITY_STONE_VALUES,
+  CITY_WALL_COURSES,
   CITY_WALL_DIMENSIONS,
+  CITY_WALL_MERLON,
   CITY_WALL_MIN_SITE_R,
   cityGateFootprint,
+  cityStoneBondPlan,
+  cityStoneTone,
   cityGateApproachFootprint,
   cityGateLocalPoint,
+  cityGateMasonryProfile,
+  cityGatePavilionProfile,
   cityGatePierTerrainProfile,
   cityGateStructureProfile,
   cityGateStreamClearance,
@@ -23,6 +35,10 @@ import {
   cityWallAngleInGate,
   cityWallClearance,
   cityWallContainsPolygon,
+  cityWallCourseProfile,
+  cityWallMerlonLoophole,
+  cityWallMerlonPlan,
+  cityWallMerlonSpans,
   cityWallOutsidePolygon,
   cityWallSegmentCapProfile,
   cityWallSegmentFootprint,
@@ -125,10 +141,475 @@ function assertGate(spec, site, gate, label) {
   invariant(maxPierHeight <= CITY_WALL_DIMENSIONS.gateMaxPierHeight + EPS,
     `${label}/${gate.name}: ${maxPierHeight.toFixed(2)}m cliff pier`);
   invariant(cityWallVegetationBlocked(spec, gate), `${label}/${gate.name}: vegetation reaches gate`);
+  const masonry = assertGateMasonry(gate, site, structure, label);
+  assertGatePavilion(gate, structure, masonry, label);
   const approach = CITY_WALL_DIMENSIONS.gateApproachLength * Math.max(0.6, gate.scale || 1);
   for (const sign of [-1, 1]) {
     const point = { x: gate.x + gate.dirX * approach * 0.9 * sign, z: gate.z + gate.dirZ * approach * 0.9 * sign };
     invariant(cityWallVegetationBlocked(spec, point), `${label}/${gate.name}: vegetation blocks approach`);
+  }
+}
+
+// ── R3 성문 석축 격상 계약(#19 A) ────────────────────────────────────────────
+// 홍예 아치·육축 배터·석재 2켜·중층 문루는 모두 순수 spec 에서 파생되고 렌더러는 그 값을 그대로
+// 소비한다. 그래서 형태 판정을 브라우저 없이 여기서 못 박을 수 있다.
+function assertGateMasonry(gate, site, structure, label) {
+  const masonry = cityGateMasonryProfile(gate, site, structure);
+  const scale = gate.scale || 1;
+  const tag = `${label}/${gate.name}`;
+
+  // (a) 홍예 개구 폭 / 육축 총폭 — 숭례문 실측 밴드.
+  const band = CITY_GATE_MASONRY.archRatioBand;
+  invariant(near(masonry.totalWidth, gate.width + masonry.pierWidth * 2, 1e-9),
+    `${tag}: masonry total width drifted from the reserved gate footprint`);
+  invariant(masonry.arch.ratio >= 0.18 - EPS && masonry.arch.ratio <= 0.22 + EPS,
+    `${tag}: 홍예 ratio ${masonry.arch.ratio.toFixed(4)} left the 0.18~0.22 band`);
+  invariant(near(masonry.arch.ratio, masonry.arch.openingWidth / masonry.totalWidth, 1e-9),
+    `${tag}: arch ratio is not the rendered opening/total`);
+  invariant(band > 0 && CITY_GATE_MASONRY.archRatio - band >= 0.18 - EPS
+    && CITY_GATE_MASONRY.archRatio + band <= 0.22 + EPS,
+  `${tag}: authored arch ratio band escapes 0.18~0.22`);
+
+  // 실제 반원 홍예: 지름=개구 폭, 무지개 정점=상인방 하단(도로 유효고 계약), 홍예석 밑 수직 문협.
+  const arch = masonry.arch;
+  invariant(near(arch.radius, arch.openingWidth * 0.5, 1e-9), `${tag}: arch is not semicircular`);
+  invariant(near(arch.crownY, structure.archTopY, 1e-9), `${tag}: arch crown left the clearance contract`);
+  invariant(near(arch.springY, arch.crownY - arch.radius, 1e-9), `${tag}: spring line drifted`);
+  invariant(arch.springY - arch.sillY >= CITY_GATE_MASONRY.jambMin - EPS,
+    `${tag}: jamb ${Number(arch.springY - arch.sillY).toFixed(2)}m is shorter than the authored floor`);
+  invariant(arch.intrados.length === CITY_GATE_MASONRY.archSegments + 1,
+    `${tag}: intrados is not a ${CITY_GATE_MASONRY.archSegments}-segment low-poly arc`);
+  invariant(near(arch.intrados[0].x, -arch.radius, 1e-9) && near(arch.intrados[0].y, arch.springY, 1e-9),
+    `${tag}: intrados does not start on the spring line`);
+  invariant(near(arch.intrados.at(-1).x, arch.radius, 1e-9)
+    && near(arch.intrados.at(-1).y, arch.springY, 1e-9), `${tag}: intrados does not close on the spring line`);
+  let crown = -Infinity;
+  for (let i = 0; i < arch.intrados.length; i++) {
+    const point = arch.intrados[i];
+    invariant(near(Math.hypot(point.x, point.y - arch.springY), arch.radius, 1e-6),
+      `${tag}: intrados point ${i} left the arch circle`);
+    if (i > 0) invariant(point.x > arch.intrados[i - 1].x, `${tag}: intrados folds back at ${i}`);
+    crown = Math.max(crown, point.y);
+  }
+  invariant(near(crown, arch.crownY, 1e-9), `${tag}: intrados never reaches the crown`);
+  invariant(arch.spandrelTopY > arch.crownY && arch.spandrelTopY <= structure.baseTopY + EPS,
+    `${tag}: spandrel does not sit between crown and deck`);
+
+  // (c) 육축 배터: 상단 폭 < 하단 폭이고 기울기가 6~10% 밴드.
+  const batter = masonry.batter;
+  invariant(batter.slope >= 0.06 - EPS && batter.slope <= 0.10 + EPS,
+    `${tag}: batter slope ${batter.slope} left the 6~10% band`);
+  invariant(batter.inset > 0, `${tag}: masonry has no batter`);
+  invariant(near(masonry.topWidth, masonry.totalWidth - 2 * batter.inset, 1e-9)
+    && masonry.topWidth < masonry.totalWidth - EPS,
+  `${tag}: battered top (${masonry.topWidth.toFixed(2)}m) is not narrower than the base (${masonry.totalWidth.toFixed(2)}m)`);
+  invariant(masonry.topDepth < masonry.depth - EPS && masonry.topDepth > masonry.depth * 0.5,
+    `${tag}: battered depth ${masonry.topDepth.toFixed(2)}m out of range`);
+  invariant(masonry.topWidth > masonry.totalWidth * 0.7,
+    `${tag}: batter over-narrows the masonry top`);
+  invariant(masonry.cornice.y1 > masonry.cornice.y0
+    && near(masonry.cornice.y1, structure.baseTopY, 1e-9),
+  `${tag}: cornice course missing under the deck`);
+  invariant(masonry.cornice.overhang > 0, `${tag}: cornice does not flare past the battered face`);
+
+  // (d-1) 석재 위계: 대석 기단 켜가 노출고의 35~45%.
+  const course = masonry.courseSplitY;
+  const exposedBottom = masonry.groundY;
+  const fraction = (course - exposedBottom) / (structure.baseTopY - exposedBottom);
+  invariant(fraction >= 0.35 - EPS && fraction <= 0.45 + EPS,
+    `${tag}: 대석 기단 켜 ${fraction.toFixed(3)} left the 0.35~0.45 band`);
+
+  // 홍예를 좁히면 옛 통행 폭 일부가 석면이 된다. 그 새 footprint 도 떠 있으면 안 된다.
+  for (const zone of masonry.zones) {
+    invariant(zone.courses.length === 2, `${tag}: masonry zone lost its 2-course hierarchy`);
+    invariant(zone.courses[0].key !== zone.courses[1].key, `${tag}: masonry courses share one material key`);
+    invariant(zone.bottomY <= structure.piers[zone.index].min
+      - CITY_WALL_DIMENSIONS.gateFoundationSink * scale + EPS,
+    `${tag}: zone ${zone.side} rose above the planned pier foot`);
+    let denseMin = Infinity;
+    for (let ix = 0; ix <= 20; ix++) for (let iz = 0; iz <= 14; iz++) {
+      const localX = zone.centerX - zone.width * 0.5 + zone.width * ix / 20;
+      const localZ = -masonry.depth * 0.5 + masonry.depth * iz / 14;
+      const point = cityGateLocalPoint(gate, localX, localZ);
+      denseMin = Math.min(denseMin, terrainMeshHeightAt(site, point.x, point.z));
+    }
+    invariant(zone.bottomY <= denseMin + EPS,
+      `${tag}: masonry zone ${zone.side} floats ${Number(zone.bottomY - denseMin).toFixed(3)}m`);
+    const first = zone.courses[0], last = zone.courses.at(-1);
+    invariant(near(first.y0, zone.bottomY, 1e-9) && near(last.y1, masonry.cornice.y0, 1e-9),
+      `${tag}: masonry zone ${zone.side} courses do not span foot→cornice`);
+    for (const [index, part] of zone.courses.entries()) {
+      invariant(part.y1 > part.y0, `${tag}: zone ${zone.side} course ${index} is inverted`);
+      if (index > 0) invariant(near(part.y0, zone.courses[index - 1].y1, 1e-9),
+        `${tag}: zone ${zone.side} course seam split`);
+      const bottomWidth = part.bottom.x1 - part.bottom.x0;
+      const topWidth = part.top.x1 - part.top.x0;
+      invariant(bottomWidth > 0 && topWidth > 0, `${tag}: zone ${zone.side} course degenerate`);
+      invariant(topWidth <= bottomWidth + EPS, `${tag}: zone ${zone.side} course flares upward`);
+      invariant(part.top.z1 - part.top.z0 <= part.bottom.z1 - part.bottom.z0 + EPS,
+        `${tag}: zone ${zone.side} depth flares upward`);
+      const innerX = zone.side > 0 ? part.bottom.x0 : part.bottom.x1;
+      invariant(near(Math.abs(innerX), arch.openingWidth * 0.5, 1e-9),
+        `${tag}: zone ${zone.side} inner face left the arch jamb`);
+      // 통로 차단 금지: 석축은 홍예 개구 밖에만 존재한다(문 너머 지형·길이 보여야 한다).
+      for (const rect of [part.bottom, part.top]) {
+        for (const x of [rect.x0, rect.x1]) {
+          invariant(Math.abs(x) >= arch.openingWidth * 0.5 - EPS && Math.sign(x) === zone.side,
+            `${tag}: zone ${zone.side} masonry entered the 홍예 passage at x=${x.toFixed(3)}`);
+        }
+      }
+      const outerFaceX = zone.side > 0 ? part.bottom.x1 : part.bottom.x0;
+      invariant(Math.abs(outerFaceX) <= masonry.totalWidth * 0.5 + EPS,
+        `${tag}: zone ${zone.side} outer face left the reserved footprint`);
+      invariant(Math.abs(part.top.z0) <= masonry.depth * 0.5 + EPS
+        && Math.abs(part.top.z1) <= masonry.depth * 0.5 + EPS,
+      `${tag}: zone ${zone.side} depth left the reserved footprint`);
+    }
+  }
+  invariant(masonry.zones.length === 2 && masonry.zones[0].side === -1 && masonry.zones[1].side === 1,
+    `${tag}: masonry lost one of its two 육축 zones`);
+  return masonry;
+}
+
+// (d-2) 중층 문루: 하층(벽체)·상층(체감)·지붕 2단 + 육축 상면 여장 링.
+function assertGatePavilion(gate, structure, masonry, label) {
+  const pavilion = cityGatePavilionProfile(gate, structure, masonry);
+  const tag = `${label}/${gate.name}`;
+  invariant(pavilion.storeys.length === 2, `${tag}: 문루 is not two storeys`);
+  invariant(pavilion.roofs.length === 2, `${tag}: 문루 lacks its two roof tiers`);
+  const [lower, upper] = pavilion.storeys;
+  invariant(lower.tier === 'lower' && upper.tier === 'upper', `${tag}: storey tiers mislabelled`);
+  invariant(lower.y0 >= structure.baseTopY - EPS, `${tag}: lower storey sinks into the masonry`);
+  invariant(near(lower.y1, lower.y0 + lower.height, 1e-9), `${tag}: lower storey height mismatch`);
+  invariant(upper.y0 >= lower.y1 - EPS, `${tag}: storey y-bands overlap`);
+  invariant(upper.y1 > upper.y0, `${tag}: upper storey is flat`);
+  invariant(near(upper.width, lower.width * CITY_GATE_PAVILION.upperRatio, 1e-9)
+    && near(upper.depth, lower.depth * CITY_GATE_PAVILION.upperRatio, 1e-9),
+  `${tag}: upper storey does not step in by ${CITY_GATE_PAVILION.upperRatio}`);
+  invariant(CITY_GATE_PAVILION.upperRatio >= 0.75 && CITY_GATE_PAVILION.upperRatio <= 0.85,
+    `${tag}: authored upper-storey taper left the ~0.8 band`);
+  invariant(lower.columns >= 3 && lower.panels > 0, `${tag}: lower storey has no column/panel wall`);
+  invariant(upper.rail > 0, `${tag}: upper storey lacks its balustrade`);
+  const [lowerRoof, upperRoof] = pavilion.roofs;
+  invariant(lowerRoof.tier === 'lower' && upperRoof.tier === 'upper', `${tag}: roof tiers mislabelled`);
+  invariant(near(lowerRoof.y, lower.y1, 1e-9), `${tag}: 하층 차양 지붕 detached from its eave line`);
+  invariant(near(upperRoof.y, upper.y1, 1e-9), `${tag}: 상층 본지붕 detached from its eave line`);
+  invariant(upperRoof.y > lowerRoof.y + 1, `${tag}: roof tiers collapse into one`);
+  invariant(lowerRoof.width > lower.width && lowerRoof.depth > lower.depth,
+    `${tag}: 하층 지붕 does not overhang its storey`);
+  invariant(upperRoof.width < lowerRoof.width && upperRoof.height > 0,
+    `${tag}: 상층 지붕 is not the smaller crowning tier`);
+
+  // 육축 둘레 여장 링: 문루가 링 안쪽에 앉고 성벽 여장과 같은 높이를 쓴다.
+  const parapet = pavilion.parapet;
+  invariant(near(parapet.height, CITY_WALL_DIMENSIONS.capHeight, 1e-9),
+    `${tag}: gate parapet height breaks continuity with the wall 여장`);
+  invariant(parapet.thickness > 0 && parapet.sides.length === 4, `${tag}: parapet ring is not closed`);
+  invariant(lower.width <= parapet.halfWidth * 2 - parapet.thickness * 2 + EPS
+    && lower.depth <= parapet.halfDepth * 2 - parapet.thickness * 2 + EPS,
+  `${tag}: 문루 overruns its parapet ring`);
+  for (const side of parapet.sides) {
+    invariant(side.length > 0, `${tag}: parapet side ${side.axis}${side.sign} is empty`);
+    const spans = cityWallMerlonSpans(side.length);
+    invariant(spans.count > 0, `${tag}: parapet side ${side.axis}${side.sign} has no merlon`);
+  }
+  return pavilion;
+}
+
+// ── R3 2라운드: 근경 표면 계약 ────────────────────────────────────────────────
+// 비전 판정에서 육축이 성벽과 다른 자산으로 보인 원인은 색이 아니라 노멀이었다(성벽은 정점 공유
+// 프리즘의 스무딩으로 수직면이 위로 기운 노멀을 갖고, 육축은 면별 플랫 노멀). 그래서 이 라운드의
+// 계약은 ① 석재 위계를 재질이 아니라 **하나의 화강암 값 테이블**로만 두고, ② 줄눈·총안 슬릿을
+// 순수 spec 으로 확정하고, ③ 렌더러가 flat shading + vertexColors 로 그것을 소비하도록 못 박는다.
+function assertStoneValues(label) {
+  const V = CITY_STONE_VALUES;
+  const stone = V.stoneKeys.map((key) => {
+    const value = V[key];
+    invariant(Number.isFinite(value) && value > 0, `${label}: stone value ${key} missing`);
+    return value;
+  });
+  invariant(stone.length >= 4, `${label}: stone hierarchy collapsed`);
+  const span = Math.max(...stone) / Math.min(...stone);
+  invariant(span <= 1.10 + EPS,
+    `${label}: stone value hierarchy spans ${((span - 1) * 100).toFixed(1)}% — 명도 차이는 10% 이내`);
+  invariant(span >= 1.02, `${label}: stone hierarchy has no readable value difference`);
+  // 성벽과 육축이 같은 키를 쓰므로 두 자산의 톤은 구성상 동일하다(별 톤 표류 불가).
+  invariant(V.body === 1, `${label}: body value must anchor the granite palette at 1`);
+  invariant(V.base < V.body && V.parapet < V.body && V.cornice > V.body,
+    `${label}: 대석/여장/코니스 위계가 뒤집혔다`);
+  // 그늘 축은 돌 위계와 분리되고, 입구 쪽이 밝아 통로 반대편이 읽힌다.
+  invariant(V.shadeDeep < 0.5 && V.shadeMouth > V.shadeDeep + 0.15,
+    `${label}: 홍예 내부 그라디언트가 입구를 밝히지 못한다`);
+  invariant(V.shadeMouth < Math.min(...stone),
+    `${label}: 통로 그늘이 석면보다 밝다`);
+  invariant(V.loophole < 0.5, `${label}: 총안 인셋이 어둡지 않다`);
+}
+
+// (3) 석재 분절(줄눈): 1m급 방형 블록이 면을 정확히 타일링하고 켜마다 통줄눈을 피한다.
+function assertBondPlan(label) {
+  for (const [width, height] of [[14.8, 9.6], [8.5, 12.4], [2.8, 2.16], [1.4, 1.1], [35, 0.42]]) {
+    const plan = cityStoneBondPlan(width, height);
+    invariant(plan.courses.length === plan.rows && plan.rows >= 1,
+      `${label}: bond plan row count mismatch (${width}×${height})`);
+    invariant(plan.blockWidth >= CITY_STONE_BOND.blockBand[0] - EPS
+      && plan.blockWidth <= CITY_STONE_BOND.blockBand[1] + EPS,
+    `${label}: block width ${plan.blockWidth.toFixed(3)}m left the band (${width}×${height})`);
+    invariant(plan.blockHeight > 0 && plan.blockHeight <= CITY_STONE_BOND.blockBand[1] + EPS,
+      `${label}: block height ${plan.blockHeight.toFixed(3)}m too tall (${width}×${height})`);
+    let previousStarts = null;
+    for (const [index, course] of plan.courses.entries()) {
+      invariant(near(course.v0, index / plan.rows, 1e-9) && near(course.v1, (index + 1) / plan.rows, 1e-9),
+        `${label}: course ${index} is not an even band`);
+      invariant(course.spans.length >= 1, `${label}: course ${index} has no block`);
+      invariant(near(course.spans[0].u0, 0, 1e-9) && near(course.spans.at(-1).u1, 1, 1e-9),
+        `${label}: course ${index} does not span the face`);
+      for (let s = 1; s < course.spans.length; s++) {
+        invariant(near(course.spans[s].u0, course.spans[s - 1].u1, 1e-9),
+          `${label}: course ${index} block seam split`);
+      }
+      // 통줄눈(모든 켜에서 세로 줄눈이 일치) 금지 — 켜마다 반 블록 어긋난 막힌줄눈.
+      const starts = course.spans.map((span) => span.u0.toFixed(6)).join(',');
+      if (previousStarts && course.spans.length > 1) {
+        invariant(starts !== previousStarts, `${label}: course ${index} repeats the stack bond`);
+      }
+      previousStarts = starts;
+    }
+    // 결정론: 같은 인자 → 같은 계획, 같은 톤.
+    const again = cityStoneBondPlan(width, height);
+    invariant(JSON.stringify(plan) === JSON.stringify(again), `${label}: bond plan is not deterministic`);
+  }
+  const spread = CITY_STONE_BOND.toneSpread;
+  invariant(spread > 0 && spread <= 0.08, `${label}: block tone spread ${spread} out of range`);
+  let min = Infinity, max = -Infinity;
+  for (let seed = 0; seed < 8; seed++) {
+    for (let i = 0; i < 40; i++) for (let j = 0; j < 12; j++) {
+      const tone = cityStoneTone(seed, i, j);
+      min = Math.min(min, tone); max = Math.max(max, tone);
+      invariant(tone === cityStoneTone(seed, i, j), `${label}: stone tone is not pure`);
+    }
+  }
+  invariant(min >= 1 - spread - EPS && max <= 1 + spread + EPS,
+    `${label}: block tone left its spread (${min.toFixed(3)}~${max.toFixed(3)})`);
+  invariant(max - min > spread, `${label}: block tone barely varies — 줄눈이 읽히지 않는다`);
+  invariant(cityStoneTone(1, 3, 4) !== cityStoneTone(2, 3, 4), `${label}: block tone ignores the seed`);
+}
+
+// (6) 총안 리듬: 정사각 아이콘이 아니라 가로 슬릿이고, 간격이 벌어지며, 시드 파생으로 불규칙하다.
+function assertMerlonSlits(label) {
+  const M = CITY_WALL_MERLON;
+  invariant(M.loopholeWidth / M.loopholeHeight >= 2.4,
+    `${label}: 총안 aspect ${(M.loopholeWidth / M.loopholeHeight).toFixed(2)} is not a 가로 슬릿`);
+  invariant(M.loopholeKeep > 0.4 && M.loopholeKeep < 0.75,
+    `${label}: 총안 keep ratio ${M.loopholeKeep} leaves no rhythm`);
+  invariant(M.loopholeJitter > 0 && M.loopholeJitter <= 0.12,
+    `${label}: 총안 jitter ${M.loopholeJitter} out of range`);
+  const sample = (seed) => {
+    let kept = 0, total = 0;
+    const heights = new Set();
+    for (let run = 0; run < 4; run++) {
+      for (let index = 0; index < 200; index++) {
+        total++;
+        const hole = cityWallMerlonLoophole(seed, run, index);
+        if (!hole) continue;
+        kept++;
+        invariant(hole.width / hole.height >= 2.4, `${label}: rendered 총안 is not a slit`);
+        invariant(hole.bottom > 0 && hole.bottom + hole.height < CITY_WALL_DIMENSIONS.capHeight,
+          `${label}: 총안 left the 타 face`);
+        heights.add(hole.bottom.toFixed(4));
+      }
+    }
+    return { ratio: kept / total, variety: heights.size };
+  };
+  const a = sample(7);
+  invariant(a.ratio > 0.4 && a.ratio < 0.75,
+    `${label}: 총안 density ${a.ratio.toFixed(3)} left the band`);
+  invariant(a.variety >= 3, `${label}: 총안 height never varies`);
+  const b = sample(8);
+  invariant(Math.abs(a.ratio - b.ratio) < 0.2, `${label}: 총안 density swings with the seed`);
+  invariant(JSON.stringify(cityWallMerlonLoophole(7, 1, 5)) === JSON.stringify(cityWallMerlonLoophole(7, 1, 5)),
+    `${label}: 총안 is not pure`);
+  let differs = false;
+  for (let index = 0; index < 40; index++) {
+    if (JSON.stringify(cityWallMerlonLoophole(7, 0, index)) !== JSON.stringify(cityWallMerlonLoophole(9, 0, index))) {
+      differs = true; break;
+    }
+  }
+  invariant(differs, `${label}: 총안 pattern ignores the wall seed`);
+}
+
+// (b) 여장 톱니: 연속 프리즘이 아니라 타/타구 반복이고, 피치가 밴드 안이며, 총안이 붙는다.
+function assertMerlonPattern(label) {
+  // 25.3m 이상이면 타 정수배가 항상 두 밴드를 함께 만족한다(성벽 run 은 전부 이 구간).
+  for (const runLength of [6.4, 25.4, 40, 137.5, 411.31, 2740]) {
+    const plan = cityWallMerlonSpans(runLength);
+    invariant(plan.count > 0, `${label}: merlon run ${runLength} produced no 타`);
+    invariant(!plan.degenerate, `${label}: merlon run ${runLength} degenerated`);
+    invariant(plan.merlonLength >= 2.8 - EPS && plan.merlonLength <= 3.2 + EPS,
+      `${label}: 타 길이 ${plan.merlonLength.toFixed(3)}m left the 2.8~3.2m band`);
+    invariant(plan.gap >= 0.3 - EPS && plan.gap <= 0.4 + EPS,
+      `${label}: 타구 ${plan.gap.toFixed(3)}m left the 0.3~0.4m band`);
+    invariant(near(plan.period, plan.merlonLength + plan.gap, 1e-9), `${label}: merlon pitch mismatch`);
+    invariant(plan.spans.length === plan.count, `${label}: merlon span count mismatch`);
+    let previousEnd = -EPS;
+    for (const span of plan.spans) {
+      invariant(span.start >= previousEnd - EPS, `${label}: merlons overlap`);
+      invariant(near(span.end - span.start, plan.merlonLength, 1e-9), `${label}: ragged 타 length`);
+      invariant(span.end <= runLength + EPS, `${label}: merlon left its run`);
+      invariant(span.loophole.start > span.start && span.loophole.end < span.end,
+        `${label}: 총안 escapes its 타`);
+      invariant(span.loophole.end - span.loophole.start <= CITY_WALL_MERLON.loopholeWidth + EPS,
+        `${label}: 총안 too wide`);
+      previousEnd = span.end;
+    }
+    invariant(previousEnd <= runLength + EPS && runLength - previousEnd <= plan.gap + EPS,
+      `${label}: merlon run leaves a blank tail`);
+  }
+  invariant(CITY_WALL_MERLON.length - CITY_WALL_MERLON.lengthBand >= 2.8 - EPS
+    && CITY_WALL_MERLON.length + CITY_WALL_MERLON.lengthBand <= 3.2 + EPS,
+  `${label}: authored 타 band escapes 2.8~3.2m`);
+  // 성문에 붙는 자투리 run 도 타 하나는 남는다(연속 프리즘으로 되돌아가지 않는다).
+  for (const runLength of [1.4, 3.05, 5, 12, 19.2]) {
+    const plan = cityWallMerlonSpans(runLength);
+    invariant(plan.count > 0 && plan.merlonLength <= 3.2 + EPS,
+      `${label}: stub run ${runLength} lost its 타`);
+    invariant(plan.spans.every((span) => span.end <= runLength + EPS),
+      `${label}: stub run ${runLength} overflows`);
+  }
+}
+
+// 여장 블록은 지형 추종 세그먼트의 miter 를 그대로 물려받아야 몸체와 틈이 생기지 않는다.
+function assertMerlonBlocks(segments, label, seed = 0) {
+  const thickness = CITY_WALL_DIMENSIONS.thickness * 0.7;
+  const plan = cityWallMerlonPlan(segments, { thickness, seed });
+  invariant(plan.runs.length >= 4, `${label}: merlon runs did not split at the four gates`);
+  invariant(plan.blocks.length > 0, `${label}: no merlon blocks`);
+  invariant(plan.triangles > 0, `${label}: merlon triangle budget not reported`);
+  let loopholes = 0;
+  const covered = new Map();
+  const slitted = new Set();
+  for (const block of plan.blocks) {
+    const segment = segments[block.segmentIndex];
+    invariant(segment, `${label}: merlon block references a missing segment`);
+    const cap = cityWallSegmentCapProfile(segment, thickness);
+    invariant(block.corners.length === 4 && block.baseY.length === 4,
+      `${label}: merlon block is not a prism`);
+    invariant(near(block.height, CITY_WALL_DIMENSIONS.capHeight, 1e-9),
+      `${label}: merlon height left capHeight`);
+    // 블록 네 코너가 여장 footprint 의 두 변 위(세그먼트 내부)에 있어야 몸체-여장 틈이 없다.
+    for (const [index, corner] of block.corners.entries()) {
+      const from = index === 0 || index === 3 ? cap.corners[0] : cap.corners[1];
+      const to = index === 0 || index === 3 ? cap.corners[3] : cap.corners[2];
+      const span = G.sub(to, from);
+      const length = Math.hypot(span.x, span.z);
+      const t = ((corner.x - from.x) * span.x + (corner.z - from.z) * span.z) / (length * length);
+      invariant(t >= -1e-9 && t <= 1 + 1e-9, `${label}: merlon corner left its segment edge`);
+      const expected = { x: from.x + span.x * t, z: from.z + span.z * t };
+      invariant(pointNear(corner, expected, 1e-9), `${label}: merlon corner left the cap footprint`);
+      const y0 = index === 0 || index === 3 ? cap.baseY[0] : cap.baseY[1];
+      const y1 = index === 0 || index === 3 ? cap.baseY[3] : cap.baseY[2];
+      invariant(near(block.baseY[index], y0 + (y1 - y0) * t, 1e-9),
+        `${label}: merlon base left the body top (${Number(block.baseY[index] - (y0 + (y1 - y0) * t)).toFixed(4)}m)`);
+    }
+    if (block.loophole) {
+      loopholes++;
+      invariant(block.loophole.bottom > 0
+        && block.loophole.bottom + block.loophole.height < CITY_WALL_DIMENSIONS.capHeight,
+      `${label}: 총안 leaves the merlon face`);
+      invariant(block.loophole.height > 0 && block.loophole.relief > 0,
+        `${label}: 총안 is a hole, not an inset face`);
+    }
+    const key = `${block.runIndex}/${block.merlonIndex}`;
+    covered.set(key, (covered.get(key) || 0) + 1);
+    if (block.loophole) slitted.add(key);
+  }
+  const totalMerlons = plan.runs.reduce((sum, run) => sum + run.count, 0);
+  invariant(covered.size === totalMerlons, `${label}: ${totalMerlons - covered.size} merlons never rendered`);
+  // 총안은 타마다가 아니라 시드 파생으로 띄어 뚫린다(등간격 아이콘 리듬 금지).
+  const density = slitted.size / Math.max(1, totalMerlons);
+  invariant(density > 0.35 && density < 0.8,
+    `${label}: 총안 density ${density.toFixed(3)} (${slitted.size}/${totalMerlons}) left the band`);
+  invariant(loopholes >= slitted.size, `${label}: 총안 block accounting lost pieces`);
+  for (const run of plan.runs) {
+    invariant(run.count > 0, `${label}: empty merlon run`);
+    // 한 타의 정수배가 밴드로 떨어지지 않는 것은 성문에 붙은 짧은 자투리뿐이다. 긴 run 이
+    // 밴드를 벗어나면 톱니 리듬 자체가 깨진 것이므로 회귀로 잡는다.
+    if (run.degenerate) {
+      invariant(run.runLength <= 26,
+        `${label}: ${run.runLength.toFixed(1)}m run degenerated out of the merlon band`);
+      invariant(run.merlonLength >= 1.2 - EPS && run.merlonLength <= 3.2 + EPS,
+        `${label}: stub run 타 ${run.merlonLength.toFixed(3)}m is not a 타`);
+      invariant(run.gap <= 2 + EPS, `${label}: stub run 타구 ${run.gap.toFixed(3)}m is a blank stretch`);
+      continue;
+    }
+    invariant(run.merlonLength >= 2.8 - EPS && run.merlonLength <= 3.2 + EPS,
+      `${label}: run 타 ${run.merlonLength.toFixed(3)}m left the band`);
+    invariant(run.gap >= 0.3 - EPS && run.gap <= 0.4 + EPS,
+      `${label}: run 타구 ${run.gap.toFixed(3)}m left the band`);
+  }
+  return plan;
+}
+
+// (d-1) 성벽 몸통 2켜: 검증된 두께 envelope 안으로만 물러나고 여장 밑변과 이어진다.
+function assertWallCourses(segment, label) {
+  const profile = cityWallCourseProfile(segment);
+  const exposed = CITY_WALL_DIMENSIONS.bodyHeight - CITY_WALL_DIMENSIONS.foundationSink;
+  invariant(profile.courses.length === 2, `${label}: wall body is not a two-course hierarchy`);
+  const [base, body] = profile.courses;
+  invariant(base.key === CITY_WALL_COURSES.keys[0] && body.key === CITY_WALL_COURSES.keys[1],
+    `${label}: wall course material keys drifted`);
+  invariant(base.key !== body.key, `${label}: wall courses share one material group`);
+  invariant(near(base.bottomOffset, -CITY_WALL_DIMENSIONS.foundationSink, 1e-9),
+    `${label}: base course left the foundation`);
+  invariant(near(body.topOffset, exposed, 1e-9), `${label}: body course top left the 여장 base`);
+  invariant(near(base.topOffset, body.bottomOffset, 1e-9), `${label}: course seam split`);
+  const fraction = base.topOffset / exposed;
+  invariant(fraction >= 0.35 - EPS && fraction <= 0.45 + EPS,
+    `${label}: 대석 기단 켜 ${fraction.toFixed(3)} left the 0.35~0.45 band`);
+  invariant(base.thickness > body.thickness + EPS,
+    `${label}: no horizontal step between base and body`);
+  invariant(near(base.thickness, segment.thickness, 1e-9),
+    `${label}: base course left the validated wall envelope`);
+  invariant(body.thickness >= CITY_WALL_DIMENSIONS.thickness * 0.7,
+    `${label}: body course receded behind the 여장`);
+
+  // (7) 성벽도 배터를 가진다 — 육축만 기울고 성벽은 판이라 접합부가 두 자산으로 읽혔다.
+  const capThickness = CITY_WALL_DIMENSIONS.thickness * 0.7;
+  for (const [index, course] of profile.courses.entries()) {
+    invariant(course.topThickness <= course.thickness + EPS,
+      `${label}: course ${index} flares upward`);
+    invariant(course.topCorners.length === 4 && course.topGroundY.length === 4,
+      `${label}: course ${index} lacks a battered top footprint`);
+    const slope = (course.thickness - course.topThickness) * 0.5
+      / Math.max(1e-6, course.topOffset - course.bottomOffset);
+    invariant(slope >= 0 && slope <= 0.10 + EPS,
+      `${label}: course ${index} batter ${(slope * 100).toFixed(1)}% exceeds the 육축 vocabulary`);
+    course.slope = slope;
+  }
+  invariant(body.slope >= 0.05 - EPS && body.slope <= 0.10 + EPS,
+    `${label}: wall body batter ${(body.slope * 100).toFixed(1)}% left the 5~10% band`);
+  invariant(base.slope <= 0.03 + EPS,
+    `${label}: 대석 기단 should stay near-vertical (${(base.slope * 100).toFixed(1)}%)`);
+  invariant(body.topThickness >= capThickness - EPS,
+    `${label}: battered body top (${body.topThickness.toFixed(3)}m) fell behind the 여장 (${capThickness}m)`);
+  // 좁아진 top footprint 도 계획이 검증한 envelope 안이라 지형 밀착·world edge 계약이 유지된다.
+  for (const course of profile.courses) {
+    for (const corner of course.topCorners) {
+      invariant(cityWallSegmentFootprint(segment, course.thickness).corners.length === 4,
+        `${label}: footprint helper broke`);
+      invariant(Number.isFinite(corner.x) && Number.isFinite(corner.z),
+        `${label}: battered corner is not finite`);
+    }
+  }
+  for (let c = 0; c < 4; c++) {
+    invariant(pointNear(base.corners[c], segment.corners[c], 1e-9),
+      `${label}: base course footprint drifted from the segment`);
+    invariant(near(base.groundY[c], segment.ground[c], 1e-9),
+      `${label}: base course ground drifted from the segment`);
+  }
+  const capProfile = cityWallSegmentCapProfile(segment, body.thickness);
+  for (let c = 0; c < 4; c++) {
+    invariant(near(body.groundY[c] + body.topOffset, capProfile.baseY[c], 1e-9),
+      `${label}: body top and cap base split`);
   }
 }
 
@@ -161,6 +642,7 @@ function assertSegments(spec, site, label) {
     invariant(segment.terrainError <= CITY_WALL_DIMENSIONS.maxTerrainError + EPS, `${label}: terrain chord error`);
     invariant(!cityWallAngleInGate(spec, (segment.angle0 + segment.angle1) * 0.5), `${label}: wall crosses gate`);
     invariant(cityWallVegetationBlocked(spec, G.lerp(segment.p0, segment.p1, 0.5)), `${label}: vegetation reaches wall`);
+    assertWallCourses(segment, label);
     const cap = cityWallSegmentCapProfile(segment, CITY_WALL_DIMENSIONS.thickness * 0.7);
     const narrow = cityWallSegmentFootprint(segment, CITY_WALL_DIMENSIONS.thickness * 0.7);
     invariant(narrow.corners.length === 4, `${label}: invalid cap footprint`);
@@ -209,6 +691,7 @@ function assertSegments(spec, site, label) {
       invariant(!segment.joinedEnd, `${label}: gate opening lost end-cap`);
     }
   }
+  assertMerlonBlocks(segments, label, spec.seed);
   const first = segments[0], last = segments.at(-1);
   if (!cityWallAngleInGate(spec, 0)) {
     invariant(last.joinedEnd && first.joinedStart, `${label}: cyclic seam lost join metadata`);
@@ -603,4 +1086,74 @@ for (const seed of [25, 108, 112, 142]) {
 }
 assertPlan({ scale: 'hanyang', seed: 7, houses: 0, includePalace: false });
 
-console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles)`);
+// ── R3 여장·문루 예산과 렌더러 소비 계약 ────────────────────────────────────
+assertMerlonPattern('merlon pattern');
+assertStoneValues('stone values');
+assertBondPlan('stone bond');
+assertMerlonSlits('merlon slits');
+const defaultWall = defaultPlan.features.cityWall;
+const defaultSegments = sampleCityWallSegments(defaultWall, defaultPlan.site);
+const defaultMerlons = assertMerlonBlocks(defaultSegments, 'default hanyang', defaultWall.seed);
+let gateParapetTriangles = 0;
+let gateMerlons = 0;
+for (const gate of defaultWall.gates) {
+  const structure = cityGateStructureProfile(gate, defaultPlan.site);
+  const masonry = cityGateMasonryProfile(gate, defaultPlan.site, structure);
+  const pavilion = cityGatePavilionProfile(gate, structure, masonry);
+  for (const side of pavilion.parapet.sides) {
+    const spans = cityWallMerlonSpans(side.length);
+    gateMerlons += spans.count;
+    // 육축 링의 타는 옆 4면 + 윗면(밑면은 마루에 묻힘) + 총안 인셋 = 12삼각.
+    gateParapetTriangles += spans.count * 12;
+  }
+}
+const merlonTriangles = defaultMerlons.triangles + gateParapetTriangles;
+invariant(merlonTriangles <= 60000,
+  `default hanyang: 여장 triangle budget exceeded (${merlonTriangles})`);
+const merlonCount = defaultMerlons.runs.reduce((sum, run) => sum + run.count, 0);
+
+// 렌더러는 이 순수 spec 을 소비해야 한다. 옛 박스 상인방·연속 여장 프리즘·단층 콜로네이드가
+// 남아 있으면 형태 격상이 무효다(브라우저 없이 잡을 수 있는 최소 회귀 가드).
+const citywallSource = readFileSync(new URL('../src/village/citywall.js', import.meta.url), 'utf8');
+for (const consumed of [
+  'cityGateMasonryProfile',
+  'cityGatePavilionProfile',
+  'cityWallCourseProfile',
+  'cityWallMerlonPlan',
+  'cityWallMerlonSpans',
+  'pavilion.storeys',
+  'pavilion.roofs',
+  'masonry.arch',
+  'masonry.zones',
+  // 2라운드: 근경 표면.
+  'cityStoneBondPlan',
+  'cityStoneTone',
+  'CITY_STONE_VALUES',
+  'cityWallMerlonLoophole',
+]) {
+  invariant(citywallSource.includes(consumed),
+    `citywall.js does not consume ${consumed} — R3 masonry/pavilion spec is unrendered`);
+}
+invariant(!/BoxGeometry\(w \+ pierW/.test(citywallSource),
+  'citywall.js still builds the box lintel instead of a 홍예 arch');
+invariant(!citywallSource.includes('cityWallSegmentCapProfile'),
+  'citywall.js still lays a continuous 여장 prism per segment');
+
+// 톤 통일은 "같은 값을 두 재질에 적어서"가 아니라 **석재 재질이 하나뿐**이라 구성상 보장된다.
+// 스무딩된 정점 노멀이 수직면을 하늘 쪽으로 기울여 성벽만 밝게 뜨던 것이 근본 원인이라
+// flat shading 을 함께 못 박는다.
+for (const banned of ['gateStoneMat', 'baseMat', 'capMat', '0x968d80', '0x8f887d', '0x79736a', '0x746c62']) {
+  invariant(!citywallSource.includes(banned),
+    `citywall.js still carries a separate stone material/tone (${banned}) — 육축과 성벽이 두 자산으로 갈린다`);
+}
+invariant(/flatShading:\s*true/.test(citywallSource),
+  'citywall.js masonry must be flat shaded — 정점 공유 프리즘의 스무딩이 수직면을 밝게 띄운다');
+invariant(/vertexColors:\s*true/.test(citywallSource),
+  'citywall.js must carry the stone value hierarchy/줄눈 in vertex colours (텍스처 추가 금지)');
+invariant(/SHADE_CASTS_SHADOW\s*=\s*false/.test(citywallSource)
+  && /shade[^\n]*SHADE_CASTS_SHADOW/i.test(citywallSource),
+'citywall.js 홍예 그늘 판은 그림자를 던지면 안 된다(밀착한 석면에 자기 그림자를 찍는다)');
+invariant((citywallSource.match(/new THREE\.MeshStandardMaterial/g) || []).length <= 6,
+  'citywall.js material count grew — 병합 후 드로우콜 예산');
+
+console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri)`);

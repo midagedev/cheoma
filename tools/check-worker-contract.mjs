@@ -246,7 +246,14 @@ const expectedSceneHashes = {
   village: '1b82856c:9cea9f80:be909434:630c326c',
   town: 'abbe8eab:9263cef9:2dee9dc9:cf4be6cb',
   capital: '7934a04c:178ac706:fe64716d:b604f9ba',
-  hanyang: '33c87162:b653132a:f6500dac:e0aa19f4',
+  // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
+  //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
+  //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
+  //   재기준 직전 실측: worker == 폴백 바이트 동일, async 불일치 0줄.
+  // R3-A2(2026-07-31): 2라운드 표면 정리(플랫 셰이딩 석재·줄눈 본드·홍예 그늘 캐스터 제거·총안
+  //   슬릿·접합 배터) + 문루 단청(city-gate rank, 사용자 승인). 동일 근거: hanyang 해시만 이동,
+  //   proxy 0ee8aaee 불변, worker == 폴백 바이트 동일·async 불일치 0줄.
+  hanyang: 'b8f26b6c:0908e0f6:117105bb:d35d0a62',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
