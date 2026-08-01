@@ -62,6 +62,9 @@ export function createCinematicRuntime({
   };
   let disposed = false;
   let pendingStart = null;
+  // #36 투어 첫 프레임 전 shader warm 동안 t 를 고정한다. warm 이 LOD FULL 재질을 링크하는
+  //   동안 카메라가 저공으로 진행하면 같은 재질이 첫 드로우에서 다시 링크 스톨을 낸다.
+  let warmHold = false;
 
   function cancelPendingStart() {
     if (pendingStart == null) return;
@@ -167,34 +170,39 @@ export function createCinematicRuntime({
 
   function update(dt) {
     if (disposed) return;
+    if (!state.active) return;
+    // warm hold: 시작 자세만 유지하고 t·walker 시계는 얼린다(#36).
+    const stepDt = warmHold ? 0 : dt;
     let lookAt;
     if (state.mode === 'walk') {
       // 입력은 input() 이 이미 walker 로 밀어넣었다(이동=지속 상태, 시선=누적 델타). 여기서 다시
       //   state.input 을 넘기면 같은 시선 델타를 매 프레임 재적용해 드래그가 무한 회전이 된다.
-      const { pos, dir } = state.walker.update(dt);
+      const { pos, dir } = state.walker.update(stepDt);
       camera.position.copy(pos);
       lookAt = state.smoothedLook.copy(pos).add(dir);
     } else {
       if (!state.pass) return;
-      state.t += dt / state.pass.duration;
-      if (state.t >= 1) {
-        if (state.single) {
-          stop();
-          return;
+      if (!warmHold) {
+        state.t += stepDt / state.pass.duration;
+        if (state.t >= 1) {
+          if (state.single) {
+            stop();
+            return;
+          }
+          // 드론 구간은 하나의 연속 투어를 잘라 놓은 시간 창이다(dronepath.js). 경계에서 t=0 으로
+          // 리셋하면 넘친 시간이 버려져 그 프레임만 이동거리가 짧아진다(실측: 프레임 속도가 한 프레임
+          // 1.6m/s 로 떨어졌다가 복귀). 남은 시간을 다음 구간 길이로 환산해 넘긴다.
+          const overflow = (state.t - 1) * state.pass.duration;
+          state.chainIdx = (state.chainIdx + 1) % state.chain.length;
+          state.pass = state.chain[state.chainIdx];
+          state.t = Math.min(0.999, Math.max(0, overflow / state.pass.duration));
+          emit('cinematic', {
+            active: true,
+            mode: 'drone',
+            pass: state.pass.name,
+            index: state.chainIdx,
+          });
         }
-        // 드론 구간은 하나의 연속 투어를 잘라 놓은 시간 창이다(dronepath.js). 경계에서 t=0 으로
-        // 리셋하면 넘친 시간이 버려져 그 프레임만 이동거리가 짧아진다(실측: 프레임 속도가 한 프레임
-        // 1.6m/s 로 떨어졌다가 복귀). 남은 시간을 다음 구간 길이로 환산해 넘긴다.
-        const overflow = (state.t - 1) * state.pass.duration;
-        state.chainIdx = (state.chainIdx + 1) % state.chain.length;
-        state.pass = state.chain[state.chainIdx];
-        state.t = Math.min(0.999, Math.max(0, overflow / state.pass.duration));
-        emit('cinematic', {
-          active: true,
-          mode: 'drone',
-          pass: state.pass.name,
-          index: state.chainIdx,
-        });
       }
       const sample = state.pass.sample(clamp01(state.t));
       camera.position.copy(sample.pos);
@@ -208,15 +216,21 @@ export function createCinematicRuntime({
         droneLook.reset(state.desiredLook);
         state.viewReady = true;
       }
-      const direction = droneLook.step(state.desiredLook, dt);
+      // warm hold 중에는 시선 슬루도 고정(시작 방향 스냅만).
+      const direction = warmHold
+        ? droneLook.reset(state.desiredLook) || state.desiredLook
+        : droneLook.step(state.desiredLook, stepDt);
       viewDirection.set(direction.x, direction.y, direction.z);
+      if (viewDirection.lengthSq() < 1e-12) viewDirection.copy(state.desiredLook);
+      if (viewDirection.lengthSq() > 1e-12) viewDirection.normalize();
       const lookDistance = Math.max(1, sample.pos.distanceTo(sample.lookAt));
       lookAt = state.smoothedLook.copy(sample.pos).addScaledVector(viewDirection, lookDistance);
       // 뱅킹 — dronepath 가 궤적 곡률·속도에서 유도한 롤(라디안). 시선 컨트롤러는 방향만 다루므로
       //   롤은 lookAt 뒤에 별도로 적용한다(아래). 표본 자체가 이미 슬루 제한된 연속 신호지만, 재생
       //   시작 프레임에서 0 → 현재 롤로 튀지 않도록 1차 지연을 한 겹 둔다.
       const wanted = Number.isFinite(sample.roll) ? sample.roll : 0;
-      state.roll += (wanted - state.roll) * Math.min(1, dt / ROLL_LAG_SEC);
+      if (warmHold) state.roll = wanted;
+      else state.roll += (wanted - state.roll) * Math.min(1, stepDt / ROLL_LAG_SEC);
     }
 
     // 종료 시 OrbitControls로 방향을 연속 인계할 수 있도록 매 프레임 같은 시선을 공유한다.
@@ -247,6 +261,7 @@ export function createCinematicRuntime({
 
   function stop() {
     cancelPendingStart();
+    warmHold = false;
     if (disposed) return;
     if (!state.active) return;
     state.active = false;
@@ -283,6 +298,11 @@ export function createCinematicRuntime({
     start,
     stop,
     update,
+    // #36 투어 진행 hold — engine 이 LOD 서브트리 compileAsync 완료 전/후에 토글한다.
+    setWarmHold(on) {
+      warmHold = !!on;
+    },
+    isWarmHold: () => warmHold,
     // 이동 의도(fwd/strafe/run)는 지속 상태로 walker 가 소유하고, 시선은 델타라 누적 후 1회 소비된다.
     //   lookDX/lookDY 는 픽셀(감도는 코어 소유), yaw/pitch 는 라디안(하위 호환).
     input(partial = {}) {
@@ -305,6 +325,7 @@ export function createCinematicRuntime({
       t: +state.t.toFixed(3),
       turnRateDeg: turnRateDegrees(),
       rollDeg: +(state.roll / DEG).toFixed(2),
+      warmHold,
     }),
     passList: () => (village.handle
       ? paths().map(({ name, kind, duration }) => ({ name, kind, duration }))

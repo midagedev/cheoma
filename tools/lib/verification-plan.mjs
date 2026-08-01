@@ -216,6 +216,9 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/lib/pixel-stats.mjs',
   'tools/check-pixel-stats.mjs',
   'tools/shoot-ab.mjs',
+  // #36 드론 투어 셰이더 링크 히치: 투어 시작 warm 이후 투어 전 구간 프로그램 증가 0 을
+  //   단언하는 브라우저 게이트. cinematic-app 그룹이 소유한다(warm 경로는 engine.js 소유).
+  'tools/check-cine-warm.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -317,6 +320,7 @@ function routePath(path) {
     'tools/check-lod-app.mjs': ['lod-focus', 'lod-wave'],
     'tools/lib/render-budget-contract.mjs': ['lod-focus'],
     'tools/check-cinematic-reveal-app.mjs': ['cinematic-app'],
+    'tools/check-cine-warm.mjs': ['cinematic-app'],
     'tools/check-app-build.mjs': ['build'],
     // #30 감상 모드 캡처 하네스 — 판정 없는 프레임·수치 수집 전용이라 소유 게이트가 없다
     // (빈 배열이라도 이 맵에 있어야 아래 tools/ 폐쇄 낙하를 타지 않는다).

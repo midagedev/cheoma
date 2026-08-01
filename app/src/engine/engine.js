@@ -715,7 +715,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       retireSemanticViewSettlement();
       tween = null;
       cinematic.stop();
-      if (demo.active) demoRuntime.stop();
+      if (demo.active) stopDemo();
     },
     markActivity,
   });
@@ -1792,9 +1792,33 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
   // ---------- 시네마틱 데모 모드 — 독립 runtime으로 위임 ----------
   const cineAvailable = () => demoRuntime.available();
-  const startDemo = (mode = 'drone', opts = {}) => demoRuntime.start(mode, opts);
+  // #36 드론·도보 투어가 도달하는 FULL LOD 재질을 첫 프레임 전에 compileAsync 로 링크한다.
+  //   진입 부감 warm 은 visible=false 청크를 건너뛰므로, 투어 start 시점에만 신규 서브트리
+  //   (village.handle.group) 를 forceLodVisible 로 데운다 — 전 씬 compile 금지.
+  //   투어 전 구간은 adaptive post 를 stable 로 잠근다: 모션 예산이 fillScale/MSAA/bokeh
+  //   품질을 왕복하면 composer 재할당·프로그램 포크가 투어 중 링크 스톨로 읽힌다.
+  const CINE_POST_STABLE_HOLD_SEC = 600;
+  const startDemo = (mode = 'drone', opts = {}) => {
+    const ok = demoRuntime.start(mode, opts);
+    if (!ok) return false;
+    try { postRuntime.forceStableQuality?.(CINE_POST_STABLE_HOLD_SEC); } catch { /* non-fatal */ }
+    if (mode !== 'drone' && mode !== 'walk') return true;
+    if (!village.handle?.group) return true;
+    if (typeof window !== 'undefined' && window.__noWarm) return true;
+    demoRuntime.setWarmHold?.(true);
+    warmTourDetailShaders().then(() => {
+      if (disposed) return;
+      // stop() 이 warm 도중 hold 를 이미 해제했을 수 있다 — 항상 clear 만 한다.
+      demoRuntime.setWarmHold?.(false);
+    });
+    return true;
+  };
   const updateDemo = (dt) => demoRuntime.update(dt);
-  const stopDemo = () => demoRuntime.stop();
+  const stopDemo = () => {
+    demoRuntime.stop();
+    // 부감 복귀 트윈이 모션 예산을 다시 쓰도록 stable hold 를 즉시 푼다.
+    try { postRuntime.forceStableQuality?.(0); } catch { /* non-fatal */ }
+  };
 
   // 시드·옵션 → 캐시 키(코어 내부 구조 불결합, 직렬화만).
   function villageKey(opts, seed) {
@@ -1931,20 +1955,267 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   //     scene.traverse 로 전수 순회하며 재질마다 prepareMaterial 을 돌리므로, scene 전체를 넘기면
   //     이미 컴파일된 마을 수백 재질까지 매번 재처리해 도리어 큰 정지가 생긴다(hop·focus 악화 확인).
   //     targetScene=scene 을 넘겨 조명·fog 는 메인 씬 것을 쓰되, 컴파일 대상은 root 서브트리로 한정.
-  function warmShaders(root, cam = camera) {
+  //
+  // #36 forceLodVisible: three 의 compile 은 visible=false 서브트리를 건너뛴다. 부감 진입 warm 은
+  //   FAR 만 보이므로 FULL/MID 재질이 링크되지 않고, 드론 저공 LOD 스왑 첫 드로우에서 링크 스톨이
+  //   난다. 투어 시작 경로만 숨은 LOD root 를 잠깐 열어 compile 한 뒤 즉시 복원한다(링크 poll 동안
+  //   가시성은 이미 원복 — 화면 플래시 없음).
+  function openLodTierRoots(root) {
+    if (!root?.traverse) return () => {};
+    const restored = [];
+    root.traverse((o) => {
+      const name = o.name || '';
+      const lodTierRoot = o.userData?.impostor === true
+        || name.startsWith('chunk-mid-')
+        || name.startsWith('chunk-full-');
+      if (!lodTierRoot) return;
+      restored.push([o, o.visible]);
+      o.visible = true;
+    });
+    return () => {
+      for (let i = 0; i < restored.length; i++) {
+        const [o, v] = restored[i];
+        o.visible = v;
+      }
+    };
+  }
+
+  function warmShaders(root, cam = camera, opts = {}) {
     // Material patches must precede both real rendering and compileAsync. Keeping
     // this ahead of the no-warm A/B gate also makes the visual contract independent
     // of the optional performance experiment and prevents a first-frame rim pop.
     post.rimRescan?.(root);
     if (typeof renderer.compile !== 'function' || !root) return Promise.resolve();
     if (typeof window !== 'undefined' && window.__noWarm) return Promise.resolve();   // A/B 계측 게이트(#117 검증용)
+    const restoreLod = opts.forceLodVisible ? openLodTierRoots(root) : null;
     try {
-      return compileSubtreeAsync(
+      // compileSubtreeAsync 는 반환 전에 renderer.compile 을 동기 호출해 materials Set 을
+      // 확보한다. 그 직후 LOD 가시성을 원복해도 링크 poll 은 계속 진행된다.
+      const pending = compileSubtreeAsync(
         renderer, root, cam, root === scene ? null : scene,
         { signal: engineAbort.signal },
       ).catch(() => {});
+      restoreLod?.();
+      return pending;
+    } catch {
+      restoreLod?.();
+      return Promise.resolve();
     }
-    catch { return Promise.resolve(); }
+  }
+
+  // #36 투어 시작 시점 warm 계측(검증·비용 보고). pending 동안 cinematic-runtime 이 t 를 고정한다.
+  let cineWarmInfo = {
+    pending: false,
+    skipped: true,
+    rafs: 0,
+    programsBefore: -1,
+    programsAfter: -1,
+    programsWarmed: 0,
+  };
+
+  // Chrome 은 링크 완료 직후가 아니라 몇 rAF 뒤에 programs 목록에 붙일 수 있다.
+  // warm 비용을 rAF 로 보고하고, 목록이 안정될 때까지 투어 t 를 붙잡아 거짓 점프를 막는다.
+  function settleProgramList(maxFrames = 48, stableNeed = 6) {
+    return new Promise((resolve) => {
+      let prev = renderer.info.programs?.length ?? -1;
+      let stable = 0;
+      let frames = 0;
+      const step = () => {
+        if (disposed) { resolve(prev); return; }
+        frames += 1;
+        cineWarmInfo.rafs += 1;
+        const cur = renderer.info.programs?.length ?? -1;
+        if (cur === prev) stable += 1;
+        else { stable = 0; prev = cur; }
+        if (stable >= stableNeed || frames >= maxFrames) resolve(cur);
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  function warmTourDetailShaders() {
+    const root = village.handle?.group;
+    const programsBefore = renderer.info.programs?.length ?? -1;
+    if (!root || typeof renderer.compile !== 'function'
+      || (typeof window !== 'undefined' && window.__noWarm)) {
+      cineWarmInfo = {
+        pending: false,
+        skipped: true,
+        rafs: 0,
+        programsBefore,
+        programsAfter: programsBefore,
+        programsWarmed: 0,
+      };
+      return Promise.resolve(cineWarmInfo);
+    }
+    cineWarmInfo = {
+      pending: true,
+      skipped: false,
+      rafs: 0,
+      programsBefore,
+      programsAfter: programsBefore,
+      programsWarmed: 0,
+    };
+
+    // 1) 숨은 FULL/MID 청크를 열어 서브트리 compile (한양 등 청크 LOD 규모).
+    // 2) 투어 경로 표본 카메라로 updateLod + compile — 저공에서만 켜지는 디테일 재질.
+    // 3) 동일 표본에서 1프레임 렌더(버퍼·지연 링크 트리거). hold 중이라 t 는 안 간다.
+    // 4) programs 목록 settle 후 hold 해제.
+    const camSaved = {
+      pos: camera.position.clone(),
+      tgt: controls.target.clone(),
+      fov: camera.fov,
+      near: camera.near,
+      far: camera.far,
+      refFov: camera.userData.villageReferenceFov,
+    };
+
+    const extras = [];
+    for (let i = 0; i < scene.children.length; i++) {
+      const child = scene.children[i];
+      if (!child || child === root) continue;
+      const name = child.name || '';
+      if (name.startsWith('ambField')
+        || name === 'village-lights'
+        || name.startsWith('weather')
+        || name.startsWith('season')) {
+        extras.push(child);
+      }
+    }
+
+    const applySample = (sample) => {
+      if (!sample?.pos) return;
+      camera.position.copy(sample.pos);
+      if (sample.lookAt) {
+        controls.target.copy(sample.lookAt);
+        camera.lookAt(sample.lookAt);
+      }
+      if (sample.fov != null && Math.abs(camera.fov - sample.fov) > 1e-3) {
+        camera.fov = sample.fov;
+        camera.updateProjectionMatrix();
+      }
+      if (sample.fov != null) {
+        camera.userData.villageReferenceFov = sample.referenceFov ?? sample.fov;
+      }
+      try { village.handle.updateLod?.(camera, controls.target, 0); } catch { /* non-fatal */ }
+    };
+
+    // 활성 드론 체인(또는 단일 패스)에서 hitch 실측 지점 부근 t 표본을 뽑는다.
+    // runtime 이 이미 start() 로 패스를 깔았다. sample 은 내부 pass 객체에만 있다.
+    const tourSamples = [];
+    try {
+      const st = demoRuntime.state;
+      const chain = st?.chain;
+      if (Array.isArray(chain) && chain.length) {
+        const ts = [0, 0.22, 0.5, 0.6, 0.85, 1];
+        for (let i = 0; i < chain.length; i++) {
+          const pass = chain[i];
+          if (!pass?.sample) continue;
+          for (let j = 0; j < ts.length; j++) {
+            try { tourSamples.push(pass.sample(ts[j])); } catch { /* skip */ }
+          }
+        }
+      } else if (st?.pass?.sample) {
+        for (const t of [0, 0.22, 0.5, 0.6, 0.85, 1]) {
+          try { tourSamples.push(st.pass.sample(t)); } catch { /* skip */ }
+        }
+      }
+    } catch { /* non-fatal */ }
+    if (!tourSamples.length) {
+      try { village.handle.updateLod?.(camera, controls.target, 0); } catch { /* non-fatal */ }
+    }
+
+    let chain = warmShaders(root, camera, { forceLodVisible: true });
+    for (const extra of extras) {
+      chain = chain.then(() => warmShaders(extra, camera));
+    }
+
+    // 경로 표본: compile 후 실제 draw 한 프레임 — compile 만으로 안 잡히는 변종을 흡수.
+    // 구름 원경 뱅크·빛줄기(cheoma-cloud-rim / ray ShaderMaterial)는 부감에서 viewActive=false
+    // 로 잠든다. 크레인 중반 저공에서 처음 켜지며 +2 프로그램 링크 스톨이 실측됐다(#36).
+    chain = chain.then(async () => {
+      const restoreLod = openLodTierRoots(root);
+      const cloudRestores = [];
+      try {
+        const cloudsRoot = root.getObjectByName?.('clouds') || null;
+        if (cloudsRoot) {
+          try { cloudsRoot.userData?.updateView?.(camera); } catch { /* non-fatal */ }
+          cloudsRoot.traverse((o) => {
+            const name = o.name || '';
+            if (name === 'horizon-cloud-bank' || name.startsWith('cloud-light-ray')
+              || name.startsWith('high-cloud-')) {
+              cloudRestores.push([o, o.visible]);
+              o.visible = true;
+            }
+          });
+        }
+        for (let i = 0; i < tourSamples.length; i++) {
+          if (disposed) break;
+          applySample(tourSamples[i]);
+          // 하늘 쪽 시선 표본 한 번: 원경 뱅크가 프러스텀·viewActive 를 통과하게.
+          if (i === Math.min(2, tourSamples.length - 1)) {
+            const up = controls.target.clone();
+            up.y += 80;
+            camera.lookAt(up);
+            try { cloudsRoot?.userData?.updateView?.(camera); } catch { /* non-fatal */ }
+          }
+          try {
+            renderer.compile(root, camera, scene);
+            for (let e = 0; e < extras.length; e++) {
+              try { renderer.compile(extras[e], camera, scene); } catch { /* skip */ }
+            }
+          } catch { /* non-fatal */ }
+          try { renderFrame(0); } catch { /* non-fatal */ }
+          cineWarmInfo.rafs += 1;
+        }
+      } finally {
+        for (let i = 0; i < cloudRestores.length; i++) {
+          const [o, v] = cloudRestores[i];
+          o.visible = v;
+        }
+        restoreLod();
+        // 투어 시작 자세로 되돌린다(hold 중 update 가 다시 깔아 주지만 첫 프레임 플래시 방지).
+        if (tourSamples[0]) applySample(tourSamples[0]);
+        else {
+          camera.position.copy(camSaved.pos);
+          controls.target.copy(camSaved.tgt);
+          camera.fov = camSaved.fov;
+          camera.near = camSaved.near;
+          camera.far = camSaved.far;
+          camera.updateProjectionMatrix();
+          if (Number.isFinite(camSaved.refFov)) camera.userData.villageReferenceFov = camSaved.refFov;
+          else delete camera.userData.villageReferenceFov;
+          camera.lookAt(controls.target);
+        }
+        try { root.getObjectByName?.('clouds')?.userData?.updateView?.(camera); } catch { /* non-fatal */ }
+      }
+    });
+
+    return chain
+      .then(() => settleProgramList())
+      .then((programsAfter) => {
+        if (!demoRuntime.state?.active) {
+          camera.position.copy(camSaved.pos);
+          controls.target.copy(camSaved.tgt);
+          camera.fov = camSaved.fov;
+          camera.near = camSaved.near;
+          camera.far = camSaved.far;
+          camera.updateProjectionMatrix();
+          if (Number.isFinite(camSaved.refFov)) camera.userData.villageReferenceFov = camSaved.refFov;
+        }
+        cineWarmInfo = {
+          pending: false,
+          skipped: false,
+          rafs: cineWarmInfo.rafs,
+          programsBefore,
+          programsAfter: programsAfter ?? (renderer.info.programs?.length ?? -1),
+          programsWarmed: (programsAfter ?? -1) >= 0 && programsBefore >= 0
+            ? (programsAfter ?? programsBefore) - programsBefore
+            : 0,
+        };
+        return cineWarmInfo;
+      });
   }
 
   // #128 활성 focus 링 컨테이너(env/focus.js makeRing 이 scene 직속으로 add, name='focusRing') 프리컴파일.
@@ -4026,6 +4297,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       debugAdvance: () => demoRuntime.debugAdvance(),
       // 검증용: walker 접지·경계·충돌(1인칭 히트박스 단언).
       debugWalker: () => demoRuntime.debugWalker(),
+      // #36 투어 시작 warm 비용·상태(rAF 수·프로그램 델타). check-cine-warm 게이트가 소비.
+      debugWarm: () => ({ ...cineWarmInfo, hold: !!demoRuntime.isWarmHold?.() }),
       // 검증용: 현재 카메라 pos/quat 유한성·시선(종료 인계 각도 연속성 계측).
       debugCam: () => ({
         pos: { x: +camera.position.x.toFixed(2), y: +camera.position.y.toFixed(2), z: +camera.position.z.toFixed(2) },
@@ -4290,10 +4563,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     'cine.available': () => false,
     'cine.getState': () => ({
       active: false, mode: null, pass: null, index: 0, chain: [], single: null, t: 0,
-      turnRateDeg: 0,
+      turnRateDeg: 0, warmHold: false,
     }),
     'cine.passList': () => [],
     'cine.debugWalker': () => null,
+    'cine.debugWarm': () => ({
+      pending: false, skipped: true, rafs: 0,
+      programsBefore: -1, programsAfter: -1, programsWarmed: 0, hold: false,
+    }),
     'cine.debugCam': () => null,
   });
   function disposedResult(path) {

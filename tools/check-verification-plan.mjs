@@ -420,6 +420,10 @@ assert.deepEqual(ids(['src/interaction/door-motion.js']), [
 assert.deepEqual(ids(['src/cinematic/architectural-reveal.js']), [
   'core', 'app', 'cinematic-app',
 ]);
+// #36 투어 warm 게이트: cinematic-app 그룹 소유(브라우저), 자기 파일 변경은 그 그룹만 다시 돈다.
+assert.deepEqual(ids(['tools/check-cine-warm.mjs'], {
+  newPaths: ['tools/check-cine-warm.mjs'],
+}), ['core', 'cinematic-app']);
 assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
 assert.deepEqual(ids(['tools/check-scene-snapshot.mjs']), ['core', 'share']);
 assert.deepEqual(ids(['tools/check-scene-guide.mjs']), ['core']);
