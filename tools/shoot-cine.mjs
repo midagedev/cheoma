@@ -82,7 +82,11 @@ const PROBE = () => {
       walker = engine.cine.debugWalker();
     } catch { return; }
     if (!state.active) return;
+    // 프로그램 수 — 히치 진단(#32 E항). 셰이더 링크 스톨은 헤드리스 절대 ms 로 판정할 수 없다.
+    let programs = -1;
+    try { programs = engine.village.debugProgramCount(); } catch {}
     probe.samples.push({
+      programs,
       ms: +dt.toFixed(2),
       t: state.t,
       pass: state.pass,
@@ -109,6 +113,7 @@ const round = (value, digits = 3) => (value == null || !Number.isFinite(value) ?
 // 프로브 샘플 → 수치 진단. 수직 저크는 프레임간 |Δy| 의 최대치와 그 초당 환산(m/s)을 함께 본다.
 function summarize(samples) {
   if (!samples.length) return { count: 0 };
+  let progMin = Infinity; let progMax = -Infinity; let progJump = 0; let progJumpAt = null;
   let maxDy = 0; let maxDyAt = null; let maxDyRate = 0;
   let maxDfov = 0;
   let maxTurn = 0;
@@ -128,8 +133,16 @@ function summarize(samples) {
     }
     if (s.coll) colliding++;
     if (s.out) outside++;
+    if (s.programs >= 0) {
+      if (s.programs < progMin) progMin = s.programs;
+      if (s.programs > progMax) progMax = s.programs;
+    }
     if (i > 0) {
       const prev = samples[i - 1];
+      if (s.programs >= 0 && prev.programs >= 0 && s.programs - prev.programs > progJump) {
+        progJump = s.programs - prev.programs;
+        progJumpAt = s.t;
+      }
       ms.push(s.ms);
       const dy = Math.abs(s.y - prev.y);
       if (dy > maxDy) { maxDy = dy; maxDyAt = s.t; }
@@ -149,6 +162,12 @@ function summarize(samples) {
     frameMsP50: round(quantile(sortedMs, 0.5), 2),
     frameMsP95: round(quantile(sortedMs, 0.95), 2),
     frameMsMax: round(sortedMs[sortedMs.length - 1], 2),
+    // #32 E항 — 히치가 셰이더 링크 스톨인지의 판정 근거. 프레임 ms 최대와 같은 시각에 프로그램 수가
+    // 늘었다면 링크 스톨이고, 프로그램 수가 상수인데 ms 만 튀면 CPU/GC 쪽이다.
+    programsMin: Number.isFinite(progMin) ? progMin : null,
+    programsMax: progMax >= 0 ? progMax : null,
+    programsMaxJump: progJump,
+    programsMaxJumpAt: progJumpAt,
     nonFinite,
     clrMin: clrCount ? round(clrMin) : null,
     clrMax: clrCount ? round(clrMax) : null,

@@ -72,6 +72,42 @@ const FLY_BASELINE_DISC = 18;
 //   빈 하늘이 됐다(fov 42 에서 하늘 27%). 15° 면 하늘 15%, 프레임 하단이 근경 지붕·담으로 채워져
 //   리딩라인이 생긴다. 26° 이상은 RTS 평면도가 되므로(#30) 이 값이 상·하한 사이의 기준이다.
 const FLY_DROP_DEG = 17;
+// 골목 패스만 한 단계 더 눕힌다(2026-08-01 3차 비전 A항). 지붕 바다 스윕은 지붕 면을 보여 주어야 해서
+//   17° 가 맞지만, 담 사이를 스치는 골목 패스에서 같은 각을 쓰면 프레임 하단이 카메라 직하 노면판이 된다.
+const FLY_LANE_DROP_DEG = 14;
+// 골목 패스의 **지면 기준** 고도 상한·하한(m). 종전에는 국소 지붕 이동평균만 기준이라 지붕이 높거나
+//   드문 구간에서 카메라가 지면 위 12m 부감으로 떠올랐고, 프레임 하단 중앙이 빈 흙 노면이 됐다
+//   (3차 비전 A항). 담 머리 높이 근처에서만 "고샅을 스친다"가 성립한다.
+const FLY_LANE_ALT_CAP = 8.5;
+const FLY_LANE_ALT_MIN = GROUND_CLEAR + 1.2;
+// 측면 오프셋(m) — 노선 중심을 그대로 날면 프레임 하단 중앙이 노면이다. 조준을 기울인 같은 쪽(밀집측)으로
+//   비행선을 밀어 담 한 줄이 하단 중앙을 대각으로 지나 리딩라인이 되게 한다. KEEP 은 건물 볼륨(FOOT_PAD
+//   1.12 로 이미 부풀려진) 밖에 남겨야 하는 최소 이격 — 이 안으로 들어가면 직하 지붕 리프트가 발동해
+//   카메라가 계단으로 튄다.
+const FLY_SWEEP_SIDE = 3.5;
+const FLY_LANE_SIDE = 4.5;
+const FLY_SIDE_KEEP = 3.0;
+// 담을 스치는 코스에서 지면 기준 상한이 "지붕 위 여유"와 맞물리면 한 프레임짜리 수직 계단이 생긴다
+//   (실측 한양 dy 56m/s → 프레임 속도 57.7m/s, 속도 점프 45.7). 원인은 리프트 격자 간격(1.2m)보다 짧은
+//   필지 모서리 교차라 격자가 놓치고 하드 안전망이 그 프레임에서만 발동하는 것이다. 상한을 **회랑 안 최고
+//   지붕 위 여유** 아래로는 내리지 않아 교차가 계단을 만들 여지를 원천에서 없앤다. 회랑 반경은
+//   측면 오프셋 + 이격 + 스플라인 벌지 여유.
+const FLY_CORRIDOR_R = 5.5;
+const FLY_CORRIDOR_CLEAR = ROOF_CLEAR + 0.6;
+// 회랑 지붕 하한이 감당하는 최대 리프트(m) — 이보다 큰 요구량은 넓은 교차이므로 리프트 격자에 맡긴다.
+// 3.0 → 1.5: 아래 미세 접힘 가드가 들어온 뒤로는 계단 억제를 이 하한에 크게 의존하지 않아도 되고,
+//   3.0 은 한양에서 저공 표본을 fly 53%→29% 로 깎았다(높은 지붕 옆을 지날 때 과하게 들어올린다).
+const FLY_GUARD_MAX_LIFT = 1.5;
+// 측면 오프셋의 최대 변화율(전진 간격 대비) — 미세 헤어핀 방지. 0.35 에서는 capital 프레임 속도 점프가
+//   5.7 로 남았고 0.18 에서 1.1 로 떨어졌다(하단 중앙 피복은 59%→56% 로만 내려간다). 사용처 주석에 근거.
+const FLY_SIDE_SLOPE = 0.18;
+// 이탈 접선·스윕 진입의 화각. 저공 와이드(FLY_FOV)를 향해 단조로 열린다 — 자세한 근거는 사용처 주석.
+const FLY_EXIT_FOV = 42;
+const FLY_ENTRY_FOV = 48;
+// 스윕→골목 뱅크 선회 두 점의 화각.
+const FLY_BANK_FOV = 40;
+// 뱅크 리드의 규모 기준 하한 비율(사용처 주석에 근거).
+const FLY_BANK_LEAD_MIN = 0.05;
 // 시선 원뿔 내 지붕 히트 — 카메라 위치의 밀도만 보면 "옆에는 집이 있는데 프레임은 비어 있는" 구간을
 //   놓친다. 수평 반각 안 5방향 × 4단 거리 = 20 표본.
 const FLY_CONE_SAMPLES = 5;
@@ -112,7 +148,19 @@ const MAX_STATION_TURN = 50 * DEG;
 // 저작 단계 요 팬 상한(°/s)과 완화 반복. 전이 구간(골목 이탈 → 상승 리빌)의 요 스윙 총량은
 //   시드·규모마다 크게 달라 고정 배분 램프로는 잡히지 않는다(실측 34~133°/s). 상한을 넘는 구간의
 //   초과분만 이웃으로 넘겨 재분배한다 — 등속 선회·조준은 건드리지 않는다.
-const AUTHOR_YAW_RATE = 22 * DEG;
+// 2026-08-01 3차 비전 D항: 실측 요 스파이크(한양 저공 30.5°/s · 마을 리빌 25.6 · 마을 진입 22.6)에 대해
+//   "15°/s 근처 캡"이 지시됐다. 22 → 15 로 내렸다. 실측 결과 시선 각속도 max 가 전 규모 31.8 → 21.7°/s,
+//   p99 26.4 → 19.0 이 되고 커버리지는 사실상 유지된다(capital 리빌 100%→97%, 그 밖 변화 없음).
+//   13 까지 내리면 max 18.7 이 되지만 capital 리빌 커버리지가 87% 로, town 리빌이 96% 로 떨어져 조준이
+//   눈에 보이게 뒤처진다 — 그 값은 리드에 수치로 보고했다.
+// ── 이 상한이 규제하는 양(2026-08-01 4차, 선언·실측 정합) ──
+//   이것은 **제어점 사이의 요(yaw) 팬 각속도** 상한이지 화면 각속도 상한이 아니다. 실제로 보이는 것은
+//   요·피치·경로 유발 시차가 합쳐진 **합성 각속도**이고, 그 값은 (a) 잔차의 Catmull-Rom 오버슈트
+//   (b) 피치 성분 때문에 항상 이 상한보다 크다. 4차에서 dt 추정의 w̄ 정규화 버그를 고쳐 둘의 간극이
+//   실측 max 31.8 → 21.2°/s 로 좁혀졌다(p99 14.9~18.1). 합성 각속도를 직접 규제하는 것은 이 상한이
+//   아니라 품질 계약 T3(max 23 / p99 20)이다 — 두 수치가 다른 것은 서로 다른 양이기 때문이며,
+//   "15°/s 캡"이라는 표현은 이 저작 상한만을 가리킨다.
+const AUTHOR_YAW_RATE = 15 * DEG;
 const YAW_RELAX_PASSES = 120;
 
 // ── 안전 리프트 ──
@@ -141,6 +189,12 @@ const ORBIT_STEP = 13 * DEG;
 //   회전에 거리를 준다.
 const CLIMB_MIN_SWEEP = 100 * DEG;
 
+// ── 미세 접힘 가드(2026-08-01) ── 사용처 주석에 근거. 반전 문턱은 저작된 큰 전환(142~143°)보다 낮게 두되
+//   길이 조건(max(8, R*0.06))이 그것을 걸러 내므로 안전하다.
+const FOLD_TURN = 118 * DEG;
+const FOLD_PULL = 0.7;
+const FOLD_PASSES = 4;
+
 // ── 프레임 기하(2026-08-01 비전 FIX) ──
 // 부감 계열의 시선은 "어떤 점을 본다"가 아니라 **피사체를 화면 어디에 놓는가**로 저작한다.
 //   깊이 δ(피사체 하강각)에 있는 대상은 NDC y = -tan(δ - p)/tan(fv/2) 에 맺힌다. 그래서
@@ -153,6 +207,17 @@ const CRANE_PITCH_TOP = 38 * DEG;   // 진입 정점(도성 위 부감) — 비�
 const CRANE_WIDE_AT = 0.42;         // 이 진행률까지 정점 피치가 와이드 대역으로 눕는다
 const ORBIT_PITCH = 18 * DEG;       // 선회 — 피사체가 "얇은 수평 띠"로 읽히지 않는 대역
 const ORBIT_FOV = 34;               // 비전 지정(종전 30 → 랜드마크가 프레임을 덜 채웠다)
+// ── 선회 상승·렌즈 크리프(2026-08-01 3차 비전 C항) ──
+// 종전 선회는 패스 전체에서 Δ고도 0.03~0.38m · Δfov 0 이라 **요만 돌아가는 회전대**로 읽혔다(비전 실측).
+//   완만한 상승과 렌즈 크리프를 얹어 드론이 살아 있게 만든다.
+// 반경은 상승분을 **프레임 피치가 유지되는 양**만큼 따라간다(Δr = Δy/tan δ). 그래야 (a) 저작된 프레임
+//   피치가 표류하지 않고 (b) 피사체 근단 하강각이 오히려 δ 로 수렴해 프레임 하단 여백이 좁아지지 않는다
+//   (보상 없이 상승만 하면 한양 하단 여백 6.3%→3.3% 로 T14 를 깬다 — 실측).
+// 다만 그 양이 반경 대비 크면(소규모: 마을 +41%) 피사체가 작아진다. 그래서 **렌즈 크리프가 되돌릴 수 있는
+//   만큼**으로 상한을 둔다: (1+grow) = tanHalf(fov)/tanHalf(fov·(1-creep)). 이 상한에서 피사체 겉보기 폭은
+//   패스 내내 출발값 이상이므로 T14 가로 점유 하한이 구조적으로 안전하다(완화가 아니라 파생이다).
+const ORBIT_CLIMB_M = 10;           // 비전 지정 8~12m
+const ORBIT_LENS_CREEP = 0.176;     // 비전 지정 34°→28° 와 같은 비율(해석된 화각에 상대 적용)
 // 선회 고도 하한 — 링 위 국소 민가 지붕 평균에서 이만큼은 띄운다. 낮고 가까운 위상 구간에서
 //   프레임 하단 30% 가 지붕 덩어리가 되던 결함(landmark-orbit-village)의 수치 계약.
 const ORBIT_ROOF_HEADROOM = 8;
@@ -697,7 +762,7 @@ export function createDronePaths({
   };
   // 저공 프레임의 지면 표본 — 평지 근사(hit 거리 = 고도/tan δ)로 충분하다. 채점용이라 정확한
   //   레이캐스트(게이트가 하는 일)까지 갈 필요가 없다.
-  const spanBareFraction = (pts, clear) => {
+  const spanBareFraction = (pts, clear, dropDeg) => {
     const cum = polyCum(pts);
     const total = cum[cum.length - 1] || 1;
     const tv = tanHalfV(FLY_FOV), th = tv * FRAME_ASPECT;
@@ -713,7 +778,7 @@ export function createDronePaths({
       const alt = Math.max(2, camY - ground);
       // 프레임 **하단 절반**만 본다(2차 비전: 하단 45% 가 맨 지면이던 결함의 척도).
       for (const ndcY of [-0.9, -0.65, -0.4, -0.15]) {
-        const dep = FLY_DROP_DEG * DEG - Math.atan(ndcY * tv);
+        const dep = dropDeg * DEG - Math.atan(ndcY * tv);
         if (dep <= 2 * DEG) continue;
         const d = alt / Math.tan(dep);
         if (!Number.isFinite(d) || d > R * 2) continue;
@@ -757,7 +822,7 @@ export function createDronePaths({
       const len = polyLen(span);
       if (len < AXIS_MIN_LEN) continue;
       const prof = spanConeProfile(span, obstacles, { hHalf: laneHHalf, far: coneFar });
-      const bare = spanBareFraction(span, FLY_ROOF_CLEAR);
+      const bare = spanBareFraction(span, FLY_ROOF_CLEAR, FLY_DROP_DEG);
       const hug = spanHugFraction(span);
       out.push({ pts: span, road: cand.road, level: cand.road.level || null, len, prof, bare, hug });
     }
@@ -916,7 +981,11 @@ export function createDronePaths({
     //   피사체가 짧은 변을 보이는 위상에서 나온다(대각으로 잡으면 계약과 다른 양을 최적화한다).
     const massW = Math.min(primary.footW, primary.footD) * 0.5 * ORBIT_SUBJECT_MASS;
     const widthFrac = Math.atan(massW / Math.max(8, r)) / Math.atan(tv * FRAME_ASPECT);
-    return { r, y, fov: fovDeg, widthFrac };
+    // 상승 보상 반경 증가분(위 상수 주석). 적합 조건 루프에는 **넣지 않는다**: 끝 상태를 적합에 넣으면
+    //   세로 점유 브레이크가 먼저 걸려 해석된 화각·반경이 통째로 달라진다(실측 마을 fov 24/r71 → fov 32/r56).
+    const growMax = tv / tanHalfV(fovDeg * (1 - ORBIT_LENS_CREEP)) - 1;
+    const radiusRise = Math.min(ORBIT_CLIMB_M / Math.tan(dep), r * growMax);
+    return { r, y, fov: fovDeg, widthFrac, radiusRise };
   };
   const orbitFrame = (() => {
     let best = null;
@@ -930,6 +999,10 @@ export function createDronePaths({
   const orbitR = orbitFrame.r;
   const orbitY = orbitFrame.y;
   const orbitFov = orbitFrame.fov;
+  // 선회 종단 기하 — 이탈 접선·진입 반경 계약이 이 값을 쓴다(상승·크리프 뒤의 실제 링).
+  const orbitREnd = orbitR + orbitFrame.radiusRise;
+  const orbitYEnd = orbitY + ORBIT_CLIMB_M;
+  const orbitFovEnd = orbitFov * (1 - ORBIT_LENS_CREEP);
 
   // ── 제어점(스테이션) 저작 ── 각 점은 { pos, dir, dist, fov, w(속도가중), leg }.
   //   dir 은 단위 시선 방향, dist 는 프레이밍 거리(lookAt = pos + dir*dist). 목표점을 직접 보간하지
@@ -988,6 +1061,11 @@ export function createDronePaths({
     orbitTarget.y + entryFarR * Math.tan(depressionFor(ORBIT_PITCH, 33)));
   const entryNearY = Math.max(orbitY,
     orbitTarget.y + entryNearR * Math.tan(depressionFor(ORBIT_PITCH, orbitFov)));
+  // 진입 나선의 방위 감김 — 상승 리빌이 **같은 감김 방향**으로 az0 에 도착해야 두 구간의 방위 구간이
+  //   겹치지 않는다(2026-08-01 3차 비전 B항, 아래 climb 블록에서 소비). 블록 밖으로 끌어 올린 이유는
+  //   그것뿐이고 진입 나선의 계산 자체는 종전과 같다.
+  const entryAzC = Math.atan2(entryFar.x - coreSubject.x, entryFar.z - coreSubject.z);
+  const craneSweep = Math.atan2(Math.sin(entryAzC - az0), Math.cos(entryAzC - az0));
   {
     const fovOf = (f) => 34 + 2 * Math.sin(Math.PI * f);
     // 정점 반경은 저작 피치(-38°)에서 파생 — 이것이 "도성 위 부감" 진입 구도를 만든다.
@@ -998,8 +1076,7 @@ export function createDronePaths({
       Math.max(groundC + Math.max(Hmax * 0.95, R * 0.30), wideFloor), CRANE_PITCH_TOP, fovOf(0));
     const yTop = apex.pos.y;
     const radApex = apex.d;
-    const entryAzC = Math.atan2(entryFar.x - coreSubject.x, entryFar.z - coreSubject.z);
-    const sweep = Math.atan2(Math.sin(entryAzC - az0), Math.cos(entryAzC - az0));
+    const sweep = craneSweep;
     const steps = Math.max(4, Math.round(Math.abs(sweep) / (30 * DEG)));
     // 피치 프로파일: 정점(-38°) → f=0.3 에서 와이드(-20°) → 진입점에서 선회 피치(-18°).
     //   **반경은 고도와 이 피치에서 파생**한다(반경을 따로 블렌딩하면 능선 하한이 고도를 올릴 때
@@ -1041,14 +1118,21 @@ export function createDronePaths({
     }
   }
 
-  // ② landmark-orbit — 부분 선회. 시선은 고정 랜드마크, 반경 불변.
+  // ② landmark-orbit — 부분 선회. 시선은 고정 랜드마크.
+  //   2026-08-01(3차 비전 C항): 반경 상수·고도 상수·화각 상수였던 종전 선회는 **회전대**로 읽혔다.
+  //   패스에 걸쳐 완만한 상승 + 렌즈 크리프를 얹고, 반경은 상승분을 부분만 따라간다(위 상수 주석).
+  //   램프는 smootherstep 이라 선회 진입·이탈에서 반경·고도의 도함수가 0 이고(제어점 곡선이 접선을
+  //   꺾지 않는다), 세 양이 모두 단조라 되돌아오는 구간이 없다.
   const orbitSteps = Math.max(7, Math.round(orbitArc / ORBIT_STEP));
   for (let i = 0; i <= orbitSteps; i++) {
-    const th = orbitTh0 + orbitDir * orbitArc * (i / orbitSteps);
-    const p = orbitPt(th);
-    const pos = V(p.x, orbitY, p.z);
-    const look = aimAtSubject(pos, orbitTarget, orbitFov);
-    addDir(1, pos, look.dir, look.dist, orbitFov, 0.74, orbitTarget);
+    const f = i / orbitSteps;
+    const e = smootherstep(f);
+    const th = orbitTh0 + orbitDir * orbitArc * f;
+    const fov = orbitFov + (orbitFovEnd - orbitFov) * e;
+    const p = orbitPt(th, orbitR + orbitFrame.radiusRise * e);
+    const pos = V(p.x, orbitY + ORBIT_CLIMB_M * e, p.z);
+    const look = aimAtSubject(pos, orbitTarget, fov);
+    addDir(1, pos, look.dir, look.dist, fov, 0.74, orbitTarget);
   }
   // 선회 **본체**의 양 끝 제어점을 참조로 잡아 둔다. 아래 세분 패스가 스테이션을 끼워 넣으면 인덱스가
   //   밀리고, 끼워 넣어진 전이 스테이션은 앞 스테이션의 leg 태그(=1)를 물려받으므로 "leg===1 의 마지막"
@@ -1059,22 +1143,122 @@ export function createDronePaths({
 
   // ③ street-flythrough — 접선 이탈 → 지붕 바다 저공 스윕 → 골목/개울 저공 패스.
   const exitTh = orbitTh0 + orbitDir * (orbitArc + ORBIT_EXIT_ARC);
-  const exitPt = orbitPt(exitTh, orbitR * 1.55);
+  // 이탈 접선은 선회 **종단** 링에서 나간다(선회가 반경·고도를 키우며 끝나므로 출발 링을 쓰면 그 자리에서
+  //   안쪽으로 꺾인다 — 3차 비전 C항의 상승·크리프가 들어오면서 생긴 정합 조건이다).
+  // 다만 링이 사이트에 비해 크면(capital: 궁 곽담이 커서 선회 반경 210m, R 280m) 1.55배 접선이 도성 밖
+  //   350m 로 나가 그 프레임의 하단 절반이 통째로 원경 맨지형이 된다(실측 무특징 34%→40%). 사이트 안으로
+  //   묶는다 — 링에서 최소 12% 는 벌려 접선 이탈의 성격은 유지한다.
+  const exitR = Math.min(orbitREnd * 1.55, Math.max(orbitREnd * 1.12, R * 0.95));
+  const exitPt = orbitPt(exitTh, exitR);
   const sweepOriented = orientFrom(pickSweep(exitPt), exitPt);
   // 스팬 → 제어점 서술자. 국소 지붕 상단 이동평균 + 스침 여유, 전방 조준(밀집측 오프액시스 + 10° 하향).
-  const spanStations = (base, { leg, clear, fov, w, n }) => {
-    const pts = resample(base, n);
+  const spanStations = (base, { leg, clear, fov, w, n, drop, side = 0, altCap = null }) => {
+    const axisPts = resample(base, n);
+    const axisCum = polyCum(axisPts);
+    const axisTotal = axisCum[axisCum.length - 1] || 1;
+    const offset = bestSideOffset(axisPts);
+    // ── 측면 오프셋(2026-08-01 3차 비전 A항) ── 조준을 기울인 쪽(밀집측)으로 비행선을 밀어 담 한 줄이
+    //   프레임 하단 중앙을 대각으로 지나게 한다. 조준을 옆으로만 틀면 담은 하단 **코너**에만 걸리고
+    //   하단 중앙은 그대로 노면판이다(실측: 하단 중앙 20% 건축 피복 village 50% / capital 60%).
+    //   부호 규약: az = atan2(dx, dz) 에서 az 증가 방향의 수평 수직벡터는 (cos az, -sin az) 이므로
+    //   조준 오프셋 부호와 같은 쪽이다.
+    const headingAtIdx = (i) => {
+      const a = polyAt(axisPts, axisCum, Math.max(0, axisCum[i] - 3));
+      const b = polyAt(axisPts, axisCum, Math.min(axisTotal, axisCum[i] + 3));
+      return Math.atan2(b.x - a.x, b.z - a.z);
+    };
+    const sideSign = (() => {
+      if (offset > 1e-6) return 1;
+      if (offset < -1e-6) return -1;
+      // 조준이 정면이면 건축이 가까운 쪽으로 붙는다(스팬 전체 합으로 판정 — 결정론).
+      let r = 0, l = 0;
+      for (let i = 0; i < axisPts.length; i++) {
+        const h = headingAtIdx(i);
+        const px = Math.cos(h), pz = -Math.sin(h);
+        r += obstacleDistance(obstacles, axisPts[i].x + px * side, axisPts[i].z + pz * side);
+        l += obstacleDistance(obstacles, axisPts[i].x - px * side, axisPts[i].z - pz * side);
+      }
+      return r <= l ? 1 : -1;
+    })();
+    // 스테이션별 허용 최대 오프셋 — 건물 볼륨 밖 최소 이격을 지키는 가장 큰 값.
+    const allow = axisPts.map((p, i) => {
+      if (side <= 0) return 0;
+      const h = headingAtIdx(i);
+      const px = Math.cos(h) * sideSign, pz = -Math.sin(h) * sideSign;
+      for (let k = 8; k >= 1; k--) {
+        const d = (side * k) / 8;
+        if (obstacleDistance(obstacles, p.x + px * d, p.z + pz * d) >= FLY_SIDE_KEEP) return d;
+      }
+      return 0;
+    });
+    // ── 오프셋 변화율 제한 ── 허용값을 그대로 쓰면 인접 스테이션의 측면 오프셋이 0↔4.5m 로 튀고, 그 폭이
+    //   전진 간격(스팬/스테이션 수, capital 스윕에서 5.9m)에 맞먹으면 스플라인이 그 사이에서 되돌아가는
+    //   **미세 헤어핀**을 만든다. 호길이 균일 시간축은 왕복 호길이를 정직하게 세므로 그 프레임의 실제
+    //   변위가 반으로 줄어 프레임 속도가 19.7→8.7 로 떨어진다(실측 capital 점프 11.0). 양방향 러닝 민으로
+    //   Lipschitz 로 만든다 — 값은 오직 **줄어들기만** 하므로 이격 안전은 그대로 보존된다.
+    {
+      const slope = FLY_SIDE_SLOPE * (axisTotal / Math.max(1, axisPts.length - 1));
+      for (let i = 1; i < allow.length; i++) allow[i] = Math.min(allow[i], allow[i - 1] + slope);
+      for (let i = allow.length - 2; i >= 0; i--) allow[i] = Math.min(allow[i], allow[i + 1] + slope);
+    }
+    const pts = axisPts.map((p, i) => {
+      if (allow[i] <= 0) return p;
+      const h = headingAtIdx(i);
+      return {
+        x: p.x + Math.cos(h) * sideSign * allow[i],
+        z: p.z - Math.sin(h) * sideSign * allow[i],
+      };
+    });
     const cum = polyCum(pts);
     const raw = pts.map(spanBaseline);
-    const offset = bestSideOffset(pts);
-    const out = [];
-    for (let i = 0; i < pts.length; i++) {
+    // ── 고도 프로파일 ── 세 단계로 만든다.
+    //   ① 지붕 기준선(+ 골목이면 지면 기준 상·하한)
+    //   ② 회랑 지붕 하한: 기준선이 국소 지붕 **평균**이라 평균보다 높은 지붕 한 채가 경로 아래로
+    //      들어오면 리프트가 그 자리에서만 올라가고, 그 첨점이 시간축의 호길이 밀도를 튀게 해 한 프레임의
+    //      수평 이동이 반으로 줄었다(실측 capital 프레임 속도 19.7→9.5, 점프 10.2). 스윕·골목 모두에 건다.
+    //   ③ 하한은 roofTopAt 이 계단함수라 그 자체가 첨점을 만든다. **이웃 최대로 계단을 넓힌 뒤** 3탭
+    //      평균으로 평활한다. 넓힌 다음 평균이므로 세 표본 모두 원래 하한 이상이고, 따라서 평균도
+    //      하한 이상이다 — 안전은 보존되고 프로파일만 Lipschitz 가 된다.
+    const corridorNeed = pts.map((p) => {
+      let guard = roofTopAt(obstacles, p.x, p.z);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const t = roofTopAt(obstacles,
+          p.x + Math.cos(a) * FLY_CORRIDOR_R, p.z + Math.sin(a) * FLY_CORRIDOR_R);
+        if (t != null && (guard == null || t > guard)) guard = t;
+      }
+      return guard == null ? -Infinity : guard + FLY_CORRIDOR_CLEAR;
+    });
+    const targetY = pts.map((p, i) => {
       let sum = 0, cnt = 0;
       for (let k = i - 1; k <= i + 1; k++) {
         if (k < 0 || k >= raw.length) continue;
         sum += raw[k]; cnt++;
       }
-      const y = sum / cnt + clear;
+      const roofY = sum / cnt + clear;
+      if (altCap == null) return roofY;
+      const ground = H(p.x, p.z);
+      return Math.max(ground + FLY_LANE_ALT_MIN, Math.min(roofY, ground + altCap));
+    });
+    // 하한은 **스칠 만큼 가까운** 지붕에만 건다. 옆으로 지나가는 높은 건축(궁 18m·종가 14m)까지 넘겨
+    //   버리면 저공 자체가 사라진다(실측 한양 저공 표본 43%→14%). 판정 근거: 격자가 놓치는 것은 폭이
+    //   격자 간격(0.8~1.1m)보다 좁은 **모서리 스침**이고, 그때 필요한 리프트는 작다. 큰 요구량은 넓은
+    //   교차에서만 나오고 그것은 리프트 격자가 이미 완만하게 흡수한다.
+    const guardRaw = corridorNeed.map((need, i) => (
+      need - targetY[i] <= FLY_GUARD_MAX_LIFT ? need : -Infinity));
+    const floored = targetY.map((v, i) => Math.max(v,
+      guardRaw[Math.max(0, i - 1)], guardRaw[i], guardRaw[Math.min(pts.length - 1, i + 1)]));
+    const yAt = floored.map((_, i) => {
+      let sum = 0, cnt = 0;
+      for (let k = i - 1; k <= i + 1; k++) {
+        if (k < 0 || k >= floored.length) continue;
+        sum += floored[k]; cnt++;
+      }
+      return sum / cnt;
+    });
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const y = yAt[i];
       // 전방 조준점은 한 점이 아니라 세 지점의 평균이다. 국소 접선을 그대로 겨누면 굽은 골목에서
       //   시선이 노선 곡률을 그대로 따라가 요 각속도가 60°/s 를 넘는다(실측). 리드 구간을 길게
       //   평균하면 같은 "가로를 따라가는" 인상이면서 회전이 완만해진다.
@@ -1088,7 +1272,7 @@ export function createDronePaths({
         leg, fov, w,
         pos: V(pts[i].x, y, pts[i].z),
         target: V(pts[i].x + Math.sin(az) * aheadDist,
-          y - aheadDist * Math.tan(FLY_DROP_DEG * DEG),
+          y - aheadDist * Math.tan(drop * DEG),
           pts[i].z + Math.cos(az) * aheadDist),
       });
     }
@@ -1097,15 +1281,27 @@ export function createDronePaths({
   const pushDesc = (d) => add(d.leg, d.pos, d.target, d.fov, d.w);
   const descDir = (d) => dirTo(d.pos, d.target);
   const descDist = (d) => Math.hypot(d.target.x - d.pos.x, d.target.y - d.pos.y, d.target.z - d.pos.z);
-  const sweepSt = spanStations(sweepOriented, { leg: 2, clear: FLY_ROOF_CLEAR, fov: FLY_FOV, w: 0.66, n: 9 });
+  const sweepSt = spanStations(sweepOriented, {
+    leg: 2, clear: FLY_ROOF_CLEAR, fov: FLY_FOV, w: 0.66, n: 9,
+    drop: FLY_DROP_DEG, side: FLY_SWEEP_SIDE,
+  });
   // 오빗 이탈 — 다음 소재(스윕 시작부)를 향해 접선으로 빠져나간다. 시선은 랜드마크에서 "지금 향해
   //   가는 곳"으로 **구면 보간**한다(두 목표점의 중간점은 카메라 근처에 떨어질 수 있다 — 그 특이점이
   //   45° 급하강 시선과 55°/s 회전의 원인이었다).
   {
-    const pos = V(exitPt.x, orbitY + Math.max(Hmax * 0.10, R * 0.03), exitPt.z);
+    // 이탈점은 선회 고도에서 **내려가며** 나간다. 종전은 한 번 더 올라갔는데(+max(Hmax·0.10, R·0.03))
+    //   그 고도·화각이 진입 나선 하강 구간과 겹쳐 같은 엽서가 됐고(실측 진입↔저공 근사중복 0.78~1.22),
+    //   동시에 프레임 하단 절반이 원경 맨지형으로 채워졌다(실측 capital 무특징 34%→40%). 저공 패스로
+    //   가는 길이므로 하강이 안무상 자연스럽고 두 결함을 함께 없앤다. 링 안전 하한은 지킨다.
+    const exitDrop = Math.max(Hmax * 0.06, R * 0.02);
+    const pos = V(exitPt.x,
+      Math.max(orbitYEnd - exitDrop, safeFloor(exitPt.x, exitPt.z) + 2), exitPt.z);
     const aim = blendAim(aimTo(pos, orbitTarget), aimTo(pos, sweepSt[0].pos), 0.55);
+    // 이탈·진입 화각은 저공 와이드(56°)를 향해 **단조로 열린다**. 종전 34→38 은 진입 나선 하강 구간의
+    //   화각(30~36°)과 겹쳐, 부분 선회 특성상 이탈 접선이 진입 접선에서 18~73° 밖에 떨어지지 않는 구조와
+    //   합쳐져 같은 엽서를 만들었다(실측 진입↔저공 0.78~1.22). 렌즈를 먼저 열어 두 구간을 문법으로 가른다.
     addDir(2, pos, dirOfAim(aim),
-      Math.hypot(sweepSt[0].pos.x - pos.x, sweepSt[0].pos.z - pos.z), 34, 1.35);
+      Math.hypot(sweepSt[0].pos.x - pos.x, sweepSt[0].pos.z - pos.z), FLY_EXIT_FOV, 1.35);
   }
   // 스윕 진입 — 스팬 시작점 뒤 상공에서 내려앉는다(접선 정렬).
   {
@@ -1113,7 +1309,7 @@ export function createDronePaths({
     const l = Math.hypot(s1.x - s0.x, s1.z - s0.z) || 1;
     const back = Math.max(24, aheadDist * 1.4);
     add(2, V(s0.x - (s1.x - s0.x) / l * back, s0.y + Math.max(10, Hmax * 0.14), s0.z - (s1.z - s0.z) / l * back),
-      sweepSt[0].target, 38, 1.32);
+      sweepSt[0].target, FLY_ENTRY_FOV, 1.32);
   }
   for (const d of sweepSt) pushDesc(d);
   const sweepExitHeading = (() => {
@@ -1140,7 +1336,10 @@ export function createDronePaths({
     const fwd = laneBase.slice(), rev = laneBase.slice().reverse();
     return score(rev) < score(fwd) ? rev : fwd;
   })();
-  const laneSt = spanStations(laneOriented, { leg: 2, clear: FLY_LANE_CLEAR, fov: FLY_FOV, w: 0.56, n: 8 });
+  const laneSt = spanStations(laneOriented, {
+    leg: 2, clear: FLY_LANE_CLEAR, fov: FLY_FOV, w: 0.56, n: 8,
+    drop: FLY_LANE_DROP_DEG, side: FLY_LANE_SIDE, altCap: FLY_LANE_ALT_CAP,
+  });
   // 스윕 → 골목 연결 — 한 번 살짝 들어올려 방향을 바꾼다(저공에서 급선회 대신 완만한 호).
   //   두 점으로 나눠 방향 전환을 분산한다(한 점이면 그 인덱스 구간에서 시선이 몰아친다).
   //   두 점을 직선 중점에 두면 스윕과 골목이 마주 볼 때 그 자리가 헤어핀이 된다. 대신 **진행
@@ -1156,18 +1355,51 @@ export function createDronePaths({
       const p = laneSt[0].pos, q = laneSt[1].pos;
       return Math.atan2(q.x - p.x, q.z - p.z);
     })();
-    const lead = Math.min(gap * 0.45, Math.max(24, R * 0.10));
-    const p1 = V(a.pos.x + Math.sin(sweepExitHeading) * lead, a.pos.y + rise * 0.75,
-      a.pos.z + Math.cos(sweepExitHeading) * lead);
-    const p2 = V(b.pos.x - Math.sin(laneHeading) * lead, b.pos.y + rise * 0.55,
-      b.pos.z - Math.cos(laneHeading) * lead);
-    addDir(2, p1, dirOfAim(blendAim(da, db, 0.3)), la + (lb - la) * 0.3, 40, 1.1);
-    addDir(2, p2, dirOfAim(blendAim(da, db, 0.75)), la + (lb - la) * 0.75, 41, 1.1);
+    // ── 뱅크 두 점의 배치 ──
+    // 리드는 두 스팬이 **가까울 때 오히려 커야** 한다. 종전 `min(gap*0.45, …)` 은 반대여서, 스윕 종점과
+    //   골목 시점이 거의 붙은 배치(capital: 두 스팬 사이 20m)에서 리드가 9m 로 줄고 두 뱅크 점이 3~6m
+    //   간격의 지그재그가 됐다(실측 제어점 turn 137°/150°, 세그먼트 2.78m).
+    // 그리고 진행 방향 성분만으로 놓으면 두 방위가 마주 볼 때(capital 176°) 골목 시점이 스윕 종점 **뒤**에
+    //   있으므로 두 점이 Z 로 접힌다. 회전량에 비례해 **선회 쪽 측면 성분**을 넣어 같은 쪽으로 벌린 평행
+    //   루프로 만든다: 회전이 작으면 종전과 같은 리드 배치이고, 180° 에 가까우면 반경 있는 U턴이 된다.
+    // 왜 중요한가: 호길이 균일 시간축은 접힘의 왕복 호길이를 정직하게 세므로, 그 프레임의 실제 변위가
+    //   반으로 줄어 프레임 속도가 19.7→8.7 로 떨어진다(실측 점프 9.4~11.0, 계약 상한 3.6).
+    const lead = Math.max(Math.min(gap * 0.45, Math.max(24, R * 0.10)), Math.max(12, R * FLY_BANK_LEAD_MIN));
+    const bankTurn = shortest(laneHeading - sweepExitHeading);
+    const bankSide = Math.abs(bankTurn) / Math.PI;
+    const sgn = bankTurn >= 0 ? 1 : -1;
+    // az 증가 방향의 수평 수직벡터(측면 오프셋과 같은 규약).
+    const qx = Math.cos(sweepExitHeading) * sgn, qz = -Math.sin(sweepExitHeading) * sgn;
+    const fwd = lead * (1 - 0.35 * bankSide), lat = lead * 1.1 * bankSide;
+    const p1r = V(a.pos.x + Math.sin(sweepExitHeading) * fwd + qx * lat, a.pos.y + rise * 0.75,
+      a.pos.z + Math.cos(sweepExitHeading) * fwd + qz * lat);
+    const p2r = V(b.pos.x - Math.sin(laneHeading) * fwd + qx * lat, b.pos.y + rise * 0.55,
+      b.pos.z - Math.cos(laneHeading) * fwd + qz * lat);
+    // 방위 성분만으로는 접힘을 막을 수 없다: 두 방위가 **같은데** 골목 시점이 스윕 종점 뒤에 있는 배치
+    //   (capital 실측)에서는 p1 이 앞, p2 가 더 뒤로 가서 Z 가 된다. a→b 축 위의 진행 순서를 강제한다 —
+    //   측면 성분(뱅크 모양)은 그대로 두고 축 성분만 구간으로 클램프하므로 접힘이 원리적으로 없다.
+    const bux = (b.pos.x - a.pos.x) / gap, buz = (b.pos.z - a.pos.z) / gap;
+    const orderOnAxis = (p, lo, hi) => {
+      const s = (p.x - a.pos.x) * bux + (p.z - a.pos.z) * buz;
+      const t = Math.min(hi, Math.max(lo, s));
+      return V(p.x + (t - s) * bux, p.y, p.z + (t - s) * buz);
+    };
+    const p1 = orderOnAxis(p1r, gap * 0.15, gap * 0.45);
+    const p2 = orderOnAxis(p2r, gap * 0.55, gap * 0.85);
+    addDir(2, p1, dirOfAim(blendAim(da, db, 0.3)), la + (lb - la) * 0.3, FLY_BANK_FOV, 1.1);
+    addDir(2, p2, dirOfAim(blendAim(da, db, 0.75)), la + (lb - la) * 0.75, FLY_BANK_FOV + 1, 1.1);
   }
   // 상승호 방위를 먼저 확정한다(골목 꼬리 선회의 대상이 필요하다).
   const laneEndPre = laneSt[laneSt.length - 1].pos;
   const laneEndAzPre = Math.atan2(laneEndPre.x - coreSubject.x, laneEndPre.z - coreSubject.z);
   const climbRawPre = Math.atan2(Math.sin(az0 - laneEndAzPre), Math.cos(az0 - laneEndAzPre));
+  // 방위 감김은 **최단 경로**를 쓴다. 2026-08-01 3차 비전 B항(진입↔리빌 프레임 중복)을 "상승호를
+  //   진입 나선과 같은 방향으로 감아 방위 구간을 분리한다"로 풀어 봤으나 실측이 기각했다: 최단 경로의
+  //   부호가 반대인 시드에서는 먼 쪽(200~260°)으로 돌아야 하고, 그러면 (a) 투어가 10~17% 부풀며
+  //   (마을 176→199s · 초락 183→209s · town 140→164s) (b) 두 호의 합이 한 바퀴에 닿아 반대편에서 다시
+  //   만난다. 실측 진입↔리빌 최소 근사중복 점수는 hamlet 0.95→2.35 · capital 1.04→2.45 로 좋아졌지만
+  //   village 1.47→0.42 · village/2026 4.65→0.38 로 더 나빠져 순효과가 없었다. 중복은 방위가 아니라
+  //   **프레임 문법**(아래 CLIMB 화각 프로파일)으로 분리한다.
   const climbSweepPre = Math.abs(climbRawPre) >= CLIMB_MIN_SWEEP
     ? climbRawPre : (climbRawPre >= 0 ? 1 : -1) * CLIMB_MIN_SWEEP;
   // 선회 대상은 시가지 중심이 아니라 **상승호 중간점**이다. 저공 코스가 시가지 중심을 스치면(capital
@@ -1206,17 +1438,56 @@ export function createDronePaths({
   //   거리는 파생된다. 마지막 두 점만 이음매(정점 -38°) 쪽으로 피치를 섞어 방향 전환을 분산한다.
   // 고도 프로파일을 앞쪽에서 더 올린다 — 피치를 눕히지 않고(반경은 피치에서 파생) 경로를 길게 만들어
   //   요 회전에 시간을 준다. aim 램프는 골목 꼬리에서 이미 시작된 회전을 이어받는다.
+  // ── 화각 프로파일 = 리빌의 정체성(2026-08-01 3차 비전 B항) ──
+  // 종전 41→34 는 진입 나선의 34~36 과 사실상 같은 렌즈였다. 진입과 리빌은 고도·프레임 피치 프로파일이
+  //   서로의 **시간 역상**이므로(둘 다 부감 -20° 대역을 지난다) 렌즈까지 같으면 방위가 달라도 같은 엽서로
+  //   읽힌다(비전 실측: 마을 pullback t030 ≈ crane-in t030). 리빌 본체를 광각으로 벌려 "계곡 전경"이라는
+  //   다른 문법으로 만든다 — 진입은 접근(표준), 리빌은 전경 공개(광각). 이음매(=진입 정점)로는 마지막
+  //   두 점에서 수렴시켜 루프 이음매의 fov 연속(T1)을 지킨다.
+  //   피치는 저작값이라 광각화가 프레임 피치를 바꾸지 않고, 파생 반경도 depressionFor 의 2° 변화뿐이다.
+  //   대신 하늘 대역이 리빌에서 약 11% 열린다(상한 40%) — 능선·헤이즈가 프레임에 들어오는 쪽이다.
+  // ── 후퇴 이징은 **후반에 몰린다**(2026-08-01 4차 비전 차단 항목) ──
+  // 종전 고도 프로파일은 k=0.18 에서 이미 Hmax·0.45 였다. 그래서 구간 t=0.3 시점에 카메라가 마을 전경
+  //   부감에 올라와 있었고, 광각(fov 46~50)이 그 고도를 상쇄해 진입 나선 t=0.3 과 **피사체 화면 폭이
+  //   같아졌다**(실측 마을 11.0% vs 11.8% = 비 1.08, 한양 26.5% vs 22.1%). 렌즈로 문법을 갈라도 배율이
+  //   같으면 같은 엽서다 — 투어의 첫 패스와 마지막 패스가 같은 그림으로 시작한다.
+  // 리빌은 **리빌할 대상에서 출발해야** 한다: 전반은 선회 종료 배율(처마선·마당이 읽히는 대역)에 머물고,
+  //   후퇴의 대부분을 후반 40%(k ≥ 0.70)에 싣는다. 끝점은 그대로라 이음매(T1)·투어 길이·방위 계약은
+  //   건드리지 않는다. 분리 축이 방위가 아니라 배율이라는 것이 비전의 처방이다.
+  // 화각 램프도 **뒤집었다**. 3차의 "리빌 본체 광각"은 배율 분리와 정면 충돌한다: 광각이 낮아진 고도를
+  //   상쇄해 피사체가 다시 작아지고(실측 고도·속도만 고치면 한양 화면 폭 비 1.00, 즉 완전히 같은 배율)
+  //   결국 같은 엽서로 돌아온다. 리빌의 자연스러운 문법은 그 반대다 — **랜드마크에서 출발해 물러나며
+  //   열린다**. 전반은 선회 종료 렌즈에 가깝게 좁고(25~34°), 후퇴와 함께 광각(46°)으로 열린 뒤 이음매
+  //   화각(34°)으로 수렴한다. 진입 나선의 34~36° 대역과는 전반에서 화각으로도 갈린다.
   const CLIMB = [
-    { k: 0.18, y: [0.45, 0.14], fov: 41, w: 0.98, pitch: 0.0, aim: 0.68 },
-    { k: 0.42, y: [0.60, 0.185], fov: 39, w: 1.05, pitch: 0.0, aim: 0.82 },
-    { k: 0.68, y: [0.74, 0.23], fov: 37, w: 1.12, pitch: 0.0, aim: 0.92 },
-    { k: 0.88, y: [0.86, 0.27], fov: 35, w: 1.16, pitch: 0.2, aim: 1.0 },
-    { k: 1.0, y: [0.95, 0.30], fov: 34, w: 1.2, pitch: 0.5, aim: 1.0 },
+    // 속도 가중도 함께 후반으로 몰린다. 시간축은 τ ∝ ∫ds/w 이므로 기하만 낮추면 전반 호길이가 짧아져
+    //   구간 t=0.3 이 오히려 뒤쪽 k 로 밀린다(실측: 고도만 낮췄을 때 화면 폭 11.8%→13.5% 에 그쳤다).
+    //   전반을 느리게 통과시켜야 t=0.3 이 랜드마크 배율 대역에 머문다. 골목 이탈 가중(0.56)과도 이어진다.
+    { k: 0.22, y: [0.19, 0.044], fov: 25, w: 0.46, pitch: 0.0, aim: 0.62 },
+    { k: 0.42, y: [0.22, 0.052], fov: 27, w: 0.50, pitch: 0.0, aim: 0.74 },
+    { k: 0.58, y: [0.30, 0.074], fov: 32, w: 0.60, pitch: 0.0, aim: 0.84 },
+    { k: 0.78, y: [0.55, 0.160], fov: 46, w: 1.06, pitch: 0.0, aim: 0.93 },
+    // 꼬리 두 점의 **속도 가중**은 1.16/1.20 → 1.40/1.55 로 올렸다. 이음매 꼬리(피치가 정점 -38° 로 서는
+    //   구간)의 시간 점유가 크면 프레임 피치 median 이 T13 와이드 대역(16~26°)을 넘는다(실측 26.7°).
+    //   상한은 프레임 최대 속도가 정한다: 1.78 에서 한양 피크가 35.4m/s 로 T2 상한 34 를 넘었다
+    //   (피크 ≈ 평균 × w/w̄). 이음매 쪽 **피치 혼합**은 0.2/0.5 → 0.16/0.40 으로 낮췄다: 후퇴가 후반으로
+    //   몰리면서 리빌이 이음매 근처에 더 오래 머물러 진입 나선 τ0.03 과 근사 중복이 났고(실측 한양 0.65),
+    //   피치를 덜 세우면 파생 반경이 커져 그 구간이 정점 바깥으로 물러난다.
+    // 이 점은 정점 **위로** 넘어간다. 정점 아래에서 수렴하면 리빌의 마지막 접근이 진입 나선의 하강 경로를
+    //   안쪽에서 따라가 이음매 근방에서 같은 프레임이 된다(실측 한양 crane τ0.03 ↔ reveal τ0.91, 70m).
+    //   마루를 넘어 내려앉는 편이 안무로도 자연스럽고 두 경로를 수직으로 가른다.
+    { k: 0.90, y: [1.06, 0.335], fov: 42, w: 1.40, pitch: 0.16, aim: 1.0 },
+    { k: 1.0, y: [0.95, 0.300], fov: 34, w: 1.55, pitch: 0.40, aim: 1.0 },
   ];
   // 시선은 골목 이탈 방향에서 부감 배치로 **구면 보간**한다(점 보간이 아니라 방향 보간이라 중간
   //   조준점이 카메라 근처에 떨어지는 특이점이 없다).
   const laneExitAim = { az: stations[stations.length - 1].az, pitch: stations[stations.length - 1].pitch };
   for (const c of CLIMB) {
+    // 전반(좁은 대역)의 화각은 **선회가 이미 푼 랜드마크 렌즈**를 바닥으로 삼는다. 저작 상수만 쓰면 궁처럼
+    //   큰 랜드마크(한양 곽 150m)에서 화면 폭이 90% 까지 차 프레임을 넘칠 위험이 있다(실측). 선회 종단
+    //   화각은 그 규모의 피사체가 프레임에 적절히 앉도록 이미 해석된 값이라, 그 1.05배를 하한으로 두면
+    //   규모에 상관없이 "랜드마크가 읽히되 넘치지 않는" 대역이 된다. 광각 구간(≥40)은 그대로 둔다.
+    const cFov = c.fov < 40 ? Math.max(c.fov, orbitFovEnd * 1.05) : c.fov;
     const pitch = REVEAL_PITCH + (CRANE_PITCH_TOP - REVEAL_PITCH) * c.pitch;
     const yBase = groundC + Math.max(Hmax * c.y[0], R * c.y[1]);
     // 상승 후반(와이드 프레임)은 능선 하한을 받는다. 전반은 아직 저공에서 올라오는 구간이라 제외.
@@ -1224,19 +1495,51 @@ export function createDronePaths({
     //   잡으면 피치가 22~24° 인 표본에서 능선이 다시 프레임 상단에 붙는다(실측 밴드 2% → 9%).
     //   진입 나선에는 같은 처방을 쓰지 않는다: 진입 후반은 선회 진입 활강이라 고도가 낮아야 하고,
     //   거기에 하한을 걸면 투어 전체가 부풀어 저공 구간의 시간·코스 채점이 무너졌다(실측 커버리지 56%).
-    const y = c.k >= 0.5 ? Math.max(yBase, Math.min(yBase * 2.4, wideYFloor(pitch, c.fov))) : yBase;
-    // 반경은 선회 반경 아래로 내려가지 않는다(외딴집처럼 orbitR > R 인 규모에서 상승 시작점이 선회
-    //   원 안쪽에 놓이면 결말이 3초짜리 꼬리가 된다).
-    const radFloor = orbitR * (0.55 + 0.45 * c.k);
-    const derived = (y - coreSubject.y) / Math.tan(depressionFor(pitch, c.fov));
-    const st = aerialAt(coreSubject, laneEndAz + climbSweep * c.k, y, pitch, c.fov,
+    const y = c.k >= 0.5 ? Math.max(yBase, Math.min(yBase * 2.4, wideYFloor(pitch, cFov))) : yBase;
+    // 반경 하한 — 외딴집처럼 orbitR > R 인 규모에서 상승 시작점이 선회 원 안쪽에 놓이면 결말이 3초짜리
+    //   꼬리가 된다. 다만 전반 계수를 0.55 로 두면 후퇴 이징을 후반에 몰아도(위 CLIMB 주석) 반경이 먼저
+    //   붙잡혀 t=0.3 배율이 그대로다. 시작 계수만 낮추고 끝점(1.0)은 유지한다.
+    const radFloor = orbitR * (0.35 + 0.65 * c.k);
+    const derived = (y - coreSubject.y) / Math.tan(depressionFor(pitch, cFov));
+    const st = aerialAt(coreSubject, laneEndAz + climbSweep * c.k, y, pitch, cFov,
       derived >= radFloor ? null : radFloor);
     const pos = st.pos;
-    const look = aimAtSubject(pos, coreSubject, c.fov);
-    addDir(3, pos, dirOfAim(blendAim(laneExitAim, aimOfDir(look.dir), c.aim)), look.dist, c.fov, c.w,
+    const look = aimAtSubject(pos, coreSubject, cFov);
+    addDir(3, pos, dirOfAim(blendAim(laneExitAim, aimOfDir(look.dir), c.aim)), look.dist, cFov, c.w,
       c.aim >= 0.9 ? coreSubject : null);
   }
   // 마지막 제어점 다음은 닫힌 곡선이므로 ①의 첫 점으로 이어진다 — 그 구간이 이 leg 의 꼬리다.
+
+  // ── 미세 접힘 가드 ── 이웃 스테이션이 **짧은 세그먼트로 되돌아오는** 배치가 생기면(스팬 축 선택·측면
+  //   오프셋·연결부 기하가 시드마다 달라 어느 규모에서든 생길 수 있다) 그 자리에서 위치 곡선이 왕복하고,
+  //   호길이 균일 시간축은 그 왕복을 정직하게 세므로 그 한 프레임의 **변위**가 절반으로 떨어진다
+  //   (실측 프레임 속도 19.7→8.7, 프레임당 변화 5.7~14.8m/s, 계약 상한 3.6). 시드마다 개별 기하를 손보는
+  //   대신 일반 가드로 둔다: 큰 반전(>FOLD_TURN)이 **짧은 세그먼트**와 함께 오면 그 스테이션을 이웃 현의
+  //   중점 쪽으로 당긴다. 긴 세그먼트의 큰 전환(오빗 이탈 142°, 이음매 143°)은 길이 조건이 걸러 내므로
+  //   저작된 안무는 건드리지 않는다. 시간축 쪽에서 비용을 평활하는 대안은 기각됐다(buildTimeAxis 주석).
+  {
+    const foldLen = Math.max(8, R * 0.06);
+    for (let pass = 0; pass < FOLD_PASSES; pass++) {
+      let fixed = 0;
+      for (let i = 0; i < stations.length; i++) {
+        const n = stations.length;
+        const a = stations[(i - 1 + n) % n].pos, b = stations[i].pos, c = stations[(i + 1) % n].pos;
+        const v1x = b.x - a.x, v1z = b.z - a.z, v2x = c.x - b.x, v2z = c.z - b.z;
+        const m1 = Math.hypot(v1x, v1z), m2 = Math.hypot(v2x, v2z);
+        if (m1 < 1e-6 || m2 < 1e-6) continue;
+        if (Math.min(m1, m2) >= foldLen) continue;
+        const cos = (v1x * v2x + v1z * v2z) / (m1 * m2);
+        if (cos > Math.cos(FOLD_TURN)) continue;
+        // 3차원 전체를 당긴다. 수평만 당기면 capital 프레임당 속도 변화가 13.2 로 남는다 — 그 시드의
+        //   접힘은 회랑 지붕 하한이 만든 **수직** 첨점이기 때문이다(수평 지그재그만 있는 것이 아니다).
+        stations[i].pos = V(b.x + ((a.x + c.x) * 0.5 - b.x) * FOLD_PULL,
+          b.y + ((a.y + c.y) * 0.5 - b.y) * FOLD_PULL,
+          b.z + ((a.z + c.z) * 0.5 - b.z) * FOLD_PULL);
+        fixed++;
+      }
+      if (!fixed) break;
+    }
+  }
 
   // ── 방향 변화 상한 세분 ── 스테이션 간 방향차가 상한을 넘으면 그 사이를 나눈다. 위치는 직선 보간
   //   (전이 구간에만 발동하므로 경로 형상은 사실상 그대로), 방향은 slerp, leg 태그는 앞 스테이션을
@@ -1284,6 +1587,10 @@ export function createDronePaths({
       tau[j] = tau[j - 1] + d / Math.max(0.25, closedScalarAt(weights, (j - 0.5) / grid));
       prev = p;
     }
+    // 셀별 호길이를 이동평균으로 평활해 미세 접힘의 시간 도둑질을 없애 보려 했으나 실측이 기각했다:
+    //   창(1.6m)이 프레임 이동거리의 몇 배라 centripetal CR **knot 에서의 매개속도 불연속**까지 프레임
+    //   스케일로 퍼뜨려, 전 규모에서 프레임당 속도 변화가 4.9~14.8m/s 로 오히려 커졌다. 시간축은 셀별
+    //   호길이를 그대로 쓰고(격자를 프레임보다 촘촘히 깔아 knot 을 평균), 접힘은 제어점 기하에서 없앤다.
     const total = tau[grid] || 1;
     for (let j = 0; j <= grid; j++) tau[j] /= total;
     return {
@@ -1358,10 +1665,23 @@ export function createDronePaths({
       const n = stations.length;
       const speedEst = Math.min(TOUR_SPEED_MAX, Math.max(TOUR_SPEED_MIN, R * TOUR_SPEED_K));
       const dt = new Float64Array(n);
+      const gaps = new Float64Array(n);
+      const wMid = new Float64Array(n);
       for (let i = 0; i < n; i++) {
         const a = stations[i], b = stations[(i + 1) % n];
-        const gap = Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y, b.pos.z - a.pos.z);
-        dt[i] = Math.max(0.05, gap / Math.max(1, speedEst * 0.5 * (a.w + b.w)));
+        gaps[i] = Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y, b.pos.z - a.pos.z);
+        wMid[i] = Math.max(0.05, 0.5 * (a.w + b.w));
+      }
+      // 국소 대지속도는 speedEst × w 가 **아니다**. 시간축이 τ ∝ ∫ds/w 이므로 실제로는
+      //   speed_local = speed_mean × w / w̄  (w̄ = 호길이 가중 조화평균)이다. w̄ 를 빼먹으면 상한이
+      //   1/w̄ 배만큼 헐거워지고, 더 나쁘게는 **한 구간의 가중치를 바꾸면 다른 구간의 실효 상한이 같이
+      //   움직인다**(실측: 리빌 전반 가중을 0.98→0.46 으로 내리자 외딴집 저공 구간 각속도가 20.2→26.3°/s).
+      //   w̄ 로 정규화하면 상한이 선언대로 °/s 를 뜻하고 구간 간 결합도 사라진다.
+      let arcSum = 0, arcOverW = 0;
+      for (let i = 0; i < n; i++) { arcSum += gaps[i]; arcOverW += gaps[i] / wMid[i]; }
+      const wBar = arcOverW > 0 ? arcSum / arcOverW : 1;
+      for (let i = 0; i < n; i++) {
+        dt[i] = Math.max(0.05, gaps[i] / Math.max(1, speedEst * (wMid[i] / wBar)));
       }
       // 언랩 + 이음매 고정(감김 보존).
       const yaw = new Float64Array(n + 1);
@@ -1564,8 +1884,18 @@ export function createDronePaths({
       footW: +primary.footW.toFixed(1), footD: +primary.footD.toFixed(1),
     },
     secondary: { kind: secondary.kind, x: +secondary.x.toFixed(2), z: +secondary.z.toFixed(2) },
+    // 방위 감김 진단 — 진입 나선과 상승 리빌의 방위 구간이 겹치지 않는지(3차 비전 B항) 게이트가 본다.
+    azimuth: {
+      az0Deg: +(az0 / DEG).toFixed(1),
+      craneSweepDeg: +(craneSweep / DEG).toFixed(1),
+      laneEndAzDeg: +(laneEndAz / DEG).toFixed(1),
+      climbSweepDeg: +(climbSweep / DEG).toFixed(1),
+    },
     orbit: {
       radius: +orbitR.toFixed(2), y: +orbitY.toFixed(2), fov: orbitFov,
+      // 선회 종단(상승·반경·렌즈 크리프 뒤). 게이트가 "회전대가 아니다"를 이 값으로 판정한다.
+      radiusEnd: +orbitREnd.toFixed(2), yEnd: +orbitYEnd.toFixed(2), fovEnd: +orbitFovEnd.toFixed(2),
+      climb: ORBIT_CLIMB_M,
       arcDeg: +(orbitArc / DEG).toFixed(1), dir: orbitDir,
       target: { x: +orbitTarget.x.toFixed(2), y: +orbitTarget.y.toFixed(2), z: +orbitTarget.z.toFixed(2) },
       // 선회 **본체**의 투어 시각 창(τ). leg 'landmark-orbit' 의 t1 은 이탈 접선 구간까지 포함하므로
