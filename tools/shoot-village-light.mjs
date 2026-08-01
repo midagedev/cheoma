@@ -94,6 +94,11 @@ post.setTime(time);
 const villageHandle = createVillage({ scale, seed, includePalace, includeTemple, character });
 villageHandle.enterVillageMode({ scene, building: null, ground, env });
 villageHandle.setTime(time);
+// enterVillageMode 가 env 를 day 로 되돌리므로 요청 시간대를 다시 건다(즉시 — 크로스페이드 대기 없이).
+//   이게 없으면 sunset/dawn 컷의 하늘·fog 가 day(0xcfdde8)로 찍힌다 — 2026-08-01 fog 라운드 A/B
+//   하네스 제작 중 발견(그전까지 이 도구의 sunset·dawn 캡처는 전부 day 하늘이었다).
+env.setTime(time, { immediate: true });
+post.setTime(time);
 
 const R = villageHandle.plan.site.R;
 // reapplyVillageFog 준용.
