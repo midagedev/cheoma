@@ -38,9 +38,13 @@ const DICT = {
     glossary_disclaimer: '제품 해석 · 실측 복원 아님',
     // 시네마틱 데모 모드(#112)
     act_drone: '드론', act_drone_tip: '드론 시네마틱 — 자동 항공 투어',
-    act_walk: '거닐기', act_walk_tip: '1인칭 골목 산책',
+    act_walk: '거닐기', act_walk_tip: '1인칭으로 직접 걸어 마을 둘러보기',
     cine_exit: '종료', cine_exit_tip: '시네마틱 종료 (ESC)',
     cine_hint: '탭 또는 ESC로 종료',
+    // 수동 조작 힌트(#33) — 진입 직후 몇 초만 보였다가 물러난다.
+    cine_walk_hint: 'WASD · 방향키 이동 · 드래그로 둘러보기 · Shift 빠르게 · ESC 종료',
+    cine_walk_hint_touch: '조이스틱으로 이동 · 화면을 드래그해 둘러보기',
+    cine_walk_move: '이동 조이스틱',
     cine_pass_crane: '진입', cine_pass_orbit: '선회', cine_pass_fly: '골목 비행', cine_pass_pull: '전경',
     cine_walk_label: '골목 산책',
     // glb 내보내기(#112)
@@ -186,9 +190,13 @@ const DICT = {
     glossary_disclaimer: 'Product reading · not a measured reconstruction',
     // Cinematic demo mode (#112)
     act_drone: 'Drone', act_drone_tip: 'Drone cinematic — automatic aerial tour',
-    act_walk: 'Walk', act_walk_tip: 'First-person stroll through the lanes',
+    act_walk: 'Walk', act_walk_tip: 'Explore the village on foot, first person',
     cine_exit: 'Exit', cine_exit_tip: 'Exit cinematic (Esc)',
     cine_hint: 'Tap or Esc to exit',
+    // Manual control hint (#33) — shown briefly on entry, then recedes.
+    cine_walk_hint: 'WASD / arrows to move · drag to look · Shift to hurry · Esc to exit',
+    cine_walk_hint_touch: 'Joystick to move · drag the screen to look',
+    cine_walk_move: 'Move joystick',
     cine_pass_crane: 'Approach', cine_pass_orbit: 'Orbit', cine_pass_fly: 'Fly-through', cine_pass_pull: 'Reveal',
     cine_walk_label: 'Lane stroll',
     // glTF export (#112)

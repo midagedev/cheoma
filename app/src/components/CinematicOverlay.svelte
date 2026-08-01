@@ -2,8 +2,11 @@
   // 시네마틱 데모 중 오버레이(#112) — 크롬을 최소화(chroma 페이드·패널 숨김)한 대신 종료 창구와
   //   현재 상태(드론 패스·1인칭)를 담백하게 알린다. 탭/클릭·ESC 로도 종료되지만 명시 버튼을 둔다.
   import { t } from '../lib/i18n.svelte.js';
+  import { device } from '../lib/device.svelte.js';
 
-  let { active = false, mode = null, pass = null, onExit } = $props();
+  let { active = false, mode = null, pass = null, onExit, onMove } = $props();
+
+  const walking = $derived(active && mode === 'walk');
 
   // 드론 패스명 → 사람이 읽는 라벨(dronepath.js name 규약).
   const PASS_LABEL = {
@@ -55,6 +58,51 @@
       dimmed = false;
     };
   });
+
+  // ── 가상 조이스틱(#33) ── 워킹뷰가 수동 탐험이 된 이상 키보드가 없는 기기에도 이동 수단이 있어야
+  //   한다. 시선은 화면 드래그가 담당하므로(App.onWalkPointerDown) 여기서는 이동 벡터만 낸다.
+  //   조이스틱은 크롬이 아니라 컨트롤이라 .chrome 자동 후퇴에 함께 사라지지 않는다.
+  const JOY_R = 44;              // 베이스 반경(px) — 노브 최대 변위 = 입력 크기 1
+  const JOY_DEAD = 5;            // 데드존(px): 손가락 미세 떨림이 0.11 짜리 이동으로 새지 않게
+  let joyPid = $state(null);
+  let joyKnob = $state({ x: 0, y: 0 });
+  let joyEl = $state(null);
+
+  function joyVector(dx, dy) {
+    const len = Math.hypot(dx, dy);
+    if (len < JOY_DEAD) return { x: 0, y: 0, fwd: 0, strafe: 0 };
+    const k = len > JOY_R ? JOY_R / len : 1;
+    const kx = dx * k, ky = dy * k;
+    return { x: kx, y: ky, fwd: -ky / JOY_R, strafe: kx / JOY_R };
+  }
+  function joyUpdate(e) {
+    const rect = joyEl?.getBoundingClientRect();
+    if (!rect) return;
+    const v = joyVector(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
+    joyKnob = { x: v.x, y: v.y };
+    onMove?.({ fwd: v.fwd, strafe: v.strafe });
+  }
+  function joyDown(e) {
+    if (joyPid !== null) return;
+    joyPid = e.pointerId;
+    joyEl?.setPointerCapture?.(e.pointerId);
+    joyUpdate(e);
+  }
+  function joyMove(e) { if (e.pointerId === joyPid) joyUpdate(e); }
+  function joyUp(e) {
+    if (e.pointerId !== joyPid) return;
+    joyPid = null;
+    joyKnob = { x: 0, y: 0 };
+    onMove?.({ fwd: 0, strafe: 0 });
+  }
+
+  // 모드를 벗어나면 눌린 채 남은 이동 의도를 반드시 놓아 준다(종료 후 무한 전진 방지).
+  $effect(() => {
+    if (walking) return;
+    joyPid = null;
+    joyKnob = { x: 0, y: 0 };
+    onMove?.({ fwd: 0, strafe: 0 });
+  });
 </script>
 
 {#if active}
@@ -71,8 +119,26 @@
       >
         <span class="x" aria-hidden="true">✕</span><span class="lbl">{t('cine_exit')}</span>
       </button>
-      <div class="hint">{t('cine_hint')}</div>
+      <div class="hint">
+        {walking ? t(device.touch ? 'cine_walk_hint_touch' : 'cine_walk_hint') : t('cine_hint')}
+      </div>
     </div>
+    {#if walking && device.touch}
+      <!-- 좌하단 가상 조이스틱: 이동만. 시선은 화면 어디든 드래그(App 이 소유). -->
+      <div
+        class="joy"
+        bind:this={joyEl}
+        data-cine-joystick
+        role="application"
+        aria-label={t('cine_walk_move')}
+        onpointerdown={joyDown}
+        onpointermove={joyMove}
+        onpointerup={joyUp}
+        onpointercancel={joyUp}
+      >
+        <div class="joy-knob" class:held={joyPid !== null} style="translate: {joyKnob.x}px {joyKnob.y}px"></div>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -150,6 +216,36 @@
   @keyframes fadein { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   @keyframes fadehint { 0% { opacity: 0; } 12% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0.25; } }
+  /* 조이스틱은 .chrome 밖이라 감상 크롬이 물러나도 남는다 — 컨트롤이지 라벨이 아니다.
+     JOY_R(44px) = 베이스 반지름이므로 지름 88px + 링 두께. 터치 타깃 최소 44px 를 넉넉히 넘는다. */
+  .joy {
+    position: absolute;
+    left: max(22px, calc(env(safe-area-inset-left) + 14px));
+    bottom: max(30px, calc(env(safe-area-inset-bottom) + 22px));
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    pointer-events: auto;
+    touch-action: none;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: grid;
+    place-items: center;
+    opacity: 0.62;
+    transition: opacity 0.2s ease;
+  }
+  .joy:has(.held) { opacity: 0.9; }
+  .joy-knob {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--glass-text) 62%, transparent);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+    transition: translate 0.09s ease-out, background 0.15s ease;
+  }
+  .joy-knob.held { background: var(--accent); transition: background 0.15s ease; }
   @media (pointer: coarse) {
     .exit { min-height: 44px; padding: 12px 16px; font-size: 14px; }
     .scene-label { font-size: 14px; padding: 9px 17px; }

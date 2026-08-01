@@ -49,6 +49,13 @@ const EXACT_IMPACT = new Map([
     './check-camera-continuity.mjs',
     './check-architecture.mjs',
   ]],
+  // #33 워킹뷰 수동 조작: 진입 기본(자동 산책 금지)·시선 델타 1회 소비는 이 런타임이 소유하고,
+  // check-walk-control 이 스텁 카메라로 그 배선을 직접 돌려 본다. esbuild 번들이라 정적 폐쇄에
+  // 잡히지 않으므로 소유를 명시한다.
+  ['app/src/engine/cinematic-runtime.js', [
+    './check-architecture.mjs',
+    './check-walk-control.mjs',
+  ]],
   // #20 R4: 성곽 렌더러와 지형 정점색은 어떤 fast check 도 import 하지 않으므로(three 의존)
   // 정적 폐쇄로는 잡히지 않는다. 개천 계약이 두 파일의 소비 문자열(수문 spec 소비·건천 하상 항)을
   // 검사하므로 소유를 명시한다.

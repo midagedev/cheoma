@@ -72,7 +72,14 @@ export {
   sampleWallMidBlocked,
   wallSegmentSolid,
 } from '../cinematic/walk-solids.js';
-export { createWalker } from '../cinematic/walker.js';
+export {
+  createWalker,
+  LOOK_PITCH_PER_PX,
+  LOOK_YAW_PER_PX,
+  MOVE_ACCEL,
+  MOVE_DECEL,
+  PITCH_LIMIT,
+} from '../cinematic/walker.js';
 export {
   createArchitecturalReveal,
   createArchitecturalRevealTimeline,

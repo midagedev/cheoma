@@ -532,6 +532,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-door-occlusion-contract.mjs',
   './check-cinematic-reveal.mjs',
   './check-walk-solids.mjs',
+  './check-walk-control.mjs',
 './check-roof-rank-contract.mjs',
   './check-plan-contract.mjs',
   './check-temple-contract.mjs',

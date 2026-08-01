@@ -127,7 +127,8 @@ export function createCinematicRuntime({
     const { site } = plan;
     if (mode === 'walk') {
       state.walker = createWalker({ site, plan, heightAt: (x, z) => site.heightAt(x, z) });
-      state.walker.startAutoStroll();
+      // #33: 워킹뷰는 사용자가 조작하는 탐험 모드다. 진입 즉시 정지 상태로 서 있고 입력을 기다린다
+      //   (종전에는 여기서 startAutoStroll() 로 자동 산책을 걸었다). 자동 산책은 명시 API 로만.
       camera.near = 0.08;
       camera.updateProjectionMatrix();
       state.pass = null;
@@ -164,7 +165,9 @@ export function createCinematicRuntime({
     if (disposed) return;
     let lookAt;
     if (state.mode === 'walk') {
-      const { pos, dir } = state.walker.update(dt, state.input);
+      // 입력은 input() 이 이미 walker 로 밀어넣었다(이동=지속 상태, 시선=누적 델타). 여기서 다시
+      //   state.input 을 넘기면 같은 시선 델타를 매 프레임 재적용해 드래그가 무한 회전이 된다.
+      const { pos, dir } = state.walker.update(dt);
       camera.position.copy(pos);
       lookAt = state.smoothedLook.copy(pos).add(dir);
     } else {
@@ -266,8 +269,14 @@ export function createCinematicRuntime({
     start,
     stop,
     update,
+    // 이동 의도(fwd/strafe/run)는 지속 상태로 walker 가 소유하고, 시선은 델타라 누적 후 1회 소비된다.
+    //   lookDX/lookDY 는 픽셀(감도는 코어 소유), yaw/pitch 는 라디안(하위 호환).
     input(partial = {}) {
-      if (state.active && state.mode === 'walk') Object.assign(state.input, partial);
+      if (!state.active || state.mode !== 'walk' || !state.walker) return;
+      Object.assign(state.input, partial);
+      state.walker.setInput(partial);
+      if (partial.lookDX || partial.lookDY) state.walker.look(partial.lookDX || 0, partial.lookDY || 0);
+      if (partial.yaw || partial.pitch) state.walker.lookRadians(partial.yaw || 0, partial.pitch || 0);
     },
     setAutoStroll(on) {
       if (state.walker) on ? state.walker.startAutoStroll() : state.walker.stopAutoStroll();
@@ -300,6 +309,11 @@ export function createCinematicRuntime({
       },
       turnRateDeg: +(state.walker.turnRate() / DEG).toFixed(2),
       turnarounds: state.walker.turnaroundCount(),
+      // #33 수동 조작 검증: 진행 속도(m/s)·시선각·자동산책 여부.
+      speed: +state.walker.speed().toFixed(3),
+      yawDeg: +(state.walker.yaw / DEG).toFixed(2),
+      pitchDeg: +(state.walker.pitch / DEG).toFixed(2),
+      autoStroll: state.walker.autoStroll,
     } : null),
     dispose() {
       if (disposed) return;

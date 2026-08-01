@@ -4007,14 +4007,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
 
     // ---------- 시네마틱 데모 모드(#103·#112) ----------
     cine: {
-      // mode 'drone'(opts.pass 지정 시 그 패스 1회, 없으면 오토플레이 체인 순환) | 'walk'(1인칭 autoStroll).
+      // mode 'drone'(opts.pass 지정 시 그 패스 1회, 없으면 오토플레이 체인 순환) | 'walk'(1인칭 수동 탐험).
       start: (mode = 'drone', opts = {}) => startDemo(mode, opts),
       stop: () => stopDemo(),
       isActive: () => demo.active,
       available: () => cineAvailable(),
-      // 1인칭 데스크톱 입력 피드(WASD/마우스). walk 모드일 때만 반영. { fwd, strafe, yaw, pitch, run }.
+      // 1인칭 입력 피드(WASD·방향키·드래그·가상 조이스틱). walk 모드일 때만 반영.
+      //   { fwd, strafe, run }  지속 이동 의도 — 다시 보낼 때까지 유지된다(놓으면 0 을 보낼 것).
+      //   { lookDX, lookDY }    포인터 이동 델타(px). 감도는 코어 소유.
+      //   { yaw, pitch }        라디안 증분(하위 호환).
       input: (partial = {}) => demoRuntime.input(partial),
-      // autoStroll 토글(walk) — 수동 조작 시 자동산책 중지. 다시 켜면 경로 복귀.
+      // autoStroll 토글(walk) — 기본은 수동. 데모 클립용 자동 산책 경로를 명시로 켠다.
       setAutoStroll: (on) => demoRuntime.setAutoStroll(on),
       getState: () => demoRuntime.getState(),
       // 검증용: 드론 패스 목록·duration.

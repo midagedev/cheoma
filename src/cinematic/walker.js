@@ -5,14 +5,20 @@ import {
 } from './dronepath.js';
 import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 
-// 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103, 대문 진입 #150-J).
+// 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103, 대문 진입 #150-J, 수동 조작 #33).
 //   createWalker({ site, plan, heightAt }) → walker
-//     walker.update(dt, input) → { pos, dir }    input:{ fwd, strafe, yaw, pitch, run }
-//       fwd/strafe ∈ [-1,1] 이동 의도, yaw/pitch 는 이번 프레임 시선 회전 증분(rad, 호출부가 감도 적용),
-//       run: true 면 달리기(2.8m/s).
+//     walker.setInput({ fwd, strafe, run })     지속 이동 의도. 놓을 때까지 유지된다.
+//       fwd/strafe ∈ [-1,1], run: true 면 달리기(2.8m/s).
+//     walker.look(dxPx, dyPx)                   포인터 이동 델타(px). 감도는 코어 소유(아래 상수).
+//     walker.lookRadians(dYaw, dPitch)          라디안 증분(감도 이미 적용된 경로·게이트용).
+//     walker.update(dt, input?) → { pos, dir }  input 을 주면 setInput + lookRadians(yaw/pitch) 와 동치.
 //     walker.pos  Vector3(x, 시선고 y, z)      walker.dir  Vector3 시선 단위벡터
 //     walker.startAutoStroll() / stopAutoStroll()  — 도로 폴리라인 따라 자동 산책(데모 클립)
 //     walker.setPos(x,z) / walker.yaw / walker.pitch
+//
+// #33 이후 이 모드의 **기본은 수동**이다: 생성 직후 walker 는 정지해 있고, 호출부가 매 프레임
+//   setInput/look 으로 사용자 입력을 밀어넣는다. 자동 산책은 명시 호출(startAutoStroll)로만 켜지는
+//   데모 경로로 남는다. 코어는 DOM 을 모른다 — 키/포인터 수집은 app 소유, 여기는 dt 기반 순수 상태기.
 //
 // 접지: 시선고 = heightAt + 1.6m, 계단·성토 패드 단차를 지수 스무딩(단차에서 튀지 않게). 하한 클램프로
 //   지면 침하(발이 땅 아래) 0 보장. 충돌: walk-solids — 담 런 세그먼트 + 집 지붕 OBB(대문 틈 open).
@@ -34,6 +40,24 @@ const EYE = 1.6;
 const WALK = 1.4, RUN = 2.8;
 const BODY = 0.45;              // 몸 반경(담과의 이격)
 const DEG = Math.PI / 180;
+// ── 수동 조작 상수(#33) ── 값은 전부 즉답성 기준의 수치 근거를 갖는다. 미감이 아니라 지연 예산이다.
+export const MOVE_ACCEL = 14;   // m/s² — 정지→1.4m/s 0.100s, 정지→2.8m/s(달리기) 0.200s
+export const MOVE_DECEL = 20;   // m/s² — 1.4m/s→완전정지 0.070s, 2.8m/s→0 0.140s (관성 잔상 방지)
+// 포인터 드래그 감도. 종전 App.svelte 가 쓰던 값을 그대로 코어로 옮긴 것이라 조작감은 불변이고,
+//   대신 노드에서 단언 가능해진다. 부호는 드래그(=화면을 잡아 끄는) 규약: dx>0 → yaw 감소.
+export const LOOK_YAW_PER_PX = 0.0026;    // rad/px = 0.149°/px
+export const LOOK_PITCH_PER_PX = 0.0022;  // rad/px = 0.126°/px
+export const PITCH_LIMIT = 1.2;           // rad = 68.75° — 종전 수동 클램프 값 유지
+
+// 목표 속도로의 선형 램프. 감속(0 으로 가거나 방향이 뒤집히거나 상한이 낮아질 때)은 더 센 비율을
+//   쓴다. 지수 스무딩과 달리 **정확히 target 에 도달**하므로 "정지 명령 후 t초 내 완전 정지"를
+//   부등식이 아니라 등식으로 단언할 수 있다.
+function rampTo(v, target, dt) {
+  const rate = (Math.abs(target) < Math.abs(v) || target * v < 0) ? MOVE_DECEL : MOVE_ACCEL;
+  const d = target - v;
+  const step = rate * dt;
+  return Math.abs(d) <= step ? target : v + Math.sign(d) * step;
+}
 const AUTO_LOOK_AHEAD = 3.0;
 const AUTO_TURN_SPEED = 24 * DEG;
 const AUTO_TURN_ACCELERATION = 120 * DEG;
@@ -288,13 +312,26 @@ export function createWalker({ site, plan, heightAt } = {}) {
     return Math.hypot(x - ox, z - oz);
   }
 
+  // 자유 이동 — 속도는 **로컬 축(전후·좌우)** 에 저장하고 방향은 매 프레임 현재 yaw 로 합성한다.
+  //   월드 속도를 관성으로 끌면 돌아설 때 옛 방향으로 미끄러진다(빙판). 로컬 저장은 회전을 즉시
+  //   반영하므로 짧은 램프의 즉답성을 지키면서 시작·정지의 뚝뚝 끊김만 없앤다.
   function freeStep(dt) {
     let f = clamp(cur.fwd, -1, 1), s = clamp(cur.strafe, -1, 1);
     const mag = Math.hypot(f, s); if (mag > 1) { f /= mag; s /= mag; }
-    const spd = (cur.run ? RUN : WALK) * dt;
+    const top = cur.run ? RUN : WALK;
+    vf = rampTo(vf, f * top, dt);
+    vs = rampTo(vs, s * top, dt);
+    if (vf === 0 && vs === 0) return;
     const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
     const rdx = Math.cos(yaw), rdz = -Math.sin(yaw);
-    tryStep((fdx * f + rdx * s) * spd, (fdz * f + rdz * s) * spd);
+    tryStep((fdx * vf + rdx * vs) * dt, (fdz * vf + rdz * vs) * dt);
+  }
+
+  // 누적 시선 델타 — update 에서 한 번 소비한다. 호출부가 이벤트마다 즉시 회전시키면 렌더 프레임과
+  //   포인터 이벤트 빈도가 어긋나 같은 드래그가 기기마다 다른 회전량을 준다.
+  function applyLook() {
+    if (pendYaw) { yaw += pendYaw; heading.reset(yaw); pendYaw = 0; }
+    if (pendPitch) { pitch = clamp(pitch + pendPitch, -PITCH_LIMIT, PITCH_LIMIT); pendPitch = 0; }
   }
 
   function strollStep(dt) {
@@ -341,15 +378,26 @@ export function createWalker({ site, plan, heightAt } = {}) {
   }
 
   const cur = { fwd: 0, strafe: 0, run: false };
+  let vf = 0, vs = 0;               // 로컬 전후·좌우 속도(m/s)
+  let pendYaw = 0, pendPitch = 0;   // 미소비 시선 증분(rad)
 
-  function update(dt, input = {}) {
+  function setInput(partial = {}) {
+    if ('fwd' in partial) cur.fwd = partial.fwd || 0;
+    if ('strafe' in partial) cur.strafe = partial.strafe || 0;
+    if ('run' in partial) cur.run = !!partial.run;
+  }
+
+  function update(dt, input) {
     dt = Math.min(Math.max(dt, 0), 0.1);      // 큰 dt 터널링 방지
+    if (input) {
+      setInput(input);
+      if (input.yaw) pendYaw += input.yaw;
+      if (input.pitch) pendPitch += input.pitch;
+    }
     if (auto) {
       strollStep(dt);
     } else {
-      if (input.yaw) { yaw += input.yaw; heading.reset(yaw); }
-      if (input.pitch) pitch = clamp(pitch + input.pitch, -1.2, 1.2);
-      cur.fwd = input.fwd || 0; cur.strafe = input.strafe || 0; cur.run = !!input.run;
+      applyLook();
       freeStep(dt);
     }
 
@@ -369,16 +417,24 @@ export function createWalker({ site, plan, heightAt } = {}) {
   }
 
   return {
-    update, pos, dir,
+    update, pos, dir, setInput,
+    // 포인터 델타(px) → 시선. 감도는 코어가 소유하므로 데스크톱 드래그·터치 드래그가 같은 값을 쓴다.
+    look(dxPx = 0, dyPx = 0) { pendYaw -= dxPx * LOOK_YAW_PER_PX; pendPitch -= dyPx * LOOK_PITCH_PER_PX; },
+    lookRadians(dYaw = 0, dPitch = 0) { pendYaw += dYaw; pendPitch += dPitch; },
     get yaw() { return yaw; }, set yaw(v) { yaw = v; heading.reset(v); },
-    get pitch() { return pitch; }, set pitch(v) { pitch = clamp(v, -1.2, 1.2); },
+    get pitch() { return pitch; }, set pitch(v) { pitch = clamp(v, -PITCH_LIMIT, PITCH_LIMIT); },
     get autoStroll() { return auto; },
-    startAutoStroll() { auto = true; heading.reset(yaw); },
-    stopAutoStroll() { auto = false; heading.reset(yaw); cur.fwd = cur.strafe = 0; cur.run = false; },
+    startAutoStroll() { auto = true; heading.reset(yaw); vf = vs = 0; },
+    stopAutoStroll() {
+      auto = false; heading.reset(yaw);
+      cur.fwd = cur.strafe = 0; cur.run = false; vf = vs = 0; pendYaw = pendPitch = 0;
+    },
     setPos(nx, nz) { const p = nudgeOut(nx, nz); x = p.x; z = p.z; eyeY = H(x, z) + EYE; pos.set(x, eyeY, z); },
     lookAt() { return pos.clone().add(dir); },
     // 검증·엔진 배선용 디버그/조회 훅.
     eyeHeight: EYE, bodyRadius: BODY, maxRadius: MAXR, center: { x: C.x, z: C.z },
+    speed() { return Math.hypot(vf, vs); },
+    velocity() { return { fwd: vf, strafe: vs }; },
     groundClearance() { return eyeY - H(x, z); },
     isColliding() { return collides(x, z); },
     outsideBoundary() { return Math.hypot(x - C.x, z - C.z) > MAXR + 1e-3; },

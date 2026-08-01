@@ -256,9 +256,12 @@
     clearLifecycleTimeout(toastTimer);
     toastTimer = setLifecycleTimeout(() => { toast = null; toastTimer = null; }, ms);
   };
-  // 데스크톱 1인칭 조작: WASD/화살표 이동 + 마우스 시선. autoStroll 기본, 수동 입력 시 해제(다시 안 켬).
+  // 1인칭 탐험 조작(#33): WASD/화살표 이동 + 포인터 드래그 시선. 모바일은 가상 조이스틱 + 드래그.
+  //   자동 산책은 더 이상 기본이 아니다 — 진입 즉시 사용자 제어다.
   const walkKeys = new Set();
-  let walkYaw = 0, walkPitch = 0, walkManual = false, walkRaf = null;
+  let walkLookDX = 0, walkLookDY = 0, walkRaf = null;
+  let walkLookPid = null, walkLookX = 0, walkLookY = 0;
+  let walkJoy = $state({ fwd: 0, strafe: 0 });   // 가상 조이스틱(터치) — CinematicOverlay 가 갱신
 
   function currentResidentialState() {
     if (!sceneVillage) return { records: [], focusedParcelId: null };
@@ -1116,30 +1119,36 @@
   function startWalk() { if (!waving) engine.cine.start('walk'); }
   function stopCine() { engine.cine.stop(); }
 
-  // 데스크톱 1인칭 입력 — cine walk 활성 동안만 rAF 로 키/마우스 델타를 walker 에 피드.
-  //   폰은 입력 피드 없이 walker 의 autoStroll 로 완주한다(키보드가 없으니 그게 맞다). 종전에는
-  //   그 이유로 "거닐기" 버튼 자체를 폰에서 지웠는데, 데모는 이미 전 디바이스에서 돌아가므로
-  //   터치 사용자만 자동 산책을 못 보는 과잉이었다(docs/mobile-effects-audit.md U1·U2).
+  // 1인칭 입력 피드 — cine walk 활성 동안 rAF 로 키·조이스틱·포인터 델타를 walker 에 민다.
+  //   #33 이전에는 `device.touch` 로 게이트해 터치 기기는 피드 없이 자동 산책을 봤다. 워킹뷰가
+  //   사용자 조작 모드가 된 이상 그 분기는 "폰에서는 조작할 수 없다"는 뜻이 되므로 제거하고,
+  //   대신 키보드 자리를 가상 조이스틱(CinematicOverlay)이 메운다. 시선은 두 문법이 공유한다.
   function startWalkFeed() {
-    // 게이트 축은 성능이 아니라 입력 장치다 — 키보드 없는 거친 포인터에는 autoStroll 이 정답이고,
-    //   pointermove 를 시선에 물리면 터치 드래그가 궤도 조작과 싸운다. 태블릿도 여기 포함된다
-    //   (perf 를 진짜 폰으로 좁혀도 태블릿은 계속 autoStroll — docs/mobile-effects-audit.md U2).
-    if (cine.mode !== 'walk' || device.touch) return;
-    walkKeys.clear(); walkYaw = 0; walkPitch = 0; walkManual = false;
+    if (cine.mode !== 'walk') return;
+    walkKeys.clear();
+    walkLookDX = 0; walkLookDY = 0; walkLookPid = null;
+    walkJoy = { fwd: 0, strafe: 0 };
     addEventListener('keydown', onWalkKey);
     addEventListener('keyup', onWalkKeyUp);
-    addEventListener('pointermove', onWalkMouse, { passive: true });
+    addEventListener('blur', onWalkBlur);
+    addEventListener('pointerdown', onWalkPointerDown, { capture: true, passive: true });
+    addEventListener('pointermove', onWalkPointerMove, { capture: true, passive: true });
+    addEventListener('pointerup', onWalkPointerUp, { capture: true, passive: true });
+    addEventListener('pointercancel', onWalkPointerUp, { capture: true, passive: true });
     const feed = () => {
       if (!cine.active || cine.mode !== 'walk') { walkRaf = null; return; }
       walkRaf = requestLifecycleFrame(feed);
-      const fwd = (walkKeys.has('w') || walkKeys.has('ArrowUp') ? 1 : 0) - (walkKeys.has('s') || walkKeys.has('ArrowDown') ? 1 : 0);
-      const strafe = (walkKeys.has('d') || walkKeys.has('ArrowRight') ? 1 : 0) - (walkKeys.has('a') || walkKeys.has('ArrowLeft') ? 1 : 0);
-      const run = walkKeys.has('shift');
-      if (fwd || strafe || walkYaw || walkPitch) {
-        if (!walkManual) { walkManual = true; engine.cine.setAutoStroll(false); }   // 첫 조작에 자동산책 해제
-        engine.cine.input({ fwd, strafe, run, yaw: walkYaw, pitch: walkPitch });
-        walkYaw = 0; walkPitch = 0;
-      }
+      const keyFwd = (walkKeys.has('w') || walkKeys.has('ArrowUp') ? 1 : 0) - (walkKeys.has('s') || walkKeys.has('ArrowDown') ? 1 : 0);
+      const keyStrafe = (walkKeys.has('d') || walkKeys.has('ArrowRight') ? 1 : 0) - (walkKeys.has('a') || walkKeys.has('ArrowLeft') ? 1 : 0);
+      // 키와 조이스틱은 배타가 아니라 합이다(키보드+터치 겸용 기기). 코어가 크기 1로 정규화한다.
+      const fwd = keyFwd || walkJoy.fwd;
+      const strafe = keyStrafe || walkJoy.strafe;
+      // 놓은 프레임에도 0 을 보내야 walker 가 멈춘다 — 이동 의도는 지속 상태다.
+      engine.cine.input({
+        fwd, strafe, run: walkKeys.has('shift'),
+        lookDX: walkLookDX, lookDY: walkLookDY,
+      });
+      walkLookDX = 0; walkLookDY = 0;
     };
     walkRaf = requestLifecycleFrame(feed);
   }
@@ -1147,12 +1156,19 @@
     if (walkRaf != null) { cancelLifecycleFrame(walkRaf); walkRaf = null; }
     removeEventListener('keydown', onWalkKey);
     removeEventListener('keyup', onWalkKeyUp);
-    removeEventListener('pointermove', onWalkMouse);
+    removeEventListener('blur', onWalkBlur);
+    removeEventListener('pointerdown', onWalkPointerDown, { capture: true });
+    removeEventListener('pointermove', onWalkPointerMove, { capture: true });
+    removeEventListener('pointerup', onWalkPointerUp, { capture: true });
+    removeEventListener('pointercancel', onWalkPointerUp, { capture: true });
     walkKeys.clear();
+    walkLookPid = null;
+    walkJoy = { fwd: 0, strafe: 0 };
   }
+  const WALK_MOVE_KEYS = ['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
   function onWalkKey(e) {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) { walkKeys.add(k); e.preventDefault(); }
+    if (WALK_MOVE_KEYS.includes(k)) { walkKeys.add(k); e.preventDefault(); }
     if (e.shiftKey) walkKeys.add('shift');
   }
   function onWalkKeyUp(e) {
@@ -1160,10 +1176,24 @@
     walkKeys.delete(k);
     if (!e.shiftKey) walkKeys.delete('shift');
   }
-  function onWalkMouse(e) {
-    // 버튼 눌린 드래그일 때만 시선 회전(자유 커서 이동과 구분). movementX/Y 는 상대 델타.
-    if (e.buttons & 1) { walkYaw -= (e.movementX || 0) * 0.0026; walkPitch -= (e.movementY || 0) * 0.0022; }
+  // 창이 포커스를 잃으면 keyup 이 오지 않아 키가 눌린 채로 남는다(무한 전진).
+  function onWalkBlur() { walkKeys.clear(); walkLookPid = null; }
+  // 시선 드래그 — 포인터 종류를 가리지 않고 clientX/Y 차분으로 계산한다. movementX/Y 는 터치에서
+  //   0 을 주는 브라우저가 있어 같은 코드가 데스크톱에서만 동작하게 된다. 오버레이 자신을 겨눈
+  //   포인터(조이스틱·종료 버튼)는 시선이 아니다.
+  function onWalkPointerDown(e) {
+    if (walkLookPid !== null) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.target?.closest?.('.cine-overlay')) return;
+    walkLookPid = e.pointerId; walkLookX = e.clientX; walkLookY = e.clientY;
   }
+  function onWalkPointerMove(e) {
+    if (e.pointerId !== walkLookPid) return;
+    walkLookDX += e.clientX - walkLookX;
+    walkLookDY += e.clientY - walkLookY;
+    walkLookX = e.clientX; walkLookY = e.clientY;
+  }
+  function onWalkPointerUp(e) { if (e.pointerId === walkLookPid) walkLookPid = null; }
 
   // ---------- glb 내보내기(#104·#112) ----------
   // 대형 마을은 sanitize+parse 가 수 초 블록 가능 → 스피너 페인트 후(rAF 2회 양보) 실행 + 중복 클릭 방지.
@@ -1647,7 +1677,13 @@
 />
 
 <!-- 시네마틱 데모 오버레이(#112): 종료 창구 + 현재 장면 라벨. -->
-<CinematicOverlay active={cine.active} mode={cine.mode} pass={cine.pass} onExit={stopCine} />
+<CinematicOverlay
+  active={cine.active}
+  mode={cine.mode}
+  pass={cine.pass}
+  onExit={stopCine}
+  onMove={(v) => { walkJoy = v; }}
+/>
 
 <!-- 안내 토스트(#112): glb overBudget·완료·실패 문구. -->
 {#if toast}
