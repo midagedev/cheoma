@@ -122,6 +122,38 @@ if (view === 'aerial') {
   const wy = plan.site.heightAt(wg.x, wg.z);
   campos = new THREE.Vector3(camX, wy + 7.5, camZ);
   target = new THREE.Vector3(wg.x, wy + 2.2, wg.z);
+} else if (view === 'bridge' || view === 'bank') {
+  // #20 R4 Phase B 판정 뷰.
+  //   bridge = 평석교 근경. 다리 축과 45° 로 서서 **접근로 노면 → 데크 → 반대편 노면**이 한 프레임에
+  //     들어가야 한다(결함이 "접근로가 골짜기로 내려갔다 올라온다"이므로 접근로가 보이지 않으면
+  //     판정할 수 없다). 교각·멍엣돌·귀틀석·청판석과 난간도 이 거리에서 읽힌다.
+  //   bank = 호안 석축 근경. 하도 안 눈높이에서 물줄기·마른 하상·석축면·천단을 한 번에 본다
+  //     (구한말 사진의 4단 단면과 같은 시점).
+  fov = 50;
+  const br = (plan.features.bridges && plan.features.bridges[0]) || { x: 0, z: cen.z + R * 0.4, rot: 0, span: 20 };
+  const rot = br.rot || 0;
+  const across = { x: Math.cos(rot), z: -Math.sin(rot) };          // 데크 span 방향
+  const along = { x: -across.z, z: across.x };                     // 개천 흐름 방향
+  const by = plan.site.heightAt(br.x, br.z);
+  if (view === 'bridge') {
+    const back = br.span * 0.85;
+    const camX = br.x + across.x * back * 0.72 + along.x * back * 0.72;
+    const camZ = br.z + across.z * back * 0.72 + along.z * back * 0.72;
+    campos = new THREE.Vector3(camX, by + br.span * 0.30, camZ);
+    target = new THREE.Vector3(br.x, by + 0.6, br.z);
+  } else {
+    // 하도 안에서 남안 석축을 본다 — 카메라를 물줄기 위 눈높이에 둔다.
+    const half = plan.site.streamWaterHalf || 3;
+    const camX = br.x + along.x * br.span * 0.55 - across.x * half * 0.4;
+    const camZ = br.z + along.z * br.span * 0.55 - across.z * half * 0.4;
+    const wy = plan.site.streamY ? plan.site.streamY(camX) : by;
+    campos = new THREE.Vector3(camX, wy + 1.6, camZ);
+    target = new THREE.Vector3(
+      br.x + along.x * br.span * 0.05 + across.x * (plan.site.streamHalf || 8),
+      wy + 1.0,
+      br.z + along.z * br.span * 0.05 + across.z * (plan.site.streamHalf || 8),
+    );
+  }
 } else if (view === 'north') {
   // 숙정문(북문) 산길 근경 — 도성 안에서 북악 급사면·성벽·문루를 올려다봄.
   fov = 48;
@@ -243,6 +275,10 @@ const shots = [
   ['hanyang-north', 'scale=hanyang&view=north&time=day'],
   ['hanyang-sugumun', 'scale=hanyang&view=sugumun&time=day'],
   ['hanyang-sugumun-2', 'scale=hanyang&view=sugumun2&time=day'],
+  ['hanyang-bridge', 'scale=hanyang&view=bridge&time=day'],
+  ['hanyang-bridge-sunset', 'scale=hanyang&view=bridge&time=sunset'],
+  ['hanyang-bank', 'scale=hanyang&view=bank&time=day'],
+  ['village-bridge', 'scale=village&view=bridge&time=day&palace=0'],
   ['hanyang-sunset', 'scale=hanyang&view=aerial&time=sunset'],
   ['hanyang-sijeon-day', 'scale=hanyang&view=sijeon&time=day'],
   ['hanyang-sijeon-sunset', 'scale=hanyang&view=sijeon&time=sunset'],

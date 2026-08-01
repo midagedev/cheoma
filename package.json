@@ -58,7 +58,7 @@
     "check:cinematic:app": "node tools/run-browser-locked.mjs -- node tools/check-cinematic-reveal-app.mjs",
     "check:walk-solids": "node tools/check-walk-solids.mjs",
     "check:citywall": "node tools/check-citywall.mjs",
-    "check:creek": "node tools/check-creek.mjs",
+    "check:creek": "node tools/check-creek.mjs && node tools/check-creek-bank-geometry.mjs",
     "check:dof": "node tools/check-dof.mjs",
     "check:roof-rank": "node tools/check-roof-rank-contract.mjs",
     "check:dancheong": "node tools/check-dancheong-contract.mjs",

@@ -538,13 +538,24 @@ export function planRoads(site, opts, rng) {
     }
     // 북촌 중로(궁 동서, 고지대 반가역) + 남촌 중로(종로 남, 초가 우세역)
     push('jungno', organicPath({ x: -site.bowlR * 0.74, z: C.z }, { x: site.bowlR * 0.74, z: C.z }, rng, { amp: site.R * 0.028, comps: 2 }));
-    const desiredSouthZ = gS ? (tJoin.z + gS.z) * 0.5 : tJoin.z + site.R * 0.19;
+    // 남촌 중로는 개천과 **나란한** 동서 간선이라, 도성 개천이 이 자리로 올라오면서(#20 R4 Phase A,
+    //   streamZ 0.30R→0.16R) 길이 하도 안을 수백 m 달렸다 — 실측 2026-08-01: seed 7 하도 안 363m·
+    //   저수로 안 104m, seed 1 229m/82m, seed 11 220m/82m. 다리를 놓아 해결할 문제가 아니다(길이
+    //   물길을 건너는 것이 아니라 물길을 따라간다). 고증의 그 길은 하상이 아니라 **호안 위**이므로
+    //   개천 남쪽 물가 밖으로 물린다. 하도를 건드리지 않는 시드·규모(capital 개천 0.30R)는 불변이다.
+    const southShoulder = ROAD_WIDTH.jungno * 0.5 + 2;
+    const offStreamZ = (x, z) => (site.stream
+      ? Math.max(z, site.streamZat(x) + site.streamHalf + southShoulder)
+      : z);
+    const desiredSouthZ = offStreamZ(0, gS ? (tJoin.z + gS.z) * 0.5 : tJoin.z + site.R * 0.19);
     const southSpan = safeHorizontalSpan(W, desiredSouthZ,
       ROAD_WIDTH.jungno * 0.5 + CITY_WALL_DIMENSIONS.roadEdgeMargin);
     if (southSpan) {
       const path = organicPath(southSpan.west, southSpan.east, rng, { amp: site.R * 0.025, comps: 2 })
         .map((point) => clampPointInsideCityWall(W, point,
-          ROAD_WIDTH.jungno * 0.5 + CITY_WALL_DIMENSIONS.roadEdgeMargin));
+          ROAD_WIDTH.jungno * 0.5 + CITY_WALL_DIMENSIONS.roadEdgeMargin))
+        // 성벽 클램프 뒤에 물가를 적용한다 — 순서를 뒤집으면 클램프가 다시 하도로 밀어 넣는다.
+        .map((point) => ({ x: point.x, z: offStreamZ(point.x, point.z) }));
       push('jungno', path);
     } else if (!W) {
       push('jungno', organicPath(

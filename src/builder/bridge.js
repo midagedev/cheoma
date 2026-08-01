@@ -18,40 +18,63 @@ export function buildBridge(opts = {}) {
   return type === 'arch' ? buildArchBridge(opts) : buildSlabBridge(opts);
 }
 
-// ── 판석교 ─────────────────────────────────────────────────────────
-// 낮은 화강석 교각 위에 긴 널돌(판석)을 걸친 소박한 다리. 널돌 2열.
+// ── 판석교(평석교) ──────────────────────────────────────────────────
+// 고증(한국민족문화대백과사전 「평석교」): "교각을 세우고 멍엣돌을 건너지른 다음 판석을 깔아 만든
+//   돌다리"이고, "교각 위에는 긴 장대석을 건너질러 연결하는데 이를 **멍엣돌(駕石)**이라고 한다.
+//   멍엣돌 위에는 마치 우물마루를 짜듯이 먼저 **귀틀석**을 건너지른 다음 귀틀석 사이에 **청판석**을
+//   깔아 마감한다." → 데크는 널돌 2열이 아니라 멍엣돌·귀틀석·청판석 3층 구성이다.
+// 난간: 같은 출처가 "**규모가 있는 석교에서는** 다리 양쪽에 난간을 설치하여 격식을 갖추기도 한다"고
+//   조건부로 서술한다. 그래서 난간은 폭 위계 게이트를 통과할 때만 세운다(RAILING_MIN_WIDTH) —
+//   근거 없이 전 규모에 붙이지 않는다. 조선시대 한양의 평석교 사례는 수표교·광통교·살곶이다리이며,
+//   살곶이다리가 76m 인 것이 다경간 장대 평석교의 선례다(도성 개천 데크 33m 의 근거).
+// 지간: BRIDGE_SLAB_BAY(3m) — 석재 한 장이 건널 수 있는 길이. 호출부가 교각 수를 계약에서 받는다.
+export const RAILING_MIN_WIDTH = 4;    // m — "규모가 있는 석교"의 제품 경계(간선 6m 데크만 통과)
+
 export function buildSlabBridge(opts = {}) {
   // 데크 리프트 기본값은 순수 접지 계약과 같은 상수를 쓴다(두 곳에 적으면 접지 단언이 무의미해진다).
-  const { seed = 7, span = 4.5, width = 1.5, deckY = BRIDGE_SLAB_DECK_LIFT, piers = 2 } = opts;
+  const {
+    seed = 7, span = 4.5, width = 1.5, deckY = BRIDGE_SLAB_DECK_LIFT,
+    piers = 2, bedY: bedYOpt,
+  } = opts;
   const rng = makeRng(seed);
   const P = getPropMaterials();
   const g = new THREE.Group();
   g.name = 'bridge-slab';
 
   const slabThk = 0.16;
-  const segN = piers + 1;
+  const beamThk = 0.22;              // 멍엣돌(장대석) 두께
+  const segN = Math.max(1, Math.round(piers)) + 1;
   const segLen = span / segN;
-  const bedY = -0.4;                 // 개울 바닥(교각 밑)
+  // 하상은 접지 계약이 준다. 개천 트렌치에서는 데크가 시가지 지반 높이라 하상까지 3m 이상이고,
+  //   옛 로컬 고정값(-0.4)을 쓰면 교각이 물 위에 떠 있는 그림이 된다.
+  const bedY = Math.min(-0.4, Number.isFinite(bedYOpt) ? bedYOpt : -0.4);
+  const beamTop = deckY - slabThk;
+  const beamBottom = beamTop - beamThk;
+  const railing = width >= RAILING_MIN_WIDTH;
 
-  // 교각(중간 지점) — 물에 잠긴 낮은 각석 기둥 + 갑석
+  // 교각(중간 지점) — 하상에 선 각석 기둥 + 갑석 + 물가름 돌
   for (let i = 1; i < segN; i++) {
     const x = -span / 2 + i * segLen;
-    const pierTop = deckY - slabThk;
+    const pierTop = beamBottom;
     const pierH = pierTop - bedY;
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(0.52, pierH, width * 0.86), P.granite);
+    if (pierH <= 0) continue;
+    // 교각 폭은 높이에 따라 두꺼워진다 — 3m 교각을 0.52m 각석으로 세우면 이쑤시개로 읽힌다.
+    const pierW = Math.min(segLen * 0.42, 0.52 + pierH * 0.14);
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(pierW, pierH, width * 0.86), P.granite);
     pier.position.set(x, bedY + pierH / 2, 0); pier.castShadow = pier.receiveShadow = true; g.add(pier);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, width * 0.98), P.graniteWarm);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(pierW + 0.18, 0.1, width * 0.98), P.graniteWarm);
     cap.position.set(x, pierTop - 0.05, 0); cap.castShadow = true; g.add(cap);
     // 물가름(뱃머리) 돌 — 상류측 삼각
-    const cut = new THREE.Mesh(new THREE.BoxGeometry(0.3, pierH * 0.8, 0.3), P.graniteDark);
-    cut.position.set(x - 0.3, bedY + pierH * 0.4, 0); cut.rotation.y = Math.PI / 4; g.add(cut);
+    const cut = new THREE.Mesh(new THREE.BoxGeometry(pierW * 0.6, pierH * 0.8, pierW * 0.6), P.graniteDark);
+    cut.position.set(x - pierW * 0.6, bedY + pierH * 0.4, 0); cut.rotation.y = Math.PI / 4; g.add(cut);
   }
 
   // 양안 둑돌(자연석 무리) — 다리 끝을 땅에 자연스럽게 앉힘
   for (const s of [-1, 1]) {
     const bx = s * (span / 2 + 0.05);
-    const abut = new THREE.Mesh(new THREE.BoxGeometry(0.6, deckY + 0.5, width * 0.95), P.graniteDark);
-    abut.position.set(bx, (deckY - 0.5) / 2, 0); abut.castShadow = abut.receiveShadow = true; g.add(abut);
+    const abutH = deckY - bedY;
+    const abut = new THREE.Mesh(new THREE.BoxGeometry(0.6, abutH, width * 0.95), P.graniteDark);
+    abut.position.set(bx, deckY - abutH / 2, 0); abut.castShadow = abut.receiveShadow = true; g.add(abut);
     for (let k = 0; k < 3; k++) {
       const r = 0.28 + rng() * 0.16;
       const rock = new THREE.Mesh(boulderGeometry(rng, r, 1, 0.8),
@@ -61,24 +84,67 @@ export function buildSlabBridge(opts = {}) {
     }
   }
 
-  // 널돌(판석) — 세그먼트마다 2열
+  // 멍엣돌(駕石) — 교각 위를 통행 방향과 직교로 건너지르는 긴 장대석 2열(데크 양 옆).
+  for (const row of [-1, 1]) {
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(span, beamThk, width * 0.2), P.granite);
+    beam.position.set(0, beamBottom + beamThk / 2, row * width * 0.38);
+    beam.castShadow = beam.receiveShadow = true; g.add(beam);
+  }
+
+  // 귀틀석 + 청판석 — 우물마루처럼 귀틀석을 건너지르고 그 사이를 청판석으로 마감한다.
   for (let i = 0; i < segN; i++) {
     const x0 = -span / 2 + i * segLen;
-    const cx = x0 + segLen / 2;
+    // 귀틀석: 경간 경계마다 폭 방향 한 켜.
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.26, slabThk, width * 0.94), P.graniteWarm);
+    rail.position.set(x0 + 0.13, deckY - slabThk / 2, 0);
+    rail.castShadow = rail.receiveShadow = true; g.add(rail);
+    // 청판석: 귀틀석 사이를 채우는 2열 널돌.
+    const fillLen = Math.max(0.2, segLen - 0.3);
     for (const row of [-1, 1]) {
       const slab = new THREE.Mesh(
-        new THREE.BoxGeometry(segLen * 1.04, slabThk, width * 0.46),
+        new THREE.BoxGeometry(fillLen, slabThk, width * 0.42),
         rng() > 0.5 ? P.granite : P.graniteWarm);
       slab.position.set(
-        cx + (rng() - 0.5) * 0.05,
+        x0 + 0.26 + fillLen / 2 + (rng() - 0.5) * 0.04,
         deckY - slabThk / 2 + (rng() - 0.5) * 0.02,
-        row * width * 0.25);
-      slab.rotation.y = (rng() - 0.5) * 0.03;
+        row * width * 0.24);
+      slab.rotation.y = (rng() - 0.5) * 0.02;
       slab.castShadow = slab.receiveShadow = true; g.add(slab);
     }
   }
+  // 마지막 귀틀석(데크 끝단 마감).
+  {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.26, slabThk, width * 0.94), P.graniteWarm);
+    rail.position.set(span / 2 - 0.13, deckY - slabThk / 2, 0);
+    rail.castShadow = rail.receiveShadow = true; g.add(rail);
+  }
 
-  g.userData = { kind: 'bridge', type: 'slab', span, width };
+  // 난간 — "규모가 있는 석교"만. 지대석 위 난간기둥과 그 위 돌란대(수평 장대석)로 구성한다.
+  if (railing) {
+    const postH = 0.78;
+    const postSpacing = Math.max(1.6, segLen);
+    const postN = Math.max(2, Math.round(span / postSpacing) + 1);
+    for (const row of [-1, 1]) {
+      const z = row * width * 0.46;
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(span, 0.14, 0.2), P.graniteWarm);
+      sill.position.set(0, deckY + 0.07, z);
+      sill.castShadow = sill.receiveShadow = true; g.add(sill);
+      for (let i = 0; i < postN; i++) {
+        const x = -span / 2 + span * (postN === 1 ? 0.5 : i / (postN - 1));
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, postH, 0.18), P.granite);
+        post.position.set(x, deckY + 0.14 + postH / 2, z);
+        post.castShadow = true; g.add(post);
+      }
+      // 돌란대 — 난간기둥 위를 잇는 수평 장대석.
+      const handrail = new THREE.Mesh(new THREE.BoxGeometry(span, 0.16, 0.24), P.graniteWarm);
+      handrail.position.set(0, deckY + 0.14 + postH + 0.08, z);
+      handrail.castShadow = true; g.add(handrail);
+    }
+  }
+
+  g.userData = { kind: 'bridge', type: 'slab', span, width, piers: segN - 1, railing };
   return g;
 }
 

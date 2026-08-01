@@ -614,6 +614,26 @@
 - URL: https://www.museum.go.kr/site/main/relic/search/view?relicId=331 · https://heritage.go.kr/heri/cul/culSelectDetail.do?ccbaCpno=1121113920000 · https://www.museum.go.kr/site/main/relic/search/view?relicId=1013 · https://www.museum.go.kr/site/main/relic/search/view?relicId=102936 · https://museum.seoul.go.kr/www/relic/RelicView.do?mcsjgbnc=PS01003026001&mcseqno1=002540&mcseqno2=00000&cdLanguage=KOR · https://encykorea.aks.ac.kr/Article/E0012820
 - 라이선스: 2026-07-26 여섯 URL 모두 HTTP 200을 확인. 국립중앙박물관·서울역사박물관 소장품 기록은 공공누리 제1유형(출처표시)이고 국가유산청 지정 기록은 포털 콘텐츠별 이용조건이 적용된다. 앱은 회화 이미지를 번들·재배포하지 않고 링크와 공개 메타데이터 요약만 싣는다. 변상벽의 별명 "국고양이"와 특정 장승업 노안도는 기관 근거를 확보하지 못해 제외했다.
 
+### 56. 한국학중앙연구원 — 평석교(平石橋)의 구성과 난간 위계 / Pyeongseokgyo deck composition and its conditional railing
+- id: cred-pyeongseokgyo
+- topic: joseon-city
+- scope: Gaecheon slab-bridge deck layering and the width-gated railing rule only
+- 한국민족문화대백과사전 「평석교(平石橋)」.
+- 평석교는 "교각을 세우고 멍엣돌을 건너지른 다음 판석을 깔아 만든 돌다리"이며, "교각 위에는 긴 장대석을 건너질러 연결하는데 이를 **멍엣돌(駕石)**이라고 한다. 멍엣돌 위에는 마치 우물마루를 짜듯이 먼저 **귀틀석**을 건너지른 다음 귀틀석 사이에 **청판석**을 깔아 마감한다." 난간은 조건부다 — "**규모가 있는 석교에서는** 다리 양쪽에 난간을 설치하여 격식을 갖추기도 한다". 조선시대 한양의 평석교 사례로 **수표교·광통교·살곶이다리**를 든다(2026-08-01 확인).
+- **활용 / Use:** 개천 위 다리를 널돌 2열이 아니라 **교각 → 멍엣돌 → 귀틀석 → 청판석** 4층으로 렌더하는 근거이고, 지간이 석재 한 장의 길이를 넘을 수 없다는 근거(제품값 `BRIDGE_SLAB_BAY` 3m, 교각 수는 span 파생)다. 난간은 이 출처의 조건부 서술 그대로 **폭 위계 게이트**(`RAILING_MIN_WIDTH` 4m)를 통과하는 간선 데크에만 세우고 촌락 소로 다리에는 붙이지 않는다 — 근거 없는 전면 부착을 하지 않기 위한 게이트다. 열거된 세 사례가 전부 평석교인 것이 도성 개천에 홍예교를 놓지 않는 근거이며, 살곶이다리 76m 가 45m 급 다경간 데크의 선례다. **미검증**: 난간 부재 구성(지대석·난간기둥·돌란대)의 세부 치수는 이 출처에 없어 제품 저작값이다 / Basis for the four-layer slab deck, for capping the bay at one stone's length, and for gating railings on deck width exactly as the source's conditional wording does; the three cited examples are all slab bridges, which is why the urban creek never gets an arch bridge. Railing member dimensions are product-authored, not sourced.
+- URL: https://encykorea.aks.ac.kr/Article/E0071927
+- 라이선스: 2026-08-01 공개 페이지에서 본문을 확인했다. 한국학중앙연구원 저작권 정책이 적용되며 원문·도판 재배포 권리를 일괄 부여하지 않는다. 앱은 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용한다.
+
+### 57. 서울시설공단 — 영조의 개천 준천과 양안 석축(1760·1773) / Yeongjo's Gaecheon dredging and its 1773 bank revetment
+- id: cred-gaecheon-revetment
+- topic: joseon-city
+- scope: Hanyang creek bank revetment and channel straightening only
+- 서울시설공단 청계천 「영조 개천을 치다」.
+- 1760년(영조 36) **경진준천**은 2월 18일~4월 15일 **57일**간, 한성부민 15만 명·고정(雇丁) 5만 명 등 **20만 명**이 동원된 준설이었고, 그 시말을 기록한 『**준천사실(濬川事實)**』이 이후 준설의 지침이 되었다. 개천 **양안 석축**은 1760년에 물자·인력이 부족해 시행하지 못했다가 **1773년(영조 49) 6월 시작·8월 초 완성**된 별개 공역이며, "양쪽 제방에 돌을 쌓아 튼튼하게 하고, 구불구불한 수로를 곧게 바로 잡았다. 또한 양안에 버드나무를 심었다"(2026-08-01 확인).
+- **활용 / Use:** 도성 개천 양안에 호안 석축을 두는 근거이고, 호안이 준설과 **별개 공역**이라는 사실이 석축을 하도 전 구간에 균질하게 깔지 않고 도성 구간에만 두는 근거다(성 밖은 자연석·토안). 직선화 서술은 Phase A 의 사행 절반(개착된 물길) 결정을 뒷받침한다. **미검증**: 석재 가공 방식은 이 페이지에 없어 구한말 사진 판독의 **막돌 메쌓기**를 따랐고(가공석 켜쌓기는 성벽·수문의 위계로 남겼다), 호안 높이·두께는 지형 파생값이다. 기록의 **버드나무**는 아직 구현하지 않았다 / Basis for revetting both banks of the urban creek, and — because the revetment was a separate 1773 project — for scoping it to the walled city rather than the whole channel. The straightening record supports the halved meander. Stone dressing follows the photo reading (rough dry-stack), heights are terrain-derived, and the recorded willows are not implemented.
+- URL: https://www.sisul.or.kr/open_content/cheonggye/intro/yeongjo.jsp
+- 라이선스: 2026-08-01 공개 페이지에서 본문을 확인했다. 서울시설공단 저작권 정책이 적용되며 원문·도판 재배포 권리를 일괄 부여하지 않는다. 앱은 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용한다.
+
 ---
 
 ## 제작 노트 (Production note)

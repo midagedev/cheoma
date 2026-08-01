@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "baselineCommit": "hanyang-roofsea-2026-07-30",
+  "_creekPhaseBRebaseline": "#20 R4 Phase B 2026-08-01 — hanyang 전용 개천 마감: 호안 석축 계획(creek-bank-plan, 성 밖 자연석 위계 포함), 평석교 지간 3m 계약(bridgeSlabPiers)·벤치 횡단 접지(creekCrossingSpanHalf)·홍예 금지, 남촌 중로를 하도 밖으로 물림(offStreamZ), 잔여 횡단부 판석교(사교 하한 0.4). 이번에도 hanyang:base·hanyang:temple 만 이동하고 hamlet·village·town·capital 불변이 한양 전용 변경의 증거(리드 재실행 2026-08-01 실측이 r4-creek-b 독립 실측과 해시 일치). FAIL-first: 접근 수평 단언이 Phase A 소스에서 +1.23~+2.84m 로 실패함을 실측.",
   "_creekRebaseline": "#20 R4 Phase A 2026-08-01 — hanyang 전용 개천(開川) 관류: streamZ 0.30R→0.16R, 도성 개천 사행 ×0.5, 도성 구간 골짜기 어깨 50m→10m(개착 하도), 안산·성저 기준선을 개천에서 분리(frontWaterZ), 논은 성 밖 계약, 성곽 도성 필지 남한선=성벽. hanyang:base·hanyang:temple 해시만 이동하고 hamlet·village·town·capital 은 불변인 것이 한양 전용 변경의 증거다. worker == ?worker=0 폴백 바이트 동일은 check:worker 가 소유한다.",
   "templeRevision": "issue-122-role-hierarchy-2026-07-23",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
@@ -34,8 +35,8 @@
       "bytes": 262652
     },
     "hanyang:base": {
-      "hash": "f163b91466816a40ff32eb98ea247d3c4279e7bbc1714a77af85a1107691a694",
-      "bytes": 1346951
+      "hash": "063066b5256095489233d5b520b4c6948be23e53c575a521cc1ff7796d698f70",
+      "bytes": 1362031
     },
     "hamlet:temple": {
       "hash": "84066937c2e99508308723c761a6699464c49dc1be38068d26834da4edcb868e",
@@ -54,8 +55,8 @@
       "bytes": 277037
     },
     "hanyang:temple": {
-      "hash": "2af8475385dd3a47a3ad383a4d6a9b5030167eecdfa076f2b24949e7dcaee6f2",
-      "bytes": 1283003
+      "hash": "6391478f0b9e048a4a5b335851741dc98add9ce11ad913d6ed8d18ec4a976ba6",
+      "bytes": 1386792
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",

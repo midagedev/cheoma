@@ -26,7 +26,14 @@ import {
   sampleCityWallSegments,
 } from '../src/village/citywall-contour.js';
 import { terrainMeshHeightAt, streamSurfaceHeightAt } from '../src/village/terrain-grid.js';
-import { bridgeDeckPlacement } from '../src/village/stream-spatial.js';
+import {
+  BRIDGE_SLAB_BAY,
+  CREEK_APPROACH_LEVEL,
+  CREEK_APPROACH_REACH,
+  bridgeDeckPlacement,
+  creekCrossingSpanHalf,
+} from '../src/village/stream-spatial.js';
+import { planCreekBanks, CREEK_BANK_LIMITS } from '../src/api/creek-bank-plan.js';
 
 const TAU = Math.PI * 2;
 // 회귀 픽스처: 2026·7·99 = 기존 계약이 쓰는 정본 시드, 777 = ratio 0.22 에서 관류가 0m 로
@@ -293,18 +300,66 @@ for (const seed of SEEDS) {
   });
 }
 
-// ── 다리 접지(판석교·홍예교) ────────────────────────────────────────────────
+// ── 다리 접지·접근 구배·평석교 구성 (Phase B) ────────────────────────────────
 // 리드 전달 관찰(2026-08-01): "개천 위 판석이 비스듬히 기울어 지면을 파고든 것처럼 보인다".
 //   실측 결과 널돌이 둑을 파고드는 것은 아니고, **데크 상면이 둑 지반보다 0.29~0.61m 높게 서 있고
-//   그 다리가 벤치보다 1.2~2.5m 낮은 골짜기 안에 있다**(접근 경사 = Phase B 평석교 몫). 이 절은
-//   그 측정된 접지 envelope 를 고정해 (a) 널돌이 지반에 묻히는 회귀와 (b) 공중에 뜨는 회귀를 잡는다.
-//   전 규모 공통 계약이다 — 다리는 도성 개천에만 있는 시설이 아니다.
+//   그 다리가 벤치보다 1.2~2.5m 낮은 골짜기 안에 있다**(= 접근로가 골짜기로 내려갔다 올라온다).
+//   Phase B 는 그 접근 구배를 다리 쪽에서 없앤다 — 데크가 양안 **벤치 높이**에서 하도를 건넌다.
+// 이 절이 고정하는 것:
+//   (a) 접지 envelope — 널돌이 지반에 묻히지도, 공중에 뜨지도 않는다(Phase A 계약 유지).
+//   (b) 접근 수평 — 벤치 횡단이 성립하면 낮은 쪽 접근 노면이 데크 상면과 수평이다.
+//       FAIL-first 실측(2026-08-01): Phase A 소스에서 이 값은 hanyang 8개 시드에서 +1.23~+2.84m
+//       (길이 다리로 내려간다)라 이 단언이 실패한다. Phase B 는 −2.00~+0.05m.
+//   (c) 평석교 구성 — 지간(널돌 한 켜가 건너는 길이)이 석재 한 장 규약 안에 있다. 교각 2기 고정은
+//       45m 데크에서 지간 15m 짜리 통돌을 요구했다.
+//   (d) 도성 개천의 다리는 예외 없이 평석교다(홍예 금지 — 고증).
 const BRIDGE_DECK_ABOVE_MIN = 0.05;   // 상면이 접지면보다 이만큼은 위(묻힘 금지)
 const BRIDGE_DECK_ABOVE_MAX = 1.0;    // 상면이 접지면보다 이 이상 뜨면 부유
+const BRIDGE_BAY_TOLERANCE = 0.5;     // m — 지간이 규약보다 이 이상 길면 통돌이다
+// 배치가 접지 최고점 위로 추가로 들어올릴 수 있는 몫. 실측(2026-08-01, 14 픽스처): 벤치 횡단 0.00m,
+//   폴백 0.04~0.36m. 0.45m 는 그 위 여유이고, 둑 표본이 산 사면을 물어 데크를 들어올리는 회귀를 잡는다.
+const BRIDGE_DECK_MAX_LIFT = 0.45;
 const bridgeRows = [];
+const approachRows = [];
+
+// 다리를 지나는 도로의 실제 노면을 따라 데크 끝 밖까지 걸어간 지점의 지반 표고.
+function approachGroundAlongRoad(plan, site, spec, reach) {
+  let road = null, best = Infinity;
+  for (const candidate of plan.roads) {
+    for (const point of candidate.pts) {
+      const distance = G.dist(point, spec);
+      if (distance < best) { best = distance; road = candidate; }
+    }
+  }
+  if (!road) return [];
+  let anchor = 0, anchorD = Infinity;
+  for (let i = 0; i < road.pts.length; i++) {
+    const distance = G.dist(road.pts[i], spec);
+    if (distance < anchorD) { anchorD = distance; anchor = i; }
+  }
+  const out = [];
+  for (const direction of [-1, 1]) {
+    let travelled = 0, index = anchor, cursor = { x: spec.x, z: spec.z };
+    while (travelled < reach) {
+      const next = road.pts[index + direction];
+      if (!next) break;
+      const step = G.dist(cursor, next);
+      if (travelled + step >= reach) {
+        const point = G.lerp(cursor, next, (reach - travelled) / Math.max(1e-6, step));
+        out.push(terrainMeshHeightAt(site, point.x, point.z));
+        break;
+      }
+      travelled += step; cursor = next; index += direction;
+    }
+  }
+  return out;
+}
+
 for (const [scale, seed] of [
   ['hamlet', 11], ['village', 20260716], ['village', 2026],
-  ['town', 5], ['capital', 7], ['hanyang', 20260716], ['hanyang', 2026],
+  ['town', 5], ['capital', 7],
+  ['hanyang', 2026], ['hanyang', 7], ['hanyang', 99], ['hanyang', 777],
+  ['hanyang', 55], ['hanyang', 4242], ['hanyang', 1], ['hanyang', 20260716], ['hanyang', 11],
 ]) {
   const plan = planVillage({
     scale, seed,
@@ -315,6 +370,11 @@ for (const [scale, seed] of [
   invariant(bridges.length >= 1, `${scale}/${seed}: 개울을 건너는 다리가 없다`);
   for (const spec of bridges) {
     const tag = `${scale}/${seed} ${spec.type || 'slab'}`;
+    // (d) 도성 개천은 홍예교를 갖지 않는다 — 사진 판독·현존 사례가 전부 평석교다.
+    if (site.stream.urban) {
+      invariant(spec.type === 'slab',
+        `${tag}: 도성 개천에 홍예교가 놓였다 — 개천의 다리는 평석교다`);
+    }
     const placement = bridgeDeckPlacement(site, spec, {
       surfaceY: streamSurfaceHeightAt(site, spec.x, site.streamZat(spec.x)),
     });
@@ -322,18 +382,109 @@ for (const [scale, seed] of [
       `${tag}: 다리 접지가 유한하지 않다`);
     invariant(placement.deckY >= placement.waterY - 1e-9,
       `${tag}: 데크가 수면 아래다(${placement.deckY.toFixed(2)} < ${placement.waterY.toFixed(2)})`);
+    // 데크는 직사각형이라 양 끝 지반 차(endSpread)만큼은 낮은 쪽이 반드시 뜬다 — 그 몫은 물리적으로
+    //   피할 수 없다(실측 2026-08-01: hanyang/777 endSpread 0.77m → 낮은 끝 1.32m 부유가 최선).
+    //   그래서 부유 판정은 두 축으로 나눈다: (i) 회피 불가한 endSpread 를 포함한 절대 상한,
+    //   (ii) **배치가 추가로 들어올린 양**의 상한. (ii)가 실제 계약이다 — endSpread 가 큰 시드에서
+    //   상한을 통째로 늘리는 대신, 배치가 접지 최고점 위로 얼마나 더 뜨는지를 직접 묶는다.
+    const endSpread = Math.max(...placement.endGround) - Math.min(...placement.endGround);
     for (const [index, ground] of placement.endGround.entries()) {
       const above = placement.deckTopY - ground;
       invariant(above >= BRIDGE_DECK_ABOVE_MIN,
         `${tag}: 데크 ${index ? '우' : '좌'} 끝 상면이 지반보다 ${above.toFixed(2)}m — 널돌이 묻힌다`);
-      invariant(above <= BRIDGE_DECK_ABOVE_MAX,
-        `${tag}: 데크 ${index ? '우' : '좌'} 끝 상면이 지반 위 ${above.toFixed(2)}m — 다리가 떠 있다`);
+      invariant(above <= BRIDGE_DECK_ABOVE_MAX + endSpread,
+        `${tag}: 데크 ${index ? '우' : '좌'} 끝 상면이 지반 위 ${above.toFixed(2)}m (끝 단차 ${endSpread.toFixed(2)}m) — 다리가 떠 있다`);
     }
+    const lift = placement.contactY - Math.max(...placement.endGround);
+    invariant(lift <= BRIDGE_DECK_MAX_LIFT,
+      `${tag}: 접지 기준이 데크 최고 접지점보다 ${lift.toFixed(2)}m 위다 — 배치가 다리를 들어올렸다`);
     // 접지 표본에는 실제 데크 양 끝이 들어가야 한다(고정 오프셋만 보면 span 이 긴 시드에서 놓친다).
     invariant(placement.contactY >= Math.max(...placement.endGround) - 1e-9,
       `${tag}: 접지 기준이 데크 끝 지반을 놓쳤다`);
-    bridgeRows.push({ tag, above: placement.endGround.map((g) => placement.deckTopY - g) });
+    // (c) 평석교 지간: 교각 수는 계약이 소유하고, 렌더러가 그 수를 소비한다.
+    const bay = spec.span / (placement.piers + 1);
+    invariant(placement.piers >= 2,
+      `${tag}: 교각이 ${placement.piers}기 — 평석교는 교각 위에 멍엣돌을 건너지른다`);
+    invariant(bay <= BRIDGE_SLAB_BAY + BRIDGE_BAY_TOLERANCE,
+      `${tag}: 지간 ${bay.toFixed(2)}m 가 널돌 한 장 규약(${BRIDGE_SLAB_BAY}m)을 넘는다 — 통돌 다리다`);
+    // 교각은 실제 하상까지 닿아야 한다(데크가 벤치까지 올라오면 교각도 길어진다).
+    invariant(placement.bedY <= placement.deckY + 1e-9,
+      `${tag}: 하상이 데크보다 높다(${placement.bedY.toFixed(2)} > ${placement.deckY.toFixed(2)})`);
+    bridgeRows.push({ tag, above: placement.endGround.map((g) => placement.deckTopY - g), bay });
+
+    // (b) 접근 수평 — 벤치 횡단이 성립한 개천 다리만. 벤치를 못 찾은 시드(개천이 산 사면·성벽에
+    //     붙어 흐르는 경우)는 농촌 개울 규칙으로 폴백하며, 그 거동은 Phase A 와 바이트 동일이다.
+    if (!site.stream.urban) continue;
+    const bench = creekCrossingSpanHalf(site, spec.x);
+    if (!bench.found) { approachRows.push({ tag, bench: false, rise: null }); continue; }
+    const ground = approachGroundAlongRoad(plan, site, spec,
+      spec.span * 0.5 + CREEK_APPROACH_REACH);
+    invariant(ground.length >= 1, `${tag}: 접근 노면 표본을 뜨지 못했다`);
+    const rise = Math.min(...ground) - placement.deckTopY;
+    invariant(rise <= CREEK_APPROACH_LEVEL,
+      `${tag}: 낮은 쪽 접근 노면이 데크 상면보다 ${rise.toFixed(2)}m 높다 — 길이 골짜기로 내려가 다리를 만난다`);
+    approachRows.push({ tag, bench: true, rise });
   }
+}
+
+// ── 호안(護岸) 계획 (Phase B) ────────────────────────────────────────────────
+// 세 급 위계(성벽·수문 가공석 > 도성 개천 호안 막돌 메쌓기 > 성 밖 자연석·토안)가 실제로 나뉘고,
+//   호안 높이가 사진 판독 대역(1~1.5m)에 상한되며, 표고·수면이 전부 공유 지형·수면 계약에서 온다.
+const bankRows = [];
+for (const [scale, seed] of [
+  ['hanyang', 2026], ['hanyang', 7], ['hanyang', 99], ['hanyang', 777],
+  ['hanyang', 55], ['hanyang', 4242], ['hanyang', 1],
+]) {
+  const plan = planVillage({ scale, seed, includePalace: true });
+  const site = plan.site;
+  const banks = planCreekBanks(site);
+  const label = `${scale}/${seed}`;
+  invariant(banks.urban === true, `${label}: 도성 개천에 호안 계획이 없다`);
+  invariant(banks.stats.revetment > 0, `${label}: 석축 호안 구간이 0 — 도성 구간 위계가 사라졌다`);
+  invariant(banks.stats.natural > 0, `${label}: 자연석·토안 구간이 0 — 성 밖 위계가 사라졌다`);
+  for (const side of [-1, 1]) {
+    invariant(banks.runs.some((run) => run.side === side),
+      `${label}: ${side < 0 ? '북' : '남'}안 호안이 없다 — 개천 석축은 **양안**이다`);
+  }
+  let minHeight = Infinity, maxHeight = -Infinity, minFreeboard = Infinity;
+  for (const run of banks.runs) {
+    for (const point of run.points) {
+      // 표고·수면은 렌더 지형·공유 수면 계약에서 와야 한다(해석 heightAt 재계산 금지).
+      invariant(Math.abs(point.toeY - terrainMeshHeightAt(site, point.x, point.z)) <= 1e-9,
+        `${label}: 호안 기저 표고가 렌더 지형 표본과 다르다`);
+      invariant(Math.abs(point.waterY - streamSurfaceHeightAt(site, point.cx, point.cz)) <= 1e-9,
+        `${label}: 호안 수면이 공유 수면 계약과 다르다`);
+      invariant(Math.abs(point.cz - site.streamZat(point.cx)) <= 1e-9,
+        `${label}: 호안 중심선 표본이 개천 중심선을 벗어났다`);
+      if (run.rank !== 'seokchuk') continue;
+      const height = point.topY - point.toeY;
+      invariant(height >= CREEK_BANK_LIMITS.minHeight - 1e-9,
+        `${label}: 석축 높이 ${height.toFixed(2)}m 가 하한 미달 — 벽이 아니라 물가다`);
+      invariant(height <= CREEK_BANK_LIMITS.maxHeight + 1e-9,
+        `${label}: 석축 높이 ${height.toFixed(2)}m 가 사진 판독 대역 상한(${CREEK_BANK_LIMITS.maxHeight}m)을 넘는다 — 옹벽이다`);
+      invariant(point.topY > point.waterY,
+        `${label}: 석축 천단이 수면 아래다 — 호안이 잠긴다`);
+      invariant(point.backOffset > CREEK_BANK_LIMITS.sampleSpacing * 0 + 1e-9
+        && point.backOffset <= site.streamValleyHalfAt(point.x) + 1e-9,
+      `${label}: 호안 두께가 골짜기 어깨 밖으로 나갔다`);
+      minHeight = Math.min(minHeight, height);
+      maxHeight = Math.max(maxHeight, height);
+      minFreeboard = Math.min(minFreeboard, point.topY - point.waterY);
+    }
+  }
+  // 계획은 순수 재현이어야 한다(렌더러와 검증이 같은 값을 본다).
+  invariant(JSON.stringify(planCreekBanks(site)) === JSON.stringify(banks),
+    `${label}: planCreekBanks 가 재현되지 않는다`);
+  bankRows.push({ label, minHeight, maxHeight, minFreeboard, ...banks.stats });
+}
+// 농촌 개울은 호안을 갖지 않는다 — 다른 규모의 형상·드로우콜 불변이 그 증거다.
+for (const scale of ['hamlet', 'village', 'town', 'capital']) {
+  const plan = planVillage({ scale, seed: 2026, includePalace: scale === 'capital' });
+  const banks = planCreekBanks(plan.site);
+  invariant(banks.urban === false && banks.runs.length === 0,
+    `${scale}: 농촌 개울에 개천 호안이 생겼다`);
+  invariant(!plan.site.stream.urban,
+    `${scale}: 농촌 개울이 개착 하천으로 표시됐다`);
 }
 
 // 다른 규모는 도성 개천 문법을 갖지 않는다 — 수문 0기, 개울은 마을 앞(0.30R)에 그대로.
@@ -357,6 +508,25 @@ invariant(featuresSource.includes('bridgeDeckPlacement'),
   'features.js 가 순수 다리 접지 계약을 소비하지 않는다 — 렌더러가 접지를 다시 푼다');
 invariant(!/bankHeight\s*-\s*0\.35/.test(featuresSource),
   'features.js 에 옛 즉석 접지 산술이 남아 있다');
+// Phase B: 렌더러가 순수 호안 계획과 계약이 준 교각 수·하상을 실제로 소비해야 한다.
+for (const consumed of ['planCreekBanks', 'buildCreekBanks', 'placement.piers', 'placement.bedY']) {
+  invariant(featuresSource.includes(consumed),
+    `features.js 가 ${consumed} 를 소비하지 않는다 — 계획만 있고 형상이 없다`);
+}
+const bankGeometrySource = readFileSync(fileURLToPath(
+  new URL('../src/village/creek-bank-geometry.js', import.meta.url),
+), 'utf8');
+// 호안은 성벽·돌다리와 같은 props 화강암 재질만 차용한다(신규 재질·텍스처·프로그램 패밀리 금지).
+invariant(!/new THREE\.Mesh\w*Material/.test(bankGeometrySource),
+  'creek-bank-geometry.js 가 자기 재질을 만든다 — props 화강암을 차용해야 드로우콜이 늘지 않는다');
+invariant(!/new THREE\.(Canvas|Data)Texture/.test(bankGeometrySource),
+  'creek-bank-geometry.js 가 텍스처를 만든다');
+const bankPlanSource = readFileSync(fileURLToPath(
+  new URL('../src/village/creek-bank-plan.js', import.meta.url),
+), 'utf8');
+const bankPlanCode = bankPlanSource.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+invariant(!/from\s+['"]three['"]|\bTHREE\.|\bdocument\.|\bwindow\./.test(bankPlanCode),
+  'creek-bank-plan.js imported a renderer or DOM dependency');
 
 for (const consumed of ['cityWaterGateProfile', 'spec.waterGates', 'buildWaterGate', 'p.jamb']) {
   invariant(citywallSource.includes(consumed),
@@ -377,6 +547,13 @@ invariant(/cDryBed/.test(terrainSource) && /urbanCreek/.test(terrainSource),
   'terrain.js 에 개천 건천 하상 정점색 항이 없다');
 invariant(!/new THREE\.MeshStandardMaterial[\s\S]{0,200}dryBed/i.test(terrainSource),
   '건천 하상이 별도 재질을 만든다 — 정점색 한 항이어야 한다');
+// 물색은 개착 하천 여부(site.stream.urban)로 갈라지고, 물 재질은 여전히 하나다.
+const ribbon = terrainSource.slice(terrainSource.indexOf('export function buildWaterRibbon'));
+const ribbonBody = ribbon.slice(0, ribbon.indexOf('\nexport '));
+invariant(/site\.stream\.urban/.test(ribbonBody),
+  'buildWaterRibbon 이 개착 하천 물색 축을 갖지 않는다');
+invariant((ribbonBody.match(/new THREE\.MeshStandardMaterial/g) || []).length === 1,
+  'buildWaterRibbon 이 물 재질을 둘 이상 만든다 — 프로그램 패밀리가 늘어난다');
 
 const contourSource = readFileSync(fileURLToPath(
   new URL('../src/village/citywall-contour.js', import.meta.url),
@@ -393,8 +570,21 @@ for (const row of rows) {
 }
 const runs = rows.map((r) => r.run), depths = rows.map((r) => r.depth);
 const bridgeAbove = bridgeRows.flatMap((r) => r.above);
+const bays = bridgeRows.map((r) => r.bay);
 console.log(`  다리 접지: ${bridgeRows.length}기 상면-지반 `
-  + `${Math.min(...bridgeAbove).toFixed(2)}~${Math.max(...bridgeAbove).toFixed(2)}m`);
+  + `${Math.min(...bridgeAbove).toFixed(2)}~${Math.max(...bridgeAbove).toFixed(2)}m, `
+  + `지간 ${Math.min(...bays).toFixed(2)}~${Math.max(...bays).toFixed(2)}m`);
+const level = approachRows.filter((r) => r.bench);
+console.log(`  접근 수평: 벤치 횡단 ${level.length}/${approachRows.length}기, 낮은쪽 노면-데크 `
+  + `${Math.min(...level.map((r) => r.rise)).toFixed(2)}~${Math.max(...level.map((r) => r.rise)).toFixed(2)}m `
+  + `(상한 ${CREEK_APPROACH_LEVEL}m), 폴백 ${approachRows.length - level.length}기`);
+const heights = bankRows.flatMap((r) => [r.minHeight, r.maxHeight]);
+const freeboards = bankRows.map((r) => r.minFreeboard);
+console.log(`  호안: ${bankRows.length}개 도성, 석축 표본 `
+  + `${Math.min(...bankRows.map((r) => r.revetment))}~${Math.max(...bankRows.map((r) => r.revetment))} / `
+  + `자연석 ${Math.min(...bankRows.map((r) => r.natural))}~${Math.max(...bankRows.map((r) => r.natural))}, `
+  + `높이 ${Math.min(...heights).toFixed(2)}~${Math.max(...heights).toFixed(2)}m, `
+  + `수면 위 ${Math.min(...freeboards).toFixed(2)}m+`);
 console.log(`CREEK: PASS (${rows.length} hanyang seeds, inside run ${Math.min(...runs)}~${Math.max(...runs)}m, `
   + `depth ${Math.min(...depths)}~${Math.max(...depths)}m, `
   + `${rows.reduce((sum, r) => sum + r.gates, 0)} water gates, `

@@ -83,7 +83,7 @@ npm run check:instance-merge  # 인스턴싱/정적 병합 geometry digest·mate
 npm run check:api-reuse      # 공개 building·시전 API 재사용·dispose·제품 카메라 smoke
 npm run check:mud-wall      # Three 없는 토담 표면 plan·상한·envelope 데이터 계약
 npm run check:drainage      # Three 없는 도로 측구·대문 건넘 정책·경사·공간 계약
-npm run check:creek         # Three 없는 개천 도성 관류·종로 불침범·수문(오간수문) 계약
+npm run check:creek         # 개천 관류·종로·수문·평석교 접지/접근(순수) + 호안 형상 조립(재질 주입)
 npm run check:dangsan       # Three 없는 당산 의례 공터·당집 배치·수관·회피 계약
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
@@ -468,11 +468,48 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
     이맛돌은 수면 위·홍예 열이 하상 평탄면 안·석축 두께가 성벽 호의 새그를 덮는지 검사한다.
   - 성벽 리본이 수문 개구부를 실제로 비웠고(세그먼트 0개) 개구부 밖 실체 구간이 82% 이상 남았는지,
     다른 규모(hamlet~capital)는 개울 위치가 0.30R 그대로이고 수문이 0기인지 검사한다.
-  - **다리 접지**(전 규모): 판석교·홍예교 데크 상면이 데크 **양 끝** 지반보다 0.05~1.0m 위여야 한다
-    (묻힘·부유 양방향). 접지 산술은 `stream-spatial#bridgeDeckPlacement` 단일 진실원이고 features.js
-    가 옛 즉석 산술로 되돌아가면 소비 단언이 잡는다. 실측 envelope 0.29~0.61m.
-  - 렌더러 소비(`cityWaterGateProfile`·`spec.waterGates`·`buildWaterGate`·`p.jamb`)와 재질 예산(수문이
-    자기 재질을 만들지 않음 = 병합 후 드로우콜 +0), 건천 하상이 지형 정점색 한 항인지도 함께 검사한다.
+  - **다리 접지**(14 픽스처, hamlet~hanyang): 데크 상면이 데크 **양 끝** 지반보다 0.05m 이상 위(묻힘 금지)이고,
+    부유는 두 축으로 본다 — 회피 불가한 양 끝 지반 차(endSpread)를 포함한 절대 상한 1.0m+endSpread, 그리고
+    **배치가 접지 최고점 위로 추가로 들어올린 양** ≤0.45m(실측 벤치 횡단 0.00m, 폴백 0.04~0.36m). 후자가
+    실제 계약이며, 둑 표본이 산 사면을 물어 데크를 들어올리는 회귀를 잡는다. 접지 산술은
+    `stream-spatial#bridgeDeckPlacement` 단일 진실원이고 features.js 가 옛 즉석 산술로 되돌아가면 소비 단언이 잡는다.
+  - **접근 수평**(Phase B): 개천에서 양안 벤치 횡단이 성립하면(`creekCrossingSpanHalf().found`) 횡단 도로의
+    실제 노면을 데크 끝 밖 15m 까지 따라가 그 낮은 쪽 표고가 데크 상면보다 **0.6m 넘게 높지 않아야** 한다
+    (= 길이 골짜기로 내려가 다리를 만나지 않는다). 실측: Phase A 소스 **+0.80~+2.84m**(실패), Phase B
+    **−0.50~+0.05m**. 벤치를 못 찾거나 양안 비대칭 >0.7m 인 시드는 농촌 규칙 폴백이라 이 절에서 제외되고,
+    그 거동은 Phase A 와 동일하다(7 도성 시드 중 3기 폴백).
+  - **평석교 구성**: 교각 ≥2기, 지간(널돌 한 켜) ≤ `BRIDGE_SLAB_BAY`(3m)+0.5m — 교각 2기 고정은 45m 데크에서
+    지간 15m 통돌을 요구했다(실측 지간 2.65~3.32m). 하상이 데크보다 낮은지도 검사해 교각이 뜨지 않게 한다.
+    도성 개천에는 홍예교가 놓이지 않는다(고증: 개천의 다리는 전부 평석교).
+  - **호안**(7 도성 시드): 양안 모두 호안이 있고, 석축(막돌 메쌓기)·자연석 두 위계가 모두 0이 아니며, 석축
+    높이가 0.7~1.8m 대역(사진 판독 1~1.5m 상한) 안이고 천단이 수면 위이며 두께가 골짜기 어깨 안이다. 표고·수면은
+    전부 렌더 지형(`terrainMeshHeightAt`)·공유 수면(`streamSurfaceHeightAt`) 계약에서 와야 하고, 계획은
+    같은 입력에서 바이트 재현되어야 한다. hamlet~capital 은 호안 0개(농촌 개울 불변).
+  - 렌더러 소비(`cityWaterGateProfile`·`spec.waterGates`·`buildWaterGate`·`p.jamb`·`planCreekBanks`·
+    `buildCreekBanks`·`placement.piers`·`placement.bedY`)와 재질 예산(수문·호안이 자기 재질·텍스처를 만들지
+    않음 = 병합 후 드로우콜 +0), 건천 하상이 지형 정점색 한 항인지, 물색이 `site.stream.urban` 으로 갈라지되
+    물 재질은 여전히 하나인지, `creek-bank-plan.js` 가 three/DOM 비의존인지도 함께 검사한다.
+- `check:creek` 두 번째 단계 — `tools/check-creek-bank-geometry.mjs`
+  - **왜 별도인가**: 순수 plan 게이트는 "계획은 정상인데 **형상 조립**이 죽는" 계열을 원리상 잡지 못한다.
+    실제 사고(2026-08-01): 자연석 배치가 `boulderGeometry()` 를 인덱스 지오메트리로 가정해 `getIndex().count`
+    를 읽었는데 그건 `IcosahedronGeometry`(=`PolyhedronGeometry`) 라 **비인덱스**이고 `getIndex()` 가 null 이라
+    TypeError 가 났다. 그 호출이 `buildFeatureObjects` 안이라 **호안을 만드는 유일한 규모인 한양이 통째로
+    생성되지 않았다**(독립 관측 3건: `populateVillage` 안 `Cannot read properties of null (reading 'count')`,
+    `App.svelte $effect` pageerror, worker 0/1 각각 420초 타임아웃). 그때 `check:creek`·`check:plan` 은 전부 PASS였다.
+  - props 재질은 캔버스 텍스처(=DOM)를 만들므로 drainage 와 같은 **재질 주입** 규약(`buildCreekBanks(plan,
+    { materials })`)으로 평범한 `MeshStandardMaterial` 을 넣어 노드에서 실제 `buildCreekBanks` 를 돌린다.
+  - 도성 7 시드에서: 모든 메시의 `position`·`index`·`normal` 이 non-null 이고 정점 수가 짝이 맞으며, 인덱스가
+    삼각형 배수이고 정점 범위 안이며, 좌표가 전부 유한하고, 삼각형 0개인 메시가 씬에 들어가지 않는다.
+    자연석 역할 메시가 **실제로 나오는지**도 단언한다(사고 경로가 픽스처에서 실행되지 않으면 무의미하므로,
+    각 시드의 자연석 구간 수 > 0 도 함께 단언한다). 예산으로 주입 재질 사용·`castShadow=false` 를 검사하고,
+    `disposeCreekBanks` 가 차용 재질을 죽이지 않는지 본다.
+  - 빈 계획(hamlet~capital·null·빈 runs)은 **조기 반환**해 아무것도 할당하지 않아야 하고, 불완전한 재질 주입은
+    던져야 한다. FAIL-first 확인: 사고 당시 코드를 되돌리면 이 게이트가 같은 `TypeError: Cannot read properties
+    of null (reading 'count')` 로 실패하고 `tools/verify-cine.mjs` 도 exit 1 로 같은 메시지를 낸다.
+  - 시각 확인은 `node tools/shoot-hanyang.mjs <out> bridge|bank` 가 담당한다(순수 게이트가 아니다):
+    `bridge` 는 접근 노면→데크→반대편 노면을 한 프레임에 넣어 접근 구배를, `bank` 는 하도 안 눈높이에서
+    물줄기·마른 하상·석축면·천단(구한말 사진의 4단 단면 시점)을 본다. `hanyang-bank` 는 개천 안이라
+    호안이 없으면 곧바로 빈 둑으로 읽힌다.
 - `check:citywall`
   - 79개 contour(R=74/128/176/250/400/440/500, 64-seed 순환 + 실제 실패 seed)에서 `+z=남`, 폐합, 자기교차 없음, world-edge 내부를 검사.
   - 사대문 위치·외향 normal·성문 구멍이 같은 contour sampler와 일치하며, 육축은 고밀도 지형 표본에 묻히되 18.5m 물리 상한을 넘지 않는지 검사.

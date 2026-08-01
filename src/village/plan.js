@@ -24,6 +24,7 @@ import { assignFittedVariation } from './house-footprint.js';
 import {
   STREAM_PADDY_BANK_CLEARANCE,
   streamIntersectsPolygon,
+  creekCrossingSpanHalf,
 } from './stream-spatial.js';
 import { planTempleSite, templeReservationPolygons } from './temple-plan.js';
 import { planPavilion } from './pavilion-plan.js';
@@ -148,10 +149,40 @@ function attachOptInMjaHouse({
 
 function roadStreamCrossing(road, site, cityWall) {
   if (!road || !site.stream) return null;
-  const candidates = [];
+  const candidates = streamCrossingsOnRoad(road, site).map((candidate) => ({
+    ...candidate,
+    outside: !cityWall || cityWallClearance(cityWall, candidate.point) <= 0,
+  }));
+  const outside = candidates.filter((candidate) => candidate.outside);
+  return (outside.length ? outside : candidates)[0] || null;
+}
+
+// 이 거리 안의 두 횡단은 한 다리로 본다(사행을 스치며 두 번 부호가 바뀌는 굽이 = 다리 하나).
+//   데크 폭(간선 6m)보다 넉넉하되, 실측된 별개 횡단(11.8~15.6m 떨어진 골목)은 자기 다리를 얻는다.
+const BRIDGE_MERGE_DISTANCE = 10;
+// 물길과 거의 나란히 가다 중심선을 스치는 길은 **건너는 것이 아니다**. 그 자리에 다리를 놓으면
+//   사교 보정이 폭주해 하도 폭 20m 를 60m 데크로 건넌다(실측 2026-08-01 hanyang/2026: 사교 0.07,
+//   span 60.6m). 지선은 실제로 물을 가로지르는 각도일 때만 다리를 얻는다(≈66° 이상).
+const BRIDGE_MIN_SKEW = 0.4;
+
+// 통행로 전체가 개울 중심선을 건너는 지점. 도로 배열 순서를 그대로 따르므로 결정론적이고 rng 를
+//   전혀 쓰지 않는다(시드 흐름 불변).
+function roadStreamCrossings(roads, site) {
+  const out = [];
+  for (const road of roads || []) {
+    for (const candidate of streamCrossingsOnRoad(road, site)) {
+      out.push({ road, ...candidate });
+    }
+  }
+  return out;
+}
+
+function streamCrossingsOnRoad(road, site) {
+  const out = [];
+  if (!road?.pts?.length || !site.stream) return out;
+  const signed = (point) => point.z - site.streamZat(point.x);
   for (let i = 0; i < road.pts.length - 1; i++) {
     const a = road.pts[i], b = road.pts[i + 1];
-    const signed = (point) => point.z - site.streamZat(point.x);
     let fa = signed(a), fb = signed(b);
     if (fa * fb > 0) continue;
     let lo = 0, hi = 1;
@@ -161,15 +192,30 @@ function roadStreamCrossing(road, site, cityWall) {
       if (fa * fm <= 0) { hi = mid; fb = fm; }
       else { lo = mid; fa = fm; }
     }
-    const point = G.lerp(a, b, (lo + hi) * 0.5);
-    candidates.push({
-      point,
-      tangent: G.norm(G.sub(b, a)),
-      outside: !cityWall || cityWallClearance(cityWall, point) <= 0,
-    });
+    out.push({ point: G.lerp(a, b, (lo + hi) * 0.5), tangent: G.norm(G.sub(b, a)) });
   }
-  const outside = candidates.filter((candidate) => candidate.outside);
-  return (outside.length ? outside : candidates)[0] || null;
+  return out;
+}
+
+// 데크가 건너야 하는 실제 폭(사교 보정 전). 개착 하도는 양안 **벤치** 사이(stream-spatial 의 벤치
+//   탐색이 단일 진실원), 농촌 개울은 하도 전폭이다.
+function bridgeCrossWidth(site, x) {
+  if (!site.stream?.urban) return site.stream.width;
+  const bench = creekCrossingSpanHalf(site, x);
+  return bench.found ? bench.half * 2 : site.stream.width;
+}
+
+// 길이 물길을 얼마나 직교로 건너는가(1 = 직교, 0 = 나란함). span 은 이 값으로 나눠 늘어난다.
+function crossingSkewRaw(site, x, tangent) {
+  const d = 1;
+  const streamTangent = G.norm({ x: d * 2, z: site.streamZat(x + d) - site.streamZat(x - d) });
+  const streamNormal = G.perpL(streamTangent);
+  return Math.abs(G.dot(tangent, streamNormal));
+}
+
+// span 계산용 하한 클램프(0.5 = 사교 60°). 성문 접근 간선은 이 라운드 이전과 같은 클램프를 쓴다.
+function crossingSkew(site, x, tangent) {
+  return Math.max(0.5, crossingSkewRaw(site, x, tangent));
 }
 
 // ── char01 규모 파생(#89) ── 규모 연동 단조 앵커 + 시드 지터. 작은 씨족촌=민촌 성향(초가 우세,
@@ -568,25 +614,47 @@ export function planVillage(opts = {}) {
       const tanS = G.norm(G.sub(site.stream.pts[Math.min(site.stream.pts.length - 1, 37)], site.stream.pts[35]));
       const across = crossing?.tangent || G.perpL(tanS);
       const rot = Math.atan2(-across.z, across.x);   // 다리 로컬 X(span)를 개울 횡단 방향으로
-      let span = site.stream.width + 5;
+      // 데크가 건너야 하는 폭. 농촌 개울은 하도 전폭(완경사 둑이라 그 밖이 곧 벤치)이고, 개착 하도는
+      //   수직 석축 **천단 사이**다 — 하도 전폭만 쓰면 데크 끝이 석축 뒤채움 사면에 걸린다.
+      const crossWidth = bridgeCrossWidth(site, cx.x);
+      let span = crossWidth + 5;
       let width = scale === 'hamlet' ? 1.8 : 2.4;
       if (crossing) {
-        const d = 1;
-        const streamTangent = G.norm({
-          x: d * 2,
-          z: site.streamZat(cx.x + d) - site.streamZat(cx.x - d),
-        });
-        const streamNormal = G.perpL(streamTangent);
-        span = site.stream.width / Math.max(0.5, Math.abs(G.dot(crossing.tangent, streamNormal))) + 5;
+        span = crossWidth / crossingSkew(site, cx.x, crossing.tangent) + 5;
         width = wallApproach.width + 1;
       }
-      // 반촌=격식 홍예교, 민촌=소박 판석교, 여염=규모 따라.
-      const bridgeType = char01 < 0.34 ? 'slab'
-        : (char01 >= 0.66 || scale === 'town' || scale === 'capital') ? 'arch' : 'slab';
+      // 반촌=격식 홍예교, 민촌=소박 판석교, 여염=규모 따라. 단 **도성 개천은 예외 없이 평석교**다:
+      //   구한말 도성 사진 판독이 "홍예 없는 평평한 석판 + 짧은 돌기둥"이고(docs/joseon-city.md
+      //   §개천), 현존 사례로 열거되는 개천의 다리도 수표교·광통교·살곶이다리 = 전부 평석교다
+      //   (한국민족문화대백과사전 「평석교」). char01 로 홍예를 고르면 도성이 0.66 이라 개천에
+      //   무지개다리가 놓였다.
+      const bridgeType = site.stream.urban ? 'slab'
+        : char01 < 0.34 ? 'slab'
+          : (char01 >= 0.66 || scale === 'town' || scale === 'capital') ? 'arch' : 'slab';
       features.bridges.push({
         x: cx.x, z: cx.z, rot, type: bridgeType,
         span, width,
       });
+      // ── 나머지 횡단부에도 다리를 놓는다 ──────────────────────────────────────
+      // 위 블록은 성문 접근 간선 **한 곳**만 다리를 놓았고, 개천이 도성을 관류하게 되면서 다른
+      //   간선·골목도 물을 건너게 됐다(실측 2026-08-01: hanyang seed 7/1/11 에서 교량 없는 횡단
+      //   2·2·3곳 — 길이 물 위를 그냥 지나갔다). 고증도 다리는 하나가 아니다: 개천 위에는 광교
+      //   등 **24개의 다리**가 놓였다(docs/joseon-city.md §개천). 그래서 남은 횡단부마다 그 길의
+      //   폭으로 다리를 놓는다. 첫 다리 spec 은 위에서 그대로 확정되므로 횡단부가 하나인 시드의
+      //   계획 바이트는 변하지 않는다.
+      for (const extra of roadStreamCrossings(roadsResult.roads, site)) {
+        if (G.dist(extra.point, cx) <= BRIDGE_MERGE_DISTANCE) continue;
+        if (features.bridges.some((b) => G.dist(b, extra.point) <= BRIDGE_MERGE_DISTANCE)) continue;
+        if (crossingSkewRaw(site, extra.point.x, extra.tangent) < BRIDGE_MIN_SKEW) continue;
+        const extraWidth = bridgeCrossWidth(site, extra.point.x);
+        features.bridges.push({
+          x: extra.point.x, z: extra.point.z,
+          rot: Math.atan2(-extra.tangent.z, extra.tangent.x),
+          type: 'slab',   // 지선 횡단은 소박한 판석교 — 격식 홍예는 성문 접근 간선의 몫이다.
+          span: extraWidth / crossingSkew(site, extra.point.x, extra.tangent) + 5,
+          width: extra.road.width + 1,
+        });
+      }
     }
   }
 

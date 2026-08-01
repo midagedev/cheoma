@@ -283,9 +283,23 @@ export function buildWaterRibbon(site, uniforms) {
     ? [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1]
     : [-1, -0.52, 0, 0.52, 1];
   const tmpT = new THREE.Vector3();
-  const deep = linCol(0x376f82);
-  const bank = linCol(0x78928a);
+  // 개천(개착 도시 하천)의 물색은 농촌 개울과 같은 축이 아니다(#20 R4 Phase B). 근거:
+  //   (1) 고증 — 구한말 사진 판독의 4단 단면 ①은 "자갈 위 **얕은** 물"이다. 얕은 물은 자기 색을
+  //       거의 갖지 않고 하상(cDryBed 0x968d7c 계열)을 통과시키므로, 깊은 물의 청록(0x376f82)이
+  //       그 자리에 오면 10cm 물줄기가 코발트 수로로 읽힌다.
+  //   (2) 룩 문법(docs/look-grammar.md 채도 규율) — 온기는 하이라이트·림이 담당하고 중간톤은
+  //       중립이다. 도성 프레임에서 개천은 지붕 바다를 가로지르는 유일한 긴 띠라 그 중간톤이
+  //       채도를 가지면 프레임 전체의 채도 규율이 그 하나 때문에 깨진다.
+  //   그래서 도성 개천만 저채도 슬레이트-그린으로 두고, 대비는 색이 아니라 **폭**이 만든다
+  //   (저수로 반폭 4m 대 하도 반폭 9.9m — 건천 하상 정점색이 그 밖을 담당한다).
+  //   가산 반사층(uSky·uGlint)과 시간·계절 틴트는 setVillageWaterTime/Season 이 그대로 담당하므로
+  //   석양의 금빛 윤슬은 이 알베도 변경과 무관하게 유지된다.
+  const urbanCreek = !!site.stream.urban;
+  const deep = linCol(urbanCreek ? 0x5f6f6d : 0x376f82);
+  const bank = linCol(urbanCreek ? 0x8b8676 : 0x78928a);
   const tone = new THREE.Color();
+  // 얕은 물은 물가로 갈수록 하상에 더 빨리 녹는다(깊이 그라디언트가 없으므로).
+  const bankBlend = urbanCreek ? 0.78 : 0.58;
   for (let i = 0; i <= N; i++) {
     const p = pts[i];
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(N, i + 1)];
@@ -296,7 +310,7 @@ export function buildWaterRibbon(site, uniforms) {
     for (const lane of lanes) {
       pos.push(p.x + nx * hw * lane, y, p.z + nz * hw * lane);
       uv.push((lane + 1) * 0.5, i / N * 10);
-      tone.copy(deep).lerp(bank, smoothstep(0.28, 1, Math.abs(lane)) * 0.58);
+      tone.copy(deep).lerp(bank, smoothstep(0.28, 1, Math.abs(lane)) * bankBlend);
       col.push(tone.r, tone.g, tone.b);
     }
   }
@@ -312,15 +326,17 @@ export function buildWaterRibbon(site, uniforms) {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.setIndex(idx);
   geo.computeVertexNormals();
+  // 얕은 자갈 위 물은 거칠고(잔물결이 바닥 요철을 타고 잘게 부서진다) 하늘을 덜 비춘다 —
+  //   하상이 비쳐 보이는 쪽이 반사보다 강하다. 재질·프로그램 패밀리는 그대로 하나다(수치만 다르다).
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
     metalness: 0,
-    roughness: site.stream.kind === 'river' ? 0.5 : 0.38,
+    roughness: site.stream.kind === 'river' ? 0.5 : (urbanCreek ? 0.52 : 0.38),
   });
   mat.onBeforeCompile = (shader) => injectWaterLook(shader, uniforms, {
-    reflection: site.stream.kind === 'river' ? 0.42 : 0.58,
-    ripple: site.stream.kind === 'river' ? 0.30 : 0.48,
+    reflection: site.stream.kind === 'river' ? 0.42 : (urbanCreek ? 0.40 : 0.58),
+    ripple: site.stream.kind === 'river' ? 0.30 : (urbanCreek ? 0.62 : 0.48),
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'village-stream';

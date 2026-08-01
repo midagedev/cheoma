@@ -113,6 +113,15 @@ const CREEK_HANYANG_Z_RATIO = 0.16;
 const CREEK_HANYANG_MEANDER_K = 0.5;
 // 도성 개천 골짜기 어깨 반폭 가산(m). 농촌 개울의 0.10R(=R500 에서 50m) 대신 고정 소폭을 쓴다 —
 //   근거는 streamValleyHalf 선언부 주석의 실측·고증. 저수 평탄면은 불변이라 물은 여전히 평탄면 위에 있다.
+// Phase B 검토 결과 이 값을 더 좁히지 않는다(2026-08-01). 수직 석축 트렌치(어깨 2.5m, 하도 끝에서
+//   3.5m 를 수직으로 떨어뜨림)를 시도했더니 **성벽 몸체 발판이 그 단차를 밟아** 몸체가 지형에 묻혔다:
+//   check-citywall 스윕 79 컨투어 중 21건이 노출 하한 4m 미달(최악 2.34m), 전부 개천 중심에서
+//   10~15m — 즉 정확히 둑 단차 위였다. 성벽은 몸체 7.9m·기초 침하 2.5m 로 평지 노출 5.4m 뿐이라
+//   발판(두께 3m) 대각선에 1.4m 이상 단차가 걸리면 하한을 못 지킨다. 어깨를 5m 로 넓혀도 남는 시드가
+//   있었고(seed 5/R440 3.98m), 하한을 지키려면 어깨 7.5m 이상 = 완경사로 되돌아온다. 개천이 성벽과
+//   나란히 10~15m 거리로 흐르는 것은 Phase A 가 채택한 기하이므로, 이 충돌의 해소는 성벽 기초(계단식
+//   기초 = R3 몫)에 있고 개천 어깨에 있지 않다. 그래서 지형은 Phase A 그대로 두고, 접근 구배는
+//   **다리가 골짜기를 벤치 높이에서 건너는 것**으로, 호안은 **완경사 사면에 붙는 석축**으로 해결한다.
 const CREEK_HANYANG_VALLEY_SHOULDER = 10;
 
 // 앵커 필드(ridgeH·benchDrop·undAmp)의 R-구간 선형보간. 밖은 끝 앵커로 클램프.
@@ -331,15 +340,35 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
   //   20m 까지 붙어 협곡이 된다(실측 2026-08-01: x=200 에서 ±20m 지반 +22m). 그래서 분지(도성) 안은
   //   좁은 어깨, 분지 밖은 기존 자연 골짜기 어깨를 쓰고 그 사이를 반경으로 부드럽게 전이한다 —
   //   구 주석이 경계한 "묻힌 리본 대신 슬롯 캐니언"을 성 밖에서 그대로 피한다.
-  const valleyHalfAt = urbanCreek
+  // 개착 하천 가중(1 = 도성 안 석축 호안, 0 = 성 밖 자연 골짜기). 어깨·평탄 하상·둑 상면 표본이
+  //   모두 이 하나의 전이를 공유해야 호안벽 상단과 실제 벤치가 어긋나지 않는다.
+  // 전이는 **성벽 안쪽에서 끝난다**. 성벽 몸체 발판은 두께 3m 인데 개착 하도의 둑은 수평 2.5m 에
+  //   3.5m 를 떨어뜨리므로, 그 단차가 성벽 발판을 지나면 한쪽 모서리는 하상·반대쪽은 벤치에 놓여
+  //   몸체가 지형에 묻힌다(실측 2026-08-01: 어깨 2.5m 에서 seed 4/R400 노출 3.93m, 어깨 5m 에서
+  //   seed 5/R440 노출 3.98m — 어깨를 넓혀도 성벽 발판이 단차를 밟는 시드가 남는다. 완경사 둑에서는
+  //   같은 표본이 통과했다). 어깨 폭이 아니라 **위치**가 원인이므로 하도를 성벽에서 물린다. 고증도
+  //   같다 — 개천이 성벽을 지나는 자리는 호안이 아니라 자기 석축과 홍예를 갖는 수문이다.
+  //   성벽 반경은 방위별 분지 반경의 WALL_SCALE 배 이하다(citywall-contour.js#planCityWall: edge·grid
+  //   상한이 더 줄일 수만 있다). 그래서 그 추정 반경에서 STANDOFF 만큼 **안쪽**까지만 개착으로 둔다.
+  const creekUrban01 = urbanCreek
     ? (x) => {
       const cz = streamZat(x);
       const r = Math.hypot(x - center.x, cz - center.z);
-      // 전이 시작을 성곽 반경(≈bowlR·1.12)에 맞춘다 — 도성 안 전 구간이 개착 하천이어야 한다.
-      const t = smoothstep(bowlR * 1.10, bowlR * 1.50, r);
-      return lerpN(urbanValleyHalf, ruralValleyHalf, t);
+      return 1 - smoothstep(bowlR * 1.10, bowlR * 1.50, r);
     }
+    : () => 0;
+  const valleyHalfAt = urbanCreek
+    ? (x) => lerpN(urbanValleyHalf, ruralValleyHalf, 1 - creekUrban01(x))
     : () => ruralValleyHalf;
+  // 둑 상면(= 시가지 벤치) 표본을 어디서 뜨는지의 단일 진실원. 다리 접지 계약과 호안 계획이 같은
+  //   함수를 써야 "데크는 벤치에 앉았는데 호안 천단은 사면 중간"이 되지 않는다. 농촌 값 streamHalf + 3
+  //   은 이 라운드 이전과 같은 수(골든 불변)이고, 개착 하도만 실제 골짜기 어깨 밖을 떠 다리 데크가
+  //   골짜기로 내려가지 않고 벤치 높이에서 건너게 한다(#20 R4 Phase B 접근 구배).
+  const bankTopHalfAt = urbanCreek
+    ? (x) => valleyHalfAt(x) + 1.5
+    : () => streamHalf + 3;
+  // 저수 평탄면 반폭. x 종속이 아니지만 호안 계획이 단면 표본을 전부 함수로 받으므로 같은 형태로 노출한다.
+  const flatHalfAt = () => streamValleyFlatHalf;
   const streamPts = [];
   // 물길 중심선이 비정형 world edge에 닿는 지점을 양쪽에서 따로 찾는다. 과거의
   // ±(terrainR-4) 사각 클램프는 한강급 폭에서 수면이 지형 밖으로 큰 직사각형으로 삐져
@@ -473,7 +502,7 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     if (dry) return 0;
     const cz = streamZat(x);
     const d = Math.abs(z - cz);
-    const weight = smoothstep(valleyHalfAt(x), streamValleyFlatHalf, d);
+    const weight = smoothstep(valleyHalfAt(x), flatHalfAt(x), d);
     // A large river forms a broad alluvial floor instead of a creek-like notch
     // cut into the front hill. The eased shoulder leaves dry bank elevation yet
     // removes the abrupt ansan slope where ferry wards and fields must settle.
@@ -535,10 +564,19 @@ export function makeSite({ scale = 'village', siteR, seed = 20260716,
     bowlRAt, bowlRadiusAt,
     heightAt, hillAt,
     streamZat, streamY, streamHalf, streamWaterHalf, streamValleyHalf, streamValleyFlatHalf,
+    // 개천 단면의 x-종속 표본(함수라 plan JSON 에는 실리지 않는다). 호안 계획·다리 접지·게이트가
+    //   같은 함수를 소비해야 계약이 실제 지형을 검사한다.
+    streamValleyHalfAt: valleyHalfAt,
+    streamValleyFlatHalfAt: flatHalfAt,
+    streamBankTopHalfAt: bankTopHalfAt,
+    streamUrban01At: creekUrban01,
     relief: settlementRelief.config,
     stream: dry ? null : {
       pts: streamPts,
       kind: riverMode ? 'river' : 'creek',
+      // 개착 하천(도성 개천) 여부 — 물색·호안 위계의 단일 진실원. 렌더러가 반경·규모로 다시
+      //   추론하면 계획과 어긋난다. 도성에서만 키를 붙여 다른 규모의 계획 바이트를 건드리지 않는다.
+      ...(urbanCreek ? { urban: true } : {}),
       width: streamHalf * 2,
       cross: streamCross,
       half: streamHalf,

@@ -33,6 +33,8 @@ import {
   disposeMjaHouse,
 } from '../../village/mja-house-geometry.js';
 import { bridgeDeckPlacement } from '../../village/stream-spatial.js';
+import { planCreekBanks } from '../../village/creek-bank-plan.js';
+import { buildCreekBanks } from '../../village/creek-bank-geometry.js';
 
 function sijeonMaterial(color, roughness, role) {
   const material = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
@@ -358,20 +360,28 @@ export function buildFeatureObjects(plan, site) {
     objects.push(pavilion);
   }
   for (const bridgeSpec of features.bridges || []) {
+    // 접지 산술은 순수 계약(stream-spatial#bridgeDeckPlacement)이 소유한다 — 렌더러가 다시 풀지 않는다.
+    //   교각 수·하상 깊이도 그 계약이 준다: 도성 개천의 데크는 시가지 지반 높이라 하상까지 3.5m 이고,
+    //   builder 의 로컬 고정값을 쓰면 교각이 공중에 뜬다.
+    const streamZ = site.streamZat(bridgeSpec.x);
+    const placement = bridgeDeckPlacement(site, bridgeSpec, {
+      surfaceY: streamSurfaceHeightAt(site, bridgeSpec.x, streamZ),
+    });
     const bridge = buildBridge({
       type: bridgeSpec.type || 'slab',
       span: bridgeSpec.span || 5,
       width: bridgeSpec.width || 1.8,
-    });
-    // 접지 산술은 순수 계약(stream-spatial#bridgeDeckPlacement)이 소유한다 — 렌더러가 다시 풀지 않는다.
-    const streamZ = site.streamZat(bridgeSpec.x);
-    const placement = bridgeDeckPlacement(site, bridgeSpec, {
-      surfaceY: streamSurfaceHeightAt(site, bridgeSpec.x, streamZ),
+      piers: placement.piers,
+      bedY: placement.bedY - placement.deckY,
     });
     bridge.position.set(bridgeSpec.x, placement.deckY, bridgeSpec.z);
     bridge.rotation.y = bridgeSpec.rot || 0;
     objects.push(bridge);
   }
+  // 개천 호안 — 계획(creek-bank-plan)이 결정한 위계·표고만 소비한다. 랜드마크 병합에 들어가
+  //   돌다리가 이미 쓰는 props 화강암으로 접히므로 드로우콜은 늘지 않는다.
+  const creekBanks = buildCreekBanks(planCreekBanks(site));
+  if (creekBanks) objects.push(creekBanks);
   if (features.ferry) {
     const spec = features.ferry;
     const waterY = streamSurfaceHeightAt(site, spec.x, spec.z);
