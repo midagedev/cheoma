@@ -304,8 +304,20 @@ const expectedSceneHashes = {
   //   plan-contract 해시·bytes 불변 + proxy fef7a386 불변 + town/capital(홍예교라 판석 데크 무관)
   //   완전 불변. 재기준 직전 실측(리드 2026-08-01): worker == `?worker=0` 폴백 바이트 동일
   //   (0681db44 양 경로 일치), snapshot·mja 교차 PASS.
-  village: '0681db44:f31d1df6:63e8daea:371ed34a',
-  town: 'bd6ba713:2c07047d:4407aa60:df5c793b',
+  // 벽머리 깊이 스택(2026-08-01, 조립 반자 z-fight 재발): `layout/hanok.js` 에서 (a) 회벽 상단을
+  //   창방 몸통 안 11cm 로 올리고 압출 원점을 벽머리로 옮겨(스케일 피벗 이동) 정착 스쿼시가 상면을
+  //   창방 밖으로 밀지 못하게 했고, (b) 기단 몸통 상면을 갑석 안으로 3cm 더 가라앉혀 갑석 상면과의
+  //   접선 접촉을 없앴다. 정지 포즈 파사드·재질·씬그래프는 불변이고 움직인 것은 정점 좌표뿐이다.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-01)**: `hanok.js` 만 수정 전으로 되돌리면 네 규모가
+  //   구 골든과 정확히 일치했다(village 0681db44 / town bd6ba713 / capital d187e903 / hanyang
+  //   b2a0e799 전부 PASS). 또 objects·triangles 가 수정 전후 완전 동일하다(village 635/2284221,
+  //   town 3330/5024809, hanyang 5878/25564031) — 노드·삼각형이 아니라 좌표만 바뀐 변경이다.
+  //   capital 이 불변인 것이 범위 증거다: capital 히어로는 관아(궁 계열)라 buildHanok 을 타지 않는다
+  //   (같은 파일의 '종가 파트 그룹' 재기준 항목과 동일한 논리). proxy 해시는 네 규모 전부 불변
+  //   (fef7a386 / 3f7f776c / 046ecd22 / 6bd5f82a) — 픽킹·구도 해 불침해. 재기준 시점에 sync ==
+  //   실제 module Worker == `?worker=0` 폴백이 세 경로 모두 바이트 동일, snapshot·mja 교차 PASS.
+  village: '84affbdc:c02bbc06:1cb16a2a:da1e755a',
+  town: '63cc99e7:4ca55a2d:4843f438:fe402f4f',
   capital: 'd187e903:6889cef9:6baab490:d0ca0d4b',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
@@ -338,7 +350,9 @@ const expectedSceneHashes = {
   //   (bba4f24a → 6bd5f82a)은 남촌 중로 재배선이 필지·지붕 OBB 를 움직이는 계획 변경의 정상
   //   추종이며 프록시 개수·안정 ID 계약 게이트는 통과. 재기준 직전 실측(리드): worker ==
   //   `?worker=0` 폴백 바이트 동일(b2a0e799 양 경로 일치).
-  hanyang: 'b2a0e799:57183ef9:22c3083c:2b1a63af',
+  // 벽머리 깊이 스택(2026-08-01): 위 village/town 항목과 같은 단일 변경. 한양에도 종가(hanok)
+  //   히어로 필지가 있어 함께 이동한다(근거·단독 변인 실측은 village 항목 참조).
+  hanyang: '41000769:d8b056f1:d6e15424:525844c7',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

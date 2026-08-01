@@ -14,11 +14,18 @@ import { planOpeningDetail } from '../builder/opening-detail-plan.js';
 import { createOpeningDetailAssembler } from '../builder/opening-details.js';
 import { createPrimaryDoorPanelSegments } from '../builder/primary-door-panel.js';
 
-// 창방(기둥머리 가로 부재) 높이와, 그 부재가 회벽 상면을 삼키는 깊이. 회벽은 wallHeadY(=wallH -
-//   CHANGBANG_H)까지만 서고 창방이 그 위를 덮는다 — 두 솔리드가 같은 높이에서 끝나면 벽머리에
-//   동일평면 캡 두 장이 생겨 z-fighting 한다(아래 회벽 주석, check:assembly ⑨).
+// 창방(기둥머리 가로 부재) 밴드와, 회벽 상면이 그 몸통 안에 잠기는 깊이.
+//   CHANGBANG_H      — 창방 노출 밴드 높이(밴드 하단 = wallH - CHANGBANG_H).
+//   CHANGBANG_UNDERCUT — 창방 몸통이 밴드 하단보다 더 내려가는 깊이. 창방 몸통 = [wallH -
+//     CHANGBANG_H - CHANGBANG_UNDERCUT, wallH]. 이 두 값이 파사드를 정한다(창방은 회벽보다 2cm
+//     내밀어 있어 몸통 하단부터 상단까지가 그대로 보이는 나무 띠다) — 조립 때문에 건드리지 말 것.
+//   WALL_HEAD_EMBED  — 회벽 상단이 창방 몸통 안으로 들어가는 깊이. 파사드에는 안 보인다(창방이
+//     회벽보다 넓어 그 구간을 덮는다). 값의 근거는 아래 회벽 주석(조립 정착 여유)에 있다.
 const CHANGBANG_H = 0.16;
-const CHANGBANG_EMBED = 0.01;
+const CHANGBANG_UNDERCUT = 0.01;
+const WALL_HEAD_EMBED = 0.11;
+// 기단 몸통 상면이 갑석 몸통 안에 잠기는 깊이(정지 포즈 여유 + 조립 정착 여유). 근거는 기단 주석.
+const PODIUM_BODY_SINK = OPENING_FACE_CLEARANCE + 0.03;
 
 // 다각형 풋프린트(rect/ㄱ자/ㄷ자) 기와집 몸채: 기단 + 기둥 + 회벽 + straight-skeleton 곡면 지붕.
 // 백골(무단청) 반가 톤. buildBuilding(궁·절·초가)과 별개로, 꺾인 평면 살림집을 만든다.
@@ -85,8 +92,14 @@ export function buildHanok({
   // 기단 몸통(장대석): 갑석이 podiumH 까지 채우므로 회벽·기둥은 그대로 podiumH 에 앉는다.
   //   몸통을 podiumH 까지 올리면 몸통 상면과 갑석 상면이 같은 평면에 겹치고, 갑석이 몸통보다
   //   넓어 그 면 전체가 depth 를 다툰다 — 상면 소유자는 갑석 하나여야 한다.
+  //   가라앉히는 깊이는 정지 포즈 기준의 OPENING_FACE_CLEARANCE(2cm) 로는 부족했다. 두 켜는 서로
+  //   다른 랭크라 정착 스쿼시 위상이 어긋나고, 실측(2026-08-01) 결과 몸통 상면과 갑석 상면이
+  //   t≈0.217 에서 **0.014mm 까지 접선으로 스쳐** 지나가며 깊이 양자(≈0.4mm) 안에 28.4ms(1.7프레임)
+  //   머물렀다 — 84.8m² 짜리 석재 캡 두 장이 같이 지직거린다. 접선 접촉은 상대속도가 0 이라
+  //   가장 오래 머무는 최악의 형태다. 3cm 를 더 가라앉혀 그 접점을 아예 없앤다(갑석 몸통이
+  //   0.39~0.50 이라 상면은 여전히 완전히 가려진다 — 파사드 불변). 게이트: check:assembly ⑩.
   const pod = new THREE.Mesh(
-    extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH - OPENING_FACE_CLEARANCE), M.stone);
+    extrudeY(shapeFrom(offsetPoly(poly, 0.7)), podiumH - PODIUM_BODY_SINK), M.stone);
   pod.name = 'foundation-body';
   pod.receiveShadow = true; pod.castShadow = true;
   podium.add(pod);
@@ -117,16 +130,36 @@ export function buildHanok({
   }
 
   // ── 회벽 (풋프린트 압출) ──
-  // 회벽은 **창방 밑까지만** 세운다. 종전에는 회벽과 창방이 같은 풋프린트를 각각 솔리드로 압출하고
-  //   둘 다 wallH 에서 끝나서, 벽머리에 **위를 보는 면 두 장이 같은 평면**에 놓였다(y=wallH, 겹침
-  //   60m²). 완성본은 지붕이 덮어 안 보이지만 조립은 지붕을 정착창 70% 지점까지 숨기므로
-  //   (docs/ceiling.md 불변식 1) 그 구간에서 벽머리가 화면의 "방 천장"이 되고, z-fighting 합판
-  //   두 장으로 읽혔다(사용자 지적 2026-07-31). 부재를 겹치지 말고 **쌓는다** — 창방이 그 위를 덮고,
-  //   회벽 상면은 창방 몸통 안으로 들어가 어느 면도 같은 평면을 공유하지 않는다. 게이트: check:assembly ⑨.
-  const wallHeadY = wallH - CHANGBANG_H;         // 회벽 상단 = 창방 하단
+  // 회벽 상면은 **창방 몸통 안**에서 끝난다. 벽머리는 조립 구간에서 화면의 "방 천장(반자)"이
+  //   되므로(지붕이 아직 안 앉았다) 여기서 깊이가 다투면 그대로 보인다.
+  //
+  // 1차 수정(2026-07-31)은 정지 포즈만 고쳤다: 회벽과 창방이 둘 다 wallH 에서 끝나 위를 보는 캡
+  //   두 장이 같은 평면에 놓이던 것을, 회벽을 창방 밑까지만 세우고 1cm 만 물려 넣어 풀었다.
+  //   그런데 회벽은 `walls` 파트, 창방은 `columns` 파트라 **서로 다른 시각에 서로 다른 스쿼시**를
+  //   받는다. 저작한 1cm 는 그 스쿼시 앞에서 무의미했다 — 실측(2026-08-01, 히어로 종가 fixture):
+  //     · 회벽 상면이 창방 상면(2.700) 위로 **+14.3mm 솟았다** — 흰 회벽이 나무 띠 위로 튀어나오고
+  //       28.8m² 짜리 캡 두 장이 스치며 z-fight(minGap 0.156mm).
+  //     · 같은 정착에서 **−47.3mm 내려앉아** 창방 몸통 하단 아래로 빠졌다 — 벽머리에 4.7cm 짜리
+  //       관통 슬롯이 열린다(집이 솔리드라 그 틈으로 배경이 보인다).
+  //   원인은 밑변을 고정한 채 위로 늘어나는 스쿼시다: 회벽은 2.04m 짜리 솔리드라 sy 1.064 만으로도
+  //   상면이 131mm 움직이고, 여기에 정착 스프링 위치 오버슈트가 더해져 총 232mm 를 훑는다. 창방
+  //   몸통은 170mm 뿐이라 **어떤 정적 마진으로도 담을 수 없다**.
+  //
+  // 그래서 assembly.js 가 지붕에 쓴 원칙을 그대로 적용한다("자식별 독립 Y/스케일은 authored 깊이
+  //   스택을 깬다"): 깊이 스택이 걸린 면은 스쿼시로 움직이지 않게 한다. 회벽 지오메트리를 **원점이
+  //   벽머리에 오도록** 옮기면 스케일 피벗이 상면으로 올라가, 상면은 위치 스프링만 타고(실측
+  //   +73.3mm / −21.7mm) 늘어난 몸통은 **기단 솔리드 안으로** 내려간다(기단 켜는 회벽보다 넓어
+  //   전부 가려진다). 남은 95mm 여행은 창방 몸통 170mm 안에 위아래 ~37mm 씩 여유를 두고 들어간다
+  //   — 그 여유가 WALL_HEAD_EMBED=0.11 의 근거다. 정지 포즈의 파사드는 불변(창방 밴드·회벽 노출
+  //   구간 그대로), 드로우콜·재질·씬그래프도 불변이다. 게이트: check:assembly ⑨·⑩.
+  //   주의: 여행량은 조립 drop(=dropBase*0.9)에 비례한다. 종가 totalH 5.98m 는 dropBase 하한 1.2 에
+  //   걸려 있어 고정이지만, 그 하한이 풀리면 여유가 먼저 사라진다 — ⑩ 이 그걸 잡는다.
+  const wallHeadY = wallH - WALL_HEAD_EMBED;     // 회벽 상단 — 창방 몸통 안에 잠긴다
   const wallGeo = extrudeY(shapeFrom(poly), wallHeadY - podiumH);
+  wallGeo.translate(0, -(wallHeadY - podiumH), 0);   // 원점 = 벽머리(스케일 피벗을 상면으로)
   const plaster = new THREE.Mesh(wallGeo, M.plaster);
-  plaster.position.y = podiumH;
+  plaster.name = 'wall-plaster';                 // check:assembly ⑩ 이 벽머리 스택을 이름으로 잡는다
+  plaster.position.y = wallHeadY;
   plaster.castShadow = plaster.receiveShadow = true;
   walls.add(plaster);
   // 인방 띠(중방) + 하부 심벽 톤
@@ -153,12 +186,15 @@ export function buildHanok({
     }
   }
   // 창방 (기둥머리 가로 부재) — 풋프린트 상단 테
-  // 회벽보다 2cm 앞으로(중인방과 같은 규약: 벽면과 수직면을 공유하지 않는다) + 회벽 상면보다 1cm
-  //   내려 시작해 그 캡을 몸통 안에 삼킨다. 두 부재가 살짝 겹쳐 어느 면도 동일평면이 아니고, 벽머리에
-  //   틈도 생기지 않는다. 노출 높이는 창방 저작값(CHANGBANG_H) 그대로다.
-  const beamGeo = extrudeY(shapeFrom(offsetPoly(poly, 0.02)), CHANGBANG_H + CHANGBANG_EMBED);
+  // 회벽보다 2cm 앞으로(중인방과 같은 규약: 벽면과 수직면을 공유하지 않는다). 몸통은 밴드 하단보다
+  //   CHANGBANG_UNDERCUT 만큼 더 내려가고, 회벽 상면은 그 몸통 **안**에서 끝나므로 어느 면도
+  //   동일평면이 아니고 벽머리에 틈도 안 생긴다. 파사드에 보이는 나무 띠 높이는 몸통 그대로다
+  //   — 이 두 수치는 회벽 상단(WALL_HEAD_EMBED)과 독립이다.
+  const beamBotY = wallH - CHANGBANG_H - CHANGBANG_UNDERCUT;
+  const beamGeo = extrudeY(shapeFrom(offsetPoly(poly, 0.02)), CHANGBANG_H + CHANGBANG_UNDERCUT);
   const beam = new THREE.Mesh(beamGeo, M.woodDark);
-  beam.position.y = wallHeadY - CHANGBANG_EMBED;
+  beam.name = 'changbang';                       // check:assembly ⑩ 이 벽머리 스택을 이름으로 잡는다
+  beam.position.y = beamBotY;
   columns.add(beam);                       // 창방=기둥머리 결구 → columns 파트(공포 없는 민도리집)
 
   // ── 창호·문 (마당 향한 면 최소 개구 보장) ──
@@ -268,7 +304,8 @@ function addHanokOpenings(g, poly, M, seed, wallH, podiumH) {
   // 개구 전용 rng(굴뚝 rng 불침해) — 방 창 폭 등 시드 파생 변주.
   const rng = makeRng((seed || 1) * 131 + 7);
 
-  // 개구 수직 구간: 기단 위 ~ 창방 밑. 회벽 상단도 같은 높이(wallHeadY)라 개구가 벽을 넘지 않는다.
+  // 개구 수직 구간: 기단 위 ~ 창방 밴드 밑. 회벽 상단(wallH - WALL_HEAD_EMBED)은 창방 몸통 안이라
+  //   이 구간보다 위에 있다 — 개구는 창방 밴드에 닿지 않는다.
   const oy0 = podiumH + 0.10;
   const oy1 = (wallH - CHANGBANG_H) - 0.03;
   const T = 0.10, faceOff = 0.075;   // 벽면 바깥으로 살짝 돌출한 응용 창호

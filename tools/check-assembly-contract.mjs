@@ -860,6 +860,164 @@ for (const mode of ['update', 'skip', 'seek1']) {
       + 'plywood sheets. Stack the members (wall head stops at the 창방 underside) instead of ending '
       + 'both solid extrusions at the same height');
   }
+
+  // ── ⑩ 조립 **타임라인** 깊이 스택 (2026-08-01) ──────────────────────────────────────────
+  // ⑨ 는 정지 포즈만 본다. 그런데 회벽은 `walls`, 창방·중인방은 `columns`, 기단 켜는 `podium` 파트라
+  //   서로 다른 시각에 서로 다른 스쿼시(sy)를 받는다 — 저작한 정적 마진은 그 앞에서 무의미하다.
+  //   수정 전 소스 실측(히어로 종가 fixture, duration 7.4s = HERO_ASSEMBLE_DUR 10s × BODY_WINDOW 0.74):
+  //     (a) 회벽 상면이 창방 몸통 상단 위로 **+14.3mm** 솟고(28.8m² 캡 두 장이 스침, minGap 0.156mm),
+  //         정착 저점에서는 몸통 하단 아래로 **−47.3mm** 빠져 벽머리에 관통 슬롯이 열렸다.
+  //     (b) 기단 몸통 상면과 갑석 상면이 t≈0.217 에서 **0.014mm 까지 접선으로** 스치며 깊이 양자
+  //         (0.4mm) 안에 28.4ms(1.7프레임) 머물렀다 — 84.8m² 석재 캡 두 장의 z-fight.
+  //   두 항 모두 수정 전 소스에서 실제로 실패한다(FAIL-first 확인 완료).
+  // 판정 규율: **접선(tangential) 금지**가 핵심이다. 서로 다른 랭크의 부재는 여행 중 반드시 한 번씩
+  //   교차하고(각 부재가 1m 안팎을 훑는다) 그 통과는 한 프레임을 못 채우므로 결함이 아니다. 결함은
+  //   상대속도가 0 에 가까운 접선 접촉 — 그때만 깊이 양자 안에 여러 프레임 머문다.
+  {
+    // 히어로 랜딩 실측 구간. engine.js HERO_ASSEMBLE_DUR(10.0) × playCompoundAssembly BODY_WINDOW(0.74).
+    const TIMELINE_SEC = 7.4;
+    const FRAME_SEC = 1 / 60;
+    // 깊이 양자: 24bit 뎁스(post.js DepthTexture=UnsignedIntType), 몸채 카메라 near 0.1 / far 500
+    //   (engine.js `camera.__houseNear ?? 0.1`), 피사체 거리 ≈25m → z²(1/near − 1/far)/2²⁴ ≈ 0.37mm.
+    const DEPTH_QUANTUM = 0.0004;
+    const SAMPLES = 4000;                         // 1.85ms/샘플 — 한 프레임(16.7ms)을 9샘플로 분해
+    const MARGIN = 0.010;                         // 벽머리 봉인 최소 여유(수정 후 실측 36.7 / 38.3mm)
+    const asm = playAssembly(hanok, { duration: TIMELINE_SEC });
+    const box = new THREE.Box3();
+    const wallsGrp = hanok.children.find((c) => c.name === 'walls');
+    const colsGrp = hanok.children.find((c) => c.name === 'columns');
+    const plaster = wallsGrp?.children.find((c) => c.name === 'wall-plaster');
+    const changbang = colsGrp?.children.find((c) => c.name === 'changbang');
+    assert.ok(plaster && changbang,
+      "buildHanok no longer names the wall-head stack ('wall-plaster' in walls, 'changbang' in "
+      + 'columns) — the timeline depth-stack contract cannot find the members it guards');
+
+    // (a) 벽머리 봉인 — 회벽 상면은 조립 내내 창방 몸통 **안**에 머문다.
+    asm.seek(1);
+    box.setFromObject(changbang);
+    const beamTop = box.max.y, beamBot = box.min.y;
+    const restTop = box.setFromObject(plaster).max.y;
+    let maxTop = -Infinity, minSeated = Infinity, seated = false;
+    for (let i = 0; i <= SAMPLES; i++) {
+      asm.seek(i / SAMPLES);
+      if (!plaster.visible) continue;
+      const top = box.setFromObject(plaster).max.y;
+      if (top > maxTop) maxTop = top;
+      if (!seated && top >= restTop) seated = true;   // 접촉(rest 높이 최초 도달) 이후 = 정착 구간
+      if (seated && top < minSeated) minSeated = top;
+    }
+    assert.ok(maxTop <= beamTop - MARGIN,
+      `wall head rises to ${maxTop.toFixed(4)} against the 창방 top ${beamTop.toFixed(4)} `
+      + `(${((maxTop - beamTop) * 1000).toFixed(1)}mm) — the plaster punches through the head band `
+      + 'during the settle, so the white wall pops above the wood and their caps scrape. The wall '
+      + 'must not carry the squash into its top cap: keep the plaster origin at the wall head so the '
+      + 'stretch runs down into the podium solid');
+    assert.ok(minSeated >= beamBot + MARGIN,
+      `wall head drops to ${minSeated.toFixed(4)} against the 창방 underside ${beamBot.toFixed(4)} `
+      + `(${((minSeated - beamBot) * 1000).toFixed(1)}mm) — a see-through slot opens around the whole `
+      + 'wall head during the settle. Embed the plaster deeper into the 창방 body (WALL_HEAD_EMBED)');
+
+    // (b) 대면적 상향 캡 접선 금지 — 깊이 양자 안 체류가 한 프레임을 넘지 않는다.
+    //   범위 한계(의도): 면 위치를 host 의 position·scale 로만 재구성하므로 **회전하는 host** 는
+    //   근사가 된다. 실제로 회전하는 host 는 강체 지붕(인양 롤)뿐이고, 강체는 정의상 자기 내부
+    //   깊이 스택을 접을 수 없으며 롤은 접촉에서 정확히 0 이다 — 지붕 내부는 ⑨ 와 check:roof-shell
+    //   이 소유한다. 여기서 잡으려는 것은 파트별로 **따로 스쿼시되는** 몸채·기단 부재다.
+    const facets = [];
+    const hosts = [];
+    const bakeHost = (host, label) => {
+      const hostIdx = hosts.length;
+      hosts.push(host);
+      const inv = new THREE.Matrix4().copy(host.matrixWorld).invert();
+      const m = new THREE.Matrix4();
+      const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+      const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), nrm = new THREE.Vector3();
+      host.traverse((o) => {
+        if (!o.isMesh || !o.geometry?.attributes?.position) return;
+        m.multiplyMatrices(inv, o.matrixWorld);
+        const pos = o.geometry.attributes.position;
+        const index = o.geometry.index;
+        const count = index ? index.count : pos.count;
+        const name = `${label}/${o.name || '(unnamed)'}`;
+        for (let i = 0; i < count; i += 3) {
+          const i0 = index ? index.getX(i) : i;
+          const i1 = index ? index.getX(i + 1) : i + 1;
+          const i2 = index ? index.getX(i + 2) : i + 2;
+          va.fromBufferAttribute(pos, i0).applyMatrix4(m);
+          vb.fromBufferAttribute(pos, i1).applyMatrix4(m);
+          vc.fromBufferAttribute(pos, i2).applyMatrix4(m);
+          e1.subVectors(vb, va); e2.subVectors(vc, va); nrm.crossVectors(e1, e2);
+          const len = nrm.length();
+          if (len < 1e-9 || nrm.y / len < 0.99) continue;   // 위를 보는 수평면만(⑨ 와 같은 이유)
+          if (len * 0.5 < 0.2) continue;                    // 대면적 캡만 — 장식 삼각형은 지각 불가
+          facets.push({
+            hostIdx, mesh: name, obj: o,
+            ly: (va.y + vb.y + vc.y) / 3,
+            lx0: Math.min(va.x, vb.x, vc.x), lx1: Math.max(va.x, vb.x, vc.x),
+            lz0: Math.min(va.z, vb.z, vc.z), lz1: Math.max(va.z, vb.z, vc.z),
+          });
+        }
+      });
+    };
+    asm.skip();                                   // rest 포즈에서 로컬 굽기(원상복구 계약 ④ 사용)
+    hanok.updateMatrixWorld(true);
+    for (const partName of ['podium', 'columns', 'walls', 'brackets', 'roof']) {
+      const grp = hanok.children.find((c) => c.name === partName);
+      if (!grp || !grp.children.length) continue;
+      if (partName === 'roof') bakeHost(grp, 'roof');   // 지붕은 강체 1유닛
+      else grp.children.forEach((c, i) => bakeHost(c, `${partName}[${i}]${c.name ? ':' + c.name : ''}`));
+    }
+    const visibleUp = (obj) => {
+      let o = obj;
+      while (o && o !== hanok) { if (!o.visible) return false; o = o.parent; }
+      return true;
+    };
+    const dwell = new Map();
+    const world = new Array(facets.length);
+    const asm2 = playAssembly(hanok, { duration: TIMELINE_SEC });
+    for (let s = 0; s <= SAMPLES; s++) {
+      asm2.seek(s / SAMPLES);
+      let n = 0;
+      for (const f of facets) {
+        if (!visibleUp(f.obj)) continue;
+        const h = hosts[f.hostIdx];
+        const sy = h.scale.y, sxz = h.scale.x;
+        world[n++] = {
+          f,
+          y: h.position.y + f.ly * sy,
+          x0: h.position.x + f.lx0 * sxz, x1: h.position.x + f.lx1 * sxz,
+          z0: h.position.z + f.lz0 * sxz, z1: h.position.z + f.lz1 * sxz,
+        };
+      }
+      const list = world.slice(0, n).sort((a, b) => a.y - b.y);
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const A = list[i], B = list[j];
+          if (B.y - A.y > DEPTH_QUANTUM) break;
+          if (A.f.mesh === B.f.mesh) continue;
+          const ox = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0);
+          const oz = Math.min(A.z1, B.z1) - Math.max(A.z0, B.z0);
+          if (ox * oz <= 0.25) continue;          // ⑨ 와 같은 지각 문턱(0.25m²)
+          const key = [A.f.mesh, B.f.mesh].sort().join(' vs ');
+          const rec = dwell.get(key) || { samples: new Set(), area: 0 };
+          rec.samples.add(s);
+          rec.area = Math.max(rec.area, ox * oz);
+          dwell.set(key, rec);
+        }
+      }
+    }
+    asm2.skip();
+    const tangential = [...dwell.entries()]
+      .map(([k, v]) => ({ k, sec: (v.samples.size / SAMPLES) * TIMELINE_SEC, area: v.area }))
+      .filter((r) => r.sec >= FRAME_SEC)
+      .sort((a, b) => b.sec - a.sec);
+    assert.deepEqual(
+      tangential.map((r) => `${r.k} — ${(r.sec * 1000).toFixed(1)}ms within ${DEPTH_QUANTUM * 1000}mm (${r.area.toFixed(1)}m²)`),
+      [],
+      'two large upward caps linger inside the depth quantum for more than one 60fps frame — that is '
+      + 'a tangential (near-zero relative velocity) contact, not a transit, and it z-fights on screen. '
+      + 'Sink the hidden cap deeper under its cover so the settle can never bring the two planes '
+      + 'together');
+  }
 }
 
 console.log('ASSEMBLY CONTRACT: PASS (momentum-continuous settle, geometry-derived member ripple, '
