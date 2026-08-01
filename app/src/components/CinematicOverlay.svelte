@@ -8,16 +8,15 @@
 
   const walking = $derived(active && mode === 'walk');
 
-  // 드론 패스명 → 사람이 읽는 라벨(dronepath.js name 규약).
-  const PASS_LABEL = {
-    'crane-in': 'cine_pass_crane',
-    'landmark-orbit': 'cine_pass_orbit',
-    'street-flythrough': 'cine_pass_fly',
-    'pullback-reveal': 'cine_pass_pull',
-  };
-  const label = $derived(
-    mode === 'walk' ? t('cine_walk_label') : (pass && PASS_LABEL[pass] ? t(PASS_LABEL[pass]) : '')
-  );
+  // ── 구간 라벨 폐지(2026-08-01, 사용자 판정) ──
+  // 드론 감상은 **하나의 연속 비행**이다. 구간(crane-in / landmark-orbit / street-flythrough /
+  //   pullback-reveal)은 dronepath.js 가 하나의 닫힌 곡선을 잘라 놓은 **내부 저작·검증 단위**일 뿐이고,
+  //   경계에서 위치·속도·시선·화각이 모두 연속이라 화면에는 이음매가 없다. 그런데 라벨이 "진입 →
+  //   선회 → 골목 비행 → 전경"으로 바뀌며 뜨면 없는 분절을 만들어 보여 준다("모드를 별도로 두지 말라").
+  //   그래서 드론에서는 라벨을 내지 않는다. 워킹뷰는 사용자가 조작하는 **다른 모드**라 그대로 남긴다.
+  //   `pass` prop 은 계속 받는다 — 소비면(engine emit·verify-cinewire·shoot-cine)의 계약이고, 이 파일이
+  //   그것을 화면에 그리지 않을 뿐이다.
+  const label = $derived(mode === 'walk' ? t('cine_walk_label') : '');
 
   // 감상 크롬 자동 후퇴 — 클립은 OS 화면녹화로 뜨므로(인앱 녹화는 만들지 않는다) 패스 라벨·하단
   //   안내·종료 버튼이 프레임에 구워지면 안 된다. 마지막 실입력 후 IDLE_MS 에 opacity 만 0 으로

@@ -7,6 +7,8 @@ import {
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const DRONE_CHAIN = ['crane-in', 'landmark-orbit', 'street-flythrough', 'pullback-reveal'];
 const DEG = Math.PI / 180;
+// 뱅킹 1차 지연(초) — 표본 롤을 그대로 쓰지 않고 이 시정수로 따라간다(재생 시작·구간 전환 보호).
+const ROLL_LAG_SEC = 0.22;
 
 // 마을 시네마틱의 상태기계. 씬 전환 정책은 콜백으로 받고 카메라 경로 구동만 소유한다.
 // 명명된 드론 패스 사이의 위치 컷은 유지하되 시선은 가속도 제한 컨트롤러로 연속 인계한다.
@@ -53,6 +55,7 @@ export function createCinematicRuntime({
     lastLook: camera.position.clone(),
     input: { fwd: 0, strafe: 0, yaw: 0, pitch: 0, run: false },
     ambT: 0,
+    roll: 0,
     viewReady: false,
     desiredLook: camera.position.clone(),
     smoothedLook: camera.position.clone(),
@@ -117,6 +120,7 @@ export function createCinematicRuntime({
     state.mode = mode;
     state.active = true;
     state.ambT = 0;
+    state.roll = 0;
     state.viewReady = false;
     Object.assign(state.input, { fwd: 0, strafe: 0, yaw: 0, pitch: 0, run: false });
     controls.enabled = false;
@@ -208,10 +212,19 @@ export function createCinematicRuntime({
       viewDirection.set(direction.x, direction.y, direction.z);
       const lookDistance = Math.max(1, sample.pos.distanceTo(sample.lookAt));
       lookAt = state.smoothedLook.copy(sample.pos).addScaledVector(viewDirection, lookDistance);
+      // 뱅킹 — dronepath 가 궤적 곡률·속도에서 유도한 롤(라디안). 시선 컨트롤러는 방향만 다루므로
+      //   롤은 lookAt 뒤에 별도로 적용한다(아래). 표본 자체가 이미 슬루 제한된 연속 신호지만, 재생
+      //   시작 프레임에서 0 → 현재 롤로 튀지 않도록 1차 지연을 한 겹 둔다.
+      const wanted = Number.isFinite(sample.roll) ? sample.roll : 0;
+      state.roll += (wanted - state.roll) * Math.min(1, dt / ROLL_LAG_SEC);
     }
 
     // 종료 시 OrbitControls로 방향을 연속 인계할 수 있도록 매 프레임 같은 시선을 공유한다.
     camera.lookAt(lookAt);
+    // lookAt 은 up=(0,1,0) 기준으로 자세를 다시 세우므로 롤은 그 **뒤에** 얹어야 한다. 로컬 +Z 는
+    //   카메라 뒤를 향하고, 그 축의 양의 회전은 화면 up 을 왼쪽으로 눕힌다 — dronepath 의 부호 규약과
+    //   같으므로 값을 그대로 넣는다. 워킹뷰는 롤이 없다(state.roll 은 진입 시 0 으로 리셋된다).
+    if (state.mode === 'drone' && state.roll) camera.rotateZ(state.roll);
     state.lastLook.copy(lookAt);
     controls.target.copy(lookAt);
     state.ambT += dt;
@@ -244,6 +257,7 @@ export function createCinematicRuntime({
     state.chain = [];
     state.single = null;
     state.viewReady = false;
+    state.roll = 0;
     controls.enabled = true;
     reapplyVillageFog();
     controls.target.copy(state.lastLook);
@@ -290,6 +304,7 @@ export function createCinematicRuntime({
       single: state.single,
       t: +state.t.toFixed(3),
       turnRateDeg: turnRateDegrees(),
+      rollDeg: +(state.roll / DEG).toFixed(2),
     }),
     passList: () => (village.handle
       ? paths().map(({ name, kind, duration }) => ({ name, kind, duration }))

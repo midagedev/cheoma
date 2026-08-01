@@ -45,7 +45,6 @@ const DICT = {
     cine_walk_hint: 'WASD · 방향키 이동 · 드래그로 둘러보기 · Shift 빠르게 · ESC 종료',
     cine_walk_hint_touch: '조이스틱으로 이동 · 화면을 드래그해 둘러보기',
     cine_walk_move: '이동 조이스틱',
-    cine_pass_crane: '진입', cine_pass_orbit: '선회', cine_pass_fly: '골목 비행', cine_pass_pull: '전경',
     cine_walk_label: '골목 산책',
     // glb 내보내기(#112)
     act_glb: '내보내기', glb_house_tip: '이 건물을 3D 모델로 내보내기 (.glb)',
@@ -197,7 +196,6 @@ const DICT = {
     cine_walk_hint: 'WASD / arrows to move · drag to look · Shift to hurry · Esc to exit',
     cine_walk_hint_touch: 'Joystick to move · drag the screen to look',
     cine_walk_move: 'Move joystick',
-    cine_pass_crane: 'Approach', cine_pass_orbit: 'Orbit', cine_pass_fly: 'Fly-through', cine_pass_pull: 'Reveal',
     cine_walk_label: 'Lane stroll',
     // glTF export (#112)
     act_glb: 'Export', glb_house_tip: 'Export this building as a 3D model (.glb)',

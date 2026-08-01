@@ -327,6 +327,42 @@ const DUP_MIN_CRANE_REVEAL = 1.60;
 //   값이다(FAIL-first). 1.35 로 두면 달성 최악 town 1.32 가 거꾸로 FAIL 한다 — 올리려면 town 재실측 먼저.
 const SCALE_SPLIT_MIN = 1.30;
 
+// ── T19 신설(2026-08-01 5차) ── 뱅킹(롤)이 실제로 존재하고, 궤적에서 유도되며, 흔들림이 아니다.
+// 종전 소스의 롤은 **전 구간 정확히 0** 이었다(레일 위 카메라). sample.roll 은 dronepath 가 조화 선회식
+//   φ=atan(GAIN·v·ω/g) 로 만든 값이고, 여기서는 그것이 (a) 충분히 읽히고 (b) 과하지 않고 (c) 각속도가
+//   촬영 대역 안이며 (d) 이음매에서 연속인지를 재생 표본에서 독립적으로 다시 잰다.
+// FAIL-first: 이 네 단언은 롤 도입 이전 소스에서 (a)가 즉시 실패한다(p99 = 0 < 4).
+const ROLL_P99_MIN_DEG = 4;      // 투어 전체 롤 |φ| 의 p99 하한 — "롤이 존재한다"
+const ROLL_ABS_MAX_DEG = 26;     // 상한(저작 상한 24 + 격자 사이 Catmull-Rom 오버슈트 여유)
+const ROLL_RATE_MAX_DEG = 22;    // °/s. 저작 슬루 상한 14 + 오버슈트 여유(실측 최악 18.6)
+// 직선 구간은 뱅크가 없어야 한다 — 상수 롤(가짜 더치 앵글)을 걸러낸다. 롤 |φ| 의 p10 상한.
+const ROLL_P10_MAX_DEG = 3.0;
+// ── T20 신설(2026-08-01 5차) ── 속도 서사.
+// 사용자 지시: "느린 리빌 구간과 빠른 저공 스윕의 속도비를 크게(3× 이상)". 종전 소스는 그 비가 **뒤집혀**
+//   있었다(저공이 가장 느리고 부감이 가장 빨랐다 — 실측 village 저공 p50 7.8 · 진입 p50 13.9m/s).
+//   두 가지를 단언한다: ① 투어 전체 프레임 속도의 p95/p05 가 3.0 이상 ② 저공 구간(leg 2)의 중앙 속도가
+//   상승 리빌 구간(leg 3)의 중앙 속도보다 빠르다(= 서사 방향이 뒤집히지 않았다).
+// FAIL-first: 종전 소스는 ①이 2.63~2.78 로, ②는 7 픽스처 중 7 이 모두 반대로 실패한다.
+const SPEED_SPREAD_MIN = 3.0;
+const SPEED_ORDER_MIN = 1.15;    // 저공 p50 / 리빌 p50 하한
+// ── T21 신설(2026-08-01, 사용자 판정 "드론뷰 화면이 자꾸 막 떨린다") ──
+// 두 가지를 닫는다.
+// ① **하드 안전망 무발동.** dronepath 는 지형·지붕 하한을 t 그리드에서 미리 푼 리프트로 해소하고,
+//    하드 안전망은 그리드 사이 잔차에만 개입하도록 설계돼 있다. 그런데 그 잔차 개입이 실제로
+//    일어나면 고도가 몇 프레임 고정됐다가 계단으로 풀리며 수직 속도가 튄다(종전 소스 실측: hamlet
+//    y 가 3프레임 고정 후 0.18m 계단 → 수직 속도 -10.9m/s). 개입 프레임이 0 이면 이 병리는
+//    원리적으로 존재할 수 없다. 리프트와 안전망이 "경합"하지 않는다는 것의 정확한 수치 표현이다.
+// ② **프레임 스케일 위치 잔차 상한.** ±2프레임 Hann 으로 평활한 경로와 실제 샘플의 차이 = 한 프레임
+//    튀는 양. 근접물 12m 기준 화면 각도로 환산해 상한을 건다(1600x900·fov40 에서 1px ≈ 0.044°).
+//    p99 가 아니라 **max** 를 보는 이유: 떨림은 드물게 크게 튀는 사건이지 상시 잡음이 아니다
+//    (실측 p99 는 종전·현행 모두 서브픽셀이고, 갈리는 것은 max 다).
+const NET_FRAMES_MAX = 0;
+const HF_NEAR_D = 12;            // 근접물 대표 거리(m)
+// 종전 소스 실측 max: solo 0.136 · hamlet 0.320 · village 0.249 · town 0.336 · capital 0.386 ·
+//   hanyang 0.359 · v2026 0.193 (7 중 5 가 0.24 초과). 현행 실측 max: 0.077~0.186.
+//   상한 0.22 는 그 사이에서 종전 소스를 실제로 FAIL 시키고(FAIL-first) 현행에 18% 여유를 둔다.
+const HF_POS_MAX_DEG = 0.22;
+
 const report = [];
 const failures = [];
 const check = (ok, message) => { if (!ok) failures.push(message); };
@@ -408,6 +444,82 @@ for (const c of SELECTED) {
     }
   }
   row.frames = seq.length;
+
+  // ── T19 뱅킹 · T20 속도 서사 ──
+  // 재생 표본에서 직접 잰다(dronepath 내부 격자가 아니라 소비면이 보는 값). 이음매 쌍(마지막 표본 →
+  //   첫 표본)은 프레임 간격이 정의되지 않으므로 속도·각속도 통계에서 제외한다 — T1 이 이음매를
+  //   위치·시선·fov 로 이미 단언한다.
+  {
+    const rollAbs = [], rollRate = [], spd = [], legSpd = legs.map(() => []);
+    for (let i = 0; i < seq.length; i++) {
+      const r = seq[i].s.roll;
+      check(Number.isFinite(r), `T19 ${row.scale}: roll 이 유한하지 않다 (표본 ${i})`);
+      rollAbs.push(Math.abs(r) / DEG);
+      if (i + 1 < seq.length) {
+        rollRate.push(Math.abs(seq[i + 1].s.roll - r) / DEG / DT);
+        const a = seq[i].s.pos, b = seq[i + 1].s.pos;
+        const v = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / DT;
+        spd.push(v);
+        legSpd[seq[i].leg].push(v);
+      }
+    }
+    const sa = rollAbs.slice().sort((x, y) => x - y);
+    const sr = rollRate.slice().sort((x, y) => x - y);
+    const ss = spd.slice().sort((x, y) => x - y);
+    const flyMid = quant(legSpd[2].slice().sort((x, y) => x - y), 0.5) || 0;
+    const revMid = quant(legSpd[3].slice().sort((x, y) => x - y), 0.5) || 1;
+    const spread = quant(ss, 0.95) / Math.max(0.01, quant(ss, 0.05));
+    row.roll = `p10 ${quant(sa, 0.10).toFixed(1)}° · p99 ${quant(sa, 0.99).toFixed(1)}° · max ${sa[sa.length - 1].toFixed(1)}° · rate max ${sr[sr.length - 1].toFixed(1)}°/s`;
+    row.speedArc = `p95/p05 ${spread.toFixed(2)} · 저공 p50 ${flyMid.toFixed(1)} / 리빌 p50 ${revMid.toFixed(1)} m/s`;
+    check(quant(sa, 0.99) >= ROLL_P99_MIN_DEG,
+      `T19 ${row.scale}: 롤 p99 ${quant(sa, 0.99).toFixed(1)}° < ${ROLL_P99_MIN_DEG}° (뱅킹이 없다 = 레일 카메라)`);
+    check(sa[sa.length - 1] <= ROLL_ABS_MAX_DEG,
+      `T19 ${row.scale}: 롤 최대 ${sa[sa.length - 1].toFixed(1)}° > ${ROLL_ABS_MAX_DEG}°`);
+    check(quant(sa, 0.10) <= ROLL_P10_MAX_DEG,
+      `T19 ${row.scale}: 롤 p10 ${quant(sa, 0.10).toFixed(1)}° > ${ROLL_P10_MAX_DEG}° (직선에서도 기울어 있다 = 상수 더치앵글)`);
+    check(sr[sr.length - 1] <= ROLL_RATE_MAX_DEG,
+      `T19 ${row.scale}: 롤 각속도 ${sr[sr.length - 1].toFixed(1)}°/s > ${ROLL_RATE_MAX_DEG}°/s (뱅크가 아니라 흔들림)`);
+    check(spread >= SPEED_SPREAD_MIN,
+      `T20 ${row.scale}: 프레임 속도 p95/p05 ${spread.toFixed(2)} < ${SPEED_SPREAD_MIN} (등속 유람선)`);
+    check(flyMid / revMid >= SPEED_ORDER_MIN,
+      `T20 ${row.scale}: 저공 p50 ${flyMid.toFixed(1)} / 리빌 p50 ${revMid.toFixed(1)} = ${(flyMid / revMid).toFixed(2)} < ${SPEED_ORDER_MIN} (속도 서사가 뒤집혔다)`);
+
+    // ── T21 화면 떨림 ──
+    // ① 하드 안전망 개입 프레임. safeFloor 는 게이트가 obstacles 에서 독립 파생한다(경로가 쓰는 값을
+    //    믿지 않는다). y 가 그 하한과 정확히 같으면 그 프레임에서 클램프가 걸린 것이다.
+    let netFrames = 0;
+    for (const s of seq) {
+      const g = H(s.s.pos.x, s.s.pos.z) + 2.0;
+      const rt = roofTopAt(obs, s.s.pos.x, s.s.pos.z);
+      const fl = rt != null ? Math.max(g, rt + 2.0) : g;
+      if (Math.abs(s.s.pos.y - fl) < 1e-9) netFrames++;
+    }
+    // ② 프레임 스케일 위치 잔차(±2프레임 Hann 제거) → 근접물 12m 에서의 화면 각도.
+    const K = [0.25, 0.75, 1, 0.75, 0.25], KS = 3;
+    let hfMax = 0;
+    const at = (i, f) => f(seq[(i + seq.length) % seq.length].s.pos);
+    // 표본 배열의 **양 끝**은 창에서 뺀다. seq 는 마지막 구간이 끝나는 지점에서 멈추므로 seq[last] 와
+    //   seq[0] 사이 간격은 한 프레임이 아니다(오버플로 나머지). 그 불일치를 창에 넣으면 루프 이음매가
+    //   아니라 **표본 목록이 끊긴 자리**를 재게 되고, 빠른 규모일수록 크게 나온다(실측 capital 0.613° ·
+    //   hanyang 0.666° — 둘 다 최고 속도 30m/s 대). 진짜 이음매 연속성은 T1 이 별도로 단언한다.
+    for (let i = 2; i < seq.length - 2; i++) {
+      let mx = 0, my = 0, mz = 0;
+      for (let j = -2; j <= 2; j++) {
+        mx += at(i + j, (p) => p.x) * K[j + 2];
+        my += at(i + j, (p) => p.y) * K[j + 2];
+        mz += at(i + j, (p) => p.z) * K[j + 2];
+      }
+      const p = seq[i].s.pos;
+      const r = Math.hypot(p.x - mx / KS, p.y - my / KS, p.z - mz / KS);
+      if (r > hfMax) hfMax = r;
+    }
+    const hfDeg = Math.atan(hfMax / HF_NEAR_D) / DEG;
+    row.shake = `하드넷 개입 ${netFrames} 프레임 · 프레임 잔차 max ${(hfMax * 1000).toFixed(1)}mm = ${hfDeg.toFixed(3)}° @${HF_NEAR_D}m`;
+    check(netFrames <= NET_FRAMES_MAX,
+      `T21 ${row.scale}: 하드 안전망이 ${netFrames} 프레임 개입 (리프트 격자와 경합 → 고도 계단 = 화면 떨림)`);
+    check(hfDeg <= HF_POS_MAX_DEG,
+      `T21 ${row.scale}: 프레임 스케일 위치 잔차 ${hfDeg.toFixed(3)}° > ${HF_POS_MAX_DEG}° (한 프레임 튄다)`);
+  }
 
   // ── T2 · T3 · T4 · T5 · T6 · T7 · T8 ──
   {
@@ -1193,7 +1305,10 @@ for (const r of report) {
   console.log(`  소재       : primary ${r.primary} · ${r.axes} · orbit ${r.orbitSpec}`);
   console.log(`  이음매     : ${r.seam}`);
   console.log(`  속도       : ${r.speed}`);
+  console.log(`  속도서사   : ${r.speedArc}`);
   console.log(`  시선       : ${r.ang}`);
+  console.log(`  뱅킹       : ${r.roll}`);
+  console.log(`  떨림       : ${r.shake}`);
   console.log(`  클리어런스 : ${r.clear} · 수관여유 ${r.canopyGap}m`);
   console.log(`  어휘       : 저공 ${r.lowBand} · 선회창 ${r.orbitWindow} ${r.orbit}`);
   console.log(`               선회 프로파일 ${r.orbitProfile}`);
