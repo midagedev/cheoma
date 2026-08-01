@@ -115,6 +115,19 @@ const FLY_CONE_RINGS = 4;
 const FLY_CONE_FAR_RATIO = 1.6;           // 원뿔 사거리 = aheadDist * 1.6
 const FLY_CONE_MIN_HITS = 3;              // 20 표본 중 이만큼은 건축이어야 프레임이 비지 않는다
 const FLY_TRIM_MIN_SPAN = 40;             // 원뿔 트리밍이 스팬을 이 아래로 줄이지는 않는다
+// ── 개활지에서는 내려가지 않는다(2026-08-01 6차 비전 FIX-2) ──
+// 비전 실측: 마을 저공 구간 τ0.60~0.73 이 필지 밀집대가 아니라 개천·논 개활지를 통과했고, 그 구간의
+//   프레임에는 건축이 한 채도 없었다(원뿔 히트 0/20 인 제어점 4개 — 스윕 꼬리 2 + 뱅크 선회 2).
+//   축 선택(denseRoadSpan·원뿔 트리밍)은 **카메라 위치**의 밀도로 스팬을 고르지만, 스팬 꼬리의
+//   스테이션은 aheadDist 의 0.75~1.5 배 앞을 조준하므로 스팬 밖(정착지 경계 너머)을 본다. 그래서
+//   위치는 필지 옆인데 프레임은 빈 들판인 구간이 남는다(실측 nearD 5.4m · 원뿔 0/20).
+// 처방은 축을 다시 고르는 것이 **아니다**: 축을 바꾸면 스팬이 짧아져 다른 규모(한양 중로 323m)의
+//   코스까지 흔들린다. 대신 이미 있는 원뿔 척도를 고도에 연결한다 — 프레임에 건축이 없는 스테이션은
+//   저공 대역에서 들어올려 "빈 구간은 높게, 빠르게 지나간다"(위 스윕 전이 주석과 같은 원리)로 만든다.
+//   건축이 있는 스테이션에서는 need 가 -Infinity 라 **수치적으로 무변경**이므로, 스팬 전체가 밀집대인
+//   규모(한양·도성·읍성 — 실측 최소 히트 6)는 이 항이 원리적으로 발동하지 않는다.
+const FLY_OPEN_MIN_HITS = 3;
+const FLY_OPEN_AGL = 18;                  // 개활 구간의 지면 기준 고도 하한(m)
 const FRAME_ASPECT = 16 / 9;              // 수평 화각 파생용(프레임에 담기는 범위는 수평이 정한다)
 
 // ── 투어 시간축 ──
@@ -318,6 +331,32 @@ const ORBIT_WIDTH_TARGET = 0.36;
 //   능선이 카메라보다 **위**에 오면 프레임 상단을 채워 top-down 지도 인상이 된다(마을 과교정).
 //   그래서 와이드 구간 고도에 "능선을 이 위치로 내려보내는" 하한을 건다.
 const WIDE_RIDGE_NDC = 0.84;
+// ── 진입 정점의 능선 밴드(2026-08-01 6차 비전 FIX-1) ──
+// 위 WIDE_RIDGE_NDC 는 **와이드 대역**(-20°) 전용이라 정점(-38°)에는 걸리지 않았고, 그래서 진입
+//   첫 프레임의 하늘 밴드가 0 이었다(비전 실측: 마을 프레임 00~01 완전 하방 부감 — 태양 방위가
+//   화면에 없다). 정점 피치에서 능선을 이 세로 위치에 놓으면 상단 (1-ndc)/2 = 12% 가 하늘이다.
+// 왜 피치가 아니라 고도로 푸는가: 같은 밴드를 피치로 만들려면 정점이 13° 까지 누워야 하고, 그것은
+//   품질 계약 T13 의 정점 대역(34~42°)과 1차 비전이 반려한 "지평선이 프레임 30~48%" 구도로
+//   되돌아간다. 정점 구도(도성 위 부감)는 유지한 채 카메라를 능선 위로 올리는 쪽이 두 계약을 모두
+//   지킨다 — 그리고 그 상승분이 그대로 FIX-1 의 다른 절반(도입 고도 평탄)의 하강 여유가 된다.
+const CRANE_APEX_RIDGE_NDC = 0.76;
+// 이 처방은 **소규모 사이트 전용**이다. 대규모에서 같은 하한을 걸면 정점이 한양 428m 까지 뜨고
+//   (위 AERIAL_Y_TARGET 주석의 실측), 투어가 부풀어 저공 구간의 시간 점유·코스 채점이 무너진다
+//   (tools/check-cine-quality.mjs T13 능선 밴드 주석의 실측: village 저공 커버리지 92%→56%).
+//   6차 비전 판정도 한양은 "손댈 것 없음"이었다. 램프는 마을(R180)과 읍성(R240) 사이에 둔다 —
+//   R ≥ 220 에서 가중치가 정확히 0 이므로 읍성·도성·한양은 수치적으로 무변경이다.
+const APEX_LIFT_R0 = 190;
+const APEX_LIFT_R1 = 220;
+// 상승 리빌 꼬리 두 점이 정점 고도에서 차지하는 비율. 정점이 올라가면 리빌의 마지막 접근도 함께
+//   올라가야 한다: 리빌 끝점과 정점은 같은 방위(climbSweep 가 az0 로 수렴)라 고도만 벌어지면
+//   이음매가 **수직 엘리베이터**가 된다(리프트 전 실측 수평 간격 4m). 두 값은 정점 아래에 머물러
+//   루프의 마루가 이음매 하나로 유지되게 한다. 리프트가 없는 규모에서는 저작 고도가 이미 더 높아
+//   max() 가 무변경이다(실측 town 95.2/133.8 · capital 121.3/166.0 · hanyang 163.2/236.3 vs
+//   각 규모의 정점 비율 값 58.8/83.3 · 74.8/105.9 · 101.2/143.3).
+const REVEAL_TAIL_APEX_FRAC = [0.60, 0.85];
+// 꼬리 속도 가중 보정의 상한(사용처 주석에 근거) — 리프트 비가 커져도 프레임 최대 속도가
+//   품질 계약 T2 상한을 향해 달리지 않게 묶는다.
+const REVEAL_TAIL_W_CAP = 1.6;
 // 저공 패스 화각 — 42° 는 근경 담·기와 덩어리의 접지선이 하단 밖으로 잘렸다(2차 비전: 마을 8장 중 6장).
 //   화각을 넓히면 같은 피치·고도에서 최전경 접지선이 프레임 안으로 들어오고 전경 와이프도 살아난다.
 const FLY_FOV = 56;
@@ -786,10 +825,13 @@ export function createDronePaths({
   //   46m 높아 개입하지 않는다(2차 비전: "한양은 적정, 마을만 과교정").
   const ridgeY = groundC + Hmax;
   const ridgeDist = Math.max(R * 0.9, Math.abs(site.mountainZ || -R) + R * 0.4);
-  const wideYFloor = (pitch, fov) => {
-    const drop = pitch - Math.atan(WIDE_RIDGE_NDC * tanHalfV(fov));
+  //   능선선을 프레임 세로 ndc 에 놓는 고도. 와이드 대역은 WIDE_RIDGE_NDC 를, 진입 정점은
+  //   CRANE_APEX_RIDGE_NDC 를 쓴다(두 대역의 피치가 18° 차이라 같은 상수로는 둘 다 만족하지 않는다).
+  const ridgeYFloor = (pitch, fov, ndc) => {
+    const drop = pitch - Math.atan(ndc * tanHalfV(fov));
     return drop <= 0 ? -Infinity : ridgeY + ridgeDist * Math.tan(drop);
   };
+  const wideYFloor = (pitch, fov) => ridgeYFloor(pitch, fov, WIDE_RIDGE_NDC);
   //   수평 방위 az(카메라 → 피사체) + 프레임 피치 → 단위 시선.
   const dirFromPitch = (az, pitch) => V(
     Math.sin(az) * Math.cos(pitch), -Math.sin(pitch), Math.cos(az) * Math.cos(pitch));
@@ -831,6 +873,8 @@ export function createDronePaths({
   // 화각 파생 — 프레임에 무엇이 담기는지는 수평 화각이 정한다.
   const hHalfOf = (fov) => Math.atan(Math.tan(fov * 0.5 * DEG) * FRAME_ASPECT);
   const aheadDist = Math.max(16, R * 0.12);
+  // 개활 판정을 적용할 만큼 시가지가 있는가(위 FLY_OPEN_* 주석의 필지 20 문턱).
+  const denseFabric = (plan.parcels || []).length >= 20;
   const coneFar = aheadDist * FLY_CONE_FAR_RATIO;
   const laneHHalf = hHalfOf(FLY_FOV);
   const discR = R * DENSITY_DISC_RATIO;
@@ -1154,14 +1198,25 @@ export function createDronePaths({
   //   그것뿐이고 진입 나선의 계산 자체는 종전과 같다.
   const entryAzC = Math.atan2(entryFar.x - coreSubject.x, entryFar.z - coreSubject.z);
   const craneSweep = Math.atan2(Math.sin(entryAzC - az0), Math.cos(entryAzC - az0));
+  const craneFovOf = (f) => 34 + 2 * Math.sin(Math.PI * f);
+  // 진입 정점 고도 — 블록 밖에서 푼다. 상승 리빌의 꼬리가 이 값을 하한으로 쓰기 때문이다
+  //   (위 REVEAL_TAIL_APEX_FRAC 주석: 리프트 뒤 이음매가 수직 엘리베이터가 되지 않게).
+  // 종전은 `max(groundC + max(Hmax·0.95, R·0.30), wideFloor)` 였고, 마을 규모에서는 wideFloor 가
+  //   그대로 정점이 되어(실측 마을 76.16 = wideFloor 76.2) 진입 나선의 f<0.6 구간이 그 하한에
+  //   **핀** 됐다 — 고도가 정확히 상수인 도입 12% 가 그것이다(비전 실측 75.7/76.2/76.2/76.4m).
+  //   정점을 능선 밴드 하한까지 올리면 그 상수 구간이 실하강으로 바뀌고 하늘 밴드도 함께 생긴다.
+  const craneWideFloor = wideYFloor(REVEAL_PITCH, 34);
+  const craneApexBase = Math.max(groundC + Math.max(Hmax * 0.95, R * 0.30), craneWideFloor);
+  const apexLiftW = 1 - smootherstep(clamp01((R - APEX_LIFT_R0) / (APEX_LIFT_R1 - APEX_LIFT_R0)));
+  const craneApexY = apexLiftW > 0
+    ? Math.max(craneApexBase, craneApexBase
+      + (ridgeYFloor(CRANE_PITCH_TOP, craneFovOf(0), CRANE_APEX_RIDGE_NDC) - craneApexBase) * apexLiftW)
+    : craneApexBase;
   {
-    const fovOf = (f) => 34 + 2 * Math.sin(Math.PI * f);
+    const fovOf = craneFovOf;
     // 정점 반경은 저작 피치(-38°)에서 파생 — 이것이 "도성 위 부감" 진입 구도를 만든다.
-    // 진입 정점은 의도된 top-down 이라 능선을 프레임에 넣지 않는다. 다만 하강하며 와이드 대역으로
-    //   눕는 구간이 능선을 상단에 두려면 정점 고도부터 그 하한 위에 있어야 한다.
-    const wideFloor = wideYFloor(REVEAL_PITCH, 34);
-    const apex = aerialAt(coreSubject, az0,
-      Math.max(groundC + Math.max(Hmax * 0.95, R * 0.30), wideFloor), CRANE_PITCH_TOP, fovOf(0));
+    const wideFloor = craneWideFloor;
+    const apex = aerialAt(coreSubject, az0, craneApexY, CRANE_PITCH_TOP, fovOf(0));
     const yTop = apex.pos.y;
     const radApex = apex.d;
     const sweep = craneSweep;
@@ -1301,6 +1356,17 @@ export function createDronePaths({
       };
     });
     const cum = polyCum(pts);
+    // 전방 조준 방위 — 한 점이 아니라 세 지점의 평균이다(아래 출력 루프 주석). 개활 판정이 **같은**
+    //   방위를 써야 한다: 축 트리밍이 쓰는 국소 접선으로 재면 실제 프레임이 보는 곳과 다르고, 그
+    //   차이가 스팬 꼬리에 빈 프레임을 남긴 원인이다(위 FLY_OPEN_* 주석).
+    const aimAzAt = (i) => {
+      let ax = 0, azs = 0;
+      for (const f of [0.75, 1.0, 1.5]) {
+        const q = polyAtExt(pts, cum, cum[i] + aheadDist * f);
+        ax += q.x / 3; azs += q.z / 3;
+      }
+      return Math.atan2(ax - pts[i].x, azs - pts[i].z) + offset;
+    };
     const raw = pts.map(spanBaseline);
     // ── 고도 프로파일 ── 세 단계로 만든다.
     //   ① 지붕 기준선(+ 골목이면 지면 기준 상·하한)
@@ -1337,8 +1403,20 @@ export function createDronePaths({
     //   교차에서만 나오고 그것은 리프트 격자가 이미 완만하게 흡수한다.
     const guardRaw = corridorNeed.map((need, i) => (
       need - targetY[i] <= FLY_GUARD_MAX_LIFT ? need : -Infinity));
+    // 개활 하한 — 프레임(시선 원뿔)에 건축이 없는 스테이션만 지면 기준으로 들어올린다. 건축이 있으면
+    //   -Infinity 라 max() 가 항등이고, 따라서 스팬 전체가 밀집대인 규모에서는 이 항이 존재하지 않는
+    //   것과 같다. 이웃 최대 → 3탭 평균은 회랑 하한과 같은 처리라 계단 없이 램프가 된다.
+    // 필지 20 미만(외딴집·초락)에는 걸지 않는다. 그 규모에서 원뿔 프로브는 점 표본이라 집 한두 채를
+    //   **구조적으로** 놓치고(품질 계약 T8·T15·T16 이 같은 이유로 같은 문턱에서 완화한다), 그러면
+    //   스팬 전체가 "개활지"로 판정돼 저공 패스 자체가 사라진다(실측 solo 저공 표본 24%→2%).
+    //   그 규모에서는 산·논이 프레임의 정당한 주인공이라는 것도 같은 계약이 이미 인정한 사실이다.
+    const openRaw = pts.map((p, i) => (
+      !denseFabric
+        || coneRoofHits(obstacles, p.x, p.z, aimAzAt(i), hHalfOf(fov), coneFar).hits >= FLY_OPEN_MIN_HITS
+        ? -Infinity : H(p.x, p.z) + FLY_OPEN_AGL));
     const floored = targetY.map((v, i) => Math.max(v,
-      guardRaw[Math.max(0, i - 1)], guardRaw[i], guardRaw[Math.min(pts.length - 1, i + 1)]));
+      guardRaw[Math.max(0, i - 1)], guardRaw[i], guardRaw[Math.min(pts.length - 1, i + 1)],
+      openRaw[Math.max(0, i - 1)], openRaw[i], openRaw[Math.min(pts.length - 1, i + 1)]));
     const yAt = floored.map((_, i) => {
       let sum = 0, cnt = 0;
       for (let k = i - 1; k <= i + 1; k++) {
@@ -1353,12 +1431,7 @@ export function createDronePaths({
       // 전방 조준점은 한 점이 아니라 세 지점의 평균이다. 국소 접선을 그대로 겨누면 굽은 골목에서
       //   시선이 노선 곡률을 그대로 따라가 요 각속도가 60°/s 를 넘는다(실측). 리드 구간을 길게
       //   평균하면 같은 "가로를 따라가는" 인상이면서 회전이 완만해진다.
-      let ax = 0, az0s = 0;
-      for (const f of [0.75, 1.0, 1.5]) {
-        const q = polyAtExt(pts, cum, cum[i] + aheadDist * f);
-        ax += q.x / 3; az0s += q.z / 3;
-      }
-      const az = Math.atan2(ax - pts[i].x, az0s - pts[i].z) + offset;
+      const az = aimAzAt(i);
       out.push({
         leg, fov, w,
         pos: V(pts[i].x, y, pts[i].z),
@@ -1618,8 +1691,8 @@ export function createDronePaths({
     // 이 점은 정점 **위로** 넘어간다. 정점 아래에서 수렴하면 리빌의 마지막 접근이 진입 나선의 하강 경로를
     //   안쪽에서 따라가 이음매 근방에서 같은 프레임이 된다(실측 한양 crane τ0.03 ↔ reveal τ0.91, 70m).
     //   마루를 넘어 내려앉는 편이 안무로도 자연스럽고 두 경로를 수직으로 가른다.
-    { k: 0.90, y: [1.06, 0.335], fov: 42, w: 1.40, pitch: 0.16, aim: 1.0 },
-    { k: 1.0, y: [0.95, 0.300], fov: 34, w: 1.55, pitch: 0.40, aim: 1.0 },
+    { k: 0.90, y: [1.06, 0.335], fov: 42, w: 1.40, pitch: 0.16, aim: 1.0, apexFrac: REVEAL_TAIL_APEX_FRAC[0] },
+    { k: 1.0, y: [0.95, 0.300], fov: 34, w: 1.55, pitch: 0.40, aim: 1.0, apexFrac: REVEAL_TAIL_APEX_FRAC[1] },
   ];
   // 시선은 골목 이탈 방향에서 부감 배치로 **구면 보간**한다(점 보간이 아니라 방향 보간이라 중간
   //   조준점이 카메라 근처에 떨어지는 특이점이 없다).
@@ -1642,7 +1715,20 @@ export function createDronePaths({
     //   잡으면 피치가 22~24° 인 표본에서 능선이 다시 프레임 상단에 붙는다(실측 밴드 2% → 9%).
     //   진입 나선에는 같은 처방을 쓰지 않는다: 진입 후반은 선회 진입 활강이라 고도가 낮아야 하고,
     //   거기에 하한을 걸면 투어 전체가 부풀어 저공 구간의 시간·코스 채점이 무너졌다(실측 커버리지 56%).
-    const y = c.k >= 0.5 ? Math.max(yBase, Math.min(yBase * 2.4, wideYFloor(pitch, cFov))) : yBase;
+    // 꼬리 두 점은 정점 고도의 일정 비율을 하한으로 받는다(위 REVEAL_TAIL_APEX_FRAC 주석).
+    //   정점 리프트가 없는 규모에서는 저작 고도가 이미 그 비율보다 높아 이 항이 무변경이다.
+    const yAuthored = c.k >= 0.5
+      ? Math.max(yBase, Math.min(yBase * 2.4, wideYFloor(pitch, cFov))) : yBase;
+    const yApexTail = c.apexFrac ? craneApexY * c.apexFrac : -Infinity;
+    const y = Math.max(yAuthored, yApexTail);
+    // ── 리프트 호길이 보정 ── 반경은 (고도 - 피사체고)/tan δ 로 파생되므로, 꼬리를 들어올리면 그 두
+    //   점의 **호길이**가 같은 비로 늘어난다. 시간축은 τ ∝ ∫ds/w 라서 가중을 그대로 두면 늘어난 호가
+    //   그대로 시간이 되고, 가장 빠른 꼬리가 리빌 구간의 프레임 과반을 차지해 구간 중앙 속도가
+    //   저공 구간을 따라잡는다(실측 마을 리빌 p50 6.6 → 10.5 m/s, 품질 계약 T20 의 저공/리빌 하한
+    //   1.15 를 1.04 로 깨뜨렸다). 가중을 같은 비로 올려 **시간 점유를 보존**한다 — 리프트가 바꾸는
+    //   것은 기하이지 편집 리듬이 아니다. 리프트가 없으면 비가 정확히 1 이라 무변경이다.
+    const wUse = c.w * Math.min(REVEAL_TAIL_W_CAP,
+      Math.max(1, (y - coreSubject.y) / Math.max(1, yAuthored - coreSubject.y)));
     // 반경 하한 — 외딴집처럼 orbitR > R 인 규모에서 상승 시작점이 선회 원 안쪽에 놓이면 결말이 3초짜리
     //   꼬리가 된다. 다만 전반 계수를 0.55 로 두면 후퇴 이징을 후반에 몰아도(위 CLIMB 주석) 반경이 먼저
     //   붙잡혀 t=0.3 배율이 그대로다. 시작 계수만 낮추고 끝점(1.0)은 유지한다.
@@ -1652,7 +1738,7 @@ export function createDronePaths({
       derived >= radFloor ? null : radFloor);
     const pos = st.pos;
     const look = aimAtSubject(pos, coreSubject, cFov);
-    addDir(3, pos, dirOfAim(blendAim(laneExitAim, aimOfDir(look.dir), c.aim)), look.dist, cFov, c.w,
+    addDir(3, pos, dirOfAim(blendAim(laneExitAim, aimOfDir(look.dir), c.aim)), look.dist, cFov, wUse,
       c.aim >= 0.9 ? coreSubject : null);
   }
   // 마지막 제어점 다음은 닫힌 곡선이므로 ①의 첫 점으로 이어진다 — 그 구간이 이 leg 의 꼬리다.

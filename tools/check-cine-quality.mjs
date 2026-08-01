@@ -327,6 +327,18 @@ const DUP_MIN_CRANE_REVEAL = 1.60;
 //   값이다(FAIL-first). 1.35 로 두면 달성 최악 town 1.32 가 거꾸로 FAIL 한다 — 올리려면 town 재실측 먼저.
 const SCALE_SPLIT_MIN = 1.30;
 
+// ── T22·T23 신설(2026-08-01 6차 비전 FIX) ── 사용처 주석에 근거·FAIL-first 실측 기록.
+// 두 계약이 공유하는 규모 범위. dronepath 의 정점 리프트 램프 하한(APEX_LIFT_R0)과 같은 자리다.
+const INTRO_REVEAL_MAX_R = 190;
+// 능선 밴드를 재는 투어 시각 — 정확한 이음매(τ=0)가 아니라 스토리보드 첫 프레임과 같은 자리다
+//   (28 프레임 등간격의 0번 = (0+0.5)/28). 비전이 판정한 프레임과 계약이 같은 프레임을 봐야 한다.
+const INTRO_BAND_TAU = 0.5 / 28;
+const INTRO_BAND_MIN = 0.10;      // 비전 지정 "상단 10~15%"
+const INTRO_TAU = 0.13;           // 비전이 평탄으로 지목한 구간(프레임 00~03)
+const INTRO_DROP_FRAC = 0.40;
+const OPEN_CONE_HITS = 3;         // dronepath FLY_OPEN_MIN_HITS 와 같은 정의(20 표본 중)
+const OPEN_AGL_MIN = 18;
+
 // ── T19 신설(2026-08-01 5차) ── 뱅킹(롤)이 실제로 존재하고, 궤적에서 유도되며, 흔들림이 아니다.
 // 종전 소스의 롤은 **전 구간 정확히 0** 이었다(레일 위 카메라). sample.roll 은 dronepath 가 조화 선회식
 //   φ=atan(GAIN·v·ω/g) 로 만든 값이고, 여기서는 그것이 (a) 충분히 읽히고 (b) 과하지 않고 (c) 각속도가
@@ -829,6 +841,82 @@ for (const c of SELECTED) {
         + ` ${Math.round((c.ok / Math.max(1, c.n)) * 100)}% < ${(floor * 100).toFixed(0)}%`
         + ' (하단 중앙이 빈 노면판이다 — 전경 앵커가 코너에만 몰렸다)');
     }
+    // ── T22 신설(2026-08-01 6차 비전 FIX-1) ── 도입이 리빌인가.
+    // 비전 실측: 마을 스토리보드 프레임 00~03(τ 0.018~0.125)의 고도가 75.7/76.2/76.2/76.4m 로 사실상
+    //   정지였고, 그 프레임의 하늘 밴드는 0 이었다("완전 하방 부감 — 태양 방위가 화면에 없다").
+    //   투어의 첫 12% 가 상승도 하강도 아닌 순항이면 "리빌"이 아니라 "이미 날고 있는 중간에 끼어든"
+    //   인상이 된다. 두 가지를 함께 닫는다: 정점 프레임의 능선 밴드와, 도입 구간의 실하강.
+    // **소규모 사이트에만 건다.** 6차 비전 판정은 한양을 "손댈 것 없음"으로 닫았고(그 규모는 정점
+    //   프레임이 시가지로 가득 차 밴드 없이도 성립한다), 같은 처방을 대규모에 걸면 정점이 428m 까지
+    //   뜨면서 투어가 부풀어 저공 코스 채점이 무너진다(위 능선 밴드 주석의 실측). 문턱은 dronepath 의
+    //   리프트 램프 하한(R 190)과 같은 자리에 둔다 — 계약과 저작이 같은 규모 경계를 본다.
+    // FAIL-first(실측): 종전 소스(4e09791)에서 village 밴드 0.0% · 하강 3.6m/41.5m = 0.09,
+    //   village/2026 밴드 0.0% · 하강 0.8m/40.9m = 0.02 로 네 단언이 모두 실패한다.
+    //   현행 실측은 밴드 12.1%/12.0% · 하강 74.9m/120.5m = 0.62 · 61.1m/120.0m = 0.51.
+    if (framed && R <= INTRO_REVEAL_MAX_R) {
+      const ridgeY = H(site.center.x, site.center.z) + site.Hmax;
+      const ridgeDist = Math.max(R * 0.9, Math.abs(site.mountainZ || -R) + R * 0.4);
+      const bandAt = (s) => {
+        const pd = Math.atan2(-(s.lookAt.y - s.pos.y),
+          Math.hypot(s.lookAt.x - s.pos.x, s.lookAt.z - s.pos.z));
+        const elev = Math.atan((ridgeY - s.pos.y) / ridgeDist);
+        const ndc = Math.tan(pd + elev) / Math.tan(s.fov * 0.5 * DEG);
+        return (1 - Math.min(1, ndc)) / 2;
+      };
+      const band = bandAt(legs[0].sampleTour(INTRO_BAND_TAU));
+      row.introBand = `${(band * 100).toFixed(1)}%`;
+      check(band >= INTRO_BAND_MIN,
+        `T22 ${row.scale}: 진입 정점 프레임의 능선 위 밴드 ${(band * 100).toFixed(1)}%`
+        + ` < ${(INTRO_BAND_MIN * 100).toFixed(0)}% (완전 하방 부감 — 하늘·태양 방위가 화면에 없다)`);
+      // 도입 하강비 = τ[0, INTRO_TAU] 의 고도 낙차 / 진입 구간 전체의 낙차. 절대값이 아니라 비율로
+      //   두는 이유: 낙차 자체는 규모에 비례하지만 "도입이 하강인가"는 구간 안의 배분 문제다.
+      const yAt = (tau) => legs[0].sampleTour(tau).pos.y;
+      const yTop = yAt(0);
+      let yIntro = yTop, yLegEnd = yTop;
+      for (let k = 0; k <= 120; k++) {
+        const tau = (k / 120) * INTRO_TAU;
+        yIntro = Math.min(yIntro, yAt(tau));
+      }
+      const t1 = legs[0].t1;
+      for (let k = 0; k <= 240; k++) yLegEnd = Math.min(yLegEnd, yAt((k / 240) * t1));
+      const drop = yTop - yIntro, total = yTop - yLegEnd;
+      const frac = total > 1e-6 ? drop / total : 0;
+      row.introDrop = `${drop.toFixed(1)}m / ${total.toFixed(1)}m = ${frac.toFixed(2)}`;
+      check(frac >= INTRO_DROP_FRAC,
+        `T22 ${row.scale}: 도입 τ0~${INTRO_TAU} 고도 하강 ${drop.toFixed(1)}m 가 진입 구간 낙차`
+        + ` ${total.toFixed(1)}m 의 ${(frac * 100).toFixed(0)}% < ${(INTRO_DROP_FRAC * 100).toFixed(0)}%`
+        + ' (도입이 평탄 순항이다)');
+    }
+    // ── T23 신설(2026-08-01 6차 비전 FIX-2) ── 저공은 밀집대에서만.
+    // 비전 실측: 마을 저공 구간이 필지 밀집대가 아니라 개천·논 개활지를 지나며 고도를 10.8m 까지
+    //   내렸고(sb-17: "건축이 한 채도 없는 들판 — 투어에서 가장 몰입해야 할 순간"), 그 구간의 뱅크는
+    //   근경 부재로 더치앵글로 읽혔다. 비전 지정 조정 축이 "개활지를 지나야 한다면 그 구간에서는
+    //   고도를 낮추지 말 것"이므로, 프레임에 건축이 없는 표본의 **지면 기준 고도 중앙값**에 하한을 둔다.
+    // 규모 범위는 T22 와 같다. 대규모는 저공 코스가 이미 밀집대 안이라(실측 개활 표본 AGL 중앙값
+    //   한양 45.4m · capital 37.0m) 이 항이 의미가 없고, 읍성(town 12.1m)은 6차 비전이 손대지 말 것을
+    //   계약으로 지정한 규모다.
+    // FAIL-first(실측): 종전 소스에서 village 14.6m < 18m 로 실패한다(village/2026 은 21.3m 로 통과 —
+    //   하한은 두 마을 픽스처 중 결함이 실제로 있던 쪽을 잡는 자리에 둔다). 현행 실측 20.3m / 23.0m.
+    if (framed && R <= INTRO_REVEAL_MAX_R) {
+      const openAgl = [];
+      let flyN = 0;
+      for (const rec of seq) {
+        if (rec.leg !== 2) continue;
+        flyN++;
+        const { pos, lookAt, fov } = rec.s;
+        const az = Math.atan2(lookAt.x - pos.x, lookAt.z - pos.z);
+        const hHalf = Math.atan(Math.tan(fov * 0.5 * DEG) * (16 / 9));
+        const far = Math.max(16, R * 0.12) * 1.6;
+        if (coneRoofHits(obs, pos.x, pos.z, az, hHalf, far).hits >= OPEN_CONE_HITS) continue;
+        openAgl.push(pos.y - H(pos.x, pos.z));
+      }
+      const med = openAgl.length ? quant(openAgl.slice().sort((a, b) => a - b), 0.5) : Infinity;
+      row.openAgl = openAgl.length
+        ? `${med.toFixed(1)}m (개활 ${Math.round((openAgl.length / Math.max(1, flyN)) * 100)}%)` : 'n/a';
+      check(med >= OPEN_AGL_MIN,
+        `T23 ${row.scale}: 저공 구간에서 프레임에 건축이 없는 표본의 지면 기준 고도 중앙값`
+        + ` ${med.toFixed(1)}m < ${OPEN_AGL_MIN}m (개활지 위에서 저공으로 내려간다)`);
+    }
   }
 
   // ── T14 주 피사체 프레임 배치(선회 구간) ──
@@ -1316,6 +1404,9 @@ for (const r of report) {
   console.log(`  프레임     : 피치 median ${r.pitch}° (전범위 ${r.pitchRange}°, 정점 ${r.apex}) 하늘 ${r.sky} 하단무특징 ${r.bare} 전경밀착 ${r.hug}`);
   console.log(`               주 피사체 ${r.subjectFrame}`);
   console.log(`               저공 최전경 접지 ${r.frontMass} · 하단중앙20% ${r.centre} · 능선 위 밴드 리빌 ${r.ridge3}`);
+  if (r.introBand != null) {
+    console.log(`  도입/개활  : 정점 능선밴드 ${r.introBand} · 도입 하강 ${r.introDrop} · 개활 저공 AGL ${r.openAgl}`);
+  }
   console.log(`  구간중복   : ${r.dup}  (최약 ${r.dupWorst})`);
   console.log(`  배율분리   : 진입↔리빌 ${r.scaleSplit}`);
   console.log(`  역광       : ${r.backlit} · 오빗 ${r.orbitBacklit}`);
