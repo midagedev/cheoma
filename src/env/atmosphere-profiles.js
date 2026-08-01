@@ -18,7 +18,10 @@ const DAWN = profile({
   sky: [[0.0, '#e7d0b8'], [0.35, '#d9c3bb'], [0.7, '#8f9bbf'], [1.0, '#5d6a97']],
   sunDir: [26, 9, 34], sunColor: 0xffd7ac, sunInt: 1.7,
   hemiSky: 0xc3bcd0, hemiGround: 0x6f6252, hemiInt: 0.75,
-  fog: 0xe4cfbd, fogNear: 55, fogFar: 430, exposure: 1.02,
+  // #35-R2 대기 3축 교정(2026-08-01) — 유도는 아래 gold 주석에 한 번만 적는다. dawn 도 같은 결함을
+  //   공유했다(fog 선형휘도 0.648 = 이 프로필 표면 휘도 중앙값의 15.1배 — 네 프로필 중 최악).
+  //   e4cfbd(H28·S_HSL 0.419·Y 0.648) → 474541(H40·S_HSL 0.050·Y 0.060).
+  fog: 0x474541, fogNear: 55, fogFar: 430, exposure: 1.02,
   ridgeNear: 0x4a5069, ridgeFar: 0xcfc1c4, mist: 0xf1e2d4, mistOp: 0.72,
   lantern: 0.0,
 }, {
@@ -104,7 +107,35 @@ export const SUNSET_LOOKS = deepFreeze({
       sunDir: [-16, 8, -45], sunColor: 0xffa85c, sunInt: 2.38,
       hemiSky: 0x8593bd, hemiGround: 0x9c7856, hemiInt: 0.72,
       // #31-2 대기색 정합(아래 crimson 주석에 세 프로필 공통 유도). ΔH 26° → 0°, S 0.46 → 0.39.
-      fog: 0xbe6c74, fogNear: 70, fogFar: 470, exposure: 1.13,
+      // #35-R2 대기 3축 교정(2026-08-01) — 네 프로필 공통 유도를 여기 한 번만 적는다.
+      //   증상: 유채 픽셀의 78.6%가 hue 320~30° 한 대역에 뭉치고 foliage 녹(60~180°)은 2.2%,
+      //     암부 3분위 채도 0.279 — "그림자·미드톤은 중립"(look-grammar §2-3) 정면 위반.
+      //   귀속(순수 노드 ablation, 대표 알베도 12종 × 마을 sunset 리그): fog 색을 같은 휘도의
+      //     무채색으로 바꾸면 hueSpread 3.7° → 93.7° 로 복원된다. 톤매핑·exposure·GradePass
+      //     sat/lift 의 지분은 0 이었다. 즉 범인은 fog 한 항이고, fogFactor 를 낮춰 풀 수 없다
+      //     (설계 최대 0.456 이 아니라 0.20 에서 이미 92° → 7.3° 로 붕괴).
+      //   왜 색상 회전만으로는 무효인가: 20° 로 돌리면 마젠타 워시가 주황 워시가 될 뿐이다
+      //     (hueSpread 3.1°). 붕괴를 만드는 것은 fog 의 **절대 선형 채도량**이고, 그 양은
+      //     선형 휘도에 비례한다 — 구 0xbe6c74 의 Y 0.229 는 이 프로필 표면 휘도 중앙값(0.023)의
+      //     9.9배였다. 20% 혼합만으로 fog 가 픽셀의 다수가 되어 표면 색차를 덮는다.
+      //   그래서 세 축을 동시에 움직인다: ① 색상을 마젠타(354°)에서 주홍·앰버(22°)로
+      //     ② HSL 채도 0.387 → 0.102 ③ 선형 휘도 0.229 → 0.050(표면 중앙값의 2.2배).
+      //     모델 실측(fogFactor 0.456): hueSpread 2.6° → 36.8°, rose 대역 12/12 → 4/12,
+      //     중성 알베도(화강암·회벽)가 대기에서 얻는 채도 +0.309/+0.292 → +0.017.
+      //     실렌더 A/B(마을 부감, fog 가 실제로 지배하는 원경 능선 밴드): rose 81.1% → 63.9%,
+      //     foliage 녹 7.3% → 20.8%, 픽셀 hue 산포 30.8° → 59.7°(town 은 92.8→76.3 / 3.0→14.4 /
+      //     21.9→41.1). 근경·중경은 fogFactor 가 낮아 색상 분포가 사실상 불변이다 — 워시는
+      //     원경 밴드의 문제였고 수정도 거기서 발현한다.
+      //   부작용이자 의도된 이득: 지평 밴드가 어두워지면서 sky.js DOME_HAZE α 램프가 비로소
+      //     휘도 구배를 만든다(**돔 기여 기준** 부감 100행당 −2.2 → +3.7 — 태양 글로우·플레어·
+      //     블룸 가산은 이 모델에 없다). 구 상태는 지평 아래가 지평 위보다 밝은 무구배 평면이었고
+      //     그것이 "안개 띠 위에 뜬 인스턴스"의 실제 원인이었다(결함 #4).
+      //     실렌더 A/B(같은 카메라 2부팅, 마을 부감 1440×900): 그 평면의 휘도가 142~150 → 74~81 로
+      //     내려와 근경 지면대(50~80)와 같은 자리에 앉고, 평면 아래 경계의 하드 스텝이 3.8 → 0.9 로
+      //     줄었다. 색상도 355°(마젠타) 고정에서 3~15°(주홍) 로, 채도는 0.45 고정에서 0.47→0.20 의
+      //     변화로 바뀐다. 게이트: tools/check-fog-wash.mjs.
+      //   불변: 노을 정체성은 하늘 스톱·rimColor·sunGlowColor·flareColor 가 갖는다(전부 불변).
+      fog: 0x463e39, fogNear: 70, fogFar: 470, exposure: 1.13,
       ridgeNear: 0x574863, ridgeFar: 0xcc9678, mist: 0xdeb69c, mistOp: 0.6,
       lantern: 0.15,
     }, {
@@ -153,7 +184,11 @@ export const SUNSET_LOOKS = deepFreeze({
       //   돔과 일치시키고 색의 양은 줄이는 변경이다. 노을 정체성은 여전히 하늘 스톱·rim·glow·
       //   flare 가 갖는다(전부 불변).
       //   crimson: ΔH 46° → 0°, S 0.30 → 0.22, relL 0.362 → 0.237.
-      fog: 0xa8788f, fogNear: 70, fogFar: 462, exposure: 1.11,
+      // #35-R2 대기 3축 교정(2026-08-01, 유도는 gold 주석). 그 정합은 **색상**만 맞췄고 fog 의
+      //   절대 채도량은 그대로였다 — crimson 도 fogFactor 0.456 에서 hueSpread 3.5°·rose 12/12 로
+      //   gold 와 같은 워시였다. a8788f(H331·S_HSL 0.216·Y 0.237) → 453e3b(H16·S_HSL 0.080·Y 0.050).
+      //   실측: hueSpread 3.5° → 42.1°, rose 12/12 → 5/12, 돔 밴드 구배 −2.4 → +4.7/100행.
+      fog: 0x453e3b, fogNear: 70, fogFar: 462, exposure: 1.11,
       ridgeNear: 0x54465b, ridgeFar: 0xbc9184, mist: 0xd3b0a4, mistOp: 0.61,
       lantern: 0.15,
     }, {
@@ -174,7 +209,14 @@ export const SUNSET_LOOKS = deepFreeze({
       hemiSky: 0x7d83b8, hemiGround: 0x806078, hemiInt: 0.72,
       // #31-2 대기색 정합(위 crimson 주석 유도). ΔH 13° → 1°, S 0.12 → 0.10 — 이미 거의 정합이라
       //   변화가 가장 작다. dawn(ΔH 46°)은 이번 지시 범위(sunset) 밖이라 그대로 둔다.
-      fog: 0x91859c, fogNear: 68, fogFar: 455, exposure: 1.12,
+      // #35-R2 대기 3축 교정(2026-08-01, 유도는 gold 주석). violet 은 색상 축이 이미 무해했고
+      //   (rose 0/12) 남은 결함은 휘도였다 — Y 0.252 = 표면 중앙값의 11.2배로 네 프로필 중 최대
+      //   비율이었다. 그래서 여기서는 색상을 옮기지 않는다(보랏빛 정체성 보존): 91859c
+      //   (H271·S_HSL 0.104·Y 0.252) → 48434e(H267·S_HSL 0.076·Y 0.059).
+      //   채도를 함께 내리는 이유: 휘도만 내리면 같은 HSL 채도가 어두운 픽셀에서 상대적으로 더
+      //   크게 작용해 중성 알베도(화강암)의 색조 전이가 +0.027 → +0.079 로 오히려 늘어난다.
+      //   실측: hueSpread 12.0° → 43.5°, rose 0/12 → 2/12, 돔 밴드 구배 −1.9 → +6.1/100행.
+      fog: 0x48434e, fogNear: 68, fogFar: 455, exposure: 1.12,
       ridgeNear: 0x4b4c68, ridgeFar: 0x978ca8, mist: 0xbdb1c0, mistOp: 0.62,
       lantern: 0.18,
     }, {

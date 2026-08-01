@@ -86,6 +86,10 @@ assert.deepEqual(ids(['tools/check-rim-master.mjs'], {
 assert.deepEqual(ids(['tools/shoot-rim-aerial.mjs'], {
   newPaths: ['tools/shoot-rim-aerial.mjs'],
 }), ['core']);
+// #35-R2 대기 워시·부감 돔 구배: 순수 노드라 core 만 소유한다.
+assert.deepEqual(ids(['tools/check-fog-wash.mjs'], {
+  newPaths: ['tools/check-fog-wash.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
   newPaths: ['src/village/forest-canopy-atten.js'],
 }), ['core', 'app', 'worker']);

@@ -80,6 +80,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-directional-shadow-runtime.mjs',
   './check-rim-gate.mjs',
   './check-rim-master.mjs',
+  './check-fog-wash.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
   './check-creek.mjs',

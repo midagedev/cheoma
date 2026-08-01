@@ -206,6 +206,10 @@ const REVIEWED_NEW_PATHS = new Set([
   //   shoot-rim-aerial 은 살아 있는 유니폼·프로그램 델타·OFF/ON 프레임을 남기는 캡처-온리다.
   'tools/check-rim-master.mjs',
   'tools/shoot-rim-aerial.mjs',
+  // #35-R2 대기 워시·부감 돔 구배 계약. fog 의 선형 mix 와 돔 알파 램프는 해석적으로 재현되므로
+  //   브라우저 없이 판정되고 tools/check-fog-wash.mjs 가 core 게이트에서 소유한다
+  //   (네 노을 프로필 전부를 회귀 픽스처로 들고 있다).
+  'tools/check-fog-wash.mjs',
 ]);
 
 function add(gates, ...items) {
