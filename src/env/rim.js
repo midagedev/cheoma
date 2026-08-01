@@ -61,7 +61,37 @@ const RIM_ROLES = new Set(['roof', 'wall', 'wood', 'stone']);
 
 // 재질군별 강도 계수(상수 노출). 건물=온전, 소품/담장/동물=절제, 유기물(나무/풀/마당초목)=은은.
 // ground=0: 넓은 지면·수면은 패치는 유지하되(프로그램 분기 방지) 기여를 0 으로 눌러 제외한다.
-export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.7, ground: 0.0 };
+//
+// organic 0.7 → 0.15 (#35-1 비전 라운드, 2026-08-01 2차 판정으로 확정). 부감 A/B 실측에서
+// 유기물이 림을 **선이 아니라 면**으로 받고 있었다: 차분 최대 지점이 건물이 아니라 나무 한
+// 그루였고, 수관 상단 패싯이 초록을 잃고 불투명한 갈색 덩어리로 읽혔다(수도 부감 +33 루마,
+// 한양 진입에서는 전경 수관이 한옥 지붕보다 밝아 실루엣 위계가 역전).
+// 0.30 이 아니라 0.15 인 이유(2차 판정의 패싯 실측): 결함의 본질은 루마가 아니라 **색상 역전**이다
+// — rim OFF 에서 G−R +3.9(초록)인 그늘측 패싯이 0.30 에서도 G−R −14.9(적색 우세)로 남고, 루마도
+// 같은 나무의 햇빛 패싯(90.4)보다 밝아(94.1) 자체 명암 논리가 뒤집힌다. 역전 해소 임계는 k≈0.24
+// 이고 0.15 는 그 아래에서 G−R −5.5·L 85.3 으로 내려와 "안개에 참여한 그늘면"으로 읽힌다.
+// 과잉 억제 아님: 햇빛 패싯 ΔL 은 어느 계수에서도 0, 원경 숲은 세 계수 시각적으로 동일 —
+// 이 메커니즘은 수관에 회화적 가장자리 빛을 준 적이 없다. 이 계수는 전 각도에 평탄하게 걸리므로
+// 아래 RIM_GROUP_POWER_MUL 과 짝을 이룬다 — 계수는 수위, 지수는 형태를 담당한다.
+export const RIM_GROUP_MUL = { building: 1.5, misc: 1.0, organic: 0.15, ground: 0.0 };
+
+// 재질군별 프레넬 지수 배수 (uRimPower × 이 값).
+//
+// 유기물의 실패는 거리가 아니라 **기하**였다. 면 범람 비율이 마을 부감 0% → 마을 드론 18% →
+// 수도 부감 29% → 수도 드론 37% → 한양 진입 80.6% 로, 유기물이 **가까울수록** 선에서 면으로
+// 퇴화한다. 저폴리 수관의 큰 평면 패싯이 그레이징 각에서 통째로 범람하는 것이라 거리 페이드를
+// 조여도 해결되지 않고, 계수만 내리면 전 각도가 똑같이 어두워져 실루엣 선까지 함께 죽는다.
+//
+// 지수를 유기물에만 올리면 그 평탄한 인하가 형태를 얻는다(현행 0.7·×1 대비, sunset uRimPower 4.92):
+//   접선 에지 ndv 0.02 → 40%   얇은 에지 0.06 → 34%   패싯 0.20 → 18%   넓은 패싯 0.32 → 9%
+// 즉 진짜 실루엣 선은 계수만 적용한 43% 에서 거의 내려가지 않고(43→40%), 범람을 만드는 중간
+// 각도 대역만 무너진다. 건물 대비로는 접선 에지 0.185 · 패싯 0.064 로 위계가 각도에 따라 벌어진다
+// (종전에는 0.467 로 각도와 무관하게 일정했다 — 그래서 면이 건물 선과 같은 밝기로 떴다).
+//
+// 지수는 재질군별 **uniform** 이다. 셰이더 소스는 하나이므로 재질군·프로그램 패밀리가 늘지 않는다
+// (RIM_GROUP_MUL 과 같은 설계 — 아래 groupUniforms 주석 참조). 지수가 오르면 fwidth(_fres) 도
+// 함께 커져 RIM_FRESNEL_AA 의 스티플 감쇠가 자동으로 더 걸린다.
+export const RIM_GROUP_POWER_MUL = { building: 1.0, misc: 1.0, organic: 1.8, ground: 1.0 };
 
 // Silhouette gate: full strength to ~6° of the tangent, closed by ~25° so a continuous eave /
 // wall edge reads while a broad plaster plane stays a surface (not a wash).
@@ -136,6 +166,53 @@ export function rimDistanceGateForFov(fovDegrees, referenceFov = VILLAGE_LENS.pa
 export const RIM_DISTANCE_GATE = Object.freeze(
   rimDistanceGateForFov(VILLAGE_LENS.parcel.fov),
 );
+
+// Framing-aware extension of that lens band.
+//
+// rimDistanceGateForFov answers "how far does this *lens* dolly the camera for the same subject".
+// It cannot answer "how far away is the subject", and at wide angle it clamps to the parcel-lens
+// floor — so the shipped band was a constant 35–253 m at every fov and every settlement tier.
+// A hanyang drone/aerial camera stands 300–470 m from what it frames (measured: crane-in 464 m,
+// pullback-reveal 432 m), so the subject itself fell *past* `far` and the distance fade multiplied
+// the rim by exactly 0. The band therefore also follows the live camera→subject distance d, and
+// only ever **extends** the lens band (max), so every close/hero framing keeps its shipped numbers:
+//
+//   near = max(lensNear, d * subjectPull)      full strength up to just short of the subject
+//   far  = max(lensFar,  near + d * bandSpan)  the background behind the subject fades out
+//
+// Both terms are proportional to d, so the fade a subject at its own depth receives is
+// scale-invariant: t = (1 - 0.62) / 1.30 = 0.292 → ~0.79 of full rim at any tier and any framing,
+// the same way village-fog-band.js fixes the far-edge fog *factor* instead of the metres. A ridge
+// one terrain radius behind the subject lands near or past `far` at every tier, and whatever
+// survives there is still washed by the (1 - fogFactor) term below, which is scale-aware for
+// exactly the same reason.
+export const RIM_VIEW_BAND = Object.freeze({ subjectPull: 0.62, bandSpan: 1.30 });
+export function rimDistanceGate(
+  fovDegrees,
+  viewDistance,
+  referenceFov = VILLAGE_LENS.parcel.referenceFov,
+) {
+  const lens = rimDistanceGateForFov(fovDegrees, referenceFov);
+  if (!(Number.isFinite(viewDistance) && viewDistance > 0)) return lens;
+  const near = Math.max(lens.near, viewDistance * RIM_VIEW_BAND.subjectPull);
+  return { near, far: Math.max(lens.far, near + viewDistance * RIM_VIEW_BAND.bandSpan) };
+}
+
+// Focus-context master for uRimScale.
+//
+// The old policy was binary — aerial 0, focus 1 — because the screen-space RimPass re-submitted
+// the whole scene every frame and had to be gated off at village/hanyang scale. That reason died
+// with the material Fresnel path (see this file's header: additional geometry submissions 0), but
+// the zero survived in the product policy, so every aerial and cinematic frame shipped with the
+// flagship rim switched off — measured as exactly 0 rim add on 32/32 captured drone frames.
+//
+// Aerial now keeps a floor rather than a zero: the backlit golden-hour rim is the unifier the
+// whole look is built on (docs/look-grammar.md §2-1, §5 "성능을 이유로 통합자를 끄는 것" 금지), and
+// it stays optically real either way — the sun-elevation gate in post.js and the per-fragment
+// solar gates above still erase it at noon and in front light. It sits *below* focus because an
+// aerial frame is mostly organic canopy and small distant roofs, where full strength reads as
+// sparkle instead of as one continuous eave line.
+export const RIM_CONTEXT_MASTER = Object.freeze({ focus: 1.0, aerial: 0.75 });
 
 // Axial defocus damp (same units as BokehPass focus = -viewZ metres). amount=0 leaves inert.
 export const RIM_DOF_GATE = Object.freeze({
@@ -240,6 +317,13 @@ export function createFresnelRim(scene) {
     organic: { value: RIM_GROUP_MUL.organic },
     ground: { value: RIM_GROUP_MUL.ground },
   };
+  // 같은 이유로 프레넬 지수 배수도 재질군별 uniform 이다(리터럴로 구우면 프로그램 캐시키가 겹친다).
+  const groupPowerUniforms = {
+    building: { value: RIM_GROUP_POWER_MUL.building },
+    misc: { value: RIM_GROUP_POWER_MUL.misc },
+    organic: { value: RIM_GROUP_POWER_MUL.organic },
+    ground: { value: RIM_GROUP_POWER_MUL.ground },
+  };
   // Shared across all non-tile materials (1) vs tile fields (RIM_TILE_SURFACE_MUL). Same program.
   const tileSurfaceMulFull = { value: 1.0 };
   const tileSurfaceMulDamp = { value: RIM_TILE_SURFACE_MUL };
@@ -310,6 +394,7 @@ export function createFresnelRim(scene) {
     // true LOD roots only — plain+rim and lod+rim must not fork WebGLProgram families.
     patchLodScreenDoorMaterial(mat);
     const groupUniform = groupUniforms[group] || groupUniforms.misc;
+    const groupPowerUniform = groupPowerUniforms[group] || groupPowerUniforms.misc;
     const tileSurfaceUniform = TILE_SURFACE_KEYS.has(mat.userData.paletteKey)
       ? tileSurfaceMulDamp
       : tileSurfaceMulFull;
@@ -346,6 +431,7 @@ export function createFresnelRim(scene) {
       shader.uniforms.uRimDofFar = u.uRimDofFar;
       shader.uniforms.uRimDofFloor = u.uRimDofFloor;
       shader.uniforms.uRimGroupMul = groupUniform;
+      shader.uniforms.uRimGroupPowerMul = groupPowerUniform;
       shader.uniforms.uRimTileMul = tileSurfaceUniform;
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
@@ -363,6 +449,7 @@ export function createFresnelRim(scene) {
           uniform float uRimDofFar;
           uniform float uRimDofFloor;
           uniform float uRimGroupMul;
+          uniform float uRimGroupPowerMul;
           uniform float uRimTileMul;`)
         .replace('#include <lights_fragment_begin>', `
           vec3 _rimMainSunUnshadowed = vec3(0.0);
@@ -377,7 +464,8 @@ export function createFresnelRim(scene) {
             vec3 _rn = nonPerturbedNormal;
             vec3 _rv = normalize(vViewPosition);              // 표면→카메라(뷰공간)
             float _ndv = clamp(dot(_rn, _rv), 0.0, 1.0);
-            float _fres = pow(1.0 - _ndv, uRimPower);
+            // 지수는 재질군별(uRimGroupPowerMul): 유기물만 올려 큰 평면 패싯 대신 실루엣만 훑는다.
+            float _fres = pow(1.0 - _ndv, uRimPower * uRimGroupPowerMul);
             // (1) Fresnel AA — high-frequency grazing damp (fwidth). Continuous eaves pass more.
             float _ndvW = fwidth(_ndv);
             float _nW = length(fwidth(_rn));
@@ -408,9 +496,10 @@ export function createFresnelRim(scene) {
             // Distance fade (far ridges) + (3) axial defocus damp (neighbour DoF sparkle).
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
             // (4) #31-4 — the rim participates in the atmosphere.
-            // uRimNear/Far is a **scale-blind** band: rimDistanceGateForFov clamps to the parcel-lens
-            // floor (1.448) at every fov, so the ramp is a fixed 35–253 m in every framing and at
-            // every settlement tier. scene.fog is not: the village band spans terrainR * 3.4
+            // The uRimNear/Far band was **scale-blind** when this term was added: rimDistanceGateForFov
+            // clamps to the parcel-lens floor (1.448) at every fov, so the ramp was a fixed 35–253 m in
+            // every framing and at every settlement tier (rimDistanceGate now follows the live
+            // camera→subject distance too). scene.fog was never fixed: the village band spans terrainR * 3.4
             // (village 551 m, capital 803 m, hanyang 1292 m). So the larger the tier, the longer the
             // rim highlight outlives the fog that is supposed to wash the surface under it.
             // Measured rim-residual ÷ fog-wash at 150 m view depth: village 1.78x, capital 2.60x,
@@ -492,6 +581,30 @@ export function createFresnelRim(scene) {
         misc: groupUniforms.misc.value,
         organic: groupUniforms.organic.value,
         ground: groupUniforms.ground.value,
+      };
+    },
+    // 재질군 계수·지수 런타임 변경(검증 전용). 제품 경로는 상수를 그대로 쓰고 이 setter 를 부르지
+    //   않는다 — 같은 카메라 포즈에서 계수/지수만 바꾼 A/B 프레임을 얻기 위한 uniform 쓰기다.
+    //   uniform 값만 바뀌므로 프로그램은 재컴파일되지 않는다.
+    setGroupMultipliers(partial = {}) {
+      for (const key of Object.keys(groupUniforms)) {
+        const value = partial[key];
+        if (Number.isFinite(value)) groupUniforms[key].value = Math.max(0, value);
+      }
+    },
+    setGroupPowerMultipliers(partial = {}) {
+      for (const key of Object.keys(groupPowerUniforms)) {
+        const value = partial[key];
+        if (Number.isFinite(value) && value > 0) groupPowerUniforms[key].value = value;
+      }
+    },
+    // 재질군별 프레넬 지수 배수(검증 판독). 값이 클수록 그 재질군은 면이 아니라 선만 받는다.
+    get groupPowerMultipliers() {
+      return {
+        building: groupPowerUniforms.building.value,
+        misc: groupPowerUniforms.misc.value,
+        organic: groupPowerUniforms.organic.value,
+        ground: groupPowerUniforms.ground.value,
       };
     },
     // 패치 자체는 되돌리지 않되(셰이더는 무해히 잔존), 강도·마스터를 0 으로 눌러 잔여 림 소거.

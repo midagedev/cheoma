@@ -103,6 +103,7 @@
     "check:dangsan": "node tools/check-dangsan-plan.mjs",
     "check:rim": "node tools/run-browser-locked.mjs -- node tools/check-rim-facing.mjs",
     "check:rim-gate": "node tools/check-rim-gate.mjs",
+    "check:rim-master": "node tools/check-rim-master.mjs",
     "check:surface": "node tools/check-surface-materials.mjs",
     "check:surface:browser": "node tools/run-browser-locked.mjs -- node tools/check-surface-browser-suite.mjs",
     "check:palette-provider": "node tools/check-palette-provider.mjs",

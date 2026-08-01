@@ -78,6 +78,14 @@ assert.deepEqual(ids(['src/env/village-fog-band.js'], {
 assert.deepEqual(ids(['tools/check-village-fog-band.mjs'], {
   newPaths: ['tools/check-village-fog-band.mjs'],
 }), ['core']);
+// #35-1 부감·시네마틱 역광 림: 정책 분리·거리 밴드 계약은 순수 core, 증거 수집 하네스는
+//   캡처-온리라 소유 게이트가 없다(둘 다 reviewed new path 라 full 로 낙하하지 않는다).
+assert.deepEqual(ids(['tools/check-rim-master.mjs'], {
+  newPaths: ['tools/check-rim-master.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/shoot-rim-aerial.mjs'], {
+  newPaths: ['tools/shoot-rim-aerial.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
   newPaths: ['src/village/forest-canopy-atten.js'],
 }), ['core', 'app', 'worker']);

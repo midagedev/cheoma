@@ -1,6 +1,9 @@
 // 환경·후처리 공개 API. browser/WebGL runtime용이다.
 export { setupEnvironment, createFocusRing, setupGrass } from '../env/index.js';
 export { setupPost } from '../env/post.js';
+// 역광 림의 focus 문맥 가중치. 제품 정책(부감 vs focus)이 이 값으로 마스터를 다이얼한다 —
+//   림 on/off 는 별개 축(setRimEnabled)이므로 부감이 림을 끄지 않는다.
+export { RIM_CONTEXT_MASTER } from '../env/rim.js';
 // 기하 에지 MSAA 샘플 프로파일. 소비자(앱)가 디바이스 등급으로 골라 setupPost 에 넘긴다.
 export {
   MSAA_SAMPLES_COMPACT,

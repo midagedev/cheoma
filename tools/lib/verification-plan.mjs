@@ -201,6 +201,11 @@ const REVIEWED_NEW_PATHS = new Set([
   // #30 감상 모드(드론·도보) 캡처 하네스 — 판정 없는 프레임·수치 수집 전용, 게이트 아님
   // (shoot-clip-stages 와 같은 캡처-온리 라우팅).
   'tools/shoot-cine.mjs',
+  // #35-1 부감·시네마틱 역광 림 마스터/거리 밴드. 정책 분리와 밴드 산술은 브라우저 없이
+  //   판정되고 tools/check-rim-master.mjs 가 core 게이트에서 소유한다(실측 부감 거리 픽스처 포함).
+  //   shoot-rim-aerial 은 살아 있는 유니폼·프로그램 델타·OFF/ON 프레임을 남기는 캡처-온리다.
+  'tools/check-rim-master.mjs',
+  'tools/shoot-rim-aerial.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -300,6 +305,8 @@ function routePath(path) {
     // #30 감상 모드 캡처 하네스 — 판정 없는 프레임·수치 수집 전용이라 소유 게이트가 없다
     // (빈 배열이라도 이 맵에 있어야 아래 tools/ 폐쇄 낙하를 타지 않는다).
     'tools/shoot-cine.mjs': [],
+    // #35-1 부감 역광 림 증거 수집기 — 같은 캡처-온리 라우팅(수치 계약은 check-rim-master).
+    'tools/shoot-rim-aerial.mjs': [],
   };
   if (browserToolGates[path]) {
     select('existing browser contract changed; run its owning gate', ...browserToolGates[path]);

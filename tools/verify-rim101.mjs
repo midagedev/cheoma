@@ -10,6 +10,15 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
+// 계수 기대값의 단일 진실원(#35-1) — rim.js 의 RIM_GROUP_MUL 리터럴. 직접 import 는 루트 노드가
+//   bare 'three' 를 해석하지 못해 불가하고(three 는 app/node_modules 소유), esbuild alias 번들은
+//   이 수동 하네스에 과하다. 리터럴 한 줄을 파싱한다 — 형태가 바뀌면 여기서 즉시 throw 한다.
+const RIM_GROUP_MUL = await readFile(new URL('../src/env/rim.js', import.meta.url), 'utf8')
+  .then((src) => {
+    const m = src.match(/export const RIM_GROUP_MUL = (\{[^}]*\});/);
+    if (!m) throw new Error('rim.js 에서 RIM_GROUP_MUL 리터럴을 찾지 못했다 — 파서를 갱신할 것');
+    return Function(`"use strict"; return (${m[1]});`)();
+  });
 
 const ROOT = resolve(import.meta.dirname, '..');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
@@ -216,21 +225,25 @@ await open('rim=fresnel&time=sunset&season=summer');
   ok(cov.building >= 4, `건물 재질 패치 ${cov.building} (>=4)`);
   ok(cov.organic >= 2, `유기물(나무+풀) 재질 패치 ${cov.organic} (>=2: 나무·풀 공유재질)`);
   ok(cov.misc >= 5, `소품·동물·담장 재질 패치 ${cov.misc} (>=5)`);
+  // 계수 기대값은 rim.js 상수에서 파생한다(#35-1 비전 판정으로 0.7→0.30→0.15 두 번 움직였다 —
+  //   리터럴을 구우면 판정 때마다 이 하네스가 스테일해진다). focusGrass 도 ORGANIC_NAMES 소속이라
+  //   나무와 같은 유기물 계수를 받는다(종전 0.7 기대는 organic 인하 전 값이 남은 스테일).
+  const ORGANIC_MUL = RIM_GROUP_MUL.organic;
   ok(
-    ri.groupMultipliers?.building === 1.5
-      && ri.groupMultipliers?.misc === 1
-      && ri.groupMultipliers?.organic === 0.7,
-    `재질군 림 uniform 계수 ${JSON.stringify(ri.groupMultipliers)} (프로그램 변형 없이 1.5/1/0.7)`,
+    ri.groupMultipliers?.building === RIM_GROUP_MUL.building
+      && ri.groupMultipliers?.misc === RIM_GROUP_MUL.misc
+      && ri.groupMultipliers?.organic === ORGANIC_MUL,
+    `재질군 림 uniform 계수 ${JSON.stringify(ri.groupMultipliers)} (프로그램 변형 없이 ${RIM_GROUP_MUL.building}/${RIM_GROUP_MUL.misc}/${ORGANIC_MUL})`,
   );
   // 나무 재질 실제 패치
   const treeRows = rows.filter((r) => r.parent === 'trees');
   ok(treeRows.length > 0 && treeRows.every((r) => r.patched), `나무(trees) 재질 전부 패치 (${treeRows.length}개 인스턴스)`);
   ok(treeRows.some((r) => r.flat), `나무 flatShading 재질 패치 성공(vNormal 미선언 함정 회피)`);
-  ok(treeRows.every((r) => r.rimMul === 0.7), `나무 실제 shader uniform 계수 0.7`);
+  ok(treeRows.every((r) => r.rimMul === ORGANIC_MUL), `나무 실제 shader uniform 계수 ${ORGANIC_MUL} (#35-1 면 범람 억제)`);
   // 풀 재질 패치
   const grassRows = rows.filter((r) => r.name === 'focusGrass');
   ok(grassRows.length > 0 && grassRows.every((r) => r.patched), `풀(focusGrass) 재질 패치`);
-  ok(grassRows.every((r) => r.rimMul === 0.7), `풀 실제 shader uniform 계수 0.7`);
+  ok(grassRows.every((r) => r.rimMul === ORGANIC_MUL), `풀 실제 shader uniform 계수 ${ORGANIC_MUL} (organic 공유)`);
   // 소품 재질 패치(props-test 하위, flat granite 포함)
   const propRows = rows.filter((r) => { let p = r; return r.parent && r.name !== '' ; });
   const patchedProps = rows.filter((r) => r.patched && r.type === 'MeshStandardMaterial' && !r.role && !r.hanji && r.parent !== 'trees' && r.name !== 'focusGrass');

@@ -40,7 +40,7 @@ import {
   resolvePostProfile,
 } from './atmosphere-profiles.js';
 import { resolveMoonBloomGate } from './moon-optics.js';
-import { createFresnelRim, rimDistanceGateForFov } from './rim.js';
+import { createFresnelRim, rimDistanceGate, RIM_CONTEXT_MASTER } from './rim.js';
 import { createDofController, DEFAULT_DOF_APERTURE } from './dof.js';
 import { StableBokehPass } from './stable-bokeh-pass.js';
 import {
@@ -605,10 +605,19 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
 
   let disposed = false;
   let enabled = true;
-  let rimOn = true;                 // setRimEnabled 마스터(부감 OFF·focus ON). fresnel=uRimScale, pass=rimPass.enabled
+  // 림 마스터는 두 개의 독립 축이다(종전엔 한 불리언이 둘을 겸했다).
+  //   rimOn    — 림 자체의 on/off. A/B 검증(window.__rim.setEnabled)·`?rim=pass` 폴백·post OFF 소유.
+  //   rimMaster— focus 문맥 가중치(RIM_CONTEXT_MASTER: focus 1.0 / 부감 0.75). 0 이 아니다 —
+  //              부감·시네마틱에서 시그니처 역광 림이 통째로 죽던 원인이 이 축의 0 이었다(rim.js).
+  let rimOn = true;
+  let rimMaster = RIM_CONTEXT_MASTER.focus;
   let rimBase = 0;                  // cur.rim × altGate(저고도); 실제 역광 기하는 rim.js 소유
+  // 카메라→피사체 거리(m). 소비자(앱 engine)가 매 프레임 넘긴다. 0/미지정이면 렌즈 파생 밴드만 쓴다.
+  let rimViewDistance = 0;
   let scanTick = 0;                 // fresnel 재질 self-heal 스캔 카운터(마을 리롤·focus-in 새 재질 포착)
-  function updateRimScale() { if (fresnelRim) fresnelRim.setScale((enabled && rimOn) ? 1 : 0); }
+  function updateRimScale() {
+    if (fresnelRim) fresnelRim.setScale((enabled && rimOn) ? rimMaster : 0);
+  }
   let glowIntensity = 0;
   const _v = new THREE.Vector3();
   const _sunProj = new THREE.Vector3();
@@ -780,9 +789,11 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       //   RIM_BASE_ENERGY_CAP×groupMul 이 여전히 상한을 잡는다(check:rim sunset peak 계약).
       fresnelRim.setSunViewDir(_v);
       fresnelRim.setStrength(enabled ? rimBase * 1.85 : 0);
-      // Live FOV distance gate: hero 7° dolly (~170 m) must keep the subject inside the
-      // full-strength band. Parcel-only scaling left settle at ~33% rim (dead eave kick).
-      const gate = rimDistanceGateForFov(camera.fov);
+      // Live distance gate: the lens term keeps the hero 7° dolly (~170 m) inside the
+      // full-strength band (parcel-only scaling left settle at ~33% rim, a dead eave kick), and
+      // the camera→subject term keeps a 300–470 m aerial/drone framing inside it at all
+      // (that band ended at 253 m for every fov, so hanyang aerial rim was multiplied by 0).
+      const gate = rimDistanceGate(camera.fov, rimViewDistance);
       fresnelRim.setNearFar(gate.near, gate.far);
       // Neighbour-rim DoF damp retired for energy: amount=1 was a CoC-independent
       // −8–11% frame tax and −50..−70 bright-band death (vision round 2) even when
@@ -799,6 +810,8 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       const len = Math.hypot(_v.x, _v.y);
       if (len > 1e-4) rimPass.uniforms.sunScreenDir.value.set(_v.x / len, _v.y / len);
       rimPass.uniforms.backlit.value = passBacklit;
+      // 구 스크린패스도 같은 focus 문맥 가중치를 받는다(applyPS 는 시간대 전환에만 도니 여기서 매 프레임).
+      rimPass.uniforms.rimStrength.value = rimBase * rimMaster;
     }
 
     // ── 태양 렌즈 플레어(#67): 스크린 위치·강도 갱신 ─────────────────────────
@@ -904,16 +917,33 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
   }
   // 플레어 패스 온/오프(부감 OFF·A/B 검증). 기본값 ON.
   function setFlareEnabled(v) { flarePass.enabled = !!v; }
-  // 림 온/오프(부감 OFF·focus ON). 계약 불변(engine setPostFocus 가 호출).
+  // 림 자체의 on/off 축. **제품 focus 정책은 더 이상 이것을 부르지 않는다** — 부감은 마스터
+  //   가중치만 내린다(setRimMaster). 남은 호출자는 A/B 검증 훅(window.__rim.setEnabled),
+  //   `?rim=pass` 폴백, setEnabled(post 전체 OFF)이다.
   //   fresnel(기본): uRimScale 마스터만 토글 — 매 프레임 씬 재렌더가 없어 성능 부담 없음
   //     (구 방식의 'RimPass OFF = 지오 2배 제출 회피' 이유 소멸). flare depth 는 rim 과 독립
   //     (FlarePass 자체 렌더)이라 rim OFF 시 flare 스테일 depth 결합 함정(#75)도 없음.
-  //   pass(?rim=pass): 구 방식 rimPass.enabled 토글 — 이 경우 rim OFF 시 flare depth 스테일이라
-  //     engine 이 flare 도 동반 OFF 해야 한다(setPostFocus 가 이미 그렇게 함).
+  //   pass(?rim=pass): 구 방식 rimPass.enabled 토글. 부감에서도 패스가 살아 있게 됐으므로
+  //     이 폴백 경로는 도성 규모에서 지오 2배 제출을 그대로 낸다 — A/B 진단용 경로의 대가로
+  //     받아들인다(제품 경로는 fresnel 이다). rim OFF 시 flare depth 가 스테일이라 engine 이
+  //     flare 도 동반 OFF 해야 하는 조건은 그대로다(setPostFocus 가 이미 그렇게 함).
   function setRimEnabled(on) {
     rimOn = !!on;
     if (useFresnel) updateRimScale();
     else rimPass.enabled = !!on;
+  }
+  // focus 문맥 가중치(0..1). enable 축과 독립이다 — 부감 정책은 이 값을 내리기만 하고 림을 끄지
+  //   않는다(rim.js RIM_CONTEXT_MASTER). fresnel 은 uRimScale, pass 는 update() 의 rimStrength.
+  function setRimMaster(weight) {
+    rimMaster = Number.isFinite(weight) ? Math.min(1, Math.max(0, weight)) : RIM_CONTEXT_MASTER.focus;
+    if (useFresnel) updateRimScale();
+    return rimMaster;
+  }
+  // 카메라→피사체 거리(m). 규모 인지 거리 밴드의 입력 — 소비자가 매 프레임 갱신한다(engine
+  //   syncCameraDependentEnvironment). 미지정·비정상이면 렌즈 파생 밴드로 폴백한다.
+  function setRimViewDistance(distance) {
+    rimViewDistance = Number.isFinite(distance) && distance > 0 ? distance : 0;
+    return rimViewDistance;
   }
 
   // 초기 재질 패치(scene 에 이미 건물이 있으면 즉시). 이후 update() 의 throttle 스캔이 self-heal.
@@ -939,10 +969,24 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
       get coverage() { return fresnelRim ? fresnelRim.coverage : null; },  // + cloudShadow/cloudRoof composition
       get groupMultipliers() { return fresnelRim ? fresnelRim.groupMultipliers : null; },
       get strength() { return useFresnel ? fresnelRim.uniforms.uRimStrength.value : (rimPass ? rimPass.uniforms.rimStrength.value : 0); },
-      get scale() { return useFresnel ? fresnelRim.uniforms.uRimScale.value : (rimPass && rimPass.enabled ? 1 : 0); },
+      get scale() { return useFresnel ? fresnelRim.uniforms.uRimScale.value : (rimPass && rimPass.enabled ? rimMaster : 0); },
+      get master() { return rimMaster; },
+      // 재질군 계수·지수 A/B(검증 전용). 같은 포즈에서 유기물 위계만 바꿔 프레임을 비교한다.
+      setGroups: (mul, powerMul) => {
+        if (!fresnelRim) return null;
+        if (mul) fresnelRim.setGroupMultipliers(mul);
+        if (powerMul) fresnelRim.setGroupPowerMultipliers(powerMul);
+        return {
+          groupMultipliers: fresnelRim.groupMultipliers,
+          groupPowerMultipliers: fresnelRim.groupPowerMultipliers,
+        };
+      },
+      get groupPowerMultipliers() { return fresnelRim ? fresnelRim.groupPowerMultipliers : null; },
+      get viewDistance() { return rimViewDistance; },
       get near() { return useFresnel ? fresnelRim.uniforms.uRimNear.value : null; },
       get far() { return useFresnel ? fresnelRim.uniforms.uRimFar.value : null; },
       setEnabled: setRimEnabled,
+      setMaster: setRimMaster,
       rescan() { if (fresnelRim) fresnelRim.apply(scene); },
       drawCalls() { return renderer.info.render.calls; },
     };
@@ -972,7 +1016,7 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
     get fillScale() { return fillScale; },
     setDof, setDofAmount, setDofAperture, setDofTilt, setDofAmountFloor,
     setFocus, setFocusPoint,
-    setEnabled, setWeather, setFlareEnabled, setRimEnabled,
+    setEnabled, setWeather, setFlareEnabled, setRimEnabled, setRimMaster, setRimViewDistance,
     renderPass, gradePass, bloomPass, rimPass, flarePass, bokehPass, outputPass,
     sunGlow, fresnelRim,
     dof,

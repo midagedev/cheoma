@@ -33,6 +33,8 @@ import {
   RIM_DOF_GATE,
   RIM_FACING_GATE,
   RIM_FRESNEL_AA,
+  RIM_GROUP_MUL,
+  RIM_GROUP_POWER_MUL,
   RIM_SOLAR_GATE,
 } from '/src/env/rim.js';
 import { injectCloudShadow } from '/src/builder/palette.js';
@@ -288,6 +290,8 @@ function facingProbe() {
     fresnelAa: RIM_FRESNEL_AA,
     dofGate: RIM_DOF_GATE,
     energyCap: RIM_BASE_ENERGY_CAP,
+    // 유기물 상한 판정은 노드 쪽에서 하지만 rim.js 임포트는 이 in-page 모듈에만 있다 → 값을 실어 보낸다.
+    organicMul: RIM_GROUP_MUL.organic,
     sunsetPeak,
     chainKept: patch.fragment.includes('CHEOMA_RIM_CHAIN_MARKER'),
     cloudFragmentInjected: patch.fragment.includes('uCloudStr'),
@@ -403,6 +407,10 @@ function instanceAndProgramProbe() {
     openingPatched: !!openingMaterial.userData.__rimPatched,
     organicMul: readPatch(renderer, organicMaterial).mul,
     villageOrganicMuls: villageOrganicMaterials.map((m) => readPatch(renderer, m).mul),
+    // 재질군별 프레넬 지수 배수(#35-1) — 유기물만 상향해 면이 아니라 선만 받게 한다.
+    groupPowerMultipliers: rim.groupPowerMultipliers,
+    expectedOrganicMul: RIM_GROUP_MUL.organic,
+    expectedOrganicPowerMul: RIM_GROUP_POWER_MUL.organic,
     // 지면은 패치를 유지해야 한다(프로그램 분기 방지) — 계수만 0.
     groundPatched: groundMaterials.map((m) => !!m.userData.__rimPatched),
     groundMuls: groundMaterials.map((m) => readPatch(renderer, m).mul),
@@ -625,8 +633,9 @@ try {
   check(result.facing.energyCap === 0.34, `base HDR rim cap ${result.facing.energyCap}`);
   check(Math.max(peak.r, peak.g, peak.b) <= 0.55 && peakLuma <= 0.34,
     `sunset 2.05×1.6 building edge stays warm/bounded (max=${Math.max(peak.r, peak.g, peak.b).toFixed(4)}, luma=${peakLuma.toFixed(4)})`);
-  check(result.facing.energyCap * 0.7 < 0.25,
-    `organic peak remains below 0.25 additive energy (${(result.facing.energyCap * 0.7).toFixed(3)})`);
+  // 유기물 상한은 계수 상수에서 파생한다(#35-1 에서 0.7 → 0.30). 리터럴을 다시 굽지 말 것.
+  check(result.facing.energyCap * result.facing.organicMul < 0.25,
+    `organic peak remains below 0.25 additive energy (${(result.facing.energyCap * result.facing.organicMul).toFixed(3)})`);
 
   console.log('\n=== shader and runtime contracts ===');
   check(result.facing.chainKept, 'pre-existing onBeforeCompile patch remains chained');
@@ -682,10 +691,17 @@ try {
     `role coverage ${JSON.stringify(contracts.coverage)}`);
   check(contracts.roleKept === 'roof' && !contracts.openingPatched,
     `role tag/opening exclusion preserved (${contracts.roleKept}, patched=${contracts.openingPatched})`);
-  check(contracts.organicMul === 0.7 && contracts.miscMul === 1,
+  check(contracts.organicMul === contracts.expectedOrganicMul && contracts.miscMul === 1,
     `shared shader keeps per-material multipliers organic=${contracts.organicMul} misc=${contracts.miscMul}`);
+  // #35-1: 계수는 수위, 지수는 형태다. 유기물 지수가 건물보다 높지 않으면 저폴리 수관의 큰 패싯이
+  //   그레이징에서 통째로 범람해 실루엣 선이 아니라 갈색 면으로 읽힌다(비전 A/B 실측).
+  check(
+    contracts.groupPowerMultipliers?.organic === contracts.expectedOrganicPowerMul
+      && contracts.groupPowerMultipliers.organic > contracts.groupPowerMultipliers.building,
+    `organic Fresnel exponent is raised above building (${JSON.stringify(contracts.groupPowerMultipliers)})`,
+  );
   // 마을 식생 그룹 이름이 organic 명단에 없으면 숲이 건물급 림을 받는다(docs/tree-look.md 0-3).
-  check(contracts.villageOrganicMuls.every((mul) => mul === 0.7),
+  check(contracts.villageOrganicMuls.every((mul) => mul === contracts.expectedOrganicMul),
     `village vegetation groups classify as organic (${JSON.stringify(contracts.villageOrganicMuls)})`);
   // 마을 지형·수면: 패치는 유지(프로그램 분기 방지)하고 계수만 0 — 광역 그레이징 워시 차단.
   check(contracts.groundPatched.every(Boolean) && contracts.groundMuls.every((mul) => mul === 0),

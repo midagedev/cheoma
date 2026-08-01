@@ -1024,6 +1024,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       lensScale,
     );
     env.setLensScale?.(lensScale);
+    // 역광 림 거리 밴드의 규모 인지 입력(src/env/rim.js rimDistanceGate). 렌즈만으로는 "피사체가
+    //   얼마나 먼가"를 알 수 없어 밴드가 모든 화각에서 35~253m 상수였고, 300~470m 에 서는 한양
+    //   부감·드론 프레임은 피사체 자체가 밴드 밖이라 림이 0 이었다. 여기가 카메라 종속 환경 정책의
+    //   단일 소유자이므로 부감·focus·드론·도보가 모두 같은 거리를 쓴다.
+    post.setRimViewDistance?.(physicalDistance);
     return { physicalDistance, physicalAltitude, visualDistance, visualAltitude, lensScale };
   }
 
@@ -1766,9 +1771,12 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     return villageCamera.restoreView(view);
   }
 
-  // 배율별 후처리(mode-integration §5): 마을 부감은 RimPass(매 프레임 씬 노멀 재렌더)가 도성 규모에서
-  // 60fps 위험이라 OFF. focus-in(집 근접)·단일건물 씬은 ON. rim OFF 시 FlarePass 가림 판정이 스테일
-  // depth 로 오작동하므로 flare 도 동반 토글. 부감엔 flare 불필요.
+  // 배율별 후처리(mode-integration §5): 부감은 flare OFF·DoF 0(마을 전체가 얕은 심도로 뭉개지지
+  // 않게), focus-in(집 근접)·단일건물 씬은 둘 다 ON.
+  //   림은 여기서 **끄지 않는다** — 부감 마스터는 0 이 아니라 RIM_CONTEXT_MASTER.aerial 가중치다.
+  //   구 규약이 rim 을 flare 와 함께 끈 근거는 RimPass 의 매 프레임 씬 재렌더였고 그 이유는 재질
+  //   프레넬 전환으로 소멸했는데 0 만 남아, 드론·부감 전 프레임에서 시그니처 역광 림이 죽어 있었다
+  //   (실측 32/32 프레임 가산 0). focus-policy-runtime.js 가 두 축을 분리해 소유한다.
   //   게이트 축은 focus 문맥 하나다 — 디바이스 분기는 없다. 종전의 `&& !perf` 는 폰에서 근접 보케와
   //   역광 플레어(이 앱의 서명 광학)를 통째로 지웠다(감사 M4·M8, look-grammar §5).
   function setPostFocus(focused, dofAmount = focused ? 1 : 0) {
@@ -2099,7 +2107,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
     camera.__houseReferenceFov = Number.isFinite(camera.userData.villageReferenceFov)
       ? camera.userData.villageReferenceFov : camera.fov;
-    setPostFocus(false);                 // 부감 진입 → RimPass·flare OFF(성능)
+    setPostFocus(false);                 // 부감 진입 → flare OFF·DoF 0(림은 부감 가중치로 유지)
     // 첫 진입은 동기(handle 無) → onReady 즉시 실행. 프레이밍 트윈을 onReady 로 두어 async 폴백에도 정합.
     buildVillage(() => { const f = villageAerial(); tweenTo(f.pos, f.target, 1.4, { fov: f.fov, referenceFov: f.referenceFov, onDone: settleVillageExplore }); });
     updateWeatherColliders();
@@ -2454,7 +2462,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       onDone: () => {
         village.transitioning = false;
         dispatchView('focusOutDone', { parcelId });
-        setPostFocus(false);              // 부감 도착 → rim/flare OFF(전환 중엔 유지해 팝 방지)
+        setPostFocus(false);              // 부감 도착 → flare OFF(전환 중엔 유지해 팝 방지)
         if (parcelId) village.handle.hideParcelDetail(parcelId);   // 부감 거리에서 오버레이 해제(팝 은닉)
         settleVillageExplore();
         emit('villageFocusMorph', 0);
@@ -3088,7 +3096,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     setFocusComposition(0);
     if (hoverParcel) { village.handle.highlightParcel(hoverParcel, false); hoverParcel = null; }
     village.reveal = null;    // 진입 reveal과 웨이브 fog가 같은 scene.fog를 동시에 소유하지 않게 한다.
-    setPostFocus(false);   // 부감 연출 — focus 잔재가 있어도 rim/flare OFF(성능·룩)
+    setPostFocus(false);   // 부감 연출 — focus 잔재가 있어도 flare OFF·DoF 0(림은 부감 가중치)
     setZoomRegime('lock');
     dispatchView('wave');   // #150-M: exclusive scenery handoff owns the view phase
     const oldHandle = village.handle;
@@ -3807,6 +3815,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       // 검증용(#93): 씬 기하 드로우콜 수(궁 편집 전/후·재생성 회귀 계측). 컴포저 최종 패스가
       //   info.render.calls 를 1(풀스크린 쿼드)로 덮으므로, 후처리 없는 씬 1회 렌더로 실측한다.
       debugDrawCalls: () => { renderer.render(scene, camera); return renderer.info.render.calls; },
+      // 전환 히치 진단용 — 이 레포에서 히치는 CPU 가 아니라 셰이더 **링크** 스톨이고 헤드리스 ANGLE 은
+      // 링크를 직렬화하므로 절대 프레임 ms 는 증거가 되지 못한다. 판정은 프로그램 수 델타로 한다.
+      // 순수 read 이며 렌더에 아무 영향이 없다.
+      debugProgramCount: () => renderer.info.programs?.length ?? -1,
       debugScreenOf(parcelId) {
         const pr = village.handle?.getPickProxy(parcelId);
         if (!pr) return null;
@@ -4269,6 +4281,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     'village.debugParcels': () => [],
     'village.debugDetailLod': () => null,
     'village.debugDrawCalls': () => 0,
+    'village.debugProgramCount': () => -1,
     'cine.start': () => false,
     'cine.isActive': () => false,
     'cine.available': () => false,
