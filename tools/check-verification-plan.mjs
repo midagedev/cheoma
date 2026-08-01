@@ -90,6 +90,19 @@ assert.deepEqual(ids(['tools/shoot-rim-aerial.mjs'], {
 assert.deepEqual(ids(['tools/check-fog-wash.mjs'], {
   newPaths: ['tools/check-fog-wash.mjs'],
 }), ['core']);
+// #38 픽셀 통계 공용 라이브러리: 순수 코드라 core 만 소유한다. 라이브러리 자체가 바뀌어도
+//   `tools/` 폐쇄 낙하(full)로 승격하지 않고 자기 계약만 다시 돈다.
+assert.deepEqual(ids(['tools/check-pixel-stats.mjs'], {
+  newPaths: ['tools/check-pixel-stats.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/lib/pixel-stats.mjs'], {
+  newPaths: ['tools/lib/pixel-stats.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['tools/lib/pixel-stats.mjs']), ['core']);
+// 같은 부팅 A/B 하네스는 판정하지 않는 캡처-온리라 소유 게이트가 없다.
+assert.deepEqual(ids(['tools/shoot-ab.mjs'], {
+  newPaths: ['tools/shoot-ab.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['src/village/forest-canopy-atten.js'], {
   newPaths: ['src/village/forest-canopy-atten.js'],
 }), ['core', 'app', 'worker']);

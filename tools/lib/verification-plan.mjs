@@ -210,6 +210,12 @@ const REVIEWED_NEW_PATHS = new Set([
   //   브라우저 없이 판정되고 tools/check-fog-wash.mjs 가 core 게이트에서 소유한다
   //   (네 노을 프로필 전부를 회귀 픽스처로 들고 있다).
   'tools/check-fog-wash.mjs',
+  // #38 픽셀 분석 공용 라이브러리와 같은 부팅 A/B 하네스. 라이브러리는 node 내장 zlib 만 쓰는
+  //   순수 코드라 tools/check-pixel-stats.mjs 가 core 게이트에서 소유하고(합성 픽스처 왕복 단언),
+  //   shoot-ab 는 판정 없는 캡처-온리다(shoot-cine·shoot-rim-aerial 과 같은 라우팅).
+  'tools/lib/pixel-stats.mjs',
+  'tools/check-pixel-stats.mjs',
+  'tools/shoot-ab.mjs',
 ]);
 
 function add(gates, ...items) {
@@ -253,6 +259,12 @@ function routePath(path) {
   }
   if (path === 'tools/check-share.mjs' || path === 'tools/check-scene-snapshot.mjs') {
     select('scene-share pure contract changed', 'share');
+    return { gates, reasons };
+  }
+  // #38 픽셀 통계 공용 라이브러리. 브라우저를 쓰지 않고, 소유 계약이 core 의 fast check 이므로
+  //   `tools/` 폐쇄 낙하(full 승격) 대신 그 계약만 다시 돌린다.
+  if (path === 'tools/lib/pixel-stats.mjs') {
+    select('shared pure pixel-statistics library changed; its contract is a core fast check', 'core');
     return { gates, reasons };
   }
   if (FAST_CHECK_PATHS.includes(path) || path === 'tools/plan-contract.json') {
@@ -311,6 +323,8 @@ function routePath(path) {
     'tools/shoot-cine.mjs': [],
     // #35-1 부감 역광 림 증거 수집기 — 같은 캡처-온리 라우팅(수치 계약은 check-rim-master).
     'tools/shoot-rim-aerial.mjs': [],
+    // #38 같은 부팅 A/B 표준 하네스 — 판정하지 않고 A/B 쌍·MANIFEST·차분 통계만 남긴다.
+    'tools/shoot-ab.mjs': [],
   };
   if (browserToolGates[path]) {
     select('existing browser contract changed; run its owning gate', ...browserToolGates[path]);
