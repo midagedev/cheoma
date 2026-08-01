@@ -249,6 +249,46 @@ export function bokehCocRadiusPx(scalePx, focus, z, maxCocPx, nearClip = 1e-4) {
   return Math.min(Math.abs(signed), cap);
 }
 
+/**
+ * Compact-source disc radius in pixels, from an already-signed CoC.
+ *
+ * The order of the two operations is the contract, not an implementation detail.
+ * maxCocFraction advertises the largest disc anything in the frame may spend, so
+ * the source multiplier goes *inside* the clamp: multiply first, clamp last.
+ * Clamping first (min(|coc|, maxCocPx) * radiusScale) made the real source bound
+ * maxCocPx * sourceRadiusScale — 2.8x the advertised one, i.e. 204px diameter at
+ * 4% / 900p, 22.6% of frame height — so any near compact emitter washed a fifth
+ * of the frame with one primitive while the gate still read 4%.
+ *
+ * Unlike the surface clamp, which binds the foreground only because the far
+ * asymptote is deliberately kept under it, this one binds both optical sides: it
+ * is a screen-coverage bound on one primitive, not part of the optics. Below the
+ * engage point (|coc| < maxCocPx / radiusScale) the full multiplier is still in
+ * force, which is what keeps the §8 lantern/window bokeh at its authored size.
+ */
+export function bokehSourceRadiusFromCocPx(signedCocPx, maxCocPx, radiusScale) {
+  const scale = Number.isFinite(radiusScale) && radiusScale > 0 ? radiusScale : 1;
+  const cap = Number.isFinite(maxCocPx) && maxCocPx > 0 ? maxCocPx : Infinity;
+  if (!Number.isFinite(signedCocPx)) return 0;
+  return Math.min(Math.abs(signedCocPx) * scale, cap);
+}
+
+/** Compact-source disc radius for one lens/depth. The JS twin of the scatter. */
+export function bokehSourceRadiusPx(
+  scalePx,
+  focus,
+  z,
+  maxCocPx,
+  radiusScale = BOKEH_COC_DEFAULTS.sourceRadiusScale,
+  nearClip = 1e-4,
+) {
+  return bokehSourceRadiusFromCocPx(
+    bokehSignedCocPx(scalePx, focus, z, nearClip),
+    maxCocPx,
+    radiusScale,
+  );
+}
+
 /** Background asymptote. Staying under maxCocPx is what keeps far unclamped. */
 export function bokehFarAsymptotePx(scalePx, focus) {
   if (!Number.isFinite(scalePx) || !Number.isFinite(focus) || focus <= 0) return 0;

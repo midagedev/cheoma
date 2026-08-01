@@ -230,6 +230,14 @@ float cocPx = clamp(abs(signedCoc), 0.0, maxCocPx);
 `maxCocPx`는 화면 높이 비율로 둔다(`maxCocFraction * viewportHeight`). §4.4에서 보듯 이 clamp는 **전경에만** 물린다 —
 배경 점근선이 clamp보다 낮으므로 far는 순수 물리 곡선을 끝까지 쓴다. 이것이 near/far 비대칭이 계약으로 보장되는 방식이다.
 
+**단, compact 소스 원반의 clamp는 예외다.** 소스 배수(`sourceRadiusScale`, §8)는 clamp **안쪽**에 들어간다 —
+`min(|signedCoc| * radiusScale, maxCocPx)`. 순서를 뒤집으면(`min(|signedCoc|, maxCocPx) * radiusScale`) 실제 소스 상한이
+광고된 `maxCocFraction`의 `radiusScale`배가 되어, 4 % / 900p에서 지름 204 px(화면 높이의 22.6 %)까지 한 프리미티브가 덮는다.
+이 clamp는 광학의 일부가 아니라 **한 프리미티브의 화면 점유 상한**이므로 전경·배경 양쪽에 물린다. 표면 clamp와 달리 그것이 의도다.
+소유자는 `bokehSourceRadiusFromCocPx()`(bokeh-coc-contract.js) 하나이며, `tools/check-dof.mjs`가 셰이더 식을 직접 평가해
+이 함수와 대조한다. 물림 지점(`|coc| < maxCocPx / radiusScale`, clamp의 36 %) 아래에서는 배수가 그대로 살아 있어
+§8의 등롱·창불 보케 크기는 변하지 않는다.
+
 ### 4.3 초기 파라미터 (초점 60 m · fov 16° 기준)
 
 | 파라미터 | 제안값 | 근거 |

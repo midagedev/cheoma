@@ -35,6 +35,7 @@ import {
   bokehLongFocusApertureMeters,
   bokehMaxCocPx,
   bokehSignedCocPx,
+  bokehSourceRadiusFromCocPx,
   bokehTiltFarAsymptoteHeadroom,
   decodeBokehCoc,
   encodeBokehCoc,
@@ -1187,7 +1188,6 @@ invariant(
     sourceScatterSource.includes(
       "cocScalePx * (gInvFocus - 1.0 / max(sourceDepth, nearClip))",
     ) &&
-    sourceScatterSource.includes("min(abs(signedCoc), maxCocPx) * radiusScale") &&
     sourceScatterSource.includes("uniform float cocScalePx;") &&
     sourceScatterSource.includes("uniform float maxCocPx;") &&
     sourceScatterSource.includes("uniform float tiltStrength;") &&
@@ -1196,13 +1196,150 @@ invariant(
   "source scatter kept the old linear blur curve instead of the shared CoC",
 );
 // Its point-size cap fallback must be bounded by the absolute clamped disc, not
-// by a maxblur/viewport-width product that grows with a wider window.
+// by a maxblur/viewport-width product that grows with a wider window. With the
+// source multiplier inside the clamp the largest disc a source can ever spend is
+// maxCocPx itself, so the promotion bound must no longer carry radiusScale — a
+// bound that still multiplies by it asks for a 2.8x larger point than any source
+// can request and promotes devices to triangles for nothing.
 invariant(
   sourceScatterSource.includes(
-    "(maxCocPx * radiusScale + 1.0) * BOKEH_SOURCE_CONTRACT.pointCoverage",
-  ),
+    "(maxCocPx + 1.0) * BOKEH_SOURCE_CONTRACT.pointCoverage",
+  ) && !/maxCocPx \* radiusScale \+ 1\.0/.test(sourceScatterSource),
   "source scatter point-size promotion stopped following the clamped CoC",
 );
+
+// ---------------------------------------------------------------------------
+// Compact-source disc bound. maxCocFraction advertises the largest disc anything
+// in the frame may spend; the source multiplier must therefore sit *inside* the
+// clamp. It used to sit outside it (min(|coc|, maxCocPx) * radiusScale), which
+// made the real source bound radiusScale times the advertised one — 204px of
+// diameter at 4% / 900p, 22.6% of frame height from one primitive — while every
+// gate here still read 4%.
+//
+// This block evaluates the scatter's own GLSL expression rather than a
+// transcription of it, so re-inverting the order in the shader fails here even
+// if the JS twin stays correct.
+// ---------------------------------------------------------------------------
+const sourceRadiusReturn = sourceScatterSource
+  .match(/float sourceRadiusAtDepth\(float sourceDepth\) \{([\s\S]*?)\n  \}/)?.[1]
+  ?.match(/return\s+([^;]+);/)?.[1]
+  ?.replace(/\s+/g, " ")
+  .trim();
+invariant(
+  sourceRadiusReturn,
+  "source scatter no longer returns a single readable disc-radius expression",
+);
+invariant(
+  /^[A-Za-z0-9_.,()*+\-/ ]+$/.test(sourceRadiusReturn) &&
+    (sourceRadiusReturn.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []).every((name) =>
+      ["min", "max", "abs", "clamp", "signedCoc", "maxCocPx", "radiusScale"].includes(
+        name,
+      ),
+    ),
+  `source disc radius expression left the evaluable contract set (${sourceRadiusReturn})`,
+);
+// eslint-disable-next-line no-new-func -- whitelisted above; GLSL min/abs are the JS ones.
+const shaderSourceRadius = new Function(
+  "signedCoc",
+  "maxCocPx",
+  "radiusScale",
+  "const min = Math.min, max = Math.max, abs = Math.abs;" +
+    "const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);" +
+    `return ${sourceRadiusReturn};`,
+);
+
+const SOURCE_DISC_LENSES = [
+  // Both product contexts where DoF is actually enabled: the parcel/focus
+  // telephoto and the hero settle lens with its long-focus aperture boost.
+  { name: "parcel 16deg", fov: PARCEL_FOV, focus: 55 },
+  { name: "hero settle 7deg", fov: HERO_FOV, focus: HERO_FOCUS },
+];
+// The hero near band is the case that saturated: a 7deg lens is past the clamp
+// for every depth from the near plane to the yard.
+const SOURCE_DISC_DEPTHS = [2, 5, 10, 20, 30, 40, 55, 120, 170, 221, 300, 600];
+const sourceScaleDial = BOKEH_COC_DEFAULTS.sourceRadiusScale;
+let worstSourceDiameter = 0;
+let worstSourceCase = "";
+let boostedSourceCases = 0;
+for (const viewportHeight of [720, 900, VIEWPORT_HEIGHT]) {
+  const cap = bokehMaxCocPx(viewportHeight, BOKEH_COC_DEFAULTS.maxCocFraction);
+  for (const lens of SOURCE_DISC_LENSES) {
+    const scalePx = bokehCocScalePx(
+      bokehLongFocusApertureMeters(BOKEH_COC_DEFAULTS.apertureMeters, lens.focus),
+      viewportHeight,
+      lens.fov,
+    );
+    for (const z of SOURCE_DISC_DEPTHS) {
+      const signed = bokehSignedCocPx(scalePx, lens.focus, z);
+      const shaderRadius = shaderSourceRadius(signed, cap, sourceScaleDial);
+      const contractRadius = bokehSourceRadiusFromCocPx(signed, cap, sourceScaleDial);
+      const where = `${lens.name} ${viewportHeight}p z=${z}m`;
+      // The advertised bound is a diameter of 2 * maxCocPx; the primitive adds
+      // the same one-pixel pad the vertex stage does.
+      const diameter = 2 * (shaderRadius + 1);
+      if (diameter > worstSourceDiameter) {
+        worstSourceDiameter = diameter;
+        worstSourceCase = where;
+      }
+      invariant(
+        shaderRadius <= cap + 1e-9,
+        `compact source disc escaped the advertised ${BOKEH_COC_DEFAULTS.maxCocFraction} ` +
+          `clamp at ${where}: radius ${shaderRadius.toFixed(2)}px against ` +
+          `maxCocPx ${cap.toFixed(2)}px (diameter ${diameter.toFixed(1)}px, ` +
+          `${((100 * diameter) / viewportHeight).toFixed(1)}% of frame height)`,
+      );
+      near(
+        shaderRadius,
+        contractRadius,
+        `source disc radius in the shader diverged from bokehSourceRadiusFromCocPx at ${where}`,
+        1e-9,
+      );
+      // Below the engage point the deliberate §8 multiplier must still be fully
+      // in force, or "fix the cap" degenerates into deleting lantern bokeh.
+      const surfaceRadius = bokehCocRadiusPx(scalePx, lens.focus, z, cap);
+      if (surfaceRadius * sourceScaleDial < cap - 1e-9) {
+        near(
+          shaderRadius,
+          surfaceRadius * sourceScaleDial,
+          `unclamped compact source lost its ${sourceScaleDial}x disc at ${where}`,
+          1e-9,
+        );
+        if (diameter >= 30) boostedSourceCases++;
+      }
+    }
+  }
+}
+invariant(
+  worstSourceDiameter <=
+    2 * (bokehMaxCocPx(VIEWPORT_HEIGHT, BOKEH_COC_DEFAULTS.maxCocFraction) + 1) + 1e-9,
+  `worst compact source disc ${worstSourceDiameter.toFixed(1)}px (${worstSourceCase}) ` +
+    "exceeded the advertised clamp at the tallest sampled viewport",
+);
+// The night-lantern intent is a regression fixture in its own right: unclamped
+// product depths must still produce discs an eye reads as discs, so a future
+// "cap fix" that merely drops radiusScale to 1 fails here.
+invariant(
+  boostedSourceCases >= 6,
+  `too few product depths keep a perceptible boosted lantern disc (${boostedSourceCases})`,
+);
+// Permanent statement of the defect's magnitude: clamping before the multiplier
+// bound the source at radiusScale times the advertised cap, on both optical
+// sides, at every depth past the clamp.
+{
+  const cap = bokehMaxCocPx(900, BOKEH_COC_DEFAULTS.maxCocFraction);
+  const preFixBound = cap * sourceScaleDial;
+  near(
+    preFixBound / cap,
+    sourceScaleDial,
+    "pre-fix source bound fixture stopped demonstrating the radiusScale overshoot",
+    1e-12,
+  );
+  invariant(
+    2 * (preFixBound + 1) > 900 * 0.2 &&
+      2 * (bokehSourceRadiusFromCocPx(1e6, cap, sourceScaleDial) + 1) < 900 * 0.1,
+    "the clamp-order fixture no longer separates a screen-washing disc from a bounded one",
+  );
+}
 
 const stableBokehSource = await readFile(
   new URL("../src/env/stable-bokeh-pass.js", import.meta.url),

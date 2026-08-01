@@ -42,6 +42,8 @@ import {
   bokehCocRadiusPx,
   bokehCocScalePx,
   bokehMaxCocPx,
+  bokehSourceRadiusFromCocPx,
+  bokehSignedCocPx,
 } from "../../src/env/bokeh-coc-contract.js";
 import { ENERGY_RADIUS } from "./bokeh-image-analysis.mjs";
 
@@ -136,13 +138,18 @@ export function bokehSurfaceDiscRadiusPx(optics, axialDepth) {
  * Compact-source disc radius in pixels, i.e. exactly what
  * bokeh-source-scatter.js#sourceRadiusAtDepth computes:
  *
- *   min(|cocScalePx * (1/focus - 1/z)|, maxCocPx) * radiusScale
+ *   min(|cocScalePx * (1/focus - 1/z)| * radiusScale, maxCocPx)
  *
- * The clamp is applied before the source multiplier in the shader, so it is
- * applied before it here as well.
+ * The source multiplier is applied inside the clamp in the shader, so it is
+ * applied inside it here as well — bokehSourceRadiusFromCocPx is the one owner
+ * of that order, and check-dof.mjs pins the shader against it.
  */
 export function bokehSourceDiscRadiusPx(optics, axialDepth, radiusScale) {
-  return bokehSurfaceDiscRadiusPx(optics, axialDepth) * radiusScale;
+  return bokehSourceRadiusFromCocPx(
+    bokehSignedCocPx(optics.cocScalePx, optics.focus, axialDepth),
+    optics.maxCocPx,
+    radiusScale,
+  );
 }
 
 /**

@@ -353,10 +353,22 @@ export const BOKEH_SCATTER_VERTEX_SHADER = /* glsl */ `
   // disc the eye expects of a point light, and it holds the existing lantern
   // bokeh and the point-size-cap fallback in their current regime.
   // docs/dof-cinematic-research.md sections 4.3 and 8.
+  //
+  // The multiplier goes INSIDE the clamp, and the order is the contract.
+  // maxCocPx comes from maxCocFraction, which advertises the largest disc
+  // anything in the frame may spend; multiplying after the clamp made the real
+  // source bound maxCocPx * radiusScale instead - 2.8x the advertised one, 204px
+  // of diameter at 4% / 900p, 22.6% of frame height - so a single near compact
+  // emitter washed a fifth of the frame while every gate still read 4%. Below
+  // the engage point (|coc| < maxCocPx / radiusScale, 36% of the clamp) the full
+  // multiplier is still in force, which is what keeps the section 8 lantern and
+  // window discs at their authored size. bokehSourceRadiusFromCocPx() in
+  // bokeh-coc-contract.js is the JS twin, and check-dof.mjs evaluates this exact
+  // expression against it.
   float sourceRadiusAtDepth(float sourceDepth) {
     float signedCoc =
       cocScalePx * (gInvFocus - 1.0 / max(sourceDepth, nearClip));
-    return min(abs(signedCoc), maxCocPx) * radiusScale;
+    return min(abs(signedCoc) * radiusScale, maxCocPx);
   }
 
   float viewDepth(vec2 uv) {
@@ -668,19 +680,20 @@ export class BokehSourceScatter {
     this.uniforms.sourceTexel.value.set(1 / nextWidth, 1 / nextHeight);
   }
 
-  _selectBackend(renderer, maxCocPx, radiusScale) {
+  _selectBackend(renderer, maxCocPx) {
     if (!this.pointSizeRange) {
       const range = renderer
         .getContext()
         .getParameter(renderer.getContext().ALIASED_POINT_SIZE_RANGE);
       this.pointSizeRange = [range[0], range[1]];
     }
-    // The largest disc a source can ever spend is the clamped CoC times the
-    // source multiplier. This is now an absolute pixel bound rather than a
-    // product of maxblur and viewport width, so it no longer grows with a wider
-    // window at a fixed height.
+    // The largest disc a source can ever spend is maxCocPx: radiusScale is
+    // applied inside that clamp (sourceRadiusAtDepth below), so it must not
+    // appear here either. An absolute pixel bound rather than a product of
+    // maxblur and viewport width, so it no longer grows with a wider window at
+    // a fixed height.
     this.requiredPointDiameter =
-      (maxCocPx * radiusScale + 1.0) * BOKEH_SOURCE_CONTRACT.pointCoverage;
+      (maxCocPx + 1.0) * BOKEH_SOURCE_CONTRACT.pointCoverage;
     const nextBackend = selectBokehSourceBackend(
       this.backend,
       this.requiredPointDiameter,
@@ -725,7 +738,7 @@ export class BokehSourceScatter {
     this.uniforms.highlightKnee.value = highlightKnee;
     this.uniforms.tiltStrength.value = tiltStrength;
     this.uniforms.tiltAnchorV.value = tiltAnchorV;
-    this._selectBackend(renderer, maxCocPx, radiusScale);
+    this._selectBackend(renderer, maxCocPx);
     const previousTarget = renderer.getRenderTarget();
     const previousAutoClear = renderer.autoClear;
     try {

@@ -130,7 +130,10 @@ export const BOKEH_COC_PREFILTER_FRAGMENT_SHADER = /* glsl */ `
     float cocAbsPx
   ) {
     float brightness = max(max(color.r, color.g), color.b);
-    float sourceRadiusPx = min(cocAbsPx, maxCocPx) * sourceRadiusScale;
+    // Same clamp order the scatter uses (bokeh-source-scatter.js
+    // sourceRadiusAtDepth): the multiplier goes inside the clamp. The two must
+    // agree or the strip decision and the disc it pays for drift apart.
+    float sourceRadiusPx = min(cocAbsPx * sourceRadiusScale, maxCocPx);
     float willScatter = step(
       ${glslFloat(BOKEH_SOURCE_CONTRACT.sharpRadiusPx)},
       sourceRadiusPx
