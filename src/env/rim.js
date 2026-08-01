@@ -129,9 +129,31 @@ export const RIM_BASE_ENERGY_CAP = 0.34;
 // captures the already-shadowed first sun; combining that visibility with directDiffuse keeps a
 // later unshadowed fill from reviving a full-strength rim inside the sun's shadow, without another
 // sampler fetch or program variant.
+//
+// facingStart/facingFull describe a **light wrap taper on the lit side of the terminator**, not a
+// sun-direction sign gate (2026-08-01, #35 round 3 — user-approved P2c). The shipped ramp was
+// `mix(uRimWrap, 1, smoothstep(facingStart, facingFull, dot(N, sun)))`, i.e. it multiplied the rim
+// by the wrap floor 0.10 exactly where a backlit subject presents its camera-facing flank
+// (dot(N,sun) < 0 there by definition), while a fragment turned *into* the sun got the full 1.0.
+// The stock `_directGate` then charged the same orientation a second time, because
+// reflectedLight.directDiffuse is ~0 both inside a cast shadow and on a face merely averted from
+// the sun. Measured product expansion (sunset, ndv 0.05, building ×1.5, chain in
+// tools/check-rim-master.mjs §5): the sun-opposite backlit face landed at 37.4% of the authored
+// peak at 16°/60 m and 21.3% on the 46°/464 m aerial, while a *sun-facing* sliver (dot(N,sun)
+// +0.2) saturated the cap at 100%. The flagship rim was therefore brightest in front light and
+// dimmest in the backlit silhouette it exists to draw — the exact inverse of the look contract.
+//
+// The view-level question "is the sun behind the subject" is already answered by `_backlit`
+// (-dot(V, sun)); the fragment level must answer "does the shading BRDF already carry this
+// energy". It does not on or beyond the terminator (that is where wrap-around sky and grazing sun
+// light live and where stock diffuse gives nothing), and it does on a surface turned into the sun.
+// So the ramp is inverted and widened: full through the whole terminator band, tapering to the
+// sky-scatter floor once the surface is within ~52° of the sun (facingFull 0.62 ≈ cos 52°, up from
+// 0.12). And `_directGate` keeps only its real content — cast-shadow occlusion — by taking the
+// max of the direct-light evidence and the same shade term, so orientation is charged once.
 export const RIM_SOLAR_GATE = Object.freeze({
   facingStart: -0.05,
-  facingFull: 0.12,
+  facingFull: 0.62,
   backlitStart: 0.02,
   backlitFull: 0.45,
   // 순광·측광 뷰에 남기는 최소 강도. 골든이 전역 backlit 게이트에 두었던 0.18 바닥과 같은 뜻 —
@@ -221,9 +243,11 @@ export const RIM_DOF_GATE = Object.freeze({
   floor: 0.12, // soft residual, not a hard cutout
 });
 
-// Anti-solar silhouette residual (the former `uRimWrap`). post.js authors this for the legacy
-// screen pass and scales it down for the material path, which lands below the value at which a
-// shaded edge still reads at all. Floor it here: the material rim owns its own sky-scatter term.
+// Residual at the far end of the solar wrap taper (`uRimWrap`). post.js authors this for the
+// legacy screen pass and scales it down for the material path, which lands below the value at
+// which an edge still reads at all. Floor it here: the material rim owns its own sky-scatter term.
+// Since the 2026-08-01 inversion fix this is the floor on the **sunlit** side of the terminator
+// (a surface facing the sun keeps only sky scatter), not the anti-solar side, which is now full.
 export const RIM_WRAP_FLOOR = 0.10;
 
 // Capture Three's first directional light immediately before and after its stock shadow
@@ -296,7 +320,7 @@ export function createFresnelRim(scene) {
     uSunViewDir: { value: new THREE.Vector3(0, 0, 1) }, // 뷰공간 태양 방향(post 가 매 프레임 세팅)
     uRimStrength: { value: 0.0 },   // cur.rim × altGate(저고도) × runtime 보정 — 물리 역광은 fragment가 판정
     uRimPower: { value: 1.92 },     // 프레넬 지수(담백하고 예리한 에지 실선 복원)
-    uRimWrap: { value: RIM_WRAP_FLOOR }, // 태양 반대편 실루엣 잔여(하늘 산란광) — 0이면 그늘 에지 소거
+    uRimWrap: { value: RIM_WRAP_FLOOR }, // 순광면 잔여(하늘 산란광) — 역광 실루엣은 1.0 이 기본
     uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
     uRimNear: { value: RIM_DISTANCE_GATE.near }, // 근경 거리 게이트 시작(뷰공간 깊이·렌즈 보정)
     uRimFar: { value: RIM_DISTANCE_GATE.far },   // 원경 능선·far 건물 제외(#119 비율 유지·렌즈 보정)
@@ -482,8 +506,12 @@ export function createFresnelRim(scene) {
               _sunDir = normalize(directionalLights[0].direction);
             #endif
             float _sunN = dot(_rn, _sunDir);
-            float _sunFacing = mix(uRimWrap, 1.0,
-              smoothstep(${solarFacingStart}, ${solarFacingFull}, _sunN));
+            // Light wrap, not a sun-direction sign penalty (see RIM_SOLAR_GATE). _sunShade is 1
+            // on and beyond the terminator — where stock diffuse delivers nothing and the edge is
+            // lit by wrap-around sky and grazing sun — and falls to 0 once the surface is turned
+            // into direct sun, where adding a gold thread would double-count the BRDF.
+            float _sunShade = 1.0 - smoothstep(${solarFacingStart}, ${solarFacingFull}, _sunN);
+            float _sunFacing = mix(uRimWrap, 1.0, _sunShade);
             float _backlit = mix(${backlitFloor}, 1.0,
               smoothstep(${backlitStart}, ${backlitFull}, -dot(_rv, _sunDir)));
             vec3 _rimLuma = vec3(0.2126, 0.7152, 0.0722);
@@ -491,8 +519,12 @@ export function createFresnelRim(scene) {
             float _mainSunAfter = dot(_rimMainSunShadowed, _rimLuma);
             float _mainSunVisibility = clamp(_mainSunAfter / max(_mainSunBefore, 1e-5), 0.0, 1.0);
             float _directLuma = dot(reflectedLight.directDiffuse, _rimLuma);
-            float _directGate = mix(${shadowFloor}, 1.0,
-              smoothstep(${directStart}, ${directFull}, _directLuma) * _mainSunVisibility);
+            // Occlusion only. directDiffuse reads ~0 both inside a cast shadow and on a face that
+            // is merely averted from the sun; without the max() the second case is charged here a
+            // second time after _sunFacing already accounted for it, which is what left a backlit
+            // silhouette at 4.5% of the two gates' product (0.10 × 0.45).
+            float _directEvidence = max(smoothstep(${directStart}, ${directFull}, _directLuma), _sunShade);
+            float _directGate = mix(${shadowFloor}, 1.0, _directEvidence * _mainSunVisibility);
             // Distance fade (far ridges) + (3) axial defocus damp (neighbour DoF sparkle).
             float _df = 1.0 - smoothstep(uRimNear, uRimFar, length(vViewPosition));
             // (4) #31-4 — the rim participates in the atmosphere.
@@ -558,8 +590,8 @@ export function createFresnelRim(scene) {
     setColor(c) { u.uRimColor.value.copy(c); },
     setStrength(s) { u.uRimStrength.value = s; },
     setPower(p) { u.uRimPower.value = p; },
-    // post 는 구 스크린패스 기준값을 축소해 넘긴다(cur.rimWrap × 0.4). 재질 프레넬의 반대편
-    // 실루엣 잔여는 그보다 커야 그늘 처마선이 읽히므로 바닥값으로 받친다.
+    // post 는 구 스크린패스 기준값을 축소해 넘긴다(cur.rimWrap × 0.4). 재질 프레넬의 순광측
+    // 잔여는 그보다 커야 태양쪽 처마선이 읽히므로 바닥값으로 받친다.
     setWrap(w) {
       u.uRimWrap.value = Math.max(RIM_WRAP_FLOOR, Number.isFinite(w) ? w : 0);
     },

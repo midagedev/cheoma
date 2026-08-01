@@ -249,9 +249,26 @@ function chainFor(timeName) {
   };
 }
 
+const rimSrc = readFileSync(join(ROOT, 'src/env/rim.js'), 'utf8');
+// Which composition the tree under test actually ships. The expansion below reproduces *both*, so
+// pointing CHEOMA_RIM_ROOT at a pre-fix checkout produces that tree's real numbers rather than the
+// new formula evaluated with old constants — that is what makes group 5 genuine FAIL-first
+// evidence instead of a tautology.
+const SHADE_FORM = rimSrc.includes('float _sunShade = 1.0 - smoothstep(')
+  && rimSrc.includes('float _sunFacing = mix(uRimWrap, 1.0, _sunShade);');
+const EVIDENCE_FORM = rimSrc.includes(
+  'max(smoothstep(${directStart}, ${directFull}, _directLuma), _sunShade)',
+);
+
 // One backlit eave-edge fragment: grazing silhouette, face averted from the sun, in its own shade.
+//
+// Two independent shading facts, deliberately kept apart (they were conflated before the
+// 2026-08-01 inversion fix):
+//   sunN       — orientation of the fragment relative to the sun. Negative = the surface is turned
+//                away, so stock diffuse gives it nothing. This is *self* shade, not occlusion.
+//   castShadow — the main sun is blocked by other geometry (_mainSunVisibility → 0).
 function rimAdd({
-  time = 'sunset', fov, viewDistance, depth, terrainR, sunN, sunLit, master,
+  time = 'sunset', fov, viewDistance, depth, terrainR, sunN, castShadow = false, master,
   group = 'building', ndv = 0.05, backlitDot = 0.9,
 }) {
   const C = chainFor(time);
@@ -260,9 +277,17 @@ function rimAdd({
   const fres = (1 - ndv) ** (C.power * powerMul);
   const silhouette = 1 - smoothstep(rim.RIM_FACING_GATE.full, rim.RIM_FACING_GATE.cutoff, ndv);
   const S = rim.RIM_SOLAR_GATE;
-  const sunFacing = C.wrap + (1 - C.wrap) * smoothstep(S.facingStart, S.facingFull, sunN);
+  const solarRamp = smoothstep(S.facingStart, S.facingFull, sunN);
+  const sunShade = 1 - solarRamp;
+  // Fixed tree: the wrap taper runs on the *lit* side. Pre-fix tree: a signed sun-direction gate.
+  const sunFacing = C.wrap + (1 - C.wrap) * (SHADE_FORM ? sunShade : solarRamp);
   const backlit = S.backlitFloor + (1 - S.backlitFloor) * smoothstep(S.backlitStart, S.backlitFull, backlitDot);
-  const directGate = sunLit ? 1 : S.shadowFloor;
+  // reflectedLight.directDiffuse is ~0 for an averted face and for an occluded one alike; the
+  // fixed shader restores the difference with max(directRamp, _sunShade).
+  const directRamp = (!castShadow && sunN > S.backlitStart) ? 1 : 0;
+  const visibility = castShadow ? 0 : 1;
+  const evidence = EVIDENCE_FORM ? Math.max(directRamp, sunShade) : directRamp;
+  const directGate = S.shadowFloor + (1 - S.shadowFloor) * evidence * visibility;
   const band = bandOf(fov, viewDistance);
   const fog = fogBand.villageFogBand(viewDistance, terrainR);
   const fogFactor = smoothstep(fog.near, fog.far, depth);
@@ -270,7 +295,7 @@ function rimAdd({
   const raw = fres * silhouette * sunFacing * backlit * directGate * df * C.strength;
   const capped = Math.min(Math.max(raw, 0), rim.RIM_BASE_ENERGY_CAP);
   return {
-    band, fogFactor, df, capped,
+    band, fogFactor, df, capped, raw, sunFacing, directGate,
     add: capped * rim.RIM_GROUP_MUL[group] * master,
     peak: rim.RIM_BASE_ENERGY_CAP * rim.RIM_GROUP_MUL.building * CONTEXT.focus,
   };
@@ -286,7 +311,7 @@ const tiers = [
 console.log('  tier                 fov   d(m)  TR(m)  fog@d    df   add(linear)  %ofPeak');
 for (const [label, fov, d, TR] of tiers) {
   const r = rimAdd({
-    fov, viewDistance: d, depth: d, terrainR: TR, sunN: -0.35, sunLit: false, master: AERIAL_MASTER,
+    fov, viewDistance: d, depth: d, terrainR: TR, sunN: -0.35, castShadow: true, master: AERIAL_MASTER,
   });
   const pct = 100 * r.add / r.peak;
   console.log(`  ${label.padEnd(20)} ${String(fov).padStart(3)} ${String(d).padStart(6)} ${String(TR).padStart(6)}  ${num(r.fogFactor)}  ${num(r.df)}   ${num(r.add, 4)}      ${pct.toFixed(1)}%`);
@@ -302,23 +327,23 @@ const noon = chainFor('day');
 console.log(`\n  noon: sunDir.y=${num(noon.dirY)} → altGate=${num(noon.altGate)} → uRimStrength=${num(noon.strength)}`);
 const noonAdd = rimAdd({
   time: 'day', fov: 46, viewDistance: 464, depth: 464, terrainR: 512,
-  sunN: -0.35, sunLit: false, master: AERIAL_MASTER,
+  sunN: -0.35, castShadow: true, master: AERIAL_MASTER,
 });
 ok(noon.altGate === 0 && noonAdd.add === 0, `noon still erases the rim entirely (add=${num(noonAdd.add, 4)})`);
 
-// Front-lit reference (reported, not asserted: the _sunFacing/_directGate balance is a separate,
-// user-gated axis — see the look-restoration round notes).
+// Front-lit reference, reported here and asserted in group 5 (the _sunFacing / _directGate
+// balance was a separate, user-gated axis until the 2026-08-01 inversion fix).
 const frontLit = rimAdd({
-  fov: 46, viewDistance: 464, depth: 464, terrainR: 512, sunN: 0.2, sunLit: true, master: AERIAL_MASTER,
+  fov: 46, viewDistance: 464, depth: 464, terrainR: 512, sunN: 0.2, castShadow: false, master: AERIAL_MASTER,
 });
 const backLit = rimAdd({
-  fov: 46, viewDistance: 464, depth: 464, terrainR: 512, sunN: -0.35, sunLit: false, master: AERIAL_MASTER,
+  fov: 46, viewDistance: 464, depth: 464, terrainR: 512, sunN: -0.35, castShadow: true, master: AERIAL_MASTER,
 });
 console.log(`  hanyang crane-in, backlit ${num(backLit.add, 4)} vs sun-facing sliver ${num(frontLit.add, 4)} (ratio ${num(backLit.add / Math.max(frontLit.add, 1e-9), 2)})`);
 
 // Group hierarchy must stay building > misc > organic so a lit aerial canopy cannot outshine roofs.
 const canopy = rimAdd({
-  fov: 46, viewDistance: 464, depth: 464, terrainR: 512, sunN: -0.35, sunLit: false,
+  fov: 46, viewDistance: 464, depth: 464, terrainR: 512, sunN: -0.35, castShadow: true,
   master: AERIAL_MASTER, group: 'organic',
 });
 ok(
@@ -344,7 +369,6 @@ ok(
   rim.RIM_GROUP_MUL.organic <= 0.30,
   `organic group multiplier is pulled to the vision-measured level (${rim.RIM_GROUP_MUL.organic} <= 0.30)`,
 );
-const rimSrc = readFileSync(join(ROOT, 'src/env/rim.js'), 'utf8');
 ok(
   rimSrc.includes('pow(1.0 - _ndv, uRimPower * uRimGroupPowerMul)'),
   'the shader takes its exponent per material group (one shared source, no new program family)',
@@ -367,7 +391,7 @@ const FACET_MAX_RATIO = 0.12;   // 패싯 대역에서 유기물은 건물의 12
 const EDGE_MIN_RATIO = 0.05;    // 그러나 접선 에지에서는 선이 살아 있어야 한다(완전 소거 금지)
 const facetCase = (ndv, group) => rimAdd({
   fov: 46, viewDistance: 262.7, depth: 200, terrainR: 412,
-  sunN: -0.35, sunLit: false, master: AERIAL_MASTER, group, ndv,
+  sunN: -0.35, castShadow: true, master: AERIAL_MASTER, group, ndv,
 });
 console.log('  ndv     building add   organic add   organic/building');
 for (const ndv of [0.02, 0.06, 0.20, 0.25, 0.32]) {
@@ -388,6 +412,83 @@ ok(
 ok(
   edgeRatio > facetCase(0.25, 'organic').add / Math.max(facetCase(0.25, 'building').add, 1e-12) * 2,
   'the organic/building ratio widens with the facet angle (a flat coefficient cannot do this)',
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. 역광 실루엣이 피크여야 한다 — 순광면이 아니라 (2026-08-01 역전 해소, #35 라운드3).
+// ─────────────────────────────────────────────────────────────────────────────
+// 결함: 프래그먼트 게이트 둘이 같은 사실(면이 태양을 등졌다)을 두 번 벌했다. `_sunFacing` 은
+// dot(N, sun) < 0 을 uRimWrap 바닥 0.10 으로(10배 감쇠), `_directGate` 는 그 면의 directDiffuse
+// 가 0 이라는 이유로 shadowFloor 0.45 로(2.22배) 내렸다. 역광 피사체의 카메라 대면 플랭크는
+// 정의상 두 조건을 동시에 만족하므로 게이트 곱이 4.5% 만 남았고, 반대로 태양쪽으로 살짝 기운
+// 슬리버는 두 게이트 모두 1.0 을 받아 상한을 포화시켰다 — 림이 순광에서 가장 밝고 역광
+// 실루엣에서 가장 어두운, 룩 계약의 정확한 반대.
+//
+// 처방(사용자 승인 P2c): 뷰 레벨 "태양이 피사체 뒤"는 `_backlit` 이 이미 판정하므로 프래그먼트
+// 레벨은 "이 에너지를 stock BRDF 가 이미 전달했는가"만 답한다. 터미네이터 안팎에서는 아니므로
+// 전량(빛 감싸기), 태양을 향해 돌아선 면에서는 그렇므로 하늘 산란 바닥까지 테이퍼. 그림자항은
+// 실제 가림(_mainSunVisibility)만 남긴다.
+console.log('\n== 5. backlit silhouette is the peak, not the front-lit sliver ==');
+ok(SHADE_FORM, 'the shader derives _sunFacing from a light-wrap shade term, not a signed sun gate');
+ok(
+  EVIDENCE_FORM,
+  'the shadow term takes max(direct evidence, _sunShade) so orientation is not charged twice',
+);
+ok(
+  rim.RIM_SOLAR_GATE.facingFull > rim.RIM_SOLAR_GATE.backlitFull,
+  `the wrap taper completes on the lit side of the terminator (facingFull=${rim.RIM_SOLAR_GATE.facingFull})`,
+);
+
+// 히어로 프레이밍(16°/60 m 마을)의 한 프래그먼트를 sunN 만 바꿔가며 전개한다.
+const heroAt = (sunN, castShadow = false, ndv = 0.05) => rimAdd({
+  fov: 16, viewDistance: 60, depth: 60, terrainR: 236,
+  sunN, castShadow, master: CONTEXT.focus, ndv,
+});
+const antiSun = heroAt(-0.9);           // 역광 피사체의 카메라 대면 플랭크(자기 그늘, 가림 없음)
+const tangentSun = heroAt(0.0);         // 접선(터미네이터) — 저작된 피크가 놓여야 하는 지점
+const sunSliver = heroAt(0.2);          // 태양쪽으로 살짝 기운 슬리버(직사광 있음)
+console.log('  hero 16°/60 m   sunN   _sunFacing  _directGate     raw   add(linear)  %ofPeak');
+for (const [label, r, sunN] of [
+  ['anti-sun flank ', antiSun, -0.9], ['tangent        ', tangentSun, 0.0], ['sun sliver     ', sunSliver, 0.2],
+]) {
+  console.log(`  ${label} ${String(sunN).padStart(5)}   ${num(r.sunFacing)}      ${num(r.directGate)}   ${num(r.raw, 4)}    ${num(r.add, 4)}     ${(100 * r.add / r.peak).toFixed(1)}%`);
+}
+const ANTI_SUN_PEAK_MIN = 0.60;
+ok(
+  antiSun.add >= ANTI_SUN_PEAK_MIN * tangentSun.add,
+  `the sun-opposite backlit flank reaches ${(100 * ANTI_SUN_PEAK_MIN).toFixed(0)}% of the tangent peak `
+  + `(${num(antiSun.add, 4)} / ${num(tangentSun.add, 4)} = ${(100 * antiSun.add / Math.max(tangentSun.add, 1e-12)).toFixed(1)}%)`,
+);
+ok(
+  sunSliver.add <= antiSun.add + 1e-12 && sunSliver.raw < antiSun.raw,
+  `a sun-facing sliver never outshines it (add ${num(sunSliver.add, 4)} <= ${num(antiSun.add, 4)}, `
+  + `uncapped ${num(sunSliver.raw, 3)} < ${num(antiSun.raw, 3)})`,
+);
+
+// 상한 아래 대역의 증인. ndv 0.05 는 sunset 강도에서 양쪽 모두 캡을 포화시키므로 위 단언만으로는
+// 부등호가 등호로 만족될 수 있다. 부감 46°/464 m·ndv 0.28 은 캡 아래라 실제 크기를 비교한다.
+const subCap = (sunN, castShadow) => rimAdd({
+  fov: 46, viewDistance: 464, depth: 464, terrainR: 512,
+  sunN, castShadow, master: AERIAL_MASTER, ndv: 0.28,
+});
+const subBack = subCap(-0.9, false);
+const subFront = subCap(0.2, false);
+const subOccluded = subCap(-0.9, true);
+console.log(`  sub-cap aerial ndv 0.28: anti-sun ${num(subBack.add, 4)} | sun sliver ${num(subFront.add, 4)} | anti-sun occluded ${num(subOccluded.add, 4)}`);
+ok(
+  subBack.capped < rim.RIM_BASE_ENERGY_CAP && subFront.add < subBack.add,
+  `below the energy cap the backlit flank is strictly brighter than the sun sliver (${num(subFront.add, 4)} < ${num(subBack.add, 4)})`,
+);
+// 이중 처벌 해소가 그림자 항을 무력화하면 안 된다: 진짜 가림은 여전히 shadowFloor 로 감쇠한다.
+ok(
+  subOccluded.add < subBack.add,
+  `a genuinely cast-shadowed fragment is still attenuated (${num(subOccluded.add, 4)} < ${num(subBack.add, 4)})`,
+);
+// 정오·에너지 캡은 이 축과 무관하게 유지된다(그룹 3 의 noon 단언과 함께 읽을 것).
+ok(
+  antiSun.capped <= rim.RIM_BASE_ENERGY_CAP + 1e-12
+    && tangentSun.capped <= rim.RIM_BASE_ENERGY_CAP + 1e-12,
+  `the HDR energy cap still bounds both (${num(antiSun.capped, 3)}, ${num(tangentSun.capped, 3)} <= ${rim.RIM_BASE_ENERGY_CAP})`,
 );
 
 if (failed) {
