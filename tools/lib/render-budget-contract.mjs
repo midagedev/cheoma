@@ -73,8 +73,15 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
     // calls via a shared set + one global merge, same floor as the deferred palace P.mats
     // consolidation #149), the hanyang heroCap policy, and an aerial palace representation.
     // Do not raise these again for hero/palace growth without deciding one of those levers.
+    //
+    // #29 히어로 전역 병합(2026-08-02): 위 레버 1(공유 재질 + 전역 mergeStatic(ids)) 소비.
+    //   실측 Chrome Metal, fixture hanyang/20260716, post=0, direct renderer.render via
+    //   debugDrawCalls: aerial total 333 calls (was 704), village-heroes share delta 32
+    //   (was 438; material meshes 32). Ceilings tighten to lock the win (~5% headroom):
+    //   aerial/focusOut calls 350. FAIL-first: pre-#29 measured 704 would fail the new 350
+    //   ceiling; pure hide script also asserts merged children ≤ 90.
     aerial: Object.freeze({
-      calls: 725,
+      calls: 350,
       triangles: 2_450_000,
       programs: 144,
       geometries: 1040,
@@ -103,7 +110,8 @@ export const HANYANG_RENDER_BUDGET = Object.freeze({
     focusOut: Object.freeze({
       // 2026-07-31: see the aerial note — focusOut mirrors aerial (707 / 2,342,905 measured,
       // scene content identical by construction; geometries measured 1,126).
-      calls: 725,
+      // #29 (2026-08-02): see aerial note — hero global merge tightens aerial/focusOut calls.
+      calls: 350,
       triangles: 2_450_000,
       ...COMMON_RESOURCE_LIMITS,
       geometries: 1165,

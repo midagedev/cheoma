@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { makeRng } from '../rng.js';
-import { makeMaterials, injectVillageCloudShadow } from '../builder/palette.js';
+import {
+  makeMaterials,
+  injectVillageCloudShadow,
+  canonicalizeSharedMaterials,
+} from '../builder/palette.js';
 import { collectOpeningGlowAnchors } from '../builder/opening-glow-anchors.js';
 import { createWaterUniforms, stepWaterLook } from '../env/water.js';
 import {
@@ -365,12 +369,24 @@ export function* populateVillageSteps(plan, opts = {}) {
       };
       for (const p of regular) root.add(placeParcel(p, protos, wallMats, char01, site));
     }
-    // 히어로(종가·반가 대형) — landmarks 전체 병합에선 빼되 "히어로별 개별 병합" 그룹으로 root 직속.
-    //   개별 그룹이라 어댑터가 하나씩 visible 토글 + buildParcel 풀디테일 오버레이로 교체(랜딩·클로즈업·
-    //   편집, #62). 히어로별 병합(mergeStatic)이라 컴파운드 수십 메시가 재질별로 접혀 드로우콜은 소수.
-    //   병합 전 원본에서 재질셋(door/hanji) 수집(야간 창호광) — 병합 후 메시엔 userData.materials 없음.
+    // 히어로(종가·반가 대형) — landmarks 병합에선 제외. #29: 비-mja 히어로는 스타일별 공유
+    //   재질셋 + 전역 1회 mergeStatic(ids)으로 재질별 접기(채당 ~73 → 전역 ~73콜). 어댑터는
+    //   heroHandle 의 visible 토글로 소스 레인지를 접어 풀디테일 오버레이와 이중 렌더를 막는다
+    //   (#62 계약 유지 — mja 는 개별 그룹, 그 외는 은닉 프록시). 병합 전 원본에서 재질셋·창호광
+    //   앵커 수집. 색 변주는 material.color/map 서명(canonicalizeSharedMaterials) — 동일 서명만 공유.
+    const heroMatCache = new Map();   // matStyle -> makeMaterials set
+    const heroMatCanon = new Map();   // signature -> canon material (#149 동형)
+    const mergeableHeroes = [];       // { p, raw } for global merge
     for (const p of heroes) {
-      const raw = buildHeroParcel(p, site);
+      let materials = null;
+      if (!p.mjaHouse) {
+        // Match buildParcel's makeMaterials(cfg.preset === 'korea' ? 'palace' : cfg.preset).
+        const style = p.heroStyle || 'hanok';
+        const matStyle = style === 'palace' ? 'palace' : style;
+        if (!heroMatCache.has(matStyle)) heroMatCache.set(matStyle, makeMaterials(matStyle));
+        materials = heroMatCache.get(matStyle);
+      }
+      const raw = buildHeroParcel(p, site, materials ? { materials } : {});
       collectMaterialSets(raw, matSets);
       nightLightSources.owners.set(
         p.id,
@@ -384,15 +400,29 @@ export function* populateVillageSteps(plan, opts = {}) {
         heroHandle.set(p.id, raw);
         continue;
       }
-      const g = mergeStatic([raw], `hero-${p.id}`);
+      // Unify builder-cloned but visually identical materials across heroes so
+      // one mergeStatic pass collapses all compounds by true material identity.
+      canonicalizeSharedMaterials(raw, heroMatCanon);
+      mergeableHeroes.push({ p, raw });
+    }
+    if (mergeableHeroes.length) {
+      const raws = mergeableHeroes.map((entry) => entry.raw);
+      const ids = mergeableHeroes.map((entry) => entry.p.id);
+      // village-walls-* 동형: ids 로 필지별 정점 레인지 → setHidden(id) 소스 접기.
+      const g = mergeStatic(raws, 'village-heroes', { ids });
       // mergeStatic owns cloned world-space geometry while retaining the source
       // material identities. Release the now-unreachable compound geometry
-      // immediately; this closes the latent leak in the existing head-house path.
-      raw.traverse((object) => {
-        if (object.isMesh || object.isInstancedMesh) object.geometry?.dispose?.();
-      });
+      // immediately; do not dispose shared materials (overlay program reuse).
+      for (const { raw } of mergeableHeroes) {
+        raw.traverse((object) => {
+          if (object.isMesh || object.isInstancedMesh) object.geometry?.dispose?.();
+        });
+      }
       root.add(g);
-      heroHandle.set(p.id, g);
+      for (const { p } of mergeableHeroes) {
+        // Adapter still toggles .visible (#62). Proxy maps that to range fold.
+        heroHandle.set(p.id, makeHeroSourceHideProxy(g, p.id));
+      }
     }
   }
   yield 'parcels/houses';
@@ -692,6 +722,23 @@ export function* populateVillageSteps(plan, opts = {}) {
     },
   };
   return root;
+}
+
+// #29: heroHandle 값 계약 — 어댑터는 group.visible 토글(#62). 전역 병합 후엔 실제 Group 대신
+//   소스 레인지 접기 프록시를 넣어, 해당 채만 병합 메시에서 사라지고 복원되게 한다.
+function makeHeroSourceHideProxy(mergedGroup, id) {
+  let visible = true;
+  return {
+    get visible() { return visible; },
+    set visible(on) {
+      const next = !!on;
+      if (next === visible) return;
+      visible = next;
+      // setHidden(id, true) folds the range; visible=false → hide.
+      mergedGroup.userData.setHidden?.(id, !next);
+    },
+    userData: {},
+  };
 }
 
 // 소동물 배치: 초가 마당(닭 무리)·논(소). setupAnimals(env/animals.js) API 재사용.

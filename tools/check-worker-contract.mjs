@@ -316,9 +316,12 @@ const expectedSceneHashes = {
   //   (같은 파일의 '종가 파트 그룹' 재기준 항목과 동일한 논리). proxy 해시는 네 규모 전부 불변
   //   (fef7a386 / 3f7f776c / 046ecd22 / 6bd5f82a) — 픽킹·구도 해 불침해. 재기준 시점에 sync ==
   //   실제 module Worker == `?worker=0` 폴백이 세 경로 모두 바이트 동일, snapshot·mja 교차 PASS.
-  village: '84affbdc:c02bbc06:1cb16a2a:da1e755a',
-  town: '63cc99e7:4ca55a2d:4843f438:fe402f4f',
-  capital: 'd187e903:6889cef9:6baab490:d0ca0d4b',
+  // #29 히어로 전역 병합(2026-08-02): 아래 hanyang 항목 주석의 단독 변인 근거 참조.
+  //   village/town/capital 도 비-mja 히어로(종가)를 품으므로 같은 구조 변경으로 scene 해시만 이동.
+  //   proxy·triangles 불변, objects 감소(채별 그룹 → 전역 1 병합 그룹).
+  village: '5c6e9658:934dcc66:e70874c0:44ec9d4c',
+  town: '42f854e6:f276ce18:9084cd07:fc581e4a',
+  capital: 'ca415f99:198e8c7b:5ac1ef16:7470dfff',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -352,7 +355,22 @@ const expectedSceneHashes = {
   //   `?worker=0` 폴백 바이트 동일(b2a0e799 양 경로 일치).
   // 벽머리 깊이 스택(2026-08-01): 위 village/town 항목과 같은 단일 변경. 한양에도 종가(hanok)
   //   히어로 필지가 있어 함께 이동한다(근거·단독 변인 실측은 village 항목 참조).
-  hanyang: '41000769:d8b056f1:d6e15424:525844c7',
+  // #29 히어로 전역 병합(2026-08-02): 비-mja 히어로를 채별 mergeStatic 에서 전역 1회
+  //   mergeStatic(ids)+스타일별 공유 재질/canonicalize 로 접음. 씬 그래프 토폴로지만 바뀌고
+  //   (village-heroes 한 그룹 + 소스 레인지 접기 프록시), 정점/삼각형 합과 픽 프록시는 불변.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-02)**:
+  //   - proxy 4종 전부 불변(fef7a386 / 3f7f776c / 046ecd22 / 6bd5f82a) — 픽킹·구도 해 불침해.
+  //   - triangles 4종 전부 불변(village 2284221 / town 5024809 / capital 5663398 /
+  //     hanyang 25564031) — 지오 합이 같고 병합 구조만 접힌 증거.
+  //   - objects 는 병합으로 감소(village 594, town 3161, capital 2186, hanyang 5541):
+  //     채당 hero-* 그룹 N개 → village-heroes 1그룹 + 재질 메시 소수. 감소 폭 = 접힌
+  //     중간 Object3D/메시 수(채별 재질 메시가 전역 재질 버킷으로 합쳐진 결과).
+  //   - mja optin·snapshot 골든 불변 — mjaHouse 경로는 병합 제외, 스냅샷 시리얼 무관.
+  //   - worker == `?worker=0` 폴백 바이트 동일(아래 신 해시 양 경로 일치), async 불일치 0.
+  //   - 이 변경(populate 히어로 블록 + buildHeroParcel materials 옵트인)만 되돌리면 구 골든
+  //     4종(village 84affbdc… / town 63cc99e7… / capital d187e903… / hanyang 41000769…)이
+  //     재현됨(구조 diff 귀속).
+  hanyang: '9ff92c07:28964659:765540ab:644088cf',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

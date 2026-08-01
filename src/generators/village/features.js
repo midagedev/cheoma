@@ -168,7 +168,10 @@ export function buildPaddyFields(site, paddies) {
   return group;
 }
 
-export function buildHeroParcel(parcel, site) {
+// opts.materials (#29): optional shared palette for non-mja heroes so populate can
+// collapse several compounds into one material-keyed mergeStatic. Unset keeps the
+// prior per-call makeMaterials path (byte-stable for single-hero / overlay builds).
+export function buildHeroParcel(parcel, site, opts = {}) {
   const group = new THREE.Group();
   if (parcel.mjaHouse) {
     const compound = buildMjaHouse(parcel.mjaHouse);
@@ -189,6 +192,7 @@ export function buildHeroParcel(parcel, site) {
       // Plan-authored roofRank wins; heroStyle palace is always magistracy/gaeksa.
       roofRank: parcel.roofRank
         ?? (heroStyle === 'palace' ? 'magistracy' : null),
+      ...(opts.materials ? { materials: opts.materials } : null),
     }));
   }
   group.rotation.y = G.facingY(parcel.frontDir);
