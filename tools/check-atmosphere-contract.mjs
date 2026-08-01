@@ -280,8 +280,19 @@ assert.match(villageLightSource, /day:\s*\{[\s\S]*?hemiInt:\s*0\.22/,
 // object family, 25 of 27 families sat in hue 17~44 with granite at hue 2 and giwa at hue 6.
 // look-grammar §2-3 requires shadows and midtones to stay neutral, so the guard now pins the
 // neutral value. What it still guards is unchanged: no cross-contamination from other times.
-assert.match(villageLightSource, /sunset:\s*\{[\s\S]*?fillColor:\s*0xb6b9c4,\s*fillInt:\s*0\.72/,
+// P1′(2026-08-01): 세기만 0.72 → 0.92 로 재저작됐다. #35-R2 가 fog 휘도를 내리면서 원경·중경이
+// fog 에서 받던 에어라이트 리프트가 사라졌고("bounce light must lift the shadow side"), 그 몫을
+// fog 가 아니라 표면 휘도 축에서 되찾는 라운드였다(실측: 능선 그늘면 밴드 sRGB 휘도 43.9 → 55.1,
+// 수광면/그늘면 대비 1.34 → 1.23 로 대비는 유지). 이 단언이 지키는 것은 **색의 중성**이지 세기가
+// 아니므로 색은 그대로 못박아 두고 세기만 새 저작값으로 다시 고정한다 — 가드는 약해지지 않는다.
+assert.match(villageLightSource, /sunset:\s*\{[\s\S]*?fillColor:\s*0xb6b9c4,\s*fillInt:\s*0\.92/,
   'sunset village fill stays the authored neutral anti-solar fill');
+// dawn 도 같은 규율 아래 둔다. 구 0xffcda0(hue 30·HSL 채도 1.0)은 안티솔라 = 그늘면 전용 광원인데
+// 웜이라 look-grammar §2-3 을 정면으로 어겼다(실측: 중성 알베도가 hue 24·HSV 채도 0.262 로 물들고
+// 그늘면 평균 r−b +13.1). 중성화 후 채도 0.021 · r−b +2.0. sunset 만 걸려 있던 탓에 dawn 이
+// 몇 라운드나 잡히지 않았으므로 여기서 함께 못박는다.
+assert.match(villageLightSource, /dawn:\s*\{[\s\S]*?fillColor:\s*0xd0d0d2,\s*fillInt:\s*0\.95/,
+  'dawn village fill is a neutral anti-solar fill, not a warm one');
 
 console.log(
   'ATMOSPHERE CONTRACT: PASS '

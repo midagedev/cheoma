@@ -15,17 +15,35 @@ function deepFreeze(value) {
 const profile = (atmosphere, post) => deepFreeze({ atmosphere, post });
 
 const DAWN = profile({
-  sky: [[0.0, '#e7d0b8'], [0.35, '#d9c3bb'], [0.7, '#8f9bbf'], [1.0, '#5d6a97']],
+  // P1′ dawn 돔 정체성 복원(2026-08-01). 구 스톱은 지평 밴드(pos 0.44~0.52)가 0.35 의 회분홍과
+  //   0.7 의 청회 사이 중간값이라 그 자체가 거의 무채였고, #35-R2 가 fog 를 중립으로 옮긴 뒤
+  //   DOME_HAZE 가 그 위를 덮자 부감 하늘이 회색판이 됐다(실측: 밴드 평균 HSV 채도 0.049,
+  //   색상이 24°→300° 로 흔들리는 회보라 뭉갬 — "새벽"이 아니라 "흐림"으로 읽힌다).
+  //   fog 축은 손대지 않고 돔 축으로만 고친다: 지평(0.52)에 온색 스톱을 놓아 부감이 실제로 보는
+  //   밴드를 새벽 온기로 채우고, 0.78·1.0 을 냉청·남색으로 남겨 "상단 냉청 → 지평 온색"
+  //   그라디언트를 세운다. 스톱 수는 네 개 유지(프로필 간 1:1 보간 계약).
+  //   실측(부감 밴드, 태양 반대 방위 = 최악): 평균 채도 0.049 → 0.298, 색상 24°→300° 가
+  //   27°→26° 로 안정. 구배는 100행당 +13.0 → +13.3(게이트 하한 +1.5 유지).
+  sky: [[0.0, '#f5cca6'], [0.52, '#e2a97f'], [0.78, '#8e9ac6'], [1.0, '#4f6096']],
   sunDir: [26, 9, 34], sunColor: 0xffd7ac, sunInt: 1.7,
   hemiSky: 0xc3bcd0, hemiGround: 0x6f6252, hemiInt: 0.75,
   // #35-R2 대기 3축 교정(2026-08-01) — 유도는 아래 gold 주석에 한 번만 적는다. dawn 도 같은 결함을
   //   공유했다(fog 선형휘도 0.648 = 이 프로필 표면 휘도 중앙값의 15.1배 — 네 프로필 중 최악).
   //   e4cfbd(H28·S_HSL 0.419·Y 0.648) → 474541(H40·S_HSL 0.050·Y 0.060).
   fog: 0x474541, fogNear: 55, fogFar: 430, exposure: 1.02,
-  ridgeNear: 0x4a5069, ridgeFar: 0xcfc1c4, mist: 0xf1e2d4, mistOp: 0.72,
+  // P1′ 원경 정합(2026-08-01) — 유도는 gold 의 같은 줄 주석에 한 번만 적는다. dawn 이 네 프로필 중
+  //   가장 어긋나 있었다(ridgeFar 9.3배 · mist 13.0배).
+  ridgeNear: 0x4a5069, ridgeFar: 0x7e7577, mist: 0x928980, mistOp: 0.72,
   lantern: 0.0,
 }, {
+  // P1′ (2026-08-01) — dawn 에도 에어라이트 토 리프트를 둔다. 유도는 gold 의 P1′ 주석과 같다
+  //   (fog 휘도 인하로 사라진 알베도 독립 가산분을 색이 아니라 밝기로만 되찾는 자리).
+  //   dawn 은 fog 휘도 비율이 네 프로필 중 최악(15.1배)이었던 만큼 잃은 리프트도 컸다.
+  //   sunset 보다 낮은 0.030 인 이유: dawn 리그의 fill 중성화(lighting.js)가 같은 밴드를 이미
+  //   올려서, 0.042 를 그대로 쓰면 수광면/그늘면 대비가 1.2 아래로 내려간다.
+  //   실측(그늘면 15표본 fogFactor 0.30, 리그 변경과 합산): 밴드 평균 42.9 → 54.9, 대비 1.32 → 1.23.
   bloomStrength: 0.55, bloomRadius: 0.55, bloomThreshold: 0.82,
+  lift: 0.030, liftColor: 0x9aa6bd,
   rim: 1.15, rimColor: 0xffd6bc, rimPower: 2.1, rimWrap: 0.14,
   sunGlow: 0.70, sunGlowSize: 70, sunGlowColor: 0xffdcb4, sat: 1.12,
   flare: 0.55, flareColor: 0xffd9b4,
@@ -136,7 +154,20 @@ export const SUNSET_LOOKS = deepFreeze({
       //     변화로 바뀐다. 게이트: tools/check-fog-wash.mjs.
       //   불변: 노을 정체성은 하늘 스톱·rimColor·sunGlowColor·flareColor 가 갖는다(전부 불변).
       fog: 0x463e39, fogNear: 70, fogFar: 470, exposure: 1.13,
-      ridgeNear: 0x574863, ridgeFar: 0xcc9678, mist: 0xdeb69c, mistOp: 0.6,
+      // P1′ 원경 정합(2026-08-01) — 네 프로필 공통 유도를 여기 한 번만 적는다.
+      //   #35-R2 는 fog 를 표면 휘도 근처로 내렸지만 능선·안개(mountains.js, 단독 건물 모드의
+      //   겹겹 능선 + 안개 띠)는 그대로 뒀다. 그래서 원경이 자신이 녹아들어야 할 대기보다
+      //   ridgeFar 7.1배 · mist 10.2배 밝은 상태가 됐다 — 대기 원근이 아니라 "유백색 판" 이다
+      //   (crimson 주석의 #31-2 에서 이미 같은 실패를 한 번 지적했던 그 현상).
+      //   실측(단독 건물 모드 1440×900 sunset 캡처의 행 프로파일): 하늘 돔 y=280 이 휘도 110.8·
+      //   채도 0.47 인데 바로 아래 y=320~400 이 휘도 136.7·채도 0.29 로 **밝고 탈색된 띠**를
+      //   만들고, 그 아래 능선이 91.6 으로 급락한다(하늘 구간 국소 돌출 +10.6).
+      //   대조군: day 는 ridgeFar/fog 0.9배 · mist/fog 1.3배로 정합적이고, 같은 자리가 단조
+      //   감소한다(돌출 +2.2). 즉 결함은 "저녁·새벽 프로필만 fog 를 따라 내려오지 않았다" 이다.
+      //   교정: 색상·채도는 그대로 두고 선형 휘도만 fog 기준 배수로 내린다(ridgeFar ≈3x ·
+      //   mist ≈4x). day 수준(≈1x)까지 내리지 않는 이유는 겹겹 능선의 층 분리가 룩의 일부라서다
+      //   — 판을 없애되 깊이는 남긴다.
+      ridgeNear: 0x574863, ridgeFar: 0x8b6550, mist: 0x967a68, mistOp: 0.6,
       lantern: 0.15,
     }, {
       // rim 2.05 는 그대로 둔다 — tools/check-rim-facing.mjs 의 HDR 에너지 상한(2.05×1.85)이
@@ -146,8 +177,18 @@ export const SUNSET_LOOKS = deepFreeze({
       //   (계약: "bounce light must lift the shadow side — no crushed-black silhouettes").
       //   가중이 (1-col) 이라 하이라이트·림·플레어는 수치상 불침해다. 색은 쿨 중성 슬레이트 —
       //   웜으로 들어올리면 그림자·미드톤이 다시 주황 워시가 된다(§2-3 채도 규율).
+      // P1′ lift 0.022 → 0.042 (2026-08-01). #35-R2 가 fog 선형휘도를 9.9배 → 2.2배로 내리면서
+      //   원경·중경이 fog 에서 받던 에어라이트 리프트가 함께 사라졌다(부감 프레임 평균 117.7 →
+      //   72.7). fog 를 되올리는 것은 워시 회귀라 금지이고, exposure 로는 복구되지 않는다(실측).
+      //   조명 리그(lighting.js)는 알베도에 곱해지므로 선형 0.02~0.03 짜리 솔잎·숲바닥에서는
+      //   한계가 있다 — hemiInt 0.54 → 1.00 을 밀어도 밴드 평균 +8%. 이 lift 항만이 fog 와 같은
+      //   **알베도 독립 가산**이고, 가중이 (1-col) 이라 하이라이트·림·플레어는 수치상 불침해다.
+      //   즉 fog 가 하던 에어라이트 몫을 색이 아니라 밝기로만 되돌려 받는 자리다.
+      //   실측(그늘면 15표본 fogFactor 0.30, 리그 상향과 합산, sRGB 휘도): 밴드 평균 43.9 → 55.1,
+      //   수광면/그늘면 대비 1.34 → 1.23, 밴드 r−b +2.6 → −0.9. 0.042 를 넘기면 대비가 1.2 아래로
+      //   내려가고 쿨 슬레이트 색이 암부에 보이기 시작한다(0.070 에서 r−b −5.3) — 그게 상한 근거다.
       bloomStrength: 0.66, bloomRadius: 0.38, bloomThreshold: 0.80,
-      lift: 0.022, liftColor: 0x9aa6bd,
+      lift: 0.042, liftColor: 0x9aa6bd,
       rim: 2.05, rimColor: 0xffa757, rimPower: 1.7, rimWrap: 0.13,
       sunGlow: 0.98, sunGlowSize: 42, sunGlowColor: 0xff8f45, sat: 1.20,
       flare: 1.0, flareColor: 0xffa155,
@@ -189,11 +230,12 @@ export const SUNSET_LOOKS = deepFreeze({
       //   gold 와 같은 워시였다. a8788f(H331·S_HSL 0.216·Y 0.237) → 453e3b(H16·S_HSL 0.080·Y 0.050).
       //   실측: hueSpread 3.5° → 42.1°, rose 12/12 → 5/12, 돔 밴드 구배 −2.4 → +4.7/100행.
       fog: 0x453e3b, fogNear: 70, fogFar: 462, exposure: 1.11,
-      ridgeNear: 0x54465b, ridgeFar: 0xbc9184, mist: 0xd3b0a4, mistOp: 0.61,
+      // P1′ 원경 정합(위 gold 주석). crimson: ridgeFar 6.5배 → 3.0배 · mist 9.5배 → 4.1배.
+      ridgeNear: 0x54465b, ridgeFar: 0x84655c, mist: 0x90786f, mistOp: 0.61,
       lantern: 0.15,
     }, {
       bloomStrength: 0.61, bloomRadius: 0.37, bloomThreshold: 0.80,
-      lift: 0.022, liftColor: 0x9aa6bd,       // gold 와 동일 근거(위 주석)
+      lift: 0.042, liftColor: 0x9aa6bd,       // gold 와 동일 근거(위 P1′ 주석). 밴드 42.9 → 53.9
       rim: 1.98, rimColor: 0xffad7d, rimPower: 1.75, rimWrap: 0.13,
       sunGlow: 0.90, sunGlowSize: 39, sunGlowColor: 0xff9974, sat: 1.14,
       flare: 0.96, flareColor: 0xffad86,
@@ -217,11 +259,12 @@ export const SUNSET_LOOKS = deepFreeze({
       //   크게 작용해 중성 알베도(화강암)의 색조 전이가 +0.027 → +0.079 로 오히려 늘어난다.
       //   실측: hueSpread 12.0° → 43.5°, rose 0/12 → 2/12, 돔 밴드 구배 −1.9 → +6.1/100행.
       fog: 0x48434e, fogNear: 68, fogFar: 455, exposure: 1.12,
-      ridgeNear: 0x4b4c68, ridgeFar: 0x978ca8, mist: 0xbdb1c0, mistOp: 0.62,
+      // P1′ 원경 정합(위 gold 주석). violet: ridgeFar 4.7배 → 2.5배 · mist 7.8배 → 3.5배.
+      ridgeNear: 0x4b4c68, ridgeFar: 0x71687e, mist: 0x847c86, mistOp: 0.62,
       lantern: 0.18,
     }, {
       bloomStrength: 0.60, bloomRadius: 0.39, bloomThreshold: 0.79,
-      lift: 0.022, liftColor: 0x9aa6bd,       // gold 와 동일 근거(위 주석)
+      lift: 0.042, liftColor: 0x9aa6bd,       // gold 와 동일 근거(위 P1′ 주석). 밴드 45.3 → 56.3
       rim: 1.90, rimColor: 0xe9bec5, rimPower: 1.82, rimWrap: 0.13,
       sunGlow: 0.86, sunGlowSize: 38, sunGlowColor: 0xf2ad9f, sat: 1.20,
       flare: 0.88, flareColor: 0xe5b4c5,

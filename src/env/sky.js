@@ -89,7 +89,47 @@ const DOME_HAZE = [
   { pos: 0.44, a: 0.94 },   // 지평 아래 ≈−11°: 대기색 = scene.background 와 사실상 동일
   { pos: 0.00, a: 0.98 },
 ];
+
+// ── P1′ 돔 채도 복원 (2026-08-01) ────────────────────────────────────────────
+// #35-R2 는 fog 를 중립·저휘도로 옮겨 마젠타 워시를 끝냈다. 그 대가로 위 α 램프가 덮는
+//   지평 밴드가 **fog 의 중립색 그대로** 수렴해, 돔이 자기 그라디언트를 잃고 회색판이 됐다
+//   (실측: dawn 부감 밴드 평균 HSV 채도 0.049 · 색상이 24°→300° 로 흔들리는 회보라 뭉갬).
+// fog 를 되올리는 것은 워시 회귀이므로 축을 나눈다: **fog 는 중립 유지, 돔만 채도를 되찾는다.**
+//   방법 = haze 오버레이의 *색*을 fog 그대로가 아니라 "fog 의 휘도 + 그 자리 하늘의 색상"으로
+//   바꾼다(HAZE_TINT 비율만큼). 휘도는 여전히 fog 로 수렴하므로 #35-R2 가 만든 수직 구배와
+//   지형 절단면 대비 완화는 그대로고, 색상만 하늘에게 돌려준다.
+// 지평 아래(pos ≤ 0.44)는 tint 0 이다 — 배경(scene.background = fog 색)과의 동일색 수렴이
+//   지형 절단면 하드컷 방지의 실제 계약이라 여기만은 침해할 수 없다.
+// 실측(부감 밴드 pos 0.44~0.52, 태양 반대 방위 = 최악): 평균 채도 gold 0.384 → 0.447 ·
+//   crimson 0.245 → 0.293 · dawn 0.049 → 0.298(하늘 스톱 재저작 합산). 게이트의 구배 하한
+//   (100행당 +1.5)은 전 방위에서 유지된다(최악 gold 반대방위 +2.90).
+const HAZE_TINT = [
+  { pos: 0.00, t: 0.00 },
+  { pos: 0.44, t: 0.00 },   // 지평 아래: 배경과 동일색(계약)
+  { pos: 0.52, t: 0.45 },
+  { pos: 0.62, t: 0.72 },
+  { pos: 1.00, t: 0.85 },
+];
+
+// ── P1′ 태양 방위 밝은 구간 (2026-08-01) ─────────────────────────────────────
+// 돔은 지금까지 순수 수직 그라디언트(캔버스 4×256)라 방위 정보가 없었다. 그래서 부감이 어느
+//   쪽을 물든 하늘 밴드가 똑같았고, 역광 프레이밍의 "태양이 저기 있다"는 신호를 post 의
+//   sunGlow 스프라이트 하나가 전담했다. 캔버스를 가로로 열어(방위 = u) 태양 방위에 낮은
+//   에너지의 온색 구간을 둔다 — 부감이 태양 쪽을 물면 따뜻한 밴드를, 반대쪽을 물면 중립
+//   대기를 물게 된다.
+// 세로 프로파일은 지평 바로 위(pos 0.545)를 중심으로 한 가우시안이고, 여기에 지평 아래를
+//   0 으로 닫는 smoothstep 게이트를 곱한다 — 위 HAZE_TINT 와 같은 이유로 pos ≤ 0.40 의
+//   배경 동일색 수렴은 침해하지 않는다.
+// 게이트 영향: 글로우가 위로 갈수록 세지므로 부감 밴드의 상승 구배를 **키운다**
+//   (gold 태양방위 +3.69 → +8.62 / 100행). 워시와 무관하다 — fog 가 아니라 돔 픽셀이고,
+//   방위 폭 ±42° 밖에서는 사실상 0 이다.
+const SUN_BAND = {
+  posCenter: 0.545, posSigma: 0.085, posGateLo: 0.40, posGateHi: 0.50,
+  azSigmaDeg: 42, peak: 0.26, uSteps: 48,
+};
+
 const HAZE_EPS = 1 / 512;   // sRGB 1/2 LSB — 이보다 작은 변화로는 텍스처를 다시 올리지 않는다
+const DOME_TEX_W = 128;     // 방위 해상도(2.8°/px). 세로 256 은 기존과 동일.
 
 // 전환 길이·이징 ---------------------------------------------------------------
 const DUR_TIME = 1.8;      // 시간대 크로스페이드(초) — 짧은 타임랩스감(그림자가 스윽 돈다)
@@ -115,10 +155,12 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   // 하늘 돔: 큰 구, 안쪽면, fog 미적용(하늘 자체). 텍스처는 재사용(트윈 중 매 프레임 재그림).
   const domeGeo = new THREE.SphereGeometry(720, 32, 20);
   const domeCanvas = document.createElement('canvas');
-  domeCanvas.width = 4; domeCanvas.height = 256;
+  domeCanvas.width = DOME_TEX_W; domeCanvas.height = 256;
   const domeCtx = domeCanvas.getContext('2d');
   const domeTex = new THREE.CanvasTexture(domeCanvas);
   domeTex.colorSpace = THREE.SRGBColorSpace;
+  // 방위축이 생겼으므로 u 는 감싸야 한다 — 태양 밴드가 u=0 을 걸치면 clamp 는 가장자리를 늘인다.
+  domeTex.wrapS = THREE.RepeatWrapping;
   const domeMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, depthWrite: false, map: domeTex });
   const dome = new THREE.Mesh(domeGeo, domeMat);
   dome.name = 'skyDome';
@@ -135,22 +177,127 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   const hazeSRGB = { r: 0.77, g: 0.64, b: 0.56 };
   const _hazeTmp = { r: 0, g: 0, b: 0 };
 
+  // pos 에서의 프로필 하늘 색(sRGB 0..1) — 캔버스 그라디언트와 같은 sRGB 선형보간.
+  function sampleStops(stops, pos) {
+    const t = [...stops].sort((a, b) => a.pos - b.pos);
+    if (pos <= t[0].pos) return { r: t[0].r, g: t[0].g, b: t[0].b };
+    const last = t[t.length - 1];
+    if (pos >= last.pos) return { r: last.r, g: last.g, b: last.b };
+    for (let i = 1; i < t.length; i++) {
+      if (pos <= t[i].pos) {
+        const k = (pos - t[i - 1].pos) / (t[i].pos - t[i - 1].pos);
+        return {
+          r: t[i - 1].r + (t[i].r - t[i - 1].r) * k,
+          g: t[i - 1].g + (t[i].g - t[i - 1].g) * k,
+          b: t[i - 1].b + (t[i].b - t[i - 1].b) * k,
+        };
+      }
+    }
+    return { r: last.r, g: last.g, b: last.b };
+  }
+  function rampAt(table, key, pos) {
+    const t = [...table].sort((a, b) => a.pos - b.pos);
+    if (pos <= t[0].pos) return t[0][key];
+    if (pos >= t[t.length - 1].pos) return t[t.length - 1][key];
+    for (let i = 1; i < t.length; i++) {
+      if (pos <= t[i].pos) {
+        const k = (pos - t[i - 1].pos) / (t[i].pos - t[i - 1].pos);
+        return t[i - 1][key] + (t[i][key] - t[i - 1][key]) * k;
+      }
+    }
+    return t[t.length - 1][key];
+  }
+  const s2lin = (x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+  const lin2s = (x) => (x <= 0.0031308 ? x * 12.92 : 1.055 * x ** (1 / 2.4) - 0.055);
+  const srgbLuma = (c) => 0.2126 * s2lin(c.r) + 0.7152 * s2lin(c.g) + 0.0722 * s2lin(c.b);
+  const clamp01 = (x) => Math.min(1, Math.max(0, x));
+  const smoothstep = (e0, e1, x) => { const t = clamp01((x - e0) / (e1 - e0)); return t * t * (3 - 2 * t); };
+
+  // haze 색: fog 의 휘도는 유지하고 색상만 그 자리 하늘에게 돌려준다(HAZE_TINT 비율).
+  const _keep = { r: 0, g: 0, b: 0 };
+  function hazeColorAt(stops, pos) {
+    const tint = rampAt(HAZE_TINT, 't', pos);
+    if (tint <= 0.001) return hazeSRGB;
+    const base = sampleStops(stops, pos);
+    const bl = srgbLuma(base);
+    const fl = srgbLuma(hazeSRGB);
+    if (bl <= 1e-6) return hazeSRGB;
+    const k = fl / bl;
+    _keep.r = lin2s(Math.min(1, s2lin(base.r) * k));
+    _keep.g = lin2s(Math.min(1, s2lin(base.g) * k));
+    _keep.b = lin2s(Math.min(1, s2lin(base.b) * k));
+    return {
+      r: hazeSRGB.r + (_keep.r - hazeSRGB.r) * tint,
+      g: hazeSRGB.g + (_keep.g - hazeSRGB.g) * tint,
+      b: hazeSRGB.b + (_keep.b - hazeSRGB.b) * tint,
+    };
+  }
+
+  // 태양 방위의 텍스처 u. SphereGeometry 는 phi=u·2π 에서 수평방향 (−cos φ, sin φ) 를 만든다.
+  function sunAzimuthU(dir) {
+    const h = Math.hypot(dir.x, dir.z);
+    if (h < 1e-6) return 0;
+    const phi = Math.atan2(dir.z / h, -dir.x / h);
+    const u = phi / (Math.PI * 2);
+    return u - Math.floor(u);
+  }
+
   // 스톱 배열({pos, r,g,b})로 돔 캔버스를 다시 그린다(텍스처 재사용).
-  //   + 대기 결합 오버레이(DOME_HAZE): 지평 아래를 현재 fog 색으로 수렴시킨다.
+  //   ① 프로필 수직 그라디언트 → ② 대기 결합 오버레이(DOME_HAZE × HAZE_TINT) →
+  //   ③ 태양 방위 밝은 구간(SUN_BAND). ②는 지평 아래를 fog 색으로 수렴시키고, ③은 지평
+  //   아래에서 0 이 되도록 게이트된다.
   function buildDomeFromStops(stops) {
+    const W = DOME_TEX_W;
     const grad = domeCtx.createLinearGradient(0, 0, 0, 256);
     for (const s of stops) {
       const R = Math.round(s.r * 255), G = Math.round(s.g * 255), B = Math.round(s.b * 255);
       grad.addColorStop(1 - s.pos, `rgb(${R},${G},${B})`);
     }
+    domeCtx.globalAlpha = 1;
     domeCtx.fillStyle = grad;
-    domeCtx.fillRect(0, 0, 4, 256);
-    const hR = Math.round(hazeSRGB.r * 255), hG = Math.round(hazeSRGB.g * 255), hB = Math.round(hazeSRGB.b * 255);
+    domeCtx.fillRect(0, 0, W, 256);
+
     const haze = domeCtx.createLinearGradient(0, 0, 0, 256);
-    for (const s of DOME_HAZE) haze.addColorStop(1 - s.pos, `rgba(${hR},${hG},${hB},${s.a})`);
+    for (const s of DOME_HAZE) {
+      const c = hazeColorAt(stops, s.pos);
+      const R = Math.round(clamp01(c.r) * 255), G = Math.round(clamp01(c.g) * 255), B = Math.round(clamp01(c.b) * 255);
+      haze.addColorStop(1 - s.pos, `rgba(${R},${G},${B},${s.a})`);
+    }
     domeCtx.fillStyle = haze;
-    domeCtx.fillRect(0, 0, 4, 256);
+    domeCtx.fillRect(0, 0, W, 256);
+
+    drawSunBand(W);
     domeTex.needsUpdate = true;
+  }
+
+  // 태양 방위 온색 구간. RGB 는 전 구간 동일(태양색)하고 알파만 방위 가우시안으로 변하므로
+  //   가로 그라디언트 하나를 재사용하고 세로는 globalAlpha 로 행마다 스케일한다.
+  const _sunSRGB = { r: 1, g: 1, b: 1 };
+  function drawSunBand(W) {
+    cur.sunColor.getRGB(_sunSRGB, THREE.SRGBColorSpace);
+    const R = Math.round(clamp01(_sunSRGB.r) * 255);
+    const G = Math.round(clamp01(_sunSRGB.g) * 255);
+    const B = Math.round(clamp01(_sunSRGB.b) * 255);
+    const uSun = sunAzimuthU(cur.sunDir);
+    const band = domeCtx.createLinearGradient(0, 0, W, 0);
+    for (let i = 0; i <= SUN_BAND.uSteps; i++) {
+      const u = i / SUN_BAND.uSteps;
+      let d = Math.abs(u - uSun);
+      if (d > 0.5) d = 1 - d;                       // 원형 거리
+      const a = Math.exp(-0.5 * ((d * 360) / SUN_BAND.azSigmaDeg) ** 2);
+      band.addColorStop(u, `rgba(${R},${G},${B},${a.toFixed(4)})`);
+    }
+    domeCtx.fillStyle = band;
+    for (let y = 0; y < 256; y++) {
+      const pos = 1 - (y + 0.5) / 256;
+      const v = SUN_BAND.peak
+        * smoothstep(SUN_BAND.posGateLo, SUN_BAND.posGateHi, pos)
+        * Math.exp(-0.5 * ((pos - SUN_BAND.posCenter) / SUN_BAND.posSigma) ** 2);
+      if (v <= 0.004) continue;
+      domeCtx.globalAlpha = v;
+      domeCtx.fillRect(0, y, W, 1);
+    }
+    domeCtx.globalAlpha = 1;
   }
 
   // 최종 합성 대기색(날씨 틴트·마을 모디파이어 이후)으로 돔 헤이즈를 맞춘다. env 의 fog 합성 훅이

@@ -103,32 +103,54 @@ function aces(c, exposure) {
 // ── 씬 상수 (미러 + 드리프트 단언) ───────────────────────────────────────────
 // lighting.js 는 three 를 import 하므로(app/node_modules 전용) 여기서 값을 미러하고,
 // 원본 텍스트와 대조해 드리프트하면 게이트가 먼저 죽게 한다.
+// P1′(2026-08-01)로 리그가 이동했다: dawn fill 중성화(0xffcda0 → 0xd0d0d2)와 sunset 그늘면
+// 리프트(hemiInt 0.54 → 0.86 · hemiGround 0x2a241e → 0x3a3733 · fillInt 0.72 → 0.92).
 const VILLAGE_RIG = {
-  dawn: { hemiSky: 0xb9c2da, hemiGround: 0x86745c, hemiInt: 0.62, fillColor: 0xffcda0, fillInt: 0.85, fillElev: 0.34 },
-  sunset: { hemiSky: 0x9fb0d6, hemiGround: 0x2a241e, hemiInt: 0.54, fillColor: 0xb6b9c4, fillInt: 0.72, fillElev: 0.42 },
+  dawn: { hemiSky: 0xb9c2da, hemiGround: 0x86745c, hemiInt: 0.80, fillColor: 0xd0d0d2, fillInt: 0.95, fillElev: 0.34 },
+  sunset: { hemiSky: 0x9fb0d6, hemiGround: 0x3a3733, hemiInt: 0.86, fillColor: 0xb6b9c4, fillInt: 0.92, fillElev: 0.42 },
 };
 {
   const src = readFileSync(join(ROOT, 'src/runtime/village/lighting.js'), 'utf8');
   for (const need of [
-    'hemiSky: 0xb9c2da, hemiGround: 0x86745c, hemiInt: 0.62',
-    'fillColor: 0xffcda0, fillInt: 0.85, fillElev: 0.34',
-    'hemiSky: 0x9fb0d6, hemiGround: 0x2a241e, hemiInt: 0.54',
-    'fillColor: 0xb6b9c4, fillInt: 0.72, fillElev: 0.42',
+    'hemiSky: 0xb9c2da, hemiGround: 0x86745c, hemiInt: 0.80',
+    'fillColor: 0xd0d0d2, fillInt: 0.95, fillElev: 0.34',
+    'hemiSky: 0x9fb0d6, hemiGround: 0x3a3733, hemiInt: 0.86',
+    'fillColor: 0xb6b9c4, fillInt: 0.92, fillElev: 0.42',
   ]) {
     assert.ok(src.includes(need), `village lighting rig drifted from the mirrored constants: ${need}`);
   }
 }
 
-// DOME_HAZE 는 sky.js 안의 렌더러 결합 상수라 export 되지 않는다. 소스에서 읽어 계약을 건다.
-function readDomeHaze() {
-  const src = readFileSync(join(ROOT, 'src/env/sky.js'), 'utf8');
-  const block = src.match(/const DOME_HAZE = \[([\s\S]*?)\];/);
-  assert.ok(block, 'DOME_HAZE table not found in src/env/sky.js');
-  const stops = [...block[1].matchAll(/pos:\s*([\d.]+),\s*a:\s*([\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
-  assert.ok(stops.length >= 4, 'DOME_HAZE parse produced too few stops');
+// DOME_HAZE·HAZE_TINT·SUN_BAND 는 sky.js 안의 렌더러 결합 상수라 export 되지 않는다.
+// 소스에서 읽어 계약을 건다(드리프트하면 파싱 단언이 먼저 죽는다).
+const SKY_SRC = readFileSync(join(ROOT, 'src/env/sky.js'), 'utf8');
+function readRamp(name, key) {
+  const block = SKY_SRC.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`));
+  assert.ok(block, `${name} table not found in src/env/sky.js`);
+  const re = new RegExp(`pos:\\s*([\\d.]+),\\s*${key}:\\s*([\\d.]+)`, 'g');
+  const stops = [...block[1].matchAll(re)].map((m) => [Number(m[1]), Number(m[2])]);
+  assert.ok(stops.length >= 4, `${name} parse produced too few stops`);
   return stops;
 }
-const DOME_HAZE = readDomeHaze();
+const DOME_HAZE = readRamp('DOME_HAZE', 'a');
+// P1′(2026-08-01): haze 오버레이가 fog 색 그대로가 아니라 "fog 휘도 + 그 자리 하늘 색상" 으로
+//   tint 비율만큼 옮겨간다. 모델이 이걸 모르면 아래 밴드 구배 단언이 실제와 다른 픽셀을 잰다.
+const HAZE_TINT = readRamp('HAZE_TINT', 't');
+function readSunBand() {
+  const block = SKY_SRC.match(/const SUN_BAND = \{([\s\S]*?)\};/);
+  assert.ok(block, 'SUN_BAND table not found in src/env/sky.js');
+  const num = (k) => {
+    const m = block[1].match(new RegExp(`${k}:\\s*([\\d.]+)`));
+    assert.ok(m, `SUN_BAND.${k} not found`);
+    return Number(m[1]);
+  };
+  return {
+    posCenter: num('posCenter'), posSigma: num('posSigma'),
+    posGateLo: num('posGateLo'), posGateHi: num('posGateHi'),
+    azSigmaDeg: num('azSigmaDeg'), peak: num('peak'),
+  };
+}
+const SUN_BAND = readSunBand();
 
 // ── 셰이딩 ───────────────────────────────────────────────────────────────────
 // warmScale: lighting.js setSiteRadius. 마을(R150)은 1.0.
@@ -232,15 +254,40 @@ function rampAt(table, pos) {
   return t[t.length - 1][1];
 }
 
-// 캔버스 그라디언트는 sRGB 로 보간하고, 그 위에 fog 색을 알파로 합성한 뒤 SRGBColorSpace
-// 텍스처로 디코드된다 — 그 순서를 그대로 따른다.
-function domeLuma(atmosphere, post, pos, fogHex) {
+const smoothstep = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+const srgbLuma = (rgb255) => dot3(LUMA, rgb255.map((c) => s2l(c / 255)));
+
+// haze 색: fog 의 선형 휘도는 유지하고 색상만 그 자리 하늘로 되돌린다(sky.js hazeColorAt 미러).
+function hazeColorAt(baseRGB, fogRGB, pos) {
+  const tint = rampAt(HAZE_TINT, pos);
+  if (tint <= 0.001) return fogRGB;
+  const bl = srgbLuma(baseRGB), fl = srgbLuma(fogRGB);
+  if (bl <= 1e-6) return fogRGB;
+  const k = fl / bl;
+  const keep = baseRGB.map((c) => l2s(Math.min(1, s2l(c / 255) * k)) * 255);
+  return fogRGB.map((c, i) => c + (keep[i] - c) * tint);
+}
+
+// 캔버스 그라디언트는 sRGB 로 보간하고, 그 위에 대기 haze 를 알파로 합성한 뒤 태양 방위 밴드를
+// 얹고, SRGBColorSpace 텍스처로 디코드된다 — 그 순서를 그대로 따른다.
+// dAzDeg: 태양 방위로부터의 각 거리. 밴드는 태양 쪽을 밝히므로 **반대 방위(180°)가 구배 최악**이고,
+//   태양 방위는 최대다. 케이스마다 둘 다 재서 최악에 단언을 건다.
+function domeLuma(atmosphere, post, pos, fogHex, dAzDeg = 180) {
   const stops = atmosphere.sky.map(([p, hex]) => [p, [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))]);
   const base = rampAt(stops, pos);
   const a = rampAt(DOME_HAZE, pos);
   const fogSRGB = hexBytes(fogHex);
-  const composited = base.map((c, i) => c * (1 - a) + fogSRGB[i] * a);
-  let lin = composited.map((c) => s2l(c / 255));
+  const hazeCol = hazeColorAt(base, fogSRGB, pos);
+  let composited = base.map((c, i) => c * (1 - a) + hazeCol[i] * a);
+  const g = SUN_BAND.peak
+    * smoothstep(SUN_BAND.posGateLo, SUN_BAND.posGateHi, pos)
+    * Math.exp(-0.5 * ((pos - SUN_BAND.posCenter) / SUN_BAND.posSigma) ** 2)
+    * Math.exp(-0.5 * (dAzDeg / SUN_BAND.azSigmaDeg) ** 2);
+  if (g > 1e-4) {
+    const sun = hexBytes(atmosphere.sunColor);
+    composited = composited.map((c, i) => c * (1 - g) + sun[i] * g);
+  }
+  let lin = composited.map((c) => s2l(Math.max(0, Math.min(255, c)) / 255));
   const l = dot3(LUMA, lin);
   lin = lin.map((x) => l + (x - l) * post.sat);
   const lc = hexLin(post.liftColor ?? 0x000000);
@@ -313,19 +360,24 @@ for (const c of CASES) {
   }
 
   // ④ 부감 돔 밴드 구배: 위로 갈수록 밝아지고, 100행마다 최소 변화가 있어야 한다.
-  const samples = [];
-  for (let pos = BAND_POS_LO; pos <= BAND_POS_HI + 1e-9; pos += POS_PER_100_ROWS) {
-    samples.push({ pos, luma: domeLuma(A, post, pos, A.fog) });
-  }
-  assert.ok(samples.length >= 3, 'dome band sampling produced too few steps');
+  // 태양 방위 밴드가 생긴 뒤로 구배는 방위에 따라 다르다. 세 방위 전부 재고 최악에 건다.
   let minStep = Infinity;
-  for (let i = 1; i < samples.length; i++) {
-    minStep = Math.min(minStep, samples[i].luma - samples[i - 1].luma);
+  let worstAz = null;
+  let samples = null;
+  for (const dAz of [0, 90, 180]) {
+    const row = [];
+    for (let pos = BAND_POS_LO; pos <= BAND_POS_HI + 1e-9; pos += POS_PER_100_ROWS) {
+      row.push({ pos, luma: domeLuma(A, post, pos, A.fog, dAz) });
+    }
+    assert.ok(row.length >= 3, 'dome band sampling produced too few steps');
+    let step = Infinity;
+    for (let i = 1; i < row.length; i++) step = Math.min(step, row[i].luma - row[i - 1].luma);
+    if (step < minStep) { minStep = step; worstAz = dAz; samples = row; }
   }
   assert.ok(minStep >= MIN_BAND_STEP_PER_100_ROWS,
     `${c.id}: dome band pos ${BAND_POS_LO}-${BAND_POS_HI} changes only ${minStep.toFixed(2)} luminance levels per 100 `
-    + `aerial rows (floor ${MIN_BAND_STEP_PER_100_ROWS}, and it must brighten upward) — a gradient-free bright plane is `
-    + `what makes protruding geometry read as floating above a fog band`);
+    + `aerial rows at ${worstAz} deg from the sun azimuth (floor ${MIN_BAND_STEP_PER_100_ROWS}, and it must brighten `
+    + `upward) — a gradient-free bright plane is what makes protruding geometry read as floating above a fog band`);
 
   report.push({
     id: c.id,

@@ -5,8 +5,19 @@ import { TIME_PRESETS } from '../../env/sky.js';
 // scene의 주 태양·hemi·post 값은 건드리지 않고, 마을 모드 수명 동안 rig 자체를 add/remove한다.
 export const VILLAGE_LIGHT_BY_TIME = {
   dawn: {
-    hemiSky: 0xb9c2da, hemiGround: 0x86745c, hemiInt: 0.62,
-    fillColor: 0xffcda0, fillInt: 0.85, fillElev: 0.34, glowBoost: 1.0,
+    // P1′ (2026-08-01) — dawn fill 중성화 + 그늘면 리프트.
+    //   fill 은 정의상 안티솔라(태양 반대편) 방향광이라 이 리그가 닿는 면은 전부 그늘면이다.
+    //   구 0xffcda0(hue 30·HSL sat 1.0)은 sunset 리그가 이미 중성으로 옮긴 그 규율
+    //   (look-grammar §2-3: 웜은 하이라이트·림·발광에만)을 dawn 만 그대로 어기고 있었다.
+    //   순수 노드 실측(그늘면 표본 15종 = 사면 25/40/55° × 알베도 5종, fogFactor 0.30):
+    //   중성 알베도(화강암)가 hue 24·HSV 채도 0.262 로 물들고 밴드 평균 r−b 가 +13.1 이었다.
+    //   0xd0d0d2 로 중성화하면 채도 0.262 → 0.021 · r−b +13.1 → +2.0 이 된다.
+    //   hemiGround(0x86745c)는 지면 바운스라 웜이 물리적으로 옳고, 위 실측의 지분도 작아
+    //   그대로 둔다 — 위반의 실질 소유자는 fill 이었다.
+    // 강도는 ① 그늘면 리프트와 합산해 정한다: hemiInt 0.62 → 0.80 · fillInt 0.85 → 0.95.
+    //   밴드 평균 42.9 → 54.9 · 소핏 15.1/23.3/57.5 → 29.1/37.3/71.5(sRGB 휘도).
+    hemiSky: 0xb9c2da, hemiGround: 0x86745c, hemiInt: 0.80,
+    fillColor: 0xd0d0d2, fillInt: 0.95, fillElev: 0.34, glowBoost: 1.0,
   },
   day: {
     hemiSky: 0xbcd4ec, hemiGround: 0x8a7a63, hemiInt: 0.22,
@@ -32,8 +43,24 @@ export const VILLAGE_LIGHT_BY_TIME = {
     //   neutral" 이므로 쿨로 넘어가면 반대쪽 실패가 된다 — 0x9db4de(hue 216·sat 0.5)는 hue 는
     //   갈라놨지만 분지 바닥을 청록으로 물들여 프레임이 하늘(앰버)과 다른 빛 아래 있는 것처럼
     //   읽혔다. 중성 회색광은 알베도 hue 를 그대로 통과시키므로 색 분리는 유지된다.
-    hemiSky: 0x9fb0d6, hemiGround: 0x2a241e, hemiInt: 0.54,
-    fillColor: 0xb6b9c4, fillInt: 0.72, fillElev: 0.42, glowBoost: 1.0,
+    // P1′ (2026-08-01) — #35-R2 fog 3축 교정의 후속. fog 선형휘도를 표면 중앙값의 ~2배로 내리자
+    //   원경·중경이 fog 에서 받던 에어라이트 리프트가 함께 사라졌고, 산 중턱 그늘 밴드가 low 대역에
+    //   잠겼다. fog 를 되올리면 워시 회귀이므로(그 라운드의 귀속 실측) 리프트는 표면 휘도 축에서만
+    //   되찾는다 = 이 리그.
+    //   왜 리그만으로는 부족한가(순수 노드 실측): fog 는 알베도와 무관한 가산 혼합이지만 조명은
+    //   알베도에 곱해진다. 이 밴드의 알베도는 선형 0.02~0.03(솔잎·숲바닥)이라, hemiInt 를 0.54 →
+    //   1.00 으로 밀어도 밴드 평균은 43.9 → 47.4(+8%)에 그친다. 그래서 리그는 형태를 살리는
+    //   몫만 맡고(아래), 나머지는 알베도 독립 가산항인 GradePass lift 가 받는다
+    //   (atmosphere-profiles.js 의 lift 0.022 → 0.042 주석).
+    //   hemiGround 0x2a241e 는 거의 순흑이라 처마 소핏·하향면이 뭉개지던 항이다("bounce light
+    //   must lift the shadow side — no crushed-black silhouettes"). 중성 다크 0x3a3733 으로
+    //   올린다 — 웜/쿨 어느 쪽도 아니라 암부 중립 규율에 걸리지 않는다.
+    //   실측(그늘면 15표본 fogFactor 0.30 / 소핏 3표본 0.12, sRGB 휘도):
+    //     밴드 평균 43.9 → 55.1 · 소핏 25.8/33.2/67.1 → 36.4/44.1/80.6
+    //     수광면/그늘면 대비 1.34 → 1.23(대비는 유지, 평탄화 아님)
+    //     밴드 r−b +2.6 → −0.9 (암부가 더 중립으로 이동)
+    hemiSky: 0x9fb0d6, hemiGround: 0x3a3733, hemiInt: 0.86,
+    fillColor: 0xb6b9c4, fillInt: 0.92, fillElev: 0.42, glowBoost: 1.0,
   },
   // #150-H: retune only the existing village hemi + anti-solar fill (no new lights).
   // Cooler moon fill models wall/column depth under eaves; glowBoost still scales hanji only.
