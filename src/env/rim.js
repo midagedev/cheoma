@@ -321,7 +321,7 @@ export function createFresnelRim(scene) {
     uRimStrength: { value: 0.0 },   // cur.rim × altGate(저고도) × runtime 보정 — 물리 역광은 fragment가 판정
     uRimPower: { value: 1.92 },     // 프레넬 지수(담백하고 예리한 에지 실선 복원)
     uRimWrap: { value: RIM_WRAP_FLOOR }, // 순광면 잔여(하늘 산란광) — 역광 실루엣은 1.0 이 기본
-    uRimScale: { value: 1.0 },      // 부감/enable 마스터(focus=1, aerial=0)
+    uRimScale: { value: 1.0 },      // 컨텍스트 마스터(RIM_CONTEXT_MASTER: focus=1, aerial=0.75)
     uRimNear: { value: RIM_DISTANCE_GATE.near }, // 근경 거리 게이트 시작(뷰공간 깊이·렌즈 보정)
     uRimFar: { value: RIM_DISTANCE_GATE.far },   // 원경 능선·far 건물 제외(#119 비율 유지·렌즈 보정)
     // DoF defocus gate (axial metres; matches BokehPass focus). amount 0 → no damp.

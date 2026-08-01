@@ -10,7 +10,7 @@
 // Usage:
 //   CHEOMA_BROWSER=chrome node tools/run-browser-locked.mjs -- \
 //     node tools/shoot-sijeon-app.mjs [--out /scratch/path]
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PNG } from 'pngjs';
@@ -23,6 +23,18 @@ import {
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const SEED = 20260716;
+// Aerial rim policy is derived from the source of truth, not pinned here:
+// 8e69150 (look round #35-1, 2026-08-01) replaced the binary aerial policy
+// (uRimScale 0) with a context weight (RIM_CONTEXT_MASTER.aerial), so the old
+// `scale === 0` pin failed on every post-8e69150 aerial frame (FAIL-first
+// evidence: check:pr 2026-08-01, desktop+mobile scale=0.75). Parsing the
+// literal keeps this gate coupled to future policy revisions.
+const RIM_CONTEXT_MASTER = await readFile(new URL('../src/env/rim.js', import.meta.url), 'utf8')
+  .then((src) => {
+    const m = src.match(/export const RIM_CONTEXT_MASTER = Object\.freeze\((\{[^}]*\})\);/);
+    if (!m) throw new Error('rim.js no longer exposes RIM_CONTEXT_MASTER — update this parser');
+    return Function(`"use strict"; return (${m[1]});`)();
+  });
 const TIMEOUT = Number(process.env.CHEOMA_SIJEON_APP_TIMEOUT_MS) || 180_000;
 
 function outputArgument(argv) {
@@ -437,11 +449,11 @@ try {
     `${viewport.label}: canonical product post composer is active`,
     prepared.postPasses.join(' → '));
     pass(prepared.rim?.mode === 'fresnel'
-        && prepared.rim.scale === 0
+        && prepared.rim.scale === RIM_CONTEXT_MASTER.aerial
         && prepared.rim.strength > 0
         && prepared.rim.patched > 0,
-    `${viewport.label}: product aerial keeps Fresnel materials patched but unlit`,
-    JSON.stringify(prepared.rim));
+    `${viewport.label}: product aerial keeps Fresnel rim at the aerial context weight`,
+    JSON.stringify({ ...prepared.rim, expectedScale: RIM_CONTEXT_MASTER.aerial }));
     pass(visibleVsHidden.changedPixels >= minimumContribution
         && visibleVsHidden.peakChannelDelta >= 4,
     `${viewport.label}: village-sijeon contributes visible canvas pixels`,
