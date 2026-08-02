@@ -73,11 +73,13 @@ const avail = await ev(page, () => window.__engine.cine.available());
 ok(avail === true, `진입 가능(부감에서 cine.available)=${avail}`);
 const passes = await ev(page, () => window.__engine.cine.passList());
 console.log('PASSES', JSON.stringify(passes.map((p) => `${p.name}:${p.duration}s`)));
-ok(passes.length === 4, `드론 패스 4종 생성 (n=${passes.length})`);
+// 여정 문법(#42)의 비트는 6종이다. 이 단언이 4 로 남아 있던 것은 재설계 라운드의 미완 흔적이고,
+//   바로 아래 명칭 규약이 이미 6종 명단을 요구하므로 둘이 모순이었다(2026-08-02 #42 R2 정합).
+ok(passes.length === 6, `드론 여정 비트 6종 생성 (n=${passes.length})`);
 const names = passes.map((p) => p.name).sort().join(',');
-ok(names === 'crane-in,landmark-orbit,pullback-reveal,street-flythrough', `패스 명칭 규약 (${names})`);
+ok(names === 'far-approach,landmark-flyby,return-arc,ridge-climb,rooftop-glide,valley-run', `패스 명칭 규약 (${names})`);
 
-// ── 게이트 ① : 드론 4패스 각각 재생 중 finite + 종료 인계 ──
+// ── 게이트 ① : 드론 6비트 각각 재생 중 finite + 종료 인계 ──
 for (const p of passes) {
   await ev(page, (n) => window.__engine.cine.start('drone', { pass: n }), p.name);
   await wait(page, 150);
@@ -104,7 +106,7 @@ await ev(page, () => window.__engine.cine.start('drone'));
 await wait(page, 200);
 const chainSt = await cine(page);
 console.log('CHAIN', JSON.stringify(chainSt.chain), 'idx', chainSt.index, 'pass', chainSt.pass);
-ok(chainSt.chain.join(',') === 'crane-in,landmark-orbit,street-flythrough,pullback-reveal',
+ok(chainSt.chain.join(',') === 'far-approach,valley-run,rooftop-glide,landmark-flyby,ridge-climb,return-arc',
   `② 체인 순서(진입→선회→비행→당김) (${chainSt.chain.join('→')})`);
 ok(chainSt.active && chainSt.index === 0 && !chainSt.single, `② 체인 재생 시작(index=0·single=false)`);
 // debugAdvance 로 각 패스를 강제 완주시켜 전이 관찰(긴 duration 대기 없이).
@@ -125,14 +127,14 @@ for (let i = 0; i < 5; i++) {
 console.log('CHAIN SEQ', seen.join(' → '));
 ok(seen.length >= 3, `② 패스 전이 발생(관측 ${seen.length}종: ${seen.join('→')})`);
 // 5회 강제 완주 → crane 이 두 번(index 0·4) 나타남 = 체인 끝에서 처음으로 순환.
-ok(seen.filter((s) => s === 'crane-in').length >= 2 || seen.length >= 5, `② 체인 순환(재-crane 관측: ${seen.join('→')})`);
+ok(seen.filter((s) => s === 'far-approach').length >= 2 || seen.length >= 5, `② 체인 순환(재-crane 관측: ${seen.join('→')})`);
 ok(camFiniteThroughCut, `② 패스 컷 전환 중 camera finite`);
 ok(maxChainTurnRate <= 72.2, `② 패스 컷 시선 각속도 ≤ 72.2°/s (max=${maxChainTurnRate.toFixed(1)}°/s)`);
 const stillActive = (await cine(page)).active;
 ok(stillActive, `② 체인은 순환 재생(자동 종료 안 함)=${stillActive}`);
 
 // ── 게이트 ③ : 중단(stop) 방향 연속성(스냅 튐 없음) ──
-await ev(page, () => window.__engine.cine.start('drone', { pass: 'landmark-orbit' }));
+await ev(page, () => window.__engine.cine.start('drone', { pass: 'landmark-flyby' }));
 await wait(page, 900);
 const before = await cam(page);
 await ev(page, () => window.__engine.cine.stop());

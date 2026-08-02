@@ -1,17 +1,32 @@
 import {
-  createDirectionController,
   createDronePaths,
   createWalker,
 } from '../../../src/api/cinematic.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
-const DRONE_CHAIN = ['crane-in', 'landmark-orbit', 'street-flythrough', 'pullback-reveal'];
 const DEG = Math.PI / 180;
-// 뱅킹 1차 지연(초) — 표본 롤을 그대로 쓰지 않고 이 시정수로 따라간다(재생 시작·구간 전환 보호).
-const ROLL_LAG_SEC = 0.22;
+// 뱅킹 지연은 **없다**. 표본 롤은 dronepath 가 이미 원뿔(슬루) 제한 + 주기 Hann 으로 만든 연속
+//   신호이고, 그 위에 1차 지연을 얹으면 지연 이득이 dt 를 타면서 프레임 시간 흔들림이 그대로 롤
+//   흔들림이 된다(#42 프로브 실측: 지연 min(1,dt/τ) 는 ±18% dt 흔들림에서 프레임 잔차 0.023~0.105°,
+//   dt 불변형 1-exp(-dt/τ) 로 고쳐도 0.14~0.17° — 지연이 남아 있는 한 정상 상태 오차 e=φ̇·τ 가
+//   dt 흔들림을 증폭한다). 시선과 같은 원칙이다: **한 번만 제어한다.**
 
 // 마을 시네마틱의 상태기계. 씬 전환 정책은 콜백으로 받고 카메라 경로 구동만 소유한다.
-// 명명된 드론 패스 사이의 위치 컷은 유지하되 시선은 가속도 제한 컨트롤러로 연속 인계한다.
+//
+// ── 드론 재생은 **하나의 τ 진행**이다(#42, 2026-08-02) ──
+// dronepath 가 내는 것은 하나의 닫힌 곡선이고, leg 는 그 위의 시간 창(라벨)일 뿐이다. 종전 러너는
+//   패스를 체인으로 이어 붙이며 경계마다 t 를 리셋했고, 그 경계에서 리셋되는 상태(시선 스무딩 누적,
+//   롤 지연)가 전환감의 물증이었다. 이제 τ 하나만 진행시키고 leg 는 τ 로 조회한다 — 경계에서
+//   리셋되는 상태가 **존재하지 않는다**.
+//
+// ── 시선을 두 번 제어하지 않는다 ──
+// dronepath 의 방향장은 이미 Hann 1.05s 짐벌 관성과 저작 요 상한이 걸린 신호다. 그 위에 가속도
+//   제한 컨트롤러(createDirectionController)를 한 겹 더 얹으면 그 컨트롤러는 bang-bang 이라
+//   목표 근처에서 프레임마다 부호를 뒤집는다(속도가 accel·dt 단위로만 변하므로 원하는 속도가 그
+//   양자보다 작아지는 순간 넘었다 되돌아온다). #42 프로브 실측: 저작 방향장의 프레임 잔차는
+//   0.0001° 인데 컨트롤러 출력은 0.018~0.056°(부호 교대율 84~100%), 가변 프레임에서는 투어 전체
+//   최대 0.20°. 사용자가 "시작부터 떨린다"고 본 것이 이것이다. 그래서 컨트롤러를 걷어내고 표본
+//   방향을 그대로 카메라에 넣는다.
 export function createCinematicRuntime({
   camera,
   cancelTween,
@@ -31,34 +46,30 @@ export function createCinematicRuntime({
   stopHeroDrive,
   tweenTo,
 } = {}) {
-  const viewDirection = camera.position.clone();
-  camera.getWorldDirection(viewDirection);
-  const droneLook = createDirectionController({
-    direction: viewDirection,
-    // Axis limits combine to a <=72.2°/s spherical turn, including diagonal
-    // yaw+pitch changes at a pass boundary.
-    maxYawSpeed: 60 * DEG,
-    maxYawAcceleration: 150 * DEG,
-    maxPitchSpeed: 40 * DEG,
-    maxPitchAcceleration: 100 * DEG,
-  });
   const state = {
     active: false,
     mode: null,
     paths: null,
     walker: null,
-    chain: [],
-    chainIdx: 0,
-    pass: null,
-    t: 0,
+    legs: [],
+    legIdx: 0,
+    tour: null,          // 투어 표본기(모든 leg 이 공유하는 같은 함수)
+    tourDuration: 0,
+    tau: 0,              // **단일 진행**. leg 경계는 이 값의 조회일 뿐이다.
+    window: null,        // opts.pass 단독 재생 시 [t0, t1]
     single: null,
     lastLook: camera.position.clone(),
     input: { fwd: 0, strafe: 0, yaw: 0, pitch: 0, run: false },
     ambT: 0,
-    roll: 0,
+    roll: null,
     viewReady: false,
-    desiredLook: camera.position.clone(),
     smoothedLook: camera.position.clone(),
+  };
+  const legAt = (tau) => {
+    const legs = state.legs;
+    let k = 0;
+    for (let i = 0; i < legs.length; i++) if (tau >= legs[i].t0) k = i;
+    return k;
   };
   let disposed = false;
   let pendingStart = null;
@@ -81,11 +92,15 @@ export function createCinematicRuntime({
     && !village.transitioning
   );
 
+  // 시선 각속도 — 워킹뷰는 walker 가, 드론은 경로 표본의 프레임 간 각으로 잰다(제어기가 없으므로
+  //   컨트롤러 상태가 아니라 실제 프레임 델타가 유일한 진실이다).
+  let lastDroneDir = null;
+  let droneTurnRate = 0;
   function turnRateDegrees() {
     if (!state.active) return 0;
     const rate = state.mode === 'walk' && state.walker
       ? Math.abs(state.walker.turnRate())
-      : droneLook.angularSpeed;
+      : droneTurnRate;
     return +(rate / DEG).toFixed(2);
   }
 
@@ -138,32 +153,39 @@ export function createCinematicRuntime({
       //   (종전에는 여기서 startAutoStroll() 로 자동 산책을 걸었다). 자동 산책은 명시 API 로만.
       camera.near = 0.08;
       camera.updateProjectionMatrix();
-      state.pass = null;
-      state.chain = [];
+      state.legs = [];
+      state.tour = null;
       state.single = null;
+      state.window = null;
       // Walk framing was authored at its physical FOV, without compensated dolly.
       // Clear a preceding house/landmark profile so local-detail LOD stays literal.
       camera.userData.villageReferenceFov = camera.fov;
     } else {
       state.paths = paths();
-      const byName = Object.fromEntries(state.paths.map((path) => [path.name, path]));
-      if (opts.pass && byName[opts.pass]) {
-        state.chain = [byName[opts.pass]];
+      state.legs = state.paths;
+      state.tour = state.paths[0].sampleTour;
+      state.tourDuration = state.paths[0].tourDuration;
+      const named = state.paths.find((path) => path.name === opts.pass);
+      if (opts.pass && named) {
+        // 단독 재생도 같은 τ 축을 쓴다 — 창만 좁힌다(별도 재생 경로를 만들지 않는다).
         state.single = opts.pass;
+        state.window = [named.t0, named.t1];
+        state.tau = named.t0;
       } else {
-        state.chain = DRONE_CHAIN.map((name) => byName[name]).filter(Boolean);
         state.single = null;
+        state.window = null;
+        state.tau = 0;
       }
-      state.chainIdx = 0;
-      state.pass = state.chain[0];
-      state.t = 0;
+      state.legIdx = legAt(state.tau);
+      state.roll = null;
+      lastDroneDir = null;
     }
     markActivity();
     emit('cinematic', {
       active: true,
       mode,
-      pass: state.pass ? state.pass.name : null,
-      index: 0,
+      pass: state.legs.length ? state.legs[state.legIdx].name : null,
+      index: state.legIdx,
     });
     return true;
   }
@@ -181,56 +203,52 @@ export function createCinematicRuntime({
       camera.position.copy(pos);
       lookAt = state.smoothedLook.copy(pos).add(dir);
     } else {
-      if (!state.pass) return;
+      if (!state.tour) return;
       if (!warmHold) {
-        state.t += stepDt / state.pass.duration;
-        if (state.t >= 1) {
-          if (state.single) {
-            stop();
-            return;
-          }
-          // 드론 구간은 하나의 연속 투어를 잘라 놓은 시간 창이다(dronepath.js). 경계에서 t=0 으로
-          // 리셋하면 넘친 시간이 버려져 그 프레임만 이동거리가 짧아진다(실측: 프레임 속도가 한 프레임
-          // 1.6m/s 로 떨어졌다가 복귀). 남은 시간을 다음 구간 길이로 환산해 넘긴다.
-          const overflow = (state.t - 1) * state.pass.duration;
-          state.chainIdx = (state.chainIdx + 1) % state.chain.length;
-          state.pass = state.chain[state.chainIdx];
-          state.t = Math.min(0.999, Math.max(0, overflow / state.pass.duration));
+        // **단일 진행**. leg 경계에 넘침 환산도, t 리셋도, 상태 초기화도 없다 — 경계가 없기 때문이다.
+        state.tau += stepDt / state.tourDuration;
+        if (state.window) {
+          if (state.tau >= state.window[1]) { stop(); return; }
+        } else if (state.tau >= 1) {
+          state.tau -= Math.floor(state.tau);   // 닫힌 곡선이라 그대로 순환한다
+        }
+        const nextLeg = legAt(state.tau);
+        if (nextLeg !== state.legIdx) {
+          state.legIdx = nextLeg;
+          // 라벨 갱신일 뿐 재생에는 아무 영향이 없다(HUD·오버레이 소비면 계약 유지).
           emit('cinematic', {
             active: true,
             mode: 'drone',
-            pass: state.pass.name,
-            index: state.chainIdx,
+            pass: state.legs[state.legIdx].name,
+            index: state.legIdx,
           });
         }
       }
-      const sample = state.pass.sample(clamp01(state.t));
+      const sample = state.tour(clamp01(state.tau));
       camera.position.copy(sample.pos);
       if (sample.fov != null && Math.abs(camera.fov - sample.fov) > 1e-3) {
         camera.fov = sample.fov;
         camera.updateProjectionMatrix();
       }
       if (sample.fov != null) camera.userData.villageReferenceFov = sample.referenceFov ?? sample.fov;
-      state.desiredLook.copy(sample.lookAt).sub(sample.pos);
-      if (!state.viewReady) {
-        droneLook.reset(state.desiredLook);
-        state.viewReady = true;
+      // 시선은 **표본 그대로** 쓴다(위 헤더 주석: 두 번 제어하지 않는다). 진단용 각속도만 여기서 잰다.
+      const dirX = sample.lookAt.x - sample.pos.x;
+      const dirY = sample.lookAt.y - sample.pos.y;
+      const dirZ = sample.lookAt.z - sample.pos.z;
+      const dirLen = Math.hypot(dirX, dirY, dirZ) || 1;
+      const nx = dirX / dirLen, ny = dirY / dirLen, nz = dirZ / dirLen;
+      if (lastDroneDir && stepDt > 0) {
+        const dot = Math.min(1, Math.max(-1,
+          lastDroneDir[0] * nx + lastDroneDir[1] * ny + lastDroneDir[2] * nz));
+        droneTurnRate = Math.acos(dot) / stepDt;
       }
-      // warm hold 중에는 시선 슬루도 고정(시작 방향 스냅만).
-      const direction = warmHold
-        ? droneLook.reset(state.desiredLook) || state.desiredLook
-        : droneLook.step(state.desiredLook, stepDt);
-      viewDirection.set(direction.x, direction.y, direction.z);
-      if (viewDirection.lengthSq() < 1e-12) viewDirection.copy(state.desiredLook);
-      if (viewDirection.lengthSq() > 1e-12) viewDirection.normalize();
-      const lookDistance = Math.max(1, sample.pos.distanceTo(sample.lookAt));
-      lookAt = state.smoothedLook.copy(sample.pos).addScaledVector(viewDirection, lookDistance);
-      // 뱅킹 — dronepath 가 궤적 곡률·속도에서 유도한 롤(라디안). 시선 컨트롤러는 방향만 다루므로
-      //   롤은 lookAt 뒤에 별도로 적용한다(아래). 표본 자체가 이미 슬루 제한된 연속 신호지만, 재생
-      //   시작 프레임에서 0 → 현재 롤로 튀지 않도록 1차 지연을 한 겹 둔다.
-      const wanted = Number.isFinite(sample.roll) ? sample.roll : 0;
-      if (warmHold) state.roll = wanted;
-      else state.roll += (wanted - state.roll) * Math.min(1, stepDt / ROLL_LAG_SEC);
+      lastDroneDir = [nx, ny, nz];
+      state.viewReady = true;
+      lookAt = state.smoothedLook.copy(sample.lookAt);
+      // 뱅킹 — dronepath 가 궤적 곡률·속도에서 유도한 롤(라디안). lookAt 뒤에 별도로 적용한다(아래).
+      //   표본을 **그대로** 쓴다(위 주석: 한 번만 제어한다). 재생 시작 롤이 0 이 아니어도 그것이
+      //   그 비행 시점의 옳은 자세다 — 0 에서 끌어올리는 램프가 오히려 없는 기동을 만든다.
+      state.roll = Number.isFinite(sample.roll) ? sample.roll : 0;
     }
 
     // 종료 시 OrbitControls로 방향을 연속 인계할 수 있도록 매 프레임 같은 시선을 공유한다.
@@ -252,7 +270,7 @@ export function createCinematicRuntime({
       x = lookAt.x;
       z = lookAt.z;
     } else {
-      const ahead = state.pass.sample(clamp01(state.t + 2.5 / state.pass.duration));
+      const ahead = state.tour(clamp01((state.tau + 2.5 / state.tourDuration) % 1));
       x = ahead.pos.x;
       z = ahead.pos.z;
     }
@@ -267,12 +285,14 @@ export function createCinematicRuntime({
     state.active = false;
     const wasWalk = state.mode === 'walk';
     state.mode = null;
-    state.pass = null;
     state.walker = null;
-    state.chain = [];
+    state.legs = [];
+    state.tour = null;
     state.single = null;
+    state.window = null;
     state.viewReady = false;
-    state.roll = 0;
+    state.roll = null;
+    lastDroneDir = null;
     controls.enabled = true;
     reapplyVillageFog();
     controls.target.copy(state.lastLook);
@@ -315,23 +335,49 @@ export function createCinematicRuntime({
     setAutoStroll(on) {
       if (state.walker) on ? state.walker.startAutoStroll() : state.walker.stopAutoStroll();
     },
-    getState: () => ({
-      active: state.active,
-      mode: state.mode,
-      pass: state.pass ? state.pass.name : null,
-      index: state.chainIdx,
-      chain: state.chain.map((path) => path.name),
-      single: state.single,
-      t: +state.t.toFixed(3),
-      turnRateDeg: turnRateDegrees(),
-      rollDeg: +(state.roll / DEG).toFixed(2),
-      warmHold,
-    }),
+    getState: () => {
+      const leg = state.legs[state.legIdx] || null;
+      // t 는 **현재 leg 안의 진행률**로 보고한다(소비면 호환). 재생 자체는 τ 하나이므로 이 값은
+      //   파생 진단이지 상태가 아니다.
+      const span = leg ? Math.max(1e-9, leg.t1 - leg.t0) : 1;
+      return {
+        active: state.active,
+        mode: state.mode,
+        pass: leg ? leg.name : null,
+        index: state.legIdx,
+        chain: state.legs.map((path) => path.name),
+        single: state.single,
+        t: leg ? +clamp01((state.tau - leg.t0) / span).toFixed(3) : 0,
+        tau: +state.tau.toFixed(4),
+        turnRateDeg: turnRateDegrees(),
+        rollDeg: +((state.roll || 0) / DEG).toFixed(2),
+        warmHold,
+      };
+    },
     passList: () => (village.handle
       ? paths().map(({ name, kind, duration }) => ({ name, kind, duration }))
       : []),
+    // 임의 τ 로 시크한다(진단 전용). 재생이 **단일 τ** 가 되면서 비로소 가능해진 affordance 다 —
+    //   종전 패스 체인에서는 구간마다 별도 시계라 임의 지점으로 점프할 수 없었고, 그래서 스토리보드
+    //   캡처가 authored duration 을 실시간으로 흘려보내야 했다. 여정 전체를 등간격으로 훑는 캡처는
+    //   이 훅 없이는 만들 수 없다. 제품 경로는 이 함수를 부르지 않는다.
+    debugSeek(tau) {
+      if (!state.active || state.mode !== 'drone' || !state.tour) return false;
+      const v = Number(tau);
+      if (!Number.isFinite(v)) return false;
+      state.tau = ((v % 1) + 1) % 1;
+      state.legIdx = legAt(state.tau);
+      lastDroneDir = null;
+      update(0);
+      return true;
+    },
+    // 다음 leg 경계로 건너뛴다(진단 전용). 재생은 여전히 같은 τ 축 위에 있다.
     debugAdvance() {
-      if (state.active && state.mode === 'drone') state.t = 1;
+      if (!state.active || state.mode !== 'drone' || !state.legs.length) return;
+      const next = (state.legIdx + 1) % state.legs.length;
+      state.tau = next === 0 ? 0 : state.legs[next].t0;
+      state.legIdx = next;
+      if (state.window) state.window = [state.legs[next].t0, state.legs[next].t1];
     },
     debugWalker: () => (state.walker ? {
       clearance: +state.walker.groundClearance().toFixed(3),
@@ -357,8 +403,8 @@ export function createCinematicRuntime({
       cancelPendingStart();
       state.active = false;
       state.walker = null;
-      state.chain = [];
-      state.pass = null;
+      state.legs = [];
+      state.tour = null;
       state.viewReady = false;
     },
   };

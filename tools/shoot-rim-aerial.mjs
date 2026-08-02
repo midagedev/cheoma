@@ -40,9 +40,9 @@ const SCALES = {
 };
 // 시나리오: 규모 × 시간대. drone 은 실시간 재생이라 규모당 한 구간·한 지점만 잡는다.
 const SCENARIOS = [
-  { id: 'village-sunset', scale: 'village', time: 'sunset', drone: { pass: 'crane-in', t: 0.5 } },
-  { id: 'capital-sunset', scale: 'capital', time: 'sunset', drone: { pass: 'landmark-orbit', t: 0.5 } },
-  { id: 'hanyang-sunset', scale: 'hanyang', time: 'sunset', drone: { pass: 'crane-in', t: 0.5 } },
+  { id: 'village-sunset', scale: 'village', time: 'sunset', drone: { pass: 'far-approach', t: 0.5 } },
+  { id: 'capital-sunset', scale: 'capital', time: 'sunset', drone: { pass: 'landmark-flyby', t: 0.5 } },
+  { id: 'hanyang-sunset', scale: 'hanyang', time: 'sunset', drone: { pass: 'far-approach', t: 0.5 } },
   { id: 'village-noon', scale: 'village', time: 'day' },
   { id: 'hanyang-noon', scale: 'hanyang', time: 'day' },
 ];

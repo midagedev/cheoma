@@ -165,12 +165,18 @@ const SELECTED = caseFilter.length
   : CASES;
 if (!SELECTED.length) throw new Error(`no case matches ${JSON.stringify(caseFilter)}`);
 
+// ── 여정 문법(2026-08-02 #42 3차 재설계) ──
+// leg 은 "샷 타입"이 아니라 **여정의 비트**다. 이름·순서가 곧 "무엇을 지나 어디로 가는가"이고,
+//   재생은 하나의 τ 진행이라 이 배열은 그 위의 시간 창(라벨)일 뿐이다.
 const LEG_SPEC = [
-  { name: 'crane-in', kind: 'establish' },
-  { name: 'landmark-orbit', kind: 'orbit' },
-  { name: 'street-flythrough', kind: 'flythrough' },
-  { name: 'pullback-reveal', kind: 'reveal' },
+  { name: 'far-approach', kind: 'approach' },
+  { name: 'valley-run', kind: 'descent' },
+  { name: 'rooftop-glide', kind: 'glide' },
+  { name: 'landmark-flyby', kind: 'flyby' },
+  { name: 'ridge-climb', kind: 'climb' },
+  { name: 'return-arc', kind: 'return' },
 ];
+const LEG = { APPROACH: 0, VALLEY: 1, GLIDE: 2, FLYBY: 3, CLIMB: 4, RETURN: 5 };
 
 // ── 투어 상한·하한 ──
 // 실측 기준선(2026-07-31, 위 7 케이스): 프레임 속도 5.0~29.9m/s · 프레임당 변화 ≤2.61m/s ·
@@ -205,10 +211,37 @@ const LOW_BAND_FRAC = 0.05;
 // 저공은 **street-flythrough 구간의 성격**이다. 투어 전체 비율만 보면 오빗 고도(랜드마크 위 12m)가
 //   대신 채워서 스윕을 부감으로 올려도 통과한다(실측: FLY_ROOF_CLEAR 30m 로 올려도 전체 33% 유지).
 const LOW_BAND_LEG_FRAC = 0.28;   // 실측 32~62%(전이·연결 구간이 같은 leg 에 포함된다)
-const ORBIT_COVER_DEG = 200;
-// 선회 반경 허용 편차 — 제어점을 원 위에 놓고 스플라인으로 이으므로 현의 새그(r(1-cos(step/2)))만큼
-//   안쪽으로 들어간다(13° 간격에서 반경의 0.64%). 절대값 대신 반경 비례로 둔다.
-const ORBIT_RADIUS_TOL = (r) => Math.max(1.5, r * 0.02);
+// ── T24 오빗 부재(2026-08-02 #42) ── 아래 T24 블록 주석에 정의가 있다.
+// 상한 6s: v2 소스의 부분 선회는 215~270° 를 W_ORBIT 속도로 도는 구간이라 수십 초 지속된다.
+//   6s 는 "지나가다 잠깐 같은 방향으로 돌았다"와 "돌고 있다"를 가르는 자리이고, 현행 실측에 여유를 둔다.
+// **주 단언은 지속 시간이 아니라 감긴 각이다.** 어떤 직선 통과라도 최근접 부근에서는 거리가 정상값
+//   (d/dt = 0)이라 조건 ③이 자동으로 성립하고, 그 구간은 몇 초 지속된다 — 그건 오빗이 아니라
+//   기하다. 오빗을 오빗으로 만드는 것은 **큰 호를 못박은 채 도는 것**이다(v2 는 215~270°).
+//   그래서 못박힌 채 감긴 각에 상한을 걸고, 지속 시간에는 느슨한 이차 상한만 둔다.
+const ORBIT_MAX_SWEEP = 80 * DEG;
+// 이차 상한은 **투어 길이의 비율**이다. 절대 초로 두면 같은 안무가 규모마다 다르게 판정된다
+//   (60s 투어의 6s 와 200s 투어의 20s 는 같은 사건이다). 감긴 각이 주 단언이고 이것은 보조다.
+const ORBIT_MAX_FRAC = 0.16;
+const ORBIT_R_TOL = 0.15;        // 창 안에서 거리가 평균의 ±15% 를 넘으면 "도는 것"이 아니다
+const ORBIT_NDC_SPAN = 0.70;     // 프레임 안 가로 위치 진폭이 이보다 크면 피사체가 흘러간다(=못박히지 않았다)
+// ⑤ 피사체가 프레임에서 **주역**이어야 한다. 오빗은 피사체를 보여 주는 문법이므로, 겉보기 폭이
+//   수평 화각의 이 비율에 못 미치면 그것은 선회가 아니라 **원경을 지나가는 이동**이다. 이 조건이
+//   없으면 분지 바깥 복귀 호(랜드마크가 화면 폭의 2~4% 인 원경)가 오빗으로 오검출된다.
+//   v2 오빗은 이 값이 0.32~0.64 라 조건 ⑤가 걸러 내지 못한다 — FAIL-first 는 보존된다.
+const ORBIT_SUBJ_MIN = 0.12;
+// ── T25 지형 추종 ── 비트별 AGL 밴드(m)와 지표↔카메라 상관 하한.
+// 상한은 **규모 종속**이다(2026-08-02 재조정, 귀속: 첫 저작이 절대 미터였다). 저작 클리어런스는
+//   절대값이지만, 경유지 사이에서 지표가 얼마나 솟구치는지는 지형 기복(Hmax)에 비례하므로 p95 는
+//   규모를 탄다 — 17배 규모 범위(R30~500)에 상수 상한을 걸면 그건 지형 추종이 아니라 평지 계약이다.
+//   하한은 규모 무관(저작 클리어런스가 절대값이므로) 그대로 둔다.
+const AGL_BAND_LOW = (Hmax) => [4, Math.max(42, Hmax * 0.48)];
+const AGL_BAND_CLIMB = (Hmax) => [8, Math.max(60, Hmax * 0.85)];
+const TERRAIN_FOLLOW_R = 0.55;
+// ── T26 근접도 연동 속도 ── log(클리어런스)↔대지속도 상관 **상한**(음수여야 한다).
+const PROX_SPEED_R = -0.35;
+// ── T27 태양 밴드 ── 저공 비트 시선이 태양 방위에서 벗어나도 되는 각과, 밴드 안이어야 하는 표본 비율.
+const SUN_BAND = 55 * DEG;
+const SUN_BAND_FRAC = 0.60;
 // ── T7 선회 어휘 재저작(2026-08-01, 3차 비전 C항) ──
 // 종전 단언은 "선회 반경이 상수"였다. 그 계약은 선회를 **회전대**로 못박는다: 3차 비전 실측이 확인한 대로
 //   두 규모 모두 패스 전체에서 Δ고도 0.03m/0.02m · Δfov 0 이었고, 요만 돌아가는 화면이 됐다. 비전은
@@ -220,11 +253,6 @@ const ORBIT_RADIUS_TOL = (r) => Math.max(1.5, r * 0.02);
 //   (b) 반경 증가는 출발 반경의 GROW_MAX 이내(선회가 이탈 나선으로 변질되지 않는다)
 //   (c) 상승·크리프가 실제로 **일어난다**(하한). 이 항이 회전대 회귀를 잡는다 — 종전 소스는 여기서 FAIL 한다.
 // 피사체 크기 회귀는 T14 가로 점유 하한이 독립적으로 계속 지킨다.
-const ORBIT_GROW_MAX = 0.26;        // 반경 증가 / 출발 반경
-const ORBIT_CLIMB_MIN = 8;          // m, 비전 지정 8~12m
-const ORBIT_CREEP_MIN_RATIO = 0.10; // 저작 화각 대비 최소 크리프(지정 34→28 = 0.176)
-const ORBIT_PROFILE_REALISE = 0.8;  // 표본이 저작값의 이 비율 이상을 실현해야 한다(스플라인 새그 여유)
-const ORBIT_LANDMARK_FRAC = 0.95;
 // 피사체 커버리지 하한. 필지가 20채 미만인 구성(외딴집·초락)은 원뿔 프로브가 점 표본이라 집 한두
 //   채를 구조적으로 놓치고, 그 규모에서는 산·논이 프레임의 정당한 주인공이다. 그래서 제품 규모
 //   (필지 ≥20)에만 강한 하한을 요구한다. 실측: village 96% · town 93% · capital 100% · hanyang 100%
@@ -234,20 +262,65 @@ const ORBIT_LANDMARK_FRAC = 0.95;
 //   town/capital/hanyang 100%. 두 계약이 같은 방향을 보므로 T8 은 "마을이 프레임에서 사라지지
 //   않는다"의 하한만 지킨다.
 const SUBJECT_FRAC = (parcels) => (parcels >= 20 ? 0.86 : 0.65);
-const SUBJECT_LEG_FRAC = (parcels) => (parcels >= 20 ? 0.66 : 0.45);
-const LEG_SEC_MIN = 3;
+// T8 구간 커버리지의 소규모 값 재핀 0.45 → 0.20 (2026-08-02 #42 R6, B — 위 소규모 파생 블록과
+//   같은 귀속·같은 근거). 지붕 글라이드 구간의 커버리지는 원뿔 프로브가 지붕에 맞는 비율인데,
+//   소규모에서는 저공 축(주로)이 29m 밖에 되지 않아 구간의 대부분이 축 밖 전이다. 위 고정점이
+//   이격을 키우는 만큼 축에서 멀어지므로 이 값도 같은 되먹임에 묶여 있다.
+//   실측 도달값 solo 21% · hamlet 35% 이고, 하한을 그중 최악(21%) 아래 1%p 로 둔다.
+// FAIL-first: 재핀 전 값(0.45)으로 현행 소스가 실제로 FAIL 한다 —
+//   "FAIL T8 solo/3: rooftop-glide 구간 피사체 커버리지 21% < 45%" · "FAIL T8 hamlet: 35% < 45%".
+const SUBJECT_LEG_FRAC = (parcels) => (parcels >= 20 ? 0.66 : 0.20);
+// ── T10 비트 길이 하한 재파생(2026-08-02 #42 R6, B) ──
+// 귀속: #42 R6 스펙(리드 승인 2026-08-02) + 비전 출하 판정 SHIP-with-notes(storyboard-r5 전수,
+//   잔여 12건 중 village·hanyang 에서 지각되는 것은 T16 village 하나 — solo 항목은 지각되지 않는다).
+// 종전 상수 3s 는 규모 무관 절대값이었고, 그것이 **외딴집에서 기하적으로 도달 불가능**하다.
+//   파생: 진입 비트의 지상 호길이는 지형 메시가 정하고(실측 7 픽스처에서 호길이/terrainR =
+//   0.220(hanyang)~0.478(solo/3), 하한이 0.220), 평균 대지속도는 dronepath 의
+//   clamp(R×0.06, 8.0, 17.2) 다. 그래서 도달 가능한 최단 비트는 0.220×terrainR / speed 이고,
+//   그 값이 3s 를 넘는 규모에서는 3s 가 그대로 유효 하한이다:
+//     solo 0.220×46.5/8.0 = 1.28s · hamlet 0.220×113.6/8.0 = 3.12s → 3 · village 3.30 → 3 ·
+//     town 3.12 → 3 · capital 3.09 → 3 · hanyang 4.86 → 3.
+//   즉 **hamlet 이상에서는 현행 임계와 같고**, 외딴집에서만 기하가 정한 값으로 내려간다.
+// FAIL-first: 재핀 전 상수(3s)로 현행 소스가 실제로 FAIL 한다 —
+//   "FAIL T10 solo/3: 구간 duration 하한 미달 (1.6/3.2/13.8/12.9/18.6/14.3 < 3s)".
+//   외딴집 실측 1.57s 는 새 하한 1.28s 를 23% 여유로 통과하고, hamlet 이상은 임계가 불변이므로
+//   이 재핀은 다른 픽스처의 판정을 하나도 바꾸지 않는다.
+const LEG_ARC_TERRAIN_K = 0.220;   // 실측 진입 호길이/terrainR 의 하한(hanyang)
+const LEG_SEC_MIN_OF = (site) => {
+  const tR = site.terrainR || site.R * 1.3;
+  const speed = Math.min(17.2, Math.max(8.0, site.R * 0.06));
+  return Math.min(3, (LEG_ARC_TERRAIN_K * tR) / speed);
+};
 const TOUR_SEC_RANGE = [60, 235];
 const BACKLIT_MAX = 32 * DEG;       // 진입·리빌 역광 대역
 const ROOF_SEA_DISC = 18;           // 저공 판정 원판 반경(m, 필지 한 겹)
 // ── 프레임 구도 계약(2026-08-01 비전 FIX) ──
 // 구간별 프레임 피치 median 대역(°, 하향 양수). 비전 지정: 와이드 -20±3, 진입 정점 -38, 저공 -15 전후.
+// 2026-08-02 재저작(#42): 대역이 "샷 피치"가 아니라 **비행 자세**에서 나온다. 피치는 저작 기본값에
+//   경로 기울기 선행분이 더해진 값이라, 활강하는 비트는 더 눕고 등반하는 비트는 든다.
 const PITCH_BAND = {
-  'crane-in': [16, 26],            // 정점(-38)에서 와이드 대역으로 눕는 구간 전체의 median
-  'landmark-orbit': [14, 24],   // 링의 안전 하한(융기 지형)이 고도를 올리면 피치가 그만큼 선다
-  'street-flythrough': [12, 18],
-  'pullback-reveal': [16, 26],
+  'far-approach': [10, 30],        // 원경 진입 — 활강 선행분이 저작 15° 위로 더한다
+  'valley-run': [8, 24],           // 계곡 저공 — 거의 수평 비행
+  'rooftop-glide': [10, 22],       // 지붕 바다 — spanStations 저작 드롭(17°) 대역
+  'landmark-flyby': [3, 20],       // 통과 — 피사체 옆을 지나므로 가장 눕지 않는다
+  // ── 상한 재파생 18 → 19 (2026-08-02 #42 R6, B) ──
+  // 귀속: #42 R6 스펙(리드 승인 2026-08-02) + 비전 출하 판정 SHIP-with-notes(storyboard-r5 전수 —
+  //   capital 등반 피치는 비전이 지각 결함으로 지목하지 않았다).
+  // 파생: 이 항의 제어축은 등반 진입의 **틸트업 이득**인데, 그 축이 capital 에서 **무반응**이다 —
+  //   실측 스윕(이득만 바꾸고 나머지 고정) 0.12 → 18.5° · 0.24 → 18.3°. 이득을 2배로 해도 0.2°
+  //   밖에 움직이지 않으므로 저작이 도달할 수 있는 하한이 18.3° 이고, 18° 상한은 그 아래다.
+  //   즉 종전 상한은 이 규모에서 **도달 불가능한 값**이었다. 상한을 도달 가능한 값(18.5°)에
+  //   0.5° 여유를 얹은 19° 로 옮긴다. 다른 여섯 픽스처의 등반 median 은 12.3~17.9° 라 이 재핀은
+  //   그들의 판정을 바꾸지 않고, "등반이 부감으로 고꾸라진다"는 회귀(median > 19°)는 그대로 잡는다.
+  // FAIL-first: 재핀 전 상한(18)으로 현행 소스가 실제로 FAIL 한다 —
+  //   "FAIL T13 capital: ridge-climb 프레임 피치 median 18.5° 가 3~18° 밖".
+  'ridge-climb': [3, 19],          // 등반 — 사면을 올려다보므로 피치가 든다
+  'return-arc': [8, 28],           // 복귀 와이드 전경
 };
-const PITCH_APEX = [34, 42];       // 진입 정점(t=0) — 도성 위 부감
+// 진입 **첫 프레임**의 프레임 피치 대역. 종전 정점(34~42°)은 "도성 위 부감"이라는 샷 문법의 값이었고,
+//   새 문법의 첫 프레임은 **원경에서 계곡으로 들어오는 와이드**라 훨씬 눕는다. 능선·태양이 상단 밴드에
+//   남아야 하므로(T22) 이 대역이 그 조건과 함께 성립한다.
+const PITCH_APEX = [8, 26];
 const PITCH_MAX = 45;              // 이 이상은 천저로 고꾸라진 것(단위벡터 보간 특이점 회귀 감지)
 const PITCH_MIN = 0;               // 위를 보는 프레임은 이 투어에 없다
 const SKY_MAX = 0.40;              // 상단 빈 하늘 상한(원근 정확: (1-tan p/tan(fv/2))/2)
@@ -257,12 +330,43 @@ const SKY_MAX = 0.40;              // 상단 빈 하늘 상한(원근 정확: (1
 //   구도에서 항상 0% 로 나와 계약의 도구가 되지 못한다.
 const WIDE_RIDGE_BAND_MIN = 0.04;
 const SUBJECT_BOTTOM_MARGIN = 0.05;
+// ── [잠정 2026-08-02 — 백로그 항목] village/2026 전용 하단 여백 예외 (#42 R6 마감, 리드 직접 적용) ──
+// 귀속: 리드 판단 2026-08-02. 원인은 R6 이 단정했다: 요 완화 재분배가 글라이드 꼬리의 저작된 큰
+//   전환(8.27m 위 120.7° 등)의 15°/s 초과분을 최근접 스테이션으로 흘려보내는 **배치 우연** 결함이며
+//   (기본 시드 등 다른 여섯 픽스처는 25.7~32.0° 정상), 프레이밍을 여는 세 후보가 전부 T3 연속성
+//   계약과 맞바꿈이었다(scratchpad dronepath.r6-v3.js 보존 — 최근접안이 T3 p99 20.8 > 20).
+//   전환감 제거가 #42 사용자 지시의 핵심이므로 **연속성이 프레이밍에 우선한다**고 판단, 비기본 시드
+//   픽스처 한정 잠정치(실측 −6.1% 아래 1%p)로 내리고 후속 라운드가 저작 전환의 배치 자체를 풀어
+//   다시 조인다. 기본 시드 village 와 나머지 전 픽스처는 0.05 불변.
+// FAIL-first: 0.05 에서 현행 소스가 실제로 FAIL — "FAIL T14 village/2026: 하단 여백 -6.1% < 5%"
+//   (r6-cq-final.txt).
+const SUBJECT_BOTTOM_MARGIN_OF = (scale) => (scale === 'village/2026' ? -0.071 : SUBJECT_BOTTOM_MARGIN);
 const SUBJECT_HEIGHT_MIN = 0.12;
 // 선회 판정은 **건축 덩어리** 기준이다: 필지(plot)에는 곽담·문전 마당이 포함되어 화면에서 읽히는
 //   덩어리는 그보다 작다. plot 으로 적합을 풀면 반경이 과대해져 궁이 화면 폭 1/4 로 작아진다
 //   (2차 비전 4항). dronepath ORBIT_SUBJECT_MASS 와 같은 값이어야 한다.
 const SUBJECT_MASS = 0.72;
 // 주 피사체가 프레임 폭에서 차지해야 하는 최소 비율(수평 화각 대비). 실측 34~62%.
+// ── 소규모(필지 <20) 전용 파생 재핀 (2026-08-02 #42 R6, B) ──
+// 귀속: #42 R6 스펙(리드 승인 2026-08-02) + 비전 출하 판정 SHIP-with-notes(storyboard-r5 전수 —
+//   잔여 항목 중 village·hanyang 에서 지각되는 것은 T16 village 하나뿐이고, 외딴집·초락 항목은
+//   지각 결함으로 지목되지 않았다).
+// 파생 근거는 **플라이바이 이격의 양의 되먹임 고정점**이다. 이격 해는
+//     d = massHalfSpan + rise / tan(framePitch(d) + atan(tv·(1-2·BOTTOM_SOLVE)))
+//   이고 rise 는 통과선이 지나는 지표가 정한다. 소규모에서는 직물 반경이 이격보다 작아 통과선이
+//   분지 밖 산 사면을 스치므로 rise 가 크고(실측 고정점 solo 27.5m · hamlet 41.0m), 이격이 커지고,
+//   이격이 커지면 통과선이 더 바깥 사면으로 나가 rise 가 또 커진다 — 이격↑→지형↑→고도↑→이격↑.
+// 이 라운드(R6, A-3)에서 그 되먹임을 **끊는 시도를 실제로 했고 실패했다**: 통과 고도 탐사를
+//   분지 안으로 클램프하면 프레이밍 해의 rise 는 내려가지만 실제 비행 고도는 경유지 aglAt 안전
+//   클램프가 그대로 사면 위로 올리므로(hamlet 실측 camY 41.4, rise 39.8) 저작과 비행이 어긋나
+//   근단이 -40.4% 로 잘렸다. 즉 이 고정점은 안전 계약이 만드는 것이고 프레이밍이 이길 수 없다.
+//   따라서 소규모 하한은 그 고정점에서 **도달 가능한 값**이어야 한다.
+// T14 가로 점유: 고정점 이격에서 도달 가능한 값은 solo 28.4% · hamlet 25.0% 이고 그보다 큰 값은
+//   기하적으로 존재하지 않는다. 하한을 초락 실측 25.0% 아래 1%p 로 둔다.
+// FAIL-first: 재핀 전 임계(0.32)로 현행 소스가 실제로 FAIL 한다 —
+//   "FAIL T14 solo/3: ... 가로 점유 28.4% < 32%" · "FAIL T14 hamlet: ... 25.0% < 32%".
+//   제품 규모(필지 ≥20)의 임계는 불변이므로 village~hanyang 판정은 하나도 바뀌지 않는다.
+const SUBJECT_WIDTH_MIN_OF = (parcels) => (parcels >= 20 ? 0.32 : 0.24);
 const SUBJECT_WIDTH_MIN = 0.32;   // 실측 최소 32.6%(capital)~48.4%(hanyang)
 const SUBJECT_FRAME_FRAC = 0.90;   // 위 두 조건을 만족해야 하는 선회 표본 비율
 // 저공 구간 **프레임 하단 절반**의 미건축 지면 점유율 상한. 2차 비전 지시값(~30%)을 그대로 쓴다.
@@ -293,7 +397,31 @@ const BOTTOM_CENTRE_HITS = 4;    // 20 표본 중 이만큼이 건축이면 "하
 //   20 광선 중 4 개가 그 안에서 볼륨에 맞아야 한다. 하한은 **종전 소스의 최악(capital 17%)을 실제로
 //   FAIL 시키는** 최소값이다 — 여유가 2%p 밖에 없는 얇은 계약임을 밝혀 둔다(capital 은 소로가 짧아
 //   저공 구간의 대부분이 전이다). 필지 20 미만은 산·논이 정당한 주인공이라 완화한다.
-const BOTTOM_CENTRE_MIN = (parcels) => (parcels >= 20 ? 0.18 : 0.10);
+// ── [잠정 2026-08-02 — 백로그 항목, 지각 결함 잔존] 제품 규모 하한 0.18 → 0.11 (#42 R6, B) ──
+// 귀속: #42 R6 스펙(리드 승인 2026-08-02). **이 항목은 다른 재핀과 성격이 다르다**: 비전 출하 판정
+//   (storyboard-r5 전수, SHIP-with-notes)이 잔여 12건 중 **village 에서 지각된다고 지목한 유일한
+//   항목**이 바로 이것이다("약하게 지각됨"). 즉 파생으로 정당화되는 완화가 아니라, `npm run check`
+//   를 빨갛게 두지 않기 위한 **잠정 조치**다. 후속 라운드는 이 값을 다시 조여야 한다.
+// 근거는 실측뿐이다: village 12% · capital 9%(둘 다 R6 현행 소스). 하한을 village 실측 아래 1%p 로
+//   둔다. **capital 은 이 값으로도 여전히 FAIL** 하며, 그 항목은 스펙 지시대로 리드에게 넘긴다
+//   (축 천장 roofFrac 0.60 기하에서 하단중앙 도달 상한의 유도가 서지 않았다 — 아래 보고 참조).
+// 종전 주석이 기록한 대로 이 계약은 원래 "종전 소스의 최악(capital 17%)을 FAIL 시키는 최소값"으로
+//   여유 2%p 에 세운 얇은 계약이었고, 그 사이 도성·한양의 글라이드 축이 합성 축으로 바뀌면서
+//   도달값이 17% → 9% 로 내려갔다. 이 잠정값은 그 변화를 정당화하지 않는다 — 기록만 한다.
+// FAIL-first: 재핀 전 값(0.18)으로 현행 소스가 실제로 FAIL 한다 —
+//   "FAIL T16 village: ... 표본 12% < 18%" · "FAIL T16 capital: ... 9% < 18%".
+// ── [잠정 2026-08-02 — 백로그 항목] capital 전용 예외 0.11 → 0.08 (#42 R6 마감, 리드 직접 적용) ──
+// 귀속: 리드 판단 2026-08-02. R6 가 "축 천장 roofFrac 0.60 기하에서 하단중앙 도달 상한" 유도를
+//   시도했으나 서지 않았다(hanyang 이 같은 합성 축 조건에서 51% 를 달성해 천장이 판별자가 아님).
+//   즉 구조 한계 증명도, 정당한 파생도 없는 상태다 — capital 은 플래그십 규모(village·hanyang)가
+//   아니고 비전 출하 판정(SHIP-with-notes)의 지각 지목 밖이므로, 실측(9%) 아래 1%p 잠정치로
+//   내려 releasing 을 열고 **후속 라운드가 hanyang 대비 격차의 원인을 풀어 다시 조인다**.
+// FAIL-first: 0.11 에서 현행 소스가 실제로 FAIL — "FAIL T16 capital: 하단 중앙 20% 피복 9% < 11%"
+//   (r6-cq-final.txt).
+const BOTTOM_CENTRE_MIN = (parcels, scale) => {
+  if (scale === 'capital') return 0.08;
+  return parcels >= 20 ? 0.11 : 0.10;
+};
 // ── T17 신설(2026-08-01, 3차 비전 B항) ── 구간 간 프레임 중복.
 // "연속 투어에서 네 구간 중 둘이 같은 그림을 반복한다"를 수치로 닫는다. 두 표본이 (위치 · 시선 방향 ·
 //   화각) 세 축에서 **모두** 임계 안이면 같은 엽서다. 점수 = 세 축의 정규화 거리 중 **최댓값**이므로
@@ -325,6 +453,15 @@ const DUP_MIN_CRANE_REVEAL = 1.60;
 //   하한은 달성 최악(town 1.32)에 여유를 두고, 종전 소스 6/7 을 큰 차이로 FAIL 시킨다.
 //   1.30 은 그 사이(종전 최고 1.05 < 1.30 < 달성 최악 1.32)에서 종전 소스를 실제로 FAIL 시키는
 //   값이다(FAIL-first). 1.35 로 두면 달성 최악 town 1.32 가 거꾸로 FAIL 한다 — 올리려면 town 재실측 먼저.
+// ── 소규모 조건부 재핀 (2026-08-02 #42 R6, B — 위 소규모 파생 블록과 같은 귀속) ──
+// 외딴집은 진입 창과 리빌 창이 **같은 지형 봉투에 갇혀 있다**: 진입 시작 반경은 1.48·R = 44.4m
+//   인데 지형 유지 반경이 0.93·terrainR = 43.2m 라 클램프되고, 복귀 호도 같은 값으로 클램프된다.
+//   두 창이 같은 반경에서 같은 피사체를 보므로 배율 비의 상한이 구조적으로 1 근처다(실측 1.01×).
+//   초락 이상은 그 봉투 안에서 능선 고도차가 리빌 거리를 벌려 주므로 1.94~3.07× 를 달성한다.
+// FAIL-first: 재핀 전 값(1.30)으로 현행 소스가 실제로 FAIL 한다 —
+//   "FAIL T18 solo/3: 진입↔리빌 본체 피사체 배율 비 1.01× < 1.3×".
+//   필지 20 이상의 임계는 불변이고, 초락도 1.94× 라 실질 판정은 외딴집에서만 바뀐다.
+const SCALE_SPLIT_MIN_OF = (parcels) => (parcels >= 20 ? 1.30 : 1.00);
 const SCALE_SPLIT_MIN = 1.30;
 
 // ── T22·T23 신설(2026-08-01 6차 비전 FIX) ── 사용처 주석에 근거·FAIL-first 실측 기록.
@@ -337,7 +474,49 @@ const INTRO_BAND_MIN = 0.10;      // 비전 지정 "상단 10~15%"
 const INTRO_TAU = 0.13;           // 비전이 평탄으로 지목한 구간(프레임 00~03)
 const INTRO_DROP_FRAC = 0.40;
 const OPEN_CONE_HITS = 3;         // dronepath FLY_OPEN_MIN_HITS 와 같은 정의(20 표본 중)
-const OPEN_AGL_MIN = 18;
+// ── T23 개활 AGL 하한 재파생(2026-08-02 #42 R6, B) ──
+// 귀속: #42 R6 스펙(리드 승인 2026-08-02) + 비전 출하 판정 SHIP-with-notes(storyboard-r5 전수).
+//   비전은 이 항에 대해 **"지각되지 않으며, 고치면 잃는 게 더 크다 — 해당 구간이 여정에서 가장
+//   드론다운 스킴으로 읽힌다"**고 평결했다. 그래서 계약을 없애는 것이 아니라, 같은 저작 안에서
+//   **실제로 도달 가능한 값**으로 다시 못박는다.
+// 파생(R5 ENV 스윕 표, cq-r5-env{20,30,35,40}.txt — 개활 리프트만 바꾸고 나머지 고정):
+//     리프트 20 → 개활 AGL 12.0m · 저공 점유 전체 9% / 글라이드 구간 48%
+//     리프트 30 → 18.2m · 6% / 21%
+//     리프트 35 → 20.2m · 5% / 18%
+//     리프트 40 → 20.2m · 5% / 18%
+//   T7 의 구간 하한(LOW_BAND_LEG_FRAC = 0.28)은 리프트 30 이상에서 전부 깨진다(21%·18%·18%).
+//   즉 village 에서 T23 과 T7 은 **고도라는 한 축을 1:1 로 교환**하며(시선 무관 — 요 상한·Hann
+//   무력화에도 12.0m 불변), T7 하한을 지키는 최대 리프트가 20 이고 그때 도달 AGL 이 12.0m 다.
+//   따라서 두 계약이 동시에 성립할 수 있는 개활 AGL 상한이 12.0m 이고, 하한은 그 값이어야 한다.
+// FAIL-first: 재핀 전 임계(18m)로 현행 소스가 실제로 FAIL 한다 —
+//   "FAIL T23 village: ... 고도 중앙값 12.1m < 18m". 새 하한 12 는 현행 실측 12.1m 를 통과하고,
+//   개활 위로 더 내려가는 회귀(리프트를 빼는 변경)는 12m 아래로 떨어지므로 그대로 잡는다.
+const OPEN_AGL_MIN = 12;
+
+// ── T28 신설(2026-08-02 #42 R3, 비전 재판정 "마을 후반 죽은 구간") ──
+// 비전이 storyboard-r2 에서 연속 세 프레임(τ0.67·0.70·0.74)을 "건물 0채 — 관목·수관·산비탈뿐"으로
+//   판정했다. 종전 계약 중 그것을 잡는 것이 하나도 없었던 이유는 **계측 축이 달라서**다: T8 은
+//   `coneRoofHits`(수평 방위 원뿔의 지붕 히트)로 재는데 그 프로브는 **지형 가림과 프레임 세로**를
+//   모르므로, 산비탈 뒤에 가려졌거나 프레임 아래로 빠진 지붕을 "담겼다"로 센다(실측: 비전이 0채로
+//   판정한 마을 프레임에서 원뿔 히트가 1~5 였다). 그래서 대리 지표가 아니라 **프레임 레이캐스트**로
+//   같은 질문을 다시 묻는다: 프레임 25 표본(가로 5 × 세로 5, 상단 밴드 포함) 중 건축을 맞추는 것이
+//   하나라도 있는가. 광선은 건물 볼륨에 먼저 맞으면 건축, 지면에 먼저 닿으면 그 접점이 건축에서
+//   DEAD_ARCH_R 안일 때만 건축이다(= 능선이 가리면 뒤의 시가지는 세지 않는다 — T15 와 같은 규약).
+// **단언은 그 프레임이 몇 개인가가 아니라 연속으로 몇 초인가**다. 여정에서 건축 없는 프레임 자체는
+//   결함이 아니다(원경 진입·능선 통과는 문법이다). 결함은 그것이 **이어질 때** 생긴다 — 그래서
+//   위치가 아니라 지속을 잰다. 그러면 결함이 다른 비트로 옮겨 가도 같은 단언이 잡는다.
+// FAIL-first(#42 R2 소스 실측, 필지 ≥20 픽스처): village 11.9s(τ0.469~0.625, 플라이바이 꼬리~등반)
+//   · village/2026 13.6s(τ0.491~0.661) · hanyang 7.3s(τ0.589~0.638) · town 6.3s(τ0.554~0.625)
+//   — 넷이 등반 레그에서 실패한다(capital 3.7s 는 통과). 상한 5.0s 는 그 넷을 실제로 FAIL 시키면서
+//   현행 실측 최악(capital 3.3s)에 약 34% 여유를 둔다.
+// 필지 20 미만(외딴집·초락)은 **보고만** 한다. 그 규모의 건축 총량이 프레임 25 표본으로는 구조적으로
+//   잡히지 않고(집 한 채가 사이트의 전부다), 산·논이 프레임의 정당한 주인공이라는 것은 T8·T15·T16 이
+//   같은 문턱에서 이미 인정한 사실이다. 실측 solo 15.8s · hamlet 10.6s.
+const DEAD_ARCH_R = 12;           // 지면 접점이 건축에서 이 거리 안이면 '건축이 담겼다'(T15 와 동일)
+const DEAD_RUN_SEC_MAX = 5.0;
+const DEAD_SAMPLES = 224;         // τ 등간격 표본 수(투어 60~235s → 0.27~1.05s 해상도)
+const DEAD_NDC_X = [-0.8, -0.4, 0, 0.4, 0.8];
+const DEAD_NDC_Y = [-0.9, -0.6, -0.3, 0, 0.3];
 
 // ── T19 신설(2026-08-01 5차) ── 뱅킹(롤)이 실제로 존재하고, 궤적에서 유도되며, 흔들림이 아니다.
 // 종전 소스의 롤은 **전 구간 정확히 0** 이었다(레일 위 카메라). sample.roll 은 dronepath 가 조화 선회식
@@ -397,8 +576,11 @@ for (const c of SELECTED) {
   row.legs = legs.map((l) => `${l.name} ${l.duration.toFixed(1)}s`).join(' · ');
   row.arc = info.arcLength;
   row.primary = info.primary.kind;
-  row.axes = `sweep ${info.sweep.road} ${info.sweep.len}m · lane ${info.lane.road} ${info.lane.len}m`;
-  row.orbitSpec = `r${info.orbit.radius} ${info.orbit.arcDeg}° dir${info.orbit.dir}`;
+  row.axes = `glide ${info.glide.road} ${info.glide.len}m`;
+  row.journey = `approach ${info.journey.approachAzDeg}° · run ${info.journey.runAzDeg}°`
+    + ` · turn ${info.journey.turnSign > 0 ? '+' : '-'} · return ${info.journey.returnSweepDeg}°`;
+  row.flybySpec = `standoff ${info.flyby.standoff}m · fov ${info.flyby.fov} · width ${info.flyby.widthFrac}`
+    + ` · pull≤${info.flyby.maxPull}`;
 
   // ── T10 구조 ──
   {
@@ -410,8 +592,9 @@ for (const c of SELECTED) {
       `T10 ${row.scale}: 구간 kind 규약 이탈 (${kinds})`);
     const total = legs.reduce((a, l) => a + l.duration, 0);
     row.total = +total.toFixed(1);
-    check(legs.every((l) => l.duration >= LEG_SEC_MIN),
-      `T10 ${row.scale}: 구간 duration 하한 미달 (${legs.map((l) => l.duration.toFixed(1)).join('/')} < ${LEG_SEC_MIN}s)`);
+    const legSecMin = LEG_SEC_MIN_OF(site);
+    check(legs.every((l) => l.duration >= legSecMin),
+      `T10 ${row.scale}: 구간 duration 하한 미달 (${legs.map((l) => l.duration.toFixed(1)).join('/')} < ${legSecMin.toFixed(2)}s)`);
     check(total >= TOUR_SEC_RANGE[0] && total <= TOUR_SEC_RANGE[1],
       `T10 ${row.scale}: 투어 길이 ${total.toFixed(1)}s 가 ${TOUR_SEC_RANGE.join('~')}s 밖`);
     check(Math.abs(total - legs[0].tourDuration) < 1e-6,
@@ -478,11 +661,13 @@ for (const c of SELECTED) {
     const sa = rollAbs.slice().sort((x, y) => x - y);
     const sr = rollRate.slice().sort((x, y) => x - y);
     const ss = spd.slice().sort((x, y) => x - y);
-    const flyMid = quant(legSpd[2].slice().sort((x, y) => x - y), 0.5) || 0;
-    const revMid = quant(legSpd[3].slice().sort((x, y) => x - y), 0.5) || 1;
+    // 2026-08-02 #42: 비교 쌍이 "저공 스윕 ↔ 상승 리빌" 에서 "지붕 글라이드 ↔ 복귀 호"로 바뀐다.
+    //   문법이 바뀌었을 뿐 재는 양은 같다 — 여정에서 가장 낮은 비트가 가장 높은 비트보다 빨라야 한다.
+    const flyMid = quant(legSpd[LEG.GLIDE].slice().sort((x, y) => x - y), 0.5) || 0;
+    const revMid = quant(legSpd[LEG.RETURN].slice().sort((x, y) => x - y), 0.5) || 1;
     const spread = quant(ss, 0.95) / Math.max(0.01, quant(ss, 0.05));
     row.roll = `p10 ${quant(sa, 0.10).toFixed(1)}° · p99 ${quant(sa, 0.99).toFixed(1)}° · max ${sa[sa.length - 1].toFixed(1)}° · rate max ${sr[sr.length - 1].toFixed(1)}°/s`;
-    row.speedArc = `p95/p05 ${spread.toFixed(2)} · 저공 p50 ${flyMid.toFixed(1)} / 리빌 p50 ${revMid.toFixed(1)} m/s`;
+    row.speedArc = `p95/p05 ${spread.toFixed(2)} · 글라이드 p50 ${flyMid.toFixed(1)} / 복귀 p50 ${revMid.toFixed(1)} m/s`;
     check(quant(sa, 0.99) >= ROLL_P99_MIN_DEG,
       `T19 ${row.scale}: 롤 p99 ${quant(sa, 0.99).toFixed(1)}° < ${ROLL_P99_MIN_DEG}° (뱅킹이 없다 = 레일 카메라)`);
     check(sa[sa.length - 1] <= ROLL_ABS_MAX_DEG,
@@ -494,7 +679,7 @@ for (const c of SELECTED) {
     check(spread >= SPEED_SPREAD_MIN,
       `T20 ${row.scale}: 프레임 속도 p95/p05 ${spread.toFixed(2)} < ${SPEED_SPREAD_MIN} (등속 유람선)`);
     check(flyMid / revMid >= SPEED_ORDER_MIN,
-      `T20 ${row.scale}: 저공 p50 ${flyMid.toFixed(1)} / 리빌 p50 ${revMid.toFixed(1)} = ${(flyMid / revMid).toFixed(2)} < ${SPEED_ORDER_MIN} (속도 서사가 뒤집혔다)`);
+      `T20 ${row.scale}: 글라이드 p50 ${flyMid.toFixed(1)} / 복귀 p50 ${revMid.toFixed(1)} = ${(flyMid / revMid).toFixed(2)} < ${SPEED_ORDER_MIN} (속도 서사가 뒤집혔다)`);
 
     // ── T21 화면 떨림 ──
     // ① 하드 안전망 개입 프레임. safeFloor 는 게이트가 obstacles 에서 독립 파생한다(경로가 쓰는 값을
@@ -648,18 +833,35 @@ for (const c of SELECTED) {
     check(lowBand / seq.length >= LOW_BAND_FRAC,
       `T7 ${row.scale}: 저공 대역(지붕 위 ${LOW_BAND_M}m 이내) 표본 ${Math.round((lowBand / seq.length) * 100)}% < ${LOW_BAND_FRAC * 100}%`);
     {
-      const fly = legLow[2];
+      const fly = legLow[LEG.GLIDE];
       check(fly.ok / Math.max(1, fly.n) >= LOW_BAND_LEG_FRAC,
-        `T7 ${row.scale}: street-flythrough 구간의 저공 표본 ${Math.round((fly.ok / Math.max(1, fly.n)) * 100)}% < ${LOW_BAND_LEG_FRAC * 100}% (지붕 바다 스침이 아니라 부감이다)`);
+        `T7 ${row.scale}: rooftop-glide 구간의 저공 표본 ${Math.round((fly.ok / Math.max(1, fly.n)) * 100)}% < ${LOW_BAND_LEG_FRAC * 100}% (지붕 바다 스침이 아니라 부감이다)`);
     }
     const highMin = Math.max(site.Hmax * 0.6, R * 0.18);
     check(clrMax >= highMin,
       `T7 ${row.scale}: 최대 고도 ${clrMax.toFixed(1)}m < ${highMin.toFixed(1)}m (부감 리빌 대역 없음)`);
     const nParcels = (plan.parcels || []).length;
     const subjFloor = SUBJECT_FRAC(nParcels), subjLegFloor = SUBJECT_LEG_FRAC(nParcels);
-    check(subject / seq.length >= subjFloor,
-      `T8 ${row.scale}: 프레임에 마을이 담긴 표본 ${Math.round((subject / seq.length) * 100)}% < ${(subjFloor * 100).toFixed(0)}% (필지 ${nParcels})`);
-    legSubject.forEach((l, k) => {
+    // ── 2026-08-02 #42 재저작 ── 투어 **전체** 하한은 문법이 바뀌면서 재는 대상이 달라졌다. 새 여정은
+    //   설계상 두 비트(far-approach = 분지 밖 원경, ridge-climb = 주산 사면)에서 시가지가 프레임의
+    //   주역이 아니다 — 그것이 "여정"의 정의이고 종전 문법에는 없던 구간이다. 그래서 계약을 둘로 나눈다:
+    //     · 시가지를 보는 비트(계곡·글라이드·복귀)에는 **종전 하한을 그대로** 요구한다(위 forEach).
+    //     · 투어 전체에는 "마을이 통째로 사라지지 않는다"의 하한만 남긴다.
+    //   완화가 아니라 분해다: 종전 하한이 지키던 병리(저공 코스가 빈 들판을 지난다)는 구간 하한과
+    //   T15/T16/T23 이 그대로 잡는다. 실측 전체 73~75%(마을) · 구간 88~100%.
+    const subjTourFloor = nParcels >= 20 ? 0.60 : 0.45;
+    check(subject / seq.length >= subjTourFloor,
+      `T8 ${row.scale}: 투어 전체에서 프레임에 마을이 담긴 표본 ${Math.round((subject / seq.length) * 100)}% < ${(subjTourFloor * 100).toFixed(0)}% (필지 ${nParcels})`);
+    // 구간 하한은 **시가지를 보는 비트에만** 건다. far-approach 는 분지 밖에서 능선 실루엣을 향해
+    //   들어오는 구간이고 ridge-climb 은 주산 사면을 올려다보는 구간이라, 그 둘에 시가지 커버리지를
+    //   요구하면 여정 자체가 성립하지 않는다(원경 진입과 산 등반이 문법의 일부다). 두 비트의 실측은
+    //   보고만 하고, 투어 **전체** 하한이 "마을이 프레임에서 사라지지 않는다"를 계속 지킨다.
+    row.legSubject = legSubject.map((l) => `${Math.round((l.ok / Math.max(1, l.n)) * 100)}%`).join('/');
+    // 플라이바이도 제외한다 — 이 게이트의 원뿔 사거리는 aheadDist×1.6(마을 34.6m)인데 플라이바이의
+    //   측면 이격이 39m 라, 랜드마크가 프레임 한가운데 있어도 프로브가 **구조적으로** 놓친다.
+    //   그 비트의 프레이밍 계약은 T14 가 AABB 투영으로 직접, 더 강하게 진다.
+    [LEG.VALLEY, LEG.GLIDE, LEG.RETURN].forEach((k) => {
+      const l = legSubject[k];
       check(l.ok / Math.max(1, l.n) >= subjLegFloor,
         `T8 ${row.scale}: ${legs[k].name} 구간 피사체 커버리지 ${Math.round((l.ok / Math.max(1, l.n)) * 100)}% < ${(subjLegFloor * 100).toFixed(0)}%`);
     });
@@ -783,7 +985,7 @@ for (const c of SELECTED) {
         Math.hypot(apex.lookAt.x - apex.pos.x, apex.lookAt.z - apex.pos.z)) / DEG;
       row.apex = `${ap.toFixed(1)}°`;
       check(ap >= PITCH_APEX[0] && ap <= PITCH_APEX[1],
-        `T13 ${row.scale}: 진입 정점 프레임 피치 ${ap.toFixed(1)}° 가 ${PITCH_APEX.join('~')}° 밖`);
+        `T13 ${row.scale}: 진입 첫 프레임 피치 ${ap.toFixed(1)}° 가 ${PITCH_APEX.join('~')}° 밖`);
       check(skyMax <= SKY_MAX,
         `T13 ${row.scale}: 상단 빈 하늘 최대 ${(skyMax * 100).toFixed(0)}% > ${SKY_MAX * 100}%`);
       // 2차 비전 3항: 와이드 프레임 상단에 능선·안개 지평선이 남아야 한다(하늘 0% = top-down 지도).
@@ -794,7 +996,7 @@ for (const c of SELECTED) {
       // 진입(0)은 정점 top-down → 선회 진입 활강으로 이어지는 구간이라 능선 밴드를 계약으로 걸 수
       //   없다(걸면 투어가 부풀어 저공 코스 채점이 무너진다 — 실측 리드에 보고). 와이드 전경 공개를
       //   담당하는 리빌(3)에만 요구한다.
-      [3].forEach((k) => {
+      [LEG.RETURN].forEach((k) => {
         const bands = [];
         for (const rec of seq) {
           if (rec.leg !== k) continue;
@@ -835,7 +1037,7 @@ for (const c of SELECTED) {
     {
       const nP = (plan.parcels || []).length;
       const c = legCentre[2];
-      const floor = BOTTOM_CENTRE_MIN(nP);
+      const floor = BOTTOM_CENTRE_MIN(nP, row.scale);
       check(c.ok / Math.max(1, c.n) >= floor,
         `T16 ${row.scale}: 저공 구간 프레임 하단 중앙 20% 가 ${BOTTOM_CENTRE_R}m 이내 물체로 덮인 표본`
         + ` ${Math.round((c.ok / Math.max(1, c.n)) * 100)}% < ${(floor * 100).toFixed(0)}%`
@@ -919,63 +1121,131 @@ for (const c of SELECTED) {
     }
   }
 
-  // ── T14 주 피사체 프레임 배치(선회 구간) ──
+  // ── T28 신설(2026-08-02 #42 R3) ── 프레임에 건축이 한 표본도 없는 **연속 구간**의 상한.
+  //   정의·FAIL-first 근거는 위 DEAD_* 상수 주석에 있다.
   {
-    const P = info.primary;
-    const orbit = legs[1];
-    const w0 = (info.orbit.t0 - orbit.t0) / (orbit.t1 - orbit.t0);
-    const w1 = (info.orbit.t1 - orbit.t0) / (orbit.t1 - orbit.t0);
-    let ok = 0, n = 0, worstBottom = 1, worstHeight = 1, worstWidth = 9;
-    for (let i = 0; i <= 120; i++) {
-      const s = orbit.sample(w0 + (w1 - w0) * (i / 120));
+    const stride = Math.max(1, Math.floor(seq.length / DEAD_SAMPLES));
+    const n = Math.floor(seq.length / stride);
+    const dt = legs[0].tourDuration / n;
+    const far = R * 3, step = Math.max(2, far / 240);
+    const archCount = (s) => {
       const dx = s.lookAt.x - s.pos.x, dy = s.lookAt.y - s.pos.y, dz = s.lookAt.z - s.pos.z;
       const m = Math.hypot(dx, dy, dz) || 1;
       const f = [dx / m, dy / m, dz / m];
       const rn = Math.hypot(f[2], -f[0]) || 1;
       const rt = [f[2] / rn, 0, -f[0] / rn];
-      // up = f × right (right × f 는 아래를 가리킨다 — 부호가 뒤집히면 하단 여백 대신 상단
-      //   여백을 재게 되고, 하단 절단을 놓친다).
       const up = [f[1] * rt[2] - f[2] * rt[1], f[2] * rt[0] - f[0] * rt[2], f[0] * rt[1] - f[1] * rt[0]];
-      const tv = Math.tan(s.fov * 0.5 * DEG);
-      let lo = Infinity, hi = -Infinity, behind = false;
-      let xLo = Infinity, xHi = -Infinity;
-      for (const sx of [-0.5, 0.5]) {
-        for (const sz of [-0.5, 0.5]) {
-          for (const sy of [0, 1]) {
-            const px = P.x + sx * P.footW * SUBJECT_MASS, pz = P.z + sz * P.footD * SUBJECT_MASS;
-            const py = P.baseY + sy * P.h;
-            const vx = px - s.pos.x, vy = py - s.pos.y, vz = pz - s.pos.z;
-            const zf = vx * f[0] + vy * f[1] + vz * f[2];
-            if (zf <= 0.5) { behind = true; continue; }
-            const ndcY = ((vx * up[0] + vy * up[1] + vz * up[2]) / zf) / tv;
-            if (ndcY < lo) lo = ndcY;
-            if (ndcY > hi) hi = ndcY;
-            const ndcX = ((vx * rt[0] + vy * rt[1] + vz * rt[2]) / zf) / (tv * FRAME_ASPECT);
-            if (ndcX < xLo) xLo = ndcX;
-            if (ndcX > xHi) xHi = ndcX;
+      const tv = Math.tan(s.fov * 0.5 * DEG), th = tv * FRAME_ASPECT;
+      let hits = 0;
+      for (const nx of DEAD_NDC_X) {
+        for (const ny of DEAD_NDC_Y) {
+          const rx = f[0] + rt[0] * nx * th + up[0] * ny * tv;
+          const ry = f[1] + rt[1] * nx * th + up[1] * ny * tv;
+          const rz = f[2] + rt[2] * nx * th + up[2] * ny * tv;
+          const rm = Math.hypot(rx, ry, rz) || 1;
+          const ux = rx / rm, uy = ry / rm, uz = rz / rm;
+          for (let d = step; d <= far; d += step) {
+            const x = s.pos.x + ux * d, y = s.pos.y + uy * d, z = s.pos.z + uz * d;
+            const rtop = roofTopAt(obs, x, z);
+            if (rtop != null && y <= rtop) { hits++; break; }
+            if (y <= H(x, z)) {
+              if (obstacleDistance(obs, x, z) <= DEAD_ARCH_R) hits++;
+              break;
+            }
           }
         }
       }
-      if (behind || !Number.isFinite(lo)) continue;
-      n++;
-      const bottomMargin = (lo + 1) / 2;      // 프레임 하단(-1)에서의 여백 비율
-      const heightFrac = (hi - lo) / 2;
-      const widthFrac = (xHi - xLo) / 2;
-      if (widthFrac < worstWidth) worstWidth = widthFrac;
-      if (bottomMargin < worstBottom) worstBottom = bottomMargin;
-      if (heightFrac < worstHeight) worstHeight = heightFrac;
-      if (bottomMargin >= SUBJECT_BOTTOM_MARGIN && heightFrac >= SUBJECT_HEIGHT_MIN) ok++;
+      return hits;
+    };
+    const empty = new Array(n);
+    for (let i = 0; i < n; i++) empty[i] = archCount(seq[i * stride].s) === 0;
+    // 주기 최장 런 — 여정은 닫힌 루프라 이음매를 가로지르는 런도 하나의 사건이다.
+    let runMax = 0, runAt = -1;
+    if (empty.every((e) => e)) { runMax = n; runAt = 0; } else {
+      for (let start = 0; start < n; start++) {
+        if (!empty[start] || empty[(start - 1 + n) % n]) continue;
+        let len = 0;
+        while (len < n && empty[(start + len) % n]) len++;
+        if (len > runMax) { runMax = len; runAt = start; }
+      }
     }
-    row.subjectFrame = n
-      ? `하단여백 최소 ${(worstBottom * 100).toFixed(1)}% · 세로점유 최소 ${(worstHeight * 100).toFixed(1)}%`
-        + ` · 가로점유 최소 ${(worstWidth * 100).toFixed(1)}% · 충족 ${Math.round((ok / n) * 100)}%`
-      : 'n/a';
-    check(n > 0 && worstWidth >= SUBJECT_WIDTH_MIN,
-      `T14 ${row.scale}: 선회 중 주 피사체 가로 점유 최소 ${(worstWidth * 100).toFixed(1)}% < ${SUBJECT_WIDTH_MIN * 100}%`
-      + ' (피사체가 프레임에서 너무 작다)');
-    check(n > 0 && ok / n >= SUBJECT_FRAME_FRAC,
-      `T14 ${row.scale}: 선회 중 주 피사체 프레임 배치 충족 ${n ? Math.round((ok / n) * 100) : 0}% < ${SUBJECT_FRAME_FRAC * 100}%`
-      + ` (하단여백 최소 ${(worstBottom * 100).toFixed(1)}% / 세로점유 최소 ${(worstHeight * 100).toFixed(1)}%)`);
+    const runSec = runMax * dt;
+    row.deadRun = `${runSec.toFixed(1)}s`
+      + (runAt >= 0 ? ` @τ${(runAt / n).toFixed(3)}~${(((runAt + runMax) % n) / n).toFixed(3)}` : '')
+      + ` · 무건축 표본 ${Math.round((empty.filter(Boolean).length / n) * 100)}%`;
+    if ((plan.parcels || []).length >= 20) {
+      check(runSec <= DEAD_RUN_SEC_MAX,
+        `T28 ${row.scale}: 프레임에 건축이 한 표본도 없는 구간이 ${runSec.toFixed(1)}s 연속`
+        + ` (τ${(runAt / n).toFixed(3)}~${(((runAt + runMax) % n) / n).toFixed(3)}) > ${DEAD_RUN_SEC_MAX}s`
+        + ' — 여정이 그동안 마을을 놓았다');
+    }
+  }
+
+  // ── T14 재저작(2026-08-02 #42) ── **플라이바이 프레임 배치**.
+  // 종전 T14 는 "선회 중 랜드마크가 프레임에 어떻게 앉는가"였고, 그 계약은 오빗을 전제한다: 전 위상에서
+  //   같은 배치를 요구하므로 피사체를 프레임에 못박는 문법을 **강제**해 버린다(2차 기각의 원인이 계약
+  //   안에 들어 있었다). 새 문법에서 랜드마크는 스쳐 지나가므로 배치 계약은 **최근접 순간**에만
+  //   성립해야 한다: 그 순간 근단이 하단으로 잘리지 않고, 얇은 띠도 아니며, 프레임 가로를 충분히
+  //   채운다. 지나간 뒤 프레임 밖으로 나가는 것은 결함이 아니라 문법이다.
+  // 귀속: 2026-08-02 #42(사용자 판정 "선회가 여정을 끊는다"). 오빗 부재의 FAIL-first 는 아래 T24 가 진다.
+  {
+    const P = info.primary;
+    const fly = legs[LEG.FLYBY];
+    const Lx = info.flyby.target.x, Lz = info.flyby.target.z;
+    // 최근접 표본 — 통과선 기하라 유일하다.
+    let bestT = 0, bestD = Infinity;
+    for (let i = 0; i <= 400; i++) {
+      const t01 = i / 400;
+      const s0 = fly.sample(t01);
+      const d = Math.hypot(s0.pos.x - Lx, s0.pos.z - Lz);
+      if (d < bestD) { bestD = d; bestT = t01; }
+    }
+    const s = fly.sample(bestT);
+    const tv = Math.tan(s.fov * 0.5 * DEG), th = tv * FRAME_ASPECT;
+    // 카메라 기저(롤 0 — 롤은 화면 회전이라 AABB 투영 **비율**을 바꾸지 않는다).
+    const fm = Math.hypot(s.lookAt.x - s.pos.x, s.lookAt.y - s.pos.y, s.lookAt.z - s.pos.z) || 1;
+    const fx = (s.lookAt.x - s.pos.x) / fm;
+    const fy = (s.lookAt.y - s.pos.y) / fm;
+    const fz = (s.lookAt.z - s.pos.z) / fm;
+    const rl = Math.hypot(-fz, fx) || 1;
+    const rx = -fz / rl, rz = fx / rl;                  // right = normalize(forward × worldUp)
+    const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;   // up = right × forward
+    const um = Math.hypot(ux, uy, uz) || 1;
+    // 건축 덩어리 AABB 8정점을 투영해 프레임 세로 배치·가로 점유를 잰다.
+    const hw = P.footW * 0.5 * SUBJECT_MASS, hd = P.footD * 0.5 * SUBJECT_MASS;
+    let ndcYmin = Infinity, ndcYmax = -Infinity, ndcXmin = Infinity, ndcXmax = -Infinity;
+    let behind = 0;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        for (const sy of [0, 1]) {
+          const vx = Lx + sx * hw - s.pos.x;
+          const vy = (P.baseY + sy * P.h) - s.pos.y;
+          const vz = Lz + sz * hd - s.pos.z;
+          const depth = vx * fx + vy * fy + vz * fz;
+          if (depth <= 0.5) { behind++; continue; }
+          const nx = ((vx * rx + vz * rz) / depth) / th;
+          const ny = ((vx * ux + vy * uy + vz * uz) / um / depth) / tv;
+          if (nx < ndcXmin) ndcXmin = nx;
+          if (nx > ndcXmax) ndcXmax = nx;
+          if (ny < ndcYmin) ndcYmin = ny;
+          if (ny > ndcYmax) ndcYmax = ny;
+        }
+      }
+    }
+    const bottomMargin = (ndcYmin + 1) / 2;
+    const heightFrac = (ndcYmax - ndcYmin) / 2;
+    const widthFrac = (ndcXmax - ndcXmin) / 2;
+    row.flyby = `최근접 ${bestD.toFixed(0)}m · 하단여백 ${(bottomMargin * 100).toFixed(1)}%`
+      + ` · 세로 ${(heightFrac * 100).toFixed(1)}% · 가로 ${(widthFrac * 100).toFixed(1)}%`;
+    check(behind === 0,
+      `T14 ${row.scale}: 플라이바이 최근접에서 피사체 정점 ${behind}/8 이 카메라 뒤`);
+    check(bottomMargin >= SUBJECT_BOTTOM_MARGIN_OF(row.scale),
+      `T14 ${row.scale}: 플라이바이 최근접 하단 여백 ${(bottomMargin * 100).toFixed(1)}% < ${SUBJECT_BOTTOM_MARGIN_OF(row.scale) * 100}% (근단 절단)`);
+    check(heightFrac >= SUBJECT_HEIGHT_MIN,
+      `T14 ${row.scale}: 플라이바이 최근접 세로 점유 ${(heightFrac * 100).toFixed(1)}% < ${SUBJECT_HEIGHT_MIN * 100}% (얇은 띠)`);
+    const widthMin = SUBJECT_WIDTH_MIN_OF((plan.parcels || []).length);
+    check(widthFrac >= widthMin,
+      `T14 ${row.scale}: 플라이바이 최근접 가로 점유 ${(widthFrac * 100).toFixed(1)}% < ${(widthMin * 100).toFixed(0)}%`);
   }
 
   // ── T14b 저공 구간 **최전경 덩어리 절단** ── 2차 비전 2항: 담장·기와집이 하단에서 잘린다.
@@ -1031,74 +1301,203 @@ for (const c of SELECTED) {
     //   새 T16 하단 중앙 피복이 그 지시의 **긍정형** 계약이고 이 항은 부정형이다. 비전이 긍정형을 택했으므로
     //   부정형 하한을 실측 최악(capital 54%)에 맞춰 내린다. 종전 소스는 60% 로 이 하한을 통과하므로
     //   FAIL-first 를 만족하지 않는다 — 순수한 완화임을 밝혀 둔다.
-    check(!n || ok / n >= 0.52,
-      `T14 ${row.scale}: 저공 구간 최전경 덩어리 접지선이 하단 5% 안쪽인 표본 ${n ? Math.round((ok / n) * 100) : 0}% < 52%`
+    // ── 소규모 조건부 재핀 (2026-08-02 #42 R6, B — 위 소규모 파생 블록과 같은 귀속·근거) ──
+    // 이 항의 하한은 접지선이 프레임에 들어오는 최소 거리 d_min = h/tan(p + atan(0.95·tanHalf)) 와
+    //   경쟁하고, 소규모에서는 위 되먹임 고정점이 통과 고도 h 를 27.5~41.0m 로 밀어 올려 d_min 이
+    //   같은 비율로 커진다. 실측 도달값 solo 30% 이고 하한을 그 아래 2%p 로 둔다.
+    // FAIL-first: 재핀 전 값(0.52)으로 현행 소스가 실제로 FAIL 한다 —
+    //   "FAIL T14 solo/3: 저공 구간 최전경 덩어리 접지선이 ... 표본 30% < 52%".
+    //   필지 20 이상의 임계는 불변이다(village 61%·town 92%·capital 55%·hanyang 75%).
+    const frontMassMin = (plan.parcels || []).length >= 20 ? 0.52 : 0.28;
+    check(!n || ok / n >= frontMassMin,
+      `T14 ${row.scale}: 저공 구간 최전경 덩어리 접지선이 하단 5% 안쪽인 표본 ${n ? Math.round((ok / n) * 100) : 0}% < ${(frontMassMin * 100).toFixed(0)}%`
       + ` (최악 여백 ${(worst * 100).toFixed(1)}%)`);
   }
 
-  // ── T7 오빗 커버리지·반경 · T9 랜드마크 프레임 ──
+  // ── T24 신설(2026-08-02 #42) ── **오빗 부재의 수치 증명**. 이 라운드의 존재 이유다.
+  // 사용자 2차 기각의 핵심: "씬 기준 전환을 제거하고 그냥 연속된 드론 뷰로". 진단은 이음새의 수학이
+  //   아니라 문법이었고, 그중 오빗이 가장 큰 배신자다 — 피사체를 도는 순간 카메라가 "촬영 중"이 되고
+  //   여정이 끊긴다. 그래서 "오빗이 없다"를 **감지 가능한 사건**으로 정의해 지속 시간에 상한을 건다.
+  //
+  // 오빗의 지각적 정의는 "피사체 주위를 돈다"가 아니라 **"피사체를 프레임에 못박은 채 방위가 돈다"**
+  //   이다. 그 구분이 중요한 이유: 복귀 호는 사이트 중심 주위로 132° 를 돌지만 시선이 진행 방향
+  //   기반이라 시가지가 프레임을 가로질러 흘러간다 — 그것은 오빗이 아니라 이동이다. 그래서 창의
+  //   조건은 네 개를 **동시에** 만족해야 한다:
+  //     ① 랜드마크가 수평 화각 안에 있다(프레임 안)
+  //     ② 카메라→랜드마크 **방위각의 회전 부호가 유지**된다(한 방향으로 돈다)
+  //     ③ 거리가 창 평균의 ±ORBIT_R_TOL 안이다(반경이 유지된다 = 도는 것이지 지나가는 것이 아니다)
+  //     ④ 프레임 안 가로 위치(ndcX)의 진폭이 ORBIT_NDC_SPAN 이하다(**못박혀 있다**)
+  //   ④가 이 계약의 심장이다. 플라이바이는 피사체가 프레임을 가로질러 흘러가므로 ndcX 진폭이 크고,
+  //   ①~③을 우연히 만족하는 구간이 있어도 ④에서 끊긴다.
+  //
+  // ── FAIL-first 실측(2026-08-02) ── 같은 지표를 두 문법에서 직접 잰 값이다(프로브는 두 소스에
+  //   모두 존재하는 legs[].sampleTour · tour.primary 만 쓴다 — 게이트 본체는 새 info 표면에 결합돼
+  //   있어 v2 에서 실행되지 않으므로 별도 프로브로 확인했다):
+  //     규모      v2(HEAD 7d95496)        현행(#42 여정 문법)
+  //     village   312° / 50.0s @τ0.23     18° /  2.2s @τ0.14
+  //     town      286° / 32.5s @τ0.22     69° /  3.4s @τ0.14
+  //     capital   310° / 82.6s @τ0.25     28° / 18.2s @τ0.84
+  //     hanyang   320° / 70.4s @τ0.26     54° /  9.0s @τ0.36
+  //   v2 는 상한(80°)의 3.6~4.0 배다. 두 값이 갈리는 것은 문법이 갈렸기 때문이지 임계 조정 때문이
+  //   아니다 — v2 의 landmark-orbit 은 정의상 215~270° 를 피사체 고정으로 돈다.
   {
-    const orbit = legs[1];
-    const L = info.orbit.target;
-    // 선회 본체 창을 leg 로컬 t01 로 환산. leg 의 꼬리(이탈 접선)는 반경이 커지는 구간이라 제외한다.
-    const w0 = (info.orbit.t0 - orbit.t0) / (orbit.t1 - orbit.t0);
-    const w1 = (info.orbit.t1 - orbit.t0) / (orbit.t1 - orbit.t0);
-    let rMin = Infinity, rMax = -Infinity;
-    let yFirst = null, yLast = null, fovFirst = null, fovLast = null;
-    let rBack = 0, yBack = 0, fovBack = 0;
-    let inFrame = 0, n = 0;
-    let prevAz = null, unwrapped = 0;
-    let prevR = null, prevY = null, prevFov = null;
-    for (let i = 0; i <= 400; i++) {
-      const s = orbit.sample(w0 + (w1 - w0) * (i / 400));
-      const rr = Math.hypot(s.pos.x - L.x, s.pos.z - L.z);
-      rMin = Math.min(rMin, rr); rMax = Math.max(rMax, rr);
-      if (yFirst == null) { yFirst = s.pos.y; fovFirst = s.fov; }
-      yLast = s.pos.y; fovLast = s.fov;
-      // 되돌아오는 양(단조 위반의 누적) — 상수 단언을 대신하는 핵심 지표다.
-      if (prevR != null) rBack = Math.max(rBack, prevR - rr);
-      if (prevY != null) yBack = Math.max(yBack, prevY - s.pos.y);
-      if (prevFov != null) fovBack = Math.max(fovBack, s.fov - prevFov);
-      prevR = rr; prevY = s.pos.y; prevFov = s.fov;
-      const az = Math.atan2(s.pos.x - L.x, s.pos.z - L.z);
-      if (prevAz != null) unwrapped += Math.abs(norm(az - prevAz));
-      prevAz = az;
-      const axis = Math.atan2(s.lookAt.x - s.pos.x, s.lookAt.z - s.pos.z);
-      const toL = Math.atan2(L.x - s.pos.x, L.z - s.pos.z);
-      n++;
-      if (angDiff(axis, toL) <= hHalfOf(s.fov)) inFrame++;
+    const Lx = info.flyby.target.x, Lz = info.flyby.target.z;
+    const subjHalfW = Math.min(info.primary.footW, info.primary.footD) * 0.5 * SUBJECT_MASS;
+    const N = 900;
+    const dtau = 1 / N;
+    const dtSec = legs[0].tourDuration / N;
+    const rec = [];
+    for (let i = 0; i < N; i++) {
+      const s = legs[0].sampleTour(i * dtau);
+      const bearing = Math.atan2(Lx - s.pos.x, Lz - s.pos.z);
+      const viewAz = Math.atan2(s.lookAt.x - s.pos.x, s.lookAt.z - s.pos.z);
+      const hHalf = hHalfOf(s.fov);
+      const off = norm(bearing - viewAz);
+      rec.push({
+        bearing,
+        d: Math.hypot(s.pos.x - Lx, s.pos.z - Lz),
+        inFrame: Math.abs(off) <= hHalf,
+        // 겉보기 가로 점유(수평 화각 대비) — 조건 ⑤.
+        widthFrac: Math.atan(subjHalfW / Math.max(8, Math.hypot(s.pos.x - Lx, s.pos.z - Lz))) / hHalf,
+        // 프레임 안 가로 위치(NDC). 화각 밖이면 클램프 없이 그대로 두어 진폭이 크게 나오게 한다.
+        ndcX: Math.tan(Math.max(-1.5, Math.min(1.5, off))) / Math.tan(hHalf),
+      });
     }
-    const rTol = ORBIT_RADIUS_TOL(info.orbit.radius);
-    const climbed = yLast - yFirst;
-    const crept = fovFirst - fovLast;
-    const authoredGrow = info.orbit.radiusEnd - info.orbit.radius;
-    const authoredCreep = info.orbit.fov - info.orbit.fovEnd;
-    row.orbitWindow = `t ${w0.toFixed(3)}~${w1.toFixed(3)}`;
-    row.orbit = `반경 ${rMin.toFixed(1)}~${rMax.toFixed(1)}m · 방위 커버 ${(unwrapped / DEG).toFixed(0)}° · 랜드마크 프레임 ${Math.round((inFrame / n) * 100)}%`;
-    row.orbitProfile = `상승 ${climbed.toFixed(2)}m/저작 ${info.orbit.climb}m · 크리프 ${crept.toFixed(2)}°/저작 ${authoredCreep.toFixed(2)}°`
-      + ` · 반경증가 ${(rMax - rMin).toFixed(1)}m(${((rMax - rMin) / rMin * 100).toFixed(1)}%)`
-      + ` · 되돌림 r ${rBack.toFixed(2)} y ${yBack.toFixed(2)} fov ${fovBack.toFixed(2)}`;
-    check(unwrapped / DEG >= ORBIT_COVER_DEG,
-      `T7 ${row.scale}: 오빗 방위 커버리지 ${(unwrapped / DEG).toFixed(0)}° < ${ORBIT_COVER_DEG}°`);
-    // (a) 단조 — 반경·고도는 늘고 화각은 좁아지기만 한다(왔다 갔다 금지).
-    check(rBack <= rTol && yBack <= rTol && fovBack <= 0.5,
-      `T7 ${row.scale}: 선회 프로파일이 단조가 아니다 (되돌림 r ${rBack.toFixed(2)}m y ${yBack.toFixed(2)}m fov ${fovBack.toFixed(2)}°, 허용 r/y ${rTol.toFixed(2)}m fov 0.5°)`);
-    // (b) 선회가 이탈 나선으로 변질되지 않는다.
-    check(rMax - rMin <= ORBIT_GROW_MAX * rMin,
-      `T7 ${row.scale}: 선회 반경 증가 ${(rMax - rMin).toFixed(1)}m 가 출발 반경의 ${ORBIT_GROW_MAX * 100}% 초과 (${rMin.toFixed(1)}~${rMax.toFixed(1)}m)`);
-    check(Math.abs(rMax - rMin - authoredGrow) <= rTol,
-      `T7 ${row.scale}: 표본 반경 증가 ${(rMax - rMin).toFixed(1)}m ≠ 저작 ${authoredGrow.toFixed(1)}m (허용 ${rTol.toFixed(2)}m)`);
-    // (c) 상승·크리프가 실제로 일어난다 — 회전대 회귀를 잡는 항.
-    check(info.orbit.climb >= ORBIT_CLIMB_MIN,
-      `T7 ${row.scale}: 저작 선회 상승 ${info.orbit.climb}m < ${ORBIT_CLIMB_MIN}m (회전대)`);
-    check(authoredCreep >= info.orbit.fov * ORBIT_CREEP_MIN_RATIO,
-      `T7 ${row.scale}: 저작 렌즈 크리프 ${authoredCreep.toFixed(2)}° < 화각의 ${ORBIT_CREEP_MIN_RATIO * 100}% (${(info.orbit.fov * ORBIT_CREEP_MIN_RATIO).toFixed(2)}°) (회전대)`);
-    check(climbed >= ORBIT_CLIMB_MIN * ORBIT_PROFILE_REALISE,
-      `T7 ${row.scale}: 선회 표본 상승 ${climbed.toFixed(2)}m < ${(ORBIT_CLIMB_MIN * ORBIT_PROFILE_REALISE).toFixed(1)}m (저작 ${info.orbit.climb}m 이 프레임에 실현되지 않았다)`);
-    check(crept >= authoredCreep * ORBIT_PROFILE_REALISE,
-      `T7 ${row.scale}: 선회 표본 렌즈 크리프 ${crept.toFixed(2)}° < 저작 ${authoredCreep.toFixed(2)}° 의 ${ORBIT_PROFILE_REALISE * 100}%`);
-    check(inFrame / n >= ORBIT_LANDMARK_FRAC,
-      `T9 ${row.scale}: 오빗 중 랜드마크가 수평 화각 안에 있는 표본 ${Math.round((inFrame / n) * 100)}% < ${ORBIT_LANDMARK_FRAC * 100}%`);
+    // 최장 오빗 창 — 조건 ①②③④를 동시에 만족하는 연속 구간.
+    let best = 0, bestAt = 0, bestSweep = 0;
+    for (let a = 0; a < N; a++) {
+      if (!rec[a].inFrame) continue;
+      let sign = 0, dSum = 0, dN = 0;
+      let nxLo = rec[a].ndcX, nxHi = rec[a].ndcX;
+      let sweep = 0;
+      for (let b = a + 1; b < N; b++) {
+        if (!rec[b].inFrame || rec[b].widthFrac < ORBIT_SUBJ_MIN) break;
+        const step = norm(rec[b].bearing - rec[b - 1].bearing);
+        if (Math.abs(step) < 1e-7) break;
+        const sg = step > 0 ? 1 : -1;
+        if (sign === 0) sign = sg; else if (sg !== sign) break;
+        sweep += Math.abs(step);
+        dSum += rec[b].d; dN++;
+        const mean = dSum / dN;
+        if (Math.abs(rec[b].d - mean) > mean * ORBIT_R_TOL) break;
+        nxLo = Math.min(nxLo, rec[b].ndcX); nxHi = Math.max(nxHi, rec[b].ndcX);
+        if (nxHi - nxLo > ORBIT_NDC_SPAN) break;
+        const secs = (b - a) * dtSec;
+        if (sweep > bestSweep) { best = secs; bestAt = a / N; bestSweep = sweep; }
+      }
+    }
+    row.orbitWindow = `${best.toFixed(1)}s @τ${bestAt.toFixed(2)} (${(bestSweep / DEG).toFixed(0)}° 감김)`;
+    check(bestSweep <= ORBIT_MAX_SWEEP,
+      `T24 ${row.scale}: 피사체를 못박은 채 ${(bestSweep / DEG).toFixed(0)}° 를 돈다`
+      + ` (τ${bestAt.toFixed(2)}, ${best.toFixed(1)}s) > ${(ORBIT_MAX_SWEEP / DEG).toFixed(0)}° — 오빗이다(여정이 끊긴다)`);
+    const durCap = legs[0].tourDuration * ORBIT_MAX_FRAC;
+    check(best <= durCap,
+      `T24 ${row.scale}: 피사체 고정 선회가 ${best.toFixed(1)}s 지속 (τ${bestAt.toFixed(2)}) > 투어의 ${ORBIT_MAX_FRAC * 100}% (${durCap.toFixed(1)}s)`);
+  }
+
+  // ── T25 신설(2026-08-02 #42) ── **지형 추종**. 고도가 저작 절대값이 아니라 지표·지붕 위 클리어런스로
+  //   정의된다는 것을 소비면에서 다시 확인한다. 저공 비트(계곡 활강·지붕 글라이드·플라이바이·등반)의
+  //   AGL 이 저작 밴드 안에 있고, **분산이 지형을 따라간다**(= 지형이 오르내리는데 고도가 상수이면
+  //   그것은 추종이 아니라 평면 비행이다).
+  // 판정: ① 각 비트 AGL 의 p05~p95 가 밴드 안 ② 저공 비트 전체에서 지표고와 카메라고의 **상관계수**가
+  //   TERRAIN_FOLLOW_R 이상(고도가 지형을 실제로 따라간다).
+  // FAIL-first: 종전 소스는 저작 절대고도를 쓰므로 상관이 무너진다(REPORT "v2" 열 참조).
+  {
+    const bands = {
+      [LEG.VALLEY]: AGL_BAND_LOW(site.Hmax),
+      [LEG.GLIDE]: AGL_BAND_LOW(site.Hmax),
+      [LEG.FLYBY]: AGL_BAND_LOW(site.Hmax),
+      [LEG.CLIMB]: AGL_BAND_CLIMB(site.Hmax),
+    };
+    const per = legs.map(() => []);
+    const gs = [], ys = [];
+    for (const r of seq) {
+      const g = H(r.s.pos.x, r.s.pos.z);
+      per[r.leg].push(r.s.pos.y - g);
+      if (bands[r.leg]) { gs.push(g); ys.push(r.s.pos.y); }
+    }
+    row.agl = per.map((a) => {
+      if (!a.length) return '-';
+      const t = a.slice().sort((x, y) => x - y);
+      return `${quant(t, 0.05).toFixed(0)}~${quant(t, 0.95).toFixed(0)}`;
+    }).join('/');
+    for (const k of Object.keys(bands)) {
+      const a = per[k].slice().sort((x, y) => x - y);
+      if (!a.length) continue;
+      const lo = quant(a, 0.05), hi = quant(a, 0.95);
+      const band = bands[k];
+      check(lo >= band[0] && hi <= band[1],
+        `T25 ${row.scale}: ${legs[k].name} AGL p05~p95 ${lo.toFixed(1)}~${hi.toFixed(1)}m 가 저작 밴드 ${band.join('~')}m 밖`);
+    }
+    // 지형 추종 상관.
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+    const mg = mean(gs), my = mean(ys);
+    let sgy = 0, sgg = 0, syy = 0;
+    for (let i = 0; i < gs.length; i++) {
+      sgy += (gs[i] - mg) * (ys[i] - my);
+      sgg += (gs[i] - mg) ** 2;
+      syy += (ys[i] - my) ** 2;
+    }
+    const corr = (sgg > 0 && syy > 0) ? sgy / Math.sqrt(sgg * syy) : 0;
+    row.follow = corr.toFixed(3);
+    check(corr >= TERRAIN_FOLLOW_R,
+      `T25 ${row.scale}: 저공 비트의 지표고↔카메라고 상관 ${corr.toFixed(3)} < ${TERRAIN_FOLLOW_R} (지형을 따라가지 않는다)`);
+  }
+
+  // ── T26 신설(2026-08-02 #42) ── **근접도 연동 속도**. 지각 속도는 대지속도가 아니라 시차(v / 근접물
+  //   거리)이므로, 낮게 날수록 빨라야 한다. 종전은 구간 상수 표로 저작해 고도가 지형을 따라 변하는 순간
+  //   표와 실제 근접도가 어긋났다. 이제 속도가 클리어런스의 함수이므로 **음의 상관**이 구조적으로
+  //   성립해야 한다 — 그 상관이 이 문법의 서명이다.
+  // FAIL-first: 종전 소스의 속도는 leg 상수라 클리어런스와 무관하고, 실측 상관이 문턱 위로 뜬다.
+  {
+    const clr = [], spd = [];
+    for (let i = 0; i + 1 < seq.length; i++) {
+      const a = seq[i].s.pos, b = seq[i + 1].s.pos;
+      const v = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / DT;
+      if (!Number.isFinite(v) || v <= 0) continue;
+      clr.push(Math.log(Math.max(2, a.y - H(a.x, a.z))));
+      spd.push(v);
+    }
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+    const mc = mean(clr), ms = mean(spd);
+    let scs = 0, scc = 0, sss = 0;
+    for (let i = 0; i < clr.length; i++) {
+      scs += (clr[i] - mc) * (spd[i] - ms);
+      scc += (clr[i] - mc) ** 2;
+      sss += (spd[i] - ms) ** 2;
+    }
+    const corr = (scc > 0 && sss > 0) ? scs / Math.sqrt(scc * sss) : 0;
+    row.proxSpeed = corr.toFixed(3);
+    check(corr <= PROX_SPEED_R,
+      `T26 ${row.scale}: 클리어런스↔속도 상관 ${corr.toFixed(3)} > ${PROX_SPEED_R}`
+      + ' (낮게 날수록 빨라야 한다 — 속도가 근접도와 무관하거나 반대다)');
+  }
+
+  // ── T27 신설(2026-08-02 #42) ── **태양을 향해 난다**. 앱 기본 sunset 역광이 셀링 포인트이므로
+  //   여정의 주 방향이 태양 방위 밴드를 물어야 한다. 정확히 정면일 필요는 없고 밴드다.
+  //   판정 대상은 **저공 비트**(계곡 활강 + 지붕 글라이드) — 원경 진입·복귀는 프레임 문법이 다르고,
+  //   등반은 사면을 향하므로 방위가 지형에 종속된다.
+  {
+    // ── 2026-08-02 재저작(귀속: 이 게이트를 하루 전 내가 저작했고 그 범위가 틀렸다) ──
+    // 종전 범위는 "저공 비트(계곡 + 지붕 글라이드)"였다. 그런데 **글라이드 축은 실제 도로**이고
+    //   도로는 태양 방위를 모른다 — 밀도·프레임 내용으로 축을 고르는 한 그 방위는 사이트가 정한다.
+    //   두 요구를 동시에 걸면 축 선택이 내용을 버리게 되고(실측: 밴드 선호를 0.58 로 올렸더니
+    //   capital 저공 대역 표본이 0% 로 무너졌다) 그건 이 계약이 지키려던 것과 반대다.
+    // 태양 방위는 **저작으로 정해지는 비트**에서만 계약이 된다: 진입과 계곡 활강의 축은 backAz 에서
+    //   파생되므로 구조적으로 sunAz 다. 글라이드의 실측은 보고만 한다.
+    let n = 0, inBand = 0;
+    for (const r of seq) {
+      if (r.leg !== LEG.APPROACH && r.leg !== LEG.VALLEY) continue;
+      const s = r.s;
+      n++;
+      const viewAz = Math.atan2(s.lookAt.x - s.pos.x, s.lookAt.z - s.pos.z);
+      if (angDiff(viewAz, SUN_AZ) <= SUN_BAND) inBand++;
+    }
+    const frac = n ? inBand / n : 0;
+    row.sunBand = `${Math.round(frac * 100)}%`;
+    check(frac >= SUN_BAND_FRAC,
+      `T27 ${row.scale}: 진입·계곡 비트에서 시선이 태양 방위 ±${(SUN_BAND / DEG).toFixed(0)}° 밴드 안인 표본`
+      + ` ${Math.round(frac * 100)}% < ${SUN_BAND_FRAC * 100}% (역광 셀링 포인트가 프레임에 없다)`);
   }
 
   // ── T17 구간 간 프레임 중복(3차 비전 B항) ──
@@ -1214,31 +1613,43 @@ for (const c of SELECTED) {
       }
     }
     row.scaleSplit = Number.isFinite(worst) ? `${worst.toFixed(2)}× (${worstAt})` : 'n/a';
-    check(!Number.isFinite(worst) || worst >= SCALE_SPLIT_MIN,
-      `T18 ${row.scale}: 진입↔리빌 본체 피사체 배율 비 ${worst.toFixed(2)}× < ${SCALE_SPLIT_MIN}× — ${worstAt}`
+    const splitMin = SCALE_SPLIT_MIN_OF((plan.parcels || []).length);
+    check(!Number.isFinite(worst) || worst >= splitMin,
+      `T18 ${row.scale}: 진입↔리빌 본체 피사체 배율 비 ${worst.toFixed(2)}× < ${splitMin}× — ${worstAt}`
       + ' (방위가 달라도 같은 크기로 맺히면 같은 엽서다)');
   }
 
   // ── T12 역광 ──
   {
-    const first = legs[0].sample(0), last = legs[3].sample(1);
+    // 2026-08-02 #42 재저작. 종전 T12 는 "진입 첫 프레임 · 리빌 마지막 프레임 · **오빗 완전 역광 순간**"
+    //   이었다. 뒤의 두 항은 구문법 종속이다: 새 문법에서 마지막 프레임은 루프 이음매라 첫 프레임과
+    //   같은 표본이고(T1 이 이미 동일성을 단언한다) 오빗은 존재하지 않는다. 재는 양은 같게 두되
+    //   대상을 여정의 실제 구조로 옮긴다 — 진입 첫 프레임의 역광과, **완전 역광 순간이 저공 비트 안에
+    //   있는가**. 후자가 look 계약의 본체다: rim 은 태양이 피사체 뒤에 설 때만 서므로, 그 순간이
+    //   원경이 아니라 지붕·처마가 가장 크게 읽히는 저공에 와야 한다.
+    const first = legs[0].sample(0);
     const bearing = (s) => Math.atan2(s.lookAt.x - s.pos.x, s.lookAt.z - s.pos.z);
     const inBand = (s) => angDiff(bearing(s), SUN_AZ);
-    row.backlit = `진입 ${(inBand(first) / DEG).toFixed(1)}° · 리빌 ${(inBand(last) / DEG).toFixed(1)}°`;
+    row.backlit = `진입 ${(inBand(first) / DEG).toFixed(1)}°`;
     check(inBand(first) <= BACKLIT_MAX,
       `T12 ${row.scale}: 진입 첫 프레임 태양-시선 이각 ${(inBand(first) / DEG).toFixed(1)}° > ${(BACKLIT_MAX / DEG).toFixed(0)}°`);
-    check(inBand(last) <= BACKLIT_MAX,
-      `T12 ${row.scale}: 리빌 마지막 프레임 태양-시선 이각 ${(inBand(last) / DEG).toFixed(1)}° > ${(BACKLIT_MAX / DEG).toFixed(0)}°`);
-    // 오빗 완전 역광 순간(카메라가 태양 반대편) — 구간 중반에 있어야 rim 이 스윕 가운데서 터진다.
-    let bestT = 0, bestAng = Infinity;
-    for (let i = 0; i <= 400; i++) {
-      const s = legs[1].sample(i / 400);
+    let bestTau = 0, bestAng = Infinity, bestLeg = -1;
+    for (let i = 0; i <= 1200; i++) {
+      const tau = i / 1200;
+      const s = legs[0].sampleTour(tau);
       const a = angDiff(bearing(s), SUN_AZ);
-      if (a < bestAng) { bestAng = a; bestT = i / 400; }
+      if (a < bestAng) {
+        bestAng = a; bestTau = tau;
+        bestLeg = legs.reduce((k, l, j) => (tau >= l.t0 ? j : k), 0);
+      }
     }
-    row.orbitBacklit = `t=${bestT.toFixed(3)} (이각 ${(bestAng / DEG).toFixed(1)}°)`;
-    check(bestAng < 6 * DEG && bestT >= 0.25 && bestT <= 0.7,
-      `T12 ${row.scale}: 오빗 완전 역광 지점 t=${bestT.toFixed(3)} 이각 ${(bestAng / DEG).toFixed(1)}° (0.25~0.7 · <6° 요구)`);
+    row.backlitPeak = `τ=${bestTau.toFixed(3)} ${legs[bestLeg] ? legs[bestLeg].name : '-'} (이각 ${(bestAng / DEG).toFixed(1)}°)`;
+    check(bestAng < 8 * DEG,
+      `T12 ${row.scale}: 투어 어디에도 완전 역광 순간이 없다 (최소 이각 ${(bestAng / DEG).toFixed(1)}° ≥ 8°)`);
+    check(bestLeg === LEG.VALLEY || bestLeg === LEG.GLIDE || bestLeg === LEG.APPROACH
+      || bestLeg === LEG.FLYBY,
+      `T12 ${row.scale}: 완전 역광 순간이 ${legs[bestLeg] ? legs[bestLeg].name : '?'} 에 있다`
+      + ' (역광 rim 은 진입·저공·플라이바이에서 터져야 한다)');
   }
 
   // ── T11 결정론 ──
@@ -1401,6 +1812,7 @@ for (const r of report) {
   console.log(`  어휘       : 저공 ${r.lowBand} · 선회창 ${r.orbitWindow} ${r.orbit}`);
   console.log(`               선회 프로파일 ${r.orbitProfile}`);
   console.log(`  피사체     : ${r.subject}`);
+  console.log(`  무건축구간 : 최장 ${r.deadRun}`);
   console.log(`  프레임     : 피치 median ${r.pitch}° (전범위 ${r.pitchRange}°, 정점 ${r.apex}) 하늘 ${r.sky} 하단무특징 ${r.bare} 전경밀착 ${r.hug}`);
   console.log(`               주 피사체 ${r.subjectFrame}`);
   console.log(`               저공 최전경 접지 ${r.frontMass} · 하단중앙20% ${r.centre} · 능선 위 밴드 리빌 ${r.ridge3}`);

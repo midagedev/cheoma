@@ -4,7 +4,7 @@
 //   스왑·근접 디테일 재질이 첫 드로우에서 지연 링크된다. 판정은 frame ms 가 아니라
 //   renderer.info.programs 길이 델타만(헤드리스 ANGLE 링크 직렬화 → wall ms 무효).
 //
-// 규모: village · hanyang. 패스: crane-in(t≥0.60), street-flythrough(t≥0.25) —
+// 규모: village · hanyang. 비트: far-approach(t≥0.60), rooftop-glide(t≥0.25) —
 //   용량-반응 실측 hitch 지점(t0.60 / t0.219)을 덮는다.
 //
 // 실행:
@@ -35,8 +35,8 @@ const SCALES = [
   },
 ];
 const PASSES = [
-  { name: 'crane-in', untilT: 0.60 },
-  { name: 'street-flythrough', untilT: 0.25 },
+  { name: 'far-approach', untilT: 0.60 },
+  { name: 'rooftop-glide', untilT: 0.25 },
 ];
 
 const failures = [];

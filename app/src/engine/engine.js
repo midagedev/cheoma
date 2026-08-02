@@ -2035,6 +2035,9 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   }
 
   function warmTourDetailShaders() {
+    // leg당 t01 등간격 표본 — SYNTH_SOLVE 경로 변화 시 초반 τ(~0.047) 재질도 데우기 위해 6점→13점.
+    // (#42 단일-τ 러너: state.chain/pass 는 더 이상 없음 → state.legs[].sample / state.tour 로 수집.)
+    const WARM_TS = Array.from({ length: 13 }, (_, i) => i / 12);
     const root = village.handle?.group;
     const programsBefore = renderer.info.programs?.length ?? -1;
     if (!root || typeof renderer.compile !== 'function'
@@ -2101,24 +2104,31 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       try { village.handle.updateLod?.(camera, controls.target, 0); } catch { /* non-fatal */ }
     };
 
-    // 활성 드론 체인(또는 단일 패스)에서 hitch 실측 지점 부근 t 표본을 뽑는다.
-    // runtime 이 이미 start() 로 패스를 깔았다. sample 은 내부 pass 객체에만 있다.
+    // 활성 드론 leg(또는 단일 패스 창)에서 hitch 실측 지점 부근 t 표본을 뽑는다.
+    // runtime 이 이미 start() 로 패스를 깔았다. #42 이후 legs[].sample(t01) / tour(τ) 가 진실원.
     const tourSamples = [];
     try {
       const st = demoRuntime.state;
-      const chain = st?.chain;
-      if (Array.isArray(chain) && chain.length) {
-        const ts = [0, 0.22, 0.5, 0.6, 0.85, 1];
-        for (let i = 0; i < chain.length; i++) {
-          const pass = chain[i];
-          if (!pass?.sample) continue;
-          for (let j = 0; j < ts.length; j++) {
-            try { tourSamples.push(pass.sample(ts[j])); } catch { /* skip */ }
-          }
+      const legs = Array.isArray(st?.legs) ? st.legs : [];
+      // 단독 패스 재생이면 그 leg 만, 전체 투어면 모든 leg.
+      const targets = st?.single
+        ? legs.filter((leg) => leg && leg.name === st.single)
+        : legs;
+      const use = targets.length ? targets : legs;
+      for (let i = 0; i < use.length; i++) {
+        const pass = use[i];
+        if (!pass?.sample) continue;
+        for (let j = 0; j < WARM_TS.length; j++) {
+          try { tourSamples.push(pass.sample(WARM_TS[j])); } catch { /* skip */ }
         }
-      } else if (st?.pass?.sample) {
-        for (const t of [0, 0.22, 0.5, 0.6, 0.85, 1]) {
-          try { tourSamples.push(st.pass.sample(t)); } catch { /* skip */ }
+      }
+      // legs 에 sample 이 없을 때 공유 tour(τ) 폴백 (window 있으면 그 구간, 없으면 0..1).
+      if (!tourSamples.length && typeof st?.tour === 'function') {
+        const t0 = Array.isArray(st.window) ? st.window[0] : 0;
+        const t1 = Array.isArray(st.window) ? st.window[1] : 1;
+        const span = Math.max(1e-9, t1 - t0);
+        for (let j = 0; j < WARM_TS.length; j++) {
+          try { tourSamples.push(st.tour(t0 + span * WARM_TS[j])); } catch { /* skip */ }
         }
       }
     } catch { /* non-fatal */ }
@@ -4296,6 +4306,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       passList: () => demoRuntime.passList(),
       // 검증용: 현재 드론 패스를 강제 완주(다음 프레임 전환/종료) — 긴 duration 대기 없이 체인 전이 관찰.
       debugAdvance: () => demoRuntime.debugAdvance(),
+      // 검증용: 투어 τ 시크(#42). 재생이 단일 τ 라 여정 전체를 등간격으로 훑는 캡처가 가능하다.
+      debugSeek: (tau) => demoRuntime.debugSeek(tau),
       // 검증용: walker 접지·경계·충돌(1인칭 히트박스 단언).
       debugWalker: () => demoRuntime.debugWalker(),
       // #36 투어 시작 warm 비용·상태(rAF 수·프로그램 델타). check-cine-warm 게이트가 소비.

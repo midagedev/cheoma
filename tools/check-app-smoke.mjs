@@ -2226,7 +2226,7 @@ try {
   const cinematic = await page.evaluate(() => {
     const { cine } = window.__engine;
     const available = cine.available();
-    const droneStarted = cine.start('drone', { pass: 'crane-in' });
+    const droneStarted = cine.start('drone', { pass: 'far-approach' });
     const drone = cine.getState();
     cine.stop();
     const droneStopped = cine.getState();
@@ -2237,7 +2237,7 @@ try {
   });
   pass(
     cinematic.available && cinematic.droneStarted
-      && cinematic.drone.active && cinematic.drone.pass === 'crane-in',
+      && cinematic.drone.active && cinematic.drone.pass === 'far-approach',
     'cinematic runtime starts a named drone path',
   );
   pass(!cinematic.droneStopped.active, 'cinematic runtime returns control after stop');

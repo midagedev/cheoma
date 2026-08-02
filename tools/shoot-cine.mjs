@@ -44,9 +44,9 @@ const SCALES = {
 // 드론 패스 시나리오. 캡처 t 지점은 진입·중반·이탈 직전.
 const T_POINTS = [0.3, 0.75];
 const SCENARIOS = [
-  { id: 'drone-village', mode: 'drone', scale: 'village', passes: ['crane-in', 'street-flythrough', 'landmark-orbit', 'pullback-reveal'] },
-  { id: 'drone-capital', mode: 'drone', scale: 'capital', passes: ['landmark-orbit', 'street-flythrough'] },
-  { id: 'drone-hanyang', mode: 'drone', scale: 'hanyang', passes: ['crane-in', 'landmark-orbit', 'street-flythrough', 'pullback-reveal'] },
+  { id: 'drone-village', mode: 'drone', scale: 'village', passes: ['far-approach', 'valley-run', 'rooftop-glide', 'landmark-flyby', 'ridge-climb', 'return-arc'] },
+  { id: 'drone-capital', mode: 'drone', scale: 'capital', passes: ['rooftop-glide', 'landmark-flyby'] },
+  { id: 'drone-hanyang', mode: 'drone', scale: 'hanyang', passes: ['far-approach', 'valley-run', 'rooftop-glide', 'landmark-flyby', 'ridge-climb', 'return-arc'] },
   // 도보는 벽시계 오프셋 캡처(자동산책에 진행률 개념이 없다). 마지막 지점은 골목 진입 이후를 노린다.
   { id: 'walk-village', mode: 'walk', scale: 'village', marks: [2, 10, 20, 30] },
   { id: 'walk-capital', mode: 'walk', scale: 'capital', marks: [3, 14, 25] },
