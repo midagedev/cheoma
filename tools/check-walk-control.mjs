@@ -46,9 +46,25 @@
 //   R2  F 런타임 배선: input({jump:true}) 가 walker 를 실제로 띄우고(눈높이 여유 > 눈높이),
 //         input({strafe:1}) 이 오른쪽으로 보낸다.
 //
+// ── #44 포인터 락 (2026-08-03) ── 데스크톱 walk 의 시선이 드래그 전용이라 FPS 로 읽히지 않았다.
+//    락 상태의 mousemove(movementX/Y)와 기존 드래그(clientX/Y 차분)는 **같은** look(dxPx,dyPx) 로
+//    들어가므로, 두 규약의 부호 관계가 배선의 유일한 실질 결정이다. 그 관계는 추론이 아니라 측정으로
+//    정했고(R3a), 코어 상수 LOOK_POINTER_LOCK_SIGN 하나가 들고 있다. FAIL-first 는 2026-08-03 확인:
+//    walker.js 의 그 상수를 −1 로 뒤집으면 R3a·R3b 가 실패하고 나머지 전 항목은 그대로 통과한다.
+//   R3a F 락 규약이 FPS 방향이다. movementX>0 을 LOOK_POINTER_LOCK_SIGN 으로 변환해 런타임
+//         input({lookDX}) 에 넣으면 시선이 M13 이 확정한 오른쪽 축(cross(forward,worldUp)) 쪽으로
+//         돈다. 세로는 movementY>0 → 아래를 본다(논인버트).
+//   R3b F 부호 관계가 측정치와 일치한다. 코어 look(+px) 이 실제로 도는 방향을 재서 필요한 계수를
+//         유도하고, 상수가 그 값인지 대조한다(상수를 상수로 검증하지 않는다). 실측 결론: 드래그
+//         규약은 이미 시선 규약이라 락과 부호가 같다 = 계수 +1.
+//   R3c   배선 계약(App.svelte 텍스트): movementX/Y 에 매직 부호가 없고 상수만 곱한다, 락 리스너의
+//         add/remove 가 짝을 이룬다, ESC 가 락 해제로 먼저 소비된다(walk 종료 오인 금지), 락 경로가
+//         (pointer: fine) 뒤에 갇혀 터치에서 실행되지 않는다.
+//
 // 실행: node tools/check-walk-control.mjs
 
 import { Buffer } from 'node:buffer';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,7 +112,7 @@ const M = await bundle(
 );
 const {
   buildWalkSolids, createWalker, createCinematicRuntime, THREE,
-  LOOK_PITCH_PER_PX, LOOK_YAW_PER_PX, MOVE_ACCEL, MOVE_DECEL, PITCH_LIMIT,
+  LOOK_PITCH_PER_PX, LOOK_POINTER_LOCK_SIGN, LOOK_YAW_PER_PX, MOVE_ACCEL, MOVE_DECEL, PITCH_LIMIT,
   AIR_CONTROL, JUMP_GRAVITY, JUMP_HEIGHT, JUMP_SPEED, RUN_SPEED, WALK_SPEED,
 } = M;
 
@@ -610,8 +626,151 @@ const r1 = (() => {
   };
 })();
 
+// ── R3 포인터 락 규약(#44) ──
+// 오른쪽 축은 M13 이 FPS 오른쪽으로 확정한 cross(forward, worldUp) = (−cos yaw, 0, sin yaw) 다.
+const rightAxis = (yaw) => ({ x: -Math.cos(yaw), z: Math.sin(yaw) });
+const forwardAxis = (yaw) => ({ x: Math.sin(yaw), z: Math.cos(yaw) });
+
+// R3b 부호 유도 — 코어 look() 이 실제로 도는 방향을 재서 필요한 계수를 만든다. 상수를 상수와
+//   비교하면 뒤집어도 자기 자신과 일치해 통과하므로, 기준은 반드시 측정치여야 한다.
+const r3b = (() => {
+  const YAW0 = 0.7;
+  const w = flatWalker();
+  w.yaw = YAW0; w.pitch = 0;
+  w.look(100, 0);                        // 드래그 규약으로 +100px
+  w.update(DT);
+  const r = rightAxis(YAW0);
+  const alongRight = w.dir.x * r.x + w.dir.z * r.z;
+  invariant(Math.abs(alongRight) > 1e-3, 'R3b: look(+px) 이 요를 전혀 돌리지 않았다(측정 무효)');
+  // look(+px) 이 오른쪽으로 돌면 dragYawSign = +1. FPS 락은 movementX>0 → 오른쪽이어야 하므로
+  //   필요한 계수는 S·dragYawSign = +1, 즉 S = dragYawSign 이다(±1 이라 역수 = 자기 자신).
+  const dragYawSign = Math.sign(alongRight);
+  // 세로도 같은 계수 하나로 맞아야 한다. FPS 논인버트는 마우스 아래(movementY>0) → 아래를 봄
+  //   (dir.y < 0). look(0,+px) 의 실측 방향이 dragPitchSign 이면 필요한 계수는 −dragPitchSign.
+  const w2 = flatWalker();
+  w2.pitch = 0;
+  w2.look(0, 100);
+  w2.update(DT);
+  invariant(Math.abs(w2.dir.y) > 1e-3, 'R3b: look(0,+px) 이 피치를 전혀 돌리지 않았다(측정 무효)');
+  const dragPitchSign = Math.sign(w2.dir.y);
+  invariant(dragYawSign === -dragPitchSign,
+    `R3b: 요(${dragYawSign})와 피치(${dragPitchSign}) 가 계수 하나로 정리되지 않는다 — 두 축이 서로 다른 반전을 요구한다`);
+  const derived = dragYawSign;
+  invariant(LOOK_POINTER_LOCK_SIGN === derived,
+    `R3b: LOOK_POINTER_LOCK_SIGN ${LOOK_POINTER_LOCK_SIGN} ≠ 실측 유도값 ${derived}`
+    + ` (look(+px) 이 ${dragYawSign > 0 ? '오른쪽' : '왼쪽'}으로 돈다 → movementX>0 을 FPS 오른쪽으로 보내려면 ${derived})`);
+  return { dragYawSign, dragPitchSign, derived, constant: LOOK_POINTER_LOCK_SIGN };
+})();
+
+// R3a 락 규약이 런타임 채널을 통과해도 FPS 방향이다. App.svelte 는 락 중 mousemove 에서
+//   lookDX = movementX · LOOK_POINTER_LOCK_SIGN 을 이 채널로 민다.
+const r3a = (() => {
+  const plan = planVillage({ scale: 'village', seed: 20260716, includePalace: false, includeTemple: false });
+  const camera = new THREE.PerspectiveCamera(35, 16 / 9, 0.1, 2000);
+  camera.position.set(0, 40, 120);
+  const noop = () => {};
+  const runtime = createCinematicRuntime({
+    camera,
+    controls: { enabled: true, target: new THREE.Vector3() },
+    village: { active: true, handle: { plan }, wave: false, heroAsm: false, transitioning: false, selected: null, seed: 7 },
+    cancelTween: noop,
+    focusOutDuration: 0.6,
+    clearHover: noop,
+    emit: noop,
+    getAerial: () => ({ pos: camera.position.clone(), target: new THREE.Vector3(), fov: 35, referenceFov: 35 }),
+    getSunAzimuth: () => 0,
+    markActivity: noop,
+    reapplyVillageFog: noop,
+    returnFromFocus: noop,
+    setPostFocus: noop,
+    setZoomRegime: noop,
+    settleControls: noop,
+    stopHeroDrive: noop,
+    tweenTo: noop,
+  });
+  invariant(runtime.start('walk') === true, 'R3a: cine.start("walk") 실패');
+
+  const MOVEMENT_X = 240;              // 마우스를 오른쪽으로 240px 이동한 락 델타
+  const yaw0 = runtime.debugWalker().yawDeg * DEG;
+  runtime.input({ lookDX: MOVEMENT_X * LOOK_POINTER_LOCK_SIGN, lookDY: 0 });
+  runtime.update(DT);
+  const yaw1 = runtime.debugWalker().yawDeg * DEG;
+  const r = rightAxis(yaw0), f = forwardAxis(yaw1);
+  const turned = f.x * r.x + f.z * r.z;
+  invariant(turned > 0,
+    `R3a: movementX>0 인데 시선이 오른쪽으로 돌지 않았다 (dir·right ${turned.toFixed(4)}${turned < 0 ? ' — 좌우 반전' : ''})`);
+  // 감도는 코어 소유(새 상수 금지) — 락 경유 회전량이 드래그와 정확히 같은 크기여야 한다.
+  const expectedRad = MOVEMENT_X * LOOK_YAW_PER_PX;
+  invariant(Math.abs(Math.abs(yaw1 - yaw0) - expectedRad) < 0.02 * DEG + 1e-6,
+    `R3a: 락 240px 회전 ${Math.abs(yaw1 - yaw0).toFixed(5)}rad ≠ 드래그 감도 해석해 ${expectedRad.toFixed(5)}rad`);
+
+  const MOVEMENT_Y = 180;              // 마우스를 아래로 180px
+  const pitch0 = runtime.debugWalker().pitchDeg * DEG;
+  runtime.input({ lookDX: 0, lookDY: MOVEMENT_Y * LOOK_POINTER_LOCK_SIGN });
+  runtime.update(DT);
+  const pitch1 = runtime.debugWalker().pitchDeg * DEG;
+  invariant(pitch1 < pitch0,
+    `R3a: movementY>0(마우스 아래)인데 시선이 아래를 향하지 않았다 (pitch ${(pitch0 / DEG).toFixed(2)}° → ${(pitch1 / DEG).toFixed(2)}° — 상하 반전)`);
+  runtime.dispose();
+  return {
+    lockYawDeg: +((yaw1 - yaw0) / DEG).toFixed(3),
+    lockPitchDeg: +((pitch1 - pitch0) / DEG).toFixed(3),
+    rightDot: +turned.toFixed(4),
+  };
+})();
+
+// R3c 배선 계약 — App.svelte 는 노드에서 import 할 수 없으므로 텍스트로 단언한다. 여기서 잡는 것은
+//   "코드가 있는가"가 아니라 이 라운드가 실제로 틀릴 수 있는 지점들이다: 매직 부호, 리스너 누수,
+//   ESC 오인, 터치 경로 오염.
+const r3c = (() => {
+  const src = readFileSync(join(ROOT, 'app/src/App.svelte'), 'utf8');
+  const has = (s) => src.includes(s);
+  const count = (s) => src.split(s).length - 1;
+
+  // ① 부호는 상수로만 — movementX/Y 에 붙은 매직 반전 부호 금지.
+  invariant(has("import { LOOK_POINTER_LOCK_SIGN } from '../../src/api/cinematic.js';"),
+    'R3c: App.svelte 가 LOOK_POINTER_LOCK_SIGN 을 src/api 파사드에서 import 하지 않는다');
+  invariant(has('walkLookDX += e.movementX * LOOK_POINTER_LOCK_SIGN;')
+    && has('walkLookDY += e.movementY * LOOK_POINTER_LOCK_SIGN;'),
+    'R3c: 락 델타가 LOOK_POINTER_LOCK_SIGN 을 거치지 않는다');
+  invariant(!/[-]\s*e\.movement[XY]/.test(src),
+    'R3c: movementX/Y 에 매직 반전 부호가 붙어 있다 (부호는 LOOK_POINTER_LOCK_SIGN 한 곳에서만)');
+
+  // ② 리스너 누수 금지 — walk 종료 시 문서 리스너가 전부 풀리고 락도 정리된다.
+  // add 는 removeEventListener 안에 포함되지 않는 문자열이므로(remove‥는 'moveEventListener')
+  //   두 카운트는 독립이다. 각각 정확히 1 이어야 짝이 맞는다.
+  for (const [label, addSig, removeSig] of [
+    ['pointerlockchange', "addEventListener('pointerlockchange'", "removeEventListener('pointerlockchange'"],
+    ['pointerlockerror', "addEventListener('pointerlockerror'", "removeEventListener('pointerlockerror'"],
+    ['락 mousemove', "addEventListener('mousemove', onWalkLockMove", "removeEventListener('mousemove', onWalkLockMove"],
+  ]) {
+    const adds = count(addSig), removes = count(removeSig);
+    invariant(adds === 1 && removes === 1,
+      `R3c: ${label} 리스너 add/remove 가 짝이 아니다 (add ${adds} / remove ${removes})`);
+  }
+  invariant(has('document.exitPointerLock()'),
+    'R3c: walk 종료 경로에 exitPointerLock 정리가 없다');
+  // walk → drone 처럼 stop 없이 모드만 바뀌는 전환에서도 락을 반납해야 한다(커서 실종 방지).
+  invariant(has("if (cine.mode !== 'walk') { stopWalkFeed(); return; }"),
+    'R3c: walk 이 아닌 모드로 전환될 때 락·피드를 반납하지 않는다');
+
+  // ③ ESC 는 락 해제로 **먼저** 소비된다 — 그 뒤에야 기존 walk 종료가 온다.
+  const escGuard = src.indexOf('if (walkEscapeReleasedLock()) return;');
+  const cineStop = src.indexOf('if (cine.active) { engine.cine.stop(); return; }');
+  invariant(escGuard > 0 && cineStop > 0 && escGuard < cineStop,
+    'R3c: ESC 락 해제 가드가 engine.cine.stop() 보다 앞서지 않는다 (락 해제가 walk 종료로 오인된다)');
+
+  // ④ 터치 경로 불변 — 락은 (pointer: fine) 판정 뒤에 갇혀 있고, 등록도 그 판정 결과로 게이트한다.
+  invariant(/function walkLockEligible\(\)[\s\S]{0,400}matchMedia\('\(pointer: fine\)'\)/.test(src),
+    'R3c: 락 적격 판정이 (pointer: fine) 를 보지 않는다');
+  invariant(/walkLockable = walkLockEligible\(\);[\s\S]{0,400}if \(walkLockable\) \{[\s\S]{0,200}addEventListener\('mousemove', onWalkLockMove/.test(src),
+    'R3c: 락 mousemove 등록이 walkLockable 게이트 안에 있지 않다 (터치 경로 오염)');
+  return { guarded: true, escGuardBeforeStop: true };
+})();
+
 console.log('walk-control contract: PASS', JSON.stringify({
   speeds: { walk: WALK_SPEED, run: RUN_SPEED }, accel: MOVE_ACCEL, decel: MOVE_DECEL, ...m5,
   forward2s: m2, ...m3, ...m9, ...m10, wallJump: m10b,
   strafeRight: m13, jump: m14, air: m15, runtime: r1,
+  pointerLock: { ...r3b, ...r3a, ...r3c },
 }));

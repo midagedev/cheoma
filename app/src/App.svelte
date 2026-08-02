@@ -26,6 +26,7 @@
   import GlossaryOverlay from './components/GlossaryOverlay.svelte';
   import ReferenceModal from './components/ReferenceModal.svelte';
   import CinematicOverlay from './components/CinematicOverlay.svelte';
+  import { LOOK_POINTER_LOCK_SIGN } from '../../src/api/cinematic.js';
   import { analyzeExport, filenameFor, triggerDownload } from '../../src/api/export.js';
   import { t } from './lib/i18n.svelte.js';
   import {
@@ -262,6 +263,10 @@
   let walkLookDX = 0, walkLookDY = 0, walkRaf = null;
   let walkLookPid = null, walkLookX = 0, walkLookY = 0;
   let walkJoy = $state({ fwd: 0, strafe: 0 });   // 가상 조이스틱(터치) — CinematicOverlay 가 갱신
+  // 포인터 락(#44) — 데스크톱 walk 만의 경로다. walkLockable 은 walk 진입 시 1회 판정하고, 터치
+  //   기기에서는 false 라 락 리스너가 아예 등록되지 않는다(드래그 시선이 유일한 문법으로 남는다).
+  let walkLockable = false, walkLocked = false, walkLockWired = false;
+  let walkLockExitAt = 0;   // 락이 풀린 시각(ms) — 그 ESC 가 walk 종료로 오인되지 않게 하는 근거
 
   function currentResidentialState() {
     if (!sceneVillage) return { records: [], focusedParcelId: null };
@@ -727,6 +732,12 @@
   function onKey(e) {
     if (e.key !== 'Escape' || refOpen || e.defaultPrevented) return;
     releaseClipStage();   // 테이크 종료 신호 — 이후 기존 Escape 동작을 그대로 이어 간다.
+    // 포인터 락(#44): ESC 는 브라우저가 락을 푸는 키다. 그 한 번을 walk 종료로도 소비하면 락을
+    //   풀려던 사용자가 워킹뷰 밖으로 튕긴다 — ESC 1회 = 락 해제(드래그 폴백으로 계속 걷기).
+    //   한 번의 ESC 가 어느 순서로 도착할지는 브라우저마다 다르다: Chrome 계열은 이 keydown 을
+    //   아예 배달하지 않고, 배달하는 브라우저는 pointerlockchange 와 순서가 정해져 있지 않다.
+    //   그래서 두 경우를 다 삼킨다 — 아직 락이면(해제가 임박) / 방금 풀렸으면(같은 ESC).
+    if (walkEscapeReleasedLock()) return;
     if (cine.active) { engine.cine.stop(); return; }  // 시네마틱 데모 중이면 먼저 종료
     if (sceneVillage) { engine.village.escape(); }   // 클로즈업이면 부감 복귀(escape 가 selected 판정)
     else if (ui.selected) { engine.clearSelection(); }
@@ -1116,7 +1127,15 @@
 
   // ---------- 시네마틱 데모 모드(#112) ----------
   function startDrone() { if (!waving) engine.cine.start('drone'); }        // 오토플레이 체인(순환)
-  function startWalk() { if (!waving) engine.cine.start('walk'); }
+  function startWalk() {
+    if (waving) return;
+    if (engine.cine.start('walk') === false) return;
+    // 락 요청은 **이 클릭 제스처 안에서** 해야 한다. startWalkFeed 는 engine 의 'cinematic'
+    //   이벤트를 타고 오므로 제스처 컨텍스트를 잃을 수 있고, 그러면 브라우저가 요청을 거부한다.
+    //   요청은 비동기라 pointerlockchange 를 먼저 달아 둔다(둘 다 멱등).
+    wireWalkLock();
+    requestWalkLock();
+  }
   function stopCine() { engine.cine.stop(); }
 
   // 1인칭 입력 피드 — cine walk 활성 동안 rAF 로 키·조이스틱·포인터 델타를 walker 에 민다.
@@ -1124,10 +1143,20 @@
   //   사용자 조작 모드가 된 이상 그 분기는 "폰에서는 조작할 수 없다"는 뜻이 되므로 제거하고,
   //   대신 키보드 자리를 가상 조이스틱(CinematicOverlay)이 메운다. 시선은 두 문법이 공유한다.
   function startWalkFeed() {
-    if (cine.mode !== 'walk') return;
+    // walk → drone 처럼 stop 없이 모드만 바뀌는 전환이 있다. 그때 그냥 return 하면 피드만 죽고
+    //   포인터 락은 잡힌 채 남아 드론 투어 내내 커서가 사라진다 — 여기서 확실히 반납한다.
+    if (cine.mode !== 'walk') { stopWalkFeed(); return; }
     walkKeys.clear();
     walkLookDX = 0; walkLookDY = 0; walkLookPid = null;
     walkJoy = { fwd: 0, strafe: 0 };
+    // 락 가능 여부는 이 walk 세션 시작 시 1회만 판정한다. false 면 아래 mousemove·pointerlock
+    //   리스너가 등록되지 않으므로 터치 경로에는 새 코드가 들어가지 않는다.
+    walkLocked = false; walkLockExitAt = 0;   // 직전 세션의 해제 시각이 첫 ESC 를 삼키지 않게
+    walkLockable = walkLockEligible();
+    if (walkLockable) {
+      wireWalkLock();
+      addEventListener('mousemove', onWalkLockMove, { capture: true, passive: true });
+    }
     addEventListener('keydown', onWalkKey);
     addEventListener('keyup', onWalkKeyUp);
     addEventListener('blur', onWalkBlur);
@@ -1161,6 +1190,9 @@
     removeEventListener('pointermove', onWalkPointerMove, { capture: true });
     removeEventListener('pointerup', onWalkPointerUp, { capture: true });
     removeEventListener('pointercancel', onWalkPointerUp, { capture: true });
+    if (walkLockable) removeEventListener('mousemove', onWalkLockMove, { capture: true });
+    unwireWalkLock();          // 걸려 있으면 exitPointerLock 까지 — walk 밖으로 락을 들고 나가지 않는다
+    walkLockable = false;
     walkKeys.clear();
     walkLookPid = null;
     walkJoy = { fwd: 0, strafe: 0 };
@@ -1184,9 +1216,16 @@
   //   0 을 주는 브라우저가 있어 같은 코드가 데스크톱에서만 동작하게 된다. 오버레이 자신을 겨눈
   //   포인터(조이스틱·종료 버튼)는 시선이 아니다.
   function onWalkPointerDown(e) {
+    // 락 중에는 커서가 없다 — 이때 오는 마우스 이벤트의 clientX/Y 는 고정값이라 시선이 아니다.
+    //   시선은 onWalkLockMove 의 movementX/Y 가 전담한다.
+    if (walkLocked) return;
     if (walkLookPid !== null) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (e.target?.closest?.('.cine-overlay')) return;
+    // 재락: 락이 풀린 상태(ESC 폴백)에서 캔버스를 누르면 다시 잡는다 — 이 pointerdown 자체가
+    //   브라우저가 요구하는 사용자 제스처다. 실패해도(해제 직후 쿨다운·미지원) 아래 드래그가
+    //   그대로 살아 있어 시선이 끊기지 않고, 성공하면 pointerlockchange 가 walkLookPid 를 회수한다.
+    if (walkLockable && e.pointerType === 'mouse') requestWalkLock();
     walkLookPid = e.pointerId; walkLookX = e.clientX; walkLookY = e.clientY;
   }
   function onWalkPointerMove(e) {
@@ -1196,6 +1235,66 @@
     walkLookX = e.clientX; walkLookY = e.clientY;
   }
   function onWalkPointerUp(e) { if (e.pointerId === walkLookPid) walkLookPid = null; }
+
+  // ---------- 포인터 락(#44) ----------
+  // 드래그 전용 시선은 데스크톱에서 FPS 로 읽히지 않는다(누른 동안에만, 화면 끝에서 멈춘다).
+  //   락을 잡으면 커서가 사라지고 movementX/Y 가 무한히 들어와 실제 1인칭 조작이 된다. 락은
+  //   보조 경로일 뿐이라 실패·해제는 전부 기존 드래그 시선으로 자연 폴백한다.
+  const WALK_LOCK_ESC_GRACE_MS = 400;   // 같은 ESC 로 보는 창(pointerlockchange ↔ keydown 순서 무보장)
+  function walkLockEligible() {
+    if (typeof document === 'undefined' || typeof matchMedia !== 'function') return false;
+    // 마우스류 포인터가 있을 때만. 터치 전용 기기는 여기서 끝나고 조이스틱+드래그가 유일 문법이다.
+    if (!matchMedia('(pointer: fine)').matches) return false;
+    return typeof document.exitPointerLock === 'function';
+  }
+  function walkCanvas() { return container?.querySelector?.('canvas') ?? null; }
+  function requestWalkLock() {
+    if (!walkLockEligible()) return;
+    const el = walkCanvas();
+    if (!el?.requestPointerLock || document.pointerLockElement === el) return;
+    // 최신 크로미움은 Promise 를 돌려주고 거부한다(해제 직후 쿨다운 등) — 삼키지 않으면 콘솔에
+    //   unhandled rejection 이 남는다. 거부는 결함이 아니라 "이번엔 드래그로 간다"는 뜻이다.
+    try { const p = el.requestPointerLock(); if (p?.catch) p.catch(() => {}); } catch { /* 드래그 폴백 */ }
+  }
+  function wireWalkLock() {
+    if (walkLockWired || !walkLockEligible()) return;
+    walkLockWired = true;
+    document.addEventListener('pointerlockchange', onWalkLockChange);
+    document.addEventListener('pointerlockerror', onWalkLockError);
+  }
+  function unwireWalkLock() {
+    if (!walkLockWired) return;
+    walkLockWired = false;
+    document.removeEventListener('pointerlockchange', onWalkLockChange);
+    document.removeEventListener('pointerlockerror', onWalkLockError);
+    walkLocked = false;
+    if (document.pointerLockElement) { try { document.exitPointerLock(); } catch { /* 이미 해제됨 */ } }
+  }
+  function onWalkLockChange() {
+    const locked = !!walkCanvas() && document.pointerLockElement === walkCanvas();
+    if (locked === walkLocked) return;
+    if (!locked) walkLockExitAt = performance.now();
+    walkLocked = locked;
+    // 규약이 바뀌는 프레임이다. 반대편 규약의 진행 중 상태(드래그 포인터·미소비 델타)를 버리지
+    //   않으면 전환 순간 시선이 한 번 튄다.
+    walkLookPid = null;
+    walkLookDX = 0; walkLookDY = 0;
+  }
+  function onWalkLockError() { walkLocked = false; walkLockExitAt = performance.now(); }
+  function onWalkLockMove(e) {
+    if (!walkLocked) return;
+    // FPS 규약: movementX>0(마우스 오른쪽) → 시선도 오른쪽. 코어 look() 의 px 규약과 부호가 같아
+    //   계수는 LOOK_POINTER_LOCK_SIGN 하나로 끝난다 — 근거·실측은 walker.js 의 그 상수 주석에 있고,
+    //   check-walk-control R3 이 이 상수를 import 해 방향을 고정한다(여기에 매직 부호를 두지 않는다).
+    walkLookDX += e.movementX * LOOK_POINTER_LOCK_SIGN;
+    walkLookDY += e.movementY * LOOK_POINTER_LOCK_SIGN;
+  }
+  // ESC 한 번이 락 해제와 walk 종료를 동시에 소비하지 않게 막는다(onKey 가 호출).
+  function walkEscapeReleasedLock() {
+    if (!walkLockable) return false;
+    if (walkLocked || document.pointerLockElement) return true;   // 해제가 임박한 ESC
+    return performance.now() - walkLockExitAt < WALK_LOCK_ESC_GRACE_MS;   // 방금 푼 그 ESC
+  }
 
   // ---------- glb 내보내기(#104·#112) ----------
   // 대형 마을은 sanitize+parse 가 수 초 블록 가능 → 스피너 페인트 후(rAF 2회 양보) 실행 + 중복 클릭 방지.

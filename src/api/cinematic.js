@@ -75,6 +75,7 @@ export {
 export {
   createWalker,
   LOOK_PITCH_PER_PX,
+  LOOK_POINTER_LOCK_SIGN,
   LOOK_YAW_PER_PX,
   MOVE_ACCEL,
   MOVE_DECEL,

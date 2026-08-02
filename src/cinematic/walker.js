@@ -75,11 +75,24 @@ export const AIR_CONTROL = 0.3;
 //   같은 섬돌 하나가 0.53m 에 걸쳐 뭉개져 시선이 지형에서 뜬 채로 걷는다(M9 눈높이 오차 79mm).
 //   같은 공간 지연 0.173m 를 유지하도록 4.5 / 0.175 ≈ 26 으로 재저작한다.
 export const GROUND_FOLLOW_RATE = 26;
-// 포인터 드래그 감도. 종전 App.svelte 가 쓰던 값을 그대로 코어로 옮긴 것이라 조작감은 불변이고,
-//   대신 노드에서 단언 가능해진다. 부호는 드래그(=화면을 잡아 끄는) 규약: dx>0 → yaw 감소.
+// 포인터 감도. 종전 App.svelte 가 쓰던 값을 그대로 코어로 옮긴 것이라 조작감은 불변이고, 대신
+//   노드에서 단언 가능해진다. 부호는 look() 이 dx>0 → yaw 감소로 정의한다.
 export const LOOK_YAW_PER_PX = 0.0026;    // rad/px = 0.149°/px
 export const LOOK_PITCH_PER_PX = 0.0022;  // rad/px = 0.126°/px
 export const PITCH_LIMIT = 1.2;           // rad = 68.75° — 종전 수동 클램프 값 유지
+// 포인터 락(#44) 델타 → look() px 변환 계수. 락 상태의 mousemove 는 movementX/Y 를, 드래그는
+//   clientX/Y 차분을 주는데 둘 다 같은 look(dxPx, dyPx) 로 들어간다. 두 규약이 같은 부호를 써도
+//   되는지는 추론이 아니라 측정이 정한다(2026-08-03, node 실측):
+//     look(+100, 0) → Δyaw = −0.26 rad. forward = (sin yaw, 0, cos yaw) 이고 오른쪽은
+//     cross(forward, worldUp) = (−cos yaw, 0, sin yaw)(M13 이 FPS 오른쪽으로 확정한 축)인데
+//     d(forward)/d(yaw) = −right 이므로 **yaw 감소 = 오른쪽 회전**이다. 실측 dir·right = +0.257
+//     (yaw 0 / 1.0 / −2.2 전부 동일). 세로도 같아서 look(0, +100) → pitch −0.22 → dir.y = −0.218,
+//     즉 마우스를 내리면 아래를 본다(논인버트).
+//   그러므로 종전 주석이 부르던 "화면을 잡아 끄는 규약"은 사실이 아니다. 드래그는 이미 시선 규약
+//   (오른쪽으로 끌면 오른쪽을 본다)이고, FPS 락 규약(movementX>0 → 오른쪽)과 **부호가 같다**.
+//   값이 1 이라서 상수를 없애지 않는 이유: 두 입력 규약의 관계를 배선부에 매직 부호로 흩뿌리지
+//   않고 한 곳에서 단언하기 위해서다(check-walk-control R3 이 이 상수를 import 해 고정한다).
+export const LOOK_POINTER_LOCK_SIGN = 1;
 
 // 목표 속도로의 선형 램프. 감속(0 으로 가거나 방향이 뒤집히거나 상한이 낮아질 때)은 더 센 비율을
 //   쓴다. 지수 스무딩과 달리 **정확히 target 에 도달**하므로 "정지 명령 후 t초 내 완전 정지"를
