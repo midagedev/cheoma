@@ -35,8 +35,8 @@
       "bytes": 245416
     },
     "hanyang:base": {
-      "hash": "9cd18e82d52a5888a7c34d616b9b6391734eb31a475cebfb2e092649a3268255",
-      "bytes": 1341329
+      "hash": "1c72ee416c048b23dd3816e86755e2112231f94e5a04a25046caba1cea8d42fa",
+      "bytes": 1342158
     },
     "hamlet:temple": {
       "hash": "84066937c2e99508308723c761a6699464c49dc1be38068d26834da4edcb868e",
@@ -55,13 +55,14 @@
       "bytes": 257489
     },
     "hanyang:temple": {
-      "hash": "315623616771d76c1084d2f135cd65f970ae4a3fb0bba11ed19f921f78ab8f3b",
-      "bytes": 1351612
+      "hash": "6aa2fc8cb3624bc6f2189e9973ee574c97c95db4ed59e52636ca12516ffde2eb",
+      "bytes": 1352732
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
   "roofRankRevision": "issue-150c-roof-rank-magistracy-city-gate-2026-07-26",
   "issue150PolishRevision": "issue-150-polish-wave-2026-07-26",
   "cityGateForecourtRevision": "issue-19-r3b-gate-forecourt-parcel-reservation-2026-07-31",
-  "palacePrecinctRevision": "#21 R5 궁·관아 위계 2026-08-02 — 사진 대조 판정 D5·D8·D13·D14·E 구현. 이동한 것은 **궁이 있는 계획뿐**이다(capital:base/temple, hanyang:base/temple). hamlet·village·town 은 해시·바이트 모두 불변이라 이 라운드가 그 규모의 시드 스트림을 건드리지 않았음이 단독 변인으로 확인된다. 궁 계획이 움직인 원인 넷: ① 궁역 폭 96→108(capital 60→58) — 정전 처마 21.6→27.4m·행각 깊이 3.0→4.6m 를 담기 위한 종속값(palace.js tierSpec 과 동기) ② 정문 앞 광장·궁장 밖 이격 링·육조 관아 슬롯이 blocker 로 추가(추첨 순서는 그대로, 후보 수락 여부만 바뀐다) ③ 주작대로 시점이 상수점에서 정문 법선 위 광장 바깥 변으로 이동 ④ 길이 궁역·광장을 관통하지 못하도록 클립(관통하던 간선은 양쪽 구간이 각각 살아남아 같은 위계의 다음 서수를 받는다). 실측: capital:base 80→73 · capital:temple 81→73 · hanyang:base 395→397 · hanyang:temple 395→397 필지. 게이트: tools/check-palace-precinct.mjs(신규, 미등록) · tools/check-road-contract.mjs(축선 재저작)."
+  "palacePrecinctRevision": "#21 R5 궁·관아 위계 2026-08-02 — 사진 대조 판정 D5·D8·D13·D14·E 구현. 이동한 것은 **궁이 있는 계획뿐**이다(capital:base/temple, hanyang:base/temple). hamlet·village·town 은 해시·바이트 모두 불변이라 이 라운드가 그 규모의 시드 스트림을 건드리지 않았음이 단독 변인으로 확인된다. 궁 계획이 움직인 원인 넷: ① 궁역 폭 96→108(capital 60→58) — 정전 처마 21.6→27.4m·행각 깊이 3.0→4.6m 를 담기 위한 종속값(palace.js tierSpec 과 동기) ② 정문 앞 광장·궁장 밖 이격 링·육조 관아 슬롯이 blocker 로 추가(추첨 순서는 그대로, 후보 수락 여부만 바뀐다) ③ 주작대로 시점이 상수점에서 정문 법선 위 광장 바깥 변으로 이동 ④ 길이 궁역·광장을 관통하지 못하도록 클립(관통하던 간선은 양쪽 구간이 각각 살아남아 같은 위계의 다음 서수를 받는다). 실측: capital:base 80→73 · capital:temple 81→73 · hanyang:base 395→397 · hanyang:temple 395→397 필지. 게이트: tools/check-palace-precinct.mjs(신규, 미등록) · tools/check-road-contract.mjs(축선 재저작).",
+  "magistracyRowRevision": "#23 R5b 관아 축선 분포 2026-08-02 — 육조 관아 슬롯이 정문에서의 절대 오프셋(firstOffset 26 / spacing 28 / 변당 2칸 + 종로 초과 칸 폐기)에서 **축선 span 종속**으로 바뀌었다: 열의 첫 칸 안쪽 변을 궁장 이격 링(8m) 바깥면에, 마지막 칸 바깥 변을 종로 여유(8m) 안쪽면에 물리고 그 사이를 피치(plotD 24 + gap 3)가 허용하는 개수(변당 최대 3)만큼 균등 분할한다. 슬롯 크기(26×24)와 좌향·이격 계약은 불변이다. 이동한 것은 **한양뿐**이다(hanyang:base 1341329→1342158 · hanyang:temple 1351612→1352732, 필지 397→397). 궁이 있어도 관아 슬롯이 없는 capital(magistracy.max 0)이 해시·바이트까지 불변인 것이 단독 변인 증거다(capital:base 245416 · capital:temple 257489 — R5 값 그대로). hamlet·village·town 도 불변. 실측 축선 위치(정문 면 기준): seed 20260716 span 44.3m [26]→[20] · 7 span 73.9m [26,54]→[20,53.9] · 1 span 80.4m [26,54]→[20,60.4] · 2026 span 98.6m [26,54]→[20,49.3,78.6](변당 3칸, 축선 3구간 전부 커버). 궁역 서편 채움(FIX-A)은 palace.js 렌더러 전용이라 계획 골든에 들어가지 않는다. 게이트: tools/check-palace-precinct.mjs(열 양 끝 고정·균등 간격·구간 커버리지 단언 추가, FAIL-first 확인)."
 }

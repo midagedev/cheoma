@@ -386,7 +386,23 @@ const expectedSceneHashes = {
   //   - worker == `?worker=0` 폴백 바이트 동일(아래 신 해시 양 경로 일치), async 불일치 0.
   //   - 이 라운드의 `src/` 변경 7개 파일만 되돌리면 구 골든 9ff92c07… 이 재현된다
   //     (실측: `git show HEAD:<file>` 로 되돌린 트리에서 재현 확인).
-  hanyang: 'd8620dc1:12769e21:213667c2:327079b3',
+  // #23 R5b 궁역 서편 채움 + 관아 축선 분포(2026-08-02): `src/` 변경은 두 파일뿐이다
+  //   (palace.js 서편 곽 3종 추가 · palace-precinct-plan.js 관아 열 span 종속화).
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-02, `scratch/r5b/worker-revert.log`)**:
+  //   - 그 두 파일을 `git show HEAD:<file>` 로 되돌린 트리에서 **구 골든이 그대로 재현된다**
+  //     (hanyang d8620dc1… / proxy 5511f335 / objects 5596 / triangles 25,510,629).
+  //   - 같은 두 실행에서 village(5c6e9658…)·town(42f854e6…)·capital(ca415f99…)·mja optin·
+  //     snapshot 골든은 전부 불변이다. capital worker fixture 는 궁을 켜지 않고, capital
+  //     프로필은 관아 슬롯이 아예 없다(magistracy.max 0).
+  //   - proxy 는 한양만 이동(5511f335 → c5517350) — 관아 슬롯이 옮겨가며 도성 필지·지붕 OBB 가
+  //     실제로 움직였으므로 정상이다.
+  //   - **objects 감소(5596→5358)·triangles 증가(25,510,629→25,598,200)** 는 계획 재배치의
+  //     결과이고 방향까지 설명된다. 같은 시드 계획 실측(before→after): 기와 77→70 · 초가
+  //     320→327 · 도로 64→62 · 마당나무 종 561→557 · 장독 382→378. 기와 한 채가 초가보다
+  //     훨씬 무거우므로 기와 7채가 초가로 바뀌면 오브젝트가 크게 준다. 삼각형은 반대로
+  //     궁 서편 채움(+144,802 — 순수 실측 919,904→1,064,706)이 그 감소분을 넘어서 순증했다.
+  //   - worker == `?worker=0` 폴백 바이트 동일(아래 신 해시 양 경로 일치), async 불일치 0.
+  hanyang: 'e1efb688:99f9f738:7c2938d4:00609f00',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -446,7 +462,13 @@ const expectedProxyHashes = {
   //   프록시 3종은 같은 실행에서 불변이고(fef7a386 / 3f7f776c / 046ecd22), 이 라운드의
   //   `src/` 7개 파일만 되돌린 트리에서 구 값 6bd5f82a 가 재현된다(실측 2026-08-02).
   //   프록시 개수·안정 ID·격리 계약은 유지.
-  hanyang: '5511f335',
+  // #23 R5b(2026-08-02): 한양만 이동. 관아 열이 축선 span 종속으로 바뀌며 예약 blocker 가
+  //   옮겨졌고, 그 하류로 도성 필지·지붕 OBB 가 움직인다(기와 77→70·초가 320→327).
+  //   village/town/capital 프록시 3종은 같은 실행에서 불변이고(fef7a386 / 3f7f776c /
+  //   046ecd22), 이 라운드의 `src/` 2개 파일만 되돌린 트리에서 구 값 5511f335 가 재현된다
+  //   (실측 2026-08-02). 서편 채움(palace.js)은 궁 컴파운드 내부라 필지 프록시를 만들지 않는다.
+  //   프록시 개수·안정 ID·격리 계약은 유지.
+  hanyang: 'c5517350',
 };
 
 const server = await createServer({

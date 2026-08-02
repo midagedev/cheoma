@@ -20,6 +20,7 @@ import { planVillage } from '../src/api/village-plan.js';
 import {
   PALACE_OUTER_WALL,
   palaceGatePoint,
+  palaceMagistracyRow,
   palaceUrbanFrontPlan,
 } from '../src/village/palace-precinct-plan.js';
 
@@ -41,6 +42,25 @@ const CIVIL_FENCE_HEIGHT = 2.2;
 const CIVIL_FENCE_THICKNESS = 0.5;
 const WALL_HEIGHT_RATIO_MIN = 1.5;    // 궁장 높이 배수        (종전 3.0/2.2 = 1.36)
 const WALL_THICKNESS_RATIO_MIN = 1.9; // 궁장 두께 배수        (종전 0.7/0.5 = 1.40)
+
+// ── #23 R5b 판정 임계 (2026-08-02) ───────────────────────────────────────────
+// F1 궁장 안 서편이 "담 친 공터"로 읽히지 않는가 — 지붕 투영 점유율 하한
+// F2 관아가 육조거리를 **따라** 늘어서는가 — 열의 양 끝이 축선 span 에 물리는가
+//
+// 괄호 안이 R5b **이전** 소스의 실측이다(FAIL-first). 점유율은 궁 컴파운드 로컬 좌표에서
+//   y ≥ 2.0m 까지 오르는 메시(궁장 서브트리 제외)의 XZ AABB 합집합을 0.5m 격자로 잰 것이다.
+const ROOF_MIN_Y = 2.0;
+const RASTER_CELL = 0.5;
+const WEST_STRIP_MIN = 0.35;          // 서편 외곽 스트립 x[-54,-24] 전체   (종전 0.135)
+const WEST_BAND_MIN = Object.freeze({ // 축선 일곽별 서편 스트립
+  jeongjeon: 0.50,                    // z[10.2,50.2]                       (종전 0.076)
+  chimjeon: 0.50,                     // z[-43.8,-17.8]                     (종전 0.118)
+  junggung: 0.35,                     // z[-65.8,-43.8]                     (종전 0.000)
+});
+const FLANK_FLANK_GAP_MIN = 1.0;      // 측면 블록끼리의 이격 m
+// 열의 양 끝이 얼마나 정확히 물려야 하는가. 균등 분할이라 오차는 부동소수뿐이지만, 0.51 은
+//   "한 칸 어긋남"(종전 정문 쪽 6.0m · 종로 쪽 최대 32.6m)과 확실히 구분되는 폭이다.
+const ROW_ANCHOR_TOL = 0.51;
 
 const SEEDS = [20260716, 7, 1, 11, 2026, 42];
 
@@ -124,6 +144,38 @@ const boxOf = (object) => {
   object.updateMatrixWorld(true);
   return new THREE.Box3().setFromObject(object);
 };
+
+/**
+ * 궁역 지붕 투영 래스터라이저 (#23 R5b F1). 궁장을 뺀 채 y ≥ ROOF_MIN_Y 인 메시의 XZ AABB 를
+ * 0.5m 격자에 찍고, 요청한 사각 구간의 점유 비율을 돌려준다. 부감에서 "빈 마당"으로 읽히는지는
+ * 결국 지붕이 땅을 얼마나 덮느냐이므로, 채의 수가 아니라 이 면적을 잰다.
+ */
+function roofRaster(root, W, D) {
+  root.updateMatrixWorld(true);
+  const wall = root.getObjectByName('palace-wall');
+  const nx = Math.round(W / RASTER_CELL), nz = Math.round(D / RASTER_CELL);
+  const grid = new Uint8Array(nx * nz);
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    for (let node = object; node; node = node.parent) if (node === wall) return;
+    const box = new THREE.Box3().setFromObject(object);
+    if (box.max.y < ROOF_MIN_Y) return;
+    const i0 = Math.max(0, Math.floor((box.min.x + W / 2) / RASTER_CELL));
+    const i1 = Math.min(nx - 1, Math.ceil((box.max.x + W / 2) / RASTER_CELL) - 1);
+    const j0 = Math.max(0, Math.floor((box.min.z + D / 2) / RASTER_CELL));
+    const j1 = Math.min(nz - 1, Math.ceil((box.max.z + D / 2) / RASTER_CELL) - 1);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) grid[j * nx + i] = 1;
+  });
+  return (x0, x1, z0, z1) => {
+    const i0 = Math.max(0, Math.floor((x0 + W / 2) / RASTER_CELL));
+    const i1 = Math.min(nx - 1, Math.ceil((x1 + W / 2) / RASTER_CELL) - 1);
+    const j0 = Math.max(0, Math.floor((z0 + D / 2) / RASTER_CELL));
+    const j1 = Math.min(nz - 1, Math.ceil((z1 + D / 2) / RASTER_CELL) - 1);
+    let filled = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (grid[j * nx + i]) filled++;
+    return filled / ((j1 - j0 + 1) * (i1 - i0 + 1));
+  };
+}
 
 // ── D5 · D13: 궁 컴파운드 기하 ───────────────────────────────────────────────
 for (const tier of ['hanyang', 'capital']) {
@@ -215,6 +267,48 @@ for (const tier of ['hanyang', 'capital']) {
   });
   assert.ok(coping > 0, `${tier}: palace wall has no shadow-casting tile coping`);
   assert.ok(plinth > 0, `${tier}: palace wall has no stone plinth wider than the wall`);
+
+  // 측면 블록끼리 겹치지 않는다 — 서편이 여러 곽을 z 로 나눠 쓰면서 새로 생긴 실패 모드다.
+  for (let a = 0; a < flanks.length; a++) {
+    for (let b = a + 1; b < flanks.length; b++) {
+      const overlapX = Math.min(flanks[a].box.max.x, flanks[b].box.max.x)
+        - Math.max(flanks[a].box.min.x, flanks[b].box.min.x);
+      if (overlapX <= 0) continue;
+      const gapZ = Math.max(
+        flanks[a].box.min.z - flanks[b].box.max.z,
+        flanks[b].box.min.z - flanks[a].box.max.z,
+      );
+      assert.ok(gapZ >= FLANK_FLANK_GAP_MIN,
+        `${tier}: ${flanks[a].area.role} and ${flanks[b].area.role} clear each other `
+        + `by only ${gapZ.toFixed(2)}m`);
+    }
+  }
+
+  // F1 궁장 안 서편이 지붕으로 덮여 있는가 (한양 전용 — capital 은 측면 블록 자체가 없다).
+  if (tier === 'hanyang') {
+    const { regionW, regionD } = root.userData.palaceHandle;
+    const coverage = roofRaster(root, regionW, regionD);
+    const axialHalfW = Math.max(...areas.map((area) => area.W)) / 2;
+    const stripOuter = -regionW / 2, stripInner = -(axialHalfW + 1);
+    const strip = coverage(stripOuter, stripInner, -regionD / 2, regionD / 2);
+    assert.ok(strip >= WEST_STRIP_MIN,
+      `${tier}: west outer strip x[${stripOuter},${stripInner.toFixed(0)}] is only `
+      + `${(strip * 100).toFixed(1)}% roofed (floor ${(WEST_STRIP_MIN * 100).toFixed(0)}%)`);
+    const bands = [];
+    for (const [role, floor] of Object.entries(WEST_BAND_MIN)) {
+      const area = areas.find((entry) => entry.role === role);
+      assert.ok(area, `${tier}: no ${role} ilgwak to band the west strip against`);
+      const measured = coverage(
+        stripOuter, stripInner, area.center.z - area.D / 2, area.center.z + area.D / 2,
+      );
+      assert.ok(measured >= floor,
+        `${tier}: west strip beside ${role} is only ${(measured * 100).toFixed(1)}% roofed `
+        + `(floor ${(floor * 100).toFixed(0)}%)`);
+      bands.push(`${role} ${(measured * 100).toFixed(1)}%`);
+    }
+    console.log(`palace ${tier}: west strip ${(strip * 100).toFixed(1)}% roofed (${bands.join(', ')}), `
+      + `flanks ${flanks.map((flank) => flank.area.role).join('/')}`);
+  }
   console.log(`palace ${tier}: jeongjeon eave ${eaveWidth.toFixed(2)}m `
     + `(front:side ${(eaveWidth / eaveDepth).toFixed(2)}), wall ${PALACE_OUTER_WALL.height}m/`
     + `${PALACE_OUTER_WALL.thickness}m, coping meshes ${coping}, plinth meshes ${plinth}`);
@@ -287,9 +381,56 @@ for (const seed of SEEDS) {
       `hanyang:${seed}: magistracy ${parcel.id} carries roof rank ${parcel.roofRank}`);
   }
 
+  // F2 관아 열이 육조거리를 **따라** 늘어선다 — 절대 오프셋이 아니라 축선 span 의 함수다.
+  //   판정 기준은 열의 양 끝: 첫 칸은 궁장 이격 링 바로 밖, 마지막 칸은 종로 여유 바로 안쪽.
+  const spec = front.front.magistracy;
+  const row = palaceMagistracyRow(front.front, axisSpan);
+  const alongOf = (parcel) => G.dot(G.sub(parcel.center, gate), direction);
+  const alongs = [...new Set(magistracy.map((parcel) => Math.round(alongOf(parcel) * 1e6) / 1e6))]
+    .sort((a, b) => a - b);
+  assert.equal(alongs.length, row.count,
+    `hanyang:${seed}: ${alongs.length} distinct magistracy stations, row solves ${row.count}`);
+  // 축선이 피치 한 칸을 더 담을 수 있으면 칸도 하나 더 있어야 한다(상한 max 까지).
+  const pitch = spec.plotD + spec.gap;
+  const usable = axisSpan - spec.jongnoGap - spec.plotD - front.front.precinctClearance;
+  const capacity = Math.max(1, Math.min(spec.max, 1 + Math.floor(usable / pitch)));
+  assert.equal(row.count, capacity,
+    `hanyang:${seed}: span ${axisSpan.toFixed(1)}m fits ${capacity} station(s), row emits ${row.count}`);
+
+  const nearReach = (alongs[0] - spec.plotD * 0.5) - front.front.precinctClearance;
+  assert.ok(Math.abs(nearReach) <= ROW_ANCHOR_TOL,
+    `hanyang:${seed}: the magistracy row starts ${nearReach.toFixed(2)}m off the palace clearance ring `
+    + `(tolerance ${ROW_ANCHOR_TOL}m) — it must anchor to the ring, not to a fixed offset`);
+  if (alongs.length >= 2) {
+    const farReach = axisSpan - (alongs[alongs.length - 1] + spec.plotD * 0.5) - spec.jongnoGap;
+    assert.ok(Math.abs(farReach) <= ROW_ANCHOR_TOL,
+      `hanyang:${seed}: the magistracy row stops ${farReach.toFixed(2)}m short of the Jongno margin `
+      + `(tolerance ${ROW_ANCHOR_TOL}m) — the tail of 육조거리 is left bare`);
+  }
+  for (let i = 2; i < alongs.length; i++) {
+    const a = alongs[i] - alongs[i - 1], b = alongs[i - 1] - alongs[i - 2];
+    assert.ok(Math.abs(a - b) <= 1e-6,
+      `hanyang:${seed}: magistracy stations are not evenly spaced (${b.toFixed(2)}m then ${a.toFixed(2)}m)`);
+  }
+  // 어떤 칸도 이격 링을 침범하거나 종로를 넘지 않는다.
+  for (const along of alongs) {
+    assert.ok(along - spec.plotD * 0.5 >= front.front.precinctClearance - 1e-6,
+      `hanyang:${seed}: a magistracy station at ${along.toFixed(1)}m bites into the clearance ring`);
+    assert.ok(along + spec.plotD * 0.5 <= axisSpan + 1e-6,
+      `hanyang:${seed}: a magistracy station at ${along.toFixed(1)}m crosses Jongno`);
+  }
+  // 칸이 세 개면 축선 span 의 세 구간을 각각 하나씩 차지한다.
+  if (alongs.length >= 3) {
+    const thirds = new Set(alongs.map(
+      (along) => Math.min(2, Math.floor(along / axisSpan * 3)),
+    ));
+    assert.equal(thirds.size, 3,
+      `hanyang:${seed}: three magistracy stations but only ${thirds.size} third(s) of the axis covered`);
+  }
+
   console.log(`hanyang:${seed}: plaza ${front.plazaLength.toFixed(1)}m (span ${axisSpan.toFixed(1)}m), `
-    + `magistracy ${magistracy.length}, nearest civil parcel ${nearest.toFixed(2)}m, `
-    + `parcels ${plan.parcels.length}`);
+    + `magistracy ${magistracy.length} at [${alongs.map((a) => a.toFixed(1)).join(', ')}]m, `
+    + `nearest civil parcel ${nearest.toFixed(2)}m, parcels ${plan.parcels.length}`);
 }
 
 console.log('PALACE PRECINCT: PASS (D5 궁 위계 기하 · D8 정문 광장 · D13 궁장 · D14 관아 정렬 · E 궁 경계 이격)');

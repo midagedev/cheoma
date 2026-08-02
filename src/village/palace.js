@@ -121,6 +121,16 @@ function tierSpec(tier) {
     };
   }
   // hanyang 플래그십 108×150: 4일곽 축선 + 동궁(+x) + 궐내각사(-x) + 금천교 + 후원 여백.
+  //
+  // 서편 열(#23 R5b FIX-A, 2026-08-02): 축선 일곽은 최대폭 46 이라 궁장(108)까지 좌우로 각
+  //   31m 가 남는다. 종전엔 그 열에 궐내각사 한 곽만 있어 서편 외곽 스트립(x −54~−24)의 지붕
+  //   점유가 13.5% 였고(실측), 정전 옆 13.5%→7.6%·중궁전 옆 0.0% 로 부감에서 "담 친 공터에
+  //   건물 몇 채"로 읽혔다. 경복궁 서편은 실제로 **궐내각사 권역**(수정전 일원과 그 남쪽 근무
+  //   관청군)이고 서북에 **태원전 일곽**(빈전·혼전)이 앉는다 — 서편을 채우는 것이 고증 방향이다
+  //   (docs/architectural-authenticity.md §11.4, docs/palace-layout.md §13).
+  //   채움은 전각이 아니라 **행각**이 한다: 실측 2026-08-02 로 행각은 326 tri/m 인데 소전각은
+  //   1채 49k tri 라, 같은 지붕 면적을 150분의 1 비용으로 덮는다. 구한말 부감 사진의 궁역도
+  //   "세로보다 훨씬 긴 낮은 지붕 띠"이지 전각 밭이 아니다.
   return {
     w: 108, d: 150, entryD: 24,
     areas: [
@@ -129,9 +139,13 @@ function tierSpec(tier) {
       { role: 'chimjeon', W: 34, D: 26, corridorDepth: 3.4, colH: 2.8, gate: 'iljakmun', gateW: 3.2, satellites: 4 },
       { role: 'junggung', W: 28, D: 22, corridorDepth: 3.4, colH: 2.7, gate: 'iljakmun', gateW: 3.0, backGarden: true },
     ],
+    // zShift: attachTo 일곽 중심에서의 축선 오프셋(+z=남). 서편 세 곽은 z 대역을 나눠 물려
+    //   서로 3.0m 씩 이격한다(gwolnaegaksa −20.8~13.2 / south 16.2~48.2 / taewonjeon −57.8~−23.8).
     flanks: [
-      { role: 'donggung', side: +1, W: 22, D: 30, attachTo: 'pyeonjeon' },
+      { role: 'donggung', side: +1, W: 22, D: 30, attachTo: 'pyeonjeon', hall: true },
       { role: 'gwolnaegaksa', side: -1, W: 24, D: 34, attachTo: 'pyeonjeon', subCells: 4 },
+      { role: 'gwolnaegaksa-south', side: -1, W: 24, D: 32, attachTo: 'jeongjeon', zShift: 2, rows: 3 },
+      { role: 'taewonjeon', side: -1, W: 24, D: 34, attachTo: 'chimjeon', zShift: -10, hall: true, rows: 1 },
     ],
   };
 }
@@ -165,6 +179,20 @@ function wallRun(root, a, b, gap, depth, colH, seed) {
     });
     root.add(group);
   }
+}
+
+// 곽 안을 동서로 가로지르는 장랑(長廊) 행각 — 궐내각사·태원전처럼 하나의 곽이 여러 작은
+//   마당으로 나뉘는 배치를 행각만으로 만든다(#23 R5b FIX-A). z0..z1 안에 count 개를 균등 배치.
+//   전각을 더 세우지 않는 이유는 tierSpec 주석의 단가 실측(행각 326 tri/m vs 소전각 49k tri)이다.
+function innerRows(root, fx, W, depth, colH, count, seed, z0, z1) {
+  const halfX = W / 2 - depth;          // 곽 안쪽 반폭(행각 안쪽 면까지)
+  const span = z1 - z0;
+  if (halfX < 3 || count < 1 || span < depth * (count + 1)) return 0;
+  for (let i = 0; i < count; i++) {
+    const z = z0 + span * ((i + 1) / (count + 1));
+    wallRun(root, { x: fx - halfX, z }, { x: fx + halfX, z }, 0, depth, colH, (seed + i * 13) >>> 0);
+  }
+  return count;
 }
 
 // 모서리 기둥(변을 따로 세우면 buildCorridor 가 코너 포스트를 안 붙이므로 수동).
@@ -517,6 +545,7 @@ export function buildPalaceCompound({
     let acc = southInner - spec.entryD;
     let fz = 0;
     for (const a of spec.areas) { const c = acc - a.D / 2; if (a.role === F.attachTo) { fz = c; break; } acc = c - a.D / 2; }
+    fz += F.zShift || 0;   // 서편 열은 같은 x 대역을 z 로 나눠 쓴다(#23 R5b FIX-A)
     // 측면 블록은 **가장 넓은 축선 일곽**을 기준으로 물린다. 종전엔 attachTo 일곽(편전)만 보고
     //   이격했는데, D5 로 정전곽이 넓어지자 정전 남단과 측면 블록 북단이 겹치는 z 대역에서
     //   행각끼리 관통했다(정전 ±23 vs 궐내각사 내변 ±18.5). 축선 최대폭 기준이면 어떤 일곽과도
@@ -527,6 +556,7 @@ export function buildPalaceCompound({
     // 측면 블록 행각도 축선 일곽과 같은 두께 계열을 쓴다(#21 R5 D5) — 여기만 얇으면 궁역
     //   윤곽에서 동·서변이 먼저 사라진다. 축선 일곽(3.4)보다 한 단 얕은 것은 격식 차이다.
     const depth = 3.0, colH = 2.8;
+    let flankHallBox = null;
     const { chd } = enclosure(grp, fx, fz, F.W, F.D, {
       depth, colH, sides: { south: true, southGap: 3.0, north: true, northGap: 0, east: true, west: true }, seed: seed ^ (F.side > 0 ? 0xa1 : 0xb2),
     });
@@ -555,11 +585,18 @@ export function buildPalaceCompound({
         cell.name = `${F.role}-cell${ci++}`;
         grp.add(cell);
       }
-    } else {
-      // 동궁: 소전 1채.
+    } else if (F.hall) {
+      // 동궁·태원전: 소전 1채(곽 북측에 등을 붙임).
       const preset = applyOv({ ...hallPreset('chimjeon', seed + 500), frontBays: 3, sideBays: 3 });
       preset.mats = hallMats;   // #149 공유 재질셋
-      placeHall(grp, preset, fx, fz - F.D / 2, depth, `hall-${F.role}`);
+      const { group: flankHall } = placeHall(grp, preset, fx, fz - F.D / 2, depth, `hall-${F.role}`);
+      flankHallBox = new THREE.Box3().setFromObject(flankHall);
+    }
+    // 곽 안 장랑(#23 R5b FIX-A) — 전각 남쪽 빈 마당을 여러 작은 마당으로 나눈다.
+    if (F.rows) {
+      const interiorHZ = F.D / 2 - depth;
+      const rowNorth = flankHallBox ? flankHallBox.max.z + 1.5 : fz - interiorHZ;
+      innerRows(grp, fx, F.W, depth, colH, F.rows, (seed ^ 0xc3) >>> 0, rowNorth, fz + interiorHZ);
     }
     const finalGrp = finalize(grp);
     areaHandles.push({ role: F.role, group: finalGrp, hall: null, center: { x: fx, z: fz }, W: F.W, D: F.D });

@@ -69,7 +69,17 @@ export function palaceOuterPrecinctPlan(width, depth) {
 //   70~84m 대역에 점포 12~14채).
 // 관아 슬롯 수는 히어로 삼각형 예산에 묶여 있다 — 실측 2026-08-02: 관아 1동 ≈ 154k tri,
 //   반가 1동 ≈ 145k tri 이고 한양 aerial 삼각형 천장(2.45M)이 전제한 히어로 몫은 heroCap 6
-//   worst case(868k)다. 한양 2동×2변 + 반가 승격 2 = 히어로 6동으로 그 전제를 보존한다.
+//   worst case(868k)다. 슬롯은 `parcels.js` heroBudget 으로 반가 승격 상한을 1:1 차감하므로
+//   변당 최대 3동(=총 6동)까지도 히어로 총수는 보존된다.
+//
+// 슬롯 배치는 **축선 span 종속**이다(#23 R5b FIX-B, 2026-08-02). 종전에는 정문에서 26m·54m 라는
+//   절대 오프셋 두 칸이라, 육조거리 길이와 무관하게 같은 자리에 앉았다 — 실측 2026-08-02:
+//   span 98.6m 시드에서 마지막 슬롯 바깥 변이 종로에서 32.6m 못 미쳐 거리 뒤쪽 3분의 1 이 비었고,
+//   span 44.3m 시드에서는 한 쌍이 거리 가운데에 뜬 채 정문 쪽 6m 가 비었다. 판정(#23)이 읽은
+//   "육조거리를 따라 늘어선 관아 열이 아니라 교차로 좌우 관청 한 쌍"이 이 절대 오프셋의 결과다.
+//   대신 열의 **양 끝을 고정**한다: 첫 칸은 궁장 이격 링 바로 밖, 마지막 칸은 종로 여유 바로 안쪽.
+//   그 사이를 authored 피치가 허용하는 만큼(최대 max) 균등 분할한다. 개별 크기는 건드리지 않는다
+//   — 관아가 커지면 궁급으로 읽혀 위계가 무너진다.
 const HANYANG_FRONT = Object.freeze({
   plazaLength: 96,
   plazaHalfWidth: 26,
@@ -79,11 +89,11 @@ const HANYANG_FRONT = Object.freeze({
   //   광장이 그 전부를 먹으면 주작대로가 길이 0 으로 소멸하고 시전 행랑도 T 에 닿지 못한다.
   axisTail: 24,
   magistracy: Object.freeze({
-    count: 2,
+    max: 3,             // 변당 슬롯 상한(축선이 짧으면 그만큼 줄어든다)
     plotW: 26,          // 축선에 직교하는 폭(광장 변에서 바깥으로)
-    plotD: 24,          // 축선 방향 깊이
-    firstOffset: 26,    // 정문 면에서 첫 슬롯 중심까지의 축선 거리(이격 링 8m 밖에 앉게)
-    spacing: 28,        // 슬롯 중심 간격(축선 방향)
+    plotD: 24,          // 축선 방향 깊이 = 거리에 면한 정면 길이
+    gap: 3,             // 이웃 슬롯 사이 최소 빈 거리(피치 = plotD + gap)
+    jongnoGap: 8,       // 종로 축에서 남겨 두는 여유(궁장 이격 링과 같은 크기로 잡아 열이 대칭)
   }),
 });
 
@@ -99,7 +109,7 @@ const CAPITAL_FRONT = Object.freeze({
   precinctClearance: 8,
   axisTail: 24,
   magistracy: Object.freeze({
-    count: 0, plotW: 26, plotD: 24, firstOffset: 26, spacing: 28,
+    max: 0, plotW: 26, plotD: 24, gap: 3, jongnoGap: 8,
   }),
 });
 
@@ -169,6 +179,34 @@ export function palacePrecinctClearancePolygon(parcel, front = palaceUrbanFront(
 }
 
 /**
+ * 육조 관아 열의 축선 위치(정문 면 기준 거리)를 축선 span 에서 푼다 — 슬롯 배치의 단일 소스.
+ *
+ * 열의 양 끝이 고정점이다: 첫 칸 안쪽 변 = 궁장 이격 링 바깥면, 마지막 칸 바깥 변 = 종로 여유
+ * 안쪽면. 그 사이를 피치(plotD + gap)가 허용하는 개수만큼 균등 분할한다. 한 칸만 들어가는
+ * 짧은 축선에서는 정문 쪽 끝에 붙인다 — 의정부·삼군부가 광화문 바로 앞이었던 배치와 같은 쪽이고,
+ * 가운데 띄우면 양쪽이 다 어중간해진다.
+ *
+ * 반환 { count, centers }(centers = 정문 면에서의 축선 거리, 남→북 아닌 **정문→종로** 방향).
+ */
+export function palaceMagistracyRow(front, axisSpan = Infinity) {
+  const spec = front.magistracy;
+  const max = spec.max | 0;
+  if (max <= 0) return { count: 0, centers: [] };
+  const pitch = spec.plotD + spec.gap;
+  const lo = front.precinctClearance + spec.plotD * 0.5;
+  // 성곽이 없어 종로 축을 모르는 구성에서는 authored 피치로 가득 찬 열을 가정한다(결정론 유지).
+  const hi = Number.isFinite(axisSpan)
+    ? axisSpan - spec.jongnoGap - spec.plotD * 0.5
+    : lo + (max - 1) * pitch;
+  if (hi < lo) return { count: 0, centers: [] };
+  const count = Math.max(1, Math.min(max, 1 + Math.floor((hi - lo) / pitch)));
+  if (count === 1) return { count, centers: [lo] };
+  const centers = [];
+  for (let i = 0; i < count; i++) centers.push(lo + (hi - lo) * (i / (count - 1)));
+  return { count, centers };
+}
+
+/**
  * 육조 관아 슬롯 — 광장 좌우 변에 궁과 **같은 좌향**으로 늘어선다. side=-1(서)/+1(동).
  *
  * 좌향을 거리 쪽(축선 직교)이 아니라 궁 축선과 같게 두는 이유: 실제 육조거리 관아도 대문만
@@ -179,19 +217,20 @@ export function palacePrecinctClearancePolygon(parcel, front = palaceUrbanFront(
  *
  * 반환은 { center, frontDir, plotW, plotD, side, index } 목록(순수 데이터).
  */
-export function palaceMagistracySlots(parcel, front = palaceUrbanFront(parcel)) {
+export function palaceMagistracySlots(parcel, front = palaceUrbanFront(parcel), axisSpan = Infinity) {
   const frame = frameOf(parcel);
   const spec = front.magistracy;
   const lateral = front.plazaHalfWidth + spec.plotW * 0.5;
   const z0 = parcel.plotD * 0.5;
+  const { centers } = palaceMagistracyRow(front, axisSpan);
   const slots = [];
   for (const side of [-1, 1]) {
-    for (let index = 0; index < spec.count; index++) {
-      const along = z0 + spec.firstOffset + spec.spacing * index;
+    for (let index = 0; index < centers.length; index++) {
       slots.push({
         side,
         index,
-        center: toWorld(parcel, frame, side * lateral, along),
+        along: centers[index],
+        center: toWorld(parcel, frame, side * lateral, z0 + centers[index]),
         frontDir: { x: frame.f.x, z: frame.f.z },
         plotW: spec.plotW,
         plotD: spec.plotD,
@@ -226,11 +265,10 @@ export function palaceUrbanFrontPlan(parcel, { axisSpan = Infinity } = {}) {
   // 축선 직선 구간은 광장보다 짧을 수 없고, 최소한 궁장 밖 이격 링은 곧게 빠져나가야 한다.
   //   링 안에서 대로가 휘면 정문 법선과 어긋난 채 궁장에 닿는다(광장이 없는 capital 프로필).
   const straightLength = Math.min(usable, Math.max(plazaLength, front.precinctClearance + 2));
-  const spec = front.magistracy;
-  const magistracy = palaceMagistracySlots(parcel, front).filter((slot) => {
-    const far = spec.firstOffset + spec.spacing * slot.index + spec.plotD * 0.5;
-    return far <= (Number.isFinite(axisSpan) ? axisSpan : Infinity);
-  });
+  // 슬롯은 span 에서 직접 풀리므로(양 끝 고정 + 균등 분할) 사후 필터가 없다 — 종전에는 절대
+  //   오프셋을 만든 뒤 종로를 넘는 칸을 버리는 방식이라, 짧은 축선일수록 남은 칸이 거리 가운데
+  //   한 쌍으로 몰렸다(#23 R5b FIX-B).
+  const magistracy = palaceMagistracySlots(parcel, front, axisSpan);
   return {
     front,
     plazaLength,
