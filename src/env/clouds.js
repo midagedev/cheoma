@@ -607,6 +607,21 @@ export function setupClouds(group, {
   // Expressing that authored limit as coverage keeps 7°/10° telephoto views
   // from restoring the shadow-source plane while it still fills the screen.
   const CLOUD_FRAME_FULL = 0.38, CLOUD_FRAME_HIDDEN = 0.64;
+  // Those endpoints were authored for cameras level with the cloud body, where the
+  // billboard still shows its lobed silhouette. A cinematic drone leg instead flies
+  // *under* the quad (hanyang τ≈0.544: camera y≈20, cloud y=82, so the camera sits
+  // below the plane's own lower edge). From there the only thing left on screen is
+  // makeCumulusTexture's baked underside — a smooth blue-grey gradient with no lobes —
+  // and patchCloudRim traces its magnified alpha contour as a hard bright edge, so the
+  // billboard reads as a flat grey-lavender disc rather than a cloud. Measured at that
+  // frame: covered-area stdev L = 6.6 and interior |grad| = 0.55, against 24.8 / 1.08
+  // for the vision-approved warm cloud at τ≈0.7025 — which is *angularly larger*
+  // (frameFraction 0.503 vs 0.479), so screen coverage alone cannot separate them.
+  // Hence the limits tighten only as the camera sinks below the lower edge; a camera
+  // level with or above it keeps the authored endpoints exactly, which is why the
+  // τ≈0.7025 cloud and every aerial (camera-above) frame are untouched.
+  const CLOUD_UNDERSIDE_SPAN = 0.35;   // depth below the lower edge, in half-heights, for full effect
+  const CLOUD_UNDERSIDE_TIGHTEN = 0.55; // fraction the coverage limits shrink by when fully underneath
 
   // ── 마을 부감 커버리지(#108) ─────────────────────────────────────────────────
   // 진단(tools/verify-cloudshadow.mjs): env 식 배치(rad = terrainMax·r + 40 + 표류 ±120)에선 블롭이
@@ -656,13 +671,13 @@ export function setupClouds(group, {
       mesh.userData = {
         laneX: cCx + perp.x * lane, laneZ: cCz + perp.y * lane, y: s.y,
         span: COVER * 0.85,                                    // 가로지름 진폭(프레임 안팎을 유유히 오감)
-        w: s.w, op: s.op, sp: s.sp, phase: i * (6.2832 / nHigh), blob: i,
+        w: s.w, h: s.h, op: s.op, sp: s.sp, phase: i * (6.2832 / nHigh), blob: i,
       };
     } else {
       const rad = R * s.r + 40;
       mesh.userData = {
         baseX: Math.cos(s.ang) * rad, z: Math.sin(s.ang) * rad, y: s.y,
-        w: s.w, op: s.op, sp: s.sp, phase: i * 2.1, blob: i,   // blob: 대응 그림자 uniform 슬롯
+        w: s.w, h: s.h, op: s.op, sp: s.sp, phase: i * 2.1, blob: i,   // blob: 대응 그림자 uniform 슬롯
       };
     }
     // 카메라를 향해 빌보드 — 렌더 직전 실제 카메라를 받아 재조준(update 에 카메라 불필요).
@@ -696,9 +711,16 @@ export function setupClouds(group, {
         const halfFrameAtDepth = distance * Math.tan(verticalFov * 0.5) * aspect;
         const frameFraction = halfFrameAtDepth > 1e-6
           ? mesh.userData.w * 0.5 / halfFrameAtDepth : Infinity;
+        // Below the quad's own lower edge only the featureless baked underside is left,
+        // so the coverage limits tighten there. Level or above keeps them unchanged.
+        const halfH = (mesh.userData.h || mesh.userData.w) * 0.5;
+        const underside = smoothstep(0, CLOUD_UNDERSIDE_SPAN,
+          (mesh.position.y - halfH - cam.position.y) / Math.max(1e-6, halfH));
+        const tighten = 1 - underside * CLOUD_UNDERSIDE_TIGHTEN;
         // The local plane remains the physical ground-shadow source even while
         // hidden. The camera-relative horizon bank supplies close sky silhouettes.
-        const proximity = 1 - smoothstep(CLOUD_FRAME_FULL, CLOUD_FRAME_HIDDEN, frameFraction);
+        const proximity = 1 - smoothstep(
+          CLOUD_FRAME_FULL * tighten, CLOUD_FRAME_HIDDEN * tighten, frameFraction);
         mesh.material.opacity = base * (1 - g * OF_DEPTH) * proximity;
       }
     };
