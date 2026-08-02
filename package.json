@@ -5,6 +5,7 @@
   "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
   "scripts": {
     "check": "node tools/check-fast.mjs && npm run check:share",
+    "check:deep": "node tools/check-fast.mjs --deep && npm run check:share",
     "check:all": "node tools/check-suite.mjs --all",
     "check:full": "node tools/check-suite.mjs --full",
     "check:pr": "node tools/check-pr.mjs",

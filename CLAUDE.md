@@ -36,13 +36,16 @@ npm run build    # → app/dist   (build.target es2022, assetsInlineLimit 0)
 Repository contract gates run from the root:
 
 ```bash
-npm run check          # architecture + plan goldens + pure geometry invariants
-npm run check:pr       # changed-file router: fast core + affected browser/worker gates
+npm run check          # BLOCKING core invariants only: architecture boundary + plan goldens + runner self-test (+ scene share) — ~20s
+npm run check:deep     # the full pure suite (former `check`, ~100 feature gates) — opt-in, never blocks a commit
+npm run check:pr       # changed-file router: core + affected feature/browser/worker gates
 npm run check:app      # isolated full-app browser smoke
 npm run check:worker   # sync / real Worker / fallback scene + picking contracts
 npm run check:all      # all repository contract groups
-npm run check:full     # merge gate: all + DoF/LOD app flows + production build
+npm run check:full     # all + DoF/LOD app flows + production build
 ```
+
+**Gate policy (user decision 2026-08-02 — "게이트 대폭 축소"):** only cross-cutting invariants block commits and CI (`npm run check` = 3 core contracts). All per-feature numeric gates were demoted to opt-in: a round touching a domain runs its own gate directly or via `check:pr` routing; `check:deep` exists for occasional whole-suite sweeps. Feature gate files were kept (not deleted), so any of them can be re-promoted by adding it to `CORE_CHECKS` in `tools/lib/fast-checks.mjs`. Do not add new gates to the blocking core without a user decision; new feature gates register in `FAST_CHECKS` (deep/routing) as before.
 
 There is **no unit-test framework, linter, typechecker, or formatter** (no eslint/prettier/tsconfig — don't hunt for `npm run lint`/`test`). Since nothing typechecks the JS, use `npx esbuild <file> --bundle --format=esm --outfile=/dev/null` as a fast syntax check before running a harness. Verification is **visual/behavioral via Playwright**: `tools/*.mjs` each spin up their own static HTTP server, drive headless Chromium, and write PNG screenshots. Playwright is a repo-root devDependency (root `package.json` — separate from `app/`), so run the tools with plain node:
 
@@ -51,7 +54,7 @@ npm install                        # at repo root, one-time (chromium reuses the
 node tools/shoot-<feature>.mjs
 ```
 
-For normal iteration, start with `npm run check:pr -- --dry-run`, then run `npm run check:pr`. The router always runs the fast core contracts, unions only the browser/worker gates affected by the changed paths, and fails closed to `check:full` for unknown paths, verification tooling, dependency manifests, or an unresolved merge base. `npm run check` runs its isolated contracts with bounded parallelism (`CHEOMA_CHECK_JOBS`, default up to 4). Run `check:full` once before merging; it preserves the full Hanyang/continuous-frame coverage and adds a production build.
+For normal iteration, start with `npm run check:pr -- --dry-run`, then run `npm run check:pr`. The router selects the pure feature gates affected by the changed paths, unions the affected browser/worker gates, and fails closed to `check:full` for unknown paths, verification tooling, dependency manifests, or an unresolved merge base. Runners execute with bounded parallelism (`CHEOMA_CHECK_JOBS`, default up to 4). The commit boundary is `npm run check` (core invariants, ~20s) — `check:deep`/`check:full` are occasional sweeps, not per-round requirements.
 
 Canonical browser harnesses use `CHEOMA_BROWSER=auto`: they prefer an installed Chrome, which may use the host GPU, and fall back to Playwright's bundled Chromium. Use `CHEOMA_BROWSER=chrome` or `CHEOMA_BROWSER=chromium` to require one backend. Harnesses using this launcher log the selected browser and, when applicable, the WebGL renderer; never compare wall time across different backends. `check:worker` deliberately stays on Playwright-pinned Chromium because its byte goldens include browser-runtime floating-point behavior and it does not render WebGL.
 

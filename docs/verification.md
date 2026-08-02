@@ -242,6 +242,16 @@ renderer와 dispose를 확인하고, 마지막으로 실제 Vite 한양 앱의 �
 
 ### `npm run check`
 
+**게이트 대축소 (2026-08-02, 사용자 결정 "게이트들 대폭 축소하고 싶어 — 이대로는 작업 진척이 안 돼"):**
+`npm run check`는 이제 **차단 불변식 3종만** 돈다(`tools/lib/fast-checks.mjs#CORE_CHECKS`:
+`check-architecture` · `check-plan-contract` · `check-verification-runner`, 이후 `check:share` 체인 — 약 20초).
+커밋과 CI 배포를 막는 것은 이것뿐이다. 종전의 전체 순수 목록(~100개 기능 게이트)은
+`npm run check:deep`(`check-fast.mjs --deep`)으로 강등됐다 — **커밋을 막지 않는 opt-in**이며,
+도메인을 만지는 라운드가 `check:pr` 영향 라우팅 또는 개별 게이트 실행으로 돌린다. 게이트 파일과
+`FAST_CHECKS` 등록은 그대로라 라우팅·개별 실행·재승격(`CORE_CHECKS`에 추가)이 모두 가능하다.
+차단 코어에 게이트를 새로 넣는 것은 사용자 결정 사항이다. 아래 본문의 "`npm run check` 포함"
+서술들은 이 개정 이전 기준이며, 이제 `check:deep` 포함으로 읽어야 한다.
+
 `tools/check-fast.mjs`가 다음 계약을 독립 Node process로 격리해 제한 병렬 실행한다. 기본 동시성은 `min(4, availableParallelism)`이고 `CHEOMA_CHECK_JOBS=1`처럼 재현할 수 있다. 상세 출력은 선언 순서로 묶여 나오며 개별/전체 시간이 표시된다. 첫 실패는 즉시 알리고 새 검사를 더 배정하지 않되 이미 실행 중인 격리 process는 정리될 때까지 기다린다.
 
 로컬에서 전체 fast 계약을 자주 돌리는 라운드라면 `CHEOMA_CHECK_JOBS=8`을 권장한다. 10코어·32GB 머신에서 99개 계약(진행 중 라운드로 실패하던 `check-atmosphere-contract`·`check-cine-quality` 제외)을 순서를 바꿔 두 번씩 측정한 결과 4 jobs 295.1s/300.3s → 8 jobs 222.1s/210.7s로 약 27% 빠르고, 자식 process RSS 합의 최대는 2.3~2.9GB로 차이가 작다(2026-08-01 #38 실측). 다만 이득은 선형이 아니다 — 단일 최장 게이트(`check-creek` 약 147s, 다음이 `check-layout-contract` 약 141s)가 임계 경로라 그 아래로는 내려가지 않는다. **러너 기본값은 그대로 둔다**: CI와 저사양 머신을 감안한 값이고, 병렬도를 올리면 다른 에이전트의 하네스와 CPU를 다투어 같은 시점의 성능 수치를 못 쓰게 만든다.

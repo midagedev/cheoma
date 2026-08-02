@@ -1,5 +1,18 @@
 // Canonical list of browser-free contracts. The fast runner and changed-file
 // impact resolver share this list so routing cannot drift from execution.
+//
+// ── 게이트 대축소 (2026-08-02, 사용자 지시 "게이트들 대폭 축소하고 싶어, 이대로는 작업 진척이 안 돼") ──
+// `npm run check`(커밋·CI 게이트)는 아래 CORE_CHECKS 만 돌린다: 레포를 가로지르는 **불변식**
+// (계층 경계·계획 결정론·검증 러너 자기검사)만 커밋을 막는다. 나머지 기능별 수치 게이트 전체
+// (FAST_CHECKS)는 `npm run check:deep` 으로 강등 — 커밋을 막지 않는 opt-in 이며, 해당 도메인을
+// 만지는 라운드가 `check:pr`(영향 라우팅) 또는 개별 실행으로 돌린다. 파일은 삭제하지 않았으므로
+// 언제든 개별 게이트를 계약으로 되살릴 수 있다.
+export const CORE_CHECKS = Object.freeze([
+  './check-architecture.mjs',
+  './check-plan-contract.mjs',
+  './check-verification-runner.mjs',
+]);
+
 export const FAST_CHECKS = Object.freeze([
   './check-architecture.mjs',
   './check-assembly-contract.mjs',
