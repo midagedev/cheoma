@@ -5,10 +5,10 @@ import {
 } from './dronepath.js';
 import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 
-// 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103, 대문 진입 #150-J, 수동 조작 #33).
+// 시네마틱 데모 — 1인칭 골목 탐색 (태스크 #103, 대문 진입 #150-J, 수동 조작 #33, FPS 문법 #43).
 //   createWalker({ site, plan, heightAt }) → walker
-//     walker.setInput({ fwd, strafe, run })     지속 이동 의도. 놓을 때까지 유지된다.
-//       fwd/strafe ∈ [-1,1], run: true 면 달리기(2.8m/s).
+//     walker.setInput({ fwd, strafe, run, jump })  지속 이동 의도. 놓을 때까지 유지된다.
+//       fwd/strafe ∈ [-1,1] (strafe +1 = 오른쪽), run: true 면 달리기, jump: true 면 지상에서 도약.
 //     walker.look(dxPx, dyPx)                   포인터 이동 델타(px). 감도는 코어 소유(아래 상수).
 //     walker.lookRadians(dYaw, dPitch)          라디안 증분(감도 이미 적용된 경로·게이트용).
 //     walker.update(dt, input?) → { pos, dir }  input 을 주면 setInput + lookRadians(yaw/pitch) 와 동치.
@@ -37,12 +37,44 @@ import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const EYE = 1.6;
-const WALK = 1.4, RUN = 2.8;
 const BODY = 0.45;              // 몸 반경(담과의 이격)
 const DEG = Math.PI / 180;
+// ── 이동 속도(#43, 2026-08-02 사용자 지시 "기본 이동속도를 기존보다 한참 더 빠르게 … 좀 더 FPS
+//   문법을 따르면 좋겠네") ── 종전 1.4/2.8m/s 는 실측 보행 속도(사람 1.4m/s)라 물리적으로는 옳지만
+//   1인칭 조작에서는 마을 한 블록이 지루하게 길어진다. FPS 는 관례적으로 실측보다 3~4배 빠르다:
+//   Source 엔진 지상 상한 sv_maxspeed 320u/s = 6.10m/s, HL2 기본 보행 190u/s = 3.62m/s, 스프린트
+//   320u/s = 6.10m/s, Quake III 러닝 320u/s ≈ 8.1m/s. 그 밴드 안에서 걷기를 HL2 스프린트 아래,
+//   달리기를 Quake 러닝 아래로 잡는다(종전 대비 걷기 3.21배·달리기 2.68배).
+export const WALK_SPEED = 4.5;  // m/s — 기본 이동(Source 지상 상한 6.10 아래, HL2 보행 3.62 위)
+export const RUN_SPEED = 7.5;   // m/s — Shift 달리기(Quake III 러닝 ≈8.1 아래)
+const WALK = WALK_SPEED, RUN = RUN_SPEED;
+// 자동 산책(데모 클립) 속도는 종전값 유지 — #30 이 저작한 24°/s 회전·담장선 접근 리듬은 산책
+//   속도를 전제로 맞춰져 있고, 조작 속도 상향은 사용자 입력 경로에만 해당한다.
+const STROLL = 1.4;
 // ── 수동 조작 상수(#33) ── 값은 전부 즉답성 기준의 수치 근거를 갖는다. 미감이 아니라 지연 예산이다.
-export const MOVE_ACCEL = 14;   // m/s² — 정지→1.4m/s 0.100s, 정지→2.8m/s(달리기) 0.200s
-export const MOVE_DECEL = 20;   // m/s² — 1.4m/s→완전정지 0.070s, 2.8m/s→0 0.140s (관성 잔상 방지)
+//   #43 에서 최고속이 3배가 되면서 종전 램프(14/20)를 그대로 두면 걷기 정지 시간이 0.067s →
+//   0.233s 로 늘어(게이트 M3 실측) FPS 감이 죽는다. **도달·정지 시간**을 종전 예산에 맞춰
+//   재저작한다(비율 보존).
+export const MOVE_ACCEL = 45;   // m/s² — 정지→4.5m/s 0.100s, 정지→7.5m/s(달리기) 0.167s
+export const MOVE_DECEL = 75;   // m/s² — M3 실측 4.5→0 0.067s·0.100m, 7.5→0 0.100s·0.313m
+// ── 점프(#43) ── 지상에서만 발동하는 단일 도약. 높이는 한옥 수직 어휘로 저작한다:
+//   기단(hanok.js podiumH 기본 0.5m, 댓돌·섬돌은 그 아래)은 넘고, 담(wall-contract 의 조적 담
+//   최저값 = mud 1.7m × 0.88 × 0.96 = 1.44m)은 못 넘는 구간. 1.05m 는 기단 대비 +0.55m,
+//   최저 조적 담 대비 −0.39m 여유다. 충돌은 xz 2D(walk-solids)라 높이와 무관하게 담을 통과할 수
+//   없으므로 이 값은 "무엇을 뛰어넘는 동작으로 읽히는가"의 저작이고, 관통 금지는 별개 계약이다.
+//   중력 20m/s² 는 FPS 관례(Source sv_gravity 800u/s² = 15.24m/s²)의 밴드로, 실중력 9.81 을 쓰면
+//   같은 높이에서 체공이 0.93s 로 늘어져 점프가 둥실거린다.
+export const JUMP_HEIGHT = 1.05;   // m — 기단 0.5 ↑ / 최저 조적 담 1.44 ↓
+export const JUMP_GRAVITY = 20;    // m/s²
+export const JUMP_SPEED = Math.sqrt(2 * JUMP_GRAVITY * JUMP_HEIGHT);  // 6.481 m/s
+// 체공 중 방향 전환 감쇠 — 지상 가속의 30%(Source 계열 air accel 이 지상보다 훨씬 낮은 관례).
+//   입력이 없으면 세계 속도를 그대로 유지한다(공중 제동 금지: 관성이 점프의 물성이다).
+export const AIR_CONTROL = 0.3;
+// 접지 추종 스무딩(계단·성토 패드 단차 완화). 이 스무딩의 실효 단위는 시간이 아니라 **거리**다:
+//   지연 길이 = 속도 / rate. 종전 1.4m/s ÷ 8 = 0.175m 였는데, 속도만 3배로 올리고 rate 를 두면
+//   같은 섬돌 하나가 0.53m 에 걸쳐 뭉개져 시선이 지형에서 뜬 채로 걷는다(M9 눈높이 오차 79mm).
+//   같은 공간 지연 0.173m 를 유지하도록 4.5 / 0.175 ≈ 26 으로 재저작한다.
+export const GROUND_FOLLOW_RATE = 26;
 // 포인터 드래그 감도. 종전 App.svelte 가 쓰던 값을 그대로 코어로 옮긴 것이라 조작감은 불변이고,
 //   대신 노드에서 단언 가능해진다. 부호는 드래그(=화면을 잡아 끄는) 규약: dx>0 → yaw 감소.
 export const LOOK_YAW_PER_PX = 0.0026;    // rad/px = 0.149°/px
@@ -52,8 +84,10 @@ export const PITCH_LIMIT = 1.2;           // rad = 68.75° — 종전 수동 클
 // 목표 속도로의 선형 램프. 감속(0 으로 가거나 방향이 뒤집히거나 상한이 낮아질 때)은 더 센 비율을
 //   쓴다. 지수 스무딩과 달리 **정확히 target 에 도달**하므로 "정지 명령 후 t초 내 완전 정지"를
 //   부등식이 아니라 등식으로 단언할 수 있다.
-function rampTo(v, target, dt) {
-  const rate = (Math.abs(target) < Math.abs(v) || target * v < 0) ? MOVE_DECEL : MOVE_ACCEL;
+function rampTo(v, target, dt, fixedRate = 0) {
+  const rate = fixedRate > 0
+    ? fixedRate
+    : (Math.abs(target) < Math.abs(v) || target * v < 0) ? MOVE_DECEL : MOVE_ACCEL;
   const d = target - v;
   const step = rate * dt;
   return Math.abs(d) <= step ? target : v + Math.sign(d) * step;
@@ -312,18 +346,56 @@ export function createWalker({ site, plan, heightAt } = {}) {
     return Math.hypot(x - ox, z - oz);
   }
 
-  // 자유 이동 — 속도는 **로컬 축(전후·좌우)** 에 저장하고 방향은 매 프레임 현재 yaw 로 합성한다.
-  //   월드 속도를 관성으로 끌면 돌아설 때 옛 방향으로 미끄러진다(빙판). 로컬 저장은 회전을 즉시
-  //   반영하므로 짧은 램프의 즉답성을 지키면서 시작·정지의 뚝뚝 끊김만 없앤다.
+  // 시선 기준 축. forward = (sin yaw, 0, cos yaw), 오른쪽 = cross(forward, worldUp) = (−cos, 0, sin).
+  //   #43 이전에는 여기가 cross(worldUp, forward) = (cos, 0, −sin) 였다. 그 벡터는 **왼쪽**이라
+  //   D(strafe +1)가 좌로, A 가 우로 갔다(A/D 반전의 유일한 근원 — App.svelte 의 D=+1/A=−1 키
+  //   매핑과 CinematicOverlay 조이스틱 kx/JOY_R 은 둘 다 FPS 표준으로 이미 옳았다).
+  const rightX = (a) => -Math.cos(a);
+  const rightZ = (a) => Math.sin(a);
+
+  // 자유 이동 — 접지 중 속도는 **로컬 축(전후·좌우)** 에 저장하고 방향은 매 프레임 현재 yaw 로
+  //   합성한다. 월드 속도를 관성으로 끌면 돌아설 때 옛 방향으로 미끄러진다(빙판). 로컬 저장은
+  //   회전을 즉시 반영하므로 짧은 램프의 즉답성을 지키면서 시작·정지의 뚝뚝 끊김만 없앤다.
+  //   체공 중에는 반대다: 속도를 **월드 축**으로 옮겨 든다. 로컬 저장을 그대로 두면 공중에서
+  //   뒤돌아보는 것만으로 이동 방향이 따라 꺾여(포물선이 시선을 따라다녀) 도약이 물체가 아니라
+  //   커서처럼 읽힌다. 이륙에서 로컬→월드, 착지에서 월드→로컬로 환산해 운동량은 연속이다.
   function freeStep(dt) {
     let f = clamp(cur.fwd, -1, 1), s = clamp(cur.strafe, -1, 1);
     const mag = Math.hypot(f, s); if (mag > 1) { f /= mag; s /= mag; }
     const top = cur.run ? RUN : WALK;
+    const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
+    const rdx = rightX(yaw), rdz = rightZ(yaw);
+
+    // 이륙 — 접지 중이고 점프 입력이 있을 때만. 체공 중 재입력은 무시된다(이단 점프 금지).
+    if (!airborne && cur.jump) {
+      airborne = true;
+      vy = JUMP_SPEED;
+      wvx = fdx * vf + rdx * vs;
+      wvz = fdz * vf + rdz * vs;
+    }
+
+    if (airborne) {
+      // 입력이 있을 때만 월드 속도를 목표 방향으로 끈다. 무입력 체공은 관성 유지(공중 제동 금지).
+      if (mag > 0) {
+        const air = MOVE_ACCEL * AIR_CONTROL;
+        wvx = rampTo(wvx, (fdx * f + rdx * s) * top, dt, air);
+        wvz = rampTo(wvz, (fdz * f + rdz * s) * top, dt, air);
+        const sp = Math.hypot(wvx, wvz);
+        if (sp > RUN) { const k = RUN / sp; wvx *= k; wvz *= k; }
+      }
+      tryStep(wvx * dt, wvz * dt);
+      return;
+    }
+
     vf = rampTo(vf, f * top, dt);
     vs = rampTo(vs, s * top, dt);
+    // 두 축은 독립 램프라 방향을 꺾는 과도구간에 합속력이 top 을 넘을 수 있다(전진축이 아직
+    //   최고속인 채로 횡축이 붙는다 — 대각 정상상태를 보는 M4 로는 안 잡힌다). 절대 상한 RUN 으로
+    //   눌러 프레임 이동량이 RUN·dt 를 넘지 않게 한다(M10 터널링 상한의 근거). Shift 를 놓는
+    //   경우는 top 이 아니라 RUN 으로 자르므로 감속이 스냅되지 않고 rampTo 가 그대로 처리한다.
+    const sp = Math.hypot(vf, vs);
+    if (sp > RUN) { const k = RUN / sp; vf *= k; vs *= k; }
     if (vf === 0 && vs === 0) return;
-    const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
-    const rdx = Math.cos(yaw), rdz = -Math.sin(yaw);
     tryStep((fdx * vf + rdx * vs) * dt, (fdz * vf + rdz * vs) * dt);
   }
 
@@ -361,7 +433,7 @@ export function createWalker({ site, plan, heightAt } = {}) {
       ? 0
       : clamp((Math.cos(turnError) - Math.cos(AUTO_MOVE_CONE)) / (1 - Math.cos(AUTO_MOVE_CONE)), 0, 1);
     const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
-    tryStep(fdx * WALK * dt * alignment, fdz * WALK * dt * alignment);
+    tryStep(fdx * STROLL * dt * alignment, fdz * STROLL * dt * alignment);
 
     // 종점 판정은 **투영된 호길이**로 한다. 한 번 뒤집으면 밴드를 벗어날 때까지 재무장하지 않아
     //   경계에서 좌우로 떠는 일이 없다.
@@ -377,14 +449,17 @@ export function createWalker({ site, plan, heightAt } = {}) {
     }
   }
 
-  const cur = { fwd: 0, strafe: 0, run: false };
-  let vf = 0, vs = 0;               // 로컬 전후·좌우 속도(m/s)
+  const cur = { fwd: 0, strafe: 0, run: false, jump: false };
+  let vf = 0, vs = 0;               // 접지 중 로컬 전후·좌우 속도(m/s)
+  let wvx = 0, wvz = 0;             // 체공 중 월드 수평 속도(m/s)
+  let vy = 0, airborne = false;     // 수직 속도(m/s)·체공 여부
   let pendYaw = 0, pendPitch = 0;   // 미소비 시선 증분(rad)
 
   function setInput(partial = {}) {
     if ('fwd' in partial) cur.fwd = partial.fwd || 0;
     if ('strafe' in partial) cur.strafe = partial.strafe || 0;
     if ('run' in partial) cur.run = !!partial.run;
+    if ('jump' in partial) cur.jump = !!partial.jump;
   }
 
   function update(dt, input) {
@@ -405,11 +480,30 @@ export function createWalker({ site, plan, heightAt } = {}) {
     const rr = Math.hypot(x - C.x, z - C.z);
     if (rr > MAXR) { const k = MAXR / rr; x = C.x + (x - C.x) * k; z = C.z + (z - C.z) * k; }
 
-    // 접지: 목표 시선고로 지수 스무딩(단차 완화) + 침하 방지 하한.
     const ground = H(x, z);
-    const desired = ground + EYE;
-    eyeY += (desired - eyeY) * (1 - Math.exp(-dt * 8));
-    if (eyeY < ground + 0.1) eyeY = ground + 0.1;
+    if (airborne) {
+      // 포물선 — 등가속 **정확적분**(y += v·dt − ½g·dt², v −= g·dt)이라 샘플이 연속해 위에 정확히
+      //   놓인다. 심플렉틱 오일러(v 먼저 갱신)를 쓰면 정점이 v₀·dt/2 = 54mm 낮아져 저작한 높이와
+      //   실제 도달 높이가 갈린다 — 그러면 "기단은 넘고 담은 못 넘는다"를 수치로 단언할 수 없다.
+      eyeY += vy * dt - 0.5 * JUMP_GRAVITY * dt * dt;
+      vy -= JUMP_GRAVITY * dt;
+      const landY = ground + EYE;
+      if (vy <= 0 && eyeY <= landY) {
+        // 착지 — 눈높이를 지형에 클램프하고 월드 수평 속도를 로컬 축으로 되돌린다(운동량 연속).
+        eyeY = landY;
+        vy = 0;
+        airborne = false;
+        const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
+        vf = wvx * fdx + wvz * fdz;
+        vs = wvx * rightX(yaw) + wvz * rightZ(yaw);
+        wvx = wvz = 0;
+      }
+    } else {
+      // 접지: 목표 시선고로 지수 스무딩(단차 완화) + 침하 방지 하한.
+      const desired = ground + EYE;
+      eyeY += (desired - eyeY) * (1 - Math.exp(-dt * GROUND_FOLLOW_RATE));
+      if (eyeY < ground + 0.1) eyeY = ground + 0.1;
+    }
 
     pos.set(x, eyeY, z);
     dir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).normalize();
@@ -424,17 +518,28 @@ export function createWalker({ site, plan, heightAt } = {}) {
     get yaw() { return yaw; }, set yaw(v) { yaw = v; heading.reset(v); },
     get pitch() { return pitch; }, set pitch(v) { pitch = clamp(v, -PITCH_LIMIT, PITCH_LIMIT); },
     get autoStroll() { return auto; },
-    startAutoStroll() { auto = true; heading.reset(yaw); vf = vs = 0; },
+    startAutoStroll() { auto = true; heading.reset(yaw); vf = vs = wvx = wvz = vy = 0; airborne = false; },
     stopAutoStroll() {
       auto = false; heading.reset(yaw);
-      cur.fwd = cur.strafe = 0; cur.run = false; vf = vs = 0; pendYaw = pendPitch = 0;
+      cur.fwd = cur.strafe = 0; cur.run = cur.jump = false;
+      vf = vs = wvx = wvz = vy = 0; airborne = false; pendYaw = pendPitch = 0;
     },
-    setPos(nx, nz) { const p = nudgeOut(nx, nz); x = p.x; z = p.z; eyeY = H(x, z) + EYE; pos.set(x, eyeY, z); },
+    setPos(nx, nz) {
+      const p = nudgeOut(nx, nz); x = p.x; z = p.z; eyeY = H(x, z) + EYE; pos.set(x, eyeY, z);
+      vy = 0; airborne = false; wvx = wvz = 0;
+    },
     lookAt() { return pos.clone().add(dir); },
     // 검증·엔진 배선용 디버그/조회 훅.
     eyeHeight: EYE, bodyRadius: BODY, maxRadius: MAXR, center: { x: C.x, z: C.z },
-    speed() { return Math.hypot(vf, vs); },
-    velocity() { return { fwd: vf, strafe: vs }; },
+    walkSpeed: WALK, runSpeed: RUN, jumpHeight: JUMP_HEIGHT, gravity: JUMP_GRAVITY,
+    speed() { return airborne ? Math.hypot(wvx, wvz) : Math.hypot(vf, vs); },
+    velocity() {
+      if (!airborne) return { fwd: vf, strafe: vs };
+      const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
+      return { fwd: wvx * fdx + wvz * fdz, strafe: wvx * rightX(yaw) + wvz * rightZ(yaw) };
+    },
+    grounded() { return !airborne; },
+    verticalSpeed() { return vy; },
     groundClearance() { return eyeY - H(x, z); },
     isColliding() { return collides(x, z); },
     outsideBoundary() { return Math.hypot(x - C.x, z - C.z) > MAXR + 1e-3; },

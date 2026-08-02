@@ -4284,7 +4284,8 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       isActive: () => demo.active,
       available: () => cineAvailable(),
       // 1인칭 입력 피드(WASD·방향키·드래그·가상 조이스틱). walk 모드일 때만 반영.
-      //   { fwd, strafe, run }  지속 이동 의도 — 다시 보낼 때까지 유지된다(놓으면 0 을 보낼 것).
+      //   { fwd, strafe, run, jump }  지속 이동 의도 — 다시 보낼 때까지 유지된다(놓으면 0 을 보낼 것).
+      //     strafe +1 = 오른쪽(D), jump 는 접지 중에만 발동한다(#43).
       //   { lookDX, lookDY }    포인터 이동 델타(px). 감도는 코어 소유.
       //   { yaw, pitch }        라디안 증분(하위 호환).
       input: (partial = {}) => demoRuntime.input(partial),

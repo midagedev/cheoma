@@ -1145,7 +1145,7 @@
       const strafe = keyStrafe || walkJoy.strafe;
       // 놓은 프레임에도 0 을 보내야 walker 가 멈춘다 — 이동 의도는 지속 상태다.
       engine.cine.input({
-        fwd, strafe, run: walkKeys.has('shift'),
+        fwd, strafe, run: walkKeys.has('shift'), jump: walkKeys.has(' '),
         lookDX: walkLookDX, lookDY: walkLookDY,
       });
       walkLookDX = 0; walkLookDY = 0;
@@ -1165,7 +1165,9 @@
     walkLookPid = null;
     walkJoy = { fwd: 0, strafe: 0 };
   }
-  const WALK_MOVE_KEYS = ['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+  // Space(#43)는 점프다. 지속 키로 수집해 매 프레임 jump 상태를 보내고(코어가 접지에서만 발동),
+  //   preventDefault 로 페이지 스크롤을 막는다 — walk 중 Space 가 화면을 밀어내면 조작이 끊긴다.
+  const WALK_MOVE_KEYS = ['w', 'a', 's', 'd', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
   function onWalkKey(e) {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (WALK_MOVE_KEYS.includes(k)) { walkKeys.add(k); e.preventDefault(); }

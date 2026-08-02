@@ -29,6 +29,23 @@
 //   R1  F 런타임 배선: cine.start('walk') 직후 walker 가 자동 산책이 아니고 무입력으로 정지해 있으며,
 //         input({lookDX}) 한 번이 정확히 한 번만 회전에 반영된다(카메라·컨트롤은 스텁).
 //
+// ── #43 FPS 문법 (2026-08-02 사용자 지시: "도보 뷰에서 WASD에 좌우가 반전되어 있고, 스페이스 점프,
+//    그리고 기본 이동속도를 기존보다 한참 더 빠르게 할 것. 이건 좀 더 FPS 문법을 따르면 좋겠네.")
+//    귀속: 아래 M2·M3 의 속도·램프 재핀과 M13~M15·R2 신규 단언은 그 지시가 근거다. 파생 근거는
+//    walker.js 상수 주석의 FPS 레퍼런스(Source/HL2/Quake III)와 한옥 수직 어휘(기단 0.5m / 조적 담
+//    최저 1.44m). FAIL-first 는 2026-08-02 확인: 변경 전 walker.js 로 되돌리면 M2·M3·M13·M14·M15·R2
+//    가 실패하고(부호·속도·점프 전 항목), 나머지는 그대로 통과한다.
+//   M13 F 횡이동 부호 = FPS 표준. strafe +1(=D) 이 시선 기준 오른쪽 cross(forward, worldUp) 과
+//         **정확히** 같은 방향이다. 변경 전 소스는 cross(worldUp, forward)= 왼쪽이라 dot = −1 로 실패.
+//   M14 F 점프 포물선: 정점 높이가 저작값과 등가속 정확적분으로 일치하고(±1mm), 체공 시간이 2v₀/g
+//         한 프레임 이내이며, 착지 후 눈높이가 지형 클램프로 복귀한다. 기단(0.5m)은 넘고 조적 담
+//         최저(1.44m)는 못 넘는다. 이단 점프 없음(체공 중 재입력이 정점을 바꾸지 못한다).
+//   M15 F 체공 관성: 무입력 체공은 세계 수평 속도를 유지하고(공중 제동 금지), 공중에서 뒤돌아봐도
+//         포물선의 진행 방향이 시선을 따라가지 않는다. 방향 전환은 AIR_CONTROL 감쇠를 따른다.
+//   M10+  점프를 섞은 장기 주행에서도 충돌 0·경계 이탈 0·터널링 0(점프 중 벽 관통 금지).
+//   R2  F 런타임 배선: input({jump:true}) 가 walker 를 실제로 띄우고(눈높이 여유 > 눈높이),
+//         input({strafe:1}) 이 오른쪽으로 보낸다.
+//
 // 실행: node tools/check-walk-control.mjs
 
 import { Buffer } from 'node:buffer';
@@ -45,7 +62,12 @@ const THREE_ADDONS = join(ROOT, 'app/node_modules/three/examples/jsm');
 
 const DT = 1 / 60;
 const DEG = Math.PI / 180;
-const WALK = 1.4, RUN = 2.8;
+// 저작값을 게이트가 직접 들고 있다(모듈에서 import 하면 값이 바뀌어도 자기 자신과 일치해 통과한다).
+// 아래 M0 이 이 상수와 walker 의 export 가 같은지 대조한다.
+const WALK = 4.5, RUN = 7.5;
+const JUMP_H = 1.05, GRAVITY = 20;
+const PODIUM_TOP = 0.5;         // hanok.js podiumH 기본 — 기단 상면
+const MASONRY_WALL_MIN = 1.7 * 0.88 * 0.96;   // wall-contract 조적 담 최저 실효 높이 = 1.436m
 
 const invariant = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -67,13 +89,31 @@ async function bundle(contents, sourcefile) {
 }
 
 const M = await bundle(
-  "export * from './src/api/cinematic.js';\nexport { createCinematicRuntime } from './app/src/engine/cinematic-runtime.js';\nexport * as THREE from 'three';\n",
+  "export * from './src/api/cinematic.js';\n"
+  + "export { AIR_CONTROL, JUMP_GRAVITY, JUMP_HEIGHT, JUMP_SPEED, RUN_SPEED, WALK_SPEED } from './src/cinematic/walker.js';\n"
+  + "export { createCinematicRuntime } from './app/src/engine/cinematic-runtime.js';\nexport * as THREE from 'three';\n",
   'walk-control-entry.js',
 );
 const {
-  createWalker, createCinematicRuntime, THREE,
+  buildWalkSolids, createWalker, createCinematicRuntime, THREE,
   LOOK_PITCH_PER_PX, LOOK_YAW_PER_PX, MOVE_ACCEL, MOVE_DECEL, PITCH_LIMIT,
+  AIR_CONTROL, JUMP_GRAVITY, JUMP_HEIGHT, JUMP_SPEED, RUN_SPEED, WALK_SPEED,
 } = M;
+
+// ── M0 저작값 핀 ── 게이트 상수 = 코어 export. 속도·점프 재저작은 이 줄까지 같이 고쳐야 한다.
+invariant(WALK_SPEED === WALK && RUN_SPEED === RUN,
+  `M0: 이동 속도 저작값 불일치 — walker ${WALK_SPEED}/${RUN_SPEED} vs 게이트 ${WALK}/${RUN}`);
+invariant(JUMP_HEIGHT === JUMP_H && JUMP_GRAVITY === GRAVITY,
+  `M0: 점프 저작값 불일치 — walker ${JUMP_HEIGHT}m/${JUMP_GRAVITY} vs 게이트 ${JUMP_H}m/${GRAVITY}`);
+invariant(Math.abs(JUMP_SPEED - Math.sqrt(2 * GRAVITY * JUMP_H)) < 1e-12,
+  `M0: 도약 초속 ${JUMP_SPEED} ≠ √(2gh) ${Math.sqrt(2 * GRAVITY * JUMP_H)}`);
+// 걷기는 종전 1.4m/s 의 3배 이상이어야 한다(사용자 지시 "한참 더 빠르게").
+invariant(WALK_SPEED >= 1.4 * 3, `M0: 걷기 ${WALK_SPEED}m/s 가 종전 1.4m/s 의 3배에 못 미친다`);
+// 점프는 기단 위·조적 담 아래.
+invariant(JUMP_HEIGHT > PODIUM_TOP + 0.3,
+  `M0: 점프 ${JUMP_HEIGHT}m 가 기단 ${PODIUM_TOP}m 를 여유 있게 넘지 못한다`);
+invariant(JUMP_HEIGHT < MASONRY_WALL_MIN - 0.2,
+  `M0: 점프 ${JUMP_HEIGHT}m 가 조적 담 최저 ${MASONRY_WALL_MIN.toFixed(3)}m 에 너무 가깝다`);
 
 // ── 평지 합성 픽스처: 이동 해석해를 장애물 간섭 없이 본다 ──
 const flatSite = {
@@ -127,8 +167,9 @@ for (const [label, run, top] of [['walk', false, WALK], ['run', true, RUN]]) {
 }
 
 // ── M3 정지 시간 상한 ──
-// 감속은 DECEL(20m/s²) 선형이므로 정지 시간 = top/DECEL + 이산화 한 프레임 이내.
-//   걷기 1.4m/s → 0.070s(이산 0.083s), 달리기 2.8m/s → 0.140s(이산 0.150s).
+// 감속은 DECEL(75m/s²) 선형이므로 정지 시간 = top/DECEL + 이산화 한 프레임 이내.
+//   걷기 4.5m/s → 0.060s(이산 0.067s), 달리기 7.5m/s → 0.100s(이산 0.117s). #43 에서 최고속이
+//   3배가 됐어도 정지 시간은 0.1s대에 묶어 둔다 — 늘어지면 FPS 즉답성이 죽는다.
 const m3 = (() => {
   const stopFrom = (run) => {
     const w = flatWalker();
@@ -137,6 +178,7 @@ const m3 = (() => {
     for (let i = 0; i < 120; i++) w.update(DT);
     const top = run ? RUN : WALK;
     invariant(Math.abs(w.speed() - top) < 1e-9, `M3: top speed ${w.speed()} ≠ ${top}`);
+    const zRelease = w.pos.z;
     w.setInput({ fwd: 0, strafe: 0, run: false });
     let frames = 0;
     while (w.speed() > 0 && frames < 60) { w.update(DT); frames++; }
@@ -144,12 +186,17 @@ const m3 = (() => {
     const x0 = w.pos.x, z0 = w.pos.z;
     for (let i = 0; i < 180; i++) w.update(DT);
     invariant(Math.hypot(w.pos.x - x0, w.pos.z - z0) === 0, 'M3: 정지 후에도 위치가 변한다');
-    return frames * DT;
+    return { t: frames * DT, dist: Math.abs(z0 - zRelease) };
   };
-  const walkStop = stopFrom(false), runStop = stopFrom(true);
-  invariant(walkStop <= 0.10 + 1e-9, `M3: 걷기 정지까지 ${walkStop.toFixed(3)}s > 0.100s 상한`);
-  invariant(runStop <= 0.16 + 1e-9, `M3: 달리기 정지까지 ${runStop.toFixed(3)}s > 0.160s 상한`);
-  return { walkStop: +walkStop.toFixed(4), runStop: +runStop.toFixed(4), decel: MOVE_DECEL };
+  const walk = stopFrom(false), run = stopFrom(true);
+  const walkStop = walk.t, runStop = run.t;
+  invariant(walkStop <= 0.08 + 1e-9, `M3: 걷기 정지까지 ${walkStop.toFixed(3)}s > 0.080s 상한`);
+  invariant(runStop <= 0.13 + 1e-9, `M3: 달리기 정지까지 ${runStop.toFixed(3)}s > 0.130s 상한`);
+  return {
+    walkStop: +walkStop.toFixed(4), runStop: +runStop.toFixed(4),
+    walkStopDist: +walk.dist.toFixed(4), runStopDist: +run.dist.toFixed(4),
+    decel: MOVE_DECEL,
+  };
 })();
 
 // ── M4 대각 정규화 ──
@@ -237,7 +284,7 @@ const m10 = (() => {
   // 결정론 시퀀스(LCG) — 무작위 조작을 재현 가능하게 흉내낸다.
   let s = 123456789 >>> 0;
   const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-  let collisions = 0, outside = 0, maxStep = 0;
+  let collisions = 0, outside = 0, maxStep = 0, airFrames = 0;
   const capStep = RUN * DT * 1.0001 + 1e-9;
   let px = w.pos.x, pz = w.pos.z;
   for (let i = 0; i < 7200; i++) {                 // 120s
@@ -246,10 +293,14 @@ const m10 = (() => {
         fwd: [1, 1, 1, 0, -1][Math.floor(rnd() * 5)],
         strafe: [0, 0, 1, -1][Math.floor(rnd() * 4)],
         run: rnd() < 0.3,
+        // #43: 점프를 섞는다. 체공 중 수평은 월드 속도라 접지와 다른 코드 경로다 — 그 경로에서도
+        //   담 관통·터널링이 0 이어야 한다(높이 없는 2D solid 라 점프가 면제를 주지 않는다).
+        jump: rnd() < 0.25,
       });
       w.look((rnd() - 0.5) * 220, (rnd() - 0.5) * 60);
     }
     w.update(DT);
+    if (!w.grounded()) airFrames++;
     if (w.isColliding()) collisions++;
     if (w.outsideBoundary()) outside++;
     maxStep = Math.max(maxStep, Math.hypot(w.pos.x - px, w.pos.z - pz));
@@ -259,7 +310,47 @@ const m10 = (() => {
   invariant(outside === 0, `M10: 분지 경계 이탈 ${outside} 프레임`);
   invariant(maxStep <= capStep,
     `M10: 프레임 이동 ${maxStep.toFixed(5)}m > 상한 ${capStep.toFixed(5)}m (터널링)`);
-  return { frames: 7200, collisions, outside, maxStep: +maxStep.toFixed(5) };
+  invariant(airFrames > 600, `M10: 체공 프레임 ${airFrames} — 점프 경로가 실질적으로 실행되지 않았다`);
+  return {
+    frames: 7200, collisions, outside, maxStep: +maxStep.toFixed(5), airFrames,
+  };
+})();
+
+// ── M10b 담을 향해 달리며 점프해도 관통하지 않는다 ──
+// 실제 마을 담 solid 하나를 골라 법선 바깥에서 정면으로 돌진 + 점프. 충돌 프레임 0 이고, 담
+//   반대편으로 넘어가지 않는다(부호 반전 0). 무작위 주행이 우연히 놓칠 수 있는 결정론 픽스처다.
+const m10b = (() => {
+  const plan = planVillage({ scale: 'village', seed: 20260716, includePalace: false, includeTemple: false });
+  const site = plan.site;
+  const solids = buildWalkSolids(plan, (x, z) => site.heightAt(x, z));
+  const wall = solids.find((s) => s.kind === 'wall' && s.hd > 0.1);
+  invariant(!!wall, 'M10b: 담 solid 를 찾지 못했다(픽스처 무효)');
+  // OBB 로컬 +z(두께 축)의 월드 방향 — pointHitsWalkSolid 의 lz = dx·sin + dz·cos 와 같은 축.
+  const nx = wall.sin, nz = wall.cos;
+  const standoff = wall.hd + 0.45 + 1.4;
+  const w = createWalker({ site, plan, heightAt: (x, z) => site.heightAt(x, z) });
+  w.setPos(wall.cx + nx * standoff, wall.cz + nz * standoff);
+  invariant(!w.isColliding(), 'M10b: 시작 지점이 이미 solid 안이다(픽스처 무효)');
+  const side0 = Math.sign((w.pos.x - wall.cx) * nx + (w.pos.z - wall.cz) * nz);
+  w.yaw = Math.atan2(-nx, -nz);                    // 담을 정면으로
+  w.setInput({ fwd: 1, strafe: 0, run: true, jump: true });
+  let collisions = 0, crossed = 0, air = 0, closest = Infinity;
+  for (let i = 0; i < 360; i++) {                  // 6s
+    w.update(DT);
+    if (!w.grounded()) air++;
+    if (w.isColliding()) collisions++;
+    const proj = (w.pos.x - wall.cx) * nx + (w.pos.z - wall.cz) * nz;
+    if (Math.sign(proj) !== side0) crossed++;
+    closest = Math.min(closest, Math.abs(proj));
+  }
+  invariant(collisions === 0, `M10b: 점프 돌진 중 담 관통 ${collisions} 프레임`);
+  invariant(crossed === 0, `M10b: 점프로 담 반대편으로 ${crossed} 프레임 넘어갔다`);
+  invariant(air > 0, 'M10b: 점프가 발동하지 않았다(픽스처 무효)');
+  invariant(closest >= wall.hd, `M10b: 담 중심선까지 ${closest.toFixed(3)}m < 반두께 ${wall.hd.toFixed(3)}m`);
+  return {
+    airFrames: air, collisions, crossed,
+    closest: +closest.toFixed(3), wallHalf: +wall.hd.toFixed(3),
+  };
 })();
 
 // ── M11 자동 산책은 명시 호출로만 ──
@@ -288,6 +379,128 @@ const m10 = (() => {
     && Math.abs(a.yaw - b.yaw) < 1e-12 && Math.abs(a.pitch - b.pitch) < 1e-12,
     'M12: update(dt,input) 하위 호환 경로가 setInput/lookRadians 와 다른 결과를 낸다');
 }
+
+// ── M13 횡이동 부호(FPS 표준) ──
+// forward = (sin yaw, 0, cos yaw), worldUp = +Y 인 오른손 좌표계에서 오른쪽은 cross(forward, up)
+//   = (−cos yaw, 0, sin yaw) 다. strafe +1(=D 키)이 정확히 그 방향이어야 한다. 변경 전 소스는
+//   cross(up, forward)= 반대 벡터를 써서 아래 dot 이 −1 이 된다(A/D 반전의 근원).
+const m13 = (() => {
+  const rows = [];
+  for (const yaw of [0, Math.PI / 2, -Math.PI / 3, 2.4]) {
+    const w = flatWalker();
+    w.yaw = yaw;
+    const x0 = w.pos.x, z0 = w.pos.z;
+    w.setInput({ fwd: 0, strafe: 1 });
+    for (let i = 0; i < 60; i++) w.update(DT);
+    const mx = w.pos.x - x0, mz = w.pos.z - z0;
+    const ml = Math.hypot(mx, mz);
+    invariant(ml > 0.1, `M13: strafe 입력에 이동이 없다 (yaw ${(yaw / DEG).toFixed(1)}°)`);
+    const dot = (mx / ml) * (-Math.cos(yaw)) + (mz / ml) * Math.sin(yaw);
+    invariant(dot > 1 - 1e-9,
+      `M13: yaw ${(yaw / DEG).toFixed(1)}° 에서 strafe +1(D) 이 오른쪽이 아니다 (dot ${dot.toFixed(6)}${dot < -0.9 ? ' — 좌우 반전' : ''})`);
+    rows.push({ yawDeg: +(yaw / DEG).toFixed(1), dot: +dot.toFixed(6) });
+  }
+  // A(=strafe −1)는 정확히 반대여야 한다(부호 이중 반전·비대칭 금지).
+  const a = flatWalker(); a.yaw = 0.7;
+  const b = flatWalker(); b.yaw = 0.7;
+  const ax0 = a.pos.x, az0 = a.pos.z, bx0 = b.pos.x, bz0 = b.pos.z;
+  a.setInput({ strafe: 1 }); b.setInput({ strafe: -1 });
+  for (let i = 0; i < 60; i++) { a.update(DT); b.update(DT); }
+  invariant(Math.abs((a.pos.x - ax0) + (b.pos.x - bx0)) < 1e-9
+    && Math.abs((a.pos.z - az0) + (b.pos.z - bz0)) < 1e-9,
+    'M13: A 와 D 가 정확히 반대 방향이 아니다');
+  return rows;
+})();
+
+// ── M14 점프 포물선 ──
+// 등가속 정확적분이므로 샘플이 연속해 위에 놓인다: 정점 = JUMP_HEIGHT (프레임 이산화로 최대
+//   g·dt²/8 = 0.7mm 미달), 체공 = 2v₀/g 의 한 프레임 이내. 착지 후 눈높이는 지형 클램프로 복귀.
+const m14 = (() => {
+  const w = flatWalker();
+  const base = w.pos.y;                            // 평지 = ground + EYE
+  invariant(w.grounded(), 'M14: 생성 직후가 접지 상태가 아니다');
+  w.setInput({ jump: true });
+  let peak = 0, frames = 0;
+  w.update(DT);
+  invariant(!w.grounded(), 'M14: 점프 입력 후에도 접지 상태다(도약하지 않음)');
+  while (!w.grounded() && frames < 600) {
+    peak = Math.max(peak, w.pos.y - base);
+    // 체공 중 재입력은 무시되어야 한다(이단 점프 금지) — 매 프레임 jump 를 계속 눌러 둔다.
+    w.update(DT);
+    frames++;
+  }
+  const airTime = (frames + 1) * DT;
+  const analytic = 2 * JUMP_SPEED / GRAVITY;
+  invariant(Math.abs(peak - JUMP_H) < 0.001,
+    `M14: 정점 ${peak.toFixed(4)}m ≠ 저작값 ${JUMP_H}m (오차 ${Math.abs(peak - JUMP_H).toFixed(5)}m)`);
+  invariant(airTime >= analytic - DT && airTime <= analytic + 2 * DT,
+    `M14: 체공 ${airTime.toFixed(4)}s ∉ [${(analytic - DT).toFixed(4)}, ${(analytic + 2 * DT).toFixed(4)}]s (해석해 ${analytic.toFixed(4)}s)`);
+  invariant(Math.abs(w.pos.y - base) < 1e-9,
+    `M14: 착지 후 눈높이 ${w.pos.y.toFixed(4)} ≠ 지형 클램프 ${base.toFixed(4)}`);
+  // 저작 의도: 기단은 넘고 조적 담은 못 넘는다.
+  invariant(peak > PODIUM_TOP, `M14: 정점 ${peak.toFixed(3)}m 가 기단 ${PODIUM_TOP}m 를 못 넘는다`);
+  invariant(peak < MASONRY_WALL_MIN,
+    `M14: 정점 ${peak.toFixed(3)}m 가 조적 담 최저 ${MASONRY_WALL_MIN.toFixed(3)}m 를 넘는다`);
+  // 이단 점프 금지 — 체공 중 최고점을 지난 뒤 다시 눌러도 정점이 갱신되지 않는다.
+  const w2 = flatWalker();
+  const base2 = w2.pos.y;
+  w2.setInput({ jump: true });
+  for (let i = 0; i < 30; i++) w2.update(DT);
+  const midY = w2.pos.y;
+  w2.setInput({ jump: false }); w2.update(DT); w2.setInput({ jump: true });
+  let peak2 = 0, guard = 0;
+  while (!w2.grounded() && guard++ < 600) { peak2 = Math.max(peak2, w2.pos.y - base2); w2.update(DT); }
+  invariant(peak2 < JUMP_H + 1e-9,
+    `M14: 체공 중 재입력이 이단 점프를 만들었다 (정점 ${peak2.toFixed(3)}m > ${JUMP_H}m, 중간고 ${(midY - base2).toFixed(3)}m)`);
+  return {
+    peak: +peak.toFixed(4), authored: JUMP_H,
+    airTime: +airTime.toFixed(4), analyticAirTime: +analytic.toFixed(4),
+    v0: +JUMP_SPEED.toFixed(4),
+  };
+})();
+
+// ── M15 체공 관성 ──
+// (a) 무입력 체공은 세계 수평 속도를 유지한다(공중 제동 금지).
+// (b) 공중에서 뒤돌아봐도 포물선의 진행 방향이 시선을 따라가지 않는다. 접지 속도는 로컬 축이라
+//     회전이 즉시 반영되지만(M8), 체공에서 같은 규칙을 쓰면 도약이 시선을 따라 휘어 물성이 죽는다.
+const m15 = (() => {
+  const w = flatWalker();
+  w.yaw = 0;
+  w.setInput({ fwd: 1, run: false });
+  for (let i = 0; i < 120; i++) w.update(DT);      // +z 최고속
+  const vTakeoff = w.speed();
+  w.setInput({ fwd: 0, strafe: 0, jump: true });
+  w.update(DT);
+  w.setInput({ jump: false });                     // 이후 무입력 체공
+  const zA = w.pos.z;
+  for (let i = 0; i < 12; i++) w.update(DT);
+  const drift = (w.pos.z - zA) / (12 * DT);
+  invariant(Math.abs(drift - vTakeoff) < 1e-6,
+    `M15: 무입력 체공 수평속도 ${drift.toFixed(4)} ≠ 이륙 속도 ${vTakeoff.toFixed(4)} (공중 제동)`);
+  // 시선을 180° 돌려도 진행 방향 유지.
+  w.yaw = Math.PI;
+  const zB = w.pos.z;
+  for (let i = 0; i < 6; i++) w.update(DT);
+  invariant(w.pos.z - zB > 0,
+    `M15: 공중에서 뒤돌아보자 진행 방향이 뒤집혔다 (Δz ${(w.pos.z - zB).toFixed(5)})`);
+  // 방향 전환은 AIR_CONTROL 감쇠를 따른다 — 같은 시간 지상 가속의 30%.
+  const w2 = flatWalker();
+  w2.yaw = 0;
+  w2.setInput({ jump: true });
+  w2.update(DT);
+  w2.setInput({ jump: false, fwd: 1 });
+  const n = 6;
+  for (let i = 0; i < n; i++) w2.update(DT);
+  const gained = w2.speed();
+  const expected = MOVE_ACCEL * AIR_CONTROL * n * DT;
+  invariant(Math.abs(gained - expected) < 1e-6,
+    `M15: 체공 가속 ${gained.toFixed(4)}m/s ≠ MOVE_ACCEL·AIR_CONTROL·t ${expected.toFixed(4)}m/s`);
+  return {
+    airControl: AIR_CONTROL,
+    driftKept: +drift.toFixed(4),
+    airAccel: +(MOVE_ACCEL * AIR_CONTROL).toFixed(2),
+  };
+})();
 
 // ── R1 런타임 배선 (카메라·컨트롤 스텁, GL 없음) ──
 const r1 = (() => {
@@ -356,11 +569,49 @@ const r1 = (() => {
   const q3 = runtime.debugWalker().pos;
   invariant(q2.x === q3.x && q2.z === q3.z,
     'R1: 이동 명령을 놓았는데 계속 나아간다 (지속 상태가 0 으로 갱신되지 않음)');
+
+  // ── R2 #43 배선 ── Space(jump) 와 D(strafe +1) 가 engine.cine.input 채널을 그대로 통과한다.
+  //   App.svelte 는 이 채널에 { jump: walkKeys.has(' ') } 와 { strafe: D?1:0 − A?1:0 } 을 민다.
+  const eye = runtime.debugWalker().eyeHeight;
+  runtime.input({ fwd: 0, strafe: 0, run: false, jump: true });
+  runtime.update(DT);
+  let airborneFrames = 0, peakClearance = 0;
+  for (let i = 0; i < 60; i++) {
+    const d = runtime.debugWalker();
+    if (d.clearance > eye + 1e-3) { airborneFrames++; peakClearance = Math.max(peakClearance, d.clearance); }
+    runtime.update(DT);
+  }
+  invariant(airborneFrames > 20,
+    `R2: input({jump:true}) 로 뜨지 않았다 (체공 프레임 ${airborneFrames})`);
+  invariant(peakClearance - eye > JUMP_H * 0.9,
+    `R2: 런타임 경유 점프 최고 여유 ${(peakClearance - eye).toFixed(3)}m < 저작 ${JUMP_H}m 의 90%`);
+  runtime.input({ jump: false, fwd: 0, strafe: 0 });
+  for (let i = 0; i < 60; i++) runtime.update(DT);   // 착지 대기
+
+  const s0 = runtime.debugWalker();
+  const yawRad = s0.yawDeg * DEG;
+  runtime.input({ fwd: 0, strafe: 1, run: false });
+  for (let i = 0; i < 30; i++) runtime.update(DT);
+  const s1 = runtime.debugWalker();
+  const sx = s1.pos.x - s0.pos.x, sz = s1.pos.z - s0.pos.z;
+  const sl = Math.hypot(sx, sz);
+  invariant(sl > 0.1, `R2: strafe 입력에 이동이 없다 (${sl.toFixed(4)}m)`);
+  const sdot = (sx / sl) * (-Math.cos(yawRad)) + (sz / sl) * Math.sin(yawRad);
+  invariant(sdot > 0.99,
+    `R2: 런타임 경유 strafe +1(D) 이 오른쪽이 아니다 (dot ${sdot.toFixed(4)}${sdot < -0.9 ? ' — 좌우 반전' : ''})`);
+
   runtime.dispose();
-  return { advanced2s: +advanced.toFixed(2), yawPer100px: +(yaw1 - yaw0).toFixed(2) };
+  return {
+    advanced2s: +advanced.toFixed(2),
+    yawPer100px: +(yaw1 - yaw0).toFixed(2),
+    jumpAirFrames: airborneFrames,
+    jumpPeak: +(peakClearance - eye).toFixed(3),
+    strafeRightDot: +sdot.toFixed(4),
+  };
 })();
 
 console.log('walk-control contract: PASS', JSON.stringify({
-  accel: MOVE_ACCEL, decel: MOVE_DECEL, ...m5,
-  forward2s: m2, ...m3, ...m9, ...m10, runtime: r1,
+  speeds: { walk: WALK_SPEED, run: RUN_SPEED }, accel: MOVE_ACCEL, decel: MOVE_DECEL, ...m5,
+  forward2s: m2, ...m3, ...m9, ...m10, wallJump: m10b,
+  strafeRight: m13, jump: m14, air: m15, runtime: r1,
 }));
