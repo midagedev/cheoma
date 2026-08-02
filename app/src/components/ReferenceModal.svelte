@@ -7,6 +7,7 @@
   import { i18n } from '../lib/i18n.svelte.js';
   import { device } from '../lib/device.svelte.js';
   import { CREDITS, CREDIT_TOPICS } from '../lib/credits.js';
+  import { REPO_LABEL, REPO_URL } from '../lib/links.js';
 
   let { open = false, onClose, returnFocus = null, fallbackFocus = null } = $props();
   let dialog = $state();
@@ -38,6 +39,8 @@
       topics: '주제',
       all: '전체',
       scope: '범위',
+      source: '소스 코드',
+      sourceNote: 'cheoma 는 오픈 소스입니다. 생성 알고리즘과 이 문서의 원본을 레포에서 확인할 수 있습니다.',
     },
     en: {
       title: 'References & Credits',
@@ -50,6 +53,8 @@
       topics: 'Topics',
       all: 'All',
       scope: 'Scope',
+      source: 'Source code',
+      sourceNote: 'cheoma is open source. The generator and the source of this page live in the repository.',
     },
   };
   const lab = $derived(L[lang] || L.en);
@@ -269,6 +274,14 @@
           </ul>
         </section>
       {/each}
+
+      <!-- Repo link closes the page: the sources above credit other people's work,
+           this credits ours. Outside `.cat` so source-link gates keep their count. -->
+      <section class="repo" data-repo-section>
+        <div class="tag">{lab.source}</div>
+        <p>{lab.sourceNote}</p>
+        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" data-source-link>{REPO_LABEL}</a>
+      </section>
     </div>
   </div>
 {/if}
@@ -453,6 +466,30 @@
   .it-refs { font-family: var(--serif); font-size: 11px; color: var(--ink-faint); }
   .it-lic { font-family: var(--serif); font-size: 11px; color: var(--ink-faint); line-height: 1.55; margin-top: 1px; }
   .it-lic strong { color: var(--ink-soft); font-weight: 700; }
+
+  .repo {
+    border-top: 1px solid var(--ink-hair);
+    padding-top: 14px;
+    margin-top: 4px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .repo .tag {
+    font-family: var(--serif); font-weight: 700; font-size: 11px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--seal);
+  }
+  .repo p { margin: 0; font-family: var(--serif); font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
+  .repo a {
+    align-self: flex-start;
+    font-family: var(--mono, var(--serif)); font-size: 11.5px; color: var(--seal);
+    text-decoration: none; border-bottom: 1px solid rgba(177, 54, 43, 0.35);
+    padding: 4px 0;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .repo a:hover { border-bottom-color: var(--seal); }
+  .repo a:focus-visible { outline: 2px solid var(--seal); outline-offset: 2px; }
+  @media (pointer: coarse) {
+    .repo a { min-height: 40px; display: flex; align-items: center; }
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .scrim, .modal { animation: none; }

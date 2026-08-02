@@ -1630,6 +1630,7 @@
       onSeason={setSeason}
       onWeather={setWeather}
       onFlowToggle={toggleFlow}
+      onReferences={openReferences}
     />
   {/if}
   <!-- Environment lives in the make panel for village CAD density. Solo scenes

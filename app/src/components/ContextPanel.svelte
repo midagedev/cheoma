@@ -25,6 +25,7 @@
   } from '../../../src/api/environment.js';
   import BottomSheet from './BottomSheet.svelte';
   import PropertyField from '../ui/PropertyField.svelte';
+  import { REPO_LABEL, REPO_URL } from '../lib/links.js';
 
   let {
     open = false, morph = 0, detent = null,
@@ -52,6 +53,9 @@
     flowing = false,
     onTime = null, onSunsetLook = null, onSeason = null, onWeather = null,
     onFlowToggle = null,
+    // Colophon — opens the References dialog owned by App (receives the trigger
+    // element so focus returns here on close).
+    onReferences = null,
   } = $props();
 
   const TIMES = ['dawn', 'day', 'sunset', 'night'];
@@ -717,6 +721,28 @@
         </div>
       {/if}
     </div>
+  </div>
+
+  <!-- Colophon closing the property column. Portrait sheets hide the bottom-left
+       seal chip (its corner belongs to the sheet), so this is the only route to
+       References and the source repo on a phone in village mode. -->
+  <div class="colophon" data-colophon>
+    {#if onReferences}
+      <button
+        type="button"
+        class="colink"
+        data-reference-trigger="colophon"
+        onclick={(e) => onReferences(e.currentTarget)}
+      >{t('about_references')}</button>
+    {/if}
+    <a
+      class="colink"
+      data-source-link
+      href={REPO_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={t('act_source_tip')}
+    >{t('about_open_source')} · {REPO_LABEL}</a>
   </div>
 </BottomSheet>
 
@@ -1468,6 +1494,34 @@
   .house-actions { display: flex; flex-direction: row; gap: 6px; width: 100%; }
   .house-actions :global(.cad-primary) { flex: 1; }
 
+  /* ── colophon: the quietest row in the column ── */
+  .colophon {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    margin-top: var(--cad-group-gap);
+    padding: 8px 0 2px;
+    border-top: 1px solid var(--panel-border);
+  }
+  .colink {
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    font: inherit;
+    font-size: 10.5px;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
+    color: var(--panel-faint);
+    text-decoration: none;
+    cursor: pointer;
+    text-align: left;
+  }
+  .colink:hover, .colink:focus-visible { color: var(--accent); }
+  .colink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   /* A 390px-tall landscape rail cannot afford the selection header or the status
      line and still keep §4's 180px scroll window: the floating breadcrumb already
      names the selection there, so both drop out rather than squeezing the levers. */
@@ -1492,5 +1546,8 @@
     .tl { font-size: 14px; }
     .ts { font-size: 10px; }
     .cad-primary { min-height: 44px; font-size: 14px; }
+    /* Secondary text links: tappable without becoming a second CTA. */
+    .colophon { gap: 4px 14px; padding-top: 10px; }
+    .colink { min-height: 36px; display: flex; align-items: center; font-size: 12px; }
   }
 </style>

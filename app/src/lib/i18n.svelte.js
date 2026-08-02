@@ -39,10 +39,10 @@ const DICT = {
     // 시네마틱 데모 모드(#112)
     act_drone: '드론', act_drone_tip: '드론 시네마틱 — 자동 항공 투어',
     act_walk: '거닐기', act_walk_tip: '1인칭으로 직접 걸어 마을 둘러보기',
-    cine_exit: '종료', cine_exit_tip: '시네마틱 종료 (ESC)',
-    cine_hint: '탭 또는 ESC로 종료',
+    cine_exit: '종료', cine_exit_tip: '시네마틱 종료 (Esc)',
+    cine_hint: '탭 또는 Esc로 종료',
     // 수동 조작 힌트(#33) — 진입 직후 몇 초만 보였다가 물러난다.
-    cine_walk_hint: 'WASD · 방향키 이동 · 드래그로 둘러보기 · Shift 빠르게 · Space 점프 · ESC 종료',
+    cine_walk_hint: 'WASD · 방향키 이동 · 드래그로 둘러보기 · Shift 빠르게 · Space 점프 · Esc 종료',
     cine_walk_hint_touch: '조이스틱으로 이동 · 화면을 드래그해 둘러보기',
     cine_walk_move: '이동 조이스틱',
     cine_walk_label: '골목 산책',
@@ -155,6 +155,11 @@ const DICT = {
     param_search: '파라미터 검색',
     changed_tip: '기본값과 다른 항목 수',
     vil_char_auto_short: '자동',
+    // 공개 링크 — 소스 레포(새 탭). 크롬 아이콘·패널 하단·참고 자료 모달이 같은 문구를 쓴다.
+    act_source: '소스 코드',
+    act_source_tip: 'GitHub에서 소스 코드 보기',
+    about_open_source: '오픈 소스',
+    about_references: '참고 자료',
   },
   en: {
     hero_enter: 'Enter',
@@ -304,6 +309,10 @@ const DICT = {
     param_search: 'Filter parameters',
     changed_tip: 'Values changed from default',
     vil_char_auto_short: 'auto',
+    act_source: 'Source',
+    act_source_tip: 'View the source on GitHub',
+    about_open_source: 'Open source',
+    about_references: 'References & credits',
   },
 };
 
