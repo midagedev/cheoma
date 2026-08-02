@@ -21,6 +21,11 @@ const OUT = process.env.CHEOMA_JOURNEY_OUT
   || join(ROOT, 'scratch', 'journey', 'storyboard');
 const FRAMES = Number(process.env.CHEOMA_JOURNEY_FRAMES) || 28;
 const timeout = Number(process.env.CHEOMA_JOURNEY_TIMEOUT_MS) || 180_000;
+// 영상 렌더용 오버라이드(#45): 기본 스토리보드는 seed 파생 sunsetLook·1600×900 그대로,
+// 클립 프레임 시퀀스는 플래그십 gold 와 1080p 를 명시해 뽑는다.
+const LOOK = process.env.CHEOMA_JOURNEY_LOOK || '';           // e.g. 'gold'
+const VIEW_W = Number(process.env.CHEOMA_JOURNEY_W) || 1600;
+const VIEW_H = Number(process.env.CHEOMA_JOURNEY_H) || 900;
 
 const SCALES = {
   village: { vseed: 20260716, query: 'vscale=village&vpalace=0&vtemple=0' },
@@ -54,12 +59,13 @@ try {
   for (const scale of selected) {
     const cfg = SCALES[scale];
     const page = await browser.newPage();
-    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
     page.on('pageerror', (e) => errors.push(`[${scale}] ${e.message}`));
     // shot=1 은 day 로 고정되므로 쓰지 않는다 — 여정의 셀링 포인트가 sunset 역광이다.
     //   hero=0&village=1 이 타이틀·히어로 랜딩을 건너뛰고 마을 모드로 바로 부팅한다(shoot-cine 과 동일).
     const url = `${base}/?hero=0&village=1&worker=0&seed=20260718&vseed=${cfg.vseed}`
-      + `&${cfg.query}&time=sunset&weather=clear&season=summer&lang=ko`;
+      + `&${cfg.query}&time=sunset&weather=clear&season=summer&lang=ko`
+      + (LOOK ? `&sunset=${LOOK}` : '');
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
     await page.waitForFunction(
       () => window.__SHOT_READY === true && window.__engine?.village?.getState()?.active === true,
@@ -90,7 +96,7 @@ try {
         const cam = window.__engine.cine.debugCam();
         return { pass: st.pass, tau: st.tau, roll: st.rollDeg, cam };
       }, tau);
-      const file = `sb-${scale}-${String(k).padStart(2, '0')}.png`;
+      const file = `sb-${scale}-${String(k).padStart(Math.max(2, String(FRAMES - 1).length), '0')}.png`;
       await page.screenshot({ path: join(OUT, file) });
       manifest.push({ scale, k, tau: +tau.toFixed(4), file, ...state });
       await page.evaluate(() => window.__engine.debugSetPaused?.(false));
