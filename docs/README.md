@@ -27,7 +27,6 @@
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
 | [`external-reuse.md`](external-reuse.md) | 계약 | 최소 외부 scene과 단독 건물·별채·시전·마당 생활상·표면 생성기의 좁은 API, 단일 Three, borrowed resource·dispose 소유권과 독립 smoke. |
 | [`ink-landscape.md`](ink-landscape.md) | archive(기록) | **2026-07-31 제품 수묵 모드 제거로 계약 폐기.** 조선 진경산수 근거와 미학 원칙만 역사 기록으로 보존한다. 서술된 pass·API·게이트는 코드에 없다. |
-| [`../HANDOFF.md`](../HANDOFF.md) | 활성 작업 | 세션 인계 상태: 무엇이 왜 이렇게 되어 있고 다음에 무엇을 할지. 남은 작업의 단일 출발점이며, 계약이 아니라 **그 시점의 인계 기록**이므로 계약 문서와 충돌하면 계약이 우선한다. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
 | [`dancheong.md`](dancheong.md) | 계약 + 리서치 | 궁 기본 모로·사찰 중심 불전 금단청 위계, 선명도/격식 축, 불변 source 캐시·수명·성능 계약과 공식 근거. |
@@ -73,7 +72,7 @@
 
 ## Claude Code 메모리에서 승격한 내용
 
-개인 메모리 경로(`/Users/hckim/.claude/projects/-Users-hckim-repo-asiahouse/memory/`)에는 풍부한 작업 이력이 있지만, 다른 환경에서는 없을 수 있고 완료·폐기된 구현도 섞여 있다. 레포 문서는 그 경로에 의존하지 않도록 다음처럼 정리했다.
+유지보수자의 개인 Claude Code 메모(레포 밖에 있다)에는 풍부한 작업 이력이 있지만, 다른 환경에서는 없을 수 있고 완료·폐기된 구현도 섞여 있다. 레포 문서는 그 메모에 의존하지 않도록 다음처럼 정리했다.
 
 | 메모리 묶음 | 레포의 기준 위치 |
 | --- | --- |
