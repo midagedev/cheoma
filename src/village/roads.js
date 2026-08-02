@@ -53,6 +53,28 @@ function organicPath(a, b, rng, { amp = 6, comps = 2 } = {}) {
 // 곧은 간선(대로): 등고에 살짝만 순응. amp 작게.
 function trunkPath(a, b, rng) { return organicPath(a, b, rng, { amp: G.dist(a, b) * 0.03, comps: 1 }); }
 
+// 궁 정문에서 뻗는 육조거리 축선(#21 R5 D8).
+//
+//   종전 시점은 `C.z + R×0.11` 이라는 **상수점**이었다. 그 상수는 정문의 실제 위치가 아니라
+//   대략의 높이라, 실측(2026-08-02) 정문에서 4.00m 어긋나 있었고 대로 자체도 organicPath 로
+//   완만히 휘어 축선이 문과 맞지 않았다. 이제 시점은 **정문 법선 위, 광장 바깥 변**이다:
+//   정문에서 광장 끝까지는 노면이 아니라 건물 없는 흙 마당이고
+//   (refs/hanyang-old/sungnyemun-1900s 의 "문 앞 흙 광장"), 대로는 그 마당이 끝나는 지점에서
+//   축선 위에 정확히 얹혀 종로 T 로 내려간다.
+//
+//   직선(광장) 길이는 plan 이 이미 종로 T 까지의 실거리로 클램프해 넘긴다
+//   (palace-precinct-plan#palaceUrbanFrontPlan) — 여기서 다시 풀지 않는다. 그 클램프가
+//   꼬리(axisTail)를 보장하므로 대로가 길이 0 으로 소멸하지 않는다.
+//
+//   rng 소비는 종전과 같은 1회(trunkPath 1개)라, 축선 유무가 하류 시드 스트림 길이를 바꾸지
+//   않는다.
+function palaceAxisTrunk(axis, tJoin, rng) {
+  const dir = G.norm(axis.dir);
+  const straight = Math.min(axis.straightLength, Math.max(0, G.dot(G.sub(tJoin, axis.origin), dir)));
+  const head = G.add(axis.origin, G.mul(dir, straight));
+  return trunkPath(head, tJoin, rng);
+}
+
 // 간선/스파인에서 가지 분기: 시작점·방향에서 유기 골목을 뻗는다. 분지 밖으로 나가면 자른다.
 function branchPath(from, dir, len, rng, site) {
   const end = G.add(from, G.mul(G.norm(dir), len));
@@ -195,6 +217,53 @@ function clipRoadsToWall(roads, cityWall, except = new Set()) {
     if (run.length > best.length) best = run;
     if (best.length >= 2) road.pts = best;
     else roads.splice(i, 1);
+  }
+}
+
+// 길은 궁역을 관통하지 않고, 정문 앞 광장을 가로지르지도 않는다(#21 R5 D8·E).
+//
+//   필지·시전은 blocker 로 막히지만 **길은 blocker 를 보지 않는다**. 그래서 실측
+//   (2026-08-02, hanyang 6시드) 궁역 안을 지나는 길이 3~14개(정점 40~118개) 있었고 — 북촌
+//   중로가 궁을 동서로 관통하는 시드도 있다 — 골목이 정문 앞 마당을 가로질러 궁장 1.0m
+//   앞까지 들어왔다. 성벽 클립과 같은 방식으로 금지 구역 밖 구간만 남긴다.
+//
+//   성벽 클립과 다른 점 하나: 최장 구간만 남기지 않고 **쓸 만한 길이의 구간을 모두** 남긴다.
+//   궁은 도시 한복판에 있어서, 관통하던 간선을 한쪽만 남기면 반대편 시가가 통째로 길을
+//   잃는다(북촌 중로 ±370m 중 한쪽 ~300m). 추가 구간은 같은 위계의 다음 서수를 받은 별개
+//   길이 된다(mintId).
+function clipRoadsFromPolygons(roads, polygons, except = new Set(), mintId = null) {
+  const active = (polygons || []).filter((polygon) => polygon?.length >= 3);
+  if (!active.length) return;
+  const blocked = (point) => active.some((polygon) => G.pointInPoly(point, polygon));
+  for (let i = roads.length - 1; i >= 0; i--) {
+    const road = roads[i];
+    if (except.has(road)) continue;
+    const runs = [];
+    let run = [];
+    for (const point of road.pts) {
+      if (!blocked(point)) run.push(point);
+      else {
+        if (run.length >= 2) runs.push(run);
+        run = [];
+      }
+    }
+    if (run.length >= 2) runs.push(run);
+    const usable = runs.filter((candidate) => G.polylineLength(candidate) >= MIN_USABLE_BRANCH_LENGTH);
+    if (!usable.length) { roads.splice(i, 1); continue; }
+    usable.sort((a, b) => G.polylineLength(b) - G.polylineLength(a));
+    road.pts = usable[0];
+    for (let extra = 1; extra < usable.length; extra++) {
+      const piece = {
+        ...road,
+        id: mintId ? mintId(road.level) : road.id,
+        pts: usable[extra],
+        junctionIds: [],
+      };
+      // 성문 접근 표시는 문에 닿는 구간의 것이다 — 잘려 나온 조각이 물려받으면 다리·문전
+      //   마당 소비자가 엉뚱한 폴리라인을 성문 접근로로 읽는다.
+      delete piece.wallApproach;
+      roads.splice(i + extra, 0, piece);
+    }
   }
 }
 
@@ -363,6 +432,7 @@ export function planRoads(site, opts, rng) {
   const C = site.center;                   // 명당(북, 종가/관아/궁)
   const coreRoadAnchor = opts.coreRoadAnchor || C; // 예약 코어의 실제 남측 대문
   const wallGateRoads = new Set();
+  const palaceAxisRoads = new Set();   // 광장 클립 예외(축선 대로)
   let southApproach = null;
   const roadOrdinals = { daero: 0, jungno: 0, soro: 0, golmok: 0 };
   const push = (level, pts) => {
@@ -458,10 +528,13 @@ export function planRoads(site, opts, rng) {
     const tJoin = G.lerp(palaceFront, E, 0.62);            // 동서 간선과 만나는 T 지점
     nodes.crossing = tJoin;
     nodes.palaceFront = palaceFront;
-    // 남북대로(육조거리형)
-    const daero = trunkPath(palaceFront, tJoin, rng);
-    push('daero', daero);
+    // 남북대로(육조거리형) — 궁이 있으면 정문 앞 광장 구간은 직선 축선(#21 R5 D8).
+    const daero = opts.palaceAxis
+      ? palaceAxisTrunk(opts.palaceAxis, tJoin, rng)
+      : trunkPath(palaceFront, tJoin, rng);
+    const daeroRoad = push('daero', daero);
     nodes.spine = daero;
+    if (opts.palaceAxis && daeroRoad) palaceAxisRoads.add(daeroRoad);
     // 동서 간선(종로형) — T 지점에서 좌우로, 지형 따라 완만 곡선
     let ew;
     if (W && gE && gW) {
@@ -498,9 +571,12 @@ export function planRoads(site, opts, rng) {
     const palaceFront = opts.coreRoadAnchor || { x: 0, z: C.z + site.R * 0.11 };
     const tJoin = { x: 0, z: W?.axes?.jongnoZ ?? C.z + site.R * 0.42 }; // 종로와 만나는 T 지점
     nodes.palaceFront = palaceFront; nodes.crossing = tJoin;
-    // 주작대로(육조거리형, 최대폭): 궁 정문 → T
-    const daero = trunkPath(palaceFront, tJoin, rng);
-    push('daero', daero); nodes.spine = daero;
+    // 주작대로(육조거리형, 최대폭): 궁 정문 → T. 궁이 있으면 정문 앞 광장 구간은 직선 축선.
+    const daero = opts.palaceAxis
+      ? palaceAxisTrunk(opts.palaceAxis, tJoin, rng)
+      : trunkPath(palaceFront, tJoin, rng);
+    const daeroRoad = push('daero', daero); nodes.spine = daero;
+    if (opts.palaceAxis && daeroRoad) palaceAxisRoads.add(daeroRoad);
     // 종로(동서 대간선): 서문 → 동문, T 높이에서 지형 완만 곡선
     let jongno;
     if (W && gE && gW) {
@@ -573,6 +649,12 @@ export function planRoads(site, opts, rng) {
       southApproach.road, gS, site, W, southApproach.atStart,
     );
     clipRoadsToWall(roads, W, wallGateRoads);
+  }
+
+  if (opts.palaceKeepOut?.length) {
+    // 분리된 구간은 같은 위계의 다음 서수를 받는다(id 형식 `level-NNN` 유지).
+    clipRoadsFromPolygons(roads, opts.palaceKeepOut, palaceAxisRoads,
+      (level) => `${level}-${String(roadOrdinals[level]++).padStart(3, '0')}`);
   }
 
   collapseNarrowRoadLenses(roads);

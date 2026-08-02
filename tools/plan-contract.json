@@ -31,12 +31,12 @@
       "bytes": 195986
     },
     "capital:base": {
-      "hash": "90865550e60d71e03e9af31f79e403576a6c146986e0e4e8f0d48c3c149e23e7",
-      "bytes": 262652
+      "hash": "1cc009a0296c687237bd2a96581e06b8edb750135e0f1a7b60e2611ac713d2f6",
+      "bytes": 245416
     },
     "hanyang:base": {
-      "hash": "063066b5256095489233d5b520b4c6948be23e53c575a521cc1ff7796d698f70",
-      "bytes": 1362031
+      "hash": "9cd18e82d52a5888a7c34d616b9b6391734eb31a475cebfb2e092649a3268255",
+      "bytes": 1341329
     },
     "hamlet:temple": {
       "hash": "84066937c2e99508308723c761a6699464c49dc1be38068d26834da4edcb868e",
@@ -51,16 +51,17 @@
       "bytes": 195522
     },
     "capital:temple": {
-      "hash": "6f0e8b1c97685aef0a4a4dc8be7395747ff394d8e1279f16267f5646c2e6ffad",
-      "bytes": 277037
+      "hash": "d762f2892eb8850eda1f1d1b07732a39df548ed4648b1a5965791e4e445ac117",
+      "bytes": 257489
     },
     "hanyang:temple": {
-      "hash": "6391478f0b9e048a4a5b335851741dc98add9ce11ad913d6ed8d18ec4a976ba6",
-      "bytes": 1386792
+      "hash": "315623616771d76c1084d2f135cd65f970ae4a3fb0bba11ed19f921f78ab8f3b",
+      "bytes": 1351612
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
   "roofRankRevision": "issue-150c-roof-rank-magistracy-city-gate-2026-07-26",
   "issue150PolishRevision": "issue-150-polish-wave-2026-07-26",
-  "cityGateForecourtRevision": "issue-19-r3b-gate-forecourt-parcel-reservation-2026-07-31"
+  "cityGateForecourtRevision": "issue-19-r3b-gate-forecourt-parcel-reservation-2026-07-31",
+  "palacePrecinctRevision": "#21 R5 궁·관아 위계 2026-08-02 — 사진 대조 판정 D5·D8·D13·D14·E 구현. 이동한 것은 **궁이 있는 계획뿐**이다(capital:base/temple, hanyang:base/temple). hamlet·village·town 은 해시·바이트 모두 불변이라 이 라운드가 그 규모의 시드 스트림을 건드리지 않았음이 단독 변인으로 확인된다. 궁 계획이 움직인 원인 넷: ① 궁역 폭 96→108(capital 60→58) — 정전 처마 21.6→27.4m·행각 깊이 3.0→4.6m 를 담기 위한 종속값(palace.js tierSpec 과 동기) ② 정문 앞 광장·궁장 밖 이격 링·육조 관아 슬롯이 blocker 로 추가(추첨 순서는 그대로, 후보 수락 여부만 바뀐다) ③ 주작대로 시점이 상수점에서 정문 법선 위 광장 바깥 변으로 이동 ④ 길이 궁역·광장을 관통하지 못하도록 클립(관통하던 간선은 양쪽 구간이 각각 살아남아 같은 위계의 다음 서수를 받는다). 실측: capital:base 80→73 · capital:temple 81→73 · hanyang:base 395→397 · hanyang:temple 395→397 필지. 게이트: tools/check-palace-precinct.mjs(신규, 미등록) · tools/check-road-contract.mjs(축선 재저작)."
 }

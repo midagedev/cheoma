@@ -70,9 +70,14 @@ function hallPreset(role, seed) {
   const k = PRESETS.korea;
   if (role === 'jeongjeon') {
     // 정전(근정전): 정면 5칸·2중 월대·돌난간. 궁의 얼굴 — 기준 100%.
+    //   칸 폭(#21 R5 D5): PRESETS.korea 의 살림집 칸(어칸 3.7)을 그대로 쓰면 정면 core 15.3m,
+    //   처마 21.6m 로 측면(17.7m)과 거의 정사각이라 "수평으로 긴 어두운 덩어리"가 생기지 않는다.
+    //   근정전 실측(정면 5칸 30.1m · 측면 5칸 21.1m, docs/architectural-authenticity.md §11.1)의
+    //   정면:측면 ≈ 1.43 을 목표로 어칸/협칸/퇴칸만 확장한다 — 칸수(5)는 고증대로 유지.
     return {
       ...k, seed, roofRank: 'palace',
       podiumTiers: 2, podiumRailing: true, frontBays: 5, sideBays: 3,
+      centerBayW: 5.1, middleBayW: 4.4, endBayW: 3.6,
     };
   }
   if (role === 'pyeonjeon') {
@@ -94,27 +99,35 @@ function hallPreset(role, seed) {
 }
 
 // 티어별 궁역 스펙(§6-3). 축선 일곽은 남→북 순서(진입부 다음부터).
+//
+// 행각 깊이(corridorDepth)와 일곽 폭(W)은 #21 R5 D5 에서 한 번에 올렸다. 구한말 도성 부감
+//   사진(refs/hanyang-old/panorama-from-citywall-1902)에서 궁·관아의 위계는 **지붕 재질과
+//   길이**로 드러난다 — 초가 바다에 박힌 "수평으로 길게 뻗은 어두운 덩어리". 종전 값(행각
+//   깊이 2.4~3.0)은 지붕 밴드가 3.95m 라 원경에서 곽이 얇은 사각 선으로 사라졌다. 깊이를
+//   키우면 지붕 halfSpan(depth/2+0.15)이 따라 커져 곽 둘레 전체가 하나의 띠로 읽힌다.
+//   일곽 W 는 넓어진 정전 처마(27.4m)와 깊어진 행각을 동시에 담기 위한 종속값이다.
 function tierSpec(tier) {
   if (tier === 'capital') {
-    // capital 축소판 60×90: 3일곽(정전+편전+침전) + 금천교, 측면 블록 생략.
+    // capital 축소판 58×90: 3일곽(정전+편전+침전) + 금천교, 측면 블록 생략.
+    //   측면 블록이 없어 정전곽(44)만 담으면 되므로 D5 확장에도 폭은 오히려 60→58 로 줄었다.
     return {
-      w: 60, d: 90, entryD: 20,
+      w: 58, d: 90, entryD: 20,
       areas: [
-        { role: 'jeongjeon', W: 32, D: 38, corridorDepth: 3.0, colH: 3.2, gate: 'soseuldaemun', gateW: 7.2, court: 'jojeong' },
-        { role: 'pyeonjeon', W: 27, D: 26, corridorDepth: 2.4, colH: 2.7, gate: 'iljakmun', gateW: 3.0 },
-        { role: 'chimjeon', W: 28, D: 24, corridorDepth: 2.4, colH: 2.6, gate: 'iljakmun', gateW: 3.0 },
+        { role: 'jeongjeon', W: 44, D: 38, corridorDepth: 4.4, colH: 3.5, gate: 'soseuldaemun', gateW: 7.2, court: 'jojeong' },
+        { role: 'pyeonjeon', W: 32, D: 26, corridorDepth: 3.4, colH: 2.9, gate: 'iljakmun', gateW: 3.0 },
+        { role: 'chimjeon', W: 34, D: 24, corridorDepth: 3.4, colH: 2.8, gate: 'iljakmun', gateW: 3.0 },
       ],
       flanks: [],
     };
   }
-  // hanyang 플래그십 96×150: 4일곽 축선 + 동궁(+x) + 궐내각사(-x) + 금천교 + 후원 여백.
+  // hanyang 플래그십 108×150: 4일곽 축선 + 동궁(+x) + 궐내각사(-x) + 금천교 + 후원 여백.
   return {
-    w: 96, d: 150, entryD: 24,
+    w: 108, d: 150, entryD: 24,
     areas: [
-      { role: 'jeongjeon', W: 34, D: 40, corridorDepth: 3.0, colH: 3.2, gate: 'soseuldaemun', gateW: 7.6, court: 'jojeong' },
-      { role: 'pyeonjeon', W: 28, D: 28, corridorDepth: 2.4, colH: 2.7, gate: 'iljakmun', gateW: 3.2 },
-      { role: 'chimjeon', W: 30, D: 26, corridorDepth: 2.4, colH: 2.6, gate: 'iljakmun', gateW: 3.2, satellites: 4 },
-      { role: 'junggung', W: 24, D: 22, corridorDepth: 2.4, colH: 2.5, gate: 'iljakmun', gateW: 3.0, backGarden: true },
+      { role: 'jeongjeon', W: 46, D: 40, corridorDepth: 4.6, colH: 3.5, gate: 'soseuldaemun', gateW: 7.6, court: 'jojeong' },
+      { role: 'pyeonjeon', W: 32, D: 28, corridorDepth: 3.4, colH: 2.9, gate: 'iljakmun', gateW: 3.2 },
+      { role: 'chimjeon', W: 34, D: 26, corridorDepth: 3.4, colH: 2.8, gate: 'iljakmun', gateW: 3.2, satellites: 4 },
+      { role: 'junggung', W: 28, D: 22, corridorDepth: 3.4, colH: 2.7, gate: 'iljakmun', gateW: 3.0, backGarden: true },
     ],
     flanks: [
       { role: 'donggung', side: +1, W: 22, D: 30, attachTo: 'pyeonjeon' },
@@ -122,6 +135,10 @@ function tierSpec(tier) {
     ],
   };
 }
+
+// 행각 지붕 낙차 — 깊어진 행각이 평지붕으로 읽히지 않도록 깊이에 비례시킨다(#21 R5 D5).
+//   1칸 회랑(buildCorridor 기본 0.85)은 깊이 2.6 기준값이라 그대로 쓰면 물매가 무너진다.
+const corridorRidgeRise = (depth) => Math.max(0.85, depth * 0.30);
 
 // 한 행각 변(2점 폴리라인)을 세운다. gap(개구) 이 있으면 중앙을 비우고 두 토막으로.
 //   a,b 는 변의 두 끝(로컬). 변은 항상 사각형 CCW 순회 방향으로 준다(INNER 일관).
@@ -144,6 +161,7 @@ function wallRun(root, a, b, gap, depth, colH, seed) {
     const { group } = buildCorridor({
       points: [p, q], closed: false, mats: root.userData.mats,
       seed: (seed + i) >>> 0, depth, colH, innerSide: INNER,
+      ridgeRise: corridorRidgeRise(depth),
     });
     root.add(group);
   }
@@ -350,6 +368,7 @@ export function buildPalaceCompound({
     seed,
     mats: M,
     wallStyle: outerPrecinct.wall.wallStyle,
+    plinth: outerPrecinct.wall.plinth,
     openings: [outerPrecinct.wall.opening],
   });
   palaceWall.name = 'palace-wall';
@@ -498,10 +517,16 @@ export function buildPalaceCompound({
     let acc = southInner - spec.entryD;
     let fz = 0;
     for (const a of spec.areas) { const c = acc - a.D / 2; if (a.role === F.attachTo) { fz = c; break; } acc = c - a.D / 2; }
-    const coreHalfW = target.W / 2;
+    // 측면 블록은 **가장 넓은 축선 일곽**을 기준으로 물린다. 종전엔 attachTo 일곽(편전)만 보고
+    //   이격했는데, D5 로 정전곽이 넓어지자 정전 남단과 측면 블록 북단이 겹치는 z 대역에서
+    //   행각끼리 관통했다(정전 ±23 vs 궐내각사 내변 ±18.5). 축선 최대폭 기준이면 어떤 일곽과도
+    //   최소 2.5m 이격이 성립한다.
+    const coreHalfW = Math.max(...spec.areas.map((a) => a.W)) / 2;
     const fx = F.side * (coreHalfW + 2.5 + F.W / 2);
     const grp = new THREE.Group(); grp.name = `flank-${F.role}`; grp.userData.mats = M;
-    const depth = 2.4, colH = 2.6;
+    // 측면 블록 행각도 축선 일곽과 같은 두께 계열을 쓴다(#21 R5 D5) — 여기만 얇으면 궁역
+    //   윤곽에서 동·서변이 먼저 사라진다. 축선 일곽(3.4)보다 한 단 얕은 것은 격식 차이다.
+    const depth = 3.0, colH = 2.8;
     const { chd } = enclosure(grp, fx, fz, F.W, F.D, {
       depth, colH, sides: { south: true, southGap: 3.0, north: true, northGap: 0, east: true, west: true }, seed: seed ^ (F.side > 0 ? 0xa1 : 0xb2),
     });

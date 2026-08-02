@@ -11,17 +11,20 @@ import { buildTileGableRoof } from './tileroof.js';
 //   depth    깊이(칸), bayLen 기둥 간격, colH 기둥 높이
 //   openEvery n칸마다 출입간(회벽 끊고 문지방돌). 0=없음
 //   innerSide +1 이면 좌측 법선(내측)이 마당쪽(개방). 폐곡선(CCW)은 +1이 안쪽.
+//   ridgeRise 처마→용마루 낙차(m). 기본 0.85 는 얕은 1칸 회랑의 값이라, depth 를 키운
+//             궁 일곽 행각이 그대로 쓰면 지붕면이 거의 평평해져 원경에서 두께가 사라진다.
+//             호출측이 depth 에 비례한 값을 넘긴다(#21 R5 D5).
 // 반환: { group }
 export function buildCorridor({
   points, closed = false, mats, seed = 1, depth = 2.6, bayLen = 2.5,
-  colH = 2.6, openEvery = 0, innerSide = 1,
+  colH = 2.6, openEvery = 0, innerSide = 1, ridgeRise = 0.85,
 } = {}) {
   const rng = makeRng((seed | 0) ^ 0x51ed);
   const M = mats;
   const group = new THREE.Group();
   group.name = 'corridor';
   const baseH = 0.28;
-  const eaveY = colH, ridgeY = colH + 0.85;
+  const eaveY = colH, ridgeY = colH + ridgeRise;
 
   const verts = points.map((p) => ({ x: p.x, z: p.z }));
   const nSeg = closed ? verts.length : verts.length - 1;

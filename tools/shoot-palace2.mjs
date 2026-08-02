@@ -59,8 +59,9 @@ const sc = sun.shadow.camera; sc.left = -120; sc.right = 120; sc.top = 120; sc.b
 sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.06; scene.add(sun);
 scene.add(new THREE.HemisphereLight(L.hemi[0], L.hemi[1], L.hemi[2]));
 
+// 궁역 치수는 palace.js tierSpec 과 동기여야 카메라 프레이밍이 궁을 담는다(#21 R5 에서 확장).
 const D = tier === 'hanyang' ? 150 : 90;
-const W = tier === 'hanyang' ? 96 : 60;
+const W = tier === 'hanyang' ? 108 : 58;
 let camera;
 if (view === 'top') {
   // 부감 top-down — 남(+z) 화면 아래, 북(-z) 위(참조 배치도와 동일 방향).

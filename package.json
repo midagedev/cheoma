@@ -94,6 +94,7 @@
     "check:season-ground": "node tools/check-season-ground-contract.mjs",
     "shoot:seasons": "node tools/run-browser-locked.mjs -- node tools/shoot-seasons.mjs",
     "check:plan": "node tools/check-plan-contract.mjs",
+    "check:palace-precinct": "node tools/check-palace-precinct.mjs",
     "check:sijeon": "node tools/check-sijeon-contract.mjs",
     "check:parcel-rebuild": "node tools/check-parcel-rebuild-contract.mjs",
     "check:parcel-rebuild:browser": "node tools/run-browser-locked.mjs -- node tools/check-parcel-rebuild-browser.mjs",

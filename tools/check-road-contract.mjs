@@ -9,6 +9,10 @@ import {
 import { createRoadSpatialIndex } from '../src/village/road-spatial.js';
 import { parcelWorldPoint } from '../src/village/parcel-contract.js';
 import {
+  palaceGatePoint,
+  palaceUrbanFrontPlan,
+} from '../src/village/palace-precinct-plan.js';
+import {
   boundsOfPoints,
   createVerificationSpatialGrid,
 } from './lib/verification-spatial-grid.mjs';
@@ -323,15 +327,62 @@ for (const scale of ['capital', 'hanyang']) {
     invariant(endpoint.distance <= POSITION_EPSILON,
       `${scale}:${seed}:no-palace daero ends ${endpoint.distance.toFixed(3)}m from government gate`);
 
+    // ── 궁역 앞 도시면 (#21 R5 D8·E, 재저작 2026-08-02) ─────────────────────────
+    // 종전 단언은 궁 구성의 주작대로가 **상수점** `C.z + R × (0.13|0.11)` 에서 시작하는지만
+    //   봤다. 그 상수는 궁 정문의 실제 위치가 아니다 — 실측 2026-08-02(hanyang 4시드): 대로
+    //   시점이 광화문에서 4.00m 떨어져 있었고 대로 자체도 완만히 휘어 정문 법선과 어긋났다.
+    //   구한말 사진 판독(#15 D8)이 "정문 앞에 광장도, 정문에서 간선대로로 직결되는 축선도
+    //   없다"로 지목한 지점이다. 상수점 대신 **정문 법선 위 광장 바깥 변**을 잠그고, 길이
+    //   궁역·광장을 침범하지 않는다는 계약을 새로 건다.
+    //
+    // 완화가 아니라 강화다. 종전 트리 실측: ① 대로 시점이 축선 위 광장 변이 아니라 정문에서
+    //   4.00m(≠ plazaLength) ② 궁역 안을 지나는 길 3~14개(정점 40~118) ③ 정문 앞 마당 안
+    //   도로 정점 28~96개. 세 단언 모두 종전 소스에서 실패한다.
     const palace = planVillage({ scale, seed, includePalace: true });
-    const legacyFront = {
-      x: 0,
-      z: palace.site.center.z + palace.site.R * (scale === 'capital' ? 0.13 : 0.11),
+    const palaceParcel = palace.features.palace;
+    invariant(palaceParcel, `${scale}:${seed}:palace plan has no palace feature`);
+    const palaceGate = palaceGatePoint(palaceParcel);
+    const direction = G.norm(palaceParcel.frontDir);
+    const jongnoZ = palace.features.cityWall?.axes?.jongnoZ;
+    const axisSpan = Number.isFinite(jongnoZ)
+      ? Math.max(0, G.dot(G.sub({ x: 0, z: jongnoZ }, palaceGate), direction))
+      : Infinity;
+    const front = palaceUrbanFrontPlan(palaceParcel, { axisSpan });
+    const axisHead = {
+      x: palaceGate.x + direction.x * front.straightLength,
+      z: palaceGate.z + direction.z * front.straightLength,
     };
-    invariant(G.dist(palace.nodes.palaceFront, legacyFront) <= POSITION_EPSILON,
-      `${scale}:${seed}:palace front anchor drifted`);
-    invariant(nearestRoadEndpoint(palace.roads, legacyFront, 'daero').distance <= POSITION_EPSILON,
-      `${scale}:${seed}:palace daero endpoint drifted`);
+    invariant(G.dist(palace.nodes.palaceFront, palaceGate) <= POSITION_EPSILON,
+      `${scale}:${seed}:palace front anchor is not the gate`);
+    invariant(nearestRoadEndpoint(palace.roads, axisHead, 'daero').distance <= POSITION_EPSILON,
+      `${scale}:${seed}:palace daero does not start on the gate axis at the plaza edge`);
+
+    // 길은 궁역도 정문 앞 마당도 지나지 않는다. 유일한 예외는 축선 대로이고, 그것도
+    //   정문 법선 **위에서만** 들어갈 수 있다(광장이 없는 capital 프로필에서 대로가 문에
+    //   직접 닿는 경우).
+    const keepOut = [front.clearance, ...(front.plaza ? [front.plaza] : [])];
+    const lateral = { x: direction.z, z: -direction.x };
+    const axisRoad = palace.roads.find((road) => road.level === 'daero'
+      && [road.pts[0], road.pts.at(-1)].some((end) => G.dist(end, axisHead) <= POSITION_EPSILON));
+    for (const road of palace.roads) {
+      for (const point of road.pts) {
+        for (const polygon of keepOut) {
+          if (!G.pointInPoly(point, polygon)) continue;
+          invariant(road === axisRoad,
+            `${scale}:${seed}:road ${road.id} enters the palace keep-out`);
+          invariant(Math.abs(G.dot(G.sub(point, palaceGate), lateral)) <= POSITION_EPSILON,
+            `${scale}:${seed}:the axis daero enters the palace keep-out off the gate normal`);
+        }
+      }
+    }
+
+    // 관아 슬롯은 궁과 같은 좌향으로 정렬한다(#21 R5 D14). 거리를 향한 좌향이 아니라
+    //   궁 축선과 같은 방위인 이유는 palace-precinct-plan#palaceMagistracySlots 주석 참조.
+    for (const magistracy of palace.parcels.filter((parcel) => parcel.magistracySlot)) {
+      const alignment = G.dot(G.norm(magistracy.frontDir), direction);
+      invariant(alignment >= 1 - 1e-9,
+        `${scale}:${seed}:magistracy ${magistracy.id} does not share the palace facing`);
+    }
   }
 }
 

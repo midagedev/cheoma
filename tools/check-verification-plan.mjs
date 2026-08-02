@@ -424,6 +424,9 @@ assert.deepEqual(ids(['src/cinematic/architectural-reveal.js']), [
 assert.deepEqual(ids(['tools/check-cine-warm.mjs'], {
   newPaths: ['tools/check-cine-warm.mjs'],
 }), ['core', 'cinematic-app']);
+assert.deepEqual(ids(['tools/check-palace-precinct.mjs'], {
+  newPaths: ['tools/check-palace-precinct.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['tools/check-worker-contract.mjs']), ['core', 'worker']);
 assert.deepEqual(ids(['tools/check-scene-snapshot.mjs']), ['core', 'share']);
 assert.deepEqual(ids(['tools/check-scene-guide.mjs']), ['core']);
@@ -567,6 +570,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-yard-life-contract.mjs',
   './check-critter-contract.mjs',
   './check-parcel-rebuild-contract.mjs',
+  './check-palace-precinct.mjs',
   './check-lod.mjs',
   './check-citywall.mjs',
   // #20 R4 (2026-07-31): 개천 계약이 planVillage 폐쇄를 공유하므로 마을 계획 경로 변경에 함께 붙는다.

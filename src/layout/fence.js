@@ -15,10 +15,12 @@ import { planFenceRuns } from './fence-plan.js';
 //   seed     시드
 //   mats     builder/palette.makeMaterials 결과
 //   openings [{seg, center(0..1), width}]  담이 끊기는 구간
+//   plinth   {height, spread} 지대석(장대석) 기단 — 담 두께보다 spread 만큼 좌우로 내밀어
+//            발치에 그림자 선을 만든다. 미지정(기본)이면 종전과 동일하게 없음.
 // 반환: { group, openings:[{position:Vector3, rotationY, width, seg}] }
 // wallStyle: 'toseok'(기본, 하부 자연석+상부 회벽+기와 지붕담),
 //            'stone'(초가: 낮은 막돌담, 지붕 없음), 'jeondol'(궁·반가: 전돌 화방담+기와 코핑).
-export function buildFence({ points, closed = false, height = 2.1, thickness = 0.46, seed = 1, mats, openings = [], wallStyle = 'toseok' }) {
+export function buildFence({ points, closed = false, height = 2.1, thickness = 0.46, seed = 1, mats, openings = [], wallStyle = 'toseok', plinth = null }) {
   const rng = makeRng((seed | 0) ^ 0x9e37);
   const M = mats;
   const group = new THREE.Group();
@@ -26,7 +28,13 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
 
   const lowStone = wallStyle === 'stone'; // 초가 막돌담
   const jeondol = wallStyle === 'jeondol';
-  const stoneH = lowStone ? height : Math.min(0.85, height * 0.42);
+  const plinthH = plinth && plinth.height > 0 ? plinth.height : 0;
+  const plinthSpread = plinth ? (plinth.spread || 0) : 0;
+  // 담 몸체는 지대석 위에서 시작한다(지대석 없으면 y=0 — 종전과 동일).
+  const bodyBase = plinthH;
+  const bodyH = height - bodyBase;
+  const stoneH = lowStone ? bodyH : Math.min(0.85, bodyH * 0.42);   // 몸체 하부 켜 높이
+  const stoneTop = bodyBase + stoneH;
   const wallTop = height - 0.16;             // 회벽 상단(=지붕 처마)
   const earthMat = new THREE.MeshStandardMaterial({ color: lowStone ? 0x7d6a52 : 0x8f6f4e, roughness: 1.0 });
   const brickMat = new THREE.MeshStandardMaterial({ color: 0x8a6656, roughness: 0.95 }); // 전돌
@@ -35,10 +43,18 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
   // 담 몸체 한 스팬 (로컬: X=길이, Z=두께, Y=높이). 중앙 정렬.
   function wallSpan(len) {
     const g = new THREE.Group();
+    // 지대석(장대석) 기단 — 팔레트 화강암 재사용이라 재질군이 늘지 않는다.
+    if (plinthH > 0) {
+      const base = new THREE.Mesh(
+        new THREE.BoxGeometry(len, plinthH, thickness + plinthSpread * 2), M.stone);
+      base.position.y = plinthH / 2;
+      base.castShadow = base.receiveShadow = true;
+      g.add(base);
+    }
     // 하부 코어: 전돌담=벽돌, 그 외=흙 줄눈
     const core = new THREE.Mesh(new THREE.BoxGeometry(len, stoneH, thickness * 0.86),
       jeondol ? brickMat : earthMat);
-    core.position.y = stoneH / 2;
+    core.position.y = bodyBase + stoneH / 2;
     core.castShadow = core.receiveShadow = true;
     g.add(core);
     // 화강 막돌 (전돌담은 생략). 초가 막돌담은 위까지 촘촘히.
@@ -50,7 +66,7 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
         const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
         for (let i = 0; i < perFace; i++) {
           const x = -len / 2 + len * rng();
-          const y = 0.12 + (stoneH - 0.22) * rng();
+          const y = bodyBase + 0.12 + (stoneH - 0.22) * rng();
           const sc = (lowStone ? 0.85 : 0.7) + rng() * 0.8;
           p.set(x, y, sign * (thickness * 0.43));
           q.setFromEuler(new THREE.Euler(rng() * 3, rng() * 3, rng() * 3));
@@ -67,8 +83,8 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
 
     // 상부: 전돌담=벽돌 화방, 그 외=회벽
     const upper = new THREE.Mesh(
-      new THREE.BoxGeometry(len, wallTop - stoneH, thickness * 0.8), jeondol ? brickMat : M.plaster);
-    upper.position.y = (stoneH + wallTop) / 2;
+      new THREE.BoxGeometry(len, wallTop - stoneTop, thickness * 0.8), jeondol ? brickMat : M.plaster);
+    upper.position.y = (stoneTop + wallTop) / 2;
     upper.castShadow = upper.receiveShadow = true;
     g.add(upper);
     // 지붕담 (기와 맞배 코핑)
@@ -101,13 +117,19 @@ export function buildFence({ points, closed = false, height = 2.1, thickness = 0
   // 모서리·끝 기둥 (스팬 이음 + 각진 코너 마감). 초가 막돌담은 기둥 생략.
   if (!lowStone) verts.forEach((v) => {
     const post = new THREE.Group();
+    if (plinthH > 0) {
+      const foot = new THREE.Mesh(
+        new THREE.BoxGeometry(thickness + plinthSpread * 2, plinthH, thickness + plinthSpread * 2),
+        M.stone);
+      foot.position.y = plinthH / 2; foot.castShadow = foot.receiveShadow = true; post.add(foot);
+    }
     const base = new THREE.Mesh(new THREE.BoxGeometry(thickness, stoneH, thickness),
       jeondol ? brickMat : earthMat);
-    base.position.y = stoneH / 2; base.castShadow = true; post.add(base);
+    base.position.y = bodyBase + stoneH / 2; base.castShadow = true; post.add(base);
     const up = new THREE.Mesh(
-      new THREE.BoxGeometry(thickness * 1.02, wallTop - stoneH, thickness * 1.02),
+      new THREE.BoxGeometry(thickness * 1.02, wallTop - stoneTop, thickness * 1.02),
       jeondol ? brickMat : M.plaster);
-    up.position.y = (stoneH + wallTop) / 2; up.castShadow = true; post.add(up);
+    up.position.y = (stoneTop + wallTop) / 2; up.castShadow = true; post.add(up);
     const cap = new THREE.Mesh(new THREE.ConeGeometry(thickness * 0.85, 0.34, 4), M.tileRidge);
     cap.rotation.y = Math.PI / 4;
     cap.position.y = height + 0.05; cap.castShadow = true; post.add(cap);

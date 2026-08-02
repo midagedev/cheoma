@@ -453,7 +453,13 @@ export function createVillageHandle(opts, seed, plan, group) {
   //   roofOpts 를 buildParcel 로 포워딩(코어 지원 시 반영).
   const heroHandle = group.userData.heroHandle instanceof Map ? group.userData.heroHandle : null;
   const heroParcels = plan.parcels.filter((p) => p.hero);
-  const primaryHero = heroParcels.find((p) => p.heroStyle === 'hanok') || heroParcels[0] || null;
+  // 대표 히어로(진입 랜딩·패널 컨텍스트의 "그 집")는 살림집이어야 한다. #21 R5 가 육조거리
+  //   관아를 같은 히어로 파이프(heroStyle 'hanok' + magistracy 격식)로 예약하면서, 예약분이
+  //   parcels 앞쪽에 오는 탓에 관아가 대표로 뽑혔다 — 관아는 종가가 아니다. 관아를 뺀 살림집을
+  //   먼저 찾고, 없을 때만 종전 폴백 순서를 그대로 탄다(궁 없는 규모는 동작 불변).
+  const primaryHero = heroParcels.find((p) => p.heroStyle === 'hanok' && !p.magistracySlot)
+    || heroParcels.find((p) => p.heroStyle === 'hanok')
+    || heroParcels[0] || null;
   const landmarksGroup = () => group.getObjectByName('village-landmarks');
   // 히어로 필지 편집 가능 여부(heroHandle 있어야 종가만 분리 은닉 가능). 프록시 스펙에 반영 —
   //   editable: 패널이 컨트롤을 열지 판단, compound: 컴파운드(hanok 종가)라 유형탭·칸수 대신 매무새만 노출.

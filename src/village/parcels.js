@@ -371,7 +371,13 @@ export function planParcels(site, roadsResult, opts, rng, blockers = []) {
   let heroCount = 0;
   // 반가(hero) 밀도: 민촌은 0(예약 종가만), 반촌은 다수 — 빈부의 핵심 시각신호.
   const baseCap = scale === 'hanyang' ? 6 : scale === 'capital' ? 6 : scale === 'town' ? 4 : scale === 'village' ? 2 : 1;
-  const heroCap = char01 < 0.34 ? 0 : Math.max(1, Math.round(baseCap * (0.3 + char01)));
+  // 히어로 예산 차감(#21 R5 D14): 육조거리 관아 슬롯은 프론티지 승격 반가와 같은 히어로 파이프
+  //   (공유 재질셋 + 전역 mergeStatic)를 쓰므로, 예약한 만큼 승격 상한을 낮춰 한양 히어로 총수를
+  //   보존한다 — 그렇지 않으면 aerial 드로우콜 예산(350)을 그만큼 잠식한다. 종가 코어처럼
+  //   heroBudget 표시가 없는 예약분은 종전과 같이 상한 밖이다(타 규모 회귀 없음).
+  const budgetedHeroes = blockers.filter((blocker) => blocker.heroBudget).length;
+  const heroCap = char01 < 0.34 ? 0
+    : Math.max(0, Math.max(1, Math.round(baseCap * (0.3 + char01))) - budgetedHeroes);
   const heroRankMin = 0.86 - char01 * 0.16;    // 반촌일수록 반가 승격 문턱 낮음
   const heroDistK = 0.45 + char01 * 0.28;      // 반촌일수록 반가가 중심에서 더 넓게
   const dbg = {

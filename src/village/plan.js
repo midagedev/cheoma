@@ -19,6 +19,10 @@ import {
   parcelWorldPoint,
   rectangularParcelShape,
 } from './parcel-contract.js';
+import {
+  palaceGatePoint,
+  palaceUrbanFrontPlan,
+} from './palace-precinct-plan.js';
 import { planGuardianTrees } from './guardian-plan.js';
 import { assignFittedVariation } from './house-footprint.js';
 import {
@@ -339,12 +343,23 @@ export function planVillage(opts = {}) {
   // 핵심 건물의 좌향은 카메라/석양 룩이 아니라 배산임수의 주산→동구 축이 결정한다.
   // 이전 rimFrontDir(-z)은 남향 주석과 달리 종가·관아·궁을 북북서로 돌리고 있었다.
   const coreFrontDir = toEntrance;
+  // 궁이 있으면 간선 앵커는 종가가 아니라 정문이고(육조거리는 광화문에서 시작한다),
+  //   축선 직선 구간을 roads.js 에 넘긴다(#21 R5 D8).
+  let palaceAxis = null;
+  let palaceRoadAnchor = null;
+  let palaceForecourt = null;   // 육조거리 광장 폴리곤(시전·논 배제에도 쓰인다)
+  let palaceReservation = null;
+  let palaceKeepOut = null;     // 길이 들어가면 안 되는 궁역·광장 폴리곤
 
   if (isCapitalTier && includePalace) {
-    // 궁역(#88): 행각 공유 다일곽 궁궐. 한양=경복궁급 4일곽(96×150), capital=3일곽 축소판(60×90).
+    // 궁역(#88): 행각 공유 다일곽 궁궐. 한양=경복궁급 4일곽(108×150), capital=3일곽 축소판(58×90).
     //   축선 깊이가 커져 궁역이 배산(-z)쪽으로 확장 — 중심을 북으로 당겨 진입부(+z)가 도성 안에 앉게 한다.
+    //   폭은 #21 R5 D5 에서 96→108 로 넓혔다: 정전 처마가 21.6→27.4m 로 길어지고
+    //   행각 깊이가 3.0→4.6m 로 두꺼워져, 종전 폭에서는 측면 블록(동궁·궐내각사)과 정전곽 행각이
+    //   관통했다. capital 은 측면 블록이 없어 정전곽 44 만 담으면 되므로 오히려 60→58 로 좁아진다
+    //   (그만큼 도성 필지가 산다). palace.js tierSpec 의 w·d 와 반드시 같은 값이어야 한다.
     const tier = scale === 'hanyang' ? 'hanyang' : 'capital';
-    const pw = tier === 'hanyang' ? 96 : 60, pd = tier === 'hanyang' ? 150 : 90;
+    const pw = tier === 'hanyang' ? 108 : 58, pd = tier === 'hanyang' ? 150 : 90;
     const pc = { x: 0, z: C.z - pd * 0.16 };   // 깊어진 축선을 북으로 상재(진입부 여유)
     const palaceParcel = reservedParcel(pc, coreFrontDir, pw, pd, {
       placement: 'landmark', kind: 'palace', roofRank: 'palace',
@@ -354,6 +369,7 @@ export function planVillage(opts = {}) {
     // 남기면 보호수와 숲 worker가 궁궐을 빈 땅으로 오인한다.
     features.palace = { ...palaceParcel, x: pc.x, z: pc.z, tier, roofRank: 'palace' };
     blockers.push(palaceParcel);
+    palaceReservation = palaceParcel;
   } else if (houseTarget <= 0 && (typeof opts.houses === 'number' || templeSolo)) {
     // 집 없는 구성(#114): houses:0 명시 시 예약 코어(종가·관아)도 생략 — "절 하나만"(includeTemple)
     //   또는 빈 산세 구성. 엔진은 hero 부재 시 부감 랜딩 폴백(기존 경로).
@@ -394,15 +410,79 @@ export function planVillage(opts = {}) {
   }
   const cityWall = wantWall && wallSupported ? planCityWall(site, seed, corePolys) : null;
   if (cityWall) features.cityWall = cityWall;
-  const coreParcel = blockers.find((blocker) => blocker.hero);
-  const coreRoadAnchor = coreParcel
+
+  // ── 2.6) 궁역 앞 도시면: 광장 · 육조거리 축선 · 관아 슬롯 · 궁장 밖 이격 (#21 R5 D8·D14·E) ──
+  //   좌표는 palace-precinct-plan.js 가 단일 소스다(렌더러·게이트가 같은 수를 읽는다).
+  //   성곽 뒤에 오는 이유: 육조거리의 실제 길이는 정문에서 **종로 축**까지이고, 그 축은
+  //   성곽 윤곽이 결정한다. 궁 예약 폴리곤은 이미 corePolys 로 성곽에 반영됐고, 여기서 다는
+  //   것은 blocker 뿐이라 성곽 계산은 종전과 같다(시드 스트림 불침해 — 이 블록은 rng 미소비).
+  if (palaceReservation) {
+    const gate = palaceGatePoint(palaceReservation);
+    const axisDir = G.norm(palaceReservation.frontDir);
+    const jongnoZ = cityWall?.axes?.jongnoZ;
+    const axisSpan = Number.isFinite(jongnoZ)
+      ? Math.max(0, G.dot(G.sub({ x: 0, z: jongnoZ }, gate), axisDir))
+      : Infinity;
+    const front = palaceUrbanFrontPlan(palaceReservation, { axisSpan });
+    palaceAxis = front.axis;
+    palaceRoadAnchor = front.axis.origin;
+    // 광장: 건물 없는 흙 마당. 시전 점포·민가·논 모두 여기 들어오지 못한다. 성문 문전 마당과
+    //   같은 blocker 단계라 시드 스트림 순서는 그대로고, 후보 수락 여부만 바뀐다.
+    if (front.plaza) {
+      palaceForecourt = front.plaza;
+      blockers.push({
+        poly: palaceForecourt,
+        palacePlaza: true,
+        solarObstruction: false,   // 빈 마당 — 그림자를 드리우지 않는다.
+      });
+    }
+    // 궁장 밖 이격 링 — 민가가 담에 붙어 궁역 윤곽을 지우는 것을 막는다.
+    blockers.push({
+      poly: front.clearance,
+      palaceClearance: true,
+      solarObstruction: false,   // 궁역 본체가 이미 일조 예약을 한다(중복 예약 금지).
+    });
+    // 같은 폴리곤들을 도로 금지 구역으로도 넘긴다 — 길은 blocker 를 보지 않는다.
+    //   관아 슬롯도 포함한다: 예약 필지는 도로 여유 검사를 건너뛰므로, 넣지 않으면 골목이
+    //   관아 지붕을 관통한다(check-layout-contract 의 "roof overlaps a road ribbon").
+    palaceKeepOut = [front.clearance, ...(front.plaza ? [front.plaza] : [])];
+    // 육조 관아: 광장 좌우 변에 **궁과 같은 좌향**으로 늘어선 대형 기와 필지(좌향 근거는
+    //   palace-precinct-plan#palaceMagistracySlots 주석). 궁 전각의 복제가 아니라
+    //   magistracy 등급이고(#150 C), 히어로 재질셋을 공유하므로 드로우콜은 heroCap 차감으로
+    //   상쇄된다(parcels.js heroBudget). 급경사·분지 밖 슬롯은 조용히 생략한다.
+    for (const slot of front.magistracy) {
+      const magistracy = reservedParcel(slot.center, slot.frontDir, slot.plotW, slot.plotD, {
+        hero: true, heroStyle: 'hanok', roofRank: 'magistracy', heroBudget: true,
+        magistracySlot: true,
+        kind: 'giwa', rank: 1,
+        seed: (seed ^ (0x6a00 + slot.index * 7 + (slot.side > 0 ? 0x40 : 0))) >>> 0,
+      });
+      if (!worldEdgeContainsPolygon(site.edge, magistracy.poly, 6)) continue;
+      if (cityWall && !cityWallContainsPolygon(cityWall, magistracy.poly, 6)) continue;
+      let low = Infinity, high = -Infinity;
+      for (const corner of magistracy.poly) {
+        const y = site.heightAt(corner.x, corner.z);
+        if (y < low) low = y;
+        if (y > high) high = y;
+      }
+      if (high - low > 2.2) continue;            // 한 계단 성토로 감당 못 하는 사면은 생략
+      if (site.hillAt(slot.center.x, slot.center.z) > 0.52) continue;
+      blockers.push(magistracy);
+      palaceKeepOut.push(magistracy.poly);
+    }
+  }
+  // 관아 슬롯도 hero 예약이지만 간선 앵커는 아니다 — 앵커는 종가/객사 코어 또는 궁 정문이다.
+  const coreParcel = blockers.find((blocker) => blocker.hero && !blocker.magistracySlot);
+  const coreRoadAnchor = palaceRoadAnchor || (coreParcel
     ? parcelWorldPoint(coreParcel, { x: 0, z: coreParcel.plotD * 0.5 })
-    : null;
+    : null);
   const layoutOpts = (cityWall || coreRoadAnchor)
     ? {
       ...norm,
       ...(cityWall ? { cityWall } : {}),
       ...(coreRoadAnchor ? { coreRoadAnchor } : {}),
+      ...(palaceAxis ? { palaceAxis } : {}),
+      ...(palaceKeepOut ? { palaceKeepOut } : {}),
     }
     : norm; // 생성 중에만 주입; 반환 plan에는 features가 단일 소스.
 
@@ -482,14 +562,19 @@ export function planVillage(opts = {}) {
     const gateForecourts = cityWall
       ? cityWall.gates.map((gate) => cityGateForecourtPolygon(gate))
       : [];
-    const sijeonReach = cityWall
-      ? (pt) => cityWallClearance(cityWall, pt) >= SIJEON_WALL_INSET
-        && !gateForecourts.some((poly) => G.pointInPoly(pt, poly))
+    // 육조거리(궁 정문 광장)는 상업 가로가 아니다 — 시전 행랑은 종로·남대문로의 몫이고,
+    //   관아 열 사이에 점포가 끼면 축선이 상가로 읽힌다(#21 R5 D8, 실측 2026-08-02: 광장
+    //   길이 70m 일 때 축선 70~84m 대역에 점포 12~14채). 점포는 blocker 를 보지 않으므로
+    //   성문 문전 마당과 같은 방식으로 reach·필터 양쪽에 광장을 명시한다.
+    const forecourts = palaceForecourt ? [...gateForecourts, palaceForecourt] : gateForecourts;
+    const sijeonReach = (cityWall || palaceForecourt)
+      ? (pt) => (!cityWall || cityWallClearance(cityWall, pt) >= SIJEON_WALL_INSET)
+        && !forecourts.some((poly) => G.pointInPoly(pt, poly))
       : undefined;
     features.sijeon = planSijeon(roadsResult, site, char01, { reach: sijeonReach }).filter((shop) =>
       worldEdgeContainsPolygon(site.edge, shop.poly, 6)
       && (!cityWall || cityWallContainsPolygon(cityWall, shop.poly, 4))
-      && !gateForecourts.some((poly) => G.polysOverlap(shop.poly, poly))
+      && !forecourts.some((poly) => G.polysOverlap(shop.poly, poly))
       && !templeReservations.some((poly) => G.polysOverlap(shop.poly, poly)));
     for (const s of features.sijeon) blockers.push({ poly: s.poly });
   }
@@ -662,6 +747,7 @@ export function planVillage(opts = {}) {
   const paddyObstacles = [
     ...parcels.map((parcel) => parcel.poly),
     ...(features.palace?.poly ? [features.palace.poly] : []),
+    ...(palaceForecourt ? [palaceForecourt] : []),   // 육조거리 광장은 논도 받지 않는다
     ...templeReservations,
   ];
   // 논 후보 RNG는 전부 소비한 뒤 실제 필지와 겹치는 배미만 걷어 낸다. 필터 때문에 뒤쪽

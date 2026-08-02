@@ -219,6 +219,8 @@ const REVIEWED_NEW_PATHS = new Set([
   // #36 드론 투어 셰이더 링크 히치: 투어 시작 warm 이후 투어 전 구간 프로그램 증가 0 을
   //   단언하는 브라우저 게이트. cinematic-app 그룹이 소유한다(warm 경로는 engine.js 소유).
   'tools/check-cine-warm.mjs',
+  // #21 R5 궁·관아 위계: 광장·축선·궁장·관아 슬롯의 순수 계획 계약 — core 가 소유한다.
+  'tools/check-palace-precinct.mjs',
 ]);
 
 function add(gates, ...items) {

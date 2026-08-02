@@ -370,7 +370,23 @@ const expectedSceneHashes = {
   //   - 이 변경(populate 히어로 블록 + buildHeroParcel materials 옵트인)만 되돌리면 구 골든
   //     4종(village 84affbdc… / town 63cc99e7… / capital d187e903… / hanyang 41000769…)이
   //     재현됨(구조 diff 귀속).
-  hanyang: '9ff92c07:28964659:765540ab:644088cf',
+  // #21 R5 궁·관아 위계(2026-08-02): 궁 컴파운드 기하(정전 칸 폭·행각 깊이·궁장·지대석)와
+  //   궁역 앞 도시면(광장·육조거리 축선·관아 슬롯·궁장 밖 이격·도로 금지 구역)이 함께 들어갔다.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-02)**:
+  //   - **hanyang 해시만 이동한다.** village(0681db44…)·town(bd6ba713…)·capital(ca415f99…)·
+  //     mja optin·snapshot 골든은 전부 불변이다. capital worker fixture 는 궁을 켜지 않으므로
+  //     궁 변경이 그 씬에 닿지 않는다는 것이 같은 실행 안에서 확인된다.
+  //   - proxy 는 한양만 이동(6bd5f82a → 5511f335) — 필지·지붕 OBB 가 실제로 움직였으므로
+  //     정상이다. village/town/capital 프록시 3종은 같은 실행에서 불변.
+  //   - **objects·triangles 도 이동한다**(hanyang 5541→5596 / 25,564,031→25,510,629).
+  //     이 라운드는 #29 처럼 그래프만 접는 변경이 아니라 **내용이 바뀌는 계획·기하 변경**이므로
+  //     그게 정상이다. 방향도 설명된다: 궁이 커져 삼각형이 늘고(궁 병합 904,508→921,424),
+  //     히어로가 관아로 대체되며 총 히어로 삼각형이 줄어(≈723k→581k) 순감했다. 오브젝트는
+  //     관아 4채·행각 세그먼트 증가분만큼 늘었다.
+  //   - worker == `?worker=0` 폴백 바이트 동일(아래 신 해시 양 경로 일치), async 불일치 0.
+  //   - 이 라운드의 `src/` 변경 7개 파일만 되돌리면 구 골든 9ff92c07… 이 재현된다
+  //     (실측: `git show HEAD:<file>` 로 되돌린 트리에서 재현 확인).
+  hanyang: 'd8620dc1:12769e21:213667c2:327079b3',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -425,7 +441,12 @@ const expectedProxyHashes = {
   //   (61c0a45 단독 측정에서 8266fb35 불변). 개수·안정 ID·격리 계약은 유지.
   // R4-B(2026-08-01): 남촌 중로를 하도 밖으로 물리는 재배선이 도성 필지·지붕 OBB 를 움직여
   //   한양만 이동. village proxy fef7a386 불변(판석교 재작은 proxy 를 건드리지 않는 증거).
-  hanyang: '6bd5f82a',
+  // #21 R5(2026-08-02): 한양만 이동. 궁역 앞 광장·궁장 밖 이격 링·관아 슬롯·도로 금지 구역이
+  //   도성 필지와 지붕 OBB 를 움직이므로 픽 프록시가 따라 움직인다. village/town/capital
+  //   프록시 3종은 같은 실행에서 불변이고(fef7a386 / 3f7f776c / 046ecd22), 이 라운드의
+  //   `src/` 7개 파일만 되돌린 트리에서 구 값 6bd5f82a 가 재현된다(실측 2026-08-02).
+  //   프록시 개수·안정 ID·격리 계약은 유지.
+  hanyang: '5511f335',
 };
 
 const server = await createServer({
