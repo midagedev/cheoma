@@ -13,7 +13,7 @@ import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const TAG = process.argv[2] || 'x';
-const OUT = process.argv[3] || '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/thatch';
+const OUT = process.argv[3] || join(ROOT, 'scratch', 'thatch');
 mkdirSync(OUT, { recursive: true });
 
 const MIME = {

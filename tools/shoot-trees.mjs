@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const dest = process.argv[2] === 'shots' ? 'shots' : 'scratch';
-const SCRATCH = '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/trees';
+const SCRATCH = join(ROOT, 'scratch', 'trees');
 const OUT = dest === 'shots' ? join(ROOT, 'shots') : SCRATCH;
 mkdirSync(OUT, { recursive: true });
 const PFX = dest === 'shots' ? 'trees-' : '';

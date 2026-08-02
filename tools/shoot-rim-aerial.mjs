@@ -17,7 +17,7 @@ import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verificati
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const OUT = process.env.CHEOMA_RIM_OUT
-  || '/private/tmp/claude-501/-Users-hckim-orca-workspaces-asiahouse-starfish/ab438db7-9318-4b2b-9d67-2426f5d51f63/scratchpad/rim-aerial';
+  || join(ROOT, 'scratch', 'rim-aerial');
 const timeout = Number(process.env.CHEOMA_RIM_TIMEOUT_MS) || 180_000;
 const filters = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
 // 기본 worker=0(결정론 변수 제거, 픽셀 불변). 한양 동기 forest 크런치가 타임아웃을 넘길 때

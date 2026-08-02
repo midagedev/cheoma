@@ -30,7 +30,7 @@ import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verificati
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const OUT = process.env.CHEOMA_CINE_OUT
-  || '/private/tmp/claude-501/-Users-hckim-orca-workspaces-asiahouse-starfish/ab438db7-9318-4b2b-9d67-2426f5d51f63/scratchpad/cine';
+  || join(ROOT, 'scratch', 'cine');
 const timeout = Number(process.env.CHEOMA_CINE_TIMEOUT_MS) || 120_000;
 const filters = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
 

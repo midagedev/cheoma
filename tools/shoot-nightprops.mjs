@@ -17,7 +17,7 @@ import { chromium } from 'playwright';
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = process.env.NIGHTPROPS_OUT
   ? (process.env.NIGHTPROPS_OUT === 'shots' ? join(ROOT, 'shots') : resolve(process.env.NIGHTPROPS_OUT))
-  : '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/nightprops';
+  : join(ROOT, 'scratch', 'nightprops');
 const PREFIX = process.env.NIGHTPROPS_OUT === 'shots' ? 'nightprops-' : '';
 mkdirSync(OUT, { recursive: true });
 

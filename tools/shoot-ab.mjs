@@ -33,7 +33,7 @@ import { band, diffStats, hueHistogram, hueStats, readPng, terciles } from './li
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const OUT = process.env.CHEOMA_AB_OUT
-  || '/private/tmp/claude-501/-Users-hckim-orca-workspaces-asiahouse-starfish/ab438db7-9318-4b2b-9d67-2426f5d51f63/scratchpad/shoot-ab';
+  || join(ROOT, 'scratch', 'shoot-ab');
 const timeout = Number(process.env.CHEOMA_AB_TIMEOUT_MS) || 180_000;
 
 // ---------------------------------------------------------------------------

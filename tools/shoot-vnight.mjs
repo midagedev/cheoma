@@ -19,7 +19,7 @@ import { chromium } from 'playwright';
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = process.env.VNIGHT_OUT
   ? (process.env.VNIGHT_OUT === 'shots' ? join(ROOT, 'shots') : resolve(process.env.VNIGHT_OUT))
-  : '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/vnight';
+  : join(ROOT, 'scratch', 'vnight');
 const PREFIX = process.env.VNIGHT_OUT === 'shots' ? 'vnight-' : '';
 mkdirSync(OUT, { recursive: true });
 

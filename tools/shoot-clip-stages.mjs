@@ -46,9 +46,27 @@ async function main() {
       url.searchParams.set('shot', '0');
       console.log(`→ ${id} ${url.search}`);
       await page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
-      // Allow village gen + auto boot.
-      const waitMs = stage.boot === 'hero' ? 18_000 : 12_000;
+      // Allow village gen + auto boot. CHEOMA_CLIP_WAIT_MS overrides when a
+      // stage needs a longer settle (e.g. hero assemble under slow headless GL).
+      const waitMs = Number(process.env.CHEOMA_CLIP_WAIT_MS)
+        || (stage.boot === 'hero' ? 18_000 : 12_000);
       await sleep(waitMs);
+      if (stage.boot === 'village-focus') {
+        // The focus dolly tracks its target parcel with the amber
+        // parcel-highlight marker and hides it on arrival. Under headless
+        // software GL the frame clock's 0.25 s spike clamp stretches the 1.9 s
+        // dolly to tens of wall seconds, so a fixed wait can capture the
+        // marker mid-flight (2026-08-02 README grid incident). Wait for the
+        // arrival signal itself: the highlight group turning invisible.
+        const settled = await page.waitForFunction(() => {
+          const e = window.__engine;
+          if (!e?.scene || !e.village?.focused?.()) return false;
+          let g = null;
+          e.scene.traverse((o) => { if (o.name === 'village-highlight') g = o; });
+          return !!g && g.visible === false;
+        }, null, { timeout: 120_000, polling: 500 }).then(() => true, () => false);
+        console.log(`  focus arrival ${settled ? 'settled (highlight cleared)' : 'TIMED OUT — frame may contain the amber marker'}`);
+      }
       // Force chrome / scene-guide off for clean stop frames.
       await page.addStyleTag({
         content: `

@@ -13,7 +13,7 @@ import { chromium } from 'playwright';
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = process.env.HANJI_OUT
   ? (process.env.HANJI_OUT === 'shots' ? join(ROOT, 'shots') : resolve(process.env.HANJI_OUT))
-  : '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/hanji';
+  : join(ROOT, 'scratch', 'hanji');
 const PREFIX = process.env.HANJI_OUT === 'shots' ? 'hanji-' : '';
 mkdirSync(OUT, { recursive: true });
 

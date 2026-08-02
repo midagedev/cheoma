@@ -3,13 +3,14 @@
 // 네트워크 실패(특히 .wasm)·콘솔 오류를 함께 기록. 결과 JSON 을 stdout + 파일로 출력.
 // 사용법: node tools/spike-libs.mjs
 import { createServer } from 'node:http';
+import { mkdirSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = process.env.SPIKE_OUT ||
-  '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/spike-results.json';
+  join(ROOT, 'scratch', 'spike-results.json');
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
@@ -53,6 +54,7 @@ try {
 }
 
 const report = { generatedAt: new Date().toISOString(), results, network: netlog };
+mkdirSync(dirname(OUT), { recursive: true });
 await writeFile(OUT, JSON.stringify(report, null, 2));
 console.log(JSON.stringify(report, null, 2));
 console.error('\nwrote', OUT);

@@ -18,7 +18,7 @@ import { launchVerificationBrowser, reportWebGLRenderer } from './lib/verificati
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_ROOT = join(ROOT, 'app');
 const OUT = process.env.CHEOMA_JOURNEY_OUT
-  || '/private/tmp/claude-501/-Users-hckim-orca-workspaces-asiahouse-starfish/ab438db7-9318-4b2b-9d67-2426f5d51f63/scratchpad/journey/storyboard';
+  || join(ROOT, 'scratch', 'journey', 'storyboard');
 const FRAMES = Number(process.env.CHEOMA_JOURNEY_FRAMES) || 28;
 const timeout = Number(process.env.CHEOMA_JOURNEY_TIMEOUT_MS) || 180_000;
 

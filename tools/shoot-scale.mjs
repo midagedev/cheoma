@@ -15,7 +15,7 @@ const args = process.argv.slice(2);
 const useTmp = args.includes('--tmp');
 const filter = args.find((a) => !a.startsWith('--')) || '';
 const OUT = useTmp
-  ? '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/scale'
+  ? join(ROOT, 'scratch', 'scale')
   : join(ROOT, 'shots');
 mkdirSync(OUT, { recursive: true });
 const prefix = useTmp ? '' : 'scale-';

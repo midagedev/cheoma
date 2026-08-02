@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 const { PNG } = createRequire(import.meta.url)('pngjs');
 
 const ROOT = resolve(import.meta.dirname, '..');
-const SCRATCH = '/private/tmp/claude-501/-Users-hckim-repo-asiahouse/7a15478e-68e3-4ad3-b08a-bdb86ae4fe92/scratchpad/fresnel';
+const SCRATCH = join(ROOT, 'scratch', 'fresnel');
 const SHOTS = join(ROOT, 'shots');
 mkdirSync(SCRATCH, { recursive: true });
 mkdirSync(SHOTS, { recursive: true });
