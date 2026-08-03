@@ -413,7 +413,15 @@ const expectedSceneHashes = {
   //     훨씬 무거우므로 기와 7채가 초가로 바뀌면 오브젝트가 크게 준다. 삼각형은 반대로
   //     궁 서편 채움(+144,802 — 순수 실측 919,904→1,064,706)이 그 감소분을 넘어서 순증했다.
   //   - worker == `?worker=0` 폴백 바이트 동일(아래 신 해시 양 경로 일치), async 불일치 0.
-  hanyang: '1bfc370b:58030e73:aea20b35:f8c3272d',
+  // R3-① 문루 공포대(2026-08-04, #23): 힌트 밴드 → 다포 포열(주포+간포, 외출목 2단,
+  //   외목도리) + 하층 판벽 상단을 창방 밑면까지 + 포벽 폐합(상층은 개방 유지). 성곽은
+  //   한양 전용이라 hanyang 해시만 이동(village/town/capital/mja/snapshot 전부 불변이 증거).
+  //   **단독 변인 증거(재기준 직전 실측)**: proxy c5517350 불변(계획·지붕 OBB 무이동),
+  //   objects 5358 불변(기존 병합 배치 흡수 — 드로우콜 델타 0의 독립 확인), triangles
+  //   25,598,200 → 25,612,936 = +14,736이 순수 노드 citywall 기하 실측 델타(렌더 +29,472의
+  //   절반, 그림자 패스 제외)와 정확히 일치. sync == 실제 module Worker == ?worker=0 폴백
+  //   바이트 동일, 비전 2라운드 SHIP(슬릿 폐합 확인 포함).
+  hanyang: 'f6513091:02c0a7ef:c9db0e76:423a44cb',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

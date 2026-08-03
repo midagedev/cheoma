@@ -436,48 +436,31 @@ function buildWaterGate(waterGate, M, wallSeed) {
   return g;
 }
 
-// 문루 한 층: 기둥열 + (하층)판벽 / (상층)난간·편액 + 공포 힌트 밴드. 실루엣 우선 — 창살·단청 없음.
+// 문루 한 층: 기둥열 + (하층)판벽 / (상층)난간·편액 + 다포계 공포대. 실루엣 우선 — 창살 없음.
+//   기둥은 층 상단까지 서지 않는다: 층 y밴드의 위 bracket.height 는 공포대가 쓰고, 기둥은 그 밑까지만
+//   선다(#23 R3-①). 층 높이·지붕 y·상층 바닥은 그래서 이 격상에 흔들리지 않는다.
 function addPavilionStorey(g, storey, M) {
   const hw = storey.width * 0.5, hd = storey.depth * 0.5;
-  const radius = Math.min(0.3, storey.height * 0.075);
-  const colH = storey.height;
-  const columns = [];
-  for (let i = 0; i < storey.columns; i++) {
-    columns.push(storey.columns === 1 ? 0 : -hw + (hw * 2) * i / (storey.columns - 1));
-  }
+  const radius = storey.columnRadius;
+  const colH = storey.height - storey.bracket.height;
+  const columns = storey.columnX;
   for (const x of columns) for (const sz of [-1, 1]) {
     const col = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.88, radius, colH, 6), M.woodMat);
     col.position.set(x, storey.y0 + colH / 2, sz * hd);
     col.castShadow = true; g.add(col);
   }
   // 기둥 머리초: 기둥 상부를 감는 짧은 채색 띠. 원통 uv 라 머리초 색선이 둘레로 돈다.
+  // 기둥머리가 곧 창방 밑면이므로 띠를 그 자리에 붙인다(예전엔 공포 힌트 밴드가 기둥 위쪽에
+  // 겹쳐 있어 머리초를 radius*2.2 내려 달았다).
   const headBandH = Math.min(colH * 0.22, radius * 4);
   for (const x of columns) for (const sz of [-1, 1]) {
     const band = new THREE.Mesh(
       new THREE.CylinderGeometry(radius * 1.04, radius * 1.04, headBandH, 8, 1, true),
       M.dancheongBeam);
-    band.position.set(x, storey.y0 + colH - headBandH * 0.5 - radius * 2.2, sz * hd);
+    band.position.set(x, storey.y0 + colH - headBandH * 0.5, sz * hd);
     band.castShadow = true; g.add(band);
   }
-  // 공포 힌트: 창방·평방 두 켜 + 기둥 머리 소로 블록. 기둥과 지붕이 직결로 붙어 보이던 이음을 끊는다.
-  // 궁의 다포 어휘를 기하로 축약하고 채색은 dancheong 정책('city-gate' 모로)에서 받는다.
-  const architraveY = storey.y0 + colH - radius * 1.4;
-  for (const sz of [-1, 1]) {
-    const chang = new THREE.Mesh(
-      new THREE.BoxGeometry(storey.width + radius * 2, radius * 1.1, radius * 0.9), M.dancheongBeam);
-    chang.position.set(0, architraveY, sz * hd);
-    chang.castShadow = true; g.add(chang);
-    // 평방: 창방 위 한 켜(다포계 어휘). 얇게 얹어 수평 밴드가 두 줄로 읽힌다.
-    const pyeong = new THREE.Mesh(
-      new THREE.BoxGeometry(storey.width + radius * 3, radius * 0.62, radius * 1.15), M.dancheongBeam);
-    pyeong.position.set(0, architraveY + radius * 0.9, sz * hd);
-    pyeong.castShadow = true; g.add(pyeong);
-  }
-  for (const x of columns) for (const sz of [-1, 1]) {
-    const soro = new THREE.Mesh(new THREE.BoxGeometry(radius * 2.6, radius * 1.5, radius * 2.6), M.dancheongBracket);
-    soro.position.set(x, architraveY + radius * 1.9, sz * hd);
-    soro.castShadow = true; g.add(soro);
-  }
+  addPavilionBrackets(g, storey, M);
   if (storey.rail > 0) {
     // 난간: 상층 둘레 낮은 띠(원경에서는 상층 바닥선을 만드는 실루엣 요소).
     for (const [w, d, x, z] of [
@@ -496,8 +479,10 @@ function addPavilionStorey(g, storey, M) {
     return;
   }
   // 하층 벽체: 기둥 사이 판벽(판문·회벽으로 읽히는 면). 기둥 뒤로 물러나 기둥열이 살아난다.
-  const panelH = colH * 0.86;
-  const panelY = storey.y0 + panelH * 0.5;
+  //   높이는 계획이 준다 — 창방 밑면까지 올라가 위 포벽과 함께 하층 파사드를 폐합한다(#23 R3-①
+  //   후속: 예전 0.86·colH 는 공포대 격상으로 짧아진 기둥 위에 가로 슬릿을 남겼다).
+  const panelH = storey.panel.height;
+  const panelY = storey.panel.y0 + panelH * 0.5;
   for (let i = 0; i < columns.length - 1; i++) {
     const span = columns[i + 1] - columns[i] - radius * 2;
     if (span <= 0.1) continue;
@@ -512,6 +497,82 @@ function addPavilionStorey(g, storey, M) {
     panel.position.set(sx * (hw - radius * 0.6), panelY, 0);
     panel.castShadow = panel.receiveShadow = true; g.add(panel);
   }
+}
+
+// 다포계 공포대 한 층(#23 R3-①). 예전 구현은 창방·평방 두 켜 + 기둥머리 소로 블록뿐이어서, 처마는
+//   깊은데 그 아래 받치는 것이 없어 지붕이 기둥에 직결된 것처럼 읽혔다(구한말 성문 사진 대비 R3
+//   비전 심각도 1위). 여기서는 그 밴드를 실제 포열로 바꾼다:
+//     · 기둥 위 **주포** + 주칸 등분 **간포**(하층 1구/칸, 상층 2구/칸 — 포 밀도가 상층 위계)
+//     · 출목마다 밖으로 더 나가는 **살미** + 그 끝 **소로** → 계단형 돌출이 측면 실루엣을 만든다
+//     · 출목 단마다 수평 **행공** 런, 최외 출목 위에 **외목도리** 런 → 처마 밑 명암이 층으로 갈린다
+//     · 하층만 포 사이를 **포벽**으로 막는다(상층은 개방 정자라 포 사이 하늘이 정당하다)
+//   부재 수를 아끼기 위해 첨차·행공은 포마다가 아니라 면당 연속 런 하나다(중경에서 같은 수평선으로
+//   읽히고, 포 하나당 상자 5개로 4문 반복 예산에 들어간다). 재질은 기존 dancheong 두 개만 쓰므로
+//   병합 후 드로우콜·프로그램 델타는 0 이다 — 새 재질은 절대 만들지 않는다.
+function addPavilionBrackets(g, storey, M) {
+  const B = storey.bracket;
+  const hw = storey.width * 0.5, hd = storey.depth * 0.5;
+  const box = (w, h, d, x, y, z, mat) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true; g.add(mesh);
+  };
+  // ── 수평 런: 창방·평방(기둥열 위) + (하층)포벽 + 출목별 행공 + 외목도리. 네 면 모두 두르므로
+  //    코너에서 밴드가 끊기지 않는다(x런과 z런이 out 만큼 겹치지만 같은 불투명 목부재라 무해하다).
+  //    grow = 면 방향 길이 여장, out = 기둥 중심선 밖 오프셋. 포벽만 둘이 다르다 — 길이는 코너
+  //    기둥 바깥면까지 늘리되(파사드 폐합) 벽면은 기둥 중심선에 서서 포가 그 앞으로 나온다.
+  const runs = [
+    { y: B.changbang.y + B.changbang.height * 0.5, h: B.changbang.height, t: B.changbang.thickness, out: B.changbang.overhang, grow: B.changbang.grow, mat: M.dancheongBeam },
+    { y: B.pyeongbang.y + B.pyeongbang.height * 0.5, h: B.pyeongbang.height, t: B.pyeongbang.thickness, out: B.pyeongbang.overhang, grow: B.pyeongbang.grow, mat: M.dancheongBeam },
+  ];
+  if (B.infill) {
+    // 포벽: 판벽과 같은 재질이라 하층 벽면이 창방·평방 뒤로 그대로 이어져 올라간 것으로 읽힌다.
+    runs.push({
+      y: B.infill.y + B.infill.height * 0.5, h: B.infill.height, t: B.infill.thickness,
+      out: B.infill.overhang, grow: B.infill.grow, mat: M.woodMat,
+    });
+  }
+  for (const step of B.steps) {
+    // 행공: 소로 위에 얹혀 도리 방향으로 교차하는 가로 부재.
+    runs.push({
+      y: step.y + step.height * (B.haenggong.base + B.haenggong.height * 0.5),
+      h: step.height * B.haenggong.height, t: B.arm, out: step.out, grow: step.grow,
+      mat: M.dancheongBracket,
+    });
+  }
+  runs.push({ y: B.purlin.y + B.purlin.height * 0.5, h: B.purlin.height, t: B.purlin.thickness, out: B.purlin.out, grow: B.purlin.grow, mat: M.dancheongBeam });
+  for (const run of runs) {
+    for (const sz of [-1, 1]) {
+      box(storey.width + run.grow * 2, run.h, run.t, 0, run.y, sz * (hd + run.out), run.mat);
+    }
+    for (const sx of [-1, 1]) {
+      box(run.t, run.h, storey.depth + run.grow * 2, sx * (hw + run.out), run.y, 0, run.mat);
+    }
+  }
+  // ── 포 유닛: 주두 하나 + 출목마다 살미 + 소로. 간포는 주포와 같은 부재를 쓰되 배치만 주칸 등분이다.
+  const unit = (x, z, outX, outZ) => {
+    box(B.judu.width, B.judu.height, B.judu.width, x, B.judu.y + B.judu.height * 0.5, z, M.dancheongBracket);
+    for (const step of B.steps) {
+      const tail = B.arm;                       // 평방 안쪽으로 물린 살미 꼬리
+      const len = step.out + tail;
+      const armH = step.height * B.salmi.height;
+      const cy = step.y + step.height * (B.salmi.base + B.salmi.height * 0.5);
+      const mid = (step.out - tail) * 0.5;
+      if (outZ) {
+        box(B.arm, armH, len, x, cy, z + outZ * mid, M.dancheongBracket);
+      } else {
+        box(len, armH, B.arm, x + outX * mid, cy, z, M.dancheongBracket);
+      }
+      // 살미 끝 소로: 그 위 행공을 받는 작은 받침 블록. 근경에서 포 하나하나를 낱개로 읽게 한다.
+      const sw = B.soro.width;
+      box(sw, step.height * B.soro.height, sw,
+        x + (outX ? outX * step.out : 0),
+        step.y + step.height * (B.soro.base + B.soro.height * 0.5),
+        z + (outZ ? outZ * step.out : 0), M.dancheongBracket);
+    }
+  };
+  for (const post of B.posts.x) for (const sz of [-1, 1]) unit(post.at, sz * hd, 0, sz);
+  for (const post of B.posts.z) for (const sx of [-1, 1]) unit(sx * hw, post.at, sx, 0);
 }
 
 // 한 성문: 지형에 앉힌 배터 석축 육축(2켜 + 코니스) + 반원 홍예 통로 + 중층 문루 + 육축 둘레 여장.

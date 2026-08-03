@@ -315,7 +315,248 @@ function assertGatePavilion(gate, structure, masonry, label) {
     const spans = cityWallMerlonSpans(side.length);
     invariant(spans.count > 0, `${tag}: parapet side ${side.axis}${side.sign} has no merlon`);
   }
+  assertGateBrackets(pavilion, tag);
   return pavilion;
+}
+
+// ── 다포계 공포대 계약(#23 R3-①) ─────────────────────────────────────────────
+// 성문 문루는 다포계다. 예전 구현은 창방·평방 두 켜 + 기둥머리 소로뿐이어서 처마 밑에 받치는 것이
+// 없었고, 구한말 성문 사진 대비 R3 비전이 심각도 1위로 꼽았다. 여기서 못 박는 것은 "포가 몇 개
+// 보이는가"가 아니라 **처마·기둥·출목이 서로 정합한가**다 — 그래서 브라우저 없이 판정된다.
+function assertGateBrackets(pavilion, tag) {
+  const P = CITY_GATE_PAVILION;
+  const [lower, upper] = pavilion.storeys;
+  for (const [i, storey] of pavilion.storeys.entries()) {
+    const B = storey.bracket;
+    const label = `${tag}/${storey.tier}`;
+    invariant(B, `${label}: 공포대 spec missing — 문루가 창방·평방 힌트 밴드로 되돌아갔다`);
+    invariant(B.tiers >= 2, `${label}: ${B.tiers} 출목 — 다포로 읽히려면 외출목 2단 이상이다`);
+    invariant(B.inter >= 1, `${label}: 간포 ${B.inter} — 기둥 위 주포만이면 주심포이지 다포가 아니다`);
+
+    // ① 공포대는 층 y밴드의 **위**를 쓰고 기둥이 그만큼 짧아진다. 그래서 지붕 y·상층 바닥이
+    //    이 격상에 흔들리지 않는다(밴드 상단 = 층 상단 = 지붕 처마선, 부동소수 오차 0).
+    invariant(B.y1 === storey.y1,
+      `${label}: 공포대 top ${B.y1} ≠ storey top ${storey.y1} — 지붕 y 가 밀린다`);
+    invariant(near(B.y0 + B.height, storey.y1, 1e-9),
+      `${label}: 공포대 밑면+높이가 층 상단과 어긋난다 (${B.y0 + B.height} vs ${storey.y1})`);
+    invariant(near(B.height, storey.height * P.bracketBandRatio, 1e-9),
+      `${label}: 공포대 높이가 저작 비율을 벗어났다`);
+    invariant(B.height / storey.height >= 0.20 && B.height / storey.height <= 0.32,
+      `${label}: 공포대/층 높이 ${(B.height / storey.height).toFixed(3)} — 0.20~0.32 밖이면 `
+      + '기둥이 사라지거나(과대) 힌트 밴드로 되돌아간다(과소)');
+    const columnHeight = storey.height - B.height;
+    invariant(columnHeight > B.height,
+      `${label}: 기둥 ${columnHeight.toFixed(2)}m 가 공포대 ${B.height.toFixed(2)}m 보다 낮다`);
+
+    // ② 포 배치: 주포는 기둥 중심에 **정확히** 얹히고, 간포는 주칸 등분이라 간격이 완전 균등하다.
+    const mains = B.posts.x.filter((post) => post.main).map((post) => post.at);
+    invariant(mains.length === storey.columns && storey.columnX.length === storey.columns,
+      `${label}: 주포 ${mains.length} vs 기둥 ${storey.columns}`);
+    for (const [k, at] of mains.entries()) {
+      invariant(at === storey.columnX[k], `${label}: 주포 ${k} 가 기둥에서 어긋났다`);
+    }
+    invariant(B.posts.x.length === storey.columns + B.inter * (storey.columns - 1),
+      `${label}: 포 수가 주칸 등분과 맞지 않는다`);
+    const gaps = B.posts.x.slice(1).map((post, k) => post.at - B.posts.x[k].at);
+    const spread = Math.max(...gaps) - Math.min(...gaps);
+    invariant(spread <= 1e-9, `${label}: 포 간격 불균등 ${spread}`);
+    const spacing = gaps[0];
+    invariant(B.judu.width / spacing >= 0.30 && B.judu.width / spacing <= 0.55,
+      `${label}: 주두폭/포간격 ${(B.judu.width / spacing).toFixed(3)} — 0.30 밑이면 포벽만 보이고 `
+      + '0.55 위면 포가 붙어 한 덩이 띠가 된다(포열 리듬 소실)');
+    invariant(B.posts.z.every((post) => !post.main),
+      `${label}: 좌·우 면 포에 코너가 남았다 — 앞·뒤 면 포와 부재가 겹친다`);
+
+    // ③ 출목: 단마다 단조 증가하고 최외 단이 외목도리 자리다.
+    invariant(B.steps.length === B.tiers, `${label}: 출목 단 수 불일치`);
+    for (let k = 1; k < B.steps.length; k++) {
+      invariant(B.steps[k].out > B.steps[k - 1].out,
+        `${label}: 출목 ${k} 가 앞 단보다 안으로 들어갔다 — 계단형 돌출이 사라진다`);
+      invariant(B.steps[k].y > B.steps[k - 1].y, `${label}: 출목 ${k} 가 위로 오르지 않는다`);
+    }
+    invariant(near(B.steps[B.steps.length - 1].out, B.tipOut, 1e-9)
+      && near(B.purlin.out, B.tipOut, 1e-9),
+    `${label}: 외목도리가 최외 출목 위에 없다`);
+    // 살미 → 소로 → 행공 적층 순서(부재가 서로를 받친다). 순서가 뒤집히면 소로가 공중에 뜬다.
+    invariant(B.salmi.base < B.soro.base && B.soro.base < B.haenggong.base,
+      `${label}: 살미·소로·행공 적층 순서가 뒤집혔다`);
+    invariant(B.haenggong.base + B.haenggong.height <= 1.10,
+      `${label}: 행공이 다음 출목 단을 넘어간다`);
+    // 수평 런은 코너 기둥 머리를 덮을 만큼 길다(짧으면 코너에 배경이 보이는 슬리버가 남는다).
+    for (const [name, run] of [
+      ['창방', B.changbang], ['평방', B.pyeongbang], ['외목도리', B.purlin],
+      ...(B.infill ? [['포벽', B.infill]] : []),
+      ...B.steps.map((step) => [`행공${step.index}`, step]),
+    ]) {
+      invariant(run.grow >= storey.columnRadius - 1e-12,
+        `${label}: ${name} 런 여장 ${run.grow} < 기둥 반경 ${storey.columnRadius}`);
+    }
+
+    // ④ 처마 정합: 처마는 외목도리 **밖으로** 캔틸레버해야 하고, 그 여장이 출목 총거리와 같은 급이다
+    //    (서까래가 외목도리를 지나 대략 출목만큼 더 나간다). 이 라운드에서 처마 값은 바꾸지 않았다 —
+    //    실측 결과 저작된 lowerEave/upperEave 가 이미 2출목이 받칠 깊이였기 때문이다.
+    const roof = pavilion.roofs[i];
+    const eave = (roof.width - storey.width) / 2;
+    invariant(near((roof.depth - storey.depth) / 2, eave, 1e-9),
+      `${label}: 처마가 방향별로 다르다`);
+    invariant(eave > B.purlin.out,
+      `${label}: 처마 ${eave.toFixed(2)}m 가 외목도리 ${B.purlin.out.toFixed(2)}m 밖으로 나가지 않는다`);
+    const cantilever = (eave - B.purlin.out) / B.purlin.out;
+    invariant(cantilever >= 0.7 && cantilever <= 1.6,
+      `${label}: 외목도리 밖 캔틸레버/출목 ${cantilever.toFixed(3)} — 0.7~1.6 밖이면 처마와 공포가 `
+      + '서로 다른 건물의 비례다');
+    // ⑤ 지붕면이 공포대를 관통하지 않는다. buildGateRoof 는 처마를 roof.y + height*0.20 에 두고
+    //    중앙만 height*0.06 처지므로, 최저점조차 밴드 상단(=roof.y) 위여야 한다.
+    const eaveLow = roof.height * 0.20 - roof.height * 0.06;
+    invariant(eaveLow > 0,
+      `${label}: 지붕 처마 최저점이 공포대 상단을 파고든다 (${eaveLow.toFixed(3)}m)`);
+  }
+
+  // ⑥ 상층 위계: 포 밀도가 하층보다 낮아지면 위계가 뒤집힌다(출목·단청 rank 는 별 계약).
+  invariant(upper.bracket.inter >= lower.bracket.inter,
+    `${tag}: 상층 간포 ${upper.bracket.inter} < 하층 ${lower.bracket.inter} — 위계 역전`);
+  return assertPavilionFacadeClosure(pavilion, tag);
+}
+
+// ── 하층 파사드 폐합(#23 R3-① 후속) ─────────────────────────────────────────
+// 공포대가 층 y밴드의 위를 쓰면서 하층 벽체 상단이 내려갔고, 그 결과 판벽 위·포열 사이로 배경
+// 하늘이 관통하는 가로 슬릿이 생겼다(비전 계측 2026-08-04: forecourt-day 1440×900 y=505–509 행의
+// 19~27% 가 순수 하늘색, y=488–493 은 행당 26~56px). 다포계 하층은 포벽이 있는 쪽이 고증상 맞고
+// 상층은 개방 정자라 포 사이 하늘이 정당하다 — 그래서 계약은 "하층 폐합 + 상층 개방"이다.
+//
+// 판정 방법: 파사드를 **수평 레이로 훑는다.** 부재를 파사드 평면에 투영해 (가로 구간 × y구간)
+// 사각형으로 모으고, y 브레이크포인트 사이 구간마다 가로 커버리지를 정확히 잰다(구간 안에서는
+// 커버리지가 상수이므로 표본이 아니라 해석이다). 렌더러가 그리는 것과 같은 수를 보게 하려고
+// 판벽 폭·기둥 반경·런 여장(grow)은 모두 순수 spec 에서 가져온다.
+//   모델은 의도적으로 **보수적**이다: 그 면과 평행한 부재만 센다. 직교면 런·코너 포도 실제로는
+//   레이를 막지만(코너에서 미터 이음), 그것까지 세면 렌더러 로컬 상수(판벽 두께·인셋)를 모델에
+//   복제해야 한다. 덜 세는 쪽은 통과를 조작할 수 없으므로 계약이 약해지지 않는다.
+function facadeSpans(storey, axis) {
+  const half = axis === 'x' ? storey.width * 0.5 : storey.depth * 0.5;
+  const other = axis === 'x' ? storey.depth * 0.5 : storey.width * 0.5;
+  const r = storey.columnRadius;
+  const B = storey.bracket;
+  const colH = storey.height - B.height;
+  const rects = [];
+  const add = (a, b, y0, y1, kind) => {
+    if (b > a && y1 > y0) rects.push({ a, b, y0, y1, kind });
+  };
+  // 기둥: x면은 주칸 격자 그대로, z면(측면)은 코너 두 개만 보인다.
+  const columnAt = axis === 'x' ? storey.columnX : [-half, half];
+  for (const at of columnAt) add(at - r, at + r, storey.y0, storey.y0 + colH, 'column');
+  // 판벽: 기둥 사이를 정확히 채운다(렌더러와 같은 span<=0.1 스킵 조건까지 모사한다).
+  if (storey.panel) {
+    if (axis === 'x') {
+      for (let i = 0; i < storey.columnX.length - 1; i++) {
+        const span = storey.columnX[i + 1] - storey.columnX[i] - r * 2;
+        if (span <= 0.1) continue;
+        const mid = (storey.columnX[i] + storey.columnX[i + 1]) * 0.5;
+        add(mid - span * 0.5, mid + span * 0.5, storey.panel.y0, storey.panel.y1, 'panel');
+      }
+    } else {
+      const span = half * 2 - r * 2;
+      if (span > 0.1) add(-span * 0.5, span * 0.5, storey.panel.y0, storey.panel.y1, 'panel');
+    }
+  }
+  // 수평 런: 창방·평방·(하층)포벽·행공·외목도리. grow 만큼 면 방향으로 길어진다.
+  const runs = [
+    { y: B.changbang.y, h: B.changbang.height, grow: B.changbang.grow, kind: 'changbang' },
+    { y: B.pyeongbang.y, h: B.pyeongbang.height, grow: B.pyeongbang.grow, kind: 'pyeongbang' },
+  ];
+  if (B.infill) {
+    runs.push({ y: B.infill.y, h: B.infill.height, grow: B.infill.grow, kind: 'infill' });
+  }
+  for (const step of B.steps) {
+    runs.push({
+      y: step.y + step.height * B.haenggong.base, h: step.height * B.haenggong.height,
+      grow: step.grow, kind: 'haenggong',
+    });
+  }
+  runs.push({ y: B.purlin.y, h: B.purlin.height, grow: B.purlin.grow, kind: 'purlin' });
+  for (const run of runs) add(-half - run.grow, half + run.grow, run.y, run.y + run.h, run.kind);
+  // 포 유닛: 주두 + 출목별 살미·소로. x면 포는 posts.x, z면 포는 posts.z 를 쓴다.
+  const posts = axis === 'x' ? B.posts.x : B.posts.z;
+  for (const post of posts) {
+    add(post.at - B.judu.width * 0.5, post.at + B.judu.width * 0.5,
+      B.judu.y, B.judu.y + B.judu.height, 'judu');
+    for (const step of B.steps) {
+      const armH = step.height * B.salmi.height;
+      const cy = step.y + step.height * B.salmi.base;
+      add(post.at - B.arm * 0.5, post.at + B.arm * 0.5, cy, cy + armH, 'salmi');
+      const sy = step.y + step.height * B.soro.base;
+      add(post.at - B.soro.width * 0.5, post.at + B.soro.width * 0.5,
+        sy, sy + step.height * B.soro.height, 'soro');
+    }
+  }
+  return { rects, limit: half + r, other };
+}
+
+// 한 y구간의 가로 커버리지: 파사드 실루엣 폭(코너 기둥 바깥면까지) 안에서 불투과 구간의 합.
+function facadeCoverageAt(model, y) {
+  const spans = model.rects
+    .filter((rect) => rect.y0 <= y && y <= rect.y1)
+    .map((rect) => [Math.max(rect.a, -model.limit), Math.min(rect.b, model.limit)])
+    .filter(([a, b]) => b > a)
+    .sort((p, q) => p[0] - q[0]);
+  let covered = 0, cursor = -model.limit;
+  for (const [a, b] of spans) {
+    if (b <= cursor) continue;
+    covered += b - Math.max(a, cursor);
+    cursor = b;
+  }
+  return covered / (model.limit * 2);
+}
+
+function facadeCoverageProfile(storey, axis) {
+  const model = facadeSpans(storey, axis);
+  const top = storey.bracket.y1;
+  const edges = new Set([storey.y0, top]);
+  for (const rect of model.rects) {
+    for (const y of [rect.y0, rect.y1]) if (y > storey.y0 && y < top) edges.add(y);
+  }
+  const sorted = [...edges].sort((a, b) => a - b);
+  const bands = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const y0 = sorted[i], y1 = sorted[i + 1];
+    if (y1 - y0 < 1e-9) continue;
+    bands.push({ y0, y1, coverage: facadeCoverageAt(model, (y0 + y1) * 0.5) });
+  }
+  let min = { coverage: Infinity };
+  let openHeight = 0;
+  for (const band of bands) {
+    if (band.coverage < min.coverage) min = band;
+    if (band.coverage < 1 - 1e-9) openHeight += band.y1 - band.y0;
+  }
+  return { bands, min, openHeight, limit: model.limit };
+}
+
+function assertPavilionFacadeClosure(pavilion, tag) {
+  const rows = [];
+  for (const storey of pavilion.storeys) {
+    for (const axis of ['x', 'z']) {
+      const profile = facadeCoverageProfile(storey, axis);
+      const label = `${tag}/${storey.tier}/${axis}면`;
+      rows.push({ tier: storey.tier, axis, ...profile });
+      if (storey.panel) {
+        // 하층: 데크에서 처마선까지 어느 높이에서도 배경이 보이지 않는다(포벽 포함 커버리지 100%).
+        invariant(profile.min.coverage >= 1 - 1e-9,
+          `${label}: 파사드 커버리지 ${(profile.min.coverage * 100).toFixed(1)}% `
+          + `(y ${profile.min.y0?.toFixed(3)}~${profile.min.y1?.toFixed(3)}, 개방 총높이 `
+          + `${profile.openHeight.toFixed(3)}m) — 하층 공포대 아래로 배경 하늘이 관통하는 `
+          + '가로 슬릿이다. 포벽(bracket.infill)·판벽 상단(storey.panel)을 확인하라');
+        invariant(profile.openHeight === 0, `${label}: 개방 구간 ${profile.openHeight}m 잔존`);
+      } else {
+        // 상층은 개방 정자다 — 포 사이가 다 막히면 누각이 벽체 상자가 된다.
+        const stackY0 = storey.bracket.y0
+          + storey.bracket.changbang.height + storey.bracket.pyeongbang.height;
+        const openInStack = profile.bands.some((band) => band.coverage < 1 - 1e-9
+          && band.y0 >= stackY0 - 1e-9);
+        invariant(openInStack, `${label}: 상층 포열 구간이 폐합됐다 — 개방 정자가 아니다`);
+        invariant(profile.openHeight > 0, `${label}: 상층 파사드에 개방 구간이 없다`);
+      }
+    }
+  }
+  return rows;
 }
 
 // ── R3 2라운드: 근경 표면 계약 ────────────────────────────────────────────────
@@ -1100,10 +1341,13 @@ const defaultSegments = sampleCityWallSegments(defaultWall, defaultPlan.site);
 const defaultMerlons = assertMerlonBlocks(defaultSegments, 'default hanyang', defaultWall.seed);
 let gateParapetTriangles = 0;
 let gateMerlons = 0;
+const closureRows = [];
 for (const gate of defaultWall.gates) {
   const structure = cityGateStructureProfile(gate, defaultPlan.site);
   const masonry = cityGateMasonryProfile(gate, defaultPlan.site, structure);
   const pavilion = cityGatePavilionProfile(gate, structure, masonry);
+  closureRows.push(...assertPavilionFacadeClosure(pavilion, `default hanyang/${gate.name}`)
+    .map((row) => ({ gate: gate.name, ...row })));
   for (const side of pavilion.parapet.sides) {
     const spans = cityWallMerlonSpans(side.length);
     gateMerlons += spans.count;
@@ -1115,6 +1359,14 @@ const merlonTriangles = defaultMerlons.triangles + gateParapetTriangles;
 invariant(merlonTriangles <= 60000,
   `default hanyang: 여장 triangle budget exceeded (${merlonTriangles})`);
 const merlonCount = defaultMerlons.runs.reduce((sum, run) => sum + run.count, 0);
+// 파사드 폐합 실측 요약: 하층은 최저 커버리지 100%, 상층은 개방 총높이가 남는다.
+const lowerRows = closureRows.filter((row) => row.tier === 'lower');
+const upperRows = closureRows.filter((row) => row.tier === 'upper');
+const closureSummary = `문루 파사드 하층 최저 커버리지 `
+  + `${(Math.min(...lowerRows.map((row) => row.min.coverage)) * 100).toFixed(1)}% / `
+  + `개방 ${Math.max(...lowerRows.map((row) => row.openHeight)).toFixed(3)}m, `
+  + `상층 개방 ${Math.min(...upperRows.map((row) => row.openHeight)).toFixed(3)}~`
+  + `${Math.max(...upperRows.map((row) => row.openHeight)).toFixed(3)}m`;
 
 // 렌더러는 이 순수 spec 을 소비해야 한다. 옛 박스 상인방·연속 여장 프리즘·단층 콜로네이드가
 // 남아 있으면 형태 격상이 무효다(브라우저 없이 잡을 수 있는 최소 회귀 가드).
@@ -1134,6 +1386,16 @@ for (const consumed of [
   'cityStoneTone',
   'CITY_STONE_VALUES',
   'cityWallMerlonLoophole',
+  // #23 R3-①: 다포계 공포대. 포열·출목 좌표는 순수 profile 이 주고 렌더러는 그것만 소비한다.
+  'storey.bracket',
+  'storey.columnX',
+  'addPavilionBrackets',
+  'B.posts',
+  'B.steps',
+  // 후속 라운드: 하층 폐합. 판벽 상단·기둥 반경·포벽은 렌더러가 스스로 고쳐 쓰지 않고 계획값을 쓴다.
+  'B.infill',
+  'storey.panel',
+  'storey.columnRadius',
 ]) {
   invariant(citywallSource.includes(consumed),
     `citywall.js does not consume ${consumed} — R3 masonry/pavilion spec is unrendered`);
@@ -1142,6 +1404,16 @@ invariant(!/BoxGeometry\(w \+ pierW/.test(citywallSource),
   'citywall.js still builds the box lintel instead of a 홍예 arch');
 invariant(!citywallSource.includes('cityWallSegmentCapProfile'),
   'citywall.js still lays a continuous 여장 prism per segment');
+// 옛 힌트 밴드는 기둥 상부에 겹쳐 놓은 architraveY 한 자리에서 창방·평방·소로를 다 만들었다.
+invariant(!/\barchitraveY\b/.test(citywallSource),
+  'citywall.js still builds the 공포 힌트 band instead of a 다포 포열 (#23 R3-①)');
+// 판벽 높이를 렌더러가 기둥 높이의 분율로 되저작하면 공포대 밑에 다시 슬릿이 열린다.
+invariant(!/panelH\s*=\s*colH\s*\*/.test(citywallSource),
+  'citywall.js re-authors 판벽 height as a fraction of the column — 공포대 밑에 가로 슬릿이 열린다');
+// 공포는 기존 dancheong 두 재질만 쓴다 — 새 재질은 프로그램 계열과 병합 드로우콜을 늘린다.
+invariant(!/new THREE\.MeshStandardMaterial[^]*?bracket/i.test(
+  citywallSource.slice(citywallSource.indexOf('function addPavilionBrackets'))),
+'citywall.js allocates a bracket-local material — 공포는 dancheongBeam/dancheongBracket 만 쓴다');
 
 // 톤 통일은 "같은 값을 두 재질에 적어서"가 아니라 **석재 재질이 하나뿐**이라 구성상 보장된다.
 // 스무딩된 정점 노멀이 수직면을 하늘 쪽으로 기울여 성벽만 밝게 뜨던 것이 근본 원인이라
@@ -1191,4 +1463,4 @@ const forecourtAreas = forecourtRows.map((r) => r.area);
 const forecourtSummary = `${forecourtRows.length} forecourts `
   + `${Math.round(Math.min(...forecourtAreas))}~${Math.round(Math.max(...forecourtAreas))} m2`;
 
-console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary})`);
+console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary}, ${closureSummary})`);

@@ -142,6 +142,35 @@ export const CITY_GATE_PAVILION = Object.freeze({
   upperRoofPitch: 0.42,
   minSpan: 2.2,
   maxColumns: 15,
+  // ── 공포대(다포계 포열) — #23 R3-① ──────────────────────────────────────────
+  //   성문 문루는 다포계다: 기둥 위 주포만이 아니라 **주칸에도 간포**가 놓이고, 출목마다 계단형으로
+  //   내밀어 처마를 받는다. 부재 재현이 아니라 중경(문전 마당·드론 저공)에서 포열의 리듬과 출목
+  //   층급이 실루엣·명암으로 읽히는 축약이다(docs/look-grammar.md 실루엣 우선).
+  //
+  //   **처마 내밀기는 이 라운드에서 바꾸지 않았다.** 실측 결과 lowerEave/upperEave 는 이미 2출목
+  //   공포대가 받칠 수 있는 깊이였다 — 아래 bracketTipRatio 규칙(최외 출목 거리 ≈ 공포대 높이)으로
+  //   하층 최외 출목이 0.94m 이므로 서까래가 그 두 배까지 내미는 처마는 1.87m 이고, 저작값은
+  //   1.9m 다(상층은 0.75m → 1.51m 대 저작값 1.7m 로 이미 더 깊다). 실측 비도 주칸의 0.49~0.61,
+  //   기둥 높이의 0.53~0.59 로 얕지 않았다. 얕게 **읽혔던** 원인은 깊이가 아니라 그 아래가 창방·평방
+  //   두 켜뿐이어서 처마를 받는 것이 없었다는 것이다. 여기서 고치는 것은 그 받침이다.
+  bracketBandRatio: 0.26,   // 공포대 높이 / 층 높이. 기둥이 그만큼 짧아지고 층 y밴드·지붕 y는 불변
+  bracketTiers: 2,          // 외출목 단수(2출목). 궁 정전급(3출목 이상) 아래 위계를 지킨다
+  bracketInterLower: 1,     // 하층 주칸당 간포 수
+  bracketInterUpper: 2,     // 상층 주칸당 간포 수 — 포 밀도가 상층 위계를 올린다(단청 rank 는 불변)
+  bracketTipRatio: 1.0,     // 최외 출목 거리 / 공포대 높이 (출목 한 단이 한 켜만큼 내민다)
+  // 주두 폭은 포 간격의 1/3~1/2 이어야 포열이 리듬으로 읽힌다 — 더 좁으면 포벽만 보이고, 더 넓으면
+  //   포가 붙어 한 덩이 띠가 된다. 실측 결과 이 값에서 주두폭/포간격 = 0.33~0.47 이 나온다.
+  bracketPostRatio: 0.36,   // 주두·소로 폭 / 공포대 높이
+  bracketArmRatio: 0.20,    // 첨차·살미 두께 / 공포대 높이
+  // 하층 폐합(#23 R3-① 후속). 다포계 하층은 **포벽**(포 사이를 막는 얇은 회벽·판벽)이 있는 쪽이
+  //   고증상 맞고, 상층은 개방 정자라 포 사이로 하늘이 보이는 것이 정당하다. 공포대가 층 y밴드의
+  //   위를 쓰면서 기둥이 짧아졌으므로, 판벽이 예전 비율(기둥의 0.86)에 머물면 그 0.14 와 포열
+  //   사이가 배경 하늘이 관통하는 가로 슬릿이 된다(비전 계측 2026-08-04: forecourt-day 1440×900
+  //   에서 y=505–509 행의 19~27% 가 순수 하늘색, y=488–493 은 행당 26~56px). 그래서 하층 판벽은
+  //   창방 밑면까지 올라가고 포열 구간은 포벽이 막는다 — 하층 파사드는 데크에서 처마선까지 폐합이다.
+  bracketInfillArmK: 1,     // 포벽 두께 / 첨차 두께(얇은 벽면 — 포는 그 앞으로 읽힌다)
+  columnRadiusK: 0.075,     // 기둥 반지름 / 층 높이
+  columnRadiusMax: 0.3,
 });
 
 // 수문(水門) — 개천이 성벽을 지나는 통과부. 고증: 오간수문은 처음 홍예 3개였고 1421년 범람 뒤
@@ -1478,6 +1507,92 @@ export function cityGateMasonryProfile(gate, site, structure = cityGateStructure
   };
 }
 
+// 문루 한 층의 공포대(다포계 포열) 스펙 — Three 없는 순수 수치. 층 y밴드 안의 **상단**을 공포대가
+//   쓰고 기둥이 그만큼 짧아지므로, 층 높이·지붕 y·상층 바닥은 이 값에 영향받지 않는다.
+//   좌표계: `out` 은 기둥 중심선 밖 수평 거리(양수 = 바깥), y 는 절대 높이.
+//   포 배치: 앞·뒤 면은 기둥 격자(주포) + 주칸 등분(간포), 좌·우 면은 코너를 뺀 등분점만 — 코너는
+//   앞·뒤 면 포가 이미 차지하므로 두 번 놓으면 부재가 겹친다.
+//   `closed`(하층)면 포열 구간을 포벽이 막는다 — 그 층 파사드는 어느 높이에서도 배경이 보이지 않는다.
+function gateBracketBand(storey, inter, closed) {
+  const P = CITY_GATE_PAVILION;
+  const height = storey.height * P.bracketBandRatio;
+  const tiers = P.bracketTiers;
+  const y0 = storey.y1 - height;
+  const changHeight = height * 0.26;              // 창방(기둥머리 인방)
+  const pyeongHeight = height * 0.14;             // 평방(창방 위 한 켜 — 다포계는 여기서 포가 뜬다)
+  const arm = height * P.bracketArmRatio;         // 첨차·살미 부재 두께
+  const postWidth = height * P.bracketPostRatio;  // 주두·소로 폭
+  const stackY0 = y0 + changHeight + pyeongHeight;
+  const stackHeight = height - changHeight - pyeongHeight;
+  const juduHeight = stackHeight * 0.24;
+  const tierHeight = (stackHeight - juduHeight) / tiers;
+  const tipOut = height * P.bracketTipRatio;
+  // 수평 런의 면 방향 길이 여장. 코너 기둥은 반지름만큼 기둥 중심선 밖으로 나와 있으므로, 런은
+  //   최소 그만큼 길어야 기둥 머리를 덮는다 — 짧으면 코너에 슬리버가 열려 배경이 보인다.
+  const grow = (out) => Math.max(out, storey.columnRadius);
+  const steps = [];
+  for (let i = 0; i < tiers; i++) {
+    const out = tipOut * (i + 1) / tiers;         // 이 단 살미 끝(기둥 중심선 밖)
+    steps.push({
+      index: i,
+      y: stackY0 + juduHeight + tierHeight * i,   // 이 단 부재의 밑면
+      height: tierHeight,
+      out,
+      grow: grow(out),                            // 이 단 행공 런의 면 방향 길이 여장
+    });
+  }
+  const spread = (positions) => {
+    const out = [];
+    for (let i = 0; i < positions.length; i++) {
+      out.push({ at: positions[i], main: true });
+      if (i === positions.length - 1) continue;
+      const span = positions[i + 1] - positions[i];
+      for (let k = 1; k <= inter; k++) {
+        out.push({ at: positions[i] + span * k / (inter + 1), main: false });
+      }
+    }
+    return out;
+  };
+  const halfDepth = storey.depth * 0.5;
+  return {
+    // y1 은 층 상단(=처마선)을 **그대로** 물려받는다. y0 는 거기서 밴드 높이를 뺀 값이라 y0+height 는
+    //   부동소수 반올림으로 y1 과 마지막 자리가 어긋날 수 있다 — 지붕 y 불변은 y1 로 단언한다.
+    tiers, inter, y0, y1: storey.y1, height,
+    changbang: {
+      y: y0, height: changHeight, thickness: arm * 1.5,
+      overhang: postWidth * 0.5, grow: grow(postWidth * 0.5),
+    },
+    pyeongbang: {
+      y: y0 + changHeight, height: pyeongHeight, thickness: arm * 1.9,
+      overhang: postWidth, grow: grow(postWidth),
+    },
+    judu: { y: stackY0, height: juduHeight, width: postWidth * 1.7 },
+    // 한 출목 단의 수직 적층은 살미 → 소로 → 행공 순이다(아래 값은 tierHeight 분율 = 부재가 서로를
+    //   받치는 순서를 그대로 만든다). 살미 위에 소로가 앉고 그 위를 행공이 지난다.
+    salmi: { base: 0.07, height: 0.46 },
+    soro: { width: postWidth, base: 0.53, height: 0.30 },
+    haenggong: { base: 0.74, height: 0.32 },
+    arm, tipOut, steps,
+    // 포벽: 평방 위 포열 구간(stackY0~층 상단)을 막는 얇은 벽면. 기둥 중심선에 서므로 주두·살미·소로가
+    //   모두 그 앞으로 나오고, 포 사이로 하늘이 보이지 않는다. 상층(개방 정자)은 null 이다.
+    infill: closed
+      ? {
+        y: stackY0, height: stackHeight, thickness: arm * P.bracketInfillArmK,
+        overhang: 0, grow: grow(0),
+      }
+      : null,
+    // 외목도리: 최외 출목 위를 잇는 수평 부재. 처마가 여기서부터 캔틸레버로 더 나간다.
+    purlin: {
+      out: tipOut, y: stackY0 + juduHeight + tierHeight * tiers,
+      height: arm * 1.4, thickness: arm * 1.4, grow: grow(tipOut),
+    },
+    posts: {
+      x: spread(storey.columnX),
+      z: spread([-halfDepth, halfDepth]).filter((post) => !post.main),
+    },
+  };
+}
+
 // 중층 문루 + 육축 상면 여장 링. 문루는 링 안쪽에 앉고, 상층은 하층을 upperRatio 로 체감한다.
 export function cityGatePavilionProfile(gate, structure, masonry) {
   const scale = gate.scale || 1;
@@ -1514,6 +1629,22 @@ export function cityGatePavilionProfile(gate, structure, masonry) {
     columns: bays(lowerWidth * P.upperRatio),
     panels: 0, rail: P.railHeight * scale,
   };
+  // 기둥 중심선(주칸 격자). 렌더러와 공포 배치가 같은 배열을 쓰므로 주포가 기둥에서 어긋날 수 없다.
+  //   기둥 반지름도 여기서 정한다 — 판벽 폭이 그 값에서 나오고(기둥 사이를 정확히 채운다), 파사드
+  //   폐합 검사가 렌더러와 같은 수를 보게 된다.
+  for (const storey of [lower, upper]) {
+    const half = storey.width * 0.5;
+    storey.columnX = Array.from({ length: storey.columns }, (_, i) => (storey.columns === 1
+      ? 0 : -half + storey.width * i / (storey.columns - 1)));
+    storey.bay = storey.columns > 1 ? storey.width / (storey.columns - 1) : storey.width;
+    storey.columnRadius = Math.min(P.columnRadiusMax, storey.height * P.columnRadiusK);
+  }
+  lower.bracket = gateBracketBand(lower, P.bracketInterLower, true);
+  upper.bracket = gateBracketBand(upper, P.bracketInterUpper, false);
+  // 하층 판벽은 창방 밑면(=공포대 밑면)까지 올라간다. 기둥 높이의 분율이 아니라 **공포대 밑면**이
+  //   기준이라, 공포대 높이가 바뀌어도 판벽과 창방 사이에 슬릿이 생길 수 없다.
+  lower.panel = { y0: lower.y0, y1: lower.bracket.y0, height: lower.bracket.y0 - lower.y0 };
+  upper.panel = null;
   const lowerRoof = {
     tier: 'lower',
     y: lower.y1,
