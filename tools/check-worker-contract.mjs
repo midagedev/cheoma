@@ -319,9 +319,20 @@ const expectedSceneHashes = {
   // #29 히어로 전역 병합(2026-08-02): 아래 hanyang 항목 주석의 단독 변인 근거 참조.
   //   village/town/capital 도 비-mja 히어로(종가)를 품으므로 같은 구조 변경으로 scene 해시만 이동.
   //   proxy·triangles 불변, objects 감소(채별 그룹 → 전역 1 병합 그룹).
-  village: '5c6e9658:934dcc66:e70874c0:44ec9d4c',
-  town: '42f854e6:f276ce18:9084cd07:fc581e4a',
-  capital: 'ca415f99:198e8c7b:5ac1ef16:7470dfff',
+  // worldedge 링 테두리 행 캡(2026-08-03, #23 쐐기 전용 라운드): EDGE_RIM_CAP_MUL 2.4 —
+  //   운해 링의 테두리 두 행(rMid·rOut)만 yCap×2.4 까지 등고를 따라, 불투명 crest 가 지형
+  //   절단면 아래에 묻히던 방위(village 37.3% / capital 24.3% / hanyang 13.6%, 순수 노드 실측)를
+  //   세 규모 전부 0% 로. 내부 행·strengthAt pool 은 yCap 그대로라 방위별 두께·농도 분포 불변.
+  //   링 기하는 네 규모 공유 경로(clouds.js#buildEdgeMistRing)라 scene 해시가 전부 이동한다.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-03)**: proxy 네 규모 전부 불변(fef7a386 /
+  //   3f7f776c / 046ecd22 / c5517350), objects·triangles 도 전부 불변(village 594/2,284,221 ·
+  //   town 3,161/5,024,809 · capital 2,186/5,663,398 · hanyang 5,358/25,598,200) — 노드·삼각형이
+  //   아니라 링 정점 좌표만 바뀐 변경이다. sync == 실제 module Worker == `?worker=0` 폴백이
+  //   세 경로 모두 바이트 동일(에이전트 실측 + 리드 재실행). 같은 부팅 픽셀 A/B 는 전 뷰
+  //   changed ≤1.11%·rim 그라디언트 불변이고 비전 판정 SHIP(회귀 0)·개천 계곡 대역 변경 0.
+  village: 'fb6e812e:eebd220a:e394b51b:e978e6b2',
+  town: '50483e3f:0ea24fd7:dd1576e6:a284d039',
+  capital: '7a786fe7:d01f2f0b:bf9cbf51:cba6c7eb',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -402,7 +413,7 @@ const expectedSceneHashes = {
   //     훨씬 무거우므로 기와 7채가 초가로 바뀌면 오브젝트가 크게 준다. 삼각형은 반대로
   //     궁 서편 채움(+144,802 — 순수 실측 919,904→1,064,706)이 그 감소분을 넘어서 순증했다.
   //   - worker == `?worker=0` 폴백 바이트 동일(아래 신 해시 양 경로 일치), async 불일치 0.
-  hanyang: 'e1efb688:99f9f738:7c2938d4:00609f00',
+  hanyang: '1bfc370b:58030e73:aea20b35:f8c3272d',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

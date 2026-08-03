@@ -369,12 +369,25 @@ function makeLightRayGeometry() {
 //     groundY(x,z): 지형 표고 샘플러(있으면 밴드가 등고를 따라 뜸). 없으면 평지 상수 y.
 //     rIn<rMid<rOut: edgeRadiusAt 대비 반경 배율 — rIn 을 작게(≈0.6) 잡아 능선 중턱까지 감는다.
 //   → { mesh, update(fogColor) }  — 색은 대기(fog)색을 살짝 밝힌 톤(호출부가 매 틱 갱신).
+
+// 테두리 행(rMid·rOut)이 등고를 따를 때의 표고 상한 = yCap × 이 배율. 자세한 유도는 함수 안
+//   rimCapMul 주석에 있고, 값의 근거는 순수 노드 실측(2026-08-03, seed 20260716, NS=176 방위):
+//   불투명 crest 행이 지형 절단면 아래로 묻힌 방위 비율이 배율 1.0(구 동작)에서
+//     village 37.3% / capital 24.3% / hanyang 13.6%, 묻힌 깊이 p90 25.7 / 43.4 / 24.3 m 였다.
+//   1.6 → 20.9 / 16.9 / 10.2%, 2.0 → 16.4 / 13.6 / 4.5%, **2.4 → 세 규모 전부 0%**,
+//   2.8·∞ 는 미덮음이 더 줄지 않고 crest 만 4~11m 더 뜬다. 즉 2.4 는 "절단면을 다 덮는 최소
+//   상승"이라는 프런티어 값이다. 능선 어깨의 얇음(strengthAt 의 pool)은 여전히 yCap 기준이라
+//   상승 방위의 강도 w 는 median 0.27~0.30 (프레임 median 0.34~0.67) — 위치만 고쳐졌고 농도
+//   분포는 그대로다.
+export const EDGE_RIM_CAP_MUL = 2.4;
+
 export function buildEdgeMistRing(edge, {
   groundY = null, yBase = 8, yAmp = 2.5, rIn = 0.6, rMid = 0.85, rOut = 1.12,
-  opacity = 0.52, thickness = 3.0, outerDrop = 0, yCap = Infinity, seed = 1,
+  opacity = 0.52, thickness = 3.0, outerDrop = 0, yCap = Infinity,
+  rimCapMul = EDGE_RIM_CAP_MUL, seed = 1,
 } = {}) {
   const NS = 176;
-  const pos = [], uv = [], idx = [];
+  const idx = [];
   let s = seed >>> 0;
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   const ph1 = rnd() * 6.28, ph2 = rnd() * 6.28, ph3 = rnd() * 6.28;
@@ -382,6 +395,13 @@ export function buildEdgeMistRing(edge, {
   //   산 사면 전체에 드리워 매스를 지운다(탁한 룩). 분지에 "고이는" 높이를 상한으로 두면 능선은
   //   운해 위로 솟고 낮은 절단면만 잠긴다 — 겸재 진경산수의 운무 절단.
   const gY = (x, z) => Math.min(groundY ? groundY(x, z) : 0, yCap);
+  // ── 테두리 행 표고 캡(rimCapMul) ──────────────────────────────────────────────
+  // yCap 은 "분지에 고이는 높이"인데, 그 값으로 **테두리 행(rMid·rOut)까지** 클램프하면 지형
+  //   테두리 표고가 yCap 을 넘는 방위 — 즉 지형 절단이 배산 능선 어깨를 가로지르는 방위 — 에서
+  //   불투명 crest 행이 지형면 **아래로** 들어간다. 링은 depthTest:true 이므로 그 방위에서 산에
+  //   묻혀 한 픽셀도 그리지 못한다. 정작 절단면·수관 하드 에지가 있는 곳이 그 방위다.
+  const rimCap = Number.isFinite(yCap) ? yCap * rimCapMul : yCap;
+  const gYRim = (x, z) => Math.min(groundY ? groundY(x, z) : 0, rimCap);
   // ── 방위·고도 종속 두께(docs/oriental-painting-research.md §1·§4) ─────────────
   // 균등한 링은 부감에서 "회색 도넛"으로 읽힌다. 실제 운무는 냉기가 고이는 낮은 골에 두껍게 눌리고
   //   능선 어깨에서는 얇아져 산 매스가 안개 위로 솟는다. 그 법칙을 두 항으로 굽는다:
@@ -404,38 +424,55 @@ export function buildEdgeMistRing(edge, {
     const NORM = 1.48;
     return Math.max(0.12, Math.min(1, (0.22 + 0.78 * pool) * (0.50 + 0.64 * swirl) * NORM));
   };
-  for (let is = 0; is <= NS; is++) {
-    const th = (is / NS) * Math.PI * 2;
-    const Redge = edge.edgeRadiusAt(th);
-    const cx = Math.cos(th), cz = Math.sin(th);
-    // 저주파 리프트 출렁임(운해가 능선 등고를 따라 얇아지고 두꺼워짐). 정수 하모닉이라 2π 에서 닫힘.
-    const lift = yBase + yAmp * (0.6 * Math.sin(2 * th + ph1) + 0.4 * Math.sin(3 * th + ph2));
-    const hEdgeRaw = groundY ? groundY(cx * Redge * rMid, cz * Redge * rMid) : 0;
-    const w = strengthAt(th, hEdgeRaw);
-    // 얇은 방위는 반경 폭도 함께 좁힌다(rMid 로 수축) — 알파만 낮추면 넓고 흐린 얼룩이 남는다.
-    const span = 0.42 + 0.58 * w;
-    const rI = rMid + (rIn - rMid) * span;
-    const rO = rMid + (rOut - rMid) * span;
-    const th2 = thickness * (0.34 + 0.66 * w);
-    // 각 행은 자기 반경의 지형 표고 + 리프트 위에 떠 등고를 따라 밴드가 드리운다(중간 행이 불투명).
-    const xi = cx * Redge * rI,   zi = cz * Redge * rI;
-    const xm = cx * Redge * rMid, zm = cz * Redge * rMid;
-    const xo = cx * Redge * rO,   zo = cz * Redge * rO;
-    pos.push(xi, gY(xi, zi) + lift + th2, zi); uv.push(w, 0);
-    pos.push(xm, gY(xm, zm) + lift, zm);       uv.push(w, 0.5);
-    // 외곽 행은 지형이 끝난 밖이다. 거기서 자체 표고를 쓰면 해석적 산 함수가 계속 솟아 밴드가
-    //   허공에 뜨거나 절단면 아래로 파고든다 → 테두리(rMid) 표고를 물려받아 밖으로 완만히
-    //   내려앉게 한다(outerDrop). 절단면 밖에 고인 저층 안개로 읽혀 원반 경계를 지운다.
-    pos.push(xo, gY(xm, zm) + lift - th2 * 0.6 - outerDrop * w, zo); uv.push(w, 1);
-  }
+  // 정점 채움을 한 함수로 둔다 — 같은 부팅 A/B 검증(아래 __edgeMist 훅)이 캡 배율만 바꿔 같은
+  //   버퍼를 다시 쓸 수 있게 하려는 것이고, 제품 경로는 생성 시 1회만 호출한다(수치 불변).
+  const pos = new Float32Array((NS + 1) * 9);
+  const uv = new Float32Array((NS + 1) * 6);
+  const fill = (capAt) => {
+    for (let is = 0; is <= NS; is++) {
+      const th = (is / NS) * Math.PI * 2;
+      const Redge = edge.edgeRadiusAt(th);
+      const cx = Math.cos(th), cz = Math.sin(th);
+      // 저주파 리프트 출렁임(운해가 능선 등고를 따라 얇아지고 두꺼워짐). 정수 하모닉이라 2π 에서 닫힘.
+      const lift = yBase + yAmp * (0.6 * Math.sin(2 * th + ph1) + 0.4 * Math.sin(3 * th + ph2));
+      const hEdgeRaw = groundY ? groundY(cx * Redge * rMid, cz * Redge * rMid) : 0;
+      const w = strengthAt(th, hEdgeRaw);
+      // 얇은 방위는 반경 폭도 함께 좁힌다(rMid 로 수축) — 알파만 낮추면 넓고 흐린 얼룩이 남는다.
+      const span = 0.42 + 0.58 * w;
+      const rI = rMid + (rIn - rMid) * span;
+      const rO = rMid + (rOut - rMid) * span;
+      const th2 = thickness * (0.34 + 0.66 * w);
+      // 각 행은 자기 반경의 지형 표고 + 리프트 위에 떠 등고를 따라 밴드가 드리운다(중간 행이 불투명).
+      const xi = cx * Redge * rI,   zi = cz * Redge * rI;
+      const xm = cx * Redge * rMid, zm = cz * Redge * rMid;
+      const xo = cx * Redge * rO,   zo = cz * Redge * rO;
+      //   테두리 두 행만 capAt(=gYRim) 으로 등고를 따른다. 내부 행과 strengthAt 의 pool 은 여전히
+      //   yCap 기준이므로 방위별 두께·농도 분포("능선 어깨는 얇다")는 불변이고, 바뀌는 것은
+      //   불투명 crest 행이 절단면 위로 나오는지 아래에 묻히는지 뿐이다.
+      const yRim = capAt(xm, zm) + lift;
+      const p = is * 9, q = is * 6;
+      pos[p] = xi; pos[p + 1] = gY(xi, zi) + lift + th2; pos[p + 2] = zi;
+      uv[q] = w; uv[q + 1] = 0;
+      pos[p + 3] = xm; pos[p + 4] = yRim; pos[p + 5] = zm;
+      uv[q + 2] = w; uv[q + 3] = 0.5;
+      // 외곽 행은 지형이 끝난 밖이다. 거기서 자체 표고를 쓰면 해석적 산 함수가 계속 솟아 밴드가
+      //   허공에 뜨거나 절단면 아래로 파고든다 → 테두리(rMid) 표고를 물려받아 밖으로 완만히
+      //   내려앉게 한다(outerDrop). 절단면 밖에 고인 저층 안개로 읽혀 원반 경계를 지운다.
+      pos[p + 6] = xo; pos[p + 7] = yRim - th2 * 0.6 - outerDrop * w; pos[p + 8] = zo;
+      uv[q + 4] = w; uv[q + 5] = 1;
+    }
+  };
+  fill(gYRim);
   for (let is = 0; is < NS; is++) {
     const a = is * 3, b = is * 3 + 3;
     idx.push(a, a + 1, b, b, a + 1, b + 1);
     idx.push(a + 1, a + 2, b + 1, b + 1, a + 2, b + 2);
   }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  // BufferAttribute 로 감싼다(Float32BufferAttribute 는 입력 배열을 **복사**하므로 아래 재채움이
+  //   GPU 에 도달하지 못한다 — 검증 훅이 조용히 무효가 되는 함정이다).
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
   // 알파 룩업: v = 반경 방향 그라디언트(가운데 불투명 → 안·밖 투명), u = 방위별 강도 램프.
@@ -489,10 +526,43 @@ export function buildEdgeMistRing(edge, {
     mesh.userData.viewWeight = 0;
     mat.opacity = 0;
   }
+  // ── 검증 전용 훅(window.__edgeMist) ──────────────────────────────────────────
+  // 테두리 캡은 **정점 표고**라 유니폼으로 바꿀 수 없다. 그런데 부감 프레이밍은 부팅마다 230~625m
+  //   흔들려 부팅 간 픽셀 비교가 성립하지 않으므로, 같은 부팅에서 캡 배율만 바꿔 같은 버퍼를 다시
+  //   채우는 경로가 있어야 A/B 가 통제된다. 재질·텍스처·인덱스·정점 수가 그대로라 드로우콜·프로그램
+  //   수는 불변이고, 제품 경로는 이 훅을 호출하지 않는다.
+  const posAttr = geo.getAttribute('position');
+  function setRimCapMul(mul) {
+    const m = Number.isFinite(mul) ? mul : rimCapMul;
+    const cap = Number.isFinite(yCap) ? yCap * m : yCap;
+    fill((x, z) => Math.min(groundY ? groundY(x, z) : 0, cap));
+    posAttr.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    return m;
+  }
+  let unregisterDebug = null;
+  if (typeof window !== 'undefined') {
+    const registry = window.__edgeMist || (window.__edgeMist = {
+      rings: [],
+      productRimCapMul: EDGE_RIM_CAP_MUL,
+      setRimCapMul(mul) {
+        const applied = this.rings.map((r) => r.setRimCapMul(mul));
+        return { rings: applied.length, mul: applied[0] ?? null };
+      },
+    });
+    const record = { setRimCapMul, get rimCapMul() { return rimCapMul; }, mesh };
+    registry.rings.push(record);
+    unregisterDebug = () => {
+      const at = registry.rings.indexOf(record);
+      if (at >= 0) registry.rings.splice(at, 1);
+    };
+  }
   function dispose() {
     if (resourcesDisposed) return;
     resourcesDisposed = true;
     deactivate();
+    if (unregisterDebug) { unregisterDebug(); unregisterDebug = null; }
     disposeObjectTree(mesh);
   }
   return { mesh, update, deactivate, dispose };
