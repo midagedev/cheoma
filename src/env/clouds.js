@@ -816,6 +816,35 @@ function makeCloudDataTexture(seed, variant) {
   return tex;
 }
 
+// ── v4 볼류메트릭 임포스터 기본값(#53 S4) ─────────────────────────────────────
+// v3 는 쿼드당 데이터 1탭 = **평면 한 장**이었다. 사용자 판정("최근 재작한 구름이 최종 클립에서
+//   영 어색하다", 2026-08-04)의 직접 원인이 그 평면성이다: 시선각이 바뀌어도 내부 명암이 고정이고,
+//   두께가 없으니 태양 방향 자기그림자도 없다 → 종이 판으로 읽힌다.
+// v4 는 같은 쿼드 안에서 8~16 스텝 의사 3D 레이마칭을 돈다. 새 패스·새 재질·새 프로그램 계열은
+//   없고(캐시 키만 v3→v4 승급), 베이크 파이프라인·그림자 계약(uCloudBlobs)·색 uniform 세트는
+//   그대로다 — 환경 크로스페이드 배선도 무변경.
+//   · 밀도 상한 = 베이크 실루엣(a). 마칭은 실루엣 밖으로 새지 않는다(형태·위상 계약 불침해).
+//   · 수직 감쇠 = 천공 개방도(b). 위쪽 밀도에 가린 샘플은 태양·하늘광을 덜 받는다.
+//   · 내부 결 = 절차 fbm 2옥타브(uCloudTime 저속 표류). 확대·시선각 변화에서 결이 흐른다.
+// **strength(=uCloudMarch.x) 0 이면 아래 v3 식이 항등식으로 복원된다** — 프로그램이 하나뿐이므로
+//   같은 페이지·같은 프로그램 안에서 런타임 A/B 가 성립한다(레포 규약: 페이지 간 비교 금지, 그리고
+//   프로그램 캐시가 구 프로그램을 서빙하는 함정 자체가 사라진다).
+export const CLOUD_MARCH_MAX_STEPS = 16;   // GLSL 루프 상한(상수 — 스텝 수는 uniform 으로만 내린다)
+export const CLOUD_MARCH_DEFAULTS = Object.freeze({
+  strength: 1,        // 0 = v3 평면 셰이딩(대조군), 1 = v4 전량
+  thickness: 0.55,    // 슬랩 반두께 = 0.5 × 이 값 × min(쿼드 폭, 높이)
+  steps: 12,          // 데스크톱 기본. 모바일·저사양은 setCloudVolume({ steps: 8 }) 로 강등
+  optical: 5,         // 전밀도 광선이 슬랩을 수직 관통할 때의 광학 두께(무차원 — 스케일 불변)
+  lateral: 3.4,       // 결 주파수(uv 단위)
+  depth: 2.1,         // 결 주파수(두께 방향)
+  amp: 0.42,          // 결 침식 강도(1 이면 결이 밀도를 0 까지 깎는다)
+  alphaBlend: 0.55,   // 베이크 알파 → 마칭 커버리지 혼합(1 이어도 베이크 알파가 상한)
+  lod: 1.6,           // 밀도 상한 탭의 밉 레벨(에일리어싱·텍스처 캐시 방어)
+  lightStep: 0.62,    // 태양 방향 2차 탭 거리(반두께 배수)
+  lightK: 2.6,        // 2차 탭 Beer 계수(자기그림자 세기)
+  drift: 0.013,       // 결 표류 속도(uv/초 — 룩 문법 "미세 스케일". SHOT 은 t=0 이라 정지)
+});
+
 // 구름 빌보드 한 장의 라이팅 전부를 이 패치가 소유한다(새 패스·새 재질 계열 0, 드로우콜 불변).
 //   map 의 RGB 는 색이 아니라 bakeCloudData 가 구운 데이터(법선 xy·천공 개방도)이므로 여기서
 //   diffuseColor.rgb 를 **덮어쓴다**. 재질 color(=diffuse)는 시간대 밝기(dim)·부감 감쇠 전용
@@ -828,7 +857,8 @@ function makeCloudDataTexture(seed, variant) {
 //   ④ 부피(FIX④ 2026-08-03): 볕면/그늘면은 베이크된 **로브 법선**으로 계산한다. 랩 램버트로
 //      종단을 부드럽게 하고, 역광에서는 투과광 바닥을 올려 코어의 −ndl 변주가 지워지지 않게
 //      한다 — 1 차는 두 항이 코어에서 각각 0 과 0.14 로 눌려 바디가 단일 램프로 평평했다.
-function patchCloudRim(material) {
+function patchCloudRim(material, { width = 1, height = 1 } = {}) {
+  const d = CLOUD_MARCH_DEFAULTS;
   const state = {
     color: new THREE.Color(0xffc68c),                    // 림(은·금테) — tools 가 이 키를 읽는다
     strength: { value: 0 },
@@ -838,6 +868,14 @@ function patchCloudRim(material) {
     shade: new THREE.Color(0xc6ccd6),                    // 그늘면 = 하늘 산란색
     // x=직사 y=천공 z=역광 투과 w=다중산란 바닥(밝은 낮에만 — FIX⑥ day 존재감)
     gain: new THREE.Vector4(1, 0.82, 0.75, 0),
+    // ── v4 ── 쿼드의 저작 크기(월드). 정점 셰이더가 여기에 인스턴스 스케일을 곱해 실제 월드 폭·높이를
+    //   varying 으로 넘긴다 → 상공 적운(150×108)과 원경 뱅크(16×11, 인스턴스 스케일 0.82~1.18)가
+    //   같은 코드로 자기 크기에 맞는 슬랩을 마칭한다.
+    quad: new THREE.Vector2(width, height),
+    march: new THREE.Vector4(d.strength, d.thickness, d.steps, d.optical),
+    detail: new THREE.Vector4(d.lateral, d.depth, d.amp, d.alphaBlend),
+    volume: new THREE.Vector4(d.lod, d.lightStep, d.lightK, d.drift),
+    time: { value: 0 },
   };
   material.userData.cloudRim = state;
   material.onBeforeCompile = (shader) => {
@@ -848,6 +886,38 @@ function patchCloudRim(material) {
     shader.uniforms.uCloudSunColor = { value: state.sun };
     shader.uniforms.uCloudShadeColor = { value: state.shade };
     shader.uniforms.uCloudGain = { value: state.gain };
+    shader.uniforms.uCloudQuad = { value: state.quad };
+    shader.uniforms.uCloudMarch = { value: state.march };
+    shader.uniforms.uCloudDetail = { value: state.detail };
+    shader.uniforms.uCloudVolume = { value: state.volume };
+    shader.uniforms.uCloudTime = state.time;
+    // 정점: 쿼드 접평면 기저(뷰공간)와 뷰공간 위치. 마칭축을 **뷰공간 고정**으로 두는 이유는 카메라
+    //   대면 쿼드가 회전할 때 마칭 방향이 함께 돌면 결이 화면에 붙어 미끄러지기 때문이다(조사 §5 위험).
+    //   USE_INSTANCING 분기는 컴파일 타임이라 프로그램 계열은 기존과 동일하게 재질당 하나다.
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+uniform vec2 uCloudQuad;
+varying vec4 vCloudAxisX;
+varying vec4 vCloudAxisY;
+varying vec3 vCloudView;`,
+    ).replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+  {
+    mat4 cloudModelView = modelViewMatrix;
+    #ifdef USE_INSTANCING
+      cloudModelView = modelViewMatrix * instanceMatrix;
+    #endif
+    vec3 cloudColX = (cloudModelView * vec4(1.0, 0.0, 0.0, 0.0)).xyz;
+    vec3 cloudColY = (cloudModelView * vec4(0.0, 1.0, 0.0, 0.0)).xyz;
+    float cloudScaleX = max(1e-5, length(cloudColX));
+    float cloudScaleY = max(1e-5, length(cloudColY));
+    vCloudAxisX = vec4(cloudColX / cloudScaleX, cloudScaleX * uCloudQuad.x);
+    vCloudAxisY = vec4(cloudColY / cloudScaleY, cloudScaleY * uCloudQuad.y);
+    vCloudView = (cloudModelView * vec4(transformed, 1.0)).xyz;
+  }`,
+    );
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
@@ -857,7 +927,60 @@ uniform vec3 uCloudSunDir;
 uniform vec2 uCloudTexel;
 uniform vec3 uCloudSunColor;
 uniform vec3 uCloudShadeColor;
-uniform vec4 uCloudGain;`,
+uniform vec4 uCloudGain;
+uniform vec4 uCloudMarch;
+uniform vec4 uCloudDetail;
+uniform vec4 uCloudVolume;
+uniform float uCloudTime;
+varying vec4 vCloudAxisX;
+varying vec4 vCloudAxisY;
+varying vec3 vCloudView;
+const int CHEOMA_CLOUD_STEPS_MAX = ${CLOUD_MARCH_MAX_STEPS};
+// 내부 결 전용 값 노이즈. sin 해시를 피한 정수 fract 해시(모바일 정밀도·드라이버 편차 방어).
+float cheomaCloudHash(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.1137, 0.4193));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float cheomaCloudNoise(vec3 x) {
+  vec3 cell = floor(x);
+  vec3 frc = fract(x);
+  frc = frc * frc * (3.0 - 2.0 * frc);
+  float n000 = cheomaCloudHash(cell);
+  float n100 = cheomaCloudHash(cell + vec3(1.0, 0.0, 0.0));
+  float n010 = cheomaCloudHash(cell + vec3(0.0, 1.0, 0.0));
+  float n110 = cheomaCloudHash(cell + vec3(1.0, 1.0, 0.0));
+  float n001 = cheomaCloudHash(cell + vec3(0.0, 0.0, 1.0));
+  float n101 = cheomaCloudHash(cell + vec3(1.0, 0.0, 1.0));
+  float n011 = cheomaCloudHash(cell + vec3(0.0, 1.0, 1.0));
+  float n111 = cheomaCloudHash(cell + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, frc.x), mix(n010, n110, frc.x), frc.y),
+    mix(mix(n001, n101, frc.x), mix(n011, n111, frc.x), frc.y),
+    frc.z);
+}
+float cheomaCloudGrain(vec3 p) {
+  return 0.63 * cheomaCloudNoise(p)
+       + 0.37 * cheomaCloudNoise(p * 2.13 + vec3(7.31, 2.17, 4.53));
+}
+// 밀도장 1샘플. 상한은 베이크 실루엣(a), 두께는 |zN|<=1 셸, 결은 fbm. 같은 탭의 b(천공 개방도)를
+//   out 으로 돌려주므로 수직 감쇠에 추가 탭이 들지 않는다. 마칭 중 흐름이 갈리므로 밉은 항상
+//   명시(textureLod) — 암시적 도함수 밉은 분기 안에서 정의되지 않는다.
+float cheomaCloudField(sampler2D cloudTex, vec2 uvp, float zN, float lod, float amp,
+                       vec3 grain, out float openSky) {
+  vec4 tap = textureLod(cloudTex, clamp(uvp, vec2(0.0015), vec2(0.9985)), lod);
+  openSky = tap.b;
+  float bound = tap.a;
+  if (bound <= 0.004) return 0.0;
+  float halfT = sqrt(bound);                       // 상한이 두꺼운 곳이 깊다 → 외곽은 둥글게 닫힌다
+  float dens = bound * (1.0 - smoothstep(halfT * 0.28, halfT, abs(zN)));
+  if (dens <= 0.0) return 0.0;
+  if (amp > 0.001) {
+    float grainV = cheomaCloudGrain(vec3(uvp * uCloudDetail.x, zN * uCloudDetail.y) + grain);
+    dens *= max(0.0, 1.0 - amp * (1.0 - grainV));
+  }
+  return dens;
+}`,
     ).replace(
       '#include <map_fragment>',
       `#include <map_fragment>
@@ -880,12 +1003,98 @@ uniform vec4 uCloudGain;`,
   //   뒤집힌다(순수 노드 시뮬 실측: 그늘 밴드 R−B +24.8 로 볕면 +19.5 를 추월).
   vec2 cloudRadial = normalize(vMapUv - vec2(0.5) + vec2(1e-4));
   float cloudSunSide = smoothstep(-0.26, 0.64, dot(cloudRadial, normalize(cloudSunV.xy + vec2(1e-4))));
+  // ── v4 쿼드 내 의사 3D 레이마칭 ─────────────────────────────────────────────
+  // 쿼드 접평면(x,y)+법선(z)을 축으로 두께 2·halfT 슬랩을 뚫는다. 시선이 기울면 광로가 길어지고
+  //   측면으로 밀려 **시차**가 생기고(평면성 해소), 스텝마다 태양 방향 2차 탭으로 Beer 감쇠를 재
+  //   **자기그림자**가 생긴다. 결(fbm)은 두께 방향으로도 변하므로 내부 명암이 변조된다.
+  float cloudMarchW = clamp(uCloudMarch.x, 0.0, 1.0);
+  float cloudCover = cloudData.a;      // 마칭 커버리지(코어에서 1 → 베이크 알파와 일치)
+  float cloudLitAvg = 1.0;             // 태양 가시도(자기그림자) — 투과율 가중 평균
+  float cloudSkyAvg = cloudSky;
+  float cloudThinRay = cloudThin;      // 광선 광학두께에서 나온 '얇음'(시선각 의존)
+  if (cloudMarchW > 0.001) {
+    vec3 cloudAxX = normalize(vCloudAxisX.xyz);
+    vec3 cloudAxY = normalize(vCloudAxisY.xyz);
+    vec3 cloudAxZ = normalize(cross(cloudAxX, cloudAxY));
+    float cloudQW = max(1e-3, abs(vCloudAxisX.w));
+    float cloudQH = max(1e-3, abs(vCloudAxisY.w));
+    float cloudHalfT = max(0.05, uCloudMarch.y * 0.5 * min(cloudQW, cloudQH));
+    vec3 cloudRayL = vec3(0.0);
+    {
+      vec3 cloudRay = normalize(vCloudView);        // 카메라 → 이 프래그먼트(뷰공간)
+      cloudRayL = vec3(dot(cloudRay, cloudAxX), dot(cloudRay, cloudAxY), dot(cloudRay, cloudAxZ));
+    }
+    // 스침각에서 광로가 발산하지 않게 하한을 둔다(측면 이탈량 유계 — 결이 화면을 가로질러 늘어나는
+    //   스트레치 방지). DoubleSide 뒷면도 부호만 반대라 같은 식으로 성립한다.
+    float cloudRayZ = max(0.22, abs(cloudRayL.z));
+    float cloudSpan = 2.0 * cloudHalfT / cloudRayZ;
+    int cloudSteps = int(clamp(uCloudMarch.z, 4.0, float(CHEOMA_CLOUD_STEPS_MAX)));
+    float cloudDs = cloudSpan / float(cloudSteps);
+    // 광학 두께는 **슬랩 두께로 정규화**한다. 월드 단위 소멸계수를 쓰면 폭 150m 적운과 폭 16m 뱅크가
+    //   같은 uniform 에서 전혀 다른 불투명도를 갖는다(뱅크가 통째로 투명해진다).
+    float cloudOptK = uCloudMarch.w / (2.0 * cloudHalfT);
+    vec2 cloudUvRate = vec2(cloudRayL.x / cloudQW, cloudRayL.y / cloudQH);
+    float cloudZRate = cloudRayL.z / cloudHalfT;
+    float cloudS = -0.5 * cloudSpan + 0.5 * cloudDs;   // 슬랩 진입점(쿼드 평면 교차가 s=0)
+    vec2 cloudUv = vMapUv + cloudUvRate * cloudS;
+    float cloudZ = cloudZRate * cloudS;
+    vec3 cloudGrainOff = uCloudTime * uCloudVolume.w * vec3(1.0, -0.62, 0.41);
+    vec3 cloudSunL = vec3(dot(cloudSunV, cloudAxX), dot(cloudSunV, cloudAxY), dot(cloudSunV, cloudAxZ));
+    float cloudLightD = uCloudVolume.y * cloudHalfT;
+    vec2 cloudLightUv = vec2(cloudSunL.x / cloudQW, cloudSunL.y / cloudQH) * cloudLightD;
+    float cloudLightZ = (cloudSunL.z / cloudHalfT) * cloudLightD;
+    float cloudTrans = 1.0;
+    float cloudWsum = 0.0, cloudLitSum = 0.0, cloudSkySum = 0.0, cloudTau = 0.0;
+    for (int cloudI = 0; cloudI < CHEOMA_CLOUD_STEPS_MAX; cloudI++) {
+      if (cloudI >= cloudSteps) break;               // 스텝 수는 uniform — 프로그램 분기 없음
+      float cloudOpenHere;
+      float cloudDens = cheomaCloudField(map, cloudUv, cloudZ, uCloudVolume.x,
+                                         uCloudDetail.z, cloudGrainOff, cloudOpenHere);
+      if (cloudDens > 0.0) {
+        float cloudTauStep = cloudDens * cloudDs * cloudOptK;
+        float cloudAStep = 1.0 - exp(-cloudTauStep);
+        float cloudWStep = cloudTrans * cloudAStep;   // front-to-back 방출·흡수 가중
+        float cloudOpenLight;
+        // 2차 탭은 저주파 형상만 본다(amp 0) — 결까지 그림자를 재면 스텝당 fbm 이 두 배인데
+        //   지각 이득은 없다. 밉을 한 단 올려 자기그림자를 부드럽게 유지한다.
+        float cloudDensLight = cheomaCloudField(map, cloudUv + cloudLightUv, cloudZ + cloudLightZ,
+                                                uCloudVolume.x + 0.75, 0.0, cloudGrainOff,
+                                                cloudOpenLight);
+        float cloudLit = exp(-uCloudVolume.z * cloudDensLight) * mix(0.34, 1.0, cloudOpenHere);
+        cloudWsum += cloudWStep;
+        cloudLitSum += cloudWStep * cloudLit;
+        cloudSkySum += cloudWStep * cloudOpenHere;
+        cloudTau += cloudTauStep;
+        cloudTrans *= 1.0 - cloudAStep;
+        if (cloudTrans < 0.03) break;                // 조기 종료(불투명 코어)
+      }
+      cloudUv += cloudUvRate * cloudDs;
+      cloudZ += cloudZRate * cloudDs;
+    }
+    cloudCover = clamp(1.0 - cloudTrans, 0.0, 1.0);
+    if (cloudWsum > 1e-4) {
+      cloudLitAvg = cloudLitSum / cloudWsum;
+      cloudSkyAvg = cloudSkySum / cloudWsum;
+    }
+    cloudThinRay = exp(-cloudTau * 0.9);
+  }
+  // 마칭 산출물 적용. cloudMarchW=0 이면 세 식 모두 항등식이라 v3 셰이딩이 비트 동일로 남는다.
+  cloudSky = mix(cloudSky, cloudSkyAvg, cloudMarchW * 0.70);
+  // 자기그림자는 **중간값 보존** 변조다(0.55 + 0.90·0.5 = 1.0): 태양을 향한 로브는 밝아지고 가려진
+  //   안쪽은 어두워지되 전체 노출은 유지된다 — 밝기 회귀 없이 부피 모델링만 얻는다.
+  float cloudSelf = mix(1.0, 0.55 + 0.90 * cloudLitAvg, cloudMarchW);
+  // 광선 기반 '얇음'은 제곱해서 섞는다. 중간 두께(≈0.3)가 그대로 들어가면 역광에서 바디까지 투과광이
+  //   번져 "한 덩어리 주황"이 된다(FIX⑤ 가 경고한 회귀). 제곱은 진짜 외곽만 남긴다.
+  cloudThin = mix(cloudThin, max(cloudThin, cloudThinRay * cloudThinRay), cloudMarchW);
   // 랩 램버트 + 다중산란 바닥. 구름은 다중산란체라 종단이 부드럽고, 밝은 낮에는 태양을 등진 면도
   //   하얗게 밝다 — 그 바닥(uCloudGain.w, 낮에만 켜진다)이 없으면 낮 구름이 하늘보다 어두워진다.
   float cloudWrap = smoothstep(-0.86, 0.52, cloudNdl);
   float cloudDirect = (uCloudGain.w + (1.0 - uCloudGain.w) * cloudWrap * cloudWrap)
-                    * mix(0.58, 1.0, cloudSky);
-  float cloudAmbient = 0.52 + 0.48 * cloudSky;
+                    * mix(0.58, 1.0, cloudSky) * cloudSelf;
+  // 하늘광은 광로가 짧은 외곽에서 살짝 들리고 두꺼운 안쪽에서 살짝 눌린다(내부 AO). 진폭이 작은
+  //   이유는 그늘면 채도 규율 때문이다 — 그늘을 더 어둡게 만드는 것이 목적이 아니다.
+  float cloudAmbient = (0.52 + 0.48 * cloudSky)
+                     * mix(1.0, 0.90 + 0.16 * cloudThinRay, cloudMarchW);
   // 투과광은 얇은 부분이 강하고, 위쪽 밀도에 가린 밑면은 태양광이 도달하지 못하므로 천공
   //   개방도로도 눌러야 한다. 이 항을 빼면 역광 프레임에서 밑면까지 웜으로 물들어 구름 전체가
   //   한 덩어리 주황이 된다. 코어 바닥 0.38 은 부피용이다 — 로브별 −ndl 변주(역광에서 유일하게
@@ -909,10 +1118,17 @@ uniform vec4 uCloudGain;`,
   diffuseColor.rgb = diffuse * cloudBody
                    + uCloudRimColor * uCloudRimStrength * cloudEdge
                    * mix(0.03, 1.0, pow(cloudSunSide, 1.5)) * cloudCrown * cloudBack;
+  // 실루엣 알파도 광로 커버리지와 섞는다. 얇은 어깨·외곽은 광로가 짧아 저절로 투명해져 "종이 컷아웃"
+  //   윤곽이 부피로 풀린다. 곱셈 형태라 베이크 알파가 항상 상한이다 → 실루엣 계약(형태·종횡비 게이트)
+  //   은 침해되지 않고, 코어(cloudCover≈1)에선 계수 1.0 으로 무변경이다.
+  diffuseColor.a *= mix(1.0, 0.30 + 0.70 * cloudCover,
+                        cloudMarchW * clamp(uCloudDetail.w, 0.0, 1.0));
 #endif`,
     );
   };
-  material.customProgramCacheKey = () => 'cheoma-cloud-shade-v3';
+  // v3 → v4: 셰이더 본문이 바뀌었으므로 키를 승급한다(프로그램 **계열 수**는 그대로 1 — 이 키를
+  //   쓰는 재질군이 하나이고, v3/v4 A/B 는 프로그램이 아니라 uniform 으로 전환한다).
+  material.customProgramCacheKey = () => 'cheoma-cloud-shade-v4';
   return state;
 }
 
@@ -1252,7 +1468,10 @@ export function setupClouds(group, {
   group.add(root);
 
   if (!CLOUDS_ON) {
-    return { group: root, uniforms: u, update() {}, setEnabled() { root.visible = false; }, dispose() {} };
+    return {
+      group: root, uniforms: u, update() {}, setEnabled() { root.visible = false; },
+      setCloudVolume() { return { materials: 0 }; }, dispose() {},
+    };
   }
 
   const R = terrainMax;
@@ -1346,7 +1565,7 @@ export function setupClouds(group, {
       map: cloudTex[i], transparent: true, opacity: s.op, depthWrite: false,
       fog: true, blending: THREE.NormalBlending, side: THREE.DoubleSide,
     });
-    patchCloudRim(mat);
+    patchCloudRim(mat, { width: s.w, height: s.h });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), mat);
     mesh.name = `high-cloud-${i}`;
     mesh.renderOrder = 3;
@@ -1447,7 +1666,7 @@ export function setupClouds(group, {
     // DoubleSide would submit transparent backfaces as a redundant second draw.
     side: THREE.FrontSide,
   });
-  patchCloudRim(horizonMaterial);
+  patchCloudRim(horizonMaterial, { width: HORIZON_CLOUD_W, height: HORIZON_CLOUD_H });
   const horizonBank = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(HORIZON_CLOUD_W, HORIZON_CLOUD_H),
     horizonMaterial,
@@ -1792,6 +2011,7 @@ export function setupClouds(group, {
         rim.sun.copy(_cloudSun);
         rim.shade.copy(_cloudShade);
         rim.gain.set(1, ambGain, glowGain, msFloor);
+        rim.time.value = t;              // v4 결 표류(SHOT 은 t=0 고정 → 결정론 유지)
       }
       // 야간엔 뭉게구름이 창불 야경을 방해하지 않게 물러난다(저광량 불투명도 바닥 ↓).
       const opNow = m.userData.op * (0.32 + 0.68 * smoothstep(0.8, 2.55, inten));
@@ -1810,6 +2030,7 @@ export function setupClouds(group, {
       horizonRim.sun.copy(_cloudSun);
       horizonRim.shade.copy(_cloudShade);
       horizonRim.gain.set(1, ambGain, glowGain, msFloor);
+      horizonRim.time.value = t;
     }
     horizonBank.userData.opNow = horizonBank.userData.op * (0.28 + 0.72 * smoothstep(0.72, 2.5, inten));
     horizonMaterial.opacity = horizonBank.userData.opNow;
@@ -1828,12 +2049,62 @@ export function setupClouds(group, {
 
   function setEnabled(v) { if (!disposed) root.visible = !!v; }
 
+  // ── v4 마칭 제어(성능 프로파일 강등 + 검증 A/B) ──────────────────────────────
+  // 모바일·저사양은 **스텝 수만 uniform 으로 내린다**(프로그램 분기 금지 → 프로그램 계열 델타 0).
+  //   setCloudVolume({ steps: 8 }) 이 권고 강등, { strength: 0 } 은 v3 평면 셰이딩 대조군이다.
+  // 이 경로는 재질·텍스처·지오메트리를 건드리지 않으므로 드로우콜도 불변이다.
+  function cloudVolumeStates() {
+    const states = highClouds.map((m) => m.material.userData.cloudRim);
+    states.push(horizonMaterial.userData.cloudRim);
+    return states.filter(Boolean);
+  }
+  function setCloudVolume(opts = {}) {
+    const states = cloudVolumeStates();
+    for (const s of states) {
+      if (Number.isFinite(opts.strength)) s.march.x = Math.max(0, Math.min(1, opts.strength));
+      if (Number.isFinite(opts.thickness)) s.march.y = Math.max(0, opts.thickness);
+      if (Number.isFinite(opts.steps)) {
+        s.march.z = Math.max(4, Math.min(CLOUD_MARCH_MAX_STEPS, Math.round(opts.steps)));
+      }
+      if (Number.isFinite(opts.optical)) s.march.w = Math.max(0.1, opts.optical);
+      if (Number.isFinite(opts.amp)) s.detail.z = Math.max(0, Math.min(1, opts.amp));
+      if (Number.isFinite(opts.alphaBlend)) s.detail.w = Math.max(0, Math.min(1, opts.alphaBlend));
+      if (Number.isFinite(opts.lightK)) s.volume.z = Math.max(0, opts.lightK);
+    }
+    const first = states[0];
+    return first ? {
+      materials: states.length,
+      strength: first.march.x, thickness: first.march.y,
+      steps: first.march.z, optical: first.march.w,
+      amp: first.detail.z, alphaBlend: first.detail.w, lightK: first.volume.z,
+    } : { materials: 0 };
+  }
+
+  // 검증 전용 훅(window.__clouds). 같은 부팅·같은 프로그램 안에서 v3/v4 를 교체해야 A/B 가 통제된다
+  //   (레포 규약: 페이지 간 픽셀 비교 금지). 제품 경로는 이 훅을 호출하지 않는다.
+  let unregisterVolumeHook = null;
+  if (typeof window !== 'undefined') {
+    const registry = window.__clouds || (window.__clouds = {
+      layers: [],
+      defaults: { ...CLOUD_MARCH_DEFAULTS },
+      maxSteps: CLOUD_MARCH_MAX_STEPS,
+      setVolume(opts) { return this.layers.map((l) => l.setCloudVolume(opts)); },
+    });
+    const record = { setCloudVolume, root, get states() { return cloudVolumeStates(); } };
+    registry.layers.push(record);
+    unregisterVolumeHook = () => {
+      const at = registry.layers.indexOf(record);
+      if (at >= 0) registry.layers.splice(at, 1);
+    };
+  }
+
   function dispose() {
     if (disposed) return;
     disposed = true;
+    if (unregisterVolumeHook) { unregisterVolumeHook(); unregisterVolumeHook = null; }
     disposeObjectTree(root);
     root.clear();
   }
 
-  return { group: root, uniforms: u, update, updateView, setEnabled, dispose };
+  return { group: root, uniforms: u, update, updateView, setEnabled, setCloudVolume, dispose };
 }
