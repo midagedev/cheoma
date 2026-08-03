@@ -7,7 +7,10 @@ export const MATERIAL_PROGRAM_PATCH = Object.freeze({
   LOD_SCREEN_DOOR: 'cheoma-lod-screen-door-v1',
   INST_FADE: 'cheoma-inst-fade-v2',
   // v2: soft centre-peaked falloff (no hard 0.42 plateau) — look-audit U5 / #221
-  CLOUD_SHADOW: 'cloudshadow-v2',
+  // v3: deformed footprint (per-slot rotated basis, elongation, blob-local fold, shared world
+  //     warp) + multiplicative union, and the chunk now rides every lit village surface rather
+  //     than roofs only — #50 B, 2026-08-04. The GLSL body changed, so the token changes with it.
+  CLOUD_SHADOW: 'cloudshadow-v3',
   SNOW: 'snow-v2',
   PHYSICAL_RIM: 'cheoma-rim-physical-v1',
   CRITTER_ARTICULATION: 'cheoma-critter-articulation-v1',

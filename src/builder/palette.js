@@ -1000,10 +1000,30 @@ export function injectCloudShadow(mat, cloudUniforms) {
   return true;
 }
 
-// 마을 root(populateVillage 산출)를 traverse 해 지붕(role='roof') 재질에 구름 그림자를 주입한다.
-//   부감에서 실제로 보이는 표면은 지붕+지형이며 지형은 이미 그늘을 받으므로, 지붕만 얹어도 "구름이
-//   마을 위를 흐르는" 그늘이 완결된다(벽·목부재까지 넓히면 프로그램 수만 늘어 이득 없음). 공유 재질이라
-//   실 패치 수는 소수(giwa·choga·궁·절·히어로·시전 지붕 팔레트). 반환: 패치한 고유 재질 수.
+// 구름 그림자에서 명시 제외할 재질 표시. 물처럼 자기 셰이더가 색을 지배하는 표면에만 쓴다.
+export function markCloudShadowOptOut(mat) {
+  if (mat && mat.isMaterial) mat.userData.__cloudShadowOptOut = true;
+  return mat;
+}
+
+// 마을 root(populateVillage 산출)를 traverse 해 구름 그림자를 주입한다.
+//
+// #50 B: 그늘은 "지붕의 성질"이 아니라 "마을의 성질"이다. 종전에는 role='roof' 만 얹었는데,
+//   면적 가중 실측(XZ 투영 면적, 최종 컴파일된 fragmentShader 에서 uCloudStr 유무로 판정,
+//   seed 20260716)은 조명 재질 가시 면적 중 그늘을 받는 비율이 capital 66.8% · hanyang 67.8%
+//   임을 보였다. 빠진 ⅓ 은 지붕이 아니라 **필지 패드(마당)·도로·논·성벽·기단 석재·산포 식생**
+//   이다 — 지형을 건너온 그늘이 마을에 닿으면 끊겨 보이던 실제 원인이 이것이고, 지붕만 넓혀서는
+//   닫히지 않는다. 그래서 role 화이트리스트를 버리고 마을의 조명 stock 재질 전체에 같은 청크를
+//   얹는다(지형·지붕·땅·식생이 한 uCloudBlobs 를 공유 → 경계에서 감쇠가 연속).
+// 프로그램 예산: 같은 청크를 계열 전체에 **균일하게** 얹으므로 지금 프로그램을 공유하는 재질은
+//   계속 공유한다(포크는 계열 중 일부만 패치할 때 생긴다). 드로우콜·씬 구조·결정론은 불변 —
+//   셰이더 코드만 늘어난다.
+// 제외 둘:
+//   ① 이미 청크를 든 재질(__cloudShadowPatched). 마을 지형은 자기 onBeforeCompile 로 직접
+//      주입하므로 여기서 두 번 얹으면 `varying vec3 vCloudWorld` 가 중복 선언돼 링크가 깨진다.
+//   ② __cloudShadowOptOut — 물. injectWaterLook 의 프레넬 반사·글린트가 색을 지배하고 글린트는
+//      AA 비결정이라 픽셀로 판정할 수 없다(감산을 얹어도 검증 가능한 이득이 없다).
+// 반환: 이 호출에서 새로 패치한 고유 재질 수.
 export function injectVillageCloudShadow(root, cloudUniforms) {
   if (!root || !cloudUniforms) return 0;
   let n = 0;
@@ -1012,7 +1032,13 @@ export function injectVillageCloudShadow(root, cloudUniforms) {
     if (!m) return;
     const list = Array.isArray(m) ? m : [m];
     for (const mm of list) {
-      if (mm && mm.userData && mm.userData.role === 'roof' && injectCloudShadow(mm, cloudUniforms)) n++;
+      if (!mm || !mm.isMaterial || mm.userData.__cloudShadowOptOut) continue;
+      // 조명(lit) stock 재질만 — diffuseColor 감산이 의미를 가지려면 라이팅을 거쳐야 하고,
+      //   MeshBasic 계열(엣지 미스트·능선 안개·야간 창불)은 대기·발광 소유라 건드리지 않는다.
+      const lit = mm.isMeshStandardMaterial || mm.isMeshPhysicalMaterial
+        || mm.isMeshLambertMaterial || mm.isMeshPhongMaterial;
+      if (!lit) continue;
+      if (injectCloudShadow(mm, cloudUniforms)) n++;
     }
   });
   return n;

@@ -170,7 +170,7 @@ cheoma의 `ink.js`는 이미 이 문법의 대부분(농담 양자화·한지 �
 
 **기본(회화) 모드**: `MeshStandardMaterial{flatShading:true}` → `injectCloudShadow`(산 숲만) →
 `patchSnowMaterial` profile `foliage` → `createFresnelRim`. 최종 cacheKey는
-산 숲 `cheoma-rim-physical-v1|cloudshadow-v2|snow-v2`, 외곽 산포 `cheoma-inst-fade-v2|cheoma-rim-physical-v1|snow-v2`.
+산 숲 `cheoma-rim-physical-v1|cloudshadow-v3|snow-v2`, 외곽 산포 `cheoma-inst-fade-v2|cheoma-rim-physical-v1|snow-v2`.
 - **림 그룹 배정 결함**: `rim.js`의 `ORGANIC_NAMES = {'trees','village-flora','focusGrass'}`는 이름 매칭이라
   `village-trees`(외곽 산포)·`village-forest`/`forest-trees`(산 숲)·`village-bloom`은 **매칭에 실패해 `misc`(×1.0)로
   림을 받는다.** 나무 재질에 `userData.role`도 없다. 즉 숲이 건물과 같은 계열의 강한 림을 받고 있고,

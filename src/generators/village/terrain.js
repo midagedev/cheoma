@@ -8,6 +8,7 @@ import {
   streamSurfaceHeightAt,
   terrainGridSize,
 } from '../../village/terrain-grid.js';
+import { markCloudShadowOptOut } from '../../builder/palette.js';
 import { injectWaterLook } from '../../env/water.js';
 import {
   CLOUD_SHADOW_FRAG_DECL, CLOUD_SHADOW_FRAG_BODY,
@@ -194,6 +195,10 @@ export function buildSiteTerrain(site, cloudU, warpInner, clearDist) {
   //   제거했다(파일 머리 주석의 유도). 남은 것은 구름 그림자 하나이고, 대기는 scene.fog 소유다.
   //   향후 패치가 얹혀도 color_fragment '뒤'에 삽입되도록 앵커는 그대로 둔다.
   const useCloud = !!cloudU;
+  // 이 재질은 청크를 자기 콜백으로 직접 든다 → 마을 전역 주입기(palette.injectVillageCloudShadow,
+  //   #50 B)가 두 번 얹지 않도록 패치 완료로 표시한다. 두 번 얹으면 `varying vec3 vCloudWorld` 가
+  //   중복 선언돼 프로그램 링크가 깨진다.
+  if (useCloud) mat.userData.__cloudShadowPatched = true;
   mat.onBeforeCompile = (shader) => {
     if (useCloud) {
       shader.uniforms.uCloudTime = cloudU.uCloudTime;
@@ -338,6 +343,9 @@ export function buildWaterRibbon(site, uniforms) {
     reflection: site.stream.kind === 'river' ? 0.42 : (urbanCreek ? 0.40 : 0.58),
     ripple: site.stream.kind === 'river' ? 0.30 : (urbanCreek ? 0.62 : 0.48),
   });
+  // 물은 마을 전역 구름 그림자에서 제외(#50 B) — 프레넬 하늘반사·글린트가 색을 지배하고,
+  //   글린트는 AA 비결정이라 감산 효과를 픽셀로 판정할 수 없다.
+  markCloudShadowOptOut(mat);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'village-stream';
   mesh.renderOrder = 1;

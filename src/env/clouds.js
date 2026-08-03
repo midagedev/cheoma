@@ -60,9 +60,34 @@ float csNoise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.0-2.0*f);
   return mix(mix(a,b,u.x),mix(c,d,u.x),u.y); }
 float csFbm(vec2 p){ float v=0.,a=0.55; for(int i=0;i<4;i++){ v+=a*csNoise(p); p=p*2.03+7.1; a*=0.5;} return v; }
 // Soft cumulus footprint: peak at centre, continuous gradient, no hard plateau disc.
-float cloudBlob(vec4 b, vec2 wp, float wob){
+// #50 B (P1' dawn verdict 2026-08-01: 산 중턱 그늘이 "부드러운 사각 판"): the radial profile was
+//   already soft, but the footprint was a **circle**, and five circles summed then clamped read as
+//   one rounded slab. So the distance is measured in a deformed frame instead:
+//     ① per-slot rotated basis — derived from the unroll index, never from b.xy. A centre-derived
+//        hash would repick every time the drifting blob crossed a hash cell and pop the outline.
+//        The slot argument is a literal at every call site, so the basis constant-folds away.
+//     ② area-preserving elongation (1.28 × 0.80 ≈ 1) so no slot is a circle to begin with.
+//     ③ blob-local trig fold — travels rigidly with the blob (this is "저 구름의 그림자"), bends
+//        the outline into lobes rather than displacing it.
+//     ④ shared world-space warp vectors, rotated into each slot's basis. Sampled once per
+//        fragment in the body below and only rotated here, so five differently-lobed footprints
+//        cost two noise taps, not ten. Overlapping slots therefore never share an outline.
+//   The radial falloff itself is untouched (soft centre peak, squared rim) — this is shape, not
+//   attenuation, so the continuity contract with the terrain is unchanged.
+float cloudBlob(vec4 b, vec2 wp, float wob, vec2 w1, vec2 w2, float slot){
   if (b.z < 0.5) return 0.0;                     // 비활성 슬롯
-  float r = max(0.0, distance(wp, b.xy) / b.z + wob);  // 0=중심 .. ~1=반경끝
+  vec2 d = (wp - b.xy) / b.z;                    // 0=중심 .. ~1=반경끝
+  float ang = 6.2831853 * csHash(vec2(slot * 13.7 + 3.1, slot * 7.3 + 1.9));
+  vec2 ex = vec2(cos(ang), sin(ang)), ey = vec2(-ex.y, ex.x);
+  vec2 q = vec2(dot(d, ex) * 1.28, dot(d, ey) * 0.80);
+  // Deform the outline, not the core. Warping uniformly displaced the centre too, and since the
+  //   0.5 iso-contour sits at only |q|≈0.32 the core came apart — measured iso-0.5 radial CV 1.02,
+  //   i.e. a shadow with holes punched in it. Ramping by |q| keeps one coherent dark centre and
+  //   spends the deformation where the silhouette is actually read.
+  float lobe = smoothstep(0.14, 0.55, length(q));
+  q += lobe * (0.10 * vec2(sin(q.y * 2.7 + slot * 2.1), sin(q.x * 3.1 + slot * 4.7))
+    + vec2(dot(w1, ex), dot(w1, ey)) * 0.29 + vec2(dot(w2, ex), dot(w2, ey)) * 0.12);
+  float r = max(0.0, length(q) + wob);
   float a = 1.0 - smoothstep(0.0, 1.12, r);
   return b.w * a * a;                            // 제곱 감쇠 → 코어는 살아 있고 rim 은 부드럽게
 }
@@ -75,12 +100,22 @@ export const CLOUD_SHADOW_FRAG_BODY = `
   // Mild edge breath only (±0.08). Stronger wobble + hard plateau used to carve concentric
   // ring / stripe contours across the courtyard under frozen shot clocks.
   float wob = (csFbm(wp * 0.007 + uCloudTime * 0.003) - 0.5) * 0.16;
-  float shade = 0.0;
-  shade += cloudBlob(uCloudBlobs[0], wp, wob);
-  shade += cloudBlob(uCloudBlobs[1], wp, wob);
-  shade += cloudBlob(uCloudBlobs[2], wp, wob);
-  shade += cloudBlob(uCloudBlobs[3], wp, wob);
-  shade += cloudBlob(uCloudBlobs[4], wp, wob);
+  // Shape vectors for cloudBlob ④ — two scales: the first bends the outline into lobes, the
+  //   second crenellates it. Sampled once here and rotated per slot, so cost is independent of
+  //   MAX_CLOUD_BLOBS. Drift is ~500 s per period (near-static field) — the visible morph comes
+  //   from the blob travelling through it, which is what an evolving cloud edge looks like.
+  vec2 wdr = vec2(uCloudTime * 0.0021, uCloudTime * -0.0013);
+  vec2 w1 = vec2(csNoise(wp * 0.0094 + wdr), csNoise(wp * 0.0094 + wdr + 37.19)) - 0.5;
+  vec2 w2 = vec2(csNoise(wp * 0.0295 + wdr), csNoise(wp * 0.0295 + wdr + 11.73)) - 0.5;
+  // Multiplicative union. The additive sum clamped at 1.0 flattened every overlap into a
+  //   saturated slab with a soft outline — that slab is what read as a plate, not the falloff.
+  //   A product union keeps each lobe's own gradient and can never plateau.
+  float shade = 1.0
+    - (1.0 - cloudBlob(uCloudBlobs[0], wp, wob, w1, w2, 0.0))
+    * (1.0 - cloudBlob(uCloudBlobs[1], wp, wob, w1, w2, 1.0))
+    * (1.0 - cloudBlob(uCloudBlobs[2], wp, wob, w1, w2, 2.0))
+    * (1.0 - cloudBlob(uCloudBlobs[3], wp, wob, w1, w2, 3.0))
+    * (1.0 - cloudBlob(uCloudBlobs[4], wp, wob, w1, w2, 4.0));
   shade = clamp(shade, 0.0, 1.0);
   diffuseColor.rgb *= 1.0 - uCloudStr * shade;
 }

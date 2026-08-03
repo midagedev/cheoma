@@ -45,8 +45,11 @@ ok(MATERIAL_PROGRAM_PATCH.LOD_SCREEN_DOOR === 'cheoma-lod-screen-door-v1',
   'LOD screen-door token is cheoma-lod-screen-door-v1');
 ok(MATERIAL_PROGRAM_PATCH.PHYSICAL_RIM === 'cheoma-rim-physical-v1',
   'physical rim token is cheoma-rim-physical-v1');
-ok(MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW === 'cloudshadow-v2',
-  'cloud-shadow token is cloudshadow-v2');
+// 2026-08-04 (#50 B): token literal tracks the GLSL body it keys — the cloud-shadow chunk got a
+// deformed footprint + multiplicative union and now rides every lit village surface, so the token
+// is v3. Still an explicit-token assertion, not a relaxation.
+ok(MATERIAL_PROGRAM_PATCH.CLOUD_SHADOW === 'cloudshadow-v3',
+  'cloud-shadow token is cloudshadow-v3');
 ok(MATERIAL_PROGRAM_PATCH.SNOW === 'snow-v2',
   'snow token is snow-v2');
 ok(LOD_SCREEN_DOOR_PROGRAM_VERSION === MATERIAL_PROGRAM_PATCH.LOD_SCREEN_DOOR,
@@ -65,7 +68,7 @@ ok(LOD_SCREEN_DOOR_PROGRAM_VERSION === MATERIAL_PROGRAM_PATCH.LOD_SCREEN_DOOR,
   addMaterialProgramKey(matRev, MATERIAL_PROGRAM_PATCH.PHYSICAL_RIM);
   ok(forward === matRev.customProgramCacheKey(),
     `token chain is order-independent (${forward})`);
-  ok(forward === 'cheoma-lod-screen-door-v1|cheoma-rim-physical-v1|cloudshadow-v2',
+  ok(forward === 'cheoma-lod-screen-door-v1|cheoma-rim-physical-v1|cloudshadow-v3',
     'canonical sorted lod|rim|cloud key');
   ok(hasOnlyMaterialProgramKeys(mat, new Set(Object.values(MATERIAL_PROGRAM_PATCH))),
     'composed tokens stay inside the known patch vocabulary');

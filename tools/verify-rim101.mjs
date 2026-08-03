@@ -144,7 +144,7 @@ window.__rimAudit = () => {
           if (!mm.customProgramCacheKey || mm.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) return false;
           const k = mm.customProgramCacheKey();
           if (typeof k !== 'string' || k.length === 0) return false;
-          const known = new Set(['cheoma-rim-physical-v1', 'cloudshadow-v2', 'snow-v2',
+          const known = new Set(['cheoma-rim-physical-v1', 'cloudshadow-v3', 'snow-v2',
             'cheoma-lod-screen-door-v1', 'cheoma-inst-fade-v2']);
           if (k.split('|').filter(Boolean).every((token) => known.has(token))) return false;
           return Object.prototype.hasOwnProperty.call(mm, 'customProgramCacheKey');

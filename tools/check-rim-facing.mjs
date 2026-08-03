@@ -644,7 +644,7 @@ try {
   // Sorted token chain: LOD screen-door is always installed with rim (R8 diet), then physical
   // rim + cloud shadow. Order of installation must not change the key.
   check(result.facing.composedProgramKey
-      === 'cheoma-lod-screen-door-v1|cheoma-rim-physical-v1|cloudshadow-v2',
+      === 'cheoma-lod-screen-door-v1|cheoma-rim-physical-v1|cloudshadow-v3',
     `cloud→rim customProgramCacheKey is composed (${result.facing.composedProgramKey})`);
   check(result.facing.reverseCloudChainKept
       && result.facing.reverseComposedProgramKey === result.facing.composedProgramKey,

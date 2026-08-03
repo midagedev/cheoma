@@ -33,7 +33,7 @@ import { VILLAGE_LENS, dollyScaleForFov } from '../camera/optics.js';
 //    재질(#66/#70): 림이 발광과 충돌.
 //  - 알려지지 않은 customProgramCacheKey 재질(#52 snowvol shell/ground): 델리킷한 프로그램 캐시키
 //    분리에 변형을 얹으면 캐시키 충돌·AO 오재사용 회귀 위험 → 건드리지 않는다. diffuseColor 곱셈과
-//    callback/key 체인을 명시한 cloudshadow-v2만 안전 합성 대상으로 허용한다.
+//    callback/key 체인을 명시한 cloudshadow-v3만 안전 합성 대상으로 허용한다.
 //  - 지형·물면(넓은 완사면·수면): 프레넬은 이웃 샘플이 없어 "평면의 실루엣 에지"와 "평면 내부의
 //    그레이징"을 구분할 수 없다(그게 프레넬의 본질). 넓은 지면이 그레이징에서 전면 금빛으로 물드는
 //    오탐(구 RimPass 가 깊이-이차미분 엣지 게이트로 힘겹게 막던 것)을 재질 프레넬로는 막을 방법이
