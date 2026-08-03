@@ -127,190 +127,757 @@ function makeCloudTexture(seed = 1) {
   return tex;
 }
 
-// 뭉게구름(적운) 텍스처 — 평평한 바닥 + 봉긋한 상부(다층 로브) + 상단 밝음/하단 그늘 베이크(볼륨감).
-//   위쪽이 은빛으로 밝고 아래가 청회 그늘이라 카메라·태양 방위와 무관하게 "덩어리"로 읽힌다(림 라이팅
-//   대용). 재질 color 가 이 위에 곱해져 시간대 틴트(석양 살구·야간 회청)를 얹는다. 결정론 시드.
-function makeCumulusTexture(seed = 1) {
-  const S = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  let s = seed >>> 0;
-  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  g.clearRect(0, 0, S, S);
+// ── 구름 데이터 텍스처(#50 실루엣·석양색·태양 인지 림) ──────────────────────
+// 예전 두 베이커는 RGB 에 **색**을 구웠다(흰 상부 하이라이트 + 청회 하부 그늘). 그러면 시간대
+//   표현 수단이 재질 color 전체 곱뿐이라 "볕 받는 쪽은 웜 · 반대쪽·바닥은 청회"가 원리적으로
+//   불가능하고(석양 구름은 흰색이 아니다), 림도 태양 방위와 무관하게 늘 같은 세기로 섰다.
+//   그래서 RGB 를 색이 아니라 **데이터**로 바꾼다:
+//     r,g = 빌보드 평면 법선 xy(0.5 중심, +y = 위). 밀도장 기울기에서 유도하며, 길이 |xy| 가
+//           그대로 외곽 근접도다(코어 0 = 카메라 정면, 실루엣 1 = 평면 내 측면).
+//     b   = 천공 개방도(위쪽 밀도의 지수 감쇠) — 밑면과 로브 사이 골이 하늘빛을 덜 받는다.
+//     a   = 실루엣.
+//   프래그먼트(patchCloudRim)가 이 법선을 뷰공간 태양 방향과 dot 해 볕면/그늘면·역광 투과·림을
+//   계산한다. 색은 전부 uniform 이므로 환경 크로스페이드가 그대로 따라온다(팝 없음).
+// 실루엣도 원형 로브 '그리기'에서 **메타볼 밀도장 + 노이즈 침식**으로 바꿨다. 로브를 겨우 이어지는
+//   간격(≈1.4r)으로 놓으면 이음부가 잘록해져 양배추 결이 생기고, 저·고주파 노이즈가 등고선을 굽혀
+//   원호 아이콘이 사라진다. 시드마다 총폭·기둥 수·기둥 높이·크라운 수가 달라 5 장이 서로 다른
+//   구름으로 읽힌다.
+// CanvasTexture 가 아니라 DataTexture 인 이유: 캔버스는 내부 저장이 프리멀티플라이라 저알파 픽셀의
+//   RGB 가 양자화로 파괴된다 — 정작 법선이 가장 중요한 곳이 그 외곽 구간이다. 부수 효과로 베이크가
+//   DOM 무의존이 되어 순수 노드에서 같은 함수를 호출해 실루엣·채널을 검증할 수 있다(도구는
+//   bakeCloudData 를 직접 import 한다). DataTexture 는 flipY=false 이므로 버퍼를 y-up(행 0 = 구름
+//   바닥)으로 채워 uv.y 와 정합시킨다. colorSpace 는 NoColorSpace — sRGB 로 두면 하드웨어 sRGB
+//   디코딩이 법선·AO 값을 왜곡한다.
+export const CLOUD_TEX_SIZE = 256;
 
-  const baseY = S * 0.70;                    // 평평한 바닥선(아래쪽에 둬 위로 봉긋이 솟게)
-  // 1) 실루엣: 바닥선을 따라 큰 로브 + 그 위 작은 로브(양배추형 봉우리). 중심 거의 불투명 → 소프트 외곽.
-  //   가로 폭을 좁히고(중앙 55%) 위로 쌓아(봉우리 높이 ↑) 넓적한 줄무늬 대신 뭉게구름 덩어리로 읽히게.
-  const lobes = [];
-  const nBig = 4;
-  for (let i = 0; i < nBig; i++) {
-    const t = i / (nBig - 1);
-    const x = S * 0.26 + t * S * 0.48 + (rnd() - 0.5) * 10;
-    const r = S * (0.155 + rnd() * 0.06);
-    const y = baseY - r * 0.55 - rnd() * S * 0.03;
-    lobes.push({ x, y, r });
+// 결정론 값노이즈(해시 격자 + smoothstep 보간). Math.random 금지 계약 — 시드만 쓴다.
+function cloudValueNoise(seed, cycles, S) {
+  const G = Math.max(2, Math.round(cycles));
+  const grid = new Float32Array((G + 1) * (G + 1));
+  let s = (seed >>> 0) || 1;
+  for (let i = 0; i < grid.length; i++) {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    grid[i] = s / 4294967296;
   }
-  const nTop = 5;
-  for (let i = 0; i < nTop; i++) {
-    const x = S * 0.30 + rnd() * S * 0.40;
-    const r = S * (0.10 + rnd() * 0.07);
-    const y = baseY - S * (0.20 + rnd() * 0.24);
-    lobes.push({ x, y, r });
-  }
-  for (const L of lobes) {
-    const rg = g.createRadialGradient(L.x, L.y, 0, L.x, L.y, L.r);
-    rg.addColorStop(0, 'rgba(255,255,255,1)');
-    rg.addColorStop(0.52, 'rgba(255,255,255,1)');       // 넓은 불투명 코어(덩어리 감)
-    rg.addColorStop(0.80, 'rgba(255,255,255,0.9)');
-    rg.addColorStop(1, 'rgba(255,255,255,0)');           // 외곽 20%만 페더링(또렷한 실루엣)
-    g.fillStyle = rg;
-    g.beginPath(); g.arc(L.x, L.y, L.r, 0, Math.PI * 2); g.fill();
-  }
-  // 2) 바닥 평탄화: 바닥선 아래를 부드럽게 지운다(destination-out).
-  g.globalCompositeOperation = 'destination-out';
-  const bg = g.createLinearGradient(0, baseY - S * 0.04, 0, baseY + S * 0.09);
-  bg.addColorStop(0, 'rgba(0,0,0,0)');
-  bg.addColorStop(1, 'rgba(0,0,0,1)');
-  g.fillStyle = bg; g.fillRect(0, baseY - S * 0.04, S, S * 0.25);
-  // 3) 볼륨 셰이딩: 실루엣 안에서만(source-atop) 아래를 청회로 어둡게 → 상단 밝음/하단 그늘.
-  g.globalCompositeOperation = 'source-atop';
-  const sg = g.createLinearGradient(0, S * 0.26, 0, baseY);
-  sg.addColorStop(0, 'rgba(146,160,182,0)');
-  sg.addColorStop(1, 'rgba(108,124,150,0.62)');
-  g.fillStyle = sg; g.fillRect(0, 0, S, S);
-  // 4) 상단 은빛 하이라이트(봉우리 윗면).
-  const hg = g.createLinearGradient(0, S * 0.14, 0, S * 0.40);
-  hg.addColorStop(0, 'rgba(255,255,255,0.55)');
-  hg.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = hg; g.fillRect(0, 0, S, S);
-  g.globalCompositeOperation = 'source-over';
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// Distant cumulus needs a more intricate silhouette than the broad overhead shadow
-// caster. Many small semi-opaque lobes form scalloped crowns and wispy shoulders;
-// baked valley/underside shading survives telephoto DoF without reading as a cloud icon.
-function makeHorizonCumulusTexture(seed = 97) {
-  const S = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  let s = seed >>> 0;
-  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  const baseY = S * 0.71;
-  g.clearRect(0, 0, S, S);
-
-  const lobe = (x, y, r, alpha) => {
-    const grad = g.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
-    grad.addColorStop(0.56, `rgba(255,255,255,${alpha * 0.94})`);
-    grad.addColorStop(0.82, `rgba(255,255,255,${alpha * 0.58})`);
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grad;
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  const step = S / G;
+  return (x, y) => {
+    const fx = Math.min(G - 1e-4, Math.max(0, x / step));
+    const fy = Math.min(G - 1e-4, Math.max(0, y / step));
+    const ix = fx | 0, iy = fy | 0;
+    const tx = fx - ix, ty = fy - iy;
+    const ux = tx * tx * (3 - 2 * tx), uy = ty * ty * (3 - 2 * ty);
+    const i0 = iy * (G + 1) + ix;
+    const a = grid[i0], b = grid[i0 + 1], c = grid[i0 + G + 1], d = grid[i0 + G + 2];
+    return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
   };
+}
 
-  // Four overlapping rows guarantee one connected mass. Each higher row narrows and
-  // uses smaller puffs, yielding a broad base with a scalloped, asymmetric crown.
-  const rows = [
-    { count: 8, x0: 0.14, x1: 0.86, y: 0.64, r0: 0.105, r1: 0.14 },
-    { count: 7, x0: 0.21, x1: 0.79, y: 0.55, r0: 0.095, r1: 0.13 },
-    { count: 5, x0: 0.30, x1: 0.70, y: 0.46, r0: 0.082, r1: 0.115 },
-    { count: 3, x0: 0.40, x1: 0.60, y: 0.38, r0: 0.072, r1: 0.10 },
-  ];
-  rows.forEach((row, rowIndex) => {
-    for (let i = 0; i < row.count; i++) {
-      const t = row.count > 1 ? i / (row.count - 1) : 0.5;
-      const x = S * (row.x0 + (row.x1 - row.x0) * t) + (rnd() - 0.5) * S * 0.035;
-      const y = S * row.y + (rnd() - 0.5) * S * (0.035 + rowIndex * 0.005);
-      const r = S * (row.r0 + rnd() * (row.r1 - row.r0));
-      lobe(x, y, r, 0.7 + rnd() * 0.2);
+// 로브 합 밀도장. 커널은 (1-d²)² — 유한 지지라 로브별 바운딩박스만 순회한다(전체 순회 대비 ~10×).
+//   sy>1 은 세로 납작(적운 바닥 덩어리), w 는 임계 대비 돌출량(작은 크라운은 낮게 잡아 봉우리로만).
+function cloudLobeField(S, lobes) {
+  const f = new Float32Array(S * S);
+  for (const L of lobes) {
+    const sy = L.sy || 1;
+    const ry = L.r / sy;
+    const x0 = Math.max(0, Math.floor(L.x - L.r)), x1 = Math.min(S - 1, Math.ceil(L.x + L.r));
+    const y0 = Math.max(0, Math.floor(L.y - ry)), y1 = Math.min(S - 1, Math.ceil(L.y + ry));
+    const inv = 1 / (L.r * L.r);
+    for (let y = y0; y <= y1; y++) {
+      const dy = (y - L.y) * sy;
+      const dy2 = dy * dy;
+      const row = y * S;
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - L.x;
+        const d2 = (dx * dx + dy2) * inv;
+        if (d2 >= 1) continue;
+        const t = 1 - d2;
+        f[row + x] += L.w * t * t;
+      }
     }
-  });
-
-  // Flatten and feather the rain-free base.
-  g.globalCompositeOperation = 'destination-out';
-  const erase = g.createLinearGradient(0, baseY - S * 0.02, 0, baseY + S * 0.10);
-  erase.addColorStop(0, 'rgba(0,0,0,0)');
-  erase.addColorStop(0.42, 'rgba(0,0,0,0.14)');
-  erase.addColorStop(1, 'rgba(0,0,0,1)');
-  g.fillStyle = erase; g.fillRect(0, baseY - S * 0.02, S, S * 0.18);
-
-  // Cool underside and small soft valley pockets give volume before the dynamic rim.
-  g.globalCompositeOperation = 'source-atop';
-  const underside = g.createLinearGradient(0, S * 0.28, 0, baseY);
-  underside.addColorStop(0, 'rgba(174,184,202,0)');
-  underside.addColorStop(0.62, 'rgba(143,155,179,0.16)');
-  underside.addColorStop(1, 'rgba(94,111,145,0.66)');
-  g.fillStyle = underside; g.fillRect(0, 0, S, S);
-  for (let i = 0; i < 6; i++) {
-    const x = S * (0.25 + rnd() * 0.5), y = S * (0.43 + rnd() * 0.18), r = S * (0.025 + rnd() * 0.035);
-    const pocket = g.createRadialGradient(x, y, 0, x, y, r);
-    pocket.addColorStop(0, 'rgba(74,91,124,0.20)');
-    pocket.addColorStop(1, 'rgba(74,91,124,0)');
-    g.fillStyle = pocket; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
   }
-  const crown = g.createLinearGradient(0, S * 0.18, 0, S * 0.42);
-  crown.addColorStop(0, 'rgba(255,255,255,0.42)');
-  crown.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = crown; g.fillRect(0, 0, S, S);
-  g.globalCompositeOperation = 'source-over';
+  return f;
+}
 
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+// 상공 적운: 평평한 바닥 + **지배 로브 1 군**(기단 로브 반경의 1.8~2.2 배) + 그 위 2~3 단 적층.
+//   좌표계는 y-up(0 = 텍스처 바닥).
+// #50 A2 (비전 FIX① 2026-08-03): 1 차는 기단·기둥·크라운 로브 반경이 모두 0.060~0.154·S 로 한
+//   옥타브 안에 몰려 있어, 빌보드가 가로로 1.39:1 늘어난 화면에서 "같은 반지름 로브가 늘어선
+//   가로 소시지 띠"로 읽혔다. 봉우리 위계는 **반경비**로만 생긴다 — 층을 더 쌓거나 노이즈를
+//   키우는 것으로 대체되지 않는다. 그래서 역할별로 반경대를 벌린다:
+//     기단(plinth) 1.0  ·  이웃 어깨 1.2~1.5  ·  지배(dominant) 1.84~2.14  (기단 반경 기준)
+//   기단은 개수 상한 4 에 세로로 눌러(sy≈1.7) 바닥선 슬래브 역할만 하고, 적층은 지배 반경에서
+//   파생해 좁혀 올린다. 마지막에 실루엣을 텍스처에 맞춰 등방 스케일한다(빌보드 크기는 고정이므로
+//   실루엣이 텍스처를 덜 채우면 그만큼 구름이 작게 보인다).
+// 로브 간격은 전부 **반경에서 파생**한다: 임계 0.32 에서 두 로브는 간격 ≲1.55r 일 때만 이어지므로
+//   그 문턱 안쪽(≤1.36r)으로만 놓는다. 문턱을 넘기면 공중에 뜬 동그라미가 생긴다.
+function cumulusLobes(rnd, S) {
+  const lobes = [];
+  const baseY = S * 0.235;
+  // ① 기단 열 — 작고 납작하게, 개수 상한 4.
+  const rP = S * (0.086 + rnd() * 0.020);
+  const nP = 3 + (rnd() < 0.45 ? 1 : 0);
+  const gapP = rP * 1.14;
+  const cx = S * 0.5;
+  const skew = (rnd() - 0.5) * S * 0.075;            // 적층이 한쪽으로 기울어 바람결이 생긴다
+  const px0 = cx - gapP * (nP - 1) * 0.5;
+  const plinth = [];
+  for (let i = 0; i < nP; i++) {
+    const r = rP * (0.84 + rnd() * 0.30);
+    const sy = 1.55 + rnd() * 0.30;
+    const lobe = {
+      x: px0 + gapP * i + (rnd() - 0.5) * rP * 0.14,
+      y: baseY + (r / sy) * (0.82 + rnd() * 0.16),
+      r, sy, w: 1.0,
+    };
+    plinth.push(lobe);
+    lobes.push(lobe);
+  }
+  // ② 지배 로브 — 기단 반경의 1.84~2.14 배. 중심 열이 아닌 로브 위에 얹어 좌우 비대칭을 만든다
+  //    (실측 적운은 한쪽 어깨만 솟는다). 아래쪽 절반은 바닥 평탄화가 잘라내므로 y 를 낮게 둔다.
+  const domRatio = 1.84 + rnd() * 0.30;
+  const rD = rP * domRatio;
+  const ai = nP >= 4 ? (rnd() < 0.5 ? 1 : 2) : (rnd() < 0.5 ? 0 : 1);
+  const ax = plinth[ai].x + (rnd() - 0.5) * rP * 0.30;
+  const syD = 1.06 + rnd() * 0.12;
+  const ryD = rD / syD;
+  const dy0 = baseY + ryD * 0.74;
+  lobes.push({ x: ax, y: dy0, r: rD, sy: syD, w: 1.0 });
+  // 볼(cheek) 2 개 — 지배 로브 측면에 걸쳐 큰 원호를 깬다. 거리 0.72rD 에서 부모 필드가 0.74 라
+  //   합집합이 확실히 이어지고, 실루엣만 양배추처럼 부푼다.
+  const cheekSide = rnd() < 0.5 ? -1 : 1;
+  for (let c = 0; c < 2; c++) {
+    const ang = (0.74 + rnd() * 0.40) * (c === 0 ? cheekSide : -cheekSide);
+    lobes.push({
+      x: ax + Math.sin(ang) * rD * 0.72,
+      y: dy0 + Math.cos(ang) * ryD * 0.46,
+      r: rD * (0.40 + rnd() * 0.14), sy: 1.04 + rnd() * 0.10, w: 0.98,
+    });
+  }
+  // ③ 적층 2~3 단 — 반경·간격 모두 rD 파생(0.52 → 0.35 → 0.25). 한 층에 로브 여러 개를 두되
+  //    간격은 1.22r 로 묶어(문턱 안) 층이 하나의 덩어리로 이어지게 한다.
+  const tiers = rnd() < 0.55 ? 3 : 2;
+  let ty = dy0, tyR = ryD;
+  for (let k = 0; k < tiers; k++) {
+    const r = rD * [0.52, 0.35, 0.25][k] * (0.92 + rnd() * 0.18);
+    const sy = 1.02 + rnd() * 0.10;
+    const ry = r / sy;
+    ty += (tyR + ry) * 0.60;
+    tyR = ry;
+    const count = k === 0 ? 2 : (k === 1 ? 2 : 1);
+    const sep = r * 1.22;
+    for (let j = 0; j < count; j++) {
+      lobes.push({
+        x: ax + skew * (k + 1) * 0.34 + (j - (count - 1) * 0.5) * sep + (rnd() - 0.5) * r * 0.22,
+        y: ty + (rnd() - 0.5) * ry * 0.18,
+        r, sy, w: 0.97 - 0.05 * k,
+      });
+    }
+  }
+  // ④ 이웃 어깨 1 개 — 지배 덩어리 반대쪽에 낮게(0.62~0.78 rD). 지배와 경쟁하지 않는 반경대라
+  //    위계를 흐리지 않으면서 실루엣을 비대칭으로 벌린다.
+  const si = ai <= 1 ? nP - 1 : 0;
+  const rS = rD * (0.62 + rnd() * 0.16);
+  const syS = 1.08 + rnd() * 0.12;
+  const sy0 = baseY + (rS / syS) * 0.70;
+  lobes.push({ x: plinth[si].x, y: sy0, r: rS, sy: syS, w: 1.0 });
+  lobes.push({
+    x: plinth[si].x + skew * 0.3, y: sy0 + (rS / syS) * 0.92,
+    r: rS * 0.56, sy: 1.04, w: 0.95,
+  });
+  // ⑤ 실루엣을 텍스처에 맞춰 등방 스케일(바닥선 고정). 시드마다 총폭이 달라도 화면 점유가
+  //    비슷해지고, 1 차에서 시드별로 13~24% 로 벌어졌던 커버리지가 좁혀진다.
+  let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const L of lobes) {
+    minX = Math.min(minX, L.x - L.r);
+    maxX = Math.max(maxX, L.x + L.r);
+    maxY = Math.max(maxY, L.y + L.r / (L.sy || 1));
+  }
+  const fit = Math.min(S * (0.90 + rnd() * 0.06) / (maxX - minX), S * 0.695 / (maxY - baseY));
+  const mid = (minX + maxX) * 0.5;
+  for (const L of lobes) {
+    L.x = cx + (L.x - mid) * fit;
+    L.y = baseY + (L.y - baseY) * fit;
+    L.r *= fit;
+  }
+  // ⑥ 스캘럽: 기존 로브의 윗면에 걸치게 작은 봉우리를 얹는다. 무작위 좌표에 흩으면 떠 있는
+  //    반점이 되고, 윗면에 걸치면 실루엣 윤곽만 크레늘레이션된다. 크기를 **부모 반경에서**
+  //    파생하는 것이 1 차와 다른 점이다 — 절대 크기로 두면 커진 지배 로브 위에서 사라진다.
+  const nScallop = 8 + Math.floor(rnd() * 5);
+  const pool = lobes.slice();
+  for (let i = 0; i < nScallop; i++) {
+    let pick = pool[Math.floor(rnd() * pool.length)];
+    const alt = pool[Math.floor(rnd() * pool.length)];
+    if (alt.y > pick.y) pick = alt;                  // 두 번 뽑아 높은 쪽 — 상단 편향
+    const ang = (rnd() - 0.5) * 1.9;                 // 상단 반구 위 방위
+    lobes.push({
+      x: pick.x + Math.sin(ang) * pick.r * 0.62,
+      y: pick.y + Math.cos(ang) * (pick.r / (pick.sy || 1)) * 0.60,
+      r: Math.min(S * 0.072, Math.max(S * 0.026, pick.r * (0.24 + rnd() * 0.14))),
+      sy: 1.0, w: 0.76 + rnd() * 0.16,
+    });
+  }
+  return {
+    lobes, baseY, erosionCycles: 8, crinkleCycles: 21, wobble: 0.36,
+    skyK: 2.6, threshold: 0.32, feather: 0.130,
+    plinthR: rP * fit, domR: rD * fit, nPlinth: nP,
+  };
+}
+
+// 원경 뱅크: 상공 빌보드와 같은 색 언어·같은 인코딩·같은 생성 규칙(반경대 위계 + rD 파생 적층).
+// #50 A3 재작(2026-08-03). 구판은 4 열(8·7·5·3 로브)을 x 0.13~0.87 에 깔고 그 위에 폭 0.05S 짜리
+//   3 단 미니 타워를 얹었다. 실측 결과 두 가지가 동시에 틀렸다:
+//     ① 실루엣 종횡비 1.84 — 이 텍스처가 종횡비 1.8 인 뱅크 쿼드(HORIZON_CLOUD_W/H)에 매핑되므로
+//        화면 합성 실루엣이 1.84 × 1.8 ≈ 3.3 이 된다. 제품 프레임 실측(probe-cloud-layers.mjs,
+//        sunset-cloudnear) 최대 성분 234×74 = 3.16, 지분가중 2.51 — 비전이 "가로 소시지 띠"로
+//        판정한 값이 정확히 이 곱이다. 텍스처 쪽 몫을 ≤1.3 으로 내리는 것이 이 함수의 책임이다.
+//     ② 알파 밴드 안 내부 홀. bakeCloudData 의 홀 채움은 임계 TH 한 레벨에서만 판정하는데, 구판
+//        씨드 97 은 alpha≈128 레벨에서는 좁은 틈으로 하늘과 이어져 있고 alpha≈77 레벨에서 그 틈이
+//        닫히는 **거의 봉인된 주머니**를 만들었다(103~130px, 임계 26~102 전 구간 상존 — A2 게이트가
+//        임계 128 단일 판정이라 0 으로 보고했다). 열 사이 간격을 반경에서 파생해 문턱 안쪽으로
+//        묶으면 그런 주머니가 애초에 생기지 않는다.
+//   비대칭 어깨(뱅크 캐릭터)는 유지한다 — 16 인스턴스가 같은 텍스처를 공유하므로 좌우 비대칭이
+//   "같은 구름 열여섯 장"으로 읽히지 않게 하는 유일한 방어다. 다만 미니 타워(말뚝)가 아니라
+//   기단 반경의 1.4 배짜리 **지배 어깨 덩어리 + rD 파생 적층**으로 솟는다(상공 적운과 같은 규칙).
+function horizonLobes(rnd, S) {
+  const lobes = [];
+  const baseY = S * 0.29;
+  const cx = S * 0.5;
+  // ① 기단 열 — 4 개. 간격을 반경에서 파생(1.24r)해 임계 0.32 의 연결 문턱(≲1.55r) 안쪽에 묶는다.
+  //    구판은 x 를 절대 좌표로 균등 분할해 반경과 무관했고, 그래서 열 사이에 주머니가 생겼다.
+  const rP = S * (0.094 + rnd() * 0.014);
+  const nP = 4;
+  const gapP = rP * 1.24;
+  const skew = (rnd() - 0.5) * S * 0.055;
+  const px0 = cx - gapP * (nP - 1) * 0.5;
+  const base = [];
+  for (let i = 0; i < nP; i++) {
+    const r = rP * (0.88 + rnd() * 0.24);
+    const sy = 1.22 + rnd() * 0.16;                  // 뱅크 기단은 상공 적운보다 덜 눌린다
+    const lobe = {
+      x: px0 + gapP * i + (rnd() - 0.5) * rP * 0.12,
+      y: baseY + (r / sy) * (0.84 + rnd() * 0.14),
+      r, sy, w: 1.0,
+    };
+    base.push(lobe);
+    lobes.push(lobe);
+  }
+  // ② 둘째 열 — 3 개, 기단 로브 사이 골 위에 얹혀 세로로 이어붙인다(간격 1.22r).
+  const rB = rP * (0.80 + rnd() * 0.10);
+  const gapB = rB * 1.22;
+  const bx0 = cx + skew * 0.5 - gapB;
+  const row2 = [];
+  for (let i = 0; i < 3; i++) {
+    const r = rB * (0.90 + rnd() * 0.18);
+    const sy = 1.10 + rnd() * 0.10;
+    const lobe = {
+      x: bx0 + gapB * i + (rnd() - 0.5) * rB * 0.14,
+      y: baseY + (rP / 1.3) * 1.42 + (r / sy) * 0.52,
+      r, sy, w: 0.96,
+    };
+    row2.push(lobe);
+    lobes.push(lobe);
+  }
+  // ③ 지배 어깨 덩어리 — 기단 반경의 1.34~1.52 배. 뱅크는 "봉우리 하나"가 아니므로 상공 적운의
+  //    1.84~2.14 밴드까지 올리지 않는다(올리면 뱅크가 단일 적운으로 읽힌다). 한쪽으로 치우쳐 얹어
+  //    좌우 비대칭을 만들고, 볼 2 개로 큰 원호를 깬다(0.70rD — 부모 필드가 확실히 이어지는 거리).
+  const side = rnd() < 0.5 ? -1 : 1;
+  const rD = rP * (1.34 + rnd() * 0.18);
+  const syD = 1.06 + rnd() * 0.10;
+  const ryD = rD / syD;
+  const ax = cx + side * gapP * 0.62 + (rnd() - 0.5) * rP * 0.20;
+  const dy0 = row2[1].y + (row2[1].r / row2[1].sy + ryD) * 0.46;
+  lobes.push({ x: ax, y: dy0, r: rD, sy: syD, w: 1.0 });
+  const cheekSide = rnd() < 0.5 ? -1 : 1;
+  for (let c = 0; c < 2; c++) {
+    const ang = (0.78 + rnd() * 0.34) * (c === 0 ? cheekSide : -cheekSide);
+    lobes.push({
+      x: ax + Math.sin(ang) * rD * 0.70,
+      y: dy0 + Math.cos(ang) * ryD * 0.44,
+      r: rD * (0.40 + rnd() * 0.12), sy: 1.04 + rnd() * 0.08, w: 0.97,
+    });
+  }
+  // ④ 적층 3 단 — 반경·간격 모두 rD 파생. 세로로 쌓아 종횡비를 1.3 아래로 끌어내리는 축이다.
+  let ty = dy0, tyR = ryD;
+  for (let k = 0; k < 3; k++) {
+    const r = rD * [0.56, 0.40, 0.28][k] * (0.92 + rnd() * 0.16);
+    const sy = 1.02 + rnd() * 0.08;
+    const ry = r / sy;
+    ty += (tyR + ry) * 0.58;
+    tyR = ry;
+    const count = k === 0 ? 2 : 1;
+    const sep = r * 1.20;
+    for (let j = 0; j < count; j++) {
+      lobes.push({
+        x: ax + skew * (k + 1) * 0.30 + (j - (count - 1) * 0.5) * sep + (rnd() - 0.5) * r * 0.20,
+        y: ty + (rnd() - 0.5) * ry * 0.16,
+        r, sy, w: 0.96 - 0.05 * k,
+      });
+    }
+  }
+  // ⑤ 반대쪽 낮은 크라운 1 개 — 지배 어깨와 경쟁하지 않는 반경대(0.60~0.74 rD)에서 뱅크가
+  //    "여러 봉우리의 열"로 읽히게 한다. 기단 열 폭 안에 두므로 총폭은 늘지 않는다.
+  const si = side > 0 ? 0 : nP - 1;
+  const rS = rD * (0.60 + rnd() * 0.14);
+  const syS = 1.08 + rnd() * 0.10;
+  const sy0 = base[si].y + (rS / syS) * 0.72;
+  lobes.push({ x: base[si].x + skew * 0.2, y: sy0, r: rS, sy: syS, w: 1.0 });
+  // ⑥ 실루엣을 텍스처에 맞춰 등방 스케일(바닥선 고정) — 상공 적운 ⑤ 와 같은 규칙. 등방이므로
+  //    종횡비는 이 단계에서 변하지 않고, 화면 점유만 시드 간에 고르게 맞춰진다.
+  let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const L of lobes) {
+    minX = Math.min(minX, L.x - L.r);
+    maxX = Math.max(maxX, L.x + L.r);
+    maxY = Math.max(maxY, L.y + L.r / (L.sy || 1));
+  }
+  const fit = Math.min(S * (0.86 + rnd() * 0.05) / (maxX - minX), S * 0.655 / (maxY - baseY));
+  const mid = (minX + maxX) * 0.5;
+  for (const L of lobes) {
+    L.x = cx + (L.x - mid) * fit;
+    L.y = baseY + (L.y - baseY) * fit;
+    L.r *= fit;
+  }
+  // ⑦ 스캘럽(상공 적운과 같은 규칙): 기존 로브 윗면에 걸치는 작은 봉우리 — 망원에서 윤곽이 잘게
+  //    부서진다. 크기는 **부모 반경 파생** — 절대 크기로 두면 fit 이후 사라지거나 튄다.
+  const pool = lobes.slice();
+  const nScallop = 9 + Math.floor(rnd() * 5);
+  for (let i = 0; i < nScallop; i++) {
+    let pick = pool[Math.floor(rnd() * pool.length)];
+    const alt = pool[Math.floor(rnd() * pool.length)];
+    if (alt.y > pick.y) pick = alt;
+    const ang = (rnd() - 0.5) * 1.9;
+    lobes.push({
+      x: pick.x + Math.sin(ang) * pick.r * 0.62,
+      y: pick.y + Math.cos(ang) * (pick.r / (pick.sy || 1)) * 0.60,
+      r: Math.min(S * 0.062, Math.max(S * 0.024, pick.r * (0.26 + rnd() * 0.14))),
+      sy: 1.0, w: 0.76 + rnd() * 0.14,
+    });
+  }
+  return {
+    lobes, baseY, erosionCycles: 10, crinkleCycles: 25, wobble: 0.34,
+    skyK: 2.9, threshold: 0.32, feather: 0.115,
+    plinthR: rP * fit, domR: rD * fit, nPlinth: nP,
+  };
+}
+
+// ── 위상·형태 정리 유틸(순수 함수, DOM/three 무의존) ────────────────────────────
+// 임계 미만 픽셀 중 **테두리에서 도달 가능한** 것만 '외부'다. 나머지는 실루엣 내부의 홀이다.
+function cloudExterior(f, S, level) {
+  const out = new Uint8Array(S * S);
+  const stack = new Int32Array(S * S);
+  let sp = 0;
+  const push = (p) => { if (!out[p] && f[p] < level) { out[p] = 1; stack[sp++] = p; } };
+  for (let x = 0; x < S; x++) { push(x); push((S - 1) * S + x); }
+  for (let y = 0; y < S; y++) { push(y * S); push(y * S + S - 1); }
+  while (sp) {
+    const p = stack[--sp];
+    const x = p % S, y = (p / S) | 0;
+    if (x > 0) push(p - 1);
+    if (x < S - 1) push(p + 1);
+    if (y > 0) push(p - S);
+    if (y < S - 1) push(p + S);
+  }
+  return out;
+}
+
+// 8-이웃 연결 성분 라벨링(f ≥ level). 고립 돌기 판별·제거용.
+function cloudComponents(f, S, level) {
+  const lab = new Int32Array(S * S).fill(-1);
+  const sizes = [];
+  const stack = new Int32Array(S * S);
+  for (let start = 0; start < S * S; start++) {
+    if (lab[start] !== -1 || f[start] < level) continue;
+    const id = sizes.length;
+    sizes.push(0);
+    let sp = 0;
+    stack[sp++] = start;
+    lab[start] = id;
+    while (sp) {
+      const p = stack[--sp];
+      sizes[id]++;
+      const x = p % S, y = (p / S) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= S) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if ((!dx && !dy) || xx < 0 || xx >= S) continue;
+          const qq = yy * S + xx;
+          if (lab[qq] !== -1 || f[qq] < level) continue;
+          lab[qq] = id;
+          stack[sp++] = qq;
+        }
+      }
+    }
+  }
+  return { lab, sizes };
+}
+
+// 분리형 그레이스케일 형태학(정사각 구조요소, 테두리는 복제). max→min = 클로징.
+//   비교는 Math.max/min 3 인자 호출이 아니라 명시 분기로 쓴다 — 베이크는 진입 로딩 창에서 6 장을
+//   굽고, 3 인자 호출판은 그 구간에 200ms 를 더 얹었다(실측 12.4ms/장 → 3.4ms/장).
+function cloudMorph(src, S, R, isMax) {
+  const a = new Float32Array(S * S), b = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      let v = src[row + x];
+      for (let d = 1; d <= R; d++) {
+        const l = src[row + (x - d < 0 ? 0 : x - d)];
+        const r = src[row + (x + d >= S ? S - 1 : x + d)];
+        if (isMax) { if (l > v) v = l; if (r > v) v = r; } else { if (l < v) v = l; if (r < v) v = r; }
+      }
+      a[row + x] = v;
+    }
+  }
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      let v = a[row + x];
+      for (let d = 1; d <= R; d++) {
+        const u = a[(y - d < 0 ? 0 : y - d) * S + x];
+        const w = a[(y + d >= S ? S - 1 : y + d) * S + x];
+        if (isMax) { if (u > v) v = u; if (w > v) v = w; } else { if (u < v) v = u; if (w < v) v = w; }
+      }
+      b[row + x] = v;
+    }
+  }
+  return b;
+}
+const cloudClose = (src, S, R) => cloudMorph(cloudMorph(src, S, R, true), S, R, false);
+
+// 분리형 박스 블러(두 번 통과 = 준가우시안). 저주파 로브 기울기 = 부피 셰이딩의 입력.
+function cloudBlur(src, S, R) {
+  const a = new Float32Array(S * S), b = new Float32Array(S * S);
+  const inv = 1 / (2 * R + 1);
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      let sum = 0;
+      for (let d = -R; d <= R; d++) sum += src[row + (x + d < 0 ? 0 : x + d >= S ? S - 1 : x + d)];
+      a[row + x] = sum * inv;
+    }
+  }
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      let sum = 0;
+      for (let d = -R; d <= R; d++) sum += a[(y + d < 0 ? 0 : y + d >= S ? S - 1 : y + d) * S + x];
+      b[row + x] = sum * inv;
+    }
+  }
+  return b;
+}
+
+// 도구가 직접 호출하는 순수 베이커(DOM 무의존). → { size, data: Uint8Array(RGBA, y-up) }
+export function bakeCloudData(seed = 1, variant = 'cumulus', S = CLOUD_TEX_SIZE) {
+  let s = (seed >>> 0) || 1;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const spec = variant === 'horizon' ? horizonLobes(rnd, S) : cumulusLobes(rnd, S);
+  const f = cloudLobeField(S, spec.lobes);
+  const TH = spec.threshold, FE = spec.feather;
+
+  // 1) 침식 — 곱연산(내부 밀도 변주 → 법선 요철)과 마스크된 덧셈(등고선 굽힘 → 실루엣 파괴)을
+  //    함께 쓴다. 곱만으로는 임계 근처 이동량이 1px 대라 실루엣이 그대로 원호로 남는다.
+  //    **깎기는 외곽 근처에서만** 한다(FIX② 2026-08-03). 1 차는 v<0.45 를 '얇은 곳'으로 보고
+  //    깎았는데 로브 이음부의 골(0.32~0.45)은 실루엣 내부에도 널려 있어서, 그 자리에 하늘이
+  //    뚫린 선명한 홀과 S 자 음영 홈이 생겼다("확대 시 우습다"의 최대 기여자). 외곽까지의
+  //    거리로 게이트하면 윤곽 굽힘은 그대로 남고 내부는 손대지 않는다.
+  const outside = cloudExterior(f, S, TH);
+  const shore = new Float32Array(S * S);
+  {
+    // 외부까지의 체임퍼 거리(전방·후방 2 패스). 외부 종자는 테두리 연결 성분만 쓰므로 기하적
+    //   내부 홀이 이미 있어도 그 홀을 키우지 않는다.
+    const BIG = 1e6;
+    const d = new Float32Array(S * S);
+    for (let i = 0; i < S * S; i++) d[i] = outside[i] ? 0 : BIG;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        let v = d[i];
+        if (x > 0) v = Math.min(v, d[i - 1] + 1);
+        if (y > 0) v = Math.min(v, d[i - S] + 1, x > 0 ? d[i - S - 1] + 1.4142 : BIG,
+          x < S - 1 ? d[i - S + 1] + 1.4142 : BIG);
+        d[i] = v;
+      }
+    }
+    for (let y = S - 1; y >= 0; y--) {
+      for (let x = S - 1; x >= 0; x--) {
+        const i = y * S + x;
+        let v = d[i];
+        if (x < S - 1) v = Math.min(v, d[i + 1] + 1);
+        if (y < S - 1) v = Math.min(v, d[i + S] + 1, x < S - 1 ? d[i + S + 1] + 1.4142 : BIG,
+          x > 0 ? d[i + S - 1] + 1.4142 : BIG);
+        d[i] = v;
+      }
+    }
+    for (let i = 0; i < S * S; i++) shore[i] = 1 - smoothstep(4, 12, d[i]);
+  }
+  const nA = cloudValueNoise(seed * 7919 + 13, spec.erosionCycles, S);
+  const nB = cloudValueNoise(seed * 104729 + 71, spec.crinkleCycles, S);
+  const baseFade = S * 0.085;
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      const i = row + x;
+      if (f[i] <= 1e-4) continue;
+      const a = nA(x, y), b = nB(x, y);
+      let v = f[i] * (0.88 + 0.24 * a);
+      const mask = smoothstep(0.02, 0.30, v);
+      const grow = ((a - 0.5) + (b - 0.5) * 0.45) * spec.wobble;
+      v += grow > 0 ? grow * mask : grow * mask * shore[i];
+      // 바닥 평탄화: 강수 없는 적운 바닥은 수평으로 잘린다. 컬럼별 미세 요동으로 자를 대지 않는다.
+      const cut = spec.baseY + (nA(x, 4) - 0.5) * S * 0.016;
+      if (y < cut) v *= Math.max(0, 1 - (cut - y) / baseFade);
+      f[i] = v > 0 ? v : 0;
+    }
+  }
+
+  // 1b) 내부 클로징 — 로브 이음부의 좁은 골을 **필드 단계에서** 메운다. 알파를 사후 보정하는
+  //    것과 달리 법선·천공 개방도가 모두 메워진 필드에서 나오므로 이음선이 남지 않는다.
+  //    외곽 밴드(shore)는 원본을 유지해 침식이 만든 윤곽 크레늘레이션을 지우지 않는다.
+  //    구조요소(11px)보다 넓은 만입 — 크라운 사이의 진짜 골 — 은 그대로 살아 왕관이 뭉개지지 않는다.
+  {
+    const closed = cloudClose(f, S, 5);
+    for (let i = 0; i < S * S; i++) f[i] = closed[i] * (1 - shore[i]) + f[i] * shore[i];
+  }
+
+  // 1c) 위상 정리. ① 고립 성분 제거(FIX③): 알파가 뜨는 성분이 여러 개면 최대 성분만 남긴다 —
+  //    기단 위에 떠 있던 가느다란 장기말/호로병형 단독 nub 이 여기서 사라진다. 페이드 잔상까지
+  //    지우려고 판정 임계를 알파 하한(TH−FE)으로 잡는다. ② 내부 홀 채움(FIX②): 테두리에서
+  //    도달 못 하는 임계 미만 성분을 큰 구조요소 클로징 값으로 메워(절벽 없이) 알파를 올린다.
+  const stats = { isolatedPx: 0, holePx: 0, components: 1 };
+  {
+    const { lab, sizes } = cloudComponents(f, S, TH - FE);
+    stats.components = sizes.length;
+    if (sizes.length > 1) {
+      let keep = 0;
+      for (let k = 1; k < sizes.length; k++) if (sizes[k] > sizes[keep]) keep = k;
+      for (let i = 0; i < S * S; i++) {
+        if (lab[i] >= 0 && lab[i] !== keep) { f[i] = 0; stats.isolatedPx++; }
+      }
+    }
+    const ext = cloudExterior(f, S, TH);
+    let holes = 0;
+    for (let i = 0; i < S * S; i++) if (f[i] < TH && !ext[i]) holes++;
+    if (holes) {
+      const big = cloudClose(f, S, 18);
+      for (let i = 0; i < S * S; i++) {
+        if (f[i] < TH && !ext[i]) { f[i] = Math.max(big[i], TH + FE * 0.25); stats.holePx++; }
+      }
+    }
+  }
+
+  // 2) 천공 개방도 — 위에서 아래로 밀도를 적분한 지수 감쇠. 바닥·틈이 하늘빛을 덜 받는다.
+  //    바닥값 0.06 은 칠흑 금지(룩 문법: 그림자면도 읽혀야 한다) 하한이다.
+  const skyRaw = new Float32Array(S * S);
+  const k = spec.skyK / S;
+  for (let x = 0; x < S; x++) {
+    let acc = 0;
+    for (let y = S - 1; y >= 0; y--) {
+      const i = y * S + x;
+      acc += f[i];
+      skyRaw[i] = 0.06 + 0.94 * Math.exp(-acc * k);
+    }
+  }
+  // 순수 수직 광선은 딱딱하므로 가로 5탭으로 눌러 확산 하늘광에 가깝게.
+  const sky = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      let sum = 0, wsum = 0;
+      for (let d = -2; d <= 2; d++) {
+        const xx = x + d;
+        if (xx < 0 || xx >= S) continue;
+        const w = d === 0 ? 3 : (Math.abs(d) === 1 ? 2 : 1);
+        sum += skyRaw[row + xx] * w; wsum += w;
+      }
+      sky[row + x] = sum / wsum;
+    }
+  }
+
+  // 3) 법선 = 밀도 감소 방향(외향). 두 스케일을 함께 인코딩한다.
+  //    · 고주파(2px 중앙차분): 실루엣 근접도 — 알파 윤곽 림·컷아웃 방지.
+  //    · 저주파(블러 필드 기울기): **로브 곡률** — 볕면/그늘면이 테두리가 아니라 부피로 읽히게
+  //      하는 유일한 입력이다(FIX④ 2026-08-03). 1 차는 길이를 pow(1−thick,0.65) 로만 눌러
+  //      코어가 전부 (0,0,1) 이 됐고, 그래서 역광 프레임의 바디가 스프라이트를 가로지르는 단일
+  //      램프 하나로 평평했다.
+  //    두께 프록시는 **길이 구간 분할**로 유지한다: 내부 로브 기울기는 [0, 0.46], 실루엣 근접도는
+  //      거기서 1 까지 올라가고, 셰이더는 slope>0.52 만 '얇은 곳'으로 읽는다(patchCloudRim 참조).
+  //    기울기 크기는 이미지마다 다르므로 표본 p95 로 정규화한다(변종·시드 무관 일관 강도).
+  const INTERIOR_TILT = 0.46;
+  const blur = cloudBlur(cloudBlur(f, S, 7), S, 7);
+  const gxs = new Float32Array(S * S), gys = new Float32Array(S * S);
+  const bxs = new Float32Array(S * S), bys = new Float32Array(S * S);
+  const mags = [], bmags = [];
+  const at = (src, x, y) => src[Math.min(S - 1, Math.max(0, y)) * S + Math.min(S - 1, Math.max(0, x))];
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const i = y * S + x;
+      if (f[i] <= 1e-4) continue;
+      const gx = at(f, x + 2, y) - at(f, x - 2, y);
+      const gy = at(f, x, y + 2) - at(f, x, y - 2);
+      gxs[i] = gx; gys[i] = gy;
+      const bx = at(blur, x + 3, y) - at(blur, x - 3, y);
+      const by = at(blur, x, y + 3) - at(blur, x, y - 3);
+      bxs[i] = bx; bys[i] = by;
+      if ((i & 7) === 0) { mags.push(Math.hypot(gx, gy)); bmags.push(Math.hypot(bx, by)); }
+    }
+  }
+  mags.sort((p, r) => p - r);
+  bmags.sort((p, r) => p - r);
+  const gRef = Math.max(1e-3, mags.length ? mags[Math.floor(mags.length * 0.95)] * 0.55 : 1);
+  const bRef = Math.max(1e-4, bmags.length ? bmags[Math.floor(bmags.length * 0.90)] * 0.62 : 1);
+
+  // feather 는 실루엣 '모양'이 아니라 알파 램프 폭이다. 임계 기울기(≈0.042/px)로 0.13 은 약 6px
+  //   램프 — 0.06 대로 좁히면 커버 픽셀의 93% 가 완전 불투명이 되어 종이 컷아웃으로 읽혔다(실측).
+  const data = new Uint8Array(S * S * 4);
+  for (let i = 0; i < S * S; i++) {
+    const fv = f[i];
+    const alpha = smoothstep(TH - FE, TH + FE, fv);
+    const p = i * 4;
+    data[p + 2] = Math.round(255 * Math.min(1, Math.max(0, sky[i])));
+    data[p + 3] = Math.round(255 * alpha);
+    if (alpha <= 0.002) { data[p] = 128; data[p + 1] = 128; continue; }
+    const gx = gxs[i], gy = gys[i];
+    const gl = Math.hypot(gx, gy);
+    const bx = bxs[i], by = bys[i];
+    const bl = Math.hypot(bx, by);
+    // 두께: 임계에서 0(외곽) → 임계의 2배에서 1(코어).
+    const thick = Math.min(1, Math.max(0, (fv - TH) / TH));
+    const edge = Math.pow(1 - thick, 0.65) * Math.min(1, gl / gRef);
+    const w = smoothstep(0.28, 0.95, edge);          // 0 = 코어, 1 = 실루엣
+    const lobe = Math.min(1, bl / bRef) * INTERIOR_TILT;
+    const ex = gl > 1e-5 ? -gx / gl : 0, ey = gl > 1e-5 ? -gy / gl : 0;
+    const ix = bl > 1e-7 ? -bx / bl : 0, iy = bl > 1e-7 ? -by / bl : 0;
+    const mx = ix * (1 - w) + ex * w, my = iy * (1 - w) + ey * w;
+    const ml = Math.hypot(mx, my);
+    const mag = lobe * (1 - w) + w;
+    const nx = ml > 1e-6 ? (mx / ml) * mag : 0;
+    const ny = ml > 1e-6 ? (my / ml) * mag : 0;
+    data[p] = Math.round(255 * (0.5 + 0.5 * Math.max(-1, Math.min(1, nx))));
+    data[p + 1] = Math.round(255 * (0.5 + 0.5 * Math.max(-1, Math.min(1, ny))));
+  }
+  return {
+    size: S, data,
+    // 형태 게이트(순수 노드)가 읽는 실측값. 검증 대상과 제품 경로가 같은 함수가 되도록
+    //   렌더러 없는 소비자에게 그대로 넘긴다.
+    meta: {
+      variant, seed, plinthR: spec.plinthR, domR: spec.domR, nPlinth: spec.nPlinth,
+      domRatio: spec.plinthR > 0 ? spec.domR / spec.plinthR : 0,
+      rawComponents: stats.components, isolatedPx: stats.isolatedPx, holeFillPx: stats.holePx,
+    },
+  };
+}
+
+function makeCloudDataTexture(seed, variant) {
+  const { size, data } = bakeCloudData(seed, variant);
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.colorSpace = THREE.NoColorSpace;      // RGB 는 법선·AO 데이터 — sRGB 디코딩 금지
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;               // 원경 뱅크 인스턴스는 화면에서 작다(에일리어싱 방어)
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
   return tex;
 }
 
-// One-pass HDR silver/gold lining for the alpha edge of a cloud billboard. The shader
-// samples alpha only (colour remains the regular map path), weights the contour toward
-// the projected sun direction, and adds linear-HDR energy for the existing bloom pass.
-// This costs no extra draw call and keeps the cloud itself available to moon/sun occlusion.
+// 구름 빌보드 한 장의 라이팅 전부를 이 패치가 소유한다(새 패스·새 재질 계열 0, 드로우콜 불변).
+//   map 의 RGB 는 색이 아니라 bakeCloudData 가 구운 데이터(법선 xy·천공 개방도)이므로 여기서
+//   diffuseColor.rgb 를 **덮어쓴다**. 재질 color(=diffuse)는 시간대 밝기(dim)·부감 감쇠 전용
+//   스칼라 캐리어로 남고, 색상(볕면·그늘면·림)은 uniform 에서 온다.
+//   ① 볕면/그늘면: 베이크 법선 · 뷰공간 태양 방향. 빌보드는 카메라를 보므로 뷰공간 ≈ 빌보드 접평면.
+//   ② 역광 게이트: 뷰공간 태양 z<0 = 태양이 카메라 앞(=피사체 뒤) → 그때만 림·투과가 선다.
+//      레포 확정 결정("림은 광학적으로 실재해야 한다")을 구름에도 적용 — 순광·정오엔 0 이다.
+//   ③ 투과광: 역광에서 얇은 부분(코어 두께 낮음)이 태양색으로 타오른다. 코어에도 바닥을 둬
+//      역광 구름이 회색 실루엣으로 죽지 않게 한다(석양 구름은 흰색도 회색도 아니다).
+//   ④ 부피(FIX④ 2026-08-03): 볕면/그늘면은 베이크된 **로브 법선**으로 계산한다. 랩 램버트로
+//      종단을 부드럽게 하고, 역광에서는 투과광 바닥을 올려 코어의 −ndl 변주가 지워지지 않게
+//      한다 — 1 차는 두 항이 코어에서 각각 0 과 0.14 로 눌려 바디가 단일 램프로 평평했다.
 function patchCloudRim(material) {
   const state = {
-    color: new THREE.Color(0xffc68c),
+    color: new THREE.Color(0xffc68c),                    // 림(은·금테) — tools 가 이 키를 읽는다
     strength: { value: 0 },
-    direction: new THREE.Vector2(0.8, 0.4).normalize(),
-    texel: new THREE.Vector2(1.8 / 256, 1.8 / 256),
+    direction: new THREE.Vector3(0.8, 0.4, -0.45).normalize(),   // 뷰공간 태양 방향(z<0 = 역광)
+    texel: new THREE.Vector2(1.8 / CLOUD_TEX_SIZE, 1.8 / CLOUD_TEX_SIZE),
+    sun: new THREE.Color(0xfff1e0),                      // 볕면 직사색
+    shade: new THREE.Color(0xc6ccd6),                    // 그늘면 = 하늘 산란색
+    // x=직사 y=천공 z=역광 투과 w=다중산란 바닥(밝은 낮에만 — FIX⑥ day 존재감)
+    gain: new THREE.Vector4(1, 0.82, 0.75, 0),
   };
   material.userData.cloudRim = state;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uCloudRimColor = { value: state.color };
     shader.uniforms.uCloudRimStrength = state.strength;
-    shader.uniforms.uCloudRimDir = { value: state.direction };
+    shader.uniforms.uCloudSunDir = { value: state.direction };
     shader.uniforms.uCloudTexel = { value: state.texel };
+    shader.uniforms.uCloudSunColor = { value: state.sun };
+    shader.uniforms.uCloudShadeColor = { value: state.shade };
+    shader.uniforms.uCloudGain = { value: state.gain };
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
 uniform vec3 uCloudRimColor;
 uniform float uCloudRimStrength;
-uniform vec2 uCloudRimDir;
-uniform vec2 uCloudTexel;`,
+uniform vec3 uCloudSunDir;
+uniform vec2 uCloudTexel;
+uniform vec3 uCloudSunColor;
+uniform vec3 uCloudShadeColor;
+uniform vec4 uCloudGain;`,
     ).replace(
       '#include <map_fragment>',
       `#include <map_fragment>
 #ifdef USE_MAP
-  float cloudCenterA = texture2D(map, vMapUv).a;
+  vec4 cloudData = texture2D(map, vMapUv);
+  vec2 cloudNxy = cloudData.rg * 2.0 - 1.0;
+  float cloudSlope = min(1.0, length(cloudNxy));
+  vec3 cloudNormal = vec3(cloudNxy, sqrt(max(0.0, 1.0 - cloudSlope * cloudSlope)));
+  // 두께 프록시. 베이크가 법선 길이를 두 구간으로 나눠 인코딩한다 — 내부 로브 기울기는 [0,0.46],
+  //   실루엣 근접도는 그 위. 그래서 '얇은 곳'은 0.52 부터다(예전 pow 역함수는 로브 기울기까지
+  //   얇은 것으로 읽어 코어 전체가 투과광으로 타올랐다).
+  float cloudThin = smoothstep(0.52, 0.97, cloudSlope);
+  vec3 cloudSunV = normalize(uCloudSunDir);
+  float cloudNdl = dot(cloudNormal, cloudSunV);
+  float cloudBack = smoothstep(0.10, -0.42, cloudSunV.z);
+  float cloudSky = cloudData.b;
+  // 화면 방위 기준 태양 쪽인가(구름 중심 → 이 픽셀 방향 · 태양 방위). 림뿐 아니라 투과광도 이
+  //   항을 쓴다: 전방산란 로브는 태양 방향에 몰려 있으므로 역광 구름은 태양 쪽 어깨가 타오르고
+  //   반대쪽은 식는다. 이 가중치가 없으면 -ndl 이 큰 **반대쪽**이 오히려 더 웜해져 볕면/그늘면이
+  //   뒤집힌다(순수 노드 시뮬 실측: 그늘 밴드 R−B +24.8 로 볕면 +19.5 를 추월).
+  vec2 cloudRadial = normalize(vMapUv - vec2(0.5) + vec2(1e-4));
+  float cloudSunSide = smoothstep(-0.26, 0.64, dot(cloudRadial, normalize(cloudSunV.xy + vec2(1e-4))));
+  // 랩 램버트 + 다중산란 바닥. 구름은 다중산란체라 종단이 부드럽고, 밝은 낮에는 태양을 등진 면도
+  //   하얗게 밝다 — 그 바닥(uCloudGain.w, 낮에만 켜진다)이 없으면 낮 구름이 하늘보다 어두워진다.
+  float cloudWrap = smoothstep(-0.86, 0.52, cloudNdl);
+  float cloudDirect = (uCloudGain.w + (1.0 - uCloudGain.w) * cloudWrap * cloudWrap)
+                    * mix(0.58, 1.0, cloudSky);
+  float cloudAmbient = 0.52 + 0.48 * cloudSky;
+  // 투과광은 얇은 부분이 강하고, 위쪽 밀도에 가린 밑면은 태양광이 도달하지 못하므로 천공
+  //   개방도로도 눌러야 한다. 이 항을 빼면 역광 프레임에서 밑면까지 웜으로 물들어 구름 전체가
+  //   한 덩어리 주황이 된다. 코어 바닥 0.38 은 부피용이다 — 로브별 −ndl 변주(역광에서 유일하게
+  //   남는 셰이딩 신호)를 살리려면 코어에도 실질 가중이 있어야 한다.
+  float cloudGlow = pow(max(0.0, -cloudNdl), 1.30) * mix(0.38, 1.0, cloudThin)
+                  * mix(0.34, 1.0, cloudSky) * mix(0.24, 1.0, cloudSunSide) * cloudBack;
+  vec3 cloudBody = uCloudShadeColor * (cloudAmbient * uCloudGain.y)
+                 + uCloudSunColor * (cloudDirect * uCloudGain.x + cloudGlow * uCloudGain.z);
   float cloudNearA = min(
     min(texture2D(map, vMapUv + vec2(uCloudTexel.x, 0.0)).a,
         texture2D(map, vMapUv - vec2(uCloudTexel.x, 0.0)).a),
     min(texture2D(map, vMapUv + vec2(0.0, uCloudTexel.y)).a,
         texture2D(map, vMapUv - vec2(0.0, uCloudTexel.y)).a)
   );
-  float cloudEdge = smoothstep(0.07, 0.62, cloudCenterA)
+  float cloudEdge = smoothstep(0.07, 0.62, cloudData.a)
                   * (1.0 - smoothstep(0.24, 0.88, cloudNearA));
-  vec2 cloudRadial = normalize(vMapUv - vec2(0.5) + vec2(1e-4));
-  float cloudSunSide = smoothstep(-0.32, 0.62, dot(cloudRadial, normalize(uCloudRimDir)));
-  float cloudCrown = mix(0.68, 1.0, smoothstep(0.32, 0.82, vMapUv.y));
-  diffuseColor.rgb += uCloudRimColor * uCloudRimStrength * cloudEdge
-                    * mix(0.16, 1.0, cloudSunSide) * cloudCrown;
+  // 림 방위·높이 가중을 좁힌다(FIX⑤): 새벽 프레임에서 림이 둘레 전체 키라인으로 읽혔다. 반태양
+  //   쪽 바닥 0.08→0.03, 방위 램프에 pow 1.5, 밑면 크라운 바닥 0.68→0.42 — 실제 구름은 가장
+  //   두꺼운 밑면 윤곽에 금테가 서지 않는다.
+  float cloudCrown = mix(0.42, 1.0, smoothstep(0.28, 0.84, vMapUv.y));
+  diffuseColor.rgb = diffuse * cloudBody
+                   + uCloudRimColor * uCloudRimStrength * cloudEdge
+                   * mix(0.03, 1.0, pow(cloudSunSide, 1.5)) * cloudCrown * cloudBack;
 #endif`,
     );
   };
-  material.customProgramCacheKey = () => 'cheoma-cloud-rim-v1';
+  material.customProgramCacheKey = () => 'cheoma-cloud-shade-v3';
   return state;
 }
 
@@ -681,7 +1248,7 @@ export function setupClouds(group, {
   // billboard still shows its lobed silhouette. A cinematic drone leg instead flies
   // *under* the quad (hanyang τ≈0.544: camera y≈20, cloud y=82, so the camera sits
   // below the plane's own lower edge). From there the only thing left on screen is
-  // makeCumulusTexture's baked underside — a smooth blue-grey gradient with no lobes —
+  // the flattened cloud base — a smooth low-contrast gradient with no lobes at all —
   // and patchCloudRim traces its magnified alpha contour as a hard bright edge, so the
   // billboard reads as a flat grey-lavender disc rather than a cloud. Measured at that
   // frame: covered-area stdev L = 6.6 and interior |grad| = 0.55, against 24.8 / 1.08
@@ -707,6 +1274,22 @@ export function setupClouds(group, {
   const COVER = village ? (coverR || terrainMax * 0.42) : 0;
   const nHigh = Math.max(0, Math.min(MAX_CLOUD_BLOBS, highCloudCount));
 
+  // 뷰공간 태양 방향(빌보드 접평면 기준) — 볕면/그늘면·역광 게이트의 유일한 입력. matrixWorld 의
+  //   열 0/1/2 가 카메라 X/Y/Z 축이므로 세 dot 이 곧 뷰공간 성분이다. 카메라 Z 축은 **뒤쪽**을
+  //   향하므로 z<0 = 태양이 카메라 앞 = 피사체 역광. 여기서 z 를 빠뜨렸던 것이 "정오에도 림이
+  //   서던" 원인이다(예전 코드는 xy 만 썼다). Vector3.copy(Color)=NaN 함정과 무관한 순수 기하.
+  function writeCloudSunView(rim, cam) {
+    if (!rim) return;
+    const me = cam.matrixWorld.elements;
+    rim.direction.set(
+      _sunDir.x * me[0] + _sunDir.y * me[1] + _sunDir.z * me[2],
+      _sunDir.x * me[4] + _sunDir.y * me[5] + _sunDir.z * me[6],
+      _sunDir.x * me[8] + _sunDir.y * me[9] + _sunDir.z * me[10],
+    );
+    if (rim.direction.lengthSq() < 1e-5) rim.direction.set(0, 1, -1).normalize();
+    else rim.direction.normalize();
+  }
+
   // ── 상공 뭉게구름 빌보드 (카메라 보는 적운, 최대 5장) ──
   // 반경을 마을·씬 중앙 위(r 0.14~0.55)로 낮춰 지면 투영 그림자가 마을 안·언저리에 떨어지게 한다
   //   (이전 r 0.62~0.86 은 그림자가 외곽 숲 링에 떨어져 "마을에 드리우는" 인상이 없었다). 크기·높이는
@@ -722,7 +1305,7 @@ export function setupClouds(group, {
   // 실제 billboard 수만큼만 생성한다. 기본 nHigh=4에서 고정 5장을 만들면 마지막
   // CanvasTexture는 어떤 material에도 연결되지 않아 상위 Object3D teardown이 회수할 수 없다.
   const cloudSeeds = [11, 29, 47, 63, 81];
-  const cloudTex = highSpecs.map((_, i) => makeCumulusTexture(cloudSeeds[i]));
+  const cloudTex = highSpecs.map((_, i) => makeCloudDataTexture(cloudSeeds[i], 'cumulus'));
   highSpecs.forEach((s, i) => {
     const mat = new THREE.MeshBasicMaterial({
       map: cloudTex[i], transparent: true, opacity: s.op, depthWrite: false,
@@ -755,16 +1338,7 @@ export function setupClouds(group, {
     mesh.onBeforeRender = (r, sc, cam) => {
       mesh.lookAt(cam.position.x, mesh.position.y + (cam.position.y - mesh.position.y) * 0.35, cam.position.z);
       mesh.up.copy(_up);
-      const rim = mesh.material.userData.cloudRim;
-      if (rim) {
-        const me = cam.matrixWorld.elements;
-        rim.direction.set(
-          _sunDir.x * me[0] + _sunDir.y * me[1] + _sunDir.z * me[2],
-          _sunDir.x * me[4] + _sunDir.y * me[5] + _sunDir.z * me[6],
-        );
-        if (rim.direction.lengthSq() < 1e-5) rim.direction.set(0, 1);
-        else rim.direction.normalize();
-      }
+      writeCloudSunView(mesh.material.userData.cloudRim, cam);
       if (overheadFade) {
         // 시선각 감쇠: dyEye>0 = 구름이 카메라 눈높이 아래(지형에 겹쳐 시선 가림) → 페이드,
         //   dyEye<0 = 구름이 하늘에 뜸 → 유지. opNow(=update 가 매 프레임 계산한 시간대 불투명도)에
@@ -807,12 +1381,24 @@ export function setupClouds(group, {
   // follows the camera, like a sky dome, so travel never reaches or overtakes the bank.
   // The bank is inside the sun/moon sprites and can therefore create real alpha occlusion.
   const HORIZON_CLOUD_COUNT = 16;
-  // At the low-cloud distance this subtends roughly 14–20° after deterministic scale
+  // At the low-cloud distance this subtends roughly 12–18° after deterministic scale
   // variation: one or two silhouettes at the edge of a telephoto frame, never a white ceiling.
-  const HORIZON_CLOUD_W = 18;
-  const HORIZON_CLOUD_H = 10;
+  // #50 A3: 18×10 → 16×11. A camera-facing quad projects with one uniform world-to-pixel
+  //   scale, so the on-screen silhouette aspect is exactly quadAspect × bakedSilhouetteAspect.
+  //   The old pair multiplied 1.80 by seed 97's 1.84 and produced 3.31 — measured 3.16 in the
+  //   product frame (probe-cloud-layers.mjs, sunset-cloudnear, largest component 234×74), the
+  //   "horizontal sausage" the vision round rejected. Both factors are now inside the band:
+  //   1.4545 × 1.05 ≈ 1.53. World area 176 vs 180 and baked fill 20.2% vs 20.6% keep the
+  //   cloud's screen presence within 4% of the reviewed A2 build — this is a reshape, not a
+  //   shrink (A2 FIX⑥ explicitly restored cloud presence and must not be undone here).
+  const HORIZON_CLOUD_W = 16;
+  const HORIZON_CLOUD_H = 11;
+  // Crepuscular shaft width is derived from the anchor cloud's width, which is a separate
+  // authored quantity from the cloud silhouette's aspect. Pinning it to the pre-A3 value
+  // keeps the three shafts exactly as reviewed while the quad reshapes.
+  const HORIZON_RAY_ANCHOR_W = 18;
   const HORIZON_CLOUD_OPACITY = 0.72;
-  const horizonTexture = makeHorizonCumulusTexture(97);
+  const horizonTexture = makeCloudDataTexture(97, 'horizon');
   const horizonMaterial = new THREE.MeshBasicMaterial({
     map: horizonTexture, transparent: true, opacity: HORIZON_CLOUD_OPACITY,
     // #31-3: fog:false → true. 이 파일의 다른 구름 재질 넷(산허리 뱅크·능선 물안개·뭉게구름·
@@ -848,14 +1434,19 @@ export function setupClouds(group, {
     // downward courtyard focus deliberately misses the band and updateView sleeps it;
     // when a user looks upward, regular depth testing still lets roofs and ridges
     // occlude the cloud bottoms without a depth-free layer over the architecture.
-    elev: [0.160, 0.195, 0.178, 0.215][i % 4],
+    // #50 A3: the four centres spanned only 0.160–0.215, so every instance in a frame sat at
+    //   nearly one elevation and the ring read as a level string of blobs rather than clouds at
+    //   different heights. The span roughly doubles (0.160–0.262) while the **lowest** centre is
+    //   unchanged, because the authored 24° downward courtyard focus must keep missing the band
+    //   (updateView sleeps it there) — the spread only ever goes up, never down.
+    elev: [0.160, 0.228, 0.190, 0.262][i % 4],
     sx: [0.82, 1.06, 1.18, 0.94][i % 4],
     sy: [0.84, 1.06, 0.92, 1.14][(i + 1) % 4],
   }));
   const horizonDummy = new THREE.Object3D();
   const horizonForward = new THREE.Vector3();
   const horizonAnchor = new THREE.Object3D();
-  horizonAnchor.userData.w = HORIZON_CLOUD_W;
+  horizonAnchor.userData.w = HORIZON_RAY_ANCHOR_W;
   const horizonViewProjection = new THREE.Matrix4();
   const horizonFrustum = new THREE.Frustum();
   const horizonSphere = new THREE.Sphere();
@@ -908,18 +1499,9 @@ export function setupClouds(group, {
       cam.position.y + nearest.elev * distance,
       cam.position.z + Math.cos(nearest.az) * distance,
     );
-    horizonAnchor.userData.w = HORIZON_CLOUD_W * nearest.sx;
+    horizonAnchor.userData.w = HORIZON_RAY_ANCHOR_W * nearest.sx;
 
-    const rim = horizonMaterial.userData.cloudRim;
-    if (rim) {
-      const me = cam.matrixWorld.elements;
-      rim.direction.set(
-        _sunDir.x * me[0] + _sunDir.y * me[1] + _sunDir.z * me[2],
-        _sunDir.x * me[4] + _sunDir.y * me[5] + _sunDir.z * me[6],
-      );
-      if (rim.direction.lengthSq() < 1e-5) rim.direction.set(0, 1);
-      else rim.direction.normalize();
-    }
+    writeCloudSunView(horizonMaterial.userData.cloudRim, cam);
     return inView;
   }
   function updateView(cam) {
@@ -986,6 +1568,17 @@ export function setupClouds(group, {
   const _haze = new THREE.Color();
   const _rimColor = new THREE.Color(0xffc68c);
   const _rayColor = new THREE.Color(0xffdfbd);
+  // 볕면·그늘면 팔레트(#50). 상수는 세 개뿐이고 나머지는 태양색·haze 에서 파생된다.
+  //   APRICOT: 석양 직사광이 대기를 길게 통과한 살구·주황. 태양색이 이미 웜이지만 구름 볕면은
+  //     한 걸음 더 깊어야 "흰 구름에 노란 조명"이 아니라 "물든 구름"으로 읽힌다.
+  //   SHADE_DAY: 낮 그늘면 = 창백한 중성 청회(채도 낮음 — 낮 구름은 흰 덩어리라야 한다).
+  //   SHADE_DUSK: 저고도 그늘면 = 태양 반대쪽 하늘의 모브·청회. 석양 구름의 그늘이 오렌지로
+  //     물들면 전체가 한 덩어리 주황 워시가 된다(레포 확정: 온기는 하이라이트·림에만).
+  const _cloudSun = new THREE.Color();
+  const _cloudShade = new THREE.Color();
+  const APRICOT = new THREE.Color(0xffab68);
+  const SHADE_DAY = new THREE.Color(0xc8ced8);
+  const SHADE_DUSK = new THREE.Color(0x7a83a6);
   const _rayDirection = new THREE.Vector3();
   const _rayView = new THREE.Vector3();
   const _rayWidth = new THREE.Vector3();
@@ -1118,30 +1711,71 @@ export function setupClouds(group, {
     _rimColor.copy(sun.color);
     if (haze?.isColor) _rimColor.lerp(_haze, 0.14);
 
+    // ── 볕면·그늘면 두 색(#50) ────────────────────────────────────────────────
+    // 볕면: 직사광색을 저고도에서 살구로 한 걸음 더. 웜 이동을 brightSky 로 게이트하는 이유는
+    //   야간에는 sun 이 달빛(청색)이라 lowSun=1 이어도 살구로 끌면 안 되기 때문이다.
+    // 그늘면: 중성 청회에서 출발해 haze(해소된 대기 프로파일)에 조금만 참여시키고, 저고도에서
+    //   모브·청회로 민다. haze 참여를 0.14 로 묶는 것이 "석양 전체 주황 워시" 방지선이다.
+    _cloudSun.copy(sun.color).lerp(APRICOT, 0.42 * lowSun * brightSky);
+    _cloudShade.copy(SHADE_DAY);
+    if (haze?.isColor) _cloudShade.lerp(_haze, 0.14);
+    _cloudShade.lerp(SHADE_DUSK, 0.62 * lowSun);
+    // 역광 투과 게인. 저고도에서 크게 올리는 근거는 광학이다 — 전방산란된 태양광은 하늘 산란광의
+    //   여러 배라서 역광 구름의 태양 쪽 어깨는 하늘보다 밝다(그래서 사진에서 종종 날아간다).
+    //   순수 노드 스윕(scratch bake-preview, sunset 역광 cumulus-11, ACES 1.05 통과 후 sRGB):
+    //     게인 0.94 → 볕면 R−B −15.3 / 그늘 −34.9  (볕면이 냉색 — 석양 구름이 아니다)
+    //     게인 1.90 → −0.6 / −28.3,  2.40 → +5.3 / −25.2,  3.00 → +11.3 / −21.7
+    //   즉 "볕면 웜 · 그늘면 냉"이 동시에 성립하는 하한이 ≈2.4 이고, 그 위는 볕면만 더 따뜻해진다.
+    // #50 A2 재핀: FIX④ 로 투과광 코어 바닥이 0.14→0.38 올라가 같은 게인이 바디를 몇 배 밝힌다.
+    //   같은 스윕을 새 셰이딩·새 베이크로 다시 돌린 값(cumulus-11, 볕면 R−B / 그늘면 R−B):
+    //     0.94 → +5.7 / −21.8,  1.30 → +13.9 / −16.6,  1.52 → +18.0 / −13.7,
+    //     1.70 → +20.8 / −11.5,  2.40 → +29.1 / −3.7
+    //   즉 하한(볕면 웜)이 0.94 아래로 내려오고 상한(그늘면 R ≤ B+10)은 ≈2.2 다. 1.52 를 채택한
+    //   근거는 밴드 중앙이라는 것 — 아래로 가면 볕면 웜이 얕아지고, 위로 가면 그늘면 냉색이 사라진다.
+    const glowGain = 0.30 + 1.22 * lowSun * brightSky;
+    // 낮 구름 존재감(FIX⑥): 다중산란 바닥과 천공 게인을 밝은 낮에만 올린다. 석양·새벽은 lowSun=1
+    //   이라 dayLift=0 → 1 차의 석양 수치(볕면 웜/그늘면 냉)가 그대로 보존된다.
+    //   같은 스윕의 day 역광(cumulus-11 구름 평균 luma / 볕밴드−그늘밴드 luma 폭):
+    //     0.34·1.00 → 221.4 / 4.9,  0.26·0.96 → 217.6 / 5.7,  0.20·0.92 → 214.1 / 6.4,
+    //     0.14·0.88 → 209.9 / 7.3,  0.08·0.86 → 205.4 / 8.4      (1 차 = 190.6 / 10.0)
+    //   밝히면 ACES 상단에서 압축돼 로브 분리가 줄어드는 상충이 있다. 0.14·0.88 은 1 차보다
+    //   +19 luma 밝으면서 폭 7.3 을 남기는 중간값 — 하늘 대비는 회복하고 로브는 여전히 분리된다.
+    const dayLift = brightSky * (1 - lowSun);
+    const msFloor = 0.14 * dayLift;
+    const ambGain = 0.82 + 0.06 * dayLift;
+
     highClouds.forEach((m) => {
       place(m);
       writeBlob(m);                                    // 빌보드 위치 → 대응 그림자 블롭 갱신
-      m.material.color.copy(_base).lerp(_warm, warmMix * 0.7);
-      // The haze colour is the resolved atmosphere profile, so crimson/violet sunsets
-      // tint cloud bodies without making the physically warm direct sun itself purple.
-      if (haze?.isColor) m.material.color.lerp(_haze, (1 - alt) * 0.16);
-      m.material.color.multiplyScalar(dim);
+      // 재질 color 는 이제 **스칼라 캐리어**다(밝기·야간 dim 전용). 색상은 uniform 이 소유하므로
+      //   여기에 웜 틴트를 곱하면 그늘면까지 물들어 그늘/볕 분화가 무너진다.
+      m.material.color.copy(_base).multiplyScalar(dim);
       const rim = m.material.userData.cloudRim;
-      if (rim) { rim.color.copy(_rimColor); rim.strength.value = rimStrength; }
+      if (rim) {
+        rim.color.copy(_rimColor);
+        rim.strength.value = rimStrength;
+        rim.sun.copy(_cloudSun);
+        rim.shade.copy(_cloudShade);
+        rim.gain.set(1, ambGain, glowGain, msFloor);
+      }
       // 야간엔 뭉게구름이 창불 야경을 방해하지 않게 물러난다(저광량 불투명도 바닥 ↓).
       const opNow = m.userData.op * (0.32 + 0.68 * smoothstep(0.8, 2.55, inten));
       m.userData.opNow = opNow;              // 부감 인스턴스는 onBeforeRender 가 시선각으로 추가 감쇠
       m.material.opacity = opNow;
     });
-    horizonMaterial.color.copy(_base).lerp(_warm, warmMix * 0.74);
-    if (haze?.isColor) horizonMaterial.color.lerp(_haze, (1 - alt) * 0.20);
     // Keep the low-sun body below white so the gold/silver HDR edge has tonal room
     // to read as a lining instead of bleaching the whole cloud into one flat cutout.
     // Midday remains bright; night still follows the shared dim multiplier.
     const horizonLuminance = 0.72 + 0.22 * brightSky - 0.14 * lowSun;
-    horizonMaterial.color.multiplyScalar(dim * horizonLuminance);
+    horizonMaterial.color.copy(_base).multiplyScalar(dim * horizonLuminance);
     const horizonRim = horizonMaterial.userData.cloudRim;
-    if (horizonRim) { horizonRim.color.copy(_rimColor); horizonRim.strength.value = rimStrength * 1.08; }
+    if (horizonRim) {
+      horizonRim.color.copy(_rimColor);
+      horizonRim.strength.value = rimStrength * 1.08;
+      horizonRim.sun.copy(_cloudSun);
+      horizonRim.shade.copy(_cloudShade);
+      horizonRim.gain.set(1, ambGain, glowGain, msFloor);
+    }
     horizonBank.userData.opNow = horizonBank.userData.op * (0.28 + 0.72 * smoothstep(0.72, 2.5, inten));
     horizonMaterial.opacity = horizonBank.userData.opNow;
     for (const ray of lightRays) {
