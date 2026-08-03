@@ -606,7 +606,17 @@ try {
       // 감상 크롬 자동 후퇴(#30 항목 9): 클립은 OS 화면녹화로 뜨므로 패스 라벨·하단 안내·종료
       //   버튼이 프레임에 구워지면 안 된다. 입력 없이 2.5s + 트랜지션이 지나면 오버레이 크롬은
       //   투명해지고, 그래도 종료 버튼은 히트테스트로 살아 있어야 한다(exitPresent 계약 유지).
-      await page.waitForTimeout(3500);
+      // [재핀 2026-08-04] 고정 waitForTimeout(3500) → opacity<0.1 폴링(상한 8s). 근거: CSS
+      //   후퇴 트랜지션은 프레임 클록으로 흐르는데 시네마틱 진입 직후 씬의 첫 프레임이 부하에서
+      //   1.9s+ 지연될 수 있고(계측 타임라인: 후퇴 자체는 첫 프레임 후 정확히 550ms 완주),
+      //   고정 3.5s 샘플은 "크롬이 물러났는가"가 아니라 "진입 프리즈가 450ms 안에 끝났는가"를
+      //   재고 있었다(부하에서 op=0.163/0.217 요동 FAIL — 조용한 머신 14/14 PASS). 계약("입력
+      //   없이 물러나고 exit는 살아 있다")은 그대로이고 프레임 클록 지연만 단언에서 뺀다.
+      //   FAIL-first: 후퇴를 op=1로 고정한 CSS를 주입하면 폴링이 8s 타임아웃으로 실패함을 확인.
+      await page.waitForFunction(() => {
+        const chrome = document.querySelector('.cine-overlay [data-cine-chrome]');
+        return !!chrome && Number(getComputedStyle(chrome).opacity) < 0.1;
+      }, null, { timeout: 8000 }).catch(() => {});
       const retired = await page.evaluate(() => {
         const chrome = document.querySelector('.cine-overlay [data-cine-chrome]');
         const exit = document.querySelector('.cine-overlay [data-cine-exit], .cine-overlay button');
