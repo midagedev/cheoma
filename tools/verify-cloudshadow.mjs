@@ -95,6 +95,9 @@ window.__ct = {
   strength(){ return inst.uniforms.uCloudStr.value; },
   blobs(){ return inst.uniforms.uCloudBlobs.value.map(b=>({x:b.x,y:b.y,z:b.z,w:b.w})); },
   time(){ return inst.uniforms.uCloudTime.value; },
+  // 시간대 강도표를 이 도구에 따로 하드코딩하지 않고 setTime() 이 실제로 소비하는
+  // 저작 소스(TIME_PRESETS)에서 직접 읽는다 — sky.js 의 sunInt 가 바뀌면 기대값도 같이 바뀐다.
+  sunInt(name){ return TIME_PRESETS[name].sunInt; },
   // 프레임 내 표본점 감쇠 = 1 - uCloudStr·shade (지형 재질이 diffuse 에 곱하는 값)
   atten(){
     const blobs=inst.uniforms.uCloudBlobs.value, str=inst.uniforms.uCloudStr.value, tt=inst.uniforms.uCloudTime.value;
@@ -180,19 +183,26 @@ console.log('\n[② 최대 국소 그늘 깊이 = uCloudStr·1.0 (블롭 중심)
 for (const t of ['day', 'sunset', 'dawn', 'night']) console.log(`   ${t.padEnd(7)} 최저밝기≈${f(1 - strTable[t])}`);
 
 // ── ③ 단일건물 env 경로 강도 곡선(#221: 0.40·smoothstep(1.2,2.45)) ──
-console.log('\n[③ env 단일건물 경로 강도(0.40·smoothstep(1.2,2.45) 이어야)]');
+// 2026-08-04(#51) 정비: 기존에는 시간대별 태양 강도를 이 표(day 2.6/sunset 2.3/dawn 1.7/night 0.9)에
+// 따로 하드코딩해 기대값을 계산했는데, sky.js#TIME_PRESETS 의 실제 sunInt 가 그 뒤 룩 라운드에서
+// 바뀌며 어긋났다(sunset 실측 0.3964 vs 이 표 기대 0.3841). 계약("시간대별 그늘 강도 게이트")은 그대로
+// 두고 하드코딩 표만 없앤다 — 기대값을 setTime() 이 실제로 소비하는 저작 소스(TIME_PRESETS.sunInt,
+// window.__ct.sunInt 로 노출)에서 같은 프레임에 직접 읽어 envSmooth 에 넣는다. sunInt 가 다시 바뀌어도
+// 이 도구가 같은 소스를 읽으므로 어긋나지 않고, 곡선식(0.40·smoothstep(1.2,2.45))이 실제로 그 저작
+// 강도에 맞게 계산되는지는 여전히 단언한다.
+console.log('\n[③ env 단일건물 경로 강도(0.40·smoothstep(1.2,2.45), 저작 sunInt 기준)]');
 const envSmooth = (inten) => { const t = Math.min(1, Math.max(0, (inten - 1.2) / (2.45 - 1.2))); return 0.40 * (t * t * (3 - 2 * t)); };
-const envInten = { day: 2.6, sunset: 2.3, dawn: 1.7, night: 0.9 };
 let envOk = true;
 for (const t of ['day', 'sunset', 'dawn', 'night']) {
   await page.evaluate(() => window.__ct.build({ scale: 'village', village: false }));
   await page.evaluate((tt) => window.__ct.setTime(tt), t);
   await page.evaluate(() => window.__ct.step(1 / 60, 30));
   const str = await page.evaluate(() => window.__ct.strength());
-  const expect = envSmooth(envInten[t]);
+  const sunInt = await page.evaluate((tt) => window.__ct.sunInt(tt), t);
+  const expect = envSmooth(sunInt);
   const ok = Math.abs(str - expect) < 0.005;
   if (!ok) envOk = false;
-  console.log(`   ${t.padEnd(7)} env=${f(str)} 기대=${f(expect)} ${ok ? '✅' : '❌'}`);
+  console.log(`   ${t.padEnd(7)} sunInt=${f(sunInt)} env=${f(str)} 기대=${f(expect)} ${ok ? '✅' : '❌'}`);
 }
 console.log(`   → env 무회귀: ${envOk ? 'PASS ✅' : 'FAIL ❌'}`);
 

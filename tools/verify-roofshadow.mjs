@@ -107,7 +107,13 @@ function R() { if (!_renderer) _renderer = makeRenderer(); return _renderer; }
 // 마을 생성 + 지붕 재질 수집(패치 여부·kind 커버리지). 셰이더 캡처를 위해 캡처 래퍼를 얹고
 //   renderer.compile 로 전 재질 컴파일 → 최종 fragmentShader/vertexShader 를 userData 에 담는다.
 function buildVillageProbe(seed, captureShaders) {
-  const plan = planVillage({ siteR: 215, seed, includePalace: true, includeTemple: true });
+  // 2026-08-04(#51) 정비: 이 픽스처는 원래 siteR:215 를 'capital' tier 로 가정해 만들어졌다(당시
+  // tierForR 경계가 town<213<=capital). ebfe258("feat: larger rural parcels grow the yard, not
+  // shrink the house", 2026-07-26)가 SCALE_ANCHORS 를 재조정하며 town 경계를 213→260 으로 올려
+  // R=215 는 이제 'town' tier 로 떨어진다(includePalace 는 capital·hanyang tier 에서만 유효 —
+  // plan.js#isCapitalTier) → features.palace=false. 절대 siteR 를 하드코딩하는 대신 이름 tier로
+  // 요청해 앞으로 SCALE_ANCHORS 가 다시 조정되어도 궁이 실제로 서는 조합을 유지한다.
+  const plan = planVillage({ scale: 'capital', seed, includePalace: true, includeTemple: true });
   const root = populateVillage(plan);
   // 지붕 재질 수집(패치된 것) + owning mesh 유형/조상 라벨.
   const roofMats = new Map();  // material -> { instanced, ancestors:Set }
@@ -256,7 +262,7 @@ console.log('================ #110 지붕 구름 그림자 수치 검증 =======
 
 // ── ① 셰이더 주입 + kind 커버리지(실제 마을 capital+궁+절) ──
 const V = await page.evaluate((s) => window.__rs.village(s, true), 20260716);
-console.log('[① 셰이더 주입 · kind 커버리지 — capital(siteR215)+궁+절]');
+console.log('[① 셰이더 주입 · kind 커버리지 — capital(scale, 궁이 실제로 서는 tier)+궁+절]');
 console.log(`   집=${V.houses}(giwa ${V.giwa}·choga ${V.choga}) 궁=${V.hasPalace} 절=${V.hasTemple}`);
 console.log(`   지붕 role 재질=${V.nRoofMats}  패치=${V.nPatched}  컴파일캡처=${V.captured}`);
 console.log(`   최종 fragmentShader 에 uCloudStr 존재: ${V.capFragHasStr}/${V.captured}`);

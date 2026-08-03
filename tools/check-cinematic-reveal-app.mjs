@@ -1090,18 +1090,25 @@ try {
   // and would make the telephoto assertion below test the wrong thing. `p31` satisfied both until
   // the #164 ridge gentling lowered the capital ridge anchor (124→84m): its nine focus rays then
   // cleared terrain by +0.95m, so the cutaway had nothing to resolve. `p8` then stopped satisfying
-  // (a) when the R2 roof-sea round re-laid the capital parcels: its rays now clear terrain by
-  // +0.768m with 0/9 blocked rays. Re-scanned over all 54 capital/7 parcels on this exact query,
-  // three stay armed — p48 (minClearance −3.007m, 9/9 blocked rays), p47 (−2.733m, near 13.296m
-  // vs subject 46.577m) and p36 (−1.132m). p36 fails (b): the bounded search moves it off
-  // candidate 0 (scale 0.9, fov 17.75°). p48 has the deeper margin on the settle solve but is
-  // armed only there — every *refreshed* solve (the ink restyle a few frames later, and both kind
-  // rebuilds below) reports `clear` at +0.54m/+0.74m, so it cannot carry the rebuild and restyle
-  // assertions. p47 stays armed across all three refreshed solves (−2.26m edited, −1.95m
-  // restored), which is what this block actually needs.
+  // (a) when the R2 roof-sea round re-laid the capital parcels. `p47` was the fixture that replaced
+  // both, but a 2026-08-04 re-scan (#51) found it clear too — minClearance +0.658m, 0/9 blocked,
+  // reason 'clear' (a same-day independent live measurement logged +0.802m; both agree it no longer
+  // crosses terrain). No commit after the R2 roof-sea round (43b93bd, 2026-07-31, "look: hanyang
+  // roof sea — density, thatch tone, road muting, paddy float gates") touches capital parcel
+  // placement, so that round is almost certainly what re-laid `p47` too, the same as it did `p8`.
+  //
+  // Pure-node re-scan of all 50 capital/7 parcels (`buildParcelPickProxies(plan, plan.site)` over
+  // `planVillage({ scale:'capital', seed:7, includePalace:true, includeTemple:true })`, no renderer)
+  // found three parcels still negative: p36 (minClearance −3.494m, 9/9 blocked, near 12.898m vs
+  // subject 42.266m), p11 (−2.279m, 9/9 blocked) and p10 (−0.685m, 5/9 blocked). `p36` satisfies (b)
+  // — it stays on candidate 0 (requestedScale 1, fov 16°) — and has the deepest margin and the most
+  // blocked rays of the three, so it is the least likely to be re-laid clear by the next reflow. A
+  // simulated kind-swap rebuild (matching the two rebuild checks below) keeps it armed throughout:
+  // choga→giwa edit gives −2.954m (9/9 blocked, still 'cutaway'), and restoring choga reproduces the
+  // exact −3.494m base value, so the rebuild's cache invalidation does not silently disarm it.
   // If this block ever fails with `active:false`, re-scan for an armed parcel instead of relaxing
   // the assertions: the cutaway is a documented product contract (CLAUDE.md, Environment).
-  const TERRAIN_FIXTURE = 'p47';
+  const TERRAIN_FIXTURE = 'p36';
   await rebuildPage.addInitScript(() => { window.__noWarm = true; });
   await rebuildPage.goto(
     `${base}/?hero=0&village=1&worker=0&shot=1&vscale=capital&vpalace=1&vtemple=1&vseed=7&time=day&weather=clear`,

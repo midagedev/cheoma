@@ -44,16 +44,25 @@ const GIWA_CAPTURE_FIXTURE = 'p21';
 // 다시 드리프트하면 base-0/after-≥1 정규 주거 필지를 재스캔할 것 — 어서션을 완화하지 말 것.
 const YARD_DETAIL_FIXTURE = 'p4';
 // The terrain-occluded fixture must actually cross the rendered ridge. `p31` stopped doing so when
-// the #164 ridge gentling lowered the capital ridge anchor (its nine focus rays now clear terrain
-// by +0.95m), and `p8` stopped doing so when the R2 roof-sea round re-laid the capital parcels: its
-// rays now clear terrain by +0.768m with 0/9 blocked. Re-scanned over all 54 capital/7 parcels on
-// this exact query, three stay armed — p48 (minClearance −3.007m), p47 (−2.733m, near 13.296m vs
-// subject 46.577m) and p36 (−1.132m). p36 is disqualified because the bounded south-opening search
-// moves it off candidate 0 (scale 0.9, fov 17.75°), which would make the telephoto assertion test
-// the wrong thing. p48 is armed only on the settle solve — every refreshed solve reports `clear` at
-// +0.5m — so `p47`, which stays armed across refreshed solves, is the stable fixture.
+// the #164 ridge gentling lowered the capital ridge anchor, `p8` stopped when the R2 roof-sea round
+// re-laid the capital parcels, and (2026-08-04 re-scan, #51) `p47`/`p48`/`p36`'s old −1.132m form all
+// went clear too: p47 now reads minClearance +0.658m (0/9 blocked, reason 'clear'; a same-day
+// independent live measurement logged +0.802m — both agree the ray no longer crosses terrain). The
+// most likely cause is the same R2 roof-sea round (43b93bd, 2026-07-31, "look: hanyang roof sea —
+// density, thatch tone, road muting, paddy float gates") that reflowed `parcels.js`/`plan.js`/
+// `house-footprint.js` and already re-laid `p8`; no later commit touches capital parcel placement.
+//
+// Pure-node re-scan of all 50 capital/7 parcels (`buildParcelPickProxies(plan, plan.site)` over
+// `planVillage({ scale:'capital', seed:7, includePalace:true, includeTemple:true })`, no renderer)
+// found three parcels still negative: p36 (minClearance −3.494m, 9/9 blocked, near 12.898m vs
+// subject 42.266m), p11 (−2.279m, 9/9 blocked) and p10 (−0.685m, 5/9 blocked). `p36` is the fixture:
+// it stays on candidate 0 (requestedScale 1, fov 16°) so the telephoto assertion below still tests
+// the authored angle, it has the deepest margin and the most blocked rays of the three (most likely
+// to survive the next reflow), and it stays armed through a simulated kind-swap rebuild (choga→giwa:
+// −2.954m, 9/9 blocked, still 'cutaway'; restored choga: exact −3.494m match, confirming determinism
+// and that a rebuild's cache invalidation does not silently disarm it).
 // Re-scan for an armed parcel if this ever goes missing — never relax the terrain assertions below.
-const TERRAIN_FIXTURE = 'p47';
+const TERRAIN_FIXTURE = 'p36';
 const cacheDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-cache-'));
 const outputDir = await mkdtemp(join(tmpdir(), 'cheoma-focus-level-shots-'));
 const timeout = Number(process.env.CHEOMA_FOCUS_LEVEL_TIMEOUT_MS) || 90_000;
