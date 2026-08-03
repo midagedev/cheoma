@@ -60,6 +60,56 @@ const semanticViewClose = (actual, expected) => {
     && Math.abs(a.panUp - b.panUp) <= 0.001
     && Math.abs(a.panSouth - b.panSouth) <= 0.001;
 };
+// captureView() is null while village is transitioning/waving or regime is mid-switch.
+// Shared-scene restores must wait for a settled semantic match — not only __SHOT_READY.
+// On match, collect the full assertion snapshot in *this same frame* so a later
+// evaluate cannot re-read a null captureView blip (optics/crane settle or regime switch).
+const waitForSemanticVillageView = async (targetPage, expectedView, waitTimeout = timeout) => {
+  await targetPage.evaluate(() => { window.__appSmokeSettled = null; });
+  await targetPage.waitForFunction((expected) => {
+    const engine = window.__engine;
+    const village = engine?.village;
+    if (window.__SHOT_READY !== true || !engine || !village) return false;
+    const state = village.getState?.();
+    if (!state || state.transitioning || village.isWaving?.()) return false;
+    const view = village.captureView();
+    if (!view || !expected) return false;
+    const circ = (a, b) => Math.abs((((a - b) % 360) + 540) % 360 - 180);
+    const matched = circ(view.azimuth, expected.azimuth) <= 0.1
+      && Math.abs(view.elevation - expected.elevation) <= 0.1
+      && Math.abs(view.zoom - expected.zoom) <= 0.001
+      && Math.abs((view.panEast ?? 0) - (expected.panEast ?? 0)) <= 0.001
+      && Math.abs((view.panUp ?? 0) - (expected.panUp ?? 0)) <= 0.001
+      && Math.abs((view.panSouth ?? 0) - (expected.panSouth ?? 0)) <= 0.001;
+    if (!matched) return false;
+    // Atomic: every field the restore assertions need, from the settle frame only.
+    window.__appSmokeSettled = {
+      address: location.href,
+      state: engine.getState(),
+      village: state,
+      view,
+      canonicalWrites: [...(window.__canonicalHistoryWrites || [])],
+      guideVisible: !!document.querySelector('[data-scene-guide]'),
+      guideStored: localStorage.getItem('cheoma-scene-guide-v1'),
+    };
+    return true;
+  }, expectedView, { timeout: waitTimeout });
+  const settled = await targetPage.evaluate(() => window.__appSmokeSettled);
+  if (!settled) {
+    throw new Error('semantic village settle matched without an atomic snapshot');
+  }
+  return settled;
+};
+// .chroma fades after ~3s idle (opacity 0 + pointer-events none). Keyboard share
+// still needs a focused, actionability-visible button — wake before focus/Enter.
+const wakeProductChroma = async (targetPage, x = 32, y = 32) => {
+  await targetPage.mouse.move(x, y);
+  await targetPage.waitForFunction(
+    () => !document.querySelector('.chroma')?.classList.contains('faded'),
+    null,
+    { timeout },
+  );
+};
 const server = await createServer({
   root: APP_ROOT,
   configFile: join(APP_ROOT, 'vite.config.js'),
@@ -509,12 +559,11 @@ try {
     }
   });
   await sharedPage.goto(nativeShare.payload.url, { waitUntil: 'domcontentloaded', timeout });
+  let sharedBeforeReload;
   try {
-    await sharedPage.waitForFunction(
-      () => window.__SHOT_READY === true && !!window.__engine?.village?.captureView?.(),
-      null,
-      { timeout },
-    );
+    // Exact restore arrives after village settle + restoreView — not merely __SHOT_READY.
+    // Snapshot is atomic with the settle frame (no later re-captureView).
+    sharedBeforeReload = await waitForSemanticVillageView(sharedPage, nativeScene.view);
   } catch (error) {
     const diagnostic = await sharedPage.evaluate(() => ({
       url: location.href,
@@ -522,6 +571,7 @@ try {
       engine: !!window.__engine,
       village: !!window.__engine?.village,
       view: window.__engine?.village?.captureView?.() || null,
+      settled: window.__appSmokeSettled || null,
       villageState: window.__engine?.village?.getState?.() || null,
       wave: window.__engine?.village?.debugWave?.() || null,
       waving: window.__engine?.village?.isWaving?.() ?? null,
@@ -539,35 +589,12 @@ try {
       { cause: error },
     );
   }
-  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
-  const sharedBeforeReload = await sharedPage.evaluate(() => ({
-    address: location.href,
-    state: window.__engine.getState(),
-    village: window.__engine.village.getState(),
-    view: window.__engine.village.captureView(),
-    canonicalWrites: [...window.__canonicalHistoryWrites],
-    guideVisible: !!document.querySelector('[data-scene-guide]'),
-    guideStored: localStorage.getItem('cheoma-scene-guide-v1'),
-  }));
   const sharedBeforeSnapshot = decodeSceneSnapshot(
     new URL(sharedBeforeReload.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
   );
   await sharedPage.reload({ waitUntil: 'domcontentloaded', timeout });
-  await sharedPage.waitForFunction(
-    () => window.__SHOT_READY === true && !!window.__engine?.village?.captureView?.(),
-    null,
-    { timeout },
-  );
-  await sharedPage.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(resolveFrame)));
-  const sharedAfterReload = await sharedPage.evaluate(() => ({
-    address: location.href,
-    state: window.__engine.getState(),
-    village: window.__engine.village.getState(),
-    view: window.__engine.village.captureView(),
-    canonicalWrites: [...window.__canonicalHistoryWrites],
-    guideVisible: !!document.querySelector('[data-scene-guide]'),
-    guideStored: localStorage.getItem('cheoma-scene-guide-v1'),
-  }));
+  // Reload re-runs restore; atomic settle snapshot again (same frame as match).
+  const sharedAfterReload = await waitForSemanticVillageView(sharedPage, nativeScene.view);
   const sharedAfterSnapshot = decodeSceneSnapshot(
     new URL(sharedAfterReload.address).searchParams.get(SCENE_SNAPSHOT_QUERY_KEY),
   );
@@ -754,14 +781,19 @@ try {
   `focused village wheel settles optics/crane before canonical vw sync (${JSON.stringify(villageManualView.view)})`);
   await sharedPage.close();
 
+  // Prior shared-page restore/reload can idle this page past the ~3s chroma fade.
+  // Mirror the earlier keyboard-share path: wake chrome, then wait for probe signals.
   await page.evaluate(() => {
     Object.assign(window.__shareProbe, { nativeMode: 'fail', clipboardMode: 'success' });
     window.__shareProbe.nativePayloads.length = 0;
     window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
+  await wakeProductChroma(page, 38, 38);
   await shareButton.focus();
   await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  await page.waitForFunction(() => window.__shareProbe.clipboardValues.length === 1, null, { timeout });
   await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 복사했습니다', null, { timeout });
   const copiedShare = await page.evaluate(() => ({
     native: window.__shareProbe.nativePayloads.length,
@@ -784,8 +816,11 @@ try {
     window.__shareProbe.nativeActivations.length = 0;
     window.__shareProbe.clipboardValues.length = 0;
   });
+  await wakeProductChroma(page, 40, 40);
   await shareButton.focus();
   await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__shareProbe.nativePayloads.length === 1, null, { timeout });
+  await page.waitForFunction(() => window.__shareProbe.clipboardValues.length === 1, null, { timeout });
   await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.trim() === '장면 링크를 공유하지 못했습니다', null, { timeout });
   const failedShare = await page.evaluate(() => ({
     native: window.__shareProbe.nativePayloads.length,
