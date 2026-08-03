@@ -234,9 +234,13 @@
     transition: opacity 0.2s ease;
     pointer-events: none;
   }
+  /* `inherit`, not `auto`: 감상 페이드는 컨테이너(.chroma.faded)에 pointer-events: none 을 걸어
+     "보이지 않는 크롬은 화면을 가리지 않는다"를 의도하는데, 여기서 auto 로 되살리면 투명한 컬럼이
+     계속 히트 타깃이라 페이드 상태에서 우측 컬럼 폭만큼의 포인터 입력이 씬에 닿지 않았다(#48).
+     비페이드 상태의 컨테이너는 pointer-events 기본값이므로 inherit 도 auto 로 해석된다. */
   .ctxcard.open {
     opacity: 1;
-    pointer-events: auto;
+    pointer-events: inherit;
     transition: opacity 0.36s ease;
   }
   .ctxcard:not(.open) { visibility: hidden; }

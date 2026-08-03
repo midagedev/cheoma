@@ -377,6 +377,20 @@
       if (!ui.selected && !villageEditing && !refOpen) chromaFaded = true;
     }, 3000);
   }
+  // 페이드가 끝나면 인스펙터 컬럼은 화면을 점유하지 않는다 — .stage 는 `right: var(--inspector-w)`
+  //   로 컬럼 앞에서 끝나므로(캔버스를 실제로 좁히는 것이 프레이밍 계약이다) 그 자리를 캔버스가
+  //   덮지 않으면 body 바탕(#0c0e12)이 우측 세로 띠로 남는다(#48: 1920×1080 에서 360px, 밴드 휘도
+  //   13.9 vs 씬 72.2). 넓히는 시점은 페이드 **종료 후** 한 번이다: 페이드 도중에 넓히면 아직 반투명한
+  //   패널 밑에서 씬이 넓어지는 이중 움직임이 되고, 깨어날 때는 즉시 되돌려 패널이 자기 폭 위로
+  //   돌아온다. CSS transition-delay 로 하지 않는 이유는 딜레이가 --inspector-w 자체의 변화(시네마틱·
+  //   클립 진입에서 패널이 닫히는 경로)까지 늦춰 같은 띠를 그 경로에 새로 만들기 때문이다.
+  const CHROMA_FADE_MS = 900;                 // .chroma { transition: opacity 0.9s } 와 같은 길이
+  let chromaGone = $state(false);
+  $effect(() => {
+    if (!chromaFaded) { chromaGone = false; return; }
+    const handle = setLifecycleTimeout(() => { chromaGone = true; }, CHROMA_FADE_MS);
+    return () => { clearLifecycleTimeout(handle); chromaGone = false; };
+  });
 
   // ---------- 모바일 크롬 가시성 (바텀 시트가 하단을 점유하는 상황) ----------
   // sheetLayout: 바텀 시트 레이아웃(세로 좁은 화면). editing: 우측 편집 시트가 열림.
@@ -1655,6 +1669,7 @@
 >
 <div
   class="stage"
+  class:fullbleed={chromaGone}
   bind:this={container}
   onpointerdowncapture={dismissSceneGuide}
   onwheelcapture={dismissSceneGuide}
@@ -1816,6 +1831,9 @@
     z-index: 0;
     background: #0c0e12;
   }
+  /* 감상 페이드가 끝난 뒤(chromaGone)에는 컬럼이 비어 있으므로 캔버스가 뷰포트를 전부 덮는다(#48).
+     세로 시트 레이아웃은 --inspector-w 가 0 이라 이 규칙이 무동작이다. */
+  .stage.fullbleed { right: 0; }
   /* 3축 크롬 전체가 이 그룹 안에 있다(#158 P6) — 감상 페이드 후 화면에 씬만 남는다. */
   .chroma { transition: opacity 0.9s ease; }
   .chroma.faded { opacity: 0; pointer-events: none; }

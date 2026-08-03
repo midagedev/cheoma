@@ -562,11 +562,14 @@
     </div>
   </section>
 
+  <!-- 두 탭 본문은 서로만 켜고 끈다(`none` / `inherit`). 활성 본문이 `auto` 로 못박으면 감상 페이드
+       상태에서도 투명한 컬럼이 히트 타깃으로 남아 그 폭만큼 씬 입력이 죽는다(#48) — 컨테이너
+       (.chroma / .ctxcard.open)에서 물려받게 두면 페이드가 상호작용까지 함께 거둔다. -->
   <div bind:this={stackRoot} class="stack">
     <div
       class="ctx village"
       style="opacity:{villageOpacity}; transform: translateY({-8 * morph}px);"
-      style:pointer-events={houseActive ? 'none' : 'auto'}
+      style:pointer-events={houseActive ? 'none' : 'inherit'}
       aria-hidden={houseActive}
       inert={houseActive}
       role="tabpanel"
@@ -668,7 +671,7 @@
     <div
       class="ctx house"
       style="opacity:{houseOpacity}; transform: translateY({12 * (1 - morph)}px);"
-      style:pointer-events={houseActive ? 'auto' : 'none'}
+      style:pointer-events={houseActive ? 'inherit' : 'none'}
       aria-hidden={!houseActive}
       inert={!houseActive}
       role="tabpanel"
@@ -836,7 +839,7 @@
     <div
       class="foot village"
       style="opacity:{villageOpacity}"
-      style:pointer-events={houseActive ? 'none' : 'auto'}
+      style:pointer-events={houseActive ? 'none' : 'inherit'}
       aria-hidden={houseActive}
       inert={houseActive}
       data-context-owner="village"
@@ -852,7 +855,7 @@
     <div
       class="foot house"
       style="opacity:{houseOpacity}"
-      style:pointer-events={houseActive ? 'auto' : 'none'}
+      style:pointer-events={houseActive ? 'inherit' : 'none'}
       aria-hidden={!houseActive}
       inert={!houseActive}
       data-context-owner="house"
