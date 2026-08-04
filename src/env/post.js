@@ -953,7 +953,20 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
   let flareDebug = null;
   let rimDebug = null;
   let aaDebug = null;
+  let bloomDebug = null;
   if (typeof window !== 'undefined') {
+    // #53 R3 검증 훅: 같은 부팅·한 JS 턴 안에서 bloom 지분만 분리한다("밤하늘 바닥이 블룸 베일인가").
+    //   applyPS() 는 시간대 트윈·setTime 에서만 돌기 때문에, 정착 후 여기서 쓴 값은 다음 프레임에도
+    //   유지된다 → debugRenderDofFrame 두 번으로 원자 A/B 가 성립한다. restore() 는 프로필로 복귀.
+    bloomDebug = {
+      get strength() { return bloomPass.strength; },
+      get radius() { return bloomPass.radius; },
+      get threshold() { return bloomPass.threshold; },
+      get smoothWidth() { return bloomPass.highPassUniforms.smoothWidth.value; },
+      setStrength: (v) => { bloomPass.strength = Math.max(0, Number(v) || 0); return bloomPass.strength; },
+      restore: () => { applyPS(); return bloomPass.strength; },
+    };
+    window.__bloom = bloomDebug;
     flareDebug = {
       setWeather,
       get sunUV() { const u = flarePass.uniforms.sunUV.value; return [u.x, u.y]; },
@@ -1042,6 +1055,7 @@ export function setupPost({ renderer, scene, camera, msaaSamples = MSAA_SAMPLES_
         if (window.__flare === flareDebug) delete window.__flare;
         if (window.__rim === rimDebug) delete window.__rim;
         if (window.__aa === aaDebug) delete window.__aa;
+        if (window.__bloom === bloomDebug) delete window.__bloom;
       }
     },
   };

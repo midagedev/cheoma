@@ -14,8 +14,32 @@ import {
   MOON_CORONA_PROFILE,
   MOON_RENDER_ORDER,
 } from './moon-optics.js';
+import {
+  MILKY_WAY,
+  MOON_TEXTURE,
+  STAR_FIELD,
+  STAR_TIME_FADE,
+  SUN_DISK,
+  SUN_DISK_TIME,
+  buildStarField,
+  elevationDegOf,
+  milkyWayFade,
+  milkyWayWeight,
+  moonPhaseLightDir,
+  moonTexel,
+  sunDiskEnlargement,
+  sunDiskFlattening,
+  sunDiskProfile,
+  sunDiskSpanWorld,
+} from './celestial.js';
 
 export { TIME_PRESETS } from './atmosphere-profiles.js';
+
+// shot 모드(?shot=1): 별 반짝임 시계를 t=0 에 얼린다(clouds.js 표류와 같은 결정론 계약).
+const _skyQuery = (typeof location !== 'undefined')
+  ? new URLSearchParams(location.search)
+  : new URLSearchParams();
+const SHOT = _skyQuery.get('shot') === '1';
 
 // 달 코로나 텍스처. 직접광 원반 안쪽은 비워 단단한 0.52° 경계를 보존하고,
 // 바로 바깥의 회절광에서 시작해 5° 안에서 낮은 에너지로 사라진다.
@@ -34,6 +58,128 @@ function makeMoonCoronaTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+
+// ── S1 태양 원반 텍스처 ───────────────────────────────────────────────────────
+// 알파에 림 다크닝 프로필(celestial.js)을 굽고 RGB 는 흰색으로 둔다 — 시간대 색은 material.color,
+// 세기는 opacity 가 소유하므로 크로스페이드 계약과 정합하고 재베이크가 없다(프로그램 +0).
+// 가산 합성이라 화면 기여는 알파 프로필에 정확히 비례한다.
+function makeSunDiskTexture() {
+  const size = SUN_DISK.textureSize;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const img = g.createImageData(size, size);
+  const half = size * 0.5;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (x + 0.5 - half) / half;
+      const dy = (y + 0.5 - half) / half;
+      const a = sunDiskProfile(Math.hypot(dx, dy));
+      const i = (y * size + x) * 4;
+      img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(Math.min(1, Math.max(0, a)) * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// ── S2 달 표면(위상 + 크레이터 결) 텍스처 ─────────────────────────────────────
+// 기존 구면 지오를 그대로 두고 equirect 알베도×위상 셰이딩을 map 으로 굽는다. 셰이더 패치가
+//   아니므로 프로그램 계열은 코로나(MeshBasic+map)와 합쳐진다(+0).
+// 베이크 프레임 규약(celestial.js): 로컬 +z = 관측자. moonDisk.onBeforeRender 가 매 프레임
+//   lookAt(camera) 로 그 프레임을 카메라에 정렬하므로 위상 방향이 화면에서 안정적이고 재베이크가 0.
+// UV 규약: three SphereGeometry 는 uv.v = 1 − theta/π 로 굽고 CanvasTexture 는 flipY=true 이므로
+//   캔버스 행 y ↔ theta = ((y+0.5)/height)·π — 즉 sphereUvNormal 의 v 파라미터와 그대로 일치한다.
+function makeMoonSurfaceTexture() {
+  const { width, height } = MOON_TEXTURE;
+  const c = document.createElement('canvas');
+  c.width = width; c.height = height;
+  const g = c.getContext('2d');
+  const img = g.createImageData(width, height);
+  const light = moonPhaseLightDir();
+  for (let y = 0; y < height; y++) {
+    const v = (y + 0.5) / height;
+    for (let x = 0; x < width; x++) {
+      const u = (x + 0.5) / width;
+      const rgb = moonTexel(u, v, light);
+      const i = (y * width + x) * 4;
+      img.data[i] = Math.round(Math.min(1, Math.max(0, rgb[0])) * 255);
+      img.data[i + 1] = Math.round(Math.min(1, Math.max(0, rgb[1])) * 255);
+      img.data[i + 2] = Math.round(Math.min(1, Math.max(0, rgb[2])) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  return tex;
+}
+
+// ── S3′ 은하수: 확산 휘도 오프스크린 베이크 ───────────────────────────────────
+// 한 번 구워 두고 돔 캔버스에 globalAlpha 로 얹는다(드로우콜 +0 · 프로그램 +0 · 재베이크 0).
+// 지평 게이트는 celestial.js#milkyWayWeight 가 소유한다 — 지평 아래는 정확히 0 이라
+//   fog 색 수렴 계약과 check-fog-wash 의 돔 미러를 침해하지 않는다.
+function makeMilkyWayCanvas(width, height) {
+  const c = document.createElement('canvas');
+  c.width = width; c.height = height;
+  const g = c.getContext('2d');
+  const img = g.createImageData(width, height);
+  const R = Math.round(MILKY_WAY.tint[0] * 255);
+  const G = Math.round(MILKY_WAY.tint[1] * 255);
+  const B = Math.round(MILKY_WAY.tint[2] * 255);
+  for (let y = 0; y < height; y++) {
+    const pos = 1 - (y + 0.5) / height;
+    for (let x = 0; x < width; x++) {
+      const w = milkyWayWeight((x + 0.5) / width, pos);
+      const i = (y * width + x) * 4;
+      img.data[i] = R; img.data[i + 1] = G; img.data[i + 2] = B;
+      img.data[i + 3] = Math.round(w * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+// ── S3 별 셰이더 ─────────────────────────────────────────────────────────────
+// Points 1 드로우콜 · 프로그램 1 계열. 픽셀 크기는 등급에서(점광원은 화각과 무관하게 PSF 크기),
+//   알파는 celestial.js#starAlpha 와 동일한 식(밝은 별이 먼저 뜨고 마지막에 진다),
+//   반짝임은 두 주파수 합 ±uTwinkle(룩 문법: 감지되면 과함).
+// GLSL 예약어(sample/patch/input/output/filter/active)는 지역변수로 쓰지 않는다.
+const STAR_VERT = /* glsl */`
+  attribute vec3 aColor;
+  attribute float aSize;
+  attribute float aBright;
+  attribute float aPhase;
+  uniform float uFade, uTime, uPixelRatio, uTwinkle, uBias;
+  varying vec3 vTint;
+  varying float vAlpha;
+  void main() {
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mv;
+    float thresh = (1.0 - aBright) * uBias;
+    vAlpha = clamp((uFade - thresh) / max(1e-4, 1.0 - thresh), 0.0, 1.0);
+    float flick = 1.0 + uTwinkle * (
+      sin(uTime * 1.7 + aPhase * 6.2831853) * 0.62
+      + sin(uTime * 0.63 + aPhase * 17.0) * 0.38);
+    vTint = aColor * flick;
+    gl_PointSize = clamp(aSize * uPixelRatio * (0.94 + 0.06 * flick), 1.0, 4.0);
+  }
+`;
+const STAR_FRAG = /* glsl */`
+  varying vec3 vTint;
+  varying float vAlpha;
+  void main() {
+    vec2 d = gl_PointCoord - vec2(0.5);
+    float r = length(d) * 2.0;
+    float core = 1.0 - smoothstep(0.30, 1.0, r);
+    if (core <= 0.0) discard;
+    gl_FragColor = vec4(vTint, vAlpha * core);
+  }
+`;
 
 // All profiles keep exactly four sky stops (bottom to top), so time/look transitions can
 // interpolate position and sRGB colour one-to-one without reallocating the canvas texture.
@@ -157,6 +303,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   const domeCanvas = document.createElement('canvas');
   domeCanvas.width = DOME_TEX_W; domeCanvas.height = 256;
   const domeCtx = domeCanvas.getContext('2d');
+  // 은하수 확산 밴드(한 번만 베이크 — 돔과 같은 해상도로 1:1 합성).
+  const milkyWayCanvas = makeMilkyWayCanvas(DOME_TEX_W, 256);
   const domeTex = new THREE.CanvasTexture(domeCanvas);
   domeTex.colorSpace = THREE.SRGBColorSpace;
   // 방위축이 생겼으므로 u 는 감싸야 한다 — 태양 밴드가 u=0 을 걸치면 clamp 는 가장자리를 늘인다.
@@ -242,6 +390,11 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     return u - Math.floor(u);
   }
 
+  // #53 R3 검증 전용 배율(제품 경로는 항상 1). window.__sky 가 이 두 값을 쓰고 돔을 다시 칠하므로
+  //   "같은 부팅 · 같은 카메라"에서 SUN_BAND / 은하수 지분을 원자로 분리할 수 있다.
+  let dbgSunBandScale = 1;
+  let dbgMilkyWayScale = 1;
+
   // 스톱 배열({pos, r,g,b})로 돔 캔버스를 다시 그린다(텍스처 재사용).
   //   ① 프로필 수직 그라디언트 → ② 대기 결합 오버레이(DOME_HAZE × HAZE_TINT) →
   //   ③ 태양 방위 밝은 구간(SUN_BAND). ②는 지평 아래를 fog 색으로 수렴시키고, ③은 지평
@@ -267,13 +420,29 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     domeCtx.fillRect(0, 0, W, 256);
 
     drawSunBand(W);
+    drawMilkyWay(W);
     domeTex.needsUpdate = true;
+  }
+
+  // 은하수 확산 밴드: 미리 구운 캔버스를 별 페이드(밤 전용 램프)만큼 얹는다.
+  //   dawn(0.18)에서는 milkyWayFade=0 → 합성 자체를 건너뛰므로 박명 돔은 불변이다.
+  function drawMilkyWay(W) {
+    const weight = MILKY_WAY.peak * milkyWayFade(cur.stars) * dbgMilkyWayScale;
+    if (weight <= 0.002) return;
+    domeCtx.globalAlpha = weight;
+    domeCtx.drawImage(milkyWayCanvas, 0, 0, W, 256);
+    domeCtx.globalAlpha = 1;
   }
 
   // 태양 방위 온색 구간. RGB 는 전 구간 동일(태양색)하고 알파만 방위 가우시안으로 변하므로
   //   가로 그라디언트 하나를 재사용하고 세로는 globalAlpha 로 행마다 스케일한다.
+  // #53 R3: 시간대 배율(cur.sunBandScale)은 저작 peak 에 곱해진다. 밤에만 0.31 로 내려가고
+  //   낮·노을·새벽은 1 이라 저 프로필들의 돔 바이트는 동결이다. 배율은 트윈 필드이므로
+  //   시간대 전환 중에도 연속으로 변한다(하드 컷 금지 계약).
   const _sunSRGB = { r: 1, g: 1, b: 1 };
   function drawSunBand(W) {
+    const bandPeak = SUN_BAND.peak * cur.sunBandScale * dbgSunBandScale;
+    if (bandPeak <= 0.0005) return;
     cur.sunColor.getRGB(_sunSRGB, THREE.SRGBColorSpace);
     const R = Math.round(clamp01(_sunSRGB.r) * 255);
     const G = Math.round(clamp01(_sunSRGB.g) * 255);
@@ -290,7 +459,7 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     domeCtx.fillStyle = band;
     for (let y = 0; y < 256; y++) {
       const pos = 1 - (y + 0.5) / 256;
-      const v = SUN_BAND.peak
+      const v = bandPeak
         * smoothstep(SUN_BAND.posGateLo, SUN_BAND.posGateHi, pos)
         * Math.exp(-0.5 * ((pos - SUN_BAND.posCenter) / SUN_BAND.posSigma) ** 2);
       if (v <= 0.004) continue;
@@ -341,11 +510,13 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   const moonGroup = new THREE.Group();
   moonGroup.name = 'moon';
   moonGroup.userData.optics = DEFAULT_MOON_OPTICS;
+  const moonSurfaceTexture = makeMoonSurfaceTexture();
   const moonDisk = new THREE.Mesh(
     new THREE.SphereGeometry(DEFAULT_MOON_OPTICS.diskRadius, 24, 16),
     // 트윈 페이드용 반투명(정착 야간 opacity=1 == 기존 불투명 룩).
+    // #53 S2: 균일 원반 → 위상·크레이터 베이크. color 는 달빛 색으로 남고 map 이 명암을 소유한다.
     new THREE.MeshBasicMaterial({
-      color: 0xf4efda, fog: false, depthTest: true, depthWrite: false,
+      color: 0xf4efda, map: moonSurfaceTexture, fog: false, depthTest: true, depthWrite: false,
       transparent: true, opacity: 1,
     })
   );
@@ -418,7 +589,13 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     moonGroup.position.copy(camera.position).add(moonOffset);
     moonGroup.updateMatrixWorld(true);
   };
-  moonDisk.onBeforeRender = (rend, sc, camera) => placeMoonForCamera(camera);
+  // 위상 베이크는 "로컬 +z = 관측자" 프레임이다. 매 프레임 카메라로 정렬해야 터미네이터가
+  //   화면에서 안정적이다(재베이크 0). 코로나와 같은 lookAt→updateMatrixWorld 패턴.
+  moonDisk.onBeforeRender = (rend, sc, camera) => {
+    placeMoonForCamera(camera);
+    moonDisk.lookAt(camera.position);
+    moonDisk.updateMatrixWorld();
+  };
   for (const corona of coronaLayers) {
     corona.onBeforeRender = (rend, sc, camera) => {
       placeMoonForCamera(camera);
@@ -426,6 +603,67 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       corona.updateMatrixWorld();
     };
   }
+
+  // ── 태양 원반 (S1) ────────────────────────────────────────────────────────
+  // post.js 의 sunGlow(헤일로)·FlarePass(렌즈)는 불침해. 여기서 더하는 것은 같은 반경 위의
+  //   "경계 있는 코어"뿐이다. 스프라이트라 항상 카메라를 향하고, scale.y 로 화면 수직을
+  //   압축하므로 저고도 편평화가 화면 기준으로 성립한다.
+  const sunDiskTexture = makeSunDiskTexture();
+  const sunDiskSpan = sunDiskSpanWorld(SUN_DISK.distance);
+  const sunDisk = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: sunDiskTexture, color: 0xffffff, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: true, fog: false,
+  }));
+  sunDisk.name = 'sun-disk';
+  sunDisk.renderOrder = -45;      // 돔(-100) 뒤 · sunGlow(-40) 앞
+  sunDisk.visible = false;
+  sunDisk.frustumCulled = false;  // 카메라 상대 배치 — 직전 프레임 바운즈로 컬링되면 안 된다
+  sunDisk.onBeforeRender = (rend, sc, camera) => {
+    sunDisk.position.copy(camera.position).addScaledVector(cur.sunDir, SUN_DISK.distance);
+    sunDisk.updateMatrixWorld();
+  };
+  skyRoot.add(sunDisk);
+  const SUN_CORE_WHITE = 0.45;    // 코어를 태양색보다 흰쪽으로 — 원반은 광원, 온기는 림·글로우 소유
+  const _sunCore = new THREE.Color();
+  const _white = new THREE.Color(1, 1, 1);
+
+  // ── 별 + 은하수 (S3) ──────────────────────────────────────────────────────
+  // 필드 별과 은하수 밴드를 한 버퍼에 실어 1 드로우콜. 배치는 celestial.js 의 지역 시드 rng —
+  //   마을 생성의 전역 Math.random 시드창을 건드리지 않는다.
+  const starField = buildStarField();
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starField.position, 3));
+  starGeo.setAttribute('aColor', new THREE.BufferAttribute(starField.color, 3));
+  starGeo.setAttribute('aSize', new THREE.BufferAttribute(starField.size, 1));
+  starGeo.setAttribute('aBright', new THREE.BufferAttribute(starField.bright, 1));
+  starGeo.setAttribute('aPhase', new THREE.BufferAttribute(starField.phase, 1));
+  starGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), starField.radius * 1.02);
+  const starMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uFade: { value: 0 },
+      uTime: { value: 0 },
+      uPixelRatio: { value: 1 },
+      uTwinkle: { value: STAR_FIELD.twinkleAmp },
+      uBias: { value: STAR_FIELD.twilightBias },
+    },
+    vertexShader: STAR_VERT,
+    fragmentShader: STAR_FRAG,
+    transparent: true, depthWrite: false, depthTest: true,
+    blending: THREE.AdditiveBlending,
+  });
+  const stars = new THREE.Points(starGeo, starMat);
+  stars.name = 'stars';
+  stars.renderOrder = -60;        // 돔 위 · 달(코로나 −1..4)보다 먼저 → 달 원반이 별을 덮는다
+  stars.visible = false;
+  stars.frustumCulled = false;
+  // 카메라 추종(돔과 같은 패턴): 지형은 여전히 깊이를 소유하므로 능선 뒤 별은 가려진다.
+  stars.onBeforeRender = (rend, sc, camera) => {
+    stars.position.copy(camera.position);
+    stars.updateMatrixWorld();
+    starMat.uniforms.uPixelRatio.value = rend.getPixelRatio();
+  };
+  skyRoot.add(stars);
+  let starClock = 0;
 
   // ── 상태(State) 표현 ──────────────────────────────────────────────────────
   // 보간 가능한 모든 시간대 필드를 한 객체로. 색은 setHex(sRGB→선형) 디코드된 THREE.Color 로
@@ -437,6 +675,11 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       fogColor: new THREE.Color(), fogNear: 0, fogFar: 0, exposure: 1,
       ridgeNear: new THREE.Color(), ridgeFar: new THREE.Color(), mist: new THREE.Color(),
       mistOp: 0, autumnAmt: 0, winterAmt: 0, lantern: 0, moon: 0,
+      // #53: 천체 페이드도 시간대 트윈 필드다(하드 컷 금지 계약 — 별이 툭 켜지면 실패).
+      stars: 0, sunDisk: 0,
+      // #53 R3: SUN_BAND 시간대 배율도 같은 자리의 트윈 필드다(밤만 0.31 — 하드 컷이면 시간대
+      //   전환에서 하늘 밝기가 툭 떨어진다). 기본 1 = 저작값 그대로.
+      sunBandScale: 1,
       stops: [0, 1, 2, 3].map(() => ({ pos: 0, r: 0, g: 0, b: 0 })),
     };
   }
@@ -452,6 +695,11 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     out.autumnAmt = AUTUMN_RIDGE_AMT[name] ?? 0.3;
     out.winterAmt = WINTER_RIDGE_AMT[name] ?? 0.3;
     out.lantern = P.lantern || 0; out.moon = P.moon ? 1 : 0;
+    // 천체 존재감은 시간대 이름으로 결정된다(노을빛 변주 gold/crimson/violet 공통).
+    out.stars = STAR_TIME_FADE[name] ?? 0;
+    out.sunDisk = SUN_DISK_TIME[name] ?? 0;
+    // 달 방위 글로우 밴드 배율은 프로필이 소유한다(밤 0.31 · 그 외 미지정 = 1).
+    out.sunBandScale = P.sunBandScale ?? 1;
     for (let i = 0; i < 4; i++) {
       const c = parseHexSRGB(P.sky[i][1]);
       out.stops[i].pos = P.sky[i][0]; out.stops[i].r = c.r; out.stops[i].g = c.g; out.stops[i].b = c.b;
@@ -465,6 +713,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     dst.ridgeNear.copy(src.ridgeNear); dst.ridgeFar.copy(src.ridgeFar); dst.mist.copy(src.mist);
     dst.mistOp = src.mistOp; dst.autumnAmt = src.autumnAmt; dst.winterAmt = src.winterAmt;
     dst.lantern = src.lantern; dst.moon = src.moon;
+    dst.stars = src.stars; dst.sunDisk = src.sunDisk;
+    dst.sunBandScale = src.sunBandScale;
     for (let i = 0; i < 4; i++) {
       dst.stops[i].pos = src.stops[i].pos; dst.stops[i].r = src.stops[i].r;
       dst.stops[i].g = src.stops[i].g; dst.stops[i].b = src.stops[i].b;
@@ -484,6 +734,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
     out.mistOp = _l(a.mistOp, b.mistOp, k); out.autumnAmt = _l(a.autumnAmt, b.autumnAmt, k);
     out.winterAmt = _l(a.winterAmt, b.winterAmt, k);
     out.lantern = _l(a.lantern, b.lantern, k); out.moon = _l(a.moon, b.moon, k);
+    out.stars = _l(a.stars, b.stars, k); out.sunDisk = _l(a.sunDisk, b.sunDisk, k);
+    out.sunBandScale = _l(a.sunBandScale, b.sunBandScale, k);
     for (let i = 0; i < 4; i++) {
       out.stops[i].pos = _l(a.stops[i].pos, b.stops[i].pos, k);
       out.stops[i].r = _l(a.stops[i].r, b.stops[i].r, k);
@@ -545,6 +797,19 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
       moonGroup.position.copy(moonOffset); // deterministic fallback before first camera render
       moonGroup.updateMatrixWorld(true);
     }
+    // 태양 원반(S1): 편평화·확대는 현재 보간된 태양 고도에서 산출하므로 트윈 중에도 연속이다.
+    //   밤 프로필은 sunDisk 0 — 밤의 sunDir 은 달 방향을 겸하기 때문에 원반이 남으면 달이 둘이 된다.
+    const sunElevDeg = elevationDegOf(cur.sunDir);
+    const sunSpan = sunDiskSpan * sunDiskEnlargement(sunElevDeg);
+    sunDisk.scale.set(sunSpan, sunSpan * sunDiskFlattening(sunElevDeg), 1);
+    sunDisk.material.opacity = cur.sunDisk;
+    // 코어는 HDR 광원이다: 선형 1.0 이면 ACES 숄더에서 밝은 노을 하늘에 묻힌다(실측 1.24×).
+    _sunCore.copy(cur.sunColor).lerp(_white, SUN_CORE_WHITE).multiplyScalar(SUN_DISK.coreHdrGain);
+    sunDisk.material.color.copy(_sunCore);
+    sunDisk.visible = cur.sunDisk > 0.002;
+    // 별(S3): 페이드는 상태 필드(크로스페이드), 반짝임 위상은 update 의 시계가 소유.
+    starMat.uniforms.uFade.value = cur.stars;
+    stars.visible = cur.stars > 0.002;
     // 돔 헤이즈는 시간대 base fog 로 먼저 맞춘다(모디파이어가 있으면 같은 프레임에 syncHaze 가 덮는다).
     cur.fogColor.getRGB(hazeSRGB, THREE.SRGBColorSpace);
     buildDomeFromStops(cur.stops);
@@ -610,6 +875,11 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
 
   // 매 프레임: 시간대 트윈 + 가을 능선 트윈 진행. env.update 에서 호출.
   function update(dt) {
+    // 별 반짝임: 별이 보일 때만 도는 미세 변조 시계. shot 모드는 t=0 고정(캡처 재현성).
+    if (!SHOT && cur.stars > 0.002) {
+      starClock += dt;
+      starMat.uniforms.uTime.value = starClock;
+    }
     let moved = false;
     if (tw) {
       tw.t += dt;
@@ -655,7 +925,34 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
 
   function setEnabled(value) { skyRoot.visible = !!value; }
 
+  // #53 R3 검증 훅: 돔의 두 가산항(달 방위 SUN_BAND · 은하수)을 같은 부팅·같은 카메라에서
+  //   원자로 분리한다. 배율만 곱하고 제품 산술을 그대로 재실행하므로, 미러 구현이 아니라
+  //   제품 픽셀을 잰다. restore() 로 프로필 값 복귀.
+  let skyDebug = null;
+  if (typeof window !== 'undefined') {
+    skyDebug = {
+      get sunBandScale() { return cur.sunBandScale * dbgSunBandScale; },
+      get milkyWayScale() { return dbgMilkyWayScale; },
+      setSunBand: (v) => {
+        dbgSunBandScale = Math.max(0, Number(v) || 0);
+        buildDomeFromStops(cur.stops);
+        return cur.sunBandScale * dbgSunBandScale;
+      },
+      setMilkyWay: (v) => {
+        dbgMilkyWayScale = Math.max(0, Number(v) || 0);
+        buildDomeFromStops(cur.stops);
+        return dbgMilkyWayScale;
+      },
+      restore: () => {
+        dbgSunBandScale = 1; dbgMilkyWayScale = 1;
+        buildDomeFromStops(cur.stops);
+      },
+    };
+    window.__sky = skyDebug;
+  }
+
   function dispose() {
+    if (typeof window !== 'undefined' && window.__sky === skyDebug) delete window.__sky;
     scene.remove(skyRoot);
     disposeObjectTree(skyRoot);
     skyRoot.clear();
@@ -664,6 +961,8 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   return {
     apply, setSunsetLook, setSeason, update, updateFlicker, getBaseFog, isTweening, syncHaze,
     setEnabled, dispose, root: skyRoot, dome, lanterns,
+    // 검증 하네스용 핸들(제품 코드는 상태기계만 쓴다).
+    sunDisk, stars, moonDisk, starCount: starField.count,
     get sunsetLook() { return sunsetLook; },
   };
 }

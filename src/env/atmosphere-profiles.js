@@ -72,15 +72,45 @@ const DAY = profile({
 // + corona in the upper sky band while light still arrives from above (raking moonlight).
 const NIGHT = profile({
   // Slightly lifted mid-sky so the cool lunar band reads as haze rather than crushed navy.
-  sky: [[0.0, '#2f3f60'], [0.4, '#1f2e4e'], [0.75, '#16233a'], [1.0, '#0d1424']],
+  // #53 R2 (2026-08-04, vision FIX — star contrast): the lift above is what made stars
+  //   unreadable. Measured product night aerial sky band was 78/255, so even the brightest
+  //   authored star reached only 2.1x local contrast ("effectively invisible" verdict).
+  //   This is a **small** step down (≈ −13% sRGB luminance per stop), not a reversal of the
+  //   #150-H decision: the lunar haze reading is preserved and the floor stays well above
+  //   crushed navy. Fog comes down with it (below) so sky and moonlit terrain stay one
+  //   atmosphere — darkening the dome alone would make the terrain float, which is the
+  //   named failure mode. Conflict with #150-H is deliberate and lead-reviewable.
+  sky: [[0.0, '#293856'], [0.4, '#1b2845'], [0.75, '#131f33'], [1.0, '#0b111e']],
   // Azimuth unchanged (north-ridge moon); elevation lowered for aerial framing (was y=5).
   sunDir: [-7, 3, -32], sunColor: 0xa8bce6, sunInt: 1.14,
   // Hemi fill lifts soffits and wall faces the moon never reaches without erasing direction.
   hemiSky: 0x3d4c6e, hemiGround: 0x1c2436, hemiInt: 0.44,
   // Near architecture stays readable; far fog still layers ridges for aerial depth.
-  fog: 0x1e2c46, fogNear: 70, fogFar: 420, exposure: 1.24,
+  // #53 R2: fog steps down with the sky stops (0x1e2c46 → 0x1a2740, ≈ −13% luminance) so the
+  //   horizon band, scene.background and distant aerial perspective stay coupled to the dome.
+  //   exposure/lighting untouched — near architecture legibility is unchanged.
+  fog: 0x1a2740, fogNear: 70, fogFar: 420, exposure: 1.24,
   ridgeNear: 0x26324e, ridgeFar: 0x4a5a78, mist: 0x5a6a92, mistOp: 0.55,
   lantern: 1.0, moon: true,
+  // #53 R3 (2026-08-04, lead look call): night-only multiplier on the dome's lunar azimuth
+  //   glow band (sky.js SUN_BAND, authored peak 0.26 — the literal stays put because
+  //   tools/check-fog-wash.mjs parses it from source). Attribution: the R3 ablation ladder
+  //   pinned 97% of the night aerial sky floor and 84% of the skyward floor on that band,
+  //   with bloom/stars/moon/cloud shares ≈ 0. The measured frontier over night peak
+  //   (0.26 → 0) showed effective peak 0.08 takes the skyward sky floor 63.4 → 35.6/255 and
+  //   lifts star contrast to 4.93x (1st) / 3.20x (20th) / 2.96x (30th) — clearing the
+  //   2.5x target for the top 20–30 stars **without touching any star constant**.
+  //   0.31 × 0.26 = 0.081 is that operating point, and the shipped measurement agrees: in one
+  //   boot at one camera the skyward sky floor is 68.6 with the band at its authored peak and
+  //   42.8 at 0.31 (31.0 with the milky way also off), while star contrast goes
+  //   2.55x → 4.93x (1st), 1.86x → 3.01x (20th), 1.73x → 2.70x (30th). The lunar azimuth glow
+  //   survives as a glow rather than being erased: on the dome row at SUN_BAND.posCenter its
+  //   azimuthal amplitude drops 39.1 → 12.1/255 with the peak still on the moon's own column.
+  //   Day/sunset/dawn keep 1.0, and because the multiplier is a plain × 1.0 there, forcing the
+  //   scale explicitly to 1 renders byte-identical frames (0 of ~2.6M channels differ, with a
+  //   same-value repaint control also at 0) — those profiles are frozen.
+  //   This is a tween field in sky.js, not a hard switch: crossfades stay continuous.
+  sunBandScale: 0.31,
 }, {
   bloomStrength: 0.72, bloomRadius: 0.62, bloomThreshold: 0.32,
   // Softer, wider moon rim so eave silhouettes and column edges separate from walls.
