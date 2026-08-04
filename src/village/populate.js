@@ -54,6 +54,7 @@ import {
 import { scatterTrees } from '../generators/village/trees.js';
 import { buildRoads } from '../generators/village/roads.js';
 import { buildDrainage } from './drainage-geometry.js';
+import { buildGateQuarter } from '../generators/village/gate-quarter.js';
 import { buildDangsan } from './dangsan-geometry.js';
 import {
   buildAuxiliaryBuilding,
@@ -464,6 +465,25 @@ export function* populateVillageSteps(plan, opts = {}) {
   if (plan.features && plan.features.cityWall) root.add(buildCityWall(plan.features.cityWall, site));
   if (plan.features && plan.features.sijeon && plan.features.sijeon.length) {
     root.add(buildVillageSijeon(plan.features.sijeon, site, villagePalette));
+  }
+  // 성벽 안면 부속 밴드(성곽 도성 전용) — 성곽과 같은 이유로 랜드마크 병합(중심 바운딩) 밖에
+  //   둔다. 재질은 마을 팔레트의 기존 역할을 빌리므로 새 재질·텍스처·프로그램 계열이 0 이고
+  //   병합 후 드로우콜은 재질 수(최대 4)만 늘어난다. 팔레트가 없는 경로(필지 0)는 담장 팔레트와
+  //   같은 방식으로 한 벌 만들고 야간 패치 대상에 등록한다.
+  if (plan.features?.gateQuarter?.records?.length) {
+    let palette = villagePalette;
+    if (!palette) {
+      palette = makeMaterials('choga');
+      matSets.push(palette);
+    }
+    root.add(buildGateQuarter(plan.features.gateQuarter, {
+      materials: {
+        wall: palette.mud,
+        roof: palette.thatch,
+        ridge: palette.jipjul,
+        stone: palette.fieldstone,
+      },
+    }));
   }
   yield 'features+wall+sijeon';
 

@@ -443,7 +443,14 @@ const expectedSceneHashes = {
   //   JSON 밖)이 범위 증거. objects 5042 불변, triangles 25,214,500 → 25,230,260 = +15,760이
   //   순수 노드 파사드 실측 델타(점포당 +80 × 197)와 정확히 일치(구값은 리드 직전 실측).
   //   FAIL-first: check-sijeon-contract 벽체 단언이 수정 전 소스에서 실패(walls=undefined).
-  hanyang: '67f594ca:6f2628e8:ec34af7d:112614a6',
+  // #54 슬라이스 B 성벽 안면 부속 밴드(2026-08-05): 신규 kind 'gateQuarter' — 성문 좌우 성벽
+  //   안면의 낮은 초가 부속채(마을 팔레트 4역할 차입, mergeStatic 1회). 도성 전용 — hanyang 만
+  //   이동, proxy 395b740a 불변(필지·지붕 OBB 무이동), village/town/capital/mja/snapshot 불변.
+  //   objects 5042→5047(+5)·triangles 25,230,260→25,230,876(+616)이 순수 노드 buildGateQuarter
+  //   직접 실측(objects 5·triangles 616·44tri/채)과 정확히 일치. worker == ?worker=0 폴백 바이트
+  //   동일. 계획 골든 재기준은 tools/plan-contract.json _gateQuarterRebaseline 참조.
+  //   FAIL-first: tools/check-gate-quarter.mjs no-band 변형 1건·crowd-wall 29건·forecourt 48건 실패.
+  hanyang: '17636529:69f1c025:98b6ee8b:99cd1639',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

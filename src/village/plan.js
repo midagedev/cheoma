@@ -4,6 +4,7 @@ import { planRoads } from './roads.js';
 import { planParcels, planSatellites } from './parcels.js';
 import {
   CITY_WALL_MIN_SITE_R,
+  cityGateApproachFootprint,
   cityGateForecourtPolygon,
   cityWallClearance,
   cityWallContainsPolygon,
@@ -33,7 +34,8 @@ import {
 } from './stream-spatial.js';
 import { planTempleSite, templeReservationPolygons } from './temple-plan.js';
 import { planPavilion } from './pavilion-plan.js';
-import { planPublicProps } from './public-props-plan.js';
+import { planPublicProps, publicPropObstruction } from './public-props-plan.js';
+import { planGateQuarters } from './gate-quarter-plan.js';
 import { planRiverPort } from './river-port-plan.js';
 import { attachRoadJunctions } from './road-topology.js';
 import { createRoadSpatialIndex } from './road-spatial.js';
@@ -881,6 +883,57 @@ export function planVillage(opts = {}) {
     dangsan: opts.dangsan,
   });
 
+  // ── 9) 성벽 안면 부속 밴드 (성곽 도성 전용, #54 슬라이스 B) ─────────────────────
+  // 구한말 도성 사진의 성문 좌우는 **성벽 안쪽 면에 낮은 부속채(헛간·초가급)가 붙어** 시가지가
+  //   성벽에 닿는다(refs/hanyang-old, 비공개). 직전 라운드가 간선 파사드를 성문까지 이었으므로
+  //   (docs/joseon-city.md §성문 주변) 남은 공백이 이 밴드다 — 실측상 성벽 안면이 전무하게 비었다.
+  // 마지막에 계획하는 이유: 이 밴드는 **남은 성벽 안면 공백을 채우는** 종속 시설이다. 도로·필지·
+  //   시전·논·정자·소품이 전부 확정된 뒤 그 여백만 쓰므로, 기존 어느 계약도 재배치되지 않고
+  //   (필지·도로·논·소품 바이트 불변) 성곽 없는 규모는 이 블록에서 features 키조차 얻지 않는다.
+  //   공유 rng 를 소비하지 않는 전용 시드 스트림이라 상류 결정론도 그대로다(drainage·dangsan 동형).
+  if (features.cityWall) {
+    // 원형 예약(정자·보호수 수관·소품)은 밴드의 회전 사각형 판정에 맞춰 감싸는 사각으로 넘긴다
+    //   — 원보다 크므로 보수적이고, 당산 공터는 host 수관 안이라 보호수 원이 이미 덮는다.
+    const circleFootprint = (circle, radius) => (Number.isFinite(radius) && radius > 0 ? [
+      { x: circle.x - radius, z: circle.z - radius },
+      { x: circle.x + radius, z: circle.z - radius },
+      { x: circle.x + radius, z: circle.z + radius },
+      { x: circle.x - radius, z: circle.z + radius },
+    ] : null);
+    const propFootprints = (features.props || [])
+      .map((prop) => publicPropObstruction(prop))
+      .filter(Boolean)
+      .map((obstacle) => circleFootprint(obstacle, obstacle.radius));
+    features.gateQuarter = planGateQuarters({
+      cityWall: features.cityWall,
+      site,
+      roads: roadsResult.roads,
+      seed,
+      // 통행·통제 예약은 절대 침범 금지(문전 마당 14m + 접근 예약 47m + 궁역·광장·절 예약).
+      keepOut: [
+        ...features.cityWall.gates.flatMap((gate) => [
+          cityGateForecourtPolygon(gate, { length: GATE_FORECOURT_PLAN_DEPTH }),
+          cityGateApproachFootprint(gate),
+        ]),
+        ...(palaceKeepOut || []),
+        ...(features.palace?.poly ? [features.palace.poly] : []),
+        ...templeReservations,
+      ],
+      occupied: [
+        ...parcels.map((parcel) => parcel.poly),
+        ...(features.sijeon || []).map((shop) => shop.poly),
+        ...(paddies || []).map((field) => field.poly),
+        ...(features.pavilion
+          ? [circleFootprint(features.pavilion, features.pavilion.radius)] : []),
+        ...(features.guardianTrees || []).map((tree) => circleFootprint(tree, tree.radius)),
+        ...propFootprints,
+      ].filter((poly) => (poly?.length || 0) >= 3),
+      // 겨울 일조 통로(30°)는 부속채가 낮아도 비운다 — 필지가 먼저 자리를 잡았으므로 후보를
+      //   스스로 기각할 수 없다(시전 행랑이 코어 일조 통로를 비우는 것과 같은 이유).
+      solarCorridors: parcels.map((parcel) => parcelSolarAccessPolygon(parcel)),
+    });
+  }
+
   const allPts = [...roadsResult.roads.flatMap((r) => r.pts), ...parcels.map((p) => p.center)];
   const bounds = G.boundsOfPts(allPts.length ? allPts : [site.center]);
 
@@ -907,6 +960,8 @@ export function planVillage(opts = {}) {
       drainageRuns: drainage.runs.length,
       drainageCrossings: drainage.crossings.length,
       dangsanSites: dangsan.sites.length,
+      // 성곽 없는 규모의 stats 바이트를 보존하려고 조건부로 붙인다(성벽 안면 밴드는 도성 전용).
+      ...(features.gateQuarter ? { gateQuarters: features.gateQuarter.records.length } : {}),
       ...(mjaHouse ? { mjaHouses: 1 } : {}),
       parcelDebug: planParcels.lastDebug,
     },

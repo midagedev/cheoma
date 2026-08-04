@@ -40,6 +40,15 @@ export {
   validateMudWallSurfacePlan,
 } from './mud-wall.js';
 export {
+  buildGateQuarter,
+  disposeGateQuarter,
+  GATE_QUARTER_KIND,
+  GATE_QUARTER_PLAN_LIMITS,
+  GATE_QUARTER_PLAN_SCHEMA_VERSION,
+  planGateQuarters,
+  validateGateQuarterPlan,
+} from './gate-quarter.js';
+export {
   buildDrainage,
   disposeDrainage,
   DRAINAGE_MATERIAL_ROLES,
