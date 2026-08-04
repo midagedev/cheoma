@@ -81,6 +81,15 @@ const EXACT_IMPACT = new Map([
   ['src/env/season-ground-carpet.js', [
     './check-season-ground-contract.mjs',
   ]],
+  // #53 천체: celestial.js·atmosphere-profiles 는 check-celestial 이 정적 import 하므로 폐쇄에
+  // 잡히지만, sky.js 배선 정합은 readFile 소스 가드라 폐쇄 밖이다 — 명시 소유.
+  ['src/env/sky.js', [
+    './check-celestial.mjs',
+  ]],
+  // #53 S6 구름 실루엣: 게이트가 esbuild 로 clouds.js 를 즉석 번들하므로 정적 폐쇄에 없다.
+  ['src/env/clouds.js', [
+    './check-cloud-silhouette.mjs',
+  ]],
   ['src/core/buffer-update-range.js', [
     './check-instance-upload.mjs',
     './check-wave-contract.mjs',

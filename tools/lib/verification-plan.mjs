@@ -210,6 +210,15 @@ const REVIEWED_NEW_PATHS = new Set([
   //   브라우저 없이 판정되고 tools/check-fog-wash.mjs 가 core 게이트에서 소유한다
   //   (네 노을 프로필 전부를 회귀 픽스처로 들고 있다).
   'tools/check-fog-wash.mjs',
+  // #53 천체 계약(S1 태양 원반·S2 달 위상·S3 별·은하수·SUN_BAND 밤 배율). celestial.js 는
+  //   Three/DOM 무의존이라 tools/check-celestial.mjs 가 core 게이트에서 소유한다. sky.js 배선
+  //   정합과 atmosphere-profiles 시간대 페이드도 같은 순수 게이트가 읽는다.
+  'src/env/celestial.js',
+  'tools/check-celestial.mjs',
+  // #53 S6 구름 실루엣 다양성(위상·비유사도·미러·위계·wisp·예산). 게이트가 esbuild 로
+  //   clouds.js 를 즉석 번들해 브라우저 없이 판정하므로 tools/check-cloud-silhouette.mjs 가
+  //   core 게이트에서 소유한다(정적 import 폐쇄에 잡히지 않아 EXACT_IMPACT 가 병행).
+  'tools/check-cloud-silhouette.mjs',
   // #38 픽셀 분석 공용 라이브러리와 같은 부팅 A/B 하네스. 라이브러리는 node 내장 zlib 만 쓰는
   //   순수 코드라 tools/check-pixel-stats.mjs 가 core 게이트에서 소유하고(합성 픽스처 왕복 단언),
   //   shoot-ab 는 판정 없는 캡처-온리다(shoot-cine·shoot-rim-aerial 과 같은 라우팅).

@@ -20,6 +20,8 @@ export const FAST_CHECKS = Object.freeze([
   './check-ceiling-contract.mjs',
   './check-residential-openings.mjs',
   './check-atmosphere-contract.mjs',
+  './check-celestial.mjs',
+  './check-cloud-silhouette.mjs',
   './check-audio-policy.mjs',
   './check-view-lifecycle.mjs',
   './check-camera-continuity.mjs',

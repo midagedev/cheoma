@@ -90,6 +90,18 @@ assert.deepEqual(ids(['tools/shoot-rim-aerial.mjs'], {
 assert.deepEqual(ids(['tools/check-fog-wash.mjs'], {
   newPaths: ['tools/check-fog-wash.mjs'],
 }), ['core']);
+// #53 천체 계약: 순수 노드 게이트와 celestial 모듈은 core 만 소유. sky 배선은 기존 env 라우팅
+//   (winter-app 등)에 실리고 pure 계약은 EXACT_IMPACT/정적 폐쇄로 check-celestial 이 잡는다.
+assert.deepEqual(ids(['tools/check-celestial.mjs'], {
+  newPaths: ['tools/check-celestial.mjs'],
+}), ['core']);
+assert.deepEqual(ids(['src/env/celestial.js'], {
+  newPaths: ['src/env/celestial.js'],
+}), ['core', 'app']);
+// #53 S6 구름 실루엣: 게이트 파일 자체는 core 만. clouds.js 는 기존 rim/lod 브라우저 라우팅 유지.
+assert.deepEqual(ids(['tools/check-cloud-silhouette.mjs'], {
+  newPaths: ['tools/check-cloud-silhouette.mjs'],
+}), ['core']);
 // #38 픽셀 통계 공용 라이브러리: 순수 코드라 core 만 소유한다. 라이브러리 자체가 바뀌어도
 //   `tools/` 폐쇄 낙하(full)로 승격하지 않고 자기 계약만 다시 돈다.
 assert.deepEqual(ids(['tools/check-pixel-stats.mjs'], {
@@ -524,6 +536,22 @@ assert.deepEqual(impactedFastChecks(['app/src/engine/village-camera-runtime.js']
 ]);
 assert.deepEqual(impactedFastChecks(['src/env/weather-physical-geometry.js']), [
   './check-architecture.mjs', './check-weather-geometry.mjs',
+]);
+// #53 천체: celestial/atmosphere-profiles 는 정적 import 폐쇄, sky.js 는 EXACT_IMPACT.
+assert.ok(impactedFastChecks(['src/env/celestial.js']).includes('./check-celestial.mjs'));
+assert.ok(impactedFastChecks(['src/env/atmosphere-profiles.js']).includes('./check-celestial.mjs'));
+assert.deepEqual(impactedFastChecks(['src/env/sky.js']), [
+  './check-architecture.mjs', './check-celestial.mjs',
+]);
+// #53 S6 구름 실루엣: esbuild 번들이라 EXACT_IMPACT 로 소유.
+assert.deepEqual(impactedFastChecks(['src/env/clouds.js']), [
+  './check-architecture.mjs', './check-cloud-silhouette.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['tools/check-celestial.mjs']), [
+  './check-architecture.mjs', './check-celestial.mjs',
+]);
+assert.deepEqual(impactedFastChecks(['tools/check-cloud-silhouette.mjs']), [
+  './check-architecture.mjs', './check-cloud-silhouette.mjs',
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/nightlight-physical-geometry.js']), [
   './check-architecture.mjs', './check-nightlight-geometry.mjs', './check-instance-upload.mjs',
