@@ -1832,6 +1832,11 @@ export function setupClouds(group, {
   // τ≈0.7025 cloud and every aerial (camera-above) frame are untouched.
   const CLOUD_UNDERSIDE_SPAN = 0.35;   // depth below the lower edge, in half-heights, for full effect
   const CLOUD_UNDERSIDE_TIGHTEN = 0.55; // fraction the coverage limits shrink by when fully underneath
+  // 이 프레임의 **저작** 림 세기·역광 투과 게인(부감 페이드를 걸기 전 값). update() 가 매 프레임
+  //   쓰고, 상공 빌보드의 onBeforeRender 가 fade 를 곱해 uniform 에 대입한다. 곱이 아니라 대입이라야
+  //   한 프레임에 렌더가 두 번 일어나도 계수가 누적되지 않는다(#53 핫픽스 주석 참조).
+  let cloudRimStrengthNow = 0;
+  let cloudGlowGainNow = 0;
 
   // ── 마을 부감 커버리지(#108) ─────────────────────────────────────────────────
   // 진단(tools/verify-cloudshadow.mjs): env 식 배치(rad = terrainMax·r + 40 + 표류 ±120)에선 블롭이
@@ -1926,7 +1931,27 @@ export function setupClouds(group, {
         // hidden. The camera-relative horizon bank supplies close sky silhouettes.
         const proximity = 1 - smoothstep(
           CLOUD_FRAME_FULL * tighten, CLOUD_FRAME_HIDDEN * tighten, frameFraction);
-        mesh.material.opacity = base * (1 - g * OF_DEPTH) * proximity;
+        const fade = (1 - g * OF_DEPTH) * proximity;
+        mesh.userData.cloudFade = fade;      // 검증이 읽는다(게이트: 림·투과광이 이 계수를 탄다)
+        mesh.material.opacity = base * fade;
+        // ── 페이드는 알파만이 아니라 HDR 외곽 항에도 걸린다 (#53 핫픽스) ──────────
+        // 알파만 낮추면 이 빌보드는 **균일하게** 사라지지 않는다. 바디는 그늘색이 haze 를 따라가
+        //   하늘과 거의 같은 복사도인데, 림(uCloudRimColor·1.28)과 역광 투과(uCloudGain.z)는
+        //   하늘의 여러 배인 HDR 항이고 둘 다 실루엣 경계에 몰려 있다. 그래서 fade 를 내리면
+        //   바디가 먼저 지각 문턱 아래로 사라지고 경계 항만 살아남아 "하늘에 매직펜으로 그린
+        //   윤곽선 낙서"가 된다 — 최종 클립 부감 6컷의 실패 모드이고, 같은 부팅 절제 실측
+        //   (2026-08-04, village 부감 sunset, fade 0.018~0.080)에서 바디 ΔL 2~6 vs 림 스트로크
+        //   ΔL 20~50(비 8~10 배)로 확인됐다. 림을 0 으로 두면 그 크리스프 스트로크가 사라진다.
+        // 같은 계수를 두 항에 걸면 페이드가 지각적으로도 균일해진다(경계/바디 비 = 1 + fade·비).
+        //   fade=1 이면 항등식이므로 S6 실루엣·역광 룩(비전 SHIP)은 불변이고, 이 블록은
+        //   overheadFade(=마을) 안이라 env 단일건물 경로·원경 뱅크는 접촉하지 않는다.
+        // 매 프레임 update() 가 저작값을 다시 쓰므로 여기서는 **곱이 아니라 대입**이다 — 한 프레임에
+        //   onBeforeRender 가 두 번 돌아도 fade² 로 누적되지 않는다.
+        const rim = mesh.material.userData.cloudRim;
+        if (rim) {
+          rim.strength.value = cloudRimStrengthNow * fade;
+          rim.gain.z = cloudGlowGainNow * fade;
+        }
       }
     };
     root.add(mesh);
@@ -2301,6 +2326,9 @@ export function setupClouds(group, {
     const dayLift = brightSky * (1 - lowSun);
     const msFloor = 0.14 * dayLift;
     const ambGain = 0.82 + 0.06 * dayLift;
+    // 저작값 게시 — 상공 빌보드의 부감 페이드가 이 둘에 같은 계수를 걸어 uniform 에 대입한다.
+    cloudRimStrengthNow = rimStrength;
+    cloudGlowGainNow = glowGain;
 
     highClouds.forEach((m) => {
       place(m);

@@ -19,6 +19,7 @@ export const VERIFICATION_GATES = Object.freeze({
   aa: Object.freeze({ script: 'check:aa', resource: 'browser', tier: 'checkpoint', description: 'Composer-path geometric anti-aliasing and edge staircase axis' }),
   'bokeh-fixture': Object.freeze({ script: 'shoot:bokeh:proof', resource: 'exclusive', tier: 'checkpoint', description: 'Controlled bokeh image, source-scatter resource proof, and hardware GPU query' }),
   rim: Object.freeze({ script: 'check:rim', resource: 'browser', tier: 'checkpoint', description: 'Physical rim shader contract' }),
+  'cloud-fade': Object.freeze({ script: 'check:cloud-fade', resource: 'browser', tier: 'checkpoint', description: 'Cloud overhead-fade HDR rim residue (no pen-stroke outline)' }),
   'lod-focus': Object.freeze({ script: 'check:lod:focus', resource: 'browser', tier: 'checkpoint', description: 'Focused LOD lifecycle' }),
   'lod-wave': Object.freeze({ script: 'check:wave:app', resource: 'browser', tier: 'checkpoint', description: 'Wave handoff lifecycle' }),
   'lod-app': Object.freeze({ script: 'check:lod:app', resource: 'browser', tier: 'checkpoint', description: 'Focus and wave in one browser boot' }),
@@ -35,7 +36,7 @@ export const ALL_PROFILE = Object.freeze([
 ]);
 
 export const FULL_PROFILE = Object.freeze([
-  ...ALL_PROFILE, 'dof-app', 'aa', 'rim', 'lod-app', 'cinematic-app', 'build',
+  ...ALL_PROFILE, 'dof-app', 'aa', 'rim', 'cloud-fade', 'lod-app', 'cinematic-app', 'build',
 ]);
 
 export function gateCommand(id) {

@@ -4,7 +4,7 @@ import { isApiReuseDependency } from './verification-impact.mjs';
 
 const FULL_GATES = Object.freeze([
   'core', 'app', 'ui-shell', 'entry', 'petals', 'particle-geometry', 'instance-upload', 'building-lifecycle', 'api-reuse', 'yard-life', 'winter-app', 'worker', 'audio',
-  'temple-browser', 'dof-app', 'aa', 'lod-focus', 'lod-wave', 'rim', 'parcel-rebuild-browser',
+  'temple-browser', 'dof-app', 'aa', 'lod-focus', 'lod-wave', 'rim', 'cloud-fade', 'parcel-rebuild-browser',
   'mja-house-browser', 'surface-browser', 'cinematic-app', 'build',
 ]);
 
@@ -219,6 +219,9 @@ const REVIEWED_NEW_PATHS = new Set([
   //   clouds.js 를 즉석 번들해 브라우저 없이 판정하므로 tools/check-cloud-silhouette.mjs 가
   //   core 게이트에서 소유한다(정적 import 폐쇄에 잡히지 않아 EXACT_IMPACT 가 병행).
   'tools/check-cloud-silhouette.mjs',
+  // #53 구름 부감 페이드 HDR 림 잔존("펜선") — 브라우저 게이트. browserToolGates 가
+  //   cloud-fade 를 소유하고, clouds.js 변경은 아래 env 라우팅으로 같은 게이트를 끈다.
+  'tools/check-cloud-fade-residue.mjs',
   // #38 픽셀 분석 공용 라이브러리와 같은 부팅 A/B 하네스. 라이브러리는 node 내장 zlib 만 쓰는
   //   순수 코드라 tools/check-pixel-stats.mjs 가 core 게이트에서 소유하고(합성 픽스처 왕복 단언),
   //   shoot-ab 는 판정 없는 캡처-온리다(shoot-cine·shoot-rim-aerial 과 같은 라우팅).
@@ -316,6 +319,7 @@ function routePath(path) {
     'tools/lib/bokeh-scatter-proof.mjs': ['bokeh-fixture'],
     'tools/lib/bokeh-source-stress.mjs': ['bokeh-fixture'],
     'tools/check-rim-facing.mjs': ['rim'],
+    'tools/check-cloud-fade-residue.mjs': ['cloud-fade'],
     'tools/check-surface-browser-suite.mjs': ['surface-browser'],
     'tools/shoot-hanyang.mjs': ['app'],
     'tools/shoot-wall-steps.mjs': ['app'],
@@ -429,6 +433,9 @@ function routePath(path) {
     }
     if (/^src\/env\/(?:rim|clouds|snow-material)\.js$/.test(path)) {
       select('physical rim inputs changed', 'rim');
+    }
+    if (path === 'src/env/clouds.js') {
+      select('cloud overhead fade HDR residue', 'cloud-fade');
     }
     if (/^src\/env\/(?:petals|weather|seasons|season-ground-plan|season-ground-carpet)\.js$/.test(path)) {
       select('seasonal particle/weather contract changed', 'petals');
@@ -875,6 +882,7 @@ export function verificationCommands(plan) {
   if (has('aa')) commands.push(gateCommand('aa'));
   if (has('bokeh-fixture')) commands.push(gateCommand('bokeh-fixture'));
   if (has('rim')) commands.push(gateCommand('rim'));
+  if (has('cloud-fade')) commands.push(gateCommand('cloud-fade'));
   if (has('petals')) commands.push(gateCommand('petals'));
   if (has('particle-geometry')) commands.push(gateCommand('particle-geometry'));
   if (has('instance-upload')) commands.push(gateCommand('instance-upload'));

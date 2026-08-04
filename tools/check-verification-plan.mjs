@@ -42,7 +42,7 @@ assert.deepEqual(ids(['src/env/bokeh-source-scatter.js']), [
   'core', 'app', 'dof-app', 'bokeh-fixture', 'lod-focus',
 ]);
 assert.deepEqual(ids(['src/env/rim.js']), ['core', 'app', 'dof-app', 'rim']);
-assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'api-reuse', 'lod-app']);
+assert.deepEqual(ids(['src/env/clouds.js']), ['core', 'app', 'rim', 'cloud-fade', 'api-reuse', 'lod-app']);
 assert.deepEqual(ids(['src/env/snow-material.js']), ['core', 'app', 'rim', 'winter-app']);
 assert.deepEqual(ids(['src/env/weather.js']), [
   'core', 'app', 'petals', 'particle-geometry', 'winter-app', 'lod-wave',
@@ -102,6 +102,12 @@ assert.deepEqual(ids(['src/env/celestial.js'], {
 assert.deepEqual(ids(['tools/check-cloud-silhouette.mjs'], {
   newPaths: ['tools/check-cloud-silhouette.mjs'],
 }), ['core']);
+// #53 구름 부감 페이드 HDR 림 잔존: 브라우저 게이트. 도구 파일은 자기 게이트만, clouds.js 는 위 라우팅.
+// new path 여도 REVIEWED_NEW_PATHS 로 full 승격하지 않는다.
+assert.deepEqual(ids(['tools/check-cloud-fade-residue.mjs']), ['core', 'cloud-fade']);
+assert.deepEqual(ids(['tools/check-cloud-fade-residue.mjs'], {
+  newPaths: ['tools/check-cloud-fade-residue.mjs'],
+}), ['core', 'cloud-fade']);
 // #38 픽셀 통계 공용 라이브러리: 순수 코드라 core 만 소유한다. 라이브러리 자체가 바뀌어도
 //   `tools/` 폐쇄 낙하(full)로 승격하지 않고 자기 계약만 다시 돈다.
 assert.deepEqual(ids(['tools/check-pixel-stats.mjs'], {
@@ -639,7 +645,7 @@ assert.deepEqual(ALL_PROFILE, [
   'mja-house-browser', 'parcel-rebuild-browser', 'surface-browser',
 ]);
 assert.deepEqual(FULL_PROFILE, [
-  ...ALL_PROFILE, 'dof-app', 'aa', 'rim', 'lod-app', 'cinematic-app', 'build',
+  ...ALL_PROFILE, 'dof-app', 'aa', 'rim', 'cloud-fade', 'lod-app', 'cinematic-app', 'build',
 ]);
 for (const id of new Set([...ALL_PROFILE, ...FULL_PROFILE])) {
   assert.equal(typeof VERIFICATION_GATES[id]?.script, 'string', `${id} must map to a script`);
