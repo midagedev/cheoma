@@ -84,6 +84,7 @@ npm run check:api-reuse      # 공개 building·시전 API 재사용·dispose·�
 npm run check:mud-wall      # Three 없는 토담 표면 plan·상한·envelope 데이터 계약
 npm run check:drainage      # Three 없는 도로 측구·대문 건넘 정책·경사·공간 계약
 npm run check:creek         # 개천 관류·종로·수문·평석교 접지/접근(순수) + 호안 형상 조립(재질 주입)
+npm run check:sijeon-approach # 시전 행랑 성문 도달·간선 커버리지·문전 마당 14m·재현성 (순수)
 npm run check:dangsan       # Three 없는 당산 의례 공터·당집 배치·수관·회피 계약
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
@@ -1072,6 +1073,7 @@ npx esbuild src/api/index.js --bundle --format=esm \
 | `tools/shoot-drainage.mjs` | 실제 capital 계획·renderer 통합, 같은 카메라 OFF/ON 근경·부감, plan/geometry hash 반복, mesh/draw/triangle/program/material/texture·dispose 예산 | 고정 seed 한 건넘의 시각 증거이며 전체 규모의 배치 수학은 `check:drainage`가 맡는다. |
 | `tools/shoot-brush-fence.mjs` | 고정 초가 필지 싸리울의 근경 실루엣 마스크 — 상단선 중앙값 절대편차, 몸통 가림률, 재질·텍스처 예산 | 규격 피켓과의 하한선만 판정하며 엮음 문양·살 굵기 분포의 사실성은 사람이 본다. |
 | `tools/check-sijeon-contract.mjs` | 기존 시전 위치 bytes, 순수 2칸 façade schema v2(소수 비발광 `signs[]` 포함), 시명/물종 필드 금지, 필지·도로 회랑 경계, 유한값·직렬화·결정론·무전역 RNG | Three 재질·병합 geometry와 실제 한양 화면은 `check:api-reuse`, app/worker 게이트가 맡는다. `shoot:sijeon`이 5 mesh/5 material·texture 0·signCount를 기록한다. |
+| `tools/check-sijeon-approach.mjs` | 시전 행랑 성문 도달: 남대문로 daero 등급, 사대문별 행랑 최근접 거리(문전 마당 14m 대역), 간선 파사드 커버리지 ≥75%, 시드 재현성 | 순수 노드(브라우저 없음). `npm run check:sijeon-approach`. 위치·schema·직렬화는 `check:sijeon`, 실제 한양 화면은 app/worker·`shoot:sijeon`이 맡는다. |
 | `tools/check-layout-contract.mjs` | 남향 군집·도로측 대문·실제 지붕 fit·단건 재굴림·도로/개울/논·집 사이 겨울 일조·정자 실면적/화면 폭·높이 있는 마을 소품·보호수·밀도 계약 | 대표 seed 순수 데이터 검사로, 실제 광학적 차폐 미감은 앱 캡처로 확인한다. |
 | `tools/check-gosat-topology.mjs` | 이웃 필지 경계 간 고샅 폭 측정·share 플래그 정합·역사 1.0–3.4 m 중앙값/비율 (#150-G) | 배치 변경 없이 measure+assert. `src/village/gosat-topology.js` + `village-walls-parcels.md` R-P2. |
 | `tools/check-wall-gate-contract.mjs` | 6종 담과 hero의 도로측 대문 중심·회전, 세 솔리드 경사지 run의 실제 geometry 높이, finite geometry | Node에서 실제 담 생성기를 bundle하며, 완성 화면의 미감은 보지 않는다. |
@@ -1161,7 +1163,7 @@ Headless ANGLE은 shader link를 직렬화하므로 절대 frame time을 실제 
 | 근경 DoF 의미 초점 | `check:opening-detail` + `check:dof:app` + 같은 카메라 `shoot:door-dof` PNG 직접 판정 |
 | shader/material/post/roof | 라우터 게이트 + program count와 고정 시드 이미지 직접 판정 |
 | 건축 고증·공식 자료 반영 | [`architectural-authenticity.md`](architectural-authenticity.md) 체크리스트 + `check:building-clearance` + `check:app` Reference UI + 같은 카메라 전후 PNG |
-| 한양 시전행랑 | [`sijeon.md`](sijeon.md) + `check:sijeon` + app/worker + `shoot:sijeon`의 거리·사선·전체 PBR PNG와 draw/program/texture 비교 |
+| 한양 시전행랑 | [`sijeon.md`](sijeon.md) + `check:sijeon` + `check:sijeon-approach` + app/worker + `shoot:sijeon`의 거리·사선·전체 PBR PNG와 draw/program/texture 비교 |
 | 계절 농가 마당 생활상 | [`yard-life.md`](yard-life.md) + `check:yard-life` + app/worker + `check:yard-life:browser`의 격리 geometry·전환/LOD/wave/rebuild/dispose와 실제 제품 동일 카메라 OFF/ON 근경·부감 PNG·자원 비교 |
 | 창호 외관·철물·주거 primary 문 상호작용 | [`exterior-detail.md`](exterior-detail.md) + `check:opening-detail` + `check:door-motion` + `check:door-occlusion` + `check:building-clearance` + `check:app`의 실제 visible/layer ray·semantic grid 가림·궁/사찰 제외·hop/rebuild 수명·Reference UI + `CHEOMA_DOOR_TARGET=choga\|hero npm run shoot:door` 정면/사선 PNG·calls/programs/textures |
 | 물리 강수·꽃잎/모트·실제 창호 야간 불빛 (#81/#96) | [`architecture-refactor.md`](architecture-refactor.md)의 particle-state/particles/lighting 경계 + [`exterior-detail.md`](exterior-detail.md) §4.2 + `check:particle-geometry`의 world geometry·종별 normal·결정론·가림·명시적 DoF depth + `check:nightlights`의 실제 anchor·owner 수명 + `check:worker` scene bytes + `check:parcel-rebuild:browser` owner 복원 + `check:app` 항목별 References UI |

@@ -130,6 +130,9 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-scene-guide.mjs',
   'tools/check-api-reuse-suite.mjs',
   'tools/check-sijeon-contract.mjs',
+  // #54 시전 행랑 성문 도달·간선 커버리지·문전 마당: 순수 노드 계약. FAST_CHECKS 소속이라
+  // sijeon-plan/roads/plan 정적 import 폐쇄로 라우팅되고, 브라우저는 쓰지 않는다.
+  'tools/check-sijeon-approach.mjs',
   'tools/check-yard-life-contract.mjs',
   // #150 item K: credits catalog metadata (id/topic/scope) + pure parse + Reference chips.
   // Browser-free; FAST_CHECKS + check:docs keep docs-only and core paths covered.

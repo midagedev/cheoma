@@ -452,6 +452,10 @@ assert.deepEqual(ids(['tools/check-building-navigation.mjs']), ['core']);
 assert.deepEqual(ids(['tools/check-sijeon-contract.mjs'], {
   newPaths: ['tools/check-sijeon-contract.mjs'],
 }), ['core']);
+// #54 시전 성문 도달: 순수 노드라 core 만 소유. new path 여도 REVIEWED_NEW_PATHS 로 full 승격하지 않는다.
+assert.deepEqual(ids(['tools/check-sijeon-approach.mjs'], {
+  newPaths: ['tools/check-sijeon-approach.mjs'],
+}), ['core']);
 assert.deepEqual(ids(['tools/shoot-sijeon.mjs'], {
   newPaths: ['tools/shoot-sijeon.mjs'],
 }), ['core', 'app', 'api-reuse']);
@@ -589,6 +593,7 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-walk-control.mjs',
 './check-roof-rank-contract.mjs',
   './check-plan-contract.mjs',
+  './check-sijeon-approach.mjs',
   './check-temple-contract.mjs',
   './check-road-contract.mjs',
   './check-drainage-plan.mjs',
@@ -609,6 +614,13 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-citywall.mjs',
   // #20 R4 (2026-07-31): 개천 계약이 planVillage 폐쇄를 공유하므로 마을 계획 경로 변경에 함께 붙는다.
   './check-creek.mjs',
+]);
+// #54 시전 성문 도달: sijeon-plan / roads / plan 정적 import 폐쇄 + 게이트 파일 직접 소유.
+assert.ok(impactedFastChecks(['src/village/sijeon-plan.js']).includes('./check-sijeon-approach.mjs'));
+assert.ok(impactedFastChecks(['src/village/roads.js']).includes('./check-sijeon-approach.mjs'));
+assert.ok(impactedFastChecks(['src/village/plan.js']).includes('./check-sijeon-approach.mjs'));
+assert.deepEqual(impactedFastChecks(['tools/check-sijeon-approach.mjs']), [
+  './check-architecture.mjs', './check-sijeon-approach.mjs',
 ]);
 assert.deepEqual(impactedFastChecks(['src/village/pad-landing-plan.js']), [
   './check-architecture.mjs',
