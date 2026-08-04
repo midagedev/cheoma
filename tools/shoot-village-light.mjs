@@ -83,22 +83,27 @@ scene.add(ground);
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 500);
 
 // env + post (앱과 동일). env.setEnabled(true) → sky.apply 가 sun/hemi/fog/exposure 구동.
+//   setEnabled 가 everApplied=true 를 세우므로 이후 plain setTime 은 크로스페이드 경로다.
+//   이 하네스는 env.update 를 16프레임만 돌리며 트윈 완료를 기다리지 않으므로, 시간대는
+//   전부 { immediate: true } 로 스냅한다(2026-08-05: plain setTime+미펌핑 → 태양이 day 고도에
+//   고정되는 계측 버그 클래스 — elev day≈46.6° vs sunset≈9.5° 실측).
 const env = setupEnvironment(scene, { sun, hemi, renderer, layout: computeLayout(PRESETS.korea) });
 const post = setupPost({ renderer, scene, camera });
 post.setSize(innerWidth, innerHeight);
 env.setEnabled(true);
-env.setTime(time);
-post.setTime(time);
+env.setTime(time, { immediate: true });
+post.setTime(time, { immediate: true });
 
 // 마을 생성 + 진입(engine.buildVillage 준용).
 const villageHandle = createVillage({ scale, seed, includePalace, includeTemple, character });
 villageHandle.enterVillageMode({ scene, building: null, ground, env });
-villageHandle.setTime(time);
-// enterVillageMode 가 env 를 day 로 되돌리므로 요청 시간대를 다시 건다(즉시 — 크로스페이드 대기 없이).
-//   이게 없으면 sunset/dawn 컷의 하늘·fog 가 day(0xcfdde8)로 찍힌다 — 2026-08-01 fog 라운드 A/B
-//   하네스 제작 중 발견(그전까지 이 도구의 sunset·dawn 캡처는 전부 day 하늘이었다).
+// 핸들 기본 time 은 'day'. enterVillageMode 가 vlights 를 day 로 스냅하므로 요청 시간대를
+//   즉시 재적용한다(immediate 없으면 리그 크로스페이드가 16프레임 안에 끝나지 않음).
+//   env 재적용: enterVillageMode 가 env 를 day 로 되돌리던 구 경로 대비 + 멱등 스냅
+//   (2026-08-01 fog 라운드: 이게 없으면 sunset/dawn 하늘·fog 가 day(0xcfdde8)로 찍힘).
+villageHandle.setTime(time, { immediate: true });
 env.setTime(time, { immediate: true });
-post.setTime(time);
+post.setTime(time, { immediate: true });
 
 const R = villageHandle.plan.site.R;
 // reapplyVillageFog 준용.
@@ -158,14 +163,32 @@ function computeStats() {
   };
 }
 
+// 태양 고도 프로브(계측 회귀 감시). day≈46.6° · sunset/dawn≈9–12° · night≈5°.
+function sunProbe() {
+  const p = sun.position;
+  const elev = Math.atan2(p.y, Math.hypot(p.x, p.z)) * 180 / Math.PI;
+  const az = Math.atan2(p.x, p.z) * 180 / Math.PI;
+  return {
+    pos: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)],
+    elevDeg: +elev.toFixed(2),
+    azDeg: +az.toFixed(2),
+    intensity: +sun.intensity.toFixed(3),
+    envTime: env.time,
+  };
+}
+
 let frames = 0;
 renderer.setAnimationLoop(() => {
+  // sky/post 시간대 트윈·마을 fog 모디파이어 재합성. immediate 스냅 이후에도 fogMods 경로가
+  //   update 안에서만 돌아가므로 매 프레임 펌핑한다(미펌핑 시 plain setTime 회귀에 취약).
+  env.update(1 / 60);
   villageHandle.update(1 / 60);
-  post.update();
+  post.update(1 / 60);
   post.composer.render();
   frames++;
   if (frames === 16) {
     window.__PLAN.perf = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
+    window.__PLAN.sun = sunProbe();
     window.__STATS = computeStats();
     window.__SHOT_READY = true;
   }
@@ -215,7 +238,11 @@ for (const [name, qs, vw, vh] of shots) {
   const file = join(OUT, `vlight-${name}.png`);
   await page.screenshot({ path: file });
   const s = info.stats || {};
-  console.log(`${name.padEnd(24)} R=${info.plan?.R} meanL=${s.meanL} | black=${s.black}% deep=${s.deep}% low=${s.low}% mid=${s.mid}% high=${s.high}% | perf=${JSON.stringify(info.plan?.perf || {})}`);
+  const sun = info.plan?.sun;
+  const sunTag = sun
+    ? `sun elev=${sun.elevDeg}° az=${sun.azDeg}° I=${sun.intensity} pos=[${sun.pos.join(',')}]`
+    : 'sun=n/a';
+  console.log(`${name.padEnd(24)} R=${info.plan?.R} meanL=${s.meanL} | black=${s.black}% deep=${s.deep}% low=${s.low}% mid=${s.mid}% high=${s.high}% | ${sunTag} | perf=${JSON.stringify(info.plan?.perf || {})}`);
   await page.close();
 }
 console.log(`\\npageerror=${pageErrs} console-error=${consoleErrs}`);
