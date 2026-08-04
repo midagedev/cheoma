@@ -56,6 +56,12 @@ function boxBounds(part) {
   };
 }
 
+function boxesOverlap(a, b, epsilon = 1e-6) {
+  return a.minX < b.maxX - epsilon && a.maxX > b.minX + epsilon
+    && a.minY < b.maxY - epsilon && a.maxY > b.minY + epsilon
+    && a.minZ < b.maxZ - epsilon && a.maxZ > b.minZ + epsilon;
+}
+
 function assertFiniteTree(value, label, path = label) {
   if (typeof value === 'number') {
     invariant(Number.isFinite(value), `${path} is not finite`);
@@ -145,6 +151,131 @@ function assertFacade(facade, label) {
   `${label}: roof corridor exception is stale`);
   invariant(facade.corridor.maxEaveZ >= facade.building.bounds.maxZ,
     `${label}: roof no longer covers the facade`);
+
+  // #54 벽체 완결: 지붕이 벽체 질량 위에 앉는가.
+  //   수정 전 계획은 전면 골조 + 후면 저장 박스 + 박공지붕만 소유했고 측벽·배면벽·박공벽이 없었다.
+  //   그래서 사선·망원(성문 접근로)에서 얇은 지붕판이 공중에 뜨고 밑면이 그대로 보였다.
+  //   이 블록은 위 physicalParts 의 본체 높이 상한(<= building.height)을 **완화하지 않는다** —
+  //   벽 위에서 지붕면까지 올라가는 closure 부재에만 적용되는 별도 상한(`roofline`)을 쓴다.
+  const roofline = facade.roofline;
+  invariant(roofline && roofline.wallTopY === facade.building.height,
+    `${label}: roofline.wallTopY must equal the body height`);
+  invariant(roofline.ridgeY === facade.building.height + facade.roof.rise,
+    `${label}: roofline.ridgeY drifted from the roof rise`);
+  invariant(roofline.slabAllowance > 0,
+    `${label}: roofline must reserve a roof-slab allowance`);
+  // 지붕면 y(z): 처마(z=±roof.depth/2, y=wall top)에서 용마루(z=0)까지의 선형 상승.
+  const halfRoofDepth = facade.roof.depth / 2;
+  const roofPlaneY = (z) => facade.building.height
+    + facade.roof.rise * (1 - Math.abs(z) / halfRoofDepth);
+  invariant(roofline.closureTopY >= facade.building.height - 1e-9
+      && roofline.closureTopY <= roofPlaneY(building.maxZ) + 1e-9,
+  `${label}: closure top ${roofline.closureTopY} escaped [wall top, roof plane]`);
+
+  const walls = Array.isArray(facade.walls) ? facade.walls : [];
+  const wallsOf = (role) => walls.filter((wall) => wall.role === role);
+  invariant(walls.length === 4
+      && wallsOf('rear-wall').length === 1
+      && wallsOf('side-wall').length === 2
+      && wallsOf('front-header').length === 1,
+  `${label}: enclosure incomplete — need rear wall + two side walls + front header,`
+    + ` got ${walls.map((wall) => wall.role).join(',') || 'none'}`);
+
+  for (const wall of walls) {
+    const bounds = boxBounds(wall);
+    invariant(wall.size.width > 0 && wall.size.height > 0 && wall.size.depth > 0,
+      `${label}:${wall.role} is degenerate`);
+    invariant(bounds.minX >= lot.minX - 1e-9 && bounds.maxX <= lot.maxX + 1e-9,
+      `${label}:${wall.role} escaped the lot laterally`);
+    invariant(bounds.minZ >= lot.minZ - 1e-9
+        && bounds.maxZ <= facade.corridor.maxNonEaveZ + 1e-9,
+    `${label}:${wall.role} entered the road corridor`);
+    invariant(bounds.minY >= -1e-9 && bounds.maxY <= roofline.closureTopY + 1e-9,
+      `${label}:${wall.role} escaped [ground, closure top]`);
+    // 개방 점포 전면은 발굴 사료 기반 어휘다(docs/sijeon.md §1.4) — 벽이 계획된 개구를 덮으면
+    // 그 근거를 지우는 것이므로 실패로 다룬다.
+    for (const opening of facade.openings) {
+      invariant(!boxesOverlap(bounds, boxBounds(opening)),
+        `${label}:${wall.role} covered the bay ${opening.bay} opening`);
+    }
+  }
+
+  const [rearWall] = wallsOf('rear-wall');
+  const rearBounds = boxBounds(rearWall);
+  invariant(rearBounds.minX <= building.minX + 1e-9 && rearBounds.maxX >= building.maxX - 1e-9,
+    `${label}: rear wall does not span the full building width`);
+  invariant(rearBounds.minY <= 1e-9 && rearBounds.maxY >= facade.building.height - 1e-9,
+    `${label}: rear wall does not reach the body height`);
+  invariant(Math.abs(rearBounds.minZ - building.minZ) <= 1e-9,
+    `${label}: rear wall is not on the rear face`);
+  // 후면 저장 매스는 유지하되 벽 안쪽에 있어야 한다(벽과 겹친 슬래브가 아니다).
+  const storageBounds = boxBounds(facade.storage);
+  invariant(storageBounds.minZ >= rearBounds.maxZ - 1e-9,
+    `${label}: rear storage still overlaps the rear wall`);
+
+  for (const wall of wallsOf('side-wall')) {
+    const bounds = boxBounds(wall);
+    invariant(wall.side === -1 || wall.side === 1, `${label}: side wall lost its side`);
+    const face = wall.side > 0 ? building.maxX : building.minX;
+    const outer = wall.side > 0 ? bounds.maxX : bounds.minX;
+    invariant(Math.abs(outer - face) <= 1e-9,
+      `${label}: side wall ${wall.side} is not flush with the building side face`);
+    invariant(bounds.minZ <= building.minZ + 1e-9 && bounds.maxZ >= building.maxZ - 1e-9,
+      `${label}: side wall ${wall.side} does not span the building depth`);
+    invariant(bounds.minY <= 1e-9 && bounds.maxY >= facade.building.height - 1e-9,
+      `${label}: side wall ${wall.side} does not reach the body height`);
+    invariant(!boxesOverlap(bounds, storageBounds),
+      `${label}: side wall ${wall.side} overlaps the rear storage mass`);
+  }
+
+  const [frontHeader] = wallsOf('front-header');
+  const headerBounds = boxBounds(frontHeader);
+  const lintelTop = Math.max(...facade.lintels.map((lintel) => boxBounds(lintel).maxY));
+  invariant(headerBounds.minX <= building.minX + 1e-9 && headerBounds.maxX >= building.maxX - 1e-9,
+    `${label}: front header does not span the full building width`);
+  invariant(headerBounds.minY <= lintelTop + 1e-9,
+    `${label}: an open band remains between the lintel and the roof`);
+  invariant(headerBounds.maxY >= roofline.closureTopY - 1e-9,
+    `${label}: front header stops below the roof plane`);
+  invariant(Math.abs(headerBounds.maxZ - building.maxZ) <= 1e-9,
+    `${label}: front header is not on the shop frontage plane`);
+
+  const gables = Array.isArray(facade.gables) ? facade.gables : [];
+  invariant(gables.length === 2, `${label}: gable walls missing (${gables.length})`);
+  invariant(new Set(gables.map((gable) => gable.side)).size === 2,
+    `${label}: both gables sit on one side`);
+  for (const gable of gables) {
+    invariant(gable.role === 'gable-wall', `${label}: gable role drifted`);
+    invariant(gable.thickness > 0, `${label}: gable has no thickness`);
+    const profile = Array.isArray(gable.profile) ? gable.profile : [];
+    invariant(profile.length >= 3, `${label}: gable profile is degenerate (${profile.length})`);
+    const face = gable.side > 0 ? building.maxX : building.minX;
+    invariant(Math.abs(gable.x - (face - gable.side * gable.thickness / 2)) <= 1e-9,
+      `${label}: gable ${gable.side} is not flush with the building side face`);
+    const zs = profile.map((point) => point.z);
+    const ys = profile.map((point) => point.y);
+    for (const point of profile) {
+      invariant(point.z >= building.minZ - 1e-9 && point.z <= building.maxZ + 1e-9,
+        `${label}: gable profile escaped the building depth`);
+      invariant(point.y >= facade.building.height - 1e-9,
+        `${label}: gable profile dipped below the wall top`);
+      invariant(point.y <= roofPlaneY(point.z) + 1e-9,
+        `${label}: gable profile pierced the roof plane at z=${point.z}`);
+    }
+    // 지붕 단면을 실제로 채우는가. 용마루 근처까지 올라가야 측면·사선에서 지붕 밑면이 사라진다.
+    invariant(Math.max(...ys) >= facade.building.height + facade.roof.rise * 0.85 - 1e-9,
+      `${label}: gable apex ${Math.max(...ys)} does not close the roof section`);
+    invariant(Math.min(...zs) <= building.minZ + 1e-9 && Math.max(...zs) >= building.maxZ - 1e-9,
+      `${label}: gable profile does not span the building depth`);
+  }
+
+  // 개방 전면 문법 보존(축소·제거 금지): 기둥 3 + 인방 2 + 판문 2 는 위에서 이미 단언했고,
+  // 여기서는 벽체가 그 앞을 막지 않는다는 것까지 확인한다.
+  for (const column of facade.columns) {
+    const bounds = boxBounds(column);
+    invariant(!boxesOverlap(bounds, headerBounds),
+      `${label}: front header swallowed a front column`);
+  }
 }
 
 const source = readFileSync(new URL('../src/village/sijeon-plan.js', import.meta.url), 'utf8');
@@ -397,8 +528,10 @@ console.log(
 
 
 // #227 schema v2 signs — decorative only, sparse, non-emissive.
+// 버전 상수만 v3 로 추적한다(#54, 2026-08-04): 계획이 벽체까지 소유하게 되어 v2 렌더러로는 닫힌
+// 행랑을 만들 수 없다 = 소비자 계약 변경. 표식 단언 자체는 그대로 유지·확장만 한다.
 {
-  invariant(SIJEON_FACADE_SCHEMA_VERSION === 2, 'schema version must be 2');
+  invariant(SIJEON_FACADE_SCHEMA_VERSION === 3, 'schema version must be 3');
   invariant(SIJEON_SIGN_POLICY.emissive === false, 'sign policy must be non-emissive');
   const withId = planSijeonFacade({ w: 6.2, d: 7.5, id: 'sijeon-test-1' });
   invariant(Array.isArray(withId.signs), 'signs array required');

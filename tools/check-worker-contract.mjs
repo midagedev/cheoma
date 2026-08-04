@@ -436,7 +436,14 @@ const expectedSceneHashes = {
   //   도성 필지 배치가 바뀐 결과다(계획 골든 hanyang:base p397 유지, tools/plan-contract.json
   //   _sijeonApproachRebaseline 참조). sync == module Worker == ?worker=0 폴백 바이트 동일.
   //   FAIL-first: tools/check-sijeon-approach.mjs 가 수정 전 소스에서 19건 실패.
-  hanyang: '6ceb8ea2:f637cefa:2f428eb0:a84dce90',
+  // #54 행랑 벽체 완결(2026-08-04): 시전 파사드 v3 — 배면벽·측벽·박공벽·전면 상벽 신설로
+  //   지붕이 벽체 질량 위에 앉는다(개방 골조가 성문 접근로 망원에서 "부유 지붕판"으로 읽히던
+  //   결함). 시전 geometry 전용 — hanyang scene 만 이동, **proxy 395b740a 불변**(계획·필지·
+  //   지붕 OBB 무이동)·village/town/capital/mja/snapshot 불변·plan 골든 불변(파사드는 계획
+  //   JSON 밖)이 범위 증거. objects 5042 불변, triangles 25,214,500 → 25,230,260 = +15,760이
+  //   순수 노드 파사드 실측 델타(점포당 +80 × 197)와 정확히 일치(구값은 리드 직전 실측).
+  //   FAIL-first: check-sijeon-contract 벽체 단언이 수정 전 소스에서 실패(walls=undefined).
+  hanyang: '67f594ca:6f2628e8:ec34af7d:112614a6',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

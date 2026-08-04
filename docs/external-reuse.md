@@ -118,6 +118,11 @@ const shops = planSijeon(roadsResult, site);
 const facade = planSijeonFacade(shops[0]);
 ```
 
+façade schema v3(2026-08-04)부터 반환 객체는 개방 골조 외에 벽체 완결 파트를 소유한다:
+`walls`(배면벽·측벽 2매·전면 상벽 — box 파트), `gables`(박공 프리즘 — `(z, y)` 프로파일과
+`thickness`), `roofline`(벽 상단~지붕면 높이 계약). v2 소비자는 이 파트를 그리지 않으면 지붕이
+벽 없이 뜨므로, 버전 확인 후 함께 렌더해야 한다(계약 상세는 `docs/sijeon.md` §3.1·§3.4).
+
 실제 geometry가 필요하면 `src/api/sijeon.js`를 사용한다. `buildSijeon()`은 `{ frame, opening, bench,
 storage, roof }` 다섯 `THREE.Material`과 `heightAt(x, z)`를 빌리며 새 material이나 texture를 만들지
 않는다. 반환 root는 점포 수와 무관하게 역할별로 병합된 geometry를 소유한다.

@@ -1,8 +1,9 @@
 # 한양 시전행랑 표현 계약
 
 > - **상태**: 조사·구현 계약
-> - **관련 이슈**: GitHub #128, #218 (줄 분절), #227 (표식 schema v2), 상위 폴리시 #75 / #209
-> - **조사 기준일**: 2026-07-24 (분절 제품 해석 2026-07-27)
+> - **관련 이슈**: GitHub #128, #218 (줄 분절), #227 (표식 schema v2), #54 (벽체 완결 schema v3),
+>   상위 폴리시 #75 / #209
+> - **조사 기준일**: 2026-07-24 (분절 제품 해석 2026-07-27, 벽체 완결 2026-08-04)
 > - **대상**: 한양 중심 간선변의 시전행랑
 > - **비대상**: 특정 연도·발굴지·개별 시전의 실측 복원
 
@@ -127,7 +128,7 @@ renderer가 shop ID나 역할 이름으로 두 번째 배치를 추론해서는 
 (도로, 면)당 **점포** 상한이다. 상한은 프리픽스 컷이므로 유한값에서는 도로 시작부만 채워진다 —
 성곽 도성 tier 는 `Infinity`를 넘겨 파사드 범위를 `reach`가 정하게 한다(2026-08-04 개정,
 근거·실측은 `docs/joseon-city.md` §성문 주변). 예약 공백(`kind: 'break'`)은 상한을 소비하지 않는다. façade 좌표는 `+x`가 행랑
-진행 방향, `+z`가 도로를 향한 전면이다. 현재 schema v2는 한 점포를 제품상 2칸으로 나누며
+진행 방향, `+z`가 도로를 향한 전면이다. 현재 schema v3는 한 점포를 제품상 2칸으로 나누며
 다음 물리 의미를 소유한다.
 
 - placement의 안정적인 점포 ID와 façade 부재의 칸 index
@@ -137,6 +138,8 @@ renderer가 shop ID나 역할 이름으로 두 번째 배치를 추론해서는 
 - 맞배지붕과 전·후·측면 처마 내밀기
 - 일반 부재의 도로 쪽 한계와 처마만 허용하는 명시적 예외
 - (v2) 점포 ID 안정 hash로 소수 선택된 **장식용 표식 판** 0–1개 (`signs[]`)
+- (v3) 벽체: 배면벽·측벽 2·전면 상벽(`walls[]`), 박공벽 프리즘 2(`gables[]`),
+  그리고 벽 위~지붕면 사이의 높이 계약(`roofline`)
 
 시명·물종 표식은 칸/점포 ID에서 파생된 순수 의미를 먼저 계획에 기록한다. renderer가 자체
 난수나 배열 순서로 두 번째 변주를 만들지 않는다. 두 bench는 칸의 깊이를 읽히게 하는 제품
@@ -147,7 +150,8 @@ renderer가 shop ID나 역할 이름으로 두 번째 배치를 추론해서는 
 | 버전 | 소유 | 의도적 비소유 |
 | --- | --- | --- |
 | v1 | 열주·상인방·후퇴 개구·판문·bench·후면 저장·맞배 | 표식·상품 |
-| v2 (`SIJEON_FACADE_SCHEMA_VERSION=2`) | v1 + 소수 `marker-board` 장식 실루엣 | 읽을 수 있는 시명/물종 문자열, SKU, 상품 진열 카탈로그, 발광·네온 |
+| v2 | v1 + 소수 `marker-board` 장식 실루엣 | 읽을 수 있는 시명/물종 문자열, SKU, 상품 진열 카탈로그, 발광·네온 |
+| v3 (`SIJEON_FACADE_SCHEMA_VERSION=3`) | v2 + 배면벽·측벽·박공벽·전면 상벽과 `roofline` 높이 계약 | 전면 개구를 덮는 벽, 벽 전용 재질·텍스처, 창·문 개구 어휘의 확장 |
 
 v2 표식 plan 규칙 (`SIJEON_SIGN_POLICY`):
 
@@ -210,11 +214,47 @@ v2 표식 plan 규칙 (`SIJEON_SIGN_POLICY`):
 검증: `npm run check:sijeon` (순수 배치·분절·facade), 의도된 Hanyang plan/worker 해시 재기준,
 `shoot:sijeon` 드로우 예산.
 
+### 3.4 벽체 완결 (#54, schema v3)
+
+**문제(실측 2026-08-04):** 행랑이 사대문 접근로까지 확장된 뒤(커버리지 22.1%→88~96%) 점포가
+정면이 아닌 각도로 잡히기 시작했는데, v2 계획은 **전면 골조·후면 저장 박스·박공지붕만** 소유했다.
+가장 높은 부재가 `y=2.78`이고 지붕 처마 밑면이 `y=BODY_HEIGHT=3`이라 지붕판이 벽 없이 떠 보이고
+밑면이 그대로 노출됐다(남문·서문 망원, 사부감). 배치는 합법이었고 결함은 **파사드 어휘**였다.
+
+**계획이 소유하는 것(순수·결정론, 전역 RNG 0):**
+
+| 부재 | 범위 | 근거·규칙 |
+| --- | --- | --- |
+| `rear-wall` | 뒷변 전폭 × 지면~`roofline.closureTopY` | 배면을 닫는다. `rear-storage`는 유지하되 이 벽 안쪽으로 물러난다. |
+| `side-wall` ×2 | 측면 전깊이 × 지면~본체 높이 | 두께 = `halfWidth − (bayWidth + openingWidth)/2` = 0.775×기둥폭(6.2 m 점포에서 0.20 m). **개구가 정한 상한**이며 미감 선택이 아니다. |
+| `gable-wall` ×2 | 본체 높이~지붕면, 로컬 `(z, y)` 볼록 프로파일 | 측벽 위 맞배 단면을 채워 옆·사선에서 지붕 밑면을 없앤다. renderer가 두께만큼 x로 압출한다. |
+| `front-header` | 인방 상단~`closureTopY`, 전폭 | 포벽 자리의 얇은 상벽. 기둥·인방·개구 아래는 그대로 열려 있다. |
+| `roofline` | `wallTopY` / `closureTopY` / `ridgeY` / `slabAllowance` | 벽 위~지붕면 높이 계약. closure 부재는 본체 높이 상한이 아니라 이 상한을 쓴다. |
+
+`closureTopY = max(본체높이, 벽 평면의 지붕면 − slabAllowance)`. `slabAllowance = 0.12 m`는
+renderer의 지붕판 두께(0.14 → 최대 수직 여유 0.079 m)를 덮는 **부재 관통 방지용 구조 여유**다.
+실측: 박공 프로파일이 건물 깊이 전 구간에서 지붕면보다 정확히 0.12 m 아래에 머문다.
+
+**개방 전면은 축소하지 않는다.** 기둥 3·인방 2·판문 2·좌판 2는 발굴 사료가 확인한 어휘이므로
+(§1.4, §3.2-4) 벽이 계획된 개구와 겹치면 `check:sijeon`이 실패한다.
+
+**예산 델타(순수 노드 실측, hanyang/20260716 197점포):**
+
+| 항목 | 전 | 후 |
+| --- | --- | --- |
+| 병합 메시 / 재질 / 텍스처 | 5 / 5 / 0 | 5 / 5 / 0 (불변) |
+| 시전 삼각형 | 43,740 | 59,500 (+15,760 = 점포당 +80) |
+| program family | 점포 수 비종속 | 동일 (`shoot:sijeon` programs 4 불변) |
+
+새 재질·텍스처·역할이 0인 이유: 벽 mass는 이미 벽 의미로 쓰이던 `storage` 역할 재질을 빌려 쓴다.
+박공벽만 프리즘이라 `unitBox` 대신 압출 geometry를 쓰지만 같은 재질 버킷으로 병합된다.
+
 ### 3.2 renderer가 표현할 것
 
 전용 시전 renderer는 계획을 그대로 읽어 다음 순서로 깊이를 만든다.
 
-1. 기존 지붕·측벽·후면 저장 매스로 연속 행랑의 큰 실루엣을 보존한다.
+1. 계획이 준 벽체(배면·측면·박공·전면 상벽)와 후면 저장 매스로 연속 행랑의 큰 실루엣을 만들고,
+   지붕을 그 질량 위에 앉힌다. 벽은 새 역할을 만들지 않고 `storage` 재질을 빌려 쓴다(v3, §3.4).
 2. 전면 벽을 처마 안쪽으로 후퇴시킨다.
 3. 세 전면 기둥과 두 상인방으로 제품상의 두 칸을 다시 읽힌다.
 4. 두 개구를 기둥선 뒤로 물리고 판문·목재 면과 깊은 음영을 절제해 빈 동굴이나 현대
@@ -231,8 +271,8 @@ v2 표식 plan 규칙 (`SIJEON_SIGN_POLICY`):
 
 | 층 | 소유 | 금지 |
 | --- | --- | --- |
-| pure plan (`sijeon-plan.js`) | 존재 여부·bay·silhouette·center/size·`decorative`/`emissive:false` | Three, Math.random, 시명 문자열, 물종 enum 단정 |
-| renderer (`generators/village/sijeon.js`) | plan box → borrowed `materials.frame` mesh, 정적 병합 | 자체 난수로 표식 추가, emissive, 새 material family, 텍스처 글자 |
+| pure plan (`sijeon-plan.js`) | 존재 여부·bay·silhouette·center/size·`decorative`/`emissive:false`, (v3) 벽체 box·박공 프로파일·`roofline` | Three, Math.random, 시명 문자열, 물종 enum 단정 |
+| renderer (`generators/village/sijeon.js`) | plan box → borrowed `materials.frame` mesh, (v3) 벽체·박공 → borrowed `materials.storage` mesh, 정적 병합 | 자체 난수로 표식 추가, emissive, 새 material family, 텍스처 글자, 벽 위치·박공 형상 재추론 |
 | 제품 어댑터 (`features.js`) | 기존 5역할 palette (frame/opening/bench/storage/roof) | 표식 전용 재질 clone |
 
 상품 진열 어휘는 역사적 근거로 문서와 References UI에는 남기지만 **rendered v2에서도
@@ -268,8 +308,9 @@ program 또는 텍스처가 점포 수에 비례해서는 안 된다.
 - 기둥·처마·후퇴선은 색에 기대지 않고 실루엣과 명암만으로 읽혀야 하며, 표현 전용 mesh나
   material을 따로 만들지 않는다.
 - 기와 지붕만 기존 roof 역할과 `snowSurface` 계약을 통해 눈을 받는다. 수직 열주, 열린 전면,
-  bench와 후면 저장 면에 지붕용 적설을 누출하지 않는다. 새 눈 텍스처나 눈 geometry를 추가하지
-  않는다.
+  bench, 후면 저장 면과 v3 벽체·박공벽에 지붕용 적설을 누출하지 않는다(벽체는 `storage` 재질을
+  빌려 쓰므로 `snowSurface` 태그가 붙은 roof 재질과 분리된다). 새 눈 텍스처나 눈 geometry를
+  추가하지 않는다.
 - 석양 림은 실제 sun-facing silhouette와 shadowed main-light 조건을 통과한 기존 물리 rim
   patch만 받으며, 어두운 처마 아래를 임의로 밝히지 않는다. 미래의 표식·상품도 발광하지 않는다.
 
@@ -309,7 +350,9 @@ pivot으로 기존 tofu scale·drop을 적용하며 다음을 금지한다.
 
 - [ ] 낮·석양에서 거리 아이레벨, 사선 부감, 한양 전체 부감을 직접 비교한다.
 - [ ] 원경은 연속 처마선, 중경은 칸 리듬, 근경은 후퇴 깊이와 절제된 생활감이 읽힌다.
-- [ ] 새 텍스처 0, 점포 수와 무관한 단일 병합 그룹, 약 5 draw call 목표를 지킨다.
+- [x] 어느 각도에서도 지붕이 벽체 질량 위에 앉는다 — 배면·측면·박공·전면 상벽이 닫히고 계획된
+      개구는 그대로 열려 있다(`check:sijeon` 신규 단언, §3.4).
+- [x] 새 텍스처 0, 점포 수와 무관한 단일 병합 그룹, 약 5 draw call 목표를 지킨다(v3 후 실측 5/5/0).
 - [ ] snow·물리 rim·wave와 dispose 계약을 자동 검사한다.
 - [ ] worker scene hash 변화는 의도한 Hanyang 시전 geometry에 한정되고 다른 규모와 picking
       계약은 유지된다.

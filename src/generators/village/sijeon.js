@@ -100,6 +100,28 @@ function addDisplayBench(group, unitBox, part, material) {
   }
 }
 
+// 박공벽(#54). 계획이 준 로컬 (z, y) 볼록 프로파일을 벽 두께만큼 x 축으로 압출한다. shape 좌표
+//   (sx, sy) 는 (z, y) 이고 압출축 +sz 는 rotateY(-90°) 로 -x 에 대응하므로, 두께의 절반만 옮기면
+//   프리즘 중심이 계획된 벽면 x 에 온다. 재질은 벽 mass 와 같은 borrowed `storage` 한 벌뿐이라
+//   병합 메시·프로그램 수가 늘지 않는다.
+function addGable(group, part, material) {
+  const shape = new THREE.Shape();
+  part.profile.forEach((point, index) => {
+    if (index === 0) shape.moveTo(point.z, point.y);
+    else shape.lineTo(point.z, point.y);
+  });
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: part.thickness,
+    bevelEnabled: false,
+  });
+  geometry.rotateY(-Math.PI / 2);
+  geometry.translate(part.x + part.thickness / 2, 0, 0);
+  const mesh = setPhysicalMesh(new THREE.Mesh(geometry, material), part.role);
+  group.add(mesh);
+  return mesh;
+}
+
 function addRoof(group, unitBox, facade, materials) {
   const { roof } = facade;
   const halfDepth = roof.depth / 2;
@@ -142,6 +164,14 @@ function buildShopUnit(shop, materials, unitBox) {
   for (const sign of signs) {
     if (sign.emissive) throw new Error('sijeon marker boards must be non-emissive');
     addBox(unit, unitBox, sign, signMaterial, sign.role);
+  }
+  // 벽체(#54): 배면·측면·전면 상벽은 벽 mass 이므로 이미 그 의미로 쓰이는 `storage` 역할 재질을
+  //   빌려 쓴다(새 역할·재질·텍스처 0). 박공벽은 프리즘이라 unitBox 를 쓸 수 없다.
+  for (const wall of facade.walls) {
+    addBox(unit, unitBox, wall, materials.storage, wall.role);
+  }
+  for (const gable of facade.gables) {
+    addGable(unit, gable, materials.storage);
   }
   addBox(unit, unitBox, facade.storage, materials.storage);
   addRoof(unit, unitBox, facade, materials);

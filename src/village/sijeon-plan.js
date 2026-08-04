@@ -26,7 +26,9 @@ export const SIJEON_PLACEMENT = Object.freeze({
   segmentGapPitches: 1,
 });
 
-export const SIJEON_FACADE_SCHEMA_VERSION = 2;
+// v3 (#54): 계획이 벽체(배면·측면·박공·전면 상벽)까지 소유한다. v2 렌더러는 개방 골조만 그리므로
+// 같은 데이터로 닫힌 행랑을 만들 수 없다 — 소비자 계약이 바뀌었으니 버전을 올린다(docs/sijeon.md §3.1).
+export const SIJEON_FACADE_SCHEMA_VERSION = 3;
 export const SIJEON_FACADE_BAYS = 2;
 
 // Product sparseness for decorative marker boards — not a historical frequency.
@@ -45,6 +47,10 @@ const MIN_WIDTH = 4.4;
 const MIN_DEPTH = 5.6;
 const SIGN_HANG_GAP = 0.05;
 const SIGN_THICKNESS = 0.05;
+// 지붕 슬래브 여유(#54). renderer 는 지붕면을 두께 있는 판으로 만들 수 있으므로 벽·박공 mass 는
+// 지붕면보다 이만큼 낮게 멈춘다. 미감 수치가 아니라 부재 관통 방지용 구조 여유다(현 renderer
+// 슬래브 0.14 → 최대 수직 여유 0.079m 를 덮는다).
+const ROOF_SLAB_ALLOWANCE = 0.12;
 
 function finiteDimension(value, name) {
   if (!Number.isFinite(value)) throw new TypeError(`sijeon ${name} must be finite`);
@@ -372,14 +378,19 @@ export function planSijeonFacade(shop) {
     { bay },
   ));
 
+  // 벽 두께는 개구가 정한다: 측벽 안쪽 면이 바깥 칸 개구의 바깥 변을 넘으면 계획된 개방 전면을
+  //   덮는다(= 발굴 사료가 확인한 어휘를 지우는 것). 그 상한을 그대로 두께로 쓴다 —
+  //   결과는 0.775×columnWidth(폭 6.2m 점포에서 0.20m)이고 미감 선택이 아니다.
+  const wallThickness = halfWidth - (bayWidth + openingWidth) / 2;
+
   const storageDepth = Math.min(2.5, depth * 0.34);
   const storageClearance = 0.16;
   const storage = box(
     'rear-storage',
     0,
     (BODY_HEIGHT - 0.22) / 2,
-    backZ + storageDepth / 2,
-    width - storageClearance * 2,
+    backZ + wallThickness + storageDepth / 2,
+    width - (storageClearance + wallThickness) * 2,
     BODY_HEIGHT - 0.22,
     storageDepth,
   );
@@ -398,6 +409,74 @@ export function planSijeonFacade(shop) {
       rear: Math.max(0, roofDepth / 2 - lotDepth / 2),
     },
   };
+
+  // 벽체 완결(#54). v2 계획은 전면 골조·후면 저장 박스·박공지붕만 소유해서 측면·배면·박공이
+  //   열려 있었다: 가장 높은 부재가 y=2.78 인데 지붕 처마 밑면이 y=BODY_HEIGHT 라, 어느 사선에서든
+  //   지붕판이 벽 없이 떠 보이고 밑면이 노출됐다(성문 접근로 망원·가로 시점 실측 2026-08-04).
+  //   계획이 배면벽·측벽·박공벽·전면 상벽을 소유해 지붕이 벽체 질량 위에 앉는다. 전면 개방 점포
+  //   (기둥·인방·판문·좌판)는 사료 근거 어휘이므로 축소하지 않는다(docs/sijeon.md §1.4, §3.2-4).
+  const halfRoofDepth = roofDepth / 2;
+  const ridgeY = BODY_HEIGHT + roof.rise;
+  // 지붕은 처마(z=±halfRoofDepth, y=BODY_HEIGHT)에서 용마루로 오르므로 건물 앞·뒷벽 위에는 그
+  //   상승분만큼 열린 띠가 남는다. closure 부재는 그 띠를 지붕면 아래까지 닫는다.
+  const roofPlaneAtWall = BODY_HEIGHT + roof.rise * (1 - halfDepth / halfRoofDepth);
+  const closureTopY = Math.max(BODY_HEIGHT, roofPlaneAtWall - ROOF_SLAB_ALLOWANCE);
+
+  const rearWall = box(
+    'rear-wall',
+    0,
+    closureTopY / 2,
+    backZ + wallThickness / 2,
+    width,
+    closureTopY,
+    wallThickness,
+  );
+  const sideWalls = [-1, 1].map((side) => box(
+    'side-wall',
+    side * (halfWidth - wallThickness / 2),
+    BODY_HEIGHT / 2,
+    0,
+    wallThickness,
+    BODY_HEIGHT,
+    depth,
+    { side },
+  ));
+  // 포벽 자리의 얇은 상벽: 인방 상단부터 지붕면까지. 이 띠가 열려 있으면 정면 사선에서 지붕
+  //   안쪽이 보인다. 기둥·인방·개구 아래는 그대로 열려 있다.
+  const frontHeader = box(
+    'front-header',
+    0,
+    (columnHeight + closureTopY) / 2,
+    frontZ - wallThickness / 2,
+    width,
+    closureTopY - columnHeight,
+    wallThickness,
+  );
+
+  // 박공벽: 측벽 위에서 맞배 지붕 단면을 채운다. `profile` 은 로컬 (z, y) 볼록 다각형이고
+  //   renderer 가 `thickness` 만큼 x 축으로 압출한다 — 새 재질·텍스처 없이 병합되는 프리즘 하나.
+  //   깊은 lot 에서는 벽 평면의 지붕 상승분이 슬래브 여유보다 작아지므로 어깨 없는 삼각형이 된다.
+  const gableApexY = ridgeY - ROOF_SLAB_ALLOWANCE;
+  const gableProfile = closureTopY > BODY_HEIGHT + 1e-6
+    ? [
+      { z: backZ, y: BODY_HEIGHT },
+      { z: backZ, y: closureTopY },
+      { z: 0, y: gableApexY },
+      { z: frontZ, y: closureTopY },
+      { z: frontZ, y: BODY_HEIGHT },
+    ]
+    : [
+      { z: backZ, y: BODY_HEIGHT },
+      { z: 0, y: gableApexY },
+      { z: frontZ, y: BODY_HEIGHT },
+    ];
+  const gables = sideWalls.map((wall) => ({
+    role: 'gable-wall',
+    side: wall.side,
+    x: wall.center.x,
+    thickness: wallThickness,
+    profile: gableProfile.map((point) => ({ z: point.z, y: point.y })),
+  }));
 
   const signs = planSparseSigns(shop, { bayWidth, lintels, frontZ });
 
@@ -431,10 +510,20 @@ export function planSijeonFacade(shop) {
       maxNonEaveZ: streetEdgeZ,
       maxEaveZ: roofDepth / 2,
     },
+    // 벽 위에서 지붕면까지의 높이 계약. closure 부재는 본체 높이 상한(building.height)이 아니라
+    // 이 상한을 쓴다 — 그게 "지붕이 벽체 위에 앉는다"의 수치 표현이다.
+    roofline: {
+      wallTopY: BODY_HEIGHT,
+      closureTopY,
+      ridgeY,
+      slabAllowance: ROOF_SLAB_ALLOWANCE,
+    },
     columns,
     lintels,
     openings,
     benches,
+    walls: [rearWall, ...sideWalls, frontHeader],
+    gables,
     storage,
     roof,
     signs,
