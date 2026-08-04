@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import * as G from '../src/core/math/geom2.js';
 import { makeSite } from '../src/village/site.js';
-import { planVillage } from '../src/village/plan.js';
+import { planVillage, GATE_FORECOURT_PLAN_DEPTH } from '../src/village/plan.js';
 import { planGuardianTrees } from '../src/village/guardian-plan.js';
 import { terrainMeshHeightAt, terrainWarpInner } from '../src/village/terrain-surface.js';
 import {
@@ -1510,6 +1510,15 @@ invariant((citywallSource.match(/new THREE\.MeshStandardMaterial/g) || []).lengt
 //   걸려 있어 일반 필지가 육축 12~14m 앞까지 붙었다(hanyang/7 남문 13.8m·/99 12.0m). 마당은 빈
 //   공간이므로 그림자를 만들지 않고(solarObstruction:false), 행랑도 마당은 비워 둔다 — 넓은 가로가
 //   좁은 홍예로 수렴하는 압축이 이 마당에서 완성된다.
+// [개정 2026-08-04, #54] 배제 깊이를 통행 예약 47m → GATE_FORECOURT_PLAN_DEPTH(14m)로 축소.
+//   사용자 결정(12~18m 대역)이며 근거는 문서가 **단언한** 조항 쪽이다: docs/joseon-city.md
+//   §시전행랑("종루~남대문·종묘~동대문")·§성문 주변("행랑은 성문에 닿는 간선 파사드를 따라").
+//   반대 근거였던 "문 안쪽 의례 광장"은 같은 문서가 미검증으로 명시한 조항이다. 47m 를 필지·시전
+//   배제에 그대로 쓰는 동안 문 안쪽 51.25m 가 통째로 비었다(실측 2026-08-04: 사대문 전부 0~30m
+//   밴드 필지 0·행랑 0). 통행·식생 예약은 47m 그대로이므로 이 단언은 "필지·시전이 문 앞 14m 를
+//   비운다"로 좁혀진 것이고, 문 앞이 열려 있다는 계약 자체는 유지된다.
+//   행랑이 실제로 문에 닿는지는 tools/check-sijeon-approach.mjs 가 반대 방향으로 못박는다
+//   (FAIL-first 확인: 수정 전 소스에서 19건 실패).
 const forecourtRows = [];
 for (const forecourtSeed of [2026, 7, 99]) {
   const fp = planVillage({
@@ -1518,7 +1527,7 @@ for (const forecourtSeed of [2026, 7, 99]) {
   const fwall = fp.features?.cityWall;
   invariant(fwall?.gates?.length >= 4, `hanyang/${forecourtSeed} lost its city wall`);
   for (const fgate of fwall.gates) {
-    const poly = cityGateForecourtPolygon(fgate);
+    const poly = cityGateForecourtPolygon(fgate, { length: GATE_FORECOURT_PLAN_DEPTH });
     const intruders = fp.parcels.filter((parcel) => G.polysOverlap(parcel.poly, poly)).length;
     invariant(intruders === 0,
       `hanyang/${forecourtSeed} ${fgate.name}: ${intruders} parcels intrude into the gate forecourt`);

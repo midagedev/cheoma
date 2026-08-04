@@ -428,7 +428,15 @@ const expectedSceneHashes = {
   //   objects 5358 불변(병합 버킷 흡수 — 순수 노드 city-wall objects=9 불변, 드로우콜 델타 0),
   //   triangles 25,612,936 → 25,620,184 = +7,248이 순수 노드 성곽 기하 실측 델타(64,802→72,050)와
   //   정확히 일치. sync == module Worker == ?worker=0 폴백 바이트 동일. 비전 SHIP(질량 관계 달성).
-  hanyang: '3a45e2d8:0d0c9c0e:9ab34fec:be1f1984',
+  // #54 시전 접근로(2026-08-04): 남대문로 jungno→daero 승격 + 성곽 도성 행랑 runCap 해제
+  //   (프리픽스 캡 26 이 51레코드를 종로 서단에 몰던 버그) + 문전 마당 필지·시전 배제 14m
+  //   (GATE_FORECOURT_PLAN_DEPTH, 사용자 결정 대역 12~18m) + 예약 코어 일조 통로 행랑 배제.
+  //   성곽 도성 전용 — hanyang 만 이동(village/town/capital scene·proxy·mja·snapshot 전부 불변이
+  //   범위 증거). **이번엔 proxy 도 이동**(c5517350 → 395b740a): 행랑 footprint 가 필지 blocker 라
+  //   도성 필지 배치가 바뀐 결과다(계획 골든 hanyang:base p397 유지, tools/plan-contract.json
+  //   _sijeonApproachRebaseline 참조). sync == module Worker == ?worker=0 폴백 바이트 동일.
+  //   FAIL-first: tools/check-sijeon-approach.mjs 가 수정 전 소스에서 19건 실패.
+  hanyang: '6ceb8ea2:f637cefa:2f428eb0:a84dce90',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -494,7 +502,12 @@ const expectedProxyHashes = {
   //   046ecd22), 이 라운드의 `src/` 2개 파일만 되돌린 트리에서 구 값 5511f335 가 재현된다
   //   (실측 2026-08-02). 서편 채움(palace.js)은 궁 컴파운드 내부라 필지 프록시를 만들지 않는다.
   //   프록시 개수·안정 ID·격리 계약은 유지.
-  hanyang: 'c5517350',
+  // #54 시전 접근로(2026-08-04): 한양만 이동. 행랑 footprint 가 필지 blocker 라 캡 해제 +
+  //   남대문로 daero 승격 + 문전 마당 14m 로 도성 필지 배치가 바뀌었고, 그 하류로 지붕 OBB 가
+  //   움직인다. village/town/capital 프록시 3종은 같은 실행에서 불변(fef7a386 / 3f7f776c /
+  //   046ecd22) — 성곽 도성 전용 변경의 범위 증거. 계획 골든 재기준은 tools/plan-contract.json
+  //   _sijeonApproachRebaseline 참조. 프록시 개수·안정 ID·격리 계약은 유지.
+  hanyang: '395b740a',
 };
 
 const server = await createServer({

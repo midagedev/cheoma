@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "baselineCommit": "hanyang-roofsea-2026-07-30",
+  "_sijeonApproachRebaseline": "#54 시전 접근로 2026-08-04 — 행랑을 성문까지: ① 남대문로 jungno→daero 승격(roads.js — 주석 스스로 '주작대로 남측 연장', planSijeon 은 daero 만 본다) ② 성곽 도성 runCap Infinity(프리픽스 캡 26이 51레코드를 종로 서단 151m 에 몰아넣던 버그, break 의 상한 잠식 제거 포함) ③ 문전 마당 필지·시전 배제 51.25→14m(GATE_FORECOURT_PLAN_DEPTH, 사용자 결정 12~18m 대역 — docs/joseon-city.md §성문 주변 개정 기록) ④ 예약 코어 30° 일조 통로를 행랑이 비움(coreSolarAccess 필터) ⑤ 접근로 진입점 바로가기에 성벽 여유 확보 전제 추가(daero 폭에서 99° 접힘 방지). hanyang:base 1342158→1422313(p397)·hanyang:temple 1352732→1413624(p389)만 이동, 나머지 8케이스 해시·바이트 불변이 성곽 도성 전용 변경의 단독 변인 증거(리드 재실행 2026-08-04 실측이 에이전트 격리 트리 V3 실측과 해시 일치). FAIL-first: tools/check-sijeon-approach.mjs 가 수정 전 소스에서 19건 실패(남대문로 미승격 4·남/동문 행랑 0·커버리지 24~32%).",
   "_creekPhaseBRebaseline": "#20 R4 Phase B 2026-08-01 — hanyang 전용 개천 마감: 호안 석축 계획(creek-bank-plan, 성 밖 자연석 위계 포함), 평석교 지간 3m 계약(bridgeSlabPiers)·벤치 횡단 접지(creekCrossingSpanHalf)·홍예 금지, 남촌 중로를 하도 밖으로 물림(offStreamZ), 잔여 횡단부 판석교(사교 하한 0.4). 이번에도 hanyang:base·hanyang:temple 만 이동하고 hamlet·village·town·capital 불변이 한양 전용 변경의 증거(리드 재실행 2026-08-01 실측이 r4-creek-b 독립 실측과 해시 일치). FAIL-first: 접근 수평 단언이 Phase A 소스에서 +1.23~+2.84m 로 실패함을 실측.",
   "_creekRebaseline": "#20 R4 Phase A 2026-08-01 — hanyang 전용 개천(開川) 관류: streamZ 0.30R→0.16R, 도성 개천 사행 ×0.5, 도성 구간 골짜기 어깨 50m→10m(개착 하도), 안산·성저 기준선을 개천에서 분리(frontWaterZ), 논은 성 밖 계약, 성곽 도성 필지 남한선=성벽. hanyang:base·hanyang:temple 해시만 이동하고 hamlet·village·town·capital 은 불변인 것이 한양 전용 변경의 증거다. worker == ?worker=0 폴백 바이트 동일은 check:worker 가 소유한다.",
   "templeRevision": "issue-122-role-hierarchy-2026-07-23",
@@ -35,8 +36,8 @@
       "bytes": 245416
     },
     "hanyang:base": {
-      "hash": "1c72ee416c048b23dd3816e86755e2112231f94e5a04a25046caba1cea8d42fa",
-      "bytes": 1342158
+      "hash": "3c98d657ae853b9ab27ea2f935e5f467402e5b689826fd1f96e161703f8e9ce3",
+      "bytes": 1422313
     },
     "hamlet:temple": {
       "hash": "84066937c2e99508308723c761a6699464c49dc1be38068d26834da4edcb868e",
@@ -55,8 +56,8 @@
       "bytes": 257489
     },
     "hanyang:temple": {
-      "hash": "6aa2fc8cb3624bc6f2189e9973ee574c97c95db4ed59e52636ca12516ffde2eb",
-      "bytes": 1352732
+      "hash": "e2d27f83f5fde3a8dc6bfa4d2dd668e3278148367dc8649143fab87f116ffd80",
+      "bytes": 1413624
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",

@@ -114,17 +114,26 @@ function annotateSegment(members, segmentId) {
 //   성곽이 있는 도성은 호출부가 "성벽 안쪽 + 문전 마당 밖"을 넘긴다: docs/joseon-city.md §시전행랑 은
 //   행랑 구간을 "종루~남대문, 종묘~동대문"으로 명시하므로 행랑은 성문까지 이어져야 한다. 분지 0.9R
 //   컷은 그 구간을 성문에서 100~300m 앞에서 끊고 있었다.
-export function planSijeon(roadsResult, site, _char01 = 0.5, { reach } = {}) {
+// runCap → (도로, 면)당 **점포** 상한. 기본값은 legacy `SIJEON_PLACEMENT.runCap` 이고, 성곽 도성은
+//   호출부가 Infinity 를 넘겨 "간선 파사드 전체를 reach 가 정한다"로 바꾼다. 상한은 프리픽스 컷이라
+//   유한값에서는 도로 시작부만 채워지므로(실측 2026-08-04: hanyang 51레코드 전부 daero-001 시작
+//   151m = 도로의 22.1%), 문서 조항의 "성문에 닿는 연속 파사드"와 양립하지 않는다.
+//   예약 공백(kind:'break')은 상한을 먹지 않는다 — 빈 footprint 가 점포 슬롯을 훔치면 같은 상한이
+//   분절 주기에 따라 실효 점포 수를 바꾼다(26슬롯 → 점포 22채).
+export function planSijeon(roadsResult, site, _char01 = 0.5, { reach, runCap: runCapOption } = {}) {
   const shops = [];
   const arterials = (roadsResult?.roads || []).filter((road) => road.level === 'daero');
   const {
     pitch,
     depth,
     setback,
-    runCap,
     segmentShops,
     segmentGapPitches,
   } = SIJEON_PLACEMENT;
+  const runCap = runCapOption === undefined ? SIJEON_PLACEMENT.runCap : runCapOption;
+  if (typeof runCap !== 'number' || Number.isNaN(runCap) || runCap <= 0) {
+    throw new RangeError('sijeon runCap must be a positive number or Infinity');
+  }
   const bowlR = site.bowlR;
   const others = (road) => arterials.filter((candidate) => candidate !== road);
   let sid = 0;
@@ -186,7 +195,6 @@ export function planSijeon(roadsResult, site, _char01 = 0.5, { reach } = {}) {
             `s${sid++}`,
             SIJEON_KIND_BREAK,
           ));
-          run++;
           pendingBreakPitches--;
           continue;
         }

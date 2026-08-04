@@ -121,8 +121,12 @@
 `shop.poly`, `center`, `frontDir`, `w`, `d`를 보존한 채 칸별 façade 의미만 파생한다.
 renderer가 shop ID나 역할 이름으로 두 번째 배치를 추론해서는 안 된다.
 
-계획은 `planSijeon(roadsResult, site, char01)`로 기존 배치 record를 만들고,
-`planSijeonFacade(shop)`으로 각 점포의 로컬 façade를 파생한다. façade 좌표는 `+x`가 행랑
+계획은 `planSijeon(roadsResult, site, char01, { reach, runCap })`로 기존 배치 record를 만들고,
+`planSijeonFacade(shop)`으로 각 점포의 로컬 façade를 파생한다. `reach(pt)`는 그 지점에 행랑을
+이어붙일 수 있는가(기본은 분지 반경 컷, 성곽 도성은 "성벽 안쪽 + 문전 마당 밖")이고, `runCap`은
+(도로, 면)당 **점포** 상한이다. 상한은 프리픽스 컷이므로 유한값에서는 도로 시작부만 채워진다 —
+성곽 도성 tier 는 `Infinity`를 넘겨 파사드 범위를 `reach`가 정하게 한다(2026-08-04 개정,
+근거·실측은 `docs/joseon-city.md` §성문 주변). 예약 공백(`kind: 'break'`)은 상한을 소비하지 않는다. façade 좌표는 `+x`가 행랑
 진행 방향, `+z`가 도로를 향한 전면이다. 현재 schema v2는 한 점포를 제품상 2칸으로 나누며
 다음 물리 의미를 소유한다.
 

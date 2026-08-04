@@ -338,6 +338,18 @@ function alignGateRoadEnd(pts, gate, width, atStart) {
   return atStart ? aligned : aligned.reverse();
 }
 
+// 문 밖 tail 의 직진 구간 비율(extendGateRoadOutside 와 공유). tail 은 이 구간을 지난 뒤에야 휜다.
+const APPROACH_STRAIGHT_FRACTION = 0.58;
+
+// 문 법선을 따라 곧장 나갈 때 성벽 여유(margin) 밖으로 처음 빠져나오는 거리. Infinity = 못 빠져나옴.
+function axisMarginClearAlong(cityWall, gate, margin, limit) {
+  for (let along = 0; along <= limit; along += 0.5) {
+    const point = { x: gate.x + gate.dirX * along, z: gate.z + gate.dirZ * along };
+    if (cityWallClearance(cityWall, point) <= -margin) return along;
+  }
+  return Infinity;
+}
+
 // 내부 도로의 gate endpoint를 옛 동구(site.entrance)까지 잇는다. 문 양쪽 throat는 같은 법선 위에
 // 두어 홍예를 정확히 통과하고, 그 뒤에만 완만하게 휘어 개울 다리와 성저 길로 이어진다.
 function approachDestination(site, cityWall, gate, width) {
@@ -345,9 +357,17 @@ function approachDestination(site, cityWall, gate, width) {
   const terrainR = site.terrainR || site.R;
   // road ribbon 전체가 regular terrain grid 영역 안에 있어야 renderer의 exact clip 계약이 성립한다.
   const terrainSafe = (point) => Math.hypot(point.x, point.z) + width * 0.5 <= terrainR - 6;
+  // 진입점(옛 동구) 바로가기는 **문 정면에서 성벽 여유를 확보한 뒤에 닿을 수 있을 때만** 쓴다.
+  //   문 법선이 진입점 방향과 크게 어긋난 문에서 넓은 대로가 곧장 진입점으로 향하면, tail 앞부분이
+  //   성벽 여유 링(width/2 + roadEdgeMargin)에 반경 투영되며 along 진행이 0으로 눌려 도로가 접힌다
+  //   (실측 2026-08-04, 남대문로 daero 승격 후 hanyang/13 남문 outside transition 99.0°).
+  //   여유 확보 거리가 직진 구간보다 길면 아래 축 방향 후보로 내려가 문 정면으로 곧게 나간다.
+  const entranceAlong = Math.max(0, G.dot(G.sub(site.entrance, gate), { x: gate.dirX, z: gate.dirZ }));
   if (cityWallClearance(cityWall, site.entrance) <= -margin
     && worldEdgeClearance(site.edge, site.entrance) >= margin
-    && terrainSafe(site.entrance)) return site.entrance;
+    && terrainSafe(site.entrance)
+    && axisMarginClearAlong(cityWall, gate, margin, entranceAlong * APPROACH_STRAIGHT_FRACTION)
+      <= entranceAlong * APPROACH_STRAIGHT_FRACTION) return site.entrance;
   let best = null;
   const maxDistance = CITY_WALL_DIMENSIONS.gateApproachLength * Math.max(0.6, gate.scale || 1);
   for (let distance = 2; distance <= maxDistance; distance += 1) {
@@ -394,7 +414,7 @@ function extendGateRoadOutside(road, gate, site, cityWall, atStart) {
     along * 0.42,
   ));
   const straightLength = Math.min(
-    along * 0.58,
+    along * APPROACH_STRAIGHT_FRACTION,
     Math.max(throatLength * 2, CITY_WALL_DIMENSIONS.gateApproachLength * 0.48),
   );
   const outerThroat = G.add(gate, G.mul(outward, throatLength));
@@ -596,9 +616,12 @@ export function planRoads(site, opts, rng) {
     const jongnoRoad = push('daero', jongno);
     if (W) wallGateRoads.add(jongnoRoad);
     // 남대문로: T → 숭례문(주작대로 남측 연장, 진입 척추)
+    //   위계는 daero 다. 이 길은 종루에서 남대문에 이르는 간선이고, docs/joseon-city.md §시전행랑 이
+    //   행랑 구간으로 명시하는 두 축 중 하나다("종루~남대문"). jungno(5m) 로 저작돼 있던 동안
+    //   planSijeon(간선=daero 만 본다)이 히어로 남문 접근로에 행랑을 놓을 수 없었다.
     if (gS) {
-      const s2 = confineGateRoad(trunkPath(tJoin, { x: gS.x, z: gS.z }, rng), W, ROAD_WIDTH.jungno, { endGate: gS });
-      const southGateRoad = push('jungno', s2);
+      const s2 = confineGateRoad(trunkPath(tJoin, { x: gS.x, z: gS.z }, rng), W, ROAD_WIDTH.daero, { endGate: gS });
+      const southGateRoad = push('daero', s2);
       wallGateRoads.add(southGateRoad);
       southApproach = { road: southGateRoad, atStart: false };
     } else push('jungno', trunkPath(tJoin, E, rng));

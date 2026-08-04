@@ -16,6 +16,7 @@ import {
   attachParcelSpatialContract,
   parcelLocalPoint,
   parcelRoadAccess,
+  parcelSolarAccessPolygon,
   parcelWorldPoint,
   rectangularParcelShape,
 } from './parcel-contract.js';
@@ -253,6 +254,19 @@ const charLabel = (c) => (c < 0.34 ? 'minchon' : c < 0.66 ? 'yeoyeom' : 'banchon
 
 // 행랑이 성벽 몸통·여장에 붙지 않도록 두는 안쪽 여유(성벽 두께 + 순라 통로 몫).
 const SIJEON_WALL_INSET = 8;
+// ── 문전 마당 깊이 (필지·시전 배제분) ── 사용자 결정 2026-08-04: 12~18m 로 축소.
+//   왜 축소했나: citywall-contour.js#cityGateForecourtPolygon 의 기본 깊이는 통행 예약
+//   (gateApproachLength 44 + clearance 3 = 47m)를 그대로 쓴다. 그 값을 **필지·시전 배제**에도 쓰면
+//   성문 안쪽 51.25m 가 통째로 비어, 문서가 단언하는 조항("행랑은 성문에 닿는 간선 파사드를 따라" —
+//   docs/joseon-city.md §성문 주변, §시전행랑 종루~남대문·종묘~동대문)과 구한말 도성 사진의
+//   "문 앞까지 처마가 이어진 가로"를 둘 다 어긴다. 반대편 근거인 "문 안쪽 의례 광장"은 같은 문서가
+//   **미검증**으로 명시한 조항이므로, 단언된 조항 쪽을 택했다(원 결정과 근거는 문서에 보존).
+//   숫자의 성격: 고증 치수가 아니라 **제품 값**이다(segmentShops 와 같은 급). 12~18m 대역에서
+//   "행랑 마지막 칸이 육축 앞 15m 안"이라는 실측 조건을 만족하는 가장 큰 값으로 골랐다
+//   (실측 2026-08-04, hanyang 4시드 × 사대문 — tools/check-sijeon-approach.mjs 표).
+//   통행·식생 예약(cityGateApproachFootprint · cityWallVegetationBlocked)은 47m 그대로다 —
+//   축소는 "무엇이 그 자리에 설 수 있는가"만 바꾸고 문 앞 통로 자체는 비운다.
+export const GATE_FORECOURT_PLAN_DEPTH = 14;
 // 논배미와 성벽 바깥면 사이 여유(성저 들이 성벽 발치에 붙지 않게) — 필지 성벽 여유와 같은 급.
 const PADDY_WALL_CLEARANCE = 6;
 
@@ -560,7 +574,8 @@ export function planVillage(opts = {}) {
     //   분지 0.9R 컷은 그 구간을 성문 100~300m 앞에서 끊었다. 단 문전 마당은 비워 두어야 하므로
     //   마당 안쪽은 reach 에서 제외한다 — 넓은 가로가 좁은 홍예로 수렴하는 압축이 마당에서 완성된다.
     const gateForecourts = cityWall
-      ? cityWall.gates.map((gate) => cityGateForecourtPolygon(gate))
+      ? cityWall.gates.map((gate) => cityGateForecourtPolygon(gate,
+        { length: GATE_FORECOURT_PLAN_DEPTH }))
       : [];
     // 육조거리(궁 정문 광장)는 상업 가로가 아니다 — 시전 행랑은 종로·남대문로의 몫이고,
     //   관아 열 사이에 점포가 끼면 축선이 상가로 읽힌다(#21 R5 D8, 실측 2026-08-02: 광장
@@ -571,10 +586,26 @@ export function planVillage(opts = {}) {
       ? (pt) => (!cityWall || cityWallClearance(cityWall, pt) >= SIJEON_WALL_INSET)
         && !forecourts.some((poly) => G.pointInPoly(pt, poly))
       : undefined;
-    features.sijeon = planSijeon(roadsResult, site, char01, { reach: sijeonReach }).filter((shop) =>
+    // 성곽 도성은 (도로,면)당 프리픽스 캡을 풀고 reach 에 맡긴다 — 캡이 26이던 동안 도성 전체
+    //   행랑 51레코드가 전부 종로 서단 151m(도로의 22.1%)에 몰려, 나머지 세 성문 접근로에는
+    //   행랑이 원리적으로 나올 수 없었다(실측 2026-08-04). 문서가 단언하는 구간은 종루~남대문·
+    //   종묘~동대문이고 규칙 7 은 "간선 양측 파사드를 따라 연속 배치"다.
+    const sijeonRunCap = cityWall ? Infinity : undefined;
+    // 예약 코어(궁·관아·종가)의 30° 일조 통로는 행랑이 비운다. 예약 코어는 행랑보다 **먼저** 자리를
+    //   잡으므로 후보를 스스로 기각할 수 없다 — 일반 필지·위성 부락은 점포 footprint 를 일조
+    //   장애물로 이미 보고 있지만(planParcels/planSatellites 의 solarObstacles), 코어에는 그 경로가
+    //   없다. 캡을 풀어 파사드를 연속으로 만들자 종로 북면 행랑이 축선 반가(x=±39) 남쪽 채광 통로에
+    //   들어왔다(실측 2026-08-04: 4시드 전부 코어 2채씩, 시드당 3~4레코드). 여기서 걸러 내면
+    //   파사드에 코어 진입 골목만큼의 틈이 생기고, 계약(check:layout)이 그대로 유지된다.
+    const coreSolarAccess = blockers
+      .filter((blocker) => blocker.hero && blocker.solarObstruction !== false)
+      .map((blocker) => parcelSolarAccessPolygon(blocker));
+    features.sijeon = planSijeon(roadsResult, site, char01,
+      { reach: sijeonReach, runCap: sijeonRunCap }).filter((shop) =>
       worldEdgeContainsPolygon(site.edge, shop.poly, 6)
       && (!cityWall || cityWallContainsPolygon(cityWall, shop.poly, 4))
       && !forecourts.some((poly) => G.polysOverlap(shop.poly, poly))
+      && !coreSolarAccess.some((poly) => G.polysOverlap(shop.poly, poly))
       && !templeReservations.some((poly) => G.polysOverlap(shop.poly, poly)));
     for (const s of features.sijeon) blockers.push({ poly: s.poly });
   }
@@ -592,7 +623,13 @@ export function planVillage(opts = {}) {
       // 빈 마당이므로 그림자를 드리우지 않는다(solarObstruction:false) — 필지 겹침만 막는다.
       //   `kind` 는 쓰지 않는다: planParcels 가 kind 를 "집이 있는 예약"으로 읽어 일조 예약 경로로
       //   보내고 거기서 center 를 요구한다(절 예약도 같은 이유로 kind 를 쓰지 않는다).
-      blockers.push({ poly: cityGateForecourtPolygon(gate), gateForecourt: true, solarObstruction: false });
+      //   깊이는 GATE_FORECOURT_PLAN_DEPTH(사용자 결정 2026-08-04) — 통행 예약 47m 은 식생·도로에
+      //   그대로 남고, 필지·시전 배제만 축소된다.
+      blockers.push({
+        poly: cityGateForecourtPolygon(gate, { length: GATE_FORECOURT_PLAN_DEPTH }),
+        gateForecourt: true,
+        solarObstruction: false,
+      });
     }
   }
 
