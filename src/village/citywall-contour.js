@@ -122,21 +122,48 @@ export const CITY_GATE_MASONRY = Object.freeze({
   pierWidth: GATE_PIER_WIDTH,   // 진실 소유는 GATE_PIER_WIDTH — gateExtraWidth 가 이 값의 2배다
 });
 
-// 중층 문루: 하층은 기둥열+벽체, 상층은 폭·깊이를 체감한 기둥열+난간, 지붕 2단.
-//   widthRatio 는 숭례문 실측 비례(육축 폭보다 좁은 문루)를 따른다. 문루가 육축 상면을 다 덮으면
-//   처마가 여장 링을 가려 성가퀴 연속이 사라지므로, 좌우에 여장이 보이는 날개를 남긴다.
+// 중층 문루: 하층은 기둥열+벽체, 상층은 정면 폭을 유지하고 깊이만 체감한 기둥열+난간, 지붕 2단.
+//
+// ── 비례 교정(#54 G8, 2026-08-04) ────────────────────────────────────────────
+// 이전 저작은 "문루는 육축보다 좁다(widthRatio 0.6)"였고 그 근거는 처마가 육축 상면 여장 링을
+// 가리지 않게 좌우에 날개를 남긴다는 것이었다. 구한말 성문 사진 실측이 그 전제를 반증한다
+// (refs/hanyang-old/sungnyemun-1900s.jpg 근정면 + sungnyemun-1890.jpg 3/4, 픽셀 실측; 절대
+// 스케일은 docs/joseon-city.md §성문의 "숭례문 홍예 ≈4.6m"로 환산 — 그 환산이 총높이 약 20m를
+// 재현해 계측이 교차 검증된다):
+//
+//   | 축                          | 사진 실측        | 구 저작        |
+//   |-----------------------------|------------------|----------------|
+//   | 하층 처마 폭 / 육축 총폭    | 1.18~1.23        | 0.70~0.75      |
+//   | 문루 기둥선 폭 / 육축 폭    | ≈1.00            | 0.60           |
+//   | 상층 처마 폭 / 하층 처마 폭 | 0.96             | 0.815          |
+//   | 육축 노출 높이 / 문루 용마루 높이 | 0.80       | 0.62~1.03      |
+//
+// 즉 실물은 문루 몸체가 육축 상면을 거의 채우고 **처마가 육축 밖으로 나가며**, 정면 여장 날개는
+// 없다(성가퀴 연속은 육축 좌우로 이어지는 성벽이 맡는다). 구 저작은 그 반대여서 "높은 석축 위
+// 작은 정자"로 읽혔다(사용자 판정 2026-08-04).
+//
+// 그래서 ① widthRatio 는 **육축 상면 폭 대비 상한**으로 의미가 바뀌고 실질 상한은 여장 링 두께다,
+// ② 여장 안쪽 통로(walkway)는 순찰로가 문루를 **앞뒤로 돌아 지나는** 깊이 축에만 남긴다,
+// ③ 처마는 넓어진 몸체에 맞춰 깊어진다(구 1.9m 는 22m 문루용 값이라 33m 몸체에서 얕게 읽혔다),
+// ④ 상층은 정면 폭을 하층과 같게 두고 **깊이만** upperRatio 로 체감한다 — 숭례문 상층 정면 5칸이
+// 하층과 같은 형식이고, 폭까지 줄이면 상층이 축소 복제처럼 읽힌다.
 //   lowerRoofPitch 는 하층 차양이 상층 벽을 삼키지 않는 완만한 값이다.
 export const CITY_GATE_PAVILION = Object.freeze({
-  walkway: 0.8,          // 여장 안쪽 통로
+  walkway: 0.5,          // 여장 안쪽 순찰로 — 깊이 축 전용(문루 앞뒤로 지나간다)
   deckHeight: 0.4,
-  widthRatio: 0.6,
-  bayWidth: 3.2,         // 기둥 사이 한 칸
+  widthRatio: 0.95,      // 문루 몸체 폭 / 육축 상면 폭 상한(실질 상한은 여장 링 두께)
+  bayWidth: 3.7,         // 기둥 사이 한 칸 — 주칸 치수를 실물급으로 두고 칸 수가 규모를 따른다
   lowerHeight: 3.6,
-  lowerEave: 1.9,
-  upperRatio: 0.8,
-  upperFloor: 0.4,
-  upperHeight: 2.9,
-  upperEave: 1.7,
+  lowerEave: 2.7,
+  upperRatio: 0.8,       // 상층 체감 — **깊이 전용**(정면 폭은 하층과 같다)
+  // 상층 바닥은 하층 차양 정점을 넘어야 한다. 차양 높이는 지붕 깊이(= 몸체 깊이 + 처마 2배)에서
+  //   나오므로 처마가 깊어지면 정점도 올라간다 — 구 0.4m 는 이미 정점이 바닥 위 1.01m 로 올라와
+  //   상층 난간(0.55m) 밖으로 0.46m 의 기와가 상층 콜로네이드 안에 노출됐고, 새 처마(2.7m)에서는
+  //   그것이 0.90m 가 된다. 1.3m 는 정점을 난간 뒤로 정확히 숨긴다(노출 0.00m). 실물도 하층 차양이
+  //   상층 벽 발치에서 만나고 그 위로 기둥이 선다(사진: 차양 기와 상단 = 상층 기둥 밑동).
+  upperFloor: 1.3,
+  upperHeight: 3.0,
+  upperEave: 2.35,
   railHeight: 0.55,
   lowerRoofPitch: 0.2,
   upperRoofPitch: 0.42,
@@ -1605,10 +1632,14 @@ export function cityGatePavilionProfile(gate, structure, masonry) {
   const parapetThickness = CITY_WALL_DIMENSIONS.thickness * 0.7 * scale;
   const parapetHeight = CITY_WALL_DIMENSIONS.capHeight;
   const walkway = P.walkway * scale;
-  const insideWidth = halfWidth * 2 - (parapetThickness + walkway) * 2;
+  // 폭 축: 여장 링 두께만 물러난다 — 정면에는 순찰로를 두지 않는다(순찰로는 문루 앞뒤로 돈다).
+  //   그래서 코너 기둥이 육축 상면 끝에 서고 처마가 육축 밖으로 나간다(사진 실측 비 위 표).
+  // 깊이 축: 여장 두께 + 순찰로. 예약 footprint(gateDepth)가 얕아 링 안쪽을 다 쓴다.
+  const insideWidth = halfWidth * 2 - parapetThickness * 2;
   const insideDepth = halfDepth * 2 - (parapetThickness + walkway) * 2;
-  // 좌우 날개에 여장이 드러나도록 문루는 육축보다 좁다. 깊이는 예약 footprint 가 얕아 링 안쪽을 다 쓴다.
-  const lowerWidth = Math.max(P.minSpan * scale, Math.min(insideWidth, halfWidth * 2 * P.widthRatio));
+  // 상한은 육축 **상면** 폭(배터로 좁아진 석축 윗면)이고, 실질 상한은 여장 링이다.
+  const lowerWidth = Math.max(P.minSpan * scale,
+    Math.min(insideWidth, masonry.topWidth * P.widthRatio));
   const lowerDepth = Math.max(P.minSpan * scale, insideDepth);
   const lowerHeight = P.lowerHeight * scale;
   const bays = (span) => Math.max(3, Math.min(P.maxColumns, Math.round(span / (P.bayWidth * scale)) + 1));
@@ -1622,11 +1653,13 @@ export function cityGatePavilionProfile(gate, structure, masonry) {
   lower.panels = lower.columns - 1;
   const upperY0 = lower.y1 + P.upperFloor * scale;
   const upperHeight = P.upperHeight * scale;
+  // 상층: 정면 폭은 하층과 **같다**(숭례문 상층 정면 5칸 = 하층). 체감은 깊이에만 걸린다.
+  //   기둥 수도 같은 폭에서 나오므로 상·하층 기둥이 정렬한다.
   const upper = {
     tier: 'upper',
     y0: upperY0, y1: upperY0 + upperHeight, height: upperHeight,
-    width: lowerWidth * P.upperRatio, depth: lowerDepth * P.upperRatio,
-    columns: bays(lowerWidth * P.upperRatio),
+    width: lowerWidth, depth: lowerDepth * P.upperRatio,
+    columns: bays(lowerWidth),
     panels: 0, rail: P.railHeight * scale,
   };
   // 기둥 중심선(주칸 격자). 렌더러와 공포 배치가 같은 배열을 쓰므로 주포가 기둥에서 어긋날 수 없다.

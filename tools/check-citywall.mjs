@@ -285,11 +285,19 @@ function assertGatePavilion(gate, structure, masonry, label) {
   invariant(near(lower.y1, lower.y0 + lower.height, 1e-9), `${tag}: lower storey height mismatch`);
   invariant(upper.y0 >= lower.y1 - EPS, `${tag}: storey y-bands overlap`);
   invariant(upper.y1 > upper.y0, `${tag}: upper storey is flat`);
-  invariant(near(upper.width, lower.width * CITY_GATE_PAVILION.upperRatio, 1e-9)
-    && near(upper.depth, lower.depth * CITY_GATE_PAVILION.upperRatio, 1e-9),
-  `${tag}: upper storey does not step in by ${CITY_GATE_PAVILION.upperRatio}`);
+  // 상층 체감은 **깊이 전용**이고 정면 폭은 하층과 같다 — 재핀 2026-08-04 (#54 G8).
+  //   구 단언은 폭·깊이를 함께 upperRatio 로 줄이라고 못 박았으나, 구한말 성문 사진 실측이
+  //   상층 정면이 하층과 같은 폭임을 보여준다(숭례문 상·하층 정면 모두 5칸; 실측 상층 처마 폭 /
+  //   하층 처마 폭 = 0.96 인데 폭까지 0.8 로 줄이면 0.815 가 되어 상층이 축소 복제로 읽힌다).
+  //   폭 동일 + 깊이 체감이면 처마 깊이 차(upperEave < lowerEave)만으로 0.98 이 나온다.
+  invariant(upper.width === lower.width,
+    `${tag}: 상층 정면 폭 ${upper.width} ≠ 하층 ${lower.width} — 상층이 축소 복제로 읽힌다`);
+  invariant(near(upper.depth, lower.depth * CITY_GATE_PAVILION.upperRatio, 1e-9),
+    `${tag}: upper storey depth does not step in by ${CITY_GATE_PAVILION.upperRatio}`);
   invariant(CITY_GATE_PAVILION.upperRatio >= 0.75 && CITY_GATE_PAVILION.upperRatio <= 0.85,
-    `${tag}: authored upper-storey taper left the ~0.8 band`);
+    `${tag}: authored upper-storey depth taper left the ~0.8 band`);
+  invariant(upper.columns === lower.columns,
+    `${tag}: 상·하층 기둥 수가 어긋났다 — 같은 정면 폭이면 주칸 격자가 정렬해야 한다`);
   invariant(lower.columns >= 3 && lower.panels > 0, `${tag}: lower storey has no column/panel wall`);
   invariant(upper.rail > 0, `${tag}: upper storey lacks its balustrade`);
   const [lowerRoof, upperRoof] = pavilion.roofs;
@@ -316,7 +324,35 @@ function assertGatePavilion(gate, structure, masonry, label) {
     invariant(spans.count > 0, `${tag}: parapet side ${side.axis}${side.sign} has no merlon`);
   }
   assertGateBrackets(pavilion, tag);
+  assertGateProportion(pavilion, masonry, tag);
   return pavilion;
+}
+
+// ── 문루 비례 계약(#54 G8, 2026-08-04) ───────────────────────────────────────
+// 사용자 판정: "성문의 형태(특히 2단 지붕의 비율)의 갭이 크다". 원인은 문루가 육축 폭의 0.6 이라
+// "높은 석축 위 작은 정자"로 읽힌 것이었다. 구한말 성문 사진 픽셀 실측(사진 2장 교차,
+// docs/joseon-city.md §성문의 홍예 4.6m 로 절대 환산 — 그 환산이 총높이 약 20m 를 재현해 계측기
+// 자체가 교차 검증된다)이 준 목표는 아래 두 축이고, 둘 다 지형과 무관한 순수 저작 비례다.
+//   · 문루 몸체 폭 / 육축 상면 폭 : 사진 ≈1.00 (기둥선이 육축 끝에 선다)
+//   · 하층 처마 폭 / 육축 총폭   : 사진 1.18~1.23 (처마가 육축 밖으로 나간다)
+// 제품은 여장 링 두께(성벽 두께×0.7 = 1.82m)가 좌우로 물러나야 해서 몸체가 육축 상면의 1.00 에
+// 닿을 수 없다 — 그래서 하한은 실측이 아니라 **링 제약 아래의 달성 가능 프런티어**다.
+function assertGateProportion(pavilion, masonry, tag) {
+  const [lower] = pavilion.storeys;
+  const [lowerRoof] = pavilion.roofs;
+  const bodyOverTop = lower.width / masonry.topWidth;
+  const roofOverMasonry = lowerRoof.width / masonry.totalWidth;
+  // 몸체는 여장 링을 뺀 육축 상면을 거의 다 쓴다. 0.86 아래면 좌우 날개가 다시 벌어져 문루가
+  // 육축 위에 얹힌 작은 정자로 읽힌다(구 저작 0.60~0.64 가 정확히 그 상태였다).
+  invariant(bodyOverTop >= 0.86,
+    `${tag}: 문루 몸체/육축 상면 폭 ${bodyOverTop.toFixed(3)} < 0.86 — 좌우 여장 날개가 벌어져 `
+    + '"석축 위 작은 정자"로 되돌아갔다(사진 실측 ≈1.00)');
+  // 처마는 육축 **밖으로** 나가야 한다. 1.0 이 그 기하학적 문턱이고, 상한은 처마가 육축 아래
+  // 성벽 여장까지 덮어 성가퀴 연속을 지우는 것을 막는다.
+  invariant(roofOverMasonry >= 1.0 && roofOverMasonry <= 1.30,
+    `${tag}: 하층 처마 폭/육축 총폭 ${roofOverMasonry.toFixed(3)} — 1.0 밑이면 처마가 육축 안에 `
+    + '갇히고(구 저작 0.70~0.75) 1.30 위면 육축 좌우 성벽 여장까지 덮는다(사진 실측 1.18~1.23)');
+  return { tag, bodyOverTop, roofOverMasonry };
 }
 
 // ── 다포계 공포대 계약(#23 R3-①) ─────────────────────────────────────────────
@@ -393,8 +429,13 @@ function assertGateBrackets(pavilion, tag) {
     }
 
     // ④ 처마 정합: 처마는 외목도리 **밖으로** 캔틸레버해야 하고, 그 여장이 출목 총거리와 같은 급이다
-    //    (서까래가 외목도리를 지나 대략 출목만큼 더 나간다). 이 라운드에서 처마 값은 바꾸지 않았다 —
-    //    실측 결과 저작된 lowerEave/upperEave 가 이미 2출목이 받칠 깊이였기 때문이다.
+    //    (서까래가 외목도리를 지나 출목의 한두 배만큼 더 나간다).
+    //    상한 재핀 2026-08-04 (#54 G8): 1.6 → 2.15. 구 상한은 문루가 육축의 0.6 폭이던 시절의
+    //    처마(1.9m)에서 나온 값이고 측정된 계약이 아니었다. 사진 실측
+    //    (refs/hanyang-old/sungnyemun-1900s.jpg, 홍예 4.6m 환산 11.7px/m)에서 하층 처마는 기둥
+    //    중심선 밖 ≈2.87m, 공포대 최외 출목은 ≈1.0m 이므로 실물 캔틸레버/출목 ≈ 1.87 이다 —
+    //    즉 구 상한 1.6 이 실물을 배제하고 있었다. 하한 0.7 은 그대로 둔다(처마가 공포에 붙는 것을
+    //    막는 쪽은 반증되지 않았다). 새 상한은 실측 1.87 위로 상층 여유만 남긴 값이다.
     const roof = pavilion.roofs[i];
     const eave = (roof.width - storey.width) / 2;
     invariant(near((roof.depth - storey.depth) / 2, eave, 1e-9),
@@ -402,9 +443,9 @@ function assertGateBrackets(pavilion, tag) {
     invariant(eave > B.purlin.out,
       `${label}: 처마 ${eave.toFixed(2)}m 가 외목도리 ${B.purlin.out.toFixed(2)}m 밖으로 나가지 않는다`);
     const cantilever = (eave - B.purlin.out) / B.purlin.out;
-    invariant(cantilever >= 0.7 && cantilever <= 1.6,
-      `${label}: 외목도리 밖 캔틸레버/출목 ${cantilever.toFixed(3)} — 0.7~1.6 밖이면 처마와 공포가 `
-      + '서로 다른 건물의 비례다');
+    invariant(cantilever >= 0.7 && cantilever <= 2.15,
+      `${label}: 외목도리 밖 캔틸레버/출목 ${cantilever.toFixed(3)} — 0.7~2.15 밖이면 처마와 공포가 `
+      + '서로 다른 건물의 비례다(사진 실측 1.87)');
     // ⑤ 지붕면이 공포대를 관통하지 않는다. buildGateRoof 는 처마를 roof.y + height*0.20 에 두고
     //    중앙만 height*0.06 처지므로, 최저점조차 밴드 상단(=roof.y) 위여야 한다.
     const eaveLow = roof.height * 0.20 - roof.height * 0.06;
@@ -1342,12 +1383,34 @@ const defaultMerlons = assertMerlonBlocks(defaultSegments, 'default hanyang', de
 let gateParapetTriangles = 0;
 let gateMerlons = 0;
 const closureRows = [];
+const heightRows = [];
 for (const gate of defaultWall.gates) {
   const structure = cityGateStructureProfile(gate, defaultPlan.site);
   const masonry = cityGateMasonryProfile(gate, defaultPlan.site, structure);
   const pavilion = cityGatePavilionProfile(gate, structure, masonry);
   closureRows.push(...assertPavilionFacadeClosure(pavilion, `default hanyang/${gate.name}`)
     .map((row) => ({ gate: gate.name, ...row })));
+  // ── 육축:문루 높이 비(#54 G8) ──
+  // 사진 실측 육축 노출 / 문루 용마루 = 0.80 (= 육축:문루 1:1.25). 이 비는 지형 낙차가 육축
+  // 노출 높이를 6.1~10.2m 로 흔들기 때문에 seed 마다 다르다 — 그래서 저작 상수가 아니라
+  // **기본 hanyang 픽스처(seed 20260716) 4문**에 못 박는다. 통행면은 도로 표본의 중앙값이다
+  // (최고점은 육축 노출을 항상 하한 6.1m 로 되돌려 지형 정보를 잃는다).
+  //
+  // 단언은 **한쪽만** 건다. 사용자 판정이 지적한 방향은 "육축이 문루를 압도한다"이고, 그 반대
+  // (문루가 육축을 압도)는 여기서 고칠 수 없는 별건 원인을 갖는다: 평지 seed 에서 육축 노출이
+  // 홍예 클리어런스 바닥(gateArchClearance 4.4 + safety 0.5 + lintel 1.2 = 6.1m)에 고정되는데
+  // 인접 성벽 노출은 bodyHeight 7.9m 라, 그 경우 성문 육축이 옆 성벽보다 **낮다**. 그것을 문루
+  // 높이로 보정하면 경사 seed 에서 문루가 다시 작아진다 — 원인은 baseTopY 이므로 백로그로 넘긴다
+  // (실측: 기본 픽스처 북문 0.531 이 그 바닥 사례다).
+  const roadYs = structure.roadTerrain.samples.map((s) => s.y).sort((a, b) => a - b);
+  const masonryOverRoad = masonry.cornice.y1 - roadYs[roadYs.length >> 1];
+  const [, upperRoof] = pavilion.roofs;
+  const pavRidge = upperRoof.y + upperRoof.height - masonry.cornice.y1;
+  const ratio = masonryOverRoad / pavRidge;
+  invariant(ratio <= 0.85,
+    `default hanyang/${gate.name}: 육축 노출/문루 용마루 ${ratio.toFixed(3)} > 0.85 — `
+    + '"높은 석축 위 작은 정자"로 되돌아갔다(사진 실측 0.80)');
+  heightRows.push({ gate: gate.name, masonryOverRoad, pavRidge, ratio });
   for (const side of pavilion.parapet.sides) {
     const spans = cityWallMerlonSpans(side.length);
     gateMerlons += spans.count;
@@ -1367,6 +1430,17 @@ const closureSummary = `문루 파사드 하층 최저 커버리지 `
   + `개방 ${Math.max(...lowerRows.map((row) => row.openHeight)).toFixed(3)}m, `
   + `상층 개방 ${Math.min(...upperRows.map((row) => row.openHeight)).toFixed(3)}~`
   + `${Math.max(...upperRows.map((row) => row.openHeight)).toFixed(3)}m`;
+// 비례 실측 요약(#54 G8): 몸체/육축 상면, 하층 처마/육축 총폭, 육축 노출/문루 용마루.
+const proportionRows = defaultWall.gates.map((gate) => {
+  const structure = cityGateStructureProfile(gate, defaultPlan.site);
+  const masonry = cityGateMasonryProfile(gate, defaultPlan.site, structure);
+  const pavilion = cityGatePavilionProfile(gate, structure, masonry);
+  return assertGateProportion(pavilion, masonry, `default hanyang/${gate.name}`);
+});
+const span = (values) => `${Math.min(...values).toFixed(3)}~${Math.max(...values).toFixed(3)}`;
+const proportionSummary = `문루 비례 몸체/육축상면 ${span(proportionRows.map((r) => r.bodyOverTop))}`
+  + ` (사진 ≈1.00), 하층처마/육축총폭 ${span(proportionRows.map((r) => r.roofOverMasonry))}`
+  + ` (사진 1.18~1.23), 육축/문루용마루 ${span(heightRows.map((r) => r.ratio))} (사진 0.80)`;
 
 // 렌더러는 이 순수 spec 을 소비해야 한다. 옛 박스 상인방·연속 여장 프리즘·단층 콜로네이드가
 // 남아 있으면 형태 격상이 무효다(브라우저 없이 잡을 수 있는 최소 회귀 가드).
@@ -1463,4 +1537,4 @@ const forecourtAreas = forecourtRows.map((r) => r.area);
 const forecourtSummary = `${forecourtRows.length} forecourts `
   + `${Math.round(Math.min(...forecourtAreas))}~${Math.round(Math.max(...forecourtAreas))} m2`;
 
-console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary}, ${closureSummary})`);
+console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary}, ${closureSummary}, ${proportionSummary})`);
