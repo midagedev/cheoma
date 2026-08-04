@@ -954,6 +954,13 @@ export function createSky({ scene, sun, hemi, renderer, group, mountains, layout
   function dispose() {
     if (typeof window !== 'undefined' && window.__sky === skyDebug) delete window.__sky;
     scene.remove(skyRoot);
+    // three 의 Sprite 는 모든 인스턴스가 모듈 전역 지오메트리 하나를 공유한다
+    //   (three/src/objects/Sprite.js `_geometry`). environment 트리의 연기 스프라이트 풀이 이미
+    //   그 지오를 소유·해제하므로, 태양 원반을 트리 워크에 남기면 같은 지오가 두 번 dispose 된다.
+    //   post.js 의 sunGlow 와 같은 계약으로 자기 재질·텍스처만 해제한다.
+    skyRoot.remove(sunDisk);
+    sunDisk.material.dispose();
+    sunDiskTexture.dispose();
     disposeObjectTree(skyRoot);
     skyRoot.clear();
   }

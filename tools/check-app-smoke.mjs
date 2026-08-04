@@ -3701,13 +3701,15 @@ try {
   });
   const resumed = texturePlateau.resumedEnvironment;
   // Night atmosphere is #150-H depth-legibility (src/env/atmosphere-profiles.js NIGHT):
-  // sunInt 1.14 / sunColor 0xa8bce6 / fog 70–420 / fog 0x1e2c46. Older smoke goldens
+  // sunInt 1.14 / sunColor 0xa8bce6 / fog 70–420. Older smoke goldens
   // (1.08, and earlier 0.9 / 0x9fb4d9 / 60–400) predate the current profile.
+  // #53 R2 (2026-08-04, lead rebase): night fogColor 0x1e2c46 → 0x1a2740 — sky stops and
+  // fog stepped down −13% together for star contrast (vision SHIP; terrain-sky unity held).
   pass(
     resumed.visible
       && Math.abs(resumed.sunIntensity - 1.14) < 1e-6
       && resumed.sunColor === 0xa8bce6
-      && resumed.fogNear === 70 && resumed.fogFar === 420 && resumed.fogColor === 0x1e2c46
+      && resumed.fogNear === 70 && resumed.fogFar === 420 && resumed.fogColor === 0x1a2740
       && Math.abs(resumed.moteIntensity - 0.5) < 1e-6
       && resumed.moteColor === 0xcdd8f0
       && (resumed.smokeColor == null || resumed.smokeColor === 0x969eae),
