@@ -421,7 +421,14 @@ const expectedSceneHashes = {
   //   25,598,200 → 25,612,936 = +14,736이 순수 노드 citywall 기하 실측 델타(렌더 +29,472의
   //   절반, 그림자 패스 제외)와 정확히 일치. sync == 실제 module Worker == ?worker=0 폴백
   //   바이트 동일, 비전 2라운드 SHIP(슬릿 폐합 확인 포함).
-  hanyang: 'f6513091:02c0a7ef:c9db0e76:423a44cb',
+  // G8 문루 질량(2026-08-04, #54): 몸체를 육축 상면 0.90 폭으로 확대(실물 주칸 3.62~3.73m,
+  //   남문 7→9칸), 하층 처마가 육축 총폭의 1.00~1.30, 상층 정면 폭=하층, 육축 노출 ≤0.85.
+  //   성곽은 한양 전용 — hanyang 해시만 이동(village/town/capital/mja/snapshot 불변이 증거).
+  //   **단독 변인 증거(재기준 직전 실측)**: proxy c5517350 불변(필지·지붕 OBB 무이동),
+  //   objects 5358 불변(병합 버킷 흡수 — 순수 노드 city-wall objects=9 불변, 드로우콜 델타 0),
+  //   triangles 25,612,936 → 25,620,184 = +7,248이 순수 노드 성곽 기하 실측 델타(64,802→72,050)와
+  //   정확히 일치. sync == module Worker == ?worker=0 폴백 바이트 동일. 비전 SHIP(질량 관계 달성).
+  hanyang: '3a45e2d8:0d0c9c0e:9ab34fec:be1f1984',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
