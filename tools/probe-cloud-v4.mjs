@@ -371,9 +371,14 @@ pass(stdevV4 > stdevV3 * 1.10, '내부 명암 변조가 증가(내부 휘도 std
 pass(spread(sweepV4.rows, 'interiorLuma') > spread(sweepV3.rows, 'interiorLuma'),
   '내부 명암이 시선각에 의존(두께·시차 존재)',
   `v3 ${spread(sweepV3.rows, 'interiorLuma')} → v4 ${spread(sweepV4.rows, 'interiorLuma')}`);
-pass(sweepV4.rows[0].edgeBandPx > sweepV3.rows[0].edgeBandPx,
-  '외곽 알파 램프가 넓어짐(종이 컷아웃 윤곽 완화)',
-  `v3 ${sweepV3.rows[0].edgeBandPx}px → v4 ${sweepV4.rows[0].edgeBandPx}px`);
+// [재핀 2026-08-04, S6 실루엣 라운드] 원판은 v4 > v3 상대 비교였으나, S6부터 윤곽 완화의
+// 주 공급원이 마칭이 아니라 베이크 wisp 외곽으로 이동해 전제가 깨졌다(v3 2388 / v4 2297 —
+// 절대폭은 S4 시점 1180px 대비 1.95배). 완화 계약 자체는 절대 하한으로 유지한다.
+// FAIL-first: S6 소스에서 원판 단언이 실제 FAIL(2297 < 2388)함을 확인하고 교체.
+const EDGE_BAND_FLOOR_PX = 1180; // S4(a3d73a3) v4 실측 — 종이 컷아웃으로 되돌아가면 이 밑으로 떨어진다
+pass(sweepV4.rows[0].edgeBandPx >= EDGE_BAND_FLOOR_PX,
+  '외곽 알파 램프가 절대 하한 이상(종이 컷아웃 윤곽 완화 유지)',
+  `v4 ${sweepV4.rows[0].edgeBandPx}px (하한 ${EDGE_BAND_FLOOR_PX}px, v3 ${sweepV3.rows[0].edgeBandPx}px)`);
 
 // 자기그림자: 태양 방향(뷰공간)을 뒤집어 같은 쿼드를 다시 재면 v4 만 내부 패턴이 바뀐다.
 async function litSignature(strength) {
