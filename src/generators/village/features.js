@@ -61,21 +61,32 @@ export function buildVillageSijeon(shops, site, palette = null) {
   // Roof UV sample must come from a real shop façade, never a reserved break slot.
   const roofSample = (Array.isArray(shops) ? shops : []).find((shop) => shop && shop.kind !== 'break')
     || null;
+  //   - `thatch`(v4, #54): 계획이 점포별로 초가/기와를 고르므로 이엉 표면 재질이 필요하다. 마을
+  //     팔레트가 **이미 가진** `mats.thatch`(볏짚 캔버스 + snowSurface + lodEnvelope 태그)를 참조로
+  //     빌려 쓴다 — clone 하지 않으므로 새 텍스처·재질·프로그램이 0 이고, `applyThatchAge` 의 마을
+  //     노후 틴트도 행랑에 그대로 적용된다. 팔레트가 없는 경로(코어 하네스)만 단색으로 폴백한다.
+  //     빌린 재질은 이 함수가 소유하지 않으므로 실패 경로에서 dispose 해서는 안 된다.
+  const borrowedThatch = palette?.thatch?.isMaterial ? palette.thatch : null;
   const materials = {
     frame: sijeonMaterial(0x6a5a44, 0.85, 'wood'),
     opening: sijeonMaterial(0x453527, 0.94, 'opening'),
     bench: sijeonMaterial(0x765031, 0.9, 'wood'),
     storage: sijeonMaterial(0xd4cbb5, 0.97, 'wall'),
     roof: sijeonRoofMaterial(roofSample ? [roofSample] : shops, palette),
+    thatch: borrowedThatch || sijeonMaterial(0xbda87e, 1.0, 'roof'),
   };
   materials.roof.userData.snowSurface = true;
+  if (!borrowedThatch) materials.thatch.userData.snowSurface = true;
   // 깊은 처마 밑 후퇴 배면은 그림자 안이라 색만 올려선 검게 죽는다. 팔레트가 이미 같은 문제에 쓰는
   //   미량 emissive 관례(백골 목재·이엉의 emissive)를 따라, 배면이 널 목재로 판독되게 바닥을 올린다.
   materials.opening.emissive.setHex(0x17120b);
   try {
     return renderSijeon(shops, { materials, heightAt: site?.heightAt });
   } catch (error) {
-    for (const material of Object.values(materials)) material.dispose();
+    // 빌린 팔레트 재질은 이 함수의 소유가 아니다 — 여기서 해제하면 마을의 초가 집채가 함께 죽는다.
+    for (const material of Object.values(materials)) {
+      if (material !== borrowedThatch) material.dispose();
+    }
     throw error;
   }
 }

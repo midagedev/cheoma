@@ -119,6 +119,9 @@ const materials = {
   bench: semanticMaterial('bench', 0x765031, 0.9, 'wood'),
   storage: semanticMaterial('storage', 0xc8b995, 0.98, 'wall'),
   roof: semanticMaterial('roof', 0x3f454b, 0.91, 'roof'),
+  // v4(#54): 계획이 점포별로 초가/기와를 고르므로 공개 계약이 이엉 표면 재질까지 요구한다. 이 하네스는
+  //   팔레트 없이 공개 API 만 검사하므로 볏짚 톤 단색 한 벌을 직접 쥔다(제품 경로는 팔레트 차입).
+  thatch: semanticMaterial('thatch', 0xbda87e, 1.0, 'roof'),
 };
 materials.roof.userData.snowSurface = true;
 

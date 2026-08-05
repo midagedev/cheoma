@@ -3,9 +3,13 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import * as G from '../src/core/math/geom2.js';
+import { SIJEON_OCCLUDER_TOP } from '../src/runtime/village/village-door-records.js';
 import {
   SIJEON_FACADE_BAYS,
   SIJEON_FACADE_SCHEMA_VERSION,
+  SIJEON_ROOF_CHOGA,
+  SIJEON_ROOF_GIWA,
+  SIJEON_ROOF_MIX,
   SIJEON_SIGN_POLICY,
   SIJEON_KIND_BREAK,
   SIJEON_KIND_SHOP,
@@ -13,6 +17,7 @@ import {
   isSijeonShop,
   planSijeon,
   planSijeonFacade,
+  sijeonRoofKind,
 } from '../src/village/sijeon-plan.js';
 
 function invariant(condition, message) {
@@ -60,6 +65,42 @@ function boxesOverlap(a, b, epsilon = 1e-6) {
   return a.minX < b.maxX - epsilon && a.maxX > b.minX + epsilon
     && a.minY < b.maxY - epsilon && a.maxY > b.minY + epsilon
     && a.minZ < b.maxZ - epsilon && a.maxZ > b.minZ + epsilon;
+}
+
+// ── v4 지붕 표면 재구성 ────────────────────────────────────────────────────────────────
+// 계획이 내보낸 단면 격자를 **렌더러와 동일한 삼각형 분할**로 재구성한다. 폐합 부재가 실제 지붕
+// 아래에 있는지(틈 없음 / 관통 없음)를 단언하려면 해석식이 아니라 이 격자에서 높이를 읽어야 한다.
+function roofTriangles(roof) {
+  const lines = roof.surface.lines;
+  const triangles = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    const cols = lines[i].points.length;
+    for (let j = 0; j < cols - 1; j++) {
+      const a = { x: lines[i].x, z: lines[i].points[j].z, y: lines[i].points[j].y };
+      const b = { x: lines[i].x, z: lines[i].points[j + 1].z, y: lines[i].points[j + 1].y };
+      const c = { x: lines[i + 1].x, z: lines[i + 1].points[j].z, y: lines[i + 1].points[j].y };
+      const d = { x: lines[i + 1].x, z: lines[i + 1].points[j + 1].z, y: lines[i + 1].points[j + 1].y };
+      triangles.push([a, b, c], [b, d, c]);
+    }
+  }
+  return triangles;
+}
+
+// (x, z) 를 덮는 삼각형의 보간 높이. 격자선 위의 점은 여러 삼각형에 걸리므로 최대값을 쓴다
+// (= 지붕면의 상한 → 관통 판정이 보수적이 된다). 덮는 삼각형이 없으면 null = 지붕 미피복.
+function roofSurfaceYAt(triangles, x, z, epsilon = 1e-7) {
+  let best = null;
+  for (const [a, b, c] of triangles) {
+    const d = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+    if (Math.abs(d) < 1e-12) continue;
+    const w0 = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / d;
+    const w1 = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / d;
+    const w2 = 1 - w0 - w1;
+    if (w0 < -epsilon || w1 < -epsilon || w2 < -epsilon) continue;
+    const y = w0 * a.y + w1 * b.y + w2 * c.y;
+    if (best === null || y > best) best = y;
+  }
+  return best;
 }
 
 function assertFiniteTree(value, label, path = label) {
@@ -152,26 +193,158 @@ function assertFacade(facade, label) {
   invariant(facade.corridor.maxEaveZ >= facade.building.bounds.maxZ,
     `${label}: roof no longer covers the facade`);
 
-  // #54 벽체 완결: 지붕이 벽체 질량 위에 앉는가.
-  //   수정 전 계획은 전면 골조 + 후면 저장 박스 + 박공지붕만 소유했고 측벽·배면벽·박공벽이 없었다.
-  //   그래서 사선·망원(성문 접근로)에서 얇은 지붕판이 공중에 뜨고 밑면이 그대로 보였다.
-  //   이 블록은 위 physicalParts 의 본체 높이 상한(<= building.height)을 **완화하지 않는다** —
-  //   벽 위에서 지붕면까지 올라가는 closure 부재에만 적용되는 별도 상한(`roofline`)을 쓴다.
+  // #54 벽체 완결 → v4 지붕 격상: 지붕이 벽체 질량 위에 앉는가.
+  //   v2 계획은 전면 골조 + 후면 저장 박스 + 박공지붕만 소유했고 측벽·배면벽·박공벽이 없어 얇은
+  //   지붕판이 공중에 떴다. v3 는 그 틈을 **선형 지붕면 전제의 스칼라 상한** 하나로 닫았고, v4 의
+  //   지붕면은 유형별 곡면이라 스칼라로는 닫히지 않는다. 그래서 아래 단언은 스칼라 대신 계획이
+  //   내보낸 격자에서 읽은 실제 지붕면과 폐합 프리즘을 직접 대조한다.
+  //   위 physicalParts 의 본체 높이 상한(<= building.height)은 **완화되지 않는다** — v4 에서는 벽도
+  //   본체 높이까지만 올라가고 그 위는 closure 프리즘이 맡는다(v3 보다 강한 계약이다).
   const roofline = facade.roofline;
+  const roof = facade.roof;
   invariant(roofline && roofline.wallTopY === facade.building.height,
     `${label}: roofline.wallTopY must equal the body height`);
-  invariant(roofline.ridgeY === facade.building.height + facade.roof.rise,
-    `${label}: roofline.ridgeY drifted from the roof rise`);
-  invariant(roofline.slabAllowance > 0,
-    `${label}: roofline must reserve a roof-slab allowance`);
-  // 지붕면 y(z): 처마(z=±roof.depth/2, y=wall top)에서 용마루(z=0)까지의 선형 상승.
-  const halfRoofDepth = facade.roof.depth / 2;
-  const roofPlaneY = (z) => facade.building.height
-    + facade.roof.rise * (1 - Math.abs(z) / halfRoofDepth);
-  invariant(roofline.closureTopY >= facade.building.height - 1e-9
-      && roofline.closureTopY <= roofPlaneY(building.maxZ) + 1e-9,
-  `${label}: closure top ${roofline.closureTopY} escaped [wall top, roof plane]`);
+  invariant(roof.thickness > 0, `${label}: roof member has no thickness`);
+  // 처마 **밑면**이 벽 상단에 앉는다 = 지붕면은 그보다 부재 두께만큼 높다.
+  invariant(Math.abs(roofline.eaveTopY - (facade.building.height + roof.thickness)) <= 1e-9,
+    `${label}: eaveTopY ${roofline.eaveTopY} is not wallTop + thickness`);
+  invariant(Math.abs(roofline.apexY - (roofline.eaveTopY + roof.rise)) <= 1e-9,
+    `${label}: roofline.apexY drifted from eaveTop + rise`);
+  invariant(roofline.ridgeY <= roofline.apexY + 1e-9
+      && roofline.ridgeY >= roofline.eaveTopY + roof.rise * 0.8,
+  `${label}: sampled ridge ${roofline.ridgeY} escaped [eaveTop+0.8·rise, apex]`);
+  invariant(roofline.slabAllowance > 0 && roofline.slabAllowance < roof.thickness,
+    `${label}: closure allowance ${roofline.slabAllowance} must be inside the member thickness`);
+  // 문 가림 occluder 상한. `src/runtime/village/village-door-records.js#sijeonRecord` 가 시전
+  //   occluder 를 `baseY .. baseY + SIJEON_OCCLUDER_TOP` 프리즘으로 세우므로 두 값은 동조해야 한다
+  //   (occluder 가 실제 질량보다 낮으면 문 가림 판정이 틀린다). 2026-08-05 재핀: 4.7 → 5.6, 근거는
+  //   초가 물매가 그 상한에 갇혀 "얇은 접시" 로 기각된 비전 판정(sijeon.md §3.5.6). 게이트는 상수를
+  //   그 모듈에서 직접 읽어 대조하므로 한쪽만 바뀌면 실패한다.
+  invariant(roofline.ceilingY === SIJEON_OCCLUDER_TOP,
+    `${label}: roof ceiling ${roofline.ceilingY} drifted from the door-occlusion prism`
+    + ` top ${SIJEON_OCCLUDER_TOP}`);
+  invariant(roofline.topY <= roofline.ceilingY + 1e-9,
+    `${label}: roof top ${roofline.topY} exceeds the door-occlusion prism ceiling`);
 
+  // 지붕 표면 격자.
+  invariant(roof.kind === SIJEON_ROOF_GIWA || roof.kind === SIJEON_ROOF_CHOGA,
+    `${label}: unknown roof kind ${roof.kind}`);
+  invariant(roof.role === (roof.kind === SIJEON_ROOF_CHOGA ? 'hip-roof' : 'gable-roof'),
+    `${label}: roof role ${roof.role} does not match kind ${roof.kind}`);
+  invariant(roof.surface?.kind === 'section-loft',
+    `${label}: roof surface is not a section loft`);
+  const lines = roof.surface.lines;
+  invariant(Array.isArray(lines) && lines.length >= 5,
+    `${label}: roof needs at least 5 sections (${lines?.length})`);
+  const cols = lines[0].points.length;
+  invariant(cols >= 7 && cols % 2 === 1,
+    `${label}: roof section needs an odd count of at least 7 points (${cols})`);
+  const halfRoofWidth = roof.width / 2;
+  const halfRoofDepth = roof.depth / 2;
+  for (const [index, line] of lines.entries()) {
+    invariant(line.points.length === cols,
+      `${label}: section ${index} has a ragged point count`);
+    invariant(Math.abs(line.x) <= halfRoofWidth + 1e-9,
+      `${label}: section ${index} x ${line.x} escaped the roof width`);
+    if (index > 0) {
+      invariant(line.x > lines[index - 1].x + 1e-12,
+        `${label}: section x is not strictly increasing at ${index}`);
+    }
+    for (const [j, point] of line.points.entries()) {
+      invariant(Math.abs(point.z) <= halfRoofDepth + 1e-9,
+        `${label}: section ${index} point ${j} z ${point.z} escaped the roof depth`);
+      invariant(point.y >= roofline.eaveTopY - 1e-9 && point.y <= roofline.apexY + 1e-9,
+        `${label}: section ${index} point ${j} y ${point.y} escaped [eaveTop, apex]`);
+      if (j > 0) {
+        invariant(point.z >= line.points[j - 1].z - 1e-12,
+          `${label}: section ${index} z is not ordered at ${j}`);
+      }
+    }
+    // 처마 링은 지붕면의 최저 고도다(기와는 앙곡만큼 들리고, 초가는 정확히 처마 높이).
+    invariant(line.points[0].y <= roofline.eaveTopY + 0.2 + 1e-9
+        && line.points[cols - 1].y <= roofline.eaveTopY + 0.2 + 1e-9,
+    `${label}: section ${index} eave ring drifted above the eave band`);
+  }
+  invariant(Math.abs(lines[0].x + halfRoofWidth) <= 1e-9
+      && Math.abs(lines[lines.length - 1].x - halfRoofWidth) <= 1e-9,
+  `${label}: roof sections do not reach both roof edges`);
+
+  // 용마루(기와 프리즘) / 용마름(초가 캡).
+  const ridge = roof.ridge;
+  invariant(ridge, `${label}: roof ridge member missing`);
+  invariant(ridge.role === (roof.kind === SIJEON_ROOF_CHOGA ? 'ridge-roll' : 'ridge-tile'),
+    `${label}: ridge role ${ridge.role} does not match kind ${roof.kind}`);
+  invariant(roofline.topY >= ridge.topY - 1e-9,
+    `${label}: roofline.topY does not account for the ridge member`);
+
+  const triangles = roofTriangles(roof);
+
+  if (roof.kind === SIJEON_ROOF_CHOGA) {
+    // R2 차단 결함: 압출 프리즘 용마름이 처지는 능선을 따라가지 못해 돔에서 떠올랐고, 리본 마구리
+    //   단면이 정육면체 블록으로 보였다. 계약은 이제 (a) 캡이 단면열이고 (b) 그 양끝 점이 지붕면
+    //   격자에 **밀착**하며 (c) 끝단 단면의 높이가 죽어 뭉툭한 마구리를 만들지 않는다는 것이다.
+    invariant(ridge.kind === 'ridge-cap',
+      `${label}: thatch ridge must be a lattice-hugging cap, got ${ridge.kind}`);
+    const capLines = ridge.lines;
+    invariant(Array.isArray(capLines) && capLines.length >= 3,
+      `${label}: ridge cap needs at least 3 sections`);
+    let bulgeMax = 0;
+    for (const [index, line] of capLines.entries()) {
+      const points = line.points;
+      invariant(points.length >= 3, `${label}: ridge cap section ${index} is degenerate`);
+      for (const point of points) {
+        const surface = roofSurfaceYAt(triangles, line.x, point.z);
+        invariant(surface !== null,
+          `${label}: ridge cap section ${index} sits outside the roof footprint`);
+        // 캡은 지붕면 위에 얹힌다(파고들지 않는다) — 그리고 밀착 상한을 넘어 뜨지 않는다.
+        invariant(point.y >= surface - 1e-6,
+          `${label}: ridge cap dips into the roof surface at x=${line.x.toFixed(3)}`);
+        const lift = point.y - surface;
+        if (lift > bulgeMax) bulgeMax = lift;
+        // 폭 방향 양끝은 지붕면에 정확히 붙어야 한다 = 공기 틈 금지.
+        if (point === points[0] || point === points[points.length - 1]) {
+          invariant(lift <= 1e-6,
+            `${label}: ridge cap edge floats ${lift.toFixed(4)}m above the roof surface`);
+        }
+      }
+    }
+    invariant(bulgeMax > 0.02,
+      `${label}: ridge cap has no volume above the roof (${bulgeMax.toFixed(4)}m)`);
+    // 롤은 **용마루 구간만** 덮는다. 마구리 경사면까지 지나가면 모히칸처럼 능선 밖으로 뻗는다.
+    //   용마루 끝에서는 처짐이 0 이므로 지붕면이 정확히 apex 높이다 — 캡의 끝 단면이 그 조건을
+    //   만족하는지로 검사한다(경사면 위였다면 그보다 훨씬 낮다).
+    for (const line of [capLines[0], capLines[capLines.length - 1]]) {
+      const ridgeHeight = roofSurfaceYAt(triangles, line.x, 0);
+      invariant(ridgeHeight !== null && ridgeHeight >= roofline.apexY - 0.02,
+        `${label}: ridge cap end at x=${line.x.toFixed(3)} sits on the hip slope`
+        + ` (roof ${ridgeHeight === null ? 'n/a' : ridgeHeight.toFixed(3)} vs apex`
+        + ` ${roofline.apexY.toFixed(3)}) — the roll must stay on the ridge`);
+    }
+    // 끝단 단면은 볼륨이 0 에 수렴한다(뭉툭한 마구리 블록 금지).
+    for (const line of [capLines[0], capLines[capLines.length - 1]]) {
+      let endLift = 0;
+      for (const point of line.points) {
+        const surface = roofSurfaceYAt(triangles, line.x, point.z);
+        if (surface !== null) endLift = Math.max(endLift, point.y - surface);
+      }
+      invariant(endLift <= bulgeMax * 0.25 + 1e-6,
+        `${label}: ridge cap end section keeps ${endLift.toFixed(4)}m of blunt volume`);
+    }
+  } else {
+    invariant(ridge.kind === 'ridge-prism' && (ridge.axis === 'x' || ridge.axis === 'z'),
+      `${label}: tile ridge must be an extruded prism`);
+    invariant(ridge.extent > 0 && Array.isArray(ridge.profile) && ridge.profile.length >= 4,
+      `${label}: ridge prism is degenerate`);
+    invariant(ridge.topY >= roofline.ridgeY - 1e-9,
+      `${label}: ridge member ${ridge.topY} sinks below the roof surface`);
+  }
+
+  // R2 차단 결함 ②: 인접 점포 지붕의 기하 교차. 배치 pitch 안에서 지붕이 서로 겹치면 유형·높이가
+  //   다른 이웃끼리 하드 관통이 되어 초가 돔이 기와 지붕면을 뚫고 나온다(부감 히어로 프레임).
+  //   행랑은 벽을 맞댄 연속 건물이므로 지붕 폭은 필지 pitch 를 넘을 수 없다.
+  invariant(roof.width <= facade.lot.width + 1e-9,
+    `${label}: roof width ${roof.width.toFixed(3)} exceeds the placement pitch`
+    + ` ${facade.lot.width.toFixed(3)} — adjacent roofs would intersect`);
   const walls = Array.isArray(facade.walls) ? facade.walls : [];
   const wallsOf = (role) => walls.filter((wall) => wall.role === role);
   invariant(walls.length === 4
@@ -190,8 +363,9 @@ function assertFacade(facade, label) {
     invariant(bounds.minZ >= lot.minZ - 1e-9
         && bounds.maxZ <= facade.corridor.maxNonEaveZ + 1e-9,
     `${label}:${wall.role} entered the road corridor`);
-    invariant(bounds.minY >= -1e-9 && bounds.maxY <= roofline.closureTopY + 1e-9,
-      `${label}:${wall.role} escaped [ground, closure top]`);
+    // v4: 벽은 본체 높이까지만 — 그 위는 지붕면을 따르는 closure 프리즘이 맡는다.
+    invariant(bounds.minY >= -1e-9 && bounds.maxY <= facade.building.height + 1e-9,
+      `${label}:${wall.role} escaped [ground, body height]`);
     // 개방 점포 전면은 발굴 사료 기반 어휘다(docs/sijeon.md §1.4) — 벽이 계획된 개구를 덮으면
     // 그 근거를 지우는 것이므로 실패로 다룬다.
     for (const opening of facade.openings) {
@@ -235,38 +409,93 @@ function assertFacade(facade, label) {
     `${label}: front header does not span the full building width`);
   invariant(headerBounds.minY <= lintelTop + 1e-9,
     `${label}: an open band remains between the lintel and the roof`);
-  invariant(headerBounds.maxY >= roofline.closureTopY - 1e-9,
-    `${label}: front header stops below the roof plane`);
+  invariant(Math.abs(headerBounds.maxY - facade.building.height) <= 1e-9,
+    `${label}: front header does not reach the body height`);
   invariant(Math.abs(headerBounds.maxZ - building.maxZ) <= 1e-9,
     `${label}: front header is not on the shop frontage plane`);
 
-  const gables = Array.isArray(facade.gables) ? facade.gables : [];
-  invariant(gables.length === 2, `${label}: gable walls missing (${gables.length})`);
-  invariant(new Set(gables.map((gable) => gable.side)).size === 2,
-    `${label}: both gables sit on one side`);
-  for (const gable of gables) {
-    invariant(gable.role === 'gable-wall', `${label}: gable role drifted`);
-    invariant(gable.thickness > 0, `${label}: gable has no thickness`);
-    const profile = Array.isArray(gable.profile) ? gable.profile : [];
-    invariant(profile.length >= 3, `${label}: gable profile is degenerate (${profile.length})`);
-    const face = gable.side > 0 ? building.maxX : building.minX;
-    invariant(Math.abs(gable.x - (face - gable.side * gable.thickness / 2)) <= 1e-9,
-      `${label}: gable ${gable.side} is not flush with the building side face`);
-    const zs = profile.map((point) => point.z);
-    const ys = profile.map((point) => point.y);
+  // ── v4 지붕 앉음(roof seat): 네 방향 폐합 프리즘 ─────────────────────────────────────
+  // 이것이 "지붕이 벽체 위에 앉는다"의 수치 계약이다. 각 프리즘 상단이
+  //   (a) 그 지점 지붕면보다 낮고           → 부재 관통 없음
+  //   (b) 그 지점 지붕 밑면(지붕면 − 두께)보다 높다 → 벽 위 열린 띠 없음
+  // 두 조건을 **계획이 내보낸 격자에서 읽은 실제 높이**로 확인한다.
+  const closures = Array.isArray(facade.closures) ? facade.closures : [];
+  invariant(closures.length === 4,
+    `${label}: roof seat needs four closures, got ${closures.length}`);
+  const sideClosures = closures.filter((closure) => closure.axis === 'x');
+  const endClosures = closures.filter((closure) => closure.axis === 'z');
+  invariant(sideClosures.length === 2 && endClosures.length === 2,
+    `${label}: closures must be two side prisms and two end prisms`);
+  invariant(new Set(sideClosures.map((closure) => closure.side)).size === 2,
+    `${label}: both side closures sit on one side`);
+  invariant(new Set(endClosures.map((closure) => closure.end)).size === 2,
+    `${label}: both end closures sit on one end`);
+  const expectedSideRole = roof.kind === SIJEON_ROOF_CHOGA ? 'eave-closure' : 'gable-wall';
+  for (const closure of sideClosures) {
+    invariant(closure.role === expectedSideRole,
+      `${label}: side closure role ${closure.role} does not match roof kind ${roof.kind}`);
+  }
+  for (const closure of endClosures) {
+    invariant(closure.role === 'eave-closure',
+      `${label}: end closure role ${closure.role} drifted`);
+  }
+
+  let seatedPoints = 0;
+  for (const closure of closures) {
+    invariant(closure.extent > 0, `${label}:${closure.role} prism has no extent`);
+    const profile = Array.isArray(closure.profile) ? closure.profile : [];
+    invariant(profile.length >= 5,
+      `${label}:${closure.role} profile is degenerate (${profile.length})`);
+    const span = closure.axis === 'x'
+      ? { min: building.minZ, max: building.maxZ }
+      : { min: building.minX, max: building.maxX };
+    // 프리즘은 벽 두께 구간을 차지한다. 그 구간에서 **가장 낮은** 지붕면을 기준으로 삼아야 반대
+    // 면에서 지붕을 뚫지 않는다 — 두 면 모두에서 검사한다.
+    const faces = closure.axis === 'x'
+      ? [closure.center - closure.extent / 2, closure.center + closure.extent / 2]
+      : [closure.center - closure.extent / 2, closure.center + closure.extent / 2];
+    let sawTop = false;
     for (const point of profile) {
-      invariant(point.z >= building.minZ - 1e-9 && point.z <= building.maxZ + 1e-9,
-        `${label}: gable profile escaped the building depth`);
+      invariant(point.u >= span.min - 1e-9 && point.u <= span.max + 1e-9,
+        `${label}:${closure.role} profile escaped the building footprint at u=${point.u}`);
       invariant(point.y >= facade.building.height - 1e-9,
-        `${label}: gable profile dipped below the wall top`);
-      invariant(point.y <= roofPlaneY(point.z) + 1e-9,
-        `${label}: gable profile pierced the roof plane at z=${point.z}`);
+        `${label}:${closure.role} profile dipped below the wall top`);
+      if (point.y <= facade.building.height + 1e-9) continue;
+      sawTop = true;
+      for (const face of faces) {
+        const x = closure.axis === 'x' ? face : point.u;
+        const z = closure.axis === 'x' ? point.u : face;
+        const surface = roofSurfaceYAt(triangles, x, z);
+        invariant(surface !== null,
+          `${label}:${closure.role} sits outside the roof footprint at (${x.toFixed(3)}, ${z.toFixed(3)})`
+          + ' — the roof does not cover the wall');
+        invariant(point.y <= surface + 1e-9,
+          `${label}:${closure.role} pierced the roof surface at (${x.toFixed(3)}, ${z.toFixed(3)}):`
+          + ` closure ${point.y.toFixed(4)} > surface ${surface.toFixed(4)}`);
+        invariant(point.y >= surface - roof.thickness - 1e-9,
+          `${label}:${closure.role} leaves an open band at (${x.toFixed(3)}, ${z.toFixed(3)}):`
+          + ` closure ${point.y.toFixed(4)} < underside ${(surface - roof.thickness).toFixed(4)}`);
+        seatedPoints++;
+      }
     }
-    // 지붕 단면을 실제로 채우는가. 용마루 근처까지 올라가야 측면·사선에서 지붕 밑면이 사라진다.
-    invariant(Math.max(...ys) >= facade.building.height + facade.roof.rise * 0.85 - 1e-9,
-      `${label}: gable apex ${Math.max(...ys)} does not close the roof section`);
-    invariant(Math.min(...zs) <= building.minZ + 1e-9 && Math.max(...zs) >= building.maxZ - 1e-9,
-      `${label}: gable profile does not span the building depth`);
+    invariant(sawTop, `${label}:${closure.role} never rises above the wall top`);
+    invariant(profile.some((point) => Math.abs(point.u - span.min) <= 1e-9)
+        && profile.some((point) => Math.abs(point.u - span.max) <= 1e-9),
+    `${label}:${closure.role} profile does not span the building footprint`);
+    for (const opening of facade.openings) {
+      invariant(boxBounds(opening).maxY <= facade.building.height + 1e-9,
+        `${label}: an opening rose into the roof-seat band`);
+    }
+  }
+  invariant(seatedPoints >= 8,
+    `${label}: too few roof-seat samples verified (${seatedPoints})`);
+
+  // 지붕이 건물 평면 전체를 덮는가 — 폐합선 밖의 코너까지 직접 확인한다.
+  for (const x of [building.minX, 0, building.maxX]) {
+    for (const z of [building.minZ, 0, building.maxZ]) {
+      invariant(roofSurfaceYAt(triangles, x, z) !== null,
+        `${label}: roof does not cover the building at (${x.toFixed(3)}, ${z.toFixed(3)})`);
+    }
   }
 
   // 개방 전면 문법 보존(축소·제거 금지): 기둥 3 + 인방 2 + 판문 2 는 위에서 이미 단언했고,
@@ -450,24 +679,47 @@ for (const segmentId of segmentIds) {
   }
 }
 
+// v4: 치수 스윕과 fuzz 는 **두 지붕 유형 모두**를 지나야 한다. id 없는 fixture 는 항상 fallback
+//   유형(기와)이므로, 종전 스윕만으로는 초가 지붕이 극단 치수에서 한 번도 검사되지 않았다(실측
+//   2026-08-05 FAIL-first 4번: 이엉 평면 피복 회귀를 이 게이트가 놓쳤다). 유형별 프로브 ID 를
+//   고정해 같은 치수를 두 유형으로 모두 통과시킨다.
+const kindProbeId = {};
+for (let probe = 0; probe < 64 && Object.keys(kindProbeId).length < 2; probe++) {
+  const id = `roof-probe-${probe}`;
+  const kind = sijeonRoofKind({ id });
+  if (!kindProbeId[kind]) kindProbeId[kind] = id;
+}
+invariant(kindProbeId[SIJEON_ROOF_GIWA] && kindProbeId[SIJEON_ROOF_CHOGA],
+  'could not find a probe id for each roof kind — the mix policy is degenerate');
+const facadeVariants = [
+  { suffix: 'bare', extra: {} },
+  { suffix: SIJEON_ROOF_GIWA, extra: { id: kindProbeId[SIJEON_ROOF_GIWA] } },
+  { suffix: SIJEON_ROOF_CHOGA, extra: { id: kindProbeId[SIJEON_ROOF_CHOGA] } },
+];
+const kindsExercised = new Set();
+
 let facadeCases = 0;
 for (const width of [4.4, 5.2, 6.2, 8, 12.5]) {
   for (const depth of [5.6, 6.4, 8.5, 11, 18]) {
-    const label = `${width}x${depth}`;
-    const facade = withoutGlobalRandom(
-      () => planSijeonFacade({ w: width, d: depth, kind: SIJEON_KIND_SHOP }),
-      `facade:${label}`,
-    );
-    const repeat = withoutGlobalRandom(
-      () => planSijeonFacade({ w: width, d: depth, kind: SIJEON_KIND_SHOP }),
-      `facade:${label}:repeat`,
-    );
-    invariant(stableJson(facade) === stableJson(repeat),
-      `${label}: facade is not deterministic`);
-    invariant(stableJson(JSON.parse(JSON.stringify(facade))) === stableJson(facade),
-      `${label}: facade is not JSON-serializable`);
-    assertFacade(facade, label);
-    facadeCases++;
+    for (const variant of facadeVariants) {
+      const label = `${width}x${depth}/${variant.suffix}`;
+      const input = { w: width, d: depth, kind: SIJEON_KIND_SHOP, ...variant.extra };
+      const facade = withoutGlobalRandom(
+        () => planSijeonFacade({ ...input }),
+        `facade:${label}`,
+      );
+      const repeat = withoutGlobalRandom(
+        () => planSijeonFacade({ ...input }),
+        `facade:${label}:repeat`,
+      );
+      invariant(stableJson(facade) === stableJson(repeat),
+        `${label}: facade is not deterministic`);
+      invariant(stableJson(JSON.parse(JSON.stringify(facade))) === stableJson(facade),
+        `${label}: facade is not JSON-serializable`);
+      assertFacade(facade, label);
+      kindsExercised.add(facade.roof.kind);
+      facadeCases++;
+    }
   }
 }
 
@@ -481,13 +733,19 @@ const fuzz01 = () => {
 for (let index = 0; index < 256; index++) {
   const width = 4.4 + fuzz01() * 20;
   const depth = 5.6 + fuzz01() * 28;
-  const facade = withoutGlobalRandom(
-    () => planSijeonFacade({ w: width, d: depth }),
-    `facade:fuzz:${index}`,
-  );
-  assertFacade(facade, `fuzz:${index}`);
-  facadeCases++;
+  for (const variant of facadeVariants) {
+    const label = `fuzz:${index}/${variant.suffix}`;
+    const facade = withoutGlobalRandom(
+      () => planSijeonFacade({ w: width, d: depth, ...variant.extra }),
+      `facade:${label}`,
+    );
+    assertFacade(facade, label);
+    kindsExercised.add(facade.roof.kind);
+    facadeCases++;
+  }
 }
+invariant(kindsExercised.has(SIJEON_ROOF_GIWA) && kindsExercised.has(SIJEON_ROOF_CHOGA),
+  `dimension sweep did not exercise both roof kinds (${[...kindsExercised].join(',')})`);
 
 // Placement-derived shops keep segment context on the facade; breaks never get one.
 const longFacade = planSijeonFacade(longShops[0]);
@@ -528,10 +786,10 @@ console.log(
 
 
 // #227 schema v2 signs — decorative only, sparse, non-emissive.
-// 버전 상수만 v3 로 추적한다(#54, 2026-08-04): 계획이 벽체까지 소유하게 되어 v2 렌더러로는 닫힌
-// 행랑을 만들 수 없다 = 소비자 계약 변경. 표식 단언 자체는 그대로 유지·확장만 한다.
+// 버전 상수만 v4 로 추적한다(#54, 2026-08-05): v3 는 계획이 벽체까지 소유하게 된 변경, v4 는 지붕이
+// 점포별 초가/기와 로프트 표면으로 바뀐 변경이다. 둘 다 소비자 계약 변경. 표식 단언은 유지·확장만.
 {
-  invariant(SIJEON_FACADE_SCHEMA_VERSION === 3, 'schema version must be 3');
+  invariant(SIJEON_FACADE_SCHEMA_VERSION === 4, 'schema version must be 4');
   invariant(SIJEON_SIGN_POLICY.emissive === false, 'sign policy must be non-emissive');
   const withId = planSijeonFacade({ w: 6.2, d: 7.5, id: 'sijeon-test-1' });
   invariant(Array.isArray(withId.signs), 'signs array required');
@@ -542,5 +800,96 @@ console.log(
   }
   const noId = planSijeonFacade({ w: 6.2, d: 7.5 });
   invariant(Array.isArray(noId.signs) && noId.signs.length === 0, 'no id → no signs');
+}
+
+// ── v4 지붕 유형 혼합 (#54, 2026-08-05) ─────────────────────────────────────────────────
+// 사료는 행랑 지붕 형식을 확정하지 않는다(docs/sijeon.md §2) — 그래서 계약은 "혼합이 존재하고 한
+// 유형으로 붕괴하지 않는다"이고, 특정 비율이 아니다. 임계는 실측 보정값이므로 대역으로 단언한다.
+{
+  invariant(Object.isFrozen(SIJEON_ROOF_MIX), 'roof mix policy must be immutable');
+  invariant(SIJEON_ROOF_MIX.fallbackKind === SIJEON_ROOF_GIWA,
+    'dimension-only fixtures must keep a deterministic fallback roof kind');
+  // id 없는 fixture: 유형·지터 모두 결정론 기본값.
+  const bare = planSijeonFacade({ w: 6.2, d: 8.5 });
+  invariant(bare.roof.kind === SIJEON_ROOF_MIX.fallbackKind,
+    'no-id fixture did not take the fallback roof kind');
+  // R2: 벽 상단 대역이 유형별로 분리됐다(초가 처마가 기와 처마보다 항상 위 — FIX ② 완화).
+  //   id 없는 fixture 는 지터 0 이므로 그 유형 대역의 상단값을 그대로 갖는다.
+  invariant(bare.building.height === 2.86,
+    `no-id fixture must keep the authored giwa band top (got ${bare.building.height})`);
+  const chogaProbe = (() => {
+    for (let probe = 0; probe < 64; probe++) {
+      const id = `lap-probe-${probe}`;
+      if (sijeonRoofKind({ id }) === SIJEON_ROOF_CHOGA) {
+        return planSijeonFacade({ w: 6.2, d: 8.5, id });
+      }
+    }
+    return null;
+  })();
+  invariant(chogaProbe, 'could not build a choga probe facade');
+  // 유형 간 처마 라프 순서: 초가 처마 상단이 기와 처마 상단보다 확실히 위여야, 곡선 구간의 얕은
+  //   겹침에서 기와가 이엉 아래로 들어가 "서로 뚫고 나온 귀" 가 되지 않는다.
+  const giwaEaveMax = 2.86 + 0.15;
+  const chogaEaveMin = 3.00 - 0.10 + 0.36;
+  invariant(chogaEaveMin - giwaEaveMax >= 0.2 - 1e-9,
+    `thatch eave band must clear the tile eave band by 0.2m`
+    + ` (choga min ${chogaEaveMin.toFixed(3)} vs giwa max ${giwaEaveMax.toFixed(3)})`);
+  invariant(chogaProbe.roofline.eaveTopY >= chogaEaveMin - 1e-9
+      && bare.roofline.eaveTopY <= giwaEaveMax + 1e-9,
+  `${'eave lap'}: measured eave tops left their type bands`);
+  invariant(planSijeonFacade({ w: 6.2, d: 8.5 }).roof.kind === bare.roof.kind,
+    'roof kind is not reproducible');
+
+  // 네 개의 서로 다른 간선 fixture. 각 fixture 에서 두 유형이 모두 나오고, 풀 혼합비가 대역 안인가.
+  const arterials = [
+    { id: 'mix-a', level: 'daero', width: 10, pts: [{ x: -300, z: 0 }, { x: 300, z: 0 }] },
+    { id: 'mix-b', level: 'daero', width: 12, pts: [{ x: -260, z: 40 }, { x: 260, z: 40 }] },
+    { id: 'mix-c', level: 'daero', width: 8, pts: [{ x: 0, z: -280 }, { x: 0, z: 280 }] },
+    { id: 'mix-d', level: 'daero', width: 14, pts: [{ x: -220, z: -60 }, { x: 220, z: 60 }] },
+  ];
+  const mixSite = { center: { x: 0, z: 0 }, bowlR: 400 };
+  let pooledShops = 0;
+  let pooledGiwa = 0;
+  let maxRoofWidth = 0;
+  for (const arterial of arterials) {
+    const fixtureShops = withoutGlobalRandom(
+      () => planSijeon({ roads: [arterial] }, mixSite).filter(isSijeonShop),
+      `mix:${arterial.id}`,
+    );
+    invariant(fixtureShops.length >= 20,
+      `${arterial.id}: mix fixture is too small (${fixtureShops.length})`);
+    const kinds = fixtureShops.map((shop) => sijeonRoofKind(shop));
+    const giwa = kinds.filter((kind) => kind === SIJEON_ROOF_GIWA).length;
+    const choga = kinds.filter((kind) => kind === SIJEON_ROOF_CHOGA).length;
+    invariant(giwa + choga === kinds.length, `${arterial.id}: unknown roof kind in the mix`);
+    invariant(giwa > 0 && choga > 0,
+      `${arterial.id}: roof mix collapsed to one type (giwa ${giwa} / choga ${choga})`);
+    // 계획이 실제로 두 유형의 지붕 형상을 내놓는가(유형 라벨만 바뀌는 것이 아니다).
+    for (const kind of [SIJEON_ROOF_GIWA, SIJEON_ROOF_CHOGA]) {
+      const sample = fixtureShops.find((shop) => sijeonRoofKind(shop) === kind);
+      const facade = planSijeonFacade(sample);
+      invariant(facade.roof.kind === kind,
+        `${arterial.id}: facade roof kind disagrees with sijeonRoofKind`);
+      assertFacade(facade, `mix:${arterial.id}:${kind}`);
+      maxRoofWidth = Math.max(maxRoofWidth, facade.roof.width);
+    }
+    pooledShops += kinds.length;
+    pooledGiwa += giwa;
+  }
+  // 대역의 목적은 "한 유형으로 붕괴"와 극단 편중을 잡는 것이지 특정 비율을 고정하는 것이 아니다.
+  //   [2026-08-05 R2 재핀] 채택 정책이 기와 우세로 바뀌었다(근거: sijeon-plan.js SIJEON_ROOF_MIX 주석
+  //   — 후기 사진을 전기 관영 행랑의 대리지표로 쓴 R1 근거를 기각). 실측: 생산 hanyang 4시드 63.3%,
+  //   여기 합성 간선 풀은 별도 세그먼트 키 집합이라 다르게 나온다. 둘을 모두 담는 대역을 쓴다.
+  const share = pooledGiwa / pooledShops;
+  invariant(share >= 0.40 && share <= 0.85,
+    `pooled giwa share ${(share * 100).toFixed(1)}% left the product band 40–85%`
+    + ` (${pooledGiwa}/${pooledShops})`);
+  // 유형 변주가 지붕 폭을 키우므로 #218 블록 틈 단언의 상수도 실제 최대 지붕 폭을 써야 한다.
+  invariant(SIJEON_PLACEMENT.pitch * 2 - maxRoofWidth > 4.5,
+    `roof width ${maxRoofWidth.toFixed(3)} closed the product row break below 4.5m`);
+  console.log(
+    `check-sijeon-contract: roof mix PASS (pooled ${pooledGiwa}/${pooledShops} giwa`
+    + ` = ${(share * 100).toFixed(1)}%, max roof width ${maxRoofWidth.toFixed(2)}m)`,
+  );
 }
 

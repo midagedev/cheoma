@@ -10,6 +10,17 @@ const SURFACE_EXPONENT = 1.32;   // 이엉 물매 곡률
 const RIDGE_SAG = 0.17;          // 용마루 중앙의 완만한 처짐
 const WALL_PLAN_MARGIN = 0.01;   // 벽 모서리 바깥으로 확보할 최소 평면 피복
 
+// 이엉 형상 어휘의 공개 상수(#54, 2026-08-05). 시전 행랑 초가 지붕은 필지 집채와 같은 규모의
+//   그리드·벽 스티칭을 쓸 수 없으므로(100~200채) 자체 저해상 로프트를 만든다. 그때 곡률 지수만
+//   다시 저작하면 같은 프로젝트 안에 두 개의 이엉 형상 방언이 생긴다 — 상수를 공개해 한 벌만
+//   존재하게 한다. 값·기존 동작은 불변이고 새 계산 경로도 없다(export 추가 전용).
+export const THATCH_SHAPE = Object.freeze({
+  planExponent: BASE_PLAN_EXPONENT,
+  hipExponent: HIP_EXPONENT,
+  surfaceExponent: SURFACE_EXPONENT,
+  ridgeSag: RIDGE_SAG,
+});
+
 export const THATCH_ROOF_SEGMENTS = Object.freeze({ a: 56, b: 44 });
 export const THATCH_WALL_END_OVERLAP = 0.03;
 

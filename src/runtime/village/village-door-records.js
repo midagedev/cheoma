@@ -661,6 +661,15 @@ function templeRecords(temple, site) {
   return records;
 }
 
+// 시전 행랑 occluder 프리즘의 지면 위 높이. **`src/village/sijeon-plan.js` 의
+//   `roofline.ceilingY` 와 반드시 같아야 한다** — 이 값이 실제 지붕 질량보다 낮으면 행랑 뒤 문이
+//   가려져 있는데도 보인다고 판정된다. `tools/check-sijeon-contract.mjs` 가 두 값을 대조하므로
+//   한쪽만 바꾸면 게이트가 실패한다.
+//   2026-08-05: 4.7 → 5.6. 4.7 은 v3 의 "본체 3 + 물매 1.7" 에서 나온 값이고, v4 초가 지붕이 그
+//   상한에 갇혀 물매가 과도하게 완만해졌다(비전 차단 판정: "얇은 접시/파라솔"). 초가 이엉의 실제
+//   볼륨을 담도록 올린다. 실측 최고점은 5.47 이라 여유 0.13 이 남는다.
+export const SIJEON_OCCLUDER_TOP = 5.6;
+
 function sijeonRecord(shop, index, site) {
   // Break footprints reserve the market corridor but have no building mass to occlude.
   if (!shop || shop.kind === 'break') return null;
@@ -676,7 +685,7 @@ function sijeonRecord(shop, index, site) {
     id: `feature:sijeon:${shop.id ?? index}`,
     kind: 'sijeon',
     parcelId: null,
-    solids: triangles.map((triangle) => semanticPrism(triangle, baseY, baseY + 4.7)),
+    solids: triangles.map((triangle) => semanticPrism(triangle, baseY, baseY + SIJEON_OCCLUDER_TOP)),
   };
 }
 

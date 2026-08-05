@@ -119,13 +119,30 @@ const facade = planSijeonFacade(shops[0]);
 ```
 
 façade schema v3(2026-08-04)부터 반환 객체는 개방 골조 외에 벽체 완결 파트를 소유한다:
-`walls`(배면벽·측벽 2매·전면 상벽 — box 파트), `gables`(박공 프리즘 — `(z, y)` 프로파일과
-`thickness`), `roofline`(벽 상단~지붕면 높이 계약). v2 소비자는 이 파트를 그리지 않으면 지붕이
-벽 없이 뜨므로, 버전 확인 후 함께 렌더해야 한다(계약 상세는 `docs/sijeon.md` §3.1·§3.4).
+`walls`(배면벽·측벽 2매·전면 상벽 — box 파트), `roofline`(벽 상단~지붕 높이 계약). v2 소비자는 이
+파트를 그리지 않으면 지붕이 벽 없이 뜨므로, 버전 확인 후 함께 렌더해야 한다.
+
+**schema v4(2026-08-05)** 는 지붕을 단일 박공 프리즘에서 점포별 초가/기와 표면으로 바꾼다. 바뀐 것:
+
+- `roof.kind` = `'giwa' | 'choga'`, `roof.role` = `'gable-roof' | 'hip-roof'`, `roof.thickness`.
+- `roof.surface` = `{ kind: 'section-loft', lines: [{ x, points: [{ z, y }] }], uv, ... }` — 행랑
+  진행축을 따라 늘어선 단면 격자다. 소비자는 이것을 상면·밑면(−`thickness`)·경계 테두리로 로프트한다.
+- `roof.ridge` = 압출 프리즘 `{ axis: 'x'|'z', center, extent, profile: [{ u, y }] }` (용마루/용마름).
+- **`gables[]` → `closures[]`**: 벽 상단~지붕면을 닫는 네 방향 프리즘. `gables` 는 더 이상 없다.
+  같은 `{ axis, center, extent, profile }` 형식이고 `role` 은 `gable-wall`(기와 측면) 또는
+  `eave-closure`(초가 측면·전후면)다.
+- `roofline` 확장: `eaveTopY`(= `wallTopY` + `thickness`), `apexY`, `ridgeY`(격자 실측 최고), `topY`
+  (능선 부재 포함), `thickness`, `slabAllowance`. v3 의 `closureTopY` 는 제거됐다 — 곡면 지붕에서는
+  스칼라 하나로 폐합이 성립하지 않는다.
+
+v3 소비자가 v4 데이터를 그대로 읽으면 지붕과 측면 폐합이 사라진다. 계약 상세와 형태 근거는
+`docs/sijeon.md` §3.1·§3.4·§3.5.
 
 실제 geometry가 필요하면 `src/api/sijeon.js`를 사용한다. `buildSijeon()`은 `{ frame, opening, bench,
-storage, roof }` 다섯 `THREE.Material`과 `heightAt(x, z)`를 빌리며 새 material이나 texture를 만들지
-않는다. 반환 root는 점포 수와 무관하게 역할별로 병합된 geometry를 소유한다.
+storage, roof, thatch }` **여섯** `THREE.Material`과 `heightAt(x, z)`를 빌리며 새 material이나
+texture를 만들지 않는다(v4 에서 `thatch` 추가 — 계획이 점포별로 지붕 재료를 고르므로 두 지붕 표면
+재질이 모두 필요하다. `roof` 는 기와 지붕면과 용마루, `thatch` 는 초가 지붕면과 용마름에 쓰인다).
+반환 root는 점포 수와 무관하게 역할별로 병합된 geometry를 소유한다.
 
 ```js
 import {
@@ -134,7 +151,7 @@ import {
 } from './cheoma/src/api/sijeon.js';
 
 const row = buildSijeon(shops, {
-  materials: { frame, opening, bench, storage, roof },
+  materials: { frame, opening, bench, storage, roof, thatch },
   heightAt: (x, z) => terrainHeightAt(x, z),
 });
 scene.add(row);
@@ -143,7 +160,7 @@ scene.remove(row);
 disposeSijeon(row); // true
 disposeSijeon(row); // false
 
-// 빌린 다섯 material은 여전히 유효하다. 마지막 사용자가 끝난 뒤 호출자가 해제한다.
+// 빌린 여섯 material은 여전히 유효하다. 마지막 사용자가 끝난 뒤 호출자가 해제한다.
 ```
 
 `buildSijeon`은 이 borrowed-material 공개 계약만 뜻한다. 제품 마을 조립기가 자체 색과 적설 역할을
@@ -379,7 +396,7 @@ peer dependency로 두는 것이 이 계약과 맞다.
 | `buildBuilding()` 원본 root의 geometry·파생 material/texture | 건물 | scene 분리 후 `disposeBuilding(root)` |
 | `P.mats`로 주입한 palette | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | `buildSijeon()` 반환 root의 병합 geometry | 시전 renderer | scene 분리 후 `disposeSijeon(root)` |
-| `buildSijeon()`에 주입한 다섯 material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
+| `buildSijeon()`에 주입한 여섯 material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | `buildYardLife()` handle의 병합 geometry·파생 전환 material | 마당 생활상 renderer | scene 분리 후 `disposeYardLife(handle)` |
 | `buildYardLife()`에 주입한 여섯 source material | 호출자 | 마지막 borrower가 끝난 뒤 호출자가 해제 |
 | `buildMudWallSurfaceGeometry()`의 `body`·`fibres` geometry | 토담 표면 façade | mesh 분리 후 `disposeMudWallSurfaceGeometry(result)` |
