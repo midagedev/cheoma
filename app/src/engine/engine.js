@@ -1875,30 +1875,85 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   // GPU 프리워밍(#46): CPU createVillage 만으로는 첫 진입 프레임에 셰이더 컴파일·버퍼 업로드 히치가
   // 남는다. 미리 씬에 붙여 compile + 1프레임 렌더(모든 메시 frustumCulled 임시 해제해 버퍼 업로드
   // 강제)한 뒤 떼어, 그 비용을 히어로 타이틀 구간(마스킹)으로 앞당긴다. 상태는 즉시 원복(플래시 없음).
-  function prewarmVillage(h) {
-    if (!h || !h.group) return;
+  //
+  // ★ 이 예열은 **두 패스**로 나뉜다 (2026-08-06, scratch/entry-feel/attribute.mjs CPU 프로파일).
+  //   compile 과 draw 를 한 태스크에 넣으면, draw 의 setProgram 이 그 프로그램의 uniform 위치를
+  //   읽어야 하고(getUniforms → ACTIVE_UNIFORMS 조회) 그 읽기는 **드라이버 링크가 끝날 때까지
+  //   메인 스레드를 동기 대기**한다 — 방금 만든 프로그램을 같은 태스크에서 쓰면
+  //   KHR_parallel_shader_compile 이 있어도 병렬 링크의 여지가 0 이다. 사전 생성은 타이틀 구간에
+  //   돌지만 사용자의 진입 클릭이 바로 그 구간에 떨어지므로, 이 대기가 그대로 "눌렀는데 반응이
+  //   없다"가 된다(사용자 지적 2026-08-06).
+  //   실측(phone/chromium, 클릭 후 2.2초 셀프타임): (program) 445ms + getProgramInfoLog 381ms
+  //   + getProgramParameter 113ms + getShaderInfoLog 40ms ≈ 1.0초. 롱태스크 305ms · 494ms.
+  //   ★ checkShaderErrors 를 예열 앞으로 당겨 끄는 안은 **측정으로 기각됐다**(ui-design §4.8.2):
+  //     three 가 그때 생략하는 호출을 GL 계층에서 공짜로 만들어 봐도 체감 지표가 756→727ms(노이즈)다.
+  //     ACTIVE_UNIFORMS 읽기가 남고 그것도 링크 완료를 요구하기 때문이다. 그 레버는 다시 쫓지 말 것.
+  //   패스 A(link): compileAsync 의 동기 compile 만 돌려 linkProgram 을 드라이버에 던지고 즉시 상태
+  //     원복. 링크 완료는 그 프라미스가 COMPLETION_STATUS_KHR 논블록 폴링으로 알려 준다.
+  //   패스 B(upload): 링크가 끝난 뒤 같은 셋업으로 draw 만 해 버퍼·instanceMatrix 업로드를 강제한다.
+  //     같은 onFirstUse 검증이 이제 동기 대기 없이 끝나므로 셰이더 에러 가시성은 그대로 보존된다.
+  //   확장 미지원 환경은 isReady() 가 즉시 true → 다음 틱에 패스 B = 종전과 같은 동작(회귀 없음).
+  //   ★ 계약: 임시 카메라·visible 상태는 **프레임 경계를 넘지 않는다**. 패스마다 자기 finally 에서
+  //     원복하므로 두 패스 사이에 렌더 루프가 돌아도 예열 카메라로 그려지지 않는다(플래시 없음).
+  const PREWARM_LINK_CAP_MS = 3000;   // 링크 완료 신호가 안 오면 그대로 업로드 — 무한 대기 금지
+
+  // 서브트리를 한 프레임만 "전부 보이고 컬링 없음"으로 열었다가 정확히 원복한다. compile 은 숨은
+  //   재질을 찾지만 render 는 visible=false 서브트리의 geometry/instance buffer 를 업로드하지 않으므로,
+  //   FAR/MID/FULL root 를 모두 열어야 첫 거리 전환까지 업로드가 미뤄지는 히치가 사라진다.
+  function openSubtreeForWarm(group) {
     const culled = [];
     const lodVisibility = [];
+    group.traverse((o) => {
+      const name = o.name || '';
+      const lodTierRoot = o.userData?.impostor === true
+        || name.startsWith('chunk-mid-') || name.startsWith('chunk-full-');
+      if (lodTierRoot) { lodVisibility.push([o, o.visible]); o.visible = true; }
+      if (o.isMesh || o.isInstancedMesh || o.isLine || o.isPoints) {
+        culled.push([o, o.frustumCulled]); o.frustumCulled = false;
+      }
+    });
+    return () => {
+      for (const [o, v] of lodVisibility) o.visible = v;
+      for (const [o, v] of culled) o.frustumCulled = v;
+    };
+  }
+
+  // 패스 B(업로드). ★ 카메라·fog·컴포저를 **건드리지 않는다.** 업로드는 컬링을 끈 상태의 draw 자체로
+  //   충족되고, 셰이더 변종 예열은 패스 A 가 올바른 부감 포즈로 이미 마쳤다. 종전처럼 예열 포즈로
+  //   컴포저를 돌리면 MSAA 예산이 관측 가능하게 흔들린다 — `check:aa` 가 그것을 잡았다(2026-08-06:
+  //   게이트가 setSamples(4) 를 강제한 3프레임 안에 이 패스가 끼어 samples 가 2로 되돌아갔다).
+  //   그래서 여기서는 컴포저 대신 renderer.render 직접 호출이고, 캔버스는 마지막에 원복한다.
+  function prewarmVillageUpload(h) {
+    if (!h || !h.group) return;
+    let restore = null;
+    try {
+      scene.add(h.group);
+      restore = openSubtreeForWarm(h.group);
+      renderer.render(scene, camera);   // 버퍼·instanceMatrix 업로드(draw 강제)
+    } catch (e) {
+      /* 업로드 예열 실패는 비치명적 — 첫 진입 프레임에 지연 업로드로 폴백 */
+    } finally {
+      restore?.();
+      scene.remove(h.group);
+      renderFrame();                    // 캔버스를 제품 컴포저 프레임으로 원복(플래시 없음)
+    }
+  }
+
+  // 패스 A(링크). 실제 진입 뷰의 셰이더 변종을 정확히 만들기 위해 부감 포즈·마을 fog 를 잠깐 세우고
+  //   compile 만 돌린다. draw 가 없으므로 uniform 위치를 읽지 않아 링크 완료 동기 대기가 없다.
+  function prewarmVillageLink(h) {
+    if (!h || !h.group) return null;
+    let restore = null;
     const cam = {
       pos: camera.position.clone(), tgt: controls.target.clone(), fov: camera.fov,
       referenceFov: camera.userData.villageReferenceFov,
       far: camera.far, near: camera.near,
     };
     const fog = scene.fog ? { near: scene.fog.near, far: scene.fog.far } : null;
+    let linked = null;
     try {
       scene.add(h.group);
-      h.group.traverse((o) => {
-        // compile은 숨은 재질 프로그램을 찾을 수 있어도 실제 render는 visible=false 서브트리의
-        // geometry/instance buffer를 업로드하지 않는다. FAR/MID/FULL root를 한 프레임만 모두 열어
-        // 첫 거리 전환까지 GPU 업로드가 미뤄지는 히치를 제거하고, 아래 finally에서 정확히 복원한다.
-        const name = o.name || '';
-        const lodTierRoot = o.userData?.impostor === true
-          || name.startsWith('chunk-mid-') || name.startsWith('chunk-full-');
-        if (lodTierRoot) { lodVisibility.push([o, o.visible]); o.visible = true; }
-        if (o.isMesh || o.isInstancedMesh || o.isLine || o.isPoints) {
-          culled.push([o, o.frustumCulled]); o.frustumCulled = false;
-        }
-      });
+      restore = openSubtreeForWarm(h.group);
       // 실제 진입 뷰(부감 카메라 + 마을 fog·far)로 예열 — 첫 진입 프레임의 셰이더 변종·업로드·
       // 스테이트를 그대로 warming(단일건물 카메라/far 로는 원경 지오·부감 셰이더가 덜 예열됨).
       const R = h.plan.site.R;
@@ -1924,13 +1979,15 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
         scene.fog.near = band.near; scene.fog.far = band.far;
       }
       post.rimRescan?.(h.group);          // patch first, then compile that final shader variant
-      renderer.compile(scene, camera);   // 셰이더 컴파일(그림자 depth 포함)
-      renderFrame();                     // 버퍼·instanceMatrix 업로드(draw 강제)
+      if (typeof renderer.compileAsync === 'function') {
+        linked = renderer.compileAsync(scene, camera);   // 동기 compile + 논블록 링크 완료 폴링
+      } else {
+        renderer.compile(scene, camera);                 // 구 three 폴백: 컴파일만
+      }
     } catch (e) {
       /* 프리워밍 실패는 비치명적 — 진입 시 정상 생성 경로로 폴백 */
     } finally {
-      for (const [o, v] of lodVisibility) o.visible = v;
-      for (const [o, v] of culled) o.frustumCulled = v;
+      restore?.();
       scene.remove(h.group);
       camera.position.copy(cam.pos); controls.target.copy(cam.tgt);
       camera.fov = cam.fov; camera.far = cam.far; camera.near = cam.near; camera.updateProjectionMatrix();
@@ -1940,6 +1997,24 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       if (fog && scene.fog) { scene.fog.near = fog.near; scene.fog.far = fog.far; }
       renderFrame();                     // 캔버스를 단일건물 상태로 원복(플래시 없음)
     }
+    return linked;
+  }
+
+  function prewarmVillage(h) {
+    if (!h || !h.group) return;
+    const linked = prewarmVillageLink(h);
+    // 업로드 패스는 이 핸들이 **아직 캐시에 있는 유휴 사전생성분일 때만** 돈다. 그 사이 진입이
+    //   캐시를 소비해 씬에 올라갔다면(village.handle === h) 예열 셋업의 scene.remove 가 살아 있는
+    //   마을을 떼어낸다 — 그 경우는 정상 렌더 루프가 이미 업로드를 하고 있으니 그냥 건너뛴다.
+    const upload = () => {
+      if (disposed || village.cache.handle !== h) return;
+      prewarmVillageUpload(h);
+    };
+    if (!linked) { tasks.frame(upload); return; }
+    let done = false;
+    const go = () => { if (done) return; done = true; tasks.clearAfter(cap); upload(); };
+    const cap = tasks.after(go, PREWARM_LINK_CAP_MS);
+    linked.then(go, go);
   }
 
   // 셰이더 프리컴파일(#117): 새 마을·오버레이 지오가 씬에 붙으면 첫 렌더 프레임에 그 재질의 셰이더가
