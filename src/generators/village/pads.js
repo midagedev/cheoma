@@ -17,6 +17,7 @@ import {
   featureGroundJunctionBudget,
   planFeatureGroundJunctions,
 } from '../../village/feature-junction-plan.js';
+import { GROUND_JUNCTION } from '../../village/ground-junction-plan.js';
 
 // Re-export the pure padY helper so existing consumers of this module keep
 // working without importing the Three-free plan directly.
@@ -34,8 +35,13 @@ const padTopMaterialUrban = markSharedResource(
   // R2.3: 도성 지면 절반 환원(terrain urban cCourt 와 동일).
   new THREE.MeshStandardMaterial({ color: 0x807560, roughness: 1, metalness: 0 }),
 );
+// vertexColors carries the #56 석축 course dressing (per-stone value, joint shadow,
+// crown highlight, 갓돌). It is still ONE material and one program family: plain pad
+// skirts write neutral white, so their look is byte-for-byte the previous one.
 const padStoneMaterial = markSharedResource(
-  new THREE.MeshStandardMaterial({ color: 0x8d857a, roughness: 1, metalness: 0 }),
+  new THREE.MeshStandardMaterial({
+    color: 0x8d857a, roughness: 1, metalness: 0, vertexColors: true,
+  }),
 );
 padStoneMaterial.userData.materialRole = VILLAGE_PAD.materialRole;
 
@@ -51,9 +57,13 @@ export function featurePadMaterials(site) {
   return { top: padTopForSite(site), stone: padStoneMaterial };
 }
 
-function makeBufferMesh(positions, indices, material, name) {
+function makeBufferMesh(positions, indices, material, name, colors = null) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  // padStoneMaterial carries vertexColors, so EVERY mesh drawn with it must supply a
+  // colour attribute. Plain pad skirts write neutral white and therefore look exactly
+  // as they did before the #56 dressing landed.
+  if (colors) geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const mesh = new THREE.Mesh(geometry, material);
@@ -63,7 +73,12 @@ function makeBufferMesh(positions, indices, material, name) {
   return mesh;
 }
 
-function emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, skirtIndices) {
+function pushNeutral(colors, vertexCount) {
+  for (let index = 0; index < vertexCount; index++) colors.push(1, 1, 1);
+}
+
+function emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, skirtIndices,
+  skirtColors) {
   const pad = G.offsetPoly(G.ensureCCW(polygon), VILLAGE_PAD.margin);
   const topBase = topPositions.length / 3;
   for (const corner of pad) topPositions.push(corner.x, padY, corner.z);
@@ -80,22 +95,65 @@ function emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, 
       segment.b.x, segment.topY, segment.b.z,
       segment.b.x, segment.bottom1, segment.b.z,
     );
+    if (skirtColors) pushNeutral(skirtColors, 4);
     skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
   }
 }
 
-// One vertical quad per junction chord. Bottom is flat at the chord's exact
-// rendered-terrain minimum, so the chord is closed along its whole length.
-function emitJunctionSegments(segments, skirtPositions, skirtIndices) {
+// One quad per junction COURSE. Every course bottom stays at or below the chord's
+// exact rendered-terrain minimum, so closure is unaffected by the dressing.
+//
+// The face is 석축, not a slab: courses stack, the face batters (each course sits
+// slightly further out as it goes down), a 갓돌 capstone laps over the top with its
+// own ledge, and stone value varies per block. All of that rides VERTEX COLOURS on
+// the existing pad-stone material — jointShade darkens each course's bottom edge and
+// crownLift lifts its top, which is what makes the horizontal joints read.
+function emitJunctionSegments(segments, skirtPositions, skirtIndices, skirtColors) {
+  const { jointShade, crownLift } = GROUND_JUNCTION;
   for (const segment of segments) {
-    const base = skirtPositions.length / 3;
-    skirtPositions.push(
-      segment.a.x, segment.topY, segment.a.z,
-      segment.a.x, segment.bottomY, segment.a.z,
-      segment.b.x, segment.topY, segment.b.z,
-      segment.b.x, segment.bottomY, segment.b.z,
-    );
-    skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+    const nx = segment.normal?.x ?? 0;
+    const nz = segment.normal?.z ?? 0;
+    for (const course of segment.courses) {
+      const topOut = course.outsetTop, bottomOut = course.outsetBottom;
+      const ax0 = segment.a.x + nx * topOut, az0 = segment.a.z + nz * topOut;
+      const bx0 = segment.b.x + nx * topOut, bz0 = segment.b.z + nz * topOut;
+      const ax1 = segment.a.x + nx * bottomOut, az1 = segment.a.z + nz * bottomOut;
+      const bx1 = segment.b.x + nx * bottomOut, bz1 = segment.b.z + nz * bottomOut;
+      const base = skirtPositions.length / 3;
+      skirtPositions.push(
+        ax0, course.topY, az0,
+        ax1, course.bottomY, az1,
+        bx0, course.topY, bz0,
+        bx1, course.bottomY, bz1,
+      );
+      const top = course.tone * (1 + crownLift);
+      const bottom = course.tone * (1 - jointShade);
+      skirtColors.push(top, top, top, bottom, bottom, bottom, top, top, top, bottom, bottom, bottom);
+      skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+
+      // The capstone laps outward, so its top face is exposed: close that ledge or
+      // the eye looks straight down into the backfaces of the courses below.
+      // The vertical quads inherit the shipped pad-skirt winding, but this ledge is
+      // horizontal, so its winding must be chosen explicitly or it faces the ground.
+      if (course.role === 'capstone' && topOut > 0) {
+        const ledge = skirtPositions.length / 3;
+        skirtPositions.push(
+          segment.a.x, course.topY, segment.a.z,
+          ax0, course.topY, az0,
+          segment.b.x, course.topY, segment.b.z,
+          bx0, course.topY, bz0,
+        );
+        const lit = course.tone * (1 + crownLift);
+        for (let vertex = 0; vertex < 4; vertex++) skirtColors.push(lit, lit, lit);
+        // (n × d)_y decides which way (ring_a, out_a, ring_b) faces.
+        const dx = segment.b.x - segment.a.x, dz = segment.b.z - segment.a.z;
+        if (nz * dx - nx * dz > 0) {
+          skirtIndices.push(ledge, ledge + 1, ledge + 2, ledge + 2, ledge + 1, ledge + 3);
+        } else {
+          skirtIndices.push(ledge, ledge + 2, ledge + 1, ledge + 2, ledge + 3, ledge + 1);
+        }
+      }
+    }
   }
 }
 
@@ -103,6 +161,7 @@ export function buildParcelPads(parcels, site, plan = null) {
   const group = new THREE.Group();
   group.name = 'village-pads';
   const topPositions = [], topIndices = [], skirtPositions = [], skirtIndices = [];
+  const skirtColors = [];
   for (const parcel of parcels) {
     if (!parcel.poly) continue;
     emitPad(
@@ -113,6 +172,7 @@ export function buildParcelPads(parcels, site, plan = null) {
       topIndices,
       skirtPositions,
       skirtIndices,
+      skirtColors,
     );
   }
   // #56 접지면: 패드를 갖지 않는 구조물(시전 행랑·정자 기단·보호수 돌단)의 석축 면을 같은
@@ -126,13 +186,15 @@ export function buildParcelPads(parcels, site, plan = null) {
   if (plan) {
     const junctions = planFeatureGroundJunctions(plan, site);
     for (const entry of junctions) {
-      emitJunctionSegments(entry.junction.segments, skirtPositions, skirtIndices);
+      emitJunctionSegments(entry.junction.segments, skirtPositions, skirtIndices, skirtColors);
     }
     junctionBudget = featureGroundJunctionBudget(junctions);
   }
   if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'pad-top'));
   // pad-skirt is the single downhill 축대 course face; same stone material role.
-  if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'pad-skirt'));
+  if (skirtIndices.length) {
+    group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'pad-skirt', skirtColors));
+  }
   if (junctionBudget) {
     group.userData.groundJunction = {
       ...junctionBudget,
@@ -166,9 +228,12 @@ export function buildFeaturePad(site, centerX, centerZ, width, depth, rotationY 
   const group = new THREE.Group();
   group.name = 'feature-pad';
   const topPositions = [], topIndices = [], skirtPositions = [], skirtIndices = [];
-  emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, skirtIndices);
+  const skirtColors = [];
+  emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, skirtIndices, skirtColors);
   if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'feat-pad-top'));
-  if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'feat-pad-skirt'));
+  if (skirtIndices.length) {
+    group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'feat-pad-skirt', skirtColors));
+  }
   return { group, padY };
 }
 
@@ -242,6 +307,7 @@ export function buildTempleFeaturePad(site, temple) {
   const group = new THREE.Group();
   group.name = 'feature-pad';
   const topPositions = [], topIndices = [], skirtPositions = [], skirtIndices = [];
+  const skirtColors = [];
   for (const surface of surfaces) {
     emitPad(
       surface.polygon,
@@ -251,10 +317,13 @@ export function buildTempleFeaturePad(site, temple) {
       topIndices,
       skirtPositions,
       skirtIndices,
+      skirtColors,
     );
   }
   if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'feat-pad-top'));
-  if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'feat-pad-skirt'));
+  if (skirtIndices.length) {
+    group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'feat-pad-skirt', skirtColors));
+  }
   group.userData.terraceCount = tierCount;
   return { group, padY, surfaces, relief, reliefCap, tierCount };
 }
