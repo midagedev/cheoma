@@ -126,6 +126,7 @@ export function featureGroundJunctionBudget(junctions) {
   let segments = 0;
   let courses = 0;
   let ledges = 0;
+  let returns = 0;
   let dressedSegments = 0;
   let maxHeight = 0;
   let chukdaeSegments = 0;
@@ -144,6 +145,7 @@ export function featureGroundJunctionBudget(junctions) {
     segments += count;
     courses += entryCourses;
     ledges += entryLedges;
+    returns += (junction.returns || []).length;
     dressedSegments += junction.dressedSegments || 0;
     chukdaeSegments += junction.chukdaeSegments;
     maxHeight = Math.max(maxHeight, junction.maxHeight);
@@ -152,15 +154,16 @@ export function featureGroundJunctionBudget(junctions) {
     });
     bucket.objects++;
     bucket.segments += count;
-    bucket.quads += entryCourses + entryLedges;
+    bucket.quads += entryCourses + entryLedges + (junction.returns || []).length;
     bucket.maxHeight = Math.max(bucket.maxHeight, junction.maxHeight);
   }
-  const quads = courses + ledges;
+  const quads = courses + ledges + returns;
   return {
     objects: (junctions || []).length,
     segments,
     courses,
     ledges,
+    returns,
     quads,
     triangles: quads * 2,
     dressedSegments,

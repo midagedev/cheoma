@@ -97,10 +97,14 @@ subdivision** — no material, texture, or program family is added, and
   flare into a neighbour. Because the flared base stands *outside* the footprint ring,
   over terrain the ring chord never sampled, closure is now taken as the **minimum
   over the ring, half-flare, and full-flare chords** — the audit checks all three.
-- **갓돌 capstone.** The top 0.18 m course laps `capstoneProjection` (0.07 m) beyond
-  the ring at `CITY_STONE_VALUES.cornice` (1.02), with its own horizontal ledge quad —
-  without that ledge the eye looks straight down into the backfaces below. The lowest
-  course is the 대석 base course at `CITY_STONE_VALUES.base` (0.95).
+- **갓돌 capstone, flush.** The top 0.26 m course carries
+  `CITY_STONE_VALUES.cornice` (1.02) and the lowest is the 대석 base course at
+  `CITY_STONE_VALUES.base` (0.95). `capstoneProjection` is **0** and the gate locks it
+  there — see the spike investigation below.
+- **Watertight seams.** Course boundaries sit on absolute Y bands measured down from the
+  datum, and corner offsets use a **mitred vertex normal**. Both exist so two chords of
+  different height still meet: with per-chord bands the batter offsets landed at
+  different heights and the wall could not close on itself.
 - **Stone value.** `cityStoneTone` (spread 0.055) varies each block deterministically;
   the gate holds tone inside 0.8–1.2 so variation stays a shade, never a second stone.
 
@@ -117,12 +121,39 @@ after the round (827 / 801 / 371 / 346). Triangles, measured exactly across the
 | | quads | triangles |
 |---|---|---|
 | pad-skirt (denser exact chords) | 12972 → 22682 | +19420 |
-| feature junctions incl. dressing | +2125 | +4250 |
-| **total** | | **+23670** |
+| feature junctions incl. dressing + returns | +2173 | +4346 |
+| **total** | | **+23766** |
 
-Worst single plan is hanyang: **+7178 triangles**, about 0.15% of that scene's
-~4.85 M. The dressing itself accounts for +2452 of the total (899 undressed quads
-would have been 1798 triangles; the coursed version is 4250).
+Worst single plan is hanyang: **+7282 triangles**, about 0.15% of that scene's
+~4.85 M.
+
+## The two bright spikes (vision round 2026-08-05)
+
+The lead rejected the v2 돌단 frame for two thin bright pointed spikes protruding past
+the terrain. Identified by rendering the junction alone with one flat ID colour per
+chord and counting connected silhouette components — no interpretation of a photograph:
+
+| change | silhouette components |
+|---|---|
+| v2 as shipped | 38 |
+| + mitred seams, absolute-Y course bands, arc-end returns | 40 (satellites byte-identical) |
+| + flush capstone (`capstoneProjection: 0`) | **1** |
+
+So the cause was the **projecting 갓돌 lip**, not the batter. The lip is the brightest
+element in the apron (cornice 1.02 x crownLift) and was one short course tall, so on a
+7 m wall seen from below it projected as a razor-thin up-facing blade standing proud of
+the batter line, disconnected from the mass behind it. Two hypotheses were tested and
+**disproved by measurement** first: the flared base is not over unsampled terrain
+(worst radial gap **0.000 m**, worst sampled-vs-emitted flare drift **0.023 m**), and
+the seams were not the cause (fixing them left the satellite components byte-identical).
+
+Kept anyway, because they are correct independent of this bug: closure is now sampled at
+the **flare cap** rather than at a flare derived from a provisional height (no circular
+dependency), seams are mitred, and every arc end carries a **return** whose bottom
+reaches the terrain minimum along its own radial line. That last one matters because a
+junction is normally an arc, not a ring — culled chords leave the wall terminating in
+mid-air, and the chord-parallel minima that close the face say nothing about the ground
+under a return.
 
 ## Open frontier
 

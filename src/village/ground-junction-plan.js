@@ -61,8 +61,21 @@ export const GROUND_JUNCTION = deepFreeze({
   maxCourses: 10,              // triangle guard for the extreme tail (6.6 m apron)
   batterSlope: CITY_GATE_MASONRY.batterSlope,   // 0.08 — face leans back, base flares
   batterMaxInset: 0.34,        // absolute cap so a tall face cannot flare into a neighbour
-  capstoneHeight: 0.18,
-  capstoneProjection: 0.07,    // 갓돌 lip beyond the footprint ring
+  capstoneHeight: 0.26,
+  // 갓돌 is a FLUSH capping course, not a projecting lip.
+  //
+  // A 0.07 m lip was measured to be the source of the two bright pointed spikes the
+  // 2026-08-05 vision round rejected: it is the brightest element in the apron
+  // (cornice 1.02 x crownLift) and only 0.18 m tall, so on a 7 m wall seen from below
+  // it projected as a razor-thin up-facing blade standing proud of the batter line.
+  // Isolation renders pinned it: with the capstone strip and its ledge excluded the
+  // thin satellite silhouette components disappeared, while mitring the seams and
+  // moving courses onto absolute-Y bands left them byte-identical.
+  //
+  // Zero keeps the 갓돌 read through the taller top course and the cornice value while
+  // removing the proud sliver; it also drops the ledge quad entirely (the emitter is
+  // guarded on a positive projection, so the path survives for any future lip).
+  capstoneProjection: 0,
   toneSpread: CITY_STONE_BOND.toneSpread,   // 0.055 per-block value variation
   jointShade: CITY_STONE_BOND.jointShade,   // 0.06 course-bottom joint shadow
   crownLift: CITY_STONE_BOND.crownLift,     // 0.03 course-top highlight
@@ -126,6 +139,25 @@ export function planGroundJunction(site, polygon, baseY, {
     if (nx * (mx - cx) + nz * (mz - cz) < 0) { nx = -nx; nz = -nz; }
     return { nx, nz };
   };
+  // Mitred normal at each ring VERTEX: the average of its two edge normals. Offsetting
+  // both adjoining chords along the shared mitre is what makes the seam watertight —
+  // offsetting each chord along its own edge normal leaves a wedge at every corner, and
+  // that is what turned the battered wall into disconnected slats whose thin projections
+  // read as bright spikes (measured: 38 silhouette components on one 13-chord arc).
+  const edgeNormals = polygon.map((point, index) =>
+    outwardNormal(point, polygon[(index + 1) % polygon.length]));
+  const vertexNormals = polygon.map((point, index) => {
+    const previous = edgeNormals[(index - 1 + polygon.length) % polygon.length];
+    const next = edgeNormals[index];
+    let nx = previous.nx + next.nx, nz = previous.nz + next.nz;
+    const length = Math.hypot(nx, nz);
+    if (length < 1e-9) return { nx: next.nx, nz: next.nz };
+    nx /= length; nz /= length;
+    // A mitre must reach the offset lines of BOTH edges, so it is longer than 1 by
+    // 1/cos(half-angle). Bounded to keep a near-reflex corner from exploding.
+    const scale = Math.min(2, 1 / Math.max(0.5, nx * next.nx + nz * next.nz));
+    return { nx: nx * scale, nz: nz * scale };
+  });
   const offsetChord = (p0, p1, normal, distance) => [
     { x: p0.x + normal.nx * distance, z: p0.z + normal.nz * distance },
     { x: p1.x + normal.nx * distance, z: p1.z + normal.nz * distance },
@@ -141,11 +173,16 @@ export function planGroundJunction(site, polygon, baseY, {
   let chukdaeSegments = 0;
   let dressedSegments = 0;
   let courseCount = 0;
+  // Chord ordinal across the whole ring, counting skipped chords too, so a run of
+  // emitted chords (an arc) can be told apart from two arcs that merely look adjacent
+  // in the output array.
+  let ordinal = -1;
   for (let index = 0; index < polygon.length; index++) {
     const a = polygon[index];
     const b = polygon[(index + 1) % polygon.length];
     const count = junctionChordCount(a, b, maxSegmentLength);
     for (let chord = 0; chord < count; chord++) {
+      ordinal++;
       const t0 = chord / count;
       const t1 = (chord + 1) / count;
       const p0 = { x: a.x + (b.x - a.x) * t0, z: a.z + (b.z - a.z) * t0 };
@@ -155,12 +192,13 @@ export function planGroundJunction(site, polygon, baseY, {
       if (baseY - ringFloor < stepMin) continue;
       const normal = outwardNormal(p0, p1);
       // A battered face puts its base OUTSIDE the ring, over terrain the ring chord
-      // never sampled. Closure must therefore hold on the flared line too, so the
-      // floor is the minimum over the ring, half-flare, and full-flare chords.
-      const provisional = baseY - ringFloor + sink;
-      const flare = batterOutset(provisional);
-      const [m0, m1] = offsetChord(p0, p1, normal, flare * 0.5);
-      const [o0, o1] = offsetChord(p0, p1, normal, flare);
+      // never sampled. Sample at the FLARE CAP rather than at a flare derived from a
+      // provisional height: the cap bounds every possible outset, so closure holds for
+      // whatever batter the courses end up with, with no circular dependency between
+      // the height and the band that was sampled to find it.
+      const cap = GROUND_JUNCTION.batterMaxInset;
+      const [m0, m1] = offsetChord(p0, p1, normal, cap * 0.5);
+      const [o0, o1] = offsetChord(p0, p1, normal, cap);
       const floor = Math.min(
         ringFloor,
         junctionChordFloor(site, m0, m1),
@@ -171,7 +209,12 @@ export function planGroundJunction(site, polygon, baseY, {
       maxHeight = Math.max(maxHeight, height);
       if (height >= GROUND_JUNCTION.chukdaeCourse) chukdaeSegments++;
 
-      // Courses, top-down. A short lip stays one undressed quad.
+      // Courses run on ABSOLUTE Y bands measured down from the datum, not on a
+      // per-chord subdivision of that chord's own height. Two neighbouring chords of
+      // different height would otherwise put their course boundaries — and hence their
+      // batter offsets — at different heights, so the quads could not meet and the wall
+      // fell apart into slats. On a shared Y band the outset is a pure function of Y,
+      // so adjacent chords agree exactly.
       const dressed = height > GROUND_JUNCTION.dressAbove;
       const courses = [];
       const pushCourse = (courseTopY, courseBottomY, role, value) => {
@@ -183,7 +226,7 @@ export function planGroundJunction(site, polygon, baseY, {
           role,
           topY: courseTopY,
           bottomY: courseBottomY,
-          // Outward offsets of the course's top and bottom edges from the ring.
+          // Outward offsets depend ONLY on Y, so a seam between two chords lines up.
           outsetTop: Math.max(batterOutset(baseY - courseTopY), projection),
           outsetBottom: Math.max(batterOutset(baseY - courseBottomY), projection),
           tone,
@@ -192,41 +235,117 @@ export function planGroundJunction(site, polygon, baseY, {
       if (!dressed) {
         pushCourse(baseY, bottomY, 'plinth', 1);
       } else {
-        const capBottom = baseY - GROUND_JUNCTION.capstoneHeight;
+        const capBottom = Math.max(baseY - GROUND_JUNCTION.capstoneHeight, bottomY);
         pushCourse(baseY, capBottom, 'capstone', GROUND_JUNCTION.capstoneValue);
-        const bodyHeight = capBottom - bottomY;
-        const rows = Math.max(1, Math.min(
-          GROUND_JUNCTION.maxCourses,
-          Math.round(bodyHeight / GROUND_JUNCTION.courseHeight),
-        ));
-        for (let row = 0; row < rows; row++) {
-          const courseTopY = capBottom - bodyHeight * row / rows;
-          const courseBottomY = capBottom - bodyHeight * (row + 1) / rows;
-          // The lowest course is the 대석 base course and sits a shade darker.
-          pushCourse(courseTopY, courseBottomY, row === rows - 1 ? 'base' : 'body',
-            row === rows - 1 ? GROUND_JUNCTION.baseCourseValue : 1);
+        let cursor = capBottom;
+        let row = 0;
+        while (cursor > bottomY + EPSILON && row < GROUND_JUNCTION.maxCourses) {
+          row++;
+          const remaining = cursor - bottomY;
+          const atCap = row === GROUND_JUNCTION.maxCourses;
+          // Absolute band, except the last permitted course absorbs the remainder so the
+          // stack always lands exactly on the closing bottom.
+          const nextY = atCap
+            ? bottomY
+            : Math.max(bottomY, cursor - GROUND_JUNCTION.courseHeight);
+          const isLast = atCap || nextY <= bottomY + EPSILON;
+          pushCourse(cursor, nextY, isLast ? 'base' : 'body',
+            isLast ? GROUND_JUNCTION.baseCourseValue : 1);
+          cursor = nextY;
+          void remaining;
         }
         dressedSegments++;
       }
       courseCount += courses.length;
 
+      // Per-endpoint offset direction: the mitred vertex normal at a real polygon
+      // corner, the edge normal anywhere along an edge. Both adjoining chords at a
+      // corner therefore offset to the SAME point, closing the seam.
+      const normalA = chord === 0 ? vertexNormals[index] : normal;
+      const normalB = chord === count - 1
+        ? vertexNormals[(index + 1) % polygon.length]
+        : normal;
       segments.push(deepFreeze({
         a: { x: p0.x, z: p0.z },
         b: { x: p1.x, z: p1.z },
         normal: { x: normal.nx, z: normal.nz },
+        normalA: { x: normalA.nx, z: normalA.nz },
+        normalB: { x: normalB.nx, z: normalB.nz },
         topY: baseY,
         bottomY,
         height,
         edge: index,
+        ordinal,
         dressed,
         courses,
       }));
+    }
+  }
+
+  // ── Arc-end returns ───────────────────────────────────────────────────────
+  // A junction is usually an ARC, not a closed ring: chords whose terrain already
+  // sits at the datum are culled, so the wall simply stops. With a zero-thickness
+  // curtain that stop is a raw open edge, and at a grazing angle it renders as a
+  // bright pointed blade — the two spikes seen flanking the 6.99 m 돌단 face
+  // (measured: 13-chord arc, thin satellite silhouette fragments at aspect 0.1).
+  //
+  // Each arc end gets a return: the small quad that turns from the battered outer
+  // face back to the footprint ring, giving the wall a visible thickness where it
+  // terminates. Its bottom is taken from its OWN line — which runs radially, i.e.
+  // perpendicular to the chords — because the chord-parallel minima that close the
+  // face say nothing about the ground under a return.
+  const totalChords = (() => {
+    let total = 0;
+    for (let index = 0; index < polygon.length; index++) {
+      total += junctionChordCount(polygon[index], polygon[(index + 1) % polygon.length], maxSegmentLength);
+    }
+    return total;
+  })();
+  const returns = [];
+  if (segments.length && segments.length < totalChords) {
+    const byOrdinal = new Map(segments.map((segment) => [segment.ordinal, segment]));
+    for (const segment of segments) {
+      const previous = byOrdinal.get((segment.ordinal - 1 + totalChords) % totalChords);
+      const next = byOrdinal.get((segment.ordinal + 1) % totalChords);
+      // side: 'a' is the open end at the chord's start, 'b' at its end.
+      for (const side of [previous ? null : 'a', next ? null : 'b']) {
+        if (!side) continue;
+        const corner = side === 'a' ? segment.a : segment.b;
+        const flare = Math.max(
+          ...segment.courses.map((course) => Math.max(course.outsetTop, course.outsetBottom)),
+          0,
+        );
+        if (flare <= 0) continue;
+        const outer = {
+          x: corner.x + segment.normal.x * flare,
+          z: corner.z + segment.normal.z * flare,
+        };
+        // Exact terrain minimum along the return's own radial line.
+        const radialFloor = junctionChordFloor(site, { x: corner.x, z: corner.z }, outer);
+        const returnBottom = Math.min(radialFloor, baseY, segment.bottomY) - sink;
+        returns.push(deepFreeze({
+          side,
+          ordinal: segment.ordinal,
+          inner: { x: corner.x, z: corner.z },
+          outer,
+          topY: baseY,
+          bottomY: returnBottom,
+          height: baseY - returnBottom,
+          // Outward direction of the return face is along the chord, away from the arc.
+          along: side === 'a'
+            ? { x: segment.a.x - segment.b.x, z: segment.a.z - segment.b.z }
+            : { x: segment.b.x - segment.a.x, z: segment.b.z - segment.a.z },
+          tone: segment.courses.at(-1).tone,
+        }));
+      }
     }
   }
   return deepFreeze({
     schema: GROUND_JUNCTION_SCHEMA_VERSION,
     baseY,
     segments,
+    returns,
+    totalChords,
     maxHeight,
     chukdaeSegments,
     dressedSegments,

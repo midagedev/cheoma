@@ -108,17 +108,46 @@ function emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, 
 // own ledge, and stone value varies per block. All of that rides VERTEX COLOURS on
 // the existing pad-stone material — jointShade darkens each course's bottom edge and
 // crownLift lifts its top, which is what makes the horizontal joints read.
+function emitJunctionReturns(returns, skirtPositions, skirtIndices, skirtColors) {
+  const { jointShade, crownLift } = GROUND_JUNCTION;
+  for (const record of returns) {
+    const base = skirtPositions.length / 3;
+    // inner-top, inner-bottom, outer-top, outer-bottom
+    skirtPositions.push(
+      record.inner.x, record.topY, record.inner.z,
+      record.inner.x, record.bottomY, record.inner.z,
+      record.outer.x, record.topY, record.outer.z,
+      record.outer.x, record.bottomY, record.outer.z,
+    );
+    const top = record.tone * (1 + crownLift);
+    const bottom = record.tone * (1 - jointShade);
+    skirtColors.push(top, top, top, bottom, bottom, bottom, top, top, top, bottom, bottom, bottom);
+    // The return faces along the chord, away from the arc. Pick the winding that
+    // turns its normal outward instead of into the wall.
+    const rx = record.outer.x - record.inner.x, rz = record.outer.z - record.inner.z;
+    if (record.along.z * rx - record.along.x * rz > 0) {
+      skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+    } else {
+      skirtIndices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+    }
+  }
+}
+
 function emitJunctionSegments(segments, skirtPositions, skirtIndices, skirtColors) {
   const { jointShade, crownLift } = GROUND_JUNCTION;
   for (const segment of segments) {
     const nx = segment.normal?.x ?? 0;
     const nz = segment.normal?.z ?? 0;
+    // Each endpoint offsets along its own direction — mitred at a polygon corner — so
+    // neighbouring chords land on the same point and the wall stays watertight.
+    const ax = segment.normalA?.x ?? nx, az = segment.normalA?.z ?? nz;
+    const bx = segment.normalB?.x ?? nx, bz = segment.normalB?.z ?? nz;
     for (const course of segment.courses) {
       const topOut = course.outsetTop, bottomOut = course.outsetBottom;
-      const ax0 = segment.a.x + nx * topOut, az0 = segment.a.z + nz * topOut;
-      const bx0 = segment.b.x + nx * topOut, bz0 = segment.b.z + nz * topOut;
-      const ax1 = segment.a.x + nx * bottomOut, az1 = segment.a.z + nz * bottomOut;
-      const bx1 = segment.b.x + nx * bottomOut, bz1 = segment.b.z + nz * bottomOut;
+      const ax0 = segment.a.x + ax * topOut, az0 = segment.a.z + az * topOut;
+      const bx0 = segment.b.x + bx * topOut, bz0 = segment.b.z + bz * topOut;
+      const ax1 = segment.a.x + ax * bottomOut, az1 = segment.a.z + az * bottomOut;
+      const bx1 = segment.b.x + bx * bottomOut, bz1 = segment.b.z + bz * bottomOut;
       const base = skirtPositions.length / 3;
       skirtPositions.push(
         ax0, course.topY, az0,
@@ -187,6 +216,9 @@ export function buildParcelPads(parcels, site, plan = null) {
     const junctions = planFeatureGroundJunctions(plan, site);
     for (const entry of junctions) {
       emitJunctionSegments(entry.junction.segments, skirtPositions, skirtIndices, skirtColors);
+      // Close the open ends of every arc so a terminating wall reads as a wall with
+      // thickness rather than a zero-thickness blade at a grazing angle (#56 v3).
+      emitJunctionReturns(entry.junction.returns, skirtPositions, skirtIndices, skirtColors);
     }
     junctionBudget = featureGroundJunctionBudget(junctions);
   }

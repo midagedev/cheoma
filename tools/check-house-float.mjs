@@ -63,6 +63,15 @@ assert(GROUND_JUNCTION.maxSegmentLength <= 3,
 // slot). That cull is only sound while it stays below what walk-mode can read.
 assert(GROUND_JUNCTION.stepMin < VISIBLE_FLOAT,
   'the junction stepMin cull must stay below the walk-mode visible float threshold');
+// 갓돌 must stay FLUSH (vision round 2026-08-05). A projecting lip is the brightest
+// element in the apron and only one course tall, so on a tall wall seen from below it
+// rendered as two razor-thin bright blades standing proud of the batter line. Isolation
+// renders measured it exactly: the junction silhouette went from 38/40 connected
+// components down to 1 when the projection was removed. Re-introducing a lip needs a
+// fresh vision verdict, not a quiet constant change.
+assert.equal(GROUND_JUNCTION.capstoneProjection, 0,
+  'capstone must stay flush with the batter line — a projecting 갓돌 lip fragmented the '
+  + 'apron silhouette into thin bright slivers (38 components vs 1)');
 
 // ── Synthetic slope fixture: closure is exact, and endpoint sampling is not ──
 {
@@ -98,6 +107,23 @@ assert(GROUND_JUNCTION.stepMin < VISIBLE_FLOAT,
   };
   assert(groundJunctionResidualFloat(slopeSite, ring, baseY, forged) > VISIBLE_FLOAT,
     'a junction that does not reach terrain must report visible residual float');
+}
+
+// How many ends does this junction's set of arcs have? Chord ordinals are global over
+// the ring, so an end is an emitted chord whose neighbour ordinal is missing. A fully
+// closed ring has none.
+function countOpenArcEnds(junction) {
+  const ordinals = new Set(junction.segments.map((segment) => segment.ordinal));
+  if (!ordinals.size) return 0;
+  const total = junction.totalChords ?? Math.max(...ordinals) + 1;
+  // A closed ring: every chord emitted.
+  if (ordinals.size === total) return 0;
+  let ends = 0;
+  for (const ordinal of ordinals) {
+    if (!ordinals.has((ordinal - 1 + total) % total)) ends++;
+    if (!ordinals.has((ordinal + 1) % total)) ends++;
+  }
+  return ends;
 }
 
 // Exact lowest rendered-terrain height under a footprint ring.
@@ -148,6 +174,8 @@ let worstUnclosedByKind = new Map();
 let worstLegacyPadResidual = 0;
 let worstLegacyPadWhere = '';
 let worstPropFloat = 0;
+let returnsChecked = 0;
+let worstReturnDepth = 0;
 let worstPropWhere = '';
 let totalJunctionSegments = 0;
 let closedObjects = 0;
@@ -189,8 +217,10 @@ for (const scale of SCALES) {
             + `${segment.courses.length} course(s) — a tall face must be coursed, not one slab`);
           assert(segment.courses[0].role === 'capstone',
             `${label} ${entry.kind}:${entry.id} dressed face lacks a 갓돌 capstone on top`);
-          assert(segment.courses[0].outsetTop >= GROUND_JUNCTION.capstoneProjection - EPSILON,
-            `${label} ${entry.kind}:${entry.id} capstone does not lap beyond the ring`);
+          // Flush cap: the capstone may not stand proud of the course beneath it.
+          assert(segment.courses[0].outsetTop <= segment.courses[1].outsetTop + EPSILON,
+            `${label} ${entry.kind}:${entry.id} capstone stands proud of the course below `
+            + '— that lip is what rendered as a bright sliver');
           assert(segment.courses.at(-1).role === 'base',
             `${label} ${entry.kind}:${entry.id} lowest course is not the 대석 base course`);
           assert(segment.courses.length <= GROUND_JUNCTION.maxCourses + 1,
@@ -220,6 +250,29 @@ for (const scale of SCALES) {
         assert(Math.abs(cursor - segment.bottomY) <= 1e-6,
           `${label} ${entry.kind}:${entry.id} courses do not reach the closing bottom`);
       }
+      // ── Arc-end returns (v3) ────────────────────────────────────────────────
+      // A junction is normally an ARC: culled chords leave the wall terminating in
+      // mid-air. Without a return that end is a zero-thickness blade, which is what
+      // rendered as two bright pointed spikes flanking the 6.99 m 돌단 face. The
+      // return's bottom must reach the terrain minimum along its OWN line, which runs
+      // radially — perpendicular to the chords — so the chord-parallel minima that
+      // close the face say nothing about it.
+      const openEnds = countOpenArcEnds(entry.junction);
+      assert(entry.junction.returns.length === openEnds,
+        `${label} ${entry.kind}:${entry.id} has ${openEnds} open arc end(s) but `
+        + `${entry.junction.returns.length} return(s)`);
+      for (const record of entry.junction.returns) {
+        const radialFloor = terrainMeshSegmentRange(site, record.inner, record.outer).min;
+        assert(record.bottomY <= radialFloor + EPSILON,
+          `${label} ${entry.kind}:${entry.id} arc-end return bottom ${record.bottomY.toFixed(3)} `
+          + `is above its own radial terrain minimum ${radialFloor.toFixed(3)} — the open end is `
+          + 'still a blade above ground');
+        assert(record.bottomY <= record.topY - EPSILON,
+          `${label} ${entry.kind}:${entry.id} arc-end return is inverted`);
+        returnsChecked++;
+        worstReturnDepth = Math.max(worstReturnDepth, record.height);
+      }
+
       closedObjects++;
       // Unclosed float = the pre-fix geometry's slot for this object.
       const unclosed = entry.baseY - ringFloor(site, entry.footprint);
@@ -315,6 +368,17 @@ assert(worstLegacyPadResidual > VISIBLE_FLOAT,
   `FAIL-first fixture weakened: the legacy analytic endpoint pad skirt now leaves only `
   + `${worstLegacyPadResidual.toFixed(3)}m of residual float — its lower bound measured `
   + `0.17m at d9dcdfc (${worstLegacyPadWhere}), 0.29m against the true interpolated bottom`);
+// v3 fixture: arcs with open ends must actually occur, and deeply enough that a
+// missing return would be a visible blade rather than a hairline. The depth is bounded
+// by the TERMINAL chord's own height (the wall has tapered by the time it ends), so it
+// is far less than the arc's peak: measured 1.56 m deepest across this matrix, against
+// a 6.99 m tallest face.
+assert(returnsChecked > 0,
+  'FAIL-first fixture lost: no arc-end returns were planned anywhere, so the '
+  + 'open-end assertion is vacuous');
+assert(worstReturnDepth > 1.0,
+  `FAIL-first fixture weakened: deepest arc-end return is only ${worstReturnDepth.toFixed(2)}m; `
+  + 'this matrix measured 1.56m, and a shallow return cannot show a missing-blade regression');
 assert(closedObjects > 300, `too few junction objects sampled (${closedObjects})`);
 assert(totalJunctionSegments > 0, 'no junction segments planned across the whole matrix');
 
@@ -343,5 +407,7 @@ console.log(
   + `돌단 ${worstUnclosedByKind.get('guardian-dolran').value.toFixed(2)}m / `
   + `pavilion ${worstUnclosedByKind.get('pavilion').value.toFixed(2)}m unclosed datum, `
   + `legacy analytic pad skirt ${worstLegacyPadResidual.toFixed(2)}m\n`
+  + `  arc-end returns: ${returnsChecked} checked, deepest ${worstReturnDepth.toFixed(2)}m, `
+  + `each reaching its own radial terrain minimum\n`
   + `  frontier [잠정 — 백로그]: public prop float ${worstPropFloat.toFixed(2)}m @ ${worstPropWhere} (ceiling ${PROP_FLOAT_FRONTIER}m)`,
 );

@@ -236,6 +236,112 @@ window.__probe = () => {
   };
 };
 window.__frame = () => { renderer.render(scene, camera); };
+
+// ── Frame search (v3) ─────────────────────────────────────────────────────────
+// The v2 돌단 frame was unjudgeable: the apron covered 1.48% of the pixels because the
+// terrain in front hid it, and the rest of the frame was dark ground silhouette. Rather
+// than guess a better camera, MEASURE candidates: for each viewpoint render the scene
+// with the junction off and on, count the pixels that actually change (= visible apron)
+// and the frame's mean luminance, and keep the best. Low-res readPixels keeps this cheap.
+const SEARCH_W = 320, SEARCH_H = 180;
+const MIN_APRON_COVERAGE = 0.08;   // apron must occupy this share of the frame
+const MIN_MEAN_LUMA = 0.18;        // no unjudgeably dark silhouette frames
+function readFrameStats(previous) {
+  const gl = renderer.getContext();
+  const pixels = new Uint8Array(SEARCH_W * SEARCH_H * 4);
+  gl.readPixels(0, 0, SEARCH_W, SEARCH_H, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  let luma = 0;
+  for (let index = 0; index < SEARCH_W * SEARCH_H; index++) {
+    const base = index * 4;
+    luma += 0.2126 * pixels[base] + 0.7152 * pixels[base + 1] + 0.0722 * pixels[base + 2];
+  }
+  let changed = 0;
+  if (previous) {
+    for (let index = 0; index < SEARCH_W * SEARCH_H; index++) {
+      const base = index * 4;
+      if (Math.abs(pixels[base] - previous[base]) > 2
+        || Math.abs(pixels[base + 1] - previous[base + 1]) > 2
+        || Math.abs(pixels[base + 2] - previous[base + 2]) > 2) changed++;
+    }
+  }
+  return { pixels, meanLuma: luma / (SEARCH_W * SEARCH_H) / 255, changed, total: SEARCH_W * SEARCH_H };
+}
+
+window.__searchFrame = (tx, tz, kind) => {
+  const worst = window.__worstFace(tx, tz, kind);
+  if (!worst) throw new Error('shoot-house-float: no junction face for this fixture');
+  // Aim at the arc's tallest face, mid-height.
+  const mid = { x: (worst.a.x + worst.b.x) / 2, z: (worst.a.z + worst.b.z) / 2 };
+  const faceMidY = (worst.topY + worst.bottomY) / 2;
+
+  renderer.setSize(SEARCH_W, SEARCH_H);
+  camera.aspect = SEARCH_W / SEARCH_H;
+  const results = [];
+  const AZIMUTHS = 24;
+  for (let a = 0; a < AZIMUTHS; a++) {
+    const angle = a / AZIMUTHS * Math.PI * 2;
+    for (const distance of [5, 8, 12, 16, 22]) {
+      const x = mid.x + Math.cos(angle) * distance;
+      const z = mid.z + Math.sin(angle) * distance;
+      const h = groundAt(x, z);
+      camera.up.set(0, 1, 0);
+      camera.position.set(x, h + EYE_HEIGHT, z);
+      camera.lookAt(mid.x, faceMidY, mid.z);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      window.__setJunction(false);
+      renderer.render(scene, camera);
+      const off = readFrameStats(null);
+      window.__setJunction(true);
+      renderer.render(scene, camera);
+      const on = readFrameStats(off.pixels);
+      const coverage = on.changed / on.total;
+      results.push({
+        x, z, h, angle, distance, coverage, meanLuma: on.meanLuma,
+        clearance: EYE_HEIGHT,
+      });
+    }
+  }
+  renderer.setSize(1280, 720);
+  camera.aspect = 1280 / 720;
+  camera.updateProjectionMatrix();
+
+  // Coverage and luminance are FLOORS, not objectives. Maximising coverage put the
+  // camera 4 m from the wall so the apron filled 59% of the frame and the object lost
+  // all context; the judgement needed is "does this read as a guardian tree on a tall
+  // 축대", which needs the whole subject in shot. So: among viewpoints that clear both
+  // floors, take the FARTHEST (most context), breaking ties toward the brighter frame.
+  const viable = results.filter((row) => row.coverage >= MIN_APRON_COVERAGE
+    && row.meanLuma >= MIN_MEAN_LUMA);
+  let best;
+  if (viable.length) {
+    viable.sort((a, b) => (b.distance - a.distance) || (b.meanLuma - a.meanLuma));
+    best = viable[0];
+  } else {
+    // Report honestly rather than silently shipping an unjudgeable frame: keep the
+    // brightest frame that at least clears the coverage floor, else the best coverage.
+    const covered = results.filter((row) => row.coverage >= MIN_APRON_COVERAGE);
+    covered.sort((a, b) => b.meanLuma - a.meanLuma);
+    best = covered[0] || [...results].sort((a, b) => b.coverage - a.coverage)[0];
+  }
+
+  camera.up.set(0, 1, 0);
+  camera.position.set(best.x, best.h + EYE_HEIGHT, best.z);
+  camera.lookAt(mid.x, faceMidY, mid.z);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  return {
+    ...window.__probe(),
+    aim: {
+      distance: +best.distance.toFixed(1),
+      faceHeight: worst.height,
+      searchCoverage: best.coverage,
+      searchLuma: best.meanLuma,
+      bestCoverage: results[0].coverage,
+      candidates: results.length,
+    },
+  };
+};
 window.__ready = true;
 </script></body></html>`;
 
@@ -265,6 +371,10 @@ const port = server.address().port;
 const MIN_EYE_CLEARANCE = 1.5;      // camera y must clear the rendered terrain by this
 const MIN_GROUND_RATIO = 0.85;      // of the bottom third of the frame, non-sky
 const MIN_AB_DIFF_PIXELS = 2000;    // the apron must actually be in shot (~0.2% of frame)
+// Judgeability floors (vision round 2026-08-05: the v2 돌단 frame was rejected as
+// unjudgeable at 1.48% apron coverage on a mostly-dark frame).
+const MIN_APRON_COVERAGE = 0.08;
+const MIN_MEAN_LUMA = 0.18;
 const SKY = { r: 0x9f, g: 0xb4, b: 0xc4 };   // scene.background set in the page
 
 function decodePng(buffer) {
@@ -331,6 +441,18 @@ function bottomThirdGroundRatio(png) {
     }
   }
   return ground / total;
+}
+
+// Mean relative luminance of a decoded frame. A frame that is almost all dark terrain
+// silhouette cannot carry a perceptual verdict, however well framed it is.
+function meanLuminance(png) {
+  let total = 0;
+  const pixels = png.width * png.height;
+  for (let index = 0; index < pixels; index++) {
+    const base = index * png.channels;
+    total += 0.2126 * png.data[base] + 0.7152 * png.data[base + 1] + 0.0722 * png.data[base + 2];
+  }
+  return total / pixels / 255;
 }
 
 function frameViolations(probe, ratio) {
@@ -429,17 +551,17 @@ for (const fixture of FIXTURES) {
     await page.evaluate('window.__setJunction(false)');
     await page.evaluate('window.__frame()');
     const legacyBefore = decodePng(await page.screenshot({
-      path: join(OUT, `v2-slab-legacy-${fixture.name}-before.png`),
+      path: join(OUT, `v3-slab-legacy-${fixture.name}-before.png`),
     }));
     await page.evaluate('window.__setJunction(true)');
     await page.evaluate('window.__frame()');
     const legacyAfter = decodePng(await page.screenshot({
-      path: join(OUT, `v2-slab-legacy-${fixture.name}-after.png`),
+      path: join(OUT, `v3-slab-legacy-${fixture.name}-after.png`),
     }));
     await page.evaluate('window.__setJunctionOnly()');
     await page.evaluate('window.__frame()');
     const legacyOnly = decodePng(await page.screenshot({
-      path: join(OUT, `v2-slab-legacy-${fixture.name}-junction-only.png`),
+      path: join(OUT, `v3-slab-legacy-${fixture.name}-junction-only.png`),
     }));
     const appeared = diffMask(legacyBefore, legacyAfter);
     const isolated = silhouette(legacyOnly);
@@ -454,13 +576,13 @@ for (const fixture of FIXTURES) {
     failFirstProven = true;
   }
 
-  const probe = await page.evaluate(`window.__aim(${fixture.target.x}, ${fixture.target.z}, '${fixture.kind}')`);
+  const probe = await page.evaluate(`window.__searchFrame(${fixture.target.x}, ${fixture.target.z}, '${fixture.kind}')`);
   const shots = {};
   const frames = {};
   for (const [suffix, on] of [['before', false], ['after', true]]) {
     await page.evaluate(`window.__setJunction(${on})`);
     await page.evaluate('window.__frame()');
-    const file = join(OUT, `v2-house-float-${fixture.name}-${suffix}.png`);
+    const file = join(OUT, `v3-house-float-${fixture.name}-${suffix}.png`);
     const buffer = await page.screenshot({ path: file });
     const png = decodePng(buffer);
     frames[suffix] = png;
@@ -483,16 +605,34 @@ for (const fixture of FIXTURES) {
       + `(< ${MIN_AB_DIFF_PIXELS}) — this viewpoint does not show the subject, so the pair is `
       + 'not evidence. Aim/fixture needs revisiting, not the assertion.');
   }
-  results.push({ ...fixture, ab, probe, shots, changed: changed.count });
+  const coverage = changed.count / (frames.before.width * frames.before.height);
+  const luma = meanLuminance(frames.after);
+  const judgeability = [];
+  if (coverage < MIN_APRON_COVERAGE) {
+    judgeability.push(`apron coverage ${(coverage * 100).toFixed(2)}% < ${(MIN_APRON_COVERAGE * 100).toFixed(0)}%`);
+  }
+  if (luma < MIN_MEAN_LUMA) {
+    judgeability.push(`mean luminance ${luma.toFixed(3)} < ${MIN_MEAN_LUMA}`);
+  }
+  if (judgeability.length) {
+    throw new Error(`${fixture.name}: frame is not judgeable — ${judgeability.join('; ')}. `
+      + 'The viewpoint search could not find a frame clearing both floors; report this '
+      + 'rather than lowering the floors.');
+  }
+  results.push({ ...fixture, ab, probe, shots, changed: changed.count, coverage, luma });
   console.log(`  ${fixture.name}: ${fixture.note}`);
   console.log(`    GROUND ASSERTIONS PASS  eye=[${probe.eye.map((v) => v.toFixed(1)).join(', ')}] `
     + `renderedGround=${probe.groundUnderCamera.toFixed(2)} clearance=${probe.clearance.toFixed(2)}m `
     + `up=[${probe.up.join(',')}] bottomThirdGround=`
     + `${(shots.before.ratio * 100).toFixed(1)}%/${(shots.after.ratio * 100).toFixed(1)}% (before/after)`);
   console.log(`    SUBJECT VISIBLE  apron changes ${changed.count} px `
-    + `(${(100 * changed.count / (frames.before.width * frames.before.height)).toFixed(2)}% of frame) `
+    + `(${(100 * changed.count / (frames.before.width * frames.before.height)).toFixed(2)}% of frame, `
+    + `luma ${luma.toFixed(3)}) `
     + `bbox y[${changed.minY}..${changed.maxY}]  standoff=${probe.aim?.distance}m `
-    + `faceHeight=${probe.aim?.faceHeight?.toFixed(2)}m sightline=${probe.aim?.sightline?.toFixed(2)}m`);
+    + `faceHeight=${probe.aim?.faceHeight?.toFixed(2)}m  `
+    + `searched ${probe.aim?.candidates} viewpoints (best coverage `
+    + `${(probe.aim?.bestCoverage * 100).toFixed(1)}%, chosen ${(probe.aim?.searchCoverage * 100).toFixed(1)}% `
+    + `@ luma ${probe.aim?.searchLuma?.toFixed(3)})`);
   console.log(`    junction: parcelIdx=${ab.split?.parcelSkirtIndexCount} totalIdx=${ab.total} `
     + `seg=${ab.split?.segments} tri=${ab.split?.triangles} maxHeight=${ab.split?.maxHeight?.toFixed?.(2)}m`);
   await page.close();
