@@ -330,9 +330,21 @@ const expectedSceneHashes = {
   //   아니라 링 정점 좌표만 바뀐 변경이다. sync == 실제 module Worker == `?worker=0` 폴백이
   //   세 경로 모두 바이트 동일(에이전트 실측 + 리드 재실행). 같은 부팅 픽셀 A/B 는 전 뷰
   //   changed ≤1.11%·rim 그라디언트 불변이고 비전 판정 SHIP(회귀 0)·개천 계곡 대역 변경 0.
-  village: 'fb6e812e:eebd220a:e394b51b:e978e6b2',
-  town: '50483e3f:0ea24fd7:dd1576e6:a284d039',
-  capital: '7a786fe7:d01f2f0b:bf9cbf51:cba6c7eb',
+  // 지면 접합 에이프런(2026-08-05, #56): 도보 시점에서 건물이 떠 보이던 단일점 기준면 결함을
+  //   지형 메시 실측 최저점까지 내려가는 석축 에이프런으로 닫았다(당산 돌단 6.49m·시전 2.91m·
+  //   정자 0.98m·필지/궁 패드 잔여 0.29/0.37m → 전부 0). 지형을 재분할하지 않고 건물 쪽에서
+  //   내려가며, 켜·물림·갓돌·석재 값은 기존 pad-stone 정점색으로만 만든다.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-05)**: proxy 네 규모 전부 불변(fef7a386 /
+  //   3f7f776c / 046ecd22 / 395b740a) — 계획·필지·지붕 OBB 무이동. objects 는 village/town/
+  //   capital 불변(594 / 3,161 / 2,186)이고 hanyang 만 5,047 → 5,050(+3 = 시전 thatch 병합 메시
+  //   1 + 밴드 post/door 2)로, 새 재질 그룹 수와 정확히 일치한다. sync == 실제 module Worker ==
+  //   `?worker=0` 폴백 바이트 동일. plan 골든은 이 라운드에서 이동하지 않는다(computePadY 무접촉).
+  //   ※ 같은 재기준에 세 라운드가 함께 들어간다(변인 하나 원칙의 예외 — 각 몫은 라운드별로
+  //   순수 노드 실측됨): 문루 지붕 곡률·종물·현판 +14,464 · 시전 파사드 v4 지붕 +58,132 ·
+  //   에이프런 hanyang +7,282. hanyang triangles 25,240,992 → 25,313,712.
+  village: '648e58b5:aaaff1c9:b1618dd4:11ca6d8d',
+  town: '53e0e856:3a0ca870:220b65c8:ec5cfce6',
+  capital: 'e6187d2b:465b2043:0ae3c17b:f900c767',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -450,7 +462,9 @@ const expectedSceneHashes = {
   //   직접 실측(objects 5·triangles 616·44tri/채)과 정확히 일치. worker == ?worker=0 폴백 바이트
   //   동일. 계획 골든 재기준은 tools/plan-contract.json _gateQuarterRebaseline 참조.
   //   FAIL-first: tools/check-gate-quarter.mjs no-band 변형 1건·crowd-wall 29건·forecourt 48건 실패.
-  hanyang: '17636529:69f1c025:98b6ee8b:99cd1639',
+  // 2026-08-05 합산 재기준 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
+  //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
+  hanyang: '4b5ec61a:adcdb27a:c65582b5:e1916b92',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
