@@ -9,6 +9,11 @@ import {
 // 기단(월대): 장대석 단 + 전면 계단 + 주춧돌
 export function buildPodium(P, L, M) {
   const g = new THREE.Group();
+  // 0단 = 기단 없음이면 계단·소맷돌·난간도 없다 — 계단은 기단을 전제한다. 중층 주불전의
+  // 상층(podiumTiers 0, 하층 지붕 위에 앉음)이 유일한 소비자인데, 종전에는 tier 루프만
+  // 건너뛰고 전면 계단이 무조건 방출돼 하층 지붕 위에 떠 있는 판으로 렌더됐다
+  // (2026-08-05 사용자 지적 "1층 지붕과 2층 벽이 만나는 부분이 특히 어색").
+  if (!(P.podiumTiers > 0)) return g;
 
   for (let t = 0; t < P.podiumTiers; t++) {
     const shrink = t * 1.35;

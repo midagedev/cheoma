@@ -297,6 +297,22 @@ function assertPrincipalStoreys(plan, label) {
   invariant(principalTop > tallestOther * 1.6,
     `${label}: principal hall ${principalTop.toFixed(2)}m is not the clear apex over`
     + ` ${tallestOther.toFixed(2)}m`);
+  // ⑧ 하층은 **스커트 지붕**이다 — 물매를 낮춰 용마루가 상층 몸체 안에 잠긴다.
+  //    (2026-08-05 사용자 판정 "1층 지붕과 2층 벽이 만나는 부분이 특히 어색"의 계약화.
+  //    수정 전에는 하층 용마루 10.06m 가 상층 바닥 8.62m 를 관통했다.)
+  const repertoirePitch = templeRoleArchitecture('main-hall', { seed: plan.seed, id: main.id })
+    .roofGrammar.pitch;
+  invariant(main.roofGrammar.pitch < repertoirePitch * 0.5,
+    `${label}: two-storey lower roof kept its full pitch ${main.roofGrammar.pitch}`
+    + ` (repertoire ${repertoirePitch}) — the lower roof must be a shallow skirt`);
+  // ⑨ 상층은 **원래 물매**를 지킨다(낮춰진 하층 프리셋을 상속하면 정점이 평평해진다).
+  invariant(Math.abs((upper.roofPitch ?? 0) - repertoirePitch) < 1e-6,
+    `${label}: upper storey pitch ${upper.roofPitch} drifted from the repertoire ${repertoirePitch}`);
+  // ⑩ 용마루가 상층 벽 높이 안에 들어와야 상층 몸체가 그것을 가린다(관통 방지).
+  const upperWallTop = upper.seatY + above.colTopY;
+  invariant(lower.ridgeY < upperWallTop,
+    `${label}: lower ridge ${lower.ridgeY.toFixed(2)} escapes the upper storey wall`
+    + ` top ${upperWallTop.toFixed(2)} — it will cut through the upper body`);
 }
 
 function assertLocalPlan(plan, label) {

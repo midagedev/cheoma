@@ -162,8 +162,17 @@ function applyTwoStoreyPrincipal(plan) {
   if (plan.variant !== 'extended') return plan;
   const main = plan.buildings?.find((building) => building.role === 'main-hall');
   if (!main || main.upperStorey) return plan;
-  const layout = computeLayout(templeHallBuilderPreset(main));
   const spec = templeUpperStoreySpec(main);
+  // 하층 지붕을 스커트 지붕으로 낮춘다 — **계획이 소유하는 값**이라 렌더러·현판·focus·게이트가
+  // 모두 같은 물매를 읽는다(role-hierarchy.js TWO_STOREY_UPPER.lowerRoofPitchRatio 참조).
+  // 처마 외연(hallExtent)은 물매와 무관하므로 가람 배치·간격 계약은 이 변경에 불변이다.
+  if (Number.isFinite(spec.lowerRoofPitchRatio) && main.roofGrammar) {
+    main.roofGrammar = {
+      ...main.roofGrammar,
+      pitch: round(main.roofGrammar.pitch * spec.lowerRoofPitchRatio),
+    };
+  }
+  const layout = computeLayout(templeHallBuilderPreset(main));
   const drop = Math.max(0, layout.ridgeY - layout.eaveInnerY) * spec.seatDropRatio;
   main.storeys = 2;
   main.upperStorey = {

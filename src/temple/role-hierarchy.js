@@ -372,9 +372,16 @@ const TWO_STOREY_UPPER = Object.freeze({
   // 같은 판정의 두 번째 축: 상층 벽은 하층과 같은 황토벽 위주가 아니라 창호가 우세한 띠다.
   // buildWalls 의 협칸 상부 창 높이 비율(winFrac)로 번역된다 — 하층 협칸 0.34 대비 0.5.
   wallWindowFrac: 0.5,
-  // 상층 몸체를 하층 지붕 곡면에 물리는 깊이 — 하층 낙차(ridgeY − eaveInnerY)의 비율.
-  // 0 이면 용마루선에 얹혀 상층 옆구리 밑에 빈틈이 보이고, 너무 크면 하층 지붕이 삼켜진다.
-  seatDropRatio: 0.32,
+  // 하층 지붕을 **스커트 지붕**으로 낮춘다 (2026-08-05 접합부 개정, 사용자 지적 "1층 지붕과
+  // 2층 벽이 만나는 부분이 특히 어색"). 실측으로 확정된 원인: 하층이 완전한 팔작이라 용마루가
+  // 10.56m 인데 상층을 8.62m 에 앉혀, 지붕 상부 경사면이 상층 벽을 관통하고 그 틈이 갈색
+  // 판으로 읽혔다. 실물 중층(화엄사 각황전·무량사 극락전)의 하층 지붕은 상층 벽에 닿는 얕은
+  // 스커트라 **용마루가 없다** — 물매를 낮춰 용마루를 상층 몸체 안으로 잠기게 하는 것이 같은
+  // 문법의 최소 번역이다(하층 처마 곡선·겹처마·공포는 불변).
+  lowerRoofPitchRatio: 0.22,
+  // 상층 몸체를 하층 용마루 아래로 물리는 깊이 — 하층 낙차(ridgeY − eaveInnerY)의 비율.
+  // 스커트 지붕에서는 용마루가 이미 상층 벽 높이 안에 들어오므로 거의 얹는다(0.05).
+  seatDropRatio: 0.05,
 });
 
 /**
@@ -399,6 +406,11 @@ export function templeUpperStoreySpec(building) {
     podiumTiers: 0,
     seatDropRatio: TWO_STOREY_UPPER.seatDropRatio,
     wallWindowFrac: TWO_STOREY_UPPER.wallWindowFrac,
+    lowerRoofPitchRatio: TWO_STOREY_UPPER.lowerRoofPitchRatio,
+    // 상층은 **원래 물매**를 쓴다 — 하층만 스커트로 낮추므로, 낮춰진 하층 프리셋을 상속하면
+    // 상층 지붕까지 평평해져 가람의 정점이 사라진다. 이 값은 하층 물매를 내리기 **전**에
+    // 채집되고(applyTwoStoreyPrincipal 순서), 이후 templeUpperStoreyPreset 이 되돌려 쓴다.
+    roofPitch: building.roofGrammar.pitch,
   };
 }
 
@@ -413,6 +425,10 @@ export function templeUpperStoreyPreset(building) {
     podiumTiers: upper.podiumTiers,
     // 저장된 플랜에 wallWindowFrac 이 없으면(스펙 개정 전 레코드) 현행 상수로 보충한다.
     wallWinFrac: upper.wallWindowFrac ?? TWO_STOREY_UPPER.wallWindowFrac,
+    // 상층 물매 복원(위 주석 참조). 저장 레코드에 없으면 하층 값을 그대로 쓰되, 그 경우
+    // 하층 스커트 비율의 역수로 되돌려 상층이 평평해지는 회귀를 막는다.
+    roofPitch: upper.roofPitch
+      ?? (building.roofGrammar.pitch / (upper.lowerRoofPitchRatio ?? TWO_STOREY_UPPER.lowerRoofPitchRatio)),
   };
 }
 

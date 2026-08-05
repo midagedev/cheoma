@@ -153,12 +153,73 @@ function buildHall(spec, seed, mats) {
   // 팔레트를 하층과 공유하므로 새 재질군·프로그램 계열이 0 이다. 전각 그룹의 자식이라
   // yaw·scale·단 리프트를 함께 받는다.
   if (spec.upperStorey) {
-    const upper = buildBuilding({ ...templeUpperStoreyPreset(spec), seed: (seed ^ 0x2b1f) >>> 0, mats });
+    const upperPreset = { ...templeUpperStoreyPreset(spec), seed: (seed ^ 0x2b1f) >>> 0, mats };
+    const upper = buildBuilding(upperPreset);
     upper.name = 'upper-storey';
     upper.position.y = spec.upperStorey.seatY;
     upper.userData.templeUpperStorey = spec.upperStorey;
     building.add(upper);
     building.userData.templeStoreys = spec.storeys || 2;
+    // 층간 판벽 스커트(2026-08-05 사용자 지적 "1층 지붕과 2층 벽이 만나는 부분이 특히 어색"):
+    //   하층 지붕 곡면은 상층 벽 하단보다 낮게 지나가는 구간이 있어(전·후면 중앙 ~0.9m 공극)
+    //   상층이 초석째로 떠 보였다. 실물 중층(각황전·미륵전)은 하층 지붕 상단이 상층 몸체의
+    //   판벽 띠에 접합된다 — 상층 기둥열 둘레를 두르는 판벽 링으로 그 문법을 번역한다.
+    //   하단은 하층 처마 안쪽 높이(plan 이 저장한 lowerEaveInnerY)까지 내려 어느 각도에서도
+    //   지붕면 아래로 잠기고, 재질은 상층 자신의 woodDark 를 빌려 새 재질군이 0 이다.
+    {
+      const upperLayout = upper.userData.layout;
+      const M = upper.userData.materials;
+      const halfW = upperLayout.W / 2 + 0.14;
+      const halfD = upperLayout.D / 2 + 0.14;
+      // 상단은 상층 벽 하단(seatY + 벽 하단 오프셋 ≈ 0.18)에 살짝만 겹친다 — 더 올리면
+      // 스커트가 벽과 한 덩어리로 읽혀 몸체가 도로 높아 보인다(1차 시도 실측).
+      const top = spec.upperStorey.seatY + 0.28;
+      const bottom = (spec.upperStorey.lowerEaveInnerY ?? (spec.upperStorey.seatY - 2.2)) + 0.1;
+      const height = Math.max(0.4, top - bottom);
+      const centerY = (top + bottom) / 2;
+      const T = 0.1;
+      const skirt = new THREE.Group();
+      skirt.name = 'storey-skirt';
+      const panel = (w, d, x, z) => {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, height, d), M.woodDark);
+        mesh.position.set(x, centerY, z);
+        mesh.castShadow = mesh.receiveShadow = true;
+        skirt.add(mesh);
+      };
+      panel(halfW * 2 + T * 2, T, 0, halfD + T / 2);   // 남
+      panel(halfW * 2 + T * 2, T, 0, -halfD - T / 2);  // 북
+      panel(T, halfD * 2, halfW + T / 2, 0);           // 동
+      panel(T, halfD * 2, -halfW - T / 2, 0);          // 서
+      // 인방(창방) 레일 + 판벽 기둥 리듬: 밋밋한 단일 판은 판지 상자로 읽힌다(1차 시도의
+      // 결함). 실물 중층의 층간 판벽은 상·하 인방 사이에 기둥이 칸을 나눈 목가구다.
+      const railWidth = halfW * 2 + T * 2 + 0.24;
+      const railDepth = halfD * 2 + T * 2 + 0.24;
+      const addRail = (y, h, name) => {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(railWidth, h, railDepth), M.wood);
+        rail.name = name;
+        rail.position.set(0, y, 0);
+        rail.castShadow = rail.receiveShadow = true;
+        skirt.add(rail);
+      };
+      addRail(top - 0.02, 0.18, 'storey-skirt-rail-top');
+      // 하부 인방은 지붕면과 만나는 선에 둔다 — 남·북면에서 지붕이 가장 높은 중앙 기준이라
+      // 어느 방위에서도 판벽 아래가 지붕 뒤로 잠긴다.
+      addRail(Math.max(bottom + 0.2, top - 1.05), 0.14, 'storey-skirt-rail-mid');
+      // 기둥: 상층 칸 경계마다. xPos 는 상층 layout 의 칸 좌표이므로 상층 기둥열과 정렬된다.
+      const stileTop = top - 0.11;
+      const stileBottom = Math.max(bottom + 0.2, top - 1.05) + 0.07;
+      const stileH = Math.max(0.2, stileTop - stileBottom);
+      for (const x of upperLayout.xPos || []) {
+        for (const zSign of [1, -1]) {
+          const stile = new THREE.Mesh(new THREE.BoxGeometry(0.22, stileH, 0.16), M.wood);
+          stile.name = 'storey-skirt-stile';
+          stile.position.set(x, (stileTop + stileBottom) / 2, zSign * (halfD + T));
+          stile.castShadow = stile.receiveShadow = true;
+          skirt.add(stile);
+        }
+      }
+      building.add(skirt);
+    }
   }
   // 현판은 주불전(유일한 rank-4 전각)에만. plan-owned 기하를 그대로 소비하고, 전각 그룹의
   // 자식이므로 yaw·scale·에이프런 리프트를 함께 받는다.

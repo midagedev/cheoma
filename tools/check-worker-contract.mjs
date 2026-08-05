@@ -472,7 +472,28 @@ const expectedSceneHashes = {
   //   record) — tools/plan-contract.json _templeTwoStoreyProportionRebaseline 참조.
   //   시각 확인: scratch/compare-refs/renders/t2s-c-close.png. 직전 값(폐기):
   //   capital 7be3b811:b4b61745:d62f1532:5667acf1 · hanyang bdbf88b0:dd432564:0c403497:12a64fda.
-  capital: 'e100203b:806215fd:ab224d0d:992efbef',
+  // 중층 층간 접합(2026-08-05, 사용자 판정 "1층 지붕과 2층 벽이 만나는 부분이 특히 어색"):
+  //   세 성분이 extended 두 씬만 이동시킨다.
+  //   (a) `src/builder/podium.js` — 0단 기단(podiumTiers 0)이면 전면 계단·소맷돌·난간도 없다.
+  //       중층 상층이 유일한 소비자였고, 종전에는 tier 루프만 건너뛰어 계단이 하층 지붕 위에
+  //       떠 있는 석판으로 렌더됐다(사용자가 본 결함의 절반).
+  //   (b) `src/temple/plan.js` + role-hierarchy — 하층 지붕을 스커트 지붕으로: 물매만 0.22배
+  //       (0.68→0.15)로 낮춰 용마루를 상층 몸체 안에 잠기게 한다(ridgeY 10.06→8.17 < 상층 벽
+  //       상단 9.9). 상층은 원래 물매 0.68 유지(upperStorey.roofPitch 보존). seatDrop 0.45→0.05.
+  //       실물 중층(각황전·무량사 극락전)의 하층 지붕에 용마루가 없는 문법의 최소 번역.
+  //   (c) `src/temple/compound.js` — 층간 판벽 스커트(4면 판 + 인방 2 + 기둥), 재질은 상층 자신의
+  //       woodDark/wood 를 빌린다 → **새 재질군 0**.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-05)**: village/town/mja/snapshot 바이트 동일,
+  //   objects 네 씬 전부 불변(594 / 3,161 / 2,188 / 5,054) — 스커트가 기존 재질 버킷으로 병합되고
+  //   계단 제거도 버킷을 없애지 않는다는 증거. triangles 는 extended 두 씬만 **정확히 같은 −304**
+  //   (5,624,016→5,623,712 · 25,192,744→25,192,440) = 계단·소맷돌·난간 제거분 − 스커트 추가분.
+  //   proxy 네 개 불변(c9575cad / 25498dcf / 77c8d724 / 73409390) — 지붕 OBB·focus 해 불침해.
+  //   FAIL-first: `tools/check-temple-contract.mjs` 의 신규 관계 ⑧⑨⑩ 이 수정 전 소스에서
+  //   "two-storey lower roof kept its full pitch 0.68" 로 실패한다.
+  //   계획 골든 +43B/케이스 — tools/plan-contract.json _templeTwoStoreyJointRebaseline 참조.
+  //   직전 값(폐기): capital e100203b:806215fd:ab224d0d:992efbef ·
+  //   hanyang 951e533d:4180eee3:5c21d00b:60ef4beb.
+  capital: 'ed4f2aad:180514eb:7bc6ae6b:1e325b13',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -594,7 +615,7 @@ const expectedSceneHashes = {
   //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
   // 2026-08-05 주불전 무자 현판 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
   //   (proxy 불변 · 절 없는 케이스 바이트 동일 · triangles 정확히 +60 · objects +1).
-  hanyang: '951e533d:4180eee3:5c21d00b:60ef4beb',
+  hanyang: '65d8faf8:6d39e6d0:5b0af7a0:ff1bf638',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
