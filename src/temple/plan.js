@@ -1,13 +1,25 @@
 import { makeRng } from '../rng.js';
 import {
   applyTempleEntrySequence,
+  planTempleEntrySequence,
   templeBuildingIsOpenPassUnder,
   templeEntrySequenceIssues,
 } from './entry-sequence.js';
+import { applyTempleTerraces, templeTerraceIssues } from './terrace-plan.js';
 import {
   templeHallEaveFootprint,
   templeRoleArchitecture,
 } from './role-hierarchy.js';
+
+// 가람 밀집 간격 (2026-08-05, refs/temple-old 대조 라운드).
+// 사료 사진(장안사 1930 사선 부감, 정양사 1930 눈높이)에서 전각들은 지붕이 거의 맞닿을
+// 만큼 붙어 용마루 방향이 채마다 달라 지붕면이 조각보로 얽힌다. 종전 배치는 일곽 폭·깊이
+// 비율로 전각을 흩어 놓아 최근접 처마 간격 median 11.13m(extended)·6.81m(courtyard),
+// 처마합이 일곽의 12%뿐이었다 — 마당이 화면 절반을 먹고 소규모 궁으로 읽힌 원인이다.
+// 이 값은 처마 사이 실간격이며 templePlanIssues 의 0.45m 겹침 한계보다 크게 잡는다.
+const CLUSTER_GAP = 1.6;
+// 주불전 북단이 일곽 담과 두는 여유. 담 두께 0.46 + 시공 여유.
+const CLUSTER_NORTH_MARGIN = 3.3;
 
 // Framework- and renderer-free Korean temple compound planner.
 // Local coordinates follow the repository convention: +z is south/entrance,
@@ -113,6 +125,25 @@ function hall(id, role, x, z, {
   }, seed);
 }
 
+/**
+ * Oriented eave extent of a hall that has not been placed yet.
+ *
+ * Layout must be derived from the real eave rectangle, never from hand-authored
+ * coordinates: `templeRoleArchitecture` picks between the matbae and paljak
+ * repertoire by `seed:id:role`, and those two differ by 1.9m of eave width on the
+ * 5-bay main hall. Fixed coordinates therefore drift the gathered spacing by more
+ * than the whole CLUSTER_GAP budget on half of all seeds.
+ */
+function hallExtent(role, id, seed, frontBays, sideBays, scale, yaw = 0) {
+  const architecture = templeRoleArchitecture(role, { seed, id });
+  const eave = templeHallEaveFootprint({ architecture, frontBays, sideBays, scale });
+  const across = Math.abs(Math.sin(yaw)) > 0.5;
+  return {
+    w: across ? eave.localDepth : eave.localWidth,
+    d: across ? eave.localWidth : eave.localDepth,
+  };
+}
+
 const PLAN_ARRAY_FIELDS = Object.freeze([
   'courtyards', 'enclosures', 'buildings', 'gates', 'props', 'paths',
 ]);
@@ -215,6 +246,9 @@ export function normalizeTemplePlan(plan) {
   if (!plan.entrySequence) {
     applyTempleEntrySequence(plan, { profile: plan.settings?.entryProfile });
   }
+  // 단 기록도 같은 방식으로 회복한다 — 완비된 v2 는 그대로 통과(identity)하고, 이전
+  // 순수 페이로드는 스키마 범프 없이 단·석축 계약을 얻는다.
+  if (!plan.terraces) applyTempleTerraces(plan);
   return plan;
 }
 
@@ -258,35 +292,48 @@ function commonPlan(seed, variant, width, depth, settings) {
 }
 
 function planCompact(plan) {
-  const { width, depth, settings } = plan;
-  const mainZ = -depth * 0.27;
+  const { width, depth, settings, seed } = plan;
+  const minZ = -depth / 2;
+  const main = hallExtent('main-hall', 'main-hall', seed, 3, 2, 0.82);
+  const yosa = hallExtent('yosa', 'west-yosa', seed, 3, 2, 0.66, -Math.PI / 2);
+
+  // 암자도 같은 밀집 문법을 쓴다. 종전에는 요사를 `-width * 0.35` 에 두어 30m 일곽에서
+  // 처마 간격이 3.12m 로 벌어졌다(마하연 사진은 큰 전각 하나에 부속이 붙어 있다).
+  const mainZ = round(minZ + CLUSTER_NORTH_MARGIN + main.d / 2);
+  const mainSouth = mainZ + main.d / 2;
+  const westFace = -main.w / 2 - CLUSTER_GAP;
+  const yosaZ = round(mainSouth + CLUSTER_GAP + yosa.d / 2);
+  const courtSouthZ = round(Math.min(depth / 2 - 2.4, yosaZ + yosa.d / 2 + 1.9));
+
   plan.courtyards.push({
     id: 'worship-court', role: 'worship',
-    polygon: rect(0, 1.5,
-      Math.min(width - 2, (width - 3) * settings.courtScale),
-      Math.min(depth - 3, (depth - 4) * settings.courtScale)),
+    polygon: rect(
+      (westFace + main.w / 2) / 2, (mainSouth + courtSouthZ) / 2,
+      round((main.w / 2 - westFace) * clamp(settings.courtScale, 0.9, 1.1)),
+      round(courtSouthZ - mainSouth),
+    ),
     level: 0,
   });
   const candidates = [
     hall('main-hall', 'main-hall', 0, mainZ, {
-      frontBays: 3, sideBays: 2, scale: 0.82, seed: plan.seed,
+      frontBays: 3, sideBays: 2, scale: 0.82, seed,
     }),
-    hall('west-yosa', 'yosa', -width * 0.35, 2.5, {
-      yaw: -Math.PI / 2, frontBays: 3, sideBays: 2, scale: 0.66,
-      seed: plan.seed,
+    hall('west-yosa', 'yosa', round(westFace - yosa.w / 2), yosaZ, {
+      yaw: -Math.PI / 2, frontBays: 3, sideBays: 2, scale: 0.66, seed,
     }),
   ];
   plan.buildings = candidates.slice(0, settings.hallCount);
   if (settings.stoneLanterns > 0) {
-    plan.props.push(prop('main-lantern', 'worship-lantern', 'stone-lantern', 2.1, mainZ + 5.2, { scale: 0.92, radius: 0.55 }));
+    plan.props.push(prop('main-lantern', 'worship-lantern', 'stone-lantern',
+      2.1, round(mainSouth + 2.4), { scale: 0.92, radius: 0.55 }));
   }
   plan.paths.push({
     id: 'entry-path', role: 'entry', width: 1.35,
-    points: [point(0, depth / 2 - 0.8), point(0, mainZ + 3.3)],
+    points: [point(0, depth / 2 - 0.8), point(0, round(mainSouth + 1.4))],
   });
   plan.solarAccess = {
-    role: 'main-hall', origin: point(0, mainZ + 3.5),
-    halfWidth: 5.6, southZ: round(depth / 2),
+    role: 'main-hall', origin: point(0, round(mainSouth + 0.6)),
+    halfWidth: round(main.w / 2), southZ: round(depth / 2),
   };
 }
 
@@ -297,16 +344,29 @@ function pagodaMode(settings, variant, seed) {
   return ((seed ^ 0x70a9) & 1) ? 'pair' : 'single';
 }
 
-function addCourtProps(plan, mainZ, axisX, spread) {
+/**
+ * Lateral offset for a paired 석탑 inside a gathered court.
+ *
+ * The court is only `main.w + 2 * CLUSTER_GAP` wide once the halls close around
+ * it, so the pair has to stay clear of both the 요사/선방 eaves and the court edge.
+ */
+function pagodaSpread(mainWidth) {
+  return round(Math.min(mainWidth * 0.34, mainWidth / 2 + CLUSTER_GAP - 1.95));
+}
+
+function addCourtProps(plan, mainSouth, axisX, spread) {
   const mode = pagodaMode(plan.settings, plan.variant, plan.seed);
-  const propZ = mainZ + (plan.variant === 'extended' ? 15 : 17);
+  const court = plan.courtyards.find((candidate) => candidate.role === 'worship');
+  const courtSouth = court ? Math.max(...court.polygon.map((corner) => corner.z)) : mainSouth + 12;
+  // 석탑은 예불축 위 마당 앞쪽(주불전 정면)에 선다 — 탑–금당 정형.
+  const propZ = round(mainSouth + (courtSouth - mainSouth) * 0.42);
   if (mode === 'single') {
-    plan.props.push(prop('central-pagoda', 'worship-pagoda', 'pagoda', axisX + spread, propZ, {
+    plan.props.push(prop('central-pagoda', 'worship-pagoda', 'pagoda', axisX, propZ, {
       scale: plan.variant === 'extended' ? 1.05 : 0.92, radius: 1.35, heightClass: 'tall', stories: 3,
     }));
   } else if (mode === 'pair') {
     for (const side of [-1, 1]) {
-      plan.props.push(prop(`pagoda-${side < 0 ? 'west' : 'east'}`, 'worship-pagoda', 'pagoda', axisX + side * spread, propZ, {
+      plan.props.push(prop(`pagoda-${side < 0 ? 'west' : 'east'}`, 'worship-pagoda', 'pagoda', round(axisX + side * spread), propZ, {
         scale: plan.variant === 'extended' ? 1.02 : 0.88,
         radius: 1.3, heightClass: 'tall', stories: 3,
       }));
@@ -317,44 +377,81 @@ function addCourtProps(plan, mainZ, axisX, spread) {
     const side = lanternCount === 1 ? 1 : (index ? 1 : -1);
     plan.props.push(prop(
       lanternCount === 1 ? 'main-lantern' : `main-lantern-${side < 0 ? 'west' : 'east'}`,
-      'worship-lantern', 'stone-lantern', axisX + side * 2.4, mainZ + 7.5,
+      'worship-lantern', 'stone-lantern', round(axisX + side * 2.4), round(mainSouth + 2.4),
       { scale: 1, radius: 0.55 },
     ));
   }
 }
 
+/**
+ * `templePassUnderPlacement()` seats the 누문 `min(4.2, span * 0.18)` north of the
+ * worship court's south edge. The gathered layout wants the pavilion flush with
+ * the 강당·종각 line instead, so solve that relation backwards for the court edge
+ * rather than duplicating the processional grammar here.
+ */
+function courtSouthForPassUnder(targetZ, northZ) {
+  const wide = targetZ + 4.2;
+  if ((wide - northZ) * 0.18 >= 4.2) return wide;
+  return (targetZ - 0.18 * northZ) / 0.82;
+}
+
 function planCourtyard(plan) {
-  const { width, depth, settings } = plan;
+  const { width, depth, settings, seed } = plan;
   const axisX = round(settings.axisBend * width * 0.035);
-  const mainZ = -depth * 0.31;
   plan.axis.offsetX = axisX;
+  const minZ = -depth / 2;
+
+  const main = hallExtent('main-hall', 'main-hall', seed, 3, 3, 0.9);
+  const yosa = hallExtent('yosa', 'west-yosa', seed, 3, 2, 0.72, -Math.PI / 2);
+  const seonbang = hallExtent('seonbang', 'east-seonbang', seed, 3, 2, 0.72, Math.PI / 2);
+  const bell = hallExtent('bell-pavilion', 'bell-pavilion', seed, 3, 2, 0.62, Math.PI / 2);
+
+  // 주불전은 가람의 정점이므로 최북단·(mountain 이면) 최고단에 앉는다.
+  const mainZ = round(minZ + CLUSTER_NORTH_MARGIN + main.d / 2);
+  const mainSouth = mainZ + main.d / 2;
+  const westFace = axisX - main.w / 2 - CLUSTER_GAP;
+  const eastFace = axisX + main.w / 2 + CLUSTER_GAP;
+
+  // 요사·선방이 마당의 동·서 변을 이룬다. yaw ±90° 라 용마루가 주불전과 직교해
+  // 사료 사진의 조각보 지붕 읽기를 만든다.
+  const yosaZ = round(mainSouth + CLUSTER_GAP + yosa.d / 2);
+  const seonbangZ = round(mainSouth + CLUSTER_GAP + seonbang.d / 2);
+  const bellZ = round(seonbangZ + seonbang.d / 2 + CLUSTER_GAP + bell.d / 2);
+
+  const courtNorthZ = round(mainSouth);
+  // 누문 줄은 요사·선방 줄 바로 남쪽이다. 종각(측방으로 물러난 채)에서 유도하면 36m
+  // 최소 일곽에서 마당 남단이 남문 z 를 넘어가 진입 순서 단언까지 깨진다.
+  const passUnder = hallExtent('gate-pavilion', 'entry-pavilion', seed, 3, 2, 0.62);
+  const southRowZ = round(Math.max(yosaZ + yosa.d / 2, seonbangZ + seonbang.d / 2)
+    + CLUSTER_GAP + passUnder.d / 2);
+  const courtSouthZ = round(courtSouthForPassUnder(southRowZ, courtNorthZ));
+  // courtScale 은 마당의 폭만 조절한다. 깊이는 누문 위치를 결정하므로 진입 문법이
+  // 사용자 파라미터로 흔들리지 않게 군집에서 그대로 유도한다.
+  const courtWidth = round((eastFace - westFace) * clamp(settings.courtScale, 0.9, 1.1));
   plan.courtyards.push({
     id: 'worship-court', role: 'worship',
-    polygon: rect(axisX, -2,
-      Math.min(width - 3, (width - 5) * settings.courtScale),
-      Math.min(depth - 5, (depth - 8) * settings.courtScale)),
+    polygon: rect((westFace + eastFace) / 2, (courtNorthZ + courtSouthZ) / 2,
+      courtWidth, courtSouthZ - courtNorthZ),
     level: 0,
   });
+
   const candidates = [
     hall('main-hall', 'main-hall', axisX, mainZ, {
-      frontBays: 3, sideBays: 3, scale: 0.9, seed: plan.seed,
+      frontBays: 3, sideBays: 3, scale: 0.9, seed,
     }),
-    hall('west-yosa', 'yosa', -width * 0.37, -1, {
-      yaw: -Math.PI / 2, scale: 0.72, seed: plan.seed,
+    hall('west-yosa', 'yosa', round(westFace - yosa.w / 2), yosaZ, {
+      yaw: -Math.PI / 2, scale: 0.72, seed,
     }),
-    hall('east-seonbang', 'seonbang', width * 0.37, -1, {
-      yaw: Math.PI / 2, scale: 0.72, seed: plan.seed,
+    hall('east-seonbang', 'seonbang', round(eastFace + seonbang.w / 2), seonbangZ, {
+      yaw: Math.PI / 2, scale: 0.72, seed,
     }),
-    hall('bell-pavilion', 'bell-pavilion', width * 0.34, depth * 0.29, {
-      frontBays: 3, sideBays: 2, scale: 0.62, seed: plan.seed,
+    hall('bell-pavilion', 'bell-pavilion', round(eastFace + bell.w / 2), bellZ, {
+      yaw: Math.PI / 2, frontBays: 3, sideBays: 2, scale: 0.62, seed,
     }),
   ];
   plan.buildings = candidates.slice(0, settings.hallCount)
     .filter((building) => building.role !== 'bell-pavilion' || settings.includeBellPavilion);
-  // A narrow courtyard needs a slightly wider pagoda offset than a simple
-  // width ratio gives it. Keep the tower and its visual mass entirely outside
-  // the main hall's south-light/camera lane at the 36m lower bound.
-  addCourtProps(plan, mainZ, axisX, Math.max(width * 0.20, 8.3));
+  addCourtProps(plan, mainSouth, axisX, pagodaSpread(main.w));
   if (settings.includeDanggan) {
     plan.props.push(prop('entry-danggan', 'entry-marker', 'danggan', axisX - 8.2, depth / 2 - 6.2, {
       scale: 0.92, radius: 0.9, heightClass: 'tall',
@@ -362,64 +459,113 @@ function planCourtyard(plan) {
   }
   plan.paths.push({
     id: 'entry-path', role: 'entry', width: 1.5,
-    points: [point(0, depth / 2 - 1), point(axisX * 0.45, 7), point(axisX, mainZ + 4.8)],
+    points: [point(0, depth / 2 - 1), point(axisX * 0.45, courtSouthZ), point(axisX, mainSouth + 1.4)],
   });
   plan.solarAccess = {
-    role: 'main-hall', origin: point(axisX, mainZ + 4.8),
-    halfWidth: 6.1, southZ: round(depth / 2),
+    role: 'main-hall', origin: point(axisX, round(mainSouth + 0.6)),
+    halfWidth: round(main.w / 2), southZ: round(depth / 2),
   };
 }
 
 function planExtended(plan) {
-  const { width, depth, settings } = plan;
+  const { width, depth, settings, seed } = plan;
   const axisX = round(settings.axisBend * width * 0.055);
-  const mainZ = -depth * 0.34;
-  const sideX = width * 0.32;
   plan.axis.offsetX = axisX;
+  const minZ = -depth / 2;
+
+  const main = hallExtent('main-hall', 'main-hall', seed, 5, 3, 0.9);
+  const westSub = hallExtent('subsidiary-hall', 'west-subsidiary', seed, 3, 2, 0.78);
+  const eastSub = hallExtent('subsidiary-hall', 'east-subsidiary', seed, 3, 2, 0.78);
+  const yosa = hallExtent('yosa', 'west-yosa', seed, 3, 2, 0.72, -Math.PI / 2);
+  const seonbang = hallExtent('seonbang', 'east-seonbang', seed, 3, 2, 0.72, Math.PI / 2);
+  const lecture = hallExtent('lecture-hall', 'lecture-hall', seed, 3, 2, 0.68, -Math.PI / 2);
+  const bell = hallExtent('bell-pavilion', 'bell-pavilion', seed, 3, 2, 0.68, Math.PI / 2);
+
+  const mainZ = round(minZ + CLUSTER_NORTH_MARGIN + main.d / 2);
+  const mainSouth = mainZ + main.d / 2;
+  const westFace = axisX - main.w / 2 - CLUSTER_GAP;
+  const eastFace = axisX + main.w / 2 + CLUSTER_GAP;
+
+  // 좌우 보전은 주불전과 용마루가 나란하되 z 를 남으로 물려 지붕면이 어긋나게 겹친다.
+  // 정면에서 한 줄로 정렬되면 사료 사진의 조각보 읽기가 사라진다.
+  const subZ = round(mainZ + Math.min(2.4, main.d * 0.24));
+  const westSubSouth = subZ + westSub.d / 2;
+  const eastSubSouth = subZ + eastSub.d / 2;
+
+  // 요사·선방·강당·종각은 yaw ±90° 로 마당의 동·서 변을 이룬다(용마루 직교).
+  const yosaZ = round(westSubSouth + CLUSTER_GAP + yosa.d / 2);
+  const seonbangZ = round(eastSubSouth + CLUSTER_GAP + seonbang.d / 2);
+  const lectureZ = round(yosaZ + yosa.d / 2 + CLUSTER_GAP + lecture.d / 2);
+  const bellZ = round(seonbangZ + seonbang.d / 2 + CLUSTER_GAP + bell.d / 2);
+
+  const courtNorthZ = round(mainSouth);
+  // 누문은 강당·종각과 같은 줄(요사·선방 남쪽)에 앉아 마당의 남변을 닫는다
+  // — 보제루 곁에 종각이 놓이는 배치(docs/temple-generator.md §2.1).
+  const passUnder = hallExtent('gate-pavilion', 'entry-pavilion', seed, 3, 2, 0.62);
+  const southRowZ = round(Math.max(yosaZ + yosa.d / 2, seonbangZ + seonbang.d / 2)
+    + CLUSTER_GAP + passUnder.d / 2);
+  const courtSouthZ = round(courtSouthForPassUnder(southRowZ, courtNorthZ));
+  const courtWidth = round((eastFace - westFace) * clamp(settings.courtScale, 0.9, 1.1));
+
+  // 일곽 내부 담은 군집 실측 윤곽을 감싼다. 종전처럼 depth 비율로 잡으면 밀집 군집의
+  // 강당·종각과 누문을 담선이 관통한다. 남변은 가장 남쪽 전각(강당 또는 종각)보다
+  // 더 남쪽이어야 하고, 중문(일주문)은 그 담선 위에 선다.
+  const clusterMinX = Math.min(westFace - westSub.w, westFace - yosa.w, westFace - lecture.w);
+  const clusterMaxX = Math.max(eastFace + eastSub.w, eastFace + seonbang.w, eastFace + bell.w);
+  const innerSouth = round(Math.max(lectureZ + lecture.d / 2, bellZ + bell.d / 2) + 1.9);
+  const innerNorth = round(mainZ - main.d / 2 - 1.9);
+
   plan.courtyards.push(
-    { id: 'entry-court', role: 'entry', polygon: rect(0, depth * 0.23, width - 5, Math.min(depth * 0.37, depth * 0.32 * settings.courtScale)), level: 0 },
-    { id: 'worship-court', role: 'worship', polygon: rect(axisX, -depth * 0.17, width - 9, Math.min(depth * 0.61, depth * 0.55 * settings.courtScale)), level: 0 },
+    {
+      id: 'entry-court', role: 'entry',
+      polygon: rect(0, (innerSouth + 3 + depth / 2 - 2) / 2, width - 5,
+        Math.max(6, depth / 2 - 2 - (innerSouth + 3))),
+      level: 0,
+    },
+    {
+      id: 'worship-court', role: 'worship',
+      polygon: rect((westFace + eastFace) / 2, (courtNorthZ + courtSouthZ) / 2,
+        courtWidth, courtSouthZ - courtNorthZ),
+      level: 0,
+    },
   );
-  // Keep the inner gate and both path segments on the exact south wall. The
-  // enclosure is centered at -0.22d with 0.52d depth, hence its south edge is
-  // +0.04d. Duplicating this as a visual offset leaves a conspicuous closed-wall
-  // strip across the processional axis.
-  const innerSouth = depth * 0.04;
   plan.enclosures.push({
     id: 'inner-precinct', role: 'worship-wall',
-    polygon: rect(axisX, -depth * 0.22, width - 7, depth * 0.52),
+    polygon: rect((clusterMinX + clusterMaxX) / 2, (innerNorth + innerSouth) / 2,
+      round(clusterMaxX - clusterMinX + 3.2), round(innerSouth - innerNorth)),
     height: 1.8, gateId: 'inner-gate',
   });
   plan.gates.push({
     id: 'inner-gate', role: 'court-gate', type: 'iljakmun',
     position: point(axisX, innerSouth), yaw: 0, width: 2.4,
   });
+
   const candidates = [
     hall('main-hall', 'main-hall', axisX, mainZ, {
-      frontBays: 5, sideBays: 3, scale: 0.9, seed: plan.seed,
+      frontBays: 5, sideBays: 3, scale: 0.9, seed,
     }),
-    hall('west-subsidiary', 'subsidiary-hall', axisX - sideX, mainZ + 0.5, {
-      scale: 0.78, seed: plan.seed,
+    hall('west-subsidiary', 'subsidiary-hall', round(westFace - westSub.w / 2), subZ, {
+      scale: 0.78, seed,
     }),
-    hall('east-subsidiary', 'subsidiary-hall', axisX + sideX, mainZ + 0.5, {
-      scale: 0.78, seed: plan.seed,
+    hall('east-subsidiary', 'subsidiary-hall', round(eastFace + eastSub.w / 2), subZ, {
+      scale: 0.78, seed,
     }),
-    hall('west-yosa', 'yosa', -width * 0.40, -depth * 0.06, {
-      yaw: -Math.PI / 2, scale: 0.72, seed: plan.seed,
+    hall('west-yosa', 'yosa', round(westFace - yosa.w / 2), yosaZ, {
+      yaw: -Math.PI / 2, scale: 0.72, seed,
     }),
-    hall('east-seonbang', 'seonbang', width * 0.40, -depth * 0.06, {
-      yaw: Math.PI / 2, scale: 0.72, seed: plan.seed,
+    hall('east-seonbang', 'seonbang', round(eastFace + seonbang.w / 2), seonbangZ, {
+      yaw: Math.PI / 2, scale: 0.72, seed,
     }),
-    hall('lecture-hall', 'lecture-hall', -width * 0.35, depth * 0.24, {
-      scale: 0.68, seed: plan.seed,
+    hall('lecture-hall', 'lecture-hall', round(westFace - lecture.w / 2), lectureZ, {
+      yaw: -Math.PI / 2, scale: 0.68, seed,
     }),
-    hall('bell-pavilion', 'bell-pavilion', width * 0.35, depth * 0.24, {
-      scale: 0.68, seed: plan.seed,
+    hall('bell-pavilion', 'bell-pavilion', round(eastFace + bell.w / 2), bellZ, {
+      yaw: Math.PI / 2, scale: 0.68, seed,
     }),
   ];
   plan.buildings = candidates.slice(0, settings.hallCount)
     .filter((building) => building.role !== 'bell-pavilion' || settings.includeBellPavilion);
-  addCourtProps(plan, mainZ, axisX, width * 0.24);
+  addCourtProps(plan, mainSouth, axisX, pagodaSpread(main.w));
   if (settings.includeDanggan) {
     plan.props.push(prop('entry-danggan', 'entry-marker', 'danggan', -14, depth / 2 - 6, {
       scale: 1, radius: 0.9, heightClass: 'tall',
@@ -432,11 +578,11 @@ function planExtended(plan) {
   }
   plan.paths.push(
     { id: 'entry-path', role: 'entry', width: 1.7, points: [point(0, depth / 2 - 1), point(0, innerSouth + 1)] },
-    { id: 'worship-path', role: 'worship', width: 1.45, points: [point(axisX, innerSouth - 1), point(axisX, mainZ + 5.2)] },
+    { id: 'worship-path', role: 'worship', width: 1.45, points: [point(axisX, innerSouth - 1), point(axisX, round(mainSouth + 1.6))] },
   );
   plan.solarAccess = {
-    role: 'main-hall', origin: point(axisX, mainZ + 5.1),
-    halfWidth: 9.7, southZ: round(depth / 2),
+    role: 'main-hall', origin: point(axisX, round(mainSouth + 0.6)),
+    halfWidth: round(main.w / 2), southZ: round(depth / 2),
   };
 }
 
@@ -471,6 +617,11 @@ export function planTempleCompound(options = {}) {
   // Gate | stair-apron | pass-under | court is owned here so village adapters
   // and editors cannot invent a second processional grammar.
   applyTempleEntrySequence(plan, { profile: entryProfile });
+  // 단(段)은 진입 시퀀스 뒤에 확정한다 — 누하 전각이 그때 추가되고, 그 전각도 단을
+  // 배정받아야 한다. 단이 전각 elevation 을 확정한 뒤 스테이지를 다시 유도해 두 기록이
+  // 같은 높이를 말하게 한다.
+  applyTempleTerraces(plan);
+  plan.entrySequence = planTempleEntrySequence(plan, { profile: entryProfile });
   return plan;
 }
 
@@ -607,6 +758,13 @@ export function templePlanIssues(plan) {
     }
     for (const item of plan.props) {
       if (item.heightClass !== 'tall') continue;
+      // 석탑은 이 레인이 존재하는 이유 자체다 — 탑–금당 정형과 부석사 예불축 석등이
+      // 모두 주불전 정면 축선 위에 선다(docs/temple-generator.md §2). 레인 규칙의 목적은
+      // 전각 매스가 정면을 가리는 것을 막는 것이고, 반경 1.35m 슬렌더 석탑은 그 대상이
+      // 아니다. 종전에는 이 규칙 때문에 석탑을 마당 밖까지 측방으로 밀어냈는데,
+      // 밀집 가람(2026-08-05)에서는 그럴 폭이 남지 않아 예외를 명시한다.
+      // 당간·그 밖의 tall 프롭은 계속 레인에서 배제된다.
+      if (item.role === 'worship-pagoda') continue;
       const box = {
         minX: item.position.x - item.radius, maxX: item.position.x + item.radius,
         minZ: item.position.z - item.radius, maxZ: item.position.z + item.radius,
@@ -615,5 +773,6 @@ export function templePlanIssues(plan) {
     }
   }
   for (const issue of templeEntrySequenceIssues(plan)) issues.push(issue);
+  for (const issue of templeTerraceIssues(plan)) issues.push(issue);
   return issues;
 }

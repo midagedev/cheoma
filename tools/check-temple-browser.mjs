@@ -49,20 +49,25 @@ page.on('console', (message) => {
 });
 
 const variants = ['compact', 'courtyard', 'extended'];
+// 마을의 절은 mountain 으로 계획된다(village/temple-plan.js). flat 만 재면 단·석축이
+// 렌더되지 않으므로 병합 콜 상한이 제품 경로를 재지 못한다 — 두 프로파일 모두 잰다.
+const profiles = ['flat', 'mountain'];
 const diagnostics = new Map();
 const captureDir = process.env.CHEOMA_TEMPLE_CAPTURE_DIR || '';
 const captureSeed = Number.parseInt(process.env.CHEOMA_TEMPLE_CAPTURE_SEED || '122', 10) >>> 0;
 try {
   for (const variant of variants) {
+    for (const profile of profiles) {
     for (const merged of [false, true]) {
-      const label = `${variant}:${merged ? 'merged' : 'raw'}`;
-      const url = `http://127.0.0.1:${port}/temple.html?variant=${variant}&shot=1&probe=1${merged ? '&merged=1' : ''}`;
+      const label = `${variant}:${profile}:${merged ? 'merged' : 'raw'}`;
+      const url = `http://127.0.0.1:${port}/temple.html?variant=${variant}&profile=${profile}&shot=1&probe=1${merged ? '&merged=1' : ''}`;
       await page.goto(url, { waitUntil: 'load' });
       await page.waitForFunction(() => document.documentElement.dataset.templeReady === 'true', null, { timeout: 45000 });
       const diag = await page.evaluate(() => JSON.parse(document.getElementById('app').dataset.templeDiag));
       diagnostics.set(label, diag);
 
-      invariant(diag.variant === variant && diag.merged === merged, `${label}: wrong render mode`);
+      invariant(diag.variant === variant && diag.merged === merged && diag.profile === profile,
+        `${label}: wrong render mode`);
       invariant(diag.issues.length === 0, `${label}: ${diag.issues.join('; ')}`);
       invariant(diag.camera.fov === 26 && diag.camera.southOffset > 0,
         `${label}: focus camera is not on the south-facing telephoto approach`);
@@ -124,6 +129,65 @@ try {
       invariant(diag.lifecycle.sharedGeometryDisposed === 1, `${label}: caller-palette geometry leaked`);
       invariant(diag.lifecycle.callerMaterialDisposed === 0, `${label}: caller-owned palette was disposed`);
       invariant(diag.lifecycle.ownedMaterialDisposed === 1, `${label}: owned palette was not disposed`);
+      // ── 단(段)·막돌 석축 계약 (2026-08-05, refs/temple-old 구조 대조 라운드) ─────────
+      // 갭 ③⑤(docs/temple-generator.md §9): 종전에는 전각이 한 높이로 깔리고 균일한 사각
+      // precinct-wall 이 남아 "소규모 궁"으로 읽혔다. 아래 단언 전부 FAIL-first 확인:
+      // `applyTempleTerraces()` 를 no-op 으로 되돌리면 `diag.terraces` 가 null 이 되어
+      // 첫 단언에서 실제로 깨진다(이 라운드에서 직접 확인).
+      const terraces = diag.terraces;
+      invariant(terraces && terraces.profile === profile,
+        `${label}: terrace record missing or profile drifted ${JSON.stringify(terraces)}`);
+      if (profile === 'flat') {
+        // 평지 가람은 단을 만들지 않는다 — 진입 계약이 `single-run` 계단이라 단차와 충돌한다.
+        invariant(terraces.tierCount === 1 && terraces.risers.length === 0 && terraces.rise === 0,
+          `${label}: flat precinct grew terraces ${JSON.stringify(terraces)}`);
+        invariant(diag.buildingLifts.every((lift) => lift.elevation === 0),
+          `${label}: flat precinct lifted halls`);
+        invariant(diag.enclosureShapes.every((shape) => shape.closed),
+          `${label}: flat precinct wall stopped being a closed loop`);
+      } else {
+        const expectedTiers = variant === 'compact' ? 2 : 3;
+        invariant(terraces.tierCount === expectedTiers,
+          `${label}: ${terraces.tierCount} terraces != ${expectedTiers}`);
+        invariant(terraces.risers.length === expectedTiers - 1,
+          `${label}: ${terraces.risers.length} risers != ${expectedTiers - 1}`);
+        // 주불전은 가람의 정점이므로 최고단·최북단에 앉는다(장안사 1930).
+        const top = terraces.tiers[0];
+        const mainLift = diag.buildingLifts.find((lift) => lift.id === 'main-hall');
+        invariant(mainLift?.terraceLevel === top.level && mainLift.elevation === top.elevation,
+          `${label}: main hall is not on the highest terrace ${JSON.stringify(mainLift)}`);
+        // 단은 남 → 북으로 단조 상승하고 z 대역이 겹치지 않는다.
+        for (let index = 1; index < terraces.tiers.length; index++) {
+          const previous = terraces.tiers[index - 1];
+          const current = terraces.tiers[index];
+          invariant(current.elevation < previous.elevation - 1e-6
+            && current.northZ >= previous.southZ - 1e-6,
+          `${label}: terrace stack is not monotonic ${previous.id}/${current.id}`);
+        }
+        // 막돌: 상단선이 오르내려야 한다. topSpread 0 이면 정연한 켜쌓기로 읽힌다.
+        for (const riser of terraces.risers) {
+          invariant(riser.segments >= 2 && riser.topSpread > 0.02,
+            `${label}: ${riser.id} rubble top is regular coursing ${JSON.stringify(riser)}`);
+          invariant(Math.abs(riser.stairOffset) > 1e-6 && Math.abs(riser.stairOffset) <= 0.7,
+            `${label}: ${riser.id} stair is dead-centred or off the axis band ${riser.stairOffset}`);
+        }
+        // 산지 외곽 담: 최상단 단이 담을 삼키는 규모에서만 진입부를 감싸는 열린 run 이
+        // 된다. compact 암자는 단 1.02m < 담 1.75m 라 폐곡선 담이 그대로 성립하므로
+        // 여기서 variant 별 기대를 명시한다(구현식을 게이트가 되풀이하지 않도록).
+        const outer = diag.enclosureShapes.find((shape) => shape.id === 'outer-precinct');
+        const shouldOpen = variant !== 'compact';
+        invariant(outer && outer.closed !== shouldOpen
+          && outer.gateSeg === (shouldOpen ? 1 : 0),
+        `${label}: precinct wall shape wrong (expected ${shouldOpen ? 'open run' : 'closed loop'})`
+          + ` ${JSON.stringify(outer)}`);
+        // 렌더까지 실제로 도달했는지(병합 전에만 노드가 남는다).
+        if (!merged) {
+          invariant(diag.renderedTerraceNodes.tiers === expectedTiers
+            && diag.renderedTerraceNodes.risers === 1,
+          `${label}: renderer dropped terrace geometry ${JSON.stringify(diag.renderedTerraceNodes)}`);
+        }
+      }
+
       const programBudget = merged ? 7 : 12;
       invariant(diag.render.programs <= programBudget && diag.render.materials <= 72,
         `${label}: program/material budget drifted ${JSON.stringify(diag.render)}`
@@ -148,18 +212,22 @@ try {
       //   이미 그리는 재질이라 새 그룹이 아니다. "새 재질 = +2콜"은 재질 목록이 아니라
       //   그 경내가 실제로 그리는 집합을 기준으로 판단해야 한다.
       if (merged) invariant(diag.render.calls <= 142, `${label}: ${diag.render.calls} merged draw calls exceed 142`);
-      console.log(`${label.padEnd(19)} calls=${String(diag.render.calls).padStart(4)}`
-        + ` tris=${diag.render.triangles} programs=${diag.render.programs} materials=${diag.render.materials}`);
+      console.log(`${label.padEnd(26)} calls=${String(diag.render.calls).padStart(4)}`
+        + ` tris=${diag.render.triangles} programs=${diag.render.programs} materials=${diag.render.materials}`
+        + ` tiers=${diag.terraces?.tierCount ?? '-'}`);
+    }
     }
   }
 
   for (const variant of variants) {
-    const raw = diagnostics.get(`${variant}:raw`);
-    const merged = diagnostics.get(`${variant}:merged`);
-    invariant(raw.render.triangles === merged.render.triangles, `${variant}: merge changed triangle content`);
-    invariant(merged.render.calls <= raw.render.calls * 0.15,
-      `${variant}: merge reduced ${raw.render.calls} calls by less than 85%`);
-    invariant(JSON.stringify(raw.counts) === JSON.stringify(merged.counts), `${variant}: semantic counts drifted`);
+    for (const profile of profiles) {
+      const raw = diagnostics.get(`${variant}:${profile}:raw`);
+      const merged = diagnostics.get(`${variant}:${profile}:merged`);
+      invariant(raw.render.triangles === merged.render.triangles, `${variant}:${profile}: merge changed triangle content`);
+      invariant(merged.render.calls <= raw.render.calls * 0.15,
+        `${variant}:${profile}: merge reduced ${raw.render.calls} calls by less than 85%`);
+      invariant(JSON.stringify(raw.counts) === JSON.stringify(merged.counts), `${variant}:${profile}: semantic counts drifted`);
+    }
   }
 
   await page.goto(
@@ -168,7 +236,7 @@ try {
   );
   await page.waitForFunction(() => document.documentElement.dataset.templeReady === 'true', null, { timeout: 45000 });
   const legacy = await page.evaluate(() => JSON.parse(document.getElementById('app').dataset.templeDiag));
-  const canonical = diagnostics.get('courtyard:merged');
+  const canonical = diagnostics.get('courtyard:flat:merged');
   invariant(legacy.inputSchemaVersion === 1 && legacy.schemaVersion === 2,
     `legacy TemplePlan did not cross the v1→v2 input boundary: ${JSON.stringify({
       input: legacy.inputSchemaVersion, output: legacy.schemaVersion,

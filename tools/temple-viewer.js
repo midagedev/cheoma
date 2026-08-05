@@ -20,6 +20,9 @@ const debug = query.get('debug') === '1';
 const lifecycleProbe = query.get('probe') === '1';
 const merged = query.get('merged') === '1';
 const inputSchemaVersion = query.get('schema') === '1' ? 1 : 2;
+// 산지 프로파일: 마을의 절이 실제로 쓰는 경로다(village/temple-plan.js 가 mountain 을
+// 넘긴다). flat 만 띄우면 단(段)·막돌 석축이 렌더되지 않아 병합 콜 측정이 무의미하다.
+const profile = query.get('profile') === 'mountain' ? 'mountain' : 'flat';
 if (shot) document.body.classList.add('shot');
 for (const link of document.querySelectorAll('[data-variant]')) {
   link.classList.toggle('on', link.dataset.variant === variant);
@@ -36,7 +39,7 @@ Math.random = () => {
   return randomState / 0x100000000;
 };
 
-const authoredPlan = planTempleCompound({ variant, seed });
+const authoredPlan = planTempleCompound({ variant, seed, entryProfile: profile });
 const inputPlan = JSON.parse(JSON.stringify(authoredPlan));
 if (inputSchemaVersion === 1) {
   inputPlan.schemaVersion = 1;
@@ -276,6 +279,7 @@ for (const [index, group] of plaqueRecords.entries()) {
 }
 window.__TEMPLE_DIAG = {
   variant,
+  profile,
   merged,
   inputSchemaVersion,
   schemaVersion: compound.userData.templeSchemaVersion,
@@ -289,6 +293,42 @@ window.__TEMPLE_DIAG = {
     props: plan.props.length,
   },
   roles: plan.buildings.map((building) => building.role),
+  terraces: plan.terraces ? {
+    profile: plan.terraces.profile,
+    rise: plan.terraces.rise,
+    base: plan.terraces.base,
+    tierCount: plan.terraces.tierCount,
+    tiers: plan.terraces.tiers.map((tier) => ({
+      id: tier.id, level: tier.level, elevation: tier.elevation,
+      northZ: tier.northZ, southZ: tier.southZ, minX: tier.minX, maxX: tier.maxX,
+      buildingIds: tier.buildingIds,
+    })),
+    risers: plan.terraces.risers.map((riser) => ({
+      id: riser.id, level: riser.level, rise: riser.rise, z: riser.z,
+      segments: riser.segments.length,
+      topSpread: +(Math.max(...riser.segments.map((s) => s.topY))
+        - Math.min(...riser.segments.map((s) => s.topY))).toFixed(4),
+      stairOffset: riser.stair.offsetFromAxis,
+    })),
+  } : null,
+  // 렌더된 단·석축이 실제로 존재하는지: 이름으로 찾는다(병합 뒤에는 사라지므로
+  // raw 모드에서만 유효하다).
+  renderedTerraceNodes: (() => {
+    let tiers = 0, risers = 0;
+    compound.traverse((node) => {
+      if (/^terrace-\d+$/.test(node.name)) tiers++;
+      if (node.name === 'terrace-risers') risers++;
+    });
+    return { tiers, risers };
+  })(),
+  buildingLifts: plan.buildings.map((building) => ({
+    id: building.id, terraceLevel: building.terraceLevel ?? null,
+    elevation: building.elevation ?? 0,
+  })),
+  enclosureShapes: plan.enclosures.map((enclosure) => ({
+    id: enclosure.id, closed: enclosure.closed !== false,
+    gateSeg: enclosure.gateSeg || 0, points: enclosure.polygon.length,
+  })),
   architecture: hallBounds,
   plaques,
   issues: templePlanIssues(plan),

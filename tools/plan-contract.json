@@ -1,12 +1,13 @@
 {
   "schema": 1,
   "baselineCommit": "hanyang-roofsea-2026-07-30",
+  "_templeGatheringTerraceRebaseline": "산사 구조 정합 (가람 밀집 + 단·막돌 석축) 2026-08-05 — refs/temple-old PD 사진 6점 대조의 실측 갭 ①③⑤(docs/temple-generator.md §9). ① 전각을 북측 밀집 군집으로 재배치: 좌표를 일곽 폭·깊이 비율에서 뽑던 것을 실제 처마 치수(hallExtent)에서 유도하도록 바꿨다 — seed 가 맞배/팔작 repertoire 를 고르면 5칸 주불전 처마 폭이 17.82↔19.73 으로 1.9m 흔들려 고정 좌표는 CLUSTER_GAP 예산 전체보다 크게 어긋난다. 최근접 처마간격 median 11.13→1.60m, 처마합/클러스터 hull 20→40%, 용마루 직교채 2/8→4/8. ③⑤ 신규 순수 src/temple/terrace-plan.js 가 단·석축·편심 계단을 소유하고, 마을의 절이 처음으로 entryProfile:mountain 으로 계획된다(종전에는 산 어깨에 앉으면서도 flat 이라 entry-sequence.js 의 산지 에이프런 단을 한 번도 쓰지 못했다). **범위 증거**: :base 5종(hamlet/village/town/capital/hanyang) 해시·바이트 전부 불변이고 :temple 5종만 이동 — 절이 없는 계획은 한 바이트도 움직이지 않았다. 필지 수도 불변(11/35/67/73/389). 바이트 증가(+2,351 / +4,291 / +4,300 / +5,696 / +5,718)는 계획에 새로 들어온 terraces 레코드(단 2~3 + 석축 1~2 + 남면/마구리 세그먼트 + 계단) 크기이고, 일곽이 클수록 석축 세그먼트가 많아 단조 증가한다. ※ 이 재기준은 두 번 잡혔다 — 첫 회차(석축 남면만) 뒤에 부감 실측에서 \"단 상면이 측면 없는 종이 판으로 읽힌다\"가 확인돼 동·서 마구리를 추가했고, 골든은 최종 형상으로 다시 잡았다. 첫 회차 값(폐기): 43,441 / 110,874 / 198,421 / 261,768 / 1,435,222B. 절 좌표·compoundWidth/Depth 는 불변이므로 마을 예약·forest mask 는 무이동. 씬/프록시 골든 재기준 근거와 삼각형 귀속 실측은 tools/check-worker-contract.mjs 의 같은 날짜 주석 참조. FAIL-first: tools/check-temple-contract.mjs 의 밀집 3단언이 재배치 전 소스에서 median(5/5 케이스)·hull 점유(3/5)·직교채(2/5) 전부 실패하고, 단 단언은 applyTempleTerraces() no-op 변형에서 terraces missing 으로 실패한다. 구값: hamlet:temple 84066937c2e9/41717B · village:temple a423c4c6678f/107976B · town:temple b67ae9a3a486/195522B · capital:temple d762f2892eb8/257489B · hanyang:temple 097ae3e2d076/1430929B",
   "_gateQuarterVariationRebaseline": "#54 슬라이스 B 2차(비전 FIX) 2026-08-05 — 밴드가 균일 반복에서 리듬으로: 칸수 1~3(1칸 신설), 몸통 높이 하한 0.70×기둥, 지붕 상승 0.38~0.5칸, 요 ±0.05rad, 틈을 군집(1.58~2.1m)/공백(3.4~6.7m) 두 대역으로 분리(군집 1~2채 제한), 정면 심벽 한 겹 + 기둥열 + 거적문 개구부, 축대 접합·리턴면 마감. hanyang:base 1434562→1439618 · hanyang:temple 1425873→1430929 — **두 케이스 델타가 정확히 같은 +5,056B이고 gateQuarter 서브트리 12,216→17,272B와 일치**(변경이 밴드 안에 갇혀 있다는 증거). 나머지 8케이스 해시·바이트 불변. 같은 라운드의 sijeon-roofs v4·gate-roof v2·house-float 에이프런은 계획 데이터를 만들지 않아 plan 골든에 무영향(파사드·문루 profile·pad geometry는 전부 계획 JSON 밖). FAIL-first: no-band 1 · crowd-wall 29 · forecourt 94 · no-door 15 · uniform 10 · notch 24 · roof-overlap 11 실패, clean 0. 실측 버그 1건 동반 수정: 로컬 +x(perpL(frontDir))가 contour 호 감소 방향이어서 축대 접합을 서로 반대로 늘리고 있었다(게이트 독립 재구성이 15건으로 잡음).",
   "_gateQuarterRebaseline": "#54 슬라이스 B 성벽 안면 부속 밴드 2026-08-05 — 신규 kind 'gateQuarter': 성문 좌우 성벽 안면을 따르는 낮은 초가 부속채 열(이격 5.4~9.8m = 반두께+순라 소로 11척+처마 유도, 좌우 호 47m = gateApproachLength+clearance, 사면 상한 1.91m = '축대 포함 성벽보다 낮다'에서 유도 — 새 자릿수 저작 0). hanyang:base 1422313→1434562·hanyang:temple 1413624→1425873, 두 케이스 모두 정확히 +12,249B = 직렬화된 gateQuarter 서브트리 12,216B + 키 33B 실측 일치. 나머지 8케이스 해시·바이트 불변 + 성곽 없는 규모는 features 키조차 없음(조건부 배선)이 도성 전용 증거. 전용 시드 스트림(공유 rng 미소비, drainage 동형). FAIL-first: tools/check-gate-quarter.mjs가 no-band/crowd-wall/forecourt 변형에서 각각 1/29/48건 실패, clean 0.",
   "_sijeonApproachRebaseline": "#54 시전 접근로 2026-08-04 — 행랑을 성문까지: ① 남대문로 jungno→daero 승격(roads.js — 주석 스스로 '주작대로 남측 연장', planSijeon 은 daero 만 본다) ② 성곽 도성 runCap Infinity(프리픽스 캡 26이 51레코드를 종로 서단 151m 에 몰아넣던 버그, break 의 상한 잠식 제거 포함) ③ 문전 마당 필지·시전 배제 51.25→14m(GATE_FORECOURT_PLAN_DEPTH, 사용자 결정 12~18m 대역 — docs/joseon-city.md §성문 주변 개정 기록) ④ 예약 코어 30° 일조 통로를 행랑이 비움(coreSolarAccess 필터) ⑤ 접근로 진입점 바로가기에 성벽 여유 확보 전제 추가(daero 폭에서 99° 접힘 방지). hanyang:base 1342158→1422313(p397)·hanyang:temple 1352732→1413624(p389)만 이동, 나머지 8케이스 해시·바이트 불변이 성곽 도성 전용 변경의 단독 변인 증거(리드 재실행 2026-08-04 실측이 에이전트 격리 트리 V3 실측과 해시 일치). FAIL-first: tools/check-sijeon-approach.mjs 가 수정 전 소스에서 19건 실패(남대문로 미승격 4·남/동문 행랑 0·커버리지 24~32%).",
   "_creekPhaseBRebaseline": "#20 R4 Phase B 2026-08-01 — hanyang 전용 개천 마감: 호안 석축 계획(creek-bank-plan, 성 밖 자연석 위계 포함), 평석교 지간 3m 계약(bridgeSlabPiers)·벤치 횡단 접지(creekCrossingSpanHalf)·홍예 금지, 남촌 중로를 하도 밖으로 물림(offStreamZ), 잔여 횡단부 판석교(사교 하한 0.4). 이번에도 hanyang:base·hanyang:temple 만 이동하고 hamlet·village·town·capital 불변이 한양 전용 변경의 증거(리드 재실행 2026-08-01 실측이 r4-creek-b 독립 실측과 해시 일치). FAIL-first: 접근 수평 단언이 Phase A 소스에서 +1.23~+2.84m 로 실패함을 실측.",
   "_creekRebaseline": "#20 R4 Phase A 2026-08-01 — hanyang 전용 개천(開川) 관류: streamZ 0.30R→0.16R, 도성 개천 사행 ×0.5, 도성 구간 골짜기 어깨 50m→10m(개착 하도), 안산·성저 기준선을 개천에서 분리(frontWaterZ), 논은 성 밖 계약, 성곽 도성 필지 남한선=성벽. hanyang:base·hanyang:temple 해시만 이동하고 hamlet·village·town·capital 은 불변인 것이 한양 전용 변경의 증거다. worker == ?worker=0 폴백 바이트 동일은 check:worker 가 소유한다.",
-  "templeRevision": "issue-122-role-hierarchy-2026-07-23",
+  "templeRevision": "issue-57-gathering-terraces-2026-08-05",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
   "focusCameraRevision": "look-restore-r1-eye-level-9deg-16deg-residential-lens-2026-07-25",
@@ -42,24 +43,24 @@
       "bytes": 1439618
     },
     "hamlet:temple": {
-      "hash": "84066937c2e99508308723c761a6699464c49dc1be38068d26834da4edcb868e",
-      "bytes": 41717
+      "hash": "61725539bce361ba155401e43f63ec5a3cc5655562eb12ca63fd1933188f09ad",
+      "bytes": 44068
     },
     "village:temple": {
-      "hash": "a423c4c6678fb29d5d6559b57acc7fa5ef272bfb26ad54d1e7b1168edf3bbb91",
-      "bytes": 107976
+      "hash": "c4c97d07473a123a0776da3a8f1a170c23ad30d8e629bcfadbe1021e6468ad0f",
+      "bytes": 112267
     },
     "town:temple": {
-      "hash": "b67ae9a3a486f4af7211f5918c684412f3946706f8db5ee2ac9c903702f57166",
-      "bytes": 195522
+      "hash": "a12a8396b527588e1caed5c41b3a0f7ded60b237f74832f466c625e63ae2c862",
+      "bytes": 199822
     },
     "capital:temple": {
-      "hash": "d762f2892eb8850eda1f1d1b07732a39df548ed4648b1a5965791e4e445ac117",
-      "bytes": 257489
+      "hash": "a72e186167a4f6bd4e99ca87975f98d8e3b342ffc63fa1e1c33ba0e6dee66737",
+      "bytes": 263185
     },
     "hanyang:temple": {
-      "hash": "097ae3e2d07619036e3adc6e2e3b8fac02a4713a5ec09e5db8222ab3227e37a4",
-      "bytes": 1430929
+      "hash": "b7021d63d62ef52c1789ab3221005e3d661377a13eeedcdb530515347b029ec4",
+      "bytes": 1436647
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",

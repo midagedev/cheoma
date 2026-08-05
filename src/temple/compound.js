@@ -174,17 +174,97 @@ function buildPaths(paths, material) {
       const dx = b.x - a.x, dz = b.z - a.z;
       const length = Math.hypot(dx, dz);
       if (length < 1e-4) continue;
+      // 답도 높이는 plan.terraces 가 확정한 단 상면이다(terrace-plan.js).
+      const ya = path.elevations?.[index] || 0;
+      const yb = path.elevations?.[index + 1] || 0;
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(length, 0.055, path.width),
         material,
       );
       mesh.name = `${path.id}-${index}`;
-      mesh.position.set((a.x + b.x) * 0.5, 0.038, (a.z + b.z) * 0.5);
+      mesh.position.set((a.x + b.x) * 0.5, 0.038 + (ya + yb) * 0.5, (a.z + b.z) * 0.5);
       mesh.rotation.y = Math.atan2(-dz, dx);
       mesh.receiveShadow = true;
       group.add(mesh);
     }
   }
+  return group;
+}
+
+// 막돌 석축 (段 사이 옹벽) + 편심 계단.
+//
+// 사료 사진(마하연 1930)의 석축은 정연한 켜쌓기가 아니라 크기가 뒤섞인 막돌이고
+// 상단이 지형에 맞춰 오르내린다. 그래서 텍스처가 아니라 **기하**로 만든다 —
+// `mats.stone` 은 담 하부 화강암 인스턴스가 이미 그리는 재질이라 병합 그룹이 늘지 않고
+// (드로우콜 +0), 텍스처 한 장으로는 막돌의 크기 편차를 만들 수 없다.
+// 세그먼트별 상단 높이는 plan-owned(`riser.segments[].topY`)이며 여기서 추론하지 않는다.
+function buildTerraceRisers(terraces, mats) {
+  const group = new THREE.Group();
+  group.name = 'temple-terraces';
+  if (!terraces || terraces.tierCount < 2) return group;
+  const positions = [], indices = [];
+  const pushBox = (minX, maxX, minY, maxY, minZ, maxZ) => {
+    const base = positions.length / 3;
+    for (const [x, y, z] of [
+      [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ],
+      [minX, maxY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [minX, maxY, maxZ],
+    ]) positions.push(x, y, z);
+    for (const triangle of [
+      [0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7],
+      [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5],
+      [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7],
+    ]) indices.push(...triangle.map((corner) => base + corner));
+  };
+  // 막돌 한 켜의 두께를 좌표에서 흔든다(면이 한 판으로 읽히지 않게). 결정론이어야 하므로
+  // rng 가 아니라 좌표의 소수부를 쓴다 — plan 이 이미 상단 요철을 소유하므로 두께는
+  // 시각적 잡음일 뿐 계약값이 아니다.
+  const jitterThickness = (coordinate) =>
+    0.42 + (((coordinate * 7.13) % 1) + 1) % 1 * 0.16;
+  for (const riser of terraces.risers) {
+    for (const segment of riser.segments) {
+      const thickness = jitterThickness(segment.x0);
+      pushBox(
+        segment.x0, segment.x1,
+        // 아래 단 상면보다 조금 더 내려 묻는다 — 뜬 석축은 즉시 가짜로 읽힌다.
+        riser.baseElevation - 0.35, segment.topY,
+        segment.z - thickness, segment.z,
+      );
+    }
+    // 마구리(동·서): 없으면 부감에서 단 상면이 측면 없는 종이 판으로 읽힌다.
+    for (const flank of riser.flanks || []) {
+      for (const segment of flank) {
+        const thickness = jitterThickness(segment.z0);
+        const inner = segment.x + thickness * segment.inward;
+        pushBox(
+          Math.min(segment.x, inner), Math.max(segment.x, inner),
+          riser.baseElevation - 0.35, segment.topY,
+          segment.z0, segment.z1,
+        );
+      }
+    }
+    const stair = riser.stair;
+    if (!stair) continue;
+    const rise = riser.rise / stair.steps;
+    for (let step = 0; step < stair.steps; step++) {
+      const y = riser.baseElevation + rise * step;
+      const inset = stair.run * (stair.steps - step) / stair.steps;
+      pushBox(
+        stair.x - stair.width / 2, stair.x + stair.width / 2,
+        y - 0.06, y + rise,
+        stair.z, stair.z + inset,
+      );
+    }
+  }
+  if (!indices.length) return group;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, mats.stone);
+  mesh.name = 'terrace-risers';
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
   return group;
 }
 
@@ -202,13 +282,17 @@ function buildEnclosures(plan, mats) {
       : 0;
     const { group: fence } = buildFence({
       points: enclosure.polygon,
-      closed: true,
+      // 산지 일곽의 외곽 담은 진입부만 감싸는 **열린** run 이다(terrace-plan.js
+      // applyPrecinctWallReinterpretation). 위쪽 경계는 막돌 석축이 맡는다.
+      closed: enclosure.closed !== false,
       height: enclosure.height,
       thickness: 0.46,
       seed: (plan.seed ^ enclosure.id.length * 0x91) >>> 0,
       mats,
       wallStyle: 'toseok',
-      openings: gate ? [{ seg: 0, center: 0.5, width: openingWidth }] : [],
+      openings: gate
+        ? [{ seg: enclosure.gateSeg || 0, center: 0.5, width: openingWidth }]
+        : [],
     });
     fence.name = enclosure.id;
     group.add(fence);
@@ -220,7 +304,7 @@ function buildEnclosures(plan, mats) {
       width: gateSpec.width,
     });
     gate.name = `temple-${gateSpec.id}`;
-    gate.position.set(gateSpec.position.x, 0, gateSpec.position.z);
+    gate.position.set(gateSpec.position.x, gateSpec.elevation || 0, gateSpec.position.z);
     gate.rotation.y = gateSpec.yaw || 0;
     gate.userData.templeId = gateSpec.id;
     gate.userData.templeRole = gateSpec.role;
@@ -264,7 +348,17 @@ export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}
     if (!courtMaterials.has(role)) courtMaterials.set(role, makeCourtMaterial(role));
     return courtMaterials.get(role);
   };
+  // 단이 둘 이상이면 예불 마당의 **바닥**은 단 상면이 소유한다. 마당 폴리곤은 여러
+  // 단을 가로지르므로 한 높이로 깔면 상단 단을 관통한다(terrace-plan.js 주석 참조).
+  const terraced = plan.terraces?.tierCount > 1;
   for (const court of plan.courtyards) {
+    if (terraced && court.role === 'worship') continue;
+    // 산지 진입부는 포장 마당이 아니라 지형이다. extended 의 `entry-court` 는 폭
+    // `width - 5` × 남측 잔여 깊이의 큰 사각형이라, 부감에서 화면 하단 40%가 계조 없는
+    // 크림색 평면으로 깔려 "주차장"으로 읽혔다(2026-08-05 실측 렌더 r7-temple-oblique).
+    // 사료 사진의 절 앞은 다져지지 않은 흙·잔디 사면이고, 마을 쪽에서는 지형 pad 의
+    // 에이프런 단(`buildTempleFeaturePad`)이 이미 그 면을 만든다. 답도만 남긴다.
+    if (terraced && court.role === 'entry') continue;
     // Prefer plan-owned elevation (mountain apron tiers); fall back to level as
     // a coarse step only when elevation was never authored.
     const courtY = Number.isFinite(court.elevation)
@@ -272,10 +366,18 @@ export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}
       : 0.018 + (court.level || 0) * 0.55;
     root.add(polygonMesh(court.polygon, courtMaterial(court.role), courtY, court.id));
   }
+  if (terraced) {
+    for (const tier of plan.terraces.tiers) {
+      // 단 상면은 예불 마당의 흙바닥이므로 마당 재질을 그대로 쓴다 — 전용 재질을 두면
+      // 병합 그룹이 늘어 콜이 +2 된다.
+      root.add(polygonMesh(tier.polygon, courtMaterial('worship'), 0.018 + tier.elevation, tier.id));
+    }
+  }
 
   const pathMaterial = new THREE.MeshStandardMaterial({ color: 0xaaa08d, roughness: 1, metalness: 0 });
   root.add(buildPaths(plan.paths, pathMaterial));
   root.add(buildEnclosures(plan, enclosurePalette));
+  root.add(buildTerraceRisers(plan.terraces, enclosurePalette));
 
   const buildings = new THREE.Group();
   buildings.name = 'temple-buildings';
@@ -293,7 +395,7 @@ export function buildTempleCompound(planOrOptions = {}, { mats, dancheong } = {}
       ...(spec.stories ? { stories: spec.stories } : {}),
     });
     object.name = `temple-${spec.id}`;
-    object.position.set(spec.position.x, 0, spec.position.z);
+    object.position.set(spec.position.x, spec.elevation || 0, spec.position.z);
     object.rotation.y = spec.yaw || 0;
     object.userData.templeId = spec.id;
     object.userData.templeRole = spec.role;

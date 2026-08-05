@@ -113,6 +113,132 @@ function assertHallPlaques(plan, label) {
   }
 }
 
+// ── 가람 밀집 계약 (2026-08-05, refs/temple-old 구조 대조 라운드) ──────────────────
+// 사료 사진(장안사 1930 사선 부감, 정양사 1930 눈높이)에서 전각들은 지붕이 거의 맞닿을
+// 만큼 붙어 용마루 방향이 채마다 달라 지붕면이 조각보로 얽힌다. 종전 배치의 실측값:
+//   extended 최근접 처마간격 median 11.13m · 처마합/클러스터 hull 20% · 직교채 2/8(25%)
+//   courtyard median 6.81m
+// 그래서 마당이 화면 절반을 먹고 "소규모 궁"으로 읽혔다(docs/temple-generator.md §9 갭 ①).
+// 재배치 후 실측(126개 마을 실사용 크기 스윕): median 1.6m · 점유 36~39% · 직교 50~60%.
+// 아래 임계는 실측 프런티어가 아니라 그 사이의 여유를 둔 계약선이다.
+//   FAIL-first 확인: 재배치 전 소스에서 extended/courtyard 가 median·점유·직교 세 단언을
+//   모두 실제로 깬다(이 라운드에서 직접 확인).
+// 전각 1채(암자)는 이웃이 없어 밀집이 성립하지 않으므로 제외한다.
+const GATHERING = Object.freeze({
+  maxMedianGap: 3.0,
+  minHullOccupancy: 0.30,
+  minCrossRidgeRatio: 0.40,
+});
+
+function polygonArea(polygon) {
+  let total = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    total += polygon[j].x * polygon[i].z - polygon[i].x * polygon[j].z;
+  }
+  return Math.abs(total) / 2;
+}
+
+// 두 볼록 사각형 사이 실간격(겹치면 0). 분리축 정리의 최대 간격.
+function polygonGap(a, b) {
+  const axes = [];
+  for (const polygon of [a, b]) {
+    for (let index = 0; index < polygon.length; index++) {
+      const next = polygon[(index + 1) % polygon.length];
+      const dx = next.x - polygon[index].x;
+      const dz = next.z - polygon[index].z;
+      const length = Math.hypot(dx, dz) || 1;
+      axes.push({ x: -dz / length, z: dx / length });
+    }
+  }
+  let best = -Infinity;
+  for (const axis of axes) {
+    const pa = a.map((corner) => corner.x * axis.x + corner.z * axis.z);
+    const pb = b.map((corner) => corner.x * axis.x + corner.z * axis.z);
+    best = Math.max(best,
+      Math.max(Math.min(...pb) - Math.max(...pa), Math.min(...pa) - Math.max(...pb)));
+  }
+  return Math.max(0, best);
+}
+
+function assertGathering(plan, label) {
+  const polygons = plan.buildings.map((building) => building.eaveFootprint.polygon);
+  if (polygons.length < 2) return;
+  const nearest = polygons.map((polygon, index) => {
+    let closest = Infinity;
+    for (let other = 0; other < polygons.length; other++) {
+      if (other !== index) closest = Math.min(closest, polygonGap(polygon, polygons[other]));
+    }
+    return closest;
+  }).sort((a, b) => a - b);
+  const median = nearest[Math.floor(nearest.length / 2)];
+  invariant(median <= GATHERING.maxMedianGap,
+    `${label}: gathered eave gap median ${median.toFixed(2)}m exceeds ${GATHERING.maxMedianGap}m`);
+
+  const corners = polygons.flat();
+  const xs = corners.map((corner) => corner.x);
+  const zs = corners.map((corner) => corner.z);
+  const hull = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...zs) - Math.min(...zs));
+  const roof = polygons.reduce((sum, polygon) => sum + polygonArea(polygon), 0);
+  const occupancy = hull > 0 ? roof / hull : 0;
+  invariant(occupancy >= GATHERING.minHullOccupancy,
+    `${label}: roofs fill ${(occupancy * 100).toFixed(1)}% of the cluster hull`
+    + ` (< ${(GATHERING.minHullOccupancy * 100).toFixed(0)}%) — the yard reads as a palace court`);
+
+  // 용마루 교차: 주축과 직교한 채가 있어야 지붕면이 조각보로 얽힌다.
+  const across = plan.buildings.filter((building) => Math.abs(Math.sin(building.yaw)) > 0.5).length;
+  const ratio = across / plan.buildings.length;
+  invariant(ratio >= GATHERING.minCrossRidgeRatio,
+    `${label}: only ${across}/${plan.buildings.length} ridges cross the main axis`
+    + ` (< ${(GATHERING.minCrossRidgeRatio * 100).toFixed(0)}%)`);
+}
+
+// ── 단(段)·막돌 석축 계약 ───────────────────────────────────────────────────────
+// 사료: 정양사(등고 따라 다른 높이 → 지붕선 계단), 마하연(축대–마당–전각 3단, 막돌
+// 상단이 오르내림), 장안사(주불전 최고단·최북단), 신계사(계단 편심).
+// FAIL-first: `applyTempleTerraces()` 를 no-op 으로 되돌리면 첫 단언이 실제로 깨진다.
+function assertTerraces(plan, label) {
+  const terraces = plan.terraces;
+  invariant(terraces && Array.isArray(terraces.tiers) && terraces.tiers.length >= 1,
+    `${label}: terrace record missing`);
+  const profile = plan.settings?.entryProfile;
+  invariant(terraces.profile === profile,
+    `${label}: terrace profile ${terraces.profile} != ${profile}`);
+  if (profile !== 'mountain') {
+    invariant(terraces.tierCount === 1 && terraces.rise === 0 && terraces.risers.length === 0,
+      `${label}: flat precinct grew terraces`);
+    invariant(plan.buildings.every((building) => building.elevation === 0),
+      `${label}: flat precinct lifted halls`);
+    return;
+  }
+  const singleHall = plan.buildings.length < 2;
+  invariant(terraces.tierCount >= (singleHall ? 1 : 2),
+    `${label}: mountain precinct did not step (${terraces.tierCount} tier)`);
+  if (terraces.tierCount < 2) return;
+  const main = plan.buildings.find((building) => building.role === 'main-hall');
+  invariant(main.terraceLevel === terraces.tiers[0].level,
+    `${label}: main hall is not on the highest terrace`);
+  // 같은 행(z 겹침)의 전각은 같은 단이어야 한다 — 어긋나면 나란한 기단이 붕괴로 읽힌다.
+  for (const first of plan.buildings) {
+    for (const second of plan.buildings) {
+      if (first.id >= second.id) continue;
+      const a = first.eaveFootprint.polygon.map((corner) => corner.z);
+      const b = second.eaveFootprint.polygon.map((corner) => corner.z);
+      const overlap = Math.min(Math.max(...a), Math.max(...b)) - Math.max(Math.min(...a), Math.min(...b));
+      if (overlap > 1.2) {
+        invariant(first.terraceLevel === second.terraceLevel,
+          `${label}: ${first.id}/${second.id} share a row but sit on different terraces`);
+      }
+    }
+  }
+  for (const riser of terraces.risers) {
+    const tops = riser.segments.map((segment) => segment.topY);
+    invariant(new Set(tops).size >= 2 && Math.max(...tops) - Math.min(...tops) > 0.02,
+      `${label}: ${riser.id} rubble top line is regular coursing`);
+    invariant(Math.abs(riser.stair.offsetFromAxis) > 1e-6,
+      `${label}: ${riser.id} terrace stair is dead-centred on the axis`);
+  }
+}
+
 function assertLocalPlan(plan, label) {
   const spec = TEMPLE_VARIANT_SPECS[plan.variant];
   invariant(plan.schemaVersion === TEMPLE_PLAN_SCHEMA_VERSION, `${label}: wrong schema version`);
@@ -169,6 +295,8 @@ function assertLocalPlan(plan, label) {
     `${label}:${building.id}: actual eave footprint is not the collision footprint`);
   }
   assertHallPlaques(plan, label);
+  assertGathering(plan, label);
+  assertTerraces(plan, label);
   const issues = templePlanIssues(plan);
   invariant(!issues.length, `${label}: ${issues.join('; ')}`);
 

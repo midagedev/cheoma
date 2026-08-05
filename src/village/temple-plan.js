@@ -451,8 +451,14 @@ export function planTempleSite({
     spatial: createRoadSpatialIndex(roads),
     siteRadius: site.R,
   };
+  // 마을의 절은 정의상 산사다 — `templeHillsidePlacement` 가 배산 어깨 벤치에만 앉히고
+  // 그 자리는 `placement.backdropRise` 만큼 배후 사면을 갖는다. 그런데 종전에는
+  // entryProfile 을 넘기지 않아 `flat` 로 계획됐고, `entry-sequence.js` 가 이미 구현해 둔
+  // 산지 에이프런 단과 단(段)·막돌 석축 계약을 제품이 한 번도 쓰지 못했다
+  // (2026-08-05, docs/temple-generator.md §9 갭 ③⑤ 대조 라운드에서 발견).
   const compound = planTempleCompound({
     seed: (seed ^ 0x7e11) >>> 0,
+    entryProfile: 'mountain',
     ...templeCompoundDefaultsForSite(site.R, seed),
     ...(compoundOptions || {}),
   });

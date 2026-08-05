@@ -34,3 +34,10 @@ export {
   templeEntrySequenceKinds,
   templePassUnderPlacement,
 } from '../temple/entry-sequence.js';
+export {
+  TEMPLE_TERRACE_DEFAULTS,
+  TEMPLE_TERRACE_SCHEMA_VERSION,
+  applyTempleTerraces,
+  templeTerraceIssues,
+  templeTerracePlan,
+} from '../temple/terrace-plan.js';

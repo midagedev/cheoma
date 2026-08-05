@@ -360,9 +360,64 @@ const expectedSceneHashes = {
   //   세 경로 바이트 동일. plan 골든은 불변 — 현판은 plan 저장 필드가 아니라 grammar 파생 기록이다.
   //   ※ village/town/capital 의 재기준 직전 절대값(다음 라운드의 before 기준): objects
   //   595 / 3,162 / 2,187 · triangles 2,285,483 / 5,026,917 / 5,665,328.
-  village: '9592c653:c9addc61:bb47935e:2e71bd5b',
-  town: '451593a6:f16b3958:6de795c5:f29db3e4',
-  capital: '86bb596d:7e01562f:9477f24f:10fc515b',
+  // 산사 구조 정합 — 가람 밀집 + 단(段)·막돌 석축 (2026-08-05, #57 구조 부분):
+  //   `refs/temple-old` PD 사진 6점 대조에서 나온 실측 갭 ①③⑤(docs/temple-generator.md §9)을
+  //   닫았다. ① 전각을 북측 밀집 군집으로 재배치(최근접 처마간격 median 11.13m → 1.60m,
+  //   처마합/클러스터 hull 20% → 40%, 용마루 직교채 2/8 → 4/8). ③⑤ 신규 순수
+  //   `src/temple/terrace-plan.js` 가 단·석축·편심 계단을 소유하고, 마을의 절이 처음으로
+  //   `entryProfile: 'mountain'` 로 계획된다(종전에는 산 어깨에 앉으면서도 flat 이라
+  //   `entry-sequence.js` 의 산지 에이프런 단을 한 번도 쓰지 못했다).
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-05)**:
+  //   ① `includeTemple:false` 케이스(mja optin 21776e5b:e09a8f05:dd2899b7:cf769c7b /
+  //      snapshot 425e3cda:72fe52de:a35b7017:fdc5c10e)가 해시·proxy·payload 까지 바이트 동일 —
+  //      이동한 것은 절을 품은 씬 넷뿐이다.
+  //   ② **proxy 는 네 규모 전부 이동**했다(fef7a386→c9575cad / 3f7f776c→25498dcf /
+  //      046ecd22→77c8d724 / 395b740a→73409390). 이번 라운드는 절 전각의 위치·yaw·높이를
+  //      바꾸므로 지붕 OBB 가 함께 이동하는 것이 **정상**이다 — 앞선 라운드들에서 proxy 불변이
+  //      범위 증거였던 것과 반대 방향의 기대이며, 절 밖 필지는 건드리지 않는다(절 좌표
+  //      -65.337/-76.204 · -53.979/-128.714 · -70.235/-144.118 · -172.050/-250.593 와
+  //      compoundWidth/Depth 는 전부 불변이므로 마을 예약·forest mask 는 무이동).
+  //   ③ 삼각형 델타의 귀속을 브라우저 뷰어에서 **두 성분으로 분리 실측**했다(같은 실행,
+  //      담 재해석만 끈 변형 1개 추가):
+  //        단·석축·계단 기하만:  courtyard 658,776 → 659,456 (+680)
+  //                              extended 1,281,576 → 1,282,784 (+1,208)   ← 병합 콜 +0
+  //        담 재해석까지:        courtyard → 501,488 (−157,968) · extended → 1,090,800 (−191,984)
+  //      (뷰어 수치는 그림자 패스를 포함하므로 기하 델타는 약 절반: −78,984 / −95,992.)
+  //      산지 외곽 담이 폐곡선 사각에서 진입부만 감싸는 열린 run 으로 바뀌어 담 몸체·화강암
+  //      인스턴스·기와 코핑이 한 변 몫 줄어든 것이 순감의 전부다.
+  //   ④ 씬 델타가 그 귀속과 일치한다: triangles village 2,285,483 → 2,207,087 (−78,396) ·
+  //      town 5,026,917 → 4,945,673 (−81,244) · capital 5,665,328 → 5,581,684 (−83,644) ·
+  //      hanyang 25,313,772 → 25,204,352 (−109,420). 일곽이 클수록 담 한 변이 길어 순감이
+  //      커지는 단조 관계이고, 절 없는 두 씬은 0 이다.
+  //   ⑤ objects 는 절을 품은 네 씬 전부 정확히 −1(595→594 / 3,162→3,161 / 2,187→2,186 /
+  //      5,051→5,050): 예불 마당 폴리곤 메시 1개가 단 상면으로 대체됐고, 단 상면·석축은 이미
+  //      그려지던 재질(마당 흙바닥 · 담 하부 화강암 `stone`)을 차입해 새 병합 그룹이 0 이다.
+  //      같은 라운드 `check:temple:browser` 실측 병합 콜: compact 99 불변 ·
+  //      courtyard 115 → 113 · extended 141 → 139, programs 7 불변.
+  //   ⑥ sync == 실제 module Worker == `?worker=0` 폴백 세 경로 바이트 동일.
+  //   ⑦ plan 골든 불변 — 절 컴파운드 계획은 `tools/plan-contract.json` 이 해시하는 마을 계획
+  //      JSON 밖의 파생 기록이다.
+  //   FAIL-first: `tools/check-temple-contract.mjs` 의 밀집 3단언이 재배치 전 소스에서
+  //      median(5/5 케이스)·hull 점유(3/5)·직교채(2/5) 전부 실패하고, 단 단언은
+  //      `applyTempleTerraces()` no-op 변형에서 `terraces missing` 으로 실패한다.
+  //   ⑧ **2차 회차**: 위 1차 재기준(석축 남면만) 뒤 부감 실측 렌더에서 "단 상면이 측면 없는
+  //      종이 판으로 읽힌다"가 확인돼 동·서 마구리 석축을 추가하고, 같은 실측에서 산지 진입부의
+  //      포장 마당(`entry-court` 폴리곤, 화면 하단 40%를 덮는 무텍스처 크림 평면)을 지형에
+  //      넘겼다. 두 성분 모두 씬 델타가 정확히 떨어진다:
+  //        마구리 +264 삼각형 — 절을 품은 네 씬 전부 동일(courtyard 2,207,087→2,207,351 ·
+  //          4,945,673→4,945,937 · extended 5,581,684→5,581,946 · 25,204,352→25,204,614 는
+  //          +262 = +264 − 2).
+  //        진입 마당 제거 −2 삼각형 · −1 object — **extended 두 씬에만** 나타난다
+  //          (objects capital 2,186→2,185 · hanyang 5,050→5,049; village/town 은 courtyard 라
+  //          `entry-court` 레코드가 애초에 없어 594 / 3,161 불변). ShapeGeometry 사각형 하나가
+  //          정확히 그 몫이다.
+  //      proxy 네 개는 이 회차에서 **불변**(c9575cad / 25498dcf / 77c8d724 / 73409390) — 마구리·
+  //      마당은 전각 위치·지붕 OBB 를 건드리지 않는다는 증거.
+  //   ※ 다음 라운드의 before 기준: objects 594 / 3,161 / 2,185 / 5,049 ·
+  //      triangles 2,207,351 / 4,945,937 / 5,581,946 / 25,204,614.
+  village: '042caafb:90f5a06d:77530a48:b7ed202f',
+  town: '1cdb6287:e4129003:e0768612:3f74b373',
+  capital: '619423bf:5a24ab09:67846b3d:9e40fdf9',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -484,7 +539,7 @@ const expectedSceneHashes = {
   //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
   // 2026-08-05 주불전 무자 현판 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
   //   (proxy 불변 · 절 없는 케이스 바이트 동일 · triangles 정확히 +60 · objects +1).
-  hanyang: '440deb11:41500f85:62850005:48060ebb',
+  hanyang: 'c598af3d:e7ebee95:5decf33f:a9abba23',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.
@@ -531,9 +586,20 @@ const expectedProxyHashes = {
   // R2.2: 농촌 배치 R1 복원으로 village/town 은 R1 골든값 그대로 복귀, 도성 2종만 신규
   //   (urbanEave 스탬프·소로 폭·급경사 게이트가 도성 필지·지붕 OBB 를 움직임).
   // R2.3: 도성 2종만 갱신(고샅·roofTone 스탬프가 도성 필지·지붕 OBB 를 움직임), 농촌은 R1 값 유지.
-  village: 'fef7a386',
-  town: '3f7f776c',
-  capital: '046ecd22',
+  // 산사 구조 정합(2026-08-05, #57 구조 부분): **네 규모 전부 이동**한다. 절은
+  //   `userData.parcelLike = {id:'temple'}` 로 픽 프록시를 갖고, 이 라운드가 전각의 위치·yaw·
+  //   높이(단)를 모두 바꾸므로 그 프록시의 지붕 OBB·focus 카메라 해 바이트가 함께 움직인다.
+  //   앞선 라운드들에서 "proxy 불변"이 범위 증거였던 것과 반대 방향의 기대다.
+  //   **범위 증거**: 같은 실행의 `check-plan-contract` 에서 `:base` 5종(절 없음) 해시·바이트가
+  //   전부 불변이고 `:temple` 5종만 이동했으며, 필지 수도 불변(11/35/67/73/389)이다 — 즉
+  //   움직인 프록시는 절 프록시 하나뿐이고 마을 필지 프록시는 배치·경계가 그대로다.
+  //   절 좌표(-65.337/-76.204 · -53.979/-128.714 · -70.235/-144.118 · -172.050/-250.593)와
+  //   compoundWidth/Depth 도 불변이므로 마을 예약·forest mask 는 무접촉.
+  //   프록시 개수·안정 ID·피사체 경계 계약·격리 계약은 유지. sync == module Worker ==
+  //   `?worker=0` 폴백 바이트 동일. 구값: fef7a386 / 3f7f776c / 046ecd22 / 395b740a.
+  village: 'c9575cad',
+  town: '25498dcf',
+  capital: '77c8d724',
   // R4-A(2026-08-01): 한양만 이동. 개천이 논을 성 밖으로 밀고 거주 한선을 성벽으로 옮기므로 필지·
   //   지붕 OBB 가 따라 움직인다. 같은 라운드의 천장 z-fight 수정은 이 프록시를 움직이지 않았다
   //   (61c0a45 단독 측정에서 8266fb35 불변). 개수·안정 ID·격리 계약은 유지.
@@ -555,7 +621,7 @@ const expectedProxyHashes = {
   //   움직인다. village/town/capital 프록시 3종은 같은 실행에서 불변(fef7a386 / 3f7f776c /
   //   046ecd22) — 성곽 도성 전용 변경의 범위 증거. 계획 골든 재기준은 tools/plan-contract.json
   //   _sijeonApproachRebaseline 참조. 프록시 개수·안정 ID·격리 계약은 유지.
-  hanyang: '395b740a',
+  hanyang: '73409390',
 };
 
 const server = await createServer({

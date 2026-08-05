@@ -327,12 +327,17 @@ export function planTempleEntrySequence(plan, options = {}) {
         corridorWidth: PASS_UNDER_CORRIDOR_WIDTH,
         corridorHeight: PASS_UNDER_CORRIDOR_HEIGHT,
       };
+      // 단(段) 계약이 이미 이 전각의 높이를 확정했으면 그것을 따른다 — 누문은 마당
+      // 최하단에 앉는다. 단 기록이 없는 계획(플랫·구 순수 페이로드)만 종전처럼
+      // 에이프런 한 칸 위로 들어 올린다.
+      const terraced = Number.isFinite(pavilion?.elevation)
+        && Number.isInteger(pavilion?.terraceLevel);
       stages.push(stage(order++, 'pass-under', {
         id: placement.id || PASS_UNDER_ID,
         role: placement.role || 'gate-pavilion',
         position: placement.position,
-        level: profile === 'mountain' ? 1 : 0,
-        elevation: profile === 'mountain' ? 0.55 : 0,
+        level: terraced ? pavilion.terraceLevel : (profile === 'mountain' ? 1 : 0),
+        elevation: terraced ? pavilion.elevation : (profile === 'mountain' ? 0.55 : 0),
         refId: placement.id || PASS_UNDER_ID,
         passUnder: {
           openLower: passUnder.openLower !== false,
