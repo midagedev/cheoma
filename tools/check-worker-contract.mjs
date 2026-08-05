@@ -415,8 +415,31 @@ const expectedSceneHashes = {
   //      마당은 전각 위치·지붕 OBB 를 건드리지 않는다는 증거.
   //   ※ 다음 라운드의 before 기준: objects 594 / 3,161 / 2,185 / 5,049 ·
   //      triangles 2,207,351 / 4,945,937 / 5,581,946 / 25,204,614.
-  village: '042caafb:90f5a06d:77530a48:b7ed202f',
-  town: '1cdb6287:e4129003:e0768612:3f74b373',
+  // 용마루 형태 수정(2026-08-05, 사용자 지적 "용마루가 짧은 형태는 사진 어디에도 없다"):
+  //   두 성분이 네 씬을 이동시킨다.
+  //   (a) `src/params.js` 팔작 ridgeHalf base — `W/2 − hipInsetBays·endBayW` → `xEave − zEave`
+  //       (합각 후퇴는 칸 폭이 아니라 처마 반깊이가 정한다 = 평면 45° 추녀). 절 누문·종각
+  //       ridge/정면폭 29% → 56%, 궁 정전 61% → 59%(실측), 편전·침전·korea 3×2 불변.
+  //   (b) `src/village/palace.js` 부속 소채(침전 satellites·궐내각사 subCells) 를 팔작 → 맞배로
+  //       (SUBSIDIARY_ROOF, 근거 docs/architectural-authenticity.md 삼산고택 위계).
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-05)**: palace.js 만 HEAD 로 원복한 (a) 단독
+  //   실행에서 village acd0a07b / town f9913c24 / capital 7be3b811 이 이미 최종값과 일치하고
+  //   hanyang 만 중간값 23aa46cf — 즉 (b)의 몫은 hanyang 전용이다(부속 소채·궐내각사 프리셋은
+  //   한양 다일곽 궁에만 존재; capital 이 (a)와 (a)+(b)에서 동일한 것이 그 증거).
+  //   (a): village/town objects·triangles 불변(594/2,207,351 · 3,161/4,945,937) — 좌표만 이동.
+  //     capital 2,189→2,188 · hanyang 5,053→5,052 (−1, triangles 는 두 씬 다 불변): 순수 노드
+  //     capital 풀씬 diff 로 귀속 — extended 절의 병합 버킷 두 개(12tri + 48tri)가 용마루 연장
+  //     후 같은 재질 버킷 하나(60tri)로 합쳐진 몫이다(삼각형 보존 12+48=60 확인).
+  //   (b): hanyang objects 5,052→5,054(+2) · triangles 25,246,684→25,192,744(−53,940) —
+  //     맞배 지붕이 팔작 곡면 셸보다 단순한 몫 + 맞배 버킷 신설.
+  //   proxy 네 개 전부 불변(c9575cad / 25498dcf / 77c8d724 / 73409390) — 픽킹·focus 해 불침해.
+  //   mja optin·snapshot 골든 PASS 불변 — 기와집은 roof-skeleton.js 경로라 이 수정 밖이라는 증거.
+  //   FAIL-first: `tools/check-roof-ridge.mjs` 가 수정 전 소스에서 절 누문·종각 29%(하한 45%)로
+  //   실패하고, 궁 부속 소채의 팔작 지붕에서도 실패한다.
+  //   ※ 다음 라운드의 before 기준: objects 594 / 3,161 / 2,188 / 5,054 ·
+  //      triangles 2,207,351 / 4,945,937 / 5,624,016 / 25,192,744.
+  village: 'acd0a07b:253eb67f:23bfbf17:b4ba4115',
+  town: 'f9913c24:86960d16:af234d2c:4a55c3d2',
   // 중층(重層) 주불전(2026-08-05, 실측 갭 ⑤): **extended 두 씬(capital·hanyang)만** 이동한다.
   //   대찰의 주불전만 상층을 올리므로(같은 칸 모듈 5×3 → 3×2, 층고 0.70배, 하층 지붕 곡면에
   //   물려 앉힘) 전체 높이가 12.59 → 17.85m = 부속의 1.89배가 되고, 가람의 정점이 확실해진다.
@@ -436,7 +459,7 @@ const expectedSceneHashes = {
   //   _templeTwoStoreyPrincipalRebaseline 참조.
   //   ※ 다음 라운드의 before 기준: objects 594 / 3,161 / 2,189 / 5,053 ·
   //      triangles 2,207,351 / 4,945,937 / 5,624,016 / 25,246,684.
-  capital: '926b4095:380da9d7:c3d060d8:0957b97b',
+  capital: '7be3b811:b4b61745:d62f1532:5667acf1',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -558,7 +581,7 @@ const expectedSceneHashes = {
   //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
   // 2026-08-05 주불전 무자 현판 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
   //   (proxy 불변 · 절 없는 케이스 바이트 동일 · triangles 정확히 +60 · objects +1).
-  hanyang: 'a0626c80:39941dcc:9eb40ff5:77eb72ce',
+  hanyang: 'bdbf88b0:dd432564:0c403497:12a64fda',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

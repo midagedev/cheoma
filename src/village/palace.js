@@ -64,6 +64,28 @@ function footprintHalf(obj) {
   };
 }
 
+// 부속 소채 지붕 (2026-08-05 사용자 지적: "궁에 작은 건물들도 용마루가 너무 짧아 보였어,
+// 이런류의 건물에 쓰는 기와 양식이 따로 있을것 같은데").
+//
+// 맞다 — **팔작은 격식 높은 전각의 지붕이고 부속채는 맞배다.** `docs/architectural-authenticity.md`
+// §(삼산고택 항)에 축자 확인된 국가유산청 서술이 이미 그 사다리를 말한다: 안채 정침이 一자
+// **팔작**이고 좌우 익사·중문채는 낮은 기와 **맞배/우진각**이다. 궁도 같다 — 근정전·사정전·
+// 강녕전·교태전은 팔작이지만 궐내각사 근무 건물과 침전 부속 소채는 맞배이고, 행각은 이미
+// `buildCorridor` 가 맞배로 만든다(docs/palace-layout.md §행각 두께).
+//
+// 이 오류가 기하 결함과 겹쳐 있었다: 작은 전각에 팔작을 얹으면 양 끝 합각이 정면폭을 먹어
+// 용마루가 구조적으로 짧아진다. 그래서 "용마루가 너무 짧다"의 절반은 `params.js` 의 합각
+// 후퇴 식(고침)이고, 나머지 절반은 **애초에 팔작을 쓸 건물이 아니라는 것**이다. 맞배는
+// 용마루가 정면폭 전체 + 박공 내밀기까지 뻗으므로 이 문제가 발생하지 않는다.
+//
+// 잡상·취두도 함께 내린다: 그 종물은 정전급 위계의 표지이고 궐내각사 근무 건물의 것이 아니다
+// (`roof-rank.js` 는 rank `palace` 에만 종물을 주므로 rank 를 내리는 것으로 충분하다).
+const SUBSIDIARY_ROOF = Object.freeze({
+  roofType: 'matbae',
+  gableOverhang: 0.7,
+  roofRank: 'giwa',
+});
+
 // 전각 프리셋 변주 — PRESETS.korea 를 격식별로 축소(신규 프리셋 아님, 스프레드 파생).
 // roofRank palace: multi-곽 궁 전각만 잡상·취두를 받는다 (관아 hero와 분리, #150 C).
 function hallPreset(role, seed) {
@@ -502,7 +524,10 @@ export function buildPalaceCompound({
     // 대부분 차지하므로, 본채 실측 외연과 행각 사이 여유폭에서 겹치지 않는 최대 scale 을 역산해
     // 앉힌다(#97 — 종전엔 scale 0.72·cz+1.0 고정이라 본채 지붕에 관통). 붙여 쌓지 않는 게 원칙.
     if (A.satellites) {
-      const satPreset = applyOv({ ...hallPreset('chimjeon', seed + 900), frontBays: 3, sideBays: 2, columnHeight: 3.0, podiumTiers: 1, podiumTierH: 0.6, mats: hallMats });
+      const satPreset = applyOv({
+        ...hallPreset('chimjeon', seed + 900), ...SUBSIDIARY_ROOF,
+        frontBays: 3, sideBays: 2, columnHeight: 3.0, podiumTiers: 1, podiumTierH: 0.6, mats: hallMats,
+      });
       const proto = buildBuilding(satPreset);
       const pf = footprintHalf(proto);
       const hf = footprintHalf(hall);            // 본채 실측 외연(월대 포함)
@@ -565,7 +590,10 @@ export function buildPalaceCompound({
       // 궐내각사: 작은 채 격자(2×2) — 저격식 소전. 1채만 짓고 clone(재질·지오 공유).
       // 격자 간격을 실측 처마 외연 + 이격으로 산정 — 종전 gx·0.7 고정은 좁은 x축에서 좌우 채가
       // 서로 관통했다(#97). 좁은 x축이 제약이라 두 열이 이격되는 최대 scale 을 역산해 앉힌다.
-      const cellPreset = applyOv({ ...hallPreset('junggung', seed + 700), frontBays: 3, sideBays: 2, columnHeight: 2.9, bracketTiers: 1, podiumTiers: 1, podiumTierH: 0.5, mats: hallMats });
+      const cellPreset = applyOv({
+        ...hallPreset('junggung', seed + 700), ...SUBSIDIARY_ROOF,
+        frontBays: 3, sideBays: 2, columnHeight: 2.9, bracketTiers: 1, podiumTiers: 1, podiumTierH: 0.5, mats: hallMats,
+      });
       const proto = buildBuilding(cellPreset);
       const pf = footprintHalf(proto);
       const gap = 1.4;

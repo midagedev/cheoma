@@ -85,6 +85,8 @@ const REVIEWED_NEW_PATHS = new Set([
   // #150 C pure roof rank / palace-ornament policy for magistracy·city-gate·giwa.
   'src/builder/roof-rank.js',
   'tools/check-roof-rank-contract.mjs',
+  // 용마루 형태 계약(2026-08-05): 팔작 ridge 유도 + 궁 부속 소채 맞배 위계. FAST_CHECKS 순수.
+  'tools/check-roof-ridge.mjs',
   'src/runtime/village/yard-life.js',
   'src/layout/giwa-roof-envelope.js',
   'src/layout/giwa-through-passage.js',

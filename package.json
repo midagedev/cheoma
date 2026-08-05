@@ -23,6 +23,7 @@
     "check:architecture": "node tools/check-architecture.mjs",
     "check:assembly": "node tools/check-assembly-contract.mjs",
     "check:roof-shell": "node tools/check-roof-shell.mjs",
+    "check:roof-ridge": "node tools/check-roof-ridge.mjs",
     "check:ceiling": "node tools/check-ceiling-contract.mjs",
     "check:clip-stage": "node tools/check-clip-stage.mjs",
     "check:api-reuse": "node tools/run-browser-locked.mjs -- node tools/check-api-reuse-suite.mjs",

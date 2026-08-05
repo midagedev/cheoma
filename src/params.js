@@ -261,7 +261,18 @@ function computeNormalizedLayout(P) {
     let vStar = 0.3, lo = 0.01, hi = 0.95;
     for (let i = 0; i < 40; i++) { vStar = (lo + hi) / 2; if (dropN(vStar) < P.hipBreak) lo = vStar; else hi = vStar; }
     const zGable = zEave * vStar;
-    const base = W / 2 - P.hipInsetBays * P.endBayW;
+    // 합각 후퇴는 **처마 반깊이**가 정한다, 칸 폭이 아니다 (2026-08-05 사용자 지적:
+    // "저렇게 용마루가 짧은 형태는 사진 어디에도 없다").
+    //   추녀는 용마루 끝에서 처마 코너까지 평면상 대각으로 내려가므로, 그 수평 이동량이
+    //   처마 반깊이(zEave)와 같다 — 즉 용마루 반길이는 xEave − zEave 다. 이것이 우진각
+    //   ridge = W − D 와 같은 기하이고, 팔작은 그 위에 합각을 끼워 넣은 것이라 용마루가
+    //   더 짧아질 이유가 없다.
+    //   종전 식 `W/2 − hipInsetBays·endBayW` 는 후퇴량을 칸 폭에 비례시켰다. 정면폭이
+    //   크면 우연히 기하와 맞았지만(정전 5×3 실측/기하 1.03), 칸이 넓고 얕은 전각에서
+    //   붕괴했다: 절 누문·종각(3×2, endBayW 3.4)에서 5.5 − 1.15×3.4 = 1.59 로 용마루가
+    //   정면폭의 **29%**(기하의 0.51배)까지 줄어 지붕이 천막처럼 읽혔다.
+    //   `hipInsetBays` 는 이제 용마루 유도에 쓰이지 않는다(프리셋 필드는 보존).
+    const base = xEave - zEave;
     const ridgeMin = Math.max(W * 0.12, RIDGE_MIN_GABLE_K * zGable);
     // 안전 상한: 합각이 벽선 밖으로 밀려 측면 회첨이 뒤집히지 않도록 정면폭의 0.46 이내.
     ridgeHalf = Math.min(Math.max(base, ridgeMin), W * 0.46);

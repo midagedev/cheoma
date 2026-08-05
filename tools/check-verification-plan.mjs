@@ -593,6 +593,9 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   './check-walk-control.mjs',
 './check-roof-rank-contract.mjs',
   './check-plan-contract.mjs',
+  // 2026-08-05: 시전 facade v4(9b5645f)가 check-sijeon-contract → village-door-records →
+  // wall-contract.js 정적 폐쇄를 만들었다 — 미러를 실제 폐쇄에 맞춘 갱신(라우팅 확대, 완화 아님).
+  './check-sijeon-contract.mjs',
   './check-sijeon-approach.mjs',
   './check-temple-contract.mjs',
   './check-road-contract.mjs',

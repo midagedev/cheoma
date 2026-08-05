@@ -64,6 +64,14 @@ const EXACT_IMPACT = new Map([
     './check-citywall.mjs',
     './check-creek.mjs',
   ]],
+  // 용마루 형태 계약(2026-08-05): palace.js 는 three 의존이라 어떤 순수 게이트도 정적으로
+  // import 하지 못한다(폐쇄 선택 0) — esbuild 로 조립하는 두 소유 게이트를 명시한다.
+  // check-roof-ridge 는 부속 소채 맞배·주전각 팔작 위계를, check-palace-precinct 는 곽 배치를 본다.
+  ['src/village/palace.js', [
+    './check-architecture.mjs',
+    './check-roof-ridge.mjs',
+    './check-palace-precinct.mjs',
+  ]],
   ['src/generators/village/terrain.js', [
     './check-architecture.mjs',
     './check-creek.mjs',
