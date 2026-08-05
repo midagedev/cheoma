@@ -932,6 +932,37 @@ try {
       (animation) => animation.finished.catch(() => {}),
     ));
   });
+  const readDetent = () => page.evaluate(() => {
+    const sheet = document.querySelector('.sheet.context');
+    const rect = sheet.getBoundingClientRect();
+    const scroll = sheet.querySelector('[data-panel-scroll]');
+    return {
+      snap: sheet.dataset.snap,
+      sheetHeight: rect.height,
+      viewportHeight: innerHeight,
+      sceneRatio: 1 - rect.height / innerHeight,
+      scrollVisible: scroll ? Math.min(innerHeight, scroll.getBoundingClientRect().bottom)
+        - Math.max(0, scroll.getBoundingClientRect().top) : 0,
+    };
+  });
+
+  // 2026-08-06 재저작. 종전 이 구간은 그립을 화면 상단까지 끌어 "세 번째 detent 는 없다 —
+  //   half 로 되돌아온다"를 단언했다. 그 단언은 **사용자 요청으로 무효가 됐다**: 모바일 편집 패널의
+  //   파라미터 가시성 라운드에서 드래그 전용 `full`(`FULL_VH` 0.86) detent 가 신설됐고
+  //   (ui-design §2 — 탭은 peek↔half 토글, full 은 드래그 전용, full 에서는 ActionBar 가 물러난다),
+  //   그래서 이 게이트는 db6bfb9 이후 상존 실패였다. 재저작 원칙:
+  //   ① 원래 보장(확장 시트가 편집 중인 집을 가리지 않는다 + 스크롤 창 ≥200px)은 **탭이 만드는
+  //      detent(half)에서 그대로 유지**한다 — 완화가 아니라 측정 지점의 정정이다.
+  //   ② 드래그 전용 full 은 새 단언으로 덮되, 프레이밍(≥0.4) 요구는 걸지 않는다. full 은 화면 면적을
+  //      파라미터 행수와 바꾸는 것이 목적이기 때문이다. 대신 **측정 높이로 두 detent 를 구별**해
+  //      단언이 공허해지지 않게 한다(full 이 half 로 클램프되면 높이 비교에서 실패한다).
+  const halfDetent = await readDetent();
+  invariant(halfDetent.snap === 'half', `tap detent is not half: ${halfDetent.snap}`);
+  invariant(halfDetent.sceneRatio >= 0.4,
+    `expanded sheet covered the edited house (scene ${(halfDetent.sceneRatio * 100).toFixed(1)}%)`);
+  invariant(halfDetent.scrollVisible >= 200,
+    `expanded sheet scroll window collapsed (${Math.round(halfDetent.scrollVisible)}px)`);
+
   const gripBox = await mobileGrip.boundingBox();
   invariant(gripBox, 'mobile editor grip has no layout box');
   await page.mouse.move(
@@ -943,26 +974,19 @@ try {
     'mobile grip missed pointerdown');
   await page.mouse.move(gripBox.x + gripBox.width / 2, 36, { steps: 8 });
   await page.mouse.up();
-  // #158 re-authored: the sheet has two detents (peek / a capped half). Dragging past
-  // the top no longer opens a third "full" detent that buried the scroll body and
-  // the edited house; it settles back at the capped expanded detent.
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'full', null, { timeout });
+  const fullDetent = await readDetent();
+  invariant(fullDetent.sheetHeight > halfDetent.sheetHeight + 0.15 * fullDetent.viewportHeight,
+    `drag past the top did not reach a taller detent than half (${Math.round(halfDetent.sheetHeight)}px `
+    + `→ ${Math.round(fullDetent.sheetHeight)}px of ${fullDetent.viewportHeight}px)`);
+  invariant(fullDetent.scrollVisible >= 200,
+    `full sheet scroll window collapsed (${Math.round(fullDetent.scrollVisible)}px)`);
+
+  // 이후 단언은 종전과 같은 detent(half)에서 돈다. 탭은 expanded→peek 토글이므로 두 번 눌러 되돌린다.
+  await mobileGrip.click();
+  await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'peek', null, { timeout });
+  await mobileGrip.click();
   await page.waitForFunction(() => document.querySelector('.sheet.context')?.dataset.snap === 'half', null, { timeout });
-  const mobileDetent = await page.evaluate(() => {
-    const sheet = document.querySelector('.sheet.context');
-    const rect = sheet.getBoundingClientRect();
-    const scroll = sheet.querySelector('[data-panel-scroll]');
-    return {
-      snap: sheet.dataset.snap,
-      sheetHeight: rect.height,
-      sceneRatio: 1 - rect.height / innerHeight,
-      scrollVisible: scroll ? Math.min(innerHeight, scroll.getBoundingClientRect().bottom)
-        - Math.max(0, scroll.getBoundingClientRect().top) : 0,
-    };
-  });
-  invariant(mobileDetent.sceneRatio >= 0.4,
-    `expanded sheet covered the edited house (scene ${(mobileDetent.sceneRatio * 100).toFixed(1)}%)`);
-  invariant(mobileDetent.scrollVisible >= 200,
-    `expanded sheet scroll window collapsed (${Math.round(mobileDetent.scrollVisible)}px)`);
   await openMakeGroup('openings');
   const mobileControls = await page.evaluate(() => {
     const house = document.querySelector('.ctx.house:not([aria-hidden="true"])');
