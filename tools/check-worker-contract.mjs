@@ -417,7 +417,26 @@ const expectedSceneHashes = {
   //      triangles 2,207,351 / 4,945,937 / 5,581,946 / 25,204,614.
   village: '042caafb:90f5a06d:77530a48:b7ed202f',
   town: '1cdb6287:e4129003:e0768612:3f74b373',
-  capital: '619423bf:5a24ab09:67846b3d:9e40fdf9',
+  // 중층(重層) 주불전(2026-08-05, 실측 갭 ⑤): **extended 두 씬(capital·hanyang)만** 이동한다.
+  //   대찰의 주불전만 상층을 올리므로(같은 칸 모듈 5×3 → 3×2, 층고 0.70배, 하층 지붕 곡면에
+  //   물려 앉힘) 전체 높이가 12.59 → 17.85m = 부속의 1.89배가 되고, 가람의 정점이 확실해진다.
+  //   **단독 변인 증거**: ① village 042caafb·town 1cdb6287(compact/courtyard — 중층 아님)과
+  //   절 없는 두 씬이 같은 실행에서 바이트 동일. ② capital·hanyang 의 델타가 **정확히 같다** —
+  //   objects 각각 2,185→2,189 · 5,049→5,053 으로 **+4**, triangles 5,581,946→5,624,016 ·
+  //   25,204,614→25,246,684 으로 **+42,070**. 경내마다 상층 하나가 도달했고 그 이상은 없다.
+  //   ③ proxy 네 개 전부 불변(c9575cad / 25498dcf / 77c8d724 / 73409390) — 상층은 하층 처마
+  //   안쪽에 들어오므로 지붕 OBB·focus 해가 움직이지 않는다. ④ objects +4 는 상층 창호
+  //   문짝 클론이 만드는 재질군 3개 + 몸체 1개이고, 이는 같은 라운드 `check:temple:browser`
+  //   실측 병합 콜 +6(재질군 3 × 컬러/그림자 2패스)과 같은 몫이다(extended flat 141→147 ·
+  //   mountain 137→143, programs 7 불변, materials 70→73). 창호 클론은 hanjiGlow 태그를
+  //   `Material.copy` 로 상속하는 설계이고 셰이더 패치 대상이라
+  //   `canonicalizeSharedMaterials` 가 보수적으로 통합을 건너뛴다 — 즉 이 +6 은 회피 가능한
+  //   낭비가 아니라 한 층의 정가다. ⑤ sync == module Worker == `?worker=0` 폴백 바이트 동일.
+  //   ⑥ 계획 골든은 extended 두 케이스만 +172B(upperStorey 레코드) — tools/plan-contract.json
+  //   _templeTwoStoreyPrincipalRebaseline 참조.
+  //   ※ 다음 라운드의 before 기준: objects 594 / 3,161 / 2,189 / 5,053 ·
+  //      triangles 2,207,351 / 4,945,937 / 5,624,016 / 25,246,684.
+  capital: '926b4095:380da9d7:c3d060d8:0957b97b',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -539,7 +558,7 @@ const expectedSceneHashes = {
   //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
   // 2026-08-05 주불전 무자 현판 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
   //   (proxy 불변 · 절 없는 케이스 바이트 동일 · triangles 정확히 +60 · objects +1).
-  hanyang: 'c598af3d:e7ebee95:5decf33f:a9abba23',
+  hanyang: 'a0626c80:39941dcc:9eb40ff5:77eb72ce',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

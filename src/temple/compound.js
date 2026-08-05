@@ -19,7 +19,7 @@ import {
   disposeObjectResources,
 } from '../core/three-resources.js';
 import { normalizeTemplePlan, planTempleCompound } from './plan.js';
-import { templeHallBuilderPreset } from './role-hierarchy.js';
+import { templeHallBuilderPreset, templeUpperStoreyPreset } from './role-hierarchy.js';
 import { templeHallPlaquePlan } from './plaque-plan.js';
 
 const lifecycle = new WeakMap();
@@ -148,6 +148,18 @@ function buildHall(spec, seed, mats) {
     bracketGrammar: spec.bracketGrammar,
     eaveGrammar: spec.eaveGrammar,
   };
+  // 중층(重層): 대찰 주불전만. 상층은 같은 칸 모듈을 칸수만 줄여 한 층 더 올린 것이고,
+  // 앉힘 높이(`seatY`)와 제원은 전부 plan-owned 다 — 여기서 층고를 다시 풀지 않는다.
+  // 팔레트를 하층과 공유하므로 새 재질군·프로그램 계열이 0 이다. 전각 그룹의 자식이라
+  // yaw·scale·단 리프트를 함께 받는다.
+  if (spec.upperStorey) {
+    const upper = buildBuilding({ ...templeUpperStoreyPreset(spec), seed: (seed ^ 0x2b1f) >>> 0, mats });
+    upper.name = 'upper-storey';
+    upper.position.y = spec.upperStorey.seatY;
+    upper.userData.templeUpperStorey = spec.upperStorey;
+    building.add(upper);
+    building.userData.templeStoreys = spec.storeys || 2;
+  }
   // 현판은 주불전(유일한 rank-4 전각)에만. plan-owned 기하를 그대로 소비하고, 전각 그룹의
   // 자식이므로 yaw·scale·에이프런 리프트를 함께 받는다.
   const plaque = templeHallPlaquePlan(spec);

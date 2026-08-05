@@ -348,6 +348,68 @@ export function templeHallBuilderPreset(spec) {
   };
 }
 
+// 중층(重層) 주불전 — 대찰의 주불전만.
+//
+// 사료: 금강산 장안사 대웅보전은 **중층**이라 가람의 정점이 확실하다(徳田写真館 1930 도판).
+// 같은 계보의 현존례가 금산사 미륵전(3층)·법주사 팔상전(5층)이고, 그 형태는 층마다 자기
+// 지붕을 갖고 위 층이 안으로 물러앉는 적층이다. 그래서 새 지붕 문법을 지어내지 않고 같은
+// 칸 모듈을 칸수만 줄여 한 층 더 올린다 — 상층 기둥이 하층 내부 기둥 위에 서는 실제 구조와
+// 같은 조작이고, 새 재질·프로그램 계열이 0 이다.
+//
+// 이것을 `TEMPLE_ROLE_HIERARCHY['main-hall']` 의 세 번째 repertoire 항목으로 넣지 않는다:
+// `templeRoleArchitecture` 가 `seed:id:role` 해시로 고르므로 항목을 늘리면 **모든** 절의
+// 주불전 형식이 재추첨되고, 중층은 어느 산사에나 있는 형식이 아니다. 규모 규칙(대찰만)이
+// 더 정확하고 골든 파급도 없다.
+const TWO_STOREY_UPPER = Object.freeze({
+  frontBayReduction: 2,
+  sideBayReduction: 1,
+  minFrontBays: 3,
+  minSideBays: 2,
+  // 상층 층고는 하층보다 낮다.
+  columnHeightRatio: 0.70,
+  // 상층 몸체를 하층 지붕 곡면에 물리는 깊이 — 하층 낙차(ridgeY − eaveInnerY)의 비율.
+  // 0 이면 용마루선에 얹혀 상층 옆구리 밑에 빈틈이 보이고, 너무 크면 하층 지붕이 삼켜진다.
+  seatDropRatio: 0.32,
+});
+
+/**
+ * 중층 주불전의 상층 제원. Renderer-free — 플랜이 이 기록을 저장하고 렌더러는 소비만 한다.
+ *
+ * `building` 은 하층(= 플랜에 저장된 전각) 이고, 반환하는 `columnHeight`·`seatDrop` 은
+ * **하층과 같은 미축척 단위**다. 전각 그룹 전체에 `scale` 이 걸리므로 여기서 곱하지 않는다.
+ */
+export function templeUpperStoreySpec(building) {
+  if (!building?.massingGrammar || !building?.roofGrammar || !building?.eaveGrammar) {
+    throw new TypeError('complete temple hall architecture is required');
+  }
+  const frontBays = Math.max(TWO_STOREY_UPPER.minFrontBays,
+    building.frontBays - TWO_STOREY_UPPER.frontBayReduction);
+  const sideBays = Math.max(TWO_STOREY_UPPER.minSideBays,
+    building.sideBays - TWO_STOREY_UPPER.sideBayReduction);
+  const round = (value) => Math.round(value * 1000) / 1000;
+  return {
+    frontBays,
+    sideBays,
+    columnHeight: round(building.massingGrammar.columnHeight * TWO_STOREY_UPPER.columnHeightRatio),
+    podiumTiers: 0,
+    seatDropRatio: TWO_STOREY_UPPER.seatDropRatio,
+  };
+}
+
+/** Builder preset for the upper storey of a 중층 hall. */
+export function templeUpperStoreyPreset(building) {
+  const upper = building.upperStorey || templeUpperStoreySpec(building);
+  return {
+    ...templeHallBuilderPreset(building),
+    frontBays: upper.frontBays,
+    sideBays: upper.sideBays,
+    columnHeight: upper.columnHeight,
+    podiumTiers: upper.podiumTiers,
+  };
+}
+
+export const TEMPLE_TWO_STOREY_UPPER = TWO_STOREY_UPPER;
+
 function baySpan(count, widths) {
   let total = 0;
   for (let index = 0; index < count; index++) {

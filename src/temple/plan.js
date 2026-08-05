@@ -6,9 +6,12 @@ import {
   templeEntrySequenceIssues,
 } from './entry-sequence.js';
 import { applyTempleTerraces, templeTerraceIssues } from './terrace-plan.js';
+import { computeLayout } from '../params.js';
 import {
+  templeHallBuilderPreset,
   templeHallEaveFootprint,
   templeRoleArchitecture,
+  templeUpperStoreySpec,
 } from './role-hierarchy.js';
 
 // 가람 밀집 간격 (2026-08-05, refs/temple-old 대조 라운드).
@@ -144,6 +147,35 @@ function hallExtent(role, id, seed, frontBays, sideBays, scale, yaw = 0) {
   };
 }
 
+/**
+ * 대찰(extended)의 주불전만 중층(重層)으로 올린다.
+ *
+ * 사료 근거와 왜 repertoire 항목이 아닌지는 `role-hierarchy.js` 의 `TWO_STOREY_UPPER` 주석
+ * 참조. 여기서 상층 제원과 **앉힘 높이까지 확정**하므로 렌더러는 layout 을 다시 풀어
+ * 층고를 추론하지 않는다.
+ *
+ * `seatY` 는 하층과 같은 미축척 단위다(전각 그룹 전체에 `scale` 이 걸린다). 하층 지붕의
+ * 낙차 `ridgeY − eaveInnerY` 에 `seatDropRatio` 를 곱한 만큼 용마루선 아래로 물려, 상층
+ * 옆구리가 하층 지붕 곡면과 맞물리게 한다 — 용마루선에 그대로 얹으면 상층 밑에 빈틈이 보인다.
+ */
+function applyTwoStoreyPrincipal(plan) {
+  if (plan.variant !== 'extended') return plan;
+  const main = plan.buildings?.find((building) => building.role === 'main-hall');
+  if (!main || main.upperStorey) return plan;
+  const layout = computeLayout(templeHallBuilderPreset(main));
+  const spec = templeUpperStoreySpec(main);
+  const drop = Math.max(0, layout.ridgeY - layout.eaveInnerY) * spec.seatDropRatio;
+  main.storeys = 2;
+  main.upperStorey = {
+    ...spec,
+    seatY: round(layout.ridgeY - drop),
+    // 검수·게이트가 관계를 재계산하지 않고 확인할 수 있게 유도 근거를 함께 남긴다.
+    lowerRidgeY: round(layout.ridgeY),
+    lowerEaveInnerY: round(layout.eaveInnerY),
+  };
+  return plan;
+}
+
 const PLAN_ARRAY_FIELDS = Object.freeze([
   'courtyards', 'enclosures', 'buildings', 'gates', 'props', 'paths',
 ]);
@@ -246,6 +278,7 @@ export function normalizeTemplePlan(plan) {
   if (!plan.entrySequence) {
     applyTempleEntrySequence(plan, { profile: plan.settings?.entryProfile });
   }
+  applyTwoStoreyPrincipal(plan);
   // 단 기록도 같은 방식으로 회복한다 — 완비된 v2 는 그대로 통과(identity)하고, 이전
   // 순수 페이로드는 스키마 범프 없이 단·석축 계약을 얻는다.
   if (!plan.terraces) applyTempleTerraces(plan);
@@ -616,6 +649,7 @@ export function planTempleCompound(options = {}) {
   else planExtended(plan);
   // Gate | stair-apron | pass-under | court is owned here so village adapters
   // and editors cannot invent a second processional grammar.
+  applyTwoStoreyPrincipal(plan);
   applyTempleEntrySequence(plan, { profile: entryProfile });
   // 단(段)은 진입 시퀀스 뒤에 확정한다 — 누하 전각이 그때 추가되고, 그 전각도 단을
   // 배정받아야 한다. 단이 전각 elevation 을 확정한 뒤 스테이지를 다시 유도해 두 기록이

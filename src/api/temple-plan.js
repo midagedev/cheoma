@@ -16,6 +16,9 @@ export {
   templeHallBuilderPreset,
   templeHallEaveFootprint,
   templeRoleArchitecture,
+  TEMPLE_TWO_STOREY_UPPER,
+  templeUpperStoreyPreset,
+  templeUpperStoreySpec,
 } from '../temple/role-hierarchy.js';
 export {
   TEMPLE_PLAQUE_SCHEMA_VERSION,

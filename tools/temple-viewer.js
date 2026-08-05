@@ -313,6 +313,27 @@ window.__TEMPLE_DIAG = {
   } : null,
   // 렌더된 단·석축이 실제로 존재하는지: 이름으로 찾는다(병합 뒤에는 사라지므로
   // raw 모드에서만 유효하다).
+  // 중층: 상층 몸체가 실제로 렌더까지 도달했는지(병합 전에만 노드가 남는다).
+  renderedUpperStoreys: (() => {
+    let count = 0;
+    compound.traverse((node) => { if (node.name === 'upper-storey') count++; });
+    return count;
+  })(),
+  principalStoreys: (() => {
+    const main = plan.buildings.find((building) => building.role === 'main-hall');
+    return {
+      storeys: main?.storeys ?? 1,
+      upper: main?.upperStorey ? {
+        frontBays: main.upperStorey.frontBays,
+        sideBays: main.upperStorey.sideBays,
+        columnHeight: main.upperStorey.columnHeight,
+        podiumTiers: main.upperStorey.podiumTiers,
+        seatY: main.upperStorey.seatY,
+        lowerRidgeY: main.upperStorey.lowerRidgeY,
+        lowerEaveInnerY: main.upperStorey.lowerEaveInnerY,
+      } : null,
+    };
+  })(),
   renderedTerraceNodes: (() => {
     let tiers = 0, risers = 0;
     compound.traverse((node) => {

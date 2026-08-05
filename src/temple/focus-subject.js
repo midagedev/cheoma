@@ -5,7 +5,7 @@
 // allocates no Three objects and does not inspect the assembled compound.
 
 import { PRESETS, computeLayout } from '../params.js';
-import { templeHallBuilderParams } from './role-hierarchy.js';
+import { templeHallBuilderParams, templeUpperStoreyPreset } from './role-hierarchy.js';
 
 function polygonCenter(polygon) {
   const sum = polygon.reduce((current, point) => ({
@@ -30,6 +30,12 @@ export function templeFocusSubject(plan) {
     frontBays: mainHall.frontBays,
     sideBays: mainHall.sideBays,
   });
+  // 중층 주불전은 상층까지가 피사체 높이다. 하층 totalH 로 두면 focus 카메라가 상층
+  // 지붕을 프레임 밖으로 잘라낸다(대찰 주불전 17.85m vs 하층 10.61m).
+  const upperTop = mainHall.upperStorey
+    ? mainHall.upperStorey.seatY + computeLayout(templeUpperStoreyPreset(mainHall)).totalH
+    : 0;
+  const subjectTop = Math.max(layout.totalH, upperTop) * scale;
   const hallCenter = polygonCenter(hallFootprint);
   const courtCenter = polygonCenter(courtFootprint);
   return {
@@ -39,7 +45,7 @@ export function templeFocusSubject(plan) {
       role: mainHall.role,
       footprint: hallFootprint.map((point) => ({ x: point.x, z: point.z })),
       minY: 0,
-      maxY: layout.totalH * scale,
+      maxY: subjectTop,
     },
     courtyard: {
       id: worshipCourt.id,

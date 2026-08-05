@@ -7,7 +7,7 @@
   "_sijeonApproachRebaseline": "#54 시전 접근로 2026-08-04 — 행랑을 성문까지: ① 남대문로 jungno→daero 승격(roads.js — 주석 스스로 '주작대로 남측 연장', planSijeon 은 daero 만 본다) ② 성곽 도성 runCap Infinity(프리픽스 캡 26이 51레코드를 종로 서단 151m 에 몰아넣던 버그, break 의 상한 잠식 제거 포함) ③ 문전 마당 필지·시전 배제 51.25→14m(GATE_FORECOURT_PLAN_DEPTH, 사용자 결정 12~18m 대역 — docs/joseon-city.md §성문 주변 개정 기록) ④ 예약 코어 30° 일조 통로를 행랑이 비움(coreSolarAccess 필터) ⑤ 접근로 진입점 바로가기에 성벽 여유 확보 전제 추가(daero 폭에서 99° 접힘 방지). hanyang:base 1342158→1422313(p397)·hanyang:temple 1352732→1413624(p389)만 이동, 나머지 8케이스 해시·바이트 불변이 성곽 도성 전용 변경의 단독 변인 증거(리드 재실행 2026-08-04 실측이 에이전트 격리 트리 V3 실측과 해시 일치). FAIL-first: tools/check-sijeon-approach.mjs 가 수정 전 소스에서 19건 실패(남대문로 미승격 4·남/동문 행랑 0·커버리지 24~32%).",
   "_creekPhaseBRebaseline": "#20 R4 Phase B 2026-08-01 — hanyang 전용 개천 마감: 호안 석축 계획(creek-bank-plan, 성 밖 자연석 위계 포함), 평석교 지간 3m 계약(bridgeSlabPiers)·벤치 횡단 접지(creekCrossingSpanHalf)·홍예 금지, 남촌 중로를 하도 밖으로 물림(offStreamZ), 잔여 횡단부 판석교(사교 하한 0.4). 이번에도 hanyang:base·hanyang:temple 만 이동하고 hamlet·village·town·capital 불변이 한양 전용 변경의 증거(리드 재실행 2026-08-01 실측이 r4-creek-b 독립 실측과 해시 일치). FAIL-first: 접근 수평 단언이 Phase A 소스에서 +1.23~+2.84m 로 실패함을 실측.",
   "_creekRebaseline": "#20 R4 Phase A 2026-08-01 — hanyang 전용 개천(開川) 관류: streamZ 0.30R→0.16R, 도성 개천 사행 ×0.5, 도성 구간 골짜기 어깨 50m→10m(개착 하도), 안산·성저 기준선을 개천에서 분리(frontWaterZ), 논은 성 밖 계약, 성곽 도성 필지 남한선=성벽. hanyang:base·hanyang:temple 해시만 이동하고 hamlet·village·town·capital 은 불변인 것이 한양 전용 변경의 증거다. worker == ?worker=0 폴백 바이트 동일은 check:worker 가 소유한다.",
-  "templeRevision": "issue-57-gathering-terraces-2026-08-05",
+  "templeRevision": "issue-57-gathering-terraces-twostorey-2026-08-05",
   "pavilionRevision": "issue-49-solar-focus-frame-2026-07-22",
   "featurePropsRevision": "issue-49-obstruction-clearance-2026-07-22",
   "focusCameraRevision": "look-restore-r1-eye-level-9deg-16deg-residential-lens-2026-07-25",
@@ -55,12 +55,12 @@
       "bytes": 199822
     },
     "capital:temple": {
-      "hash": "a72e186167a4f6bd4e99ca87975f98d8e3b342ffc63fa1e1c33ba0e6dee66737",
-      "bytes": 263185
+      "hash": "cd475890ad39d2c1a746c96a196fe7ddb0c7e31d8989bf7ea0b5b2c798d70e6d",
+      "bytes": 263357
     },
     "hanyang:temple": {
-      "hash": "b7021d63d62ef52c1789ab3221005e3d661377a13eeedcdb530515347b029ec4",
-      "bytes": 1436647
+      "hash": "a769dcb938953cf347d2470f4d1c4d5911d173b8d781b53109da6e49f2f4a103",
+      "bytes": 1436819
     }
   },
   "yardBodyClearanceRevision": "yard-hard-object-body-exclusion-2026-07-26",
@@ -68,5 +68,6 @@
   "issue150PolishRevision": "issue-150-polish-wave-2026-07-26",
   "cityGateForecourtRevision": "issue-19-r3b-gate-forecourt-parcel-reservation-2026-07-31",
   "palacePrecinctRevision": "#21 R5 궁·관아 위계 2026-08-02 — 사진 대조 판정 D5·D8·D13·D14·E 구현. 이동한 것은 **궁이 있는 계획뿐**이다(capital:base/temple, hanyang:base/temple). hamlet·village·town 은 해시·바이트 모두 불변이라 이 라운드가 그 규모의 시드 스트림을 건드리지 않았음이 단독 변인으로 확인된다. 궁 계획이 움직인 원인 넷: ① 궁역 폭 96→108(capital 60→58) — 정전 처마 21.6→27.4m·행각 깊이 3.0→4.6m 를 담기 위한 종속값(palace.js tierSpec 과 동기) ② 정문 앞 광장·궁장 밖 이격 링·육조 관아 슬롯이 blocker 로 추가(추첨 순서는 그대로, 후보 수락 여부만 바뀐다) ③ 주작대로 시점이 상수점에서 정문 법선 위 광장 바깥 변으로 이동 ④ 길이 궁역·광장을 관통하지 못하도록 클립(관통하던 간선은 양쪽 구간이 각각 살아남아 같은 위계의 다음 서수를 받는다). 실측: capital:base 80→73 · capital:temple 81→73 · hanyang:base 395→397 · hanyang:temple 395→397 필지. 게이트: tools/check-palace-precinct.mjs(신규, 미등록) · tools/check-road-contract.mjs(축선 재저작).",
-  "magistracyRowRevision": "#23 R5b 관아 축선 분포 2026-08-02 — 육조 관아 슬롯이 정문에서의 절대 오프셋(firstOffset 26 / spacing 28 / 변당 2칸 + 종로 초과 칸 폐기)에서 **축선 span 종속**으로 바뀌었다: 열의 첫 칸 안쪽 변을 궁장 이격 링(8m) 바깥면에, 마지막 칸 바깥 변을 종로 여유(8m) 안쪽면에 물리고 그 사이를 피치(plotD 24 + gap 3)가 허용하는 개수(변당 최대 3)만큼 균등 분할한다. 슬롯 크기(26×24)와 좌향·이격 계약은 불변이다. 이동한 것은 **한양뿐**이다(hanyang:base 1341329→1342158 · hanyang:temple 1351612→1352732, 필지 397→397). 궁이 있어도 관아 슬롯이 없는 capital(magistracy.max 0)이 해시·바이트까지 불변인 것이 단독 변인 증거다(capital:base 245416 · capital:temple 257489 — R5 값 그대로). hamlet·village·town 도 불변. 실측 축선 위치(정문 면 기준): seed 20260716 span 44.3m [26]→[20] · 7 span 73.9m [26,54]→[20,53.9] · 1 span 80.4m [26,54]→[20,60.4] · 2026 span 98.6m [26,54]→[20,49.3,78.6](변당 3칸, 축선 3구간 전부 커버). 궁역 서편 채움(FIX-A)은 palace.js 렌더러 전용이라 계획 골든에 들어가지 않는다. 게이트: tools/check-palace-precinct.mjs(열 양 끝 고정·균등 간격·구간 커버리지 단언 추가, FAIL-first 확인)."
+  "magistracyRowRevision": "#23 R5b 관아 축선 분포 2026-08-02 — 육조 관아 슬롯이 정문에서의 절대 오프셋(firstOffset 26 / spacing 28 / 변당 2칸 + 종로 초과 칸 폐기)에서 **축선 span 종속**으로 바뀌었다: 열의 첫 칸 안쪽 변을 궁장 이격 링(8m) 바깥면에, 마지막 칸 바깥 변을 종로 여유(8m) 안쪽면에 물리고 그 사이를 피치(plotD 24 + gap 3)가 허용하는 개수(변당 최대 3)만큼 균등 분할한다. 슬롯 크기(26×24)와 좌향·이격 계약은 불변이다. 이동한 것은 **한양뿐**이다(hanyang:base 1341329→1342158 · hanyang:temple 1351612→1352732, 필지 397→397). 궁이 있어도 관아 슬롯이 없는 capital(magistracy.max 0)이 해시·바이트까지 불변인 것이 단독 변인 증거다(capital:base 245416 · capital:temple 257489 — R5 값 그대로). hamlet·village·town 도 불변. 실측 축선 위치(정문 면 기준): seed 20260716 span 44.3m [26]→[20] · 7 span 73.9m [26,54]→[20,53.9] · 1 span 80.4m [26,54]→[20,60.4] · 2026 span 98.6m [26,54]→[20,49.3,78.6](변당 3칸, 축선 3구간 전부 커버). 궁역 서편 채움(FIX-A)은 palace.js 렌더러 전용이라 계획 골든에 들어가지 않는다. 게이트: tools/check-palace-precinct.mjs(열 양 끝 고정·균등 간격·구간 커버리지 단언 추가, FAIL-first 확인).",
+  "_templeTwoStoreyPrincipalRebaseline": "중층(重層) 주불전 2026-08-05 — 실측 갭 ⑤(docs/temple-generator.md §10). 금강산 장안사 대웅보전은 중층이라 가람의 정점이 확실한데, cheoma 주불전은 단층이라 부속과의 높이차가 1.33배(12.59 vs 9.46m)뿐이었다. 대찰(extended)의 주불전만 상층을 올린다 — 같은 칸 모듈을 칸수만 줄여(5×3 → 3×2) 하층 지붕 곡면에 물려 앉히고, 층고는 하층의 0.70배다. 전체 높이 12.59 → 17.85m(부속의 1.89배). repertoire 항목으로 넣지 않은 이유는 role-hierarchy.js 의 TWO_STOREY_UPPER 주석 참조(해시 재추첨 방지). **범위 증거**: :base 5종 전부 불변이고 :temple 중에서도 **extended 두 씬(capital·hanyang)만** 이동했다 — hamlet(compact) 44,068B · village/town(courtyard) 112,267 / 199,822B 는 한 바이트도 움직이지 않았다. 두 씬의 바이트 증가가 **정확히 같은 +172B**(263,185→263,357 · 1,436,647→1,436,819)이고 그것이 upperStorey 레코드 하나의 크기다. 필지 수 불변(73/389). 씬 골든 재기준 근거와 삼각형 귀속은 tools/check-worker-contract.mjs 의 같은 날짜 주석 참조. FAIL-first: tools/check-temple-contract.mjs 의 assertPrincipalStoreys 가 applyTwoStoreyPrincipal() no-op 변형에서 \"principal hall is not two-storey\" 로 실패한다. 구값: capital de795247769c/261,768B(1차) → a72e186167a4/263,185B(2차) → 현재 · hanyang 01e08e49b5df/1,435,222B(1차) → b7021d63d62e/1,436,647B(2차) → 현재."
 }

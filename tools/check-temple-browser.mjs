@@ -188,8 +188,39 @@ try {
         }
       }
 
+      // ── 중층(重層) 주불전 (2026-08-05, 실측 갭 ⑤) ─────────────────────────────
+      // 대찰 주불전만 중층이고, 상층 몸체는 하층과 팔레트를 공유하므로 병합 콜이 늘지
+      // 않아야 한다(아래 콜 상한이 그것을 물린다).
+      //   FAIL-first: `applyTwoStoreyPrincipal()` no-op 변형에서
+      //   'principal hall is not two-storey' 로 실제로 깨진다.
+      const storeys = diag.principalStoreys;
+      if (variant === 'extended') {
+        invariant(storeys.storeys === 2 && storeys.upper,
+          `${label}: principal hall is not two-storey ${JSON.stringify(storeys)}`);
+        invariant(storeys.upper.podiumTiers === 0,
+          `${label}: upper storey grew its own podium`);
+        invariant(storeys.upper.seatY < storeys.upper.lowerRidgeY
+          && storeys.upper.seatY > storeys.upper.lowerEaveInnerY,
+        `${label}: upper storey seat left the lower roof band ${JSON.stringify(storeys.upper)}`);
+        if (!merged) {
+          invariant(diag.renderedUpperStoreys === 1,
+            `${label}: renderer built ${diag.renderedUpperStoreys} upper storeys`);
+        }
+      } else {
+        invariant(storeys.storeys === 1 && !storeys.upper,
+          `${label}: only a 대찰 principal hall may be two-storey`);
+        invariant(diag.renderedUpperStoreys === 0,
+          `${label}: an upper storey leaked into a ${variant} precinct`);
+      }
+
       const programBudget = merged ? 7 : 12;
-      invariant(diag.render.programs <= programBudget && diag.render.materials <= 72,
+      // 재질 상한 72 → 73 (2026-08-05, 중층 주불전). 상층 몸체는 하층과 팔레트를 공유하지만
+      // 창호 문짝은 설계상 **per-mesh 클론**이고(hanjiGlow 태그가 `Material.copy` 로 상속되는
+      // 구조 — src/builder/palette.js), 클론은 셰이더 패치 대상이라
+      // `canonicalizeSharedMaterials` 가 보수적으로 통합을 건너뛴다. 그래서 한 층이 늘면
+      // 재질군이 정확히 3개 늘어난다(실측 extended 70 → 73). 상한은 실측 프런티어이고
+      // 여유분이 아니다.
+      invariant(diag.render.programs <= programBudget && diag.render.materials <= 73,
         `${label}: program/material budget drifted ${JSON.stringify(diag.render)}`
         + ` (program budget ${programBudget})`);
       invariant(diag.render.palaceOrnaments === 0,
@@ -211,7 +242,20 @@ try {
       //   계측 주의: 같은 실험을 `woodBoard`로 하면 콜이 움직이지 않는다 — 맞배 부속 전각이
       //   이미 그리는 재질이라 새 그룹이 아니다. "새 재질 = +2콜"은 재질 목록이 아니라
       //   그 경내가 실제로 그리는 집합을 기준으로 판단해야 한다.
-      if (merged) invariant(diag.render.calls <= 142, `${label}: ${diag.render.calls} merged draw calls exceed 142`);
+      // 병합 콜 상한 142 → 147 (2026-08-05, 중층 주불전).
+      //   판정 근거: 대찰 주불전을 중층으로 올리면 상층 창호 클론이 재질군 3개를 더한다
+      //   (위 재질 상한 주석). 정당한 파생: 재질군 하나의 실측 비용은 정확히 2콜
+      //   (컬러 패스 1 + 그림자 패스 1)이므로 3 × 2 = +6, 즉 142 + 6 = 148 이 아니라
+      //   **실측 최대값 147**(extended:flat)을 쓴다 — 종전 최대 141 이 147 이 된 것이고
+      //   여유분 1콜은 남기지 않는다.
+      //   실측(Chrome/M1 Pro, 2026-08-05): compact 99 불변(중층 아님) ·
+      //   courtyard flat 115 / mountain 113 불변(중층 아님) ·
+      //   extended flat 141 → 147 · extended mountain 137 → 143. programs 7 불변.
+      //   FAIL-first: 상한을 종전 142 로 두면 extended:flat 147 이 이 단언을 실제로 깬다
+      //   (이 라운드에서 직접 확인 — 그 실행에서 재질 상한 72 도 73 으로 함께 깨졌다).
+      //   계측 주의: 제품 경로는 mountain(143)이고 flat 은 표준 하네스 경로다. 상한은 둘 중
+      //   큰 값을 쓴다 — flat 만 재던 종전 게이트로는 제품 경로를 재지 못했다.
+      if (merged) invariant(diag.render.calls <= 147, `${label}: ${diag.render.calls} merged draw calls exceed 147`);
       console.log(`${label.padEnd(26)} calls=${String(diag.render.calls).padStart(4)}`
         + ` tris=${diag.render.triangles} programs=${diag.render.programs} materials=${diag.render.materials}`
         + ` tiers=${diag.terraces?.tierCount ?? '-'}`);

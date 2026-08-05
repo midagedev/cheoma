@@ -23,8 +23,10 @@ import {
   templeHallPlaquePlan,
   templePlanIssues,
   templeRoleArchitecture,
+  templeUpperStoreyPreset,
   templeVariantsForSize,
 } from '../src/api/temple-plan.js';
+import { computeLayout } from '../src/params.js';
 import { planVillage } from '../src/api/village-plan.js';
 
 const repoFile = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -239,6 +241,64 @@ function assertTerraces(plan, label) {
   }
 }
 
+// ── 중층(重層) 주불전 (2026-08-05, 실측 갭 ⑤) ────────────────────────────────────
+// 사료: 금강산 장안사 대웅보전은 중층이라 가람의 정점이 확실하다. 종전 주불전은 단층
+// (전체 12.59m)이라 부속(9.46m)과의 차가 1.33배뿐이었고, 이제 17.85m = 1.89배다.
+// 중층은 **대찰(extended)의 주불전만** — repertoire 항목으로 넣으면 해시 재추첨으로 모든
+// 절의 주불전 형식이 바뀌고, 중층은 어느 산사에나 있는 형식이 아니다.
+// 아래 네 관계는 전부 물리적이며, 깨지면 상층이 하층 지붕을 뚫거나 공중에 뜬다.
+//   FAIL-first: `applyTwoStoreyPrincipal()` 을 no-op 으로 되돌리면 extended 케이스가
+//   'principal hall is not two-storey' 에서 실제로 깨진다(이 라운드에서 직접 확인).
+function assertPrincipalStoreys(plan, label) {
+  const main = plan.buildings.find((building) => building.role === 'main-hall');
+  if (plan.variant !== 'extended') {
+    invariant(!main.upperStorey && (main.storeys ?? 1) === 1,
+      `${label}: only a 대찰 principal hall may be two-storey`);
+    return;
+  }
+  const upper = main.upperStorey;
+  invariant(upper && main.storeys === 2,
+    `${label}: principal hall is not two-storey`);
+  // ① 상층 칸수는 하층보다 줄어든다(상층 기둥이 하층 내부 기둥 위에 선다).
+  invariant(upper.frontBays < main.frontBays && upper.sideBays < main.sideBays
+    && upper.frontBays >= 3 && upper.sideBays >= 2,
+  `${label}: upper storey bays ${upper.frontBays}x${upper.sideBays} did not step in from`
+    + ` ${main.frontBays}x${main.sideBays}`);
+  // ② 상층 층고는 하층보다 낮다.
+  invariant(upper.columnHeight > 0 && upper.columnHeight < main.massingGrammar.columnHeight,
+    `${label}: upper storey column height ${upper.columnHeight} is not below the lower storey`);
+  // ③ 상층 기단은 없다 — 하층 구조 위에 앉으므로.
+  invariant(upper.podiumTiers === 0, `${label}: upper storey grew its own podium`);
+  const lower = computeLayout(templeHallBuilderPreset(main));
+  const above = computeLayout(templeUpperStoreyPreset(main));
+  // ④ 상층 처마가 하층 처마 안쪽에 들어와야 하층 지붕면이 상층 둘레로 보인다.
+  invariant(above.xEave < lower.xEave - 0.4 && above.zEave < lower.zEave - 0.4,
+    `${label}: upper eave ${above.xEave.toFixed(2)}/${above.zEave.toFixed(2)} escapes the lower`
+    + ` eave ${lower.xEave.toFixed(2)}/${lower.zEave.toFixed(2)}`);
+  // ⑤ 앉힘은 하층 용마루 아래·처마 안쪽 높이 사이. 용마루선 위면 상층 옆구리 밑에 빈틈이
+  //    보이고, 처마 안쪽 높이보다 낮으면 상층이 하층 지붕에 삼켜진다.
+  invariant(upper.seatY < lower.ridgeY && upper.seatY > lower.eaveInnerY,
+    `${label}: upper storey seat ${upper.seatY} outside the lower roof band`
+    + ` (${lower.eaveInnerY.toFixed(2)}, ${lower.ridgeY.toFixed(2)})`);
+  // ⑥ 저장된 유도 근거가 실제 layout 과 일치한다(플랜이 렌더러와 다른 층고를 말하지 않게).
+  invariant(Math.abs(upper.lowerRidgeY - lower.ridgeY) < 0.002
+    && Math.abs(upper.lowerEaveInnerY - lower.eaveInnerY) < 0.002,
+  `${label}: stored two-storey derivation drifted from the builder layout`);
+  // ⑦ 가람의 정점: 중층 주불전은 어느 부속보다 확실히 높다.
+  const scale = main.scale || 1;
+  const principalTop = (upper.seatY + above.totalH) * scale + (main.elevation || 0);
+  let tallestOther = 0;
+  for (const building of plan.buildings) {
+    if (building.id === main.id) continue;
+    const height = computeLayout(templeHallBuilderPreset(building)).totalH
+      * (building.scale || 1) + (building.elevation || 0);
+    tallestOther = Math.max(tallestOther, height);
+  }
+  invariant(principalTop > tallestOther * 1.6,
+    `${label}: principal hall ${principalTop.toFixed(2)}m is not the clear apex over`
+    + ` ${tallestOther.toFixed(2)}m`);
+}
+
 function assertLocalPlan(plan, label) {
   const spec = TEMPLE_VARIANT_SPECS[plan.variant];
   invariant(plan.schemaVersion === TEMPLE_PLAN_SCHEMA_VERSION, `${label}: wrong schema version`);
@@ -297,6 +357,7 @@ function assertLocalPlan(plan, label) {
   assertHallPlaques(plan, label);
   assertGathering(plan, label);
   assertTerraces(plan, label);
+  assertPrincipalStoreys(plan, label);
   const issues = templePlanIssues(plan);
   invariant(!issues.length, `${label}: ${issues.join('; ')}`);
 
