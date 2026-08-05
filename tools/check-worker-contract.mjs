@@ -459,7 +459,20 @@ const expectedSceneHashes = {
   //   _templeTwoStoreyPrincipalRebaseline 참조.
   //   ※ 다음 라운드의 before 기준: objects 594 / 3,161 / 2,189 / 5,053 ·
   //      triangles 2,207,351 / 4,945,937 / 5,624,016 / 25,246,684.
-  capital: '7be3b811:b4b61745:d62f1532:5667acf1',
+  // 중층 비례 개정(2026-08-05, 사용자 판정 "2층짜리 좀 보기 어색한데" → A안 유지+비례 수정):
+  //   상층 columnHeightRatio 0.70 → 0.45, 상층 벽 창호 띠(wallWindowFrac 0.5 — buildWalls
+  //   winFrac 번역). 현존 중층 불전(각황전·무량사 극락전·금산사 미륵전)의 상층은 '두 지붕
+  //   사이의 창호 띠'로 읽히는 높이이고, 0.70 은 하층의 축소 복제(2층 누각)로 읽혔다.
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-05)**: extended 두 씬(capital·hanyang)만
+  //   이동하고 village/town/mja/snapshot 은 같은 실행에서 바이트 동일. objects·triangles 는
+  //   네 씬 전부 **완전 불변**(594/2,207,351 · 3,161/4,945,937 · 2,188/5,624,016 ·
+  //   5,054/25,192,744) — 노드·삼각형이 아니라 상층 정점 좌표(층고·벽/창 분할)만 바뀐 변경.
+  //   proxy 네 개 불변(c9575cad / 25498dcf / 77c8d724 / 73409390) — 상층은 여전히 하층 처마
+  //   안이라 지붕 OBB·focus 해 무이동. 계획 골든은 extended 두 케이스만 +21B(upperStorey
+  //   record) — tools/plan-contract.json _templeTwoStoreyProportionRebaseline 참조.
+  //   시각 확인: scratch/compare-refs/renders/t2s-c-close.png. 직전 값(폐기):
+  //   capital 7be3b811:b4b61745:d62f1532:5667acf1 · hanyang bdbf88b0:dd432564:0c403497:12a64fda.
+  capital: 'e100203b:806215fd:ab224d0d:992efbef',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -581,7 +594,7 @@ const expectedSceneHashes = {
   //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
   // 2026-08-05 주불전 무자 현판 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
   //   (proxy 불변 · 절 없는 케이스 바이트 동일 · triangles 정확히 +60 · objects +1).
-  hanyang: 'bdbf88b0:dd432564:0c403497:12a64fda',
+  hanyang: '951e533d:4180eee3:5c21d00b:60ef4beb',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

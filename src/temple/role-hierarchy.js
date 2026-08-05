@@ -365,8 +365,13 @@ const TWO_STOREY_UPPER = Object.freeze({
   sideBayReduction: 1,
   minFrontBays: 3,
   minSideBays: 2,
-  // 상층 층고는 하층보다 낮다.
-  columnHeightRatio: 0.70,
+  // 상층 층고는 하층보다 **훨씬** 낮다. 0.70 은 상층이 하층의 축소 복제(2층 누각)로 읽혔다
+  // (2026-08-05 사용자 판정 "2층짜리 좀 보기 어색한데"). 현존 중층 불전 — 화엄사 각황전·
+  // 무량사 극락전·금산사 미륵전 — 의 상층 몸체는 '두 지붕 사이의 창호 띠'로 읽히는 높이다.
+  columnHeightRatio: 0.45,
+  // 같은 판정의 두 번째 축: 상층 벽은 하층과 같은 황토벽 위주가 아니라 창호가 우세한 띠다.
+  // buildWalls 의 협칸 상부 창 높이 비율(winFrac)로 번역된다 — 하층 협칸 0.34 대비 0.5.
+  wallWindowFrac: 0.5,
   // 상층 몸체를 하층 지붕 곡면에 물리는 깊이 — 하층 낙차(ridgeY − eaveInnerY)의 비율.
   // 0 이면 용마루선에 얹혀 상층 옆구리 밑에 빈틈이 보이고, 너무 크면 하층 지붕이 삼켜진다.
   seatDropRatio: 0.32,
@@ -393,6 +398,7 @@ export function templeUpperStoreySpec(building) {
     columnHeight: round(building.massingGrammar.columnHeight * TWO_STOREY_UPPER.columnHeightRatio),
     podiumTiers: 0,
     seatDropRatio: TWO_STOREY_UPPER.seatDropRatio,
+    wallWindowFrac: TWO_STOREY_UPPER.wallWindowFrac,
   };
 }
 
@@ -405,6 +411,8 @@ export function templeUpperStoreyPreset(building) {
     sideBays: upper.sideBays,
     columnHeight: upper.columnHeight,
     podiumTiers: upper.podiumTiers,
+    // 저장된 플랜에 wallWindowFrac 이 없으면(스펙 개정 전 레코드) 현행 상수로 보충한다.
+    wallWinFrac: upper.wallWindowFrac ?? TWO_STOREY_UPPER.wallWindowFrac,
   };
 }
 

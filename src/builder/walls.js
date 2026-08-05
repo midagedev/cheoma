@@ -91,7 +91,9 @@ export function buildWalls(P, L, M) {
   };
 
   // 회벽/황토벽(하부) + 중방 + 광창/살창(상부). winFrac: 상부 창 높이 비율.
-  const sideWall = (cx, cz, w, rotY, winMat, placement, seed, winFrac = 0.30) => {
+  // P.wallWinFrac: 호출측 프리셋이 전 벽면의 창 비율을 올릴 때(중층 주불전 상층의 창호 띠 —
+  // temple/role-hierarchy.js TWO_STOREY_UPPER). 미지정이면 종전 기본값 그대로.
+  const sideWall = (cx, cz, w, rotY, winMat, placement, seed, winFrac = P.wallWinFrac ?? 0.30) => {
     const wallFrac = 1 - winFrac - 0.08;
     const wall = new THREE.Mesh(new THREE.BoxGeometry(w, H * wallFrac, T), M.plaster);
     wall.position.set(cx, y0 + H * wallFrac / 2, cz);
@@ -134,7 +136,7 @@ export function buildWalls(P, L, M) {
     } else {
       sideWall(cx, zF, w, 0, winMat, {
         tangent: { x: 1, z: 0 }, outward: { x: 0, z: 1 },
-      }, `${P.style}:${P.seed ?? 0}:front:${i}`, 0.34); // 협칸: 흙벽 + 살창
+      }, `${P.style}:${P.seed ?? 0}:front:${i}`, P.wallWinFrac ?? 0.34); // 협칸: 흙벽 + 살창
     }
   }
 
