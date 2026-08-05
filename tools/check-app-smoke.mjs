@@ -1663,6 +1663,20 @@ try {
     const sheet = document.querySelector('.sheet.context');
     return sheet && sheet.getBoundingClientRect().top < innerHeight * 0.6;
   }, null, { timeout });
+  // 2026-08-05: the sheet folds the building picker behind a header toggle so the
+  // scroll window opens on parameters (사용자 지적 "파라미터가 거의 안 보여" — 종전에는
+  // half 시트 426px 중 200px 이 크롬이고 최상단 가시 파라미터가 0개였다). The layout
+  // assertions below are unchanged; the gate now drives the affordance that reveals it,
+  // and additionally requires that the toggle exists and works on a sheet.
+  const sheetNavToggle = contextSheet.locator('[data-action="sheet-nav"]');
+  const sheetNavToggleCount = await sheetNavToggle.count();
+  pass(sheetNavToggleCount === 1,
+    `mobile sheet exposes exactly one building-picker fold toggle (${sheetNavToggleCount})`);
+  const navHiddenBeforeToggle = await page.evaluate(() => !document.querySelector('[data-building-navigation]'));
+  pass(navHiddenBeforeToggle,
+    'mobile sheet keeps the building picker folded until its toggle is pressed');
+  await sheetNavToggle.press('Enter');
+  await page.waitForSelector('[data-building-navigation]', { timeout });
   const mobileNavigationLayout = await buildingNavigation.evaluate((navigation) => {
     const rect = navigation.getBoundingClientRect();
     const sheet = navigation.closest('.sheet')?.getBoundingClientRect();

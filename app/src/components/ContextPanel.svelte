@@ -262,6 +262,18 @@
 
   // ── 파라미터 검색(결함 4) — 라벨/키 부분일치. 빈 질의는 아무것도 숨기지 않는다. ──
   let query = $state('');
+  // 시트에서는 검색 필드·건물 선택자·환경 다이얼이 헤더 토글 뒤에 접혀 있다.
+  //   근거(2026-08-05 실측): iPhone 393×852 세로에서 half 시트는 426px 인데 그 중 200px(47%)이
+  //   크롬이라 스크롤 창이 226px 뿐이었고, 스크롤 최상단에 **편집 파라미터가 0개** 보였다
+  //   (`scratch/mobile-panel/before/REPORT.json`). 파라미터가 창의 첫 화면을 차지하는 것이
+  //   시트 레이아웃의 기본값이어야 한다.
+  let searchOpen = $state(false);
+  let navOpen = $state(false);
+  let envOpen = $state(false);
+  $effect(() => {
+    if (device.sheet) return;
+    searchOpen = false; navOpen = false; envOpen = false;
+  });
   const q = $derived(query.trim().toLowerCase());
   const fieldMatches = (f) => !q
     || t('s_' + f.key).toLowerCase().includes(q)
@@ -441,9 +453,12 @@
 >
   <!-- Building picker leads the scrolled column: it is the keyboard route into a
        selection, and the sheet layout needs its height inside the scroll window
-       (check:ui-shell measures visible scroll, not the header block). -->
-  {#if navigationGroups.length}
-    <div class="buildingnav" data-building-navigation>
+       (check:ui-shell measures visible scroll, not the header block).
+       On a sheet it is collapsed behind the header caret for the same budget reason
+       as the search field — the docking bar already names the selection, so the
+       picker is a navigation affordance, not a permanent readout. -->
+  {#if navigationGroups.length && (!device.sheet || navOpen)}
+    <div class="buildingnav" class:sheetnav={device.sheet} data-building-navigation>
       <label class="cad-sr" for="building-navigation">{t('nav_building')}</label>
       <div class="navcontrols">
         <!-- Native select: app-smoke / keyboard nav contract (#114, #158 P8). -->
@@ -485,21 +500,41 @@
   {/if}
 
   <!-- Parameter filter. Empty query hides nothing, so the CAD column still opens
-       with the full lever set (check:ui-shell counts every group body). -->
-  <div class="psearchrow">
-    <input
-      class="psearch"
-      type="search"
-      bind:value={query}
-      placeholder={t('param_search')}
-      aria-label={t('param_search')}
-    />
-  </div>
+       with the full lever set (check:ui-shell counts every group body).
+       Sheet layouts collapse this behind the header magnifier: on a 393px phone the
+       scroll window is ~226px, so a permanent 60px search field costs 1.5 of the
+       ~5 visible parameter rows (2026-08-05 사용자 지적 "파라미터가 거의 안 보여"). -->
+  {#if !device.sheet || searchOpen}
+    <div class="psearchrow" class:sheetsearch={device.sheet}>
+      <input
+        class="psearch"
+        type="search"
+        bind:value={query}
+        placeholder={t('param_search')}
+        aria-label={t('param_search')}
+      />
+    </div>
+  {/if}
 
   <!-- Environment — dense CAD rows in the inspector (class .dial keeps gate hooks). -->
   <section class="dial envblock" aria-label={t('axis_view')}>
-    <div class="advtoggle group static envhead">
-      <span class="gname">{t('axis_view')}</span>
+    <div class="advtoggle group static envhead" class:foldable={device.sheet}>
+      {#if device.sheet}
+        <!-- On a sheet the environment dial is a foldable group like every other:
+             three segmented rows are 200px, which is the whole visible parameter
+             window on a phone. Desktop keeps it always open (it has the height). -->
+        <button
+          type="button"
+          class="gname envfold"
+          aria-expanded={envOpen ? 'true' : 'false'}
+          onclick={() => { envOpen = !envOpen; }}
+        >
+          <span class="envcaret" class:open={envOpen} aria-hidden="true"></span>
+          {t('axis_view')}
+        </button>
+      {:else}
+        <span class="gname">{t('axis_view')}</span>
+      {/if}
       <!-- Mono line icons on the same stroke as the tool row. These used to be a
            colour orb and a half-disc, which made the environment header the most
            saturated block in the panel outside the CTA. The tone / flow identity
@@ -534,7 +569,7 @@
         </button>
       </div>
     </div>
-    <div class="envbody">
+    <div class="envbody" class:envfolded={device.sheet && !envOpen}>
       <div class="row envrow">
         <span class="rl cad-label">{t('dial_time')}</span>
         <div class="cad-seg" role="group" aria-label={t('dial_time')}>
@@ -782,10 +817,44 @@
         onclick={() => onTab?.('house')}
       >{t('mode_house')}</button>
     </div>
-    {#if hasShareTools}
+    {#if hasShareTools || device.sheet}
       <!-- Native buttons: app-smoke uses focus+Enter and transient activation for share().
-           Icons + sr-only labels — the labels stay in the DOM for the gates. -->
+           Icons + sr-only labels — the labels stay in the DOM for the gates.
+           Sheet layouts append the two fold toggles (building picker, parameter search)
+           to **this** row rather than adding a second one: a new 44px header row costs
+           exactly the scroll it was meant to buy (2026-08-05 실측 chrome 200→248px). -->
       <div class="toolrow" role="group" aria-label={t('axis_share')}>
+        {#if device.sheet}
+          {#if navigationGroups.length}
+            <button
+              type="button"
+              class="tbtn"
+              class:on={navOpen}
+              data-action="sheet-nav"
+              aria-expanded={navOpen ? 'true' : 'false'}
+              aria-label={t('nav_building')}
+              title={t('nav_building')}
+              onclick={() => { navOpen = !navOpen; }}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 13.4V6.6L8 2.6l5.6 4v6.8"/><path d="M6.4 13.4V9.2h3.2v4.2"/></svg>
+              <span class="cad-sr">{t('nav_building')}</span>
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="tbtn"
+            class:on={searchOpen}
+            data-action="sheet-search"
+            aria-expanded={searchOpen ? 'true' : 'false'}
+            aria-label={t('param_search')}
+            title={t('param_search')}
+            onclick={() => { searchOpen = !searchOpen; }}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 13.6 13.6"/></svg>
+            <span class="cad-sr">{t('param_search')}</span>
+          </button>
+          <span class="toolgap" aria-hidden="true"></span>
+        {/if}
         {#if onPostcard}
           <button
             type="button"
@@ -1552,5 +1621,47 @@
     /* Secondary text links: tappable without becoming a second CTA. */
     .colophon { gap: 4px 14px; padding-top: 10px; }
     .colink { min-height: 36px; display: flex; align-items: center; font-size: 12px; }
+  }
+
+  /* ── 시트 파라미터 예산 (2026-08-05) ────────────────────────────────────────
+     iPhone 393×852 세로 half 시트 = 426px 이고, 종전에는 그 중 200px 이 크롬이라
+     스크롤 창 226px · 최상단 가시 파라미터 0개였다. 건물 선택자·검색·환경 다이얼을
+     헤더 토글 뒤로 접고, 남는 세로를 전부 파라미터 행에 준다. */
+  /* 토글은 공유 아이콘 줄에 합류한다(새 줄 금지 — 위 마크업 주석). 눌린 상태만 강조색. */
+  .toolrow .tbtn.on { border-color: var(--accent); color: var(--panel-text); }
+  /* 폴드 토글과 공유 도구를 시각적으로 가르는 여백. */
+  .toolgap { flex: 0 0 8px; }
+  /* 접혀 있던 블록이 펼쳐질 때는 스크롤 흐름의 맨 위에 얹힌다 — 파라미터를 밀어내되
+     그 상태가 사용자가 방금 누른 토글의 결과라서 예측 가능하다. */
+  .psearchrow.sheetsearch,
+  .buildingnav.sheetnav { padding-top: 2px; }
+  .envhead.foldable { cursor: pointer; }
+  .envfold {
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    min-height: 32px;
+  }
+  .envcaret {
+    width: 0;
+    height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+    opacity: 0.75;
+    transition: transform 0.14s ease;
+  }
+  .envcaret.open { transform: rotate(90deg) translateX(1px); }
+  .envbody.envfolded { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .envcaret { transition: none; }
   }
 </style>

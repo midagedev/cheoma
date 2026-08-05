@@ -98,7 +98,8 @@
     );
     /* Right only — bottom jumps with sheet detents; continuous bottom
        transitions make Playwright "stable" clicks time out. */
-    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.18s linear, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .watchgroup {
     display: flex;
@@ -157,6 +158,15 @@
       flex-wrap: nowrap;
       gap: 2px;
       padding: 3px;
+    }
+    /* The `full` detent (0.86vh, added 2026-08-05 so the whole lever list can be
+       scanned) leaves no strip above the sheet — lifting the dock there parks it
+       *inside* the panel, on top of the parameter rows. Scanning is a transient
+       state with its own close affordance, so the dock steps aside instead. */
+    :global(html:has([data-make-panel][data-snap='full'])) .actions {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(6px);
     }
   }
   @media (max-width: 430px) {

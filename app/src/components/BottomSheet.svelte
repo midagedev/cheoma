@@ -3,7 +3,7 @@
   //
   //   Desktop / tablet     : full-height right dock (.ctxcard)
   //   Landscape phone      : same right dock, thinner rail
-  //   Portrait phone       : bottom sheet (.sheet) peek / half
+  //   Portrait phone       : bottom sheet (.sheet) peek / half / full
   //
   // Detents use **visible height** so scroll content cannot leave the viewport.
   // Dock open → --inspector-w so dial / share dock / guide clear the column.
@@ -23,6 +23,13 @@
   // Expanded sheet height. 0.50 keeps ≥28% framing band (focus-framing
   // minSafeFraction). Density comes from tighter rows, not a taller sheet.
   const HALF_VH = 0.50;
+  // Third detent (2026-08-05, 사용자 지적 "모바일 편집 패널 사용감이 안 좋다 · 파라미터가
+  // 거의 안 보여"): scanning a 15-lever list through a 226px window is the complaint.
+  // `full` exists for **finding** a parameter, not for adjusting it — half stays the
+  // default so the subject keeps its framing band while a slider is being dragged.
+  // Drag-only: a tap must stay the collapse affordance (check:ui-shell contracts one
+  // tap = half), and dragging a sheet past its detent is the gesture users already try.
+  const FULL_VH = 0.86;
   let viewportH = $state(0);
   let snap = $state('hidden');
   let dragH = $state(null);
@@ -32,9 +39,10 @@
   let grip = $state(null);
 
   const halfPx = $derived(Math.round((viewportH || 0) * HALF_VH));
-  const detentH = (name) => (name === 'half' ? halfPx : peekPx);
+  const fullPx = $derived(Math.round((viewportH || 0) * FULL_VH));
+  const detentH = (name) => (name === 'full' ? fullPx : name === 'half' ? halfPx : peekPx);
   const sheetMax = $derived(dragH != null ? dragH : detentH(snap));
-  const expanded = $derived(snap === 'half');
+  const expanded = $derived(snap === 'half' || snap === 'full');
   const contentInteractive = $derived(open && (!device.sheet || expanded));
 
   // Measure the right dock and publish --inspector-w so dial / share dock / guide
@@ -120,17 +128,24 @@
     if (!dragging) return;
     const dy = e.clientY - startPY;
     movedBy = Math.max(movedBy, Math.abs(dy));
-    dragH = Math.max(peekPx, Math.min(halfPx, startH - dy));
+    dragH = Math.max(peekPx, Math.min(fullPx, startH - dy));
   }
   function up() {
     if (!dragging) return;
     dragging = false;
     const h = dragH; dragH = null;
     suppressClick = movedBy > 6;
-    snap = Math.abs(h - halfPx) <= Math.abs(h - peekPx) ? 'half' : 'peek';
+    // Nearest of the three detents by visible height.
+    const near = [['peek', peekPx], ['half', halfPx], ['full', fullPx]]
+      .reduce((best, cur) => (Math.abs(h - cur[1]) < Math.abs(h - best[1]) ? cur : best));
+    snap = near[0];
   }
   function tapGrip() {
     if (suppressClick) { suppressClick = false; return; }
+    // Tap stays a two-state toggle (peek ↔ half): "tap the bar to put the panel away"
+    // is the model, and check:ui-shell contracts one tap = half. `full` is drag-only —
+    // dragging a sheet past its detent is the gesture users already try, and making a
+    // tap land there stranded them (the collapse affordance became a third expand).
     snap = expanded ? 'peek' : 'half';
   }
 </script>

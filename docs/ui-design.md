@@ -28,8 +28,16 @@
 - **데스크톱 / 태블릿 / 가로 폰**: 우측 full-height inspector column. WebGL stage is
   physically `right: var(--inspector-w)` — the camera centres on the free canvas, not
   a `setViewOffset` past an overlay. Overlay view-shift remains only for sheet/chips.
-- **세로 폰**: 하단 sheet 2 detent(peek / half). focus-in 시 half 자동. 상한 `HALF_VH` → `--sheet-half`.
+- **세로 폰**: 하단 sheet 3 detent(peek / half / full). 탭은 peek ↔ half 토글(계약: `check:ui-shell`
+  "one grip tap = half"), **full(`FULL_VH` 0.86)은 드래그 전용**이다. 상한 `HALF_VH` → `--sheet-half`.
   Stage stays full-bleed; sheet still overlays and is measured by view-shift.
+- **시트 파라미터 예산** (2026-08-05, 사용자 지적 "모바일 편집 패널 사용감이 안 좋다 · 파라미터가
+  거의 안 보여"): iPhone 393×852 세로 half 시트 426px 중 200px(47%)이 크롬이라 스크롤 창이 226px
+  뿐이었고 **최상단 가시 파라미터가 0개**였다(실측 `scratch/mobile-panel`). 시트에서는 건물 선택자·
+  파라미터 검색을 헤더 아이콘 줄의 토글 뒤로, 환경(보기) 다이얼을 접히는 그룹으로 돌려 스크롤 창이
+  파라미터로 시작한다(콘텐츠 1264→1009px). **새 헤더 줄을 만들지 말 것** — 44px 한 줄이 벌려던
+  스크롤을 정확히 되먹는다(실측 chrome 200→248px). 결과: half 최상단 0→3행, full 0→13행(전 15행 중).
+  full 에서는 `ActionBar` 가 물러난다(그 높이에는 시트 위 여백이 없어 패널 안에 주차됐다).
 - 브레드·다이얼·독은 씬(축소된 캔버스) 위 glass chip; 만들기 패널만 opaque inspector.
 - 마우스 idle 3s → `.chroma` 페이드로 씬만 남김.
 - 판정: `ui-consolidation.md` §4 + `npm run check:ui-shell`.
