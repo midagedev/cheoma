@@ -1,9 +1,10 @@
-# 처마 (cheoma)
+# 처마 · cheoma
 
 **A procedural Joseon-era Korean village, grown from a seed — in the browser.**
-조선 전통건축(궁궐·사찰·기와집·초가)과 마을을 파라메트릭으로 생성하는 three.js 앱.
 
-**Live: [cheoma.midagedev.com](https://cheoma.midagedev.com)**
+Parametric hanok — Korean traditional architecture — and whole settlements, generated in three.js: palaces, mountain temples, tiled and thatched houses, and the terrain, walls, paddies and forests around them.
+
+**Live demo → [cheoma.midagedev.com](https://cheoma.midagedev.com)**
 
 ![cheoma — Hanyang at sunset](docs/media/hero.jpg)
 
@@ -12,37 +13,38 @@
 | ![close-up hanok courtyard](docs/media/grid-1-house.jpg) | ![parcel cluster with yard life](docs/media/grid-2-yard.jpg) |
 | ![hillside village](docs/media/grid-3-hillside.jpg) | ![palace precinct and sijeon](docs/media/grid-4-palace.jpg) |
 
-<sub>근접 한옥 마당 · 필지 무리와 마당 생활상 · 산기슭 마을 · 궁역과 시전. 종가 한 채에서 도성까지, 모두 앱의 제품 경로를 그대로 캡처한 것이다.</sub>
+<sub>A hanok courtyard up close · a parcel cluster with its yard life · a hillside village · the palace precinct and the market street. From one house to a walled capital — every frame is captured straight from the app's product path.</sub>
 
 ## Features
 
-- **파라메트릭 한옥** — 칸(間) 체계·공포·팔작지붕 곡선을 파라미터로: 지붕 물매·처마 깊이·창호·단청까지 편집
-- **마을 자동 구성** — 배산임수 지형 생성, 필지·담장·고샅, 다랑이 논·개울, 산사(山寺)
-- **규모 연속 슬라이더** — 외딴집·촌락부터 성곽 도성 한양(궁궐 다일곽·시전행랑·사대문)까지 하나의 연속체
-- **궁궐 다일곽** — 행각으로 담을 공유하는 축선 스택 (경복궁 배치 고증)
-- **시간·계절·날씨** — 골든아워 림 라이트, 눈·비, 야간 창호 불빛과 달빛. 모든 전환은 크로스페이드다
-- **focus 줌 연속체** — 부감↔근접 연속 줌, 필지별 편집·조립 애니메이션·앰비언스(닭·밥 짓는 연기·바람에 흔들리는 풀)
-- **드론 원테이크 투어** — 접근 → 골짜기 저공 → 지붕 위 활공 → 랜드마크 선회 → 능선 상승 → 귀환을 끊지 않고 잇는 한 번의 비행
-- **1인칭 도보 탐험** — WASD·방향키·드래그(모바일은 가상 조이스틱)로 고샅과 마당을 직접 걷는다
-- **마을 리롤 웨이브** — 새 시드로 다시 지을 때 지형·길·필지·숲의 세대 교체를 먹안개 베일 아래에서 한 프레임에 넘긴다
-- **glTF/GLB 내보내기** — 인스턴싱을 `EXT_mesh_gpu_instancing`으로 보존한 채 씬을 내보낸다
-- **씬 공유 URL** — 시드·규모·시간·계절·카메라가 URL에 실려, 링크 하나가 같은 장면을 그대로 재현한다
+- **Parametric hanok** — the 칸 (*kan*) bay system, bracket sets and the hip-and-gable roof curve are all parameters: roof pitch, eave depth, window lattice and 단청 polychrome are editable live.
+- **Composed villages** — 배산임수 terrain (mountain behind, water in front), parcels with mud walls and alleys, terraced paddies, a creek, and a mountain temple compound.
+- **A continuous scale slider** — one continuum from a lone farmstead through hamlet, village and town to 한양, the walled capital, with its multi-court palace, market arcades and four great gates.
+- **Multi-court palace** — axial courts stacked behind shared corridor walls, following the Gyeongbokgung layout.
+- **Gathered, terraced mountain temples** — halls packed with eaves nearly touching and ridge directions crossing, stepping down over rubble retaining terraces, with a two-storey principal hall crowning the largest compounds.
+- **Time, season, weather** — golden-hour rim light, snow and rain, lantern glow and moonlight at night. Every transition crossfades; a visible pop is treated as a bug.
+- **A focus zoom continuum** — aerial to eye level without a mode switch, with per-parcel editing, an assembly animation, and close-up ambience (chickens, kitchen smoke, grass moving in the wind).
+- **A one-take drone tour** — approach, a low pass through the valley, a glide over the rooftops, an orbit around the landmark, a ridge climb, and the return, in a single unbroken flight.
+- **First-person walking** — WASD, arrow keys and pointer-lock look (a virtual joystick on mobile) to walk the alleys and yards yourself.
+- **Reroll wave** — regenerating with a new seed hands terrain, roads, parcels and forest over to the next generation in a single frame, hidden under an ink-fog veil.
+- **glTF/GLB export** — the scene exports with instancing preserved through `EXT_mesh_gpu_instancing`.
+- **Shareable scene URLs** — seed, scale, time, season and camera all ride in the URL, so one link reproduces the exact frame.
 
 ## Technical highlights
 
-three.js로 큰 절차적 씬을 만드는 사람에게 흥미로울 만한 부분만 추렸다.
+The parts most likely to interest anyone building a large procedural scene in three.js.
 
-- **결정론 생성 + Worker 오프로드.** 마을 생성은 시드 rng를 전역 `Math.random`에 끼웠다가 되돌리는 창(window) 안에서 돈다. 비용의 대부분인 숲 배치(1.4만~4만 그루)는 Web Worker가 계산해 transferable `Float32Array` 행렬로 넘기고, 메인 스레드는 `InstancedMesh` 조립만 한다. worker 경로와 동기 경로가 **바이트 동일**한 씬을 만드는지 해시로 검사한다 → [`docs/verification.md`](docs/verification.md)
-- **드로우콜 0의 색 다양성.** 집마다 다른 부재 색은 새 재질이 아니라 `instanceColor`에 싣는다. 재질 변주는 프로그램 가족을 늘려 비싸므로, 다양성은 인스턴스 속성으로만 만든다 → [`docs/house-diversity.md`](docs/house-diversity.md)
-- **림 라이트는 스크린 스페이스 패스가 아니라 재질 프레넬 패치.** 역할 태그가 붙은 재질에 `onBeforeCompile`로 프레넬 항을 심어, 태양이 실제로 피사체 뒤에 있을 때만 테두리가 살고 정오에는 사라진다 (`src/env/rim.js`) → [`AGENTS.md`](AGENTS.md)
-- **단일 EffectComposer 체인.** Render → Grade/Rim → Bokeh → Bloom → Flare → Outline → Output. 광학 블러가 센서 블룸보다 **앞에** 오고(작은 HDR 소스가 먼저 조리개 상을 맺은 뒤 블룸이 후광을 얹는다), ACES 톤매핑과 sRGB 변환이 선형 HDR 효과 뒤에서 한 번만 일어나도록 Output이 항상 마지막이다 (`src/env/post.js`, `?post=0`으로 끌 수 있다)
-- **성능은 벽시계가 아니라 프로그램 수로 판정한다.** 전환 중 멈칫함의 정체는 CPU가 아니라 셰이더 링크 스톨이었다. 헤드리스 ANGLE은 링크를 직렬화하므로 절대 프레임 시간은 근거가 되지 않고, 대신 프로그램 수 델타와 결정론 해시를 본다. PointLight 하나를 추가·제거하면 씬 전체가 재컴파일되므로 라이트는 고정 풀로 상주시킨다 → [`docs/verification.md`](docs/verification.md), [`docs/perf-campaign.md`](docs/perf-campaign.md)
+- **Deterministic generation with a worker offload.** Village generation runs inside a window where a seeded RNG replaces the global `Math.random` and is then restored. The dominant cost — forest placement, 14k–40k trees — is computed in a Web Worker that returns transferable `Float32Array` matrices; the main thread only assembles the `InstancedMesh`. A hash gate asserts that the worker path and the synchronous path produce **byte-identical** scenes → [`docs/verification.md`](docs/verification.md)
+- **Colour variety at zero draw-call cost.** Per-house member colour rides `instanceColor`, not new materials. Material variants multiply program families and are expensive, so all variety is an instance attribute → [`docs/house-diversity.md`](docs/house-diversity.md)
+- **The rim light is a material Fresnel patch, not a screen-space pass.** A Fresnel term is injected via `onBeforeCompile` into role-tagged materials, so the outline appears only when the sun is genuinely behind the subject and vanishes at noon (`src/env/rim.js`) → [`AGENTS.md`](AGENTS.md)
+- **One EffectComposer chain.** Render → Grade/Rim → Bokeh → Bloom → Flare → Outline → Output. Optical defocus comes **before** sensor bloom (small HDR sources form the aperture image first, then bloom adds its halo), and Output stays last so ACES tone mapping and sRGB conversion happen exactly once, after the linear-HDR effects (`src/env/post.js`; `?post=0` disables it).
+- **Performance is judged by program counts, not wall clock.** Transition hitches turned out to be shader *link* stalls, not CPU. Headless ANGLE serialises linking, so absolute frame times are not evidence — program-count deltas and determinism hashes are. Adding or removing a single PointLight recompiles every lit material, so lights live in a resident fixed pool → [`docs/verification.md`](docs/verification.md), [`docs/perf-campaign.md`](docs/perf-campaign.md)
 
-시각 문법(빛·대기로 통합한 회화적 스타일라이제이션)과 고증의 기준선은 [`docs/look-grammar.md`](docs/look-grammar.md)와 [`docs/architectural-authenticity.md`](docs/architectural-authenticity.md)에 있다.
+The visual grammar (painterly stylisation unified by light and atmosphere) and the historical baseline are documented in [`docs/look-grammar.md`](docs/look-grammar.md) and [`docs/architectural-authenticity.md`](docs/architectural-authenticity.md).
 
 ## Development
 
-three.js **0.185.1** 고정, 코어는 프레임워크 무관 ES 모듈(`src/`), 앱은 Svelte 5 + Vite SPA(`app/`)다. 앱은 `src/api/`를 통해서만 코어를 소비한다.
+three.js is pinned to **0.185.1**. The core is framework-agnostic ES modules (`src/`); the app is a Svelte 5 + Vite SPA (`app/`) that consumes the core only through `src/api/`.
 
 ```bash
 cd app
@@ -51,41 +53,46 @@ npm run dev     # vite dev server (default :5173)
 npm run build   # → app/dist
 ```
 
-저장소 계약 검사는 루트에서 돌린다.
+Repository contract gates run from the root:
 
 ```bash
-npm run check       # 커밋을 막는 코어 불변식만: 아키텍처 경계 + plan 골든 + 러너 자체 검사 (~20s)
-npm run check:deep  # 순수 계약 전체 스위트(약 100개 기능 게이트) — opt-in
-npm run check:pr    # 변경 파일 라우터: 코어 + 영향받은 기능/브라우저/worker 게이트
-npm run check:app   # 전체 앱 브라우저 smoke
+npm run check       # BLOCKING core invariants only: architecture boundary + plan goldens + runner self-test (~20s)
+npm run check:deep  # the full pure suite (~100 feature gates) — opt-in
+npm run check:pr    # changed-file router: core + affected feature/browser/worker gates
+npm run check:app   # isolated full-app browser smoke
 npm run check:worker
 npm run check:all
-npm run check:full  # 머지 게이트: 전체 + DoF/LOD 앱 플로우 + 프로덕션 빌드
+npm run check:full  # merge gate: all groups + DoF/LOD app flows + a production build
 ```
 
-단위 테스트 프레임워크·린터·타입체커가 없다. 대신 검증은 **순수 노드 계약 + Playwright 시각 하네스**로 한다: `tools/*.mjs`가 각자 정적 서버를 띄우고 헤드리스 Chromium을 몰아 스크린샷과 수치를 낸다. 원인은 순수 노드에서 단언하고 브라우저는 효과 확인에만 쓴다는 것이 이 저장소의 규율이다.
+There is no unit-test framework, linter or typechecker. Verification is **pure-node contracts plus Playwright visual harnesses**: each `tools/*.mjs` spins up its own static server, drives headless Chromium, and writes screenshots and measurements. The discipline of this repository is to assert the *cause* in pure node and use the browser once to confirm the *effect*.
 
 ```bash
-npm install                   # 저장소 루트에서 1회 (Playwright는 루트 devDependency)
+npm install                   # once, at the repo root (Playwright is a root devDependency)
 node tools/shoot-<feature>.mjs
 ```
 
-일상 반복은 `npm run check:pr -- --dry-run`으로 계획을 본 뒤 `npm run check:pr`. 브라우저 게이트는 로컬에 설치된 Chrome을 우선 쓰고 실제 WebGL 렌더러를 로그에 남기며, 없으면 번들 Chromium으로 내려간다(`CHEOMA_BROWSER=chromium`으로 고정 가능).
+For everyday iteration, run `npm run check:pr -- --dry-run` to see the plan, then `npm run check:pr`. Browser gates prefer a locally installed Chrome (and log the real WebGL renderer), falling back to the bundled Chromium; pin one with `CHEOMA_BROWSER=chromium`.
 
 ## Documentation
 
-- [`AGENTS.md`](AGENTS.md) — 코드 경계, 아키텍처, 결정론·성능 불변식, 기여자/코딩 에이전트 규칙
-- [`docs/README.md`](docs/README.md) — 문서 지도와 상태 라벨(계약 / 활성 작업 / 리서치 / 스냅샷 / 완료 기록)
-- [`docs/project-status.md`](docs/project-status.md) — 프로젝트 방향과 유지해야 할 결정
-- [`docs/architecture-refactor.md`](docs/architecture-refactor.md) — 구조 분할과 재사용·경계 계약
-- [`docs/verification.md`](docs/verification.md) — 하네스 지도와 검증 함정
-- [`docs/look-grammar.md`](docs/look-grammar.md) — 목표 룩의 시각 문법
-- [`docs/architectural-authenticity.md`](docs/architectural-authenticity.md) — 고증 감사와 사실→구현 번역
+- [`AGENTS.md`](AGENTS.md) — code boundaries, architecture, determinism and performance invariants, rules for contributors and coding agents
+- [`docs/README.md`](docs/README.md) — the document map and status labels (contract / active work / research / snapshot / completed record)
+- [`docs/project-status.md`](docs/project-status.md) — project direction and the decisions that must hold
+- [`docs/architecture-refactor.md`](docs/architecture-refactor.md) — the structural split and the reuse/boundary contract
+- [`docs/verification.md`](docs/verification.md) — harness map and verification pitfalls
+- [`docs/look-grammar.md`](docs/look-grammar.md) — the visual grammar the look is judged against
+- [`docs/architectural-authenticity.md`](docs/architectural-authenticity.md) — the authenticity audit and the fact → implementation mapping
+- [`docs/temple-generator.md`](docs/temple-generator.md) — the mountain temple contract: gathered layout, terraces, the two-storey hall
 
 ## Credits & License
 
-역사·건축 근거로 삼은 실측도면·문헌·논문·사진의 출처와 "그 자료로 무엇을 구현했는가"의 매핑은 [`docs/credits.md`](docs/credits.md)에 있고, 같은 목록이 앱의 References 화면에 그대로 노출된다. cheoma는 특정 문화재의 학술적 복원이 아니라 스타일라이즈된 재해석이다.
+Sources for the measured drawings, literature, papers and photographs behind the historical and architectural decisions — together with a "what was built from this" mapping — are in [`docs/credits.md`](docs/credits.md), and the same list is surfaced in the app's References screen. cheoma is a stylised reinterpretation, not a scholarly reconstruction of any specific monument.
 
-BGM은 저장소 밖에서 Suno로 생성했고([`docs/suno-prompts.md`](docs/suno-prompts.md)), 작업에 참고한 제3자 사진 자료(`refs/`)는 배포 권한이 없어 저장소에 포함하지 않는다.
+The background music was generated outside the repository with Suno ([`docs/suno-prompts.md`](docs/suno-prompts.md)). Third-party reference photography used during development (`refs/`) is not redistributable and is therefore not included here.
 
 MIT — [`LICENSE`](LICENSE)
+
+---
+
+<sub><b>한국어</b> — 처마(cheoma)는 조선 전통건축(궁궐·사찰·기와집·초가)과 마을을 파라메트릭으로 생성하는 three.js 앱입니다. 종가 한 채에서 성곽 도성 한양까지 규모가 하나의 연속체로 이어지고, 시간·계절·날씨와 focus 줌·드론 원테이크 투어·1인칭 도보를 지원합니다. 고증 근거와 구현 매핑은 <a href="docs/architectural-authenticity.md"><code>docs/architectural-authenticity.md</code></a>, 문서 지도는 <a href="docs/README.md"><code>docs/README.md</code></a>에 있습니다.</sub>
