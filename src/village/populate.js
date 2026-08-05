@@ -482,8 +482,16 @@ export function* populateVillageSteps(plan, opts = {}) {
       materials: {
         wall: palette.mud,
         roof: palette.thatch,
-        ridge: palette.jipjul,
+        // 용마름은 전용 롤 재질(새끼줄 감김 텍스처)이다 — jipjul 은 밝은 크림이라 근접에서
+        //   용마름이 콘크리트 보처럼 튀었다(리드 판정 2026-08-05, gq v1 비전 FIX ④의 잔여).
+        ridge: palette.yongmaru,
         stone: palette.fieldstone,
+        // 선택 역할: 렌더러가 이 둘을 받으면 기둥·거적문을 목재로 그리고, 없으면 흙벽·볏짚으로
+        //   폴백한다. 목재를 넣는 이유는 스케일 기준물이다 — 개구부·기둥이 없으면 부속채가
+        //   "헛간 한 급 아래"가 아니라 큰 창고로 읽혔다(gq v1 비전 Q3). 병합 콜 +2(4→6),
+        //   한양 실측 여유(505~682 / 천장 1000) 안이다.
+        post: palette.wood,
+        door: palette.woodDark,
       },
     }));
   }
