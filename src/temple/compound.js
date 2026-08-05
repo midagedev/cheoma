@@ -19,7 +19,8 @@ import {
   disposeObjectResources,
 } from '../core/three-resources.js';
 import { normalizeTemplePlan, planTempleCompound } from './plan.js';
-import { templeHallBuilderParams } from './role-hierarchy.js';
+import { templeHallBuilderPreset } from './role-hierarchy.js';
+import { templeHallPlaquePlan } from './plaque-plan.js';
 
 const lifecycle = new WeakMap();
 
@@ -70,13 +71,6 @@ function polygonMesh(polygon, material, y, name) {
 }
 
 function hallPreset(spec, seed, mats) {
-  const architecture = {
-    architecturalRank: spec.architecturalRank,
-    roofGrammar: spec.roofGrammar,
-    bracketGrammar: spec.bracketGrammar,
-    eaveGrammar: spec.eaveGrammar,
-    massingGrammar: spec.massingGrammar,
-  };
   const passUnder = spec.passUnder?.openLower
     ? {
       openLowerCorridor: true,
@@ -85,16 +79,55 @@ function hallPreset(spec, seed, mats) {
     }
     : null;
   return {
-    ...PRESETS.temple,
-    ...templeHallBuilderParams(architecture),
+    // One owner for the preset composition (role-hierarchy.js): the pure plaque
+    // planner resolves its layout landmarks from the same call.
+    ...templeHallBuilderPreset(spec),
     seed,
     mats,
-    frontBays: spec.frontBays,
-    sideBays: spec.sideBays,
     // 누하: raised hall with an open lower corridor — no palace ornaments, same
     // temple palette, walls omitted so the processional axis walks through.
     ...(passUnder || {}),
   };
+}
+
+// 현판: 무자 바탕판 + 밝은 테두리 몰딩. Both materials are borrowed from the hall's
+// own palette — no plaque-local material, texture, clone, or program family.
+//   바탕 `planwall`(판벽, 0x4a3a28): 어두운 널 + **metalness 0**. 종전 `hardware`(창호 철물)는
+//   병합 그룹이 늘지 않는 대신 metalness 0.42를 함께 차입했고, 환경맵이 없는 처마 그늘에서는
+//   스페큘러 이득 0 · 디퓨즈 −42% 순손실이라 판 내부가 계조 없는 검은 클램프로 떨어졌다
+//   (2026-08-05 비전 FIX: "현판이 아니라 구멍"). 판벽은 의미도 맞고 metalness도 0이므로
+//   재질을 clone·변형하지 않고 교체만으로 닫힌다 — 대가는 병합 그룹 +1(§8.3).
+//   몰딩 `wood`(백골): 주불전이 이미 그리는 재질이라 +0.
+// Geometry only — no glyphs (see plaque-plan.js).
+function buildHallPlaque(plaque, mats) {
+  const { board, molding } = plaque;
+  const group = new THREE.Group();
+  group.name = 'hall-plaque';
+  group.userData.templePlaque = plaque;
+  const railDepth = board.thickness + molding.proud;
+  const railZ = molding.proud / 2;
+  const panel = new THREE.Mesh(
+    new THREE.BoxGeometry(board.width, board.height, board.thickness),
+    mats.planwall,
+  );
+  panel.name = 'plaque-board';
+  group.add(panel);
+  const innerHeight = Math.max(0.02, board.height - molding.rail * 2);
+  const rails = [
+    ['plaque-molding-top', board.width, molding.rail, 0, (board.height - molding.rail) / 2],
+    ['plaque-molding-bottom', board.width, molding.rail, 0, -(board.height - molding.rail) / 2],
+    ['plaque-molding-left', molding.rail, innerHeight, -(board.width - molding.rail) / 2, 0],
+    ['plaque-molding-right', molding.rail, innerHeight, (board.width - molding.rail) / 2, 0],
+  ];
+  for (const [name, width, height, x, y] of rails) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(width, height, railDepth), mats.wood);
+    rail.name = name;
+    rail.position.set(x, y, railZ);
+    group.add(rail);
+  }
+  for (const mesh of group.children) mesh.castShadow = true;
+  group.position.set(plaque.local.x, plaque.local.y, plaque.local.z);
+  return group;
 }
 
 function buildHall(spec, seed, mats) {
@@ -115,6 +148,13 @@ function buildHall(spec, seed, mats) {
     bracketGrammar: spec.bracketGrammar,
     eaveGrammar: spec.eaveGrammar,
   };
+  // 현판은 주불전(유일한 rank-4 전각)에만. plan-owned 기하를 그대로 소비하고, 전각 그룹의
+  // 자식이므로 yaw·scale·에이프런 리프트를 함께 받는다.
+  const plaque = templeHallPlaquePlan(spec);
+  if (plaque) {
+    building.add(buildHallPlaque(plaque, mats));
+    building.userData.templePlaque = plaque;
+  }
   if (spec.passUnder?.openLower) {
     building.userData.templePassUnder = {
       openLower: true,

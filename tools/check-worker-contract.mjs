@@ -342,9 +342,27 @@ const expectedSceneHashes = {
   //   ※ 같은 재기준에 세 라운드가 함께 들어간다(변인 하나 원칙의 예외 — 각 몫은 라운드별로
   //   순수 노드 실측됨): 문루 지붕 곡률·종물·현판 +14,464 · 시전 파사드 v4 지붕 +58,132 ·
   //   에이프런 hanyang +7,282. hanyang triangles 25,240,992 → 25,313,712.
-  village: '648e58b5:aaaff1c9:b1618dd4:11ca6d8d',
-  town: '53e0e856:3a0ca870:220b65c8:ec5cfce6',
-  capital: 'e6187d2b:465b2043:0ae3c17b:f900c767',
+  // 주불전 무자 현판(2026-08-05, #55 선행): 사료 사진의 사찰 주불전 어칸 처마 밑에 걸린 편액이
+  //   cheoma 전각에는 비어 있었다. 순수 `src/temple/plaque-plan.js`가 판·몰딩 기하를 소유하고
+  //   renderer 는 그 기록만 소비한다(글자 없음). 최초 구현이 차입한 `hardware`의 metalness 0.42 가
+  //   환경맵 없는 처마 그늘에서 순손실이라 판이 검은 구멍으로 읽혔고, 무광 `planwall`로 교체했다
+  //   (docs/temple-generator.md §8.3).
+  //   **단독 변인 증거(재기준 직전 실측 2026-08-05)**: ① proxy 네 규모 전부 불변(fef7a386 /
+  //   3f7f776c / 046ecd22 / 395b740a) — 계획·픽킹·구도 해 무이동. ② `includeTemple:false` 케이스
+  //   (mja optin 21776e5b / snapshot 425e3cda)가 해시·proxy·payload 까지 바이트 동일 — 이동한 것은
+  //   절을 품은 씬 넷뿐이다. ③ 순수 노드 실측(esbuild alias 하네스): compact/courtyard/extended
+  //   전부 현판 그룹 **정확히 1개 · mesh 5 · 삼각형 60 · 차입 재질 2종(4a3a28 판벽 · 87703f 백골,
+  //   metalness 0/0)** — 새 재질·텍스처·clone 0. ④ hanyang triangles 25,313,712 → 25,313,772 =
+  //   **정확히 +60**, 즉 경내마다 현판 하나가 도달했고 그 이상은 없다. objects 5,050 → 5,051 =
+  //   +1(신규 `planwall` 병합 그룹 메시 1개)이고, 이는 같은 라운드 `check:temple:browser` 실측
+  //   병합 콜 +2(컬러 1 + 그림자 1)와 같은 몫이다(compact 97→99 · courtyard 113→115 ·
+  //   extended 139→141, programs 7 불변). ⑤ sync == 실제 module Worker == `?worker=0` 폴백
+  //   세 경로 바이트 동일. plan 골든은 불변 — 현판은 plan 저장 필드가 아니라 grammar 파생 기록이다.
+  //   ※ village/town/capital 의 재기준 직전 절대값(다음 라운드의 before 기준): objects
+  //   595 / 3,162 / 2,187 · triangles 2,285,483 / 5,026,917 / 5,665,328.
+  village: '9592c653:c9addc61:bb47935e:2e71bd5b',
+  town: '451593a6:f16b3958:6de795c5:f29db3e4',
+  capital: '86bb596d:7e01562f:9477f24f:10fc515b',
   // R3-A(2026-07-31): 성문·성곽 형태 격상(#19) — 홍예 개구(비 0.20)·여장 톱니+총안(494+90타)·
   //   성벽 2켜 석재 위계·배터 육축+코니스·중층 문루. 성곽은 한양 전용이라 hanyang 해시만 이동
   //   (village/town/capital/mja/snapshot 골든 불변이 증거). proxy 0ee8aaee 불변 = 픽킹·편집 불침해.
@@ -464,7 +482,9 @@ const expectedSceneHashes = {
   //   FAIL-first: tools/check-gate-quarter.mjs no-band 변형 1건·crowd-wall 29건·forecourt 48건 실패.
   // 2026-08-05 합산 재기준 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
   //   (문루 지붕 v2 + 시전 파사드 v4 + 밴드 리듬 v2 + 지면 접합 에이프런 v3).
-  hanyang: '4b5ec61a:adcdb27a:c65582b5:e1916b92',
+  // 2026-08-05 주불전 무자 현판 — 근거·분해는 위 expectedSceneHashes 의 village 절 주석 참조
+  //   (proxy 불변 · 절 없는 케이스 바이트 동일 · triangles 정확히 +60 · objects +1).
+  hanyang: '440deb11:41500f85:62850005:48060ebb',
 };
 const expectedProxyHashes = {
   // #22 visibility uses #8's fitted roof OBBs plus planned feature blockers.

@@ -5,6 +5,7 @@ import {
   disposeTempleCompound,
   normalizeTemplePlan,
   planTempleCompound,
+  templeHallPlaquePlan,
   templePlanIssues,
 } from '../src/api/temple.js';
 import { templeCameraFraming } from '../src/runtime/village/picking.js';
@@ -71,6 +72,47 @@ const hallBounds = plan.buildings.map((spec) => {
     },
   };
 });
+// 현판: rendered geometry vs the plan-owned record. Measured on the unmerged
+// compound so the merged budget run reports the same placement evidence.
+const plaqueRecords = [];
+compound.traverse((object) => {
+  if (object.name === 'hall-plaque') plaqueRecords.push(object);
+});
+const plaques = plaqueRecords.map((group) => {
+  const host = group.parent;
+  const plan = group.userData.templePlaque;
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const board = group.getObjectByName('plaque-board');
+  const rail = group.getObjectByName('plaque-molding-top');
+  const hostMats = host.userData.materials;
+  const front = new THREE.Vector3(0, 0, 1).applyQuaternion(host.getWorldQuaternion(new THREE.Quaternion()));
+  const center = box.getCenter(new THREE.Vector3());
+  const hostCenter = host.getWorldPosition(new THREE.Vector3());
+  return {
+    hostId: host.userData.templeId,
+    hostRole: host.userData.templeRole,
+    hostRank: host.userData.templeArchitecture?.architecturalRank,
+    lettering: plan?.lettering || null,
+    meshes: group.children.length,
+    // Same-side test: the plaque must sit on the hall's front (south) face.
+    frontDot: +front.dot(center.clone().sub(hostCenter)).toFixed(3),
+    world: { width: +size.x.toFixed(3), height: +size.y.toFixed(3), depth: +size.z.toFixed(3) },
+    plannedWorld: plan ? { width: +plan.world.width.toFixed(3), height: +plan.world.height.toFixed(3) } : null,
+    // Local-space band, so the assertion is scale- and placement-independent.
+    localTopY: plan ? +plan.topY.toFixed(3) : null,
+    localBottomY: plan ? +plan.bottomY.toFixed(3) : null,
+    bracketBaseY: plan ? +plan.band.bracketBaseY.toFixed(3) : null,
+    columnTopY: plan ? +plan.band.columnTopY.toFixed(3) : null,
+    eaveEdgeY: plan ? +plan.band.eaveEdgeY.toFixed(3) : null,
+    borrowedBoard: !!hostMats && board?.material === hostMats.planwall,
+    borrowedMolding: !!hostMats && rail?.material === hostMats.wood,
+    ownTexture: !!board?.material?.map,
+    // 환경맵 없는 처마 그늘에서 metalness는 디퓨즈 순손실이다 (2026-08-05 비전 FIX).
+    boardMetalness: board?.material?.metalness ?? null,
+    moldingMetalness: rail?.material?.metalness ?? null,
+  };
+});
 const renderRoot = merged ? mergeStatic([compound], 'temple-viewer-merged') : compound;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc7d1d7);
@@ -133,7 +175,27 @@ if (debug && plan.solarAccess) {
 
 const camera = new THREE.PerspectiveCamera(34, innerWidth / innerHeight, 0.1, 500);
 const view = query.get('view') || 'focus';
-if (view === 'aerial') {
+// `view=plaque`: close front elevation of the principal hall's 어칸 현판 band. The
+// framing is derived from the plan record (not the built mesh) so a capture taken
+// before the plaque exists uses the identical camera.
+let viewTarget = null;
+if (view === 'plaque') {
+  const host = compound.getObjectByName(`temple-${plan.buildings.find(
+    (building) => building.architecturalRank === 4,
+  ).id}`);
+  const record = templeHallPlaquePlan(plan.buildings.find(
+    (building) => building.architecturalRank === 4,
+  ));
+  host.updateMatrixWorld(true);
+  viewTarget = new THREE.Vector3(record.local.x, record.local.y, record.local.z)
+    .applyMatrix4(host.matrixWorld);
+  const front = new THREE.Vector3(0, 0, 1)
+    .applyQuaternion(host.getWorldQuaternion(new THREE.Quaternion())).normalize();
+  camera.fov = 22;
+  camera.position.copy(viewTarget).addScaledVector(front, 15);
+  camera.position.y = viewTarget.y + 1.1;
+  camera.lookAt(viewTarget);
+} else if (view === 'aerial') {
   camera.fov = 40;
   camera.position.set(plan.width * 0.58, plan.depth * 0.92, plan.depth * 0.88);
   camera.lookAt(0, 2.6, -plan.depth * 0.05);
@@ -146,7 +208,8 @@ if (view === 'aerial') {
 camera.updateProjectionMatrix();
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.target.set(0, 3, -plan.depth * 0.04);
+if (viewTarget) controls.target.copy(viewTarget);
+else controls.target.set(0, 3, -plan.depth * 0.04);
 controls.update();
 
 const bounds = new THREE.Box3().setFromObject(renderRoot);
@@ -187,6 +250,30 @@ renderRoot.traverse((object) => {
   for (const material of current) if (material?.isMaterial) materials.add(material);
   if (object.name === 'palace-japsang' || object.name === 'palace-chwidu') palaceOrnaments++;
 });
+// Exact screen rect of each plaque board, so a pixel probe can sample the board
+// interior instead of guessing an inset from a diff bounding box.
+camera.updateMatrixWorld(true);
+for (const [index, group] of plaqueRecords.entries()) {
+  const board = group.getObjectByName('plaque-board');
+  board.updateMatrixWorld(true);
+  const local = new THREE.Box3().setFromBufferAttribute(board.geometry.attributes.position);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const cx of [local.min.x, local.max.x]) {
+    for (const cy of [local.min.y, local.max.y]) {
+      for (const cz of [local.min.z, local.max.z]) {
+        const point = new THREE.Vector3(cx, cy, cz).applyMatrix4(board.matrixWorld).project(camera);
+        const px = (point.x * 0.5 + 0.5) * innerWidth;
+        const py = (1 - (point.y * 0.5 + 0.5)) * innerHeight;
+        x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+        y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+      }
+    }
+  }
+  plaques[index].screen = {
+    x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(x1), y1: Math.round(y1),
+    viewport: { width: innerWidth, height: innerHeight },
+  };
+}
 window.__TEMPLE_DIAG = {
   variant,
   merged,
@@ -203,6 +290,7 @@ window.__TEMPLE_DIAG = {
   },
   roles: plan.buildings.map((building) => building.role),
   architecture: hallBounds,
+  plaques,
   issues: templePlanIssues(plan),
   camera: {
     fov: camera.fov,

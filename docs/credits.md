@@ -358,6 +358,16 @@
 - URL: https://encykorea.aks.ac.kr/Article/E0008175 · https://encykorea.aks.ac.kr/Article/E0011213 · https://encykorea.aks.ac.kr/Article/E0011569 · https://journals.biologists.com/jeb/article/189/1/251/6785/Energy-savings-in-formation-flight-of-pink-footed
 - 라이선스: 2026-07-26 네 URL 모두 HTTP 200과 인용 축자를 확인. 한국학중앙연구원 백과는 항목별 이용조건이 적용되고, JEB 논문은 The Company of Biologists 저작권 자료로 초록만 인용하며 본문·도표는 복제하지 않는다. 국립생물자원관 종 페이지는 JS 전용 셸이라 인용에서 제외했다.
 
+### 58. 한국학중앙연구원 · 법보신문 · YTN — 편액(현판)의 자리·규격·서법 방향 / The name plaque: placement, size convention, and writing direction
+- id: cred-hyeonpan-pyeonaek
+- topic: plaque
+- scope: Temple main-hall and city-gate name plaques only — placement band, size derivation, and horizontal/vertical rule
+- 한국학중앙연구원 조선왕조실록사전(sillokwiki) 「현판(懸板)」(집필 탁현규) / 법보신문 「이것이 한국 불교 최초」 64. 편액(扁額) / YTN 「광화문 현판, 검은 바탕에 금박 글씨로」(2018-01-30).
+- sillokwiki는 **편액**을 "건물의 앞부분 높은 곳에 설치하여 건물의 명호(名號)를 알려주는 액자"로 한정하고 현판은 "편액을 포함하여 건물에 거는 모든 널판을 포괄하는 광의의 개념"이라 적는다. **"규격은 건물의 규모나 성격에 따라 정해졌는데 종교 건축이나 일반 건축에 걸린 현판보다 궁궐 현판은 규모도 크며 당초문(唐草紋), 운문(雲紋) 등의 화려한 장식을 새겨 넣어"** 장식성을 더했다고 하며, 서법 방향은 **"대체로 편액이나 짧은 명구는 가로로 쓰고 긴 문장이나 시문은 세로로 쓰는 것이 일반적"**이라고 적는다. 법보신문은 실측 표본을 준다 — 여수 흥국사 봉황루 안쪽 이순신 필 「공북루(拱北樓)」가 **"가로 280㎝, 세로 120㎝로 크기가 웅장하다"**(세로/가로 ≈ 0.43). YTN은 광화문 현판 복원이 **검은 바탕에 금박 글씨**로 결정된 경위를 보도한다(2026-08-05 세 URL 모두 HTTP 200과 위 축자 확인).
+- **활용 / Use:** 사찰 주불전과 성문 문루에 **글자 없는(무자) 편액** 한 매를 거는 근거다. ① 자리 — "앞부분 높은 곳"을 어칸 정면 창방 대역(공포대 밑)으로 읽어 판 상단을 평방 윗면 아래에 둔다. ② 크기 — 출처가 규격을 "건물의 규모나 성격에 따라" 정해진 **종속 변수**로 서술하므로 절대 치수를 고정하지 않고 어칸 폭 비율(×0.56)로 유도하고, 세로/가로는 공북루 표본 0.43을 따른다(그 표본을 "웅장하다"고 쓴 만큼 상한으로 읽고 기본값은 절제한다). ③ 방향 — 편액은 가로가 일반형이므로 사찰 주불전과 흥인지문·돈의문·숙정문은 가로로 걸고, 세로는 숭례문에만 둔다. ④ 위계 — 궁궐 현판이 종교·일반 건축보다 크다는 서술이 성문 문루 편액을 절 편액보다 한 단 크게 둔 근거다. ⑤ 색 — 어두운 바탕 + 밝은 테두리 몰딩. **미검증·미구현**: 글씨는 넣지 않는다(절차적 서체는 고증이 아니라 창작이 되고, 텍스처 한 장이 병합 예산을 늘린다 — 사용자 지시 "글은 없더라도"). 당초문·운문 같은 궁궐급 조각 장식, 금박 안료, 판재 두께·설치 철물의 치수는 이 출처들에 없어 넣지 않았거나 제품 저작값이다. 전국 사찰 편액의 폭·높이 분포를 주는 출처는 찾지 못했다 / Basis for the uninscribed name plaque on the temple main hall and the city-gate pavilion: the band under the bracket set, size derived as a ratio of the center bay (the source calls size a dependent variable), the 0.43 aspect from the measured 공북루 sample read as an upper bound, horizontal as the default with 숭례문 the vertical exception, and the palace-over-religious size hierarchy. Glyphs, palace-grade carved ornament, and gilding are deliberately not implemented; board thickness and mounting hardware are product-authored (`docs/temple-generator.md` §8, `docs/joseon-city.md` 성문 문루 절).
+- URL: https://dh.aks.ac.kr/sillokwiki/index.php/현판(懸板) · https://www.beopbo.com/news/articleView.html?idxno=58863 · https://www.ytn.co.kr/_ln/0106_201801302244118945
+- 라이선스: 2026-08-05 세 URL 모두 HTTP 200. 한국학중앙연구원 사전은 항목별 이용조건이, 법보신문·YTN 기사는 각 언론사 저작권이 적용되며 원문·사진 재배포 권리를 일괄 부여하지 않는다. 앱은 출처를 밝힌 사실 요약과 독자 procedural geometry만 사용하고 기사 사진·서체는 복제하지 않는다. 나무위키 「현판」은 조사 과정의 길잡이로만 썼고 근거로 인용하지 않았다(위키 2차 자료).
+
 ---
 
 ## ⑤ 마을 · 읍성 문헌 (Village & walled-town sources)

@@ -3212,10 +3212,18 @@ try {
   const footwearCredit = page.locator('.modal .cat li').filter({
     hasText: '국립익산박물관 · 국립중앙박물관 — 조선 신발과 문간 탈화 생활',
   });
+  // 편액(현판) 출처군은 사찰 주불전과 성문 문루 양쪽에 걸린 무자 편액의 근거다. 글자를 넣지
+  //   않은 이유와 크기를 어칸 종속으로 유도한 이유가 사용자에게 보여야 한다(2026-08-05 신설).
+  //   FAIL-first: docs/credits.md 에서 이 항목(### 58)만 지우면 이 게이트가 실제로 1 FAIL 을
+  //   낸다 — 렌더된 모달을 보는 단언이라 카탈로그 파서만 통과해서는 초록이 되지 않는다.
+  const plaqueCredit = page.locator('.modal .cat li').filter({
+    hasText: '한국학중앙연구원 · 법보신문 · YTN — 편액(현판)의 자리·규격·서법 방향',
+  });
   await kitchenCredit.waitFor({ state: 'visible', timeout });
   await ornamentCredit.waitFor({ state: 'visible', timeout });
   await openingCredit.waitFor({ state: 'visible', timeout });
   await footwearCredit.waitFor({ state: 'visible', timeout });
+  await plaqueCredit.waitFor({ state: 'visible', timeout });
   const referenceContract = {
     kitchenLinks: await kitchenCredit.locator('a').count(),
     ornamentLinks: await ornamentCredit.locator('a').count(),
@@ -3229,6 +3237,8 @@ try {
     footwearHrefs: await footwearCredit.locator('.it-links a')
       .evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
     footwearLicense: await footwearCredit.locator('.it-license').textContent(),
+    plaqueLinks: await plaqueCredit.locator('a').count(),
+    plaqueUse: await plaqueCredit.locator('.it-use').textContent(),
     safeLinks: await page.locator('.modal .it-links a').evaluateAll((links) => links.every((link) => (
       link.target === '_blank'
         && link.rel.split(/\s+/).includes('noopener')
@@ -3257,6 +3267,11 @@ try {
       ))
       && referenceContract.footwearLicense?.includes('저작권 보호')
       && referenceContract.footwearLicense?.includes('공공누리 제3유형')
+      && referenceContract.plaqueLinks === 3
+      && referenceContract.plaqueUse?.includes('글자 없는(무자) 편액')
+      && referenceContract.plaqueUse?.includes('어칸 폭 비율')
+      && referenceContract.plaqueUse?.includes('세로는 숭례문에만')
+      && referenceContract.plaqueUse?.includes('글씨는 넣지 않는다')
       && referenceContract.safeLinks,
     `Reference UI exposes authenticity evidence and applied-use mapping (${JSON.stringify(referenceContract)})`,
   );

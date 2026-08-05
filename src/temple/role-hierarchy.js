@@ -6,6 +6,8 @@
 // evidence documented in docs/temple-generator.md, not measurements copied from
 // one monument.
 
+import { PRESETS } from '../params.js';
+
 const BASE_BAYS = Object.freeze({
   front: Object.freeze({ center: 4.2, middle: 3.4, end: 3.4 }),
   side: Object.freeze({ center: 2.4, middle: 2.4, end: 2.4 }),
@@ -327,6 +329,22 @@ export function templeHallBuilderParams(architecture) {
     columnHeight: massing.columnHeight,
     podiumTiers: massing.podiumTiers,
     podiumTierH: massing.podiumTierHeight,
+  };
+}
+
+/**
+ * The complete builder parameter set for one planned hall: the temple preset
+ * overridden by this hall's own grammar. `buildTempleCompound` and the pure
+ * plaque planner both consume this single composition, so a plan-side detail can
+ * never be positioned against a layout the renderer does not actually build.
+ * `spec` is a plan building (it carries the grammar fields directly).
+ */
+export function templeHallBuilderPreset(spec) {
+  return {
+    ...PRESETS.temple,
+    ...templeHallBuilderParams(spec),
+    frontBays: spec.frontBays,
+    sideBays: spec.sideBays,
   };
 }
 

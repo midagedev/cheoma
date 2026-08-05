@@ -92,6 +92,33 @@ try {
             && hall.eave.renderedDepth <= hall.eave.plannedDepth + 0.9,
         `${label}:${hall.id}: rendered roof drifted from planned eave ${JSON.stringify(hall.eave)}`);
       }
+      // 주불전 무자 현판: the renderer must actually build the plan-owned board on
+      // the principal hall's front face, inside the 창방/공포대 band, with borrowed
+      // palette materials. A source-level check is not enough — an unwired
+      // renderer keeps the call site and still draws nothing.
+      invariant(diag.plaques.length === 1,
+        `${label}: expected exactly one rendered principal-hall plaque, got ${diag.plaques.length}`);
+      const plaque = diag.plaques[0];
+      invariant(plaque.hostRank === 4 && plaque.hostRole === 'main-hall',
+        `${label}: plaque host is not the principal worship hall (${plaque.hostRole}/${plaque.hostRank})`);
+      invariant(plaque.meshes === 5 && plaque.lettering === 'none' && !plaque.ownTexture,
+        `${label}: plaque is not the 5-part uninscribed board ${JSON.stringify(plaque)}`);
+      invariant(plaque.borrowedBoard && plaque.borrowedMolding,
+        `${label}: plaque stopped borrowing the hall palette (board/molding)`);
+      // 처마 그늘에는 환경맵이 없다: metalness는 스페큘러 이득 없이 디퓨즈만 깎아 판을
+      // 계조 없는 검은 클램프로 만든다 (2026-08-05 비전 FIX의 실제 원인).
+      invariant(plaque.boardMetalness === 0 && plaque.moldingMetalness === 0,
+        `${label}: plaque borrowed a metallic material (board ${plaque.boardMetalness},`
+        + ` molding ${plaque.moldingMetalness})`);
+      invariant(plaque.frontDot > 0.5,
+        `${label}: plaque is not on the hall's south front face (frontDot ${plaque.frontDot})`);
+      invariant(plaque.localTopY <= plaque.bracketBaseY - 0.02
+          && plaque.localTopY >= plaque.columnTopY + 0.25
+          && plaque.localTopY < plaque.eaveEdgeY,
+      `${label}: rendered plaque left the 창방-above / 공포대-below eave band ${JSON.stringify(plaque)}`);
+      invariant(Math.abs(plaque.world.width - plaque.plannedWorld.width) < 0.02
+          && Math.abs(plaque.world.height - plaque.plannedWorld.height) < 0.02,
+      `${label}: rendered plaque drifted from the planned size ${JSON.stringify(plaque)}`);
       invariant(diag.lifecycle.first && !diag.lifecycle.second && diag.lifecycle.owned,
         `${label}: disposal is not successful and idempotent`);
       invariant(diag.lifecycle.sharedGeometryDisposed === 1, `${label}: caller-palette geometry leaked`);
@@ -103,7 +130,24 @@ try {
         + ` (program budget ${programBudget})`);
       invariant(diag.render.palaceOrnaments === 0,
         `${label}: palace-only roof ornaments leaked into a temple grammar`);
-      if (merged) invariant(diag.render.calls <= 140, `${label}: ${diag.render.calls} merged draw calls exceed 140`);
+      // 병합 콜 상한 140 → 142 (2026-08-05, 주불전 현판 비전 FIX).
+      //   판정 근거: 현판 바탕이 차입한 `hardware`는 병합 그룹을 늘리지 않는 대신 metalness
+      //   0.42를 함께 가져왔고, 환경맵이 없는 처마 그늘에서 그것은 스페큘러 이득 0 · 디퓨즈
+      //   −42% 순손실이라 판 내부가 계조 없는 검은 클램프로 떨어졌다(비전: "현판이 아니라 구멍").
+      //   무광 판벽(`planwall`, metalness 0)으로 바꾸는 것이 유일한 무클론 해법이고, 그 대가로
+      //   전각 팔레트에 아직 그려지지 않던 재질 하나가 병합 그룹으로 추가된다.
+      //   정당한 파생: 신규 재질 그룹 하나의 실측 비용은 정확히 2콜 — 컬러 패스 1 + 그림자 패스
+      //   1(같은 실행에서 raw가 mesh 5개에 +10콜로 움직인 것과 같은 배수). 따라서 상한은
+      //   140 + 2 = 142이며, 이는 승인된 재질 그룹 하나만큼이고 여유분이 아니다.
+      //   실측(Chrome/M1 Pro): compact 97→99, courtyard 113→115, extended 139→141.
+      //   FAIL-first ①: 상한을 종전 140으로 두면 extended 141이 이 단언을 실제로 깬다 —
+      //   142는 여유분이 아니라 실측 프런티어다.
+      //   FAIL-first ②: 승인되지 않은 두 번째 재질 그룹(몰딩을 `onggi`로)을 넣으면
+      //   extended가 143으로 이 단언을 깬다 — 재핀된 상한은 여전히 물린다.
+      //   계측 주의: 같은 실험을 `woodBoard`로 하면 콜이 움직이지 않는다 — 맞배 부속 전각이
+      //   이미 그리는 재질이라 새 그룹이 아니다. "새 재질 = +2콜"은 재질 목록이 아니라
+      //   그 경내가 실제로 그리는 집합을 기준으로 판단해야 한다.
+      if (merged) invariant(diag.render.calls <= 142, `${label}: ${diag.render.calls} merged draw calls exceed 142`);
       console.log(`${label.padEnd(19)} calls=${String(diag.render.calls).padStart(4)}`
         + ` tris=${diag.render.triangles} programs=${diag.render.programs} materials=${diag.render.materials}`);
     }
@@ -131,6 +175,8 @@ try {
     })}`);
   invariant(JSON.stringify(legacy.architecture) === JSON.stringify(canonical.architecture),
     'legacy TemplePlan rendered a different hall architecture after upgrade');
+  invariant(JSON.stringify(legacy.plaques) === JSON.stringify(canonical.plaques),
+    'legacy TemplePlan lost or moved the principal-hall plaque after upgrade');
   invariant(legacy.render.calls === canonical.render.calls
       && legacy.render.triangles === canonical.render.triangles
       && legacy.render.programs === canonical.render.programs

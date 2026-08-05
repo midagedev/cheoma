@@ -7,6 +7,7 @@ import {
   TEMPLE_ENTRY_SEQUENCE_SCHEMA_VERSION,
   TEMPLE_ENTRY_STAGE_KINDS,
   TEMPLE_PLAN_SCHEMA_VERSION,
+  TEMPLE_PLAQUE_SCHEMA_VERSION,
   TEMPLE_ROLE_HIERARCHY,
   TEMPLE_VARIANTS,
   TEMPLE_VARIANT_SPECS,
@@ -16,7 +17,10 @@ import {
   templeEntrySequenceIssues,
   templeEntrySequenceKinds,
   templeHallBuilderParams,
+  templeHallBuilderPreset,
   templeHallEaveFootprint,
+  templeHallHasPlaque,
+  templeHallPlaquePlan,
   templePlanIssues,
   templeRoleArchitecture,
   templeVariantsForSize,
@@ -50,6 +54,63 @@ function stableJson(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
   }
   return JSON.stringify(value);
+}
+
+// 주불전 무자 현판(懸板): exactly one per compound, on the principal hall only,
+// horizontally centered in the 어칸, and inside the 창방-above / 공포대-below band
+// under the eave. See docs/temple-generator.md §8.
+function assertHallPlaques(plan, label) {
+  const hosts = plan.buildings.filter((building) => templeHallHasPlaque(building));
+  invariant(hosts.length === 1 && hosts[0].architecturalRank === 4,
+    `${label}: exactly one principal-hall plaque host expected, got ${hosts.length}`);
+  for (const building of plan.buildings) {
+    const plaque = templeHallPlaquePlan(building);
+    if (building !== hosts[0]) {
+      invariant(plaque === null,
+        `${label}:${building.id}: a hall below principal rank grew a plaque`);
+      continue;
+    }
+    invariant(plaque?.schemaVersion === TEMPLE_PLAQUE_SCHEMA_VERSION,
+      `${label}:${building.id}: plaque schema missing`);
+    // 무자 현판: geometry only — no glyph, text, or inscription payload.
+    invariant(plaque.lettering === 'none'
+        && !('text' in plaque) && !('glyphs' in plaque) && !('inscription' in plaque),
+    `${label}:${building.id}: plaque is no longer uninscribed`);
+    const { board, molding, band } = plaque;
+    invariant(plaque.local.x === 0 && board.width / 2 + 0.5 <= band.centerBayHalf,
+      `${label}:${building.id}: plaque is not centered inside the 어칸 with column clearance`);
+    // 공포대(평방 윗면부터)를 침범하지 않는다.
+    invariant(plaque.topY <= band.bracketBaseY - 0.02,
+      `${label}:${building.id}: plaque intrudes into the bracket band`);
+    // 창방 대역에 걸린다: 상단은 기둥머리 위, 하단은 판 높이의 60% 이상 아래로 못 내려간다.
+    invariant(plaque.topY >= band.columnTopY + 0.25,
+      `${label}:${building.id}: plaque sank below the 창방 band`);
+    invariant(plaque.bottomY >= band.columnTopY - board.height * 0.6,
+      `${label}:${building.id}: plaque hangs too far down the front wall`);
+    // 처마 밑: 처마 끝선보다 낮고, 처마 그늘 안쪽에 있다.
+    invariant(plaque.topY < band.eaveEdgeY,
+      `${label}:${building.id}: plaque is not under the eave line`);
+    invariant(plaque.local.z + board.thickness / 2 + molding.proud <= band.eaveFrontZ - 1,
+      `${label}:${building.id}: plaque leaves the eave shelter`);
+    invariant(plaque.local.z - board.thickness / 2 >= band.frontFaceZ + 0.1,
+      `${label}:${building.id}: plaque is not fastened in front of the 창방 face`);
+    // 테두리 몰딩은 테두리로 남아야 한다(판을 덮지 않는다).
+    invariant(molding.rail >= 0.05 && molding.rail * 4 < board.height && molding.proud > 0,
+      `${label}:${building.id}: border molding is not a proud border rail`);
+    // 실물 관례 비례: 공북루 편액 280×120cm(세로/가로 0.43)을 상한 표본으로 삼은 밴드.
+    const aspect = board.height / board.width;
+    invariant(aspect > 0.36 && aspect < 0.5,
+      `${label}:${building.id}: plaque aspect ${aspect.toFixed(3)} outside the documented band`);
+    invariant(plaque.world.width > 1.4 && plaque.world.width <= 2.8,
+      `${label}:${building.id}: plaque world width ${plaque.world.width.toFixed(3)} outside 1.4–2.8m`);
+    invariant(plaque.world.height > 0.55 && plaque.world.height <= 1.2,
+      `${label}:${building.id}: plaque world height ${plaque.world.height.toFixed(3)} outside 0.55–1.2m`);
+    // The plaque must be planned against the very preset the renderer builds.
+    const preset = templeHallBuilderPreset(building);
+    invariant(preset.centerBayW === band.centerBayHalf * 2
+        && preset.columnHeight === building.massingGrammar.columnHeight,
+    `${label}:${building.id}: plaque band drifted from the renderer preset`);
+  }
 }
 
 function assertLocalPlan(plan, label) {
@@ -107,6 +168,7 @@ function assertLocalPlan(plan, label) {
         && building.footprint.depth === building.eaveFootprint.depth,
     `${label}:${building.id}: actual eave footprint is not the collision footprint`);
   }
+  assertHallPlaques(plan, label);
   const issues = templePlanIssues(plan);
   invariant(!issues.length, `${label}: ${issues.join('; ')}`);
 
@@ -264,6 +326,31 @@ try {
   rejectedMalformedV2 = error instanceof TypeError && error.message.includes('incomplete architecture');
 }
 invariant(rejectedMalformedV2, 'TemplePlan v2 with missing grammar reached a consumer');
+
+// 현판: pure, deterministic, RNG-free, and actually consumed by the renderer with
+// borrowed palette materials (no new material/texture/program family).
+const plaqueHost = currentFixture.buildings.find((building) => building.architecturalRank === 4);
+const plaqueFirst = withoutGlobalRandom(() => templeHallPlaquePlan(plaqueHost), 'plaque plan');
+const plaqueRepeat = withoutGlobalRandom(() => templeHallPlaquePlan(plaqueHost), 'plaque repeat');
+invariant(plaqueFirst && stableJson(plaqueFirst) === stableJson(plaqueRepeat),
+  'principal-hall plaque plan is not deterministic');
+invariant(templeHallPlaquePlan({ ...plaqueHost, frontBays: 4 }) === null,
+  'plaque was placed on an even bay count that has a column on the center axis');
+invariant(templeHallPlaquePlan({ ...plaqueHost, architecturalRank: 3 }) === null,
+  'plaque is not gated on principal architectural rank');
+const compoundSource = repoFile('src/temple/compound.js');
+invariant(compoundSource.includes('templeHallPlaquePlan(spec)')
+    && compoundSource.includes("group.name = 'hall-plaque'"),
+'temple renderer no longer builds the plan-owned principal-hall plaque');
+const plaqueBuilder = compoundSource.match(/function buildHallPlaque[\s\S]*?\n}\n/)?.[0] || '';
+invariant(plaqueBuilder.includes('mats.planwall') && plaqueBuilder.includes('mats.wood'),
+  'plaque stopped borrowing the hall palette for its board and molding');
+invariant(!/\.metalness\s*=/.test(plaqueBuilder) && !plaqueBuilder.includes('.clone()'),
+  'plaque mutated or cloned a borrowed material instead of choosing a matte palette entry');
+invariant(!/new THREE\.(\w*Material|\w*Texture)\b/.test(plaqueBuilder),
+  'plaque allocated its own material or texture instead of borrowing the palette');
+invariant(!/plaque[\s\S]{0,40}(fillText|font|glyph|label)/i.test(plaqueBuilder),
+  'plaque grew lettering — the contract is a 무자 현판');
 
 const creditsSource = repoFile('docs/credits.md');
 const referenceModalSource = repoFile('app/src/components/ReferenceModal.svelte');

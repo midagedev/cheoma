@@ -13,9 +13,15 @@ export {
 export {
   TEMPLE_ROLE_HIERARCHY,
   templeHallBuilderParams,
+  templeHallBuilderPreset,
   templeHallEaveFootprint,
   templeRoleArchitecture,
 } from '../temple/role-hierarchy.js';
+export {
+  TEMPLE_PLAQUE_SCHEMA_VERSION,
+  templeHallHasPlaque,
+  templeHallPlaquePlan,
+} from '../temple/plaque-plan.js';
 export {
   TEMPLE_ENTRY_PROFILES,
   TEMPLE_ENTRY_SEQUENCE_SCHEMA_VERSION,
