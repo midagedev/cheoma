@@ -69,8 +69,16 @@
   @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.92; } }
 
   /* 준비 구간(#16): 누름은 즉시 확인되고, 대기는 먹선 한 획으로만 표시한다. */
+  /* 누름 피드백은 **브라우저의 :active** 가 준다 — JS·Svelte 업데이트를 기다리지 않는다.
+     실측(2026-08-06, scratch/entry-feel): 클릭 직후 롱태스크 273ms + 1260ms 가 메인 스레드를
+     채워, `entering` 클래스는 11ms 에 붙는데 그 **첫 페인트는 248ms** 뒤였다 — 사용자가 "반응이
+     느리다"고 한 구간이 정확히 그것이다. transform/opacity 만 바꾸면 컴포지터가 단독으로 그리므로
+     메인 스레드가 막혀 있어도 누른 프레임에 반응이 보인다. width·색·filter 로 바꾸면 안 된다. */
+  .hero:active .title { transform: scale(0.985); }
+  .hero:active .enter { opacity: 1; }
+  .hero .title { transition: transform 0.12s cubic-bezier(0.22, 1, 0.36, 1); }
   .hero.entering { cursor: progress; }
-  .hero.entering .title { opacity: 0.72; transition: opacity 0.4s ease; }
+  .hero.entering .title { opacity: 0.72; transition: opacity 0.4s ease, transform 0.12s ease; }
   .enter[data-entry-progress] {
     display: inline-flex; flex-direction: column; align-items: center; gap: 7px;
     color: var(--ink-soft);

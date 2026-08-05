@@ -194,6 +194,23 @@
   let villageZooming = $state(false);          // focus 전환(돌리) 진행 중 — 크롬 숨김 판단
   let focusMorph = $state(0);                  // 0=마을(부감)·1=집(근접) 패널 컨텍스트 모프
   let heroLanding = $state(false);             // 부팅 종가 랜딩 중(패널 숨김 — 히어로 연출)
+  // 진입 진행률(2026-08-06). null = 스플래시 준비 구간(사전 생성 대기 — 남은 길이를 알 수 없어
+  //   무한 표시), 0..1 = 랜딩 구간(엔진 landingProgress). 하선은 두 구간을 하나로 잇는다.
+  let entryProgress = $state(null);
+  let entryProgressOn = $derived(heroEntering || heroLanding);
+  // 랜딩 진행률은 엔진이 소유하므로 프레임마다 읽어 온다. 랜딩 구간에서만 돌고, heroEntering
+  //   준비 구간에서는 엔진에 랜딩이 없어 null 을 그대로 유지한다(무한 표시).
+  //   raw rAF 금지(check-architecture) — 생애주기 스케줄러를 써야 에폭 교체 때 콜백이 정리된다.
+  let entryRaf = null;
+  $effect(() => {
+    if (!entryProgressOn || !engine) { entryProgress = null; return; }
+    const tick = () => {
+      entryProgress = engine.village.landingProgress?.() ?? null;
+      entryRaf = requestLifecycleFrame(tick);
+    };
+    entryRaf = requestLifecycleFrame(tick);
+    return () => { cancelLifecycleFrame(entryRaf); entryRaf = null; };
+  });
   // 클립 촬영 스테이지(#255–#260): 인스펙터 도크가 프레임의 ~28%를 먹으므로 테이크 동안 3축 크롬을
   //   물린다. 인앱 녹화기는 없고(그 결정 유지) 이건 OS 녹화용 무대 세팅일 뿐이다. 첫 의도적 입력에서
   //   해제되므로 테이크가 끝난 뒤 앱은 그대로 쓸 수 있다.
@@ -1679,6 +1696,24 @@
   <Hero onEnter={enterHero} leaving={heroLeaving} entering={heroEntering} />
 {/if}
 
+<!-- 진입 진행 하선(2026-08-06 사용자 지적 "들어가는 중에 진행감이 부족"). 실측: 클릭→정착
+     11.67s 인데 스플래시 진행 표시는 1.13s 에 사라져 10.5초가 무신호였다. 이 선은 스플래시
+     구간(무한 붓획)과 랜딩 구간(결정적)을 하나로 이어 준다 — 화면 맨 아래 1.5px 먹선이라
+     "눈치채면 과하다"는 미세 모션 계약을 지키면서 남은 길이만 말한다. -->
+{#if entryProgressOn}
+  <div
+    class="entryline"
+    class:landing={entryProgress != null}
+    data-entry-line
+    role="progressbar"
+    aria-label={t('hero_entering')}
+    aria-valuemin="0"
+    aria-valuemax="100"
+    aria-valuenow={entryProgress != null ? Math.round(entryProgress * 100) : undefined}
+    style:--p={entryProgress != null ? entryProgress : 0}
+  ><i></i></div>
+{/if}
+
 <!-- 먹 안개 트랜지션(#46): 마을 생성 프리징을 가리는 수묵 크로스페이드 오버레이. -->
 <div class="veil" class:on={veil} aria-hidden="true"></div>
 
@@ -1847,6 +1882,50 @@
       radial-gradient(130% 110% at 50% 42%, #f4efe4 0%, #ece4d4 55%, #e0d5c2 100%);
   }
   .veil.on { opacity: 1; pointer-events: auto; }
+
+  /* ── 진입 진행 하선 (2026-08-06) ─────────────────────────────────────────────
+     화면 맨 아래 1.5px 먹선. 스플래시 위(z 500)와 씬 위 모두에 걸쳐 하나로 이어져,
+     클릭에서 정착까지 11.7초 동안 신호가 끊기지 않는다. 준비 구간은 남은 길이를 알 수 없어
+     붓획이 왕복하고(무한), 랜딩 구간은 실제 진행률로 채운다(결정적).
+     **컴포지터 전용 속성만 쓴다** — 진입 첫 2초에 롱태스크 1.9초가 메인 스레드를 채우므로
+     (실측 scratch/entry-feel/longtask-phone) width/left 로 만들면 그 구간에 그대로 멈춘다. */
+  .entryline {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 1.5px;
+    z-index: 500;
+    pointer-events: none;
+    overflow: hidden;
+    background: rgba(44, 38, 32, 0.14);
+  }
+  .entryline i {
+    position: absolute; inset: 0;
+    transform-origin: left center;
+    background: linear-gradient(90deg,
+      rgba(44, 38, 32, 0) 0%,
+      rgba(44, 38, 32, 0.34) 34%,
+      var(--seal) 62%,
+      rgba(44, 38, 32, 0) 100%);
+    will-change: transform;
+    /* 준비 구간: 남은 길이를 모르므로 획이 왕복한다. */
+    animation: entrybrush 1.9s ease-in-out infinite;
+  }
+  /* 랜딩 구간: 진행률만큼 채운다. scaleX 라 페인트가 필요 없다. */
+  .entryline.landing i {
+    animation: none;
+    background: linear-gradient(90deg, rgba(44, 38, 32, 0.42) 0%, var(--seal) 100%);
+    transform: scaleX(var(--p, 0));
+    transition: transform 0.16s linear;
+  }
+  @keyframes entrybrush {
+    0% { transform: translateX(-100%) scaleX(0.34); opacity: 0.55; }
+    50% { opacity: 0.95; }
+    100% { transform: translateX(100%) scaleX(0.34); opacity: 0.55; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .entryline i { animation-duration: 3.6s; }
+    .entryline.landing i { transition: none; }
+  }
 
   .toast {
     position: fixed;

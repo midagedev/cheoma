@@ -3016,6 +3016,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     env.setTime('sunset');                              // 조립 중 비주얼 석양 강제 (오디오 반응성 보호를 위해 state.time 은 보존)
     post.setTime('sunset');
     village.active = true; village.selected = null; village.transitioning = true;
+    // 진입 진행률(2026-08-06 사용자 지적 "들어가는 중에 진행감이 부족"). 실측: 클릭에서 정착까지
+    //   11.67s 인데 스플래시 진행 표시는 1.13s 에 사라져 **10.5초 동안 진행 신호가 없었다**
+    //   (scratch/entry-feel/before-phone/REPORT.json). 랜딩 총 길이는 아래 startVillageReveal 의
+    //   그것과 같은 식이어야 하므로 여기서 한 번만 유도하고 App 은 읽기만 한다.
+    village.landing = {
+      t0: performance.now(),
+      total: (HERO_ASSEMBLE_DELAY_MS / 1000 + HERO_ASSEMBLE_DUR + 0.6) * 1000,
+    };
     dispatchView('enter');
     setFocusComposition(0);
     camera.__houseFar = camera.far; camera.__houseNear = camera.near; camera.__houseFov = camera.fov;
@@ -3036,7 +3044,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       camera.updateProjectionMatrix(); camera.lookAt(controls.target);
       village.transitioning = false; heroActive = false;
       audio?.introEvent('skip');   // arm() 이 뮤트한 BGM 복원 + 진입 트랙 인계(폴백 — 랜딩 스킵)
-      emit('villageMode', true); onDone?.(); return;
+      village.landing = null; emit('villageMode', true); onDone?.(); return;
     }
     village.selected = heroId;
     dispatchView('focus', { parcelId: heroId });
@@ -3176,6 +3184,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       //   순서: 정지 프레임 → 미세 표류(HERO_SETTLE_DRIFT_DELAY_MS) → 크롬.
       const announceSettled = () => {
         if (disposed || !village.active || village.selected !== heroId) return;
+        village.landing = null;   // 진입 진행률 종료(App 의 진행 하선이 이 시점에 물러난다)
         emit('villageSelect', { parcelId: heroId, spec: pr.buildingSpec });
         emitSettledView();
         onDone?.();
@@ -3763,6 +3772,11 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       enter: (opts, seed) => enterVillage(opts, seed),
       // 마을 우선 진입(#62): 마을 진입 + 종가 클로즈업 랜딩 + 조립. 기본 인터랙티브 부팅에서 호출.
       enterHero: (opts, seed, cb) => enterVillageHero(opts, seed, cb),
+      // 진입 랜딩 진행률 0..1 (랜딩 중이 아니면 null). App 의 진입 진행 하선이 이것만 읽는다 —
+      // 총 길이를 App 에 복제하면 안무를 바꿀 때 조용히 어긋난다.
+      landingProgress: () => (village.landing
+        ? Math.max(0, Math.min(1, (performance.now() - village.landing.t0) / village.landing.total))
+        : null),
       // 모드 일원화(#59): '집' 토글 = 종가 클로즈업 돌리 / 부감 복귀는 return.
       focusHero,
       // 리플레이(#59·#92 일반화): 현재 focus 중인 필지를 다시 조립(같은 시드, 시각 불변).
@@ -4544,6 +4558,7 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     'village.glossaryScreen': () => null,
     'village.preload': () => null,
     'village.isReady': () => false,
+    'village.landingProgress': () => null,
     'village.reroll': () => village.seed,
     'village.rerollWave': () => null,
     'village.isWaving': () => false,
