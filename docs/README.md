@@ -37,6 +37,7 @@
 | [`surface-materials.md`](surface-materials.md) | 계약 + 리서치 | 재사용 가능한 결정론 표면 source/Three adapter 경계, 흙길 월드 UV·색공간·LOD·수명·성능·A/B 채택 기준, 표면 albedo 위계 실측과 기와를 더 낮추지 않는 근거. |
 | [`mud-wall.md`](mud-wall.md) | 계약 + 리서치 | 판담·짚·돌 굽·하부 습윤 근거와 순수 profile, footprint·정적 병합·거리 LOD·성능 경계. |
 | [`drainage.md`](drainage.md) | 계약 + 리서치 | 한양 길가 도랑·인사동 배수로·외암 수로의 근거와 일반화 한계, 순수 측구/대문 건넘 계획·물리 단면·성능 경계. |
+| [`ground-junction.md`](ground-junction.md) | 계약 | 경사지 부유(도보 눈높이 >0.12m) 실측 진단과 접지 석축 계약: 렌더 삼각면 정확 최저점까지 내리는 에이프런, 지형 재분할·기준높이 이동·신규 재질 금지, 잔여 프런티어. |
 | [`dangsan.md`](dangsan.md) | 계약 + 리서치 | 보호수 수관 아래 선택적 의례 공터·당집, 전국 빈도 비주장, 순수 plan·≤+2 borrowed-mat 렌더 경계. |
 | [`sijeon.md`](sijeon.md) | 계약 + 리서치 | 한양 시전행랑의 연속 칸·열주·후퇴 점포 전면 근거, 경량 façade plan/renderer 경계와 사료가 정하지 않는 형식의 한계. |
 | [`yard-life.md`](yard-life.md) | 계약 + 리서치 | 봄 볍씨 준비·가을 타작·겨울 땔감의 공식 근거와 드문 배치, 순수 plan·저비용 renderer·거리 LOD·제품 번역 한계. |

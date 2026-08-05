@@ -13,6 +13,10 @@ import {
   templeCompoundWidth,
   templeFootprint,
 } from '../../village/temple-plan.js';
+import {
+  featureGroundJunctionBudget,
+  planFeatureGroundJunctions,
+} from '../../village/feature-junction-plan.js';
 
 // Re-export the pure padY helper so existing consumers of this module keep
 // working without importing the Three-free plan directly.
@@ -80,7 +84,22 @@ function emitPad(polygon, padY, site, topPositions, topIndices, skirtPositions, 
   }
 }
 
-export function buildParcelPads(parcels, site) {
+// One vertical quad per junction chord. Bottom is flat at the chord's exact
+// rendered-terrain minimum, so the chord is closed along its whole length.
+function emitJunctionSegments(segments, skirtPositions, skirtIndices) {
+  for (const segment of segments) {
+    const base = skirtPositions.length / 3;
+    skirtPositions.push(
+      segment.a.x, segment.topY, segment.a.z,
+      segment.a.x, segment.bottomY, segment.a.z,
+      segment.b.x, segment.topY, segment.b.z,
+      segment.b.x, segment.bottomY, segment.b.z,
+    );
+    skirtIndices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+  }
+}
+
+export function buildParcelPads(parcels, site, plan = null) {
   const group = new THREE.Group();
   group.name = 'village-pads';
   const topPositions = [], topIndices = [], skirtPositions = [], skirtIndices = [];
@@ -96,9 +115,31 @@ export function buildParcelPads(parcels, site) {
       skirtIndices,
     );
   }
+  // #56 접지면: 패드를 갖지 않는 구조물(시전 행랑·정자 기단·보호수 돌단)의 석축 면을 같은
+  //   pad-skirt 버퍼에 넣는다. 재질·드로우콜 델타 0 — 새 재질군을 만들면 병합이 갈라진다.
+  //   배치·기단 높이는 계획(feature-junction-plan)이 소유하고 여기서는 삼각형만 만든다.
+  let junctionBudget = null;
+  // Index where the parcel skirt ends and the feature junctions begin. Lets a
+  // same-boot A/B capture isolate the junction face with setDrawRange instead of
+  // shipping a runtime feature flag, and lets an audit assert the fold.
+  const parcelSkirtIndexCount = skirtIndices.length;
+  if (plan) {
+    const junctions = planFeatureGroundJunctions(plan, site);
+    for (const entry of junctions) {
+      emitJunctionSegments(entry.junction.segments, skirtPositions, skirtIndices);
+    }
+    junctionBudget = featureGroundJunctionBudget(junctions);
+  }
   if (topIndices.length) group.add(makeBufferMesh(topPositions, topIndices, padTopForSite(site), 'pad-top'));
   // pad-skirt is the single downhill 축대 course face; same stone material role.
   if (skirtIndices.length) group.add(makeBufferMesh(skirtPositions, skirtIndices, padStoneMaterial, 'pad-skirt'));
+  if (junctionBudget) {
+    group.userData.groundJunction = {
+      ...junctionBudget,
+      parcelSkirtIndexCount,
+      totalSkirtIndexCount: skirtIndices.length,
+    };
+  }
   return group;
 }
 

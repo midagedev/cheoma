@@ -33,6 +33,19 @@ export function guardianCanopyRadius(kind, scale = 1) {
   return (GUARDIAN_CANOPY_RADIUS_BY_KIND[kind] || GUARDIAN_CANOPY_RADIUS) * scale;
 }
 
+// 돌단(원형 석축단) 반경. gardens.js#bakeDolran 이 실제로 굽는 값과 그 바닥 반경(하부가
+// 1.06배로 넓다)을 한 곳에서 소유한다 — 접지면(ground-junction) 계약이 렌더러 상수를
+// 재추정하면 석축이 단 밑을 못 덮는다(#56).
+export const GUARDIAN_DOLRAN_BASE_FLARE = 1.06;
+
+export function guardianDolranRadius(scale = 1) {
+  return 2.6 + (Number.isFinite(scale) ? scale : 1) * 0.4;
+}
+
+export function guardianDolranFootprintRadius(scale = 1) {
+  return guardianDolranRadius(scale) * GUARDIAN_DOLRAN_BASE_FLARE;
+}
+
 export function planGuardianTrees(plan, site, seed) {
   const rng = makeRng((seed ^ 0x60a2d) >>> 0);
   const C = site.center, R = site.R, scale = plan.scale;

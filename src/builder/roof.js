@@ -22,6 +22,38 @@ import { resolveRoofRank, roofOrnamentPolicy } from './roof-rank.js';
 const NU = 48, NV = 22;
 const smooth = (t) => t * t * (3 - 2 * t);
 
+// ── 다른 지붕 생성기와 공유하는 곡선 어휘 ────────────────────────────────────
+// 아래 세 함수는 이 파일이 이미 쓰던 식을 **문자 그대로** 옮긴 것이고, buildRoof 가 그것을
+// 호출하도록 다시 배선했다(값 변화 0 — palace/temple/giwa 정점 해시로 단독 확인). 문루
+// 우진각 지붕(src/village/citywall.js)이 같은 지붕곡·앙곡 문법을 두 번 저작하지 않도록
+// export 만 추가한 것이며, 여기서 곡률 상수를 바꾸면 안 된다.
+
+/** 지붕곡(후림): slope(v)=s1+(s0-s1)(1-v)^q 의 적분을 0..1 로 정규화한 낙차 곡선. */
+export function makeRoofDropCurve({ s0, s1, q, totalDrop }) {
+  return (v) =>
+    (s1 * v + ((s0 - s1) * (1 - Math.pow(1 - v, q + 1))) / (q + 1)) / totalDrop;
+}
+
+/** 앙곡 배분 지수. 클수록 처마선이 직선이다가 끝에서만 들린다(궁=1.7, 절=3.6). */
+export function makeRoofCornerEase(pow = 1.7) {
+  return (t) => Math.pow(Math.abs(t), pow);
+}
+
+/** makeChwiduGeometry 가 만드는 단위 취두의 실제 치수(스케일 환산용). */
+export const CHWIDU_UNIT = Object.freeze({ height: 0.9, width: 0.55, depth: 0.58 });
+
+/** 취두 실루엣(용마루 끝 종물) 단위 지오메트리. 밑동 y=0, 말린 끝이 +x. */
+export function makeChwiduGeometry() {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0); s.lineTo(0.55, 0); s.lineTo(0.55, 0.35);
+  s.quadraticCurveTo(0.5, 0.75, 0.15, 0.9);
+  s.quadraticCurveTo(0.28, 0.55, 0.18, 0.4);
+  s.lineTo(0, 0.35); s.closePath();
+  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.58, bevelEnabled: false });
+  geo.translate(0, 0, -0.29); // z 방향 중심 정렬 (depth 반영)
+  return geo;
+}
+
 export function buildRoof(P, L, M) {
   if (P.roofType === 'choga') return buildThatchRoof(P, L, M);
   const g = new THREE.Group();
@@ -38,11 +70,10 @@ export function buildRoof(P, L, M) {
   const xr = L.ridgeHalf;
   const yEaveTile = L.eaveEdgeY + tileLift; // 기와면 기준 처마 높이
   // 앙곡 배분 지수: 클수록 처마선이 직선이다가 끝에서만 들린다. 궁=1.7, 절=3.6.
-  const cornerEase = (t) => Math.pow(Math.abs(t), P.cornerEasePow ?? 1.7);
+  const cornerEase = makeRoofCornerEase(P.cornerEasePow ?? 1.7);
 
   // 낙차 곡선 (0..1 정규화): slope(v)=s1+(s0-s1)(1-v)^q 의 적분
-  const dropN = (v) =>
-    (s1 * v + ((s0 - s1) * (1 - Math.pow(1 - v, q + 1))) / (q + 1)) / totalDrop;
+  const dropN = makeRoofDropCurve({ s0, s1, q, totalDrop });
 
   // 합각 밑변 높이(hipBreak = 낙차 비율) → 곡선상 위치 v* 를 이분법으로 역산
   let vStar = 0.3;
@@ -277,13 +308,7 @@ export function buildRoof(P, L, M) {
     // 장식이 누출되지 않도록 형태 분기와 roof-rank 분기를 분리한다.
     if (ornaments.chwidu) {
       for (const sign of [1, -1]) {
-        const s = new THREE.Shape();
-        s.moveTo(0, 0); s.lineTo(0.55, 0); s.lineTo(0.55, 0.35);
-        s.quadraticCurveTo(0.5, 0.75, 0.15, 0.9);
-        s.quadraticCurveTo(0.28, 0.55, 0.18, 0.4);
-        s.lineTo(0, 0.35); s.closePath();
-        const geo = new THREE.ExtrudeGeometry(s, { depth: 0.58, bevelEnabled: false });
-        geo.translate(0, 0, -0.29); // z 방향 중심 정렬 (depth 반영)
+        const geo = makeChwiduGeometry();
         const chwidu = new THREE.Mesh(geo, M.tileRidge);
         chwidu.name = ornaments.chwiduName;
         // 말린 끝(x+)이 용마루 중앙(x=0) 쪽을 향하게: 오른쪽 끝은 좌우 미러

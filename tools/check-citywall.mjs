@@ -13,8 +13,23 @@ import {
   sampleRoadSurface,
 } from '../src/village/road-surface.js';
 import {
+  CITY_GATE_CHWIDU_NAME,
+  CITY_GATE_JAPSANG_NAME,
+  CITY_GATE_JAPSANG_RANGE,
+  PALACE_CHWIDU_NAME,
+  PALACE_JAPSANG_NAME,
+  ROOF_RANK,
+  cityGateRoofOrnamentPolicy,
+  roofOrnamentPolicy,
+} from '../src/builder/roof-rank.js';
+import { srgbRelativeLuminance } from '../src/builder/material-colors.js';
+import {
   CITY_GATE_MASONRY,
+  CITY_GATE_PLAQUE,
+  CITY_GATE_ROOF,
   cityGateForecourtPolygon,
+  cityGateRoofProfile,
+  cityGateRoofTier,
   CITY_GATE_PAVILION,
   CITY_STONE_BOND,
   CITY_STONE_VALUES,
@@ -325,7 +340,333 @@ function assertGatePavilion(gate, structure, masonry, label) {
   }
   assertGateBrackets(pavilion, tag);
   assertGateProportion(pavilion, masonry, tag);
+  assertGateRoofForm(pavilion, tag);
+  assertGatePlaque(gate, pavilion, tag);
   return pavilion;
+}
+
+// ── 문루 현판 계약 (#54, 사용자 지시 2026-08-05) ─────────────────────────────
+// 상층 정면 중앙 칸, 창방 밑에 무자 현판 1매. 방향은 고증으로 갈린다 — 사대문 중 숭례문(제품의
+// 남문 = 주작대로 문)만 세로이고 나머지 셋은 가로다. 하층에는 걸지 않는다(판벽 파사드).
+function assertGatePlaque(gate, pavilion, tag) {
+  const Q = CITY_GATE_PLAQUE;
+  const [lower, upper] = pavilion.storeys;
+  invariant(lower.plaque == null, `${tag}: 하층에 현판이 걸렸다 — 상층 정면 중앙 칸 1매다`);
+  const p = upper.plaque;
+  invariant(p, `${tag}: 상층 현판이 없다`);
+  // 방향 고증은 **여기서 못 박는다**(저작 상수를 그대로 읽으면 상수를 바꿨을 때 단언이 함께 따라가
+  // 무의미해진다): 사대문 중 세로 현판은 숭례문뿐이고, 제품에서 그 자리는 주작대로가 닿는 남문이다.
+  invariant(Q.verticalGate === 'south',
+    `현판 세로 대상이 ${Q.verticalGate} 로 바뀌었다 — 세로는 숭례문(제품 남문) 하나다`);
+  const wantVertical = gate.name === 'south';
+  invariant(p.orientation === (wantVertical ? 'vertical' : 'horizontal'),
+    `${tag}: 현판 방향 ${p.orientation} — 숭례문 자리(남문)만 세로, 나머지 셋은 가로다`);
+  invariant(wantVertical ? p.height > p.width : p.width > p.height,
+    `${tag}: 현판 ${p.width.toFixed(2)}×${p.height.toFixed(2)} 가 선언한 방향과 반대다`);
+  invariant(p.x === 0, `${tag}: 현판이 정면 중앙에서 벗어났다 (x=${p.x})`);
+  // ── 판독성 계약 (비전 FIX① 2026-08-05) ─────────────────────────────────────
+  // 구 구현은 z 를 기둥 중심선 밖 0.18m 에 두었는데 공포 최외 출목이 0.78m 였다 → 현판이 공포대
+  // **뒤**에 박혀 포열 그림자에 묻히고, 세로 상한이 개방고(1.32m)로 갇혀 "작고 어두운 세로 슬롯"이
+  // 되어 개구부로 오독됐다. 세 축을 함께 못 박는다: 출목 앞 · 공포대 대역 가로지름 · 전방 틸트.
+  invariant(p.z > upper.depth * 0.5 + p.purlinOut,
+    `${tag}: 현판(z=${p.z.toFixed(2)})이 공포 최외 출목(${(upper.depth * 0.5 + p.purlinOut).toFixed(2)}) `
+    + '뒤에 박혔다 — 포열 그림자에 묻혀 개구부로 오독된다');
+  invariant(p.crossesBracketBand && p.top > p.bracketY0,
+    `${tag}: 현판 상단 ${p.top.toFixed(2)} 이 창방 밑면 ${p.bracketY0.toFixed(2)} 아래에 갇혔다 — `
+    + '실물 현판은 공포대 대역을 가로질러 걸린다');
+  invariant(p.tiltDeg >= 8 && p.tiltDeg <= 18,
+    `${tag}: 현판 전방 틸트 ${p.tiltDeg}° 가 대역 8~18° 밖이다 — 수직판은 하늘빛을 받지 못해 `
+    + '실내 음영과 휘도로 갈리지 않는다');
+  // 슬롯 방지: 판의 **긴 변**이 자기 기준(세로=파사드 대역, 가로=주칸)의 60% 이상이어야 한다.
+  //   단 층이 낮아 쓸 수 있는 대역 자체가 그보다 작으면 대역을 다 쓴 것으로 갈음한다(작은 규모 문).
+  const facadeBand = upper.y1 - upper.y0 - upper.rail;
+  const usedFullBand = Math.abs(p.height - p.available) < 1e-9;
+  const longSideOk = wantVertical
+    ? p.height >= facadeBand * 0.6 - 1e-9
+    : p.width >= Math.min(upper.bay * 0.6, Q.horizontal.maxWidth) - 1e-9;
+  invariant(longSideOk || usedFullBand,
+    `${tag}: 현판 ${p.width.toFixed(2)}×${p.height.toFixed(2)} 의 긴 변이 기준(세로=파사드 대역 `
+    + `${facadeBand.toFixed(2)}m / 가로=주칸 ${upper.bay.toFixed(2)}m)의 60% 미만이고 대역을 다 쓰지도 `
+    + '않았다 — 좁고 짧은 판은 슬롯으로 읽힌다');
+  // [재저작 2026-08-05, 비전 FIX①] 구 단언은 "현판 상단이 창방 밑면 아래에 머문다"였다. 그 계약이
+  //   현판을 개방 칸(1.32m) 안에 갇히게 해 "작고 어두운 세로 슬롯"을 만든 원인이었다 — 실물 현판은
+  //   공포대 대역을 가로질러 걸린다. 새 상한은 **처마선(층 상단)** 이고, 공포 부재와의 간섭은 y 가
+  //   아니라 z(출목 앞)로 회피한다(위 판독성 계약). 여유는 저작 상수가 아니라 절대 하한으로 잰다.
+  invariant(Q.clearBelowEave >= 0.10 && Q.clearAboveRail >= 0.10,
+    `현판 여유 저작값(처마 ${Q.clearBelowEave} / 난간 ${Q.clearAboveRail})이 하한 밑으로 내려갔다`);
+  invariant(p.top <= upper.y1 - 0.10 + 1e-9,
+    `${tag}: 현판 상단 ${p.top.toFixed(3)} 이 처마선(층 상단 ${upper.y1.toFixed(3)})을 파고든다`);
+  invariant(p.bottom >= upper.y0 + upper.rail + 0.10 - 1e-9,
+    `${tag}: 현판 하단 ${p.bottom.toFixed(3)} 이 상층 난간을 파고든다`);
+  invariant(p.width < upper.bay,
+    `${tag}: 현판 폭 ${p.width.toFixed(2)} 이 주칸 ${upper.bay.toFixed(2)} 을 넘어 이웃 칸을 덮는다`);
+  invariant(p.frame > 0 && p.frame < Math.min(p.width, p.height) * 0.5,
+    `${tag}: 현판 테두리 몰딩 ${p.frame} 이 판을 삼킨다`);
+  invariant(p.height >= 0.5,
+    `${tag}: 현판 높이 ${p.height.toFixed(2)}m — 근경에서 초점이 되지 못한다`);
+  return { gate: gate.name, orientation: p.orientation, width: p.width, height: p.height };
+}
+
+// ── 문루 우진각 지붕 곡률·마루 종물 계약 (#54, 2026-08-05) ───────────────────
+// 사용자 판정: "성문 좀더 기와에 곡률이 나와야겠다 ... 사진 속 성문은 제대로 된 지붕이야 —
+// 기와 장식도 있고." 구 구현은 정점 8개의 저폴리 부채(곡률 0) + 막대 마루였고 종물이 없었다.
+// 여기서 못 박는 것은 브라우저 없이 판정 가능한 기하 전부다: 45° 내림마루(우진각의 정의),
+// 세 곡률의 존재와 방향, 격자 봉합·와인딩, city-gate **전용** 종물 등급, 처마 단청 띠 정합.
+function assertGateRoofForm(pavilion, tag) {
+  const R = CITY_GATE_ROOF;
+  const rows = [];
+  for (const roof of pavilion.roofs) {
+    const label = `${tag}/${roof.tier}`;
+    const profile = cityGateRoofProfile(roof);
+    const hw = profile.halfWidth, hd = profile.halfDepth;
+
+    // ① 우진각 형식: 내림마루가 평면에서 45°. 구 저작(용마루 반길이 = 폭의 0.15)은 상층에서
+    //    74° 로 서는 천막이었고 그것이 사진과의 가장 큰 형태 갭이었다.
+    invariant(near(profile.ridge.halfLength, Math.max(roof.width * R.ridgeHalfMinRatio, hw - hd), 1e-9),
+      `${label}: 용마루 반길이 ${profile.ridge.halfLength.toFixed(3)} 가 45° 내림마루 규칙(hw-hd=`
+      + `${(hw - hd).toFixed(3)})에서 벗어났다`);
+    const hipPlanDeg = Math.atan2(hw - profile.ridge.halfLength, hd) * 180 / Math.PI;
+    invariant(Math.abs(hipPlanDeg - 45) <= 1e-6,
+      `${label}: 내림마루 평면각 ${hipPlanDeg.toFixed(2)}° ≠ 45° — 우진각이 아니라 천막/모임지붕이다`);
+    invariant(profile.ridge.halfLength > roof.width * 0.15 + 1e-9,
+      `${label}: 용마루 반길이가 구 저작(폭×0.15)으로 되돌아갔다`);
+
+    // ② 용마루 곡선: 양단이 지붕 정점이고 중앙이 처진다. 정점을 올리면 하층 차양 정점을 상층
+    //    난간 뒤에 숨기는 upperFloor 계약이 깨지므로 apex === height 를 정확히 못 박는다.
+    invariant(profile.ridge.apexY === roof.height,
+      `${label}: 용마루 양단 ${profile.ridge.apexY} ≠ 지붕 높이 ${roof.height} — 정점이 이동하면 `
+      + '상층 바닥(upperFloor) 계약이 흔들린다');
+    const ridgeSag = profile.ridge.apexY - profile.ridge.midY;
+    invariant(ridgeSag > roof.height * 0.03,
+      `${label}: 용마루 처짐 ${ridgeSag.toFixed(3)}m — 곡선이 없으면 직선 막대로 되돌아간다`);
+    // 용마루 표본은 -halfLength → +halfLength 로 지나가므로 |x| 기준 단조 상승이 곡선의 계약이다
+    // (중앙이 최저, 양단이 최고). 중앙 표본이 정확히 x=0 에 놓이는지도 함께 본다.
+    const ridgeByAbsX = [...profile.ridge.points].sort((a, b) => Math.abs(a.x) - Math.abs(b.x));
+    invariant(near(ridgeByAbsX[0].x, 0, 1e-9) && near(ridgeByAbsX[0].y, profile.ridge.midY, 1e-9),
+      `${label}: 용마루 최저 표본이 중앙(x=0)에 없다`);
+    for (let i = 1; i < ridgeByAbsX.length; i++) {
+      invariant(ridgeByAbsX[i].y >= ridgeByAbsX[i - 1].y - 1e-12,
+        `${label}: 용마루 곡선이 중앙에서 양단으로 단조 상승하지 않는다 (표본 ${i})`);
+    }
+
+    // ③ 처마선 앙곡: 코너가 중앙보다 들리고, 처마 격자(v=nv 행)가 중앙→코너 단조 상승이다.
+    //    [강화 2026-08-05, 비전 FIX②] 하한을 **지붕 높이 비율에서 폭 비율로** 바꿨다. 높이 기준은
+    //    얕은 물매 단을 통과시켜 버린다: 하층 차양은 h 가 상층의 57% 이고 폭은 더 넓어, 같은
+    //    height*0.05 하한을 통과하면서도 폭 대비 앙곡이 0.76%(상층 1.38%)에 머물러 비전이 "직선
+    //    평판"으로 판정했다. 앙곡은 **폭에 대해** 지각되므로 계약도 폭 기준이어야 한다.
+    //    (완화 아님: 구 하한도 함께 유지한다.)
+    const angok = profile.eave.cornerY - profile.eave.midY;
+    invariant(angok > roof.height * 0.05,
+      `${label}: 앙곡 낙차 ${angok.toFixed(3)}m — 처마선이 수평 직선이면 "종이 접기"로 되돌아간다`);
+    const angokOverWidth = angok / roof.width;
+    invariant(angokOverWidth >= 0.012,
+      `${label}: 앙곡/폭 ${(angokOverWidth * 100).toFixed(2)}% < 1.2% — 폭 ${roof.width.toFixed(1)}m `
+      + `지붕에서 낙차 ${angok.toFixed(3)}m 는 지각되지 않는다(비전 판정: "직선 평판")`);
+    for (const face of profile.faces) {
+      const row = face.nv * (face.nu + 1);
+      const mid = face.nu / 2;
+      for (let iu = Math.ceil(mid); iu < face.nu; iu++) {
+        const a = (row + iu) * 3 + 1, b = (row + iu + 1) * 3 + 1;
+        invariant(face.points[b] >= face.points[a] - 1e-9,
+          `${label}/${face.key}: 처마선이 코너로 갈수록 낮아진다 (u ${iu})`);
+      }
+      const cornerY = face.points[(row + face.nu) * 3 + 1];
+      invariant(near(cornerY, profile.eave.cornerY, 1e-9),
+        `${label}/${face.key}: 코너 처마 ${cornerY} ≠ 공통 코너 높이 ${profile.eave.cornerY} — `
+        + '앞·뒤면과 좌·우면이 다른 점에서 만난다');
+    }
+
+    // ④ 후림(지붕면 오목): 용마루→처마 낙차가 직선 아래로 처진다. s0 === s1 이면 선형이 되고
+    //    이 단언이 잡는다.
+    let maxConcavity = 0;
+    {
+      const front = profile.faces.find((face) => face.key === 'front');
+      const mid = front.nu / 2;
+      const yAt = (iv) => front.points[(iv * (front.nu + 1) + mid) * 3 + 1];
+      const y0 = yAt(0), y1 = yAt(front.nv);
+      for (let iv = 1; iv < front.nv; iv++) {
+        const linear = y0 + (y1 - y0) * (iv / front.nv);
+        invariant(yAt(iv) <= linear + 1e-9,
+          `${label}: 지붕면이 직선 위로 볼록해졌다 (v ${iv / front.nv})`);
+        maxConcavity = Math.max(maxConcavity, (linear - yAt(iv)) / (y0 - y1));
+      }
+    }
+    invariant(maxConcavity >= 0.03,
+      `${label}: 지붕면 후림 ${(maxConcavity * 100).toFixed(1)}% — 3% 미만이면 평면 부채와 구별되지 않는다`);
+    // 얕은 물매 단은 %가 같아도 절대 처짐이 사라진다 → 절대값 하한도 함께 둔다(비전 FIX②).
+    const concavityAbs = maxConcavity * (roof.height - profile.eave.midY);
+    invariant(concavityAbs >= 0.12,
+      `${label}: 지붕면 후림 절대 처짐 ${concavityAbs.toFixed(3)}m < 0.12m — 물매가 얕은 단에서 `
+      + '오목이 지각되지 않는다');
+
+    // ⑤ 격자 봉합·와인딩·정점 예산. 앞·뒤면의 u=±1 에지는 좌·우면의 u=±1 에지와 **정확히** 같은
+    //    점이어야 한다(그렇지 않으면 내림마루선에 틈이 열린다). 와인딩은 profile 이 바깥+위로
+    //    확정하므로, 아래로 향하는 삼각형이 하나라도 있으면 roof.js 팔작면의 함정을 물려받은 것이다.
+    const edge = (face, u1) => {
+      const out = [];
+      for (let iv = 0; iv <= face.nv; iv++) {
+        const i = (iv * (face.nu + 1) + (u1 ? face.nu : 0)) * 3;
+        out.push([face.points[i], face.points[i + 1], face.points[i + 2]]);
+      }
+      return out;
+    };
+    const byKey = Object.fromEntries(profile.faces.map((face) => [face.key, face]));
+    let seamErr = 0;
+    for (const [faceKey, sideKey, u1] of [
+      ['front', 'right', true], ['front', 'left', false],
+      ['back', 'right', true], ['back', 'left', false],
+    ]) {
+      // front/back 의 u=±1 열과 side 의 같은 부호 열이 만난다: side 는 z 부호로 갈리므로
+      // front(+z) ↔ side u=+1, back(-z) ↔ side u=-1 이다.
+      const faceEdge = edge(byKey[faceKey], u1);
+      const sideEdge = edge(byKey[sideKey], faceKey === 'front');
+      for (let i = 0; i < faceEdge.length; i++) {
+        seamErr = Math.max(seamErr, Math.hypot(
+          faceEdge[i][0] - sideEdge[i][0],
+          faceEdge[i][1] - sideEdge[i][1],
+          faceEdge[i][2] - sideEdge[i][2],
+        ));
+      }
+    }
+    invariant(seamErr <= 1e-12,
+      `${label}: 내림마루 봉합 오차 ${seamErr.toExponential(2)} — 지붕면 사이에 틈이 열린다`);
+
+    let triangles = 0, apexY = -Infinity, lowY = Infinity;
+    for (const face of profile.faces) {
+      invariant(face.indices.length % 3 === 0, `${label}/${face.key}: 인덱스가 삼각형 배수가 아니다`);
+      for (let i = 0; i < face.indices.length; i += 3) {
+        const p = [0, 1, 2].map((k) => face.indices[i + k] * 3);
+        const ux = face.points[p[1]] - face.points[p[0]];
+        const uy = face.points[p[1] + 1] - face.points[p[0] + 1];
+        const uz = face.points[p[1] + 2] - face.points[p[0] + 2];
+        const vx = face.points[p[2]] - face.points[p[0]];
+        const vy = face.points[p[2] + 1] - face.points[p[0] + 1];
+        const vz = face.points[p[2] + 2] - face.points[p[0] + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const len = Math.hypot(nx, ny, nz);
+        invariant(len > 1e-12, `${label}/${face.key}: 퇴화 삼각형이 남았다 (삼각 ${i / 3})`);
+        invariant(ny > 0,
+          `${label}/${face.key}: 지붕면 법선이 아래를 향한다 (삼각 ${i / 3}) — 월드노멀 효과가 `
+          + 'abs() 보정을 강요받는 roof.js 팔작면 함정을 물려받았다');
+        invariant(nx * face.outward[0] + nz * face.outward[2] >= -1e-9,
+          `${label}/${face.key}: 지붕면 법선이 안쪽을 향한다 (삼각 ${i / 3})`);
+        triangles += 1;
+      }
+      for (let i = 1; i < face.points.length; i += 3) {
+        apexY = Math.max(apexY, face.points[i]);
+        lowY = Math.min(lowY, face.points[i]);
+      }
+    }
+    invariant(near(apexY, roof.height, 1e-9) && near(lowY, profile.eave.midY, 1e-9),
+      `${label}: 지붕면 y 대역 ${lowY.toFixed(3)}~${apexY.toFixed(3)} 이 처마 중앙~용마루 정점과 다르다`);
+    invariant(triangles <= 700,
+      `${label}: 지붕면 ${triangles} 삼각 — 문 4기 × 2단 예산(≤700/기)을 넘겼다`);
+
+    // ⑥ 내림마루 4줄: 용마루 끝에서 시작해 처마 코너에서 끝나고, 모든 표본이 지붕면 위에 있다.
+    invariant(profile.hips.length === 4, `${label}: 내림마루 ${profile.hips.length}줄 (4 필요)`);
+    for (const hip of profile.hips) {
+      const first = hip.points[0], last = hip.points[hip.points.length - 1];
+      invariant(near(Math.abs(first.x), profile.ridge.halfLength, 1e-9) && near(first.z, 0, 1e-9)
+        && near(first.y, roof.height, 1e-9),
+      `${label}: 내림마루가 용마루 끝에서 시작하지 않는다`);
+      // [재저작 2026-08-05, 비전 권고 ④] 구 단언은 "종단이 처마 코너와 **정확히** 일치"였다.
+      //   그 상태에서 튜브 반지름이 처마선 밖으로 삐죽 나와 처마 실루엣을 넘고 종단이 각지게
+      //   꺾였다(비전 판정). 새 계약은 더 강하다: 종단이 코너 **안쪽** tipInset 이내에 있고,
+      //   **반지름을 더해도 처마선을 넘지 않는다**(구 단언은 이 넘김을 잡지 못했다).
+      invariant(hip.tipInsetV > 0 && hip.tipInsetV <= 0.25,
+        `${label}: 내림마루 종단 인셋 ${hip.tipInsetV} 이 대역(0, 0.25] 밖이다`);
+      const tipGapX = hw - Math.abs(last.x), tipGapZ = hd - Math.abs(last.z);
+      invariant(tipGapX > 0 && tipGapZ > 0,
+        `${label}: 내림마루 종단이 처마선에 닿거나 넘었다 (x여유 ${tipGapX.toFixed(3)} z여유 ${tipGapZ.toFixed(3)})`);
+      invariant(tipGapX >= hip.radius && tipGapZ >= hip.radius,
+        `${label}: 내림마루 종단 여유(x ${tipGapX.toFixed(3)} / z ${tipGapZ.toFixed(3)})가 반지름 `
+        + `${hip.radius.toFixed(3)} 보다 작다 — 마루가 처마 실루엣을 넘는다`);
+      // 종단이 처마에 닿기 전에 끝나므로 종단 높이는 코너 처마보다 **높고** 용마루 정점보다 낮다.
+      invariant(last.y > profile.eave.cornerY - 1e-9 && last.y < roof.height,
+        `${label}: 내림마루 종단 높이 ${last.y.toFixed(3)} 가 처마 코너 `
+        + `${profile.eave.cornerY.toFixed(3)}~용마루 ${roof.height.toFixed(3)} 대역 밖이다`);
+      invariant(hip.radius > 0, `${label}: 내림마루 반지름 0`);
+    }
+
+    // ⑦ 종물: **city-gate 전용 등급**만 쓴다(#150 C 개정 2026-08-05). palace 이름은 0건이고,
+    //    잡상 수는 궁보다 적은 홀수(3~5)이며 각 잡상은 자기 내림마루 위에 앉는다.
+    const orn = profile.ornaments;
+    invariant(orn.rank === ROOF_RANK.CITY_GATE, `${label}: 지붕 종물 rank ${orn.rank} ≠ city-gate`);
+    for (const figure of [...orn.chwidu, ...orn.japsang]) {
+      invariant(figure.name !== PALACE_CHWIDU_NAME && figure.name !== PALACE_JAPSANG_NAME,
+        `${label}: 성문 종물이 궁 이름(${figure.name})을 차용했다 — 감사·정책 분류가 오표시된다`);
+    }
+    if (!profile.ridged) {
+      // 하층 차양은 용마루가 없으므로 종물도 없다(위계). 내림마루·처마 곡률은 위에서 이미 검사됐다.
+      invariant(orn.chwidu.length === 0 && orn.japsang.length === 0,
+        `${label}: 용마루 없는 차양에 종물이 붙었다`);
+      rows.push({ tier: roof.tier, triangles, angok, ridgeSag, hipPlanDeg, chwidu: 0, japsang: 0 });
+      continue;
+    }
+    invariant(orn.chwidu.length === 2, `${label}: 취두 ${orn.chwidu.length}기 (용마루 양단 2기 필요)`);
+    const chwiduX = orn.chwidu.map((c) => c.x).sort((a, b) => a - b);
+    invariant(near(chwiduX[0], -profile.ridge.halfLength, 1e-9)
+      && near(chwiduX[1], profile.ridge.halfLength, 1e-9),
+    `${label}: 취두가 용마루 양단에 없다 (${chwiduX.map((x) => x.toFixed(2)).join(',')})`);
+    for (const c of orn.chwidu) {
+      invariant(c.name === CITY_GATE_CHWIDU_NAME, `${label}: 취두 이름 ${c.name}`);
+      invariant(c.y > roof.height, `${label}: 취두가 용마루 위로 서지 않는다`);
+      invariant(c.height > roof.height * 0.2, `${label}: 취두 ${c.height.toFixed(2)}m 가 실루엣을 못 만든다`);
+    }
+    const perHip = new Map();
+    for (const j of orn.japsang) {
+      invariant(j.name === CITY_GATE_JAPSANG_NAME, `${label}: 잡상 이름 ${j.name}`);
+      perHip.set(j.hip, [...(perHip.get(j.hip) || []), j]);
+    }
+    invariant(perHip.size === 4, `${label}: 잡상이 놓인 내림마루 ${perHip.size}줄 (4 필요)`);
+    for (const [hipKey, figures] of perHip) {
+      const n = figures.length;
+      invariant(n >= CITY_GATE_JAPSANG_RANGE.min && n <= CITY_GATE_JAPSANG_RANGE.max,
+        `${label}/${hipKey}: 잡상 ${n}기 — 성문 등급 대역 ${CITY_GATE_JAPSANG_RANGE.min}~`
+        + `${CITY_GATE_JAPSANG_RANGE.max}(궁보다 적어야 한다) 밖이다`);
+      invariant(n % 2 === 1, `${label}/${hipKey}: 잡상 ${n}기 — 홀수 관례를 벗어났다`);
+      invariant(figures.filter((f) => f.lead).length === 1,
+        `${label}/${hipKey}: 삿갓 쓴 선두가 정확히 1기가 아니다`);
+      const hip = profile.hips.find((h) => `${h.sx > 0 ? '+x' : '-x'}${h.sz > 0 ? '+z' : '-z'}` === hipKey);
+      invariant(hip, `${label}: 잡상 ${hipKey} 에 대응하는 내림마루가 없다`);
+      let prevAlong = -Infinity;
+      for (const f of figures) {
+        invariant(f.along > prevAlong, `${label}/${hipKey}: 잡상 호길이 순서가 뒤집혔다`);
+        prevAlong = f.along;
+        // 내림마루 폴리라인과의 최소 거리(수평)로 "마루 위 정렬"을 판정한다.
+        let best = Infinity;
+        for (let i = 1; i < hip.points.length; i++) {
+          const a = hip.points[i - 1], b = hip.points[i];
+          const dx = b.x - a.x, dz = b.z - a.z;
+          const t = Math.max(0, Math.min(1, ((f.x - a.x) * dx + (f.z - a.z) * dz)
+            / Math.max(1e-12, dx * dx + dz * dz)));
+          best = Math.min(best, Math.hypot(f.x - (a.x + dx * t), f.z - (a.z + dz * t)));
+        }
+        invariant(best <= 1e-6,
+          `${label}/${hipKey}: 잡상이 내림마루선에서 ${best.toFixed(4)}m 벗어났다`);
+        invariant(f.y > profile.eave.cornerY && f.y < roof.height,
+          `${label}/${hipKey}: 잡상 y ${f.y.toFixed(3)} 가 처마~용마루 구간 밖이다`);
+        invariant(f.size > 0.1, `${label}/${hipKey}: 잡상 크기 ${f.size}`);
+      }
+    }
+
+    // ⑧ 처마 밑 단청 띠: 저작 상수가 아니라 실측 지붕면 아래여야 한다(면 중앙에서 띠가 지붕을
+    //    뚫고 올라오는 회귀 가드). 아래로는 공포대 상단(=roof.y, 로컬 0) 위에 남는다.
+    invariant(profile.band, `${label}: 처마 단청 띠가 사라졌다`);
+    invariant(profile.band.top <= profile.band.surfaceLow + 1e-9,
+      `${label}: 단청 띠 상단 ${profile.band.top.toFixed(3)} 이 지붕면 최저 `
+      + `${profile.band.surfaceLow.toFixed(3)} 위로 뚫고 나온다`);
+    invariant(profile.band.y - profile.band.height * 0.5 > 0,
+      `${label}: 단청 띠 밑면이 공포대 상단을 파고든다`);
+    invariant(profile.band.halfWidth < hw && profile.band.halfDepth < hd,
+      `${label}: 단청 띠가 처마선 밖으로 나갔다`);
+
+    rows.push({
+      tier: roof.tier, triangles, angok, ridgeSag, hipPlanDeg,
+      chwidu: orn.chwidu.length, japsang: orn.japsang.length,
+    });
+  }
+  return rows;
 }
 
 // ── 문루 비례 계약(#54 G8, 2026-08-04) ───────────────────────────────────────
@@ -446,11 +787,19 @@ function assertGateBrackets(pavilion, tag) {
     invariant(cantilever >= 0.7 && cantilever <= 2.15,
       `${label}: 외목도리 밖 캔틸레버/출목 ${cantilever.toFixed(3)} — 0.7~2.15 밖이면 처마와 공포가 `
       + '서로 다른 건물의 비례다(사진 실측 1.87)');
-    // ⑤ 지붕면이 공포대를 관통하지 않는다. buildGateRoof 는 처마를 roof.y + height*0.20 에 두고
-    //    중앙만 height*0.06 처지므로, 최저점조차 밴드 상단(=roof.y) 위여야 한다.
-    const eaveLow = roof.height * 0.20 - roof.height * 0.06;
+    // ⑤ 지붕면이 공포대를 관통하지 않는다. 처마선은 코너가 height*eaveLift, 중앙이
+    //    height*(eaveLift - eaveSag) 이므로 **최저점(중앙)** 조차 밴드 상단(=roof.y) 위여야 한다.
+    //    [2026-08-05 #54] 구 단언은 0.20/0.06 을 하드코딩했다. 상수를 읽도록 바꿨을 뿐 값은 같다
+    //    (0.30 - 0.16 = 0.14 = 구 0.20 - 0.06) — 완화가 아니라 곡률 저작과의 정합이다. 중앙 여유
+    //    비율 하한을 함께 못 박아, 나중에 앙곡을 키우려고 중앙을 공포대 쪽으로 내리는 것을 막는다.
+    const tierCurve = cityGateRoofTier(roof.tier);
+    const eaveMidRatio = tierCurve.eaveLift - tierCurve.eaveSag;
+    const eaveLow = roof.height * eaveMidRatio;
     invariant(eaveLow > 0,
       `${label}: 지붕 처마 최저점이 공포대 상단을 파고든다 (${eaveLow.toFixed(3)}m)`);
+    invariant(eaveMidRatio >= 0.10,
+      `${label}: 처마 중앙 여유 비율 ${eaveMidRatio.toFixed(3)} < 0.10 — 앙곡을 키우려면 코너를 `
+      + '올려라(eaveLift), 중앙을 공포대 쪽으로 내리지 말 것');
   }
 
   // ⑥ 상층 위계: 포 밀도가 하층보다 낮아지면 위계가 뒤집힌다(출목·단청 rank 는 별 계약).
@@ -1384,12 +1733,17 @@ let gateParapetTriangles = 0;
 let gateMerlons = 0;
 const closureRows = [];
 const heightRows = [];
+const roofRows = [];
+const plaqueRows = [];
 for (const gate of defaultWall.gates) {
   const structure = cityGateStructureProfile(gate, defaultPlan.site);
   const masonry = cityGateMasonryProfile(gate, defaultPlan.site, structure);
   const pavilion = cityGatePavilionProfile(gate, structure, masonry);
   closureRows.push(...assertPavilionFacadeClosure(pavilion, `default hanyang/${gate.name}`)
     .map((row) => ({ gate: gate.name, ...row })));
+  roofRows.push(...assertGateRoofForm(pavilion, `default hanyang/${gate.name}`)
+    .map((row) => ({ gate: gate.name, ...row })));
+  plaqueRows.push(assertGatePlaque(gate, pavilion, `default hanyang/${gate.name}`));
   // ── 육축:문루 높이 비(#54 G8) ──
   // 사진 실측 육축 노출 / 문루 용마루 = 0.80 (= 육축:문루 1:1.25). 이 비는 지형 낙차가 육축
   // 노출 높이를 6.1~10.2m 로 흔들기 때문에 seed 마다 다르다 — 그래서 저작 상수가 아니라
@@ -1470,6 +1824,14 @@ for (const consumed of [
   'B.infill',
   'storey.panel',
   'storey.columnRadius',
+  // #54 2026-08-05: 지붕 곡률·마루 종물. 곡선·종물 좌표는 순수 profile 이 주고 렌더러는 소비만 한다.
+  'cityGateRoofProfile',
+  'cityGateRoofOrnamentPolicy',
+  'profile.faces',
+  'profile.hips',
+  'profile.ornaments',
+  'profile.ridge',
+  'profile.band',
 ]) {
   invariant(citywallSource.includes(consumed),
     `citywall.js does not consume ${consumed} — R3 masonry/pavilion spec is unrendered`);
@@ -1505,6 +1867,84 @@ invariant(/SHADE_CASTS_SHADOW\s*=\s*false/.test(citywallSource)
 'citywall.js 홍예 그늘 판은 그림자를 던지면 안 된다(밀착한 석면에 자기 그림자를 찍는다)');
 invariant((citywallSource.match(/new THREE\.MeshStandardMaterial/g) || []).length <= 6,
   'citywall.js material count grew — 병합 후 드로우콜 예산');
+
+// ── 현판·양성 휘도 대비 계약 (비전 FIX①·권고③ 2026-08-05) ───────────────────
+// 비전 판정은 "현판이 실내 음영과 값 차가 없어 개구부로 오독된다"였다. 픽셀 ΔL 은 조명·톤매핑에
+// 딸린 값이라 순수 게이트가 잴 수 없지만, **재질 배정의 상대휘도 차**는 조명과 무관한 구성상 계약이고
+// 순수하게 잴 수 있다 — 밝은 몰딩(plaqueMat) · 짙은 바탕판(ridgeMat) · 상층 실내 배경(woodMat)의
+// 세 값이 서로 갈려 있어야 어떤 노출에서도 판이 개구부로 뭉개지지 않는다. 렌더된 픽셀 ΔL 실측은
+// scratch 도구(analyze-plaque.mjs)가 별도로 보고한다.
+const gateColour = (name) => {
+  const match = citywallSource.match(new RegExp(`${name}\\s*=\\s*new THREE\\.MeshStandardMaterial\\(\\{[^}]*?(?:color:\\s*)?linCol\\(0x([0-9a-fA-F]{6})\\)`));
+  invariant(match, `citywall.js 에서 ${name} 색을 찾지 못했다 — 대비 계약을 잴 수 없다`);
+  return Number.parseInt(match[1], 16);
+};
+const plaqueFrameLum = srgbRelativeLuminance(gateColour('plaqueMat'));
+const plaqueBoardLum = srgbRelativeLuminance(gateColour('ridgeMat'));
+const interiorLum = srgbRelativeLuminance(gateColour('woodMat'));
+invariant(plaqueFrameLum - plaqueBoardLum >= 0.30,
+  `현판 몰딩/바탕판 상대휘도 차 ${(plaqueFrameLum - plaqueBoardLum).toFixed(3)} < 0.30 — 테두리가 `
+  + '판을 분리하지 못해 어두운 슬롯으로 읽힌다');
+invariant(plaqueFrameLum - interiorLum >= 0.30,
+  `현판 몰딩/상층 실내 배경 상대휘도 차 ${(plaqueFrameLum - interiorLum).toFixed(3)} < 0.30 — `
+  + '현판이 실내 음영에 묻힌다(비전 FIX①)');
+invariant(plaqueBoardLum < interiorLum,
+  `현판 바탕판(${plaqueBoardLum.toFixed(3)})이 실내 배경(${interiorLum.toFixed(3)})보다 밝다 — `
+  + '어두운 판 + 밝은 테두리라는 현판 대비가 반대로 뒤집혔다');
+// 색 대비 계약은 **재질 배정**까지 봐야 성립한다(색만 재면 판/몰딩 재질을 맞바꿔도 통과한다 —
+// FAIL-first 확인에서 실제로 그 구멍이 드러났다: 바탕판을 밝은 판으로 바꿔도 잡히지 않았다).
+invariant(/BoxGeometry\(p\.width \+ p\.frame \* 2[\s\S]{0,80}?M\.plaqueMat\)/.test(citywallSource),
+  '현판 테두리 몰딩이 밝은 재질(plaqueMat)이 아니다');
+invariant(/BoxGeometry\(p\.width, p\.height, p\.depth\), M\.ridgeMat\)/.test(citywallSource),
+  '현판 바탕판이 짙은 재질(ridgeMat)이 아니다 — 밝은 판은 창호로 읽힌다');
+// 양성은 흰 판이 아니라 회색 화강암 재질을 쓴다(구 흰 plaqueMat = "눈 쌓인 띠", 비전 권고 ③).
+invariant(/city-gate-ridge-plaster[\s\S]{0,400}?M\.masonryMat/.test(citywallSource)
+  || /sweepMaruGeometry\([^)]*PLASTER_TONE\),\s*\n?\s*M\.masonryMat/.test(citywallSource),
+'용마루 양성이 회색 화강암 재질(masonryMat)로 칠해지지 않는다 — 흰 판은 눈 쌓인 띠로 읽힌다');
+invariant(/paintTube\(geoHip, PLASTER_TONE\), M\.masonryMat/.test(citywallSource),
+  '내림마루가 양성(masonryMat)이 아니다 — 어두운 실선에 구슬만 얹힌 인상으로 되돌아간다');
+const plasterLum = srgbRelativeLuminance(0x8e887c);   // masonryMat 화강암(색 리터럴은 vertexColors 재질)
+invariant(plasterLum < plaqueFrameLum - 0.10,
+  `양성(${plasterLum.toFixed(3)})이 현판 몰딩(${plaqueFrameLum.toFixed(3)})만큼 밝다 — 회색 양성 `
+  + '요구(비전 권고 ③)와 어긋난다');
+
+// ── 문루 지붕 종물 등급 (#150 C 개정 2026-08-05) ─────────────────────────────
+// 원 결정 보존 확인: palace 정책은 여전히 city-gate 에 잡상·취두를 주지 않는다. 신설 등급은
+// 그 정책을 우회하지 않고 **별도 등급**으로 존재한다(이름·플래그가 서로 배타적이다).
+invariant(roofOrnamentPolicy(ROOF_RANK.CITY_GATE).chwidu === false
+  && roofOrnamentPolicy(ROOF_RANK.CITY_GATE).japsang === false,
+'palace 종물 정책이 city-gate 로 누출됐다 — #150 C 원 결정이 훼손됐다');
+invariant(cityGateRoofOrnamentPolicy(ROOF_RANK.CITY_GATE).chwidu === true
+  && cityGateRoofOrnamentPolicy(ROOF_RANK.CITY_GATE).japsang === true
+  && cityGateRoofOrnamentPolicy(ROOF_RANK.CITY_GATE).ridgePlaster === true,
+'city-gate 전용 종물 등급이 성문에 적용되지 않는다');
+for (const rank of [ROOF_RANK.PALACE, ROOF_RANK.MAGISTRACY, ROOF_RANK.GIWA]) {
+  const policy = cityGateRoofOrnamentPolicy(rank);
+  invariant(!policy.chwidu && !policy.japsang && !policy.ridgePlaster,
+    `city-gate 종물 등급이 ${rank} 로 번졌다 — 등급 분리가 깨졌다`);
+}
+invariant(cityGateRoofOrnamentPolicy(ROOF_RANK.CITY_GATE).chwiduName === CITY_GATE_CHWIDU_NAME
+  && cityGateRoofOrnamentPolicy(ROOF_RANK.CITY_GATE).japsangName === CITY_GATE_JAPSANG_NAME
+  && CITY_GATE_CHWIDU_NAME !== PALACE_CHWIDU_NAME
+  && CITY_GATE_JAPSANG_NAME !== PALACE_JAPSANG_NAME,
+'성문 종물 이름이 궁 이름과 겹친다 — 감사·아이콘 분류가 오표시된다');
+invariant(CITY_GATE_JAPSANG_RANGE.max <= 5 && CITY_GATE_JAPSANG_RANGE.min >= 3,
+  `성문 잡상 대역 ${CITY_GATE_JAPSANG_RANGE.min}~${CITY_GATE_JAPSANG_RANGE.max} — 궁(3~11)보다 `
+  + '적어야 위계가 유지된다');
+// 렌더러가 궁 이름을 문자열로 박아 넣는 것도 금지(정책 우회 경로).
+for (const banned of [PALACE_CHWIDU_NAME, PALACE_JAPSANG_NAME]) {
+  invariant(!citywallSource.includes(banned),
+    `citywall.js 가 궁 종물 이름(${banned})을 직접 쓴다`);
+}
+// 구 저작(정점 8개 부채 + 막대 마루 + 하드코딩된 처마 높이)이 남아 있으면 곡률 격상이 무효다.
+invariant(!/const tw = w \* 0\.15/.test(citywallSource),
+  'citywall.js still authors the tent ridge (폭×0.15) instead of the 45° 우진각 rule');
+// 렌더러가 지붕 높이의 분율로 좌표를 되저작하는 것을 금지한다(구 처마 반전 height*0.20 이 그 형태였다).
+// 부재 자기 중심(B.*.height * 0.5 류)은 계획값 소비라 허용되고, roof/profile 의 **지붕 높이**만 막는다.
+invariant(!/(roof|profile)\.height\s*\*/.test(citywallSource),
+  'citywall.js re-authors a fraction of the roof height — 처마·마루 곡선 좌표는 profile 이 소유한다');
+invariant(/profile\.y \+ band\.y/.test(citywallSource),
+  'citywall.js 처마 단청 띠가 profile 의 실측 band.y 를 쓰지 않는다');
 
 // ── 문전 마당 (R3 Phase B) ── 성문 안쪽 접근 예약이 **필지 배치에도** 걸려야 한다. 이전에는 식생에만
 //   걸려 있어 일반 필지가 육축 12~14m 앞까지 붙었다(hanyang/7 남문 13.8m·/99 12.0m). 마당은 빈
@@ -1546,4 +1986,14 @@ const forecourtAreas = forecourtRows.map((r) => r.area);
 const forecourtSummary = `${forecourtRows.length} forecourts `
   + `${Math.round(Math.min(...forecourtAreas))}~${Math.round(Math.max(...forecourtAreas))} m2`;
 
-console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary}, ${closureSummary}, ${proportionSummary})`);
+// 지붕 실측 요약(#54 2026-08-05): 곡률 3축 + 종물 수 + 지붕면 삼각 예산.
+const upperRoofRows = roofRows.filter((row) => row.tier === 'upper');
+const roofSummary = `문루 지붕 내림마루 ${span(roofRows.map((r) => r.hipPlanDeg))}° 평면각, `
+  + `앙곡 ${span(roofRows.map((r) => r.angok))}m, 용마루 처짐 ${span(roofRows.map((r) => r.ridgeSag))}m, `
+  + `종물 취두 ${upperRoofRows.reduce((s, r) => s + r.chwidu, 0)}·잡상 `
+  + `${upperRoofRows.reduce((s, r) => s + r.japsang, 0)} (city-gate 등급), `
+  + `지붕면 ${roofRows.reduce((s, r) => s + r.triangles, 0)} tri / ${roofRows.length}면조`;
+const plaqueSummary = `현판 ${plaqueRows.map((r) => `${r.gate}=${r.orientation[0]}`
+  + `${r.width.toFixed(2)}×${r.height.toFixed(2)}`).join(' ')}`;
+
+console.log(`CITY WALL: PASS (${contourCount} contours, ${terrainSegments} terrain segments, ${defaultPlan.parcels.length} default parcels, ${defaultRoadTriangles} road triangles, ${merlonCount}+${gateMerlons} merlons / ${merlonTriangles} tri, ${forecourtSummary}, ${closureSummary}, ${proportionSummary}, ${roofSummary}, ${plaqueSummary})`);

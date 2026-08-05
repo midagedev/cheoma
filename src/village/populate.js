@@ -231,7 +231,9 @@ export function* populateVillageSteps(plan, opts = {}) {
     villagePalette = wallMats;
     // 필지 성토 패드 높이(집·마당·담이 한 레벨). 인접 필지 낙차 → 계단식 단차.
     for (const p of plan.parcels) p.baseY = computePadY(p, site);
-    root.add(buildParcelPads(plan.parcels, site));   // 기단 상면 + 축대(옹벽) — 2 드로우콜
+    // 기단 상면 + 축대(옹벽) — 2 드로우콜. plan 을 넘기면 패드 없는 구조물(시전·정자·돌단)의
+    //   접지 석축도 같은 두 버퍼에 접힌다(#56 ground-junction, 드로우콜 델타 0).
+    root.add(buildParcelPads(plan.parcels, site, plan));
 
     // 대규모 주택 청크 런타임 LOD(#92 자유 줌: 부감 mass가 다가가도 남던 문제).
     //   구현은 모듈 스코프 attachChunkLodSwap(L818) — chunkGroup.userData.lodUpdate 에 부착하고 렌더 루프

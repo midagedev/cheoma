@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { makeCityGateDancheong } from '../builder/palette.js';
+import { CHWIDU_UNIT, makeChwiduGeometry } from '../builder/roof.js';
+import { cityGateRoofOrnamentPolicy } from '../builder/roof-rank.js';
 import { mergeStatic } from './instancing.js';
 import {
   CITY_STONE_BOND,
@@ -8,6 +10,7 @@ import {
   CITY_WALL_DIMENSIONS,
   cityGateMasonryProfile,
   cityGatePavilionProfile,
+  cityGateRoofProfile,
   cityGateStructureProfile,
   cityStoneBondPlan,
   cityStoneTone,
@@ -197,51 +200,158 @@ function pushRectPrism(P, I, C, bottom, top, y0, y1, {
   if (withBottom) pushQuad(P, I, C, [b[0], b[1], b[2], b[3]], [0, -1, 0], flat);
 }
 
-// 문루 우진각 지붕(#78 근경 격상) — 평슬래브 대신 지붕 어휘로 읽히게: 처마 반전(코너 들림)·
-//   처마 곡(중앙 처짐)·용마루(main ridge)·내림마루(hip ridges, 능선 끝→4코너). 저폴리 유지.
-//   반환 THREE.Group(면=tileMat, 마루=ridgeMat). 문 4기 한정이라 병합 후 드로우콜 소폭↑ 허용.
-//   roof-rank = city-gate (#150 C): 궁 잡상·취두 등 palace ornament를 절대 붙이지 않는다.
-//   중층의 하층 차양은 상층 벽에 붙는 스커트라 실제로는 용마루가 없다(ridge=false). 코너 내림마루는
-//   바깥에서 보이므로 두 단 모두 남긴다.
-function buildGateRoof(w, d, h, M, { ridge = true } = {}) {
+// 마루 부재 스윕: 폴리라인(용마루 곡선)을 따라가는 사각 단면 프리즘. 밑면은 지붕면에 묻히므로
+//   윗면 + 좌우 면 + 양 끝 마구리만 만든다(곡선을 따르는 BoxGeometry 대체물).
+//   value: 정점색 값. 양성바름을 화강암 재질(masonryMat, vertexColors)로 칠하므로 색 속성이 필수다.
+function sweepMaruGeometry(points, halfThickness, height, seat, value = null) {
+  const P = [], I = [], C = [];
+  const push = (x, y, z, tone) => {
+    P.push(x, y, z);
+    if (value != null) C.push(tone, tone, tone);
+    return P.length / 3 - 1;
+  };
+  const rows = points.map((p) => {
+    const y0 = p.y + seat, y1 = p.y + seat + height;
+    // 위가 밝고 아래가 살짝 어두운 값차 — 회반죽 띠의 두께가 실루엣 없이도 읽힌다.
+    const low = value != null ? value * 0.9 : 0;
+    return {
+      bn: push(p.x, y0, -halfThickness, low), bp: push(p.x, y0, halfThickness, low),
+      tn: push(p.x, y1, -halfThickness, value), tp: push(p.x, y1, halfThickness, value),
+    };
+  });
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i], b = rows[i + 1];
+    I.push(a.tn, a.tp, b.tp, a.tn, b.tp, b.tn);   // 윗면
+    I.push(a.bp, a.tp, b.tp, a.bp, b.tp, b.bp);   // +z 면
+    I.push(a.bn, b.bn, b.tn, a.bn, b.tn, a.tn);   // -z 면
+  }
+  const s = rows[0], e = rows[rows.length - 1];
+  I.push(s.bn, s.tn, s.tp, s.bn, s.tp, s.bp);     // 마구리(시작)
+  I.push(e.bp, e.tp, e.tn, e.bp, e.tn, e.bn);     // 마구리(끝)
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  if (value != null) geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+  geo.setIndex(I); geo.computeVertexNormals();
+  return geo;
+}
+
+// 내림마루 튜브에 정점색을 입힌다(masonryMat 은 vertexColors 재질이라 색 속성이 없으면 흰색으로 뜬다).
+function paintTube(geo, value) {
+  const count = geo.attributes.position.count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    // 튜브 위쪽이 밝고 아래가 어둡게 — 둥근 마루의 음영을 정점색으로 거든다.
+    const ny = geo.attributes.normal ? geo.attributes.normal.getY(i) : 0;
+    const tone = value * (0.9 + 0.1 * Math.max(0, ny));
+    colors[i * 3] = tone; colors[i * 3 + 1] = tone; colors[i * 3 + 2] = tone;
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  return geo;
+}
+
+// 문루 우진각 지붕(#54 2026-08-05 곡면 격상) — 좌표는 전부 cityGateRoofProfile 이 준다. 이 함수는
+//   그 정점·인덱스·마루선·종물 위치를 재질에 얹기만 하고 곡선을 다시 평가하지 않는다.
+//     · 지붕면: 앙곡(처마 코너 들림) + 후림(오목 낙차) + 용마루 곡선을 태운 4면 격자
+//     · 용마루: 양성바름(흰 회 = 기존 plaqueMat) 띠 + 그 위 어두운 기와 관
+//     · 내림마루: 앞·뒤면과 좌·우면이 공유하는 에지를 따르는 튜브 4줄(하층 차양도 받는다)
+//     · 종물: **city-gate 전용 등급**(#150 C 개정 2026-08-05)의 취두 2 + 내림마루 잡상 열.
+//       궁 등급의 이름·정책은 빌려오지 않는다(roof-rank.js 가 두 등급을 분리 소유) — 취두는
+//       기하만 공유한다(roof.js makeChwiduGeometry).
+//   재질은 기존 tileMat/ridgeMat/plaqueMat 만 쓰므로 병합 후 드로우콜 델타는 0 이다.
+function buildGateRoof(profile, M) {
   const g = new THREE.Group();
   g.name = 'city-gate-roof';
   g.userData.roofRank = 'city-gate';
-  const hw = w / 2, hd = d / 2;
-  const tw = w * 0.15;               // 용마루 반길이(짧은 능선)
-  const cl = h * 0.20;               // 처마 반전(코너 들림) — 한식 지붕 실루엣
-  const sag = h * 0.06;              // 처마 중앙 처짐(오목 곡선)
+  g.userData.roofTier = profile.tier;
+  const ornaments = cityGateRoofOrnamentPolicy(g.userData.roofRank);
+
+  // ── 지붕면 4면을 한 지오메트리로(와인딩은 profile 이 바깥+위로 확정해 준다).
   const P = [], I = [];
-  const add = (x, y, z) => { P.push(x, y, z); return P.length / 3 - 1; };
-  const RL = add(-tw, h, 0), RR = add(tw, h, 0);              // 용마루 두 끝
-  const flC = add(-hw, cl, hd), frC = add(hw, cl, hd), fMid = add(0, cl - sag, hd); // 앞 처마
-  const blC = add(-hw, cl, -hd), brC = add(hw, cl, -hd), bMid = add(0, cl - sag, -hd); // 뒤 처마
-  // 앞면(+z): 처마(fl·fMid·fr) → 용마루(RL·RR)
-  I.push(flC, fMid, RL, fMid, RR, RL, fMid, frC, RR);
-  // 뒷면(-z)
-  I.push(brC, bMid, RR, bMid, RL, RR, bMid, blC, RL);
-  // 좌·우 우진각 삼각
-  I.push(flC, RL, blC);
-  I.push(frC, brC, RR);
+  for (const face of profile.faces) {
+    const base = P.length / 3;
+    for (let i = 0; i < face.points.length; i++) P.push(face.points[i]);
+    for (let i = 0; i < face.indices.length; i++) I.push(base + face.indices[i]);
+  }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   geo.setIndex(I); geo.computeVertexNormals();
   const surf = new THREE.Mesh(geo, M.tileMat);
+  surf.name = 'city-gate-roof-surface';
   surf.castShadow = surf.receiveShadow = true; g.add(surf);
-  // 용마루: 능선 위 두툼한 어두운 기와마루.
-  if (ridge) {
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(tw * 2 + w * 0.05, h * 0.16, d * 0.11), M.ridgeMat);
-    beam.position.set(0, h + h * 0.04, 0); beam.castShadow = true; g.add(beam);
+
+  // ── 용마루: 양성바름 띠 + 관. 하층 차양(ridged=false)은 용마루가 없다.
+  //    [비전 권고 ③ 2026-08-05] 양성은 흰 plaqueMat 이 아니라 **화강암 masonryMat(회색)** 으로
+  //    칠한다 — 흰 판은 "눈 쌓인 띠"로 읽혔고 구한말 사진의 양성은 더 회색이다. 재질은 성벽과
+  //    공유하므로 신규 재질 0·병합 델타 0 이고, 값 변주는 정점색이 낸다.
+  const PLASTER_TONE = 0.94;
+  if (profile.ridged) {
+    const R = profile.ridge;
+    const plaster = new THREE.Mesh(
+      sweepMaruGeometry(R.points, R.thickness * 0.5, R.height, -R.height * 0.12, PLASTER_TONE),
+      M.masonryMat);
+    plaster.name = 'city-gate-ridge-plaster';
+    plaster.castShadow = plaster.receiveShadow = true; g.add(plaster);
+    const cap = new THREE.Mesh(
+      sweepMaruGeometry(R.points, R.thickness * 0.5 + 0.04, R.capHeight, R.height * 0.88), M.ridgeMat);
+    cap.name = 'city-gate-ridge-cap';
+    cap.castShadow = true; g.add(cap);
   }
-  const xAxis = new THREE.Vector3(1, 0, 0);
-  for (const [ex, ez] of [[hw, hd], [hw, -hd], [-hw, hd], [-hw, -hd]]) {
-    const rx = Math.sign(ex) * tw;                            // 능선 끝
-    const dir = new THREE.Vector3(ex - rx, cl - h, ez);
-    const len = dir.length(); dir.normalize();
-    const hip = new THREE.Mesh(new THREE.BoxGeometry(len, h * 0.10, d * 0.07), M.ridgeMat);
-    hip.quaternion.setFromUnitVectors(xAxis, dir);
-    hip.position.set((rx + ex) / 2, (h + cl) / 2, ez / 2);
-    hip.castShadow = true; g.add(hip);
+
+  // ── 내림마루: 지붕면 위에 앉는 튜브(반지름만큼 들어 면에 접한다). 용마루와 같은 양성이라
+  //    같은 회색 재질을 쓰고, 그 위에 얹히는 잡상만 짙은 기와색이라 대비가 생긴다
+  //    (구 구현은 마루가 짙어 "어두운 실선에 구슬만 얹힌" 인상이었다 — 비전 권고 ③).
+  for (const hip of profile.hips) {
+    const pts = hip.points.map((p) => new THREE.Vector3(p.x, p.y + hip.radius, p.z));
+    const geoHip = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, hip.radius, 5, false);
+    const tube = new THREE.Mesh(paintTube(geoHip, PLASTER_TONE), M.masonryMat);
+    tube.name = 'city-gate-hip-ridge';
+    tube.castShadow = true; g.add(tube);
+  }
+
+  // ── 취두(용마루 양단). 기하는 roof.js 의 단위 취두를 공유하되 이름은 city-gate 등급이다.
+  //    미러는 음수 스케일이 아니라 y 180° 회전으로 한다(병합 시 와인딩이 뒤집히지 않게).
+  if (ornaments.chwidu) {
+    for (const c of profile.ornaments.chwidu) {
+      const unit = makeChwiduGeometry();
+      const s = c.height / CHWIDU_UNIT.height;
+      const base = c.mirror ? Math.PI : 0;
+      const main = new THREE.Mesh(unit, M.ridgeMat);
+      main.name = c.name;
+      // [비전 권고 ⑤] 실루엣이 뭉툭했다: 세로로 늘리고 교차 메시를 더 좁혀 위로 솟은 형태로 읽히게.
+      main.scale.set(s * 0.92, s * 1.12, s * 0.92);
+      main.rotation.y = base;
+      main.position.set(c.x, c.y, c.z);
+      main.castShadow = true; g.add(main);
+      // 십자 교차: 같은 shape 을 90° 돌려 축소해 겹쳐 어느 각도에서도 실루엣이 남는다.
+      const cross = new THREE.Mesh(unit, M.ridgeMat);
+      cross.name = c.name;
+      cross.scale.set(s * 0.66, s * 1.06, s * 0.66);
+      cross.rotation.y = base + Math.PI / 2;
+      cross.position.copy(main.position);
+      cross.castShadow = true; g.add(cross);
+    }
+  }
+
+  // ── 잡상(내림마루 열). 처마 쪽 선두만 삿갓을 쓴다 — 궁 잡상보다 수가 적고(≤5) 토수·추녀마루
+  //    종물은 받지 않는다(위계).
+  if (ornaments.japsang) {
+    for (const j of profile.ornaments.japsang) {
+      const s = j.size;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(s * 0.7, s, s * 0.7), M.ridgeMat);
+      body.name = j.name;
+      body.position.set(j.x, j.y + s * 0.5, j.z);
+      body.castShadow = true; g.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(s * 0.42, 6, 4), M.ridgeMat);
+      head.name = j.name;
+      head.position.set(j.x, j.y + s + s * 0.3, j.z);
+      head.castShadow = true; g.add(head);
+      if (j.lead) {
+        const hat = new THREE.Mesh(new THREE.ConeGeometry(s * 0.62, s * 0.4, 8), M.ridgeMat);
+        hat.name = j.name;
+        hat.position.set(j.x, j.y + s + s * 0.72, j.z);
+        hat.castShadow = true; g.add(hat);
+      }
+    }
   }
   return g;
 }
@@ -471,11 +581,7 @@ function addPavilionStorey(g, storey, M) {
       rail.position.set(x, storey.y0 + storey.rail * 0.5, z);
       rail.castShadow = true; g.add(rail);
     }
-    // 편액: 상층 정면 흰 판 하나(글씨·단청 없음 — 기하만).
-    const plaqueW = Math.min(storey.width * 0.34, 3.2);
-    const plaque = new THREE.Mesh(new THREE.BoxGeometry(plaqueW, plaqueW * 0.42, 0.14), M.plaqueMat);
-    plaque.position.set(0, storey.y0 + colH * 0.6, hd + 0.1);
-    plaque.castShadow = true; g.add(plaque);
+    addPavilionPlaque(g, storey, M);
     return;
   }
   // 하층 벽체: 기둥 사이 판벽(판문·회벽으로 읽히는 면). 기둥 뒤로 물러나 기둥열이 살아난다.
@@ -497,6 +603,38 @@ function addPavilionStorey(g, storey, M) {
     panel.position.set(sx * (hw - radius * 0.6), panelY, 0);
     panel.castShadow = panel.receiveShadow = true; g.add(panel);
   }
+}
+
+// 현판(#54, 사용자 지시 2026-08-05): 상층 정면 중앙 칸 창방 밑에 걸리는 편액 1매.
+//   구 구현은 흰 판 하나(plaqueMat)를 기둥 높이의 0.6 자리에 붙였고, 밝은 판이라 파사드에서
+//   창호처럼 읽혔다. 현판은 **어두운 바탕판 + 밝은 테두리 몰딩**이라 대비가 반대다 — 글자는 넣지
+//   않는다(사용자 지시). 위치·치수·방향(남문 세로 / 나머지 가로)은 순수 profile 이 소유한다.
+//   재질은 기존 ridgeMat(짙은 판) + plaqueMat(밝은 몰딩) 두 개를 차입하므로 병합 델타 0 이다.
+function addPavilionPlaque(g, storey, M) {
+  const p = storey.plaque;
+  if (!p) return;
+  // 전방 틸트(비전 FIX① 2026-08-05): rotation.x = -tilt 이면 판 상단이 앞으로 나오고 판면 법선이
+  //   위-앞을 향한다 → 판면이 하늘빛을 받아 상층 실내 음영과 휘도로 갈린다(구 구현은 수직판이라
+  //   포열 그림자에 묻혀 "어두운 세로 슬롯"으로 개구부처럼 오독됐다). 실물 편액도 올려다보게 기울여
+  //   건다. 틸트로 상단이 z 로 나오는 양은 height/2 * sin(tilt) 이며, 처마 밑에 그대로 남는다.
+  const tilt = -(p.tiltDeg || 0) * Math.PI / 180;
+  const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(p.width + p.frame * 2, p.height + p.frame * 2, p.depth * 0.6),
+    M.plaqueMat);
+  frame.name = 'city-gate-plaque-frame';
+  frame.position.set(p.x, p.y, p.z);
+  frame.rotation.x = tilt;
+  frame.castShadow = frame.receiveShadow = true; g.add(frame);
+  // 바탕판은 몰딩 앞으로 나오되 같은 틸트를 공유한다(판면 법선이 어긋나면 테두리가 그림자를 만든다).
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(p.width, p.height, p.depth), M.ridgeMat);
+  board.name = 'city-gate-plaque-board';
+  board.position.set(
+    p.x,
+    p.y + Math.sin(-tilt) * p.depth * 0.28,
+    p.z + Math.cos(tilt) * p.depth * 0.28);
+  board.rotation.x = tilt;
+  board.castShadow = true; g.add(board);
 }
 
 // 다포계 공포대 한 층(#23 R3-①). 예전 구현은 창방·평방 두 켜 + 기둥머리 소로 블록뿐이어서, 처마는
@@ -711,28 +849,32 @@ function buildGate(gate, site, M, wallSeed) {
   // 중층 문루: 하층 기둥열+판벽, 상층은 폭·깊이를 체감한 기둥열+난간. 지붕 2단(하층 차양 + 상층 본지붕).
   for (const storey of pavilion.storeys) addPavilionStorey(g, storey, M);
   for (const roof of pavilion.roofs) {
-    const built = buildGateRoof(roof.width, roof.depth, roof.height, M, { ridge: roof.tier === 'upper' });
+    // 지붕 spec 은 한 번만 만들어 지붕면·마루·종물·처마 단청 띠가 같은 곡선을 공유한다.
+    const roofProfile = cityGateRoofProfile(roof);
+    const built = buildGateRoof(roofProfile, M);
     built.position.set(0, roof.y, 0);
     g.add(built);
-    addEaveDancheongBand(g, roof, M);
+    addEaveDancheongBand(g, roofProfile, M);
   }
   return g;
 }
 
 // 처마 밑 채색 띠: 처마선 바로 안쪽을 도리·부연 채색 밴드로 두른다. 지붕면 자체는 손으로 감은
 // uv 없는 지오메트리라 단청 map 을 붙일 수 없으므로, uv 가 있는 박스 네 개로 처마 밑면을 대신한다.
-function addEaveDancheongBand(g, roof, M) {
-  const lift = roof.height * 0.20;              // buildGateRoof 의 처마 반전 높이
-  const inset = 0.55, thickness = 0.3, height = 0.24;
-  const hw = roof.width * 0.5 - inset, hd = roof.depth * 0.5 - inset;
-  if (hw <= thickness || hd <= thickness) return;
-  const y = roof.y + lift - height * 0.45;
+//   y 는 더 이상 처마 반전 높이(구 height*0.20)를 가정하지 않는다 — 처마선이 곡선이 되면서 코너와
+//   중앙의 높이가 갈렸으므로, profile 이 **네 런의 인셋 위치에서 실측한 가장 낮은 지붕면** 아래로
+//   내려 준다(면 중앙에서 띠가 지붕면을 뚫고 올라오는 것을 구성상 불가능하게 한다).
+function addEaveDancheongBand(g, profile, M) {
+  const band = profile.band;
+  if (!band) return;
+  const y = profile.y + band.y;
+  const { halfWidth: hw, halfDepth: hd, thickness, height } = band;
   for (const [w, d, x, z] of [
     [hw * 2, thickness, 0, hd], [hw * 2, thickness, 0, -hd],
     [thickness, hd * 2, hw, 0], [thickness, hd * 2, -hw, 0],
   ]) {
-    const band = new THREE.Mesh(new THREE.BoxGeometry(w, height, d), M.dancheongBeam);
-    band.position.set(x, y, z);
-    band.castShadow = true; g.add(band);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, height, d), M.dancheongBeam);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true; g.add(mesh);
   }
 }

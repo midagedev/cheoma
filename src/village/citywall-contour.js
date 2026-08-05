@@ -1,4 +1,10 @@
 import * as G from '../core/math/geom2.js';
+import {
+  CITY_GATE_CHWIDU_NAME,
+  CITY_GATE_JAPSANG_NAME,
+  CITY_GATE_JAPSANG_RANGE,
+  ROOF_RANK,
+} from '../builder/roof-rank.js';
 import { streamSurfaceHeightAt, terrainMeshHeightAt } from './terrain-grid.js';
 
 // 한양 성곽의 순수 평면 계약. 좌표는 village 공통 규약(+z=남)을 따른다.
@@ -199,6 +205,391 @@ export const CITY_GATE_PAVILION = Object.freeze({
   columnRadiusK: 0.075,     // 기둥 반지름 / 층 높이
   columnRadiusMax: 0.3,
 });
+
+// ── 문루 현판(#54, 사용자 지시 2026-08-05) ───────────────────────────────────
+// 상층 정면 중앙 칸, 공포대(창방) 밑에 걸리는 편액 1매. **글자는 넣지 않는다**(사용자: "글은
+// 없더라도") — 어두운 바탕판 + 밝은 테두리 몰딩의 무자 현판이고, 근경에서 성문 파사드의 초점이
+// 되는 것은 글씨가 아니라 그 검은 사각형과 테두리의 대비다.
+//
+// 방향(세로/가로)은 고증으로 갈린다: 사대문 중 **숭례문(남대문)만 세로 현판**이고 흥인지문·
+// 돈의문·숙정문은 가로다(숭례문 현판은 양녕대군 글씨로 전하며, 세로로 쓴 것은 관악산의 화기를
+// 누르기 위함이라는 설이 함께 전한다). 제품의 남문은 주작대로가 닿는 히어로 문이라 숭례문 자리이므로
+// **남문만 세로, 나머지 셋은 가로**로 둔다.
+// [개정 2026-08-05, 비전 FIX①] 구 저작은 현판을 **개방 칸 안**(창방 밑면 ~ 난간 위)에 갇히게 두고
+//   기둥 중심선 밖 0.18m 에 걸었다. 그 둘이 겹쳐 정면에서 "작고 어두운 세로 슬롯"이 되어 개구부로
+//   오독됐다(비전 판정). 실측이 원인을 확정한다:
+//     · 공포 최외 출목은 기둥 중심선 밖 **0.78m**(purlin.out) → 공포 끝 z = 2.32m 인데 현판 z 는
+//       1.72m 였다. 즉 현판이 **공포대 뒤에 박혀** 포열 그림자에 묻혀 있었다.
+//     · 세로 상한이 개방고 1.32m 로 잡혀 있었으나, 실물 현판은 개방 칸 안이 아니라 **공포대(창방·
+//       평방) 대역을 가로질러** 걸린다 → 상한을 층 상단 밑(처마선 여유)까지 풀면 1.95m 다.
+//   그래서 ① z 를 공포 최외 출목 **앞**으로 내고 ② 세로 상한을 공포대 대역까지 풀고 ③ 판을 앞으로
+//   기울여(전방 틸트) 판면이 하늘빛을 받아 실내 음영과 휘도로 갈리게 하고 ④ 몰딩 폭을 올린다.
+export const CITY_GATE_PLAQUE = Object.freeze({
+  verticalGate: 'south',        // 숭례문 자리(주작대로 문)만 세로 현판
+  depth: 0.12,
+  // 공포 최외 출목 밖으로 내는 여유(기둥 중심선 기준이 아니라 **출목 기준**이다).
+  standoffBeyondPurlin: 0.06,
+  frameRatio: 0.22,            // 테두리 몰딩 두께 / 판 짧은 변 (구 0.13 — 판독성)
+  // 전방 틸트: 판 상단이 앞으로 나오고 법선이 위-앞을 향한다 → 하늘빛을 받아 실내 음영과 분리된다.
+  //   실물 편액도 아래에서 올려다보게 기울여 건다. 8~18° 대역이 계약이고 저작값은 12°.
+  tiltDeg: 12,
+  clearBelowEave: 0.25,        // 층 상단(=처마선)과의 여유 — 이 아래가 현판이 쓸 수 있는 대역
+  clearBelowBracket: 0.10,     // (참고) 창방 밑면 여유 — 이제 상한이 아니다
+  clearAboveRail: 0.25,        // 난간 위 여유
+  horizontal: Object.freeze({ bayFraction: 0.78, aspect: 0.42, maxWidth: 3.4 }),
+  vertical: Object.freeze({ bayFraction: 0.34, aspect: 2.35, maxWidth: 1.35 }),
+});
+
+// 상층 중앙 칸 현판 한 매. 사용 가능한 높이(창방 밑면 ~ 난간 위)에 맞춰 판을 줄인다 — 실물
+//   숭례문 현판(세로 약 3.5m)은 이 문루의 상층 개방고보다 크므로 비례만 따르고 크기는 맞춘다.
+function gatePlaquePlan(gate, storey) {
+  const Q = CITY_GATE_PLAQUE;
+  const vertical = gate.name === Q.verticalGate;
+  const spec = vertical ? Q.vertical : Q.horizontal;
+  // 상한은 개방 칸 안(창방 밑면)이 아니라 **층 상단(처마선) 밑**이다 — 현판은 공포대 대역을
+  //   가로질러 걸리므로, 창방·평방 앞을 지나는 것이 정상이다(비전 FIX① 2026-08-05).
+  const top = storey.y1 - Q.clearBelowEave;
+  const floor = storey.y0 + storey.rail + Q.clearAboveRail;
+  const available = top - floor;
+  if (available <= 0.3) return null;
+  const bay = storey.bay;
+  let width = Math.min(spec.maxWidth, bay * spec.bayFraction);
+  let height = width * spec.aspect;
+  if (height > available) {                    // 쓸 수 있는 대역에 맞춰 축소(비례 유지)
+    height = available;
+    width = height / spec.aspect;
+  }
+  const frame = Math.min(width, height) * Q.frameRatio;
+  // z: 공포 최외 출목 앞. 처마 끝(halfDepth + eave)보다는 한참 안쪽이라 처마 밑에 남는다.
+  const z = storey.depth * 0.5 + storey.bracket.purlin.out + Q.standoffBeyondPurlin + Q.depth * 0.5;
+  return {
+    orientation: vertical ? 'vertical' : 'horizontal',
+    width, height, frame,
+    depth: Q.depth,
+    tiltDeg: Q.tiltDeg,
+    x: 0,                                      // 정면 중앙(중앙 칸)
+    y: top - height * 0.5,
+    z,
+    purlinOut: storey.bracket.purlin.out,
+    bracketY0: storey.bracket.y0,
+    crossesBracketBand: top > storey.bracket.y0,
+    top,
+    bottom: top - height,
+    available,
+  };
+}
+
+// ── 문루 우진각 지붕(#54, 2026-08-05) ────────────────────────────────────────
+// 사용자 판정: "성문 좀더 기와에 곡률이 나와야겠다, 사진과 갭이 그게 크네. 사진 속 성문은 제대로 된
+// 지붕이야 — 기와 장식도 있고." 구 구현은 정점 8개(용마루 2 + 처마 6)의 저폴리 부채여서 지붕면에
+// 곡률이 아예 없었고("종이 접기"), 용마루 길이도 폭의 0.15 라 내림마루가 평면에서 74° 로 서는 천막에
+// 가까웠다. 여기서 못 박는 것은 그 둘이다:
+//
+//   ① 용마루 길이 = **평면 45° 내림마루** 규칙(ridgeHalf = hw - hd). 우진각의 정의적 성질이고,
+//      숭례문 사진의 내림마루 기울기가 그것이다. 구 0.15·폭 대비 상층 용마루가 5.71m → 15.13m.
+//   ② 세 곡률: 처마선 **앙곡**(코너로 갈수록 들림), 지붕면 **후림**(용마루 쪽이 급하고 처마에서
+//      완만해지는 오목 낙차), **용마루 곡선**(양단이 들리고 중앙이 처짐).
+//
+// 곡선 문법은 새로 저작하지 않고 `src/builder/roof.js` 의 것을 그대로 쓴다(makeRoofDropCurve /
+// makeRoofCornerEase). 지붕곡 상수도 hanok 기본값(params.js PRESETS: s0 1, s1 0.3, q 2)과 같은
+// 값이라 궁·민가와 한 방언을 쓴다.
+//
+// 안허리곡(코너에서 평면상 더 내미는 곡)은 **일부러 넣지 않았다.** 처마 폭이 G8 비례 계약
+// (하층 처마 폭 / 육축 총폭 ≤ 1.30)의 측정 대상이고, 그 계약은 profile 의 roof.width 를 잰다 —
+// 기하가 그 폭 밖으로 나가면 계약이 재는 값과 화면이 어긋난다. 처마 폭은 profile 이 소유한다.
+export const CITY_GATE_ROOF = Object.freeze({
+  ridgeHalfMinRatio: 0.10,  // 용마루 반길이 하한 / 폭(퇴화 방어 — 45° 규칙이 항상 이보다 크다)
+  // ── 곡률 계수는 **단(tier)별로 갈린다** (비전 판정 2026-08-05 FIX②) ──────────
+  // 곡률 비율을 상·하층에 똑같이 걸면 지각되는 곡률이 같아지지 않는다: 하층 차양은 물매가 얕아
+  // (lowerRoofPitch 0.2) 지붕 높이가 1.852m 로 상층 3.271m 의 57% 이고, 폭은 오히려 더 넓다
+  // (38.76 vs 38.06). 그래서 같은 비율이 폭 대비 앙곡 0.76%(하층) vs 1.38%(상층)로 벌어져
+  // 하층만 "직선 평판"으로 읽혔다(비전: "남은 종이접기 인상의 전부가 여기서 온다").
+  // 하층 계수는 그 절대 곡률을 상층 급으로 되돌린 값이고, **지붕 높이(height)는 건드리지 않는다** —
+  // 하층 정점은 상층 난간 뒤에 정확히 숨는 upperFloor 계약(CITY_GATE_PAVILION.upperFloor)에
+  // 묶여 있으므로 곡률은 그 높이 **안에서만** 재분배한다.
+  //   처마선: 코너 y = height*eaveLift, 중앙 y = height*(eaveLift - eaveSag).
+  //   상층 중앙값 0.14 는 구 구현(0.20 - 0.06)과 같은 값이고, 하층도 0.16 으로 그 급을 지킨다
+  //   (게이트가 중앙 여유 비율 ≥ 0.10 을 못 박는다 — 앙곡은 코너를 올려서 키운다).
+  tiers: Object.freeze({
+    upper: Object.freeze({
+      eaveLift: 0.30, eaveSag: 0.16, cornerPow: 3.0,
+      ridgeSag: 0.10, ridgePow: 2.0,
+      drop: Object.freeze({ s0: 1, s1: 0.3, q: 2 }),   // 후림(hanok 기본 지붕곡과 동일)
+    }),
+    lower: Object.freeze({
+      // 코너를 0.52h 까지 들어 앙곡 0.296m → 0.667m (폭 대비 0.76% → 1.72%). 코너 절대 높이
+      //   0.963m 는 상층 바닥(upperFloor 1.3m)보다 낮고, 코너는 상층 몸체 폭 밖이라 간섭이 없다.
+      eaveLift: 0.52, eaveSag: 0.36, cornerPow: 2.6,
+      ridgeSag: 0.20, ridgePow: 2.0,
+      // 얕은 물매에서 오목이 읽히도록 처마 쪽 기울기를 더 낮춘다(s1 ↓, q ↑).
+      drop: Object.freeze({ s0: 1, s1: 0.22, q: 2.3 }),
+    }),
+  }),
+  // 세분: 문 4기 × 지붕 2단 = 8면조라 저비용으로 둔다. 상층 폭 38m 에서 u 20 등분 = 코너 셀 1.9m,
+  //   v 5 등분 = 물매 방향 0.78m. 지붕 1기당 삼각 560(앞뒤 200×2 + 좌우 80×2).
+  segmentsU: 20,
+  segmentsV: 5,
+  segmentsSide: 10,
+  // 마루 부재. 용마루는 양성바름 띠 + 그 위 어두운 기와 관.
+  //   [비전 권고 2026-08-05 ③] 구 저작(0.20h · 0.11d)은 흰 plaqueMat 을 써서 "눈 쌓인 띠"로
+  //   읽혔다. 구한말 사진의 양성은 더 **회색이고 좁다** → 폭·높이를 내리고, 색은 재질 배정을
+  //   흰 plaqueMat 에서 화강암 masonryMat(회색)으로 옮긴다(신규 재질 0 — 렌더러 배정 변경).
+  ridgeHeightRatio: 0.15,      // 양성 띠 높이 / 지붕 높이
+  ridgeThicknessRatio: 0.085,  // 양성 띠 두께 / 지붕 깊이
+  ridgeCapRatio: 0.26,         // 관 높이 / 양성 띠 높이
+  hipRadiusRatio: 0.050,       // 내림마루 반지름 / 지붕 높이
+  // [비전 권고 ④] 내림마루 스윕이 처마 코너에서 각지게 꺾이며 실루엣을 미세하게 넘었다.
+  //   종단을 처마선 안쪽으로 반지름의 이 배수만큼 물린다(처마 실루엣을 마루가 넘지 않는다).
+  hipTipInsetK: 1.6,
+  // 종물(신설 city-gate 등급). 취두 높이는 사진 환산 실물 ≈1.5m 대역.
+  chwiduHeightRatio: 0.44,
+  japsangSpacing: 1.1,         // 잡상 간격(m, × pavilion scale)
+  japsangFromEave: 0.45,       // 처마 끝에서 첫 잡상까지(m)
+  japsangSize: 0.42,           // 잡상 몸통 크기(m)
+  japsangRidgeClear: 0.9,      // 용마루 끝(취두) 쪽으로 남기는 여유(m)
+  // 처마 밑 단청 띠. y 는 저작 상수가 아니라 **실제 지붕면 아래**로 계산된다(아래 참조).
+  bandInset: 0.55,
+  bandThickness: 0.3,
+  bandHeight: 0.24,
+  bandClear: 0.02,
+});
+
+/** 이 단(tier)의 곡률 계수. 하층 차양과 상층 본지붕은 물매·높이가 달라 계수가 갈린다. */
+export function cityGateRoofTier(tier) {
+  return CITY_GATE_ROOF.tiers[tier] || CITY_GATE_ROOF.tiers.upper;
+}
+
+// 내림마루/처마 곡선을 평가하는 순수 함수 묶음. THREE 없이 좌표만 만든다.
+function gateRoofCurves(roof) {
+  const R = CITY_GATE_ROOF;
+  const T = cityGateRoofTier(roof.tier);
+  const h = roof.height;
+  const hw = roof.width * 0.5, hd = roof.depth * 0.5;
+  const ridgeHalf = Math.max(roof.width * R.ridgeHalfMinRatio, hw - hd);
+  const eaveCornerY = h * T.eaveLift;
+  const eaveMidY = h * (T.eaveLift - T.eaveSag);
+  const ridgeMidY = h - h * T.ridgeSag;
+  const { s0, s1, q } = T.drop;
+  const totalDrop = s1 + (s0 - s1) / (q + 1);
+  // 지붕곡·앙곡 식은 roof.js 와 문자 그대로 같다(그 파일의 makeRoofDropCurve/makeRoofCornerEase).
+  const dropN = (v) => (s1 * v + ((s0 - s1) * (1 - Math.pow(1 - v, q + 1))) / (q + 1)) / totalDrop;
+  const cornerEase = (t) => Math.pow(Math.abs(t), T.cornerPow);
+  const ridgeY = (x) => ridgeMidY
+    + (h - ridgeMidY) * Math.pow(Math.min(1, Math.abs(x) / ridgeHalf), T.ridgePow);
+  const eaveY = (u) => eaveMidY + (eaveCornerY - eaveMidY) * cornerEase(u);
+  // 앞·뒤면(sz=±1): 용마루선 → 처마선. u=±1 이 내림마루(공유 에지).
+  const frontPoint = (u, v, sz) => {
+    const halfAtV = ridgeHalf + (hw - ridgeHalf) * v;
+    const yRidge = ridgeY(u * ridgeHalf);
+    return {
+      x: u * halfAtV,
+      y: yRidge - (yRidge - eaveY(u)) * dropN(v),
+      z: sz * hd * v,
+    };
+  };
+  // 좌·우면(sx=±1): 용마루 끝 한 점에서 퍼지는 우진각 삼각면. u=±1 이 같은 내림마루.
+  const sidePoint = (u, v, sx) => ({
+    x: sx * (ridgeHalf + (hw - ridgeHalf) * v),
+    y: h - (h - eaveY(u)) * dropN(v),
+    z: u * hd * v,
+  });
+  return {
+    h, hw, hd, ridgeHalf, eaveCornerY, eaveMidY, ridgeMidY, totalDrop, tier: T,
+    dropN, ridgeY, eaveY, frontPoint, sidePoint,
+  };
+}
+
+/**
+ * 문루 우진각 지붕 한 기의 완성 spec(JSON-safe). 렌더러는 이 좌표만 소비하고 곡선을 다시
+ * 평가하지 않는다. roof = pavilion.roofs 의 한 항목({ tier, y, width, depth, height, ridged, scale }).
+ */
+export function cityGateRoofProfile(roof) {
+  const R = CITY_GATE_ROOF;
+  const C = gateRoofCurves(roof);
+  const scale = roof.scale || 1;
+  const ridged = roof.ridged === true;
+  const NU = R.segmentsU, NV = R.segmentsV, NS = R.segmentsSide;
+
+  // ── 지붕면 4면(정점 격자 + 인덱스). apex=true 인 면은 v=0 행이 한 점으로 모인다(우진각 삼각면).
+  //    인덱스 와인딩은 **여기서** 정한다: 면 법선이 항상 바깥+위를 향하도록 삼각형마다 판정한다.
+  //    roof.js 팔작면은 +x·-z 를 부호 반전으로 매개해 그 두 면의 법선이 아래를 향하는 알려진 함정이
+  //    있고(월드 노멀 셰이더가 abs() 를 써야 하는 이유), 새 지붕은 그것을 물려받지 않는다.
+  const faceIndices = (nu, nv, points, outward, apex) => {
+    const idx = [];
+    const ref = [outward[0], outward[1] + 1, outward[2]];
+    for (let iv = 0; iv < nv; iv++) {
+      for (let iu = 0; iu < nu; iu++) {
+        const a = iv * (nu + 1) + iu, b = a + 1, c = a + (nu + 1), d = c + 1;
+        const tris = (apex && iv === 0) ? [[b, c, d]] : [[a, c, b], [b, c, d]];
+        for (const tri of tris) {
+          const [i0, i1, i2] = tri;
+          const p0 = i0 * 3, p1 = i1 * 3, p2 = i2 * 3;
+          const ux = points[p1] - points[p0], uy = points[p1 + 1] - points[p0 + 1], uz = points[p1 + 2] - points[p0 + 2];
+          const vx = points[p2] - points[p0], vy = points[p2 + 1] - points[p0 + 1], vz = points[p2 + 2] - points[p0 + 2];
+          const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+          if (Math.hypot(nx, ny, nz) < 1e-12) continue;               // 퇴화 삼각 제외
+          if (nx * ref[0] + ny * ref[1] + nz * ref[2] < 0) idx.push(i0, i2, i1);
+          else idx.push(i0, i1, i2);
+        }
+      }
+    }
+    return idx;
+  };
+  const faces = [];
+  for (const sz of [1, -1]) {
+    const points = [];
+    for (let iv = 0; iv <= NV; iv++) {
+      for (let iu = 0; iu <= NU; iu++) {
+        const p = C.frontPoint((iu / NU) * 2 - 1, iv / NV, sz);
+        points.push(p.x, p.y, p.z);
+      }
+    }
+    const outward = [0, 0, sz];
+    faces.push({
+      key: sz > 0 ? 'front' : 'back', nu: NU, nv: NV, apex: false, outward, points,
+      indices: faceIndices(NU, NV, points, outward, false),
+    });
+  }
+  for (const sx of [1, -1]) {
+    const points = [];
+    for (let iv = 0; iv <= NV; iv++) {
+      for (let iu = 0; iu <= NS; iu++) {
+        const p = C.sidePoint((iu / NS) * 2 - 1, iv / NV, sx);
+        points.push(p.x, p.y, p.z);
+      }
+    }
+    const outward = [sx, 0, 0];
+    faces.push({
+      key: sx > 0 ? 'right' : 'left', nu: NS, nv: NV, apex: true, outward, points,
+      indices: faceIndices(NS, NV, points, outward, true),
+    });
+  }
+
+  // ── 용마루(양성 띠) 폴리라인: 중앙이 처지고 양단이 정점.
+  const ridgeHeight = C.h * R.ridgeHeightRatio;
+  const ridgeSamples = [];
+  const NR = 12;
+  for (let i = 0; i <= NR; i++) {
+    const x = -C.ridgeHalf + (C.ridgeHalf * 2) * (i / NR);
+    ridgeSamples.push({ x, y: C.ridgeY(x), z: 0 });
+  }
+
+  // ── 내림마루 4줄: 앞·뒤면과 좌·우면이 공유하는 u=±1 에지를 그대로 따른다.
+  //    종단은 처마선에 닿기 **전에** 끝난다(비전 권고 ④): 튜브 반지름이 처마 밖으로 삐죽 나와
+  //    실루엣을 넘고, CatmullRom 종단이 각지게 꺾였다. 물리는 양은 반지름에 비례한다.
+  const hipRadius = C.h * R.hipRadiusRatio;
+  const hipRun = Math.hypot(C.hw - C.ridgeHalf, C.hd, C.h - C.eaveCornerY);
+  const tipInsetV = Math.min(0.25, (hipRadius * R.hipTipInsetK) / Math.max(1e-6, hipRun));
+  const hips = [];
+  for (const sx of [1, -1]) for (const sz of [1, -1]) {
+    const points = [];
+    const NH = 24;
+    const vEnd = 1 - tipInsetV;
+    for (let i = 0; i <= NH; i++) points.push(C.frontPoint(sx, (i / NH) * vEnd, sz));
+    hips.push({ sx, sz, radius: hipRadius, tipInsetV, vEnd, points });
+  }
+
+  // ── 종물(신설 city-gate 등급): 용마루 양단 취두 + 내림마루 잡상 열. 용마루가 없는 하층 차양은
+  //    종물을 받지 않는다(위계: 관을 쓴 상층만 종물을 얹는다).
+  const chwidu = [];
+  const japsang = [];
+  if (ridged) {
+    const chwiduHeight = C.h * R.chwiduHeightRatio;
+    for (const sx of [1, -1]) {
+      chwidu.push({
+        name: CITY_GATE_CHWIDU_NAME,
+        x: sx * C.ridgeHalf, y: C.h + ridgeHeight * 0.5, z: 0,
+        height: chwiduHeight,
+        // 말린 끝이 용마루 중앙을 향하게 미러링(roof.js 궁 취두와 같은 규칙).
+        mirror: sx > 0,
+      });
+    }
+    const spacing = R.japsangSpacing * scale;
+    const size = R.japsangSize * scale;
+    for (const hip of hips) {
+      // 처마 끝(v=1)에서 용마루 쪽(v=0)으로 올라가며 호길이 기준 등간격.
+      const pts = hip.points;
+      const cum = [0];
+      for (let i = pts.length - 1; i > 0; i--) {
+        const a = pts[i], b = pts[i - 1];
+        cum.push(cum[cum.length - 1] + Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z));
+      }
+      const hipLen = cum[cum.length - 1];
+      const usable = hipLen - R.japsangFromEave * scale - R.japsangRidgeClear * scale;
+      let n = usable > 0 ? Math.floor(usable / spacing) + 1 : 0;
+      n = Math.max(CITY_GATE_JAPSANG_RANGE.min, Math.min(CITY_GATE_JAPSANG_RANGE.max, n));
+      if (n % 2 === 0) n -= 1;                     // 홀수 관례
+      for (let k = 0; k < n; k++) {
+        const target = R.japsangFromEave * scale + spacing * k;
+        // 호길이 target 지점을 폴리라인에서 선형 보간(처마 끝 기준).
+        let seg = 1;
+        while (seg < cum.length - 1 && cum[seg] < target) seg += 1;
+        const t = (target - cum[seg - 1]) / Math.max(1e-9, cum[seg] - cum[seg - 1]);
+        const a = pts[pts.length - seg], b = pts[pts.length - 1 - seg];
+        japsang.push({
+          name: CITY_GATE_JAPSANG_NAME,
+          hip: `${hip.sx > 0 ? '+x' : '-x'}${hip.sz > 0 ? '+z' : '-z'}`,
+          index: k,
+          lead: k === 0,
+          size: k === 0 ? size : size * (1 - 0.06 * k),
+          x: a.x + (b.x - a.x) * t,
+          y: a.y + (b.y - a.y) * t + hipRadius,
+          z: a.z + (b.z - a.z) * t,
+          along: target,
+        });
+      }
+    }
+  }
+
+  // ── 처마 밑 단청 띠: y 를 저작하지 않고 **실제 지붕면 아래**로 내린다. 네 런의 인셋 위치 중
+  //    가장 낮은 지붕면(= 면 중앙, 인셋이 처마에 가까운 좌·우 런)을 기준으로 삼는다.
+  const bandInset = R.bandInset, bandHeight = R.bandHeight;
+  const bandHalfWidth = C.hw - bandInset, bandHalfDepth = C.hd - bandInset;
+  let band = null;
+  if (bandHalfWidth > R.bandThickness && bandHalfDepth > R.bandThickness) {
+    const vFront = 1 - bandInset / C.hd;        // 앞·뒤 런이 앉는 v
+    const vSide = 1 - bandInset / C.hw;         // 좌·우 런(폭이 크므로 처마에 더 가깝다)
+    const surfaceLow = Math.min(
+      C.frontPoint(0, vFront, 1).y,
+      C.sidePoint(0, vSide, 1).y,
+    );
+    band = {
+      y: surfaceLow - R.bandClear - bandHeight * 0.5,
+      top: surfaceLow - R.bandClear,
+      height: bandHeight,
+      thickness: R.bandThickness,
+      halfWidth: bandHalfWidth,
+      halfDepth: bandHalfDepth,
+      surfaceLow,
+    };
+  }
+
+  return {
+    tier: roof.tier,
+    y: roof.y,
+    width: roof.width, depth: roof.depth, height: roof.height,
+    halfWidth: C.hw, halfDepth: C.hd,
+    ridged, scale,
+    ridge: {
+      halfLength: C.ridgeHalf,
+      apexY: C.h,
+      midY: C.ridgeMidY,
+      height: ridgeHeight,
+      thickness: roof.depth * R.ridgeThicknessRatio,
+      capHeight: ridgeHeight * R.ridgeCapRatio,
+      points: ridgeSamples,
+    },
+    eave: {
+      cornerY: C.eaveCornerY, midY: C.eaveMidY, cornerPow: C.tier.cornerPow,
+      liftRatio: C.tier.eaveLift, sagRatio: C.tier.eaveSag,
+    },
+    drop: { ...C.tier.drop, totalDrop: C.totalDrop },
+    faces,
+    hips,
+    ornaments: { rank: ROOF_RANK.CITY_GATE, chwidu, japsang },
+    band,
+  };
+}
 
 // 수문(水門) — 개천이 성벽을 지나는 통과부. 고증: 오간수문은 처음 홍예 3개였고 1421년 범람 뒤
 //   1422년 2개를 더해 **홍예 5개**가 되었다(docs/joseon-city.md §개천). 사대문과는 별개 시설이며
@@ -1678,12 +2069,19 @@ export function cityGatePavilionProfile(gate, structure, masonry) {
   //   기준이라, 공포대 높이가 바뀌어도 판벽과 창방 사이에 슬릿이 생길 수 없다.
   lower.panel = { y0: lower.y0, y1: lower.bracket.y0, height: lower.bracket.y0 - lower.y0 };
   upper.panel = null;
+  // 현판은 상층 정면 중앙 칸에만 1매(하층은 판벽 파사드라 걸 자리가 없다).
+  lower.plaque = null;
+  upper.plaque = gatePlaquePlan(gate, upper);
+  // ridged: 용마루와 그 종물(취두·잡상)을 받는 단. 하층 차양은 상층 벽에 붙는 스커트라 실제로
+  //   용마루가 없다 — 렌더러가 tier 로 다시 판정하지 않게 계획이 소유한다(#54 2026-08-05).
   const lowerRoof = {
     tier: 'lower',
     y: lower.y1,
     width: lower.width + P.lowerEave * 2 * scale,
     depth: lower.depth + P.lowerEave * 2 * scale,
     height: 0,
+    ridged: false,
+    scale,
   };
   lowerRoof.height = lowerRoof.depth * P.lowerRoofPitch;
   const upperRoof = {
@@ -1692,6 +2090,8 @@ export function cityGatePavilionProfile(gate, structure, masonry) {
     width: upper.width + P.upperEave * 2 * scale,
     depth: upper.depth + P.upperEave * 2 * scale,
     height: 0,
+    ridged: true,
+    scale,
   };
   upperRoof.height = upperRoof.depth * P.upperRoofPitch;
   // 앞뒤(x축) 여장이 모서리까지 덮고, 좌우(z축) 여장은 그 안쪽만 채워 코너에 틈이 없다.

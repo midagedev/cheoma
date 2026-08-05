@@ -17,6 +17,11 @@ import { COURTYARD_SURFACE_LIFT, FOUNDATION_SINK } from '../core/surface-clearan
 import { terrainRangeOnPolygon } from './placement-search.js';
 import { VILLAGE_WALL_STEP } from './wall-contract.js';
 import { terrainMeshSegmentRange } from './terrain-grid.js';
+import {
+  GROUND_JUNCTION,
+  junctionChordCount,
+  junctionChordFloor,
+} from './ground-junction-plan.js';
 
 export const PAD_LANDING_SCHEMA_VERSION = 1;
 
@@ -56,8 +61,17 @@ export function padApronPolygon(polygon) {
 // Pure skirt segment records for one pad shelf. Tops sit at padY; bottoms sink
 // PAD.sink below the lower of terrain and padY. Segments shorter than stepMin
 // in rise are omitted so flat edges do not allocate dead geometry.
+//
+// #56: the bottom of a chord is the EXACT minimum of the rendered, triangulated
+// terrain along that chord (ground-junction-plan.js), flat across the chord — not
+// two analytic endpoint samples interpolated between. Endpoint sampling on the
+// analytic field left a measured residual slot of up to 0.29 m (town) / 0.37 m
+// (palace pad) at walk-mode eye height, from two independent causes: the analytic
+// field diverges from the drawn triangles, and a 4-chord split of a long parcel
+// edge never sees a mid-chord dip. Chord count is therefore also length-driven.
 export function planPadSkirtSegments(polygon, padY, site, {
   segmentsPerEdge = VILLAGE_PAD.skirtSegmentsPerEdge,
+  maxSegmentLength = GROUND_JUNCTION.maxSegmentLength,
 } = {}) {
   if (!Number.isFinite(padY)) throw new TypeError('planPadSkirtSegments requires finite padY');
   if (typeof site?.heightAt !== 'function') {
@@ -65,27 +79,26 @@ export function planPadSkirtSegments(polygon, padY, site, {
   }
   const apron = padApronPolygon(polygon);
   const segments = [];
-  const count = Math.max(1, segmentsPerEdge | 0);
+  const floor = Math.max(1, segmentsPerEdge | 0);
   for (let index = 0; index < apron.length; index++) {
     const a = apron[index];
     const b = apron[(index + 1) % apron.length];
+    const count = Math.max(floor, junctionChordCount(a, b, maxSegmentLength));
     for (let segment = 0; segment < count; segment++) {
       const t0 = segment / count;
       const t1 = (segment + 1) / count;
       const p0 = { x: a.x + (b.x - a.x) * t0, z: a.z + (b.z - a.z) * t0 };
       const p1 = { x: a.x + (b.x - a.x) * t1, z: a.z + (b.z - a.z) * t1 };
-      const ground0 = site.heightAt(p0.x, p0.z);
-      const ground1 = site.heightAt(p1.x, p1.z);
-      if (padY - ground0 < VILLAGE_PAD.stepMin && padY - ground1 < VILLAGE_PAD.stepMin) continue;
-      const bottom0 = Math.min(ground0, padY) - VILLAGE_PAD.sink;
-      const bottom1 = Math.min(ground1, padY) - VILLAGE_PAD.sink;
+      const ground = junctionChordFloor(site, p0, p1);
+      if (padY - ground < VILLAGE_PAD.stepMin) continue;
+      const bottom = Math.min(ground, padY) - VILLAGE_PAD.sink;
       segments.push(deepFreeze({
         a: p0,
         b: p1,
         topY: padY,
-        bottom0,
-        bottom1,
-        height: Math.max(padY - bottom0, padY - bottom1),
+        bottom0: bottom,
+        bottom1: bottom,
+        height: padY - bottom,
       }));
     }
   }
