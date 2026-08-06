@@ -38,8 +38,12 @@ const QUERY = process.env.CHEOMA_OG_QUERY || `clip=${STAGE}`;
 // The assemble stage plays a reveal + ~10s tofu assembly before the landing
 // settles; the card must be taken after all of it, not mid-drop.
 const SETTLE_MS = Number(process.env.CHEOMA_OG_SETTLE_MS) || 24_000;
-const WIDTH = 1200;
-const HEIGHT = 630;
+// 기본 1200×630 = 앱 og:image 규격(app/index.html 이 그 수치를 선언한다).
+// GitHub 저장소 Social preview 는 별개 표면이고 권장 규격이 1280×640 이라, 같은 픽스처에서
+// 규격만 바꿔 뽑는다 — 두 카드가 서로 다른 장면으로 갈라지지 않게 하려는 것이다(파일 상단의
+// "카드와 클립 스테이지가 어긋날 수 없게" 와 같은 이유). 판정은 전부 규격 상대값이라 무관하다.
+const WIDTH = Number(process.env.CHEOMA_OG_WIDTH) || 1200;
+const HEIGHT = Number(process.env.CHEOMA_OG_HEIGHT) || 630;
 const TIMEOUT = Number(process.env.CHEOMA_OG_TIMEOUT_MS) || 90_000;
 
 const MIME = {
