@@ -4,7 +4,7 @@
   import { t } from '../lib/i18n.svelte.js';
   import { device } from '../lib/device.svelte.js';
 
-  let { active = false, mode = null, pass = null, onExit, onMove } = $props();
+  let { active = false, mode = null, pass = null, flying = false, onExit, onMove, onKeys } = $props();
 
   const walking = $derived(active && mode === 'walk');
 
@@ -95,12 +95,38 @@
     onMove?.({ fwd: 0, strafe: 0 });
   }
 
+  // ── 터치 액션 버튼(2026-08-06 사용자 요청 "모바일 점프까지 가자 마인크래프트 조작성 완성") ──
+  //   데스크톱의 Space·Shift 를 그대로 두 버튼으로 옮긴다 — 새 의미를 만들지 않는 것이 요점이다:
+  //     · 위 버튼 = Space : 지상에서 점프, **두 번 탭하면 비행 토글**(더블탭 판정은 코어 walker 가
+  //       점프 상승 에지로 하므로 여기서 타이머를 들지 않는다 — 규약이 한 곳에만 있다), 비행 중 상승.
+  //     · 아래 버튼 = Shift : 지상에서 달리기, 비행 중 하강.
+  //   그래서 라벨만 비행 상태에 따라 바뀌고 입력 의미는 데스크톱과 완전히 같다(MCPE 도 같은 배치다).
+  //   pointerdown/up 으로 **누르고 있는 동안** 유지되는 상태다(click 이 아니다 — 상승은 홀드다).
+  let btnJump = $state(false);
+  let btnRun = $state(false);
+  function press(which, down) {
+    if (which === 'jump') { btnJump = down; onKeys?.({ jump: down }); }
+    else { btnRun = down; onKeys?.({ run: down }); }
+  }
+  // 포인터가 버튼을 벗어난 채 떼어져도 눌린 상태로 남지 않게 캡처한다. ★ 입력을 **먼저** 반영하고
+  //   캡처는 best-effort 다: setPointerCapture 는 해당 포인터가 활성이 아니면 throw 하는데
+  //   (실측 2026-08-06 — 합성 PointerEvent 로 검증할 때 4회 연속 pageerror), 캡처를 먼저 부르면
+  //   그 예외가 핸들러를 중단시켜 **버튼이 아무 일도 하지 않는다**. 캡처는 편의이고 입력이 계약이다.
+  const holdDown = (which) => (e) => {
+    press(which, true);
+    e.preventDefault();
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch {}
+  };
+  const holdUp = (which) => () => press(which, false);
+
   // 모드를 벗어나면 눌린 채 남은 이동 의도를 반드시 놓아 준다(종료 후 무한 전진 방지).
   $effect(() => {
     if (walking) return;
     joyPid = null;
     joyKnob = { x: 0, y: 0 };
     onMove?.({ fwd: 0, strafe: 0 });
+    if (btnJump) press('jump', false);
+    if (btnRun) press('run', false);
   });
 </script>
 
@@ -136,6 +162,35 @@
         onpointercancel={joyUp}
       >
         <div class="joy-knob" class:held={joyPid !== null} style="translate: {joyKnob.x}px {joyKnob.y}px"></div>
+      </div>
+      <!-- 우하단 액션 쌍: 위=Space(점프·두 번 탭 비행·상승), 아래=Shift(달리기·하강). -->
+      <div class="acts" data-cine-actions>
+        <button
+          class="act"
+          class:held={btnJump}
+          data-cine-jump
+          type="button"
+          aria-label={flying ? t('cine_walk_up') : t('cine_walk_jump')}
+          title={flying ? t('cine_walk_up') : t('cine_walk_jump')}
+          aria-pressed={btnJump}
+          onpointerdown={holdDown('jump')}
+          onpointerup={holdUp('jump')}
+          onpointercancel={holdUp('jump')}
+          onpointerleave={holdUp('jump')}
+        >{flying ? '▲' : '⤒'}</button>
+        <button
+          class="act"
+          class:held={btnRun}
+          data-cine-run
+          type="button"
+          aria-label={flying ? t('cine_walk_down') : t('cine_walk_run')}
+          title={flying ? t('cine_walk_down') : t('cine_walk_run')}
+          aria-pressed={btnRun}
+          onpointerdown={holdDown('run')}
+          onpointerup={holdUp('run')}
+          onpointercancel={holdUp('run')}
+          onpointerleave={holdUp('run')}
+        >{flying ? '▼' : '»'}</button>
       </div>
     {/if}
   </div>
@@ -245,6 +300,39 @@
     transition: translate 0.09s ease-out, background 0.15s ease;
   }
   .joy-knob.held { background: var(--accent); transition: background 0.15s ease; }
+  /* 액션 쌍은 조이스틱과 대칭으로 우하단. 세로 스택(위=Space, 아래=Shift)은 MCPE 배치와 같다.
+     터치 타깃은 모바일 계약 하한 44px 를 넘긴 56px 로 두고, 조이스틱과 같은 glass 톤을 쓴다. */
+  .acts {
+    position: absolute;
+    right: max(22px, calc(env(safe-area-inset-right) + 14px));
+    bottom: max(30px, calc(env(safe-area-inset-bottom) + 22px));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+  }
+  .act {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    pointer-events: auto;
+    touch-action: none;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: color-mix(in srgb, var(--glass-text) 80%, transparent);
+    font: inherit;
+    font-size: 19px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    opacity: 0.62;
+    /* 누름 반응은 컴포지터 전용 속성만 쓴다(4.8.1 과 같은 이유 — 메인 스레드가 막혀도 칠해진다). */
+    transition: opacity 0.2s ease, transform 0.12s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .act.held { opacity: 0.95; transform: scale(0.94); }
+  .act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (pointer: coarse) {
     .exit { min-height: 44px; padding: 12px 16px; font-size: 14px; }
     .scene-label { font-size: 14px; padding: 9px 17px; }

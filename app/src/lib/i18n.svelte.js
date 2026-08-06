@@ -43,8 +43,12 @@ const DICT = {
     cine_hint: '탭 또는 Esc로 종료',
     // 수동 조작 힌트(#33) — 진입 직후 몇 초만 보였다가 물러난다.
     cine_walk_hint: 'WASD · 방향키 이동 · 드래그로 둘러보기 · Shift 빠르게 · Space 점프 · Space 두 번 비행 · Esc 종료',
-    cine_walk_hint_touch: '조이스틱으로 이동 · 화면을 드래그해 둘러보기',
+    cine_walk_hint_touch: '조이스틱으로 이동 · 드래그해 둘러보기 · 점프 두 번 탭 비행',
     cine_walk_move: '이동 조이스틱',
+    cine_walk_jump: '점프 (두 번 탭하면 비행)',
+    cine_walk_up: '상승',
+    cine_walk_down: '하강',
+    cine_walk_run: '빠르게',
     cine_walk_label: '골목 산책',
     // glb 내보내기(#112)
     act_glb: '내보내기', glb_house_tip: '이 건물을 3D 모델로 내보내기 (.glb)',
@@ -199,8 +203,12 @@ const DICT = {
     cine_hint: 'Tap or Esc to exit',
     // Manual control hint (#33) — shown briefly on entry, then recedes.
     cine_walk_hint: 'WASD / arrows to move · drag to look · Shift to hurry · Space to jump · double-Space to fly · Esc to exit',
-    cine_walk_hint_touch: 'Joystick to move · drag the screen to look',
+    cine_walk_hint_touch: 'Joystick to move · drag to look · double-tap jump to fly',
     cine_walk_move: 'Move joystick',
+    cine_walk_jump: 'Jump (double-tap to fly)',
+    cine_walk_up: 'Ascend',
+    cine_walk_down: 'Descend',
+    cine_walk_run: 'Hurry',
     cine_walk_label: 'Lane stroll',
     // glTF export (#112)
     act_glb: 'Export', glb_house_tip: 'Export this building as a 3D model (.glb)',

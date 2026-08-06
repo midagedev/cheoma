@@ -280,6 +280,10 @@
   let walkLookDX = 0, walkLookDY = 0, walkRaf = null;
   let walkLookPid = null, walkLookX = 0, walkLookY = 0;
   let walkJoy = $state({ fwd: 0, strafe: 0 });   // 가상 조이스틱(터치) — CinematicOverlay 가 갱신
+  // 터치 액션 버튼(점프/달리기) — 데스크톱 Space·Shift 와 **같은 의미**를 같은 경로로 보낸다.
+  //   비행 토글은 코어 walker 가 점프 상승 에지로 더블탭 판정하므로 여기서 별도 상태를 들지 않는다.
+  let walkBtn = $state({ jump: false, run: false });
+  let cineFlying = $state(false);   // 버튼 라벨(▲▼ vs ⤒») 전환용 — walk 피드에서 갱신
   // 포인터 락(#44) — 데스크톱 walk 만의 경로다. walkLockable 은 walk 진입 시 1회 판정하고, 터치
   //   기기에서는 false 라 락 리스너가 아예 등록되지 않는다(드래그 시선이 유일한 문법으로 남는다).
   let walkLockable = false, walkLocked = false, walkLockWired = false;
@@ -1180,6 +1184,8 @@
     walkKeys.clear();
     walkLookDX = 0; walkLookDY = 0; walkLookPid = null;
     walkJoy = { fwd: 0, strafe: 0 };
+    walkBtn = { jump: false, run: false };
+    cineFlying = false;
     // 락 가능 여부는 이 walk 세션 시작 시 1회만 판정한다. false 면 아래 mousemove·pointerlock
     //   리스너가 등록되지 않으므로 터치 경로에는 새 코드가 들어가지 않는다.
     walkLocked = false; walkLockExitAt = 0;   // 직전 세션의 해제 시각이 첫 ESC 를 삼키지 않게
@@ -1205,9 +1211,12 @@
       const strafe = keyStrafe || walkJoy.strafe;
       // 놓은 프레임에도 0 을 보내야 walker 가 멈춘다 — 이동 의도는 지속 상태다.
       engine.cine.input({
-        fwd, strafe, run: walkKeys.has('shift'), jump: walkKeys.has(' '),
+        fwd, strafe,
+        run: walkKeys.has('shift') || walkBtn.run,
+        jump: walkKeys.has(' ') || walkBtn.jump,
         lookDX: walkLookDX, lookDY: walkLookDY,
       });
+      cineFlying = engine.cine.flying?.() ?? false;
       walkLookDX = 0; walkLookDY = 0;
     };
     walkRaf = requestLifecycleFrame(feed);
@@ -1227,6 +1236,8 @@
     walkKeys.clear();
     walkLookPid = null;
     walkJoy = { fwd: 0, strafe: 0 };
+    walkBtn = { jump: false, run: false };
+    cineFlying = false;
   }
   // Space(#43)는 점프다. 지속 키로 수집해 매 프레임 jump 상태를 보내고(코어가 접지에서만 발동),
   //   preventDefault 로 페이지 스크롤을 막는다 — walk 중 Space 가 화면을 밀어내면 조작이 끊긴다.
@@ -1242,7 +1253,10 @@
     if (!e.shiftKey) walkKeys.delete('shift');
   }
   // 창이 포커스를 잃으면 keyup 이 오지 않아 키가 눌린 채로 남는다(무한 전진).
-  function onWalkBlur() { walkKeys.clear(); walkLookPid = null; }
+  function onWalkBlur() {
+    walkKeys.clear(); walkLookPid = null;
+    walkBtn = { jump: false, run: false };   // 포커스 이탈에 눌린 버튼이 남으면 계속 상승한다
+  }
   // 시선 드래그 — 포인터 종류를 가리지 않고 clientX/Y 차분으로 계산한다. movementX/Y 는 터치에서
   //   0 을 주는 브라우저가 있어 같은 코드가 데스크톱에서만 동작하게 된다. 오버레이 자신을 겨눈
   //   포인터(조이스틱·종료 버튼)는 시선이 아니다.
@@ -1833,8 +1847,10 @@
   active={cine.active}
   mode={cine.mode}
   pass={cine.pass}
+  flying={cineFlying}
   onExit={stopCine}
   onMove={(v) => { walkJoy = v; }}
+  onKeys={(v) => { walkBtn = { ...walkBtn, ...v }; }}
 />
 
 <!-- 안내 토스트(#112): glb overBudget·완료·실패 문구. -->
