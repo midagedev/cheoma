@@ -144,7 +144,7 @@
       >
         <span class="x" aria-hidden="true">✕</span><span class="lbl">{t('cine_exit')}</span>
       </button>
-      <div class="hint">
+      <div class="hint" class:stacked={walking && device.touch}>
         {walking ? t(device.touch ? 'cine_walk_hint_touch' : 'cine_walk_hint') : t('cine_hint')}
       </div>
     </div>
@@ -266,6 +266,16 @@
     letter-spacing: 0.04em;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
     animation: fadehint 5s ease forwards;
+    max-width: min(72vw, 420px);
+    text-align: center;
+  }
+  /* 터치 도보에서는 하단 중앙이 조이스틱·액션 버튼의 자리다. 힌트를 그 위로 올리고 폭을 좁혀
+     컨트롤과 겹치지 않게 한다(2026-08-06 실측: 힌트가 두 줄로 늘면서 조이스틱 위를 덮었다).
+     좌우 컨트롤 사이 폭 = 100vw − (조이스틱 96 + 버튼 56 + 좌우 여백) ≈ 54vw. */
+  .hint.stacked {
+    bottom: max(140px, calc(env(safe-area-inset-bottom) + 132px));
+    max-width: 54vw;
+    line-height: 1.45;
   }
   @keyframes fadein { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
