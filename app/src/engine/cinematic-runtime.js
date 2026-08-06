@@ -2,6 +2,7 @@ import {
   createDronePaths,
   createWalker,
 } from '../../../src/api/cinematic.js';
+import { STRIDE_RUN, STRIDE_WALK } from '../../../src/api/audio.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const DEG = Math.PI / 180;
@@ -45,12 +46,15 @@ export function createCinematicRuntime({
   settleControls,
   stopHeroDrive,
   tweenTo,
+  footstep = null,
+  footLand = null,
 } = {}) {
   const state = {
     active: false,
     mode: null,
     paths: null,
     walker: null,
+    lastStepDist: 0,     // 마지막 발소리를 낸 누적 보행거리(m) — 발소리 케이던스 기준점
     legs: [],
     legIdx: 0,
     tour: null,          // 투어 표본기(모든 leg 이 공유하는 같은 함수)
@@ -149,6 +153,7 @@ export function createCinematicRuntime({
     const { site } = plan;
     if (mode === 'walk') {
       state.walker = createWalker({ site, plan, heightAt: (x, z) => site.heightAt(x, z) });
+      state.lastStepDist = 0;
       // #33: 워킹뷰는 사용자가 조작하는 탐험 모드다. 진입 즉시 정지 상태로 서 있고 입력을 기다린다
       //   (종전에는 여기서 startAutoStroll() 로 자동 산책을 걸었다). 자동 산책은 명시 API 로만.
       camera.near = 0.08;
@@ -202,6 +207,24 @@ export function createCinematicRuntime({
       const { pos, dir } = state.walker.update(stepDt);
       camera.position.copy(pos);
       lookAt = state.smoothedLook.copy(pos).add(dir);
+      // 발소리(2026-08-06) — 케이던스는 시간이 아니라 **보폭 누적**에서 나온다. walker 가 접지
+      //   이동거리만 적립하므로 비행·체공 중에는 자동으로 조용하고, 저fps 에서도 걸음 수가
+      //   어긋나지 않는다. 달리기 판정은 속도 중간값 기준(램프 중 깜박임 방지).
+      if (footstep) {
+        const dist = state.walker.strideDistance();
+        const running = state.walker.speed() > (state.walker.walkSpeed + state.walker.runSpeed) / 2;
+        const stride = running ? STRIDE_RUN : STRIDE_WALK;
+        if (state.walker.grounded() && dist - state.lastStepDist >= stride) {
+          state.lastStepDist = dist;
+          footstep(running ? 1 : 0.5);
+        } else if (dist < state.lastStepDist) {
+          state.lastStepDist = dist;   // walker 재생성·순간이동으로 누적이 되돌아간 경우
+        }
+      }
+      if (footLand) {
+        const impact = state.walker.takeLandImpact();
+        if (impact > 0) footLand(impact);
+      }
     } else {
       if (!state.tour) return;
       if (!warmHold) {
@@ -335,6 +358,10 @@ export function createCinematicRuntime({
     setAutoStroll(on) {
       if (state.walker) on ? state.walker.startAutoStroll() : state.walker.stopAutoStroll();
     },
+    // 크리에이티브 비행 토글. 데스크톱은 점프 더블탭이 코어에서 판정되므로 이 경로가 필요 없지만,
+    //   키보드가 없는 표면(모바일 HUD 버튼)과 하네스는 명시 토글이 필요하다.
+    setFly(on) { return state.walker ? state.walker.setFly(on) : false; },
+    flying() { return state.walker ? state.walker.flying() : false; },
     getState: () => {
       const leg = state.legs[state.legIdx] || null;
       // t 는 **현재 leg 안의 진행률**로 보고한다(소비면 호환). 재생 자체는 τ 하나이므로 이 값은

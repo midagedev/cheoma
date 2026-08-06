@@ -106,7 +106,10 @@ async function bundle(contents, sourcefile) {
 
 const M = await bundle(
   "export * from './src/api/cinematic.js';\n"
-  + "export { AIR_CONTROL, JUMP_GRAVITY, JUMP_HEIGHT, JUMP_SPEED, RUN_SPEED, WALK_SPEED } from './src/cinematic/walker.js';\n"
+  + "export { AIR_CONTROL, JUMP_GRAVITY, JUMP_HEIGHT, JUMP_SPEED, RUN_SPEED, WALK_SPEED,"
+  + " FLY_CEILING, FLY_DOUBLE_TAP_SEC, FLY_SOLID_CLEARANCE, FLY_SPEED, FLY_VERTICAL_SPEED"
+  + " } from './src/cinematic/walker.js';\n"
+  + "export { LAND_MIN_MPS, STRIDE_RUN, STRIDE_WALK } from './src/audio/footsteps.js';\n"
   + "export { createCinematicRuntime } from './app/src/engine/cinematic-runtime.js';\nexport * as THREE from 'three';\n",
   'walk-control-entry.js',
 );
@@ -114,6 +117,8 @@ const {
   buildWalkSolids, createWalker, createCinematicRuntime, THREE,
   LOOK_PITCH_PER_PX, LOOK_POINTER_LOCK_SIGN, LOOK_YAW_PER_PX, MOVE_ACCEL, MOVE_DECEL, PITCH_LIMIT,
   AIR_CONTROL, JUMP_GRAVITY, JUMP_HEIGHT, JUMP_SPEED, RUN_SPEED, WALK_SPEED,
+  FLY_CEILING, FLY_DOUBLE_TAP_SEC, FLY_SOLID_CLEARANCE, FLY_SPEED, FLY_VERTICAL_SPEED,
+  LAND_MIN_MPS, STRIDE_RUN, STRIDE_WALK,
 } = M;
 
 // ── M0 저작값 핀 ── 게이트 상수 = 코어 export. 속도·점프 재저작은 이 줄까지 같이 고쳐야 한다.
@@ -768,9 +773,138 @@ const r3c = (() => {
   return { guarded: true, escGuardBeforeStop: true };
 })();
 
+// ── M16 크리에이티브 비행(2026-08-06 사용자 요청 "하늘도 날 수 있고") ────────────────────────
+//   조작 규약(MC 크리에이티브): 점프 **더블탭**으로 토글 · 비행 중 점프=상승 / Shift=하강 · 중력 없음.
+//   여기서 단언하는 것은 ① 한 번 탭은 비행을 켜지 않는다(평소 도약) ② 판정 창 안의 두 번째 탭이
+//   켠다 ③ 비행 중 중력이 없다(입력 없으면 고도 유지) ④ 상승·하강 속도가 저작값 ⑤ 천장·바닥 클램프
+//   ⑥ 다시 더블탭하면 낙하로 인수된다.
+const m16 = (() => {
+  const w = flatWalker();
+  const ground = w.pos.y - w.eyeHeight;
+  // ① 단일 탭 — 도약만 하고 비행은 꺼진 채다.
+  w.setInput({ jump: true }); w.update(DT);
+  w.setInput({ jump: false }); w.update(DT);
+  invariant(!w.flying(), 'M16①: 점프 한 번에 비행이 켜졌다 (더블탭 규약 위반)');
+  // 착지까지 기다린다(단일 도약).
+  for (let i = 0; i < 200 && !w.grounded(); i++) w.update(DT);
+  invariant(w.grounded(), 'M16①: 단일 도약이 착지하지 않았다');
+
+  // ② 판정 창 안의 두 번째 탭 — 비행 ON. 탭 사이는 프레임 두 개(0.033s < 0.35s).
+  w.setInput({ jump: true }); w.update(DT);
+  w.setInput({ jump: false }); w.update(DT);
+  w.setInput({ jump: true }); w.update(DT);
+  invariant(w.flying(), 'M16②: 판정 창 안의 더블탭이 비행을 켜지 않았다');
+  invariant(!w.grounded(), 'M16②: 비행 중인데 grounded() 가 참이다');
+
+  // ③ 무입력 비행 = 고도 유지(중력 없음). 상승 입력을 놓고 속도가 0 으로 램프된 뒤를 본다.
+  w.setInput({ jump: false, run: false, fwd: 0, strafe: 0 });
+  for (let i = 0; i < 30; i++) w.update(DT);
+  const hold0 = w.pos.y;
+  for (let i = 0; i < 90; i++) w.update(DT);          // 1.5s 방치
+  invariant(Math.abs(w.pos.y - hold0) < 1e-6,
+    `M16③: 비행 중 무입력에 고도가 변했다 (${hold0} → ${w.pos.y}) — 중력이 남아 있다`);
+
+  // ④ 상승·하강 속도 — 램프가 끝난 뒤 1초 이동량이 저작값과 같다.
+  w.setInput({ jump: true });
+  for (let i = 0; i < 30; i++) w.update(DT);          // FLY_ACCEL 램프 소진
+  const y0 = w.pos.y;
+  for (let i = 0; i < 60; i++) w.update(DT);
+  const upMps = (w.pos.y - y0) / (60 * DT);
+  invariant(Math.abs(upMps - FLY_VERTICAL_SPEED) < 0.02,
+    `M16④: 상승 속도 ${upMps.toFixed(3)} != 저작 ${FLY_VERTICAL_SPEED}`);
+  w.setInput({ jump: false, run: true });
+  for (let i = 0; i < 30; i++) w.update(DT);
+  const y1 = w.pos.y;
+  for (let i = 0; i < 60; i++) w.update(DT);
+  const downMps = (y1 - w.pos.y) / (60 * DT);
+  invariant(Math.abs(downMps - FLY_VERTICAL_SPEED) < 0.02,
+    `M16④: 하강 속도 ${downMps.toFixed(3)} != 저작 ${FLY_VERTICAL_SPEED}`);
+
+  // ⑤ 천장·바닥 클램프.
+  w.setInput({ jump: true, run: false });
+  for (let i = 0; i < 3000; i++) w.update(DT);        // 50s 상승 — 천장에 붙는다
+  const ceilY = w.pos.y - ground;
+  invariant(Math.abs(ceilY - FLY_CEILING) < 0.05,
+    `M16⑤: 상한 고도 ${ceilY.toFixed(2)}m != 저작 ${FLY_CEILING}m`);
+  w.setInput({ jump: false, run: true });
+  for (let i = 0; i < 3000; i++) w.update(DT);        // 바닥까지 하강
+  invariant(Math.abs((w.pos.y - ground) - w.eyeHeight) < 1e-6,
+    `M16⑤: 바닥 클램프가 눈높이(${w.eyeHeight}m)가 아니다 (${(w.pos.y - ground).toFixed(3)}m)`);
+
+  // ⑥ 다시 더블탭 = 비행 OFF → 낙하로 인수.
+  //   ★ 끄는 순간의 수직 속도는 **물려받는다**(운동량 연속). 그래서 상승 중에 끄면 탄도로 잠시
+  //   더 올라간 뒤 떨어진다 — 그것이 의도된 동작이므로, 낙하 판정은 상승을 멈춘 **호버 상태**에서
+  //   해야 한다(이 순서를 지키지 않으면 게이트가 정상 동작을 실패로 읽는다).
+  w.setInput({ jump: true, run: false });
+  for (let i = 0; i < 120; i++) w.update(DT);   // 고도 확보
+  w.setInput({ jump: false, run: false });
+  for (let i = 0; i < 30; i++) w.update(DT);    // 수직 속도 0 으로 램프(호버)
+  const offFrom = w.pos.y;
+  w.setInput({ jump: true }); w.update(DT);
+  w.setInput({ jump: false }); w.update(DT);
+  w.setInput({ jump: true }); w.update(DT);
+  invariant(!w.flying(), 'M16⑥: 두 번째 더블탭이 비행을 끄지 않았다');
+  w.setInput({ jump: false });
+  for (let i = 0; i < 60; i++) w.update(DT);    // 1s — 중력이 탭 잔여 상승을 압도한다
+  invariant(w.pos.y < offFrom - 0.2,
+    `M16⑥: 비행을 끈 뒤 낙하하지 않는다 (${offFrom.toFixed(2)} → ${w.pos.y.toFixed(2)})`);
+  return { ceilingM: +ceilY.toFixed(2), upMps: +upMps.toFixed(3), downMps: +downMps.toFixed(3) };
+})();
+
+// ── M17 발소리 케이던스(2026-08-06 사용자 요청 "걷는 효과음도 나고") ─────────────────────────
+//   발소리는 시간이 아니라 **보폭 누적**으로 난다. 그래야 케이던스가 속도에서 파생되고 저fps 에서도
+//   걸음 수가 어긋나지 않는다. 여기서 단언하는 것은 ① 접지 이동만 적립된다(비행·체공은 0)
+//   ② 걷기 케이던스가 사람 보행 밴드(2~3.2 걸음/s) ③ 달리기가 걷기보다 잦다 ④ 착지 충격이
+//   한 번만 소비된다.
+const m17 = (() => {
+  const w = flatWalker();
+  w.yaw = 0;
+  const cadence = (run) => {
+    const ww = flatWalker();
+    ww.yaw = 0;
+    ww.setInput({ fwd: 1, run });
+    for (let i = 0; i < 60; i++) ww.update(DT);       // 최고속 도달
+    const d0 = ww.strideDistance();
+    for (let i = 0; i < 300; i++) ww.update(DT);      // 5s
+    const dist = ww.strideDistance() - d0;
+    const stride = run ? STRIDE_RUN : STRIDE_WALK;
+    return dist / stride / (300 * DT);               // 걸음/s
+  };
+  const walkHz = cadence(false);
+  const runHz = cadence(true);
+  invariant(walkHz > 2.0 && walkHz < 3.2,
+    `M17②: 걷기 케이던스 ${walkHz.toFixed(2)} 걸음/s 가 보행 밴드(2.0~3.2)를 벗어났다`);
+  invariant(runHz > walkHz + 0.2,
+    `M17③: 달리기 케이던스(${runHz.toFixed(2)})가 걷기(${walkHz.toFixed(2)})보다 잦지 않다`);
+
+  // ① 비행 중에는 적립되지 않는다.
+  w.setInput({ jump: true }); w.update(DT);
+  w.setInput({ jump: false }); w.update(DT);
+  w.setInput({ jump: true }); w.update(DT);
+  invariant(w.flying(), 'M17①: 비행 진입 실패');
+  w.setInput({ fwd: 1, jump: false });
+  const flyD0 = w.strideDistance();
+  for (let i = 0; i < 180; i++) w.update(DT);
+  invariant(w.strideDistance() === flyD0,
+    'M17①: 비행 중 보행거리가 적립됐다 — 발이 닿지 않는데 발소리가 난다');
+
+  // ④ 착지 충격은 한 번만 소비된다.
+  const j = flatWalker();
+  j.setInput({ jump: true }); j.update(DT);
+  j.setInput({ jump: false });
+  for (let i = 0; i < 200 && !j.grounded(); i++) j.update(DT);
+  const impact = j.takeLandImpact();
+  invariant(impact > 3 && impact < 8, `M17④: 착지 충격 ${impact.toFixed(2)} m/s 가 도약 밴드를 벗어났다`);
+  invariant(j.takeLandImpact() === 0, 'M17④: 착지 충격이 두 번 소비된다 (착지음 중복)');
+  return {
+    walkHz: +walkHz.toFixed(2), runHz: +runHz.toFixed(2), landMps: +impact.toFixed(2),
+  };
+})();
+
 console.log('walk-control contract: PASS', JSON.stringify({
   speeds: { walk: WALK_SPEED, run: RUN_SPEED }, accel: MOVE_ACCEL, decel: MOVE_DECEL, ...m5,
   forward2s: m2, ...m3, ...m9, ...m10, wallJump: m10b,
   strafeRight: m13, jump: m14, air: m15, runtime: r1,
   pointerLock: { ...r3b, ...r3a, ...r3c },
+  fly: m16, footsteps: m17,
 }));

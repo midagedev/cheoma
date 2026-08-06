@@ -4,6 +4,7 @@ import { createAmbience } from './ambience.js';
 import { createBgm } from './bgm.js';
 import { createStream } from './stream.js';
 import { createDog } from './dog.js';
+import { createFootsteps } from './footsteps.js';
 import { handOffTrack, trackForEntry, trackForTime } from './track-policy.js';
 import { introAdvance, introInitialState, introReduce } from './intro-policy.js';
 
@@ -112,6 +113,9 @@ export function setupAudio(listenerCarrier, {
     : null;
   // 마당 개 짖음(위치성). 개 앵커 getter 없으면 생성하지 않는다.
   const dog = getDogAnchor ? createDog(listener, { getAnchor: getDogAnchor, getState: getDogState }) : null;
+  // 1인칭 발소리. 위치 음원이 아니라 **청자 자신의 발**이므로 앰비언스 버스가 아니라 마스터에
+  //   직결한다(거리 감쇠·패닝 없음). 도보 모드에서만 호출되므로 상주 비용은 게인 노드 하나다.
+  const footsteps = createFootsteps(listener, { destination: input });
 
   let enabled = true;
   let started = false;
@@ -296,6 +300,9 @@ export function setupAudio(listenerCarrier, {
     strike(i) { if (!disposed) chimes.strike(i); },
     // 테스트용 즉시 개 짖음
     barkDog() { if (!disposed) dog?.bark(); },
+    // 1인칭 도보 발소리·착지음. 케이던스는 호출부(walker 배선)가 보폭으로 만든다.
+    footstep(intensity = 0.5) { if (!disposed && enabled) footsteps?.step(intensity); },
+    footLand(mps = 0) { if (!disposed && enabled) footsteps?.land(mps); },
     // 무음 진단 스냅샷 — 귀 없이 판정하는 계측점. 화면이 아니라 오디오 그래프를 본다.
     //   ctx 상태 / 마스터 / BGM 트랙·보이스 게인 / 각 레이어 활성·게인 / mp3 로드 실패.
     diagnostics() {
@@ -349,6 +356,7 @@ export function setupAudio(listenerCarrier, {
       bgm.dispose();
       stream?.dispose();
       dog?.dispose();
+      footsteps?.dispose();
       try { ambienceGain.disconnect(); } catch {}
       try { bgmGain.disconnect(); } catch {}
       try { input.disconnect(); } catch {}

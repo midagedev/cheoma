@@ -337,6 +337,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     settleControls,
     stopHeroDrive: () => cinematic.stop(),
     tweenTo,
+    // 1인칭 발소리·착지음. 런타임은 오디오를 모르고 케이던스만 만든다(audio 는 지연 생성이라
+    //   콜백으로 늦게 묶는다 — 도보 진입 전에 오디오가 없으면 조용히 no-op).
+    footstep: (intensity) => audio?.footstep(intensity),
+    footLand: (mps) => audio?.footLand(mps),
   });
   const demo = demoRuntime.state;
 
@@ -4390,6 +4394,10 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       input: (partial = {}) => demoRuntime.input(partial),
       // autoStroll 토글(walk) — 기본은 수동. 데모 클립용 자동 산책 경로를 명시로 켠다.
       setAutoStroll: (on) => demoRuntime.setAutoStroll(on),
+      // 크리에이티브 비행(도보) — 데스크톱은 Space 더블탭이 코어 판정이고, 이 API 는 키보드 없는
+      //   표면·하네스용 명시 토글이다.
+      setFly: (on) => demoRuntime.setFly(on),
+      flying: () => demoRuntime.flying(),
       getState: () => demoRuntime.getState(),
       // 검증용: 드론 패스 목록·duration.
       passList: () => demoRuntime.passList(),

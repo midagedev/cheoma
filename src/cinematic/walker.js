@@ -15,6 +15,8 @@ import { buildWalkSolids, pointHitsWalkSolids } from './walk-solids.js';
 //     walker.pos  Vector3(x, 시선고 y, z)      walker.dir  Vector3 시선 단위벡터
 //     walker.startAutoStroll() / stopAutoStroll()  — 도로 폴리라인 따라 자동 산책(데모 클립)
 //     walker.setPos(x,z) / walker.yaw / walker.pitch
+//     walker.flying() / walker.setFly(on)         — 크리에이티브 비행(점프 더블탭 토글은 내부 판정)
+//     walker.strideDistance() / walker.takeLandImpact()  — 발소리·착지음 배선용(접지 이동만 적립)
 //
 // #33 이후 이 모드의 **기본은 수동**이다: 생성 직후 walker 는 정지해 있고, 호출부가 매 프레임
 //   setInput/look 으로 사용자 입력을 밀어넣는다. 자동 산책은 명시 호출(startAutoStroll)로만 켜지는
@@ -93,6 +95,28 @@ export const PITCH_LIMIT = 1.2;           // rad = 68.75° — 종전 수동 클
 //   값이 1 이라서 상수를 없애지 않는 이유: 두 입력 규약의 관계를 배선부에 매직 부호로 흩뿌리지
 //   않고 한 곳에서 단언하기 위해서다(check-walk-control R3 이 이 상수를 import 해 고정한다).
 export const LOOK_POINTER_LOCK_SIGN = 1;
+
+// ── 크리에이티브 비행(2026-08-06 사용자 요청 "fps모드에서 좀더 마인크래프트 크리에이티브 조작법을
+//   도입해줘 하늘도 날 수 있고") ── 마인크래프트 크리에이티브의 조작 규약을 그대로 가져온다:
+//   **점프 더블탭으로 비행 토글**, 비행 중 점프=상승 / 웅크리기(Shift)=하강, 중력 없음.
+//   수치는 MC 실측 밴드에 맞춘다(MC 걷기 4.317 m/s · 크리에이티브 비행 10.89 m/s ≈ 2.5배).
+//   우리 걷기는 4.5 m/s 이므로 비행은 같은 비율인 11.0 m/s 로 둔다 — 마을 한 끝에서 끝까지가
+//   비행으로 체감상 짧아지되, 지형 스케일에서 방향을 잃을 만큼 빠르지는 않다.
+export const FLY_DOUBLE_TAP_SEC = 0.35;    // MC 더블탭 판정 창(~0.3s)보다 살짝 넉넉하게
+export const FLY_SPEED = 11.0;             // m/s 수평 (MC 크리에이티브 10.89)
+export const FLY_VERTICAL_SPEED = 7.5;     // m/s 상승·하강 — 지상 달리기와 같은 크기로 저작
+export const FLY_ACCEL = 60;               // m/s² — 지상 45 보다 즉답(공기 저항이 없는 조작감)
+// 지형 위 상한. 하늘 오브젝트(달·헤일로)는 카메라 far 안이고 능선 위 낮게 앉으므로(sky 계약)
+//   무제한 상승은 하늘 지오를 통과한다. 120m 는 마을 분지 전체가 프레임에 드는 높이이면서
+//   그 지오보다 충분히 낮다.
+export const FLY_CEILING = 120;            // m — 지형면 기준 상대 고도 상한
+// 비행 중 xz 충돌을 유지하는 고도. walk-solids 는 **높이가 없는 2D 솔리드**라(담 런 세그먼트 +
+//   지붕 OBB) 고도와 무관하게 무한히 높은 벽으로 동작한다. 그래서 비행에 충돌을 그대로 걸면
+//   집 위를 날 수 없고(보이지 않는 하늘 벽), 완전히 끄면 눈높이로 담을 통과한다. 둘 중 덜 나쁜
+//   쪽을 고른다: **이 고도 아래에서는 막고, 위로는 통과**. 2.5m 는 최저 조적 담(1.44m)과 기단
+//   위 눈높이보다 높고 한옥 처마보다 낮다 — 담을 넘어 들어가는 것은 되고, 지상에서 벽을 뚫는
+//   것은 안 된다. 솔리드에 높이가 생기면 이 근사는 걷어내야 한다.
+export const FLY_SOLID_CLEARANCE = 2.5;    // m
 
 // 목표 속도로의 선형 램프. 감속(0 으로 가거나 방향이 뒤집히거나 상한이 낮아질 때)은 더 센 비율을
 //   쓴다. 지수 스무딩과 달리 **정확히 target 에 도달**하므로 "정지 명령 후 t초 내 완전 정지"를
@@ -352,8 +376,9 @@ export function createWalker({ site, plan, heightAt } = {}) {
   let turnArmed = true;
 
   // 축분리 이동+슬라이드: 각 축을 독립 시도, 충돌하면 그 축만 취소(담을 따라 미끄러짐).
-  function tryStep(dx, dz) {
+  function tryStep(dx, dz, noclip = false) {
     const ox = x, oz = z;
+    if (noclip) { x += dx; z += dz; return Math.hypot(dx, dz); }
     if (!collides(x + dx, z)) x += dx;
     if (!collides(x, z + dz)) z += dz;
     return Math.hypot(x - ox, z - oz);
@@ -372,12 +397,51 @@ export function createWalker({ site, plan, heightAt } = {}) {
   //   체공 중에는 반대다: 속도를 **월드 축**으로 옮겨 든다. 로컬 저장을 그대로 두면 공중에서
   //   뒤돌아보는 것만으로 이동 방향이 따라 꺾여(포물선이 시선을 따라다녀) 도약이 물체가 아니라
   //   커서처럼 읽힌다. 이륙에서 로컬→월드, 착지에서 월드→로컬로 환산해 운동량은 연속이다.
+  // 비행 이동 — 중력 없음, 수직은 점프/웅크리기 입력이 직접 만든다. 수평 속도는 체공과 같은
+  //   **월드 축** 저장을 쓴다(시선을 돌려도 관성이 따라 꺾이지 않게 — freeStep 의 같은 이유).
+  function flyStep(dt, f, s) {
+    const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
+    const rdx = rightX(yaw), rdz = rightZ(yaw);
+    wvx = rampTo(wvx, (fdx * f + rdx * s) * FLY_SPEED, dt, FLY_ACCEL);
+    wvz = rampTo(wvz, (fdz * f + rdz * s) * FLY_SPEED, dt, FLY_ACCEL);
+    const up = (cur.jump ? 1 : 0) - (cur.run ? 1 : 0);
+    vy = rampTo(vy, up * FLY_VERTICAL_SPEED, dt, FLY_ACCEL);
+    tryStep(wvx * dt, wvz * dt, eyeY - H(x, z) > FLY_SOLID_CLEARANCE);
+    eyeY += vy * dt;
+  }
+
   function freeStep(dt) {
     let f = clamp(cur.fwd, -1, 1), s = clamp(cur.strafe, -1, 1);
     const mag = Math.hypot(f, s); if (mag > 1) { f /= mag; s /= mag; }
     const top = cur.run ? RUN : WALK;
     const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
     const rdx = rightX(yaw), rdz = rightZ(yaw);
+
+    // 점프 더블탭 = 비행 토글(MC 크리에이티브). **상승 에지**에서만 본다 — 누르고 있는 동안
+    //   매 프레임 토글되면 조작이 불가능하다. 첫 탭은 평소대로 도약하고, 판정 창 안의 두 번째
+    //   탭이 비행을 켠다/끈다. 켜는 순간의 상승 속도는 그대로 물려받는다(운동량 연속).
+    const jumpEdge = cur.jump && !prevJump;
+    prevJump = cur.jump;
+    if (jumpEdge) {
+      if (clock - lastJumpTap <= FLY_DOUBLE_TAP_SEC) {
+        lastJumpTap = -Infinity;
+        if (fly) {
+          fly = false;             // 끄면 그 자리에서 낙하로 인수된다(중력 재개)
+          airborne = true;
+        } else {
+          fly = true;
+          airborne = false;        // 비행은 체공과 배타 — 중력 적분을 타지 않는다
+          if (!wvx && !wvz) {      // 지상에서 바로 이륙한 경우 로컬 속도를 월드로 넘긴다
+            wvx = fdx * vf + rdx * vs;
+            wvz = fdz * vf + rdz * vs;
+          }
+          vf = vs = 0;
+        }
+      } else {
+        lastJumpTap = clock;
+      }
+    }
+    if (fly) { flyStep(dt, f, s); return; }
 
     // 이륙 — 접지 중이고 점프 입력이 있을 때만. 체공 중 재입력은 무시된다(이단 점프 금지).
     if (!airborne && cur.jump) {
@@ -467,6 +531,13 @@ export function createWalker({ site, plan, heightAt } = {}) {
   let wvx = 0, wvz = 0;             // 체공 중 월드 수평 속도(m/s)
   let vy = 0, airborne = false;     // 수직 속도(m/s)·체공 여부
   let pendYaw = 0, pendPitch = 0;   // 미소비 시선 증분(rad)
+  // 크리에이티브 비행 상태. clock 은 더블탭 판정 전용 단조 시계(초)다 — Date.now 를 쓰지 않는
+  //   이유는 이 모듈이 결정론 seek 하네스에서도 돌아야 하기 때문이다(dt 누적만 쓴다).
+  let fly = false, clock = 0, lastJumpTap = -Infinity, prevJump = false;
+  // 발소리 케이던스용 누적 보행거리(m). 접지 이동만 적립한다 — 비행·체공은 발이 닿지 않는다.
+  let strideDist = 0;
+  // 착지 이벤트(발소리 배선이 소비). 착지 프레임에 수직 속도 크기를 담고, 읽으면 비워진다.
+  let landImpact = 0;
 
   function setInput(partial = {}) {
     if ('fwd' in partial) cur.fwd = partial.fwd || 0;
@@ -477,6 +548,8 @@ export function createWalker({ site, plan, heightAt } = {}) {
 
   function update(dt, input) {
     dt = Math.min(Math.max(dt, 0), 0.1);      // 큰 dt 터널링 방지
+    clock += dt;
+    const px = x, pz = z;                     // 발소리 케이던스용 이번 프레임 수평 이동량
     if (input) {
       setInput(input);
       if (input.yaw) pendYaw += input.yaw;
@@ -494,7 +567,14 @@ export function createWalker({ site, plan, heightAt } = {}) {
     if (rr > MAXR) { const k = MAXR / rr; x = C.x + (x - C.x) * k; z = C.z + (z - C.z) * k; }
 
     const ground = H(x, z);
-    if (airborne) {
+    if (fly) {
+      // 비행: 중력 없음. 지형면 위 [EYE, FLY_CEILING] 으로만 클램프한다 — 지면 관통도, 하늘 지오
+      //   통과도 막는다. 바닥에 닿아도 비행은 유지된다(MC 와 같다 — 끄는 것은 더블탭뿐).
+      const floorY = ground + EYE;
+      const ceilY = ground + FLY_CEILING;
+      if (eyeY < floorY) { eyeY = floorY; if (vy < 0) vy = 0; }
+      if (eyeY > ceilY) { eyeY = ceilY; if (vy > 0) vy = 0; }
+    } else if (airborne) {
       // 포물선 — 등가속 **정확적분**(y += v·dt − ½g·dt², v −= g·dt)이라 샘플이 연속해 위에 정확히
       //   놓인다. 심플렉틱 오일러(v 먼저 갱신)를 쓰면 정점이 v₀·dt/2 = 54mm 낮아져 저작한 높이와
       //   실제 도달 높이가 갈린다 — 그러면 "기단은 넘고 담은 못 넘는다"를 수치로 단언할 수 없다.
@@ -504,6 +584,7 @@ export function createWalker({ site, plan, heightAt } = {}) {
       if (vy <= 0 && eyeY <= landY) {
         // 착지 — 눈높이를 지형에 클램프하고 월드 수평 속도를 로컬 축으로 되돌린다(운동량 연속).
         eyeY = landY;
+        landImpact = Math.max(landImpact, Math.abs(vy));   // 착지음 세기(배선이 소비)
         vy = 0;
         airborne = false;
         const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
@@ -518,6 +599,11 @@ export function createWalker({ site, plan, heightAt } = {}) {
       if (eyeY < ground + 0.1) eyeY = ground + 0.1;
     }
 
+    // 발소리 케이던스는 시간이 아니라 **거리**로 적립한다 — 그러면 걷기·달리기의 케이던스가
+    //   속도에서 자동으로 파생되고(보폭 고정), 저fps 에서도 걸음 수가 어긋나지 않는다.
+    //   접지 이동만 센다: 비행·체공 중에는 발이 닿지 않는다.
+    if (!fly && !airborne) strideDist += Math.hypot(x - px, z - pz);
+
     pos.set(x, eyeY, z);
     dir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).normalize();
     return { pos, dir };
@@ -531,15 +617,19 @@ export function createWalker({ site, plan, heightAt } = {}) {
     get yaw() { return yaw; }, set yaw(v) { yaw = v; heading.reset(v); },
     get pitch() { return pitch; }, set pitch(v) { pitch = clamp(v, -PITCH_LIMIT, PITCH_LIMIT); },
     get autoStroll() { return auto; },
-    startAutoStroll() { auto = true; heading.reset(yaw); vf = vs = wvx = wvz = vy = 0; airborne = false; },
+    startAutoStroll() {
+      auto = true; heading.reset(yaw); vf = vs = wvx = wvz = vy = 0; airborne = false;
+      fly = false; prevJump = false; lastJumpTap = -Infinity;   // 자동 산책은 걷는다 — 비행 해제
+    },
     stopAutoStroll() {
       auto = false; heading.reset(yaw);
       cur.fwd = cur.strafe = 0; cur.run = cur.jump = false;
       vf = vs = wvx = wvz = vy = 0; airborne = false; pendYaw = pendPitch = 0;
+      fly = false; prevJump = false; lastJumpTap = -Infinity;
     },
     setPos(nx, nz) {
       const p = nudgeOut(nx, nz); x = p.x; z = p.z; eyeY = H(x, z) + EYE; pos.set(x, eyeY, z);
-      vy = 0; airborne = false; wvx = wvz = 0;
+      vy = 0; airborne = false; wvx = wvz = 0; fly = false;
     },
     lookAt() { return pos.clone().add(dir); },
     // 검증·엔진 배선용 디버그/조회 훅.
@@ -551,8 +641,32 @@ export function createWalker({ site, plan, heightAt } = {}) {
       const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
       return { fwd: wvx * fdx + wvz * fdz, strafe: wvx * rightX(yaw) + wvz * rightZ(yaw) };
     },
-    grounded() { return !airborne; },
+    grounded() { return !airborne && !fly; },
     verticalSpeed() { return vy; },
+    // ── 크리에이티브 비행 ──
+    flying() { return fly; },
+    setFly(on) {
+      const next = !!on;
+      if (next === fly) return fly;
+      fly = next;
+      if (fly) {
+        airborne = false;
+        const fdx = Math.sin(yaw), fdz = Math.cos(yaw);
+        if (!wvx && !wvz) { wvx = fdx * vf + rightX(yaw) * vs; wvz = fdz * vf + rightZ(yaw) * vs; }
+        vf = vs = 0;
+      } else {
+        airborne = true;   // 끄면 낙하로 인수된다
+      }
+      return fly;
+    },
+    flyCeiling: FLY_CEILING,
+    flySpeed: FLY_SPEED,
+    // ── 발소리 배선 ──
+    // 누적 접지 보행거리(m). 소비자가 보폭으로 나눠 걸음 이벤트를 만든다(리셋은 소비자 몫이 아니라
+    //   여기서 하지 않는다 — 단조 증가값을 그대로 노출해 배선이 자기 기준점을 든다).
+    strideDistance() { return strideDist; },
+    // 착지 충격(m/s). 읽으면 0 으로 비워진다 — 한 착지에 한 번만 소리가 난다.
+    takeLandImpact() { const v = landImpact; landImpact = 0; return v; },
     groundClearance() { return eyeY - H(x, z); },
     isColliding() { return collides(x, z); },
     outsideBoundary() { return Math.hypot(x - C.x, z - C.z) > MAXR + 1e-3; },
