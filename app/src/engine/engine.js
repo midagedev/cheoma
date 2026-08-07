@@ -51,6 +51,7 @@ import {
   isVillageMjaHouseProductContext,
 } from '../../../src/api/village-options.js';
 import { terrainMeshHeightAt } from '../../../src/api/village-plan.js';
+import { solveHeroBacklight } from '../../../src/api/lighting.js';
 import { configFromSeed, paramsFor, newSeed } from '../lib/seed.js';
 import { buildingNavigationTargetFromProxy } from '../lib/building-navigation.js';
 import { normalizeStandaloneParamPatch } from '../lib/standalone-param-spec.js';
@@ -227,9 +228,17 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
   let legacyHeroPoll = null;
   let legacyHeroFadeFrame = null;
   // 히어로 역광 방위(#98 사용자 지시). 종가 랜딩 시 종가 배면(frontDir+180±) 쪽으로 태양 방위를 고정해,
-  //   정측면에서 멈춘 카메라가 집을 역광으로 보게 한다(처마 실루엣 골든 림). 태양 고도·색은 시간대(석양)
-  //   그대로 두고 방위만 매 프레임 회전(env sky 가 sun.position 을 세팅한 뒤 덮어씀). null=미적용(비히어로).
+  //   정측면에서 멈춘 카메라가 집을 역광으로 보게 한다(처마 실루엣 골든 림). 방위는 매 프레임 회전
+  //   (env sky 가 sun.position 을 세팅한 뒤 덮어씀). null=미적용(비히어로).
+  //
+  // 2026-08-07: 방위와 **고도**를 함께 지형에서 푼다(src/env/hero-sun.js). 종전엔 배면 +55° 상수에
+  //   고도는 시간대 프로필 그대로였는데, 배산임수 규약상 종가 배면은 곧 배산이라 고도 9.51° 석양이
+  //   능선(그 방위 16.59°) 뒤 7.08° 아래에 묻혔다 — 종가에 직사광이 0 이고 rim.js `_directGate` 가
+  //   그림자 바닥값 0.45 로 눌린 채 시작했다(사용자 보고 "조립 후 림라이트가 거의 없다"). 능선 윤곽은
+  //   시드마다 다르므로 상수로는 다른 부지에서 재발한다. heroSunElev=null 이면 프로필 고도 유지.
   let heroSunAz = null;
+  let heroSunElev = null;
+  let heroSunSolve = null;   // 검증 판독(__hero.sunSolve)
 
   // ---------- 그림자 정적 캐시(#140-A) ----------
   //   sun.shadow.camera 는 ±22 ortho 크기를 유지하되, 선택/전환 중에는 controls.target 을 texel 단위로
@@ -1391,8 +1400,14 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     //   position 회전만으로 그림자·rim(post uSunViewDir)·flare 가 일관되게 역광으로 정렬된다.
     if (village.active && heroSunAz != null) {
       const sp = sun.position;
-      const hmag = Math.hypot(sp.x, sp.z);
-      if (hmag > 1e-4) { sp.x = Math.sin(heroSunAz) * hmag; sp.z = Math.cos(heroSunAz) * hmag; }
+      const r = sp.length();
+      if (r > 1e-4) {
+        // 고도는 해가 능선을 넘기려고 올려 둔 값이 있으면 그것을, 없으면 프로필 그대로.
+        //   반지름을 보존하므로 sun.target=원점 규약과 그림자 카메라 거리는 불변이다.
+        const el = heroSunElev != null ? heroSunElev : Math.asin(THREE.MathUtils.clamp(sp.y / r, -1, 1));
+        const ch = Math.cos(el);
+        sp.set(Math.sin(heroSunAz) * ch * r, Math.sin(el) * r, Math.cos(heroSunAz) * ch * r);
+      }
     }
     // Product sun.position remains a direction vector for clouds/motes/grass/rim/flare.
     // Only the shadow camera follows the viewed architectural target. During focus
@@ -3139,15 +3154,6 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     const bbSpan = pr.bbox ? { x: pr.bbox.max.x - pr.bbox.min.x, y: pr.bbox.max.y - pr.bbox.min.y, z: pr.bbox.max.z - pr.bbox.min.z } : null;
     const rotY = Number.isFinite(pr.rotY) ? pr.rotY : 0;
     const maxDim = Number.isFinite(pr.maxDim) ? pr.maxDim : (bbSpan ? Math.max(bbSpan.x, bbSpan.y, bbSpan.z) : 14);
-    // 역광 무대(#98): 태양을 종가 배면(frontDir≈rotY, +180°+25° 사선)에 고정한다.
-    // 카메라 XZ 방향은 일반 focus와 같은 남측 개방부 계약을 쓰므로 고정 방위로 앞집을 끌어들이지 않는다.
-    // 배면 사선 역광. +25° 는 태양이 시선축에서 11° 밖에 안 벗어나 정배면과 다름없었다(측정:
-    //   sunAz -155° vs 카메라 시선 -166°). 그러면 카메라를 향한 모든 면 — 남측 지붕면·벽·배산 사면 —
-    //   이 전부 음영측이 되어 프레임이 실루엣 하나로 붕괴한다(정착 프레임 피사체 밴드 중값 14/255,
-    //   룩 계약 "크러시드 블랙 실루엣 금지" 위반). +55° 는 3/4 역광이다: 림 게이트의 backlit 항
-    //   (-dot(표면→카메라, 표면→태양) ≥ 0.45)은 0.63~0.70 으로 여전히 만점이고, 서측 지붕면과
-    //   배산 사면이 골든 그레이징을 받아 처마선이 기댈 밝은 면이 생긴다.
-    heroSunAz = rotY + Math.PI + 55 * DEG;
     village.heroRotY = rotY;   // 검증용(카메라·태양 방위 vs frontDir 단언)
     const heroFraming = pr.heroCameraFraming;
     let finalPosition;
@@ -3169,6 +3175,55 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
       finalPosition = fittedFocus.position.clone();
       finalFov = fittedFocus.fov;
       finalReferenceFov = fittedFocus.referenceFov;
+    }
+
+    // ── 역광 무대(#98 · 2026-08-07 지형 인지 해) ────────────────────────────────────────
+    // 종전: `heroSunAz = rotY + π + 55°` — 배면 사선 고정 상수(2026-07-31 판정이 고른 값).
+    // 그 판정은 옳은 축(방위)을 조정했지만 프레임을 죽이던 축은 **고도**였다. 배산임수 규약상
+    // 종가 배면은 곧 배산이고, 그 방위의 능선 수평선은 16.59° 인데 석양 고도는 9.51° 다 —
+    // 태양이 능선 뒤 7.08° 아래에 묻혀 종가에 직사광이 0 이었다(scratch/rim-entry/occlusion.json).
+    // 그래서 rim.js `_directGate` 가 그림자 바닥값 0.45 로 눌린 채 시작했고, 무엇보다 씬 전체가
+    // 앰비언트만 받아 골든아워로 읽히지 않았다. 능선 윤곽은 시드마다 다르므로 상수 재조정으로는
+    // 다른 부지에서 재발한다 → 방위·고도를 부지에서 함께 푼다(src/env/hero-sun.js).
+    //
+    // 해가 정착 프레이밍 **뒤에** 도는 이유: 목적함수의 역광 항이 실제 정착 카메라 방위를 쓴다.
+    // 종전 상수는 "카메라가 집 정면에 선다"를 가정했는데 실측 카메라 방위는 rotY 에서 13.8° 벗어나
+    // 있었고, 그만큼 역광 분리각이 어긋났다.
+    {
+      const site = village.handle?.plan?.site;
+      const camDir = finalPosition.clone().sub(finalTarget);
+      const camAzimuth = Math.atan2(camDir.x, camDir.z);
+      const camElevation = Math.atan2(camDir.y, Math.hypot(camDir.x, camDir.z));
+      const sunElevation = Math.asin(THREE.MathUtils.clamp(
+        sun.position.y / Math.max(1e-6, sun.position.length()), -1, 1));
+      const solved = typeof site?.heightAt === 'function' ? solveHeroBacklight({
+        backAzimuth: rotY + Math.PI,
+        cameraAzimuth: camAzimuth,
+        cameraElevation: camElevation,
+        sunElevation,
+        heightAt: (x, z) => site.heightAt(x, z),
+        // 원점은 종가 상단(용마루 부근) — "태양이 이 점에 닿는가"가 직사광 판정이다.
+        origin: { x: finalTarget.x, y: finalTarget.y + maxDim * 0.25, z: finalTarget.z },
+      }) : null;
+      if (solved) {
+        heroSunAz = solved.azimuth;
+        // 프로필 고도로 이미 능선을 넘으면 해가 sunElevation 을 그대로 돌려주므로 여기서 override 를
+        //   달지 않는다 — 골든아워 저고도를 불필요하게 잃지 않기 위한 항등 경로다.
+        heroSunElev = solved.elevation > sunElevation + 1e-4 ? solved.elevation : null;
+      } else {
+        heroSunAz = rotY + Math.PI + 55 * DEG;   // 지형 미노출 핸들(구/커스텀) 폴백 — 종전 상수
+        heroSunElev = null;
+      }
+      heroSunSolve = solved && {
+        offsetDeg: +(solved.offset * 180 / Math.PI).toFixed(1),
+        azimuthDeg: +(solved.azimuth * 180 / Math.PI).toFixed(1),
+        elevationDeg: +(solved.elevation * 180 / Math.PI).toFixed(2),
+        horizonDeg: +(solved.horizon * 180 / Math.PI).toFixed(2),
+        clearanceDeg: +(solved.clearance * 180 / Math.PI).toFixed(2),
+        occluded: solved.occluded,
+        score: +solved.score.toFixed(4),
+        camAzimuthDeg: +(camAzimuth * 180 / Math.PI).toFixed(1),
+      };
     }
 
     // 순수 건축 리빌 경로(#22): 넓은 establishing 화각에서 종가 둘레를 완만히 돌아 공유 24°의
@@ -4759,6 +4814,13 @@ export function createEngine({ container, perf = false, compact = false } = {}) 
     get dofAperture() { return !disposed && bokehPass ? bokehPass.uniforms.aperture.value : null; },
     // #98 역광: 태양 방위(sun.position 실측)·히어로 종가 frontDir(rotY)·카메라 방위 — 역광 구도 단언.
     get sunAz() { return disposed ? 0 : Math.atan2(sun.position.x, sun.position.z); },
+    // 태양 고도(라디안) + 지형 인지 해의 판독. 게이트가 "능선을 넘겼는가"를 직접 단언한다.
+    get sunElev() {
+      if (disposed) return 0;
+      const r = sun.position.length();
+      return r > 1e-6 ? Math.asin(THREE.MathUtils.clamp(sun.position.y / r, -1, 1)) : 0;
+    },
+    get sunSolve() { return disposed ? null : heroSunSolve; },
     get heroRotY() { return !disposed && village.heroRotY != null ? village.heroRotY : null; },
     get timeState() { return state.time; },
   };

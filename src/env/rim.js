@@ -5,6 +5,7 @@ import {
   addMaterialProgramKey,
 } from '../render/material-program-key.js';
 import { patchLodScreenDoorMaterial } from '../render/lod-screen-door.js';
+import { RIM_SOLAR_GATE } from './rim-solar-gate.js';
 import { VILLAGE_LENS, dollyScaleForFov } from '../camera/optics.js';
 
 // 재질 프레넬 골든아워 림 (태스크 #76 도입 · #101 전 오브젝트 확장) — RimPass(스크린스페이스) 대체.
@@ -108,7 +109,29 @@ export const RIM_FRESNEL_AA = Object.freeze({
   normalFull: 0.025,
   normalCutoff: 0.16,
   fresnelW: 3.5, // Toksvig-style peak soften vs fwidth(Fresnel)
+  // 기하 AA 두 항(_fresAa·_normAa)의 바닥값 (2026-08-07).
+  //
+  // 그 둘은 "화면 미분이 크면 지운다"는 이진 삭제다. 그런데 실루엣은 정의상 ndv 가 가장 급변하는
+  // 곳이라, 이 삭제는 림이 그려야 할 바로 그 선을 정조준한다. 히어로 정착(7° 렌즈·146 m)에서
+  // 종가 실루엣 삼각형의 화면 공간 미분을 지오메트리로 직접 계산한 결과(scratch/rim-entry/aa.json):
+  //
+  //     _aa 평균 0.491 · **42.9% 가 완전 소멸(_aa < 0.05)** · 읽히는 비율 0.803 → 0.459
+  //
+  // 즉 이 항이 처마 금빛의 대부분을 먹고 있었다(사용자 보고 "조립 후 림라이트가 거의 없다").
+  // 삭제를 감쇠로 바꾼다 — 진짜 안티에일리어싱은 에너지 보존형인 _peakAa(Toksvig)가 계속 맡고,
+  // 두 기하 항은 고주파 실루엣을 **약하게** 만들되 지우지는 않는다. 0.45 는 스티플 방지의 원 목적
+  // (역광 금점 — docs/surface-materials.md)을 유지하는 하한이다: 완전 소멸 구간이 이 값으로
+  // 올라와도 캡(0.34)의 절반에 못 미쳐 원반·점열이 되지 않는다.
+  floor: 0.45,
 });
+
+// 처마 킥 배수 (2026-08-07). 기와 **면**은 RIM_TILE_SURFACE_MUL=0 으로 림에서 빠져 있고, 처마의
+// 금빛은 설계상 eaveBand(처마 단면 띠)와 목부재가 전담한다. 그런데 히어로 정착은 그 띠가 화면에서
+// 2~3 px 인 망원 프레임이라, 같은 계수로는 사다리 실측에서 건물군 5배까지 올려도 처마선이 읽히지
+// 않았다(scratch/rim-entry/ladder-5p0.png). 전역 계수를 올리면 넓은 회벽면이 함께 HDR 백색으로
+// 떠오르므로(부스트 실측), 이미 존재하는 재질별 uniform(uRimTileMul)에 처마 전용 값을 준다 —
+// 같은 프로그램·같은 uniform 이라 드로우콜·프로그램 계열 변화 0.
+export const RIM_EAVE_KICK_MUL = 3.2;
 
 // paletteKey for corrugated tile fields (not eaveBand / wadang / jeoksae ornaments).
 const TILE_SURFACE_KEYS = new Set([
@@ -117,52 +140,22 @@ const TILE_SURFACE_KEYS = new Set([
 // Zero: field ridges must not light as gold threads; eave kick lives on eaveBand + timber.
 export const RIM_TILE_SURFACE_MUL = 0.0;
 
+// 처마선을 실제로 그리는 재질 — **연속된** 처마 단면 띠 하나뿐이다.
+// 막새·와구토·적새(wadang/waguto/jeoksae)는 처음에 함께 넣었다가 뺐다: 그것들은 낱개 장식이라
+// 같은 배수에서 용마루가 금빛 **점선**으로 떠올랐다(scratch/rim-entry/eave40.png) — 스티플은
+// RIM_FRESNEL_AA 가 막으려던 바로 그 결함이다. 킥은 선에만, 점에는 붙이지 않는다.
+const EAVE_KICK_KEYS = new Set(['eaveBand']);
+
 // The tangent edge is meant to clip and seed bloom — that overexposed thread along the eave is
 // the look. Cap only far enough to stop a whole pale plaster face or grass clump from becoming a
 // flat HDR-white emitter. Group multipliers remain outside the cap, preserving
 // building > misc > organic hierarchy at both ordinary and peak strength.
 export const RIM_BASE_ENERGY_CAP = 0.34;
 
-// The physical conditions still shape the rim, but as attenuation rather than as an all-or-nothing
-// switch. Real backlit edges glow even in shadow and even somewhat off the sun axis, because the
-// whole sky is a source at golden hour — so each condition keeps a floor. The stock lighting loop
-// captures the already-shadowed first sun; combining that visibility with directDiffuse keeps a
-// later unshadowed fill from reviving a full-strength rim inside the sun's shadow, without another
-// sampler fetch or program variant.
-//
-// facingStart/facingFull describe a **light wrap taper on the lit side of the terminator**, not a
-// sun-direction sign gate (2026-08-01, #35 round 3 — user-approved P2c). The shipped ramp was
-// `mix(uRimWrap, 1, smoothstep(facingStart, facingFull, dot(N, sun)))`, i.e. it multiplied the rim
-// by the wrap floor 0.10 exactly where a backlit subject presents its camera-facing flank
-// (dot(N,sun) < 0 there by definition), while a fragment turned *into* the sun got the full 1.0.
-// The stock `_directGate` then charged the same orientation a second time, because
-// reflectedLight.directDiffuse is ~0 both inside a cast shadow and on a face merely averted from
-// the sun. Measured product expansion (sunset, ndv 0.05, building ×1.5, chain in
-// tools/check-rim-master.mjs §5): the sun-opposite backlit face landed at 37.4% of the authored
-// peak at 16°/60 m and 21.3% on the 46°/464 m aerial, while a *sun-facing* sliver (dot(N,sun)
-// +0.2) saturated the cap at 100%. The flagship rim was therefore brightest in front light and
-// dimmest in the backlit silhouette it exists to draw — the exact inverse of the look contract.
-//
-// The view-level question "is the sun behind the subject" is already answered by `_backlit`
-// (-dot(V, sun)); the fragment level must answer "does the shading BRDF already carry this
-// energy". It does not on or beyond the terminator (that is where wrap-around sky and grazing sun
-// light live and where stock diffuse gives nothing), and it does on a surface turned into the sun.
-// So the ramp is inverted and widened: full through the whole terminator band, tapering to the
-// sky-scatter floor once the surface is within ~52° of the sun (facingFull 0.62 ≈ cos 52°, up from
-// 0.12). And `_directGate` keeps only its real content — cast-shadow occlusion — by taking the
-// max of the direct-light evidence and the same shade term, so orientation is charged once.
-export const RIM_SOLAR_GATE = Object.freeze({
-  facingStart: -0.05,
-  facingFull: 0.62,
-  backlitStart: 0.02,
-  backlitFull: 0.45,
-  // 순광·측광 뷰에 남기는 최소 강도. 골든이 전역 backlit 게이트에 두었던 0.18 바닥과 같은 뜻 —
-  // 림은 역광에서 읽히는 것이 본질이므로 이 값이 커지면 방향성이 무너진다.
-  backlitFloor: 0.20,
-  directStart: 0.002,
-  directFull: 0.08,
-  shadowFloor: 0.45,
-});
+// 태양 게이트 상수는 rim-solar-gate.js 가 소유한다(2026-08-07 분리) — 셰이더와 히어로 태양 해
+// (hero-sun.js)가 같은 값을 써야 하는데, hero-sun 은 three 를 임포트하지 않는 순수 모듈이다.
+// 여기서 재수출하므로 기존 소비자(tools/check-rim-*.mjs)의 임포트 경로는 변하지 않는다.
+export { RIM_SOLAR_GATE };
 
 // The distance fade exists to drop rim off *apparent* background — distant ridges and far
 // buildings — but it reads raw view-space depth. A compensated telephoto dolly holds the
@@ -349,8 +342,11 @@ export function createFresnelRim(scene) {
     ground: { value: RIM_GROUP_POWER_MUL.ground },
   };
   // Shared across all non-tile materials (1) vs tile fields (RIM_TILE_SURFACE_MUL). Same program.
+  // 처마 단면 띠·처마끝 장식만 RIM_EAVE_KICK_MUL — 셋 다 같은 uniform 이름을 쓰므로 프로그램 계열은
+  // 하나 그대로다(재질별로 어느 uniform 객체를 붙이느냐만 다르다).
   const tileSurfaceMulFull = { value: 1.0 };
   const tileSurfaceMulDamp = { value: RIM_TILE_SURFACE_MUL };
+  const tileSurfaceMulEave = { value: RIM_EAVE_KICK_MUL };
 
   // 커버리지 카운트(검증 로그): 재질군별 패치 수 — 나무·풀·소품 포함 증명·제외 준수 확인.
   const counts = {
@@ -419,9 +415,10 @@ export function createFresnelRim(scene) {
     patchLodScreenDoorMaterial(mat);
     const groupUniform = groupUniforms[group] || groupUniforms.misc;
     const groupPowerUniform = groupPowerUniforms[group] || groupPowerUniforms.misc;
-    const tileSurfaceUniform = TILE_SURFACE_KEYS.has(mat.userData.paletteKey)
+    const paletteKey = mat.userData.paletteKey;
+    const tileSurfaceUniform = TILE_SURFACE_KEYS.has(paletteKey)
       ? tileSurfaceMulDamp
-      : tileSurfaceMulFull;
+      : (EAVE_KICK_KEYS.has(paletteKey) ? tileSurfaceMulEave : tileSurfaceMulFull);
     const facingFull = RIM_FACING_GATE.full.toFixed(2);
     const facingCutoff = RIM_FACING_GATE.cutoff.toFixed(2);
     const energyCap = RIM_BASE_ENERGY_CAP.toFixed(2);
@@ -438,6 +435,7 @@ export function createFresnelRim(scene) {
     const aaNormalFull = RIM_FRESNEL_AA.normalFull.toFixed(3);
     const aaNormalCutoff = RIM_FRESNEL_AA.normalCutoff.toFixed(2);
     const aaFresnelW = RIM_FRESNEL_AA.fresnelW.toFixed(2);
+    const aaFloor = RIM_FRESNEL_AA.floor.toFixed(2);
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader, r) => {
       if (prev) prev(shader, r);
@@ -497,7 +495,10 @@ export function createFresnelRim(scene) {
             float _fresAa = 1.0 - smoothstep(${aaNdvFull}, ${aaNdvCutoff}, _ndvW);
             float _normAa = 1.0 - smoothstep(${aaNormalFull}, ${aaNormalCutoff}, _nW);
             float _peakAa = _fres / max(_fres + _fresW * ${aaFresnelW}, 1e-4);
-            float _aa = min(_fresAa, _normAa) * clamp(_peakAa, 0.0, 1.0);
+            // 기하 두 항은 **삭제가 아니라 감쇠**다(2026-08-07, RIM_FRESNEL_AA.floor 주석 참조).
+            //   실루엣은 정의상 ndv 미분이 가장 큰 곳이라 이진 컷오프는 림이 그려야 할 선을
+            //   정조준해 지웠다. 에너지 보존형 _peakAa(Toksvig)가 진짜 AA 를 계속 맡는다.
+            float _aa = mix(${aaFloor}, 1.0, min(_fresAa, _normAa)) * clamp(_peakAa, 0.0, 1.0);
             // Front-facing wash gate (broad wall must not become an HDR emitter).
             float _silhouette = 1.0 - smoothstep(${facingFull}, ${facingCutoff}, _ndv);
             // Solar: floored attenuation (facing · backlight · main-sun shadow ratio).

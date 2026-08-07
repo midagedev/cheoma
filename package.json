@@ -111,6 +111,7 @@
     "check:drainage": "node tools/check-drainage-plan.mjs",
     "check:dangsan": "node tools/check-dangsan-plan.mjs",
     "check:rim": "node tools/run-browser-locked.mjs -- node tools/check-rim-facing.mjs",
+    "check:hero-sun": "node tools/check-hero-sun.mjs",
     "check:rim-gate": "node tools/check-rim-gate.mjs",
     "check:rim-master": "node tools/check-rim-master.mjs",
     "check:fog-wash": "node tools/check-fog-wash.mjs",
