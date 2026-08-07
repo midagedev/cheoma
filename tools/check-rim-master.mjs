@@ -491,6 +491,63 @@ ok(
   `the HDR energy cap still bounds both (${num(antiSun.capped, 3)}, ${num(tangentSun.capped, 3)} <= ${rim.RIM_BASE_ENERGY_CAP})`,
 );
 
+
+// ── §6 처마 실이 블룸을 먹인다 (2026-08-07) ───────────────────────────────────────
+// "The tangent edge is meant to clip and seed bloom — that overexposed thread along the eave is
+// the look"(rim.js RIM_BASE_ENERGY_CAP 주석)는 오랫동안 **성립할 수 없는 서술**이었다.
+// uRimTileMul 이 에너지 캡 *안*에 있어 처마 띠도 상한 0.34×1.5=0.51 linear 에 막혔고, 그 루마는
+// sunset gold 블룸 문턱 0.80 의 32% 였다 — 어떤 배수를 줘도 피어날 수 없었다(사용자 보고
+// "림라이트가 뿌옇게 환하게 빛나면 좋겠는데"). 판별자를 캡 밖으로 옮겨 그 서술을 계약으로 만든다.
+//
+// 여기서 재는 것은 셰이더 산술 그대로다: 가산 = CAP × groupMul × tileMul, 화면 루마 = 가산 · rimColor.
+{
+  const SRGB = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const linearOf = (hex) => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255]
+    .map((v) => SRGB(v / 255));
+  const lumaOf = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // sunset gold 프로필(src/env/atmosphere-profiles.js): rimColor 0xffa757 · bloomThreshold 0.80.
+  const SUNSET_RIM_COLOR = 0xffa757;
+  const SUNSET_BLOOM_THRESHOLD = 0.80;
+  const colorLuma = lumaOf(linearOf(SUNSET_RIM_COLOR));
+  const addFor = (tileMul) => rim.RIM_BASE_ENERGY_CAP * rim.RIM_GROUP_MUL.building * tileMul;
+  const eaveLuma = addFor(rim.RIM_EAVE_KICK_MUL) * colorLuma;
+  const faceLuma = addFor(1) * colorLuma;
+  const tileLuma = addFor(rim.RIM_TILE_SURFACE_MUL) * colorLuma;
+  console.log(`\n  eave thread ${num(eaveLuma, 3)} · ordinary face ${num(faceLuma, 3)} `
+    + `· tile field ${num(tileLuma, 3)}  (bloom threshold ${SUNSET_BLOOM_THRESHOLD})`);
+  ok(
+    eaveLuma > SUNSET_BLOOM_THRESHOLD * 1.25,
+    `the eave thread clears the sunset bloom threshold with margin (${num(eaveLuma, 3)} > `
+      + `${num(SUNSET_BLOOM_THRESHOLD * 1.25, 3)}) — the halo cannot flicker with framing/fog`,
+  );
+  ok(
+    faceLuma < SUNSET_BLOOM_THRESHOLD,
+    `an ordinary silhouette face still stays below it (${num(faceLuma, 3)} < ${SUNSET_BLOOM_THRESHOLD}) `
+      + '— only the line blooms, never a broad plaster face',
+  );
+  ok(
+    tileLuma === 0,
+    `the tile field contributes nothing at any position of the multiplier (${num(tileLuma, 3)})`,
+  );
+  ok(
+    rim.RIM_EAVE_KICK_MUL > 1 && rim.RIM_GROUP_MUL.building * rim.RIM_BASE_ENERGY_CAP < SUNSET_BLOOM_THRESHOLD,
+    'the kick is what crosses the threshold, not the shared building coefficient '
+      + `(building peak ${num(faceLuma, 3)} stays sub-threshold)`,
+  );
+  // 위 산술은 uRimTileMul 이 **캡 밖**일 때만 참이다. 안에 있으면 어떤 배수를 줘도 상한이
+  //   0.51 linear(루마 0.253)에 머물러 문턱의 32% 를 넘지 못한다 — 이 라운드 이전이 정확히 그
+  //   상태였다. 그래서 위치 자체를 소스에서 단언한다(값만 보는 계약은 회귀를 놓친다).
+  const src = readFileSync(new URL('../src/env/rim.js', import.meta.url), 'utf8');
+  const emit = src.slice(src.indexOf('outgoingLight += uRimColor'));
+  const emitLine = emit.slice(0, emit.indexOf(';') + 1);
+  const clampEnd = emitLine.indexOf('${energyCap})');
+  ok(
+    clampEnd > 0 && emitLine.indexOf('uRimTileMul') > clampEnd,
+    'uRimTileMul multiplies OUTSIDE the energy cap — a line may clip and seed bloom while the cap '
+      + 'still bounds every face',
+  );
+}
+
 if (failed) {
   console.error(`\nRIM MASTER: FAIL (${failed})`);
   process.exit(1);

@@ -131,7 +131,18 @@ export const RIM_FRESNEL_AA = Object.freeze({
 // 않았다(scratch/rim-entry/ladder-5p0.png). 전역 계수를 올리면 넓은 회벽면이 함께 HDR 백색으로
 // 떠오르므로(부스트 실측), 이미 존재하는 재질별 uniform(uRimTileMul)에 처마 전용 값을 준다 —
 // 같은 프로그램·같은 uniform 이라 드로우콜·프로그램 계열 변화 0.
-export const RIM_EAVE_KICK_MUL = 3.2;
+//
+// 값은 **블룸 문턱에서 역산한다**(사용자 요청 "림라이트가 약간은 뿌옇게 환하게 빛나는 아름다움").
+// 그 뿌연 후광은 림 자체가 아니라 림이 블룸을 먹여야 생긴다. sunset gold 기준:
+//   rimColor 0xffa757 → 선형 (1.000, 0.386, 0.095), 루마 0.496 · bloomThreshold 0.80
+//   가산 = CAP(0.34) × building(1.5) × 이 값 → 루마 = 가산 × 0.496
+//     ×1   0.253 (문턱의 32% — 종전. 캡 안에 있어 어떤 배수로도 여기서 막혔다)
+//     ×3.2 0.809 (101% — 겨우 접함, 후광이 안 생긴다)
+//     ×5.0 1.264 (158% — 실이 확실히 클리핑해 부드러운 헤일로를 만든다)
+// 5.0 을 고른 이유: 문턱을 접하는 값(3.2)은 프레임·계절·안개에 따라 문턱 아래로 떨어져 후광이
+// 깜빡인다. 158% 는 그 변동폭 밖이면서, 클리핑하는 대상이 **폭 2~3 px 의 선 하나**라 넓은 면이
+// HDR 백색이 되는 실패 모드(부스트 실측에서 회벽이 통째로 떴던 것)와는 종류가 다르다.
+export const RIM_EAVE_KICK_MUL = 5.0;
 
 // paletteKey for corrugated tile fields (not eaveBand / wadang / jeoksae ornaments).
 const TILE_SURFACE_KEYS = new Set([
@@ -555,11 +566,19 @@ export function createFresnelRim(scene) {
             float _defocus = abs(_axial - uRimFocusDepth);
             float _dofInFocus = 1.0 - smoothstep(uRimDofNear, uRimDofFar, _defocus);
             float _dofDamp = mix(1.0, mix(uRimDofFloor, 1.0, _dofInFocus), clamp(uRimDofAmount, 0.0, 1.0));
-            // (2) uRimTileMul: tile fields 0, eaveBand/wood 1.
             float _rim = _fres * _silhouette * _aa * _sunFacing * _backlit * _directGate
-              * _df * _dofDamp * uRimStrength * uRimScale * uRimTileMul;
+              * _df * _dofDamp * uRimStrength * uRimScale;
             // Linear HDR add before bloom / ACES. Group mul keeps building > misc > organic.
-            outgoingLight += uRimColor * min(max(_rim, 0.0), ${energyCap}) * uRimGroupMul;
+            //
+            // uRimTileMul 은 **캡 바깥**이다(2026-08-07). 그 값은 에너지가 아니라 "이 재질이 선인가
+            //   면인가"라는 판별자다 — 면(기와 0)은 아무리 커도 떠오르면 안 되고, 처마 단면 띠는
+            //   반대로 **넘쳐서 블룸을 먹여야** 한다("The tangent edge is meant to clip and seed
+            //   bloom" — 아래 RIM_BASE_ENERGY_CAP 주석의 원래 의도). 캡 안에 있던 동안 그 의도는
+            //   성립할 수 없었다: 상한 0.34×1.5=0.51 linear = 루마 0.253 인데 sunset 블룸 문턱은
+            //   0.80 이라 **문턱의 32%** 에서 천장에 막혔다. 곱 위치만 옮기므로 mul=1(대부분)과
+            //   mul=0(기와 면)은 산술적으로 완전 동일하고, 값이 다른 재질은 처마 띠 하나뿐이다.
+            outgoingLight += uRimColor * min(max(_rim, 0.0), ${energyCap})
+              * uRimGroupMul * uRimTileMul;
           }
           #include <opaque_fragment>`);
     };
