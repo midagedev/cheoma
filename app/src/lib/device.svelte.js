@@ -4,6 +4,7 @@
 //   sheet          : 바텀 시트 레이아웃 사용(세로 좁은 화면). 우측 한지 패널·마을 옵션이 시트로.
 //   touch          : 거친 포인터(폰·태블릿) — 터치 타깃 확대·다이얼 밴드 확대.
 //   landscapePhone : 가로 폰(짧은 높이) — 시트 대신 축소된 우측 패널.
+//   shortViewport  : 세로 여유가 없는 화면(트위터 인앱 브라우저처럼 거의 1:1) — 시트 크롬 압축.
 //   phone          : 진짜 폰(거친 포인터 + 최소변 ≤ 520) — 아래 두 성능 술어의 유일한 축.
 //   compact        : 픽셀 예산 하향(pixelRatio 1.5·저해상 bloom).
 //   perf           : 성능 하향 프로파일(그림자맵 하향·눈비 지붕 충돌 생략).
@@ -25,6 +26,7 @@ export const device = $state({
   sheet: false,
   touch: false,
   landscapePhone: false,
+  shortViewport: false,
   phone: false,
   compact: false,
   perf: false,
@@ -35,6 +37,10 @@ const Q = {
   sheet: '(max-width: 768px) and (orientation: portrait)',
   touch: '(pointer: coarse)',
   landscapePhone: '(max-height: 520px) and (orientation: landscape)',
+  // 인앱 브라우저(트위터 등)는 상하 툴바가 뷰포트를 크게 깎아 세로인데도 높이가 짧다. 그 화면은
+  //   "키 큰 폰"이 아니므로 시트 크롬을 압축한다 — 560 은 그 아래에서 스크롤 창이 240px 를
+  //   지키지 못하기 시작하는 실측 경계다(scratch/mobile-panel).
+  shortViewport: '(max-height: 560px)',
 };
 
 // 프로파일 오버라이드 검증 훅(docs/verification.md) — `?fxperf=0|1`, `?fxcompact=0|1`.
@@ -62,6 +68,7 @@ export function initDevice() {
     device.landscapePhone = window.matchMedia(Q.landscapePhone).matches && device.touch;
     // 시트: 세로 좁은 화면. 가로 폰은 축소 사이드 패널이 더 쾌적(세로 여유가 없어 시트가 씬을 덮음).
     device.sheet = window.matchMedia(Q.sheet).matches;
+    device.shortViewport = window.matchMedia(Q.shortViewport).matches;
     // 진짜 폰만: 거친 포인터 + 최소변이 폰급. 가로 폰(852×393)도 최소변으로 걸리고, 태블릿
     // (최소변 > 520)과 좁은 데스크톱 창(비터치)은 빠진다.
     device.phone = device.touch && Math.min(w, h) <= 520;

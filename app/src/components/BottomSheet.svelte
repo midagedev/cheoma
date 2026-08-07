@@ -30,6 +30,27 @@
   // Drag-only: a tap must stay the collapse affordance (check:ui-shell contracts one
   // tap = half), and dragging a sheet past its detent is the gesture users already try.
   const FULL_VH = 0.86;
+  // ── 짧은 뷰포트 최소 높이(2026-08-07, 사용자 지적 "트위터 같은 데서 열면 화면비율이 거의 1:1이
+  //   되어 거의 보기가 힘들다") ── 이 시트의 구조적 문제는 **크롬은 고정 px, 높이는 비율**이라는
+  //   것이다. 스크롤 창 = 0.50·H − 크롬 이므로 화면이 짧아지면 선형이 아니라 절벽처럼 사라진다:
+  //   실측(scratch/mobile-panel) 393×852 에서 226px 이던 창이 393×430 에서 **72px · 보이는
+  //   파라미터 행 0개**가 된다(트위터 인앱 브라우저가 대략 이 비율이다).
+  //   그래서 확장 높이를 비율이 아니라 **clamp** 로 정의한다: 최소 MIN_EXPANDED_PX(크롬 + 쓸 만한
+  //   스크롤), 최대 SHORT_MAX_VH. 긴 폰(852)에서는 426 → 440 으로 사실상 무변화이고, 짧은 화면
+  //   에서는 자연히 화면 대부분을 덮는다 — **패널을 열었다는 것은 지금 파라미터를 보겠다는 뜻**
+  //   이므로 그게 맞는 동작이고, peek 는 그대로라 씬은 한 번의 탭으로 되찾는다.
+  //   ★ 이 clamp 는 **짧은 뷰포트(≤SHORT_VP_PX)에만** 적용한다. 그 위에서는 0.50 이 계약이다 —
+  //   슬라이더를 끄는 동안 피사체가 보여야 한다는 프레이밍 밴드(focus-framing `minSafeFraction`
+  //   0.28)를 지키는 값이고, `usable:false` 는 게이트 문구가 아니라 **코어 카메라의 overflow 경로**를
+  //   켠다. 2026-08-07 실측: 클램프를 전 화면에 걸었더니 phone-small 360×780 에서 밴드가
+  //   0.297 → 0.233 으로 내려가 `check:ui-shell` 이 잡았다. 780 은 애초에 문제 사례가 아니다
+  //   (인앱 브라우저는 ~430) — 게이트가 옳고 클램프의 **범위**가 틀렸다. 짧은 화면에서 밴드를
+  //   포기하는 것은 사용자 판단이다(2026-08-07 "작은 화면에서는 어쩔 수 없다") — 그 화면에는
+  //   애초에 지킬 밴드가 없다.
+  //   짧은 화면에서만 밴드를 포기하는 이유는 그 화면에는 애초에 지킬 밴드가 없기 때문이다.
+  const MIN_EXPANDED_PX = 440;   // 크롬(실측 152~200) + 최소 스크롤 240
+  const SHORT_MAX_VH = 0.92;     // 짧은 화면에서도 그립·상단 여백은 남긴다
+  const SHORT_VP_PX = 560;       // device.svelte.js 의 shortViewport 질의와 같은 경계
   let viewportH = $state(0);
   let snap = $state('hidden');
   let dragH = $state(null);
@@ -38,8 +59,17 @@
   let surface = $state(null);
   let grip = $state(null);
 
-  const halfPx = $derived(Math.round((viewportH || 0) * HALF_VH));
-  const fullPx = $derived(Math.round((viewportH || 0) * FULL_VH));
+  const halfPx = $derived(
+    viewportH > 0 && viewportH <= SHORT_VP_PX
+      ? Math.min(
+        Math.max(Math.round(viewportH * HALF_VH), MIN_EXPANDED_PX),
+        Math.round(viewportH * SHORT_MAX_VH),
+      )
+      : Math.round((viewportH || 0) * HALF_VH),
+  );
+  // full 은 half 보다 낮아질 수 없다. 짧은 화면에서는 둘이 같은 값으로 만나 세 번째 정지점이
+  //   자연히 사라진다(쓸모없는 detent 를 남기지 않는다).
+  const fullPx = $derived(Math.max(Math.round((viewportH || 0) * FULL_VH), halfPx));
   const detentH = (name) => (name === 'full' ? fullPx : name === 'half' ? halfPx : peekPx);
   const sheetMax = $derived(dragH != null ? dragH : detentH(snap));
   const expanded = $derived(snap === 'half' || snap === 'full');

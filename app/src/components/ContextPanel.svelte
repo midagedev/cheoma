@@ -785,7 +785,7 @@
 </BottomSheet>
 
 {#snippet header()}
-  <div class="makehead">
+  <div class="makehead" class:tight={device.sheet && device.shortViewport}>
     {#if !device.sheet}
       <!-- Selection header: what these properties belong to. Text only — the tab
            order contract (check-app-smoke) puts the context tabs first. -->
@@ -1140,6 +1140,13 @@
   /* Context tabs get the 2px rail (the strongest state signal in the column);
      property segments keep 1px so a tab always outranks a value. */
   .axistabs { width: 100%; --cad-seg-rail: 2px; }
+  /* 짧은 뷰포트(인앱 브라우저 ~1:1): 축 탭과 도구 줄을 **한 줄로 합친다**. 실측 2026-08-07,
+     393×430 에서 시트 396px 중 크롬이 200px(51%)이고 그 절반이 헤드 102px = 44px 두 줄이다.
+     한 줄로 합치면 48px 가 스크롤로 돌아간다. 44px 터치 타깃은 그대로 둔다 — 줄이는 것은
+     **줄 수**이지 타깃 크기가 아니다(모바일 계약). */
+  .makehead.tight { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 4px; }
+  .makehead.tight .axistabs { width: auto; flex: 1 1 auto; min-width: 0; }
+  .makehead.tight :global(.toolrow) { flex: 0 0 auto; }
   .axistabs :global(.axistab) { height: 28px; min-height: 28px; font-size: 12px; }
 
   /* Tool row — quiet 28px icon buttons, one hairline rule under the block. */
