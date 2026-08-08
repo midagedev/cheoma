@@ -337,7 +337,14 @@ const textureCount = [...sijeonMaterials].reduce((count, material) => (
   count + Object.values(material).filter((value) => value?.isTexture).length
 ), 0);
 if (sijeon.name !== 'village-sijeon') throw new Error('wave semantic name drifted');
-if (sijeonMeshes.length !== 5 || sijeonMaterials.size !== 5) {
+// Budget repin 2026-08-08 from 5 mesh/5 material to 6/6.
+// Cause: 9b5645f (feat: sijeon roofs become real tile/thatch roofs, facade v4).
+// That commit intentionally added caller-owned thatch for per-shop choga/giwa
+// choice (REQUIRED_MATERIALS + docs/sijeon.md section 3.5); mergeStatic therefore
+// emits one extra draw group. Commit message records "merged meshes 5 -> 6".
+// Node probe (same planSijeon/buildSijeon args as this harness) measures 6/6;
+// FAIL-first: pre-repin gate throws "sijeon draw/material budget drifted".
+if (sijeonMeshes.length !== 6 || sijeonMaterials.size !== 6) {
   throw new Error('sijeon draw/material budget drifted');
 }
 if (textureCount !== 0) throw new Error('sijeon renderer introduced a texture');
@@ -345,7 +352,12 @@ if (sijeon.userData.sijeon?.materialOwnership !== 'caller'
     || sijeon.userData.sijeon?.geometryOwnership !== 'renderer') {
   throw new Error('sijeon ownership metadata is incomplete');
 }
-if (rim.coverage.building !== 4 || rim.coverage.total !== 4) {
+// Rim coverage repin 2026-08-08 from building/total 4/4 to 5/5.
+// Same cause as the draw/material budget above (9b5645f facade v4 thatch):
+// opening is excluded from rim, so pre-v4 patched frame+bench+storage+roof = 4;
+// v4 adds thatch (role roof) as a fifth patched caller material. Node probe
+// measures building=5 total=5; FAIL-first threw "sijeon rim role coverage drifted".
+if (rim.coverage.building !== 5 || rim.coverage.total !== 5) {
   throw new Error('sijeon rim role coverage drifted');
 }
 if (!materials.roof.userData.__snowPatched) {
