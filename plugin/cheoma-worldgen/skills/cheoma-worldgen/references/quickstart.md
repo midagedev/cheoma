@@ -6,13 +6,22 @@ Related: [plan-schema.md](plan-schema.md) · [map-data.md](map-data.md) · [limi
 
 ## 1. Install
 
+In a consumer project (registry, since 0.1.0 — 2026-08-08):
+
+```bash
+npm install cheoma       # exact-pinned peer three@0.185.1 comes along
+npx cheoma --help
+```
+
+Or work from a git checkout (needed for repo gates / hacking the generator):
+
 ```bash
 git clone https://github.com/midagedev/cheoma.git cheoma
 cd cheoma
 npm install
 ```
 
-`https://github.com/midagedev/cheoma.git` is the git remote for this source tree (MIT, Copyright 2026 midagedev). Do **not** use `npm install cheoma` from the public registry. From another project you may install this checkout as a file dependency: `npm install /path/to/cheoma`.
+`https://github.com/midagedev/cheoma.git` is the git remote for this source tree (MIT, Copyright 2026 midagedev). A local checkout can also be installed into another project as a file dependency: `npm install /path/to/cheoma`. In a registry/file install the CLI form is `npx cheoma …`; in a checkout it is `node bin/cheoma.mjs …` — the snippets below use the checkout form.
 
 Confirm:
 

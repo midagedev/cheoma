@@ -20,7 +20,14 @@ The primary product for agents is the **JSON map contract**, not a baked mesh. A
 
 ### ① Obtain the repo and install
 
-cheoma is **not** published to the npm registry. Install from a git checkout of this repository:
+cheoma is published on the npm registry (since 0.1.0, 2026-08-08). In a consumer project:
+
+```bash
+npm install cheoma        # three@0.185.1 arrives as an exact-pinned peer
+npx cheoma --help
+```
+
+For hacking on the generator itself (or running repo gates), use a git checkout instead:
 
 ```bash
 git clone https://github.com/midagedev/cheoma.git cheoma
@@ -196,7 +203,7 @@ Do not promise these. Details and rationale: [references/limitations.md](referen
 | Single three instance | two three.js copies break `instanceof` and prototype patches. Pin **0.185.1**, one install, alias + dedupe. |
 | No tree-shaking | Importing a building still pulls a wide palette/helper graph. "Minimal" is not byte-minimal. |
 
-Also: **no npm registry package yet** — git clone (or `npm install /path/to/cheoma` as a file: dependency) only. Install instructions that say `npm install cheoma` from the public registry are wrong.
+Install paths: registry `npm install cheoma` (0.1.0+, verified: plan/validate/glb all run from a registry install via `npx cheoma`), git clone, or `npm install /path/to/cheoma` as a file: dependency.
 
 ## three.js consumers
 

@@ -19,7 +19,7 @@ Related: [quickstart.md](quickstart.md) · [map-data.md](map-data.md) · [SKILL.
 
 | Limit | Reality |
 | --- | --- |
-| **Not on npm registry** | Install via **git clone** of this repository + `npm install` at the root, or `npm install /path/to/cheoma` as a **file:** dependency. Do not document registry `npm install cheoma`. |
+| **Registry install is new** | `npm install cheoma` works since **0.1.0 (2026-08-08)**; git clone and `npm install /path/to/cheoma` (file: dependency) remain valid. From a registry install the CLI is `npx cheoma …`; `node bin/cheoma.mjs …` is the checkout form. |
 | **Look pipeline is product-coupled** | Golden-hour look lives in `src/env/post.js` (composer: bloom + rim + DoF). three.js consumers can take that pipeline; other engines must reimplement atmosphere. Packaging does not promise a portable "look package". |
 | **No new generation features in packaging** | Packaging (P0–P2, and P3 serialization) does not add China/Japan architecture, open-world expansion, or in-app recording (`docs/project-status.md` / packaging-plan §4). |
 
