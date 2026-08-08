@@ -1,8 +1,33 @@
 {
-  "name": "cheoma-tools",
-  "private": true,
+  "name": "cheoma",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
+  "description": "Procedural Joseon-era Korean architecture & village generator (three.js) — deterministic plan JSON, hanok/temple/walled-capital geometry, map-data export, CLI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/midagedev/cheoma.git"
+  },
+  "homepage": "https://cheoma.midagedev.com",
+  "keywords": [
+    "threejs",
+    "procedural-generation",
+    "hanok",
+    "korean-architecture",
+    "village-generator",
+    "worldgen",
+    "joseon",
+    "map-generator"
+  ],
+  "files": [
+    "src",
+    "bin",
+    "tools/lib/node-canvas-stub.mjs",
+    "docs/plan-schema.md",
+    "docs/external-reuse.md",
+    "LICENSE",
+    "README.md"
+  ],
   "exports": {
     ".": "./src/api/index.js",
     "./plan": "./src/api/village-plan.js",

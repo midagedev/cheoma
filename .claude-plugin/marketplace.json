@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cheoma",
+  "description": "cheoma (처마) — procedural Joseon-era Korean architecture & village generator. Skill for coding agents building games with hanok village maps.",
+  "owner": {
+    "name": "midagedev"
+  },
+  "plugins": [
+    {
+      "name": "cheoma-worldgen",
+      "description": "Korean traditional village/hanok procedural map generation for coding agents — deterministic plan JSON, walk colliders, terrain grid, GLB bake, and three.js environment/look wiring (time-of-day, weather, rim light, DoF).",
+      "author": {
+        "name": "midagedev"
+      },
+      "category": "development",
+      "source": "./plugin/cheoma-worldgen",
+      "homepage": "https://cheoma.midagedev.com"
+    }
+  ]
+}
