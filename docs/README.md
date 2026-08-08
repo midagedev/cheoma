@@ -25,7 +25,8 @@
 | --- | --- | --- |
 | [`agent-workflow.md`](agent-workflow.md) | 계약 | 독립 worktree·claim·인계·정리와 세 단계 검증의 빠른 표준 경로. |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
-| [`external-reuse.md`](external-reuse.md) | 계약 | 최소 외부 scene과 단독 건물·별채·시전·마당 생활상·표면 생성기의 좁은 API, 단일 Three, borrowed resource·dispose 소유권과 독립 smoke. |
+| [`external-reuse.md`](external-reuse.md) | 계약 | 최소 외부 scene과 단독 건물·별채·시전·마당 생활상·표면 생성기의 좁은 API, 단일 Three, borrowed resource·dispose 소유권과 독립 smoke. **현재 상태**를 서술한다 — 앞으로의 패키징 방향은 `packaging-plan.md`. |
+| [`packaging-plan.md`](packaging-plan.md) | 활성 작업(미착수) | **2026-08-08 방향 전환.** 외부 게임 프로젝트용 모듈화·툴화 P0–P3 계획. 계층 경계 실측(api 47개 = 순수 26 / three 21), plan JSON 크기 실측, 루트 three 미설치 결함, 에이전트 스킬 형식, 소비자에게 알려야 할 한계. |
 | [`ink-landscape.md`](ink-landscape.md) | archive(기록) | **2026-07-31 제품 수묵 모드 제거로 계약 폐기.** 조선 진경산수 근거와 미학 원칙만 역사 기록으로 보존한다. 서술된 pass·API·게이트는 코드에 없다. |
 | [`../SANSA-HANDOFF.md`](../SANSA-HANDOFF.md) | 완료 기록 | #5 사찰 터·대지·진입로·식생 여백의 승인된 계약과 검증 결과. |
 | [`temple-generator.md`](temple-generator.md) | 계약 | #12의 재사용 가능한 복합 가람, 전각·석등·석탑·당간지주·부도, 편집·수명주기·성능 검증 경계. |
@@ -43,7 +44,7 @@
 | [`yard-life.md`](yard-life.md) | 계약 + 리서치 | 봄 볍씨 준비·가을 타작·겨울 땔감의 공식 근거와 드문 배치, 순수 plan·저비용 renderer·거리 LOD·제품 번역 한계. |
 | [`exterior-detail.md`](exterior-detail.md) | 계약 + 리서치 | 공통 문·창 순수 grammar, 창 하부 머름·문 lowerPanel·frame·threshold·절제된 철물, FULL/MID 경계와 focus 전용 짚신·우천 나막신. |
 | [`building-navigation.md`](building-navigation.md) | 계약 | native 건물 선택기, stable pick-proxy ID, focus/switch 재사용, busy·modal·live-region·reduced-motion 경계. |
-| [`project-status.md`](project-status.md) | 계약 | 프로젝트 마무리 방향, 유지해야 할 사용자 결정, 현재 작업 상태. |
+| [`project-status.md`](project-status.md) | 계약 | 프로젝트 방향(2026-08-08 개정 — 커뮤니티 공개 달성, 현재는 모듈화·툴화), 유지해야 할 사용자 결정, 현재 작업 상태. |
 | [`verification.md`](verification.md) | 계약 | 빌드·문법·Playwright·결정론 검증의 실제 사용 범위와 함정. |
 | [`mode-integration.md`](mode-integration.md) | 계약 | 모드/카메라/focus 통합. `ui-design.md`의 초기 모드 구상보다 우선한다. |
 | [`ui-design.md`](ui-design.md) | 리서치 | 초기 UI 설계와 상호작용 언어. 현재 focus 연속체는 `mode-integration.md`, 크롬 레이아웃은 `ui-consolidation.md`를 따른다. |

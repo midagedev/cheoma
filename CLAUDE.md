@@ -8,12 +8,15 @@ cheoma (처마) — a procedural Joseon-era Korean architecture & village genera
 
 ## Project goals
 
-Four axes, restated by the user. They are the priority test for any task: work that does not advance one of them does not get picked up.
+Five axes. They are the priority test for any task: work that does not advance one of them does not get picked up.
+
+**Axis 5 is the current active direction** (user decision 2026-08-08). Axis 2 is **achieved** — the three.js community release happened. Axes 1/3/4 stay in force as quality bars, not as a queue of new work.
 
 1. **The house — detail, editing, and regeneration.** Not just something to look at: the quality of touching it and changing it. Close-up hanok fidelity, the edit panel, and rebuild/reroll all count as one axis.
-2. **A clip impressive enough to go viral in the three.js community.** That is why this repo exists; the reference deliverable is a single shot worth sharing.
+2. **A clip impressive enough to go viral in the three.js community.** ✅ **Achieved 2026-08-08.** That is why this repo originally exists; the reference deliverable was a single shot worth sharing. Preserved here because the look bar it set is still the standard — but a proposal may no longer justify itself by "this would help the clip".
 3. **Oriental visual language as the selling point.** Golden hour, the atmospheric haze of a mountain valley, the 처마 line — lean into that aesthetic rather than treating it as decoration.
 4. **Joseon authenticity at study-material quality.** Someone learning hanok should be able to use this as reference, so historical grounding is a quality bar, not trim.
+5. **Reusability — other people building games can pick this up.** The generator becomes a module and a tool: package boundaries, a CLI, and an agent-loadable skill, so a game developer (working with a coding agent) can consume the plan layer as JSON, the collision solids as data, and the geometry as three.js or glTF. The plan is `docs/packaging-plan.md`; the design axis is that **the primary product is a JSON map contract, not a baked mesh**, because an agent can read a 46 KB village plan but cannot see a 3D scene.
 
 The visual genre is fixed and documented in `docs/look-grammar.md`: painterly stylization unified by light and atmosphere — not cartoon, not low-poly showcase, not realism. Every look-affecting change is judged against that grammar (silhouette-first geometry, saturation discipline, everything participates in the atmosphere).
 
@@ -23,6 +26,8 @@ The visual genre is fixed and documented in `docs/look-grammar.md`: painterly st
 - **`app/`** — a Svelte 5 + Vite SPA that consumes the core through `src/api/` only. `app/src/engine/engine.js` is the imperative wrapper: it wires the core into one three.js scene and exposes `window.__engine`. Svelte components drive that imperative API only — they hold no three.js state of their own.
 
 three is pinned to **0.185.1**. `app/vite.config.js` aliases bare `three` → `app/node_modules` (with `dedupe`) and sets `server.fs.allow = repoRoot` so the app can import `../src`. A second three instance silently breaks `instanceof` checks and prototype patches (e.g. accelerated raycast).
+
+**Measured caveat (2026-08-08):** "framework-agnostic" currently holds in full only for the *plan* layer. `three` is **not installed at the repo root** — only under `app/node_modules` — so importing a three-touching core module in plain node fails with `Cannot find package 'three' imported from src/builder/index.js`. That vite alias has been standing in for a real dependency declaration. The plan layer is genuinely portable (26 of 47 `src/api/` façades load in node with no three; `planVillage()` runs there). Fixing this is `docs/packaging-plan.md` P0.
 
 ## Commands
 
@@ -119,7 +124,9 @@ Many stock materials are patched via `onBeforeCompile`. Rules learned the hard w
 
 ## Stable user decisions
 
-These are standing calls from the user; `docs/project-status.md` carries the fuller version. The project is in wrap-up, not expansion — a proposal has to serve one of the four goals above, plus the flagship look, a measured bottleneck, or the release.
+These are standing calls from the user; `docs/project-status.md` carries the fuller version. A proposal has to serve one of the five goals above, plus the flagship look, a measured bottleneck, or the release.
+
+**Scope rule, revised 2026-08-08.** The old rule read "the project is in wrap-up, not expansion". That is superseded: the release shipped, and the active direction is now packaging the generator for reuse (axis 5). What the rule was protecting against still holds, so state it precisely — **no new generation features** (no China/Japan architecture, no general-purpose world expansion, no in-app recording). Packaging work is not an exception to that: `docs/packaging-plan.md` P0–P2 repackages existing output and adds no generator capability, and only P3 adds new serialization. A proposal to grow what the generator *makes* still needs a fresh user decision.
 
 - **The look is about light.** Bloom haze plus a golden-hour rim is the signature, and the rim must be optically real: it appears only when the sun is genuinely behind the subject and vanishes at noon. The default framing is backlit for that reason.
 - Ground albedo stays darker than the buildings, but bounce light must lift the shadow side — no crushed-black silhouettes; shadow-side 단청 and 창호 still read. Warmth belongs to highlights and rim while shadows and midtones stay neutral, so 뇌록·주홍, foliage green, and the sky gradient stay distinct hues instead of one orange wash. Sun shadows must read parallel.

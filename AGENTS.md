@@ -6,12 +6,18 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 cheoma (처마) — a procedural Joseon-era Korean architecture & village generator in three.js. Parametric hanok (칸 system, 공포, 팔작지붕 curvature), auto-composed villages (배산임수 terrain, 필지·담장·고샅, 다랑이 논·개울, 산사), a scale continuum from a lone house to a walled capital (한양) with multi-곽 palaces, plus time/season/weather and a focus zoom continuum. Live at cheoma.midagedev.com.
 
+## Current direction (2026-08-08)
+
+The three.js community release is **achieved**. The active direction is packaging this generator so other people can build games with it — package boundaries, a CLI, and an agent-loadable skill. Plan: [`docs/packaging-plan.md`](docs/packaging-plan.md). Design axis: **the primary product is a JSON map contract, not a baked mesh.** Full goal list and the revised scope rule are in `CLAUDE.md` (Project goals, axis 5) and [`docs/project-status.md`](docs/project-status.md). No new generation features without a fresh user decision.
+
 ## Two-layer boundary (read this first)
 
 - **`src/`** — the framework-agnostic ES-module core (pure three.js): all generation, rendering, environment, animation, export. Imports bare `three`. **Never import Svelte or anything from `app/` into `src/`.**
 - **`app/`** — a Svelte 5 + Vite SPA that consumes the core through `src/api/` only. `app/src/engine/engine.js` is the imperative wrapper: it wires the core into one three.js scene and exposes `window.__engine`. Svelte components drive that imperative API only — they hold no three.js state of their own.
 
 three is pinned to **0.185.1**. `app/vite.config.js` aliases bare `three` → `app/node_modules` (with `dedupe`) and sets `server.fs.allow = repoRoot` so the app can import `../src`. A second three instance silently breaks `instanceof` checks and prototype patches (e.g. accelerated raycast).
+
+**Measured caveat (2026-08-08):** "framework-agnostic" currently holds in full only for the *plan* layer. `three` is **not installed at the repo root** — only under `app/node_modules` — so importing a three-touching core module in plain node fails with `Cannot find package 'three' imported from src/builder/index.js`. That vite alias has been standing in for a real dependency declaration. The plan layer is genuinely portable (26 of 47 `src/api/` façades load in node with no three; `planVillage()` runs there). Fixing this is `docs/packaging-plan.md` P0.
 
 ## Commands
 
