@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "description": "Verification/tooling deps for cheoma (tools/*.mjs). App lives in app/.",
+  "exports": {
+    ".": "./src/api/index.js",
+    "./plan": "./src/api/village-plan.js",
+    "./building": "./src/api/building.js",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "check": "node tools/check-fast.mjs && npm run check:share",
     "check:deep": "node tools/check-fast.mjs --deep && npm run check:share",
@@ -142,6 +148,7 @@
     "check:critters": "node tools/check-critter-contract.mjs",
     "check:yard-life:browser": "node tools/run-browser-locked.mjs -- node tools/check-yard-life-browser.mjs",
     "check:worker": "node tools/run-browser-locked.mjs -- node tools/check-worker-contract.mjs",
+    "check:node-core": "node tools/check-node-core.mjs",
     "shoot:bokeh": "node tools/run-browser-locked.mjs -- node tools/shoot-bokeh-fixture.mjs",
     "shoot:bokeh:proof": "node tools/run-browser-locked.mjs -- node tools/shoot-bokeh-scatter-proof.mjs",
     "shoot:door": "node tools/run-browser-locked.mjs -- node tools/shoot-door-interaction.mjs",
@@ -168,7 +175,11 @@
   },
   "devDependencies": {
     "playwright": "1.61.1",
-    "pngjs": "7.0.0"
+    "pngjs": "7.0.0",
+    "three": "0.185.1"
+  },
+  "peerDependencies": {
+    "three": "0.185.1"
   },
   "allowScripts": {
     "playwright@1.61.1": true

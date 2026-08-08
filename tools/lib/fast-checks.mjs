@@ -73,6 +73,7 @@ export const FAST_CHECKS = Object.freeze([
   './check-dangsan-plan.mjs',
   './check-surface-materials.mjs',
   './check-palette-provider.mjs',
+  './check-node-core.mjs',
   './check-layout-contract.mjs',
   './check-gosat-topology.mjs',
   './check-wall-gate-contract.mjs',

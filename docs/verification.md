@@ -277,6 +277,11 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - **로케일 키 짝맞춤**: `i18n.svelte.js` 의 두 사전이 같은 키 집합을 가져야 한다. `t()` 는 없는 키를
     키 문자열 그대로 반환하므로 한쪽에만 있는 키는 식별자가 UI 문구로 노출된다(실제 사례:
     `vil_reroll_tip` 누락으로 영어 툴팁이 `vil_reroll_tip` 으로 렌더).
+- `check:node-core`
+  - 플레인 Node(esbuild alias 없음)에서 루트 `three@0.185.1` 해석으로 `src/api/village-plan.js` 결정론과
+    `src/api/building.js` 빌드(`setPaletteContext` + 공용 레코딩 canvas 스텁)를 검사한다. mesh/triangle > 0,
+    `disposeBuilding` 무예외. 전체 façade `src/api/index.js` import는 정보 항목이며 실패해도 게이트는 통과.
+  - 패키징 P0 계약(`docs/packaging-plan.md`). GLB bake는 게이트가 아니라 `tools/probe-node-glb.mjs` 1회 프로브.
 - `check:building-clearance`
   - 기본·최소·최대·clamp 경계 ㄱ자 기와집 기단의 아래켜·위켜·줄눈·갑석이 각각 하나의 오목 솔리드만 소유하고, 날개는 유지하면서 안마당 쪽 빈 영역을 메우지 않는지 실제 production geometry로 검사한다.
   - 궁·절·초가·기와·반가의 최하단 기초가 보이는 상단 높이를 바꾸지 않고 대지 아래로 6cm 묻히며, 필지 마당이 성토면에서 6cm 분리되는지 검사한다.

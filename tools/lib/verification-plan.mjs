@@ -163,6 +163,12 @@ const REVIEWED_NEW_PATHS = new Set([
   // Product path keeps browser defaults; node injects stub canvas + fixed RNG.
   'src/builder/palette-context.js',
   'tools/check-palette-provider.mjs',
+  // P0 packaging (2026-08-08): plain Node loads building/plan via root three +
+  // shared recording canvas stub. FAST_CHECKS owns the assertion; probe is
+  // evidence-only (exit 0 always) and must not fail closed to check:full alone.
+  'tools/check-node-core.mjs',
+  'tools/lib/node-canvas-stub.mjs',
+  'tools/probe-node-glb.mjs',
 // #150-J: first-person gate-aware walk solids (pure + FAST_CHECKS, no mesh-bvh).
   'src/cinematic/walk-solids.js',
   'tools/check-walk-solids.mjs',  'tools/check-building-navigation.mjs',
