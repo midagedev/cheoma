@@ -1,0 +1,8 @@
+{
+  "name": "cheoma-worldgen",
+  "description": "Korean traditional village/hanok procedural map generation skill for coding agents — plan JSON, map-data colliders, and CLI validate.",
+  "version": "0.1.0",
+  "author": {
+    "name": "midagedev"
+  }
+}
