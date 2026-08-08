@@ -6,4 +6,5 @@ export {
   filenameFor,
   triggerDownload,
 } from '../export/gltf.js';
+export { stripMaterialTextures, TEXTURE_SLOTS } from '../export/strip-textures.js';
 export { capturePostcard } from '../share/postcard.js';

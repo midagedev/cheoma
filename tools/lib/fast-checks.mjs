@@ -68,6 +68,9 @@ export const FAST_CHECKS = Object.freeze([
   // Packaging P1 (2026-08-08): plan JSON schema doc ↔ measured keys, cheoma CLI smoke.
   './check-plan-schema-doc.mjs',
   './check-cli.mjs',
+  // Packaging P3a/P3b (2026-08-08): pure map-data JSON + CLI map-data/glb export.
+  './check-map-data.mjs',
+  './check-cli-export.mjs',
   './check-sijeon-contract.mjs',
   './check-sijeon-approach.mjs',
   './check-temple-contract.mjs',

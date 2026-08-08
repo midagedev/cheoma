@@ -88,6 +88,8 @@ npm run check:sijeon-approach # 시전 행랑 성문 도달·간선 커버리지
 npm run check:dangsan       # Three 없는 당산 의례 공터·당집 배치·수관·회피 계약
 npm run check:plan-schema   # plan JSON 스키마 문서 ↔ planVillage 실측 키 경로 대조 (packaging P1)
 npm run check:cli           # cheoma plan/inspect/validate CLI 스모크·결정론 (packaging P1)
+npm run check:map-data      # pure map colliders/metadata/terrain JSON (packaging P3a)
+npm run check:cli-export    # cheoma map-data + glb CLI 스모크·결정론·GLB 매직 (packaging P3b)
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
 npm run check:full            # 머지 직전 전체 profile + production build
@@ -291,6 +293,14 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
 - `check:cli`
   - `bin/cheoma.mjs` plan → 파일·파싱·2회 바이트 동일, inspect 요약, validate PASS, 손상 seed FAIL,
     `--help` 3종(+root) exit 0. 패키징 P1.
+- `check:map-data`
+  - `src/api/map-data.js` pure JSON: village(siteR 120) + hanyang-with-citywall colliders 결정론·
+    walk-solids hit-test 일치, citywall polygonize mismatch 상한, metadata buildings↔parcels,
+    terrain grid `nx*nz == heights.length`. 패키징 P3a.
+- `check:cli-export`
+  - `cheoma plan` → `cheoma map-data` 3파일 존재·파싱·2회 바이트 동일; `cheoma glb --preset giwa
+    --seed 7` 2회 바이트 동일 + GLB 매직(`glTF`)/선언 길이; 없는 preset → exit 1 + available 목록.
+    Node 경로 GLB는 텍스처 생략(`stripMaterialTextures`). 패키징 P3b.
 - `check:building-clearance`
   - 기본·최소·최대·clamp 경계 ㄱ자 기와집 기단의 아래켜·위켜·줄눈·갑석이 각각 하나의 오목 솔리드만 소유하고, 날개는 유지하면서 안마당 쪽 빈 영역을 메우지 않는지 실제 production geometry로 검사한다.
   - 궁·절·초가·기와·반가의 최하단 기초가 보이는 상단 높이를 바꾸지 않고 대지 아래로 6cm 묻히며, 필지 마당이 성토면에서 6cm 분리되는지 검사한다.

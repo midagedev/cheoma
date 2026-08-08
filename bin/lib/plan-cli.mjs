@@ -314,6 +314,43 @@ export function printHelp(command) {
       '  --help               Show this help',
     ].join('\n');
   }
+  if (command === 'map-data') {
+    return [
+      'Usage: cheoma map-data <plan.json> --out-dir <dir> [options]',
+      '',
+      'Write pure JSON map export files from a village plan (three-free):',
+      '  colliders.json  — walk solids for game engines',
+      '  metadata.json   — buildings, roads, site summary',
+      '  terrain.json    — regular height grid',
+      '',
+      'Options:',
+      '  --out-dir <dir>           Output directory (required)',
+      '  --terrain-step <m>        Terrain grid step in meters (default: 4)',
+      '  --polygonize-citywall     Replace analytic citywall solids with poly strips',
+      '  --help                    Show this help',
+      '',
+      'Notes:',
+      '  - stdout is quiet; a one-line solids/buildings/grid summary goes to stderr.',
+      '  - Same plan input always yields the same file bytes.',
+    ].join('\n');
+  }
+  if (command === 'glb') {
+    return [
+      'Usage: cheoma glb --preset <name> --out <file.glb> [options]',
+      '',
+      'Bake a standalone building to binary glTF (GLB) in plain Node.',
+      '',
+      'Options:',
+      '  --preset <name>     Building preset (see error list for names)',
+      '  --out <file.glb>    Output path (required)',
+      '  --seed <n>          Palette paint RNG seed (LCG; default: 0)',
+      '  --help              Show this help',
+      '',
+      'Notes:',
+      '  - Textures are omitted in the node path; use the in-app export for textured GLB.',
+      '  - Same preset+seed always yields the same GLB bytes.',
+    ].join('\n');
+  }
   return [
     'Usage: cheoma <command> [options]',
     '',
@@ -321,6 +358,8 @@ export function printHelp(command) {
     '  plan       Generate a village plan JSON',
     '  inspect    Summarize a plan JSON',
     '  validate   Determinism + domain validation of a plan JSON',
+    '  map-data   Write colliders/metadata/terrain JSON from a plan',
+    '  glb        Bake a standalone building GLB (textures omitted in Node)',
     '',
     'Run `cheoma <command> --help` for command options.',
   ].join('\n');

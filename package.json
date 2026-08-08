@@ -110,6 +110,8 @@
     "check:plan": "node tools/check-plan-contract.mjs",
     "check:plan-schema": "node tools/check-plan-schema-doc.mjs",
     "check:cli": "node tools/check-cli.mjs",
+    "check:map-data": "node tools/check-map-data.mjs",
+    "check:cli-export": "node tools/check-cli-export.mjs",
     "check:palace-precinct": "node tools/check-palace-precinct.mjs",
     "check:sijeon": "node tools/check-sijeon-contract.mjs",
     "check:sijeon-approach": "node tools/check-sijeon-approach.mjs",

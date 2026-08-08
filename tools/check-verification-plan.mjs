@@ -596,6 +596,9 @@ assert.deepEqual(impactedFastChecks(['src/village/wall-contract.js']), [
   // Packaging P1 (2026-08-08): check-plan-schema-doc imports planVillage → village-plan
   // closure; village plan-path edits must re-run the schema inventory gate.
   './check-plan-schema-doc.mjs',
+  // Packaging P3a (2026-08-08): check-map-data imports walk-solids + village-plan
+  // closure through wall-contract; plan-path edits must re-run map-data.
+  './check-map-data.mjs',
   // 2026-08-05: 시전 facade v4(9b5645f)가 check-sijeon-contract → village-door-records →
   // wall-contract.js 정적 폐쇄를 만들었다 — 미러를 실제 폐쇄에 맞춘 갱신(라우팅 확대, 완화 아님).
   './check-sijeon-contract.mjs',

@@ -176,6 +176,13 @@ const REVIEWED_NEW_PATHS = new Set([
   'bin/cheoma.mjs',
   'bin/lib/plan-cli.mjs',
   'docs/plan-schema.md',
+  // P3a/P3b packaging (2026-08-08): pure map-data JSON + CLI map-data/glb.
+  // FAST_CHECKS pure; strip-textures is Node GLB helper (export-only clones).
+  'tools/check-map-data.mjs',
+  'tools/check-cli-export.mjs',
+  'src/api/map-data.js',
+  'src/export/map-data.js',
+  'src/export/strip-textures.js',
 // #150-J: first-person gate-aware walk solids (pure + FAST_CHECKS, no mesh-bvh).
   'src/cinematic/walk-solids.js',
   'tools/check-walk-solids.mjs',  'tools/check-building-navigation.mjs',
@@ -656,6 +663,22 @@ function routePath(path) {
     return { gates, reasons };
   }
 
+  // Packaging P3: pure map-data implementation (no three) — core only, before the
+  // generic export/share route that would pull browser app/worker gates.
+  if (path === 'src/export/map-data.js') {
+    select('pure JSON map-data export implementation changed');
+    return { gates, reasons };
+  }
+  if (path === 'src/export/strip-textures.js') {
+    select('Node GLB export texture-strip helper changed');
+    return { gates, reasons };
+  }
+  // Packaging CLI surface (plan + map-data + glb).
+  if (path === 'bin/cheoma.mjs' || path === 'bin/lib/plan-cli.mjs') {
+    select('cheoma CLI packaging surface changed');
+    return { gates, reasons };
+  }
+
   if (/^src\/(?:builder|layout|props|anim|core|export|share)\//.test(path)
     || path === 'src/params.js' || path === 'src/rng.js') {
     select('shared generated scene content changed', 'app');
@@ -690,6 +713,11 @@ function routePath(path) {
   }
 
   if (path.startsWith('src/api/')) {
+    // Packaging P3: pure JSON map colliders/metadata/terrain (no three).
+    if (path === 'src/api/map-data.js') {
+      select('public pure map-data JSON export API changed');
+      return { gates, reasons };
+    }
     if (path === 'src/api/glossary-plan.js') {
       select('public renderer-free focus glossary planning API changed');
       return { gates, reasons };
