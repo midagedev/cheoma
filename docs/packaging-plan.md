@@ -1,6 +1,6 @@
 # 모듈화·툴화 계획 (외부 게임 프로젝트 대상)
 
-> - **상태**: P0–P3 구현 완료 (2026-08-08, 같은 날 실행) — 잔여: npm publish·마켓플레이스 등록(사용자 결정), 네비메시(보류), textured Node GLB(프런티어)
+> - **상태**: 완료 (2026-08-08, 당일 실행) — P0–P3 + P2b 구현, **npm 발행 완료(`cheoma@0.1.0`, 레지스트리 설치 실증)**, 셀프 호스팅 마켓플레이스(`.claude-plugin/marketplace.json`) 배포. 잔여: 네비메시(보류), textured Node GLB(프런티어), 공식 마켓플레이스 등재(선택·사용자 결정)
 > - **기준일**: 2026-08-08
 > - **근거**: 아래 §1의 실측. 사용자 결정 2026-08-08 — three.js 커뮤니티 공개 목표 달성 후 방향 전환.
 > - **선행 문서**: [`external-reuse.md`](external-reuse.md)(현재 외부 소비 계약), [`architecture-refactor.md`](architecture-refactor.md)(§공개 재사용 API), [`project-status.md`](project-status.md)(방향)
