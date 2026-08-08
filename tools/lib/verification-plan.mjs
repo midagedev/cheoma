@@ -169,6 +169,13 @@ const REVIEWED_NEW_PATHS = new Set([
   'tools/check-node-core.mjs',
   'tools/lib/node-canvas-stub.mjs',
   'tools/probe-node-glb.mjs',
+  // P1 packaging (2026-08-08): plan JSON schema doc inventory + cheoma CLI
+  // (plan/inspect/validate). FAST_CHECKS pure; bin is CLI only (no browser).
+  'tools/check-plan-schema-doc.mjs',
+  'tools/check-cli.mjs',
+  'bin/cheoma.mjs',
+  'bin/lib/plan-cli.mjs',
+  'docs/plan-schema.md',
 // #150-J: first-person gate-aware walk solids (pure + FAST_CHECKS, no mesh-bvh).
   'src/cinematic/walk-solids.js',
   'tools/check-walk-solids.mjs',  'tools/check-building-navigation.mjs',

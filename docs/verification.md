@@ -86,6 +86,8 @@ npm run check:drainage      # Three 없는 도로 측구·대문 건넘 정책·
 npm run check:creek         # 개천 관류·종로·수문·평석교 접지/접근(순수) + 호안 형상 조립(재질 주입)
 npm run check:sijeon-approach # 시전 행랑 성문 도달·간선 커버리지·문전 마당 14m·재현성 (순수)
 npm run check:dangsan       # Three 없는 당산 의례 공터·당집 배치·수관·회피 계약
+npm run check:plan-schema   # plan JSON 스키마 문서 ↔ planVillage 실측 키 경로 대조 (packaging P1)
+npm run check:cli           # cheoma plan/inspect/validate CLI 스모크·결정론 (packaging P1)
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
 npm run check:full            # 머지 직전 전체 profile + production build
@@ -282,6 +284,13 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
     `src/api/building.js` 빌드(`setPaletteContext` + 공용 레코딩 canvas 스텁)를 검사한다. mesh/triangle > 0,
     `disposeBuilding` 무예외. 전체 façade `src/api/index.js` import는 정보 항목이며 실패해도 게이트는 통과.
   - 패키징 P0 계약(`docs/packaging-plan.md`). GLB bake는 게이트가 아니라 `tools/probe-node-glb.mjs` 1회 프로브.
+- `check:plan-schema`
+  - `docs/plan-schema.md`의 `plan-paths` inventory가 seed 7 · siteR {60,120,250,400} `planVillage`
+    실측 키 경로 합집합과 양방향 일치하는지 검사한다(최상위 + `site.*` / `roads[].*` / `parcels[].*` /
+    `paddies[].*` / `features.*`). 패키징 P1.
+- `check:cli`
+  - `bin/cheoma.mjs` plan → 파일·파싱·2회 바이트 동일, inspect 요약, validate PASS, 손상 seed FAIL,
+    `--help` 3종(+root) exit 0. 패키징 P1.
 - `check:building-clearance`
   - 기본·최소·최대·clamp 경계 ㄱ자 기와집 기단의 아래켜·위켜·줄눈·갑석이 각각 하나의 오목 솔리드만 소유하고, 날개는 유지하면서 안마당 쪽 빈 영역을 메우지 않는지 실제 production geometry로 검사한다.
   - 궁·절·초가·기와·반가의 최하단 기초가 보이는 상단 높이를 바꾸지 않고 대지 아래로 6cm 묻히며, 필지 마당이 성토면에서 6cm 분리되는지 검사한다.
