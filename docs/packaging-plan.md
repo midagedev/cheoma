@@ -14,6 +14,7 @@
 | P1 | `a61a11d` | `bin/cheoma.mjs` CLI `plan`/`inspect`/`validate`, `docs/plan-schema.md`(109 키 경로 대조) | `check:cli`·`check:plan-schema` (FAST) |
 | P3b | `ea3cb61` | CLI `map-data`(opts 재수화)·`glb`(텍스처 스트립 Node bake, GLB 매직·바이트 결정론), `src/export/strip-textures.js` | `check:cli-export` (FAST) |
 | P2 | `6b46392` | `plugin/cheoma-worldgen/` 스킬+플러그인. **신선 에이전트 왕복 테스트 통과**(스킬만으로 plan→map-data→validate 완주, metadata JSON만으로 필지 배치 판단 성립), 결함 7건 반영 | `check:docs` |
+| P2b | `4d64623` | 스킬 확장(사용자 지시): 환경·플래그십 룩·야간 3계·입자·시네마틱·오디오 런타임 가이드 2편. 실측이 문서를 두 번 이김(부감 rim 0.75 — DoF/flare만 정책 0, 낙엽 ~29cm) | `check:skill-refs` (65 심볼 Node 실증, FAST) |
 
 실행 중 계측기 결함 2건을 리드가 FAIL-first로 잡아 수정했다: ① 폴리곤화 대조 표본이 비원형 성곽 contour(196–324m)를 meanRadius ±11m 밴드로 뽑아 0% 불일치가 허공 측정이었던 것(각도별 실제 contour 반경 중심으로 수정 → 실측 0.150%, 전부 경계 밴드 내) ② 스키마 대조가 고정 4밴드만 돌아 capital 앵커(280) 전용 키 3개가 새던 것(`SCALE_ANCHORS` 전수 스윕 추가).
 
