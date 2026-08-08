@@ -26,7 +26,7 @@
 | [`agent-workflow.md`](agent-workflow.md) | 계약 | 독립 worktree·claim·인계·정리와 세 단계 검증의 빠른 표준 경로. |
 | [`architecture-refactor.md`](architecture-refactor.md) | 계약 | 완료된 1차 분할, façade·순수 커널·generator·runtime 경계와 후속 개선 조건. |
 | [`external-reuse.md`](external-reuse.md) | 계약 | 최소 외부 scene과 단독 건물·별채·시전·마당 생활상·표면 생성기의 좁은 API, 단일 Three, borrowed resource·dispose 소유권과 독립 smoke. **현재 상태**를 서술한다 — 앞으로의 패키징 방향은 `packaging-plan.md`. |
-| [`packaging-plan.md`](packaging-plan.md) | 활성 작업(미착수) | **2026-08-08 방향 전환.** 외부 게임 프로젝트용 모듈화·툴화 P0–P3 계획. 계층 경계 실측(api 47개 = 순수 26 / three 21), plan JSON 크기 실측, 루트 three 미설치 결함, 에이전트 스킬 형식, 소비자에게 알려야 할 한계. |
+| [`packaging-plan.md`](packaging-plan.md) | 계약 + 완료 기록 | **2026-08-08 방향 전환, 같은 날 P0–P3 구현 완료**(§0-bis 커밋 표). 외부 게임 프로젝트용 모듈화·툴화: 루트 exports map, CLI(plan/inspect/validate/map-data/glb), plan 스키마 계약, 맵 데이터 반출, 에이전트 스킬. 잔여: npm publish·마켓플레이스(사용자 결정), 네비메시(보류). |
 | [`plan-schema.md`](plan-schema.md) | 계약 | `planVillage()` JSON 맵 계약 필드 레퍼런스(+z=남, 미터, 결정론). `check:plan-schema`가 실측 키 경로와 문서 inventory를 대조. CLI: `cheoma plan\|inspect\|validate`. |
 | [`../plugin/cheoma-worldgen/`](../plugin/cheoma-worldgen/) | 활성 작업 | P2 에이전트 스킬·Claude Code 플러그인 (`cheoma-worldgen`): plan/inspect/validate 워크플로, map-data·한계 레퍼런스. 마켓플레이스 등록은 별도 사용자 결정. |
 | [`ink-landscape.md`](ink-landscape.md) | archive(기록) | **2026-07-31 제품 수묵 모드 제거로 계약 폐기.** 조선 진경산수 근거와 미학 원칙만 역사 기록으로 보존한다. 서술된 pass·API·게이트는 코드에 없다. |

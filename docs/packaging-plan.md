@@ -1,9 +1,23 @@
 # 모듈화·툴화 계획 (외부 게임 프로젝트 대상)
 
-> - **상태**: 활성 작업 (미착수)
+> - **상태**: P0–P3 구현 완료 (2026-08-08, 같은 날 실행) — 잔여: npm publish·마켓플레이스 등록(사용자 결정), 네비메시(보류), textured Node GLB(프런티어)
 > - **기준일**: 2026-08-08
 > - **근거**: 아래 §1의 실측. 사용자 결정 2026-08-08 — three.js 커뮤니티 공개 목표 달성 후 방향 전환.
 > - **선행 문서**: [`external-reuse.md`](external-reuse.md)(현재 외부 소비 계약), [`architecture-refactor.md`](architecture-refactor.md)(§공개 재사용 API), [`project-status.md`](project-status.md)(방향)
+
+## 0-bis. 실행 결과 (2026-08-08)
+
+| 단계 | 커밋 | 산출물 | 게이트 |
+| --- | --- | --- | --- |
+| P0 | `faaf69b` | 루트 three@0.185.1(dev+peer) + exports map(`.`/`./plan`/`./building`), `tools/lib/node-canvas-stub.mjs`, GLB 프로브 | `check:node-core` (FAST) |
+| P3a | `9901216` | `src/api/map-data.js` — 콜라이더(walk-solids 통과)·메타데이터·지형 그리드, citywall 폴리곤화 폴백 | `check:map-data` (FAST, P3b에서 등록) |
+| P1 | `a61a11d` | `bin/cheoma.mjs` CLI `plan`/`inspect`/`validate`, `docs/plan-schema.md`(109 키 경로 대조) | `check:cli`·`check:plan-schema` (FAST) |
+| P3b | `ea3cb61` | CLI `map-data`(opts 재수화)·`glb`(텍스처 스트립 Node bake, GLB 매직·바이트 결정론), `src/export/strip-textures.js` | `check:cli-export` (FAST) |
+| P2 | `6b46392` | `plugin/cheoma-worldgen/` 스킬+플러그인. **신선 에이전트 왕복 테스트 통과**(스킬만으로 plan→map-data→validate 완주, metadata JSON만으로 필지 배치 판단 성립), 결함 7건 반영 | `check:docs` |
+
+실행 중 계측기 결함 2건을 리드가 FAIL-first로 잡아 수정했다: ① 폴리곤화 대조 표본이 비원형 성곽 contour(196–324m)를 meanRadius ±11m 밴드로 뽑아 0% 불일치가 허공 측정이었던 것(각도별 실제 contour 반경 중심으로 수정 → 실측 0.150%, 전부 경계 밴드 내) ② 스키마 대조가 고정 4밴드만 돌아 capital 앵커(280) 전용 키 3개가 새던 것(`SCALE_ANCHORS` 전수 스윕 추가).
+
+GLB 텍스처의 Node 반출은 프로브로 기각 확인(`GLTFExporter.processImage`가 DOM `document` 요구) — Node 경로는 텍스처 생략을 `--help`에 명시하고, 텍스처 GLB는 기존 인앱 반출이 담당한다. napi-canvas 심 경로(toBlob·FileReader 이중 폴리필)는 프런티어로만 기록한다.
 
 ## 0. 무엇을 만드는가
 
