@@ -183,6 +183,17 @@ const REVIEWED_NEW_PATHS = new Set([
   'src/api/map-data.js',
   'src/export/map-data.js',
   'src/export/strip-textures.js',
+  // P2b packaging (2026-08-08): agent skill runtime-surface guides + api-symbols gate.
+  // FAST_CHECKS pure; plugin markdown is not product docs (DOC_PATH) but must not
+  // fail closed to check:full when new references are added.
+  'tools/check-skill-refs.mjs',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/SKILL.md',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/references/quickstart.md',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/references/plan-schema.md',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/references/map-data.md',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/references/limitations.md',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/references/environment-and-look.md',
+  'plugin/cheoma-worldgen/skills/cheoma-worldgen/references/scene-integration.md',
 // #150-J: first-person gate-aware walk solids (pure + FAST_CHECKS, no mesh-bvh).
   'src/cinematic/walk-solids.js',
   'tools/check-walk-solids.mjs',  'tools/check-building-navigation.mjs',
@@ -278,6 +289,12 @@ function routePath(path) {
 
   if (DOC_PATH.test(path)) {
     select('documentation only', 'docs');
+    return { gates, reasons };
+  }
+
+  // Packaging P2b: agent skill markdown under plugin/ — pure skill-refs contract only.
+  if (path.startsWith('plugin/')) {
+    select('agent skill surface changed; re-check documented api-symbols', 'core');
     return { gates, reasons };
   }
 

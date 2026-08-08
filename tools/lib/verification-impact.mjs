@@ -24,6 +24,23 @@ const EXACT_IMPACT = new Map([
   ['docs/credits.md', [
     './check-credits-catalog.mjs',
   ]],
+  // Packaging P2b: skill reference api-symbols gate. Markdown is not in any
+  // static import closure of the checker (it readFileSyncs the tree).
+  ['plugin/cheoma-worldgen/skills/cheoma-worldgen/SKILL.md', [
+    './check-skill-refs.mjs',
+  ]],
+  ['plugin/cheoma-worldgen/skills/cheoma-worldgen/references/map-data.md', [
+    './check-skill-refs.mjs',
+  ]],
+  ['plugin/cheoma-worldgen/skills/cheoma-worldgen/references/environment-and-look.md', [
+    './check-skill-refs.mjs',
+  ]],
+  ['plugin/cheoma-worldgen/skills/cheoma-worldgen/references/scene-integration.md', [
+    './check-skill-refs.mjs',
+  ]],
+  ['tools/check-skill-refs.mjs', [
+    './check-skill-refs.mjs',
+  ]],
   ['app/src/lib/credits-parse.js', [
     './check-credits-catalog.mjs',
   ]],

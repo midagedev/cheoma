@@ -71,6 +71,8 @@ export const FAST_CHECKS = Object.freeze([
   // Packaging P3a/P3b (2026-08-08): pure map-data JSON + CLI map-data/glb export.
   './check-map-data.mjs',
   './check-cli-export.mjs',
+  // Packaging P2b (2026-08-08): skill reference api-symbols ↔ real src/api exports.
+  './check-skill-refs.mjs',
   './check-sijeon-contract.mjs',
   './check-sijeon-approach.mjs',
   './check-temple-contract.mjs',

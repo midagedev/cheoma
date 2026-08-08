@@ -90,6 +90,7 @@ npm run check:plan-schema   # plan JSON 스키마 문서 ↔ planVillage 실측 
 npm run check:cli           # cheoma plan/inspect/validate CLI 스모크·결정론 (packaging P1)
 npm run check:map-data      # pure map colliders/metadata/terrain JSON (packaging P3a)
 npm run check:cli-export    # cheoma map-data + glb CLI 스모크·결정론·GLB 매직 (packaging P3b)
+npm run check:skill-refs    # plugin skill api-symbols ↔ real src/api named exports (packaging P2b)
 npm run check:building-navigation # JSON 후보·상태·reduced-motion 한 프레임 카메라 클록
 npm run check:all             # core/app/particle/upload/Worker/audio/temple/parcel/surface profile
 npm run check:full            # 머지 직전 전체 profile + production build
@@ -301,6 +302,12 @@ cohort도 grid 후보를 brute AABB oracle과 비교한다. 이 최적화는 검
   - `cheoma plan` → `cheoma map-data` 3파일 존재·파싱·2회 바이트 동일; `cheoma glb --preset giwa
     --seed 7` 2회 바이트 동일 + GLB 매직(`glTF`)/선언 길이; 없는 preset → exit 1 + available 목록.
     Node 경로 GLB는 텍스처 생략(`stripMaterialTextures`). 패키징 P3b.
+- `check:skill-refs`
+  - skill reference Markdown under `plugin/cheoma-worldgen/skills/cheoma-worldgen/references/`
+    must declare machine-readable `api-symbols` fences (`src/api/<file>.js#exportName` per line).
+    Plain Node dynamic-imports each module and asserts the named export. Missing export or module
+    load failure is FAIL. Required files: environment-and-look, scene-integration, map-data.
+    Packaging P2b (environment / look / cinematic skill expansion).
 - `check:building-clearance`
   - 기본·최소·최대·clamp 경계 ㄱ자 기와집 기단의 아래켜·위켜·줄눈·갑석이 각각 하나의 오목 솔리드만 소유하고, 날개는 유지하면서 안마당 쪽 빈 영역을 메우지 않는지 실제 production geometry로 검사한다.
   - 궁·절·초가·기와·반가의 최하단 기초가 보이는 상단 높이를 바꾸지 않고 대지 아래로 6cm 묻히며, 필지 마당이 성토면에서 6cm 분리되는지 검사한다.

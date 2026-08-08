@@ -41,6 +41,14 @@ Writes `colliders.json`, `metadata.json`, and `terrain.json`. The CLI **re-gener
 
 Import paths: run the script from the **cheoma repo root**, or `npm install /path/to/cheoma` (file: dependency) in the consumer and use package exports (`cheoma/plan`, etc.). Relative `./src/api/...` only resolves at the repo root.
 
+```api-symbols
+src/api/village-plan.js#planVillage
+src/api/map-data.js#buildMapColliders
+src/api/map-data.js#buildMapMetadata
+src/api/map-data.js#sampleTerrainHeightGrid
+src/api/map-data.js#polygonizeCityWallSolid
+```
+
 ```js
 import { planVillage } from './src/api/village-plan.js';
 import {

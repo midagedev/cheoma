@@ -1,6 +1,6 @@
 ---
 name: cheoma-worldgen
-description: Korean traditional village/hanok procedural map generation (Joseon-era plan JSON, colliders, terrain). Use when the user needs a hanok village map, Korean traditional settlement layout, deterministic village plan from a seed, map colliders for a game engine, or help consuming cheoma plan/map-data APIs.
+description: Korean traditional village/hanok procedural map generation (Joseon-era plan JSON, colliders, terrain). Use when the user needs a hanok village map, Korean traditional settlement layout, deterministic village plan from a seed, map colliders for a game engine, help consuming cheoma plan/map-data APIs, or wiring cheoma's time-of-day/weather/rim-light/DoF look into a three.js scene.
 ---
 
 # cheoma-worldgen
@@ -125,6 +125,8 @@ json bytes: 100687
 | Height field (API) | `sampleTerrainHeightGrid(plan, { step })` — **requires a live plan** (see below) |
 | Standalone building mesh file | `node bin/cheoma.mjs glb --preset <name> --out building.glb` (textures omitted in Node; see `glb --help`) |
 | Rendered house mesh (three.js) | package export `./building` — see below |
+| Time/season/weather + flagship look (rim/DoF/bloom) | [references/environment-and-look.md](references/environment-and-look.md) — three.js only |
+| Full village runtime, cinematic, audio in your scene | [references/scene-integration.md](references/scene-integration.md) — three.js only; product wiring pointer `app/src/engine/engine.js` |
 
 **Terrain grid and file plans:** `sampleTerrainHeightGrid` needs a **live** `planVillage` result (`site.heightAt` is a function). A plan loaded with `JSON.parse` from disk throws `site.heightAt is not a function`. Colliders and metadata accept file plans. For a file pipeline that needs terrain, use **`cheoma map-data`** (it re-plans from stored `opts`/`seed` internally) or call `planVillage` yourself and pass the live object.
 
@@ -251,6 +253,8 @@ npm run check
 | [references/quickstart.md](references/quickstart.md) | Install → plan → inspect → validate loop with measured output |
 | [references/plan-schema.md](references/plan-schema.md) | Top-level plan keys + pointer to full repo schema |
 | [references/map-data.md](references/map-data.md) | Colliders, metadata, terrain grid, solid types |
+| [references/environment-and-look.md](references/environment-and-look.md) | Time/season/weather, post look (rim/DoF/bloom), night glow, snow, particles |
+| [references/scene-integration.md](references/scene-integration.md) | Full façade in your three.js scene, cinematic, audio, engine pointer |
 | [references/limitations.md](references/limitations.md) | Full limitations table |
 
 ## Repo docs (authoritative, do not fork)
