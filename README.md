@@ -1,17 +1,20 @@
 # 처마 · cheoma
 
-**A procedural Joseon-era Korean village, grown from a seed — in the browser.**
+[![npm](https://img.shields.io/npm/v/cheoma)](https://www.npmjs.com/package/cheoma)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+**A procedural Joseon-era Korean village, grown from a seed — in the browser, and now in your project.**
 
 Parametric hanok — Korean traditional architecture — and whole settlements, generated in three.js: palaces, mountain temples, tiled and thatched houses, and the terrain, walls, paddies and forests around them.
 
 **Live demo → [cheoma.midagedev.com](https://cheoma.midagedev.com)**
 
-![cheoma — Hanyang at sunset](docs/media/hero.jpg)
+![cheoma — Hanyang at sunset](https://raw.githubusercontent.com/midagedev/cheoma/main/docs/media/hero.jpg)
 
 | | |
 | --- | --- |
-| ![close-up hanok courtyard](docs/media/grid-1-house.jpg) | ![parcel cluster with yard life](docs/media/grid-2-yard.jpg) |
-| ![hillside village](docs/media/grid-3-hillside.jpg) | ![palace precinct and sijeon](docs/media/grid-4-palace.jpg) |
+| ![close-up hanok courtyard](https://raw.githubusercontent.com/midagedev/cheoma/main/docs/media/grid-1-house.jpg) | ![parcel cluster with yard life](https://raw.githubusercontent.com/midagedev/cheoma/main/docs/media/grid-2-yard.jpg) |
+| ![hillside village](https://raw.githubusercontent.com/midagedev/cheoma/main/docs/media/grid-3-hillside.jpg) | ![palace precinct and sijeon](https://raw.githubusercontent.com/midagedev/cheoma/main/docs/media/grid-4-palace.jpg) |
 
 <sub>A hanok courtyard up close · a parcel cluster with its yard life · a hillside village · the palace precinct and the market street. From one house to a walled capital — every frame is captured straight from the app's product path.</sub>
 
@@ -29,6 +32,49 @@ Parametric hanok — Korean traditional architecture — and whole settlements, 
 - **Reroll wave** — regenerating with a new seed hands terrain, roads, parcels and forest over to the next generation in a single frame, hidden under an ink-fog veil.
 - **glTF/GLB export** — the scene exports with instancing preserved through `EXT_mesh_gpu_instancing`.
 - **Shareable scene URLs** — seed, scale, time, season and camera all ride in the URL, so one link reproduces the exact frame.
+
+## Use it in your project
+
+cheoma is not only a demo — the generator ships as an **npm package, a CLI, and an agent skill**.
+
+```bash
+npm install cheoma        # three@0.185.1 arrives as an exact-pinned peer dependency
+```
+
+| Entry point | What you get | Needs three |
+| --- | --- | --- |
+| `cheoma/plan` | Deterministic village **plan as JSON** — parcels, roads, paddies, features. Runs in Node, workers, servers. | no |
+| `cheoma/building` | `buildBuilding` / `disposeBuilding` — a standalone hanok for your own scene. | yes |
+| `cheoma` | The full runtime façade the app itself consumes — village runtime, environment, cinematic, export. | yes |
+
+```js
+import { planVillage } from 'cheoma/plan';
+
+const plan = planVillage({ seed: 7, scale: 'village' });
+// ~50–100 KB of readable JSON. Same seed + options → the same bytes, every time.
+```
+
+The primary product is the **JSON map contract** ([`docs/plan-schema.md`](docs/plan-schema.md) — every field, `+z` = south, meters, gated against the real generator output). A coding agent can read a village plan and place gameplay without ever seeing the 3D scene.
+
+The CLI covers the whole pipeline:
+
+```bash
+npx cheoma plan --seed 42 --scale town --out plan.json
+npx cheoma inspect plan.json                    # summary instead of 180 KB in your context
+npx cheoma validate plan.json                   # determinism re-check + domain validators
+npx cheoma map-data plan.json --out-dir map/    # colliders.json / metadata.json / terrain.json
+npx cheoma glb --preset giwa --out house.glb    # node GLB bake (textures omitted; the in-app export keeps them)
+```
+
+`map-data` is the game-engine surface: walk **colliders** (wall segments, house body polygons, and the walled capital as an analytic band with a polygonized fallback for engines that want plain polygons), building/gate **metadata** for spawns and quests, and a regular terrain **height grid**.
+
+For coding agents there is a Claude Code plugin — this repository is its own marketplace:
+
+```
+/plugin marketplace add midagedev/cheoma      →  skill: cheoma-worldgen
+```
+
+The skill walks an agent through plan → inspect → consume → self-validate, plus wiring the time-of-day / weather / rim-light / DoF look into a three.js scene. Honest limits (no interiors, no tile streaming, no navmesh, no gameplay hooks — those are yours to add) are stated up front in the skill and in [`docs/external-reuse.md`](docs/external-reuse.md).
 
 ## Technical highlights
 
@@ -72,6 +118,8 @@ npm install                   # once, at the repo root (Playwright is a root dev
 node tools/shoot-<feature>.mjs
 ```
 
+The root install also makes the core runnable in plain node (that is what the package build rides on): `npm run check:node-core` asserts a deterministic plan and a full `buildBuilding` with an injected canvas stub, no browser involved.
+
 For everyday iteration, run `npm run check:pr -- --dry-run` to see the plan, then `npm run check:pr`. Browser gates prefer a locally installed Chrome (and log the real WebGL renderer), falling back to the bundled Chromium; pin one with `CHEOMA_BROWSER=chromium`.
 
 ## Documentation
@@ -80,6 +128,8 @@ For everyday iteration, run `npm run check:pr -- --dry-run` to see the plan, the
 - [`docs/README.md`](docs/README.md) — the document map and status labels (contract / active work / research / snapshot / completed record)
 - [`docs/project-status.md`](docs/project-status.md) — project direction and the decisions that must hold
 - [`docs/architecture-refactor.md`](docs/architecture-refactor.md) — the structural split and the reuse/boundary contract
+- [`docs/plan-schema.md`](docs/plan-schema.md) — the JSON map contract: every plan field, coordinate convention, determinism
+- [`docs/external-reuse.md`](docs/external-reuse.md) — consuming the generator outside the app: narrow façades, single three, dispose ownership
 - [`docs/verification.md`](docs/verification.md) — harness map and verification pitfalls
 - [`docs/look-grammar.md`](docs/look-grammar.md) — the visual grammar the look is judged against
 - [`docs/architectural-authenticity.md`](docs/architectural-authenticity.md) — the authenticity audit and the fact → implementation mapping
@@ -95,4 +145,4 @@ MIT — [`LICENSE`](LICENSE)
 
 ---
 
-<sub><b>한국어</b> — 처마(cheoma)는 조선 전통건축(궁궐·사찰·기와집·초가)과 마을을 파라메트릭으로 생성하는 three.js 앱입니다. 종가 한 채에서 성곽 도성 한양까지 규모가 하나의 연속체로 이어지고, 시간·계절·날씨와 focus 줌·드론 원테이크 투어·1인칭 도보를 지원합니다. 고증 근거와 구현 매핑은 <a href="docs/architectural-authenticity.md"><code>docs/architectural-authenticity.md</code></a>, 문서 지도는 <a href="docs/README.md"><code>docs/README.md</code></a>에 있습니다.</sub>
+<sub><b>한국어</b> — 처마(cheoma)는 조선 전통건축(궁궐·사찰·기와집·초가)과 마을을 파라메트릭으로 생성하는 three.js 앱이자 <b>npm 패키지·CLI·에이전트 스킬</b>입니다(<code>npm install cheoma</code>). 종가 한 채에서 성곽 도성 한양까지 규모가 하나의 연속체로 이어지고, 시간·계절·날씨와 focus 줌·드론 원테이크 투어·1인칭 도보를 지원합니다. 결정론 plan JSON·콜라이더·지형 그리드를 반출해 다른 게임 프로젝트에서 맵으로 쓸 수 있습니다. 고증 근거와 구현 매핑은 <a href="docs/architectural-authenticity.md"><code>docs/architectural-authenticity.md</code></a>, 문서 지도는 <a href="docs/README.md"><code>docs/README.md</code></a>에 있습니다.</sub>
